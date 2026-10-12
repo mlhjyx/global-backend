@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { createDiscoveryActivities } from "./discovery.activities";
+import { ExecutionControlError } from "../execution-budget/execution-control-error";
 import { DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS } from "./discovery-company-materialization";
 import { ToolPolicyDenied } from "../tools/tool-broker";
 import { MAX_DISCOVERY_PLAN_QUERIES } from "../discovery/execution-envelope";
@@ -703,6 +704,51 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
       provider: null,
       queryReceipt: { providers: [] },
     });
+  });
+
+  it("returns the model extractions its providers made and dropped, summed across providers", async () => {
+    const deps = makeDeps([
+      {
+        ...okAdapter("wikidata", []),
+        discoverCompanies: vi.fn(async () => ({
+          records: [],
+          costCents: 0,
+          modelExtractions: {
+            invoked: 3,
+            failedByReason: { STRUCTURED_OUTPUT_EMPTY_TRUNCATED: 1 },
+          },
+        })),
+      },
+      {
+        ...okAdapter("ted", []),
+        discoverCompanies: vi.fn(async () => ({
+          records: [],
+          costCents: 0,
+          modelExtractions: {
+            invoked: 2,
+            failedByReason: { STRUCTURED_OUTPUT_EMPTY_TRUNCATED: 1, MODEL_CALL_FAILED: 1 },
+          },
+        })),
+      },
+    ]);
+    const acts = createDiscoveryActivities(deps);
+
+    await expect(
+      acts.executeQuery(discoveryArgs("run-ok-x", { query: QUERY })),
+    ).resolves.toMatchObject({
+      modelExtractions: {
+        invoked: 5,
+        failedByReason: { STRUCTURED_OUTPUT_EMPTY_TRUNCATED: 2, MODEL_CALL_FAILED: 1 },
+      },
+    });
+  });
+
+  it("returns no model extractions when no provider made a model call", async () => {
+    const acts = createDiscoveryActivities(makeDeps([okAdapter("wikidata", [])]));
+
+    const result = await acts.executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
+
+    expect(result).not.toHaveProperty("modelExtractions");
   });
 
   it("uses the relayed authority account and rejects missing binding before provider execution", async () => {
@@ -1736,12 +1782,13 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
       activities.qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" })),
     ).resolves.toMatchObject({ judged: 0, unjudged: 1 });
 
-    // A transport failure usually hits every company: it stops the activity instead.
+    // A single stream the gateway settled as cut short skips that company too; two in a row
+    // stop the activity (see "qualifyFitForRun —— 流截断").
     const cut = new ProviderTransportError("CHAT_COMPLETIONS_STREAM_TRUNCATED", { inputTokens: 520 });
     fitRuntimeMocks.execute.mockRejectedValueOnce(cut);
     await expect(
       activities.qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" })),
-    ).rejects.toBe(cut);
+    ).resolves.toMatchObject({ judged: 0, unjudged: 1 });
   });
 
   it("既有 canonical identity 命中 suppression 时只修复状态，不再链接或写 evidence", async () => {
@@ -3558,6 +3605,157 @@ describe("resolveRunStatus —— 数据源停用而跳过的查询（BI-30）",
       resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, skippedQueries: 0 }),
     ).toBe("DONE");
     expect(resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false })).toBe("DONE");
+  });
+});
+
+describe("qualifyFitForRun —— 流截断", () => {
+  const FIT = {
+    provider: "test",
+    data: {
+      verdict: "match",
+      material_gate: "match",
+      role_gate: "match",
+      process_gate: "match",
+      business_model_gate: "match",
+      reasons: ["safe"],
+    },
+  };
+  const cut = () =>
+    new ProviderTransportError("CHAT_COMPLETIONS_STREAM_TRUNCATED", { inputTokens: 520 });
+
+  function fitActivities(companyIds: string[]) {
+    const company = (id: string) => ({
+      id,
+      name: `${id} GmbH`,
+      domain: `${id}.example`,
+      country: "DE",
+      industry: null,
+      status: "NEW",
+      attributes: {},
+    });
+    const tx = {
+      $queryRaw: legacyMaterializationQueryRaw(),
+      rawSourceRecord: {
+        findMany: async () =>
+          companyIds.map((id) => ({
+            id: `raw-${id}`,
+            providerKey: "registry",
+            payload: { externalId: id, name: `${id} GmbH`, domain: `${id}.example`, country: "DE" },
+          })),
+      },
+      identityLink: {
+        findMany: async () => companyIds.map((id) => ({ canonicalId: id })),
+      },
+      canonicalCompany: {
+        findMany: async () => companyIds.map(company),
+        findUnique: async ({ where }: { where: { id: string } }) => company(where.id),
+        updateMany: async () => ({ count: 0 }),
+      },
+      suppressionRecord: { findMany: async () => [] },
+      icpDefinition: { findUnique: async () => null },
+      lead: { upsert: async () => ({}) },
+    };
+    return createDiscoveryActivities({
+      prisma: {
+        withWorkspace: async <T>(
+          _workspaceId: string,
+          callback: (client: typeof tx) => Promise<T>,
+        ): Promise<T> => callback(tx),
+      },
+      providers: {},
+      gateway: {},
+      budgetStore: authorityBudgetStore(),
+    } as never);
+  }
+
+  beforeEach(() => {
+    fitRuntimeMocks.execute.mockReset();
+  });
+
+  it("counts one cut stream as an unjudged company and judges the rest", async () => {
+    fitRuntimeMocks.execute
+      .mockResolvedValueOnce(FIT)
+      .mockRejectedValueOnce(cut())
+      .mockResolvedValueOnce(FIT);
+
+    await expect(
+      fitActivities(["c1", "c2", "c3"]).qualifyFitForRun(
+        discoveryArgs("run-1", { icpId: "icp-1" }),
+      ),
+    ).resolves.toMatchObject({ judged: 2, unjudged: 1, verdicts: { match: 2 } });
+  });
+
+  it("absorbs cut streams that a judged company separates", async () => {
+    fitRuntimeMocks.execute
+      .mockRejectedValueOnce(cut())
+      .mockResolvedValueOnce(FIT)
+      .mockRejectedValueOnce(cut());
+
+    await expect(
+      fitActivities(["c1", "c2", "c3"]).qualifyFitForRun(
+        discoveryArgs("run-1", { icpId: "icp-1" }),
+      ),
+    ).resolves.toMatchObject({ judged: 1, unjudged: 2 });
+  });
+
+  it("stops the activity when two companies in a row lose their fit call to a cut stream", async () => {
+    const second = cut();
+    fitRuntimeMocks.execute.mockRejectedValueOnce(cut()).mockRejectedValueOnce(second);
+
+    await expect(
+      fitActivities(["c1", "c2", "c3"]).qualifyFitForRun(
+        discoveryArgs("run-1", { icpId: "icp-1" }),
+      ),
+    ).rejects.toBe(second);
+    expect(fitRuntimeMocks.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops on a second cut after an unusable answer, which is no sign the upstream recovered", async () => {
+    const second = cut();
+    fitRuntimeMocks.execute
+      .mockRejectedValueOnce(cut())
+      .mockRejectedValueOnce(
+        new ProviderOutputError("STRUCTURED_OUTPUT_NOT_JSON: not JSON", { inputTokens: 520 }),
+      )
+      .mockRejectedValueOnce(second);
+
+    await expect(
+      fitActivities(["c1", "c2", "c3"]).qualifyFitForRun(
+        discoveryArgs("run-1", { icpId: "icp-1" }),
+      ),
+    ).rejects.toBe(second);
+  });
+
+  it("still stops on any other transport failure", async () => {
+    const failure = new ProviderTransportError("CHAT_COMPLETIONS_STREAM_TRUNCATED", undefined, {
+      cause: new ExecutionControlError("EXECUTION_BUDGET_EXHAUSTED"),
+    });
+    fitRuntimeMocks.execute.mockResolvedValueOnce(FIT).mockRejectedValueOnce(failure);
+
+    await expect(
+      fitActivities(["c1", "c2"]).qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" })),
+    ).rejects.toBe(failure);
+  });
+});
+
+describe("resolveRunStatus —— 公司抽取因模型失败被跳过", () => {
+  it("有抽取被跳过 → 至少 PARTIAL，绝不 DONE", () => {
+    expect(
+      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, droppedExtractions: 1 }),
+    ).toBe("PARTIAL");
+  });
+  it("不单独判 FAILED：全部查询都失败时才是 FAILED", () => {
+    expect(
+      resolveRunStatus({ failures: 0, totalQueries: 1, budgetTruncated: false, droppedExtractions: 5 }),
+    ).toBe("PARTIAL");
+    expect(
+      resolveRunStatus({ failures: 1, totalQueries: 1, budgetTruncated: false, droppedExtractions: 5 }),
+    ).toBe("FAILED");
+  });
+  it("零跳过与旧历史（缺这个字段）保持原语义", () => {
+    expect(
+      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, droppedExtractions: 0 }),
+    ).toBe("DONE");
   });
 });
 

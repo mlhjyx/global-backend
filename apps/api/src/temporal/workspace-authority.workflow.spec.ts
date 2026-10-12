@@ -720,6 +720,152 @@ describe('discoveryWorkflow queries skipped because their source is off (BI-30)'
   });
 });
 
+describe('discoveryWorkflow model extractions dropped after a failed call', () => {
+  const QUERIES = [
+    { source_class: 'public_intelligence', filters: { source_hint: 'public_web' }, keywords: ['Pumpen'], priority: 1 },
+    { source_class: 'industry_data', filters: { source_hint: 'public_web' }, keywords: ['Pumpen'], priority: 2 },
+  ];
+
+  function executed(queryOrdinal: number, accepted: number, modelExtractions?: unknown) {
+    return {
+      rawCount: accepted,
+      quarantinedCount: 0,
+      rejectedCount: 0,
+      duplicateCount: 0,
+      costCents: 0,
+      provider: 'public_web',
+      budgetTruncated: false,
+      queryReceipt: {
+        schemaVersion: 'discovery-query-receipt/v1',
+        queryKey: String(queryOrdinal + 1).repeat(64),
+        queryOrdinal,
+        sourceClass: QUERIES[queryOrdinal]!.source_class,
+        providers: ['public_web'],
+        accepted,
+        quarantined: 0,
+        rejected: 0,
+        governanceDenied: 0,
+        duplicate: 0,
+        usageQuantity: accepted,
+        costCents: 0,
+      },
+      ...(modelExtractions ? { modelExtractions } : {}),
+    };
+  }
+
+  it('counts dropped extractions by reason and finalizes PARTIAL', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: QUERIES });
+    acts.executeQuery
+      .mockResolvedValueOnce(executed(0, 9, {
+        invoked: 10,
+        failedByReason: { STRUCTURED_OUTPUT_EMPTY_TRUNCATED: 1 },
+      }))
+      .mockResolvedValueOnce(executed(1, 5, { invoked: 5, failedByReason: {} }));
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'PARTIAL',
+        stats: expect.objectContaining({
+          failures: 0,
+          modelExtractions: {
+            invoked: 15,
+            failed: 1,
+            failedByReason: { STRUCTURED_OUTPUT_EMPTY_TRUNCATED: 1 },
+            queriesAllFailed: 0,
+          },
+        }),
+      }),
+    );
+  });
+
+  it('flags a query whose every model extraction failed', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: QUERIES });
+    acts.executeQuery
+      .mockResolvedValueOnce(executed(0, 4, { invoked: 4, failedByReason: {} }))
+      .mockResolvedValueOnce(executed(1, 0, {
+        invoked: 3,
+        failedByReason: { STRUCTURED_OUTPUT_EMPTY_TRUNCATED: 2, MODEL_CALL_FAILED: 1 },
+      }));
+
+    await discoveryWorkflow(discoveryInput());
+
+    const [{ status, stats }] = acts.finalizeRun.mock.calls[0]!;
+    expect(status).toBe('PARTIAL');
+    expect(stats).toMatchObject({
+      modelExtractions: { invoked: 7, failed: 3, queriesAllFailed: 1 },
+    });
+  });
+
+  it('fails a run whose every extraction failed with nothing accepted, keeping its plan READY', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: QUERIES });
+    acts.executeQuery
+      .mockResolvedValueOnce(executed(0, 0, {
+        invoked: 3,
+        failedByReason: { CHAT_COMPLETIONS_STREAM_TRUNCATED: 3 },
+      }))
+      .mockResolvedValueOnce(executed(1, 0, {
+        invoked: 2,
+        failedByReason: { STRUCTURED_OUTPUT_EMPTY_TRUNCATED: 2 },
+      }));
+
+    await discoveryWorkflow(discoveryInput());
+
+    const [{ status, stats }] = acts.finalizeRun.mock.calls[0]!;
+    expect(status).toBe('FAILED');
+    expect(stats).toMatchObject({
+      modelExtractions: { invoked: 5, failed: 5, queriesAllFailed: 2 },
+    });
+  });
+
+  it('keeps DONE and the stats shape when no extraction was dropped', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: QUERIES });
+    acts.executeQuery
+      .mockResolvedValueOnce(executed(0, 4, { invoked: 4, failedByReason: {} }))
+      // An activity result recorded before the counter existed.
+      .mockResolvedValueOnce(executed(1, 2));
+
+    await discoveryWorkflow(discoveryInput());
+
+    const [{ status, stats }] = acts.finalizeRun.mock.calls[0]!;
+    expect(status).toBe('DONE');
+    expect(stats).not.toHaveProperty('modelExtractions');
+  });
+
+  it('records the dropped extractions on a run that a later control error fails (BI-25)', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: QUERIES });
+    const control = activityFailure('executeQuery', 'BudgetOperationReplayError');
+    acts.executeQuery
+      .mockResolvedValueOnce(executed(0, 3, {
+        invoked: 4,
+        failedByReason: { STRUCTURED_OUTPUT_EMPTY_TRUNCATED: 1 },
+      }))
+      .mockRejectedValueOnce(control);
+
+    await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(control);
+
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'FAILED',
+        stats: expect.objectContaining({
+          modelExtractions: {
+            invoked: 4,
+            failed: 1,
+            failedByReason: { STRUCTURED_OUTPUT_EMPTY_TRUNCATED: 1 },
+            queriesAllFailed: 0,
+          },
+        }),
+      }),
+    );
+  });
+});
+
 describe('discoveryWorkflow failure finalization (BI-25)', () => {
   const HAPPY_RECEIPT = {
     schemaVersion: 'discovery-query-receipt/v1',

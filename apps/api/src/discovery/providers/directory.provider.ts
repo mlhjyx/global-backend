@@ -23,7 +23,8 @@ import {
 import type { RuntimeTelemetry } from '../../model-runtime/types';
 import { artifactSubjectSkipReason } from '../../tools/artifact-subject-denial';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
-import { isRecoverableModelFailure } from '../../model-gateway/providers/provider-output-error';
+import { MODEL_CALL_FAILED, tallyModelExtractions } from '../discovery-model-extractions';
+import { settledModelFailureReason } from '../settled-model-failure';
 import {
   DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
   buildDiscoveryCompanyResultLineage,
@@ -74,6 +75,8 @@ type MinedDirectoryRecord = Readonly<{
 type MinedDirectoryListing = Readonly<{
   records: readonly MinedDirectoryRecord[];
   collectors: readonly DiscoveryCompanyReceiptCollector[];
+  /** One entry per model call on the listing's pages, with the failure reason if it was skipped. */
+  extractionCalls: readonly Readonly<{ failureReason?: string }>[];
 }>;
 
 /**
@@ -154,6 +157,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
     // 2) 抓每个名录页 + 列表抽取（有限并发），记录按 name+domain 去重
     const dedup = new Map<string, ProviderCompanyRecord>();
     const collectors: DiscoveryCompanyReceiptCollector[] = [];
+    const extractionCalls: Array<Readonly<{ failureReason?: string }>> = [];
     const collectorIndexes = new Map<DiscoveryCompanyReceiptCollector, readonly number[]>();
     for (let i = 0; i < urls.length; i += CRAWL_CONCURRENCY) {
       const batch = urls.slice(i, i + CRAWL_CONCURRENCY);
@@ -164,6 +168,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
         if (s.status === 'rejected' && isDiscoveryCompanyLineageInvalid(s.reason)) throw s.reason;
         if (s.status !== 'fulfilled') continue;
         collectors.push(...s.value.collectors);
+        extractionCalls.push(...s.value.extractionCalls);
         for (const item of s.value.records) {
           const key = item.record.domain ?? `n:${item.record.name.toLowerCase()}`;
           if (!dedup.has(key)) {
@@ -192,6 +197,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
       records,
       costCents: 0,
       ...(lineage ? { lineage } : {}),
+      modelExtractions: tallyModelExtractions(extractionCalls),
     };
   }
 
@@ -213,6 +219,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
   ): Promise<MinedDirectoryListing> {
     const out: MinedDirectoryRecord[] = [];
     const collectors: DiscoveryCompanyReceiptCollector[] = [];
+    const extractionCalls: Array<Readonly<{ failureReason?: string }>> = [];
     let pageUrl: string | null = listUrl;
     const visited = new Set<string>();
 
@@ -254,6 +261,9 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
 
       const extraction = await this.extractList(pageUrl, text, query, ctx);
       collectors.push(extraction.collector);
+      extractionCalls.push(
+        extraction.failureReason === undefined ? {} : { failureReason: extraction.failureReason },
+      );
       const extracted = extraction.data;
       if (!extracted?.is_directory || !extracted.companies?.length) {
         if (page === 0) this.log(`${pageUrl}: not a directory (llm)`);
@@ -283,6 +293,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
     return Object.freeze({
       records: Object.freeze(out),
       collectors: Object.freeze(collectors),
+      extractionCalls: Object.freeze(extractionCalls),
     });
   }
 
@@ -294,6 +305,8 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
   ): Promise<Readonly<{
     data: ExtractedList | null;
     collector: DiscoveryCompanyReceiptCollector;
+    /** Why the call failed and the listing was skipped. */
+    failureReason?: string;
   }>> {
     const contract = getTask('discovery.extract_list');
     const collector = createDiscoveryCompanyReceiptCollector({
@@ -328,18 +341,24 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
       );
       return Object.freeze({ data: result.data, collector });
     } catch (err) {
+      const settledReason = settledModelFailureReason(err);
       if (
         collector.isForwardingFailure(err) ||
-        isExecutionControlError(err) ||
-        isDiscoveryCompanyLineageInvalid(err)
+        isDiscoveryCompanyLineageInvalid(err) ||
+        (settledReason === undefined && isExecutionControlError(err))
       ) {
         throw err;
       }
-      // An unusable answer was settled by the gateway without a durable result: the listing is
-      // skipped and the query keeps its lineage. Any other failure leaves the outcome unknown.
-      if (isRecoverableModelFailure(err)) collector.markInvocationFailed();
+      // The gateway settled the call without a durable result (an unusable answer or a cut
+      // stream): the listing is skipped, the query keeps its lineage, and the run counts the
+      // skip. Any other failure leaves the outcome unknown and voids the lineage.
+      if (settledReason !== undefined) collector.markInvocationFailed();
       this.log(`extract failed ${url}: ${String(err).slice(0, 80)}`);
-      return Object.freeze({ data: null, collector });
+      return Object.freeze({
+        data: null,
+        collector,
+        failureReason: settledReason ?? MODEL_CALL_FAILED,
+      });
     }
   }
 }

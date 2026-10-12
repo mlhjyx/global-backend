@@ -22,6 +22,11 @@ import {
   isDiscoveryQuerySkipReason,
   type DiscoveryQuerySkipReason,
 } from '../discovery/discovery-query-skip';
+import {
+  EMPTY_RUN_MODEL_EXTRACTIONS,
+  addQueryModelExtractions,
+  type DiscoveryRunModelExtractions,
+} from '../discovery/discovery-model-extractions';
 
 export const DISCOVERY_AUTHORITY_PATCH = 'discovery-workspace-authority-v2';
 export const DISCOVERY_RAW_GOVERNANCE_PATCH =
@@ -129,6 +134,18 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
   // Counts only, and only when a query was skipped: runs without skips keep their stats shape.
   const skipStats = (): Record<string, unknown> =>
     skippedQueryCount > 0 ? { skippedQueries: { ...skippedQueries } } : {};
+  // Company extractions the providers skipped after a failed model call (#638). Shown only when
+  // one was skipped, so runs without a skip keep their stats shape.
+  let modelExtractions: DiscoveryRunModelExtractions = EMPTY_RUN_MODEL_EXTRACTIONS;
+  const extractionStats = (): Record<string, unknown> =>
+    modelExtractions.failed > 0
+      ? {
+          modelExtractions: {
+            ...modelExtractions,
+            failedByReason: { ...modelExtractions.failedByReason },
+          },
+        }
+      : {};
 
   // Query totals in the exact shape finalizeRun checks against the stored receipts.
   const queryStats = (): Record<string, unknown> => ({
@@ -254,6 +271,8 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
           skippedQueries[r.skipReason] = (skippedQueries[r.skipReason] ?? 0) + 1;
           skippedQueryCount += 1;
         }
+        // Absent in histories recorded before the counter existed: replays keep their status.
+        modelExtractions = addQueryModelExtractions(modelExtractions, r.modelExtractions);
       } catch (err) {
         if (isExecutionControlError(err)) throw err;
         failures += 1;
@@ -369,15 +388,26 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       // Absent in histories recorded before the counter existed: replays keep their status.
       fitUnjudged: fit.unjudged ?? 0,
       skippedQueries: skippedQueryCount,
+      droppedExtractions: modelExtractions.failed,
     });
     if (usesRawGovernance && governanceDenied > 0) {
       status = acceptedRaw === 0 ? 'FAILED' : status === 'DONE' ? 'PARTIAL' : status;
+    }
+    // Every extraction the run made failed and nothing was accepted: an upstream outage, not a
+    // thin market. FAILED keeps the plan READY for another run (BI-25) instead of consuming it.
+    if (
+      modelExtractions.invoked > 0 &&
+      modelExtractions.failed === modelExtractions.invoked &&
+      acceptedRaw === 0
+    ) {
+      status = 'FAILED';
     }
     outcome = {
       status,
       stats: {
         ...queryStats(),
         ...skipStats(),
+        ...extractionStats(),
         companies,
         suppressed,
         fit: fit.verdicts,
@@ -421,6 +451,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
             stats: {
               ...queryStats(),
               ...skipStats(),
+              ...extractionStats(),
               queries: queryCount,
               failures,
               failure: describeDiscoveryRunFailure(stage, error),
