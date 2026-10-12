@@ -336,14 +336,16 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       stage = 'websiteProfile';
       try {
         const profileArgs = { workspaceId, runId, icpId: input.icpId, ...authorityArgs };
-        let pass = await signalActs.profileWebsitesForRun(profileArgs);
-        websiteProfile = pass;
         // Each activity hands the companies it did not reach to the next one; a spent run budget
         // ends the stage. A result recorded before the hand-off has no index and ends it too.
-        while (typeof pass.nextIndex === 'number' && !pass.budgetTruncated) {
-          pass = await signalActs.profileWebsitesForRun({ ...profileArgs, startIndex: pass.nextIndex });
-          websiteProfile = addWebsiteProfilePass(websiteProfile, pass);
-        }
+        let startIndex: number | undefined;
+        do {
+          const pass = await signalActs.profileWebsitesForRun(
+            startIndex === undefined ? profileArgs : { ...profileArgs, startIndex },
+          );
+          websiteProfile = startIndex === undefined ? pass : addWebsiteProfilePass(websiteProfile, pass);
+          startIndex = typeof pass.nextIndex === 'number' && !pass.budgetTruncated ? pass.nextIndex : undefined;
+        } while (startIndex !== undefined);
       } catch (error) {
         if (isExecutionControlError(error)) throw error;
         /* 画像是 Fit 的补充证据，失败时 Fit 仍按已有信息判定 */
@@ -353,18 +355,20 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     // ICP 资格门：判定本次归一出的公司是否为该 ICP 的真实目标客户（评测驱动）
     stage = 'fit';
     const fitArgs = { workspaceId, runId, icpId: input.icpId, ...authorityArgs };
-    let fitPass = await modelActs.qualifyFitForRun(fitArgs);
-    let fit: FitTotals = fitPass;
     // Each activity hands the companies it did not reach to the next one. A result recorded
     // before the hand-off has no cursor, so replaying that history schedules nothing new.
-    while (typeof fitPass.nextCompanyId === 'string') {
-      fitPass = await modelActs.qualifyFitForRun({
-        ...fitArgs,
-        afterCompanyId: fitPass.nextCompanyId,
-        previousCallCut: fitPass.previousCallCut === true,
-      });
-      fit = addFitPass(fit, fitPass);
-    }
+    let fit: FitTotals | undefined;
+    let fitContinuation: { afterCompanyId: string; previousCallCut: boolean } | undefined;
+    do {
+      const pass = await modelActs.qualifyFitForRun(
+        fitContinuation === undefined ? fitArgs : { ...fitArgs, ...fitContinuation },
+      );
+      fit = fit === undefined ? pass : addFitPass(fit, pass);
+      fitContinuation =
+        typeof pass.nextCompanyId === 'string'
+          ? { afterCompanyId: pass.nextCompanyId, previousCallCut: pass.previousCallCut === true }
+          : undefined;
+    } while (fitContinuation !== undefined);
 
     // 富集（Waterfall 富化段）：只给过了本 run ICP fit 门的高价值公司补 GLEIF 法律身份 + 母子关系（快事实，2 分钟活动）
     stage = 'enrich';
