@@ -59,6 +59,8 @@ const acts = proxyActivities<DiscoveryActivities>({
 // Query execution and the per-company fit pass make deepseek-v4-pro calls one
 // after another (extraction batches, taxonomy terms, one fit call per company),
 // which outruns the 2-minute default and turns into replay failures on retry.
+// The fit pass hands the companies it did not reach within its time box to the
+// next activity, so 15 minutes bounds one activity, not the whole pass.
 const modelActs = proxyActivities<DiscoveryActivities>({
   startToCloseTimeout: '15 minutes',
   retry: { maximumAttempts: 3 },
@@ -70,6 +72,44 @@ const signalActs = proxyActivities<DiscoveryActivities>({
   startToCloseTimeout: '30 minutes',
   retry: { maximumAttempts: 2 },
 });
+
+interface FitTotals {
+  judged?: number;
+  verdicts: Record<string, number>;
+  skippedForBudget?: number;
+  unjudged?: number;
+}
+
+interface WebsiteProfileTotals {
+  profiled: number;
+  matched: number;
+  skippedSubjects?: number;
+  budgetTruncated?: boolean;
+  unclassified?: number;
+}
+
+function addFitPass(total: FitTotals, pass: FitTotals): FitTotals {
+  const verdicts = { ...total.verdicts };
+  for (const [verdict, count] of Object.entries(pass.verdicts ?? {})) {
+    verdicts[verdict] = (verdicts[verdict] ?? 0) + count;
+  }
+  return {
+    judged: (total.judged ?? 0) + (pass.judged ?? 0),
+    verdicts,
+    skippedForBudget: (total.skippedForBudget ?? 0) + (pass.skippedForBudget ?? 0),
+    unjudged: (total.unjudged ?? 0) + (pass.unjudged ?? 0),
+  };
+}
+
+function addWebsiteProfilePass(total: WebsiteProfileTotals, pass: WebsiteProfileTotals): WebsiteProfileTotals {
+  return {
+    profiled: total.profiled + pass.profiled,
+    matched: total.matched + pass.matched,
+    skippedSubjects: (total.skippedSubjects ?? 0) + (pass.skippedSubjects ?? 0),
+    budgetTruncated: (total.budgetTruncated ?? false) || (pass.budgetTruncated ?? false),
+    unclassified: (total.unclassified ?? 0) + (pass.unclassified ?? 0),
+  };
+}
 
 /**
  * Discover 编排（PRD 5.5 / 7.4.8 Waterfall 的发现段）：
@@ -291,22 +331,21 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
 
     // 官网画像（G3 5.4b）：Fit 之前以已建档公司为主体抓首页与 Impressum（慢 → 长活动）；
     // 尽力而为，失败不影响 run 状态，控制错误照旧上抛。patch 守卫：旧历史重放不产生新命令。
-    let websiteProfile: {
-      profiled: number;
-      matched: number;
-      skippedSubjects?: number;
-      budgetTruncated?: boolean;
-      unclassified?: number;
-    } = { profiled: 0, matched: 0 };
+    let websiteProfile: WebsiteProfileTotals = { profiled: 0, matched: 0 };
     if (patched(DISCOVERY_WEBSITE_PROFILE_PATCH)) {
       stage = 'websiteProfile';
       try {
-        websiteProfile = await signalActs.profileWebsitesForRun({
-          workspaceId,
-          runId,
-          icpId: input.icpId,
-          ...authorityArgs,
-        });
+        const profileArgs = { workspaceId, runId, icpId: input.icpId, ...authorityArgs };
+        // Each activity hands the companies it did not reach to the next one; a spent run budget
+        // ends the stage. A result recorded before the hand-off has no index and ends it too.
+        let startIndex: number | undefined;
+        do {
+          const pass = await signalActs.profileWebsitesForRun(
+            startIndex === undefined ? profileArgs : { ...profileArgs, startIndex },
+          );
+          websiteProfile = startIndex === undefined ? pass : addWebsiteProfilePass(websiteProfile, pass);
+          startIndex = typeof pass.nextIndex === 'number' && !pass.budgetTruncated ? pass.nextIndex : undefined;
+        } while (startIndex !== undefined);
       } catch (error) {
         if (isExecutionControlError(error)) throw error;
         /* 画像是 Fit 的补充证据，失败时 Fit 仍按已有信息判定 */
@@ -315,7 +354,21 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
 
     // ICP 资格门：判定本次归一出的公司是否为该 ICP 的真实目标客户（评测驱动）
     stage = 'fit';
-    const fit = await modelActs.qualifyFitForRun({ workspaceId, runId, icpId: input.icpId, ...authorityArgs });
+    const fitArgs = { workspaceId, runId, icpId: input.icpId, ...authorityArgs };
+    // Each activity hands the companies it did not reach to the next one. A result recorded
+    // before the hand-off has no cursor, so replaying that history schedules nothing new.
+    let fit: FitTotals | undefined;
+    let fitContinuation: { afterCompanyId: string; previousCallCut: boolean } | undefined;
+    do {
+      const pass = await modelActs.qualifyFitForRun(
+        fitContinuation === undefined ? fitArgs : { ...fitArgs, ...fitContinuation },
+      );
+      fit = fit === undefined ? pass : addFitPass(fit, pass);
+      fitContinuation =
+        typeof pass.nextCompanyId === 'string'
+          ? { afterCompanyId: pass.nextCompanyId, previousCallCut: pass.previousCallCut === true }
+          : undefined;
+    } while (fitContinuation !== undefined);
 
     // 富集（Waterfall 富化段）：只给过了本 run ICP fit 门的高价值公司补 GLEIF 法律身份 + 母子关系（快事实，2 分钟活动）
     stage = 'enrich';

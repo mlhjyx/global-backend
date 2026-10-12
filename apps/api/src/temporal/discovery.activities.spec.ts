@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
-import { createDiscoveryActivities } from "./discovery.activities";
+import {
+  createDiscoveryActivities,
+  FIT_PASS_TIME_BOX_MS,
+  PROFILE_PASS_TIME_BOX_MS,
+} from "./discovery.activities";
 import { ExecutionControlError } from "../execution-budget/execution-control-error";
 import { DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS } from "./discovery-company-materialization";
 import { ToolPolicyDenied } from "../tools/tool-broker";
@@ -17,6 +21,7 @@ import {
   TestBudgetExceededError as BudgetExceededError,
 } from "@global/test-support";
 import {
+  BudgetExceededError as StoreBudgetExceededError,
   BudgetOperationReplayError,
   BudgetUnsettledOperationsError,
   type BudgetStore,
@@ -3287,13 +3292,28 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
 
   async function makeProfileDeps(
     profile: ReturnType<typeof vi.fn>,
-    options: { status?: string; attributes?: Record<string, unknown> } = {},
+    options: {
+      status?: string;
+      attributes?: Record<string, unknown>;
+      companies?: string[];
+      now?: () => number;
+    } = {},
   ) {
     const deps = makeEnrichDeps([]) as unknown as {
       prisma: { withWorkspace: (ws: string, fn: (tx: Record<string, Record<string, unknown>>) => Promise<unknown>) => Promise<unknown> };
       websiteProfile?: unknown;
+      now?: () => number;
     };
     const updateMany = vi.fn(async () => ({ count: 1 }));
+    const findMany = vi.fn(async () =>
+      (options.companies ?? ["c1"]).map((id) => ({
+        id,
+        name: id.toUpperCase(),
+        domain: `${id}.de`,
+        country: "DE",
+        attributes: options.attributes ?? {},
+      })),
+    );
     await deps.prisma.withWorkspace("ws", async (tx) => {
       // BI-14's company_contact switch keeps its seeded DISABLED here; its own cases are below.
       tx.dataProvider = {
@@ -3308,13 +3328,12 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
         })),
       };
       tx.canonicalCompany!.updateMany = updateMany;
-      tx.canonicalCompany!.findMany = async () => [
-        { id: "c1", name: "C1", domain: "c1.de", country: "DE", attributes: options.attributes ?? {} },
-      ];
+      tx.canonicalCompany!.findMany = findMany;
       tx.fieldEvidence!.findMany = async () => [];
     });
     deps.websiteProfile = { profile };
-    return { acts: createDiscoveryActivities(deps as never), updateMany };
+    if (options.now) deps.now = options.now;
+    return { acts: createDiscoveryActivities(deps as never), updateMany, findMany };
   }
 
   it("is a no-op while the website_profile source is not ENABLED", async () => {
@@ -3323,7 +3342,14 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
 
     await expect(
       acts.profileWebsitesForRun(discoveryArgs("run-profile-off", { icpId: "icp-1" })),
-    ).resolves.toEqual({ profiled: 0, matched: 0, skippedSubjects: 0, budgetTruncated: false, unclassified: 0 });
+    ).resolves.toEqual({
+      profiled: 0,
+      matched: 0,
+      skippedSubjects: 0,
+      budgetTruncated: false,
+      unclassified: 0,
+      nextIndex: null,
+    });
     expect(profile).not.toHaveBeenCalled();
   });
 
@@ -3393,6 +3419,48 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
     await expect(
       acts.profileWebsitesForRun(discoveryArgs("run-profile-storage", { icpId: "icp-1" })),
     ).rejects.toThrow("GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE");
+  });
+
+  it("hands the companies left to the next activity once its time box is spent", async () => {
+    const profile = vi.fn(async () => PROFILE);
+    const now = vi.fn().mockReturnValueOnce(0).mockReturnValue(PROFILE_PASS_TIME_BOX_MS);
+    const { acts } = await makeProfileDeps(profile, { companies: ["c1", "c2", "c3"], now });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-profile-pass", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ profiled: 1, nextIndex: 1 });
+    expect(profile).toHaveBeenCalledOnce();
+  });
+
+  it("resumes at the index it was handed, in a stable order, and hands nothing on once done", async () => {
+    const profile = vi.fn(async () => PROFILE);
+    const { acts, findMany } = await makeProfileDeps(profile, {
+      companies: ["c1", "c2", "c3"],
+      now: () => 0,
+    });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-profile-resume", { icpId: "icp-1", startIndex: 1 })),
+    ).resolves.toMatchObject({ profiled: 2, nextIndex: null });
+    expect(profile.mock.calls.map(([input]) => (input as { domain: string }).domain)).toEqual([
+      "c2.de",
+      "c3.de",
+    ]);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: [{ createdAt: "asc" }, { id: "asc" }] }),
+    );
+  });
+
+  it.each([-1, 1.5, 51, "1"])("rejects a continuation index of %s before any fetch", async (startIndex) => {
+    const profile = vi.fn(async () => PROFILE);
+    const { acts } = await makeProfileDeps(profile);
+
+    await expect(
+      acts.profileWebsitesForRun(
+        discoveryArgs("run-profile-bad", { icpId: "icp-1", startIndex }) as never,
+      ),
+    ).rejects.toMatchObject({ type: "DISCOVERY_STAGE_CONTINUATION_INVALID", nonRetryable: true });
+    expect(profile).not.toHaveBeenCalled();
   });
 });
 
@@ -3735,6 +3803,164 @@ describe("qualifyFitForRun —— 流截断", () => {
     await expect(
       fitActivities(["c1", "c2"]).qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" })),
     ).rejects.toBe(failure);
+  });
+});
+
+describe("qualifyFitForRun —— 按时限把余下公司交给下一次活动", () => {
+  const FIT = {
+    provider: "test",
+    data: {
+      verdict: "match",
+      material_gate: "match",
+      role_gate: "match",
+      process_gate: "match",
+      business_model_gate: "match",
+      reasons: ["safe"],
+    },
+  };
+  const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+  const cut = () =>
+    new ProviderTransportError("CHAT_COMPLETIONS_STREAM_TRUNCATED", { inputTokens: 520 });
+
+  /** Companies come back in id order after the cursor, as the database returns them. */
+  function passActivities(companyIds: string[], now: () => number) {
+    const company = (companyId: string) => ({
+      id: companyId,
+      name: `${companyId.slice(-2)} GmbH`,
+      domain: `c${companyId.slice(-2)}.example`,
+      country: "DE",
+      industry: null,
+      status: "NEW",
+      attributes: {},
+    });
+    const findMany = vi.fn(async ({ where }: { where: { id: { in: string[]; gt?: string } } }) =>
+      [...companyIds]
+        .sort()
+        .filter((companyId) => where.id.gt === undefined || companyId > where.id.gt)
+        .map(company),
+    );
+    const tx = {
+      $queryRaw: legacyMaterializationQueryRaw(),
+      rawSourceRecord: {
+        findMany: async () =>
+          companyIds.map((companyId) => ({
+            id: `raw-${companyId}`,
+            providerKey: "registry",
+            payload: {
+              externalId: companyId,
+              name: `${companyId.slice(-2)} GmbH`,
+              domain: `c${companyId.slice(-2)}.example`,
+              country: "DE",
+            },
+          })),
+      },
+      identityLink: {
+        findMany: async () => companyIds.map((companyId) => ({ canonicalId: companyId })),
+      },
+      canonicalCompany: {
+        findMany,
+        findUnique: async ({ where }: { where: { id: string } }) => company(where.id),
+        updateMany: async () => ({ count: 0 }),
+      },
+      suppressionRecord: { findMany: async () => [] },
+      icpDefinition: { findUnique: async () => null },
+      lead: { upsert: async () => ({}) },
+    };
+    const acts = createDiscoveryActivities({
+      prisma: {
+        withWorkspace: async <T>(
+          _workspaceId: string,
+          callback: (client: typeof tx) => Promise<T>,
+        ): Promise<T> => callback(tx),
+      },
+      providers: {},
+      gateway: {},
+      budgetStore: authorityBudgetStore(),
+      now,
+    } as never);
+    return { acts, findMany };
+  }
+
+  beforeEach(() => {
+    fitRuntimeMocks.execute.mockReset();
+  });
+
+  it("hands the companies left to the next activity once its time box is spent", async () => {
+    fitRuntimeMocks.execute.mockResolvedValue(FIT);
+    const now = vi.fn().mockReturnValueOnce(0).mockReturnValue(FIT_PASS_TIME_BOX_MS);
+    const { acts } = passActivities([id(1), id(2), id(3)], now);
+
+    await expect(
+      acts.qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ judged: 1, nextCompanyId: id(1), previousCallCut: false });
+    expect(fitRuntimeMocks.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("resumes after the company it was handed, in id order, and hands nothing on once done", async () => {
+    fitRuntimeMocks.execute.mockResolvedValue(FIT);
+    const { acts, findMany } = passActivities([id(3), id(1), id(2)], () => 0);
+
+    await expect(
+      acts.qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1", afterCompanyId: id(1) })),
+    ).resolves.toMatchObject({ judged: 2, nextCompanyId: null });
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: expect.objectContaining({ gt: id(1) }) }),
+        orderBy: { id: "asc" },
+      }),
+    );
+  });
+
+  it("stops on a cut stream that follows the one the previous activity ended on", async () => {
+    const second = cut();
+    fitRuntimeMocks.execute.mockRejectedValueOnce(second);
+    const { acts } = passActivities([id(2), id(3)], () => 0);
+
+    await expect(
+      acts.qualifyFitForRun(
+        discoveryArgs("run-1", { icpId: "icp-1", afterCompanyId: id(1), previousCallCut: true }),
+      ),
+    ).rejects.toBe(second);
+  });
+
+  it("tells the next activity that it ended on a cut stream", async () => {
+    fitRuntimeMocks.execute.mockResolvedValueOnce(FIT).mockRejectedValueOnce(cut());
+    const now = vi
+      .fn()
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0)
+      .mockReturnValue(FIT_PASS_TIME_BOX_MS);
+    const { acts } = passActivities([id(1), id(2), id(3)], now);
+
+    await expect(
+      acts.qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({
+      judged: 1,
+      unjudged: 1,
+      nextCompanyId: id(2),
+      previousCallCut: true,
+    });
+  });
+
+  it("counts every company after the cursor as skipped for budget and hands nothing on", async () => {
+    fitRuntimeMocks.execute.mockRejectedValueOnce(new StoreBudgetExceededError("account", 1n, 0n));
+    const { acts } = passActivities([id(1), id(2), id(3)], () => 0);
+
+    await expect(
+      acts.qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ judged: 0, skippedForBudget: 3, nextCompanyId: null });
+  });
+
+  it.each([
+    ["a company id that is not a UUID", { afterCompanyId: "c1" }],
+    ["a cut flag that is not a boolean", { previousCallCut: "yes" }],
+  ])("rejects a continuation with %s before any model call", async (_label, extra) => {
+    const { acts } = passActivities([id(1)], () => 0);
+
+    await expect(
+      acts.qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1", ...extra }) as never),
+    ).rejects.toMatchObject({ type: "DISCOVERY_STAGE_CONTINUATION_INVALID", nonRetryable: true });
+    expect(fitRuntimeMocks.execute).not.toHaveBeenCalled();
   });
 });
 

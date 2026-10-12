@@ -866,6 +866,108 @@ describe('discoveryWorkflow model extractions dropped after a failed call', () =
   });
 });
 
+describe('discoveryWorkflow company passes handed from one activity to the next', () => {
+  const fitPass = (overrides: Record<string, unknown>) => ({
+    judged: 0,
+    verdicts: {},
+    skippedForBudget: 0,
+    unjudged: 0,
+    nextCompanyId: null,
+    previousCallCut: false,
+    ...overrides,
+  });
+  const profilePass = (overrides: Record<string, unknown>) => ({
+    profiled: 0,
+    matched: 0,
+    skippedSubjects: 0,
+    budgetTruncated: false,
+    unclassified: 0,
+    nextIndex: null,
+    ...overrides,
+  });
+
+  it('runs the fit judge until no company is left and adds up every pass', async () => {
+    primeDiscovery();
+    acts.qualifyFitForRun
+      .mockResolvedValueOnce(
+        fitPass({ judged: 2, verdicts: { match: 1, weak: 1 }, nextCompanyId: 'company-2', previousCallCut: true }),
+      )
+      .mockResolvedValueOnce(fitPass({ judged: 1, verdicts: { match: 1 }, unjudged: 1 }));
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.qualifyFitForRun).toHaveBeenCalledTimes(2);
+    expect(acts.qualifyFitForRun.mock.calls[0]![0]).not.toHaveProperty('afterCompanyId');
+    expect(acts.qualifyFitForRun.mock.calls[1]![0]).toMatchObject({
+      icpId: 'icp-1',
+      afterCompanyId: 'company-2',
+      previousCallCut: true,
+    });
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'PARTIAL',
+        stats: expect.objectContaining({
+          fit: { match: 2, weak: 1 },
+          fitUnjudged: 1,
+          fitSkippedForBudget: 0,
+        }),
+      }),
+    );
+  });
+
+  it('profiles websites until no company is left and adds up every pass', async () => {
+    primeDiscovery();
+    acts.profileWebsitesForRun
+      .mockResolvedValueOnce(profilePass({ profiled: 2, matched: 1, unclassified: 1, nextIndex: 2 }))
+      .mockResolvedValueOnce(profilePass({ profiled: 1, matched: 1 }));
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.profileWebsitesForRun).toHaveBeenCalledTimes(2);
+    expect(acts.profileWebsitesForRun.mock.calls[1]![0]).toMatchObject({ icpId: 'icp-1', startIndex: 2 });
+    expect(acts.profileWebsitesForRun.mock.invocationCallOrder[1]).toBeLessThan(
+      acts.qualifyFitForRun.mock.invocationCallOrder[0]!,
+    );
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'DONE',
+        stats: expect.objectContaining({ websiteProfile: { profiled: 3, matched: 2, unclassified: 1 } }),
+      }),
+    );
+  });
+
+  it('stops profiling once a pass reports the run budget spent', async () => {
+    primeDiscovery();
+    acts.profileWebsitesForRun.mockResolvedValueOnce(
+      profilePass({ profiled: 2, matched: 2, budgetTruncated: true, nextIndex: 2 }),
+    );
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.profileWebsitesForRun).toHaveBeenCalledOnce();
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'PARTIAL', stats: expect.objectContaining({ budgetTruncated: true }) }),
+    );
+  });
+
+  it('keeps the counts of earlier profile passes when a later pass fails', async () => {
+    primeDiscovery();
+    acts.profileWebsitesForRun
+      .mockResolvedValueOnce(profilePass({ profiled: 2, matched: 1, nextIndex: 2 }))
+      .mockRejectedValueOnce(new Error('crawler unavailable'));
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.qualifyFitForRun).toHaveBeenCalled();
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'DONE',
+        stats: expect.objectContaining({ websiteProfile: { profiled: 2, matched: 1, unclassified: 0 } }),
+      }),
+    );
+  });
+});
+
 describe('discoveryWorkflow failure finalization (BI-25)', () => {
   const HAPPY_RECEIPT = {
     schemaVersion: 'discovery-query-receipt/v1',
