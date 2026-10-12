@@ -32,7 +32,7 @@
   - 被跳过的失败调用不计入查询收据和 run 统计，只在 `ai_trace` 里可查。如果某条查询的调用全部失败，它会以 0 条记录提交，而不是报错。按原因码计数或加「全部失败」信号，另行处理。
   - 随下一个运行镜像上线，再用新卖方重跑验收。
 
-## 2026-10-12 · Count the company extractions a discovery run skips, and skip a cut stream instead of failing the run
+## 2026-10-12 · Count the company extractions a discovery run skips, and absorb a cut stream per company instead of failing the run
 
 - 起因：
   - #638 之后，被网关拒收的公司抽取只跳过一个域名，但跳过只记在 `ai_trace` 里；查询收据和 run 统计都看不到。上游如果把每次答案都截断，查询会以 0 条记录提交，run 照样 DONE（#638 复审 LOW-3）。
@@ -46,16 +46,22 @@
     - 原因码只接受网关的安全格式，其他一律记为 `MODEL_CALL_FAILED`；
     - 汇总到 run 时严格校验，旧历史或格式不对的数据不计入。
   - public_web、directory 把跳过的原因与调用数随结果返回（`DiscoveryResult.modelExtractions`），executeQuery 按查询汇总。
-  - 判断「网关已结算、没有结果」的函数 `settledExtractionFailureReason` 认两类：
+  - 判断「网关已结算、没有结果」的函数 `settledModelFailureReason`（`discovery/settled-model-failure.ts`）认两类：
     - 可恢复的 `ProviderOutputError`（#638）；
     - 精确类型的 `ProviderTransportError`，并且 cause 链里没有控制错误。
-    - 两类都跳过这个域名或名录页、标记失败、保留血缘。结果未知的错误（`ProviderOutputUnresolvedError`、`ProviderSettlementError` 等）照旧抛出。
+    - 公司抽取遇到这两类时，跳过这个域名或名录页、标记失败、保留血缘。结果未知的错误（`ProviderOutputUnresolvedError`、`ProviderSettlementError` 等）照旧抛出。
+  - fit 判定（`qualifyFitForRun`）保留原设计的意图：传输失败通常会打到每一家，所以照旧让活动失败。只有一种情况例外：单独一次、且网关已结算的流截断。重试只会撞上 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`，所以这家公司记为未判定，run 照旧至少 `PARTIAL`。
+    - 连续两家都被截断，视为上游故障，照旧让活动失败；
+    - 其他传输失败（包括 cause 链里有控制错误的）也照旧让活动失败；
+    - `judgeFitCompany` 本身不变。
+    - 按每家一次 fit 调用、约 0.6% 的流截断率估算，30 家的 run 原本约有 17% 的概率死在这一步。
   - 工作流：`stats.modelExtractions` 只在有跳过时出现，含 `invoked`、`failed`、`failedByReason`、`queriesAllFailed`（调用全部失败的查询数）。阶段失败时补写的 FAILED 统计里也带上它。
   - `resolveRunStatus`：有跳过就至少 `PARTIAL`，与 fit 的未判定同理，不单独判 FAILED。旧历史没有这个字段，重放时状态不变。
   - 对接说明（`packages/contracts/INTEGRATION.md` 第 3 步）补了这个字段。
 - 测试：
   - 先写失败测试：纯函数模块（计数、原因码过滤与防原型污染、求和、run 累加不可变、格式不对的输入）；public_web、directory 的计数；executeQuery 汇总；工作流的 PARTIAL、`queriesAllFailed`、DONE 时不出现该字段、BI-25 失败收尾也带统计；`resolveRunStatus`。改动前 10 项失败。
   - 流截断：#638 曾把「`ProviderTransportError` 原样抛出」钉成约定，这次改为跳过并计数。结果未知的两类错误，以及带控制错误 cause 的传输错误，仍然钉住「原样抛出」。
+  - fit 判定：新测试覆盖四种情况——单次截断记为未判定、被已判定公司隔开的两次截断、连续两次截断让活动失败、带控制错误 cause 的照旧失败。改动前前三项失败；原测试「一次截断就让活动失败」改为「记为未判定」。
   - `vitest run src/discovery/ src/temporal/ src/icp/ src/model-gateway/`：161 个文件 2514 项通过，7 个 PostgreSQL 文件跳过。
 - 未做：活动重试时，已结算但没有持久结果的调用仍会报 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`。这次改动让首次尝试不再因为单次失败而失败，所以很少走到重试；彻底解决属于 D13。
 

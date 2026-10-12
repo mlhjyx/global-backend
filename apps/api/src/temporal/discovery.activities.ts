@@ -112,6 +112,7 @@ import {
   sumModelExtractions,
   type DiscoveryModelExtractions,
 } from '../discovery/discovery-model-extractions';
+import { settledModelFailureReason } from '../discovery/settled-model-failure';
 import { narrowBySourceHints, planQuerySkipReason } from '../discovery/plan-query-sources';
 
 export interface DiscoveryRunInput {
@@ -1229,6 +1230,8 @@ export function createDiscoveryActivities(deps: {
 
       // 逐家判别（事务外，可并发但这里顺序以控成本/限流）
       let skippedForBudget = 0;
+      // The previous company lost its fit call to a stream the gateway settled as cut short.
+      let previousCallCut = false;
       for (let i = 0; i < companies.length; i++) {
         const c = companies[i];
         if (
@@ -1254,8 +1257,18 @@ export function createDiscoveryActivities(deps: {
             );
             break;
           }
+          // A transport failure usually hits every company, so it stops the activity. A single cut
+          // stream that the gateway settled without a result is the exception: retrying the
+          // activity could only replay it into BUDGET_OPERATION_REPLAY_UNAVAILABLE, so that one
+          // company counts as unjudged. A second cut in a row looks like an outage and stops.
+          if (!previousCallCut && settledModelFailureReason(err) !== undefined) {
+            previousCallCut = true;
+            unjudged += 1;
+            continue;
+          }
           throw err;
         }
+        previousCallCut = false;
         if (!judgment) {
           // 单家判别失败不影响其余，但要计数：编排层据此判 PARTIAL / FAILED，绝不静默漏判假 DONE。
           unjudged += 1;

@@ -24,7 +24,7 @@ import type { RuntimeTelemetry } from '../../model-runtime/types';
 import { artifactSubjectSkipReason } from '../../tools/artifact-subject-denial';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
 import { MODEL_CALL_FAILED, tallyModelExtractions } from '../discovery-model-extractions';
-import { settledExtractionFailureReason } from './model-extraction-failure';
+import { settledModelFailureReason } from '../settled-model-failure';
 import {
   DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
   buildDiscoveryCompanyResultLineage,
@@ -341,7 +341,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
       );
       return Object.freeze({ data: result.data, collector });
     } catch (err) {
-      const settledReason = settledExtractionFailureReason(err);
+      const settledReason = settledModelFailureReason(err);
       if (
         collector.isForwardingFailure(err) ||
         isDiscoveryCompanyLineageInvalid(err) ||

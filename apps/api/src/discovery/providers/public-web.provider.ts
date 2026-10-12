@@ -50,7 +50,7 @@ import {
 import type { RuntimeTelemetry } from '../../model-runtime/types';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
 import { MODEL_CALL_FAILED, tallyModelExtractions } from '../discovery-model-extractions';
-import { settledExtractionFailureReason } from './model-extraction-failure';
+import { settledModelFailureReason } from '../settled-model-failure';
 import {
   DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
   buildDiscoveryCompanyResultLineage,
@@ -288,7 +288,7 @@ export class PublicWebDiscoveryProvider
         { telemetry: this.deps.runtimeTelemetry },
       );
     } catch (error) {
-      const settledReason = settledExtractionFailureReason(error);
+      const settledReason = settledModelFailureReason(error);
       if (
         collector.isForwardingFailure(error) ||
         isDiscoveryCompanyLineageInvalid(error) ||
