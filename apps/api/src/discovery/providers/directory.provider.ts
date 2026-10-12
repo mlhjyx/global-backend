@@ -23,6 +23,7 @@ import {
 import type { RuntimeTelemetry } from '../../model-runtime/types';
 import { artifactSubjectSkipReason } from '../../tools/artifact-subject-denial';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
+import { isRecoverableModelFailure } from '../../model-gateway/providers/provider-output-error';
 import {
   DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
   buildDiscoveryCompanyResultLineage,
@@ -334,6 +335,9 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
       ) {
         throw err;
       }
+      // An unusable answer was settled by the gateway without a durable result: the listing is
+      // skipped and the query keeps its lineage. Any other failure leaves the outcome unknown.
+      if (isRecoverableModelFailure(err)) collector.markInvocationFailed();
       this.log(`extract failed ${url}: ${String(err).slice(0, 80)}`);
       return Object.freeze({ data: null, collector });
     }

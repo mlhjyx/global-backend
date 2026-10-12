@@ -34,12 +34,21 @@ export type DiscoveryCompanyResultLineageV1 = Readonly<{
 export type DiscoveryCompanyReceiptObservation = Readonly<{
   producerId: string;
   invoked: boolean;
+  /** The invoked call failed before any durable receipt, so the lineage leaves it out. */
+  failed: boolean;
   receipt: DurableExecutionReceipt | null;
   recordIndexes: readonly number[];
 }>;
 
 export type DiscoveryCompanyReceiptCollector = Readonly<{
   markExpectedInvocation: () => void;
+  /**
+   * The expected call is known to have failed: the gateway settled an unusable answer
+   * without a durable result, so no receipt can follow. A receipt that already arrived is
+   * kept. A provider marks only failures it can prove; any other failure stays an invoked
+   * call without a receipt, which voids the whole lineage.
+   */
+  markInvocationFailed: () => void;
   onDurableReceipt: (
     producerId: string,
     receipt: DurableExecutionReceipt,
@@ -63,6 +72,7 @@ const COVERAGE_KEYS = Object.freeze([
 const OBSERVATION_KEYS = Object.freeze([
   'producerId',
   'invoked',
+  'failed',
   'receipt',
   'recordIndexes',
 ] as const);
@@ -90,6 +100,7 @@ type DataRecord = Record<string, unknown>;
 type CollectorState = Readonly<
   | { phase: 'idle' }
   | { phase: 'invoked' }
+  | { phase: 'failed' }
   | {
       phase: 'forwarding_failed';
       receipt: DurableExecutionReceipt;
@@ -288,13 +299,17 @@ function parseObservation(
   const record = ownDataRecord(value, OBSERVATION_KEYS);
   const invoked = field(record, 'invoked');
   if (typeof invoked !== 'boolean') invalid();
+  const failed = field(record, 'failed');
+  if (typeof failed !== 'boolean') invalid();
   const rawReceipt = field(record, 'receipt');
   const recordIndexes = parseRecordIndexes(field(record, 'recordIndexes'), true);
   if (!invoked && (rawReceipt !== null || recordIndexes.length > 0)) invalid();
+  if (failed && (!invoked || rawReceipt !== null || recordIndexes.length > 0)) invalid();
   const producerId = expectedProducer(provider, field(record, 'producerId'));
   return Object.freeze({
     producerId,
     invoked,
+    failed,
     receipt:
       rawReceipt === null
         ? null
@@ -375,6 +390,11 @@ export function createDiscoveryCompanyReceiptCollector(input: Readonly<{
       if (state.phase !== 'idle') fail();
       state = Object.freeze({ phase: 'invoked' });
     },
+    markInvocationFailed: () => {
+      if (state.phase === 'settled') return;
+      if (state.phase !== 'invoked') fail();
+      state = Object.freeze({ phase: 'failed' });
+    },
     onDurableReceipt: (actualProducerId, value) => {
       if (state.phase === 'terminal' || state.phase === 'forwarding_failed') {
         invalid();
@@ -413,10 +433,16 @@ export function createDiscoveryCompanyReceiptCollector(input: Readonly<{
         invalid();
       }
       const recordIndexes = parseRecordIndexes(value, true);
-      if (state.phase === 'idle' && recordIndexes.length > 0) invalid();
+      if (
+        (state.phase === 'idle' || state.phase === 'failed') &&
+        recordIndexes.length > 0
+      ) {
+        invalid();
+      }
       const observation = Object.freeze({
         producerId,
         invoked: state.phase !== 'idle',
+        failed: state.phase === 'failed',
         receipt: state.phase === 'settled' ? state.receipt : null,
         recordIndexes,
       });
@@ -438,7 +464,14 @@ export function buildDiscoveryCompanyResultLineage(input: Readonly<{
       parseObservation(observation, provider),
     ),
   );
-  if (observations.some((observation) => observation.invoked && !observation.receipt)) {
+  // An invoked call without a receipt has an unknown outcome and voids the lineage; a call
+  // proven to have failed produced nothing to attest and is simply left out.
+  if (
+    observations.some(
+      (observation) =>
+        observation.invoked && !observation.failed && !observation.receipt,
+    )
+  ) {
     return undefined;
   }
   const settled = observations.filter(

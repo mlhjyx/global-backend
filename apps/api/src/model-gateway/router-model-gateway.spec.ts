@@ -166,6 +166,51 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     );
   });
 
+  it('settles an unusable answer without a result projection and sends no durable receipt', async () => {
+    // Discovery leaves such a call out of its company lineage (markInvocationFailed) only
+    // because no receipt can follow it; a receipt-capable store must not change that.
+    const provider = fakeProvider();
+    vi.mocked(provider.generateStructured).mockRejectedValueOnce(
+      new ProviderOutputError('STRUCTURED_OUTPUT_EMPTY_TRUNCATED: empty answer', { outputTokens: 10 }),
+    );
+    const settle = vi.fn(async () => ({
+      chargedMicrousd: 0n,
+      observedMicrousd: 0n,
+      capVariance: false,
+      replay: false,
+      receipt: DURABLE_RECEIPT,
+    }));
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op', estimatedMicrousd: BigInt(40) * 10_000n, replay: false,
+      })),
+      settle,
+    } as unknown as BudgetStore;
+    const onDurableReceipt = vi.fn();
+    const gateway = new RouterModelGateway(
+      { route: () => [provider] } as unknown as ModelRouter,
+      undefined,
+      budgetStore,
+    );
+
+    await expect(gateway.generateStructured(
+      {
+        task: 'taxonomy.normalize',
+        prompt: 'p',
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['code'],
+          properties: { code: { type: 'string' } },
+        },
+      },
+      { workspaceId: 'ws-1', runId: 'run-1', durableResultSchema: 'taxonomy-code/v1', onDurableReceipt },
+    )).rejects.toBeInstanceOf(ProviderOutputError);
+    expect(settle).toHaveBeenCalledTimes(1);
+    expect(settle.mock.calls[0]).toHaveLength(2);
+    expect(onDurableReceipt).not.toHaveBeenCalled();
+  });
+
   it('persists explicit token-pricing receipt facts for a registered Model task', async () => {
     const provider = fakeProvider();
     vi.mocked(provider.generateStructured).mockResolvedValueOnce({
