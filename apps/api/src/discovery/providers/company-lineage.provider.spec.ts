@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DurableExecutionReceipt } from '../../durable-results/durable-execution-receipt';
-import { ProviderOutputError } from '../../model-gateway/providers/provider-output-error';
+import {
+  ProviderOutputError,
+  ProviderOutputUnresolvedError,
+  ProviderSettlementError,
+  ProviderTransportError,
+} from '../../model-gateway/providers/provider-output-error';
 import type { ExecutionBroker, ToolContext, ToolResult } from '../../tools/tool-contract';
 import {
   DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
@@ -330,6 +335,25 @@ describe('provider-owned company receipt lineage', () => {
       log.mockRestore();
       mocks.executeStructuredTaskWithRuntime.mockReset();
     }
+  });
+
+  it.each([
+    ['ProviderTransportError', () => new ProviderTransportError('STREAM_CUT: stream ended early')],
+    ['ProviderOutputUnresolvedError', () => new ProviderOutputUnresolvedError(
+      'STRUCTURED_OUTPUT_REPAIR_CALL_FAILED: repair outcome unknown',
+    )],
+    ['ProviderSettlementError', () => new ProviderSettlementError('MODEL_SETTLEMENT_UPSTREAM_ACK_UNKNOWN')],
+  ])('public-web rethrows an unknown-outcome %s instead of marking the call failed', async (_name, failure) => {
+    const error = failure();
+    const executionBroker = broker(async (toolId) => toolId === 'searxng.search'
+      ? { data: { results: [{ url: 'https://acme.test/', title: 'Acme pumps' }] }, costCents: 0 }
+      : { data: { text: 'industrial pump distributor '.repeat(20) }, costCents: 0 });
+    mocks.executeStructuredTaskWithRuntime.mockRejectedValueOnce(error);
+
+    await expect(new PublicWebDiscoveryProvider({
+      gateway: {} as never,
+      broker: executionBroker,
+    }).discoverCompanies(query, context())).rejects.toBe(error);
   });
 
   it('still omits the public-web lineage when a model call fails in any other way', async () => {

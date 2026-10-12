@@ -10,7 +10,7 @@
   - 这次 run 共 112 次公司抽取，其中 1 次被网关以 `STRUCTURED_OUTPUT_EMPTY_TRUNCATED` 拒收（pro 跑了 139 秒，输出为空）。网关已结算这次预算操作，没有持久结果。
   - public_web 把它当作「跳过这个域名」，但收据收集器仍记为「已调用、没有收据」。`buildDiscoveryCompanyResultLineage` 因此整份血缘都不给，受治理的执行计划判为 MISMATCH。
   - Temporal 重试时，同一个预算操作「已存在但没有持久结果」，报 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`，run 失败。
-  - C-TX Release B（#631）激活前走 legacy 路径，失败的抽取只是被跳过；激活后，一次普通的模型失败就能让整个 run 失败。
+  - 这个缺陷从受治理的查询路径（2026-08-30 的 G2/G3）起就潜伏着：查询走受治理路径还是 legacy 路径，看每个适配器是否声明血缘，与 C-TX Release B（#631）的激活无关。
 - 改动：
   - `company-discovery-lineage.ts`：收集器新增 `markInvocationFailed()`，观察记录新增 `failed`。
     - 只能在「已调用、还没有收据」时标记，标记后不能再收收据，也不能覆盖记录；
@@ -21,10 +21,15 @@
     - 其他普通错误照旧让血缘作废。
   - trade_fair 不变：它的失败来自 broker 工具调用，不是模型调用。原有「结算前失败即 fail closed」的测试保留。
 - 测试：
-  - 先红后绿：新增 11 项（收集器 3 项、观察记录格式 5 项、public_web 2 项、directory 1 项），改动前 6 项失败，改动后全部通过。已有的两条畸形观察用例补上 `failed: false`，仍然测原来的规则。
-  - `vitest run src/discovery/ src/temporal/discovery`：85 个文件 1359 项通过，4 个 PostgreSQL 文件跳过。
+  - 先红后绿：新增 11 项行为测试（收集器 3 项、观察记录格式 5 项、public_web 2 项、directory 1 项），改动前 6 项失败，改动后全部通过。已有的两条畸形观察用例补上 `failed: false`，仍然测原来的规则。
+  - 另加 4 项，钉住这次修复依赖的已有约定：
+    - public_web 遇到 `ProviderTransportError`、`ProviderOutputUnresolvedError`、`ProviderSettlementError` 都照旧抛出，不标记失败；
+    - 网关对不可用的答案只结算、不带结果投影，也不发持久收据（`router-model-gateway.spec.ts`）。
+  - `vitest run src/discovery/ src/temporal/discovery src/model-gateway/router-model-gateway.spec.ts`：86 个文件 1435 项通过，4 个 PostgreSQL 文件跳过。
+  - 独立对抗审查结论：可合并。四条低优先级意见里，这一句的归因与测试数已改，网关约定已补测试；另两条列入下面的「未做」。
 - 未做：
   - 同一活动因为别的原因被 Temporal 重试时，已结算但没有持久结果的模型调用仍会报 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`，让查询失败。这属于 D13「失败后重试」，要改受围栏保护的 router，另行处理。
+  - 被跳过的失败调用不计入查询收据和 run 统计，只在 `ai_trace` 里可查。如果某条查询的调用全部失败，它会以 0 条记录提交，而不是报错。按原因码计数或加「全部失败」信号，另行处理。
   - 随下一个运行镜像上线，再用新卖方重跑验收。
 
 ## 2026-10-11 · Activate governed Discovery company materialization (C-TX Release B)
