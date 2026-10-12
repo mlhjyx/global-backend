@@ -14,7 +14,6 @@ import {
   isExecutionControlError,
 } from '../execution-budget/execution-control-error';
 import { applyDomainAckConsumerTransaction } from '../durable-results/domain-ack-consumer-bindings';
-import { settledModelFailureReason } from './settled-model-failure';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
 export type TaxonomyKind = 'industry' | 'country' | 'product';
@@ -180,10 +179,7 @@ export class TaxonomyResolver {
       );
       return node;
     } catch (e) {
-      if (
-        e instanceof BudgetExceededError ||
-        (isExecutionControlError(e) && settledModelFailureReason(e) === undefined)
-      ) throw e;
+      if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
       this.logger.warn(`llm normalize failed for "${term}": ${String(e).slice(0, 120)}`);
       return null;
     }
@@ -260,10 +256,7 @@ export class TaxonomyResolver {
       );
       return code;
     } catch (e) {
-      if (
-        e instanceof BudgetExceededError ||
-        (isExecutionControlError(e) && settledModelFailureReason(e) === undefined)
-      ) throw e;
+      if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
       this.logger.warn(`cpv refine failed for "${product}": ${String(e).slice(0, 120)}`);
       return null;
     }
@@ -340,10 +333,7 @@ export class TaxonomyResolver {
       );
       return code;
     } catch (e) {
-      if (
-        e instanceof BudgetExceededError ||
-        (isExecutionControlError(e) && settledModelFailureReason(e) === undefined)
-      ) throw e;
+      if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
       this.logger.warn(`naics refine failed for "${product}": ${String(e).slice(0, 120)}`);
       return null;
     }
@@ -426,10 +416,7 @@ export class TaxonomyResolver {
       );
       return code;
     } catch (e) {
-      if (
-        e instanceof BudgetExceededError ||
-        (isExecutionControlError(e) && settledModelFailureReason(e) === undefined)
-      ) throw e;
+      if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
       this.logger.warn(`fda refine failed for "${product}": ${String(e).slice(0, 120)}`);
       return null;
     }
