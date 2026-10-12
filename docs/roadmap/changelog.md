@@ -80,6 +80,35 @@
   - 官网画像吸收一次截断后，会保存一份未分类的画像并刷新时间戳，TTL 内不再分类。截断如果是整体性的，而后面的 fit 又调用不足两次（例如重跑已判定过的公司），run 可能以 DONE 结束；只能从 `stats.websiteProfile.unclassified` 看出来。
   - 被吸收的抽取，预算操作键由 run 账户和提示词决定。两条查询如果过滤条件和关键词完全相同、又碰到同一个域名，第二次会重放这次失败，报 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`，run 失败（旧问题，真实计划里关键词通常不同）。
 
+## 2026-10-12 · Hand the companies a fit or website-profile activity did not reach to the next activity
+
+- 起因：卖方 #22 的验收 run（`6f2d0871`，xin，2026-10-12 17:21–18:11 UTC）6 条查询全部完成：原始 65 条、通过 51 条、51 家公司，84 次抽取没有跳过。但 run 在 fit 阶段失败。
+  - fit 在一个活动里逐家判定全部 51 家，每家一次 pro 调用（平均 26 秒，最长 55 秒），共需约 22 分钟，超过 `modelActs` 的 15 分钟时限。
+  - 第一次尝试超时后，第二次尝试跳过已判定的公司（判定逐家落库），从下一家开始。但这家的调用还在第一次尝试里进行：预算操作仍是 RESERVED，没有持久结果，于是报 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`。第三次同样失败，run 失败。
+  - 超时的第一次尝试并没有停下：活动不发心跳，也不检查取消。工作流失败后它又跑了 7 分钟，判完全部 51 家（18:18:58），这部分调用白花了。
+  - 官网画像也是一个活动处理全部公司（上限 50 家），这次用了 25.5 分钟，离 `signalActs` 的 30 分钟时限只差 4.5 分钟。
+  - 根因：逐家处理的阶段，活动耗时随 run 的公司数线性增长，时限却是固定的。`MAX_DISCOVERY_FIT_COMPANIES` 是 11,550；按平均 26 秒算，15 分钟只够约 34 家。
+- 改动：
+  - **时间盒**：`qualifyFitForRun`、`profileWebsitesForRun` 各设一个时间盒（`FIT_PASS_TIME_BOX_MS` 8 分钟、`PROFILE_PASS_TIME_BOX_MS` 15 分钟）。
+    - 过了时间盒就不再开始新公司，把余下的交给下一个活动；
+    - 每个活动至少处理一家，run 总能往前走；
+    - 时间盒到点时正在处理的那一家照常做完，两个阶段都为它在各自时限内留了余量：fit 最多再跑一次模型调用（上限 300 秒）；官网画像最多再跑两次抓页、一次渲染和一次模型调用。
+  - **fit 续接**：按公司 id 顺序处理，用 `afterCompanyId` 续接，候选公司照旧排除本 ICP 已判定的。「连续两次流截断就停」的规则用 `previousCallCut` 跨活动传递。
+  - **官网画像续接**：候选列表改为全序（`createdAt`、`id`），用 `startIndex` 续接；某一批报告 run 预算用完后不再续接。
+  - **工作流**：循环调用，直到活动不再返回续接位置，再把各次计数相加。统计字段和 run 状态的规则都不变。后一批官网画像失败时，保留前面各批的计数，失败本身仍和原来一样按尽力而为处理。
+  - **参数校验**：续接参数在活动入口校验，格式不对时报不可重试的 `DISCOVERY_STAGE_CONTINUATION_INVALID`。
+  - **重放兼容**：不需要 patch。是否续接取决于活动结果，改动前记录的历史里没有续接字段，重放时不会排出新命令。
+- 测试：
+  - 先写失败测试，覆盖：
+    - fit 活动 7 项：时间盒交接、按游标与 id 顺序续跑、截断标记跨活动传递（两项）、预算用完、两项参数校验；
+    - 官网画像活动 6 项：时间盒交接、按位置续跑与全序、四种非法位置；
+    - 工作流 4 项：fit 与官网画像多次续接后相加、预算用完即停、后一批失败保留前面的计数。
+  - 改动前 16 项失败（工作流里两项是新循环的回归保护，改动前也能通过）；改动后全部通过。官网画像「源未开启时什么也不做」的用例，返回值多了 `nextIndex: null`。
+- 未做：
+  - 超时的尝试仍会在后台跑完，因为活动不发心跳、也不检查取消。这次改动让活动不再因为公司多而超时；但如果单次调用异常慢、一批仍然超时，重试会撞上旧尝试里还没完成的调用，报 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`（D13）。
+  - 富集（GLEIF）在 2 分钟的活动里处理全部 match 公司（上限 50 家，每家至多 4 次请求）。#22 只有 12 家 match，没有风险；match 公司多时同样可能超时，改法相同。
+  - 信号富集、监控注册各自上限 12 家，在 30 分钟时限内余量充足，不改。
+
 ## 2026-10-11 · Activate governed Discovery company materialization (C-TX Release B)
 
 - 起因：C-TX 只发了 Release A（#431：迁移 `20260830130300`/`20260830130400`，激活单例表为空），Release B 一直没做。API 自 Release A 起给每个新发现 run 写 v1 标记，而 `admit_discovery_company_materialization_v1` 对「v1 标记 + 无激活行」一律抛不可重试的 `DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_UNAVAILABLE`：任何走完查询阶段的 run 都会在 canonicalize 失败。xin 上激活表为 0 行，至今没有 run 走到 canonicalize。

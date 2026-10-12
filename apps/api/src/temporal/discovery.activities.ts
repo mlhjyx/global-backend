@@ -336,6 +336,24 @@ const WATCH_REGISTER_LIMIT = MAX_DISCOVERY_WATCH_COMPANIES; // 单 run 自动注
 const PATENT_ENQUEUE_LIMIT = 500; // 单 run 专利缓存预热 enqueue 上限（cheap upsert，非慢活动；超出记 log）
 const WEBSITE_PROFILE_TTL_MS = 30 * 24 * 3600 * 1000; // 官网画像较稳定：30 天内画像过的公司不重抓
 
+/**
+ * A per-company pass stops starting companies once this much wall-clock time has gone by and
+ * hands the rest to the next activity, so a run's company count never decides whether the pass
+ * fits its start-to-close timeout. The company in progress still finishes: for fit one model
+ * call, at most the gateway's 300-second ceiling (modelActs: 15 minutes); for a website profile
+ * two page fetches, a render and one model call (signalActs: 30 minutes).
+ */
+export const FIT_PASS_TIME_BOX_MS = 8 * 60_000;
+export const PROFILE_PASS_TIME_BOX_MS = 15 * 60_000;
+const CONTINUATION_COMPANY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+
+function invalidContinuation(): never {
+  throw ApplicationFailure.nonRetryable(
+    'DISCOVERY_STAGE_CONTINUATION_INVALID',
+    'DISCOVERY_STAGE_CONTINUATION_INVALID',
+  );
+}
+
 /** ICP 品类上下文（只供模型判断相关品类，不进输出）。 */
 function icpProductContext(companyAttributes: unknown): string {
   const attributes = (companyAttributes ?? {}) as Record<string, unknown>;
@@ -421,7 +439,10 @@ export function createDiscoveryActivities(deps: {
   rawIngestLimits?: RawSourceIngestLimits;
   /** G3 5.4b website profile; defaults to the provider over `gateway` + `broker`. */
   websiteProfile?: Pick<WebsiteProfileProvider, 'profile'>;
+  /** Wall clock for the per-company pass time boxes. */
+  now?: () => number;
 }) {
+  const clock = deps.now ?? Date.now;
   const budgets =
     deps.budgetStore ?? new UnavailableBudgetStore('discovery activities require an authoritative BudgetStore');
   const ensureRunBudget = async (
@@ -1156,13 +1177,33 @@ export function createDiscoveryActivities(deps: {
      * 判定即 CandidateAssessment：发现候选就建 Lead 行（status=DISCOVERED、无 scores），评分阶段再填 scores。
      * fit 挂 Lead 而非 canonical —— 同 workspace 多 ICP 各自独立判，互不覆盖。网络调用在事务外，落库在事务内。
      */
-    async qualifyFitForRun(args: DiscoveryActivityInput & { runId: string; icpId: string }): Promise<{
+    async qualifyFitForRun(
+      args: DiscoveryActivityInput & {
+        runId: string;
+        icpId: string;
+        /** Continue after this company in id order; absent on a run's first fit activity. */
+        afterCompanyId?: string;
+        /** The previous fit activity ended on a cut stream. */
+        previousCallCut?: boolean;
+      },
+    ): Promise<{
       judged: number;
       verdicts: Record<string, number>;
       skippedForBudget: number;
       /** Companies whose judgment failed (an absorbed model failure); they lower the run status. */
       unjudged: number;
+      /** The last company this activity reached once its time box ran out; null when none is left. */
+      nextCompanyId: string | null;
+      /** Carries the two-cuts-in-a-row rule over to the next fit activity. */
+      previousCallCut: boolean;
     }> {
+      if (
+        (args.afterCompanyId !== undefined &&
+          (typeof args.afterCompanyId !== 'string' || !CONTINUATION_COMPANY_ID.test(args.afterCompanyId))) ||
+        (args.previousCallCut !== undefined && typeof args.previousCallCut !== 'boolean')
+      ) {
+        invalidContinuation();
+      }
       const binding = await ensureRunBudget(args); // fit 判定（LLM）消耗计入同一 authority 账户
       // ICP 摘要 + 本 run 待判公司（事务内只读，快）
       const { icpBrief, companies } = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
@@ -1190,7 +1231,7 @@ export function createDiscoveryActivities(deps: {
             // 尚无「本 run ICP」的已判 Lead（无 Lead 或该 Lead.fitVerdict 为 null）才判定——防重复判、
             // 且以 icpId 限定 → 别的 ICP 判过的公司在本 ICP 仍会被判（修「后判 ICP 判不了」的漏斗断流）。
             where: {
-              id: { in: ids },
+              id: { in: ids, ...(args.afterCompanyId === undefined ? {} : { gt: args.afterCompanyId }) },
               status: { not: 'SUPPRESSED' },
               NOT: {
                 leads: {
@@ -1206,6 +1247,8 @@ export function createDiscoveryActivities(deps: {
               industry: true,
               attributes: true,
             },
+            // The hand-off cursor walks companies in id order.
+            orderBy: { id: 'asc' },
           })
         ).map((company) => ({
           ...company,
@@ -1231,8 +1274,16 @@ export function createDiscoveryActivities(deps: {
       // 逐家判别（事务外，可并发但这里顺序以控成本/限流）
       let skippedForBudget = 0;
       // The previous company lost its fit call to a stream the gateway settled as cut short.
-      let previousCallCut = false;
+      let previousCallCut = args.previousCallCut ?? false;
+      let nextCompanyId: string | null = null;
+      const startedAt = clock();
       for (let i = 0; i < companies.length; i++) {
+        // Hand the rest to the next activity rather than outrun this one's timeout; every
+        // activity judges at least one company, so the run always moves forward.
+        if (i > 0 && clock() - startedAt >= FIT_PASS_TIME_BOX_MS) {
+          nextCompanyId = companies[i - 1].id;
+          break;
+        }
         const c = companies[i];
         if (
           !(await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
@@ -1281,7 +1332,7 @@ export function createDiscoveryActivities(deps: {
           upsertLeadFit(tx, args.workspaceId, args.icpId, c.id, judgment),
         );
       }
-      return { judged, verdicts, skippedForBudget, unjudged };
+      return { judged, verdicts, skippedForBudget, unjudged, nextCompanyId, previousCallCut };
     },
 
     /**
@@ -1450,16 +1501,42 @@ export function createDiscoveryActivities(deps: {
      *    经禁联闸门写 company_contact_point。开关关闭时不渲染、不写点。画像在 30 天内、但还没用当前规则读过
      *    联系路径的公司，开关打开后会重画像一次。
      */
-    async profileWebsitesForRun(args: DiscoveryActivityInput & { runId: string; icpId: string }): Promise<{
+    async profileWebsitesForRun(
+      args: DiscoveryActivityInput & {
+        runId: string;
+        icpId: string;
+        /** Continue at this position of the run's profile list; absent on the first profile activity. */
+        startIndex?: number;
+      },
+    ): Promise<{
       profiled: number;
       matched: number;
       skippedSubjects: number;
       budgetTruncated: boolean;
       /** Profiles without a trade role: rules were not decisive and the model gave no verdict. */
       unclassified: number;
+      /** Where the next profile activity continues once this one's time box ran out; null when none is left. */
+      nextIndex: number | null;
     }> {
+      if (
+        args.startIndex !== undefined &&
+        !(
+          Number.isInteger(args.startIndex) &&
+          args.startIndex >= 0 &&
+          args.startIndex <= MAX_DISCOVERY_PROFILE_COMPANIES
+        )
+      ) {
+        invalidContinuation();
+      }
       const binding = await ensureRunBudget(args);
-      const idle = { profiled: 0, matched: 0, skippedSubjects: 0, budgetTruncated: false, unclassified: 0 };
+      const idle = {
+        profiled: 0,
+        matched: 0,
+        skippedSubjects: 0,
+        budgetTruncated: false,
+        unclassified: 0,
+        nextIndex: null,
+      };
       const setup = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const source = await tx.dataProvider.findUnique({
           where: { key: WEBSITE_PROFILE_PROVIDER_KEY },
@@ -1492,7 +1569,8 @@ export function createDiscoveryActivities(deps: {
             domain: { not: null },
           },
           select: { id: true, name: true, domain: true, country: true, attributes: true },
-          orderBy: { createdAt: 'asc' },
+          // A total order, so every profile activity of the run sees the same list behind its index.
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
           take: MAX_DISCOVERY_PROFILE_COMPANIES,
         });
         return { icp, companies, contactPaths: contactSource?.status === 'ENABLED' };
@@ -1517,8 +1595,17 @@ export function createDiscoveryActivities(deps: {
       let matched = 0;
       let skippedSubjects = 0;
       let unclassified = 0;
-      for (const c of setup.companies) {
-        const existing = ((c.attributes as Record<string, unknown> | null) ?? {})[WEBSITE_PROFILE_PROVIDER_KEY] as
+      const startIndex = args.startIndex ?? 0;
+      let nextIndex: number | null = null;
+      const startedAt = clock();
+      for (let i = startIndex; i < setup.companies.length; i++) {
+        // Hand the rest to the next activity rather than outrun this one's timeout.
+        if (i > startIndex && clock() - startedAt >= PROFILE_PASS_TIME_BOX_MS) {
+          nextIndex = i;
+          break;
+        }
+        const c = setup.companies[i];
+        const existing =((c.attributes as Record<string, unknown> | null) ?? {})[WEBSITE_PROFILE_PROVIDER_KEY] as
           | { _ts?: string; [COMPANY_CONTACT_PARSER_MARKER]?: string }
           | undefined;
         const fresh = Boolean(existing?._ts) && nowMs - Date.parse(existing!._ts!) < WEBSITE_PROFILE_TTL_MS;
@@ -1637,6 +1724,7 @@ export function createDiscoveryActivities(deps: {
         skippedSubjects,
         budgetTruncated: (await budgets.status({ workspaceId: binding.scopeKey, accountKey: binding.accountKey })).exhausted,
         unclassified,
+        nextIndex,
       };
     },
 
