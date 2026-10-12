@@ -8,6 +8,7 @@ import type { CompanyIdentifier } from './identity';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 import type { ArtifactSubjectRef } from '../tools/artifact-execution-port';
 import type { DiscoveryCompanyResultLineageV1 } from './company-discovery-lineage';
+import type { DiscoveryModelExtractions } from './discovery-model-extractions';
 
 export type SourceClass =
   | 'trade_data'
@@ -138,6 +139,8 @@ export interface DiscoveryResult {
   costCents: number;
   /** Optional closed lineage for providers that advertise the v1 capability. */
   lineage?: DiscoveryCompanyResultLineageV1;
+  /** Model extractions behind the result, and the ones skipped after a failed call. */
+  modelExtractions?: DiscoveryModelExtractions;
 }
 
 export interface ContactDiscoveryResult {

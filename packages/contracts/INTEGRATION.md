@@ -83,6 +83,11 @@
 3. 执行：`POST /query-plans/:id/execute` → 202 `{ data: { runId, status } }`；轮询 `GET /discovery-runs/:runId`（`RUNNING → DONE|PARTIAL`，stats 含每源计数）
    - 确认之后数据源被停用的查询会跳过，不让 run 失败：`stats.skippedQueries` 按原因计数（`SOURCE_DISABLED` / `SOURCE_LINEAGE_UNAVAILABLE` / `SOURCE_UNKNOWN`），run 判 `PARTIAL`
    - 没有受治理公司血缘的数据源（目前 `wikidata`、`openstreetmap`、`ted`、`openfda`）即使启用也不出查询、不执行；旧计划里指向它们的查询按 `SOURCE_LINEAGE_UNAVAILABLE` 跳过
+   - 公司抽取的模型调用失败时（答案不可用或流被截断），只跳过那个域名或名录页，run 继续，判 `PARTIAL`。`stats.modelExtractions` 只在有跳过时出现，含：
+     - `invoked`：模型调用次数；
+     - `failed`：跳过次数；
+     - `failedByReason`：按网关原因码计数，例如 `STRUCTURED_OUTPUT_EMPTY_TRUNCATED`、`CHAT_COMPLETIONS_STREAM_TRUNCATED`；
+     - `queriesAllFailed`：调用全部失败的查询数。大于 0 时多半是模型上游出了故障，值得人工看一下。
 4. 结果：`GET /canonical-companies`（`?status=NEW|ENRICHED|SUPPRESSED`）；详情含**字段级 Evidence**（每个字段值来自哪个源、什么许可）
    - 过了 fit 门的高价值公司自动做**多源富集**（互补并跑，均 CC0 直连数据）：
      - `attributes.gleif.*` —— 法律身份：`lei`/`legal_name`/`legal_form`/`entity_status`/`parent_name`/`ultimate_parent_name`（母子集团关系，识别目标是否某集团子公司）

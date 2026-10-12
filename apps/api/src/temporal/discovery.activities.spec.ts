@@ -705,6 +705,51 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
     });
   });
 
+  it("returns the model extractions its providers made and dropped, summed across providers", async () => {
+    const deps = makeDeps([
+      {
+        ...okAdapter("wikidata", []),
+        discoverCompanies: vi.fn(async () => ({
+          records: [],
+          costCents: 0,
+          modelExtractions: {
+            invoked: 3,
+            failedByReason: { STRUCTURED_OUTPUT_EMPTY_TRUNCATED: 1 },
+          },
+        })),
+      },
+      {
+        ...okAdapter("ted", []),
+        discoverCompanies: vi.fn(async () => ({
+          records: [],
+          costCents: 0,
+          modelExtractions: {
+            invoked: 2,
+            failedByReason: { STRUCTURED_OUTPUT_EMPTY_TRUNCATED: 1, MODEL_CALL_FAILED: 1 },
+          },
+        })),
+      },
+    ]);
+    const acts = createDiscoveryActivities(deps);
+
+    await expect(
+      acts.executeQuery(discoveryArgs("run-ok-x", { query: QUERY })),
+    ).resolves.toMatchObject({
+      modelExtractions: {
+        invoked: 5,
+        failedByReason: { STRUCTURED_OUTPUT_EMPTY_TRUNCATED: 2, MODEL_CALL_FAILED: 1 },
+      },
+    });
+  });
+
+  it("returns no model extractions when no provider made a model call", async () => {
+    const acts = createDiscoveryActivities(makeDeps([okAdapter("wikidata", [])]));
+
+    const result = await acts.executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
+
+    expect(result).not.toHaveProperty("modelExtractions");
+  });
+
   it("uses the relayed authority account and rejects missing binding before provider execution", async () => {
     const discoverCompanies = vi.fn(async () => ({
       records: [],
@@ -3558,6 +3603,27 @@ describe("resolveRunStatus —— 数据源停用而跳过的查询（BI-30）",
       resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, skippedQueries: 0 }),
     ).toBe("DONE");
     expect(resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false })).toBe("DONE");
+  });
+});
+
+describe("resolveRunStatus —— 公司抽取因模型失败被跳过", () => {
+  it("有抽取被跳过 → 至少 PARTIAL，绝不 DONE", () => {
+    expect(
+      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, droppedExtractions: 1 }),
+    ).toBe("PARTIAL");
+  });
+  it("不单独判 FAILED：全部查询都失败时才是 FAILED", () => {
+    expect(
+      resolveRunStatus({ failures: 0, totalQueries: 1, budgetTruncated: false, droppedExtractions: 5 }),
+    ).toBe("PARTIAL");
+    expect(
+      resolveRunStatus({ failures: 1, totalQueries: 1, budgetTruncated: false, droppedExtractions: 5 }),
+    ).toBe("FAILED");
+  });
+  it("零跳过与旧历史（缺这个字段）保持原语义", () => {
+    expect(
+      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, droppedExtractions: 0 }),
+    ).toBe("DONE");
   });
 });
 

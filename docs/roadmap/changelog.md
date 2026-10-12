@@ -32,6 +32,33 @@
   - 被跳过的失败调用不计入查询收据和 run 统计，只在 `ai_trace` 里可查。如果某条查询的调用全部失败，它会以 0 条记录提交，而不是报错。按原因码计数或加「全部失败」信号，另行处理。
   - 随下一个运行镜像上线，再用新卖方重跑验收。
 
+## 2026-10-12 · Count the company extractions a discovery run skips, and skip a cut stream instead of failing the run
+
+- 起因：
+  - #638 之后，被网关拒收的公司抽取只跳过一个域名，但跳过只记在 `ai_trace` 里；查询收据和 run 统计都看不到。上游如果把每次答案都截断，查询会以 0 条记录提交，run 照样 DONE（#638 复审 LOW-3）。
+  - 卖方 #21 的验收 run（`5740150c`，xin，2026-10-12 10:55–11:30 UTC）跑完 11 条查询后失败。原因：159 次公司抽取里有 1 次 SSE 流被截断，报 `ProviderTransportError: CHAT_COMPLETIONS_STREAM_TRUNCATED`。
+    - 传输错误按设计属于控制错误，活动因此失败；
+    - Temporal 重试时，这次调用已结算、但没有持久结果，于是报 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`，三次尝试全部失败。
+  - 传输错误之所以 fail closed，是怕网关整体故障时每次调用都失败，而调用方各自吞掉，run 悄悄得到空结果。网关对流截断的结算方式和不可用答案完全一样：只结算一次，不带结果投影，也不发持久收据。
+- 改动：
+  - 新的纯函数模块 `discovery-model-extractions.ts`，不依赖其他模块，供工作流直接引用：
+    - 按查询统计模型调用次数，以及按原因码统计跳过次数；
+    - 原因码只接受网关的安全格式，其他一律记为 `MODEL_CALL_FAILED`；
+    - 汇总到 run 时严格校验，旧历史或格式不对的数据不计入。
+  - public_web、directory 把跳过的原因与调用数随结果返回（`DiscoveryResult.modelExtractions`），executeQuery 按查询汇总。
+  - 判断「网关已结算、没有结果」的函数 `settledExtractionFailureReason` 认两类：
+    - 可恢复的 `ProviderOutputError`（#638）；
+    - 精确类型的 `ProviderTransportError`，并且 cause 链里没有控制错误。
+    - 两类都跳过这个域名或名录页、标记失败、保留血缘。结果未知的错误（`ProviderOutputUnresolvedError`、`ProviderSettlementError` 等）照旧抛出。
+  - 工作流：`stats.modelExtractions` 只在有跳过时出现，含 `invoked`、`failed`、`failedByReason`、`queriesAllFailed`（调用全部失败的查询数）。阶段失败时补写的 FAILED 统计里也带上它。
+  - `resolveRunStatus`：有跳过就至少 `PARTIAL`，与 fit 的未判定同理，不单独判 FAILED。旧历史没有这个字段，重放时状态不变。
+  - 对接说明（`packages/contracts/INTEGRATION.md` 第 3 步）补了这个字段。
+- 测试：
+  - 先写失败测试：纯函数模块（计数、原因码过滤与防原型污染、求和、run 累加不可变、格式不对的输入）；public_web、directory 的计数；executeQuery 汇总；工作流的 PARTIAL、`queriesAllFailed`、DONE 时不出现该字段、BI-25 失败收尾也带统计；`resolveRunStatus`。改动前 10 项失败。
+  - 流截断：#638 曾把「`ProviderTransportError` 原样抛出」钉成约定，这次改为跳过并计数。结果未知的两类错误，以及带控制错误 cause 的传输错误，仍然钉住「原样抛出」。
+  - `vitest run src/discovery/ src/temporal/ src/icp/ src/model-gateway/`：161 个文件 2514 项通过，7 个 PostgreSQL 文件跳过。
+- 未做：活动重试时，已结算但没有持久结果的调用仍会报 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`。这次改动让首次尝试不再因为单次失败而失败，所以很少走到重试；彻底解决属于 D13。
+
 ## 2026-10-11 · Activate governed Discovery company materialization (C-TX Release B)
 
 - 起因：C-TX 只发了 Release A（#431：迁移 `20260830130300`/`20260830130400`，激活单例表为空），Release B 一直没做。API 自 Release A 起给每个新发现 run 写 v1 标记，而 `admit_discovery_company_materialization_v1` 对「v1 标记 + 无激活行」一律抛不可重试的 `DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_UNAVAILABLE`：任何走完查询阶段的 run 都会在 canonicalize 失败。xin 上激活表为 0 行，至今没有 run 走到 canonicalize。

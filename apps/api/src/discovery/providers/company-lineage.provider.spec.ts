@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DurableExecutionReceipt } from '../../durable-results/durable-execution-receipt';
+import { ExecutionControlError } from '../../execution-budget/execution-control-error';
 import {
   ProviderOutputError,
   ProviderOutputUnresolvedError,
@@ -337,8 +338,73 @@ describe('provider-owned company receipt lineage', () => {
     }
   });
 
+  it('keeps the public-web lineage and counts the skip when the upstream cuts a stream short', async () => {
+    const executionBroker = broker(async (toolId) => toolId === 'searxng.search'
+      ? {
+          data: { results: [
+            { url: 'https://acme.test/', title: 'Acme pumps' },
+            { url: 'https://cut.test/', title: 'Cut pumps' },
+          ] },
+          costCents: 0,
+        }
+      : { data: { text: 'industrial pump distributor '.repeat(20) }, costCents: 0 });
+    mocks.executeStructuredTaskWithRuntime.mockImplementation(async (_gateway, input, ctx) => {
+      // The gateway settles a cut stream like an unusable answer (seller #21 run, 2026-10-12).
+      if (input.prompt.includes('cut.test')) {
+        throw new ProviderTransportError('CHAT_COMPLETIONS_STREAM_TRUNCATED');
+      }
+      ctx.onDurableReceipt?.(input.task, MODEL_A);
+      return {
+        data: { is_company_site: true, name: 'Acme GmbH' },
+        provider: 'gateway',
+        model: 'model',
+        runtimeExecution: {},
+      };
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      const result = await new PublicWebDiscoveryProvider({
+        gateway: {} as never,
+        broker: executionBroker,
+      }).discoverCompanies(query, context());
+
+      expect(result.records.map((record) => record.domain)).toEqual(['acme.test']);
+      expect(result.lineage).toEqual({
+        schemaVersion: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+        recordCount: 1,
+        attemptReceipts: [],
+        receiptCoverage: [{
+          producerId: 'discovery.extract_company',
+          receipt: MODEL_A,
+          recordIndexes: [0],
+        }],
+      });
+      expect(result.modelExtractions).toEqual({
+        invoked: 2,
+        failedByReason: { CHAT_COMPLETIONS_STREAM_TRUNCATED: 1 },
+      });
+    } finally {
+      log.mockRestore();
+      mocks.executeStructuredTaskWithRuntime.mockReset();
+    }
+  });
+
+  it('public-web rethrows a transport error that carries a control error', async () => {
+    const error = new ProviderTransportError('CHAT_COMPLETIONS_STREAM_TRUNCATED', undefined, {
+      cause: new ExecutionControlError('EXECUTION_BUDGET_EXHAUSTED'),
+    });
+    const executionBroker = broker(async (toolId) => toolId === 'searxng.search'
+      ? { data: { results: [{ url: 'https://acme.test/', title: 'Acme pumps' }] }, costCents: 0 }
+      : { data: { text: 'industrial pump distributor '.repeat(20) }, costCents: 0 });
+    mocks.executeStructuredTaskWithRuntime.mockRejectedValueOnce(error);
+
+    await expect(new PublicWebDiscoveryProvider({
+      gateway: {} as never,
+      broker: executionBroker,
+    }).discoverCompanies(query, context())).rejects.toBe(error);
+  });
+
   it.each([
-    ['ProviderTransportError', () => new ProviderTransportError('STREAM_CUT: stream ended early')],
     ['ProviderOutputUnresolvedError', () => new ProviderOutputUnresolvedError(
       'STRUCTURED_OUTPUT_REPAIR_CALL_FAILED: repair outcome unknown',
     )],
@@ -354,6 +420,62 @@ describe('provider-owned company receipt lineage', () => {
       gateway: {} as never,
       broker: executionBroker,
     }).discoverCompanies(query, context())).rejects.toBe(error);
+  });
+
+  it('counts the public-web model calls of a query and the ones it dropped, by reason', async () => {
+    const executionBroker = broker(async (toolId) => toolId === 'searxng.search'
+      ? {
+          data: { results: [
+            { url: 'https://acme.test/', title: 'Acme pumps' },
+            { url: 'https://broken.test/', title: 'Broken pumps' },
+            { url: 'https://down.test/', title: 'Down pumps' },
+            { url: 'https://blank.test/', title: '   ' },
+          ] },
+          costCents: 0,
+        }
+      : { data: { text: 'industrial pump distributor '.repeat(20) }, costCents: 0 });
+    mocks.executeStructuredTaskWithRuntime.mockImplementation(async (_gateway, input, ctx) => {
+      if (input.prompt.includes('broken.test')) {
+        throw new ProviderOutputError('STRUCTURED_OUTPUT_EMPTY_TRUNCATED: empty answer');
+      }
+      if (input.prompt.includes('down.test')) throw new Error('socket hang up');
+      ctx.onDurableReceipt?.(input.task, MODEL_A);
+      return {
+        data: { is_company_site: true, name: 'Acme GmbH' },
+        provider: 'gateway',
+        model: 'model',
+        runtimeExecution: {},
+      };
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      const result = await new PublicWebDiscoveryProvider({
+        gateway: {} as never,
+        broker: executionBroker,
+      }).discoverCompanies(query, context());
+
+      // blank.test has no usable search text, so it never reached the model.
+      expect(result.modelExtractions).toEqual({
+        invoked: 3,
+        failedByReason: { STRUCTURED_OUTPUT_EMPTY_TRUNCATED: 1, MODEL_CALL_FAILED: 1 },
+      });
+    } finally {
+      log.mockRestore();
+      mocks.executeStructuredTaskWithRuntime.mockReset();
+    }
+  });
+
+  it('reports no public-web model call when no search hit carries usable text', async () => {
+    const executionBroker = broker(async () => ({
+      data: { results: [{ url: 'https://acme.test/', title: '   ' }] },
+      costCents: 0,
+    }));
+    const result = await new PublicWebDiscoveryProvider({
+      gateway: {} as never,
+      broker: executionBroker,
+    }).discoverCompanies(query, context());
+
+    expect(result.modelExtractions).toEqual({ invoked: 0, failedByReason: {} });
   });
 
   it('still omits the public-web lineage when a model call fails in any other way', async () => {
@@ -584,6 +706,7 @@ describe('provider-owned company receipt lineage', () => {
       },
     ]);
     expect(result.lineage?.attemptReceipts).toEqual([]);
+    expect(result.modelExtractions).toEqual({ invoked: 2, failedByReason: {} });
     expect(parent.mock.calls.filter(([producer]) => producer === 'discovery.extract_list'))
       .toEqual([
         ['discovery.extract_list', MODEL_B],
@@ -656,6 +779,23 @@ describe('provider-owned company receipt lineage', () => {
         attemptReceipts: [],
         receiptCoverage: [],
       });
+      expect(unusable.modelExtractions).toEqual({
+        invoked: 1,
+        failedByReason: { STRUCTURED_OUTPUT_EMPTY_TRUNCATED: 1 },
+      });
+
+      mocks.executeStructuredTaskWithRuntime.mockRejectedValueOnce(
+        new ProviderTransportError('CHAT_COMPLETIONS_STREAM_TRUNCATED'),
+      );
+      const cut = await new DirectoryDiscoveryProvider({
+        gateway: {} as never,
+        broker: listingBroker,
+      }).discoverCompanies(query, context());
+      expect(cut.lineage?.recordCount).toBe(0);
+      expect(cut.modelExtractions).toEqual({
+        invoked: 1,
+        failedByReason: { CHAT_COMPLETIONS_STREAM_TRUNCATED: 1 },
+      });
 
       mocks.executeStructuredTaskWithRuntime.mockRejectedValueOnce(new Error('socket hang up'));
       const unknown = await new DirectoryDiscoveryProvider({
@@ -664,6 +804,10 @@ describe('provider-owned company receipt lineage', () => {
       }).discoverCompanies(query, context());
       expect(unknown.records).toEqual([]);
       expect(unknown).not.toHaveProperty('lineage');
+      expect(unknown.modelExtractions).toEqual({
+        invoked: 1,
+        failedByReason: { MODEL_CALL_FAILED: 1 },
+      });
     } finally {
       log.mockRestore();
     }

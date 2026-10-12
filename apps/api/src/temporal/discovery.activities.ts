@@ -108,6 +108,10 @@ import {
 import { targetCountryCodes } from '../discovery/search-localization';
 import { companyMatchesSuppression } from '../discovery/suppression-value';
 import type { DiscoveryQuerySkipReason } from '../discovery/discovery-query-skip';
+import {
+  sumModelExtractions,
+  type DiscoveryModelExtractions,
+} from '../discovery/discovery-model-extractions';
 import { narrowBySourceHints, planQuerySkipReason } from '../discovery/plan-query-sources';
 
 export interface DiscoveryRunInput {
@@ -143,6 +147,18 @@ interface DiscoveryQueryExecutionResult {
   queryReceipt?: DiscoveryQueryReceipt;
   /** BI-30: the query ran on no provider; the workflow counts the reason in the run's stats. */
   skipReason?: DiscoveryQuerySkipReason;
+  /**
+   * Model extractions the providers made for this query and the ones they skipped after a
+   * failed call. Absent when no provider called a model, and on a replay that ran no provider.
+   */
+  modelExtractions?: DiscoveryModelExtractions;
+}
+
+function withModelExtractions(
+  result: DiscoveryQueryExecutionResult,
+  modelExtractions: DiscoveryModelExtractions | undefined,
+): DiscoveryQueryExecutionResult {
+  return modelExtractions ? { ...result, modelExtractions } : result;
 }
 
 /**
@@ -696,6 +712,11 @@ export function createDiscoveryActivities(deps: {
         adapters,
         settled,
       });
+      const modelExtractions = sumModelExtractions(
+        settled.map((item) =>
+          item.status === 'fulfilled' ? item.value.r.modelExtractions : undefined,
+        ),
+      );
       // 预算耗尽绝不被吞成假成功。**不能**靠「某源 reject」判断——provider 的 fail-safe catch 会把
       // BudgetExceededError 吞成空结果（对源失败是对的），编排层从返回值区分不出「真没数据」还是「打穿被吞」。
       // 改由持久预算账户唯一真相点判：本 run 预算若在 fan-out 中被任一源的 broker/gateway reserve 打穿，
@@ -723,7 +744,7 @@ export function createDiscoveryActivities(deps: {
           budgetAuthorization,
           budgetTruncated,
         });
-        return withReceiptSkip(governed, skipReason);
+        return withModelExtractions(withReceiptSkip(governed, skipReason), modelExtractions);
       }
       // ── 事务内：bounded Raw v2 receipt + deterministic reconciliation ──
       return deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
@@ -914,9 +935,12 @@ export function createDiscoveryActivities(deps: {
         // Only a query with no receipt identity can reach this path with no
         // adapter; a legacy receipt omits providers that failed, so its
         // provider list cannot tell a skip apart.
-        return adapters.length === 0
-          ? { ...persisted.value, skipReason: skipReason() }
-          : persisted.value;
+        return withModelExtractions(
+          adapters.length === 0
+            ? { ...persisted.value, skipReason: skipReason() }
+            : persisted.value,
+          modelExtractions,
+        );
       });
     },
 

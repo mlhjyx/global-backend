@@ -49,7 +49,8 @@ import {
 } from '../../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
-import { isRecoverableModelFailure } from '../../model-gateway/providers/provider-output-error';
+import { MODEL_CALL_FAILED, tallyModelExtractions } from '../discovery-model-extractions';
+import { settledExtractionFailureReason } from './model-extraction-failure';
 import {
   DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
   buildDiscoveryCompanyResultLineage,
@@ -182,6 +183,7 @@ export class PublicWebDiscoveryProvider
     const domains = [...candidates.keys()].slice(0, MAX_PUBLIC_WEB_DOMAINS_PER_QUERY);
     const dedup = new Map<string, ProviderCompanyRecord>();
     const observations: DiscoveryCompanyReceiptObservation[] = [];
+    const extractionCalls: Array<Readonly<{ failureReason?: string }>> = [];
 
     // 有限并发地：按搜索命中让 LLM 判站 + 抽取（输入只有标题与 URL：搜索摘要不出 searxng.search，见其持久契约）
     for (let i = 0; i < domains.length; i += JUDGE_CONCURRENCY) {
@@ -204,6 +206,9 @@ export class PublicWebDiscoveryProvider
         }
         if (s.value.collector) {
           observations.push(s.value.collector.finish(recordIndexes));
+          extractionCalls.push(
+            s.value.failureReason === undefined ? {} : { failureReason: s.value.failureReason },
+          );
         }
       }
     }
@@ -217,6 +222,7 @@ export class PublicWebDiscoveryProvider
       records,
       costCents: 0,
       ...(lineage ? { lineage } : {}),
+      modelExtractions: tallyModelExtractions(extractionCalls),
     };
   }
 
@@ -241,7 +247,10 @@ export class PublicWebDiscoveryProvider
     ctx: ExecutionContext,
   ): Promise<Readonly<{
     record: ProviderCompanyRecord | null;
+    /** Present when the model was called for this domain. */
     collector?: DiscoveryCompanyReceiptCollector;
+    /** Why the call failed and the domain was skipped. */
+    failureReason?: string;
   }>> {
     const text = searchEvidenceText(hits);
     if (!text) {
@@ -279,18 +288,24 @@ export class PublicWebDiscoveryProvider
         { telemetry: this.deps.runtimeTelemetry },
       );
     } catch (error) {
+      const settledReason = settledExtractionFailureReason(error);
       if (
         collector.isForwardingFailure(error) ||
-        isExecutionControlError(error) ||
-        isDiscoveryCompanyLineageInvalid(error)
+        isDiscoveryCompanyLineageInvalid(error) ||
+        (settledReason === undefined && isExecutionControlError(error))
       ) {
         throw error;
       }
-      // An unusable answer was settled by the gateway without a durable result: one domain is
-      // skipped and the query keeps its lineage. Any other failure leaves the outcome unknown.
-      if (isRecoverableModelFailure(error)) collector.markInvocationFailed();
+      // The gateway settled the call without a durable result (an unusable answer or a cut
+      // stream): one domain is skipped, the query keeps its lineage, and the run counts the
+      // skip. Any other failure leaves the outcome unknown and voids the lineage.
+      if (settledReason !== undefined) collector.markInvocationFailed();
       this.log('skip: extract failed (ERROR)');
-      return Object.freeze({ record: null, collector });
+      return Object.freeze({
+        record: null,
+        collector,
+        failureReason: settledReason ?? MODEL_CALL_FAILED,
+      });
     }
     const out = result.data;
     // Same normalization as the record: a name of only quotes or trademark signs is no name.
