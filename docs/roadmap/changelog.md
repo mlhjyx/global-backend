@@ -30,6 +30,7 @@
       - 信号阶段全部无法重放，run 照旧判 FAILED。
     - 不依赖 Temporal、数据库与网络，几秒跑完。
     - 代理时限从工作流源码读取，与 `discovery.workflow.timeouts.spec.ts` 共用 `testing/discovery-activity-timeouts.ts`。
+  - 对接说明（`packages/contracts/INTEGRATION.md` 第 3 步）补了 `stats.unreplayableSkips`。
 - 测试：
   - 先写失败测试：
     - 活动侧：信号 3 项、监控 2 项、官网画像 5 项、富集时间盒 6 项；

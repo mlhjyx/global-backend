@@ -173,16 +173,17 @@ async function* bytesOf(body: string): AsyncIterable<Uint8Array> {
   if (body.length > 0) yield new TextEncoder().encode(body);
 }
 
-/**
- * Production ArtifactExecutionPort (G3 spec 2026-09-24 §4.1): RLS subject
- * admission, bounded PERSONAL_DATA object persistence bound to the subject
- * (1-day TTL from the tool strategy) and verified replay.
- */
+/** The bounded storage code of a persist failure, or only the error's class. */
 function persistFailureLabel(error: unknown): string {
   if (error instanceof ArtifactStorageError) return `${error.name}:${error.code}`;
   return error instanceof Error ? error.name : 'unknown';
 }
 
+/**
+ * Production ArtifactExecutionPort (G3 spec 2026-09-24 §4.1): RLS subject
+ * admission, bounded PERSONAL_DATA object persistence bound to the subject
+ * (1-day TTL from the tool strategy) and verified replay.
+ */
 export class GenericOperationArtifactExecution implements ArtifactExecutionPort {
   private readonly now: () => Date;
 

@@ -88,6 +88,7 @@
      - `failed`：跳过次数；
      - `failedByReason`：按网关原因码计数，例如 `STRUCTURED_OUTPUT_EMPTY_TRUNCATED`、`CHAT_COMPLETIONS_STREAM_TRUNCATED`；没有网关原因码的失败记为 `MODEL_CALL_FAILED`；
      - `queriesAllFailed`：调用全部失败的查询数。大于 0 时多半是模型上游出了故障，值得人工看一下。
+   - 官网画像、信号富集、网站监控是尽力而为的阶段。某家公司的操作无法重放时（已经发出、却没有持久结果，例如抓到的页面没能存下），跳过这一家，run 至少判 `PARTIAL`；连续两家都这样时视为故障，run 判 `FAILED`。`stats.unreplayableSkips` 只在有跳过时出现，按阶段计数：`websiteProfile`、`signals`、`watches`。
 4. 结果：`GET /canonical-companies`（`?status=NEW|ENRICHED|SUPPRESSED`）；详情含**字段级 Evidence**（每个字段值来自哪个源、什么许可）
    - 过了 fit 门的高价值公司自动做**多源富集**（互补并跑，均 CC0 直连数据）：
      - `attributes.gleif.*` —— 法律身份：`lei`/`legal_name`/`legal_form`/`entity_status`/`parent_name`/`ultimate_parent_name`（母子集团关系，识别目标是否某集团子公司）
