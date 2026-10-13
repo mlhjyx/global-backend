@@ -142,7 +142,7 @@ beforeEach(() => resetActivities());
 
 describe('discoveryWorkflow execution-control propagation', () => {
   it.each([
-    ['executeQuery', 'query', 'BudgetOperationReplayError'],
+    ['executeQuery', 'query', 'ExecutionBudgetGrantError'],
     ['enrichSignalsRun', 'signals', 'ExecutionBudgetGrantError'],
     ['registerWatchesForRun', 'watches', 'ExecutionBudgetGrantError'],
     ['enqueuePatentLookupsForRun', 'patentEnqueue', 'ExecutionBudgetGrantError'],
@@ -704,7 +704,7 @@ describe('discoveryWorkflow queries skipped because their source is off (BI-30)'
   it('records the skips on a run that a later control error fails (BI-25)', async () => {
     primeDiscovery();
     acts.loadPlanQueries.mockResolvedValue({ queries: QUERIES.slice(0, 2) });
-    const control = activityFailure('executeQuery', 'BudgetOperationReplayError');
+    const control = activityFailure('executeQuery', 'ExecutionBudgetGrantError');
     acts.executeQuery
       .mockResolvedValueOnce(executed(0, 'company_registry', [], 0, 'SOURCE_DISABLED'))
       .mockRejectedValueOnce(control);
@@ -840,7 +840,7 @@ describe('discoveryWorkflow model extractions dropped after a failed call', () =
   it('records the dropped extractions on a run that a later control error fails (BI-25)', async () => {
     primeDiscovery();
     acts.loadPlanQueries.mockResolvedValue({ queries: QUERIES });
-    const control = activityFailure('executeQuery', 'BudgetOperationReplayError');
+    const control = activityFailure('executeQuery', 'ExecutionBudgetGrantError');
     acts.executeQuery
       .mockResolvedValueOnce(executed(0, 3, {
         invoked: 4,
@@ -860,6 +860,102 @@ describe('discoveryWorkflow model extractions dropped after a failed call', () =
             failedByReason: { STRUCTURED_OUTPUT_EMPTY_TRUNCATED: 1 },
             queriesAllFailed: 0,
           },
+        }),
+      }),
+    );
+  });
+});
+
+describe('discoveryWorkflow queries whose retries met an unreplayable operation', () => {
+  const query = (priority: number) => ({
+    source_class: 'public_intelligence',
+    filters: {},
+    keywords: [`Pumpen ${priority}`],
+    priority,
+  });
+  const unreplayable = () => activityFailure('executeQuery', 'BudgetOperationReplayError');
+
+  it('counts such a query as failed and runs the rest of the plan', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: [query(1), query(2)] });
+    acts.executeQuery.mockRejectedValueOnce(unreplayable());
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.executeQuery).toHaveBeenCalledTimes(2);
+    expect(acts.canonicalizeRun).toHaveBeenCalled();
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'PARTIAL',
+        stats: expect.objectContaining({
+          failures: 1,
+          unreplayableSkips: expect.objectContaining({ queries: 1 }),
+        }),
+      }),
+    );
+  });
+
+  it('still fails the run when two queries in a row meet one', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: [query(1), query(2), query(3)] });
+    const second = unreplayable();
+    acts.executeQuery.mockRejectedValueOnce(unreplayable()).mockRejectedValueOnce(second);
+
+    await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(second);
+
+    expect(acts.executeQuery).toHaveBeenCalledTimes(2);
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'FAILED',
+        stats: expect.objectContaining({
+          failure: { stage: 'query', errorType: 'BudgetOperationReplayError', control: true },
+        }),
+      }),
+    );
+  });
+
+  it('absorbs such queries again once a query in between succeeded', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: [query(1), query(2), query(3)] });
+    const succeeded = await acts.executeQuery.getMockImplementation()!();
+    acts.executeQuery
+      .mockRejectedValueOnce(unreplayable())
+      .mockResolvedValueOnce(succeeded)
+      .mockRejectedValueOnce(unreplayable());
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'PARTIAL',
+        stats: expect.objectContaining({
+          failures: 2,
+          unreplayableSkips: expect.objectContaining({ queries: 2 }),
+        }),
+      }),
+    );
+  });
+
+  it('counts fit companies the fit pass left unjudged as unreplayable', async () => {
+    primeDiscovery();
+    acts.qualifyFitForRun.mockResolvedValueOnce({
+      judged: 2,
+      verdicts: { match: 2 },
+      skippedForBudget: 0,
+      unjudged: 1,
+      unreplayable: 1,
+      nextCompanyId: null,
+      previousCallCut: false,
+    });
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'PARTIAL',
+        stats: expect.objectContaining({
+          fitUnjudged: 1,
+          unreplayableSkips: { queries: 0, websiteProfile: 0, fit: 1, signals: 0, watches: 0 },
         }),
       }),
     );
@@ -988,7 +1084,7 @@ describe('discoveryWorkflow company passes handed from one activity to the next'
       expect.objectContaining({
         status: 'PARTIAL',
         stats: expect.objectContaining({
-          unreplayableSkips: { websiteProfile: 1, signals: 2, watches: 1 },
+          unreplayableSkips: { queries: 0, websiteProfile: 1, fit: 0, signals: 2, watches: 1 },
         }),
       }),
     );
@@ -1222,7 +1318,7 @@ describe('discoveryWorkflow failure finalization (BI-25)', () => {
   );
 
   it.each([
-    ['executeQuery', 'query', 'BudgetOperationReplayError'],
+    ['executeQuery', 'query', 'ExecutionBudgetGrantError'],
     ['canonicalizeRun', 'canonicalize', 'ExecutionBudgetGrantError'],
     ['profileWebsitesForRun', 'websiteProfile', 'ExecutionBudgetGrantError'],
     ['qualifyFitForRun', 'fit', 'BudgetOperationReplayError'],
@@ -1256,7 +1352,7 @@ describe('discoveryWorkflow failure finalization (BI-25)', () => {
         { source_class: 'public_intelligence', filters: {}, keywords: ['pump'], priority: 2 },
       ],
     });
-    const replay = activityFailure('executeQuery', 'BudgetOperationReplayError');
+    const replay = activityFailure('executeQuery', 'ExecutionBudgetGrantError');
     acts.executeQuery
       .mockResolvedValueOnce({
         rawCount: 1,
@@ -1281,7 +1377,7 @@ describe('discoveryWorkflow failure finalization (BI-25)', () => {
         failures: 0,
         failure: {
           stage: 'query',
-          errorType: 'BudgetOperationReplayError',
+          errorType: 'ExecutionBudgetGrantError',
           control: true,
         },
       },

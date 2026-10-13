@@ -4032,6 +4032,27 @@ describe("qualifyFitForRun —— 流截断", () => {
     ).rejects.toBe(second);
   });
 
+  it("leaves a company whose operation cannot be replayed unjudged and judges the rest", async () => {
+    // What a retry meets after the previous attempt lost this company's call to a broken stream.
+    fitRuntimeMocks.execute
+      .mockResolvedValueOnce(FIT)
+      .mockRejectedValueOnce(new BudgetOperationReplayError("op-2"))
+      .mockResolvedValueOnce(FIT);
+
+    await expect(
+      fitActivities(["c1", "c2", "c3"]).qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ judged: 2, unjudged: 1, unreplayable: 1 });
+  });
+
+  it("stops on an unreplayable company right after a cut stream", async () => {
+    const replay = new BudgetOperationReplayError("op-2");
+    fitRuntimeMocks.execute.mockRejectedValueOnce(cut()).mockRejectedValueOnce(replay);
+
+    await expect(
+      fitActivities(["c1", "c2", "c3"]).qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" })),
+    ).rejects.toBe(replay);
+  });
+
   it("still stops on any other transport failure", async () => {
     const failure = new ProviderTransportError("CHAT_COMPLETIONS_STREAM_TRUNCATED", undefined, {
       cause: new ExecutionControlError("EXECUTION_BUDGET_EXHAUSTED"),

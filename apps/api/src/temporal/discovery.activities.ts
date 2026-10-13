@@ -1212,8 +1212,10 @@ export function createDiscoveryActivities(deps: {
       unjudged: number;
       /** The last company this activity reached once its time box ran out; null when none is left. */
       nextCompanyId: string | null;
-      /** Carries the two-cuts-in-a-row rule over to the next fit activity. */
+      /** Carries the two-in-a-row rule for lost calls over to the next fit activity. */
       previousCallCut: boolean;
+      /** Companies left unjudged because their operation could not be replayed (part of `unjudged`). */
+      unreplayable: number;
     }> {
       if (
         (args.afterCompanyId !== undefined &&
@@ -1291,7 +1293,9 @@ export function createDiscoveryActivities(deps: {
 
       // 逐家判别（事务外，可并发但这里顺序以控成本/限流）
       let skippedForBudget = 0;
-      // The previous company lost its fit call to a stream the gateway settled as cut short.
+      let unreplayable = 0;
+      // The previous company lost its fit call: to a stream the gateway settled as cut short, or,
+      // on a retry, to an operation an earlier attempt left without a durable result.
       let previousCallCut = args.previousCallCut ?? false;
       let nextCompanyId: string | null = null;
       const startedAt = clock();
@@ -1329,10 +1333,14 @@ export function createDiscoveryActivities(deps: {
           // A transport failure usually hits every company, so it stops the activity. A single cut
           // stream that the gateway settled without a result is the exception: retrying the
           // activity could only replay it into BUDGET_OPERATION_REPLAY_UNAVAILABLE, so that one
-          // company counts as unjudged. A second cut in a row looks like an outage and stops.
-          if (!previousCallCut && settledModelFailureReason(err) !== undefined) {
+          // company counts as unjudged. The same goes for the company a retry finds an earlier
+          // attempt's call for, without a durable result: it is never sent again (D13). A second
+          // lost call in a row looks like an outage and stops.
+          const lostOnReplay = isUnreplayableOperation(err);
+          if (!previousCallCut && (lostOnReplay || settledModelFailureReason(err) !== undefined)) {
             previousCallCut = true;
             unjudged += 1;
+            if (lostOnReplay) unreplayable += 1;
             continue;
           }
           throw err;
@@ -1350,7 +1358,7 @@ export function createDiscoveryActivities(deps: {
           upsertLeadFit(tx, args.workspaceId, args.icpId, c.id, judgment),
         );
       }
-      return { judged, verdicts, skippedForBudget, unjudged, nextCompanyId, previousCallCut };
+      return { judged, verdicts, skippedForBudget, unjudged, nextCompanyId, previousCallCut, unreplayable };
     },
 
     /**

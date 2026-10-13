@@ -48,6 +48,32 @@
   - 开发快速通道（xin 上用本地代码起的 worker 处理测试租户的 run，不经发布与换镜像），按产品负责人决定放在验收通过之后，单独 PR。
   - 预演测试不模拟 Temporal 的重试与预算账本，所以测不出「重试撞上旧尝试还在进行的调用」这类问题，那属于 D13。
 
+## 2026-10-13 · Let a retry recover a query or a fit company whose operation cannot be replayed (stage-level D13)
+
+- 起因：卖方 #25 的验收 run（`57529327`，xin，2026-10-13 08:22–08:37 UTC）在第 6 条查询失败。
+  - 一次公司抽取的流里带了上游错误事件（`ProviderTransportError: CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR`），这类传输错误按 #639 的设计照旧 fail closed，活动失败；
+  - 重试撞上同一个操作，报 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`，整个 run 失败。
+  - new-api 的日志显示，这是 openox.tech 在第 33 秒提前结束了流（`reason=eof`，0 个输出 token）。10-11 以来 867 次流式调用里断了 3 次：两次 `scanner_error`（`unexpected EOF`、`tls: bad record MAC`），一次 `eof`。new-api 自己的时限（流空闲 300 秒、整体不限）远大于我们最长的 134 秒调用，断流不是 new-api 造成的。
+  - 按错误类型逐个放行是打地鼠。产品负责人 2026-10-13 选定「现在做阶段级 D13」：不改受保护的模型网关与 broker，让重试本身成为恢复手段。
+- 改动：
+  - **查询**：一条查询的重试遇到无法重放的操作时（活动失败类型为 `BudgetOperationReplayError`），这条查询记为失败，计划继续，run 至少 PARTIAL。连续两条查询都这样时视为故障，照旧让 run 失败。其他控制错误（授权过期、撤销、预算用尽等）照旧立即停止。
+  - **fit**：某家公司的判定在重试时遇到无法重放的操作，这家记为未判定，接着判下一家。它与单次流截断共用「连续两次就停」的规则，并随时间盒交接跨活动传递。活动返回新增 `unreplayable`（包含在 `unjudged` 里）。
+  - `stats.unreplayableSkips` 增加 `queries` 与 `fit` 两个阶段。对接说明（`packages/contracts/INTEGRATION.md` 第 3 步）已同步。
+- 测试：
+  - 先写失败测试，改动前 8 项失败、改动后全部通过：
+    - 工作流 4 项：单条查询记为失败并继续、连续两条仍判失败、中间隔一条成功时都吸收、fit 的计数进统计；
+    - fit 活动 2 项：无法重放时记未判定并继续；紧跟在流截断后面时停下。
+  - 五个以「查询的控制错误让 run 停下」为例的旧用例，改用 `ExecutionBudgetGrantError` 作例子：语义没变，只是 `BudgetOperationReplayError` 不再是「立即停下」的例子。#641 的一个用例补上了新的两个阶段字段。
+  - **预演测试现在模拟 Temporal 重试**：每个活动按它所走代理的 `maximumAttempts` 重试，代理配置从工作流源码读取。新增三个场景：
+    - fit 的流以不被吸收的方式断开，重试把这家记为未判定，run 判 PARTIAL，其余 99 家都有判定；
+    - 一条查询第一次断流、重试遇到无法重放的操作，这条查询记为失败，run 判 PARTIAL；
+    - 连续两条查询都这样，run 判 FAILED。
+  - 变异检验：分别关掉查询的吸收和 fit 的吸收，对应的预演场景都会失败。
+- 未做：
+  - 完整的 D13（重试等待「还在进行」的调用结算；broker 对确定的失败不再保留预留）仍按产品负责人决定放在验收之后。
+  - 查询因无法重放而失败时，这条查询里已经抽到的其他公司一并丢失（这一条查询整体记为失败）。按公司粒度的恢复要改受治理的血缘收集器，放到完整 D13。
+  - run 统计只计每个活动最后一次尝试的计数：fit 重试前那次尝试判过的公司，判定已存库，但不计入 `stats.fit`（旧问题，状态判定不受影响）。
+
 ## 2026-10-12 · Keep a governed discovery query going when one model extraction answers unusably
 
 - 起因：卖方 #20 的验收 run（`322866ef`，xin，2026-10-11 19:02–19:21 UTC）在第 8 条查询失败，报 `DOMAIN_ACK_DISCOVERY_QUERY_LINEAGE_RECEIPT_MISMATCH`。
