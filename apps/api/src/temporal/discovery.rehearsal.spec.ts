@@ -1,0 +1,442 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+/**
+ * Rehearsal of a full-size discovery run, without Temporal, a database or the network.
+ *
+ * The real `discoveryWorkflow` drives the real activity code of the per-company stages (website
+ * profile, fit, enrichment, signals, watches) over an in-memory workspace of 100 companies. Model
+ * calls, page fetches and registry reads advance a simulated clock by latencies measured on xin
+ * (acceptance runs 6f2d0871 and c3878e54, 2026-10-12/13), slowest tails included. Each activity
+ * call is timed against the startToCloseTimeout of the proxy the workflow calls it through.
+ *
+ * This is what the acceptance runs kept discovering one image at a time: an activity whose work
+ * grows with the company count outruns its timeout, or one isolated failure takes the run down.
+ */
+
+vi.mock('@temporalio/workflow', () => import('./testing/temporal-workflow.mock'));
+
+const rehearsal = vi.hoisted(() => ({
+  clock: { now: 0 },
+  fitModel: vi.fn(),
+}));
+
+vi.mock('@temporalio/activity', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@temporalio/activity')>()),
+  heartbeat: vi.fn(),
+}));
+
+vi.mock('../model-runtime/structured-task-runtime-bridge', () => ({
+  executeStructuredTaskWithRuntime: rehearsal.fitModel,
+}));
+
+vi.mock('../durable-results/domain-ack-consumer-bindings', () => ({
+  applyDomainAckConsumerTransactions: async (input: {
+    transaction: unknown;
+    acknowledgements: Array<{ producerId: string }>;
+    apply: (transaction: unknown) => Promise<unknown>;
+  }) => ({
+    status: 'APPLIED',
+    acknowledgements: input.acknowledgements.map(({ producerId }) => ({ producerId, status: 'APPLIED' })),
+    value: await input.apply(input.transaction),
+  }),
+  applyPartitionedDomainAckConsumerTransactions: async (input: {
+    transaction: unknown;
+    apply: (transaction: unknown, companyFacts: readonly unknown[], auxiliaryFacts: readonly unknown[]) => Promise<unknown>;
+  }) => ({
+    status: 'APPLIED',
+    companyFacts: [],
+    auxiliaryFacts: [],
+    value: await input.apply(input.transaction, [], []),
+  }),
+  applyDomainAckConsumerTransaction: async (input: {
+    transaction: unknown;
+    apply: (transaction: unknown) => Promise<unknown>;
+  }) => input.apply(input.transaction),
+}));
+
+import { ActivityFailure, ApplicationFailure } from '@temporalio/common';
+import { acts, resetActivities } from './testing/temporal-workflow.mock';
+import { discoveryActivityTimeouts, timeoutMilliseconds } from './testing/discovery-activity-timeouts';
+import { createDiscoveryActivities } from './discovery.activities';
+import { discoveryWorkflow } from './discovery.workflow';
+import { ProviderTransportError } from '../model-gateway/providers/provider-output-error';
+import { BudgetOperationReplayError } from '../tools/budget-store';
+
+const WS = '10000000-0000-4000-8000-000000000001';
+const SHA = 'a'.repeat(64);
+const ICP_ID = '30000000-0000-4000-8000-000000000003';
+const DISCOVERY_BUDGET = Object.freeze({
+  authorityId: '20000000-0000-4000-8000-000000000002',
+  replay: false,
+  scopeKey: WS,
+  accountKey: `discovery.run:discovery_run:request:${SHA}:${SHA}`,
+  purpose: 'discovery.run' as const,
+  subjectType: 'discovery_run',
+  subjectId: `request:${SHA}`,
+  requestSha256: SHA,
+});
+
+/** Per-call latencies measured on xin, slowest tails included (milliseconds). */
+const LATENCY_MS = {
+  /** One deepseek-v4-pro fit judgment: mean 26 s (run #22) to 55 s (run #23), slowest 134 s. */
+  fit: [21_000, 26_000, 31_000, 37_000, 45_000, 54_000, 62_000, 75_000, 98_000, 134_000],
+  /** One website profile: two page fetches and a trade-role classification. */
+  profile: [18_000, 25_000, 33_000, 41_000, 52_000, 66_000, 80_000, 112_000],
+  /** One GLEIF read: mean 0.66 s, slowest 1.67 s. */
+  gleif: [500, 700, 900, 1_200, 1_700],
+  /** One signal enricher call: sitemap, careers and footprint reads. */
+  signal: [4_000, 9_000, 15_000, 24_000, 32_000],
+} as const;
+
+const VERDICTS = ['match', 'weak', 'mismatch', 'mismatch', 'mismatch'] as const;
+
+const PROFILE = Object.freeze({
+  homepageUrl: 'https://pumpen.example/',
+  impressumUrl: 'https://pumpen.example/impressum',
+  tradeRole: 'distributor',
+  tradeRoleSource: 'rules',
+  tradeRoleConfidence: 0.7,
+  ownManufacturing: null,
+  carriedBrands: [],
+  carriesChineseBrand: false,
+  carriesForeignBrand: false,
+  legalName: null,
+  register: null,
+  vatId: null,
+  evidence: [],
+});
+
+/** A seeded generator (mulberry32), so every rehearsal draws the same latencies. */
+function sampler(seed: number) {
+  let state = seed >>> 0;
+  return <T>(values: readonly T[]): T => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    const unit = ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
+    return values[Math.floor(unit * values.length)]!;
+  };
+}
+
+interface Company {
+  id: string;
+  name: string;
+  domain: string;
+  country: string;
+  industry: null;
+  region: null;
+  status: string;
+  attributes: Record<string, unknown>;
+}
+
+type Where = {
+  id: { in: string[]; gt?: string };
+  status?: { not: string };
+  domain?: { not: null };
+  leads?: { some: { icpId: string; fitVerdict: string } };
+  NOT?: { leads: { some: { icpId: string } } };
+};
+
+/** An in-memory workspace with the rows the per-company stages read and write. */
+function workspace(count: number) {
+  const companies: Company[] = Array.from({ length: count }, (_, i) => ({
+    id: `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
+    name: `Pumpen ${i + 1} GmbH`,
+    domain: `pumpen-${i + 1}.example`,
+    country: 'DE',
+    industry: null,
+    region: null,
+    status: 'NEW',
+    attributes: {},
+  }));
+  const byId = new Map(companies.map((company) => [company.id, company]));
+  const leads: Array<{ companyId: string; icpId: string; fitVerdict: string }> = [];
+  const verdictOf = (companyId: string, icpId: string) =>
+    leads.find((lead) => lead.companyId === companyId && lead.icpId === icpId)?.fitVerdict;
+  const tx = {
+    $queryRaw: async () => [{ pg_advisory_xact_lock: null }],
+    rawSourceRecord: {
+      findMany: async () =>
+        companies.map((company) => ({
+          id: `raw-${company.id}`,
+          providerKey: 'registry',
+          payload: { externalId: company.id, name: company.name, domain: company.domain, country: company.country },
+        })),
+    },
+    identityLink: { findMany: async () => companies.map((company) => ({ canonicalId: company.id })) },
+    canonicalCompany: {
+      // Companies were created in id order, so createdAt order and id order agree.
+      findMany: async ({ where, take }: { where: Where; take?: number }) => {
+        const rows = companies
+          .filter((company) => where.id.in.includes(company.id))
+          .filter((company) => where.id.gt === undefined || company.id > where.id.gt)
+          .filter((company) => where.status === undefined || company.status !== where.status.not)
+          .filter((company) => where.domain === undefined || company.domain !== null)
+          .filter((company) =>
+            where.leads === undefined ||
+            verdictOf(company.id, where.leads.some.icpId) === where.leads.some.fitVerdict,
+          )
+          .filter((company) =>
+            where.NOT === undefined || verdictOf(company.id, where.NOT.leads.some.icpId) === undefined,
+          )
+          .sort((left, right) => (left.id < right.id ? -1 : 1));
+        return take === undefined ? rows : rows.slice(0, take);
+      },
+      findUnique: async ({ where }: { where: { id: string } }) => byId.get(where.id) ?? null,
+      updateMany: async ({ where, data }: { where: { id: string }; data: { attributes?: Record<string, unknown> } }) => {
+        const company = byId.get(where.id);
+        if (company && data.attributes) company.attributes = data.attributes;
+        return { count: company ? 1 : 0 };
+      },
+    },
+    lead: {
+      upsert: async ({ create }: { create: { canonicalCompanyId: string; icpId: string; fitVerdict: string } }) => {
+        leads.push({ companyId: create.canonicalCompanyId, icpId: create.icpId, fitVerdict: create.fitVerdict });
+        return {};
+      },
+    },
+    suppressionRecord: { findMany: async () => [] },
+    icpDefinition: {
+      findUnique: async () => ({ companyAttributes: { industry: 'Pumpen' }, targetMarkets: ['德国'] }),
+    },
+    dataProvider: {
+      findUnique: async ({ where }: { where: { key: string } }) => ({
+        status: where.key === 'company_contact' ? 'DISABLED' : 'ENABLED',
+      }),
+    },
+    fieldEvidence: { create: async () => ({}), findMany: async () => [] },
+  };
+  return { companies, leads, tx };
+}
+
+interface Faults {
+  /** Fit calls (1-based) whose stream is cut after the gateway settled them. */
+  fitCuts?: number[];
+  /** Website profiles (1-based) whose operation cannot be replayed. */
+  profileUnreplayable?: number[];
+  /** Signal enricher calls (1-based) whose operation cannot be replayed; 'all' for an outage. */
+  signalUnreplayable?: number[] | 'all';
+}
+
+/**
+ * Wires the workflow's activities: the query stage, canonicalization, patent enqueue and
+ * finalization answer at once; the per-company stages run the real activity code.
+ */
+function rehearse(options: { companies: number; slowdown?: number; faults?: Faults; seed?: number }) {
+  const slowdown = options.slowdown ?? 1;
+  const faults = options.faults ?? {};
+  const pick = sampler(options.seed ?? 20261013);
+  const advance = (latencies: readonly number[]) => {
+    rehearsal.clock.now += pick(latencies) * slowdown;
+  };
+  const { tx } = workspace(options.companies);
+
+  let fitCalls = 0;
+  rehearsal.fitModel.mockImplementation(async () => {
+    fitCalls += 1;
+    advance(LATENCY_MS.fit);
+    if (faults.fitCuts?.includes(fitCalls)) {
+      throw new ProviderTransportError('CHAT_COMPLETIONS_STREAM_TRUNCATED', { inputTokens: 520 });
+    }
+    const verdict = pick(VERDICTS);
+    return {
+      provider: 'rehearsal',
+      data: {
+        verdict,
+        material_gate: verdict,
+        role_gate: verdict,
+        process_gate: verdict,
+        business_model_gate: verdict,
+        reasons: ['rehearsal'],
+      },
+    };
+  });
+  let profiles = 0;
+  const websiteProfile = {
+    profile: vi.fn(async () => {
+      profiles += 1;
+      advance(LATENCY_MS.profile);
+      if (faults.profileUnreplayable?.includes(profiles)) {
+        throw new BudgetOperationReplayError(`profile-${profiles}`);
+      }
+      return PROFILE;
+    }),
+  };
+  const gleif = {
+    key: 'gleif',
+    enrichCompany: vi.fn(async () => {
+      // A search, a name-only retry and both parent reads.
+      for (let read = 0; read < 4; read += 1) advance(LATENCY_MS.gleif);
+      return { matched: false };
+    }),
+  };
+  let signalCalls = 0;
+  const signal = (key: string) => ({
+    key,
+    enrichCompany: vi.fn(async () => {
+      signalCalls += 1;
+      advance(LATENCY_MS.signal);
+      if (
+        faults.signalUnreplayable === 'all' ||
+        faults.signalUnreplayable?.includes(signalCalls)
+      ) {
+        throw new BudgetOperationReplayError(`signal-${signalCalls}`);
+      }
+      return { matched: false };
+    }),
+  });
+  const activities = createDiscoveryActivities({
+    prisma: {
+      withWorkspace: async <T>(_workspaceId: string, callback: (client: typeof tx) => Promise<T>) => callback(tx),
+      sourcePolicy: { findMany: async () => [] },
+    },
+    providers: {
+      routeEnrichment: async () => [gleif],
+      routeSignalEnrichment: async () => [signal('digital_footprint'), signal('structured_harvest')],
+    },
+    gateway: {},
+    budgetStore: {
+      attestAuthorized: async (input: { authorityId: string }) => ({
+        accountId: '40000000-0000-4000-8000-000000000004',
+        authorityId: input.authorityId,
+        authorizedCapMicrousd: 1_000_000n,
+        generation: 1,
+      }),
+      status: async () => ({ exhausted: false }),
+    },
+    websiteProfile,
+    now: () => rehearsal.clock.now,
+  } as never);
+
+  const calls: Array<{ activity: string; elapsedMs: number }> = [];
+  const timed = (activity: keyof typeof activities) =>
+    acts[activity]!.mockImplementation(async (args: never) => {
+      const startedAt = rehearsal.clock.now;
+      try {
+        return await (activities[activity] as (input: never) => Promise<unknown>)(args);
+      } catch (error) {
+        // What Temporal hands the workflow once the activity's attempts are used up.
+        throw new ActivityFailure(
+          'Activity task failed',
+          activity,
+          '1',
+          'MAXIMUM_ATTEMPTS_REACHED',
+          'rehearsal-worker',
+          new ApplicationFailure(
+            error instanceof Error ? error.message : String(error),
+            error instanceof Error ? error.name : 'Error',
+            false,
+          ),
+        );
+      } finally {
+        calls.push({ activity, elapsedMs: rehearsal.clock.now - startedAt });
+      }
+    });
+  for (const activity of [
+    'profileWebsitesForRun',
+    'qualifyFitForRun',
+    'enrichRun',
+    'enrichSignalsRun',
+    'registerWatchesForRun',
+  ] as const) {
+    timed(activity);
+  }
+
+  acts.resetRunBudget.mockResolvedValue(undefined);
+  acts.loadPlanQueries.mockResolvedValue({
+    queries: [{ source_class: 'public_intelligence', filters: {}, keywords: ['Pumpen Großhandel'], priority: 1 }],
+  });
+  acts.executeQuery.mockResolvedValue({
+    rawCount: options.companies,
+    quarantinedCount: 0,
+    rejectedCount: 0,
+    duplicateCount: 0,
+    queryReceipt: {
+      schemaVersion: 'discovery-query-receipt/v1',
+      queryKey: 'b'.repeat(64),
+      queryOrdinal: 0,
+      sourceClass: 'public_intelligence',
+      providers: ['public_web'],
+      accepted: options.companies,
+      quarantined: 0,
+      rejected: 0,
+      governanceDenied: 0,
+      duplicate: 0,
+      usageQuantity: options.companies,
+      costCents: 0,
+    },
+    provider: 'public_web',
+    budgetTruncated: false,
+  });
+  acts.canonicalizeRun.mockResolvedValue({ companies: options.companies, suppressed: 0 });
+  acts.enqueuePatentLookupsForRun.mockResolvedValue({ candidates: 0, enqueued: 0 });
+  acts.finalizeRun.mockResolvedValue(undefined);
+
+  const input = {
+    workspaceId: WS,
+    runId: 'rehearsal-run',
+    planId: 'rehearsal-plan',
+    icpId: ICP_ID,
+    executionContractVersion: 2 as const,
+    executionBudget: DISCOVERY_BUDGET,
+  };
+  const timeouts = discoveryActivityTimeouts();
+  const overruns = () =>
+    calls.filter(({ activity, elapsedMs }) => elapsedMs > timeoutMilliseconds(timeouts.get(activity)![0]!));
+  const callsOf = (activity: string) => calls.filter((call) => call.activity === activity).length;
+  const finalized = () => acts.finalizeRun.mock.calls[0]![0] as { status: string; stats: Record<string, unknown> };
+  return { run: () => discoveryWorkflow(input), overruns, callsOf, finalized, calls };
+}
+
+beforeEach(() => {
+  resetActivities();
+  rehearsal.clock.now = 0;
+  rehearsal.fitModel.mockReset();
+});
+
+describe('discovery run rehearsal at measured latencies', () => {
+  it('keeps every activity of a 100-company run inside its timeout and absorbs isolated failures', async () => {
+    const rehearsalRun = rehearse({
+      companies: 100,
+      faults: { fitCuts: [37], profileUnreplayable: [12], signalUnreplayable: [3] },
+    });
+
+    await rehearsalRun.run();
+
+    expect(rehearsalRun.overruns()).toEqual([]);
+    // The company count no longer decides whether a pass fits: it takes several activities.
+    expect(rehearsalRun.callsOf('qualifyFitForRun')).toBeGreaterThan(1);
+    expect(rehearsalRun.callsOf('profileWebsitesForRun')).toBeGreaterThan(1);
+    const { status, stats } = rehearsalRun.finalized();
+    expect(status).toBe('PARTIAL');
+    expect(stats).toMatchObject({
+      fitUnjudged: 1,
+      unreplayableSkips: { websiteProfile: 1, signals: 1, watches: 0 },
+      websiteProfile: expect.objectContaining({ profiled: 49 }),
+    });
+    const verdicts = stats.fit as Record<string, number>;
+    expect(Object.values(verdicts).reduce((sum, count) => sum + count, 0)).toBe(99);
+  });
+
+  it('still fits every activity inside its timeout on a day when every call takes twice as long', async () => {
+    const rehearsalRun = rehearse({ companies: 100, slowdown: 2, seed: 7 });
+
+    await rehearsalRun.run();
+
+    expect(rehearsalRun.overruns()).toEqual([]);
+    expect(rehearsalRun.finalized().status).toBe('DONE');
+  });
+
+  it('still fails the run when signal enrichment loses every company to unreplayable operations', async () => {
+    const rehearsalRun = rehearse({ companies: 100, faults: { signalUnreplayable: 'all' } });
+
+    await expect(rehearsalRun.run()).rejects.toBeInstanceOf(ActivityFailure);
+
+    expect(rehearsalRun.overruns()).toEqual([]);
+    expect(rehearsalRun.finalized()).toMatchObject({
+      status: 'FAILED',
+      stats: { failure: { stage: 'signals', errorType: 'BudgetOperationReplayError', control: true } },
+    });
+  });
+});

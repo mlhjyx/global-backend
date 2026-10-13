@@ -30,6 +30,7 @@ import { IntentProjectionService } from '../intent/intent-projection.service';
 import { enqueuePatentLookup, PATENT_PROVIDER_KEY } from '../adapters/patent-inventor-cache';
 import {
   BudgetExceededError,
+  BudgetOperationReplayError,
   type BudgetAccountAuthorization,
   type BudgetStore,
   UnavailableBudgetStore,
@@ -345,6 +346,8 @@ const WEBSITE_PROFILE_TTL_MS = 30 * 24 * 3600 * 1000; // 官网画像较稳定�
  */
 export const FIT_PASS_TIME_BOX_MS = 8 * 60_000;
 export const PROFILE_PASS_TIME_BOX_MS = 15 * 60_000;
+/** Enrichment runs on the 2-minute proxy; one company is at most four GLEIF reads of about a second. */
+export const ENRICH_PASS_TIME_BOX_MS = 60_000;
 const CONTINUATION_COMPANY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 
 function invalidContinuation(): never {
@@ -352,6 +355,21 @@ function invalidContinuation(): never {
     'DISCOVERY_STAGE_CONTINUATION_INVALID',
     'DISCOVERY_STAGE_CONTINUATION_INVALID',
   );
+}
+
+function isContinuationIndex(value: unknown, limit: number): boolean {
+  return Number.isInteger(value) && (value as number) >= 0 && (value as number) <= limit;
+}
+
+/**
+ * The best-effort per-company passes (website profile, signals, watches) skip a company whose
+ * operation cannot be replayed and count it instead of failing the run. Such an operation's wire
+ * already ran and left no durable result (an artifact that could not be stored, a call settled
+ * without a result), so it is never retried: retrying could pay twice. A second such company in a
+ * row looks like a storage or upstream outage rather than one bad page, and still stops the pass.
+ */
+function isUnreplayableOperation(error: unknown): error is BudgetOperationReplayError {
+  return error instanceof BudgetOperationReplayError;
 }
 
 /** ICP 品类上下文（只供模型判断相关品类，不进输出）。 */
@@ -1343,12 +1361,24 @@ export function createDiscoveryActivities(deps: {
      * 幂等：按 enricher key 命名空间存 attributes，已有该源命名空间则跳过（重跑不重复写证据）。
      * 网络调用在事务外，每家命中后单独落库（attributes 命名空间合并 + 逐字段 field_evidence）。
      */
-    async enrichRun(args: DiscoveryActivityInput & { runId: string; icpId: string }): Promise<{
+    async enrichRun(
+      args: DiscoveryActivityInput & {
+        runId: string;
+        icpId: string;
+        /** Continue at this position of the run's enrichment list; absent on the first enrich activity. */
+        startIndex?: number;
+      },
+    ): Promise<{
       enriched: number;
       matched: number;
       provider: string | null;
       budgetTruncated: boolean;
+      /** Where the next enrich activity continues once this one's time box ran out; null when none is left. */
+      nextIndex: number | null;
     }> {
+      if (args.startIndex !== undefined && !isContinuationIndex(args.startIndex, ENRICH_LIMIT)) {
+        invalidContinuation();
+      }
       const binding = await ensureRunBudget(args);
       const enrichers = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         deps.providers.routeEnrichment(tx as never),
@@ -1359,6 +1389,7 @@ export function createDiscoveryActivities(deps: {
           matched: 0,
           provider: null,
           budgetTruncated: false,
+          nextIndex: null,
         };
 
       // 本 run 归一出、且过了本 run ICP 资格门（Lead.fitVerdict='match'）的公司
@@ -1395,13 +1426,25 @@ export function createDiscoveryActivities(deps: {
             region: true,
             attributes: true,
           },
+          // A total order, so every enrich activity of the run sees the same list behind its index.
+          orderBy: { id: 'asc' },
+          take: ENRICH_LIMIT,
         });
       });
 
       const providersHit = new Set<string>();
       let enriched = 0;
       let matched = 0;
-      for (const c of companies.slice(0, ENRICH_LIMIT)) {
+      const startIndex = args.startIndex ?? 0;
+      let nextIndex: number | null = null;
+      const startedAt = clock();
+      for (let i = startIndex; i < companies.length; i++) {
+        // Hand the rest to the next activity rather than outrun this one's timeout.
+        if (i > startIndex && clock() - startedAt >= ENRICH_PASS_TIME_BOX_MS) {
+          nextIndex = i;
+          break;
+        }
+        const c = companies[i];
         const durableReceipts: Array<{
           producerId: string;
           receipt: DurableExecutionReceipt;
@@ -1487,6 +1530,7 @@ export function createDiscoveryActivities(deps: {
         matched,
         provider: providersHit.size ? [...providersHit].join('+') : null,
         budgetTruncated: (await budgets.status({ workspaceId: binding.scopeKey, accountKey: binding.accountKey })).exhausted,
+        nextIndex,
       };
     },
 
@@ -1507,6 +1551,8 @@ export function createDiscoveryActivities(deps: {
         icpId: string;
         /** Continue at this position of the run's profile list; absent on the first profile activity. */
         startIndex?: number;
+        /** The previous profile activity ended on a company it skipped as unreplayable. */
+        previousUnreplayable?: boolean;
       },
     ): Promise<{
       profiled: number;
@@ -1517,14 +1563,14 @@ export function createDiscoveryActivities(deps: {
       unclassified: number;
       /** Where the next profile activity continues once this one's time box ran out; null when none is left. */
       nextIndex: number | null;
+      /** Companies skipped because an operation could not be replayed. */
+      unreplayable: number;
+      /** Carries the two-in-a-row rule for unreplayable companies over to the next profile activity. */
+      previousUnreplayable: boolean;
     }> {
       if (
-        args.startIndex !== undefined &&
-        !(
-          Number.isInteger(args.startIndex) &&
-          args.startIndex >= 0 &&
-          args.startIndex <= MAX_DISCOVERY_PROFILE_COMPANIES
-        )
+        (args.startIndex !== undefined && !isContinuationIndex(args.startIndex, MAX_DISCOVERY_PROFILE_COMPANIES)) ||
+        (args.previousUnreplayable !== undefined && typeof args.previousUnreplayable !== 'boolean')
       ) {
         invalidContinuation();
       }
@@ -1536,6 +1582,8 @@ export function createDiscoveryActivities(deps: {
         budgetTruncated: false,
         unclassified: 0,
         nextIndex: null,
+        unreplayable: 0,
+        previousUnreplayable: args.previousUnreplayable ?? false,
       };
       const setup = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const source = await tx.dataProvider.findUnique({
@@ -1595,6 +1643,8 @@ export function createDiscoveryActivities(deps: {
       let matched = 0;
       let skippedSubjects = 0;
       let unclassified = 0;
+      let unreplayable = 0;
+      let previousUnreplayable = args.previousUnreplayable ?? false;
       const startIndex = args.startIndex ?? 0;
       let nextIndex: number | null = null;
       const startedAt = clock();
@@ -1605,7 +1655,7 @@ export function createDiscoveryActivities(deps: {
           break;
         }
         const c = setup.companies[i];
-        const existing =((c.attributes as Record<string, unknown> | null) ?? {})[WEBSITE_PROFILE_PROVIDER_KEY] as
+        const existing = ((c.attributes as Record<string, unknown> | null) ?? {})[WEBSITE_PROFILE_PROVIDER_KEY] as
           | { _ts?: string; [COMPANY_CONTACT_PARSER_MARKER]?: string }
           | undefined;
         const fresh = Boolean(existing?._ts) && nowMs - Date.parse(existing!._ts!) < WEBSITE_PROFILE_TTL_MS;
@@ -1624,6 +1674,7 @@ export function createDiscoveryActivities(deps: {
         const durableReceipts: Array<{ producerId: string; receipt: DurableExecutionReceipt }> = [];
         let profile: WebsiteProfile | null = null;
         let subjectDenied = false;
+        let unreplayableSkip = false;
         try {
           const homeCountry = targetCountryCodes({ filters: { country: c.country } })[0] ?? icpHomeCountry;
           profile = await provider.profile(
@@ -1642,14 +1693,18 @@ export function createDiscoveryActivities(deps: {
         } catch (error) {
           if (artifactSubjectSkipReason(error)) {
             subjectDenied = true;
+          } else if (isUnreplayableOperation(error) && !previousUnreplayable) {
+            unreplayableSkip = true;
           } else if (isExecutionControlError(error)) {
             throw error;
           }
           /* 单家画像失败不影响其余 */
         }
+        previousUnreplayable = unreplayableSkip;
         // BI-14：联系路径的观测时间取这家页面读完的时刻（不是活动开始时刻），供 last_seen_at 单调比较。
         const observedAt = new Date();
-        if (subjectDenied) skippedSubjects += 1;
+        if (unreplayableSkip) unreplayable += 1;
+        else if (subjectDenied) skippedSubjects += 1;
         else profiled += 1;
         if (profile && profile.tradeRoleSource === null) unclassified += 1;
         // 不给被拒主体写任何属性；已产生的回执照常 ACK（apply 为空操作）。
@@ -1725,6 +1780,8 @@ export function createDiscoveryActivities(deps: {
         budgetTruncated: (await budgets.status({ workspaceId: binding.scopeKey, accountKey: binding.accountKey })).exhausted,
         unclassified,
         nextIndex,
+        unreplayable,
+        previousUnreplayable,
       };
     },
 
@@ -1741,6 +1798,8 @@ export function createDiscoveryActivities(deps: {
       provider: string | null;
       budgetTruncated: boolean;
       skippedSubjects: number;
+      /** Companies skipped because an operation could not be replayed. */
+      unreplayable: number;
     }> {
       const binding = await ensureRunBudget(args);
       const enrichers = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
@@ -1753,6 +1812,7 @@ export function createDiscoveryActivities(deps: {
           provider: null,
           budgetTruncated: false,
           skippedSubjects: 0,
+          unreplayable: 0,
         };
 
       // DAT-011：SUSPENDED 域名黑名单（平台级 source_policy，富集侧同样遵守 —— 富集也会抓这些域名）
@@ -1806,6 +1866,8 @@ export function createDiscoveryActivities(deps: {
       let enriched = 0;
       let matched = 0;
       let skippedSubjects = 0;
+      let unreplayable = 0;
+      let previousUnreplayable = false;
       const nowMs = Date.now();
       for (const c of companies.slice(0, SIGNAL_ENRICH_LIMIT)) {
         const durableReceipts: Array<{
@@ -1832,6 +1894,8 @@ export function createDiscoveryActivities(deps: {
         const existing = ((c.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
         const hits: { key: string; result: EnrichmentResult }[] = [];
         let subjectDenied = false;
+        let unreplayableSkip = false;
+        let attempted = false;
         for (const e of enrichers) {
           const prev = existing[e.key] as { _ts?: string } | undefined;
           if (prev?._ts && nowMs - Date.parse(prev._ts) < SIGNAL_TTL_MS) continue; // TTL 新鲜 → 跳过（不刷）
@@ -1841,6 +1905,7 @@ export function createDiscoveryActivities(deps: {
             ))
           )
             break;
+          attempted = true;
           try {
             const r = await e.enrichCompany(
               {
@@ -1858,14 +1923,20 @@ export function createDiscoveryActivities(deps: {
               subjectDenied = true;
               break;
             }
+            if (isUnreplayableOperation(error) && !previousUnreplayable) {
+              unreplayableSkip = true;
+              break;
+            }
             if (isExecutionControlError(error)) throw error;
             /* 单信号源失败不影响其余 */
           }
         }
-        if (subjectDenied) skippedSubjects += 1;
+        if (attempted) previousUnreplayable = unreplayableSkip;
+        if (unreplayableSkip) unreplayable += 1;
+        else if (subjectDenied) skippedSubjects += 1;
         else enriched += 1;
-        // 不给被拒主体写任何属性；已产生的回执照常 ACK（apply 为空操作）。
-        const committedHits = subjectDenied ? [] : hits;
+        // 不给被拒主体或跳过的公司写任何属性；已产生的回执照常 ACK（apply 为空操作）。
+        const committedHits = subjectDenied || unreplayableSkip ? [] : hits;
         if (!committedHits.length && !durableReceipts.length) continue;
         const committed = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
           const result = await applyDomainAckConsumerTransactions({
@@ -1905,6 +1976,7 @@ export function createDiscoveryActivities(deps: {
         provider: providersHit.size ? [...providersHit].join('+') : null,
         budgetTruncated: (await budgets.status({ workspaceId: binding.scopeKey, accountKey: binding.accountKey })).exhausted,
         skippedSubjects,
+        unreplayable,
       };
     },
 
@@ -1919,7 +1991,13 @@ export function createDiscoveryActivities(deps: {
       workspaceId: string;
       runId: string;
       icpId: string;
-    }): Promise<{ candidates: number; registered: number; skippedSubjects: number }> {
+    }): Promise<{
+      candidates: number;
+      registered: number;
+      skippedSubjects: number;
+      /** Companies skipped because an operation could not be replayed. */
+      unreplayable: number;
+    }> {
       const binding = await ensureRunBudget(args);
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const rawIds = (
@@ -1959,7 +2037,7 @@ export function createDiscoveryActivities(deps: {
             `[discovery] run ${args.runId} 跳过 ${companies.length} 家的网站监控注册：本进程没有平台写入者`,
           );
         }
-        return { candidates: companies.length, registered: 0, skippedSubjects: 0 };
+        return { candidates: companies.length, registered: 0, skippedSubjects: 0, unreplayable: 0 };
       }
       const intentSvc = new IntentProjectionService({
         prisma: deps.prisma,
@@ -1969,6 +2047,8 @@ export function createDiscoveryActivities(deps: {
       });
       let registered = 0;
       let skippedSubjects = 0;
+      let unreplayable = 0;
+      let previousUnreplayable = false;
       for (const c of companies.slice(0, WATCH_REGISTER_LIMIT)) {
         try {
           if (
@@ -1984,17 +2064,25 @@ export function createDiscoveryActivities(deps: {
             executionBudget: binding,
           });
           registered += 1;
+          previousUnreplayable = false;
         } catch (error) {
           // G3 5.5：sitemap 抓取挂在这家公司名下；主体被拒 → 跳过这家（计入 PARTIAL）。
           if (artifactSubjectSkipReason(error)) {
             skippedSubjects += 1;
+            previousUnreplayable = false;
+            continue;
+          }
+          if (isUnreplayableOperation(error) && !previousUnreplayable) {
+            unreplayable += 1;
+            previousUnreplayable = true;
             continue;
           }
           if (isExecutionControlError(error)) throw error;
+          previousUnreplayable = false;
           /* 单家注册失败（无域名/sitemap 不可达/DAT-011）不影响其余 */
         }
       }
-      return { candidates: companies.length, registered, skippedSubjects };
+      return { candidates: companies.length, registered, skippedSubjects, unreplayable };
     },
 
     /**

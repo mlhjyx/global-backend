@@ -950,6 +950,100 @@ describe('discoveryWorkflow company passes handed from one activity to the next'
     );
   });
 
+  it('hands the unreplayable flag of a profile pass to the next pass', async () => {
+    primeDiscovery();
+    acts.profileWebsitesForRun
+      .mockResolvedValueOnce(profilePass({ profiled: 1, unreplayable: 1, nextIndex: 2, previousUnreplayable: true }))
+      .mockResolvedValueOnce(profilePass({ profiled: 1 }));
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.profileWebsitesForRun.mock.calls[1]![0]).toMatchObject({
+      startIndex: 2,
+      previousUnreplayable: true,
+    });
+  });
+
+  it('finalizes PARTIAL and counts companies the best-effort stages skipped as unreplayable', async () => {
+    primeDiscovery();
+    acts.profileWebsitesForRun.mockResolvedValueOnce(profilePass({ profiled: 2, unreplayable: 1 }));
+    acts.enrichSignalsRun.mockResolvedValueOnce({
+      matched: 0,
+      enriched: 1,
+      provider: null,
+      budgetTruncated: false,
+      skippedSubjects: 0,
+      unreplayable: 2,
+    });
+    acts.registerWatchesForRun.mockResolvedValueOnce({
+      candidates: 1,
+      registered: 0,
+      skippedSubjects: 0,
+      unreplayable: 1,
+    });
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'PARTIAL',
+        stats: expect.objectContaining({
+          unreplayableSkips: { websiteProfile: 1, signals: 2, watches: 1 },
+        }),
+      }),
+    );
+  });
+
+  it('keeps the stats shape of a run that skipped nothing', async () => {
+    primeDiscovery();
+
+    await discoveryWorkflow(discoveryInput());
+
+    const [{ status, stats }] = acts.finalizeRun.mock.calls[0]! as [{ status: string; stats: object }];
+    expect(status).toBe('DONE');
+    expect(stats).not.toHaveProperty('unreplayableSkips');
+  });
+
+  it('enriches until no company is left and adds up every pass', async () => {
+    primeDiscovery();
+    acts.enrichRun
+      .mockResolvedValueOnce({ enriched: 2, matched: 1, provider: 'gleif', budgetTruncated: false, nextIndex: 2 })
+      .mockResolvedValueOnce({ enriched: 1, matched: 1, provider: 'gleif', budgetTruncated: false, nextIndex: null });
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.enrichRun).toHaveBeenCalledTimes(2);
+    expect(acts.enrichRun.mock.calls[0]![0]).not.toHaveProperty('startIndex');
+    expect(acts.enrichRun.mock.calls[1]![0]).toMatchObject({ icpId: 'icp-1', startIndex: 2 });
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'DONE',
+        stats: expect.objectContaining({ enrich: { matched: 2, of: 3, provider: 'gleif' } }),
+      }),
+    );
+  });
+
+  it('stops enriching once a pass reports the run budget spent', async () => {
+    primeDiscovery();
+    acts.enrichRun.mockResolvedValueOnce({
+      enriched: 2,
+      matched: 1,
+      provider: 'gleif',
+      budgetTruncated: true,
+      nextIndex: 2,
+    });
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.enrichRun).toHaveBeenCalledOnce();
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'PARTIAL',
+        stats: expect.objectContaining({ enrichBudgetTruncated: true }),
+      }),
+    );
+  });
+
   it('keeps the counts of earlier profile passes when a later pass fails', async () => {
     primeDiscovery();
     acts.profileWebsitesForRun

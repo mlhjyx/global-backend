@@ -4,6 +4,50 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-13 · Let best-effort stages skip a company whose operation cannot be replayed, time-box enrichment, and rehearse a full-size run
+
+- 起因：卖方 #23 的验收 run（`c3878e54`，xin，2026-10-12 22:47–10-13 01:23 UTC）跑完查询、官网画像、fit（#640 的时间盒生效，分约 10 批判完 84 家）和富集后，在信号富集阶段失败。
+  - 一次 `http.get` 的结果没能存成产物（`ArtifactStorageError`，日志里没有错误码）。
+  - broker 按设计把它改成 `BudgetOperationReplayError`（控制错误）：这次请求已经发出、却没有持久结果，绝不能再发一次。
+  - Temporal 重试时撞上同一个操作，整个 run 失败。信号富集本是尽力而为的阶段，却因为一家公司失败了。
+  - 产品负责人 2026-10-13 选定「系统性修复后再跑」：尽力而为的阶段按公司跳过并计数，日志补错误码，富集加时间盒，再写一个按真实耗时与故障率预演整个 run 的测试。D13（让重试本身安全）放到验收通过之后。
+- 改动：
+  - **尽力而为的阶段跳过无法重放的公司**：官网画像、信号富集、网站监控遇到 `BudgetOperationReplayError` 时，跳过这一家并计数，不再让 run 失败。
+    - 跳过的公司不写任何属性；已产生的回执照常确认，与被拒主体的处理方式一致。
+    - 连续两家都无法重放，就视为存储或上游故障，阶段照旧失败，run 判 FAILED。官网画像的这条规则用 `previousUnreplayable` 跨活动传递。
+    - 只有一家公司参与时，它失败只记跳过，不判失败。
+    - run 统计新增 `unreplayableSkips`（按阶段计数，只在有跳过时出现），有跳过时至少 PARTIAL（`resolveRunStatus`）。
+    - 核心阶段（查询、fit、富集）不变，仍然 fail closed。
+  - **富集的时间盒**：`enrichRun` 也按时间盒交接（`ENRICH_PASS_TIME_BOX_MS` 60 秒，跑在 2 分钟的代理上）。候选列表改为按 id 全序、上限 50 家，用 `startIndex` 续接。工作流循环调用并合并计数与源名；某一批报告 run 预算用完后不再续接。
+    - #23 实测 GLEIF 每次读取平均 0.66 秒、最长 1.67 秒，一家至多 4 次读取。
+  - **产物存储失败的日志**：`GenericOperationArtifactExecution.persist` 失败时记录 schema、操作 id 和有界的存储错误码（`GENERIC_OPERATION_ARTIFACT_*`），不记原始错误信息（可能带端点或对象键）。broker 是受保护文件，没有改。
+  - **预演测试** `discovery.rehearsal.spec.ts`：
+    - 真实的 `discoveryWorkflow` 驱动官网画像、fit、富集、信号、监控的真实活动代码，跑一个 100 家公司的内存工作区；
+    - 模型调用、抓页和登记读取按 xin 实测的耗时（含最慢的尾部）推进模拟时钟，每次活动调用按它所走代理的 startToCloseTimeout 计时；
+    - 三个场景：
+      - 实测耗时加上互相隔开的单点故障（一次流截断、一家画像、一次信号无法重放），每个活动都在时限内，run 判 PARTIAL；
+      - 每次调用都慢一倍，仍在时限内，run 判 DONE；
+      - 信号阶段全部无法重放，run 照旧判 FAILED。
+    - 不依赖 Temporal、数据库与网络，几秒跑完。
+    - 代理时限从工作流源码读取，与 `discovery.workflow.timeouts.spec.ts` 共用 `testing/discovery-activity-timeouts.ts`。
+  - 对接说明（`packages/contracts/INTEGRATION.md` 第 3 步）补了 `stats.unreplayableSkips`。
+- 测试：
+  - 先写失败测试：
+    - 活动侧：信号 3 项、监控 2 项、官网画像 5 项、富集时间盒 6 项；
+    - 工作流侧 5 项；
+    - `resolveRunStatus` 2 项；
+    - 产物日志 2 项。
+    - 改动前 24 项失败，改动后全部通过。三处固定返回结构的旧用例补上了新字段。
+  - 预演测试的变异检验：
+    - 关掉 fit 的时间盒（#22 的缺陷），三个场景全部失败；
+    - 关掉信号的跳过（#23 的缺陷），单点故障场景失败。
+    - 说明它能在上线前发现这两类问题。
+- 未做：
+  - D13：让活动重试本身安全（等「还在进行」的调用结算；把「已结算、无结果」和确定的失败当作这一家失败）。这要改受保护的模型网关与 broker，按产品负责人决定放在验收通过之后。
+  - 爬虫已回 500、出口被拦（请求根本没发出）这类确定的失败，broker 仍保留预留、不结算，与 D13 一起处理。
+  - 开发快速通道（xin 上用本地代码起的 worker 处理测试租户的 run，不经发布与换镜像），按产品负责人决定放在验收通过之后，单独 PR。
+  - 预演测试不模拟 Temporal 的重试与预算账本，所以测不出「重试撞上旧尝试还在进行的调用」这类问题，那属于 D13。
+
 ## 2026-10-12 · Keep a governed discovery query going when one model extraction answers unusably
 
 - 起因：卖方 #20 的验收 run（`322866ef`，xin，2026-10-11 19:02–19:21 UTC）在第 8 条查询失败，报 `DOMAIN_ACK_DISCOVERY_QUERY_LINEAGE_RECEIPT_MISMATCH`。
