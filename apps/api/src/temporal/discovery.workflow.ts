@@ -78,6 +78,17 @@ interface FitTotals {
   verdicts: Record<string, number>;
   skippedForBudget?: number;
   unjudged?: number;
+  unreplayable?: number;
+}
+
+/**
+ * A query activity whose last attempt met an operation it cannot replay: an earlier attempt's
+ * wire ran and left no durable result, so it is never sent again (D13). Temporal reports the
+ * activity's error class as the failure type.
+ */
+function isUnreplayableActivityFailure(error: unknown): boolean {
+  if (!(error instanceof TemporalFailure)) return false;
+  return (error.cause as { type?: unknown } | undefined)?.type === 'BudgetOperationReplayError';
 }
 
 interface WebsiteProfileTotals {
@@ -106,6 +117,7 @@ function addFitPass(total: FitTotals, pass: FitTotals): FitTotals {
     verdicts,
     skippedForBudget: (total.skippedForBudget ?? 0) + (pass.skippedForBudget ?? 0),
     unjudged: (total.unjudged ?? 0) + (pass.unjudged ?? 0),
+    unreplayable: (total.unreplayable ?? 0) + (pass.unreplayable ?? 0),
   };
 }
 
@@ -191,6 +203,8 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
   let rejectedRaw = 0;
   let duplicateRaw = 0;
   let queryCount = 0;
+  // Queries counted as failed because their retries met an operation they cannot replay.
+  let unreplayableQueries = 0;
   let stage: DiscoveryRunStage = 'plan';
   // BI-30: plan queries that ran on no provider because their source was off, by reason.
   const skippedQueries: Partial<Record<DiscoveryQuerySkipReason, number>> = {};
@@ -263,6 +277,9 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     const { queries } = await acts.loadPlanQueries({ workspaceId, planId, ...authorityArgs });
     queryCount = queries.length;
     stage = 'query';
+    // A query whose retries met an operation they cannot replay counts as failed and the plan
+    // goes on; a second such query in a row looks like an outage and still stops the run.
+    let previousQueryUnreplayable = false;
     for (const [queryOrdinal, query] of queries.entries()) {
       try {
         const r = await modelActs.executeQuery(
@@ -337,8 +354,12 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         }
         // Absent in histories recorded before the counter existed: replays keep their status.
         modelExtractions = addQueryModelExtractions(modelExtractions, r.modelExtractions);
+        previousQueryUnreplayable = false;
       } catch (err) {
-        if (isExecutionControlError(err)) throw err;
+        const unreplayable: boolean = isUnreplayableActivityFailure(err) && !previousQueryUnreplayable;
+        if (!unreplayable && isExecutionControlError(err)) throw err;
+        previousQueryUnreplayable = unreplayable;
+        if (unreplayable) unreplayableQueries += 1;
         failures += 1;
         if (!usesQueryReceipts) {
           perSource[query.source_class] = {
@@ -478,15 +499,16 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       (websiteProfile.skippedSubjects ?? 0) +
       (signals.skippedSubjects ?? 0) +
       (watches.skippedSubjects ?? 0);
-    // Companies the best-effort stages skipped because an operation could not be replayed.
-    // Absent in results recorded before the counter existed.
+    // Queries and companies skipped because an operation could not be replayed. Absent in
+    // results recorded before the counters existed.
     const unreplayableSkips = {
+      queries: unreplayableQueries,
       websiteProfile: websiteProfile.unreplayable ?? 0,
+      fit: fit.unreplayable ?? 0,
       signals: signals.unreplayable ?? 0,
       watches: watches.unreplayable ?? 0,
     };
-    const unreplayableSkipCount =
-      unreplayableSkips.websiteProfile + unreplayableSkips.signals + unreplayableSkips.watches;
+    const unreplayableSkipCount = Object.values(unreplayableSkips).reduce((sum, count) => sum + count, 0);
     let status = resolveRunStatus({
       failures,
       totalQueries: queries.length,

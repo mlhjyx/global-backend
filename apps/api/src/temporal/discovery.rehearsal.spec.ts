@@ -56,7 +56,11 @@ vi.mock('../durable-results/domain-ack-consumer-bindings', () => ({
 
 import { ActivityFailure, ApplicationFailure } from '@temporalio/common';
 import { acts, resetActivities } from './testing/temporal-workflow.mock';
-import { discoveryActivityTimeouts, timeoutMilliseconds } from './testing/discovery-activity-timeouts';
+import {
+  discoveryActivityMaximumAttempts,
+  discoveryActivityTimeouts,
+  timeoutMilliseconds,
+} from './testing/discovery-activity-timeouts';
 import { createDiscoveryActivities } from './discovery.activities';
 import { discoveryWorkflow } from './discovery.workflow';
 import { ProviderTransportError } from '../model-gateway/providers/provider-output-error';
@@ -210,18 +214,60 @@ function workspace(count: number) {
   return { companies, leads, tx };
 }
 
+
 interface Faults {
   /** Fit calls (1-based) whose stream is cut after the gateway settled them. */
   fitCuts?: number[];
+  /**
+   * Fit calls (1-based) whose stream breaks in a way the activity does not absorb. The activity
+   * fails; its retry then meets that company's call again, which cannot be replayed.
+   */
+  fitBreaks?: number[];
+  /** Plan queries (0-based) whose first attempt breaks and whose retries meet the unreplayable call. */
+  queryBreaks?: number[];
   /** Website profiles (1-based) whose operation cannot be replayed. */
   profileUnreplayable?: number[];
   /** Signal enricher calls (1-based) whose operation cannot be replayed; 'all' for an outage. */
   signalUnreplayable?: number[] | 'all';
 }
 
+const QUERY_COUNT = 4;
+
+/** The company a fit call judges, read from the prompt it was given. */
+function companyOf(request: unknown): string {
+  const prompt = (request as { prompt?: string }).prompt ?? '';
+  return /"name": "([^"]+)"/u.exec(prompt)?.[1] ?? 'unknown';
+}
+
+function queryReceipt(queryOrdinal: number) {
+  return {
+    rawCount: 25,
+    quarantinedCount: 0,
+    rejectedCount: 0,
+    duplicateCount: 0,
+    queryReceipt: {
+      schemaVersion: 'discovery-query-receipt/v1',
+      queryKey: String(queryOrdinal).repeat(64).slice(0, 64),
+      queryOrdinal,
+      sourceClass: 'public_intelligence',
+      providers: ['public_web'],
+      accepted: 25,
+      quarantined: 0,
+      rejected: 0,
+      governanceDenied: 0,
+      duplicate: 0,
+      usageQuantity: 25,
+      costCents: 0,
+    },
+    provider: 'public_web',
+    budgetTruncated: false,
+  };
+}
+
 /**
- * Wires the workflow's activities: the query stage, canonicalization, patent enqueue and
- * finalization answer at once; the per-company stages run the real activity code.
+ * Wires the workflow's activities: plan loading, canonicalization, patent enqueue and
+ * finalization answer at once; queries answer with receipts (or break, as configured); the
+ * per-company stages run the real activity code. Every activity is retried as its proxy says.
  */
 function rehearse(options: { companies: number; slowdown?: number; faults?: Faults; seed?: number }) {
   const slowdown = options.slowdown ?? 1;
@@ -230,14 +276,22 @@ function rehearse(options: { companies: number; slowdown?: number; faults?: Faul
   const advance = (latencies: readonly number[]) => {
     rehearsal.clock.now += pick(latencies) * slowdown;
   };
-  const { tx } = workspace(options.companies);
+  const { tx, leads } = workspace(options.companies);
 
   let fitCalls = 0;
-  rehearsal.fitModel.mockImplementation(async () => {
+  // Companies whose fit call broke: the gateway has their operation, without a durable result.
+  const unreplayableCompanies = new Set<string>();
+  rehearsal.fitModel.mockImplementation(async (_gateway: unknown, request: unknown) => {
+    const company = companyOf(request);
+    if (unreplayableCompanies.has(company)) throw new BudgetOperationReplayError(`fit-${company}`);
     fitCalls += 1;
     advance(LATENCY_MS.fit);
     if (faults.fitCuts?.includes(fitCalls)) {
       throw new ProviderTransportError('CHAT_COMPLETIONS_STREAM_TRUNCATED', { inputTokens: 520 });
+    }
+    if (faults.fitBreaks?.includes(fitCalls)) {
+      unreplayableCompanies.add(company);
+      throw new ProviderTransportError('CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR', { inputTokens: 520 });
     }
     const verdict = pick(VERDICTS);
     return {
@@ -309,29 +363,53 @@ function rehearse(options: { companies: number; slowdown?: number; faults?: Faul
     now: () => rehearsal.clock.now,
   } as never);
 
-  const calls: Array<{ activity: string; elapsedMs: number }> = [];
-  const timed = (activity: keyof typeof activities) =>
-    acts[activity]!.mockImplementation(async (args: never) => {
-      const startedAt = rehearsal.clock.now;
-      try {
-        return await (activities[activity] as (input: never) => Promise<unknown>)(args);
-      } catch (error) {
-        // What Temporal hands the workflow once the activity's attempts are used up.
-        throw new ActivityFailure(
-          'Activity task failed',
-          activity,
-          '1',
-          'MAXIMUM_ATTEMPTS_REACHED',
-          'rehearsal-worker',
-          new ApplicationFailure(
-            error instanceof Error ? error.message : String(error),
-            error instanceof Error ? error.name : 'Error',
-            false,
-          ),
-        );
-      } finally {
-        calls.push({ activity, elapsedMs: rehearsal.clock.now - startedAt });
+  // The query stage answers at once; a configured query breaks on its first attempt, and its
+  // retries meet the call that attempt left behind.
+  const queryAttempts = new Map<number, number>();
+  const executeQuery = async (args: { queryOrdinal: number }) => {
+    const attempt = (queryAttempts.get(args.queryOrdinal) ?? 0) + 1;
+    queryAttempts.set(args.queryOrdinal, attempt);
+    advance(LATENCY_MS.fit);
+    if (faults.queryBreaks?.includes(args.queryOrdinal)) {
+      if (attempt === 1) {
+        throw new ProviderTransportError('CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR', { inputTokens: 520 });
       }
+      throw new BudgetOperationReplayError(`query-${args.queryOrdinal}`);
+    }
+    return queryReceipt(args.queryOrdinal);
+  };
+
+  const timeouts = discoveryActivityTimeouts();
+  const maximumAttempts = discoveryActivityMaximumAttempts();
+  const calls: Array<{ activity: string; attempt: number; elapsedMs: number }> = [];
+  const timed = (activity: string, run: (args: never) => Promise<unknown>) =>
+    acts[activity]!.mockImplementation(async (args: never) => {
+      const attempts = maximumAttempts.get(activity)![0]!;
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        const startedAt = rehearsal.clock.now;
+        try {
+          return await run(args);
+        } catch (error) {
+          lastError = error;
+          if (error instanceof ApplicationFailure && error.nonRetryable) break;
+        } finally {
+          calls.push({ activity, attempt, elapsedMs: rehearsal.clock.now - startedAt });
+        }
+      }
+      // What Temporal hands the workflow once the activity's attempts are used up.
+      throw new ActivityFailure(
+        'Activity task failed',
+        activity,
+        '1',
+        'MAXIMUM_ATTEMPTS_REACHED',
+        'rehearsal-worker',
+        new ApplicationFailure(
+          lastError instanceof Error ? lastError.message : String(lastError),
+          lastError instanceof Error ? lastError.name : 'Error',
+          false,
+        ),
+      );
     });
   for (const activity of [
     'profileWebsitesForRun',
@@ -340,34 +418,18 @@ function rehearse(options: { companies: number; slowdown?: number; faults?: Faul
     'enrichSignalsRun',
     'registerWatchesForRun',
   ] as const) {
-    timed(activity);
+    timed(activity, activities[activity] as (args: never) => Promise<unknown>);
   }
+  timed('executeQuery', executeQuery as (args: never) => Promise<unknown>);
 
   acts.resetRunBudget.mockResolvedValue(undefined);
   acts.loadPlanQueries.mockResolvedValue({
-    queries: [{ source_class: 'public_intelligence', filters: {}, keywords: ['Pumpen Großhandel'], priority: 1 }],
-  });
-  acts.executeQuery.mockResolvedValue({
-    rawCount: options.companies,
-    quarantinedCount: 0,
-    rejectedCount: 0,
-    duplicateCount: 0,
-    queryReceipt: {
-      schemaVersion: 'discovery-query-receipt/v1',
-      queryKey: 'b'.repeat(64),
-      queryOrdinal: 0,
-      sourceClass: 'public_intelligence',
-      providers: ['public_web'],
-      accepted: options.companies,
-      quarantined: 0,
-      rejected: 0,
-      governanceDenied: 0,
-      duplicate: 0,
-      usageQuantity: options.companies,
-      costCents: 0,
-    },
-    provider: 'public_web',
-    budgetTruncated: false,
+    queries: Array.from({ length: QUERY_COUNT }, (_, i) => ({
+      source_class: 'public_intelligence',
+      filters: {},
+      keywords: [`Pumpen Großhandel ${i + 1}`],
+      priority: i + 1,
+    })),
   });
   acts.canonicalizeRun.mockResolvedValue({ companies: options.companies, suppressed: 0 });
   acts.enqueuePatentLookupsForRun.mockResolvedValue({ candidates: 0, enqueued: 0 });
@@ -381,12 +443,13 @@ function rehearse(options: { companies: number; slowdown?: number; faults?: Faul
     executionContractVersion: 2 as const,
     executionBudget: DISCOVERY_BUDGET,
   };
-  const timeouts = discoveryActivityTimeouts();
   const overruns = () =>
     calls.filter(({ activity, elapsedMs }) => elapsedMs > timeoutMilliseconds(timeouts.get(activity)![0]!));
-  const callsOf = (activity: string) => calls.filter((call) => call.activity === activity).length;
+  const callsOf = (activity: string) => calls.filter((call) => call.activity === activity);
   const finalized = () => acts.finalizeRun.mock.calls[0]![0] as { status: string; stats: Record<string, unknown> };
-  return { run: () => discoveryWorkflow(input), overruns, callsOf, finalized, calls };
+  /** Companies with a fit verdict stored for the ICP, whichever attempt judged them. */
+  const judgedCompanies = () => new Set(leads.filter((lead) => lead.icpId === ICP_ID).map((lead) => lead.companyId)).size;
+  return { run: () => discoveryWorkflow(input), overruns, callsOf, finalized, judgedCompanies };
 }
 
 beforeEach(() => {
@@ -406,8 +469,8 @@ describe('discovery run rehearsal at measured latencies', () => {
 
     expect(rehearsalRun.overruns()).toEqual([]);
     // The company count no longer decides whether a pass fits: it takes several activities.
-    expect(rehearsalRun.callsOf('qualifyFitForRun')).toBeGreaterThan(1);
-    expect(rehearsalRun.callsOf('profileWebsitesForRun')).toBeGreaterThan(1);
+    expect(rehearsalRun.callsOf('qualifyFitForRun').length).toBeGreaterThan(1);
+    expect(rehearsalRun.callsOf('profileWebsitesForRun').length).toBeGreaterThan(1);
     const { status, stats } = rehearsalRun.finalized();
     expect(status).toBe('PARTIAL');
     expect(stats).toMatchObject({
@@ -426,6 +489,44 @@ describe('discovery run rehearsal at measured latencies', () => {
 
     expect(rehearsalRun.overruns()).toEqual([]);
     expect(rehearsalRun.finalized().status).toBe('DONE');
+  });
+
+  it('recovers through the retry when a fit stream breaks in a way the activity does not absorb', async () => {
+    const rehearsalRun = rehearse({ companies: 100, faults: { fitBreaks: [23] } });
+
+    await rehearsalRun.run();
+
+    expect(rehearsalRun.overruns()).toEqual([]);
+    // The broken call failed one attempt; the retry left that company unjudged and went on.
+    expect(rehearsalRun.callsOf('qualifyFitForRun').some(({ attempt }) => attempt > 1)).toBe(true);
+    const { status, stats } = rehearsalRun.finalized();
+    expect(status).toBe('PARTIAL');
+    expect(stats).toMatchObject({ fitUnjudged: 1, unreplayableSkips: { fit: 1 } });
+    // Every company but the broken one has a stored verdict. The run stats count only each
+    // activity's last attempt, so verdicts stored by the attempt that broke are not in stats.fit.
+    expect(rehearsalRun.judgedCompanies()).toBe(99);
+  });
+
+  it('counts a query whose retries meet an unreplayable call as failed and runs the rest', async () => {
+    const rehearsalRun = rehearse({ companies: 100, faults: { queryBreaks: [1] } });
+
+    await rehearsalRun.run();
+
+    expect(rehearsalRun.overruns()).toEqual([]);
+    const { status, stats } = rehearsalRun.finalized();
+    expect(status).toBe('PARTIAL');
+    expect(stats).toMatchObject({ failures: 1, queries: QUERY_COUNT, unreplayableSkips: { queries: 1 } });
+  });
+
+  it('still fails the run when two queries in a row meet unreplayable calls', async () => {
+    const rehearsalRun = rehearse({ companies: 100, faults: { queryBreaks: [1, 2] } });
+
+    await expect(rehearsalRun.run()).rejects.toBeInstanceOf(ActivityFailure);
+
+    expect(rehearsalRun.finalized()).toMatchObject({
+      status: 'FAILED',
+      stats: { failure: { stage: 'query', errorType: 'BudgetOperationReplayError', control: true } },
+    });
   });
 
   it('still fails the run when signal enrichment loses every company to unreplayable operations', async () => {
