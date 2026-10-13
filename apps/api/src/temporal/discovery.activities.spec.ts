@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import {
   createDiscoveryActivities,
+  ENRICH_PASS_TIME_BOX_MS,
   FIT_PASS_TIME_BOX_MS,
   PROFILE_PASS_TIME_BOX_MS,
 } from "./discovery.activities";
@@ -3157,6 +3158,178 @@ describe("enrichRun / resetRunBudget —— 富集阶段截断也上报 + 未知
   });
 });
 
+/** Gives a makeEnrichDeps fixture several fit=match companies with their own domains. */
+async function withMatchCompanies<T>(deps: T, ids: string[]): Promise<T> {
+  const fixture = deps as unknown as {
+    prisma: { withWorkspace: (ws: string, fn: (tx: Record<string, Record<string, unknown>>) => Promise<unknown>) => Promise<unknown> };
+  };
+  await fixture.prisma.withWorkspace("ws", async (tx) => {
+    tx.canonicalCompany!.findMany = vi.fn(async () =>
+      ids.map((id) => ({
+        id,
+        name: id.toUpperCase(),
+        domain: `${id}.de`,
+        country: "DE",
+        region: null,
+        attributes: {},
+      })),
+    );
+  });
+  return deps;
+}
+
+describe("尽力而为的阶段：无法重放的公司跳过并计数", () => {
+  const unreplayable = (operationId: string) => new BudgetOperationReplayError(operationId);
+
+  it("signals skip a company whose operation cannot be replayed, count it, and enrich the rest", async () => {
+    const enricher = {
+      key: "digital_footprint",
+      enrichCompany: vi
+        .fn()
+        .mockRejectedValueOnce(unreplayable("op-1"))
+        .mockResolvedValue({ matched: false } as EnrichmentResult),
+    };
+    const deps = await withMatchCompanies(makeEnrichDeps([enricher]), ["c1", "c2"]);
+
+    await expect(
+      createDiscoveryActivities(deps).enrichSignalsRun(
+        discoveryArgs("run-signal-unreplayable", { icpId: "icp-1" }),
+      ),
+    ).resolves.toMatchObject({ enriched: 1, unreplayable: 1, skippedSubjects: 0 });
+    expect(enricher.enrichCompany).toHaveBeenCalledTimes(2);
+  });
+
+  it("signals still stop when two companies in a row cannot be replayed", async () => {
+    const second = unreplayable("op-2");
+    const enricher = {
+      key: "digital_footprint",
+      enrichCompany: vi.fn().mockRejectedValueOnce(unreplayable("op-1")).mockRejectedValueOnce(second),
+    };
+    const deps = await withMatchCompanies(makeEnrichDeps([enricher]), ["c1", "c2", "c3"]);
+
+    await expect(
+      createDiscoveryActivities(deps).enrichSignalsRun(
+        discoveryArgs("run-signal-unreplayable-twice", { icpId: "icp-1" }),
+      ),
+    ).rejects.toBe(second);
+  });
+
+  it("signals absorb unreplayable companies that an enriched company separates", async () => {
+    const enricher = {
+      key: "digital_footprint",
+      enrichCompany: vi
+        .fn()
+        .mockRejectedValueOnce(unreplayable("op-1"))
+        .mockResolvedValueOnce({ matched: false } as EnrichmentResult)
+        .mockRejectedValueOnce(unreplayable("op-3")),
+    };
+    const deps = await withMatchCompanies(makeEnrichDeps([enricher]), ["c1", "c2", "c3"]);
+
+    await expect(
+      createDiscoveryActivities(deps).enrichSignalsRun(
+        discoveryArgs("run-signal-unreplayable-apart", { icpId: "icp-1" }),
+      ),
+    ).resolves.toMatchObject({ enriched: 1, unreplayable: 2 });
+  });
+
+  function watchDeps(invoke: ReturnType<typeof vi.fn>) {
+    const deps = makeEnrichDeps([]) as unknown as {
+      prisma: { withWorkspace: (ws: string, fn: (tx: Record<string, Record<string, unknown>>) => Promise<unknown>) => Promise<unknown> };
+      broker?: unknown;
+      platformWriter?: unknown;
+    };
+    deps.broker = { invoke };
+    deps.platformWriter = { $transaction: vi.fn() };
+    return deps;
+  }
+
+  it("watch registration skips a company whose sitemap read cannot be replayed and counts it", async () => {
+    const invoke = vi.fn().mockRejectedValueOnce(unreplayable("op-1")).mockRejectedValueOnce(
+      new ToolPolicyDenied("http.get", "GENERIC_OPERATION_ARTIFACT_SUBJECT_TOMBSTONED"),
+    );
+    const deps = await withMatchCompanies(watchDeps(invoke), ["c1", "c2"]);
+    await deps.prisma.withWorkspace("ws", async (tx) => {
+      tx.fieldEvidence!.findMany = async () => [];
+    });
+
+    await expect(
+      createDiscoveryActivities(deps as never).registerWatchesForRun(
+        discoveryArgs("run-watch-unreplayable", { icpId: "icp-1" }) as never,
+      ),
+    ).resolves.toEqual({ candidates: 2, registered: 0, skippedSubjects: 1, unreplayable: 1 });
+  });
+
+  it("watch registration still stops when two companies in a row cannot be replayed", async () => {
+    const second = unreplayable("op-2");
+    const invoke = vi.fn().mockRejectedValueOnce(unreplayable("op-1")).mockRejectedValueOnce(second);
+    const deps = await withMatchCompanies(watchDeps(invoke), ["c1", "c2"]);
+    await deps.prisma.withWorkspace("ws", async (tx) => {
+      tx.fieldEvidence!.findMany = async () => [];
+    });
+
+    await expect(
+      createDiscoveryActivities(deps as never).registerWatchesForRun(
+        discoveryArgs("run-watch-unreplayable-twice", { icpId: "icp-1" }) as never,
+      ),
+    ).rejects.toBe(second);
+  });
+});
+
+describe("enrichRun —— 按时限把余下公司交给下一次活动", () => {
+  const gleif = () => ({
+    key: "gleif",
+    enrichCompany: vi.fn(async () => ({ matched: false }) as EnrichmentResult),
+  });
+
+  it("hands the companies left to the next enrich activity once its time box is spent", async () => {
+    const enricher = gleif();
+    const deps = await withMatchCompanies(makeEnrichDeps([enricher]), ["c1", "c2", "c3"]);
+    (deps as { now?: () => number }).now = vi
+      .fn()
+      .mockReturnValueOnce(0)
+      .mockReturnValue(ENRICH_PASS_TIME_BOX_MS);
+
+    await expect(
+      createDiscoveryActivities(deps).enrichRun(discoveryArgs("run-enrich-pass", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ enriched: 1, nextIndex: 1 });
+    expect(enricher.enrichCompany).toHaveBeenCalledOnce();
+  });
+
+  it("resumes at the index it was handed, in id order, and hands nothing on once done", async () => {
+    const enricher = gleif();
+    const deps = await withMatchCompanies(makeEnrichDeps([enricher]), ["c1", "c2", "c3"]);
+    (deps as { now?: () => number }).now = () => 0;
+    const findMany = (
+      (await (deps.prisma as unknown as {
+        withWorkspace: (ws: string, fn: (tx: Record<string, Record<string, unknown>>) => Promise<unknown>) => Promise<unknown>;
+      }).withWorkspace("ws", async (tx) => tx.canonicalCompany!.findMany)) as ReturnType<typeof vi.fn>
+    );
+
+    await expect(
+      createDiscoveryActivities(deps).enrichRun(
+        discoveryArgs("run-enrich-resume", { icpId: "icp-1", startIndex: 1 }),
+      ),
+    ).resolves.toMatchObject({ enriched: 2, nextIndex: null });
+    expect(enricher.enrichCompany.mock.calls.map(([company]) => (company as { domain: string }).domain)).toEqual([
+      "c2.de",
+      "c3.de",
+    ]);
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ orderBy: { id: "asc" }, take: 50 }));
+  });
+
+  it.each([-1, 1.5, 51, "1"])("rejects a continuation index of %s before any enrichment", async (startIndex) => {
+    const enricher = gleif();
+    const deps = makeEnrichDeps([enricher]);
+
+    await expect(
+      createDiscoveryActivities(deps).enrichRun(
+        discoveryArgs("run-enrich-bad", { icpId: "icp-1", startIndex }) as never,
+      ),
+    ).rejects.toMatchObject({ type: "DISCOVERY_STAGE_CONTINUATION_INVALID", nonRetryable: true });
+    expect(enricher.enrichCompany).not.toHaveBeenCalled();
+  });
+});
+
 describe("company-subject call sites (G3 5.5)", () => {
   it("binds every signal-enrichment wire to the canonical company it enriches", async () => {
     const enricher = {
@@ -3219,7 +3392,7 @@ describe("company-subject call sites (G3 5.5)", () => {
 
     expect(invoke).toHaveBeenCalled();
     expect($transaction).not.toHaveBeenCalled();
-    expect(result).toEqual({ candidates: 1, registered: 0, skippedSubjects: 1 });
+    expect(result).toEqual({ candidates: 1, registered: 0, skippedSubjects: 1, unreplayable: 0 });
   });
 
   it("registers no watch and fetches no sitemap in a worker without the platform writer", async () => {
@@ -3253,7 +3426,7 @@ describe("company-subject call sites (G3 5.5)", () => {
       createDiscoveryActivities(deps as never).registerWatchesForRun(
         discoveryArgs("run-watch-no-platform-writer", { icpId: "icp-1" }) as never,
       ),
-    ).resolves.toEqual({ candidates: 1, registered: 0, skippedSubjects: 0 });
+    ).resolves.toEqual({ candidates: 1, registered: 0, skippedSubjects: 0, unreplayable: 0 });
     expect(invoke).not.toHaveBeenCalled();
   });
 
@@ -3349,6 +3522,8 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
       budgetTruncated: false,
       unclassified: 0,
       nextIndex: null,
+      unreplayable: 0,
+      previousUnreplayable: false,
     });
     expect(profile).not.toHaveBeenCalled();
   });
@@ -3449,6 +3624,69 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({ orderBy: [{ createdAt: "asc" }, { id: "asc" }] }),
     );
+  });
+
+  it("skips a company whose fetch cannot be replayed, counts it, and profiles the rest", async () => {
+    const profile = vi
+      .fn()
+      .mockRejectedValueOnce(new BudgetOperationReplayError("op-1"))
+      .mockResolvedValue(PROFILE);
+    const { acts } = await makeProfileDeps(profile, { companies: ["c1", "c2"], now: () => 0 });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-profile-unreplayable", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ profiled: 1, unreplayable: 1, previousUnreplayable: false, nextIndex: null });
+  });
+
+  it("still stops when two companies in a row cannot be replayed", async () => {
+    const second = new BudgetOperationReplayError("op-2");
+    const profile = vi
+      .fn()
+      .mockRejectedValueOnce(new BudgetOperationReplayError("op-1"))
+      .mockRejectedValueOnce(second);
+    const { acts } = await makeProfileDeps(profile, { companies: ["c1", "c2", "c3"], now: () => 0 });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-profile-unreplayable-twice", { icpId: "icp-1" })),
+    ).rejects.toBe(second);
+  });
+
+  it("stops on an unreplayable company that follows the one the previous pass ended on", async () => {
+    const second = new BudgetOperationReplayError("op-2");
+    const profile = vi.fn().mockRejectedValueOnce(second);
+    const { acts } = await makeProfileDeps(profile, { companies: ["c1", "c2"], now: () => 0 });
+
+    await expect(
+      acts.profileWebsitesForRun(
+        discoveryArgs("run-profile-unreplayable-carried", {
+          icpId: "icp-1",
+          startIndex: 1,
+          previousUnreplayable: true,
+        }),
+      ),
+    ).rejects.toBe(second);
+  });
+
+  it("tells the next pass that it ended on an unreplayable company", async () => {
+    const profile = vi.fn().mockRejectedValueOnce(new BudgetOperationReplayError("op-1"));
+    const now = vi.fn().mockReturnValueOnce(0).mockReturnValue(PROFILE_PASS_TIME_BOX_MS);
+    const { acts } = await makeProfileDeps(profile, { companies: ["c1", "c2"], now });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-profile-unreplayable-handoff", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ unreplayable: 1, nextIndex: 1, previousUnreplayable: true });
+  });
+
+  it("rejects an unreplayable flag that is not a boolean", async () => {
+    const profile = vi.fn(async () => PROFILE);
+    const { acts } = await makeProfileDeps(profile);
+
+    await expect(
+      acts.profileWebsitesForRun(
+        discoveryArgs("run-profile-bad-flag", { icpId: "icp-1", previousUnreplayable: "yes" }) as never,
+      ),
+    ).rejects.toMatchObject({ type: "DISCOVERY_STAGE_CONTINUATION_INVALID", nonRetryable: true });
+    expect(profile).not.toHaveBeenCalled();
   });
 
   it.each([-1, 1.5, 51, "1"])("rejects a continuation index of %s before any fetch", async (startIndex) => {
@@ -3981,6 +4219,22 @@ describe("resolveRunStatus —— 公司抽取因模型失败被跳过", () => {
   it("零跳过与旧历史（缺这个字段）保持原语义", () => {
     expect(
       resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, droppedExtractions: 0 }),
+    ).toBe("DONE");
+  });
+});
+
+describe("resolveRunStatus —— 尽力而为的阶段跳过了无法重放的公司", () => {
+  it("有跳过 → 至少 PARTIAL，绝不 DONE", () => {
+    expect(
+      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, unreplayableSkips: 1 }),
+    ).toBe("PARTIAL");
+  });
+  it("不单独判 FAILED；零跳过与旧历史（缺这个字段）保持原语义", () => {
+    expect(
+      resolveRunStatus({ failures: 1, totalQueries: 1, budgetTruncated: false, unreplayableSkips: 2 }),
+    ).toBe("FAILED");
+    expect(
+      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, unreplayableSkips: 0 }),
     ).toBe("DONE");
   });
 });

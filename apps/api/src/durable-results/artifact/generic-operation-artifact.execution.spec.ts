@@ -5,6 +5,7 @@ import type { Tool } from '../../tools/tool-contract';
 import type { DurableResultStrategy } from '../durable-result-strategy';
 import type { DurableExecutionReceipt } from '../durable-execution-receipt';
 import { GenericOperationArtifactExecution } from './generic-operation-artifact.execution';
+import { ArtifactStorageError } from './generic-operation-artifact.store';
 import { productArtifactMaterializerRegistry } from './generic-operation-artifact.runtime';
 import { manifestFor } from './materializers/materializer-fixtures.spec-helper';
 import type { PersistGenericOperationArtifactInput } from './generic-operation-artifact.service';
@@ -225,6 +226,48 @@ describe('GenericOperationArtifactExecution.persist', () => {
       subjectRef, input: {}, result: { data: {}, costCents: 0 },
     })).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
     expect(service.persist).not.toHaveBeenCalled();
+  });
+
+  it('logs the storage error code and the operation before rethrowing', async () => {
+    const { execution, service } = harness();
+    const failure = new ArtifactStorageError('GENERIC_OPERATION_ARTIFACT_STAGE_ACK_UNKNOWN');
+    service.persist.mockRejectedValueOnce(failure);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      await expect(execution.persist({
+        reservation: reservation(), tool: toolFor('http-get/v1', 'http.get'), subjectRef,
+        input: { url: 'https://pumpen.example/sitemap.xml' },
+        result: {
+          data: { status: 200, ok: true, mediaType: 'text/plain', text: '<urlset/>', finalUrl: 'https://pumpen.example/sitemap.xml' },
+          costCents: 0,
+        },
+      })).rejects.toBe(failure);
+      expect(warn).toHaveBeenCalledOnce();
+      const [line] = warn.mock.calls[0]! as [string];
+      expect(line).toContain('http-get/v1');
+      expect(line).toContain('GENERIC_OPERATION_ARTIFACT_STAGE_ACK_UNKNOWN');
+      expect(line).toContain(OPERATION_ID);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('logs only the error name for a failure without a storage code', async () => {
+    const { execution, service } = harness();
+    service.persist.mockRejectedValueOnce(new Error('connect ECONNREFUSED 10.0.0.7:9000'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      await expect(execution.persist({
+        reservation: reservation(), tool: toolFor('http-get/v1', 'http.get'), subjectRef,
+        input: { url: 'https://pumpen.example/' },
+        result: { data: { status: 200, ok: true, mediaType: 'text/plain', text: 'x', finalUrl: 'https://pumpen.example/' }, costCents: 0 },
+      })).rejects.toThrow('ECONNREFUSED');
+      const [line] = warn.mock.calls[0]! as [string];
+      expect(line).toContain('Error');
+      expect(line).not.toContain('10.0.0.7');
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

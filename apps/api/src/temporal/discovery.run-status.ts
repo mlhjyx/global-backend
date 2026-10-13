@@ -13,6 +13,8 @@
  * 都被跳过时同样是 PARTIAL，不让 run 失败。
  * 公司抽取因模型调用失败（网关已结算、无结果）而跳过的域名或名录页，同样是漏了活儿 → 至少
  * PARTIAL，与 fit 的未判定同理，不单独判 FAILED。
+ * 尽力而为的阶段（官网画像、信号、监控）因操作无法重放而跳过的公司，同样至少 PARTIAL；
+ * 连续两家无法重放时阶段照旧失败，不在这里判。
  */
 export function resolveRunStatus(args: {
   failures: number;
@@ -25,19 +27,23 @@ export function resolveRunStatus(args: {
   skippedQueries?: number;
   /** Company extractions skipped after a failed model call. */
   droppedExtractions?: number;
+  /** Companies the best-effort stages skipped because an operation could not be replayed. */
+  unreplayableSkips?: number;
 }): 'DONE' | 'PARTIAL' | 'FAILED' {
   const { failures, totalQueries, budgetTruncated } = args;
   const skipped = (args.skippedSubjects ?? 0) > 0;
   const unjudged = (args.fitUnjudged ?? 0) > 0;
   const queriesSkipped = (args.skippedQueries ?? 0) > 0;
   const extractionsDropped = (args.droppedExtractions ?? 0) > 0;
+  const unreplayableSkipped = (args.unreplayableSkips ?? 0) > 0;
   if (
     failures === 0 &&
     !budgetTruncated &&
     !skipped &&
     !unjudged &&
     !queriesSkipped &&
-    !extractionsDropped
+    !extractionsDropped &&
+    !unreplayableSkipped
   ) {
     return 'DONE';
   }

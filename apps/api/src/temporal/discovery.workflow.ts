@@ -86,6 +86,14 @@ interface WebsiteProfileTotals {
   skippedSubjects?: number;
   budgetTruncated?: boolean;
   unclassified?: number;
+  unreplayable?: number;
+}
+
+interface EnrichTotals {
+  enriched: number;
+  matched: number;
+  provider: string | null;
+  budgetTruncated: boolean;
 }
 
 function addFitPass(total: FitTotals, pass: FitTotals): FitTotals {
@@ -108,6 +116,22 @@ function addWebsiteProfilePass(total: WebsiteProfileTotals, pass: WebsiteProfile
     skippedSubjects: (total.skippedSubjects ?? 0) + (pass.skippedSubjects ?? 0),
     budgetTruncated: (total.budgetTruncated ?? false) || (pass.budgetTruncated ?? false),
     unclassified: (total.unclassified ?? 0) + (pass.unclassified ?? 0),
+    unreplayable: (total.unreplayable ?? 0) + (pass.unreplayable ?? 0),
+  };
+}
+
+/** Joins the `+`-separated provider keys of two enrich activities without repeating one. */
+function mergeProviders(left: string | null, right: string | null): string | null {
+  const keys = [...new Set([left, right].flatMap((value) => (value ? value.split('+') : [])))];
+  return keys.length ? keys.join('+') : null;
+}
+
+function addEnrichPass(total: EnrichTotals, pass: EnrichTotals): EnrichTotals {
+  return {
+    enriched: total.enriched + pass.enriched,
+    matched: total.matched + pass.matched,
+    provider: mergeProviders(total.provider, pass.provider),
+    budgetTruncated: total.budgetTruncated || pass.budgetTruncated,
   };
 }
 
@@ -338,14 +362,18 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         const profileArgs = { workspaceId, runId, icpId: input.icpId, ...authorityArgs };
         // Each activity hands the companies it did not reach to the next one; a spent run budget
         // ends the stage. A result recorded before the hand-off has no index and ends it too.
-        let startIndex: number | undefined;
+        let profileContinuation: { startIndex: number; previousUnreplayable: boolean } | undefined;
         do {
           const pass = await signalActs.profileWebsitesForRun(
-            startIndex === undefined ? profileArgs : { ...profileArgs, startIndex },
+            profileContinuation === undefined ? profileArgs : { ...profileArgs, ...profileContinuation },
           );
-          websiteProfile = startIndex === undefined ? pass : addWebsiteProfilePass(websiteProfile, pass);
-          startIndex = typeof pass.nextIndex === 'number' && !pass.budgetTruncated ? pass.nextIndex : undefined;
-        } while (startIndex !== undefined);
+          websiteProfile =
+            profileContinuation === undefined ? pass : addWebsiteProfilePass(websiteProfile, pass);
+          profileContinuation =
+            typeof pass.nextIndex === 'number' && !pass.budgetTruncated
+              ? { startIndex: pass.nextIndex, previousUnreplayable: pass.previousUnreplayable === true }
+              : undefined;
+        } while (profileContinuation !== undefined);
       } catch (error) {
         if (isExecutionControlError(error)) throw error;
         /* 画像是 Fit 的补充证据，失败时 Fit 仍按已有信息判定 */
@@ -372,7 +400,18 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
 
     // 富集（Waterfall 富化段）：只给过了本 run ICP fit 门的高价值公司补 GLEIF 法律身份 + 母子关系（快事实，2 分钟活动）
     stage = 'enrich';
-    const enrich = await acts.enrichRun({ workspaceId, runId, icpId: input.icpId, ...authorityArgs });
+    const enrichArgs = { workspaceId, runId, icpId: input.icpId, ...authorityArgs };
+    // Like the fit pass, each enrich activity hands the companies it did not reach to the next
+    // one, and a spent run budget ends the stage.
+    let enrich: EnrichTotals | undefined;
+    let enrichIndex: number | undefined;
+    do {
+      const pass = await acts.enrichRun(
+        enrichIndex === undefined ? enrichArgs : { ...enrichArgs, startIndex: enrichIndex },
+      );
+      enrich = enrich === undefined ? pass : addEnrichPass(enrich, pass);
+      enrichIndex = typeof pass.nextIndex === 'number' && !pass.budgetTruncated ? pass.nextIndex : undefined;
+    } while (enrichIndex !== undefined);
 
     // 信号富集（数字足迹 + 结构化收割）：慢且时变，走独立长活动 + heartbeat；失败不拖垮整个 run
     let signals: {
@@ -381,6 +420,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       provider: string | null;
       budgetTruncated?: boolean;
       skippedSubjects?: number;
+      unreplayable?: number;
     } = {
       matched: 0,
       enriched: 0,
@@ -396,7 +436,12 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
 
     // 从 ICP 短名单自动注册网站变更监控（#4 loop）：对本 run ICP fit=match 公司建 web_watch，交给 intentSweep 持续盯变更。
     // best-effort（每家一次 sitemap 探测，慢）→ 长活动；失败不影响 run 状态。
-    let watches: { candidates: number; registered: number; skippedSubjects?: number } = {
+    let watches: {
+      candidates: number;
+      registered: number;
+      skippedSubjects?: number;
+      unreplayable?: number;
+    } = {
       candidates: 0,
       registered: 0,
     };
@@ -433,6 +478,15 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       (websiteProfile.skippedSubjects ?? 0) +
       (signals.skippedSubjects ?? 0) +
       (watches.skippedSubjects ?? 0);
+    // Companies the best-effort stages skipped because an operation could not be replayed.
+    // Absent in results recorded before the counter existed.
+    const unreplayableSkips = {
+      websiteProfile: websiteProfile.unreplayable ?? 0,
+      signals: signals.unreplayable ?? 0,
+      watches: watches.unreplayable ?? 0,
+    };
+    const unreplayableSkipCount =
+      unreplayableSkips.websiteProfile + unreplayableSkips.signals + unreplayableSkips.watches;
     let status = resolveRunStatus({
       failures,
       totalQueries: queries.length,
@@ -442,6 +496,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       fitUnjudged: fit.unjudged ?? 0,
       skippedQueries: skippedQueryCount,
       droppedExtractions: modelExtractions.failed,
+      unreplayableSkips: unreplayableSkipCount,
     });
     if (usesRawGovernance && governanceDenied > 0) {
       status = acceptedRaw === 0 ? 'FAILED' : status === 'DONE' ? 'PARTIAL' : status;
@@ -461,6 +516,8 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         ...queryStats(),
         ...skipStats(),
         ...extractionStats(),
+        // Shown only when a company was skipped, so runs without a skip keep their stats shape.
+        ...(unreplayableSkipCount > 0 ? { unreplayableSkips } : {}),
         companies,
         suppressed,
         fit: fit.verdicts,

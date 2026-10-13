@@ -17,6 +17,7 @@ import {
   isCanonicalArtifactUuid,
 } from './artifact.types';
 import type { GenericOperationArtifactService } from './generic-operation-artifact.service';
+import { ArtifactStorageError } from './generic-operation-artifact.store';
 
 type WorkspaceArtifactSchema =
   | 'crawl4ai-fetch/v1'
@@ -177,6 +178,11 @@ async function* bytesOf(body: string): AsyncIterable<Uint8Array> {
  * admission, bounded PERSONAL_DATA object persistence bound to the subject
  * (1-day TTL from the tool strategy) and verified replay.
  */
+function persistFailureLabel(error: unknown): string {
+  if (error instanceof ArtifactStorageError) return `${error.name}:${error.code}`;
+  return error instanceof Error ? error.name : 'unknown';
+}
+
 export class GenericOperationArtifactExecution implements ArtifactExecutionPort {
   private readonly now: () => Date;
 
@@ -223,18 +229,29 @@ export class GenericOperationArtifactExecution implements ArtifactExecutionPort 
     if (!Number.isSafeInteger(costCents) || costCents < 0) return invalid();
     const payload = PAYLOADS[schema](input.input, input.result.data);
     const expiresAt = new Date(this.now().getTime() + strategy.ttlSeconds * 1_000);
-    const settled = await this.deps.service.persist({
-      reservation: input.reservation,
-      authorityId,
-      source: { body: bytesOf(payload.body), mediaType: payload.mediaType },
-      maxBytes: strategy.maxBytes,
-      resultSchema: schema,
-      privacyClass: strategy.privacyClass,
-      subjectRef: input.subjectRef,
-      expiresAt: expiresAt.toISOString(),
-      observedMicrousd: BigInt(costCents) * MICROUSD_PER_CENT,
-      expectedFacts: payload.expectedFacts,
-    });
+    let settled: Awaited<ReturnType<GenericOperationArtifactExecutionDeps['service']['persist']>>;
+    try {
+      settled = await this.deps.service.persist({
+        reservation: input.reservation,
+        authorityId,
+        source: { body: bytesOf(payload.body), mediaType: payload.mediaType },
+        maxBytes: strategy.maxBytes,
+        resultSchema: schema,
+        privacyClass: strategy.privacyClass,
+        subjectRef: input.subjectRef,
+        expiresAt: expiresAt.toISOString(),
+        observedMicrousd: BigInt(costCents) * MICROUSD_PER_CENT,
+        expectedFacts: payload.expectedFacts,
+      });
+    } catch (error) {
+      // The broker turns this into an unreplayable operation and logs only the error's class, so
+      // say which step failed. Only the bounded storage code is logged: a raw message may carry
+      // endpoints or object keys.
+      console.warn(
+        `[artifact] ${schema} persist failed for operation ${input.reservation.operationId}: ${persistFailureLabel(error)}`,
+      );
+      throw error;
+    }
     return {
       data: payload.data as O,
       costCents,
