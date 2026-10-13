@@ -866,7 +866,7 @@ describe('discoveryWorkflow model extractions dropped after a failed call', () =
   });
 });
 
-describe('discoveryWorkflow queries whose retries met an unreplayable operation', () => {
+describe('discoveryWorkflow queries that lost a provider to an unreplayable operation', () => {
   const query = (priority: number) => ({
     source_class: 'public_intelligence',
     filters: {},
@@ -874,15 +874,30 @@ describe('discoveryWorkflow queries whose retries met an unreplayable operation'
     priority,
   });
   const unreplayable = () => activityFailure('executeQuery', 'BudgetOperationReplayError');
+  // What the activity answers once a retry met the lost operation: a zero receipt, flagged.
+  const lostQuery = async () => {
+    const answered = await acts.executeQuery.getMockImplementation()!();
+    return {
+      ...answered,
+      rawCount: 0,
+      unreplayable: true,
+      queryReceipt: { ...answered.queryReceipt, accepted: 0, usageQuantity: 0 },
+    };
+  };
+  const handOffOf = (call: number) =>
+    (acts.executeQuery.mock.calls[call]![0] as { previousQueryUnreplayable?: unknown })
+      .previousQueryUnreplayable;
 
-  it('counts such a query as failed and runs the rest of the plan', async () => {
+  it('counts such a query as failed, tells the next query, and runs the rest of the plan', async () => {
     primeDiscovery();
     acts.loadPlanQueries.mockResolvedValue({ queries: [query(1), query(2)] });
-    acts.executeQuery.mockRejectedValueOnce(unreplayable());
+    acts.executeQuery.mockResolvedValueOnce(await lostQuery());
 
     await discoveryWorkflow(discoveryInput());
 
     expect(acts.executeQuery).toHaveBeenCalledTimes(2);
+    expect(handOffOf(0)).toBeUndefined();
+    expect(handOffOf(1)).toBe(true);
     expect(acts.canonicalizeRun).toHaveBeenCalled();
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -895,15 +910,16 @@ describe('discoveryWorkflow queries whose retries met an unreplayable operation'
     );
   });
 
-  it('still fails the run when two queries in a row meet one', async () => {
+  it('fails the run when the activity reports the second such query in a row', async () => {
     primeDiscovery();
     acts.loadPlanQueries.mockResolvedValue({ queries: [query(1), query(2), query(3)] });
     const second = unreplayable();
-    acts.executeQuery.mockRejectedValueOnce(unreplayable()).mockRejectedValueOnce(second);
+    acts.executeQuery.mockResolvedValueOnce(await lostQuery()).mockRejectedValueOnce(second);
 
     await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(second);
 
     expect(acts.executeQuery).toHaveBeenCalledTimes(2);
+    expect(handOffOf(1)).toBe(true);
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
         status: 'FAILED',
@@ -914,23 +930,45 @@ describe('discoveryWorkflow queries whose retries met an unreplayable operation'
     );
   });
 
-  it('absorbs such queries again once a query in between succeeded', async () => {
+  it('counts such queries again once a query in between succeeded, without a hand-off', async () => {
     primeDiscovery();
     acts.loadPlanQueries.mockResolvedValue({ queries: [query(1), query(2), query(3)] });
     const succeeded = await acts.executeQuery.getMockImplementation()!();
     acts.executeQuery
-      .mockRejectedValueOnce(unreplayable())
+      .mockResolvedValueOnce(await lostQuery())
       .mockResolvedValueOnce(succeeded)
-      .mockRejectedValueOnce(unreplayable());
+      .mockResolvedValueOnce(await lostQuery());
 
     await discoveryWorkflow(discoveryInput());
 
+    expect(handOffOf(1)).toBe(true);
+    expect(handOffOf(2)).toBeUndefined();
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
         status: 'PARTIAL',
         stats: expect.objectContaining({
           failures: 2,
           unreplayableSkips: expect.objectContaining({ queries: 2 }),
+        }),
+      }),
+    );
+  });
+
+  it('no longer absorbs a query activity that failed on an unreplayable operation: it left no receipt', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: [query(1), query(2)] });
+    const failed = unreplayable();
+    acts.executeQuery.mockRejectedValueOnce(failed);
+
+    await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(failed);
+
+    expect(acts.executeQuery).toHaveBeenCalledTimes(1);
+    expect(acts.canonicalizeRun).not.toHaveBeenCalled();
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'FAILED',
+        stats: expect.objectContaining({
+          failure: { stage: 'query', errorType: 'BudgetOperationReplayError', control: true },
         }),
       }),
     );

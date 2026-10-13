@@ -868,7 +868,7 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
     expect(r.rawCount).toBe(1);
   });
 
-  it("generic replay 不可恢复时拒绝 activity，而不是把已付费结果吞成空成功", async () => {
+  it("generic replay 不可恢复时，这条查询以零回执结束并标记，而不是把已付费结果吞成空成功", async () => {
     const deps = makeDeps([
       {
         ...okAdapter("ted", []),
@@ -881,7 +881,11 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
 
     await expect(
       acts.executeQuery(discoveryArgs("run-ok-x", { query: QUERY })),
-    ).rejects.toBeInstanceOf(BudgetOperationReplayError);
+    ).resolves.toMatchObject({
+      rawCount: 0,
+      unreplayable: true,
+      queryReceipt: { providers: ["ted"], accepted: 0 },
+    });
   });
 
   it("reads back the exact persisted query receipt after DomainAck response-loss replay", async () => {
@@ -4354,5 +4358,149 @@ describe("enqueuePatentLookupsForRun · P1-1 kill-switch", () => {
     );
     expect(res).toEqual({ candidates: 1, enqueued: 1 });
     expect(upserts).toHaveLength(1);
+  });
+});
+
+describe("executeQuery —— a provider whose operation cannot be replayed ends the query with a zero receipt (#643)", () => {
+  const lost = () => new BudgetOperationReplayError("public-web-op");
+  const lineageAdapter = (discoverCompanies: () => Promise<unknown>) => ({
+    key: "public_web",
+    classes: ["public_intelligence"],
+    companyResultLineage: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+    discoverCompanies,
+  });
+  const taxonomy = (resolveMany: () => Promise<unknown>) =>
+    ({ resolveMany: vi.fn(resolveMany), resolve: vi.fn(async () => null) }) as never;
+
+  it("lists the provider on a zero receipt through Q-TX and flags the loss, with no skip reason", async () => {
+    const discoverCompanies = vi.fn(async () => {
+      throw lost();
+    });
+    const activities = createDiscoveryActivities(makeDeps([lineageAdapter(discoverCompanies)]));
+
+    const result = await activities.executeQuery(discoveryArgs("run-lost", { query: QUERY }));
+
+    expect(discoverCompanies).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({
+      rawCount: 0,
+      costCents: 0,
+      provider: "public_web",
+      unreplayable: true,
+      // The materialization admission needs one receipt per plan query; this one says the
+      // provider was routed and answered with nothing.
+      queryReceipt: { providers: ["public_web"], accepted: 0, usageQuantity: 0, costCents: 0 },
+    });
+    expect(result).not.toHaveProperty("skipReason");
+  });
+
+  it("keeps the records of the providers that answered beside the one that was lost", async () => {
+    const activities = createDiscoveryActivities(
+      makeDeps([
+        okAdapter("wikidata", [REC]),
+        {
+          ...okAdapter("ted", []),
+          discoverCompanies: async () => {
+            throw lost();
+          },
+        },
+      ]),
+    );
+
+    await expect(
+      activities.executeQuery(discoveryArgs("run-lost-one", { query: QUERY })),
+    ).resolves.toMatchObject({
+      rawCount: 1,
+      unreplayable: true,
+      queryReceipt: { providers: ["ted", "wikidata"], accepted: 1 },
+    });
+  });
+
+  it("flags nothing when every provider answered", async () => {
+    const activities = createDiscoveryActivities(makeDeps([okAdapter("wikidata", [REC])]));
+
+    const result = await activities.executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
+
+    expect(result).not.toHaveProperty("unreplayable");
+  });
+
+  it("fails the query instead when the query before lost a provider the same way", async () => {
+    const error = lost();
+    const activities = createDiscoveryActivities(
+      makeDeps([
+        lineageAdapter(async () => {
+          throw error;
+        }),
+      ]),
+    );
+
+    await expect(
+      activities.executeQuery(
+        discoveryArgs("run-lost-twice", { query: QUERY, previousQueryUnreplayable: true }),
+      ),
+    ).rejects.toBe(error);
+  });
+
+  it("answers with nothing from every provider, calling none, when term normalization cannot be replayed", async () => {
+    const discoverCompanies = vi.fn(async () => ({ records: [REC], costCents: 0 }));
+    const deps = makeDeps([{ ...okAdapter("wikidata", [REC]), discoverCompanies }]);
+    deps.taxonomy = taxonomy(async () => {
+      throw lost();
+    });
+    const activities = createDiscoveryActivities(deps);
+
+    const result = await activities.executeQuery(discoveryArgs("run-lost-terms", { query: QUERY }));
+
+    expect(discoverCompanies).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      rawCount: 0,
+      unreplayable: true,
+      queryReceipt: { providers: ["wikidata"], accepted: 0 },
+    });
+  });
+
+  it("fails the query when term normalization cannot be replayed right after such a query", async () => {
+    const error = lost();
+    const discoverCompanies = vi.fn(async () => ({ records: [REC], costCents: 0 }));
+    const deps = makeDeps([{ ...okAdapter("wikidata", [REC]), discoverCompanies }]);
+    deps.taxonomy = taxonomy(async () => {
+      throw error;
+    });
+    const activities = createDiscoveryActivities(deps);
+
+    await expect(
+      activities.executeQuery(
+        discoveryArgs("run-lost-terms-twice", { query: QUERY, previousQueryUnreplayable: true }),
+      ),
+    ).rejects.toBe(error);
+    expect(discoverCompanies).not.toHaveBeenCalled();
+  });
+
+  it("rejects a hand-off flag that is not a boolean before any call", async () => {
+    const discoverCompanies = vi.fn(async () => ({ records: [REC], costCents: 0 }));
+    const activities = createDiscoveryActivities(
+      makeDeps([{ ...okAdapter("wikidata", [REC]), discoverCompanies }]),
+    );
+
+    await expect(
+      activities.executeQuery(
+        discoveryArgs("run-lost-flag", { query: QUERY, previousQueryUnreplayable: "yes" as never }),
+      ),
+    ).rejects.toMatchObject({ type: "DISCOVERY_STAGE_CONTINUATION_INVALID", nonRetryable: true });
+    expect(discoverCompanies).not.toHaveBeenCalled();
+  });
+
+  it("still fails the query on every other control error of a provider", async () => {
+    const error = new ExecutionControlError("EXECUTION_BUDGET_AUTHORITY_REVOKED");
+    const activities = createDiscoveryActivities(
+      makeDeps([
+        lineageAdapter(async () => {
+          throw error;
+        }),
+      ]),
+    );
+
+    await expect(
+      activities.executeQuery(discoveryArgs("run-lost-other", { query: QUERY })),
+    ).rejects.toBe(error);
   });
 });

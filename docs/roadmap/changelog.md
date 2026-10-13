@@ -74,6 +74,25 @@
   - 查询因无法重放而失败时，这条查询里已经抽到的其他公司一并丢失（这一条查询整体记为失败）。按公司粒度的恢复要改受治理的血缘收集器，放到完整 D13。
   - run 统计只计每个活动最后一次尝试的计数：fit 重试前那次尝试判过的公司，判定已存库，但不计入 `stats.fit`（旧问题，状态判定不受影响）。
 
+## 2026-10-13 · End a query that lost a provider to an unreplayable operation with a zero receipt, so materialization still admits the run
+
+- 起因：卖方 #27 的验收 run（`5abe5584`，xin，2026-10-13 12:25–12:53 UTC）第一次让 #642 的查询恢复生效——第 1 条查询的 5 次并发抽取在同一秒被 openox.tech 的上游错误事件打断，重试撞上无法重放的操作，这条查询记为失败，其余 9 条照常跑完（59 条原始记录、51 条通过）——却在 canonicalize 阶段报 `DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD`。
+  - 物化准入 `admit_discovery_company_materialization_v1`（2026-08-30 的 Q v2「完整」语义）要求回执数、执行结果数都等于计划查询数，且每个 ordinal 都有回执。#642 让失败的查询不落回执就继续，正好打破了这条不变式。
+  - 预演测试把 canonicalize 整个 mock 掉，所以没有发现。
+- 改动：
+  - **活动**（`executeQuery`）：某个数据源在重试时遇到无法重放的操作，不再让活动失败，而是把这个源替换成「已路由、0 条记录、0 费用」的结果（声明血缘的源带一份空血缘），其余源的记录照常落库，查询以零回执结束并返回 `unreplayable: true`。词表归一遇到这种操作时，不再调用任何源（每个源都会再撞上同一个操作），整条查询同样以零回执结束。此前那次尝试已经发出的调用仍在预算账本上。
+  - **工作流**：改为读返回值计数（`failures`、`unreplayableSkips.queries`），并把 `previousQueryUnreplayable` 交给下一条查询的活动；活动在它为真时直接把无法重放的错误抛出，所以「连续两条即停」的规则没变，只是停在活动里。查询活动因无法重放而失败的情况不再被吸收：那说明查询没能落回执，继续跑只会在物化时被扣住。
+  - 对接说明（`packages/contracts/INTEGRATION.md` 第 3 步）同步。
+- 测试：
+  - 先写失败测试，改动前 11 项失败、改动后 5 个文件 263 项全部通过：
+    - 活动 8 项：零回执列出该源且无跳过原因；其余源的记录保留；全部应答时不标记；前一条已丢失时直接失败；词表归一丢失时不调用任何源；词表归一紧跟在上一条之后时失败；交接标志不是布尔值时拒绝；其他控制错误照旧失败。原「generic replay 拒绝活动」用例改为新行为。
+    - 工作流 4 项：记失败并把标志交给下一条、第二条由活动报错时 run 失败、中间隔一条成功时不交接、活动因无法重放而失败时不再吸收。
+  - **预演测试补上物化准入**：canonicalize 的 mock 按 `admit_discovery_company_materialization_v1` 的规则，缺任何一条查询的回执就扣住 run；查询 mock 按活动的新行为应答。新增场景「一条查询每次尝试都因普通错误失败 → 没有回执 → 物化扣住、run 判 FAILED」。这个场景在改动前就成立，记录的是下面「未做」里的既有缺口。
+- 未做：
+  - 查询活动因**普通**错误用尽重试时仍然没有回执，run 会在物化时被扣住（#642 之前就如此；只是普通错误很少见，多数错误都归为控制错误）。
+  - 共用操作键的失败仍会跨查询传染：词表归一的操作键由 run、任务、提示词决定，一次 503 让后面每条查询第一次尝试就撞上，连续两条即停（卖方 #26，10-13 11:36）。根治在网关或词表归一回退，按产品负责人决定放在验收之后。
+  - REPLAYED 的查询结果（同一活动在上一次尝试已提交回执）不带 `unreplayable` 标记，不计入统计。
+
 ## 2026-10-12 · Keep a governed discovery query going when one model extraction answers unusably
 
 - 起因：卖方 #20 的验收 run（`322866ef`，xin，2026-10-11 19:02–19:21 UTC）在第 8 条查询失败，报 `DOMAIN_ACK_DISCOVERY_QUERY_LINEAGE_RECEIPT_MISMATCH`。

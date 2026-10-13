@@ -225,6 +225,8 @@ interface Faults {
   fitBreaks?: number[];
   /** Plan queries (0-based) whose first attempt breaks and whose retries meet the unreplayable call. */
   queryBreaks?: number[];
+  /** Plan queries (0-based) whose every attempt fails on a plain error, so they end without a receipt. */
+  queryFails?: number[];
   /** Website profiles (1-based) whose operation cannot be replayed. */
   profileUnreplayable?: number[];
   /** Signal enricher calls (1-based) whose operation cannot be replayed; 'all' for an outage. */
@@ -263,6 +265,19 @@ function queryReceipt(queryOrdinal: number) {
     budgetTruncated: false,
   };
 }
+
+/** A query whose provider was lost to an unreplayable operation: routed, nothing to show, flagged. */
+function lostQueryReceipt(queryOrdinal: number) {
+  const answered = queryReceipt(queryOrdinal);
+  return {
+    ...answered,
+    rawCount: 0,
+    unreplayable: true,
+    queryReceipt: { ...answered.queryReceipt, accepted: 0, usageQuantity: 0 },
+  };
+}
+
+const MATERIALIZATION_HOLD = 'DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD';
 
 /**
  * Wires the workflow's activities: plan loading, canonicalization, patent enqueue and
@@ -363,19 +378,25 @@ function rehearse(options: { companies: number; slowdown?: number; faults?: Faul
     now: () => rehearsal.clock.now,
   } as never);
 
-  // The query stage answers at once; a configured query breaks on its first attempt, and its
-  // retries meet the call that attempt left behind.
+  // The query stage answers at once. A configured query breaks on its first attempt; its retries
+  // meet the call that attempt left behind and, as the activity does, end the query with a zero
+  // receipt, unless the query before ended the same way.
+  const receipts = new Set<number>();
   const queryAttempts = new Map<number, number>();
-  const executeQuery = async (args: { queryOrdinal: number }) => {
+  const executeQuery = async (args: { queryOrdinal: number; previousQueryUnreplayable?: boolean }) => {
     const attempt = (queryAttempts.get(args.queryOrdinal) ?? 0) + 1;
     queryAttempts.set(args.queryOrdinal, attempt);
     advance(LATENCY_MS.fit);
+    if (faults.queryFails?.includes(args.queryOrdinal)) throw new Error('rehearsal query failure');
     if (faults.queryBreaks?.includes(args.queryOrdinal)) {
       if (attempt === 1) {
         throw new ProviderTransportError('CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR', { inputTokens: 520 });
       }
-      throw new BudgetOperationReplayError(`query-${args.queryOrdinal}`);
+      if (args.previousQueryUnreplayable) throw new BudgetOperationReplayError(`query-${args.queryOrdinal}`);
+      receipts.add(args.queryOrdinal);
+      return lostQueryReceipt(args.queryOrdinal);
     }
+    receipts.add(args.queryOrdinal);
     return queryReceipt(args.queryOrdinal);
   };
 
@@ -431,7 +452,14 @@ function rehearse(options: { companies: number; slowdown?: number; faults?: Faul
       priority: i + 1,
     })),
   });
-  acts.canonicalizeRun.mockResolvedValue({ companies: options.companies, suppressed: 0 });
+  // The materialization admission (`admit_discovery_company_materialization_v1`) holds the run
+  // unless every plan query ended with its receipt.
+  acts.canonicalizeRun.mockImplementation(async () => {
+    for (let ordinal = 0; ordinal < QUERY_COUNT; ordinal += 1) {
+      if (!receipts.has(ordinal)) throw ApplicationFailure.nonRetryable(MATERIALIZATION_HOLD, MATERIALIZATION_HOLD);
+    }
+    return { companies: options.companies, suppressed: 0 };
+  });
   acts.enqueuePatentLookupsForRun.mockResolvedValue({ candidates: 0, enqueued: 0 });
   acts.finalizeRun.mockResolvedValue(undefined);
 
@@ -538,6 +566,18 @@ describe('discovery run rehearsal at measured latencies', () => {
     expect(rehearsalRun.finalized()).toMatchObject({
       status: 'FAILED',
       stats: { failure: { stage: 'signals', errorType: 'BudgetOperationReplayError', control: true } },
+    });
+  });
+
+  it('holds materialization when a query ends without its receipt (a plain failure on every attempt)', async () => {
+    const rehearsalRun = rehearse({ companies: 100, faults: { queryFails: [1] } });
+
+    await expect(rehearsalRun.run()).rejects.toMatchObject({ type: MATERIALIZATION_HOLD });
+
+    expect(rehearsalRun.callsOf('executeQuery').filter(({ attempt }) => attempt > 1)).toHaveLength(2);
+    expect(rehearsalRun.finalized()).toMatchObject({
+      status: 'FAILED',
+      stats: { failures: 1, failure: { stage: 'canonicalize', errorType: MATERIALIZATION_HOLD, control: true } },
     });
   });
 });
