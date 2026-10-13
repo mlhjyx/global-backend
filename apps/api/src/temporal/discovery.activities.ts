@@ -18,7 +18,13 @@ import { queryTaxonomyTerms } from '../discovery/query-taxonomy-terms';
 import { artifactSubjectSkipReason } from '../tools/artifact-subject-denial';
 import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-judge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
-import { CompanyDiscoveryQuery, EnrichmentResult, ExecutionContext, SourceClass } from '../discovery/provider-contract';
+import {
+  CompanyDiscoveryQuery,
+  DiscoveryResult,
+  EnrichmentResult,
+  ExecutionContext,
+  SourceClass,
+} from '../discovery/provider-contract';
 import { companyIdentity } from '../discovery/identity';
 import {
   assertProductDiscoveryProvenance,
@@ -67,6 +73,11 @@ import {
   projectDiscoveryQueryLineageAttestKey,
 } from '../discovery/discovery-query-governed-lineage';
 import { attestQueryLineageV2 } from '../discovery/discovery-query-lineage.repository';
+import {
+  buildDiscoveryCompanyResultLineage,
+  declaresDiscoveryCompanyLineage,
+  isDiscoveryCompanyLineageProviderKey,
+} from '../discovery/company-discovery-lineage';
 import {
   buildGovernedDiscoveryQueryExecutionPlan,
   commitGovernedDiscoveryQueryExecution,
@@ -154,6 +165,12 @@ interface DiscoveryQueryExecutionResult {
    * failed call. Absent when no provider called a model, and on a replay that ran no provider.
    */
   modelExtractions?: DiscoveryModelExtractions;
+  /**
+   * A provider of this query lost its operation to a replay the gateway refuses (settled or in
+   * flight without a durable result): the query ended with a zero receipt for that provider,
+   * and the workflow counts it. Absent when every provider answered.
+   */
+  unreplayable?: boolean;
 }
 
 function withModelExtractions(
@@ -161,6 +178,42 @@ function withModelExtractions(
   modelExtractions: DiscoveryModelExtractions | undefined,
 ): DiscoveryQueryExecutionResult {
   return modelExtractions ? { ...result, modelExtractions } : result;
+}
+
+function withUnreplayable(
+  result: DiscoveryQueryExecutionResult,
+  unreplayable: boolean,
+): DiscoveryQueryExecutionResult {
+  return unreplayable ? { ...result, unreplayable: true } : result;
+}
+
+type ProviderExecution = {
+  key: string;
+  r: DiscoveryResult;
+  durableReceipts: Array<{ producerId: string; receipt: DurableExecutionReceipt }>;
+};
+
+/**
+ * What a provider whose operation cannot be replayed contributes to a query: no records, no
+ * cost and, for a provider with governed lineage, an empty lineage, so the query's receipt
+ * lists the provider as routed with nothing to show. The calls the provider made before are on
+ * the budget ledger; the run's stats count the query.
+ */
+function unreplayableProviderExecution(
+  adapter: Readonly<{ key: string; companyResultLineage?: unknown }>,
+): PromiseFulfilledResult<ProviderExecution> {
+  const lineage =
+    declaresDiscoveryCompanyLineage(adapter) && isDiscoveryCompanyLineageProviderKey(adapter.key)
+      ? buildDiscoveryCompanyResultLineage({ providerKey: adapter.key, recordCount: 0, observations: [] })
+      : undefined;
+  return {
+    status: 'fulfilled',
+    value: {
+      key: adapter.key,
+      r: { records: [], costCents: 0, ...(lineage ? { lineage } : {}) },
+      durableReceipts: [],
+    },
+  };
 }
 
 /**
@@ -559,7 +612,15 @@ export function createDiscoveryActivities(deps: {
       planId?: string;
       queryOrdinal?: number;
       query: PlanQuery;
+      /** The query before this one lost a provider to an unreplayable operation (workflow hand-off). */
+      previousQueryUnreplayable?: boolean;
     }): Promise<DiscoveryQueryExecutionResult> {
+      if (
+        args.previousQueryUnreplayable !== undefined &&
+        typeof args.previousQueryUnreplayable !== 'boolean'
+      ) {
+        invalidContinuation();
+      }
       let binding: ExecutionBudgetBinding;
       try {
         if (args.executionContractVersion !== 2) throw new Error('invalid version');
@@ -660,30 +721,48 @@ export function createDiscoveryActivities(deps: {
       const enriched: Record<string, unknown> = {
         ...(args.query.filters ?? {}),
       };
+      // A provider whose operation cannot be replayed (settled or in flight without a durable
+      // result, the way a retry finds the call a broken attempt left behind) answers this query
+      // with nothing instead of failing it: the query still ends with its receipt, which the
+      // materialization admission requires for every plan query, and the workflow counts it.
+      // A second query in a row looks like an outage and still fails.
+      const lostOnReplay = (error: unknown): boolean => {
+        if (!isUnreplayableOperation(error)) return false;
+        if (args.previousQueryUnreplayable) throw error;
+        return true;
+      };
+      // Term normalization is shared by every query of the run: once its operation is lost,
+      // no provider of this query is called, since each would reach that operation again.
+      let taxonomyUnreplayable = false;
       if (deps.taxonomy && adapters.length > 0) {
-        // Bounded per query: each unresolved term costs one taxonomy.normalize call.
-        const { industryTerms, countryTerms } = queryTaxonomyTerms(enriched);
-        const inds = await deps.taxonomy.resolveMany('industry', industryTerms, {
-          workspaceId: args.workspaceId,
-          runId: binding.accountKey,
-          executionBudget: binding,
-        });
-        if (inds.length) {
-          enriched._industryQids = inds.map((n) => n.wikidataQid).filter(Boolean);
-          enriched._osmTags = inds.flatMap((n) => n.osmTags ?? []);
-          enriched._industryCodes = inds.map((n) => n.code);
-        }
-        for (const ct of countryTerms) {
-          const c = await deps.taxonomy.resolve('country', ct, {
+        try {
+          // Bounded per query: each unresolved term costs one taxonomy.normalize call.
+          const { industryTerms, countryTerms } = queryTaxonomyTerms(enriched);
+          const inds = await deps.taxonomy.resolveMany('industry', industryTerms, {
             workspaceId: args.workspaceId,
             runId: binding.accountKey,
             executionBudget: binding,
           });
-          if (c?.wikidataQid) {
-            enriched._countryQid = c.wikidataQid;
-            enriched._countryCode = c.code;
-            break;
+          if (inds.length) {
+            enriched._industryQids = inds.map((n) => n.wikidataQid).filter(Boolean);
+            enriched._osmTags = inds.flatMap((n) => n.osmTags ?? []);
+            enriched._industryCodes = inds.map((n) => n.code);
           }
+          for (const ct of countryTerms) {
+            const c = await deps.taxonomy.resolve('country', ct, {
+              workspaceId: args.workspaceId,
+              runId: binding.accountKey,
+              executionBudget: binding,
+            });
+            if (c?.wikidataQid) {
+              enriched._countryQid = c.wikidataQid;
+              enriched._countryCode = c.code;
+              break;
+            }
+          }
+        } catch (error) {
+          if (!lostOnReplay(error)) throw error;
+          taxonomyUnreplayable = true;
         }
       }
       const q: CompanyDiscoveryQuery = {
@@ -714,24 +793,36 @@ export function createDiscoveryActivities(deps: {
       const blockedDomains = sourcePolicies
         .filter((policy) => policy.reviewStatus === 'SUSPENDED')
         .map((policy) => policy.domain);
-      const settled = await Promise.allSettled(
-        adapters.map(async (a) => {
-          const durableReceipts: Array<{
-            producerId: string;
-            receipt: DurableExecutionReceipt;
-          }> = [];
-          const r = await a.discoverCompanies(q, {
-            ...ctx,
-            onDurableReceipt: (producerId, receipt) => {
-              if (!DISCOVERY_DOMAIN_ACK_PRODUCERS.has(producerId)) {
-                throw new ExecutionControlError('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
-              }
-              durableReceipts.push({ producerId, receipt });
-            },
-          }, { blockedDomains });
-          return { key: a.key, r, durableReceipts };
-        }),
+      const dispatched: PromiseSettledResult<ProviderExecution>[] = taxonomyUnreplayable
+        ? []
+        : await Promise.allSettled(
+            adapters.map(async (a) => {
+              const durableReceipts: Array<{
+                producerId: string;
+                receipt: DurableExecutionReceipt;
+              }> = [];
+              const r = await a.discoverCompanies(q, {
+                ...ctx,
+                onDurableReceipt: (producerId, receipt) => {
+                  if (!DISCOVERY_DOMAIN_ACK_PRODUCERS.has(producerId)) {
+                    throw new ExecutionControlError('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+                  }
+                  durableReceipts.push({ producerId, receipt });
+                },
+              }, { blockedDomains });
+              return { key: a.key, r, durableReceipts };
+            }),
+          );
+      // Every provider has finished by now, so nothing is sent after a lost operation is seen.
+      const lostProviders = dispatched.flatMap((result, index) =>
+        result.status === 'rejected' && lostOnReplay(result.reason) ? [index] : [],
       );
+      const unreplayable = taxonomyUnreplayable || lostProviders.length > 0;
+      const settled: PromiseSettledResult<ProviderExecution>[] = taxonomyUnreplayable
+        ? adapters.map((adapter) => unreplayableProviderExecution(adapter))
+        : dispatched.map((result, index) =>
+            lostProviders.includes(index) ? unreplayableProviderExecution(adapters[index]!) : result,
+          );
       for (const result of settled) {
         if (result.status === 'rejected' && isExecutionControlError(result.reason)) {
           // UNKNOWN physical-call/ACK state is a control failure: throw it and
@@ -784,7 +875,10 @@ export function createDiscoveryActivities(deps: {
           budgetAuthorization,
           budgetTruncated,
         });
-        return withModelExtractions(withReceiptSkip(governed, skipReason), modelExtractions);
+        return withUnreplayable(
+          withModelExtractions(withReceiptSkip(governed, skipReason), modelExtractions),
+          unreplayable,
+        );
       }
       // ── 事务内：bounded Raw v2 receipt + deterministic reconciliation ──
       return deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
@@ -975,11 +1069,14 @@ export function createDiscoveryActivities(deps: {
         // Only a query with no receipt identity can reach this path with no
         // adapter; a legacy receipt omits providers that failed, so its
         // provider list cannot tell a skip apart.
-        return withModelExtractions(
-          adapters.length === 0
-            ? { ...persisted.value, skipReason: skipReason() }
-            : persisted.value,
-          modelExtractions,
+        return withUnreplayable(
+          withModelExtractions(
+            adapters.length === 0
+              ? { ...persisted.value, skipReason: skipReason() }
+              : persisted.value,
+            modelExtractions,
+          ),
+          unreplayable,
         );
       });
     },

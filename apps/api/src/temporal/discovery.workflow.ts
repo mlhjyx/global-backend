@@ -81,16 +81,6 @@ interface FitTotals {
   unreplayable?: number;
 }
 
-/**
- * A query activity whose last attempt met an operation it cannot replay: an earlier attempt's
- * wire ran and left no durable result, so it is never sent again (D13). Temporal reports the
- * activity's error class as the failure type.
- */
-function isUnreplayableActivityFailure(error: unknown): boolean {
-  if (!(error instanceof TemporalFailure)) return false;
-  return (error.cause as { type?: unknown } | undefined)?.type === 'BudgetOperationReplayError';
-}
-
 interface WebsiteProfileTotals {
   profiled: number;
   matched: number;
@@ -277,10 +267,16 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     const { queries } = await acts.loadPlanQueries({ workspaceId, planId, ...authorityArgs });
     queryCount = queries.length;
     stage = 'query';
-    // A query whose retries met an operation they cannot replay counts as failed and the plan
-    // goes on; a second such query in a row looks like an outage and still stops the run.
+    // A query that lost a provider to an operation it cannot replay ends with a zero receipt
+    // and counts as failed; the plan goes on. The activity hears whether the query before did
+    // the same: a second such query in a row looks like an outage, and the activity fails it.
     let previousQueryUnreplayable = false;
     for (const [queryOrdinal, query] of queries.entries()) {
+      // Named only when set, so histories recorded before the hand-off replay unchanged. The
+      // annotation keeps the flag's control-flow type out of the activity result's inference.
+      const handOff: { previousQueryUnreplayable?: true } = previousQueryUnreplayable
+        ? { previousQueryUnreplayable: true }
+        : {};
       try {
         const r = await modelActs.executeQuery(
           usesQueryReceipts
@@ -292,8 +288,9 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
                 queryReceiptMode: DISCOVERY_QUERY_RECEIPT_MODE,
                 query,
                 ...authorityArgs,
+                ...handOff,
               }
-            : { workspaceId, runId, query, ...authorityArgs },
+            : { workspaceId, runId, query, ...authorityArgs, ...handOff },
         );
         acceptedRaw += r.rawCount;
         if (usesQueryReceipts) {
@@ -354,12 +351,15 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         }
         // Absent in histories recorded before the counter existed: replays keep their status.
         modelExtractions = addQueryModelExtractions(modelExtractions, r.modelExtractions);
-        previousQueryUnreplayable = false;
+        // Absent in histories recorded before the activity absorbed such a loss.
+        previousQueryUnreplayable = r.unreplayable === true;
+        if (previousQueryUnreplayable) {
+          unreplayableQueries += 1;
+          failures += 1;
+        }
       } catch (err) {
-        const unreplayable: boolean = isUnreplayableActivityFailure(err) && !previousQueryUnreplayable;
-        if (!unreplayable && isExecutionControlError(err)) throw err;
-        previousQueryUnreplayable = unreplayable;
-        if (unreplayable) unreplayableQueries += 1;
+        if (isExecutionControlError(err)) throw err;
+        previousQueryUnreplayable = false;
         failures += 1;
         if (!usesQueryReceipts) {
           perSource[query.source_class] = {
