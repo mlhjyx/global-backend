@@ -23,7 +23,8 @@ title: Replace the single-file changelog with one fragment per PR, assembled lat
     - 本仓的片段合格；`governance.yml` 的步骤形状与 `verify-docs` 的接线。
   - 该 spec 由 `scripts/governance-contracts.spec.mjs` 引入，随 `governance:verify` 在 CI 的 governance 工作流与 `docs:verify` 中运行。
   - 对本仓真实 `changelog.md` 预演汇编（把本片段折进去再还原）：只在当天已有小节之后多出这一节，其余内容逐字节不变。
-  - `gctl check`：docs/governance、prisma generate、contracts、lint、build 全绿；零容器单测见 PR。
+  - `gctl check` 全部通过：docs/governance、prisma generate、contracts、lint、build、零容器单测。
+  - 本分支对 `origin/main` 跑 `require`：识别出本片段，通过。
 - 未做：
   - 没有改 ruleset，strict 维持关闭。
   - 没有自动汇编：不加 bot、不加定时任务，片段会在目录里累积到有人运行汇编为止。
