@@ -1164,7 +1164,7 @@ export class PostgresBudgetStore implements BudgetStore {
       return await this.inAuthorityScope(reservation.workspaceId, async (tx) => {
         const rows = await tx.$queryRaw<MicrousdSettleRow[]>(
           objectVersionId
-            ? Prisma.sql`SELECT * FROM settle_tool_budget_artifact_manifest_with_receipt_v3(
+            ? Prisma.sql`SELECT * FROM settle_tool_budget_artifact_manifest_with_receipt_v4(
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
             ${observedMicrousd}, ${JSON.stringify(manifest)}::jsonb,
             ${facts.expectedHttpStatus}::smallint, ${facts.expectedHttpOk},
