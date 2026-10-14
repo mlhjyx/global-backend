@@ -3,6 +3,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { ApplicationFailure } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
+import { ProviderHttpError } from '../model-gateway/providers/provider-output-error';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import {
   MAX_COMPANY_DISCOVERY_ADAPTERS,
@@ -31,7 +32,7 @@ import {
   isProductDiscoveryRawRecord,
   resolveEvidenceLicense,
 } from '../discovery/evidence-license';
-import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
+import { TaxonomyResolver, type TaxonomyResolveOptions } from '../discovery/taxonomy-resolver';
 import { IntentProjectionService } from '../intent/intent-projection.service';
 import { enqueuePatentLookup, PATENT_PROVIDER_KEY } from '../adapters/patent-inventor-cache';
 import {
@@ -172,6 +173,30 @@ interface DiscoveryQueryExecutionResult {
    * and the workflow counts it. Absent when every provider answered.
    */
   unreplayable?: boolean;
+  /**
+   * Term normalization lost its model call (an operation that cannot be replayed, or an upstream
+   * 5xx the gateway settled without a result): the providers ran this query on their built-in
+   * vocabularies. The workflow counts it; the run's status is unchanged.
+   */
+  taxonomyFallback?: boolean;
+  /**
+   * No routed provider reads the resolved taxonomy, so normalization kept to the deterministic
+   * alias lookup and called no model. The workflow counts it.
+   */
+  taxonomyModelSkipped?: boolean;
+}
+
+type TaxonomyOutcome = Readonly<{ fallback: boolean; modelSkipped: boolean }>;
+
+function withTaxonomyOutcome(
+  result: DiscoveryQueryExecutionResult,
+  outcome: TaxonomyOutcome,
+): DiscoveryQueryExecutionResult {
+  return {
+    ...result,
+    ...(outcome.fallback ? { taxonomyFallback: true } : {}),
+    ...(outcome.modelSkipped ? { taxonomyModelSkipped: true } : {}),
+  };
 }
 
 function withModelExtractions(
@@ -424,6 +449,25 @@ function isContinuationIndex(value: unknown, limit: number): boolean {
  */
 function isUnreplayableOperation(error: unknown): error is BudgetOperationReplayError {
   return error instanceof BudgetOperationReplayError;
+}
+
+/**
+ * Term normalization refines a query; it is not the query's work. A provider without resolved
+ * codes falls back to its built-in vocabulary (wikidata, openstreetmap) or never read them
+ * (public_web, the registries). So a query whose normalization call is lost goes on without it
+ * instead of ending with nothing (#643) or failing: the operation cannot be replayed (the call
+ * ran and left no result; a retry finds it this way), or the upstream answered 5xx and the
+ * gateway settled the operation without a result (seller #26, run 3e78eb4e: one 503 on the
+ * first query, and every later query met the dead operation because the key was per run).
+ * This is the one place a ProviderHttpError is absorbed; elsewhere it stays a control error,
+ * since an outage usually hits every call of a run. A 4xx (credentials, quota, request) still
+ * fails closed here too, as does every other control error.
+ */
+function isLostTaxonomyNormalization(error: unknown): boolean {
+  return (
+    isUnreplayableOperation(error) ||
+    (error instanceof ProviderHttpError && error.status >= 500)
+  );
 }
 
 /** ICP 品类上下文（只供模型判断相关品类，不进输出）。 */
@@ -779,9 +823,9 @@ export function createDiscoveryActivities(deps: {
       for (const adapter of adapters) {
         assertProductDiscoveryProvenance({ providerKey: adapter.key });
       }
-      // 词表归一（冷路径，docs/backend/vocab-taxonomy.md）：把 filters 里的行业/国家
-      // 自由词（中/英/德）归一到规范节点，注入 resolved 码供各源精确路由。
-      // 未接 resolver 或未命中时，provider 回退到内置 vocab.ts。
+      // 词表归一（docs/backend/vocab-taxonomy.md）：把 filters 里的行业/国家自由词（中/英/德）
+      // 归一到规范节点，注入 resolved 码供会读它们的源精确路由。未接 resolver 或未命中时，
+      // provider 回退到内置 vocab.ts。
       const enriched: Record<string, unknown> = {
         ...(args.query.filters ?? {}),
       };
@@ -795,29 +839,34 @@ export function createDiscoveryActivities(deps: {
         if (args.previousQueryUnreplayable) throw error;
         return true;
       };
-      // Term normalization is shared by every query of the run: once its operation is lost,
-      // no provider of this query is called, since each would reach that operation again.
-      let taxonomyUnreplayable = false;
-      if (deps.taxonomy && adapters.length > 0) {
+      // The model is worth calling only for a source that reads the resolved codes (wikidata,
+      // openstreetmap); a query routed to public_web or the registries alone keeps the
+      // deterministic alias lookup. The model operation is keyed per query, not per run, and a
+      // lost call falls back to the providers' vocabularies (isLostTaxonomyNormalization).
+      const taxonomyConsumed = adapters.some((adapter) => adapter.consumesResolvedTaxonomy === true);
+      // Bounded per query: each unresolved term costs one taxonomy.normalize call.
+      const { industryTerms, countryTerms } = queryTaxonomyTerms(enriched);
+      const taxonomy = adapters.length > 0 ? deps.taxonomy : undefined;
+      let taxonomyFallback = false;
+      if (taxonomy) {
+        const resolveOptions: TaxonomyResolveOptions = {
+          workspaceId: args.workspaceId,
+          runId: binding.accountKey,
+          executionBudget: binding,
+          ...(receiptIdentity && queryKey
+            ? { correlationId: `${queryKey}:${receiptIdentity.queryOrdinal}` }
+            : {}),
+          ...(taxonomyConsumed ? {} : { allowLlm: false }),
+        };
         try {
-          // Bounded per query: each unresolved term costs one taxonomy.normalize call.
-          const { industryTerms, countryTerms } = queryTaxonomyTerms(enriched);
-          const inds = await deps.taxonomy.resolveMany('industry', industryTerms, {
-            workspaceId: args.workspaceId,
-            runId: binding.accountKey,
-            executionBudget: binding,
-          });
+          const inds = await taxonomy.resolveMany('industry', industryTerms, resolveOptions);
           if (inds.length) {
             enriched._industryQids = inds.map((n) => n.wikidataQid).filter(Boolean);
             enriched._osmTags = inds.flatMap((n) => n.osmTags ?? []);
             enriched._industryCodes = inds.map((n) => n.code);
           }
           for (const ct of countryTerms) {
-            const c = await deps.taxonomy.resolve('country', ct, {
-              workspaceId: args.workspaceId,
-              runId: binding.accountKey,
-              executionBudget: binding,
-            });
+            const c = await taxonomy.resolve('country', ct, resolveOptions);
             if (c?.wikidataQid) {
               enriched._countryQid = c.wikidataQid;
               enriched._countryCode = c.code;
@@ -825,10 +874,17 @@ export function createDiscoveryActivities(deps: {
             }
           }
         } catch (error) {
-          if (!lostOnReplay(error)) throw error;
-          taxonomyUnreplayable = true;
+          // The terms resolved before the loss stay; the rest use the providers' vocabularies.
+          if (!isLostTaxonomyNormalization(error)) throw error;
+          taxonomyFallback = true;
         }
       }
+      // Counted only when there was a term the model could have been asked about.
+      const taxonomyOutcome: TaxonomyOutcome = {
+        fallback: taxonomyFallback,
+        modelSkipped:
+          taxonomy !== undefined && !taxonomyConsumed && industryTerms.length + countryTerms.length > 0,
+      };
       const q: CompanyDiscoveryQuery = {
         sourceClass,
         filters: enriched,
@@ -857,36 +913,32 @@ export function createDiscoveryActivities(deps: {
       const blockedDomains = sourcePolicies
         .filter((policy) => policy.reviewStatus === 'SUSPENDED')
         .map((policy) => policy.domain);
-      const dispatched: PromiseSettledResult<ProviderExecution>[] = taxonomyUnreplayable
-        ? []
-        : await Promise.allSettled(
-            adapters.map(async (a) => {
-              const durableReceipts: Array<{
-                producerId: string;
-                receipt: DurableExecutionReceipt;
-              }> = [];
-              const r = await a.discoverCompanies(q, {
-                ...ctx,
-                onDurableReceipt: (producerId, receipt) => {
-                  if (!DISCOVERY_DOMAIN_ACK_PRODUCERS.has(producerId)) {
-                    throw new ExecutionControlError('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
-                  }
-                  durableReceipts.push({ producerId, receipt });
-                },
-              }, { blockedDomains });
-              return { key: a.key, r, durableReceipts };
-            }),
-          );
+      const dispatched: PromiseSettledResult<ProviderExecution>[] = await Promise.allSettled(
+        adapters.map(async (a) => {
+          const durableReceipts: Array<{
+            producerId: string;
+            receipt: DurableExecutionReceipt;
+          }> = [];
+          const r = await a.discoverCompanies(q, {
+            ...ctx,
+            onDurableReceipt: (producerId, receipt) => {
+              if (!DISCOVERY_DOMAIN_ACK_PRODUCERS.has(producerId)) {
+                throw new ExecutionControlError('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+              }
+              durableReceipts.push({ producerId, receipt });
+            },
+          }, { blockedDomains });
+          return { key: a.key, r, durableReceipts };
+        }),
+      );
       // Every provider has finished by now, so nothing is sent after a lost operation is seen.
       const lostProviders = dispatched.flatMap((result, index) =>
         result.status === 'rejected' && lostOnReplay(result.reason) ? [index] : [],
       );
-      const unreplayable = taxonomyUnreplayable || lostProviders.length > 0;
-      const settled: PromiseSettledResult<ProviderExecution>[] = taxonomyUnreplayable
-        ? adapters.map((adapter) => unreplayableProviderExecution(adapter))
-        : dispatched.map((result, index) =>
-            lostProviders.includes(index) ? unreplayableProviderExecution(adapters[index]!) : result,
-          );
+      const unreplayable = lostProviders.length > 0;
+      const settled: PromiseSettledResult<ProviderExecution>[] = dispatched.map((result, index) =>
+        lostProviders.includes(index) ? unreplayableProviderExecution(adapters[index]!) : result,
+      );
       for (const result of settled) {
         if (result.status === 'rejected' && isExecutionControlError(result.reason)) {
           // UNKNOWN physical-call/ACK state is a control failure: throw it and
@@ -939,13 +991,16 @@ export function createDiscoveryActivities(deps: {
           budgetAuthorization,
           budgetTruncated,
         });
-        return withUnreplayable(
-          withModelExtractions(withReceiptSkip(governed, skipReason), modelExtractions),
-          unreplayable,
+        return withTaxonomyOutcome(
+          withUnreplayable(
+            withModelExtractions(withReceiptSkip(governed, skipReason), modelExtractions),
+            unreplayable,
+          ),
+          taxonomyOutcome,
         );
       }
       // ── 事务内：bounded Raw v2 receipt + deterministic reconciliation ──
-      return deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+      const legacy = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const persisted = await applyDomainAckConsumerTransactions({
           transaction: tx,
           acknowledgements: settled.flatMap((item) => item.status === 'fulfilled'
@@ -1143,6 +1198,7 @@ export function createDiscoveryActivities(deps: {
           unreplayable,
         );
       });
+      return withTaxonomyOutcome(legacy, taxonomyOutcome);
     },
 
     /**

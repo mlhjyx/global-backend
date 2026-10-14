@@ -111,6 +111,24 @@ export function parseStoredArtifactContract(
   });
 }
 
+const EXPIRATION_HEADER_PATTERN = /expiry-date="([^"]{1,64})"/u;
+
+/**
+ * The lifecycle expiry S3 and MinIO announce on HEAD/GET as
+ * `x-amz-expiration: expiry-date="<RFC 1123>", rule-id="..."` when an
+ * expiration rule matches the object. MinIO derives it from the object's
+ * LastModified (midnight UTC after LastModified + Days + 1 day), so it is the
+ * one authoritative statement of when the bucket lifecycle will delete the
+ * current version. Null when no rule applies or the header is unreadable.
+ */
+export function parseLifecycleExpiration(value: unknown): Date | null {
+  if (typeof value !== 'string' || value.length > 512) return null;
+  const match = EXPIRATION_HEADER_PATTERN.exec(value);
+  if (!match?.[1]) return null;
+  const date = new Date(match[1]);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
 export function objectMetadata(
   artifact: ArtifactDescriptor,
 ): Readonly<Record<string, string>> {
@@ -123,6 +141,15 @@ export function objectMetadata(
   });
 }
 
+/**
+ * Whether a stored object is the artifact a caller expects. A final object is
+ * addressed by its bytes inside one privacy boundary, so two operations whose
+ * results are byte-identical share it even when their result schemas or media
+ * types differ: an empty HEAD probe (http-get/v1, text/plain) and an empty
+ * crawl (crawl4ai-fetch/v1, text/markdown) are the same empty object. The
+ * object's own metadata records the first writer's contract; each artifact
+ * manifest carries its own, and materializers read the manifest.
+ */
 export function sameArtifact(
   stored: ArtifactDescriptor,
   expected: ArtifactDescriptor,
@@ -130,8 +157,23 @@ export function sameArtifact(
   return (
     stored.sha256 === expected.sha256 &&
     stored.sizeBytes === expected.sizeBytes &&
-    stored.mediaType === expected.mediaType &&
-    stored.resultSchema === expected.resultSchema &&
     stored.privacyClass === expected.privacyClass
+  );
+}
+
+/**
+ * Whether two descriptors carry the identical object contract: bytes, privacy
+ * boundary, media type and result schema. Reuse compares only the bytes
+ * (sameArtifact); a write to an existing object, such as the retention refresh
+ * copy, must leave the first writer's whole contract exactly as it found it.
+ */
+export function sameObjectContract(
+  stored: ArtifactDescriptor,
+  expected: ArtifactDescriptor,
+): boolean {
+  return (
+    sameArtifact(stored, expected) &&
+    stored.mediaType === expected.mediaType &&
+    stored.resultSchema === expected.resultSchema
   );
 }

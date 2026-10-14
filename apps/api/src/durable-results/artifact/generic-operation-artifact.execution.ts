@@ -13,6 +13,7 @@ import { parseArtifactExpectedFacts } from './artifact-expected-facts';
 import type { ArtifactMaterializerRegistry } from './artifact-materializer.registry';
 import type { ArtifactSubjectBindingContract } from './artifact-subject-binding.contract';
 import {
+  GenericOperationArtifactError,
   invalidGenericOperationArtifact,
   isCanonicalArtifactUuid,
 } from './artifact.types';
@@ -173,9 +174,14 @@ async function* bytesOf(body: string): AsyncIterable<Uint8Array> {
   if (body.length > 0) yield new TextEncoder().encode(body);
 }
 
-/** The bounded storage code of a persist failure, or only the error's class. */
-function persistFailureLabel(error: unknown): string {
-  if (error instanceof ArtifactStorageError) return `${error.name}:${error.code}`;
+/** The bounded artifact or storage code of a failure, or only the error's class. */
+function failureLabel(error: unknown): string {
+  if (
+    error instanceof ArtifactStorageError ||
+    error instanceof GenericOperationArtifactError
+  ) {
+    return `${error.name}:${error.code}`;
+  }
   return error instanceof Error ? error.name : 'unknown';
 }
 
@@ -249,7 +255,7 @@ export class GenericOperationArtifactExecution implements ArtifactExecutionPort 
       // say which step failed. Only the bounded storage code is logged: a raw message may carry
       // endpoints or object keys.
       console.warn(
-        `[artifact] ${schema} persist failed for operation ${input.reservation.operationId}: ${persistFailureLabel(error)}`,
+        `[artifact] ${schema} persist failed for operation ${input.reservation.operationId}: ${failureLabel(error)}`,
       );
       throw error;
     }
@@ -273,18 +279,31 @@ export class GenericOperationArtifactExecution implements ArtifactExecutionPort 
     ) {
       return invalid();
     }
-    const verified = await this.deps.service.readVerified({
-      scopeKind: 'workspace',
-      workspaceId: input.reservation.workspaceId,
-      authorityId: authorityOf(input.reservation),
-      reference: replay.reference,
-    });
-    const data = await this.deps.materializers.materialize<O>(
-      schema,
-      verified.body,
-      verified.manifest,
-      verified.expectedFacts,
-    );
-    return { data, costCents: 0, durableReceipt: input.reservation.receipt };
+    try {
+      const verified = await this.deps.service.readVerified({
+        scopeKind: 'workspace',
+        workspaceId: input.reservation.workspaceId,
+        authorityId: authorityOf(input.reservation),
+        reference: replay.reference,
+      });
+      const data = await this.deps.materializers.materialize<O>(
+        schema,
+        verified.body,
+        verified.manifest,
+        verified.expectedFacts,
+      );
+      return { data, costCents: 0, durableReceipt: input.reservation.receipt };
+    } catch (error) {
+      // The broker turns any replay failure into an operation it cannot replay
+      // (no second physical call, the company or query is skipped and counted),
+      // and logs only the error's class. Leave the bounded code, the schema and
+      // the operation behind: an object the bucket no longer holds
+      // (GENERIC_OPERATION_ARTIFACT_OBJECT_MISSING) reads differently from a
+      // tampered one. Never the digest or an object key.
+      console.warn(
+        `[artifact] ${schema} replay failed for operation ${input.reservation.operationId}: ${failureLabel(error)}`,
+      );
+      throw error;
+    }
   }
 }

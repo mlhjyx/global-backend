@@ -1922,3 +1922,41 @@ describe('workspace authority Temporal compatibility', () => {
     },
   );
 });
+
+describe('discoveryWorkflow term normalization counters (W2)', () => {
+  const query = (priority: number) => ({
+    source_class: 'public_intelligence',
+    filters: { industry: 'Pumpen' },
+    keywords: [],
+    priority,
+  });
+  it('counts the queries whose normalization fell back or skipped the model, without degrading the status', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: [query(1), query(2), query(3)] });
+    // Read the primed answer before queueing: getMockImplementation() returns the next queued one.
+    const answered = await acts.executeQuery.getMockImplementation()!();
+    acts.executeQuery
+      .mockResolvedValueOnce({ ...answered, taxonomyFallback: true })
+      .mockResolvedValueOnce({ ...answered, taxonomyModelSkipped: true })
+      .mockResolvedValueOnce({ ...answered, taxonomyModelSkipped: true });
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'DONE',
+        stats: expect.objectContaining({ failures: 0, taxonomyFallback: 1, taxonomyModelSkipped: 2 }),
+      }),
+    );
+  });
+
+  it('keeps the stats shape of a run whose normalization neither fell back nor skipped the model', async () => {
+    primeDiscovery();
+
+    await discoveryWorkflow(discoveryInput());
+
+    const [{ stats }] = acts.finalizeRun.mock.calls[0]!;
+    expect(stats).not.toHaveProperty('taxonomyFallback');
+    expect(stats).not.toHaveProperty('taxonomyModelSkipped');
+  });
+});
