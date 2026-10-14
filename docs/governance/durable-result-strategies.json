@@ -6,11 +6,11 @@
     "protectedFiles": [
       {
         "path": "apps/api/src/tools/tool-broker.ts",
-        "sha256": "03dea53bbafd35283a2dcae2cd0613df18dbbc24b1addbf1d5db9fd7b40a46c4"
+        "sha256": "659bb26d8bd6a2c9c6b2b3e47ce3ca5b585208fd581ec23ba0c9d7e0c2aec685"
       },
       {
         "path": "apps/api/src/model-gateway/router-model-gateway.ts",
-        "sha256": "d3194efcca04fefa9cce175a2e9b11772613aa9c9c4b813d2109c539435ec964"
+        "sha256": "fd3e6091271280c547aa84b2bb89fbf1cea067572824987911bcba356e0e935c"
       },
       {
         "path": "apps/api/src/tools/tool-broker.factory.ts",
@@ -69,12 +69,14 @@
     ]
   },
   "resultDisposition": {
-    "schema": "execution-result-disposition/v1",
-    "kinds": ["valid_output", "result_unknown", "control_error", "replay_error"],
-    "automaticPhysicalRetryAllowed": false,
+    "schema": "execution-result-disposition/v2",
+    "kinds": ["valid_output", "result_unknown", "control_error", "definite_failure", "replay_error"],
+    "automaticPhysicalRetryAllowed": "DEFINITE_FAILURE_BEFORE_OUTPUT_ONLY",
     "unknownStatus": "RESULT_UNKNOWN",
     "controlStatus": "RELEASED",
-    "replayStatus": "SETTLED"
+    "definiteFailureStatus": "RELEASED",
+    "replayStatus": "SETTLED",
+    "maxReservationAttempts": 3
   },
   "tools": [
     {

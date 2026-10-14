@@ -20,8 +20,10 @@ import {
   projectModelResultForReplay,
   restoreModelResultFromReplay,
 } from "../durable-results/model-result-replay";
+import { definiteModelFailureCode } from "./definite-model-failure";
 import {
   ExternalActionDeniedError,
+  ProviderHttpError,
   ProviderIdentityError,
   ProviderOutputError,
   ProviderOutputUnresolvedError,
@@ -682,11 +684,19 @@ export class RouterModelGateway extends ModelGateway {
         input.model,
         substituteAnswers,
       );
-      if (
+      // D13: a definite failure before any output (HTTP 429/5xx, a connection
+      // that never opened, a stream that ended before its first output) cost
+      // nothing, so it releases like a pre-wire denial and a retry of the
+      // same key may reserve again. A platform-egress call stays with its
+      // fence, which owns that wire's outcome.
+      const controlDenial =
         err instanceof ExternalActionDeniedError &&
         err.callCount === 0 &&
-        !err.usage
-      ) {
+        !err.usage;
+      const definiteFailure = ctx.platformEgress
+        ? undefined
+        : definiteModelFailureCode(err);
+      if (controlDenial || definiteFailure !== undefined) {
         await this.budgetStore.release(reservation);
       } else {
         // Once a provider may have been called, an unusable output or unknown ACK is
@@ -719,14 +729,23 @@ export class RouterModelGateway extends ModelGateway {
         errorMessage:
           err instanceof ProviderOutputError
             ? `${err.name}:${err.reasonCode}`
-            : err instanceof Error
-              ? err.name
-              : "model call failed",
+            : err instanceof ProviderHttpError
+              ? `${err.name}:HTTP_${err.status}`
+              : err instanceof Error
+                ? err.name
+                : "model call failed",
         latencyMs: Date.now() - started,
         inputTokens: failedUsage?.inputTokens,
         outputTokens: failedUsage?.outputTokens,
         correlationId: ctx.correlationId,
         modelPolicy: ctx.modelPolicy,
+        // Durable link from this failure to its ledger row and what became of it.
+        budgetOperationId: reservation.operationId,
+        budgetDisposition: controlDenial
+          ? "RELEASED_CONTROL_DENIAL"
+          : definiteFailure !== undefined
+            ? "RELEASED_DEFINITE_FAILURE"
+            : "SETTLED_NO_RESULT",
       });
       throw err;
     }
