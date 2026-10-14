@@ -175,6 +175,19 @@ describe('weekly report row (BI-22, design §5)', () => {
     expect(byColumn(weeklyReportRow(input({ runCost: null })))['所属发现 run ID']).toBe('');
   });
 
+  it('shows an unknown stored label as is, without reading the prototype', () => {
+    const row = byColumn(
+      weeklyReportRow(
+        input({
+          fitVerdict: 'constructor',
+          company: { name: 'X GmbH', domain: null, country: null, attributes: { website_profile: { trade_role: 'toString' } } },
+        }),
+      ),
+    );
+    expect(row['Fit 结论']).toBe('constructor');
+    expect(row['贸易角色']).toBe('toString');
+  });
+
   it('names a cleared false positive explicitly', () => {
     expect(byColumn(weeklyReportRow(input({ sanctionsStatus: 'cleared_false_positive' })))['制裁状态']).toBe(
       '已筛查，命中经人工复核为误报',

@@ -29,6 +29,26 @@
   - 旧形态（无计划身份）的查询不带 `correlationId`，仍按 run 共用操作键。
   - `taxonomyFallback` 不进 `resolveRunStatus`：回退的查询照常跑完所有源，不算漏活；若产品负责人希望它把 run 判 PARTIAL，是一行改动。
 
+## 2026-10-14 · Weekly lead report CSV with per-row DataRights EXPORT (BI-22, L4-lite)
+
+- 起因：线索交付闭环设计（`docs/superpowers/plans/2026-10-10-lead-delivery-loop-design.md` §5、§11 的 L4）要给客户一份每周的线索 CSV，这次改为先于 L1–L3 实施的 L4-lite。改动前仓内没有任何导出或报表代码，OpenAPI 没有 `/reports` 路径，DataRights 的 `EXPORT` 动作定义了（`compliance/data-rights.types.ts:9`）却没有调用点，只有 accept 判 `STORE`（`lead/lead.service.ts`）。
+- 改动：
+  - **接口** `GET /api/v1/reports/weekly?icpId=&week=YYYY-Www`（`ReportController_weekly_v1`，`week` 缺省为本周，UTC、周一起）：返回 UTF-8 带 BOM 的 CSV，中文表头；行 = 该 ICP 在该周 accept（`lead_decision.action=accept`）、当前仍为 `QUALIFIED`/`CONTACTED`/`CONVERTED` 的线索；一周超过 1000 条返回 422 `WEEKLY_REPORT_TOO_LARGE`，不截断。
+  - **列**（设计 §5）：公司名、域名、国家；贸易角色与置信度、自有制造、在售品牌（中国 / 非中国含产地）、登记号、税号（`attributes.website_profile`）；六维分、总分、Fit 结论；证据链接（`website_profile.source_url` 与联系路径 URL）；联系路径（`company_contact_point`，按设计 §7 优先级列 kind + url，不含 `INVALID`）；制裁状态；有效期至（`computeValidUntil`，与 accept 快照同一函数，只用公司级证据）；本条成本（列名写明「所属发现 run 合计，后端账本口径，未按线索分摊」）与所属发现 run ID；线索 ID；客户填写 5 列。「为什么现在」「原因码」「注册地址」「开发信草稿」先留空列。
+  - **逐行判权与留痕**：历史合成来源的行隔离不出；制裁命中未经人工清除（库里的结果或实时筛查，规则与 accept 的第五门相同）的行不出；其余每行判 DataRights `EXPORT`（公司 `SUPPRESSED`、命中 domain/company_name 禁联记录、或没有任何证据 → `DENY`），每条判定都在同一事务写 `policy_decision_log`（`subject_type=lead`、`actor_id`、`correlation_id` = 响应头 `X-Report-Id`）。各类未导出计数见 `X-Report-Withheld-Rights` / `-Sanctions` / `-Quarantined`。
+  - **CSV 防公式注入**：以 `=`、`+`、`-`、`@`（含前导空白与全角形式）以及 Tab、CR 开头的单元格加 `'` 前缀。编码器手写，不新增依赖。
+  - **新 scope `acquisition:export`**：接口需要 `acquisition:read` + `acquisition:export`，`authz-openapi.spec.ts` 锁定 OpenAPI 的 `x-required-scopes`。
+  - `DataRightsService` 新增批量 `logDecisions`；`data-rights.context.ts` 新增 `exportRightsContextForLead`（dataClass 恒 green：周报不读 `canonical_contact` / `contact_point`）。对接说明（`packages/contracts/INTEGRATION.md` 阶段 3 第 5 步）同步。
+- 测试：
+  - 先写失败测试，改动前 37 项失败（报表模块 5 个文件 32 项因模块不存在、DataRights 上下文 2 项、scope 词表 1 项、OpenAPI scope 锁 1 项、守卫拓扑 1 项），改动后全部通过；另补 `logDecisions` 1 项、未知标签不读原型 1 项。
+  - 真库用例 `weekly-report.postgres.spec.ts` 3 项：一次性 PostgreSQL 跑完全部迁移，报表经生产 `PrismaService` 以 app_user 运行。本周 accept 的 3 条只导出允许的 1 条，禁联与无证据各写一条 `EXPORT DENY`、允许的写 `EXPORT ALLOW`；上周、accept 后被 reject、其他 ICP 的线索不进入；跨 workspace 的 ICP 返回 404、日志互不可见；app_user 改写 `policy_decision_log` 被拒。去掉留痕调用后真库用例与 3 项服务单测失败（变异检验）。
+  - OpenAPI 重新导出无漂移；本地 `oasdiff breaking` 无 error（1 条 warning：`GET /whoami` 的 `scopes` 枚举新增 `acquisition:export`）。
+- 未做：
+  - 运行时的角色映射在环境变量 `AUTH_ROLE_SCOPE_MAP_JSON`（不在 `auth/scopes.ts`），本 PR 没有改：旧镜像不认识新 scope，提前写进去会让 API readiness 失败。新镜像上线后再给 `TENANT_OWNER`、`ADMIN` 加 `acquisition:export`。
+  - 线索级分摊成本（设计 E4）、`LeadPackage` 读模型（L3）、反馈 CSV 上传（BI-23）、「为什么现在」等空列（L1、L2、L5、L6）。
+  - 真库用例没有接进 CI（改 `ci.yml` 会触发全部重门）；本 PR 在 xin 的一次性 PostgreSQL 上跑过。
+  - API 的 CORS 只暴露 `Location`、`X-Request-Id`、`ETag`，浏览器跨源读不到 `X-Report-*` 响应头。
+
 ## 2026-10-13 · Let best-effort stages skip a company whose operation cannot be replayed, time-box enrichment, and rehearse a full-size run
 
 - 起因：卖方 #23 的验收 run（`c3878e54`，xin，2026-10-12 22:47–10-13 01:23 UTC）跑完查询、官网画像、fit（#640 的时间盒生效，分约 10 批判完 84 家）和富集后，在信号富集阶段失败。

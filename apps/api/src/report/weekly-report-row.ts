@@ -101,6 +101,11 @@ const SANCTIONS_LABELS: Readonly<Record<WeeklyReportSanctionsStatus, string>> = 
 
 const SCORE_KEYS = ['fit', 'role', 'intent', 'dataQuality', 'reachability', 'engagement'] as const;
 
+/** Own-property lookup, so a stored value such as `constructor` never reads the prototype. */
+function labelOf(labels: Readonly<Record<string, string>>, key: string): string {
+  return Object.hasOwn(labels, key) ? labels[key]! : key;
+}
+
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
@@ -167,7 +172,7 @@ export function weeklyReportRow(input: WeeklyReportRowInput): readonly CsvValue[
     input.company.name,
     input.company.domain ?? '',
     input.company.country ?? '',
-    TRADE_ROLE_LABELS[tradeRole] ?? tradeRole,
+    labelOf(TRADE_ROLE_LABELS, tradeRole),
     decimal(profile.trade_role_confidence),
     yesNo(profile.own_manufacturing),
     carried.chinese,
@@ -177,7 +182,7 @@ export function weeklyReportRow(input: WeeklyReportRowInput): readonly CsvValue[
     '', // 为什么现在: signals (L1 links them to domain-keyed companies)
     ...SCORE_KEYS.map((key) => decimal(scores[key])),
     decimal(input.totalScore),
-    FIT_VERDICT_LABELS[verdict] ?? verdict,
+    labelOf(FIT_VERDICT_LABELS, verdict),
     '', // 原因码: reason codes (L2)
     evidenceLinks.join('\n'),
     points.map((point) => `${point.label}：${point.value}${point.status === 'VALID' ? '（已人工确认）' : ''}`).join('\n'),
