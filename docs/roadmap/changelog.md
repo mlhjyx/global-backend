@@ -4,7 +4,7 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
-## 2026-10-14 · Keep a reused artifact object alive until its latest manifest expires, and record every object version for erasure (#TBD)
+## 2026-10-14 · Keep a reused artifact object alive until its latest manifest expires, and record every object version for erasure (#647)
 
 - 起因：运行时会话 10-14 用库与 MinIO 证实，产物对象按 `sha256 + 隐私类` 寻址复用，但桶生命周期按**对象年龄**过期（PERSONAL_DATA 1 天，MinIO 的实际删除点是 `LastModified + 2 天` 向下取整到 UTC 午夜）。后来的清单复用同一对象不刷新年龄，第一个写入者的到期一到对象就没了，库里更晚的行还在有效期内：空页面摘要 `e3b0c442…` 有 23 行（10-12 17:34 → 10-13 16:36 写入，最晚到 10-14 16:36），对象 10-14 00:00 已被删除；重放时 `readVerified` 报 `GENERIC_OPERATION_ARTIFACT_INVALID`，「同一操作重放不再出网」的保证被破坏。
   - 顺带发现两处同根缺陷：`settle…v3` 拒绝任何与对象表钉住的版本不同的版本号，生命周期删除后同样字节的再次写入会以 `…_INVALID` 结算失败（xin 173 个对象里 126 个钉在已不存在的版本上）；个人数据擦除只删钉住的那一个版本，而按版本号删除当前版本会让上一个版本重新成为当前版本（MinIO 实测）。
