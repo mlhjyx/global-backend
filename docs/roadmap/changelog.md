@@ -4,7 +4,7 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
-## 2026-10-14 · Key term normalization per query, skip its model when no routed source reads it, and fall back to the built-in vocabulary when the call is lost
+## 2026-10-14 · Key term normalization per query, skip its model when no routed source reads it, and fall back to the built-in vocabulary when the call is lost (#645)
 
 - 起因：卖方 #26 的验收 run（`3e78eb4e`，xin，2026-10-13 11:36 UTC）15 秒内失败：`stats.failure = { stage: query, errorType: BudgetOperationReplayError }`，16 条查询只记 1 条失败。
   - 第 1 条查询的词表归一（`taxonomy.normalize`，deepseek-v4-pro）被上游以 503 拒绝（`ai_trace` 一行 `ProviderHttpError`，5.9 秒），网关把这次预算操作按预留上界结算（`tool_budget_operation`：SETTLED、无结果、100000 microusd）。
