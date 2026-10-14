@@ -195,6 +195,10 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
   let queryCount = 0;
   // Queries counted as failed because their retries met an operation they cannot replay.
   let unreplayableQueries = 0;
+  // Term normalization per query: lost its model call and ran on the providers' vocabularies,
+  // or called no model because no routed source reads resolved codes (W2). Counts only.
+  let taxonomyFallbacks = 0;
+  let taxonomyModelSkips = 0;
   let stage: DiscoveryRunStage = 'plan';
   // BI-30: plan queries that ran on no provider because their source was off, by reason.
   const skippedQueries: Partial<Record<DiscoveryQuerySkipReason, number>> = {};
@@ -351,6 +355,9 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         }
         // Absent in histories recorded before the counter existed: replays keep their status.
         modelExtractions = addQueryModelExtractions(modelExtractions, r.modelExtractions);
+        // Absent in histories recorded before the counters existed.
+        if (r.taxonomyFallback === true) taxonomyFallbacks += 1;
+        if (r.taxonomyModelSkipped === true) taxonomyModelSkips += 1;
         // Absent in histories recorded before the activity absorbed such a loss.
         previousQueryUnreplayable = r.unreplayable === true;
         if (previousQueryUnreplayable) {
@@ -540,6 +547,9 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         ...extractionStats(),
         // Shown only when a company was skipped, so runs without a skip keep their stats shape.
         ...(unreplayableSkipCount > 0 ? { unreplayableSkips } : {}),
+        // Shown only when it happened; neither changes the status (the queries ran).
+        ...(taxonomyFallbacks > 0 ? { taxonomyFallback: taxonomyFallbacks } : {}),
+        ...(taxonomyModelSkips > 0 ? { taxonomyModelSkipped: taxonomyModelSkips } : {}),
         companies,
         suppressed,
         fit: fit.verdicts,

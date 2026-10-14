@@ -44,7 +44,7 @@ TermAlias           别名 → 规范节点（随用随长）
 3. 校验 LLM 返回的 code 确在 CanonicalTaxonomy 中 → 写回 `TermAlias(source='llm')` 沉淀 → 下次同词变确定性。
 4. resolve 结果供 `QualificationRule.field='industry'/'country'` 与查询计划路由用。
 
-LLM 只在**冷路径**（ICP 设计 / query-plan 生成）每词一次，**不碰发现热路径**。词表随用随长、不靠人手维护——正好还上「词表归一」这笔欠账。
+LLM 每词一次，且只在两处：**冷路径**（ICP 设计 / query-plan 生成），以及发现热路径 `executeQuery` 里**路由到了会读归一结果的源**（`CompanyDiscoveryAdapter.consumesResolvedTaxonomy`，目前 wikidata、openstreetmap）的查询；只路由 public_web 等不读它的源时传 `allowLlm=false`，只走确定性别名。热路径的模型操作按查询归键（`correlationId = queryKey:queryOrdinal`），不按 run；一条查询的归一调用丢失（操作无法重放、上游 5xx）时，这条查询回退各源内置词表照常派发，run 统计计 `taxonomyFallback` / `taxonomyModelSkipped`（2026-10-14，卖方 #26 run `3e78eb4e`）。词表随用随长、不靠人手维护——正好还上「词表归一」这笔欠账。
 
 ## 现成数据集（无需人手）
 
