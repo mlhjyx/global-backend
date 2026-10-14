@@ -104,6 +104,25 @@
   - 内容寻址去重与 MinIO 按对象年龄过期（personal-data 1 天）相冲：复用对象不刷新年龄，首个写入者的 TTL 一到对象就没了，而库里仍有未过期的产物行指向它（10-13 验证：空对象已 NotFound，库里最晚的引用到 10-14 16:36）。另行处理。
   - 每次 HEAD 探测都落一份空产物，是浪费但无害。
 
+## 2026-10-13 · Stop a discovery run at the query stage when a query activity fails on an ordinary error, instead of holding it at materialization
+
+- 起因：#643「未做」里记录的既有缺口。查询活动因**普通**错误（分类器判为非控制错误，例如数据库或网关的普通失败）用尽重试时，`discovery_query_receipt` 和 `discovery_query_execution_outcome` 都没有这条查询的记录，工作流却只把 `failures` 加一、继续跑完其余查询，直到 canonicalize 阶段才被物化准入 `admit_discovery_company_materialization_v1`（回执数、执行结果数都等于计划查询数，且每个 ordinal 都有回执）以 `DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD` 扣住：其余查询的时间与模型费用白花，run 记的还是 canonicalize 阶段的控制错误，看不出真正起因。预演场景「一条查询每次尝试都因普通错误失败」记录的就是这个。
+- 取舍：在两个方案里选了「诚实的最小改动」——在查询阶段就停，而不是从工作流侧补一条零回执。
+  - 补零回执要新增一个活动（计划、预算绑定、查询键都得由工作流交下去），并为一条根本没执行完的查询写一份执行结果，物化准入见到的「完整」就是假的。#643 的零回执是活动自己在重试时写的，它知道哪个源已路由、哪个没有；工作流不知道。
+  - 普通错误连续三次用尽重试多半是基础设施故障，不是这一条查询的问题，后面的查询大概率同样失败。停下来、记清阶段与错误类型、计划保持 `READY` 可重跑，比跑完再被扣住便宜，也诚实。
+- 改动：
+  - **工作流**（`discoveryWorkflow`）：查询活动因普通错误失败时不再吸收，直接抛出，由既有的失败收尾（BI-25）把 run 记为 `FAILED`，`stats.failure = { stage: 'query', errorType: <活动最后一次尝试的错误类型>, control: false }`；后面的查询不再执行，canonicalize 不再调用。控制错误照旧直接上抛，行为不变。
+  - `stats.failures` 的语义收紧为「以零回执结束的查询数」（#643 的无法重放情形）：让 run 停下的那次失败记在 `stats.failure` 里，不计数，与 fit 等阶段一致。此前已经拿到的回执照常留在 FAILED 记录的 `perQuery` / `perSource` 里，`finalizeRun` 的回执核对照常通过。
+  - patch 守卫 `discovery-query-failure-stop-v1`：改动前记录的历史没有这个标记，重放时照旧计失败、继续跑后面的查询，命令序列不变；回执之前的旧历史不问这个 patch。没有新活动，超时声明不变。
+  - 对接说明（`packages/contracts/INTEGRATION.md` 第 3 步）同步。
+- 测试（先写失败测试：改动前 4 项失败，改动后 4 个文件 87 项全部通过）：
+  - 工作流 4 项新用例：普通错误在查询阶段停住、后面的查询不跑、canonicalize 不调用、`failures: 0` 且 `failure.stage = 'query'`；此前以零回执结束的查询照常计入 `failures`；没有 patch 标记的旧历史照旧继续跑并判 `PARTIAL`；回执之前的旧历史不问这个 patch。正常 run 不问这个 patch（既有用例加一条断言）。原「普通查询失败仍走正常状态路径」用例删除，「后一条查询失败时保留前面同类回执」用例改为断言这些回执留在 FAILED 记录里。
+  - 重放 2 项（真实 Temporal 历史）：改动前记录的「查询失败 → 下一条查询 → canonicalize 扣住 → FAILED 收尾」历史重放不变；改动后记录的「查询失败 → FAILED 收尾（stage `query`）」历史重放通过。
+  - 预演场景改写：「一条查询每次尝试都因普通错误失败」现在断言 run 停在查询阶段（`executeQuery` 只跑 4 次尝试 [1, 1, 2, 3]，后两条查询不跑，canonicalize 不调用，`failure.stage = 'query'`），不再是物化扣住。
+- 未做：
+  - 没有补零回执的活动（方案 B），理由见上。若将来要「一条查询普通失败、其余照跑」，应在活动侧让普通错误也以零回执结束，而不是从工作流侧补。
+  - #643「未做」里的另外两条（共用操作键的失败跨查询传染、REPLAYED 结果不带标记）不变。
+
 ## 2026-10-12 · Keep a governed discovery query going when one model extraction answers unusably
 
 - 起因：卖方 #20 的验收 run（`322866ef`，xin，2026-10-11 19:02–19:21 UTC）在第 8 条查询失败，报 `DOMAIN_ACK_DISCOVERY_QUERY_LINEAGE_RECEIPT_MISMATCH`。

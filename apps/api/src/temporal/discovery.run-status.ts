@@ -17,6 +17,11 @@
  * 连续两家无法重放时阶段照旧失败，不在这里判。
  */
 export function resolveRunStatus(args: {
+  /**
+   * Queries that ended with a zero receipt because a provider was lost to an unreplayable
+   * operation. A query activity that fails outright stops the run before this is called;
+   * histories recorded before the query-stop patch count such a query here too.
+   */
   failures: number;
   totalQueries: number;
   budgetTruncated: boolean;
