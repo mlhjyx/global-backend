@@ -92,7 +92,7 @@
         "fit_reasons_available": { "type": "boolean" }
       }
     },
-    "qualification_rule_version": { "type": "string", "examples": ["additive-6dim-v1"] },
+    "qualification_rule_version": { "type": "string", "examples": ["additive-6dim-v3"], "description": "Scoring rule set the lead was scored with. additive-6dim-v3 (2026-10-14): reachability = max(company-level contact paths, personal contact points); weights fit .45 / role 0 / intent .15 / data_quality .15 / reachability .20 / engagement .05; same six keys and ranges as v2, so snapshot_version stays 1." },
     "storage_rights_decision": { "type": ["string", "null"], "description": "DataRightsService STORE-action verdict (ALLOW | ALLOW_WITH_BASIS | REQUIRE_APPROVAL | DENY); null if the producer did not evaluate rights." },
     "personal_data_class": { "type": "string", "enum": ["named_person_refs", "company_facts_only"] },
     "suppression_state": { "type": "string", "enum": ["none", "suppressed"] },

@@ -4,6 +4,36 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-14 · Score reachability from company-level contact paths, retire the idle Role weight, and record mirrored exclusions instead of rejecting on them (scoring rules v3)
+
+- 起因：xin 上 `recommended` 队列结构性为 0（2026-10-14 只读核实：lead 62 needs_review / 117 rejected / 0 recommended；150/150 家公司 industry 与 employee_count 为 NULL；`company_contact_point` 0 行，开关 `company_contact` DISABLED）。三道门叠在一起：
+  - 可达性只读人级 `contact_point`（`scoring.ts` 旧 161–168 行；`qualify.activities.ts` 只 include `contacts.contactPoints`），而自动链路里没有联系人发现（LIA 之后才走），#630 建好的公司级 `company_contact_point` 评分读不到。
+  - 0.55 门槛够不着：可达性置 1.0 后 ICP ce100faa 的 12 条 match 最高 0.5225。根因是 DataQuality 的 industry / employee_count 对 150/150 家都是 NULL（public_web 原始记录从不带这两个字段），封顶 0.5；Role 维在 RL1 恒 0，15% 权重闲置；关键词代理用 `JSON.stringify` 全文扫描，2 字母 token「ce」误命中 JSON 键名 `certifications`。
+  - ICP 生成的镜像 EXCLUSION：ICP 22202d3c 有 6 条 EXCLUSION 是 MUST_HAVE 的镜像（`keywords not_contains "泵" / "库存" / "售后"`、`region not_contains "DACH"`、`business_model not_in […]`）。规则引擎对 not_contains 的语义是「属性存在且不含该词 → pass」，任一 EXCLUSION pass → exclude，评分把 exclude 放在权威 Fit 之前；公司 keywords 是受控英文词表、永远不含中文，于是带 keywords 的公司一律 rejected（离线复算 5 条 match 里 2 条被吞）。
+  - 产品负责人按方案 A 授权：RL1 没有具名联系人，Role 并入 Fit / Reachability，门槛不变。
+- 改动（`qualification_rule_version` 升为 `additive-6dim-v3`，写进 LeadQualified 快照；六维键与值域不变，`snapshot_version` 仍 1）：
+  - **可达性 = max(公司级, 个人旧口径)**：`CompanyForScoring` 新增 `companyContactPoints[]`；任一 kind ∈ contact_page / impressum_page / contact_form / supplier_page 且 status ∈ VALID / UNVERIFIED 记 1.0（社交页不计，INVALID 不计）；个人口径不变（VALID 1 / UNVERIFIED、RISKY 0.5 / external_id 不计）。`scoreCandidates` include 该表（只取 VALID / UNVERIFIED），每批读一次禁联事实，**读时过滤**（公司被禁联 → 无点；被禁联域名覆盖的点剔除；`reachableCompanyContactPoints`）。`score_detail.reasonCodes[]` 新增：零可达且进 needs_review 写 `MISSING_CONTACT_POINT`；提示文案「先做联系人发现」改为「先补公司级联系路径」。
+  - **权重 v3**：fit .45 / role 0 / intent .15 / dataQuality .15 / reachability .20 / engagement .05（v2：.35 / .15 / .15 / .15 / .15 / .05），门槛 0.55 不变；Role 仍计算、仍上报。复算：资格门 match + 联系页 + DataQuality 0.5 = 0.85×.45 + .20 + .15×.5 = **0.6575**，进推荐。
+  - **关键词代理**：只扫属性**值**（不扫键名、不扫数字和布尔）；Latin token ≥3 字符（CJK ≥2 字，「扩产」仍有效）；排除 `intent`（原有）、`extraction_*` 与 `website_profile.evidence`。
+  - **镜像 EXCLUSION**：`qualify()` 新增 `negativeExclusionsAdvisory`——权威 Fit 存在时，否定操作符（neq / not_in / not_contains）的 EXCLUSION 只评估、记进 `ruleEvaluations`（`advisory: true`）不改队列；正向 EXCLUSION 维持最高优先；无权威 Fit 时行为不变。ICP 生成（`icp.design` 输出落库）丢弃与 MUST_HAVE 同 field 同 value 的镜像 EXCLUSION（`mirrorExclusionRuleIndexes`，field / value 归一化后比较）；`IcpDto` 新增 `ruleLint[]`（读取 / 激活时由规则推导，不落库），指出存量 ICP 里的镜像规则。OpenAPI 已重导出。
+  - **为现有公司补联系路径**：`profileWebsitesForRun` 在开关 `company_contact` 打开、本 run 的公司没用完 50 家画像配额时，用余量按 created_at 读工作区里还没按当前规则读过联系路径的公司（`contactPathBackfillCandidates`），计入 `backfilled`；配额、时间盒、续接下标对合并列表一体生效（本 run 已读过的公司留在列表里由循环跳过，下标稳定）。打开开关后不必等新 run 再找到这 150 家。
+  - 文档：`docs/product-scope.md` 的可达性定义；`lead-qualified.v1.schema.json` 的 `qualification_rule_version` 示例与说明；`docs/architecture/current.md` 的六维注记。
+- 被替换的设计与原因：
+  - BI-14 设计 §5.1「仅表单 0.6」已被 2026-10-10 §10 改为联系路径任一存在即 1.0，本 PR 按 §10。
+  - v2 权重（LED-006）给 Role 15% 的前提是有具名联系人，RL1 不成立。
+  - 关键词代理的 `JSON.stringify` 全文扫描（#4）把键名与抽取账本当作公司事实。
+  - 「EXCLUSION 永远优先于权威 Fit」在镜像规则下把资格门判 match 的公司硬拒；改为只对正向 EXCLUSION 维持最高优先。
+- 测试：
+  - 先写失败测试：`rule-engine.spec` 7 项、`scoring.spec` 新增 20 项并改 4 项旧断言、`qualify.activities.spec`（新文件）5 项、`icp.service.spec` 1 项、`icp.dto.spec`（新文件）2 项、`discovery.activities.spec` 5 项（其中 2 项护栏在改动前已通过）、`lead-qualified-snapshot.spec` 1 项；改动前 35 项失败，改动后全部通过。
+  - 邻近用例（候选评估、qualify / 发现 workflow、预演、删除编排、website-profile、快照契约 ajv）全绿；`gctl check` 通过。
+- 未做：
+  - 没有改 DataQuality：industry / employee_count 仍靠富集，public_web 不带这两个字段是数据源问题。
+  - 没有新开「只补联系路径」的独立端点或工作流：补读复用 run 的画像配额与预算，每个 run 最多补 (50 − 本 run 公司数) 家，150 家存量要 3–4 个 run；更快需要带预算授权的独立活动（新 scope、OpenAPI、GrowthOS 报价），另开。
+  - 画像返回空（robots 拒绝、空页）的公司没有标记，会留在补读候选里（与本 run 列表的既有行为一致）。
+  - 存量 ICP 的镜像规则没有自动删除：`ruleLint` 只提示，由人用 `DELETE /rules/:ruleId` 处理；评分侧已不受其影响。
+  - 存量 lead 要重新评分才生效：对每个 ACTIVE ICP 调一次 `POST /icps/:icpId/qualify`；打开 `company_contact` 与是否再跑 run 补读由产品负责人决定（D9）。
+  - 读模型 `GET /canonical-companies/:id` 带出联系点、BI-21 交付包字段不在本 PR。
+
 ## 2026-10-13 · Let best-effort stages skip a company whose operation cannot be replayed, time-box enrichment, and rehearse a full-size run
 
 - 起因：卖方 #23 的验收 run（`c3878e54`，xin，2026-10-12 22:47–10-13 01:23 UTC）跑完查询、官网画像、fit（#640 的时间盒生效，分约 10 批判完 84 家）和富集后，在信号富集阶段失败。

@@ -115,6 +115,7 @@ import {
   COMPANY_CONTACT_PARSER_VERSION,
   COMPANY_CONTACT_PROVIDER_KEY,
   companyContactObservation,
+  contactPathBackfillCandidates,
   persistCompanyContactPoints,
 } from '../discovery/company-contact-points';
 import { targetCountryCodes } from '../discovery/search-localization';
@@ -1649,6 +1650,9 @@ export function createDiscoveryActivities(deps: {
      *    Impressum、供应商页、公司 LinkedIn 与 X，并渲染联系页（每家至多 1 页）看有没有联系表单；在同一事务里
      *    经禁联闸门写 company_contact_point。开关关闭时不渲染、不写点。画像在 30 天内、但还没用当前规则读过
      *    联系路径的公司，开关打开后会重画像一次。
+     *  - 补联系路径（评分规则 v3）：开关打开、且本 run 的公司没用完画像配额时，用余量按 created_at 读工作区里
+     *    还没按当前规则读过联系路径的公司（contactPathBackfillCandidates），不必等新 run 再找到它们；
+     *    计入 `backfilled`。配额、时间盒与续接下标对本 run 公司 + 补读公司的合并列表一体生效。
      */
     async profileWebsitesForRun(
       args: DiscoveryActivityInput & {
@@ -1672,6 +1676,8 @@ export function createDiscoveryActivities(deps: {
       unreplayable: number;
       /** Carries the two-in-a-row rule for unreplayable companies over to the next profile activity. */
       previousUnreplayable: boolean;
+      /** Workspace companies outside the run profiled with the quota the run's own companies left (contact-path backfill). */
+      backfilled: number;
     }> {
       if (
         (args.startIndex !== undefined && !isContinuationIndex(args.startIndex, MAX_DISCOVERY_PROFILE_COMPANIES)) ||
@@ -1689,6 +1695,7 @@ export function createDiscoveryActivities(deps: {
         nextIndex: null,
         unreplayable: 0,
         previousUnreplayable: args.previousUnreplayable ?? false,
+        backfilled: 0,
       };
       const setup = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const source = await tx.dataProvider.findUnique({
@@ -1715,7 +1722,7 @@ export function createDiscoveryActivities(deps: {
           where: { canonicalType: 'company', rawRecordId: { in: rawIds.map((r) => r.id) } },
           select: { canonicalId: true },
         });
-        const companies = await tx.canonicalCompany.findMany({
+        const runCompanies = await tx.canonicalCompany.findMany({
           where: {
             id: { in: [...new Set(links.map((l) => l.canonicalId))] },
             status: { not: 'SUPPRESSED' },
@@ -1726,7 +1733,18 @@ export function createDiscoveryActivities(deps: {
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
           take: MAX_DISCOVERY_PROFILE_COMPANIES,
         });
-        return { icp, companies, contactPaths: contactSource?.status === 'ENABLED' };
+        const contactPaths = contactSource?.status === 'ENABLED';
+        // Scoring rules v3: the quota the run's own companies leave goes to the workspace companies
+        // whose contact paths were never read (same total order, appended, so indexes still hold).
+        const backfill = contactPaths
+          ? await contactPathBackfillCandidates(tx, {
+              workspaceId: args.workspaceId,
+              runId: args.runId,
+              excludeCompanyIds: runCompanies.map((company) => company.id),
+              limit: MAX_DISCOVERY_PROFILE_COMPANIES - runCompanies.length,
+            })
+          : [];
+        return { icp, companies: [...runCompanies, ...backfill], runCount: runCompanies.length, contactPaths };
       });
       if (!setup) return idle;
       const provider =
@@ -1749,6 +1767,7 @@ export function createDiscoveryActivities(deps: {
       let skippedSubjects = 0;
       let unclassified = 0;
       let unreplayable = 0;
+      let backfilled = 0;
       let previousUnreplayable = args.previousUnreplayable ?? false;
       const startIndex = args.startIndex ?? 0;
       let nextIndex: number | null = null;
@@ -1810,7 +1829,10 @@ export function createDiscoveryActivities(deps: {
         const observedAt = new Date();
         if (unreplayableSkip) unreplayable += 1;
         else if (subjectDenied) skippedSubjects += 1;
-        else profiled += 1;
+        else {
+          profiled += 1;
+          if (i >= setup.runCount) backfilled += 1;
+        }
         if (profile && profile.tradeRoleSource === null) unclassified += 1;
         // 不给被拒主体写任何属性；已产生的回执照常 ACK（apply 为空操作）。
         const hits = profile && !subjectDenied
@@ -1887,6 +1909,7 @@ export function createDiscoveryActivities(deps: {
         nextIndex,
         unreplayable,
         previousUnreplayable,
+        backfilled,
       };
     },
 

@@ -519,6 +519,41 @@ describe("ICP generation authority and controlled enrichment", () => {
     expect(f.tx.persona.create).toHaveBeenCalledOnce();
     expect(f.tx.buyingCommitteeRole.create).toHaveBeenCalledOnce();
   });
+  it("drops a proposed EXCLUSION that mirrors a MUST_HAVE (same field and value, negated operator) and keeps the positive one", async () => {
+    // ICP 22202d3c on xin: six EXCLUSION rules mirrored the MUST_HAVEs; the company keywords are an
+    // English controlled vocabulary, so `keywords not_contains "泵"` passed for every company.
+    const f = generationFixture();
+    f.result.data = {
+      name: "Generated",
+      company_attributes: {},
+      pain_points: [],
+      trigger_signals: [],
+      exclusions: [],
+      value_props: [],
+      target_markets: [],
+      personas: [],
+      buying_committee: [],
+      qualification_rules: [
+        { kind: "MUST_HAVE", field: "keywords", operator: "contains", value: "泵" },
+        { kind: "MUST_HAVE", field: "business_model", operator: "in", value: ["分销商", "进口商"] },
+        { kind: "EXCLUSION", field: "keywords", operator: "not_contains", value: "泵" },
+        { kind: "EXCLUSION", field: "business_model", operator: "not_in", value: ["进口商", "分销商"] },
+        { kind: "EXCLUSION", field: "region", operator: "not_contains", value: "DACH" },
+        { kind: "EXCLUSION", field: "business_model", operator: "contains", value: "终端工厂" },
+      ],
+    };
+    await f.service.generateFromCompany(ctx, "company");
+    const created = f.tx.qualificationRule.create.mock.calls.map(
+      ([call]: [{ data: { kind: string; field: string; operator: string } }]) =>
+        [call.data.kind, call.data.field, call.data.operator],
+    );
+    expect(created).toEqual([
+      ["MUST_HAVE", "keywords", "contains"],
+      ["MUST_HAVE", "business_model", "in"],
+      ["EXCLUSION", "region", "not_contains"], // no MUST_HAVE on region → not a mirror, kept
+      ["EXCLUSION", "business_model", "contains"],
+    ]);
+  });
   it.each(["missing", "HYPOTHESIS"])(
     "refuses query generation for %s ICP",
     async (status) => {

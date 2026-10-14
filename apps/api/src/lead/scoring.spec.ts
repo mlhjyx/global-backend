@@ -11,6 +11,7 @@ const company = (p: Partial<CompanyForScoring>): CompanyForScoring => ({
   attributes: null,
   status: 'NEW',
   contacts: [],
+  companyContactPoints: [],
   ...p,
 });
 
@@ -186,7 +187,7 @@ describe('scoreLead — authoritativeFit（资格门覆盖 Fit 维，不再覆�
     const r = scoreLead(company({}), icp, { authoritativeFit: 'match' });
     expect(r.scores.fit).toBeCloseTo(0.85, 2);
     expect(r.queue).toBe('needs_review');
-    expect(r.detail.notes.some((n) => n.includes('先联系人发现'))).toBe(true);
+    expect(r.detail.notes.some((n) => n.includes('先补公司级联系路径'))).toBe(true);
   });
 
   it('🔴 P1（#58）：董事仅有 external_id 点（无 email/phone）→ 零可达 → needs_review（external_id 不给 Reachability 信用）', () => {
@@ -251,7 +252,7 @@ describe('scoreLead — Reachability 硬底（非权威路径同样生效）', (
     expect(r.totalScore).toBeGreaterThanOrEqual(0.55);
     expect(r.scores.reachability).toBe(0);
     expect(r.queue).toBe('needs_review'); // 修复前此处会误判 recommended
-    expect(r.detail.notes.some((n) => n.includes('先联系人发现'))).toBe(true);
+    expect(r.detail.notes.some((n) => n.includes('先补公司级联系路径'))).toBe(true);
   });
 
   it('非权威 match + 总分≥0.55 + 可达联系方式 → recommended', () => {
@@ -332,11 +333,11 @@ describe('scoreLead — DemandProof 观测维（收口⑤：一等 Signal 需求
     expect(r.scores.demandProof).toBe(0);
   });
 
-  it('demandProof 不进 totalScore：总分 = 六维加权和（观测维零权重）', () => {
+  it('demandProof 不进 totalScore：总分 = 六维加权和（观测维零权重；v3 权重 fit .45 / role 0 / reach .20）', () => {
     const r = scoreLead(withEvents([{ type: 'TENDER_PUBLISHED', at: daysAgo(3), strength: 0.9, evidence: { notice: 'N-1', source: 'ted' } }]), icp, { nowMs: NOW });
     const expected =
-      0.35 * r.scores.fit + 0.15 * r.scores.role + 0.15 * r.scores.intent +
-      0.15 * r.scores.dataQuality + 0.15 * r.scores.reachability + 0.05 * r.scores.engagement;
+      0.45 * r.scores.fit + 0 * r.scores.role + 0.15 * r.scores.intent +
+      0.15 * r.scores.dataQuality + 0.2 * r.scores.reachability + 0.05 * r.scores.engagement;
     expect(r.totalScore).toBeCloseTo(expected, 4);
   });
 
@@ -345,6 +346,170 @@ describe('scoreLead — DemandProof 观测维（收口⑤：一等 Signal 需求
     const stale = scoreLead(withEvents([{ type: 'TENDER_PUBLISHED', at: daysAgo(180), strength: 0.9, evidence: { notice: 'N-2', source: 'ted' } }]), icp, { nowMs: NOW });
     expect(stale.scores.demandProof).toBeLessThan(fresh.scores.demandProof);
     expect(stale.scores.demandProof).toBeLessThan(0.15); // 3 个半衰期 ≈ ×0.125
+  });
+});
+
+// ── 评分规则 v3（additive-6dim-v3）：公司级可达性（BI-14 D-028）──────────────────────
+describe('scoreLead — v3 公司级可达性（company_contact_point 与个人旧口径取大）', () => {
+  /** xin 的 ce100faa 形态：public_web 原始记录从不带行业/员工数 → DataQuality 0.5；无具名联系人。 */
+  const xinLike = (points: CompanyForScoring['companyContactPoints']): CompanyForScoring =>
+    company({ industry: null, employeeCount: null, attributes: { keywords: ['industrial pumps'] }, companyContactPoints: points });
+  const page = (kind: string, status = 'UNVERIFIED') => ({ kind, status });
+
+  it('资格门 match + 联系页（UNVERIFIED）→ reachability 1 → 总分 0.6575 → recommended（v2 口径只有 0.5225 进不了）', () => {
+    const r = scoreLead(xinLike([page('contact_page')]), icp, { authoritativeFit: 'match' });
+    expect(r.scores.reachability).toBe(1);
+    expect(r.scores.dataQuality).toBe(0.5);
+    expect(r.totalScore).toBeCloseTo(0.6575, 4); // 0.85×.45 + .20 + .15×.5
+    expect(r.queue).toBe('recommended');
+    expect(r.detail.reasonCodes).toEqual([]);
+  });
+
+  it.each(['contact_page', 'impressum_page', 'contact_form', 'supplier_page'])('联系路径 kind=%s 计 1.0', (kind) => {
+    expect(scoreLead(xinLike([page(kind)]), icp, { authoritativeFit: 'match' }).scores.reachability).toBe(1);
+  });
+
+  it('社交页（linkedin_company_page / x_company_account）不是联系路径 → 0', () => {
+    const r = scoreLead(xinLike([page('linkedin_company_page'), page('x_company_account')]), icp, { authoritativeFit: 'match' });
+    expect(r.scores.reachability).toBe(0);
+    expect(r.queue).toBe('needs_review');
+  });
+
+  it('INVALID 的点被忽略；VALID 与 UNVERIFIED 同计 1.0（自动链路只写 UNVERIFIED，VALID 只能由人给出）', () => {
+    expect(scoreLead(xinLike([page('contact_page', 'INVALID')]), icp, { authoritativeFit: 'match' }).scores.reachability).toBe(0);
+    expect(scoreLead(xinLike([page('contact_page', 'VALID')]), icp, { authoritativeFit: 'match' }).scores.reachability).toBe(1);
+  });
+
+  it('与个人旧口径取大：个人 UNVERIFIED 0.5 / 公司联系页 1.0 / 两者并存 1.0；external_id 仍不计', () => {
+    const personal = [{ title: 'Einkauf', seniority: null, contactPoints: [{ type: 'email', status: 'UNVERIFIED' }] }];
+    expect(scoreLead(company({ contacts: personal }), icp).scores.reachability).toBe(0.5);
+    expect(scoreLead(company({ contacts: personal, companyContactPoints: [page('contact_page')] }), icp).scores.reachability).toBe(1);
+    const officer = [{ title: 'Director', seniority: null, contactPoints: [{ type: 'external_id', status: 'UNVERIFIED' }] }];
+    expect(scoreLead(company({ contacts: officer }), icp).scores.reachability).toBe(0);
+  });
+
+  it('零可达且进 needs_review → reasonCodes 带 MISSING_CONTACT_POINT；注释改为「先补公司级联系路径」', () => {
+    const r = scoreLead(xinLike([]), icp, { authoritativeFit: 'match' });
+    expect(r.queue).toBe('needs_review');
+    expect(r.detail.reasonCodes).toContain('MISSING_CONTACT_POINT');
+    expect(r.detail.notes.some((n) => n.includes('先补公司级联系路径'))).toBe(true);
+    expect(r.detail.notes.some((n) => n.includes('联系人发现'))).toBe(false);
+  });
+
+  it('rejected / 可达的线索不带 MISSING_CONTACT_POINT', () => {
+    expect(scoreLead(xinLike([]), icp, { authoritativeFit: 'mismatch' }).detail.reasonCodes).toEqual([]);
+    expect(scoreLead(xinLike([page('contact_page')]), icp, { authoritativeFit: 'match' }).detail.reasonCodes).toEqual([]);
+  });
+});
+
+describe('scoreLead — v3 权重（RL1 无具名联系人：Role 15% 并入 Fit .45 / Reachability .20，门槛 0.55 不变）', () => {
+  it('总分 = .45 fit + 0 role + .15 intent + .15 dataQuality + .20 reachability + .05 engagement；Role 仍上报', () => {
+    const r = scoreLead(
+      company({
+        contacts: [{ title: 'CEO', seniority: 'c_level', contactPoints: [{ type: 'email', status: 'VALID' }] }],
+        companyContactPoints: [{ kind: 'contact_page', status: 'UNVERIFIED' }],
+      }),
+      icp,
+      { nowMs: NOW },
+    );
+    expect(r.scores.role).toBe(0.5); // 1/2 委员会角色被覆盖：仍计算、仍上报，只是零权重
+    const expected = 0.45 * r.scores.fit + 0.15 * r.scores.intent + 0.15 * r.scores.dataQuality + 0.2 * r.scores.reachability + 0.05 * r.scores.engagement;
+    expect(r.totalScore).toBeCloseTo(expected, 4);
+  });
+
+  it('Role 覆盖率的变化不再改变总分', () => {
+    const base = { companyContactPoints: [{ kind: 'contact_page', status: 'UNVERIFIED' }] };
+    const noRole = scoreLead(company(base), icp, { nowMs: NOW });
+    const fullRole = scoreLead(
+      company({
+        ...base,
+        contacts: [
+          { title: 'CEO', seniority: 'c_level', contactPoints: [] },
+          { title: 'Head of Procurement', seniority: 'director', contactPoints: [] },
+        ],
+      }),
+      icp,
+      { nowMs: NOW },
+    );
+    expect(fullRole.scores.role).toBe(1);
+    expect(noRole.scores.role).toBe(0);
+    expect(fullRole.totalScore).toBe(noRole.totalScore);
+  });
+});
+
+describe('scoreLead — v3 关键词代理（只扫属性值；Latin token ≥3；排除 extraction_* 与 website_profile.evidence）', () => {
+  const triggers = (...triggerSignals: string[]): IcpForScoring => ({ ...icp, triggerSignals });
+
+  it('2 字母 token「CE」不再误命中 JSON 键名 certifications', () => {
+    const r = scoreLead(company({ attributes: { certifications: ['ISO 9001'] } }), triggers('CE 认证'), { nowMs: NOW });
+    expect(r.detail.matchedSignals).toEqual([]);
+    expect(r.scores.intent).toBe(0);
+  });
+
+  it('只扫属性值不扫键名：触发词等于键名 keywords 不算命中', () => {
+    const r = scoreLead(company({ attributes: { keywords: ['industrial pumps'] } }), triggers('keywords'), { nowMs: NOW });
+    expect(r.detail.matchedSignals).toEqual([]);
+  });
+
+  it('extraction_* 与 website_profile.evidence 不参与；website_profile 其余字段值参与', () => {
+    const attrs = {
+      extraction_evidence_digest: 'sourcing-digest',
+      extraction_confidence: 0.9,
+      website_profile: { evidence: ['Großhandel für Pumpen mit Lagerhaltung'], trade_role: 'distributor', _ts: daysAgo(1) },
+    };
+    expect(scoreLead(company({ attributes: attrs }), triggers('sourcing'), { nowMs: NOW }).detail.matchedSignals).toEqual([]);
+    expect(scoreLead(company({ attributes: attrs }), triggers('Lagerhaltung'), { nowMs: NOW }).detail.matchedSignals).toEqual([]);
+    expect(scoreLead(company({ attributes: attrs }), triggers('distributor'), { nowMs: NOW }).detail.matchedSignals).toEqual(['distributor']);
+  });
+
+  it('中文 2 字 token 仍有效（CJK 信息密度高）；Latin 2 字母 token 丢弃', () => {
+    expect(scoreLead(company({ attributes: { keywords: ['扩产 计划'] } }), triggers('扩产'), { nowMs: NOW }).detail.matchedSignals).toEqual(['扩产']);
+    expect(scoreLead(company({ attributes: { keywords: ['ce marked'] } }), triggers('ce'), { nowMs: NOW }).detail.matchedSignals).toEqual([]);
+  });
+
+  it('intent 命名空间照旧排除（不双重计数）', () => {
+    const r = scoreLead(company(withIntent([{ type: 'SOURCING_OPENED', at: daysAgo(400), strength: 1 }])), triggers('sourcing'), { nowMs: NOW });
+    expect(r.detail.matchedSignals).toEqual([]);
+  });
+});
+
+describe('scoreLead — v3 镜像 EXCLUSION 在权威 Fit 下只记录（ICP 22202d3c 形态）', () => {
+  const mirroredIcp: IcpForScoring = {
+    rules: [
+      { id: 'm1', kind: 'MUST_HAVE', field: 'keywords', operator: 'contains', value: '泵' },
+      { id: 'x1', kind: 'EXCLUSION', field: 'keywords', operator: 'not_contains', value: '泵' },
+      { id: 'x2', kind: 'EXCLUSION', field: 'business_model', operator: 'not_in', value: ['分销商', '进口商'] },
+      { id: 'x3', kind: 'EXCLUSION', field: 'business_model', operator: 'contains', value: '终端工厂' },
+    ],
+    triggerSignals: [],
+    committeeRoles: [],
+  };
+  const reachable = company({
+    industry: null,
+    employeeCount: null,
+    attributes: { keywords: ['industrial pumps'], business_model: 'distributor' },
+    companyContactPoints: [{ kind: 'contact_page', status: 'UNVERIFIED' }],
+  });
+
+  it('权威 match：否定型 EXCLUSION 命中只进 ruleEvaluations（advisory），队列按总分 → recommended', () => {
+    const r = scoreLead(reachable, mirroredIcp, { authoritativeFit: 'match' });
+    expect(r.queue).toBe('recommended');
+    expect(r.detail.ruleEvaluations.find((e) => e.ruleId === 'x1')).toMatchObject({ outcome: 'pass', advisory: true });
+    expect(r.detail.ruleEvaluations.find((e) => e.ruleId === 'x2')).toMatchObject({ outcome: 'pass', advisory: true });
+    expect(r.detail.notes.some((n) => n.includes('镜像'))).toBe(true);
+  });
+
+  it('权威 match：正向 EXCLUSION 命中仍 rejected（最高优先）', () => {
+    const r = scoreLead(
+      company({ ...reachable, attributes: { keywords: ['industrial pumps'], business_model: '终端工厂' } }),
+      mirroredIcp,
+      { authoritativeFit: 'match' },
+    );
+    expect(r.queue).toBe('rejected');
+  });
+
+  it('无权威 Fit：镜像 EXCLUSION 照旧 rejected（规则引擎老路径行为不变）', () => {
+    expect(scoreLead(reachable, mirroredIcp).queue).toBe('rejected');
   });
 });
 
