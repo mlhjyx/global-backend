@@ -190,11 +190,17 @@ function assertReservationBinding(
   });
 }
 
+/**
+ * Whether the inspected object is the one a manifest refers to: same key,
+ * same bytes, same privacy boundary. The object's media type and result
+ * schema are the first writer's and may differ from this manifest's, which
+ * is what the materializer reads (see sameArtifact in the object contract).
+ */
 function sameStoredArtifact(
   actual: StoredArtifact | null,
   expected: Pick<
     GenericOperationArtifactManifest,
-    'objectKey' | 'sha256' | 'sizeBytes' | 'mediaType' | 'resultSchema' | 'privacyClass'
+    'objectKey' | 'sha256' | 'sizeBytes' | 'privacyClass'
   > & Readonly<{ versionId?: string }>,
 ): actual is StoredArtifact {
   return Boolean(
@@ -202,8 +208,6 @@ function sameStoredArtifact(
       actual.objectKey === expected.objectKey &&
       actual.sha256 === expected.sha256 &&
       actual.sizeBytes === expected.sizeBytes &&
-      actual.mediaType === expected.mediaType &&
-      actual.resultSchema === expected.resultSchema &&
       actual.privacyClass === expected.privacyClass &&
       (expected.versionId === undefined || actual.versionId === expected.versionId),
   );

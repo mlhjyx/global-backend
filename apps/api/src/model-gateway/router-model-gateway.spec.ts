@@ -1723,3 +1723,36 @@ describe('RouterModelGateway — task-level deterministic output gate', () => {
     );
   });
 });
+
+describe('RouterModelGateway budget operation identity', () => {
+  // Pins the contract TaxonomyResolver relies on since W2: a paid operation is keyed by
+  // correlationId beside run, task, prompt and schema, so two queries of one run that
+  // send the same prompt reserve two operations, and the same query reserves one.
+  it('keys the budget operation by correlationId, so queries that share a prompt reserve distinct operations', async () => {
+    const budget = new BudgetLedger();
+    budget.open('run-1', 1000);
+    const store = new InMemoryBudgetStoreAdapter(budget) as unknown as BudgetStore;
+    const reserve = vi.spyOn(store, 'reserve');
+    const provider = fakeProvider();
+    const gateway = new RouterModelGateway(
+      { route: () => [provider] } as unknown as ModelRouter,
+      undefined,
+      store,
+    );
+    const input = { task: 'taxonomy.normalize', prompt: 'p', schema: {} };
+    const context = { workspaceId: 'ws-1', runId: 'run-1' };
+
+    await gateway.generateStructured(input, { ...context, correlationId: 'query-a:0' });
+    await gateway.generateStructured(input, { ...context, correlationId: 'query-b:1' });
+    await gateway.generateStructured(input, { ...context, correlationId: 'query-a:0' });
+    await gateway.generateStructured(input, context);
+    await gateway.generateStructured(input, context);
+
+    const keys = reserve.mock.calls.map(([call]) => call.operationKey);
+    expect(keys).toHaveLength(5);
+    expect(keys[1]).not.toBe(keys[0]);
+    expect(keys[2]).toBe(keys[0]);
+    expect(keys[3]).not.toBe(keys[0]);
+    expect(keys[4]).toBe(keys[3]);
+  });
+});
