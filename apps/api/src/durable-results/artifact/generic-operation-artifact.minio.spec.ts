@@ -27,6 +27,7 @@ import {
   S3GenericOperationArtifactStore,
 } from './generic-operation-artifact.store';
 import { contentAddressedObjectKey } from './artifact-key';
+import { objectMetadata } from './generic-operation-artifact.object-contract';
 import { checkGenericArtifactStorageReadiness } from '../../runtime/managed-dependency-readiness';
 
 const enabled = process.env.GENERIC_OPERATION_ARTIFACT_MINIO_TEST === '1';
@@ -608,6 +609,88 @@ describe.runIf(enabled)(
         await store.deleteStaging(artifactId);
         runtime.destroy();
       } finally {
+        admin.destroy();
+      }
+    });
+
+    it('refreshes a reused PERSONAL_DATA object in place under the runtime policy when the manifest would outlive its lifecycle expiry', async () => {
+      const runtime = runtimeClient();
+      const admin = rootClient();
+      const store = artifactStore(runtime);
+      const bucket = required('GENERIC_OPERATION_ARTIFACT_MINIO_BUCKET');
+      const artifactId = randomUUID();
+      const body = new TextEncoder().encode(`retention-${randomUUID()}`);
+      let objectKey: string | undefined;
+      try {
+        const staged = await store.stage({
+          artifactId,
+          source: { body: sourceOfLength(body.byteLength, body[0]), mediaType: 'text/plain' },
+          maxBytes: body.byteLength,
+          resultSchema: 'http-get/v1',
+          privacyClass: 'PERSONAL_DATA',
+        });
+        const first = await store.promote(staged);
+        objectKey = first.objectKey;
+        const firstHead = await admin.send(
+          new HeadObjectCommand({ Bucket: bucket, Key: first.objectKey }),
+        );
+        expect(firstHead.Expiration).toMatch(/expiry-date="[^"]+"/);
+
+        // Within the lifecycle window: the same version is reused, nothing is copied.
+        const soon = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+        await expect(store.promote(staged, { retainUntil: soon })).resolves.toEqual(first);
+
+        // Beyond it: the runtime principal copies the object onto itself.
+        const later = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString();
+        const refreshed = await store.promote(staged, { retainUntil: later });
+        expect(refreshed).toEqual({ ...first, versionId: refreshed.versionId });
+        expect(refreshed.versionId).not.toBe(first.versionId);
+        const head = await admin.send(
+          new HeadObjectCommand({ Bucket: bucket, Key: first.objectKey }),
+        );
+        expect(head.VersionId).toBe(refreshed.versionId);
+        expect(head.LastModified!.getTime()).toBeGreaterThanOrEqual(
+          firstHead.LastModified!.getTime(),
+        );
+        expect(head.ServerSideEncryption).toBe('AES256');
+        expect(head.ContentType).toBe('text/plain');
+        expect(head.Metadata).toEqual(
+          objectMetadata({
+            sha256: staged.sha256,
+            sizeBytes: staged.sizeBytes,
+            mediaType: 'text/plain',
+            resultSchema: 'http-get/v1',
+            privacyClass: 'PERSONAL_DATA',
+          }),
+        );
+        const tags = await admin.send(
+          new GetObjectTaggingCommand({ Bucket: bucket, Key: first.objectKey }),
+        );
+        expect(tags.TagSet).toEqual([{ Key: 'artifact-privacy', Value: 'PERSONAL_DATA' }]);
+        const versions = await admin.send(
+          new ListObjectVersionsCommand({ Bucket: bucket, Prefix: first.objectKey }),
+        );
+        expect(
+          (versions.Versions ?? []).filter((entry) => entry.Key === first.objectKey).map((entry) => entry.VersionId).sort(),
+        ).toEqual([first.versionId, refreshed.versionId].sort());
+        await expect(store.inspect(staged.sha256, 'PERSONAL_DATA')).resolves.toEqual(refreshed);
+        const read = await store.read(staged.sha256, 'PERSONAL_DATA');
+        expect(await bytes(read)).toHaveLength(body.byteLength);
+      } finally {
+        await store.deleteStaging(artifactId).catch(() => undefined);
+        if (objectKey) {
+          const discovered = await admin.send(
+            new ListObjectVersionsCommand({ Bucket: bucket, Prefix: objectKey }),
+          );
+          for (const entry of [...(discovered.Versions ?? []), ...(discovered.DeleteMarkers ?? [])]) {
+            if (entry.Key === objectKey && entry.VersionId) {
+              await admin.send(
+                new DeleteObjectCommand({ Bucket: bucket, Key: objectKey, VersionId: entry.VersionId }),
+              ).catch(() => undefined);
+            }
+          }
+        }
+        runtime.destroy();
         admin.destroy();
       }
     });

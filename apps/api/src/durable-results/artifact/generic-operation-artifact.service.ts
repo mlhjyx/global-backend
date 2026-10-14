@@ -33,6 +33,7 @@ import {
   invalidGenericOperationArtifact,
   isCanonicalArtifactSha256,
   isCanonicalArtifactUuid,
+  missingGenericOperationArtifactObject,
   type ArtifactPrivacyClass,
   type ArtifactScopeKind,
   type ArtifactSource,
@@ -462,7 +463,12 @@ export class GenericOperationArtifactService {
 
     let promoted: StoredArtifact;
     try {
-      promoted = await this.store.promote(staged);
+      // The object is shared by every manifest with these bytes and the bucket
+      // expires it by the age of its current version: a reuse must keep it
+      // alive until this manifest's own expiry.
+      promoted = await this.store.promote(staged, {
+        retainUntil: manifest.expiresAt,
+      });
     } catch (error) {
       await this.markUnknownOnAmbiguousWrite(
         error,
@@ -487,7 +493,21 @@ export class GenericOperationArtifactService {
       promoted.privacyClass,
       input.signal,
     );
-    if (!sameStoredArtifact(inspected, promoted)) return invalid();
+    // Another reuse may have refreshed the object again in between, so the
+    // current version id may differ; the content contract may not. The version
+    // this settlement records is the one promote itself verified or created.
+    if (
+      !sameStoredArtifact(inspected, {
+        objectKey: promoted.objectKey,
+        sha256: promoted.sha256,
+        sizeBytes: promoted.sizeBytes,
+        mediaType: promoted.mediaType,
+        resultSchema: promoted.resultSchema,
+        privacyClass: promoted.privacyClass,
+      })
+    ) {
+      return invalid();
+    }
     await this.drainVerifiedBody(promoted, input.signal);
 
     const reference = referenceFromManifest(manifest);
@@ -627,6 +647,9 @@ export class GenericOperationArtifactService {
       snapshot.manifest.privacyClass,
       input.signal,
     );
+    // A live manifest whose object is gone (lifecycle, erasure, operator) is a
+    // result that can no longer be reproduced, not a tampered one.
+    if (inspected === null) return missingGenericOperationArtifactObject();
     if (!sameStoredArtifact(inspected, snapshot.manifest)) return invalid();
     const body = await this.store.read(
       reference.sha256,

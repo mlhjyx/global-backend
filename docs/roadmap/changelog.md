@@ -4,6 +4,25 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-14 · Keep a reused artifact object alive until its latest manifest expires, and record every object version for erasure (#TBD)
+
+- 起因：运行时会话 10-14 用库与 MinIO 证实，产物对象按 `sha256 + 隐私类` 寻址复用，但桶生命周期按**对象年龄**过期（PERSONAL_DATA 1 天，MinIO 的实际删除点是 `LastModified + 2 天` 向下取整到 UTC 午夜）。后来的清单复用同一对象不刷新年龄，第一个写入者的到期一到对象就没了，库里更晚的行还在有效期内：空页面摘要 `e3b0c442…` 有 23 行（10-12 17:34 → 10-13 16:36 写入，最晚到 10-14 16:36），对象 10-14 00:00 已被删除；重放时 `readVerified` 报 `GENERIC_OPERATION_ARTIFACT_INVALID`，「同一操作重放不再出网」的保证被破坏。
+  - 顺带发现两处同根缺陷：`settle…v3` 拒绝任何与对象表钉住的版本不同的版本号，生命周期删除后同样字节的再次写入会以 `…_INVALID` 结算失败（xin 173 个对象里 126 个钉在已不存在的版本上）；个人数据擦除只删钉住的那一个版本，而按版本号删除当前版本会让上一个版本重新成为当前版本（MinIO 实测）。
+- 改动（方案 A，复用时刷新；理由与未采用的方案 B 见 [docs/backend/generic-operation-artifact-storage.md](../backend/generic-operation-artifact-storage.md)）：
+  - **存储**（`generic-operation-artifact.store.ts`）：`promote` 接收 `retainUntil`（服务传入本次清单的 `expiresAt`）。复用分支校验字节后，若当前版本在 `x-amz-expiration` 里公布的到期早于 `retainUntil` 或没有公布，则 `CopyObject` 到自身（`REPLACE` 同一套元数据与标签、SSE-S3），再 HEAD 核对合同，返回复制响应里的版本号；到期已覆盖则原样复用。复制失败不让操作失败：返回已校验的现有版本并记固定告警码 `GENERIC_OPERATION_ARTIFACT_RETENTION_REFRESH_FAILED`。`store.read` 的 NotFound 改报 `GENERIC_OPERATION_ARTIFACT_OBJECT_MISSING`。
+  - **服务**：`persist` 之后的 inspect 只核对内容合同、不再要求版本号相等（并发复用可能已再刷新一次），结算记录 `promote` 自己校验或创建的版本；`readVerified` 对「清单有效、对象不在」报 `GENERIC_OPERATION_ARTIFACT_OBJECT_MISSING` 而不是 `…_INVALID`。
+  - **重放路径**（`generic-operation-artifact.execution.ts`）：`replay` 失败时记 `[artifact] <schema> replay failed for operation <id>: <类名:有界码>` 后原样抛出；ToolBroker（受保护文件，未改）照旧转成 `BudgetOperationReplayError`，发现 run 按无法重放跳过并计数，不二调。
+  - **迁移** `20261014050000_generic_operation_artifact_object_version_ledger`：新表 `generic_operation_artifact_object_version` 记录每个被结算记录过的版本（从现有钉子回填）；`settle…v4` 取代 v3，版本号改为「移动钉子 + 写入账本」；`enqueue_workspace_personal_artifact_cleanup_v1` 同签名重建，为账本里的每个版本各建一条精确版本清理命令。擦除端口与 MinIO 策略、桶生命周期、readiness 期望都不变；在 bootstrap 策略下实测运行时 principal 的复制到自身被允许、无标签或错标签的复制被拒。
+  - `PostgresBudgetStore.settleArtifactManifest` 改调 v4；Prisma 新增模型；`app-user-table-privileges.json` 登记新表（无权限）；CI 的 PostgreSQL 作业加跑新 postgres spec。
+- 测试：
+  - 先红后绿：存储 9 项（按到期刷新、已覆盖不刷新、无到期头刷新、不传 `retainUntil` 不复制、复制失败 fail-open 只记一条码、复制响应无版本号时取当前版本、刷新后合同漂移拒绝、`retainUntil` 非规范拒绝、`read` 的 `OBJECT_MISSING`）、服务 3 项、重放路径 1 项，改动前 11 项失败（服务/重放 3 项在 origin/main 代码上复跑确认），改动后三个文件 98 项通过。内存 S3 桩补了 `CopyObject`、LastModified 与 MinIO 公式的 `x-amz-expiration`。
+  - 迁移静态 spec 5 项；真库 spec（`generic-operation-artifact-object-version.postgres.spec.ts`，一次性 pgvector:pg16，以 app_user 跑）4 项：v4 移动钉子并逐版本记账、v3 仍拒绝不同版本（被取代的行为）、账本写入函数对 app_user 拒绝、擦除为每个版本各建命令并逐条 claim/complete。
+  - 真 MinIO（一次性容器 + `infra/minio/bootstrap.sh` 原样建桶与三个 principal）：`generic-operation-artifact.minio.spec.ts` 新增「复用对象在运行时策略下复制到自身」用例，与既有用例、`personal-artifact-cleanup.minio.spec.ts` 一起通过。
+- 未做：
+  - 复制成功但结算未落库留下的孤儿版本不在账本里，只靠生命周期按年龄清（≤ 2 个生命周期日）。
+  - readiness 金丝雀没有加「复制到自身」探针；策略若漂移，只会在复用时以告警码暴露。
+  - 与 `claude/artifact-dedupe-bytes` 的字节级复用判定互不触及（本分支未改 `sameArtifact`/`sameStoredArtifact` 的比较项）；该分支尚未推送。
+
 ## 2026-10-13 · Let best-effort stages skip a company whose operation cannot be replayed, time-box enrichment, and rehearse a full-size run
 
 - 起因：卖方 #23 的验收 run（`c3878e54`，xin，2026-10-12 22:47–10-13 01:23 UTC）跑完查询、官网画像、fit（#640 的时间盒生效，分约 10 批判完 84 家）和富集后，在信号富集阶段失败。

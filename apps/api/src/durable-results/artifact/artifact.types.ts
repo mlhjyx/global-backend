@@ -62,7 +62,14 @@ export interface ArtifactMaterializer<T> {
 }
 
 export type GenericOperationArtifactErrorCode =
-  'GENERIC_OPERATION_ARTIFACT_INVALID';
+  | 'GENERIC_OPERATION_ARTIFACT_INVALID'
+  /**
+   * The manifest row is live but the content object is gone from storage
+   * (lifecycle expiry, erasure, operator deletion). The settled result cannot
+   * be reproduced; the caller treats it as a result it cannot replay, never as
+   * tampering and never as a reason for a second physical call.
+   */
+  | 'GENERIC_OPERATION_ARTIFACT_OBJECT_MISSING';
 
 export class GenericOperationArtifactError extends Error {
   constructor(public readonly code: GenericOperationArtifactErrorCode) {
@@ -99,4 +106,10 @@ export function isCanonicalArtifactSizeBytes(value: unknown): value is string {
 
 export function invalidGenericOperationArtifact(): never {
   throw new GenericOperationArtifactError('GENERIC_OPERATION_ARTIFACT_INVALID');
+}
+
+export function missingGenericOperationArtifactObject(): never {
+  throw new GenericOperationArtifactError(
+    'GENERIC_OPERATION_ARTIFACT_OBJECT_MISSING',
+  );
 }

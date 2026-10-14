@@ -1,10 +1,12 @@
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   GetObjectTaggingCommand,
   HeadObjectCommand,
   PutObjectCommand,
 } from '@aws-sdk/client-s3';
+import { Logger } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { types as utilTypes } from 'node:util';
@@ -16,7 +18,9 @@ import {
 import { uploadGenericOperationArtifactStaging } from './generic-operation-artifact.multipart-upload';
 import {
   GENERIC_OPERATION_ARTIFACT_OBJECT_SCHEMA,
+  isCanonicalArtifactObjectVersionId,
   objectMetadata,
+  parseLifecycleExpiration,
   parseStoredArtifactContract,
   sameArtifact,
 } from './generic-operation-artifact.object-contract';
@@ -51,6 +55,8 @@ const STAGED_ARTIFACT_KEYS = [
 export type ArtifactStorageErrorCode =
   | 'GENERIC_OPERATION_ARTIFACT_ABORTED'
   | 'GENERIC_OPERATION_ARTIFACT_INVALID'
+  /** The digest-derived final object is not in the bucket any more. */
+  | 'GENERIC_OPERATION_ARTIFACT_OBJECT_MISSING'
   | 'GENERIC_OPERATION_ARTIFACT_PROMOTE_ACK_UNKNOWN'
   | 'GENERIC_OPERATION_ARTIFACT_SIZE_LIMIT_EXCEEDED'
   | 'GENERIC_OPERATION_ARTIFACT_SOURCE_FAILED'
@@ -63,6 +69,26 @@ export class ArtifactStorageError extends Error {
     super(code);
     this.name = 'ArtifactStorageError';
   }
+}
+
+/**
+ * A reuse kept the verified object but could not move its lifecycle age
+ * forward; the manifest may outlive the object (fail open, logged).
+ */
+export type ArtifactStoreWarningCode =
+  'GENERIC_OPERATION_ARTIFACT_RETENTION_REFRESH_FAILED';
+
+export interface ArtifactStoreLogger {
+  warn(code: ArtifactStoreWarningCode): void;
+}
+
+export interface PromoteArtifactOptions {
+  /**
+   * The manifest expiry the object must stay readable until (canonical UTC
+   * millisecond ISO-8601). When the current version's bucket lifecycle expiry
+   * is earlier, or unknown, promote refreshes the version in place.
+   */
+  readonly retainUntil?: string;
 }
 
 export interface ArtifactS3Client {
@@ -109,7 +135,10 @@ export type { ArtifactStorageReadiness };
 
 export interface GenericOperationArtifactStore {
   stage(input: StageArtifactInput): Promise<StagedArtifact>;
-  promote(input: StagedArtifact): Promise<StoredArtifact>;
+  promote(
+    input: StagedArtifact,
+    options?: PromoteArtifactOptions,
+  ): Promise<StoredArtifact>;
   inspect(
     sha256: string,
     privacyClass: ArtifactPrivacyClass,
@@ -127,10 +156,39 @@ export interface GenericOperationArtifactStore {
 export interface S3GenericOperationArtifactStoreOptions {
   readonly bucket: string;
   readonly client: ArtifactS3Client;
+  readonly logger?: ArtifactStoreLogger;
 }
+
+interface InspectedArtifact {
+  readonly stored: StoredArtifact;
+  /** When the bucket lifecycle will delete the current version; null if it says nothing. */
+  readonly lifecycleExpiresAt: Date | null;
+}
+
+const DEFAULT_LOGGER = new Logger('S3GenericOperationArtifactStore');
 
 function storageError(code: ArtifactStorageErrorCode): ArtifactStorageError {
   return new ArtifactStorageError(code);
+}
+
+/** The retention bound of a promote, validated before any storage call. */
+function parseRetainUntil(options: PromoteArtifactOptions | undefined): number | null {
+  if (options === undefined) return null;
+  if (typeof options !== 'object' || options === null) {
+    throw storageError('GENERIC_OPERATION_ARTIFACT_INVALID');
+  }
+  const value = options.retainUntil;
+  if (value === undefined) return null;
+  const time = typeof value === 'string' ? Date.parse(value) : Number.NaN;
+  if (!Number.isFinite(time) || new Date(time).toISOString() !== value) {
+    throw storageError('GENERIC_OPERATION_ARTIFACT_INVALID');
+  }
+  return time;
+}
+
+/** S3 CopySource: bucket and key with every path segment percent-encoded. */
+function copySource(bucket: string, key: string): string {
+  return `${bucket}/${key.split('/').map(encodeURIComponent).join('/')}`;
 }
 
 function assertNotAborted(signal?: AbortSignal): void {
@@ -327,6 +385,7 @@ function readableBody(
 export class S3GenericOperationArtifactStore implements GenericOperationArtifactStore {
   private readonly bucket: string;
   private readonly client: ArtifactS3Client;
+  private readonly logger: ArtifactStoreLogger;
 
   constructor(options: S3GenericOperationArtifactStoreOptions) {
     if (
@@ -335,12 +394,16 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
       typeof options.bucket !== 'string' ||
       options.bucket.length < 1 ||
       options.bucket.length > 255 ||
-      typeof options.client?.send !== 'function'
+      typeof options.client?.send !== 'function' ||
+      (options.logger !== undefined && typeof options.logger?.warn !== 'function')
     ) {
       throw storageError('GENERIC_OPERATION_ARTIFACT_INVALID');
     }
     this.bucket = options.bucket;
     this.client = options.client;
+    this.logger = options.logger ?? {
+      warn: (code) => DEFAULT_LOGGER.warn(code),
+    };
   }
 
   async stage(input: StageArtifactInput): Promise<StagedArtifact> {
@@ -401,19 +464,33 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
     return stagedArtifact();
   }
 
-  async promote(input: StagedArtifact): Promise<StoredArtifact> {
+  async promote(
+    input: StagedArtifact,
+    options?: PromoteArtifactOptions,
+  ): Promise<StoredArtifact> {
     const staged = snapshotStagedArtifact(input);
+    const retainUntil = parseRetainUntil(options);
     const objectKey = contentAddressedObjectKey(
       staged.sha256,
       staged.privacyClass,
     );
-    const existing = await this.inspect(staged.sha256, staged.privacyClass);
+    const existing = await this.inspectCurrent(
+      staged.sha256,
+      staged.privacyClass,
+    );
     if (existing) {
-      if (!sameArtifact(existing, staged)) {
+      if (!sameArtifact(existing.stored, staged)) {
         throw storageError('GENERIC_OPERATION_ARTIFACT_INVALID');
       }
       await this.verifyFinalBody(staged);
-      return existing;
+      if (
+        retainUntil === null ||
+        (existing.lifecycleExpiresAt !== null &&
+          existing.lifecycleExpiresAt.getTime() >= retainUntil)
+      ) {
+        return existing.stored;
+      }
+      return this.refreshRetention(staged, existing.stored);
     }
     let body: AsyncIterable<Uint8Array>;
     try {
@@ -472,6 +549,15 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
     privacyClass: ArtifactPrivacyClass,
     signal?: AbortSignal,
   ): Promise<StoredArtifact | null> {
+    const inspected = await this.inspectCurrent(sha256, privacyClass, signal);
+    return inspected?.stored ?? null;
+  }
+
+  private async inspectCurrent(
+    sha256: string,
+    privacyClass: ArtifactPrivacyClass,
+    signal?: AbortSignal,
+  ): Promise<InspectedArtifact | null> {
     if (!isCanonicalArtifactSha256(sha256)) {
       throw storageError('GENERIC_OPERATION_ARTIFACT_INVALID');
     }
@@ -493,13 +579,65 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
       if (!stored) {
         throw storageError('GENERIC_OPERATION_ARTIFACT_INVALID');
       }
-      return stored;
+      return Object.freeze({
+        stored,
+        lifecycleExpiresAt: parseLifecycleExpiration(
+          asRecord(output)?.Expiration,
+        ),
+      });
     } catch (error) {
       if (error instanceof ArtifactStorageError) throw error;
       assertNotAborted(signal);
       if (isNotFound(error)) return null;
       throw storageError('GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE');
     }
+  }
+
+  /**
+   * Copies the verified current version onto itself with identical contract
+   * metadata, tag and encryption. S3 and MinIO record the copy as a new
+   * current version with a fresh LastModified, which is the age the bucket
+   * lifecycle expires by; the superseded version is noncurrent and expires on
+   * its own lifecycle rule. The copied version is what the caller records,
+   * so a concurrent refresh landing afterwards never hides it from erasure.
+   * A failed copy keeps the verified object (fail open) and leaves one bounded
+   * warning: the manifest may then outlive the object by at most one lifecycle day.
+   */
+  private async refreshRetention(
+    staged: StagedArtifact,
+    existing: StoredArtifact,
+  ): Promise<StoredArtifact> {
+    let copiedVersionId: string | null;
+    try {
+      const result = asRecord(
+        await this.client.send(
+          new CopyObjectCommand({
+            Bucket: this.bucket,
+            Key: existing.objectKey,
+            CopySource: copySource(this.bucket, existing.objectKey),
+            MetadataDirective: 'REPLACE',
+            Metadata: objectMetadata(staged),
+            ContentType: staged.mediaType,
+            TaggingDirective: 'REPLACE',
+            Tagging: `artifact-privacy=${encodeURIComponent(staged.privacyClass)}`,
+            ServerSideEncryption: 'AES256',
+          }),
+        ),
+      );
+      copiedVersionId = isCanonicalArtifactObjectVersionId(result?.VersionId)
+        ? result.VersionId
+        : null;
+    } catch {
+      this.logger.warn('GENERIC_OPERATION_ARTIFACT_RETENTION_REFRESH_FAILED');
+      return existing;
+    }
+    const refreshed = await this.inspect(staged.sha256, staged.privacyClass);
+    if (!refreshed || !sameArtifact(refreshed, staged)) {
+      throw storageError('GENERIC_OPERATION_ARTIFACT_INVALID');
+    }
+    return copiedVersionId === null
+      ? refreshed
+      : Object.freeze({ ...refreshed, versionId: copiedVersionId });
   }
 
   async read(
@@ -530,7 +668,7 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
       if (error instanceof ArtifactStorageError) throw error;
       assertNotAborted(signal);
       if (isNotFound(error)) {
-        throw storageError('GENERIC_OPERATION_ARTIFACT_INVALID');
+        throw storageError('GENERIC_OPERATION_ARTIFACT_OBJECT_MISSING');
       }
       throw storageError('GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE');
     }

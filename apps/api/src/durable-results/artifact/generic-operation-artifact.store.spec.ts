@@ -1,4 +1,5 @@
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
@@ -6,6 +7,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { describe, expect, it, vi } from 'vitest';
 import { contentAddressedObjectKey, stagingObjectKey } from './artifact-key';
+import { parseLifecycleExpiration } from './generic-operation-artifact.object-contract';
 import {
   ArtifactStorageError,
   GENERIC_OPERATION_ARTIFACT_OBJECT_SCHEMA,
@@ -21,6 +23,7 @@ import {
   bytes,
   collect,
   expectStorageCode,
+  minioLifecycleExpiry,
   sha256,
   source,
   stage,
@@ -726,5 +729,220 @@ describe('S3GenericOperationArtifactStore read/delete/readiness', () => {
       }),
     );
     expect(error).not.toHaveProperty('cause');
+  });
+
+  it('reports a final object the bucket no longer holds with the bounded OBJECT_MISSING code', async () => {
+    const { store: target } = store();
+    await expectStorageCode(
+      target.read('ef'.repeat(32), 'PERSONAL_DATA'),
+      'GENERIC_OPERATION_ARTIFACT_OBJECT_MISSING',
+    );
+    await expect(
+      target.inspect('ef'.repeat(32), 'PERSONAL_DATA'),
+    ).resolves.toBeNull();
+  });
+});
+
+/*
+ * The content object is shared by every manifest with the same bytes, but the
+ * bucket lifecycle expires it by the age of its current version. A later
+ * manifest therefore has to move that age forward when its own expiry would
+ * outlive the version the first writer created (xin, 2026-10-14: 23 live rows
+ * pointed at an object MinIO had already deleted).
+ */
+describe('S3GenericOperationArtifactStore retention refresh on reuse', () => {
+  const FIRST_WRITE = new Date('2026-10-12T17:34:40.000Z');
+  const REUSE = new Date('2026-10-13T16:36:09.000Z');
+  const REUSE_EXPIRES_AT = '2026-10-14T16:36:09.000Z';
+
+  async function firstWrite(
+    client: MemoryS3Client,
+    logger?: { warn(code: string): void },
+  ) {
+    client.now = FIRST_WRITE;
+    const { store: target } = store(client, logger);
+    const staged = await target.stage({
+      artifactId: ARTIFACT_ID,
+      source: source([bytes(1, 2, 3)]),
+      maxBytes: 3,
+      resultSchema: RESULT_SCHEMA,
+      privacyClass: 'PERSONAL_DATA',
+    });
+    const stored = await target.promote(staged);
+    expect(stored.versionId).toBe('version-1');
+    return { target, staged, stored };
+  }
+
+  function copies(client: MemoryS3Client): CopyObjectCommand[] {
+    return client.commands.filter(
+      (command): command is CopyObjectCommand =>
+        command instanceof CopyObjectCommand,
+    );
+  }
+
+  it('copies the object onto itself when the lifecycle expiry precedes the manifest expiry', async () => {
+    const client = new MemoryS3Client();
+    const { target, staged, stored } = await firstWrite(client);
+    // The first version expires at midnight UTC after 2026-10-14 17:34, i.e. 2026-10-14 00:00.
+    expect(minioLifecycleExpiry(FIRST_WRITE, 1).toISOString()).toBe(
+      '2026-10-14T00:00:00.000Z',
+    );
+
+    client.now = REUSE;
+    const reused = await target.promote(staged, {
+      retainUntil: REUSE_EXPIRES_AT,
+    });
+
+    const [copy, ...rest] = copies(client);
+    expect(rest).toHaveLength(0);
+    expect(copy?.input).toEqual({
+      Bucket: BUCKET,
+      Key: stored.objectKey,
+      CopySource: `${BUCKET}/${stored.objectKey}`,
+      MetadataDirective: 'REPLACE',
+      Metadata: {
+        sha256: staged.sha256,
+        'size-bytes': '3',
+        schema: GENERIC_OPERATION_ARTIFACT_OBJECT_SCHEMA,
+        'result-schema': RESULT_SCHEMA,
+        'privacy-class': 'PERSONAL_DATA',
+      },
+      ContentType: staged.mediaType,
+      TaggingDirective: 'REPLACE',
+      Tagging: 'artifact-privacy=PERSONAL_DATA',
+      ServerSideEncryption: 'AES256',
+    });
+    expect(reused).toEqual({ ...stored, versionId: 'copy-version-1' });
+    const object = client.objects.get(stored.objectKey);
+    expect(object?.lastModified).toEqual(REUSE);
+    expect(object?.chunks).toEqual([bytes(1, 2, 3)]);
+    expect(object?.serverSideEncryption).toBe('AES256');
+    expect(
+      minioLifecycleExpiry(REUSE, 1).getTime(),
+    ).toBeGreaterThanOrEqual(Date.parse(REUSE_EXPIRES_AT));
+    await expect(
+      target.inspect(staged.sha256, 'PERSONAL_DATA'),
+    ).resolves.toEqual(reused);
+  });
+
+  it('keeps the current version when its lifecycle expiry already covers the manifest expiry', async () => {
+    const client = new MemoryS3Client();
+    const { target, staged, stored } = await firstWrite(client);
+
+    client.now = new Date('2026-10-12T17:40:00.000Z');
+    const reused = await target.promote(staged, {
+      retainUntil: '2026-10-13T17:40:00.000Z',
+    });
+
+    expect(copies(client)).toHaveLength(0);
+    expect(reused).toEqual(stored);
+    expect(client.objects.get(stored.objectKey)?.lastModified).toEqual(
+      FIRST_WRITE,
+    );
+  });
+
+  it('refreshes when the object announces no lifecycle expiry at all', async () => {
+    const client = new MemoryS3Client();
+    const { target, staged } = await firstWrite(client);
+    client.emitExpiration = false;
+
+    client.now = new Date('2026-10-12T17:40:00.000Z');
+    const reused = await target.promote(staged, {
+      retainUntil: '2026-10-13T17:40:00.000Z',
+    });
+
+    expect(copies(client)).toHaveLength(1);
+    expect(reused.versionId).toBe('copy-version-1');
+  });
+
+  it('never copies when the caller states no retention requirement', async () => {
+    const client = new MemoryS3Client();
+    const { target, staged, stored } = await firstWrite(client);
+
+    client.now = REUSE;
+    await expect(target.promote(staged)).resolves.toEqual(stored);
+    expect(copies(client)).toHaveLength(0);
+  });
+
+  it('keeps the verified version and logs one bounded code when the refresh copy fails', async () => {
+    const client = new MemoryS3Client();
+    const logger = { warn: vi.fn() };
+    const { target, staged, stored } = await firstWrite(client, logger);
+    client.copyFailure = new Error(
+      'bucket=private endpoint=https://secret.invalid credential=secret',
+    );
+
+    client.now = REUSE;
+    await expect(
+      target.promote(staged, { retainUntil: REUSE_EXPIRES_AT }),
+    ).resolves.toEqual(stored);
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'GENERIC_OPERATION_ARTIFACT_RETENTION_REFRESH_FAILED',
+    );
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toMatch(
+      /private|secret|credential/i,
+    );
+  });
+
+  it('records the copied version even when a concurrent refresh landed afterwards', async () => {
+    const client = new MemoryS3Client();
+    const { target, staged } = await firstWrite(client);
+    client.copyResponseVersionId = false;
+
+    client.now = REUSE;
+    const reused = await target.promote(staged, {
+      retainUntil: REUSE_EXPIRES_AT,
+    });
+
+    // Without a version in the copy response the current version is the only truth.
+    expect(reused.versionId).toBe('copy-version-1');
+  });
+
+  it('rejects a refreshed object whose contract no longer matches the staged artifact', async () => {
+    const client = new MemoryS3Client();
+    const { target, staged } = await firstWrite(client);
+    client.copyContentTypeDrift = 'text/plain';
+
+    client.now = REUSE;
+    await expectStorageCode(
+      target.promote(staged, { retainUntil: REUSE_EXPIRES_AT }),
+      'GENERIC_OPERATION_ARTIFACT_INVALID',
+    );
+  });
+
+  it('reads the lifecycle expiry only from a well-formed x-amz-expiration header', () => {
+    expect(
+      parseLifecycleExpiration(
+        'expiry-date="Fri, 16 Oct 2026 00:00:00 GMT", rule-id="generic-operation-artifact-personal-data-ttl"',
+      ),
+    ).toEqual(new Date('2026-10-16T00:00:00.000Z'));
+    for (const header of [
+      undefined,
+      null,
+      42,
+      '',
+      'rule-id="x"',
+      'expiry-date="not a date"',
+      `expiry-date="${'x'.repeat(65)}"`,
+    ]) {
+      expect(parseLifecycleExpiration(header)).toBeNull();
+    }
+  });
+
+  it.each([
+    ['a non-canonical retainUntil', 'tomorrow'],
+    ['a retainUntil with an offset', '2026-10-14T16:36:09+02:00'],
+  ])('rejects %s before touching storage', async (_label, retainUntil) => {
+    const client = new MemoryS3Client();
+    const { target, staged } = await firstWrite(client);
+    const before = client.commands.length;
+
+    await expectStorageCode(
+      target.promote(staged, { retainUntil }),
+      'GENERIC_OPERATION_ARTIFACT_INVALID',
+    );
+    expect(client.commands).toHaveLength(before);
   });
 });

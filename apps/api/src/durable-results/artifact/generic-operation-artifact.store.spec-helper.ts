@@ -1,6 +1,7 @@
 import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
+  CopyObjectCommand,
   CreateMultipartUploadCommand,
   DeleteObjectCommand,
   GetBucketEncryptionCommand,
@@ -30,6 +31,20 @@ interface MemoryObject {
   readonly tagSet?: readonly Readonly<{ Key: string; Value: string }>[];
   readonly serverSideEncryption?: string;
   readonly versionId: string;
+  /** Absent on hand-planted objects: they count as written at the epoch. */
+  readonly lastModified?: Date;
+}
+/** The bucket lifecycle Days per privacy tag, as infra/minio/generic-operation-artifact-lifecycle.json. */
+const LIFECYCLE_DAYS: Readonly<Record<string, number>> = Object.freeze({
+  PUBLIC_ORGANIZATION: 30,
+  CONFIDENTIAL_TENANT: 7,
+  PERSONAL_DATA: 1,
+});
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** MinIO's ExpectedExpiryTime: midnight UTC after LastModified + (Days + 1) days. */
+export function minioLifecycleExpiry(lastModified: Date, days: number): Date {
+  const raw = lastModified.getTime() + (days + 1) * DAY_MS;
+  return new Date(raw - (raw % DAY_MS));
 }
 interface Failure extends Error {
   readonly $metadata?: Readonly<{ httpStatusCode?: number }>;
@@ -88,6 +103,30 @@ export class MemoryS3Client implements ArtifactS3Client {
   getFailure: Error | null = null;
   headFailure: Error | null = null;
   readinessFailure: Error | null = null;
+  /** The wall clock the fake bucket stamps on writes; null means the real clock. */
+  now: Date | null = null;
+  /** MinIO announces x-amz-expiration only when a lifecycle rule matches. */
+  emitExpiration = true;
+  copyFailure: Error | null = null;
+  copyResponseVersionId = true;
+  /** When set, the copy lands with this content type instead of the requested one. */
+  copyContentTypeDrift: string | null = null;
+  private copies = 0;
+  private clock(): Date {
+    return this.now ?? new Date();
+  }
+  private lifecycleExpiration(value: MemoryObject): string | undefined {
+    const privacy = value.tagSet?.find(
+      (tag) => tag.Key === 'artifact-privacy',
+    )?.Value;
+    const days = privacy === undefined ? undefined : LIFECYCLE_DAYS[privacy];
+    if (!this.emitExpiration || days === undefined) return undefined;
+    const expiry = minioLifecycleExpiry(
+      value.lastModified ?? new Date(0),
+      days,
+    );
+    return `expiry-date="${expiry.toUTCString()}", rule-id="generic-operation-artifact-${privacy!.toLowerCase().replace('_', '-')}-ttl"`;
+  }
   async send(
     command: object,
     options?: Readonly<{ abortSignal?: AbortSignal }>,
@@ -140,6 +179,7 @@ export class MemoryS3Client implements ArtifactS3Client {
         tagSet: Object.freeze([]),
         serverSideEncryption: 'AES256',
         versionId: `staging-version-${this.objects.size + 1}`,
+        lastModified: this.clock(),
       });
       this.multipartUploads.delete(uploadId as string);
       if (this.stagingPutAckFailure) {
@@ -185,6 +225,7 @@ export class MemoryS3Client implements ArtifactS3Client {
         tagSet: Object.freeze(tagSet),
         serverSideEncryption: input.ServerSideEncryption,
         versionId: 'version-1',
+        lastModified: this.clock(),
       });
       if (!isFinal && this.stagingPutAckFailure) {
         this.stagingPutAckAbort?.abort();
@@ -200,6 +241,7 @@ export class MemoryS3Client implements ArtifactS3Client {
       const key = command.input.Key;
       const value = key === undefined ? undefined : this.objects.get(key);
       if (!value) throw failure('NotFound', 'not found', 404);
+      const expiration = this.lifecycleExpiration(value);
       return {
         ContentLength: value.chunks.reduce(
           (total, chunk) => total + chunk.byteLength,
@@ -209,6 +251,56 @@ export class MemoryS3Client implements ArtifactS3Client {
         Metadata: value.metadata,
         ServerSideEncryption: value.serverSideEncryption,
         VersionId: value.versionId,
+        LastModified: value.lastModified ?? new Date(0),
+        ...(expiration === undefined ? {} : { Expiration: expiration }),
+      };
+    }
+    if (command instanceof CopyObjectCommand) {
+      const input = command.input;
+      if (this.copyFailure) throw this.copyFailure;
+      const sourceKey =
+        typeof input.CopySource === 'string' &&
+        input.CopySource.startsWith(`${BUCKET}/`)
+          ? decodeURIComponent(input.CopySource.slice(BUCKET.length + 1))
+          : undefined;
+      const existing =
+        sourceKey === undefined ? undefined : this.objects.get(sourceKey);
+      if (input.Bucket !== BUCKET || typeof input.Key !== 'string' || !existing) {
+        throw failure('NoSuchKey', 'copy source not found', 404);
+      }
+      const tagSet =
+        input.TaggingDirective === 'REPLACE'
+          ? (input.Tagging ?? '')
+              .split('&')
+              .filter(Boolean)
+              .map((entry) => {
+                const [key = '', value = ''] = entry.split('=', 2);
+                return Object.freeze({
+                  Key: decodeURIComponent(key),
+                  Value: decodeURIComponent(value),
+                });
+              })
+          : (existing.tagSet ?? []);
+      const replaced = input.MetadataDirective === 'REPLACE';
+      this.copies += 1;
+      const versionId = `copy-version-${this.copies}`;
+      const lastModified = this.clock();
+      this.objects.set(input.Key, {
+        chunks: existing.chunks,
+        contentType:
+          this.copyContentTypeDrift ??
+          (replaced ? (input.ContentType ?? '') : existing.contentType),
+        metadata: replaced
+          ? Object.freeze({ ...(input.Metadata ?? {}) })
+          : existing.metadata,
+        tagSet: Object.freeze(tagSet),
+        serverSideEncryption: input.ServerSideEncryption,
+        versionId,
+        lastModified,
+      });
+      return {
+        ...(this.copyResponseVersionId ? { VersionId: versionId } : {}),
+        CopyObjectResult: { LastModified: lastModified, ETag: '"copy"' },
       };
     }
     if (command instanceof GetObjectTaggingCommand) {
@@ -339,13 +431,20 @@ export class MemoryS3Client implements ArtifactS3Client {
     throw new Error(`unsupported test command: ${command.constructor.name}`);
   }
 }
-export function store(client = new MemoryS3Client()): {
+export function store(
+  client = new MemoryS3Client(),
+  logger?: { warn(code: string): void },
+): {
   readonly client: MemoryS3Client;
   readonly store: S3GenericOperationArtifactStore;
 } {
   return {
     client,
-    store: new S3GenericOperationArtifactStore({ bucket: BUCKET, client }),
+    store: new S3GenericOperationArtifactStore({
+      bucket: BUCKET,
+      client,
+      ...(logger ? { logger } : {}),
+    }),
   };
 }
 export function source(
@@ -388,6 +487,7 @@ export function expectStorageCode(
   code:
     | 'GENERIC_OPERATION_ARTIFACT_ABORTED'
     | 'GENERIC_OPERATION_ARTIFACT_INVALID'
+    | 'GENERIC_OPERATION_ARTIFACT_OBJECT_MISSING'
     | 'GENERIC_OPERATION_ARTIFACT_PROMOTE_ACK_UNKNOWN'
     | 'GENERIC_OPERATION_ARTIFACT_SIZE_LIMIT_EXCEEDED'
     | 'GENERIC_OPERATION_ARTIFACT_SOURCE_FAILED'

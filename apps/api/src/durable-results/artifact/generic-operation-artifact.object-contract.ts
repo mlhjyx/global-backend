@@ -111,6 +111,24 @@ export function parseStoredArtifactContract(
   });
 }
 
+const EXPIRATION_HEADER_PATTERN = /expiry-date="([^"]{1,64})"/u;
+
+/**
+ * The lifecycle expiry S3 and MinIO announce on HEAD/GET as
+ * `x-amz-expiration: expiry-date="<RFC 1123>", rule-id="..."` when an
+ * expiration rule matches the object. MinIO derives it from the object's
+ * LastModified (midnight UTC after LastModified + Days + 1 day), so it is the
+ * one authoritative statement of when the bucket lifecycle will delete the
+ * current version. Null when no rule applies or the header is unreadable.
+ */
+export function parseLifecycleExpiration(value: unknown): Date | null {
+  if (typeof value !== 'string' || value.length > 512) return null;
+  const match = EXPIRATION_HEADER_PATTERN.exec(value);
+  if (!match?.[1]) return null;
+  const date = new Date(match[1]);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
 export function objectMetadata(
   artifact: ArtifactDescriptor,
 ): Readonly<Record<string, string>> {
