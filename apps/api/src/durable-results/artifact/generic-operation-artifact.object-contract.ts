@@ -160,3 +160,20 @@ export function sameArtifact(
     stored.privacyClass === expected.privacyClass
   );
 }
+
+/**
+ * Whether two descriptors carry the identical object contract: bytes, privacy
+ * boundary, media type and result schema. Reuse compares only the bytes
+ * (sameArtifact); a write to an existing object, such as the retention refresh
+ * copy, must leave the first writer's whole contract exactly as it found it.
+ */
+export function sameObjectContract(
+  stored: ArtifactDescriptor,
+  expected: ArtifactDescriptor,
+): boolean {
+  return (
+    sameArtifact(stored, expected) &&
+    stored.mediaType === expected.mediaType &&
+    stored.resultSchema === expected.resultSchema
+  );
+}

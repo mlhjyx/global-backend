@@ -684,6 +684,27 @@ describe('GenericOperationArtifactService', () => {
     });
   });
 
+  it('settles a refreshed reuse that keeps the first writer\'s contract even when a later refresh moved the current version', async () => {
+    // #644 (shared object, first writer's contract) meets #647 (refresh on
+    // reuse): promote returns the copy it made under the first writer's
+    // contract, a concurrent reuse refreshes again before the inspect, and the
+    // settlement still records the version promote created.
+    const shared = { ...stored, mediaType: 'text/markdown', resultSchema: 'crawl4ai-fetch/v1' };
+    const deps = dependencies({
+      promote: async () => ({ ...shared, versionId: 'copy-version-7' }),
+      inspect: async () => ({ ...shared, versionId: 'copy-version-8' }),
+    });
+
+    await expect(deps.service.persist(persistInput())).resolves.toBeDefined();
+
+    expect(deps.budgetStore.settleArtifactManifest).toHaveBeenCalledOnce();
+    const call = deps.budgetStore.settleArtifactManifest.mock.calls[0]!;
+    expect(call[2]).toMatchObject({
+      manifest: { mediaType: staged.mediaType, resultSchema: staged.resultSchema, sha256: SHA256 },
+    });
+    expect(call[6]).toBe('copy-version-7');
+  });
+
   it('streams a verified read without buffering it in the service', async () => {
     const deps = dependencies();
     const reference = {

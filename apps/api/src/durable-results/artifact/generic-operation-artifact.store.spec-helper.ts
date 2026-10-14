@@ -111,6 +111,8 @@ export class MemoryS3Client implements ArtifactS3Client {
   copyResponseVersionId = true;
   /** When set, the copy lands with this content type instead of the requested one. */
   copyContentTypeDrift: string | null = null;
+  /** When set, the copy lands with this result-schema metadata instead of the requested one. */
+  copyResultSchemaDrift: string | null = null;
   private copies = 0;
   private clock(): Date {
     return this.now ?? new Date();
@@ -282,6 +284,9 @@ export class MemoryS3Client implements ArtifactS3Client {
               })
           : (existing.tagSet ?? []);
       const replaced = input.MetadataDirective === 'REPLACE';
+      const copiedMetadata = replaced
+        ? Object.freeze({ ...(input.Metadata ?? {}) })
+        : existing.metadata;
       this.copies += 1;
       const versionId = `copy-version-${this.copies}`;
       const lastModified = this.clock();
@@ -290,9 +295,13 @@ export class MemoryS3Client implements ArtifactS3Client {
         contentType:
           this.copyContentTypeDrift ??
           (replaced ? (input.ContentType ?? '') : existing.contentType),
-        metadata: replaced
-          ? Object.freeze({ ...(input.Metadata ?? {}) })
-          : existing.metadata,
+        metadata:
+          this.copyResultSchemaDrift === null
+            ? copiedMetadata
+            : Object.freeze({
+                ...copiedMetadata,
+                'result-schema': this.copyResultSchemaDrift,
+              }),
         tagSet: Object.freeze(tagSet),
         serverSideEncryption: input.ServerSideEncryption,
         versionId,

@@ -9,7 +9,8 @@
 
 - 最终 key 只由内容摘要和隐私类派生：`generic-operation-results/v1/final/<privacy-class>/sha256/<前两位>/<sha256>`（`artifact-key.ts`）。同样的字节在同一隐私类下只有一个对象，任何清单都不能自选 key。
 - 写入走 staging（按产物 UUID）→ 校验字节 → `PutObject … IfNoneMatch: *` 到最终 key（`generic-operation-artifact.store.ts` 的 `promote`）。对象带五项固定元数据、一个 `artifact-privacy` 标签和 SSE-S3，缺一项都视为合同破坏（`generic-operation-artifact.object-contract.ts`）。
-- 最终 key 已存在时走**复用分支**：清单元数据必须全等（`sameArtifact`），再把现有对象的字节流式读回校验一遍，然后才把它当作这次操作的结果。复用判定收紧到「字节 + 大小 + 隐私类、schema/mediaType 由各自清单记录」由另一条分支（`claude/artifact-dedupe-bytes`）处理，本页不覆盖。
+- 最终 key 已存在时走**复用分支**：只要求字节摘要、大小与隐私类相同（`sameArtifact`，#644），再把现有对象的字节流式读回校验一遍，然后才把它当作这次操作的结果。结果 schema 与 media type 不参与复用判定：对象自己的元数据与 `ContentType` 保留**首写者的合同**，每个清单各自记录自己的 `resultSchema`/`mediaType`，物化器只读清单。所以空的 HEAD 探测（`http-get/v1`、`text/plain`）可以复用空抓取（`crawl4ai-fetch/v1`、`text/markdown`）写下的同一个空对象。
+- 复用**从不改写对象的合同**。下面第 2 节的刷新复制会写对象，但写回的元数据、`ContentType` 与标签全部取自现有对象，而不是这次清单。
 
 ## 2. 两套保留期，以及复用时的刷新
 
@@ -27,9 +28,9 @@ MinIO 的实际删除时刻是 `LastModified + (Days + 1) 天` 向下取整到 U
 | 当前版本公布的生命周期到期 | 动作 |
 | --- | --- |
 | ≥ `retainUntil` | 原样复用，不动对象 |
-| < `retainUntil`，或没有公布（没有规则命中、头不可读） | **把对象复制到自身**：`CopyObject`，`MetadataDirective: REPLACE`（同一套元数据）、`TaggingDirective: REPLACE`（同一个标签）、`ContentType`、`ServerSideEncryption: AES256`。S3 与 MinIO 把它记成一个**新的当前版本**，LastModified 为现在，生命周期从现在重新起算；旧版本变为 noncurrent，由 `NoncurrentVersionExpiration` 规则在 1/7/30 天后清掉 |
+| < `retainUntil`，或没有公布（没有规则命中、头不可读） | **把对象复制到自身**：`CopyObject`，`MetadataDirective: REPLACE` + `ContentType` + `TaggingDirective: REPLACE` + `ServerSideEncryption: AES256`，元数据、`ContentType` 与标签都取自**现有对象**（首写者的合同），这次清单的 schema/mediaType 不写上对象。S3 与 MinIO 把它记成一个**新的当前版本**，LastModified 为现在，生命周期从现在重新起算；旧版本变为 noncurrent，由 `NoncurrentVersionExpiration` 规则在 1/7/30 天后清掉 |
 
-复制之后再 HEAD 一次核对合同，返回的 `versionId` 是复制响应里的那个版本（而不是重新 HEAD 看到的当前版本），这样即使两次复用并发、各自复制了一次，每个结算记录的都是自己创建的版本。
+复制之后再 HEAD 一次，要求新版本与现有对象的合同**全等**（字节摘要、大小、隐私类、`ContentType`、结果 schema，`sameObjectContract`），任何一项漂移都按 `GENERIC_OPERATION_ARTIFACT_INVALID` 拒绝。返回的 `versionId` 是复制响应里的那个版本（而不是重新 HEAD 看到的当前版本），这样即使两次复用并发、各自复制了一次，每个结算记录的都是自己创建的版本。`persist` 在 `promote` 之后的 inspect 只核对 key、字节与隐私类（与 `sameStoredArtifact` 一致），不要求版本号相等。
 
 - 复制失败（传输错误、权限）**不让这次操作失败**：对象本身已经校验过，`promote` 返回现有版本，并以固定码 `GENERIC_OPERATION_ARTIFACT_RETENTION_REFRESH_FAILED` 记一条告警（不含端点、key、凭据）。代价是这一行清单可能比对象多活最多一个生命周期日，重放时会按下面第 4 节的 `OBJECT_MISSING` 收口。
 - 不传 `retainUntil` 的调用（只有测试和恢复路径）保持原有「纯复用」语义。
@@ -47,7 +48,13 @@ MinIO 的实际删除时刻是 `LastModified + (Days + 1) 天` 向下取整到 U
 - `generic_operation_artifact_object.object_version_id` 的含义改为「最近一次结算校验过的版本」；新表 `generic_operation_artifact_object_version`（sha256 + 隐私类 + 版本号，append-only）记录每一个被结算记录过的版本，并从现有钉住的版本回填。
 - `settle_tool_budget_artifact_manifest_with_receipt_v4` 取代 v3：预算、清单、expected facts、回执、主体绑定语义全是 v2 的；版本号改为「移动钉子 + 写入账本」（`record_generic_operation_artifact_object_version_v1`，只有 SECURITY DEFINER 内部可调）。`PostgresBudgetStore.settleArtifactManifest` 已改调 v4。
 - `enqueue_workspace_personal_artifact_cleanup_v1` 同签名重建：对象无其它在册主体引用时，为账本 ∪ 钉子里的**每个版本**各建一条精确版本的清理命令（命令表的唯一键本来就是「请求 × 摘要 × 版本」）。`claim` 每次都会重跑 enqueue，所以首次入队后新出现的版本也会在下一次 claim 时得到命令；清理工作流每次活动处理一条命令，直到没有待处理命令为止。擦除端口（`personal-artifact-cleanup.store.ts`）与其权限不变。
-- 边界：复制成功但本次结算没有落库（进程在两者之间死掉）会留下一个账本不知道的版本。它会作为当前版本按年龄过期（≤ 2 个生命周期日），`ExpiredObjectAllVersions` 同时清掉所有版本；擦除链覆盖不到它，这是已知的有界缺口。
+- 边界：**未入账的复制版本**。刷新复制在数据库结算之前就生成了新的当前版本；只要这次结算没有落库，这个版本就不在账本里，擦除只删「账本 ∪ 钉子」里的版本，删不到它。改动前复用分支从不写对象，不存在这个缺口。已知会留下未入账版本的路径：
+  - 进程在复制与结算之间死掉；
+  - 结算被拒绝并整体回滚，典型是个人数据擦除进行中：该摘要已有清理命令，另一主体以同样字节复用时 `settle…v4` 插入主体绑定，被 `enforce_personal_artifact_cleanup_binding_fence_v1` 以 `SUBJECT_TOMBSTONED` 拒绝；清理端删掉已入账的旧版本后，复制出的版本仍是当前版本、GET 可读；
+  - 复制 ACK 丢失：按 fail-open 当作复制失败、返回旧版本结算，但复制其实已经落地；
+  - 复制后的 HEAD 报 `STORAGE_UNAVAILABLE` 或合同漂移，`promote` 抛错，结算不发生。
+
+  这些版本作为当前版本按年龄过期：PERSONAL_DATA 最长约 2 天（`LastModified + 2 天` 向下取整到 UTC 午夜），`ExpiredObjectAllVersions` 同时清掉所有版本。在此之前，被擦除主体的字节仍可读。运行时 principal 不能删除最终对象的版本，应用侧无法补偿删除。可选的后续收口（未做）：PERSONAL_DATA 复用在复制前先确认该摘要没有清理命令或墓碑；或在复制前把意向写进账本、结算时再确认。
 
 ## 4. 错误码与痕迹
 

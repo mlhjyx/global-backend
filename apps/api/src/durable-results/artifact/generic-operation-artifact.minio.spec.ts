@@ -695,6 +695,77 @@ describe.runIf(enabled)(
       }
     });
 
+    it('keeps the first writer\'s content type, metadata and tag when a reuse under another result schema refreshes the object', async () => {
+      const runtime = runtimeClient();
+      const admin = rootClient();
+      const store = artifactStore(runtime);
+      const bucket = required('GENERIC_OPERATION_ARTIFACT_MINIO_BUCKET');
+      const firstId = randomUUID();
+      const reuseId = randomUUID();
+      // A length no other scenario uses, so the digest-derived key is this test's own.
+      const size = 101 + Math.floor(Math.random() * 800);
+      let objectKey: string | undefined;
+      try {
+        const first = await store.promote(
+          await store.stage({
+            artifactId: firstId,
+            source: { body: sourceOfLength(size, 0x51), mediaType: 'text/markdown' },
+            maxBytes: size,
+            resultSchema: 'crawl4ai-fetch/v1',
+            privacyClass: 'PERSONAL_DATA',
+          }),
+        );
+        objectKey = first.objectKey;
+        const firstHead = await admin.send(
+          new HeadObjectCommand({ Bucket: bucket, Key: first.objectKey }),
+        );
+
+        const later = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString();
+        const reused = await store.promote(
+          await store.stage({
+            artifactId: reuseId,
+            source: { body: sourceOfLength(size, 0x51), mediaType: 'text/plain' },
+            maxBytes: size,
+            resultSchema: 'http-get/v1',
+            privacyClass: 'PERSONAL_DATA',
+          }),
+          { retainUntil: later },
+        );
+
+        expect(reused).toEqual({ ...first, versionId: reused.versionId });
+        expect(reused.versionId).not.toBe(first.versionId);
+        const head = await admin.send(
+          new HeadObjectCommand({ Bucket: bucket, Key: first.objectKey }),
+        );
+        expect(head.VersionId).toBe(reused.versionId);
+        expect(head.ContentType).toBe('text/markdown');
+        expect(head.Metadata).toEqual(firstHead.Metadata);
+        expect(head.Metadata?.['result-schema']).toBe('crawl4ai-fetch/v1');
+        expect(head.ServerSideEncryption).toBe('AES256');
+        const tags = await admin.send(
+          new GetObjectTaggingCommand({ Bucket: bucket, Key: first.objectKey }),
+        );
+        expect(tags.TagSet).toEqual([{ Key: 'artifact-privacy', Value: 'PERSONAL_DATA' }]);
+      } finally {
+        await store.deleteStaging(firstId).catch(() => undefined);
+        await store.deleteStaging(reuseId).catch(() => undefined);
+        if (objectKey) {
+          const discovered = await admin.send(
+            new ListObjectVersionsCommand({ Bucket: bucket, Prefix: objectKey }),
+          );
+          for (const entry of [...(discovered.Versions ?? []), ...(discovered.DeleteMarkers ?? [])]) {
+            if (entry.Key === objectKey && entry.VersionId) {
+              await admin.send(
+                new DeleteObjectCommand({ Bucket: bucket, Key: objectKey, VersionId: entry.VersionId }),
+              ).catch(() => undefined);
+            }
+          }
+        }
+        runtime.destroy();
+        admin.destroy();
+      }
+    });
+
     it('limits the PERSONAL_DATA read role to tagged PERSONAL_DATA objects', async () => {
       const runtime = runtimeClient();
       const personalReader = personalReadClient();

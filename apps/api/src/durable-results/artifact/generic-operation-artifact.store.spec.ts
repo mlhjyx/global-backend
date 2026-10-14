@@ -936,14 +936,95 @@ describe('S3GenericOperationArtifactStore retention refresh on reuse', () => {
     expect(reused.versionId).toBe('copy-version-1');
   });
 
-  it('rejects a refreshed object whose contract no longer matches the staged artifact', async () => {
+  it('keeps the first writer\'s metadata, content type and tag when a reuse under another contract refreshes the object', async () => {
+    // #644 lets byte-identical artifacts of different result schemas share one
+    // object and keeps the first writer's contract on it; the refresh copy must
+    // not rewrite that contract with the later manifest's.
+    const client = new MemoryS3Client();
+    const { store: target } = store(client);
+    client.now = FIRST_WRITE;
+    const first = await target.promote(
+      await target.stage({
+        artifactId: ARTIFACT_ID,
+        source: source([], { mediaType: 'text/markdown' }),
+        maxBytes: 0,
+        resultSchema: 'crawl4ai-fetch/v1',
+        privacyClass: 'PERSONAL_DATA',
+      }),
+    );
+    const firstObject = client.objects.get(first.objectKey);
+    const firstMetadata = { ...firstObject?.metadata };
+    const firstTags = [...(firstObject?.tagSet ?? [])];
+
+    client.now = REUSE;
+    const reused = await target.promote(
+      await target.stage({
+        artifactId: '5d1c3b8e-2f0a-4a4e-9a51-3f7d2b6c8e10',
+        source: source([], { mediaType: 'text/plain' }),
+        maxBytes: 0,
+        resultSchema: 'http-get/v1',
+        privacyClass: 'PERSONAL_DATA',
+      }),
+      { retainUntil: REUSE_EXPIRES_AT },
+    );
+
+    const [copy, ...rest] = copies(client);
+    expect(rest).toHaveLength(0);
+    expect(copy?.input).toMatchObject({
+      MetadataDirective: 'REPLACE',
+      Metadata: firstMetadata,
+      ContentType: 'text/markdown',
+      TaggingDirective: 'REPLACE',
+      Tagging: 'artifact-privacy=PERSONAL_DATA',
+    });
+    const after = client.objects.get(first.objectKey);
+    expect(after?.contentType).toBe('text/markdown');
+    expect(after?.metadata).toEqual(firstMetadata);
+    expect(after?.metadata['result-schema']).toBe('crawl4ai-fetch/v1');
+    expect(after?.tagSet).toEqual(firstTags);
+    expect(after?.lastModified).toEqual(REUSE);
+    expect(reused).toEqual({ ...first, versionId: 'copy-version-1' });
+  });
+
+  it.each([
+    ['content type', (client: MemoryS3Client) => {
+      client.copyContentTypeDrift = 'text/plain';
+    }],
+    ['result schema', (client: MemoryS3Client) => {
+      client.copyResultSchemaDrift = 'crawl4ai-fetch/v1';
+    }],
+  ])('rejects a refreshed object whose %s drifted from the existing object\'s contract', async (_label, drift) => {
     const client = new MemoryS3Client();
     const { target, staged } = await firstWrite(client);
-    client.copyContentTypeDrift = 'text/plain';
+    drift(client);
 
     client.now = REUSE;
     await expectStorageCode(
       target.promote(staged, { retainUntil: REUSE_EXPIRES_AT }),
+      'GENERIC_OPERATION_ARTIFACT_INVALID',
+    );
+  });
+
+  it('rejects a refresh whose copy lands with the later manifest\'s contract instead of the first writer\'s', async () => {
+    const client = new MemoryS3Client();
+    const { target, stored } = await firstWrite(client);
+    expect(stored.mediaType).toBe('application/octet-stream');
+    // The copy lands carrying the reusing manifest's media type, as an S3
+    // implementation that ignored the requested contract would leave it.
+    client.copyContentTypeDrift = 'text/plain';
+
+    client.now = REUSE;
+    await expectStorageCode(
+      target.promote(
+        await target.stage({
+          artifactId: '5d1c3b8e-2f0a-4a4e-9a51-3f7d2b6c8e10',
+          source: source([bytes(1, 2, 3)], { mediaType: 'text/plain' }),
+          maxBytes: 3,
+          resultSchema: 'crawl4ai-fetch/v1',
+          privacyClass: 'PERSONAL_DATA',
+        }),
+        { retainUntil: REUSE_EXPIRES_AT },
+      ),
       'GENERIC_OPERATION_ARTIFACT_INVALID',
     );
   });

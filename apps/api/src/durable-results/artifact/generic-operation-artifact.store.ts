@@ -23,6 +23,7 @@ import {
   parseLifecycleExpiration,
   parseStoredArtifactContract,
   sameArtifact,
+  sameObjectContract,
 } from './generic-operation-artifact.object-contract';
 import {
   isCanonicalArtifactSha256,
@@ -490,7 +491,7 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
       ) {
         return existing.stored;
       }
-      return this.refreshRetention(staged, existing.stored);
+      return this.refreshRetention(existing.stored);
     }
     let body: AsyncIterable<Uint8Array>;
     try {
@@ -594,17 +595,20 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
   }
 
   /**
-   * Copies the verified current version onto itself with identical contract
-   * metadata, tag and encryption. S3 and MinIO record the copy as a new
-   * current version with a fresh LastModified, which is the age the bucket
-   * lifecycle expires by; the superseded version is noncurrent and expires on
-   * its own lifecycle rule. The copied version is what the caller records,
-   * so a concurrent refresh landing afterwards never hides it from erasure.
-   * A failed copy keeps the verified object (fail open) and leaves one bounded
-   * warning: the manifest may then outlive the object by at most one lifecycle day.
+   * Copies the verified current version onto itself with the object's own
+   * contract metadata, content type, tag and encryption, all taken from the
+   * existing object: the object keeps the first writer's contract (#644), and
+   * a reusing manifest whose result schema or media type differs carries its
+   * own in the manifest, never on the object. S3 and MinIO record the copy as
+   * a new current version with a fresh LastModified, which is the age the
+   * bucket lifecycle expires by; the superseded version is noncurrent and
+   * expires on its own lifecycle rule. The copied version is what the caller
+   * records, so a concurrent refresh landing afterwards never hides it from
+   * erasure. A failed copy keeps the verified object (fail open) and leaves
+   * one bounded warning: the manifest may then outlive the object by at most
+   * one lifecycle day.
    */
   private async refreshRetention(
-    staged: StagedArtifact,
     existing: StoredArtifact,
   ): Promise<StoredArtifact> {
     let copiedVersionId: string | null;
@@ -616,10 +620,10 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
             Key: existing.objectKey,
             CopySource: copySource(this.bucket, existing.objectKey),
             MetadataDirective: 'REPLACE',
-            Metadata: objectMetadata(staged),
-            ContentType: staged.mediaType,
+            Metadata: objectMetadata(existing),
+            ContentType: existing.mediaType,
             TaggingDirective: 'REPLACE',
-            Tagging: `artifact-privacy=${encodeURIComponent(staged.privacyClass)}`,
+            Tagging: `artifact-privacy=${encodeURIComponent(existing.privacyClass)}`,
             ServerSideEncryption: 'AES256',
           }),
         ),
@@ -631,8 +635,8 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
       this.logger.warn('GENERIC_OPERATION_ARTIFACT_RETENTION_REFRESH_FAILED');
       return existing;
     }
-    const refreshed = await this.inspect(staged.sha256, staged.privacyClass);
-    if (!refreshed || !sameArtifact(refreshed, staged)) {
+    const refreshed = await this.inspect(existing.sha256, existing.privacyClass);
+    if (!refreshed || !sameObjectContract(refreshed, existing)) {
       throw storageError('GENERIC_OPERATION_ARTIFACT_INVALID');
     }
     return copiedVersionId === null

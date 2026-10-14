@@ -498,15 +498,16 @@ export class GenericOperationArtifactService {
       input.signal,
     );
     // Another reuse may have refreshed the object again in between, so the
-    // current version id may differ; the content contract may not. The version
-    // this settlement records is the one promote itself verified or created.
+    // current version id may differ; the key, bytes and privacy boundary may
+    // not. The object's media type and result schema are the first writer's
+    // (#644) and the refresh keeps them, so they are not this manifest's to
+    // compare. The version this settlement records is the one promote itself
+    // verified or created.
     if (
       !sameStoredArtifact(inspected, {
         objectKey: promoted.objectKey,
         sha256: promoted.sha256,
         sizeBytes: promoted.sizeBytes,
-        mediaType: promoted.mediaType,
-        resultSchema: promoted.resultSchema,
         privacyClass: promoted.privacyClass,
       })
     ) {
