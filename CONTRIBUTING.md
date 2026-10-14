@@ -31,6 +31,13 @@
 `type(scope): 摘要` —— `feat` / `fix` / `docs` / `refactor` / `test` / `chore` / `perf`。
 正文说清「为什么 + 如何验证」。
 
+## Changelog 片段
+
+- 改了 `apps/`、`packages/`、`scripts/`、`infra/` 任一路径的 PR，必须在 `docs/roadmap/changelog.d/` 新增一个片段 `<YYYY-MM-DD>-<slug>.md`（或修改已有片段），不再直接改 `docs/roadmap/changelog.md`。governance 工作流按 PR diff 检查，缺片段即失败；纯文档 PR 不强制。
+- 片段的 frontmatter 写 `date`、`pr`、`title`，正文依次写 `- 起因：` / `- 改动：` / `- 测试：` / `- 未做：`。`pr` 可以留空，汇编时从 squash 提交标题的 `(#N)` 取，不必为补 PR 号再推一次。格式与示例见 [片段目录 README](docs/roadmap/changelog.d/README.md)，`pnpm docs:verify` 校验。
+- 汇编：`node scripts/changelog-assemble.mjs`（先 `--dry-run` 看结果）由发版列车或任何人手动运行，从最新 `origin/main` 建分支，把片段按日期倒序写进 changelog 并删除片段，作为 `docs(changelog)` PR 提交。
+- 为什么：所有 PR 都改 changelog 同一处，任何一个合入都让其余在途 PR 冲突、被迫并入 main 再跑一轮 CI（ruleset 并不要求分支最新）。各写各的片段后不再冲突。
+
 ## 本地必绿（提 PR 前）
 
 ```bash

@@ -4,6 +4,10 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  isFragmentPath,
+  verifyChangelogFragments,
+} from "./governance-changelog-fragments.mjs";
 import { verifyModelCandidateBaseline } from "./model-candidate-baseline.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -331,11 +335,13 @@ for (const [path, content] of markdownByPath) {
   // Plans, records, research and runbooks outside the controlled set still
   // declare whether they are current, closed or superseded, so a reader never
   // mistakes a finished plan or a time-bound report for the live contract.
+  // Changelog fragments carry frontmatter instead and are checked below.
   if (
     !controlled &&
     !authoritativeCurrent &&
     !historicalProvenance &&
     !immutableEvidence &&
+    !isFragmentPath(repoPath(path)) &&
     isLifecycleRequired(path)
   ) {
     const metadata = content.split("\n").slice(0, 16).join("\n");
@@ -565,6 +571,10 @@ if (existsSync(releaseDirectory)) {
 }
 
 for (const issue of verifyModelCandidateBaseline(root)) {
+  report("error", issue.code, join(root, issue.path), issue.detail);
+}
+
+for (const issue of verifyChangelogFragments(root)) {
   report("error", issue.code, join(root, issue.path), issue.detail);
 }
 

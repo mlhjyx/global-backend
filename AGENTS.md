@@ -94,7 +94,7 @@ pnpm --filter @global/db exec prisma migrate deploy # 读 packages/db/.env
 
 ## 9. 文档与交付
 
-- 稳定规则写本文件或治理页；当前事实写 `docs/status/current.md`；追加历史写 changelog；原始/冻结证明写 evidence；架构承重决定写 ADR。
+- 稳定规则写本文件或治理页；当前事实写 `docs/status/current.md`；追加历史写 changelog 片段：每个 PR 在 [`docs/roadmap/changelog.d/`](docs/roadmap/changelog.d/README.md) 放一个 `<YYYY-MM-DD>-<slug>.md`（frontmatter `date` / `pr` / `title`，正文依次写起因 / 改动 / 测试 / 未做），不直接改 `changelog.md`，由 `scripts/changelog-assemble.mjs` 手动汇编并以 `docs(changelog)` PR 提交；改了 `apps/`、`packages/`、`scripts/`、`infra/` 的 PR 缺片段时 governance 检查失败。原始/冻结证明写 evidence；架构承重决定写 ADR。
 - 不在多个 current 文档复制同一事实。迁移旧文字时保留 Git provenance，并在 changelog/evidence 索引留下 successor 指针。
 - 代码改动后运行相关单元/集成/E2E、lint、build、docs、ContractGraph 与安全检查；同一相关源码、配置、依赖、环境和范围的可信结果可复用，相关变化或新疑点须重验，不按消息或固定时间机械重跑。必需门不得省略；真实 provider/数据库/Temporal 验证只在范围、成本、数据与外部动作均获授权时执行。
 - 提交使用 Conventional Commits。提交前检查 diff、秘密、输入校验、授权、RLS、错误泄露和回滚路径。

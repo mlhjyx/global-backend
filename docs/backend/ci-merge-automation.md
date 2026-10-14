@@ -55,6 +55,7 @@ review thread 必须解决、push 后撤销旧 review。与下文 2026-08-09 相
   而它防范的"各自绿、合起来坏"在此规模下风险低。替代保护：main 每个 push 的 CI 不被取消、完整跑完；
   开发代理合并前把 PR 与最新 main 的组合在本地复核（`governance:verify`、`docs:verify`、Copy 指纹）；
   Copy 回执与 changelog 等多 PR 共改的行会产生文本冲突，迫使后合者变基重签。
+  （changelog 部分已于 2026-10-14 改为每个 PR 一个片段，见 [changelog.d](../roadmap/changelog.d/README.md)。）
 
 删除、non-fast-forward、review thread 解决与 push 后撤销旧 review 等其余规则不变。
 
