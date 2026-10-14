@@ -98,27 +98,56 @@ export class DataRightsService implements OnModuleInit {
     meta?: PolicyDecisionMeta,
   ): Promise<void> {
     await tx.policyDecisionLog.create({
-      data: {
-        workspaceId,
-        action: ctx.action,
-        dataClass: ctx.dataClass,
-        subjectJurisdiction: ctx.subjectJurisdiction,
-        processorJurisdiction: ctx.processorJurisdiction,
-        effect: decision.effect,
-        allowed: decision.allowed,
-        reason: decision.reason,
-        ruleId: decision.ruleId,
-        ruleVersion: decision.ruleVersion,
-        article14Required: decision.article14NoticeRequired,
-        subjectType: meta?.subjectType ?? null,
-        subjectId: meta?.subjectId ?? null,
-        // 🔴 内容最小化：只存 basis 引用（ref），绝不嵌 note/人名/邮箱明文。
-        lawfulBasisRef: meta?.lawfulBasisRef ?? ctx.lawfulBasis?.ref ?? null,
-        actorId: meta?.actorId ?? null,
-        correlationId: meta?.correlationId ?? null,
-      },
+      data: policyDecisionLogRow(workspaceId, { ctx, decision, meta }),
     });
   }
+
+  /**
+   * {@link logDecision} 的批量版：一次 INSERT 写多条判定（周报逐行 EXPORT 判权）。
+   * 在调用方事务 tx 内执行，与该次导出共存亡；空列表不发语句。
+   */
+  async logDecisions(
+    tx: Prisma.TransactionClient,
+    workspaceId: string,
+    entries: readonly PolicyDecisionEntry[],
+  ): Promise<void> {
+    if (entries.length === 0) return;
+    await tx.policyDecisionLog.createMany({
+      data: entries.map((entry) => policyDecisionLogRow(workspaceId, entry)),
+    });
+  }
+}
+
+/** 一条待留痕的判定：上下文 + 结论 + 引用元数据。 */
+export interface PolicyDecisionEntry {
+  ctx: DataRightsContext;
+  decision: DataRightsDecision;
+  meta?: PolicyDecisionMeta;
+}
+
+function policyDecisionLogRow(
+  workspaceId: string,
+  { ctx, decision, meta }: PolicyDecisionEntry,
+): Prisma.PolicyDecisionLogCreateManyInput {
+  return {
+    workspaceId,
+    action: ctx.action,
+    dataClass: ctx.dataClass,
+    subjectJurisdiction: ctx.subjectJurisdiction,
+    processorJurisdiction: ctx.processorJurisdiction,
+    effect: decision.effect,
+    allowed: decision.allowed,
+    reason: decision.reason,
+    ruleId: decision.ruleId,
+    ruleVersion: decision.ruleVersion,
+    article14Required: decision.article14NoticeRequired,
+    subjectType: meta?.subjectType ?? null,
+    subjectId: meta?.subjectId ?? null,
+    // 🔴 内容最小化：只存 basis 引用（ref），绝不嵌 note/人名/邮箱明文。
+    lawfulBasisRef: meta?.lawfulBasisRef ?? ctx.lawfulBasis?.ref ?? null,
+    actorId: meta?.actorId ?? null,
+    correlationId: meta?.correlationId ?? null,
+  };
 }
 
 /** DB 行 → 引擎规则（DB 值可信，做类型收敛）。 */

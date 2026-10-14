@@ -114,6 +114,10 @@ describe('OpenAPI authorization scope contract', () => {
       'personal-data:read',
       'compliance:manage',
     ]);
+    // BI-22: the weekly CSV leaves the platform, so reading leads is not enough.
+    expect(
+      operation(spec, 'get', '/api/v1/reports/weekly')['x-required-scopes'],
+    ).toEqual(['acquisition:read', 'acquisition:export']);
   });
 
   it('keeps infrastructure health probes public', () => {
