@@ -29,6 +29,23 @@
   - 旧形态（无计划身份）的查询不带 `correlationId`，仍按 run 共用操作键。
   - `taxonomyFallback` 不进 `resolveRunStatus`：回退的查询照常跑完所有源，不算漏活；若产品负责人希望它把 run 判 PARTIAL，是一行改动。
 
+## 2026-10-14 · Bring status, roadmap, ADR and governance records up to the 2026-10 decisions (#651)
+
+- 起因：2026-10-13 未完成任务评审稿 §3.2 核实 12 份权威文档过时——`docs/status/current.md` 停在 2026-09-20、仍写「推进 R4 到最终 hosted」（与 PRD4-D2 相反）；`release-plan.md` 仍以 Pilot 3-A 的「zero model / paid / send」「named-person collection disabled」为约束；ADR 与冲突登记没有任何 2026-10-10 起的决定；7 个计划生命周期头过期；AGENTS §7 的晋级门已成死锁却无记录。
+- 改动（纯文档，不改代码、脚本、迁移与机器合同）：
+  - `docs/status/current.md` 重写为一页 RL1 当前状态，按「做了什么（四态）/ 证据 / 谁验收 / 怎么回退」组织：11 次验收 run 全 FAILED 及逐次倒下阶段与修复 PR、评分与制裁门从未在验收数据上执行、可达性结构上为 0、GrowthOS 自 09-01 起从未 ACK、卖方入驻官网抓取自 08-24 被 HOLD、生效决定与在途 PR。G0–G7 表与 platform-writer 历史费用段保留。2026-09-20 旧正文原文移入 [`docs/archive/status/current-20260920.md`](../archive/status/current-20260920.md)（successor 指针：status 的「历史（2026-09-20 核验）」一节）。
+  - `release-plan.md` 头部加覆盖横幅与 RL1–RL6 结构（只列退出指标名称）；稳定路线的结构契约测试不允许新增标题，所以放在横幅里。
+  - ADR registry：ADR-001…024 行首补状态字，说明 Site 线 D9/D13 与 PRD 4.0 同号异义并改用 `PRD4-` 前缀，新增「PRD 4.0 决定」一节（PRD4-D2、D3、D9、D14、D16 与 PRD4-BI14 可达性改为公司级联系路径）。
+  - 冲突登记 §11.1 登记 PRD4-D1…D19 的状态与拍板日期。
+  - 计划生命周期：10-09 三份与 10-10 平台 schedule 设计改 `CLOSED`（#619/#621、#618/#623、#617、#629），09-13 两份与 09-19 一份 R4 计划改 `SUPERSEDED`（PRD4-D2）。
+  - AGENTS §6 登记制裁运营刷新例外；§7 登记 PILOT/GA 晋级门死锁（approval/readback 回读器已由 #566 移除，`scripts/governance-delivery-contracts.mjs` 恒阻断），指向待拍板的 PRD4-D12，不改脚本。
+  - CONTRIBUTING（DEC-AIDEV-004、5 项必需检查、合入即删 worktree、去掉 Codex 自动审查）、`packages/contracts/INTEGRATION.md`（删 dev base64 token 与 sandbox 段，交付对象改为 GrowthOS + 周报 CSV，事件按注册表分集成事件与内部命令）、导航指南模块地图、architecture/current（头部 20 条 Site / Copy 历史横幅原文移入 [`docs/archive/architecture/current-site-builder-banners-20260809.md`](../archive/architecture/current-site-builder-banners-20260809.md)；§6 事件以 `event-registry.ts` 为准，6 个内部命令 / 10 个集成事件）。
+- 验证：`pnpm docs:verify` 通过；`governance-document-drift`、`governance-contracts`、`environment-parity-policy`、`model-candidate-baseline` 四个 spec 共 336 项通过；`gctl check` 通过（见 PR）。
+- 未做：
+  - PRD 4.0 本体仍在私有目录（PRD4-D10 未拍板），本条只回写仓内文档；L0 宪章里与 D16、D13、D7 相矛盾的段落要在 PRD 4.0 里同步。
+  - `docs/product-scope.md` 的可达性定义随 #649 修改；RL1 计划 §15 第 6 行「snapshot_version 2」与已批准设计 E1「仍为 1」的矛盾在私有计划里，未改。
+  - 晋级门死锁、`docs/site-builder/01-prd.md` 仍标 CURRENT 等，分别等 PRD4-D12、PRD4-D1 拍板。
+
 ## 2026-10-13 · Let best-effort stages skip a company whose operation cannot be replayed, time-box enrichment, and rehearse a full-size run
 
 - 起因：卖方 #23 的验收 run（`c3878e54`，xin，2026-10-12 22:47–10-13 01:23 UTC）跑完查询、官网画像、fit（#640 的时间盒生效，分约 10 批判完 84 家）和富集后，在信号富集阶段失败。
