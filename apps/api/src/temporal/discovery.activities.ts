@@ -493,6 +493,32 @@ const DISCOVERY_DOMAIN_ACK_PRODUCERS = new Set([
 ]);
 
 /**
+ * The run's fit stage judged at least one company: its final stats say so (`fit` holds the
+ * verdict counts), or — the failure path builds stats without `fit` — the ICP's leads hold a
+ * verdict. finalizeRun uses it to request scoring for a FAILED run.
+ */
+async function fitStageJudged(
+  tx: Prisma.TransactionClient,
+  icpId: string,
+  stats: Record<string, unknown>,
+): Promise<boolean> {
+  const fit = stats.fit;
+  if (
+    fit !== null &&
+    typeof fit === 'object' &&
+    !Array.isArray(fit) &&
+    Object.values(fit as Record<string, unknown>).some((count) => typeof count === 'number' && count > 0)
+  ) {
+    return true;
+  }
+  const judged = await tx.lead.findFirst({
+    where: { icpId, fitVerdict: { not: null } },
+    select: { id: true },
+  });
+  return judged !== null;
+}
+
+/**
  * Discover 阶段活动（PRD 5.5 / 8.7 流水线）：
  * 计划 → Provider 调用 → Raw Zone 原样落地 → 归一 + 身份解析 → Canonical +
  * FieldEvidence + IdentityLink → Suppression 标记 → 成本入账。
@@ -541,11 +567,13 @@ export function createDiscoveryActivities(deps: {
     return binding;
   };
   /**
-   * A FAILED outcome spends nothing and starts nothing: the plan stays READY
-   * and no QualifyRequested is written. It may therefore still be recorded
-   * after the run's authority has ended; otherwise a run whose grant lapsed or
-   * was revoked mid-way would stay RUNNING forever. A legacy envelope stays
-   * parked, and every other attestation failure still refuses the write.
+   * A FAILED outcome spends nothing: the plan stays READY, and the only thing
+   * it may start is scoring (QualifyRequested, when the fit stage already
+   * judged companies), which is deterministic and makes no provider call. It
+   * may therefore still be recorded after the run's authority has ended;
+   * otherwise a run whose grant lapsed or was revoked mid-way would stay
+   * RUNNING forever. A legacy envelope stays parked, and every other
+   * attestation failure still refuses the write.
    */
   const attestRunFinalization = async (
     args: DiscoveryActivityInput & { status: 'DONE' | 'PARTIAL' | 'FAILED' },
@@ -2332,9 +2360,14 @@ export function createDiscoveryActivities(deps: {
             } as Prisma.InputJsonValue,
           },
         });
-        // 发现→评分自动衔接：run 完成即请求重评分（relay 启 qualifyWorkflow，重复请求合并到在跑实例）。
+        // 发现→评分自动衔接：run 收尾即请求重评分（relay 启 qualifyWorkflow，重复请求合并到在跑实例）。
         // 之前评分只能人工触发 —— 新公司判了 fit 也进不了 lead 队列，漏斗断在这一步。
-        if (args.status !== 'FAILED' && args.icpId) {
+        // FAILED 的 run 也请求，只要 fit 阶段已经给过判定：已物化的公司就该拿到评分（分数是幂等
+        // upsert，之后的 run 再刷新）。此前 FAILED 一律不写——xin 上 11 次验收 run 全部 FAILED，179 条
+        // lead 六维分全 NULL、队列只是 fit 门预置，评分、制裁第五门、LeadsScored 从未在真实数据上跑过。
+        // 评分是确定性的、不调 provider、不花预算，所以不需要仍然有效的授权；plan 仍留 READY，
+        // DiscoveryRunCompleted 照旧带 status=FAILED。
+        if (args.icpId && (args.status !== 'FAILED' || (await fitStageJudged(tx, args.icpId, finalStats)))) {
           await tx.outboxEvent.create({
             data: {
               workspaceId: args.workspaceId,
@@ -2342,7 +2375,7 @@ export function createDiscoveryActivities(deps: {
               aggregateType: 'ICP',
               aggregateId: args.icpId,
               payload: {
-                reason: 'discovery_run_completed',
+                reason: args.status === 'FAILED' ? 'discovery_run_failed_after_fit' : 'discovery_run_completed',
                 runId: args.runId,
               } as Prisma.InputJsonValue,
             },

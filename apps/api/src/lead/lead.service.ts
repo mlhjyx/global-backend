@@ -21,6 +21,10 @@ import { contactSuppressionKeys } from '../discovery/identity';
 import { blindContactKey } from '../compliance/pii-crypto';
 import { isSyntheticDiscoveryProvenance } from '../discovery/evidence-license';
 import { collectProductReadPage } from '../discovery/product-read-pagination';
+import { isLeadScored, leadQueueBasis, summarizeLeadQueues } from './lead-queue-basis';
+
+/** 列表/详情行的队列依据探针：只取一条 reject 裁决（有界），不把裁决历史拉进行。 */
+const REJECT_DECISION_PROBE = { where: { action: 'reject' }, select: { id: true }, take: 1 } as const;
 
 @Injectable()
 export class LeadService {
@@ -82,6 +86,7 @@ export class LeadService {
             // nulls last：fit 门先建的 Lead 尚无分（totalScore=null），PG 默认 DESC NULLS FIRST 会把
             // 未评分行顶到列表最前——显式压到最后，评分完成后自然按分排。
             orderBy: [{ totalScore: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
+            include: { decisions: REJECT_DECISION_PROBE },
           }),
         projectProductRows: async (rows) => {
           // 附公司摘要（跨表查询而非 include：lead 与 canonical 无 Prisma relation）
@@ -113,10 +118,14 @@ export class LeadService {
           const byId = new Map(companies.map((company) => [company.id, company]));
           return rows
             .filter((lead) => !quarantinedCompanyIds.has(lead.canonicalCompanyId))
-            .map((lead) => ({
+            .map(({ decisions, ...lead }) => ({
               cursor: lead.id,
               value: {
                 ...lead,
+                // 预置队列 vs 已评分：scored = total_score 非空；queueBasis 见 lead-queue-basis.ts。
+                scored: isLeadScored(lead),
+                // 探针只装 reject 裁决；旧形状的行没有该字段 → 视为无。
+                queueBasis: leadQueueBasis(lead, Array.isArray(decisions) && decisions.length > 0),
                 company: byId.get(lead.canonicalCompanyId) ?? null,
               },
             }));
@@ -127,14 +136,22 @@ export class LeadService {
 
   async get(ctx: RequestContext, leadId: string) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const lead = await tx.lead.findUnique({
+      const found = await tx.lead.findUnique({
         where: { id: leadId },
         include: { decisions: true },
       });
-      if (!lead)
+      if (!found)
         throw new NotFoundException({
           error: { code: 'NOT_FOUND', message: 'lead not found' },
         });
+      const lead = {
+        ...found,
+        scored: isLeadScored(found),
+        queueBasis: leadQueueBasis(
+          found,
+          found.decisions.some((decision) => decision.action === 'reject'),
+        ),
+      };
       const company = await tx.canonicalCompany.findUnique({
         where: { id: lead.canonicalCompanyId },
         include: { contacts: { include: { contactPoints: true } } },
@@ -433,8 +450,14 @@ export class LeadService {
           subjectId: leadId,
           actorId: ctx.userId,
         });
+        // 接受前队列的依据（快照 queue_basis）：REJECTED 只凭状态分不出人工拒绝与评分拒绝，
+        // 查一条 reject 裁决作证（有界；其他状态不查）。
+        const humanRejected =
+          lead.status === 'REJECTED' &&
+          (await tx.leadDecision.findFirst({ where: { leadId, action: 'reject' }, select: { id: true } })) !== null;
         const snapshot = buildLeadQualifiedSnapshot({
           lead,
+          humanRejected,
           company: effectiveCompany,
           icpVersion: icp?.version ?? null,
           storageRightsDecision: rights.effect,
@@ -470,23 +493,24 @@ export class LeadService {
     return result;
   }
 
-  /** 四队列计数（LED-008 的工作台视图数据）。 */
+  /**
+   * 五队列计数（LED-008 的工作台视图数据）+ 队列依据：`scored`（每条都有 total_score）与
+   * `queueBasis` 四种依据的计数，让使用者看出计数是 fit 门预置的还是评分得出的。两条有界查询：
+   * 按 (queue, status) 分组计数（`_count.totalScore` = COUNT(total_score)），再聚合「REJECTED 且有
+   * reject 裁决」的条数——评分阶段自己也写 REJECTED，只凭状态分不出人工拒绝。
+   */
   queueSummary(ctx: RequestContext, icpId: string) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const rows = await tx.lead.groupBy({
-        by: ['queue'],
+        by: ['queue', 'status'],
         where: { icpId },
-        _count: { _all: true },
+        _count: { _all: true, totalScore: true },
       });
-      const summary: Record<string, number> = {
-        recommended: 0,
-        needs_review: 0,
-        rejected: 0,
-        suppressed: 0,
-        sanctions_hold: 0,
-      };
-      for (const r of rows) summary[r.queue] = r._count._all;
-      return summary;
+      const humanRejected = await tx.lead.aggregate({
+        where: { icpId, status: 'REJECTED', decisions: { some: { action: 'reject' } } },
+        _count: { _all: true, totalScore: true },
+      });
+      return summarizeLeadQueues(rows, humanRejected._count);
     });
   }
 

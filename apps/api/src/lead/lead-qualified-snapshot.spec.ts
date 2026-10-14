@@ -219,6 +219,66 @@ describe('buildLeadQualifiedSnapshot — 快照 v1（Consumer Test：契约 sche
     expect(snap.suppression_state).toBe('suppressed');
   });
 
+  // 可选字段 scored_at / queue_basis（设计 E1：v1 加可选字段，snapshot_version 仍 1）：
+  // 消费方能看出这条线索被接受时，它所在的队列是评分算出的，还是 fit 门预置、或人工曾拒绝的。
+  it('已评分 lead → scored_at=评分时刻 ISO、queue_basis=score，仍过 v1 契约', () => {
+    const { validate } = loadValidator();
+    const snap = buildLeadQualifiedSnapshot({
+      lead: makeLead({ scoredAt: new Date('2026-10-14T01:02:03.000Z') }),
+      company: makeCompany(),
+      icpVersion: 3,
+    });
+    const ok = validate(snap);
+    expect(validate.errors ?? []).toEqual([]);
+    expect(ok).toBe(true);
+    expect(snap.scored_at).toBe('2026-10-14T01:02:03.000Z');
+    expect(snap.queue_basis).toBe('score');
+  });
+
+  it('列加进来之前评的分（scoredAt 缺）→ scored_at null 如实，queue_basis 仍是 score', () => {
+    const snap = buildLeadQualifiedSnapshot({ lead: makeLead(), company: makeCompany(), icpVersion: 3 });
+    expect(snap.scored_at).toBeNull();
+    expect(snap.queue_basis).toBe('score');
+  });
+
+  it('未评分（fit 门预置队列）→ scored_at null、queue_basis=fit_gate_preset', () => {
+    const { validate } = loadValidator();
+    const snap = buildLeadQualifiedSnapshot({
+      lead: makeLead({ status: 'DISCOVERED', queue: 'needs_review', scores: null, totalScore: null, scoredAt: null }),
+      company: makeCompany(),
+      icpVersion: 3,
+    });
+    expect(validate(snap)).toBe(true);
+    expect(snap.scored_at).toBeNull();
+    expect(snap.queue_basis).toBe('fit_gate_preset');
+  });
+
+  it('人工曾拒绝的 REJECTED lead 被接受 → queue_basis=human_reject（接受前队列的依据）', () => {
+    const snap = buildLeadQualifiedSnapshot({
+      lead: makeLead({ status: 'REJECTED', queue: 'rejected' }),
+      humanRejected: true,
+      company: makeCompany(),
+      icpVersion: 3,
+    });
+    expect(snap.queue_basis).toBe('human_reject');
+  });
+
+  it('schema：queue_basis 只收四个枚举值、scored_at 须是 date-time；旧载荷（无这两个字段）仍通过', () => {
+    const { validate } = loadValidator();
+    const good = buildLeadQualifiedSnapshot({ lead: makeLead(), company: makeCompany(), icpVersion: 3 });
+
+    const legacy = { ...(good as unknown as Record<string, unknown>) };
+    delete legacy.scored_at;
+    delete legacy.queue_basis;
+    expect(validate(legacy)).toBe(true);
+
+    expect(validate({ ...good, queue_basis: 'guess' })).toBe(false);
+    expect(validate({ ...good, scored_at: 'yesterday' })).toBe(false);
+    for (const basis of ['fit_gate_preset', 'score', 'human_accept', 'human_reject']) {
+      expect(validate({ ...good, queue_basis: basis })).toBe(true);
+    }
+  });
+
   it('schema 拒绝缺 required 字段与多余字段（additionalProperties:false）', () => {
     const { validate } = loadValidator();
     const good = buildLeadQualifiedSnapshot({ lead: makeLead(), company: makeCompany(), icpVersion: 3 });
@@ -810,5 +870,30 @@ describe('valid_until 鲜度模型 v2（computeValidUntil + decide 接线）', (
     await svc.decide(decideCtx, LEAD_ID, 'accept');
     const payload = (outboxCreate.mock.calls[0][0].data as Record<string, unknown>).payload as Record<string, unknown>;
     expect(payload.valid_until).toBe(iso(Date.parse(earlier) + 180 * day)); // 最早抓取决定最早失效
+  });
+
+  it('decide 接线：已评分 lead 的 scored_at 与 queue_basis=score 进入快照，且不查 lead_decision', async () => {
+    const { validate } = loadValidator();
+    const outboxCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+    const tx = makeDecideTx(makeLead({ scoredAt: new Date('2026-10-14T01:02:03.000Z') }), makeCompany(), outboxCreate, vi.fn());
+    const findFirst = vi.fn(async () => ({ id: 'decision-1' }));
+    (tx.leadDecision as Record<string, unknown>).findFirst = findFirst;
+    await makeDecideService(tx).decide(decideCtx, LEAD_ID, 'accept');
+    const payload = (outboxCreate.mock.calls[0][0].data as Record<string, unknown>).payload as Record<string, unknown>;
+    expect(validate(payload)).toBe(true);
+    expect(payload.scored_at).toBe('2026-10-14T01:02:03.000Z');
+    expect(payload.queue_basis).toBe('score');
+    expect(findFirst).not.toHaveBeenCalled();
+  });
+
+  it('decide 接线：REJECTED 且有 reject 裁决的 lead 被 accept → queue_basis=human_reject（只在 REJECTED 时查一条裁决）', async () => {
+    const outboxCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+    const tx = makeDecideTx(makeLead({ status: 'REJECTED', queue: 'rejected' }), makeCompany(), outboxCreate, vi.fn());
+    const findFirst = vi.fn(async () => ({ id: 'decision-1' }));
+    (tx.leadDecision as Record<string, unknown>).findFirst = findFirst;
+    await makeDecideService(tx).decide(decideCtx, LEAD_ID, 'accept');
+    expect(findFirst).toHaveBeenCalledWith({ where: { leadId: LEAD_ID, action: 'reject' }, select: { id: true } });
+    const payload = (outboxCreate.mock.calls[0][0].data as Record<string, unknown>).payload as Record<string, unknown>;
+    expect(payload.queue_basis).toBe('human_reject');
   });
 });

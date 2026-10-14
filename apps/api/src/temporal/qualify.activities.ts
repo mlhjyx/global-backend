@@ -147,6 +147,9 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
             const scoreDetail = { ...result.detail, fitVerdict: authoritativeFit };
             // 人工已裁决（QUALIFIED/REJECTED via decision/CONTACTED+）的 Lead 不被重评覆盖状态
             const humanFinal = existing && ['QUALIFIED', 'CONTACTED', 'CONVERTED'].includes(existing.status);
+            // scored_at：这条 lead 的队列从此由评分决定（fit 门预置结束）。API 的 scored/queueBasis 与
+            // LeadQualified 快照的 scored_at 读它。
+            const scoredAt = new Date();
             // 评分只写 scores/queue/status —— **绝不覆盖 fitVerdict/fitReasons**（那是资格门① 的产物）。
             await tx.lead.upsert({
               where: {
@@ -160,6 +163,7 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                 totalScore: result.totalScore,
                 scores: result.scores as unknown as Prisma.InputJsonValue,
                 scoreDetail: scoreDetail as unknown as Prisma.InputJsonValue,
+                scoredAt,
                 ...(humanFinal ? {} : { status: status as never, queue }),
                 version: { increment: 1 },
               },
@@ -172,6 +176,7 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                 totalScore: result.totalScore,
                 scores: result.scores as unknown as Prisma.InputJsonValue,
                 scoreDetail: scoreDetail as unknown as Prisma.InputJsonValue,
+                scoredAt,
               },
             });
             // 记/更制裁审计件（命中时）：名单/条目 ref/版本/分数/复核态——🔴 非个人传记（只公司名 + 名单条目引用）。
