@@ -29,7 +29,7 @@
   - 旧形态（无计划身份）的查询不带 `correlationId`，仍按 run 共用操作键。
   - `taxonomyFallback` 不进 `resolveRunStatus`：回退的查询照常跑完所有源，不算漏活；若产品负责人希望它把 run 判 PARTIAL，是一行改动。
 
-## 2026-10-14 · Release the reservation of a definite failure before any output, and let the same key reserve again (D13, operational fix)
+## 2026-10-14 · Release the reservation of a definite failure before any output, and let the same key reserve again (D13, operational fix) (#652)
 
 - 起因：非付费路径（获客全部走这里）把「确定的失败」和「结果未知」一样当作不可重放，每一次都是 run 的终点。
   - 网关 `router-model-gateway.ts` 的 catch 只在 `ExternalActionDeniedError`、`callCount === 0` 且没有 usage 时释放预留，其余一律「已结算、无结果」：HTTP 503（卖方 #26 的词表归一，10-13 11:36，`ProviderHttpError`）、首个输出之前的上游错误事件（卖方 #25、#27，10-13 08:36 与 12:27 的 6 次 `CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR`，ai_trace 里输入、输出 token 都为空，new-api 记 `reason=eof`、0 个输出 token）。
