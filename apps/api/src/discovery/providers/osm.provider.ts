@@ -23,6 +23,8 @@ import { lookupIndustryOsmTags, lookupRegionOsmArea } from '../vocab';
 export class OsmDiscoveryProvider implements CompanyDiscoveryAdapter {
   readonly key = 'openstreetmap';
   readonly classes: SourceClass[] = ['industry_data'];
+  /** mapTags reads `_osmTags` before the built-in vocabulary. */
+  readonly consumesResolvedTaxonomy = true;
 
   constructor(private readonly deps?: { broker?: ExecutionBroker }) {}
 

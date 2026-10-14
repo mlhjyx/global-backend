@@ -23,6 +23,8 @@ import { mapIndustryToQids, mapCountryToQid } from '../vocab';
 export class WikidataDiscoveryProvider implements CompanyDiscoveryAdapter {
   readonly key = 'wikidata';
   readonly classes: SourceClass[] = ['company_registry', 'industry_data'];
+  /** mapIndustries / mapCountry read `_industryQids` / `_countryQid` before the built-in vocabulary. */
+  readonly consumesResolvedTaxonomy = true;
 
   constructor(private readonly deps?: { broker?: ExecutionBroker }) {}
 

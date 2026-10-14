@@ -364,3 +364,51 @@ describe('TaxonomyResolver — durable model budget binding', () => {
     },
   );
 });
+
+describe('TaxonomyResolver — operation identity per query (W2)', () => {
+  // Seller #26, run 3e78eb4e (xin, 2026-10-13 11:36 UTC): the gateway keys a paid model
+  // operation by run, task, prompt, schema and correlationId. The resolver sent no
+  // correlationId, so every query of the run that shared a term shared one operation;
+  // after a 503 settled it without a result, the next query met it and the run failed.
+  it('forwards the caller correlationId to the gateway context, and sends none without it', async () => {
+    const generateStructured = vi.fn(async (_input: unknown, context: { correlationId?: string }) => ({
+      data: { code: 'industry-1' }, provider: 'gateway', model: 'model', context,
+    }));
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
+        termAlias: { upsert: vi.fn(async () => ({})) },
+      })),
+      termAlias: { findUnique: vi.fn(async () => null) },
+      canonicalTaxonomy: {
+        findMany: vi.fn(async () => [{ code: 'industry-1', labelEn: 'Pumps', labels: {} }]),
+        findUnique: vi.fn(async () => ({
+          kind: 'industry', scheme: 'isic', code: 'industry-1', labelEn: 'Pumps', labels: {},
+          wikidataQid: null, osmTags: null, crosswalks: null,
+        })),
+      },
+    };
+    const resolver = new TaxonomyResolver(
+      prisma as never,
+      { generateStructured } as never,
+      undefined,
+      { open: vi.fn(), close: vi.fn(), attestAuthorized: vi.fn() } as never,
+    );
+    const opts = { workspaceId: TEST_BINDING.scopeKey, runId: TEST_BINDING.accountKey, executionBudget: TEST_BINDING };
+
+    await resolver.resolve('industry', 'pumps', { ...opts, correlationId: 'query-key-1:0' });
+    await resolver.resolveMany('industry', ['pumps'], { ...opts, correlationId: 'query-key-2:1' });
+    await resolver.resolve('industry', 'pumps', opts);
+
+    expect(generateStructured).toHaveBeenCalledTimes(3);
+    expect(generateStructured.mock.calls.map(([, context]) => context.correlationId))
+      .toEqual(['query-key-1:0', 'query-key-2:1', undefined]);
+    expect(generateStructured.mock.calls[2]![1]).not.toHaveProperty('correlationId');
+    for (const [, context] of generateStructured.mock.calls) {
+      expect(context).toMatchObject({
+        workspaceId: TEST_BINDING.scopeKey,
+        runId: TEST_BINDING.accountKey,
+        durableResultSchema: 'taxonomy-code/v1',
+      });
+    }
+  });
+});
