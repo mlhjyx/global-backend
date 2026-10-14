@@ -404,6 +404,43 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
     expect(getKeys).toEqual([key]);
   });
 
+  it('shares an existing immutable target first written under another result schema and media type', async () => {
+    // Same bytes inside one privacy boundary are one object: an empty HEAD probe
+    // (http-get/v1, text/plain) and an empty crawl (crawl4ai-fetch/v1,
+    // text/markdown) must not reject each other.
+    const { client, store: target } = store();
+    const staged = await stage(target, [bytes(9, 10)], 2);
+    const key = contentAddressedObjectKey(staged.sha256, staged.privacyClass);
+    client.objects.set(key, {
+      chunks: [bytes(9, 10)],
+      contentType: 'text/markdown',
+      tagSet: [{ Key: 'artifact-privacy', Value: staged.privacyClass }],
+      serverSideEncryption: 'AES256',
+      versionId: 'version-existing',
+      metadata: {
+        sha256: staged.sha256,
+        'size-bytes': staged.sizeBytes,
+        schema: GENERIC_OPERATION_ARTIFACT_OBJECT_SCHEMA,
+        'result-schema': 'crawl4ai-fetch/v1',
+        'privacy-class': staged.privacyClass,
+      },
+    });
+    await expect(target.promote(staged)).resolves.toMatchObject({
+      objectKey: key,
+      sha256: staged.sha256,
+      sizeBytes: staged.sizeBytes,
+      mediaType: 'text/markdown',
+      resultSchema: 'crawl4ai-fetch/v1',
+      versionId: 'version-existing',
+    });
+    expect(client.objects.get(key)?.chunks).toEqual([bytes(9, 10)]);
+    // The existing object is reused as it is, never rewritten with the new contract.
+    expect(
+      client.commands.filter((command) => command instanceof PutObjectCommand),
+    ).toHaveLength(0);
+    expect(client.objects.get(key)?.metadata['result-schema']).toBe('crawl4ai-fetch/v1');
+  });
+
   it.each([
     ['missing privacy tag', []],
     [
@@ -523,7 +560,6 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
   it.each([
     ['HEAD size mismatch', { contentLength: 3 }],
     ['digest metadata mismatch', { sha256: 'ab'.repeat(32) }],
-    ['result schema mismatch', { resultSchema: 'crawl4ai-fetch/v1' }],
     ['privacy metadata mismatch', { privacyClass: 'PERSONAL_DATA' }],
   ])('rejects an immutable target with %s', async (_label, mutation) => {
     const { client, store: target } = store();

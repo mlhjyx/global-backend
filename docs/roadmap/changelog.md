@@ -23,6 +23,31 @@
   - readiness 金丝雀没有加「复制到自身」探针；策略若漂移，只会在复用时以告警码暴露。
   - 与 `claude/artifact-dedupe-bytes` 的字节级复用判定互不触及（本分支未改 `sameArtifact`/`sameStoredArtifact` 的比较项）；该分支尚未推送。
 
+## 2026-10-14 · Key term normalization per query, skip its model when no routed source reads it, and fall back to the built-in vocabulary when the call is lost (#645)
+
+- 起因：卖方 #26 的验收 run（`3e78eb4e`，xin，2026-10-13 11:36 UTC）15 秒内失败：`stats.failure = { stage: query, errorType: BudgetOperationReplayError }`，16 条查询只记 1 条失败。
+  - 第 1 条查询的词表归一（`taxonomy.normalize`，deepseek-v4-pro）被上游以 503 拒绝（`ai_trace` 一行 `ProviderHttpError`，5.9 秒），网关把这次预算操作按预留上界结算（`tool_budget_operation`：SETTLED、无结果、100000 microusd）。
+  - 模型操作键 = run、任务、模型、`correlationId`、提示词、system、schema（`router-model-gateway.ts` 的 `paidOperationKey`），而 `TaxonomyResolver` 传给网关的上下文只有 workspace、run 与结果 schema（`taxonomy-resolver.ts` 的 `executeBudgetedTask`）。同一个词在同一 run 里的提示词完全相同，于是 16 条查询共用一个已死的操作：第 1 条的重试与第 2 条的首次尝试都撞上 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`，按 #643「连续两条即停」run 失败。#643 的「未做」已登记这条传染。
+  - 另外两处与设计不符：`docs/backend/vocab-taxonomy.md` 写明 LLM 归一「不碰发现热路径」，而 `executeQuery` 对每条查询都调；`public_web`（今天唯一有受治理血缘、真正被路由的发现源）根本不读归一结果（`_industryQids` / `_osmTags` / `_countryQid` 只有 wikidata 与 openstreetmap 消费），这些调用既花钱又没有用处。
+- 改动：
+  - **操作按查询归键**：`TaxonomyResolveOptions` 新增 `correlationId`，四条归一路径都把它放进网关上下文；`executeQuery` 传 `${queryKey}:${queryOrdinal}`。同一 run 两条查询共用一个词时各自预留操作；成功归一仍由 `term_alias` 沉淀，后续查询走确定性路径不再调模型，所以只有失败会各撞一次。只有 authority 时代、没有计划身份的旧形态查询不带 `correlationId`（保持原键）。
+  - **只为会读归一结果的源调用模型**：`CompanyDiscoveryAdapter` 新增 `consumesResolvedTaxonomy`，wikidata 与 openstreetmap 声明；一条查询路由到的源都不声明时，`executeQuery` 传 `allowLlm: false`，只查已沉淀的别名，未命中由 provider 回退内置 `vocab.ts`。按今天的路由（只有 `public_web` 有血缘），发现热路径不再调 `taxonomy.normalize`。
+  - **调用丢失时回退内置词表**：词表归一遇到 `BudgetOperationReplayError` 或 `ProviderHttpError` 5xx 时，这条查询不再「不调任何源、以零回执结束并标记 `unreplayable`」（#643 的设计，在此被替换：归一只是查询的精修，不是查询本身的工作，丢了它不该丢整条查询），而是保留已归一的词、其余回退各源内置词表，照常派发所有源，查询不算失败、`previousQueryUnreplayable` 不受影响。`ProviderHttpError` 在别处仍是控制错误（`execution-control-error.ts` 按形状判定），只在词表归一这一处吸收；4xx 与其他控制错误照旧 fail closed。
+  - **统计**：活动结果新增 `taxonomyFallback` / `taxonomyModelSkipped`（只在为真时出现）；工作流计入 `stats.taxonomyFallback`（回退的查询数）与 `stats.taxonomyModelSkipped`（有词可归一却没有调模型的查询数），只在大于 0 时出现，不改 run 状态。对接说明（`packages/contracts/INTEGRATION.md` 第 3 步）与 `docs/backend/vocab-taxonomy.md` 同步到 as-built。
+- 测试：
+  - 先写失败测试，改动前 7 项失败、改动后 5 个文件 339 项全部通过：
+    - resolver 1 项：`correlationId` 进入网关上下文、不传时不带；
+    - 活动 5 项（另 2 项改动前就成立）：同一 run 两条查询共用词时两次归一的 `correlationId` 各为 `queryKey:ordinal` 且不同；只路由 `public_web` 时 `allowLlm: false` 并计 `taxonomyModelSkipped`；路由到 wikidata 时允许模型；503 回退并照常派发、无 `unreplayable`；`BudgetOperationReplayError` 紧跟在丢失的查询之后同样回退；国家归一失败时保留已归一的行业；401 与其他控制错误照旧失败；
+    - 工作流 1 项：两种计数进统计且状态仍 DONE；另 1 项核对没有发生时统计形状不变。
+  - 网关 1 项钉住本修复依赖的契约：同一提示词、不同 `correlationId` 预留不同操作键，相同的则相同（改动前后都成立）。
+  - #643 的两个用例「词表归一丢失时不调用任何源」「紧跟在上一条之后时失败」按新行为删除，由上述回退用例取代。
+  - `gctl check`：docs/governance、prisma generate、contracts、lint、build 全绿；全量单测 9665 项通过、1 项 `browser-readiness-probe` 的 1000 进程 soak 在本机负载下超时，单独重跑该文件 24 项全绿（`/global/CLAUDE.md` §6 登记的假红）。
+- 未做：
+  - 失败的归一调用仍按预留上界结算（本例 0.10 美元）。操作按查询归键后，上游持续 5xx 时每条查询最多各撞一次（每条最多 6 个词），总额仍受 run 预算封顶；没有加「本 run 已见 5xx 就跳过后续归一」的交接。
+  - 429 等 4xx 仍按控制错误让查询失败，没有放进回退范围。
+  - 旧形态（无计划身份）的查询不带 `correlationId`，仍按 run 共用操作键。
+  - `taxonomyFallback` 不进 `resolveRunStatus`：回退的查询照常跑完所有源，不算漏活；若产品负责人希望它把 run 判 PARTIAL，是一行改动。
+
 ## 2026-10-13 · Let best-effort stages skip a company whose operation cannot be replayed, time-box enrichment, and rehearse a full-size run
 
 - 起因：卖方 #23 的验收 run（`c3878e54`，xin，2026-10-12 22:47–10-13 01:23 UTC）跑完查询、官网画像、fit（#640 的时间盒生效，分约 10 批判完 84 家）和富集后，在信号富集阶段失败。
@@ -111,6 +136,17 @@
   - 查询活动因**普通**错误用尽重试时仍然没有回执，run 会在物化时被扣住（#642 之前就如此；只是普通错误很少见，多数错误都归为控制错误）。
   - 共用操作键的失败仍会跨查询传染：词表归一的操作键由 run、任务、提示词决定，一次 503 让后面每条查询第一次尝试就撞上，连续两条即停（卖方 #26，10-13 11:36）。根治在网关或词表归一回退，按产品负责人决定放在验收之后。
   - REPLAYED 的查询结果（同一活动在上一次尝试已提交回执）不带 `unreplayable` 标记，不计入统计。
+
+## 2026-10-13 · Let byte-identical artifacts of different result schemas share one stored object
+
+- 起因：卖方 #28 的验收 run（`3afe9c46`，xin，2026-10-13 15:43–17:11 UTC）12 条查询全部完成、44 家公司进入物化、fit 判完，却在信号阶段失败；#23（10-13 01:23）倒在同一处。#641 补的错误码这次把根因露了出来：连续两家公司的 `http-get/v1` 产物持久化报 `ArtifactStorageError:GENERIC_OPERATION_ARTIFACT_INVALID`，broker 按设计改抛不可重放错误，#641 的「连续两家即停」生效。
+  - 产物对象按 sha256 + 隐私类寻址（`artifact-key.ts`），但 `store.promote` 对已存在的对象还要求 result-schema 与 media-type 完全一致（`object-contract.ts` 的 `sameArtifact`），读回时 `service.ts` 的 `sameStoredArtifact` 同样要求。
+  - 信号阶段对每家公司做 careers 路径的 HEAD 探测，产物是空字节；而 `crawl4ai-fetch/v1`（text/markdown）早在 10-12 17:34 就把 23 份空结果存进了同一个对象。于是每家公司都在同一步被判 INVALID——不是上游、不是 MinIO，是我们自己的相等判定。
+- 改动：相等判定收紧到字节本身——sha256、大小、隐私类；对象自身的 media-type 与 result-schema 只记录首个写入者的合同，每份产物清单带自己的合同，materializer 一直读的就是清单。`promote` 复用已存在的对象时不改写它。
+- 测试：先红后绿（3 项新用例改动前失败，改动后产物模块 25 个文件 348 项通过）：存储层「同字节、另一 schema/媒体类型的对象被复用且不重写」；服务层「读回这样的产物」「持久化到这样的对象上时清单仍是自己的合同」；原「result schema mismatch 即拒绝」的用例按新规则删除，大小、摘要、隐私类不一致仍拒绝。
+- 未做：
+  - 内容寻址去重与 MinIO 按对象年龄过期（personal-data 1 天）相冲：复用对象不刷新年龄，首个写入者的 TTL 一到对象就没了，而库里仍有未过期的产物行指向它（10-13 验证：空对象已 NotFound，库里最晚的引用到 10-14 16:36）。另行处理。
+  - 每次 HEAD 探测都落一份空产物，是浪费但无害。
 
 ## 2026-10-12 · Keep a governed discovery query going when one model extraction answers unusably
 

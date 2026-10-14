@@ -141,6 +141,15 @@ export function objectMetadata(
   });
 }
 
+/**
+ * Whether a stored object is the artifact a caller expects. A final object is
+ * addressed by its bytes inside one privacy boundary, so two operations whose
+ * results are byte-identical share it even when their result schemas or media
+ * types differ: an empty HEAD probe (http-get/v1, text/plain) and an empty
+ * crawl (crawl4ai-fetch/v1, text/markdown) are the same empty object. The
+ * object's own metadata records the first writer's contract; each artifact
+ * manifest carries its own, and materializers read the manifest.
+ */
 export function sameArtifact(
   stored: ArtifactDescriptor,
   expected: ArtifactDescriptor,
@@ -148,8 +157,6 @@ export function sameArtifact(
   return (
     stored.sha256 === expected.sha256 &&
     stored.sizeBytes === expected.sizeBytes &&
-    stored.mediaType === expected.mediaType &&
-    stored.resultSchema === expected.resultSchema &&
     stored.privacyClass === expected.privacyClass
   );
 }

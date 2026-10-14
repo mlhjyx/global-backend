@@ -641,6 +641,49 @@ describe('GenericOperationArtifactService', () => {
     expect(verified.expectedFacts).toEqual(expectedFacts);
   });
 
+  it('reads an artifact whose object was first written under another result schema and media type', async () => {
+    // The object's own metadata records the first writer's contract; this
+    // artifact's manifest carries its own, and only the bytes must agree.
+    const deps = dependencies({
+      inspect: async () => ({ ...stored, mediaType: 'text/markdown', resultSchema: 'crawl4ai-fetch/v1' }),
+    });
+
+    const verified = await deps.service.readVerified({
+      scopeKind: 'workspace',
+      workspaceId: WORKSPACE_ID,
+      authorityId: AUTHORITY_ID,
+      reference: {
+        schemaVersion: 'generic-operation-artifact-ref/v1',
+        artifactId: ARTIFACT_ID,
+        operationId: OPERATION_ID,
+        resultSchema: 'http-get/v1',
+        sha256: SHA256,
+        sizeBytes: String(BODY.byteLength),
+        mediaType: 'text/plain',
+        expiresAt: EXPIRES_AT,
+      },
+    });
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of verified.body) chunks.push(chunk);
+    expect(chunks).toEqual([BODY]);
+    expect(verified.manifest).toEqual(manifest);
+  });
+
+  it('persists an artifact whose bytes already exist under another result schema and media type', async () => {
+    const shared = { ...stored, mediaType: 'text/markdown', resultSchema: 'crawl4ai-fetch/v1' };
+    const deps = dependencies({
+      promote: async () => shared,
+      inspect: async () => shared,
+    });
+
+    await expect(deps.service.persist(persistInput())).resolves.toBeDefined();
+
+    expect(deps.budgetStore.settleArtifactManifest).toHaveBeenCalledOnce();
+    expect(deps.budgetStore.settleArtifactManifest.mock.calls[0]![2]).toMatchObject({
+      manifest: { mediaType: staged.mediaType, resultSchema: staged.resultSchema, sha256: SHA256 },
+    });
+  });
+
   it('streams a verified read without buffering it in the service', async () => {
     const deps = dependencies();
     const reference = {
@@ -677,7 +720,7 @@ describe('GenericOperationArtifactService', () => {
     {
       name: 'mismatched object',
       findExact: async () => snapshot,
-      inspect: async () => ({ ...stored, mediaType: 'application/json' }),
+      inspect: async () => ({ ...stored, sizeBytes: String(BODY.byteLength + 1) }),
     },
   ])('fails readVerified closed for $name', async ({ findExact, inspect }) => {
     const deps = dependencies({
