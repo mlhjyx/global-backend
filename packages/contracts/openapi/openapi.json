@@ -5716,6 +5716,7 @@
     },
     "/api/v1/companies/{companyId}/icps": {
       "post": {
+        "description": "模型网关结算了调用却没有可用答案（内容被过滤、输出截断、非 JSON、流被截断等）时返回 502 MODEL_UPSTREAM_UNUSABLE，details.reasonCode 为网关原因码；此时预算授权已消耗，重试需要新的授权。",
         "operationId": "IcpController_generate_v1",
         "parameters": [
           {
@@ -5845,6 +5846,56 @@
                         },
                         "message": {
                           "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "MODEL_UPSTREAM_UNUSABLE：模型网关已结算这次调用，但没有可用的答案（details.reasonCode 为网关原因码）。预算授权已消耗，重试需要新的授权",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message",
+                        "details"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "MODEL_UPSTREAM_UNUSABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "reasonCode"
+                          ],
+                          "properties": {
+                            "reasonCode": {
+                              "type": "string",
+                              "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+                              "description": "模型网关的原因码，例如 CHAT_COMPLETIONS_CONTENT_FILTERED、STRUCTURED_OUTPUT_TRUNCATED、CHAT_COMPLETIONS_STREAM_TRUNCATED；不含模型文本"
+                            }
+                          }
                         }
                       }
                     }
@@ -6373,7 +6424,7 @@
     },
     "/api/v1/icps/{icpId}/query-plans": {
       "post": {
-        "description": "只为当前已启用的数据源出查询，每条查询的 filters.source_hint 写明它执行的源；estimatedVolume 只计会执行的查询。没有可用的已启用数据源时返回 409 NO_ENABLED_DISCOVERY_SOURCE（不调用模型）；模型给出的查询全落在不可用的数据源上时返回 409 NO_RUNNABLE_QUERIES，不保存计划。",
+        "description": "只为当前已启用的数据源出查询，每条查询的 filters.source_hint 写明它执行的源；estimatedVolume 只计会执行的查询。没有可用的已启用数据源时返回 409 NO_ENABLED_DISCOVERY_SOURCE（不调用模型）；模型给出的查询全落在不可用的数据源上时返回 409 NO_RUNNABLE_QUERIES，不保存计划。模型网关结算了调用却没有可用答案（内容被过滤、输出截断、非 JSON、流被截断等）时返回 502 MODEL_UPSTREAM_UNUSABLE，details.reasonCode 为网关原因码，不保存计划；此时预算授权已消耗，重试需要新的授权。",
         "operationId": "IcpController_generateQueryPlan_v1",
         "parameters": [
           {
@@ -6503,6 +6554,56 @@
                         },
                         "message": {
                           "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "MODEL_UPSTREAM_UNUSABLE：模型网关已结算这次调用，但没有可用的答案（details.reasonCode 为网关原因码）。预算授权已消耗，重试需要新的授权",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message",
+                        "details"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "MODEL_UPSTREAM_UNUSABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "reasonCode"
+                          ],
+                          "properties": {
+                            "reasonCode": {
+                              "type": "string",
+                              "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+                              "description": "模型网关的原因码，例如 CHAT_COMPLETIONS_CONTENT_FILTERED、STRUCTURED_OUTPUT_TRUNCATED、CHAT_COMPLETIONS_STREAM_TRUNCATED；不含模型文本"
+                            }
+                          }
                         }
                       }
                     }

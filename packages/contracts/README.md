@@ -55,6 +55,7 @@ packages/contracts/
 | 409 | `VERSION_CONFLICT` | 版本冲突 → 合并/新建 Revision |
 | 422 | `AUTHORIZATION_REQUIRED` | 需审批 → 走审批流 |
 | 423 | `LICENSE_RESTRICTED` | 数据权利限制 → 换来源 |
+| 502 | `MODEL_UPSTREAM_UNUSABLE` | 模型网关结算了调用但没有可用答案（`details.reasonCode` 为网关原因码）→ 取新授权后重试 |
 | 503 | `PROVIDER_UNAVAILABLE` | 供应商暂不可用 → 稍后/替代 |
 
 ## 变更策略与 CI 门

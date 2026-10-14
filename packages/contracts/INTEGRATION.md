@@ -79,6 +79,7 @@
 1. `POST /icps/:id/query-plans` → AI 生成多源查询计划（`DRAFT`）
    - 只为当前已启用的数据源出查询，每条查询的 `filters.source_hint` 写明它执行的源；`estimatedVolume` 只计会执行的查询
    - 没有可用的已启用数据源时返回 409 `NO_ENABLED_DISCOVERY_SOURCE`（不调用模型）；模型给出的查询全落在不可用的数据源上时返回 409 `NO_RUNNABLE_QUERIES`，不保存计划
+   - 模型网关结算了调用却没有可用答案时（内容被过滤、输出截断、非 JSON、流被截断等）返回 502 `MODEL_UPSTREAM_UNUSABLE`，`details.reasonCode` 为网关原因码（例如 `CHAT_COMPLETIONS_CONTENT_FILTERED`、`STRUCTURED_OUTPUT_TRUNCATED`、`CHAT_COMPLETIONS_STREAM_TRUNCATED`），不保存计划；这次调用的预算授权已在调用前消耗并按真实用量结算，用同一授权重试会得到 409 `EXECUTION_BUDGET_GRANT_REUSED`，重试要先向 SaaS 取一份新的授权。`POST /companies/:id/icps` 同
 2. 人工确认：`POST /query-plans/:id/confirm`（→ `READY`）
 3. 执行：`POST /query-plans/:id/execute` → 202 `{ data: { runId, status } }`；轮询 `GET /discovery-runs/:runId`（`RUNNING → DONE|PARTIAL`，stats 含每源计数）
    - 确认之后数据源被停用的查询会跳过，不让 run 失败：`stats.skippedQueries` 按原因计数（`SOURCE_DISABLED` / `SOURCE_LINEAGE_UNAVAILABLE` / `SOURCE_UNKNOWN`），run 判 `PARTIAL`

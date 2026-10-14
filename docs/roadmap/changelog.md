@@ -93,6 +93,25 @@
   - 共用操作键的失败仍会跨查询传染：词表归一的操作键由 run、任务、提示词决定，一次 503 让后面每条查询第一次尝试就撞上，连续两条即停（卖方 #26，10-13 11:36）。根治在网关或词表归一回退，按产品负责人决定放在验收之后。
   - REPLAYED 的查询结果（同一活动在上一次尝试已提交回执）不带 `unreplayable` 标记，不计入统计。
 
+## 2026-10-13 · Answer ICP design and plan generation whose model answer settled unusable with 502 MODEL_UPSTREAM_UNUSABLE instead of a bare 500
+
+- 起因：卖方 #24 的 ICP `971c9242`（xin，2026-10-13 07:55–08:02 UTC）`POST /icps/:icpId/query-plans` 跑了 284 秒后，网关把这次调用结算为 `CHAT_COMPLETIONS_CONTENT_FILTERED`（`ProviderOutputError`，已按真实用量结算），API 却只回 500 `INTERNAL`，没有错误码；同一 ICP 再试一次得到 409 `EXECUTION_BUDGET_GRANT_REUSED`，因为 GrowthOS 对同一操作与主体会签发同一份授权，而后端按 jti 消耗授权（`consume_workspace_execution_authority`）。调用方从这两个响应里看不出模型答案不可用、也看不出该怎么重试。
+- 改动：
+  - **新的 HTTP 边界** `apps/api/src/model-gateway/model-upstream-http-boundary.ts`：`asModelUpstreamHttpBoundary` 把网关**已结算、没有可用答案**的模型失败映射成 502 `{ error: { code: "MODEL_UPSTREAM_UNUSABLE", message, details: { reasonCode } } }`。
+    - 识别的失败：可恢复的 `ProviderOutputError`（非 JSON、不过 schema、任务门拒绝，含 `TaskOutputValidationError`），以及**原型精确**的 `ProviderIdentityError`、`ProviderTransportError`（流被截断、上游错误事件、不可读、非 JSON 响应体、finish reason 无效、Responses 状态失败），且 cause 链里没有控制错误。
+    - 不识别、原样放行：授权错误（402/403/409/503 仍由 `asExecutionBudgetHttpBoundary` 映射）、控制错误、`ProviderOutputUnresolvedError`、`ProviderSettlementError`、合规拒绝、在途 wire、业务 409、普通错误。
+    - 响应正文只有固定 message 与经 `^[A-Z][A-Z0-9_]{2,63}$` 校验的 `reasonCode`，不带模型文本；日志同样只记原因码。
+  - **ICP 控制器**：`POST /companies/:companyId/icps` 与 `POST /icps/:icpId/query-plans` 在授权边界之内套上这道边界，并以 `@ApiModelUpstreamUnusable()` 把 502 注册进 code-first OpenAPI（`packages/contracts/openapi/openapi.json` 重导出，两个操作各多一个 502，spectral 0 错误，无破坏性变更）。
+  - **授权语义（这次生成失败后授权怎么算）**：授权在模型调用之前就在自己的事务里被消耗（`consumeWorkspaceAndOpen`：消耗 jti + 开账户），网关再把这次调用的真实用量结算到这份授权的账户上；失败后服务不写任何 ICP 或计划。所以授权**已消耗、已计费**，不能回滚：消耗与调用不在同一个事务里，而且就算在，结算行也必须保留，否则同一份授权可以付两次。调用方的重试方式是先向 SaaS 取一份新的授权；用同一份会得到 409 `EXECUTION_BUDGET_GRANT_REUSED`。
+  - 对接说明（`packages/contracts/INTEGRATION.md` 阶段 2 第 1 步）与错误模型表（`packages/contracts/README.md`）补上 502。
+- 测试：
+  - 先写失败测试：边界 1 个文件（识别 15 例、不识别 13 例、响应体 4 项、边界包装 8 项）在模块不存在时整体失败；控制器 14 项中 9 项失败（502 映射 6 项、OpenAPI 元数据 2 项、1 项是夹具缺 `createdAt`）；OpenAPI 文档 1 项失败。改动与重导出后 4 个文件 132 项全部通过。
+  - 服务侧新增 3 项刻画授权语义：模型失败时 `consumeWorkspaceGrant` 恰好调用一次且早于模型调用，不写计划/ICP，错误原样抛出；改动前就成立（服务没改）。
+- 未做：
+  - **用同一份授权重试仍是 409**。要让失败后的重试不必换授权，只能由 GrowthOS 在收到 502 `MODEL_UPSTREAM_UNUSABLE` 后换一个 jti 签发（例如把尝试序号纳入签发键），本仓不改 GrowthOS。风险：在那之前，调用方必须先取新授权再重试；若 SaaS 侧仍返回同一份，这个 ICP 在授权过期前都无法重新生成。
+  - 「不消耗授权」的方案评估过并放弃（见上「授权语义」）：会让同一份授权付两次。
+  - 查询计划执行（`POST /query-plans/:planId/execute`）是异步的，模型失败发生在 run 里，不走这道边界。
+
 ## 2026-10-12 · Keep a governed discovery query going when one model extraction answers unusably
 
 - 起因：卖方 #20 的验收 run（`322866ef`，xin，2026-10-11 19:02–19:21 UTC）在第 8 条查询失败，报 `DOMAIN_ACK_DISCOVERY_QUERY_LINEAGE_RECEIPT_MISMATCH`。
