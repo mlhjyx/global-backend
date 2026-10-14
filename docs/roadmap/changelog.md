@@ -29,7 +29,7 @@
   - 旧形态（无计划身份）的查询不带 `correlationId`，仍按 run 共用操作键。
   - `taxonomyFallback` 不进 `resolveRunStatus`：回退的查询照常跑完所有源，不算漏活；若产品负责人希望它把 run 判 PARTIAL，是一行改动。
 
-## 2026-10-14 · Weekly lead report CSV with per-row DataRights EXPORT (BI-22, L4-lite)
+## 2026-10-14 · Weekly lead report CSV with per-row DataRights EXPORT (BI-22, L4-lite) (#650)
 
 - 起因：线索交付闭环设计（`docs/superpowers/plans/2026-10-10-lead-delivery-loop-design.md` §5、§11 的 L4）要给客户一份每周的线索 CSV，这次改为先于 L1–L3 实施的 L4-lite。改动前仓内没有任何导出或报表代码，OpenAPI 没有 `/reports` 路径，DataRights 的 `EXPORT` 动作定义了（`compliance/data-rights.types.ts:9`）却没有调用点，只有 accept 判 `STORE`（`lead/lead.service.ts`）。
 - 改动：
