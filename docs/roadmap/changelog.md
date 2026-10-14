@@ -93,6 +93,17 @@
   - 共用操作键的失败仍会跨查询传染：词表归一的操作键由 run、任务、提示词决定，一次 503 让后面每条查询第一次尝试就撞上，连续两条即停（卖方 #26，10-13 11:36）。根治在网关或词表归一回退，按产品负责人决定放在验收之后。
   - REPLAYED 的查询结果（同一活动在上一次尝试已提交回执）不带 `unreplayable` 标记，不计入统计。
 
+## 2026-10-13 · Let byte-identical artifacts of different result schemas share one stored object
+
+- 起因：卖方 #28 的验收 run（`3afe9c46`，xin，2026-10-13 15:43–17:11 UTC）12 条查询全部完成、44 家公司进入物化、fit 判完，却在信号阶段失败；#23（10-13 01:23）倒在同一处。#641 补的错误码这次把根因露了出来：连续两家公司的 `http-get/v1` 产物持久化报 `ArtifactStorageError:GENERIC_OPERATION_ARTIFACT_INVALID`，broker 按设计改抛不可重放错误，#641 的「连续两家即停」生效。
+  - 产物对象按 sha256 + 隐私类寻址（`artifact-key.ts`），但 `store.promote` 对已存在的对象还要求 result-schema 与 media-type 完全一致（`object-contract.ts` 的 `sameArtifact`），读回时 `service.ts` 的 `sameStoredArtifact` 同样要求。
+  - 信号阶段对每家公司做 careers 路径的 HEAD 探测，产物是空字节；而 `crawl4ai-fetch/v1`（text/markdown）早在 10-12 17:34 就把 23 份空结果存进了同一个对象。于是每家公司都在同一步被判 INVALID——不是上游、不是 MinIO，是我们自己的相等判定。
+- 改动：相等判定收紧到字节本身——sha256、大小、隐私类；对象自身的 media-type 与 result-schema 只记录首个写入者的合同，每份产物清单带自己的合同，materializer 一直读的就是清单。`promote` 复用已存在的对象时不改写它。
+- 测试：先红后绿（3 项新用例改动前失败，改动后产物模块 25 个文件 348 项通过）：存储层「同字节、另一 schema/媒体类型的对象被复用且不重写」；服务层「读回这样的产物」「持久化到这样的对象上时清单仍是自己的合同」；原「result schema mismatch 即拒绝」的用例按新规则删除，大小、摘要、隐私类不一致仍拒绝。
+- 未做：
+  - 内容寻址去重与 MinIO 按对象年龄过期（personal-data 1 天）相冲：复用对象不刷新年龄，首个写入者的 TTL 一到对象就没了，而库里仍有未过期的产物行指向它（10-13 验证：空对象已 NotFound，库里最晚的引用到 10-14 16:36）。另行处理。
+  - 每次 HEAD 探测都落一份空产物，是浪费但无害。
+
 ## 2026-10-12 · Keep a governed discovery query going when one model extraction answers unusably
 
 - 起因：卖方 #20 的验收 run（`322866ef`，xin，2026-10-11 19:02–19:21 UTC）在第 8 条查询失败，报 `DOMAIN_ACK_DISCOVERY_QUERY_LINEAGE_RECEIPT_MISMATCH`。
