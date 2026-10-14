@@ -10,7 +10,7 @@
 | 项 | 约定 |
 |---|---|
 | Base URL | `http://<host>:3000/api/v1` |
-| 认证 | `Authorization: Bearer <token>` —— token 由 **SaaS 平台侧签发**，本后端只校验并解出 `sub`（用户）、`workspace_id`（租户）、`roles`。开发环境用 base64url(JSON) 即可：`base64url({"sub":"u1","workspace_id":"<uuid>","roles":["admin"]})` |
+| 认证 | `Authorization: Bearer <token>` —— token 由 **SaaS 平台侧（GrowthOS）签发**的 JWKS 签名令牌，本后端只验签并解出 `sub`（用户）、`workspace_id`（租户）、`roles`。任何环境都不接受未签名令牌；开发环境同样由本地 GrowthOS 身份源签发（ADR-024） |
 | 租户 | 一切数据按 `workspace_id` 隔离（数据库 RLS 强制），前端无需传租户参数 |
 | 错误模型 | 所有非 2xx 都是 `{ "error": { "code", "message", "details?" } }`；常见 code：`VALIDATION_ERROR`、`NOT_FOUND`、`INVALID_STATE`、`VERSION_CONFLICT`、`NO_APPROVED_CLAIMS`、`SUPPRESSED` |
 | 统一信封 | 2xx 一律 `{ "data": ... }`；分页列表 `{ "data": [...], "page": { "next_cursor", "has_more" } }`（游标式 `?limit=&cursor=`，`next_cursor: null` = 到底）。例外：`/health*` 探针不套信封 |
@@ -58,6 +58,8 @@
 ## 3. 获客能力 · 端到端调用顺序（冻结已解除；实施仍须当前重审与明确授权）
 
 ### 阶段 0：企业理解（Understand）
+
+> 可用性：官网抓取自 2026-08-24 起被执行授权门扣住，公司会停在 `ENRICHING`、不报错（修复中，当前情况以 `docs/status/current.md` 为准）；修复前用第 5 步手工补事实，再走第 3 步审批——公司状态仍停在 `ENRICHING`，但 ICP 设计只读已审批的 Claim 与 offerings，不受影响。
 
 1. `POST /companies { website, name? }` → 202，后台自动：多页抓取 → 抽取事实/产品/画像/公开联系方式
 2. 轮询 `GET /companies/:id` —— `status`: `DRAFT → ENRICHING → REVIEW → ACTIVE`
@@ -108,17 +110,18 @@
 1. `POST /icps/:id/qualify` → 202，后台确定性六维评分（Fit/Role/Intent/DataQuality/Reachability/Engagement）
 2. 队列视图：`GET /icps/:id/lead-queues` → `{ data: { recommended, needs_review, rejected, suppressed } }`
 3. 列表：`GET /leads?icpId=&queue=`（按总分排序，含公司摘要）；详情 `GET /leads/:id` 带**逐规则评分依据**
-4. 人工裁决：`POST /leads/:id/accept`（→ `QUALIFIED`，发 `LeadQualified` 事件——交给 Campaign 的出口）/ `POST /leads/:id/reject { reason }`
+4. 人工裁决：`POST /leads/:id/accept`（→ `QUALIFIED`，发 `LeadQualified` 集成事件——交给 GrowthOS 的出口，GrowthOS 经 `GET /events` 拉取并 `POST /events/ack` 确认）/ `POST /leads/:id/reject { reason }`
+5. 试点期（RL1）的另一交付形态是按 ICP、按周导出的周报 CSV（BI-22，设计见 `docs/superpowers/plans/2026-10-10-lead-delivery-loop-design.md`），**尚未实现**；在它上线前没有周报端点
 
 ## 4. 事件（服务端集成用）
 
-领域事件经 Transactional Outbox 发布，信封结构见 `events/envelope.schema.json`。关键事件：
-`CompanyProfileCreated`、`ClaimApproved`、`ClaimRevoked`、`ClaimExpired`、`KnowledgeConflictDetected`、
-`ICPActivated`、`DiscoveryRunRequested/Completed`、`QualifyRequested`、`LeadsScored`、`LeadQualified`。
+领域事件经 Transactional Outbox 发布，信封结构见 `events/envelope.schema.json`；哪些事件对外交付以 `apps/api/src/relay/event-registry.ts` 为准。对外交付的集成事件（`GET /events` 拉取 + `POST /events/ack`，配置 webhook 时另行推送）：
+`LeadQualified`、`LeadsScored`、`DiscoveryRunCompleted`、`ICPActivated`、`ClaimApproved`、`ClaimRevoked`、`ClaimExpired`、
+`KnowledgeConflictDetected`、`DeletionCompleted`、`SiteBuildCostSummaryUpdated`。其中 `LeadQualified`、`DeletionCompleted`、`SiteBuildCostSummaryUpdated` 有专用 payload schema（`events/payloads/`），其余走信封通用契约。
+`CompanyProfileCreated`、`DiscoveryRunRequested`、`QualifyRequested`、`DeletionRequested` 等是内部命令，只用来拉起后台工作流，不对外交付。
 
 ## 5. 数据真实性说明（前端展示建议）
 
 - **Claim = 事实**：永远带来源 URL + 原文片段，建议 UI 提供「查看原文」
 - **ICP = 推断**（`HYPOTHESIS`）：建议 UI 标注「AI 生成，待回测/确认」
-- **sandbox 数据**：`license=sandbox`、域名 `*.sandbox.example.com` 的记录是合成数据（真源接入前），UI 必须可区分
 - 联系方式发送前必须 `VALID`（邮箱验证状态在 `contactPoints[].status`）

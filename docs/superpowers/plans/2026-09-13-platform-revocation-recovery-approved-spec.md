@@ -1,7 +1,7 @@
 # 平台撤销恢复：已批准差额规格
 
-> 生命周期：`APPROVED`
-> 生命周期依据：已批准规格；恢复查找原语已合入，其余在 R4 线（#545 与 GrowthOS 105 补丁线）进行中
+> 生命周期：`SUPERSEDED`
+> 生命周期依据：已批准规格；恢复查找原语已合入，其余在 R4 线（#545 与 GrowthOS 105 补丁线）进行中。2026-10-14 改为 `SUPERSEDED`：产品负责人 2026-10-10 拍板 PRD4-D2 冻结 R4，不再推进本规格的剩余部分；已合入的部分保留，本文件只作 provenance，见 ADR registry 的 PRD4-D2
 
 状态：**USER_APPROVED / IMPLEMENTATION_PENDING / NO_RUNTIME_ACCEPTANCE**。
 
