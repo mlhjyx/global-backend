@@ -32,6 +32,17 @@ export function leadQueueBasis(lead: LeadQueueBasisInput, humanRejected: boolean
   return isLeadScored(lead) ? 'score' : 'fit_gate_preset';
 }
 
+/**
+ * 给一条 lead 行附上 `scored` 与 `queueBasis`（GET /leads、GET /leads/:id、POST /leads/:id/accept|reject
+ * 共用的 LEAD_SCHEMA 把这两个字段列为 required）。
+ */
+export function withQueueBasis<T extends LeadQueueBasisInput>(
+  lead: T,
+  humanRejected: boolean,
+): T & { scored: boolean; queueBasis: LeadQueueBasis } {
+  return { ...lead, scored: isLeadScored(lead), queueBasis: leadQueueBasis(lead, humanRejected) };
+}
+
 /** 一行 = 一个 (queue, status) 组：总数与有分数的条数（Prisma groupBy `_count.totalScore` = COUNT(total_score)）。 */
 export interface LeadQueueGroupRow {
   queue: string;

@@ -126,6 +126,7 @@ import {
 } from '../discovery/discovery-model-extractions';
 import { settledModelFailureReason } from '../discovery/settled-model-failure';
 import { narrowBySourceHints, planQuerySkipReason } from '../discovery/plan-query-sources';
+import type { DiscoveryRunStage } from './discovery.run-failure';
 
 export interface DiscoveryRunInput {
   workspaceId: string;
@@ -492,27 +493,62 @@ const DISCOVERY_DOMAIN_ACK_PRODUCERS = new Set([
   'discovery.extract_list', 'contact.find_decision_makers',
 ]);
 
+/** Failure stages a run reaches only after canonicalization, with the fit stage started. */
+const FIT_REACHED_FAILURE_STAGES: ReadonlySet<string> = new Set<DiscoveryRunStage>([
+  'fit',
+  'enrich',
+  'signals',
+  'watches',
+  'patentEnqueue',
+]);
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
 /**
- * The run's fit stage judged at least one company: its final stats say so (`fit` holds the
- * verdict counts), or — the failure path builds stats without `fit` — the ICP's leads hold a
- * verdict. finalizeRun uses it to request scoring for a FAILED run.
+ * This run's fit stage judged at least one company. finalizeRun uses it to request scoring
+ * for a FAILED run.
+ *
+ * - Stats with `fit` (the normal end of a run) answer alone: some verdict count is above zero.
+ * - Stats without `fit` (the failure path) need a failure stage at or after fit, and then a fit
+ *   verdict on a lead of this ICP for a company this run resolved: its accepted raw records →
+ *   their company identity links → the leads. A fit pass that failed may have stored verdicts
+ *   before it threw, so the lead rows are the record. Verdicts on companies this run never
+ *   touched do not count.
  */
 async function fitStageJudged(
   tx: Prisma.TransactionClient,
-  icpId: string,
+  run: { runId: string; icpId: string },
   stats: Record<string, unknown>,
 ): Promise<boolean> {
-  const fit = stats.fit;
-  if (
-    fit !== null &&
-    typeof fit === 'object' &&
-    !Array.isArray(fit) &&
-    Object.values(fit as Record<string, unknown>).some((count) => typeof count === 'number' && count > 0)
-  ) {
-    return true;
+  if (Object.prototype.hasOwnProperty.call(stats, 'fit')) {
+    const fit = stats.fit;
+    return (
+      isPlainRecord(fit) && Object.values(fit).some((count) => typeof count === 'number' && count > 0)
+    );
   }
+  const failure = stats.failure;
+  if (
+    !isPlainRecord(failure) ||
+    typeof failure.stage !== 'string' ||
+    !FIT_REACHED_FAILURE_STAGES.has(failure.stage)
+  ) {
+    return false;
+  }
+  const rawRecords = await tx.rawSourceRecord.findMany({
+    where: { runId: run.runId, ingestStatus: 'ACCEPTED' },
+    select: { id: true },
+  });
+  if (!rawRecords.length) return false;
+  const links = await tx.identityLink.findMany({
+    where: { canonicalType: 'company', rawRecordId: { in: rawRecords.map((record) => record.id) } },
+    select: { canonicalId: true },
+  });
+  const companyIds = [...new Set(links.map((link) => link.canonicalId))];
+  if (!companyIds.length) return false;
   const judged = await tx.lead.findFirst({
-    where: { icpId, fitVerdict: { not: null } },
+    where: { icpId: run.icpId, canonicalCompanyId: { in: companyIds }, fitVerdict: { not: null } },
     select: { id: true },
   });
   return judged !== null;
@@ -2362,12 +2398,17 @@ export function createDiscoveryActivities(deps: {
         });
         // 发现→评分自动衔接：run 收尾即请求重评分（relay 启 qualifyWorkflow，重复请求合并到在跑实例）。
         // 之前评分只能人工触发 —— 新公司判了 fit 也进不了 lead 队列，漏斗断在这一步。
-        // FAILED 的 run 也请求，只要 fit 阶段已经给过判定：已物化的公司就该拿到评分（分数是幂等
-        // upsert，之后的 run 再刷新）。此前 FAILED 一律不写——xin 上 11 次验收 run 全部 FAILED，179 条
-        // lead 六维分全 NULL、队列只是 fit 门预置，评分、制裁第五门、LeadsScored 从未在真实数据上跑过。
-        // 评分是确定性的、不调 provider、不花预算，所以不需要仍然有效的授权；plan 仍留 READY，
-        // DiscoveryRunCompleted 照旧带 status=FAILED。
-        if (args.icpId && (args.status !== 'FAILED' || (await fitStageJudged(tx, args.icpId, finalStats)))) {
+        // FAILED 的 run 也请求，只要本 run 的 fit 阶段已经给过判定（fitStageJudged：只看本 run 的
+        // stats.fit；失败路径先看 failure.stage 是否已到 fit，再查本 run 解析出的公司的 lead）：已物化的
+        // 公司就该拿到评分（分数是幂等 upsert，之后的 run 再刷新）。此前 FAILED 一律不写——xin 上 11 次
+        // 验收 run 全部 FAILED，179 条 lead 六维分全 NULL、队列只是 fit 门预置，评分、制裁第五门、
+        // LeadsScored 从未在真实数据上跑过。评分是确定性的、不调 provider、不花预算，所以不需要仍然
+        // 有效的授权；plan 仍留 READY，DiscoveryRunCompleted 照旧带 status=FAILED。
+        if (
+          args.icpId &&
+          (args.status !== 'FAILED' ||
+            (await fitStageJudged(tx, { runId: args.runId, icpId: args.icpId }, finalStats)))
+        ) {
           await tx.outboxEvent.create({
             data: {
               workspaceId: args.workspaceId,

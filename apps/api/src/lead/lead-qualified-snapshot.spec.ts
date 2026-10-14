@@ -897,3 +897,102 @@ describe('valid_until 鲜度模型 v2（computeValidUntil + decide 接线）', (
     expect(payload.queue_basis).toBe('human_reject');
   });
 });
+
+// ── POST /leads/:id/accept|reject 的响应：与 GET /leads 同一个 LEAD_SCHEMA（required scored/queueBasis）──
+
+/** 从 cwd 向上找 openapi.json（同 contractSchemaPath）。 */
+function openApiPath(): string {
+  let dir = process.cwd();
+  for (let i = 0; i < 6; i++) {
+    const p = path.join(dir, 'packages/contracts/openapi/openapi.json');
+    if (fs.existsSync(p)) return p;
+    dir = path.dirname(dir);
+  }
+  throw new Error('openapi.json not found — contract file missing');
+}
+
+/** 契约里 POST /leads/:id/{action} 200 响应 data 的 required 与 queueBasis 枚举。 */
+function decideResponseContract(action: 'accept' | 'reject'): { required: string[]; queueBases: string[] } {
+  const doc = JSON.parse(fs.readFileSync(openApiPath(), 'utf8'));
+  const data = doc.paths[`/api/v1/leads/{leadId}/${action}`].post.responses['200'].content['application/json'].schema
+    .properties.data;
+  return { required: data.required ?? [], queueBases: data.properties.queueBasis.enum };
+}
+
+function expectDecideResponseHonoursContract(action: 'accept' | 'reject', response: Record<string, unknown>) {
+  const { required, queueBases } = decideResponseContract(action);
+  expect(required).toEqual(expect.arrayContaining(['scored', 'queueBasis']));
+  for (const key of required) expect(response).toHaveProperty(key);
+  expect(typeof response.scored).toBe('boolean');
+  expect(queueBases).toContain(response.queueBasis);
+}
+
+describe('LeadService.decide — 响应带 scored / queueBasis（契约 LEAD_SCHEMA required）', () => {
+  it('accept → QUALIFIED：scored 按 total_score、queueBasis=human_accept', async () => {
+    const lead = makeLead();
+    const svc = makeDecideService(makeDecideTx(lead, makeCompany(), vi.fn(async () => ({})), vi.fn(async () => ({}))));
+
+    const r = (await svc.decide(decideCtx, LEAD_ID, 'accept')) as Record<string, unknown>;
+
+    expect(r).toMatchObject({ status: 'QUALIFIED', scored: true, queueBasis: 'human_accept' });
+    expectDecideResponseHonoursContract('accept', r);
+  });
+
+  it('重复 accept 的幂等早返回同样带 scored / queueBasis', async () => {
+    const lead = makeLead({ status: 'QUALIFIED', totalScore: null });
+    const svc = makeDecideService(makeDecideTx(lead, makeCompany(), vi.fn(), vi.fn()));
+
+    const r = (await svc.decide(decideCtx, LEAD_ID, 'accept')) as Record<string, unknown>;
+
+    expect(r).toMatchObject({ status: 'QUALIFIED', scored: false, queueBasis: 'human_accept' });
+    expectDecideResponseHonoursContract('accept', r);
+  });
+
+  it('reject → REJECTED：写入裁决后 queueBasis=human_reject', async () => {
+    const lead = makeLead();
+    const decisionCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+    const svc = makeDecideService(makeDecideTx(lead, makeCompany(), vi.fn(), decisionCreate));
+
+    const r = (await svc.decide(decideCtx, LEAD_ID, 'reject')) as Record<string, unknown>;
+
+    expect(decisionCreate).toHaveBeenCalledTimes(1);
+    expect(r).toMatchObject({ status: 'REJECTED', scored: true, queueBasis: 'human_reject' });
+    expectDecideResponseHonoursContract('reject', r);
+  });
+
+  it('重复 reject（已有 reject 裁决）：幂等早返回，不建第二条裁决，响应带 human_reject', async () => {
+    const lead = makeLead({ status: 'REJECTED', queue: 'rejected' });
+    const decisionCreate = vi.fn();
+    const tx = makeDecideTx(lead, makeCompany(), vi.fn(), decisionCreate);
+    const findFirst = vi.fn(async () => ({ id: 'decision-1' }));
+    (tx.leadDecision as Record<string, unknown>).findFirst = findFirst;
+
+    const r = (await makeDecideService(tx).decide(decideCtx, LEAD_ID, 'reject')) as Record<string, unknown>;
+
+    expect(findFirst).toHaveBeenCalledWith({ where: { leadId: LEAD_ID, action: 'reject' }, select: { id: true } });
+    expect(decisionCreate).not.toHaveBeenCalled();
+    expect(tx.lead.updateMany).not.toHaveBeenCalled();
+    expect(r).toMatchObject({ status: 'REJECTED', queueBasis: 'human_reject' });
+    expectDecideResponseHonoursContract('reject', r);
+  });
+
+  it('人工 reject 一条评分写的 REJECTED（还没有 reject 裁决）：照样记下裁决，让它成为人工终态', async () => {
+    // 评分阶段自己也写 REJECTED；只有一条 reject 裁决能让重评分把它当人工终态（scoreCandidates humanFinal）。
+    const lead = makeLead({ status: 'REJECTED', queue: 'rejected', totalScore: 0.1 });
+    const decisionCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+    const tx = makeDecideTx(lead, makeCompany(), vi.fn(), decisionCreate);
+    (tx.leadDecision as Record<string, unknown>).findFirst = vi.fn(async () => null);
+
+    const r = (await makeDecideService(tx).decide(decideCtx, LEAD_ID, 'reject', 'not a distributor')) as Record<
+      string,
+      unknown
+    >;
+
+    expect(decisionCreate).toHaveBeenCalledTimes(1);
+    expect(decisionCreate.mock.calls[0]![0]).toMatchObject({
+      data: { leadId: LEAD_ID, action: 'reject', reason: 'not a distributor' },
+    });
+    expect(r).toMatchObject({ status: 'REJECTED', scored: true, queueBasis: 'human_reject' });
+    expectDecideResponseHonoursContract('reject', r);
+  });
+});

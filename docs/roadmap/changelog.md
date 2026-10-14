@@ -10,23 +10,28 @@
   - `finalizeRun` 只在 run 状态非 FAILED 时写 `QualifyRequested`，而 11 次验收 run 全部 FAILED（10-14 只读核对 `global_dev`：`discovery_run` 11 行全 FAILED、stats 都没有 `fit` 键（全部走的失败收尾路径）；`outbox_event` 里 `QualifyRequested` 与 `LeadsScored` 各 0 条）。
   - 结果是评分、制裁第五门（`temporal/qualify.activities.ts`）、`LeadsScored` 事件从未在真实数据上跑过；API 又把预置队列和评分队列显示成一样。
 - 改动：
-  - **FAILED 的 run 也请求评分**：只要 fit 阶段已经给过判定——本 run 的 `stats.fit` 有计数，或（失败路径的 stats 不带 `fit`）该 ICP 的 lead 表里有 `fit_verdict`——`finalizeRun` 照样写 `QualifyRequested`（`reason: discovery_run_failed_after_fit`），让已物化的公司得到评分；分数是幂等 upsert，之后的 run 再刷新。
+  - **FAILED 的 run 也请求评分**：只要本 run 的 fit 阶段已经给过判定，`finalizeRun` 照样写 `QualifyRequested`（`reason: discovery_run_failed_after_fit`），让已物化的公司得到评分；分数是幂等 upsert，之后的 run 再刷新。
+    - 判据只看本 run（`fitStageJudged`）：stats 带 `fit` 时只按它的计数（全 0 就不写，不再回退查 lead 表）；失败路径的 stats 不带 `fit`，先要求 `failure.stage` 已到 fit（fit / enrich / signals / watches / patentEnqueue），再查本 run 解析出的公司（本 run 已接受的 raw → company identity link）在该 ICP 下有没有 `fit_verdict`。停在 query 等 fit 之前阶段的 run、或别的 run 留下的判定都不触发。
     - 评分是确定性的、不调 provider、不花预算，所以 run 授权已结束（过期 / 撤销 / 用尽）时也写；`attestRunFinalization` 对 FAILED 的容忍逻辑不变。
     - plan 仍留 READY；`DiscoveryRunCompleted` 照旧带 `status: FAILED`。
   - **API 区分预置与已评分**：`GET /leads` 与 `GET /leads/:id` 每行加 `scored`（`total_score` 非空）与 `queueBasis`（`fit_gate_preset | score | human_accept | human_reject`）；`GET /icps/:id/lead-queues` 加 `scored`（每条都有分）与 `queueBasis`（四种依据的计数），并把一直返回却不在契约里的 `sanctions_hold` 补进契约。
     - 多加了 `human_reject`：评分阶段自己也写 `status=REJECTED`，只凭状态分不出人工拒绝与评分拒绝，所以用一条 reject 裁决作证（列表每行只探 1 条；汇总用关系过滤聚合）。
     - 新列 `lead.scored_at`（迁移 `20261014051926_lead_scored_at`，可空、不回填），评分阶段每次写分盖上。
+    - `POST /leads/:id/accept` 与 `/reject` 用同一个 `LEAD_SCHEMA`，响应同样带 `scored` 与 `queueBasis`（含两处幂等早返回）。
+  - **人工拒绝成为终态**：`scoreCandidates` 的 `humanFinal` 原先不含 REJECTED（注释说含），人工拒绝会被重评分改回 REVIEW；FAILED 收尾也请求评分后这条路径每次都会走到。现在 REJECTED 且有 reject 裁决的 lead 重评分只刷新分数、不改状态与队列，判据与 `human_reject` 相同。
+    - 人工 reject 一条评分写的 REJECTED（还没有 reject 裁决）时，`decide` 照样记下裁决，不再当成重试直接返回——否则人工的拒绝没有留痕，也挡不住重评分。已有 reject 裁决的重复 reject 仍是幂等早返回。
   - **`LeadQualified` 快照 v1 加可选字段** `scored_at`、`queue_basis`（设计 E1：`snapshot_version` 仍 1，旧载荷照样通过）。
   - OpenAPI 重导出；`packages/contracts/INTEGRATION.md` 阶段 3 与 `docs/architecture/current.md` 的快照字段表同步。
 - 测试：
   - 先写失败测试，改动前 19 项失败（另一个文件因模块不存在整体失败）、改动后全部通过：
-    - `finalizeRun` 7 项：stats 有 fit 判定 / stats 无 fit 但 lead 表有判定 / 无判定不写 / 授权已结束仍写（3 种码）/ DONE 的 reason 不变且不查 lead 表；
-    - 队列依据纯函数 11 项；`LeadService.list` / `queueSummary` 4 项；快照 7 项（含 schema 正反例、旧载荷通过、decide 接线）；评分 `scored_at` 2 项。
-  - 真库 `lead-queue-basis.postgres.spec.ts`（app_user + RLS，一次性 Postgres，4 项）：迁移后的列可写、`groupBy` 的 `_count.totalScore`、关系过滤聚合、列表排序与行形状、跨 workspace / 跨 ICP 不计入。已登记到 CI 的 PostgreSQL 步骤。
+    - `finalizeRun` 18 项：stats 有 fit 判定 / 失败停在 fit 及之后 5 个阶段且本 run 的公司有判定（断言按 run → raw → identity link → lead 查询）/ 停在 fit 之前 4 个阶段即使 ICP 有判定也不写 / stats 既无 fit 也无 failure 不写 / 本 run 的公司无判定不写 / 本 run 无已接受 raw 不查 lead / 本 run fit 计数全 0 不回退查 lead / 授权已结束仍写（3 种码）/ DONE 的 reason 不变且不查 lead 表；
+    - 队列依据纯函数 11 项；`LeadService.list` / `queueSummary` 4 项；快照 7 项（含 schema 正反例、旧载荷通过、decide 接线）；评分 `scored_at` 2 项、人工拒绝终态 2 项；`decide` 响应 5 项（accept / 重复 accept / reject / 重复 reject / reject 评分写的 REJECTED，逐项对照 openapi.json 的 required）。
+  - 真库 `lead-queue-basis.postgres.spec.ts`（app_user + RLS，一次性 Postgres，5 项）：迁移后的列可写、`groupBy` 的 `_count.totalScore`、关系过滤聚合、列表排序与行形状、跨 workspace / 跨 ICP 不计入、`decide(reject)` 对评分写的 REJECTED 记下裁决且重试不再加。已登记到 CI 的 PostgreSQL 步骤。
   - `gctl check` 通过；oasdiff 对 origin/main 无破坏性变更。
 - 未做：
-  - 已有的 179 条 lead 不会自动评分：下一次 run 收尾时触发，或对该 ICP 手动 `POST /icps/:id/qualify`。本 PR 不在 xin 上发起评分。
-  - `scoreCandidates` 的 `humanFinal` 不含 REJECTED（注释说含）：人工拒绝会被重评分改状态，因为评分阶段自己也写 REJECTED。`queueBasis` 据此如实回到 `score`；要不要把人工拒绝做成终态是另一个决定。
+  - 已有的 179 条 lead 不会自动评分：下一次 run 收尾时触发，或手动 `POST /icps/:id/qualify`。本 PR 不在 xin 上发起评分。
+    - 这 179 条分属 3 个 ICP（84 / 51 / 44 条，10-14 只读核对），手动 qualify 一个 ICP 只给这一个 ICP 的 lead 评分。
+    - `scoreCandidates` 遍历的是整个 workspace 的 canonical 公司，不只是该 ICP 判过的（既有行为，本 PR 未改）：xin 上 workspace 有 150 家公司，qualify 一个 ICP 后它的 lead 会变成 150 条，多出来的 66 / 99 / 106 条没有 `fit_verdict`，按评分直接进队列。所以 qualify 之后该 ICP 的 `lead-queues` 会是 `scored: true`、总数 150，而不是「179 条变 scored」。要不要只给本 ICP 判过 fit 的公司评分是另一个决定。
   - 任务描述里「FAILED 收尾不发 `DiscoveryRunCompleted`」与代码不符：FAILED 一直发、带 `status: FAILED`，本 PR 保持。
 
 ## 2026-10-13 · Let best-effort stages skip a company whose operation cannot be replayed, time-box enrichment, and rehearse a full-size run

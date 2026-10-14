@@ -2703,13 +2703,20 @@ describe("finalizeRun durable query receipt readback", () => {
     stats: unknown = { perQuery: derived.perQuery },
     budgetStore: BudgetStore = authorityBudgetStore(),
     runStatus = "RUNNING",
-    // The ICP's lead rows: a FAILED run consults them for fit verdicts when its own stats
-    // carry none (the failure path builds stats without `fit`).
+    // Lead rows of the run's companies: a FAILED run that stopped at or after the fit stage
+    // consults them for fit verdicts when its own stats carry none (the failure path builds
+    // stats without `fit`).
     leadFindFirst: ReturnType<typeof vi.fn> = vi.fn(async () => null),
   ) {
     const update = vi.fn(async () => ({}));
     const outboxCreate = vi.fn(async () => ({}));
     const planUpdate = vi.fn(async () => ({}));
+    // The run's accepted raw records and the companies they resolved to.
+    const rawFindMany = vi.fn(async () => [{ id: RUN_RAW_RECORD_ID }]);
+    const identityLinkFindMany = vi.fn(async () => [
+      { canonicalId: RUN_COMPANY_ID },
+      { canonicalId: RUN_COMPANY_ID },
+    ]);
     const tx = {
       $queryRaw: vi.fn(async () => [
         {
@@ -2722,6 +2729,8 @@ describe("finalizeRun durable query receipt readback", () => {
       discoveryRun: { update },
       discoveryQueryPlan: { update: planUpdate },
       lead: { findFirst: leadFindFirst },
+      rawSourceRecord: { findMany: rawFindMany },
+      identityLink: { findMany: identityLinkFindMany },
       outboxEvent: { create: outboxCreate },
     };
     const activities = createDiscoveryActivities({
@@ -2732,8 +2741,11 @@ describe("finalizeRun durable query receipt readback", () => {
       gateway: {},
       budgetStore,
     } as never);
-    return { activities, outboxCreate, update, planUpdate, leadFindFirst };
+    return { activities, outboxCreate, update, planUpdate, leadFindFirst, rawFindMany, identityLinkFindMany };
   }
+
+  const RUN_RAW_RECORD_ID = "80000000-0000-4000-8000-000000000001";
+  const RUN_COMPANY_ID = "90000000-0000-4000-8000-000000000001";
 
   function endedAuthorityStore(code: ExecutionBudgetGrantErrorCode): BudgetStore {
     const store = authorityBudgetStore();
@@ -2773,8 +2785,8 @@ describe("finalizeRun durable query receipt readback", () => {
         where: { id: "40000000-0000-4000-8000-000000000001" },
         data: expect.objectContaining({ status: "FAILED", stats: FAILURE_STATS }),
       });
-      // FAILED starts nothing here: the plan stays READY, and with no fit verdict on the ICP
-      // no QualifyRequested is written.
+      // FAILED starts nothing here: the plan stays READY, and with no fit verdict on the run's
+      // companies no QualifyRequested is written.
       expect(planUpdate).not.toHaveBeenCalled();
       expect(outboxCreate).toHaveBeenCalledOnce();
       expect(outboxCreate.mock.calls[0]![0]).toMatchObject({
@@ -2828,9 +2840,89 @@ describe("finalizeRun durable query receipt readback", () => {
     });
   });
 
-  it("requests scoring for a FAILED run whose stats lack fit once the ICP holds fit verdicts (the failure path's stats shape)", async () => {
+  it.each(["fit", "enrich", "signals", "watches", "patentEnqueue"] as const)(
+    "requests scoring for a FAILED run that stopped at stage %s once the run's own companies hold a fit verdict (the failure path's stats shape)",
+    async (stage) => {
+      const leadFindFirst = vi.fn(async () => ({ id: "70000000-0000-4000-8000-000000000001" }));
+      const { activities, outboxCreate, planUpdate, rawFindMany, identityLinkFindMany } = finalizeHarness(
+        null,
+        authorityBudgetStore(),
+        "RUNNING",
+        leadFindFirst,
+      );
+
+      await activities.finalizeRun(
+        discoveryArgs("40000000-0000-4000-8000-000000000001", {
+          planId: "50000000-0000-4000-8000-000000000001",
+          icpId: "60000000-0000-4000-8000-000000000001",
+          status: "FAILED" as const,
+          stats: { ...FAILED_AFTER_FIT_STATS, failure: { ...FAILED_AFTER_FIT_STATS.failure, stage } },
+        }),
+      );
+
+      // Scoped to this run: its accepted raw records → the companies they resolved to → their
+      // leads for this ICP. Another run's verdicts on other companies do not count.
+      expect(rawFindMany).toHaveBeenCalledWith({
+        where: { runId: "40000000-0000-4000-8000-000000000001", ingestStatus: "ACCEPTED" },
+        select: { id: true },
+      });
+      expect(identityLinkFindMany).toHaveBeenCalledWith({
+        where: { canonicalType: "company", rawRecordId: { in: [RUN_RAW_RECORD_ID] } },
+        select: { canonicalId: true },
+      });
+      expect(leadFindFirst).toHaveBeenCalledWith({
+        where: {
+          icpId: "60000000-0000-4000-8000-000000000001",
+          canonicalCompanyId: { in: [RUN_COMPANY_ID] },
+          fitVerdict: { not: null },
+        },
+        select: { id: true },
+      });
+      expect(planUpdate).not.toHaveBeenCalled();
+      expect(outboxCreate).toHaveBeenCalledTimes(2);
+      expect(outboxCreate.mock.calls[1]![0]).toMatchObject({
+        data: {
+          eventType: "QualifyRequested",
+          aggregateId: "60000000-0000-4000-8000-000000000001",
+          payload: { reason: "discovery_run_failed_after_fit" },
+        },
+      });
+    },
+  );
+
+  it.each(["plan", "query", "canonicalize", "websiteProfile"] as const)(
+    "writes no QualifyRequested for a FAILED run that stopped at stage %s, before fit, whatever the ICP's leads hold",
+    async (stage) => {
+      // Another run left fit verdicts on this ICP's leads; this run never reached fit.
+      const leadFindFirst = vi.fn(async () => ({ id: "70000000-0000-4000-8000-000000000001" }));
+      const { activities, outboxCreate, rawFindMany } = finalizeHarness(
+        null,
+        authorityBudgetStore(),
+        "RUNNING",
+        leadFindFirst,
+      );
+
+      await activities.finalizeRun(
+        discoveryArgs("40000000-0000-4000-8000-000000000001", {
+          planId: "50000000-0000-4000-8000-000000000001",
+          icpId: "60000000-0000-4000-8000-000000000001",
+          status: "FAILED" as const,
+          stats: { failures: 1, failure: { stage, errorType: "BudgetOperationReplayError", control: false } },
+        }),
+      );
+
+      expect(rawFindMany).not.toHaveBeenCalled();
+      expect(leadFindFirst).not.toHaveBeenCalled();
+      expect(outboxCreate).toHaveBeenCalledOnce();
+      expect(outboxCreate.mock.calls[0]![0]).toMatchObject({
+        data: { eventType: "DiscoveryRunCompleted", payload: { status: "FAILED" } },
+      });
+    },
+  );
+
+  it("writes no QualifyRequested for a FAILED run whose stats carry neither fit counts nor a failure stage", async () => {
     const leadFindFirst = vi.fn(async () => ({ id: "70000000-0000-4000-8000-000000000001" }));
-    const { activities, outboxCreate, planUpdate } = finalizeHarness(
+    const { activities, outboxCreate, rawFindMany } = finalizeHarness(
       null,
       authorityBudgetStore(),
       "RUNNING",
@@ -2842,28 +2934,61 @@ describe("finalizeRun durable query receipt readback", () => {
         planId: "50000000-0000-4000-8000-000000000001",
         icpId: "60000000-0000-4000-8000-000000000001",
         status: "FAILED" as const,
+        stats: { failures: 1 },
+      }),
+    );
+
+    expect(rawFindMany).not.toHaveBeenCalled();
+    expect(leadFindFirst).not.toHaveBeenCalled();
+    expect(outboxCreate).toHaveBeenCalledOnce();
+  });
+
+  it("writes no QualifyRequested for a FAILED run past fit whose own companies hold no fit verdict", async () => {
+    const { activities, outboxCreate, leadFindFirst } = finalizeHarness(null);
+
+    await activities.finalizeRun(
+      discoveryArgs("40000000-0000-4000-8000-000000000001", {
+        planId: "50000000-0000-4000-8000-000000000001",
+        icpId: "60000000-0000-4000-8000-000000000001",
+        status: "FAILED" as const,
         stats: FAILED_AFTER_FIT_STATS,
       }),
     );
 
-    expect(leadFindFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { icpId: "60000000-0000-4000-8000-000000000001", fitVerdict: { not: null } },
-      }),
-    );
-    expect(planUpdate).not.toHaveBeenCalled();
-    expect(outboxCreate).toHaveBeenCalledTimes(2);
-    expect(outboxCreate.mock.calls[1]![0]).toMatchObject({
-      data: {
-        eventType: "QualifyRequested",
-        aggregateId: "60000000-0000-4000-8000-000000000001",
-        payload: { reason: "discovery_run_failed_after_fit" },
-      },
+    expect(leadFindFirst).toHaveBeenCalledOnce();
+    expect(outboxCreate).toHaveBeenCalledOnce();
+    expect(outboxCreate.mock.calls[0]![0]).toMatchObject({
+      data: { eventType: "DiscoveryRunCompleted" },
     });
   });
 
-  it("writes no QualifyRequested for a FAILED run that judged nothing and whose ICP holds no verdict", async () => {
-    const { activities, outboxCreate, leadFindFirst } = finalizeHarness(null);
+  it("writes no QualifyRequested for a FAILED run past fit that accepted no raw record, without a lead lookup", async () => {
+    const { activities, outboxCreate, leadFindFirst, rawFindMany, identityLinkFindMany } = finalizeHarness(null);
+    rawFindMany.mockResolvedValueOnce([]);
+
+    await activities.finalizeRun(
+      discoveryArgs("40000000-0000-4000-8000-000000000001", {
+        planId: "50000000-0000-4000-8000-000000000001",
+        icpId: "60000000-0000-4000-8000-000000000001",
+        status: "FAILED" as const,
+        stats: FAILED_AFTER_FIT_STATS,
+      }),
+    );
+
+    expect(identityLinkFindMany).not.toHaveBeenCalled();
+    expect(leadFindFirst).not.toHaveBeenCalled();
+    expect(outboxCreate).toHaveBeenCalledOnce();
+  });
+
+  it("writes no QualifyRequested for a FAILED run whose own fit counts are all zero, without consulting lead rows", async () => {
+    // The ICP's leads hold verdicts from an earlier run; this run's fit stage judged nothing.
+    const leadFindFirst = vi.fn(async () => ({ id: "70000000-0000-4000-8000-000000000001" }));
+    const { activities, outboxCreate, rawFindMany } = finalizeHarness(
+      null,
+      authorityBudgetStore(),
+      "RUNNING",
+      leadFindFirst,
+    );
 
     await activities.finalizeRun(
       discoveryArgs("40000000-0000-4000-8000-000000000001", {
@@ -2874,7 +2999,8 @@ describe("finalizeRun durable query receipt readback", () => {
       }),
     );
 
-    expect(leadFindFirst).toHaveBeenCalledOnce();
+    expect(rawFindMany).not.toHaveBeenCalled();
+    expect(leadFindFirst).not.toHaveBeenCalled();
     expect(outboxCreate).toHaveBeenCalledOnce();
     expect(outboxCreate.mock.calls[0]![0]).toMatchObject({
       data: { eventType: "DiscoveryRunCompleted" },

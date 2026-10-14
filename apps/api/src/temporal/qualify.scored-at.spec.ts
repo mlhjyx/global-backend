@@ -6,7 +6,9 @@ import { createQualifyActivities } from './qualify.activities';
  * 供 API（scored / queueBasis）与 LeadQualified 快照（scored_at）读取。
  */
 
-function harness(existing: { status: string; fitVerdict: string | null; id: string } | null) {
+function harness(
+  existing: { status: string; fitVerdict: string | null; id: string; decisions?: Array<{ id: string }> } | null,
+) {
   const leadUpsert = vi.fn(async () => ({}));
   const company = {
     id: 'company-real',
@@ -37,7 +39,7 @@ function harness(existing: { status: string; fitVerdict: string | null; id: stri
       callback(tx),
   };
   const activities = createQualifyActivities({ prisma: prisma as never });
-  return { activities, leadUpsert };
+  return { activities, leadUpsert, leadFindUnique: tx.lead.findUnique };
 }
 
 type UpsertArgs = { update: Record<string, unknown>; create: Record<string, unknown> };
@@ -68,5 +70,48 @@ describe('scoreCandidates — scored_at', () => {
     expect(args.update).not.toHaveProperty('queue');
     expect(args.update.scoredAt).toBeInstanceOf(Date);
     expect(typeof args.update.totalScore).toBe('number');
+  });
+});
+
+/**
+ * 人工拒绝是终态：评分阶段自己也写 status=REJECTED，所以只凭状态分不出人工拒绝与评分拒绝，
+ * 与 API 的 queueBasis（human_reject）同一判据——REJECTED 且有一条 reject 裁决。FAILED 收尾也请求
+ * 评分（#648）之后，没有这条判据，每次重评分都会把人工拒绝改回 REVIEW/needs_review。
+ */
+describe('scoreCandidates — 人工拒绝不被重评覆盖', () => {
+  it('REJECTED 且有 reject 裁决的 lead：不改 status/queue，分数与 scored_at 照常刷新；裁决只探一条', async () => {
+    const { activities, leadUpsert, leadFindUnique } = harness({
+      id: 'lead-1',
+      status: 'REJECTED',
+      fitVerdict: 'match',
+      decisions: [{ id: 'decision-1' }],
+    });
+
+    await activities.scoreCandidates({ workspaceId: 'ws-1', icpId: 'icp-1' });
+
+    const args = leadUpsert.mock.calls[0]![0] as unknown as UpsertArgs;
+    expect(args.update).not.toHaveProperty('status');
+    expect(args.update).not.toHaveProperty('queue');
+    expect(args.update.scoredAt).toBeInstanceOf(Date);
+    expect(typeof args.update.totalScore).toBe('number');
+    expect(leadFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          status: true,
+          fitVerdict: true,
+          decisions: { where: { action: 'reject' }, select: { id: true }, take: 1 },
+        }),
+      }),
+    );
+  });
+
+  it('评分写的 REJECTED（没有 reject 裁决）仍由重评分决定 status/queue', async () => {
+    const { activities, leadUpsert } = harness({ id: 'lead-1', status: 'REJECTED', fitVerdict: 'match', decisions: [] });
+
+    await activities.scoreCandidates({ workspaceId: 'ws-1', icpId: 'icp-1' });
+
+    const args = leadUpsert.mock.calls[0]![0] as unknown as UpsertArgs;
+    expect(args.update).toHaveProperty('status');
+    expect(args.update).toHaveProperty('queue');
   });
 });

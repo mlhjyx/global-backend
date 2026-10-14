@@ -21,7 +21,7 @@ import { contactSuppressionKeys } from '../discovery/identity';
 import { blindContactKey } from '../compliance/pii-crypto';
 import { isSyntheticDiscoveryProvenance } from '../discovery/evidence-license';
 import { collectProductReadPage } from '../discovery/product-read-pagination';
-import { isLeadScored, leadQueueBasis, summarizeLeadQueues } from './lead-queue-basis';
+import { isLeadScored, leadQueueBasis, summarizeLeadQueues, withQueueBasis } from './lead-queue-basis';
 
 /** 列表/详情行的队列依据探针：只取一条 reject 裁决（有界），不把裁决历史拉进行。 */
 const REJECT_DECISION_PROBE = { where: { action: 'reject' }, select: { id: true }, take: 1 } as const;
@@ -144,14 +144,10 @@ export class LeadService {
         throw new NotFoundException({
           error: { code: 'NOT_FOUND', message: 'lead not found' },
         });
-      const lead = {
-        ...found,
-        scored: isLeadScored(found),
-        queueBasis: leadQueueBasis(
-          found,
-          found.decisions.some((decision) => decision.action === 'reject'),
-        ),
-      };
+      const lead = withQueueBasis(
+        found,
+        found.decisions.some((decision) => decision.action === 'reject'),
+      );
       const company = await tx.canonicalCompany.findUnique({
         where: { id: lead.canonicalCompanyId },
         include: { contacts: { include: { contactPoints: true } } },
@@ -208,7 +204,15 @@ export class LeadService {
       // reject 重试没有外部交棒，仍可立即幂等返回。accept 重试必须重新经过 suppression、
       // DataRights 与 sanctions 终极闸，避免首次 QUALIFIED 后新增的禁联事实被早返回绕过；
       // 通过复核后仍不建第二条 decision/outbox。
-      if (alreadyAtTarget && action === 'reject') return lead;
+      // 评分阶段自己也写 REJECTED：只有已经有 reject 裁决的才是重试；评分写的 REJECTED 照常记下
+      // 人工裁决，重评分（scoreCandidates humanFinal）与 queueBasis 都以这条裁决认人工拒绝。
+      if (
+        alreadyAtTarget &&
+        action === 'reject' &&
+        (await tx.leadDecision.findFirst({ where: { leadId, action: 'reject' }, select: { id: true } })) !== null
+      ) {
+        return withQueueBasis(lead, true);
+      }
       const persistDecision = async (): Promise<void> => {
         // CAS 乐观锁（C）：accept 必须先通过 sanctions/DataRights 预检；DENY 不得留下业务状态变化。
         const cas = await tx.lead.updateMany({
@@ -417,7 +421,7 @@ export class LeadService {
               : ((prior?.listVersions as Record<string, string> | null) ?? {}),
         };
         // accept 重试已完成所有当前安全复核；保持原 event/decision 幂等，不产生第二份交棒事实。
-        if (alreadyAtTarget) return lead;
+        if (alreadyAtTarget) return withQueueBasis(lead, false);
         const icp = await tx.icpDefinition.findUnique({
           where: { id: lead.icpId },
           select: { version: true },
@@ -479,8 +483,9 @@ export class LeadService {
       }
       if (action === 'reject') await persistDecision();
       // updateMany 不返回行 → 重取 CAS 后的 lead 作为响应（同事务内读，状态一致）。
+      // 响应与 GET /leads 同一个 LEAD_SCHEMA（scored/queueBasis 为 required）：reject 刚写下裁决。
       const updated = await tx.lead.findUnique({ where: { id: leadId } });
-      return updated ?? lead;
+      return withQueueBasis(updated ?? lead, action === 'reject');
     });
     if (result && 'storageRightsDenied' in result && result.storageRightsDenied) {
       throw new ConflictException({
