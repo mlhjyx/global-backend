@@ -47,6 +47,7 @@
     "field_evidence": ["DELETE", "INSERT", "SELECT", "UPDATE"],
     "generic_operation_artifact": [],
     "generic_operation_artifact_object": [],
+    "generic_operation_artifact_object_version": [],
     "generic_operation_artifact_subject": [],
     "generic_operation_artifact_subject_tombstone": [],
     "generic_operation_artifact_subject_tombstone_audit": [],
