@@ -35,10 +35,12 @@ import {
 const budgetLedger = new BudgetLedger();
 import type {
   CompanyDiscoveryAdapter,
+  CompanyDiscoveryQuery,
   EnrichmentResult,
   ExecutionContext,
   ProviderCompanyRecord,
 } from "../discovery/provider-contract";
+import { ProviderHttpError } from "../model-gateway/providers/provider-output-error";
 import type { DurableExecutionReceipt } from "../durable-results/durable-execution-receipt";
 import { DISCOVERY_COMPANY_RESULT_LINEAGE_V1 } from "../discovery/company-discovery-lineage";
 import { DiscoveryProviderRegistry } from "../discovery/provider.registry";
@@ -4369,9 +4371,6 @@ describe("executeQuery —— a provider whose operation cannot be replayed ends
     companyResultLineage: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
     discoverCompanies,
   });
-  const taxonomy = (resolveMany: () => Promise<unknown>) =>
-    ({ resolveMany: vi.fn(resolveMany), resolve: vi.fn(async () => null) }) as never;
-
   it("lists the provider on a zero receipt through Q-TX and flags the loss, with no skip reason", async () => {
     const discoverCompanies = vi.fn(async () => {
       throw lost();
@@ -4440,41 +4439,6 @@ describe("executeQuery —— a provider whose operation cannot be replayed ends
     ).rejects.toBe(error);
   });
 
-  it("answers with nothing from every provider, calling none, when term normalization cannot be replayed", async () => {
-    const discoverCompanies = vi.fn(async () => ({ records: [REC], costCents: 0 }));
-    const deps = makeDeps([{ ...okAdapter("wikidata", [REC]), discoverCompanies }]);
-    deps.taxonomy = taxonomy(async () => {
-      throw lost();
-    });
-    const activities = createDiscoveryActivities(deps);
-
-    const result = await activities.executeQuery(discoveryArgs("run-lost-terms", { query: QUERY }));
-
-    expect(discoverCompanies).not.toHaveBeenCalled();
-    expect(result).toMatchObject({
-      rawCount: 0,
-      unreplayable: true,
-      queryReceipt: { providers: ["wikidata"], accepted: 0 },
-    });
-  });
-
-  it("fails the query when term normalization cannot be replayed right after such a query", async () => {
-    const error = lost();
-    const discoverCompanies = vi.fn(async () => ({ records: [REC], costCents: 0 }));
-    const deps = makeDeps([{ ...okAdapter("wikidata", [REC]), discoverCompanies }]);
-    deps.taxonomy = taxonomy(async () => {
-      throw error;
-    });
-    const activities = createDiscoveryActivities(deps);
-
-    await expect(
-      activities.executeQuery(
-        discoveryArgs("run-lost-terms-twice", { query: QUERY, previousQueryUnreplayable: true }),
-      ),
-    ).rejects.toBe(error);
-    expect(discoverCompanies).not.toHaveBeenCalled();
-  });
-
   it("rejects a hand-off flag that is not a boolean before any call", async () => {
     const discoverCompanies = vi.fn(async () => ({ records: [REC], costCents: 0 }));
     const activities = createDiscoveryActivities(
@@ -4502,5 +4466,150 @@ describe("executeQuery —— a provider whose operation cannot be replayed ends
     await expect(
       activities.executeQuery(discoveryArgs("run-lost-other", { query: QUERY })),
     ).rejects.toBe(error);
+  });
+});
+
+describe("executeQuery —— term normalization: keyed per query, skipped when no routed source reads it, falling back to the built-in vocabulary (W2)", () => {
+  // Seller #26, run 3e78eb4e (xin, 2026-10-13 11:36 UTC): the taxonomy model answered 503 on
+  // the first query and the gateway settled the operation without a result. Its key held only
+  // run, task, prompt and schema, so every later query that shared the term met the dead
+  // operation on its first attempt, and the second one in a row failed the run.
+  const TERMS = { industry: "pump", country: "Germany" };
+  const query = { ...QUERY, filters: TERMS };
+  type TaxonomyOptions = { correlationId?: string; allowLlm?: boolean };
+  const taxonomySpy = (
+    resolveMany: (kind: string, terms: string[], options?: TaxonomyOptions) => Promise<unknown>,
+    resolve: (kind: string, term: string, options?: TaxonomyOptions) => Promise<unknown> = async () => null,
+  ) => ({ resolveMany: vi.fn(resolveMany), resolve: vi.fn(resolve) });
+  const discoverer = () => vi.fn(async (_query: CompanyDiscoveryQuery) => ({ records: [REC], costCents: 0 }));
+  // wikidata and openstreetmap read the resolved codes executeQuery injects.
+  const consumer = (discoverCompanies = discoverer()) => ({
+    ...okAdapter("wikidata", [REC]),
+    consumesResolvedTaxonomy: true,
+    discoverCompanies,
+  }) as unknown as CompanyDiscoveryAdapter;
+
+  it("sends term normalization a per-query correlation id, so two queries that share a term use distinct model operations", async () => {
+    const taxonomy = taxonomySpy(async () => []);
+    const deps = makeDeps([consumer()]);
+    deps.taxonomy = taxonomy as never;
+    const activities = createDiscoveryActivities(deps);
+    const runId = testRunId("run-keyed");
+    const planId = "50000000-0000-4000-8000-000000000001";
+    const expectedKey = (queryOrdinal: number) =>
+      `${discoveryQueryKey({ runId, planId, queryOrdinal, query })}:${queryOrdinal}`;
+
+    await activities.executeQuery(discoveryArgs(runId, { query, queryOrdinal: 0 }));
+    await activities.executeQuery(discoveryArgs(runId, { query, queryOrdinal: 1 }));
+
+    expect(expectedKey(0)).not.toBe(expectedKey(1));
+    expect(taxonomy.resolveMany.mock.calls.map(([, , options]) => options?.correlationId))
+      .toEqual([expectedKey(0), expectedKey(1)]);
+    expect(taxonomy.resolve.mock.calls.map(([, , options]) => options?.correlationId))
+      .toEqual([expectedKey(0), expectedKey(1)]);
+  });
+
+  it("keeps term normalization deterministic for a query routed only to sources that never read resolved codes", async () => {
+    const taxonomy = taxonomySpy(async () => []);
+    const discoverCompanies = discoverer();
+    const deps = makeDeps([{ ...okAdapter("public_web", []), discoverCompanies } as unknown as CompanyDiscoveryAdapter]);
+    deps.taxonomy = taxonomy as never;
+    const activities = createDiscoveryActivities(deps);
+
+    const result = await activities.executeQuery(discoveryArgs("run-public-web-only", { query }));
+
+    expect(taxonomy.resolveMany).toHaveBeenCalledWith("industry", ["pump"], expect.objectContaining({ allowLlm: false }));
+    expect(taxonomy.resolve).toHaveBeenCalledWith("country", "Germany", expect.objectContaining({ allowLlm: false }));
+    expect(discoverCompanies).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ taxonomyModelSkipped: true, queryReceipt: { providers: ["public_web"] } });
+    expect(result).not.toHaveProperty("taxonomyFallback");
+  });
+
+  it("lets term normalization call the model once a routed source reads resolved codes", async () => {
+    const taxonomy = taxonomySpy(async () => []);
+    const deps = makeDeps([okAdapter("public_web", [REC]), consumer()]);
+    deps.taxonomy = taxonomy as never;
+    const activities = createDiscoveryActivities(deps);
+
+    const result = await activities.executeQuery(discoveryArgs("run-mixed-sources", { query }));
+
+    expect(taxonomy.resolveMany.mock.calls[0]![2]?.allowLlm).toBeUndefined();
+    expect(taxonomy.resolve.mock.calls[0]![2]?.allowLlm).toBeUndefined();
+    expect(result).not.toHaveProperty("taxonomyModelSkipped");
+    expect(result).not.toHaveProperty("taxonomyFallback");
+  });
+
+  it("falls back to the built-in vocabulary and still dispatches the query when term normalization meets an upstream 5xx", async () => {
+    const discoverCompanies = discoverer();
+    const deps = makeDeps([consumer(discoverCompanies)]);
+    deps.taxonomy = taxonomySpy(async () => {
+      throw new ProviderHttpError({ status: 503, provider: "gateway", model: "deepseek-v4-pro" });
+    }) as never;
+    const activities = createDiscoveryActivities(deps);
+
+    const result = await activities.executeQuery(discoveryArgs("run-taxonomy-503", { query }));
+
+    expect(discoverCompanies).toHaveBeenCalledOnce();
+    expect(discoverCompanies.mock.calls[0]![0].filters).toEqual(TERMS);
+    expect(result).toMatchObject({
+      rawCount: 1,
+      taxonomyFallback: true,
+      queryReceipt: { providers: ["wikidata"], accepted: 1 },
+    });
+    expect(result).not.toHaveProperty("unreplayable");
+    expect(result).not.toHaveProperty("skipReason");
+  });
+
+  it("falls back the same way when the normalization operation cannot be replayed, even right after a query that lost a provider", async () => {
+    const discoverCompanies = discoverer();
+    const deps = makeDeps([consumer(discoverCompanies)]);
+    deps.taxonomy = taxonomySpy(async () => {
+      throw new BudgetOperationReplayError("taxonomy-op");
+    }) as never;
+    const activities = createDiscoveryActivities(deps);
+
+    const result = await activities.executeQuery(
+      discoveryArgs("run-taxonomy-replay", { query, previousQueryUnreplayable: true }),
+    );
+
+    expect(discoverCompanies).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ rawCount: 1, taxonomyFallback: true });
+    expect(result).not.toHaveProperty("unreplayable");
+  });
+
+  it("keeps the industries resolved before the country lookup fell back", async () => {
+    const discoverCompanies = discoverer();
+    const deps = makeDeps([consumer(discoverCompanies)]);
+    deps.taxonomy = taxonomySpy(
+      async () => [{ wikidataQid: "Q1", osmTags: null, code: "2812" }],
+      async () => {
+        throw new ProviderHttpError({ status: 502, provider: "gateway", model: "deepseek-v4-pro" });
+      },
+    ) as never;
+    const activities = createDiscoveryActivities(deps);
+
+    const result = await activities.executeQuery(discoveryArgs("run-taxonomy-502", { query }));
+
+    const dispatched = discoverCompanies.mock.calls[0]![0].filters;
+    expect(dispatched).toMatchObject({ _industryCodes: ["2812"], _industryQids: ["Q1"] });
+    expect(dispatched).not.toHaveProperty("_countryCode");
+    expect(result).toMatchObject({ rawCount: 1, taxonomyFallback: true });
+  });
+
+  it.each([
+    ["an upstream 4xx", new ProviderHttpError({ status: 401, provider: "gateway", model: "deepseek-v4-pro" })],
+    ["another control error", new ExecutionControlError("EXECUTION_BUDGET_AUTHORITY_REVOKED")],
+  ])("still fails the query when term normalization meets %s", async (_label, error) => {
+    const discoverCompanies = discoverer();
+    const deps = makeDeps([consumer(discoverCompanies)]);
+    deps.taxonomy = taxonomySpy(async () => {
+      throw error;
+    }) as never;
+    const activities = createDiscoveryActivities(deps);
+
+    await expect(
+      activities.executeQuery(discoveryArgs("run-taxonomy-closed", { query })),
+    ).rejects.toBe(error);
+    expect(discoverCompanies).not.toHaveBeenCalled();
   });
 });

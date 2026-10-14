@@ -22,6 +22,14 @@ export type TaxonomyResolveOptions = {
   workspaceId?: string;
   runId?: string;
   executionBudget?: ExecutionBudgetBinding;
+  /**
+   * Identity of the caller's unit of work (executeQuery sends `${queryKey}:${queryOrdinal}`).
+   * The gateway keys a paid model operation by run, task, prompt, schema and this id, so two
+   * queries of one run that normalize the same term reserve two operations: a call the gateway
+   * settled without a result (upstream 5xx, cut stream) stays confined to its own query instead
+   * of meeting every later query of the run as an operation that cannot be replayed.
+   */
+  correlationId?: string;
 };
 
 /** 官方码制对照（§8.2 暴露给 resolveIcpToCpv 等冷路径；schemaless JSON，键按 kind 选用）。 */
@@ -75,7 +83,9 @@ export const cpvSubtreePrefix = (code: string): string => code.replace(/0+$/, ''
  * 1) 确定性：normKey → TermAlias 命中 → CanonicalTaxonomy 节点（零成本零延迟）。
  * 2) 冷路径 LLM：未命中 → taxonomy.normalize（enum 约束 code 值域，杜绝幻觉）→
  *    校验 code 存在 → 写回 TermAlias(source='llm') 沉淀 → 下次确定性。
- * LLM 只在冷路径（ICP 设计 / query-plan 生成）每词一次，不碰发现热路径。
+ * LLM 每词一次：冷路径（ICP 设计 / query-plan 生成），以及发现热路径里路由到了会读归一结果的源
+ * （wikidata / openstreetmap）的查询；只路由 public_web 等不读它的源时 executeQuery 传 allowLlm=false。
+ * 操作按查询（correlationId）归键，不按 run；调用丢失时 executeQuery 回退内置词表（见其注释）。
  *
  * canonical_taxonomy / term_alias 是无 RLS 平台表（app_user 只读）→ 直接用 prisma 读。
  */
@@ -154,6 +164,7 @@ export class TaxonomyResolver {
         opts.workspaceId,
         opts.runId,
         opts.executionBudget,
+        opts.correlationId,
       );
       const code = result.data?.code;
       if (!code) {
@@ -232,6 +243,7 @@ export class TaxonomyResolver {
         opts.workspaceId,
         opts.runId,
         opts.executionBudget,
+        opts.correlationId,
       );
       const code = result.data?.code;
       if (!code) {
@@ -309,6 +321,7 @@ export class TaxonomyResolver {
         opts.workspaceId,
         opts.runId,
         opts.executionBudget,
+        opts.correlationId,
       );
       const code = result.data?.code;
       if (!code) {
@@ -390,6 +403,7 @@ export class TaxonomyResolver {
         opts.workspaceId,
         opts.runId,
         opts.executionBudget,
+        opts.correlationId,
       );
       const code = result.data?.code;
       if (!code) {
@@ -438,6 +452,7 @@ export class TaxonomyResolver {
     workspaceId: string,
     runId?: string,
     executionBudget?: ExecutionBudgetBinding,
+    correlationId?: string,
   ) {
     const budgets = this.budgetStore ?? new UnavailableBudgetStore('TaxonomyResolver requires an authoritative BudgetStore');
     if (!executionBudget) {
@@ -460,6 +475,7 @@ export class TaxonomyResolver {
       {
         workspaceId: binding.scopeKey,
         runId: binding.accountKey,
+        ...(correlationId === undefined ? {} : { correlationId }),
         durableResultSchema: 'taxonomy-code/v1',
       },
       { telemetry: this.runtimeTelemetry },
