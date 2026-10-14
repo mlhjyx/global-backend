@@ -23,6 +23,11 @@ import {
 } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 import { MAX_UNDERSTANDING_SUBPAGES } from '../discovery/execution-envelope';
+import type { ArtifactSubjectRef } from '../tools/artifact-execution-port';
+import {
+  understandingFailureLabel,
+  type UnderstandingFailure,
+} from './understanding.run-failure';
 
 export interface UnderstandingInput {
   workspaceId: string;
@@ -67,6 +72,45 @@ export interface CrawledPage {
 
 /** Keep Temporal payloads bounded — a page beyond this adds noise, not facts. */
 const MAX_PAGE_CHARS = 40_000;
+
+/** A failure type is one closed token: the shared run-failure classifier reads nothing else. */
+const CLOSED_FAILURE_TYPE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
+
+/**
+ * G3 5.1 (#565): crawl4ai-fetch/v1 is a subject-bound PERSONAL_DATA artifact,
+ * and the broker admits a call only for the live workspace subject it names.
+ * The seller company_profile being understood is the subject of every page
+ * crawled for it. The binding contract knows the `company` kind; whether a
+ * seller profile resolves under it is the owner's decision (changelog
+ * 2026-10-13), so until then the broker answers SUBJECT_BINDING_INVALID
+ * instead of the former SUBJECT_BINDING_HOLD, still before any wire.
+ */
+function sellerSubject(companyId: string): ArtifactSubjectRef {
+  return { subjectType: 'company', subjectId: companyId };
+}
+
+/**
+ * A broker policy denial as the activity's own failure. The worker's diagnostic
+ * converter keeps an ApplicationFailure's type and redacts everything else, so
+ * the company row can name the policy that refused the crawl
+ * (GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_INVALID, ...) instead of `Error`.
+ * Only a closed token becomes the type; a reason carrying a domain or a task id
+ * keeps the class name. The denial stays attached as the cause, so the control
+ * classifier sees the shape it saw before, and the attempt is not retried: a
+ * policy decision does not change between attempts.
+ */
+function policyDenialFailure(error: unknown): ApplicationFailure | null {
+  if (!(error instanceof Error) || error.name !== 'ToolPolicyDenied') return null;
+  const reason = (error as { reason?: unknown }).reason;
+  const type =
+    typeof reason === 'string' && CLOSED_FAILURE_TYPE.test(reason) ? reason : 'ToolPolicyDenied';
+  return ApplicationFailure.create({
+    type,
+    message: `understanding crawl denied: ${type}`,
+    nonRetryable: true,
+    cause: error,
+  });
+}
 
 /**
  * Activities do the real (side-effectful) work — DB writes go through
@@ -121,23 +165,30 @@ export function createUnderstandingActivities(deps: {
 
   const crawlViaBroker = async (
     workspaceId: string,
+    companyId: string,
     url: string,
     accountKey: string,
   ): Promise<{ text: string; durableReceipt?: DurableExecutionReceipt }> => {
     if (!deps.broker) throw new Error('understanding: broker unavailable (fail-closed, no raw egress)');
-    const r = await deps.broker.invoke<{ url: string }, CrawlResult>(
-      'crawl4ai.fetch',
-      { url },
-      // FIX C（Codex P1）：显式声明 discovery/enrichment 用途——crawl4ai.fetch 追加 site_builder 后，
-      // 不带 purpose 会 fallback 到扩宽全集，令仅授权 site_builder 的域连带放行；显式声明精确复现变更前有效集。
-      {
-        workspaceId,
-        taskContractId: 'company_understanding.extract_claims',
-        correlationId: url,
-        purpose: ['discovery', 'enrichment'],
-        runId: accountKey,
-      },
-    );
+    const r = await deps.broker
+      .invoke<{ url: string }, CrawlResult>(
+        'crawl4ai.fetch',
+        { url },
+        // FIX C（Codex P1）：显式声明 discovery/enrichment 用途——crawl4ai.fetch 追加 site_builder 后，
+        // 不带 purpose 会 fallback 到扩宽全集，令仅授权 site_builder 的域连带放行；显式声明精确复现变更前有效集。
+        {
+          workspaceId,
+          taskContractId: 'company_understanding.extract_claims',
+          correlationId: url,
+          purpose: ['discovery', 'enrichment'],
+          runId: accountKey,
+          // G3 5.1：产物挂在正被理解的卖方 company_profile 名下（见 sellerSubject）。
+          artifactSubject: sellerSubject(companyId),
+        },
+      )
+      .catch((error: unknown) => {
+        throw policyDenialFailure(error) ?? error;
+      });
     return {
       text: r.data.text,
       ...(r.durableReceipt ? { durableReceipt: r.durableReceipt } : {}),
@@ -173,14 +224,51 @@ export function createUnderstandingActivities(deps: {
       await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         tx.companyProfile.update({
           where: { id: args.companyId },
-          data: { status: args.status },
+          data: {
+            status: args.status,
+            // A new attempt supersedes the failure recorded for the previous one.
+            ...(args.status === 'ENRICHING'
+              ? { understandingFailedAt: null, understandingLastError: null }
+              : {}),
+          },
         }),
       );
     },
 
-    async crawlWebsite(args: UnderstandingAuthorityInput & { website: string }): Promise<CrawledPage> {
+    /**
+     * A stage failure the workflow could not absorb: the profile returns to
+     * DRAFT (nothing was enriched for use) and keeps `stage:errorType`, one
+     * closed token each, never a message. Any other shape is refused, not written.
+     */
+    async recordUnderstandingFailure(args: UnderstandingAuthorityInput & {
+      companyId: string;
+      failure: UnderstandingFailure;
+    }): Promise<void> {
+      requireAuthority(args);
+      const label = understandingFailureLabel(args.failure);
+      if (label === null) {
+        throw ApplicationFailure.nonRetryable(
+          'UNDERSTANDING_FAILURE_INVALID',
+          'UNDERSTANDING_FAILURE_INVALID',
+        );
+      }
+      await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+        tx.companyProfile.update({
+          where: { id: args.companyId },
+          data: {
+            status: 'DRAFT',
+            understandingFailedAt: new Date(),
+            understandingLastError: label,
+          },
+        }),
+      );
+    },
+
+    async crawlWebsite(
+      args: UnderstandingAuthorityInput & { companyId: string; website: string },
+    ): Promise<CrawledPage> {
       return withRunBudget(args, async (accountKey) => {
-        const crawled = await crawlViaBroker(args.workspaceId, args.website, accountKey);
+        const crawled = await crawlViaBroker(args.workspaceId, args.companyId, args.website, accountKey);
         return {
           url: args.website,
           text: crawled.text.slice(0, MAX_PAGE_CHARS),
@@ -199,10 +287,12 @@ export function createUnderstandingActivities(deps: {
     },
 
     /** Crawl subpages, tolerating individual failures — a broken page must not kill the run. */
-    async crawlPages(args: UnderstandingAuthorityInput & { urls: string[] }): Promise<{ pages: CrawledPage[] }> {
+    async crawlPages(
+      args: UnderstandingAuthorityInput & { companyId: string; urls: string[] },
+    ): Promise<{ pages: CrawledPage[] }> {
       return withRunBudget(args, async (accountKey) => {
         const settled = await Promise.allSettled(
-          args.urls.map((u) => crawlViaBroker(args.workspaceId, u, accountKey)),
+          args.urls.map((u) => crawlViaBroker(args.workspaceId, args.companyId, u, accountKey)),
         );
         const pages: CrawledPage[] = [];
         settled.forEach((s, i) => {

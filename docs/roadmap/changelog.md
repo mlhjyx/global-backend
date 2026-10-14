@@ -104,6 +104,20 @@
   - 内容寻址去重与 MinIO 按对象年龄过期（personal-data 1 天）相冲：复用对象不刷新年龄，首个写入者的 TTL 一到对象就没了，而库里仍有未过期的产物行指向它（10-13 验证：空对象已 NotFound，库里最晚的引用到 10-14 16:36）。另行处理。
   - 每次 HEAD 探测都落一份空产物，是浪费但无害。
 
+## 2026-10-13 · Carry the seller profile as the artifact subject of understanding crawls, and record a failed understanding on the company row
+
+- 起因：卖方入驻的理解工作流（`POST /companies` → outbox relay → `understandingWorkflow`）自 2026-08-24 起一次都没跑通。b8dd5eb0 把 `crawl4ai-fetch/v1`、`http-get/v1` 列进主体绑定的 PERSONAL_DATA 产物；#565（G3 5.1）改成按调用准入——broker 的 `artifactPrecheck` 只放行带 `ctx.artifactSubject` 的调用，发现侧 website-profile 接了，理解侧从没接：`crawlViaBroker`（d404a70d）不带主体，首页抓取被 `GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD` 拒 3 次，工作流失败，`company_profile` 停在 ENRICHING，什么也没记（xin 只读核验 2026-10-13：10-01..10-13 ENRICHING 28 行、DRAFT 9 行、ACTIVE 从未有过；验收 e2e 能过只因它手工 POST claims）。
+- 改动：
+  - 理解的首页与子页抓取带上 `artifactSubject: { subjectType: 'company', subjectId: company_profile.id }`——与发现侧 website-profile 同一个 G3 模板；工作流把 `companyId` 交给 `crawlWebsite` / `crawlPages`。
+  - broker 的策略拒绝在活动边界转成带类型的 `ApplicationFailure`（类型=封闭 token 的拒绝原因，带域名或任务 id 的原因只留类名；原错误作 cause，分类结果不变；不重试——策略判定不会因重试而变）。worker 的诊断转换器只保留 ApplicationFailure 的 type，不这样做，回写只能记到 `Error`。
+  - 工作流任一阶段失败（只认 Temporal 上报的失败；`understanding-failure-record-v1` patch 守卫）先调新活动 `recordUnderstandingFailure`：`company_profile` 回 DRAFT，记 `understanding_failed_at` 与 `understanding_last_error`（`阶段:错误类型`，无消息、无抓取内容），再抛原错误；新一轮 ENRICHING 清空两列；收尾 REVIEW 本身失败不补写。迁移 `20261014120000_company_profile_understanding_failure` 加两列与 CHECK（只收 `token:token`、两列同空同非空）；API 经 `CompanyDto` 映射，OpenAPI 不变。
+  - `describeRunFailure` 从 `discovery.run-failure` 抽出，发现与理解共用一个无内容的失败描述。
+- 契约里没有卖方主体，本次没有擅自加：`resolveExistingSubject` 只在 `canonical_company` / `canonical_contact` 里解析；DB 侧 `assert_workspace_generic_operation_artifact_subject_v1`（bind 前置）、`find_…_execution_hold_v1` 与三张主体表的 CHECK 也只认这两种。所以 xin 上这次改动把拒绝从 HOLD 换成 `SUBJECT_BINDING_INVALID`（仍在 wire 之前：零出网、零花费、预留照常释放），并把失败如实写回行上；理解真正跑通要等产品负责人在下面二选一：
+  - A · 扩契约，新增卖方主体种类（如 `company_profile`）：改主体种类与解析 SQL，迁移改 3 个 CHECK 与 4 个 DB 函数（assert / bind / find_by_subject / tombstone）与 execution-hold 读取器，补 RLS 测试，并定义删除编排对卖方画像的语义。审计最清楚：主体表能分辨买方公司与卖方画像，租户删除可按主体 tombstone。
+  - B · 绑到现有 `company` 主体：解析 SQL 与 `assert_…_v1` 各 UNION 一段 `company_profile`（仍要一个迁移，改 1 个 DB 函数）。改动最小，但 `generic_operation_artifact_subject.subject_type = 'company'` 从此可能指向两张表：DSR tombstone、按主体查产物、合规报表都得带「可能是卖方画像」的注记；没有任何路径会为卖方画像写 tombstone，产物只靠 1 天 TTL 清理。
+- 测试：先红后绿。`understanding.activities.spec`：用真实 `ToolBroker` 复现无主体即 HOLD（admit / execute 都没跑、预留已释放）；带主体 → admit 收到 `{ crawl4ai-fetch/v1, company 主体 }`、wire 跑一次、persist 挂同一主体；子页逐个带同一主体；主体被拒 → `ApplicationFailure{ type: GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_INVALID, nonRetryable }` 且仍是控制错误；带域名的拒绝原因只以类名过边界；回写 DRAFT+失败、ENRICHING 清空、非封闭 token 拒写。`understanding.workflow.spec`（新，proxyActivities-mock harness）：抓取带 companyId；首页被拒 / 抽取失败各记对应阶段并以原错误失败；工作流代码缺陷、无 patch 标记的旧历史、回写失败、收尾失败四种都不补写。`understanding.run-failure.spec`：标签与拒收。改动前 10 项失败 + 1 个模块缺失，改动后 5 个文件 43 项全过。
+- 真机：按任务硬规则只做只读核验，没有新建卖方公司、没有触发理解工作流。
+
 ## 2026-10-12 · Keep a governed discovery query going when one model extraction answers unusably
 
 - 起因：卖方 #20 的验收 run（`322866ef`，xin，2026-10-11 19:02–19:21 UTC）在第 8 条查询失败，报 `DOMAIN_ACK_DISCOVERY_QUERY_LINEAGE_RECEIPT_MISMATCH`。

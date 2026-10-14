@@ -1,5 +1,15 @@
-import { ApplicationFailure, patched, proxyActivities } from '@temporalio/workflow';
+import {
+  ApplicationFailure,
+  CancellationScope,
+  TemporalFailure,
+  patched,
+  proxyActivities,
+} from '@temporalio/workflow';
 import type { UnderstandingActivities } from './understanding.activities';
+import {
+  describeUnderstandingFailure,
+  type UnderstandingStage,
+} from './understanding.run-failure';
 import {
   parseExecutionBudgetBinding,
   type ExecutionBudgetBinding,
@@ -32,6 +42,8 @@ export interface UnderstandingWorkflowInput {
 }
 
 export const UNDERSTANDING_AUTHORITY_PATCH = 'understanding-workspace-authority-v2';
+/** A stage failure returns the profile to DRAFT with the failure recorded before the workflow fails. */
+export const UNDERSTANDING_FAILURE_RECORD_PATCH = 'understanding-failure-record-v1';
 const EXECUTION_CONTRACT_VERSION = 2 as const;
 
 function invalidAuthorityInput(): never {
@@ -48,7 +60,8 @@ function invalidAuthorityInput(): never {
  *
  * Flow: homepage → pick key subpages (deterministic) → crawl them → per-page
  * claim + offering extraction (evidence keeps the real page URL) → persist →
- * deterministic public-contact extraction → ACTIVE.
+ * deterministic public-contact extraction → REVIEW. The crawls carry the
+ * company id: the activities name the seller profile as the G3 artifact subject.
  */
 export async function understandingWorkflow(input: UnderstandingWorkflowInput): Promise<void> {
   const { workspaceId, companyId, website } = input;
@@ -73,38 +86,73 @@ export async function understandingWorkflow(input: UnderstandingWorkflowInput): 
     : {};
   await dbActs.setStatus({ companyId, workspaceId, ...authorityArgs, status: 'ENRICHING' });
 
-  const home = await crawlActs.crawlWebsite({ workspaceId, website, ...authorityArgs });
-  const subUrls = await dbActs.selectSubpages({
-    markdown: home.text,
-    website,
-    ...(usesAuthority ? { workspaceId, ...authorityArgs } : {}),
-  });
-  const { pages: subPages } = await crawlActs.crawlPages({ workspaceId, urls: subUrls, ...authorityArgs });
-  const pages = [home, ...subPages];
+  let stage: UnderstandingStage = 'crawlWebsite';
+  try {
+    const home = await crawlActs.crawlWebsite({ workspaceId, companyId, website, ...authorityArgs });
+    stage = 'selectSubpages';
+    const subUrls = await dbActs.selectSubpages({
+      markdown: home.text,
+      website,
+      ...(usesAuthority ? { workspaceId, ...authorityArgs } : {}),
+    });
+    stage = 'crawlPages';
+    const { pages: subPages } = await crawlActs.crawlPages({ workspaceId, companyId, urls: subUrls, ...authorityArgs });
+    const pages = [home, ...subPages];
 
-  // Per-page extraction so every Evidence row points at the page it came from.
-  // Claims and offerings extract concurrently across pages.
-  const [claimPages, offeringPages] = await Promise.all([
-    Promise.all(
-      pages.map(async (p) => ({
-        url: p.url,
-        ...(p.durableReceipt ? { crawlDurableReceipt: p.durableReceipt } : {}),
-        ...await modelActs.extractClaims({ workspaceId, text: p.text, ...authorityArgs }),
-      })),
-    ),
-    Promise.all(
-      pages.map(async (p) => ({
-        url: p.url,
-        ...(p.durableReceipt ? { crawlDurableReceipt: p.durableReceipt } : {}),
-        ...await modelActs.extractOfferings({ workspaceId, text: p.text, ...authorityArgs }),
-      })),
-    ),
-  ]);
+    // Per-page extraction so every Evidence row points at the page it came from.
+    // Claims and offerings extract concurrently across pages.
+    stage = 'extract';
+    const [claimPages, offeringPages] = await Promise.all([
+      Promise.all(
+        pages.map(async (p) => ({
+          url: p.url,
+          ...(p.durableReceipt ? { crawlDurableReceipt: p.durableReceipt } : {}),
+          ...await modelActs.extractClaims({ workspaceId, text: p.text, ...authorityArgs }),
+        })),
+      ),
+      Promise.all(
+        pages.map(async (p) => ({
+          url: p.url,
+          ...(p.durableReceipt ? { crawlDurableReceipt: p.durableReceipt } : {}),
+          ...await modelActs.extractOfferings({ workspaceId, text: p.text, ...authorityArgs }),
+        })),
+      ),
+    ]);
 
-  await dbActs.persistClaims({ workspaceId, companyId, website, pages: claimPages, ...authorityArgs });
-  await dbActs.persistOfferings({ workspaceId, companyId, website, pages: offeringPages, ...authorityArgs });
-  await dbActs.persistPublicContacts({ workspaceId, companyId, website, pages, ...authorityArgs });
-  await modelActs.extractAndPersistProfile({ workspaceId, companyId, website, text: home.text, ...authorityArgs });
+    stage = 'persistClaims';
+    await dbActs.persistClaims({ workspaceId, companyId, website, pages: claimPages, ...authorityArgs });
+    stage = 'persistOfferings';
+    await dbActs.persistOfferings({ workspaceId, companyId, website, pages: offeringPages, ...authorityArgs });
+    stage = 'persistPublicContacts';
+    await dbActs.persistPublicContacts({ workspaceId, companyId, website, pages, ...authorityArgs });
+    stage = 'extractProfile';
+    await modelActs.extractAndPersistProfile({ workspaceId, companyId, website, text: home.text, ...authorityArgs });
+  } catch (error) {
+    // 阶段失败（重试用尽、控制错误、超时或取消）不能让画像永远停在 ENRICHING：先把「阶段:错误类型」
+    // 回写到 company_profile（状态回 DRAFT）再抛原错误，工作流照旧失败、控制错误照旧可见。只处理
+    // Temporal 上报的失败：工作流代码自身的缺陷让工作流任务失败并重试，修好的版本还能接着跑。
+    // 收尾（REVIEW）本身失败不在这里补写，免得把已落库的结果说成没有。授权前的旧历史跳过；patch
+    // 守卫让旧历史重放时命令序列不变。补写放在不可取消的作用域里；补写失败时以阶段错误为准。
+    if (
+      error instanceof TemporalFailure &&
+      usesAuthority &&
+      patched(UNDERSTANDING_FAILURE_RECORD_PATCH)
+    ) {
+      try {
+        await CancellationScope.nonCancellable(() =>
+          dbActs.recordUnderstandingFailure({
+            workspaceId,
+            companyId,
+            ...authorityArgs,
+            failure: describeUnderstandingFailure(stage, error),
+          }),
+        );
+      } catch {
+        /* 阶段错误才是要报告的结果，回写失败不能顶替它 */
+      }
+    }
+    throw error;
+  }
 
   // 5.2.7：理解完成 ≠ 可用。落 REVIEW，等待人工审批（Claim 审批达阈值或显式 confirm）→ ACTIVE。
   await dbActs.setStatus({ companyId, workspaceId, ...authorityArgs, status: 'REVIEW' });
