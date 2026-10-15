@@ -846,9 +846,17 @@ export class OpenAICompatibleProvider implements ModelProvider {
     body: ChatCompletionBody;
     streamedModels: readonly unknown[];
     truncated: boolean;
+    outputStarted: boolean;
   }> {
     const streamedModels: unknown[] = [];
-    const invalid = (reason: string, reasonCode: string): never => {
+    // D13: whether any output delta or counted output token arrived. Only a
+    // failure with none of either is a definite failure the gateway releases.
+    let outputStarted = false;
+    const invalid = (
+      reason: string,
+      reasonCode: string,
+      outputState: { outputStarted?: boolean } = {},
+    ): never => {
       throw new ProviderTransportError(
         `${this.id} ${model}: ${reason}`,
         undefined,
@@ -856,6 +864,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
           provider: this.id,
           ...this.failedStreamProvenance(model, streamedModels, substitutes),
           reasonCode,
+          ...outputState,
         },
       );
     };
@@ -872,6 +881,8 @@ export class OpenAICompatibleProvider implements ModelProvider {
           body: JSON.parse(trimmed) as ChatCompletionBody,
           streamedModels: [],
           truncated: false,
+          // A whole JSON body is an answer, not a stream; it is never cut.
+          outputStarted: true,
         };
       } catch {
         return invalid("response body is not valid JSON", "CHAT_COMPLETIONS_BODY_NOT_JSON");
@@ -897,9 +908,12 @@ export class OpenAICompatibleProvider implements ModelProvider {
         return invalid("stream data line is not valid JSON", "CHAT_COMPLETIONS_STREAM_LINE_INVALID");
       }
       if (event.error != null) {
-        return invalid("stream carried an upstream error", "CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR");
+        return invalid("stream carried an upstream error", "CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR", {
+          outputStarted,
+        });
       }
       chunks += 1;
+      if (streamEventCarriesOutput(event)) outputStarted = true;
       const model: unknown = (event as { model?: unknown }).model;
       const named = model !== undefined && model !== null && model !== "";
       if (named) {
@@ -926,7 +940,9 @@ export class OpenAICompatibleProvider implements ModelProvider {
       if (typeof choice?.finish_reason === "string") finishReason = choice.finish_reason;
     }
     if (chunks === 0) {
-      return invalid("stream carried no completion chunk", "CHAT_COMPLETIONS_STREAM_EMPTY");
+      return invalid("stream carried no completion chunk", "CHAT_COMPLETIONS_STREAM_EMPTY", {
+        outputStarted: false,
+      });
     }
     // Provenance names the model that produced the content. Content on chunks
     // that named no model leaves the upstream identity unproven.
@@ -940,6 +956,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       },
       streamedModels,
       truncated: finishReason === undefined,
+      outputStarted,
     };
   }
 
@@ -1053,7 +1070,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       return this.throwHttpFailure(res, opts.model, ctx);
     }
     const substitutes = this.substitutesFor(ctx, opts.model);
-    const { body: json, streamedModels, truncated } = stream
+    const { body: json, streamedModels, truncated, outputStarted } = stream
       ? await this.parseChatCompletionStream(res, opts.model, substitutes)
       : {
           body: await this.parseResponseJson<ChatCompletionBody>(
@@ -1063,6 +1080,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
           ),
           streamedModels: [] as readonly unknown[],
           truncated: false,
+          outputStarted: true,
         };
     const bodyUsage = {
       inputTokens: json.usage?.prompt_tokens,
@@ -1123,6 +1141,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
           "openai-chat-completions",
           substitutes,
         ),
+        outputStarted,
       });
     }
     const finishReason = json.choices?.[0]?.finish_reason;
@@ -2015,4 +2034,32 @@ interface ChatCompletionStreamEvent {
   choices?: { delta?: { content?: string }; finish_reason?: string | null }[];
   usage?: { prompt_tokens?: number; completion_tokens?: number };
   error?: unknown;
+}
+
+/**
+ * D13: true when a stream event shows the model produced output: a counted
+ * output token, or a delta field other than `role` that carries a value
+ * (content, reasoning under any name, tool calls). A role-only opening chunk
+ * or an empty content string is not output.
+ */
+function streamEventCarriesOutput(event: ChatCompletionStreamEvent): boolean {
+  const outputTokens = event.usage?.completion_tokens;
+  if (typeof outputTokens === "number" && outputTokens > 0) return true;
+  const choices: unknown = event.choices;
+  if (!Array.isArray(choices)) return false;
+  return choices.some((choice: unknown) => {
+    const delta =
+      choice && typeof choice === "object"
+        ? (choice as { delta?: unknown }).delta
+        : undefined;
+    if (!delta || typeof delta !== "object" || Array.isArray(delta)) {
+      return false;
+    }
+    return Object.entries(delta).some(([field, value]) => {
+      if (field === "role" || value === null || value === undefined) return false;
+      if (typeof value === "string") return value.length > 0;
+      if (Array.isArray(value)) return value.length > 0;
+      return true;
+    });
+  });
 }

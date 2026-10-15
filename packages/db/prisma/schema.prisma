@@ -355,6 +355,8 @@ model ToolBudgetOperation {
   expectedBlockedCode         String?                   @map("expected_blocked_code") @db.VarChar(80)
   expectedRobotsBlocked       Boolean?                  @map("expected_robots_blocked")
   status                      ToolBudgetOperationStatus @default(RESERVED)
+  /// D13: reservations of this key; a RELEASED row may be reserved again until 3 (CHECK 1..3).
+  attempt                     Int                       @default(1)
   createdAt                   DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
   settledAt                   DateTime?                 @map("settled_at") @db.Timestamptz(3)
 

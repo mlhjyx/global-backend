@@ -163,6 +163,8 @@ export const crawl4aiRenderTool: Tool<
     ttlSeconds: 86_400,
   },
   healthCheck: async () => ({ healthy: true, detail: "crawl4ai" }),
+  // robots fetch and renderer dispatch both take ctx.beforePhysicalWire (D13).
+  physicalWireObservation: "before_each_wire",
   execute: async (input, ctx) => {
     if (
       !(await isAllowedByRobots(input.url, {
@@ -276,6 +278,8 @@ export const httpGetTool: Tool<HttpGetInput, HttpGetOutput> = {
     ttlSeconds: 86_400,
   },
   healthCheck: async () => ({ healthy: true, detail: "fetch" }),
+  // One guarded request; every redirect hop calls ctx.beforePhysicalWire (D13).
+  physicalWireObservation: "before_each_wire",
   execute: async (input, ctx) => {
     try {
       const res = await requestPublicHttp(
@@ -900,6 +904,8 @@ export const tradeFairAlgoliaTool: Tool<
     schema: CATALOG_RESULT_PROJECTION_SCHEMAS["tradefair.algolia"],
   },
   healthCheck: async () => ({ healthy: true, detail: "algolia" }),
+  // Every Algolia page calls ctx.beforePhysicalWire before its POST (D13).
+  physicalWireObservation: "before_each_wire",
   execute: async (input, ctx) => ({
     data: {
       exhibitors: await queryAlgoliaExhibitors(
@@ -961,6 +967,8 @@ export const mapYourShowFetchTool: Tool<
     schema: CATALOG_RESULT_PROJECTION_SCHEMAS["mapyourshow.fetch"],
   },
   healthCheck: async () => ({ healthy: true, detail: "mapyourshow" }),
+  // One guarded request that takes ctx.beforePhysicalWire (D13).
+  physicalWireObservation: "before_each_wire",
   execute: async (input, ctx) => {
     const base = `https://${input.host}/8_0`;
     const limit = input.limit === undefined
@@ -1120,6 +1128,8 @@ export const sanctionsDownloadTool: Tool<
     ttlSeconds: 86_400,
   },
   healthCheck: async () => ({ healthy: true, detail: "sanctions" }),
+  // One guarded request; every redirect hop calls ctx.beforePhysicalWire (D13).
+  physicalWireObservation: "before_each_wire",
   execute: async (input, ctx) => {
     let res;
     try {

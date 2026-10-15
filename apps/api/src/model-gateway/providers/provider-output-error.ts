@@ -28,6 +28,12 @@ export class ProviderOutputError extends Error {
   readonly model?: string;
   readonly reportedModel?: string;
   readonly modelResolutionSource?: ModelResolutionSource;
+  /**
+   * Whether any output (a content, reasoning or tool-call delta, or a counted
+   * output token) arrived before the failure. Only a stream parser that saw
+   * the whole stream sets it; undefined means unknown and is treated as true.
+   */
+  readonly outputStarted?: boolean;
 
   constructor(
     message: string,
@@ -43,6 +49,7 @@ export class ProviderOutputError extends Error {
     this.model = opts?.model;
     this.reportedModel = opts?.reportedModel;
     this.modelResolutionSource = opts?.modelResolutionSource;
+    if (opts?.outputStarted !== undefined) this.outputStarted = opts.outputStarted;
   }
 }
 
@@ -203,6 +210,8 @@ export type ProviderOutputErrorOptions = {
   callCount?: number;
   /** Stable code for traces; defaults to the message's leading CODE token. */
   reasonCode?: string;
+  /** See ProviderOutputError.outputStarted; omit when the parser cannot tell. */
+  outputStarted?: boolean;
 } & ProviderErrorProvenance;
 
 // One unusable answer (bad JSON, schema miss, task-gate rejection) is not a

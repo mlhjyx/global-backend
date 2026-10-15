@@ -4,6 +4,7 @@ import { RouterModelGateway } from './router-model-gateway';
 import { ModelRouter } from './model-router';
 import { ModelProvider } from './model-provider';
 import {
+  ProviderHttpError,
   ProviderIdentityError,
   ProviderOutputError,
   ProviderOutputUnresolvedError,
@@ -1754,5 +1755,265 @@ describe('RouterModelGateway budget operation identity', () => {
     expect(keys[2]).toBe(keys[0]);
     expect(keys[3]).not.toBe(keys[0]);
     expect(keys[4]).toBe(keys[3]);
+  });
+});
+
+/**
+ * D13: a provider error that proves the gateway billed nothing (an HTTP 429 or
+ * 5xx status other than the 504/524 timeouts, or a connection that never
+ * opened) is a definite failure. The reservation is released and a retry of
+ * the same operation key may reserve it again. Everything that may have been
+ * billed keeps the old rule: one settlement with no result, never a second
+ * physical request. That includes a stream that failed before its first
+ * output, which the live new-api fork still bills by estimated prompt tokens.
+ */
+describe('RouterModelGateway — definite failures before any output release the reservation (D13)', () => {
+  const OPERATION_ID = '7d5e8f1a-2b3c-4d5e-8f90-a1b2c3d4e5f6';
+  const RESERVED = 400_000n; // discovery.qualify_fit: 2 × 20¢ for a structured call
+
+  function harness(error: unknown, extra: { ctx?: Record<string, unknown>; repair?: boolean } = {}) {
+    const provider = fakeProvider();
+    if (extra.repair) {
+      vi.mocked(provider.generateStructured)
+        .mockResolvedValueOnce({
+          data: { y: 1 } as never,
+          provider: 'fake',
+          model: 'm',
+          usage: { inputTokens: 7, outputTokens: 3 },
+        })
+        .mockRejectedValueOnce(error);
+    } else {
+      vi.mocked(provider.generateStructured).mockRejectedValueOnce(error);
+    }
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: 'ws-1',
+        accountKey: 'run-1',
+        operationId: OPERATION_ID,
+        estimatedMicrousd: RESERVED,
+        replay: false,
+      })),
+      settle: vi.fn(async () => ({
+        chargedMicrousd: RESERVED,
+        observedMicrousd: RESERVED,
+        capVariance: false,
+        replay: false,
+      })),
+      release: vi.fn(async () => ({
+        chargedMicrousd: 0n,
+        observedMicrousd: 0n,
+        capVariance: false,
+        replay: false,
+      })),
+    };
+    const trace = { record: vi.fn() } as unknown as AiTraceSink;
+    const gateway = new RouterModelGateway(
+      { route: () => [provider] } as unknown as ModelRouter,
+      trace,
+      budgetStore as unknown as BudgetStore,
+    );
+    const call = () =>
+      gateway
+        .generateStructured(
+          { task: QUALIFY_TASK, prompt: 'p', schema: { required: ['x'] } },
+          { workspaceId: 'ws-1', runId: 'run-1', ...extra.ctx } as never,
+        )
+        .catch((err: unknown) => err);
+    return { budgetStore, trace, call };
+  }
+
+  function connectError(code: string): TypeError {
+    return new TypeError('fetch failed', {
+      cause: Object.assign(new Error(`connect ${code}`), { code }),
+    });
+  }
+
+  it.each([
+    ['HTTP 503 from the gateway', new ProviderHttpError({ status: 503, provider: 'gateway', model: 'm' })],
+    ['HTTP 502 from the gateway', new ProviderHttpError({ status: 502, provider: 'gateway', model: 'm' })],
+    ['HTTP 429 from the gateway', new ProviderHttpError({ status: 429, provider: 'gateway', model: 'm' })],
+    ['a refused connection', connectError('ECONNREFUSED')],
+    ['an unresolvable gateway host', connectError('ENOTFOUND')],
+    ['a connect timeout', connectError('UND_ERR_CONNECT_TIMEOUT')],
+    [
+      'every address of a dual-stack connect refused',
+      new TypeError('fetch failed', {
+        cause: new AggregateError([
+          Object.assign(new Error('connect ECONNREFUSED ::1'), { code: 'ECONNREFUSED' }),
+          Object.assign(new Error('connect ECONNREFUSED 127.0.0.1'), { code: 'ECONNREFUSED' }),
+        ]),
+      }),
+    ],
+  ])('releases on %s and rethrows the provider error unchanged', async (_name, error) => {
+    const { budgetStore, call, trace } = harness(error);
+
+    await expect(call()).resolves.toBe(error);
+
+    expect(budgetStore.release).toHaveBeenCalledTimes(1);
+    expect(budgetStore.release).toHaveBeenCalledWith(
+      expect.objectContaining({ operationId: OPERATION_ID }),
+    );
+    expect(budgetStore.settle).not.toHaveBeenCalled();
+    // The release leaves a durable mark: the trace names the ledger operation it freed.
+    expect(trace.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ERROR',
+        budgetDisposition: 'RELEASED_DEFINITE_FAILURE',
+        budgetOperationId: OPERATION_ID,
+      }),
+    );
+  });
+
+  it.each([
+    [
+      'HTTP 400 (a request the gateway rejects every time)',
+      new ProviderHttpError({ status: 400, provider: 'gateway', model: 'm' }),
+    ],
+    // A gateway or origin timeout means the request reached the upstream, which
+    // may already have generated and billed the answer. new-api excludes both
+    // from its own retry statuses for the same reason.
+    ['HTTP 504 (a gateway timeout)', new ProviderHttpError({ status: 504, provider: 'gateway', model: 'm' })],
+    ['HTTP 524 (an origin timeout)', new ProviderHttpError({ status: 524, provider: 'gateway', model: 'm' })],
+    // The live new-api fork answers a stream that fails before its first output
+    // with HTTP 200 and bills the locally estimated prompt tokens (xin new-api
+    // logs 5734-5738, 2026-10-13 12:27: completion 0, about 23k quota each), so
+    // releasing these would under-record spend. They become releasable once the
+    // first-byte fix (mlhjyx/new-api#3) turns them into HTTP errors.
+    [
+      'an upstream error event before any output (xin 2026-10-13 12:27, five extractions)',
+      new ProviderTransportError('gateway m: stream carried an upstream error', undefined, {
+        reasonCode: 'CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR',
+        outputStarted: false,
+      }),
+    ],
+    [
+      'a stream cut before its first token with zero output tokens',
+      new ProviderTransportError(
+        'CHAT_COMPLETIONS_STREAM_TRUNCATED',
+        { inputTokens: 600, outputTokens: 0 },
+        { outputStarted: false },
+      ),
+    ],
+    [
+      'a stream that carried no completion chunk',
+      new ProviderTransportError('gateway m: stream carried no completion chunk', undefined, {
+        reasonCode: 'CHAT_COMPLETIONS_STREAM_EMPTY',
+        outputStarted: false,
+      }),
+    ],
+    ['a reset connection (the request may have been sent)', connectError('ECONNRESET')],
+    [
+      'a dual-stack connect where one address reset',
+      new TypeError('fetch failed', {
+        cause: new AggregateError([
+          Object.assign(new Error('connect ECONNREFUSED ::1'), { code: 'ECONNREFUSED' }),
+          Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }),
+        ]),
+      }),
+    ],
+    ['a request timeout', new DOMException('The operation was aborted due to timeout', 'TimeoutError')],
+    ['an abort', new DOMException('This operation was aborted', 'AbortError')],
+    [
+      'an upstream error event after output had started',
+      new ProviderTransportError('gateway m: stream carried an upstream error', undefined, {
+        reasonCode: 'CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR',
+        outputStarted: true,
+      }),
+    ],
+    [
+      'a cut stream that had produced output tokens (xin 2026-10-13 00:52, 8 tokens)',
+      new ProviderTransportError(
+        'CHAT_COMPLETIONS_STREAM_TRUNCATED',
+        { inputTokens: 1627, outputTokens: 8 },
+        { outputStarted: false },
+      ),
+    ],
+    [
+      'a cut stream whose output state is unknown',
+      new ProviderTransportError('CHAT_COMPLETIONS_STREAM_TRUNCATED', {
+        inputTokens: 600,
+        outputTokens: 0,
+      }),
+    ],
+    [
+      'an unreadable stream body',
+      new ProviderTransportError('gateway m: stream body unavailable', undefined, {
+        reasonCode: 'CHAT_COMPLETIONS_STREAM_UNREADABLE',
+        outputStarted: false,
+      }),
+    ],
+    [
+      'a content-filtered answer (xin 2026-10-13 08:02)',
+      new ProviderOutputError(
+        'CHAT_COMPLETIONS_FINISH_REASON_INVALID',
+        { inputTokens: 4324, outputTokens: 10061 },
+        { reasonCode: 'CHAT_COMPLETIONS_CONTENT_FILTERED' },
+      ),
+    ],
+    ['an unclassified error', new Error('model down')],
+  ])('keeps the settle-with-no-result rule on %s', async (_name, error) => {
+    const { budgetStore, call, trace } = harness(error);
+
+    await expect(call()).resolves.toBe(error);
+
+    expect(budgetStore.release).not.toHaveBeenCalled();
+    expect(budgetStore.settle).toHaveBeenCalledTimes(1);
+    expect(budgetStore.settle.mock.calls[0]).toHaveLength(2);
+    expect(trace.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ERROR',
+        budgetDisposition: 'SETTLED_NO_RESULT',
+        budgetOperationId: OPERATION_ID,
+      }),
+    );
+  });
+
+  it('settles a repair that hit HTTP 503: the first call already produced output', async () => {
+    const { budgetStore, call } = harness(
+      new ProviderHttpError({ status: 503, provider: 'gateway', model: 'm' }),
+      { repair: true },
+    );
+
+    const error = await call();
+
+    expect(error).toBeInstanceOf(ProviderOutputUnresolvedError);
+    expect(budgetStore.release).not.toHaveBeenCalled();
+    expect(budgetStore.settle).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves a platform-egress call to its fence: a 503 there is settled, never released', async () => {
+    const { budgetStore, call } = harness(
+      new ProviderHttpError({ status: 503, provider: 'gateway', model: 'm' }),
+      {
+        ctx: {
+          platformEgress: {
+            authorizeAndDispatch: async (_operation: unknown, send: () => Promise<unknown>) => send(),
+          },
+        },
+      },
+    );
+
+    await expect(call()).resolves.toBeInstanceOf(ProviderHttpError);
+
+    expect(budgetStore.release).not.toHaveBeenCalled();
+    expect(budgetStore.settle).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns the whole reservation to the account on a definite failure', async () => {
+    const budget = new BudgetLedger();
+    budget.open('run-1', 100);
+    const provider = fakeProvider();
+    vi.mocked(provider.generateStructured).mockRejectedValueOnce(
+      new ProviderHttpError({ status: 503, provider: 'gateway', model: 'm' }),
+    );
+    const gw = gatewayWith(provider, budget);
+
+    await expect(
+      gw.generateStructured(
+        { task: QUALIFY_TASK, prompt: 'p', schema: {} },
+        { workspaceId: 'ws-1', runId: 'run-1' },
+      ),
+    ).rejects.toBeInstanceOf(ProviderHttpError);
+    expect(budget.remainingCents('run-1')).toBe(100);
   });
 });
