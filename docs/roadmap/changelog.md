@@ -211,7 +211,7 @@
   - 与并发 run 交错时，一家公司可能在 run 中途进入补读列表（例如另一个 run 把它当作自己的公司重新画像、记下尝试），让后面的下标错一位；后果只是本轮漏掉一家，或重读后跳过，不会重复抓取。彻底固定列表需要把每个 run 的补读名单落库，没有做。
   - 存量 lead：#649 之前计分的 lead 没有 `ruleVersion`，快照会如实标 `additive-6dim-v2`。要按 v3 交付，先对每个 ACTIVE ICP 调一次 `POST /icps/:icpId/qualify`。
 
-## 2026-10-14 · Erase every stored version of a personal-data object, not only the versions the ledger recorded (W11-f) (#TBD)
+## 2026-10-14 · Erase every stored version of a personal-data object, not only the versions the ledger recorded (W11-f) (#659)
 
 - 起因：#647 复审的 MEDIUM。复用刷新在数据库结算**之前**就把对象复制到自身、生成新的当前版本；结算没落库时（进程在两步之间死掉、擦除围栏以 `SUBJECT_TOMBSTONED` 回滚、复制 ACK 丢失被 fail-open 当作失败、复制后 HEAD 报错或漂移），这个版本不进版本账本。擦除只删「账本 ∪ 钉子」里的版本，删不到它，被擦除主体的 PERSONAL_DATA 最长约 2 天仍可读（直到生命周期按年龄清掉）。#647 之前复用分支从不写对象，没有这个缺口。
 - 改动（详见 [docs/backend/generic-operation-artifact-storage.md](../backend/generic-operation-artifact-storage.md) 3.1 节）：
