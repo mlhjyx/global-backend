@@ -602,10 +602,26 @@ model GenericOperationArtifactObject {
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   artifacts GenericOperationArtifact[]
+  versions  GenericOperationArtifactObjectVersion[]
 
   @@id([sha256, privacyClass], map: "generic_operation_artifact_object_pkey")
   @@unique([sha256, objectKey, sizeBytes, mediaType, privacyClass], map: "generic_operation_artifact_object_metadata_key")
   @@map("generic_operation_artifact_object")
+}
+
+/// Every immutable S3 version a settlement recorded for one content object:
+/// the first write, each retention refresh, each re-write after a lifecycle
+/// deletion. Append-only; personal-data erasure addresses each one exactly.
+model GenericOperationArtifactObjectVersion {
+  sha256          String   @db.Char(64)
+  privacyClass    String   @map("privacy_class") @db.VarChar(40)
+  objectVersionId String   @map("object_version_id") @db.VarChar(1024)
+  firstSettledAt  DateTime @default(now()) @map("first_settled_at") @db.Timestamptz(3)
+
+  object GenericOperationArtifactObject @relation(fields: [sha256, privacyClass], references: [sha256, privacyClass], onDelete: Restrict, onUpdate: Restrict, map: "generic_operation_artifact_object_version_object_fkey")
+
+  @@id([sha256, privacyClass, objectVersionId], map: "generic_operation_artifact_object_version_pkey")
+  @@map("generic_operation_artifact_object_version")
 }
 
 model PersonalArtifactCleanupCommand {
@@ -2141,6 +2157,9 @@ model Lead {
   scores             Json?
   /// 评分依据：规则逐条评估结果 + 各维输入（审计/申诉用）
   scoreDetail        Json?      @map("score_detail")
+  /// 评分阶段最近一次写分的时刻（scoreCandidates 的 upsert 盖）。null = 评分从未跑过（queue 仍是 fit 门
+  /// 预置）或在本列加入前评的分。API 的 scored/queueBasis 与 LeadQualified 快照的 scored_at 读它。
+  scoredAt           DateTime?  @map("scored_at")
   version            Int        @default(1)
   createdAt          DateTime   @default(now()) @map("created_at")
   updatedAt          DateTime   @updatedAt @map("updated_at")
