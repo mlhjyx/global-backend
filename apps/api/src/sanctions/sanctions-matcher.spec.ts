@@ -156,9 +156,12 @@ describe('实体名开头的俄式法律形式：唯一重合是法律形式时�
     expect(m).toMatchObject({ externalId: 'fse-4' });
   });
 
-  it('名字只由法律形式组成时核心至少留一个 token（不制造空核心）', () => {
-    expect(prepareName('OOO AO').coreTokens).toEqual(new Set(['ao']));
+  it('名字全部由法律形式组成时核心用完整词集（没有可剥的名字，不改变 main 的命中）', () => {
+    expect(prepareName('OOO AO').coreTokens).toEqual(new Set(['ooo', 'ao']));
     expect(prepareName('AO').coreTokens).toEqual(new Set(['ao']));
+    // #660 第二轮复审：只留最后一个词会让公司「FSE」漏掉实体「FSE AO」（main 下 0.80 命中）。
+    const [m] = screenName('FSE', null, [idx('all-forms', 'FSE AO')]);
+    expect(m).toMatchObject({ externalId: 'all-forms', nameScore: 0.8 });
   });
 
   it('查询侧与分数用 token 都不剥：同名「OOO Romashka」仍是精确满分', () => {

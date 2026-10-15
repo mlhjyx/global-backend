@@ -79,15 +79,19 @@ const ENTITY_LEADING_LEGAL_FORMS: ReadonlySet<string> = new Set([
 
 /**
  * 实体侧预归一：(normalized, tokens) 与查询侧同法（normForMatch），分数按它们算；另给出 coreTokens——
- * 剥掉**开头**法律形式后的词（至少留 1 个）。只用于门槛：查询与 coreTokens 没有交集时这个名字不算命中，
+ * 剥掉**开头**法律形式后的词（名字全由法律形式组成时取完整词集）。只用于门槛：查询与 coreTokens 没有交集时这个名字不算命中，
  * 于是「唯一重合是法律形式」的误报（公司「FSE」↔「FSE Kamensky Zavod」）消失；分数、其余命中都不变。
  * 不直接剥 tokens：那会让「Kalashnikov JSC」↔「JSC KALASHNIKOV CONCERN」这类两侧都带法律形式的真命中漏掉（#660 复审）。
  */
 export function prepareName(name: string): { normalized: string; tokens: Set<string>; coreTokens: Set<string> } {
   const normalized = normForMatch(name);
   const parts = normalized.split(' ').filter(Boolean);
+  // 名字全部由法律形式组成时没有可剥的名字：核心用完整词集，命中与 main 相同。
+  if (parts.every((t) => ENTITY_LEADING_LEGAL_FORMS.has(t))) {
+    return { normalized, tokens: new Set(parts), coreTokens: new Set(parts) };
+  }
   let start = 0;
-  while (start < parts.length - 1 && ENTITY_LEADING_LEGAL_FORMS.has(parts[start])) start += 1;
+  while (ENTITY_LEADING_LEGAL_FORMS.has(parts[start])) start += 1;
   return { normalized, tokens: new Set(parts), coreTokens: new Set(parts.slice(start)) };
 }
 
