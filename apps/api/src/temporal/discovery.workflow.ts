@@ -87,12 +87,15 @@ interface FitTotals {
 }
 
 interface WebsiteProfileTotals {
+  /** The run's own companies profiled (W5-f: backfill companies are counted in `backfilled`). */
   profiled: number;
   matched: number;
   skippedSubjects?: number;
   budgetTruncated?: boolean;
   unclassified?: number;
   unreplayable?: number;
+  /** Workspace companies outside the run whose contact paths were read with the leftover quota; absent in older results. */
+  backfilled?: number;
 }
 
 interface EnrichTotals {
@@ -124,6 +127,7 @@ function addWebsiteProfilePass(total: WebsiteProfileTotals, pass: WebsiteProfile
     budgetTruncated: (total.budgetTruncated ?? false) || (pass.budgetTruncated ?? false),
     unclassified: (total.unclassified ?? 0) + (pass.unclassified ?? 0),
     unreplayable: (total.unreplayable ?? 0) + (pass.unreplayable ?? 0),
+    backfilled: (total.backfilled ?? 0) + (pass.backfilled ?? 0),
   };
 }
 
@@ -584,6 +588,8 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
           profiled: websiteProfile.profiled,
           matched: websiteProfile.matched,
           unclassified: websiteProfile.unclassified ?? 0,
+          // Stats only (no command, replay-safe); results recorded before the counter existed report 0.
+          backfilled: websiteProfile.backfilled ?? 0,
         },
         enrich: { matched: enrich.matched, of: enrich.enriched, provider: enrich.provider },
         signals: { matched: signals.matched, of: signals.enriched, provider: signals.provider },

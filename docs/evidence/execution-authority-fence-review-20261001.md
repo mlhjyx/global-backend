@@ -187,3 +187,38 @@
 - **测试**：新 `router-model-identity-substitution.spec.ts`（真实 provider + 模拟上游）、`model-identity-substitutes.spec.ts`，以及身份别名、trace 落库、注册表标记的用例。覆盖：替代被接受且处处记 Flash；线上仍请求 pro；文本、非流式、Responses 传输；混合署名与未署名内容；首调与修复分属不同模型；截断与流解析失败；定价与 pro 相同、持久回执扣费不超过预留、持久重放记 Flash；启动失败。以下情形仍为 `MODEL_IDENTITY_MISMATCH`：默认关闭、空设置、任务未标记（含建站）、其他模型族、未审查的 Flash 名、反方向、付费上下文、未审查组合。调用方自带替代字段（含继承）在预留前被拒；无署名答案带 `modelIdentityUnproven`。API 全量单测 9,398 项通过，唯一失败为已知负载假红 `browser-readiness-probe`（单独重跑 24/24 通过）。
 - **未覆盖**：没有用真实 PostgreSQL 往返，也没有在 xin 上开启开关跑测；账本的 `LEAST`、`cap_variance` 与账户耗尽是既有 SQL 行为，只做了静态核对。
 - **结论**：更新 `router-model-gateway.ts` 指纹为 `d3194efcca04fefa9cce175a2e9b11772613aa9c9c4b813d2109c539435ec964`。
+
+## 2026-10-14 Router 与 ToolBroker 改动复核（D13：确定失败释放预留）
+
+起因：非付费路径把「在任何输出之前就确定失败」与「结果未知」一样结算为「已结算、无结果」或保留 RESERVED，账本又对已存在的 key 一律 `REPLAY`，于是 HTTP 503、首个输出之前的上游错误事件这类免费的失败成了 run 的终点（10 月 SETTLED 无结果 31 行、RESERVED 19 行）。改动涉及 `router-model-gateway.ts` 与 `tool-broker.ts`，并修订治理声明里 `automaticPhysicalRetryAllowed: false` 的口径，所以先复核、再更新指纹。设计须由运行时会话确认后才能合并（PR 为 draft）。
+
+- **改动（Router）**：
+  - catch 中新增一个释放条件：非平台出网调用的错误经 `definiteModelFailureCode` 判为确定失败（HTTP 429/5xx；`fetch failed` 的 cause 为连接阶段错误码，双栈时每个地址都是；`CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR`/`_TRUNCATED`/`_EMPTY` 且解析器标记 `outputStarted === false`、`callCount === 1`、无 cause、输出 token 与上报费用为 0）时，与零调用的禁联拒绝一样调用 `release`。其余错误一律照旧 `settle`，观测额计算一字未改。
+  - 判定在 `definite-model-failure.ts`（围栏外），Router 只调用它；修复调用的失败被包装成 `ProviderOutputError`/`ProviderOutputUnresolvedError`（`callCount` 2），不可能被判为确定失败。平台出网调用（`ctx.platformEgress`）不走这条释放，结果由出网围栏负责。付费路径（`runPersistent`）未改。
+  - trace：失败行增加 `budgetOperationId` 与 `budgetDisposition`（`RELEASED_CONTROL_DENIAL` / `RELEASED_DEFINITE_FAILURE` / `SETTLED_NO_RESULT`）；`ProviderHttpError` 的 `errorMessage` 带状态码。只是记录，不影响控制流。
+- **改动（ToolBroker）**：
+  - 工作区路径上，只有声明了 `physicalWireObservation: "before_each_wire"` 的工具，执行上下文才换成 `{ ...ctx, beforePhysicalWire }`：观察钩子先记下「请求了物理请求」，再调用调用方原有的钩子（产品代码里没有调用方设置它）。观察钩子自身从不抛错，所以 guarded-http 的 `ExternalHttpPhysicalWireDeniedError` 语义不变。未声明的工具拿到的仍是调用方原对象（`platform-egress-fence.composition.spec.ts` 的同一性用例照旧通过）。
+  - `execute()` 失败、不是禁联拒绝、非付费、预留不是重放，且 broker 能证明一个物理请求都没发出（平台路径：`!platformWireStarted && !platformWireFailed`；工作区路径：已声明且观察钩子未被调用）时 `release` 后原样抛出。调度器失败、已发出过请求、未声明的工具与付费路径都照旧。
+  - 声明的工具（`source-tools.ts`，围栏外）：`http.get`、`crawl4ai.render`、`tradefair.algolia`、`mapyourshow.fetch`、`sanctions.download`。`source-tools-wire-observation.spec.ts` 锁住声明清单，并证明它们把 broker 的钩子原样交给每个适配器；适配器各自的用例（guarded-http 每一跳、web-crawler 在 fetch 之前、Algolia 每一页）证明钩子在每个物理请求之前被调用。
+- **账本**：迁移 `20261015045032` 只替换 `reserve_tool_budget_microusd_v1`（签名、返回形状、属主、授权、`search_path` 含 `pg_temp`、两层包装都不变），新增 `attempt` 列（CHECK 1..3）。只有 RELEASED 且 `attempt < 3` 的行会被重开为 RESERVED（同一 id、`attempt + 1`、与新插入相同的额度检查与 DENIED/exhausted 处理）；RESERVED、RESULT_UNKNOWN、SETTLED（有无结果）照旧 `REPLAY`，所以「结果未知不付两次」的保证不变。
+- **放宽了什么**：这是一次有意的放宽，治理声明同步改口径：`automaticPhysicalRetryAllowed` 由 `false` 改为 `"DEFINITE_FAILURE_BEFORE_OUTPUT_ONLY"`，`maxReservationAttempts: 3`，`execution-authority-policy.mjs` 逐值校验并要求迁移与分类器里的关键条件存在。放宽只覆盖「已证明没有输出」的失败；授权检查、预算预留与结算的金额、持久回执与重放投影、出网围栏、物理调用分配都没有改，也没有新增物理调用路径——再次物理请求只来自调用方（Temporal 重试、下一条查询）用同一 key 重新走完整的预留与授权。
+- **已知残余风险**：
+  - 重开沿用同一 operation id。若某次执行在释放之后又对同一预留发出迟到的 `release`/`settle`，会作用在下一次尝试上。当前没有这样的路径（每条释放路径都是该次执行对账本的最后一次写入，且没有对 `release` 的重试）；可在 PR-2 把 `release`/`settle` 绑定到 `attempt` 加固。
+  - new-api 对流式请求在没有上游 usage 时可能按本地估算的输入 token 计费。若如此，释放流式确定失败会少记这部分（每个 key 至多 3 次输入 token 的费用）。需要运行时会话用 new-api 日志核对 10-13 12:27 那几次 `reason=eof` 是否计费，再确认流式三类是否保留。
+  - 平台路径的证明依赖平台合同工具的每个物理请求都经 broker 调度器发出；这与出网围栏本身依赖的前提相同（10-06 复审后续事项 2）。
+- **独立复审**：首版所在的工作流里没有可用的子代理，只做了作者逐行自审与先红后绿的测试。运行时会话的设计确认见下方「收窄」一条；收窄后 head 的独立复审另行贴到 PR。
+- **测试**：见 PR 与 changelog（2026-10-14 小节）。网关、流解析器、broker、处置合同、治理脚本、工具声明清单的新用例先红后绿；账本 6 项在一次性 PostgreSQL 上以 app_user 先红后绿，其中一项用真实 `PostgresBudgetStore` + 网关证明 503 之后的重试真正跑完。
+- **结论**：更新指纹 `router-model-gateway.ts` → `fd3e6091271280c547aa84b2bb89fbf1cea067572824987911bcba356e0e935c`，`tool-broker.ts` → `659bb26d8bd6a2c9c6b2b3e47ce3ca5b585208fd581ec23ba0c9d7e0c2aec685`。`tool-broker.factory.ts` 与 `model-gateway.module.ts` 未改。
+- **运行时会话核对后的收窄（2026-10-14，同一 PR 追加提交）**：
+  - 运行时会话在 PR 评论（issuecomment-6182377079）里贴了 new-api 计费日志的只读核对结果：宿主侧以 `mode=ro&immutable=1` 打开 SQLite，只读计费列。上面「已知残余风险」第二条得到证实：10-13 12:27 那批 `reason=eof`（log 5734–5738）各有一行 consume，completion 为 0，按本地估算的输入 token 计费。HTTP 429/5xx 在 new-api 侧没有计费行。
+  - 处置如下：
+    - 分类器去掉三种流式失败。`definite-model-failure.ts` 不再引用 `ProviderTransportError`。
+    - `isUnavailableStatus` 排除 504、524（超时：请求已到达上游，可能已经计费），与 new-api 的重试状态码对齐。
+    - 处置合同的 `DEFINITE_FAILURE_CODES` 去掉 `MODEL_PROVIDER_STREAM_FAILED_BEFORE_OUTPUT`。
+    - `execution-authority-policy.mjs` 的分类器检查改为：要求有 `new Set([504, 524])` 和 `!UPSTREAM_TIMEOUT_STATUSES.has(status)`，并反向检查分类器不得引用 `ProviderTransportError`/`ProviderOutputError`。这样，在 mlhjyx/new-api#3 上线前，任何人加回流式释放都会被治理门拦下。
+  - Router 本身只改了一段注释，控制流与上一版逐字相同，释放的范围只会因分类器收窄而变小。这次收窄没有放宽任何东西。
+  - 测试先红后绿：三种流式用例移到「照旧结算」，另加 HTTP 504、524 两项，处置合同把流式码加进拒收列表，收窄前共 6 项红，收窄后网关与处置合同 103 项全绿。
+  - 「每个 key 最多 3 次」是账本层的预留次数。new-api `RetryTimes=1`，最多对应 6 次物理请求，已写入 AGENTS 与执行预算设计文档。
+  - 运行时会话的结论：按这两处修改后同意合并。独立复审由续跑工作流的复审 agent 对收窄后的 head 进行，结论贴在 PR 上。
+  - 更新指纹 `router-model-gateway.ts` → `3887cf6307cd829c8a529fab092e52644c6eab0c53eae5455ca26fa9c0ad36a1`；`tool-broker.ts` 未改，仍为 `659bb26d…`。
+- **迁移改名（2026-10-15）**：#654 已把 `20261014120000_company_profile_understanding_failure` 带进 main。本 PR 的迁移原名 `20261014095011`，按名字排在它之前：落到不同班车时，`finished_at` 最新的会是本迁移，而镜像的 `migration_revision` 按名字取的是 120000，会报 `MIGRATION_REVISION_MISMATCH`。因此改名为 `20261015045032_tool_budget_released_rereserve`，SQL 内容逐字不变，排在 main 上所有迁移之后。

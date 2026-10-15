@@ -4,6 +4,57 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-15 · Repair the stale artifact-subject RLS spec and run it in CI
+
+- 起因：`packages/db/test/generic-operation-artifact-subject.rls.spec.mjs`（PERSONAL_DATA 产物按主体建索引、DSR tombstone 阻止再物化、app_user 不能直读或改写索引，共 10 项）不在任何 CI 步骤里，没人发现它早已跑不起来：在只含 main 迁移的库上，before 钩子以 `GENERIC_OPERATION_ARTIFACT_INVALID` 失败，10 项全部取消（#654 的实施工作流在一次性库上发现）。
+- 根因是夹具落后于两次迁移，不是被测的 SQL 有缺陷：
+  - `20260901060000_generic_operation_artifact_privacy_prefix` 起，最终对象键带隐私类前缀（`…/v1/final/<privacy>/sha256/…`），`assert_generic_operation_artifact_manifest_v2` 拒绝其他形式；夹具还在拼旧键。
+  - `generic_operation_artifact_personal_version_guard`（延迟约束触发器）要求 PERSONAL_DATA 对象在事务提交前钉上对象版本；夹具用不带版本的 `settle_…_v2`，并直接 `append_…_v3` 写个人数据，提交时报 `GENERIC_OPERATION_ARTIFACT_OBJECT_VERSION_REQUIRED`。
+- 改动（只动测试与 CI）：
+  - 对象键按 `contentAddressedObjectKey` 的规则带隐私类前缀；
+  - 个人数据一律走运行时实际使用的 `settle_tool_budget_artifact_manifest_with_receipt_v4`，带对象版本；非个人数据仍用 `append_…_v3`。专门验证「旧函数被拒」的用例保持原样。
+  - CI 新增步骤「Generic operation artifact subject RLS on PostgreSQL」：在同一个 Postgres 服务里另建 `global_artifact_subject_test` 库（用例写固定 id、保留数据行，不能与其他步骤共库），用例自己部署全部迁移后运行。
+- 测试：
+  - 修复前 0/10（before 钩子失败、10 项取消），修复后 10/10。
+  - 所有拒绝断言都钉具体错误标记（`permission denied`、`…_SUBJECT_TOMBSTONED`、`…_SUBJECT_INVALID`），新的版本守卫不会让它们误过。
+  - 变异检验：禁用 `generic_operation_artifact_personal_subject_guard` 后，「v2 append 绕过」与「ACK_UNKNOWN 恢复冻结主体」两项变红，失败原因是「没有被拒」（日志里 0 次 `OBJECT_VERSION_REQUIRED`）。
+  - 独立复审 LOW：这两项的裸 append 原本会被两个延迟触发器（主体守卫、版本守卫）同时拒绝，命中 `SUBJECT_INVALID` 只是因为 PostgreSQL 按触发器名字顺序执行。现在先经运行时结算写入同字节的承载产物、钉住对象版本，再做裸 append，只剩主体守卫能拒绝，不再依赖触发器命名。
+  - 按 CI 步骤的命令在一次性 pgvector/pg16 上模拟：主库已迁移、另建库、运行用例，退出码 0。
+- 未做：`packages/db/test` 里其余不在 CI 的用例没有逐个核查；#654 合入后可在本用例补 `company_profile` 主体的 tombstone 覆盖。
+
+## 2026-10-14 · Release the reservation of a definite failure before any output, and let the same key reserve again (D13, operational fix) (#652)
+
+- 起因：非付费路径（获客全部走这里）把「确定的失败」和「结果未知」一样当作不可重放，每一次都是 run 的终点。
+  - 网关 `router-model-gateway.ts` 的 catch 只在 `ExternalActionDeniedError`、`callCount === 0` 且没有 usage 时释放预留，其余一律「已结算、无结果」：HTTP 503（卖方 #26 的词表归一，10-13 11:36，`ProviderHttpError`）、首个输出之前的上游错误事件（卖方 #25、#27，10-13 08:36 与 12:27 的 6 次 `CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR`，ai_trace 里输入、输出 token 都为空，new-api 记 `reason=eof`、0 个输出 token）。
+  - 账本 `reserve_tool_budget_microusd_v1` 对已存在的 key 一律 `REPLAY`，`release` 只允许 RESERVED → RELEASED：释放过的操作也永远不能再跑，重试都撞上 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`。共用操作键时还跨查询传染（卖方 #26）：#645 已按查询分键并在丢失时回退内置词表，但失败的归一调用仍按预留上界结算（#645「未做」第 1 条），本 PR 让 503 这类确定失败释放、同一查询的重试可以重新预留。
+  - broker 在 `execute()` 开始后的任何失败都保留 RESERVED，连请求根本没发出（DNS 失败、SSRF 拦截、平台出网合同不可用）也一样。
+  - xin 只读核对（`global_dev`）：10 月「SETTLED、无结果」31 行、RESERVED 19 行（10-09 至 10-13，全部是 1¢/0¢ 的工具预留）、RELEASED 28 行。
+- 改动：
+  - **网关**：新模块 `model-gateway/definite-model-failure.ts` 判定「确定失败、网关没有计费」，两类：HTTP 429 与除 504/524 外的 5xx（`MODEL_PROVIDER_HTTP_UNAVAILABLE`，与 new-api 自身的重试状态码 429,500-503,520-523,525-599 对齐）、连接从未建立（`fetch failed` 的 cause 为 ECONNREFUSED/ENOTFOUND/EAI_AGAIN/EHOSTUNREACH/ENETUNREACH/UND_ERR_CONNECT_TIMEOUT，双栈时每个地址都是，`MODEL_PROVIDER_CONNECTION_NOT_ESTABLISHED`）。非付费、非平台出网路径上这两类释放预留；超时、中止、HTTP 504/524、任何流式失败（含首个输出之前的）、内容过滤、不可读的流、HTTP 4xx、修复调用（首调已出输出）和其他错误照旧结算、无结果。
+  - **运行时会话核对后的收窄**（PR 评论 issuecomment-6182377079）：初版还释放「流在第一个输出之前结束」（`CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR`/`_TRUNCATED`/`_EMPTY`，`MODEL_PROVIDER_STREAM_FAILED_BEFORE_OUTPUT`）。运行时会话只读查了 new-api 的计费日志：10-13 12:27 那批 `reason=eof`（log 5734–5738）各有一行 consume，completion 为 0，按本地估算的输入 token 计费，每次约 2.3 万 quota；10 月全月有 6 行 0 输出计费，约 0.28 美元。现役 fork 对这种流回 HTTP 200 并扣费，释放会少记，所以拿掉这一类，等 mlhjyx/new-api#3（首字节之前的失败改为回错误、不计费）随 W12 上线后再单独加回。HTTP 504/524 是超时，请求已到达上游、可能已生成并计费，也排除。HTTP 429/5xx 在 new-api 侧没有任何计费行，可以释放。每个 key 最多 3 次是账本层的计数：new-api `RetryTimes=1`，最多对应 6 次物理请求。
+  - **流解析器**（`openai-compatible.provider.ts`，判定暂不使用，留给 new-api#3 上线后的那次改动）：记录是否收到过输出——content、任何名字的 reasoning、tool_calls 增量，或 usage 里的输出 token；只有 role 的开头块和空字符串不算。三种流失败带上 `outputStarted`；其余失败不带（视为未知）。
+  - **ai_trace**：失败的非付费调用在 `meta` 里写 `budgetOperationId` 与 `budgetDisposition`（`RELEASED_CONTROL_DENIAL` / `RELEASED_DEFINITE_FAILURE` / `SETTLED_NO_RESULT`），每次失败都能追到账本行；`ProviderHttpError` 的 `errorMessage` 带上状态码（`ProviderHttpError:HTTP_503`）。
+  - **broker**：能证明一个物理请求都没发出时释放预留——平台工具的调度器从未进入；或工作区工具声明了 `physicalWireObservation: "before_each_wire"`（每个物理请求前都调用 `ctx.beforePhysicalWire`）而 broker 注入的观察钩子从未被调用。声明的工具：`http.get`、`crawl4ai.render`、`tradefair.algolia`、`mapyourshow.fetch`、`sanctions.download`。没有声明的工具与付费路径不变。
+  - **账本**：迁移 `20261015045032_tool_budget_released_rereserve` 给 `tool_budget_operation` 加 `attempt`（1..3）；`reserve` 遇到同 key 的 RELEASED 行且 `attempt < 3` 时重新打开同一行（`attempt + 1`、回到 RESERVED、按新额度做与新插入相同的额度检查与 DENIED/exhausted 处理），id 不变，`(account_id, generation, operation_key)` 仍唯一；RESERVED、RESULT_UNKNOWN、SETTLED（有无结果都一样）以及第 3 次的 RELEASED 照旧 `REPLAY`。
+  - **治理声明**：`durable-result-strategies.json` 的 `resultDisposition` 升到 `execution-result-disposition/v2`，新增 `definite_failure`，`automaticPhysicalRetryAllowed` 从 `false` 改为 `"DEFINITE_FAILURE_BEFORE_OUTPUT_ONLY"`，并声明 `definiteFailureStatus: RELEASED`、`maxReservationAttempts: 3`；`execution-authority-policy.mjs` 按新口径逐值校验，并要求迁移里有 3 次上限与「只有 RELEASED 可再预留」、分类器排除 504/524，并且在 new-api#3 上线前不得引用 `ProviderTransportError`/`ProviderOutputError`（即不得释放任何流式或输出失败）。`domain-ack-contract.ts` 的处置合同同步到 v2：只有 `definite_failure` 可以 `automaticPhysicalRetryAllowed: true`。AGENTS.md §8 与执行预算设计文档同步口径。
+  - 受保护文件 `router-model-gateway.ts`、`tool-broker.ts` 重钉指纹，复核追加到 `docs/evidence/execution-authority-fence-review-20261001.md`。`schema.prisma` 变更后 Copy 回执重签（HASH_ONLY）。CI 的 PostgreSQL 步骤加跑新的账本真库用例。
+- 测试：
+  - 先写失败测试，确认红后再实现，改动后全部通过：
+    - 网关 24 项新用例，改动前 22 项红（10 类释放、11 类照旧结算、预算余额回到原值）；「修复调用遇 503 照旧结算」「平台出网照旧结算」两项改动前就成立，锁住边界。收窄时三种流式用例移到「照旧结算」，另加 HTTP 504、524 两项「照旧结算」，收窄前这 5 项红；处置合同把流式码加进拒收列表，收窄前红。
+    - 流解析器 12 项，改动前 11 项红（不可读行的输出状态保持未知，改动前就成立）。
+    - broker 8 项，改动前 3 项红（另外 5 项锁住不变的行为：未声明工具、调用方钩子、上下文不变、平台已发出、调度器失败）。
+    - 处置合同新增 6 项，改动前 4 项红；4 个旧用例随 v1 → v2 改名。治理脚本 1 项红。工具声明清单 1 项红。
+    - 账本真库 6 项全部红：RELEASED 后同 key 重开为第 2 次并正常结算；在途、结果未知、已结算无结果都照旧 REPLAY；第 4 次 REPLAY；额度不足时 DENIED 且行仍为 RELEASED；两个并发重开只有一个成功；网关在 503 后的重试真正跑完而不是撞上 REPLAY。
+    - ai_trace 写入 `meta` 的 1 项与实现同时写。
+  - 一次性 PostgreSQL（pgvector/pg16）上 `prisma migrate deploy` 全部迁移后跑真库用例，以 app_user 运行；`security-definer-search-path.postgres.spec.ts` 与 `discovery-run-admission-lease.postgres.spec.ts` 在同一库上照旧通过。
+- 未做：
+  - 在途 RESERVED 的有界等待（重试遇到「仍在进行」时按 2 秒轮询、最多 310 秒）与超龄 RESERVED → RESULT_UNKNOWN 的 SQL 函数（任务里的 PR-2）。10 月的 19 行 RESERVED 多是 `crawl4ai.fetch` 发出请求之后的失败（爬虫 5xx、超时）或进程中断，本 PR 不释放它们。
+  - `crawl4ai.fetch` 没有把 `beforePhysicalWire` 传给 robots 与爬虫，所以不声明；本地 crawl4ai 服务回 5xx（请求已发出）是否也算「确定失败」需要单独决定。
+  - 付费路径（Site Builder R4-B 账本）不变。
+  - 重新打开的行保留首次的 `created_at`；如果 PR-2 按年龄判定超龄，需要另记每次预留的时间。
+  - 流在第一个输出之前失败暂不释放，等 mlhjyx/new-api#3 上线后单独加回（同时改 `execution-authority-policy.mjs` 的反向检查）。
+  - 迁移原名 `20261014095011`，排在 #654 的 `20261014120000` 之前；为避免分班上线时 `migration_revision` 与最新执行的迁移不一致，改名为 `20261015045032`，SQL 不变。
+
 ## 2026-10-14 · Keep a reused artifact object alive until its latest manifest expires, and record every object version for erasure (#647)
 
 - 起因：运行时会话 10-14 用库与 MinIO 证实，产物对象按 `sha256 + 隐私类` 寻址复用，但桶生命周期按**对象年龄**过期（PERSONAL_DATA 1 天，MinIO 的实际删除点是 `LastModified + 2 天` 向下取整到 UTC 午夜）。后来的清单复用同一对象不刷新年龄，第一个写入者的到期一到对象就没了，库里更晚的行还在有效期内：空页面摘要 `e3b0c442…` 有 23 行（10-12 17:34 → 10-13 16:36 写入，最晚到 10-14 16:36），对象 10-14 00:00 已被删除；重放时 `readVerified` 报 `GENERIC_OPERATION_ARTIFACT_INVALID`，「同一操作重放不再出网」的保证被破坏。
@@ -127,6 +178,38 @@
 - 未做 / 边界：
   - 尚未在 xin 上运行；首次落地要发布并切换一次含本改动的镜像（主线已含 #647、#648 的迁移，按带迁移的流程），镜像发布与打开开关是另外的授权事项。
   - 车道只覆盖三个 workflow 的 workflow 体与活动体；workflow 输入、outbox payload、事件注册表与 API 内的同步获客操作仍是镜像代码。两个车道 worker 之间不在代码层互斥。车道观察永远不是 RuntimeEvidence PASS，R4 撤销投递链仍未打通。
+
+## 2026-10-14 · Record the rule version each lead was scored with, rest failing backfill companies for a week, keep non-mirror negative exclusions, count backfill apart, and match trigger words on word boundaries (scoring rules v3 follow-ups, W5-f) (#655)
+
+- 起因：#649（评分规则 v3）的独立复审判 MERGE，同时登记了跟进项 W5-f（3 条 MEDIUM、3 条 LOW），要求与 #649 同一班车上线：
+  - MEDIUM-1：`LeadQualified` 快照的 `qualification_rule_version` 取决策时的代码常量（`lead-qualified-snapshot.ts` 旧 264 行），`score_detail` 也不存规则版本。合并后没有重评的存量 lead 会被标成 v3。
+  - MEDIUM-2：补读候选（`contactPathBackfillCandidates`）按 created_at 取，没有尝试水位。画像返回空（robots 拒绝、空页、死站、超时）或主体被拒的公司拿不到 `_contact_parser`，会一直排在候选最前面，新公司饿死。xin 的 150 家里有 60 家没有 website_profile。
+  - MEDIUM-3：`negativeExclusionsAdvisory` 在有权威 Fit 时把所有否定型 EXCLUSION（neq / not_in / not_contains）都降为只记录，范围过宽：用户手加的 `country not_in [DE, AT, CH]` 会被静默失效。
+  - LOW：stats 不输出 `backfilled`，profiled / matched 混入了补读公司；补读 SQL 没有真库测试（删掉 `_ts >= since` 子句测试仍过）；关键词代理仍扫 `_` 前缀的记账值，且按子串匹配（「new」命中「news」，「dach」命中「Bedachung」）。
+- 改动：
+  - **规则版本随 lead 存**：`scoreCandidates` 把计分用的版本写进 `score_detail.ruleVersion`（create 与 update 两路）。快照改读 `leadQualificationRuleVersion(score_detail)`：有版本取版本；`score_detail` 存在但没有版本 → `additive-6dim-v2`；从未计分 → `null`。`lead-qualified.v1.schema.json` 的 `qualification_rule_version` 改为 `string | null`，说明写明语义；`INTEGRATION.md` 同步。
+  - **尝试水位与 7 天冷却**：开关 `company_contact` 打开时，每次联系路径尝试都在 `website_profile` 记 `_contact_attempt_at`，不论结果（读到、空页、robots 拒绝、死站、超时、无法重放、主体被拒）。写入走 `recordContactPathAttempt`：持禁联策略锁、经禁联安全写入口，被禁联的公司不写；画像提交改写命名空间之后才写，所以和画像事实在同一事务里并存。
+    - 补读候选排序：从未尝试的优先，其次上次尝试最早的，再按 created_at。run 创建前 7 天内尝试过的不入选（`CONTACT_PATH_RETRY_COOLDOWN_MS`）。
+    - 续接下标稳定：本 run 尝试过的公司留在列表里，按它在本 run 之前的那次尝试（`_contact_attempt_prev`）排序，位置不变；冷却截止按 run 创建时刻算，不随各活动的时钟移动。
+    - 并发去重：补读每家前重读一次存储；两个 run 选到同一批时，后到的那个看到对方刚记的尝试（冷却期内）就跳过。本 run 自己的公司也重读一次，别处刚读完的跳过。
+    - 只有尝试标记、没有画像事实的命名空间不当作画像：fit 判定的提示词不再带出空的 `website_profile`；画像提交重放时的回读改为看 `_ts`（画像事实一定带它），不把只有尝试标记的命名空间算成 matched。
+  - **否定型排除收窄**：`qualify()` 的选项改名为 `mirrorExclusionsAdvisory`，只把 `mirrorExclusionRuleIndexes` 认出的镜像规则降为只记录；非镜像的否定型 EXCLUSION 照旧排除。`lintQualificationRules` / `IcpDto.ruleLint` 对非镜像否定型 EXCLUSION 也给一条提示（资格门已判 Fit 时仍然排除，请确认取值写法与公司属性一致）。OpenAPI 描述已重导出。
+  - **stats**：活动返回的 `profiled` / `matched` / `unclassified` 只计本 run 的公司，补读公司计入 `backfilled`。工作流的 `WebsiteProfileTotals` 与 `addWebsiteProfilePass` 累加 `backfilled`，`stats.websiteProfile.backfilled` 输出（旧结果没有这个键时按 0）。只改 stats 对象，不新增命令，重放不受影响。
+  - **关键词代理**：跳过任意层级 `_` 前缀的键；Latin token 按词边界匹配（前后不是 Unicode 字母或数字），CJK 仍按子串。
+- 测试：
+  - 先写失败测试，改动前 33 项失败：`company-contact-points.spec` 6 项（新）；`discovery.activities.spec` 6 项新增、3 项改计数；`workspace-authority.workflow.spec` 1 项新增、3 项改期望；`scoring.spec` 4 项新增；`rule-engine.spec` 4 项（advisory 段按新语义重写）；`lead-qualified-snapshot.spec` 3 项新增；`qualify.activities.spec`、`icp.dto.spec`、`fit-judge.spec` 各 1 项新增。改动后全部通过。
+  - 真库：新增 `contact-path-backfill.postgres.spec.ts`（5 项），以 app_user 真跑补读 SQL 和尝试写入：排序（从未尝试优先、尝试早者优先）、冷却与各排除条件、RLS、run 内打标后列表不变（下标稳定）、下一个 run 与冷却期满后的列表。三处变异各有用例变红：删掉 run-since 子句、排序不用 `_contact_attempt_prev`、删掉冷却条件。没有加进 ci.yml（W9 会把真库 spec 移出 ci.yml），手动运行命令写在 PR 正文。`raw-sql-parameter-types.postgres.spec` 与 `company-contact-point.postgres.spec` 在同一个一次性库上通过。
+  - 邻近：icp、lead、候选评估、删除编排、发现预演、qualify 合成、发现工作流与两条重放用例全绿。
+- 被替换的旧设计：
+  - #649 的「权威 Fit 存在时所有否定型 EXCLUSION 只记录」（`negativeExclusionsAdvisory`）。
+  - 快照写决策时的代码常量。
+  - 补读按 created_at 排序、靠 `_ts >= since` 保持下标；画像返回空的公司不留任何标记。
+- 未做：
+  - 补读公司的主体被拒 / 无法重放仍计入本 run 的 `skippedSubjects` / `unreplayableSkips`，会把 run 判 PARTIAL（与 #649 相同，未改）。
+  - 冷却只管补读候选：本 run 自己的公司画像失败后，下一个找到它的 run 照旧会重试。
+  - 词边界匹配不做词干化，复数与复合词少命中：「pump」不再命中「pumps」，「großhandel」不命中「Pumpengroßhandel」。
+  - 与并发 run 交错时，一家公司可能在 run 中途进入补读列表（例如另一个 run 把它当作自己的公司重新画像、记下尝试），让后面的下标错一位；后果只是本轮漏掉一家，或重读后跳过，不会重复抓取。彻底固定列表需要把每个 run 的补读名单落库，没有做。
+  - 存量 lead：#649 之前计分的 lead 没有 `ruleVersion`，快照会如实标 `additive-6dim-v2`。要按 v3 交付，先对每个 ACTIVE ICP 调一次 `POST /icps/:icpId/qualify`。
 
 ## 2026-10-14 · Bring status, roadmap, ADR and governance records up to the 2026-10 decisions (#651)
 

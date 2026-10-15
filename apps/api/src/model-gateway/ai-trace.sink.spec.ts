@@ -3,6 +3,38 @@ import { AiTraceSink } from './ai-trace.sink';
 import type { PrismaService } from '../prisma/prisma.service';
 
 describe('AiTraceSink', () => {
+  it('persists the ledger operation and budget disposition of a failed call in ai_trace.meta (D13)', async () => {
+    const aiTraceCreate = vi.fn(async () => ({ id: 'trace-d13' }));
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId: string, fn: (tx: unknown) => Promise<unknown>) =>
+        fn({ aiTrace: { create: aiTraceCreate }, usageLedger: { create: vi.fn() } }),
+      ),
+    } as unknown as PrismaService;
+
+    new AiTraceSink(prisma).record({
+      workspaceId: '00000000-0000-0000-0000-000000000001',
+      task: 'discovery.extract_company',
+      op: 'generateStructured',
+      provider: 'gateway',
+      model: 'deepseek-v4-pro',
+      status: 'ERROR',
+      errorMessage: 'ProviderTransportError:CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR',
+      latencyMs: 31_527,
+      budgetOperationId: '7d5e8f1a-2b3c-4d5e-8f90-a1b2c3d4e5f6',
+      budgetDisposition: 'RELEASED_DEFINITE_FAILURE',
+    });
+
+    await vi.waitFor(() => expect(aiTraceCreate).toHaveBeenCalledTimes(1));
+    expect(aiTraceCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        meta: {
+          budgetOperationId: '7d5e8f1a-2b3c-4d5e-8f90-a1b2c3d4e5f6',
+          budgetDisposition: 'RELEASED_DEFINITE_FAILURE',
+        },
+      }),
+    });
+  });
+
   it('persists a Site Builder execution policy snapshot in ai_trace.meta', async () => {
     const aiTraceCreate = vi.fn(async () => ({ id: 'trace-1' }));
     const usageLedgerCreate = vi.fn(async () => ({}));
