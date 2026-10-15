@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import type { CompanyContactPaths } from './providers/website-profile.provider';
 import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
 import {
@@ -66,15 +66,85 @@ function pointKey(kind: string, value: string): string {
 }
 
 /** Whether a suppressed domain covers the link's host or one of its parent domains. Fails closed. */
-function hostSuppressed(value: string, suppressedDomains: ReadonlySet<string>): boolean {
+export function contactPointHostSuppressed(value: string, suppressedDomains: ReadonlySet<string>): boolean {
   if (suppressedDomains.size === 0) return false;
-  const host = canonicalizeSuppressionValue('domain', new URL(value).hostname);
+  let hostname: string;
+  try {
+    hostname = new URL(value).hostname;
+  } catch {
+    return true;
+  }
+  const host = canonicalizeSuppressionValue('domain', hostname);
   if (!host) return true;
   const labels = host.split('.');
   for (let index = 0; index < labels.length - 1; index += 1) {
     if (suppressedDomains.has(labels.slice(index).join('.'))) return true;
   }
   return false;
+}
+
+/**
+ * Suppression is not a status: it is applied when the points are read (scoring, read models)
+ * and by deletion when the company subject is erased. A company covered by a suppression
+ * (its domain or name) has no reachable point; otherwise every point on a suppressed host
+ * (or a parent domain of one) is left out.
+ */
+export function reachableCompanyContactPoints<T extends { readonly value: string }>(
+  points: readonly T[],
+  suppressions: ReadonlyArray<{ type: string; value: string }>,
+  company: { name: string; domain: string | null },
+): T[] {
+  if (points.length === 0) return [];
+  if (companyMatchesSuppression(suppressions, company)) return [];
+  const suppressedDomains = canonicalizeSuppressionValues(
+    'domain',
+    suppressions.filter((row) => row.type === 'domain').map((row) => row.value),
+  );
+  return points.filter((point) => !contactPointHostSuppressed(point.value, suppressedDomains));
+}
+
+/** The company columns the website profile reads for one candidate. */
+export interface ContactPathBackfillCandidate {
+  readonly id: string;
+  readonly name: string;
+  readonly domain: string | null;
+  readonly country: string | null;
+  readonly attributes: unknown;
+}
+
+/**
+ * Backfill of the contact paths (scoring rules v3): while the switch is on, a run whose own
+ * companies leave part of the website-profile quota unused reads the workspace companies whose
+ * contact paths were never read under the current rules, oldest first, so a switched-on
+ * workspace does not have to wait for a new run to find each company again. The list must be
+ * the same for every profile activity of one run (continuation is by index): a company this run
+ * already read (`website_profile._ts` at or after the run was created) stays in it and the
+ * profile loop skips it as fresh and current. A company whose profile returned nothing
+ * (robots-blocked, empty) carries no marker and stays a candidate, as in the run's own list.
+ */
+export async function contactPathBackfillCandidates(
+  tx: Prisma.TransactionClient,
+  args: { workspaceId: string; runId: string; excludeCompanyIds: readonly string[]; limit: number },
+): Promise<ContactPathBackfillCandidate[]> {
+  if (args.limit <= 0) return [];
+  const run = await tx.discoveryRun.findUnique({ where: { id: args.runId }, select: { createdAt: true } });
+  const since = (run?.createdAt ?? new Date()).toISOString();
+  const excluded = args.excludeCompanyIds.length
+    ? Prisma.sql`AND id NOT IN (${Prisma.join(args.excludeCompanyIds.map((id) => Prisma.sql`${id}::uuid`))})`
+    : Prisma.empty;
+  return tx.$queryRaw<ContactPathBackfillCandidate[]>`
+    SELECT id, name, domain, country, attributes
+    FROM canonical_company
+    WHERE workspace_id = ${args.workspaceId}::uuid
+      AND status <> 'SUPPRESSED'
+      AND domain IS NOT NULL
+      ${excluded}
+      AND (
+        COALESCE(attributes #>> '{website_profile,_contact_parser}', '') <> ${COMPANY_CONTACT_PARSER_VERSION}
+        OR COALESCE(attributes #>> '{website_profile,_ts}', '') >= ${since}
+      )
+    ORDER BY created_at ASC, id ASC
+    LIMIT ${args.limit}`;
 }
 
 /**
@@ -114,7 +184,7 @@ export async function persistCompanyContactPoints(
   const observed = new Map<string, CompanyContactObservedPoint>();
   for (const point of args.observation.points) {
     if (!isCompanyContactPointValue(point.kind, point.value, company.domain)) continue;
-    if (hostSuppressed(point.value, suppressedDomains)) continue;
+    if (contactPointHostSuppressed(point.value, suppressedDomains)) continue;
     observed.set(pointKey(point.kind, point.value), point);
   }
 

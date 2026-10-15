@@ -14,8 +14,13 @@ export const LEAD_QUALIFIED_SCHEMA_VERSION = 1;
  * v2（收口⑤）：总分构成不变（加法六维 + recommended≥0.55 且 Reachability>0），新增 **demand_proof
  * 观测维填充**（一等 Signal 事实驱动，不入总分——乘法门待 R2 backtest）。快照 v1 契约已预留
  * demand_proof 为 number|null 槽位，填充**非破坏**、无需 v2 schema 文件（snapshot_version 仍 1）。
+ *
+ * v3（2026-10-14，scoring.ts）：Reachability = max(公司级联系路径 BI-14, 个人旧口径)；权重
+ * fit .45 / role 0 / intent .15 / dataQuality .15 / reachability .20 / engagement .05（门槛 0.55 不变）；
+ * 关键词代理只扫属性值、Latin token ≥3；权威 Fit 存在时否定型 EXCLUSION 只记录。六维键与值域不变 →
+ * 快照 v1 契约零破坏（snapshot_version 仍 1），消费端用本串区分口径。
  */
-export const QUALIFICATION_RULE_VERSION = 'additive-6dim-v2';
+export const QUALIFICATION_RULE_VERSION = 'additive-6dim-v3';
 
 /** lead.scores Json 的现行形状（lead/scoring.ts 写入）。 */
 interface LeadScoresJson {

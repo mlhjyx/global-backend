@@ -98,6 +98,7 @@
      - 以上任何一种，run 都至少判 `PARTIAL`；同一阶段连续两次遇到时视为故障，run 判 `FAILED`。
      - `stats.unreplayableSkips` 只在有跳过时出现，按阶段计数：`queries`、`websiteProfile`、`fit`、`signals`、`watches`。
    - 词表归一（把查询里的行业/国家词归一到标准码）只为会读归一结果的数据源（`wikidata`、`openstreetmap`）调用模型，其余查询只查已沉淀的别名；一条查询的归一调用丢失（上游 5xx、操作无法重放）时，这条查询照常用各源内置词表执行，不算失败、不改状态。`stats.taxonomyFallback`（回退的查询数）与 `stats.taxonomyModelSkipped`（有词可归一却没有调用模型的查询数）只在大于 0 时出现。
+   - 查询活动因**普通**错误（不是控制错误）用尽重试时，这条查询没有回执，run 立即停在查询阶段：判 `FAILED`，`stats.failure = { stage: 'query', errorType, control: false }`（`errorType` 是活动最后一次尝试的错误类型，不含消息），后面的查询不再执行，计划保持 `READY` 可以重跑。`stats.failures` 只计数据源在重试时遇到无法重放的操作、因而以零回执结束的查询（与 `stats.unreplayableSkips.queries` 相同）；没找到记录、或数据源被停用而以 `accepted: 0` 回执结束的查询不计，这次停止也不计。
 4. 结果：`GET /canonical-companies`（`?status=NEW|ENRICHED|SUPPRESSED`）；详情含**字段级 Evidence**（每个字段值来自哪个源、什么许可）
    - 过了 fit 门的高价值公司自动做**多源富集**（互补并跑，均 CC0 直连数据）：
      - `attributes.gleif.*` —— 法律身份：`lei`/`legal_name`/`legal_form`/`entity_status`/`parent_name`/`ultimate_parent_name`（母子集团关系，识别目标是否某集团子公司）

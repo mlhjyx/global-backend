@@ -82,6 +82,36 @@
     - `scoreCandidates` 遍历的是整个 workspace 的 canonical 公司，不只是该 ICP 判过的（既有行为，本 PR 未改）：xin 上 workspace 有 150 家公司，qualify 一个 ICP 后它的 lead 会变成 150 条，多出来的 66 / 99 / 106 条没有 `fit_verdict`，按评分直接进队列。所以 qualify 之后该 ICP 的 `lead-queues` 会是 `scored: true`、总数 150，而不是「179 条变 scored」。要不要只给本 ICP 判过 fit 的公司评分是另一个决定。
   - 任务描述里「FAILED 收尾不发 `DiscoveryRunCompleted`」与代码不符：FAILED 一直发、带 `status: FAILED`，本 PR 保持。
 
+## 2026-10-14 · Score reachability from company-level contact paths, retire the idle Role weight, and record mirrored exclusions instead of rejecting on them (scoring rules v3) (#649)
+
+- 起因：xin 上 `recommended` 队列结构性为 0（2026-10-14 只读核实：lead 62 needs_review / 117 rejected / 0 recommended；150/150 家公司 industry 与 employee_count 为 NULL；`company_contact_point` 0 行，开关 `company_contact` DISABLED）。三道门叠在一起：
+  - 可达性只读人级 `contact_point`（`scoring.ts` 旧 161–168 行；`qualify.activities.ts` 只 include `contacts.contactPoints`），而自动链路里没有联系人发现（LIA 之后才走），#630 建好的公司级 `company_contact_point` 评分读不到。
+  - 0.55 门槛够不着：可达性置 1.0 后 ICP ce100faa 的 12 条 match 最高 0.5225。根因是 DataQuality 的 industry / employee_count 对 150/150 家都是 NULL（public_web 原始记录从不带这两个字段），封顶 0.5；Role 维在 RL1 恒 0，15% 权重闲置；关键词代理用 `JSON.stringify` 全文扫描，2 字母 token「ce」误命中 JSON 键名 `certifications`。
+  - ICP 生成的镜像 EXCLUSION：ICP 22202d3c 有 6 条 EXCLUSION 是 MUST_HAVE 的镜像（`keywords not_contains "泵" / "库存" / "售后"`、`region not_contains "DACH"`、`business_model not_in […]`）。规则引擎对 not_contains 的语义是「属性存在且不含该词 → pass」，任一 EXCLUSION pass → exclude，评分把 exclude 放在权威 Fit 之前；公司 keywords 是受控英文词表、永远不含中文，于是带 keywords 的公司一律 rejected（离线复算 5 条 match 里 2 条被吞）。
+  - 产品负责人按方案 A 授权：RL1 没有具名联系人，Role 并入 Fit / Reachability，门槛不变。
+- 改动（`qualification_rule_version` 升为 `additive-6dim-v3`，写进 LeadQualified 快照；六维键与值域不变，`snapshot_version` 仍 1）：
+  - **可达性 = max(公司级, 个人旧口径)**：`CompanyForScoring` 新增 `companyContactPoints[]`；任一 kind ∈ contact_page / impressum_page / contact_form / supplier_page 且 status ∈ VALID / UNVERIFIED 记 1.0（社交页不计，INVALID 不计）；个人口径不变（VALID 1 / UNVERIFIED、RISKY 0.5 / external_id 不计）。`scoreCandidates` include 该表（只取 VALID / UNVERIFIED），每批读一次禁联事实，**读时过滤**（公司被禁联 → 无点；被禁联域名覆盖的点剔除；`reachableCompanyContactPoints`）。`score_detail.reasonCodes[]` 新增：零可达且进 needs_review 写 `MISSING_CONTACT_POINT`；提示文案「先做联系人发现」改为「先补公司级联系路径」。
+  - **权重 v3**：fit .45 / role 0 / intent .15 / dataQuality .15 / reachability .20 / engagement .05（v2：.35 / .15 / .15 / .15 / .15 / .05），门槛 0.55 不变；Role 仍计算、仍上报。复算：资格门 match + 联系页 + DataQuality 0.5 = 0.85×.45 + .20 + .15×.5 = **0.6575**，进推荐。
+  - **关键词代理**：只扫属性**值**（不扫键名、不扫数字和布尔）；Latin token ≥3 字符（CJK ≥2 字，「扩产」仍有效）；排除 `intent`（原有）、`extraction_*` 与 `website_profile.evidence`。
+  - **镜像 EXCLUSION**：`qualify()` 新增 `negativeExclusionsAdvisory`——权威 Fit 存在时，否定操作符（neq / not_in / not_contains）的 EXCLUSION 只评估、记进 `ruleEvaluations`（`advisory: true`）不改队列；正向 EXCLUSION 维持最高优先；无权威 Fit 时行为不变。ICP 生成（`icp.design` 输出落库）丢弃与 MUST_HAVE 同 field 同 value 的镜像 EXCLUSION（`mirrorExclusionRuleIndexes`，field / value 归一化后比较）；`IcpDto` 新增 `ruleLint[]`（读取 / 激活时由规则推导，不落库），指出存量 ICP 里的镜像规则。OpenAPI 已重导出。
+  - **为现有公司补联系路径**：`profileWebsitesForRun` 在开关 `company_contact` 打开、本 run 的公司没用完 50 家画像配额时，用余量按 created_at 读工作区里还没按当前规则读过联系路径的公司（`contactPathBackfillCandidates`），计入 `backfilled`；配额、时间盒、续接下标对合并列表一体生效（本 run 已读过的公司留在列表里由循环跳过，下标稳定）。打开开关后不必等新 run 再找到这 150 家。
+  - 文档：`docs/product-scope.md` 的可达性定义；`lead-qualified.v1.schema.json` 的 `qualification_rule_version` 示例与说明；`docs/architecture/current.md` 的六维注记。
+- 被替换的设计与原因：
+  - BI-14 设计 §5.1「仅表单 0.6」已被 2026-10-10 §10 改为联系路径任一存在即 1.0，本 PR 按 §10。
+  - v2 权重（LED-006）给 Role 15% 的前提是有具名联系人，RL1 不成立。
+  - 关键词代理的 `JSON.stringify` 全文扫描（#4）把键名与抽取账本当作公司事实。
+  - 「EXCLUSION 永远优先于权威 Fit」在镜像规则下把资格门判 match 的公司硬拒；改为只对正向 EXCLUSION 维持最高优先。
+- 测试：
+  - 先写失败测试：`rule-engine.spec` 7 项、`scoring.spec` 新增 20 项并改 4 项旧断言、`qualify.activities.spec`（新文件）5 项、`icp.service.spec` 1 项、`icp.dto.spec`（新文件）2 项、`discovery.activities.spec` 5 项（其中 2 项护栏在改动前已通过）、`lead-qualified-snapshot.spec` 1 项；改动前 35 项失败，改动后全部通过。
+  - 邻近用例（候选评估、qualify / 发现 workflow、预演、删除编排、website-profile、快照契约 ajv）全绿；`gctl check` 通过。
+- 未做：
+  - 没有改 DataQuality：industry / employee_count 仍靠富集，public_web 不带这两个字段是数据源问题。
+  - 没有新开「只补联系路径」的独立端点或工作流：补读复用 run 的画像配额与预算，每个 run 最多补 (50 − 本 run 公司数) 家，150 家存量要 3–4 个 run；更快需要带预算授权的独立活动（新 scope、OpenAPI、GrowthOS 报价），另开。
+  - 画像返回空（robots 拒绝、空页）的公司没有标记，会留在补读候选里（与本 run 列表的既有行为一致）。
+  - 存量 ICP 的镜像规则没有自动删除：`ruleLint` 只提示，由人用 `DELETE /rules/:ruleId` 处理；评分侧已不受其影响。
+  - 存量 lead 要重新评分才生效：对每个 ACTIVE ICP 调一次 `POST /icps/:icpId/qualify`；打开 `company_contact` 与是否再跑 run 补读由产品负责人决定（D9）。
+  - 读模型 `GET /canonical-companies/:id` 带出联系点、BI-21 交付包字段不在本 PR。
+
 ## 2026-10-14 · Bring status, roadmap, ADR and governance records up to the 2026-10 decisions (#651)
 
 - 起因：2026-10-13 未完成任务评审稿 §3.2 核实 12 份权威文档过时——`docs/status/current.md` 停在 2026-09-20、仍写「推进 R4 到最终 hosted」（与 PRD4-D2 相反）；`release-plan.md` 仍以 Pilot 3-A 的「zero model / paid / send」「named-person collection disabled」为约束；ADR 与冲突登记没有任何 2026-10-10 起的决定；7 个计划生命周期头过期；AGENTS §7 的晋级门已成死锁却无记录。
@@ -218,6 +248,25 @@
   - **用同一份授权重试仍是 409**。要让失败后的重试不必换授权，只能由 GrowthOS 在收到 502 `MODEL_UPSTREAM_UNUSABLE` 后换一个 jti 签发（例如把尝试序号纳入签发键），本仓不改 GrowthOS。风险：在那之前，调用方必须先取新授权再重试；若 SaaS 侧仍返回同一份，这个 ICP 在授权过期前都无法重新生成。
   - 「不消耗授权」的方案评估过并放弃（见上「授权语义」）：会让同一份授权付两次。
   - 查询计划执行（`POST /query-plans/:planId/execute`）是异步的，模型失败发生在 run 里，不走这道边界。
+
+## 2026-10-13 · Stop a discovery run at the query stage when a query activity fails on an ordinary error, instead of holding it at materialization
+
+- 起因：#643「未做」里记录的既有缺口。查询活动因**普通**错误（分类器判为非控制错误，例如数据库或网关的普通失败）用尽重试时，`discovery_query_receipt` 和 `discovery_query_execution_outcome` 都没有这条查询的记录，工作流却只把 `failures` 加一、继续跑完其余查询，直到 canonicalize 阶段才被物化准入 `admit_discovery_company_materialization_v1`（回执数、执行结果数都等于计划查询数，且每个 ordinal 都有回执）以 `DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD` 扣住：其余查询的时间与模型费用白花，run 记的还是 canonicalize 阶段的控制错误，看不出真正起因。预演场景「一条查询每次尝试都因普通错误失败」记录的就是这个。
+- 取舍：在两个方案里选了「诚实的最小改动」——在查询阶段就停，而不是从工作流侧补一条零回执。
+  - 补零回执要新增一个活动（计划、预算绑定、查询键都得由工作流交下去），并为一条根本没执行完的查询写一份执行结果，物化准入见到的「完整」就是假的。#643 的零回执是活动自己在重试时写的，它知道哪个源已路由、哪个没有；工作流不知道。
+  - 普通错误连续三次用尽重试多半是基础设施故障，不是这一条查询的问题，后面的查询大概率同样失败。停下来、记清阶段与错误类型、计划保持 `READY` 可重跑，比跑完再被扣住便宜，也诚实。
+- 改动：
+  - **工作流**（`discoveryWorkflow`）：查询活动因普通错误失败时不再吸收，直接抛出，由既有的失败收尾（BI-25）把 run 记为 `FAILED`，`stats.failure = { stage: 'query', errorType: <活动最后一次尝试的错误类型>, control: false }`；后面的查询不再执行，canonicalize 不再调用。控制错误照旧直接上抛，行为不变。
+  - `stats.failures` 的语义收紧为「以零回执结束的查询数」（#643 的无法重放情形）：让 run 停下的那次失败记在 `stats.failure` 里，不计数，与 fit 等阶段一致。此前已经拿到的回执照常留在 FAILED 记录的 `perQuery` / `perSource` 里，`finalizeRun` 的回执核对照常通过。
+  - patch 守卫 `discovery-query-failure-stop-v1`：改动前记录的历史没有这个标记，重放时照旧计失败、继续跑后面的查询，命令序列不变；回执之前的旧历史不问这个 patch。没有新活动，超时声明不变。
+  - 对接说明（`packages/contracts/INTEGRATION.md` 第 3 步）同步。
+- 测试（先写失败测试：改动前 5 项失败——工作流 3、预演 1、重放 1；首版写成 4 项，独立复审对照 main 实测更正——改动后 4 个文件 87 项全部通过）：
+  - 工作流 4 项新用例：普通错误在查询阶段停住、后面的查询不跑、canonicalize 不调用、`failures: 0` 且 `failure.stage = 'query'`；此前以零回执结束的查询照常计入 `failures`；没有 patch 标记的旧历史照旧继续跑并判 `PARTIAL`；回执之前的旧历史不问这个 patch。正常 run 不问这个 patch（既有用例加一条断言）。原「普通查询失败仍走正常状态路径」用例删除，「后一条查询失败时保留前面同类回执」用例改为断言这些回执留在 FAILED 记录里。
+  - 重放 2 项（真实 Temporal 历史）：改动前记录的「查询失败 → 下一条查询 → canonicalize 扣住 → FAILED 收尾」历史重放不变；改动后记录的「查询失败 → FAILED 收尾（stage `query`）」历史重放通过。
+  - 预演场景改写：「一条查询每次尝试都因普通错误失败」现在断言 run 停在查询阶段（`executeQuery` 只跑 4 次尝试 [1, 1, 2, 3]，后两条查询不跑，canonicalize 不调用，`failure.stage = 'query'`），不再是物化扣住。
+- 未做：
+  - 没有补零回执的活动（方案 B），理由见上。若将来要「一条查询普通失败、其余照跑」，应在活动侧让普通错误也以零回执结束，而不是从工作流侧补。
+  - #643「未做」里的另外两条（共用操作键的失败跨查询传染、REPLAYED 结果不带标记）不变。
 
 ## 2026-10-12 · Keep a governed discovery query going when one model extraction answers unusably
 

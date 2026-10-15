@@ -569,15 +569,18 @@ describe('discovery run rehearsal at measured latencies', () => {
     });
   });
 
-  it('holds materialization when a query ends without its receipt (a plain failure on every attempt)', async () => {
+  it('stops the run at the query stage when a query fails on a plain error on every attempt, before the later queries spend', async () => {
     const rehearsalRun = rehearse({ companies: 100, faults: { queryFails: [1] } });
 
-    await expect(rehearsalRun.run()).rejects.toMatchObject({ type: MATERIALIZATION_HOLD });
+    await expect(rehearsalRun.run()).rejects.toBeInstanceOf(ActivityFailure);
 
-    expect(rehearsalRun.callsOf('executeQuery').filter(({ attempt }) => attempt > 1)).toHaveLength(2);
+    // Query 1 used its three attempts; queries 2 and 3 never ran, and nothing was materialized:
+    // the failed query left no receipt, so the admission would only have held the run later.
+    expect(rehearsalRun.callsOf('executeQuery').map(({ attempt }) => attempt)).toEqual([1, 1, 2, 3]);
+    expect(acts.canonicalizeRun).not.toHaveBeenCalled();
     expect(rehearsalRun.finalized()).toMatchObject({
       status: 'FAILED',
-      stats: { failures: 1, failure: { stage: 'canonicalize', errorType: MATERIALIZATION_HOLD, control: true } },
+      stats: { queries: QUERY_COUNT, failures: 0, failure: { stage: 'query', errorType: 'Error', control: false } },
     });
   });
 });
