@@ -607,3 +607,63 @@ describe("RuntimeProcessLeaseService", () => {
     expect(store.upsert).not.toHaveBeenCalled();
   });
 });
+
+describe("migration revision checks", () => {
+  function prismaReturning(rows: Array<{ migration_name: string }>) {
+    return { $queryRawUnsafe: vi.fn(async () => rows) };
+  }
+
+  it("accepts only the exact latest finished migration as the expected revision", async () => {
+    // Arrange
+    const matching = prismaReturning([
+      { migration_name: identity.migration_revision },
+    ]);
+    const different = prismaReturning([
+      { migration_name: "20990101000000_newer" },
+    ]);
+    const empty = prismaReturning([]);
+
+    // Act + Assert
+    await expect(
+      leaseModule.assertMigrationRevision(
+        matching as never,
+        identity.migration_revision,
+      ),
+    ).resolves.toBeUndefined();
+    await expect(
+      leaseModule.assertMigrationRevision(
+        different as never,
+        identity.migration_revision,
+      ),
+    ).rejects.toThrow("MIGRATION_REVISION_MISMATCH");
+    await expect(
+      leaseModule.assertMigrationRevision(
+        empty as never,
+        identity.migration_revision,
+      ),
+    ).rejects.toThrow("MIGRATION_REVISION_MISMATCH");
+    expect(matching.$queryRawUnsafe.mock.calls[0]?.[0]).toContain(
+      "WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL",
+    );
+  });
+
+  it("keeps rejecting an unattested identity before querying the database", async () => {
+    // Arrange
+    const prisma = prismaReturning([
+      { migration_name: identity.migration_revision },
+    ]);
+
+    // Act + Assert
+    await expect(
+      leaseModule.assertMigrationCompatible(prisma as never, {
+        attested: false,
+        schema_version: "global-runtime-release-identity/v1",
+        code: "BUILD_ATTESTATION_REQUIRED",
+      }),
+    ).rejects.toThrow("RUNTIME_RELEASE_IDENTITY_UNAVAILABLE");
+    expect(prisma.$queryRawUnsafe).not.toHaveBeenCalled();
+    await expect(
+      leaseModule.assertMigrationCompatible(prisma as never, identity),
+    ).resolves.toBeUndefined();
+  });
+});

@@ -4,6 +4,7 @@ import {
   loadBuildIdentity,
   type BuildAttestation,
 } from './build-attestation';
+import type { DevFastLane } from './dev-fast-lane';
 import type { RuntimeMode } from './runtime-environment';
 
 export const RUNTIME_RELEASE_IDENTITY_SCHEMA =
@@ -18,7 +19,9 @@ export type RuntimeReleaseIdentityFailureCode =
   | 'IMAGE_REFERENCE_REQUIRED'
   | 'IMAGE_REFERENCE_INVALID'
   | 'SOURCE_WATCH_NOT_MANAGED'
-  | 'TEST_RUNTIME_UNATTESTED';
+  | 'TEST_RUNTIME_UNATTESTED'
+  // Development only: the fast-lane switch is on and the build has no receipt.
+  | 'DEV_FAST_LANE_UNATTESTED';
 
 export type RuntimeReleaseIdentity =
   | ({
@@ -46,6 +49,7 @@ export function initializeRuntimeReleaseIdentity(input: {
   mode: RuntimeMode;
   artifactRoot: string;
   env?: NodeJS.ProcessEnv;
+  devFastLane?: DevFastLane;
 }): Promise<RuntimeReleaseIdentity> {
   initializedIdentity ??= loadRuntimeReleaseIdentity(input);
   return initializedIdentity;
@@ -79,6 +83,7 @@ export async function loadRuntimeReleaseIdentity(input: {
   mode: RuntimeMode;
   artifactRoot: string;
   env?: NodeJS.ProcessEnv;
+  devFastLane?: DevFastLane;
 }): Promise<RuntimeReleaseIdentity> {
   const env = input.env ?? process.env;
   if (input.mode === 'test') return unavailable('TEST_RUNTIME_UNATTESTED');
@@ -96,9 +101,13 @@ export async function loadRuntimeReleaseIdentity(input: {
     if (!identity.attested) return unavailable('BUILD_ATTESTATION_REQUIRED');
     build = identity;
   } catch (error) {
+    // The lane switch renames only the missing-receipt failure; a present but
+    // invalid receipt stays BUILD_ATTESTATION_INVALID and nothing attests.
     return unavailable(
       isMissingAttestation(error)
-        ? 'BUILD_ATTESTATION_REQUIRED'
+        ? input.devFastLane?.enabled
+          ? 'DEV_FAST_LANE_UNATTESTED'
+          : 'BUILD_ATTESTATION_REQUIRED'
         : 'BUILD_ATTESTATION_INVALID',
     );
   }

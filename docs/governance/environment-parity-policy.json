@@ -41,7 +41,7 @@
       "path": "apps/api/src/runtime/runtime-admission.ts",
       "match_sha256": "sha256:680db1242167b347fa4c645dc6ab213b2ad0aa3e2df35c7699e6d1d572f5f393",
       "category": "test-process",
-      "reason": "Only the isolated test process is outside managed runtime admission and cannot accept product work."
+      "reason": "Only the isolated test process is outside managed runtime admission and cannot accept product work. In development the single dev-fast-lane customer worker (development-fast-lane-unattested-worker-trust) still runs this same admission and tolerates exactly the missing build receipt for one allowlisted workspace's dedicated task queue."
     },
     {
       "id": "revocation-http-isolated-test-fixture",
@@ -194,6 +194,14 @@
       "match_sha256": "sha256:2120ea4610aa57c694af9fd1fca6b88d7901c95a3569f10bdca221275c0cc212",
       "category": "deployment",
       "reason": "The product renderer child is always launched with production runtime semantics from the pinned renderer identity."
+    },
+    {
+      "id": "development-fast-lane-unattested-worker-trust",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/runtime/dev-fast-lane.ts",
+      "match_sha256": "sha256:17ae5a08b2407833b7387deb92700a62ade0133a538999c0e6570a86a679496c",
+      "category": "trust",
+      "reason": "Development alone may honour RUNTIME_DEV_FAST_LANE_WORKSPACE_ID: the attested API routes the three acquisition commands of exactly one workspace to a tenant-scoped task queue on a loopback development Temporal, and one source-built customer worker that passes every managed admission check except the build receipt, and whose source schema matches the managed image, may serve only that queue; every other mode refuses any lane variable at process start, no lease is written, readiness reports the lane as not_proven, and the business rules, admission checks and failure semantics remain identical."
     }
   ],
   "migration_allowlist": [

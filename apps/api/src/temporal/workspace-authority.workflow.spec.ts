@@ -30,6 +30,8 @@ const WS = '10000000-0000-4000-8000-000000000001';
 const SHA = 'a'.repeat(64);
 const QUERY_RECEIPT_PATCH = 'discovery-query-receipt-input-v1';
 const QUERY_RECEIPT_MODE = 'raw-governance-query-receipt/v1';
+// A literal on purpose: recorded histories carry the id, so renaming it breaks their replay.
+const QUERY_FAILURE_STOP_PATCH = 'discovery-query-failure-stop-v1';
 const DISCOVERY_BUDGET = Object.freeze({
   authorityId: '20000000-0000-4000-8000-000000000002',
   replay: false,
@@ -200,7 +202,8 @@ describe('discoveryWorkflow execution-control propagation', () => {
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
         status: 'DONE',
-        stats: expect.objectContaining({ websiteProfile: { profiled: 1, matched: 1, unclassified: 0 } }),
+        // A result recorded before the backfill counter existed reports 0 backfilled companies.
+        stats: expect.objectContaining({ websiteProfile: { profiled: 1, matched: 1, unclassified: 0, backfilled: 0 } }),
       }),
     );
   });
@@ -213,20 +216,6 @@ describe('discoveryWorkflow execution-control propagation', () => {
 
     expect(acts.profileWebsitesForRun).not.toHaveBeenCalled();
     expect(acts.qualifyFitForRun).toHaveBeenCalled();
-  });
-
-  it('keeps an ordinary query failure in the normal status path while still finalizing', async () => {
-    primeDiscovery();
-    acts.executeQuery.mockRejectedValue(new Error('provider unavailable'));
-
-    await discoveryWorkflow(discoveryInput());
-
-    expect(acts.finalizeRun).toHaveBeenCalledWith(
-      expect.objectContaining({
-        status: 'FAILED',
-        stats: expect.objectContaining({ failures: 1 }),
-      }),
-    );
   });
 
   it.each([
@@ -497,7 +486,7 @@ describe('discoveryWorkflow execution-control propagation', () => {
     );
   });
 
-  it('preserves earlier same-class receipts when a later query fails', async () => {
+  it('keeps earlier same-class receipts in the FAILED record when a later query activity fails', async () => {
     primeDiscovery();
     acts.loadPlanQueries.mockResolvedValue({
       queries: [
@@ -529,6 +518,8 @@ describe('discoveryWorkflow execution-control propagation', () => {
       usageQuantity: 1,
       costCents: 0,
     } as const;
+    // An ordinary failure after the retries stops the run; the receipts earned before it stay.
+    const failed = activityFailure('executeQuery', 'ProviderTransportError');
     acts.executeQuery
       .mockResolvedValueOnce({
         rawCount: 1,
@@ -539,15 +530,16 @@ describe('discoveryWorkflow execution-control propagation', () => {
         provider: 'ted',
         budgetTruncated: false,
       })
-      .mockRejectedValueOnce(new Error('provider unavailable'));
+      .mockRejectedValueOnce(failed);
 
-    await discoveryWorkflow(discoveryInput());
+    await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(failed);
 
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
-        status: 'PARTIAL',
+        status: 'FAILED',
         stats: expect.objectContaining({
-          failures: 1,
+          failures: 0,
+          failure: { stage: 'query', errorType: 'ProviderTransportError', control: false },
           perQuery: { [receipt.queryKey]: receipt },
           perSource: {
             public_intelligence: {
@@ -1000,6 +992,113 @@ describe('discoveryWorkflow queries that lost a provider to an unreplayable oper
   });
 });
 
+describe('discoveryWorkflow query activities that failed for an ordinary reason', () => {
+  const query = (priority: number) => ({
+    source_class: 'official_registry',
+    filters: {},
+    keywords: [`Pumpen ${priority}`],
+    priority,
+  });
+  // What Temporal hands the workflow once the query activity's last attempt failed on a plain
+  // error: no receipt was committed, so the materialization admission would hold the run.
+  const ordinary = () => activityFailure('executeQuery', 'PrismaClientKnownRequestError');
+  const answered = () => acts.executeQuery.getMockImplementation()!();
+
+  it('stops the run at the query stage, before the later queries run: the failed query left no receipt', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: [query(1), query(2), query(3)] });
+    const first = await answered();
+    const failed = ordinary();
+    acts.executeQuery.mockResolvedValueOnce(first).mockRejectedValueOnce(failed);
+
+    await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(failed);
+
+    expect(acts.executeQuery).toHaveBeenCalledTimes(2);
+    expect(acts.canonicalizeRun).not.toHaveBeenCalled();
+    expect(acts.finalizeRun).toHaveBeenCalledOnce();
+    // The receipts already earned stay in the record; the stop is described, not counted.
+    expect(acts.finalizeRun.mock.calls[0]![0]).toMatchObject({
+      status: 'FAILED',
+      stats: {
+        perQuery: { [first.queryReceipt.queryKey]: first.queryReceipt },
+        queries: 3,
+        failures: 0,
+        failure: { stage: 'query', errorType: 'PrismaClientKnownRequestError', control: false },
+      },
+    });
+  });
+
+  it('keeps counting the queries that ended with a zero receipt before the stop, not the stop itself', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: [query(1), query(2)] });
+    const first = await answered();
+    const lost = {
+      ...first,
+      rawCount: 0,
+      unreplayable: true,
+      queryReceipt: { ...first.queryReceipt, accepted: 0, usageQuantity: 0 },
+    };
+    const failed = ordinary();
+    acts.executeQuery.mockResolvedValueOnce(lost).mockRejectedValueOnce(failed);
+
+    await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(failed);
+
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'FAILED',
+        stats: expect.objectContaining({
+          failures: 1,
+          failure: { stage: 'query', errorType: 'PrismaClientKnownRequestError', control: false },
+        }),
+      }),
+    );
+  });
+
+  it('keeps histories recorded before the patch on their old command sequence: the failed query counts and the plan goes on', async () => {
+    setPatched((patchId) => patchId !== QUERY_FAILURE_STOP_PATCH);
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: [query(1), query(2)] });
+    acts.executeQuery.mockRejectedValueOnce(ordinary());
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.executeQuery).toHaveBeenCalledTimes(2);
+    expect(acts.canonicalizeRun).toHaveBeenCalled();
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'PARTIAL',
+        stats: expect.objectContaining({ queries: 2, failures: 1 }),
+      }),
+    );
+  });
+
+  it('never asks for the patch on a history recorded before query receipts, which absorbs the failure as before', async () => {
+    const asked: string[] = [];
+    setPatched((patchId) => {
+      asked.push(patchId);
+      return patchId !== QUERY_RECEIPT_PATCH;
+    });
+    primeDiscovery();
+    acts.executeQuery.mockRejectedValue(ordinary());
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(asked).not.toContain(QUERY_FAILURE_STOP_PATCH);
+    expect(acts.canonicalizeRun).toHaveBeenCalled();
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'FAILED',
+        stats: expect.objectContaining({
+          failures: 1,
+          perSource: {
+            official_registry: { rawCount: 0, provider: null, error: 'QUERY_EXECUTION_FAILED' },
+          },
+        }),
+      }),
+    );
+  });
+});
+
 describe('discoveryWorkflow company passes handed from one activity to the next', () => {
   const fitPass = (overrides: Record<string, unknown>) => ({
     judged: 0,
@@ -1049,11 +1148,24 @@ describe('discoveryWorkflow company passes handed from one activity to the next'
     );
   });
 
+  it('reports the companies a single profile pass backfilled apart from the run’s own (W5-f)', async () => {
+    primeDiscovery();
+    acts.profileWebsitesForRun.mockResolvedValueOnce(profilePass({ profiled: 2, matched: 1, backfilled: 4 }));
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stats: expect.objectContaining({ websiteProfile: { profiled: 2, matched: 1, unclassified: 0, backfilled: 4 } }),
+      }),
+    );
+  });
+
   it('profiles websites until no company is left and adds up every pass', async () => {
     primeDiscovery();
     acts.profileWebsitesForRun
-      .mockResolvedValueOnce(profilePass({ profiled: 2, matched: 1, unclassified: 1, nextIndex: 2 }))
-      .mockResolvedValueOnce(profilePass({ profiled: 1, matched: 1 }));
+      .mockResolvedValueOnce(profilePass({ profiled: 2, matched: 1, unclassified: 1, backfilled: 1, nextIndex: 2 }))
+      .mockResolvedValueOnce(profilePass({ profiled: 1, matched: 1, backfilled: 3 }));
 
     await discoveryWorkflow(discoveryInput());
 
@@ -1065,7 +1177,7 @@ describe('discoveryWorkflow company passes handed from one activity to the next'
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
         status: 'DONE',
-        stats: expect.objectContaining({ websiteProfile: { profiled: 3, matched: 2, unclassified: 1 } }),
+        stats: expect.objectContaining({ websiteProfile: { profiled: 3, matched: 2, unclassified: 1, backfilled: 4 } }),
       }),
     );
   });
@@ -1190,7 +1302,7 @@ describe('discoveryWorkflow company passes handed from one activity to the next'
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
         status: 'DONE',
-        stats: expect.objectContaining({ websiteProfile: { profiled: 2, matched: 1, unclassified: 0 } }),
+        stats: expect.objectContaining({ websiteProfile: { profiled: 2, matched: 1, unclassified: 0, backfilled: 0 } }),
       }),
     );
   });
@@ -1248,6 +1360,7 @@ describe('discoveryWorkflow failure finalization (BI-25)', () => {
     await discoveryWorkflow(discoveryInput());
 
     expect(asked).not.toContain(DISCOVERY_FAILURE_FINALIZE_PATCH);
+    expect(asked).not.toContain(QUERY_FAILURE_STOP_PATCH);
     expect(acts.finalizeRun).toHaveBeenCalledOnce();
     expect(acts.finalizeRun).toHaveBeenCalledWith({
       workspaceId: WS,
@@ -1267,7 +1380,8 @@ describe('discoveryWorkflow failure finalization (BI-25)', () => {
         signalsBudgetTruncated: false,
         budgetTruncated: false,
         skippedSubjects: 0,
-        websiteProfile: { profiled: 1, matched: 1, unclassified: 0 },
+        // W5-f: stats only; the profile result here predates the counter, so 0.
+        websiteProfile: { profiled: 1, matched: 1, unclassified: 0, backfilled: 0 },
         enrich: { matched: 1, of: 1, provider: 'gleif' },
         signals: { matched: 1, of: 1, provider: 'public_web' },
         watches: { registered: 1, of: 1 },

@@ -69,6 +69,10 @@ services:
     environment:
       <<: *backend-environment
       PLATFORM_CAPABILITY_CA_FILE: /run/secrets/machine/capability-ca.pem
+      # Development fast lane (docs/backend/dev-fast-lane.md): empty = off.
+      # API only; the API refuses either value outside development.
+      RUNTIME_DEV_FAST_LANE_WORKSPACE_ID: ${RUNTIME_DEV_FAST_LANE_WORKSPACE_ID:-}
+      RUNTIME_DEV_FAST_LANE_TEMPORAL_ADDRESS: ${RUNTIME_DEV_FAST_LANE_TEMPORAL_ADDRESS:-}
     volumes:
       - type: bind
         source: ${SITE_BUILD_SETTLEMENT_SECRET_DIRECTORY:-./.secrets/site-build-settlement}

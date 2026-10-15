@@ -116,7 +116,13 @@ import {
   COMPANY_CONTACT_PARSER_VERSION,
   COMPANY_CONTACT_PROVIDER_KEY,
   companyContactObservation,
+  contactPathAttempt,
+  contactPathAttemptCooling,
+  contactPathBackfillCandidates,
+  nextContactPathAttempt,
   persistCompanyContactPoints,
+  recordContactPathAttempt,
+  type ContactPathAttempt,
 } from '../discovery/company-contact-points';
 import { targetCountryCodes } from '../discovery/search-localization';
 import { companyMatchesSuppression } from '../discovery/suppression-value';
@@ -127,6 +133,7 @@ import {
 } from '../discovery/discovery-model-extractions';
 import { settledModelFailureReason } from '../discovery/settled-model-failure';
 import { narrowBySourceHints, planQuerySkipReason } from '../discovery/plan-query-sources';
+import type { DiscoveryRunStage } from './discovery.run-failure';
 
 export interface DiscoveryRunInput {
   workspaceId: string;
@@ -479,6 +486,19 @@ function icpProductContext(companyAttributes: unknown): string {
     .slice(0, 600);
 }
 
+/**
+ * 画像在 30 天内、且（开关打开时）联系路径已按当前规则读过 → 这家不用再画像。
+ * BI-14：开关打开时，30 天内的画像在联系路径按当前规则读过之前仍算过期（每家每个规则版本一次）。
+ */
+function websiteProfileFreshAndCurrent(attributes: unknown, contactPaths: boolean, nowMs: number): boolean {
+  const existing = ((attributes as Record<string, unknown> | null) ?? {})[WEBSITE_PROFILE_PROVIDER_KEY] as
+    | { _ts?: string; [COMPANY_CONTACT_PARSER_MARKER]?: string }
+    | undefined;
+  const fresh = Boolean(existing?._ts) && nowMs - Date.parse(existing!._ts!) < WEBSITE_PROFILE_TTL_MS;
+  const contactPathsCurrent = !contactPaths || existing?.[COMPANY_CONTACT_PARSER_MARKER] === COMPANY_CONTACT_PARSER_VERSION;
+  return fresh && contactPathsCurrent;
+}
+
 /** 官网画像 → 只含公司级事实的富集结果（命名空间 `website_profile`）。 */
 function websiteProfileEnrichment(profile: WebsiteProfile, fetchedAt: Date): EnrichmentResult {
   // 画像事实所在的页（有 Impressum 用 Impressum，否则首页）；A4：贸易角色、登记号、税号据此有来源 URL。
@@ -536,6 +556,67 @@ const DISCOVERY_DOMAIN_ACK_PRODUCERS = new Set([
   'discovery.extract_list', 'contact.find_decision_makers',
 ]);
 
+/** Failure stages a run reaches only after canonicalization, with the fit stage started. */
+const FIT_REACHED_FAILURE_STAGES: ReadonlySet<string> = new Set<DiscoveryRunStage>([
+  'fit',
+  'enrich',
+  'signals',
+  'watches',
+  'patentEnqueue',
+]);
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * This run's fit stage judged at least one company. finalizeRun uses it to request scoring
+ * for a FAILED run.
+ *
+ * - Stats with `fit` (the normal end of a run) answer alone: some verdict count is above zero.
+ * - Stats without `fit` (the failure path) need a failure stage at or after fit, and then a fit
+ *   verdict on a lead of this ICP for a company this run resolved: its accepted raw records →
+ *   their company identity links → the leads. A fit pass that failed may have stored verdicts
+ *   before it threw, so the lead rows are the record. Verdicts on companies this run never
+ *   touched do not count.
+ */
+async function fitStageJudged(
+  tx: Prisma.TransactionClient,
+  run: { runId: string; icpId: string },
+  stats: Record<string, unknown>,
+): Promise<boolean> {
+  if (Object.prototype.hasOwnProperty.call(stats, 'fit')) {
+    const fit = stats.fit;
+    return (
+      isPlainRecord(fit) && Object.values(fit).some((count) => typeof count === 'number' && count > 0)
+    );
+  }
+  const failure = stats.failure;
+  if (
+    !isPlainRecord(failure) ||
+    typeof failure.stage !== 'string' ||
+    !FIT_REACHED_FAILURE_STAGES.has(failure.stage)
+  ) {
+    return false;
+  }
+  const rawRecords = await tx.rawSourceRecord.findMany({
+    where: { runId: run.runId, ingestStatus: 'ACCEPTED' },
+    select: { id: true },
+  });
+  if (!rawRecords.length) return false;
+  const links = await tx.identityLink.findMany({
+    where: { canonicalType: 'company', rawRecordId: { in: rawRecords.map((record) => record.id) } },
+    select: { canonicalId: true },
+  });
+  const companyIds = [...new Set(links.map((link) => link.canonicalId))];
+  if (!companyIds.length) return false;
+  const judged = await tx.lead.findFirst({
+    where: { icpId: run.icpId, canonicalCompanyId: { in: companyIds }, fitVerdict: { not: null } },
+    select: { id: true },
+  });
+  return judged !== null;
+}
+
 /**
  * Discover 阶段活动（PRD 5.5 / 8.7 流水线）：
  * 计划 → Provider 调用 → Raw Zone 原样落地 → 归一 + 身份解析 → Canonical +
@@ -585,11 +666,13 @@ export function createDiscoveryActivities(deps: {
     return binding;
   };
   /**
-   * A FAILED outcome spends nothing and starts nothing: the plan stays READY
-   * and no QualifyRequested is written. It may therefore still be recorded
-   * after the run's authority has ended; otherwise a run whose grant lapsed or
-   * was revoked mid-way would stay RUNNING forever. A legacy envelope stays
-   * parked, and every other attestation failure still refuses the write.
+   * A FAILED outcome spends nothing: the plan stays READY, and the only thing
+   * it may start is scoring (QualifyRequested, when the fit stage already
+   * judged companies), which is deterministic and makes no provider call. It
+   * may therefore still be recorded after the run's authority has ended;
+   * otherwise a run whose grant lapsed or was revoked mid-way would stay
+   * RUNNING forever. A legacy envelope stays parked, and every other
+   * attestation failure still refuses the write.
    */
   const attestRunFinalization = async (
     args: DiscoveryActivityInput & { status: 'DONE' | 'PARTIAL' | 'FAILED' },
@@ -1705,6 +1788,13 @@ export function createDiscoveryActivities(deps: {
      *    Impressum、供应商页、公司 LinkedIn 与 X，并渲染联系页（每家至多 1 页）看有没有联系表单；在同一事务里
      *    经禁联闸门写 company_contact_point。开关关闭时不渲染、不写点。画像在 30 天内、但还没用当前规则读过
      *    联系路径的公司，开关打开后会重画像一次。
+     *  - 补联系路径（评分规则 v3）：开关打开、且本 run 的公司没用完画像配额时，用余量读工作区里还没按当前规则
+     *    读过联系路径的公司（contactPathBackfillCandidates），不必等新 run 再找到它们；计入 `backfilled`
+     *   （profiled / matched / unclassified 只计本 run 的公司）。配额、时间盒与续接下标对本 run 公司 + 补读公司的
+     *    合并列表一体生效。
+     *  - 尝试水位（W5-f）：开关打开时每次尝试都在 website_profile 记 `_contact_attempt_at`（无论结果）；补读候选
+     *    从未尝试的优先、再按上次尝试时间升序，run 创建前 7 天内尝试过的不入选；补读每家前重读一次，别的 run
+     *    刚尝试过的跳过。
      */
     async profileWebsitesForRun(
       args: DiscoveryActivityInput & {
@@ -1728,6 +1818,8 @@ export function createDiscoveryActivities(deps: {
       unreplayable: number;
       /** Carries the two-in-a-row rule for unreplayable companies over to the next profile activity. */
       previousUnreplayable: boolean;
+      /** Workspace companies outside the run profiled with the quota the run's own companies left (contact-path backfill). */
+      backfilled: number;
     }> {
       if (
         (args.startIndex !== undefined && !isContinuationIndex(args.startIndex, MAX_DISCOVERY_PROFILE_COMPANIES)) ||
@@ -1745,6 +1837,7 @@ export function createDiscoveryActivities(deps: {
         nextIndex: null,
         unreplayable: 0,
         previousUnreplayable: args.previousUnreplayable ?? false,
+        backfilled: 0,
       };
       const setup = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const source = await tx.dataProvider.findUnique({
@@ -1771,7 +1864,7 @@ export function createDiscoveryActivities(deps: {
           where: { canonicalType: 'company', rawRecordId: { in: rawIds.map((r) => r.id) } },
           select: { canonicalId: true },
         });
-        const companies = await tx.canonicalCompany.findMany({
+        const runCompanies = await tx.canonicalCompany.findMany({
           where: {
             id: { in: [...new Set(links.map((l) => l.canonicalId))] },
             status: { not: 'SUPPRESSED' },
@@ -1782,7 +1875,30 @@ export function createDiscoveryActivities(deps: {
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
           take: MAX_DISCOVERY_PROFILE_COMPANIES,
         });
-        return { icp, companies, contactPaths: contactSource?.status === 'ENABLED' };
+        const contactPaths = contactSource?.status === 'ENABLED';
+        // W5-f: the attempt watermark and its cooldown count from the run's creation, the same instant
+        // for every profile activity of the run.
+        const runSince = contactPaths
+          ? (await tx.discoveryRun.findUnique({ where: { id: args.runId }, select: { createdAt: true } }))
+              ?.createdAt ?? new Date()
+          : null;
+        // Scoring rules v3: the quota the run's own companies leave goes to the workspace companies
+        // whose contact paths were never read (same total order, appended, so indexes still hold).
+        const backfill = runSince
+          ? await contactPathBackfillCandidates(tx, {
+              workspaceId: args.workspaceId,
+              runSince,
+              excludeCompanyIds: runCompanies.map((company) => company.id),
+              limit: MAX_DISCOVERY_PROFILE_COMPANIES - runCompanies.length,
+            })
+          : [];
+        return {
+          icp,
+          companies: [...runCompanies, ...backfill],
+          runCount: runCompanies.length,
+          contactPaths,
+          runSince,
+        };
       });
       if (!setup) return idle;
       const provider =
@@ -1805,6 +1921,7 @@ export function createDiscoveryActivities(deps: {
       let skippedSubjects = 0;
       let unclassified = 0;
       let unreplayable = 0;
+      let backfilled = 0;
       let previousUnreplayable = args.previousUnreplayable ?? false;
       const startIndex = args.startIndex ?? 0;
       let nextIndex: number | null = null;
@@ -1816,22 +1933,25 @@ export function createDiscoveryActivities(deps: {
           break;
         }
         const c = setup.companies[i];
-        const existing = ((c.attributes as Record<string, unknown> | null) ?? {})[WEBSITE_PROFILE_PROVIDER_KEY] as
-          | { _ts?: string; [COMPANY_CONTACT_PARSER_MARKER]?: string }
-          | undefined;
-        const fresh = Boolean(existing?._ts) && nowMs - Date.parse(existing!._ts!) < WEBSITE_PROFILE_TTL_MS;
-        // BI-14: with the switch on, a fresh profile still counts as stale until its contact paths
-        // were read under the current rules (once per company and rules version).
-        const contactPathsCurrent =
-          !setup.contactPaths || existing?.[COMPANY_CONTACT_PARSER_MARKER] === COMPANY_CONTACT_PARSER_VERSION;
-        if (fresh && contactPathsCurrent) continue;
-        if (
-          !c.domain ||
-          !(await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-            companyMayUseExternalProcessing(tx, args.workspaceId, c.id),
-          ))
-        )
+        // A workspace company outside the run, profiled with the quota the run's own companies left.
+        const backfill = i >= setup.runCount;
+        if (websiteProfileFreshAndCurrent(c.attributes, setup.contactPaths, nowMs) || !c.domain) continue;
+        // W5-f: with the switch on, read the stored company again right before the fetch. A company
+        // another run (or an earlier attempt of this activity) read since the list was taken is skipped,
+        // a backfill company tried within the cooldown too, and the attempt stamp starts from what is
+        // stored now.
+        const stored = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+          if (!(await companyMayUseExternalProcessing(tx, args.workspaceId, c.id))) return null;
+          if (!setup.runSince) return { attempt: null };
+          const row = await tx.canonicalCompany.findUnique({ where: { id: c.id }, select: { attributes: true } });
+          if (websiteProfileFreshAndCurrent(row?.attributes, true, nowMs)) return null;
+          return { attempt: contactPathAttempt(row?.attributes) };
+        });
+        if (!stored) continue;
+        const priorAttempt: ContactPathAttempt | null = stored.attempt;
+        if (backfill && priorAttempt && setup.runSince && contactPathAttemptCooling(priorAttempt, setup.runSince)) {
           continue;
+        }
         const durableReceipts: Array<{ producerId: string; receipt: DurableExecutionReceipt }> = [];
         let profile: WebsiteProfile | null = null;
         let subjectDenied = false;
@@ -1864,11 +1984,17 @@ export function createDiscoveryActivities(deps: {
         previousUnreplayable = unreplayableSkip;
         // BI-14：联系路径的观测时间取这家页面读完的时刻（不是活动开始时刻），供 last_seen_at 单调比较。
         const observedAt = new Date();
+        // W5-f：profiled / matched / unclassified 只计本 run 的公司；补读的公司计入 backfilled。
         if (unreplayableSkip) unreplayable += 1;
         else if (subjectDenied) skippedSubjects += 1;
+        else if (backfill) backfilled += 1;
         else profiled += 1;
-        if (profile && profile.tradeRoleSource === null) unclassified += 1;
-        // 不给被拒主体写任何属性；已产生的回执照常 ACK（apply 为空操作）。
+        if (!backfill && profile && profile.tradeRoleSource === null) unclassified += 1;
+        // W5-f：开关打开时每次尝试都记尝试时间（读到、空页、robots 拒绝、死站、超时、无法重放、主体被拒），
+        // 一直失败的公司歇满冷却期再排到从未尝试的公司之后，不再永远占着补读候选的最前面。
+        const attempt =
+          priorAttempt && setup.runSince ? nextContactPathAttempt(priorAttempt, observedAt, setup.runSince) : null;
+        // 不给被拒主体写任何事实（只记尝试时间）；已产生的回执照常 ACK（apply 为空操作）。
         const hits = profile && !subjectDenied
           ? [{ key: WEBSITE_PROFILE_PROVIDER_KEY, result: websiteProfileEnrichment(profile, new Date(nowMs)) }]
           : [];
@@ -1878,7 +2004,14 @@ export function createDiscoveryActivities(deps: {
         // profile replayed from an earlier attempt cannot mix replayed and new receipts.
         const profileReceipts = durableReceipts.filter(({ producerId }) => producerId !== 'crawl4ai.render');
         const contactReceipts = durableReceipts.filter(({ producerId }) => producerId === 'crawl4ai.render');
-        if (!hits.length && !durableReceipts.length) continue;
+        const stampAttempt = (tx: Prisma.TransactionClient) =>
+          attempt
+            ? recordContactPathAttempt(tx, { workspaceId: args.workspaceId, companyId: c.id, attempt })
+            : Promise.resolve(false);
+        if (!hits.length && !durableReceipts.length) {
+          if (attempt) await deps.prisma.withWorkspace(args.workspaceId, stampAttempt);
+          continue;
+        }
         const committed = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
           const result = await applyDomainAckConsumerTransactions({
             transaction: tx,
@@ -1905,7 +2038,9 @@ export function createDiscoveryActivities(deps: {
                 select: { attributes: true },
               });
               const attributes = (current?.attributes ?? {}) as Record<string, unknown>;
-              return hits.length > 0 && Object.hasOwn(attributes, WEBSITE_PROFILE_PROVIDER_KEY);
+              // Profile facts carry `_ts`; a namespace holding only a contact-path attempt stamp (W5-f) is not a commit.
+              const namespace = attributes[WEBSITE_PROFILE_PROVIDER_KEY] as { _ts?: unknown } | undefined;
+              return hits.length > 0 && typeof namespace?._ts === 'string';
             },
           });
           if (contactPaths || contactReceipts.length > 0) {
@@ -1930,9 +2065,11 @@ export function createDiscoveryActivities(deps: {
               readback: async () => null,
             });
           }
+          // After the profile commit, which rewrites the namespace: the stamp lands next to its facts.
+          await stampAttempt(tx);
           return result.value;
         });
-        if (committed) matched += 1;
+        if (committed && !backfill) matched += 1;
       }
       return {
         profiled,
@@ -1943,6 +2080,7 @@ export function createDiscoveryActivities(deps: {
         nextIndex,
         unreplayable,
         previousUnreplayable,
+        backfilled,
       };
     },
 
@@ -2388,9 +2526,19 @@ export function createDiscoveryActivities(deps: {
             } as Prisma.InputJsonValue,
           },
         });
-        // 发现→评分自动衔接：run 完成即请求重评分（relay 启 qualifyWorkflow，重复请求合并到在跑实例）。
+        // 发现→评分自动衔接：run 收尾即请求重评分（relay 启 qualifyWorkflow，重复请求合并到在跑实例）。
         // 之前评分只能人工触发 —— 新公司判了 fit 也进不了 lead 队列，漏斗断在这一步。
-        if (args.status !== 'FAILED' && args.icpId) {
+        // FAILED 的 run 也请求，只要本 run 的 fit 阶段已经给过判定（fitStageJudged：只看本 run 的
+        // stats.fit；失败路径先看 failure.stage 是否已到 fit，再查本 run 解析出的公司的 lead）：已物化的
+        // 公司就该拿到评分（分数是幂等 upsert，之后的 run 再刷新）。此前 FAILED 一律不写——xin 上 11 次
+        // 验收 run 全部 FAILED，179 条 lead 六维分全 NULL、队列只是 fit 门预置，评分、制裁第五门、
+        // LeadsScored 从未在真实数据上跑过。评分是确定性的、不调 provider、不花预算，所以不需要仍然
+        // 有效的授权；plan 仍留 READY，DiscoveryRunCompleted 照旧带 status=FAILED。
+        if (
+          args.icpId &&
+          (args.status !== 'FAILED' ||
+            (await fitStageJudged(tx, { runId: args.runId, icpId: args.icpId }, finalStats)))
+        ) {
           await tx.outboxEvent.create({
             data: {
               workspaceId: args.workspaceId,
@@ -2398,7 +2546,7 @@ export function createDiscoveryActivities(deps: {
               aggregateType: 'ICP',
               aggregateId: args.icpId,
               payload: {
-                reason: 'discovery_run_completed',
+                reason: args.status === 'FAILED' ? 'discovery_run_failed_after_fit' : 'discovery_run_completed',
                 runId: args.runId,
               } as Prisma.InputJsonValue,
             },

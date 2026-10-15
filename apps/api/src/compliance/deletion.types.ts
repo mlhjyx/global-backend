@@ -3,6 +3,8 @@
  * 🔴 内容最小化红线：跨 workflow 传递与落回执的都是**计数 + 行 id 引用**，绝不含人名/邮箱明文。
  */
 
+// DSR 主体种类（公开删除 API、DeletionCompleted 契约同此）。产物主体另多一种卖方 company_profile
+// （GENERIC_OPERATION_ARTIFACT_SUBJECT_TYPES，2026-10-14 方案 A），它不是 DSR 主体，不在此列。
 export const DELETION_SUBJECT_TYPES = ['contact', 'company'] as const;
 export type DeletionSubjectType = (typeof DELETION_SUBJECT_TYPES)[number];
 

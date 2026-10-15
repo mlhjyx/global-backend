@@ -16,9 +16,18 @@ describe('GenericOperationArtifactSubjectRepository', () => {
       subjectType: 'contact',
       subjectId: SUBJECT_ID,
     })).toEqual({ subjectType: 'contact', subjectId: SUBJECT_ID });
+    // The tenant's own seller profile (understanding crawls) is the third kind.
+    expect(parseGenericOperationArtifactSubjectRef({
+      subjectType: 'company_profile',
+      subjectId: SUBJECT_ID,
+    })).toEqual({ subjectType: 'company_profile', subjectId: SUBJECT_ID });
 
     for (const value of [
       { subjectType: 'contact_point', subjectId: SUBJECT_ID },
+      { subjectType: 'companyProfile', subjectId: SUBJECT_ID },
+      { subjectType: 'company-profile', subjectId: SUBJECT_ID },
+      { subjectType: 'COMPANY_PROFILE', subjectId: SUBJECT_ID },
+      { subjectType: 'company_profile', subjectId: 'acme.example' },
       { subjectType: 'contact', subjectId: 'person@example.test' },
       { subjectType: 'contact', subjectId: SUBJECT_ID, email: 'forbidden' },
       { subjectType: 'company', subjectId: SUBJECT_ID, body: 'forbidden' },
@@ -166,6 +175,22 @@ describe('GenericOperationArtifactSubjectRepository', () => {
         'find_workspace_generic_operation_artifact_subject_execution_hold_v1',
       );
       expect(sql.values).toEqual([WORKSPACE_ID, 'company', SUBJECT_ID]);
+    });
+
+    it('asks the same guarded reader about a seller company_profile subject', async () => {
+      const queryRaw = vi.fn(async () => [{ tombstoned: false, suppressed: false }]);
+      const repository = new GenericOperationArtifactSubjectRepository();
+
+      await expect(repository.findExecutionHold(
+        { $queryRaw: queryRaw } as never,
+        {
+          workspaceId: WORKSPACE_ID,
+          subjectRef: { subjectType: 'company_profile', subjectId: SUBJECT_ID },
+        },
+      )).resolves.toBeNull();
+
+      const sql = queryRaw.mock.calls[0]?.[0] as Prisma.Sql;
+      expect(sql.values).toEqual([WORKSPACE_ID, 'company_profile', SUBJECT_ID]);
     });
 
     it('fails closed when the scope guard yields no row or a malformed row', async () => {

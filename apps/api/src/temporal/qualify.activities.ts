@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { scoreLead } from '../lead/scoring';
+import { QUALIFICATION_RULE_VERSION } from '../lead/lead-qualified-snapshot';
 import { RuleLike } from '../icp/rule-engine';
 import {
   SanctionsScreeningService,
@@ -9,6 +10,7 @@ import {
 } from '../sanctions/sanctions-screening.service';
 import type { ScreenMatch } from '../sanctions/sanctions-matcher';
 import { syntheticDiscoveryEntityIds } from '../discovery/evidence-license';
+import { reachableCompanyContactPoints } from '../discovery/company-contact-points';
 
 export interface QualifyRunInput {
   workspaceId: string;
@@ -64,9 +66,22 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
             take: batchSize,
             ...(cursor ? { where: { id: { gt: cursor } } } : {}),
             orderBy: { id: 'asc' },
-            include: { contacts: { include: { contactPoints: true } } },
+            include: {
+              contacts: { include: { contactPoints: true } },
+              // 评分规则 v3：公司级联系路径（BI-14 company_contact_point）进可达性。只读 VALID / UNVERIFIED
+              //（INVALID 不是渠道）；禁联不是状态，在下面读时过滤（设计 §4.5）。
+              companyContactPoints: {
+                where: { status: { in: ['VALID', 'UNVERIFIED'] } },
+                select: { kind: true, value: true, status: true },
+              },
+            },
           });
           if (!companies.length) return true;
+          // 一批一次：公司 / 域名禁联事实，用于联系路径的读时过滤（公司被禁联 → 无点；被禁联域名覆盖的点剔除）。
+          const suppressions = await tx.suppressionRecord.findMany({
+            where: { type: { in: ['domain', 'company_name'] } },
+            select: { type: true, value: true },
+          });
           const evidenceEntityOwners = new Map<string, string>();
           for (const company of companies) {
             evidenceEntityOwners.set(company.id, company.id);
@@ -93,7 +108,13 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                   canonicalCompanyId: c.id,
                 },
               },
-              select: { id: true, status: true, fitVerdict: true },
+              // 一条 reject 裁决作证人工拒绝（有界：只探一条），判据与 API 的 queueBasis=human_reject 相同。
+              select: {
+                id: true,
+                status: true,
+                fitVerdict: true,
+                decisions: { where: { action: 'reject' }, select: { id: true }, take: 1 },
+              },
             });
             const authoritativeFit = (existing?.fitVerdict ?? null) as 'match' | 'weak' | 'mismatch' | null;
 
@@ -135,6 +156,9 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                   seniority: ct.seniority,
                   contactPoints: ct.contactPoints.map((p) => ({ type: p.type, status: p.status })),
                 })),
+                companyContactPoints: reachableCompanyContactPoints(c.companyContactPoints, suppressions, c).map(
+                  (p) => ({ kind: p.kind, status: p.status }),
+                ),
               },
               icpForScoring,
               // ICP 资格门（LLM 四门）作为权威 Fit 传入：只覆盖 Fit 维，队列归属由六维总分 +
@@ -144,9 +168,19 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
             const queue = result.queue;
             const status =
               queue === 'suppressed' ? 'SUPPRESSED' : queue === 'rejected' ? 'REJECTED' : 'REVIEW';
-            const scoreDetail = { ...result.detail, fitVerdict: authoritativeFit };
-            // 人工已裁决（QUALIFIED/REJECTED via decision/CONTACTED+）的 Lead 不被重评覆盖状态
-            const humanFinal = existing && ['QUALIFIED', 'CONTACTED', 'CONVERTED'].includes(existing.status);
+            // ruleVersion：这次计分用的规则版本。LeadQualified 快照读它，而不是决策时的代码常量——
+            // 规则升级后没有重评的 lead 仍如实标注旧版本（W5-f）。
+            const scoreDetail = { ...result.detail, fitVerdict: authoritativeFit, ruleVersion: QUALIFICATION_RULE_VERSION };
+            // 人工已裁决（QUALIFIED/REJECTED via decision/CONTACTED+）的 Lead 不被重评覆盖状态。
+            // 评分自己也写 REJECTED，所以 REJECTED 只在有 reject 裁决时才算人工终态；评分写的 REJECTED
+            // 仍由重评分决定。
+            const humanFinal =
+              existing !== null &&
+              (['QUALIFIED', 'CONTACTED', 'CONVERTED'].includes(existing.status) ||
+                (existing.status === 'REJECTED' && existing.decisions.length > 0));
+            // scored_at：这条 lead 的队列从此由评分决定（fit 门预置结束）。API 的 scored/queueBasis 与
+            // LeadQualified 快照的 scored_at 读它。
+            const scoredAt = new Date();
             // 评分只写 scores/queue/status —— **绝不覆盖 fitVerdict/fitReasons**（那是资格门① 的产物）。
             await tx.lead.upsert({
               where: {
@@ -160,6 +194,7 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                 totalScore: result.totalScore,
                 scores: result.scores as unknown as Prisma.InputJsonValue,
                 scoreDetail: scoreDetail as unknown as Prisma.InputJsonValue,
+                scoredAt,
                 ...(humanFinal ? {} : { status: status as never, queue }),
                 version: { increment: 1 },
               },
@@ -172,6 +207,7 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                 totalScore: result.totalScore,
                 scores: result.scores as unknown as Prisma.InputJsonValue,
                 scoreDetail: scoreDetail as unknown as Prisma.InputJsonValue,
+                scoredAt,
               },
             });
             // 记/更制裁审计件（命中时）：名单/条目 ref/版本/分数/复核态——🔴 非个人传记（只公司名 + 名单条目引用）。

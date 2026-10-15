@@ -17,12 +17,14 @@ describe('QualifyActivities synthetic provenance quarantine', () => {
       attributes: {},
       status: 'NEW',
       contacts: [],
+      companyContactPoints: [],
     };
     const tx = {
       icpDefinition: {
         findUnique: vi.fn(async () => ({ status: 'ACTIVE', rules: [], roles: [], triggerSignals: [] })),
       },
       canonicalCompany: { findMany: vi.fn(async () => [company]) },
+      suppressionRecord: { findMany: vi.fn(async () => []) },
       fieldEvidence: {
         findMany: vi.fn(async () => [
           { entityId: company.id, providerKey: 'sandbox', license: 'sandbox' },
@@ -65,12 +67,14 @@ describe('QualifyActivities synthetic provenance quarantine', () => {
       attributes: {},
       status: 'NEW',
       contacts: [],
+      companyContactPoints: [],
     };
     const tx = {
       icpDefinition: {
         findUnique: vi.fn(async () => ({ status: 'ACTIVE', rules: [], roles: [], triggerSignals: [] })),
       },
       canonicalCompany: { findMany: vi.fn(async () => [company]) },
+      suppressionRecord: { findMany: vi.fn(async () => []) },
       fieldEvidence: {
         findMany: vi.fn(async () => [
           { entityId: company.id, providerKey: 'companies_house', license: 'OGL-UK-3.0' },

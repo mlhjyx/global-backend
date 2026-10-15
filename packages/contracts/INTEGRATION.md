@@ -73,12 +73,16 @@
 2. 人工修订：`PATCH /icps/:id`；规则增删改：`POST /icps/:id/rules`、`PATCH|DELETE /icp-rules/:ruleId`
 3. 回测：`POST /icps/:id/backtests { samples: [{name, attributes, expected}] }` → 命中率指标（→ `VALIDATING`）
 4. 激活：`POST /icps/:id/activate`（旧 ACTIVE 自动 `SUPERSEDED`）
+5. ICP 读取 / 激活结果带 `ruleLint[]`（由规则推导、不落库）：每条否定操作符（`neq` / `not_in` / `not_contains`）的 EXCLUSION 一条提示。
+   - 与某条 MUST_HAVE 同 field 同 value 的是镜像：资格门已判 Fit 时评分只记录、不排除，建议删除；
+   - 其余否定型排除（如手加的 `country not_in ["DE","AT","CH"]`）资格门判 match 也照样排除，提示里请确认取值写法与公司属性一致。
 
 ### 阶段 2：发现（Discover）
 
 1. `POST /icps/:id/query-plans` → AI 生成多源查询计划（`DRAFT`）
    - 只为当前已启用的数据源出查询，每条查询的 `filters.source_hint` 写明它执行的源；`estimatedVolume` 只计会执行的查询
    - 没有可用的已启用数据源时返回 409 `NO_ENABLED_DISCOVERY_SOURCE`（不调用模型）；模型给出的查询全落在不可用的数据源上时返回 409 `NO_RUNNABLE_QUERIES`，不保存计划
+   - 模型网关结算了调用却没有可用答案时（内容被过滤、输出截断、非 JSON、流被截断等）返回 502 `MODEL_UPSTREAM_UNUSABLE`，`details.reasonCode` 为网关原因码（例如 `CHAT_COMPLETIONS_CONTENT_FILTERED`、`STRUCTURED_OUTPUT_TRUNCATED`、`CHAT_COMPLETIONS_STREAM_TRUNCATED`；网关直接回了 429 或 5xx 时为 `GATEWAY_HTTP_<状态码>`，例如 `GATEWAY_HTTP_503`），不保存计划；这次调用的预算授权已在调用前消耗并按真实用量结算，用同一授权重试会得到 409 `EXECUTION_BUDGET_GRANT_REUSED`，重试要先向 SaaS 取一份新的授权。`POST /companies/:id/icps` 同
 2. 人工确认：`POST /query-plans/:id/confirm`（→ `READY`）
 3. 执行：`POST /query-plans/:id/execute` → 202 `{ data: { runId, status } }`；轮询 `GET /discovery-runs/:runId`（`RUNNING → DONE|PARTIAL`，stats 含每源计数）
    - 确认之后数据源被停用的查询会跳过，不让 run 失败：`stats.skippedQueries` 按原因计数（`SOURCE_DISABLED` / `SOURCE_LINEAGE_UNAVAILABLE` / `SOURCE_UNKNOWN`），run 判 `PARTIAL`
@@ -95,6 +99,8 @@
      - 以上任何一种，run 都至少判 `PARTIAL`；同一阶段连续两次遇到时视为故障，run 判 `FAILED`。
      - `stats.unreplayableSkips` 只在有跳过时出现，按阶段计数：`queries`、`websiteProfile`、`fit`、`signals`、`watches`。
    - 词表归一（把查询里的行业/国家词归一到标准码）只为会读归一结果的数据源（`wikidata`、`openstreetmap`）调用模型，其余查询只查已沉淀的别名；一条查询的归一调用丢失（上游 5xx、操作无法重放）时，这条查询照常用各源内置词表执行，不算失败、不改状态。`stats.taxonomyFallback`（回退的查询数）与 `stats.taxonomyModelSkipped`（有词可归一却没有调用模型的查询数）只在大于 0 时出现。
+   - 查询活动因**普通**错误（不是控制错误）用尽重试时，这条查询没有回执，run 立即停在查询阶段：判 `FAILED`，`stats.failure = { stage: 'query', errorType, control: false }`（`errorType` 是活动最后一次尝试的错误类型，不含消息），后面的查询不再执行，计划保持 `READY` 可以重跑。`stats.failures` 只计数据源在重试时遇到无法重放的操作、因而以零回执结束的查询（与 `stats.unreplayableSkips.queries` 相同）；没找到记录、或数据源被停用而以 `accepted: 0` 回执结束的查询不计，这次停止也不计。
+   - `stats.websiteProfile`：`profiled` / `matched` / `unclassified` 只计本 run 自己的公司；`backfilled` 是开关 `company_contact` 打开时，用本 run 剩下的画像配额补读联系路径的工作区存量公司数（不在本 run 里；这个键自评分规则 v3 跟进起才有，更早的 run 的 stats 里没有它）。补读候选里，从未尝试过的公司优先，其次是上次尝试最早的；run 创建前 7 天内尝试过的公司（不论读到与否）不补读。
 4. 结果：`GET /canonical-companies`（`?status=NEW|ENRICHED|SUPPRESSED`）；详情含**字段级 Evidence**（每个字段值来自哪个源、什么许可）
    - 过了 fit 门的高价值公司自动做**多源富集**（互补并跑，均 CC0 直连数据）：
      - `attributes.gleif.*` —— 法律身份：`lei`/`legal_name`/`legal_form`/`entity_status`/`parent_name`/`ultimate_parent_name`（母子集团关系，识别目标是否某集团子公司）
@@ -106,9 +112,10 @@
 ### 阶段 3：验证评分（Qualify）
 
 1. `POST /icps/:id/qualify` → 202，后台确定性六维评分（Fit/Role/Intent/DataQuality/Reachability/Engagement）
-2. 队列视图：`GET /icps/:id/lead-queues` → `{ data: { recommended, needs_review, rejected, suppressed } }`
-3. 列表：`GET /leads?icpId=&queue=`（按总分排序，含公司摘要）；详情 `GET /leads/:id` 带**逐规则评分依据**
+2. 队列视图：`GET /icps/:id/lead-queues` → `{ data: { recommended, needs_review, rejected, suppressed, sanctions_hold, scored, queueBasis } }`——`scored` 为真表示每条 lead 都有 `total_score`；`queueBasis` 按队列依据计数（`fit_gate_preset` = fit 门按 verdict 预置、评分从未跑过；`score` = 评分阶段算出；`human_accept` / `human_reject` = 人工裁决），四项之和 = lead 总数
+3. 列表：`GET /leads?icpId=&queue=`（按总分排序，含公司摘要；每行带 `scored` 与 `queueBasis`，未评分的行只是 fit 门预置的队列）；详情 `GET /leads/:id` 带**逐规则评分依据**
 4. 人工裁决：`POST /leads/:id/accept`（→ `QUALIFIED`，发 `LeadQualified` 事件——交给 Campaign 的出口）/ `POST /leads/:id/reject { reason }`
+   - `LeadQualified.qualification_rule_version` 是这条 lead **实际计分时**的规则版本（评分时写进 `score_detail.ruleVersion`），不是接受那一刻服务端的规则：v3 之前计分、此后没有重评的 lead 标 `additive-6dim-v2`；从未计分的 lead 为 `null`。要按新规则交付，先对该 ICP 重新 `POST /icps/:id/qualify`。
 
 ## 4. 事件（服务端集成用）
 

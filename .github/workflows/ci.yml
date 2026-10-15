@@ -249,6 +249,9 @@ jobs:
           EXECUTION_BUDGET_ADMISSION_LEASE_DATABASE_TEST=1 \
             pnpm --filter @global/api exec vitest run \
               src/execution-budget/discovery-run-admission-lease.postgres.spec.ts
+          TOOL_BUDGET_RERESERVE_DATABASE_TEST=1 \
+            pnpm --filter @global/api exec vitest run \
+              src/tools/budget-store-rereserve.postgres.spec.ts
           export EXECUTION_BUDGET_PLATFORM_WRITER_PROVISION_DATABASE_URL="${DATABASE_URL}"
           export EXECUTION_BUDGET_PLATFORM_WRITER_LOGIN=ci_execution_budget_platform_writer
           export EXECUTION_BUDGET_PLATFORM_WRITER_PASSWORD="$(openssl rand -hex 24)"
@@ -325,6 +328,8 @@ jobs:
       # The same migrated schema must list pg_temp last wherever a routine sets its
       # search_path (and every SECURITY DEFINER routine must set one), so a session's
       # temporary tables cannot stand in for the tables those routines read.
+      # The seller company_profile artifact subject kind binds, holds, tombstones and
+      # guards its profile's deletion as app_user on the same schema.
       - name: Raw SQL parameter types on PostgreSQL
         env:
           DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
@@ -337,6 +342,10 @@ jobs:
           COMPANY_CONTACT_POINT_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
           ARTIFACT_OBJECT_VERSION_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
           ARTIFACT_OBJECT_VERSION_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
+          ARTIFACT_SELLER_SUBJECT_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+          ARTIFACT_SELLER_SUBJECT_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
+          LEAD_QUEUE_BASIS_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+          LEAD_QUEUE_BASIS_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
         run: |
           set -euo pipefail
           pnpm --filter @global/db exec prisma migrate deploy
@@ -345,7 +354,9 @@ jobs:
             src/prisma/security-definer-search-path.postgres.spec.ts \
             src/site-builder/site-build-budget-publication-lock.postgres.spec.ts \
             src/discovery/company-contact-point.postgres.spec.ts \
-            src/durable-results/artifact/generic-operation-artifact-object-version.postgres.spec.ts
+            src/durable-results/artifact/generic-operation-artifact-object-version.postgres.spec.ts \
+            src/durable-results/artifact/generic-operation-artifact-seller-subject.postgres.spec.ts \
+            src/lead/lead-queue-basis.postgres.spec.ts
 
       - name: Site Builder isolated zero-dispatch evaluation boundary
         run: pnpm --filter @global/site-builder-eval-runner test
@@ -359,6 +370,21 @@ jobs:
           RAW_SOURCE_POLICY_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
           RAW_SOURCE_POLICY_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
         run: pnpm --filter @global/api exec vitest run src/discovery/raw-source-company-site-policy.postgres.spec.ts
+
+      # PERSONAL_DATA artifacts are indexed by exact workspace and subject, a DSR
+      # tombstone blocks their rematerialization, and app_user can neither read
+      # the index raw nor mutate it. The spec seeds fixed ids and keeps its rows,
+      # so it gets a database of its own and deploys every migration into it.
+      - name: Generic operation artifact subject RLS on PostgreSQL
+        env:
+          ADMIN_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+          DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_artifact_subject_test
+          APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_artifact_subject_test
+        run: |
+          set -euo pipefail
+          psql "${ADMIN_DATABASE_URL}" --no-psqlrc --set ON_ERROR_STOP=1 --quiet \
+            --command 'CREATE DATABASE global_artifact_subject_test;'
+          node --test packages/db/test/generic-operation-artifact-subject.rls.spec.mjs
 
       # source_policy and data_provider are written by the owner connection only.
       # app_user keeps SELECT; no other role, runtime logins included, may write them.

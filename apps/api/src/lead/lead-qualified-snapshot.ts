@@ -7,14 +7,42 @@
  */
 
 import { clamp01 } from './scoring';
+import { leadQueueBasis, type LeadQueueBasis } from './lead-queue-basis';
 
 export const LEAD_QUALIFIED_SCHEMA_VERSION = 1;
 /**
  * v2（收口⑤）：总分构成不变（加法六维 + recommended≥0.55 且 Reachability>0），新增 **demand_proof
  * 观测维填充**（一等 Signal 事实驱动，不入总分——乘法门待 R2 backtest）。快照 v1 契约已预留
  * demand_proof 为 number|null 槽位，填充**非破坏**、无需 v2 schema 文件（snapshot_version 仍 1）。
+ *
+ * v3（2026-10-14，scoring.ts）：Reachability = max(公司级联系路径 BI-14, 个人旧口径)；权重
+ * fit .45 / role 0 / intent .15 / dataQuality .15 / reachability .20 / engagement .05（门槛 0.55 不变）；
+ * 关键词代理只扫属性值（跳过 `_` 前缀的记账键）、Latin token ≥3 按词边界匹配；权威 Fit 存在时只有
+ * MUST_HAVE 的镜像 EXCLUSION 只记录。六维键与值域不变 → 快照 v1 契约零破坏（snapshot_version 仍 1），
+ * 消费端用本串区分口径。
+ *
+ * 本常量是**现在计分**用的版本：scoreCandidates 把它写进 `lead.score_detail.ruleVersion`；快照读的是
+ * 那条 lead 实际计分时记下的版本（leadQualificationRuleVersion），不是决策时的本常量。
  */
-export const QUALIFICATION_RULE_VERSION = 'additive-6dim-v2';
+export const QUALIFICATION_RULE_VERSION = 'additive-6dim-v3';
+/**
+ * v3 起 score_detail 才记规则版本。score_detail 存在却没有版本的 lead 是 v3 之前计分、此后没有重评的，
+ * 按 v3 之前的版本标注（不冒充 v3）。
+ */
+export const PRE_V3_QUALIFICATION_RULE_VERSION = 'additive-6dim-v2';
+
+/**
+ * 这条 lead 计分时的规则版本：score_detail.ruleVersion（非空串）；score_detail 存在但没有版本 →
+ * PRE_V3_QUALIFICATION_RULE_VERSION；从未计分（score_detail 为 null）→ null。
+ */
+export function leadQualificationRuleVersion(scoreDetail: unknown): string | null {
+  if (scoreDetail == null) return null;
+  const recorded =
+    typeof scoreDetail === 'object' && !Array.isArray(scoreDetail)
+      ? (scoreDetail as { ruleVersion?: unknown }).ruleVersion
+      : undefined;
+  return typeof recorded === 'string' && recorded.length > 0 ? recorded : PRE_V3_QUALIFICATION_RULE_VERSION;
+}
 
 /** lead.scores Json 的现行形状（lead/scoring.ts 写入）。 */
 interface LeadScoresJson {
@@ -60,7 +88,8 @@ export interface LeadQualifiedSnapshotV1 {
   };
   fit_verdict: string | null;
   evidence_refs: { score_detail_available: boolean; fit_reasons_available: boolean };
-  qualification_rule_version: string;
+  /** 这条 lead 计分时的规则版本（score_detail.ruleVersion）；从未计分 → null。 */
+  qualification_rule_version: string | null;
   storage_rights_decision: string | null;
   personal_data_class: 'named_person_refs' | 'company_facts_only';
   suppression_state: 'none' | 'suppressed';
@@ -75,6 +104,13 @@ export interface LeadQualifiedSnapshotV1 {
   };
   recommended_action: string;
   valid_until: string | null;
+  /**
+   * 评分阶段最近一次写分的时刻（lead.scored_at）；评分从未跑过（队列仍是 fit 门预置）或在该列
+   * 存在前评的分 → null。**可选字段**（设计 E1：v1 加可选字段，snapshot_version 仍 1）。
+   */
+  scored_at: string | null;
+  /** 接受时这条线索所在队列的依据（lead-queue-basis.ts）。**可选字段**（同上）。 */
+  queue_basis: LeadQueueBasis;
 }
 
 export interface LeadQualifiedSnapshotInput {
@@ -82,12 +118,19 @@ export interface LeadQualifiedSnapshotInput {
     id: string;
     workspaceId: string;
     icpId: string;
+    status?: string | null;
     fitVerdict: string | null;
     totalScore: number | null;
     scores: unknown;
     scoreDetail: unknown;
     fitReasons: unknown;
+    scoredAt?: Date | string | null;
   };
+  /**
+   * 这条 lead 存在 action=reject 的裁决（调用方 decide 在 lead 为 REJECTED 时查一条）。缺省 false
+   *（旧调用方/测试非破坏）。
+   */
+  humanRejected?: boolean;
   /** icpDefinition.version（ICP 已删则 null——lead.icpId 无 FK 强约束）。 */
   icpVersion: number | null;
   /**
@@ -256,7 +299,7 @@ export function buildLeadQualifiedSnapshot(input: LeadQualifiedSnapshotInput): L
       score_detail_available: lead.scoreDetail != null,
       fit_reasons_available: lead.fitReasons != null,
     },
-    qualification_rule_version: QUALIFICATION_RULE_VERSION,
+    qualification_rule_version: leadQualificationRuleVersion(lead.scoreDetail),
     storage_rights_decision: input.storageRightsDecision ?? null, // 收口⑥：DataRightsService STORE 判定（调用方传入）
     personal_data_class: contactRefs.length ? 'named_person_refs' : 'company_facts_only',
     suppression_state: company.status === 'SUPPRESSED' ? 'suppressed' : 'none',
@@ -270,5 +313,14 @@ export function buildLeadQualifiedSnapshot(input: LeadQualifiedSnapshotInput): L
     recommended_action: 'handoff_to_campaign',
     // 鲜度 v2：min(evidence.fetchedAt + 分级TTL, 最新 intent.at + 时机窗)；无鲜度依据 → null。
     valid_until: computeValidUntil(input.evidence ?? [], company.attributes),
+    scored_at: isoOrNull(lead.scoredAt),
+    queue_basis: leadQueueBasis(lead, input.humanRejected === true),
   };
+}
+
+/** Date 或 ISO 串 → ISO 串；缺省/不可解析 → null（不注入 Invalid Date）。 */
+function isoOrNull(value: Date | string | null | undefined): string | null {
+  if (value == null) return null;
+  const ms = value instanceof Date ? value.getTime() : Date.parse(value);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
 }

@@ -51,7 +51,7 @@ pnpm --filter @global/db exec prisma migrate deploy # 读 packages/db/.env
 - 环境差异只允许位于信任根、secret、endpoint、网络暴露、资源额度、可观测性和部署拓扑等配置边界；允许项及尚未清理的迁移债务必须逐项登记在 [`environment-parity-policy.json`](docs/governance/environment-parity-policy.json)，由 `pnpm governance:verify` 校验精确源码指纹。未登记分支、失效豁免和恢复旧分支一律失败。
 - 不因一致性复用生产密钥、生产租户或生产数据。开发使用独立凭据、JWKS、端点、数据与较低额度，但不得更换验证器、业务算法、状态模型或失败策略。
 - Stub、Fake、Sandbox、fixture、visual gallery、Dev Token verifier 和 evaluation runner 只可由测试入口或独立测试 workspace 注入；产品 composition root、运行依赖、OCI/Release 制品与用户站点不得包含或自动 fallback 到这些能力。单元测试可与源码相邻，但必须被产品编译与制品排除。
-- compiled development runtime 与 pilot/production 一样必须拥有 exact commit、artifact/image digest、迁移和 Worker 身份；缺依赖可启动诊断，但 readiness 必须失败、API 不接新工作、Worker 不消费，绝不切到合成结果或未钉住身份。「API 不接新工作」按该工作自身的依赖集合判定。
+- compiled development runtime 与 pilot/production 一样必须拥有 exact commit、artifact/image digest、迁移和 Worker 身份；缺依赖可启动诊断，但 readiness 必须失败、API 不接新工作、Worker 不消费，绝不切到合成结果或未钉住身份。「API 不接新工作」按该工作自身的依赖集合判定。唯一例外是登记的 development 快速通道（allowance `development-fast-lane-unattested-worker-trust`，见 [运维说明](docs/backend/dev-fast-lane.md)）：一个源码 customer worker 只服务一个 workspace 在开发用 Temporal 上的专属队列，API 仍须是受证镜像。
 
 ## 5. 所有权、worktree 与外部动作
 
@@ -89,7 +89,7 @@ pnpm --filter @global/db exec prisma migrate deploy # 读 packages/db/.env
 - 生产路由、评测基础设施、评测 evidence、promotion 和 runtime adoption 必须分开变更。
 - 正常产品 BuildRun 的费用权威来自 SaaS Control Plane 签发的一次性、短期、请求绑定 Budget Grant；本仓只验签、原子消费、reserve/settle/reconcile 并回报，不另设隐藏的产品总金额门。缺失、非法、过期、跨 workspace/operation/request（已有 Site 时还必须绑定 site）或重复挪用的 Grant 必须在创建 Run、启动 Workflow 和调用模型前拒绝。
 - “暂不调用模型”仍表示 Codex/operator/evaluation 的零费用、离线或 create-only 边界。此类 ad-hoc/evaluation 真实 dispatch 前必须有精确 alias/protocol/credential scope、有限额度、冻结价格、请求与 campaign cap、durable settlement 和用户明确费用授权；正常产品 Grant 与该授权不能互相推导。
-- 有效输出已经持久取得但精确费用暂不可得时，按完整 reservation 上界保守扣减、允许 BuildRun 继续并异步追加对账，不得冒充精确费用。没有有效输出，或物理调用/ACK 状态未知时，完整 reservation 保持占用、禁止自动发起第二次物理请求，并按稳定 request/operation identity 恢复事实。
+- 有效输出已经持久取得但精确费用暂不可得时，按完整 reservation 上界保守扣减、允许 BuildRun 继续并异步追加对账，不得冒充精确费用。没有有效输出，或物理调用/ACK 状态未知时，完整 reservation 保持占用、禁止自动发起第二次物理请求，并按稳定 request/operation identity 恢复事实。唯一例外是确定失败、因而网关没有计费的请求（HTTP 429 与除 504/524 超时外的 5xx、连接从未建立、Tool 在第一次物理请求之前失败；流式失败一律不算，现役 new-api 仍按估算输入 token 计费）：reservation 释放，同一 operation key 最多再预留到第 3 次（账本计数，网关 RetryTimes=1 时最多 6 次物理请求）；机器声明见 `durable-result-strategies.json` 的 `resultDisposition`。
 - Provider kill switch、单次 task/wire/token/output 上限、幂等和异常停用继续保留；24 小时人工 settlement attestation 不得作为正常产品运行授权或调用门。
 
 ## 9. 文档与交付

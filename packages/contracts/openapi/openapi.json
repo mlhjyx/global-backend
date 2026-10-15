@@ -791,6 +791,69 @@
                               }
                             }
                           ]
+                        },
+                        "dev_fast_lane": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
                         }
                       }
                     },
@@ -2302,6 +2365,69 @@
                           ]
                         },
                         "platform_target_lookup": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "dev_fast_lane": {
                           "oneOf": [
                             {
                               "type": "object",
@@ -5716,6 +5842,7 @@
     },
     "/api/v1/companies/{companyId}/icps": {
       "post": {
+        "description": "模型网关结算了调用却没有可用答案（内容被过滤、输出截断、非 JSON、流被截断等）时返回 502 MODEL_UPSTREAM_UNUSABLE，details.reasonCode 为网关原因码；此时预算授权已消耗，重试需要新的授权。",
         "operationId": "IcpController_generate_v1",
         "parameters": [
           {
@@ -5845,6 +5972,56 @@
                         },
                         "message": {
                           "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "MODEL_UPSTREAM_UNUSABLE：模型网关已结算这次调用，但没有可用的答案（details.reasonCode 为网关原因码）。预算授权已消耗，重试需要新的授权",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message",
+                        "details"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "MODEL_UPSTREAM_UNUSABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "reasonCode"
+                          ],
+                          "properties": {
+                            "reasonCode": {
+                              "type": "string",
+                              "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+                              "description": "模型网关的原因码，例如 CHAT_COMPLETIONS_CONTENT_FILTERED、STRUCTURED_OUTPUT_TRUNCATED、CHAT_COMPLETIONS_STREAM_TRUNCATED；不含模型文本"
+                            }
+                          }
                         }
                       }
                     }
@@ -6373,7 +6550,7 @@
     },
     "/api/v1/icps/{icpId}/query-plans": {
       "post": {
-        "description": "只为当前已启用的数据源出查询，每条查询的 filters.source_hint 写明它执行的源；estimatedVolume 只计会执行的查询。没有可用的已启用数据源时返回 409 NO_ENABLED_DISCOVERY_SOURCE（不调用模型）；模型给出的查询全落在不可用的数据源上时返回 409 NO_RUNNABLE_QUERIES，不保存计划。",
+        "description": "只为当前已启用的数据源出查询，每条查询的 filters.source_hint 写明它执行的源；estimatedVolume 只计会执行的查询。没有可用的已启用数据源时返回 409 NO_ENABLED_DISCOVERY_SOURCE（不调用模型）；模型给出的查询全落在不可用的数据源上时返回 409 NO_RUNNABLE_QUERIES，不保存计划。模型网关结算了调用却没有可用答案（内容被过滤、输出截断、非 JSON、流被截断等）时返回 502 MODEL_UPSTREAM_UNUSABLE，details.reasonCode 为网关原因码，不保存计划；此时预算授权已消耗，重试需要新的授权。",
         "operationId": "IcpController_generateQueryPlan_v1",
         "parameters": [
           {
@@ -6503,6 +6680,56 @@
                         },
                         "message": {
                           "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "MODEL_UPSTREAM_UNUSABLE：模型网关已结算这次调用，但没有可用的答案（details.reasonCode 为网关原因码）。预算授权已消耗，重试需要新的授权",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message",
+                        "details"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "MODEL_UPSTREAM_UNUSABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "reasonCode"
+                          ],
+                          "properties": {
+                            "reasonCode": {
+                              "type": "string",
+                              "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+                              "description": "模型网关的原因码，例如 CHAT_COMPLETIONS_CONTENT_FILTERED、STRUCTURED_OUTPUT_TRUNCATED、CHAT_COMPLETIONS_STREAM_TRUNCATED；不含模型文本"
+                            }
+                          }
                         }
                       }
                     }
@@ -8610,7 +8837,27 @@
                       "items": {
                         "type": "object",
                         "additionalProperties": true,
-                        "description": "Lead（六维分+队列+裁决状态）"
+                        "description": "Lead（六维分+队列+裁决状态）",
+                        "required": [
+                          "scored",
+                          "queueBasis"
+                        ],
+                        "properties": {
+                          "scored": {
+                            "type": "boolean",
+                            "description": "total_score 非空：队列已由评分决定；false = 仍是 fit 门预置"
+                          },
+                          "queueBasis": {
+                            "type": "string",
+                            "enum": [
+                              "fit_gate_preset",
+                              "score",
+                              "human_accept",
+                              "human_reject"
+                            ],
+                            "description": "队列依据：fit_gate_preset = fit 门按 verdict 预置、评分从未跑过；score = 评分阶段算出；human_accept / human_reject = 人工裁决"
+                          }
+                        }
                       }
                     },
                     "page": {
@@ -8680,7 +8927,10 @@
                         "recommended",
                         "needs_review",
                         "rejected",
-                        "suppressed"
+                        "suppressed",
+                        "sanctions_hold",
+                        "scored",
+                        "queueBasis"
                       ],
                       "properties": {
                         "recommended": {
@@ -8694,6 +8944,37 @@
                         },
                         "suppressed": {
                           "type": "integer"
+                        },
+                        "sanctions_hold": {
+                          "type": "integer"
+                        },
+                        "scored": {
+                          "type": "boolean",
+                          "description": "每条 lead 都有 total_score（计数全部出自评分或人工裁决）；false = 至少一条仍是 fit 门预置，或 ICP 无 lead"
+                        },
+                        "queueBasis": {
+                          "type": "object",
+                          "description": "按队列依据计数，四项之和 = lead 总数",
+                          "required": [
+                            "fit_gate_preset",
+                            "score",
+                            "human_accept",
+                            "human_reject"
+                          ],
+                          "properties": {
+                            "fit_gate_preset": {
+                              "type": "integer"
+                            },
+                            "score": {
+                              "type": "integer"
+                            },
+                            "human_accept": {
+                              "type": "integer"
+                            },
+                            "human_reject": {
+                              "type": "integer"
+                            }
+                          }
                         }
                       }
                     }
@@ -8708,7 +8989,7 @@
             "bearer": []
           }
         ],
-        "summary": "四队列计数（推荐/待确认/拒绝/禁联）",
+        "summary": "五队列计数（推荐/待确认/拒绝/禁联/制裁隔离）+ 队列依据（预置 / 评分 / 人工）",
         "tags": [
           "Leads"
         ],
@@ -8744,7 +9025,27 @@
                     "data": {
                       "type": "object",
                       "additionalProperties": true,
-                      "description": "Lead（六维分+队列+裁决状态）"
+                      "description": "Lead（六维分+队列+裁决状态）",
+                      "required": [
+                        "scored",
+                        "queueBasis"
+                      ],
+                      "properties": {
+                        "scored": {
+                          "type": "boolean",
+                          "description": "total_score 非空：队列已由评分决定；false = 仍是 fit 门预置"
+                        },
+                        "queueBasis": {
+                          "type": "string",
+                          "enum": [
+                            "fit_gate_preset",
+                            "score",
+                            "human_accept",
+                            "human_reject"
+                          ],
+                          "description": "队列依据：fit_gate_preset = fit 门按 verdict 预置、评分从未跑过；score = 评分阶段算出；human_accept / human_reject = 人工裁决"
+                        }
+                      }
                     }
                   }
                 }
@@ -8804,7 +9105,27 @@
                     "data": {
                       "type": "object",
                       "additionalProperties": true,
-                      "description": "Lead（六维分+队列+裁决状态）"
+                      "description": "Lead（六维分+队列+裁决状态）",
+                      "required": [
+                        "scored",
+                        "queueBasis"
+                      ],
+                      "properties": {
+                        "scored": {
+                          "type": "boolean",
+                          "description": "total_score 非空：队列已由评分决定；false = 仍是 fit 门预置"
+                        },
+                        "queueBasis": {
+                          "type": "string",
+                          "enum": [
+                            "fit_gate_preset",
+                            "score",
+                            "human_accept",
+                            "human_reject"
+                          ],
+                          "description": "队列依据：fit_gate_preset = fit 门按 verdict 预置、评分从未跑过；score = 评分阶段算出；human_accept / human_reject = 人工裁决"
+                        }
+                      }
                     }
                   }
                 }
@@ -8973,7 +9294,27 @@
                     "data": {
                       "type": "object",
                       "additionalProperties": true,
-                      "description": "Lead（六维分+队列+裁决状态）"
+                      "description": "Lead（六维分+队列+裁决状态）",
+                      "required": [
+                        "scored",
+                        "queueBasis"
+                      ],
+                      "properties": {
+                        "scored": {
+                          "type": "boolean",
+                          "description": "total_score 非空：队列已由评分决定；false = 仍是 fit 门预置"
+                        },
+                        "queueBasis": {
+                          "type": "string",
+                          "enum": [
+                            "fit_gate_preset",
+                            "score",
+                            "human_accept",
+                            "human_reject"
+                          ],
+                          "description": "队列依据：fit_gate_preset = fit 门按 verdict 预置、评分从未跑过；score = 评分阶段算出；human_accept / human_reject = 人工裁决"
+                        }
+                      }
                     }
                   }
                 }
@@ -15093,6 +15434,13 @@
               "$ref": "#/components/schemas/IcpRuleDto"
             }
           },
+          "ruleLint": {
+            "description": "规则 lint（读取 / 激活时由 rules 推导，不落库）：每条否定操作符（neq / not_in / not_contains）的 EXCLUSION 一条提示——与 MUST_HAVE 同 field 同 value 的镜像（资格门已判 Fit 时只记录不排除，建议删除），或非镜像（资格门已判 Fit 时仍然排除，请确认取值写法）；无问题为空数组",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -15113,6 +15461,7 @@
           "personas",
           "buyingCommittee",
           "rules",
+          "ruleLint",
           "createdAt"
         ]
       },

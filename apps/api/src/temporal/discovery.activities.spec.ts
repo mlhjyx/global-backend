@@ -10,7 +10,7 @@ import {
 import { ExecutionControlError } from "../execution-budget/execution-control-error";
 import { DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS } from "./discovery-company-materialization";
 import { ToolPolicyDenied } from "../tools/tool-broker";
-import { MAX_DISCOVERY_PLAN_QUERIES } from "../discovery/execution-envelope";
+import { MAX_DISCOVERY_PLAN_QUERIES, MAX_DISCOVERY_PROFILE_COMPANIES } from "../discovery/execution-envelope";
 import { resolveRunStatus } from "./discovery.run-status";
 import {
   ProviderOutputError,
@@ -2705,10 +2705,20 @@ describe("finalizeRun durable query receipt readback", () => {
     stats: unknown = { perQuery: derived.perQuery },
     budgetStore: BudgetStore = authorityBudgetStore(),
     runStatus = "RUNNING",
+    // Lead rows of the run's companies: a FAILED run that stopped at or after the fit stage
+    // consults them for fit verdicts when its own stats carry none (the failure path builds
+    // stats without `fit`).
+    leadFindFirst: ReturnType<typeof vi.fn> = vi.fn(async () => null),
   ) {
     const update = vi.fn(async () => ({}));
     const outboxCreate = vi.fn(async () => ({}));
     const planUpdate = vi.fn(async () => ({}));
+    // The run's accepted raw records and the companies they resolved to.
+    const rawFindMany = vi.fn(async () => [{ id: RUN_RAW_RECORD_ID }]);
+    const identityLinkFindMany = vi.fn(async () => [
+      { canonicalId: RUN_COMPANY_ID },
+      { canonicalId: RUN_COMPANY_ID },
+    ]);
     const tx = {
       $queryRaw: vi.fn(async () => [
         {
@@ -2720,6 +2730,9 @@ describe("finalizeRun durable query receipt readback", () => {
       ]),
       discoveryRun: { update },
       discoveryQueryPlan: { update: planUpdate },
+      lead: { findFirst: leadFindFirst },
+      rawSourceRecord: { findMany: rawFindMany },
+      identityLink: { findMany: identityLinkFindMany },
       outboxEvent: { create: outboxCreate },
     };
     const activities = createDiscoveryActivities({
@@ -2730,8 +2743,11 @@ describe("finalizeRun durable query receipt readback", () => {
       gateway: {},
       budgetStore,
     } as never);
-    return { activities, outboxCreate, update, planUpdate };
+    return { activities, outboxCreate, update, planUpdate, leadFindFirst, rawFindMany, identityLinkFindMany };
   }
+
+  const RUN_RAW_RECORD_ID = "80000000-0000-4000-8000-000000000001";
+  const RUN_COMPANY_ID = "90000000-0000-4000-8000-000000000001";
 
   function endedAuthorityStore(code: ExecutionBudgetGrantErrorCode): BudgetStore {
     const store = authorityBudgetStore();
@@ -2771,7 +2787,8 @@ describe("finalizeRun durable query receipt readback", () => {
         where: { id: "40000000-0000-4000-8000-000000000001" },
         data: expect.objectContaining({ status: "FAILED", stats: FAILURE_STATS }),
       });
-      // FAILED starts nothing: the plan stays READY and no QualifyRequested is written.
+      // FAILED starts nothing here: the plan stays READY, and with no fit verdict on the run's
+      // companies no QualifyRequested is written.
       expect(planUpdate).not.toHaveBeenCalled();
       expect(outboxCreate).toHaveBeenCalledOnce();
       expect(outboxCreate.mock.calls[0]![0]).toMatchObject({
@@ -2782,6 +2799,266 @@ describe("finalizeRun durable query receipt readback", () => {
       });
     },
   );
+
+  // A run that failed after the fit stage leaves judged-but-unscored companies behind: their
+  // queue is the fit-gate preset, their six scores are NULL and the sanctions gate never ran
+  // (xin, 2026-10-14: 179 such leads from 11 FAILED runs). Scoring is deterministic and spends
+  // no execution budget, so the FAILED write still requests it; the plan stays READY and
+  // DiscoveryRunCompleted keeps reporting FAILED.
+  const FAILED_AFTER_FIT_STATS = Object.freeze({
+    failures: 0,
+    failure: { stage: "signals", errorType: "ProviderTransportError", control: false },
+  });
+
+  it("requests scoring for a FAILED run whose stats show the fit stage judged companies", async () => {
+    const { activities, outboxCreate, planUpdate, leadFindFirst } = finalizeHarness(null);
+
+    await activities.finalizeRun(
+      discoveryArgs("40000000-0000-4000-8000-000000000001", {
+        planId: "50000000-0000-4000-8000-000000000001",
+        icpId: "60000000-0000-4000-8000-000000000001",
+        status: "FAILED" as const,
+        stats: { ...FAILED_AFTER_FIT_STATS, fit: { match: 2, weak: 0, mismatch: 1 } },
+      }),
+    );
+
+    expect(planUpdate).not.toHaveBeenCalled();
+    expect(leadFindFirst).not.toHaveBeenCalled();
+    expect(outboxCreate).toHaveBeenCalledTimes(2);
+    expect(outboxCreate.mock.calls[0]![0]).toMatchObject({
+      data: { eventType: "DiscoveryRunCompleted", payload: { status: "FAILED" } },
+    });
+    expect(outboxCreate.mock.calls[1]![0]).toMatchObject({
+      data: {
+        workspaceId: DISCOVERY_BINDING.scopeKey,
+        eventType: "QualifyRequested",
+        aggregateType: "ICP",
+        aggregateId: "60000000-0000-4000-8000-000000000001",
+        payload: {
+          reason: "discovery_run_failed_after_fit",
+          runId: "40000000-0000-4000-8000-000000000001",
+        },
+      },
+    });
+  });
+
+  it.each(["fit", "enrich", "signals", "watches", "patentEnqueue"] as const)(
+    "requests scoring for a FAILED run that stopped at stage %s once the run's own companies hold a fit verdict (the failure path's stats shape)",
+    async (stage) => {
+      const leadFindFirst = vi.fn(async () => ({ id: "70000000-0000-4000-8000-000000000001" }));
+      const { activities, outboxCreate, planUpdate, rawFindMany, identityLinkFindMany } = finalizeHarness(
+        null,
+        authorityBudgetStore(),
+        "RUNNING",
+        leadFindFirst,
+      );
+
+      await activities.finalizeRun(
+        discoveryArgs("40000000-0000-4000-8000-000000000001", {
+          planId: "50000000-0000-4000-8000-000000000001",
+          icpId: "60000000-0000-4000-8000-000000000001",
+          status: "FAILED" as const,
+          stats: { ...FAILED_AFTER_FIT_STATS, failure: { ...FAILED_AFTER_FIT_STATS.failure, stage } },
+        }),
+      );
+
+      // Scoped to this run: its accepted raw records → the companies they resolved to → their
+      // leads for this ICP. Another run's verdicts on other companies do not count.
+      expect(rawFindMany).toHaveBeenCalledWith({
+        where: { runId: "40000000-0000-4000-8000-000000000001", ingestStatus: "ACCEPTED" },
+        select: { id: true },
+      });
+      expect(identityLinkFindMany).toHaveBeenCalledWith({
+        where: { canonicalType: "company", rawRecordId: { in: [RUN_RAW_RECORD_ID] } },
+        select: { canonicalId: true },
+      });
+      expect(leadFindFirst).toHaveBeenCalledWith({
+        where: {
+          icpId: "60000000-0000-4000-8000-000000000001",
+          canonicalCompanyId: { in: [RUN_COMPANY_ID] },
+          fitVerdict: { not: null },
+        },
+        select: { id: true },
+      });
+      expect(planUpdate).not.toHaveBeenCalled();
+      expect(outboxCreate).toHaveBeenCalledTimes(2);
+      expect(outboxCreate.mock.calls[1]![0]).toMatchObject({
+        data: {
+          eventType: "QualifyRequested",
+          aggregateId: "60000000-0000-4000-8000-000000000001",
+          payload: { reason: "discovery_run_failed_after_fit" },
+        },
+      });
+    },
+  );
+
+  it.each(["plan", "query", "canonicalize", "websiteProfile"] as const)(
+    "writes no QualifyRequested for a FAILED run that stopped at stage %s, before fit, whatever the ICP's leads hold",
+    async (stage) => {
+      // Another run left fit verdicts on this ICP's leads; this run never reached fit.
+      const leadFindFirst = vi.fn(async () => ({ id: "70000000-0000-4000-8000-000000000001" }));
+      const { activities, outboxCreate, rawFindMany } = finalizeHarness(
+        null,
+        authorityBudgetStore(),
+        "RUNNING",
+        leadFindFirst,
+      );
+
+      await activities.finalizeRun(
+        discoveryArgs("40000000-0000-4000-8000-000000000001", {
+          planId: "50000000-0000-4000-8000-000000000001",
+          icpId: "60000000-0000-4000-8000-000000000001",
+          status: "FAILED" as const,
+          stats: { failures: 1, failure: { stage, errorType: "BudgetOperationReplayError", control: false } },
+        }),
+      );
+
+      expect(rawFindMany).not.toHaveBeenCalled();
+      expect(leadFindFirst).not.toHaveBeenCalled();
+      expect(outboxCreate).toHaveBeenCalledOnce();
+      expect(outboxCreate.mock.calls[0]![0]).toMatchObject({
+        data: { eventType: "DiscoveryRunCompleted", payload: { status: "FAILED" } },
+      });
+    },
+  );
+
+  it("writes no QualifyRequested for a FAILED run whose stats carry neither fit counts nor a failure stage", async () => {
+    const leadFindFirst = vi.fn(async () => ({ id: "70000000-0000-4000-8000-000000000001" }));
+    const { activities, outboxCreate, rawFindMany } = finalizeHarness(
+      null,
+      authorityBudgetStore(),
+      "RUNNING",
+      leadFindFirst,
+    );
+
+    await activities.finalizeRun(
+      discoveryArgs("40000000-0000-4000-8000-000000000001", {
+        planId: "50000000-0000-4000-8000-000000000001",
+        icpId: "60000000-0000-4000-8000-000000000001",
+        status: "FAILED" as const,
+        stats: { failures: 1 },
+      }),
+    );
+
+    expect(rawFindMany).not.toHaveBeenCalled();
+    expect(leadFindFirst).not.toHaveBeenCalled();
+    expect(outboxCreate).toHaveBeenCalledOnce();
+  });
+
+  it("writes no QualifyRequested for a FAILED run past fit whose own companies hold no fit verdict", async () => {
+    const { activities, outboxCreate, leadFindFirst } = finalizeHarness(null);
+
+    await activities.finalizeRun(
+      discoveryArgs("40000000-0000-4000-8000-000000000001", {
+        planId: "50000000-0000-4000-8000-000000000001",
+        icpId: "60000000-0000-4000-8000-000000000001",
+        status: "FAILED" as const,
+        stats: FAILED_AFTER_FIT_STATS,
+      }),
+    );
+
+    expect(leadFindFirst).toHaveBeenCalledOnce();
+    expect(outboxCreate).toHaveBeenCalledOnce();
+    expect(outboxCreate.mock.calls[0]![0]).toMatchObject({
+      data: { eventType: "DiscoveryRunCompleted" },
+    });
+  });
+
+  it("writes no QualifyRequested for a FAILED run past fit that accepted no raw record, without a lead lookup", async () => {
+    const { activities, outboxCreate, leadFindFirst, rawFindMany, identityLinkFindMany } = finalizeHarness(null);
+    rawFindMany.mockResolvedValueOnce([]);
+
+    await activities.finalizeRun(
+      discoveryArgs("40000000-0000-4000-8000-000000000001", {
+        planId: "50000000-0000-4000-8000-000000000001",
+        icpId: "60000000-0000-4000-8000-000000000001",
+        status: "FAILED" as const,
+        stats: FAILED_AFTER_FIT_STATS,
+      }),
+    );
+
+    expect(identityLinkFindMany).not.toHaveBeenCalled();
+    expect(leadFindFirst).not.toHaveBeenCalled();
+    expect(outboxCreate).toHaveBeenCalledOnce();
+  });
+
+  it("writes no QualifyRequested for a FAILED run whose own fit counts are all zero, without consulting lead rows", async () => {
+    // The ICP's leads hold verdicts from an earlier run; this run's fit stage judged nothing.
+    const leadFindFirst = vi.fn(async () => ({ id: "70000000-0000-4000-8000-000000000001" }));
+    const { activities, outboxCreate, rawFindMany } = finalizeHarness(
+      null,
+      authorityBudgetStore(),
+      "RUNNING",
+      leadFindFirst,
+    );
+
+    await activities.finalizeRun(
+      discoveryArgs("40000000-0000-4000-8000-000000000001", {
+        planId: "50000000-0000-4000-8000-000000000001",
+        icpId: "60000000-0000-4000-8000-000000000001",
+        status: "FAILED" as const,
+        stats: { ...FAILED_AFTER_FIT_STATS, fit: { match: 0, weak: 0, mismatch: 0 } },
+      }),
+    );
+
+    expect(rawFindMany).not.toHaveBeenCalled();
+    expect(leadFindFirst).not.toHaveBeenCalled();
+    expect(outboxCreate).toHaveBeenCalledOnce();
+    expect(outboxCreate.mock.calls[0]![0]).toMatchObject({
+      data: { eventType: "DiscoveryRunCompleted" },
+    });
+  });
+
+  it.each([
+    "EXECUTION_BUDGET_GRANT_EXPIRED",
+    "EXECUTION_BUDGET_AUTHORITY_REVOKED",
+    "EXECUTION_BUDGET_AUTHORITY_EXHAUSTED",
+  ] as const)(
+    "still requests scoring for a FAILED run after its authority ended (%s): scoring spends no budget",
+    async (code) => {
+      const leadFindFirst = vi.fn(async () => ({ id: "70000000-0000-4000-8000-000000000001" }));
+      const { activities, outboxCreate, planUpdate } = finalizeHarness(
+        null,
+        endedAuthorityStore(code),
+        "RUNNING",
+        leadFindFirst,
+      );
+
+      await activities.finalizeRun(
+        discoveryArgs("40000000-0000-4000-8000-000000000001", {
+          planId: "50000000-0000-4000-8000-000000000001",
+          icpId: "60000000-0000-4000-8000-000000000001",
+          status: "FAILED" as const,
+          stats: FAILED_AFTER_FIT_STATS,
+        }),
+      );
+
+      expect(planUpdate).not.toHaveBeenCalled();
+      expect(outboxCreate).toHaveBeenCalledTimes(2);
+      expect(outboxCreate.mock.calls[1]![0]).toMatchObject({
+        data: { eventType: "QualifyRequested", payload: { reason: "discovery_run_failed_after_fit" } },
+      });
+    },
+  );
+
+  it("keeps the completed-run reason on a DONE run's QualifyRequested without consulting lead rows", async () => {
+    const { activities, outboxCreate, leadFindFirst } = finalizeHarness(null);
+
+    await activities.finalizeRun(
+      discoveryArgs("40000000-0000-4000-8000-000000000001", {
+        planId: "50000000-0000-4000-8000-000000000001",
+        icpId: "60000000-0000-4000-8000-000000000001",
+        status: "DONE" as const,
+        stats: { failures: 0, fit: { match: 0, weak: 0, mismatch: 0 } },
+      }),
+    );
+
+    expect(leadFindFirst).not.toHaveBeenCalled();
+    expect(outboxCreate).toHaveBeenCalledTimes(2);
+    expect(outboxCreate.mock.calls[1]![0]).toMatchObject({
+      data: { eventType: "QualifyRequested", payload: { reason: "discovery_run_completed" } },
+    });
+  });
 
   it.each(["DONE", "PARTIAL"] as const)(
     "refuses a %s outcome once the run's authority has ended",
@@ -3530,6 +3807,7 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
       nextIndex: null,
       unreplayable: 0,
       previousUnreplayable: false,
+      backfilled: 0,
     });
     expect(profile).not.toHaveBeenCalled();
   });
@@ -3738,29 +4016,63 @@ describe("profileWebsitesForRun contact paths (BI-14)", () => {
     evidence: [],
   };
 
-  type Committed = { data: { attributes: Record<string, Record<string, unknown>> } };
+  type Committed = {
+    where?: { id?: string };
+    data: { attributes: Record<string, Record<string, unknown>> };
+  };
+  type Row = { id: string; name: string; domain: string; country: string; attributes: unknown };
 
   async function makeContactDeps(
     profile: ReturnType<typeof vi.fn>,
-    options: { contactStatus?: string; attributes?: Record<string, unknown>; lockedStatus?: string } = {},
+    options: {
+      contactStatus?: string;
+      attributes?: Record<string, unknown>;
+      lockedStatus?: string;
+      /** Workspace companies outside the run whose contact paths were never read (the backfill candidates). */
+      backfill?: Array<{ id: string; name: string; domain: string; country: string; attributes: Record<string, unknown> }>;
+      runCompanies?: Array<{ id: string; name: string; domain: string; country: string }>;
+      /** What a re-read of the company finds now (e.g. stamped by a concurrent run since the list was read). */
+      current?: Record<string, Record<string, unknown>>;
+    } = {},
   ) {
     const deps = makeEnrichDeps([]) as unknown as {
       prisma: { withWorkspace: (ws: string, fn: (tx: unknown) => Promise<unknown>) => Promise<unknown> };
       websiteProfile?: unknown;
     };
-    const updateMany = vi.fn(async (_args: Committed) => ({ count: 1 }));
+    const attributes = options.attributes ?? {};
+    // The stored companies: re-reads and writes go through this map, like the rows of one database.
+    const rows = new Map<string, Row>();
+    for (const company of options.runCompanies ?? [COMPANY]) rows.set(company.id, { ...company, attributes });
+    for (const company of options.backfill ?? []) rows.set(company.id, { ...company });
+    for (const [id, current] of Object.entries(options.current ?? {})) {
+      const row = rows.get(id);
+      if (row) rows.set(id, { ...row, attributes: current });
+    }
+    const updateMany = vi.fn(async (args: Committed) => {
+      const row = args.where?.id ? rows.get(args.where.id) : undefined;
+      if (row && args.data.attributes !== undefined) row.attributes = args.data.attributes;
+      return { count: 1 };
+    });
     const points = {
       findMany: vi.fn(async () => []),
       createMany: vi.fn(async (args: { data: unknown[] }) => ({ count: args.data.length })),
       updateMany: vi.fn(async () => ({ count: 0 })),
     };
-    const attributes = options.attributes ?? {};
+    const backfillQueries: unknown[][] = [];
     await deps.prisma.withWorkspace("ws", async (raw) => {
       const tx = raw as Record<string, unknown> & { canonicalCompany: Record<string, unknown> };
-      tx.$queryRaw = vi.fn(async (strings: TemplateStringsArray) =>
-        strings.join("?").includes("FOR SHARE")
-          ? [{ status: options.lockedStatus ?? "NEW", name: COMPANY.name, domain: COMPANY.domain }]
-          : [{ locked: true }]);
+      tx.$queryRaw = vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+        const sql = strings.join("?");
+        if (sql.includes("FOR SHARE")) {
+          return [{ status: options.lockedStatus ?? "NEW", name: COMPANY.name, domain: COMPANY.domain }];
+        }
+        if (sql.includes("_contact_parser")) {
+          backfillQueries.push(values);
+          return options.backfill ?? [];
+        }
+        return [{ locked: true }];
+      });
+      tx.discoveryRun = { findUnique: vi.fn(async () => ({ createdAt: new Date("2026-10-14T00:00:00Z") })) };
       tx.dataProvider = {
         findUnique: vi.fn(async ({ where }: { where: { key: string } }) => ({
           status: where.key === "company_contact" ? options.contactStatus ?? "DISABLED" : "ENABLED",
@@ -3770,13 +4082,22 @@ describe("profileWebsitesForRun contact paths (BI-14)", () => {
         findUnique: vi.fn(async () => ({ companyAttributes: { industry: "Pumpen" }, targetMarkets: ["DE"] })),
       };
       tx.canonicalCompany.updateMany = updateMany;
-      tx.canonicalCompany.findMany = async () => [{ ...COMPANY, attributes }];
-      tx.canonicalCompany.findUnique = async () => ({ ...COMPANY, status: "NEW", attributes });
+      tx.canonicalCompany.findMany = async () =>
+        (options.runCompanies ?? [COMPANY]).map((company) => ({ ...company, attributes }));
+      tx.canonicalCompany.findUnique = async ({ where }: { where: { id: string } }) => ({
+        ...(rows.get(where.id) ?? { ...COMPANY, attributes }),
+        status: "NEW",
+      });
       tx.companyContactPoint = points;
     });
     deps.websiteProfile = { profile };
-    return { acts: createDiscoveryActivities(deps as never), updateMany, points };
+    return { acts: createDiscoveryActivities(deps as never), updateMany, points, backfillQueries, rows };
   }
+
+  const websiteProfileOf = (row: Row | undefined) =>
+    ((row?.attributes ?? {}) as { website_profile?: Record<string, unknown> }).website_profile ?? {};
+  const stampWrites = (updateMany: ReturnType<typeof vi.fn>) =>
+    updateMany.mock.calls.filter(([args]) => JSON.stringify((args as Committed).data).includes("_contact_attempt_at"));
 
   it("leaves contact paths alone while company_contact is DISABLED: nothing asked for, no points", async () => {
     // A provider that returns contact paths anyway is ignored.
@@ -3793,6 +4114,8 @@ describe("profileWebsitesForRun contact paths (BI-14)", () => {
     expect(profileAttributes).not.toHaveProperty("_contact_parser");
     // The source page of the profile facts is kept either way (A4).
     expect(profileAttributes).toMatchObject({ source_url: `${SITE}/impressum` });
+    // Contact paths were not read, so no attempt is recorded either (W5-f).
+    expect(stampWrites(updateMany)).toEqual([]);
   });
 
   it("asks for contact paths while company_contact is ENABLED and stores them in the profile transaction", async () => {
@@ -3856,6 +4179,214 @@ describe("profileWebsitesForRun contact paths (BI-14)", () => {
     expect(points.findMany).not.toHaveBeenCalled();
     expect(points.createMany).not.toHaveBeenCalled();
     expect(points.updateMany).not.toHaveBeenCalled();
+  });
+
+  // ── 评分规则 v3：补联系路径（backfill）——开关打开后，每个 run 用画像配额的余量读工作区里还没读过联系路径的公司 ──
+  const BACKFILL = [
+    { id: "b1", name: "B1 Pumpen", domain: "b1-pumpen.example", country: "DE", attributes: {} },
+    { id: "b2", name: "B2 Armaturen", domain: "b2-armaturen.example", country: "AT", attributes: {} },
+  ];
+
+  it("fills the remaining profile quota with workspace companies whose contact paths were never read (switch ENABLED)", async () => {
+    const profile = vi.fn(async () => ({ ...PROFILE, contactPaths: PATHS }));
+    const { acts, backfillQueries } = await makeContactDeps(profile, { contactStatus: "ENABLED", backfill: BACKFILL });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-contact-backfill", { icpId: "icp-1" })),
+    // profiled / matched count the run's own companies only; the backfill companies are counted apart (W5-f).
+    ).resolves.toMatchObject({ profiled: 1, matched: 1, backfilled: 2, nextIndex: null });
+
+    expect(profile.mock.calls.map((call) => (call[0] as { domain: string }).domain)).toEqual([
+      COMPANY.domain,
+      "b1-pumpen.example",
+      "b2-armaturen.example",
+    ]);
+    // The candidate query takes only the quota the run's own companies left over.
+    expect(backfillQueries).toHaveLength(1);
+    expect(backfillQueries[0]).toContain(MAX_DISCOVERY_PROFILE_COMPANIES - 1);
+  });
+
+  it("does not look for backfill candidates while company_contact is DISABLED", async () => {
+    const profile = vi.fn(async () => PROFILE);
+    const { acts, backfillQueries } = await makeContactDeps(profile, { backfill: BACKFILL });
+
+    await acts.profileWebsitesForRun(discoveryArgs("run-contact-backfill-off", { icpId: "icp-1" }));
+
+    expect(backfillQueries).toHaveLength(0);
+    expect(profile).toHaveBeenCalledOnce();
+  });
+
+  it("a continuation activity starting past the run's own list profiles the backfill companies only", async () => {
+    const profile = vi.fn(async () => ({ ...PROFILE, contactPaths: PATHS }));
+    const { acts } = await makeContactDeps(profile, { contactStatus: "ENABLED", backfill: BACKFILL });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-contact-backfill-resume", { icpId: "icp-1", startIndex: 1 })),
+    ).resolves.toMatchObject({ profiled: 0, matched: 0, backfilled: 2 });
+
+    expect(profile.mock.calls.map((call) => (call[0] as { domain: string }).domain)).toEqual([
+      "b1-pumpen.example",
+      "b2-armaturen.example",
+    ]);
+  });
+
+  it("does not look for backfill candidates when the run's own companies already fill the quota", async () => {
+    const profile = vi.fn(async () => null);
+    const runCompanies = Array.from({ length: MAX_DISCOVERY_PROFILE_COMPANIES }, (_, index) => ({
+      id: `r${index}`,
+      name: `R${index}`,
+      domain: `r${index}.example`,
+      country: "DE",
+    }));
+    const { acts, backfillQueries } = await makeContactDeps(profile, {
+      contactStatus: "ENABLED",
+      backfill: BACKFILL,
+      runCompanies,
+    });
+
+    await acts.profileWebsitesForRun(discoveryArgs("run-contact-backfill-full", { icpId: "icp-1" }));
+
+    expect(backfillQueries).toHaveLength(0);
+    expect(profile).toHaveBeenCalledTimes(MAX_DISCOVERY_PROFILE_COMPANIES);
+  });
+
+  it("skips a backfill candidate this run already read (it stays in the list so continuation indexes hold)", async () => {
+    const profile = vi.fn(async () => ({ ...PROFILE, contactPaths: PATHS }));
+    const alreadyRead = {
+      ...BACKFILL[0]!,
+      attributes: {
+        website_profile: { trade_role: "distributor", _ts: new Date().toISOString(), _contact_parser: "company_contact/v1" },
+      },
+    };
+    const { acts } = await makeContactDeps(profile, { contactStatus: "ENABLED", backfill: [alreadyRead, BACKFILL[1]!] });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-contact-backfill-read", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ profiled: 1, backfilled: 1 });
+
+    expect(profile.mock.calls.map((call) => (call[0] as { domain: string }).domain)).toEqual([
+      COMPANY.domain,
+      "b2-armaturen.example",
+    ]);
+  });
+
+  // ── W5-f：尝试水位与 7 天冷却——画像返回空、死站、主体被拒的公司不再永远占着候选最前面 ──
+  it("stamps every contact-path attempt, also one whose profile came back empty, and keeps the facts of a read one", async () => {
+    const profile = vi.fn(async (input: { domain: string }) =>
+      input.domain === "b1-pumpen.example" ? null : { ...PROFILE, contactPaths: PATHS },
+    );
+    const { acts, rows } = await makeContactDeps(profile, { contactStatus: "ENABLED", backfill: BACKFILL });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-contact-attempt", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ profiled: 1, matched: 1, backfilled: 2 });
+
+    // Robots-blocked / empty / dead site: no facts, no parser marker, but the attempt is on record.
+    const empty = websiteProfileOf(rows.get("b1"));
+    expect(Date.parse(String(empty._contact_attempt_at))).not.toBeNaN();
+    expect(empty).not.toHaveProperty("_contact_attempt_prev");
+    expect(empty).not.toHaveProperty("_contact_parser");
+    expect(empty).not.toHaveProperty("trade_role");
+    // A company read successfully keeps its facts and parser marker next to the stamp.
+    for (const id of [COMPANY.id, "b2"]) {
+      expect(websiteProfileOf(rows.get(id)), id).toMatchObject({
+        _contact_parser: "company_contact/v1",
+        source_url: `${SITE}/impressum`,
+        _contact_attempt_at: expect.any(String),
+      });
+    }
+  });
+
+  it("stamps a backfill company whose subject is denied (bookkeeping only, no facts)", async () => {
+    const profile = vi.fn(async (input: { domain: string }) => {
+      if (input.domain === "b1-pumpen.example") {
+        throw new ToolPolicyDenied("http.get", "GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD");
+      }
+      return { ...PROFILE, contactPaths: PATHS };
+    });
+    const { acts, rows } = await makeContactDeps(profile, { contactStatus: "ENABLED", backfill: BACKFILL });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-contact-denied", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ skippedSubjects: 1, backfilled: 1 });
+
+    const denied = websiteProfileOf(rows.get("b1"));
+    expect(Object.keys(denied)).toEqual(["_contact_attempt_at"]);
+  });
+
+  it("keeps the attempt before this run as `previous` and stamps a company tried before the cooldown again", async () => {
+    const tried = {
+      ...BACKFILL[0]!,
+      attributes: { website_profile: { _contact_attempt_at: "2026-09-01T00:00:00.000Z" } },
+    };
+    const profile = vi.fn(async () => null);
+    const { acts, rows } = await makeContactDeps(profile, { contactStatus: "ENABLED", backfill: [tried] });
+
+    await acts.profileWebsitesForRun(discoveryArgs("run-contact-retry", { icpId: "icp-1" }));
+
+    expect(profile.mock.calls.map((call) => (call[0] as { domain: string }).domain)).toContain("b1-pumpen.example");
+    expect(websiteProfileOf(rows.get("b1"))).toMatchObject({
+      _contact_attempt_at: expect.any(String),
+      _contact_attempt_prev: "2026-09-01T00:00:00.000Z",
+    });
+  });
+
+  it("re-reads each backfill company before profiling it: one a concurrent run attempted since this run began is skipped", async () => {
+    const profile = vi.fn(async () => ({ ...PROFILE, contactPaths: PATHS }));
+    const { acts, updateMany } = await makeContactDeps(profile, {
+      contactStatus: "ENABLED",
+      backfill: BACKFILL,
+      // The list still shows b1 unread; the stored row was stamped since by another run whose read failed.
+      current: { b1: { website_profile: { _contact_attempt_at: "2026-10-14T03:00:00.000Z" } } },
+    });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-contact-dedupe", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ profiled: 1, backfilled: 1 });
+
+    expect(profile.mock.calls.map((call) => (call[0] as { domain: string }).domain)).toEqual([
+      COMPANY.domain,
+      "b2-armaturen.example",
+    ]);
+    expect(stampWrites(updateMany).some(([args]) => (args as Committed).where?.id === "b1")).toBe(false);
+  });
+
+  it("a replayed profile commit counts as matched only when the namespace holds profile facts, not just an attempt stamp", async () => {
+    acknowledgementMocks.apply.mockImplementationOnce(
+      async (input: {
+        transaction: unknown;
+        acknowledgements: Array<{ producerId: string }>;
+        readback: (transaction: unknown) => Promise<unknown>;
+      }) => ({
+        status: "REPLAYED",
+        acknowledgements: input.acknowledgements.map(({ producerId }) => ({ producerId, status: "REPLAYED" })),
+        value: await input.readback(input.transaction),
+      }),
+    );
+    const profile = vi.fn(async (_input: unknown, ctx: ExecutionContext) => {
+      ctx.onDurableReceipt?.("http.get", ENRICHMENT_RECEIPT);
+      return { ...PROFILE, contactPaths: PATHS };
+    });
+    // An earlier attempt left only its stamp: no profile facts, so no `_ts`.
+    const { acts } = await makeContactDeps(profile, {
+      contactStatus: "ENABLED",
+      attributes: { website_profile: { _contact_attempt_at: "2026-10-13T00:00:00.000Z" } },
+    });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-contact-readback", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ profiled: 1, matched: 0 });
+  });
+
+  it("asks for candidates outside the 7-day cooldown, counted from the run's creation", async () => {
+    const profile = vi.fn(async () => null);
+    const { acts, backfillQueries } = await makeContactDeps(profile, { contactStatus: "ENABLED", backfill: [] });
+
+    await acts.profileWebsitesForRun(discoveryArgs("run-contact-cutoff", { icpId: "icp-1" }));
+
+    // The run was created 2026-10-14T00:00Z (see makeContactDeps): attempts from 2026-10-07T00:00Z on are cooling.
+    expect(backfillQueries[0]).toContain("2026-10-14T00:00:00.000Z");
+    expect(backfillQueries[0]).toContain("2026-10-07T00:00:00.000Z");
   });
 });
 

@@ -5,6 +5,57 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-15 · Repair the stale artifact-subject RLS spec and run it in CI
+
+- 起因：`packages/db/test/generic-operation-artifact-subject.rls.spec.mjs`（PERSONAL_DATA 产物按主体建索引、DSR tombstone 阻止再物化、app_user 不能直读或改写索引，共 10 项）不在任何 CI 步骤里，没人发现它早已跑不起来：在只含 main 迁移的库上，before 钩子以 `GENERIC_OPERATION_ARTIFACT_INVALID` 失败，10 项全部取消（#654 的实施工作流在一次性库上发现）。
+- 根因是夹具落后于两次迁移，不是被测的 SQL 有缺陷：
+  - `20260901060000_generic_operation_artifact_privacy_prefix` 起，最终对象键带隐私类前缀（`…/v1/final/<privacy>/sha256/…`），`assert_generic_operation_artifact_manifest_v2` 拒绝其他形式；夹具还在拼旧键。
+  - `generic_operation_artifact_personal_version_guard`（延迟约束触发器）要求 PERSONAL_DATA 对象在事务提交前钉上对象版本；夹具用不带版本的 `settle_…_v2`，并直接 `append_…_v3` 写个人数据，提交时报 `GENERIC_OPERATION_ARTIFACT_OBJECT_VERSION_REQUIRED`。
+- 改动（只动测试与 CI）：
+  - 对象键按 `contentAddressedObjectKey` 的规则带隐私类前缀；
+  - 个人数据一律走运行时实际使用的 `settle_tool_budget_artifact_manifest_with_receipt_v4`，带对象版本；非个人数据仍用 `append_…_v3`。专门验证「旧函数被拒」的用例保持原样。
+  - CI 新增步骤「Generic operation artifact subject RLS on PostgreSQL」：在同一个 Postgres 服务里另建 `global_artifact_subject_test` 库（用例写固定 id、保留数据行，不能与其他步骤共库），用例自己部署全部迁移后运行。
+- 测试：
+  - 修复前 0/10（before 钩子失败、10 项取消），修复后 10/10。
+  - 所有拒绝断言都钉具体错误标记（`permission denied`、`…_SUBJECT_TOMBSTONED`、`…_SUBJECT_INVALID`），新的版本守卫不会让它们误过。
+  - 变异检验：禁用 `generic_operation_artifact_personal_subject_guard` 后，「v2 append 绕过」与「ACK_UNKNOWN 恢复冻结主体」两项变红，失败原因是「没有被拒」（日志里 0 次 `OBJECT_VERSION_REQUIRED`）。
+  - 独立复审 LOW：这两项的裸 append 原本会被两个延迟触发器（主体守卫、版本守卫）同时拒绝，命中 `SUBJECT_INVALID` 只是因为 PostgreSQL 按触发器名字顺序执行。现在先经运行时结算写入同字节的承载产物、钉住对象版本，再做裸 append，只剩主体守卫能拒绝，不再依赖触发器命名。
+  - 按 CI 步骤的命令在一次性 pgvector/pg16 上模拟：主库已迁移、另建库、运行用例，退出码 0。
+- 未做：`packages/db/test` 里其余不在 CI 的用例没有逐个核查；#654 合入后可在本用例补 `company_profile` 主体的 tombstone 覆盖。
+
+## 2026-10-14 · Release the reservation of a definite failure before any output, and let the same key reserve again (D13, operational fix) (#652)
+
+- 起因：非付费路径（获客全部走这里）把「确定的失败」和「结果未知」一样当作不可重放，每一次都是 run 的终点。
+  - 网关 `router-model-gateway.ts` 的 catch 只在 `ExternalActionDeniedError`、`callCount === 0` 且没有 usage 时释放预留，其余一律「已结算、无结果」：HTTP 503（卖方 #26 的词表归一，10-13 11:36，`ProviderHttpError`）、首个输出之前的上游错误事件（卖方 #25、#27，10-13 08:36 与 12:27 的 6 次 `CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR`，ai_trace 里输入、输出 token 都为空，new-api 记 `reason=eof`、0 个输出 token）。
+  - 账本 `reserve_tool_budget_microusd_v1` 对已存在的 key 一律 `REPLAY`，`release` 只允许 RESERVED → RELEASED：释放过的操作也永远不能再跑，重试都撞上 `BUDGET_OPERATION_REPLAY_UNAVAILABLE`。共用操作键时还跨查询传染（卖方 #26）：#645 已按查询分键并在丢失时回退内置词表，但失败的归一调用仍按预留上界结算（#645「未做」第 1 条），本 PR 让 503 这类确定失败释放、同一查询的重试可以重新预留。
+  - broker 在 `execute()` 开始后的任何失败都保留 RESERVED，连请求根本没发出（DNS 失败、SSRF 拦截、平台出网合同不可用）也一样。
+  - xin 只读核对（`global_dev`）：10 月「SETTLED、无结果」31 行、RESERVED 19 行（10-09 至 10-13，全部是 1¢/0¢ 的工具预留）、RELEASED 28 行。
+- 改动：
+  - **网关**：新模块 `model-gateway/definite-model-failure.ts` 判定「确定失败、网关没有计费」，两类：HTTP 429 与除 504/524 外的 5xx（`MODEL_PROVIDER_HTTP_UNAVAILABLE`，与 new-api 自身的重试状态码 429,500-503,520-523,525-599 对齐）、连接从未建立（`fetch failed` 的 cause 为 ECONNREFUSED/ENOTFOUND/EAI_AGAIN/EHOSTUNREACH/ENETUNREACH/UND_ERR_CONNECT_TIMEOUT，双栈时每个地址都是，`MODEL_PROVIDER_CONNECTION_NOT_ESTABLISHED`）。非付费、非平台出网路径上这两类释放预留；超时、中止、HTTP 504/524、任何流式失败（含首个输出之前的）、内容过滤、不可读的流、HTTP 4xx、修复调用（首调已出输出）和其他错误照旧结算、无结果。
+  - **运行时会话核对后的收窄**（PR 评论 issuecomment-6182377079）：初版还释放「流在第一个输出之前结束」（`CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR`/`_TRUNCATED`/`_EMPTY`，`MODEL_PROVIDER_STREAM_FAILED_BEFORE_OUTPUT`）。运行时会话只读查了 new-api 的计费日志：10-13 12:27 那批 `reason=eof`（log 5734–5738）各有一行 consume，completion 为 0，按本地估算的输入 token 计费，每次约 2.3 万 quota；10 月全月有 6 行 0 输出计费，约 0.28 美元。现役 fork 对这种流回 HTTP 200 并扣费，释放会少记，所以拿掉这一类，等 mlhjyx/new-api#3（首字节之前的失败改为回错误、不计费）随 W12 上线后再单独加回。HTTP 504/524 是超时，请求已到达上游、可能已生成并计费，也排除。HTTP 429/5xx 在 new-api 侧没有任何计费行，可以释放。每个 key 最多 3 次是账本层的计数：new-api `RetryTimes=1`，最多对应 6 次物理请求。
+  - **流解析器**（`openai-compatible.provider.ts`，判定暂不使用，留给 new-api#3 上线后的那次改动）：记录是否收到过输出——content、任何名字的 reasoning、tool_calls 增量，或 usage 里的输出 token；只有 role 的开头块和空字符串不算。三种流失败带上 `outputStarted`；其余失败不带（视为未知）。
+  - **ai_trace**：失败的非付费调用在 `meta` 里写 `budgetOperationId` 与 `budgetDisposition`（`RELEASED_CONTROL_DENIAL` / `RELEASED_DEFINITE_FAILURE` / `SETTLED_NO_RESULT`），每次失败都能追到账本行；`ProviderHttpError` 的 `errorMessage` 带上状态码（`ProviderHttpError:HTTP_503`）。
+  - **broker**：能证明一个物理请求都没发出时释放预留——平台工具的调度器从未进入；或工作区工具声明了 `physicalWireObservation: "before_each_wire"`（每个物理请求前都调用 `ctx.beforePhysicalWire`）而 broker 注入的观察钩子从未被调用。声明的工具：`http.get`、`crawl4ai.render`、`tradefair.algolia`、`mapyourshow.fetch`、`sanctions.download`。没有声明的工具与付费路径不变。
+  - **账本**：迁移 `20261015045032_tool_budget_released_rereserve` 给 `tool_budget_operation` 加 `attempt`（1..3）；`reserve` 遇到同 key 的 RELEASED 行且 `attempt < 3` 时重新打开同一行（`attempt + 1`、回到 RESERVED、按新额度做与新插入相同的额度检查与 DENIED/exhausted 处理），id 不变，`(account_id, generation, operation_key)` 仍唯一；RESERVED、RESULT_UNKNOWN、SETTLED（有无结果都一样）以及第 3 次的 RELEASED 照旧 `REPLAY`。
+  - **治理声明**：`durable-result-strategies.json` 的 `resultDisposition` 升到 `execution-result-disposition/v2`，新增 `definite_failure`，`automaticPhysicalRetryAllowed` 从 `false` 改为 `"DEFINITE_FAILURE_BEFORE_OUTPUT_ONLY"`，并声明 `definiteFailureStatus: RELEASED`、`maxReservationAttempts: 3`；`execution-authority-policy.mjs` 按新口径逐值校验，并要求迁移里有 3 次上限与「只有 RELEASED 可再预留」、分类器排除 504/524，并且在 new-api#3 上线前不得引用 `ProviderTransportError`/`ProviderOutputError`（即不得释放任何流式或输出失败）。`domain-ack-contract.ts` 的处置合同同步到 v2：只有 `definite_failure` 可以 `automaticPhysicalRetryAllowed: true`。AGENTS.md §8 与执行预算设计文档同步口径。
+  - 受保护文件 `router-model-gateway.ts`、`tool-broker.ts` 重钉指纹，复核追加到 `docs/evidence/execution-authority-fence-review-20261001.md`。`schema.prisma` 变更后 Copy 回执重签（HASH_ONLY）。CI 的 PostgreSQL 步骤加跑新的账本真库用例。
+- 测试：
+  - 先写失败测试，确认红后再实现，改动后全部通过：
+    - 网关 24 项新用例，改动前 22 项红（10 类释放、11 类照旧结算、预算余额回到原值）；「修复调用遇 503 照旧结算」「平台出网照旧结算」两项改动前就成立，锁住边界。收窄时三种流式用例移到「照旧结算」，另加 HTTP 504、524 两项「照旧结算」，收窄前这 5 项红；处置合同把流式码加进拒收列表，收窄前红。
+    - 流解析器 12 项，改动前 11 项红（不可读行的输出状态保持未知，改动前就成立）。
+    - broker 8 项，改动前 3 项红（另外 5 项锁住不变的行为：未声明工具、调用方钩子、上下文不变、平台已发出、调度器失败）。
+    - 处置合同新增 6 项，改动前 4 项红；4 个旧用例随 v1 → v2 改名。治理脚本 1 项红。工具声明清单 1 项红。
+    - 账本真库 6 项全部红：RELEASED 后同 key 重开为第 2 次并正常结算；在途、结果未知、已结算无结果都照旧 REPLAY；第 4 次 REPLAY；额度不足时 DENIED 且行仍为 RELEASED；两个并发重开只有一个成功；网关在 503 后的重试真正跑完而不是撞上 REPLAY。
+    - ai_trace 写入 `meta` 的 1 项与实现同时写。
+  - 一次性 PostgreSQL（pgvector/pg16）上 `prisma migrate deploy` 全部迁移后跑真库用例，以 app_user 运行；`security-definer-search-path.postgres.spec.ts` 与 `discovery-run-admission-lease.postgres.spec.ts` 在同一库上照旧通过。
+- 未做：
+  - 在途 RESERVED 的有界等待（重试遇到「仍在进行」时按 2 秒轮询、最多 310 秒）与超龄 RESERVED → RESULT_UNKNOWN 的 SQL 函数（任务里的 PR-2）。10 月的 19 行 RESERVED 多是 `crawl4ai.fetch` 发出请求之后的失败（爬虫 5xx、超时）或进程中断，本 PR 不释放它们。
+  - `crawl4ai.fetch` 没有把 `beforePhysicalWire` 传给 robots 与爬虫，所以不声明；本地 crawl4ai 服务回 5xx（请求已发出）是否也算「确定失败」需要单独决定。
+  - 付费路径（Site Builder R4-B 账本）不变。
+  - 重新打开的行保留首次的 `created_at`；如果 PR-2 按年龄判定超龄，需要另记每次预留的时间。
+  - 流在第一个输出之前失败暂不释放，等 mlhjyx/new-api#3 上线后单独加回（同时改 `execution-authority-policy.mjs` 的反向检查）。
+  - 迁移原名 `20261014095011`，排在 #654 的 `20261014120000` 之前；为避免分班上线时 `migration_revision` 与最新执行的迁移不一致，改名为 `20261015045032`，SQL 不变。
+
 ## 2026-10-14 · Keep a reused artifact object alive until its latest manifest expires, and record every object version for erasure (#647)
 
 - 起因：运行时会话 10-14 用库与 MinIO 证实，产物对象按 `sha256 + 隐私类` 寻址复用，但桶生命周期按**对象年龄**过期（PERSONAL_DATA 1 天，MinIO 的实际删除点是 `LastModified + 2 天` 向下取整到 UTC 午夜）。后来的清单复用同一对象不刷新年龄，第一个写入者的到期一到对象就没了，库里更晚的行还在有效期内：空页面摘要 `e3b0c442…` 有 23 行（10-12 17:34 → 10-13 16:36 写入，最晚到 10-14 16:36），对象 10-14 00:00 已被删除；重放时 `readVerified` 报 `GENERIC_OPERATION_ARTIFACT_INVALID`，「同一操作重放不再出网」的保证被破坏。
@@ -52,6 +103,114 @@
   - 429 等 4xx 仍按控制错误让查询失败，没有放进回退范围。
   - 旧形态（无计划身份）的查询不带 `correlationId`，仍按 run 共用操作键。
   - `taxonomyFallback` 不进 `resolveRunStatus`：回退的查询照常跑完所有源，不算漏活；若产品负责人希望它把 run 判 PARTIAL，是一行改动。
+
+## 2026-10-14 · Request scoring after a FAILED discovery run that already judged fit, and tell preset queues from scored ones (#648)
+
+- 起因：xin 上 179 条 lead 的六维分全是 NULL，队列只是 fit 阶段按 verdict 预置的值（`discovery/fit-judge.ts` `upsertLeadFit`：mismatch→rejected、其余→needs_review）。
+  - `finalizeRun` 只在 run 状态非 FAILED 时写 `QualifyRequested`，而 11 次验收 run 全部 FAILED（10-14 只读核对 `global_dev`：`discovery_run` 11 行全 FAILED、stats 都没有 `fit` 键（全部走的失败收尾路径）；`outbox_event` 里 `QualifyRequested` 与 `LeadsScored` 各 0 条）。
+  - 结果是评分、制裁第五门（`temporal/qualify.activities.ts`）、`LeadsScored` 事件从未在真实数据上跑过；API 又把预置队列和评分队列显示成一样。
+- 改动：
+  - **FAILED 的 run 也请求评分**：只要本 run 的 fit 阶段已经给过判定，`finalizeRun` 照样写 `QualifyRequested`（`reason: discovery_run_failed_after_fit`），让已物化的公司得到评分；分数是幂等 upsert，之后的 run 再刷新。
+    - 判据只看本 run（`fitStageJudged`）：stats 带 `fit` 时只按它的计数（全 0 就不写，不再回退查 lead 表）；失败路径的 stats 不带 `fit`，先要求 `failure.stage` 已到 fit（fit / enrich / signals / watches / patentEnqueue），再查本 run 解析出的公司（本 run 已接受的 raw → company identity link）在该 ICP 下有没有 `fit_verdict`。停在 query 等 fit 之前阶段的 run、或别的 run 留下的判定都不触发。
+    - 评分是确定性的、不调 provider、不花预算，所以 run 授权已结束（过期 / 撤销 / 用尽）时也写；`attestRunFinalization` 对 FAILED 的容忍逻辑不变。
+    - plan 仍留 READY；`DiscoveryRunCompleted` 照旧带 `status: FAILED`。
+  - **API 区分预置与已评分**：`GET /leads` 与 `GET /leads/:id` 每行加 `scored`（`total_score` 非空）与 `queueBasis`（`fit_gate_preset | score | human_accept | human_reject`）；`GET /icps/:id/lead-queues` 加 `scored`（每条都有分）与 `queueBasis`（四种依据的计数），并把一直返回却不在契约里的 `sanctions_hold` 补进契约。
+    - 多加了 `human_reject`：评分阶段自己也写 `status=REJECTED`，只凭状态分不出人工拒绝与评分拒绝，所以用一条 reject 裁决作证（列表每行只探 1 条；汇总用关系过滤聚合）。
+    - 新列 `lead.scored_at`（迁移 `20261014051926_lead_scored_at`，可空、不回填），评分阶段每次写分盖上。
+    - `POST /leads/:id/accept` 与 `/reject` 用同一个 `LEAD_SCHEMA`，响应同样带 `scored` 与 `queueBasis`（含两处幂等早返回）。
+  - **人工拒绝成为终态**：`scoreCandidates` 的 `humanFinal` 原先不含 REJECTED（注释说含），人工拒绝会被重评分改回 REVIEW；FAILED 收尾也请求评分后这条路径每次都会走到。现在 REJECTED 且有 reject 裁决的 lead 重评分只刷新分数、不改状态与队列，判据与 `human_reject` 相同。
+    - 人工 reject 一条评分写的 REJECTED（还没有 reject 裁决）时，`decide` 照样记下裁决，不再当成重试直接返回——否则人工的拒绝没有留痕，也挡不住重评分。已有 reject 裁决的重复 reject 仍是幂等早返回。
+  - **`LeadQualified` 快照 v1 加可选字段** `scored_at`、`queue_basis`（设计 E1：`snapshot_version` 仍 1，旧载荷照样通过）。
+  - OpenAPI 重导出；`packages/contracts/INTEGRATION.md` 阶段 3 与 `docs/architecture/current.md` 的快照字段表同步。
+- 测试：
+  - 先写失败测试，改动前 19 项失败（另一个文件因模块不存在整体失败）、改动后全部通过：
+    - `finalizeRun` 18 项：stats 有 fit 判定 / 失败停在 fit 及之后 5 个阶段且本 run 的公司有判定（断言按 run → raw → identity link → lead 查询）/ 停在 fit 之前 4 个阶段即使 ICP 有判定也不写 / stats 既无 fit 也无 failure 不写 / 本 run 的公司无判定不写 / 本 run 无已接受 raw 不查 lead / 本 run fit 计数全 0 不回退查 lead / 授权已结束仍写（3 种码）/ DONE 的 reason 不变且不查 lead 表；
+    - 队列依据纯函数 11 项；`LeadService.list` / `queueSummary` 4 项；快照 7 项（含 schema 正反例、旧载荷通过、decide 接线）；评分 `scored_at` 2 项、人工拒绝终态 2 项；`decide` 响应 5 项（accept / 重复 accept / reject / 重复 reject / reject 评分写的 REJECTED，逐项对照 openapi.json 的 required）。
+  - 真库 `lead-queue-basis.postgres.spec.ts`（app_user + RLS，一次性 Postgres，5 项）：迁移后的列可写、`groupBy` 的 `_count.totalScore`、关系过滤聚合、列表排序与行形状、跨 workspace / 跨 ICP 不计入、`decide(reject)` 对评分写的 REJECTED 记下裁决且重试不再加。已登记到 CI 的 PostgreSQL 步骤。
+  - `gctl check` 通过；oasdiff 对 origin/main 无破坏性变更。
+- 未做：
+  - 已有的 179 条 lead 不会自动评分：下一次 run 收尾时触发，或手动 `POST /icps/:id/qualify`。本 PR 不在 xin 上发起评分。
+    - 这 179 条分属 3 个 ICP（84 / 51 / 44 条，10-14 只读核对），手动 qualify 一个 ICP 只给这一个 ICP 的 lead 评分。
+    - `scoreCandidates` 遍历的是整个 workspace 的 canonical 公司，不只是该 ICP 判过的（既有行为，本 PR 未改）：xin 上 workspace 有 150 家公司，qualify 一个 ICP 后它的 lead 会变成 150 条，多出来的 66 / 99 / 106 条没有 `fit_verdict`，按评分直接进队列。所以 qualify 之后该 ICP 的 `lead-queues` 会是 `scored: true`、总数 150，而不是「179 条变 scored」。要不要只给本 ICP 判过 fit 的公司评分是另一个决定。
+  - 任务描述里「FAILED 收尾不发 `DiscoveryRunCompleted`」与代码不符：FAILED 一直发、带 `status: FAILED`，本 PR 保持。
+
+## 2026-10-14 · Score reachability from company-level contact paths, retire the idle Role weight, and record mirrored exclusions instead of rejecting on them (scoring rules v3) (#649)
+
+- 起因：xin 上 `recommended` 队列结构性为 0（2026-10-14 只读核实：lead 62 needs_review / 117 rejected / 0 recommended；150/150 家公司 industry 与 employee_count 为 NULL；`company_contact_point` 0 行，开关 `company_contact` DISABLED）。三道门叠在一起：
+  - 可达性只读人级 `contact_point`（`scoring.ts` 旧 161–168 行；`qualify.activities.ts` 只 include `contacts.contactPoints`），而自动链路里没有联系人发现（LIA 之后才走），#630 建好的公司级 `company_contact_point` 评分读不到。
+  - 0.55 门槛够不着：可达性置 1.0 后 ICP ce100faa 的 12 条 match 最高 0.5225。根因是 DataQuality 的 industry / employee_count 对 150/150 家都是 NULL（public_web 原始记录从不带这两个字段），封顶 0.5；Role 维在 RL1 恒 0，15% 权重闲置；关键词代理用 `JSON.stringify` 全文扫描，2 字母 token「ce」误命中 JSON 键名 `certifications`。
+  - ICP 生成的镜像 EXCLUSION：ICP 22202d3c 有 6 条 EXCLUSION 是 MUST_HAVE 的镜像（`keywords not_contains "泵" / "库存" / "售后"`、`region not_contains "DACH"`、`business_model not_in […]`）。规则引擎对 not_contains 的语义是「属性存在且不含该词 → pass」，任一 EXCLUSION pass → exclude，评分把 exclude 放在权威 Fit 之前；公司 keywords 是受控英文词表、永远不含中文，于是带 keywords 的公司一律 rejected（离线复算 5 条 match 里 2 条被吞）。
+  - 产品负责人按方案 A 授权：RL1 没有具名联系人，Role 并入 Fit / Reachability，门槛不变。
+- 改动（`qualification_rule_version` 升为 `additive-6dim-v3`，写进 LeadQualified 快照；六维键与值域不变，`snapshot_version` 仍 1）：
+  - **可达性 = max(公司级, 个人旧口径)**：`CompanyForScoring` 新增 `companyContactPoints[]`；任一 kind ∈ contact_page / impressum_page / contact_form / supplier_page 且 status ∈ VALID / UNVERIFIED 记 1.0（社交页不计，INVALID 不计）；个人口径不变（VALID 1 / UNVERIFIED、RISKY 0.5 / external_id 不计）。`scoreCandidates` include 该表（只取 VALID / UNVERIFIED），每批读一次禁联事实，**读时过滤**（公司被禁联 → 无点；被禁联域名覆盖的点剔除；`reachableCompanyContactPoints`）。`score_detail.reasonCodes[]` 新增：零可达且进 needs_review 写 `MISSING_CONTACT_POINT`；提示文案「先做联系人发现」改为「先补公司级联系路径」。
+  - **权重 v3**：fit .45 / role 0 / intent .15 / dataQuality .15 / reachability .20 / engagement .05（v2：.35 / .15 / .15 / .15 / .15 / .05），门槛 0.55 不变；Role 仍计算、仍上报。复算：资格门 match + 联系页 + DataQuality 0.5 = 0.85×.45 + .20 + .15×.5 = **0.6575**，进推荐。
+  - **关键词代理**：只扫属性**值**（不扫键名、不扫数字和布尔）；Latin token ≥3 字符（CJK ≥2 字，「扩产」仍有效）；排除 `intent`（原有）、`extraction_*` 与 `website_profile.evidence`。
+  - **镜像 EXCLUSION**：`qualify()` 新增 `negativeExclusionsAdvisory`——权威 Fit 存在时，否定操作符（neq / not_in / not_contains）的 EXCLUSION 只评估、记进 `ruleEvaluations`（`advisory: true`）不改队列；正向 EXCLUSION 维持最高优先；无权威 Fit 时行为不变。ICP 生成（`icp.design` 输出落库）丢弃与 MUST_HAVE 同 field 同 value 的镜像 EXCLUSION（`mirrorExclusionRuleIndexes`，field / value 归一化后比较）；`IcpDto` 新增 `ruleLint[]`（读取 / 激活时由规则推导，不落库），指出存量 ICP 里的镜像规则。OpenAPI 已重导出。
+  - **为现有公司补联系路径**：`profileWebsitesForRun` 在开关 `company_contact` 打开、本 run 的公司没用完 50 家画像配额时，用余量按 created_at 读工作区里还没按当前规则读过联系路径的公司（`contactPathBackfillCandidates`），计入 `backfilled`；配额、时间盒、续接下标对合并列表一体生效（本 run 已读过的公司留在列表里由循环跳过，下标稳定）。打开开关后不必等新 run 再找到这 150 家。
+  - 文档：`docs/product-scope.md` 的可达性定义；`lead-qualified.v1.schema.json` 的 `qualification_rule_version` 示例与说明；`docs/architecture/current.md` 的六维注记。
+- 被替换的设计与原因：
+  - BI-14 设计 §5.1「仅表单 0.6」已被 2026-10-10 §10 改为联系路径任一存在即 1.0，本 PR 按 §10。
+  - v2 权重（LED-006）给 Role 15% 的前提是有具名联系人，RL1 不成立。
+  - 关键词代理的 `JSON.stringify` 全文扫描（#4）把键名与抽取账本当作公司事实。
+  - 「EXCLUSION 永远优先于权威 Fit」在镜像规则下把资格门判 match 的公司硬拒；改为只对正向 EXCLUSION 维持最高优先。
+- 测试：
+  - 先写失败测试：`rule-engine.spec` 7 项、`scoring.spec` 新增 20 项并改 4 项旧断言、`qualify.activities.spec`（新文件）5 项、`icp.service.spec` 1 项、`icp.dto.spec`（新文件）2 项、`discovery.activities.spec` 5 项（其中 2 项护栏在改动前已通过）、`lead-qualified-snapshot.spec` 1 项；改动前 35 项失败，改动后全部通过。
+  - 邻近用例（候选评估、qualify / 发现 workflow、预演、删除编排、website-profile、快照契约 ajv）全绿；`gctl check` 通过。
+- 未做：
+  - 没有改 DataQuality：industry / employee_count 仍靠富集，public_web 不带这两个字段是数据源问题。
+  - 没有新开「只补联系路径」的独立端点或工作流：补读复用 run 的画像配额与预算，每个 run 最多补 (50 − 本 run 公司数) 家，150 家存量要 3–4 个 run；更快需要带预算授权的独立活动（新 scope、OpenAPI、GrowthOS 报价），另开。
+  - 画像返回空（robots 拒绝、空页）的公司没有标记，会留在补读候选里（与本 run 列表的既有行为一致）。
+  - 存量 ICP 的镜像规则没有自动删除：`ruleLint` 只提示，由人用 `DELETE /rules/:ruleId` 处理；评分侧已不受其影响。
+  - 存量 lead 要重新评分才生效：对每个 ACTIVE ICP 调一次 `POST /icps/:icpId/qualify`；打开 `company_contact` 与是否再跑 run 补读由产品负责人决定（D9）。
+  - 读模型 `GET /canonical-companies/:id` 带出联系点、BI-21 交付包字段不在本 PR。
+
+## 2026-10-14 · Let one development workspace run its acquisition workflows on a source-built worker while the attested API keeps serving
+
+- 起因：改获客的 worker 侧代码后，每次都要发布并切换后端镜像才能在本机验证。目标是只在 development、只对一个测试 workspace，让入驻理解、发现 run 与资格判定跑在源码 customer worker 上，管理态受证 API 继续承担全部 HTTP、readiness 与 relay，管理态受证 worker 继续服务其余 workspace；pilot/production 不受影响且 fail closed。设计与复核调整见[落地设计](../superpowers/plans/2026-10-14-dev-fast-lane.md)，运维步骤见[开发快速通道](../backend/dev-fast-lane.md)。
+- 改动：
+  - **开关**（`runtime/dev-fast-lane.ts`）：`RUNTIME_DEV_FAST_LANE_WORKSPACE_ID`（一个小写 UUID，既是开关又是唯一 workspace）、`RUNTIME_DEV_FAST_LANE_TEMPORAL_ADDRESS`（只接受 loopback）、`RUNTIME_DEV_FAST_LANE_SCHEMA_DIGEST`（车道 worker 用）。唯一解析器在 test/pilot/production 下见到任何一个就抛 `DEV_FAST_LANE_FORBIDDEN_OUTSIDE_DEVELOPMENT`；API 与 worker 都在启动最早处解析。compose 只把前两个转发给 `api` 服务，默认空。
+  - **路由**（`outbox-relay.service.ts`、新 `temporal/dev-fast-lane-temporal.client.ts`）：只有车道 workspace 的 `CompanyProfileCreated`、`DiscoveryRunRequested`、`QualifyRequested` 改投开发用 Temporal 的 `understanding-dev-fast-lane-<id>` 队列，带执行超时（发现 185 分钟，其余 30 分钟），workflowId、reuse policy 与参数不变；车道命令单独成批，由 relay 主循环之外的车道 pass 投递，主循环与 `OUTBOX_RELAY` 心跳不等它。每次连接、每次启动最多 5 秒；连不上就关闭连接、冷却 30 秒，冷却期间不查询也不投递车道命令。所以开发用 Temporal 不可达时，车道命令既占不满主批次，也拖不慢心跳、readiness 和其他 workspace 的投递。开关为空时主查询与投递逐字不变。原生 Temporal 的机器授权器把 customer 队列钉死为 `understanding`，所以车道不用它。
+  - **readiness**：开关开时 `/health/ready` 多一个可选的 `capabilities.dev_fast_lane`（恒为 `not_proven` / `DEV_FAST_LANE_UNATTESTED_ROUTING`），不参与整体状态与客户写入准入；OpenAPI 重导出（只增可选属性）。
+  - **身份**（`runtime-release-identity.ts`）：开关开且缺构建回执时失败码改为 `DEV_FAST_LANE_UNATTESTED`；有效回执照常 attested，无效回执照常 `BUILD_ATTESTATION_INVALID`。API 不把开关交给身份加载，永远是受证镜像。`runtime-admission.ts` 未改。
+  - **worker**（`temporal/worker.ts` 一个分叉点 + 新 `temporal/dev-fast-lane-worker.ts`）：只在「开关开 + 缺回执 + 唯一失败的准入项是 build」时，于遥测、数据库、租约之前分叉进车道 worker；其余进程走原路径（看到开关的受证进程只打一行 warning）。车道 worker 明文连开发用 Temporal、只 poll 车道队列、只注册 understanding/discovery/qualify 三组活动；不写租约、不建 owner 连接、不跑平台 seed、不取机器令牌、不需要建站依赖；迁移名与 schema 摘要用构建回执同一组函数从源码树求得（`build-attestation.ts` 导出 `latestMigrationRevision`、新增 `computeSchemaDigest`，`runtime-process-lease.ts` 拆出 `assertMigrationRevision`），schema 摘要必须等于镜像的，否则 `SCHEMA_DIGEST_MISMATCH` 不 poll。网关、broker、分类器、制裁与三组活动的构造与 `worker.ts` 逐字相同，由源码守卫 spec 比较。
+  - **治理**：`environment-parity-policy.json` 新增一条 `trust` allowance `development-fast-lane-unattested-worker-trust`（verify 恰好 1 条新 finding、0 条 STALE），`runtime-admission-test-process-only` 的 reason 补一句；RuntimeEvidence 验证器拒绝非 development 的 `dev-fast-lane-` 证据（`EVIDENCE_FAST_LANE_ENVIRONMENT_INVALID`），traceability 拒绝把车道 kind 写进 `required_evidence_kinds`（`TRACE_FAST_LANE_EVIDENCE_KIND_FORBIDDEN`）。
+  - 文档：architecture/current、status/current §4.5、ADR-024 补记、AGENTS §4、evidence README §2 同步写明这条例外与边界。运维页的排空检查在 RLS 下先 `set_config` workspace 再计数，并加上开发用 Temporal 车道队列的在途 workflow 计数；写明车道 env 文件只能交给 dotenv 读，不能让 shell source。
+- 测试（先红后绿，AAA）：解析/路由/车道判定/schema 核对 14 项；迁移枚举与 schema 摘要 3 项（名字合格的普通文件按复核修正为报 `must be a directory`）；`assertMigrationRevision` 2 项；身份加载 4 项（含 main.ts 不把开关交给身份的源码断言）；`DEV_FAST_LANE` provider 2 项；车道 Temporal 客户端 6 项（连接失败关闭通道、30 秒冷却、启动 deadline、abort 中止等待）；relay 7 项（含 25 条车道行在第一次连不上时结束本轮、冷却期不查询；用真实客户端模拟每次连接等满 5 秒，READY 心跳与其他 workspace 的投递仍每 2 秒一轮，关闭时排空立即完成；开关关时单一查询逐字不变）；readiness 3 项与 OpenAPI 1 项；源码守卫：车道来源 3 项、`worker.ts` 分叉与车道 worker 6 项；compose 1 项；治理 1 项。`worker.ts` 现有的源码守卫 spec 全部原样通过。编译后的 worker 用合成环境（数据库与 Temporal 指向 `127.0.0.1:1`）冒烟：pilot 带车道变量退出码 1；只给 workspace 报地址无效；缺/错 schema 摘要分别停在 `DEV_FAST_LANE_SCHEMA_DIGEST_REQUIRED` / `SCHEMA_DIGEST_MISMATCH`；摘要正确时走到数据库准入。
+- 未做 / 边界：
+  - 尚未在 xin 上运行；首次落地要发布并切换一次含本改动的镜像（主线已含 #647、#648 的迁移，按带迁移的流程），镜像发布与打开开关是另外的授权事项。
+  - 车道只覆盖三个 workflow 的 workflow 体与活动体；workflow 输入、outbox payload、事件注册表与 API 内的同步获客操作仍是镜像代码。两个车道 worker 之间不在代码层互斥。车道观察永远不是 RuntimeEvidence PASS，R4 撤销投递链仍未打通。
+
+## 2026-10-14 · Record the rule version each lead was scored with, rest failing backfill companies for a week, keep non-mirror negative exclusions, count backfill apart, and match trigger words on word boundaries (scoring rules v3 follow-ups, W5-f) (#655)
+
+- 起因：#649（评分规则 v3）的独立复审判 MERGE，同时登记了跟进项 W5-f（3 条 MEDIUM、3 条 LOW），要求与 #649 同一班车上线：
+  - MEDIUM-1：`LeadQualified` 快照的 `qualification_rule_version` 取决策时的代码常量（`lead-qualified-snapshot.ts` 旧 264 行），`score_detail` 也不存规则版本。合并后没有重评的存量 lead 会被标成 v3。
+  - MEDIUM-2：补读候选（`contactPathBackfillCandidates`）按 created_at 取，没有尝试水位。画像返回空（robots 拒绝、空页、死站、超时）或主体被拒的公司拿不到 `_contact_parser`，会一直排在候选最前面，新公司饿死。xin 的 150 家里有 60 家没有 website_profile。
+  - MEDIUM-3：`negativeExclusionsAdvisory` 在有权威 Fit 时把所有否定型 EXCLUSION（neq / not_in / not_contains）都降为只记录，范围过宽：用户手加的 `country not_in [DE, AT, CH]` 会被静默失效。
+  - LOW：stats 不输出 `backfilled`，profiled / matched 混入了补读公司；补读 SQL 没有真库测试（删掉 `_ts >= since` 子句测试仍过）；关键词代理仍扫 `_` 前缀的记账值，且按子串匹配（「new」命中「news」，「dach」命中「Bedachung」）。
+- 改动：
+  - **规则版本随 lead 存**：`scoreCandidates` 把计分用的版本写进 `score_detail.ruleVersion`（create 与 update 两路）。快照改读 `leadQualificationRuleVersion(score_detail)`：有版本取版本；`score_detail` 存在但没有版本 → `additive-6dim-v2`；从未计分 → `null`。`lead-qualified.v1.schema.json` 的 `qualification_rule_version` 改为 `string | null`，说明写明语义；`INTEGRATION.md` 同步。
+  - **尝试水位与 7 天冷却**：开关 `company_contact` 打开时，每次联系路径尝试都在 `website_profile` 记 `_contact_attempt_at`，不论结果（读到、空页、robots 拒绝、死站、超时、无法重放、主体被拒）。写入走 `recordContactPathAttempt`：持禁联策略锁、经禁联安全写入口，被禁联的公司不写；画像提交改写命名空间之后才写，所以和画像事实在同一事务里并存。
+    - 补读候选排序：从未尝试的优先，其次上次尝试最早的，再按 created_at。run 创建前 7 天内尝试过的不入选（`CONTACT_PATH_RETRY_COOLDOWN_MS`）。
+    - 续接下标稳定：本 run 尝试过的公司留在列表里，按它在本 run 之前的那次尝试（`_contact_attempt_prev`）排序，位置不变；冷却截止按 run 创建时刻算，不随各活动的时钟移动。
+    - 并发去重：补读每家前重读一次存储；两个 run 选到同一批时，后到的那个看到对方刚记的尝试（冷却期内）就跳过。本 run 自己的公司也重读一次，别处刚读完的跳过。
+    - 只有尝试标记、没有画像事实的命名空间不当作画像：fit 判定的提示词不再带出空的 `website_profile`；画像提交重放时的回读改为看 `_ts`（画像事实一定带它），不把只有尝试标记的命名空间算成 matched。
+  - **否定型排除收窄**：`qualify()` 的选项改名为 `mirrorExclusionsAdvisory`，只把 `mirrorExclusionRuleIndexes` 认出的镜像规则降为只记录；非镜像的否定型 EXCLUSION 照旧排除。`lintQualificationRules` / `IcpDto.ruleLint` 对非镜像否定型 EXCLUSION 也给一条提示（资格门已判 Fit 时仍然排除，请确认取值写法与公司属性一致）。OpenAPI 描述已重导出。
+  - **stats**：活动返回的 `profiled` / `matched` / `unclassified` 只计本 run 的公司，补读公司计入 `backfilled`。工作流的 `WebsiteProfileTotals` 与 `addWebsiteProfilePass` 累加 `backfilled`，`stats.websiteProfile.backfilled` 输出（旧结果没有这个键时按 0）。只改 stats 对象，不新增命令，重放不受影响。
+  - **关键词代理**：跳过任意层级 `_` 前缀的键；Latin token 按词边界匹配（前后不是 Unicode 字母或数字），CJK 仍按子串。
+- 测试：
+  - 先写失败测试，改动前 33 项失败：`company-contact-points.spec` 6 项（新）；`discovery.activities.spec` 6 项新增、3 项改计数；`workspace-authority.workflow.spec` 1 项新增、3 项改期望；`scoring.spec` 4 项新增；`rule-engine.spec` 4 项（advisory 段按新语义重写）；`lead-qualified-snapshot.spec` 3 项新增；`qualify.activities.spec`、`icp.dto.spec`、`fit-judge.spec` 各 1 项新增。改动后全部通过。
+  - 真库：新增 `contact-path-backfill.postgres.spec.ts`（5 项），以 app_user 真跑补读 SQL 和尝试写入：排序（从未尝试优先、尝试早者优先）、冷却与各排除条件、RLS、run 内打标后列表不变（下标稳定）、下一个 run 与冷却期满后的列表。三处变异各有用例变红：删掉 run-since 子句、排序不用 `_contact_attempt_prev`、删掉冷却条件。没有加进 ci.yml（W9 会把真库 spec 移出 ci.yml），手动运行命令写在 PR 正文。`raw-sql-parameter-types.postgres.spec` 与 `company-contact-point.postgres.spec` 在同一个一次性库上通过。
+  - 邻近：icp、lead、候选评估、删除编排、发现预演、qualify 合成、发现工作流与两条重放用例全绿。
+- 被替换的旧设计：
+  - #649 的「权威 Fit 存在时所有否定型 EXCLUSION 只记录」（`negativeExclusionsAdvisory`）。
+  - 快照写决策时的代码常量。
+  - 补读按 created_at 排序、靠 `_ts >= since` 保持下标；画像返回空的公司不留任何标记。
+- 未做：
+  - 补读公司的主体被拒 / 无法重放仍计入本 run 的 `skippedSubjects` / `unreplayableSkips`，会把 run 判 PARTIAL（与 #649 相同，未改）。
+  - 冷却只管补读候选：本 run 自己的公司画像失败后，下一个找到它的 run 照旧会重试。
+  - 词边界匹配不做词干化，复数与复合词少命中：「pump」不再命中「pumps」，「großhandel」不命中「Pumpengroßhandel」。
+  - 与并发 run 交错时，一家公司可能在 run 中途进入补读列表（例如另一个 run 把它当作自己的公司重新画像、记下尝试），让后面的下标错一位；后果只是本轮漏掉一家，或重读后跳过，不会重复抓取。彻底固定列表需要把每个 run 的补读名单落库，没有做。
+  - 存量 lead：#649 之前计分的 lead 没有 `ruleVersion`，快照会如实标 `additive-6dim-v2`。要按 v3 交付，先对每个 ACTIVE ICP 调一次 `POST /icps/:icpId/qualify`。
 
 ## 2026-10-13 · Let best-effort stages skip a company whose operation cannot be replayed, time-box enrichment, and rehearse a full-size run
 
@@ -152,6 +311,64 @@
 - 未做：
   - 内容寻址去重与 MinIO 按对象年龄过期（personal-data 1 天）相冲：复用对象不刷新年龄，首个写入者的 TTL 一到对象就没了，而库里仍有未过期的产物行指向它（10-13 验证：空对象已 NotFound，库里最晚的引用到 10-14 16:36）。另行处理。
   - 每次 HEAD 探测都落一份空产物，是浪费但无害。
+
+## 2026-10-13 · Carry the seller profile as the artifact subject of understanding crawls, and record a failed understanding on the company row
+
+- 起因：卖方入驻的理解工作流（`POST /companies` → outbox relay → `understandingWorkflow`）自 2026-08-24 起一次都没跑通。b8dd5eb0 把 `crawl4ai-fetch/v1`、`http-get/v1` 列进主体绑定的 PERSONAL_DATA 产物；#565（G3 5.1）改成按调用准入——broker 的 `artifactPrecheck` 只放行带 `ctx.artifactSubject` 的调用，发现侧 website-profile 接了，理解侧从没接：`crawlViaBroker`（d404a70d）不带主体，首页抓取被 `GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD` 拒 3 次，工作流失败，`company_profile` 停在 ENRICHING，什么也没记（xin 只读核验 2026-10-13：10-01..10-13 ENRICHING 28 行、DRAFT 9 行、ACTIVE 从未有过；验收 e2e 能过只因它手工 POST claims）。
+- 改动：
+  - 理解的首页与子页抓取带上 `artifactSubject: { subjectType: 'company_profile', subjectId: company_profile.id }`——与发现侧 website-profile 同一个 G3 模板，主体种类是卖方画像自己的（见下）；工作流把 `companyId` 交给 `crawlWebsite` / `crawlPages`。
+  - broker 的策略拒绝在活动边界转成带类型的 `ApplicationFailure`（类型=封闭 token 的拒绝原因，带域名或任务 id 的原因只留类名；原错误作 cause，分类结果不变；不重试——策略判定不会因重试而变）。worker 的诊断转换器只保留 ApplicationFailure 的 type，不这样做，回写只能记到 `Error`。
+  - 工作流任一阶段失败（只认 Temporal 上报的失败；`understanding-failure-record-v1` patch 守卫）先调新活动 `recordUnderstandingFailure`：`company_profile` 回 DRAFT，记 `understanding_failed_at` 与 `understanding_last_error`（`阶段:错误类型`，无消息、无抓取内容），再抛原错误；新一轮 ENRICHING 清空两列；收尾 REVIEW 本身失败不补写。迁移 `20261014120000_company_profile_understanding_failure` 加两列与 CHECK（只收 `token:token`、两列同空同非空）；API 经 `CompanyDto` 映射，OpenAPI 不变。
+  - `describeRunFailure` 从 `discovery.run-failure` 抽出，发现与理解共用一个无内容的失败描述。
+- 卖方主体种类 `company_profile`（方案 A，产品负责人 2026-10-14 选定）。原先契约只认 `contact` / `company`，理解抓取挂不上任何主体。没有复用 `company`（方案 B）：`company` 指 `canonical_company`（发现到的买方），`company_profile` 是租户自己的卖方档案、另一张表；复用会让同一主体种类指向两张表，DSR tombstone、按主体查产物、合规报表都得带注记。
+  - 合同（TS）：`GENERIC_OPERATION_ARTIFACT_SUBJECT_TYPES = contact | company | company_profile`（`generic-operation-artifact-subject.repository.ts`），主体解析器与 broker 端口的 `ArtifactSubjectRef` 类型随之放宽（broker 文件本身未改）；`resolveExistingSubject` 多一个 `company_profile` 分支，按种类、同工作区精确匹配——画像 id 不会按 `company` 解析，买方公司 id 也不会按 `company_profile` 解析。
+  - 公开删除 API 不收新种类：`DELETION_SUBJECT_TYPES` 仍是 `contact | company`，OpenAPI 与 DeletionCompleted 事件契约不变——卖方画像不是 DSR 主体。删除工作流的 `freezeSubject` 现在在任何写入之前拒掉非 DSR 种类（`DELETION_SUBJECT_TYPE_INVALID`，不重试）：DB 的 tombstone 已认 `company_profile`，不再替它拦。
+  - 数据库（并入本 PR 尚未合入的迁移 `20261014120000`）：4 个主体种类 CHECK 按原名删后重加；11 个 SQL 函数各按最新定义 `CREATE OR REPLACE`，只放宽种类列表——assert / bind / find_by_subject / tombstone、execution-hold 读取器、`enforce_tool_budget_expected_artifact_subject_v1`、`mark_…_v4`、`load_…_v4`、`append_…_v3`、`settle_…_v4`、`settle_…_with_receipt_v2`（现行的 v4 结算经 v3 调它）。另有两处语义改动：assert 加同工作区 `company_profile` 存在性查找（带 `FOR KEY SHARE`）；execution-hold 的停用判定 CASE 只认 `company` / `contact`，卖方画像没有停用态，只看 tombstone。属主、SECURITY DEFINER、search_path、授权逐一不变（真库迁移前后目录对比一致）。
+  - 删除语义：现在没有任何路径删卖方画像或工作区，工作区已被主体表的 RESTRICT 外键挡住。主体行对画像没有外键，所以新增 `company_profile` 的 AFTER DELETE 守卫：仍有产物绑定、而该主体没有 tombstone 时拒删（`GENERIC_OPERATION_ARTIFACT_SUBJECT_NOT_TOMBSTONED`）。日后的租户删除必须先用一条指名该画像的 `deletion_request` 调 `tombstone_…_v1`：tombstone 挡住新抓取（execution hold 与结算都报 `…_TOMBSTONED`），`enqueue_workspace_personal_artifact_cleanup_v1` 把对象交给个人产物清理；之后画像才删得掉，绑定行留作审计。在此之前产物照旧按 1 天 TTL 过期。绑定与删画像并发时，`FOR KEY SHARE` 加 AFTER 守卫保证两种先后都不会留下指向已删画像的绑定。
+  - CI：新 `generic-operation-artifact-seller-subject.postgres.spec` 接进 `ci.yml` 的「Raw SQL parameter types on PostgreSQL」步骤（与 #647 的 object-version 用例同库同步骤）。
+- 测试：先红后绿。`understanding.activities.spec`：用真实 `ToolBroker` 复现无主体即 HOLD（admit / execute 都没跑、预留已释放）；带主体 → admit 收到 `{ crawl4ai-fetch/v1, company_profile 主体 }`、wire 跑一次、persist 挂同一主体；子页逐个带同一主体；主体被拒 → `ApplicationFailure{ type: GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_INVALID, nonRetryable }` 且仍是控制错误；带域名的拒绝原因只以类名过边界；回写 DRAFT+失败、ENRICHING 清空、非封闭 token 拒写。`understanding.workflow.spec`（新，proxyActivities-mock harness）：抓取带 companyId；首页被拒 / 抽取失败各记对应阶段并以原错误失败；工作流代码缺陷、无 patch 标记的旧历史、回写失败、收尾失败四种都不补写。`understanding.run-failure.spec`：标签与拒收。改动前 10 项失败 + 1 个模块缺失，改动后 5 个文件 43 项全过。
+  - 方案 A 单测（零容器）：改动前 5 个文件 63 项里 13 项失败——主体解析器不收 `company_profile`、解析 SQL 没有画像分支、绑定合同不认卖方画像、删除工作流照收非 DSR 种类，以及 `understanding.activities.spec` 新增的「生产准入」用例：真实 `ToolBroker` 前面接真实 `GenericOperationArtifactExecution.admit` → `ArtifactSubjectBindingContract` → 主体仓库（只有 SQL 行是假的），改动前正是 xin 上的 `SUBJECT_BINDING_INVALID`；改动后全过：admit 收到 `company_profile` 主体、wire 一次、persist 挂同一主体，依次发生；画像 id 按 `company` 种类仍被拒，tombstone 后报 `SUBJECT_TOMBSTONED`，都在 wire 之前。
+  - 方案 A 真库（一次性 `pgvector:pg16` 容器，全部迁移，查询以 app_user 在工作区事务里跑）：新 spec 7 项，在未含本迁移的库上 5 项失败，迁移后全过——目录：4 个 CHECK 与 11 个函数都收 `company_profile`，属主 / definer / search_path / 授权不变，再无函数把种类关在 `contact, company`；同工作区画像可解析、可结算绑定，别的工作区的画像、不存在的 id、买方公司 id、按 `company` 种类的画像 id 都以 `…_SUBJECT_INVALID` 拒；删画像在 tombstone 前被守卫拒（owner 与 app_user 都拒），工作区也删不掉；tombstone 要求 `deletion_request` 种类一致，之后 execution hold 为 `TOMBSTONED`、新结算 `…_TOMBSTONED`、清理入队 1 条命令，画像随后可删；两个并发用例（删画像等在途绑定、绑定等在途删除）在去掉 `FOR KEY SHARE` 后都会失败。同库重跑 CI 同步骤的 raw-sql-parameter-types、security-definer-search-path、object-version、company-contact-point、site-build-budget-lock，以及 app-user-table-privileges，全过。
+- 真机：按任务硬规则只做只读核验，没有新建卖方公司、没有触发理解工作流。本 PR 部署后，新建卖方公司的理解抓取会被准入并真实出网抓取卖方官网（产物 PERSONAL_DATA、1 天 TTL）；xin 上既有 28 行 ENRICHING 不回填。
+
+## 2026-10-13 · Answer ICP design and plan generation whose model answer settled unusable with 502 MODEL_UPSTREAM_UNUSABLE instead of a bare 500
+
+- 起因：卖方 #24 的 ICP `971c9242`（xin，2026-10-13 07:55–08:02 UTC）`POST /icps/:icpId/query-plans` 跑了 284 秒后，网关把这次调用结算为 `CHAT_COMPLETIONS_CONTENT_FILTERED`（`ProviderOutputError`，已按真实用量结算），API 却只回 500 `INTERNAL`，没有错误码；同一 ICP 再试一次得到 409 `EXECUTION_BUDGET_GRANT_REUSED`，因为 GrowthOS 对同一操作与主体会签发同一份授权，而后端按 jti 消耗授权（`consume_workspace_execution_authority`）。调用方从这两个响应里看不出模型答案不可用、也看不出该怎么重试。
+- 改动：
+  - **新的 HTTP 边界** `apps/api/src/model-gateway/model-upstream-http-boundary.ts`：`asModelUpstreamHttpBoundary` 把网关**已结算、没有可用答案**的模型失败映射成 502 `{ error: { code: "MODEL_UPSTREAM_UNUSABLE", message, details: { reasonCode } } }`。
+    - 识别的失败：可恢复的 `ProviderOutputError`（非 JSON、不过 schema、任务门拒绝，含 `TaskOutputValidationError`），以及**原型精确**的 `ProviderIdentityError`、`ProviderTransportError`（流被截断、上游错误事件、不可读、非 JSON 响应体、finish reason 无效、Responses 状态失败），且 cause 链里没有控制错误。
+    - 网关在未付费 wire 上直接回 400–599（实际是 429、5xx）时抛的 `ProviderHttpError`（原型精确、状态码为整数）：原因码为 `GATEWAY_HTTP_<状态码>`。授权（jti）在模型调用之前就已消耗，所以重试同样需要新授权；这次调用的预留是否计费由路由按失败类别决定（现在按预留额度保守结算）。子类与范围外状态码不识别（复审 MEDIUM：此前这类失败仍是裸 500）。
+    - 不识别、原样放行：授权错误（402/403/409/503 仍由 `asExecutionBudgetHttpBoundary` 映射）、控制错误、`ProviderOutputUnresolvedError`、`ProviderSettlementError`、合规拒绝、在途 wire、业务 409、普通错误。
+    - 响应正文只有固定 message 与经 `^[A-Z][A-Z0-9_]{2,63}$` 校验的 `reasonCode`，不带模型文本；日志同样只记原因码。
+  - **ICP 控制器**：`POST /companies/:companyId/icps` 与 `POST /icps/:icpId/query-plans` 在授权边界之内套上这道边界，并以 `@ApiModelUpstreamUnusable()` 把 502 注册进 code-first OpenAPI（`packages/contracts/openapi/openapi.json` 重导出，两个操作各多一个 502，spectral 0 错误，无破坏性变更）。
+  - **授权语义（这次生成失败后授权怎么算）**：授权在模型调用之前就在自己的事务里被消耗（`consumeWorkspaceAndOpen`：消耗 jti + 开账户），网关再把这次调用的真实用量结算到这份授权的账户上；失败后服务不写任何 ICP 或计划。所以授权**已消耗、已计费**，不能回滚：消耗与调用不在同一个事务里，而且就算在，结算行也必须保留，否则同一份授权可以付两次。调用方的重试方式是先向 SaaS 取一份新的授权；用同一份会得到 409 `EXECUTION_BUDGET_GRANT_REUSED`。
+  - 对接说明（`packages/contracts/INTEGRATION.md` 阶段 2 第 1 步）与错误模型表（`packages/contracts/README.md`）补上 502。
+- 测试：
+  - 先写失败测试：边界 1 个文件（识别 15 例、不识别 13 例、响应体 4 项、边界包装 8 项）在模块不存在时整体失败；控制器 14 项中 9 项失败（502 映射 6 项、OpenAPI 元数据 2 项、1 项是夹具缺 `createdAt`）；OpenAPI 文档 1 项失败。改动与重导出后 4 个文件 132 项全部通过。
+  - 服务侧新增 3 项刻画授权语义：模型失败时 `consumeWorkspaceGrant` 恰好调用一次且早于模型调用，不写计划/ICP，错误原样抛出；改动前就成立（服务没改）。
+- 未做：
+  - **用同一份授权重试仍是 409**。要让失败后的重试不必换授权，只能由 GrowthOS 在收到 502 `MODEL_UPSTREAM_UNUSABLE` 后换一个 jti 签发（例如把尝试序号纳入签发键），本仓不改 GrowthOS。风险：在那之前，调用方必须先取新授权再重试；若 SaaS 侧仍返回同一份，这个 ICP 在授权过期前都无法重新生成。
+  - 「不消耗授权」的方案评估过并放弃（见上「授权语义」）：会让同一份授权付两次。
+  - 查询计划执行（`POST /query-plans/:planId/execute`）是异步的，模型失败发生在 run 里，不走这道边界。
+
+## 2026-10-13 · Stop a discovery run at the query stage when a query activity fails on an ordinary error, instead of holding it at materialization
+
+- 起因：#643「未做」里记录的既有缺口。查询活动因**普通**错误（分类器判为非控制错误，例如数据库或网关的普通失败）用尽重试时，`discovery_query_receipt` 和 `discovery_query_execution_outcome` 都没有这条查询的记录，工作流却只把 `failures` 加一、继续跑完其余查询，直到 canonicalize 阶段才被物化准入 `admit_discovery_company_materialization_v1`（回执数、执行结果数都等于计划查询数，且每个 ordinal 都有回执）以 `DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD` 扣住：其余查询的时间与模型费用白花，run 记的还是 canonicalize 阶段的控制错误，看不出真正起因。预演场景「一条查询每次尝试都因普通错误失败」记录的就是这个。
+- 取舍：在两个方案里选了「诚实的最小改动」——在查询阶段就停，而不是从工作流侧补一条零回执。
+  - 补零回执要新增一个活动（计划、预算绑定、查询键都得由工作流交下去），并为一条根本没执行完的查询写一份执行结果，物化准入见到的「完整」就是假的。#643 的零回执是活动自己在重试时写的，它知道哪个源已路由、哪个没有；工作流不知道。
+  - 普通错误连续三次用尽重试多半是基础设施故障，不是这一条查询的问题，后面的查询大概率同样失败。停下来、记清阶段与错误类型、计划保持 `READY` 可重跑，比跑完再被扣住便宜，也诚实。
+- 改动：
+  - **工作流**（`discoveryWorkflow`）：查询活动因普通错误失败时不再吸收，直接抛出，由既有的失败收尾（BI-25）把 run 记为 `FAILED`，`stats.failure = { stage: 'query', errorType: <活动最后一次尝试的错误类型>, control: false }`；后面的查询不再执行，canonicalize 不再调用。控制错误照旧直接上抛，行为不变。
+  - `stats.failures` 的语义收紧为「以零回执结束的查询数」（#643 的无法重放情形）：让 run 停下的那次失败记在 `stats.failure` 里，不计数，与 fit 等阶段一致。此前已经拿到的回执照常留在 FAILED 记录的 `perQuery` / `perSource` 里，`finalizeRun` 的回执核对照常通过。
+  - patch 守卫 `discovery-query-failure-stop-v1`：改动前记录的历史没有这个标记，重放时照旧计失败、继续跑后面的查询，命令序列不变；回执之前的旧历史不问这个 patch。没有新活动，超时声明不变。
+  - 对接说明（`packages/contracts/INTEGRATION.md` 第 3 步）同步。
+- 测试（先写失败测试：改动前 5 项失败——工作流 3、预演 1、重放 1；首版写成 4 项，独立复审对照 main 实测更正——改动后 4 个文件 87 项全部通过）：
+  - 工作流 4 项新用例：普通错误在查询阶段停住、后面的查询不跑、canonicalize 不调用、`failures: 0` 且 `failure.stage = 'query'`；此前以零回执结束的查询照常计入 `failures`；没有 patch 标记的旧历史照旧继续跑并判 `PARTIAL`；回执之前的旧历史不问这个 patch。正常 run 不问这个 patch（既有用例加一条断言）。原「普通查询失败仍走正常状态路径」用例删除，「后一条查询失败时保留前面同类回执」用例改为断言这些回执留在 FAILED 记录里。
+  - 重放 2 项（真实 Temporal 历史）：改动前记录的「查询失败 → 下一条查询 → canonicalize 扣住 → FAILED 收尾」历史重放不变；改动后记录的「查询失败 → FAILED 收尾（stage `query`）」历史重放通过。
+  - 预演场景改写：「一条查询每次尝试都因普通错误失败」现在断言 run 停在查询阶段（`executeQuery` 只跑 4 次尝试 [1, 1, 2, 3]，后两条查询不跑，canonicalize 不调用，`failure.stage = 'query'`），不再是物化扣住。
+- 未做：
+  - 没有补零回执的活动（方案 B），理由见上。若将来要「一条查询普通失败、其余照跑」，应在活动侧让普通错误也以零回执结束，而不是从工作流侧补。
+  - #643「未做」里的另外两条（共用操作键的失败跨查询传染、REPLAYED 结果不带标记）不变。
 
 ## 2026-10-12 · Keep a governed discovery query going when one model extraction answers unusably
 
