@@ -6,7 +6,7 @@
 > 评审状态：`APPROVED_AT_GATE_8`
 > 事实 Owner：`OWN-DOC-GOV`
 > 机器政策：[`docs-verification-policy/v1`](docs-verification-policy.json)
-> 最后核验：2026-08-07
+> 最后核验：2026-10-15
 > 批准边界：产品负责人条件批准机器门与例外治理；独立人工、真实 Release 和全部 blocker 仍保留
 
 本文定义文档如何进入持续集成、什么必须失败、什么只能告警，以及历史证据为什么不能为了“全绿”被无声重写。机器规则由 JSON 政策和 `scripts/verify-docs.mjs` 承重；本文解释其人类语义。
@@ -17,7 +17,7 @@
 pnpm docs:verify
 ```
 
-该命令不访问网络、不连接数据库、不生成产品代码，也不写入仓库。它先运行 `governance:verify` 的 mutation tests 与机器 Registry/Schema/生成物检查，再运行既有模型候选、contracts build 和 Markdown 校验。普通 CI 的安装步骤后运行同一命令；独立 `governance · traceability · release` required context 也运行 `pnpm governance:verify`。
+该命令不访问网络、不连接数据库、不生成产品代码，也不写入仓库。它先运行 `governance:verify` 的 mutation tests 与机器 Registry/Schema/生成物检查，再运行既有模型候选、contracts build 和 Markdown 校验（含 changelog 片段格式）。普通 CI 的安装步骤后运行同一命令；独立 `governance · traceability · release` required context 运行 `pnpm governance:verify`，并且只在 `pull_request` 上再运行一步 `node scripts/governance-changelog-fragments.mjs require --base <base.sha> --head <head.sha>`（push 到 main 时跳过；前一步失败也照跑，同一轮报全）。
 
 ## 2. 检查面与失败语义
 
@@ -36,6 +36,8 @@ pnpm docs:verify
 | Workflow 供应链与 ownership | 任一 workflow 含 moving-tag/未登记 action，完整 40 位 SHA 与版本注释不匹配，或 CODEOWNERS 结尾治理规则块缺失 | GitHub ruleset 已生效、action 本身无漏洞或外部 review 已发生 |
 | Spec 可达性 | `scripts/` 下的 spec 既不在 workflow 经 `node --test`/`tsx --test`（直接或经根 package.json 脚本）执行的入口及其 import 链上，也没有带理由与运行命令登记进 `MANUAL_SPECS`；登记项已失效（已被 runner 执行或文件已删）；runner 用 glob 或指向不存在的 spec | spec 内容正确、手动 spec 近期跑过，或 `scripts/` 以外的测试有 runner 执行 |
 | 敏感模式 | Markdown 出现高置信私钥、长 API key 或 AWS access key 模式 | 已完成完整 DLP/secret scan |
+| Changelog 片段格式 | `docs/roadmap/changelog.d/` 里出现 README 与 `YYYY-MM-DD-<slug>.md` 片段以外的文件；片段文件名、frontmatter（只许 `date` / `pr` / `title`，日期须为真实日期且与文件名一致）、正文四项（起因 / 改动 / 测试 / 未做）的顺序与内容、一二级标题、引用式链接或脚注定义不合格；政策的 `frontmatterFragmentDirectories` 列了别的目录。错误码 `CHANGELOG_FRAGMENT_*`，由 `docs:verify` 报 | 片段内容真实、`pr` 等于当前 PR 号，或片段已经汇编进 changelog |
+| 代码 PR 的 changelog 片段 | PR 相对合并基点（`base...head`）改了 `apps/`、`packages/`、`scripts/`、`infra/` 或根目录的构建与运行时文件（`CODE_ROOT_FILES`：`Dockerfile`、`runtime-entrypoint.mjs`、`package.json`、`pnpm-lock.yaml` 等），却没有新增或修改片段，也没有改 `changelog.md`；diff 算不出时失败而不放行。只在 governance 工作流的 `pull_request` 上运行 | 片段写得对、PR 作者没有连同检查脚本一起改（fork PR 可以），或过渡期直接改 `changelog.md` 的 PR 不会冲突 |
 
 所有硬失败退出码为非零。输出中的计数是本次扫描范围，不是产品能力、测试通过数或发布证据。
 
@@ -53,7 +55,7 @@ pnpm docs:verify
 
 机器政策明确区分三类文件：
 
-- **生命周期必填目录**（`lifecycleRequired`）：`docs/backend/`、`docs/implementation-records/`、`docs/research/`、`docs/roadmap/`、`docs/security/`、`docs/site-builder/`、`docs/status/`、`docs/superpowers/plans/` 下不属于受控、权威当前、历史出处或不可变证据的文档，前 16 行必须有 `> 生命周期：` 行，值取自同一词表（如计划落地后 `CLOSED`、调研与时点报告 `REFERENCE_ONLY`、runbook `GUIDE`、被取代 `SUPERSEDED`）。判断依据另写一行 `> 生命周期依据：`，该行不被解析。缺失为 `LIFECYCLE_MISSING`，非法值为 `STATUS_UNKNOWN`。目的只有一个：读者（包括开发代理）不会把已完成的计划或过时的时点报告当成现行合同。
+- **生命周期必填目录**（`lifecycleRequired`）：`docs/backend/`、`docs/implementation-records/`、`docs/research/`、`docs/roadmap/`、`docs/security/`、`docs/site-builder/`、`docs/status/`、`docs/superpowers/plans/` 下不属于受控、权威当前、历史出处或不可变证据的文档，前 16 行必须有 `> 生命周期：` 行，值取自同一词表（如计划落地后 `CLOSED`、调研与时点报告 `REFERENCE_ONLY`、runbook `GUIDE`、被取代 `SUPERSEDED`）。判断依据另写一行 `> 生命周期依据：`，该行不被解析。缺失为 `LIFECYCLE_MISSING`，非法值为 `STATUS_UNKNOWN`。目的只有一个：读者（包括开发代理）不会把已完成的计划或过时的时点报告当成现行合同。唯一的豁免也写在政策里：`lifecycleRequired.frontmatterFragmentDirectories` 列出的目录（目前只有 `docs/roadmap/changelog.d/`）中的片段（不含该目录 README）用 frontmatter 代替生命周期行，改由「Changelog 片段格式」检查；从政策里删掉该项，片段就重新要求生命周期行。列别的目录会报 `CHANGELOG_FRAGMENT_POLICY`，因为没有脚本检查它们的 frontmatter。
 - **权威当前页**：承载当下合同与阶段事实，改动能力时须按阶段回写清单人工复核；机器校验结构、链接、ID、事实来源元数据，并要求生命周期**恰为** `CURRENT`。
 - **历史 / provenance 页**：保留当时决策、实施记录与 handoff；机器要求已登记路径的前言含显著历史 banner、结构和链接，不为消除 warning 改写正文。
 - **不可改写 evidence**：证据原文只作路径、结构、链接和敏感模式校验；不以当前文档格式或日期要求重写。
@@ -68,6 +70,8 @@ pnpm docs:verify
 |---|---|---|---|
 | `docs/templates/前端技术方案模板.md` | 不强制新元数据 | 历史模板不是当前前端方案或 Release schema | `REFERENCE_ONLY`；需要正式前端方案时基于当前规范另行产出 |
 | `docs/site-builder/12-site-builder-design-intelligence-and-cc-implementation-v3.2.md` | 历史表格列错误只告警 | `DATED_PROPOSAL` 必须保持原始证据；错误不影响 current truth | 原位保留 banner；不在 Phase 8 修正文义或移动文件 |
+| `docs/roadmap/changelog.d/<YYYY-MM-DD>-<slug>.md`（不含 README） | 不要求 `> 生命周期：` 行（政策项 `lifecycleRequired.frontmatterFragmentDirectories`） | 片段用 frontmatter 的 `date` / `pr` / `title` 承担元数据并由 `CHANGELOG_FRAGMENT_*` 校验，下一班发版列车汇编后即删除。风险：片段在目录里停留期间不声明生命周期，读者可能把未汇编的片段当成已归档条目 | Owner：`OWN-DOC-GOV`。关闭条件：恢复「每个 PR 直接改 `changelog.md`」时删除该政策项与本行。successor：汇编后的 `docs/roadmap/changelog.md` 条目 |
+| `scripts/governance-changelog-fragments.mjs` 的 `fragmentRequirement`（`\|\| changelogEdited`） | 改了代码的 PR 只改 `changelog.md`、不加片段，也通过（附 `::warning::`），不论 PR 何时开 | 过渡：仓外的 `/global/CLAUDE.md` §7 与派活脚本仍写「在 changelog.md 当天小节末尾新增小节」，规则生效时有在途 PR 照此改了 `changelog.md`。风险：照旧写法的新 PR 继续通过，`changelog.md` 的文本冲突在这些指令改掉之前不会消失 | Owner：`OWN-DOC-GOV`。关闭条件：上述仓外指令改为写片段后，删除 `\|\| changelogEdited`、本行与对应测试。successor：只认片段的必需检查 |
 
 新增例外必须记录路径、规则、风险、Owner、到期/关闭条件和 successor。永久 wildcard、整目录关闭链接检查或“历史所以都不检查”不允许。
 
