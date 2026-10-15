@@ -4,6 +4,29 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-14 · Keep a reused artifact object alive until its latest manifest expires, and record every object version for erasure (#647)
+
+- 起因：运行时会话 10-14 用库与 MinIO 证实，产物对象按 `sha256 + 隐私类` 寻址复用，但桶生命周期按**对象年龄**过期（PERSONAL_DATA 1 天，MinIO 的实际删除点是 `LastModified + 2 天` 向下取整到 UTC 午夜）。后来的清单复用同一对象不刷新年龄，第一个写入者的到期一到对象就没了，库里更晚的行还在有效期内：空页面摘要 `e3b0c442…` 有 23 行（10-12 17:34 → 10-13 16:36 写入，最晚到 10-14 16:36），对象 10-14 00:00 已被删除；重放时 `readVerified` 报 `GENERIC_OPERATION_ARTIFACT_INVALID`，「同一操作重放不再出网」的保证被破坏。
+  - 顺带发现两处同根缺陷：`settle…v3` 拒绝任何与对象表钉住的版本不同的版本号，生命周期删除后同样字节的再次写入会以 `…_INVALID` 结算失败（xin 173 个对象里 126 个钉在已不存在的版本上）；个人数据擦除只删钉住的那一个版本，而按版本号删除当前版本会让上一个版本重新成为当前版本（MinIO 实测）。
+- 改动（方案 A，复用时刷新；理由与未采用的方案 B 见 [docs/backend/generic-operation-artifact-storage.md](../backend/generic-operation-artifact-storage.md)）：
+  - **存储**（`generic-operation-artifact.store.ts`）：`promote` 接收 `retainUntil`（服务传入本次清单的 `expiresAt`）。复用分支校验字节后，若当前版本在 `x-amz-expiration` 里公布的到期早于 `retainUntil` 或没有公布，则 `CopyObject` 到自身（`REPLACE`，元数据、`ContentType` 与标签都取自现有对象，即首写者的合同；SSE-S3），再 HEAD 要求与现有对象合同全等（`sameObjectContract`），返回复制响应里的版本号；到期已覆盖则原样复用。复制失败不让操作失败：返回已校验的现有版本并记固定告警码 `GENERIC_OPERATION_ARTIFACT_RETENTION_REFRESH_FAILED`。`store.read` 的 NotFound 改报 `GENERIC_OPERATION_ARTIFACT_OBJECT_MISSING`。
+  - **服务**：`persist` 之后的 inspect 只核对 key、字节与隐私类（#644 后的 `sameStoredArtifact`）、不再要求版本号相等（并发复用可能已再刷新一次），结算记录 `promote` 自己校验或创建的版本；`readVerified` 对「清单有效、对象不在」报 `GENERIC_OPERATION_ARTIFACT_OBJECT_MISSING` 而不是 `…_INVALID`。
+  - **重放路径**（`generic-operation-artifact.execution.ts`）：`replay` 失败时记 `[artifact] <schema> replay failed for operation <id>: <类名:有界码>` 后原样抛出；ToolBroker（受保护文件，未改）照旧转成 `BudgetOperationReplayError`，发现 run 按无法重放跳过并计数，不二调。
+  - **迁移** `20261014050000_generic_operation_artifact_object_version_ledger`：新表 `generic_operation_artifact_object_version` 记录每个被结算记录过的版本（从现有钉子回填）；`settle…v4` 取代 v3，版本号改为「移动钉子 + 写入账本」；`enqueue_workspace_personal_artifact_cleanup_v1` 同签名重建，为账本里的每个版本各建一条精确版本清理命令。擦除端口与 MinIO 策略、桶生命周期、readiness 期望都不变；在 bootstrap 策略下实测运行时 principal 的复制到自身被允许、无标签或错标签的复制被拒。
+  - `PostgresBudgetStore.settleArtifactManifest` 改调 v4；Prisma 新增模型；`app-user-table-privileges.json` 登记新表（无权限）；CI 的 PostgreSQL 作业加跑新 postgres spec。
+- 测试：
+  - 先红后绿：存储 9 项（按到期刷新、已覆盖不刷新、无到期头刷新、不传 `retainUntil` 不复制、复制失败 fail-open 只记一条码、复制响应无版本号时取当前版本、刷新后合同漂移拒绝、`retainUntil` 非规范拒绝、`read` 的 `OBJECT_MISSING`）、服务 3 项、重放路径 1 项，改动前 11 项失败（服务/重放 3 项在 origin/main 代码上复跑确认），改动后三个文件 98 项通过。内存 S3 桩补了 `CopyObject`、LastModified 与 MinIO 公式的 `x-amz-expiration`。
+  - 迁移静态 spec 5 项；真库 spec（`generic-operation-artifact-object-version.postgres.spec.ts`，一次性 pgvector:pg16，以 app_user 跑）4 项：v4 移动钉子并逐版本记账、v3 仍拒绝不同版本（被取代的行为）、账本写入函数对 app_user 拒绝、擦除为每个版本各建命令并逐条 claim/complete。
+  - 真 MinIO（一次性容器 + `infra/minio/bootstrap.sh` 原样建桶与三个 principal）：`generic-operation-artifact.minio.spec.ts` 新增「复用对象在运行时策略下复制到自身」用例，与既有用例、`personal-artifact-cleanup.minio.spec.ts` 一起通过。
+- 未做：
+  - 刷新复制在结算之前就生成新的当前版本，结算没落库时这个版本不在账本里，擦除删不到它，只靠生命周期按年龄清（PERSONAL_DATA 最长约 2 天，期间仍可读）。会留下它的路径：进程在两步之间死掉；结算被擦除围栏以 `SUBJECT_TOMBSTONED` 拒绝而回滚；复制 ACK 丢失被 fail-open 当作失败；复制后的 HEAD 报 `STORAGE_UNAVAILABLE` 或漂移。改动前复用分支从不写对象，没有这个缺口。可选收口（复制前查清理命令/墓碑，或复制前写意向账本）见存储文档第 3 节。
+  - readiness 金丝雀没有加「复制到自身」探针；策略若漂移，只会在复用时以告警码暴露。
+- 与 #644（字节级复用判定，先于本 PR 合入 main）的交互，合入 main 后按复审修了三处：
+  - 刷新复制原先用本次清单（后来者）的元数据、`ContentType` 与标签，会把首写者合同改写成后来者的，库里首写者的 `media_type` 与桶从此不一致；改为取现有对象的合同。
+  - 复制后的核对原用 `sameArtifact`，#644 后它不再比较 mediaType/resultSchema，漂移检测失效；改用新增的 `sameObjectContract`，要求与现有对象五项全等。
+  - `persist` 里传给 `sameStoredArtifact` 的对象字面量多带了 mediaType/resultSchema，#644 收窄形参后触发 TS2353，`nest build` 失败；删掉这两项（它们本来就不再参与比较）。
+  - 测试（先红后绿）：store spec 新增「后来者以另一合同复用并触发刷新时保留首写者的元数据、ContentType 与标签」、「复制后 ContentType / 结果 schema 偏离现有对象合同时拒绝」（2 项，原「偏离 staged」用例改写）、「复制落地为后来者合同时拒绝」，改动前 4 项红、改动后通过；service spec 新增「刷新复用保留首写者合同、并发再刷新后仍记录 promote 创建的版本」（运行时改动前后都成立，钉住接口；编译错误由 build 暴露）；真 MinIO spec 新增「另一结果 schema 的复用刷新后 HEAD 的 ContentType、元数据、标签仍是首写者的」，在改动前的 store 上红、改动后与其余 7 项一起通过（一次性 MinIO + `infra/minio/bootstrap.sh`）。
+
 ## 2026-10-14 · Key term normalization per query, skip its model when no routed source reads it, and fall back to the built-in vocabulary when the call is lost (#645)
 
 - 起因：卖方 #26 的验收 run（`3e78eb4e`，xin，2026-10-13 11:36 UTC）15 秒内失败：`stats.failure = { stage: query, errorType: BudgetOperationReplayError }`，16 条查询只记 1 条失败。
@@ -28,6 +51,36 @@
   - 429 等 4xx 仍按控制错误让查询失败，没有放进回退范围。
   - 旧形态（无计划身份）的查询不带 `correlationId`，仍按 run 共用操作键。
   - `taxonomyFallback` 不进 `resolveRunStatus`：回退的查询照常跑完所有源，不算漏活；若产品负责人希望它把 run 判 PARTIAL，是一行改动。
+
+## 2026-10-14 · Request scoring after a FAILED discovery run that already judged fit, and tell preset queues from scored ones (#648)
+
+- 起因：xin 上 179 条 lead 的六维分全是 NULL，队列只是 fit 阶段按 verdict 预置的值（`discovery/fit-judge.ts` `upsertLeadFit`：mismatch→rejected、其余→needs_review）。
+  - `finalizeRun` 只在 run 状态非 FAILED 时写 `QualifyRequested`，而 11 次验收 run 全部 FAILED（10-14 只读核对 `global_dev`：`discovery_run` 11 行全 FAILED、stats 都没有 `fit` 键（全部走的失败收尾路径）；`outbox_event` 里 `QualifyRequested` 与 `LeadsScored` 各 0 条）。
+  - 结果是评分、制裁第五门（`temporal/qualify.activities.ts`）、`LeadsScored` 事件从未在真实数据上跑过；API 又把预置队列和评分队列显示成一样。
+- 改动：
+  - **FAILED 的 run 也请求评分**：只要本 run 的 fit 阶段已经给过判定，`finalizeRun` 照样写 `QualifyRequested`（`reason: discovery_run_failed_after_fit`），让已物化的公司得到评分；分数是幂等 upsert，之后的 run 再刷新。
+    - 判据只看本 run（`fitStageJudged`）：stats 带 `fit` 时只按它的计数（全 0 就不写，不再回退查 lead 表）；失败路径的 stats 不带 `fit`，先要求 `failure.stage` 已到 fit（fit / enrich / signals / watches / patentEnqueue），再查本 run 解析出的公司（本 run 已接受的 raw → company identity link）在该 ICP 下有没有 `fit_verdict`。停在 query 等 fit 之前阶段的 run、或别的 run 留下的判定都不触发。
+    - 评分是确定性的、不调 provider、不花预算，所以 run 授权已结束（过期 / 撤销 / 用尽）时也写；`attestRunFinalization` 对 FAILED 的容忍逻辑不变。
+    - plan 仍留 READY；`DiscoveryRunCompleted` 照旧带 `status: FAILED`。
+  - **API 区分预置与已评分**：`GET /leads` 与 `GET /leads/:id` 每行加 `scored`（`total_score` 非空）与 `queueBasis`（`fit_gate_preset | score | human_accept | human_reject`）；`GET /icps/:id/lead-queues` 加 `scored`（每条都有分）与 `queueBasis`（四种依据的计数），并把一直返回却不在契约里的 `sanctions_hold` 补进契约。
+    - 多加了 `human_reject`：评分阶段自己也写 `status=REJECTED`，只凭状态分不出人工拒绝与评分拒绝，所以用一条 reject 裁决作证（列表每行只探 1 条；汇总用关系过滤聚合）。
+    - 新列 `lead.scored_at`（迁移 `20261014051926_lead_scored_at`，可空、不回填），评分阶段每次写分盖上。
+    - `POST /leads/:id/accept` 与 `/reject` 用同一个 `LEAD_SCHEMA`，响应同样带 `scored` 与 `queueBasis`（含两处幂等早返回）。
+  - **人工拒绝成为终态**：`scoreCandidates` 的 `humanFinal` 原先不含 REJECTED（注释说含），人工拒绝会被重评分改回 REVIEW；FAILED 收尾也请求评分后这条路径每次都会走到。现在 REJECTED 且有 reject 裁决的 lead 重评分只刷新分数、不改状态与队列，判据与 `human_reject` 相同。
+    - 人工 reject 一条评分写的 REJECTED（还没有 reject 裁决）时，`decide` 照样记下裁决，不再当成重试直接返回——否则人工的拒绝没有留痕，也挡不住重评分。已有 reject 裁决的重复 reject 仍是幂等早返回。
+  - **`LeadQualified` 快照 v1 加可选字段** `scored_at`、`queue_basis`（设计 E1：`snapshot_version` 仍 1，旧载荷照样通过）。
+  - OpenAPI 重导出；`packages/contracts/INTEGRATION.md` 阶段 3 与 `docs/architecture/current.md` 的快照字段表同步。
+- 测试：
+  - 先写失败测试，改动前 19 项失败（另一个文件因模块不存在整体失败）、改动后全部通过：
+    - `finalizeRun` 18 项：stats 有 fit 判定 / 失败停在 fit 及之后 5 个阶段且本 run 的公司有判定（断言按 run → raw → identity link → lead 查询）/ 停在 fit 之前 4 个阶段即使 ICP 有判定也不写 / stats 既无 fit 也无 failure 不写 / 本 run 的公司无判定不写 / 本 run 无已接受 raw 不查 lead / 本 run fit 计数全 0 不回退查 lead / 授权已结束仍写（3 种码）/ DONE 的 reason 不变且不查 lead 表；
+    - 队列依据纯函数 11 项；`LeadService.list` / `queueSummary` 4 项；快照 7 项（含 schema 正反例、旧载荷通过、decide 接线）；评分 `scored_at` 2 项、人工拒绝终态 2 项；`decide` 响应 5 项（accept / 重复 accept / reject / 重复 reject / reject 评分写的 REJECTED，逐项对照 openapi.json 的 required）。
+  - 真库 `lead-queue-basis.postgres.spec.ts`（app_user + RLS，一次性 Postgres，5 项）：迁移后的列可写、`groupBy` 的 `_count.totalScore`、关系过滤聚合、列表排序与行形状、跨 workspace / 跨 ICP 不计入、`decide(reject)` 对评分写的 REJECTED 记下裁决且重试不再加。已登记到 CI 的 PostgreSQL 步骤。
+  - `gctl check` 通过；oasdiff 对 origin/main 无破坏性变更。
+- 未做：
+  - 已有的 179 条 lead 不会自动评分：下一次 run 收尾时触发，或手动 `POST /icps/:id/qualify`。本 PR 不在 xin 上发起评分。
+    - 这 179 条分属 3 个 ICP（84 / 51 / 44 条，10-14 只读核对），手动 qualify 一个 ICP 只给这一个 ICP 的 lead 评分。
+    - `scoreCandidates` 遍历的是整个 workspace 的 canonical 公司，不只是该 ICP 判过的（既有行为，本 PR 未改）：xin 上 workspace 有 150 家公司，qualify 一个 ICP 后它的 lead 会变成 150 条，多出来的 66 / 99 / 106 条没有 `fit_verdict`，按评分直接进队列。所以 qualify 之后该 ICP 的 `lead-queues` 会是 `scored: true`、总数 150，而不是「179 条变 scored」。要不要只给本 ICP 判过 fit 的公司评分是另一个决定。
+  - 任务描述里「FAILED 收尾不发 `DiscoveryRunCompleted`」与代码不符：FAILED 一直发、带 `status: FAILED`，本 PR 保持。
 
 ## 2026-10-13 · Let best-effort stages skip a company whose operation cannot be replayed, time-box enrichment, and rehearse a full-size run
 
@@ -129,6 +182,26 @@
   - 内容寻址去重与 MinIO 按对象年龄过期（personal-data 1 天）相冲：复用对象不刷新年龄，首个写入者的 TTL 一到对象就没了，而库里仍有未过期的产物行指向它（10-13 验证：空对象已 NotFound，库里最晚的引用到 10-14 16:36）。另行处理。
   - 每次 HEAD 探测都落一份空产物，是浪费但无害。
 
+## 2026-10-13 · Answer ICP design and plan generation whose model answer settled unusable with 502 MODEL_UPSTREAM_UNUSABLE instead of a bare 500
+
+- 起因：卖方 #24 的 ICP `971c9242`（xin，2026-10-13 07:55–08:02 UTC）`POST /icps/:icpId/query-plans` 跑了 284 秒后，网关把这次调用结算为 `CHAT_COMPLETIONS_CONTENT_FILTERED`（`ProviderOutputError`，已按真实用量结算），API 却只回 500 `INTERNAL`，没有错误码；同一 ICP 再试一次得到 409 `EXECUTION_BUDGET_GRANT_REUSED`，因为 GrowthOS 对同一操作与主体会签发同一份授权，而后端按 jti 消耗授权（`consume_workspace_execution_authority`）。调用方从这两个响应里看不出模型答案不可用、也看不出该怎么重试。
+- 改动：
+  - **新的 HTTP 边界** `apps/api/src/model-gateway/model-upstream-http-boundary.ts`：`asModelUpstreamHttpBoundary` 把网关**已结算、没有可用答案**的模型失败映射成 502 `{ error: { code: "MODEL_UPSTREAM_UNUSABLE", message, details: { reasonCode } } }`。
+    - 识别的失败：可恢复的 `ProviderOutputError`（非 JSON、不过 schema、任务门拒绝，含 `TaskOutputValidationError`），以及**原型精确**的 `ProviderIdentityError`、`ProviderTransportError`（流被截断、上游错误事件、不可读、非 JSON 响应体、finish reason 无效、Responses 状态失败），且 cause 链里没有控制错误。
+    - 网关在未付费 wire 上直接回 400–599（实际是 429、5xx）时抛的 `ProviderHttpError`（原型精确、状态码为整数）：原因码为 `GATEWAY_HTTP_<状态码>`。授权（jti）在模型调用之前就已消耗，所以重试同样需要新授权；这次调用的预留是否计费由路由按失败类别决定（现在按预留额度保守结算）。子类与范围外状态码不识别（复审 MEDIUM：此前这类失败仍是裸 500）。
+    - 不识别、原样放行：授权错误（402/403/409/503 仍由 `asExecutionBudgetHttpBoundary` 映射）、控制错误、`ProviderOutputUnresolvedError`、`ProviderSettlementError`、合规拒绝、在途 wire、业务 409、普通错误。
+    - 响应正文只有固定 message 与经 `^[A-Z][A-Z0-9_]{2,63}$` 校验的 `reasonCode`，不带模型文本；日志同样只记原因码。
+  - **ICP 控制器**：`POST /companies/:companyId/icps` 与 `POST /icps/:icpId/query-plans` 在授权边界之内套上这道边界，并以 `@ApiModelUpstreamUnusable()` 把 502 注册进 code-first OpenAPI（`packages/contracts/openapi/openapi.json` 重导出，两个操作各多一个 502，spectral 0 错误，无破坏性变更）。
+  - **授权语义（这次生成失败后授权怎么算）**：授权在模型调用之前就在自己的事务里被消耗（`consumeWorkspaceAndOpen`：消耗 jti + 开账户），网关再把这次调用的真实用量结算到这份授权的账户上；失败后服务不写任何 ICP 或计划。所以授权**已消耗、已计费**，不能回滚：消耗与调用不在同一个事务里，而且就算在，结算行也必须保留，否则同一份授权可以付两次。调用方的重试方式是先向 SaaS 取一份新的授权；用同一份会得到 409 `EXECUTION_BUDGET_GRANT_REUSED`。
+  - 对接说明（`packages/contracts/INTEGRATION.md` 阶段 2 第 1 步）与错误模型表（`packages/contracts/README.md`）补上 502。
+- 测试：
+  - 先写失败测试：边界 1 个文件（识别 15 例、不识别 13 例、响应体 4 项、边界包装 8 项）在模块不存在时整体失败；控制器 14 项中 9 项失败（502 映射 6 项、OpenAPI 元数据 2 项、1 项是夹具缺 `createdAt`）；OpenAPI 文档 1 项失败。改动与重导出后 4 个文件 132 项全部通过。
+  - 服务侧新增 3 项刻画授权语义：模型失败时 `consumeWorkspaceGrant` 恰好调用一次且早于模型调用，不写计划/ICP，错误原样抛出；改动前就成立（服务没改）。
+- 未做：
+  - **用同一份授权重试仍是 409**。要让失败后的重试不必换授权，只能由 GrowthOS 在收到 502 `MODEL_UPSTREAM_UNUSABLE` 后换一个 jti 签发（例如把尝试序号纳入签发键），本仓不改 GrowthOS。风险：在那之前，调用方必须先取新授权再重试；若 SaaS 侧仍返回同一份，这个 ICP 在授权过期前都无法重新生成。
+  - 「不消耗授权」的方案评估过并放弃（见上「授权语义」）：会让同一份授权付两次。
+  - 查询计划执行（`POST /query-plans/:planId/execute`）是异步的，模型失败发生在 run 里，不走这道边界。
+
 ## 2026-10-13 · Stop a discovery run at the query stage when a query activity fails on an ordinary error, instead of holding it at materialization
 
 - 起因：#643「未做」里记录的既有缺口。查询活动因**普通**错误（分类器判为非控制错误，例如数据库或网关的普通失败）用尽重试时，`discovery_query_receipt` 和 `discovery_query_execution_outcome` 都没有这条查询的记录，工作流却只把 `failures` 加一、继续跑完其余查询，直到 canonicalize 阶段才被物化准入 `admit_discovery_company_materialization_v1`（回执数、执行结果数都等于计划查询数，且每个 ordinal 都有回执）以 `DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD` 扣住：其余查询的时间与模型费用白花，run 记的还是 canonicalize 阶段的控制错误，看不出真正起因。预演场景「一条查询每次尝试都因普通错误失败」记录的就是这个。
@@ -140,7 +213,7 @@
   - `stats.failures` 的语义收紧为「以零回执结束的查询数」（#643 的无法重放情形）：让 run 停下的那次失败记在 `stats.failure` 里，不计数，与 fit 等阶段一致。此前已经拿到的回执照常留在 FAILED 记录的 `perQuery` / `perSource` 里，`finalizeRun` 的回执核对照常通过。
   - patch 守卫 `discovery-query-failure-stop-v1`：改动前记录的历史没有这个标记，重放时照旧计失败、继续跑后面的查询，命令序列不变；回执之前的旧历史不问这个 patch。没有新活动，超时声明不变。
   - 对接说明（`packages/contracts/INTEGRATION.md` 第 3 步）同步。
-- 测试（先写失败测试：改动前 4 项失败，改动后 4 个文件 87 项全部通过）：
+- 测试（先写失败测试：改动前 5 项失败——工作流 3、预演 1、重放 1；首版写成 4 项，独立复审对照 main 实测更正——改动后 4 个文件 87 项全部通过）：
   - 工作流 4 项新用例：普通错误在查询阶段停住、后面的查询不跑、canonicalize 不调用、`failures: 0` 且 `failure.stage = 'query'`；此前以零回执结束的查询照常计入 `failures`；没有 patch 标记的旧历史照旧继续跑并判 `PARTIAL`；回执之前的旧历史不问这个 patch。正常 run 不问这个 patch（既有用例加一条断言）。原「普通查询失败仍走正常状态路径」用例删除，「后一条查询失败时保留前面同类回执」用例改为断言这些回执留在 FAILED 记录里。
   - 重放 2 项（真实 Temporal 历史）：改动前记录的「查询失败 → 下一条查询 → canonicalize 扣住 → FAILED 收尾」历史重放不变；改动后记录的「查询失败 → FAILED 收尾（stage `query`）」历史重放通过。
   - 预演场景改写：「一条查询每次尝试都因普通错误失败」现在断言 run 停在查询阶段（`executeQuery` 只跑 4 次尝试 [1, 1, 2, 3]，后两条查询不跑，canonicalize 不调用，`failure.stage = 'query'`），不再是物化扣住。

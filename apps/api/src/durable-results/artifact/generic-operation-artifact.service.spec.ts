@@ -285,6 +285,49 @@ describe('GenericOperationArtifactService', () => {
     );
   });
 
+  it('asks the store to keep the object until the manifest expires and records the version promote verified', async () => {
+    const deps = dependencies({
+      promote: async () => {
+        deps.order.push('promote');
+        return { ...stored, versionId: 'copy-version-7' };
+      },
+    });
+
+    await deps.service.persist(persistInput());
+
+    expect(deps.store.promote).toHaveBeenCalledWith(staged, {
+      retainUntil: EXPIRES_AT,
+    });
+    // A concurrent reuse may have refreshed the object again between promote
+    // and the post-promote inspect: the content contract still has to match,
+    // the version this settlement records is the one promote verified.
+    expect(deps.store.inspect).toHaveBeenCalledWith(
+      SHA256,
+      'CONFIDENTIAL_TENANT',
+      undefined,
+    );
+    expect(deps.budgetStore.settleArtifactManifest).toHaveBeenCalledWith(
+      reservation,
+      130_000n,
+      snapshot,
+      expect.anything(),
+      expect.anything(),
+      undefined,
+      'copy-version-7',
+    );
+  });
+
+  it('still fails closed when the post-promote inspect contradicts the content contract', async () => {
+    const deps = dependencies({
+      inspect: async () => ({ ...stored, sizeBytes: '1' }),
+    });
+
+    await expect(deps.service.persist(persistInput())).rejects.toEqual(
+      new GenericOperationArtifactError('GENERIC_OPERATION_ARTIFACT_INVALID'),
+    );
+    expect(deps.budgetStore.settleArtifactManifest).not.toHaveBeenCalled();
+  });
+
   it('does not mark a pre-ack storage denial RESULT_UNKNOWN', async () => {
     const failure = new ArtifactStorageError(
       'GENERIC_OPERATION_ARTIFACT_SIZE_LIMIT_EXCEEDED',
@@ -641,6 +684,27 @@ describe('GenericOperationArtifactService', () => {
     });
   });
 
+  it('settles a refreshed reuse that keeps the first writer\'s contract even when a later refresh moved the current version', async () => {
+    // #644 (shared object, first writer's contract) meets #647 (refresh on
+    // reuse): promote returns the copy it made under the first writer's
+    // contract, a concurrent reuse refreshes again before the inspect, and the
+    // settlement still records the version promote created.
+    const shared = { ...stored, mediaType: 'text/markdown', resultSchema: 'crawl4ai-fetch/v1' };
+    const deps = dependencies({
+      promote: async () => ({ ...shared, versionId: 'copy-version-7' }),
+      inspect: async () => ({ ...shared, versionId: 'copy-version-8' }),
+    });
+
+    await expect(deps.service.persist(persistInput())).resolves.toBeDefined();
+
+    expect(deps.budgetStore.settleArtifactManifest).toHaveBeenCalledOnce();
+    const call = deps.budgetStore.settleArtifactManifest.mock.calls[0]!;
+    expect(call[2]).toMatchObject({
+      manifest: { mediaType: staged.mediaType, resultSchema: staged.resultSchema, sha256: SHA256 },
+    });
+    expect(call[6]).toBe('copy-version-7');
+  });
+
   it('streams a verified read without buffering it in the service', async () => {
     const deps = dependencies();
     const reference = {
@@ -704,6 +768,29 @@ describe('GenericOperationArtifactService', () => {
     })).rejects.toMatchObject({
       code: 'GENERIC_OPERATION_ARTIFACT_INVALID',
     });
+  });
+
+  it('names a live manifest whose object storage no longer holds with OBJECT_MISSING, not tampering', async () => {
+    const deps = dependencies({ inspect: async () => null });
+
+    await expect(deps.service.readVerified({
+      scopeKind: 'workspace',
+      workspaceId: WORKSPACE_ID,
+      authorityId: AUTHORITY_ID,
+      reference: {
+        schemaVersion: 'generic-operation-artifact-ref/v1',
+        artifactId: ARTIFACT_ID,
+        operationId: OPERATION_ID,
+        resultSchema: 'http-get/v1',
+        sha256: SHA256,
+        sizeBytes: String(BODY.byteLength),
+        mediaType: 'text/plain',
+        expiresAt: EXPIRES_AT,
+      },
+    })).rejects.toEqual(
+      new GenericOperationArtifactError('GENERIC_OPERATION_ARTIFACT_OBJECT_MISSING'),
+    );
+    expect(deps.store.read).not.toHaveBeenCalled();
   });
 
   it('maps an unbounded read stream failure to the one artifact error', async () => {
