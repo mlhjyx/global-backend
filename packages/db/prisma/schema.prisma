@@ -410,9 +410,10 @@ model GenericOperationArtifact {
   @@map("generic_operation_artifact")
 }
 
-/// Append-only PERSONAL_DATA lookup. It contains only the existing rights-flow
-/// subject discriminator and row UUID; identity text and artifact bytes remain
-/// forbidden. One artifact can bind to exactly one DSR subject.
+/// Append-only PERSONAL_DATA lookup. It contains only the subject discriminator
+/// (`contact` | `company`, the DSR subjects, or `company_profile`, the tenant's own
+/// seller profile since 2026-10-14) and row UUID; identity text and artifact bytes
+/// remain forbidden. One artifact can bind to exactly one subject.
 model GenericOperationArtifactSubject {
   artifactId  String   @id @map("artifact_id") @db.Uuid
   scopeKey    String   @map("scope_key") @db.VarChar(200)
@@ -794,6 +795,10 @@ model CompanyProfile {
   version        Int           @default(1) // optimistic lock (PRD 11.16)
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
+  /// 企业理解失败回写（2026-10-13）：某阶段重试用尽时记 `阶段:错误类型`（各一个封闭 token，无消息、无抓取内容），
+  /// 状态回到 DRAFT；新一轮 ENRICHING 清空。两列同空同非空，迁移里的 CHECK 只收这个形状。
+  understandingFailedAt  DateTime? @map("understanding_failed_at") @db.Timestamptz(3)
+  understandingLastError String?   @map("understanding_last_error") @db.VarChar(120)
 
   workspace                 Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   offerings                 Offering[]
