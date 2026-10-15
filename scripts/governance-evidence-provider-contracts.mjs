@@ -41,6 +41,10 @@ const PROVIDER_EVIDENCE_KINDS = new Set([
   "HISTORICAL_EVIDENCE",
 ]);
 const MAX_RUNTIME_EVIDENCE_WINDOW_MS = 24 * 60 * 60 * 1000;
+// Observations made while a source-built worker served the development fast
+// lane (docs/backend/dev-fast-lane.md). They stay development-only and never
+// count toward a release chain.
+const DEV_FAST_LANE_EVIDENCE_PREFIX = "dev-fast-lane-";
 
 function issue(code, message, path = null) {
   return Object.freeze({ code, message, ...(path ? { path } : {}) });
@@ -212,6 +216,16 @@ export function validateRuntimeEvidence(evidence, options = {}) {
   if (!isNonEmptyString(evidence.evidence_kind)) {
     issues.push(
       issue("EVIDENCE_KIND_INVALID", "evidence_kind must be a non-empty string"),
+    );
+  } else if (
+    evidence.evidence_kind.startsWith(DEV_FAST_LANE_EVIDENCE_PREFIX) &&
+    evidence.environment !== "development"
+  ) {
+    issues.push(
+      issue(
+        "EVIDENCE_FAST_LANE_ENVIRONMENT_INVALID",
+        "dev-fast-lane evidence must be recorded in the development environment",
+      ),
     );
   }
   if (!EVIDENCE_RESULTS.has(evidence.result)) {
@@ -524,6 +538,7 @@ ${rows}
 
 export {
   DELIVERY_STATES,
+  DEV_FAST_LANE_EVIDENCE_PREFIX,
   EVIDENCE_ENVIRONMENTS,
   IDENTIFIER,
   PROMOTION_STATES,

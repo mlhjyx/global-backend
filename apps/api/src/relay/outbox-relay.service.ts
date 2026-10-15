@@ -9,6 +9,8 @@ import {
 import { PrismaClient } from "@prisma/client";
 import { WorkflowIdReusePolicy } from "@temporalio/client";
 import { TemporalClient } from "../temporal/temporal.client";
+import { DevFastLaneTemporalClient } from "../temporal/dev-fast-lane-temporal.client";
+import { DEV_FAST_LANE_ACQUISITION_COMMANDS } from "../runtime/dev-fast-lane";
 import {
   DELETION_WORKFLOW,
   DISCOVERY_WORKFLOW,
@@ -143,6 +145,9 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     @Optional() private readonly admission?: RuntimeAdmissionService,
     @Optional()
     private readonly releaseIdentity?: RuntimeReleaseIdentityService,
+    // Development fast lane only (dev-fast-lane.ts); absent or disabled keeps
+    // every command on the managed Temporal and the 'understanding' queue.
+    @Optional() private readonly devFastLane?: DevFastLaneTemporalClient,
   ) {
     this.db =
       db ?? new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
@@ -346,14 +351,36 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       await this.expireDueClaims();
       if (this.shuttingDown) return;
       // parked 事件排除在轮询外：未注册类型只报一次错并停靠，不每 2s 重试刷日志。
+      const lane = this.devFastLane?.lane;
+      const laneCommands = lane?.enabled
+        ? {
+            workspaceId: lane.workspaceId,
+            eventType: { in: [...DEV_FAST_LANE_ACQUISITION_COMMANDS] },
+          }
+        : undefined;
       const events = (await this.db.outboxEvent.findMany({
-        where: { publishedAt: null, parkedAt: null },
+        // Lane commands are polled in their own batch below, so commands that
+        // wait for an unavailable development Temporal never fill this one.
+        where: laneCommands
+          ? { publishedAt: null, parkedAt: null, NOT: laneCommands }
+          : { publishedAt: null, parkedAt: null },
         orderBy: { id: "asc" },
         take: BATCH_SIZE,
       })) as OutboxEventRecord[];
       for (const ev of events) {
         if (this.shuttingDown) break;
         await this.routeEvent(ev);
+      }
+      if (laneCommands && !this.shuttingDown) {
+        const laneEvents = (await this.db.outboxEvent.findMany({
+          where: { publishedAt: null, parkedAt: null, ...laneCommands },
+          orderBy: { id: "asc" },
+          take: BATCH_SIZE,
+        })) as OutboxEventRecord[];
+        for (const ev of laneEvents) {
+          if (this.shuttingDown) break;
+          await this.routeEvent(ev);
+        }
       }
       // webhook 派送循环：仅推模式启用时才扫账本（与 routeEvent 的 sink 判定共用同一谓词，消除漂移）。
       if (!this.shuttingDown && this.webhookEnabled()) {
@@ -637,13 +664,34 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       workflowIdReusePolicy?: WorkflowIdReusePolicy;
     },
     what: string,
+    acquisitionCommand?: { eventType: string; workspaceId: string },
   ): Promise<void> {
+    // Development fast lane: only the three acquisition commands pass
+    // `acquisitionCommand`, and only the lane workspace's get a route.
+    const laneRoute = acquisitionCommand
+      ? (this.devFastLane?.route(
+          acquisitionCommand.eventType,
+          acquisitionCommand.workspaceId,
+        ) ?? null)
+      : null;
+    const described = laneRoute
+      ? `${what} on dev fast lane task queue '${laneRoute.taskQueue}'`
+      : what;
     try {
-      await this.temporal.client.workflow.start(workflowType, options);
-      this.logger.log(`started ${what}`);
+      if (laneRoute && this.devFastLane) {
+        const laneWorkflow = await this.devFastLane.workflow();
+        await laneWorkflow.start(workflowType, {
+          ...options,
+          taskQueue: laneRoute.taskQueue,
+          workflowExecutionTimeout: laneRoute.workflowExecutionTimeout,
+        });
+      } else {
+        await this.temporal.client.workflow.start(workflowType, options);
+      }
+      this.logger.log(`started ${described}`);
     } catch (err) {
       if ((err as Error)?.name === "WorkflowExecutionAlreadyStartedError") {
-        this.logger.log(`${what} already started — merged`);
+        this.logger.log(`${described} already started — merged`);
       } else throw err;
     }
   }
@@ -690,6 +738,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           ],
         },
         `understanding workflow for company ${ev.aggregateId}`,
+        ev,
       );
     }
     if (ev.eventType === "DiscoveryRunRequested") {
@@ -731,6 +780,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           ],
         },
         `discovery workflow for run ${ev.aggregateId}`,
+        ev,
       );
     }
     if (ev.eventType === "QualifyRequested") {
@@ -743,6 +793,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           args: [{ workspaceId: ev.workspaceId, icpId: ev.aggregateId }],
         },
         `qualify workflow for icp ${ev.aggregateId}`,
+        ev,
       );
     }
     if (ev.eventType === "DeletionRequested") {

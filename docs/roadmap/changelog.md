@@ -82,6 +82,22 @@
     - `scoreCandidates` 遍历的是整个 workspace 的 canonical 公司，不只是该 ICP 判过的（既有行为，本 PR 未改）：xin 上 workspace 有 150 家公司，qualify 一个 ICP 后它的 lead 会变成 150 条，多出来的 66 / 99 / 106 条没有 `fit_verdict`，按评分直接进队列。所以 qualify 之后该 ICP 的 `lead-queues` 会是 `scored: true`、总数 150，而不是「179 条变 scored」。要不要只给本 ICP 判过 fit 的公司评分是另一个决定。
   - 任务描述里「FAILED 收尾不发 `DiscoveryRunCompleted`」与代码不符：FAILED 一直发、带 `status: FAILED`，本 PR 保持。
 
+## 2026-10-14 · Let one development workspace run its acquisition workflows on a source-built worker while the attested API keeps serving
+
+- 起因：改获客的 worker 侧代码后，每次都要发布并切换后端镜像才能在本机验证。目标是只在 development、只对一个测试 workspace，让入驻理解、发现 run 与资格判定跑在源码 customer worker 上，管理态受证 API 继续承担全部 HTTP、readiness 与 relay，管理态受证 worker 继续服务其余 workspace；pilot/production 不受影响且 fail closed。设计与复核调整见[落地设计](../superpowers/plans/2026-10-14-dev-fast-lane.md)，运维步骤见[开发快速通道](../backend/dev-fast-lane.md)。
+- 改动：
+  - **开关**（`runtime/dev-fast-lane.ts`）：`RUNTIME_DEV_FAST_LANE_WORKSPACE_ID`（一个小写 UUID，既是开关又是唯一 workspace）、`RUNTIME_DEV_FAST_LANE_TEMPORAL_ADDRESS`（只接受 loopback）、`RUNTIME_DEV_FAST_LANE_SCHEMA_DIGEST`（车道 worker 用）。唯一解析器在 test/pilot/production 下见到任何一个就抛 `DEV_FAST_LANE_FORBIDDEN_OUTSIDE_DEVELOPMENT`；API 与 worker 都在启动最早处解析。compose 只把前两个转发给 `api` 服务，默认空。
+  - **路由**（`outbox-relay.service.ts`、新 `temporal/dev-fast-lane-temporal.client.ts`）：只有车道 workspace 的 `CompanyProfileCreated`、`DiscoveryRunRequested`、`QualifyRequested` 改投开发用 Temporal 的 `understanding-dev-fast-lane-<id>` 队列，带执行超时（发现 185 分钟，其余 30 分钟），workflowId、reuse policy 与参数不变；车道命令单独成批轮询，开发用 Temporal 不可达也饿不死其他 workspace 的 outbox。开关为空时主查询与投递逐字不变。原生 Temporal 的机器授权器把 customer 队列钉死为 `understanding`，所以车道不用它。
+  - **readiness**：开关开时 `/health/ready` 多一个可选的 `capabilities.dev_fast_lane`（恒为 `not_proven` / `DEV_FAST_LANE_UNATTESTED_ROUTING`），不参与整体状态与客户写入准入；OpenAPI 重导出（只增可选属性）。
+  - **身份**（`runtime-release-identity.ts`）：开关开且缺构建回执时失败码改为 `DEV_FAST_LANE_UNATTESTED`；有效回执照常 attested，无效回执照常 `BUILD_ATTESTATION_INVALID`。API 不把开关交给身份加载，永远是受证镜像。`runtime-admission.ts` 未改。
+  - **worker**（`temporal/worker.ts` 一个分叉点 + 新 `temporal/dev-fast-lane-worker.ts`）：只在「开关开 + 缺回执 + 唯一失败的准入项是 build」时，于遥测、数据库、租约之前分叉进车道 worker；其余进程走原路径（看到开关的受证进程只打一行 warning）。车道 worker 明文连开发用 Temporal、只 poll 车道队列、只注册 understanding/discovery/qualify 三组活动；不写租约、不建 owner 连接、不跑平台 seed、不取机器令牌、不需要建站依赖；迁移名与 schema 摘要用构建回执同一组函数从源码树求得（`build-attestation.ts` 导出 `latestMigrationRevision`、新增 `computeSchemaDigest`，`runtime-process-lease.ts` 拆出 `assertMigrationRevision`），schema 摘要必须等于镜像的，否则 `SCHEMA_DIGEST_MISMATCH` 不 poll。网关、broker、分类器、制裁与三组活动的构造与 `worker.ts` 逐字相同，由源码守卫 spec 比较。
+  - **治理**：`environment-parity-policy.json` 新增一条 `trust` allowance `development-fast-lane-unattested-worker-trust`（verify 恰好 1 条新 finding、0 条 STALE），`runtime-admission-test-process-only` 的 reason 补一句；RuntimeEvidence 验证器拒绝非 development 的 `dev-fast-lane-` 证据（`EVIDENCE_FAST_LANE_ENVIRONMENT_INVALID`），traceability 拒绝把车道 kind 写进 `required_evidence_kinds`（`TRACE_FAST_LANE_EVIDENCE_KIND_FORBIDDEN`）。
+  - 文档：architecture/current、status/current §4.5、ADR-024 补记、AGENTS §4、evidence README §2 同步写明这条例外与边界。
+- 测试（先红后绿，AAA）：解析/路由/车道判定/schema 核对 14 项；迁移枚举与 schema 摘要 3 项（名字合格的普通文件按复核修正为报 `must be a directory`）；`assertMigrationRevision` 2 项；身份加载 4 项（含 main.ts 不把开关交给身份的源码断言）；`DEV_FAST_LANE` provider 2 项；车道 Temporal 客户端 3 项；relay 6 项（含 25 条卡住的车道行不饿死其他 workspace、开关关时单一查询逐字不变）；readiness 3 项与 OpenAPI 1 项；源码守卫：车道来源 3 项、`worker.ts` 分叉与车道 worker 6 项；compose 1 项；治理 1 项。`worker.ts` 现有的源码守卫 spec 全部原样通过。编译后的 worker 用合成环境（数据库与 Temporal 指向 `127.0.0.1:1`）冒烟：pilot 带车道变量退出码 1；只给 workspace 报地址无效；缺/错 schema 摘要分别停在 `DEV_FAST_LANE_SCHEMA_DIGEST_REQUIRED` / `SCHEMA_DIGEST_MISMATCH`；摘要正确时走到数据库准入。
+- 未做 / 边界：
+  - 尚未在 xin 上运行；首次落地要发布并切换一次含本改动的镜像（主线已含 #647、#648 的迁移，按带迁移的流程），镜像发布与打开开关是另外的授权事项。
+  - 车道只覆盖三个 workflow 的 workflow 体与活动体；workflow 输入、outbox payload、事件注册表与 API 内的同步获客操作仍是镜像代码。两个车道 worker 之间不在代码层互斥。车道观察永远不是 RuntimeEvidence PASS，R4 撤销投递链仍未打通。
+
 ## 2026-10-13 · Let best-effort stages skip a company whose operation cannot be replayed, time-box enrichment, and rehearse a full-size run
 
 - 起因：卖方 #23 的验收 run（`c3878e54`，xin，2026-10-12 22:47–10-13 01:23 UTC）跑完查询、官网画像、fit（#640 的时间盒生效，分约 10 批判完 84 家）和富集后，在信号富集阶段失败。

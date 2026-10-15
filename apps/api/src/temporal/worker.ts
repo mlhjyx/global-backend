@@ -96,6 +96,12 @@ import {
   waitForWorkerDependencyAdmission,
 } from "../runtime/worker-dependency-admission";
 import { startWorkerDependencyHeartbeat } from "../runtime/worker-dependency-heartbeat";
+import {
+  devFastLaneWorkerLane,
+  resolveDevFastLane,
+  type DevFastLane,
+} from "../runtime/dev-fast-lane";
+import { runDevFastLaneWorker } from "./dev-fast-lane-worker";
 
 const WORKER_NOT_READY_LOG_INTERVAL_MS = 30_000;
 
@@ -123,10 +129,21 @@ async function holdWorkerNotReady(
 async function main(): Promise<void> {
   Runtime.install({ shutdownSignals: [] });
   const runtimeSettings = resolveRuntimeSettings(process.env);
+  let devFastLane: DevFastLane;
+  try {
+    devFastLane = resolveDevFastLane(runtimeSettings.mode, process.env);
+  } catch (error) {
+    // main().catch prints only a generic line; name the refused variable first.
+    console.error(
+      `[worker] ${error instanceof Error ? error.message : String(error)}`,
+    );
+    throw error;
+  }
   const releaseIdentity = await loadRuntimeReleaseIdentity({
     mode: runtimeSettings.mode,
     artifactRoot: resolve(__dirname, ".."),
     env: process.env,
+    devFastLane,
   });
   const admission = inspectRuntimeAdmission(
     runtimeSettings,
@@ -134,6 +151,19 @@ async function main(): Promise<void> {
     releaseIdentity,
     "WORKER",
   );
+  // Development fast lane: an unattested source build whose only failed check
+  // is the missing receipt serves the lane queue instead (dev-fast-lane.ts).
+  // Every other process, including an attested one with the switch set,
+  // continues on the unchanged managed path below.
+  const lane = devFastLaneWorkerLane(devFastLane, releaseIdentity, admission);
+  if (lane.active && devFastLane.enabled) {
+    return runDevFastLaneWorker(devFastLane);
+  }
+  if (devFastLane.enabled) {
+    console.warn(
+      "[worker] RUNTIME_DEV_FAST_LANE_WORKSPACE_ID is set but this process is not the fast-lane worker (attested build, or admission fails beyond the missing receipt); it keeps the managed path",
+    );
+  }
   if (!admission.admitted) {
     const failed = Object.entries(admission.checks)
       .filter(([, check]) => check.status === "failed")

@@ -382,7 +382,12 @@ function sha256(contents: Buffer | string): string {
   return `sha256:${createHash('sha256').update(contents).digest('hex')}`;
 }
 
-async function latestMigrationRevision(root: string): Promise<string> {
+/**
+ * Newest Prisma migration directory name. The build receipt records it as
+ * migration_revision; the development fast lane derives the same value from
+ * its source tree instead of from a receipt.
+ */
+export async function latestMigrationRevision(root: string): Promise<string> {
   const directory = await openStableDirectory(root, 'migration inventory root');
   try {
     const before = await directory.stat({ bigint: true });
@@ -414,6 +419,17 @@ async function latestMigrationRevision(root: string): Promise<string> {
   } finally {
     await directory.close();
   }
+}
+
+/** schema_digest of a Prisma schema, read through the bounded no-follow guard. */
+export async function computeSchemaDigest(schemaPath: string): Promise<string> {
+  return sha256(
+    await readBoundedRegularFile(
+      schemaPath,
+      MAX_SCHEMA_BYTES,
+      'Prisma schema provenance input',
+    ),
+  );
 }
 
 interface RuntimeProvenanceDigests {
@@ -510,11 +526,7 @@ export async function generateBuildAttestation(input: {
     throw new Error('build attestation build_sha must be 40 lowercase hex');
   }
   const migrationRevision = await latestMigrationRevision(input.migrationsRoot);
-  const schemaContents = await readBoundedRegularFile(
-    input.schemaPath,
-    MAX_SCHEMA_BYTES,
-    'Prisma schema provenance input',
-  );
+  const schemaDigest = await computeSchemaDigest(input.schemaPath);
   const distDirectory = await openStableDirectory(input.distRoot, 'artifact tree root');
   try {
     const provenance = await runtimeProvenanceDigests(
@@ -532,7 +544,7 @@ export async function generateBuildAttestation(input: {
       source_tree_digest: provenance.sourceTreeDigest,
       renderer_digest: provenance.rendererDigest,
       migration_revision: migrationRevision,
-      schema_digest: sha256(schemaContents),
+      schema_digest: schemaDigest,
     });
     const temporaryName = `.build-attestation.tmp-${randomUUID()}`;
     const temporaryPath = descriptorPath(distDirectory, temporaryName);

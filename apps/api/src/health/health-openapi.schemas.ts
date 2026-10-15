@@ -253,6 +253,9 @@ export const RUNTIME_READINESS_RESPONSE_SCHEMA: SchemaObject = {
         // Optional for additive readback compatibility. Missing means unproven;
         // the recovery caller must still enforce its own capability gate.
         platform_target_lookup: COMPONENT_SCHEMA,
+        // Development fast lane only; present (never ok) while one workspace's
+        // acquisition commands route to an unattested source worker.
+        dev_fast_lane: COMPONENT_SCHEMA,
       },
     },
     components: {

@@ -95,7 +95,7 @@ GrowthOS 历史 managed runtime 恢复见[原恢复记录](../evidence/growthos-
 | --- | --- | --- |
 | 源码完整性 | 旧机 181 个"领先 origin/main"的 head 已全部存在于新宿主；交叉核对已合并 PR 后，其中 77 个实为 squash 合入、104 个未进主线；1 个从未推送的分支（6 commits）已直取并推送为 `codex/pr407-identity-test-closeout-20260913`（#538）；全量 git bundle 原存 WSL 归档（尚未取回 xin） | 取回不等于已裁决或已合入；104 个未进主线分支按 `BRANCH-TRIAGE-20260921.md` 默认归档、零操作，不代表放弃或采纳 |
 | 运行配置 | 旧机 `.secrets/`、`apps/api/.env`、`packages/db/.env` 及 `GOOGLE_PATENTS_SA_JSON` 指向的 service account 文件已取回并 sha256 逐项校验；可移植三方凭据已接入 `local-config`，主机相关值刻意不继承 | 配置就位不等于服务已启动或已验证 |
-| 运行时 | 2026-09-21 起新宿主以已发布镜像（`ghcr.io/mlhjyx/global-backend`，按 digest 钉住，源提交 `cca0d0e5`）经 `infra/backend-runtime.compose.yml` 启动 API/Worker：`/health/build` 为 `attested: true`；Worker 就绪链停在 `PLATFORM_AUTOMATION_ACQ_SWEEP_TEMPORAL_PROOF_UNAVAILABLE`，与旧宿主 2026-09-12 的 `TEMPORAL_PROOF_UNAVAILABLE` 同一既有缺口（见[原恢复记录](../evidence/growthos-managed-runtime-restoration-20260912.md)）。参考数据由代码 seed，未从旧库导入 | 这是原 WSL 宿主的历史运行观察，不是 xin 当前观察或 RuntimeEvidence，也不产生可信 Release Bundle；源码 `pnpm worker` 停在 `BUILD_ATTESTATION_REQUIRED` 属设计；§3 的 runtime 观察仍绑定其原宿主与时刻 |
+| 运行时 | 2026-09-21 起新宿主以已发布镜像（`ghcr.io/mlhjyx/global-backend`，按 digest 钉住，源提交 `cca0d0e5`）经 `infra/backend-runtime.compose.yml` 启动 API/Worker：`/health/build` 为 `attested: true`；Worker 就绪链停在 `PLATFORM_AUTOMATION_ACQ_SWEEP_TEMPORAL_PROOF_UNAVAILABLE`，与旧宿主 2026-09-12 的 `TEMPORAL_PROOF_UNAVAILABLE` 同一既有缺口（见[原恢复记录](../evidence/growthos-managed-runtime-restoration-20260912.md)）。参考数据由代码 seed，未从旧库导入 | 这是原 WSL 宿主的历史运行观察，不是 xin 当前观察或 RuntimeEvidence，也不产生可信 Release Bundle；源码 `pnpm worker` 在没有车道开关时停在 `BUILD_ATTESTATION_REQUIRED` 属设计（车道见 §4.5）；§3 的 runtime 观察仍绑定其原宿主与时刻 |
 | 主线一致性 | 以 `origin/main` 为准；原记录中旧机与 WSL 本地 `main` 落后的事实不外推到 xin | 本地 checkout 不是权威 |
 | WSL 停用 | WSL 已于 2026-09-23 停用，xin 是唯一开发与运行机器 | 停用不代表归档已取回 xin |
 
@@ -154,6 +154,18 @@ GrowthOS 历史 managed runtime 恢复见[原恢复记录](../evidence/growthos-
 | 改变的 | 全局写入守卫与建站门改用 `customerWriteAdmission`：硬组件仍须全部 ok，唯一例外是 platform Worker 恰为 `PLATFORM_WORKER_NOT_READY`（没有 READY 租约：租约不在、已停止，或同一发布仍在 STARTING/DRAINING） | 运行镜像何时采用另行记录，采用前行为不变；尚无本机运行观察，不是 RuntimeEvidence |
 | 不变的 | `/health/ready` 的整体口径、响应格式与 503 码；platform Worker 自身的 fail-closed（不就绪不轮询、不出网）；静态发布准入；platform Worker 混版本、Temporal 身份不符、租约查询失败仍关闭客户写入 | 换镜像时新旧发布的租约并存期间仍是混版本，客户写入照旧关闭，只有旧租约消失后的等待段不再关闭；4 个平台 schedule 仍为 paused；R4 撤销投递链仍未打通（`BLOCKED_PENDING_BACKEND_4A4`），platform Worker 就绪只代表事实可观察，不代表撤销能真正送达 |
 | 代价 | platform Worker 故障不再经由客户写入 503 暴露，要靠 `/health/ready` 的 `components.platform_worker` 与本机巡检发现 | platform Worker 频繁单独重启的根因另立任务，本项不处理 |
+
+## 4.5 开发快速通道（2026-10-14，边界限于本节）
+
+> 本节只记录这一项改动，**不刷新**本页 `最后核验` 时间戳，也不改动 §2 阶段门、§3 runtime 观察或 §4–§4.4 的证据裁决。
+
+开发者改了获客的 worker 侧代码后，此前每次都要发布并切换后端镜像才能在本机验证。本项让 development 里一个测试 workspace 的入驻理解、发现 run 与资格判定跑在源码 customer worker 上；设计与复核调整见 [落地设计](../superpowers/plans/2026-10-14-dev-fast-lane.md)，运维步骤见 [开发快速通道](../backend/dev-fast-lane.md)。
+
+| 项 | 当前事实 | 不得外推 |
+| --- | --- | --- |
+| 改变的 | 开关置位时，受证 API 的 relay 把该 workspace 的三条获客命令投到开发用 Temporal 的专属队列（带执行超时），源码 worker 只 poll 该队列；`/health/ready` 多一个恒为 `not_proven` 的 `capabilities.dev_fast_lane` | 运行镜像何时采用另行记录，采用前行为不变；尚无本机运行观察，不是 RuntimeEvidence |
+| 不变的 | 开关为空时 API、relay、worker 行为逐字不变；其余 workspace、擦除与建站命令、整体 readiness、客户写入准入、`/health/build`、租约与准入代码都不变；pilot/production 启动即拒绝车道变量 | 车道 worker 是 unattested 源码进程，车道时段的任何观察都不能作为 RuntimeEvidence PASS 或进入 Release Bundle；R4 撤销投递链仍未打通 |
+| 代价 | 车道只覆盖三个 workflow 的 workflow 体与活动体，workflow 输入、outbox payload、事件注册表与 API 内的同步获客操作仍是镜像代码；开关、迭代、关闭都要先排空在途 run（路由在投递时决定）；换镜像前要关车道 | 首次落地仍需发布并切换一次含本改动的镜像 |
 
 ## 5. 下一顺序与授权边界
 
