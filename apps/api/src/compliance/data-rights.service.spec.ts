@@ -159,4 +159,31 @@ describe('DataRightsService', () => {
     // 关键：走**调用方 tx**，不经 this.prisma.withWorkspace 另开事务（与 evaluateAndLog 的区别）。
     expect(fake.createdLogs).toHaveLength(0);
   });
+
+  it('logDecisions 在调用方 tx 内一次 createMany 写多条判定（周报逐行 EXPORT），空列表不发语句', async () => {
+    const fake = new FakePrisma();
+    const s = svc(fake);
+    const createMany = vi.fn(async ({ data }: { data: LoggedRow[] }) => ({ count: data.length }));
+    const tx = { policyDecisionLog: { createMany } };
+    await s.logDecisions(tx as never, WS, []);
+    expect(createMany).not.toHaveBeenCalled();
+
+    const allowed: DataRightsContext = {
+      action: 'EXPORT', dataClass: 'green', subjectJurisdiction: 'EU', processorJurisdiction: 'EU', hasEvidence: true,
+    };
+    const denied: DataRightsContext = { ...allowed, suppressed: true, lawfulBasis: { basis: 'contract', ref: 'C-1', note: 'secret' } };
+    await s.logDecisions(tx as never, WS, [
+      { ctx: allowed, decision: s.evaluate(allowed), meta: { subjectType: 'lead', subjectId: 'lead-1', correlationId: 'r-1' } },
+      { ctx: denied, decision: s.evaluate(denied), meta: { subjectType: 'lead', subjectId: 'lead-2', correlationId: 'r-1' } },
+    ]);
+    expect(createMany).toHaveBeenCalledTimes(1);
+    const rows = createMany.mock.calls[0]![0].data;
+    expect(rows.map((row) => [row.subjectId, row.action, row.effect, row.allowed, row.reason, row.correlationId])).toEqual([
+      ['lead-1', 'EXPORT', 'ALLOW', true, 'green_company_fact', 'r-1'],
+      ['lead-2', 'EXPORT', 'DENY', false, 'suppressed', 'r-1'],
+    ]);
+    expect(rows[1]).toMatchObject({ workspaceId: WS, lawfulBasisRef: 'C-1', actorId: null });
+    expect(JSON.stringify(rows)).not.toContain('secret');
+    expect(fake.createdLogs).toHaveLength(0);
+  });
 });

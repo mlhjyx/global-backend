@@ -3,161 +3,78 @@
 > 文档 ID：`DOC-STATUS-001`
 > 生命周期：`CURRENT`
 > 状态：`CURRENT`
-> 当前事实来源：[产品范围](../product-scope.md)、[当前架构](../architecture/current.md)、[ADR registry](../adr/registry.md)、[发布路线](../roadmap/release-plan.md)，以及本页逐项注明的 Git/GitHub 回读、机器验证与 owner 交付
-> 最后核验：2026-09-20T08:51:58.634Z（源码、队列与 owner 交付回读；历史 runtime 不重新标记为当前）
+> 当前事实来源：[产品范围](../product-scope.md)、[当前架构](../architecture/current.md)、[ADR registry](../adr/registry.md)、[发布路线](../roadmap/release-plan.md)、[冲突与开放决策登记](../governance/conflict-register.md)，以及本页逐项注明的 Git/GitHub 回读与 xin `global_dev` 只读查询
+> 最后核验：2026-10-14T10:05Z（`origin/main@33339fb4`、GitHub PR 列表、xin 运行容器的镜像 revision 与 `global_dev` 只读计数；本页是人工核验的读数，不是 RuntimeEvidence）
+> 写法：按 PRD 4.0 L2 §5 的四问填写——做了什么（四态：未做 / 可运行 / 已验证 / 已验收）、证据、谁验收、怎么回退。四态口径（D-029）尚未逐条拍板，本页先按它组织。2026-09-20 核验的旧版正文见文末[历史](#历史2026-09-20-核验)。
 
-## 当前结论
+## 一页结论
 
-`SOURCE_INTEGRATED_ALPHA / CROSS_REPO_PRODUCT_ASSEMBLY / USER_JOURNEY_NOT_VALIDATED / COMMERCIAL_LOOP_NOT_CLOSED / PRODUCTION_READINESS_BLOCKED`
+当前 Release 是 **RL1 线索试点**：一个 ICP（德国 / DACH 工业泵进口商与分销商）、一个国家、一个品类，Managed 周报交付，目标是拿到第一个人工 QGO 判断并记下每条线索的成本。产品负责人 2026-10-10 批准按 PRD 4.0 开发（「同意，继续，需要闭环，按照 prd 中的需求进行开发实施」）。
 
-源码、局部与联合测试、hosted CI、合入、运行采用、发布和用户验收分别判定。当前没有证据证明完整 `Onboarding → ICP → LeadQualifiedPackage → Opportunity → Human QGO → Feedback` 用户旅程已经接纳，也没有 Pilot/GA 授权。
+**RL1 还没有达成任何一条产出类退出指标。** xin 上 `discovery_run` 全部 11 行都是 `FAILED`，没有一行 `COMPLETED` 或 `PARTIAL`（截至 2026-10-14 03:30 UTC；本次 10:05 UTC 复核没有新 run）。八条退出指标里，真实产出、精度、可达、证据、成本、商机六条没有数据可填；合规可以计数（个人数据三张表 0 行，制裁门从未执行所以命中为 0）；节奏为 0（还没有发出过一份周报）。
 
-Program C 保持已批准的完整 C1–C5/QGO 范围；company-first 是未选择的可选缩范围，不是原范围的执行阻塞。Billing/Credits 保持 `DEFERRED / NOT_IMPLEMENTED`，`cap_microusd` 是平台执行安全包络，不是客户余额或模型购买次数。并行 Site 验收路径仍是 `Quote → Grant → Build → Preview`，不替代商业链及 Human QGO；范围以[发布路线](../roadmap/release-plan.md)为准。
+阻塞 RL1 的不止「run 跑不完」：评分从未在验收数据上跑过，可达性结构上为 0，交付最后一跳（GrowthOS ACK）从未走通，卖方自助入驻自 08-24 起不可运行。逐项见下表。
 
-当前非运行时模型候选合同仍为 `site-builder-model-candidate-baseline/2026-08-07-v3`，详见[生成页](../site-builder/model-candidate-baseline.md)；它不等于 active route、质量证明或真实 dispatch 授权。本轮 SDK 依赖升级没有改变这一边界。
+## 1. RL1 主链：做了什么、证据、谁验收、怎么回退
 
-本轮依赖队列状态见最终收口证据。历史 #407 已关闭，原始分支与逐项语义处置继续保留；关闭不代表整个历史综合候选已被替代或取得准入。#515 与 #538 已于 2026-10-06 关闭（见 §4.3）。
+| 项 | 做了什么（四态） | 证据 | 谁验收 | 怎么回退 |
+| --- | --- | --- | --- | --- |
+| 发现 run（ICP → 查询计划 → run） | **可运行，未验证**：11 次全部 FAILED，最远走到信号阶段（卖方 #23、#28）；10-11 起每次失败都由一个 PR 修了倒下的那一处（#638–#645，见 §2），#644、#645 尚未上线 | `discovery_run` 只读查询（status、`stats.failure`）；RL1 执行计划 §15 | 产品负责人（RL1 内部验收） | 运行镜像按 digest 钉在 `local-config/global/runtime.compose.env`，每次换镜像的前后 digest 与验收记录在 `/global/_archive/backend-runtime-switch-*`；带迁移的窗口先 `pg_dump`，另有每日 `db-backup` |
+| 评分与制裁第五门 | **未验证**：从未在验收数据上执行。179 条 lead 的 `total_score` 全部为 NULL，队列只是 fit 阶段按判定预置的值；`sanctions_screening_result` 0 行。原因：`finalizeRun` 只在 run 不是 FAILED 时发 `QualifyRequested`，而 run 全部 FAILED。修复 #648 在途 | `lead`、`sanctions_screening_result`、`outbox_event` 只读计数 | 产品负责人 | 评分是确定性重算、可重跑，不改源数据，规则版本写进快照；#648 随镜像回退 |
+| 可达性（BI-14 公司级联系路径） | **可运行（开关关闭），未验证**：#630（PR-1，只存联系页 / Impressum / 表单等链接）已合并，`company_contact` 为 DISABLED，`company_contact_point` 0 行；评分侧（可达性按公司级联系路径计分、评分规则 v3）在 #649，未合并。在它上线前 recommended 结构上为 0（当前 179 条 lead：62 条 needs_review、117 条 rejected、0 条 recommended） | `data_provider`、`company_contact_point` 只读查询；#630、#649 | 产品负责人 | `company_contact` 置回 DISABLED；#649 随镜像回退 |
+| 交付最后一跳（`LeadQualified` → GrowthOS ACK） | **未验证**：`outbox_delivery` 154 行全部是 `sink=saas`、`PENDING`（2026-09-01 至 2026-10-13），GrowthOS 从未 ACK 过任何事件；xin 没有配置 webhook sink，只能由 GrowthOS 调 `POST /events/ack`；GrowthOS 前台只拉前 50 条、只给前 3 条 ACK 按钮 | `outbox_delivery` 只读计数；评审稿 2026-10-13 §1.5 | 产品负责人；GrowthOS 侧消费需走 `growthos-dev` 补丁线 | 不涉及数据回退（事件只读交付） |
+| 卖方自助入驻（understanding 官网抓取） | **不可运行**：自 2026-08-24（#413）起，ToolBroker 的 artifactPrecheck 对 understanding 的 `crawl4ai-fetch/v1` 抓取一律 HOLD，`company_profile` 28 行 ENRICHING、9 行 DRAFT、历史上 0 行 ACTIVE；工作流没有失败终态，同一公司不可重跑。验收靠手工 `POST /companies/:id/claims` 再审批绕过。已派任务卡 E（扩主体种类 + 失败终态 + 重跑入口） | `company_profile` 按 status 分组；评审稿 2026-10-13 §1.1 | 产品负责人 | 修复随镜像回退。修复前不影响验收 run 产出 lead，但 pilot 客户经 GrowthOS 自助入驻会 100% 失败且不报错 |
+| 交付包 v1.1、周报 CSV、反馈端点、Golden Set（BI-19–BI-24） | **未做**（RL1 执行计划 §15 第 5–9 项）。交付闭环设计已批准：[`2026-10-10-lead-delivery-loop-design.md`](../superpowers/plans/2026-10-10-lead-delivery-loop-design.md) | 仓内无 `/reports` 路径、无反馈端点；Golden Set 不在仓内 | 产品负责人；design partner（商机，PRD4-D8 未定人选） | — |
 
-## 1. 源码与候选
+运行时：xin 的 API / Worker / platform Worker 运行 `9b94ee53`（#643，镜像 `sha256:72b8504c…`，2026-10-13 窗口 7 上线，无迁移）。#644、#645 已于 2026-10-14 合并，**尚未上线**。
 
-以下是带观察时间的快照，不预测本文之后的提交、其他 writer 的结果或未来部署。
+## 2. 验收 run 记录（11 次，全部 FAILED）
 
-Owner 行中的局部测试和独立 review 统计来自其2026-09-20交付回执；本任务另行回读对应 Git head，但没有重跑其他 owner 的测试或将其结果升级为运行接纳。具体消息身份和回读命令保留于本轮收口证据。
+| 卖方 | run | 启动（UTC） | 倒在 | 直接原因 | 修复 |
+| --- | --- | --- | --- | --- | --- |
+| #14 | `e182794c` | 10-08 19:28 | 查询 | 所有模型输出失败都被判成控制错误 | #610 |
+| #15 | `e269a2ba` | 10-09 07:27 | 查询 | `searxng.search` 输出不符合持久契约 | #611 |
+| #16 | `733fbf03` | 10-09 09:42 | 查询 | 21 条公开网页记录全被 Raw 源治理拒收；Grant 约 6 分钟过期；公司官网无源策略 | #615、#617、#618 |
+| #20 | `322866ef` | 10-11 19:02 | 查询（7/14） | 一次抽取输出被截断，整份血缘作废 | #638 |
+| #21 | `5740150c` | 10-12 10:55 | 查询（11/16） | 一次 SSE 流中断 | #639 |
+| #22 | `6f2d0871` | 10-12 17:21 | fit（51 家） | 一个活动判 51 家，超过 15 分钟时限 | #640 |
+| #23 | `c3878e54` | 10-12 22:47 | 信号（86 家） | `http-get/v1` 产物没能存下，重试撞同一操作 | #641（跳过并计数）；根因见 #28 |
+| #25 | `57529327` | 10-13 08:22 | 查询（5/16） | 抽取流里带上游错误事件，重试撞同一操作 | #642 |
+| #26 | `3e78eb4e` | 10-13 11:36 | 查询（1/16） | 词表归一遇上游 503，同一个词的操作键被 16 条查询共用 | #645（未上线） |
+| #27 | `5abe5584` | 10-13 12:25 | 物化（9/10 条查询完成） | 失败的查询没有回执，物化准入扣住 run | #643 |
+| #28 | `3afe9c46` | 10-13 15:43 | 信号（44 家） | 连续两家 `http-get/v1` 产物被判 `GENERIC_OPERATION_ARTIFACT_INVALID`：careers 探测的空产物撞上 `crawl4ai-fetch/v1` 存过的同字节空对象 | #644（未上线） |
 
-| Subject | 已核实的状态 | 尚不能据此判定完成的门 |
+前三行是 10-08/09 旧镜像上的试跑，10-09 经产品负责人授权清理时统一记 FAILED（`/global/_archive/discovery-run-cleanup-xin-20261009/`）；10-11 起的八行是正式验收。另有两次没有开出 run：卖方 #19 的 ICP 调用被上游换成 Flash、身份闸门拒收（D14 之前）；卖方 #24 的查询计划被上游内容过滤，API 报裸 500（#646 在途改为 502 `MODEL_UPSTREAM_UNUSABLE`），同一 ICP 重试报 409 `EXECUTION_BUDGET_GRANT_REUSED`。验收期间上游（OpenOx）失败率：10-13 截至 12:55 UTC 约 3.9%（206 次中 8 次），10-11 至 10-12 约 0.35%（867 次中 3 次）。
+
+失败后的完整重试（D13 根治，涉及受保护的网关与 broker）产品负责人 2026-10-13 定为验收通过后再做；在此之前，同一计划、同一主体的 Grant 只能用一次，失败就换卖方。
+
+## 3. 生效的决定（2026-10-10 起）
+
+PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](../governance/conflict-register.md)；已生效的承重决定登记在 [ADR registry](../adr/registry.md) 的 `PRD4-` 一节。为避免与 Site Builder 线的 D9/D13 混淆，本页一律写 `PRD4-D<n>`。
+
+| 决定 | 当前事实 | 怎么回退 |
 | --- | --- | --- |
-| Backend source | 本轮整合的上一 main 基线为 `cca0d0e546ab649fcdfd22132c96fa44c4b4c1cd`；当前源码包含五组依赖目标。根 checkout 是否跟随由受控同步回执独立证明 | main checkout 不等于 managed runtime；当前制品、迁移与 API/Worker/Relay 身份须独立绑定 |
-| 依赖维护 | #539 Redocly、#540 Langfuse、#541 S3、#543 AI SDK 已逐项合入；最后工具链与本次状态修订属于同一候选，最终 head/CI/merge 从原 #533 的 successor 收口记录回读，见[本轮证据](../evidence/dependency-queue-closeout-20260920.md) | 本地与 hosted 成功不证明 retained 采用；JS production audit 不覆盖所有开发依赖或 Go 告警 |
-| 已采用的修复 | Browser/ACK/DeletionCompleted、native Temporal 基础设施、覆盖率与受控 root-sync 修复已有独立已合入来源；#494/#495 实际分别合入，#497 完成后续 native harness 收口；Wikidata country binding 由 #498 合入 | #494/#495 的实际历史不是最初计划的“关闭为 superseded”；country 子项不是完整获客产品；ACK readback 不是 SaaS durable consumer；native disposable 不是保留环境健康 |
-| #407 历史综合候选 | CLOSED，原始 head `70885cdb4196ae86db762ae96ca73f4cfa51f89d` 保留，successor 按独立准入条件处理 | 不恢复历史 Identity、迁移、provider、Relay 或 HTTP hook；不把关闭解释为全量语义接纳 |
-| #538 身份/质量 | 2026-10-06 关闭、未合并：owner 于 2026-09-23 决定不再向治理与 R4 授权机制投入，本 PR 属该方向。关闭时远端 head 为 `2f5d4313849bc4c2332be64ec2f428e123a3337a`（native HTTPS reader 交付，owner 曾报告54项相关测试通过），由 tag `archive/governance/organization-identity-successor-2f5d4313-20260920` 与 PR 保留，见 §4.3 | 关闭不代表下列门已满足或其内容被采纳： v3 request/receipt/descriptor及消费者迁移、完整 transport/source/tool/CA/DNS 闭包、controller/FD/journal/可信receipt接线、精确外部物化/凭据与独立readback仍缺；旧v2未切换，Task0A/0B没有ADMITTED |
-| R4 native 与 Backend | 本地 `41a59788d72d44b728ceff98dbf88bb1049cc93f` 已接入cca0d0e5；split-worker、namespace lease、capability正式装配已有本地实现。owner 报告当前main依赖下API/Worker编译、22files/257相关测试、gov220，以及native真实矩阵、PG lease7项和独立review通过 | 当前head hosted CI、最终制品、retained migrations/principals/TLS/storage/lease/readiness、RuntimeEvidence和三轮UAT仍未完成；不把此前不同源码的全API结果合并为当前fresh全量PASS |
-| GrowthOS 平台 authority | 已确认产品patch108/99paths基线 `f9699f0f42a050a69294bb4ae679de520ba50e91`，随后构建资源修复head `6125b6da8da974dde8ff8399f46940cf73b2b511`。owner 报告真实producer/consumer lease/recovery/clock/ACK等本地接线、51整合和Bootstrap hermetic591项通过 | 最新JAR/3OCI仍待重新构建；该local authority无remote，hosted CI/私有仓库授权待解决；源码/本地矩阵不等于保留环境采用 |
-| #515 capability receiver | 2026-10-06 以 superseded 关闭：它新增的 11 个 `apps/api/src/platform-authority/` 源码文件与 main 逐字节相同（随 R4 合入，capability 读取自 2026-09-30 起在开发宿主走通）；head `6a3126b7670661a64c95676574320a3f6992ee66` 由 PR 保留，见 §4.3 | 关闭只处置旧 PR，不构成运行接纳；专用identity/JWKS、nonce/digest、freshness/backlog与Temporal事实仍须在被采用制品和环境中共同成立 |
-| #542 安全基线刷新 | 迁移任务已合入为 `cca0d0e546ab649fcdfd22132c96fa44c4b4c1cd` 并明确释放依赖窗口；本工具链候选又以精确源码 `728fbf8eaab86f24182cffe1cccdfb5fbaa7e16c` 重审，872个生产依赖、0 advisories，freshness从HOLD转为FRESH | 本地精确审计不等于全部开发依赖或Go告警清零；零漏洞政策、原有效期和验证器保持不变，源码接纳与后续运行发布仍分开 |
-| Program C | 最新 owner 交付 `a6debdf4271920b5658e66e05e481c5e922a1adb` 已增加 C4 durable action-intent 与前端挂载，状态为 `LOCAL_CANDIDATE_VERIFIED / NOT_ADOPTED` | 可信 QGO evidence 仍 HOLD；新增 human action-intent 表尚未被既有 DSR 覆盖，保持 `HOLD_PRIVACY`、不可激活真实数据。C1 restricted envelope、C5 facade/会话接线、shared main、retained upgrade/release/runtime/真实全栈 UAT 仍未接纳 |
+| PRD4-D2 冻结 R4（2026-10-10） | 不在 R4 准入上继续投入；4 个平台 schedule 在 RL1 期间继续 paused；平台工作流迁进 customer worker 另出设计（未做）。每次换镜像仍要续 R4 部署绑定与准入回执（7 天）。R4 撤销投递链仍未打通（Backend 没有调用 GrowthOS HMAC 签发端点的客户端，`BLOCKED_PENDING_BACKEND_4A4`）：platform Worker 绿灯只代表「事实可观察」，不代表「撤销能真正送达」 | 冻结只是停止投入，没有删代码；恢复平台 schedule 是产品负责人的单独决定，且先要做平台写入者授权（L4-G23） |
+| PRD4-D3 客户写入准入与 platform Worker 就绪解耦（2026-10-10） | #627 已合并，2026-10-11 上线：客户写入按客户依赖集合判定，platform Worker 恰为 `PLATFORM_WORKER_NOT_READY` 时不再关闭客户写入；`/health/ready` 的整体口径不变 | 换回 #627 之前的镜像 |
+| PRD4-D9 制裁名单与职能邮箱（2026-10-10，部分拍板） | 制裁名单走运营刷新（#629，不经平台 schedule），2026-10-11 打开三个源（OFAC SDN、OFAC Consolidated、EU FSF，`sanctions_source` 均 ENABLED，约 1.2 万条实体）；职能邮箱按 BI-14 做公司级（#630，开关 DISABLED）。LIA 时机未定 | `sanctions_source` 置 DISABLED |
+| PRD4-D14 模型供应（2026-10-11） | #633：11 个获客任务照旧请求 pro 档，上游换成 Flash 档时也接受，trace 与账本如实记为 Flash；建站等其他任务仍只认 pro。xin 已打开 `MODEL_IDENTITY_SUBSTITUTES`。官方备用上游未接 | 关掉 `MODEL_IDENTITY_SUBSTITUTES` |
+| PRD4-D16 个人数据路径保持现状（2026-10-11） | `decision_maker`、`companies_house`、`inpi_rne`、`smtp_self` 保持 ENABLED，展会 Algolia 来源保留，产品负责人风险自担；验收 run 存下个人数据不再停止，改为如实计数并注明来源；不新写抽邮箱、电话的自动化。当前个人数据三张表（`canonical_contact`、`contact_point`、`company_contact_point`）均 0 行 | 把相应 `data_provider` 置 DISABLED |
 
-Program C 的新交付入口为其 worktree 中 `handoffs/program-c/successors/full-schema-verification.json`、`real-session-http.verification.json` 和 `lifecycle-http.verification.json`。完整空库初始化通过生产 Flyway 工厂执行46项迁移、validate及二次 migrate 0；它不证明 retained upgrade。真实会话判断 HTTP 交付由 owner 报告13项测试通过，最新生命周期交付报告22项测试通过；本任务另行核对对应主报告 hash 与零 failure/error/skip，但没有将局部数量相加为全项目 fresh PASS。
+## 4. 在途工作（2026-10-14 10:05 UTC GitHub 回读）
 
-真实 QGO 仍因 `EvidenceUnavailable` 返回503且 revision 不变；SAO/CLOSED 路径使用明确的 owner 合成 QGO 前置验证，不能解释为真实 QGO 或商业闭环。此前257项反馈/轮询测试及前端/合成HTTP场景保留为各自源码的局部历史证明，不替代连接真实服务器的浏览器 UAT。Snapshot Key Authority 继续用户明确延期，不用固定 profile key 替代 C1 保护。
-
-后续 C4 交付入口为该 worktree 的 `handoffs/program-c/successors/c4-action-intent.md` 和 `c4-frontend-verification.md`。owner 报告前端55files/428tests及真实 Chromium+合成HTTP恢复场景通过；后端70项测试有实际runner成功与独立报告回读，但原外层wrapper因SIGTERM不能称PASS。新增race helper后的受影响HTTP/DB复验取得完整wrapper PASS，涵盖47项fresh迁移、合成46→47、并发及恢复；这些均不证明retained升级、真实QGO或全栈UAT。Outcome outbox事实不代表下游Learning consumer完成；`HOLD_PRIVACY`也不是重新启动已延期Key Authority的授权。
-
-### Program 所有权
-
-| Program | 当前层级 | 边界 |
+| PR | 内容 | 状态 |
 | --- | --- | --- |
-| A — authority/runtime primitives | PARTIAL | 通用 Authority、GovernedSubject/Relation、Site Quote/Grant、runtime/release；不拥有 Raw/Identity/Provider 或 Opportunity |
-| B — Buyer Intelligence discovery | CURRENT_CANDIDATE_ACCEPTANCE_NOT_VERIFIED | QueryReceipt、Raw/Identity/Canonical、Provider/transport、Discovery、LeadQualifiedPackage；不拥有 SaaS Opportunity 或 runtime deploy |
-| C — SaaS handoff/commercial loop | LOCAL_SOURCE_AND_INTEGRATION / PRODUCT_ACCEPTANCE_PENDING | consumer、receipt、QualificationSnapshot、Opportunity、QGO/SAO、Outcome、Conversation linkage；局部实现和联合测试不等于最终产品接纳 |
+| #646 | ICP / 查询计划遇已结算但不可用的模型回答时报 502 `MODEL_UPSTREAM_UNUSABLE`，不再是裸 500（任务卡 C） | OPEN |
+| #647 | 复用的产物对象在最晚一份清单到期前保持存活，并为擦除记录每个对象版本（#644 的邻接缺陷） | OPEN |
+| #648 | FAILED 但已判过 fit 的发现 run 也请求评分；GET /leads 区分「预置队列」与「已评分」 | OPEN |
+| #649 | 评分规则 v3：可达性取公司级联系路径与个人口径的较大值，闲置的 Role 权重归零并入 Fit / Reachability，权威 Fit 存在时镜像排除规则只记录不排除，并为现有公司补读联系路径（产品负责人已按方案 A 授权） | OPEN |
+| #597 | ICP 请求在之前没有尝试到达上游时才允许重试 | OPEN、draft、`CONFLICTING`；建议关闭或改题，避免被当作在途工作 |
 
-A/B ownership seam 维持既有 ADR 的固定边界：`ExecutionAuthority → ToolOperationSubject → B-owned QueryReceipt → RawSourceRecord → IdentityLink/CanonicalCompany → A-owned append primitive → Domain ACK`。该边界不自动关闭来源、迁移、运行与验收门。
+#644（产物按字节判等）与 #645（词表归一按查询归键、无源读取时不调模型、调用丢失时回退内置词表）已合并、待下一个维护窗口上线。另有任务卡 A（开发快速通道）、B（`gctl switch-backend` 一条命令换镜像）、D（查询活动普通错误无回执）、E（卖方入驻 HOLD）已派出，以各自 PR 为准。
 
-## 2. 全局阶段门
+### 4.1 开发快速通道（#656，2026-10-14 合并）
 
-| Gate | 当前裁决 | 所缺证据 |
-| --- | --- | --- |
-| G0 — Truth & Ownership | PARTIAL | 当前 writer 与尚未释放的历史 owner 分开；剩余 path/migration/patch 权威交付 |
-| G1 — Product/UX/Contract | PARTIAL | 跨仓可执行隐私、不可变 Evidence、UI 和用户旅程合同接纳 |
-| G2 — Source/TDD/Security | PARTIAL / MERGED_FIXES_VERIFIED | #538/R4/Program C 的最终当前候选与各自安全准入；已有修复不推广到所有模块 |
-| G3 — Integration/Data | PARTIAL / PRODUCT_E2E_NOT_RUN | 完整跨仓消费、重启、UNKNOWN 与隐私删除用户闭环 |
-| G4 — Release Candidate | DEVELOPMENT_CANDIDATE_ONLY | 同一精确 source/image/artifact/migration/identity 与可信外部 provenance readback |
-| G5-Site — Runtime Observed | HISTORICAL_ONLY | 当前 PASS RuntimeEvidence；历史 Browser/镜像观察不可晋级 |
-| G5-Acquisition — Runtime Observed | NOT_VERIFIED | 平台权限、Discovery 到 Opportunity 的当前完整运行证据 |
-| G6 — UAT Accepted | NOT_RUN | 商业链与并行 Site `Quote → Grant → Build → Preview` 的完整验收；关键旅程连续三次、至少一次受控重启、失败恢复/UNKNOWN/隐私删除及产品 owner 验收 |
-| G7 — Pilot/GA Authorized | NOT_AUTHORIZED | 有效跨仓 Release Bundle、运行证据、独立 readback 和单独的产品授权 |
-
-## 3. 运行与发布证据
-
-本轮不宣称新的保留环境部署、迁移、凭据变更或服务重启。2026-09-12 的 Browser 30 分钟观察、API/Worker/Relay image `sha256:175ae53c6500456f1121d006fd4add694231d15e20d26fbd77ef795d3f9f90d5`、source `b6be49020b28dccf2f67413667c396a893b9ce94` 均为其原观察时间的历史事实，详见[采用观察](../evidence/browser-readiness-runtime-adoption-20260912.md)和[ESRCH 因果证据](../evidence/browser-readiness-proc-exit-race-20260912.md)。本页不把旧 health/readiness、端口或 `.playwright-cli/` 观察重新称为当前状态。
-
-GrowthOS 历史 managed runtime 恢复见[原恢复记录](../evidence/growthos-managed-runtime-restoration-20260912.md)；native Temporal 发布与制品 inspect 见[发布证据](../evidence/temporal-native-publication-20260913.md)。它们不能替代最新 R4/producer/receiver/Worker 的保留环境接纳。
-
-本轮相同证据文件集合的治理验证为 RuntimeEvidence `6 total / 0 current / 6 historical`、Release Bundle 3 个，均为 development `CANDIDATE / EXTERNAL_UNVERIFIED`。没有生成新的 RuntimeEvidence，也没有通过可信 external provenance readback 晋级。
-
-历史费用记录保持 UNKNOWN/unknown：attempts 1–5 为 UNRESOLVED，attempt 6 为 EXPIRED，reservation/conservative charge 均为 `800000`；EXPIRED 不产生有效输出或精确费用，继续不重发。完整脱敏字段见 [2026-09-04 platform-writer successor runtime readback](../evidence/site-builder/production-parity-platform-writer-runtime-readback-20260904.json)；20260901 predecessor 保持 historical provenance。GrowthOS 2026-09-01 historical provenance 也不能代替当前 authority source。
-
-源码修复、disposable 测试或当前文档不能改写历史物理调用和 ACK 事实。
-
-## 4. PR、分支与工作区处置
-
-#407、#479、#514、#527/#529 以及被本批 successor 替代的原 PR 保留 provenance；关闭状态不授权删除历史分支。216 个结构退役候选已完成 committed history 的独立恢复回读，其中195个仍有 ignored 材料、21个未见 ignored 条目，均未取得 owner release 或删除授权。全量本地分支、远端分支与 worktree 的精确分类在批末回执 `/var/tmp/backend-dependency-queue-20260920/final-all-dispositions.json` 中记录（本机已不存在），不把未检查的材料或独有历史当作已清理。
-
-已合入或关闭不自动授权删除分支/worktree。历史综合候选、独有提交、脏文件、ignored/untracked 材料和锁定旧路径继续保留。当前主线包含的提交可恢复，不代表 owner 已释放其工作区或其 ignored 材料已归档。
-
-## 4.1 开发宿主迁移至 xin 原生 Ubuntu（2026-09-23 更新，边界限于本节）
-
-> 本节只记录宿主迁移这一件事，**不刷新**本页 `最后核验` 时间戳，也不改动 §2 阶段门、§3 runtime 观察或 §4 证据裁决 —— 那些仍绑定其各自的原核验时刻。
-
-开发宿主为 **xin，原生 Ubuntu 26.04**；WSL 已于 2026-09-23 停用，xin 是唯一开发与运行机器，仓库以 `origin` 为准，不存在 `server` remote。下列迁移盘点与表中 2026-09-20/21 观察仅保留原 WSL 迁移时的历史事实，不是 xin 当前运行证明。原只读归档 `/global/_archive/migration-20260920/audit/MIGRATION-TRIAGE-20260920.md`、同目录 `legacy-worktree-audit-20260920.tsv`（420 个 worktree 逐项 git 状态）与 `BRANCH-TRIAGE-20260921.md`（旧机分支归属）；**该归档仅在已停用的 WSL 上，尚未取回 xin**。
-
-| 观察 | 原迁移记录与本次更正 | 不得外推 |
-| --- | --- | --- |
-| 源码完整性 | 旧机 181 个"领先 origin/main"的 head 已全部存在于新宿主；交叉核对已合并 PR 后，其中 77 个实为 squash 合入、104 个未进主线；1 个从未推送的分支（6 commits）已直取并推送为 `codex/pr407-identity-test-closeout-20260913`（#538）；全量 git bundle 原存 WSL 归档（尚未取回 xin） | 取回不等于已裁决或已合入；104 个未进主线分支按 `BRANCH-TRIAGE-20260921.md` 默认归档、零操作，不代表放弃或采纳 |
-| 运行配置 | 旧机 `.secrets/`、`apps/api/.env`、`packages/db/.env` 及 `GOOGLE_PATENTS_SA_JSON` 指向的 service account 文件已取回并 sha256 逐项校验；可移植三方凭据已接入 `local-config`，主机相关值刻意不继承 | 配置就位不等于服务已启动或已验证 |
-| 运行时 | 2026-09-21 起新宿主以已发布镜像（`ghcr.io/mlhjyx/global-backend`，按 digest 钉住，源提交 `cca0d0e5`）经 `infra/backend-runtime.compose.yml` 启动 API/Worker：`/health/build` 为 `attested: true`；Worker 就绪链停在 `PLATFORM_AUTOMATION_ACQ_SWEEP_TEMPORAL_PROOF_UNAVAILABLE`，与旧宿主 2026-09-12 的 `TEMPORAL_PROOF_UNAVAILABLE` 同一既有缺口（见[原恢复记录](../evidence/growthos-managed-runtime-restoration-20260912.md)）。参考数据由代码 seed，未从旧库导入 | 这是原 WSL 宿主的历史运行观察，不是 xin 当前观察或 RuntimeEvidence，也不产生可信 Release Bundle；源码 `pnpm worker` 在没有车道开关时停在 `BUILD_ATTESTATION_REQUIRED` 属设计（车道见 §4.5）；§3 的 runtime 观察仍绑定其原宿主与时刻 |
-| 主线一致性 | 以 `origin/main` 为准；原记录中旧机与 WSL 本地 `main` 落后的事实不外推到 xin | 本地 checkout 不是权威 |
-| WSL 停用 | WSL 已于 2026-09-23 停用，xin 是唯一开发与运行机器 | 停用不代表归档已取回 xin |
-
-**本节不改变任何阶段门裁决。** G5-Site / G5-Acquisition / G6 / G7 维持 §2 的现有裁决；宿主迁移不产生、也不替代 RuntimeEvidence。
-
-## 4.2 R4 平台命名空间机器身份授权缺口（2026-09-23 增补，边界限于本节）
-
-> 本节只记录这一个缺口，**不刷新**本页 `最后核验` 时间戳，也不改动 §2 阶段门、§3 runtime 观察或 §4/§4.1 的证据裁决。开发宿主自 2026-09-22 起为原生 Ubuntu 主机；§4.1 的 WSL2 记述绑定其原核验时刻，本节不改写它。
-
-原生 Temporal 曾持续拒绝 GrowthOS 的 `growthos-temporal-reader` 身份（`PLATFORM_TEMPORAL_READER_AUTH_DENIED`），GrowthOS capability producer 因此取不到 Temporal 事实。**2026-09-30 该拒绝与随后暴露的 update_time 门都已在 GrowthOS 侧修复**，capability 已在本机首次完整走通（见下表）；2026-10-01 经 owner 批准安装平台出网策略后，Backend readiness 整体就绪、platform Worker 取得租约（见「出网围栏」）。4 个平台 schedule 仍为 paused，执行路径尚未验证。
-
-> **2026-09-24 更正**：本节最初（2026-09-23）记为「`platform-automation` 命名空间的两个机器身份都被拒」，并称停掉 platform Worker 后拒绝速率减半可区分出两个独立调用方。该归因**错误**，下表已按复核结果改写。实际上 platform Worker 从未连过 Temporal（其日志为 `polling disabled`，30 分钟内 `temporal-platform-worker` profile 的机器 token 签发数为 0）；它轮询的是 GrowthOS 的 capability 端点，而**每次 capability 读取都会触发 GrowthOS reader 去调 `DescribeSchedule`**，所以停掉它减半的是同一个调用方的触发频率。以真实 `global-backend-platform-worker` token 直接调用 `platform-automation` 的 `operator namespace describe` **成功**，证明该身份本身可以通过授权。
-
-| 观察 | 当前可确认的事实 | 不得外推 |
-| --- | --- | --- |
-| 拒绝面 | 唯一被拒的是 `growthos-temporal-reader`（capability 路径上的 `DescribeSchedule`），约 12 次/分，宿主重启后速率不变。`global-backend-platform-worker` 未被拒——它根本没有连过 Temporal，而用其真实 token 手工调用 `platform-automation` 的 `operator namespace describe` 可以成功。`global-backend-customer-worker`、`global-backend-api`（`default` 命名空间）正常工作 | 这是本机只读运行观察，不是 RuntimeEvidence，也不定位产品代码缺陷所在；不证明其他环境有同样表现 |
-| 已排除的配置面 | 逐项核对一致：两侧 reader 主体；`TEMPORAL_RUNTIME_JWT_ISSUER` 与 GrowthOS machine manifest 的 `temporalIssuer`；JWT audience；JWKS URI 及其信任 CA；reader 叶子证书满足 `readerpolicy.singleReaderIdentity`（CN 为主体、无 SAN、EKU 仅 clientAuth、KeyUsage digitalSignature）；服务端 `reader-ca.crt` 对该证书验签通过（带 reader 证书且 SNI 为 reader server name 时 TLS 握手成功并进入 gRPC，不带证书或改用其他 CA 签发的证书则握手失败） | 配置一致不等于已定位根因；未核对项不得据此推定正确 |
-| **已定位的根因（2026-09-24）** | GrowthOS 的 gRPC 连接**根本不发送 SNI**：在不改 GrowthOS 任何配置的前提下（仅以 host 条目把 `temporal-platform` 指向一台只读 ClientHello、原样透传、不终止 TLS 的 SNI 嗅探代理），观测到的 SNI 捕获为空；该探针以对照校验过 —— 同一配置下显式发送 SNI 的客户端被正确记为 `temporal-platform-reader`，只连 IP 的客户端才记为空，因此空值确实表示「未发送 SNI」而不是探针失效。而 Temporal 前端**按 SNI 选择监听器**：实测「连 IP 不发 SNI」与「SNI=`temporal-platform`」都落到默认监听器且从不索要客户端证书，只有 SNI 恰为 `temporal-platform-reader` 的连接才会索要并校验 reader 证书。因此 reader 的连接永远落在只认 JWT 的默认监听器上，`VerifiedChains` 恒为空，而 `readerpolicy` 对 `temporal-reader` profile 强制要求非空 peer proof —— 必然 `denied()`。这也解释了此前两次「把地址改成 reader 名」的转发实验为何无效：不发 SNI 时地址名与监听器选择无关 | 修复面后来选定为 GrowthOS 客户端（见下一行）；本仓 Temporal 前端的 reader mTLS 暴露方式未改动 |
-| **机制与修复（2026-09-30）** | 机制：gRPC 把 `overrideAuthority` 作为对端主机名交给 TLS 引擎，但 Netty（`SslUtils.isValidHostNameForSNI`）与 JDK（`Utilities.rawToSNIHostName`）都只在该名字**含点号**时才自动生成 SNI；部署用的 `temporal-platform-reader` 是单标签，所以从未发送。GrowthOS 补丁 0113（growthos-source PR #1）改为显式设置 SNI，并以真实回环 mTLS 测试固化：修复前单标签名字收到的 SNI 为空、带点的对照名字正常；修复后两者都发送，配错名字仍在握手阶段被拒。本机换到该版本、且 Backend 换到含 #565 迁移的镜像恢复准入后，同一来源的自然流量（API 与 platform Worker 各每 10 秒读一次 capability，合计约 12 次/分）下，原生 Temporal 的 `PLATFORM_TEMPORAL_READER_AUTH_DENIED` 由修复前约 12 次/分降为 0；同一分钟内 12 次读取触发的 `DescribeSchedule` 都正常返回，并进入 GrowthOS 自己的结果校验 | 本机只读运行观察，不是 RuntimeEvidence；证明的是授权这一段，不证明 capability 可用（见下一行） |
-| **update_time 门（2026-09-30，已修）** | 授权修复后 capability 仍返回 503：GrowthOS `NativePlatformAuthorityTemporalProofClient.capabilitySnapshot` 要求 `DescribeScheduleResponse.info.update_time` 存在，而本机 4 个平台 schedule 自 2026-09-22 创建后从未 Update（`schedule describe` 实测只有 `createTime`，`updateTime` 为空），每个 enabled schedule 都被判 `PLATFORM_AUTHORITY_TEMPORAL_PROOF_DENIED`（以 JFR 异常事件定位）。GrowthOS 补丁 0114（growthos-source PR #2）改为：`update_time` 缺失或为 CHASM 调度器的 Go 零值时取 `create_time`，否则取 `update_time` 且不得早于 `create_time`，`create_time` 缺失即拒绝。依据是按运行版本 Temporal v1.31.2 源码核实的语义：只有 Update 能改 schedule 的 action，而且它必定记录 `update_time`。本机换版后，capability 返回 200 的签名响应，Backend 验签后 4 个 schedule 的 Temporal 证明均为 ok | 本机只读运行观察，不是 RuntimeEvidence；手工 Update schedule 从未被用来绕过这道门 |
-| **出网围栏（2026-09-30 定位，2026-10-01 已解）** | 0114 之后 readiness 前移为 `PLATFORM_AUTOMATION_ACQ_SWEEP_BLOCKED`：报价、Temporal 证明、issuer、writer、撤销投递均已通过，卡在出网围栏（`inspectPlatformEgressFenceCapability`）。`global_dev` 中 3 个启用的 schedule 状态为 ACTIVE、writer 的执行权限齐全，但 generation 为 0，策略摘要、执行信封摘要与每次运行的金额上限均为 NULL，即 `install_platform_egress_policy_v2` 从未执行。这道门也挡住了客户侧：`RuntimeWorkAdmissionGuard` 要求整体 readiness 为 ready 才放行写请求，所以此前客户侧写入恒为 503 `RUNTIME_ADMISSION_CLOSED`（2026-10-10 起客户写入改按客户依赖集合判定，见 §4.4）。2026-10-01 owner 批准后，以库属主在单个事务里为 3 个 schedule 安装（generation 0→1），参数在运行中的 API 镜像里由 readiness 所用的同一报价实现推导：策略摘要 `f9e95917…`，每次运行上限 acq-sweep 与 sanctions-refresh 为 1 µUSD（零付费派发），intent-sweep 为 10 美元；安装值与独立重算的结果逐一相同。安装后 readiness 整体为 ready，platform Worker 取得租约 | 4 个 schedule 仍为 paused（actionCount 均为 0，平台命名空间没有任何 workflow），安装本身没有运行任何东西，恢复运行是 owner 的单独决定。围栏只能前进：撤销只能把 state 置为 DISABLED，之后需要新代码或迁移才能重开；技术合同或报价一旦变化，须以 generation+1 重新安装，否则 readiness 回到 BLOCKED。本机运行观察，不是 RuntimeEvidence |
-| 首次验证 | 该正向路径此前从未验证过：平台 Temporal 发布当时只执行了负例授权探针，reader 正例被明确记为「改由 GrowthOS 真实 reader 端到端承担」。2026-09-30 起 capability 的正例已在本机完整走通（200 签名响应，Backend 验签后 Temporal 证明为 ok）；2026-10-01 起 platform Worker 在本机就绪。平台 schedule 的执行路径仍未验证 | 历史负例通过不构成正向路径可用的证据；platform Worker 就绪只代表事实可观察，不代表撤销能真正送达（`BLOCKED_PENDING_BACKEND_4A4`） |
-
-**与既有缺口的关系**：本项与 `platform_target_lookup`（`PLATFORM_AUTHORITY_TARGET_READER_*` 从未配置）同属 R4 未交付项。后者已可由部署配置闭合并在本机观察到 readiness 转 `ok`；本项的授权与 update_time 两道门已由 GrowthOS 产品代码修复；出网围栏于 2026-10-01 由 owner 批准的预算部署解除。
-
-**本节不改变任何阶段门裁决。** G5-Site / G5-Acquisition / G6 / G7 维持 §2 的现有裁决；本机观察到的 platform Worker 就绪不是 RuntimeEvidence，撤销投递链（`BLOCKED_PENDING_BACKEND_4A4`）闭合之前，也不得据此声称撤销可以送达。
-
-## 4.3 远端分支清理（2026-10-06，边界限于本节）
-
-> 本节只记录这一次清理，**不刷新**本页 `最后核验` 时间戳，也不改动 §2 阶段门、§3 runtime 观察或 §4–§4.2 的证据裁决。
-
-§4 要求历史分支按 owner 的精确删除授权逐项退役。2026-10-06 owner 逐项批准了下表的处置，`mlhjyx/global-backend` 的远端分支由 17 个非 main 分支减为只剩 `main`（其中 `codex/prod-advisories-20261006` 是 #589 合并后自动删除的，不属于本次清理）。每个被删分支的提交仍可从下表的 PR 或 `archive/` tag 找回；删除前另在开发宿主做了全量 bundle。
-
-| 分支 | 处置依据 | GitHub 上的保留位置 |
-| --- | --- | --- |
-| `codex/status-runtime-browser-fix-20260912` | 提交已全部在 main | main 历史；tag `archive/governance/status-runtime-browser-fix-b5123654-20260912`；#514 |
-| `archive/codex/runtime-sbom-third-party-pin-20260919` | 已以 `28c362bd` 合入 main | main 历史 |
-| `archive/codex/platform-receiver-rebase-20260912`、`codex/platform-receiver-rebase-20260912` | 源码与 main 逐字节相同；#515 以 superseded 关闭 | #515 |
-| `claude/g3-website-profile-rules` | G3 5.3–5.4b 的半成品，经修订后由 #575、#578、#581 合入 | 各合入 PR |
-| `codex/goodjob-acquisition-integration` | #407 早已关闭 | tag `archive/acquisition/goodjob-integration-70885cdb-20260826`；#407 |
-| `codex/qualification-feedback-receiver-20260919` 及其 `archive/` 副本 | 未进 main，也从未开 PR | tag `archive/acquisition/qualification-feedback-receiver-ab0af629-20260919` |
-| `codex/pr407-final-closeout-20260919` | #407 收口证据，未进 main，也从未开 PR | tag `archive/governance/pr407-final-closeout-fcb0fb7c-20260919` |
-| `codex/pr407-identity-test-closeout-20260913` | #538 关闭、未合并 | tag `archive/governance/organization-identity-successor-2f5d4313-20260920`；#538 |
-| `dependabot/*`（6 个） | #527–#532 早已关闭；main 上的对应版本均已更新 | 各自 PR |
-
-同日 owner 又要求清理开发宿主上的本地分支与 worktree：525 个本地分支删去 518 个，只保留被 worktree 占用的分支；移除了 2 个无进程占用的 worktree。唯一一个未合入、也未推送的提交（`claude/execution-authority-rebaseline`，执行授权策略重基线）先推到 origin，再删本地。被删的本地分支中有 213 个带有不在 origin 分支和 tag 上的提交，它们与全部 525 个分支一起保存在开发宿主的全量 bundle 中；正被其他会话使用的 worktree、常驻的 `local-development` worktree 与原生 Temporal 的编排源码均未动。
-
-## 4.4 客户写入准入与 platform Worker 就绪解耦（2026-10-10，边界限于本节）
-
-> 本节只记录这一项改动，**不刷新**本页 `最后核验` 时间戳，也不改动 §2 阶段门、§3 runtime 观察或 §4–§4.3 的证据裁决。
-
-自 #545 起，全局写入守卫只认整体 readiness，而整体 readiness 包含独立的 platform Worker 租约：platform Worker 一不就绪（单独重启、换镜像后尚未重新就绪、R4 部署绑定到期、出网围栏重装），全部客户侧写入就返回 503 `RUNTIME_ADMISSION_CLOSED`，其中包括 GrowthOS 签 Grant 前调用的 workspace 技术报价。产品负责人 2026-10-10 批准 D3：客户写入准入按客户依赖集合判定（AGENTS §4 第 5 条同步补了一句澄清）。
-
-| 项 | 当前事实 | 不得外推 |
-| --- | --- | --- |
-| 改变的 | 全局写入守卫与建站门改用 `customerWriteAdmission`：硬组件仍须全部 ok，唯一例外是 platform Worker 恰为 `PLATFORM_WORKER_NOT_READY`（没有 READY 租约：租约不在、已停止，或同一发布仍在 STARTING/DRAINING） | 运行镜像何时采用另行记录，采用前行为不变；尚无本机运行观察，不是 RuntimeEvidence |
-| 不变的 | `/health/ready` 的整体口径、响应格式与 503 码；platform Worker 自身的 fail-closed（不就绪不轮询、不出网）；静态发布准入；platform Worker 混版本、Temporal 身份不符、租约查询失败仍关闭客户写入 | 换镜像时新旧发布的租约并存期间仍是混版本，客户写入照旧关闭，只有旧租约消失后的等待段不再关闭；4 个平台 schedule 仍为 paused；R4 撤销投递链仍未打通（`BLOCKED_PENDING_BACKEND_4A4`），platform Worker 就绪只代表事实可观察，不代表撤销能真正送达 |
-| 代价 | platform Worker 故障不再经由客户写入 503 暴露，要靠 `/health/ready` 的 `components.platform_worker` 与本机巡检发现 | platform Worker 频繁单独重启的根因另立任务，本项不处理 |
-
-## 4.5 开发快速通道（2026-10-14，边界限于本节）
-
-> 本节只记录这一项改动，**不刷新**本页 `最后核验` 时间戳，也不改动 §2 阶段门、§3 runtime 观察或 §4–§4.4 的证据裁决。
+> 2026-10-15 随 #651 并入 main 时从旧结构的 §4.5 原样搬入：只记录这一项改动（#656，已合并、未上线），**不刷新**本页 `最后核验` 时间戳，也不改动上面各节的裁决。
 
 开发者改了获客的 worker 侧代码后，此前每次都要发布并切换后端镜像才能在本机验证。本项让 development 里一个测试 workspace 的入驻理解、发现 run 与资格判定跑在源码 customer worker 上；设计与复核调整见 [落地设计](../superpowers/plans/2026-10-14-dev-fast-lane.md)，运维步骤见 [开发快速通道](../backend/dev-fast-lane.md)。
 
@@ -167,12 +84,40 @@ GrowthOS 历史 managed runtime 恢复见[原恢复记录](../evidence/growthos-
 | 不变的 | 开关为空时 API、relay、worker 行为逐字不变；其余 workspace、擦除与建站命令、整体 readiness、客户写入准入、`/health/build`、租约与准入代码都不变；pilot/production 启动即拒绝车道变量 | 车道 worker 是 unattested 源码进程，车道时段的任何观察都不能作为 RuntimeEvidence PASS 或进入 Release Bundle；R4 撤销投递链仍未打通 |
 | 代价 | 车道只覆盖三个 workflow 的 workflow 体与活动体，workflow 输入、outbox payload、事件注册表与 API 内的同步获客操作仍是镜像代码；开关、迭代、关闭都要先排空在途 run（路由在投递时决定）；换镜像前要关车道 | 首次落地仍需发布并切换一次含本改动的镜像 |
 
-## 5. 下一顺序与授权边界
+## 5. 下一步与需要的决定
 
-1. #538 已于 2026-10-06 关闭、不再推进（§4.3）。R4将已接线的本地候选推进到最终hosted、制品和运行接纳。
-2. Program C 保留已验证的C4本地候选，补齐action-intent隐私/DSR、C1 restricted envelope、C5产品接线与跨仓接纳；已完成的本地候选不重复列为未开发。
-3. 根据实际最终制品与保留环境事实生成当前 RuntimeEvidence、可信 Release Bundle，再做完整三次用户旅程和重启/失败/UNKNOWN/隐私删除验收。
-4. 历史分支/worktree 按 owner release、完整可恢复证据及精确删除授权逐项退役；不以数量多或工作区干净代替授权。远端与本地分支、worktree 已于 2026-10-06 按此完成（§4.3）。
-5. §4.2 的 GrowthOS reader 授权缺口、update_time 门与出网围栏，已分别由 GrowthOS 补丁 0113、0114 与 2026-10-01 owner 批准的出网策略安装解除；本机 readiness 整体就绪，platform Worker 取得租约。剩余事项：平台 schedule 恢复运行是 owner 的单独决定（执行路径尚未验证）；技术合同或报价一旦变化，就要重新推导并以 generation+1 重装出网策略，目前没有仓库工具；另外 `readerpolicy` 的注释声称「包括仅 JWT 的公共监听器也要 peer proof」，而当前 `temporal.yaml` 只在 `temporal-platform-reader` 这个 hostOverride 上开启 `requireClientAuth`，两者仍需对齐（与本次修复无关，属本仓注释与配置的一致性）。本机就绪不构成 RuntimeEvidence；Backend 仍没有调用 GrowthOS HMAC 签发端点的客户端（`BLOCKED_PENDING_BACKEND_4A4`），所以这次转绿只代表事实可观察，不代表撤销能真正送达。
+不碰受保护文件、可以先做的：#648、#649 合并并上线后，对两条验收 ICP 各调一次 `POST /icps/:icpId/qualify`，让现有 179 条 lead 拿到真实评分（不必等 run 全绿）；翻开 `company_contact` 并对现有公司补联系路径；交付包 v1.1 与周报 CSV 先出第一份；走通一次 GrowthOS 对真实 `LeadQualified` 的 accept → `GET /events` → ack。验收 run 的稳定性（#644、#645 上线后再跑）与「评分 → 接受 → CSV」可以并行验收。
 
-相同动作、目标和范围的有效授权继续沿用。源码/PR 合入不自动授权生产部署、保留数据库迁移、凭据与端口修改、真实 provider/model/付费调用或 Pilot/GA。正常产品请求的费用权威与开发者 ad-hoc 调用授权保持分离。
+需要产品负责人拍板的：PRD4-D8（design partner 人选与数据使用授权，卡「商机」与「节奏」）；PRD4-D15（成本口径与每个 run 的上限，卡「成本」）；PRD4-D12（流程瘦身，AGENTS §7 的晋级门在它之前是死锁，见 §6）；PRD4-D1（Site Builder 正式冻结）；PRD4-D4 与 PRD4-D19（文档里各有两案相反）；D13 是否拆成账户层（不碰受保护文件）与操作层（受保护，验收后）两步。
+
+## 6. 不变的边界与工程门
+
+- 源码合入、单测或 CI 通过不等于运行采用；xin 的运行观察不是 RuntimeEvidence，也不产生可信 Release Bundle。
+- Billing/Credits 保持 `DEFERRED / NOT_IMPLEMENTED`；`cap_microusd` 是一次执行的技术安全上界，不是客户余额。正常产品请求的费用权威是 SaaS 签发的 Budget Grant，与开发者 ad-hoc 调用授权保持分离。
+- 当前非运行时模型候选合同仍为 `site-builder-model-candidate-baseline/2026-08-07-v3`，详见[生成页](../site-builder/model-candidate-baseline.md)；它不等于 active route、质量证明或真实 dispatch 授权。
+- 发送仍未开放：RL1 不做任何发送，触达属于 RL4。
+- `PILOT`/`GA` 晋级门目前不可达：AGENTS §7 要求可信外部 readback，而仓内原有的 approval/readback 回读器已由 #566 移除，`scripts/governance-delivery-contracts.mjs` 对任何晋级状态恒阻断。这是已知死锁，是否改为产品负责人签字待 PRD4-D12 拍板。
+
+工程门 G0–G7 的定义见[发布路线](../roadmap/release-plan.md)。自 2026-09-20 核验以来没有任何一道门晋级，下表的裁决不变，所缺证据按当前事实改写：
+
+| Gate | 当前裁决 | 所缺证据 |
+| --- | --- | --- |
+| G0 — Truth & Ownership | PARTIAL | 权威文档已回写到 2026-10 决定；PRD 4.0 仍只在私有目录（PRD4-D10 未拍板），不是仓内权威 |
+| G1 — Product/UX/Contract | PARTIAL | 交付包 v1.1、反馈端点的机器合同未做（周报 CSV 已有端点与 OpenAPI，#650，2026-10-15 合并、未上线）；可达性口径改为公司级联系路径尚未写入产品范围 |
+| G2 — Source/TDD/Security | PARTIAL / MERGED_FIXES_VERIFIED | 每个修复 PR 自带 TDD 与必需检查；不推广到未改动的模块 |
+| G3 — Integration/Data | PARTIAL / PRODUCT_E2E_NOT_RUN | 没有一次发现 run 跑完；评分、制裁门与 GrowthOS ACK 从未在验收数据上执行 |
+| G4 — Release Candidate | DEVELOPMENT_CANDIDATE_ONLY | xin 运行的是按 digest 钉住、带构建证明的开发镜像；没有可信外部 provenance readback |
+| G5-Site — Runtime Observed | HISTORICAL_ONLY | Site 线未推进（PRD4-D1 未拍板）；历史观察不可晋级 |
+| G5-Acquisition — Runtime Observed | NOT_VERIFIED | 11 次 run 全部 FAILED；没有当前 RuntimeEvidence |
+| G6 — UAT Accepted | NOT_RUN | RL1 退出指标（≥3 个跑完的 run、≥15 条 recommended、design partner 回填）都没有数据 |
+| G7 — Pilot/GA Authorized | NOT_AUTHORIZED | 晋级门当前不可达（见上一条死锁）；也没有产品授权 |
+
+相同动作、目标和范围的有效授权继续沿用。源码 / PR 合入不自动授权生产部署、保留数据库迁移、凭据与端口修改、付费调用或 Pilot/GA。
+
+## 历史（2026-09-20 核验）
+
+2026-09-20 核验的旧版正文——源码与候选、Program A/B/C 所有权、阶段门的原裁决与所缺证据、运行与发布证据、PR / 分支 / worktree 处置，以及其后不刷新核验的 §4.1 宿主迁移、§4.2 R4 平台命名空间授权缺口、§4.3 远端分支清理、§4.4 客户写入准入解耦与旧「下一顺序」——已原文移至[归档](../archive/status/current-20260920.md)，不代表当前状态。其中 R4 的推进项已由 PRD4-D2 冻结取代；#538 与 #515 已于 2026-10-06 关闭。
+
+下面这条历史事实仍需在本页可见：
+
+历史费用记录保持 UNKNOWN/unknown：attempts 1–5 为 UNRESOLVED，attempt 6 为 EXPIRED，reservation/conservative charge 均为 `800000`；EXPIRED 不产生有效输出或精确费用，继续不重发。完整脱敏字段见 [2026-09-04 platform-writer successor runtime readback](../evidence/site-builder/production-parity-platform-writer-runtime-readback-20260904.json)；20260901 predecessor 保持 historical provenance。GrowthOS 2026-09-01 historical provenance 也不能代替当前 authority source。源码修复、disposable 测试或当前文档不能改写历史物理调用和 ACK 事实。

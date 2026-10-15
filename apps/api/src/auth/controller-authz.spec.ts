@@ -11,6 +11,7 @@ import { DiscoveryController } from '../discovery/discovery.controller';
 import { EventsController } from '../events/events.controller';
 import { IcpController } from '../icp/icp.controller';
 import { LeadController } from '../lead/lead.controller';
+import { ReportController } from '../report/report.controller';
 import { PlatformExecutionTechnicalQuoteController } from '../platform-authority/platform-execution-technical-quote.controller';
 import { PlatformTechnicalQuoteServiceAuthenticationGuard } from '../platform-authority/platform-technical-quote-service-auth';
 import { PlatformTargetLookupController } from '../platform-authority/platform-target-lookup.controller';
@@ -38,6 +39,7 @@ const PROTECTED_CONTROLLERS = [
   EventsController,
   IcpController,
   LeadController,
+  ReportController,
   AssetsController,
   BuildsController,
   IntakeController,

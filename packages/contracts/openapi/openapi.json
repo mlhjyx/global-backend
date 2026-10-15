@@ -3575,15 +3575,17 @@
                         },
                         "scopes": {
                           "type": "array",
+                          "description": "服务端派生的 scope。取值集合会随新能力增长：客户端须容忍未列出的值（按未知 scope 忽略），不要按封闭枚举校验。",
                           "items": {
                             "type": "string",
-                            "enum": [
+                            "x-extensible-enum": [
                               "acquisition:read",
                               "acquisition:write",
                               "acquisition:review",
                               "acquisition:event:ack",
                               "acquisition:label:write",
                               "acquisition:identity:review",
+                              "acquisition:export",
                               "personal-data:read",
                               "compliance:manage",
                               "ops:read"
@@ -9506,6 +9508,211 @@
         "x-required-scopes": [
           "acquisition:review",
           "compliance:manage"
+        ]
+      }
+    },
+    "/api/v1/reports/weekly": {
+      "get": {
+        "operationId": "ReportController_weekly_v1",
+        "parameters": [
+          {
+            "name": "week",
+            "required": false,
+            "in": "query",
+            "description": "ISO 周，如 2026-W42；缺省为本周（UTC）",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-W\\d{2}$"
+            }
+          },
+          {
+            "name": "icpId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "UTF-8（带 BOM）CSV，中文表头；以 = + - @ 开头的单元格前加单引号防公式注入",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "Content-Disposition": {
+                "description": "附件文件名",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Report-Id": {
+                "description": "本次导出的 policy_decision_log correlation_id",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "X-Report-Week": {
+                "description": "实际导出的 ISO 周",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Report-Rows": {
+                "description": "导出的行数",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Report-Withheld-Rights": {
+                "description": "DataRights EXPORT 拒绝而未导出的行数（每行已写 policy_decision_log）",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Report-Withheld-Sanctions": {
+                "description": "制裁命中未经人工清除而未导出的行数（每行写一条 EXPORT DENY，reason sanctions_hold）",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Report-Withheld-Quarantined": {
+                "description": "历史合成来源被隔离而未导出的行数（每行写一条 EXPORT DENY，reason synthetic_quarantined）",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "icpId 或 week 不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "当前 workspace 不可见该 ICP",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "该周 accept 的线索超过 1000 条，拒绝而不截断",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WEEKLY_REPORT_TOO_LARGE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "周报 CSV：该 ICP 下最新一条裁决是该 ISO 周（UTC，周一起）accept 的线索；每行都写一条 EXPORT 判定到 policy_decision_log，被拒或被拦的行不导出",
+        "tags": [
+          "Reports"
+        ],
+        "x-required-scopes": [
+          "acquisition:read",
+          "acquisition:export"
         ]
       }
     },

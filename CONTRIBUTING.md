@@ -1,6 +1,6 @@
 # 贡献指南（团队协作流程）
 
-> 面向团队成员与 Claude Code 开发会话；Codex 只在 Claude Code 指派下执行边界明确的任务。权威简版另见 [AGENTS.md §8](AGENTS.md)。
+> 面向团队成员与 Claude Code 开发会话；Codex 只在 Claude Code 指派下执行边界明确的任务。权威简版另见 [AGENTS.md](AGENTS.md) §5（所有权、worktree 与外部动作）与 §9（文档与交付）。
 
 ## 分支
 
@@ -10,7 +10,7 @@
 - 远端 PR 合入后，本地根 `main` 的跟随使用 `node scripts/governance-main-worktree-sync.mjs status` / `node scripts/governance-main-worktree-sync.mjs apply`。`apply` 只允许 fetch 后把 `origin/main` 解析成精确 commit，再对该 commit 纯 fast-forward，且必须证明远端入站路径不触碰本地 tracked、untracked 或 ignored 现场；任何 ahead/diverged、路径冲突、ref 新鲜度变化或事后状态变化都 fail-closed。它不 stash/reset/clean，不处理 PR、push、merge 授权或分支清理。
 - **新鲜度门**：规划、只读审计和实施开始前先执行 `git fetch origin --prune` 与 `git rev-list --count HEAD..origin/main`。若结果非 `0`，该 worktree 已落后，不能据此给出“当前事实”结论；必须从刚 fetch 的 `origin/main` 新建正式 worktree，或先完成受控同步后再继续。功能分支上的已提交工作不免除此门。
 - 已有 `/global/wt/*` 不批量迁移：干净且确认仍需开发的才可用 `git worktree move` 迁入；脏、锁定、失联或承载 provenance 的现场原地冻结并先审计。工具管理且仍被活跃任务持有的 worktree 不得手工移动。
-- worktree 合并后**不要求立即删除**；删除仅是可选的本地空间/目录清理。只有在 PR 已合并、目标提交已进入 `main`、工作区干净且未跟踪文件已逐项归属后才可删除；需要回查、继续维护或留作开发现场时可以保留，并定期审计即可。
+- **PR 合入即删 worktree**：PR 合入后依次删除该任务的 worktree（`git worktree remove`）与本地分支，再在 `/global/backend` 用 `node scripts/governance-main-worktree-sync.mjs apply` 跟随 `main`。删除前确认目标提交已进入 `main`（本仓 squash 合并，要与已合并 PR 交叉核对，不能只看 `rev-list`）、工作区干净、未跟踪文件已逐项归属；有未推送提交或无法归属的文件时先推送或归档，不得强删。常驻的 `local-development` worktree 不在此列。
 - 项目内 worktree 位于父 `main` 工作区的 ignored 子树；禁止在 `/global/backend` 运行 `git clean -fdx`、递归删除 `.codex/` 或绕过 `git worktree move/remove` 手工搬删目录。
 
 ## 异常恢复审计（先取证，后重做）
@@ -48,7 +48,7 @@ pnpm --filter @global/api build            # nest build = tsc 全量类型检查
 pnpm --filter @global/api test             # vitest
 ```
 
-**provider / 采集 / 富集类改动**：另需**真实数据实测**（无 sandbox，见 [AGENTS.md §5](AGENTS.md)）：
+**provider / 采集 / 富集类改动**：另需**真实数据实测**（无 sandbox，见 [AGENTS.md](AGENTS.md) §4）：
 
 ```bash
 cd /global/backend/apps/api && node --import tsx scripts/verify-*.mts
@@ -56,16 +56,20 @@ cd /global/backend/apps/api && node --import tsx scripts/verify-*.mts
 
 ## Pull Request
 
-- `gh pr create --base main`，按 `.github/pull_request_template.md` 填（概述 / 改动分组 / 测试 / 合规 / 待续）。
-- **CI 必须绿**才可合：
-  - `CI`（`.github/workflows/ci.yml`）：install → prisma generate → build → test。
-  - `Security`（`.github/workflows/security.yml`）：gitleaks 密钥扫描。
-- **代码审查**：仓库启用了 Codex 自动审查（开 PR / 标 ready / 评论 `@codex review` 触发）。处置每条 inline 意见后在该线程回复并 resolve。
-- CI 只跑**纯单测**（无 DB/网络）；需要 DB/真源的验证走本地 `verify-*` 脚本，不进 CI。
+- `gh pr create --base main`，按 `.github/pull_request_template.md` 填（概述 / 改动分组 / 文档与阶段回写 / 测试 / 给产品负责人的说明 / 合规 / 待续）；「给产品负责人的说明」四行（得到什么 / 没改什么 / 风险与回退 / 建议）不经机器解析。
+- **5 项必需检查在当前 head 全绿**才可合（`main` 的 ruleset 要求）：
+  - `build · typecheck · test`（`.github/workflows/ci.yml`）
+  - `contracts · drift · lint · breaking`（`.github/workflows/ci.yml`）
+  - `governance · traceability · release`（`.github/workflows/governance.yml`）
+  - `gitleaks 密钥扫描`（`.github/workflows/security.yml`）
+  - `renderer visual scope`（`.github/workflows/ci.yml`）
+  `github-advanced-security`（Copilot Autofix）不是必需检查。推送前本地先跑 `gctl check`（docs/governance、prisma generate、contracts、lint、build、零容器单测）。
+- **代码审查**：按 `DEC-AIDEV-004`，由开发代理对每个 PR 做独立审查（`/code-review` 或逐文件审查），发现的问题先修复重验；处置每条意见后在该线程回复并 resolve。
+- CI 的单测零容器（无网络）；另有一步在一次性 PostgreSQL 上跑登记的真库用例。需要真源或付费调用的验证走本地 `verify-*` 脚本，不进 CI。
 
 ## PR 粒度与风险分级
 
-一个**逻辑改动 = 一个 PR**，不碎片化；琐碎改动搭车不单开。所有 PR 都须用户明确确认，风险级别只决定验证与复核深度：
+一个**逻辑改动 = 一个 PR**，不碎片化；琐碎改动搭车不单开。合并授权统一按 `DEC-AIDEV-004`（产品负责人 2026-09-21 的常设授权，见 [conflict register §11](docs/governance/conflict-register.md#11-aidev-gate-1-已批准决策)），不再逐 PR 请用户确认；风险级别只决定验证与复核深度：
 
 | 级别 | 例子                                        | 处理                                                                                    |
 | ---- | ------------------------------------------- | --------------------------------------------------------------------------------------- |
