@@ -105,6 +105,55 @@ describe('screenName（召回优先匹配）', () => {
   });
 });
 
+/**
+ * 实体名开头的俄式法律形式（FSE = Federal State Enterprise、OOO、AO…）和 GmbH、LLC 一样不是身份。
+ * xin 2026-10-15 重评：德国公司「FSE」命中 6 条以「FSE」开头的 EU/OFAC 实体，全部是误报。
+ * 只剥实体侧、只剥开头：查询侧不动（否则名为 FSE 的公司会没有核心 token、整家不筛），
+ * 末尾括号里的缩写（"… Company (FSE)"）是名字的首字母，不是法律形式，保留给人审。
+ */
+describe('实体名开头的俄式法律形式（只剥实体侧）', () => {
+  it('公司「FSE」不再命中以 FSE 开头的实体主名', () => {
+    expect(screenName('FSE', null, [idx('fse-1', 'FSE Kamensky Zavod', { sourceKey: 'eu_fsf', country: 'RU' })])).toEqual([]);
+  });
+
+  it('公司「FSE」不再命中以 FSE 开头的强别名', () => {
+    const ent = idx('fse-2', 'Alekszini Vegyi Üzem Szövetségi Állami Vállalat', {
+      sourceKey: 'eu_fsf',
+      country: 'RU',
+      aliases: [{ name: 'FSE AHK', quality: 'strong' }, { name: 'FSE ACP VYMPEL', quality: 'strong' }],
+    });
+    expect(screenName('FSE', null, [ent])).toEqual([]);
+  });
+
+  it('剥掉开头法律形式后，实体真名照样命中（召回不降反升）', () => {
+    const [m] = screenName('Kamensky Zavod GmbH', 'RU', [idx('fse-3', 'FSE Kamensky Zavod', { country: 'RU' })]);
+    expect(m).toMatchObject({ externalId: 'fse-3', nameScore: 1, aliasQuality: 'primary' });
+  });
+
+  it.each(['OOO Romashka', 'AO Romashka', 'PAO Romashka', 'FGUP Romashka', 'JSC Romashka'])(
+    '%s ≡ Romashka',
+    (entityName) => {
+      const [m] = screenName('Romashka', null, [idx('ru-form', entityName)]);
+      expect(m).toMatchObject({ externalId: 'ru-form', nameScore: 1 });
+    },
+  );
+
+  it('末尾括号里的缩写不是法律形式：照旧是候选，交人审', () => {
+    const [m] = screenName('FSE', null, [idx('fse-4', 'Fanavaran Sanat Ertebatat Company (FSE)', { sourceKey: 'eu_fsf' })]);
+    expect(m).toMatchObject({ externalId: 'fse-4' });
+  });
+
+  it('实体名只剩法律形式本身时不剥（不制造空名）', () => {
+    expect(prepareName('AO').tokens).toEqual(new Set(['ao']));
+  });
+
+  it('查询侧不剥：名为「OOO Romashka」的公司仍按原名筛', () => {
+    const [m] = screenName('OOO Romashka', null, [idx('ru-q', 'OOO Romashka')]);
+    // 实体侧剥成 romashka，查询侧仍是 ooo romashka：实体 ⊆ 查询、多 1 个 token → 0.80（未剥则是精确 1.0）。
+    expect(m).toMatchObject({ externalId: 'ru-q', nameScore: 0.8 });
+  });
+});
+
 describe('buildSanctionsIndex（DB 行 → 索引）', () => {
   const rows: SanctionsEntityRow[] = [
     {

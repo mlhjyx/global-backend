@@ -64,9 +64,28 @@ function bidirNameScore(q: string, qTokens: Set<string>, n: string, nTokens: Set
   return Math.max(nameScore(q, qTokens, n, nTokens), nameScore(n, nTokens, q, qTokens));
 }
 
-/** 预归一：把名字转成 (normalized, tokens)。screening service 建索引时对实体侧同法预处理。 */
+/**
+ * 名单实体名开头的俄式 / 独联体法律形式（FSE = Federal State Enterprise、FSUE/FGUP 联邦国有单一制企业、
+ * OOO/OAO/ZAO/PAO/AO/NAO 公司形式、JSC 系列、TOO/TOV）。和 GmbH、LLC 一样不是身份，留着会让名为
+ * 「FSE」的公司命中一串「FSE …」实体（xin 2026-10-15 重评，6 条误报）。
+ */
+const ENTITY_LEADING_LEGAL_FORMS: ReadonlySet<string> = new Set([
+  'fse', 'fsue', 'fgup', 'gup', 'mup',
+  'ooo', 'oao', 'zao', 'pao', 'ao', 'nao',
+  'jsc', 'ojsc', 'pjsc', 'cjsc',
+  'too', 'tov',
+]);
+
+/**
+ * 实体侧预归一：把名字转成 (normalized, tokens)，并剥掉**开头**的法律形式（至少留一个 token）。
+ * 只给名单实体用（建索引）；查询侧在 screenName 里直接 normForMatch、不剥——否则名为「FSE」的
+ * 公司会没有核心 token、整家不筛。末尾的「(FSE)」这类缩写是名字首字母，不剥。
+ */
 export function prepareName(name: string): { normalized: string; tokens: Set<string> } {
-  const normalized = normForMatch(name);
+  const parts = normForMatch(name).split(' ').filter(Boolean);
+  let start = 0;
+  while (start < parts.length - 1 && ENTITY_LEADING_LEGAL_FORMS.has(parts[start])) start += 1;
+  const normalized = parts.slice(start).join(' ');
   return { normalized, tokens: new Set(normalized.split(' ').filter(Boolean)) };
 }
 

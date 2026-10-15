@@ -4,6 +4,16 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-15 · Strip leading Russian legal forms from sanctions entity names so a company named "FSE" stops matching every "FSE …" entity
+
+- 起因：第一班车上线后，对 3 个 ACTIVE ICP 重评，每个 ICP 都有 8 家公司进 `sanctions_hold`，共 19 条命中，全部是误报（运行时会话核对，样本只含公开的机构信息）。其中 6 条来自德国公司「FSE」：EU/OFAC 名单里一串以「FSE」开头的实体，例如 `FSE Kamensky Zavod`、强别名 `FSE AHK`。这里的 FSE 是俄式法律形式 Federal State Enterprise（联邦国有企业），和 GmbH、LLC 一样不是身份，但 `normForMatch` 不认识它，就被当成了名字词。
+- 改动：`sanctions-matcher.ts` 的 `prepareName` 只在建索引时用于实体一侧，现在会剥掉名字**开头**的俄式和独联体法律形式（FSE、FSUE、FGUP、GUP、MUP、OOO、OAO、ZAO、PAO、AO、NAO、JSC、OJSC、PJSC、CJSC、TOO、TOV），并且至少留下一个 token。
+  - 查询一侧（我方公司名）不剥。否则名为「FSE」的公司没有核心 token，整家都不筛。
+  - 末尾的「… Company (FSE)」这类缩写是名字的首字母，不是法律形式，不剥，照旧交人审。
+  - 剥掉开头的法律形式后，实体真名也能直接命中（`Kamensky Zavod GmbH` 对 `FSE Kamensky Zavod` 得满分），召回不降反升。
+- 测试：新增 11 项，先红后绿（改动前 9 项红）。用 19 条真实样本做回放：以 FSE 开头的 5 条消失，其余 14 条照旧是候选。sanctions、lead、report、qualify、name-match 共 306 项通过。
+- 未做：其余 14 条都是只有一个词重合的弱匹配，包括 WAVE、LK、OPUS、Hermes、Homa、AURUM、Sunny Trade，以及末尾带 (FSE) 缩写的那条。产品负责人 2026-10-15 选定不改匹配规则，「召回优先」不变，这些命中由人通过 `POST /leads/:id/sanctions-review` 逐条标为 `cleared_false_positive`。之后重新筛查时，只要没有冒出新的实体，已解除的状态会保留。「单词重合且双方国家都已知、但不相同就不卡」这条精度规则经评估没有采用：它会削弱对「换个国家注册规避制裁」的召回。
+
 ## 2026-10-15 · Repair the stale artifact-subject RLS spec and run it in CI
 
 - 起因：`packages/db/test/generic-operation-artifact-subject.rls.spec.mjs`（PERSONAL_DATA 产物按主体建索引、DSR tombstone 阻止再物化、app_user 不能直读或改写索引，共 10 项）不在任何 CI 步骤里，没人发现它早已跑不起来：在只含 main 迁移的库上，before 钩子以 `GENERIC_OPERATION_ARTIFACT_INVALID` 失败，10 项全部取消（#654 的实施工作流在一次性库上发现）。
