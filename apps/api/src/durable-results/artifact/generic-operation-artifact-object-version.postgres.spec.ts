@@ -1,6 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { PrismaService } from '../../prisma/prisma.service';
+import { PersonalArtifactCleanupService } from './personal-artifact-cleanup.contract';
+import {
+  PrismaPersonalArtifactCleanupCommandRepository,
+  personalArtifactCleanupPersistence,
+} from './personal-artifact-cleanup.repository';
+import { S3PersonalArtifactCleanupAdapter } from './personal-artifact-cleanup.store';
+import { VersionedBucketFixture } from './personal-artifact-cleanup.versioned-bucket.test-fixture';
 
 /*
  * Explicitly opted-in, disposable and migrated PostgreSQL only. The owner
@@ -170,8 +178,51 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
       )`);
     }
 
-    async function settledFixture(): Promise<ArtifactFixture> {
-      return { ...(await seedBinding()), artifactId: randomUUID(), sha256, subjectId };
+    async function settledFixture(
+      fixtureSha256 = sha256,
+      fixtureSubjectId = subjectId,
+    ): Promise<ArtifactFixture> {
+      return {
+        ...(await seedBinding()),
+        artifactId: randomUUID(),
+        sha256: fixtureSha256,
+        subjectId: fixtureSubjectId,
+      };
+    }
+
+    /** The same workspace transaction PrismaService.withWorkspace opens, as app_user. */
+    function appPrismaService(): PrismaService {
+      return {
+        withWorkspace: <T>(
+          id: string,
+          run: (tx: Prisma.TransactionClient) => Promise<T>,
+        ) =>
+          app.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${id}, true)`;
+            return run(tx);
+          }),
+      } as unknown as PrismaService;
+    }
+
+    async function seedContact(contactId: string): Promise<void> {
+      await owner.$executeRaw`
+        INSERT INTO canonical_contact (id, workspace_id, company_id, full_name, dedupe_key, created_at)
+        VALUES (${contactId}::uuid, ${workspaceId}::uuid, ${companyId}::uuid, 'Erased Subject', ${`ledger-subject-${contactId}`}, now())`;
+    }
+
+    async function tombstoneSubject(contactId: string): Promise<string> {
+      const deletionRequestId = randomUUID();
+      await owner.$executeRaw`
+        INSERT INTO deletion_request (
+          id, workspace_id, subject_type, subject_id, status, requested_by, reason, created_at, updated_at
+        ) VALUES (${deletionRequestId}::uuid, ${workspaceId}::uuid, 'contact', ${contactId}::uuid,
+          'RECEIVED', 'ledger-test', 'erasure', now(), now())`;
+      await withWorkspace((tx) =>
+        tx.$queryRaw`
+          SELECT artifact_count FROM tombstone_workspace_generic_operation_artifact_subject_v1(
+            ${workspaceId}::uuid, 'contact', ${contactId}::uuid, ${deletionRequestId}::uuid)`,
+      );
+      return deletionRequestId;
     }
 
     async function pinnedVersion(): Promise<string | null> {
@@ -308,6 +359,77 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
           SELECT status FROM claim_workspace_personal_artifact_cleanup_v1(${workspaceId}::uuid, ${deletionRequestId}::uuid)`,
       );
       expect(replay?.status).toBe('COMPLETED');
+    });
+
+    it('erasure removes every stored version, one no settlement recorded included, and leaves one completion receipt per command', async () => {
+      const erasedSubjectId = randomUUID();
+      const erasedSha256 = digest();
+      const key = objectKey(erasedSha256);
+      await seedContact(erasedSubjectId);
+      // Two settlements recorded two versions. A third, a refresh copy whose
+      // settlement never committed, is the current version in the bucket.
+      const firstWrite = await settledFixture(erasedSha256, erasedSubjectId);
+      await withWorkspace((tx) => settle(tx, 'v4', firstWrite, 'version-settled-first'));
+      const refreshWrite = await settledFixture(erasedSha256, erasedSubjectId);
+      await withWorkspace((tx) => settle(tx, 'v4', refreshWrite, 'version-settled-refresh'));
+      const bucket = new VersionedBucketFixture('artifact-version-ledger-test');
+      bucket.putVersion(key, { versionId: 'version-settled-first' });
+      bucket.putVersion(key, { versionId: 'version-settled-refresh' });
+      bucket.putVersion(key, { versionId: 'version-never-settled' });
+      const seeded = bucket.currentHistory.length;
+
+      const deletionRequestId = await tombstoneSubject(erasedSubjectId);
+      const service = new PersonalArtifactCleanupService(
+        new PrismaPersonalArtifactCleanupCommandRepository(
+          personalArtifactCleanupPersistence(appPrismaService()),
+        ),
+        new S3PersonalArtifactCleanupAdapter({ bucket: bucket.bucket, client: bucket }),
+      );
+      const request = { workspaceId, deletionRequestId };
+
+      // The workflow runs one command per activity call until the claim replays.
+      const firstRun = await service.cleanup(request);
+      const secondRun = await service.cleanup(request);
+      const replayRun = await service.cleanup(request);
+
+      expect(firstRun).toMatchObject({ status: 'COMPLETED', objectStatus: 'DELETED', replay: false });
+      expect(secondRun).toMatchObject({ status: 'COMPLETED', objectStatus: 'ABSENT', replay: false });
+      expect(replayRun).toMatchObject({ status: 'COMPLETED', replay: true });
+      // Nothing of the key is left, and no older version ever became current on the way.
+      expect(bucket.versionIds(key)).toEqual({ objects: [], markers: [] });
+      const during = bucket.currentHistory.slice(seeded).filter((entry) => entry.key === key);
+      expect(during.at(-1)?.current).toBeNull();
+      expect(
+        during.every((entry) => entry.current === 'version-never-settled' || entry.current === null),
+      ).toBe(true);
+
+      // The receipts: each ledger version's command completed; the first sweep
+      // removed everything, so the later command found its version already gone.
+      const receipts = await owner.$queryRaw<
+        { command_id: string; object_version_id: string; status: string; object_status: string }[]
+      >`
+        SELECT command_id::text, object_version_id, status, object_status
+        FROM personal_artifact_cleanup_command
+        WHERE deletion_request_id = ${deletionRequestId}::uuid`;
+      const byCommand = new Map(receipts.map((row) => [row.command_id, row]));
+      const firstId = (firstRun as { commandId: string }).commandId;
+      const secondId = (secondRun as { commandId: string }).commandId;
+      expect(receipts).toHaveLength(2);
+      expect(byCommand.get(firstId)).toMatchObject({ status: 'COMPLETED', object_status: 'DELETED' });
+      expect(byCommand.get(secondId)).toMatchObject({ status: 'COMPLETED', object_status: 'ABSENT' });
+      expect(receipts.map((row) => row.object_version_id).sort()).toEqual([
+        'version-settled-first',
+        'version-settled-refresh',
+      ]);
+      // The ledger stays the audit of what settlements verified; erasure does not rewrite it.
+      const ledgerRows = await owner.$queryRaw<{ object_version_id: string }[]>`
+        SELECT object_version_id FROM generic_operation_artifact_object_version
+        WHERE sha256 = ${erasedSha256} AND privacy_class = 'PERSONAL_DATA'
+        ORDER BY object_version_id`;
+      expect(ledgerRows.map((row) => row.object_version_id)).toEqual([
+        'version-settled-first',
+        'version-settled-refresh',
+      ]);
     });
   },
 );

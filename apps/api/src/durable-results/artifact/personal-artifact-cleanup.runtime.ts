@@ -88,13 +88,17 @@ export function createPersonalArtifactCleanupRuntime(
       requestTimeout: 2_500,
     },
   });
+  const port = new S3PersonalArtifactCleanupAdapter({ bucket, client });
   return Object.freeze({
-    port: new S3PersonalArtifactCleanupAdapter({ bucket, client }),
+    port,
     checkReadiness: async () => {
       try {
         await client.send(
           new GetBucketLocationCommand({ Bucket: bucket }),
         );
+        // Erasure lists every version of a key; without that grant it cannot
+        // finish, so a worker missing it is not ready rather than retrying forever.
+        await port.verifyVersionListing();
         return Object.freeze({ status: 'ok' as const });
       } catch {
         return Object.freeze({

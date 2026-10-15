@@ -375,6 +375,16 @@ cat > "$cleanup_policy" <<EOF
     },
     {
       "Effect": "Allow",
+      "Action": ["s3:ListBucketVersions"],
+      "Resource": ["arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET"],
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": "generic-operation-results/v1/final/personal-data/*"
+        }
+      }
+    },
+    {
+      "Effect": "Allow",
       "Action": [
         "s3:GetObjectVersion",
         "s3:GetObjectTagging",

@@ -125,6 +125,15 @@ test('MinIO is pinned and provisioned by one idempotent deployment job', async (
   assert.match(bootstrap, /"s3:DeleteObjectVersion"/);
   const cleanupPolicy = bootstrap.slice(bootstrap.indexOf('cat > "$cleanup_policy"'), bootstrap.indexOf('cat > "$personal_policy"'));
   assert.doesNotMatch(cleanupPolicy, /DeleteObjectVersion[\s\S]*ExistingObjectTag/u);
+  // Erasure lists every version of one personal-data key (the version ledger can
+  // miss a refresh copy); the grant is that prefix only, never the bucket.
+  assert.match(
+    cleanupPolicy,
+    /"Action": \["s3:ListBucketVersions"\],\s*"Resource": \["arn:aws:s3:::\$GENERIC_OPERATION_ARTIFACT_S3_BUCKET"\],\s*"Condition": \{\s*"StringLike": \{\s*"s3:prefix": "generic-operation-results\/v1\/final\/personal-data\/\*"\s*\}\s*\}/u,
+  );
+  assert.equal(cleanupPolicy.match(/s3:ListBucketVersions/gu)?.length, 1);
+  assert.doesNotMatch(cleanupPolicy, /"s3:ListBucket"/u);
+  assert.match(cleanupAdapter, /ListObjectVersionsCommand/);
   assert.match(cleanupAdapter, /GetObjectTaggingCommand/);
   assert.match(cleanupAdapter, /Value !== 'PERSONAL_DATA'/);
   const runtimePolicy = bootstrap.slice(bootstrap.indexOf('cat > "$runtime_policy"'), bootstrap.indexOf('cat > "$cleanup_policy"'));
