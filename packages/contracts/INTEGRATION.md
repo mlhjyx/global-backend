@@ -79,7 +79,7 @@
 1. `POST /icps/:id/query-plans` → AI 生成多源查询计划（`DRAFT`）
    - 只为当前已启用的数据源出查询，每条查询的 `filters.source_hint` 写明它执行的源；`estimatedVolume` 只计会执行的查询
    - 没有可用的已启用数据源时返回 409 `NO_ENABLED_DISCOVERY_SOURCE`（不调用模型）；模型给出的查询全落在不可用的数据源上时返回 409 `NO_RUNNABLE_QUERIES`，不保存计划
-   - 模型网关结算了调用却没有可用答案时（内容被过滤、输出截断、非 JSON、流被截断等）返回 502 `MODEL_UPSTREAM_UNUSABLE`，`details.reasonCode` 为网关原因码（例如 `CHAT_COMPLETIONS_CONTENT_FILTERED`、`STRUCTURED_OUTPUT_TRUNCATED`、`CHAT_COMPLETIONS_STREAM_TRUNCATED`），不保存计划；这次调用的预算授权已在调用前消耗并按真实用量结算，用同一授权重试会得到 409 `EXECUTION_BUDGET_GRANT_REUSED`，重试要先向 SaaS 取一份新的授权。`POST /companies/:id/icps` 同
+   - 模型网关结算了调用却没有可用答案时（内容被过滤、输出截断、非 JSON、流被截断等）返回 502 `MODEL_UPSTREAM_UNUSABLE`，`details.reasonCode` 为网关原因码（例如 `CHAT_COMPLETIONS_CONTENT_FILTERED`、`STRUCTURED_OUTPUT_TRUNCATED`、`CHAT_COMPLETIONS_STREAM_TRUNCATED`；网关直接回了 429 或 5xx 时为 `GATEWAY_HTTP_<状态码>`，例如 `GATEWAY_HTTP_503`），不保存计划；这次调用的预算授权已在调用前消耗并按真实用量结算，用同一授权重试会得到 409 `EXECUTION_BUDGET_GRANT_REUSED`，重试要先向 SaaS 取一份新的授权。`POST /companies/:id/icps` 同
 2. 人工确认：`POST /query-plans/:id/confirm`（→ `READY`）
 3. 执行：`POST /query-plans/:id/execute` → 202 `{ data: { runId, status } }`；轮询 `GET /discovery-runs/:runId`（`RUNNING → DONE|PARTIAL`，stats 含每源计数）
    - 确认之后数据源被停用的查询会跳过，不让 run 失败：`stats.skippedQueries` 按原因计数（`SOURCE_DISABLED` / `SOURCE_LINEAGE_UNAVAILABLE` / `SOURCE_UNKNOWN`），run 判 `PARTIAL`
@@ -95,6 +95,7 @@
      - 查询的某个数据源在重试时遇到这种操作，这条查询就以零回执结束（回执列出该源、0 条记录，所以物化准入仍然见到每条计划查询一份回执），记为失败，计划继续往下跑。
      - 以上任何一种，run 都至少判 `PARTIAL`；同一阶段连续两次遇到时视为故障，run 判 `FAILED`。
      - `stats.unreplayableSkips` 只在有跳过时出现，按阶段计数：`queries`、`websiteProfile`、`fit`、`signals`、`watches`。
+   - 词表归一（把查询里的行业/国家词归一到标准码）只为会读归一结果的数据源（`wikidata`、`openstreetmap`）调用模型，其余查询只查已沉淀的别名；一条查询的归一调用丢失（上游 5xx、操作无法重放）时，这条查询照常用各源内置词表执行，不算失败、不改状态。`stats.taxonomyFallback`（回退的查询数）与 `stats.taxonomyModelSkipped`（有词可归一却没有调用模型的查询数）只在大于 0 时出现。
 4. 结果：`GET /canonical-companies`（`?status=NEW|ENRICHED|SUPPRESSED`）；详情含**字段级 Evidence**（每个字段值来自哪个源、什么许可）
    - 过了 fit 门的高价值公司自动做**多源富集**（互补并跑，均 CC0 直连数据）：
      - `attributes.gleif.*` —— 法律身份：`lei`/`legal_name`/`legal_form`/`entity_status`/`parent_name`/`ultimate_parent_name`（母子集团关系，识别目标是否某集团子公司）

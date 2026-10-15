@@ -186,6 +186,13 @@ export interface CompanyDiscoveryAdapter {
   key: string;
   classes: SourceClass[];
   readonly companyResultLineage?: 'discovery-company-result-lineage/v1';
+  /**
+   * The adapter reads the resolved taxonomy executeQuery injects into the query filters
+   * (`_industryQids`, `_osmTags`, `_industryCodes`, `_countryQid`, `_countryCode`) before its
+   * built-in vocabulary. executeQuery calls the taxonomy model for a query only when at least
+   * one routed adapter declares this; public_web and the registries match on their own terms.
+   */
+  readonly consumesResolvedTaxonomy?: boolean;
   discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, opts?: DiscoveryOptions,
   ): Promise<DiscoveryResult>;
 }
