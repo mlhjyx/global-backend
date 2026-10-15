@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { storageRightsContextForLead, resolveProcessorJurisdiction } from './data-rights.context';
+import {
+  exportRightsContextForLead,
+  resolveProcessorJurisdiction,
+  storageRightsContextForLead,
+} from './data-rights.context';
 import { evaluateDataRights } from './data-rights.engine';
 import { JURISDICTION_POLICY_SEED } from './jurisdiction-policy.seed';
 
@@ -92,5 +96,45 @@ describe('resolveProcessorJurisdiction（fail-closed）', () => {
   it('非法值 → 抛（fail-fast 防拼写）', () => {
     expect(() => resolveProcessorJurisdiction('XX')).toThrow(/非法/);
     expect(() => resolveProcessorJurisdiction('CHINA')).toThrow(/非法/);
+  });
+});
+
+describe('exportRightsContextForLead（周报导出，BI-22）', () => {
+  const exportEffect = (input: Parameters<typeof exportRightsContextForLead>[0], processor?: 'EU' | 'CN') =>
+    evaluateDataRights(exportRightsContextForLead(input, processor), rules);
+
+  it('EXPORT of company facts only: green, no lawful basis asserted, processor resolved from config', () => {
+    const ctx = exportRightsContextForLead({ country: 'DE', suppressed: false, hasEvidence: true });
+    expect(ctx).toEqual({
+      action: 'EXPORT',
+      dataClass: 'green',
+      subjectJurisdiction: 'EU',
+      processorJurisdiction: resolveProcessorJurisdiction(process.env.DATA_PROCESSOR_JURISDICTION),
+      lawfulBasis: null,
+      suppressed: false,
+      hasEvidence: true,
+    });
+    expect(exportRightsContextForLead({ country: 'CHN', suppressed: false, hasEvidence: true }, 'CN')).toMatchObject({
+      subjectJurisdiction: 'CN',
+      processorJurisdiction: 'CN',
+    });
+  });
+
+  it('allows a company with evidence, denies a suppressed one first and one without evidence', () => {
+    expect(exportEffect({ country: 'DE', suppressed: false, hasEvidence: true }, 'EU')).toMatchObject({
+      allowed: true,
+      effect: 'ALLOW',
+      reason: 'green_company_fact',
+    });
+    expect(exportEffect({ country: 'DE', suppressed: true, hasEvidence: false }, 'EU')).toMatchObject({
+      allowed: false,
+      effect: 'DENY',
+      reason: 'suppressed',
+    });
+    expect(exportEffect({ country: 'US', suppressed: false, hasEvidence: false }, 'EU')).toMatchObject({
+      allowed: false,
+      effect: 'DENY',
+      reason: 'no_evidence',
+    });
   });
 });
