@@ -53,7 +53,7 @@ describe('LeadService synthetic provenance read quarantine', () => {
     };
 
     await expect(serviceWithTx(tx).list(ctx, { limit: 2 })).resolves.toEqual({
-      data: [{ ...lead, company: null }],
+      data: [{ ...lead, scored: false, queueBasis: 'fit_gate_preset', company: null }],
       nextCursor: null,
       hasMore: false,
     });
@@ -97,6 +97,8 @@ describe('LeadService synthetic provenance read quarantine', () => {
     await expect(serviceWithTx(tx).list(ctx, { limit: 2 })).resolves.toEqual({
       data: productLeads.map((lead) => ({
         ...lead,
+        scored: false,
+        queueBasis: 'fit_gate_preset',
         company: { id: lead.canonicalCompanyId, name: lead.canonicalCompanyId },
       })),
       nextCursor: null,
@@ -131,8 +133,8 @@ describe('LeadService synthetic provenance read quarantine', () => {
 
     await expect(serviceWithTx(tx).list(ctx, { limit: 2 })).resolves.toEqual({
       data: [
-        { ...leads[0], company: { id: 'company-real', name: 'Real Co' } },
-        { ...leads[2], company: { id: 'company-next', name: 'Next Co' } },
+        { ...leads[0], scored: false, queueBasis: 'fit_gate_preset', company: { id: 'company-real', name: 'Real Co' } },
+        { ...leads[2], scored: false, queueBasis: 'fit_gate_preset', company: { id: 'company-next', name: 'Next Co' } },
       ],
       nextCursor: null,
       hasMore: false,
@@ -178,8 +180,9 @@ describe('LeadService synthetic provenance read quarantine', () => {
       fieldEvidence,
     });
 
-    await expect(service.get(ctx, 'lead-real')).resolves.toEqual({ ...lead, company: null });
-    await expect(service.get(ctx, 'lead-real')).resolves.toEqual({ ...lead, company });
+    const derived = { scored: false, queueBasis: 'fit_gate_preset' };
+    await expect(service.get(ctx, 'lead-real')).resolves.toEqual({ ...lead, ...derived, company: null });
+    await expect(service.get(ctx, 'lead-real')).resolves.toEqual({ ...lead, ...derived, company });
     expect(fieldEvidence.findMany).toHaveBeenCalledTimes(1);
   });
 });

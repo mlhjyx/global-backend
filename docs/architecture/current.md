@@ -149,6 +149,7 @@ scores: { fit, role, intent, demand_proof?, reachability, data_quality, engageme
 evidence_refs + freshness / qualification_rule_version
 storage_rights_decision / personal_data_class / suppression_state
 recommended_action / valid_until
+scored_at? / queue_basis?（2026-10-14 起的可选字段：评分时刻；接受时队列的依据 fit_gate_preset | score | human_accept | human_reject）
 ```
 
 scores 与 as-built 六维映射注记：现行六维=fit/role/intent/dataQuality/reachability/engagement（scoring.ts）；`demand_proof` ✅ 收口⑤起由一等 Signal 填充（需求证据类事件=TENDER_PUBLISHED+SOURCING_OPENED，evidence 判据强制；FDA_CLEARANCE 属上市时机留 Intent 维）——**观测维不进总分**（乘法门待 R2 backtest ≥50 QGO 标签），`qualification_rule_version` 升 `additive-6dim-v2` 供消费端区分；**v1 契约预留 number|null 槽位使填充零破坏，snapshot_version 保持 1、不开 v2 文件**（避免 v1/v2 混流坑消费者——release-plan「升 v2」以此达成）。null=lead 评分早于 v2 规则。
