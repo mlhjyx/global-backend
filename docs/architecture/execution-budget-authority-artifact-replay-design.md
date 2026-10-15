@@ -19,7 +19,7 @@
 - 同一业务代码、JWS/claims、数据库 guard、artifact manifest、重放、ACK、错误码和 readiness。
 - 环境差异只允许 issuer/JWKS、secret reference、endpoint、数据、额度值、资源和部署拓扑。
 - 没有权威授权时零账户、零 operation、零 Provider wire。
-- 没有有效输出或物理调用/ACK 状态未知时保留完整 reservation，绝不自动发送第二次物理请求。唯一例外（D13，2026-10-14）：确定失败、网关没有计费的请求（HTTP 429 与除 504/524 外的 5xx、连接从未建立，或 Tool 在第一次物理请求之前就失败），reservation 释放为 `RELEASED`，同一 operation key 可再预留，每个 key 最多 3 次。3 次是账本层的预留次数：new-api 自身 `RetryTimes=1`，backend 看到的 429/5xx 已是网关重试一次后的结果，所以最多对应 6 次物理请求。超时（含 HTTP 504/524：请求已到达上游，可能已生成并计费）、任何流式失败、内容过滤等可能已计费的失败仍按上一条处理。流在第一个输出之前失败暂不释放：现役 new-api fork 对它回 HTTP 200 并按本地估算的输入 token 扣费（运行时会话 10-14 用 new-api 日志 5734–5738 核实），等 mlhjyx/new-api#3（首字节之前的失败改为回错误、不计费）上线后再单独纳入。
+- 没有有效输出或物理调用/ACK 状态未知时保留完整 reservation，绝不自动发送第二次物理请求。唯一例外（D13，2026-10-14）：确定失败、网关没有计费的请求（HTTP 429 与除 504/524 外的 5xx、连接从未建立，或 Tool 在第一次物理请求之前就失败），reservation 释放为 `RELEASED`，同一 operation key 可再预留，每个 key 最多 3 次。3 次是账本层的预留次数：new-api 自身 `RetryTimes=1`，backend 看到的 429/5xx 已是网关重试一次后的结果，所以最多对应 6 次物理请求。超时（含 HTTP 504/524：请求已到达上游，可能已生成并计费）、任何流式失败、内容过滤等可能已计费的失败仍按上一条处理。流式失败不在释放之列：自 new-api 6ea085c6（rc.44 同步加首字节修复，2026-10-15 上线）起，首字节之前的失败由 new-api 回可重试的 HTTP 502、不计费，backend 按 5xx 释放；仍以流式失败到达 backend 的，都发生在首字节之后，可能已计费。旧版 new-api 曾对首字节前失败回 HTTP 200 并按本地估算的输入 token 扣费（运行时会话 10-14 用 new-api 日志 5734–5738 核实），所以即使 new-api 回退到旧镜像，流式失败照旧结算也不会少记。
 - 有效输出但精确费用暂缺时按 reservation 上界结算，结果仍可重放，费用异步 reconciliation。
 - 测试 Stub/Fake/Sandbox 不能签发产品 authority、不能进入 managed composition，也不能生成正式 artifact。
 - Backend 不成为 subscription、Credits 或 Billing 的最终账务 SoR。

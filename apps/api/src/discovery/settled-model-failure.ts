@@ -21,9 +21,9 @@ const ABSORBED_TRANSPORT_FAILURES: ReadonlySet<string> = new Set([
  *   CHAT_COMPLETIONS_STREAM_TRUNCATED and no control error behind it. The
  *   gateway settles it exactly like an unusable answer (one settle, no result
  *   projection, no durable receipt), so nothing can follow it, and a retry
- *   could only replay into BUDGET_OPERATION_REPLAY_UNAVAILABLE. That holds for
- *   a cut before the first output token too: the live new-api fork still bills
- *   it by estimated prompt tokens, so D13 does not release it.
+ *   could only replay into BUDGET_OPERATION_REPLAY_UNAVAILABLE. D13 never
+ *   releases a cut stream: since new-api 6ea085c6 a failure before the first
+ *   byte arrives as an HTTP 502 instead, so a cut that reaches us may be billed.
  *
  * The gateway classes transport errors as control errors on purpose: an outage
  * hits every call of a run. Every other transport failure (timeouts, unreadable

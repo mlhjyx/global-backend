@@ -12,10 +12,13 @@ import { ProviderHttpError } from "./providers/provider-output-error";
  * point, a content filter, an unreadable body, a structured-output repair
  * (the first call already ran) and every unclassified error.
  *
- * A stream that failed before its first output is deliberately not listed:
- * the live new-api fork answers it with HTTP 200 and bills the locally
- * estimated prompt tokens (xin new-api logs 5734-5738, 2026-10-13). It can be
- * added once the first-byte fix (mlhjyx/new-api#3) makes it an HTTP error.
+ * Stream failures are deliberately not listed. Since new-api 6ea085c6 (live
+ * 2026-10-15) a failure before the gateway's first byte reaches us as a
+ * retryable, unbilled HTTP 502 and is released above; a stream failure that
+ * still reaches us began after the first byte and may have been billed. The
+ * older fork answered a pre-output failure with HTTP 200 and billed estimated
+ * prompt tokens (xin new-api logs 5734-5738, 2026-10-13), so settling stream
+ * failures also stays correct if new-api is rolled back.
  */
 export type DefiniteModelFailureCode =
   | "MODEL_PROVIDER_HTTP_UNAVAILABLE"

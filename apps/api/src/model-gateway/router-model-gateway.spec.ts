@@ -1764,8 +1764,9 @@ describe('RouterModelGateway budget operation identity', () => {
  * opened) is a definite failure. The reservation is released and a retry of
  * the same operation key may reserve it again. Everything that may have been
  * billed keeps the old rule: one settlement with no result, never a second
- * physical request. That includes a stream that failed before its first
- * output, which the live new-api fork still bills by estimated prompt tokens.
+ * physical request. That includes every stream failure: since new-api 6ea085c6
+ * a failure before the first byte arrives as an HTTP 502 instead, and the older
+ * fork billed it by estimated prompt tokens.
  */
 describe('RouterModelGateway — definite failures before any output release the reservation (D13)', () => {
   const OPERATION_ID = '7d5e8f1a-2b3c-4d5e-8f90-a1b2c3d4e5f6';
@@ -1874,11 +1875,11 @@ describe('RouterModelGateway — definite failures before any output release the
     // from its own retry statuses for the same reason.
     ['HTTP 504 (a gateway timeout)', new ProviderHttpError({ status: 504, provider: 'gateway', model: 'm' })],
     ['HTTP 524 (an origin timeout)', new ProviderHttpError({ status: 524, provider: 'gateway', model: 'm' })],
-    // The live new-api fork answers a stream that fails before its first output
-    // with HTTP 200 and bills the locally estimated prompt tokens (xin new-api
-    // logs 5734-5738, 2026-10-13 12:27: completion 0, about 23k quota each), so
-    // releasing these would under-record spend. They become releasable once the
-    // first-byte fix (mlhjyx/new-api#3) turns them into HTTP errors.
+    // Stream failures stay settled. Since new-api 6ea085c6 a failure before the
+    // first byte reaches us as a retryable HTTP 502 (released above), so one that
+    // still arrives as a stream error began after the first byte. The older fork
+    // answered these with HTTP 200 and billed estimated prompt tokens (xin new-api
+    // logs 5734-5738, 2026-10-13 12:27), so settling also holds after a rollback.
     [
       'an upstream error event before any output (xin 2026-10-13 12:27, five extractions)',
       new ProviderTransportError('gateway m: stream carried an upstream error', undefined, {

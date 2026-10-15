@@ -988,11 +988,12 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
       issues.push(issue('EXECUTION_AUTHORITY_RESULT_DISPOSITION_INVALID', DEFINITE_FAILURE_CLASSIFIER_PATH, `definite-failure classifier missing ${token}`));
     }
   }
-  // The live new-api fork bills a stream that failed before its first output
-  // (HTTP 200 plus estimated prompt tokens), so no stream failure may release
-  // until mlhjyx/new-api#3 is live; re-admitting one must change this check.
+  // No stream or output failure may release: since new-api 6ea085c6 a failure
+  // before the first byte arrives as an HTTP 502 (released as unavailable), so a
+  // stream failure that reaches the classifier began after the first byte and may
+  // have been billed; the older fork billed even pre-output failures.
   if (/ProviderTransportError|ProviderOutputError/.test(definiteClassifier)) {
-    issues.push(issue('EXECUTION_AUTHORITY_RESULT_DISPOSITION_INVALID', DEFINITE_FAILURE_CLASSIFIER_PATH, 'definite-failure classifier must not release a stream or output failure while the gateway still bills it'));
+    issues.push(issue('EXECUTION_AUTHORITY_RESULT_DISPOSITION_INVALID', DEFINITE_FAILURE_CLASSIFIER_PATH, 'definite-failure classifier must not release a stream or output failure: one that reaches the backend may have been billed'));
   }
   const artifactRegistry = await readText(repoRoot, 'apps/api/src/durable-results/artifact/artifact-materializer.registry.ts');
   for (const schema of Object.keys(ARTIFACT_CONTRACTS)) {
