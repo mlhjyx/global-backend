@@ -17,7 +17,8 @@
 - 测试：
   - 修复前 0/10（before 钩子失败、10 项取消），修复后 10/10。
   - 所有拒绝断言都钉具体错误标记（`permission denied`、`…_SUBJECT_TOMBSTONED`、`…_SUBJECT_INVALID`），新的版本守卫不会让它们误过。
-  - 变异检验：禁用 `generic_operation_artifact_personal_subject_guard` 后，「v2 append 绕过」与「ACK_UNKNOWN 恢复冻结主体」两项变红。
+  - 变异检验：禁用 `generic_operation_artifact_personal_subject_guard` 后，「v2 append 绕过」与「ACK_UNKNOWN 恢复冻结主体」两项变红，失败原因是「没有被拒」（日志里 0 次 `OBJECT_VERSION_REQUIRED`）。
+  - 独立复审 LOW：这两项的裸 append 原本会被两个延迟触发器（主体守卫、版本守卫）同时拒绝，命中 `SUBJECT_INVALID` 只是因为 PostgreSQL 按触发器名字顺序执行。现在先经运行时结算写入同字节的承载产物、钉住对象版本，再做裸 append，只剩主体守卫能拒绝，不再依赖触发器命名。
   - 按 CI 步骤的命令在一次性 pgvector/pg16 上模拟：主库已迁移、另建库、运行用例，退出码 0。
 - 未做：`packages/db/test` 里其余不在 CI 的用例没有逐个核查；#654 合入后可在本用例补 `company_profile` 主体的 tombstone 覆盖。
 

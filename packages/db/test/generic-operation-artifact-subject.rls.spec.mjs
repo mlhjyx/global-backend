@@ -285,6 +285,32 @@ async function settleWorkspaceCurrent(transaction, input) {
   );
 }
 
+// A bare append of PERSONAL_DATA bytes is refused at commit by two deferred
+// triggers, the subject guard and the version guard, and PostgreSQL fires them
+// in name order. To make a refusal prove the subject guard alone, first settle
+// a carrier artifact with the same bytes through the runtime settlement, which
+// pins the object version; only the subject guard can then refuse the append.
+async function pinPersonalObjectVersion(owner, app, input, companyId) {
+  const carrierSubjectId = randomUUID();
+  await seedContactSubject(owner, {
+    subjectId: carrierSubjectId,
+    workspaceId: input.workspaceId,
+    companyId,
+  });
+  const carrier = {
+    ...artifactInput(
+      await seedWorkspaceBinding(owner, input.workspaceId),
+      "PERSONAL_DATA",
+      { subjectType: "contact", subjectId: carrierSubjectId },
+    ),
+    sha256: input.sha256,
+    objectKey: input.objectKey,
+  };
+  await withWorkspace(app, input.workspaceId, (tx) =>
+    settleWorkspaceCurrent(tx, carrier),
+  );
+}
+
 function manifestFor(input) {
   return {
     schemaVersion: "generic-operation-artifact/v1",
@@ -757,6 +783,7 @@ describe("generic operation PERSONAL_DATA subject index and DSR tombstone RLS", 
       workspaceId: WS_A,
       companyId: COMPANY_A,
     });
+    await pinPersonalObjectVersion(owner, app, unknown, COMPANY_A);
     await rejectsSql(
       () =>
         withWorkspace(app, WS_A, async (tx) => {
@@ -860,6 +887,7 @@ describe("generic operation PERSONAL_DATA subject index and DSR tombstone RLS", 
       await seedWorkspaceBinding(owner, WS_A),
       "PERSONAL_DATA",
     );
+    await pinPersonalObjectVersion(owner, app, personal, COMPANY_A);
     await rejectsSql(
       () => withWorkspace(app, WS_A, (tx) => appendWorkspaceV2(tx, personal)),
       "GENERIC_OPERATION_ARTIFACT_SUBJECT_INVALID",
