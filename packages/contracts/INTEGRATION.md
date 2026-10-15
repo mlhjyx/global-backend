@@ -107,8 +107,8 @@
 ### 阶段 3：验证评分（Qualify）
 
 1. `POST /icps/:id/qualify` → 202，后台确定性六维评分（Fit/Role/Intent/DataQuality/Reachability/Engagement）
-2. 队列视图：`GET /icps/:id/lead-queues` → `{ data: { recommended, needs_review, rejected, suppressed } }`
-3. 列表：`GET /leads?icpId=&queue=`（按总分排序，含公司摘要）；详情 `GET /leads/:id` 带**逐规则评分依据**
+2. 队列视图：`GET /icps/:id/lead-queues` → `{ data: { recommended, needs_review, rejected, suppressed, sanctions_hold, scored, queueBasis } }`——`scored` 为真表示每条 lead 都有 `total_score`；`queueBasis` 按队列依据计数（`fit_gate_preset` = fit 门按 verdict 预置、评分从未跑过；`score` = 评分阶段算出；`human_accept` / `human_reject` = 人工裁决），四项之和 = lead 总数
+3. 列表：`GET /leads?icpId=&queue=`（按总分排序，含公司摘要；每行带 `scored` 与 `queueBasis`，未评分的行只是 fit 门预置的队列）；详情 `GET /leads/:id` 带**逐规则评分依据**
 4. 人工裁决：`POST /leads/:id/accept`（→ `QUALIFIED`，发 `LeadQualified` 事件——交给 Campaign 的出口）/ `POST /leads/:id/reject { reason }`
 
 ## 4. 事件（服务端集成用）

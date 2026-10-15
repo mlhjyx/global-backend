@@ -8711,7 +8711,27 @@
                       "items": {
                         "type": "object",
                         "additionalProperties": true,
-                        "description": "Lead（六维分+队列+裁决状态）"
+                        "description": "Lead（六维分+队列+裁决状态）",
+                        "required": [
+                          "scored",
+                          "queueBasis"
+                        ],
+                        "properties": {
+                          "scored": {
+                            "type": "boolean",
+                            "description": "total_score 非空：队列已由评分决定；false = 仍是 fit 门预置"
+                          },
+                          "queueBasis": {
+                            "type": "string",
+                            "enum": [
+                              "fit_gate_preset",
+                              "score",
+                              "human_accept",
+                              "human_reject"
+                            ],
+                            "description": "队列依据：fit_gate_preset = fit 门按 verdict 预置、评分从未跑过；score = 评分阶段算出；human_accept / human_reject = 人工裁决"
+                          }
+                        }
                       }
                     },
                     "page": {
@@ -8781,7 +8801,10 @@
                         "recommended",
                         "needs_review",
                         "rejected",
-                        "suppressed"
+                        "suppressed",
+                        "sanctions_hold",
+                        "scored",
+                        "queueBasis"
                       ],
                       "properties": {
                         "recommended": {
@@ -8795,6 +8818,37 @@
                         },
                         "suppressed": {
                           "type": "integer"
+                        },
+                        "sanctions_hold": {
+                          "type": "integer"
+                        },
+                        "scored": {
+                          "type": "boolean",
+                          "description": "每条 lead 都有 total_score（计数全部出自评分或人工裁决）；false = 至少一条仍是 fit 门预置，或 ICP 无 lead"
+                        },
+                        "queueBasis": {
+                          "type": "object",
+                          "description": "按队列依据计数，四项之和 = lead 总数",
+                          "required": [
+                            "fit_gate_preset",
+                            "score",
+                            "human_accept",
+                            "human_reject"
+                          ],
+                          "properties": {
+                            "fit_gate_preset": {
+                              "type": "integer"
+                            },
+                            "score": {
+                              "type": "integer"
+                            },
+                            "human_accept": {
+                              "type": "integer"
+                            },
+                            "human_reject": {
+                              "type": "integer"
+                            }
+                          }
                         }
                       }
                     }
@@ -8809,7 +8863,7 @@
             "bearer": []
           }
         ],
-        "summary": "四队列计数（推荐/待确认/拒绝/禁联）",
+        "summary": "五队列计数（推荐/待确认/拒绝/禁联/制裁隔离）+ 队列依据（预置 / 评分 / 人工）",
         "tags": [
           "Leads"
         ],
@@ -8845,7 +8899,27 @@
                     "data": {
                       "type": "object",
                       "additionalProperties": true,
-                      "description": "Lead（六维分+队列+裁决状态）"
+                      "description": "Lead（六维分+队列+裁决状态）",
+                      "required": [
+                        "scored",
+                        "queueBasis"
+                      ],
+                      "properties": {
+                        "scored": {
+                          "type": "boolean",
+                          "description": "total_score 非空：队列已由评分决定；false = 仍是 fit 门预置"
+                        },
+                        "queueBasis": {
+                          "type": "string",
+                          "enum": [
+                            "fit_gate_preset",
+                            "score",
+                            "human_accept",
+                            "human_reject"
+                          ],
+                          "description": "队列依据：fit_gate_preset = fit 门按 verdict 预置、评分从未跑过；score = 评分阶段算出；human_accept / human_reject = 人工裁决"
+                        }
+                      }
                     }
                   }
                 }
@@ -8905,7 +8979,27 @@
                     "data": {
                       "type": "object",
                       "additionalProperties": true,
-                      "description": "Lead（六维分+队列+裁决状态）"
+                      "description": "Lead（六维分+队列+裁决状态）",
+                      "required": [
+                        "scored",
+                        "queueBasis"
+                      ],
+                      "properties": {
+                        "scored": {
+                          "type": "boolean",
+                          "description": "total_score 非空：队列已由评分决定；false = 仍是 fit 门预置"
+                        },
+                        "queueBasis": {
+                          "type": "string",
+                          "enum": [
+                            "fit_gate_preset",
+                            "score",
+                            "human_accept",
+                            "human_reject"
+                          ],
+                          "description": "队列依据：fit_gate_preset = fit 门按 verdict 预置、评分从未跑过；score = 评分阶段算出；human_accept / human_reject = 人工裁决"
+                        }
+                      }
                     }
                   }
                 }
@@ -9074,7 +9168,27 @@
                     "data": {
                       "type": "object",
                       "additionalProperties": true,
-                      "description": "Lead（六维分+队列+裁决状态）"
+                      "description": "Lead（六维分+队列+裁决状态）",
+                      "required": [
+                        "scored",
+                        "queueBasis"
+                      ],
+                      "properties": {
+                        "scored": {
+                          "type": "boolean",
+                          "description": "total_score 非空：队列已由评分决定；false = 仍是 fit 门预置"
+                        },
+                        "queueBasis": {
+                          "type": "string",
+                          "enum": [
+                            "fit_gate_preset",
+                            "score",
+                            "human_accept",
+                            "human_reject"
+                          ],
+                          "description": "队列依据：fit_gate_preset = fit 门按 verdict 预置、评分从未跑过；score = 评分阶段算出；human_accept / human_reject = 人工裁决"
+                        }
+                      }
                     }
                   }
                 }
