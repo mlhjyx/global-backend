@@ -1,7 +1,9 @@
 import {
+  Inject,
   Injectable,
   OnApplicationBootstrap,
   OnApplicationShutdown,
+  Optional,
 } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { RuntimeAdmissionService } from "../runtime/runtime-admission";
@@ -9,6 +11,7 @@ import { RuntimeProcessLeaseService } from "../runtime/runtime-process-lease";
 import { RuntimeReadinessContributorRegistry } from "../runtime/runtime-readiness-registry";
 import { RuntimeReleaseIdentityService } from "../runtime/runtime-release-identity";
 import { TemporalClient } from "../temporal/temporal.client";
+import { DEV_FAST_LANE, type DevFastLane } from "../runtime/dev-fast-lane";
 import {
   projectPlatformAutomationReadinessForHealth,
   type PlatformAutomationHealthProjection,
@@ -33,6 +36,10 @@ export interface RuntimeReadinessReport {
     // Additive capability for older readback consumers; absence is unproven,
     // never permission to recover a target or an aggregate readiness override.
     platform_target_lookup?: ComponentStatus;
+    // Development fast lane only: present while this API routes one
+    // workspace's acquisition commands to an unattested source worker. Never
+    // ok and never an input to aggregate status or customer write admission.
+    dev_fast_lane?: ComponentStatus;
   };
   components: {
     database: ComponentStatus;
@@ -60,6 +67,10 @@ type RuntimeHardReadiness = Readonly<{
 }>;
 
 const READINESS_REFRESH_INTERVAL_MS = 10_000;
+const DEV_FAST_LANE_CAPABILITY: ComponentStatus = Object.freeze({
+  status: "not_proven",
+  code: "DEV_FAST_LANE_UNATTESTED_ROUTING",
+});
 const SNAPSHOT_UNAVAILABLE = "RUNTIME_READINESS_SNAPSHOT_UNAVAILABLE";
 
 function unavailableComponent(): ComponentStatus {
@@ -118,6 +129,9 @@ export class RuntimeReadinessService
     private readonly releaseIdentity: RuntimeReleaseIdentityService,
     private readonly leases: RuntimeProcessLeaseService,
     private readonly contributors: RuntimeReadinessContributorRegistry,
+    @Optional()
+    @Inject(DEV_FAST_LANE)
+    private readonly devFastLane?: DevFastLane,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
@@ -319,7 +333,9 @@ export class RuntimeReadinessService
       status: hard.status,
       service: "global-api",
       ts: new Date().toISOString(),
-      capabilities,
+      capabilities: this.devFastLane?.enabled
+        ? { ...capabilities, dev_fast_lane: DEV_FAST_LANE_CAPABILITY }
+        : capabilities,
       components: hard.components,
     };
   }

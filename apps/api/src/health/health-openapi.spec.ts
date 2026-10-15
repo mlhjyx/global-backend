@@ -183,4 +183,19 @@ describe('layered health OpenAPI contract', () => {
       );
     }
   });
+
+  it('publishes the development fast lane as an optional ComponentStatus capability', () => {
+    for (const status of ['200', '503']) {
+      // Arrange
+      const capabilities = schema('/api/v1/health/ready', status)?.properties
+        ?.capabilities;
+
+      // Act
+      const lane = capabilities?.properties?.dev_fast_lane;
+
+      // Assert
+      expect(lane?.oneOf, status).toHaveLength(3);
+      expect(capabilities?.required, status).not.toContain('dev_fast_lane');
+    }
+  });
 });
