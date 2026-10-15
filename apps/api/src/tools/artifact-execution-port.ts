@@ -1,12 +1,14 @@
+import type { GenericOperationArtifactSubjectType } from "../durable-results/artifact/generic-operation-artifact-subject.repository";
 import type { BudgetReservation } from "./budget-store";
 import type { Tool, ToolResult } from "./tool-contract";
 
 /**
- * Company/contact row id an artifact-producing call is bound to (G3 spec
- * 2026-09-24 §4.1). Carries ids only, never identity text.
+ * Company/contact (or seller company_profile) row id an artifact-producing
+ * call is bound to (G3 spec 2026-09-24 §4.1). Carries ids only, never identity
+ * text.
  */
 export interface ArtifactSubjectRef {
-  readonly subjectType: "company" | "contact";
+  readonly subjectType: GenericOperationArtifactSubjectType;
   readonly subjectId: string;
 }
 

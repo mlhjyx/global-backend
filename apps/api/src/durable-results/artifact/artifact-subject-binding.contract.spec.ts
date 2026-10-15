@@ -9,6 +9,7 @@ const WORKSPACE_ID = "00000000-0000-4000-8000-0000000000a1";
 const OTHER_WORKSPACE_ID = "00000000-0000-4000-8000-0000000000b2";
 const COMPANY_ID = "00000000-0000-4000-8000-0000000000c3";
 const CONTACT_ID = "00000000-0000-4000-8000-0000000000d4";
+const PROFILE_ID = "00000000-0000-4000-8000-0000000000e5";
 const tx = {} as Prisma.TransactionClient;
 
 const WORKSPACE_SCHEMAS = [
@@ -20,7 +21,7 @@ const WORKSPACE_SCHEMAS = [
 function repository(
   resolved: Readonly<{
     workspaceId: string;
-    subjectType: "company" | "contact";
+    subjectType: "company" | "contact" | "company_profile";
     subjectId: string;
   }> | null,
 ) {
@@ -74,6 +75,8 @@ describe("ArtifactSubjectBindingContract", () => {
     ["http-get/v1", "company", COMPANY_ID],
     ["crawl4ai-fetch/v1", "contact", CONTACT_ID],
     ["crawl4ai-render/v1", "company", COMPANY_ID],
+    // The understanding workflow's homepage crawl: the tenant's own seller profile.
+    ["crawl4ai-fetch/v1", "company_profile", PROFILE_ID],
   ] as const)(
     "binds %s only after the repository verifies an exact current-workspace %s",
     async (resultSchema, subjectType, subjectId) => {
@@ -115,6 +118,14 @@ describe("ArtifactSubjectBindingContract", () => {
         subjectId: COMPANY_ID,
       },
     ],
+    [
+      "row of another kind",
+      {
+        workspaceId: WORKSPACE_ID,
+        subjectType: "company_profile",
+        subjectId: COMPANY_ID,
+      },
+    ],
   ] as const)(
     "denies a syntactically valid claim when the repository reports %s",
     async (_case, resolved) => {
@@ -139,6 +150,10 @@ describe("ArtifactSubjectBindingContract", () => {
   it.each([
     ["partial ref", { subjectType: "company" }],
     ["wrong subject kind", { subjectType: "schedule", subjectId: COMPANY_ID }],
+    [
+      "seller profile kind spelled another way",
+      { subjectType: "companyProfile", subjectId: PROFILE_ID },
+    ],
     [
       "identity text",
       { subjectType: "contact", subjectId: "person@example.test" },
@@ -303,6 +318,31 @@ describe("ArtifactSubjectBindingContract.resolveForExecution", () => {
     expect(subjects.findExecutionHold).toHaveBeenCalledWith(tx, {
       workspaceId: WORKSPACE_ID,
       subjectRef: { subjectType: "company", subjectId: COMPANY_ID },
+    });
+  });
+
+  it("binds a live seller profile and denies it once its subject is tombstoned", async () => {
+    const profileRef = { subjectType: "company_profile", subjectId: PROFILE_ID } as const;
+    const profileInput = workspaceInput("crawl4ai-fetch/v1", profileRef);
+    const findExecutionHold = vi.fn(async () => null as "TOMBSTONED" | null);
+    const contract = new ArtifactSubjectBindingContract({
+      ...repository({ workspaceId: WORKSPACE_ID, ...profileRef }),
+      findExecutionHold,
+    });
+
+    await expect(contract.resolveForExecution(tx, profileInput)).resolves.toEqual({
+      status: "BOUND",
+      subjectRef: profileRef,
+    });
+    expect(findExecutionHold).toHaveBeenCalledWith(tx, {
+      workspaceId: WORKSPACE_ID,
+      subjectRef: profileRef,
+    });
+
+    findExecutionHold.mockResolvedValueOnce("TOMBSTONED");
+    await expect(contract.resolveForExecution(tx, profileInput)).resolves.toEqual({
+      status: "DENIED",
+      reason: "SUBJECT_TOMBSTONED",
     });
   });
 

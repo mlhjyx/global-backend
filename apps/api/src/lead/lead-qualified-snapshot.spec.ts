@@ -128,7 +128,7 @@ describe('buildLeadQualifiedSnapshot — 快照 v1（Consumer Test：契约 sche
     });
     expect(snap.fit_verdict).toBe('match');
     expect(snap.evidence_refs).toEqual({ score_detail_available: true, fit_reasons_available: true });
-    expect(snap.qualification_rule_version).toBe('additive-6dim-v2');
+    expect(snap.qualification_rule_version).toBe('additive-6dim-v3');
     expect(snap.storage_rights_decision).toBeNull(); // 未传 storageRightsDecision → 缺省 null（非破坏）
     expect(snap.personal_data_class).toBe('named_person_refs');
     expect(snap.suppression_state).toBe('none');

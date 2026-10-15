@@ -91,4 +91,27 @@ describe('deletion artifact subject freeze', () => {
       },
     });
   });
+
+  it.each(['company_profile', '', 'schedule'])(
+    'refuses a subject kind the DSR API does not accept (%j) before any write',
+    async (subjectType) => {
+      // The artifact subject functions accept the seller company_profile kind (2026-10-14), so a
+      // DSR request is no longer refused by the database tombstone for that kind: the deletion
+      // workflow itself admits only contact | company, the kinds its API and DeletionCompleted name.
+      const prisma = { withWorkspace: vi.fn() };
+      const activities = createDeletionActivities({ prisma: prisma as never });
+
+      await expect(activities.freezeSubject({
+        workspaceId: WORKSPACE_ID,
+        deletionRequestId: DELETION_REQUEST_ID,
+        subjectType: subjectType as never,
+        subjectId: SUBJECT_ID,
+      })).rejects.toMatchObject({
+        name: 'ApplicationFailure',
+        type: 'DELETION_SUBJECT_TYPE_INVALID',
+        nonRetryable: true,
+      });
+      expect(prisma.withWorkspace).not.toHaveBeenCalled();
+    },
+  );
 });

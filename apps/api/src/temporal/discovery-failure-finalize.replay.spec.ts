@@ -40,6 +40,9 @@ const PRE_FAILURE_PATCHES = [
   'discovery-query-receipt-input-v1',
 ] as const;
 const WEBSITE_PROFILE_PATCH = 'discovery-website-profile-v1';
+const QUERY_FAILURE_STOP_PATCH = 'discovery-query-failure-stop-v1';
+const QUERY_RECEIPT_MODE = 'raw-governance-query-receipt/v1';
+const MATERIALIZATION_HOLD = 'DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD';
 // The policy a `retry: { maximumAttempts: 3 }` proxy schedules with.
 const RETRY_POLICY = {
   initialInterval: '1s',
@@ -231,6 +234,70 @@ function fitFailure(): ActivityFailure {
   );
 }
 
+const PLAN_QUERIES = [1, 2].map((priority) => ({
+  source_class: 'official_registry',
+  filters: {},
+  keywords: [`Pumpen ${priority}`],
+  priority,
+}));
+
+function queryInput(queryOrdinal: number) {
+  return {
+    ...RUN,
+    planId: 'plan-1',
+    queryOrdinal,
+    queryReceiptMode: QUERY_RECEIPT_MODE,
+    query: PLAN_QUERIES[queryOrdinal],
+    ...AUTHORITY,
+  };
+}
+
+const SECOND_QUERY_RECEIPT = {
+  schemaVersion: 'discovery-query-receipt/v1',
+  queryKey: 'b'.repeat(64),
+  queryOrdinal: 1,
+  sourceClass: 'official_registry',
+  providers: ['gleif'],
+  accepted: 1,
+  quarantined: 0,
+  rejected: 0,
+  governanceDenied: 0,
+  duplicate: 0,
+  usageQuantity: 1,
+  costCents: 0,
+};
+
+// What the last attempt of a query activity reports when it failed for an ordinary reason.
+const lastQueryAttempt = ApplicationFailure.create({
+  message: 'database unavailable',
+  type: 'PrismaClientKnownRequestError',
+  nonRetryable: false,
+});
+
+function queryFailure(): ActivityFailure {
+  return new ActivityFailure(
+    'Activity task failed',
+    'executeQuery',
+    '2',
+    'MAXIMUM_ATTEMPTS_REACHED',
+    'replay-fixture',
+    lastQueryAttempt,
+  );
+}
+
+/** Everything up to and including the first query activity, which failed after its retries. */
+function historyThroughFailedQuery(): { history: DiscoveryHistory; task: string } {
+  const history = new DiscoveryHistory();
+  let task = history.workflowTask();
+  for (const patchId of PRE_FAILURE_PATCHES) history.patch(patchId, task);
+  history.activity(task, 'loadPlanQueries', { workspaceId: WORKSPACE, planId: 'plan-1', ...AUTHORITY }, '120s', {
+    result: { queries: PLAN_QUERIES },
+  });
+  task = history.workflowTask();
+  history.activity(task, 'executeQuery', queryInput(0), '900s', { failure: lastQueryAttempt });
+  return { history, task: history.workflowTask() };
+}
+
 describe('discovery failure finalization replay (BI-25)', () => {
   let workflowBundle: WorkflowBundle;
 
@@ -281,5 +348,108 @@ describe('discovery failure finalization replay (BI-25)', () => {
     history.workflowFailed(history.workflowTask(), fitFailure());
 
     await Worker.runReplayHistory({ workflowBundle }, { events: history.events }, 'patched-fit-failure');
+  }, 120_000);
+
+  it('replays a query failure recorded before the query-stop patch on to the next query and the materialization hold', async () => {
+    const { history, task } = historyThroughFailedQuery();
+    history.activity(task, 'executeQuery', queryInput(1), '900s', {
+      result: {
+        rawCount: 1,
+        quarantinedCount: 0,
+        rejectedCount: 0,
+        duplicateCount: 0,
+        queryReceipt: SECOND_QUERY_RECEIPT,
+        provider: 'gleif',
+        budgetTruncated: false,
+      },
+    });
+    let next = history.workflowTask();
+    const hold = ApplicationFailure.create({ message: MATERIALIZATION_HOLD, type: MATERIALIZATION_HOLD, nonRetryable: false });
+    history.activity(next, 'canonicalizeRun', { ...RUN, ...AUTHORITY }, '120s', { failure: hold });
+    next = history.workflowTask();
+    history.patch(FAILURE_FINALIZE_PATCH, next);
+    history.activity(
+      next,
+      'finalizeRun',
+      {
+        ...RUN_ICP,
+        planId: 'plan-1',
+        status: 'FAILED',
+        stats: {
+          perSource: {
+            official_registry: {
+              rawCount: 1,
+              quarantinedCount: 0,
+              rejectedCount: 0,
+              governanceDenied: 0,
+              duplicateCount: 0,
+              usageQuantity: 1,
+              costCents: 0,
+              providers: ['gleif'],
+              provider: 'gleif',
+            },
+          },
+          perQuery: { [SECOND_QUERY_RECEIPT.queryKey]: SECOND_QUERY_RECEIPT },
+          rawGovernance: {
+            accepted: 1,
+            quarantined: 0,
+            rejected: 0,
+            governanceDenied: 0,
+            duplicate: 0,
+            usageQuantity: 1,
+            costCents: 0,
+          },
+          queries: 2,
+          failures: 1,
+          failure: { stage: 'canonicalize', errorType: MATERIALIZATION_HOLD, control: true },
+        },
+        ...AUTHORITY,
+      },
+      '120s',
+      { result: undefined },
+    );
+    history.workflowFailed(
+      history.workflowTask(),
+      new ActivityFailure('Activity task failed', 'canonicalizeRun', '3', 'MAXIMUM_ATTEMPTS_REACHED', 'replay-fixture', hold),
+    );
+
+    await Worker.runReplayHistory({ workflowBundle }, { events: history.events }, 'pre-patch-query-failure');
+  }, 120_000);
+
+  it('replays a query failure recorded after the query-stop patch through its FAILED finalizeRun, with no later query', async () => {
+    const { history, task } = historyThroughFailedQuery();
+    history.patch(QUERY_FAILURE_STOP_PATCH, task);
+    history.patch(FAILURE_FINALIZE_PATCH, task);
+    history.activity(
+      task,
+      'finalizeRun',
+      {
+        ...RUN_ICP,
+        planId: 'plan-1',
+        status: 'FAILED',
+        stats: {
+          perSource: {},
+          perQuery: {},
+          rawGovernance: {
+            accepted: 0,
+            quarantined: 0,
+            rejected: 0,
+            governanceDenied: 0,
+            duplicate: 0,
+            usageQuantity: 0,
+            costCents: 0,
+          },
+          queries: 2,
+          failures: 0,
+          failure: { stage: 'query', errorType: 'PrismaClientKnownRequestError', control: false },
+        },
+        ...AUTHORITY,
+      },
+      '120s',
+      { result: undefined },
+    );
+    history.workflowFailed(history.workflowTask(), queryFailure());
+
+    await Worker.runReplayHistory({ workflowBundle }, { events: history.events }, 'patched-query-failure');
   }, 120_000);
 });
