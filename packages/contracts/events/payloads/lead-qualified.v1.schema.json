@@ -92,7 +92,7 @@
         "fit_reasons_available": { "type": "boolean" }
       }
     },
-    "qualification_rule_version": { "type": "string", "examples": ["additive-6dim-v3"], "description": "Scoring rule set the lead was scored with. additive-6dim-v3 (2026-10-14): reachability = max(company-level contact paths, personal contact points); weights fit .45 / role 0 / intent .15 / data_quality .15 / reachability .20 / engagement .05; same six keys and ranges as v2, so snapshot_version stays 1." },
+    "qualification_rule_version": { "type": ["string", "null"], "examples": ["additive-6dim-v3", "additive-6dim-v2"], "description": "Scoring rule set this lead was actually scored with, read from the lead's score_detail.ruleVersion (recorded at scoring time since additive-6dim-v3), not the producer's current rules. A lead scored before v3 and not re-scored since carries additive-6dim-v2; a lead that was never scored carries null. additive-6dim-v3 (2026-10-14): reachability = max(company-level contact paths, personal contact points); weights fit .45 / role 0 / intent .15 / data_quality .15 / reachability .20 / engagement .05; same six keys and ranges as v2, so snapshot_version stays 1." },
     "storage_rights_decision": { "type": ["string", "null"], "description": "DataRightsService STORE-action verdict (ALLOW | ALLOW_WITH_BASIS | REQUIRE_APPROVAL | DENY); null if the producer did not evaluate rights." },
     "personal_data_class": { "type": "string", "enum": ["named_person_refs", "company_facts_only"] },
     "suppression_state": { "type": "string", "enum": ["none", "suppressed"] },

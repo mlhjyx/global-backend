@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import type { CompanyContactPaths } from './providers/website-profile.provider';
+import { loadCompanyForSuppressionSafeWrite } from './company-suppression-gate';
 import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
 import {
   canonicalizeSuppressionValue,
@@ -21,6 +22,15 @@ export const COMPANY_CONTACT_PARSER_VERSION = 'company_contact/v1' as const;
  * evidence): the rules version the contact paths were last read with.
  */
 export const COMPANY_CONTACT_PARSER_MARKER = '_contact_parser' as const;
+/**
+ * Bookkeeping keys in the website_profile namespace (W5-f): when the contact paths were last
+ * tried (every outcome: read, empty, robots-blocked, dead site, timeout, unreplayable, denied
+ * subject), and the attempt before the current run's (see nextContactPathAttempt).
+ */
+export const CONTACT_PATH_ATTEMPT_MARKER = '_contact_attempt_at' as const;
+export const CONTACT_PATH_PREVIOUS_ATTEMPT_MARKER = '_contact_attempt_prev' as const;
+/** A company whose contact paths were tried rests this long before the backfill tries it again. */
+export const CONTACT_PATH_RETRY_COOLDOWN_MS = 7 * 24 * 60 * 60 * 1000;
 const REMOVED_FROM_SITE = 'REMOVED_FROM_SITE';
 
 export type CompanyContactSourceKind = 'homepage' | 'contact_page';
@@ -112,26 +122,131 @@ export interface ContactPathBackfillCandidate {
   readonly attributes: unknown;
 }
 
+/** A company's contact-path attempt watermark (ISO timestamps; anything else reads as absent). */
+export interface ContactPathAttempt {
+  readonly at: string | null;
+  readonly previous: string | null;
+}
+
+function isoTimestamp(value: unknown): string | null {
+  return typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : null;
+}
+
+/** The attempt watermark stored in `attributes.website_profile`. */
+export function contactPathAttempt(attributes: unknown): ContactPathAttempt {
+  const namespace =
+    attributes !== null && typeof attributes === 'object' && !Array.isArray(attributes)
+      ? (attributes as Record<string, unknown>).website_profile
+      : undefined;
+  const profile =
+    namespace !== null && typeof namespace === 'object' && !Array.isArray(namespace)
+      ? (namespace as Record<string, unknown>)
+      : {};
+  return {
+    at: isoTimestamp(profile[CONTACT_PATH_ATTEMPT_MARKER]),
+    previous: isoTimestamp(profile[CONTACT_PATH_PREVIOUS_ATTEMPT_MARKER]),
+  };
+}
+
+/**
+ * Attempts at or after this instant are cooling for a run created at `runSince`. The cooldown counts
+ * from the run's creation, not from each activity's clock, so a run's candidate list is the same
+ * for every one of its profile activities.
+ */
+export function contactPathRetryCutoff(runSince: Date): Date {
+  return new Date(runSince.getTime() - CONTACT_PATH_RETRY_COOLDOWN_MS);
+}
+
+/**
+ * Whether the backfill should leave this company alone now: it was tried within the cooldown, or
+ * since the run began (by this run's earlier activity or a concurrent run). Read again just before
+ * profiling a backfill company, so two runs that listed the same companies do not both fetch them.
+ */
+export function contactPathAttemptCooling(attempt: ContactPathAttempt, runSince: Date): boolean {
+  return attempt.at !== null && Date.parse(attempt.at) >= contactPathRetryCutoff(runSince).getTime();
+}
+
+/**
+ * The watermark after an attempt at `at` by a run created at `runSince`. `previous` keeps the last
+ * attempt from before the run began: the candidate list orders a company the run already tried by
+ * that value, so it stays where it was and continuation indexes still point at the same companies.
+ * A company tried again since the run began (a retried activity, a concurrent run) keeps its
+ * earlier `previous`.
+ */
+export function nextContactPathAttempt(
+  prior: ContactPathAttempt,
+  at: Date,
+  runSince: Date,
+): { at: string; previous: string | null } {
+  const triedSinceRunBegan = prior.at !== null && Date.parse(prior.at) >= runSince.getTime();
+  return { at: at.toISOString(), previous: triedSinceRunBegan ? prior.previous : prior.at };
+}
+
+/**
+ * Record a contact-path attempt in the website_profile namespace (bookkeeping next to `_ts`, never
+ * field evidence). Written under the suppression policy lock through the suppression-safe loader:
+ * a suppressed company, or one a suppression covers, gets nothing. The rest of the attributes,
+ * including the facts a profile commit wrote earlier in the same transaction, is kept as stored.
+ */
+export async function recordContactPathAttempt(
+  tx: Prisma.TransactionClient,
+  args: { workspaceId: string; companyId: string; attempt: { at: string; previous: string | null } },
+): Promise<boolean> {
+  const current = await loadCompanyForSuppressionSafeWrite(tx, args.workspaceId, args.companyId);
+  if (!current) return false;
+  const stored = current.attributes.website_profile;
+  const {
+    [CONTACT_PATH_ATTEMPT_MARKER]: _previousAt,
+    [CONTACT_PATH_PREVIOUS_ATTEMPT_MARKER]: _previousPrevious,
+    ...profile
+  } = stored !== null && typeof stored === 'object' && !Array.isArray(stored) ? (stored as Record<string, unknown>) : {};
+  const updated = await tx.canonicalCompany.updateMany({
+    where: { id: current.id, status: { not: 'SUPPRESSED' } },
+    data: {
+      attributes: {
+        ...current.attributes,
+        website_profile: {
+          ...profile,
+          [CONTACT_PATH_ATTEMPT_MARKER]: args.attempt.at,
+          ...(args.attempt.previous ? { [CONTACT_PATH_PREVIOUS_ATTEMPT_MARKER]: args.attempt.previous } : {}),
+        },
+      } as Prisma.InputJsonValue,
+      version: { increment: 1 },
+    },
+  });
+  return updated.count === 1;
+}
+
 /**
  * Backfill of the contact paths (scoring rules v3): while the switch is on, a run whose own
  * companies leave part of the website-profile quota unused reads the workspace companies whose
- * contact paths were never read under the current rules, oldest first, so a switched-on
- * workspace does not have to wait for a new run to find each company again. The list must be
- * the same for every profile activity of one run (continuation is by index): a company this run
- * already read (`website_profile._ts` at or after the run was created) stays in it and the
- * profile loop skips it as fresh and current. A company whose profile returned nothing
- * (robots-blocked, empty) carries no marker and stays a candidate, as in the run's own list.
+ * contact paths were never read under the current rules, so a switched-on workspace does not have
+ * to wait for a new run to find each company again.
+ *
+ * Attempt watermark (W5-f): every attempt is stamped (`_contact_attempt_at`), whatever came of it,
+ * and a company tried within CONTACT_PATH_RETRY_COOLDOWN_MS before the run was created is left
+ * out. Never-tried companies come first, then the longest-untried, then the oldest — so companies
+ * that keep failing (robots-blocked, empty page, dead site, timeout, denied subject) rest a week
+ * and then queue behind every company never tried, instead of holding the front of the list and
+ * starving new companies.
+ *
+ * The list must be the same for every profile activity of one run (continuation is by index): a
+ * company tried since the run was created stays in it, ordered by the attempt it had before the
+ * run (`_contact_attempt_prev`), and the profile loop skips it on its re-read. A company a
+ * concurrent run tries mid-run can still enter the list and shift later indexes by one; the cost is
+ * one company missed this round or skipped on its re-read, never a second fetch.
  */
 export async function contactPathBackfillCandidates(
   tx: Prisma.TransactionClient,
-  args: { workspaceId: string; runId: string; excludeCompanyIds: readonly string[]; limit: number },
+  args: { workspaceId: string; runSince: Date; excludeCompanyIds: readonly string[]; limit: number },
 ): Promise<ContactPathBackfillCandidate[]> {
   if (args.limit <= 0) return [];
-  const run = await tx.discoveryRun.findUnique({ where: { id: args.runId }, select: { createdAt: true } });
-  const since = (run?.createdAt ?? new Date()).toISOString();
+  const since = args.runSince.toISOString();
+  const cutoff = contactPathRetryCutoff(args.runSince).toISOString();
   const excluded = args.excludeCompanyIds.length
     ? Prisma.sql`AND id NOT IN (${Prisma.join(args.excludeCompanyIds.map((id) => Prisma.sql`${id}::uuid`))})`
     : Prisma.empty;
+  // ISO-8601 timestamps written by toISOString() compare as text in time order; a missing stamp is ''.
   return tx.$queryRaw<ContactPathBackfillCandidate[]>`
     SELECT id, name, domain, country, attributes
     FROM canonical_company
@@ -140,10 +255,20 @@ export async function contactPathBackfillCandidates(
       AND domain IS NOT NULL
       ${excluded}
       AND (
-        COALESCE(attributes #>> '{website_profile,_contact_parser}', '') <> ${COMPANY_CONTACT_PARSER_VERSION}
-        OR COALESCE(attributes #>> '{website_profile,_ts}', '') >= ${since}
+        COALESCE(attributes #>> '{website_profile,_contact_attempt_at}', '') >= ${since}
+        OR (
+          COALESCE(attributes #>> '{website_profile,_contact_parser}', '') <> ${COMPANY_CONTACT_PARSER_VERSION}
+          AND COALESCE(attributes #>> '{website_profile,_contact_attempt_at}', '') < ${cutoff}
+        )
       )
-    ORDER BY created_at ASC, id ASC
+    ORDER BY
+      CASE
+        WHEN COALESCE(attributes #>> '{website_profile,_contact_attempt_at}', '') >= ${since}
+          THEN attributes #>> '{website_profile,_contact_attempt_prev}'
+        ELSE attributes #>> '{website_profile,_contact_attempt_at}'
+      END ASC NULLS FIRST,
+      created_at ASC,
+      id ASC
     LIMIT ${args.limit}`;
 }
 

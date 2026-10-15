@@ -2,8 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   COMPANY_CONTACT_PARSER_VERSION,
   COMPANY_CONTACT_PROVIDER_KEY,
+  CONTACT_PATH_RETRY_COOLDOWN_MS,
   companyContactObservation,
+  contactPathAttempt,
+  contactPathAttemptCooling,
+  contactPathRetryCutoff,
+  nextContactPathAttempt,
   persistCompanyContactPoints,
+  recordContactPathAttempt,
 } from './company-contact-points';
 
 // Synthetic `.example` company and made-up slugs and handles only.
@@ -275,6 +281,141 @@ describe('persistCompanyContactPoints (BI-14)', () => {
         lastSeenAt: { lt: SEEN_AT },
       },
       data: { status: 'INVALID', statusReason: 'REMOVED_FROM_SITE' },
+    });
+  });
+});
+
+// ── W5-f：联系路径的尝试水位（website_profile._contact_attempt_at / _contact_attempt_prev）──
+describe('contact-path attempt watermark (W5-f)', () => {
+  const RUN_SINCE = new Date('2026-10-14T00:00:00.000Z');
+
+  it('reads the watermark from the website_profile namespace; a value that is not a timestamp counts as absent', () => {
+    expect(contactPathAttempt(null)).toEqual({ at: null, previous: null });
+    expect(contactPathAttempt({ website_profile: { trade_role: 'distributor' } })).toEqual({ at: null, previous: null });
+    expect(
+      contactPathAttempt({
+        website_profile: { _contact_attempt_at: '2026-10-01T00:00:00.000Z', _contact_attempt_prev: '2026-09-01T00:00:00.000Z' },
+      }),
+    ).toEqual({ at: '2026-10-01T00:00:00.000Z', previous: '2026-09-01T00:00:00.000Z' });
+    expect(contactPathAttempt({ website_profile: { _contact_attempt_at: 'soon', _contact_attempt_prev: 7 } })).toEqual({
+      at: null,
+      previous: null,
+    });
+  });
+
+  it('a failed company rests 7 days, counted from when the run was created', () => {
+    expect(CONTACT_PATH_RETRY_COOLDOWN_MS).toBe(7 * 24 * 60 * 60 * 1000);
+    expect(contactPathRetryCutoff(RUN_SINCE).toISOString()).toBe('2026-10-07T00:00:00.000Z');
+    expect(contactPathAttemptCooling({ at: null, previous: null }, RUN_SINCE)).toBe(false);
+    expect(contactPathAttemptCooling({ at: '2026-10-06T23:59:59.999Z', previous: null }, RUN_SINCE)).toBe(false);
+    expect(contactPathAttemptCooling({ at: '2026-10-07T00:00:00.000Z', previous: null }, RUN_SINCE)).toBe(true);
+    // Attempted since the run began (this run's earlier activity, or a concurrent run).
+    expect(contactPathAttemptCooling({ at: '2026-10-14T05:00:00.000Z', previous: null }, RUN_SINCE)).toBe(true);
+  });
+
+  it("a new attempt keeps the attempt from before this run as `previous`, so the run's candidate order holds", () => {
+    const at = new Date('2026-10-14T06:00:00.000Z');
+    expect(nextContactPathAttempt({ at: null, previous: null }, at, RUN_SINCE)).toEqual({
+      at: at.toISOString(),
+      previous: null,
+    });
+    expect(
+      nextContactPathAttempt({ at: '2026-09-30T00:00:00.000Z', previous: '2026-09-01T00:00:00.000Z' }, at, RUN_SINCE),
+    ).toEqual({ at: at.toISOString(), previous: '2026-09-30T00:00:00.000Z' });
+    // Already attempted since the run began (a retried activity, a concurrent run): the earlier `previous` stays.
+    expect(
+      nextContactPathAttempt({ at: '2026-10-14T05:00:00.000Z', previous: '2026-09-30T00:00:00.000Z' }, at, RUN_SINCE),
+    ).toEqual({ at: at.toISOString(), previous: '2026-09-30T00:00:00.000Z' });
+    expect(nextContactPathAttempt({ at: '2026-10-14T05:00:00.000Z', previous: null }, at, RUN_SINCE)).toEqual({
+      at: at.toISOString(),
+      previous: null,
+    });
+  });
+
+  describe('recordContactPathAttempt', () => {
+    function writerTx(company: { status: string; attributes: unknown }, suppressions: Array<{ type: string; value: string }> = []) {
+      const order: string[] = [];
+      const tx = {
+        $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
+          const text = strings.join('?');
+          if (!text.includes('pg_advisory_xact_lock')) throw new Error(`unexpected query: ${text}`);
+          order.push('policy-lock');
+          return [{ locked: '' }];
+        }),
+        canonicalCompany: {
+          findUnique: vi.fn(async () => {
+            order.push('company');
+            return { id: COMPANY, name: 'Pumpen Handel GmbH', domain: 'pumpen-handel.example', ...company };
+          }),
+          updateMany: vi.fn(async (_args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+            order.push('write');
+            return { count: 1 };
+          }),
+        },
+        suppressionRecord: { findMany: vi.fn(async () => suppressions) },
+      };
+      return { tx, order };
+    }
+    const record = (tx: unknown, attempt: { at: string; previous: string | null }) =>
+      recordContactPathAttempt(tx as never, { workspaceId: WORKSPACE, companyId: COMPANY, attempt });
+
+    it('stamps the attempt next to the profile facts under the suppression lock, keeping everything else', async () => {
+      const { tx, order } = writerTx({
+        status: 'ENRICHED',
+        attributes: {
+          keywords: ['industrial pumps'],
+          website_profile: { trade_role: 'distributor', _ts: '2026-09-20T00:00:00.000Z', _contact_parser: COMPANY_CONTACT_PARSER_VERSION },
+        },
+      });
+
+      await expect(record(tx, { at: '2026-10-14T06:00:00.000Z', previous: '2026-09-20T00:00:00.000Z' })).resolves.toBe(true);
+
+      expect(order).toEqual(['policy-lock', 'company', 'write']);
+      const write = tx.canonicalCompany.updateMany.mock.calls[0]![0];
+      expect(write.where).toEqual({ id: COMPANY, status: { not: 'SUPPRESSED' } });
+      expect(write.data.attributes).toEqual({
+        keywords: ['industrial pumps'],
+        website_profile: {
+          trade_role: 'distributor',
+          _ts: '2026-09-20T00:00:00.000Z',
+          _contact_parser: COMPANY_CONTACT_PARSER_VERSION,
+          _contact_attempt_at: '2026-10-14T06:00:00.000Z',
+          _contact_attempt_prev: '2026-09-20T00:00:00.000Z',
+        },
+      });
+    });
+
+    it('creates the namespace for a company never profiled, and drops a stale `previous` when there is none', async () => {
+      const fresh = writerTx({ status: 'NEW', attributes: null });
+      await record(fresh.tx, { at: '2026-10-14T06:00:00.000Z', previous: null });
+      expect(fresh.tx.canonicalCompany.updateMany.mock.calls[0]![0].data.attributes).toEqual({
+        website_profile: { _contact_attempt_at: '2026-10-14T06:00:00.000Z' },
+      });
+
+      const stale = writerTx({
+        status: 'NEW',
+        attributes: { website_profile: { _contact_attempt_at: '2026-09-01T00:00:00.000Z', _contact_attempt_prev: '2026-08-01T00:00:00.000Z' } },
+      });
+      await record(stale.tx, { at: '2026-10-14T06:00:00.000Z', previous: null });
+      expect(stale.tx.canonicalCompany.updateMany.mock.calls[0]![0].data.attributes).toEqual({
+        website_profile: { _contact_attempt_at: '2026-10-14T06:00:00.000Z' },
+      });
+    });
+
+    it('writes no stamp for a suppressed company or one a suppression covers', async () => {
+      const suppressed = writerTx({ status: 'SUPPRESSED', attributes: {} });
+      await expect(record(suppressed.tx, { at: '2026-10-14T06:00:00.000Z', previous: null })).resolves.toBe(false);
+      expect(
+        suppressed.tx.canonicalCompany.updateMany.mock.calls.some(([args]) =>
+          JSON.stringify(args.data).includes('_contact_attempt_at'),
+        ),
+      ).toBe(false);
+
+      const covered = writerTx({ status: 'NEW', attributes: {} }, [{ type: 'domain', value: 'pumpen-handel.example' }]);
+      await expect(record(covered.tx, { at: '2026-10-14T06:00:00.000Z', previous: null })).resolves.toBe(false);
+      expect(
+        covered.tx.canonicalCompany.updateMany.mock.calls.some(([args]) => JSON.stringify(args.data).includes('_contact_attempt_at')),
+      ).toBe(false);
     });
   });
 });

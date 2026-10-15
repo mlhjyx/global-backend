@@ -3739,7 +3739,11 @@ describe("profileWebsitesForRun contact paths (BI-14)", () => {
     evidence: [],
   };
 
-  type Committed = { data: { attributes: Record<string, Record<string, unknown>> } };
+  type Committed = {
+    where?: { id?: string };
+    data: { attributes: Record<string, Record<string, unknown>> };
+  };
+  type Row = { id: string; name: string; domain: string; country: string; attributes: unknown };
 
   async function makeContactDeps(
     profile: ReturnType<typeof vi.fn>,
@@ -3750,19 +3754,33 @@ describe("profileWebsitesForRun contact paths (BI-14)", () => {
       /** Workspace companies outside the run whose contact paths were never read (the backfill candidates). */
       backfill?: Array<{ id: string; name: string; domain: string; country: string; attributes: Record<string, unknown> }>;
       runCompanies?: Array<{ id: string; name: string; domain: string; country: string }>;
+      /** What a re-read of the company finds now (e.g. stamped by a concurrent run since the list was read). */
+      current?: Record<string, Record<string, unknown>>;
     } = {},
   ) {
     const deps = makeEnrichDeps([]) as unknown as {
       prisma: { withWorkspace: (ws: string, fn: (tx: unknown) => Promise<unknown>) => Promise<unknown> };
       websiteProfile?: unknown;
     };
-    const updateMany = vi.fn(async (_args: Committed) => ({ count: 1 }));
+    const attributes = options.attributes ?? {};
+    // The stored companies: re-reads and writes go through this map, like the rows of one database.
+    const rows = new Map<string, Row>();
+    for (const company of options.runCompanies ?? [COMPANY]) rows.set(company.id, { ...company, attributes });
+    for (const company of options.backfill ?? []) rows.set(company.id, { ...company });
+    for (const [id, current] of Object.entries(options.current ?? {})) {
+      const row = rows.get(id);
+      if (row) rows.set(id, { ...row, attributes: current });
+    }
+    const updateMany = vi.fn(async (args: Committed) => {
+      const row = args.where?.id ? rows.get(args.where.id) : undefined;
+      if (row && args.data.attributes !== undefined) row.attributes = args.data.attributes;
+      return { count: 1 };
+    });
     const points = {
       findMany: vi.fn(async () => []),
       createMany: vi.fn(async (args: { data: unknown[] }) => ({ count: args.data.length })),
       updateMany: vi.fn(async () => ({ count: 0 })),
     };
-    const attributes = options.attributes ?? {};
     const backfillQueries: unknown[][] = [];
     await deps.prisma.withWorkspace("ws", async (raw) => {
       const tx = raw as Record<string, unknown> & { canonicalCompany: Record<string, unknown> };
@@ -3789,12 +3807,20 @@ describe("profileWebsitesForRun contact paths (BI-14)", () => {
       tx.canonicalCompany.updateMany = updateMany;
       tx.canonicalCompany.findMany = async () =>
         (options.runCompanies ?? [COMPANY]).map((company) => ({ ...company, attributes }));
-      tx.canonicalCompany.findUnique = async () => ({ ...COMPANY, status: "NEW", attributes });
+      tx.canonicalCompany.findUnique = async ({ where }: { where: { id: string } }) => ({
+        ...(rows.get(where.id) ?? { ...COMPANY, attributes }),
+        status: "NEW",
+      });
       tx.companyContactPoint = points;
     });
     deps.websiteProfile = { profile };
-    return { acts: createDiscoveryActivities(deps as never), updateMany, points, backfillQueries };
+    return { acts: createDiscoveryActivities(deps as never), updateMany, points, backfillQueries, rows };
   }
+
+  const websiteProfileOf = (row: Row | undefined) =>
+    ((row?.attributes ?? {}) as { website_profile?: Record<string, unknown> }).website_profile ?? {};
+  const stampWrites = (updateMany: ReturnType<typeof vi.fn>) =>
+    updateMany.mock.calls.filter(([args]) => JSON.stringify((args as Committed).data).includes("_contact_attempt_at"));
 
   it("leaves contact paths alone while company_contact is DISABLED: nothing asked for, no points", async () => {
     // A provider that returns contact paths anyway is ignored.
@@ -3811,6 +3837,8 @@ describe("profileWebsitesForRun contact paths (BI-14)", () => {
     expect(profileAttributes).not.toHaveProperty("_contact_parser");
     // The source page of the profile facts is kept either way (A4).
     expect(profileAttributes).toMatchObject({ source_url: `${SITE}/impressum` });
+    // Contact paths were not read, so no attempt is recorded either (W5-f).
+    expect(stampWrites(updateMany)).toEqual([]);
   });
 
   it("asks for contact paths while company_contact is ENABLED and stores them in the profile transaction", async () => {
@@ -3888,7 +3916,8 @@ describe("profileWebsitesForRun contact paths (BI-14)", () => {
 
     await expect(
       acts.profileWebsitesForRun(discoveryArgs("run-contact-backfill", { icpId: "icp-1" })),
-    ).resolves.toMatchObject({ profiled: 3, matched: 3, backfilled: 2, nextIndex: null });
+    // profiled / matched count the run's own companies only; the backfill companies are counted apart (W5-f).
+    ).resolves.toMatchObject({ profiled: 1, matched: 1, backfilled: 2, nextIndex: null });
 
     expect(profile.mock.calls.map((call) => (call[0] as { domain: string }).domain)).toEqual([
       COMPANY.domain,
@@ -3916,7 +3945,7 @@ describe("profileWebsitesForRun contact paths (BI-14)", () => {
 
     await expect(
       acts.profileWebsitesForRun(discoveryArgs("run-contact-backfill-resume", { icpId: "icp-1", startIndex: 1 })),
-    ).resolves.toMatchObject({ profiled: 2, backfilled: 2 });
+    ).resolves.toMatchObject({ profiled: 0, matched: 0, backfilled: 2 });
 
     expect(profile.mock.calls.map((call) => (call[0] as { domain: string }).domain)).toEqual([
       "b1-pumpen.example",
@@ -3956,12 +3985,131 @@ describe("profileWebsitesForRun contact paths (BI-14)", () => {
 
     await expect(
       acts.profileWebsitesForRun(discoveryArgs("run-contact-backfill-read", { icpId: "icp-1" })),
-    ).resolves.toMatchObject({ profiled: 2, backfilled: 1 });
+    ).resolves.toMatchObject({ profiled: 1, backfilled: 1 });
 
     expect(profile.mock.calls.map((call) => (call[0] as { domain: string }).domain)).toEqual([
       COMPANY.domain,
       "b2-armaturen.example",
     ]);
+  });
+
+  // ── W5-f：尝试水位与 7 天冷却——画像返回空、死站、主体被拒的公司不再永远占着候选最前面 ──
+  it("stamps every contact-path attempt, also one whose profile came back empty, and keeps the facts of a read one", async () => {
+    const profile = vi.fn(async (input: { domain: string }) =>
+      input.domain === "b1-pumpen.example" ? null : { ...PROFILE, contactPaths: PATHS },
+    );
+    const { acts, rows } = await makeContactDeps(profile, { contactStatus: "ENABLED", backfill: BACKFILL });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-contact-attempt", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ profiled: 1, matched: 1, backfilled: 2 });
+
+    // Robots-blocked / empty / dead site: no facts, no parser marker, but the attempt is on record.
+    const empty = websiteProfileOf(rows.get("b1"));
+    expect(Date.parse(String(empty._contact_attempt_at))).not.toBeNaN();
+    expect(empty).not.toHaveProperty("_contact_attempt_prev");
+    expect(empty).not.toHaveProperty("_contact_parser");
+    expect(empty).not.toHaveProperty("trade_role");
+    // A company read successfully keeps its facts and parser marker next to the stamp.
+    for (const id of [COMPANY.id, "b2"]) {
+      expect(websiteProfileOf(rows.get(id)), id).toMatchObject({
+        _contact_parser: "company_contact/v1",
+        source_url: `${SITE}/impressum`,
+        _contact_attempt_at: expect.any(String),
+      });
+    }
+  });
+
+  it("stamps a backfill company whose subject is denied (bookkeeping only, no facts)", async () => {
+    const profile = vi.fn(async (input: { domain: string }) => {
+      if (input.domain === "b1-pumpen.example") {
+        throw new ToolPolicyDenied("http.get", "GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD");
+      }
+      return { ...PROFILE, contactPaths: PATHS };
+    });
+    const { acts, rows } = await makeContactDeps(profile, { contactStatus: "ENABLED", backfill: BACKFILL });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-contact-denied", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ skippedSubjects: 1, backfilled: 1 });
+
+    const denied = websiteProfileOf(rows.get("b1"));
+    expect(Object.keys(denied)).toEqual(["_contact_attempt_at"]);
+  });
+
+  it("keeps the attempt before this run as `previous` and stamps a company tried before the cooldown again", async () => {
+    const tried = {
+      ...BACKFILL[0]!,
+      attributes: { website_profile: { _contact_attempt_at: "2026-09-01T00:00:00.000Z" } },
+    };
+    const profile = vi.fn(async () => null);
+    const { acts, rows } = await makeContactDeps(profile, { contactStatus: "ENABLED", backfill: [tried] });
+
+    await acts.profileWebsitesForRun(discoveryArgs("run-contact-retry", { icpId: "icp-1" }));
+
+    expect(profile.mock.calls.map((call) => (call[0] as { domain: string }).domain)).toContain("b1-pumpen.example");
+    expect(websiteProfileOf(rows.get("b1"))).toMatchObject({
+      _contact_attempt_at: expect.any(String),
+      _contact_attempt_prev: "2026-09-01T00:00:00.000Z",
+    });
+  });
+
+  it("re-reads each backfill company before profiling it: one a concurrent run attempted since this run began is skipped", async () => {
+    const profile = vi.fn(async () => ({ ...PROFILE, contactPaths: PATHS }));
+    const { acts, updateMany } = await makeContactDeps(profile, {
+      contactStatus: "ENABLED",
+      backfill: BACKFILL,
+      // The list still shows b1 unread; the stored row was stamped since by another run whose read failed.
+      current: { b1: { website_profile: { _contact_attempt_at: "2026-10-14T03:00:00.000Z" } } },
+    });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-contact-dedupe", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ profiled: 1, backfilled: 1 });
+
+    expect(profile.mock.calls.map((call) => (call[0] as { domain: string }).domain)).toEqual([
+      COMPANY.domain,
+      "b2-armaturen.example",
+    ]);
+    expect(stampWrites(updateMany).some(([args]) => (args as Committed).where?.id === "b1")).toBe(false);
+  });
+
+  it("a replayed profile commit counts as matched only when the namespace holds profile facts, not just an attempt stamp", async () => {
+    acknowledgementMocks.apply.mockImplementationOnce(
+      async (input: {
+        transaction: unknown;
+        acknowledgements: Array<{ producerId: string }>;
+        readback: (transaction: unknown) => Promise<unknown>;
+      }) => ({
+        status: "REPLAYED",
+        acknowledgements: input.acknowledgements.map(({ producerId }) => ({ producerId, status: "REPLAYED" })),
+        value: await input.readback(input.transaction),
+      }),
+    );
+    const profile = vi.fn(async (_input: unknown, ctx: ExecutionContext) => {
+      ctx.onDurableReceipt?.("http.get", ENRICHMENT_RECEIPT);
+      return { ...PROFILE, contactPaths: PATHS };
+    });
+    // An earlier attempt left only its stamp: no profile facts, so no `_ts`.
+    const { acts } = await makeContactDeps(profile, {
+      contactStatus: "ENABLED",
+      attributes: { website_profile: { _contact_attempt_at: "2026-10-13T00:00:00.000Z" } },
+    });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-contact-readback", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ profiled: 1, matched: 0 });
+  });
+
+  it("asks for candidates outside the 7-day cooldown, counted from the run's creation", async () => {
+    const profile = vi.fn(async () => null);
+    const { acts, backfillQueries } = await makeContactDeps(profile, { contactStatus: "ENABLED", backfill: [] });
+
+    await acts.profileWebsitesForRun(discoveryArgs("run-contact-cutoff", { icpId: "icp-1" }));
+
+    // The run was created 2026-10-14T00:00Z (see makeContactDeps): attempts from 2026-10-07T00:00Z on are cooling.
+    expect(backfillQueries[0]).toContain("2026-10-14T00:00:00.000Z");
+    expect(backfillQueries[0]).toContain("2026-10-07T00:00:00.000Z");
   });
 });
 

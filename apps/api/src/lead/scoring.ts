@@ -9,12 +9,14 @@ import { TENDER_PUBLISHED, US_FED_SOURCES_SOUGHT } from '../signals/signal-mappe
  * DataQuality  关键字段完整度
  * Reachability 联系路径可达性 = max(公司级联系路径 BI-14, 个人联系点旧口径)
  * Engagement   互动历史（触达能力未上线 → 恒 0，权重最低）
- * 正向排除规则永远优先（EXCLUSION 命中 → rejected 队列，不进推荐）；权威 Fit 存在时否定型 EXCLUSION 只记录。
+ * 排除规则永远优先（EXCLUSION 命中 → rejected 队列，不进推荐）；唯一例外：权威 Fit 存在时，MUST_HAVE 的
+ * 镜像 EXCLUSION 只记录（非镜像的否定型 EXCLUSION 照旧排除）。
  *
- * 规则版本 `additive-6dim-v3`（lead-qualified-snapshot.ts QUALIFICATION_RULE_VERSION），v3 替换了：
+ * 规则版本 `additive-6dim-v3`（lead-qualified-snapshot.ts QUALIFICATION_RULE_VERSION，计分时写进
+ * score_detail.ruleVersion），v3 替换了：
  *  - 可达性只读人级 contact_point（xin 上 recommended 结构性为 0：自动链路没有联系人发现）；
  *  - 权重 fit .35 / role .15 / reach .15（Role 恒 0 → 15% 闲置，match + 联系页也只有 0.5225 够不着 0.55）；
- *  - 关键词代理 JSON.stringify 全文扫描（2 字母 token「ce」命中键名 certifications）；
+ *  - 关键词代理 JSON.stringify 全文子串扫描（2 字母 token「ce」命中键名 certifications；「new」命中「news」）；
  *  - 镜像 EXCLUSION 在权威 Fit 之前硬排除（keywords 受控英文词表 → 带 keywords 的公司一律 rejected）。
  */
 
@@ -128,7 +130,8 @@ export interface ScoreLeadOpts {
    * 词表归一欠账），确定性规则 Fit 会误判；资格门更可靠。但队列归属仍走六维总分 + 阈值 +
    * Reachability 硬底——此前 fitVerdict=match 直接盖整个队列，推荐队列里 9/11 家一个联系人
    * 都没有（联系不上的"推荐"），其余五维形同虚设。词表归一落地后此覆盖退化为一致性校验。
-   * v3：权威 Fit 存在时，否定型 EXCLUSION（MUST_HAVE 的镜像）只记进 ruleEvaluations，不改队列。
+   * v3：权威 Fit 存在时，MUST_HAVE 的镜像 EXCLUSION 只记进 ruleEvaluations，不改队列；非镜像的否定型
+   * EXCLUSION（如手加的 country not_in […]）照旧排除。
    */
   authoritativeFit?: 'match' | 'weak' | 'mismatch' | null;
   /**
@@ -147,8 +150,8 @@ export function scoreLead(company: CompanyForScoring, icp: IcpForScoring, opts?:
   const reasonCodes: string[] = [];
   const attrs = companyAttributes(company);
   const authoritative = opts?.authoritativeFit ?? null;
-  // v3：资格门已判 Fit 时，否定型 EXCLUSION（镜像规则）只记录不排除；正向 EXCLUSION 照旧最高优先。
-  const fitResult = qualify(icp.rules, attrs, { negativeExclusionsAdvisory: authoritative !== null });
+  // v3：资格门已判 Fit 时，MUST_HAVE 的镜像 EXCLUSION 只记录不排除；其余 EXCLUSION（正向、非镜像否定型）照旧最高优先。
+  const fitResult = qualify(icp.rules, attrs, { mirrorExclusionsAdvisory: authoritative !== null });
 
   // Fit：权威资格门判过 → 用它（只覆盖本维）；否则规则引擎。
   // clamp01（J）：nice-to-have 权重若混入负值，归一化比可超 1 → fit>1 会污染 totalScore 与队列排序
@@ -166,7 +169,7 @@ export function scoreLead(company: CompanyForScoring, icp: IcpForScoring, opts?:
   const advisoryHits = fitResult.evaluations.filter((e) => e.advisory && e.outcome === 'pass');
   if (advisoryHits.length) {
     notes.push(
-      `${advisoryHits.length} 条否定型 EXCLUSION 命中但只记录不排除（资格门已判 Fit；多为 MUST_HAVE 的镜像规则，见 IcpDto.ruleLint）`,
+      `${advisoryHits.length} 条 MUST_HAVE 的镜像 EXCLUSION 命中但只记录不排除（资格门已判 Fit；见 IcpDto.ruleLint）`,
     );
   }
 
@@ -330,11 +333,12 @@ function intentDimension(
   realIntent = clamp01(realIntent);
 
   // ② 关键词代理（v3）：ICP triggerSignals ↔ 公司属性**值**文本命中（弱先验兜底）。
-  //    只扫属性值不扫键名（v2 用 JSON.stringify 全文，2 字母 token「ce」命中键名 certifications）；
-  //    排除 intent 命名空间（否则触发词会命中 intent 事件自身的元数据，对同一信号在 realIntent 之外再计一次
-  //    未衰减的分）、extraction_*（抽取账本 / 摘要，非公司事实）与 website_profile.evidence（模型判定的证据片段）。
+  //    只扫属性值不扫键名（v2 用 JSON.stringify 全文，2 字母 token「ce」命中键名 certifications），也不扫 `_` 前缀的
+  //    记账键（_ts / _contact_parser / _contact_attempt_at …）；排除 intent 命名空间（否则触发词会命中 intent 事件
+  //    自身的元数据，对同一信号在 realIntent 之外再计一次未衰减的分）、extraction_*（抽取账本 / 摘要，非公司事实）
+  //    与 website_profile.evidence（模型判定的证据片段）。Latin token 按词边界匹配（「new」不命中「news」），CJK 按子串。
   const attrText = keywordProxyText(attrs);
-  const matchedSignals = triggerSignals.filter((s) => keywordTokens(s).some((w) => attrText.includes(w)));
+  const matchedSignals = triggerSignals.filter((s) => keywordTokens(s).some((w) => keywordTokenMatches(attrText, w)));
   const keywordIntent = triggerSignals.length
     ? Math.min(1, matchedSignals.length / Math.min(triggerSignals.length, 3))
     : 0;
@@ -358,7 +362,17 @@ function keywordTokens(signal: string): string[] {
     .filter((w) => w.length >= 3 || (w.length >= 2 && CJK_SCRIPT.test(w)));
 }
 
-/** 公司属性里参与关键词代理的**字符串值**（小写、换行拼接）；键名、数字、布尔不参与。 */
+/**
+ * token 是否出现在文本里：含 CJK 的 token 按子串（中文不按空格分词）；其余按词边界——前后都不是字母或数字
+ *（Unicode 意义上，ß / ü 也算字母），所以「new」不命中「news」、「dach」不命中「bedachung」，但命中「dach-region」。
+ */
+function keywordTokenMatches(text: string, token: string): boolean {
+  if (CJK_SCRIPT.test(token)) return text.includes(token);
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'u').test(text);
+}
+
+/** 公司属性里参与关键词代理的**字符串值**（小写、换行拼接）；键名、数字、布尔、`_` 前缀的记账键不参与。 */
 function keywordProxyText(attrs: Record<string, unknown>): string {
   const parts: string[] = [];
   const visit = (value: unknown, path: readonly string[]): void => {
@@ -372,6 +386,8 @@ function keywordProxyText(attrs: Record<string, unknown>): string {
     }
     if (!value || typeof value !== 'object') return;
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      // `_` 前缀 = 记账值（_ts、_contact_parser、_contact_attempt_at …），不是公司事实。
+      if (key.startsWith('_')) continue;
       if (path.length === 0 && (key === 'intent' || key.startsWith('extraction_'))) continue;
       if (path.length === 1 && path[0] === 'website_profile' && key === 'evidence') continue;
       visit(item, [...path, key]);

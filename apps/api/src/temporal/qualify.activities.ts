@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { scoreLead } from '../lead/scoring';
+import { QUALIFICATION_RULE_VERSION } from '../lead/lead-qualified-snapshot';
 import { RuleLike } from '../icp/rule-engine';
 import {
   SanctionsScreeningService,
@@ -161,7 +162,9 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
             const queue = result.queue;
             const status =
               queue === 'suppressed' ? 'SUPPRESSED' : queue === 'rejected' ? 'REJECTED' : 'REVIEW';
-            const scoreDetail = { ...result.detail, fitVerdict: authoritativeFit };
+            // ruleVersion：这次计分用的规则版本。LeadQualified 快照读它，而不是决策时的代码常量——
+            // 规则升级后没有重评的 lead 仍如实标注旧版本（W5-f）。
+            const scoreDetail = { ...result.detail, fitVerdict: authoritativeFit, ruleVersion: QUALIFICATION_RULE_VERSION };
             // 人工已裁决（QUALIFIED/REJECTED via decision/CONTACTED+）的 Lead 不被重评覆盖状态
             const humanFinal = existing && ['QUALIFIED', 'CONTACTED', 'CONVERTED'].includes(existing.status);
             // 评分只写 scores/queue/status —— **绝不覆盖 fitVerdict/fitReasons**（那是资格门① 的产物）。

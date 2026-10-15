@@ -471,12 +471,53 @@ describe('scoreLead — v3 关键词代理（只扫属性值；Latin token ≥3�
     const r = scoreLead(company(withIntent([{ type: 'SOURCING_OPENED', at: daysAgo(400), strength: 1 }])), triggers('sourcing'), { nowMs: NOW });
     expect(r.detail.matchedSignals).toEqual([]);
   });
+
+  // ── W5-f：记账键与子串误命中 ──
+  it('`_` 前缀的记账键（任意层级：_ts / _contact_parser / _contact_attempt_at …）不参与', () => {
+    const attrs = {
+      _source_note: 'expansion',
+      website_profile: {
+        trade_role: 'distributor',
+        _ts: daysAgo(1),
+        _contact_parser: 'company_contact/v1',
+        _contact_attempt_at: daysAgo(1),
+      },
+    };
+    expect(scoreLead(company({ attributes: attrs }), triggers('contact'), { nowMs: NOW }).detail.matchedSignals).toEqual([]);
+    expect(scoreLead(company({ attributes: attrs }), triggers('expansion'), { nowMs: NOW }).detail.matchedSignals).toEqual([]);
+    expect(scoreLead(company({ attributes: attrs }), triggers('distributor'), { nowMs: NOW }).detail.matchedSignals).toEqual([
+      'distributor',
+    ]);
+  });
+
+  it('Latin token 按词边界匹配：「new」不命中「news」、「DACH」不命中「Bedachung」', () => {
+    const news = company({ attributes: { keywords: ['industry news'] } });
+    expect(scoreLead(news, triggers('new plant'), { nowMs: NOW }).detail.matchedSignals).toEqual([]);
+    const roofer = company({ attributes: { keywords: ['Bedachung und Spenglerei'] } });
+    expect(scoreLead(roofer, triggers('DACH'), { nowMs: NOW }).detail.matchedSignals).toEqual([]);
+  });
+
+  it('整词仍命中：大小写不敏感，连字符 / 标点 / 行首行尾都算词边界，含变音符的词按整词', () => {
+    const attrs = { keywords: ['DACH-Region distributor', 'Großhandel'], region: 'Expansion (DACH)' };
+    expect(scoreLead(company({ attributes: attrs }), triggers('dach'), { nowMs: NOW }).detail.matchedSignals).toEqual(['dach']);
+    expect(scoreLead(company({ attributes: attrs }), triggers('großhandel'), { nowMs: NOW }).detail.matchedSignals).toEqual([
+      'großhandel',
+    ]);
+    expect(scoreLead(company({ attributes: { keywords: ['Pumpengroßhandel'] } }), triggers('großhandel'), { nowMs: NOW }).detail.matchedSignals).toEqual([]);
+  });
+
+  it('CJK token 仍按子串匹配（中文不按空格分词）', () => {
+    expect(scoreLead(company({ attributes: { keywords: ['计划扩产中'] } }), triggers('扩产'), { nowMs: NOW }).detail.matchedSignals).toEqual([
+      '扩产',
+    ]);
+  });
 });
 
 describe('scoreLead — v3 镜像 EXCLUSION 在权威 Fit 下只记录（ICP 22202d3c 形态）', () => {
   const mirroredIcp: IcpForScoring = {
     rules: [
       { id: 'm1', kind: 'MUST_HAVE', field: 'keywords', operator: 'contains', value: '泵' },
+      { id: 'm2', kind: 'MUST_HAVE', field: 'business_model', operator: 'in', value: ['分销商', '进口商'] },
       { id: 'x1', kind: 'EXCLUSION', field: 'keywords', operator: 'not_contains', value: '泵' },
       { id: 'x2', kind: 'EXCLUSION', field: 'business_model', operator: 'not_in', value: ['分销商', '进口商'] },
       { id: 'x3', kind: 'EXCLUSION', field: 'business_model', operator: 'contains', value: '终端工厂' },
@@ -491,12 +532,30 @@ describe('scoreLead — v3 镜像 EXCLUSION 在权威 Fit 下只记录（ICP 222
     companyContactPoints: [{ kind: 'contact_page', status: 'UNVERIFIED' }],
   });
 
-  it('权威 match：否定型 EXCLUSION 命中只进 ruleEvaluations（advisory），队列按总分 → recommended', () => {
+  it('权威 match：镜像 EXCLUSION 命中只进 ruleEvaluations（advisory），队列按总分 → recommended', () => {
     const r = scoreLead(reachable, mirroredIcp, { authoritativeFit: 'match' });
     expect(r.queue).toBe('recommended');
     expect(r.detail.ruleEvaluations.find((e) => e.ruleId === 'x1')).toMatchObject({ outcome: 'pass', advisory: true });
     expect(r.detail.ruleEvaluations.find((e) => e.ruleId === 'x2')).toMatchObject({ outcome: 'pass', advisory: true });
     expect(r.detail.notes.some((n) => n.includes('镜像'))).toBe(true);
+  });
+
+  it('权威 match：不是镜像的否定型 EXCLUSION（用户手加的 country not_in [DE, AT, CH]）照旧排除 → rejected', () => {
+    const withHandAdded: IcpForScoring = {
+      ...mirroredIcp,
+      rules: [
+        ...mirroredIcp.rules,
+        { id: 'x4', kind: 'EXCLUSION', field: 'country', operator: 'not_in', value: ['DE', 'AT', 'CH'] },
+      ],
+    };
+    const r = scoreLead(company({ ...reachable, country: 'PL' }), withHandAdded, { authoritativeFit: 'match' });
+    expect(r.queue).toBe('rejected');
+    expect(r.detail.ruleEvaluations.find((e) => e.ruleId === 'x4')).toMatchObject({ outcome: 'pass' });
+    expect(r.detail.ruleEvaluations.find((e) => e.ruleId === 'x4')).not.toHaveProperty('advisory');
+    // 范围内的国家不触发它，镜像规则仍只记录 → recommended
+    expect(scoreLead(company({ ...reachable, country: 'AT' }), withHandAdded, { authoritativeFit: 'match' }).queue).toBe(
+      'recommended',
+    );
   });
 
   it('权威 match：正向 EXCLUSION 命中仍 rejected（最高优先）', () => {

@@ -33,6 +33,13 @@ describe('IcpDto.ruleLint（激活 / 读取时的规则提示）', () => {
     expect(dto.ruleLint[0]).toContain('keywords');
   });
 
+  it('非镜像的否定型 EXCLUSION → 一条提示（它在资格门已判 Fit 时仍然排除）', () => {
+    const dto = IcpDto.from(row([{ kind: 'EXCLUSION', field: 'country', operator: 'not_in', value: ['DE', 'AT', 'CH'] }]));
+    expect(dto.ruleLint).toHaveLength(1);
+    expect(dto.ruleLint[0]).toContain('rule-0');
+    expect(dto.ruleLint[0]).toContain('仍然排除');
+  });
+
   it('无镜像 → 空数组（不是 undefined，契约稳定）', () => {
     const dto = IcpDto.from(row([{ kind: 'EXCLUSION', field: 'country', operator: 'in', value: ['RU'] }]));
     expect(dto.ruleLint).toEqual([]);

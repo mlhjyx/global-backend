@@ -200,7 +200,8 @@ describe('discoveryWorkflow execution-control propagation', () => {
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
         status: 'DONE',
-        stats: expect.objectContaining({ websiteProfile: { profiled: 1, matched: 1, unclassified: 0 } }),
+        // A result recorded before the backfill counter existed reports 0 backfilled companies.
+        stats: expect.objectContaining({ websiteProfile: { profiled: 1, matched: 1, unclassified: 0, backfilled: 0 } }),
       }),
     );
   });
@@ -1049,11 +1050,24 @@ describe('discoveryWorkflow company passes handed from one activity to the next'
     );
   });
 
+  it('reports the companies a single profile pass backfilled apart from the run’s own (W5-f)', async () => {
+    primeDiscovery();
+    acts.profileWebsitesForRun.mockResolvedValueOnce(profilePass({ profiled: 2, matched: 1, backfilled: 4 }));
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stats: expect.objectContaining({ websiteProfile: { profiled: 2, matched: 1, unclassified: 0, backfilled: 4 } }),
+      }),
+    );
+  });
+
   it('profiles websites until no company is left and adds up every pass', async () => {
     primeDiscovery();
     acts.profileWebsitesForRun
-      .mockResolvedValueOnce(profilePass({ profiled: 2, matched: 1, unclassified: 1, nextIndex: 2 }))
-      .mockResolvedValueOnce(profilePass({ profiled: 1, matched: 1 }));
+      .mockResolvedValueOnce(profilePass({ profiled: 2, matched: 1, unclassified: 1, backfilled: 1, nextIndex: 2 }))
+      .mockResolvedValueOnce(profilePass({ profiled: 1, matched: 1, backfilled: 3 }));
 
     await discoveryWorkflow(discoveryInput());
 
@@ -1065,7 +1079,7 @@ describe('discoveryWorkflow company passes handed from one activity to the next'
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
         status: 'DONE',
-        stats: expect.objectContaining({ websiteProfile: { profiled: 3, matched: 2, unclassified: 1 } }),
+        stats: expect.objectContaining({ websiteProfile: { profiled: 3, matched: 2, unclassified: 1, backfilled: 4 } }),
       }),
     );
   });
@@ -1190,7 +1204,7 @@ describe('discoveryWorkflow company passes handed from one activity to the next'
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
         status: 'DONE',
-        stats: expect.objectContaining({ websiteProfile: { profiled: 2, matched: 1, unclassified: 0 } }),
+        stats: expect.objectContaining({ websiteProfile: { profiled: 2, matched: 1, unclassified: 0, backfilled: 0 } }),
       }),
     );
   });
@@ -1267,7 +1281,8 @@ describe('discoveryWorkflow failure finalization (BI-25)', () => {
         signalsBudgetTruncated: false,
         budgetTruncated: false,
         skippedSubjects: 0,
-        websiteProfile: { profiled: 1, matched: 1, unclassified: 0 },
+        // W5-f: stats only; the profile result here predates the counter, so 0.
+        websiteProfile: { profiled: 1, matched: 1, unclassified: 0, backfilled: 0 },
         enrich: { matched: 1, of: 1, provider: 'gleif' },
         signals: { matched: 1, of: 1, provider: 'public_web' },
         watches: { registered: 1, of: 1 },
