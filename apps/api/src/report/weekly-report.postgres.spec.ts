@@ -48,7 +48,10 @@ if (
 }
 
 const COST_COLUMN = '本条成本 USD（所属发现 run 合计，后端账本口径，未按线索分摊）';
-/** Constants the materialization and query receipt CHECKs pin; the report does not read them. */
+/**
+ * Contract digests for the cost-chain fixtures: the materialization outcome CHECK pins this exact
+ * value, the query receipt CHECK only a 64-hex digest (the Q-TX one is used). The report reads neither.
+ */
 const MATERIALIZATION_CONTRACT_SHA256 = '558e526a674a7eac4e5e83d03fcf4f635c15b1b3081cffc7f03c2d9213c0c9fe';
 const QUERY_CONTRACT_SHA256 = 'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c';
 
