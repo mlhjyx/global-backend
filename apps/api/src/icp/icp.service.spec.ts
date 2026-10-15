@@ -10,6 +10,10 @@ import * as RuntimeBridge from "../model-runtime/structured-task-runtime-bridge"
 import * as Cpv from "../discovery/icp-to-cpv";
 import * as Fda from "../discovery/icp-to-fda";
 import { DiscoveryProviderRegistry } from "../discovery/provider.registry";
+import {
+  ProviderOutputError,
+  ProviderTransportError,
+} from "../model-gateway/providers/provider-output-error";
 
 const ctx = {
   workspaceId: "10000000-0000-4000-8000-000000000001",
@@ -899,4 +903,46 @@ describe("ICP generation authority and controlled enrichment", () => {
       });
     },
   );
+});
+
+/**
+ * Grant semantics of a generation whose model answer the gateway settled as
+ * unusable: the grant was consumed (its jti durably, in its own transaction)
+ * before the model call, the gateway charged the real usage to it, and the
+ * service writes no ICP or plan. The error leaves the service as the gateway
+ * raised it; the controller boundary turns it into 502 MODEL_UPSTREAM_UNUSABLE.
+ */
+describe("a generation whose model answer the gateway settled as unusable", () => {
+  it.each([
+    ["an unusable answer", new ProviderOutputError("CHAT_COMPLETIONS_CONTENT_FILTERED")],
+    ["a cut stream", new ProviderTransportError("CHAT_COMPLETIONS_STREAM_TRUNCATED")],
+  ])("consumes the grant once, stores no plan and rethrows %s untouched", async (_case, failure) => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.runtime.mockRejectedValue(failure);
+
+    await expect(f.service.generateQueryPlan(ctx, f.icp.id)).rejects.toBe(failure);
+
+    expect(f.authority.consumeWorkspaceGrant).toHaveBeenCalledOnce();
+    expect(f.runtime).toHaveBeenCalledOnce();
+    expect(f.authority.consumeWorkspaceGrant.mock.invocationCallOrder[0]).toBeLessThan(
+      f.runtime.mock.invocationCallOrder[0],
+    );
+    expect(f.tx.discoveryQueryPlan.create).not.toHaveBeenCalled();
+    expect(f.cpv).not.toHaveBeenCalled();
+    expect(f.fda).not.toHaveBeenCalled();
+  });
+
+  it("consumes the grant once, stores no ICP and rethrows the failure untouched", async () => {
+    const f = generationFixture();
+    const failure = new ProviderOutputError("STRUCTURED_OUTPUT_TRUNCATED");
+    f.runtime.mockRejectedValue(failure);
+
+    await expect(f.service.generateFromCompany(ctx, "company")).rejects.toBe(failure);
+
+    expect(f.authority.consumeWorkspaceGrant).toHaveBeenCalledOnce();
+    expect(f.runtime).toHaveBeenCalledOnce();
+    expect(f.tx.icpDefinition.create).not.toHaveBeenCalled();
+    expect(f.tx.persona.create).not.toHaveBeenCalled();
+  });
 });
