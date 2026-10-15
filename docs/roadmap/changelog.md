@@ -82,7 +82,7 @@
   - 存量 lead 要重新评分才生效：对每个 ACTIVE ICP 调一次 `POST /icps/:icpId/qualify`；打开 `company_contact` 与是否再跑 run 补读由产品负责人决定（D9）。
   - 读模型 `GET /canonical-companies/:id` 带出联系点、BI-21 交付包字段不在本 PR。
 
-## 2026-10-14 · Record the rule version each lead was scored with, rest failing backfill companies for a week, keep non-mirror negative exclusions, count backfill apart, and match trigger words on word boundaries (scoring rules v3 follow-ups, W5-f)
+## 2026-10-14 · Record the rule version each lead was scored with, rest failing backfill companies for a week, keep non-mirror negative exclusions, count backfill apart, and match trigger words on word boundaries (scoring rules v3 follow-ups, W5-f) (#655)
 
 - 起因：#649（评分规则 v3）的独立复审判 MERGE，同时登记了跟进项 W5-f（3 条 MEDIUM、3 条 LOW），要求与 #649 同一班车上线：
   - MEDIUM-1：`LeadQualified` 快照的 `qualification_rule_version` 取决策时的代码常量（`lead-qualified-snapshot.ts` 旧 264 行），`score_detail` 也不存规则版本。合并后没有重评的存量 lead 会被标成 v3。
