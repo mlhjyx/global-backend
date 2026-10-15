@@ -48,7 +48,7 @@
   - 事件注册表（`relay/event-registry.ts`）：车道代码发出的命令或事件如果不在旧镜像的注册表里，或不合合同，会被 park；
   - API 进程内同步执行的获客操作：ICP 设计、查询计划、回测、discover-contacts、guess-emails、verify。
 - **understanding 只能由新建公司触发**：`CompanyProfileCreated` 只在 `POST /companies` 时写入，每次还要用掉一张 GrowthOS grant。
-- **擦除**：`DeletionRequested`、`PersonalArtifactCleanupRequested` 留在管理态。车道分支不得改 durable-result、artifact、raw 的持久化格式和对象版本语义，否则旧代码可能擦不干净；做不到就只用不含真实个人数据的 workspace 跑车道。删除流程发出的重评分 `QualifyRequested` 也会进车道，车道 worker 停着时它会在 30 分钟后超时作废。
+- **擦除**：`DeletionRequested`、`PersonalArtifactCleanupRequested` 留在管理态。车道分支不得改 durable-result、artifact、raw 的持久化格式和对象版本语义，否则旧代码可能擦不干净；做不到就只用不含真实个人数据的 workspace 跑车道。删除流程发出的重评分 `QualifyRequested` 也会进车道，车道 worker 停着时它会在 30 分钟后超时作废。车道 workflow 的历史（输入与活动结果）存在开发用 Temporal 自己的本地库里，保留期按它的配置；擦除流程不清理 Temporal 历史，这一点与原生 Temporal 相同。
 - **readiness**：车道开启时 `/health/ready` 多一个 `capabilities.dev_fast_lane = {status: not_proven, code: DEV_FAST_LANE_UNATTESTED_ROUTING}`。它永远不会 ok，也不参与整体状态和客户写入准入。巡检工具把它列为非 ok 能力属预期。`/health/build` 报告的仍是 API 自己的受证构建，不代表车道 worker。
 - **证据**：车道时段的观察不能作为 RuntimeEvidence PASS 依据，不能进入 PILOT/GA Release Bundle。要记录时 `evidence_kind` 以 `dev-fast-lane-` 开头、`environment=development`，正文写明「worker 为源码 unattested，API 为受证镜像」；验证器会拒绝非 development 的车道证据，也拒绝把车道 kind 写进 release chain 的 `required_evidence_kinds`。
 
@@ -90,7 +90,7 @@
    SELECT count(*) FROM discovery_run WHERE workspace_id = '<ws>' AND status = 'RUNNING';
    ```
 
-2. 在管理态 runtime 的 compose 插值环境里设 `RUNTIME_DEV_FAST_LANE_WORKSPACE_ID` 与 `RUNTIME_DEV_FAST_LANE_TEMPORAL_ADDRESS`，**只重建 api 服务**（环境变了要重建，不是重启）；worker、platform-worker 不动。
+2. 在管理态 runtime 的 compose 插值环境里设 `RUNTIME_DEV_FAST_LANE_WORKSPACE_ID` 与 `RUNTIME_DEV_FAST_LANE_TEMPORAL_ADDRESS`，**只重建 api 服务**（环境变了要重建，不是重启）；worker、platform-worker 不动。两个变量必须一起设、取值合法：API 对不合法的车道配置拒绝启动（进入重启循环，期间所有写入不可用），回退就是删掉这两个变量再重建 api。
 3. 核验：`/health/build` 仍 `attested: true`；`/health/ready` 仍 `ready`，并出现 `capabilities.dev_fast_lane`；与开关前的快照相比只允许 `ts` 与这个键不同。API 启动日志有一行 `[api] DEV FAST LANE: …`。
 
 ## 7. 验收（有界样本）
