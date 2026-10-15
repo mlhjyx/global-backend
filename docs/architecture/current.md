@@ -165,6 +165,7 @@ scores: { fit, role, intent, demand_proof?, reachability, data_quality, engageme
 evidence_refs + freshness / qualification_rule_version
 storage_rights_decision / personal_data_class / suppression_state
 recommended_action / valid_until
+scored_at? / queue_basis?（2026-10-14 起的可选字段：评分时刻；接受时队列的依据 fit_gate_preset | score | human_accept | human_reject）
 ```
 
 scores 与 as-built 六维映射注记：现行六维=fit/role/intent/dataQuality/reachability/engagement（scoring.ts）；`demand_proof` ✅ 收口⑤起由一等 Signal 填充（需求证据类事件=TENDER_PUBLISHED+SOURCING_OPENED，evidence 判据强制；FDA_CLEARANCE 属上市时机留 Intent 维）——**观测维不进总分**（乘法门待 R2 backtest ≥50 QGO 标签），`qualification_rule_version` 升 `additive-6dim-v2` 供消费端区分；**v1 契约预留 number|null 槽位使填充零破坏，snapshot_version 保持 1、不开 v2 文件**（避免 v1/v2 混流坑消费者——release-plan「升 v2」以此达成）。null=lead 评分早于 v2 规则。 **v3（2026-10-14，`additive-6dim-v3`）**：Reachability = max(公司级联系路径 `company_contact_point`（kind ∈ contact_page/impressum_page/contact_form/supplier_page，status ∈ VALID/UNVERIFIED，读时禁联过滤）, 个人旧口径)；权重 fit .45 / role 0 / intent .15 / dataQuality .15 / reachability .20 / engagement .05（RL1 无具名联系人，Role 闲置并入；门槛 0.55 不变，Role 仍上报）；关键词代理只扫属性值、Latin token ≥3（CJK ≥2）、排除 extraction_* 与 website_profile.evidence；权威 Fit 存在时否定型 EXCLUSION（neq/not_in/not_contains）只记进 ruleEvaluations（advisory）不改队列，正向 EXCLUSION 仍最高优先；ICP 生成拒绝与 MUST_HAVE 同 field 同 value 的镜像 EXCLUSION，IcpDto.ruleLint 对存量 ICP 提示；score_detail.reasonCodes（MISSING_CONTACT_POINT）。六维键与值域不变、snapshot_version 仍 1。

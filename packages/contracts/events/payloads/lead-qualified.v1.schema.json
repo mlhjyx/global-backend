@@ -108,6 +108,16 @@
         "screened_at": { "type": ["string", "null"], "format": "date-time" },
         "list_versions": { "type": "object", "additionalProperties": { "type": "string" }, "description": "sourceKey -> list publish date (ISO), e.g. { ofac_sdn: '2026-07-13' }." }
       }
+    },
+    "scored_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "When the scoring stage last wrote the six-dimension scores (lead.scored_at). null = never scored (the queue was the fit gate's preset) or scored before the column existed. Optional since 2026-10-14; absent in older payloads."
+    },
+    "queue_basis": {
+      "type": "string",
+      "enum": ["fit_gate_preset", "score", "human_accept", "human_reject"],
+      "description": "What decided the queue the lead sat in when it was accepted: the fit gate's preset (never scored), the scoring stage, or a human decision. Optional since 2026-10-14; absent in older payloads."
     }
   }
 }

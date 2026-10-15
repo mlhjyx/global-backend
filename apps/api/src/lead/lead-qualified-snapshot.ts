@@ -7,6 +7,7 @@
  */
 
 import { clamp01 } from './scoring';
+import { leadQueueBasis, type LeadQueueBasis } from './lead-queue-basis';
 
 export const LEAD_QUALIFIED_SCHEMA_VERSION = 1;
 /**
@@ -80,6 +81,13 @@ export interface LeadQualifiedSnapshotV1 {
   };
   recommended_action: string;
   valid_until: string | null;
+  /**
+   * 评分阶段最近一次写分的时刻（lead.scored_at）；评分从未跑过（队列仍是 fit 门预置）或在该列
+   * 存在前评的分 → null。**可选字段**（设计 E1：v1 加可选字段，snapshot_version 仍 1）。
+   */
+  scored_at: string | null;
+  /** 接受时这条线索所在队列的依据（lead-queue-basis.ts）。**可选字段**（同上）。 */
+  queue_basis: LeadQueueBasis;
 }
 
 export interface LeadQualifiedSnapshotInput {
@@ -87,12 +95,19 @@ export interface LeadQualifiedSnapshotInput {
     id: string;
     workspaceId: string;
     icpId: string;
+    status?: string | null;
     fitVerdict: string | null;
     totalScore: number | null;
     scores: unknown;
     scoreDetail: unknown;
     fitReasons: unknown;
+    scoredAt?: Date | string | null;
   };
+  /**
+   * 这条 lead 存在 action=reject 的裁决（调用方 decide 在 lead 为 REJECTED 时查一条）。缺省 false
+   *（旧调用方/测试非破坏）。
+   */
+  humanRejected?: boolean;
   /** icpDefinition.version（ICP 已删则 null——lead.icpId 无 FK 强约束）。 */
   icpVersion: number | null;
   /**
@@ -275,5 +290,14 @@ export function buildLeadQualifiedSnapshot(input: LeadQualifiedSnapshotInput): L
     recommended_action: 'handoff_to_campaign',
     // 鲜度 v2：min(evidence.fetchedAt + 分级TTL, 最新 intent.at + 时机窗)；无鲜度依据 → null。
     valid_until: computeValidUntil(input.evidence ?? [], company.attributes),
+    scored_at: isoOrNull(lead.scoredAt),
+    queue_basis: leadQueueBasis(lead, input.humanRejected === true),
   };
+}
+
+/** Date 或 ISO 串 → ISO 串；缺省/不可解析 → null（不注入 Invalid Date）。 */
+function isoOrNull(value: Date | string | null | undefined): string | null {
+  if (value == null) return null;
+  const ms = value instanceof Date ? value.getTime() : Date.parse(value);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
 }

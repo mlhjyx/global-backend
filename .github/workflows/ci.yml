@@ -337,6 +337,8 @@ jobs:
           COMPANY_CONTACT_POINT_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
           ARTIFACT_OBJECT_VERSION_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
           ARTIFACT_OBJECT_VERSION_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
+          LEAD_QUEUE_BASIS_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+          LEAD_QUEUE_BASIS_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
         run: |
           set -euo pipefail
           pnpm --filter @global/db exec prisma migrate deploy
@@ -345,7 +347,8 @@ jobs:
             src/prisma/security-definer-search-path.postgres.spec.ts \
             src/site-builder/site-build-budget-publication-lock.postgres.spec.ts \
             src/discovery/company-contact-point.postgres.spec.ts \
-            src/durable-results/artifact/generic-operation-artifact-object-version.postgres.spec.ts
+            src/durable-results/artifact/generic-operation-artifact-object-version.postgres.spec.ts \
+            src/lead/lead-queue-basis.postgres.spec.ts
 
       - name: Site Builder isolated zero-dispatch evaluation boundary
         run: pnpm --filter @global/site-builder-eval-runner test
