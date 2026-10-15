@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { ApplicationFailure } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { decryptPii } from '../compliance/pii-crypto';
 import { inventorErasureKeys } from '../adapters/patent-inventor-cache';
@@ -10,6 +11,7 @@ import {
   countsFromLocated,
 } from '../compliance/deletion-snapshot';
 import {
+  DELETION_SUBJECT_TYPES,
   DeletionWorkflowInput,
   ErasureCounts,
   LocatedErasureTargets,
@@ -39,6 +41,16 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
 
   return {
     async freezeSubject(input: DeletionWorkflowInput): Promise<LocatedErasureTargets> {
+      // 只受理 DSR 主体种类（contact | company）。产物主体函数自 2026-10-14 起也认卖方
+      // company_profile，DB tombstone 不再替本流程拒掉它；而本流程的定位分支、回执与
+      // DeletionCompleted 契约都只认这两种，别的种类在任何写入之前失败、不重试。
+      if (!(DELETION_SUBJECT_TYPES as readonly string[]).includes(input.subjectType)) {
+        throw ApplicationFailure.create({
+          type: 'DELETION_SUBJECT_TYPE_INVALID',
+          message: 'DELETION_SUBJECT_TYPE_INVALID',
+          nonRetryable: true,
+        });
+      }
       return prisma.withWorkspace(input.workspaceId, async (tx) => {
         await lockWorkspaceSuppressionPolicy(tx, input.workspaceId);
         const { located, suppressionEntries } = await locateInTransaction(tx, input);

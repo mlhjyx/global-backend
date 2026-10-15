@@ -125,6 +125,7 @@ describe('understanding receipt consumers', () => {
 
     await expect(activities.crawlWebsite({
       ...AUTHORITY_ARGS,
+      companyId: '50000000-0000-4000-8000-000000000005',
       website: 'https://acme.example/',
     })).resolves.toEqual({
       url: 'https://acme.example/',
