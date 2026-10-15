@@ -38,21 +38,40 @@ export interface DomainAckContract {
   readonly acknowledgedAt: string;
 }
 
+/**
+ * v2 (D13) adds `definite_failure`: a physical request that failed definitively
+ * before anything was billed (an HTTP 429 or 5xx status other than the 504/524
+ * timeouts, a connection that never opened, or a Tool that failed before its
+ * first wire). Its operation is RELEASED and it is the only disposition that
+ * allows another physical request, bounded by the ledger to three reservations
+ * per operation key (a ledger count: the model gateway's own RetryTimes=1 makes
+ * that up to six physical requests). A control error is also RELEASED but sent nothing, so there is
+ * nothing to retry; every other disposition still forbids a second request.
+ */
 export type ExecutionResultDisposition =
   | Readonly<{
-      schemaVersion: 'execution-result-disposition/v1';
+      schemaVersion: 'execution-result-disposition/v2';
       kind: 'valid_output';
       receipt: DurableExecutionReceipt;
       automaticPhysicalRetryAllowed: false;
     }>
   | Readonly<{
-      schemaVersion: 'execution-result-disposition/v1';
+      schemaVersion: 'execution-result-disposition/v2';
       kind: 'result_unknown' | 'control_error' | 'replay_error';
       code: string;
       operationStatus: 'RESULT_UNKNOWN' | 'RELEASED' | 'SETTLED';
       operationId: string;
       operationKey: string;
       automaticPhysicalRetryAllowed: false;
+    }>
+  | Readonly<{
+      schemaVersion: 'execution-result-disposition/v2';
+      kind: 'definite_failure';
+      code: string;
+      operationStatus: 'RELEASED';
+      operationId: string;
+      operationKey: string;
+      automaticPhysicalRetryAllowed: true;
     }>;
 
 const ACK_KEYS = Object.freeze([
@@ -83,6 +102,11 @@ const CONTROL_CODES = new Set([
 const REPLAY_CODES = new Set([
   'GENERIC_OPERATION_REPLAY_INVALID', 'GENERIC_OPERATION_ARTIFACT_INVALID',
   'ARTIFACT_EXPIRED_UNACKED', 'GENERIC_OPERATION_DOMAIN_ACK_CONFLICT',
+]);
+/** model-gateway/definite-model-failure.ts codes plus the ToolBroker pre-wire release. */
+const DEFINITE_FAILURE_CODES = new Set([
+  'MODEL_PROVIDER_HTTP_UNAVAILABLE', 'MODEL_PROVIDER_CONNECTION_NOT_ESTABLISHED',
+  'TOOL_FAILED_BEFORE_PHYSICAL_WIRE',
 ]);
 
 function ackInvalid(): never { throw new ExecutionControlError('DOMAIN_ACK_CONTRACT_INVALID'); }
@@ -203,12 +227,12 @@ export function parseExecutionResultDisposition(value: unknown): ExecutionResult
   if (kind === 'valid_output') {
     const source = ownDataRecord(value, VALID_KEYS, dispositionInvalid);
     if (
-      valueOf(source, 'schemaVersion') !== 'execution-result-disposition/v1' ||
+      valueOf(source, 'schemaVersion') !== 'execution-result-disposition/v2' ||
       valueOf(source, 'automaticPhysicalRetryAllowed') !== false
     ) dispositionInvalid();
     try {
       return Object.freeze({
-        schemaVersion: 'execution-result-disposition/v1',
+        schemaVersion: 'execution-result-disposition/v2',
         kind: 'valid_output',
         receipt: parseDurableExecutionReceipt(valueOf(source, 'receipt')),
         automaticPhysicalRetryAllowed: false,
@@ -225,20 +249,37 @@ export function parseExecutionResultDisposition(value: unknown): ExecutionResult
       ? code === 'GENERIC_OPERATION_RESULT_UNKNOWN' && status === 'RESULT_UNKNOWN'
       : kind === 'control_error'
         ? typeof code === 'string' && CONTROL_CODES.has(code) && status === 'RELEASED'
-        : kind === 'replay_error'
-          ? typeof code === 'string' && REPLAY_CODES.has(code) && status === 'SETTLED'
-          : false;
+        : kind === 'definite_failure'
+          ? typeof code === 'string' && DEFINITE_FAILURE_CODES.has(code) && status === 'RELEASED'
+          : kind === 'replay_error'
+            ? typeof code === 'string' && REPLAY_CODES.has(code) && status === 'SETTLED'
+            : false;
+  // Only a definite failure may be retried; every other outcome forbids it.
+  const retryAllowed = kind === 'definite_failure';
   if (
-    !valid || valueOf(source, 'schemaVersion') !== 'execution-result-disposition/v1' ||
-    valueOf(source, 'automaticPhysicalRetryAllowed') !== false
+    !valid || valueOf(source, 'schemaVersion') !== 'execution-result-disposition/v2' ||
+    valueOf(source, 'automaticPhysicalRetryAllowed') !== retryAllowed
   ) dispositionInvalid();
+  const operationId = uuid(valueOf(source, 'operationId'), dispositionInvalid);
+  const operationKey = safeKey(valueOf(source, 'operationKey'), dispositionInvalid);
+  if (kind === 'definite_failure') {
+    return Object.freeze({
+      schemaVersion: 'execution-result-disposition/v2',
+      kind,
+      code: code as string,
+      operationStatus: 'RELEASED',
+      operationId,
+      operationKey,
+      automaticPhysicalRetryAllowed: true,
+    });
+  }
   return Object.freeze({
-    schemaVersion: 'execution-result-disposition/v1',
+    schemaVersion: 'execution-result-disposition/v2',
     kind,
     code: code as string,
     operationStatus: status as 'RESULT_UNKNOWN' | 'RELEASED' | 'SETTLED',
-    operationId: uuid(valueOf(source, 'operationId'), dispositionInvalid),
-    operationKey: safeKey(valueOf(source, 'operationKey'), dispositionInvalid),
+    operationId,
+    operationKey,
     automaticPhysicalRetryAllowed: false,
   });
 }

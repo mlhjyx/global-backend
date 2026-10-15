@@ -11,6 +11,7 @@ import { BudgetStoreUnavailableError, type BudgetStore } from "./budget-store";
 import { projectGenericOperationResult } from "./generic-operation-projection";
 import { RateLimitStoreUnavailableError } from "./redis-rate-limit-store";
 import { Tool } from "./tool-contract";
+import { EgressBlockedError } from "../adapters/url-guard";
 import type { ArtifactExecutionPort } from "./artifact-execution-port";
 import type { DurableExecutionReceipt } from "../durable-results/durable-execution-receipt";
 import { TypedProjectionRegistry } from "../durable-results/typed-projection.registry";
@@ -834,6 +835,189 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
     ).rejects.toThrow("redis unavailable");
     expect(budget.remainingCents("run1")).toBe(10);
     expect(release).toHaveBeenCalledOnce();
+  });
+});
+
+/**
+ * D13: an execute() that failed before any physical wire left costs nothing,
+ * so the reservation is released and a retry may reserve the same key again.
+ * The broker releases only when it can prove that no wire started: a Platform
+ * tool sends every wire through the broker's dispatcher, and a workspace tool
+ * that declares `physicalWireObservation: "before_each_wire"` calls
+ * ctx.beforePhysicalWire immediately before each of its wires. Every other
+ * failure keeps the reservation, as before.
+ */
+describe("ToolBroker — a failure before any physical wire releases the reservation (D13)", () => {
+  function observedTool(failure: "before-wire" | "after-wire"): Tool {
+    const tool = fakeTool("http.observed", 10);
+    tool.physicalWireObservation = "before_each_wire";
+    tool.execute = async (_input, ctx) => {
+      if (failure === "after-wire") await ctx.beforePhysicalWire!();
+      throw new EgressBlockedError(failure === "before-wire" ? "dns_failed" : "response_too_large");
+    };
+    return tool;
+  }
+
+  it("releases a declared workspace tool that failed before its first wire (dead domain)", async () => {
+    const budget = new BudgetLedger();
+    budget.open("run1", 10);
+    const { broker } = makeBroker(observedTool("before-wire"), { budget });
+
+    await expect(
+      broker.invoke("http.observed", {}, { workspaceId: "w", runId: "run1" }),
+    ).rejects.toBeInstanceOf(EgressBlockedError);
+    expect(budget.remainingCents("run1")).toBe(10);
+  });
+
+  it("keeps the reservation once a declared workspace tool reached a wire", async () => {
+    const budget = new BudgetLedger();
+    budget.open("run1", 10);
+    const { broker } = makeBroker(observedTool("after-wire"), { budget });
+
+    await expect(
+      broker.invoke("http.observed", {}, { workspaceId: "w", runId: "run1" }),
+    ).rejects.toBeInstanceOf(EgressBlockedError);
+    expect(budget.remainingCents("run1")).toBe(0);
+  });
+
+  it("keeps the reservation for a workspace tool that does not declare its wires", async () => {
+    const budget = new BudgetLedger();
+    budget.open("run1", 10);
+    const tool = fakeTool("t.undeclared", 10);
+    tool.execute = async () => {
+      throw new EgressBlockedError("dns_failed");
+    };
+    const { broker } = makeBroker(tool, { budget });
+
+    await expect(
+      broker.invoke("t.undeclared", {}, { workspaceId: "w", runId: "run1" }),
+    ).rejects.toBeInstanceOf(EgressBlockedError);
+    expect(budget.remainingCents("run1")).toBe(0);
+  });
+
+  it("still calls a caller-supplied beforePhysicalWire hook and stops on its refusal", async () => {
+    const budget = new BudgetLedger();
+    budget.open("run1", 10);
+    const callerHook = vi.fn(async () => {
+      throw new Error("caller fence refused");
+    });
+    const tool = observedTool("after-wire");
+    const { broker } = makeBroker(tool, { budget });
+
+    await expect(
+      broker.invoke(
+        "http.observed",
+        {},
+        { workspaceId: "w", runId: "run1", beforePhysicalWire: callerHook },
+      ),
+    ).rejects.toThrow("caller fence refused");
+    expect(callerHook).toHaveBeenCalledOnce();
+    // The hook was asked for a wire: the broker cannot prove nothing was sent.
+    expect(budget.remainingCents("run1")).toBe(0);
+  });
+
+  it("passes an undeclared tool the caller's context unchanged", async () => {
+    const tool = fakeTool("t.plain", 0);
+    const execute = vi.fn(tool.execute);
+    tool.execute = execute;
+    const { broker } = makeBroker(tool);
+    const context = { workspaceId: "w" };
+
+    await broker.invoke("t.plain", {}, context);
+
+    expect(execute.mock.calls[0][1]).toBe(context);
+  });
+
+  function platformTool(execute: Tool["execute"]): Tool {
+    const tool = fakeTool("tradefair.algolia", 0);
+    tool.execute = execute;
+    return tool;
+  }
+
+  function platformBudget() {
+    return {
+      reserve: vi.fn(async () => ({
+        workspaceId: "platform",
+        accountKey: "run-1",
+        operationId: "22222222-2222-4222-8222-222222222222",
+        estimatedMicrousd: 0n,
+        replay: false,
+      })),
+      settle: vi.fn(),
+      release: vi.fn(async () => ({
+        chargedMicrousd: 0n,
+        observedMicrousd: 0n,
+        capVariance: false,
+        replay: false,
+      })),
+    };
+  }
+
+  it("releases a Platform tool that failed before its dispatcher sent anything", async () => {
+    const budgetStore = platformBudget();
+    const dispatch = vi.fn(async <T,>(_operation: unknown, send: () => Promise<T>): Promise<T> => send());
+    const { broker } = makeBroker(
+      platformTool(async () => {
+        throw new EgressBlockedError("dns_failed");
+      }),
+      { budgetStore: budgetStore as unknown as BudgetStore },
+    );
+
+    await expect(
+      broker.invoke("tradefair.algolia", {}, {
+        workspaceId: "platform",
+        runId: "run-1",
+        platformEgress: { authorizeAndDispatch: dispatch },
+      }),
+    ).rejects.toBeInstanceOf(EgressBlockedError);
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(budgetStore.release).toHaveBeenCalledOnce();
+    expect(budgetStore.settle).not.toHaveBeenCalled();
+  });
+
+  it("keeps a Platform reservation once a wire was sent", async () => {
+    const budgetStore = platformBudget();
+    const dispatch = vi.fn(async <T,>(_operation: unknown, send: () => Promise<T>): Promise<T> => send());
+    const { broker } = makeBroker(
+      platformTool(async (_input, ctx) => {
+        await ctx.dispatchPhysicalWire!("tradefair.algolia.page", async () => "page");
+        throw new Error("algolia 503");
+      }),
+      { budgetStore: budgetStore as unknown as BudgetStore },
+    );
+
+    await expect(
+      broker.invoke("tradefair.algolia", {}, {
+        workspaceId: "platform",
+        runId: "run-1",
+        platformEgress: { authorizeAndDispatch: dispatch },
+      }),
+    ).rejects.toThrow("algolia 503");
+    expect(dispatch).toHaveBeenCalledOnce();
+    expect(budgetStore.release).not.toHaveBeenCalled();
+  });
+
+  it("keeps a Platform reservation when the dispatcher itself failed", async () => {
+    const budgetStore = platformBudget();
+    const dispatch = vi.fn(async () => {
+      throw new Error("send-cut commit acknowledgement lost");
+    });
+    const { broker } = makeBroker(
+      platformTool(async (_input, ctx) => {
+        await ctx.dispatchPhysicalWire!("tradefair.algolia.page", async () => "page");
+        return { data: {}, costCents: 0 };
+      }),
+      { budgetStore: budgetStore as unknown as BudgetStore },
+    );
+
+    await expect(
+      broker.invoke("tradefair.algolia", {}, {
+        workspaceId: "platform",
+        runId: "run-1",
+        platformEgress: { authorizeAndDispatch: dispatch },
+      }),
+    ).rejects.toThrow("PLATFORM_EGRESS_PHYSICAL_WIRE_FAILED");
+    expect(budgetStore.release).not.toHaveBeenCalled();
   });
 });
 

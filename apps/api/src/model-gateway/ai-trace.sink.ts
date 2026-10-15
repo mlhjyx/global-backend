@@ -34,6 +34,16 @@ export interface TraceEntry {
    * not upstream proof (D14).
    */
   modelIdentityUnproven?: true;
+  /**
+   * Failed non-paid calls only (D13): the ledger operation the call reserved
+   * and what the gateway did with it, so every failure that ends or skips a
+   * run item can be traced to its tool_budget_operation row.
+   */
+  budgetOperationId?: string;
+  budgetDisposition?:
+    | 'RELEASED_CONTROL_DENIAL'
+    | 'RELEASED_DEFINITE_FAILURE'
+    | 'SETTLED_NO_RESULT';
 }
 
 /** D14 model-identity markers for ai_trace.meta and usage_ledger.meta. */
@@ -74,6 +84,13 @@ export class AiTraceSink {
 
   record(entry: TraceEntry): void {
     const identity = modelIdentityMeta(entry);
+    const budget =
+      entry.budgetOperationId !== undefined && entry.budgetDisposition !== undefined
+        ? {
+            budgetOperationId: entry.budgetOperationId,
+            budgetDisposition: entry.budgetDisposition,
+          }
+        : undefined;
     void this.prisma
       .withWorkspace(entry.workspaceId, async (tx) => {
         const trace = await tx.aiTrace.create({
@@ -91,12 +108,13 @@ export class AiTraceSink {
             costUsd: entry.costUsd ?? null,
             correlationId: entry.correlationId ?? null,
             meta:
-              entry.modelPolicy || identity
+              entry.modelPolicy || identity || budget
                 ? ({
                     ...(entry.modelPolicy
                       ? { modelPolicy: entry.modelPolicy }
                       : {}),
                     ...identity,
+                    ...budget,
                   } as unknown as Prisma.InputJsonObject)
                 : undefined,
           },

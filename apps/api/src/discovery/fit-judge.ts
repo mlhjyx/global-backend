@@ -141,7 +141,7 @@ export async function judgeFitCompany(
   const keywords = attributes?.keywords ?? [];
   // G3 5.4b: the company's own homepage/Impressum profile is direct trade-role evidence.
   const profile = attributes?.website_profile;
-  const websiteProfile = profile
+  const profileFacts = profile
     ? {
         trade_role: profile.trade_role,
         own_manufacturing: profile.own_manufacturing,
@@ -151,6 +151,9 @@ export async function judgeFitCompany(
         evidence: profile.evidence,
       }
     : undefined;
+  // A namespace with bookkeeping only (W5-f: a contact-path attempt on a company never profiled) is no evidence.
+  const websiteProfile =
+    profileFacts && Object.values(profileFacts).some((value) => value !== undefined) ? profileFacts : undefined;
   let out: FitOutput;
   let durableReceipt: DurableExecutionReceipt | undefined;
   try {

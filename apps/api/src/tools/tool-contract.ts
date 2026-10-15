@@ -242,4 +242,13 @@ export interface Tool<I = unknown, O = unknown> {
   execute(input: I, ctx: ToolContext): Promise<ToolResult<O>>;
   /** 同能力降级链。 */
   fallbackToolIds?: string[];
+  /**
+   * D13: set only when every physical transport this Tool performs (each
+   * redirect hop and each page included) calls `ctx.beforePhysicalWire`
+   * immediately before writing. ToolBroker then knows that an execute() which
+   * failed without that call sent nothing, and releases its reservation so a
+   * retry may reserve again. A wrong declaration lets a failure after a real
+   * wire be retried, so declare it only with a test that proves the call.
+   */
+  physicalWireObservation?: "before_each_wire";
 }

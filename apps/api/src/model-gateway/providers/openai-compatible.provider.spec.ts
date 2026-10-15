@@ -325,6 +325,109 @@ describe("OpenAICompatibleProvider — streamed chat completions for unsettled c
     });
   });
 
+  describe("says whether any output arrived before the stream failed (D13)", () => {
+    const upstreamError = { error: { message: "upstream overloaded" } };
+    const failure = (): Promise<unknown> =>
+      streaming
+        .generateStructured({ task: "t", prompt: "p", schema: {}, model: "deepseek-v4-pro" })
+        .catch((err: unknown) => err);
+
+    it("reports no output for an upstream error that is the first event (xin 2026-10-13 12:27)", async () => {
+      mockText(`data: ${JSON.stringify(upstreamError)}\n\n`);
+      await expect(failure()).resolves.toMatchObject({
+        reasonCode: "CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR",
+        outputStarted: false,
+      });
+    });
+
+    it("reports no output when only a role chunk preceded the upstream error", async () => {
+      mockText(
+        sse([
+          { model: "deepseek-v4-pro", choices: [{ delta: { role: "assistant", content: "" } }] },
+          upstreamError,
+        ]),
+      );
+      await expect(failure()).resolves.toMatchObject({
+        reasonCode: "CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR",
+        outputStarted: false,
+      });
+    });
+
+    it.each([
+      ["content", { content: '{"a"' }],
+      ["reasoning", { reasoning_content: "thinking about pumps" }],
+      ["a reasoning field under another name", { reasoning: "thinking" }],
+      ["a tool call", { tool_calls: [{ index: 0, function: { name: "f" } }] }],
+    ])("reports output once %s arrived before the upstream error", async (_name, delta) => {
+      mockText(sse([{ model: "deepseek-v4-pro", choices: [{ delta }] }, upstreamError]));
+      await expect(failure()).resolves.toMatchObject({
+        reasonCode: "CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR",
+        outputStarted: true,
+      });
+    });
+
+    it("reports output when a usage chunk counted output tokens before the upstream error", async () => {
+      mockText(
+        sse([
+          { model: "deepseek-v4-pro", choices: [], usage: { prompt_tokens: 600, completion_tokens: 12 } },
+          upstreamError,
+        ]),
+      );
+      await expect(failure()).resolves.toMatchObject({ outputStarted: true });
+    });
+
+    it("reports no output for a stream cut before its first token", async () => {
+      mockText(
+        sse([
+          { model: "deepseek-v4-pro", choices: [{ delta: { role: "assistant" } }] },
+          { model: "deepseek-v4-pro", choices: [], usage: { prompt_tokens: 600, completion_tokens: 0 } },
+        ]),
+      );
+      await expect(failure()).resolves.toMatchObject({
+        name: "ProviderTransportError",
+        reasonCode: "CHAT_COMPLETIONS_STREAM_TRUNCATED",
+        usage: { inputTokens: 600, outputTokens: 0 },
+        outputStarted: false,
+      });
+    });
+
+    it("reports output for a stream cut after reasoning tokens only (xin 2026-10-13 00:52)", async () => {
+      mockText(
+        sse([
+          { model: "deepseek-v4-pro", choices: [{ delta: { reasoning_content: "…" } }] },
+          { model: "deepseek-v4-pro", choices: [], usage: { prompt_tokens: 1627, completion_tokens: 8 } },
+        ]),
+      );
+      await expect(failure()).resolves.toMatchObject({
+        reasonCode: "CHAT_COMPLETIONS_STREAM_TRUNCATED",
+        outputStarted: true,
+      });
+    });
+
+    it("reports output for a stream cut mid-answer", async () => {
+      mockText(sse([{ model: "deepseek-v4-pro", choices: [{ delta: { content: '{"name":"Pumpen' } }] }]));
+      await expect(failure()).resolves.toMatchObject({
+        reasonCode: "CHAT_COMPLETIONS_STREAM_TRUNCATED",
+        outputStarted: true,
+      });
+    });
+
+    it("reports no output for a stream that carried no completion chunk", async () => {
+      mockText(": keep-alive\n\n");
+      await expect(failure()).resolves.toMatchObject({
+        reasonCode: "CHAT_COMPLETIONS_STREAM_EMPTY",
+        outputStarted: false,
+      });
+    });
+
+    it("leaves the output state unknown for an unreadable line", async () => {
+      mockText(": keep-alive\n\ndata: not-json\n\n");
+      const error = await failure();
+      expect(error).toMatchObject({ reasonCode: "CHAT_COMPLETIONS_STREAM_LINE_INVALID" });
+      expect((error as { outputStarted?: boolean }).outputStarted).toBeUndefined();
+    });
+  });
+
   it("treats a finish reason about the upstream, not the answer, as a transport failure", async () => {
     mockText(
       sse([
