@@ -7,11 +7,14 @@
 
 ## 什么时候必须写
 
-PR 改了 `apps/`、`packages/`、`scripts/`、`infra/` 下任一路径时，必须新增（或修改）一个片段，或者直接改 `changelog.md`。governance 工作流（`governance · traceability · release`，必需检查）按 PR 的 diff（合并基点到 PR head）判断，缺了就失败。纯文档、`.github/` 等改动不强制，但写了也欢迎。
+PR 改了 `apps/`、`packages/`、`scripts/`、`infra/` 下任一路径时，必须新增（或修改）一个片段。governance 工作流（`governance · traceability · release`，必需检查）按 PR 的 diff（合并基点到 PR head）判断，缺了就失败。纯文档、`.github/` 等改动不强制，但写了也欢迎。
+
+- **过渡**：本规则生效前开的 PR 仍直接改 `changelog.md`，检查照样放行（只出一条 warning），不必返工；新 PR 一律写片段。
+- **Dependabot 安全更新 PR** 改到 `apps/` 或 `packages/` 下的 `package.json` 时同样会缺片段。开发代理给它补 Copy 重签的那次提交里一并加上片段。
 
 ## 文件名与格式
 
-文件名：`<YYYY-MM-DD>-<slug>.md`，日期与 frontmatter 的 `date` 一致，slug 只用小写字母、数字和连字符。
+文件名：`<YYYY-MM-DD>-<slug>.md`，日期与 frontmatter 的 `date` 一致，slug 只用小写字母、数字和连字符。slug 用分支名里的 topic（`claude/changelog-fragments` → `2026-10-14-changelog-fragments.md`），这样两个在途 PR 不会撞名；万一同日同 slug，后合的那个会在 GitHub 上显示冲突，改个名重推即可。
 
 ```markdown
 ---
@@ -42,4 +45,4 @@ node scripts/changelog-assemble.mjs --dry-run   # 只列出将要写入的条目
 node scripts/changelog-assemble.mjs             # 写入 changelog.md 并删除片段
 ```
 
-由发版列车或任何人手动运行：从刚 fetch 的 `origin/main` 建分支，运行汇编，`pnpm docs:verify` 通过后作为 `docs(changelog): …` PR 提交，不由 bot 直接提交 main。条目按日期倒序插入；同一天的条目接在当天已有小节之后，按 PR 号升序。任何片段格式不合格时汇编器什么都不写。
+每班发版列车的 PR 合完后，由当班负责合并的开发代理运行：从刚 fetch 的 `origin/main` 建分支，运行汇编，`pnpm docs:verify` 通过后作为 `docs(changelog): …` PR 提交，不由 bot 直接提交 main。步骤、冲突处理与回退方法见 [CI / 审查与合并流程](../../backend/ci-merge-automation.md#changelog-片段的汇编)。条目按日期倒序插入；同一天的条目接在当天已有小节之后，按 PR 号升序。任何片段格式不合格时汇编器什么都不写。

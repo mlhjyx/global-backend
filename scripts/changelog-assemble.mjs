@@ -83,6 +83,7 @@ export function main(argv = process.argv.slice(2)) {
     readFileSync(changelogFile, "utf8"),
     resolved,
   );
+  const count = `${resolved.length} fragment${resolved.length === 1 ? "" : "s"}`;
   const summary = resolved
     .map(
       (fragment) =>
@@ -91,14 +92,14 @@ export function main(argv = process.argv.slice(2)) {
     .join("\n");
   if (dryRun) {
     console.log(
-      `changelog-assemble: would fold ${resolved.length} fragments into ${CHANGELOG_PATH}:\n${summary}`,
+      `changelog-assemble: would fold ${count} into ${CHANGELOG_PATH}:\n${summary}`,
     );
     return 0;
   }
   writeFileSync(changelogFile, assembled);
   for (const fragment of resolved) unlinkSync(resolve(root, fragment.path));
   console.log(
-    `changelog-assemble: folded ${resolved.length} fragments into ${CHANGELOG_PATH} and removed them:\n${summary}\n` +
+    `changelog-assemble: folded ${count} into ${CHANGELOG_PATH} and removed ${resolved.length === 1 ? "it" : "them"}:\n${summary}\n` +
       "Run pnpm docs:verify, then open the change as a docs(changelog) PR.",
   );
   return 0;

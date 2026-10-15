@@ -55,7 +55,7 @@ review thread 必须解决、push 后撤销旧 review。与下文 2026-08-09 相
   而它防范的"各自绿、合起来坏"在此规模下风险低。替代保护：main 每个 push 的 CI 不被取消、完整跑完；
   开发代理合并前把 PR 与最新 main 的组合在本地复核（`governance:verify`、`docs:verify`、Copy 指纹）；
   Copy 回执与 changelog 等多 PR 共改的行会产生文本冲突，迫使后合者变基重签。
-  （changelog 部分已于 2026-10-14 改为每个 PR 一个片段，见 [changelog.d](../roadmap/changelog.d/README.md)。）
+  （changelog 部分已于 2026-10-14 改为每个 PR 一个片段，见下文 [Changelog 片段的汇编](#changelog-片段的汇编)。）
 
 删除、non-fast-forward、review thread 解决与 push 后撤销旧 review 等其余规则不变。
 
@@ -171,6 +171,19 @@ Release Bundle 中的 `CHECK_RUN`、`GITHUB_REVIEW`、`SIGNED_AUTHORIZATION`、m
 3. 开 PR 后等待 required-context 清单中的 CI、Security 与 Governance 门，触发独立 review，逐条处置 inline comment 并 resolve。
 4. 向用户报告改动、风险、验证和未完成项；按用户对当次 PR 的明确授权合并，或在 `DEC-AIDEV-004` 常设授权下于独立审查通过、必需检查在当前 head 全绿、审查线程清零，且 PR 与最新 main 的组合已在本地复核（ruleset 不再强制 strict）后合并。
 5. 合并后在 `/global/backend` 运行 `node scripts/governance-main-worktree-sync.mjs apply`，以 fetch 后解析出的 `origin/main` 精确 commit 做纯 fast-forward；若远端 PR/分支由另一会话处理，它只交接已合入的精确 SHA，本地会话仍独立 fetch 和验证，不从通知推导 merge 授权。同步脚本遇到 HOLD 时保留现场并单独审计，不 stash/reset/clean。功能分支与本地 worktree 默认保留用于复查。删除仅是可选空间清理，须满足 `CONTRIBUTING.md` 的提交已入主线、工作区干净且未跟踪文件归属已核清条件，并取得用户明确授权。
+
+## Changelog 片段的汇编
+
+自 2026-10-14 起，每个 PR 在 [changelog.d](../roadmap/changelog.d/README.md) 放一个片段，不直接改 `docs/roadmap/changelog.md`；片段由人工汇编进 changelog。
+
+- **谁、何时**：跟随发版列车（一批已合并 PR 一起换上运行时镜像的批次）。每班车的 PR 合完后，由当班负责合并的开发代理运行一次汇编，单独开一个 PR；某天没有发车时片段留在目录里，不影响任何检查，下一班一起汇编。功能 PR 里不顺带汇编，也不加 bot 或定时任务直接提交 main。
+- **步骤**：
+  1. 从刚 fetch 的 `origin/main` 建分支（如 `claude/changelog-assemble-<YYYY-MM-DD>`）；
+  2. `node scripts/changelog-assemble.mjs --dry-run` 核对将写入的条目，没有 PR 号的会在 stderr 列出；
+  3. `node scripts/changelog-assemble.mjs` 写入 changelog 并删除已写入的片段，没有 PR 号的条目按需手工补上 `(#N)`；
+  4. `pnpm docs:verify` 通过后提交，标题 `docs(changelog): assemble fragments through #<最大 PR 号>`，按纯文档 PR 审查合并。汇编 PR 只改 `changelog.md` 并删除片段，不需要自己的片段。
+- **冲突**：汇编 PR 在审期间又有 PR 合入新片段时互不影响，汇编只删除它运行时目录里已有的片段。若有 PR 修改了将被删除的片段，以最新 main 为准重跑汇编。过渡期仍直接改 `changelog.md` 的旧 PR 可能与汇编 PR 冲突，后合者按 changelog 的老办法处理（两边段落都留）。
+- **回退**：恢复「每个 PR 直接改 `changelog.md`」只需改回 `AGENTS.md` §9、`CONTRIBUTING.md`、PR 模板与片段 README 的写法；governance 的片段检查本来就接受直接改 `changelog.md`，可以留着，也可以删掉 `governance.yml` 的那一步。目录里剩下的片段运行一次汇编即可全部收进 `changelog.md`。
 
 ## 风险分级（决定验证深度，不授予自动合并）
 

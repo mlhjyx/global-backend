@@ -190,6 +190,89 @@ test("fragment validation rejects each malformed shape with its own code", () =>
   }
 });
 
+function details(path, text) {
+  return validateFragment(path, text).map((issue) => issue.detail);
+}
+
+test("frontmatter errors say how to write the line instead of only quoting it", () => {
+  const capitalised = details(
+    FRAGMENT,
+    fragmentText().replace("date: 2026-10-14", "Date: 2026-10-14"),
+  );
+  assert.ok(
+    capitalised.some((detail) => /lowercase.*"date: …"/.test(detail)),
+    JSON.stringify(capitalised),
+  );
+  assert.ok(
+    capitalised.some((detail) => /date is missing/.test(detail)),
+    JSON.stringify(capitalised),
+  );
+
+  const noSpace = details(
+    FRAGMENT,
+    fragmentText().replace(
+      "title: Keep one fragment per PR",
+      "title:Keep one fragment per PR",
+    ),
+  );
+  assert.ok(
+    noSpace.some((detail) =>
+      /space after the colon.*"title: Keep one fragment per PR"/.test(detail),
+    ),
+    JSON.stringify(noSpace),
+  );
+
+  const unreadable = details(FRAGMENT, fragmentText({ extra: "just words" }));
+  assert.ok(
+    unreadable.some((detail) =>
+      /"<key>: <value>".*date, pr, title/.test(detail),
+    ),
+    JSON.stringify(unreadable),
+  );
+
+  const byteOrderMark = details(FRAGMENT, `\uFEFF${fragmentText()}`);
+  assert.ok(
+    byteOrderMark.some((detail) => /byte order mark/.test(detail)),
+    JSON.stringify(byteOrderMark),
+  );
+});
+
+test("body errors point at the line of the file and say what a top-level item looks like", () => {
+  // Frontmatter is lines 1-5, line 6 is blank, the body starts on line 7.
+  const heading = details(
+    FRAGMENT,
+    fragmentText({ body: `## 起因\n\n${BODY}` }),
+  );
+  assert.ok(
+    heading.some((detail) => /^line 7 /.test(detail)),
+    JSON.stringify(heading),
+  );
+
+  const starred = details(
+    FRAGMENT,
+    fragmentText({ body: BODY.replace("- 起因：", "* 起因：") }),
+  );
+  assert.ok(
+    starred.some((detail) =>
+      /missing top-level item "- 起因：".*not indented/.test(detail),
+    ),
+    JSON.stringify(starred),
+  );
+});
+
+test("a malformed file name says which characters a slug may use", () => {
+  const named = details(
+    `${FRAGMENT_DIRECTORY}/2026-10-14-One_Fragment.md`,
+    fragmentText(),
+  );
+  assert.ok(
+    named.some((detail) =>
+      /lowercase letters, digits and hyphens/.test(detail),
+    ),
+    JSON.stringify(named),
+  );
+});
+
 test("sections may carry extra top-level items, ASCII colons and fenced headings", () => {
   const body = [
     "- 起因：x",
@@ -501,6 +584,27 @@ test("the require command fails a code change without a fragment and passes once
     assert.equal(satisfied.status, 0, satisfied.stdout + satisfied.stderr);
     assert.match(satisfied.stdout, /2026-10-14-one-fragment\.md/);
 
+    // An open PR from before the fragment rule still edits the changelog
+    // itself: it passes, with a warning that points at the fragment format.
+    git("checkout", "-qb", "older-pr", base);
+    await write("scripts/x.mjs", "export {};\n");
+    await write(CHANGELOG_PATH, `${CHANGELOG}\n- older PR entry\n`);
+    git("add", "-A");
+    git("commit", "-qm", "older PR edits the changelog");
+    const transitional = runNode(
+      LIBRARY,
+      ["require", "--base", movedBase, "--head", "HEAD"],
+      root,
+      gitEnvironment,
+    );
+    assert.equal(
+      transitional.status,
+      0,
+      transitional.stdout + transitional.stderr,
+    );
+    assert.match(transitional.stdout, /^::warning::.*changelog\.d\//m);
+    assert.doesNotMatch(satisfied.stdout, /::warning::/);
+
     const unknownBase = runNode(
       LIBRARY,
       [
@@ -576,6 +680,11 @@ test("the assembler refuses to touch anything while a fragment is invalid", asyn
     assert.match(result.stderr, /CHANGELOG_FRAGMENT_DATE/);
     assert.equal(await readFile(join(root, CHANGELOG_PATH), "utf8"), CHANGELOG);
     assert.equal((await readdir(join(root, FRAGMENT_DIRECTORY))).length, 2);
+
+    await write(FRAGMENT, fragmentText());
+    const fixed = runNode(ASSEMBLER, [], root, gitEnvironment);
+    assert.equal(fixed.status, 0, fixed.stdout + fixed.stderr);
+    assert.match(fixed.stdout, /folded 1 fragment into/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -627,6 +736,20 @@ test("the governance workflow checks every pull request's diff for a fragment", 
     workflow,
     /^\s+run: node scripts\/governance-changelog-fragments\.mjs require --base "\$BASE_SHA" --head "\$HEAD_SHA"$/m,
   );
+});
+
+test("the merge runbook says who assembles the fragments, when, and how to roll back", async () => {
+  const runbook = await readFile(
+    join(REPOSITORY_ROOT, "docs/backend/ci-merge-automation.md"),
+    "utf8",
+  );
+  const section = runbook.slice(runbook.indexOf("## Changelog 片段的汇编"));
+  assert.ok(section.startsWith("## Changelog 片段的汇编"), "section exists");
+  const body = section.slice(0, section.indexOf("\n## ", 1));
+  assert.match(body, /发版列车/);
+  assert.match(body, /node scripts\/changelog-assemble\.mjs --dry-run/);
+  assert.match(body, /docs\(changelog\)/);
+  assert.match(body, /回退/);
 });
 
 test("docs:verify runs the fragment check and exempts fragments from lifecycle metadata", async () => {

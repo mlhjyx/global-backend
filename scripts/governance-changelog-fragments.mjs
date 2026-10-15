@@ -95,6 +95,29 @@ function unfencedLines(lines) {
   return result;
 }
 
+// What is wrong with a frontmatter line that is not "<key>: <value>", told
+// as the line the author should write instead.
+function frontmatterLineAdvice(line) {
+  const match = line.match(/^(\s*)([A-Za-z][\w-]*)(\s*):(.*)$/);
+  if (!match) {
+    return `unreadable frontmatter line "${line}"; each line is "<key>: <value>" with key ${FRONTMATTER_KEYS.join(", ")}`;
+  }
+  const [, indent, key, spaceBefore, rest] = match;
+  const value = rest.trim();
+  const suggestion = `"${key.toLowerCase()}: ${value || "…"}"`;
+  if (key !== key.toLowerCase()) {
+    return `frontmatter keys are lowercase: write "${key.toLowerCase()}: …" instead of "${key}: …"`;
+  }
+  if (indent) return `frontmatter lines are not indented: write ${suggestion}`;
+  if (spaceBefore) {
+    return `no space before the colon: write ${suggestion}`;
+  }
+  if (rest === "" || /^\s/.test(rest)) {
+    return `unknown frontmatter key ${key}; allowed: ${FRONTMATTER_KEYS.join(", ")}`;
+  }
+  return `put a space after the colon: write ${suggestion}`;
+}
+
 function parseFrontmatter(path, lines, issues) {
   if (lines[0] !== "---") {
     issues.push(
@@ -125,7 +148,7 @@ function parseFrontmatter(path, lines, issues) {
         issue(
           "CHANGELOG_FRAGMENT_FRONTMATTER",
           path,
-          `unreadable frontmatter line: ${line}`,
+          frontmatterLineAdvice(line),
         ),
       );
       continue;
@@ -158,12 +181,20 @@ function parseFrontmatter(path, lines, issues) {
 
 function checkDate(path, date, issues) {
   const nameDate = basename(path).match(FRAGMENT_NAME)?.[1];
-  if (date === undefined || !isCalendarDate(date)) {
+  if (date === undefined) {
     issues.push(
       issue(
         "CHANGELOG_FRAGMENT_DATE",
         path,
-        `date must be a calendar date YYYY-MM-DD, got ${date ?? "nothing"}`,
+        "date is missing from the frontmatter; write date: YYYY-MM-DD",
+      ),
+    );
+  } else if (!isCalendarDate(date)) {
+    issues.push(
+      issue(
+        "CHANGELOG_FRAGMENT_DATE",
+        path,
+        `date must be a calendar date YYYY-MM-DD, got ${date || "nothing"}`,
       ),
     );
   } else if (nameDate && nameDate !== date) {
@@ -195,7 +226,15 @@ function checkPr(path, raw, issues) {
 function checkTitle(path, raw, issues) {
   const title = raw === undefined ? "" : unquote(raw).trim();
   if (!title) {
-    issues.push(issue("CHANGELOG_FRAGMENT_TITLE", path, "title is required"));
+    issues.push(
+      issue(
+        "CHANGELOG_FRAGMENT_TITLE",
+        path,
+        raw === undefined
+          ? "title is missing from the frontmatter; write title: <one English sentence>"
+          : "title is empty; write one English sentence",
+      ),
+    );
   } else if (title.startsWith("#")) {
     issues.push(
       issue(
@@ -227,7 +266,9 @@ function itemHasContent(lines, start, rest) {
   return false;
 }
 
-function checkBody(path, body, issues) {
+// `firstLine` is the file line number of the body's first line, so messages
+// point at the line the author sees in an editor.
+function checkBody(path, body, issues, firstLine) {
   if (!body.trim()) {
     issues.push(
       issue(
@@ -246,7 +287,7 @@ function checkBody(path, body, issues) {
         issue(
           "CHANGELOG_FRAGMENT_BODY",
           path,
-          `body line ${index + 1} is a level-1 or level-2 heading; the assembler writes the entry heading`,
+          `line ${firstLine + index} is a level-1 or level-2 heading; the assembler writes the entry heading, so use a top-level item or ### instead`,
         ),
       );
     }
@@ -265,7 +306,7 @@ function checkBody(path, body, issues) {
         issue(
           "CHANGELOG_FRAGMENT_SECTIONS",
           path,
-          `missing top-level item "- ${section}："`,
+          `missing top-level item "- ${section}：" (a line starting with "- ${section}：", not indented and outside code blocks)`,
         ),
       );
       continue;
@@ -300,9 +341,19 @@ export function parseFragment(path, text) {
       issue(
         "CHANGELOG_FRAGMENT_FILENAME",
         path,
-        "fragment files are named YYYY-MM-DD-<lowercase-slug>.md",
+        "fragment files are named YYYY-MM-DD-<slug>.md with a slug of lowercase letters, digits and hyphens, such as the branch topic (2026-10-14-changelog-fragments.md)",
       ),
     );
+  }
+  if (text.startsWith("\uFEFF")) {
+    issues.push(
+      issue(
+        "CHANGELOG_FRAGMENT_FRONTMATTER",
+        path,
+        "remove the UTF-8 byte order mark at the start of the file",
+      ),
+    );
+    return { path, date: null, pr: null, title: "", body: "", issues };
   }
   if (text.includes("\r")) {
     issues.push(
@@ -319,8 +370,10 @@ export function parseFragment(path, text) {
   checkDate(path, date, issues);
   const pr = checkPr(path, fields.get("pr"), issues);
   const title = checkTitle(path, fields.get("title"), issues);
-  const body = lines.slice(bodyStart).join("\n").replace(/^\n+/, "").trimEnd();
-  checkBody(path, body, issues);
+  let bodyIndex = bodyStart;
+  while (bodyIndex < lines.length && lines[bodyIndex] === "") bodyIndex += 1;
+  const body = lines.slice(bodyIndex).join("\n").trimEnd();
+  checkBody(path, body, issues, bodyIndex + 1);
   return { path, date: date ?? null, pr, title, body, issues };
 }
 
@@ -582,6 +635,14 @@ function runRequire({ root, base, head }) {
       ...(result.changelogEdited ? [CHANGELOG_PATH] : []),
     ];
     console.log(`changelog fragment: present (${evidence.join(", ")})`);
+    // Transition: PRs opened before the fragment rule still edit the
+    // changelog itself and pass, but new PRs are pointed at the fragments.
+    if (result.fragmentPaths.length === 0) {
+      console.log(
+        `::warning::This PR edits ${CHANGELOG_PATH} directly. That still passes for PRs opened before the fragment rule, ` +
+          `but new PRs add ${FRAGMENT_DIRECTORY}/<YYYY-MM-DD>-<slug>.md instead so open PRs stop conflicting (format: ${FRAGMENT_README}).`,
+      );
+    }
     return 0;
   }
   const shown = result.codePaths.slice(0, 10).join(", ");
