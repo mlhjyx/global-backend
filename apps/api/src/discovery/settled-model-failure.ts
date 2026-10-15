@@ -18,13 +18,12 @@ const ABSORBED_TRANSPORT_FAILURES: ReadonlySet<string> = new Set([
  * result, or undefined when the error does not prove that. Two kinds qualify:
  * - an unusable answer: a recoverable ProviderOutputError (#638);
  * - a cut stream: an exact ProviderTransportError with reason code
- *   CHAT_COMPLETIONS_STREAM_TRUNCATED and no control error behind it. Once
- *   output had started (every cut seen on xin so far carried 8 to 11086
- *   output tokens) the gateway settles it exactly like an unusable answer (one
- *   settle, no result projection, no durable receipt), so nothing can follow
- *   it, and a retry could only replay into BUDGET_OPERATION_REPLAY_UNAVAILABLE.
- *   A cut before the first output token is a definite failure the gateway
- *   releases instead (D13); absorbing it here still costs only that company.
+ *   CHAT_COMPLETIONS_STREAM_TRUNCATED and no control error behind it. The
+ *   gateway settles it exactly like an unusable answer (one settle, no result
+ *   projection, no durable receipt), so nothing can follow it, and a retry
+ *   could only replay into BUDGET_OPERATION_REPLAY_UNAVAILABLE. That holds for
+ *   a cut before the first output token too: the live new-api fork still bills
+ *   it by estimated prompt tokens, so D13 does not release it.
  *
  * The gateway classes transport errors as control errors on purpose: an outage
  * hits every call of a run. Every other transport failure (timeouts, unreadable

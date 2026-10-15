@@ -983,10 +983,16 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
   const definiteClassifier = existsSync(resolve(repoRoot, DEFINITE_FAILURE_CLASSIFIER_PATH))
     ? await readText(repoRoot, DEFINITE_FAILURE_CLASSIFIER_PATH)
     : '';
-  for (const token of ['definiteModelFailureCode', 'error.outputStarted === false', 'error.callCount === 1']) {
+  for (const token of ['definiteModelFailureCode', 'new Set([504, 524])', '!UPSTREAM_TIMEOUT_STATUSES.has(status)']) {
     if (!definiteClassifier.includes(token)) {
       issues.push(issue('EXECUTION_AUTHORITY_RESULT_DISPOSITION_INVALID', DEFINITE_FAILURE_CLASSIFIER_PATH, `definite-failure classifier missing ${token}`));
     }
+  }
+  // The live new-api fork bills a stream that failed before its first output
+  // (HTTP 200 plus estimated prompt tokens), so no stream failure may release
+  // until mlhjyx/new-api#3 is live; re-admitting one must change this check.
+  if (/ProviderTransportError|ProviderOutputError/.test(definiteClassifier)) {
+    issues.push(issue('EXECUTION_AUTHORITY_RESULT_DISPOSITION_INVALID', DEFINITE_FAILURE_CLASSIFIER_PATH, 'definite-failure classifier must not release a stream or output failure while the gateway still bills it'));
   }
   const artifactRegistry = await readText(repoRoot, 'apps/api/src/durable-results/artifact/artifact-materializer.registry.ts');
   for (const schema of Object.keys(ARTIFACT_CONTRACTS)) {

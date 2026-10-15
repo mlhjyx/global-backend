@@ -1,9 +1,9 @@
 -- D13: a released operation key may be reserved again, at most three attempts.
 --
 -- RELEASED means the ledger proved no physical cost was incurred: a pre-wire
--- control denial, or (since this change) a definite failure before any output
--- such as an HTTP 429/5xx status, a connection that never opened, or a stream
--- that ended before its first output delta with zero output tokens. Until now
+-- control denial, or (since this change) a definite failure the gateway did
+-- not bill: an HTTP 429 or 5xx status other than the 504/524 timeouts, or a
+-- connection that never opened. Stream failures are not released. Until now
 -- reserve replayed every existing key, so a released operation could never run
 -- again and each retry ended in BUDGET_OPERATION_REPLAY_UNAVAILABLE: a definite,
 -- free failure became the end of the run item.

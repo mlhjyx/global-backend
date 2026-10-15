@@ -684,10 +684,9 @@ export class RouterModelGateway extends ModelGateway {
         input.model,
         substituteAnswers,
       );
-      // D13: a definite failure before any output (HTTP 429/5xx, a connection
-      // that never opened, a stream that ended before its first output) cost
-      // nothing, so it releases like a pre-wire denial and a retry of the
-      // same key may reserve again. A platform-egress call stays with its
+      // D13: a definite failure the gateway did not bill (HTTP 429/5xx other
+      // than the 504/524 timeouts, a connection that never opened) releases
+      // like a pre-wire denial and a retry of the same key may reserve again. A platform-egress call stays with its
       // fence, which owns that wire's outcome.
       const controlDenial =
         err instanceof ExternalActionDeniedError &&

@@ -10,7 +10,7 @@
       },
       {
         "path": "apps/api/src/model-gateway/router-model-gateway.ts",
-        "sha256": "fd3e6091271280c547aa84b2bb89fbf1cea067572824987911bcba356e0e935c"
+        "sha256": "3887cf6307cd829c8a529fab092e52644c6eab0c53eae5455ca26fa9c0ad36a1"
       },
       {
         "path": "apps/api/src/tools/tool-broker.factory.ts",

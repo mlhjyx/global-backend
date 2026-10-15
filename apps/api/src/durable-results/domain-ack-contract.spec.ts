@@ -147,7 +147,6 @@ describe('valid/unknown/control/replay disposition contract', () => {
   it.each([
     'MODEL_PROVIDER_HTTP_UNAVAILABLE',
     'MODEL_PROVIDER_CONNECTION_NOT_ESTABLISHED',
-    'MODEL_PROVIDER_STREAM_FAILED_BEFORE_OUTPUT',
     'TOOL_FAILED_BEFORE_PHYSICAL_WIRE',
   ])('allows a bounded physical retry only for the definite failure %s on a released operation (D13)', (code) => {
     const input = { kind: 'definite_failure', code, operationStatus: 'RELEASED' };
@@ -176,6 +175,9 @@ describe('valid/unknown/control/replay disposition contract', () => {
       { automaticPhysicalRetryAllowed: false },
       { code: 'GENERIC_OPERATION_RESULT_UNKNOWN' },
       { code: 'CHAT_COMPLETIONS_CONTENT_FILTERED' },
+      // The live new-api fork bills a stream that failed before its first
+      // output, so it is not a definite failure until mlhjyx/new-api#3 ships.
+      { code: 'MODEL_PROVIDER_STREAM_FAILED_BEFORE_OUTPUT' },
       { schemaVersion: 'execution-result-disposition/v1' },
     ]) {
       expect(() => parseExecutionResultDisposition({ ...base, ...drift }), JSON.stringify(drift))

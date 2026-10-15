@@ -19,7 +19,7 @@
 - 同一业务代码、JWS/claims、数据库 guard、artifact manifest、重放、ACK、错误码和 readiness。
 - 环境差异只允许 issuer/JWKS、secret reference、endpoint、数据、额度值、资源和部署拓扑。
 - 没有权威授权时零账户、零 operation、零 Provider wire。
-- 没有有效输出或物理调用/ACK 状态未知时保留完整 reservation，绝不自动发送第二次物理请求。唯一例外（D13，2026-10-14）：在任何输出之前就确定失败的请求（HTTP 429/5xx、连接从未建立、流在第一个输出增量之前结束且输出 token 为 0，或 Tool 在第一次物理请求之前就失败）没有产生费用，reservation 释放为 `RELEASED`，同一 operation key 可再预留，每个 key 最多 3 次。超时、已有输出后的截断、内容过滤等可能已计费的失败仍按上一条处理。
+- 没有有效输出或物理调用/ACK 状态未知时保留完整 reservation，绝不自动发送第二次物理请求。唯一例外（D13，2026-10-14）：确定失败、网关没有计费的请求（HTTP 429 与除 504/524 外的 5xx、连接从未建立，或 Tool 在第一次物理请求之前就失败），reservation 释放为 `RELEASED`，同一 operation key 可再预留，每个 key 最多 3 次。3 次是账本层的预留次数：new-api 自身 `RetryTimes=1`，backend 看到的 429/5xx 已是网关重试一次后的结果，所以最多对应 6 次物理请求。超时（含 HTTP 504/524：请求已到达上游，可能已生成并计费）、任何流式失败、内容过滤等可能已计费的失败仍按上一条处理。流在第一个输出之前失败暂不释放：现役 new-api fork 对它回 HTTP 200 并按本地估算的输入 token 扣费（运行时会话 10-14 用 new-api 日志 5734–5738 核实），等 mlhjyx/new-api#3（首字节之前的失败改为回错误、不计费）上线后再单独纳入。
 - 有效输出但精确费用暂缺时按 reservation 上界结算，结果仍可重放，费用异步 reconciliation。
 - 测试 Stub/Fake/Sandbox 不能签发产品 authority、不能进入 managed composition，也不能生成正式 artifact。
 - Backend 不成为 subscription、Credits 或 Billing 的最终账务 SoR。
@@ -332,7 +332,7 @@ RESERVED | RESULT_UNKNOWN | SETTLED | RELEASED
 - `RESERVED`：调用可能尚未开始，或调用后尚无可验证结果/结算事实；不得新 generation 绕过。
 - `RESULT_UNKNOWN`：物理调用已开始，结果/object ACK 状态未知；只允许事实恢复。
 - `SETTLED`：有效 typed projection 或 artifact ref 已持久化，费用按 exact/upper bound 结算。
-- `RELEASED`：已证明没有产生物理费用：物理调用未开始，或（D13）在任何输出之前就确定失败。`reserve` 对同一 key 的 `RELEASED` 行会重新打开同一行（`attempt + 1`，状态回到 `RESERVED`，按新预留额度重新做额度检查），最多 3 次；其余状态的已存在 key 一律 `REPLAY`。迁移 `20261014095011_tool_budget_released_rereserve`。
+- `RELEASED`：已证明没有产生物理费用：物理调用未开始，或（D13）确定失败且网关没有计费。`reserve` 对同一 key 的 `RELEASED` 行会重新打开同一行（`attempt + 1`，状态回到 `RESERVED`，按新预留额度重新做额度检查），最多 3 次；其余状态的已存在 key 一律 `REPLAY`。迁移 `20261014095011_tool_budget_released_rereserve`。
 
 费用和结果状态分离：有效 artifact 但 exact cost 暂缺仍为 `SETTLED + estimated_upper_bound`；没有有效结果或物理状态未知才使用 `RESULT_UNKNOWN`。
 

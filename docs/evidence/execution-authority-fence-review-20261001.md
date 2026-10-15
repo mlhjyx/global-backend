@@ -206,6 +206,18 @@
   - 重开沿用同一 operation id。若某次执行在释放之后又对同一预留发出迟到的 `release`/`settle`，会作用在下一次尝试上。当前没有这样的路径（每条释放路径都是该次执行对账本的最后一次写入，且没有对 `release` 的重试）；可在 PR-2 把 `release`/`settle` 绑定到 `attempt` 加固。
   - new-api 对流式请求在没有上游 usage 时可能按本地估算的输入 token 计费。若如此，释放流式确定失败会少记这部分（每个 key 至多 3 次输入 token 的费用）。需要运行时会话用 new-api 日志核对 10-13 12:27 那几次 `reason=eof` 是否计费，再确认流式三类是否保留。
   - 平台路径的证明依赖平台合同工具的每个物理请求都经 broker 调度器发出；这与出网围栏本身依赖的前提相同（10-06 复审后续事项 2）。
-- **独立复审**：本工作流里没有可用的子代理，只做了作者逐行自审与先红后绿的测试。合并前需运行时会话对设计与上述残余风险做独立确认。
+- **独立复审**：首版所在的工作流里没有可用的子代理，只做了作者逐行自审与先红后绿的测试。运行时会话的设计确认见下方「收窄」一条；收窄后 head 的独立复审另行贴到 PR。
 - **测试**：见 PR 与 changelog（2026-10-14 小节）。网关、流解析器、broker、处置合同、治理脚本、工具声明清单的新用例先红后绿；账本 6 项在一次性 PostgreSQL 上以 app_user 先红后绿，其中一项用真实 `PostgresBudgetStore` + 网关证明 503 之后的重试真正跑完。
 - **结论**：更新指纹 `router-model-gateway.ts` → `fd3e6091271280c547aa84b2bb89fbf1cea067572824987911bcba356e0e935c`，`tool-broker.ts` → `659bb26d8bd6a2c9c6b2b3e47ce3ca5b585208fd581ec23ba0c9d7e0c2aec685`。`tool-broker.factory.ts` 与 `model-gateway.module.ts` 未改。
+- **运行时会话核对后的收窄（2026-10-14，同一 PR 追加提交）**：
+  - 运行时会话在 PR 评论（issuecomment-6182377079）里贴了 new-api 计费日志的只读核对结果：宿主侧以 `mode=ro&immutable=1` 打开 SQLite，只读计费列。上面「已知残余风险」第二条得到证实：10-13 12:27 那批 `reason=eof`（log 5734–5738）各有一行 consume，completion 为 0，按本地估算的输入 token 计费。HTTP 429/5xx 在 new-api 侧没有计费行。
+  - 处置如下：
+    - 分类器去掉三种流式失败。`definite-model-failure.ts` 不再引用 `ProviderTransportError`。
+    - `isUnavailableStatus` 排除 504、524（超时：请求已到达上游，可能已经计费），与 new-api 的重试状态码对齐。
+    - 处置合同的 `DEFINITE_FAILURE_CODES` 去掉 `MODEL_PROVIDER_STREAM_FAILED_BEFORE_OUTPUT`。
+    - `execution-authority-policy.mjs` 的分类器检查改为：要求有 `new Set([504, 524])` 和 `!UPSTREAM_TIMEOUT_STATUSES.has(status)`，并反向检查分类器不得引用 `ProviderTransportError`/`ProviderOutputError`。这样，在 mlhjyx/new-api#3 上线前，任何人加回流式释放都会被治理门拦下。
+  - Router 本身只改了一段注释，控制流与上一版逐字相同，释放的范围只会因分类器收窄而变小。这次收窄没有放宽任何东西。
+  - 测试先红后绿：三种流式用例移到「照旧结算」，另加 HTTP 504、524 两项，处置合同把流式码加进拒收列表，收窄前共 6 项红，收窄后网关与处置合同 103 项全绿。
+  - 「每个 key 最多 3 次」是账本层的预留次数。new-api `RetryTimes=1`，最多对应 6 次物理请求，已写入 AGENTS 与执行预算设计文档。
+  - 运行时会话的结论：按这两处修改后同意合并。独立复审由续跑工作流的复审 agent 对收窄后的 head 进行，结论贴在 PR 上。
+  - 更新指纹 `router-model-gateway.ts` → `3887cf6307cd829c8a529fab092e52644c6eab0c53eae5455ca26fa9c0ad36a1`；`tool-broker.ts` 未改，仍为 `659bb26d…`。

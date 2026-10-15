@@ -40,11 +40,12 @@ export interface DomainAckContract {
 
 /**
  * v2 (D13) adds `definite_failure`: a physical request that failed definitively
- * before any output (an HTTP 429/5xx status, a connection that never opened, a
- * stream that ended before its first output, or a Tool that failed before its
+ * before anything was billed (an HTTP 429 or 5xx status other than the 504/524
+ * timeouts, a connection that never opened, or a Tool that failed before its
  * first wire). Its operation is RELEASED and it is the only disposition that
- * allows another physical request, bounded by the ledger to three attempts per
- * operation key. A control error is also RELEASED but sent nothing, so there is
+ * allows another physical request, bounded by the ledger to three reservations
+ * per operation key (a ledger count: the model gateway's own RetryTimes=1 makes
+ * that up to six physical requests). A control error is also RELEASED but sent nothing, so there is
  * nothing to retry; every other disposition still forbids a second request.
  */
 export type ExecutionResultDisposition =
@@ -105,7 +106,7 @@ const REPLAY_CODES = new Set([
 /** model-gateway/definite-model-failure.ts codes plus the ToolBroker pre-wire release. */
 const DEFINITE_FAILURE_CODES = new Set([
   'MODEL_PROVIDER_HTTP_UNAVAILABLE', 'MODEL_PROVIDER_CONNECTION_NOT_ESTABLISHED',
-  'MODEL_PROVIDER_STREAM_FAILED_BEFORE_OUTPUT', 'TOOL_FAILED_BEFORE_PHYSICAL_WIRE',
+  'TOOL_FAILED_BEFORE_PHYSICAL_WIRE',
 ]);
 
 function ackInvalid(): never { throw new ExecutionControlError('DOMAIN_ACK_CONTRACT_INVALID'); }

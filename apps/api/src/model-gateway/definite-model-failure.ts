@@ -1,33 +1,42 @@
-import {
-  ProviderHttpError,
-  ProviderTransportError,
-} from "./providers/provider-output-error";
+import { ProviderHttpError } from "./providers/provider-output-error";
 
 /**
  * D13: the stable codes of a model call that failed definitively before the
- * model produced any output. Such a call cost nothing at the gateway, so the
- * non-paid gateway releases its reservation instead of settling it, and a
- * retry of the same operation key may reserve it again (the ledger allows at
- * most three attempts per key).
+ * gateway billed anything. The non-paid gateway releases its reservation
+ * instead of settling it, and a retry of the same operation key may reserve
+ * it again. The ledger allows at most three reservations per key; with the
+ * gateway's own RetryTimes=1 that is up to six physical requests.
  *
- * Every failure that may already have produced billable output stays a
- * settlement with no result: a timeout or abort, a stream cut after any
- * output delta or counted output token, a content filter, an unreadable body,
- * a structured-output repair (the first call already ran) and every
- * unclassified error.
+ * Every failure that may already have been billed stays a settlement with no
+ * result: a timeout or abort, an HTTP 504/524, a stream that failed at any
+ * point, a content filter, an unreadable body, a structured-output repair
+ * (the first call already ran) and every unclassified error.
+ *
+ * A stream that failed before its first output is deliberately not listed:
+ * the live new-api fork answers it with HTTP 200 and bills the locally
+ * estimated prompt tokens (xin new-api logs 5734-5738, 2026-10-13). It can be
+ * added once the first-byte fix (mlhjyx/new-api#3) makes it an HTTP error.
  */
 export type DefiniteModelFailureCode =
   | "MODEL_PROVIDER_HTTP_UNAVAILABLE"
-  | "MODEL_PROVIDER_CONNECTION_NOT_ESTABLISHED"
-  | "MODEL_PROVIDER_STREAM_FAILED_BEFORE_OUTPUT";
+  | "MODEL_PROVIDER_CONNECTION_NOT_ESTABLISHED";
+
+/** Gateway timeouts: the request reached the upstream, which may have billed it. */
+const UPSTREAM_TIMEOUT_STATUSES: ReadonlySet<number> = new Set([504, 524]);
 
 /**
  * Statuses the gateway answers before streaming anything: rate limiting and
- * server-side unavailability. A 4xx request error fails the same way on every
- * retry, so it keeps the settle rule and stops the operation.
+ * server-side unavailability, matching new-api's own retry statuses
+ * (429, 500-503, 520-523, 525-599). A 4xx request error fails the same way on
+ * every retry, so it keeps the settle rule and stops the operation.
  */
 function isUnavailableStatus(status: number): boolean {
-  return status === 429 || (status >= 500 && status <= 599);
+  return (
+    status === 429 ||
+    (status >= 500 &&
+      status <= 599 &&
+      !UPSTREAM_TIMEOUT_STATUSES.has(status))
+  );
 }
 
 /**
@@ -42,13 +51,6 @@ const CONNECT_PHASE_CODES: ReadonlySet<string> = new Set([
   "EHOSTUNREACH",
   "ENETUNREACH",
   "UND_ERR_CONNECT_TIMEOUT",
-]);
-
-/** Stream failures the parser can prove happened before any output. */
-const STREAM_FAILURES_BEFORE_OUTPUT: ReadonlySet<string> = new Set([
-  "CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR",
-  "CHAT_COMPLETIONS_STREAM_TRUNCATED",
-  "CHAT_COMPLETIONS_STREAM_EMPTY",
 ]);
 
 function errorCode(value: unknown): unknown {
@@ -80,18 +82,6 @@ export function definiteModelFailureCode(
   }
   if (error instanceof TypeError && isConnectPhaseCause(error.cause)) {
     return "MODEL_PROVIDER_CONNECTION_NOT_ESTABLISHED";
-  }
-  if (
-    error instanceof ProviderTransportError &&
-    Object.getPrototypeOf(error) === ProviderTransportError.prototype &&
-    STREAM_FAILURES_BEFORE_OUTPUT.has(error.reasonCode) &&
-    error.outputStarted === false &&
-    error.callCount === 1 &&
-    error.cause === undefined &&
-    !((error.usage?.outputTokens ?? 0) > 0) &&
-    !((error.usage?.costUsd ?? 0) > 0)
-  ) {
-    return "MODEL_PROVIDER_STREAM_FAILED_BEFORE_OUTPUT";
   }
   return undefined;
 }

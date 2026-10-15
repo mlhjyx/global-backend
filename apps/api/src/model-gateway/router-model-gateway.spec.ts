@@ -1759,13 +1759,13 @@ describe('RouterModelGateway budget operation identity', () => {
 });
 
 /**
- * D13: a provider error that proves no output was produced before the answer
- * started (an HTTP 429/5xx status, a connection that never opened, or a stream
- * that ended before its first output delta and with zero output tokens) is a
- * definite failure. It costs nothing at the gateway, so the reservation is
- * released and a retry of the same operation key may reserve it again.
- * Everything that may have produced billable output keeps the old rule: one
- * settlement with no result, never a second physical request.
+ * D13: a provider error that proves the gateway billed nothing (an HTTP 429 or
+ * 5xx status other than the 504/524 timeouts, or a connection that never
+ * opened) is a definite failure. The reservation is released and a retry of
+ * the same operation key may reserve it again. Everything that may have been
+ * billed keeps the old rule: one settlement with no result, never a second
+ * physical request. That includes a stream that failed before its first
+ * output, which the live new-api fork still bills by estimated prompt tokens.
  */
 describe('RouterModelGateway — definite failures before any output release the reservation (D13)', () => {
   const OPERATION_ID = '7d5e8f1a-2b3c-4d5e-8f90-a1b2c3d4e5f6';
@@ -1844,28 +1844,6 @@ describe('RouterModelGateway — definite failures before any output release the
         ]),
       }),
     ],
-    [
-      'an upstream error event before any output (xin 2026-10-13 12:27, five extractions)',
-      new ProviderTransportError('gateway m: stream carried an upstream error', undefined, {
-        reasonCode: 'CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR',
-        outputStarted: false,
-      }),
-    ],
-    [
-      'a stream cut before its first token with zero output tokens',
-      new ProviderTransportError(
-        'CHAT_COMPLETIONS_STREAM_TRUNCATED',
-        { inputTokens: 600, outputTokens: 0 },
-        { outputStarted: false },
-      ),
-    ],
-    [
-      'a stream that carried no completion chunk',
-      new ProviderTransportError('gateway m: stream carried no completion chunk', undefined, {
-        reasonCode: 'CHAT_COMPLETIONS_STREAM_EMPTY',
-        outputStarted: false,
-      }),
-    ],
   ])('releases on %s and rethrows the provider error unchanged', async (_name, error) => {
     const { budgetStore, call, trace } = harness(error);
 
@@ -1890,6 +1868,38 @@ describe('RouterModelGateway — definite failures before any output release the
     [
       'HTTP 400 (a request the gateway rejects every time)',
       new ProviderHttpError({ status: 400, provider: 'gateway', model: 'm' }),
+    ],
+    // A gateway or origin timeout means the request reached the upstream, which
+    // may already have generated and billed the answer. new-api excludes both
+    // from its own retry statuses for the same reason.
+    ['HTTP 504 (a gateway timeout)', new ProviderHttpError({ status: 504, provider: 'gateway', model: 'm' })],
+    ['HTTP 524 (an origin timeout)', new ProviderHttpError({ status: 524, provider: 'gateway', model: 'm' })],
+    // The live new-api fork answers a stream that fails before its first output
+    // with HTTP 200 and bills the locally estimated prompt tokens (xin new-api
+    // logs 5734-5738, 2026-10-13 12:27: completion 0, about 23k quota each), so
+    // releasing these would under-record spend. They become releasable once the
+    // first-byte fix (mlhjyx/new-api#3) turns them into HTTP errors.
+    [
+      'an upstream error event before any output (xin 2026-10-13 12:27, five extractions)',
+      new ProviderTransportError('gateway m: stream carried an upstream error', undefined, {
+        reasonCode: 'CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR',
+        outputStarted: false,
+      }),
+    ],
+    [
+      'a stream cut before its first token with zero output tokens',
+      new ProviderTransportError(
+        'CHAT_COMPLETIONS_STREAM_TRUNCATED',
+        { inputTokens: 600, outputTokens: 0 },
+        { outputStarted: false },
+      ),
+    ],
+    [
+      'a stream that carried no completion chunk',
+      new ProviderTransportError('gateway m: stream carried no completion chunk', undefined, {
+        reasonCode: 'CHAT_COMPLETIONS_STREAM_EMPTY',
+        outputStarted: false,
+      }),
     ],
     ['a reset connection (the request may have been sent)', connectError('ECONNRESET')],
     [
