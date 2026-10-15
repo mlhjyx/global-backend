@@ -3,6 +3,7 @@ import { ApiResponse } from '@nestjs/swagger';
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { isExecutionControlError } from '../execution-budget/execution-control-error';
 import {
+  ProviderHttpError,
   ProviderIdentityError,
   ProviderOutputError,
   ProviderTransportError,
@@ -38,12 +39,23 @@ const SETTLED_UNREGISTERED_PROTOTYPES: ReadonlySet<object> = new Set<object>([
 /**
  * The gateway reason code of a model call settled without a usable answer, or
  * undefined when the error does not prove that. Recognised: a recoverable
- * ProviderOutputError (bad JSON, schema miss, task-gate rejection) and an exact
- * identity or transport error with no control error behind it. Everything
- * else, control errors above all, is left to its own boundary.
+ * ProviderOutputError (bad JSON, schema miss, task-gate rejection), an exact
+ * identity or transport error with no control error behind it, and an exact
+ * HTTP error status from the gateway on an unpaid wire (429, 5xx: the gateway
+ * answered and the router settled the reservation). Everything else, control
+ * errors and unknown settlements above all, is left to its own boundary.
  */
 export function settledModelUpstreamFailureReason(error: unknown): string | undefined {
   if (isRecoverableModelFailure(error)) return error.reasonCode;
+  if (
+    error instanceof ProviderHttpError &&
+    Object.getPrototypeOf(error) === ProviderHttpError.prototype &&
+    Number.isInteger(error.status) &&
+    error.status >= 400 &&
+    error.status <= 599
+  ) {
+    return `GATEWAY_HTTP_${error.status}`;
+  }
   if (
     error instanceof ProviderOutputError &&
     SETTLED_UNREGISTERED_PROTOTYPES.has(Object.getPrototypeOf(error) as object) &&

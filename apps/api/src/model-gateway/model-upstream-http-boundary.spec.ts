@@ -5,6 +5,7 @@ import { ExecutionBudgetGrantError } from '../execution-budget/execution-budget-
 import { ExecutionControlError } from '../execution-budget/execution-control-error';
 import {
   ExternalActionDeniedError,
+  ProviderHttpError,
   ProviderIdentityError,
   ProviderOutputError,
   ProviderOutputUnresolvedError,
@@ -67,6 +68,31 @@ describe('a model call the gateway settled without a usable answer', () => {
     ],
   ])('is recognised for %s', (_case, error, reason) => {
     expect(settledModelUpstreamFailureReason(error)).toBe(reason);
+  });
+
+  it.each([
+    ['an upstream 503 the gateway relayed (xin 2026-10-13, seller #26)', 503, 'GATEWAY_HTTP_503'],
+    ['a rate limit', 429, 'GATEWAY_HTTP_429'],
+    ['a gateway 502 for a stream that failed before its first byte', 502, 'GATEWAY_HTTP_502'],
+    ['an origin timeout behind the CDN', 524, 'GATEWAY_HTTP_524'],
+  ])('is recognised for %s', (_case, status, reason) => {
+    const error = new ProviderHttpError({ status, provider: 'gateway', model: 'deepseek-v4-pro' });
+    expect(settledModelUpstreamFailureReason(error)).toBe(reason);
+  });
+
+  it.each([
+    ['a status below 400', 302],
+    ['a status above 599', 600],
+    ['a fractional status', 503.5],
+  ])('is not recognised for an HTTP error with %s', (_case, status) => {
+    const error = new ProviderHttpError({ status, provider: 'gateway', model: 'deepseek-v4-pro' });
+    expect(settledModelUpstreamFailureReason(error)).toBeUndefined();
+  });
+
+  it('is not recognised for a subclass of the HTTP error nobody registered', () => {
+    class DerivedHttpError extends ProviderHttpError {}
+    const error = new DerivedHttpError({ status: 503, provider: 'gateway', model: 'deepseek-v4-pro' });
+    expect(settledModelUpstreamFailureReason(error)).toBeUndefined();
   });
 
   it.each([
