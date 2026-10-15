@@ -32,8 +32,20 @@ function client(url) {
   return new PrismaClient({ datasources: { db: { url } } });
 }
 
-function objectKey(sha256) {
-  return `generic-operation-results/v1/sha256/${sha256.slice(0, 2)}/${sha256}`;
+// Mirrors contentAddressedObjectKey (apps/api/src/durable-results/artifact/
+// artifact-key.ts): since 20260901060000 every final object lives under its
+// privacy-class prefix, and assert_generic_operation_artifact_manifest_v2
+// rejects any other key.
+const PRIVACY_PATH = Object.freeze({
+  PUBLIC_ORGANIZATION: "public-organization",
+  CONFIDENTIAL_TENANT: "confidential-tenant",
+  PERSONAL_DATA: "personal-data",
+});
+
+function objectKey(sha256, privacyClass) {
+  const privacyPath = PRIVACY_PATH[privacyClass];
+  assert.ok(privacyPath, `unknown privacy class ${privacyClass}`);
+  return `generic-operation-results/v1/final/${privacyPath}/sha256/${sha256.slice(0, 2)}/${sha256}`;
 }
 
 function digest() {
@@ -144,7 +156,7 @@ function artifactInput(binding, privacyClass, subjectRef = null) {
     ...binding,
     artifactId: randomUUID(),
     resultSchema: "http-get/v1",
-    objectKey: objectKey(sha256),
+    objectKey: objectKey(sha256, privacyClass),
     sha256,
     sizeBytes: 1024n,
     mediaType: "text/html",
@@ -152,6 +164,7 @@ function artifactInput(binding, privacyClass, subjectRef = null) {
     sourceDigest: null,
     createdAt: CREATED_AT,
     expiresAt: EXPIRES_AT,
+    objectVersionId: `version-${randomUUID()}`,
     subjectRef,
   };
 }
@@ -222,6 +235,10 @@ async function appendWorkspaceV2(transaction, input) {
   );
 }
 
+// The settlement the runtime uses (apps/api/src/tools/budget-store.ts): v4 is
+// v2's settlement plus the object version identity, which a PERSONAL_DATA
+// artifact must have before its transaction commits
+// (generic_operation_artifact_personal_version_guard).
 async function settleWorkspaceCurrent(transaction, input) {
   const manifest = {
     schemaVersion: "generic-operation-artifact/v1",
@@ -241,9 +258,9 @@ async function settleWorkspaceCurrent(transaction, input) {
     expiresAt: input.expiresAt.toISOString(),
   };
   return transaction.$queryRawUnsafe(
-    `SELECT * FROM settle_tool_budget_artifact_manifest_with_receipt_v2(
+    `SELECT * FROM settle_tool_budget_artifact_manifest_with_receipt_v4(
       $1, $2::uuid, $3::bigint, $4::jsonb, $5::smallint, $6::boolean,
-      $7, $8, $9, $10::boolean, $11::jsonb, $12, $13, $14::uuid
+      $7, $8, $9, $10::boolean, $11::jsonb, $12, $13, $14::uuid, $15
     )`,
     input.workspaceId,
     input.operationId,
@@ -264,6 +281,33 @@ async function settleWorkspaceCurrent(transaction, input) {
     "estimated_upper_bound",
     input.subjectRef?.subjectType ?? null,
     input.subjectRef?.subjectId ?? null,
+    input.objectVersionId,
+  );
+}
+
+// A bare append of PERSONAL_DATA bytes is refused at commit by two deferred
+// triggers, the subject guard and the version guard, and PostgreSQL fires them
+// in name order. To make a refusal prove the subject guard alone, first settle
+// a carrier artifact with the same bytes through the runtime settlement, which
+// pins the object version; only the subject guard can then refuse the append.
+async function pinPersonalObjectVersion(owner, app, input, companyId) {
+  const carrierSubjectId = randomUUID();
+  await seedContactSubject(owner, {
+    subjectId: carrierSubjectId,
+    workspaceId: input.workspaceId,
+    companyId,
+  });
+  const carrier = {
+    ...artifactInput(
+      await seedWorkspaceBinding(owner, input.workspaceId),
+      "PERSONAL_DATA",
+      { subjectType: "contact", subjectId: carrierSubjectId },
+    ),
+    sha256: input.sha256,
+    objectKey: input.objectKey,
+  };
+  await withWorkspace(app, input.workspaceId, (tx) =>
+    settleWorkspaceCurrent(tx, carrier),
   );
 }
 
@@ -453,7 +497,9 @@ describe("generic operation PERSONAL_DATA subject index and DSR tombstone RLS", 
     await withWorkspace(app, WS_A, (tx) =>
       settleWorkspaceCurrent(tx, personalA),
     );
-    await withWorkspace(app, WS_B, (tx) => appendWorkspaceV3(tx, personalB));
+    await withWorkspace(app, WS_B, (tx) =>
+      settleWorkspaceCurrent(tx, personalB),
+    );
     await withWorkspace(app, WS_A, (tx) => appendWorkspaceV3(tx, nonPersonalA));
     deletionRequestId = randomUUID();
     await owner.$executeRawUnsafe(
@@ -737,6 +783,7 @@ describe("generic operation PERSONAL_DATA subject index and DSR tombstone RLS", 
       workspaceId: WS_A,
       companyId: COMPANY_A,
     });
+    await pinPersonalObjectVersion(owner, app, unknown, COMPANY_A);
     await rejectsSql(
       () =>
         withWorkspace(app, WS_A, async (tx) => {
@@ -840,6 +887,7 @@ describe("generic operation PERSONAL_DATA subject index and DSR tombstone RLS", 
       await seedWorkspaceBinding(owner, WS_A),
       "PERSONAL_DATA",
     );
+    await pinPersonalObjectVersion(owner, app, personal, COMPANY_A);
     await rejectsSql(
       () => withWorkspace(app, WS_A, (tx) => appendWorkspaceV2(tx, personal)),
       "GENERIC_OPERATION_ARTIFACT_SUBJECT_INVALID",

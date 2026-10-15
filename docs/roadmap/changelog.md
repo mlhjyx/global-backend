@@ -4,6 +4,24 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-15 · Repair the stale artifact-subject RLS spec and run it in CI
+
+- 起因：`packages/db/test/generic-operation-artifact-subject.rls.spec.mjs`（PERSONAL_DATA 产物按主体建索引、DSR tombstone 阻止再物化、app_user 不能直读或改写索引，共 10 项）不在任何 CI 步骤里，没人发现它早已跑不起来：在只含 main 迁移的库上，before 钩子以 `GENERIC_OPERATION_ARTIFACT_INVALID` 失败，10 项全部取消（#654 的实施工作流在一次性库上发现）。
+- 根因是夹具落后于两次迁移，不是被测的 SQL 有缺陷：
+  - `20260901060000_generic_operation_artifact_privacy_prefix` 起，最终对象键带隐私类前缀（`…/v1/final/<privacy>/sha256/…`），`assert_generic_operation_artifact_manifest_v2` 拒绝其他形式；夹具还在拼旧键。
+  - `generic_operation_artifact_personal_version_guard`（延迟约束触发器）要求 PERSONAL_DATA 对象在事务提交前钉上对象版本；夹具用不带版本的 `settle_…_v2`，并直接 `append_…_v3` 写个人数据，提交时报 `GENERIC_OPERATION_ARTIFACT_OBJECT_VERSION_REQUIRED`。
+- 改动（只动测试与 CI）：
+  - 对象键按 `contentAddressedObjectKey` 的规则带隐私类前缀；
+  - 个人数据一律走运行时实际使用的 `settle_tool_budget_artifact_manifest_with_receipt_v4`，带对象版本；非个人数据仍用 `append_…_v3`。专门验证「旧函数被拒」的用例保持原样。
+  - CI 新增步骤「Generic operation artifact subject RLS on PostgreSQL」：在同一个 Postgres 服务里另建 `global_artifact_subject_test` 库（用例写固定 id、保留数据行，不能与其他步骤共库），用例自己部署全部迁移后运行。
+- 测试：
+  - 修复前 0/10（before 钩子失败、10 项取消），修复后 10/10。
+  - 所有拒绝断言都钉具体错误标记（`permission denied`、`…_SUBJECT_TOMBSTONED`、`…_SUBJECT_INVALID`），新的版本守卫不会让它们误过。
+  - 变异检验：禁用 `generic_operation_artifact_personal_subject_guard` 后，「v2 append 绕过」与「ACK_UNKNOWN 恢复冻结主体」两项变红，失败原因是「没有被拒」（日志里 0 次 `OBJECT_VERSION_REQUIRED`）。
+  - 独立复审 LOW：这两项的裸 append 原本会被两个延迟触发器（主体守卫、版本守卫）同时拒绝，命中 `SUBJECT_INVALID` 只是因为 PostgreSQL 按触发器名字顺序执行。现在先经运行时结算写入同字节的承载产物、钉住对象版本，再做裸 append，只剩主体守卫能拒绝，不再依赖触发器命名。
+  - 按 CI 步骤的命令在一次性 pgvector/pg16 上模拟：主库已迁移、另建库、运行用例，退出码 0。
+- 未做：`packages/db/test` 里其余不在 CI 的用例没有逐个核查；#654 合入后可在本用例补 `company_profile` 主体的 tombstone 覆盖。
+
 ## 2026-10-14 · Keep a reused artifact object alive until its latest manifest expires, and record every object version for erasure (#647)
 
 - 起因：运行时会话 10-14 用库与 MinIO 证实，产物对象按 `sha256 + 隐私类` 寻址复用，但桶生命周期按**对象年龄**过期（PERSONAL_DATA 1 天，MinIO 的实际删除点是 `LastModified + 2 天` 向下取整到 UTC 午夜）。后来的清单复用同一对象不刷新年龄，第一个写入者的到期一到对象就没了，库里更晚的行还在有效期内：空页面摘要 `e3b0c442…` 有 23 行（10-12 17:34 → 10-13 16:36 写入，最晚到 10-14 16:36），对象 10-14 00:00 已被删除；重放时 `readVerified` 报 `GENERIC_OPERATION_ARTIFACT_INVALID`，「同一操作重放不再出网」的保证被破坏。
