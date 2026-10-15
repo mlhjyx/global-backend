@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateRule, qualify, RuleLike } from './rule-engine';
+import {
+  evaluateRule,
+  isNegativeOperator,
+  lintQualificationRules,
+  mirrorExclusionRuleIndexes,
+  qualify,
+  RuleLike,
+} from './rule-engine';
 
 const rule = (partial: Partial<RuleLike>): RuleLike => ({
   kind: 'MUST_HAVE',
@@ -70,5 +77,81 @@ describe('qualify（优先级：EXCLUSION > MUST_HAVE fail > unknown > match）'
     const r = qualify(rules, { country: 'DE', employee_count: 300, certifications: ['ISO 9001:2015'] });
     expect(r.verdict).toBe('match');
     expect(r.score).toBeCloseTo(2 / 3, 3);
+  });
+});
+
+// ── v3：权威 Fit 存在时，否定型 EXCLUSION（neq / not_in / not_contains）只记录不排除 ──
+describe('qualify — negativeExclusionsAdvisory（镜像 EXCLUSION 只记录）', () => {
+  const mirrored: RuleLike[] = [
+    { id: 'm1', kind: 'MUST_HAVE', field: 'keywords', operator: 'contains', value: '泵' },
+    { id: 'x1', kind: 'EXCLUSION', field: 'keywords', operator: 'not_contains', value: '泵' },
+    { id: 'x2', kind: 'EXCLUSION', field: 'business_model', operator: 'not_in', value: ['分销商', '进口商'] },
+    { id: 'x3', kind: 'EXCLUSION', field: 'country', operator: 'neq', value: 'DE' },
+    { id: 'x4', kind: 'EXCLUSION', field: 'business_model', operator: 'contains', value: '终端工厂' },
+  ];
+  // 公司 keywords 是受控英文词表，永远不含中文：镜像 EXCLUSION「keywords not_contains 泵」对每家公司都 pass。
+  const attrs = { keywords: ['industrial pumps'], business_model: 'distributor', country: 'DE' };
+
+  it('默认（无权威 Fit）：否定型 EXCLUSION 命中照旧 exclude（行为不变）', () => {
+    expect(qualify(mirrored, attrs).verdict).toBe('exclude');
+  });
+
+  it('advisory：否定型 EXCLUSION 命中只记进 evaluations（advisory=true），不产生 exclude', () => {
+    const r = qualify(mirrored, attrs, { negativeExclusionsAdvisory: true });
+    expect(r.verdict).toBe('no_match'); // MUST_HAVE「keywords contains 泵」对英文词表 fail（权威 Fit 会覆盖 Fit 维）
+    expect(r.evaluations.find((e) => e.ruleId === 'x1')).toMatchObject({ outcome: 'pass', advisory: true });
+    expect(r.evaluations.find((e) => e.ruleId === 'x2')).toMatchObject({ outcome: 'pass', advisory: true });
+    expect(r.evaluations.find((e) => e.ruleId === 'x3')).toMatchObject({ outcome: 'fail', advisory: true });
+    expect(r.evaluations.find((e) => e.ruleId === 'x4')).not.toHaveProperty('advisory');
+    expect(r.evaluations.find((e) => e.ruleId === 'm1')).not.toHaveProperty('advisory');
+  });
+
+  it('advisory：正向 EXCLUSION（contains / in / eq）命中仍 exclude（最高优先）', () => {
+    const r = qualify(mirrored, { ...attrs, business_model: '终端工厂' }, { negativeExclusionsAdvisory: true });
+    expect(r.verdict).toBe('exclude');
+    expect(r.evaluations.find((e) => e.ruleId === 'x4')).toMatchObject({ outcome: 'pass' });
+  });
+
+  it('advisory 关闭（显式 false）与缺省等价', () => {
+    expect(qualify(mirrored, attrs, { negativeExclusionsAdvisory: false }).verdict).toBe('exclude');
+  });
+});
+
+describe('mirrorExclusionRuleIndexes / lintQualificationRules（MUST_HAVE 的镜像 EXCLUSION）', () => {
+  it('同 field 同 value 的否定型 EXCLUSION 是镜像；field 与 value 归一化后比较（大小写 / 下划线 / 数组顺序 / 空白）', () => {
+    const rules: RuleLike[] = [
+      { kind: 'MUST_HAVE', field: 'keywords', operator: 'contains', value: '泵' },
+      { kind: 'MUST_HAVE', field: 'business_model', operator: 'in', value: ['分销商', '进口商'] },
+      { kind: 'MUST_HAVE', field: 'region', operator: 'contains', value: 'DACH' },
+      { kind: 'EXCLUSION', field: 'keywords', operator: 'not_contains', value: ' 泵 ' },
+      { kind: 'EXCLUSION', field: 'businessModel', operator: 'not_in', value: ['进口商', '分销商'] },
+      { kind: 'EXCLUSION', field: 'region', operator: 'not_contains', value: 'dach' },
+      { kind: 'EXCLUSION', field: 'keywords', operator: 'not_contains', value: '阀门' }, // 不同 value → 非镜像
+      { kind: 'EXCLUSION', field: 'business_model', operator: 'contains', value: '终端工厂' }, // 正向 → 非镜像
+      { kind: 'NICE_TO_HAVE', field: 'keywords', operator: 'contains', value: '泵' }, // 非 EXCLUSION
+    ];
+    expect(mirrorExclusionRuleIndexes(rules)).toEqual([3, 4, 5]);
+    const lint = lintQualificationRules(rules);
+    expect(lint).toHaveLength(3);
+    expect(lint[0]).toContain('keywords');
+    expect(lint[0]).toContain('not_contains');
+    expect(lint[1]).toContain('businessModel');
+  });
+
+  it('无 MUST_HAVE 或无否定型 EXCLUSION → 无镜像、无提示', () => {
+    expect(
+      mirrorExclusionRuleIndexes([{ kind: 'EXCLUSION', field: 'keywords', operator: 'not_contains', value: '泵' }]),
+    ).toEqual([]);
+    expect(
+      lintQualificationRules([
+        { kind: 'MUST_HAVE', field: 'keywords', operator: 'contains', value: '泵' },
+        { kind: 'EXCLUSION', field: 'country', operator: 'in', value: ['RU'] },
+      ]),
+    ).toEqual([]);
+  });
+
+  it('isNegativeOperator：neq / not_in / not_contains 为否定型，其余为正向', () => {
+    for (const op of ['neq', 'not_in', 'not_contains']) expect(isNegativeOperator(op)).toBe(true);
+    for (const op of ['eq', 'in', 'contains', 'gte', 'lte', 'matches', 'bogus']) expect(isNegativeOperator(op)).toBe(false);
   });
 });

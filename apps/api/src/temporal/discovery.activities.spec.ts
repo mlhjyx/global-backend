@@ -10,7 +10,7 @@ import {
 import { ExecutionControlError } from "../execution-budget/execution-control-error";
 import { DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS } from "./discovery-company-materialization";
 import { ToolPolicyDenied } from "../tools/tool-broker";
-import { MAX_DISCOVERY_PLAN_QUERIES } from "../discovery/execution-envelope";
+import { MAX_DISCOVERY_PLAN_QUERIES, MAX_DISCOVERY_PROFILE_COMPANIES } from "../discovery/execution-envelope";
 import { resolveRunStatus } from "./discovery.run-status";
 import {
   ProviderOutputError,
@@ -3807,6 +3807,7 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
       nextIndex: null,
       unreplayable: 0,
       previousUnreplayable: false,
+      backfilled: 0,
     });
     expect(profile).not.toHaveBeenCalled();
   });
@@ -4019,7 +4020,14 @@ describe("profileWebsitesForRun contact paths (BI-14)", () => {
 
   async function makeContactDeps(
     profile: ReturnType<typeof vi.fn>,
-    options: { contactStatus?: string; attributes?: Record<string, unknown>; lockedStatus?: string } = {},
+    options: {
+      contactStatus?: string;
+      attributes?: Record<string, unknown>;
+      lockedStatus?: string;
+      /** Workspace companies outside the run whose contact paths were never read (the backfill candidates). */
+      backfill?: Array<{ id: string; name: string; domain: string; country: string; attributes: Record<string, unknown> }>;
+      runCompanies?: Array<{ id: string; name: string; domain: string; country: string }>;
+    } = {},
   ) {
     const deps = makeEnrichDeps([]) as unknown as {
       prisma: { withWorkspace: (ws: string, fn: (tx: unknown) => Promise<unknown>) => Promise<unknown> };
@@ -4032,12 +4040,21 @@ describe("profileWebsitesForRun contact paths (BI-14)", () => {
       updateMany: vi.fn(async () => ({ count: 0 })),
     };
     const attributes = options.attributes ?? {};
+    const backfillQueries: unknown[][] = [];
     await deps.prisma.withWorkspace("ws", async (raw) => {
       const tx = raw as Record<string, unknown> & { canonicalCompany: Record<string, unknown> };
-      tx.$queryRaw = vi.fn(async (strings: TemplateStringsArray) =>
-        strings.join("?").includes("FOR SHARE")
-          ? [{ status: options.lockedStatus ?? "NEW", name: COMPANY.name, domain: COMPANY.domain }]
-          : [{ locked: true }]);
+      tx.$queryRaw = vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
+        const sql = strings.join("?");
+        if (sql.includes("FOR SHARE")) {
+          return [{ status: options.lockedStatus ?? "NEW", name: COMPANY.name, domain: COMPANY.domain }];
+        }
+        if (sql.includes("_contact_parser")) {
+          backfillQueries.push(values);
+          return options.backfill ?? [];
+        }
+        return [{ locked: true }];
+      });
+      tx.discoveryRun = { findUnique: vi.fn(async () => ({ createdAt: new Date("2026-10-14T00:00:00Z") })) };
       tx.dataProvider = {
         findUnique: vi.fn(async ({ where }: { where: { key: string } }) => ({
           status: where.key === "company_contact" ? options.contactStatus ?? "DISABLED" : "ENABLED",
@@ -4047,12 +4064,13 @@ describe("profileWebsitesForRun contact paths (BI-14)", () => {
         findUnique: vi.fn(async () => ({ companyAttributes: { industry: "Pumpen" }, targetMarkets: ["DE"] })),
       };
       tx.canonicalCompany.updateMany = updateMany;
-      tx.canonicalCompany.findMany = async () => [{ ...COMPANY, attributes }];
+      tx.canonicalCompany.findMany = async () =>
+        (options.runCompanies ?? [COMPANY]).map((company) => ({ ...company, attributes }));
       tx.canonicalCompany.findUnique = async () => ({ ...COMPANY, status: "NEW", attributes });
       tx.companyContactPoint = points;
     });
     deps.websiteProfile = { profile };
-    return { acts: createDiscoveryActivities(deps as never), updateMany, points };
+    return { acts: createDiscoveryActivities(deps as never), updateMany, points, backfillQueries };
   }
 
   it("leaves contact paths alone while company_contact is DISABLED: nothing asked for, no points", async () => {
@@ -4133,6 +4151,94 @@ describe("profileWebsitesForRun contact paths (BI-14)", () => {
     expect(points.findMany).not.toHaveBeenCalled();
     expect(points.createMany).not.toHaveBeenCalled();
     expect(points.updateMany).not.toHaveBeenCalled();
+  });
+
+  // ── 评分规则 v3：补联系路径（backfill）——开关打开后，每个 run 用画像配额的余量读工作区里还没读过联系路径的公司 ──
+  const BACKFILL = [
+    { id: "b1", name: "B1 Pumpen", domain: "b1-pumpen.example", country: "DE", attributes: {} },
+    { id: "b2", name: "B2 Armaturen", domain: "b2-armaturen.example", country: "AT", attributes: {} },
+  ];
+
+  it("fills the remaining profile quota with workspace companies whose contact paths were never read (switch ENABLED)", async () => {
+    const profile = vi.fn(async () => ({ ...PROFILE, contactPaths: PATHS }));
+    const { acts, backfillQueries } = await makeContactDeps(profile, { contactStatus: "ENABLED", backfill: BACKFILL });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-contact-backfill", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ profiled: 3, matched: 3, backfilled: 2, nextIndex: null });
+
+    expect(profile.mock.calls.map((call) => (call[0] as { domain: string }).domain)).toEqual([
+      COMPANY.domain,
+      "b1-pumpen.example",
+      "b2-armaturen.example",
+    ]);
+    // The candidate query takes only the quota the run's own companies left over.
+    expect(backfillQueries).toHaveLength(1);
+    expect(backfillQueries[0]).toContain(MAX_DISCOVERY_PROFILE_COMPANIES - 1);
+  });
+
+  it("does not look for backfill candidates while company_contact is DISABLED", async () => {
+    const profile = vi.fn(async () => PROFILE);
+    const { acts, backfillQueries } = await makeContactDeps(profile, { backfill: BACKFILL });
+
+    await acts.profileWebsitesForRun(discoveryArgs("run-contact-backfill-off", { icpId: "icp-1" }));
+
+    expect(backfillQueries).toHaveLength(0);
+    expect(profile).toHaveBeenCalledOnce();
+  });
+
+  it("a continuation activity starting past the run's own list profiles the backfill companies only", async () => {
+    const profile = vi.fn(async () => ({ ...PROFILE, contactPaths: PATHS }));
+    const { acts } = await makeContactDeps(profile, { contactStatus: "ENABLED", backfill: BACKFILL });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-contact-backfill-resume", { icpId: "icp-1", startIndex: 1 })),
+    ).resolves.toMatchObject({ profiled: 2, backfilled: 2 });
+
+    expect(profile.mock.calls.map((call) => (call[0] as { domain: string }).domain)).toEqual([
+      "b1-pumpen.example",
+      "b2-armaturen.example",
+    ]);
+  });
+
+  it("does not look for backfill candidates when the run's own companies already fill the quota", async () => {
+    const profile = vi.fn(async () => null);
+    const runCompanies = Array.from({ length: MAX_DISCOVERY_PROFILE_COMPANIES }, (_, index) => ({
+      id: `r${index}`,
+      name: `R${index}`,
+      domain: `r${index}.example`,
+      country: "DE",
+    }));
+    const { acts, backfillQueries } = await makeContactDeps(profile, {
+      contactStatus: "ENABLED",
+      backfill: BACKFILL,
+      runCompanies,
+    });
+
+    await acts.profileWebsitesForRun(discoveryArgs("run-contact-backfill-full", { icpId: "icp-1" }));
+
+    expect(backfillQueries).toHaveLength(0);
+    expect(profile).toHaveBeenCalledTimes(MAX_DISCOVERY_PROFILE_COMPANIES);
+  });
+
+  it("skips a backfill candidate this run already read (it stays in the list so continuation indexes hold)", async () => {
+    const profile = vi.fn(async () => ({ ...PROFILE, contactPaths: PATHS }));
+    const alreadyRead = {
+      ...BACKFILL[0]!,
+      attributes: {
+        website_profile: { trade_role: "distributor", _ts: new Date().toISOString(), _contact_parser: "company_contact/v1" },
+      },
+    };
+    const { acts } = await makeContactDeps(profile, { contactStatus: "ENABLED", backfill: [alreadyRead, BACKFILL[1]!] });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-contact-backfill-read", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ profiled: 2, backfilled: 1 });
+
+    expect(profile.mock.calls.map((call) => (call[0] as { domain: string }).domain)).toEqual([
+      COMPANY.domain,
+      "b2-armaturen.example",
+    ]);
   });
 });
 

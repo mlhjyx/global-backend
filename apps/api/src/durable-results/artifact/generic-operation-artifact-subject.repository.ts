@@ -1,14 +1,30 @@
 import { types } from "node:util";
 import { Prisma } from "@prisma/client";
-import type { DeletionSubjectType } from "../../compliance/deletion.types";
+import { DELETION_SUBJECT_TYPES } from "../../compliance/deletion.types";
 import { isCanonicalArtifactUuid } from "./artifact.types";
 import { ExecutionControlError } from "../../execution-budget/execution-control-error";
 
 export const GENERIC_OPERATION_ARTIFACT_SUBJECT_INVALID =
   "GENERIC_OPERATION_ARTIFACT_SUBJECT_INVALID" as const;
 
+/**
+ * The rows a PERSONAL_DATA artifact can be bound to: the two DSR subject kinds
+ * (`contact` = canonical_contact, `company` = canonical_company, a discovered
+ * buyer) and `company_profile`, the tenant's own seller profile whose pages the
+ * understanding workflow crawls (owner decision 2026-10-14, option A). A seller
+ * profile is not a DSR subject: the public deletion API and DeletionCompleted
+ * keep `contact | company`. The database CHECKs and subject functions admit the
+ * same three kinds (migration 20261014120000).
+ */
+export const GENERIC_OPERATION_ARTIFACT_SUBJECT_TYPES = [
+  ...DELETION_SUBJECT_TYPES,
+  "company_profile",
+] as const;
+export type GenericOperationArtifactSubjectType =
+  (typeof GENERIC_OPERATION_ARTIFACT_SUBJECT_TYPES)[number];
+
 export interface GenericOperationArtifactSubjectRef {
-  readonly subjectType: DeletionSubjectType;
+  readonly subjectType: GenericOperationArtifactSubjectType;
   readonly subjectId: string;
 }
 
@@ -122,8 +138,12 @@ function canonicalTimestamp(value: unknown): string {
   return canonical;
 }
 
-function subjectType(value: unknown): DeletionSubjectType {
-  return value === "contact" || value === "company" ? value : invalid();
+function subjectType(value: unknown): GenericOperationArtifactSubjectType {
+  return (GENERIC_OPERATION_ARTIFACT_SUBJECT_TYPES as readonly unknown[]).includes(
+    value,
+  )
+    ? (value as GenericOperationArtifactSubjectType)
+    : invalid();
 }
 
 function uuid(value: unknown): string {
@@ -260,6 +280,13 @@ export class GenericOperationArtifactSubjectRepository {
         WHERE contact.workspace_id = ${workspaceId}::uuid
           AND ${subjectRef.subjectType} = 'contact'
           AND contact.id = ${subjectRef.subjectId}::uuid
+        UNION ALL
+        SELECT profile.workspace_id, 'company_profile'::text AS subject_type,
+          profile.id AS subject_id
+        FROM public.company_profile profile
+        WHERE profile.workspace_id = ${workspaceId}::uuid
+          AND ${subjectRef.subjectType} = 'company_profile'
+          AND profile.id = ${subjectRef.subjectId}::uuid
       ) candidate
       WHERE session_user = 'app_user'
         AND current_setting('role', true) IS NOT DISTINCT FROM 'none'
@@ -282,7 +309,8 @@ export class GenericOperationArtifactSubjectRepository {
   /**
    * G3 pre-wire admission: a subject already tombstoned by a DSR, or a company
    * (or the company of a contact) suppressed by the rights flow, must not start
-   * a new physical fetch. The settlement SQL re-checks tombstones; this read
+   * a new physical fetch. A seller company_profile has no suppression state;
+   * only its tombstone holds it. The settlement SQL re-checks tombstones; this read
    * only prevents the wire. The owner-defined reader applies the app_user and
    * workspace guard; zero rows means that guard failed (fail closed).
    */
