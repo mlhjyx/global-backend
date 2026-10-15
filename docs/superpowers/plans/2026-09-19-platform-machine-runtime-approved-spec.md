@@ -1,7 +1,7 @@
 # R4 最小 machine/runtime 安全差额提案
 
-> 生命周期：`APPROVED`
-> 生命周期依据：用户已批准的 R4 规格；实现随 #545 与 GrowthOS 补丁线推进，尚无 RuntimeEvidence
+> 生命周期：`SUPERSEDED`
+> 生命周期依据：用户已批准的 R4 规格；实现随 #545 与 GrowthOS 补丁线推进，尚无 RuntimeEvidence。2026-10-14 改为 `SUPERSEDED`：PRD4-D2（2026-10-10）冻结 R4，不再推进本规格的剩余部分（出网围栏保留）；已合入的部分保留，本文件只作 provenance
 
 状态：**APPROVED_SPEC / IMPLEMENTATION_IN_PROGRESS / NO_RUNTIME_EVIDENCE**。
 

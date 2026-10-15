@@ -1,7 +1,7 @@
 # 历史文档归档
 
 > 生命周期：`REFERENCE_ONLY`
-> 依据：PR-C 按 2026-09-25 的候选清单归档历史 Word 和头部标记为 CLOSED、未被机器合同精确钉住的计划；当前权威不因归档改变。
+> 依据：PR-C 按 2026-09-25 的候选清单归档历史 Word 和头部标记为 CLOSED、未被机器合同精确钉住的计划；2026-10-14 的文档回写另把 status 旧正文与 architecture 头部历史横幅原文移入（清单末两行）。当前权威不因归档改变。
 
 此目录保留原 `docs/` 下的相对目录结构。Word 为原文件字节移动；计划保留原生命周期与历史内容，仅调整受移动影响的路径。当前事实仍以[当前状态](../status/current.md)及其权威入口为准。两份 Site Builder v3.1/v3.2 文档和两份被测试脚本钉住的 CLOSED 计划留在原处，原因见[本次证据](../evidence/governance-slimming-20260925.md)。
 
@@ -28,3 +28,5 @@
 | `docs/出海企业AI全球客户开发与增长执行平台_产品总体PRD_v3.0_完整评审稿.docx` | [出海企业AI全球客户开发与增长执行平台_产品总体PRD_v3.0_完整评审稿.docx](出海企业AI全球客户开发与增长执行平台_产品总体PRD_v3.0_完整评审稿.docx) |
 | `docs/出海企业AI全球客户开发与增长执行平台_产品总纲与产品手册_v3.0_完整评审稿.docx` | [出海企业AI全球客户开发与增长执行平台_产品总纲与产品手册_v3.0_完整评审稿.docx](出海企业AI全球客户开发与增长执行平台_产品总纲与产品手册_v3.0_完整评审稿.docx) |
 | `docs/出海企业AI增长平台_总产品手册与PRD_v2.0_完整产品母本.docx` | [出海企业AI增长平台_总产品手册与PRD_v2.0_完整产品母本.docx](出海企业AI增长平台_总产品手册与PRD_v2.0_完整产品母本.docx) |
+| `docs/status/current.md` 的 2026-09-20 核验版正文（2026-10-14 重写前） | [status/current-20260920.md](status/current-20260920.md) |
+| `docs/architecture/current.md` 头部 20 条 Site Builder / Copy 历史横幅（2026-10-14 折叠） | [architecture/current-site-builder-banners-20260809.md](architecture/current-site-builder-banners-20260809.md) |

@@ -71,7 +71,7 @@ pnpm --filter @global/db exec prisma migrate deploy # 读 packages/db/.env
 - 在系统边界做 schema 校验；外部数据、URL、身份、权限、费用和 provider 响应全部不可信，必须 fail closed。
 - 业务逻辑优先不可变数据与新对象；不得静默吞错。用户面返回稳定错误，服务端记录有界诊断且不泄露秘密或个人数据。
 - SQL 使用参数化/Prisma，租户数据遵守 `app_user` + `set_config('app.current_workspace_id')` + FORCE RLS；owner 连接只用于明确的平台级任务。
-- 出网只能经 ToolBroker 与 source policy；执行 SSRF/global-unicast、redirect 逐跳重验、凭据剥离、超时、字节上限、预算和幂等门。
+- 出网只能经 ToolBroker 与 source policy；执行 SSRF/global-unicast、redirect 逐跳重验、凭据剥离、超时、字节上限、预算和幂等门。唯一登记例外是制裁名单运营刷新（`apps/api/scripts/refresh-sanctions-lists.mts`，#629，PRD4-D9）：不经 ToolBroker 持有调用与预算回执，仍受 source_policy 与 net-guard 约束。
 - API 唯一真值是 code-first [`packages/contracts/openapi/openapi.json`](packages/contracts/openapi/openapi.json)。文档引用 operationId，不手抄 path/operation 总数。
 - 所有 GitHub Actions 外部 `uses:` 必须锁定已从官方 tag 只读解析的 40 位 commit SHA，并保留人类可读的版本注释。`pnpm governance:verify` 扫描全部 workflow；新增未登记或 moving-tag action 必须失败。治理脚本、机器政策、schema、runtime evidence 与 release 目录必须保持在 CODEOWNERS 最终规则块内。
 
@@ -80,7 +80,7 @@ pnpm --filter @global/db exec prisma migrate deploy # 读 packages/db/.env
 - Provider 当前机器真值为 [`docs/governance/provider-registry.json`](docs/governance/provider-registry.json)，人类页由 `pnpm governance:providers` 生成；seed key、SourceClass 与默认 enablement 漂移必须使 CI 失败。
 - Capability → Core Object → operationId → code → test → Scenario 的机器链位于 [`docs/governance/delivery-traceability.json`](docs/governance/delivery-traceability.json)。路径存在只证明 anchor 存在，不证明运行通过。
 - RuntimeEvidence 必须满足 [`runtime-evidence.schema.json`](docs/governance/runtime-evidence.schema.json)，包含 commit、environment、verified_at、valid_until、evidence_kind、result 与 artifact_digest。到期证据自动降为 `HISTORICAL`，不能用于晋级。
-- `PILOT`/`GA` 必须同时拥有当前 PASS RuntimeEvidence 与有效 Release Bundle。每条机器追踪链须声明 `required_evidence_kinds`，Release Bundle 的 `traceability_bindings` 必须把同一 chain、capability 与同一 evidence set 精确绑定。Release Bundle 使用 [`release-bundle.schema.json`](docs/governance/release-bundle.schema.json)，并分别记录机器检查、独立 reviewer、用户授权和 merge-method provenance。这些字段和 URL 仅是声明；在可信的独立外部 readback verifier 绑定其身份与内容前，`external_provenance` 必须保持 `EXTERNAL_UNVERIFIED`，验证器必须阻断晋级。伪造 `VERIFIED`、URL 或模板都不是发布证据。
+- `PILOT`/`GA` 必须同时拥有当前 PASS RuntimeEvidence 与有效 Release Bundle。每条机器追踪链须声明 `required_evidence_kinds`，Release Bundle 的 `traceability_bindings` 必须把同一 chain、capability 与同一 evidence set 精确绑定。Release Bundle 使用 [`release-bundle.schema.json`](docs/governance/release-bundle.schema.json)，并分别记录机器检查、独立 reviewer、用户授权和 merge-method provenance。这些字段和 URL 仅是声明；在可信的独立外部 readback verifier 绑定其身份与内容前，`external_provenance` 必须保持 `EXTERNAL_UNVERIFIED`，验证器必须阻断晋级。伪造 `VERIFIED`、URL 或模板都不是发布证据。**已知死锁（2026-10-14 登记）**：仓内原有的 approval/readback 回读器已由 #566 移除，`scripts/governance-delivery-contracts.mjs` 对 `PILOT`/`GA` 恒报 `RELEASE_EXTERNAL_PROVENANCE_UNVERIFIED`，晋级目前不可达；是否改为产品负责人签字待 PRD4-D12 拍板（见 conflict register），拍板前不改脚本。
 - 运行 `pnpm governance:verify` 与 `pnpm docs:verify`。不得为过 CI 删除历史、改写 evidence 或把文件移出受控范围。
 
 ## 8. 模型、评测与费用

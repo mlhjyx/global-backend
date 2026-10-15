@@ -1,7 +1,7 @@
 # Platform revocation recovery implementation
 
-> 生命周期：`APPROVED`
-> 生命周期依据：上述规格的实施计划，进行中
+> 生命周期：`SUPERSEDED`
+> 生命周期依据：上述规格的实施计划，进行中。2026-10-14 改为 `SUPERSEDED`：PRD4-D2（2026-10-10）冻结 R4，本计划停止推进；已合入的部分保留，本文件只作 provenance
 
 ## Goal and authority
 

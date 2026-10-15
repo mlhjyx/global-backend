@@ -7,6 +7,8 @@ export const AUTHORIZATION_SCOPES = Object.freeze([
   'acquisition:event:ack',
   'acquisition:label:write',
   'acquisition:identity:review',
+  // BI-22: data leaving the platform as a file (weekly report CSV). Reading leads does not imply it.
+  'acquisition:export',
   'personal-data:read',
   'compliance:manage',
   'ops:read',
