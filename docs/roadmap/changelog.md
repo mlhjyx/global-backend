@@ -4,6 +4,15 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-15 · Say why stream failures still settle after the new-api first-byte fix went live
+
+- 起因：#652 收窄时，把「流在首个输出之前失败不释放预留」写成了暂缓措施，理由是现役 new-api 会对它回 HTTP 200 并按估算输入 token 计费，要等 mlhjyx/new-api#3 上线后再加回。W12 已于 2026-10-15 上线（new-api 6ea085c6，镜像由 #661 钉住）：首字节之前的失败现在由 new-api 回可重试的 HTTP 502、不计费，backend 的分类器本来就把 502 当作确定失败释放。
+- 改动：只改文字，代码行为不变。
+  - 流式失败仍然不释放，`execution-authority-policy.mjs` 的反向检查也保留。理由改为：以流式失败到达 backend 的，都发生在首字节之后，可能已计费；即使 new-api 回退到旧镜像，照旧结算也不会少记。
+  - 同步修改的地方：`definite-model-failure.ts`、`settled-model-failure.ts` 的说明，两个 spec 的注释，策略报错文字，AGENTS §8，执行预算设计文档。
+- 测试：execution-authority-policy PASS；治理 spec 29 项、网关 / 处置合同 / discovery 单测 1351 项通过；Copy 回执 UNCHANGED；受保护文件没有改动。
+- 未做：首字节之前失败的对账日志 `NEWAPI_FIRST_BYTE_UNBILLED` 还没有真实触发的记录（openox 仍在返回 503，那是 HTTP 错误，不是断流），恢复后由运行时会话核对。
+
 ## 2026-10-15 · Pin the new-api rc.44 fork release (first-byte failures retried and unbilled)
 
 - 起因：xin 的 new-api 停在上游 rc.21 与 rc.22 之间（`bde9b2f4` + 结算回读 `d14d3e1c`），流式请求在首字节前失败时回 200 并按估算输入 token 计费（10 月 6 次、约 0.28 美元），也不会换渠道重试。mlhjyx/new-api#4（W12，评审会话实施、独立复审 MERGE）同步上游 `v1.0.0-rc.44` 并移植首字节前失败的处理：回可重试 502、不计费、记 `NEWAPI_FIRST_BYTE_UNBILLED` 供与 openox 对账。

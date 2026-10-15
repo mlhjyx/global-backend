@@ -175,8 +175,8 @@ describe('valid/unknown/control/replay disposition contract', () => {
       { automaticPhysicalRetryAllowed: false },
       { code: 'GENERIC_OPERATION_RESULT_UNKNOWN' },
       { code: 'CHAT_COMPLETIONS_CONTENT_FILTERED' },
-      // The live new-api fork bills a stream that failed before its first
-      // output, so it is not a definite failure until mlhjyx/new-api#3 ships.
+      // A stream failure that reaches the backend may have been billed (a
+      // failure before the first byte arrives as HTTP 502 since new-api 6ea085c6).
       { code: 'MODEL_PROVIDER_STREAM_FAILED_BEFORE_OUTPUT' },
       { schemaVersion: 'execution-result-disposition/v1' },
     ]) {
