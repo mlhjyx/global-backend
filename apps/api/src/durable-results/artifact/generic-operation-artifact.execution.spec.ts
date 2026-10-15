@@ -4,6 +4,7 @@ import type { BudgetReservation } from '../../tools/budget-store';
 import type { Tool } from '../../tools/tool-contract';
 import type { DurableResultStrategy } from '../durable-result-strategy';
 import type { DurableExecutionReceipt } from '../durable-execution-receipt';
+import { GenericOperationArtifactError } from './artifact.types';
 import { GenericOperationArtifactExecution } from './generic-operation-artifact.execution';
 import { ArtifactStorageError } from './generic-operation-artifact.store';
 import { productArtifactMaterializerRegistry } from './generic-operation-artifact.runtime';
@@ -314,5 +315,36 @@ describe('GenericOperationArtifactExecution.replay', () => {
     await expect(execution.replay({
       reservation: reservation({ replay: true }), tool: toolFor('crawl4ai-fetch/v1'),
     })).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
+  });
+
+  it('logs the bounded code, the schema and the operation when the settled object is gone, then rethrows', async () => {
+    const { execution, service } = harness();
+    const missing = new GenericOperationArtifactError('GENERIC_OPERATION_ARTIFACT_OBJECT_MISSING');
+    service.readVerified.mockRejectedValueOnce(missing);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const reference = {
+        schemaVersion: 'generic-operation-artifact-ref/v1', artifactId: ARTIFACT_ID, operationId: OPERATION_ID,
+        resultSchema: 'crawl4ai-fetch/v1', sha256: 'a'.repeat(64), sizeBytes: '1',
+        mediaType: 'text/markdown', expiresAt: '2026-09-26T00:00:00.000Z',
+      };
+      await expect(execution.replay({
+        reservation: reservation({
+          replay: true,
+          replayResult: { resultStrategy: 'artifact_reference', reference } as never,
+          receipt: receipt('crawl4ai-fetch/v1'),
+        }),
+        tool: toolFor('crawl4ai-fetch/v1'),
+      })).rejects.toBe(missing);
+      expect(warn).toHaveBeenCalledOnce();
+      const [line] = warn.mock.calls[0]! as [string];
+      expect(line).toContain('replay');
+      expect(line).toContain('crawl4ai-fetch/v1');
+      expect(line).toContain('GenericOperationArtifactError:GENERIC_OPERATION_ARTIFACT_OBJECT_MISSING');
+      expect(line).toContain(OPERATION_ID);
+      expect(line).not.toContain('a'.repeat(64));
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
