@@ -14,6 +14,8 @@ export interface IndexedAlias {
   name: string;
   normalized: string;
   tokens: Set<string>;
+  /** 去掉开头法律形式后的核心词：查询至少与它共享 1 个词，这个名字才算数（分数仍按 tokens 算）。 */
+  coreTokens: Set<string>;
   quality: 'strong' | 'weak';
 }
 
@@ -24,6 +26,7 @@ export interface IndexedSanctionsEntity {
   primaryName: string;
   normalizedPrimary: string;
   primaryTokens: Set<string>;
+  primaryCoreTokens: Set<string>;
   country: string | null; // alpha-2（或原样）
   listVersion: string;
   aliases: IndexedAlias[];
@@ -64,10 +67,37 @@ function bidirNameScore(q: string, qTokens: Set<string>, n: string, nTokens: Set
   return Math.max(nameScore(q, qTokens, n, nTokens), nameScore(n, nTokens, q, qTokens));
 }
 
-/** 预归一：把名字转成 (normalized, tokens)。screening service 建索引时对实体侧同法预处理。 */
-export function prepareName(name: string): { normalized: string; tokens: Set<string> } {
+/**
+ * 名单实体名开头的俄式 / 独联体法律形式（FSE = Federal State Enterprise、FSUE/FGUP/GUP 国有单一制企业、
+ * OOO/OAO/ZAO/PAO/AO 公司形式、JSC 系列），只收两份名单里实际以开头形式出现过的。和 GmbH、LLC 一样不是身份。
+ */
+const ENTITY_LEADING_LEGAL_FORMS: ReadonlySet<string> = new Set([
+  'fse', 'fsue', 'fgup', 'gup',
+  'ooo', 'oao', 'zao', 'pao', 'ao',
+  'jsc', 'ojsc', 'pjsc', 'cjsc',
+]);
+
+/**
+ * 实体侧预归一：(normalized, tokens) 与查询侧同法（normForMatch），分数按它们算；另给出 coreTokens——
+ * 剥掉**开头**法律形式后的词（名字全由法律形式组成时取完整词集）。只用于门槛：查询与 coreTokens 没有交集时这个名字不算命中，
+ * 于是「唯一重合是法律形式」的误报（公司「FSE」↔「FSE Kamensky Zavod」）消失；分数、其余命中都不变。
+ * 不直接剥 tokens：那会让「Kalashnikov JSC」↔「JSC KALASHNIKOV CONCERN」这类两侧都带法律形式的真命中漏掉（#660 复审）。
+ */
+export function prepareName(name: string): { normalized: string; tokens: Set<string>; coreTokens: Set<string> } {
   const normalized = normForMatch(name);
-  return { normalized, tokens: new Set(normalized.split(' ').filter(Boolean)) };
+  const parts = normalized.split(' ').filter(Boolean);
+  // 名字全部由法律形式组成时没有可剥的名字：核心用完整词集，命中与 main 相同。
+  if (parts.every((t) => ENTITY_LEADING_LEGAL_FORMS.has(t))) {
+    return { normalized, tokens: new Set(parts), coreTokens: new Set(parts) };
+  }
+  let start = 0;
+  while (ENTITY_LEADING_LEGAL_FORMS.has(parts[start])) start += 1;
+  return { normalized, tokens: new Set(parts), coreTokens: new Set(parts.slice(start)) };
+}
+
+function sharesCore(qTokens: Set<string>, coreTokens: Set<string>): boolean {
+  for (const t of qTokens) if (coreTokens.has(t)) return true;
+  return false;
 }
 
 /** 建索引的输入行（screening service 从 sanctions_entity 取，sourceId→sourceKey 已解析）。 */
@@ -92,7 +122,13 @@ export function buildSanctionsIndex(rows: readonly SanctionsEntityRow[]): Indexe
       const name = typeof a?.name === 'string' ? a.name : null;
       if (!name) continue;
       const pa = prepareName(name);
-      aliases.push({ name, normalized: pa.normalized, tokens: pa.tokens, quality: a?.quality === 'weak' ? 'weak' : 'strong' });
+      aliases.push({
+        name,
+        normalized: pa.normalized,
+        tokens: pa.tokens,
+        coreTokens: pa.coreTokens,
+        quality: a?.quality === 'weak' ? 'weak' : 'strong',
+      });
     }
     out.push({
       externalId: r.externalId,
@@ -100,6 +136,7 @@ export function buildSanctionsIndex(rows: readonly SanctionsEntityRow[]): Indexe
       primaryName: r.primaryName,
       normalizedPrimary: p.normalized,
       primaryTokens: p.tokens,
+      primaryCoreTokens: p.coreTokens,
       country: r.country,
       listVersion: r.listVersion,
       aliases,
@@ -132,9 +169,12 @@ export function screenName(
     // ① originate：只用 primaryName + 强别名（弱别名不 originate）
     let bestName = ent.primaryName;
     let bestQuality: ScreenMatch['aliasQuality'] = 'primary';
-    let best = ent.primaryTokens.size ? bidirNameScore(q, qTokens, ent.normalizedPrimary, ent.primaryTokens) : 0;
+    let best =
+      ent.primaryTokens.size && sharesCore(qTokens, ent.primaryCoreTokens)
+        ? bidirNameScore(q, qTokens, ent.normalizedPrimary, ent.primaryTokens)
+        : 0;
     for (const a of ent.aliases) {
-      if (a.quality !== 'strong' || !a.tokens.size) continue;
+      if (a.quality !== 'strong' || !a.tokens.size || !sharesCore(qTokens, a.coreTokens)) continue;
       const s = bidirNameScore(q, qTokens, a.normalized, a.tokens);
       if (s > best) {
         best = s;
@@ -146,7 +186,7 @@ export function screenName(
 
     // ② 弱别名只用于**升高**已 originate 的候选（不能凭空建候选）
     for (const a of ent.aliases) {
-      if (a.quality !== 'weak' || !a.tokens.size) continue;
+      if (a.quality !== 'weak' || !a.tokens.size || !sharesCore(qTokens, a.coreTokens)) continue;
       const s = bidirNameScore(q, qTokens, a.normalized, a.tokens);
       if (s > best) {
         best = s;
