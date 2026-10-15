@@ -15435,7 +15435,7 @@
             }
           },
           "ruleLint": {
-            "description": "规则 lint（读取 / 激活时由 rules 推导，不落库）：与 MUST_HAVE 同 field 同 value 的镜像 EXCLUSION（否定操作符）各一条提示；无问题为空数组",
+            "description": "规则 lint（读取 / 激活时由 rules 推导，不落库）：每条否定操作符（neq / not_in / not_contains）的 EXCLUSION 一条提示——与 MUST_HAVE 同 field 同 value 的镜像（资格门已判 Fit 时只记录不排除，建议删除），或非镜像（资格门已判 Fit 时仍然排除，请确认取值写法）；无问题为空数组",
             "type": "array",
             "items": {
               "type": "string"

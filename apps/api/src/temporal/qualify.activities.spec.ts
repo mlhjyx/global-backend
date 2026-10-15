@@ -150,3 +150,20 @@ describe('scoreCandidates — 公司级联系路径进可达性（评分规则 v
     expect(both.upserted().scores.reachability).toBe(1);
   });
 });
+
+describe('scoreCandidates — score_detail 记下计分所用的规则版本（W5-f）', () => {
+  it('score_detail.ruleVersion = 本次计分的规则版本（create 与 update 两路一致），LeadQualified 快照读它', async () => {
+    const f = fixture({
+      points: [{ kind: 'contact_page', value: 'https://pumpen-handel.example/kontakt', status: 'UNVERIFIED' }],
+    });
+
+    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
+
+    const call = f.leadUpsert.mock.calls[0]![0] as unknown as {
+      update: { scoreDetail: Record<string, unknown> };
+      create: { scoreDetail: Record<string, unknown> };
+    };
+    expect(call.update.scoreDetail.ruleVersion).toBe('additive-6dim-v3');
+    expect(call.create.scoreDetail.ruleVersion).toBe('additive-6dim-v3');
+  });
+});

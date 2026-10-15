@@ -56,7 +56,7 @@ function makeLead(over: Record<string, unknown> = {}) {
     fitReasons: { material: 'm', reasons: [] },
     totalScore: 0.55,
     scores: { fit: 0.8, role: 0.5, intent: 0.3, dataQuality: 0.7, reachability: 0.6, engagement: 0 },
-    scoreDetail: { rules: [] },
+    scoreDetail: { rules: [], ruleVersion: 'additive-6dim-v3' },
     version: 2,
     ...over,
   };
@@ -294,6 +294,38 @@ describe('buildLeadQualifiedSnapshot — 快照 v1（Consumer Test：契约 sche
     const leakedContact = JSON.parse(JSON.stringify(good)) as { contact_refs: Array<Record<string, unknown>> };
     leakedContact.contact_refs[0].email = 'x@y.z';
     expect(validate(leakedContact)).toBe(false);
+  });
+});
+
+// ── qualification_rule_version：取这条 lead 实际计分时的规则版本（W5-f），不是决策时的代码常量 ──
+describe('buildLeadQualifiedSnapshot — qualification_rule_version 读 score_detail.ruleVersion', () => {
+  const snapshotFor = (scoreDetail: unknown) =>
+    buildLeadQualifiedSnapshot({ lead: makeLead({ scoreDetail }), company: makeCompany(), icpVersion: 3 });
+
+  it('score_detail 带 ruleVersion → 原样写进快照（即便代码常量已升到别的版本）', () => {
+    const { validate } = loadValidator();
+    const snap = snapshotFor({ rules: [], ruleVersion: 'additive-6dim-v9' });
+    expect(snap.qualification_rule_version).toBe('additive-6dim-v9');
+    expect(validate(snap)).toBe(true);
+  });
+
+  it('score_detail 存在但没有 ruleVersion（v3 之前计分、没有重评的存量 lead）→ additive-6dim-v2，不冒充 v3', () => {
+    const { validate } = loadValidator();
+    for (const detail of [{ rules: [] }, { rules: [], ruleVersion: '' }, { rules: [], ruleVersion: 3 }]) {
+      const snap = snapshotFor(detail);
+      expect(snap.qualification_rule_version, JSON.stringify(detail)).toBe('additive-6dim-v2');
+      expect(validate(snap)).toBe(true);
+    }
+  });
+
+  it('从未计分（score_detail 为 null）→ null，且仍过契约校验', () => {
+    const { validate } = loadValidator();
+    const snap = snapshotFor(null);
+    expect(snap.qualification_rule_version).toBeNull();
+    expect(snap.evidence_refs.score_detail_available).toBe(false);
+    const ok = validate(snap);
+    expect(validate.errors ?? []).toEqual([]);
+    expect(ok).toBe(true);
   });
 });
 
