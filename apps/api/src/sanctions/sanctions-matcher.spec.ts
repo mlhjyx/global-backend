@@ -27,6 +27,7 @@ function idx(
     primaryName,
     normalizedPrimary: p.normalized,
     primaryTokens: p.tokens,
+    primaryCoreTokens: p.coreTokens,
     country: opts.country ?? null,
     listVersion: '2026-07-13',
     aliases: (opts.aliases ?? []).map((a) => ({ name: a.name, ...prepareName(a.name), quality: a.quality })),
@@ -106,12 +107,13 @@ describe('screenName（召回优先匹配）', () => {
 });
 
 /**
- * 实体名开头的俄式法律形式（FSE = Federal State Enterprise、OOO、AO…）和 GmbH、LLC 一样不是身份。
+ * 实体名开头的俄式法律形式（FSE = Federal State Enterprise、OOO、AO、JSC…）和 GmbH、LLC 一样不是身份。
  * xin 2026-10-15 重评：德国公司「FSE」命中 6 条以「FSE」开头的 EU/OFAC 实体，全部是误报。
- * 只剥实体侧、只剥开头：查询侧不动（否则名为 FSE 的公司会没有核心 token、整家不筛），
- * 末尾括号里的缩写（"… Company (FSE)"）是名字的首字母，不是法律形式，保留给人审。
+ * 规则：一个名字（主名或强/弱别名）只有在查询与它**去掉开头法律形式后的核心词**至少共享 1 个词时才算数；
+ * 分数照旧按完整 token 算。所以只去掉「唯一重合是法律形式」的命中，其余命中的分数与改动前逐字相同、
+ * 不新增候选。#660 复审：只剥实体侧会让「Kalashnikov JSC」这类两侧都带法律形式的真命中漏掉，故不剥分数用的 token。
  */
-describe('实体名开头的俄式法律形式（只剥实体侧）', () => {
+describe('实体名开头的俄式法律形式：唯一重合是法律形式时不算命中', () => {
   it('公司「FSE」不再命中以 FSE 开头的实体主名', () => {
     expect(screenName('FSE', null, [idx('fse-1', 'FSE Kamensky Zavod', { sourceKey: 'eu_fsf', country: 'RU' })])).toEqual([]);
   });
@@ -125,32 +127,43 @@ describe('实体名开头的俄式法律形式（只剥实体侧）', () => {
     expect(screenName('FSE', null, [ent])).toEqual([]);
   });
 
-  it('剥掉开头法律形式后，实体真名照样命中（召回不降反升）', () => {
-    const [m] = screenName('Kamensky Zavod GmbH', 'RU', [idx('fse-3', 'FSE Kamensky Zavod', { country: 'RU' })]);
-    expect(m).toMatchObject({ externalId: 'fse-3', nameScore: 1, aliasQuality: 'primary' });
+  it('多个法律形式连在一起也一路剥完：公司「AO」不命中「ZAO AO KVORUM」', () => {
+    expect(screenName('AO', null, [idx('kvorum-1', 'ZAO AO KVORUM')])).toEqual([]);
   });
 
-  it.each(['OOO Romashka', 'AO Romashka', 'PAO Romashka', 'FGUP Romashka', 'JSC Romashka'])(
-    '%s ≡ Romashka',
-    (entityName) => {
-      const [m] = screenName('Romashka', null, [idx('ru-form', entityName)]);
-      expect(m).toMatchObject({ externalId: 'ru-form', nameScore: 1 });
-    },
-  );
+  it.each([
+    // #660 复审用公开名单找到的回归场景：两侧都带法律形式、核心词部分覆盖。
+    ['Kalashnikov JSC', 'JSC KALASHNIKOV CONCERN', 0.8],
+    ['OJSC Belavia', 'OJSC BELAVIA BELARUSIAN AIRLINES', 0.75],
+    ['OOO Volga', 'OOO VOLGA GROUP', 0.8],
+    ['Almaz-Antey JSC', 'JSC CONCERN VKO ALMAZ ANTEY', 0.75],
+  ])('两侧都带法律形式的真命中保留且分数不变：%s ↔ %s', (company, entityName, score) => {
+    const [m] = screenName(company, 'RU', [idx('ru-hit', entityName, { country: 'RU' })]);
+    expect(m).toMatchObject({ externalId: 'ru-hit', nameScore: score });
+  });
+
+  it('核心词有重合时分数与改动前相同（按完整 token 算，不因剥法律形式而升分）', () => {
+    const [m] = screenName('Kamensky Zavod GmbH', 'RU', [idx('fse-3', 'FSE Kamensky Zavod', { country: 'RU' })]);
+    expect(m).toMatchObject({ externalId: 'fse-3', nameScore: 0.8, aliasQuality: 'primary' });
+  });
+
+  it('不新增候选：「Saturn Electronics GmbH」与「JSC Saturn」改动前不命中，改动后也不命中', () => {
+    expect(screenName('Saturn Electronics GmbH', null, [idx('saturn', 'JSC Saturn')])).toEqual([]);
+  });
 
   it('末尾括号里的缩写不是法律形式：照旧是候选，交人审', () => {
     const [m] = screenName('FSE', null, [idx('fse-4', 'Fanavaran Sanat Ertebatat Company (FSE)', { sourceKey: 'eu_fsf' })]);
     expect(m).toMatchObject({ externalId: 'fse-4' });
   });
 
-  it('实体名只剩法律形式本身时不剥（不制造空名）', () => {
-    expect(prepareName('AO').tokens).toEqual(new Set(['ao']));
+  it('名字只由法律形式组成时核心至少留一个 token（不制造空核心）', () => {
+    expect(prepareName('OOO AO').coreTokens).toEqual(new Set(['ao']));
+    expect(prepareName('AO').coreTokens).toEqual(new Set(['ao']));
   });
 
-  it('查询侧不剥：名为「OOO Romashka」的公司仍按原名筛', () => {
+  it('查询侧与分数用 token 都不剥：同名「OOO Romashka」仍是精确满分', () => {
     const [m] = screenName('OOO Romashka', null, [idx('ru-q', 'OOO Romashka')]);
-    // 实体侧剥成 romashka，查询侧仍是 ooo romashka：实体 ⊆ 查询、多 1 个 token → 0.80（未剥则是精确 1.0）。
-    expect(m).toMatchObject({ externalId: 'ru-q', nameScore: 0.8 });
+    expect(m).toMatchObject({ externalId: 'ru-q', nameScore: 1 });
   });
 });
 

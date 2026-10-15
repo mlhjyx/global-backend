@@ -4,15 +4,18 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
-## 2026-10-15 · Strip leading Russian legal forms from sanctions entity names so a company named "FSE" stops matching every "FSE …" entity
+## 2026-10-15 · Stop a sanctions hit whose only shared word is a leading Russian legal form (a company named "FSE" matched every "FSE …" entity)
 
-- 起因：第一班车上线后，对 3 个 ACTIVE ICP 重评，每个 ICP 都有 8 家公司进 `sanctions_hold`，共 19 条命中，全部是误报（运行时会话核对，样本只含公开的机构信息）。其中 6 条来自德国公司「FSE」：EU/OFAC 名单里一串以「FSE」开头的实体，例如 `FSE Kamensky Zavod`、强别名 `FSE AHK`。这里的 FSE 是俄式法律形式 Federal State Enterprise（联邦国有企业），和 GmbH、LLC 一样不是身份，但 `normForMatch` 不认识它，就被当成了名字词。
-- 改动：`sanctions-matcher.ts` 的 `prepareName` 只在建索引时用于实体一侧，现在会剥掉名字**开头**的俄式和独联体法律形式（FSE、FSUE、FGUP、GUP、MUP、OOO、OAO、ZAO、PAO、AO、NAO、JSC、OJSC、PJSC、CJSC、TOO、TOV），并且至少留下一个 token。
-  - 查询一侧（我方公司名）不剥。否则名为「FSE」的公司没有核心 token，整家都不筛。
-  - 末尾的「… Company (FSE)」这类缩写是名字的首字母，不是法律形式，不剥，照旧交人审。
-  - 剥掉开头的法律形式后，实体真名也能直接命中（`Kamensky Zavod GmbH` 对 `FSE Kamensky Zavod` 得满分），召回不降反升。
-- 测试：新增 11 项，先红后绿（改动前 9 项红）。用 19 条真实样本做回放：以 FSE 开头的 5 条消失，其余 14 条照旧是候选。sanctions、lead、report、qualify、name-match 共 306 项通过。
-- 未做：其余 14 条都是只有一个词重合的弱匹配，包括 WAVE、LK、OPUS、Hermes、Homa、AURUM、Sunny Trade，以及末尾带 (FSE) 缩写的那条。产品负责人 2026-10-15 选定不改匹配规则，「召回优先」不变，这些命中由人通过 `POST /leads/:id/sanctions-review` 逐条标为 `cleared_false_positive`。之后重新筛查时，只要没有冒出新的实体，已解除的状态会保留。「单词重合且双方国家都已知、但不相同就不卡」这条精度规则经评估没有采用：它会削弱对「换个国家注册规避制裁」的召回。
+- 起因：第一班车上线后，对 3 个 ACTIVE ICP 重评，每个 ICP 都有 8 家公司进 `sanctions_hold`，共 19 条命中，全部是误报（运行时会话核对，样本只含公开的机构信息）。其中 6 条来自德国公司「FSE」：EU/OFAC 名单里一串以「FSE」开头的实体，例如 `FSE Kamensky Zavod`、强别名 `FSE AHK`。这里的 FSE 是俄式法律形式 Federal State Enterprise（联邦国有企业），和 GmbH、LLC 一样不是身份，但 `normForMatch` 不认识它，于是它成了两边唯一相同的词。
+- 改动（`sanctions-matcher.ts`）：
+  - `prepareName` 只用于名单实体一侧。它现在额外给出 `coreTokens`，也就是剥掉名字**开头**的俄式和独联体法律形式之后的词：FSE、FSUE、FGUP、GUP、OOO、OAO、ZAO、PAO、AO、JSC、OJSC、PJSC、CJSC，只收两份名单里实际以开头形式出现过的，并且至少留 1 个 token。
+  - `screenName` 判主名、强别名、弱别名时，先要求查询和该名字的 `coreTokens` 至少共享 1 个词，**分数照旧按完整 token 算**。效果是只去掉「唯一重合是法律形式」的命中；其余命中的分数和改动前逐字相同，也不新增候选。
+  - 被替换的初版（同一 PR 的首个提交）直接剥掉了实体一侧计分用的 token。独立复审指出这会造成召回回退：`Kalashnikov JSC` 对 `JSC KALASHNIKOV CONCERN`、`OJSC Belavia`、`OOO Volga` 这类两边都带法律形式的真命中会漏掉，按公开名单模拟，OFAC 有 748 个场景由命中变成漏掉。同时，剥完只剩一个词的实体会凭空多出候选。现在的门槛做法这两个问题都没有。
+  - 查询一侧（我方公司名）不剥。末尾的「… Company (FSE)」这类缩写不在开头，不受影响，照旧交人审。
+- 测试：
+  - 单测 12 项，覆盖：FSE 主名和强别名不再命中；多个法律形式连在一起；复审给出的 4 组两侧都带法律形式的真命中保留且分数不变；不新增候选；末尾缩写仍是候选；只有法律形式时核心至少留 1 个词；查询侧不剥。在 main 的实现上，其中 5 项红。sanctions、lead、report、qualify 的单测全部通过。
+  - 用公开名单回放（OFAC SDN 全量 + EU FSF 截断版，共 11,530 个实体）：对以法律形式开头的名字生成「法律形式 + 核心首词」等 8,780 个查询，原来命中的 8,140 个全部保留，新增 0 个。消失的 9 个场景，查询本身全是法律形式（如 `ao`、`jsc`），正是要去掉的那一类。公司「FSE」的命中从 6 条降到 1 条。
+- 未做：其余 14 条只有一个词重合的弱匹配（WAVE、LK、OPUS、Hermes、Homa、AURUM、Sunny Trade，以及末尾带 (FSE) 缩写的那条）照旧是候选。产品负责人 2026-10-15 选定不改匹配规则、保持「召回优先」，8 家公司的命中由产品负责人判为误报，交运行时会话通过 `POST /leads/:id/sanctions-review` 标为 `cleared_false_positive`。之后重新筛查时，只要没有冒出新的实体，已解除的状态会保留。「单词重合且双方国家都已知、但不相同就不卡」这条规则经评估没有采用。
 
 ## 2026-10-15 · Repair the stale artifact-subject RLS spec and run it in CI
 
