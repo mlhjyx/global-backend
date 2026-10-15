@@ -21,7 +21,6 @@ function harness(
     attributes: {},
     status: 'NEW',
     contacts: [],
-    // Scoring rules v3 (#649) reads company-level contact paths and the suppression facts per batch.
     companyContactPoints: [],
   };
   const tx = {
@@ -29,6 +28,7 @@ function harness(
       findUnique: vi.fn(async () => ({ status: 'ACTIVE', rules: [], roles: [], triggerSignals: [] })),
     },
     canonicalCompany: { findMany: vi.fn(async () => [company]) },
+    // Scoring rules v3 (#649) reads company/domain suppressions once per batch.
     suppressionRecord: { findMany: vi.fn(async () => []) },
     fieldEvidence: {
       findMany: vi.fn(async () => [{ entityId: company.id, providerKey: 'companies_house', license: 'OGL-UK-3.0' }]),

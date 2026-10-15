@@ -1,5 +1,6 @@
 import {
   DELIVERY_STATES,
+  DEV_FAST_LANE_EVIDENCE_PREFIX,
   EVIDENCE_ENVIRONMENTS,
   IDENTIFIER,
   PROMOTION_STATES,
@@ -111,6 +112,20 @@ export function validateTraceability(traceability, context = {}) {
         issue(
           "TRACE_EVIDENCE_KINDS_INVALID",
           `${chainId} must declare unique required_evidence_kinds`,
+        ),
+      );
+    }
+    if (
+      requiredEvidenceKinds.some(
+        (kind) =>
+          isNonEmptyString(kind) &&
+          kind.startsWith(DEV_FAST_LANE_EVIDENCE_PREFIX),
+      )
+    ) {
+      issues.push(
+        issue(
+          "TRACE_FAST_LANE_EVIDENCE_KIND_FORBIDDEN",
+          `${chainId} cannot require development fast-lane evidence`,
         ),
       );
     }

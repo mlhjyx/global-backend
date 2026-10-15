@@ -674,6 +674,46 @@ test("runtime evidence cannot self-authorize an unbounded freshness window", () 
   assert.equal(result.eligible_for_promotion, false);
 });
 
+test("development fast-lane evidence stays in development and never becomes a release-chain kind", () => {
+  const pilotLane = validateRuntimeEvidence(
+    runtimeEvidence({
+      evidence_kind: "dev-fast-lane-discovery-run",
+      environment: "pilot",
+    }),
+    { now: NOW },
+  );
+  assert.ok(
+    issueCodes(pilotLane).includes("EVIDENCE_FAST_LANE_ENVIRONMENT_INVALID"),
+  );
+  assert.equal(pilotLane.eligible_for_promotion, false);
+
+  const developmentLane = validateRuntimeEvidence(
+    runtimeEvidence({ evidence_kind: "dev-fast-lane-discovery-run" }),
+    { now: NOW },
+  );
+  assert.deepEqual(developmentLane.issues, []);
+
+  const chain = traceability().chains[0];
+  const laneChain = validateTraceability(
+    {
+      ...traceability(),
+      chains: [
+        {
+          ...chain,
+          required_evidence_kinds: [
+            "runtime_probe",
+            "dev-fast-lane-discovery-run",
+          ],
+        },
+      ],
+    },
+    traceabilityContext(),
+  );
+  assert.ok(
+    issueCodes(laneChain).includes("TRACE_FAST_LANE_EVIDENCE_KIND_FORBIDDEN"),
+  );
+});
+
 test("provider registry is bound to code-seeded key, SourceClass, and enablement", () => {
   const context = {
     seed_providers: [

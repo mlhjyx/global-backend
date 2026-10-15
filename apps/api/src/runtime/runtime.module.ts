@@ -26,9 +26,22 @@ import {
 import { ApiRuntimeProcessHeartbeat } from "./runtime-process-heartbeat";
 import { ManagedDependencyReadinessContributors } from "./managed-dependency-readiness";
 import { RuntimeReadinessService } from "../health/runtime-readiness.service";
+import {
+  DEV_FAST_LANE,
+  resolveDevFastLane,
+  type DevFastLane,
+} from "./dev-fast-lane";
 
 export const RUNTIME_SETTINGS = Symbol("RUNTIME_SETTINGS");
 export const RUNTIME_RELEASE_IDENTITY = Symbol("RUNTIME_RELEASE_IDENTITY");
+
+/** Same pure resolver and environment as main.ts, so both always agree. */
+export const DEV_FAST_LANE_PROVIDER = {
+  provide: DEV_FAST_LANE,
+  inject: [RUNTIME_SETTINGS],
+  useFactory: (settings: RuntimeSettings): DevFastLane =>
+    resolveDevFastLane(settings.mode, process.env),
+};
 
 function buildCompatibilityIdentity(
   identity: RuntimeReleaseIdentity,
@@ -108,10 +121,12 @@ function buildCompatibilityIdentity(
     },
     ApiRuntimeProcessHeartbeat,
     ManagedDependencyReadinessContributors,
+    DEV_FAST_LANE_PROVIDER,
     RuntimeReadinessService,
   ],
   exports: [
     RUNTIME_SETTINGS,
+    DEV_FAST_LANE,
     BuildIdentityService,
     RuntimeReleaseIdentityService,
     RuntimeAdmissionService,

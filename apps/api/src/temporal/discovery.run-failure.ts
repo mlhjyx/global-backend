@@ -82,14 +82,27 @@ function failureType(error: unknown): string {
   return innermostName ?? UNCLASSIFIED;
 }
 
+/**
+ * Content-free description of the error that stopped a run: its failure type
+ * and the shared classifier's control verdict. Shared by the discovery and
+ * understanding workflows, which add their own stage.
+ */
+export interface RunFailureDescription {
+  readonly errorType: string;
+  readonly control: boolean;
+}
+
+export function describeRunFailure(error: unknown): RunFailureDescription {
+  return {
+    errorType: failureType(error),
+    control: isExecutionControlError(error),
+  };
+}
+
 /** Content-free description of the error that stopped a discovery run in `stage`. */
 export function describeDiscoveryRunFailure(
   stage: DiscoveryRunStage,
   error: unknown,
 ): DiscoveryRunFailure {
-  return {
-    stage,
-    errorType: failureType(error),
-    control: isExecutionControlError(error),
-  };
+  return { stage, ...describeRunFailure(error) };
 }

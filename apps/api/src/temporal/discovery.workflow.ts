@@ -36,6 +36,11 @@ export const DISCOVERY_QUERY_RECEIPT_PATCH = 'discovery-query-receipt-input-v1';
 export const DISCOVERY_WEBSITE_PROFILE_PATCH = 'discovery-website-profile-v1';
 /** BI-25: a stage failure records the run FAILED before the workflow fails. */
 export const DISCOVERY_FAILURE_FINALIZE_PATCH = 'discovery-failure-finalize-v1';
+/**
+ * A query activity that failed on an ordinary error after its retries stops the run at the
+ * query stage instead of going on to the materialization hold it left behind.
+ */
+export const DISCOVERY_QUERY_FAILURE_STOP_PATCH = 'discovery-query-failure-stop-v1';
 export const DISCOVERY_QUERY_RECEIPT_MODE = QUERY_RECEIPT_MODE;
 const EXECUTION_CONTRACT_VERSION = 2 as const;
 
@@ -143,8 +148,10 @@ function addEnrichPass(total: EnrichTotals, pass: EnrichTotals): EnrichTotals {
 
 /**
  * Discover 编排（PRD 5.5 / 7.4.8 Waterfall 的发现段）：
- * READY 计划 → 按 priority 逐源执行（单源失败不终止整个 run → PARTIAL；数据源已停用的查询
- * 跳过，stats.skippedQueries 按原因计数，run 至少 PARTIAL，BI-30）→
+ * READY 计划 → 按 priority 逐源执行（查询的某个源在重试时遇到无法重放的操作 → 零回执、计失败、
+ * 计划继续，run 判 PARTIAL；查询活动因普通错误用尽重试 → 没有回执，run 停在查询阶段判 FAILED，
+ * 后面的查询不再执行；数据源已停用的查询跳过，stats.skippedQueries 按原因计数，run 至少
+ * PARTIAL，BI-30）→
  * 归一 + 身份解析 + Suppression → 收尾（计划 EXECUTED + DiscoveryRunCompleted 事件）。
  * 任一阶段失败（重试用尽，或控制错误）时先把 run 记为 FAILED，stats.failure 写明阶段与错误类型、
  * 不含消息，计划保持 READY；之后照旧抛出原错误，让工作流失败（BI-25）。
@@ -189,6 +196,10 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     }
   > = {};
   const perQuery: Record<string, DiscoveryQueryReceipt> = {};
+  // Queries that ended with a zero receipt because a provider was lost to an unreplayable
+  // operation. A query activity that fails outright stops the run instead, and the stop is
+  // described in stats.failure, not counted here; histories recorded before
+  // DISCOVERY_QUERY_FAILURE_STOP_PATCH count such a query too and go on.
   let failures = 0;
   let discoveryBudgetTruncated = false;
   let acceptedRaw = 0;
@@ -370,6 +381,14 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         }
       } catch (err) {
         if (isExecutionControlError(err)) throw err;
+        // The activity failed on an ordinary error after its retries, so the query left no
+        // receipt and no execution outcome. The materialization admission requires one of each
+        // per plan query, so going on would only hold the run at canonicalize, after the other
+        // queries' time and model spend. Stop here: the outer catch records the run FAILED at
+        // this stage with the error type, and the plan stays READY. Histories recorded before
+        // the patch keep counting the query and going on; so do runs without query receipts,
+        // whose materialization is not admitted by receipts, and they never ask for the patch.
+        if (usesQueryReceipts && patched(DISCOVERY_QUERY_FAILURE_STOP_PATCH)) throw err;
         previousQueryUnreplayable = false;
         failures += 1;
         if (!usesQueryReceipts) {
