@@ -11,7 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { RequestContext } from '../auth/request-context';
 import { getTask } from '../ai-tasks/task-registry';
-import { qualify, RuleLike } from './rule-engine';
+import { mirrorExclusionRuleIndexes, qualify, RuleLike } from './rule-engine';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import {
   resolveIcpToCpv,
@@ -232,14 +232,22 @@ export class IcpService {
         });
       }
       // 结构化验证规则（LED-003）：AI 提议 → 落库 → 由确定性规则引擎评估。
-      for (const r of out.qualification_rules ?? []) {
+      const proposed = (out.qualification_rules ?? []).flatMap((r) => {
         const kind = String(r.kind).toUpperCase();
-        if (!RULE_KINDS.includes(kind as never) || !RULE_OPERATORS.includes(r.operator)) continue; // 丢弃不合法提议
+        if (!RULE_KINDS.includes(kind as never) || !RULE_OPERATORS.includes(r.operator)) return []; // 丢弃不合法提议
+        return [{ ...r, kind: kind as RuleLike['kind'] }];
+      });
+      // 评分规则 v3：拒绝与 MUST_HAVE 同 field 同 value 的镜像 EXCLUSION（否定操作符）——模型常把每条
+      // MUST_HAVE 复述成 not_contains / not_in（xin ICP 22202d3c 6 条），公司属性是受控英文词表时它对每家
+      // 公司都命中。MUST_HAVE 不满足本就 no_match，镜像只会把「复核」硬变成「拒绝」。
+      const mirrored = new Set(mirrorExclusionRuleIndexes(proposed));
+      for (const [index, r] of proposed.entries()) {
+        if (mirrored.has(index)) continue;
         await transaction.qualificationRule.create({
           data: {
             workspaceId: ctx.workspaceId,
             icpId: icp.id,
-            kind: kind as never,
+            kind: r.kind as never,
             field: r.field,
             operator: r.operator,
             value: (r.value ?? null) as Prisma.InputJsonValue,

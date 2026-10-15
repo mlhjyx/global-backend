@@ -1,4 +1,5 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty } from '@nestjs/swagger';
+import { lintQualificationRules, type RuleKind } from '../rule-engine';
 
 const ICP_STATUSES = ['DRAFT', 'HYPOTHESIS', 'VALIDATING', 'ACTIVE', 'SUPERSEDED', 'ARCHIVED'];
 
@@ -66,6 +67,12 @@ export class IcpDto {
   @ApiProperty({ type: [BuyingRoleDto] }) buyingCommittee!: BuyingRoleDto[];
   @ApiProperty({ type: [IcpRuleDto], description: '机器可评估的验证规则（LED-003）' })
   rules!: IcpRuleDto[];
+  @ApiProperty({
+    type: [String],
+    description:
+      '规则 lint（读取 / 激活时由 rules 推导，不落库）：与 MUST_HAVE 同 field 同 value 的镜像 EXCLUSION（否定操作符）各一条提示；无问题为空数组',
+  })
+  ruleLint!: string[];
   @ApiProperty({ format: 'date-time' }) createdAt!: string;
 
   static from(icp: IcpRow): IcpDto {
@@ -100,6 +107,15 @@ export class IcpDto {
         weight: r.weight,
         rationale: r.rationale,
       })),
+      ruleLint: lintQualificationRules(
+        (icp.rules ?? []).map((r) => ({
+          id: r.id,
+          kind: r.kind as RuleKind,
+          field: r.field,
+          operator: r.operator,
+          value: r.value,
+        })),
+      ),
       createdAt: icp.createdAt.toISOString(),
     };
   }

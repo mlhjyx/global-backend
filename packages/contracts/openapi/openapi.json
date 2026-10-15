@@ -15308,6 +15308,13 @@
               "$ref": "#/components/schemas/IcpRuleDto"
             }
           },
+          "ruleLint": {
+            "description": "规则 lint（读取 / 激活时由 rules 推导，不落库）：与 MUST_HAVE 同 field 同 value 的镜像 EXCLUSION（否定操作符）各一条提示；无问题为空数组",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -15328,6 +15335,7 @@
           "personas",
           "buyingCommittee",
           "rules",
+          "ruleLint",
           "createdAt"
         ]
       },

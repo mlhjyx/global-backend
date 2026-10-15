@@ -9,6 +9,7 @@ import {
 } from '../sanctions/sanctions-screening.service';
 import type { ScreenMatch } from '../sanctions/sanctions-matcher';
 import { syntheticDiscoveryEntityIds } from '../discovery/evidence-license';
+import { reachableCompanyContactPoints } from '../discovery/company-contact-points';
 
 export interface QualifyRunInput {
   workspaceId: string;
@@ -64,9 +65,22 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
             take: batchSize,
             ...(cursor ? { where: { id: { gt: cursor } } } : {}),
             orderBy: { id: 'asc' },
-            include: { contacts: { include: { contactPoints: true } } },
+            include: {
+              contacts: { include: { contactPoints: true } },
+              // 评分规则 v3：公司级联系路径（BI-14 company_contact_point）进可达性。只读 VALID / UNVERIFIED
+              //（INVALID 不是渠道）；禁联不是状态，在下面读时过滤（设计 §4.5）。
+              companyContactPoints: {
+                where: { status: { in: ['VALID', 'UNVERIFIED'] } },
+                select: { kind: true, value: true, status: true },
+              },
+            },
           });
           if (!companies.length) return true;
+          // 一批一次：公司 / 域名禁联事实，用于联系路径的读时过滤（公司被禁联 → 无点；被禁联域名覆盖的点剔除）。
+          const suppressions = await tx.suppressionRecord.findMany({
+            where: { type: { in: ['domain', 'company_name'] } },
+            select: { type: true, value: true },
+          });
           const evidenceEntityOwners = new Map<string, string>();
           for (const company of companies) {
             evidenceEntityOwners.set(company.id, company.id);
@@ -141,6 +155,9 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                   seniority: ct.seniority,
                   contactPoints: ct.contactPoints.map((p) => ({ type: p.type, status: p.status })),
                 })),
+                companyContactPoints: reachableCompanyContactPoints(c.companyContactPoints, suppressions, c).map(
+                  (p) => ({ kind: p.kind, status: p.status }),
+                ),
               },
               icpForScoring,
               // ICP 资格门（LLM 四门）作为权威 Fit 传入：只覆盖 Fit 维，队列归属由六维总分 +
