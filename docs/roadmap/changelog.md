@@ -52,6 +52,36 @@
   - 旧形态（无计划身份）的查询不带 `correlationId`，仍按 run 共用操作键。
   - `taxonomyFallback` 不进 `resolveRunStatus`：回退的查询照常跑完所有源，不算漏活；若产品负责人希望它把 run 判 PARTIAL，是一行改动。
 
+## 2026-10-14 · Request scoring after a FAILED discovery run that already judged fit, and tell preset queues from scored ones (#648)
+
+- 起因：xin 上 179 条 lead 的六维分全是 NULL，队列只是 fit 阶段按 verdict 预置的值（`discovery/fit-judge.ts` `upsertLeadFit`：mismatch→rejected、其余→needs_review）。
+  - `finalizeRun` 只在 run 状态非 FAILED 时写 `QualifyRequested`，而 11 次验收 run 全部 FAILED（10-14 只读核对 `global_dev`：`discovery_run` 11 行全 FAILED、stats 都没有 `fit` 键（全部走的失败收尾路径）；`outbox_event` 里 `QualifyRequested` 与 `LeadsScored` 各 0 条）。
+  - 结果是评分、制裁第五门（`temporal/qualify.activities.ts`）、`LeadsScored` 事件从未在真实数据上跑过；API 又把预置队列和评分队列显示成一样。
+- 改动：
+  - **FAILED 的 run 也请求评分**：只要本 run 的 fit 阶段已经给过判定，`finalizeRun` 照样写 `QualifyRequested`（`reason: discovery_run_failed_after_fit`），让已物化的公司得到评分；分数是幂等 upsert，之后的 run 再刷新。
+    - 判据只看本 run（`fitStageJudged`）：stats 带 `fit` 时只按它的计数（全 0 就不写，不再回退查 lead 表）；失败路径的 stats 不带 `fit`，先要求 `failure.stage` 已到 fit（fit / enrich / signals / watches / patentEnqueue），再查本 run 解析出的公司（本 run 已接受的 raw → company identity link）在该 ICP 下有没有 `fit_verdict`。停在 query 等 fit 之前阶段的 run、或别的 run 留下的判定都不触发。
+    - 评分是确定性的、不调 provider、不花预算，所以 run 授权已结束（过期 / 撤销 / 用尽）时也写；`attestRunFinalization` 对 FAILED 的容忍逻辑不变。
+    - plan 仍留 READY；`DiscoveryRunCompleted` 照旧带 `status: FAILED`。
+  - **API 区分预置与已评分**：`GET /leads` 与 `GET /leads/:id` 每行加 `scored`（`total_score` 非空）与 `queueBasis`（`fit_gate_preset | score | human_accept | human_reject`）；`GET /icps/:id/lead-queues` 加 `scored`（每条都有分）与 `queueBasis`（四种依据的计数），并把一直返回却不在契约里的 `sanctions_hold` 补进契约。
+    - 多加了 `human_reject`：评分阶段自己也写 `status=REJECTED`，只凭状态分不出人工拒绝与评分拒绝，所以用一条 reject 裁决作证（列表每行只探 1 条；汇总用关系过滤聚合）。
+    - 新列 `lead.scored_at`（迁移 `20261014051926_lead_scored_at`，可空、不回填），评分阶段每次写分盖上。
+    - `POST /leads/:id/accept` 与 `/reject` 用同一个 `LEAD_SCHEMA`，响应同样带 `scored` 与 `queueBasis`（含两处幂等早返回）。
+  - **人工拒绝成为终态**：`scoreCandidates` 的 `humanFinal` 原先不含 REJECTED（注释说含），人工拒绝会被重评分改回 REVIEW；FAILED 收尾也请求评分后这条路径每次都会走到。现在 REJECTED 且有 reject 裁决的 lead 重评分只刷新分数、不改状态与队列，判据与 `human_reject` 相同。
+    - 人工 reject 一条评分写的 REJECTED（还没有 reject 裁决）时，`decide` 照样记下裁决，不再当成重试直接返回——否则人工的拒绝没有留痕，也挡不住重评分。已有 reject 裁决的重复 reject 仍是幂等早返回。
+  - **`LeadQualified` 快照 v1 加可选字段** `scored_at`、`queue_basis`（设计 E1：`snapshot_version` 仍 1，旧载荷照样通过）。
+  - OpenAPI 重导出；`packages/contracts/INTEGRATION.md` 阶段 3 与 `docs/architecture/current.md` 的快照字段表同步。
+- 测试：
+  - 先写失败测试，改动前 19 项失败（另一个文件因模块不存在整体失败）、改动后全部通过：
+    - `finalizeRun` 18 项：stats 有 fit 判定 / 失败停在 fit 及之后 5 个阶段且本 run 的公司有判定（断言按 run → raw → identity link → lead 查询）/ 停在 fit 之前 4 个阶段即使 ICP 有判定也不写 / stats 既无 fit 也无 failure 不写 / 本 run 的公司无判定不写 / 本 run 无已接受 raw 不查 lead / 本 run fit 计数全 0 不回退查 lead / 授权已结束仍写（3 种码）/ DONE 的 reason 不变且不查 lead 表；
+    - 队列依据纯函数 11 项；`LeadService.list` / `queueSummary` 4 项；快照 7 项（含 schema 正反例、旧载荷通过、decide 接线）；评分 `scored_at` 2 项、人工拒绝终态 2 项；`decide` 响应 5 项（accept / 重复 accept / reject / 重复 reject / reject 评分写的 REJECTED，逐项对照 openapi.json 的 required）。
+  - 真库 `lead-queue-basis.postgres.spec.ts`（app_user + RLS，一次性 Postgres，5 项）：迁移后的列可写、`groupBy` 的 `_count.totalScore`、关系过滤聚合、列表排序与行形状、跨 workspace / 跨 ICP 不计入、`decide(reject)` 对评分写的 REJECTED 记下裁决且重试不再加。已登记到 CI 的 PostgreSQL 步骤。
+  - `gctl check` 通过；oasdiff 对 origin/main 无破坏性变更。
+- 未做：
+  - 已有的 179 条 lead 不会自动评分：下一次 run 收尾时触发，或手动 `POST /icps/:id/qualify`。本 PR 不在 xin 上发起评分。
+    - 这 179 条分属 3 个 ICP（84 / 51 / 44 条，10-14 只读核对），手动 qualify 一个 ICP 只给这一个 ICP 的 lead 评分。
+    - `scoreCandidates` 遍历的是整个 workspace 的 canonical 公司，不只是该 ICP 判过的（既有行为，本 PR 未改）：xin 上 workspace 有 150 家公司，qualify 一个 ICP 后它的 lead 会变成 150 条，多出来的 66 / 99 / 106 条没有 `fit_verdict`，按评分直接进队列。所以 qualify 之后该 ICP 的 `lead-queues` 会是 `scored: true`、总数 150，而不是「179 条变 scored」。要不要只给本 ICP 判过 fit 的公司评分是另一个决定。
+  - 任务描述里「FAILED 收尾不发 `DiscoveryRunCompleted`」与代码不符：FAILED 一直发、带 `status: FAILED`，本 PR 保持。
+
 ## 2026-10-13 · Let best-effort stages skip a company whose operation cannot be replayed, time-box enrichment, and rehearse a full-size run
 
 - 起因：卖方 #23 的验收 run（`c3878e54`，xin，2026-10-12 22:47–10-13 01:23 UTC）跑完查询、官网画像、fit（#640 的时间盒生效，分约 10 批判完 84 家）和富集后，在信号富集阶段失败。
@@ -170,6 +200,26 @@
   - 方案 A 单测（零容器）：改动前 5 个文件 63 项里 13 项失败——主体解析器不收 `company_profile`、解析 SQL 没有画像分支、绑定合同不认卖方画像、删除工作流照收非 DSR 种类，以及 `understanding.activities.spec` 新增的「生产准入」用例：真实 `ToolBroker` 前面接真实 `GenericOperationArtifactExecution.admit` → `ArtifactSubjectBindingContract` → 主体仓库（只有 SQL 行是假的），改动前正是 xin 上的 `SUBJECT_BINDING_INVALID`；改动后全过：admit 收到 `company_profile` 主体、wire 一次、persist 挂同一主体，依次发生；画像 id 按 `company` 种类仍被拒，tombstone 后报 `SUBJECT_TOMBSTONED`，都在 wire 之前。
   - 方案 A 真库（一次性 `pgvector:pg16` 容器，全部迁移，查询以 app_user 在工作区事务里跑）：新 spec 7 项，在未含本迁移的库上 5 项失败，迁移后全过——目录：4 个 CHECK 与 11 个函数都收 `company_profile`，属主 / definer / search_path / 授权不变，再无函数把种类关在 `contact, company`；同工作区画像可解析、可结算绑定，别的工作区的画像、不存在的 id、买方公司 id、按 `company` 种类的画像 id 都以 `…_SUBJECT_INVALID` 拒；删画像在 tombstone 前被守卫拒（owner 与 app_user 都拒），工作区也删不掉；tombstone 要求 `deletion_request` 种类一致，之后 execution hold 为 `TOMBSTONED`、新结算 `…_TOMBSTONED`、清理入队 1 条命令，画像随后可删；两个并发用例（删画像等在途绑定、绑定等在途删除）在去掉 `FOR KEY SHARE` 后都会失败。同库重跑 CI 同步骤的 raw-sql-parameter-types、security-definer-search-path、object-version、company-contact-point、site-build-budget-lock，以及 app-user-table-privileges，全过。
 - 真机：按任务硬规则只做只读核验，没有新建卖方公司、没有触发理解工作流。本 PR 部署后，新建卖方公司的理解抓取会被准入并真实出网抓取卖方官网（产物 PERSONAL_DATA、1 天 TTL）；xin 上既有 28 行 ENRICHING 不回填。
+
+## 2026-10-13 · Answer ICP design and plan generation whose model answer settled unusable with 502 MODEL_UPSTREAM_UNUSABLE instead of a bare 500
+
+- 起因：卖方 #24 的 ICP `971c9242`（xin，2026-10-13 07:55–08:02 UTC）`POST /icps/:icpId/query-plans` 跑了 284 秒后，网关把这次调用结算为 `CHAT_COMPLETIONS_CONTENT_FILTERED`（`ProviderOutputError`，已按真实用量结算），API 却只回 500 `INTERNAL`，没有错误码；同一 ICP 再试一次得到 409 `EXECUTION_BUDGET_GRANT_REUSED`，因为 GrowthOS 对同一操作与主体会签发同一份授权，而后端按 jti 消耗授权（`consume_workspace_execution_authority`）。调用方从这两个响应里看不出模型答案不可用、也看不出该怎么重试。
+- 改动：
+  - **新的 HTTP 边界** `apps/api/src/model-gateway/model-upstream-http-boundary.ts`：`asModelUpstreamHttpBoundary` 把网关**已结算、没有可用答案**的模型失败映射成 502 `{ error: { code: "MODEL_UPSTREAM_UNUSABLE", message, details: { reasonCode } } }`。
+    - 识别的失败：可恢复的 `ProviderOutputError`（非 JSON、不过 schema、任务门拒绝，含 `TaskOutputValidationError`），以及**原型精确**的 `ProviderIdentityError`、`ProviderTransportError`（流被截断、上游错误事件、不可读、非 JSON 响应体、finish reason 无效、Responses 状态失败），且 cause 链里没有控制错误。
+    - 网关在未付费 wire 上直接回 400–599（实际是 429、5xx）时抛的 `ProviderHttpError`（原型精确、状态码为整数）：原因码为 `GATEWAY_HTTP_<状态码>`。授权（jti）在模型调用之前就已消耗，所以重试同样需要新授权；这次调用的预留是否计费由路由按失败类别决定（现在按预留额度保守结算）。子类与范围外状态码不识别（复审 MEDIUM：此前这类失败仍是裸 500）。
+    - 不识别、原样放行：授权错误（402/403/409/503 仍由 `asExecutionBudgetHttpBoundary` 映射）、控制错误、`ProviderOutputUnresolvedError`、`ProviderSettlementError`、合规拒绝、在途 wire、业务 409、普通错误。
+    - 响应正文只有固定 message 与经 `^[A-Z][A-Z0-9_]{2,63}$` 校验的 `reasonCode`，不带模型文本；日志同样只记原因码。
+  - **ICP 控制器**：`POST /companies/:companyId/icps` 与 `POST /icps/:icpId/query-plans` 在授权边界之内套上这道边界，并以 `@ApiModelUpstreamUnusable()` 把 502 注册进 code-first OpenAPI（`packages/contracts/openapi/openapi.json` 重导出，两个操作各多一个 502，spectral 0 错误，无破坏性变更）。
+  - **授权语义（这次生成失败后授权怎么算）**：授权在模型调用之前就在自己的事务里被消耗（`consumeWorkspaceAndOpen`：消耗 jti + 开账户），网关再把这次调用的真实用量结算到这份授权的账户上；失败后服务不写任何 ICP 或计划。所以授权**已消耗、已计费**，不能回滚：消耗与调用不在同一个事务里，而且就算在，结算行也必须保留，否则同一份授权可以付两次。调用方的重试方式是先向 SaaS 取一份新的授权；用同一份会得到 409 `EXECUTION_BUDGET_GRANT_REUSED`。
+  - 对接说明（`packages/contracts/INTEGRATION.md` 阶段 2 第 1 步）与错误模型表（`packages/contracts/README.md`）补上 502。
+- 测试：
+  - 先写失败测试：边界 1 个文件（识别 15 例、不识别 13 例、响应体 4 项、边界包装 8 项）在模块不存在时整体失败；控制器 14 项中 9 项失败（502 映射 6 项、OpenAPI 元数据 2 项、1 项是夹具缺 `createdAt`）；OpenAPI 文档 1 项失败。改动与重导出后 4 个文件 132 项全部通过。
+  - 服务侧新增 3 项刻画授权语义：模型失败时 `consumeWorkspaceGrant` 恰好调用一次且早于模型调用，不写计划/ICP，错误原样抛出；改动前就成立（服务没改）。
+- 未做：
+  - **用同一份授权重试仍是 409**。要让失败后的重试不必换授权，只能由 GrowthOS 在收到 502 `MODEL_UPSTREAM_UNUSABLE` 后换一个 jti 签发（例如把尝试序号纳入签发键），本仓不改 GrowthOS。风险：在那之前，调用方必须先取新授权再重试；若 SaaS 侧仍返回同一份，这个 ICP 在授权过期前都无法重新生成。
+  - 「不消耗授权」的方案评估过并放弃（见上「授权语义」）：会让同一份授权付两次。
+  - 查询计划执行（`POST /query-plans/:planId/execute`）是异步的，模型失败发生在 run 里，不走这道边界。
 
 ## 2026-10-12 · Keep a governed discovery query going when one model extraction answers unusably
 

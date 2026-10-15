@@ -2162,6 +2162,9 @@ model Lead {
   scores             Json?
   /// 评分依据：规则逐条评估结果 + 各维输入（审计/申诉用）
   scoreDetail        Json?      @map("score_detail")
+  /// 评分阶段最近一次写分的时刻（scoreCandidates 的 upsert 盖）。null = 评分从未跑过（queue 仍是 fit 门
+  /// 预置）或在本列加入前评的分。API 的 scored/queueBasis 与 LeadQualified 快照的 scored_at 读它。
+  scoredAt           DateTime?  @map("scored_at")
   version            Int        @default(1)
   createdAt          DateTime   @default(now()) @map("created_at")
   updatedAt          DateTime   @updatedAt @map("updated_at")

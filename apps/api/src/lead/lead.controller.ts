@@ -21,9 +21,25 @@ import { ScopesGuard } from '../auth/scopes.guard';
 import { envelope, pageEnvelope } from '../common/envelope';
 import { ApiEnvelope, ApiPageEnvelope } from '../common/api-envelope.decorator';
 import { LeadService } from './lead.service';
+import { LEAD_QUEUE_BASES } from './lead-queue-basis';
+
+const LEAD_QUEUE_BASIS_SCHEMA = {
+  type: 'string',
+  enum: [...LEAD_QUEUE_BASES],
+  description:
+    '队列依据：fit_gate_preset = fit 门按 verdict 预置、评分从未跑过；score = 评分阶段算出；human_accept / human_reject = 人工裁决',
+};
 
 /** Lead 行（六维分+队列）；完整字段结构化 DTO 待收口⑤ 一等 Signal 后定型。 */
-const LEAD_SCHEMA = { type: 'object', additionalProperties: true, description: 'Lead（六维分+队列+裁决状态）',
+const LEAD_SCHEMA = {
+  type: 'object',
+  additionalProperties: true,
+  description: 'Lead（六维分+队列+裁决状态）',
+  required: ['scored', 'queueBasis'],
+  properties: {
+    scored: { type: 'boolean', description: 'total_score 非空：队列已由评分决定；false = 仍是 fit 门预置' },
+    queueBasis: LEAD_QUEUE_BASIS_SCHEMA,
+  },
 };
 
 const leadDecisionErrorSchema = (codes: readonly string[]) => ({
@@ -125,15 +141,26 @@ export class LeadController {
   }
 
   @Get('icps/:icpId/lead-queues')
-  @ApiOperation({ summary: '四队列计数（推荐/待确认/拒绝/禁联）' })
+  @ApiOperation({ summary: '五队列计数（推荐/待确认/拒绝/禁联/制裁隔离）+ 队列依据（预置 / 评分 / 人工）' })
   @ApiEnvelope({
     type: 'object',
-    required: ['recommended', 'needs_review', 'rejected', 'suppressed'],
+    required: ['recommended', 'needs_review', 'rejected', 'suppressed', 'sanctions_hold', 'scored', 'queueBasis'],
     properties: {
       recommended: { type: 'integer' },
       needs_review: { type: 'integer' },
       rejected: { type: 'integer' },
       suppressed: { type: 'integer' },
+      sanctions_hold: { type: 'integer' },
+      scored: {
+        type: 'boolean',
+        description: '每条 lead 都有 total_score（计数全部出自评分或人工裁决）；false = 至少一条仍是 fit 门预置，或 ICP 无 lead',
+      },
+      queueBasis: {
+        type: 'object',
+        description: '按队列依据计数，四项之和 = lead 总数',
+        required: [...LEAD_QUEUE_BASES],
+        properties: Object.fromEntries(LEAD_QUEUE_BASES.map((basis) => [basis, { type: 'integer' }])),
+      },
     },
   })
   async queues(@Ctx() ctx: RequestContext, @Param('icpId', ParseUUIDPipe) icpId: string) {

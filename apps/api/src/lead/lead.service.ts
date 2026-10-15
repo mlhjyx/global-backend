@@ -21,6 +21,10 @@ import { contactSuppressionKeys } from '../discovery/identity';
 import { blindContactKey } from '../compliance/pii-crypto';
 import { isSyntheticDiscoveryProvenance } from '../discovery/evidence-license';
 import { collectProductReadPage } from '../discovery/product-read-pagination';
+import { isLeadScored, leadQueueBasis, summarizeLeadQueues, withQueueBasis } from './lead-queue-basis';
+
+/** 列表/详情行的队列依据探针：只取一条 reject 裁决（有界），不把裁决历史拉进行。 */
+const REJECT_DECISION_PROBE = { where: { action: 'reject' }, select: { id: true }, take: 1 } as const;
 
 @Injectable()
 export class LeadService {
@@ -82,6 +86,7 @@ export class LeadService {
             // nulls last：fit 门先建的 Lead 尚无分（totalScore=null），PG 默认 DESC NULLS FIRST 会把
             // 未评分行顶到列表最前——显式压到最后，评分完成后自然按分排。
             orderBy: [{ totalScore: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
+            include: { decisions: REJECT_DECISION_PROBE },
           }),
         projectProductRows: async (rows) => {
           // 附公司摘要（跨表查询而非 include：lead 与 canonical 无 Prisma relation）
@@ -113,10 +118,14 @@ export class LeadService {
           const byId = new Map(companies.map((company) => [company.id, company]));
           return rows
             .filter((lead) => !quarantinedCompanyIds.has(lead.canonicalCompanyId))
-            .map((lead) => ({
+            .map(({ decisions, ...lead }) => ({
               cursor: lead.id,
               value: {
                 ...lead,
+                // 预置队列 vs 已评分：scored = total_score 非空；queueBasis 见 lead-queue-basis.ts。
+                scored: isLeadScored(lead),
+                // 探针只装 reject 裁决；旧形状的行没有该字段 → 视为无。
+                queueBasis: leadQueueBasis(lead, Array.isArray(decisions) && decisions.length > 0),
                 company: byId.get(lead.canonicalCompanyId) ?? null,
               },
             }));
@@ -127,14 +136,18 @@ export class LeadService {
 
   async get(ctx: RequestContext, leadId: string) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const lead = await tx.lead.findUnique({
+      const found = await tx.lead.findUnique({
         where: { id: leadId },
         include: { decisions: true },
       });
-      if (!lead)
+      if (!found)
         throw new NotFoundException({
           error: { code: 'NOT_FOUND', message: 'lead not found' },
         });
+      const lead = withQueueBasis(
+        found,
+        found.decisions.some((decision) => decision.action === 'reject'),
+      );
       const company = await tx.canonicalCompany.findUnique({
         where: { id: lead.canonicalCompanyId },
         include: { contacts: { include: { contactPoints: true } } },
@@ -191,7 +204,15 @@ export class LeadService {
       // reject 重试没有外部交棒，仍可立即幂等返回。accept 重试必须重新经过 suppression、
       // DataRights 与 sanctions 终极闸，避免首次 QUALIFIED 后新增的禁联事实被早返回绕过；
       // 通过复核后仍不建第二条 decision/outbox。
-      if (alreadyAtTarget && action === 'reject') return lead;
+      // 评分阶段自己也写 REJECTED：只有已经有 reject 裁决的才是重试；评分写的 REJECTED 照常记下
+      // 人工裁决，重评分（scoreCandidates humanFinal）与 queueBasis 都以这条裁决认人工拒绝。
+      if (
+        alreadyAtTarget &&
+        action === 'reject' &&
+        (await tx.leadDecision.findFirst({ where: { leadId, action: 'reject' }, select: { id: true } })) !== null
+      ) {
+        return withQueueBasis(lead, true);
+      }
       const persistDecision = async (): Promise<void> => {
         // CAS 乐观锁（C）：accept 必须先通过 sanctions/DataRights 预检；DENY 不得留下业务状态变化。
         const cas = await tx.lead.updateMany({
@@ -400,7 +421,7 @@ export class LeadService {
               : ((prior?.listVersions as Record<string, string> | null) ?? {}),
         };
         // accept 重试已完成所有当前安全复核；保持原 event/decision 幂等，不产生第二份交棒事实。
-        if (alreadyAtTarget) return lead;
+        if (alreadyAtTarget) return withQueueBasis(lead, false);
         const icp = await tx.icpDefinition.findUnique({
           where: { id: lead.icpId },
           select: { version: true },
@@ -433,8 +454,14 @@ export class LeadService {
           subjectId: leadId,
           actorId: ctx.userId,
         });
+        // 接受前队列的依据（快照 queue_basis）：REJECTED 只凭状态分不出人工拒绝与评分拒绝，
+        // 查一条 reject 裁决作证（有界；其他状态不查）。
+        const humanRejected =
+          lead.status === 'REJECTED' &&
+          (await tx.leadDecision.findFirst({ where: { leadId, action: 'reject' }, select: { id: true } })) !== null;
         const snapshot = buildLeadQualifiedSnapshot({
           lead,
+          humanRejected,
           company: effectiveCompany,
           icpVersion: icp?.version ?? null,
           storageRightsDecision: rights.effect,
@@ -456,8 +483,9 @@ export class LeadService {
       }
       if (action === 'reject') await persistDecision();
       // updateMany 不返回行 → 重取 CAS 后的 lead 作为响应（同事务内读，状态一致）。
+      // 响应与 GET /leads 同一个 LEAD_SCHEMA（scored/queueBasis 为 required）：reject 刚写下裁决。
       const updated = await tx.lead.findUnique({ where: { id: leadId } });
-      return updated ?? lead;
+      return withQueueBasis(updated ?? lead, action === 'reject');
     });
     if (result && 'storageRightsDenied' in result && result.storageRightsDenied) {
       throw new ConflictException({
@@ -470,23 +498,24 @@ export class LeadService {
     return result;
   }
 
-  /** 四队列计数（LED-008 的工作台视图数据）。 */
+  /**
+   * 五队列计数（LED-008 的工作台视图数据）+ 队列依据：`scored`（每条都有 total_score）与
+   * `queueBasis` 四种依据的计数，让使用者看出计数是 fit 门预置的还是评分得出的。两条有界查询：
+   * 按 (queue, status) 分组计数（`_count.totalScore` = COUNT(total_score)），再聚合「REJECTED 且有
+   * reject 裁决」的条数——评分阶段自己也写 REJECTED，只凭状态分不出人工拒绝。
+   */
   queueSummary(ctx: RequestContext, icpId: string) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const rows = await tx.lead.groupBy({
-        by: ['queue'],
+        by: ['queue', 'status'],
         where: { icpId },
-        _count: { _all: true },
+        _count: { _all: true, totalScore: true },
       });
-      const summary: Record<string, number> = {
-        recommended: 0,
-        needs_review: 0,
-        rejected: 0,
-        suppressed: 0,
-        sanctions_hold: 0,
-      };
-      for (const r of rows) summary[r.queue] = r._count._all;
-      return summary;
+      const humanRejected = await tx.lead.aggregate({
+        where: { icpId, status: 'REJECTED', decisions: { some: { action: 'reject' } } },
+        _count: { _all: true, totalScore: true },
+      });
+      return summarizeLeadQueues(rows, humanRejected._count);
     });
   }
 
