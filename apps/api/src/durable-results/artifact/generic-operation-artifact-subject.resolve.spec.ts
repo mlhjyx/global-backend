@@ -34,6 +34,7 @@ describe("GenericOperationArtifactSubjectRepository.resolveExistingSubject", () 
     const statement = sql.strings.join("");
     expect(statement).toContain("FROM public.canonical_company");
     expect(statement).toContain("FROM public.canonical_contact");
+    expect(statement).toContain("FROM public.company_profile");
     expect(statement).toContain("session_user = 'app_user'");
     expect(statement).toContain(
       "current_setting('role', true) IS NOT DISTINCT FROM 'none'",
@@ -46,7 +47,65 @@ describe("GenericOperationArtifactSubjectRepository.resolveExistingSubject", () 
       WORKSPACE_ID,
       "company",
       SUBJECT_ID,
+      WORKSPACE_ID,
+      "company",
+      SUBJECT_ID,
     ]);
+  });
+
+  it("resolves the tenant's seller company_profile as its own subject kind", async () => {
+    const queryRaw = vi.fn(async () => [
+      {
+        workspace_id: WORKSPACE_ID,
+        subject_type: "company_profile",
+        subject_id: SUBJECT_ID,
+      },
+    ]);
+    const repository = new GenericOperationArtifactSubjectRepository();
+
+    await expect(
+      repository.resolveExistingSubject(
+        { $queryRaw: queryRaw } as never,
+        {
+          workspaceId: WORKSPACE_ID,
+          subjectRef: { subjectType: "company_profile", subjectId: SUBJECT_ID },
+        },
+      ),
+    ).resolves.toEqual({
+      workspaceId: WORKSPACE_ID,
+      subjectType: "company_profile",
+      subjectId: SUBJECT_ID,
+    });
+
+    const sql = queryRaw.mock.calls[0]?.[0] as Prisma.Sql;
+    // Each branch is keyed by its own kind: a profile id never resolves as a
+    // canonical company, nor a canonical company id as a profile.
+    expect(sql.strings.join("")).toMatch(
+      /'company_profile'::text AS subject_type,\s+profile\.id AS subject_id\s+FROM public\.company_profile profile\s+WHERE profile\.workspace_id = /u,
+    );
+    expect(sql.values.filter((value) => value === "company_profile")).toHaveLength(3);
+  });
+
+  it("refuses a row of another kind than the one asked for", async () => {
+    const repository = new GenericOperationArtifactSubjectRepository();
+
+    await expect(
+      repository.resolveExistingSubject(
+        {
+          $queryRaw: vi.fn(async () => [
+            {
+              workspace_id: WORKSPACE_ID,
+              subject_type: "company",
+              subject_id: SUBJECT_ID,
+            },
+          ]),
+        } as never,
+        {
+          workspaceId: WORKSPACE_ID,
+          subjectRef: { subjectType: "company_profile", subjectId: SUBJECT_ID },
+        },
+      ),
+    ).rejects.toThrow("GENERIC_OPERATION_ARTIFACT_SUBJECT_INVALID");
   });
 
   it("reports no canonical subject when the exact current-workspace query finds none", async () => {

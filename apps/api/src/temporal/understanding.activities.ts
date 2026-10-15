@@ -80,13 +80,13 @@ const CLOSED_FAILURE_TYPE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
  * G3 5.1 (#565): crawl4ai-fetch/v1 is a subject-bound PERSONAL_DATA artifact,
  * and the broker admits a call only for the live workspace subject it names.
  * The seller company_profile being understood is the subject of every page
- * crawled for it. The binding contract knows the `company` kind; whether a
- * seller profile resolves under it is the owner's decision (changelog
- * 2026-10-13), so until then the broker answers SUBJECT_BINDING_INVALID
- * instead of the former SUBJECT_BINDING_HOLD, still before any wire.
+ * crawled for it, as its own `company_profile` kind (owner decision 2026-10-14,
+ * option A): `company` names a discovered buyer (canonical_company), a
+ * different table, so binding the seller under it would make one subject kind
+ * point at two tables.
  */
 function sellerSubject(companyId: string): ArtifactSubjectRef {
-  return { subjectType: 'company', subjectId: companyId };
+  return { subjectType: 'company_profile', subjectId: companyId };
 }
 
 /**

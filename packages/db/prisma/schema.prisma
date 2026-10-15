@@ -410,9 +410,10 @@ model GenericOperationArtifact {
   @@map("generic_operation_artifact")
 }
 
-/// Append-only PERSONAL_DATA lookup. It contains only the existing rights-flow
-/// subject discriminator and row UUID; identity text and artifact bytes remain
-/// forbidden. One artifact can bind to exactly one DSR subject.
+/// Append-only PERSONAL_DATA lookup. It contains only the subject discriminator
+/// (`contact` | `company`, the DSR subjects, or `company_profile`, the tenant's own
+/// seller profile since 2026-10-14) and row UUID; identity text and artifact bytes
+/// remain forbidden. One artifact can bind to exactly one subject.
 model GenericOperationArtifactSubject {
   artifactId  String   @id @map("artifact_id") @db.Uuid
   scopeKey    String   @map("scope_key") @db.VarChar(200)
