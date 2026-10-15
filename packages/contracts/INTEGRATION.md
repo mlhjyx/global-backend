@@ -82,6 +82,7 @@
 1. `POST /icps/:id/query-plans` → AI 生成多源查询计划（`DRAFT`）
    - 只为当前已启用的数据源出查询，每条查询的 `filters.source_hint` 写明它执行的源；`estimatedVolume` 只计会执行的查询
    - 没有可用的已启用数据源时返回 409 `NO_ENABLED_DISCOVERY_SOURCE`（不调用模型）；模型给出的查询全落在不可用的数据源上时返回 409 `NO_RUNNABLE_QUERIES`，不保存计划
+   - 模型网关结算了调用却没有可用答案时（内容被过滤、输出截断、非 JSON、流被截断等）返回 502 `MODEL_UPSTREAM_UNUSABLE`，`details.reasonCode` 为网关原因码（例如 `CHAT_COMPLETIONS_CONTENT_FILTERED`、`STRUCTURED_OUTPUT_TRUNCATED`、`CHAT_COMPLETIONS_STREAM_TRUNCATED`；网关直接回了 429 或 5xx 时为 `GATEWAY_HTTP_<状态码>`，例如 `GATEWAY_HTTP_503`），不保存计划；这次调用的预算授权已在调用前消耗并按真实用量结算，用同一授权重试会得到 409 `EXECUTION_BUDGET_GRANT_REUSED`，重试要先向 SaaS 取一份新的授权。`POST /companies/:id/icps` 同
 2. 人工确认：`POST /query-plans/:id/confirm`（→ `READY`）
 3. 执行：`POST /query-plans/:id/execute` → 202 `{ data: { runId, status } }`；轮询 `GET /discovery-runs/:runId`（`RUNNING → DONE|PARTIAL`，stats 含每源计数）
    - 确认之后数据源被停用的查询会跳过，不让 run 失败：`stats.skippedQueries` 按原因计数（`SOURCE_DISABLED` / `SOURCE_LINEAGE_UNAVAILABLE` / `SOURCE_UNKNOWN`），run 判 `PARTIAL`
@@ -110,8 +111,8 @@
 ### 阶段 3：验证评分（Qualify）
 
 1. `POST /icps/:id/qualify` → 202，后台确定性六维评分（Fit/Role/Intent/DataQuality/Reachability/Engagement）
-2. 队列视图：`GET /icps/:id/lead-queues` → `{ data: { recommended, needs_review, rejected, suppressed } }`
-3. 列表：`GET /leads?icpId=&queue=`（按总分排序，含公司摘要）；详情 `GET /leads/:id` 带**逐规则评分依据**
+2. 队列视图：`GET /icps/:id/lead-queues` → `{ data: { recommended, needs_review, rejected, suppressed, sanctions_hold, scored, queueBasis } }`——`scored` 为真表示每条 lead 都有 `total_score`；`queueBasis` 按队列依据计数（`fit_gate_preset` = fit 门按 verdict 预置、评分从未跑过；`score` = 评分阶段算出；`human_accept` / `human_reject` = 人工裁决），四项之和 = lead 总数
+3. 列表：`GET /leads?icpId=&queue=`（按总分排序，含公司摘要；每行带 `scored` 与 `queueBasis`，未评分的行只是 fit 门预置的队列）；详情 `GET /leads/:id` 带**逐规则评分依据**
 4. 人工裁决：`POST /leads/:id/accept`（→ `QUALIFIED`，发 `LeadQualified` 事件——交给 Campaign 的出口）/ `POST /leads/:id/reject { reason }`
    - `LeadQualified.qualification_rule_version` 是这条 lead **实际计分时**的规则版本（评分时写进 `score_detail.ruleVersion`），不是接受那一刻服务端的规则：v3 之前计分、此后没有重评的 lead 标 `additive-6dim-v2`；从未计分的 lead 为 `null`。要按新规则交付，先对该 ICP 重新 `POST /icps/:id/qualify`。
 

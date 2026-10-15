@@ -108,7 +108,13 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                   canonicalCompanyId: c.id,
                 },
               },
-              select: { id: true, status: true, fitVerdict: true },
+              // 一条 reject 裁决作证人工拒绝（有界：只探一条），判据与 API 的 queueBasis=human_reject 相同。
+              select: {
+                id: true,
+                status: true,
+                fitVerdict: true,
+                decisions: { where: { action: 'reject' }, select: { id: true }, take: 1 },
+              },
             });
             const authoritativeFit = (existing?.fitVerdict ?? null) as 'match' | 'weak' | 'mismatch' | null;
 
@@ -165,8 +171,16 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
             // ruleVersion：这次计分用的规则版本。LeadQualified 快照读它，而不是决策时的代码常量——
             // 规则升级后没有重评的 lead 仍如实标注旧版本（W5-f）。
             const scoreDetail = { ...result.detail, fitVerdict: authoritativeFit, ruleVersion: QUALIFICATION_RULE_VERSION };
-            // 人工已裁决（QUALIFIED/REJECTED via decision/CONTACTED+）的 Lead 不被重评覆盖状态
-            const humanFinal = existing && ['QUALIFIED', 'CONTACTED', 'CONVERTED'].includes(existing.status);
+            // 人工已裁决（QUALIFIED/REJECTED via decision/CONTACTED+）的 Lead 不被重评覆盖状态。
+            // 评分自己也写 REJECTED，所以 REJECTED 只在有 reject 裁决时才算人工终态；评分写的 REJECTED
+            // 仍由重评分决定。
+            const humanFinal =
+              existing !== null &&
+              (['QUALIFIED', 'CONTACTED', 'CONVERTED'].includes(existing.status) ||
+                (existing.status === 'REJECTED' && existing.decisions.length > 0));
+            // scored_at：这条 lead 的队列从此由评分决定（fit 门预置结束）。API 的 scored/queueBasis 与
+            // LeadQualified 快照的 scored_at 读它。
+            const scoredAt = new Date();
             // 评分只写 scores/queue/status —— **绝不覆盖 fitVerdict/fitReasons**（那是资格门① 的产物）。
             await tx.lead.upsert({
               where: {
@@ -180,6 +194,7 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                 totalScore: result.totalScore,
                 scores: result.scores as unknown as Prisma.InputJsonValue,
                 scoreDetail: scoreDetail as unknown as Prisma.InputJsonValue,
+                scoredAt,
                 ...(humanFinal ? {} : { status: status as never, queue }),
                 version: { increment: 1 },
               },
@@ -192,6 +207,7 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                 totalScore: result.totalScore,
                 scores: result.scores as unknown as Prisma.InputJsonValue,
                 scoreDetail: scoreDetail as unknown as Prisma.InputJsonValue,
+                scoredAt,
               },
             });
             // 记/更制裁审计件（命中时）：名单/条目 ref/版本/分数/复核态——🔴 非个人传记（只公司名 + 名单条目引用）。
