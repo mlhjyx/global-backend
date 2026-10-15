@@ -4,6 +4,13 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-15 · Pin the new-api rc.44 fork release (first-byte failures retried and unbilled)
+
+- 起因：xin 的 new-api 停在上游 rc.21 与 rc.22 之间（`bde9b2f4` + 结算回读 `d14d3e1c`），流式请求在首字节前失败时回 200 并按估算输入 token 计费（10 月 6 次、约 0.28 美元），也不会换渠道重试。mlhjyx/new-api#4（W12，评审会话实施、独立复审 MERGE）同步上游 `v1.0.0-rc.44` 并移植首字节前失败的处理：回可重试 502、不计费、记 `NEWAPI_FIRST_BYTE_UNBILLED` 供与 openox 对账。
+- 改动：`docker-compose.yml` 的 new-api 镜像改钉 `ghcr.io/mlhjyx/new-api@sha256:79850cd2…`。来源：new-api#4 以 merge commit 合入 `production-parity/settlement-readback-v1` 得 `6ea085c6`，发布 run `38768715010`（`growthos-new-api-release.yml`：准入、gitleaks、许可证核验、源码 release、构建、cosign、SBOM 与构建来源证明 `56345581`、`56345639`）；本地拉取核对 revision 标签 = `6ea085c6`、运行用户 65532。许可证（node-forge 选 BSD-3-Clause）由产品负责人确认。
+- 上线（运行时会话，按 new-api#4 的上线步骤）：先停 new-api 再成对备份 `one-api.db` 与 `pepper.keyring`（新版启用 SQLite WAL）→ 重建 new-api → 重建 worker（RUNBOOK §10）→ 核对 RetryTimes、可重试状态码、`GODEBUG=http2client=0`、结算回读 capability。回退：换回旧 digest `b72f2290…`，重建 new-api 与 worker；旧版能直接打开迁移后的库。
+- 未做：#652 执行授权策略里「判定模块不得引用流式失败」的反向检查仍然成立——上线后首字节前失败以 HTTP 502 到达 backend，已按确定失败释放；还能以流式失败形式到达的只剩首字节后断流，上游已计费、不该释放——评审会话随第二班车只改其说明文字。Site Builder 的两个脚本用旧 admin access token，新版首启 30 天后停用，需改用作用域令牌。
+
 ## 2026-10-15 · Stop a sanctions hit whose only shared word is a leading Russian legal form (a company named "FSE" matched every "FSE …" entity)
 
 - 起因：第一班车上线后，对 3 个 ACTIVE ICP 重评，每个 ICP 都有 8 家公司进 `sanctions_hold`，共 19 条命中，全部是误报（运行时会话核对，样本只含公开的机构信息）。其中 6 条来自德国公司「FSE」：EU/OFAC 名单里一串以「FSE」开头的实体，例如 `FSE Kamensky Zavod`、强别名 `FSE AHK`。这里的 FSE 是俄式法律形式 Federal State Enterprise（联邦国有企业），和 GmbH、LLC 一样不是身份，但 `normForMatch` 不认识它，于是它成了两边唯一相同的词。
