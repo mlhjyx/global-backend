@@ -1,6 +1,11 @@
-import { WorkflowIdReusePolicy } from "@temporalio/client";
+import { Connection, WorkflowIdReusePolicy } from "@temporalio/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OutboxRelayService } from "./outbox-relay.service";
+import {
+  DEV_FAST_LANE_CONNECT_TIMEOUT_MS,
+  DEV_FAST_LANE_UNAVAILABLE_COOLDOWN_MS,
+  DevFastLaneTemporalClient,
+} from "../temporal/dev-fast-lane-temporal.client";
 import {
   DEV_FAST_LANE_ACQUISITION_COMMANDS,
   devFastLaneRoute,
@@ -164,13 +169,16 @@ function managedTemporal(startImpl?: () => Promise<unknown>) {
 }
 
 function laneClient(lane: DevFastLane, startImpl?: () => Promise<unknown>) {
-  const workflow = { start: vi.fn(startImpl ?? (async () => ({}))) };
+  const state = { coolingDown: false };
+  const start = vi.fn(startImpl ?? (async () => undefined));
   return {
     lane,
-    workflow: vi.fn(async () => workflow),
+    state,
+    start,
+    coolingDown: vi.fn(() => state.coolingDown),
     route: (eventType: string, workspaceId: string) =>
       devFastLaneRoute(lane, eventType, workspaceId),
-    started: workflow.start,
+    started: start,
   };
 }
 
@@ -187,14 +195,15 @@ type AnyService = any;
 function makeService(
   db: unknown,
   temporal: unknown,
-  lane?: ReturnType<typeof laneClient>,
+  lane?: ReturnType<typeof laneClient> | DevFastLaneTemporalClient,
+  leases?: unknown,
 ): AnyService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return new (OutboxRelayService as any)(
     temporal,
     db,
     vi.fn(),
-    undefined,
+    leases,
     undefined,
     undefined,
     lane,
@@ -202,6 +211,7 @@ function makeService(
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -218,22 +228,26 @@ describe("relay routing with the development fast lane", () => {
 
     // Assert
     expect(temporal.client.workflow.start).not.toHaveBeenCalled();
-    expect(lane.started).toHaveBeenCalledWith(DISCOVERY_WORKFLOW, {
-      taskQueue: LANE_QUEUE,
-      workflowId: "discovery-run-1",
-      workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
-      workflowExecutionTimeout: "185 minutes",
-      args: [
-        {
-          workspaceId: LANE_WS,
-          runId: "run-1",
-          planId: "plan-1",
-          icpId: "icp-1",
-          executionContractVersion: 2,
-          executionBudget: budget(LANE_WS, "discovery.run", "discovery_run"),
-        },
-      ],
-    });
+    expect(lane.started).toHaveBeenCalledWith(
+      DISCOVERY_WORKFLOW,
+      {
+        taskQueue: LANE_QUEUE,
+        workflowId: "discovery-run-1",
+        workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
+        workflowExecutionTimeout: "185 minutes",
+        args: [
+          {
+            workspaceId: LANE_WS,
+            runId: "run-1",
+            planId: "plan-1",
+            icpId: "icp-1",
+            executionContractVersion: 2,
+            executionBudget: budget(LANE_WS, "discovery.run", "discovery_run"),
+          },
+        ],
+      },
+      expect.any(AbortSignal),
+    );
     expect(ev.publishedAt).toBeInstanceOf(Date);
   });
 
@@ -259,6 +273,7 @@ describe("relay routing with the development fast lane", () => {
           workflowId,
           workflowExecutionTimeout: "30 minutes",
         }),
+        expect.any(AbortSignal),
       );
       expect(ev.publishedAt, eventType).toBeInstanceOf(Date);
     }
@@ -302,7 +317,7 @@ describe("relay routing with the development fast lane", () => {
       await makeService(makeDb([ev]), temporal, lane).routeEvent(ev);
 
       // Assert
-      expect(lane.workflow, ev.eventType).not.toHaveBeenCalled();
+      expect(lane.start, ev.eventType).not.toHaveBeenCalled();
       const [type, options] = vi.mocked(temporal.client.workflow.start).mock
         .calls[0] as unknown as [string, Record<string, unknown>];
       expect(type, ev.eventType).toBe(workflowType);
@@ -325,7 +340,7 @@ describe("relay routing with the development fast lane", () => {
       throw alreadyStarted;
     });
     const downLane = laneClient(laneFor(LANE_WS));
-    downLane.workflow.mockRejectedValue(new Error("ECONNREFUSED"));
+    downLane.start.mockRejectedValue(new Error("ECONNREFUSED"));
     const temporal = managedTemporal();
 
     // Act
@@ -346,21 +361,25 @@ describe("relay routing with the development fast lane", () => {
     expect(temporal.client.workflow.start).not.toHaveBeenCalled();
   });
 
-  it("polls lane commands in their own batch so a stuck lane never starves other workspaces", async () => {
+  it("polls lane commands in their own pass, ends it at the first failure to reach the lane and skips the lane while it cools down", async () => {
     // Arrange
     const laneRows = Array.from({ length: 25 }, (_, index) =>
       command("QualifyRequested", LANE_WS, BigInt(index + 1)),
     );
     const otherRow = command("QualifyRequested", OTHER_WS, 26n);
-    const db = makeDb([...laneRows, otherRow]);
+    const rows = [...laneRows, otherRow];
+    const db = makeDb(rows);
     const temporal = managedTemporal();
-    const lane = laneClient(laneFor(LANE_WS));
-    lane.workflow.mockRejectedValue(new Error("ECONNREFUSED"));
+    const lane = laneClient(laneFor(LANE_WS), async () => {
+      lane.state.coolingDown = true;
+      throw new Error("Failed to connect before the deadline");
+    });
     const service = makeService(db, temporal, lane);
     vi.spyOn(service["logger"], "error").mockImplementation(() => undefined);
 
     // Act
     await service.tick();
+    await service["laneInFlight"];
 
     // Assert
     expect(otherRow.publishedAt).toBeInstanceOf(Date);
@@ -390,7 +409,110 @@ describe("relay routing with the development fast lane", () => {
         take: 20,
       }),
     );
-    expect(lane.workflow).toHaveBeenCalledTimes(20);
+    expect(lane.start).toHaveBeenCalledTimes(1);
+
+    // Act: a tick during the cool-down neither polls nor starts lane commands
+    const laterRow = command("QualifyRequested", OTHER_WS, 27n);
+    rows.push(laterRow);
+    await service.tick();
+    await service["laneInFlight"];
+
+    // Assert
+    expect(laterRow.publishedAt).toBeInstanceOf(Date);
+    expect(db.outboxEvent.findMany).toHaveBeenCalledTimes(3);
+    expect(lane.start).toHaveBeenCalledTimes(1);
+
+    // Act: once the lane is reachable again, the next pass drains a batch
+    lane.state.coolingDown = false;
+    lane.start.mockImplementation(async () => undefined);
+    await service.tick();
+    await service["laneInFlight"];
+
+    // Assert
+    expect(lane.start).toHaveBeenCalledTimes(21);
+    expect(laneRows.filter((row) => row.publishedAt !== null)).toHaveLength(20);
+  });
+
+  it("keeps the relay heartbeat and other workspaces' commands on their 2-second cadence while every lane connect takes its full budget", async () => {
+    // Arrange
+    vi.useFakeTimers({ now: new Date("2026-10-14T08:00:00.000Z") });
+    const laneRows = Array.from({ length: 6 }, (_, index) =>
+      command("QualifyRequested", LANE_WS, BigInt(index + 1)),
+    );
+    const rows = [...laneRows];
+    const db = {
+      ...makeDb(rows),
+      $connect: vi.fn(async () => undefined),
+      $disconnect: vi.fn(async () => undefined),
+    };
+    const unreachable = () => ({
+      plugins: [],
+      ensureConnected: vi.fn(
+        () =>
+          new Promise<void>((_resolve, reject) => {
+            setTimeout(
+              () => reject(new Error("Failed to connect before the deadline")),
+              DEV_FAST_LANE_CONNECT_TIMEOUT_MS,
+            );
+          }),
+      ),
+      close: vi.fn(async () => undefined),
+    });
+    const connections = [unreachable(), unreachable()];
+    const lazy = vi.spyOn(Connection, "lazy");
+    for (const connection of connections) {
+      lazy.mockReturnValueOnce(connection as unknown as Connection);
+    }
+    const leases = {
+      heartbeat: vi.fn<
+        (role: string, state: string, owner: null) => Promise<void>
+      >(async () => undefined),
+    };
+    const service = makeService(
+      db,
+      managedTemporal(),
+      new DevFastLaneTemporalClient(laneFor(LANE_WS)),
+      leases,
+    );
+    vi.spyOn(service, "initializePlatformState").mockResolvedValue(undefined);
+    vi.spyOn(service["logger"], "error").mockImplementation(() => undefined);
+    vi.spyOn(service["logger"], "log").mockImplementation(() => undefined);
+    await service.onModuleInit();
+    const readyHeartbeats = () =>
+      leases.heartbeat.mock.calls.filter(([, state]) => state === "READY")
+        .length;
+
+    // Act + Assert: every managed tick runs on time and routes the other
+    // workspace's command, although the first lane connect is pending for its
+    // whole budget and then fails
+    const ticks = Math.ceil(DEV_FAST_LANE_UNAVAILABLE_COOLDOWN_MS / 2_000) + 4;
+    for (let tick = 1; tick <= ticks; tick++) {
+      const other = command("QualifyRequested", OTHER_WS, BigInt(100 + tick));
+      rows.push(other);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(readyHeartbeats(), `tick ${tick}`).toBe(1 + tick);
+      expect(other.publishedAt, `tick ${tick}`).toBeInstanceOf(Date);
+    }
+
+    // Assert: one bounded attempt per cool-down, failed channels closed
+    expect(lazy).toHaveBeenCalledTimes(2);
+    expect(connections[0]!.ensureConnected).toHaveBeenCalledTimes(1);
+    expect(connections[0]!.close).toHaveBeenCalledTimes(1);
+    expect(laneRows.every((row) => row.publishedAt === null)).toBe(true);
+
+    // Act: shut down while the second connect is still pending
+    const stopped = vi.fn();
+    const shutdown = service.onModuleDestroy().then(stopped);
+    await vi.advanceTimersByTimeAsync(1);
+
+    // Assert: the pending lane start is abandoned, so the drain completes
+    expect(stopped).toHaveBeenCalledTimes(1);
+    expect(leases.heartbeat).toHaveBeenLastCalledWith(
+      "OUTBOX_RELAY",
+      "STOPPED",
+      null,
+    );
+    await shutdown;
   });
 
   it("keeps the single managed poll unchanged when the lane is off", async () => {

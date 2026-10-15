@@ -15,7 +15,7 @@
 | --- | --- | --- |
 | 开关 | 一个变量既是开关又是唯一 workspace；另两个变量给开发用 Temporal 地址与期望 schema 摘要；唯一解析器在非 development 下只会抛错 | `apps/api/src/runtime/dev-fast-lane.ts` |
 | API | 启动时解析（大声拒绝），不把开关传给 release identity，API 永远是受证镜像 | `main.ts`、`runtime.module.ts` 的 `DEV_FAST_LANE` |
-| 路由 | relay 只对车道 workspace 的三条获客命令改用开发用 Temporal 客户端、车道队列与执行超时；车道命令单独成批轮询，卡住也饿不死其他 workspace | `outbox-relay.service.ts`、`temporal/dev-fast-lane-temporal.client.ts` |
+| 路由 | relay 只对车道 workspace 的三条获客命令改用开发用 Temporal 客户端、车道队列与执行超时；车道命令在单独的车道 pass 里投递，relay 主循环不等它；连接与启动各有上限，连不上就冷却 30 秒 | `outbox-relay.service.ts`、`temporal/dev-fast-lane-temporal.client.ts` |
 | readiness | 可选 capability `dev_fast_lane`，恒为 `not_proven`，不参与整体状态与写入准入 | `runtime-readiness.service.ts`、`health-openapi.schemas.ts` |
 | release identity | 只把「缺回执」改名为 `DEV_FAST_LANE_UNATTESTED`；有效回执照常 attested，无效回执照常 `BUILD_ATTESTATION_INVALID` | `runtime-release-identity.ts` |
 | worker | 只在「开关开 + 缺回执 + 唯一失败的准入项是 build」时，于任何管理态副作用之前分叉进车道 worker；其余进程（含看到开关的受证进程）走原路径 | `temporal/worker.ts`、`temporal/dev-fast-lane-worker.ts` |
@@ -24,15 +24,22 @@
 
 ## 2. 相对裁决版设计的调整（来自复核）
 
-1. **开发用 Temporal，而不是原生 Temporal**（复核 CRITICAL）：原生 Temporal 的机器授权器把 customer worker 与 customer client 的队列钉死为 `understanding`（`machine_policy.go` 的 `workerQueue`）。按原设计，relay 投车道队列会得到 PermissionDenied，行不 park、每 2 秒重试，积满一批 20 行后饿死所有租户的 outbox；车道 worker 也会在首次 poll 时被拒。改授权器要重发原生 Temporal 镜像。本实现改用 core 层的开发用 Temporal：relay 只在 development 下为车道命令另建一个明文 loopback 客户端（惰性连接，不影响 API 启动与 readiness），车道 worker 直连它、不取机器令牌。地址只接受 loopback。附带收益：可用开发用 Temporal 的 UI 观察车道 run、用它的 terminate 清理孤儿（customer client 在原生 Temporal 上只有 Start/Describe/GetHistory/RequestCancel 四个操作）。
-2. **车道命令单独成批轮询**：即使开发用 Temporal 不可达、车道行持续失败，主批次的查询排除车道命令，车道行另取一批，其他 workspace 不受影响。开关关闭时主查询与原来逐字相同。
+1. **开发用 Temporal，而不是原生 Temporal**（复核 CRITICAL）：原生 Temporal 的机器授权器把 customer worker 与 customer client 的队列钉死为 `understanding`（`machine_policy.go` 的 `workerQueue`）。按原设计，relay 投车道队列会得到 PermissionDenied，行不 park、每 2 秒重试，积满一批 20 行后饿死所有租户的 outbox；车道 worker 也会在首次 poll 时被拒。改授权器要重发原生 Temporal 镜像。本实现改用 core 层的开发用 Temporal：relay 只在 development 下为车道命令另建一个明文 loopback 客户端（惰性连接，不影响 API 启动；不可达时如何不拖住 relay 见第 2、10 条），车道 worker 直连它、不取机器令牌。地址只接受 loopback。附带收益：可用开发用 Temporal 的 UI 观察车道 run、用它的 terminate 清理孤儿（customer client 在原生 Temporal 上只有 Start/Describe/GetHistory/RequestCancel 四个操作）。
+2. **车道命令单独成批轮询**：主批次的查询排除车道命令，车道行另取一批，车道行再多也占不满主批次。开关关闭时主查询与原来逐字相同。只分批次还不够，还要在时间上隔开，见第 10 条。
 3. **车道启动带执行超时**（复核 HIGH）：发现 run 185 分钟（3 小时准入租约加收尾余量），理解与资格判定 30 分钟。没人 poll 的车道 workflow 会结束，不会永久吞掉同 workflowId 的后续请求。
 4. **车道 worker 不拿 owner 权限**（复核 HIGH）：不建 owner 连接、不跑三个平台 seed（`seedJurisdictionPolicy` 的 upsert 会覆盖已有规则行）；只注册 understanding、discovery、qualify 三组活动（backlog、external-intent、建站、擦除活动都要 owner 连接或建站依赖，而它们的 workflow 从不进车道）。
 5. **worker 改为「早分叉 + 独立模块」，而不是在 `worker.ts` 里就地加约 16 处分支**：复核要求的改动（去 owner、去 seed、去机器令牌、改明文连接、活动子集）让就地分支变成三十处左右，对管理态 worker 的回归风险更大。现在 `worker.ts` 只在准入之后、任何遥测、数据库、租约之前多一个分叉点，管理态路径逐字不变；车道 worker 在 `dev-fast-lane-worker.ts`，与 `worker.ts` 相同的构造（网关、broker、分类器、制裁、三组活动）由源码守卫 spec 逐个调用比较，防止漂移。`worker.ts` 现有的源码守卫 spec 全部原样通过。
 6. **schema 摘要核对**（复核 claim 4）：迁移名相等只说明「源码树最新迁移 = 库里最新完成迁移」，不是 schema 等价（`schema.prisma` 多次不带迁移地变化）。车道 worker 另外要求源码 `schema.prisma` 的 sha256 等于运维从 `/health/build` 复制来的 `schema_digest`，不符则 `SCHEMA_DIGEST_MISMATCH` 不 poll。
 7. **worktree 基线与首次落地**（复核 claim 4）：车道 worktree 从运行镜像的 `build_sha` 加车道提交创建，不从最新 main；首次落地的镜像若带迁移（主线已含 #647、#648 的迁移），走带迁移的换镜像流程。
-8. **运维规程**（复核 HIGH/MEDIUM/LOW）：先起 worker 再开路由；开关前后都要求没有未发布的三类命令与 RUNNING discovery run；迭代前排空，改 workflow 代码用 `patched()`；孤儿 run 标 FAILED；换镜像前关车道；车道开着时不跑不带 workspaceId 的 sweep；覆盖范围与擦除边界写明。见运维页。
+8. **运维规程**（复核 HIGH/MEDIUM/LOW）：先起 worker 再开路由；开关前后都要求排空：未发布的三类命令、RUNNING discovery run、车道队列上在跑的 workflow 三项为 0（两条 SQL 在同一事务里先 `set_config` workspace，否则在 RLS 下恒为 0；Temporal 一项是第二轮复核补的，资格判定在途时前两项看不出来）；迭代前排空，改 workflow 代码用 `patched()`；孤儿 run 标 FAILED；换镜像前关车道；车道开着时不跑不带 workspaceId 的 sweep；覆盖范围与擦除边界写明。见运维页。
 9. C2 的测试按复核修正：名字符合迁移格式的普通文件会让枚举报错（`must be a directory`），而不是被跳过。
+10. **车道 pass 与 relay 主循环在时间上隔开**（第二轮复核 HIGH/MEDIUM）：
+    - 原问题：第 2 条只分开了批次，车道批次仍在 relay 的单飞 tick 里串行执行，而 `OUTBOX_RELAY` 心跳只在 tick 之间写。在 xin 上实测 `@temporalio/client` 1.24：连一个没人监听的 loopback 端口，每次都要等满 5 秒才失败。原实现每条待投车道命令都重付这 5 秒。积到 6 条，一轮 tick 就超过 30 秒，租约失去新鲜度，readiness 的 `outbox_relay` 失败，所有 workspace 的客户写入被 503 关闭；条数更少时，其他 workspace 的命令每轮也要多等 5 秒乘以条数。另外，`Connection.connect` 失败时不关闭自己建的 gRPC 通道，每次失败泄漏一条；已连上的客户端在服务端停掉后，默认重试拦截器还会让一次启动拖约 20 秒。
+    - 现做法：
+      - relay 的主循环只发起车道 pass、不等它；车道 pass 单飞，API 关闭时用 relay 的 abort 信号中止在途启动，并与主循环一起排空。
+      - 车道客户端改用 `Connection.lazy` 加 `ensureConnected`，连接失败就关闭通道；每次启动用 `withDeadline` 限 5 秒，gRPC 重试也算在内。
+      - 连接失败，或启动遇到 `DEADLINE_EXCEEDED`、`UNAVAILABLE`，就关闭连接并冷却 30 秒。冷却期间启动立即失败，relay 也不再查询车道命令；本轮 pass 遇到第一次这类失败就结束。单条命令自身的拒绝（例如 `INVALID_ARGUMENT`）不触发冷却，后面的命令照常投递。
+    - 验证：relay spec 用真实的车道客户端和一个每次都要等满 5 秒才失败的连接，模拟 38 秒的 managed tick。每 2 秒一次 READY 心跳、其他 workspace 每轮的命令都不延迟；30 秒内只连一次，失败的通道被关闭；第二次连接还没结束时关闭 API，排空立即完成并写 `STOPPED`。把车道 pass 临时改回 tick 内等待，这条 spec 在第 2 轮 tick 就失败。
 
 ## 3. 不变的
 

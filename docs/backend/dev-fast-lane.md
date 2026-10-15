@@ -11,7 +11,7 @@
 
 | 角色 | 跑什么 | 做什么 |
 | --- | --- | --- |
-| 管理态 API | 已发布镜像（attested） | 所有 HTTP、readiness、outbox relay。relay 投递时，只把车道 workspace 的 `CompanyProfileCreated`、`DiscoveryRunRequested`、`QualifyRequested` 三条命令发到**开发用 Temporal**（loopback、明文）的 `understanding-dev-fast-lane-<workspaceId>` 队列，并给它们加执行超时；其余命令、其余 workspace 一律照旧发到原生 Temporal 的 `understanding` |
+| 管理态 API | 已发布镜像（attested） | 所有 HTTP、readiness、outbox relay。relay 投递时，只把车道 workspace 的 `CompanyProfileCreated`、`DiscoveryRunRequested`、`QualifyRequested` 三条命令发到**开发用 Temporal**（loopback、明文）的 `understanding-dev-fast-lane-<workspaceId>` 队列，并给它们加执行超时；这三条命令由单独的车道 pass 投递，relay 主循环不等它（见第 3 节「隔离」）。其余命令、其余 workspace 一律照旧发到原生 Temporal 的 `understanding` |
 | 管理态 customer worker | 已发布镜像 | 照旧服务原生 Temporal 的 `understanding`，租约、readiness 都不变 |
 | 车道 worker | 源码 worktree 的 `apps/api/dist`（无构建回执） | 只 poll 开发用 Temporal 上的车道队列；只注册 understanding、discovery、qualify 三组活动 |
 
@@ -49,6 +49,7 @@
   - API 进程内同步执行的获客操作：ICP 设计、查询计划、回测、discover-contacts、guess-emails、verify。
 - **understanding 只能由新建公司触发**：`CompanyProfileCreated` 只在 `POST /companies` 时写入，每次还要用掉一张 GrowthOS grant。
 - **擦除**：`DeletionRequested`、`PersonalArtifactCleanupRequested` 留在管理态。车道分支不得改 durable-result、artifact、raw 的持久化格式和对象版本语义，否则旧代码可能擦不干净；做不到就只用不含真实个人数据的 workspace 跑车道。删除流程发出的重评分 `QualifyRequested` 也会进车道，车道 worker 停着时它会在 30 分钟后超时作废。车道 workflow 的历史（输入与活动结果）存在开发用 Temporal 自己的本地库里，保留期按它的配置；擦除流程不清理 Temporal 历史，这一点与原生 Temporal 相同。
+- **隔离**：relay 的主循环每 2 秒一轮，先写 `OUTBOX_RELAY` 心跳，再投递其余命令；它只发起车道 pass，不等它结束。车道 pass 同一时刻只跑一个。连接开发用 Temporal 每次最多 5 秒，启动 workflow 每次最多 5 秒（含 gRPC 重试）。连不上时（连接失败、启动超时或 `UNAVAILABLE`），车道关掉这条连接、冷却 30 秒，并结束本轮 pass。冷却期间不查询、也不投递车道命令。所以开发用 Temporal 停掉或地址写错时，每 30 秒最多一次有界尝试、一行错误日志；心跳、readiness 和其他 workspace 的投递节奏都不受影响。车道命令留在 outbox 里，恢复后照常投递。API 关闭时会中止在途的车道启动，不拖住 relay 的排空。
 - **readiness**：车道开启时 `/health/ready` 多一个 `capabilities.dev_fast_lane = {status: not_proven, code: DEV_FAST_LANE_UNATTESTED_ROUTING}`。它永远不会 ok，也不参与整体状态和客户写入准入。巡检工具把它列为非 ok 能力属预期。`/health/build` 报告的仍是 API 自己的受证构建，不代表车道 worker。
 - **证据**：车道时段的观察不能作为 RuntimeEvidence PASS 依据，不能进入 PILOT/GA Release Bundle。要记录时 `evidence_kind` 以 `dev-fast-lane-` 开头、`environment=development`，正文写明「worker 为源码 unattested，API 为受证镜像」；验证器会拒绝非 development 的车道证据，也拒绝把车道 kind 写进 release chain 的 `required_evidence_kinds`。
 
@@ -67,6 +68,8 @@
    - **删掉** `DATABASE_URL`、`RUNTIME_WORKER_LEASE_DATABASE_URL`、`MACHINE_BOOTSTRAP_*`、`TEMPORAL_MACHINE_*`、`TEMPORAL_ADDRESS`、`TEMPORAL_TLS_*`、`GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_*`、`RUNTIME_IMAGE_REFERENCE`；
    - **加上**第 2 节的三个变量；`SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE` 指向宿主上的常规文件（0600，不经符号链接）。
 2. 用 `DOTENV_CONFIG_PATH` 指向这份文件后启动 `node apps/api/dist/temporal/worker.js`（`worker.ts` 开头的 `dotenv/config` 就不会去读 worktree 的 `apps/api/.env`），记录 PID。一次只起一个车道 worker。
+   - **不要让 shell 读这份文件**：`set -a; . 文件`、`source`、`export $(cat …)` 都不行。它沿用管理态 env 文件的写法，里面有不加引号的 JSON（例如 `AUTH_ROLE_SCOPE_MAP_JSON`）和含 `>` 的值。bash 会吃掉 JSON 里的双引号；遇到 `>` 会把它当成重定向，取值被截断，当前目录还会多出一个空文件。dotenv 不覆盖已导出的变量，进程就拿到了坏值，准入里的 auth 等项随之失败（例如 `AUTH_ROLE_SCOPE_POLICY_INVALID`）。结果是进程停在下表 `not ready: build:DEV_FAST_LANE_UNATTESTED,…` 那一行，看不到 `dev fast lane worker up`。
+   - 只在进程启动时才读的 Node 变量（例如 `NODE_EXTRA_CA_CERTS`），dotenv 设了也不生效。确实需要时，在启动命令前单独写这一项。
 3. 期望日志：`[worker] DEV FAST LANE: unattested source worker for workspace … on task queue 'understanding-dev-fast-lane-…'` → 依赖准入 → `[worker] dev fast lane worker up on task queue '…'`。
 
 | 停在 | 含义 |
@@ -81,13 +84,26 @@
 
 ## 6. 打开 API 路由
 
-1. **前置检查**（只读）：该 workspace 没有未发布、未停靠的三类命令，也没有 `RUNNING` 的 discovery run。路由在 relay **投递时**决定，不在命令写入时决定：开关前写入、开关后才投递的行跟随新路由。
+1. **排空检查**（只读，第 8、9 节也用它）。路由在 relay **投递时**决定，不在命令写入时决定：开关前写入、开关后才投递的行跟随新路由。下面三个计数都为 0 才继续：
+   - 该 workspace 未发布、未停靠的三类命令；
+   - 该 workspace `RUNNING` 的 discovery run；
+   - 开发用 Temporal 上车道队列里还在跑的 workflow。这一项不能省：资格判定、入驻理解的 outbox 行在启动时就已发布，也不留 `RUNNING` 的 discovery run，在途时前两项都看不出来。
+
+   `outbox_event` 与 `discovery_run` 都开了 FORCE ROW LEVEL SECURITY，按 `app.current_workspace_id` 过滤。用 `app_user` 连接而没设这个值时，两个计数恒为 0，检查形同虚设。所以两条 SQL 要放在同一个事务里，先设 workspace 再计数；这样不管用哪个角色执行，结果都一样：
 
    ```sql
+   BEGIN;
+   SELECT set_config('app.current_workspace_id', '<ws>', true);
    SELECT count(*) FROM outbox_event
     WHERE workspace_id = '<ws>' AND published_at IS NULL AND parked_at IS NULL
       AND event_type IN ('CompanyProfileCreated', 'DiscoveryRunRequested', 'QualifyRequested');
    SELECT count(*) FROM discovery_run WHERE workspace_id = '<ws>' AND status = 'RUNNING';
+   COMMIT;
+   ```
+
+   ```bash
+   temporal workflow count --address <车道 Temporal 地址> --namespace default \
+     --query "TaskQueue='understanding-dev-fast-lane-<ws>' AND ExecutionStatus='Running'"
    ```
 
 2. 在管理态 runtime 的 compose 插值环境里设 `RUNTIME_DEV_FAST_LANE_WORKSPACE_ID` 与 `RUNTIME_DEV_FAST_LANE_TEMPORAL_ADDRESS`，**只重建 api 服务**（环境变了要重建，不是重启）；worker、platform-worker 不动。两个变量必须一起设、取值合法：API 对不合法的车道配置拒绝启动（进入重启循环，期间所有写入不可用），回退就是删掉这两个变量再重建 api。
@@ -99,16 +115,19 @@
 
 ## 8. 迭代
 
-1. 先确认该 workspace 没有在途的车道 workflow（以 discovery run 与 outbox 为准，或看开发用 Temporal UI）。
+1. 先做第 6 节第 1 步的排空检查，三项都为 0（尤其是开发用 Temporal 那一项）。
 2. 只改活动代码：SIGTERM 停车道 worker（按 PID）→ build → 重新启动。
 3. 改了 workflow 代码：要么先排空在途 workflow，要么用 `patched()` 做版本演进（`discovery.workflow.ts` 已有先例）。新代码重放旧历史会报不确定性错误（NDE），workflow task 无限重试，run 一直停在 RUNNING。
 
 ## 9. 关闭
 
-1. 等测试 workspace 的在途 run 结束；第 6 节的前置检查同样适用。
+1. 等测试 workspace 的在途车道 workflow 结束，第 6 节第 1 步的排空检查三项都为 0 才继续。
 2. 从 compose 插值环境里删掉两个变量，只重建 api；核验 `/health/ready` 不再有 `capabilities.dev_fast_lane`。
 3. 按 PID 停车道 worker。不要按命令行 pkill：宿主网络下，管理态容器的 node 进程在宿主进程表里同样可见。
-4. 清理孤儿：车道队列上没人 poll 的 workflow 会在执行超时后结束（发现 run 185 分钟，理解与资格判定 30 分钟），也可以在开发用 Temporal 上直接 terminate。超时或 terminate 都不跑收尾，对应的 discovery run 会一直是 `RUNNING`：确认没有在跑的 workflow 后，由运维用属主连接把它标为 `FAILED`。不要留着它：换镜像的前置检查会因 `RUNNING` 的 discovery run 拒绝切换。
+4. 清理孤儿：车道队列上没人 poll 的 workflow 会在执行超时后结束（发现 run 185 分钟，理解与资格判定 30 分钟），也可以在开发用 Temporal 上直接 terminate。超时或 terminate 都不跑收尾：
+   - 对应的 discovery run 会一直是 `RUNNING`。确认没有在跑的 workflow 后，由运维用属主连接把它标为 `FAILED`。不要留着它：换镜像的前置检查会因 `RUNNING` 的 discovery run 拒绝切换。
+   - 被丢下的资格判定，关掉车道后用 `POST /icps/:icpId/qualify` 重新触发，它会走管理态。
+   - 被丢下的入驻理解没法补跑：understanding 只在新建公司时触发。
 
 ## 10. 与其他操作的关系
 
