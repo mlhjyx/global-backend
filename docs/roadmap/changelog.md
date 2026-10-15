@@ -345,6 +345,12 @@
   - 版本多到 60 秒内连标签都读不完的键（按单请求上限 2.5 秒约 23 个版本，正常延迟下远多于此）每次都在删除前用完预算、不会有进展，会按退避一直重试（命令表 attempt 递增、可见）。为保住「先确认全部标签再删」的整键拒绝语义，没有改成边读边删。
   - `docs/implementation-records/generic-operation-artifact-replay.md` 第 106 行仍写清理 principal 没有列出权限；它是历史实施记录，不改。
 
+- 第二轮复审（修复增量）：
+  - MEDIUM：上一条「只匹配完整键」用的是普通 `StringLike`。同一请求可以重复 `prefix` 参数，MinIO 只要任一个值匹配就放行，而 ListObjectVersions 按第一个值列出，所以「短前缀 + 完整键」仍能列出全部个人数据键（复审在一次性 MinIO 上实测）。
+  - 改动：清理 principal 的列出授权改为 `ForAllValues:StringLike`，并加 `"Null": {"s3:prefix": "false"}`（`ForAllValues` 对空集合按真处理，不加 `Null` 时不带 `prefix` 的请求可能被放行）。运行时 principal 列 `readiness/*` 的授权在 main 上原本也是这种写法，同一文件里一并改掉，避免重跑两次 bootstrap。复审测过「保留 Allow、再加一条 `ForAnyValue:StringNotLike` 的 Deny」，无效，所以没有用。
+  - 测试：`runtime-deployment-contract.spec.mjs` 钉住两条授权都是 `ForAllValues` 加 `Null`，并且两段策略里都不再有普通 `StringLike` 前缀条件；先红后绿，16 项通过。真 MinIO spec 新增「重复 `prefix`（短前缀加完整键、空前缀加完整键）必须被拒」两项：一次性 MinIO（同一 digest，开发用 KMS 密钥现场随机生成）上用原策略跑红 1 项，换新策略后 10 项全绿。
+  - 上线顺序不变：先由运行时会话重跑 `minio-bootstrap`，核对清理凭据「列精确键允许、列 `personal-data/` 拒绝、重复 `prefix` 拒绝」，再换镜像。如果 xin 已经按本 PR 早先的策略跑过 bootstrap，要用最终版本再跑一次。
+
 ## 2026-10-13 · Let best-effort stages skip a company whose operation cannot be replayed, time-box enrichment, and rehearse a full-size run
 
 - 起因：卖方 #23 的验收 run（`c3878e54`，xin，2026-10-12 22:47–10-13 01:23 UTC）跑完查询、官网画像、fit（#640 的时间盒生效，分约 10 批判完 84 家）和富集后，在信号富集阶段失败。

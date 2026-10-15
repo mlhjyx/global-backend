@@ -96,6 +96,23 @@ async function expectDenied(promise: Promise<unknown>): Promise<void> {
   expect(observed).toBe(true);
 }
 
+/**
+ * ListObjectVersions with the prefix query parameter repeated. The values are
+ * set before signing, so the request is validly signed with both of them.
+ */
+function sendWithPrefixes(s3: S3Client, bucket: string, prefixes: string[]): Promise<unknown> {
+  const command = new ListObjectVersionsCommand({ Bucket: bucket, Prefix: prefixes[0] });
+  command.middlewareStack.add(
+    (next) => async (args) => {
+      const request = args.request as { query?: Record<string, string | string[]> };
+      request.query = { ...(request.query ?? {}), prefix: prefixes };
+      return next(args);
+    },
+    { step: 'build', name: 'repeatPrefixParameter' },
+  );
+  return s3.send(command);
+}
+
 function notFound(error: unknown): boolean {
   const record = error as {
     name?: string;
@@ -425,6 +442,14 @@ describe.runIf(enabled)('PERSONAL_DATA cleanup real MinIO boundary', () => {
       await expectDenied(
         cleanup.send(new ListObjectVersionsCommand({ Bucket: bucket })),
       );
+      // A repeated prefix parameter must not widen the listing: the policy
+      // requires EVERY prefix value to be the full key (ForAllValues), because
+      // MinIO lists by the first value while a plain StringLike passes on any.
+      for (const shorter of ['generic-operation-results/v1/final/personal-data/', '']) {
+        await expectDenied(
+          sendWithPrefixes(cleanup, bucket, [shorter, personal.stored.objectKey]),
+        );
+      }
 
       await expect(
         erase(adapter, {

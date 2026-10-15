@@ -194,8 +194,11 @@ cat > "$runtime_policy" <<EOF
       "Action": ["s3:ListBucketVersions"],
       "Resource": ["arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET"],
       "Condition": {
-        "StringLike": {
+        "ForAllValues:StringLike": {
           "s3:prefix": "generic-operation-results/v1/readiness/*"
+        },
+        "Null": {
+          "s3:prefix": "false"
         }
       }
     },
@@ -382,8 +385,11 @@ cat > "$cleanup_policy" <<EOF
       "Action": ["s3:ListBucketVersions"],
       "Resource": ["arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET"],
       "Condition": {
-        "StringLike": {
+        "ForAllValues:StringLike": {
           "s3:prefix": "generic-operation-results/v1/final/personal-data/sha256/??/????????????????????????????????????????????????????????????????"
+        },
+        "Null": {
+          "s3:prefix": "false"
         }
       }
     },
