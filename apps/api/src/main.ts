@@ -17,6 +17,7 @@ import {
   resolveRuntimeSettings,
 } from './runtime/runtime-environment';
 import { initializeRuntimeReleaseIdentity } from './runtime/runtime-release-identity';
+import { resolveDevFastLane } from './runtime/dev-fast-lane';
 import { installPlatformRevocationHttpBoundary } from './platform-authority/platform-revocation-http.middleware';
 
 /** code-first OpenAPI 文档（单一事实源：从实现的装饰器生成）。 */
@@ -79,6 +80,14 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
 
 async function bootstrap(): Promise<void> {
   const runtimeSettings = resolveRuntimeSettings(process.env);
+  // Fail closed on any lane variable outside development before Nest starts.
+  // The lane only routes; it never changes this process's release identity.
+  const devFastLane = resolveDevFastLane(runtimeSettings.mode, process.env);
+  if (devFastLane.enabled) {
+    console.warn(
+      `[api] DEV FAST LANE: acquisition commands of one workspace route to task queue '${devFastLane.taskQueue}' on ${devFastLane.temporalAddress}`,
+    );
+  }
   await initializeRuntimeReleaseIdentity({
     mode: runtimeSettings.mode,
     artifactRoot: resolve(__dirname),

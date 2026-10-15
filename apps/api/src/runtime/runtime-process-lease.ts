@@ -565,6 +565,18 @@ export async function assertMigrationCompatible(
 ): Promise<void> {
   if (!identity.attested)
     throw new Error("RUNTIME_RELEASE_IDENTITY_UNAVAILABLE");
+  await assertMigrationRevision(prisma, identity.migration_revision);
+}
+
+/**
+ * The latest finished migration must equal `expected`. Attested processes pass
+ * their receipt's migration_revision through assertMigrationCompatible; the
+ * development fast lane passes the newest migration of its source tree.
+ */
+export async function assertMigrationRevision(
+  prisma: Pick<PrismaService, "$queryRawUnsafe">,
+  expected: string,
+): Promise<void> {
   const rows = await prisma.$queryRawUnsafe<Array<{ migration_name: string }>>(
     `SELECT migration_name
        FROM "_prisma_migrations"
@@ -572,7 +584,7 @@ export async function assertMigrationCompatible(
       ORDER BY finished_at DESC, migration_name DESC
       LIMIT 1`,
   );
-  if (rows[0]?.migration_name !== identity.migration_revision) {
+  if (rows[0]?.migration_name !== expected) {
     throw new Error("MIGRATION_REVISION_MISMATCH");
   }
 }

@@ -8,7 +8,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   accountArtifactBytes,
   computeArtifactDigest,
+  computeSchemaDigest,
   generateBuildAttestation,
+  latestMigrationRevision,
   loadBuildIdentity,
   parseBuildAttestation,
 } from './build-attestation';
@@ -312,5 +314,60 @@ describe('build attestation', () => {
       }),
     ).resolves.toMatchObject({ attested: true, build_sha: validAttestation.build_sha });
     expect((await readdir(distRoot)).filter((name) => name.includes('.tmp-'))).toEqual([]);
+  });
+});
+
+describe('source-tree provenance for the development fast lane', () => {
+  it('returns the newest migration directory and ignores names outside the revision pattern', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    await mkdir(join(root, '20260101000000_a'));
+    await mkdir(join(root, '20260202000000_b'));
+    await mkdir(join(root, 'not_a_revision'));
+    await writeFile(join(root, 'migration_lock.toml'), 'provider = "postgresql"');
+
+    // Act
+    const latest = await latestMigrationRevision(root);
+
+    // Assert
+    expect(latest).toBe('20260202000000_b');
+  });
+
+  it('rejects a pattern-matching regular file, an empty inventory and a symlinked revision', async () => {
+    // Arrange
+    const withFile = await temporaryDirectory();
+    await mkdir(join(withFile, '20260101000000_a'));
+    await writeFile(join(withFile, '20260303000000_c'), 'not a directory');
+    const empty = await temporaryDirectory();
+    const withLink = await temporaryDirectory();
+    const target = await temporaryDirectory();
+    await symlink(target, join(withLink, '20260404000000_d'));
+
+    // Act + Assert
+    await expect(latestMigrationRevision(withFile)).rejects.toThrow(
+      /20260303000000_c must be a directory/,
+    );
+    await expect(latestMigrationRevision(empty)).rejects.toThrow(
+      /migration_revision is unavailable/,
+    );
+    await expect(latestMigrationRevision(withLink)).rejects.toThrow(/symlink|nofollow/i);
+  });
+
+  it('digests schema bytes exactly as the build receipt does', async () => {
+    // Arrange
+    const directory = await temporaryDirectory();
+    const schemaPath = join(directory, 'schema.prisma');
+    await writeFile(schemaPath, 'model RuntimeReceipt {}');
+    const schemaLink = join(directory, 'schema-link.prisma');
+    await symlink(schemaPath, schemaLink);
+
+    // Act
+    const digest = await computeSchemaDigest(schemaPath);
+
+    // Assert
+    expect(digest).toBe(
+      `sha256:${createHash('sha256').update('model RuntimeReceipt {}').digest('hex')}`,
+    );
+    await expect(computeSchemaDigest(schemaLink)).rejects.toThrow(/symlink|nofollow/i);
   });
 });
