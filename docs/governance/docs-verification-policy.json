@@ -42,7 +42,8 @@
       "docs/site-builder/",
       "docs/status/",
       "docs/superpowers/plans/"
-    ]
+    ],
+    "frontmatterFragmentDirectories": ["docs/roadmap/changelog.d/"]
   },
   "authoritativeCurrent": {
     "exact": [

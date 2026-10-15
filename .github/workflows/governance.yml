@@ -37,9 +37,10 @@ jobs:
       - name: Verify governance contracts and mutation tests
         run: pnpm governance:verify
 
-      # A PR that changes apps/, packages/, scripts/ or infra/ adds a fragment
-      # under docs/roadmap/changelog.d/ (or edits the changelog). Runs even when
-      # the step above failed, so one CI round reports both.
+      # A PR that changes apps/, packages/, scripts/, infra/ or a root build or
+      # runtime file adds a fragment under docs/roadmap/changelog.d/ (or edits
+      # the changelog). Runs even when the step above failed, so one CI round
+      # reports both.
       - name: Changelog fragment for code changes
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         env:

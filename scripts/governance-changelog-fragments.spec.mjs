@@ -15,16 +15,19 @@ import { fileURLToPath } from "node:url";
 
 import {
   CHANGELOG_PATH,
+  CODE_ROOT_FILES,
   FRAGMENT_DIRECTORY,
   assembleChangelog,
   fragmentRequirement,
   isFragmentPath,
+  lifecycleExemptFragment,
   parseFragment,
   parseNameStatus,
   prFromSquashSubject,
   rewriteRelativeLinks,
   validateFragment,
   verifyChangelogFragments,
+  verifyFragmentPolicy,
 } from "./governance-changelog-fragments.mjs";
 import { createSafeGitEnvironment } from "./safe-git-environment.mjs";
 
@@ -352,6 +355,65 @@ test("a PR that changes apps, packages, scripts or infra needs a fragment or a c
   assert.equal(withChangelog.changelogEdited, true);
 });
 
+test("root files that go into the build or the runtime image need a fragment too", () => {
+  for (const rootFile of [
+    "Dockerfile",
+    "runtime-entrypoint.mjs",
+    "docker-compose.yml",
+    "pnpm-workspace.yaml",
+    "tsconfig.base.json",
+    "package.json",
+    "pnpm-lock.yaml",
+  ]) {
+    const missing = fragmentRequirement([{ status: "M", path: rootFile }]);
+    assert.equal(missing.required, true, rootFile);
+    assert.equal(missing.satisfied, false, rootFile);
+    assert.deepEqual(missing.codePaths, [rootFile]);
+  }
+  // Only the file at the root counts, not a file of that name elsewhere.
+  for (const elsewhere of ["docs/Dockerfile", "docs/package.json"]) {
+    assert.equal(
+      fragmentRequirement([{ status: "M", path: elsewhere }]).required,
+      false,
+      elsewhere,
+    );
+  }
+});
+
+// Every tracked file at the repository root is either a build or runtime
+// input (CODE_ROOT_FILES) or one of these; a new root file needs a decision.
+const NON_CODE_ROOT_FILES = Object.freeze([
+  ".editorconfig",
+  ".env.example",
+  ".gitignore",
+  ".gitleaks.toml",
+  ".gitleaksignore",
+  "AGENTS.md",
+  "CLAUDE.md",
+  "CONTRIBUTING.md",
+  "README.md",
+]);
+
+test("every tracked root file is classified as code or not", () => {
+  const tracked = execFileSync("git", ["ls-files"], {
+    cwd: REPOSITORY_ROOT,
+    encoding: "utf8",
+    env: createSafeGitEnvironment(),
+  })
+    .split("\n")
+    .filter((path) => path && !path.includes("/"));
+  assert.ok(tracked.includes("Dockerfile"), JSON.stringify(tracked));
+  const unclassified = tracked.filter(
+    (path) =>
+      !CODE_ROOT_FILES.includes(path) && !NON_CODE_ROOT_FILES.includes(path),
+  );
+  assert.deepEqual(
+    unclassified,
+    [],
+    "add each new root file to CODE_ROOT_FILES or NON_CODE_ROOT_FILES",
+  );
+});
+
 test("deleting a fragment, touching the README or editing docs alone does not count", () => {
   const deletedOnly = fragmentRequirement([
     { status: "M", path: "apps/api/src/a.ts" },
@@ -393,6 +455,45 @@ test("relative links are rebased from the fragment directory onto the changelog"
       "- 未做：无",
     ].join("\n"),
   );
+});
+
+test("angle-bracket targets and single-quoted titles are rebased too", () => {
+  const body = [
+    '- 起因：[有空格](<../../evidence/a b.md>)、[带标题](<../../evidence/c.md> "t")。',
+    "- 改动：[单引号](../../backend/d.md 'title')、[外链](<https://example.org/a b>)。",
+  ].join("\n");
+  assert.equal(
+    rewriteRelativeLinks(body, FRAGMENT_DIRECTORY, "docs/roadmap"),
+    [
+      '- 起因：[有空格](<../evidence/a b.md>)、[带标题](<../evidence/c.md> "t")。',
+      "- 改动：[单引号](../backend/d.md 'title')、[外链](<https://example.org/a b>)。",
+    ].join("\n"),
+  );
+});
+
+test("reference-style link and footnote definitions are rejected because nothing checks or rebases them", () => {
+  for (const definition of [
+    "[r]: ../../evidence/d.md",
+    '  [r]: <../../evidence/d.md> "title"',
+    "[^1]: a footnote",
+  ]) {
+    const issues = validateFragment(
+      FRAGMENT,
+      fragmentText({ body: `${BODY}\n${definition}\n` }),
+    );
+    assert.deepEqual(codes(issues), ["CHANGELOG_FRAGMENT_LINK"], definition);
+    assert.match(issues[0].detail, /\[text\]\(target\)/);
+    // Frontmatter is lines 1-5, the body runs from line 7; BODY ends with a
+    // newline, so a blank line 12 precedes the definition.
+    assert.match(issues[0].detail, /^line 13 /);
+  }
+  // Inside a code block or an inline code span it is only text.
+  for (const body of [
+    `${BODY}\n\`\`\`md\n[r]: ../../evidence/d.md\n\`\`\`\n`,
+    `${BODY}\n\`[r]: ../../evidence/d.md\`\n`,
+  ]) {
+    assert.deepEqual(validateFragment(FRAGMENT, fragmentText({ body })), []);
+  }
 });
 
 const CHANGELOG = [
@@ -584,8 +685,9 @@ test("the require command fails a code change without a fragment and passes once
     assert.equal(satisfied.status, 0, satisfied.stdout + satisfied.stderr);
     assert.match(satisfied.stdout, /2026-10-14-one-fragment\.md/);
 
-    // An open PR from before the fragment rule still edits the changelog
-    // itself: it passes, with a warning that points at the fragment format.
+    // A PR that still edits the changelog itself passes during the
+    // transition, whenever it was opened, with a warning that points at the
+    // fragment format.
     git("checkout", "-qb", "older-pr", base);
     await write("scripts/x.mjs", "export {};\n");
     await write(CHANGELOG_PATH, `${CHANGELOG}\n- older PR entry\n`);
@@ -603,6 +705,9 @@ test("the require command fails a code change without a fragment and passes once
       transitional.stdout + transitional.stderr,
     );
     assert.match(transitional.stdout, /^::warning::.*changelog\.d\//m);
+    // No open-date check exists, so the warning does not imply one.
+    assert.doesNotMatch(transitional.stdout, /opened before/);
+    assert.match(transitional.stdout, /^::warning::.*transition/m);
     assert.doesNotMatch(satisfied.stdout, /::warning::/);
 
     const unknownBase = runNode(
@@ -619,6 +724,34 @@ test("the require command fails a code change without a fragment and passes once
     );
     assert.equal(unknownBase.status, 1);
     assert.match(unknownBase.stderr, /cannot compute/i);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("the require command diffs from the merge base, so code main merged after the branch point is not the PR's", async () => {
+  const { root, git, write, gitEnvironment } = await fixtureRepository();
+  try {
+    git("checkout", "-qb", "docs-only");
+    await write("docs/status/current.md", "# Current\n");
+    git("add", "-A");
+    git("commit", "-qm", "docs only");
+    // main merges a code change after the branch point; the PR's base.sha is
+    // that newer main, not the merge base.
+    git("checkout", "-q", "main");
+    await write("apps/api/src/a.ts", "export const a = 3;\n");
+    git("commit", "-qam", "code PR (#650)");
+    const movedBase = git("rev-parse", "HEAD");
+    git("checkout", "-q", "docs-only");
+
+    const result = runNode(
+      LIBRARY,
+      ["require", "--base", movedBase, "--head", "HEAD"],
+      root,
+      gitEnvironment,
+    );
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.match(result.stdout, /not required/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -666,6 +799,39 @@ test("the assembler folds fragments into the changelog, takes a missing PR numbe
     ]);
     assert.match(result.stdout, /3 fragments/);
     assert.match(result.stderr, /2026-10-14-local\.md.*no PR number/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a fragment name reused after an assembly takes the PR number of the commit that added it last", async () => {
+  const { root, git, write, gitEnvironment } = await fixtureRepository();
+  const reused = `${FRAGMENT_DIRECTORY}/2026-10-20-fix-x.md`;
+  try {
+    await write(
+      reused,
+      fragmentText({ date: "2026-10-20", pr: undefined, title: "First fix" }),
+    );
+    git("add", "-A");
+    git("commit", "-qm", "fix(x): first (#700)");
+    git("rm", "-q", reused);
+    git(
+      "commit",
+      "-qm",
+      "docs(changelog): assemble fragments through #700 (#701)",
+    );
+    await write(
+      reused,
+      fragmentText({ date: "2026-10-20", pr: undefined, title: "Second fix" }),
+    );
+    git("add", "-A");
+    git("commit", "-qm", "fix(x): second (#705)");
+
+    const result = runNode(ASSEMBLER, [], root, gitEnvironment);
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    const changelog = await readFile(join(root, CHANGELOG_PATH), "utf8");
+    assert.match(changelog, /^## 2026-10-20 · Second fix \(#705\)$/m);
+    assert.doesNotMatch(changelog, /#700/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -752,12 +918,104 @@ test("the merge runbook says who assembles the fragments, when, and how to roll 
   assert.match(body, /回退/);
 });
 
-test("docs:verify runs the fragment check and exempts fragments from lifecycle metadata", async () => {
+const POLICY_PATH = "docs/governance/docs-verification-policy.json";
+
+function policyWith(directories) {
+  return {
+    lifecycleRequired: {
+      prefixes: ["docs/roadmap/"],
+      ...(directories ? { frontmatterFragmentDirectories: directories } : {}),
+    },
+  };
+}
+
+test("only the docs-verification policy exempts fragments from the lifecycle line", () => {
+  const listed = policyWith([`${FRAGMENT_DIRECTORY}/`]);
+  assert.equal(lifecycleExemptFragment(listed, FRAGMENT), true);
+  assert.equal(
+    lifecycleExemptFragment(listed, `${FRAGMENT_DIRECTORY}/README.md`),
+    false,
+  );
+  assert.equal(
+    lifecycleExemptFragment(listed, "docs/roadmap/release-plan.md"),
+    false,
+  );
+  // Take the directory out of the policy and fragments need the line again.
+  assert.equal(lifecycleExemptFragment(policyWith(), FRAGMENT), false);
+  assert.equal(lifecycleExemptFragment(policyWith([]), FRAGMENT), false);
+});
+
+test("the policy may list only the directory whose frontmatter this script checks", () => {
+  assert.deepEqual(
+    verifyFragmentPolicy(policyWith([`${FRAGMENT_DIRECTORY}/`])),
+    [],
+  );
+  assert.deepEqual(verifyFragmentPolicy(policyWith()), []);
+  const drifted = verifyFragmentPolicy(
+    policyWith([`${FRAGMENT_DIRECTORY}/`, "docs/research/"]),
+  );
+  assert.deepEqual(codes(drifted), ["CHANGELOG_FRAGMENT_POLICY"]);
+  assert.equal(drifted[0].path, POLICY_PATH);
+  assert.match(drifted[0].detail, /docs\/research\//);
+});
+
+test("docs:verify runs the fragment check and takes the lifecycle exemption from the policy", async () => {
   const verifyDocs = await readFile(
     join(REPOSITORY_ROOT, "scripts/verify-docs.mjs"),
     "utf8",
   );
   assert.match(verifyDocs, /from "\.\/governance-changelog-fragments\.mjs"/);
   assert.match(verifyDocs, /verifyChangelogFragments\(root\)/);
-  assert.match(verifyDocs, /!isFragmentPath\(repoPath\(path\)\)/);
+  assert.match(verifyDocs, /verifyFragmentPolicy\(policy\)/);
+  assert.match(
+    verifyDocs,
+    /!lifecycleExemptFragment\(policy, repoPath\(path\)\)/,
+  );
+  assert.doesNotMatch(verifyDocs, /isFragmentPath/);
+
+  const policy = JSON.parse(
+    await readFile(join(REPOSITORY_ROOT, POLICY_PATH), "utf8"),
+  );
+  assert.deepEqual(policy.lifecycleRequired.frontmatterFragmentDirectories, [
+    `${FRAGMENT_DIRECTORY}/`,
+  ]);
+  assert.deepEqual(verifyFragmentPolicy(policy), []);
+});
+
+function section(markdown, heading) {
+  const start = markdown.indexOf(`\n${heading}\n`);
+  assert.notEqual(start, -1, `${heading} exists`);
+  const end = markdown.indexOf("\n## ", start + heading.length + 1);
+  return markdown.slice(start, end === -1 ? undefined : end);
+}
+
+test("the docs-verification governance page records the fragment checks and their exceptions", async () => {
+  const page = await readFile(
+    join(REPOSITORY_ROOT, "docs/governance/docs-verification.md"),
+    "utf8",
+  );
+  assert.match(
+    section(page, "## 1. 运行方式"),
+    /governance-changelog-fragments\.mjs require/,
+  );
+  const checks = section(page, "## 2. 检查面与失败语义");
+  assert.match(checks, /^\| Changelog 片段格式 \|.*CHANGELOG_FRAGMENT_\*/m);
+  assert.match(checks, /^\| 代码 PR 的 changelog 片段 \|/m);
+  const scope = section(page, "## 3. 受控范围");
+  assert.match(scope, /frontmatterFragmentDirectories/);
+  const exceptions = section(page, "## 4. 当前显式例外");
+  const fragmentRow = exceptions
+    .split("\n")
+    .find((line) => line.startsWith("| `docs/roadmap/changelog.d/"));
+  assert.ok(fragmentRow, "lifecycle exemption row");
+  for (const field of ["风险", "Owner", "关闭条件", "successor"]) {
+    assert.ok(fragmentRow.includes(field), `${field} in ${fragmentRow}`);
+  }
+  const transitionRow = exceptions
+    .split("\n")
+    .find((line) => line.includes("changelogEdited"));
+  assert.ok(transitionRow, "transition exception row");
+  for (const field of ["风险", "Owner", "关闭条件", "successor"]) {
+    assert.ok(transitionRow.includes(field), `${field} in ${transitionRow}`);
+  }
 });

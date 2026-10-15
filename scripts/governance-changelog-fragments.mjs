@@ -14,8 +14,9 @@
 //
 // `verify` checks the fragment format (docs:verify runs the same check).
 // `require` fails when the diff base...head changes apps/, packages/,
-// scripts/ or infra/ without adding or editing a fragment or the changelog;
-// the governance workflow runs it on every pull request.
+// scripts/, infra/ or a root build or runtime file (CODE_ROOT_FILES) without
+// adding or editing a fragment or the changelog; the governance workflow
+// runs it on every pull request.
 import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, posix, resolve } from "node:path";
@@ -26,12 +27,30 @@ import { createSafeGitEnvironment } from "./safe-git-environment.mjs";
 export const CHANGELOG_PATH = "docs/roadmap/changelog.md";
 export const FRAGMENT_DIRECTORY = "docs/roadmap/changelog.d";
 export const FRAGMENT_README = `${FRAGMENT_DIRECTORY}/README.md`;
+export const POLICY_PATH = "docs/governance/docs-verification-policy.json";
 export const CODE_PATH_PREFIXES = Object.freeze([
   "apps/",
   "packages/",
   "scripts/",
   "infra/",
 ]);
+// Root files that go into the build or the runtime image (Dockerfile copies
+// the whole context, then runtime-entrypoint.mjs and package.json). The spec
+// fails when a new root file is tracked without being classified.
+export const CODE_ROOT_FILES = Object.freeze([
+  ".dockerignore",
+  "Dockerfile",
+  "docker-compose.yml",
+  "eslint.config.mjs",
+  "nx.json",
+  "package.json",
+  "pnpm-lock.yaml",
+  "pnpm-workspace.yaml",
+  "runtime-entrypoint.mjs",
+  "tsconfig.base.json",
+]);
+const CODE_SCOPE =
+  "apps/, packages/, scripts/, infra/ or a root build or runtime file";
 export const REQUIRED_SECTIONS = Object.freeze([
   "起因",
   "改动",
@@ -48,6 +67,12 @@ const TOP_LEVEL_ITEM = /^- ([^：:\s][^：:]*?)[：:](.*)$/;
 const FENCE = /^\s*(?:```|~~~)/;
 const DATED_HEADING = /^## (\d{4}-\d{2}-\d{2})\b/;
 const EXTERNAL_TARGET = /^(?:[a-z][a-z0-9+.-]*:|#|\/)/i;
+// "[label]: target" and "[^1]: note", at any indentation.
+const REFERENCE_DEFINITION = /^\s*\[[^\]\n]+\]:(?:\s|$)/;
+// "[text](target)", "[text](<target with spaces>)", each with an optional
+// "double" or 'single' quoted title; verify-docs reads the same forms.
+const INLINE_LINK =
+  /(!?\[[^\]]*\]\()(<[^>\n]*>|[^)\s<>]+)((?:\s+(?:"[^"]*"|'[^']*'))?\s*\))/g;
 
 function issue(code, path, detail) {
   return Object.freeze({ code, path, detail });
@@ -62,6 +87,34 @@ export function isFragmentPath(repoPath) {
   if (!repoPath.startsWith(prefix)) return false;
   const name = repoPath.slice(prefix.length);
   return !name.includes("/") && name.endsWith(".md") && name !== "README.md";
+}
+
+function frontmatterFragmentDirectories(policy) {
+  return policy?.lifecycleRequired?.frontmatterFragmentDirectories ?? [];
+}
+
+// Fragments carry frontmatter instead of the "> 生命周期：" line, but only
+// while docs-verification-policy.json lists their directory: the lifecycle
+// scope changes in the policy, not in a script.
+export function lifecycleExemptFragment(policy, repoPath) {
+  return (
+    frontmatterFragmentDirectories(policy).includes(`${FRAGMENT_DIRECTORY}/`) &&
+    isFragmentPath(repoPath)
+  );
+}
+
+// Any other directory listed there would lose its lifecycle check with
+// nothing checking its frontmatter instead.
+export function verifyFragmentPolicy(policy) {
+  return frontmatterFragmentDirectories(policy)
+    .filter((directory) => directory !== `${FRAGMENT_DIRECTORY}/`)
+    .map((directory) =>
+      issue(
+        "CHANGELOG_FRAGMENT_POLICY",
+        POLICY_PATH,
+        `lifecycleRequired.frontmatterFragmentDirectories lists ${directory}, but only ${FRAGMENT_DIRECTORY}/ has a frontmatter check (scripts/governance-changelog-fragments.mjs)`,
+      ),
+    );
 }
 
 function isCalendarDate(value) {
@@ -291,6 +344,15 @@ function checkBody(path, body, issues, firstLine) {
         ),
       );
     }
+    if (REFERENCE_DEFINITION.test(line)) {
+      issues.push(
+        issue(
+          "CHANGELOG_FRAGMENT_LINK",
+          path,
+          `line ${firstLine + index} is a reference or footnote definition; docs:verify does not check it and assembly does not rebase it, so write the link inline as [text](target)`,
+        ),
+      );
+    }
   }
   const items = visible
     .map(([index, line]) => {
@@ -436,11 +498,16 @@ export function parseNameStatus(output) {
   return changes;
 }
 
+function isCodePath(path) {
+  return (
+    CODE_PATH_PREFIXES.some((prefix) => path.startsWith(prefix)) ||
+    CODE_ROOT_FILES.includes(path)
+  );
+}
+
 export function fragmentRequirement(changes) {
   const codePaths = changes
-    .filter(({ path }) =>
-      CODE_PATH_PREFIXES.some((prefix) => path.startsWith(prefix)),
-    )
+    .filter(({ path }) => isCodePath(path))
     .map(({ path }) => path);
   const fragmentPaths = changes
     .filter(({ status, path }) => status !== "D" && isFragmentPath(path))
@@ -451,6 +518,11 @@ export function fragmentRequirement(changes) {
   const required = codePaths.length > 0;
   return {
     required,
+    // Transition: a direct changelog edit still satisfies the rule, for any
+    // PR whenever it was opened. It ends when the dispatch instructions
+    // outside this repository (/global/CLAUDE.md §7, the workflow scripts)
+    // say to write fragments; then drop `|| changelogEdited` together with
+    // the exception row in docs/governance/docs-verification.md §4.
     satisfied: !required || fragmentPaths.length > 0 || changelogEdited,
     codePaths,
     fragmentPaths,
@@ -481,11 +553,12 @@ function rewriteLine(line, fromDirectory, toDirectory) {
     .map((part) =>
       part.startsWith("`")
         ? part
-        : part.replace(
-            /(!?\[[^\]]*\]\()([^)\s]+)((?:\s+"[^"]*")?\))/g,
-            (_, open, target, close) =>
-              `${open}${rebaseTarget(target, fromDirectory, toDirectory)}${close}`,
-          ),
+        : part.replace(INLINE_LINK, (_, open, target, close) => {
+            const angled = target.startsWith("<");
+            const bare = angled ? target.slice(1, -1) : target;
+            const rebased = rebaseTarget(bare, fromDirectory, toDirectory);
+            return `${open}${angled ? `<${rebased}>` : rebased}${close}`;
+          }),
     )
     .join("");
 }
@@ -583,7 +656,9 @@ export function changedPaths(root, base, head) {
   return parseNameStatus(result.stdout);
 }
 
-// The squash commit that added a fragment carries its PR number.
+// The squash commit that added a fragment carries its PR number. git log
+// lists the newest commit first; when a name comes back after an assembly
+// deleted it, the newest add is the one whose file is in the tree now.
 export function prFromHistory(root, path) {
   const result = git(root, [
     "log",
@@ -594,7 +669,7 @@ export function prFromHistory(root, path) {
   ]);
   if (result.status !== 0) return null;
   const subjects = result.stdout.split("\n").filter(Boolean);
-  return subjects.length === 0 ? null : prFromSquashSubject(subjects.at(-1));
+  return subjects.length === 0 ? null : prFromSquashSubject(subjects[0]);
 }
 
 function parseArguments(argv) {
@@ -625,7 +700,7 @@ function runRequire({ root, base, head }) {
   const result = fragmentRequirement(changedPaths(root, base, head));
   if (!result.required) {
     console.log(
-      "changelog fragment: not required (no change under apps/, packages/, scripts/ or infra/)",
+      `changelog fragment: not required (no change under ${CODE_SCOPE})`,
     );
     return 0;
   }
@@ -635,12 +710,13 @@ function runRequire({ root, base, head }) {
       ...(result.changelogEdited ? [CHANGELOG_PATH] : []),
     ];
     console.log(`changelog fragment: present (${evidence.join(", ")})`);
-    // Transition: PRs opened before the fragment rule still edit the
-    // changelog itself and pass, but new PRs are pointed at the fragments.
+    // Transition (see fragmentRequirement): a direct changelog edit passes
+    // with a warning that points at the fragments. There is no open-date
+    // check, so the warning does not claim one.
     if (result.fragmentPaths.length === 0) {
       console.log(
-        `::warning::This PR edits ${CHANGELOG_PATH} directly. That still passes for PRs opened before the fragment rule, ` +
-          `but new PRs add ${FRAGMENT_DIRECTORY}/<YYYY-MM-DD>-<slug>.md instead so open PRs stop conflicting (format: ${FRAGMENT_README}).`,
+        `::warning::This PR edits ${CHANGELOG_PATH} directly instead of adding a fragment. The check accepts that only during the transition; ` +
+          `add ${FRAGMENT_DIRECTORY}/<YYYY-MM-DD>-<slug>.md instead so open PRs stop conflicting (format: ${FRAGMENT_README}).`,
       );
     }
     return 0;

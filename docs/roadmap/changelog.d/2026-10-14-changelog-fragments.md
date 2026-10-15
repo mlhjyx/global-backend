@@ -11,8 +11,8 @@ title: Replace the single-file changelog with one fragment per PR, assembled lat
 - 改动：
   - **片段目录** `docs/roadmap/changelog.d/`：每个 PR 放一个 `<YYYY-MM-DD>-<slug>.md`，frontmatter 写 `date` / `pr` / `title`，正文依次写起因 / 改动 / 测试 / 未做。目录 README 写明格式、何时必需、slug 取分支 topic 以免撞名、汇编方法。`pr` 可以留空：汇编时从加入片段的 squash 提交标题里的 `(#N)` 取，不必为补 PR 号再推一次（本条目就留空）。
   - **校验** `scripts/governance-changelog-fragments.mjs`：文件名、frontmatter（只允许三个键、日期须为真实日期且与文件名一致、PR 号为正整数或空、标题不带 `#` 与 `(#N)`）、正文四项的顺序与内容、正文不得有一二级标题、目录里只能有 README 与片段。`pnpm docs:verify` 调用它（`scripts/verify-docs.mjs`），片段改由 frontmatter 承担元数据，免去 `docs/roadmap/` 的「生命周期」行要求。报错直接给出应写成的样子：键名大写、冒号后缺空格、缩进、BOM 各有自己的提示，正文错误给文件里的行号，缺顶层条目时说明顶层条目的写法。
-  - **必需检查**：同一脚本的 `require` 子命令按 `git diff --name-status --no-renames <base>...<head>` 判断：改了 `apps/`、`packages/`、`scripts/`、`infra/` 任一路径时，必须新增或修改一个片段；只删片段、只改 README 不算。`governance.yml` 的 checkout 改为 `fetch-depth: 0`，新增只在 `pull_request` 上运行的一步（push 到 main 时跳过），传 `base.sha` 与 PR 的 `head.sha`，并用 `!cancelled()` 让它与 `governance:verify` 在同一轮里各自报错；算不出 diff 时失败而不是放行。
-  - **过渡**：规则生效前开的 PR 仍直接改 `changelog.md`，`require` 照样放行，只在日志里出一条 `::warning::` 指向片段格式，在途 PR 不会因此变红、也不必返工。
+  - **必需检查**：同一脚本的 `require` 子命令按 `git diff --name-status --no-renames <base>...<head>` 判断：改了 `apps/`、`packages/`、`scripts/`、`infra/` 任一路径或根目录的构建与运行时文件（`CODE_ROOT_FILES`，见下文复审一轮）时，必须新增或修改一个片段；只删片段、只改 README 不算。`governance.yml` 的 checkout 改为 `fetch-depth: 0`，新增只在 `pull_request` 上运行的一步（push 到 main 时跳过），传 `base.sha` 与 PR 的 `head.sha`，并用 `!cancelled()` 让它与 `governance:verify` 在同一轮里各自报错；算不出 diff 时失败而不是放行。
+  - **过渡**：直接改 `changelog.md` 的 PR，`require` 照样放行，只在日志里出一条 `::warning::` 指向片段格式，在途 PR 不会因此变红、也不必返工。放行不看 PR 何时开，关闭条件见下文复审一轮。
   - **汇编** `scripts/changelog-assemble.mjs`（`--dry-run` 只列不写）：按日期倒序插入，同一天的条目接在当天已有小节之后、按 PR 号升序；片段里按片段目录写的相对链接改写成从 `changelog.md` 出发的路径；写入后删除片段。任何片段不合格时什么都不写。每班发版列车的 PR 合完后，由当班负责合并的开发代理运行一次，单独作为 `docs(changelog)` PR 提交，不由 bot 直接提交 main。
   - 规则同步：`AGENTS.md` §9、`CONTRIBUTING.md` 新增「Changelog 片段」一节、PR 模板加一项勾选、`changelog.md` 开头加写法变更说明；`docs/backend/ci-merge-automation.md` 新增「Changelog 片段的汇编」一节（谁、何时、四步、冲突处理、回退），原来那句「changelog 冲突」指向它。本条目是第一个片段。
 - 测试：
@@ -30,6 +30,16 @@ title: Replace the single-file changelog with one fragment per PR, assembled lat
   - 没有改 ruleset，strict 维持关闭。
   - 没有自动汇编：不加 bot、不加定时任务，片段会在目录里累积到下一班发版列车后有人运行汇编为止。
   - 不校验片段里的 `pr` 是否等于当前 PR 号。
-  - 根目录的 `package.json`、`pnpm-lock.yaml` 与 `.github/` 不在必需前缀里：只改这些的 PR 不强制写片段（依赖刷新 PR 一般也会改 `apps/` 或 `packages/` 下的 `package.json`）。
+  - `.github/` 与根目录的文档、编辑器和密钥扫描配置不在必需范围里：只改这些的 PR 不强制写片段。
   - fork 来的 PR 可以连同检查脚本一起改，这一步和其他 `pull_request` 检查一样只防遗漏、不防恶意。
   - 仓外的 `/global/CLAUDE.md` §7 与派活脚本里「在 changelog.md 当天小节末尾新增小节」的写法，要在本 PR 合入后改成写片段，不在本 PR 内。
+- 复审一轮（#658 独立复审 1 条 MEDIUM、5 条 LOW）：
+  - 起因：复审指出片段的生命周期豁免硬编码在 `verify-docs.mjs`、没进机器政策也没登记例外，治理页 `docs/governance/docs-verification.md` 不知道新检查的存在（M1）；汇编按最早一次加入提交取 PR 号，片段名在汇编后被重用会拿到旧 PR 号（L1）；没有用例钉住三点 diff（L2）；过渡放行的 warning 暗示有开 PR 日期判断、实际没有，也没有关闭条件（L3）；`Dockerfile`、`runtime-entrypoint.mjs` 等根目录运行时文件不在必需范围（L4），#661 就是只改根目录 `docker-compose.yml` 的 PR；尖括号目标、单引号标题与引用式定义的相对链接汇编时不改写（L5）。
+  - 改动：
+    - M1：豁免移进 `docs-verification-policy.json` 的 `lifecycleRequired.frontmatterFragmentDirectories`，`verify-docs.mjs` 改用 `lifecycleExemptFragment(policy, path)`，删掉该项片段就重新要求生命周期行；政策列了 `changelog.d` 以外的目录时报 `CHANGELOG_FRAGMENT_POLICY`。治理页 §1 写明 governance 工作流在 `pull_request` 上多跑 `require` 一步，§2 新增「Changelog 片段格式」「代码 PR 的 changelog 片段」两行，§3 写明政策豁免，§4 登记两条例外（片段免生命周期行、过渡放行），各带风险、Owner、关闭条件与 successor。
+    - L1：`prFromHistory` 改取最近一次加入该文件的提交；片段 README 改正「同日同 slug 必然冲突」的说法（前一个片段已汇编时不冲突）。
+    - L3：warning 改为「只在过渡期接受」，不再说「规则生效前开的 PR」；放行处加注释，关闭条件写进治理页 §4、片段 README 与 `CONTRIBUTING.md`：仓外 `/global/CLAUDE.md` §7 与派活脚本改为写片段后，删除 `|| changelogEdited`。
+    - L4：新增 `CODE_ROOT_FILES`（`.dockerignore`、`Dockerfile`、`docker-compose.yml`、`eslint.config.mjs`、`nx.json`、`package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、`runtime-entrypoint.mjs`、`tsconfig.base.json`），只认根目录同名文件；`AGENTS.md` §9、`CONTRIBUTING.md`、PR 模板、片段 README 与工作流注释同步。根目录 `package.json` 与 `pnpm-lock.yaml` 原先在「未做」里被排除，这次一并纳入：它们进运行时镜像，改它们的 PR 本来就要有人补 Copy 重签。
+    - L5：链接改写支持 `[t](<目标>)` 与单引号标题；引用式定义与脚注定义在片段里直接拒绝（`CHANGELOG_FRAGMENT_LINK`），因为 `docs:verify` 不检查它们、汇编也不改写。
+  - 测试：先写 9 项新用例并改 2 项既有用例（过渡 warning、`verify-docs` 接线），在只导出空桩的实现上跑出 10 项失败（除三点 diff 用例外的 8 项新用例与改过的 2 项），补实现后 35 项全部通过：根目录运行时文件触发必需判定且只认根目录；仓库根目录每个被跟踪文件都已归类（新增根文件不归类即失败）；尖括号与单引号链接改写；引用式与脚注定义被拒并给出行号、代码块与行内代码里不误报；过渡 warning 不再声称有开 PR 日期判断；汇编后重用片段名取 #705 而非 #700；政策豁免与政策漂移各自的判定；`verify-docs` 接线与政策内容；治理页 §1/§2/§3/§4 的记录。三点 diff 用例（main 在分叉后合入 `apps/` 改动、PR 只改文档）在现实现上本来就通过，把 `...` 临时改成 `..` 后它失败，确认能抓住这个变异。`pnpm docs:verify` 0 错误。
+  - 未做：没有给过渡放行加开 PR 日期判断或截止日期，派活指令改掉之前加门会让照旧写法的新 PR 变红；仓外指令的修改不在本 PR 内。
