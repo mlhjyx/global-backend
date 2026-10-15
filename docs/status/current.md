@@ -72,6 +72,18 @@ PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](..
 
 #644（产物按字节判等）与 #645（词表归一按查询归键、无源读取时不调模型、调用丢失时回退内置词表）已合并、待下一个维护窗口上线。另有任务卡 A（开发快速通道）、B（`gctl switch-backend` 一条命令换镜像）、D（查询活动普通错误无回执）、E（卖方入驻 HOLD）已派出，以各自 PR 为准。
 
+### 4.1 开发快速通道（#656，2026-10-14 合并）
+
+> 2026-10-15 随 #651 并入 main 时从旧结构的 §4.5 原样搬入：只记录这一项改动（#656，已合并、未上线），**不刷新**本页 `最后核验` 时间戳，也不改动上面各节的裁决。
+
+开发者改了获客的 worker 侧代码后，此前每次都要发布并切换后端镜像才能在本机验证。本项让 development 里一个测试 workspace 的入驻理解、发现 run 与资格判定跑在源码 customer worker 上；设计与复核调整见 [落地设计](../superpowers/plans/2026-10-14-dev-fast-lane.md)，运维步骤见 [开发快速通道](../backend/dev-fast-lane.md)。
+
+| 项 | 当前事实 | 不得外推 |
+| --- | --- | --- |
+| 改变的 | 开关置位时，受证 API 的 relay 把该 workspace 的三条获客命令投到开发用 Temporal 的专属队列（带执行超时），源码 worker 只 poll 该队列；`/health/ready` 多一个恒为 `not_proven` 的 `capabilities.dev_fast_lane` | 运行镜像何时采用另行记录，采用前行为不变；尚无本机运行观察，不是 RuntimeEvidence |
+| 不变的 | 开关为空时 API、relay、worker 行为逐字不变；其余 workspace、擦除与建站命令、整体 readiness、客户写入准入、`/health/build`、租约与准入代码都不变；pilot/production 启动即拒绝车道变量 | 车道 worker 是 unattested 源码进程，车道时段的任何观察都不能作为 RuntimeEvidence PASS 或进入 Release Bundle；R4 撤销投递链仍未打通 |
+| 代价 | 车道只覆盖三个 workflow 的 workflow 体与活动体，workflow 输入、outbox payload、事件注册表与 API 内的同步获客操作仍是镜像代码；开关、迭代、关闭都要先排空在途 run（路由在投递时决定）；换镜像前要关车道 | 首次落地仍需发布并切换一次含本改动的镜像 |
+
 ## 5. 下一步与需要的决定
 
 不碰受保护文件、可以先做的：#648、#649 合并并上线后，对两条验收 ICP 各调一次 `POST /icps/:icpId/qualify`，让现有 179 条 lead 拿到真实评分（不必等 run 全绿）；翻开 `company_contact` 并对现有公司补联系路径；交付包 v1.1 与周报 CSV 先出第一份；走通一次 GrowthOS 对真实 `LeadQualified` 的 accept → `GET /events` → ack。验收 run 的稳定性（#644、#645 上线后再跑）与「评分 → 接受 → CSV」可以并行验收。

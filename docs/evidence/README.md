@@ -57,6 +57,8 @@ RuntimeEvidence 文件必须位于 `docs/evidence/runtime/`、使用 [RuntimeEvi
 
 时间到达 `valid_until` 后，记录自动成为 `HISTORICAL`：保留 provenance，但不能满足 `PILOT`/`GA` 门。TEST_ANCHOR、旧真机日志、手工日期和“命令曾通过”的叙述都不能替代这张记录。
 
+开发快速通道（[运维说明](../backend/dev-fast-lane.md)）开启期间：`/health/ready` 带 `capabilities.dev_fast_lane` 的任何时段、在 `understanding-dev-fast-lane-*` 队列上执行的任何 run，都不能作为 RuntimeEvidence PASS 依据，也不能进入 PILOT/GA Release Bundle。要记录车道观察时，`evidence_kind` 以 `dev-fast-lane-` 开头、`environment` 为 `development`，正文写明「worker 为源码 unattested，API 为受证镜像，绿灯只代表事实可观察」。验证器会拒绝非 development 的车道证据（`EVIDENCE_FAST_LANE_ENVIRONMENT_INVALID`），也拒绝把车道 kind 写进 traceability chain 的 `required_evidence_kinds`（`TRACE_FAST_LANE_EVIDENCE_KIND_FORBIDDEN`）。
+
 ## 3. Release 与决策边界
 
 真实发布记录不放在本目录，而放在 `docs/releases/<release-id>.release.json`。记录数量和当前接纳状态见[当前状态](../status/current.md)；只有完整机器校验、独立 reviewer、用户授权及可信 external provenance 均满足相应门时才可晋级。RuntimeEvidence 到期不改写 Bundle，也不能由 Bundle 反向延长。

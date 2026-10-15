@@ -350,6 +350,23 @@ test('development API and Worker use one immutable image reference and wait for 
   assert.match(compose, /nofile:\n\s+soft: 1024\n\s+hard: 1024/);
 });
 
+test('the development fast lane switch reaches only the API service and defaults to off', async () => {
+  const compose = await repositoryFile('infra/backend-runtime.compose.yml');
+  const sharedEnvironment = compose.slice(
+    compose.indexOf('x-backend-environment:'),
+    compose.indexOf('x-backend-runtime:'),
+  );
+  const apiService = compose.slice(compose.indexOf('\n  api:'), compose.indexOf('\n  worker:'));
+  const workerServices = compose.slice(compose.indexOf('\n  worker:'));
+  for (const name of ['RUNTIME_DEV_FAST_LANE_WORKSPACE_ID', 'RUNTIME_DEV_FAST_LANE_TEMPORAL_ADDRESS']) {
+    assert.match(apiService, new RegExp(`^      ${name}: \\$\\{${name}:-\\}$`, 'm'));
+    assert.doesNotMatch(sharedEnvironment, new RegExp(name));
+    assert.doesNotMatch(workerServices, new RegExp(name));
+  }
+  // Only the source-built lane worker reads the expected schema digest.
+  assert.doesNotMatch(compose, /RUNTIME_DEV_FAST_LANE_SCHEMA_DIGEST/);
+});
+
 test('runtime lease principals are provisioned without embedded credentials and split by process', async () => {
   const [compose, provision, verify] = await Promise.all([
     repositoryFile('infra/backend-runtime.compose.yml'),

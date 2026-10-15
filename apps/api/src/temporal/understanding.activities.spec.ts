@@ -7,6 +7,15 @@ import type { BudgetStore } from '../tools/budget-store';
 import { createUnderstandingActivities } from './understanding.activities';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 import { Context } from '@temporalio/activity';
+import { ToolBroker } from '../tools/tool-broker';
+import { ToolRegistry } from '../tools/tool-registry';
+import { RateLimiter } from '../tools/rate-limiter';
+import type { Tool } from '../tools/tool-contract';
+import type { ArtifactExecutionPort } from '../tools/artifact-execution-port';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
+import type { Prisma } from '@prisma/client';
+import { ArtifactSubjectBindingContract } from '../durable-results/artifact/artifact-subject-binding.contract';
+import { GenericOperationArtifactExecution } from '../durable-results/artifact/generic-operation-artifact.execution';
 
 const MODEL_RECEIPT: DurableExecutionReceipt = Object.freeze({
   schemaVersion: 'durable-execution-receipt/v1',
@@ -55,6 +64,13 @@ const AUTHORITY_ARGS = Object.freeze({
   executionContractVersion: 2 as const,
   executionBudget: UNDERSTANDING_BINDING,
 });
+/**
+ * The seller company_profile being understood. It is the G3 artifact subject of every crawl, as
+ * its own `company_profile` kind: `company` names a discovered buyer (canonical_company).
+ */
+const COMPANY_ID = '50000000-0000-4000-8000-000000000005';
+const SELLER_SUBJECT = Object.freeze({ subjectType: 'company_profile' as const, subjectId: COMPANY_ID });
+const CRAWL_ARGS = Object.freeze({ ...AUTHORITY_ARGS, companyId: COMPANY_ID });
 
 /**
  * FIX C（Codex P1）：crawl4ai.fetch 的 allowedPurpose 追加 site_builder 后，**不带 purpose** 的调用者
@@ -74,7 +90,7 @@ describe('understanding.activities — crawl4ai.fetch 显式声明 discovery/enr
       budgetStore: budget.store,
       activityRunId: () => 'understanding-run-1',
     });
-    await acts.crawlWebsite({ ...AUTHORITY_ARGS, website: 'https://acme.example/' });
+    await acts.crawlWebsite({ ...CRAWL_ARGS, website: 'https://acme.example/' });
     expect(invoke).toHaveBeenCalledTimes(1);
     const [toolId, , ctx] = invoke.mock.calls[0] as [string, unknown, { purpose?: string[] }];
     expect(toolId).toBe('crawl4ai.fetch');
@@ -196,6 +212,7 @@ describe('understanding.activities — durable workflow budget lifecycle', () =>
 
     await acts.crawlWebsite({
       workspaceId: UNDERSTANDING_BINDING.scopeKey,
+      companyId: COMPANY_ID,
       website: 'https://acme.example/',
       executionContractVersion: 2,
       executionBudget: UNDERSTANDING_BINDING,
@@ -268,8 +285,8 @@ describe('understanding.activities — durable workflow budget lifecycle', () =>
       activityRunId: () => 'understanding-workflow-run',
     });
 
-    await acts.crawlWebsite({ ...AUTHORITY_ARGS, website: 'https://acme.example/' });
-    await acts.crawlPages({ ...AUTHORITY_ARGS, urls: ['https://acme.example/about'] });
+    await acts.crawlWebsite({ ...CRAWL_ARGS, website: 'https://acme.example/' });
+    await acts.crawlPages({ ...CRAWL_ARGS, urls: ['https://acme.example/about'] });
     await acts.extractClaims({ ...AUTHORITY_ARGS, text: 'claims' });
     await acts.extractOfferings({ ...AUTHORITY_ARGS, text: 'offerings' });
     await acts.extractAndPersistProfile({
@@ -329,7 +346,7 @@ describe('understanding.activities — durable workflow budget lifecycle', () =>
     });
 
     await expect(
-      acts.crawlWebsite({ ...AUTHORITY_ARGS, website: 'https://acme.example/' }),
+      acts.crawlWebsite({ ...CRAWL_ARGS, website: 'https://acme.example/' }),
     ).rejects.toThrow('wire failed');
     expect(budget.close).not.toHaveBeenCalled();
   });
@@ -347,7 +364,294 @@ describe('understanding.activities — durable workflow budget lifecycle', () =>
       activityRunId: () => 'understanding-workflow-run',
     });
 
-    await expect(acts.crawlPages({ ...AUTHORITY_ARGS, urls: ['https://acme.example/about'] }))
+    await expect(acts.crawlPages({ ...CRAWL_ARGS, urls: ['https://acme.example/about'] }))
       .rejects.toBe(replayError);
+  });
+});
+
+/**
+ * G3 5.1（#565）：crawl4ai-fetch/v1 是主体绑定的 PERSONAL_DATA 产物，真实 ToolBroker 的 artifactPrecheck
+ * 只放行带 ctx.artifactSubject 的调用。理解工作流自 2026-08-24 起每次抓取都被
+ * GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD 拒掉——这里用真实 broker 复现，再证明活动把卖方
+ * company_profile 以 `company_profile` 主体种类交出后被准入（方案 A，2026-10-14：`company` 指发现到的
+ * 买方 canonical_company，卖方画像是另一张表）；主体被拒时失败类型是拒绝原因本身而非 `Error`。
+ */
+describe('understanding.activities — the seller profile is the G3 artifact subject of every crawl', () => {
+  const RESERVATION = Object.freeze({
+    workspaceId: UNDERSTANDING_BINDING.scopeKey,
+    accountKey: UNDERSTANDING_BINDING.accountKey,
+    operationId: '1b3d6096-b924-4bc8-bb4f-8436efb37b07',
+    estimatedMicrousd: 10_000n,
+    replay: false,
+    authorityId: UNDERSTANDING_BINDING.authorityId,
+  });
+
+  /** The real ToolBroker with the #565 per-call gate in front of a fake crawl4ai.fetch wire. */
+  function g3Broker(
+    admission: Awaited<ReturnType<ArtifactExecutionPort['admit']>> = { status: 'BOUND', subjectRef: SELLER_SUBJECT },
+    admitWith?: ArtifactExecutionPort['admit'],
+  ) {
+    const execute = vi.fn(async () => ({ url: 'https://acme.example/', text: 'Acme makes pumps.', contentHash: 'x' }));
+    const tool = {
+      id: 'crawl4ai.fetch',
+      version: '1.0.0',
+      category: 'crawl',
+      cost: { unit: 'call', estimatedCents: 1, external: false },
+      rateLimit: { rps: 100, concurrency: 10 },
+      compliance: {
+        sourcePolicy: 'none',
+        respectsRobots: false,
+        personalData: false,
+        allowedPurpose: ['discovery', 'enrichment'],
+        reversible: true,
+        authRequired: false,
+        risk: 'low',
+      },
+      capabilities: { produces: ['text'], accepts: ['url'] },
+      idempotencyKey: (input: { url: string }) => `fetch:${input.url}`,
+      durableResultStrategy: {
+        kind: 'artifact_reference',
+        schema: 'crawl4ai-fetch/v1',
+        maxBytes: 300_000,
+        mediaTypes: ['text/markdown'],
+        privacyClass: 'PERSONAL_DATA',
+        ttlSeconds: 86_400,
+      },
+      durableReplayResult: (result: unknown) => result,
+      healthCheck: async () => ({ healthy: true }),
+      execute: async () => ({ data: await execute(), costCents: 1 }),
+    } as unknown as Tool;
+    const release = vi.fn(async () => ({ chargedMicrousd: 0n, observedMicrousd: 0n, capVariance: false, replay: false }));
+    const admit = vi.fn<ArtifactExecutionPort['admit']>(admitWith ?? (async () => admission));
+    const persist = vi.fn(async (input: { result: unknown }) => input.result);
+    const registry = new ToolRegistry();
+    registry.register(tool);
+    const broker = new ToolBroker({
+      registry,
+      budgetStore: { reserve: vi.fn(async () => RESERVATION), release, settle: vi.fn() } as unknown as BudgetStore,
+      limiter: new RateLimiter(),
+      now: () => 1_000_000,
+      artifactExecution: { admit, persist, replay: vi.fn() } as unknown as ArtifactExecutionPort,
+    });
+    return { broker, execute, admit, persist, release };
+  }
+
+  function activitiesOn(broker: ExecutionBroker) {
+    return createUnderstandingActivities({
+      prisma: {} as PrismaService,
+      gateway: {} as ModelGateway,
+      broker,
+      budgetStore: budgetStoreSpies().store,
+      activityRunId: () => 'understanding-run-1',
+    });
+  }
+
+  it('reproduces the hold: the real broker refuses a crawl that names no artifact subject, before any wire', async () => {
+    const { broker, execute, admit, release } = g3Broker();
+
+    await expect(
+      broker.invoke(
+        'crawl4ai.fetch',
+        { url: 'https://acme.example/' },
+        {
+          workspaceId: UNDERSTANDING_BINDING.scopeKey,
+          taskContractId: 'company_understanding.extract_claims',
+          correlationId: 'https://acme.example/',
+          purpose: ['discovery', 'enrichment'],
+          runId: UNDERSTANDING_BINDING.accountKey,
+        },
+      ),
+    ).rejects.toMatchObject({ name: 'ToolPolicyDenied', reason: 'GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD' });
+    expect(admit).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledWith(RESERVATION);
+  });
+
+  it('crawlWebsite names the seller profile as the subject and the real broker admits it', async () => {
+    const { broker, execute, admit, persist } = g3Broker();
+    const acts = activitiesOn(broker);
+
+    await expect(acts.crawlWebsite({ ...CRAWL_ARGS, website: 'https://acme.example/' })).resolves.toEqual({
+      url: 'https://acme.example/',
+      text: 'Acme makes pumps.',
+    });
+
+    expect(admit).toHaveBeenCalledWith({
+      workspaceId: UNDERSTANDING_BINDING.scopeKey,
+      resultSchema: 'crawl4ai-fetch/v1',
+      subjectRef: SELLER_SUBJECT,
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(persist).toHaveBeenCalledWith(expect.objectContaining({ subjectRef: SELLER_SUBJECT }));
+  });
+
+  /**
+   * The production admission (GenericOperationArtifactExecution.admit → ArtifactSubjectBindingContract
+   * → GenericOperationArtifactSubjectRepository) over a fake workspace transaction that holds the
+   * seller's company_profile row and no canonical company with that id — what the database answers
+   * for a seller being onboarded. Only the SQL rows are fake.
+   */
+  function productionAdmit(hold: { tombstoned: boolean; suppressed: boolean } = { tombstoned: false, suppressed: false }) {
+    const statements: string[] = [];
+    const queryRaw = vi.fn(async (sql: Prisma.Sql) => {
+      const text = sql.strings.join('');
+      statements.push(text);
+      if (text.includes('find_workspace_generic_operation_artifact_subject_execution_hold_v1')) return [hold];
+      // resolveExistingSubject: one branch per kind, each keyed by the kind asked for.
+      return sql.values.includes('company_profile') && sql.values.includes(COMPANY_ID)
+        ? [{ workspace_id: UNDERSTANDING_BINDING.scopeKey, subject_type: 'company_profile', subject_id: COMPANY_ID }]
+        : [];
+    });
+    const execution = new GenericOperationArtifactExecution({
+      withWorkspace: async (_workspaceId, fn) => fn({ $queryRaw: queryRaw } as unknown as Prisma.TransactionClient),
+      binding: new ArtifactSubjectBindingContract(),
+      service: {} as never,
+      materializers: {} as never,
+    });
+    return { admit: (input: Parameters<ArtifactExecutionPort['admit']>[0]) => execution.admit(input), statements };
+  }
+
+  it('the production admission binds the seller profile kind: admit, then one wire, then persist on the same subject', async () => {
+    const production = productionAdmit();
+    const { broker, execute, admit, persist } = g3Broker(undefined, production.admit);
+    const acts = activitiesOn(broker);
+
+    await expect(acts.crawlWebsite({ ...CRAWL_ARGS, website: 'https://acme.example/' })).resolves.toEqual({
+      url: 'https://acme.example/',
+      text: 'Acme makes pumps.',
+    });
+
+    await expect(admit.mock.results[0]?.value).resolves.toEqual({ status: 'BOUND', subjectRef: SELLER_SUBJECT });
+    expect(production.statements.some((text) => text.includes('FROM public.company_profile'))).toBe(true);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(persist).toHaveBeenCalledWith(expect.objectContaining({ subjectRef: SELLER_SUBJECT }));
+    expect(execute.mock.invocationCallOrder[0]).toBeGreaterThan(admit.mock.invocationCallOrder[0]!);
+    expect(persist.mock.invocationCallOrder[0]).toBeGreaterThan(execute.mock.invocationCallOrder[0]!);
+  });
+
+  it('the production admission refuses the profile id under the buyer company kind, before any wire', async () => {
+    const { broker, execute } = g3Broker(undefined, productionAdmit().admit);
+
+    await expect(
+      broker.invoke(
+        'crawl4ai.fetch',
+        { url: 'https://acme.example/' },
+        {
+          workspaceId: UNDERSTANDING_BINDING.scopeKey,
+          taskContractId: 'company_understanding.extract_claims',
+          correlationId: 'https://acme.example/',
+          purpose: ['discovery', 'enrichment'],
+          runId: UNDERSTANDING_BINDING.accountKey,
+          artifactSubject: { subjectType: 'company', subjectId: COMPANY_ID },
+        },
+      ),
+    ).rejects.toMatchObject({ name: 'ToolPolicyDenied', reason: 'GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_INVALID' });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('a tombstoned seller profile fails the homepage crawl as SUBJECT_TOMBSTONED, before any wire', async () => {
+    const { broker, execute } = g3Broker(undefined, productionAdmit({ tombstoned: true, suppressed: false }).admit);
+    const acts = activitiesOn(broker);
+
+    await expect(acts.crawlWebsite({ ...CRAWL_ARGS, website: 'https://acme.example/' })).rejects.toMatchObject({
+      name: 'ApplicationFailure',
+      type: 'GENERIC_OPERATION_ARTIFACT_SUBJECT_TOMBSTONED',
+      nonRetryable: true,
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('crawlPages carries the same subject on every subpage', async () => {
+    const invoke = vi.fn(async (_tool: string, input: { url: string }) => ({ data: { text: `page ${input.url}` }, costCents: 0 }));
+    const acts = activitiesOn({ invoke } as unknown as ExecutionBroker);
+
+    await acts.crawlPages({ ...CRAWL_ARGS, urls: ['https://acme.example/about', 'https://acme.example/products'] });
+
+    expect(invoke).toHaveBeenCalledTimes(2);
+    for (const call of invoke.mock.calls) {
+      const ctx = call[2] as { artifactSubject?: unknown; purpose?: string[] };
+      expect(ctx.artifactSubject).toEqual(SELLER_SUBJECT);
+      expect(ctx.purpose).toEqual(['discovery', 'enrichment']);
+    }
+  });
+
+  it('a subject the contract cannot bind fails the homepage crawl with the denial as its type, not retried', async () => {
+    const { broker, execute } = g3Broker({ status: 'DENIED', reason: 'SUBJECT_BINDING_INVALID' });
+    const acts = activitiesOn(broker);
+
+    const error = await acts.crawlWebsite({ ...CRAWL_ARGS, website: 'https://acme.example/' }).then(
+      () => { throw new Error('expected a denial'); },
+      (e: unknown) => e as { name: string; type: string; nonRetryable: boolean; cause?: unknown },
+    );
+
+    expect(error).toMatchObject({
+      name: 'ApplicationFailure',
+      type: 'GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_INVALID',
+      nonRetryable: true,
+    });
+    expect(error.cause).toMatchObject({ name: 'ToolPolicyDenied' });
+    expect(isExecutionControlError(error)).toBe(true);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('a policy reason that is not a closed token crosses the boundary as the class name only', async () => {
+    const denial = Object.assign(new Error('tool crawl4ai.fetch denied: domain acme.example is SUSPENDED'), {
+      name: 'ToolPolicyDenied',
+      toolId: 'crawl4ai.fetch',
+      reason: 'domain acme.example is SUSPENDED',
+    });
+    const acts = activitiesOn({ invoke: vi.fn(async () => { throw denial; }) } as unknown as ExecutionBroker);
+
+    const error = await acts.crawlWebsite({ ...CRAWL_ARGS, website: 'https://acme.example/' }).then(
+      () => { throw new Error('expected a denial'); },
+      (e: unknown) => e as { type: string; message: string; nonRetryable: boolean },
+    );
+
+    expect(error).toMatchObject({ type: 'ToolPolicyDenied', nonRetryable: true });
+    expect(`${error.type} ${error.message}`).not.toMatch(/acme\.example/u);
+  });
+
+  it('recordUnderstandingFailure returns the profile to DRAFT with the content-free failure; a new ENRICHING clears it', async () => {
+    const update = vi.fn(async () => ({}));
+    const prisma = {
+      withWorkspace: vi.fn(async (_ws: string, fn: (tx: unknown) => Promise<unknown>) => fn({ companyProfile: { update } })),
+    } as unknown as PrismaService;
+    const acts = createUnderstandingActivities({ prisma, gateway: {} as ModelGateway, budgetStore: budgetStoreSpies().store });
+
+    await acts.recordUnderstandingFailure({
+      ...CRAWL_ARGS,
+      failure: { stage: 'crawlWebsite', errorType: 'GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_INVALID', control: true },
+    });
+    await acts.setStatus({ ...CRAWL_ARGS, status: 'ENRICHING' });
+    await acts.setStatus({ ...CRAWL_ARGS, status: 'REVIEW' });
+
+    expect(update.mock.calls.map(([args]) => args)).toEqual([
+      {
+        where: { id: COMPANY_ID },
+        data: {
+          status: 'DRAFT',
+          understandingFailedAt: expect.any(Date),
+          understandingLastError: 'crawlWebsite:GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_INVALID',
+        },
+      },
+      { where: { id: COMPANY_ID }, data: { status: 'ENRICHING', understandingFailedAt: null, understandingLastError: null } },
+      { where: { id: COMPANY_ID }, data: { status: 'REVIEW' } },
+    ]);
+  });
+
+  it('recordUnderstandingFailure refuses a failure that is not a closed stage:type pair and writes nothing', async () => {
+    const update = vi.fn(async () => ({}));
+    const prisma = {
+      withWorkspace: vi.fn(async (_ws: string, fn: (tx: unknown) => Promise<unknown>) => fn({ companyProfile: { update } })),
+    } as unknown as PrismaService;
+    const acts = createUnderstandingActivities({ prisma, gateway: {} as ModelGateway, budgetStore: budgetStoreSpies().store });
+
+    await expect(
+      acts.recordUnderstandingFailure({
+        ...CRAWL_ARGS,
+        failure: { stage: 'crawlWebsite', errorType: 'person@example.com', control: false } as never,
+      }),
+    ).rejects.toMatchObject({ type: 'UNDERSTANDING_FAILURE_INVALID', nonRetryable: true });
+    expect(update).not.toHaveBeenCalled();
   });
 });
