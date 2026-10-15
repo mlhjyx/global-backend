@@ -29,8 +29,12 @@
 -- subject row has no foreign key to the profile, so a delete guard keeps a profile from going
 -- while an artifact is still bound to it without a tombstone: whatever deletes a seller profile
 -- (a future tenant deletion) must first tombstone the subject through
--- tombstone_workspace_generic_operation_artifact_subject_v1 under a deletion_request naming it,
--- which also hands the bound objects to the personal artifact cleanup.
+-- tombstone_workspace_generic_operation_artifact_subject_v1 under a deletion_request naming it.
+-- The tombstone only blocks new bindings; it does not enqueue the bound objects for the personal
+-- artifact cleanup, so that flow must enqueue them itself (until then they go by object TTL).
+-- The guard has two known limits that flow must also cover: a crawl left RESULT_UNKNOWN records
+-- its subject only on tool_budget_operation.expected_artifact_subject_*, which the guard does not
+-- read; and the KEY SHARE handshake with the binder holds only for a deleter at READ COMMITTED.
 BEGIN;
 
 SET LOCAL lock_timeout = '5s';
