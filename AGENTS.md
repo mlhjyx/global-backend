@@ -89,7 +89,7 @@ pnpm --filter @global/db exec prisma migrate deploy # 读 packages/db/.env
 - 生产路由、评测基础设施、评测 evidence、promotion 和 runtime adoption 必须分开变更。
 - 正常产品 BuildRun 的费用权威来自 SaaS Control Plane 签发的一次性、短期、请求绑定 Budget Grant；本仓只验签、原子消费、reserve/settle/reconcile 并回报，不另设隐藏的产品总金额门。缺失、非法、过期、跨 workspace/operation/request（已有 Site 时还必须绑定 site）或重复挪用的 Grant 必须在创建 Run、启动 Workflow 和调用模型前拒绝。
 - “暂不调用模型”仍表示 Codex/operator/evaluation 的零费用、离线或 create-only 边界。此类 ad-hoc/evaluation 真实 dispatch 前必须有精确 alias/protocol/credential scope、有限额度、冻结价格、请求与 campaign cap、durable settlement 和用户明确费用授权；正常产品 Grant 与该授权不能互相推导。
-- 有效输出已经持久取得但精确费用暂不可得时，按完整 reservation 上界保守扣减、允许 BuildRun 继续并异步追加对账，不得冒充精确费用。没有有效输出，或物理调用/ACK 状态未知时，完整 reservation 保持占用、禁止自动发起第二次物理请求，并按稳定 request/operation identity 恢复事实。唯一例外是确定失败、因而网关没有计费的请求（HTTP 429 与除 504/524 超时外的 5xx、连接从未建立、Tool 在第一次物理请求之前失败；流式失败一律不算：首字节之前的失败由 new-api 回可重试的 HTTP 502、按 5xx 释放，以流式失败到达的都已有输出、可能已计费）：reservation 释放，同一 operation key 最多再预留到第 3 次（账本计数，网关 RetryTimes=1 时最多 6 次物理请求）；机器声明见 `durable-result-strategies.json` 的 `resultDisposition`。
+- 有效输出已经持久取得但精确费用暂不可得时，按完整 reservation 上界保守扣减、允许 BuildRun 继续并异步追加对账，不得冒充精确费用。没有有效输出，或物理调用/ACK 状态未知时，完整 reservation 保持占用、禁止自动发起第二次物理请求，并按稳定 request/operation identity 恢复事实。唯一例外是确定失败、因而网关没有计费的请求（HTTP 429 与除 504/524 超时外的 5xx、连接从未建立、Tool 在第一次物理请求之前失败；流式失败一律不算：首字节之前的失败由 new-api 回可重试的 HTTP 502、按 5xx 释放，仍以流式失败到达的都在 new-api 写出首字节（数据块或 keepalive ping）之后，即使还没有输出也可能已按估算计费）：reservation 释放，同一 operation key 最多再预留到第 3 次（账本计数，网关 RetryTimes=1 时最多 6 次物理请求）；机器声明见 `durable-result-strategies.json` 的 `resultDisposition`。
 - Provider kill switch、单次 task/wire/token/output 上限、幂等和异常停用继续保留；24 小时人工 settlement attestation 不得作为正常产品运行授权或调用门。
 
 ## 9. 文档与交付
