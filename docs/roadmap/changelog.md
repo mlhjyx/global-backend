@@ -95,7 +95,7 @@
   - **流解析器**（`openai-compatible.provider.ts`，判定暂不使用，留给 new-api#3 上线后的那次改动）：记录是否收到过输出——content、任何名字的 reasoning、tool_calls 增量，或 usage 里的输出 token；只有 role 的开头块和空字符串不算。三种流失败带上 `outputStarted`；其余失败不带（视为未知）。
   - **ai_trace**：失败的非付费调用在 `meta` 里写 `budgetOperationId` 与 `budgetDisposition`（`RELEASED_CONTROL_DENIAL` / `RELEASED_DEFINITE_FAILURE` / `SETTLED_NO_RESULT`），每次失败都能追到账本行；`ProviderHttpError` 的 `errorMessage` 带上状态码（`ProviderHttpError:HTTP_503`）。
   - **broker**：能证明一个物理请求都没发出时释放预留——平台工具的调度器从未进入；或工作区工具声明了 `physicalWireObservation: "before_each_wire"`（每个物理请求前都调用 `ctx.beforePhysicalWire`）而 broker 注入的观察钩子从未被调用。声明的工具：`http.get`、`crawl4ai.render`、`tradefair.algolia`、`mapyourshow.fetch`、`sanctions.download`。没有声明的工具与付费路径不变。
-  - **账本**：迁移 `20261014095011_tool_budget_released_rereserve` 给 `tool_budget_operation` 加 `attempt`（1..3）；`reserve` 遇到同 key 的 RELEASED 行且 `attempt < 3` 时重新打开同一行（`attempt + 1`、回到 RESERVED、按新额度做与新插入相同的额度检查与 DENIED/exhausted 处理），id 不变，`(account_id, generation, operation_key)` 仍唯一；RESERVED、RESULT_UNKNOWN、SETTLED（有无结果都一样）以及第 3 次的 RELEASED 照旧 `REPLAY`。
+  - **账本**：迁移 `20261015045032_tool_budget_released_rereserve` 给 `tool_budget_operation` 加 `attempt`（1..3）；`reserve` 遇到同 key 的 RELEASED 行且 `attempt < 3` 时重新打开同一行（`attempt + 1`、回到 RESERVED、按新额度做与新插入相同的额度检查与 DENIED/exhausted 处理），id 不变，`(account_id, generation, operation_key)` 仍唯一；RESERVED、RESULT_UNKNOWN、SETTLED（有无结果都一样）以及第 3 次的 RELEASED 照旧 `REPLAY`。
   - **治理声明**：`durable-result-strategies.json` 的 `resultDisposition` 升到 `execution-result-disposition/v2`，新增 `definite_failure`，`automaticPhysicalRetryAllowed` 从 `false` 改为 `"DEFINITE_FAILURE_BEFORE_OUTPUT_ONLY"`，并声明 `definiteFailureStatus: RELEASED`、`maxReservationAttempts: 3`；`execution-authority-policy.mjs` 按新口径逐值校验，并要求迁移里有 3 次上限与「只有 RELEASED 可再预留」、分类器排除 504/524，并且在 new-api#3 上线前不得引用 `ProviderTransportError`/`ProviderOutputError`（即不得释放任何流式或输出失败）。`domain-ack-contract.ts` 的处置合同同步到 v2：只有 `definite_failure` 可以 `automaticPhysicalRetryAllowed: true`。AGENTS.md §8 与执行预算设计文档同步口径。
   - 受保护文件 `router-model-gateway.ts`、`tool-broker.ts` 重钉指纹，复核追加到 `docs/evidence/execution-authority-fence-review-20261001.md`。`schema.prisma` 变更后 Copy 回执重签（HASH_ONLY）。CI 的 PostgreSQL 步骤加跑新的账本真库用例。
 - 测试：
@@ -113,6 +113,7 @@
   - 付费路径（Site Builder R4-B 账本）不变。
   - 重新打开的行保留首次的 `created_at`；如果 PR-2 按年龄判定超龄，需要另记每次预留的时间。
   - 流在第一个输出之前失败暂不释放，等 mlhjyx/new-api#3 上线后单独加回（同时改 `execution-authority-policy.mjs` 的反向检查）。
+  - 迁移原名 `20261014095011`，排在 #654 的 `20261014120000` 之前；为避免分班上线时 `migration_revision` 与最新执行的迁移不一致，改名为 `20261015045032`，SQL 不变。
 
 ## 2026-10-13 · Let best-effort stages skip a company whose operation cannot be replayed, time-box enrichment, and rehearse a full-size run
 

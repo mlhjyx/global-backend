@@ -200,7 +200,7 @@
   - 工作区路径上，只有声明了 `physicalWireObservation: "before_each_wire"` 的工具，执行上下文才换成 `{ ...ctx, beforePhysicalWire }`：观察钩子先记下「请求了物理请求」，再调用调用方原有的钩子（产品代码里没有调用方设置它）。观察钩子自身从不抛错，所以 guarded-http 的 `ExternalHttpPhysicalWireDeniedError` 语义不变。未声明的工具拿到的仍是调用方原对象（`platform-egress-fence.composition.spec.ts` 的同一性用例照旧通过）。
   - `execute()` 失败、不是禁联拒绝、非付费、预留不是重放，且 broker 能证明一个物理请求都没发出（平台路径：`!platformWireStarted && !platformWireFailed`；工作区路径：已声明且观察钩子未被调用）时 `release` 后原样抛出。调度器失败、已发出过请求、未声明的工具与付费路径都照旧。
   - 声明的工具（`source-tools.ts`，围栏外）：`http.get`、`crawl4ai.render`、`tradefair.algolia`、`mapyourshow.fetch`、`sanctions.download`。`source-tools-wire-observation.spec.ts` 锁住声明清单，并证明它们把 broker 的钩子原样交给每个适配器；适配器各自的用例（guarded-http 每一跳、web-crawler 在 fetch 之前、Algolia 每一页）证明钩子在每个物理请求之前被调用。
-- **账本**：迁移 `20261014095011` 只替换 `reserve_tool_budget_microusd_v1`（签名、返回形状、属主、授权、`search_path` 含 `pg_temp`、两层包装都不变），新增 `attempt` 列（CHECK 1..3）。只有 RELEASED 且 `attempt < 3` 的行会被重开为 RESERVED（同一 id、`attempt + 1`、与新插入相同的额度检查与 DENIED/exhausted 处理）；RESERVED、RESULT_UNKNOWN、SETTLED（有无结果）照旧 `REPLAY`，所以「结果未知不付两次」的保证不变。
+- **账本**：迁移 `20261015045032` 只替换 `reserve_tool_budget_microusd_v1`（签名、返回形状、属主、授权、`search_path` 含 `pg_temp`、两层包装都不变），新增 `attempt` 列（CHECK 1..3）。只有 RELEASED 且 `attempt < 3` 的行会被重开为 RESERVED（同一 id、`attempt + 1`、与新插入相同的额度检查与 DENIED/exhausted 处理）；RESERVED、RESULT_UNKNOWN、SETTLED（有无结果）照旧 `REPLAY`，所以「结果未知不付两次」的保证不变。
 - **放宽了什么**：这是一次有意的放宽，治理声明同步改口径：`automaticPhysicalRetryAllowed` 由 `false` 改为 `"DEFINITE_FAILURE_BEFORE_OUTPUT_ONLY"`，`maxReservationAttempts: 3`，`execution-authority-policy.mjs` 逐值校验并要求迁移与分类器里的关键条件存在。放宽只覆盖「已证明没有输出」的失败；授权检查、预算预留与结算的金额、持久回执与重放投影、出网围栏、物理调用分配都没有改，也没有新增物理调用路径——再次物理请求只来自调用方（Temporal 重试、下一条查询）用同一 key 重新走完整的预留与授权。
 - **已知残余风险**：
   - 重开沿用同一 operation id。若某次执行在释放之后又对同一预留发出迟到的 `release`/`settle`，会作用在下一次尝试上。当前没有这样的路径（每条释放路径都是该次执行对账本的最后一次写入，且没有对 `release` 的重试）；可在 PR-2 把 `release`/`settle` 绑定到 `attempt` 加固。
@@ -221,3 +221,4 @@
   - 「每个 key 最多 3 次」是账本层的预留次数。new-api `RetryTimes=1`，最多对应 6 次物理请求，已写入 AGENTS 与执行预算设计文档。
   - 运行时会话的结论：按这两处修改后同意合并。独立复审由续跑工作流的复审 agent 对收窄后的 head 进行，结论贴在 PR 上。
   - 更新指纹 `router-model-gateway.ts` → `3887cf6307cd829c8a529fab092e52644c6eab0c53eae5455ca26fa9c0ad36a1`；`tool-broker.ts` 未改，仍为 `659bb26d…`。
+- **迁移改名（2026-10-15）**：#654 已把 `20261014120000_company_profile_understanding_failure` 带进 main。本 PR 的迁移原名 `20261014095011`，按名字排在它之前：落到不同班车时，`finished_at` 最新的会是本迁移，而镜像的 `migration_revision` 按名字取的是 120000，会报 `MIGRATION_REVISION_MISMATCH`。因此改名为 `20261015045032_tool_budget_released_rereserve`，SQL 内容逐字不变，排在 main 上所有迁移之后。

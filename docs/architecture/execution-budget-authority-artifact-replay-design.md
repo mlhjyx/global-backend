@@ -332,7 +332,7 @@ RESERVED | RESULT_UNKNOWN | SETTLED | RELEASED
 - `RESERVED`：调用可能尚未开始，或调用后尚无可验证结果/结算事实；不得新 generation 绕过。
 - `RESULT_UNKNOWN`：物理调用已开始，结果/object ACK 状态未知；只允许事实恢复。
 - `SETTLED`：有效 typed projection 或 artifact ref 已持久化，费用按 exact/upper bound 结算。
-- `RELEASED`：已证明没有产生物理费用：物理调用未开始，或（D13）确定失败且网关没有计费。`reserve` 对同一 key 的 `RELEASED` 行会重新打开同一行（`attempt + 1`，状态回到 `RESERVED`，按新预留额度重新做额度检查），最多 3 次；其余状态的已存在 key 一律 `REPLAY`。迁移 `20261014095011_tool_budget_released_rereserve`。
+- `RELEASED`：已证明没有产生物理费用：物理调用未开始，或（D13）确定失败且网关没有计费。`reserve` 对同一 key 的 `RELEASED` 行会重新打开同一行（`attempt + 1`，状态回到 `RESERVED`，按新预留额度重新做额度检查），最多 3 次；其余状态的已存在 key 一律 `REPLAY`。迁移 `20261015045032_tool_budget_released_rereserve`。
 
 费用和结果状态分离：有效 artifact 但 exact cost 暂缺仍为 `SETTLED + estimated_upper_bound`；没有有效结果或物理状态未知才使用 `RESULT_UNKNOWN`。
 

@@ -19,7 +19,7 @@ const ACK_PATH = 'apps/api/src/durable-results/domain-ack-contract.ts';
 /** D13: the ledger's bound on reservations of one released operation key. */
 const MAX_RESERVATION_ATTEMPTS = 3;
 const RESERVED_ATTEMPT_MIGRATION =
-  'packages/db/prisma/migrations/20261014095011_tool_budget_released_rereserve/migration.sql';
+  'packages/db/prisma/migrations/20261015045032_tool_budget_released_rereserve/migration.sql';
 const DEFINITE_FAILURE_CLASSIFIER_PATH = 'apps/api/src/model-gateway/definite-model-failure.ts';
 
 export const EXPECTED_TOOL_IDS = Object.freeze([

@@ -38,7 +38,7 @@ if (
 }
 
 /*
- * D13 (migration 20261014095011): a RELEASED operation incurred no physical
+ * D13 (migration 20261015045032): a RELEASED operation incurred no physical
  * cost, so reserving its key again reopens the same row as a new attempt, at
  * most three attempts per (account, generation, operation key). Every other
  * existing row (RESERVED, RESULT_UNKNOWN, SETTLED with or without a result)
