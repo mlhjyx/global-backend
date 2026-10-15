@@ -65,3 +65,36 @@ export function storageRightsContextForLead(
     suppressed: input.status === 'SUPPRESSED',
   };
 }
+
+export interface ExportRightsLeadInput {
+  /** 公司国别（数据主体法域来源）。 */
+  country: string | null;
+  /** 公司已禁联：canonical_company.status=SUPPRESSED，或命中 domain/company_name 禁联记录。 */
+  suppressed: boolean;
+  /** 这家公司至少有一条非合成的 field_evidence（证据先行：无证据不导出）。 */
+  hasEvidence: boolean;
+}
+
+/**
+ * Lead/公司 → EXPORT 动作的 DataRightsContext（BI-22 周报导出逐行判权）。纯函数。
+ *
+ * dataClass 恒 green：周报只导出公司级事实（canonical_company 列、attributes.website_profile）与
+ * company_contact_point 链接（数据库 CHECK 只允许 green），不读 canonical_contact / contact_point，
+ * 结构上不含具名个人。若日后周报加入 amber/red 字段，必须改这里，而不是在调用方绕开。
+ */
+export function exportRightsContextForLead(
+  input: ExportRightsLeadInput,
+  processorJurisdiction: Jurisdiction = resolveProcessorJurisdiction(
+    process.env.DATA_PROCESSOR_JURISDICTION,
+  ),
+): DataRightsContext {
+  return {
+    action: 'EXPORT',
+    dataClass: 'green',
+    subjectJurisdiction: normalizeJurisdiction(input.country),
+    processorJurisdiction,
+    lawfulBasis: null,
+    suppressed: input.suppressed,
+    hasEvidence: input.hasEvidence,
+  };
+}

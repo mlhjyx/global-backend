@@ -103,7 +103,7 @@ PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](..
 | Gate | 当前裁决 | 所缺证据 |
 | --- | --- | --- |
 | G0 — Truth & Ownership | PARTIAL | 权威文档已回写到 2026-10 决定；PRD 4.0 仍只在私有目录（PRD4-D10 未拍板），不是仓内权威 |
-| G1 — Product/UX/Contract | PARTIAL | 交付包 v1.1、周报 CSV、反馈端点的机器合同未做；可达性口径改为公司级联系路径尚未写入产品范围 |
+| G1 — Product/UX/Contract | PARTIAL | 交付包 v1.1、反馈端点的机器合同未做（周报 CSV 已有端点与 OpenAPI，#650，2026-10-15 合并、未上线）；可达性口径改为公司级联系路径尚未写入产品范围 |
 | G2 — Source/TDD/Security | PARTIAL / MERGED_FIXES_VERIFIED | 每个修复 PR 自带 TDD 与必需检查；不推广到未改动的模块 |
 | G3 — Integration/Data | PARTIAL / PRODUCT_E2E_NOT_RUN | 没有一次发现 run 跑完；评分、制裁门与 GrowthOS ACK 从未在验收数据上执行 |
 | G4 — Release Candidate | DEVELOPMENT_CANDIDATE_ONLY | xin 运行的是按 digest 钉住、带构建证明的开发镜像；没有可信外部 provenance readback |

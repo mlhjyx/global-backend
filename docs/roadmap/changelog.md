@@ -211,6 +211,59 @@
   - 与并发 run 交错时，一家公司可能在 run 中途进入补读列表（例如另一个 run 把它当作自己的公司重新画像、记下尝试），让后面的下标错一位；后果只是本轮漏掉一家，或重读后跳过，不会重复抓取。彻底固定列表需要把每个 run 的补读名单落库，没有做。
   - 存量 lead：#649 之前计分的 lead 没有 `ruleVersion`，快照会如实标 `additive-6dim-v2`。要按 v3 交付，先对每个 ACTIVE ICP 调一次 `POST /icps/:icpId/qualify`。
 
+## 2026-10-14 · Weekly lead report CSV with per-row DataRights EXPORT (BI-22, L4-lite) (#650)
+
+- 起因：线索交付闭环设计（`docs/superpowers/plans/2026-10-10-lead-delivery-loop-design.md` §5、§11 的 L4）要给客户一份每周的线索 CSV，这次改为先于 L1–L3 实施的 L4-lite。改动前仓内没有任何导出或报表代码，OpenAPI 没有 `/reports` 路径，DataRights 的 `EXPORT` 动作定义了（`compliance/data-rights.types.ts:9`）却没有调用点，只有 accept 判 `STORE`（`lead/lead.service.ts`）。
+- 改动：
+  - **接口** `GET /api/v1/reports/weekly?icpId=&week=YYYY-Www`（`ReportController_weekly_v1`，`week` 缺省为本周，UTC、周一起）：返回 UTF-8 带 BOM 的 CSV，中文表头；行 = 该 ICP 下最新一条裁决是该周 accept（`lead_decision.action=accept`，复审后收紧，见下一节）、当前仍为 `QUALIFIED`/`CONTACTED`/`CONVERTED` 的线索；一周超过 1000 条返回 422 `WEEKLY_REPORT_TOO_LARGE`，不截断。
+  - **列**（设计 §5）：公司名、域名、国家；贸易角色与置信度、自有制造、在售品牌（中国 / 非中国含产地）、登记号、税号（`attributes.website_profile`）；六维分、总分、Fit 结论；证据链接（`website_profile.source_url` 与联系路径 URL）；联系路径（`company_contact_point`，按设计 §7 优先级列 kind + url，不含 `INVALID`）；制裁状态；有效期至（`computeValidUntil`，与 accept 快照同一函数，只用公司级证据）；本条成本（列名写明「所属发现 run 合计，后端账本口径，未按线索分摊」）与所属发现 run ID；线索 ID；客户填写 5 列。「为什么现在」「原因码」「注册地址」「开发信草稿」先留空列。
+  - **逐行判权与留痕**：历史合成来源的行隔离不出；制裁命中未经人工清除（库里的结果或实时筛查，规则与 accept 的第五门相同）的行不出；其余每行判 DataRights `EXPORT`（公司 `SUPPRESSED`、命中 domain/company_name 禁联记录、或没有任何证据 → `DENY`），每条判定都写 `policy_decision_log`（`subject_type=lead`、`actor_id`、`correlation_id` = 响应头 `X-Report-Id`；复审后被拦的行也写、日志改为独立事务，见下一节）。各类未导出计数见 `X-Report-Withheld-Rights` / `-Sanctions` / `-Quarantined`。
+  - **CSV 防公式注入**：以 `=`、`+`、`-`、`@`（含前导空白与全角形式）以及 Tab、CR 开头的单元格加 `'` 前缀。编码器手写，不新增依赖。
+  - **新 scope `acquisition:export`**：接口需要 `acquisition:read` + `acquisition:export`，`authz-openapi.spec.ts` 锁定 OpenAPI 的 `x-required-scopes`。
+  - `DataRightsService` 新增批量 `logDecisions`；`data-rights.context.ts` 新增 `exportRightsContextForLead`（dataClass 恒 green：周报不读 `canonical_contact` / `contact_point`）。对接说明（`packages/contracts/INTEGRATION.md` 阶段 3 第 5 步）同步。
+- 测试：
+  - 先写失败测试，改动前 37 项失败（报表模块 5 个文件 32 项因模块不存在、DataRights 上下文 2 项、scope 词表 1 项、OpenAPI scope 锁 1 项、守卫拓扑 1 项），改动后全部通过；另补 `logDecisions` 1 项、未知标签不读原型 1 项。
+  - 真库用例 `weekly-report.postgres.spec.ts` 3 项：一次性 PostgreSQL 跑完全部迁移，报表经生产 `PrismaService` 以 app_user 运行。本周 accept 的 3 条只导出允许的 1 条，禁联与无证据各写一条 `EXPORT DENY`、允许的写 `EXPORT ALLOW`；上周、accept 后被 reject、其他 ICP 的线索不进入；跨 workspace 的 ICP 返回 404、日志互不可见；app_user 改写 `policy_decision_log` 被拒。去掉留痕调用后真库用例与 3 项服务单测失败（变异检验）。
+  - OpenAPI 重新导出无漂移；本地 `oasdiff breaking` 无 error（1 条 warning：`GET /whoami` 的 `scopes` 枚举新增 `acquisition:export`）。这个结论用的不是 CI 钉的 oasdiff 版本，CI 判为 error，修正见下一节。
+- 未做：
+  - 运行时的角色映射在环境变量 `AUTH_ROLE_SCOPE_MAP_JSON`（不在 `auth/scopes.ts`），本 PR 没有改：旧镜像不认识新 scope，提前写进去会让 API readiness 失败。新镜像上线后再给 `TENANT_OWNER`、`ADMIN` 加 `acquisition:export`。
+  - 线索级分摊成本（设计 E4）、`LeadPackage` 读模型（L3）、反馈 CSV 上传（BI-23）、「为什么现在」等空列（L1、L2、L5、L6）。
+  - 真库用例没有接进 CI（改 `ci.yml` 会触发全部重门）；本 PR 在 xin 的一次性 PostgreSQL 上跑过。
+  - API 的 CORS 只暴露 `Location`、`X-Request-Id`、`ETag`，浏览器跨源读不到 `X-Report-*` 响应头。
+
+## 2026-10-14 · Weekly report review fixes: an open whoami scope set, run cost bounded by the accept and by open reservations, the latest decision decides the week, and withheld rows are logged (#650)
+
+- 起因：#650 的 CI 与独立复审。
+  - 必需检查「contracts · drift · lint · breaking」红：CI 的 oasdiff（action v0.1.17 钉的 `tufin/oasdiff:v1.32.1`）把 `GET /whoami` 的 `scopes` 响应枚举新增 `acquisition:export` 判为 ERR（`response-property-enum-value-added`）。原 PR 本地跑的是另一版 oasdiff，只报 warning。
+  - 复审另提 2 条 MEDIUM：成本列的 run 取「物化过这家公司的最新 run」，没限定在 accept 之前，同一周报不同时间导出结果不同、run 与成本归错；成本只加 `charged_microusd`，漏了 `reserved_microusd`（RESULT_UNKNOWN 或仍 RESERVED 的操作），会低报。以及 4 条 LOW：被拒后再 accept 的线索在两周重复出现；制裁 / 合成来源被拦的行不留痕；`csv.ts` 里的 BOM 是不可见字符；实时制裁筛查在长事务里占事件循环。
+- 改动：
+  - **whoami 的 `scopes` 不再以封闭枚举对外承诺**：`items.enum` 改为 `items["x-extensible-enum"]`（仍列出 `AUTHORIZATION_SCOPES` 的全部取值），字段说明写明集合会增长、客户端须容忍未列出的值。
+    - 仓内没有 oasdiff 的 err-ignore 文件；唯一豁免机制是 PR 打 `breaking-change-approved` label，按 `packages/contracts/README.md` 要升主版本并写迁移说明。加 scope 不是真破坏，打 label 以后每加一个 scope 都要再打一次，所以改契约。这也是 oasdiff 报错信息里给的做法。
+    - 对 GrowthOS：`frontend/growthos-work` 的源码里检索不到 `/whoami` 或 scope 字符串，GrowthOS 不消费这个字段。若有客户端按旧契约生成了封闭联合类型，重新生成后变成 `string`。
+  - **成本列只认 accept 之前的 run**：所属发现 run = 该 ICP 下物化过这家公司、`created_at` 不晚于该线索 accept 时间的最新 run。之后的 run 不再改变已导出的周报；都在 accept 之后时，run 与成本都留空。
+  - **预留未结不报成本**：run 的任一预算账户 `reserved_microusd > 0` 时成本留空，与「任一账户缺失则留空」同一口径。
+  - **按最新裁决入周**：只选最新一条 `lead_decision` 是 accept 且落在本周的线索。查询加「本周之后没有裁决」的预过滤，再按选出的最新一条裁决精确判定。被拒后再 accept 的线索只出现在最后一次 accept 的那一周。
+  - **被拦的行也留痕**：历史合成来源、制裁命中未清的行各写一条 `EXPORT DENY`（reason `synthetic_quarantined` / `sanctions_hold`，`rule_id` 为空、`rule_version` 为空串，与引擎的 `suppressed` / `no_evidence` 同形），`correlation_id` 同为报表 id。`policy_decision_log` 对 `reason` 没有约束，真库验证可写。
+  - **实时制裁筛查挪出事务**：读放在一个短事务里；筛查（内存索引上的 CPU 工作）和逐行判定在事务外做，同一报表内按 (name, country) 去重；所有判定随后在独立事务里一次写入，提交后才返回 CSV。
+  - `csv.ts` 的 BOM 改写成转义 `﻿`。
+  - 对接说明（`packages/contracts/INTEGRATION.md` 阶段 3 第 5 步）同步。
+- 测试：
+  - 先写失败测试，改动前 10 项失败、改动后全部通过：
+    - whoami 契约 1 项（`authz-openapi.spec.ts`：`scopes.items` 无 `enum`、`x-extensible-enum` 等于 scope 词表）；BOM 转义 1 项；
+    - 服务 8 项：查询带预过滤和最新裁决的 select；最新裁决不是本周 accept 的不入；合成来源写 DENY 且不去筛查；制裁命中写 DENY；筛查在事务外、按名称 + 国家去重，日志写在事务内；accept 之后的 run 不计；run 都在 accept 之后时留空；有预留时留空。
+  - 真库用例补上 outcome → run → receipt → account 链，治理血缘上游（admission、batch、Q item、governed subject / relation）用 `session_replication_role = replica` 跳过外键与行触发器（与 materialization activation 用例同法），CHECK 照常生效。共 4 项：
+    - 导出行的成本是 accept 前那个 run 的 2.840000，accept 后的 run（9.000000）不计，账户经 RLS 以 app_user 读到；
+    - 预留未结的 run 成本留空、run ID 照出；
+    - 合成来源写 `synthetic_quarantined`；
+    - W40 accept、拒、W41 再 accept 的线索只在 W41 出现，W40 报表 0 行、0 条日志。
+    - 用 PR 原来的服务代码跑这份用例 3 项失败，新代码 4 项通过（xin 一次性 `pgvector/pgvector:pg16`，全部迁移，app_user）。用例不进 CI，手动运行命令写在用例文件头。
+  - oasdiff：用与 CI 同版的 `tufin/oasdiff:v1.32.1` 对 origin/main 的契约跑 `breaking --fail-on ERR` 通过；在新契约上再加一个 scope 也不报（以后加 scope 不再触发）。
+  - `src/report`、`src/compliance`、`src/auth`、`src/whoami` 31 个文件 284 项通过。
+- 未做与被替换的旧设计：
+  - 被替换：「run = 物化过这家公司的最新 run」→ 限定在 accept 之前；「金额 = `charged_microusd` 之和」→ 有预留时留空；「accept 落在本周即入」→ 看最新一条裁决；「被拦的行不写 `policy_decision_log`」→ 写 DENY；「读、判定、日志在同一个最长 30 秒的事务里」→ 短读事务 + 事务外判定 + 日志事务（CSV 仍只在日志提交后返回）。
+  - 422 的 1000 条上限按候选计数（本周有 accept、且本周之后没有裁决），不是按最终行数。
+  - 真库用例仍不接 CI（不改 `ci.yml`）。
+
 ## 2026-10-14 · Bring status, roadmap, ADR and governance records up to the 2026-10 decisions (#651)
 
 - 起因：2026-10-13 未完成任务评审稿 §3.2 核实 12 份权威文档过时——`docs/status/current.md` 停在 2026-09-20、仍写「推进 R4 到最终 hosted」（与 PRD4-D2 相反）；`release-plan.md` 仍以 Pilot 3-A 的「zero model / paid / send」「named-person collection disabled」为约束；ADR 与冲突登记没有任何 2026-10-10 起的决定；7 个计划生命周期头过期；AGENTS §7 的晋级门已成死锁却无记录。

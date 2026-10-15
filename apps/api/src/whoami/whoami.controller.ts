@@ -26,9 +26,12 @@ export class WhoamiController {
       roles: { type: 'array', items: { type: 'string' } },
       scopes: {
         type: 'array',
+        description: '服务端派生的 scope。取值集合会随新能力增长：客户端须容忍未列出的值（按未知 scope 忽略），不要按封闭枚举校验。',
         items: {
           type: 'string',
-          enum: [...AUTHORIZATION_SCOPES],
+          // Open on purpose: a closed `enum` makes every new scope a breaking response change
+          // (oasdiff response-property-enum-value-added). The known values are still listed.
+          'x-extensible-enum': [...AUTHORIZATION_SCOPES],
         },
       },
     },
