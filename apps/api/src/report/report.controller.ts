@@ -43,7 +43,7 @@ export class ReportController {
   @Get('weekly')
   @ApiOperation({
     summary:
-      '周报 CSV：该 ICP 在该 ISO 周（UTC，周一起）accept 的线索，每行先经 DataRights EXPORT 判权并写 policy_decision_log，拒绝的行不导出',
+      '周报 CSV：该 ICP 下最新一条裁决是该 ISO 周（UTC，周一起）accept 的线索；每行都写一条 EXPORT 判定到 policy_decision_log，被拒或被拦的行不导出',
   })
   @ApiQuery({ name: 'icpId', required: true, schema: { type: 'string', format: 'uuid' } })
   @ApiQuery({
@@ -65,8 +65,8 @@ export class ReportController {
       'X-Report-Week': { description: '实际导出的 ISO 周', schema: { type: 'string' } },
       'X-Report-Rows': countHeader('导出的行数'),
       'X-Report-Withheld-Rights': countHeader('DataRights EXPORT 拒绝而未导出的行数（每行已写 policy_decision_log）'),
-      'X-Report-Withheld-Sanctions': countHeader('制裁命中未经人工清除而未导出的行数'),
-      'X-Report-Withheld-Quarantined': countHeader('历史合成来源被隔离而未导出的行数'),
+      'X-Report-Withheld-Sanctions': countHeader('制裁命中未经人工清除而未导出的行数（每行写一条 EXPORT DENY，reason sanctions_hold）'),
+      'X-Report-Withheld-Quarantined': countHeader('历史合成来源被隔离而未导出的行数（每行写一条 EXPORT DENY，reason synthetic_quarantined）'),
     },
   })
   @ApiResponse({ status: 400, description: 'icpId 或 week 不合法', schema: errorSchema(['VALIDATION_ERROR']) })

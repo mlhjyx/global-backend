@@ -111,8 +111,10 @@
 3. 列表：`GET /leads?icpId=&queue=`（按总分排序，含公司摘要；每行带 `scored` 与 `queueBasis`，未评分的行只是 fit 门预置的队列）；详情 `GET /leads/:id` 带**逐规则评分依据**
 4. 人工裁决：`POST /leads/:id/accept`（→ `QUALIFIED`，发 `LeadQualified` 事件——交给 Campaign 的出口）/ `POST /leads/:id/reject { reason }`
 5. 周报 CSV（`ReportController_weekly_v1`）：`GET /reports/weekly?icpId=&week=2026-W42`（`week` 缺省为本周，UTC、周一起），需要 `acquisition:read` + `acquisition:export`。
-   - 返回 `text/csv`（UTF-8 带 BOM，中文表头），**不套 `{data}` 信封**；行 = 该周 accept、当前仍为 `QUALIFIED`/`CONTACTED`/`CONVERTED` 的线索，末尾 5 列留给客户填写。
-   - 每行先判 DataRights `EXPORT` 并写 `policy_decision_log`（`correlation_id` = 响应头 `X-Report-Id`）；被拒、制裁命中未清、历史合成来源的行不导出，计数见 `X-Report-Withheld-Rights` / `-Sanctions` / `-Quarantined`。
+   - 返回 `text/csv`（UTF-8 带 BOM，中文表头），**不套 `{data}` 信封**；行 = 最新一条裁决是该周 accept、当前仍为 `QUALIFIED`/`CONTACTED`/`CONVERTED` 的线索（被拒后再 accept 的只出现在最后一次 accept 那一周），末尾 5 列留给客户填写。
+   - 每行都写一条 `EXPORT` 判定到 `policy_decision_log`（`correlation_id` = 响应头 `X-Report-Id`）：DataRights 拒绝的（禁联 / 无证据）、制裁命中未清的（reason `sanctions_hold`）、历史合成来源的（reason `synthetic_quarantined`）都不导出，计数见 `X-Report-Withheld-Rights` / `-Sanctions` / `-Quarantined`。
+   - 成本列 = 该 ICP 下物化过这家公司、且不晚于 accept 的最新一次发现 run 的账本合计；任一预算账户缺失或仍有未结预留时留空。
+   - `GET /whoami` 的 `scopes` 以 `x-extensible-enum` 列出已知取值，集合会增长（如本接口的 `acquisition:export`）：客户端须容忍未列出的值，不要按封闭枚举校验。
    - 浏览器跨源读取这些响应头需要网关或 CORS 暴露它们；当前 API 的 CORS 只暴露 `Location`、`X-Request-Id`、`ETag`。
 
 ## 4. 事件（服务端集成用）

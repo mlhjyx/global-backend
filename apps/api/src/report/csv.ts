@@ -7,7 +7,7 @@
 export type CsvValue = string | number | null | undefined;
 
 /** Excel opens a UTF-8 CSV correctly only when it starts with a byte order mark. */
-export const UTF8_BOM = '﻿';
+export const UTF8_BOM = '\uFEFF';
 
 /**
  * Cells a spreadsheet may evaluate as a formula (OWASP CSV injection): a leading `=`, `+`, `-`

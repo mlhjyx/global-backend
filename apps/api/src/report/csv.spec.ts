@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { encodeCsv, encodeCsvCell, UTF8_BOM } from './csv';
 
@@ -6,6 +8,12 @@ describe('CSV encoding for the weekly report', () => {
     const csv = encodeCsv(['公司名', '域名'], [['Pumpen GmbH', 'pumpen.example']]);
     expect(Buffer.from(csv, 'utf8').subarray(0, 3)).toEqual(Buffer.from([0xef, 0xbb, 0xbf]));
     expect(csv).toBe(`${UTF8_BOM}公司名,域名\r\nPumpen GmbH,pumpen.example\r\n`);
+  });
+
+  it('spells the byte order mark as an escape, never as an invisible character in the source', () => {
+    expect(UTF8_BOM).toBe('\uFEFF');
+    const source = readFileSync(join(__dirname, 'csv.ts'), 'utf8');
+    expect(source.includes(String.fromCharCode(0xfeff))).toBe(false);
   });
 
   it('quotes cells that carry a separator, a quote or a line break', () => {

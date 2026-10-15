@@ -3449,9 +3449,10 @@
                         },
                         "scopes": {
                           "type": "array",
+                          "description": "服务端派生的 scope。取值集合会随新能力增长：客户端须容忍未列出的值（按未知 scope 忽略），不要按封闭枚举校验。",
                           "items": {
                             "type": "string",
-                            "enum": [
+                            "x-extensible-enum": [
                               "acquisition:read",
                               "acquisition:write",
                               "acquisition:review",
@@ -9453,14 +9454,14 @@
                 }
               },
               "X-Report-Withheld-Sanctions": {
-                "description": "制裁命中未经人工清除而未导出的行数",
+                "description": "制裁命中未经人工清除而未导出的行数（每行写一条 EXPORT DENY，reason sanctions_hold）",
                 "schema": {
                   "type": "integer",
                   "minimum": 0
                 }
               },
               "X-Report-Withheld-Quarantined": {
-                "description": "历史合成来源被隔离而未导出的行数",
+                "description": "历史合成来源被隔离而未导出的行数（每行写一条 EXPORT DENY，reason synthetic_quarantined）",
                 "schema": {
                   "type": "integer",
                   "minimum": 0
@@ -9579,7 +9580,7 @@
             "bearer": []
           }
         ],
-        "summary": "周报 CSV：该 ICP 在该 ISO 周（UTC，周一起）accept 的线索，每行先经 DataRights EXPORT 判权并写 policy_decision_log，拒绝的行不导出",
+        "summary": "周报 CSV：该 ICP 下最新一条裁决是该 ISO 周（UTC，周一起）accept 的线索；每行都写一条 EXPORT 判定到 policy_decision_log，被拒或被拦的行不导出",
         "tags": [
           "Reports"
         ],

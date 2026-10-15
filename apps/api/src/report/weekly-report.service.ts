@@ -9,6 +9,7 @@ import type { Prisma } from '@prisma/client';
 import type { RequestContext } from '../auth/request-context';
 import { exportRightsContextForLead } from '../compliance/data-rights.context';
 import { DataRightsService, type PolicyDecisionEntry } from '../compliance/data-rights.service';
+import type { DataRightsDecision } from '../compliance/data-rights.types';
 import { isSyntheticDiscoveryProvenance } from '../discovery/evidence-license';
 import { canonicalizeSuppressionValue, canonicalizeSuppressionValues } from '../discovery/suppression-value';
 import { computeValidUntil } from '../lead/lead-qualified-snapshot';
@@ -20,7 +21,7 @@ import {
   type ScreenResult,
 } from '../sanctions/sanctions-screening.service';
 import { encodeCsv, type CsvValue } from './csv';
-import { isoWeekOf, parseIsoWeek } from './iso-week';
+import { isoWeekOf, parseIsoWeek, type IsoWeekRange } from './iso-week';
 import {
   WEEKLY_REPORT_COLUMNS,
   weeklyReportRow,
@@ -51,7 +52,7 @@ export interface WeeklyReport {
   readonly csv: string;
   readonly rows: number;
   readonly withheld: {
-    /** DataRights EXPORT denied (suppressed, or no evidence); each one is in policy_decision_log. */
+    /** DataRights EXPORT denied (suppressed, or no evidence). */
     readonly rights: number;
     /** Unresolved sanctions hit (persisted or live): never delivered. */
     readonly sanctions: number;
@@ -67,6 +68,12 @@ interface ReportLead {
   fitVerdict: string | null;
   totalScore: number | null;
   scores: Prisma.JsonValue;
+  /** The latest decision only (ordered newest first, take 1). */
+  decisions: { action: string; createdAt: Date }[];
+}
+interface DeliveredLead extends ReportLead {
+  /** When the accept that puts the lead in this week's report was made. */
+  acceptedAt: Date;
 }
 interface ReportCompany {
   id: string;
@@ -81,6 +88,8 @@ interface PriorScreening {
   reviewState: string;
   matches: Prisma.JsonValue;
 }
+type RunCost = NonNullable<WeeklyReportRowInput['runCost']>;
+type ReportFacts = Awaited<ReturnType<WeeklyReportService['loadFacts']>>;
 
 function invalid(message: string): BadRequestException {
   return new BadRequestException({ error: { code: 'VALIDATION_ERROR', message } });
@@ -94,6 +103,18 @@ function groupBy<T, K>(items: readonly T[], key: (item: T) => K): Map<K, T[]> {
     else groups.set(key(item), [item]);
   }
   return groups;
+}
+
+/**
+ * A lead belongs to the week of its latest decision when that decision is an accept: a lead that
+ * was rejected and accepted again is listed once, in the week of the last accept.
+ */
+function deliveredInWeek(lead: ReportLead, range: IsoWeekRange): DeliveredLead | null {
+  const latest = lead.decisions[0];
+  if (!latest || latest.action !== 'accept') return null;
+  const at = latest.createdAt.getTime();
+  if (at < range.start.getTime() || at >= range.end.getTime()) return null;
+  return { ...lead, acceptedAt: latest.createdAt };
 }
 
 /**
@@ -120,10 +141,29 @@ function sanctionsDelivery(
 }
 
 /**
- * BI-22 weekly report (design §5, L4-lite): one CSV row per lead of the ICP accepted in the ISO
- * week. Every row passes DataRights EXPORT first and every decision is written to
- * policy_decision_log in the same transaction; a denied row is not exported. Only company-level
- * facts and company contact links are read — never canonical_contact or contact_point.
+ * EXPORT denied by a gate that runs before the DataRights engine (quarantine, sanctions). Shaped
+ * like the engine's own pre-rule denials (`suppressed`, `no_evidence`): no rule id, empty version.
+ */
+function gateDenial(reason: 'synthetic_quarantined' | 'sanctions_hold'): DataRightsDecision {
+  return {
+    effect: 'DENY',
+    allowed: false,
+    reason,
+    ruleId: null,
+    ruleVersion: '',
+    requiresLawfulBasis: false,
+    article14NoticeRequired: false,
+  };
+}
+
+/**
+ * BI-22 weekly report (design §5, L4-lite): one CSV row per lead of the ICP whose latest decision
+ * is an accept in the ISO week. Reads happen in one short transaction; sanctions screening (CPU on
+ * the in-memory index) and the per-row decisions run outside it; every decision — exported, denied
+ * by DataRights, or withheld for sanctions or synthetic provenance — is then written to
+ * policy_decision_log in its own transaction, and the CSV is returned only after that commits.
+ * Only company-level facts and company contact links are read — never canonical_contact or
+ * contact_point.
  */
 @Injectable()
 export class WeeklyReportService {
@@ -141,80 +181,101 @@ export class WeeklyReportService {
     if (!range) throw invalid('week must be an ISO week such as 2026-W42');
     const reportId = randomUUID();
 
-    return this.prisma.withWorkspace(
+    const snapshot = await this.prisma.withWorkspace(
       ctx.workspaceId,
-      async (tx) => {
-        const icp = await tx.icpDefinition.findUnique({ where: { id: icpId }, select: { id: true } });
-        if (!icp) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'icp not found' } });
-
-        const leads: ReportLead[] = await tx.lead.findMany({
-          where: {
-            icpId,
-            status: { in: [...DELIVERED_LEAD_STATUSES] },
-            decisions: { some: { action: 'accept', createdAt: { gte: range.start, lt: range.end } } },
-          },
-          select: { id: true, canonicalCompanyId: true, fitVerdict: true, totalScore: true, scores: true },
-          orderBy: [{ totalScore: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
-          take: WEEKLY_REPORT_MAX_LEADS + 1,
-        });
-        if (leads.length > WEEKLY_REPORT_MAX_LEADS) {
-          throw new UnprocessableEntityException({
-            error: {
-              code: 'WEEKLY_REPORT_TOO_LARGE',
-              message: `more than ${WEEKLY_REPORT_MAX_LEADS} leads were accepted in ${range.week}`,
-            },
-          });
-        }
-
-        const built = leads.length ? await this.buildRows(tx, ctx, reportId, icpId, leads) : null;
-        return {
-          reportId,
-          week: range.week,
-          icpId,
-          csv: encodeCsv(WEEKLY_REPORT_COLUMNS, built?.rows ?? []),
-          rows: built?.rows.length ?? 0,
-          withheld: built?.withheld ?? { rights: 0, sanctions: 0, quarantined: 0 },
-        };
-      },
+      (tx) => this.read(tx, ctx.workspaceId, icpId, range),
       TRANSACTION,
     );
+    const built = snapshot ? this.buildRows(ctx, reportId, snapshot.leads, snapshot.facts) : null;
+    if (built && built.decisions.length > 0) {
+      await this.prisma.withWorkspace(
+        ctx.workspaceId,
+        (tx) => this.dataRights.logDecisions(tx, ctx.workspaceId, built.decisions),
+        TRANSACTION,
+      );
+    }
+    return {
+      reportId,
+      week: range.week,
+      icpId,
+      csv: encodeCsv(WEEKLY_REPORT_COLUMNS, built?.rows ?? []),
+      rows: built?.rows.length ?? 0,
+      withheld: built?.withheld ?? { rights: 0, sanctions: 0, quarantined: 0 },
+    };
   }
 
-  private async buildRows(tx: Tx, ctx: RequestContext, reportId: string, icpId: string, leads: readonly ReportLead[]) {
-    const facts = await this.loadFacts(tx, ctx.workspaceId, icpId, [
-      ...new Set(leads.map((lead) => lead.canonicalCompanyId)),
-    ]);
+  /** The week's delivered leads and their facts; null when the week has none. */
+  private async read(tx: Tx, workspaceId: string, icpId: string, range: IsoWeekRange) {
+    const icp = await tx.icpDefinition.findUnique({ where: { id: icpId }, select: { id: true } });
+    if (!icp) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'icp not found' } });
+
+    const candidates: ReportLead[] = await tx.lead.findMany({
+      where: {
+        icpId,
+        status: { in: [...DELIVERED_LEAD_STATUSES] },
+        decisions: {
+          some: { action: 'accept', createdAt: { gte: range.start, lt: range.end } },
+          none: { createdAt: { gte: range.end } },
+        },
+      },
+      select: {
+        id: true,
+        canonicalCompanyId: true,
+        fitVerdict: true,
+        totalScore: true,
+        scores: true,
+        decisions: {
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: 1,
+          select: { action: true, createdAt: true },
+        },
+      },
+      orderBy: [{ totalScore: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
+      take: WEEKLY_REPORT_MAX_LEADS + 1,
+    });
+    if (candidates.length > WEEKLY_REPORT_MAX_LEADS) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'WEEKLY_REPORT_TOO_LARGE',
+          message: `more than ${WEEKLY_REPORT_MAX_LEADS} leads were accepted in ${range.week}`,
+        },
+      });
+    }
+    const leads = candidates.flatMap((lead) => deliveredInWeek(lead, range) ?? []);
+    if (leads.length === 0) return null;
+    return { leads, facts: await this.loadFacts(tx, workspaceId, icpId, leads) };
+  }
+
+  /** Pure CPU over the snapshot: screening, decisions and rows. Never inside a transaction. */
+  private buildRows(ctx: RequestContext, reportId: string, leads: readonly DeliveredLead[], facts: ReportFacts) {
     const rows: CsvValue[][] = [];
     const decisions: PolicyDecisionEntry[] = [];
     const withheld = { rights: 0, sanctions: 0, quarantined: 0 };
+    const screen = this.memoizedScreen();
     for (const lead of leads) {
       // FK lead → canonical_company (cascade) and the same RLS scope make a miss impossible; skip defensively.
       const company = facts.companies.get(lead.canonicalCompanyId);
       if (!company) continue;
       const evidence = facts.evidence.get(company.id) ?? [];
-      if (evidence.some(isSyntheticDiscoveryProvenance)) {
-        withheld.quarantined += 1;
-        continue;
-      }
-      const sanctions = sanctionsDelivery(
-        facts.screenings.get(company.id),
-        this.sanctions.screen(company.name, company.country),
-      );
-      if (sanctions.blocking) {
-        withheld.sanctions += 1;
-        continue;
-      }
       const rightsContext = exportRightsContextForLead({
         country: company.country,
         suppressed: company.status === 'SUPPRESSED' || facts.isListed(company),
         hasEvidence: evidence.length > 0,
       });
+      const meta = { subjectType: 'lead', subjectId: lead.id, actorId: ctx.userId, correlationId: reportId };
+      if (evidence.some(isSyntheticDiscoveryProvenance)) {
+        withheld.quarantined += 1;
+        decisions.push({ ctx: rightsContext, decision: gateDenial('synthetic_quarantined'), meta });
+        continue;
+      }
+      const sanctions = sanctionsDelivery(facts.screenings.get(company.id), screen(company));
+      if (sanctions.blocking) {
+        withheld.sanctions += 1;
+        decisions.push({ ctx: rightsContext, decision: gateDenial('sanctions_hold'), meta });
+        continue;
+      }
       const decision = this.dataRights.evaluate(rightsContext);
-      decisions.push({
-        ctx: rightsContext,
-        decision,
-        meta: { subjectType: 'lead', subjectId: lead.id, actorId: ctx.userId, correlationId: reportId },
-      });
+      decisions.push({ ctx: rightsContext, decision, meta });
       if (!decision.allowed) {
         withheld.rights += 1;
         continue;
@@ -236,12 +297,26 @@ export class WeeklyReportService {
         }),
       ]);
     }
-    await this.dataRights.logDecisions(tx, ctx.workspaceId, decisions);
-    return { rows, withheld };
+    return { rows, decisions, withheld };
+  }
+
+  /** Live screening once per (name, country) of this report: several sites of one firm share a name. */
+  private memoizedScreen(): (company: ReportCompany) => ScreenResult {
+    const results = new Map<string, ScreenResult>();
+    return (company) => {
+      const key = JSON.stringify([company.name, company.country]);
+      let result = results.get(key);
+      if (!result) {
+        result = this.sanctions.screen(company.name, company.country);
+        results.set(key, result);
+      }
+      return result;
+    };
   }
 
   /** Everything the rows need, read in a few bounded queries keyed by company id. */
-  private async loadFacts(tx: Tx, workspaceId: string, icpId: string, companyIds: string[]) {
+  private async loadFacts(tx: Tx, workspaceId: string, icpId: string, leads: readonly DeliveredLead[]) {
+    const companyIds = [...new Set(leads.map((lead) => lead.canonicalCompanyId))];
     // Sequential on purpose: an interactive transaction runs on one connection anyway.
     const companies: ReportCompany[] = await tx.canonicalCompany.findMany({
       where: { id: { in: companyIds } },
@@ -284,24 +359,26 @@ export class WeeklyReportService {
         const name = canonicalizeSuppressionValue('company_name', company.name);
         return (!!domain && suppressedDomains.has(domain)) || (!!name && suppressedNames.has(name));
       },
-      runCosts: await this.runCosts(tx, workspaceId, icpId, companyIds),
+      runCosts: await this.runCosts(tx, workspaceId, icpId, leads),
     };
   }
 
   /**
    * Run-level cost (design E4 deferred: no per-lead allocation yet). The run is the latest
-   * discovery run of this ICP that materialized the company; its cost is the charged total of the
-   * run's budget account(s), found through its query receipts. Null when any account is missing.
+   * discovery run of this ICP that materialized the company and was created no later than the
+   * lead's accept, so a later run never changes an exported week. Keyed by company: a lead is
+   * unique per (ICP, company).
    */
   private async runCosts(
     tx: Tx,
     workspaceId: string,
     icpId: string,
-    companyIds: readonly string[],
-  ): Promise<Map<string, NonNullable<WeeklyReportRowInput['runCost']>>> {
-    const result = new Map<string, NonNullable<WeeklyReportRowInput['runCost']>>();
+    leads: readonly DeliveredLead[],
+  ): Promise<Map<string, RunCost>> {
+    const result = new Map<string, RunCost>();
+    const acceptedAt = new Map(leads.map((lead) => [lead.canonicalCompanyId, lead.acceptedAt.getTime()]));
     const outcomes = await tx.discoveryCompanyMaterializationOutcome.findMany({
-      where: { canonicalCompanyId: { in: [...companyIds] } },
+      where: { canonicalCompanyId: { in: [...acceptedAt.keys()] } },
       select: { canonicalCompanyId: true, runId: true },
       distinct: ['canonicalCompanyId', 'runId'],
     });
@@ -315,7 +392,8 @@ export class WeeklyReportService {
     for (const outcome of outcomes) {
       const run = runById.get(outcome.runId);
       const companyId = outcome.canonicalCompanyId;
-      if (!run || !companyId) continue;
+      const accepted = companyId ? acceptedAt.get(companyId) : undefined;
+      if (!run || !companyId || accepted === undefined || run.createdAt.getTime() > accepted) continue;
       const current = latestRun.get(companyId);
       if (
         !current ||
@@ -326,9 +404,21 @@ export class WeeklyReportService {
       }
     }
     if (latestRun.size === 0) return result;
-    const runIds = [...new Set([...latestRun.values()].map((run) => run.id))];
+    const chargedByRun = await this.runCharges(tx, workspaceId, [...new Set([...latestRun.values()].map((run) => run.id))]);
+    for (const [companyId, run] of latestRun) {
+      result.set(companyId, { runId: run.id, chargedMicrousd: chargedByRun.get(run.id) ?? null });
+    }
+    return result;
+  }
+
+  /**
+   * Charged total of each run's budget account(s), found through its query receipts. Null — never
+   * an under-count — when any account is missing or still holds a reservation (an operation still
+   * RESERVED or RESULT_UNKNOWN, whose spend is not settled yet).
+   */
+  private async runCharges(tx: Tx, workspaceId: string, runIds: readonly string[]): Promise<Map<string, bigint | null>> {
     const receipts = await tx.discoveryQueryReceipt.findMany({
-      where: { runId: { in: runIds } },
+      where: { runId: { in: [...runIds] } },
       select: { runId: true, accountKey: true },
       distinct: ['runId', 'accountKey'],
     });
@@ -337,24 +427,24 @@ export class WeeklyReportService {
     const accounts = accountKeys.length
       ? await tx.toolBudgetAccount.findMany({
           where: { scopeKey: workspaceId, accountKey: { in: accountKeys } },
-          select: { accountKey: true, chargedMicrousd: true },
+          select: { accountKey: true, chargedMicrousd: true, reservedMicrousd: true },
         })
       : [];
-    const chargedByKey = new Map(accounts.map((account) => [account.accountKey, account.chargedMicrousd]));
+    const accountByKey = new Map(accounts.map((account) => [account.accountKey, account]));
     const chargedByRun = new Map<string, bigint | null>();
     for (const runId of runIds) {
-      const keys = (keysByRun.get(runId) ?? []).map((receipt) => receipt.accountKey);
-      const charges = keys.map((key) => chargedByKey.get(key));
+      const runAccounts = (keysByRun.get(runId) ?? []).map((receipt) => accountByKey.get(receipt.accountKey));
+      const settled =
+        runAccounts.length > 0 &&
+        runAccounts.every(
+          (account) =>
+            account !== undefined && account.reservedMicrousd === 0n && typeof account.chargedMicrousd === 'bigint',
+        );
       chargedByRun.set(
         runId,
-        keys.length > 0 && charges.every((charge): charge is bigint => typeof charge === 'bigint')
-          ? charges.reduce((sum, charge) => sum + charge, 0n)
-          : null,
+        settled ? runAccounts.reduce((sum, account) => sum + (account?.chargedMicrousd ?? 0n), 0n) : null,
       );
     }
-    for (const [companyId, run] of latestRun) {
-      result.set(companyId, { runId: run.id, chargedMicrousd: chargedByRun.get(run.id) ?? null });
-    }
-    return result;
+    return chargedByRun;
   }
 }

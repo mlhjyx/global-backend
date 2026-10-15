@@ -13,7 +13,9 @@ const ctx = { workspaceId: WORKSPACE, userId: USER, roles: ['TENANT_OWNER'], sco
 const RUN_OLD = '33333333-3333-4333-8333-333333333331';
 const RUN_NEW = '33333333-3333-4333-8333-333333333332';
 const RUN_OTHER_ICP = '33333333-3333-4333-8333-333333333333';
+const RUN_AFTER_ACCEPT = '33333333-3333-4333-8333-333333333334';
 const ACCEPTED_AT = new Date('2026-10-13T10:00:00.000Z');
+const COST_COLUMN = '本条成本 USD（所属发现 run 合计，后端账本口径，未按线索分摊）';
 
 interface CompanyFixture {
   id: string;
@@ -35,7 +37,7 @@ interface Fixture {
   outcomes: Array<{ canonicalCompanyId: string; runId: string }>;
   runs: Array<{ id: string; icpId: string; createdAt: Date }>;
   receipts: Array<{ runId: string; accountKey: string }>;
-  accounts: Array<{ accountKey: string; chargedMicrousd: bigint }>;
+  accounts: Array<{ accountKey: string; chargedMicrousd: bigint; reservedMicrousd: bigint }>;
 }
 
 function leadRow(id: string, companyId: string, overrides: Record<string, unknown> = {}) {
@@ -45,7 +47,8 @@ function leadRow(id: string, companyId: string, overrides: Record<string, unknow
     fitVerdict: 'match',
     totalScore: 0.8,
     scores: { fit: 0.9, role: 0.8, intent: 0.2, dataQuality: 0.7, reachability: 1, engagement: 0 },
-    decisions: [{ createdAt: ACCEPTED_AT }],
+    // The lead's latest decision, as the report selects it.
+    decisions: [{ action: 'accept', createdAt: ACCEPTED_AT }],
     ...overrides,
   };
 }
@@ -105,14 +108,17 @@ function baseFixture(overrides: Partial<Fixture> = {}): Fixture {
       { runId: RUN_NEW, accountKey: 'discovery.run:new' },
     ],
     accounts: [
-      { accountKey: 'discovery.run:old', chargedMicrousd: 100n },
-      { accountKey: 'discovery.run:new', chargedMicrousd: 2_840_000n },
+      { accountKey: 'discovery.run:old', chargedMicrousd: 100n, reservedMicrousd: 0n },
+      { accountKey: 'discovery.run:new', chargedMicrousd: 2_840_000n, reservedMicrousd: 0n },
     ],
     ...overrides,
   };
 }
 
 function harness(fixture: Fixture, screen = vi.fn(() => ({ status: 'not_screened', matches: [], listVersions: {} }))) {
+  let inTransaction = false;
+  /** Whether each sanctions screen and each decision-log write ran inside a database transaction. */
+  const transactionTrace: Array<{ call: 'screen' | 'log'; inTransaction: boolean }> = [];
   const tx = {
     icpDefinition: { findUnique: vi.fn(async () => fixture.icp) },
     lead: { findMany: vi.fn(async (_query: unknown) => fixture.leads) },
@@ -132,18 +138,34 @@ function harness(fixture: Fixture, screen = vi.fn(() => ({ status: 'not_screened
         fixture.receipts.filter((receipt) => query.where.runId.in.includes(receipt.runId)),
       ),
     },
-    toolBudgetAccount: { findMany: vi.fn(async () => fixture.accounts) },
-    policyDecisionLog: { createMany: vi.fn(async (args: { data: unknown[] }) => ({ count: args.data.length })) },
+    toolBudgetAccount: { findMany: vi.fn(async (_query: unknown) => fixture.accounts) },
+    policyDecisionLog: {
+      createMany: vi.fn(async (args: { data: unknown[] }) => {
+        transactionTrace.push({ call: 'log', inTransaction });
+        return { count: args.data.length };
+      }),
+    },
   };
   const prisma = {
     withWorkspace: vi.fn(async <T>(workspaceId: string, work: (client: unknown) => Promise<T>) => {
       expect(workspaceId).toBe(WORKSPACE);
-      return work(tx);
+      inTransaction = true;
+      try {
+        return await work(tx);
+      } finally {
+        inTransaction = false;
+      }
     }),
   };
   const dataRights = new DataRightsService(prisma as never);
-  const service = new WeeklyReportService(prisma as never, dataRights, { screen } as never);
-  return { service, tx, prisma, screen };
+  const sanctions = {
+    screen: (name: string, country: string | null) => {
+      transactionTrace.push({ call: 'screen', inTransaction });
+      return (screen as (name: string, country: string | null) => unknown)(name, country);
+    },
+  };
+  const service = new WeeklyReportService(prisma as never, dataRights, sanctions as never);
+  return { service, tx, prisma, screen, transactionTrace };
 }
 
 function records(csv: string): Array<Record<string, string>> {
@@ -194,10 +216,45 @@ describe('WeeklyReportService (BI-22)', () => {
       where: {
         icpId: ICP,
         status: { in: ['QUALIFIED', 'CONTACTED', 'CONVERTED'] },
-        decisions: { some: { action: 'accept', createdAt: range } },
+        // An accept in the week and no decision after the week: the latest decision is in the week.
+        decisions: { some: { action: 'accept', createdAt: range }, none: { createdAt: { gte: range.lt } } },
+      },
+      select: {
+        decisions: { orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1, select: { action: true, createdAt: true } },
       },
       take: WEEKLY_REPORT_MAX_LEADS + 1,
     });
+  });
+
+  it('lists a lead only in the week of its latest decision, and only when that decision is an accept', async () => {
+    const reacceptedLater = '44444444-4444-4444-8444-444444444411';
+    const rejectedLast = '44444444-4444-4444-8444-444444444412';
+    const kept = '44444444-4444-4444-8444-444444444413';
+    const ids = [reacceptedLater, rejectedLast, kept];
+    const leadIds = ids.map((id) => `55555555-5555-4555-8555-5555555555${id.slice(-2)}`);
+    const { service, tx } = harness(
+      baseFixture({
+        leads: [
+          // Accepted in W42, rejected, accepted again in W43: it belongs to W43's report only.
+          leadRow(leadIds[0]!, reacceptedLater, {
+            decisions: [{ action: 'accept', createdAt: new Date('2026-10-20T08:00:00.000Z') }],
+          }),
+          leadRow(leadIds[1]!, rejectedLast, {
+            decisions: [{ action: 'reject', createdAt: new Date('2026-10-13T11:00:00.000Z') }],
+          }),
+          leadRow(leadIds[2]!, kept),
+        ],
+        companies: ids.map((id) => company(id)),
+        evidence: ids.map((id) => evidence(id)),
+        outcomes: [],
+      }),
+    );
+    const report = await service.weekly(ctx, { icpId: ICP, week: '2026-W42' });
+
+    expect(records(report.csv).map((row) => row['线索 ID'])).toEqual([leadIds[2]]);
+    expect(report).toMatchObject({ rows: 1, withheld: { rights: 0, sanctions: 0, quarantined: 0 } });
+    expect(loggedDecisions(tx).map((entry) => entry.subjectId)).toEqual([leadIds[2]]);
+    expect(tx.canonicalCompany.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: [kept] } } }));
   });
 
   it('defaults to the current UTC ISO week', async () => {
@@ -293,15 +350,32 @@ describe('WeeklyReportService (BI-22)', () => {
     expect(tx.toolBudgetAccount.findMany).not.toHaveBeenCalled();
   });
 
-  it('never exports a company with synthetic provenance and does not log it as a rights decision', async () => {
+  it('never exports a company with synthetic provenance and logs the withheld row as an EXPORT denial', async () => {
     const companyId = '44444444-4444-4444-8444-444444444401';
-    const { service, tx } = harness(
+    const { service, tx, transactionTrace } = harness(
       baseFixture({ evidence: [evidence(companyId), evidence(companyId, { providerKey: 'Sandbox', license: 'sandbox' })] }),
     );
     const report = await service.weekly(ctx, { icpId: ICP, week: '2026-W42' });
     expect(records(report.csv)).toEqual([]);
     expect(report).toMatchObject({ rows: 0, withheld: { rights: 0, sanctions: 0, quarantined: 1 } });
-    expect(tx.policyDecisionLog.createMany).not.toHaveBeenCalled();
+    expect(loggedDecisions(tx)).toEqual([
+      expect.objectContaining({
+        workspaceId: WORKSPACE,
+        action: 'EXPORT',
+        dataClass: 'green',
+        subjectJurisdiction: 'EU',
+        effect: 'DENY',
+        allowed: false,
+        reason: 'synthetic_quarantined',
+        ruleId: null,
+        subjectType: 'lead',
+        subjectId: '55555555-5555-4555-8555-555555555501',
+        actorId: USER,
+        correlationId: report.reportId,
+      }),
+    ]);
+    // Quarantined before screening: a synthetic company is never looked up in the sanctions lists.
+    expect(transactionTrace.filter((entry) => entry.call === 'screen')).toEqual([]);
   });
 
   it('withholds an unresolved sanctions hit, persisted or live, and labels a cleared false positive', async () => {
@@ -346,8 +420,51 @@ describe('WeeklyReportService (BI-22)', () => {
       [leadIds[4], '已筛查，无命中'],
     ]);
     expect(report).toMatchObject({ rows: 2, withheld: { rights: 0, sanctions: 3, quarantined: 0 } });
-    // A withheld sanctions hit is not an EXPORT decision: only the two exported rows are logged.
-    expect(loggedDecisions(tx).map((entry) => entry.subjectId)).toEqual([leadIds[2], leadIds[4]]);
+    // Every withheld hit leaves an EXPORT denial under the same report id, next to the two allowed rows.
+    expect(
+      loggedDecisions(tx).map((entry) => [entry.subjectId, entry.effect, entry.allowed, entry.reason, entry.correlationId]),
+    ).toEqual([
+      [leadIds[0], 'DENY', false, 'sanctions_hold', report.reportId],
+      [leadIds[1], 'DENY', false, 'sanctions_hold', report.reportId],
+      [leadIds[2], 'ALLOW', true, 'green_company_fact', report.reportId],
+      [leadIds[3], 'DENY', false, 'sanctions_hold', report.reportId],
+      [leadIds[4], 'ALLOW', true, 'green_company_fact', report.reportId],
+    ]);
+  });
+
+  it('screens sanctions outside any database transaction, once per name and country, and logs inside one', async () => {
+    const ids = [
+      '44444444-4444-4444-8444-444444444414',
+      '44444444-4444-4444-8444-444444444415',
+      '44444444-4444-4444-8444-444444444416',
+    ];
+    const screen = vi.fn((_name: string, _country: string | null) => ({ status: 'clear', matches: [], listVersions: {} }));
+    const { service, transactionTrace } = harness(
+      baseFixture({
+        leads: ids.map((id) => leadRow(`55555555-5555-4555-8555-5555555555${id.slice(-2)}`, id)),
+        // Two companies share a name and country (two sites of one firm); the third is in another country.
+        companies: [
+          company(ids[0]!, { name: 'Pumpen Nord GmbH' }),
+          company(ids[1]!, { name: 'Pumpen Nord GmbH' }),
+          company(ids[2]!, { name: 'Pumpen Nord GmbH', country: 'AT' }),
+        ],
+        evidence: ids.map((id) => evidence(id)),
+        outcomes: [],
+      }),
+      screen as never,
+    );
+    const report = await service.weekly(ctx, { icpId: ICP, week: '2026-W42' });
+
+    expect(report.rows).toBe(3);
+    expect(screen.mock.calls).toEqual([
+      ['Pumpen Nord GmbH', 'DE'],
+      ['Pumpen Nord GmbH', 'AT'],
+    ]);
+    expect(transactionTrace).toEqual([
+      { call: 'screen', inTransaction: false },
+      { call: 'screen', inTransaction: false },
+      { call: 'log', inTransaction: true },
+    ]);
   });
 
   it('neutralizes spreadsheet formulas in company data', async () => {
@@ -357,6 +474,75 @@ describe('WeeklyReportService (BI-22)', () => {
     );
     const report = await service.weekly(ctx, { icpId: ICP, week: '2026-W42' });
     expect(records(report.csv)[0]!['公司名']).toBe(`'=HYPERLINK("https://evil.example","Pumpen")`);
+  });
+
+  it('attributes the cost to the latest run created before the accept, never to a later run', async () => {
+    const companyId = '44444444-4444-4444-8444-444444444401';
+    const { service, tx } = harness(
+      baseFixture({
+        outcomes: [
+          { canonicalCompanyId: companyId, runId: RUN_OLD },
+          { canonicalCompanyId: companyId, runId: RUN_NEW },
+          { canonicalCompanyId: companyId, runId: RUN_AFTER_ACCEPT },
+        ],
+        runs: [
+          { id: RUN_OLD, icpId: ICP, createdAt: new Date('2026-10-01T00:00:00.000Z') },
+          { id: RUN_NEW, icpId: ICP, createdAt: new Date('2026-10-12T00:00:00.000Z') },
+          // Found the company again a day after it was accepted: neither its run nor its cost.
+          { id: RUN_AFTER_ACCEPT, icpId: ICP, createdAt: new Date('2026-10-14T00:00:00.000Z') },
+        ],
+        receipts: [
+          { runId: RUN_OLD, accountKey: 'discovery.run:old' },
+          { runId: RUN_NEW, accountKey: 'discovery.run:new' },
+          { runId: RUN_AFTER_ACCEPT, accountKey: 'discovery.run:after' },
+        ],
+        accounts: [
+          { accountKey: 'discovery.run:old', chargedMicrousd: 100n, reservedMicrousd: 0n },
+          { accountKey: 'discovery.run:new', chargedMicrousd: 2_840_000n, reservedMicrousd: 0n },
+          { accountKey: 'discovery.run:after', chargedMicrousd: 9_000_000n, reservedMicrousd: 0n },
+        ],
+      }),
+    );
+    const report = await service.weekly(ctx, { icpId: ICP, week: '2026-W42' });
+    expect(records(report.csv)[0]).toMatchObject({ '所属发现 run ID': RUN_NEW, [COST_COLUMN]: '2.840000' });
+    expect(tx.discoveryQueryReceipt.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { runId: { in: [RUN_NEW] } } }),
+    );
+  });
+
+  it('leaves run and cost empty when every run that found the company started after the accept', async () => {
+    const { service, tx } = harness(
+      baseFixture({
+        outcomes: [{ canonicalCompanyId: '44444444-4444-4444-8444-444444444401', runId: RUN_AFTER_ACCEPT }],
+        runs: [{ id: RUN_AFTER_ACCEPT, icpId: ICP, createdAt: new Date('2026-10-13T10:00:00.001Z') }],
+        receipts: [{ runId: RUN_AFTER_ACCEPT, accountKey: 'discovery.run:after' }],
+        accounts: [{ accountKey: 'discovery.run:after', chargedMicrousd: 9_000_000n, reservedMicrousd: 0n }],
+      }),
+    );
+    const report = await service.weekly(ctx, { icpId: ICP, week: '2026-W42' });
+    expect(records(report.csv)[0]).toMatchObject({ '所属发现 run ID': '', [COST_COLUMN]: '' });
+    expect(tx.discoveryQueryReceipt.findMany).not.toHaveBeenCalled();
+  });
+
+  it('leaves the cost empty while any account of the run still holds a reservation', async () => {
+    const { service, tx } = harness(
+      baseFixture({
+        receipts: [
+          { runId: RUN_NEW, accountKey: 'discovery.run:new' },
+          { runId: RUN_NEW, accountKey: 'discovery.run:new-second' },
+        ],
+        accounts: [
+          { accountKey: 'discovery.run:new', chargedMicrousd: 2_840_000n, reservedMicrousd: 0n },
+          // A RESULT_UNKNOWN or still RESERVED operation: what it spent is not known yet.
+          { accountKey: 'discovery.run:new-second', chargedMicrousd: 10_000n, reservedMicrousd: 50_000n },
+        ],
+      }),
+    );
+    const report = await service.weekly(ctx, { icpId: ICP, week: '2026-W42' });
+    expect(records(report.csv)[0]).toMatchObject({ '所属发现 run ID': RUN_NEW, [COST_COLUMN]: '' });
+    expect(tx.toolBudgetAccount.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ select: { accountKey: true, chargedMicrousd: true, reservedMicrousd: true } }),
+    );
   });
 
   it('leaves the cost empty when any ledger account of the run is missing', async () => {
