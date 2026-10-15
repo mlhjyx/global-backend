@@ -364,6 +364,10 @@ cat > "$runtime_policy" <<EOF
 }
 EOF
 
+# Erasure lists every version of one content-addressed PERSONAL_DATA key. The
+# list grant matches a full key (sha256/<2>/<64>) and no shorter prefix: this
+# principal can already read versions, so a listable prefix would let it
+# enumerate and read every personal-data object.
 cat > "$cleanup_policy" <<EOF
 {
   "Version": "2012-10-17",
@@ -379,7 +383,7 @@ cat > "$cleanup_policy" <<EOF
       "Resource": ["arn:aws:s3:::$GENERIC_OPERATION_ARTIFACT_S3_BUCKET"],
       "Condition": {
         "StringLike": {
-          "s3:prefix": "generic-operation-results/v1/final/personal-data/*"
+          "s3:prefix": "generic-operation-results/v1/final/personal-data/sha256/??/????????????????????????????????????????????????????????????????"
         }
       }
     },

@@ -20,6 +20,8 @@ export interface PersonalArtifactCleanupS3Client {
 export interface S3PersonalArtifactCleanupAdapterOptions {
   readonly bucket: string;
   readonly client: PersonalArtifactCleanupS3Client;
+  /** Milliseconds clock for the erasure time budget; tests inject one. */
+  readonly now?: () => number;
 }
 
 const INPUT_KEYS = Object.freeze(['sha256', 'versionId']);
@@ -32,10 +34,21 @@ const LIST_PAGE_SIZE = 1_000;
  * after a day. Beyond it the attempt fails closed and retries.
  */
 const MAX_LISTED_ENTRIES = 10_000;
+/**
+ * Wall time one erasure attempt may spend before it stops sending requests.
+ * The request count grows with the key's versions, while the cleanup activity
+ * runs once with a 2-minute start-to-close timeout. Ending the attempt here
+ * (one request runs at most a few seconds past it) turns slow storage or a
+ * crowded key into the durable RETRY path, which records the attempt and backs
+ * off, instead of an activity timeout. The next attempt relists and continues.
+ */
+export const ERASE_TIME_BUDGET_MS = 60_000;
 /** A PERSONAL_DATA key no content can address in practice: the readiness probe lists it. */
 const LISTING_PROBE_KEY = contentAddressedObjectKey('0'.repeat(64), 'PERSONAL_DATA');
 
 type KeyEntry = Readonly<{ versionId: string; isLatest: boolean }>;
+/** client.send that refuses to start a request once the attempt's time budget is spent. */
+type BudgetedSend = (command: object) => Promise<unknown>;
 type KeyListing = Readonly<{
   versions: readonly KeyEntry[];
   deleteMarkers: readonly KeyEntry[];
@@ -131,6 +144,7 @@ export class S3PersonalArtifactCleanupAdapter
 {
   private readonly bucket: string;
   private readonly client: PersonalArtifactCleanupS3Client;
+  private readonly now: () => number;
 
   constructor(options: S3PersonalArtifactCleanupAdapterOptions) {
     if (
@@ -139,12 +153,14 @@ export class S3PersonalArtifactCleanupAdapter
       typeof options.bucket !== 'string' ||
       options.bucket.length < 3 ||
       options.bucket.length > 63 ||
-      typeof options.client?.send !== 'function'
+      typeof options.client?.send !== 'function' ||
+      (options.now !== undefined && typeof options.now !== 'function')
     ) {
       throw unavailable();
     }
     this.bucket = options.bucket;
     this.client = options.client;
+    this.now = options.now ?? Date.now;
   }
 
   /**
@@ -161,7 +177,8 @@ export class S3PersonalArtifactCleanupAdapter
    * already readable. Every object version must carry exactly the
    * PERSONAL_DATA tag before anything is deleted. The pass repeats while a
    * concurrent copy keeps landing; after a bounded number of passes the
-   * attempt fails and the durable command retries.
+   * attempt fails and the durable command retries. So does an attempt that
+   * has spent ERASE_TIME_BUDGET_MS: it sends no further request.
    *
    * The result is the receipt for the commanded version: DELETED when the
    * erasure found it, ABSENT when it was already gone (an earlier command's
@@ -173,9 +190,14 @@ export class S3PersonalArtifactCleanupAdapter
   }>): Promise<'DELETED' | 'ABSENT'> {
     const exact = parseInput(input);
     const key = contentAddressedObjectKey(exact.sha256, 'PERSONAL_DATA');
+    const deadline = this.now() + ERASE_TIME_BUDGET_MS;
+    const send = (command: object): Promise<unknown> => {
+      if (!(this.now() < deadline)) return Promise.reject(unavailable());
+      return this.client.send(command);
+    };
     let commandedFound = false;
     for (let pass = 0; ; pass += 1) {
-      const listing = await this.listKey(key);
+      const listing = await this.listKey(send, key);
       if (listing.versions.length === 0 && listing.deleteMarkers.length === 0) {
         return commandedFound ? 'DELETED' : 'ABSENT';
       }
@@ -185,14 +207,14 @@ export class S3PersonalArtifactCleanupAdapter
       }
       const present: KeyEntry[] = [];
       for (const version of listing.versions) {
-        if (await this.hasPersonalTag(key, version.versionId)) present.push(version);
+        if (await this.hasPersonalTag(send, key, version.versionId)) present.push(version);
       }
       for (const entry of [
         ...present.filter((version) => !version.isLatest),
         ...present.filter((version) => version.isLatest),
         ...listing.deleteMarkers,
       ]) {
-        await this.deleteVersion(key, entry.versionId);
+        await this.deleteVersion(send, key, entry.versionId);
       }
     }
   }
@@ -215,7 +237,7 @@ export class S3PersonalArtifactCleanupAdapter
     }
   }
 
-  private async listKey(key: string): Promise<KeyListing> {
+  private async listKey(send: BudgetedSend, key: string): Promise<KeyListing> {
     const versions: KeyEntry[] = [];
     const deleteMarkers: KeyEntry[] = [];
     let continuation: Readonly<{ KeyMarker: string; VersionIdMarker: string }> | null = null;
@@ -223,7 +245,7 @@ export class S3PersonalArtifactCleanupAdapter
       let output: Record<string, unknown> | null;
       try {
         output = asRecord(
-          await this.client.send(
+          await send(
             new ListObjectVersionsCommand({
               Bucket: this.bucket,
               Prefix: key,
@@ -256,11 +278,15 @@ export class S3PersonalArtifactCleanupAdapter
   }
 
   /** True for a PERSONAL_DATA version, false for one already gone; anything else fails closed. */
-  private async hasPersonalTag(key: string, versionId: string): Promise<boolean> {
+  private async hasPersonalTag(
+    send: BudgetedSend,
+    key: string,
+    versionId: string,
+  ): Promise<boolean> {
     let tagging: Record<string, unknown> | null;
     try {
       tagging = asRecord(
-        await this.client.send(
+        await send(
           new GetObjectTaggingCommand({
             Bucket: this.bucket,
             Key: key,
@@ -269,7 +295,7 @@ export class S3PersonalArtifactCleanupAdapter
         ),
       );
     } catch (error) {
-      if (await this.isConfirmedAbsent(error)) return false;
+      if (await this.isConfirmedAbsent(send, error)) return false;
       throw unavailable();
     }
     const tagSet = tagging?.TagSet;
@@ -285,11 +311,22 @@ export class S3PersonalArtifactCleanupAdapter
     return true;
   }
 
-  private async deleteVersion(key: string, versionId: string): Promise<void> {
+  /**
+   * Deletes one version. MinIO acknowledges a delete of a version that no
+   * longer exists (another request's sweep of the same digest, or the
+   * lifecycle) with 204 and no VersionId. That is not proof of absence, and
+   * the next delete in the order may be the current version, so the exact
+   * version is read back first: gone is fine, still stored fails the attempt.
+   */
+  private async deleteVersion(
+    send: BudgetedSend,
+    key: string,
+    versionId: string,
+  ): Promise<void> {
     let deleted: Record<string, unknown> | null;
     try {
       deleted = asRecord(
-        await this.client.send(
+        await send(
           new DeleteObjectCommand({
             Bucket: this.bucket,
             Key: key,
@@ -298,17 +335,42 @@ export class S3PersonalArtifactCleanupAdapter
         ),
       );
     } catch (error) {
-      if (await this.isConfirmedAbsent(error)) return;
+      if (await this.isConfirmedAbsent(send, error)) return;
       throw unavailable();
     }
-    if (deleted?.VersionId !== versionId) throw unavailable();
+    if (!deleted) throw unavailable();
+    if (deleted.VersionId === undefined) {
+      if (await this.isConfirmedGoneVersion(send, key, versionId)) return;
+      throw unavailable();
+    }
+    if (deleted.VersionId !== versionId) throw unavailable();
   }
 
-  private async isConfirmedAbsent(error: unknown): Promise<boolean> {
+  /** True only when reading the exact version reports it absent; a delete marker or anything else is false. */
+  private async isConfirmedGoneVersion(
+    send: BudgetedSend,
+    key: string,
+    versionId: string,
+  ): Promise<boolean> {
+    try {
+      await send(
+        new GetObjectTaggingCommand({
+          Bucket: this.bucket,
+          Key: key,
+          VersionId: versionId,
+        }),
+      );
+      return false;
+    } catch (error) {
+      return this.isConfirmedAbsent(send, error);
+    }
+  }
+
+  private async isConfirmedAbsent(send: BudgetedSend, error: unknown): Promise<boolean> {
     if (isExplicitObjectVersionAbsence(error)) return true;
     if (!isAmbiguousNotFound(error)) return false;
     try {
-      const location = await this.client.send(
+      const location = await send(
         new GetBucketLocationCommand({ Bucket: this.bucket }),
       );
       return location !== null && typeof location === 'object';

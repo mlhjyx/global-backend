@@ -66,6 +66,16 @@ export class VersionedBucketFixture implements PersonalArtifactCleanupS3Client {
     return versionId;
   }
 
+  /** Removes one entry the way another principal or the lifecycle would, unseen by `commands`. */
+  removeElsewhere(key: string, versionId: string): void {
+    const stack = this.keys.get(key) ?? [];
+    const index = stack.findIndex((entry) => entry.versionId === versionId);
+    if (index < 0) return;
+    stack.splice(index, 1);
+    if (stack.length === 0) this.keys.delete(key);
+    this.recordCurrent(key);
+  }
+
   /** The object version a plain GET reads, or null for a marker or nothing. */
   current(key: string): string | null {
     const stack = this.keys.get(key) ?? [];
@@ -118,7 +128,9 @@ export class VersionedBucketFixture implements PersonalArtifactCleanupS3Client {
       }
       const stack = this.keys.get(key) ?? [];
       const index = stack.findIndex((entry) => entry.versionId === versionId);
-      if (index < 0) return { VersionId: versionId };
+      // MinIO answers a delete of a version that no longer exists with 204 and
+      // no x-amz-version-id (real-MinIO spec pins this).
+      if (index < 0) return {};
       const [removed] = stack.splice(index, 1);
       if (stack.length === 0) this.keys.delete(key);
       this.recordCurrent(key);

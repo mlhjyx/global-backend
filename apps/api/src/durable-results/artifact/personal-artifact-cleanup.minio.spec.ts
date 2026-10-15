@@ -247,6 +247,21 @@ async function expectNoVersionLeft(
   expect(missing).toBe(true);
 }
 
+/** The version a plain read of `key` returns now, or null when nothing is readable. */
+async function currentVersion(
+  root: S3Client,
+  bucket: string,
+  key: string,
+): Promise<string | null> {
+  try {
+    const head = await root.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    return head.VersionId ?? 'unversioned-read';
+  } catch (error) {
+    if (notFound(error)) return null;
+    throw error;
+  }
+}
+
 async function cleanupTrackedObjects(
   root: S3Client,
   bucket: string,
@@ -377,7 +392,9 @@ describe.runIf(enabled)('PERSONAL_DATA cleanup real MinIO boundary', () => {
         ),
       );
 
-      // The cleanup principal lists the versions of personal-data keys only.
+      // The cleanup principal lists the versions of one full personal-data key
+      // it already knows, never a shorter prefix: with its version-read grant a
+      // listable prefix would hand it every PERSONAL_DATA object in bulk.
       await expect(
         cleanup.send(
           new ListObjectVersionsCommand({
@@ -386,10 +403,18 @@ describe.runIf(enabled)('PERSONAL_DATA cleanup real MinIO boundary', () => {
           }),
         ),
       ).resolves.toBeDefined();
+      const personalShard = personal.stored.objectKey.slice(
+        0,
+        personal.stored.objectKey.lastIndexOf('/') + 1,
+      );
       for (const prefix of [
         confidential.stored.objectKey,
         'generic-operation-results/v1/final/',
         'generic-operation-results/v1/staging/',
+        'generic-operation-results/v1/final/personal-data/',
+        'generic-operation-results/v1/final/personal-data/sha256/',
+        personalShard,
+        personal.stored.objectKey.slice(0, -1),
       ]) {
         await expectDenied(
           cleanup.send(
@@ -516,13 +541,97 @@ describe.runIf(enabled)('PERSONAL_DATA cleanup real MinIO boundary', () => {
         ledger,
       );
 
+      // After every delete the erasure sends, record what a plain read sees.
+      const readable: Array<string | null> = [];
+      const observed = new S3PersonalArtifactCleanupAdapter({
+        bucket,
+        client: {
+          send: async (command: object) => {
+            const output = await cleanup.send(command as never);
+            if (command instanceof DeleteObjectCommand) {
+              readable.push(
+                await currentVersion(root, bucket, first.stored.objectKey),
+              );
+            }
+            return output;
+          },
+        },
+      });
+
       // Only the current (refreshed) version is commanded; the older one is noncurrent.
+      await expect(
+        erase(observed, {
+          sha256: first.stored.sha256,
+          versionId: refreshed.versionId,
+        }),
+      ).resolves.toBe('DELETED');
+      // The noncurrent version goes first, so the refreshed one stays current
+      // until it goes too; the older bytes are never readable on the way.
+      expect(readable).toEqual([refreshed.versionId, null]);
+      await expectNoVersionLeft(root, bucket, first.stored.objectKey);
       await expect(
         erase(adapter, {
           sha256: first.stored.sha256,
           versionId: refreshed.versionId,
         }),
+      ).resolves.toBe('ABSENT');
+    } finally {
+      await cleanupTrackedObjects(root, bucket, ledger);
+      for (const client of ledger.clients) client.destroy();
+      cleanup.destroy();
+      root.destroy();
+    }
+  }, 20_000);
+
+  it('keeps going when another sweep removed a listed version before its delete', async () => {
+    const ledger = cleanupLedger();
+    const cleanup = cleanupClient();
+    const root = rootClient();
+    const bucket = required('PERSONAL_ARTIFACT_CLEANUP_MINIO_BUCKET');
+    try {
+      const first = await promote('PERSONAL_DATA', 0x69, ledger);
+      const refreshed = await refreshWithoutSettlement(
+        first.store,
+        first.staged,
+        ledger,
+      );
+      const raced: unknown[] = [];
+      const adapter = new S3PersonalArtifactCleanupAdapter({
+        bucket,
+        client: {
+          send: async (command: object) => {
+            const racing =
+              command instanceof DeleteObjectCommand &&
+              command.input.VersionId === first.stored.versionId &&
+              raced.length === 0;
+            if (racing) {
+              // A second deletion request sweeping the same shared digest wins the race.
+              await root.send(
+                new DeleteObjectCommand({
+                  Bucket: bucket,
+                  Key: first.stored.objectKey,
+                  VersionId: first.stored.versionId,
+                }),
+              );
+            }
+            const output = await cleanup.send(command as never);
+            if (racing) raced.push(output);
+            return output;
+          },
+        },
+      });
+
+      await expect(
+        erase(adapter, {
+          sha256: first.stored.sha256,
+          versionId: first.stored.versionId,
+        }),
       ).resolves.toBe('DELETED');
+      // MinIO acknowledges a delete of a version that is already gone without
+      // naming any version; the erasure confirms the absence and carries on.
+      expect(raced).toHaveLength(1);
+      expect((raced[0] as { VersionId?: string }).VersionId).toBeUndefined();
+      expect(refreshed.versionId).not.toBe(first.stored.versionId);
       await expectNoVersionLeft(root, bucket, first.stored.objectKey);
     } finally {
       await cleanupTrackedObjects(root, bucket, ledger);

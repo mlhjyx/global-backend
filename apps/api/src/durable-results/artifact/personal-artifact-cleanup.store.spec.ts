@@ -223,6 +223,100 @@ describe('S3PersonalArtifactCleanupAdapter', () => {
     expect(deletedVersionIds(bucket)).toContain(current);
   });
 
+  it('carries on when another sweep deleted a listed version before this delete reached it', async () => {
+    const bucket = new VersionedBucketFixture(BUCKET);
+    bucket.putVersion(KEY, { versionId: VERSION_ID });
+    const current = bucket.putVersion(KEY);
+    let raced = false;
+    bucket.beforeCommand = (command) => {
+      if (
+        !raced &&
+        command instanceof DeleteObjectCommand &&
+        command.input.VersionId === VERSION_ID
+      ) {
+        raced = true;
+        // A second deletion request sweeping the same shared digest got there first.
+        bucket.removeElsewhere(KEY, VERSION_ID);
+      }
+    };
+    const seeded = bucket.currentHistory.length;
+
+    await expect(
+      adapterOver(bucket).eraseFinalObject({ sha256: SHA256, versionId: VERSION_ID }),
+    ).resolves.toBe('DELETED');
+
+    expect(raced).toBe(true);
+    expect(deletedVersionIds(bucket)).toEqual([VERSION_ID, current]);
+    // The unacknowledged delete is confirmed by reading that exact version before the next delete.
+    const afterRace = bucket.commands.slice(
+      bucket.commands.findIndex(
+        (command) => command instanceof DeleteObjectCommand && command.input.VersionId === VERSION_ID,
+      ) + 1,
+    );
+    expect(afterRace[0]).toBeInstanceOf(GetObjectTaggingCommand);
+    expect((afterRace[0] as GetObjectTaggingCommand).input.VersionId).toBe(VERSION_ID);
+    expect(bucket.currentHistory.slice(seeded).map((entry) => entry.current)).toEqual([
+      current,
+      null,
+    ]);
+    expect(bucket.versionIds(KEY)).toEqual({ objects: [], markers: [] });
+  });
+
+  it('stops before the current version when a noncurrent delete is unacknowledged and the version is still stored', async () => {
+    const bucket = new VersionedBucketFixture(BUCKET);
+    bucket.putVersion(KEY, { versionId: VERSION_ID });
+    const current = bucket.putVersion(KEY);
+    const seeded = bucket.currentHistory.length;
+    const client: PersonalArtifactCleanupS3Client = {
+      send: async (command) =>
+        command instanceof DeleteObjectCommand && command.input.VersionId === VERSION_ID
+          ? {}
+          : bucket.send(command),
+    };
+
+    await expect(
+      adapterOver(client).eraseFinalObject({ sha256: SHA256, versionId: VERSION_ID }),
+    ).rejects.toThrow('PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE');
+
+    // Deleting the current version now would make the older one current again.
+    expect(deletedVersionIds(bucket)).toEqual([]);
+    expect(bucket.versionIds(KEY)).toEqual({ objects: [VERSION_ID, current], markers: [] });
+    expect(bucket.currentHistory.slice(seeded)).toEqual([]);
+  });
+
+  it('ends an attempt that has spent its time budget before the activity timeout, and the retry resumes', async () => {
+    const bucket = new VersionedBucketFixture(BUCKET);
+    bucket.putVersion(KEY, { versionId: VERSION_ID });
+    bucket.putVersion(KEY);
+    const current = bucket.putVersion(KEY);
+    let now = 0;
+    bucket.beforeCommand = () => {
+      // Slow storage: every request takes ten seconds.
+      now += 10_000;
+    };
+    const seeded = bucket.currentHistory.length;
+    const slow = new S3PersonalArtifactCleanupAdapter({ bucket: BUCKET, client: bucket, now: () => now });
+
+    await expect(
+      slow.eraseFinalObject({ sha256: SHA256, versionId: VERSION_ID }),
+    ).rejects.toThrow('PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE');
+
+    // One listing, three tag reads and the two noncurrent deletes fit in 60 s;
+    // the current version is never sent once the budget is spent.
+    expect(bucket.commands).toHaveLength(6);
+    expect(bucket.versionIds(KEY)).toEqual({ objects: [current], markers: [] });
+    expect(bucket.currentHistory.slice(seeded).map((entry) => entry.current)).toEqual([
+      current,
+      current,
+    ]);
+
+    // The durable retry is a fresh attempt with a fresh budget.
+    await expect(
+      slow.eraseFinalObject({ sha256: SHA256, versionId: VERSION_ID }),
+    ).resolves.toBe('ABSENT');
+    expect(bucket.versionIds(KEY)).toEqual({ objects: [], markers: [] });
+  });
+
   it('confirms the bucket before treating an ambiguous tag 404 as a vanished version', async () => {
     const send = vi.fn(async (command: object) => {
       if (command instanceof ListObjectVersionsCommand) {
@@ -275,7 +369,7 @@ describe('S3PersonalArtifactCleanupAdapter', () => {
 
   it.each([
     ['a delete acknowledged for another version', { VersionId: 'someone-else' }],
-    ['a delete without a version acknowledgement', {}],
+    ['a delete without a version acknowledgement while the version is still stored', {}],
   ])('refuses %s', async (_label, acknowledgement) => {
     const send = vi.fn(async (command: object) => {
       if (command instanceof ListObjectVersionsCommand) {

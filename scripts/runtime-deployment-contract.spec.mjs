@@ -126,12 +126,16 @@ test('MinIO is pinned and provisioned by one idempotent deployment job', async (
   const cleanupPolicy = bootstrap.slice(bootstrap.indexOf('cat > "$cleanup_policy"'), bootstrap.indexOf('cat > "$personal_policy"'));
   assert.doesNotMatch(cleanupPolicy, /DeleteObjectVersion[\s\S]*ExistingObjectTag/u);
   // Erasure lists every version of one personal-data key (the version ledger can
-  // miss a refresh copy); the grant is that prefix only, never the bucket.
-  assert.match(
-    cleanupPolicy,
-    /"Action": \["s3:ListBucketVersions"\],\s*"Resource": \["arn:aws:s3:::\$GENERIC_OPERATION_ARTIFACT_S3_BUCKET"\],\s*"Condition": \{\s*"StringLike": \{\s*"s3:prefix": "generic-operation-results\/v1\/final\/personal-data\/\*"\s*\}\s*\}/u,
+  // miss a refresh copy). The grant matches one full content-addressed key and
+  // nothing shorter: a wildcard prefix would let the cleanup credential, which
+  // already reads versions, enumerate and bulk-read every PERSONAL_DATA object.
+  const exactPersonalKeyPattern = `generic-operation-results/v1/final/personal-data/sha256/??/${'?'.repeat(64)}`;
+  const listGrant = cleanupPolicy.match(
+    /"Action": \["s3:ListBucketVersions"\],\s*"Resource": \["arn:aws:s3:::\$GENERIC_OPERATION_ARTIFACT_S3_BUCKET"\],\s*"Condition": \{\s*"StringLike": \{\s*"s3:prefix": "([^"]*)"\s*\}\s*\}/u,
   );
+  assert.equal(listGrant?.[1], exactPersonalKeyPattern);
   assert.equal(cleanupPolicy.match(/s3:ListBucketVersions/gu)?.length, 1);
+  assert.equal(cleanupPolicy.match(/"s3:prefix"/gu)?.length, 1);
   assert.doesNotMatch(cleanupPolicy, /"s3:ListBucket"/u);
   assert.match(cleanupAdapter, /ListObjectVersionsCommand/);
   assert.match(cleanupAdapter, /GetObjectTaggingCommand/);

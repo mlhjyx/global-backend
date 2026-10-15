@@ -58,9 +58,12 @@ MinIO 的实际删除时刻是 `LastModified + (Days + 1) 天` 向下取整到 U
 1. 先读每个对象版本的标签，任何一个不是唯一的 `artifact-privacy=PERSONAL_DATA` 就整键拒绝、一个都不删（`PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE`，命令重试）；读标签时版本已不在（生命周期刚清掉）按已删除处理。
 2. 删除顺序：**非当前版本 → 当前版本 → 删除标记**。按版本号删当前版本会让下一个版本变成当前版本（MinIO 实测）；先删非当前版本，当前版本始终不变直到最后一个被删，任何时刻都不会有旧版本「复活」可读，中途崩溃也只留下本来就可读的东西。删除标记压在对象版本上时，先删其下的对象版本，GET 全程 404，最后才删标记。
 3. 删完再列一次；并发复制又生成了版本就再扫一轮，最多 3 轮仍不为空则本次失败、交给命令的持久重试（工作流退避重放）。
+   - 删一个已经不在的版本（另一条请求在扫同一个共享摘要，或生命周期刚清掉）时，MinIO 回 204 且不带 `x-amz-version-id`（真实 MinIO 实测）。这不能当作删除成功：下一个要删的可能就是当前版本，万一那个旧版本其实还在，它就会复活。所以先按版本号读回那个版本：确认不在（`NoSuchVersion`）就继续，还在或读不准就本次失败、交给重试。
+   - 每次尝试最多花 60 秒（`ERASE_TIME_BUDGET_MS`），超时后不再发新请求，本次失败、交给持久重试；下一次重新列出、接着删。请求数随该键版本数增长，而清理活动只跑一次、`startToCloseTimeout` 2 分钟，这样慢存储或版本很多的键走的是记录在命令表里的 RETRY（attempt 加一、写 `last_error_code`），而不是活动超时。
+   - 工作流把活动的 `START_TO_CLOSE` 超时（典型是 Worker 在擦除中途死掉或卡住）与 `PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE` 同样按退避重放处理，不再让工作流失败。outbox 只启动这个工作流一次，失败会让命令停在 CLAIMED 无人接手；claim 会重新领取 CLAIMED 的命令，擦除本身幂等。
 4. 回执：结果是这条命令所记版本的状态——擦除时在桶里找到它为 `DELETED`，已不在为 `ABSENT`。同一个键的第一条命令就会清空整个键，所以后续命令通常回 `ABSENT`；两种回执都表示「该版本确认已不在桶里」。账本与命令表只作审计与回执，不再决定删什么。
 
-权限：清理 principal（`generic-operation-artifact-personal-cleanup` 策略）新增 `s3:ListBucketVersions`，条件 `s3:prefix` = `generic-operation-results/v1/final/personal-data/*`；整桶、其它隐私类前缀、staging 前缀的列出仍被拒绝（真实 MinIO 实测）。readiness 除 `GetBucketLocation` 外，再列一个不存在的 PERSONAL_DATA 键（全零摘要）的版本；没有这个授权时 Worker 报 `PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE` 不就绪，而不是让擦除在后台无限重试。
+权限：清理 principal（`generic-operation-artifact-personal-cleanup` 策略）新增 `s3:ListBucketVersions`，条件 `s3:prefix` 用 `StringLike` 匹配**一个完整的内容寻址键**：`generic-operation-results/v1/final/personal-data/sha256/??/` 后接 64 个 `?`。这个 principal 本来就能按版本读对象，若允许列一个更短的前缀（例如 `personal-data/*`），单凭它就能枚举并批量读出全部 PERSONAL_DATA 对象；限定为完整键后，它只能列出调用方已经从数据库拿到摘要的那一个键。`personal-data/`、`personal-data/sha256/`、两位分片目录、少一个字符的键前缀，以及整桶、其它隐私类前缀、staging 前缀的列出都被拒绝（真实 MinIO 实测）。readiness 除 `GetBucketLocation` 外，再列一个不存在的 PERSONAL_DATA 键（全零摘要）的版本；没有这个授权时 Worker 报 `PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE` 不就绪，而不是让擦除在后台无限重试。
 
 共享对象：多个产物行指向同一摘要时，只有所有引用主体都已墓碑才会建清理命令（`SHARED_OBJECT_STILL_REFERENCED` 期间保持 HOLD）；一旦命令存在，围栏拒绝任何新主体绑定。擦除删掉对象后，其它行的重放在 `readVerified` 得到 `GENERIC_OPERATION_ARTIFACT_OBJECT_MISSING`，按第 4 节当作无法重放的操作处理，不读到任何残留字节。
 
@@ -81,7 +84,7 @@ MinIO 的实际删除时刻是 `LastModified + (Days + 1) 天` 向下取整到 U
 - 迁移随携带它的镜像部署（见 `docs/backend/compose-project-migration.md` 与 RUNBOOK「换后端运行时镜像」）；旧镜像在迁移应用后因 `MIGRATION_REVISION_MISMATCH` 拒绝启动。回退 = 恢复迁移前的数据库备份 + 旧镜像。
 - 版本账本那次（#647）：桶生命周期、IAM 策略、readiness 期望的规则集都没有变，换镜像不需要重跑 `minio-bootstrap`。
 - 已经钉在已删除版本上的 126 个对象行不需要修：下一次同样字节的写入会走全新 `PutObject`，v4 把钉子移到新版本并记入账本。
-- 按桶列出全部版本那次（3.1 节）：没有迁移，但**清理 principal 的 IAM 策略变了**（多一条前缀受限的 `s3:ListBucketVersions`）。顺序是先重跑 `minio-bootstrap`（幂等：策略同名覆盖，用户、桶、生命周期按原值重放；在已有部署上实测返回 `OBJECT_STORAGE_PROVISIONED`），再换到含此改动的镜像。漏了第一步，新镜像的 Worker 会以 `PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE` 停在不就绪。新策略对旧镜像无影响（只多一项授权），可以提前做。回退 = 旧镜像；多出的列出授权留着无害，也可以用旧版 `bootstrap.sh` 再跑一次撤掉。
+- 按桶列出全部版本那次（3.1 节）：没有迁移，但**清理 principal 的 IAM 策略变了**（多一条只匹配完整键的 `s3:ListBucketVersions`）。顺序是先重跑 `minio-bootstrap`（幂等：策略同名覆盖，用户、桶、生命周期按原值重放；在已有部署上实测返回 `OBJECT_STORAGE_PROVISIONED`），再换到含此改动的镜像。**漏了第一步的后果不只是擦除**：清理 readiness 是 understanding Worker 的硬检查（`worker.ts` 启动时的 `waitForWorkerDependencyAdmission` 和运行中的依赖心跳都查它），新镜像的这个 Worker 会以 `PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE` 停在不就绪、不 poll，understanding 队列上的全部后台工作流都停。新策略对旧镜像无影响（只多一项授权），可以提前做。回退 = 旧镜像；多出的列出授权留着无害，也可以用旧版 `bootstrap.sh` 再跑一次撤掉。
 
 ## 6. 没有采用的方案
 
