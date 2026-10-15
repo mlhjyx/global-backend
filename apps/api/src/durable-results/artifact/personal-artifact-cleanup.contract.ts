@@ -69,12 +69,16 @@ export interface PersonalArtifactCleanupCommandRepository {
 
 /**
  * Separate privileged capability for physical erasure. Implementations must
- * derive the final object key from sha256 internally and address the supplied
- * exact immutable version. No object key, object body, subject, or PII crosses
- * this boundary.
+ * derive the PERSONAL_DATA final object key from sha256 internally and remove
+ * every version and delete marker the bucket holds for that key, without
+ * relying on the database version ledger being complete: a reuse refresh can
+ * create a version whose settlement never commits. The supplied versionId is
+ * the command's ledger version and only shapes the receipt (DELETED when the
+ * erasure found it, ABSENT when it was already gone). No object key, object
+ * body, subject, or PII crosses this boundary.
  */
 export interface PrivilegedPersonalArtifactCleanupPort {
-  deleteFinalVersion(
+  eraseFinalObject(
     input: Readonly<{
       sha256: string;
       versionId: string;
@@ -351,7 +355,7 @@ export class PersonalArtifactCleanupService {
     }
 
     try {
-      const objectStatus = await this.cleanupPort.deleteFinalVersion(
+      const objectStatus = await this.cleanupPort.eraseFinalObject(
         Object.freeze({
           sha256: command.sha256,
           versionId: command.versionId,

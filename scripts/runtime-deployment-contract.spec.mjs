@@ -125,9 +125,30 @@ test('MinIO is pinned and provisioned by one idempotent deployment job', async (
   assert.match(bootstrap, /"s3:DeleteObjectVersion"/);
   const cleanupPolicy = bootstrap.slice(bootstrap.indexOf('cat > "$cleanup_policy"'), bootstrap.indexOf('cat > "$personal_policy"'));
   assert.doesNotMatch(cleanupPolicy, /DeleteObjectVersion[\s\S]*ExistingObjectTag/u);
+  // Erasure lists every version of one personal-data key (the version ledger can
+  // miss a refresh copy). The grant matches one full content-addressed key and
+  // nothing shorter: a wildcard prefix would let the cleanup credential, which
+  // already reads versions, enumerate and bulk-read every PERSONAL_DATA object.
+  const exactPersonalKeyPattern = `generic-operation-results/v1/final/personal-data/sha256/??/${'?'.repeat(64)}`;
+  // MinIO lets a plain StringLike condition pass when ANY value of a repeated
+  // query parameter matches, while ListObjectVersions lists by the first value.
+  // ForAllValues requires every prefix value to match; Null=false rejects a
+  // request without one (ForAllValues is true for an empty set).
+  const listGrant = cleanupPolicy.match(LIST_VERSIONS_GRANT);
+  assert.equal(listGrant?.[1], exactPersonalKeyPattern);
+  assert.doesNotMatch(cleanupPolicy, /"StringLike": \{\s*"s3:prefix"/u);
+  assert.equal(cleanupPolicy.match(/s3:ListBucketVersions/gu)?.length, 1);
+  // Exactly the ForAllValues pattern and its Null guard name s3:prefix.
+  assert.equal(cleanupPolicy.match(/"s3:prefix"/gu)?.length, 2);
+  assert.doesNotMatch(cleanupPolicy, /"s3:ListBucket"/u);
+  assert.match(cleanupAdapter, /ListObjectVersionsCommand/);
   assert.match(cleanupAdapter, /GetObjectTaggingCommand/);
   assert.match(cleanupAdapter, /Value !== 'PERSONAL_DATA'/);
   const runtimePolicy = bootstrap.slice(bootstrap.indexOf('cat > "$runtime_policy"'), bootstrap.indexOf('cat > "$cleanup_policy"'));
+  // The runtime readiness probe lists versions under readiness/ only; the same
+  // repeated-parameter rule applies.
+  assert.equal(runtimePolicy.match(LIST_VERSIONS_GRANT)?.[1], 'generic-operation-results/v1/readiness/*');
+  assert.doesNotMatch(runtimePolicy, /"StringLike": \{\s*"s3:prefix"/u);
   for (const [prefix, privacyClass] of [
     ['public-organization', 'PUBLIC_ORGANIZATION'],
     ['confidential-tenant', 'CONFIDENTIAL_TENANT'],
@@ -141,6 +162,9 @@ test('MinIO is pinned and provisioned by one idempotent deployment job', async (
   assert.match(compose, /GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY/);
   assert.match(compose, /GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY/);
 });
+
+const LIST_VERSIONS_GRANT =
+  /"Action": \["s3:ListBucketVersions"\],\s*"Resource": \["arn:aws:s3:::\$GENERIC_OPERATION_ARTIFACT_S3_BUCKET"\],\s*"Condition": \{\s*"ForAllValues:StringLike": \{\s*"s3:prefix": "([^"]*)"\s*\},\s*"Null": \{\s*"s3:prefix": "false"\s*\}\s*\}/u;
 
 function expectPolicyMapping(policy, action, prefix, privacyClass) {
   const actionOffset = policy.indexOf(`"Action": ["${action}"]`);

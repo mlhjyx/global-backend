@@ -301,6 +301,56 @@
   - `docs/product-scope.md` 的可达性定义随 #649 修改；RL1 计划 §15 第 6 行「snapshot_version 2」与已批准设计 E1「仍为 1」的矛盾在私有计划里，未改。
   - 晋级门死锁、`docs/site-builder/01-prd.md` 仍标 CURRENT 等，分别等 PRD4-D12、PRD4-D1 拍板。
 
+## 2026-10-14 · Erase every stored version of a personal-data object, not only the versions the ledger recorded (W11-f) (#659)
+
+- 起因：#647 复审的 MEDIUM。复用刷新在数据库结算**之前**就把对象复制到自身、生成新的当前版本；结算没落库时（进程在两步之间死掉、擦除围栏以 `SUBJECT_TOMBSTONED` 回滚、复制 ACK 丢失被 fail-open 当作失败、复制后 HEAD 报错或漂移），这个版本不进版本账本。擦除只删「账本 ∪ 钉子」里的版本，删不到它，被擦除主体的 PERSONAL_DATA 最长约 2 天仍可读（直到生命周期按年龄清掉）。#647 之前复用分支从不写对象，没有这个缺口。
+- 改动（详见 [docs/backend/generic-operation-artifact-storage.md](../backend/generic-operation-artifact-storage.md) 3.1 节）：
+  - **擦除端口**（`personal-artifact-cleanup.store.ts`）：`deleteFinalVersion` 改为 `eraseFinalObject`。每执行一条清理命令，都对该摘要派生的 PERSONAL_DATA 最终键做 `ListObjectVersions`（前缀为精确键、`MaxKeys` 1000 分页、只取 `Key` 全等的条目、上限 1 万条），删掉这个键的全部版本与删除标记：先确认每个对象版本都带唯一的 `artifact-privacy=PERSONAL_DATA` 标签（任一不符整键拒绝、一个不删），再按「非当前版本 → 当前版本 → 删除标记」的顺序删，保证任何时刻都没有旧版本复活为当前版本；删完再列，并发复制又落地就再扫，3 轮仍不空则本次失败、交给命令的持久重试。回执是命令所记版本的状态：擦除时在桶里为 `DELETED`，已不在为 `ABSENT`。账本与命令表只作审计与回执。
+  - **端口合同**（`personal-artifact-cleanup.contract.ts`）：接口注释改为「按键删全部版本、不依赖账本完整」，服务流程（claim → 擦除 → complete / retry）不变，数据库函数与 schema 都没有改。
+  - **MinIO 策略**（`infra/minio/bootstrap.sh`）：清理 principal 新增 `s3:ListBucketVersions`，条件 `s3:prefix` = `generic-operation-results/v1/final/personal-data/*`；整桶、其它隐私类前缀与 staging 的列出仍被拒绝。`scripts/runtime-deployment-contract.spec.mjs` 钉住这条授权且只此一条、没有 `s3:ListBucket`。
+  - **readiness**（`personal-artifact-cleanup.runtime.ts`）：`GetBucketLocation` 之后再列一个不存在的 PERSONAL_DATA 键（全零摘要）的版本；没有列出授权时 Worker 以 `PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE` 不就绪，而不是让擦除在后台无限重试。
+- 测试：
+  - 先红后绿，真 MinIO（一次性容器 + 仓库 `bootstrap.sh` 原样建桶与三个 principal）：`personal-artifact-cleanup.minio.spec.ts` 重写为 9 项，改动前 8 项红——复制出的未入账版本在擦除后仍在、只命令当前版本时旧版本复活、删除标记下的版本残留、别人写入的版本残留、清理 principal 列出被拒、readiness 不查列出授权、只查命令版本的标签、共享对象的另一份清单仍能读到字节；改为新策略后在**同一个已部署实例**上重跑 `bootstrap.sh`（幂等，返回 `OBJECT_STORAGE_PROVISIONED`），9 项全绿。其中「共享对象被一个主体擦除后，另一行清单的 `readVerified` 得到 `GENERIC_OPERATION_ARTIFACT_OBJECT_MISSING`」钉住重放按结果未知处理的前提。
+  - 先红后绿，真库（`generic-operation-artifact-object-version.postgres.spec.ts`，一次性 pgvector:pg16，以 app_user 跑，CI 已在跑这个文件）：新增 1 项，用真实的命令仓储与服务、擦除端口接新的内存版本桶夹具：账本两版本 + 一个未入账的当前版本，三次 `cleanup` 依次得到 `DELETED`、`ABSENT`、重放 `COMPLETED`，桶里该键一个版本也不剩、过程中当前版本从未回到旧版本，命令表两条 `COMPLETED` 回执与账本内容如实。改动前红（第二条命令回 `DELETED`、桶里留着未入账版本），改动后 5 项全绿。
+  - 单元（零容器）：`personal-artifact-cleanup.store.spec.ts` 按新接口重写为 26 项（删除顺序、分页续接、只碰精确键、并发复制再扫、轮数上限、标签整键拒绝、读标签时版本已消失、桶不存在 / 列出被拒不当作 ABSENT、删除回执版本不符拒绝、列出结构异常拒绝、readiness 探针）；新增内存版本桶夹具 `personal-artifact-cleanup.versioned-bucket.test-fixture.ts`（按 MinIO 语义：删当前版本让下一个版本成为当前）；runtime spec 新增「无列出授权时不就绪」；contract spec 随端口改名。
+- 被替换的旧设计：#647 的「擦除为账本 ∪ 钉子里的每个版本各删那一个精确版本、擦除端口与其权限不变」。清理命令仍按账本版本逐条建、逐条回执，但删什么由桶的列出决定。
+- 未做：
+  - 命令表不记录被扫掉的未入账版本（数量或版本号），回执只针对命令所记的版本。
+  - 清理命令全部完成之后，另一主体再次抓到同样字节会走全新写入，它的结算被围栏永久拒绝（#647 之前就有的行为）；这个对象不属于已完成的擦除请求、不会再被扫到，按年龄过期（PERSONAL_DATA 最长约 2 天）。
+  - 真 MinIO spec 不在 CI 跑（CI 没有 MinIO），手动运行方式见 PR 正文。
+  - xin 上的清理策略要由运行时会话重跑 `minio-bootstrap` 才更新，必须在换到含此改动的镜像之前做（见存储文档第 5 节）。
+
+## 2026-10-14 · Erasure review fixes: the cleanup credential lists one full key only, an unacknowledged delete is read back, and an attempt stops at a time budget and resumes after a timeout (#659)
+
+- 起因：#659 的独立复审（1 条 MEDIUM、3 条 LOW）。
+  - MEDIUM：清理 principal 新加的 `s3:ListBucketVersions` 条件是 `personal-data/*`，它能列出全部 PERSONAL_DATA 键；它本来就有 `s3:GetObjectVersion`，单凭这一个凭据就能批量读出所有个人数据对象。复审在一次性 MinIO 上实测可列可读。
+  - LOW：删一个已经不在的版本时 MinIO 回 204、不带 VersionId，适配器当作 `STORE_UNAVAILABLE`，多等一轮至少 30 秒的重试（夹具回显 VersionId，单测碰不到）；真 MinIO 用例「不让旧版本复活」只看最终为空，删除顺序反过来也通过；请求数随版本数 × 轮数增长，而活动只跑一次、2 分钟超时，超时的 rootCause 不是 `STORE_UNAVAILABLE`，工作流直接失败，命令停在 CLAIMED。
+- 改动：
+  - **列出授权只匹配完整键**（`infra/minio/bootstrap.sh`）：条件改为 `generic-operation-results/v1/final/personal-data/sha256/??/` 后接 64 个 `?`，清理凭据只能列出调用方已经从数据库拿到摘要的那一个键。readiness 探针（全零摘要的键）照常匹配。`scripts/runtime-deployment-contract.spec.mjs` 钉住这个精确值，且整份策略只有一个 `s3:prefix`。
+  - **未确认的删除先读回**（`personal-artifact-cleanup.store.ts`）：删除回执没有 VersionId 时，按版本号读那个版本的标签：确认不在（`NoSuchVersion`）就继续，还在或读不准就本次失败。不能直接当成功：下一个要删的可能是当前版本，万一旧版本其实还在就会复活。
+  - **每次尝试 60 秒时间预算**（`ERASE_TIME_BUDGET_MS`）：超时后不再发新请求，本次失败、命令走 RETRY（attempt 加一、写 `last_error_code`），工作流退避重放，下一次重新列出、接着删。适配器新增可选的 `now` 时钟供测试注入。
+  - **工作流把活动的 `START_TO_CLOSE` 超时当作可恢复**（`personal-artifact-cleanup.workflow.ts`）：与 `STORE_UNAVAILABLE` 同走退避 + `continueAsNew`。典型场景是 Worker 在擦除中途死掉；claim 会重新领取 CLAIMED 的命令，擦除幂等。其它失败（非重试的应用错误、其它类型的超时）照旧让工作流失败。
+  - 夹具按 MinIO 实测改为「删不存在的版本回 `{}`」，并加 `removeElsewhere` 模拟别的请求或生命周期删掉版本。
+  - 存储文档 3.1 节补上这三条与完整键授权的理由；第 5 节写明漏跑 `minio-bootstrap` 直接换镜像时，清理 readiness 是 understanding Worker 的硬检查，整个 Worker 不 poll，不只是擦除停。
+- 测试：
+  - 先红后绿，真 MinIO（一次性 `quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z`，按 digest，只绑 127.0.0.1，`mc` 跑仓库 `bootstrap.sh`）：`personal-artifact-cleanup.minio.spec.ts` 10 项。
+    - 用 PR 原 `bootstrap.sh` 与原适配器：2 项红。清理凭据列 `personal-data/`、`personal-data/sha256/`、两位分片目录、少一个字符的键前缀都没被拒绝；另一请求抢先删掉已列出的版本后，擦除报 `STORE_UNAVAILABLE`，且 MinIO 对这次删除的回执确实不带 VersionId。
+    - 在同一实例上重跑新 `bootstrap.sh`、换新适配器后 10 项全绿（readiness 探针在新条件下仍就绪）。
+    - 「不让旧版本复活」改为每次删除后用 root 读一次当前版本，断言依次是 `[刷新出的版本, null]`；把删除顺序临时改成先删当前版本，该项变红（读到了旧版本），复原后绿。
+  - 单元（零容器）：store spec 新增 3 项（抢先删除后继续且先读回再删下一个；未确认且版本仍在时停在当前版本之前、一个不删；慢存储用尽 60 秒预算后不再发请求、当前版本未动，下一次尝试接着删完回 `ABSENT`），改动前 2 项红；workflow spec 新增 5 项（`START_TO_CLOSE` 超时直接与经 wire 往返两种都退避重放；非重试错误、`SCHEDULE_TO_CLOSE` 超时仍失败；活动超时 2 分钟不小于预算的两倍），改动前 3 项红。两份 spec 共 39 项通过。
+  - `node --test scripts/runtime-deployment-contract.spec.mjs` 16 项通过（改条件前红）。
+  - 真库 spec（`generic-operation-artifact-object-version.postgres.spec.ts`）走的删除都针对存在的版本、第二条命令列出为空直接回 `ABSENT`，不经过本次改动的分支，本地未重跑，由 CI 的 PostgreSQL 作业覆盖。
+- 被替换的旧设计：本 PR 前一条记录里的 `s3:prefix` = `generic-operation-results/v1/final/personal-data/*` → 完整键模式；「删除回执不带 VersionId 一律失败」→ 读回确认；「一次尝试不限时，超时即工作流失败」→ 60 秒预算 + 超时退避重放。
+- 未做：
+  - 版本多到 60 秒内连标签都读不完的键（按单请求上限 2.5 秒约 23 个版本，正常延迟下远多于此）每次都在删除前用完预算、不会有进展，会按退避一直重试（命令表 attempt 递增、可见）。为保住「先确认全部标签再删」的整键拒绝语义，没有改成边读边删。
+  - `docs/implementation-records/generic-operation-artifact-replay.md` 第 106 行仍写清理 principal 没有列出权限；它是历史实施记录，不改。
+
+- 第二轮复审（修复增量）：
+  - MEDIUM：上一条「只匹配完整键」用的是普通 `StringLike`。同一请求可以重复 `prefix` 参数，MinIO 只要任一个值匹配就放行，而 ListObjectVersions 按第一个值列出，所以「短前缀 + 完整键」仍能列出全部个人数据键（复审在一次性 MinIO 上实测）。
+  - 改动：清理 principal 的列出授权改为 `ForAllValues:StringLike`，并加 `"Null": {"s3:prefix": "false"}`（`ForAllValues` 对空集合按真处理，不加 `Null` 时不带 `prefix` 的请求可能被放行）。运行时 principal 列 `readiness/*` 的授权在 main 上原本也是这种写法，同一文件里一并改掉，避免重跑两次 bootstrap。复审测过「保留 Allow、再加一条 `ForAnyValue:StringNotLike` 的 Deny」，无效，所以没有用。
+  - 测试：`runtime-deployment-contract.spec.mjs` 钉住两条授权都是 `ForAllValues` 加 `Null`，并且两段策略里都不再有普通 `StringLike` 前缀条件；先红后绿，16 项通过。真 MinIO spec 新增「重复 `prefix`（短前缀加完整键、空前缀加完整键）必须被拒」两项：一次性 MinIO（同一 digest，开发用 KMS 密钥现场随机生成）上用原策略跑红 1 项，换新策略后 10 项全绿。
+  - 上线顺序不变：先由运行时会话重跑 `minio-bootstrap`，核对清理凭据「列精确键允许、列 `personal-data/` 拒绝、重复 `prefix` 拒绝」，再换镜像。如果 xin 已经按本 PR 早先的策略跑过 bootstrap，要用最终版本再跑一次。
+
 ## 2026-10-13 · Let best-effort stages skip a company whose operation cannot be replayed, time-box enrichment, and rehearse a full-size run
 
 - 起因：卖方 #23 的验收 run（`c3878e54`，xin，2026-10-12 22:47–10-13 01:23 UTC）跑完查询、官网画像、fit（#640 的时间盒生效，分约 10 批判完 84 家）和富集后，在信号富集阶段失败。
