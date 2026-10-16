@@ -17,6 +17,7 @@ import {
   CHANGELOG_PATH,
   CODE_ROOT_FILES,
   FRAGMENT_DIRECTORY,
+  FRAGMENT_README,
   assembleChangelog,
   fragmentRequirement,
   isFragmentPath,
@@ -347,12 +348,22 @@ test("a PR that changes apps, packages, scripts or infra needs a fragment or a c
   ]);
   assert.equal(editedFragment.satisfied, true);
 
-  const withChangelog = fragmentRequirement([
+  const changelogOnly = [
     { status: "M", path: "infra/x.yml" },
     { status: "M", path: CHANGELOG_PATH },
-  ]);
-  assert.equal(withChangelog.satisfied, true);
-  assert.equal(withChangelog.changelogEdited, true);
+  ];
+  // A direct changelog edit counts only for a branch cut before the fragment
+  // rule reached main; the caller decides that from the merge base.
+  const legacyBranch = fragmentRequirement(changelogOnly, {
+    changelogEditAccepted: true,
+  });
+  assert.equal(legacyBranch.satisfied, true);
+  assert.equal(legacyBranch.changelogEdited, true);
+  const newBranch = fragmentRequirement(changelogOnly, {
+    changelogEditAccepted: false,
+  });
+  assert.equal(newBranch.satisfied, false);
+  assert.equal(newBranch.changelogEdited, true);
 });
 
 test("root files that go into the build or the runtime image need a fragment too", () => {
@@ -608,7 +619,7 @@ test("assembly rebases the fragment's relative links onto the changelog", () => 
   assert.ok(output.includes("- 测试：见 [证据](../evidence/x.md)。"));
 });
 
-async function fixtureRepository() {
+async function fixtureRepository({ withRule = true } = {}) {
   const root = await mkdtemp(join(tmpdir(), "changelog-fragments-"));
   const gitEnvironment = {
     ...createSafeGitEnvironment(),
@@ -630,7 +641,7 @@ async function fixtureRepository() {
     await writeFile(join(root, path), text);
   };
   await write(CHANGELOG_PATH, CHANGELOG);
-  await write(`${FRAGMENT_DIRECTORY}/README.md`, "# Fragments\n");
+  if (withRule) await write(FRAGMENT_README, "# Fragments\n");
   await write("apps/api/src/a.ts", "export const a = 1;\n");
   git("add", "-A");
   git("commit", "-qm", "base");
@@ -644,6 +655,39 @@ function runNode(script, args, root, env) {
     env,
   });
 }
+
+test("a branch cut before the fragment rule may still edit the changelog, with a warning", async () => {
+  const { root, git, write, gitEnvironment } = await fixtureRepository({
+    withRule: false,
+  });
+  try {
+    const legacyPoint = git("rev-parse", "HEAD");
+    git("checkout", "-qb", "legacy-pr", legacyPoint);
+    await write("scripts/x.mjs", "export {};\n");
+    await write(CHANGELOG_PATH, `${CHANGELOG}\n- legacy PR entry\n`);
+    git("add", "-A");
+    git("commit", "-qm", "legacy PR edits the changelog");
+    // The fragment rule reaches main after the branch point.
+    git("checkout", "-q", "main");
+    await write(FRAGMENT_README, "# Fragments\n");
+    git("add", "-A");
+    git("commit", "-qm", "fragment rule (#658)");
+    const ruleOnMain = git("rev-parse", "HEAD");
+    git("checkout", "-q", "legacy-pr");
+
+    const legacy = runNode(
+      LIBRARY,
+      ["require", "--base", ruleOnMain, "--head", "HEAD"],
+      root,
+      gitEnvironment,
+    );
+    assert.equal(legacy.status, 0, legacy.stdout + legacy.stderr);
+    assert.match(legacy.stdout, /^::warning::.*cut before the fragment rule/m);
+    assert.match(legacy.stdout, /^::warning::.*changelog\.d\//m);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("the require command fails a code change without a fragment and passes once one is added", async () => {
   const { root, git, write, gitEnvironment } = await fixtureRepository();
@@ -685,29 +729,22 @@ test("the require command fails a code change without a fragment and passes once
     assert.equal(satisfied.status, 0, satisfied.stdout + satisfied.stderr);
     assert.match(satisfied.stdout, /2026-10-14-one-fragment\.md/);
 
-    // A PR that still edits the changelog itself passes during the
-    // transition, whenever it was opened, with a warning that points at the
-    // fragment format.
-    git("checkout", "-qb", "older-pr", base);
+    // A branch cut after the fragment rule reached main (its merge base has
+    // the fragment README) may not edit the changelog instead of a fragment.
+    git("checkout", "-qb", "late-pr", base);
     await write("scripts/x.mjs", "export {};\n");
-    await write(CHANGELOG_PATH, `${CHANGELOG}\n- older PR entry\n`);
+    await write(CHANGELOG_PATH, `${CHANGELOG}\n- late PR entry\n`);
     git("add", "-A");
-    git("commit", "-qm", "older PR edits the changelog");
-    const transitional = runNode(
+    git("commit", "-qm", "late PR edits the changelog");
+    const late = runNode(
       LIBRARY,
       ["require", "--base", movedBase, "--head", "HEAD"],
       root,
       gitEnvironment,
     );
-    assert.equal(
-      transitional.status,
-      0,
-      transitional.stdout + transitional.stderr,
-    );
-    assert.match(transitional.stdout, /^::warning::.*changelog\.d\//m);
-    // No open-date check exists, so the warning does not imply one.
-    assert.doesNotMatch(transitional.stdout, /opened before/);
-    assert.match(transitional.stdout, /^::warning::.*transition/m);
+    assert.equal(late.status, 1, late.stdout + late.stderr);
+    assert.match(late.stderr, /cut after the fragment rule/);
+    assert.match(late.stderr, /docs\/roadmap\/changelog\.d\//);
     assert.doesNotMatch(satisfied.stdout, /::warning::/);
 
     const unknownBase = runNode(
@@ -1013,7 +1050,7 @@ test("the docs-verification governance page records the fragment checks and thei
   }
   const transitionRow = exceptions
     .split("\n")
-    .find((line) => line.includes("changelogEdited"));
+    .find((line) => line.includes("changelogEditAccepted"));
   assert.ok(transitionRow, "transition exception row");
   for (const field of ["风险", "Owner", "关闭条件", "successor"]) {
     assert.ok(transitionRow.includes(field), `${field} in ${transitionRow}`);
