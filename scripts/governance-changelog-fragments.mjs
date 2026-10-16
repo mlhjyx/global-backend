@@ -505,7 +505,7 @@ function isCodePath(path) {
   );
 }
 
-export function fragmentRequirement(changes) {
+export function fragmentRequirement(changes, { changelogEditAccepted = false } = {}) {
   const codePaths = changes
     .filter(({ path }) => isCodePath(path))
     .map(({ path }) => path);
@@ -518,12 +518,13 @@ export function fragmentRequirement(changes) {
   const required = codePaths.length > 0;
   return {
     required,
-    // Transition: a direct changelog edit still satisfies the rule, for any
-    // PR whenever it was opened. It ends when the dispatch instructions
-    // outside this repository (/global/CLAUDE.md §7, the workflow scripts)
-    // say to write fragments; then drop `|| changelogEdited` together with
-    // the exception row in docs/governance/docs-verification.md §4.
-    satisfied: !required || fragmentPaths.length > 0 || changelogEdited,
+    // Transition: a direct changelog edit counts only for a branch cut before
+    // the fragment rule reached main (the caller checks the merge base), so
+    // the exception ends by itself once those branches are merged.
+    satisfied:
+      !required ||
+      fragmentPaths.length > 0 ||
+      (changelogEditAccepted && changelogEdited),
     codePaths,
     fragmentPaths,
     changelogEdited,
@@ -640,6 +641,23 @@ function git(root, args) {
   });
 }
 
+// A branch whose merge base already has the fragment README was cut after
+// the fragment rule reached main and must write a fragment.
+export function branchPredatesFragmentRule(root, base, head) {
+  const mergeBase = git(root, ["merge-base", base, head]);
+  if (mergeBase.status !== 0) {
+    throw new Error(
+      `cannot find the merge base of ${base} and ${head}: ${(mergeBase.stderr || mergeBase.error?.message || "").trim()}`,
+    );
+  }
+  const readme = git(root, [
+    "cat-file",
+    "-e",
+    `${mergeBase.stdout.trim()}:${FRAGMENT_README}`,
+  ]);
+  return readme.status !== 0;
+}
+
 export function changedPaths(root, base, head) {
   const result = git(root, [
     "diff",
@@ -697,7 +715,11 @@ function printIssues(issues) {
 
 function runRequire({ root, base, head }) {
   if (!base || !head) throw new Error("require needs --base and --head");
-  const result = fragmentRequirement(changedPaths(root, base, head));
+  const changes = changedPaths(root, base, head);
+  const legacyBranch = branchPredatesFragmentRule(root, base, head);
+  const result = fragmentRequirement(changes, {
+    changelogEditAccepted: legacyBranch,
+  });
   if (!result.required) {
     console.log(
       `changelog fragment: not required (no change under ${CODE_SCOPE})`,
@@ -710,16 +732,22 @@ function runRequire({ root, base, head }) {
       ...(result.changelogEdited ? [CHANGELOG_PATH] : []),
     ];
     console.log(`changelog fragment: present (${evidence.join(", ")})`);
-    // Transition (see fragmentRequirement): a direct changelog edit passes
-    // with a warning that points at the fragments. There is no open-date
-    // check, so the warning does not claim one.
+    // Transition (see fragmentRequirement): a legacy branch's direct
+    // changelog edit passes with a warning that points at the fragments.
     if (result.fragmentPaths.length === 0) {
       console.log(
-        `::warning::This PR edits ${CHANGELOG_PATH} directly instead of adding a fragment. The check accepts that only during the transition; ` +
-          `add ${FRAGMENT_DIRECTORY}/<YYYY-MM-DD>-<slug>.md instead so open PRs stop conflicting (format: ${FRAGMENT_README}).`,
+        `::warning::This branch was cut before the fragment rule reached main, so editing ${CHANGELOG_PATH} directly is still accepted; ` +
+          `new branches add ${FRAGMENT_DIRECTORY}/<YYYY-MM-DD>-<slug>.md instead (format: ${FRAGMENT_README}).`,
       );
     }
     return 0;
+  }
+  if (result.changelogEdited) {
+    console.error(
+      `::error::This branch was cut after the fragment rule reached main, so editing ${CHANGELOG_PATH} directly no longer counts. ` +
+        `Move the entry into ${FRAGMENT_DIRECTORY}/<YYYY-MM-DD>-<slug>.md (format: ${FRAGMENT_README}).`,
+    );
+    return 1;
   }
   const shown = result.codePaths.slice(0, 10).join(", ");
   const more =

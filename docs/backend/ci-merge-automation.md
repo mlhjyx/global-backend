@@ -183,7 +183,7 @@ Release Bundle 中的 `CHECK_RUN`、`GITHUB_REVIEW`、`SIGNED_AUTHORIZATION`、m
   3. `node scripts/changelog-assemble.mjs` 写入 changelog 并删除已写入的片段，没有 PR 号的条目按需手工补上 `(#N)`；
   4. `pnpm docs:verify` 通过后提交，标题 `docs(changelog): assemble fragments through #<最大 PR 号>`，按纯文档 PR 审查合并。汇编 PR 只改 `changelog.md` 并删除片段，不需要自己的片段。
 - **冲突**：汇编 PR 在审期间又有 PR 合入新片段时互不影响，汇编只删除它运行时目录里已有的片段。若有 PR 修改了将被删除的片段，以最新 main 为准重跑汇编。过渡期仍直接改 `changelog.md` 的旧 PR 可能与汇编 PR 冲突，后合者按 changelog 的老办法处理（两边段落都留）。
-- **回退**：恢复「每个 PR 直接改 `changelog.md`」只需改回 `AGENTS.md` §9、`CONTRIBUTING.md`、PR 模板与片段 README 的写法；governance 的片段检查本来就接受直接改 `changelog.md`，可以留着，也可以删掉 `governance.yml` 的那一步。目录里剩下的片段运行一次汇编即可全部收进 `changelog.md`。
+- **回退**：恢复「每个 PR 直接改 `changelog.md`」要改回 `AGENTS.md` §9、`CONTRIBUTING.md`、PR 模板与片段 README 的写法，并删掉 `governance.yml` 里运行 `require` 的那一步：片段规则合入后切出的分支直接改 `changelog.md` 不再被这一步接受。目录里剩下的片段运行一次汇编即可全部收进 `changelog.md`。
 
 ## 风险分级（决定验证深度，不授予自动合并）
 

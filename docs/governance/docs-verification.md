@@ -37,7 +37,7 @@ pnpm docs:verify
 | Spec 可达性 | `scripts/` 下的 spec 既不在 workflow 经 `node --test`/`tsx --test`（直接或经根 package.json 脚本）执行的入口及其 import 链上，也没有带理由与运行命令登记进 `MANUAL_SPECS`；登记项已失效（已被 runner 执行或文件已删）；runner 用 glob 或指向不存在的 spec | spec 内容正确、手动 spec 近期跑过，或 `scripts/` 以外的测试有 runner 执行 |
 | 敏感模式 | Markdown 出现高置信私钥、长 API key 或 AWS access key 模式 | 已完成完整 DLP/secret scan |
 | Changelog 片段格式 | `docs/roadmap/changelog.d/` 里出现 README 与 `YYYY-MM-DD-<slug>.md` 片段以外的文件；片段文件名、frontmatter（只许 `date` / `pr` / `title`，日期须为真实日期且与文件名一致）、正文四项（起因 / 改动 / 测试 / 未做）的顺序与内容、一二级标题、引用式链接或脚注定义不合格；政策的 `frontmatterFragmentDirectories` 列了别的目录。错误码 `CHANGELOG_FRAGMENT_*`，由 `docs:verify` 报 | 片段内容真实、`pr` 等于当前 PR 号，或片段已经汇编进 changelog |
-| 代码 PR 的 changelog 片段 | PR 相对合并基点（`base...head`）改了 `apps/`、`packages/`、`scripts/`、`infra/` 或根目录的构建与运行时文件（`CODE_ROOT_FILES`：`Dockerfile`、`runtime-entrypoint.mjs`、`package.json`、`pnpm-lock.yaml` 等），却没有新增或修改片段，也没有改 `changelog.md`；diff 算不出时失败而不放行。只在 governance 工作流的 `pull_request` 上运行 | 片段写得对、PR 作者没有连同检查脚本一起改（fork PR 可以），或过渡期直接改 `changelog.md` 的 PR 不会冲突 |
+| 代码 PR 的 changelog 片段 | PR 相对合并基点（`base...head`）改了 `apps/`、`packages/`、`scripts/`、`infra/` 或根目录的构建与运行时文件（`CODE_ROOT_FILES`：`Dockerfile`、`runtime-entrypoint.mjs`、`package.json`、`pnpm-lock.yaml` 等），却没有新增或修改片段；在片段规则合入前切出的分支（合并基点里没有片段 README）直接改 `changelog.md` 也算满足，之后切出的分支不算；diff 或合并基点算不出时失败而不放行。只在 governance 工作流的 `pull_request` 上运行 | 片段写得对、PR 作者没有连同检查脚本一起改（fork PR 可以），或过渡期直接改 `changelog.md` 的 PR 不会冲突 |
 
 所有硬失败退出码为非零。输出中的计数是本次扫描范围，不是产品能力、测试通过数或发布证据。
 
@@ -71,7 +71,7 @@ pnpm docs:verify
 | `docs/templates/前端技术方案模板.md` | 不强制新元数据 | 历史模板不是当前前端方案或 Release schema | `REFERENCE_ONLY`；需要正式前端方案时基于当前规范另行产出 |
 | `docs/site-builder/12-site-builder-design-intelligence-and-cc-implementation-v3.2.md` | 历史表格列错误只告警 | `DATED_PROPOSAL` 必须保持原始证据；错误不影响 current truth | 原位保留 banner；不在 Phase 8 修正文义或移动文件 |
 | `docs/roadmap/changelog.d/<YYYY-MM-DD>-<slug>.md`（不含 README） | 不要求 `> 生命周期：` 行（政策项 `lifecycleRequired.frontmatterFragmentDirectories`） | 片段用 frontmatter 的 `date` / `pr` / `title` 承担元数据并由 `CHANGELOG_FRAGMENT_*` 校验，下一班发版列车汇编后即删除。风险：片段在目录里停留期间不声明生命周期，读者可能把未汇编的片段当成已归档条目 | Owner：`OWN-DOC-GOV`。关闭条件：恢复「每个 PR 直接改 `changelog.md`」时删除该政策项与本行。successor：汇编后的 `docs/roadmap/changelog.md` 条目 |
-| `scripts/governance-changelog-fragments.mjs` 的 `fragmentRequirement`（`\|\| changelogEdited`） | 改了代码的 PR 只改 `changelog.md`、不加片段，也通过（附 `::warning::`），不论 PR 何时开 | 过渡：仓外的 `/global/CLAUDE.md` §7 与派活脚本仍写「在 changelog.md 当天小节末尾新增小节」，规则生效时有在途 PR 照此改了 `changelog.md`。风险：照旧写法的新 PR 继续通过，`changelog.md` 的文本冲突在这些指令改掉之前不会消失 | Owner：`OWN-DOC-GOV`。关闭条件：上述仓外指令改为写片段后，删除 `\|\| changelogEdited`、本行与对应测试。successor：只认片段的必需检查 |
+| `scripts/governance-changelog-fragments.mjs` 的 `fragmentRequirement`（`changelogEditAccepted`） | 合并基点里还没有片段 README 的分支（片段规则合入 main 之前切出），改了代码却只改 `changelog.md`、不加片段，也通过（附 `::warning::`）；之后切出的分支不放行 | 过渡：规则合入时已有在途分支照旧改了 `changelog.md`，不必返工。风险：这些旧分支合入前，`changelog.md` 仍可能出现文本冲突 | Owner：`OWN-DOC-GOV`。关闭条件：不再有合并基点早于片段规则的在途分支后，删除 `changelogEditAccepted`、`branchPredatesFragmentRule`、本行与对应测试。successor：只认片段的必需检查 |
 
 新增例外必须记录路径、规则、风险、Owner、到期/关闭条件和 successor。永久 wildcard、整目录关闭链接检查或“历史所以都不检查”不允许。
 
