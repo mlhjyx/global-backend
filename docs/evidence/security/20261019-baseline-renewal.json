@@ -1,0 +1,134 @@
+{
+  "classification": "FROZEN_AUDIT_EVIDENCE",
+  "scope": "Official npm production audit and exact-lock freshness for the 2026-10-19 audit baseline renewal (lockfile unchanged since the 2026-10-10 monthly refresh); not runtime/release/UAT evidence",
+  "records": [
+    {
+      "audit": {
+        "actions": [],
+        "advisories": {},
+        "muted": [],
+        "metadata": {
+          "vulnerabilities": {
+            "info": 0,
+            "low": 0,
+            "moderate": 0,
+            "high": 0,
+            "critical": 0
+          },
+          "dependencies": 831,
+          "devDependencies": 0,
+          "optionalDependencies": 0,
+          "totalDependencies": 831
+        }
+      },
+      "before": {
+        "schema_version": "production-dependency-baseline-freshness-result/v1",
+        "result": "FRESH",
+        "hold": false,
+        "current_advisories": 0,
+        "resolved_advisories": [],
+        "issues": [],
+        "provenance": {
+          "subject_commit": "6f95c44e80f909d42bc939c646a77afa0d53de74",
+          "lockfile_digest": "sha256:14962679245f94987162656a5c23354f5ca92f59d4643c2d74d1a9fbf17a80b5",
+          "verifier_digest": "sha256:3f85820122b15ca96ff62ecb7ec58e162b14ff2b4029355de0a4b0bee376539c",
+          "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
+          "audit_digest": "sha256:fdc6a5ead508bf04ea1bc35045ace0dd8ff7be76c8dcbed0834bde3ebcc1021a",
+          "observed_at": "2026-10-19T11:26:20.000Z",
+          "registry": "https://registry.npmjs.org/"
+        }
+      },
+      "after": {
+        "schema_version": "production-dependency-baseline-freshness-result/v1",
+        "result": "FRESH",
+        "hold": false,
+        "current_advisories": 0,
+        "resolved_advisories": [],
+        "issues": [],
+        "provenance": {
+          "subject_commit": "6f95c44e80f909d42bc939c646a77afa0d53de74",
+          "lockfile_digest": "sha256:14962679245f94987162656a5c23354f5ca92f59d4643c2d74d1a9fbf17a80b5",
+          "verifier_digest": "sha256:3f85820122b15ca96ff62ecb7ec58e162b14ff2b4029355de0a4b0bee376539c",
+          "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
+          "audit_digest": "sha256:fdc6a5ead508bf04ea1bc35045ace0dd8ff7be76c8dcbed0834bde3ebcc1021a",
+          "observed_at": "2026-10-19T11:27:34.000Z",
+          "registry": "https://registry.npmjs.org/"
+        }
+      }
+    }
+  ],
+  "expiry_projection": {
+    "method": "evaluateProductionAuditBaselineFreshness from scripts/supply-chain-audit.mjs called with an explicit now; the baseline-freshness CLI evaluates validity against the wall clock and records --observed-at only as provenance",
+    "audit_digest": "sha256:fdc6a5ead508bf04ea1bc35045ace0dd8ff7be76c8dcbed0834bde3ebcc1021a",
+    "results": [
+      {
+        "binding": "old_binding",
+        "valid_until": "2026-10-24T13:59:34.000Z",
+        "evaluated_at": "2026-10-24T13:59:34.000Z",
+        "result": "AUDIT_INVALID_HOLD",
+        "issues": ["BASELINE_EXPIRED"]
+      },
+      {
+        "binding": "old_binding",
+        "valid_until": "2026-10-24T13:59:34.000Z",
+        "evaluated_at": "2026-11-02T11:27:17.999Z",
+        "result": "AUDIT_INVALID_HOLD",
+        "issues": ["BASELINE_EXPIRED"]
+      },
+      {
+        "binding": "old_binding",
+        "valid_until": "2026-10-24T13:59:34.000Z",
+        "evaluated_at": "2026-11-02T11:27:18.000Z",
+        "result": "AUDIT_INVALID_HOLD",
+        "issues": ["BASELINE_EXPIRED"]
+      },
+      {
+        "binding": "new_binding",
+        "valid_until": "2026-11-02T11:27:18.000Z",
+        "evaluated_at": "2026-10-24T13:59:34.000Z",
+        "result": "FRESH",
+        "issues": []
+      },
+      {
+        "binding": "new_binding",
+        "valid_until": "2026-11-02T11:27:18.000Z",
+        "evaluated_at": "2026-11-02T11:27:17.999Z",
+        "result": "FRESH",
+        "issues": []
+      },
+      {
+        "binding": "new_binding",
+        "valid_until": "2026-11-02T11:27:18.000Z",
+        "evaluated_at": "2026-11-02T11:27:18.000Z",
+        "result": "AUDIT_INVALID_HOLD",
+        "issues": ["BASELINE_EXPIRED"]
+      }
+    ]
+  },
+  "full_audit": {
+    "command": "pnpm audit --registry=https://registry.npmjs.org --json (development dependencies included)",
+    "subject_commit": "6f95c44e80f909d42bc939c646a77afa0d53de74",
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 2,
+      "critical": 0
+    },
+    "advisories": [
+      {
+        "package": "@faker-js/faker",
+        "ghsa": "GHSA-qxc2-j82w-r537",
+        "severity": "high",
+        "vulnerable_versions": "<=10.4.0"
+      },
+      {
+        "package": "braces",
+        "ghsa": "GHSA-vfj7-8cjw-p6xm",
+        "severity": "high",
+        "vulnerable_versions": "<=3.0.3"
+      }
+    ],
+    "note": "Same two development-only advisories as the 2026-10-10 refresh, both still open on main as Dependabot alerts 80 (faker, only in the Prism mock chain) and 118 (braces, no patched release). No new alert."
+  }
+}
