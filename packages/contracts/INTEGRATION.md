@@ -86,10 +86,10 @@
    - 没有可用的已启用数据源时返回 409 `NO_ENABLED_DISCOVERY_SOURCE`（不调用模型）；模型给出的查询全落在不可用的数据源上时返回 409 `NO_RUNNABLE_QUERIES`，不保存计划
    - 模型网关结算了调用却没有可用答案时（内容被过滤、输出截断、非 JSON、流被截断等）返回 502 `MODEL_UPSTREAM_UNUSABLE`，`details.reasonCode` 为网关原因码（例如 `CHAT_COMPLETIONS_CONTENT_FILTERED`、`STRUCTURED_OUTPUT_TRUNCATED`、`CHAT_COMPLETIONS_STREAM_TRUNCATED`；网关直接回了 429 或 5xx 时为 `GATEWAY_HTTP_<状态码>`，例如 `GATEWAY_HTTP_503`），不保存计划；这次调用的预算授权已在调用前消耗并按真实用量结算，用同一授权重试会得到 409 `EXECUTION_BUDGET_GRANT_REUSED`，重试要先向 SaaS 取一份新的授权。`POST /companies/:id/icps` 同
 2. 人工确认：`POST /query-plans/:id/confirm`（→ `READY`）
-3. 执行：`POST /query-plans/:id/execute` → 202 `{ data: { runId, status } }`；轮询 `GET /discovery-runs/:runId`（`RUNNING → DONE|PARTIAL`，stats 含每源计数）
+3. 执行：`POST /query-plans/:id/execute` → 202 `{ data: { runId, status } }`；轮询 `GET /discovery-runs/:runId`（`RUNNING → DONE|PARTIAL|FAILED`，stats 含每源计数）
    - 确认之后数据源被停用的查询会跳过，不让 run 失败：`stats.skippedQueries` 按原因计数（`SOURCE_DISABLED` / `SOURCE_LINEAGE_UNAVAILABLE` / `SOURCE_UNKNOWN`），run 判 `PARTIAL`
    - 没有受治理公司血缘的数据源（目前 `wikidata`、`openstreetmap`、`ted`、`openfda`）即使启用也不出查询、不执行；旧计划里指向它们的查询按 `SOURCE_LINEAGE_UNAVAILABLE` 跳过
-   - 公司抽取的模型调用失败时（答案不可用、流被截断，或其他普通失败），只跳过那个域名或名录页，run 继续，至少判 `PARTIAL`。整个 run 的抽取全部失败、且没有任何记录通过时判 `FAILED`，计划保持 `READY` 可以重跑。`stats.modelExtractions` 只在有跳过时出现，含：
+   - 公司抽取的模型调用失败时（答案不可用、流被截断，或其他普通失败），只跳过那个域名或名录页，run 继续，至少判 `PARTIAL`。模型上游不可用不在此列：网关回 429 或除 504/524 以外的 5xx、或网关地址拒绝连接时，整条查询失败，见下面「查询活动」一条（连到网关超时仍按单个域名的失败跳过）。整个 run 的抽取全部失败、且没有任何记录通过时判 `FAILED`；计划保持 `READY`，但同一计划不能再执行（新授权也会得到 409 `EXECUTION_BUDGET_GRANT_REUSED`），要重跑须重新生成计划。`stats.modelExtractions` 只在有跳过时出现，含：
      - `invoked`：抽取调用次数（一次带修复的抽取算一次）；
      - `failed`：跳过次数；
      - `failedByReason`：按网关原因码计数，例如 `STRUCTURED_OUTPUT_EMPTY_TRUNCATED`、`CHAT_COMPLETIONS_STREAM_TRUNCATED`；没有网关原因码的失败记为 `MODEL_CALL_FAILED`；
@@ -101,7 +101,8 @@
      - 以上任何一种，run 都至少判 `PARTIAL`；同一阶段连续两次遇到时视为故障，run 判 `FAILED`。
      - `stats.unreplayableSkips` 只在有跳过时出现，按阶段计数：`queries`、`websiteProfile`、`fit`、`signals`、`watches`。
    - 词表归一（把查询里的行业/国家词归一到标准码）只为会读归一结果的数据源（`wikidata`、`openstreetmap`）调用模型，其余查询只查已沉淀的别名；一条查询的归一调用丢失（上游 5xx、操作无法重放）时，这条查询照常用各源内置词表执行，不算失败、不改状态。`stats.taxonomyFallback`（回退的查询数）与 `stats.taxonomyModelSkipped`（有词可归一却没有调用模型的查询数）只在大于 0 时出现。
-   - 查询活动因**普通**错误（不是控制错误）用尽重试时，这条查询没有回执，run 立即停在查询阶段：判 `FAILED`，`stats.failure = { stage: 'query', errorType, control: false }`（`errorType` 是活动最后一次尝试的错误类型，不含消息），后面的查询不再执行，计划保持 `READY` 可以重跑。`stats.failures` 只计数据源在重试时遇到无法重放的操作、因而以零回执结束的查询（与 `stats.unreplayableSkips.queries` 相同）；没找到记录、或数据源被停用而以 `accepted: 0` 回执结束的查询不计，这次停止也不计。
+   - 查询活动因**普通**错误（不是控制错误）用尽重试时，这条查询没有回执，run 立即停在查询阶段：判 `FAILED`，`stats.failure = { stage: 'query', errorType, control: false }`（`errorType` 是活动最后一次尝试的错误类型，不含消息），后面的查询不再执行；计划保持 `READY`，但同一计划不能再执行（见上面「公司抽取」一条）。活动最多尝试 3 次（等于预算账本对同一操作的预留上限）。失败是模型上游不可用时（网关回 429 或除 504/524 以外的 5xx，此时 `control: false`；或网关地址拒绝连接，此时按控制错误记 `control: true`），第 2 次尝试前等 5 分钟、第 3 次前等 25 分钟，所以半小时左右以内恢复的上游故障不会让 run 停；这类失败的预留已退回，等待不花钱；更长的故障照旧停在查询阶段。fit 阶段遇到同样的失败按同样的间隔重试。`stats.failures` 只计数据源在重试时遇到无法重放的操作、因而以零回执结束的查询（与 `stats.unreplayableSkips.queries` 相同）；没找到记录、或数据源被停用而以 `accepted: 0` 回执结束的查询不计，这次停止也不计。
+   - 官网画像阶段遇到同样的上游不可用时，下一次尝试前等 25 分钟（这个阶段只有 2 次尝试）；仍然失败时画像阶段提前结束，fit 照常判定余下的公司（没有画像证据），run 至少判 `PARTIAL`，`stats.websiteProfile.stageFailed = true`（只在发生时出现；画像阶段因其他普通错误提前结束时同样如此）。
    - `stats.websiteProfile`：`profiled` / `matched` / `unclassified` 只计本 run 自己的公司；`backfilled` 是开关 `company_contact` 打开时，用本 run 剩下的画像配额补读联系路径的工作区存量公司数（不在本 run 里；这个键自评分规则 v3 跟进起才有，更早的 run 的 stats 里没有它）。补读候选里，从未尝试过的公司优先，其次是上次尝试最早的；run 创建前 7 天内尝试过的公司（不论读到与否）不补读。
 4. 结果：`GET /canonical-companies`（`?status=NEW|ENRICHED|SUPPRESSED`）；详情含**字段级 Evidence**（每个字段值来自哪个源、什么许可）
    - 过了 fit 门的高价值公司自动做**多源富集**（互补并跑，均 CC0 直连数据）：

@@ -407,6 +407,9 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     // 官网画像（G3 5.4b）：Fit 之前以已建档公司为主体抓首页与 Impressum（慢 → 长活动）；
     // 尽力而为，失败不影响 run 状态，控制错误照旧上抛。patch 守卫：旧历史重放不产生新命令。
     let websiteProfile: WebsiteProfileTotals = { profiled: 0, matched: 0 };
+    // Set when the stage ended on an error absorbed below: the companies after it go to fit
+    // without their profile, so the run cannot report DONE. Derived from recorded history only.
+    let websiteProfileStageFailed = false;
     if (patched(DISCOVERY_WEBSITE_PROFILE_PATCH)) {
       stage = 'websiteProfile';
       try {
@@ -428,6 +431,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       } catch (error) {
         if (isExecutionControlError(error)) throw error;
         /* 画像是 Fit 的补充证据，失败时 Fit 仍按已有信息判定 */
+        websiteProfileStageFailed = true;
       }
     }
 
@@ -549,6 +553,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       skippedQueries: skippedQueryCount,
       droppedExtractions: modelExtractions.failed,
       unreplayableSkips: unreplayableSkipCount,
+      profileStageFailed: websiteProfileStageFailed,
     });
     if (usesRawGovernance && governanceDenied > 0) {
       status = acceptedRaw === 0 ? 'FAILED' : status === 'DONE' ? 'PARTIAL' : status;
@@ -590,6 +595,8 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
           unclassified: websiteProfile.unclassified ?? 0,
           // Stats only (no command, replay-safe); results recorded before the counter existed report 0.
           backfilled: websiteProfile.backfilled ?? 0,
+          // Shown only when the stage was cut short, so other runs keep their stats shape.
+          ...(websiteProfileStageFailed ? { stageFailed: true } : {}),
         },
         enrich: { matched: enrich.matched, of: enrich.enriched, provider: enrich.provider },
         signals: { matched: signals.matched, of: signals.enriched, provider: signals.provider },

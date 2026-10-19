@@ -1290,7 +1290,7 @@ describe('discoveryWorkflow company passes handed from one activity to the next'
     );
   });
 
-  it('keeps the counts of earlier profile passes when a later pass fails', async () => {
+  it('keeps the counts of earlier profile passes when a later pass fails, and reports the run PARTIAL', async () => {
     primeDiscovery();
     acts.profileWebsitesForRun
       .mockResolvedValueOnce(profilePass({ profiled: 2, matched: 1, nextIndex: 2 }))
@@ -1298,11 +1298,14 @@ describe('discoveryWorkflow company passes handed from one activity to the next'
 
     await discoveryWorkflow(discoveryInput());
 
+    // Fit still runs, but the companies after the failure go without their profile.
     expect(acts.qualifyFitForRun).toHaveBeenCalled();
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
-        status: 'DONE',
-        stats: expect.objectContaining({ websiteProfile: { profiled: 2, matched: 1, unclassified: 0, backfilled: 0 } }),
+        status: 'PARTIAL',
+        stats: expect.objectContaining({
+          websiteProfile: { profiled: 2, matched: 1, unclassified: 0, backfilled: 0, stageFailed: true },
+        }),
       }),
     );
   });

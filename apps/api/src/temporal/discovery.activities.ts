@@ -134,6 +134,7 @@ import {
 import { settledModelFailureReason } from '../discovery/settled-model-failure';
 import { narrowBySourceHints, planQuerySkipReason } from '../discovery/plan-query-sources';
 import type { DiscoveryRunStage } from './discovery.run-failure';
+import { withUpstreamUnavailableRetryDelay } from './upstream-unavailable-retry';
 
 export interface DiscoveryRunInput {
   workspaceId: string;
@@ -894,7 +895,8 @@ export function createDiscoveryActivities(deps: {
           }
         } catch (error) {
           // The terms resolved before the loss stay; the rest use the providers' vocabularies.
-          if (!isLostTaxonomyNormalization(error)) throw error;
+          // A 429 or a refused gateway connection is not absorbed: the next attempt waits for it.
+          if (!isLostTaxonomyNormalization(error)) throw withUpstreamUnavailableRetryDelay(error);
           taxonomyFallback = true;
         }
       }
@@ -961,8 +963,9 @@ export function createDiscoveryActivities(deps: {
       for (const result of settled) {
         if (result.status === 'rejected' && isExecutionControlError(result.reason)) {
           // UNKNOWN physical-call/ACK state is a control failure: throw it and
-          // never issue another provider wire from this Activity.
-          throw result.reason;
+          // never issue another provider wire from this Activity. An unavailable model
+          // upstream makes the next attempt wait instead of retrying within seconds.
+          throw withUpstreamUnavailableRetryDelay(result.reason);
         }
         if (result.status !== 'fulfilled') continue;
         assertProductDiscoveryProvenance({ providerKey: result.value.key });
@@ -1579,7 +1582,7 @@ export function createDiscoveryActivities(deps: {
             if (lostOnReplay) unreplayable += 1;
             continue;
           }
-          throw err;
+          throw withUpstreamUnavailableRetryDelay(err);
         }
         if (!judgment) {
           // 单家判别失败不影响其余，但要计数：编排层据此判 PARTIAL / FAILED，绝不静默漏判假 DONE。
@@ -1977,7 +1980,8 @@ export function createDiscoveryActivities(deps: {
           } else if (isUnreplayableOperation(error) && !previousUnreplayable) {
             unreplayableSkip = true;
           } else if (isExecutionControlError(error)) {
-            throw error;
+            // An unavailable model upstream makes the next attempt wait instead of retrying within seconds.
+            throw withUpstreamUnavailableRetryDelay(error);
           }
           /* 单家画像失败不影响其余 */
         }

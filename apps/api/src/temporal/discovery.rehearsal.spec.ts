@@ -63,7 +63,7 @@ import {
 } from './testing/discovery-activity-timeouts';
 import { createDiscoveryActivities } from './discovery.activities';
 import { discoveryWorkflow } from './discovery.workflow';
-import { ProviderTransportError } from '../model-gateway/providers/provider-output-error';
+import { ProviderHttpError, ProviderTransportError } from '../model-gateway/providers/provider-output-error';
 import { BudgetOperationReplayError } from '../tools/budget-store';
 
 const WS = '10000000-0000-4000-8000-000000000001';
@@ -229,6 +229,8 @@ interface Faults {
   queryFails?: number[];
   /** Website profiles (1-based) whose operation cannot be replayed. */
   profileUnreplayable?: number[];
+  /** Website profiles (1-based) the model upstream cannot answer (an outage during the stage). */
+  profileUpstreamDown?: number[];
   /** Signal enricher calls (1-based) whose operation cannot be replayed; 'all' for an outage. */
   signalUnreplayable?: number[] | 'all';
 }
@@ -328,6 +330,9 @@ function rehearse(options: { companies: number; slowdown?: number; faults?: Faul
       advance(LATENCY_MS.profile);
       if (faults.profileUnreplayable?.includes(profiles)) {
         throw new BudgetOperationReplayError(`profile-${profiles}`);
+      }
+      if (faults.profileUpstreamDown?.includes(profiles)) {
+        throw new ProviderHttpError({ status: 521, provider: 'gateway', model: 'deepseek-v4-pro' });
       }
       return PROFILE;
     }),
@@ -582,5 +587,19 @@ describe('discovery run rehearsal at measured latencies', () => {
       status: 'FAILED',
       stats: { queries: QUERY_COUNT, failures: 0, failure: { stage: 'query', errorType: 'Error', control: false } },
     });
+  });
+
+  it('does not report DONE when an upstream outage cuts the website-profile stage short and fit judges without it', async () => {
+    // The outage covers the profile stage's two attempts (profiles 12 and 13) and is over by fit.
+    const rehearsalRun = rehearse({ companies: 100, faults: { profileUpstreamDown: [12, 13] } });
+
+    await rehearsalRun.run();
+
+    expect(rehearsalRun.callsOf('profileWebsitesForRun').filter(({ attempt }) => attempt > 1)).toHaveLength(1);
+    const { status, stats } = rehearsalRun.finalized();
+    expect(status).toBe('PARTIAL');
+    // The pass that failed recorded no result, so its profiles are not in the counters either.
+    expect(stats).toMatchObject({ websiteProfile: expect.objectContaining({ stageFailed: true }) });
+    expect(rehearsalRun.judgedCompanies()).toBe(100);
   });
 });

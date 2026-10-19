@@ -48,14 +48,17 @@ export type DevFastLaneAcquisitionCommand =
 
 /**
  * A lane workflow nobody polls must end instead of absorbing later requests
- * that reuse its workflow id. Discovery gets its 3-hour admission lease plus
- * finalization headroom; understanding and qualify get 30 minutes.
+ * that reuse its workflow id. Discovery gets its 3-hour admission lease, the
+ * longest wait before a retry after an unavailable model upstream (5 + 25
+ * minutes, see temporal/upstream-unavailable-retry.ts) and 5 minutes of
+ * finalization headroom, so a run that hits an outage late still finalizes
+ * instead of timing out RUNNING; understanding and qualify get 30 minutes.
  */
 const DEV_FAST_LANE_WORKFLOW_EXECUTION_TIMEOUTS: Readonly<
   Record<DevFastLaneAcquisitionCommand, Duration>
 > = Object.freeze({
   CompanyProfileCreated: "30 minutes",
-  DiscoveryRunRequested: "185 minutes",
+  DiscoveryRunRequested: "215 minutes",
   QualifyRequested: "30 minutes",
 });
 

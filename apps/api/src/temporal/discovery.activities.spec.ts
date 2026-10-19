@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
+import { ApplicationFailure } from "@temporalio/activity";
 import {
   createDiscoveryActivities,
   ENRICH_PASS_TIME_BOX_MS,
@@ -3869,6 +3870,24 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
     expect(updateMany).not.toHaveBeenCalled();
   });
 
+  it("ends the attempt with a retryable failure that waits when the model upstream is unavailable", async () => {
+    const error = new ProviderHttpError({ status: 521, provider: "gateway", model: "deepseek-v4-pro" });
+    const profile = vi.fn(async () => {
+      throw error;
+    });
+    const { acts, updateMany } = await makeProfileDeps(profile, { companies: ["c1", "c2"] });
+
+    const failure = await acts
+      .profileWebsitesForRun(discoveryArgs("run-profile-upstream", { icpId: "icp-1" }))
+      .then(() => undefined, (reason: unknown) => reason);
+
+    expect(failure).toBeInstanceOf(ApplicationFailure);
+    expect(failure).toMatchObject({ type: "ProviderHttpError", nonRetryable: false, nextRetryDelay: expect.any(String) });
+    // The outage stops the pass at the first company instead of burning through the rest.
+    expect(profile).toHaveBeenCalledOnce();
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
   it("fails the run when the artifact store is unavailable", async () => {
     const profile = vi.fn(async () => {
       throw new ToolPolicyDenied("crawl4ai.fetch", "GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE");
@@ -4411,6 +4430,19 @@ describe("resolveRunStatus —— Fit 判定按公司吸收的模型失败", () 
       resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, fitUnjudged: 0 }),
     ).toBe("DONE");
     expect(resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false })).toBe("DONE");
+  });
+});
+
+describe("resolveRunStatus —— a website-profile stage the workflow absorbed", () => {
+  it("is at least PARTIAL: the companies after the failure were judged without their profile", () => {
+    expect(
+      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, profileStageFailed: true }),
+    ).toBe("PARTIAL");
+  });
+  it("keeps DONE when the stage finished, including replays of histories without the field", () => {
+    expect(
+      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, profileStageFailed: false }),
+    ).toBe("DONE");
   });
 });
 
@@ -5000,6 +5032,146 @@ describe("executeQuery —— a provider whose operation cannot be replayed ends
   });
 });
 
+describe("an unavailable model upstream makes the next activity attempt wait instead of retrying within seconds", () => {
+  // Run 097593b7 (xin, 2026-10-19 12:03 UTC): mining one domain met openox 521; the three
+  // attempts of the query fell inside 6 seconds and the run failed while openox stayed down
+  // for 28 minutes. The ledger already released each attempt's reservation (D13).
+  const http = (status: number) =>
+    new ProviderHttpError({ status, provider: "gateway", model: "deepseek-v4-pro" });
+  const miningAdapter = (discoverCompanies: () => Promise<unknown>) => ({
+    key: "public_web",
+    classes: ["public_intelligence"],
+    companyResultLineage: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+    discoverCompanies,
+  });
+
+  it("fails the query with a retryable failure that waits before the next attempt", async () => {
+    const error = http(521);
+    const activities = createDiscoveryActivities(
+      makeDeps([
+        miningAdapter(async () => {
+          throw error;
+        }),
+      ]),
+    );
+
+    const failure = await activities
+      .executeQuery(discoveryArgs("run-upstream-521", { query: QUERY }))
+      .then(() => undefined, (reason: unknown) => reason);
+
+    expect(failure).toBeInstanceOf(ApplicationFailure);
+    expect(failure).toMatchObject({
+      type: "ProviderHttpError",
+      message: error.message,
+      nonRetryable: false,
+      nextRetryDelay: "5 minutes",
+    });
+  });
+
+  it("waits the same way when the gateway itself refuses the connection", async () => {
+    // What Node fetch throws when nothing listens on the gateway port: the cause is a system error.
+    const refused = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:3001"), {
+      errno: -111,
+      code: "ECONNREFUSED",
+      syscall: "connect",
+      address: "127.0.0.1",
+      port: 3001,
+    });
+    const error = new TypeError("fetch failed", { cause: refused });
+    const activities = createDiscoveryActivities(
+      makeDeps([
+        miningAdapter(async () => {
+          throw error;
+        }),
+      ]),
+    );
+
+    const failure = await activities
+      .executeQuery(discoveryArgs("run-gateway-refused", { query: QUERY }))
+      .then(() => undefined, (reason: unknown) => reason);
+
+    expect(failure).toBeInstanceOf(ApplicationFailure);
+    expect(failure).toMatchObject({ type: "TypeError", nonRetryable: false, nextRetryDelay: "5 minutes" });
+  });
+
+  it("still fails the query at once on a gateway timeout, which the upstream may have billed", async () => {
+    const error = http(504);
+    const activities = createDiscoveryActivities(
+      makeDeps([
+        miningAdapter(async () => {
+          throw error;
+        }),
+      ]),
+    );
+
+    await expect(
+      activities.executeQuery(discoveryArgs("run-upstream-504", { query: QUERY })),
+    ).rejects.toBe(error);
+  });
+
+  describe("in the fit pass", () => {
+    const FIT_COMPANY = { id: "c1", name: "c1 GmbH", domain: "c1.example", country: "DE", industry: null, status: "NEW", attributes: {} };
+    function fitActivities() {
+      const tx = {
+        $queryRaw: legacyMaterializationQueryRaw(),
+        rawSourceRecord: {
+          findMany: async () => [
+            { id: "raw-c1", providerKey: "registry", payload: { externalId: "c1", name: "c1 GmbH", domain: "c1.example", country: "DE" } },
+          ],
+        },
+        identityLink: { findMany: async () => [{ canonicalId: "c1" }] },
+        canonicalCompany: {
+          findMany: async () => [FIT_COMPANY],
+          findUnique: async () => FIT_COMPANY,
+          updateMany: async () => ({ count: 0 }),
+        },
+        suppressionRecord: { findMany: async () => [] },
+        icpDefinition: { findUnique: async () => null },
+        lead: { upsert: async () => ({}) },
+      };
+      return createDiscoveryActivities({
+        prisma: {
+          withWorkspace: async <T>(_workspaceId: string, callback: (client: typeof tx) => Promise<T>): Promise<T> =>
+            callback(tx),
+        },
+        providers: {},
+        gateway: {},
+        budgetStore: authorityBudgetStore(),
+      } as never);
+    }
+
+    beforeEach(() => {
+      fitRuntimeMocks.execute.mockReset();
+    });
+
+    it("stops the fit pass with a retryable failure that waits before the next attempt", async () => {
+      const error = http(523);
+      fitRuntimeMocks.execute.mockRejectedValueOnce(error);
+
+      const failure = await fitActivities()
+        .qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" }))
+        .then(() => undefined, (reason: unknown) => reason);
+
+      expect(failure).toBeInstanceOf(ApplicationFailure);
+      expect(failure).toMatchObject({
+        type: "ProviderHttpError",
+        message: error.message,
+        nonRetryable: false,
+        nextRetryDelay: "5 minutes",
+      });
+    });
+
+    it("still stops the fit pass at once on an upstream 4xx", async () => {
+      const error = http(401);
+      fitRuntimeMocks.execute.mockRejectedValueOnce(error);
+
+      await expect(
+        fitActivities().qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" })),
+      ).rejects.toBe(error);
+    });
+  });
+});
+
 describe("executeQuery —— term normalization: keyed per query, skipped when no routed source reads it, falling back to the built-in vocabulary (W2)", () => {
   // Seller #26, run 3e78eb4e (xin, 2026-10-13 11:36 UTC): the taxonomy model answered 503 on
   // the first query and the gateway settled the operation without a result. Its key held only
@@ -5125,6 +5297,24 @@ describe("executeQuery —— term normalization: keyed per query, skipped when 
     expect(dispatched).toMatchObject({ _industryCodes: ["2812"], _industryQids: ["Q1"] });
     expect(dispatched).not.toHaveProperty("_countryCode");
     expect(result).toMatchObject({ rawCount: 1, taxonomyFallback: true });
+  });
+
+  it("fails the query with a failure that waits when term normalization meets an upstream 429", async () => {
+    const error = new ProviderHttpError({ status: 429, provider: "gateway", model: "deepseek-v4-pro" });
+    const discoverCompanies = discoverer();
+    const deps = makeDeps([consumer(discoverCompanies)]);
+    deps.taxonomy = taxonomySpy(async () => {
+      throw error;
+    }) as never;
+    const activities = createDiscoveryActivities(deps);
+
+    const failure = await activities
+      .executeQuery(discoveryArgs("run-taxonomy-429", { query }))
+      .then(() => undefined, (reason: unknown) => reason);
+
+    expect(failure).toBeInstanceOf(ApplicationFailure);
+    expect(failure).toMatchObject({ type: "ProviderHttpError", nonRetryable: false, nextRetryDelay: "5 minutes" });
+    expect(discoverCompanies).not.toHaveBeenCalled();
   });
 
   it.each([

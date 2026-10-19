@@ -247,7 +247,7 @@ describe("devFastLaneRoute", () => {
       },
       DiscoveryRunRequested: {
         taskQueue: lane.taskQueue,
-        workflowExecutionTimeout: "185 minutes",
+        workflowExecutionTimeout: "215 minutes",
       },
       QualifyRequested: {
         taskQueue: lane.taskQueue,
