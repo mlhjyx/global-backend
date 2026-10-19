@@ -176,6 +176,79 @@ function expectPolicyMapping(policy, action, prefix, privacyClass) {
   assert.match(statement, new RegExp(`"s3:RequestObjectTag/artifact-privacy": "${privacyClass}"`));
 }
 
+// The IAM policies bootstrap.sh writes, parsed: the heredoc between
+// `cat > "$<name>" <<EOF` and `EOF`, with the bucket variable substituted.
+function bootstrapPolicies(bootstrap) {
+  const policies = {};
+  for (const match of bootstrap.matchAll(/cat > "\$(\w+)" <<EOF\n([\s\S]*?)\nEOF/gu)) {
+    policies[match[1]] = JSON.parse(match[2].replaceAll('$GENERIC_OPERATION_ARTIFACT_S3_BUCKET', 'bucket'));
+  }
+  return policies;
+}
+
+const PREFIX_OPERATORS = new Set(['ForAllValues:StringLike', 'Null']);
+
+// Every rule the s3:prefix conditions must keep, as a list of violations.
+// Whitelist, not blacklist: MinIO lets an unqualified operator (StringLike,
+// StringEquals, StringNotLike) or ForAnyValue pass when ANY value of a
+// repeated prefix parameter matches, while ListObjectVersions lists by the
+// first value, so only ForAllValues:StringLike with a Null=false guard is safe.
+function prefixConditionViolations(policies) {
+  const violations = [];
+  for (const [name, policy] of Object.entries(policies)) {
+    for (const [index, statement] of policy.Statement.entries()) {
+      const where = `${name} statement ${index}`;
+      const actions = [statement.Action].flat();
+      const lists = actions.some((action) => action.startsWith('s3:List'));
+      const condition = statement.Condition ?? {};
+      let namesPrefix = false;
+      for (const [operator, keys] of Object.entries(condition)) {
+        if (!Object.hasOwn(keys, 's3:prefix')) continue;
+        namesPrefix = true;
+        if (!PREFIX_OPERATORS.has(operator)) violations.push(`${where}: s3:prefix under ${operator}`);
+        if (operator === 'Null' && keys['s3:prefix'] !== 'false') violations.push(`${where}: Null s3:prefix is not "false"`);
+      }
+      if (lists && statement.Effect === 'Allow') {
+        if (typeof condition['ForAllValues:StringLike']?.['s3:prefix'] !== 'string') {
+          violations.push(`${where}: list grant without ForAllValues:StringLike s3:prefix`);
+        }
+        if (condition.Null?.['s3:prefix'] !== 'false') violations.push(`${where}: list grant without Null s3:prefix "false"`);
+      }
+      if (namesPrefix && !lists) violations.push(`${where}: s3:prefix on a statement that lists nothing`);
+    }
+  }
+  return violations;
+}
+
+test('MinIO policies name s3:prefix only under ForAllValues:StringLike with a Null=false guard', async () => {
+  const policies = bootstrapPolicies(await repositoryFile('infra/minio/bootstrap.sh'));
+  assert.deepEqual(Object.keys(policies).sort(), ['cleanup_policy', 'personal_policy', 'runtime_policy']);
+  assert.deepEqual(prefixConditionViolations(policies), []);
+  const listGrants = (name) =>
+    policies[name].Statement.filter((statement) => [statement.Action].flat().some((action) => action.startsWith('s3:List')));
+  assert.equal(listGrants('runtime_policy').length, 1);
+  assert.equal(listGrants('cleanup_policy').length, 1);
+  assert.equal(listGrants('personal_policy').length, 0);
+  assert.doesNotMatch(JSON.stringify(policies.personal_policy), /s3:prefix/u);
+});
+
+test('the s3:prefix whitelist rejects every other operator, a missing guard and a stray prefix', () => {
+  const grant = (condition, action = 's3:ListBucketVersions') => ({
+    policy: { Statement: [{ Effect: 'Allow', Action: [action], Resource: ['arn:aws:s3:::bucket'], Condition: condition }] },
+  });
+  const safe = { 'ForAllValues:StringLike': { 's3:prefix': 'readiness/*' }, Null: { 's3:prefix': 'false' } };
+  assert.deepEqual(prefixConditionViolations(grant(safe)), []);
+  for (const operator of ['StringLike', 'StringEquals', 'StringNotLike', 'ForAnyValue:StringLike', 'ForAllValues:StringEquals']) {
+    const { 'ForAllValues:StringLike': _allowed, ...rest } = safe;
+    const violations = prefixConditionViolations(grant({ ...rest, [operator]: { 's3:prefix': 'readiness/*' } }));
+    assert.ok(violations.some((line) => line.includes(`under ${operator}`)), operator);
+  }
+  assert.ok(prefixConditionViolations(grant({ 'ForAllValues:StringLike': { 's3:prefix': 'readiness/*' } })).length > 0);
+  assert.ok(prefixConditionViolations(grant({ ...safe, Null: { 's3:prefix': 'true' } })).length > 0);
+  assert.ok(prefixConditionViolations(grant(undefined)).length > 0);
+  assert.ok(prefixConditionViolations(grant(safe, 's3:GetObject')).some((line) => line.includes('lists nothing')));
+});
+
 test('MinIO bootstrap rejects merged principals before the first mc mutation', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'artifact-bootstrap-contract-'));
   const marker = join(directory, 'mc-called');
