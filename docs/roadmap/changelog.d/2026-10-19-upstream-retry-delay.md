@@ -32,4 +32,5 @@ title: Wait minutes, not seconds, before retrying a discovery stage the model up
   - 不扛超过约半小时的上游故障：13:47 那次 openox 故障持续约 2 小时 15 分钟，修复后照样会以 FAILED 停下。要扛就得接备用上游（PRD4-D14），产品负责人 10-19 决定暂不接。
   - 连到网关超时（undici `UND_ERR_CONNECT_TIMEOUT`）在 public_web 和 fit 里仍按单个域名、单家公司的失败跳过，不会走到等待：这两处只把控制错误往上抛，没改。在 xin 上网关是 `127.0.0.1:3001`，它挂掉时是连接被拒绝，会走到等待。
   - 一次尝试里已经发出、却没留下持久结果的调用（截断流等），重试时仍无法重放，这条查询仍按 #643 以零回执结束、计为失败：等待帮不了这种情况。
+  - 等待不看准入租约还剩多少：租约快到期时又遇上故障，等过之后下一次尝试以 `EXECUTION_BUDGET_GRANT_EXPIRED`（控制错误）失败，不等则以 `ProviderHttpError` 失败，两者都是 FAILED，只是失败分类与耗时不同。让等待感知租约要让活动拿到 `admission_lease_expires_at`，与 reserve() 把租约到期映射成授权错误、收尾窗口一起另开任务。另：24 条查询的计划不靠任何等待也可能跑不完 3 小时租约，这是计划规模的既有问题。运维对活动执行 unpause、update-options 或 reset 时，服务端按退避重算调度，会忽略 `nextRetryDelay`。
   - 没有改成「一条查询失败时 run 判 PARTIAL、物化已成功查询的记录」：这要动物化准入「每条计划查询一份回执」的完整性不变量（#653 的理由），需要产品负责人拍板。
