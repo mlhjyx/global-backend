@@ -71,7 +71,7 @@ pnpm --filter @global/db exec prisma migrate deploy # 读 packages/db/.env
 - 在系统边界做 schema 校验；外部数据、URL、身份、权限、费用和 provider 响应全部不可信，必须 fail closed。
 - 业务逻辑优先不可变数据与新对象；不得静默吞错。用户面返回稳定错误，服务端记录有界诊断且不泄露秘密或个人数据。
 - SQL 使用参数化/Prisma，租户数据遵守 `app_user` + `set_config('app.current_workspace_id')` + FORCE RLS；owner 连接只用于明确的平台级任务。
-- 出网只能经 ToolBroker 与 source policy；执行 SSRF/global-unicast、redirect 逐跳重验、凭据剥离、超时、字节上限、预算和幂等门。唯一登记例外是制裁名单运营刷新（`apps/api/scripts/refresh-sanctions-lists.mts`，#629，PRD4-D9）：不经 ToolBroker 持有调用与预算回执，仍受 source_policy 与 net-guard 约束。
+- 出网只能经 ToolBroker 与 source policy；执行 SSRF/global-unicast、redirect 逐跳重验、凭据剥离、超时、字节上限、预算和幂等门。已登记的例外：robots.txt、DNS、模型网关与 outbox webhook 四类（#51，见 [as-built 架构](docs/architecture/current.md) §8 第 2 项），以及制裁名单运营刷新（`apps/api/scripts/refresh-sanctions-lists.mts`，#629，PRD4-D9）：后者不经 ToolBroker 持有调用与预算回执，仍受 source_policy 与 net-guard 约束。
 - API 唯一真值是 code-first [`packages/contracts/openapi/openapi.json`](packages/contracts/openapi/openapi.json)。文档引用 operationId，不手抄 path/operation 总数。
 - 所有 GitHub Actions 外部 `uses:` 必须锁定已从官方 tag 只读解析的 40 位 commit SHA，并保留人类可读的版本注释。`pnpm governance:verify` 扫描全部 workflow；新增未登记或 moving-tag action 必须失败。治理脚本、机器政策、schema、runtime evidence 与 release 目录必须保持在 CODEOWNERS 最终规则块内。
 

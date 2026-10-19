@@ -84,7 +84,7 @@ MinIO 的实际删除时刻是 `LastModified + (Days + 1) 天` 向下取整到 U
 - 迁移随携带它的镜像部署（见 `docs/backend/compose-project-migration.md` 与 RUNBOOK「换后端运行时镜像」）；旧镜像在迁移应用后因 `MIGRATION_REVISION_MISMATCH` 拒绝启动。回退 = 恢复迁移前的数据库备份 + 旧镜像。
 - 版本账本那次（#647）：桶生命周期、IAM 策略、readiness 期望的规则集都没有变，换镜像不需要重跑 `minio-bootstrap`。
 - 已经钉在已删除版本上的 126 个对象行不需要修：下一次同样字节的写入会走全新 `PutObject`，v4 把钉子移到新版本并记入账本。
-- 按桶列出全部版本那次（3.1 节）：没有迁移，但**清理 principal 的 IAM 策略变了**（多一条只匹配完整键的 `s3:ListBucketVersions`）。顺序是先重跑 `minio-bootstrap`（幂等：策略同名覆盖，用户、桶、生命周期按原值重放；在已有部署上实测返回 `OBJECT_STORAGE_PROVISIONED`），再换到含此改动的镜像。**漏了第一步的后果不只是擦除**：清理 readiness 是 understanding Worker 的硬检查（`worker.ts` 启动时的 `waitForWorkerDependencyAdmission` 和运行中的依赖心跳都查它），新镜像的这个 Worker 会以 `PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE` 停在不就绪、不 poll，understanding 队列上的全部后台工作流都停。新策略对旧镜像无影响（只多一项授权），可以提前做。回退 = 旧镜像；多出的列出授权留着无害，也可以用旧版 `bootstrap.sh` 再跑一次撤掉。
+- 按桶列出全部版本那次（3.1 节）：没有迁移，但**清理 principal 与运行时 principal 的 IAM 策略都变了**：清理 principal 多一条只匹配完整键的 `s3:ListBucketVersions`；运行时 principal 原有的 `readiness/*` 列出授权从普通 `StringLike` 改为 `ForAllValues:StringLike` 加 `"Null": {"s3:prefix": "false"}`（理由见 3.1 节）。顺序是先重跑 `minio-bootstrap`（幂等：策略同名覆盖，用户、桶、生命周期按原值重放；在已有部署上实测返回 `OBJECT_STORAGE_PROVISIONED`），再换到含此改动的镜像。**漏了第一步的后果不只是擦除**：清理 readiness 是 understanding Worker 的硬检查（`worker.ts` 启动时的 `waitForWorkerDependencyAdmission` 和运行中的依赖心跳都查它），新镜像的这个 Worker 会以 `PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE` 停在不就绪、不 poll，understanding 队列上的全部后台工作流都停。新策略对旧镜像同样无影响，可以提前做：旧镜像不用清理 principal 的列出授权；运行时 readiness 每次只带一个 `prefix`（`readiness/` 下的探针键，`generic-operation-artifact.readiness.ts`），收紧后的授权照样放行（#659 合并前的复审在一次性 MinIO 上实测）。回退 = 旧镜像，策略保留新版即可。不要用旧版 `bootstrap.sh` 再跑一次来撤掉列出授权：那样运行时 principal 的 `readiness/*` 授权也会退回普通 `StringLike`，重复 `prefix` 的绕过（见 3.1 节）对运行时凭据重新成立。
 
 ## 6. 没有采用的方案
 

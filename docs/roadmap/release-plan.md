@@ -5,7 +5,7 @@
 > 当前事实来源：[当前状态](../status/current.md) · [as-built 架构](../architecture/current.md)。
 > 2026-07-10 v2（获客合流定稿）；2026-07-27 模型候选重基线更新；2026-09-04 产品顺序与 currentness 分离更新。历史实施日志见 [changelog.md](changelog.md)。
 >
-> **2026-10-14 覆盖说明（先读）**：下方「Ordered delivery」的 MVP-0 / MVP-1 / Pilot 3-A / Site 3-B / MVP-2 顺序，以及「Concurrency and authorization boundaries」里 Pilot 3-A 的范围与上限，已被产品负责人 2026-10-10 / 2026-10-11 的决定与 PRD 4.0（L2「能力路线图与 Release 门」，目前在私有目录，入库待 PRD4-D10）的 RL1–RL6 覆盖，只作历史产品序列保留，直到 PRD 4.0 入库后本页收缩。Pilot 3-A 写的「zero model / paid / send」与「named-person collection disabled」**不再是当前约束**：RL1 的发现与评分使用真实模型调用（产品请求由 SaaS 签发的 Budget Grant 授权）；2026-10-11 产品负责人决定保留个人数据路径（具名个人邮箱与姓名、决策人、SMTP 探测、展会来源），风险自担，改为如实计数（PRD4-D16）。仍然有效的是：RL1 不做任何发送；G0–G7 的定义与下方逐项授权的边界不变。当前 Release 与执行事实只看[当前状态](../status/current.md)。
+> **2026-10-14 覆盖说明（先读）**：下方「Ordered delivery」的 MVP-0 / MVP-1 / Pilot 3-A / Site 3-B / MVP-2 顺序，以及「Concurrency and authorization boundaries」里 Pilot 3-A 的范围与上限，已被产品负责人 2026-10-10 / 2026-10-11 的决定与 PRD 4.0（L2「能力路线图与 Release 门」，目前在私有目录，入库待 PRD4-D10）的 RL1–RL6 覆盖，只作历史产品序列保留，直到 PRD 4.0 入库后本页收缩。Pilot 3-A 写的「zero model / paid / send」与「named-person collection disabled」**不再是当前约束**：RL1 的发现（含 ICP 资格门的 fit 判定）使用真实模型调用（产品请求由 SaaS 签发的 Budget Grant 授权），评分本身是确定性计算、不调用模型；2026-10-11 产品负责人决定保留个人数据路径（具名个人邮箱与姓名、决策人、SMTP 探测、展会来源），风险自担，改为如实计数（PRD4-D16）。仍然有效的是：RL1 不做任何发送；G0–G7 的定义与下方逐项授权的边界不变。当前 Release 与执行事实只看[当前状态](../status/current.md)。
 >
 > **PRD 4.0 Release 结构**（只列结构与退出指标名称；范围、门槛与时间以 PRD 4.0 为准，并行度不超过两条线）：
 >
@@ -15,7 +15,7 @@
 > - **RL4 受控触达**：用户授权的单一发送渠道。退出指标：投诉率、退信率、回复进入 Conversation。
 > - **RL5 对话与 Inbox**：回复识别 → Conversation → 商机候选。退出指标：一个渠道闭环。
 > - **RL6 内容与站点**：Site Builder 作为「被找到」的信任资产按条件复活。退出指标：客户主动要求（触发条件）。
-> - **X 减负线**（与 RL1–RL2 并行）：冻结 Site / R4、门改 lint、文档归档、缩短 CI。退出指标：每 PR 固定开销。
+> - **X 减负线**（与 RL1–RL2 并行）：冻结 Site / R4、门改 lint、文档归档、缩短 CI（Site 冻结待 PRD4-D1，门改 lint 待 PRD4-D12，归档清单待 PRD4-D11；R4 已由 PRD4-D2 冻结）。退出指标：每 PR 固定开销。
 
 ## Stable product sequence
 
