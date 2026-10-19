@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
+import { ApplicationFailure } from "@temporalio/activity";
 import {
   createDiscoveryActivities,
   ENRICH_PASS_TIME_BOX_MS,
@@ -4997,6 +4998,120 @@ describe("executeQuery —— a provider whose operation cannot be replayed ends
     await expect(
       activities.executeQuery(discoveryArgs("run-lost-other", { query: QUERY })),
     ).rejects.toBe(error);
+  });
+});
+
+describe("an unavailable model upstream makes the next activity attempt wait instead of retrying within seconds", () => {
+  // Run 097593b7 (xin, 2026-10-19 12:03 UTC): mining one domain met openox 521; the three
+  // attempts of the query fell inside 6 seconds and the run failed while openox stayed down
+  // for 28 minutes. The ledger already released each attempt's reservation (D13).
+  const http = (status: number) =>
+    new ProviderHttpError({ status, provider: "gateway", model: "deepseek-v4-pro" });
+  const miningAdapter = (discoverCompanies: () => Promise<unknown>) => ({
+    key: "public_web",
+    classes: ["public_intelligence"],
+    companyResultLineage: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+    discoverCompanies,
+  });
+
+  it("fails the query with a retryable failure that waits before the next attempt", async () => {
+    const error = http(521);
+    const activities = createDiscoveryActivities(
+      makeDeps([
+        miningAdapter(async () => {
+          throw error;
+        }),
+      ]),
+    );
+
+    const failure = await activities
+      .executeQuery(discoveryArgs("run-upstream-521", { query: QUERY }))
+      .then(() => undefined, (reason: unknown) => reason);
+
+    expect(failure).toBeInstanceOf(ApplicationFailure);
+    expect(failure).toMatchObject({
+      type: "ProviderHttpError",
+      message: error.message,
+      nonRetryable: false,
+      nextRetryDelay: "5 minutes",
+    });
+  });
+
+  it("still fails the query at once on a gateway timeout, which the upstream may have billed", async () => {
+    const error = http(504);
+    const activities = createDiscoveryActivities(
+      makeDeps([
+        miningAdapter(async () => {
+          throw error;
+        }),
+      ]),
+    );
+
+    await expect(
+      activities.executeQuery(discoveryArgs("run-upstream-504", { query: QUERY })),
+    ).rejects.toBe(error);
+  });
+
+  describe("in the fit pass", () => {
+    const FIT_COMPANY = { id: "c1", name: "c1 GmbH", domain: "c1.example", country: "DE", industry: null, status: "NEW", attributes: {} };
+    function fitActivities() {
+      const tx = {
+        $queryRaw: legacyMaterializationQueryRaw(),
+        rawSourceRecord: {
+          findMany: async () => [
+            { id: "raw-c1", providerKey: "registry", payload: { externalId: "c1", name: "c1 GmbH", domain: "c1.example", country: "DE" } },
+          ],
+        },
+        identityLink: { findMany: async () => [{ canonicalId: "c1" }] },
+        canonicalCompany: {
+          findMany: async () => [FIT_COMPANY],
+          findUnique: async () => FIT_COMPANY,
+          updateMany: async () => ({ count: 0 }),
+        },
+        suppressionRecord: { findMany: async () => [] },
+        icpDefinition: { findUnique: async () => null },
+        lead: { upsert: async () => ({}) },
+      };
+      return createDiscoveryActivities({
+        prisma: {
+          withWorkspace: async <T>(_workspaceId: string, callback: (client: typeof tx) => Promise<T>): Promise<T> =>
+            callback(tx),
+        },
+        providers: {},
+        gateway: {},
+        budgetStore: authorityBudgetStore(),
+      } as never);
+    }
+
+    beforeEach(() => {
+      fitRuntimeMocks.execute.mockReset();
+    });
+
+    it("stops the fit pass with a retryable failure that waits before the next attempt", async () => {
+      const error = http(523);
+      fitRuntimeMocks.execute.mockRejectedValueOnce(error);
+
+      const failure = await fitActivities()
+        .qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" }))
+        .then(() => undefined, (reason: unknown) => reason);
+
+      expect(failure).toBeInstanceOf(ApplicationFailure);
+      expect(failure).toMatchObject({
+        type: "ProviderHttpError",
+        message: error.message,
+        nonRetryable: false,
+        nextRetryDelay: "5 minutes",
+      });
+    });
+
+    it("still stops the fit pass at once on an upstream 4xx", async () => {
+      const error = http(401);
+      fitRuntimeMocks.execute.mockRejectedValueOnce(error);
+
+      await expect(
+        fitActivities().qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" })),
+      ).rejects.toBe(error);
+    });
   });
 });
 

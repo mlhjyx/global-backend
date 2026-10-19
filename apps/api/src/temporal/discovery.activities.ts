@@ -134,6 +134,7 @@ import {
 import { settledModelFailureReason } from '../discovery/settled-model-failure';
 import { narrowBySourceHints, planQuerySkipReason } from '../discovery/plan-query-sources';
 import type { DiscoveryRunStage } from './discovery.run-failure';
+import { withUpstreamUnavailableRetryDelay } from './upstream-unavailable-retry';
 
 export interface DiscoveryRunInput {
   workspaceId: string;
@@ -961,8 +962,9 @@ export function createDiscoveryActivities(deps: {
       for (const result of settled) {
         if (result.status === 'rejected' && isExecutionControlError(result.reason)) {
           // UNKNOWN physical-call/ACK state is a control failure: throw it and
-          // never issue another provider wire from this Activity.
-          throw result.reason;
+          // never issue another provider wire from this Activity. An unavailable model
+          // upstream makes the next attempt wait instead of retrying within seconds.
+          throw withUpstreamUnavailableRetryDelay(result.reason);
         }
         if (result.status !== 'fulfilled') continue;
         assertProductDiscoveryProvenance({ providerKey: result.value.key });
@@ -1579,7 +1581,7 @@ export function createDiscoveryActivities(deps: {
             if (lostOnReplay) unreplayable += 1;
             continue;
           }
-          throw err;
+          throw withUpstreamUnavailableRetryDelay(err);
         }
         if (!judgment) {
           // 单家判别失败不影响其余，但要计数：编排层据此判 PARTIAL / FAILED，绝不静默漏判假 DONE。
