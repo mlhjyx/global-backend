@@ -505,7 +505,10 @@ function isCodePath(path) {
   );
 }
 
-export function fragmentRequirement(changes, { changelogEditAccepted = false } = {}) {
+export function fragmentRequirement(
+  changes,
+  { changelogEditAccepted = false } = {},
+) {
   const codePaths = changes
     .filter(({ path }) => isCodePath(path))
     .map(({ path }) => path);
@@ -519,8 +522,9 @@ export function fragmentRequirement(changes, { changelogEditAccepted = false } =
   return {
     required,
     // Transition: a direct changelog edit counts only for a branch cut before
-    // the fragment rule reached main (the caller checks the merge base), so
-    // the exception ends by itself once those branches are merged.
+    // the fragment rule reached main (the caller checks where the branch
+    // leaves base), so the exception ends by itself once those branches are
+    // merged.
     satisfied:
       !required ||
       fragmentPaths.length > 0 ||
@@ -641,21 +645,55 @@ function git(root, args) {
   });
 }
 
-// A branch whose merge base already has the fragment README was cut after
-// the fragment rule reached main and must write a fragment.
-export function branchPredatesFragmentRule(root, base, head) {
-  const mergeBase = git(root, ["merge-base", base, head]);
-  if (mergeBase.status !== 0) {
+// The commits where the branch leaves base: base's commits that are parents
+// of the branch's own commits. The merge base is not enough, because merging
+// main into the branch moves it to main's tip; the point where the branch was
+// cut stays among these, whichever parent the merge lists first.
+function forkPoints(root, base, head) {
+  const result = git(root, ["rev-list", "--boundary", `${base}..${head}`]);
+  if (result.status !== 0) {
     throw new Error(
-      `cannot find the merge base of ${base} and ${head}: ${(mergeBase.stderr || mergeBase.error?.message || "").trim()}`,
+      `cannot list the commits of ${base}..${head}: ${(result.stderr || result.error?.message || "").trim()}`,
     );
   }
-  const readme = git(root, [
-    "cat-file",
-    "-e",
-    `${mergeBase.stdout.trim()}:${FRAGMENT_README}`,
+  const lines = result.stdout.split("\n").filter(Boolean);
+  const forks = lines
+    .filter((line) => line.startsWith("-"))
+    .map((line) => line.slice(1));
+  if (forks.length === 0 && lines.length > 0) {
+    throw new Error(
+      `the history of ${head} never meets ${base} (unrelated or shallow history)`,
+    );
+  }
+  return forks;
+}
+
+// ls-tree prints nothing for a missing path and fails only when it cannot read
+// the tree, so an unreadable tree is an error rather than a missing README.
+function treeHasPath(root, commit, path) {
+  const result = git(root, [
+    "ls-tree",
+    "--full-tree",
+    "--name-only",
+    commit,
+    "--",
+    path,
   ]);
-  return readme.status !== 0;
+  if (result.status !== 0) {
+    throw new Error(
+      `cannot read the tree of ${commit}: ${(result.stderr || result.error?.message || "").trim()}`,
+    );
+  }
+  return result.stdout.split("\n").includes(path);
+}
+
+// A branch was cut before the fragment rule reached main when one of the
+// points where it leaves base lacks the fragment README. A rebase moves every
+// such point past the rule, so a rebased branch must write a fragment.
+export function branchPredatesFragmentRule(root, base, head) {
+  return forkPoints(root, base, head).some(
+    (commit) => !treeHasPath(root, commit, FRAGMENT_README),
+  );
 }
 
 export function changedPaths(root, base, head) {
@@ -744,7 +782,7 @@ function runRequire({ root, base, head }) {
   }
   if (result.changelogEdited) {
     console.error(
-      `::error::This branch was cut after the fragment rule reached main, so editing ${CHANGELOG_PATH} directly no longer counts. ` +
+      `::error::This branch was cut after the fragment rule reached main, or rebased onto it since, so editing ${CHANGELOG_PATH} directly no longer counts. ` +
         `Move the entry into ${FRAGMENT_DIRECTORY}/<YYYY-MM-DD>-<slug>.md (format: ${FRAGMENT_README}).`,
     );
     return 1;

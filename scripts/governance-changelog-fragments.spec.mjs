@@ -19,6 +19,7 @@ import {
   FRAGMENT_DIRECTORY,
   FRAGMENT_README,
   assembleChangelog,
+  branchPredatesFragmentRule,
   fragmentRequirement,
   isFragmentPath,
   lifecycleExemptFragment,
@@ -364,6 +365,9 @@ test("a PR that changes apps, packages, scripts or infra needs a fragment or a c
   });
   assert.equal(newBranch.satisfied, false);
   assert.equal(newBranch.changelogEdited, true);
+  // Without the caller's word that the branch predates the rule, the edit
+  // does not count.
+  assert.equal(fragmentRequirement(changelogOnly).satisfied, false);
 });
 
 test("root files that go into the build or the runtime image need a fragment too", () => {
@@ -656,25 +660,33 @@ function runNode(script, args, root, env) {
   });
 }
 
-test("a branch cut before the fragment rule may still edit the changelog, with a warning", async () => {
-  const { root, git, write, gitEnvironment } = await fixtureRepository({
-    withRule: false,
-  });
-  try {
-    const legacyPoint = git("rev-parse", "HEAD");
-    git("checkout", "-qb", "legacy-pr", legacyPoint);
-    await write("scripts/x.mjs", "export {};\n");
-    await write(CHANGELOG_PATH, `${CHANGELOG}\n- legacy PR entry\n`);
-    git("add", "-A");
-    git("commit", "-qm", "legacy PR edits the changelog");
-    // The fragment rule reaches main after the branch point.
-    git("checkout", "-q", "main");
-    await write(FRAGMENT_README, "# Fragments\n");
-    git("add", "-A");
-    git("commit", "-qm", "fragment rule (#658)");
-    const ruleOnMain = git("rev-parse", "HEAD");
-    git("checkout", "-q", "legacy-pr");
+// main without the fragment README, a branch cut there that changes code and
+// edits the changelog, then main takes the fragment rule and one more code PR.
+async function legacyBranchFixture() {
+  const fixture = await fixtureRepository({ withRule: false });
+  const { git, write } = fixture;
+  const legacyPoint = git("rev-parse", "HEAD");
+  git("checkout", "-qb", "legacy-pr", legacyPoint);
+  await write("scripts/x.mjs", "export {};\n");
+  await write(CHANGELOG_PATH, `${CHANGELOG}\n- legacy PR entry\n`);
+  git("add", "-A");
+  git("commit", "-qm", "legacy PR edits the changelog");
+  const legacyTip = git("rev-parse", "HEAD");
+  git("checkout", "-q", "main");
+  await write(FRAGMENT_README, "# Fragments\n");
+  git("add", "-A");
+  git("commit", "-qm", "fragment rule (#658)");
+  const ruleOnMain = git("rev-parse", "HEAD");
+  await write("apps/api/src/a.ts", "export const a = 2;\n");
+  git("commit", "-qam", "later code PR (#661)");
+  const mainTip = git("rev-parse", "HEAD");
+  return { ...fixture, legacyPoint, legacyTip, ruleOnMain, mainTip };
+}
 
+test("a branch cut before the fragment rule may still edit the changelog, with a warning", async () => {
+  const { root, git, gitEnvironment, ruleOnMain } = await legacyBranchFixture();
+  try {
+    git("checkout", "-q", "legacy-pr");
     const legacy = runNode(
       LIBRARY,
       ["require", "--base", ruleOnMain, "--head", "HEAD"],
@@ -684,6 +696,106 @@ test("a branch cut before the fragment rule may still edit the changelog, with a
     assert.equal(legacy.status, 0, legacy.stdout + legacy.stderr);
     assert.match(legacy.stdout, /^::warning::.*cut before the fragment rule/m);
     assert.match(legacy.stdout, /^::warning::.*changelog\.d\//m);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a branch cut before the fragment rule keeps the exception after it merges main in, from either side", async () => {
+  const { root, git, gitEnvironment, legacyTip, mainTip } =
+    await legacyBranchFixture();
+  try {
+    // GitHub's "Update branch" and its conflict editor merge main into the
+    // PR branch: the merge base becomes main's tip, which has the README.
+    git("checkout", "-q", "legacy-pr");
+    git("merge", "-q", "--no-edit", mainTip);
+    const updated = runNode(
+      LIBRARY,
+      ["require", "--base", mainTip, "--head", "HEAD"],
+      root,
+      gitEnvironment,
+    );
+    assert.equal(updated.status, 0, updated.stdout + updated.stderr);
+    assert.match(updated.stdout, /^::warning::.*cut before the fragment rule/m);
+
+    // The same merge made from main's side puts main first among the parents.
+    git("checkout", "-qb", "merged-from-main", mainTip);
+    git("merge", "-q", "--no-edit", legacyTip);
+    const reversed = runNode(
+      LIBRARY,
+      ["require", "--base", mainTip, "--head", "HEAD"],
+      root,
+      gitEnvironment,
+    );
+    assert.equal(reversed.status, 0, reversed.stdout + reversed.stderr);
+    assert.match(
+      reversed.stdout,
+      /^::warning::.*cut before the fragment rule/m,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a branch cut before the fragment rule and then rebased onto main must write a fragment", async () => {
+  const { root, git, gitEnvironment, legacyTip, mainTip } =
+    await legacyBranchFixture();
+  try {
+    git("checkout", "-qb", "rebased-pr", legacyTip);
+    git("rebase", "-q", mainTip);
+    const rebased = runNode(
+      LIBRARY,
+      ["require", "--base", mainTip, "--head", "HEAD"],
+      root,
+      gitEnvironment,
+    );
+    assert.equal(rebased.status, 1, rebased.stdout + rebased.stderr);
+    // A rebase leaves no trace of the old cut, so the error names it.
+    assert.match(rebased.stderr, /cut after the fragment rule/);
+    assert.match(rebased.stderr, /rebased onto it/);
+    assert.match(rebased.stderr, /docs\/roadmap\/changelog\.d\//);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("the cut-before check fails closed when it cannot find or read where the branch leaves base", async () => {
+  const { root, git, write, legacyPoint, legacyTip, ruleOnMain, mainTip } =
+    await legacyBranchFixture();
+  try {
+    assert.equal(branchPredatesFragmentRule(root, mainTip, legacyTip), true);
+    git("checkout", "-qb", "late-pr", mainTip);
+    await write("scripts/y.mjs", "export {};\n");
+    git("add", "-A");
+    git("commit", "-qm", "late PR");
+    const lateTip = git("rev-parse", "HEAD");
+    assert.equal(branchPredatesFragmentRule(root, mainTip, lateTip), false);
+    // Nothing on the branch: nothing to accept.
+    assert.equal(branchPredatesFragmentRule(root, mainTip, ruleOnMain), false);
+
+    assert.throws(
+      () => branchPredatesFragmentRule(root, "no-such-ref", lateTip),
+      /cannot list the commits/,
+    );
+
+    // History that never meets base (a shallow clone looks the same).
+    git("checkout", "-q", "--orphan", "unrelated");
+    await write("scripts/z.mjs", "export {};\n");
+    git("add", "-A");
+    git("commit", "-qm", "unrelated root");
+    const unrelated = git("rev-parse", "HEAD");
+    assert.throws(
+      () => branchPredatesFragmentRule(root, mainTip, unrelated),
+      /never meets/,
+    );
+
+    // A fork point whose tree cannot be read is an error, not a legacy branch.
+    const tree = git("rev-parse", `${legacyPoint}^{tree}`);
+    await rm(join(root, ".git/objects", tree.slice(0, 2), tree.slice(2)));
+    assert.throws(
+      () => branchPredatesFragmentRule(root, mainTip, legacyTip),
+      /cannot read the tree/,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -939,6 +1051,25 @@ test("the governance workflow checks every pull request's diff for a fragment", 
     workflow,
     /^\s+run: node scripts\/governance-changelog-fragments\.mjs require --base "\$BASE_SHA" --head "\$HEAD_SHA"$/m,
   );
+  // The comment on the step must not promise that a changelog edit always
+  // counts.
+  assert.doesNotMatch(workflow, /\(or edits\s*(#\s*)?the changelog\)/);
+  assert.match(workflow, /# .*cut before the fragment rule/);
+});
+
+test("CONTRIBUTING and the fragment README describe the transition the check enforces", async () => {
+  for (const path of ["CONTRIBUTING.md", FRAGMENT_README]) {
+    const text = await readFile(join(REPOSITORY_ROOT, path), "utf8");
+    const transition = text
+      .split("\n")
+      .find((line) => /^- (\*\*)?过渡(\*\*)?：/.test(line));
+    assert.ok(transition, `${path} has a transition item`);
+    assert.match(transition, /片段规则合入 main 之前切出/, path);
+    // Merging main in keeps the exception; a rebase loses it.
+    assert.match(transition, /merge/, path);
+    assert.match(transition, /rebase/, path);
+    assert.doesNotMatch(transition, /不看 PR 何时开/, path);
+  }
 });
 
 test("the merge runbook says who assembles the fragments, when, and how to roll back", async () => {
@@ -1055,4 +1186,7 @@ test("the docs-verification governance page records the fragment checks and thei
   for (const field of ["风险", "Owner", "关闭条件", "successor"]) {
     assert.ok(transitionRow.includes(field), `${field} in ${transitionRow}`);
   }
+  // The closing condition names the check someone can run.
+  assert.match(transitionRow, /gh pr list --state open/);
+  assert.match(transitionRow, /cut before the fragment rule/);
 });
