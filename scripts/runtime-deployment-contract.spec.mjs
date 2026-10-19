@@ -176,30 +176,66 @@ function expectPolicyMapping(policy, action, prefix, privacyClass) {
   assert.match(statement, new RegExp(`"s3:RequestObjectTag/artifact-privacy": "${privacyClass}"`));
 }
 
-// The IAM policies bootstrap.sh writes, parsed: the heredoc between
-// `cat > "$<name>" <<EOF` and `EOF`, with the bucket variable substituted.
+// The IAM policies bootstrap.sh writes, parsed. Every `mc admin policy create`
+// must load a "$<var>" file written by exactly one `cat > "$<var>" <<EOF`
+// heredoc, and the file holds no other heredoc, so a policy written any other
+// way fails here instead of escaping the checks below. The heredoc is unquoted,
+// so the shell expands it: the body may hold no expansion besides the bucket.
 function bootstrapPolicies(bootstrap) {
+  const heredocs = [...bootstrap.matchAll(/cat > "\$(\w+)" <<EOF\n([\s\S]*?)\nEOF/gu)];
+  assert.equal(bootstrap.split('<<').length - 1, heredocs.length, 'every heredoc in bootstrap.sh is a policy heredoc');
+  const created = [...bootstrap.matchAll(/^mc admin policy create \S+ \S+ (.+)$/gmu)].map((match) => match[1]);
+  const createdVars = created.map((argument) => argument.match(/^"\$(\w+)"$/u)?.[1]);
+  assert.ok(createdVars.every(Boolean), `every policy file is a "$<var>" argument: ${created.join(', ')}`);
+  const names = heredocs.map((match) => match[1]);
+  assert.equal(new Set(names).size, names.length, 'each policy variable is written once');
+  assert.deepEqual([...createdVars].sort(), [...names].sort(), 'the created policies are exactly the parsed heredocs');
   const policies = {};
-  for (const match of bootstrap.matchAll(/cat > "\$(\w+)" <<EOF\n([\s\S]*?)\nEOF/gu)) {
-    policies[match[1]] = JSON.parse(match[2].replaceAll('$GENERIC_OPERATION_ARTIFACT_S3_BUCKET', 'bucket'));
+  for (const [, name, body] of heredocs) {
+    const rendered = body.replaceAll('$GENERIC_OPERATION_ARTIFACT_S3_BUCKET', 'bucket');
+    assert.doesNotMatch(rendered, /[$`\\]/u, `${name} holds no shell expansion besides the bucket`);
+    try {
+      policies[name] = JSON.parse(rendered);
+    } catch (error) {
+      throw new Error(`${name} is not valid JSON: ${error.message}`);
+    }
   }
   return policies;
 }
 
+// Actions that accept the s3:prefix condition key in MinIO (IAMActionConditionKeyMap).
+const PREFIX_ACTIONS = ['s3:ListBucket', 's3:ListBucketVersions'];
 const PREFIX_OPERATORS = new Set(['ForAllValues:StringLike', 'Null']);
 
-// Every rule the s3:prefix conditions must keep, as a list of violations.
-// Whitelist, not blacklist: MinIO lets an unqualified operator (StringLike,
-// StringEquals, StringNotLike) or ForAnyValue pass when ANY value of a
-// repeated prefix parameter matches, while ListObjectVersions lists by the
-// first value, so only ForAllValues:StringLike with a Null=false guard is safe.
+// MinIO matches Action with * and ? wildcards, so "*", "s3:*" or "s3:L*" grant listing too.
+function grantsListing(actions) {
+  return actions.some((action) => {
+    const escaped = action.replace(/[.+^${}()|[\]\\]/gu, '\\$&').replaceAll('*', '.*').replaceAll('?', '.');
+    const pattern = new RegExp(`^${escaped}$`, 'u');
+    return PREFIX_ACTIONS.some((listAction) => pattern.test(listAction));
+  });
+}
+
+// Every rule the policies must keep, as a list of violations. MinIO lets an
+// unqualified operator (StringLike, StringEquals, StringNotLike) or ForAnyValue
+// pass when ANY value of a repeated prefix parameter matches, while
+// ListObjectVersions lists by the first value. ForAllValues:StringLike and
+// ForAllValues:StringEquals with Null=false are both safe; this contract admits
+// only the shape bootstrap.sh uses (Allow, Action, Resource; one
+// ForAllValues:StringLike pattern; Null "false") and fails closed on the rest.
 function prefixConditionViolations(policies) {
   const violations = [];
   for (const [name, policy] of Object.entries(policies)) {
     for (const [index, statement] of policy.Statement.entries()) {
       const where = `${name} statement ${index}`;
-      const actions = [statement.Action].flat();
-      const lists = actions.some((action) => action.startsWith('s3:List'));
+      const shape = Object.keys(statement).filter((key) => !['Effect', 'Action', 'Resource', 'Condition'].includes(key));
+      if (statement.Effect !== 'Allow' || statement.Action === undefined || shape.length > 0) {
+        violations.push(
+          `${where}: unsupported statement shape (Effect ${statement.Effect}, ${statement.Action === undefined ? 'no Action' : 'Action'}, extra keys: ${shape.join(', ') || 'none'})`,
+        );
+        continue;
+      }
+      const lists = grantsListing([statement.Action].flat());
       const condition = statement.Condition ?? {};
       let namesPrefix = false;
       for (const [operator, keys] of Object.entries(condition)) {
@@ -208,11 +244,11 @@ function prefixConditionViolations(policies) {
         if (!PREFIX_OPERATORS.has(operator)) violations.push(`${where}: s3:prefix under ${operator}`);
         if (operator === 'Null' && keys['s3:prefix'] !== 'false') violations.push(`${where}: Null s3:prefix is not "false"`);
       }
-      if (lists && statement.Effect === 'Allow') {
+      if (lists) {
         if (typeof condition['ForAllValues:StringLike']?.['s3:prefix'] !== 'string') {
-          violations.push(`${where}: list grant without ForAllValues:StringLike s3:prefix`);
+          violations.push(`${where}: list grant needs one ForAllValues:StringLike s3:prefix pattern`);
         }
-        if (condition.Null?.['s3:prefix'] !== 'false') violations.push(`${where}: list grant without Null s3:prefix "false"`);
+        if (condition.Null?.['s3:prefix'] !== 'false') violations.push(`${where}: list grant needs Null s3:prefix "false"`);
       }
       if (namesPrefix && !lists) violations.push(`${where}: s3:prefix on a statement that lists nothing`);
     }
@@ -224,29 +260,70 @@ test('MinIO policies name s3:prefix only under ForAllValues:StringLike with a Nu
   const policies = bootstrapPolicies(await repositoryFile('infra/minio/bootstrap.sh'));
   assert.deepEqual(Object.keys(policies).sort(), ['cleanup_policy', 'personal_policy', 'runtime_policy']);
   assert.deepEqual(prefixConditionViolations(policies), []);
-  const listGrants = (name) =>
-    policies[name].Statement.filter((statement) => [statement.Action].flat().some((action) => action.startsWith('s3:List')));
+  const listGrants = (name) => policies[name].Statement.filter((statement) => grantsListing([statement.Action].flat()));
   assert.equal(listGrants('runtime_policy').length, 1);
   assert.equal(listGrants('cleanup_policy').length, 1);
   assert.equal(listGrants('personal_policy').length, 0);
   assert.doesNotMatch(JSON.stringify(policies.personal_policy), /s3:prefix/u);
 });
 
-test('the s3:prefix whitelist rejects every other operator, a missing guard and a stray prefix', () => {
-  const grant = (condition, action = 's3:ListBucketVersions') => ({
-    policy: { Statement: [{ Effect: 'Allow', Action: [action], Resource: ['arn:aws:s3:::bucket'], Condition: condition }] },
+test('the s3:prefix whitelist reports exactly what is wrong with each statement', () => {
+  const at = 'p statement 0';
+  const check = (statement) => prefixConditionViolations({ p: { Statement: [statement] } });
+  const grant = (condition, Action = ['s3:ListBucketVersions']) => ({
+    Effect: 'Allow',
+    Action,
+    Resource: ['arn:aws:s3:::bucket'],
+    ...(condition ? { Condition: condition } : {}),
   });
   const safe = { 'ForAllValues:StringLike': { 's3:prefix': 'readiness/*' }, Null: { 's3:prefix': 'false' } };
-  assert.deepEqual(prefixConditionViolations(grant(safe)), []);
+  const needsPattern = `${at}: list grant needs one ForAllValues:StringLike s3:prefix pattern`;
+  const needsNull = `${at}: list grant needs Null s3:prefix "false"`;
+
+  assert.deepEqual(check(grant(safe)), []);
   for (const operator of ['StringLike', 'StringEquals', 'StringNotLike', 'ForAnyValue:StringLike', 'ForAllValues:StringEquals']) {
-    const { 'ForAllValues:StringLike': _allowed, ...rest } = safe;
-    const violations = prefixConditionViolations(grant({ ...rest, [operator]: { 's3:prefix': 'readiness/*' } }));
-    assert.ok(violations.some((line) => line.includes(`under ${operator}`)), operator);
+    assert.deepEqual(
+      check(grant({ [operator]: { 's3:prefix': 'readiness/*' }, Null: { 's3:prefix': 'false' } })),
+      [`${at}: s3:prefix under ${operator}`, needsPattern],
+      operator,
+    );
   }
-  assert.ok(prefixConditionViolations(grant({ 'ForAllValues:StringLike': { 's3:prefix': 'readiness/*' } })).length > 0);
-  assert.ok(prefixConditionViolations(grant({ ...safe, Null: { 's3:prefix': 'true' } })).length > 0);
-  assert.ok(prefixConditionViolations(grant(undefined)).length > 0);
-  assert.ok(prefixConditionViolations(grant(safe, 's3:GetObject')).some((line) => line.includes('lists nothing')));
+  assert.deepEqual(check(grant({ Null: { 's3:prefix': 'false' } })), [needsPattern]);
+  assert.deepEqual(check(grant({ 'ForAllValues:StringLike': { 's3:prefix': 'readiness/*' } })), [needsNull]);
+  assert.deepEqual(check(grant({ ...safe, Null: { 's3:prefix': 'true' } })), [`${at}: Null s3:prefix is not "false"`, needsNull]);
+  assert.deepEqual(check(grant({ ...safe, 'ForAllValues:StringLike': { 's3:prefix': ['a/*', 'b/*'] } })), [needsPattern]);
+  // Wildcards grant listing in MinIO, so an unconditioned one is a list grant without its guards.
+  for (const Action of [['s3:*'], '*', ['s3:L*'], ['s3:*Versions'], ['s3:ListBucket'], ['s3:GetObject', 's3:List*']]) {
+    assert.deepEqual(check(grant(undefined, Action)), [needsPattern, needsNull], JSON.stringify(Action));
+  }
+  // Listing actions that cannot carry s3:prefix are not list grants here.
+  assert.deepEqual(check(grant(undefined, ['s3:ListBucketMultipartUploads', 's3:ListMultipartUploadParts'])), []);
+  assert.deepEqual(check(grant({ 'ForAllValues:StringLike': { 's3:prefix': 'x/*' } }, ['s3:GetObject'])), [
+    `${at}: s3:prefix on a statement that lists nothing`,
+  ]);
+  assert.deepEqual(check({ ...grant(safe), Effect: 'Deny' }), [
+    `${at}: unsupported statement shape (Effect Deny, Action, extra keys: none)`,
+  ]);
+  const { Action: _action, ...withoutAction } = grant(undefined);
+  assert.deepEqual(check({ ...withoutAction, NotAction: ['s3:GetObject'] }), [
+    `${at}: unsupported statement shape (Effect Allow, no Action, extra keys: NotAction)`,
+  ]);
+});
+
+test('bootstrapPolicies fails closed on a policy written outside the parsed heredocs', () => {
+  const policy = (name) => `cat > "$${name}" <<EOF\n{"Statement": []}\nEOF\n`;
+  const create = (name) => `mc admin policy create deployment ${name} "$${name}"\n`;
+  assert.deepEqual(Object.keys(bootstrapPolicies(policy('a') + create('a'))), ['a']);
+  for (const [label, script] of [
+    ['quoted heredoc', `${policy('a')}cat > "$b" <<'EOF'\n{"Statement": []}\nEOF\n${create('a')}${create('b')}`],
+    ['printf file', `${policy('a')}printf '{}' > "$b"\n${create('a')}${create('b')}`],
+    ['literal path', `${policy('a')}${create('a')}mc admin policy create deployment b /config/b.json\n`],
+    ['written twice', `${policy('a')}${policy('a')}${create('a')}`],
+    ['shell expansion', `cat > "$a" <<EOF\n{"Statement": ["$OTHER"]}\nEOF\n${create('a')}`],
+    ['escape', `cat > "$a" <<EOF\n{"Statement": ["s3:\\\\u004c"]}\nEOF\n${create('a')}`],
+  ]) {
+    assert.throws(() => bootstrapPolicies(script), undefined, label);
+  }
 });
 
 test('MinIO bootstrap rejects merged principals before the first mc mutation', async () => {
