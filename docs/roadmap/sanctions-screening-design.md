@@ -2,7 +2,7 @@
 
 > **后续实施状态（2026-07-16）**：本文设计已由 PR #104（merge `44e68ed`）落地，功能保持默认 `DISABLED`。下文“设计待认可 / 未动代码”是立项时快照，只作实施 provenance；当前状态以代码与 [../status/current.md](../status/current.md) 为准。
 >
-> **2026-10-19（#665）**：qualify 的队列与 `decide`、周报导出共用 `storedScreeningBlocks`（库里的命中未被人工清白就拦）。这次 live 筛查无命中（含索引未生效的 `not_screened`）而库里有未清白命中时，lead 进 `sanctions_hold`，由人在复核端点清白；命中只由人关闭，qualify 不改写筛查记录。此前队列只看 live 筛查，命中消失后 lead 停在推荐队列，accept 却照拦。
+> **2026-10-19（#665）**：qualify 的队列与 `decide`、周报导出共用 `storedScreeningBlocks`（库里的命中未被人工清白就拦）。这次 live 筛查无命中（含索引未生效的 `not_screened`）而库里有未清白命中时，lead 进 `sanctions_hold`：open 的由人在复核端点清白，confirmed_true_hit 不能经端点清白、一直隔离；命中只由人关闭，qualify 不改写筛查记录。此前队列只看 live 筛查，命中消失后 lead 停在推荐队列，accept 却照拦。
 >
 > 生命周期：`CLOSED`
 > 状态说明：**设计待认可**（2026-07-14）。四项方向已拍板（AskUserQuestion）：**① Phase 1 仅公司/实体**；**② 名单集=OFAC(SDN+Consolidated)+EU FSF**；**③ 命中处置=第 5 队列 `sanctions_hold` + 审计件 + `decide(accept)` 硬拦**；**④ 复筛=qualify+decide 筛 + 名单每日刷新**（存量 delta 复筛=Phase 1.5）；**⑤ 上线=种子 DISABLED，真测绿后 ops 翻 ENABLED**。

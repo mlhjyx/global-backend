@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createQualifyActivities } from './qualify.activities';
+import type { ScreenResult } from '../sanctions/sanctions-screening.service';
+import {
+  MATCH_E1,
+  SANCTIONS_GATE_CASES,
+  liveScreen,
+  storedScreening,
+} from '../sanctions/sanctions-gate.test-fixture';
 
 /**
  * scoreCandidates 读公司级联系路径（BI-14 company_contact_point，#630）进可达性（评分规则 v3）。
@@ -22,8 +29,12 @@ function fixture(options: {
   screen?: { status: 'clear' | 'potential_match' | 'not_screened'; matches?: unknown[] };
   /** 库里的筛查记录；假 findMany 按 where 里的公司与 status 过滤。 */
   storedHits?: Array<{ canonicalCompanyId: string; status: string; reviewState: string }>;
-  /** 同一批里的其他公司（与主公司同形，只换 id）。 */
-  extraCompanyIds?: string[];
+  /** 同一批里的其他公司（与主公司同形，可换 id、名称、国家）。 */
+  extraCompanies?: Array<{ id: string; name?: string; country?: string }>;
+  /** 按公司名与国家给出筛查结果；给了它就不看 screen。 */
+  screenImpl?: (name: string, country: string | null) => ScreenResult;
+  /** 命中路径 reconcile 读到的库里记录（findFirst 的返回）。 */
+  prior?: { status: string; reviewState: string; matches: unknown } | null;
 } = {}) {
   const company = {
     id: COMPANY_ID,
@@ -41,7 +52,7 @@ function fixture(options: {
   };
   const findMany = vi.fn(async (_args: FindManyArgs) => [
     company,
-    ...(options.extraCompanyIds ?? []).map((id) => ({ ...company, id })),
+    ...(options.extraCompanies ?? []).map((extra) => ({ ...company, ...extra })),
   ]);
   const leadUpsert = vi.fn(async () => ({}));
   const suppressionFindMany = vi.fn(async () => options.suppressions ?? []);
@@ -63,7 +74,7 @@ function fixture(options: {
       upsert: leadUpsert,
     },
     sanctionsScreeningResult: {
-      findFirst: vi.fn(async () => null),
+      findFirst: vi.fn(async () => options.prior ?? null),
       upsert: vi.fn(async () => ({})),
       findMany: vi.fn(async (args: { where: { canonicalCompanyId: { in: string[] }; status: string } }) =>
         (options.storedHits ?? []).filter(
@@ -74,16 +85,18 @@ function fixture(options: {
     },
     outboxEvent: { create: vi.fn(async () => ({})) },
   };
-  const sanctionsScreening = options.screen
-    ? {
-        rebuildIndex: vi.fn(async () => undefined),
-        screen: vi.fn(() => ({
-          status: options.screen!.status,
-          matches: options.screen!.matches ?? [],
-          listVersions: options.screen!.status === 'not_screened' ? {} : LIST_VERSIONS,
-        })),
-      }
-    : undefined;
+  const sanctionsScreening = options.screenImpl
+    ? { rebuildIndex: vi.fn(async () => undefined), screen: vi.fn(options.screenImpl) }
+    : options.screen
+      ? {
+          rebuildIndex: vi.fn(async () => undefined),
+          screen: vi.fn(() => ({
+            status: options.screen!.status,
+            matches: options.screen!.matches ?? [],
+            listVersions: options.screen!.status === 'not_screened' ? {} : LIST_VERSIONS,
+          })),
+        }
+      : undefined;
   const activities = createQualifyActivities({
     prisma: {
       withWorkspace: async <T>(_workspaceId: string, callback: (client: typeof tx) => Promise<T>): Promise<T> =>
@@ -98,7 +111,15 @@ function fixture(options: {
     };
     return call.update;
   };
-  return { activities, findMany, leadUpsert, suppressionFindMany, upserted, screening: tx.sanctionsScreeningResult };
+  return {
+    activities,
+    findMany,
+    leadUpsert,
+    suppressionFindMany,
+    upserted,
+    screening: tx.sanctionsScreeningResult,
+    sanctionsScreening,
+  };
 }
 
 const LIST_VERSIONS = { ofac_sdn: '2026-10-19', eu_fsf: '2026-10-19' };
@@ -272,7 +293,7 @@ describe('scoreCandidates — 库里未清白的制裁命中让 lead 进 sanctio
     const f = fixture({
       points: CONTACT_PAGE,
       screen: { status: 'clear' },
-      extraCompanyIds: [OTHER_ID],
+      extraCompanies: [{ id: OTHER_ID }],
       storedHits: [{ canonicalCompanyId: OTHER_ID, status: 'potential_match', reviewState: 'open' }],
     });
 
@@ -307,5 +328,56 @@ describe('scoreCandidates — 库里未清白的制裁命中让 lead 进 sanctio
     expect(f.screening.findMany).not.toHaveBeenCalled();
     expect(f.screening.upsert).toHaveBeenCalledTimes(1);
     expect(f.upserted().queue).toBe('sanctions_hold');
+  });
+});
+
+describe('scoreCandidates — 第五门与 accept、导出同一张真值表（#665）', () => {
+  it.each(SANCTIONS_GATE_CASES)('live=$live × 库里=$stored → sanctions_hold=$blocks', async ({ live, stored, blocks }) => {
+    const row = storedScreening(stored);
+    const f = fixture({
+      points: CONTACT_PAGE,
+      screenImpl: () => liveScreen(live),
+      prior: row,
+      storedHits: row ? [{ canonicalCompanyId: COMPANY_ID, status: row.status, reviewState: row.reviewState }] : [],
+    });
+
+    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
+
+    expect(f.upserted().queue === 'sanctions_hold').toBe(blocks);
+    // live 无命中的路径绝不写筛查记录；命中路径照旧 upsert。
+    if (live === 'clear' || live === 'not_screened') expect(f.screening.upsert).not.toHaveBeenCalled();
+    else expect(f.screening.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('一批多家：每家用自己的名称与国家筛查，结果不串到别家', async () => {
+    const OTHER = '30000000-0000-4000-8000-000000000098';
+    const f = fixture({
+      points: CONTACT_PAGE,
+      extraCompanies: [{ id: OTHER, name: 'Ventil Werk GmbH', country: 'AT' }],
+      screenImpl: (name) =>
+        name === 'Pumpen Handel GmbH'
+          ? { status: 'potential_match', matches: [MATCH_E1], listVersions: { ofac_sdn: '2026-10-19' } }
+          : { status: 'clear', matches: [], listVersions: { ofac_sdn: '2026-10-19' } },
+      storedHits: [],
+    });
+
+    await expect(f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP })).resolves.toMatchObject({
+      scored: 2,
+      queues: { recommended: 1, sanctions_hold: 1 },
+    });
+
+    expect(f.sanctionsScreening!.screen).toHaveBeenCalledWith('Pumpen Handel GmbH', 'DE');
+    expect(f.sanctionsScreening!.screen).toHaveBeenCalledWith('Ventil Werk GmbH', 'AT');
+    const calls = f.leadUpsert.mock.calls as unknown as Array<
+      [{ where: { workspaceId_icpId_canonicalCompanyId: { canonicalCompanyId: string } }; update: { queue: string } }]
+    >;
+    const queueOf = (id: string) =>
+      calls.find(([call]) => call.where.workspaceId_icpId_canonicalCompanyId.canonicalCompanyId === id)![0].update.queue;
+    expect(queueOf(COMPANY_ID)).toBe('sanctions_hold');
+    expect(queueOf(OTHER)).toBe('recommended');
+    // 只为这次无命中的那家读库存命中。
+    expect(f.screening.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ canonicalCompanyId: { in: [OTHER] } }) }),
+    );
   });
 });

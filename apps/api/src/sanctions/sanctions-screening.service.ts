@@ -14,7 +14,7 @@ import {
  * 制裁筛查服务（Qualify 第五门的匹配引擎）。进程内内存索引（从 sanctions_entity 建，init + 刷新后重建），
  * 对公司名召回优先匹配。平台参考表无 RLS、app_user 只读（GRANT SELECT），故直接 this.prisma 读、不需租户上下文。
  *
- * 🔴 fail-open 诚实姿势（设计决策④）：无 ENABLED 源 / 空索引 → `screen()` 返 `not_screened`（快照如实标、门不拦，
+ * 🔴 fail-open 诚实姿势（设计决策⑤：种子 DISABLED，未启用时门不拦）：无 ENABLED 源 / 空索引 → `screen()` 返 `not_screened`（快照如实标、门不拦，
  *    不断管线）；ops 翻 ENABLED + 真测绿后才生效为硬门。索引构建失败亦 active=false（不阻断 qualify）。
  *    例外：库里已有、未被人工清白的命中照拦（`storedScreeningBlocks`，accept、导出与 qualify 队列共用）。
  */

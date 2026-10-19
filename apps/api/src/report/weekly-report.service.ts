@@ -123,7 +123,7 @@ function deliveredInWeek(lead: ReportLead, range: IsoWeekRange): DeliveredLead |
  * person cleared it as a false positive, and a live hit blocks unless every match was already
  * cleared. Not screened when the gate is off and nothing was ever recorded.
  */
-function sanctionsDelivery(
+export function sanctionsDelivery(
   prior: PriorScreening | undefined,
   live: ScreenResult,
 ): { blocking: true } | { blocking: false; status: WeeklyReportSanctionsStatus } {
