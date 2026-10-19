@@ -38,9 +38,10 @@ jobs:
         run: pnpm governance:verify
 
       # A PR that changes apps/, packages/, scripts/, infra/ or a root build or
-      # runtime file adds a fragment under docs/roadmap/changelog.d/ (or edits
-      # the changelog). Runs even when the step above failed, so one CI round
-      # reports both.
+      # runtime file adds a fragment under docs/roadmap/changelog.d/. Only a
+      # branch cut before the fragment rule reached main may edit the
+      # changelog instead. Runs even when the step above failed, so one CI
+      # round reports both.
       - name: Changelog fragment for code changes
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         env:

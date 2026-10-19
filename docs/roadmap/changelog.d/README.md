@@ -7,9 +7,10 @@
 
 ## 什么时候必须写
 
-PR 改了 `apps/`、`packages/`、`scripts/`、`infra/` 下任一路径，或根目录的构建与运行时文件（`Dockerfile`、`.dockerignore`、`runtime-entrypoint.mjs`、`docker-compose.yml`、`package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、`tsconfig.base.json`、`nx.json`、`eslint.config.mjs`，即脚本里的 `CODE_ROOT_FILES`）时，必须新增（或修改）一个片段。governance 工作流（`governance · traceability · release`，必需检查）按 PR 的 diff（合并基点到 PR head）判断，缺了就失败。纯文档、`.github/` 等改动不强制，但写了也欢迎。
+PR 改了 `apps/`、`packages/`、`scripts/`、`infra/` 下任一路径，或根目录的构建与运行时文件（`Dockerfile`、`.dockerignore`、`runtime-entrypoint.mjs`、`docker-compose.yml`、`package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、`tsconfig.base.json`、`nx.json`、`eslint.config.mjs`，即脚本里的 `CODE_ROOT_FILES`）时，必须新增（或修改）一个片段。governance 工作流（`governance · traceability · release`，必需检查）按 PR 的 diff（合并基点到 PR head）判断，缺了就失败。纯文档、`.github/` 等改动不强制，但写了也欢迎。注意按路径判断：`apps/`、`packages/` 下的 Markdown（如 `packages/contracts/INTEGRATION.md`）也算代码路径，改了就要片段。
 
-- **过渡**：直接改 `changelog.md`、不加片段的 PR 检查照样放行（只出一条 warning），规则生效前开的 PR 不必返工；新 PR 一律写片段。放行不看 PR 何时开，所以照旧写法的新 PR 也会通过，直到仓外的 `/global/CLAUDE.md` §7 与派活脚本改成写片段、再删掉这条放行（登记在 [文档校验治理页](../../governance/docs-verification.md#4-当前显式例外) §4）。
+- **过渡**：只有**在片段规则合入 main 之前切出的分支**（它离开 main 的分叉点里还没有本 README）改了代码时，直接改 `changelog.md`、不加片段才放行（附一条 warning），不必返工。这类分支并入 main 要用 merge（GitHub 网页的 Update branch 或解冲突、`git merge origin/main`）：分叉点还在，放行保留；rebase 会把分叉点挪到新 main，之后只能写片段。之后切出的分支改了代码、没有片段而只改 `changelog.md` 会失败，报错提示把条目挪进片段。判断只看分叉点、不看日期，结果可复现，这些旧分支合完后例外自然结束（登记在 [文档校验治理页](../../governance/docs-verification.md#4-当前显式例外) §4）。
+- **检查不禁止改 `changelog.md`**：它只管代码 PR 有没有片段。纯文档 PR、已有片段又顺手改了 `changelog.md` 的 PR 照样通过，但仍会和别的 PR 在 changelog 上冲突，所以除汇编 PR 外都不要改它。
 - **Dependabot 安全更新 PR** 改到 `apps/` 或 `packages/` 下的 `package.json` 时同样会缺片段。开发代理给它补 Copy 重签的那次提交里一并加上片段。
 
 ## 文件名与格式
