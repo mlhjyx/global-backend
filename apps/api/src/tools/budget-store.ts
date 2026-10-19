@@ -12,6 +12,7 @@ import {
   isExecutionBudgetUuid,
   isTrustedExecutionBudgetDatabaseMarker,
   mapExecutionBudgetPersistenceError,
+  trustedExecutionBudgetGrantError,
 } from '../execution-budget/execution-budget-authority.repository';
 import {
   parseGenericOperationProjection,
@@ -884,6 +885,11 @@ export class PostgresBudgetStore implements BudgetStore {
       if (isAuthorityLifecycleUnavailable(error)) {
         throw authorityLifecycleUnavailable();
       }
+      // reserve_tool_budget attests the authority itself: an expired lease, a
+      // revocation or a scope mismatch arrives here as the same trusted marker
+      // attestAuthorized maps, and must leave as the same contract error.
+      const grantError = trustedExecutionBudgetGrantError(error);
+      if (grantError) throw grantError;
       if (isBudgetAccountUnavailable(error)) throw new BudgetAccountUnavailableError(input.accountKey);
       throw error;
     }

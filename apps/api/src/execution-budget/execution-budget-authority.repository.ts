@@ -164,10 +164,23 @@ function unavailable(): ExecutionBudgetGrantError {
  */
 export function mapExecutionBudgetPersistenceError(error: unknown): Error {
   if (error instanceof ExecutionBudgetGrantError) return error;
+  return trustedExecutionBudgetGrantError(error) ?? unavailable();
+}
+
+/**
+ * The authority-contract error for an exact trusted database marker
+ * (P2010, SQLSTATE P0001, message `ERROR: <code>`), or undefined for anything
+ * else. Unlike mapExecutionBudgetPersistenceError it does not turn other
+ * failures into VERIFICATION_UNAVAILABLE, so a caller can keep a genuine
+ * database error (deadlock, timeout, invariant) as it is.
+ */
+export function trustedExecutionBudgetGrantError(
+  error: unknown,
+): ExecutionBudgetGrantError | undefined {
   const code = DATABASE_ERROR_CODES.find((candidate) =>
     isTrustedExecutionBudgetDatabaseMarker(error, candidate),
   );
-  return code ? new ExecutionBudgetGrantError(code) : unavailable();
+  return code ? new ExecutionBudgetGrantError(code) : undefined;
 }
 
 export function isExecutionBudgetUuid(value: unknown): value is string {

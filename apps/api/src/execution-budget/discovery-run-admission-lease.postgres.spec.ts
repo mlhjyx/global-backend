@@ -6,7 +6,6 @@ import { BudgetExceededError, PostgresBudgetStore } from '../tools/budget-store'
 import {
   ExecutionBudgetAuthorityRepository,
   isTrustedExecutionBudgetDatabaseMarker,
-  mapExecutionBudgetPersistenceError,
 } from './execution-budget-authority.repository';
 import { ExecutionBudgetAuthorityService } from './execution-budget-authority.service';
 import type { VerifiedExecutionBudgetAuthority } from './execution-budget-authority.types';
@@ -391,18 +390,15 @@ describe('workspace admission lease on PostgreSQL as the RLS-bound app principal
           accountKey: binding.accountKey,
         }),
       ).rejects.toMatchObject({ name: 'ExecutionBudgetGrantError', code: 'EXECUTION_BUDGET_GRANT_EXPIRED' });
-      const reserveError = await errorOf(
+      // reserve_tool_budget attests too; the store maps its marker to the same contract error.
+      await expect(
         store.reserve({
           workspaceId,
           accountKey: binding.accountKey,
           operationKey: `lease-op-${randomUUID()}`,
           estimatedMicrousd: 0n,
         }),
-      );
-      expect(isTrustedExecutionBudgetDatabaseMarker(reserveError, 'EXECUTION_BUDGET_GRANT_EXPIRED')).toBe(true);
-      expect(mapExecutionBudgetPersistenceError(reserveError)).toMatchObject({
-        code: 'EXECUTION_BUDGET_GRANT_EXPIRED',
-      });
+      ).rejects.toMatchObject({ name: 'ExecutionBudgetGrantError', code: 'EXECUTION_BUDGET_GRANT_EXPIRED' });
     },
     TIMEOUT,
   );
@@ -423,6 +419,14 @@ describe('workspace admission lease on PostgreSQL as the RLS-bound app principal
 
       await repository.revoke({ scopeKey: workspaceId, authorityId: revoked!.authorityId, reason: 'operator stop' });
       expect(await attestOutcome(revoked!)).toBe('EXECUTION_BUDGET_AUTHORITY_REVOKED');
+      await expect(
+        store.reserve({
+          workspaceId,
+          accountKey: revoked!.accountKey,
+          operationKey: `lease-op-${randomUUID()}`,
+          estimatedMicrousd: 0n,
+        }),
+      ).rejects.toMatchObject({ name: 'ExecutionBudgetGrantError', code: 'EXECUTION_BUDGET_AUTHORITY_REVOKED' });
 
       await expect(
         store.reserve({
@@ -592,20 +596,15 @@ describe('workspace admission lease on PostgreSQL as the RLS-bound app principal
           }),
           name,
         ).rejects.toMatchObject({ name: 'ExecutionBudgetGrantError', code: 'EXECUTION_BUDGET_GRANT_EXPIRED' });
-        const reserveError = await errorOf(
+        await expect(
           store.reserve({
             workspaceId,
             accountKey: binding.accountKey,
             operationKey: `lease-op-${randomUUID()}`,
             estimatedMicrousd: 0n,
           }),
-        );
-        expect(isTrustedExecutionBudgetDatabaseMarker(reserveError, 'EXECUTION_BUDGET_GRANT_EXPIRED'), name).toBe(
-          true,
-        );
-        expect(mapExecutionBudgetPersistenceError(reserveError), name).toMatchObject({
-          code: 'EXECUTION_BUDGET_GRANT_EXPIRED',
-        });
+          name,
+        ).rejects.toMatchObject({ name: 'ExecutionBudgetGrantError', code: 'EXECUTION_BUDGET_GRANT_EXPIRED' });
       }
     },
     TIMEOUT,
