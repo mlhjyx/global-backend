@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ApplicationFailure } from '@temporalio/activity';
+import { ApplicationFailure, Context } from '@temporalio/activity';
 import {
   ActivityFailure,
   DefaultFailureConverter,
@@ -8,7 +8,7 @@ import {
   ensureApplicationFailure,
 } from '@temporalio/common';
 import { temporal } from '@temporalio/proto';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { failureConverter } from './diagnostic-failure-converter';
 import { describeDiscoveryRunFailure } from './discovery.run-failure';
 import { ExecutionControlError } from '../execution-budget/execution-control-error';
@@ -30,6 +30,7 @@ const http = (status: number) =>
   new ProviderHttpError({ status, provider: 'gateway', model: 'deepseek-v4-pro' });
 const notConnected = () =>
   new TypeError('fetch failed', { cause: Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }) });
+const FIRST_OF_THREE = { attempt: 1, maximumAttempts: 3 };
 
 // Discovery run admission lease (ADR-024, 2026-10-09): admission + 3 hours.
 const DISCOVERY_ADMISSION_LEASE_MS = 3 * 60 * 60_000;
@@ -47,21 +48,25 @@ describe('withUpstreamUnavailableRetryDelay', () => {
     ['HTTP 523', http(523)],
     ['a connection that was never established', notConnected()],
   ])('turns %s into a retryable failure that waits before the next attempt', (_label, error) => {
-    const failure = withUpstreamUnavailableRetryDelay(error, 1);
+    const failure = withUpstreamUnavailableRetryDelay(error, FIRST_OF_THREE);
 
     expect(failure).toBeInstanceOf(ApplicationFailure);
     expect(failure).toMatchObject({
       type: error.name,
       message: error.message,
       nonRetryable: false,
-      nextRetryDelay: upstreamUnavailableRetryDelay(1),
+      nextRetryDelay: '5 minutes',
     });
   });
 
-  it('waits 5 minutes after the first attempt and 25 minutes after the second', () => {
-    expect(upstreamUnavailableRetryDelay(1)).toBe('5 minutes');
-    expect(upstreamUnavailableRetryDelay(2)).toBe('25 minutes');
-    expect(withUpstreamUnavailableRetryDelay(http(521), 2)).toMatchObject({ nextRetryDelay: '25 minutes' });
+  it('waits 25 minutes before the last retry and 5 minutes before any earlier one', () => {
+    expect(upstreamUnavailableRetryDelay(1, 3)).toBe('5 minutes');
+    expect(upstreamUnavailableRetryDelay(2, 3)).toBe('25 minutes');
+    // A two-attempt activity (the website profile) has only the last retry.
+    expect(upstreamUnavailableRetryDelay(1, 2)).toBe('25 minutes');
+    expect(
+      withUpstreamUnavailableRetryDelay(http(521), { attempt: 2, maximumAttempts: 3 }),
+    ).toMatchObject({ nextRetryDelay: '25 minutes' });
   });
 
   it.each([
@@ -75,21 +80,45 @@ describe('withUpstreamUnavailableRetryDelay', () => {
     ['an operation that cannot be replayed', new BudgetOperationReplayError('op-1')],
     ['an ordinary error', new Error('boom')],
   ])('returns %s unchanged', (_label, error) => {
-    expect(withUpstreamUnavailableRetryDelay(error, 1)).toBe(error);
+    expect(withUpstreamUnavailableRetryDelay(error, FIRST_OF_THREE)).toBe(error);
   });
 
   it('leaves the original error untouched', () => {
     const error = http(521);
     const before = { ...error, message: error.message, name: error.name };
 
-    withUpstreamUnavailableRetryDelay(error, 1);
+    withUpstreamUnavailableRetryDelay(error, FIRST_OF_THREE);
 
     expect(error).not.toBeInstanceOf(ApplicationFailure);
     expect({ ...error, message: error.message, name: error.name }).toEqual(before);
   });
 
-  it('counts a call outside an Activity as the first attempt', () => {
+  it('counts a call outside an Activity as the first of three attempts', () => {
     expect(withUpstreamUnavailableRetryDelay(http(503))).toMatchObject({ nextRetryDelay: '5 minutes' });
+  });
+});
+
+describe('withUpstreamUnavailableRetryDelay inside an Activity', () => {
+  const inActivity = (info: { attempt: number; retryPolicy?: { maximumAttempts?: number } }) =>
+    vi.spyOn(Context, 'current').mockReturnValue({ info } as unknown as Context);
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    ['the first of three attempts', { attempt: 1, retryPolicy: { maximumAttempts: 3 } }, '5 minutes'],
+    ['the second of three attempts', { attempt: 2, retryPolicy: { maximumAttempts: 3 } }, '25 minutes'],
+    ['the first of two attempts (the website profile)', { attempt: 1, retryPolicy: { maximumAttempts: 2 } }, '25 minutes'],
+    // More attempts than the ledger allows one key are capped at its three.
+    ['the second of five attempts', { attempt: 2, retryPolicy: { maximumAttempts: 5 } }, '25 minutes'],
+    // No maximum (unlimited, or not reported by the server): the ledger caps it at three.
+    ['the first attempt of an unlimited policy', { attempt: 1, retryPolicy: { maximumAttempts: 0 } }, '5 minutes'],
+    ['the second attempt with no policy reported', { attempt: 2 }, '25 minutes'],
+  ])('reads the attempt and the retry policy of %s', (_label, info, delay) => {
+    inActivity(info);
+
+    expect(withUpstreamUnavailableRetryDelay(http(503))).toMatchObject({ nextRetryDelay: delay });
   });
 });
 
@@ -107,7 +136,7 @@ describe('upstream-unavailable failure on the wire', () => {
     // The server only waits if nextRetryDelay survives the worker's failure converter.
     const error = http(521);
 
-    const delayed = wire(withUpstreamUnavailableRetryDelay(error, 1));
+    const delayed = wire(withUpstreamUnavailableRetryDelay(error, FIRST_OF_THREE));
     const plain = wire(ensureApplicationFailure(error));
 
     expect(Number(delayed.applicationFailureInfo?.nextRetryDelay?.seconds)).toBe(300);
@@ -117,7 +146,7 @@ describe('upstream-unavailable failure on the wire', () => {
 
   it('still reads as the same query-stage run failure once the attempts are used up', () => {
     const decoded = new DefaultFailureConverter().failureToError(
-      wire(withUpstreamUnavailableRetryDelay(http(521), 3)),
+      wire(withUpstreamUnavailableRetryDelay(http(521), { attempt: 3, maximumAttempts: 3 })),
       defaultPayloadConverter,
     );
     const exhausted = new ActivityFailure(
@@ -144,20 +173,27 @@ describe('upstream-unavailable retry window', () => {
     readFileSync(join(import.meta.dirname, '../../../../docs/governance/durable-result-strategies.json'), 'utf8'),
   ) as { resultDisposition: { maxReservationAttempts: number } };
 
-  it('retries query execution and the fit pass no more often than the ledger re-reserves one operation key', () => {
+  const totalWait = (attempts: number) =>
+    Array.from({ length: attempts - 1 }, (_, index) =>
+      timeoutMilliseconds(upstreamUnavailableRetryDelay(index + 1, attempts) as string),
+    ).reduce((sum, wait) => sum + wait, 0);
+
+  it('retries the waiting activities no more often than the ledger re-reserves one operation key', () => {
     const attempts = discoveryActivityMaximumAttempts();
     const cap = resultDisposition.maxReservationAttempts;
     expect(attempts.get('executeQuery')).toEqual([cap]);
     expect(attempts.get('qualifyFitForRun')).toEqual([cap]);
+    expect(attempts.get('profileWebsitesForRun')![0]!).toBeLessThanOrEqual(cap);
   });
 
-  it('rides out about half an hour and stays well inside the discovery admission lease', () => {
-    const attempts = discoveryActivityMaximumAttempts().get('executeQuery')![0]!;
-    const waits = Array.from({ length: attempts - 1 }, (_, index) =>
-      timeoutMilliseconds(upstreamUnavailableRetryDelay(index + 1)),
-    );
-    const total = waits.reduce((sum, wait) => sum + wait, 0);
-    expect(total).toBe(30 * 60_000);
-    expect(total).toBeLessThan(DISCOVERY_ADMISSION_LEASE_MS / 4);
+  it('rides out about half an hour in query and fit, 25 minutes in the website profile, well inside the admission lease', () => {
+    const attempts = discoveryActivityMaximumAttempts();
+    expect(totalWait(attempts.get('executeQuery')![0]!)).toBe(30 * 60_000);
+    expect(totalWait(attempts.get('qualifyFitForRun')![0]!)).toBe(30 * 60_000);
+    expect(totalWait(attempts.get('profileWebsitesForRun')![0]!)).toBe(25 * 60_000);
+    // Profile then fit, both waiting in full, still leave most of the lease for the run.
+    expect(
+      totalWait(attempts.get('profileWebsitesForRun')![0]!) + totalWait(attempts.get('qualifyFitForRun')![0]!),
+    ).toBeLessThan(DISCOVERY_ADMISSION_LEASE_MS / 3);
   });
 });

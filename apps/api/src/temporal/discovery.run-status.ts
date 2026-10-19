@@ -34,6 +34,11 @@ export function resolveRunStatus(args: {
   droppedExtractions?: number;
   /** Companies the best-effort stages skipped because an operation could not be replayed. */
   unreplayableSkips?: number;
+  /**
+   * The website-profile stage ended on an error the workflow absorbed, leaving the companies after
+   * it unprofiled: fit then judged them without that evidence.
+   */
+  profileStageFailed?: boolean;
 }): 'DONE' | 'PARTIAL' | 'FAILED' {
   const { failures, totalQueries, budgetTruncated } = args;
   const skipped = (args.skippedSubjects ?? 0) > 0;
@@ -41,6 +46,7 @@ export function resolveRunStatus(args: {
   const queriesSkipped = (args.skippedQueries ?? 0) > 0;
   const extractionsDropped = (args.droppedExtractions ?? 0) > 0;
   const unreplayableSkipped = (args.unreplayableSkips ?? 0) > 0;
+  const profileStageFailed = args.profileStageFailed === true;
   if (
     failures === 0 &&
     !budgetTruncated &&
@@ -48,7 +54,8 @@ export function resolveRunStatus(args: {
     !unjudged &&
     !queriesSkipped &&
     !extractionsDropped &&
-    !unreplayableSkipped
+    !unreplayableSkipped &&
+    !profileStageFailed
   ) {
     return 'DONE';
   }

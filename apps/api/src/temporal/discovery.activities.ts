@@ -1979,7 +1979,8 @@ export function createDiscoveryActivities(deps: {
           } else if (isUnreplayableOperation(error) && !previousUnreplayable) {
             unreplayableSkip = true;
           } else if (isExecutionControlError(error)) {
-            throw error;
+            // An unavailable model upstream makes the next attempt wait instead of retrying within seconds.
+            throw withUpstreamUnavailableRetryDelay(error);
           }
           /* 单家画像失败不影响其余 */
         }

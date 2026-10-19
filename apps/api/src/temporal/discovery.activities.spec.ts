@@ -3870,6 +3870,24 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
     expect(updateMany).not.toHaveBeenCalled();
   });
 
+  it("ends the attempt with a retryable failure that waits when the model upstream is unavailable", async () => {
+    const error = new ProviderHttpError({ status: 521, provider: "gateway", model: "deepseek-v4-pro" });
+    const profile = vi.fn(async () => {
+      throw error;
+    });
+    const { acts, updateMany } = await makeProfileDeps(profile, { companies: ["c1", "c2"] });
+
+    const failure = await acts
+      .profileWebsitesForRun(discoveryArgs("run-profile-upstream", { icpId: "icp-1" }))
+      .then(() => undefined, (reason: unknown) => reason);
+
+    expect(failure).toBeInstanceOf(ApplicationFailure);
+    expect(failure).toMatchObject({ type: "ProviderHttpError", nonRetryable: false, nextRetryDelay: expect.any(String) });
+    // The outage stops the pass at the first company instead of burning through the rest.
+    expect(profile).toHaveBeenCalledOnce();
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
   it("fails the run when the artifact store is unavailable", async () => {
     const profile = vi.fn(async () => {
       throw new ToolPolicyDenied("crawl4ai.fetch", "GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE");
@@ -4412,6 +4430,19 @@ describe("resolveRunStatus —— Fit 判定按公司吸收的模型失败", () 
       resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, fitUnjudged: 0 }),
     ).toBe("DONE");
     expect(resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false })).toBe("DONE");
+  });
+});
+
+describe("resolveRunStatus —— a website-profile stage the workflow absorbed", () => {
+  it("is at least PARTIAL: the companies after the failure were judged without their profile", () => {
+    expect(
+      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, profileStageFailed: true }),
+    ).toBe("PARTIAL");
+  });
+  it("keeps DONE when the stage finished, including replays of histories without the field", () => {
+    expect(
+      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, profileStageFailed: false }),
+    ).toBe("DONE");
   });
 });
 
@@ -5035,6 +5066,32 @@ describe("an unavailable model upstream makes the next activity attempt wait ins
       nonRetryable: false,
       nextRetryDelay: "5 minutes",
     });
+  });
+
+  it("waits the same way when the gateway itself refuses the connection", async () => {
+    // What Node fetch throws when nothing listens on the gateway port: the cause is a system error.
+    const refused = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:3001"), {
+      errno: -111,
+      code: "ECONNREFUSED",
+      syscall: "connect",
+      address: "127.0.0.1",
+      port: 3001,
+    });
+    const error = new TypeError("fetch failed", { cause: refused });
+    const activities = createDiscoveryActivities(
+      makeDeps([
+        miningAdapter(async () => {
+          throw error;
+        }),
+      ]),
+    );
+
+    const failure = await activities
+      .executeQuery(discoveryArgs("run-gateway-refused", { query: QUERY }))
+      .then(() => undefined, (reason: unknown) => reason);
+
+    expect(failure).toBeInstanceOf(ApplicationFailure);
+    expect(failure).toMatchObject({ type: "TypeError", nonRetryable: false, nextRetryDelay: "5 minutes" });
   });
 
   it("still fails the query at once on a gateway timeout, which the upstream may have billed", async () => {

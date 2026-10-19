@@ -234,7 +234,7 @@ describe("relay routing with the development fast lane", () => {
         taskQueue: LANE_QUEUE,
         workflowId: "discovery-run-1",
         workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
-        workflowExecutionTimeout: "185 minutes",
+        workflowExecutionTimeout: "215 minutes",
         args: [
           {
             workspaceId: LANE_WS,

@@ -2,16 +2,26 @@ import { ApplicationFailure, Context } from '@temporalio/activity';
 import type { Duration } from '@temporalio/common';
 import { definiteModelFailureCode } from '../model-gateway/definite-model-failure';
 
+/** The ledger re-reserves one operation key at most this many times in all (D13). */
+const LEDGER_MAX_RESERVATION_ATTEMPTS = 3;
+
 /**
  * How long the next attempt of a discovery model activity waits after the model upstream was
- * unavailable. Without it the proxies' default backoff (1 s, then 2 s) spends all three attempts
- * within seconds: run 097593b7 (xin, 2026-10-19) failed that way while openox answered 521/523
- * for 28 minutes. 5 minutes, then 25, rides out about half an hour of outage with the same three
- * attempts the ledger allows one operation key (D13), well inside the 3-hour discovery admission
- * lease. A longer outage still fails the run at the stage it reached (#653).
+ * unavailable. Without it the proxies' default backoff (1 s, then 2 s) spends every attempt within
+ * seconds: run 097593b7 (xin, 2026-10-19) failed that way while openox answered 521/523 for 28
+ * minutes. The last retry waits 25 minutes and any earlier one 5, so the three-attempt query and
+ * fit activities ride out about half an hour (5 + 25) and the two-attempt website profile 25
+ * minutes, with no more attempts than the ledger allows one operation key and well inside the
+ * 3-hour discovery admission lease. A longer outage still stops the run where it was (#653).
  */
-export function upstreamUnavailableRetryDelay(attempt: number): Duration {
-  return attempt <= 1 ? '5 minutes' : '25 minutes';
+export function upstreamUnavailableRetryDelay(attempt: number, maximumAttempts: number): Duration {
+  return attempt >= maximumAttempts - 1 ? '25 minutes' : '5 minutes';
+}
+
+/** The attempt that failed and how many the activity's retry policy allows. */
+export interface ActivityAttempt {
+  attempt: number;
+  maximumAttempts: number;
 }
 
 /**
@@ -20,18 +30,33 @@ export function upstreamUnavailableRetryDelay(attempt: number): Duration {
  * waits before the next attempt: the router has already released that call's reservation, so the
  * wait spends nothing. Every other error is returned unchanged.
  */
-export function withUpstreamUnavailableRetryDelay(error: unknown, attempt?: number): unknown {
+export function withUpstreamUnavailableRetryDelay(
+  error: unknown,
+  activityAttempt: ActivityAttempt = currentActivityAttempt(),
+): unknown {
   if (definiteModelFailureCode(error) === undefined) return error;
   return ApplicationFailure.fromError(error, {
-    nextRetryDelay: upstreamUnavailableRetryDelay(attempt ?? currentActivityAttempt()),
+    nextRetryDelay: upstreamUnavailableRetryDelay(activityAttempt.attempt, activityAttempt.maximumAttempts),
   });
 }
 
-function currentActivityAttempt(): number {
+function currentActivityAttempt(): ActivityAttempt {
+  let info: { attempt: number; retryPolicy?: { maximumAttempts?: number } };
   try {
-    return Context.current().info.attempt;
+    info = Context.current().info;
   } catch {
-    // Outside an Activity (unit tests) there is no attempt: count it as the first.
-    return 1;
+    // Outside an Activity (unit tests) there is no attempt: count it as the first of the most
+    // the ledger allows.
+    return { attempt: 1, maximumAttempts: LEDGER_MAX_RESERVATION_ATTEMPTS };
   }
+  // A policy without a positive maximum (unlimited, or not reported by an old server) is capped by
+  // the ledger anyway.
+  const maximumAttempts = info.retryPolicy?.maximumAttempts;
+  return {
+    attempt: info.attempt,
+    maximumAttempts:
+      maximumAttempts && maximumAttempts > 0
+        ? Math.min(maximumAttempts, LEDGER_MAX_RESERVATION_ATTEMPTS)
+        : LEDGER_MAX_RESERVATION_ATTEMPTS,
+  };
 }

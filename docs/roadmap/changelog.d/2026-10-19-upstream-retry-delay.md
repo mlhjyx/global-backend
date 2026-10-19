@@ -1,15 +1,35 @@
 ---
 date: 2026-10-19
-title: Wait minutes, not seconds, before retrying a discovery query or fit pass the model upstream could not answer
+title: Wait minutes, not seconds, before retrying a discovery stage the model upstream could not answer, and never report DONE after a cut-short website profile
 ---
 
-- 起因：RL1 验收 run `097593b7`（xin，2026-10-19 11:33–12:03 UTC）跑完 14 条查询中的 9 条，已接受 45 条原始记录。12:03 openox 先回 521、再回 523，约 28 分钟后恢复。public_web 挖一个域名时模型调用失败，executeQuery 的 3 次尝试按默认退避（1 秒、2 秒）全部挤在 6 秒内（12:03:19 → :21 → :25），run 按 #653 判 `FAILED`，停在 query。物化没跑，45 条记录产出 0 家公司、0 条线索。预算账本早已按 D13 把每次失败的预留释放，所以等待本来不花钱，只是没人等。
+- 起因：RL1 验收 run `097593b7`（xin，2026-10-19 11:33–12:03 UTC）跑完 14 条查询中的 9 条、已接受 45 条原始记录；12:03 openox 先回 521、再回 523，约 28 分钟后恢复。public_web 挖一个域名时模型调用失败，executeQuery 的 3 次尝试按默认退避（1 秒、2 秒）全部挤在 6 秒内（12:03:19 → :21 → :25），run 按 #653 判 `FAILED` 停在 query，物化没跑，45 条记录产出 0 家公司、0 条线索。同日 `f3439b0f` 跑完 24 条中的 16 条、92 条通过后，13:47 openox 回 503，3 次尝试 24 秒内用完，结局相同。预算账本早已按 D13 退回每次失败的预留，等待本来不花钱，只是没人等。
 - 改动：
-  - 新增 `apps/api/src/temporal/upstream-unavailable-retry.ts`：对 `definiteModelFailureCode` 判定的确定失败（网关 429、除 504/524 以外的 5xx、连接没建立），活动抛出时带 `nextRetryDelay` 的可重试 `ApplicationFailure`。第 2 次尝试前等 5 分钟，第 3 次前等 25 分钟，合计约 30 分钟，远在发现 run 3 小时准入租约之内。其余错误原样抛出（504/524 超时、4xx、截断流、控制错误、无法重放的操作），不改变它们今天的行为。
-  - `discovery.activities.ts` 的两处重抛（executeQuery 的数据源控制错误、qualifyFitForRun 停止 fit 的错误）改用它。尝试次数仍是 3（等于账本对同一操作键的预留上限），workflow 与重试策略都没改，重放不受影响。#653 的停止语义不变：超过约半小时的故障照旧以 `FAILED` 停在当时的阶段。
-  - `packages/contracts/INTEGRATION.md`：run 状态补上 `FAILED`；写明模型上游不可用会让整条查询失败（不是只跳过那个域名），以及新的等待间隔；更正「计划保持 READY 可以重跑」——同一计划再执行会得到 409 `EXECUTION_BUDGET_GRANT_REUSED`（xin 2026-10-19 实测）。
-- 测试：新增 `upstream-unavailable-retry.spec.ts`（22 例）：7 种确定失败都转成带等待的可重试失败，8 种其他错误原样返回；入参不被修改；仓库失败转换器序列化后保留 `nextRetryDelay`（300 秒）且其余字段与不加等待时相同；用尽尝试后 `describeDiscoveryRunFailure` 仍是 `{stage:'query', errorType:'ProviderHttpError', control:false}`；executeQuery 与 qualifyFitForRun 的重试次数等于 `durable-result-strategies.json` 的 `maxReservationAttempts`，总等待 30 分钟。`discovery.activities.spec.ts` 加 4 例（executeQuery 遇 521、fit 遇 523 抛带等待的失败；504、401 仍原样立即失败）。先 RED 后 GREEN。
+  - 新增 `apps/api/src/temporal/upstream-unavailable-retry.ts`：对 `definiteModelFailureCode` 判定的确定失败，活动抛出带 `nextRetryDelay` 的可重试 `ApplicationFailure`；其余错误原样抛出（504/524 超时、4xx、截断流、控制错误、无法重放的操作），行为不变。等待按活动自己的重试策略算：最后一次重试前等 25 分钟，更早的等 5 分钟；次数取重试策略的 `maximumAttempts`，并以账本上限 3 封顶（策略没报上来时也按 3）。所以 3 次尝试的查询与 fit 等 5 + 25 分钟，2 次尝试的官网画像等 25 分钟，都远在发现 run 3 小时准入租约之内。
+  - `discovery.activities.ts` 的三处重抛改用它：executeQuery 的数据源控制错误、qualifyFitForRun 停止 fit 的错误、profileWebsitesForRun 的控制错误。workflow 的重试策略与尝试次数都没改。
+  - 官网画像阶段因非控制错误提前结束（workflow 吞掉失败、fit 照常判定余下公司）时，run 不再报 `DONE`：`resolveRunStatus` 新增 `profileStageFailed`，至少判 `PARTIAL`，`stats.websiteProfile.stageFailed = true`（只在发生时出现）。原来画像被腰斩时 run 照样报 DONE；fit 现在会等上游恢复，这种情况更容易出现，所以一起修。`workspace-authority.workflow.spec.ts` 里锁住旧行为（后一批画像失败仍 DONE）的用例相应改为 PARTIAL。
+  - 开发快速通道的发现 run 执行超时 185 → 215 分钟（3 小时租约 + 最长 30 分钟等待 + 5 分钟收尾），免得 run 在等待中被整个 workflow 超时、停在 RUNNING 不收尾。环境一致性指纹不受影响（`environment-parity-policy.mjs` 通过）。
+  - 文档：`packages/contracts/INTEGRATION.md` 的 run 状态补上 `FAILED`；写明模型上游不可用会让整条查询失败（不是只跳过那个域名），等待间隔，画像阶段提前结束判 PARTIAL；更正「计划保持 READY 可以重跑」：同一计划再执行会得到 409 `EXECUTION_BUDGET_GRANT_REUSED`（xin 2026-10-19 实测）。`docs/backend/dev-fast-lane.md` 同步新超时。
+- 测试：
+  - 先 RED 后 GREEN。新增 `upstream-unavailable-retry.spec.ts`，共 28 例：
+    - 7 种确定失败转成带等待的可重试失败，8 种其他错误原样返回；
+    - 按重试策略读 attempt 与 maximumAttempts，6 种组合，含封顶与没有策略；
+    - 入参不被修改；
+    - 仓库失败转换器序列化后保留 `nextRetryDelay`（300 秒），其余字段与不加等待时相同；
+    - 用尽尝试后 `describeDiscoveryRunFailure` 仍是 `{stage:'query', errorType:'ProviderHttpError', control:false}`；
+    - 防漂移：查询与 fit 的尝试次数等于 `durable-result-strategies.json` 的 `maxReservationAttempts`，画像不超过它，等待合计 30 / 25 分钟。
+  - `discovery.activities.spec.ts` 新增 7 例：
+    - executeQuery 遇 521 抛带等待的失败；
+    - 网关拒绝连接（Node 系统错误形状）同样等待；
+    - 504 仍原样立即失败；
+    - fit 遇 523 等待、遇 401 立即失败；
+    - 画像遇 521 在第一家就停下并等待；
+    - `resolveRunStatus` 遇 `profileStageFailed` 判 PARTIAL。
+  - `discovery.rehearsal.spec.ts` 新增 1 例：一次上游故障覆盖画像的两次尝试、fit 时已恢复，run 判 PARTIAL 并带 `stageFailed`。
+  - `temporal/` 下 66 个文件 1012 例全绿；`dev-fast-lane` 两个 spec 21 例全绿。
+  - 合并前在 dev Temporal Server 1.31.2（与原生 platform 同版本）实测：活动第 1 次抛带 `nextRetryDelay: '5 minutes'` 的失败后，服务端把第 2 次尝试排在正好 300 秒后，没有被默认 `maximumInterval`（100 秒）截断。
 - 未做：
-  - 没有改成「一条查询失败时 run 判 PARTIAL、物化已成功查询的记录」：这要动物化准入「每条计划查询一份回执」的完整性不变量（#653 的理由），是另一件需要产品负责人拍板的事。
-  - 扛不过数小时以上的上游故障：那要靠备用上游（PRD4-D14）。
-  - 合并后要在 dev Temporal 上实测服务端按 `nextRetryDelay` 排下一次尝试（不被默认 `maximumInterval` 100 秒截断），并在下次换镜像后观察。
+  - 不扛超过约半小时的上游故障：13:47 那次 openox 故障持续约 2 小时 15 分钟，修复后照样会以 FAILED 停下。要扛就得接备用上游（PRD4-D14），产品负责人 10-19 决定暂不接。
+  - 连到网关超时（undici `UND_ERR_CONNECT_TIMEOUT`）在 public_web 和 fit 里仍按单个域名、单家公司的失败跳过，不会走到等待：这两处只把控制错误往上抛，没改。在 xin 上网关是 `127.0.0.1:3001`，它挂掉时是连接被拒绝，会走到等待。
+  - 一次尝试里已经发出、却没留下持久结果的调用（截断流等），重试时仍无法重放，这条查询仍按 #643 以零回执结束、计为失败：等待帮不了这种情况。
+  - 没有改成「一条查询失败时 run 判 PARTIAL、物化已成功查询的记录」：这要动物化准入「每条计划查询一份回执」的完整性不变量（#653 的理由），需要产品负责人拍板。

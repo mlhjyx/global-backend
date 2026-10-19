@@ -124,7 +124,7 @@
 1. 等测试 workspace 的在途车道 workflow 结束，第 6 节第 1 步的排空检查三项都为 0 才继续。
 2. 从 compose 插值环境里删掉两个变量，只重建 api；核验 `/health/ready` 不再有 `capabilities.dev_fast_lane`。
 3. 按 PID 停车道 worker。不要按命令行 pkill：宿主网络下，管理态容器的 node 进程在宿主进程表里同样可见。
-4. 清理孤儿：车道队列上没人 poll 的 workflow 会在执行超时后结束（发现 run 185 分钟，理解与资格判定 30 分钟），也可以在开发用 Temporal 上直接 terminate。超时或 terminate 都不跑收尾：
+4. 清理孤儿：车道队列上没人 poll 的 workflow 会在执行超时后结束（发现 run 215 分钟：3 小时准入租约、上游不可用时重试前最长 30 分钟的等待与 5 分钟收尾余量；理解与资格判定 30 分钟），也可以在开发用 Temporal 上直接 terminate。超时或 terminate 都不跑收尾：
    - 对应的 discovery run 会一直是 `RUNNING`。确认没有在跑的 workflow 后，由运维用属主连接把它标为 `FAILED`。不要留着它：换镜像的前置检查会因 `RUNNING` 的 discovery run 拒绝切换。
    - 被丢下的资格判定，关掉车道后用 `POST /icps/:icpId/qualify` 重新触发，它会走管理态。
    - 被丢下的入驻理解没法补跑：understanding 只在新建公司时触发。
