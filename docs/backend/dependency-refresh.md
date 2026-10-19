@@ -18,7 +18,7 @@
 ## 2. 节奏与硬期限
 
 - **每月一次**批量 PR，覆盖 npm 与 GitHub Actions。
-- **硬期限**：必须在 `docs/security/production-dependency-audit-baseline.json` 的 `governance.valid_until` **之前**合入续期。过期后所有 PR 的 `production dependency delta · canary` 都会失败，包括续期 PR 自身（它读取受信 base 上已过期的基线）。这也是该检查不能设为 required 的原因。
+- **硬期限**：必须在 `docs/security/production-dependency-audit-baseline.json` 的 `governance.valid_until` **之前**合入续期。过期后，改了依赖输入（各 `package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、`.npmrc`、`.pnpmfile.cjs`、`patches/`）的 PR 的 `production dependency delta · canary` 都会失败，改了锁文件的续期 PR 也不例外（它读取受信 base 上已过期的基线）；main 的 `production advisory baseline freshness · canary` 同样变红。依赖输入未变的 PR 被判为 `IDENTICAL_TO_TRUSTED_BASE`，不读基线，照常通过，只换绑定与有效期的续期 PR 也属于这一类。改依赖的 PR 会被过期基线拦住，这也是该检查不能设为 required 的原因。
 
 ## 3. 批量升级
 
@@ -51,8 +51,8 @@ pnpm --filter @global/api build && pnpm --filter @global/api test
 
 基线是限时治理账，不是豁免。两种情形：
 
-- **锁文件变动后的重新绑定**（每个改了 `pnpm-lock.yaml` 的 PR）：先提交锁文件改动，再对**该提交**执行上面的审计命令，把 `source.base_commit`、`bootstrap.base_commit` 设为该提交，`source.lockfile_digest` 设为 `sha256:` 加 `pnpm-lock.yaml` 的 SHA-256，更新 `source.captured_at`；审计结果若有变化，同步 `advisories` / `exposure` / `summary`。`governance.valid_until` 不变。同时更新 `scripts/supply-chain-gates.spec.mjs` 里钉住的基线提交、锁文件摘要与 `REPOSITORY_BASELINE_NOW`（`captured_at` 加 1 秒），并把同一审计在旧、新绑定下的 `baseline-freshness` 结果存为 `docs/evidence/security/` 下的冻结回执。先例：#544 与 2026-09-21 开发依赖告警刷新。
-- **到期续期**：在 `governance.valid_until` 之前另设新的到期时间（惯例约两周），同时按上一条重新绑定。先例：#542 及其证据 [`20260920-baseline-refresh.json`](../evidence/security/20260920-baseline-refresh.json)。
+- **锁文件变动后的重新绑定**（每个改了 `pnpm-lock.yaml` 的 PR）：先提交锁文件改动，再对**该提交**执行上面的审计命令，把 `source.base_commit`、`bootstrap.base_commit` 设为该提交，`source.lockfile_digest` 设为 `sha256:` 加 `pnpm-lock.yaml` 的 SHA-256，更新 `source.captured_at`；审计结果若有变化，同步 `advisories` / `exposure` / `summary`。`governance.valid_until` 不变。同时更新 `scripts/supply-chain-gates.spec.mjs` 里钉住的基线提交、锁文件摘要与 `REPOSITORY_BASELINE_NOW`（`captured_at` 加 1 秒），并把同一审计在旧、新绑定下的 `baseline-freshness` 结果存为 `docs/evidence/security/` 下的冻结回执。先例：#542、#544 与 2026-09-21 开发依赖告警刷新。
+- **到期续期**：在 `governance.valid_until` 之前另设新的到期时间（惯例约两周），同时按上一条重新绑定。锁文件变动时随刷新一起做，先例 #624 及其证据 [`20261010-monthly-dependency-refresh-baseline-renewal.json`](../evidence/security/20261010-monthly-dependency-refresh-baseline-renewal.json)；锁文件未变时只把绑定改到当前 main 提交、延长有效期，先例 #664 及其证据 [`20261019-baseline-renewal.json`](../evidence/security/20261019-baseline-renewal.json)。
 
 本地验证：`verify` 对照基线做生产审计（应为 `PASS_CLEAR`），但不检查锁文件绑定；绑定要用与 main 上 `production advisory baseline freshness · canary` 相同的 `baseline-freshness`（应为 `FRESH`）：
 
