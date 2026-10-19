@@ -895,7 +895,8 @@ export function createDiscoveryActivities(deps: {
           }
         } catch (error) {
           // The terms resolved before the loss stay; the rest use the providers' vocabularies.
-          if (!isLostTaxonomyNormalization(error)) throw error;
+          // A 429 or a refused gateway connection is not absorbed: the next attempt waits for it.
+          if (!isLostTaxonomyNormalization(error)) throw withUpstreamUnavailableRetryDelay(error);
           taxonomyFallback = true;
         }
       }

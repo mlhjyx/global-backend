@@ -6,7 +6,7 @@ title: Wait minutes, not seconds, before retrying a discovery stage the model up
 - 起因：RL1 验收 run `097593b7`（xin，2026-10-19 11:33–12:03 UTC）跑完 14 条查询中的 9 条、已接受 45 条原始记录；12:03 openox 先回 521、再回 523，约 28 分钟后恢复。public_web 挖一个域名时模型调用失败，executeQuery 的 3 次尝试按默认退避（1 秒、2 秒）全部挤在 6 秒内（12:03:19 → :21 → :25），run 按 #653 判 `FAILED` 停在 query，物化没跑，45 条记录产出 0 家公司、0 条线索。同日 `f3439b0f` 跑完 24 条中的 16 条、92 条通过后，13:47 openox 回 503，3 次尝试 24 秒内用完，结局相同。预算账本早已按 D13 退回每次失败的预留，等待本来不花钱，只是没人等。
 - 改动：
   - 新增 `apps/api/src/temporal/upstream-unavailable-retry.ts`：对 `definiteModelFailureCode` 判定的确定失败，活动抛出带 `nextRetryDelay` 的可重试 `ApplicationFailure`；其余错误原样抛出（504/524 超时、4xx、截断流、控制错误、无法重放的操作），行为不变。等待按活动自己的重试策略算：最后一次重试前等 25 分钟，更早的等 5 分钟；次数取重试策略的 `maximumAttempts`，并以账本上限 3 封顶（策略没报上来时也按 3）。所以 3 次尝试的查询与 fit 等 5 + 25 分钟，2 次尝试的官网画像等 25 分钟，都远在发现 run 3 小时准入租约之内。
-  - `discovery.activities.ts` 的三处重抛改用它：executeQuery 的数据源控制错误、qualifyFitForRun 停止 fit 的错误、profileWebsitesForRun 的控制错误。workflow 的重试策略与尝试次数都没改。
+  - `discovery.activities.ts` 的四处重抛改用它：executeQuery 的数据源控制错误、executeQuery 词表归一没被吸收的错误（5xx 照旧降级为内置词表；429 与网关拒绝连接原来 3 秒内用完 3 次尝试）、qualifyFitForRun 停止 fit 的错误、profileWebsitesForRun 的控制错误。workflow 的重试策略与尝试次数都没改。
   - 官网画像阶段因非控制错误提前结束（workflow 吞掉失败、fit 照常判定余下公司）时，run 不再报 `DONE`：`resolveRunStatus` 新增 `profileStageFailed`，至少判 `PARTIAL`，`stats.websiteProfile.stageFailed = true`（只在发生时出现）。原来画像被腰斩时 run 照样报 DONE；fit 现在会等上游恢复，这种情况更容易出现，所以一起修。`workspace-authority.workflow.spec.ts` 里锁住旧行为（后一批画像失败仍 DONE）的用例相应改为 PARTIAL。
   - 开发快速通道的发现 run 执行超时 185 → 215 分钟（3 小时租约 + 最长 30 分钟等待 + 5 分钟收尾），免得 run 在等待中被整个 workflow 超时、停在 RUNNING 不收尾。环境一致性指纹不受影响（`environment-parity-policy.mjs` 通过）。
   - 文档：`packages/contracts/INTEGRATION.md` 的 run 状态补上 `FAILED`；写明模型上游不可用会让整条查询失败（不是只跳过那个域名），等待间隔，画像阶段提前结束判 PARTIAL；更正「计划保持 READY 可以重跑」：同一计划再执行会得到 409 `EXECUTION_BUDGET_GRANT_REUSED`（xin 2026-10-19 实测）。`docs/backend/dev-fast-lane.md` 同步新超时。
@@ -18,8 +18,8 @@ title: Wait minutes, not seconds, before retrying a discovery stage the model up
     - 仓库失败转换器序列化后保留 `nextRetryDelay`（300 秒），其余字段与不加等待时相同；
     - 用尽尝试后 `describeDiscoveryRunFailure` 仍是 `{stage:'query', errorType:'ProviderHttpError', control:false}`；
     - 防漂移：查询与 fit 的尝试次数等于 `durable-result-strategies.json` 的 `maxReservationAttempts`，画像不超过它，等待合计 30 / 25 分钟。
-  - `discovery.activities.spec.ts` 新增 7 例：
-    - executeQuery 遇 521 抛带等待的失败；
+  - `discovery.activities.spec.ts` 新增 8 例：
+    - executeQuery 遇 521 抛带等待的失败；词表归一遇 429 同样等待、不调 provider；
     - 网关拒绝连接（Node 系统错误形状）同样等待；
     - 504 仍原样立即失败；
     - fit 遇 523 等待、遇 401 立即失败；

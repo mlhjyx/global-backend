@@ -5299,6 +5299,24 @@ describe("executeQuery —— term normalization: keyed per query, skipped when 
     expect(result).toMatchObject({ rawCount: 1, taxonomyFallback: true });
   });
 
+  it("fails the query with a failure that waits when term normalization meets an upstream 429", async () => {
+    const error = new ProviderHttpError({ status: 429, provider: "gateway", model: "deepseek-v4-pro" });
+    const discoverCompanies = discoverer();
+    const deps = makeDeps([consumer(discoverCompanies)]);
+    deps.taxonomy = taxonomySpy(async () => {
+      throw error;
+    }) as never;
+    const activities = createDiscoveryActivities(deps);
+
+    const failure = await activities
+      .executeQuery(discoveryArgs("run-taxonomy-429", { query }))
+      .then(() => undefined, (reason: unknown) => reason);
+
+    expect(failure).toBeInstanceOf(ApplicationFailure);
+    expect(failure).toMatchObject({ type: "ProviderHttpError", nonRetryable: false, nextRetryDelay: "5 minutes" });
+    expect(discoverCompanies).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["an upstream 4xx", new ProviderHttpError({ status: 401, provider: "gateway", model: "deepseek-v4-pro" })],
     ["another control error", new ExecutionControlError("EXECUTION_BUDGET_AUTHORITY_REVOKED")],
