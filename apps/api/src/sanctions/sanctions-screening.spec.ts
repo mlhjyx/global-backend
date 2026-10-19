@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { reconcileReviewState, screenMatchKey, matchesFromJson } from './sanctions-screening.service';
+import {
+  reconcileReviewState,
+  screenMatchKey,
+  matchesFromJson,
+  storedScreeningBlocks,
+} from './sanctions-screening.service';
 
 /**
  * 复核态对账（re-screen 抑制）纯逻辑单测。红线：confirmed 恒留、cleared 仅当无新命中才留、出现新命中重开。
@@ -48,5 +53,25 @@ describe('screenMatchKey / matchesFromJson', () => {
     const raw = [{ sourceKey: 'ofac_sdn', externalId: '36', score: 1 }, { sourceKey: 'x' }, 'junk', null];
     expect(matchesFromJson(raw)).toEqual([{ sourceKey: 'ofac_sdn', externalId: '36' }]);
     expect(matchesFromJson(null)).toEqual([]);
+  });
+});
+
+/**
+ * accept、周报导出与 qualify 共用的「库里的筛查结果是否仍拦交付」。(q) 的根因是 qualify 自己另算一套：
+ * live 无命中时队列不 hold，accept 却按库里的命中硬拦，lead 卡在 recommended 却永远 accept 不了。
+ */
+describe('storedScreeningBlocks', () => {
+  it.each([
+    ['open', true],
+    ['confirmed_true_hit', true],
+    ['cleared_false_positive', false],
+  ])('potential_match + %s → %s', (reviewState, blocks) => {
+    expect(storedScreeningBlocks({ status: 'potential_match', reviewState })).toBe(blocks);
+  });
+
+  it('没有记录、或记录不是 potential_match → 不拦', () => {
+    expect(storedScreeningBlocks(null)).toBe(false);
+    expect(storedScreeningBlocks(undefined)).toBe(false);
+    expect(storedScreeningBlocks({ status: 'clear', reviewState: 'open' })).toBe(false);
   });
 });

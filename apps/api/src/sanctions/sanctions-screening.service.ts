@@ -16,6 +16,7 @@ import {
  *
  * 🔴 fail-open 诚实姿势（设计决策④）：无 ENABLED 源 / 空索引 → `screen()` 返 `not_screened`（快照如实标、门不拦，
  *    不断管线）；ops 翻 ENABLED + 真测绿后才生效为硬门。索引构建失败亦 active=false（不阻断 qualify）。
+ *    例外：库里已有、未被人工清白的命中照拦（`storedScreeningBlocks`，accept、导出与 qualify 队列共用）。
  */
 
 export interface ScreenResult {
@@ -136,6 +137,15 @@ export function matchesFromJson(raw: unknown): { sourceKey: string; externalId: 
   return (raw as { sourceKey?: unknown; externalId?: unknown }[])
     .filter((m) => typeof m?.sourceKey === 'string' && typeof m?.externalId === 'string')
     .map((m) => ({ sourceKey: m.sourceKey as string, externalId: m.externalId as string }));
+}
+
+/**
+ * 库里存的筛查结果是否仍拦交付：命中且没被人工清白（open / confirmed_true_hit）。
+ * accept（decide）、周报导出与 qualify 的队列共用这一条，三处不再各算各的（(q)：qualify 曾只看 live 筛查，
+ * 命中消失后队列不 hold、accept 却照拦）。命中只由人在复核端点关闭，live 无命中不会自动放行。
+ */
+export function storedScreeningBlocks(prior: { status: string; reviewState: string } | null | undefined): boolean {
+  return !!prior && prior.status === 'potential_match' && prior.reviewState !== 'cleared_false_positive';
 }
 
 /**

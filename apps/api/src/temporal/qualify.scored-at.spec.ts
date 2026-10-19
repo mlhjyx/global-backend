@@ -34,7 +34,7 @@ function harness(
       findMany: vi.fn(async () => [{ entityId: company.id, providerKey: 'companies_house', license: 'OGL-UK-3.0' }]),
     },
     lead: { findUnique: vi.fn(async () => existing), upsert: leadUpsert },
-    sanctionsScreeningResult: { findFirst: vi.fn(), upsert: vi.fn() },
+    sanctionsScreeningResult: { findFirst: vi.fn(), upsert: vi.fn(), findMany: vi.fn(async () => []) },
     outboxEvent: { create: vi.fn(async () => ({})) },
   };
   const prisma = {

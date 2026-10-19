@@ -7,6 +7,7 @@ import {
   SanctionsScreeningService,
   reconcileReviewState,
   matchesFromJson,
+  storedScreeningBlocks,
 } from '../sanctions/sanctions-screening.service';
 import type { ScreenMatch } from '../sanctions/sanctions-matcher';
 import { syntheticDiscoveryEntityIds } from '../discovery/evidence-license';
@@ -98,23 +99,23 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
               .filter((companyId): companyId is string => companyId !== undefined),
           );
           const scoredCompanies = companies.filter((company) => !quarantinedCompanyIds.has(company.id));
-          // 第五门制裁筛查（召回优先，内存索引）先对整批算完，无命中的公司才能一次读出库里的旧命中。
+          // 第五门制裁筛查（召回优先，内存索引）先对整批算完：这次没有命中的公司，要一次读出库里的命中。
           const screens = new Map(
             scoredCompanies.map((company) => [company.id, deps.sanctionsScreening?.screen(company.name, company.country)]),
           );
-          const clearIds = scoredCompanies
-            .filter((company) => screens.get(company.id)?.status === 'clear')
+          // (q) 这次 live 无命中（clear / not_screened / 未接筛查服务）的公司，库里若还留着未清白的命中，
+          // accept 与周报导出照拦（复审 #1 的跨进程兜底），队列要与之一致：lead 进 sanctions_hold，等人在
+          // 复核端点清白。qualify 不改写记录——命中只由人关闭（#665 复审：自动改写在索引覆盖不全时会误放）。
+          const unmatchedIds = scoredCompanies
+            .filter((company) => screens.get(company.id)?.status !== 'potential_match')
             .map((company) => company.id);
-          // (q) 索引生效、这次无命中，库里却还留着 potential_match（名单移除了实体、匹配规则修正了误报）：
-          // accept 与周报导出按库里的记录硬拦（复审 #1 的跨进程兜底），所以要在这里收敛。
-          // not_screened（索引空 / 构建失败）不进 clearIds：索引没生效时绝不清掉命中。
-          const staleHits = clearIds.length
+          const storedHits = unmatchedIds.length
             ? await tx.sanctionsScreeningResult.findMany({
-                where: { workspaceId: args.workspaceId, canonicalCompanyId: { in: clearIds }, status: 'potential_match' },
-                select: { canonicalCompanyId: true, reviewState: true },
+                where: { workspaceId: args.workspaceId, canonicalCompanyId: { in: unmatchedIds }, status: 'potential_match' },
+                select: { canonicalCompanyId: true, status: true, reviewState: true },
               })
             : [];
-          const staleReviewStates = new Map(staleHits.map((row) => [row.canonicalCompanyId, row.reviewState]));
+          const storedHitByCompany = new Map(storedHits.map((row) => [row.canonicalCompanyId, row]));
           for (const c of scoredCompanies) {
             // 该 (icpId, company) 的既有 Lead——资格门① 写在这里（fitVerdict/fitReasons），是 CandidateAssessment。
             // 权威 Fit 来自**本 ICP 的 Lead**（不再读 canonical，那是「上一个判定该公司的 ICP」的值 → 串 ICP 的根 bug）。
@@ -136,12 +137,10 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
             });
             const authoritativeFit = (existing?.fitVerdict ?? null) as 'match' | 'weak' | 'mismatch' | null;
 
-            // 第五门：命中且未被人工清 → sanctionsHold（queue 强制 sanctions_hold）。
-            // DISABLED/清白 → not_screened/clear → sanctionsHold=false（fail-open，不影响队列）；
-            // 例外是人工确认过的真命中，见下。
+            // 第五门：这次命中且未被人工清 → sanctionsHold（queue 强制 sanctions_hold）。这次没有命中时，
+            // 与 accept 同一条规则：库里的命中未被清白就 hold（storedScreeningBlocks），否则不 hold。
             const screen = screens.get(c.id);
-            const staleReviewState = screen?.status === 'clear' ? staleReviewStates.get(c.id) : undefined;
-            let sanctionsHold = false;
+            let sanctionsHold = storedScreeningBlocks(storedHitByCompany.get(c.id));
             let screenMatches: ScreenMatch[] = [];
             let screenReviewState: 'open' | 'cleared_false_positive' | 'confirmed_true_hit' = 'open';
             let screenListVersions: Record<string, string> = {};
@@ -159,9 +158,6 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
               );
               // 已清(无新命中) → 不 hold（尊重人工 false-positive 判定，抑制复发）；open/confirmed → hold。
               sanctionsHold = screenReviewState !== 'cleared_false_positive';
-            } else if (staleReviewState === 'confirmed_true_hit') {
-              // 人工确认的真命中不随命中消失自动解除（复核端点同样不许把它清白）；accept 照样硬拦，队列与之一致。
-              sanctionsHold = true;
             }
 
             const result = scoreLead(
@@ -249,25 +245,6 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                 where: { workspaceId_canonicalCompanyId: { workspaceId: args.workspaceId, canonicalCompanyId: c.id } },
                 update: data,
                 create: { workspaceId: args.workspaceId, canonicalCompanyId: c.id, ...data },
-              });
-            } else if (screen && staleReviewState !== undefined && staleReviewState !== 'confirmed_true_hit') {
-              // (q) 命中已消失：旧记录改写为这次的 clear 结果，复核态不动。条件写进 where：
-              // 读出之后若有人刚确认了真命中，这里不覆盖。
-              await tx.sanctionsScreeningResult.updateMany({
-                where: {
-                  workspaceId: args.workspaceId,
-                  canonicalCompanyId: c.id,
-                  status: 'potential_match',
-                  reviewState: { in: ['open', 'cleared_false_positive'] },
-                },
-                data: {
-                  screenedName: c.name,
-                  status: 'clear',
-                  matches: [],
-                  topScore: null,
-                  listVersions: screen.listVersions as unknown as Prisma.InputJsonValue,
-                  screenedAt: new Date(),
-                },
               });
             }
             queues[queue] = (queues[queue] ?? 0) + 1;

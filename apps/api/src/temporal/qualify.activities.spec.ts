@@ -20,8 +20,10 @@ function fixture(options: {
   status?: string;
   /** 制裁筛查这次的结果；不传 = 没有接筛查服务。 */
   screen?: { status: 'clear' | 'potential_match' | 'not_screened'; matches?: unknown[] };
-  /** 库里该公司的 potential_match 记录（findMany 的返回）。 */
-  staleHits?: Array<{ canonicalCompanyId: string; reviewState: string }>;
+  /** 库里的筛查记录；假 findMany 按 where 里的公司与 status 过滤。 */
+  storedHits?: Array<{ canonicalCompanyId: string; status: string; reviewState: string }>;
+  /** 同一批里的其他公司（与主公司同形，只换 id）。 */
+  extraCompanyIds?: string[];
 } = {}) {
   const company = {
     id: COMPANY_ID,
@@ -37,7 +39,10 @@ function fixture(options: {
     contacts: options.contacts ?? [],
     companyContactPoints: options.points ?? [],
   };
-  const findMany = vi.fn(async (_args: FindManyArgs) => [company]);
+  const findMany = vi.fn(async (_args: FindManyArgs) => [
+    company,
+    ...(options.extraCompanyIds ?? []).map((id) => ({ ...company, id })),
+  ]);
   const leadUpsert = vi.fn(async () => ({}));
   const suppressionFindMany = vi.fn(async () => options.suppressions ?? []);
   const tx = {
@@ -60,7 +65,11 @@ function fixture(options: {
     sanctionsScreeningResult: {
       findFirst: vi.fn(async () => null),
       upsert: vi.fn(async () => ({})),
-      findMany: vi.fn(async (_args: unknown) => options.staleHits ?? []),
+      findMany: vi.fn(async (args: { where: { canonicalCompanyId: { in: string[] }; status: string } }) =>
+        (options.storedHits ?? []).filter(
+          (row) => args.where.canonicalCompanyId.in.includes(row.canonicalCompanyId) && row.status === args.where.status,
+        ),
+      ),
       updateMany: vi.fn(async (_args: unknown) => ({ count: 1 })),
     },
     outboxEvent: { create: vi.fn(async () => ({})) },
@@ -192,100 +201,94 @@ describe('scoreCandidates — score_detail 记下计分所用的规则版本（W
 });
 
 /**
- * (q) 命中消失后的旧记录：qualify 以前只在有命中时写 sanctions_screening_result，命中全部消失的公司
- * （名单更新移除了实体、匹配规则修正了误报，如 #660）留着旧的 potential_match，accept 与周报导出按它硬拦。
- * 规则：索引生效且这次无命中时，未确认的旧命中改写为 clear；人工确认的真命中保留并继续 hold；
- * 索引没生效（not_screened）时不读也不改。
+ * (q) 队列与 accept 的制裁拦截用同一条规则：库里的命中未被人工清白（open / confirmed_true_hit）就拦。
+ * 以前 qualify 只看这次的 live 筛查：命中消失后（名单移除了实体、匹配规则修正了误报）队列不再 hold，
+ * accept 与周报导出却按库里的命中硬拦，lead 停在 recommended 却永远 accept 不了。
+ * 现在这类 lead 进 sanctions_hold，由人在复核端点清白；qualify 不改写、不新建任何筛查记录（fail-closed：
+ * 命中只由人关闭，复审 #665 证实自动改写在索引覆盖不全或与复核并发时会误放）。
  */
-describe('scoreCandidates — 命中消失后改写旧的制裁筛查记录（q）', () => {
-  const STALE_WHERE = {
-    workspaceId: WS,
-    canonicalCompanyId: COMPANY_ID,
-    status: 'potential_match',
-    reviewState: { in: ['open', 'cleared_false_positive'] },
-  };
+describe('scoreCandidates — 库里未清白的制裁命中让 lead 进 sanctions_hold（q）', () => {
+  const OTHER_ID = '30000000-0000-4000-8000-000000000099';
 
-  it('索引生效、这次无命中，库里有未复核的旧命中 → 改写为 clear，lead 不进 sanctions_hold', async () => {
+  it.each([
+    ['open', 'clear'],
+    ['confirmed_true_hit', 'clear'],
+    ['open', 'not_screened'],
+    ['confirmed_true_hit', 'not_screened'],
+  ] as const)('库里 potential_match/%s、这次 %s → sanctions_hold，不写筛查记录', async (reviewState, status) => {
     const f = fixture({
       points: CONTACT_PAGE,
-      screen: { status: 'clear' },
-      staleHits: [{ canonicalCompanyId: COMPANY_ID, reviewState: 'open' }],
-    });
-
-    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
-
-    expect(f.screening.findMany).toHaveBeenCalledWith({
-      where: { workspaceId: WS, canonicalCompanyId: { in: [COMPANY_ID] }, status: 'potential_match' },
-      select: { canonicalCompanyId: true, reviewState: true },
-    });
-    expect(f.screening.updateMany).toHaveBeenCalledWith({
-      where: STALE_WHERE,
-      data: {
-        screenedName: 'Pumpen Handel GmbH',
-        status: 'clear',
-        matches: [],
-        topScore: null,
-        listVersions: LIST_VERSIONS,
-        screenedAt: expect.any(Date),
-      },
-    });
-    expect(f.screening.upsert).not.toHaveBeenCalled();
-    expect(f.upserted().queue).toBe('recommended');
-  });
-
-  it('人工已清的旧命中同样改写为 clear，复核态不动（不写 reviewState）', async () => {
-    const f = fixture({
-      points: CONTACT_PAGE,
-      screen: { status: 'clear' },
-      staleHits: [{ canonicalCompanyId: COMPANY_ID, reviewState: 'cleared_false_positive' }],
-    });
-
-    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
-
-    expect(f.screening.updateMany).toHaveBeenCalledTimes(1);
-    const call = f.screening.updateMany.mock.calls[0]![0] as { where: unknown; data: Record<string, unknown> };
-    expect(call.where).toEqual(STALE_WHERE);
-    expect(call.data).not.toHaveProperty('reviewState');
-  });
-
-  it('人工确认的真命中不改写，lead 仍是 sanctions_hold（与 accept 的硬拦一致）', async () => {
-    const f = fixture({
-      points: CONTACT_PAGE,
-      screen: { status: 'clear' },
-      staleHits: [{ canonicalCompanyId: COMPANY_ID, reviewState: 'confirmed_true_hit' }],
+      screen: { status },
+      storedHits: [{ canonicalCompanyId: COMPANY_ID, status: 'potential_match', reviewState }],
     });
 
     await expect(f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP })).resolves.toMatchObject({
       queues: { sanctions_hold: 1 },
     });
 
-    expect(f.screening.updateMany).not.toHaveBeenCalled();
+    expect(f.screening.findMany).toHaveBeenCalledWith({
+      where: { workspaceId: WS, canonicalCompanyId: { in: [COMPANY_ID] }, status: 'potential_match' },
+      select: { canonicalCompanyId: true, status: true, reviewState: true },
+    });
     expect(f.upserted().queue).toBe('sanctions_hold');
+    expect(f.screening.upsert).not.toHaveBeenCalled();
+    expect(f.screening.updateMany).not.toHaveBeenCalled();
   });
 
-  it('索引没生效（not_screened）→ 不读、不改旧记录：索引空或构建失败时绝不清掉命中', async () => {
+  it('库里的命中已被人工清白 → 不 hold', async () => {
     const f = fixture({
       points: CONTACT_PAGE,
-      screen: { status: 'not_screened' },
-      staleHits: [{ canonicalCompanyId: COMPANY_ID, reviewState: 'open' }],
+      screen: { status: 'clear' },
+      storedHits: [{ canonicalCompanyId: COMPANY_ID, status: 'potential_match', reviewState: 'cleared_false_positive' }],
     });
 
     await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
 
-    expect(f.screening.findMany).not.toHaveBeenCalled();
-    expect(f.screening.updateMany).not.toHaveBeenCalled();
+    expect(f.upserted().queue).toBe('recommended');
   });
 
-  it('这次无命中、库里也没有旧命中 → 不写任何筛查记录', async () => {
-    const f = fixture({ points: CONTACT_PAGE, screen: { status: 'clear' }, staleHits: [] });
+  it('库里没有命中、这次也无命中 → 不 hold，不写筛查记录', async () => {
+    const f = fixture({ points: CONTACT_PAGE, screen: { status: 'clear' }, storedHits: [] });
 
     await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
 
-    expect(f.screening.updateMany).not.toHaveBeenCalled();
+    expect(f.upserted().queue).toBe('recommended');
     expect(f.screening.upsert).not.toHaveBeenCalled();
+    expect(f.screening.updateMany).not.toHaveBeenCalled();
   });
 
-  it('这次有命中 → 照旧 upsert potential_match，不读旧命中、不走改写', async () => {
+  it('没接筛查服务时同样按库里的命中 hold（与 accept 的持久化兜底一致）', async () => {
+    const f = fixture({
+      points: CONTACT_PAGE,
+      storedHits: [{ canonicalCompanyId: COMPANY_ID, status: 'potential_match', reviewState: 'open' }],
+    });
+
+    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
+
+    expect(f.upserted().queue).toBe('sanctions_hold');
+  });
+
+  it('一批多家：只 hold 库里有未清白命中的那家', async () => {
+    const f = fixture({
+      points: CONTACT_PAGE,
+      screen: { status: 'clear' },
+      extraCompanyIds: [OTHER_ID],
+      storedHits: [{ canonicalCompanyId: OTHER_ID, status: 'potential_match', reviewState: 'open' }],
+    });
+
+    await expect(f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP })).resolves.toMatchObject({
+      scored: 2,
+      queues: { recommended: 1, sanctions_hold: 1 },
+    });
+
+    const queueOf = (id: string) =>
+      (f.leadUpsert.mock.calls as unknown as Array<[{ where: { workspaceId_icpId_canonicalCompanyId: { canonicalCompanyId: string } }; update: { queue: string } }]>)
+        .find(([call]) => call.where.workspaceId_icpId_canonicalCompanyId.canonicalCompanyId === id)![0].update.queue;
+    expect(queueOf(COMPANY_ID)).toBe('recommended');
+    expect(queueOf(OTHER_ID)).toBe('sanctions_hold');
+  });
+
+  it('这次有命中 → 照旧 upsert potential_match 并 hold，不读批量的库存命中', async () => {
     const match = {
       externalId: 'e-1',
       sourceKey: 'ofac_sdn',
@@ -302,7 +305,6 @@ describe('scoreCandidates — 命中消失后改写旧的制裁筛查记录（q�
     await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
 
     expect(f.screening.findMany).not.toHaveBeenCalled();
-    expect(f.screening.updateMany).not.toHaveBeenCalled();
     expect(f.screening.upsert).toHaveBeenCalledTimes(1);
     expect(f.upserted().queue).toBe('sanctions_hold');
   });
