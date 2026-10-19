@@ -542,13 +542,23 @@ export class LeadService {
       const result = await tx.sanctionsScreeningResult.findFirst({
         where: { canonicalCompanyId: lead.canonicalCompanyId },
         orderBy: { screenedAt: 'desc' },
-        select: { id: true, reviewState: true },
+        select: { id: true, status: true, reviewState: true },
       });
       if (!result) {
         throw new NotFoundException({
           error: {
             code: 'NOT_FOUND',
             message: 'no sanctions screening result for this lead',
+          },
+        });
+      }
+      // qualify 会把命中已消失的记录改写为 clear（q）。clear 记录上没有可复核的命中，记复核态不起作用
+      // （accept 与导出只看 potential_match），拒绝而不是假装生效。
+      if (result.status !== 'potential_match') {
+        throw new ConflictException({
+          error: {
+            code: 'SANCTIONS_NOTHING_TO_REVIEW',
+            message: 'the latest sanctions screening of this lead has no match to review',
           },
         });
       }

@@ -18,6 +18,10 @@ function fixture(options: {
   suppressions?: Array<{ type: string; value: string }>;
   fitVerdict?: 'match' | 'weak' | 'mismatch' | null;
   status?: string;
+  /** 制裁筛查这次的结果；不传 = 没有接筛查服务。 */
+  screen?: { status: 'clear' | 'potential_match' | 'not_screened'; matches?: unknown[] };
+  /** 库里该公司的 potential_match 记录（findMany 的返回）。 */
+  staleHits?: Array<{ canonicalCompanyId: string; reviewState: string }>;
 } = {}) {
   const company = {
     id: COMPANY_ID,
@@ -53,14 +57,30 @@ function fixture(options: {
       ),
       upsert: leadUpsert,
     },
-    sanctionsScreeningResult: { findFirst: vi.fn(), upsert: vi.fn() },
+    sanctionsScreeningResult: {
+      findFirst: vi.fn(async () => null),
+      upsert: vi.fn(async () => ({})),
+      findMany: vi.fn(async (_args: unknown) => options.staleHits ?? []),
+      updateMany: vi.fn(async (_args: unknown) => ({ count: 1 })),
+    },
     outboxEvent: { create: vi.fn(async () => ({})) },
   };
+  const sanctionsScreening = options.screen
+    ? {
+        rebuildIndex: vi.fn(async () => undefined),
+        screen: vi.fn(() => ({
+          status: options.screen!.status,
+          matches: options.screen!.matches ?? [],
+          listVersions: options.screen!.status === 'not_screened' ? {} : LIST_VERSIONS,
+        })),
+      }
+    : undefined;
   const activities = createQualifyActivities({
     prisma: {
       withWorkspace: async <T>(_workspaceId: string, callback: (client: typeof tx) => Promise<T>): Promise<T> =>
         callback(tx),
     } as never,
+    sanctionsScreening: sanctionsScreening as never,
   });
   const upserted = () => {
     const call = leadUpsert.mock.calls[0]![0] as unknown as {
@@ -69,8 +89,11 @@ function fixture(options: {
     };
     return call.update;
   };
-  return { activities, findMany, leadUpsert, suppressionFindMany, upserted };
+  return { activities, findMany, leadUpsert, suppressionFindMany, upserted, screening: tx.sanctionsScreeningResult };
 }
+
+const LIST_VERSIONS = { ofac_sdn: '2026-10-19', eu_fsf: '2026-10-19' };
+const CONTACT_PAGE = [{ kind: 'contact_page', value: 'https://pumpen-handel.example/kontakt', status: 'UNVERIFIED' }];
 
 describe('scoreCandidates — 公司级联系路径进可达性（评分规则 v3）', () => {
   it('include 公司级联系点（只取 VALID / UNVERIFIED），资格门 match + 联系页 → recommended（xin 的 ce100faa 形态）', async () => {
@@ -165,5 +188,122 @@ describe('scoreCandidates — score_detail 记下计分所用的规则版本（W
     };
     expect(call.update.scoreDetail.ruleVersion).toBe('additive-6dim-v3');
     expect(call.create.scoreDetail.ruleVersion).toBe('additive-6dim-v3');
+  });
+});
+
+/**
+ * (q) 命中消失后的旧记录：qualify 以前只在有命中时写 sanctions_screening_result，命中全部消失的公司
+ * （名单更新移除了实体、匹配规则修正了误报，如 #660）留着旧的 potential_match，accept 与周报导出按它硬拦。
+ * 规则：索引生效且这次无命中时，未确认的旧命中改写为 clear；人工确认的真命中保留并继续 hold；
+ * 索引没生效（not_screened）时不读也不改。
+ */
+describe('scoreCandidates — 命中消失后改写旧的制裁筛查记录（q）', () => {
+  const STALE_WHERE = {
+    workspaceId: WS,
+    canonicalCompanyId: COMPANY_ID,
+    status: 'potential_match',
+    reviewState: { in: ['open', 'cleared_false_positive'] },
+  };
+
+  it('索引生效、这次无命中，库里有未复核的旧命中 → 改写为 clear，lead 不进 sanctions_hold', async () => {
+    const f = fixture({
+      points: CONTACT_PAGE,
+      screen: { status: 'clear' },
+      staleHits: [{ canonicalCompanyId: COMPANY_ID, reviewState: 'open' }],
+    });
+
+    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
+
+    expect(f.screening.findMany).toHaveBeenCalledWith({
+      where: { workspaceId: WS, canonicalCompanyId: { in: [COMPANY_ID] }, status: 'potential_match' },
+      select: { canonicalCompanyId: true, reviewState: true },
+    });
+    expect(f.screening.updateMany).toHaveBeenCalledWith({
+      where: STALE_WHERE,
+      data: {
+        screenedName: 'Pumpen Handel GmbH',
+        status: 'clear',
+        matches: [],
+        topScore: null,
+        listVersions: LIST_VERSIONS,
+        screenedAt: expect.any(Date),
+      },
+    });
+    expect(f.screening.upsert).not.toHaveBeenCalled();
+    expect(f.upserted().queue).toBe('recommended');
+  });
+
+  it('人工已清的旧命中同样改写为 clear，复核态不动（不写 reviewState）', async () => {
+    const f = fixture({
+      points: CONTACT_PAGE,
+      screen: { status: 'clear' },
+      staleHits: [{ canonicalCompanyId: COMPANY_ID, reviewState: 'cleared_false_positive' }],
+    });
+
+    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
+
+    expect(f.screening.updateMany).toHaveBeenCalledTimes(1);
+    const call = f.screening.updateMany.mock.calls[0]![0] as { where: unknown; data: Record<string, unknown> };
+    expect(call.where).toEqual(STALE_WHERE);
+    expect(call.data).not.toHaveProperty('reviewState');
+  });
+
+  it('人工确认的真命中不改写，lead 仍是 sanctions_hold（与 accept 的硬拦一致）', async () => {
+    const f = fixture({
+      points: CONTACT_PAGE,
+      screen: { status: 'clear' },
+      staleHits: [{ canonicalCompanyId: COMPANY_ID, reviewState: 'confirmed_true_hit' }],
+    });
+
+    await expect(f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP })).resolves.toMatchObject({
+      queues: { sanctions_hold: 1 },
+    });
+
+    expect(f.screening.updateMany).not.toHaveBeenCalled();
+    expect(f.upserted().queue).toBe('sanctions_hold');
+  });
+
+  it('索引没生效（not_screened）→ 不读、不改旧记录：索引空或构建失败时绝不清掉命中', async () => {
+    const f = fixture({
+      points: CONTACT_PAGE,
+      screen: { status: 'not_screened' },
+      staleHits: [{ canonicalCompanyId: COMPANY_ID, reviewState: 'open' }],
+    });
+
+    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
+
+    expect(f.screening.findMany).not.toHaveBeenCalled();
+    expect(f.screening.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('这次无命中、库里也没有旧命中 → 不写任何筛查记录', async () => {
+    const f = fixture({ points: CONTACT_PAGE, screen: { status: 'clear' }, staleHits: [] });
+
+    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
+
+    expect(f.screening.updateMany).not.toHaveBeenCalled();
+    expect(f.screening.upsert).not.toHaveBeenCalled();
+  });
+
+  it('这次有命中 → 照旧 upsert potential_match，不读旧命中、不走改写', async () => {
+    const match = {
+      externalId: 'e-1',
+      sourceKey: 'ofac_sdn',
+      matchedName: 'PUMPEN HANDEL',
+      aliasQuality: 'primary',
+      score: 0.9,
+      nameScore: 0.9,
+      entityCountry: null,
+      countryMatch: 'unknown',
+      listVersion: '2026-10-19',
+    };
+    const f = fixture({ points: CONTACT_PAGE, screen: { status: 'potential_match', matches: [match] } });
+
+    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
+
+    expect(f.screening.findMany).not.toHaveBeenCalled();
+    expect(f.screening.updateMany).not.toHaveBeenCalled();
+    expect(f.screening.upsert).toHaveBeenCalledTimes(1);
+    expect(f.upserted().queue).toBe('sanctions_hold');
   });
 });
