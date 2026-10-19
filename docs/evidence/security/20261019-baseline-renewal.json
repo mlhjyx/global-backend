@@ -64,21 +64,14 @@
       {
         "binding": "old_binding",
         "valid_until": "2026-10-24T13:59:34.000Z",
+        "evaluated_at": "2026-10-24T13:59:33.999Z",
+        "result": "FRESH",
+        "issues": []
+      },
+      {
+        "binding": "old_binding",
+        "valid_until": "2026-10-24T13:59:34.000Z",
         "evaluated_at": "2026-10-24T13:59:34.000Z",
-        "result": "AUDIT_INVALID_HOLD",
-        "issues": ["BASELINE_EXPIRED"]
-      },
-      {
-        "binding": "old_binding",
-        "valid_until": "2026-10-24T13:59:34.000Z",
-        "evaluated_at": "2026-11-02T11:27:17.999Z",
-        "result": "AUDIT_INVALID_HOLD",
-        "issues": ["BASELINE_EXPIRED"]
-      },
-      {
-        "binding": "old_binding",
-        "valid_until": "2026-10-24T13:59:34.000Z",
-        "evaluated_at": "2026-11-02T11:27:18.000Z",
         "result": "AUDIT_INVALID_HOLD",
         "issues": ["BASELINE_EXPIRED"]
       },
@@ -129,6 +122,6 @@
         "vulnerable_versions": "<=3.0.3"
       }
     ],
-    "note": "Same two development-only advisories as the 2026-10-10 refresh, both still open on main as Dependabot alerts 80 (faker, only in the Prism mock chain) and 118 (braces, no patched release). No new alert."
+    "note": "Same two advisories as the 2026-10-10 refresh, both still open on main as Dependabot alerts 80 (faker, only in the Prism mock chain) and 118 (braces, no patched release). They are outside the pnpm production dependency graph (the --prod audit above is zero), although Dependabot labels both with scope runtime. No new alert."
   }
 }
