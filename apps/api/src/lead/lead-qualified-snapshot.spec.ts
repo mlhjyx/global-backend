@@ -1,3 +1,4 @@
+import { SANCTIONS_GATE_CASES, liveScreen, storedScreening } from '../sanctions/sanctions-gate.test-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -1026,5 +1027,27 @@ describe('LeadService.decide — 响应带 scored / queueBasis（契约 LEAD_SCH
     });
     expect(r).toMatchObject({ status: 'REJECTED', scored: true, queueBasis: 'human_reject' });
     expectDecideResponseHonoursContract('reject', r);
+  });
+});
+
+describe('LeadService.decide(accept) — 第五门与 qualify、导出同一张真值表（#665）', () => {
+  it.each(SANCTIONS_GATE_CASES)('live=$live × 库里=$stored → 拦=$blocks', async ({ live, stored, blocks }) => {
+    const outboxCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+    const decisionCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+    const tx = makeDecideTx(makeLead(), makeCompany(), outboxCreate, decisionCreate);
+    const findFirst = vi.fn(async () => storedScreening(stored));
+    tx.sanctionsScreeningResult = { findFirst } as never;
+    const svc = makeDecideService(tx, undefined, { screen: vi.fn(() => liveScreen(live)) });
+
+    const outcome = svc.decide(decideCtx, LEAD_ID, 'accept');
+
+    if (blocks) {
+      await expect(outcome).rejects.toMatchObject({ response: { error: { code: 'SANCTIONS_HOLD_UNRESOLVED' } } });
+      expect(outboxCreate).not.toHaveBeenCalled();
+    } else {
+      await expect(outcome).resolves.toBeDefined();
+      expect(outboxCreate).toHaveBeenCalledTimes(1);
+    }
+    expect(findFirst).toHaveBeenCalledTimes(1);
   });
 });

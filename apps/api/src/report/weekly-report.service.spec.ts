@@ -3,7 +3,8 @@ import { parse } from 'csv-parse/sync';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DataRightsService } from '../compliance/data-rights.service';
 import { WEEKLY_REPORT_COLUMNS } from './weekly-report-row';
-import { WEEKLY_REPORT_MAX_LEADS, WeeklyReportService } from './weekly-report.service';
+import { WEEKLY_REPORT_MAX_LEADS, WeeklyReportService, sanctionsDelivery } from './weekly-report.service';
+import { SANCTIONS_GATE_CASES, liveScreen, storedScreening } from '../sanctions/sanctions-gate.test-fixture';
 
 const WORKSPACE = '11111111-1111-4111-8111-111111111111';
 const ICP = '22222222-2222-4222-8222-222222222222';
@@ -581,5 +582,12 @@ describe('WeeklyReportService (BI-22)', () => {
       error: { code: 'WEEKLY_REPORT_TOO_LARGE' },
     });
     expect(tx.policyDecisionLog.createMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('sanctionsDelivery — 与 qualify、accept 同一张真值表（#665）', () => {
+  it.each(SANCTIONS_GATE_CASES)('live=$live × 库里=$stored → 拦=$blocks', ({ live, stored, blocks }) => {
+    const prior = storedScreening(stored);
+    expect(sanctionsDelivery(prior ?? undefined, liveScreen(live)).blocking).toBe(blocks);
   });
 });

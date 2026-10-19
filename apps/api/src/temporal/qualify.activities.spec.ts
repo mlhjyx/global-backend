@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createQualifyActivities } from './qualify.activities';
+import type { ScreenResult } from '../sanctions/sanctions-screening.service';
+import {
+  MATCH_E1,
+  SANCTIONS_GATE_CASES,
+  liveScreen,
+  storedScreening,
+} from '../sanctions/sanctions-gate.test-fixture';
 
 /**
  * scoreCandidates 读公司级联系路径（BI-14 company_contact_point，#630）进可达性（评分规则 v3）。
@@ -18,6 +25,16 @@ function fixture(options: {
   suppressions?: Array<{ type: string; value: string }>;
   fitVerdict?: 'match' | 'weak' | 'mismatch' | null;
   status?: string;
+  /** 制裁筛查这次的结果；不传 = 没有接筛查服务。 */
+  screen?: { status: 'clear' | 'potential_match' | 'not_screened'; matches?: unknown[] };
+  /** 库里的筛查记录；假 findMany 按 where 里的公司与 status 过滤。 */
+  storedHits?: Array<{ canonicalCompanyId: string; status: string; reviewState: string }>;
+  /** 同一批里的其他公司（与主公司同形，可换 id、名称、国家）。 */
+  extraCompanies?: Array<{ id: string; name?: string; country?: string }>;
+  /** 按公司名与国家给出筛查结果；给了它就不看 screen。 */
+  screenImpl?: (name: string, country: string | null) => ScreenResult;
+  /** 命中路径 reconcile 读到的库里记录（findFirst 的返回）。 */
+  prior?: { status: string; reviewState: string; matches: unknown } | null;
 } = {}) {
   const company = {
     id: COMPANY_ID,
@@ -33,7 +50,10 @@ function fixture(options: {
     contacts: options.contacts ?? [],
     companyContactPoints: options.points ?? [],
   };
-  const findMany = vi.fn(async (_args: FindManyArgs) => [company]);
+  const findMany = vi.fn(async (_args: FindManyArgs) => [
+    company,
+    ...(options.extraCompanies ?? []).map((extra) => ({ ...company, ...extra })),
+  ]);
   const leadUpsert = vi.fn(async () => ({}));
   const suppressionFindMany = vi.fn(async () => options.suppressions ?? []);
   const tx = {
@@ -53,14 +73,36 @@ function fixture(options: {
       ),
       upsert: leadUpsert,
     },
-    sanctionsScreeningResult: { findFirst: vi.fn(), upsert: vi.fn() },
+    sanctionsScreeningResult: {
+      findFirst: vi.fn(async () => options.prior ?? null),
+      upsert: vi.fn(async () => ({})),
+      findMany: vi.fn(async (args: { where: { canonicalCompanyId: { in: string[] }; status: string } }) =>
+        (options.storedHits ?? []).filter(
+          (row) => args.where.canonicalCompanyId.in.includes(row.canonicalCompanyId) && row.status === args.where.status,
+        ),
+      ),
+      updateMany: vi.fn(async (_args: unknown) => ({ count: 1 })),
+    },
     outboxEvent: { create: vi.fn(async () => ({})) },
   };
+  const sanctionsScreening = options.screenImpl
+    ? { rebuildIndex: vi.fn(async () => undefined), screen: vi.fn(options.screenImpl) }
+    : options.screen
+      ? {
+          rebuildIndex: vi.fn(async () => undefined),
+          screen: vi.fn(() => ({
+            status: options.screen!.status,
+            matches: options.screen!.matches ?? [],
+            listVersions: options.screen!.status === 'not_screened' ? {} : LIST_VERSIONS,
+          })),
+        }
+      : undefined;
   const activities = createQualifyActivities({
     prisma: {
       withWorkspace: async <T>(_workspaceId: string, callback: (client: typeof tx) => Promise<T>): Promise<T> =>
         callback(tx),
     } as never,
+    sanctionsScreening: sanctionsScreening as never,
   });
   const upserted = () => {
     const call = leadUpsert.mock.calls[0]![0] as unknown as {
@@ -69,8 +111,19 @@ function fixture(options: {
     };
     return call.update;
   };
-  return { activities, findMany, leadUpsert, suppressionFindMany, upserted };
+  return {
+    activities,
+    findMany,
+    leadUpsert,
+    suppressionFindMany,
+    upserted,
+    screening: tx.sanctionsScreeningResult,
+    sanctionsScreening,
+  };
 }
+
+const LIST_VERSIONS = { ofac_sdn: '2026-10-19', eu_fsf: '2026-10-19' };
+const CONTACT_PAGE = [{ kind: 'contact_page', value: 'https://pumpen-handel.example/kontakt', status: 'UNVERIFIED' }];
 
 describe('scoreCandidates — 公司级联系路径进可达性（评分规则 v3）', () => {
   it('include 公司级联系点（只取 VALID / UNVERIFIED），资格门 match + 联系页 → recommended（xin 的 ce100faa 形态）', async () => {
@@ -165,5 +218,166 @@ describe('scoreCandidates — score_detail 记下计分所用的规则版本（W
     };
     expect(call.update.scoreDetail.ruleVersion).toBe('additive-6dim-v3');
     expect(call.create.scoreDetail.ruleVersion).toBe('additive-6dim-v3');
+  });
+});
+
+/**
+ * (q) 队列与 accept 的制裁拦截用同一条规则：库里的命中未被人工清白（open / confirmed_true_hit）就拦。
+ * 以前 qualify 只看这次的 live 筛查：命中消失后（名单移除了实体、匹配规则修正了误报）队列不再 hold，
+ * accept 与周报导出却按库里的命中硬拦，lead 停在 recommended 却永远 accept 不了。
+ * 现在这类 lead 进 sanctions_hold，由人在复核端点清白；qualify 不改写、不新建任何筛查记录（fail-closed：
+ * 命中只由人关闭，复审 #665 证实自动改写在索引覆盖不全或与复核并发时会误放）。
+ */
+describe('scoreCandidates — 库里未清白的制裁命中让 lead 进 sanctions_hold（q）', () => {
+  const OTHER_ID = '30000000-0000-4000-8000-000000000099';
+
+  it.each([
+    ['open', 'clear'],
+    ['confirmed_true_hit', 'clear'],
+    ['open', 'not_screened'],
+    ['confirmed_true_hit', 'not_screened'],
+  ] as const)('库里 potential_match/%s、这次 %s → sanctions_hold，不写筛查记录', async (reviewState, status) => {
+    const f = fixture({
+      points: CONTACT_PAGE,
+      screen: { status },
+      storedHits: [{ canonicalCompanyId: COMPANY_ID, status: 'potential_match', reviewState }],
+    });
+
+    await expect(f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP })).resolves.toMatchObject({
+      queues: { sanctions_hold: 1 },
+    });
+
+    expect(f.screening.findMany).toHaveBeenCalledWith({
+      where: { workspaceId: WS, canonicalCompanyId: { in: [COMPANY_ID] }, status: 'potential_match' },
+      select: { canonicalCompanyId: true, status: true, reviewState: true },
+    });
+    expect(f.upserted().queue).toBe('sanctions_hold');
+    expect(f.screening.upsert).not.toHaveBeenCalled();
+    expect(f.screening.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('库里的命中已被人工清白 → 不 hold', async () => {
+    const f = fixture({
+      points: CONTACT_PAGE,
+      screen: { status: 'clear' },
+      storedHits: [{ canonicalCompanyId: COMPANY_ID, status: 'potential_match', reviewState: 'cleared_false_positive' }],
+    });
+
+    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
+
+    expect(f.upserted().queue).toBe('recommended');
+  });
+
+  it('库里没有命中、这次也无命中 → 不 hold，不写筛查记录', async () => {
+    const f = fixture({ points: CONTACT_PAGE, screen: { status: 'clear' }, storedHits: [] });
+
+    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
+
+    expect(f.upserted().queue).toBe('recommended');
+    expect(f.screening.upsert).not.toHaveBeenCalled();
+    expect(f.screening.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('没接筛查服务时同样按库里的命中 hold（与 accept 的持久化兜底一致）', async () => {
+    const f = fixture({
+      points: CONTACT_PAGE,
+      storedHits: [{ canonicalCompanyId: COMPANY_ID, status: 'potential_match', reviewState: 'open' }],
+    });
+
+    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
+
+    expect(f.upserted().queue).toBe('sanctions_hold');
+  });
+
+  it('一批多家：只 hold 库里有未清白命中的那家', async () => {
+    const f = fixture({
+      points: CONTACT_PAGE,
+      screen: { status: 'clear' },
+      extraCompanies: [{ id: OTHER_ID }],
+      storedHits: [{ canonicalCompanyId: OTHER_ID, status: 'potential_match', reviewState: 'open' }],
+    });
+
+    await expect(f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP })).resolves.toMatchObject({
+      scored: 2,
+      queues: { recommended: 1, sanctions_hold: 1 },
+    });
+
+    const queueOf = (id: string) =>
+      (f.leadUpsert.mock.calls as unknown as Array<[{ where: { workspaceId_icpId_canonicalCompanyId: { canonicalCompanyId: string } }; update: { queue: string } }]>)
+        .find(([call]) => call.where.workspaceId_icpId_canonicalCompanyId.canonicalCompanyId === id)![0].update.queue;
+    expect(queueOf(COMPANY_ID)).toBe('recommended');
+    expect(queueOf(OTHER_ID)).toBe('sanctions_hold');
+  });
+
+  it('这次有命中 → 照旧 upsert potential_match 并 hold，不读批量的库存命中', async () => {
+    const match = {
+      externalId: 'e-1',
+      sourceKey: 'ofac_sdn',
+      matchedName: 'PUMPEN HANDEL',
+      aliasQuality: 'primary',
+      score: 0.9,
+      nameScore: 0.9,
+      entityCountry: null,
+      countryMatch: 'unknown',
+      listVersion: '2026-10-19',
+    };
+    const f = fixture({ points: CONTACT_PAGE, screen: { status: 'potential_match', matches: [match] } });
+
+    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
+
+    expect(f.screening.findMany).not.toHaveBeenCalled();
+    expect(f.screening.upsert).toHaveBeenCalledTimes(1);
+    expect(f.upserted().queue).toBe('sanctions_hold');
+  });
+});
+
+describe('scoreCandidates — 第五门与 accept、导出同一张真值表（#665）', () => {
+  it.each(SANCTIONS_GATE_CASES)('live=$live × 库里=$stored → sanctions_hold=$blocks', async ({ live, stored, blocks }) => {
+    const row = storedScreening(stored);
+    const f = fixture({
+      points: CONTACT_PAGE,
+      screenImpl: () => liveScreen(live),
+      prior: row,
+      storedHits: row ? [{ canonicalCompanyId: COMPANY_ID, status: row.status, reviewState: row.reviewState }] : [],
+    });
+
+    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
+
+    expect(f.upserted().queue === 'sanctions_hold').toBe(blocks);
+    // live 无命中的路径绝不写筛查记录；命中路径照旧 upsert。
+    if (live === 'clear' || live === 'not_screened') expect(f.screening.upsert).not.toHaveBeenCalled();
+    else expect(f.screening.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('一批多家：每家用自己的名称与国家筛查，结果不串到别家', async () => {
+    const OTHER = '30000000-0000-4000-8000-000000000098';
+    const f = fixture({
+      points: CONTACT_PAGE,
+      extraCompanies: [{ id: OTHER, name: 'Ventil Werk GmbH', country: 'AT' }],
+      screenImpl: (name) =>
+        name === 'Pumpen Handel GmbH'
+          ? { status: 'potential_match', matches: [MATCH_E1], listVersions: { ofac_sdn: '2026-10-19' } }
+          : { status: 'clear', matches: [], listVersions: { ofac_sdn: '2026-10-19' } },
+      storedHits: [],
+    });
+
+    await expect(f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP })).resolves.toMatchObject({
+      scored: 2,
+      queues: { recommended: 1, sanctions_hold: 1 },
+    });
+
+    expect(f.sanctionsScreening!.screen).toHaveBeenCalledWith('Pumpen Handel GmbH', 'DE');
+    expect(f.sanctionsScreening!.screen).toHaveBeenCalledWith('Ventil Werk GmbH', 'AT');
+    const calls = f.leadUpsert.mock.calls as unknown as Array<
+      [{ where: { workspaceId_icpId_canonicalCompanyId: { canonicalCompanyId: string } }; update: { queue: string } }]
+    >;
+    const queueOf = (id: string) =>
+      calls.find(([call]) => call.where.workspaceId_icpId_canonicalCompanyId.canonicalCompanyId === id)![0].update.queue;
+    expect(queueOf(COMPANY_ID)).toBe('sanctions_hold');
+    expect(queueOf(OTHER)).toBe('recommended');
+    // 只为这次无命中的那家读库存命中。
+    expect(f.screening.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ canonicalCompanyId: { in: [OTHER] } }) }),
+    );
   });
 });

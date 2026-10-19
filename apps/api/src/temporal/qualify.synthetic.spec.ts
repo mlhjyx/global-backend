@@ -31,7 +31,7 @@ describe('QualifyActivities synthetic provenance quarantine', () => {
         ]),
       },
       lead: { findUnique: vi.fn(async () => null), upsert: leadUpsert },
-      sanctionsScreeningResult: { findFirst: vi.fn(), upsert: vi.fn() },
+      sanctionsScreeningResult: { findFirst: vi.fn(), upsert: vi.fn(), findMany: vi.fn(async () => []) },
       outboxEvent: { create: outboxCreate },
     };
     const prisma = {
@@ -81,7 +81,7 @@ describe('QualifyActivities synthetic provenance quarantine', () => {
         ]),
       },
       lead: { findUnique: vi.fn(async () => null), upsert: leadUpsert },
-      sanctionsScreeningResult: { findFirst: vi.fn(), upsert: vi.fn() },
+      sanctionsScreeningResult: { findFirst: vi.fn(), upsert: vi.fn(), findMany: vi.fn(async () => []) },
       outboxEvent: { create: vi.fn(async () => ({})) },
     };
     const activities = createQualifyActivities({

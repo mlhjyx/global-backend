@@ -14,7 +14,7 @@ import {
   companyMatchesSuppression,
 } from '../discovery/suppression-value';
 import { storageRightsContextForLead } from '../compliance/data-rights.context';
-import { SanctionsScreeningService, reconcileReviewState, matchesFromJson,
+import { SanctionsScreeningService, reconcileReviewState, matchesFromJson, storedScreeningBlocks,
 } from '../sanctions/sanctions-screening.service';
 import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
 import { contactSuppressionKeys } from '../discovery/identity';
@@ -382,8 +382,7 @@ export class LeadService {
             listVersions: true,
           },
         });
-        const priorBlocking =
-          !!prior && prior.status === 'potential_match' && prior.reviewState !== 'cleared_false_positive';
+        const priorBlocking = storedScreeningBlocks(prior);
         let liveBlocking = false;
         if (screen.status === 'potential_match') {
           const reviewState = reconcileReviewState(

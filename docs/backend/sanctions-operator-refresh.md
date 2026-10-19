@@ -77,6 +77,8 @@ UPDATE sanctions_source SET status = 'DISABLED', updated_at = now()
  WHERE key IN ('ofac_sdn', 'ofac_consolidated', 'eu_fsf');
 ```
 
+关掉只停止**新的**筛查：库里已有、未被人工清白的命中（open / confirmed_true_hit）照样拦，accept、周报导出与 qualify 的 sanctions_hold 队列都按它判断（`storedScreeningBlocks`，#665）。要放行这些公司，须在复核端点逐家清白。
+
 ## 5. 新名单何时生效
 
 - 只有 `ENABLED` 且有活跃实体的源进入筛查索引。刷新 `DISABLED` 的源，对筛查没有任何影响。

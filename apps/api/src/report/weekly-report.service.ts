@@ -18,6 +18,7 @@ import {
   matchesFromJson,
   reconcileReviewState,
   SanctionsScreeningService,
+  storedScreeningBlocks,
   type ScreenResult,
 } from '../sanctions/sanctions-screening.service';
 import { encodeCsv, type CsvValue } from './csv';
@@ -122,11 +123,11 @@ function deliveredInWeek(lead: ReportLead, range: IsoWeekRange): DeliveredLead |
  * person cleared it as a false positive, and a live hit blocks unless every match was already
  * cleared. Not screened when the gate is off and nothing was ever recorded.
  */
-function sanctionsDelivery(
+export function sanctionsDelivery(
   prior: PriorScreening | undefined,
   live: ScreenResult,
 ): { blocking: true } | { blocking: false; status: WeeklyReportSanctionsStatus } {
-  const priorBlocking = !!prior && prior.status === 'potential_match' && prior.reviewState !== 'cleared_false_positive';
+  const priorBlocking = storedScreeningBlocks(prior);
   const liveBlocking =
     live.status === 'potential_match' &&
     reconcileReviewState(
