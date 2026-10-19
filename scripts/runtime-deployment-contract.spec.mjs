@@ -176,31 +176,81 @@ function expectPolicyMapping(policy, action, prefix, privacyClass) {
   assert.match(statement, new RegExp(`"s3:RequestObjectTag/artifact-privacy": "${privacyClass}"`));
 }
 
-// The IAM policies bootstrap.sh writes, parsed. Every `mc admin policy create`
-// must load a "$<var>" file written by exactly one `cat > "$<var>" <<EOF`
-// heredoc, and the file holds no other heredoc, so a policy written any other
-// way fails here instead of escaping the checks below. The heredoc is unquoted,
-// so the shell expands it: the body may hold no expansion besides the bucket.
-function bootstrapPolicies(bootstrap) {
-  const heredocs = [...bootstrap.matchAll(/cat > "\$(\w+)" <<EOF\n([\s\S]*?)\nEOF/gu)];
-  assert.equal(bootstrap.split('<<').length - 1, heredocs.length, 'every heredoc in bootstrap.sh is a policy heredoc');
-  const created = [...bootstrap.matchAll(/^mc admin policy create \S+ \S+ (.+)$/gmu)].map((match) => match[1]);
-  const createdVars = created.map((argument) => argument.match(/^"\$(\w+)"$/u)?.[1]);
-  assert.ok(createdVars.every(Boolean), `every policy file is a "$<var>" argument: ${created.join(', ')}`);
-  const names = heredocs.map((match) => match[1]);
-  assert.equal(new Set(names).size, names.length, 'each policy variable is written once');
-  assert.deepEqual([...createdVars].sort(), [...names].sort(), 'the created policies are exactly the parsed heredocs');
-  const policies = {};
-  for (const [, name, body] of heredocs) {
-    const rendered = body.replaceAll('$GENERIC_OPERATION_ARTIFACT_S3_BUCKET', 'bucket');
-    assert.doesNotMatch(rendered, /[$`\\]/u, `${name} holds no shell expansion besides the bucket`);
-    try {
-      policies[name] = JSON.parse(rendered);
-    } catch (error) {
-      throw new Error(`${name} is not valid JSON: ${error.message}`);
+// The IAM calls and policy documents MinIO would receive, captured by running
+// bootstrap.sh against a fake mc instead of parsing its text: shell can write
+// or rewrite a policy file in too many ways (indentation, continuation lines,
+// command substitution, a second write after the heredoc, swapped arguments)
+// for a parser to follow. Only /config/ and /tmp/ are redirected into the
+// sandbox. The fake mc answers exactly the calls a provisioning run makes and
+// exits 97 on any other, so a new mc command fails here until it is reviewed.
+const FAKE_MC = `#!/bin/sh
+printf '%s\\n' "$*" >> "$MC_STATE/calls"
+case "$*" in
+  'alias set '*|'mb --ignore-existing '*|'version enable '*|'encrypt set SSE-S3 '*|'admin user add '*) exit 0 ;;
+  'ls deployment') exit 0 ;;
+  'ilm rule import '*) cat > "$MC_STATE/ilm-$(printf '%s' "$4" | tr '/' '_')"; exit 0 ;;
+  'ilm rule export '*) cat "$MC_STATE/ilm-$(printf '%s' "$4" | tr '/' '_')"; exit 0 ;;
+  'version info '*) echo 'versioning is enabled'; exit 0 ;;
+  'encrypt info '*) echo 'auto encryption: sse-s3'; exit 0 ;;
+  'admin policy create deployment '*)
+    [ "$#" -eq 6 ] || exit 98
+    count=$(ls "$MC_STATE" | grep -c '^policy-' || true)
+    cp "$6" "$MC_STATE/policy-$count-$5.json"; exit 0 ;;
+  'admin policy attach deployment '*' --user '*)
+    [ "$#" -eq 7 ] || exit 98
+    printf '%s %s\\n' "$7" "$5" >> "$MC_STATE/attached"; exit 0 ;;
+  'admin user info deployment '*' --json')
+    policy=$(awk -v user="$5" '$1 == user { print $2 }' "$MC_STATE/attached" | paste -sd, -)
+    printf '{"accessKey":"%s","policyName":"%s","userStatus":"enabled"}\\n' "$5" "$policy"; exit 0 ;;
+esac
+echo "unexpected mc call: $*" >&2
+exit 97
+`;
+
+const PROVISIONING_ENV = {
+  MINIO_ENDPOINT: 'http://minio:9000',
+  MINIO_ROOT_USER: 'root-principal',
+  MINIO_ROOT_PASSWORD: 'root-password-123',
+  S3_BUCKET: 'site-assets-test',
+  GENERIC_OPERATION_ARTIFACT_S3_BUCKET: 'operation-artifacts-test',
+  GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY: 'runtime-writer',
+  GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY: 'runtime-password-123',
+  GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_ACCESS_KEY: 'personal-reader',
+  GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_SECRET_KEY: 'personal-password-123',
+  GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY: 'cleanup-writer',
+  GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY: 'cleanup-password-123',
+};
+
+async function provisionWithFakeMc(bootstrapSource) {
+  const directory = await mkdtemp(join(tmpdir(), 'artifact-policy-capture-'));
+  try {
+    const state = join(directory, 'state');
+    await execFileAsync('mkdir', [state]);
+    await writeFile(join(directory, 'mc'), FAKE_MC, 'utf8');
+    await chmod(join(directory, 'mc'), 0o700);
+    const configDirectory = new URL('../infra/minio/', import.meta.url).pathname;
+    const script = bootstrapSource.replaceAll('/config/', configDirectory).replaceAll('/tmp/', `${directory}/`);
+    await writeFile(join(directory, 'bootstrap.sh'), script, 'utf8');
+    const { stdout } = await execFileAsync('/bin/sh', [join(directory, 'bootstrap.sh')], {
+      env: { ...PROVISIONING_ENV, PATH: `${directory}:/usr/bin:/bin`, MC_STATE: state },
+    });
+    const calls = (await readFile(join(state, 'calls'), 'utf8')).trim().split('\n');
+    const created = (await execFileAsync('ls', [state])).stdout.split('\n').filter((name) => name.startsWith('policy-'));
+    const policies = {};
+    for (const file of created) {
+      const name = file.replace(/^policy-\d+-/u, '').replace(/\.json$/u, '');
+      assert.equal(Object.hasOwn(policies, name), false, `${name} is created once`);
+      const text = await readFile(join(state, file), 'utf8');
+      try {
+        policies[name] = JSON.parse(text);
+      } catch (error) {
+        throw new Error(`${name} is not one JSON document: ${error.message}`);
+      }
     }
+    return { stdout, calls, policies, directory };
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
-  return policies;
 }
 
 // Actions that accept the s3:prefix condition key in MinIO (IAMActionConditionKeyMap).
@@ -256,15 +306,52 @@ function prefixConditionViolations(policies) {
   return violations;
 }
 
-test('MinIO policies name s3:prefix only under ForAllValues:StringLike with a Null=false guard', async () => {
-  const policies = bootstrapPolicies(await repositoryFile('infra/minio/bootstrap.sh'));
-  assert.deepEqual(Object.keys(policies).sort(), ['cleanup_policy', 'personal_policy', 'runtime_policy']);
-  assert.deepEqual(prefixConditionViolations(policies), []);
-  const listGrants = (name) => policies[name].Statement.filter((statement) => grantsListing([statement.Action].flat()));
-  assert.equal(listGrants('runtime_policy').length, 1);
-  assert.equal(listGrants('cleanup_policy').length, 1);
-  assert.equal(listGrants('personal_policy').length, 0);
-  assert.doesNotMatch(JSON.stringify(policies.personal_policy), /s3:prefix/u);
+test('provisioning gives MinIO exactly the reviewed IAM calls and policies', async () => {
+  const { stdout, calls, policies, directory } = await provisionWithFakeMc(await repositoryFile('infra/minio/bootstrap.sh'));
+  assert.match(stdout, /"status":"OBJECT_STORAGE_PROVISIONED"/u);
+  const users = {
+    'generic-operation-artifact-runtime': 'runtime-writer',
+    'generic-operation-artifact-personal-read': 'personal-reader',
+    'generic-operation-artifact-personal-cleanup': 'cleanup-writer',
+  };
+  const file = (name) => `${directory}/generic-operation-artifact-${name.replace('generic-operation-artifact-', '')}-policy.json`;
+  // Every IAM-surface call, in order: anything else (another create, an attach,
+  // anonymous access, a group, a service account) changes this list.
+  assert.deepEqual(
+    calls.filter((call) => /^(admin|anonymous|policy|idp)\b/u.test(call)),
+    [
+      ...Object.keys(users).map((name) => `admin policy create deployment ${name} ${file(name)}`),
+      ...Object.values(users).map((user) => `admin user add deployment ${user} ${user.split('-')[0]}-password-123`),
+      ...Object.entries(users).map(([name, user]) => `admin policy attach deployment ${name} --user ${user}`),
+      ...Object.values(users).map((user) => `admin user info deployment ${user} --json`),
+    ],
+  );
+  const named = {
+    runtime_policy: policies['generic-operation-artifact-runtime'],
+    personal_policy: policies['generic-operation-artifact-personal-read'],
+    cleanup_policy: policies['generic-operation-artifact-personal-cleanup'],
+  };
+  assert.deepEqual(Object.keys(policies).sort(), Object.keys(users).sort());
+  // MinIO decodes policy keys case-insensitively and keeps the last duplicate,
+  // so a "statement" key would replace "Statement": only these two may exist.
+  for (const [name, policy] of Object.entries(named)) {
+    assert.deepEqual(Object.keys(policy).sort(), ['Statement', 'Version'], name);
+    assert.ok(Array.isArray(policy.Statement), name);
+  }
+  assert.deepEqual(prefixConditionViolations(named), []);
+  const listGrants = (policy) => policy.Statement.filter((statement) => grantsListing([statement.Action].flat()));
+  const listGrant = (pattern) => ({
+    Effect: 'Allow',
+    Action: ['s3:ListBucketVersions'],
+    Resource: ['arn:aws:s3:::operation-artifacts-test'],
+    Condition: { 'ForAllValues:StringLike': { 's3:prefix': pattern }, Null: { 's3:prefix': 'false' } },
+  });
+  assert.deepEqual(listGrants(named.runtime_policy), [listGrant('generic-operation-results/v1/readiness/*')]);
+  assert.deepEqual(listGrants(named.cleanup_policy), [
+    listGrant(`generic-operation-results/v1/final/personal-data/sha256/??/${'?'.repeat(64)}`),
+  ]);
+  assert.deepEqual(listGrants(named.personal_policy), []);
+  assert.doesNotMatch(JSON.stringify(named.personal_policy), /s3:prefix/u);
 });
 
 test('the s3:prefix whitelist reports exactly what is wrong with each statement', () => {
@@ -308,22 +395,6 @@ test('the s3:prefix whitelist reports exactly what is wrong with each statement'
   assert.deepEqual(check({ ...withoutAction, NotAction: ['s3:GetObject'] }), [
     `${at}: unsupported statement shape (Effect Allow, no Action, extra keys: NotAction)`,
   ]);
-});
-
-test('bootstrapPolicies fails closed on a policy written outside the parsed heredocs', () => {
-  const policy = (name) => `cat > "$${name}" <<EOF\n{"Statement": []}\nEOF\n`;
-  const create = (name) => `mc admin policy create deployment ${name} "$${name}"\n`;
-  assert.deepEqual(Object.keys(bootstrapPolicies(policy('a') + create('a'))), ['a']);
-  for (const [label, script] of [
-    ['quoted heredoc', `${policy('a')}cat > "$b" <<'EOF'\n{"Statement": []}\nEOF\n${create('a')}${create('b')}`],
-    ['printf file', `${policy('a')}printf '{}' > "$b"\n${create('a')}${create('b')}`],
-    ['literal path', `${policy('a')}${create('a')}mc admin policy create deployment b /config/b.json\n`],
-    ['written twice', `${policy('a')}${policy('a')}${create('a')}`],
-    ['shell expansion', `cat > "$a" <<EOF\n{"Statement": ["$OTHER"]}\nEOF\n${create('a')}`],
-    ['escape', `cat > "$a" <<EOF\n{"Statement": ["s3:\\\\u004c"]}\nEOF\n${create('a')}`],
-  ]) {
-    assert.throws(() => bootstrapPolicies(script), undefined, label);
-  }
 });
 
 test('MinIO bootstrap rejects merged principals before the first mc mutation', async () => {
