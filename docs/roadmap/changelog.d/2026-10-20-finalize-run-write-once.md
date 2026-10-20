@@ -1,0 +1,31 @@
+---
+date: 2026-10-20
+title: Write a discovery run's outcome once, and record FAILED at finalize when its authority already ended
+---
+
+- 起因：`finalizeRun` 有两处缺陷。
+  - 授权已结束（准入租约到期、被撤销或预算耗尽）时收尾 `DONE` 或 `PARTIAL`：attest 直接抛错，什么都没写入，工作流因收尾错误失败，run 一直停在 `RUNNING`。准入租约的落地设计（`docs/superpowers/plans/2026-10-09-discovery-run-admission-lease.md` §5）写的是「超出租约记 FAILED」，实际却从来没有记上。
+  - 收尾结果已提交、但回执丢失后重试：会再更新一遍、计划版本再加 1，并再发一次 `DiscoveryRunCompleted` 和 `QualifyRequested`。
+- 改动：只改 `apps/api/src/temporal/discovery.activities.ts` 里的活动，工作流不动，也不需要 patch。
+  - 终态只写一次：
+    - 库里已经是同一个终态时直接返回。这一步只读不写（短暂行锁），放在 attest 之前，所以授权到期后的重试也能成功。只对 v2 信封做，旧信封照旧由 `ensureRunBudget` 挂起。
+    - 另一次尝试在本次预读之后、写锁之前提交了同一个终态时，同样算成功，即使授权恰在其间结束。
+    - 请求 `DONE` / `PARTIAL` 而库里已是另一个终态时，抛不可重试的 `DISCOVERY_RUN_ALREADY_FINALIZED`。
+    - `FAILED` 仍然只关闭 `RUNNING` 的 run。
+  - 授权已结束时收尾 `DONE` / `PARTIAL`：
+    - 在同一个写事务里改记 `FAILED`，`stats.failure = { stage: 'finalize', errorType, control: true }`。`errorType` 记结束原因的代码（到期、撤销、耗尽三者的处置不同）。
+    - 其余 stats 保留，回执比对照旧；fit 判过公司时照常请求评分。
+    - 之后以不可重试的原错误失败：工作流照样失败，但库里与它一致。回落的 `FAILED` 写入本身被拒时（例如回执不一致），抛出的仍是授权错误，回执错误放在 `cause` 里。
+    - 只有这三种「已结束」会改记 `FAILED`；其余 attest 失败（范围不符、授权无效、核验不可用）照原样抛出，什么都不写。
+  - `DiscoveryRunStage` 新增 `'finalize'`，并加入「已到 fit」的阶段集合。
+  - `packages/contracts/INTEGRATION.md` 写明这种收尾结果。
+- 测试：`discovery.activities.spec.ts` 先 RED 后 GREEN。
+  - 授权已结束时把 `DONE` / `PARTIAL` 改记 `FAILED(stage=finalize)`：3 例，覆盖到期、撤销、耗尽。这条替换了原来锁定「什么都不写」的用例。
+  - 已提交的重试：不 attest、不再写、不发事件，2 例。
+  - 已是别的终态时拒绝：3 例。
+  - 复审后补的 7 例：与另一次尝试重叠提交，授权有效、已结束各 1 例；其余 attest 失败照原样抛出，3 例；回落写入被拒时仍抛授权错误，1 例；旧信封即使库里已是同一终态也照旧挂起，1 例。其中修正行为对应的 6 例在修正前的实现上先确认为 RED。
+  - temporal、discovery 下共 2306 例通过。
+- 未做：
+  - 没有加「卡在 `RUNNING` 的 run」的兜底清理器（通过 terminate 或执行超时停下的 run）。
+  - 也没有改「授权结束后不花钱的收尾能否仍记 `DONE` / `PARTIAL`」这条口径；需要的话由产品负责人决定。
+  - 租约感知的软截止另起 PR：让 run 在租约到期之前就以 `PARTIAL` 收尾，这样多半不会走到这里。

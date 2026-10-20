@@ -2705,7 +2705,9 @@ describe("finalizeRun durable query receipt readback", () => {
   function finalizeHarness(
     stats: unknown = { perQuery: derived.perQuery },
     budgetStore: BudgetStore = authorityBudgetStore(),
-    runStatus = "RUNNING",
+    // The run's status at each read of its row, the last repeating: finalizeRun reads the row
+    // before attesting and again under the write lock.
+    runStatus: string | readonly string[] = "RUNNING",
     // Lead rows of the run's companies: a FAILED run that stopped at or after the fit stage
     // consults them for fit verdicts when its own stats carry none (the failure path builds
     // stats without `fit`).
@@ -2720,13 +2722,15 @@ describe("finalizeRun durable query receipt readback", () => {
       { canonicalId: RUN_COMPANY_ID },
       { canonicalId: RUN_COMPANY_ID },
     ]);
+    const statuses = typeof runStatus === "string" ? [runStatus] : runStatus;
+    let runReads = 0;
     const tx = {
       $queryRaw: vi.fn(async () => [
         {
           id: "40000000-0000-4000-8000-000000000001",
           plan_id: "50000000-0000-4000-8000-000000000001",
           stats,
-          status: runStatus,
+          status: statuses[Math.min(runReads++, statuses.length - 1)],
         },
       ]),
       discoveryRun: { update },
@@ -3061,13 +3065,18 @@ describe("finalizeRun durable query receipt readback", () => {
     });
   });
 
-  it.each(["DONE", "PARTIAL"] as const)(
-    "refuses a %s outcome once the run's authority has ended",
-    async (status) => {
-      const { activities, outboxCreate, update, planUpdate } = finalizeHarness(
-        null,
-        endedAuthorityStore("EXECUTION_BUDGET_GRANT_EXPIRED"),
-      );
+  // A DONE or PARTIAL write after the authority ended used to throw before writing anything, so the
+  // run stayed RUNNING for good (the workflow fails on a finalize error). The admission lease design
+  // records a run past its authority as FAILED, so the activity writes that outcome itself, keeping
+  // the ended code, then fails without retrying.
+  it.each([
+    ["DONE", "EXECUTION_BUDGET_GRANT_EXPIRED"],
+    ["PARTIAL", "EXECUTION_BUDGET_AUTHORITY_REVOKED"],
+    ["DONE", "EXECUTION_BUDGET_AUTHORITY_EXHAUSTED"],
+  ] as const)(
+    "records a %s outcome as FAILED at the finalize stage once the run's authority has ended (%s)",
+    async (status, code) => {
+      const { activities, outboxCreate, update, planUpdate } = finalizeHarness(null, endedAuthorityStore(code));
 
       await expect(
         activities.finalizeRun(
@@ -3075,15 +3084,156 @@ describe("finalizeRun durable query receipt readback", () => {
             planId: "50000000-0000-4000-8000-000000000001",
             icpId: "60000000-0000-4000-8000-000000000001",
             status,
-            stats: { failures: 0 },
+            stats: { failures: 0, fit: { match: 1, weak: 0, mismatch: 0 } },
           }),
         ),
-      ).rejects.toMatchObject({ code: "EXECUTION_BUDGET_GRANT_EXPIRED" });
+      ).rejects.toMatchObject({ type: "ExecutionBudgetGrantError", nonRetryable: true });
+
+      expect(update).toHaveBeenCalledTimes(1);
+      expect(update.mock.calls[0]![0]).toMatchObject({
+        data: {
+          status: "FAILED",
+          stats: {
+            fit: { match: 1 },
+            failure: { stage: "finalize", errorType: code, control: true },
+          },
+        },
+      });
+      expect(planUpdate).not.toHaveBeenCalled();
+      expect(outboxCreate.mock.calls.map(([call]) => call.data.eventType)).toEqual([
+        "DiscoveryRunCompleted",
+        "QualifyRequested",
+      ]);
+      expect(outboxCreate.mock.calls[0]![0]).toMatchObject({ data: { payload: { status: "FAILED" } } });
+    },
+  );
+
+  // finalizeRun writes a run's outcome once: a retry of a write that already committed (its result
+  // was lost) answers without attesting again, writing again or emitting a second event.
+  it.each(["DONE", "PARTIAL"] as const)(
+    "answers a retried %s write that already committed without a second write or event, even after the authority ended",
+    async (status) => {
+      const budgetStore = endedAuthorityStore("EXECUTION_BUDGET_GRANT_EXPIRED");
+      const { activities, outboxCreate, update, planUpdate } = finalizeHarness(null, budgetStore, status);
+
+      await activities.finalizeRun(
+        discoveryArgs("40000000-0000-4000-8000-000000000001", {
+          planId: "50000000-0000-4000-8000-000000000001",
+          icpId: "60000000-0000-4000-8000-000000000001",
+          status,
+          stats: { failures: 0 },
+        }),
+      );
+
+      expect(budgetStore.attestAuthorized).not.toHaveBeenCalled();
       expect(update).not.toHaveBeenCalled();
       expect(planUpdate).not.toHaveBeenCalled();
       expect(outboxCreate).not.toHaveBeenCalled();
     },
   );
+
+  it.each([
+    ["DONE", "FAILED"],
+    ["PARTIAL", "DONE"],
+    ["DONE", "PARTIAL"],
+  ] as const)(
+    "refuses a %s write over a run already recorded %s, without retrying",
+    async (status, runStatus) => {
+      const { activities, outboxCreate, update, planUpdate } = finalizeHarness(null, authorityBudgetStore(), runStatus);
+
+      await expect(
+        activities.finalizeRun(
+          discoveryArgs("40000000-0000-4000-8000-000000000001", {
+            planId: "50000000-0000-4000-8000-000000000001",
+            status,
+            stats: { failures: 0 },
+          }),
+        ),
+      ).rejects.toMatchObject({ type: "DISCOVERY_RUN_ALREADY_FINALIZED", nonRetryable: true });
+      expect(update).not.toHaveBeenCalled();
+      expect(planUpdate).not.toHaveBeenCalled();
+      expect(outboxCreate).not.toHaveBeenCalled();
+    },
+  );
+
+  // Another attempt can commit the same outcome between this attempt's first read and its write
+  // lock. The write then succeeded, even when the authority ended in between.
+  it.each([
+    ["a live authority", authorityBudgetStore],
+    ["an ended authority", () => endedAuthorityStore("EXECUTION_BUDGET_GRANT_EXPIRED")],
+  ] as const)(
+    "answers a DONE write that an overlapping attempt committed first, with %s",
+    async (_label, budgetStore) => {
+      const { activities, outboxCreate, update, planUpdate } = finalizeHarness(
+        null,
+        budgetStore(),
+        ["RUNNING", "DONE"],
+      );
+
+      await activities.finalizeRun(
+        discoveryArgs("40000000-0000-4000-8000-000000000001", {
+          planId: "50000000-0000-4000-8000-000000000001",
+          icpId: "60000000-0000-4000-8000-000000000001",
+          status: "DONE" as const,
+          stats: { failures: 0 },
+        }),
+      );
+
+      expect(update).not.toHaveBeenCalled();
+      expect(planUpdate).not.toHaveBeenCalled();
+      expect(outboxCreate).not.toHaveBeenCalled();
+    },
+  );
+
+  // Only an ended authority turns DONE or PARTIAL into FAILED: any other attestation failure is
+  // raised as it is, with nothing written.
+  it.each([
+    ["DONE", "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH"],
+    ["PARTIAL", "EXECUTION_BUDGET_GRANT_INVALID"],
+    ["DONE", "EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE"],
+  ] as const)(
+    "refuses a %s outcome without writing when attestation reports %s",
+    async (status, code) => {
+      const { activities, outboxCreate, update, planUpdate } = finalizeHarness(null, endedAuthorityStore(code));
+
+      await expect(
+        activities.finalizeRun(
+          discoveryArgs("40000000-0000-4000-8000-000000000001", {
+            planId: "50000000-0000-4000-8000-000000000001",
+            status,
+            stats: { failures: 0 },
+          }),
+        ),
+      ).rejects.toMatchObject({ code });
+      expect(update).not.toHaveBeenCalled();
+      expect(planUpdate).not.toHaveBeenCalled();
+      expect(outboxCreate).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps the ended authority as the error when the FAILED write it falls back to is refused", async () => {
+    // The stored receipts are missing from the requested stats, so the FAILED write is refused.
+    const { activities, outboxCreate, update } = finalizeHarness(
+      undefined,
+      endedAuthorityStore("EXECUTION_BUDGET_AUTHORITY_REVOKED"),
+    );
+
+    await expect(
+      activities.finalizeRun(
+        discoveryArgs("40000000-0000-4000-8000-000000000001", {
+          planId: "50000000-0000-4000-8000-000000000001",
+          status: "DONE" as const,
+          stats: { failures: 0 },
+        }),
+      ),
+    ).rejects.toMatchObject({
+      type: "ExecutionBudgetGrantError",
+      nonRetryable: true,
+      cause: { message: "DISCOVERY_QUERY_RECEIPT_FINALIZE_MISSING" },
+    });
+    expect(update).not.toHaveBeenCalled();
+    expect(outboxCreate).not.toHaveBeenCalled();
+  });
 
   it.each([
     "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH",
@@ -3173,6 +3323,25 @@ describe("finalizeRun durable query receipt readback", () => {
         planId: "50000000-0000-4000-8000-000000000001",
         status: "FAILED",
         stats: FAILURE_STATS,
+      } as never),
+    ).rejects.toMatchObject({
+      type: "EXECUTION_BUDGET_LEGACY_HISTORY_PARKED",
+      nonRetryable: true,
+    });
+    expect(update).not.toHaveBeenCalled();
+    expect(outboxCreate).not.toHaveBeenCalled();
+  });
+
+  it("keeps a DONE outcome without a v2 envelope parked, even over a run already recorded DONE", async () => {
+    const { activities, outboxCreate, update } = finalizeHarness(null, authorityBudgetStore(), "DONE");
+
+    await expect(
+      activities.finalizeRun({
+        workspaceId: DISCOVERY_BINDING.scopeKey,
+        runId: "40000000-0000-4000-8000-000000000001",
+        planId: "50000000-0000-4000-8000-000000000001",
+        status: "DONE",
+        stats: { failures: 0 },
       } as never),
     ).rejects.toMatchObject({
       type: "EXECUTION_BUDGET_LEGACY_HISTORY_PARKED",

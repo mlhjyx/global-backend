@@ -13,7 +13,8 @@ export type DiscoveryRunStage =
   | 'enrich'
   | 'signals'
   | 'watches'
-  | 'patentEnqueue';
+  | 'patentEnqueue'
+  | 'finalize';
 
 /** What a FAILED run records about the error that stopped it: no message, no details. */
 export interface DiscoveryRunFailure {
