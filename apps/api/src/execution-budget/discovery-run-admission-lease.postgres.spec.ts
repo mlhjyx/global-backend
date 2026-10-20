@@ -437,6 +437,17 @@ describe('workspace admission lease on PostgreSQL as the RLS-bound app principal
         }),
       ).rejects.toBeInstanceOf(BudgetExceededError);
       expect(await attestOutcome(exhausted!)).toBe('EXECUTION_BUDGET_AUTHORITY_EXHAUSTED');
+      // reserve checks the exhausted flag before it attests, so a reserve on an
+      // exhausted account stays a budget denial (fit counts it as skippedForBudget)
+      // and never surfaces the authority's EXHAUSTED marker.
+      await expect(
+        store.reserve({
+          workspaceId,
+          accountKey: exhausted!.accountKey,
+          operationKey: `lease-op-${randomUUID()}`,
+          estimatedMicrousd: 0n,
+        }),
+      ).rejects.toBeInstanceOf(BudgetExceededError);
 
       expect(await attestOutcome(foreign!, otherWorkspaceId)).toBe('EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH');
 
