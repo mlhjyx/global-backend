@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { access, chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import test from 'node:test';
 
@@ -176,42 +177,58 @@ function expectPolicyMapping(policy, action, prefix, privacyClass) {
   assert.match(statement, new RegExp(`"s3:RequestObjectTag/artifact-privacy": "${privacyClass}"`));
 }
 
-// The IAM calls and policy documents MinIO would receive, captured by running
+// The mc calls and policy documents MinIO would receive, captured by running
 // bootstrap.sh against a fake mc instead of parsing its text: shell can write
-// or rewrite a policy file in too many ways (indentation, continuation lines,
-// command substitution, a second write after the heredoc, swapped arguments)
-// for a parser to follow. Only /config/ and /tmp/ are redirected into the
-// sandbox. The fake mc answers exactly the calls a provisioning run makes and
-// exits 97 on any other, so a new mc command fails here until it is reviewed.
+// or rewrite a policy file in too many ways for a parser to follow. The run
+// follows the minio-bootstrap container where it is cheap to: compose
+// defaults, HOSTNAME and HOME set, PATH holding only the tools the pinned mc
+// image ships (cat, tr, id, mktemp, paste), stdin closed, and both dash and
+// bash invoked as sh (the image's /bin/sh is bash). /config/ and /tmp/ are
+// redirected into the sandbox as whole path words. The fake answers exactly the calls of a
+// provisioning run and records every other call as rejected, so even
+// `mc ... || true` cannot hide a new command.
+// Threat model: this guards against an accidental or reviewed-looking change,
+// not a deliberate bypass (an absolute /usr/bin/mc path, `command -p`, or a
+// branch on a file that exists only in the image would still escape it;
+// closing that needs the capture to run inside the pinned mc image).
 const FAKE_MC = `#!/bin/sh
 printf '%s\\n' "$*" >> "$MC_STATE/calls"
+reject() { printf '%s\\n' "$*" >> "$MC_STATE/rejected"; exit 97; }
 case "$*" in
-  'alias set '*|'mb --ignore-existing '*|'version enable '*|'encrypt set SSE-S3 '*|'admin user add '*) exit 0 ;;
-  'ls deployment') exit 0 ;;
-  'ilm rule import '*) cat > "$MC_STATE/ilm-$(printf '%s' "$4" | tr '/' '_')"; exit 0 ;;
-  'ilm rule export '*) cat "$MC_STATE/ilm-$(printf '%s' "$4" | tr '/' '_')"; exit 0 ;;
-  'version info '*) echo 'versioning is enabled'; exit 0 ;;
-  'encrypt info '*) echo 'auto encryption: sse-s3'; exit 0 ;;
+  'alias set deployment '*|'mb --ignore-existing deployment/'*|'version enable deployment/'*|'encrypt set SSE-S3 deployment/'*|'admin user add deployment '*) exit 0 ;;
+  'ls deployment')
+    if [ "$MC_REDEPLOY" = 1 ]; then printf '%s\\n' "[2026-10-19 00:00:00 UTC]     0B $MC_ARTIFACT_BUCKET/"; fi
+    exit 0 ;;
+  'ls --recursive --versions deployment/'*) [ "$MC_REDEPLOY" = 1 ] || reject "$@"; exit 0 ;;
+  'ilm rule import deployment/'*) /usr/bin/cat > "$MC_STATE/ilm-$(printf '%s' "$4" | /usr/bin/tr '/' '_')"; exit 0 ;;
+  'ilm rule export deployment/'*) /usr/bin/cat "$MC_STATE/ilm-$(printf '%s' "$4" | /usr/bin/tr '/' '_')"; exit 0 ;;
+  'version info deployment/'*) echo 'versioning is enabled'; exit 0 ;;
+  'encrypt info deployment/'*) echo 'auto encryption: sse-s3'; exit 0 ;;
   'admin policy create deployment '*)
-    [ "$#" -eq 6 ] || exit 98
-    count=$(ls "$MC_STATE" | grep -c '^policy-' || true)
-    cp "$6" "$MC_STATE/policy-$count-$5.json"; exit 0 ;;
+    [ "$#" -eq 6 ] || reject "$@"
+    count=$(( $(/usr/bin/cat "$MC_STATE/count" 2>/dev/null || echo 0) + 1 ))
+    echo "$count" > "$MC_STATE/count"
+    /usr/bin/cp "$6" "$MC_STATE/policy-$count-$5.json"; exit 0 ;;
   'admin policy attach deployment '*' --user '*)
-    [ "$#" -eq 7 ] || exit 98
+    [ "$#" -eq 7 ] || reject "$@"
     printf '%s %s\\n' "$7" "$5" >> "$MC_STATE/attached"; exit 0 ;;
   'admin user info deployment '*' --json')
-    policy=$(awk -v user="$5" '$1 == user { print $2 }' "$MC_STATE/attached" | paste -sd, -)
+    policy=$(/usr/bin/awk -v user="$5" '$1 == user { print $2 }' "$MC_STATE/attached" | /usr/bin/paste -sd, -)
     printf '{"accessKey":"%s","policyName":"%s","userStatus":"enabled"}\\n' "$5" "$policy"; exit 0 ;;
 esac
-echo "unexpected mc call: $*" >&2
-exit 97
+reject "$@"
 `;
 
+const IMAGE_TOOLS = ['cat', 'tr', 'id', 'mktemp', 'paste'];
+
+// The compose defaults where docker-compose.yml has one; the artifact variables have none.
 const PROVISIONING_ENV = {
+  HOSTNAME: 'minio-bootstrap',
+  HOME: '/root',
   MINIO_ENDPOINT: 'http://minio:9000',
-  MINIO_ROOT_USER: 'root-principal',
-  MINIO_ROOT_PASSWORD: 'root-password-123',
-  S3_BUCKET: 'site-assets-test',
+  MINIO_ROOT_USER: 'global',
+  MINIO_ROOT_PASSWORD: 'global-minio-dev',
+  S3_BUCKET: 'global-site-builder',
   GENERIC_OPERATION_ARTIFACT_S3_BUCKET: 'operation-artifacts-test',
   GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY: 'runtime-writer',
   GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY: 'runtime-password-123',
@@ -221,21 +238,39 @@ const PROVISIONING_ENV = {
   GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY: 'cleanup-password-123',
 };
 
-async function provisionWithFakeMc(bootstrapSource) {
+async function provisionWithFakeMc(bootstrapSource, { shell, redeploy }) {
   const directory = await mkdtemp(join(tmpdir(), 'artifact-policy-capture-'));
   try {
     const state = join(directory, 'state');
-    await execFileAsync('mkdir', [state]);
-    await writeFile(join(directory, 'mc'), FAKE_MC, 'utf8');
-    await chmod(join(directory, 'mc'), 0o700);
-    const configDirectory = new URL('../infra/minio/', import.meta.url).pathname;
-    const script = bootstrapSource.replaceAll('/config/', configDirectory).replaceAll('/tmp/', `${directory}/`);
+    const bin = join(directory, 'bin');
+    await execFileAsync('/usr/bin/mkdir', [state, bin]);
+    await writeFile(join(bin, 'mc'), FAKE_MC, 'utf8');
+    await chmod(join(bin, 'mc'), 0o700);
+    for (const tool of IMAGE_TOOLS) await symlink(`/usr/bin/${tool}`, join(bin, tool));
+    // /config and /tmp as whole path words, with or without a trailing slash.
+    const configDirectory = fileURLToPath(new URL('../infra/minio', import.meta.url));
+    const script = bootstrapSource.replace(/\/(config|tmp)\b/gu, (_match, root) =>
+      root === 'config' ? configDirectory : directory,
+    );
     await writeFile(join(directory, 'bootstrap.sh'), script, 'utf8');
-    const { stdout } = await execFileAsync('/bin/sh', [join(directory, 'bootstrap.sh')], {
-      env: { ...PROVISIONING_ENV, PATH: `${directory}:/usr/bin:/bin`, MC_STATE: state },
+    const run = execFileAsync(shell, [join(directory, 'bootstrap.sh')], {
+      argv0: 'sh',
+      timeout: 60_000,
+      env: {
+        ...PROVISIONING_ENV,
+        PATH: bin,
+        MC_STATE: state,
+        MC_REDEPLOY: redeploy ? '1' : '0',
+        MC_ARTIFACT_BUCKET: PROVISIONING_ENV.GENERIC_OPERATION_ARTIFACT_S3_BUCKET,
+      },
     });
-    const calls = (await readFile(join(state, 'calls'), 'utf8')).trim().split('\n');
-    const created = (await execFileAsync('ls', [state])).stdout.split('\n').filter((name) => name.startsWith('policy-'));
+    // The container's stdin is /dev/null: a read must see end of file, not hang.
+    run.child.stdin.end();
+    const { stdout, stderr } = await run;
+    const read = async (name) => readFile(join(state, name), 'utf8').catch((error) => (error.code === 'ENOENT' ? '' : Promise.reject(error)));
+    const rejected = await read('rejected');
+    const calls = (await read('calls')).trim().split('\n');
+    const created = (await execFileAsync('/usr/bin/ls', [state])).stdout.split('\n').filter((name) => name.startsWith('policy-'));
     const policies = {};
     for (const file of created) {
       const name = file.replace(/^policy-\d+-/u, '').replace(/\.json$/u, '');
@@ -247,7 +282,7 @@ async function provisionWithFakeMc(bootstrapSource) {
         throw new Error(`${name} is not one JSON document: ${error.message}`);
       }
     }
-    return { stdout, calls, policies, directory };
+    return { stdout, stderr, rejected, calls, policies, directory };
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -306,32 +341,64 @@ function prefixConditionViolations(policies) {
   return violations;
 }
 
-test('provisioning gives MinIO exactly the reviewed IAM calls and policies', async () => {
-  const { stdout, calls, policies, directory } = await provisionWithFakeMc(await repositoryFile('infra/minio/bootstrap.sh'));
-  assert.match(stdout, /"status":"OBJECT_STORAGE_PROVISIONED"/u);
-  const users = {
-    'generic-operation-artifact-runtime': 'runtime-writer',
-    'generic-operation-artifact-personal-read': 'personal-reader',
-    'generic-operation-artifact-personal-cleanup': 'cleanup-writer',
-  };
-  const file = (name) => `${directory}/generic-operation-artifact-${name.replace('generic-operation-artifact-', '')}-policy.json`;
-  // Every IAM-surface call, in order: anything else (another create, an attach,
-  // anonymous access, a group, a service account) changes this list.
-  assert.deepEqual(
-    calls.filter((call) => /^(admin|anonymous|policy|idp)\b/u.test(call)),
-    [
-      ...Object.keys(users).map((name) => `admin policy create deployment ${name} ${file(name)}`),
-      ...Object.values(users).map((user) => `admin user add deployment ${user} ${user.split('-')[0]}-password-123`),
-      ...Object.entries(users).map(([name, user]) => `admin policy attach deployment ${name} --user ${user}`),
-      ...Object.values(users).map((user) => `admin user info deployment ${user} --json`),
-    ],
-  );
+function expectedMcCalls(directory, redeploy) {
+  const env = PROVISIONING_ENV;
+  const artifact = `deployment/${env.GENERIC_OPERATION_ARTIFACT_S3_BUCKET}`;
+  const users = [
+    ['generic-operation-artifact-runtime', 'runtime', env.GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY, env.GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY],
+    ['generic-operation-artifact-personal-read', 'personal-read', env.GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_ACCESS_KEY, env.GENERIC_OPERATION_ARTIFACT_PERSONAL_READ_SECRET_KEY],
+    ['generic-operation-artifact-personal-cleanup', 'personal-cleanup', env.GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_ACCESS_KEY, env.GENERIC_OPERATION_ARTIFACT_CLEANUP_S3_SECRET_KEY],
+  ];
+  return [
+    `alias set deployment ${env.MINIO_ENDPOINT} ${env.MINIO_ROOT_USER} ${env.MINIO_ROOT_PASSWORD}`,
+    'ls deployment',
+    ...(redeploy ? [`ls --recursive --versions ${artifact}/generic-operation-results/v1/sha256/`] : []),
+    `mb --ignore-existing deployment/${env.S3_BUCKET}`,
+    `ilm rule import deployment/${env.S3_BUCKET}`,
+    `mb --ignore-existing ${artifact}`,
+    `version enable ${artifact}`,
+    `encrypt set SSE-S3 ${artifact}`,
+    `ilm rule import ${artifact}`,
+    `ilm rule export deployment/${env.S3_BUCKET}`,
+    `ilm rule export ${artifact}`,
+    `version info ${artifact}`,
+    `encrypt info ${artifact}`,
+    ...users.map(([name, file]) => `admin policy create deployment ${name} ${directory}/generic-operation-artifact-${file}-policy.json`),
+    ...users.map(([, , user, secret]) => `admin user add deployment ${user} ${secret}`),
+    ...users.map(([name, , user]) => `admin policy attach deployment ${name} --user ${user}`),
+    ...users.map(([, , user]) => `admin user info deployment ${user} --json`),
+  ];
+}
+
+const SHELLS = ['/bin/sh', '/bin/bash'];
+
+test('provisioning gives MinIO exactly the reviewed calls and policies, first deploy and redeploy, under dash and bash', async () => {
+  const bootstrap = await repositoryFile('infra/minio/bootstrap.sh');
+  let reference;
+  for (const shell of SHELLS) {
+    for (const redeploy of [false, true]) {
+      const label = `${shell} ${redeploy ? 'redeploy' : 'first deploy'}`;
+      const { stdout, stderr, rejected, calls, policies, directory } = await provisionWithFakeMc(bootstrap, { shell, redeploy });
+      assert.equal(rejected, '', `${label}: mc rejected a call`);
+      assert.equal(stderr, '', `${label}: bootstrap wrote to stderr`);
+      assert.match(stdout, /"status":"OBJECT_STORAGE_PROVISIONED"/u, label);
+      // Every mc call in order, unfiltered: a new command, flag or branch changes this list.
+      assert.deepEqual(calls, expectedMcCalls(directory, redeploy), label);
+      if (reference) assert.deepEqual(policies, reference, `${label}: same policies as the first run`);
+      else reference = policies;
+    }
+  }
+
   const named = {
-    runtime_policy: policies['generic-operation-artifact-runtime'],
-    personal_policy: policies['generic-operation-artifact-personal-read'],
-    cleanup_policy: policies['generic-operation-artifact-personal-cleanup'],
+    runtime_policy: reference['generic-operation-artifact-runtime'],
+    personal_policy: reference['generic-operation-artifact-personal-read'],
+    cleanup_policy: reference['generic-operation-artifact-personal-cleanup'],
   };
-  assert.deepEqual(Object.keys(policies).sort(), Object.keys(users).sort());
+  assert.deepEqual(Object.keys(reference).sort(), [
+    'generic-operation-artifact-personal-cleanup',
+    'generic-operation-artifact-personal-read',
+    'generic-operation-artifact-runtime',
+  ]);
   // MinIO decodes policy keys case-insensitively and keeps the last duplicate,
   // so a "statement" key would replace "Statement": only these two may exist.
   for (const [name, policy] of Object.entries(named)) {
