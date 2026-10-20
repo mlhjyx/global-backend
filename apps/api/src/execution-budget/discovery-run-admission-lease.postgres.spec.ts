@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PrismaService } from '../prisma/prisma.service';
+import { prismaDiscoveryRunLeaseReader } from '../temporal/discovery-run-lease';
 import { BudgetExceededError, PostgresBudgetStore } from '../tools/budget-store';
 import {
   ExecutionBudgetAuthorityRepository,
@@ -353,6 +354,38 @@ describe('workspace admission lease on PostgreSQL as the RLS-bound app principal
       });
       expect(reservation).toMatchObject({ replay: false, estimatedMicrousd: 0n });
       await expect(store.release(reservation)).resolves.toMatchObject({ chargedMicrousd: 0n, replay: false });
+    },
+    TIMEOUT,
+  );
+
+  liveDatabaseIt(
+    "reads the time left on a run's lease as app_user, the way attest judges it, and fails closed elsewhere",
+    async () => {
+      const workspaceId = await seedWorkspace();
+      const binding = await admit(workspaceId, discoveryRun());
+      const read = prismaDiscoveryRunLeaseReader(app);
+
+      const remaining = await read(binding);
+      expect(remaining).toBeGreaterThan((LEASE_SECONDS - 60) * 1000);
+      expect(remaining).toBeLessThanOrEqual(LEASE_SECONDS * 1000);
+
+      // Aging the row moves its lease with it: the time left shrinks by the same amount.
+      await age(binding.authorityId, PAST_GRANT_WINDOW);
+      const aged = await read(binding);
+      expect(aged).toBeLessThan(remaining - PAST_GRANT_WINDOW * 1000 + 5_000);
+      expect(aged).toBeGreaterThan(remaining - PAST_GRANT_WINDOW * 1000 - 30_000);
+
+      // A row without a lease answers with its Grant window, as attest does (expires in 240 s).
+      const unleased = await admit(workspaceId, understandingRun());
+      const window = await read(unleased);
+      expect(window).toBeGreaterThan(0);
+      expect(window).toBeLessThanOrEqual(240_000);
+
+      // Another workspace's scope sees no row: the reader fails closed as a control error.
+      const otherWorkspace = await seedWorkspace();
+      await expect(read({ ...binding, scopeKey: otherWorkspace })).rejects.toMatchObject({
+        code: 'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
+      });
     },
     TIMEOUT,
   );

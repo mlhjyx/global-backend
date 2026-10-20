@@ -177,6 +177,10 @@ describe("development fast-lane worker", () => {
     ]) {
       expect(call(lane, anchor), anchor).toBe(call(worker, anchor));
     }
+    // Discovery stages stop for the run's admission lease only where the reader is wired.
+    expect(call(worker, "createDiscoveryActivities(")).toContain(
+      "runLease: prismaDiscoveryRunLeaseReader(prisma)",
+    );
     for (const statement of [
       "gateway.paidLedger = costLedger;",
       "gateway.costReconciliationCatalog = costReconciliationCatalog;",

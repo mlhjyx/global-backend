@@ -135,6 +135,15 @@ import { settledModelFailureReason } from '../discovery/settled-model-failure';
 import { narrowBySourceHints, planQuerySkipReason } from '../discovery/plan-query-sources';
 import type { DiscoveryRunStage } from './discovery.run-failure';
 import { withUpstreamUnavailableRetryDelay } from './upstream-unavailable-retry';
+import {
+  DISCOVERY_LEASE_UNIT_MS,
+  startDiscoveryRunLease,
+  UNBOUNDED_DISCOVERY_RUN_LEASE,
+  upstreamWaitFitsLease,
+  withLeaseAwareQueryRetryDelay,
+  type DiscoveryRunLease,
+  type DiscoveryRunLeaseReader,
+} from './discovery-run-lease';
 
 export interface DiscoveryRunInput {
   workspaceId: string;
@@ -169,6 +178,12 @@ interface DiscoveryQueryExecutionResult {
   queryReceipt?: DiscoveryQueryReceipt;
   /** BI-30: the query ran on no provider; the workflow counts the reason in the run's stats. */
   skipReason?: DiscoveryQuerySkipReason;
+  /**
+   * The query ran on no provider because the run's admission lease had no room left for it: it
+   * ended with a zero receipt, and the workflow counts it in stats.skippedForLease. Never set
+   * together with `skipReason`.
+   */
+  skippedForLease?: true;
   /**
    * Model extractions the providers made for this query and the ones they skipped after a
    * failed call. Absent when no provider called a model, and on a replay that ran no provider.
@@ -260,6 +275,22 @@ function withReceiptSkip(
   return result.queryReceipt?.providers.length === 0
     ? { ...result, skipReason: reason() }
     : result;
+}
+
+/**
+ * A replayed query result. A zero receipt replayed once the query deadline has passed is counted
+ * as a lease stop: the deadline never comes back, so a receipt written then was one (a source
+ * switched off just before the deadline is the rare exception, and the run is PARTIAL either way).
+ */
+async function replayedQueryResult(
+  result: DiscoveryQueryExecutionResult,
+  reason: () => DiscoveryQuerySkipReason,
+  lease: () => Promise<DiscoveryRunLease>,
+): Promise<DiscoveryQueryExecutionResult> {
+  if (result.queryReceipt?.providers.length === 0 && !(await lease()).allows(DISCOVERY_LEASE_UNIT_MS.query)) {
+    return { ...result, skippedForLease: true };
+  }
+  return withReceiptSkip(result, reason);
 }
 
 function invalidDiscoveryQueryReceiptIdentity(): never {
@@ -640,8 +671,16 @@ export function createDiscoveryActivities(deps: {
   websiteProfile?: Pick<WebsiteProfileProvider, 'profile'>;
   /** Wall clock for the per-company pass time boxes. */
   now?: () => number;
+  /**
+   * Reads the time left on the run's admission lease, so a stage stops while the run can still
+   * finish PARTIAL (discovery-run-lease.ts). Without it nothing stops early.
+   */
+  runLease?: DiscoveryRunLeaseReader;
 }) {
   const clock = deps.now ?? Date.now;
+  /** Read once per activity, after its attest: the lease never changes once admitted. */
+  const readRunLease = async (binding: ExecutionBudgetBinding): Promise<DiscoveryRunLease> =>
+    deps.runLease ? startDiscoveryRunLease(await deps.runLease(binding), clock) : UNBOUNDED_DISCOVERY_RUN_LEASE;
   const budgets =
     deps.budgetStore ?? new UnavailableBudgetStore('discovery activities require an authoritative BudgetStore');
   const ensureRunBudget = async (
@@ -807,9 +846,10 @@ export function createDiscoveryActivities(deps: {
               'DOMAIN_ACK_DISCOVERY_GOVERNED_LINEAGE_REPLAY_INTEGRITY_HOLD',
             );
           }
-          return withReceiptSkip(
+          return replayedQueryResult(
             executionResult(prior.queryReceipt as DiscoveryQueryReceipt, prior.budgetTruncated),
             skipReason,
+            () => readRunLease(binding),
           );
         }
         if (prior.status === 'NOT_FOUND') {
@@ -831,10 +871,15 @@ export function createDiscoveryActivities(deps: {
       // BI-30：先路由、再做词表归一。路由不到适配器的查询（数据源在规划后被停用、源没有受治理血缘，或旧计划
       // 里没有 provider 的 source_class）就此跳过：不调词表归一模型、不调 provider，照常落一条零回执
       // （物化准入要求每条计划查询都有回执），并把跳过原因交给工作流按原因计数，run 不因此失败。
+      // A query the run's admission lease has no room for ends the same way, counted as a lease stop.
+      const lease = await readRunLease(binding);
+      const leaseStop = lineageLookup !== null && !lease.allows(DISCOVERY_LEASE_UNIT_MS.query);
       const sourceClass = args.query.source_class as SourceClass;
-      const classAdapters = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-        deps.providers.routeCompanyDiscovery(tx as never, sourceClass),
-      );
+      const classAdapters = leaseStop
+        ? []
+        : await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+            deps.providers.routeCompanyDiscovery(tx as never, sourceClass),
+          );
       const adapters = narrowBySourceHints(args.query.filters, classAdapters, (adapter) => adapter.key);
       if (adapters.length > MAX_DISCOVERY_PROVIDER_ADAPTERS) {
         throw ApplicationFailure.nonRetryable(
@@ -897,8 +942,9 @@ export function createDiscoveryActivities(deps: {
           }
         } catch (error) {
           // The terms resolved before the loss stay; the rest use the providers' vocabularies.
-          // A 429 or a refused gateway connection is not absorbed: the next attempt waits for it.
-          if (!isLostTaxonomyNormalization(error)) throw withUpstreamUnavailableRetryDelay(error);
+          // A 429 or a refused gateway connection is not absorbed: the next attempt waits for it,
+          // or starts past the query deadline when the lease cannot hold the wait.
+          if (!isLostTaxonomyNormalization(error)) throw withLeaseAwareQueryRetryDelay(error, lease);
           taxonomyFallback = true;
         }
       }
@@ -966,8 +1012,9 @@ export function createDiscoveryActivities(deps: {
         if (result.status === 'rejected' && isExecutionControlError(result.reason)) {
           // UNKNOWN physical-call/ACK state is a control failure: throw it and
           // never issue another provider wire from this Activity. An unavailable model
-          // upstream makes the next attempt wait instead of retrying within seconds.
-          throw withUpstreamUnavailableRetryDelay(result.reason);
+          // upstream makes the next attempt wait instead of retrying within seconds, or start
+          // past the query deadline when the lease cannot hold the wait.
+          throw withLeaseAwareQueryRetryDelay(result.reason, lease);
         }
         if (result.status !== 'fulfilled') continue;
         assertProductDiscoveryProvenance({ providerKey: result.value.key });
@@ -1015,6 +1062,7 @@ export function createDiscoveryActivities(deps: {
           budgetAuthorization,
           budgetTruncated,
         });
+        if (leaseStop) return { ...governed, skippedForLease: true };
         return withTaxonomyOutcome(
           withUnreplayable(
             withModelExtractions(withReceiptSkip(governed, skipReason), modelExtractions),
@@ -1457,6 +1505,8 @@ export function createDiscoveryActivities(deps: {
       previousCallCut: boolean;
       /** Companies left unjudged because their operation could not be replayed (part of `unjudged`). */
       unreplayable: number;
+      /** Companies left unjudged because the run's admission lease had no room for them; present only then. */
+      skippedForLease?: number;
     }> {
       if (
         (args.afterCompanyId !== undefined &&
@@ -1539,8 +1589,16 @@ export function createDiscoveryActivities(deps: {
       // on a retry, to an operation an earlier attempt left without a durable result.
       let previousCallCut = args.previousCallCut ?? false;
       let nextCompanyId: string | null = null;
+      let skippedForLease = 0;
+      const lease = await readRunLease(binding);
       const startedAt = clock();
       for (let i = 0; i < companies.length; i++) {
+        // A company the lease has no room for ends the stage: the rest count as skipped for the
+        // lease, nothing is handed on, and the run finishes PARTIAL.
+        if (!lease.allows(DISCOVERY_LEASE_UNIT_MS.fit)) {
+          skippedForLease = companies.length - i;
+          break;
+        }
         // Hand the rest to the next activity rather than outrun this one's timeout; every
         // activity judges at least one company, so the run always moves forward.
         if (i > 0 && clock() - startedAt >= FIT_PASS_TIME_BOX_MS) {
@@ -1584,6 +1642,12 @@ export function createDiscoveryActivities(deps: {
             if (lostOnReplay) unreplayable += 1;
             continue;
           }
+          // An unavailable upstream makes the next attempt wait; when the lease cannot hold the
+          // wait and one more judgment, the stage stops for the lease here instead of failing.
+          if (!upstreamWaitFitsLease(err, lease, DISCOVERY_LEASE_UNIT_MS.fit)) {
+            skippedForLease = companies.length - i;
+            break;
+          }
           throw withUpstreamUnavailableRetryDelay(err);
         }
         if (!judgment) {
@@ -1599,7 +1663,16 @@ export function createDiscoveryActivities(deps: {
           upsertLeadFit(tx, args.workspaceId, args.icpId, c.id, judgment),
         );
       }
-      return { judged, verdicts, skippedForBudget, unjudged, nextCompanyId, previousCallCut, unreplayable };
+      return {
+        judged,
+        verdicts,
+        skippedForBudget,
+        unjudged,
+        nextCompanyId,
+        previousCallCut,
+        unreplayable,
+        ...(skippedForLease > 0 ? { skippedForLease } : {}),
+      };
     },
 
     /**
@@ -1624,6 +1697,8 @@ export function createDiscoveryActivities(deps: {
       budgetTruncated: boolean;
       /** Where the next enrich activity continues once this one's time box ran out; null when none is left. */
       nextIndex: number | null;
+      /** Companies left unenriched because the run's admission lease had no room for them; present only then. */
+      skippedForLease?: number;
     }> {
       if (args.startIndex !== undefined && !isContinuationIndex(args.startIndex, ENRICH_LIMIT)) {
         invalidContinuation();
@@ -1686,8 +1761,15 @@ export function createDiscoveryActivities(deps: {
       let matched = 0;
       const startIndex = args.startIndex ?? 0;
       let nextIndex: number | null = null;
+      let skippedForLease = 0;
+      const lease = await readRunLease(binding);
       const startedAt = clock();
       for (let i = startIndex; i < companies.length; i++) {
+        // A company the lease has no room for ends the stage (see qualifyFitForRun).
+        if (!lease.allows(DISCOVERY_LEASE_UNIT_MS.enrich)) {
+          skippedForLease = companies.length - i;
+          break;
+        }
         // Hand the rest to the next activity rather than outrun this one's timeout.
         if (i > startIndex && clock() - startedAt >= ENRICH_PASS_TIME_BOX_MS) {
           nextIndex = i;
@@ -1780,6 +1862,7 @@ export function createDiscoveryActivities(deps: {
         provider: providersHit.size ? [...providersHit].join('+') : null,
         budgetTruncated: (await budgets.status({ workspaceId: binding.scopeKey, accountKey: binding.accountKey })).exhausted,
         nextIndex,
+        ...(skippedForLease > 0 ? { skippedForLease } : {}),
       };
     },
 
@@ -1825,6 +1908,11 @@ export function createDiscoveryActivities(deps: {
       previousUnreplayable: boolean;
       /** Workspace companies outside the run profiled with the quota the run's own companies left (contact-path backfill). */
       backfilled: number;
+      /**
+       * The run's own companies left unprofiled because the admission lease had no room for them
+       * (backfill companies are not counted); present only then.
+       */
+      skippedForLease?: number;
     }> {
       if (
         (args.startIndex !== undefined && !isContinuationIndex(args.startIndex, MAX_DISCOVERY_PROFILE_COMPANIES)) ||
@@ -1930,8 +2018,21 @@ export function createDiscoveryActivities(deps: {
       let previousUnreplayable = args.previousUnreplayable ?? false;
       const startIndex = args.startIndex ?? 0;
       let nextIndex: number | null = null;
+      let skippedForLease = 0;
+      // The run's own companies from `from` on that still wanted a profile.
+      const unprofiledRunCompanies = (from: number): number =>
+        setup.companies
+          .slice(from, setup.runCount)
+          .filter((company) => company.domain && !websiteProfileFreshAndCurrent(company.attributes, setup.contactPaths, nowMs))
+          .length;
+      const lease = await readRunLease(binding);
       const startedAt = clock();
       for (let i = startIndex; i < setup.companies.length; i++) {
+        // A company the lease has no room for ends the stage (see qualifyFitForRun).
+        if (!lease.allows(DISCOVERY_LEASE_UNIT_MS.websiteProfile)) {
+          skippedForLease = unprofiledRunCompanies(i);
+          break;
+        }
         // Hand the rest to the next activity rather than outrun this one's timeout.
         if (i > startIndex && clock() - startedAt >= PROFILE_PASS_TIME_BOX_MS) {
           nextIndex = i;
@@ -1982,7 +2083,13 @@ export function createDiscoveryActivities(deps: {
           } else if (isUnreplayableOperation(error) && !previousUnreplayable) {
             unreplayableSkip = true;
           } else if (isExecutionControlError(error)) {
-            // An unavailable model upstream makes the next attempt wait instead of retrying within seconds.
+            // An unavailable model upstream makes the next attempt wait instead of retrying within
+            // seconds; when the lease cannot hold the wait and one more profile, the stage stops
+            // for the lease here instead.
+            if (!upstreamWaitFitsLease(error, lease, DISCOVERY_LEASE_UNIT_MS.websiteProfile)) {
+              skippedForLease = unprofiledRunCompanies(i);
+              break;
+            }
             throw withUpstreamUnavailableRetryDelay(error);
           }
           /* 单家画像失败不影响其余 */
@@ -2087,6 +2194,7 @@ export function createDiscoveryActivities(deps: {
         unreplayable,
         previousUnreplayable,
         backfilled,
+        ...(skippedForLease > 0 ? { skippedForLease } : {}),
       };
     },
 
@@ -2302,6 +2410,8 @@ export function createDiscoveryActivities(deps: {
       skippedSubjects: number;
       /** Companies skipped because an operation could not be replayed. */
       unreplayable: number;
+      /** Companies left unwatched because the run's admission lease had no room for them; present only then. */
+      skippedForLease?: number;
     }> {
       const binding = await ensureRunBudget(args);
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
@@ -2354,7 +2464,15 @@ export function createDiscoveryActivities(deps: {
       let skippedSubjects = 0;
       let unreplayable = 0;
       let previousUnreplayable = false;
-      for (const c of companies.slice(0, WATCH_REGISTER_LIMIT)) {
+      let skippedForLease = 0;
+      const lease = await readRunLease(binding);
+      const watchCompanies = companies.slice(0, WATCH_REGISTER_LIMIT);
+      for (const [index, c] of watchCompanies.entries()) {
+        // A company the lease has no room for ends the stage (see qualifyFitForRun).
+        if (!lease.allows(DISCOVERY_LEASE_UNIT_MS.watches)) {
+          skippedForLease = watchCompanies.length - index;
+          break;
+        }
         try {
           if (
             !(await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
@@ -2387,7 +2505,13 @@ export function createDiscoveryActivities(deps: {
           /* 单家注册失败（无域名/sitemap 不可达/DAT-011）不影响其余 */
         }
       }
-      return { candidates: companies.length, registered, skippedSubjects, unreplayable };
+      return {
+        candidates: companies.length,
+        registered,
+        skippedSubjects,
+        unreplayable,
+        ...(skippedForLease > 0 ? { skippedForLease } : {}),
+      };
     },
 
     /**

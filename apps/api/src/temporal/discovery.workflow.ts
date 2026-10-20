@@ -84,6 +84,8 @@ interface FitTotals {
   skippedForBudget?: number;
   unjudged?: number;
   unreplayable?: number;
+  /** Absent in results recorded before the lease soft deadline existed. */
+  skippedForLease?: number;
 }
 
 interface WebsiteProfileTotals {
@@ -96,6 +98,7 @@ interface WebsiteProfileTotals {
   unreplayable?: number;
   /** Workspace companies outside the run whose contact paths were read with the leftover quota; absent in older results. */
   backfilled?: number;
+  skippedForLease?: number;
 }
 
 interface EnrichTotals {
@@ -103,6 +106,7 @@ interface EnrichTotals {
   matched: number;
   provider: string | null;
   budgetTruncated: boolean;
+  skippedForLease?: number;
 }
 
 function addFitPass(total: FitTotals, pass: FitTotals): FitTotals {
@@ -116,6 +120,7 @@ function addFitPass(total: FitTotals, pass: FitTotals): FitTotals {
     skippedForBudget: (total.skippedForBudget ?? 0) + (pass.skippedForBudget ?? 0),
     unjudged: (total.unjudged ?? 0) + (pass.unjudged ?? 0),
     unreplayable: (total.unreplayable ?? 0) + (pass.unreplayable ?? 0),
+    skippedForLease: (total.skippedForLease ?? 0) + (pass.skippedForLease ?? 0),
   };
 }
 
@@ -128,6 +133,7 @@ function addWebsiteProfilePass(total: WebsiteProfileTotals, pass: WebsiteProfile
     unclassified: (total.unclassified ?? 0) + (pass.unclassified ?? 0),
     unreplayable: (total.unreplayable ?? 0) + (pass.unreplayable ?? 0),
     backfilled: (total.backfilled ?? 0) + (pass.backfilled ?? 0),
+    skippedForLease: (total.skippedForLease ?? 0) + (pass.skippedForLease ?? 0),
   };
 }
 
@@ -143,6 +149,7 @@ function addEnrichPass(total: EnrichTotals, pass: EnrichTotals): EnrichTotals {
     matched: total.matched + pass.matched,
     provider: mergeProviders(total.provider, pass.provider),
     budgetTruncated: total.budgetTruncated || pass.budgetTruncated,
+    skippedForLease: (total.skippedForLease ?? 0) + (pass.skippedForLease ?? 0),
   };
 }
 
@@ -210,6 +217,8 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
   let queryCount = 0;
   // Queries counted as failed because their retries met an operation they cannot replay.
   let unreplayableQueries = 0;
+  // Queries that ran on no provider because the admission lease had no room left for them.
+  let leaseSkippedQueries = 0;
   // Term normalization per query: lost its model call and ran on the providers' vocabularies,
   // or called no model because no routed source reads resolved codes (W2). Counts only.
   let taxonomyFallbacks = 0;
@@ -373,6 +382,8 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         // Absent in histories recorded before the counters existed.
         if (r.taxonomyFallback === true) taxonomyFallbacks += 1;
         if (r.taxonomyModelSkipped === true) taxonomyModelSkips += 1;
+        // Absent in results recorded before the lease soft deadline existed.
+        if (r.skippedForLease === true) leaseSkippedQueries += 1;
         // Absent in histories recorded before the activity absorbed such a loss.
         previousQueryUnreplayable = r.unreplayable === true;
         if (previousQueryUnreplayable) {
@@ -496,6 +507,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       registered: number;
       skippedSubjects?: number;
       unreplayable?: number;
+      skippedForLease?: number;
     } = {
       candidates: 0,
       registered: 0,
@@ -543,6 +555,19 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       watches: watches.unreplayable ?? 0,
     };
     const unreplayableSkipCount = Object.values(unreplayableSkips).reduce((sum, count) => sum + count, 0);
+    // Queries and companies the stages left because the admission lease had no room for them,
+    // shown only for the stages that left any. Absent in results recorded before the lease soft
+    // deadline existed, so replays keep their status.
+    const leaseSkips = Object.fromEntries(
+      Object.entries({
+        queries: leaseSkippedQueries,
+        websiteProfile: websiteProfile.skippedForLease ?? 0,
+        fit: fit.skippedForLease ?? 0,
+        enrich: enrich.skippedForLease ?? 0,
+        watches: watches.skippedForLease ?? 0,
+      }).filter(([, count]) => count > 0),
+    );
+    const leaseSkipCount = Object.values(leaseSkips).reduce((sum, count) => sum + count, 0);
     let status = resolveRunStatus({
       failures,
       totalQueries: queries.length,
@@ -554,6 +579,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       droppedExtractions: modelExtractions.failed,
       unreplayableSkips: unreplayableSkipCount,
       profileStageFailed: websiteProfileStageFailed,
+      leaseSkips: leaseSkipCount,
     });
     if (usesRawGovernance && governanceDenied > 0) {
       status = acceptedRaw === 0 ? 'FAILED' : status === 'DONE' ? 'PARTIAL' : status;
@@ -567,6 +593,11 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     ) {
       status = 'FAILED';
     }
+    // The lease left no room for a single query that could bring data (the run started late, say):
+    // FAILED keeps the plan READY for another run instead of consuming it on nothing.
+    if (leaseSkippedQueries > 0 && leaseSkippedQueries + failures >= queries.length) {
+      status = 'FAILED';
+    }
     outcome = {
       status,
       stats: {
@@ -575,6 +606,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         ...extractionStats(),
         // Shown only when a company was skipped, so runs without a skip keep their stats shape.
         ...(unreplayableSkipCount > 0 ? { unreplayableSkips } : {}),
+        ...(leaseSkipCount > 0 ? { skippedForLease: leaseSkips } : {}),
         // Shown only when it happened; neither changes the status (the queries ran).
         ...(taxonomyFallbacks > 0 ? { taxonomyFallback: taxonomyFallbacks } : {}),
         ...(taxonomyModelSkips > 0 ? { taxonomyModelSkipped: taxonomyModelSkips } : {}),

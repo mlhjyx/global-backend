@@ -712,6 +712,134 @@ describe('discoveryWorkflow queries skipped because their source is off (BI-30)'
   });
 });
 
+describe("discoveryWorkflow stages that stopped for the run's admission lease", () => {
+  const QUERIES = [0, 1, 2].map((priority) => ({
+    source_class: 'public_intelligence',
+    filters: {},
+    keywords: [],
+    priority,
+  }));
+
+  function executed(queryOrdinal: number, accepted: number, extra: Record<string, unknown> = {}) {
+    return {
+      rawCount: accepted,
+      quarantinedCount: 0,
+      rejectedCount: 0,
+      duplicateCount: 0,
+      costCents: 0,
+      provider: accepted > 0 ? 'public_web' : null,
+      budgetTruncated: false,
+      queryReceipt: {
+        schemaVersion: 'discovery-query-receipt/v1',
+        queryKey: String(queryOrdinal + 1).repeat(64),
+        queryOrdinal,
+        sourceClass: 'public_intelligence',
+        providers: accepted > 0 ? ['public_web'] : [],
+        accepted,
+        quarantined: 0,
+        rejected: 0,
+        governanceDenied: 0,
+        duplicate: 0,
+        usageQuantity: accepted,
+        costCents: 0,
+      },
+      ...extra,
+    };
+  }
+  const finalStats = () =>
+    (acts.finalizeRun.mock.calls[0]![0] as { status: string; stats: Record<string, unknown> });
+
+  it('finalizes PARTIAL with the fit companies left for the lease, apart from the budget and unjudged counts', async () => {
+    primeDiscovery();
+    acts.qualifyFitForRun.mockResolvedValueOnce({
+      judged: 3,
+      verdicts: { match: 3 },
+      skippedForBudget: 0,
+      unjudged: 0,
+      nextCompanyId: null,
+      previousCallCut: false,
+      skippedForLease: 7,
+    });
+
+    await discoveryWorkflow(discoveryInput());
+
+    const { status, stats } = finalStats();
+    expect(status).toBe('PARTIAL');
+    expect(stats).toMatchObject({
+      skippedForLease: { fit: 7 },
+      budgetTruncated: false,
+      fitUnjudged: 0,
+      fitSkippedForBudget: 0,
+    });
+  });
+
+  it('counts the queries the lease left, apart from the BI-30 skips, and still materializes the rest', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: QUERIES });
+    acts.executeQuery
+      .mockResolvedValueOnce(executed(0, 1))
+      .mockResolvedValueOnce(executed(1, 0, { skippedForLease: true }))
+      .mockResolvedValueOnce(executed(2, 0, { skippedForLease: true }));
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.canonicalizeRun).toHaveBeenCalledOnce();
+    const { status, stats } = finalStats();
+    expect(status).toBe('PARTIAL');
+    expect(stats).toMatchObject({ skippedForLease: { queries: 2 }, failures: 0, queries: 3 });
+    expect(stats).not.toHaveProperty('skippedQueries');
+  });
+
+  it('adds up what every stage left for the lease across its passes', async () => {
+    primeDiscovery();
+    acts.profileWebsitesForRun
+      .mockResolvedValueOnce({ profiled: 1, matched: 0, skippedSubjects: 0, budgetTruncated: false, nextIndex: 1 })
+      .mockResolvedValueOnce({ profiled: 0, matched: 0, skippedSubjects: 0, budgetTruncated: false, nextIndex: null, skippedForLease: 4 });
+    acts.enrichRun.mockResolvedValueOnce({ matched: 0, enriched: 1, provider: null, budgetTruncated: false, nextIndex: null, skippedForLease: 2 });
+    acts.registerWatchesForRun.mockResolvedValueOnce({ candidates: 3, registered: 0, skippedSubjects: 0, unreplayable: 0, skippedForLease: 3 });
+
+    await discoveryWorkflow(discoveryInput());
+
+    const { status, stats } = finalStats();
+    expect(status).toBe('PARTIAL');
+    expect(stats.skippedForLease).toEqual({ websiteProfile: 4, enrich: 2, watches: 3 });
+  });
+
+  it('fails a run the lease left no query to bring data for, keeping its plan READY', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: QUERIES.slice(0, 2) });
+    acts.executeQuery
+      .mockResolvedValueOnce(executed(0, 0, { skippedForLease: true }))
+      .mockResolvedValueOnce(executed(1, 0, { skippedForLease: true }));
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(finalStats()).toMatchObject({ status: 'FAILED', stats: { skippedForLease: { queries: 2 } } });
+  });
+
+  it('fails a run whose only other queries lost their provider to an unreplayable operation', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: QUERIES.slice(0, 2) });
+    acts.executeQuery
+      .mockResolvedValueOnce(executed(0, 0, { unreplayable: true }))
+      .mockResolvedValueOnce(executed(1, 0, { skippedForLease: true }));
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(finalStats().status).toBe('FAILED');
+  });
+
+  it('keeps DONE and the stats shape of a run the lease did not cut short', async () => {
+    primeDiscovery();
+
+    await discoveryWorkflow(discoveryInput());
+
+    const { status, stats } = finalStats();
+    expect(status).toBe('DONE');
+    expect(stats).not.toHaveProperty('skippedForLease');
+  });
+});
+
 describe('discoveryWorkflow model extractions dropped after a failed call', () => {
   const QUERIES = [
     { source_class: 'public_intelligence', filters: { source_hint: 'public_web' }, keywords: ['Pumpen'], priority: 1 },

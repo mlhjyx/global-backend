@@ -104,6 +104,13 @@
    - 查询活动因**普通**错误（不是控制错误）用尽重试时，这条查询没有回执，run 立即停在查询阶段：判 `FAILED`，`stats.failure = { stage: 'query', errorType, control: false }`（`errorType` 是活动最后一次尝试的错误类型，不含消息），后面的查询不再执行；计划保持 `READY`，但同一计划不能再执行（见上面「公司抽取」一条）。活动最多尝试 3 次（等于预算账本对同一操作的预留上限）。失败是模型上游不可用时（网关回 429 或除 504/524 以外的 5xx，此时 `control: false`；或网关地址拒绝连接，此时按控制错误记 `control: true`），第 2 次尝试前等 5 分钟、第 3 次前等 25 分钟，所以半小时左右以内恢复的上游故障不会让 run 停；这类失败的预留已退回，等待不花钱；更长的故障照旧停在查询阶段。fit 阶段遇到同样的失败按同样的间隔重试。`stats.failures` 只计数据源在重试时遇到无法重放的操作、因而以零回执结束的查询（与 `stats.unreplayableSkips.queries` 相同）；没找到记录、或数据源被停用而以 `accepted: 0` 回执结束的查询不计，这次停止也不计。
    - 官网画像阶段遇到同样的上游不可用时，下一次尝试前等 25 分钟（这个阶段只有 2 次尝试）；仍然失败时画像阶段提前结束，fit 照常判定余下的公司（没有画像证据），run 至少判 `PARTIAL`，`stats.websiteProfile.stageFailed = true`（只在发生时出现；画像阶段因其他普通错误提前结束时同样如此）。
    - 各阶段都跑完、要以 `DONE` 或 `PARTIAL` 收尾时，如果这次 run 的授权已经结束（准入租约到期、被撤销或预算耗尽），run 改记 `FAILED`，`stats.failure = { stage: 'finalize', errorType, control: true }`。其中 `errorType` 是结束原因的代码，取 `EXECUTION_BUDGET_GRANT_EXPIRED`、`EXECUTION_BUDGET_AUTHORITY_REVOKED` 或 `EXECUTION_BUDGET_AUTHORITY_EXHAUSTED`；其余 stats 照常保留；fit 判过公司时照常请求评分。此前这种情况下 run 会一直停在 `RUNNING`。授权在更早的阶段就结束时，run 记在那一阶段（下一次核验所在的阶段），`errorType` 一般是 `ExecutionBudgetGrantError`。判断「授权已结束」请看 `control: true`，不要按 `errorType` 的写法区分。同一结果重复写入（例如收尾结果已提交但回执丢失后重试）不会再写第二次，也不会再发第二个 `DiscoveryRunCompleted`。
+   - 准入租约（准入后 3 小时）快用完时，run 提前收工，不再一直跑到租约过期再判 `FAILED`。查询、官网画像、fit、富集、监控注册这几个阶段，每开始一条查询或一家公司之前，先看剩余租约够不够在收尾预留（10 分钟）之前做完这一条；不够就停下，余下的计入 `stats.skippedForLease`，run 判 `PARTIAL`，评分照常请求。
+     - `stats.skippedForLease` 只在发生时出现，按阶段计数，只列有跳过的阶段：`queries`、`websiteProfile`（只计本 run 自己的公司）、`fit`、`enrich`、`watches`。
+     - 因租约跳过的查询照常落一条零回执（`providers: []`），不带 `skipReason`，不计入 `stats.skippedQueries` 和 `stats.failures`。
+     - 每条查询都因租约跳过、或因无法重放以零回执结束，没有一条带来数据时（例如 run 在准入后很久才开始），run 判 `FAILED`，计划保持 `READY`。
+     - 模型上游不可用时的等待（见上面「查询活动」一条），如果租约装不下「等待 + 再做一条」：fit 和官网画像就地停下，余下的按租约跳过计数；查询把下一次尝试推迟到刚过查询截止点，那次尝试以租约零回执结束。所以租约最后约半小时内遇到上游故障，结果是 `PARTIAL` 而不是 `FAILED`；最后一次尝试也失败时照旧判 `FAILED`。这样结束的查询零回执记 `costCents: 0`，之前几次尝试实际花的钱以预算账本为准。
+     - 被跳过的公司不会自动补判（fit 的补判任务目前停用），被跳过的查询也不会自动重跑（`PARTIAL` 会把计划标为 `EXECUTED`）。
+     - 信号阶段暂未按租约提前停下：它越过租约时，run 仍记 `FAILED`（记在信号阶段，或按上一条记在 finalize）。
    - `stats.websiteProfile`：`profiled` / `matched` / `unclassified` 只计本 run 自己的公司；`backfilled` 是开关 `company_contact` 打开时，用本 run 剩下的画像配额补读联系路径的工作区存量公司数（不在本 run 里；这个键自评分规则 v3 跟进起才有，更早的 run 的 stats 里没有它）。补读候选里，从未尝试过的公司优先，其次是上次尝试最早的；run 创建前 7 天内尝试过的公司（不论读到与否）不补读。
 4. 结果：`GET /canonical-companies`（`?status=NEW|ENRICHED|SUPPRESSED`）；详情含**字段级 Evidence**（每个字段值来自哪个源、什么许可）
    - 过了 fit 门的高价值公司自动做**多源富集**（互补并跑，均 CC0 直连数据）：
