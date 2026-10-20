@@ -76,13 +76,13 @@ PDR-004 is a forward amendment: it preserves PDR-003 as dated provenance while s
 
 PRD 4.0（L0 产品宪章 / L2 路线图与 Release 门等，目前在私有目录，入库待 PRD4-D10）列了待拍板项 D1–D19，全量状态与拍板日期登记在[冲突与开放决策登记](../governance/conflict-register.md)。本节只登记**已拍板、且改变架构或运行约束**的承重决定；`ACCEPTED` 只表示决策生效，不表示已全部落地，落地事实以[当前状态](../status/current.md)为准。
 
-| ID | 决策 | 拍板 | 落地（截至 2026-10-14） | 与既有 ADR 的关系 | 状态 |
+| ID | 决策 | 拍板 | 落地（PR） | 与既有 ADR 的关系 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| PRD4-D2 | R4 平台授权冻结：不在 R4 准入（capability、撤销、fence-ack、target-lookup、机器 token）上继续投入，保留出网围栏；平台 schedule 在 RL1 期间继续暂停；平台工作流迁进 customer worker 另出设计 | 2026-10-10 | 设计见 [`2026-10-10-platform-schedule-admission-and-writer-grants.md`](../superpowers/plans/2026-10-10-platform-schedule-admission-and-writer-grants.md)（#625）；4 个平台 schedule 保持 paused；迁移设计未做；每次换镜像仍续 7 天部署绑定与准入回执 | 不改 ADR-024 的 Budget Grant 路径。R4 撤销投递链仍未打通（`BLOCKED_PENDING_BACKEND_4A4`），platform Worker 就绪只代表事实可观察，不代表撤销能真正送达；三个 R4 计划因此改为 `SUPERSEDED` | ACCEPTED |
-| PRD4-D3 | 客户写入准入按客户依赖集合判定，与 platform Worker 就绪解耦（方案 A，含建站写入） | 2026-10-10 | #627，2026-10-11 上线；`/health/ready` 整体口径不变；方案 C 另立任务，未做 | 细化 ADR-024 与 AGENTS §4「API 不接新工作按该工作自身的依赖集合判定」 | ACCEPTED |
-| PRD4-D9 | 制裁名单先走运营刷新、核对后打开三个源；职能邮箱按 BI-14 做公司级；LIA 时机未定 | 2026-10-10（部分拍板） | #629 的运营刷新命令；2026-10-11 打开 OFAC SDN、OFAC Consolidated、EU FSF 三源；第五门尚未在验收数据上执行 | ADR-005 出网门的登记例外（AGENTS §6）：该命令不经 ToolBroker 持有调用与预算回执，仍受 source_policy 与 net-guard 约束；ADR-010 的制裁第五门不变 | ACCEPTED |
-| PRD4-D14 | 获客任务允许上游以 Flash 档替代所请求的 pro 档，trace 与账本如实记为 Flash；建站等其他任务仍只认 pro；官方备用上游可选 | 2026-10-11 | #633；xin 已打开部署级开关 `MODEL_IDENTITY_SUBSTITUTES`（默认关闭）；官方备用上游未接 | 不改 ADR-016、ADR-020…023 管辖的建站任务路由与执行语义 | ACCEPTED |
-| PRD4-D16 | 个人数据路径保持现状：`decision_maker`、`companies_house`、`inpi_rne`、`smtp_self` 保持 ENABLED，展会 Algolia 来源保留，产品负责人风险自担；验收 run 存下个人数据不再停止，改为如实计数并注明来源；不新写抽邮箱、电话的自动化 | 2026-10-11 | 无代码改动；个人数据三张表当前 0 行 | 没有修订 ADR-010 的存储侧条款（列级加密、删除链、个人数据不写 Trace / 日志 / Prompt、无 LIA 不解锁触达）；PRD 4.0 L0 的「不探 SMTP、不猜邮箱」红线与本决定冲突，待 PRD 4.0 同步 | ACCEPTED |
-| PRD4-BI14 | 可达性改按公司级联系路径计分：联系页、Impressum、联系表单、供应商页任一存在即可达；只存链接，不抽邮箱和电话 | 2026-10-10 | PR-1 #630（链接通路，`company_contact` 默认 DISABLED）已合并；评分侧 #649（评分规则 v3）在途、未合并；`docs/product-scope.md` 的可达性定义随 #649 修改 | 改变 ADR-010 评分中可达性一维的输入口径，不改评分确定性、版本化与 feature snapshot 原则 | ACCEPTED |
+| PRD4-D2 | R4 平台授权冻结：不在 R4 准入（capability、撤销、fence-ack、target-lookup、机器 token）上继续投入，保留出网围栏；平台 schedule 在 RL1 期间继续暂停；平台工作流迁进 customer worker 另出设计 | 2026-10-10 | 设计见 [`2026-10-10-platform-schedule-admission-and-writer-grants.md`](../superpowers/plans/2026-10-10-platform-schedule-admission-and-writer-grants.md)（#625） | 不改 ADR-024 的 Budget Grant 路径。R4 撤销投递链仍未打通（`BLOCKED_PENDING_BACKEND_4A4`），platform Worker 就绪只代表事实可观察，不代表撤销能真正送达；三个 R4 计划因此改为 `SUPERSEDED` | ACCEPTED |
+| PRD4-D3 | 客户写入准入按客户依赖集合判定，与 platform Worker 就绪解耦（方案 A，含建站写入） | 2026-10-10 | #627；方案 C 另立任务 | 细化 ADR-024 与 AGENTS §4「API 不接新工作按该工作自身的依赖集合判定」 | ACCEPTED |
+| PRD4-D9 | 制裁名单先走运营刷新、核对后打开三个源；职能邮箱按 BI-14 做公司级；LIA 时机未定 | 2026-10-10（部分拍板） | #629 的运营刷新命令 | ADR-005 出网门的登记例外（AGENTS §6）：该命令不经 ToolBroker 持有调用与预算回执，仍受 source_policy 与 net-guard 约束；ADR-010 的制裁第五门不变 | ACCEPTED |
+| PRD4-D14 | 获客任务允许上游以 Flash 档替代所请求的 pro 档，trace 与账本如实记为 Flash；建站等其他任务仍只认 pro；官方备用上游可选 | 2026-10-11 | #633（部署级开关 `MODEL_IDENTITY_SUBSTITUTES`，默认关闭） | 不改 ADR-016、ADR-020…023 管辖的建站任务路由与执行语义 | ACCEPTED |
+| PRD4-D16 | 个人数据路径保持现状：`decision_maker`、`companies_house`、`inpi_rne`、`smtp_self` 保持 ENABLED，展会 Algolia 来源保留，产品负责人风险自担；验收 run 存下个人数据不再停止，改为如实计数并注明来源；不新写抽邮箱、电话的自动化 | 2026-10-11 | 无代码改动 | 没有修订 ADR-010 的存储侧条款（列级加密、删除链、个人数据不写 Trace / 日志 / Prompt、无 LIA 不解锁触达）；PRD 4.0 L0 的「不探 SMTP、不猜邮箱」红线与本决定冲突，待 PRD 4.0 同步 | ACCEPTED |
+| PRD4-BI14 | 可达性改按公司级联系路径计分：联系页、Impressum、联系表单、供应商页任一存在即可达；只存链接，不抽邮箱和电话 | 2026-10-10 | PR-1 #630（链接通路，`company_contact` 默认 DISABLED）；评分侧 #649（评分规则 v3，同一 PR 改了 `docs/product-scope.md` 的可达性定义） | 改变 ADR-010 评分中可达性一维的输入口径，不改评分确定性、版本化与 feature snapshot 原则 | ACCEPTED |
 
 > Site Builder 的滚动实现状态与施工顺序不在 ADR 注册表维护；统一见 [status/current](../status/current.md) 与 [release-plan](../roadmap/release-plan.md)。`ACCEPTED` 始终不等于已实现。

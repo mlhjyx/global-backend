@@ -5,13 +5,13 @@
 > 状态：`CURRENT`
 > 当前事实来源：[产品范围](../product-scope.md)、[当前架构](../architecture/current.md)、[ADR registry](../adr/registry.md)、[发布路线](../roadmap/release-plan.md)、[冲突与开放决策登记](../governance/conflict-register.md)，以及本页逐项注明的 Git/GitHub 回读与 xin `global_dev` 只读查询
 > 最后核验：2026-10-14T10:05Z（`origin/main@33339fb4`、GitHub PR 列表、xin 运行容器的镜像 revision 与 `global_dev` 只读计数；本页是人工核验的读数，不是 RuntimeEvidence）
-> 写法：按 PRD 4.0 L2 §5 的四问填写——做了什么（四态：未做 / 可运行 / 已验证 / 已验收）、证据、谁验收、怎么回退。四态口径（D-029）尚未逐条拍板，本页先按它组织。2026-09-20 核验的旧版正文见文末[历史](#历史2026-09-20-核验)。
+> 写法：按 PRD 4.0 L2 §5 的四问填写——做了什么（四态：未做 / 可运行 / 已验证 / 已验收）、证据、谁验收、怎么回退。四态口径（PRD 4.0 L0 §9.3「4.0 新锁定」的 `D-029`，与待拍板项 `PRD4-D<n>` 不是同一编号序列）尚未逐条拍板，本页先按它组织。2026-09-20 核验的旧版正文见文末[历史](#历史2026-09-20-核验)。
 
 ## 一页结论
 
 当前 Release 是 **RL1 线索试点**：一个 ICP（德国 / DACH 工业泵进口商与分销商）、一个国家、一个品类，Managed 周报交付，目标是拿到第一个人工 QGO 判断并记下每条线索的成本。产品负责人 2026-10-10 批准按 PRD 4.0 开发（「同意，继续，需要闭环，按照 prd 中的需求进行开发实施」）。
 
-**RL1 还没有达成任何一条产出类退出指标。** xin 上 `discovery_run` 全部 11 行都是 `FAILED`，没有一行 `COMPLETED` 或 `PARTIAL`（截至 2026-10-14 03:30 UTC；本次 10:05 UTC 复核没有新 run）。八条退出指标里，真实产出、精度、可达、证据、成本、商机六条没有数据可填；合规可以计数（个人数据三张表 0 行，制裁门从未执行所以命中为 0）；节奏为 0（还没有发出过一份周报）。
+**RL1 还没有达成任何一条产出类退出指标。** xin 上 `discovery_run` 全部 11 行都是 `FAILED`，没有一行 `COMPLETED` 或 `PARTIAL`（截至 2026-10-14 08:33 UTC；本次 10:05 UTC 复核没有新 run）。八条退出指标里，真实产出、精度、可达、证据、成本、商机六条没有数据可填；合规可以计数（个人数据三张表 0 行，制裁门从未执行所以命中为 0）；节奏为 0（还没有发出过一份周报）。
 
 阻塞 RL1 的不止「run 跑不完」：评分从未在验收数据上跑过，可达性结构上为 0，交付最后一跳（GrowthOS ACK）从未走通，卖方自助入驻自 08-24 起不可运行。逐项见下表。
 
@@ -58,7 +58,7 @@ PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](..
 | PRD4-D3 客户写入准入与 platform Worker 就绪解耦（2026-10-10） | #627 已合并，2026-10-11 上线：客户写入按客户依赖集合判定，platform Worker 恰为 `PLATFORM_WORKER_NOT_READY` 时不再关闭客户写入；`/health/ready` 的整体口径不变 | 换回 #627 之前的镜像 |
 | PRD4-D9 制裁名单与职能邮箱（2026-10-10，部分拍板） | 制裁名单走运营刷新（#629，不经平台 schedule），2026-10-11 打开三个源（OFAC SDN、OFAC Consolidated、EU FSF，`sanctions_source` 均 ENABLED，约 1.2 万条实体）；职能邮箱按 BI-14 做公司级（#630，开关 DISABLED）。LIA 时机未定 | `sanctions_source` 置 DISABLED |
 | PRD4-D14 模型供应（2026-10-11） | #633：11 个获客任务照旧请求 pro 档，上游换成 Flash 档时也接受，trace 与账本如实记为 Flash；建站等其他任务仍只认 pro。xin 已打开 `MODEL_IDENTITY_SUBSTITUTES`。官方备用上游未接 | 关掉 `MODEL_IDENTITY_SUBSTITUTES` |
-| PRD4-D16 个人数据路径保持现状（2026-10-11） | `decision_maker`、`companies_house`、`inpi_rne`、`smtp_self` 保持 ENABLED，展会 Algolia 来源保留，产品负责人风险自担；验收 run 存下个人数据不再停止，改为如实计数并注明来源；不新写抽邮箱、电话的自动化。当前个人数据三张表（`canonical_contact`、`contact_point`、`company_contact_point`）均 0 行 | 把相应 `data_provider` 置 DISABLED |
+| PRD4-D16 个人数据路径保持现状（2026-10-11） | `decision_maker`、`companies_house`、`inpi_rne`、`smtp_self` 保持 ENABLED，展会 Algolia 来源保留，产品负责人风险自担（注：xin 上 `trade_fair` provider 实际为 DISABLED，发现 run 按 `data_provider.status` 门不会调用它）；验收 run 存下个人数据不再停止，改为如实计数并注明来源；不新写抽邮箱、电话的自动化。当前个人数据三张表（`canonical_contact`、`contact_point`、`company_contact_point`）均 0 行 | 把相应 `data_provider` 置 DISABLED |
 
 ## 4. 在途工作（2026-10-14 10:05 UTC GitHub 回读）
 
@@ -69,6 +69,8 @@ PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](..
 | #648 | FAILED 但已判过 fit 的发现 run 也请求评分；GET /leads 区分「预置队列」与「已评分」 | OPEN |
 | #649 | 评分规则 v3：可达性取公司级联系路径与个人口径的较大值，闲置的 Role 权重归零并入 Fit / Reachability，权威 Fit 存在时镜像排除规则只记录不排除，并为现有公司补读联系路径（产品负责人已按方案 A 授权） | OPEN |
 | #597 | ICP 请求在之前没有尝试到达上游时才允许重试 | OPEN、draft、`CONFLICTING`；建议关闭或改题，避免被当作在途工作 |
+
+> 本表回读之后、#651 合入之前又开出两项，当时未列入：#650（周报 CSV 端点，BI-22；10-14 10:52 UTC 开出）与 #652（确定失败、尚无输出时释放 reservation，同一 key 可再预留；PRD4-D13；10-14 12:11 UTC 开出）。此后 #647 于 2026-10-14、#646 / #648 / #649 / #650 / #652 于 2026-10-15 合并，#597 仍为 draft；本节不刷新 `最后核验` 时间戳，现场状态以 GitHub 为准。
 
 #644（产物按字节判等）与 #645（词表归一按查询归键、无源读取时不调模型、调用丢失时回退内置词表）已合并、待下一个维护窗口上线。另有任务卡 A（开发快速通道）、B（`gctl switch-backend` 一条命令换镜像）、D（查询活动普通错误无回执）、E（卖方入驻 HOLD）已派出，以各自 PR 为准。
 

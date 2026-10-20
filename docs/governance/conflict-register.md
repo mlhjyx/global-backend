@@ -249,7 +249,7 @@ ExecutionAuthority
 
 ## 11.1 PRD 4.0 待拍板项 PRD4-D1…D19（2026-10-14 登记）
 
-PRD 4.0（L0 产品宪章 §9.4，目前在私有目录，入库待 `PRD4-D10`）列出 D1–D19 共 19 项待拍板。为避免与 Site Builder 线的 D9/D13 等编号同号异义，本表与其他仓内文档一律写 `PRD4-D<n>`。状态口径沿用 §1：`RESOLVED` = 已拍板且已落地；`RESOLVED_WITH_REMEDIATION` = 已拍板、仍有未落地部分；`OPEN_DECISION` = 未拍板。已拍板的承重决定另登记在 [ADR registry](../adr/registry.md) 的「PRD 4.0 决定」一节；落地事实以 [current status](../status/current.md) 为准。本表核验时间 2026-10-14，依据 2026-10-13 评审稿 §3.3 的逐项核实与当日 Git / GitHub / xin 只读回读。
+PRD 4.0（L0 产品宪章 §9.4，目前在私有目录，入库待 `PRD4-D10`）列出 D1–D19 共 19 项待拍板。为避免与 Site Builder 线的 D9/D13 等编号同号异义，本表与其他仓内文档一律写 `PRD4-D<n>`。状态口径沿用 §1：`RESOLVED` = 矛盾已由明确权威/Decision 关闭，后续文档只引用裁决；`RESOLVED_WITH_REMEDIATION` = 事实/边界已裁决，但旧实现、文档或安全处置仍需独立收口；`OPEN_DECISION` = 需要产品/设计/技术/合规 Owner 拍板（本表各项 Owner 均为 `OWN-PRODUCT`）。已拍板的承重决定另登记在 [ADR registry](../adr/registry.md) 的「PRD 4.0 决定」一节；落地事实以 [current status](../status/current.md) 为准。本表核验时间 2026-10-14，依据 2026-10-13 评审稿 §3.3 的逐项核实与当日 Git / GitHub / xin 只读回读。
 
 | Decision ID | 主题 | 状态 | Decision Owner | 拍板日期与落地 / 未决原因 |
 |---|---|---|---|---|
@@ -268,7 +268,7 @@ PRD 4.0（L0 产品宪章 §9.4，目前在私有目录，入库待 `PRD4-D10`�
 | `PRD4-D13` | 失败后重试（请求带尝试编号） | `RESOLVED_WITH_REMEDIATION` | `OWN-PRODUCT` | 2026-10-13：阶段级恢复已上线（#642、#643），根治（受保护网关与 broker）定为验收通过后做；L0 仍写「RL1 内做」；是否拆为账户层与操作层两步待拍板；#597 draft 且冲突 |
 | `PRD4-D14` | 模型供应：备用上游与 Flash 档 | `RESOLVED_WITH_REMEDIATION` | `OWN-PRODUCT` | 2026-10-11 拍板「先用 Flash 跑通 + 接官方备用」；#633 上线、xin 已开开关；官方备用上游未接 |
 | `PRD4-D15` | 成本口径与上限 | `OPEN_DECISION` | `OWN-PRODUCT` | 网关对 pro 仍是兜底倍率、线索级成本未实现、每个 run 的上限未定；卡 RL1「成本」 |
-| `PRD4-D16` | 个人数据源开关 | `RESOLVED` | `OWN-PRODUCT` | 2026-10-11 拍板保持现状（风险由产品负责人承担）；四源 ENABLED；PRD 4.0 L0/L2 仍写「不探 SMTP、不猜邮箱」，待同步 |
+| `PRD4-D16` | 个人数据源开关 | `RESOLVED_WITH_REMEDIATION` | `OWN-PRODUCT` | 2026-10-11 拍板保持现状（风险由产品负责人承担）；四源 ENABLED；PRD 4.0 L0/L2 仍写「不探 SMTP、不猜邮箱」，待同步 |
 | `PRD4-D17` | 只追加表的 `app_user` 权限漂移 | `RESOLVED` | `OWN-PRODUCT` | 2026-10-10 并入 PRD4-D18 的设计，#621 上线后逐表核对零差异 |
 | `PRD4-D18` | 无 RLS 平台表的 `app_user` 写权限 | `RESOLVED_WITH_REMEDIATION` | `OWN-PRODUCT` | 2026-10-09 拍板；#619、#621 于 2026-10-10 上线；平台写入者授权（L4-G23）未做，恢复任何平台 schedule 前必做 |
 | `PRD4-D19` | Raw 记录保留期 | `OPEN_DECISION` | `OWN-PRODUCT` | 代码与真库均为 365 天；PRD 4.0 L0/L3 建议 365 天，2026-10-11 精读建议 90 天 + 回执长期，两案并列待定 |
