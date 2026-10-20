@@ -3061,13 +3061,17 @@ describe("finalizeRun durable query receipt readback", () => {
     });
   });
 
-  it.each(["DONE", "PARTIAL"] as const)(
-    "refuses a %s outcome once the run's authority has ended",
-    async (status) => {
-      const { activities, outboxCreate, update, planUpdate } = finalizeHarness(
-        null,
-        endedAuthorityStore("EXECUTION_BUDGET_GRANT_EXPIRED"),
-      );
+  // A DONE or PARTIAL write after the authority ended used to throw before writing anything, so the
+  // run stayed RUNNING for good (the workflow fails on a finalize error). The authority's end is what
+  // ADR-024 records as FAILED, so the activity writes that outcome itself, then fails without retrying.
+  it.each([
+    ["DONE", "EXECUTION_BUDGET_GRANT_EXPIRED"],
+    ["PARTIAL", "EXECUTION_BUDGET_AUTHORITY_REVOKED"],
+    ["DONE", "EXECUTION_BUDGET_AUTHORITY_EXHAUSTED"],
+  ] as const)(
+    "records a %s outcome as FAILED at the finalize stage once the run's authority has ended (%s)",
+    async (status, code) => {
+      const { activities, outboxCreate, update, planUpdate } = finalizeHarness(null, endedAuthorityStore(code));
 
       await expect(
         activities.finalizeRun(
@@ -3075,10 +3079,72 @@ describe("finalizeRun durable query receipt readback", () => {
             planId: "50000000-0000-4000-8000-000000000001",
             icpId: "60000000-0000-4000-8000-000000000001",
             status,
+            stats: { failures: 0, fit: { match: 1, weak: 0, mismatch: 0 } },
+          }),
+        ),
+      ).rejects.toMatchObject({ type: "ExecutionBudgetGrantError", nonRetryable: true });
+
+      expect(update).toHaveBeenCalledTimes(1);
+      expect(update.mock.calls[0]![0]).toMatchObject({
+        data: {
+          status: "FAILED",
+          stats: {
+            fit: { match: 1 },
+            failure: { stage: "finalize", errorType: "ExecutionBudgetGrantError", control: true },
+          },
+        },
+      });
+      expect(planUpdate).not.toHaveBeenCalled();
+      expect(outboxCreate.mock.calls.map(([call]) => call.data.eventType)).toEqual([
+        "DiscoveryRunCompleted",
+        "QualifyRequested",
+      ]);
+      expect(outboxCreate.mock.calls[0]![0]).toMatchObject({ data: { payload: { status: "FAILED" } } });
+    },
+  );
+
+  // finalizeRun writes a run's outcome once: a retry of a write that already committed (its result
+  // was lost) answers without attesting again, writing again or emitting a second event.
+  it.each(["DONE", "PARTIAL"] as const)(
+    "answers a retried %s write that already committed without a second write or event, even after the authority ended",
+    async (status) => {
+      const budgetStore = endedAuthorityStore("EXECUTION_BUDGET_GRANT_EXPIRED");
+      const { activities, outboxCreate, update, planUpdate } = finalizeHarness(null, budgetStore, status);
+
+      await activities.finalizeRun(
+        discoveryArgs("40000000-0000-4000-8000-000000000001", {
+          planId: "50000000-0000-4000-8000-000000000001",
+          icpId: "60000000-0000-4000-8000-000000000001",
+          status,
+          stats: { failures: 0 },
+        }),
+      );
+
+      expect(budgetStore.attestAuthorized).not.toHaveBeenCalled();
+      expect(update).not.toHaveBeenCalled();
+      expect(planUpdate).not.toHaveBeenCalled();
+      expect(outboxCreate).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["DONE", "FAILED"],
+    ["PARTIAL", "DONE"],
+    ["DONE", "PARTIAL"],
+  ] as const)(
+    "refuses a %s write over a run already recorded %s, without retrying",
+    async (status, runStatus) => {
+      const { activities, outboxCreate, update, planUpdate } = finalizeHarness(null, authorityBudgetStore(), runStatus);
+
+      await expect(
+        activities.finalizeRun(
+          discoveryArgs("40000000-0000-4000-8000-000000000001", {
+            planId: "50000000-0000-4000-8000-000000000001",
+            status,
             stats: { failures: 0 },
           }),
         ),
-      ).rejects.toMatchObject({ code: "EXECUTION_BUDGET_GRANT_EXPIRED" });
+      ).rejects.toMatchObject({ type: "DISCOVERY_RUN_ALREADY_FINALIZED", nonRetryable: true });
       expect(update).not.toHaveBeenCalled();
       expect(planUpdate).not.toHaveBeenCalled();
       expect(outboxCreate).not.toHaveBeenCalled();

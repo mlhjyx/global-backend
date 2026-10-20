@@ -564,6 +564,7 @@ const FIT_REACHED_FAILURE_STAGES: ReadonlySet<string> = new Set<DiscoveryRunStag
   'signals',
   'watches',
   'patentEnqueue',
+  'finalize',
 ]);
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -2458,7 +2459,7 @@ export function createDiscoveryActivities(deps: {
       return { candidates: companies.length, enqueued };
     },
 
-    async finalizeRun(args: DiscoveryActivityInput & {
+    async finalizeRun(input: DiscoveryActivityInput & {
       workspaceId: string;
       runId: string;
       planId: string;
@@ -2466,13 +2467,53 @@ export function createDiscoveryActivities(deps: {
       status: 'DONE' | 'PARTIAL' | 'FAILED';
       stats: Record<string, unknown>;
     }): Promise<void> {
-      await attestRunFinalization(args);
+      // A run's outcome is written once. A retry of a write that already committed (its
+      // result was lost) is answered from the row, without attesting again (the authority
+      // may have ended since), writing again or emitting a second event.
+      const current = await deps.prisma.withWorkspace(input.workspaceId, (tx) =>
+        lockDiscoveryRunReceiptState(tx, input),
+      );
+      if (current.status === input.status) return;
+      // A DONE or PARTIAL write after the run's authority ended (lease expired, revoked,
+      // exhausted) records the run FAILED at the finalize stage, as ADR-024 records a run
+      // past its lease, and then fails without retrying: otherwise the run stays RUNNING
+      // for good, because the workflow fails on a finalize error.
+      let endedAuthority: ExecutionBudgetGrantError | undefined;
+      try {
+        await attestRunFinalization(input);
+      } catch (error) {
+        if (
+          input.status === 'FAILED' ||
+          !(error instanceof ExecutionBudgetGrantError) ||
+          !ENDED_AUTHORITY_CODES.has(error.code)
+        ) {
+          throw error;
+        }
+        endedAuthority = error;
+      }
+      const args = endedAuthority
+        ? {
+            ...input,
+            status: 'FAILED' as const,
+            stats: {
+              ...input.stats,
+              failure: { stage: 'finalize', errorType: 'ExecutionBudgetGrantError', control: true },
+            },
+          }
+        : input;
       await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const lockedRun = await lockDiscoveryRunReceiptState(tx, args);
-        // FAILED only closes a run that is still open: it never replaces a recorded
-        // outcome (say, from a duplicate execution after the grant lapsed), and a
-        // retried FAILED write emits no second DiscoveryRunCompleted.
-        if (args.status === 'FAILED' && lockedRun.status !== 'RUNNING') return;
+        if (lockedRun.status !== 'RUNNING') {
+          // FAILED only closes a run that is still open: it never replaces a recorded
+          // outcome (say, from a duplicate execution after the grant lapsed), and a
+          // retried FAILED write emits no second DiscoveryRunCompleted. The same
+          // outcome written concurrently is a retry; any other outcome is a conflict.
+          if (args.status === 'FAILED' || lockedRun.status === args.status) return;
+          throw ApplicationFailure.nonRetryable(
+            `discovery run already finalized as ${lockedRun.status}`,
+            'DISCOVERY_RUN_ALREADY_FINALIZED',
+          );
+        }
         if (
           lockedRun.stats !== null &&
           (typeof lockedRun.stats !== 'object' || Array.isArray(lockedRun.stats))
@@ -2557,6 +2598,7 @@ export function createDiscoveryActivities(deps: {
           });
         }
       });
+      if (endedAuthority) throw ApplicationFailure.fromError(endedAuthority, { nonRetryable: true });
     },
   };
   const { canonicalizeLegacyDiscoveryRun, ...publicActivities } = activities;
