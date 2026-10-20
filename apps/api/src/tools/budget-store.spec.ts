@@ -1637,3 +1637,77 @@ describe('InMemoryBudgetStoreAdapter', () => {
     ).rejects.toThrow('BUDGET_STORE_UNAVAILABLE');
   });
 });
+
+/**
+ * Post-admission, the only check of the lease, revocation and scope is
+ * attest_authorized_tool_budget_v1, called directly (attestAuthorized, mapped)
+ * or from inside reserve_tool_budget (unmapped until now). An unmapped marker
+ * left the Activity as a raw PrismaClientKnownRequestError: the workflow then
+ * recorded `{ errorType: 'PrismaClientKnownRequestError', control: false }` and
+ * HTTP answered 500 instead of the 402/403 the contract declares.
+ */
+describe('PostgresBudgetStore.reserve — authority markers raised by attest inside reserve', () => {
+  const reserveInput = {
+    workspaceId: TEST_WORKSPACE_ID,
+    accountKey: 'icp:design:req',
+    operationKey: 'op:lease-boundary',
+    estimatedMicrousd: 0n,
+  };
+  const storeFailingWith = (failure: unknown) =>
+    new PostgresBudgetStore({
+      withWorkspace: vi.fn(async (_workspaceId, fn) =>
+        fn({
+          $queryRaw: vi.fn(async () => {
+            throw failure;
+          }),
+        } as never),
+      ),
+    } as unknown as PrismaService);
+
+  it.each([
+    'EXECUTION_BUDGET_GRANT_INVALID',
+    'EXECUTION_BUDGET_GRANT_EXPIRED',
+    'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
+    'EXECUTION_BUDGET_GRANT_REUSED',
+    'EXECUTION_BUDGET_AUTHORITY_REVOKED',
+    'EXECUTION_BUDGET_AUTHORITY_EXHAUSTED',
+  ] as const)('maps the trusted marker %s to the authority contract', async (marker) => {
+    await expect(storeFailingWith(rawQueryMarkerError(marker)).reserve(reserveInput)).rejects.toEqual(
+      new ExecutionBudgetGrantError(marker),
+    );
+  });
+
+  const rawQuery = (meta: Record<string, string>) =>
+    new Prisma.PrismaClientKnownRequestError('raw query failed', { code: 'P2010', clientVersion: 'test', meta });
+  it.each([
+    ['a deadlock', rawQuery({ code: '40P01', message: 'ERROR: deadlock detected' })],
+    ['an invariant marker', rawQueryMarkerError('TOOL_BUDGET_MICROUSD_INVARIANT')],
+    ['a marker with a suffix', rawQueryMarkerError('EXECUTION_BUDGET_GRANT_EXPIRED; injected detail')],
+    ['the marker text under another SQLSTATE', rawQuery({ code: '23505', message: 'ERROR: EXECUTION_BUDGET_GRANT_EXPIRED' })],
+    [
+      'another Prisma code',
+      new Prisma.PrismaClientKnownRequestError('value too long', { code: 'P2000', clientVersion: 'test' }),
+    ],
+    [
+      'a transaction timeout',
+      new Prisma.PrismaClientKnownRequestError('Transaction already closed', { code: 'P2028', clientVersion: 'test' }),
+    ],
+    ['a plain Error carrying the marker text', new Error('EXECUTION_BUDGET_GRANT_EXPIRED')],
+  ])('keeps %s unchanged', async (_label, failure) => {
+    await expect(storeFailingWith(failure).reserve(reserveInput)).rejects.toBe(failure);
+  });
+
+  it('still maps the lifecycle and account markers as before', async () => {
+    await expect(
+      storeFailingWith(rawQueryMarkerError('EXECUTION_BUDGET_AUTHORITY_LIFECYCLE_UNAVAILABLE')).reserve(reserveInput),
+    ).rejects.toEqual(new ExecutionBudgetGrantError('EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE'));
+    // Prisma's P2010 message carries the database message, which the account check matches.
+    const accountUnavailable = new Prisma.PrismaClientKnownRequestError(
+      'Raw query failed. Code: `P0001`. Message: `ERROR: TOOL_BUDGET_ACCOUNT_UNAVAILABLE`',
+      { code: 'P2010', clientVersion: 'test', meta: { code: 'P0001', message: 'ERROR: TOOL_BUDGET_ACCOUNT_UNAVAILABLE' } },
+    );
+    await expect(storeFailingWith(accountUnavailable).reserve(reserveInput)).rejects.toBeInstanceOf(
+      BudgetAccountUnavailableError,
+    );
+  });
+});

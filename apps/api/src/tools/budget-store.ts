@@ -12,6 +12,7 @@ import {
   isExecutionBudgetUuid,
   isTrustedExecutionBudgetDatabaseMarker,
   mapExecutionBudgetPersistenceError,
+  trustedExecutionBudgetGrantError,
 } from '../execution-budget/execution-budget-authority.repository';
 import {
   parseGenericOperationProjection,
@@ -884,6 +885,15 @@ export class PostgresBudgetStore implements BudgetStore {
       if (isAuthorityLifecycleUnavailable(error)) {
         throw authorityLifecycleUnavailable();
       }
+      // reserve_tool_budget attests the authority itself: an expired lease, a
+      // revocation, an invalid grant or a scope mismatch arrives here as the same
+      // trusted marker attestAuthorized maps, and leaves as the same contract error
+      // (the scope mismatch included, as attestAuthorized maps it). REUSED and
+      // EXHAUSTED cannot come from here: attest never raises REUSED, and reserve
+      // answers an exhausted account with a DENIED row (BudgetExceededError below)
+      // before it attests; the live lease spec pins that order.
+      const grantError = trustedExecutionBudgetGrantError(error);
+      if (grantError) throw grantError;
       if (isBudgetAccountUnavailable(error)) throw new BudgetAccountUnavailableError(input.accountKey);
       throw error;
     }
