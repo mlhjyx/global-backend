@@ -5,6 +5,123 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [release-plan.md](release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-10-19 · Renew the production dependency audit baseline before it expires on 2026-10-24 (#664)
+
+- 起因：生产依赖漏洞基线 2026-10-24T13:59:34Z 到期。到期后改了依赖输入的 PR 的 `production dependency delta · canary` 和 main 的 freshness canary 都会失败（依赖输入未变的 PR 不读基线，照常通过），所以要在到期前续期。
+- 改动：
+  - 锁文件自 10-10 月度刷新（#624）以来没有变动，按 [依赖刷新 runbook](../backend/dependency-refresh.md) §4 只做到期续期：基线改绑到当时的 main 提交 `6f95c44e`，`valid_until` 延至 2026-11-02T11:27:18Z。
+  - `scripts/supply-chain-gates.spec.mjs` 同步钉住的基线提交与 `REPOSITORY_BASELINE_NOW`。
+  - 新增 [冻结证据](../evidence/security/20261019-baseline-renewal.json)，[安全门](../security/README.md) 与证据索引各加一条记录。
+  - [依赖刷新 runbook](../backend/dependency-refresh.md) 改正两处：§2 原写「过期后所有 PR 都失败，包括续期 PR 自身」，实际上依赖输入未变的 PR 判为 `IDENTICAL_TO_TRUSTED_BASE`、不读基线；§4 到期续期的先例原写 #542，它其实是锁文件变动后的重新绑定、没有延长有效期，改为 #624 与本次。
+- 测试：官方 registry 生产审计零 advisory（831 个依赖），`supply-chain-audit.mjs verify` 为 `PASS_CLEAR`，新旧绑定下的 `baseline-freshness` 都是 `FRESH`；直接调用 `evaluateProductionAuditBaselineFreshness` 投影，旧基线在 10-24T13:59:33.999Z 还是 `FRESH`、13:59:34.000Z 起 `BASELINE_EXPIRED`，新基线到 11-02T11:27:18Z 前保持 `FRESH`；含开发依赖的全量审计只有 main 上已开的两条开发告警（Dependabot #80、#118），没有新增；`supply-chain-gates.spec.mjs` 27/27 通过。
+- 未做：不升级任何依赖，11 月的月度批量刷新另行立项，须在 11-02 前合入或再续期一次。`baseline-freshness` 命令行的 `--observed-at` 只写进回执、不参与有效期判断，这次没有改。
+
+## 2026-10-19 · Hold a lead whose stored sanctions hit is not cleared, as accept and export already do (#665)
+
+- 起因：qualify 的 sanctions_hold 只看这次的 live 筛查，accept 与周报导出却同时按库里的命中硬拦（复审 #1 的跨进程兜底）。一家公司的命中消失后（名单移除了实体、匹配规则修正了误报，或索引未生效），lead 停在推荐队列，却永远 accept 不了、也导出不了，原因在队列里看不出来。
+- 改动：
+  - 新增共用的 `storedScreeningBlocks`（库里的 potential_match 未被人工清白就拦），accept（`decide`）、周报导出与 qualify 三处都用它，不再各算各的。
+  - qualify 先对整批公司算完筛查，再用一次查询读出其中「这次没有命中」的公司在库里的命中；未清白（open 或 confirmed_true_hit）的，lead 进 sanctions_hold。open 的由人在复核端点清白，confirmed_true_hit 不能经端点清白、一直隔离。这次有命中的公司走原来的 reconcile 与 upsert，不变。
+  - qualify 不新建、不改写任何筛查记录：命中只由人关闭。第一版改成「live 无命中就把旧命中改写为 clear」，对抗复审证实两条误放路径：单独停用一个名单源时，「索引生效」只代表至少一个源有数据，只命中那个源的 open 命中会被清掉；复核人确认真命中与改写并发时，确认会落在一条已是 clear 的记录上。因此改为现在的 fail-closed 做法。
+  - 设计决策⑤（种子 DISABLED、未启用时门不拦）有一处收紧：库里已有的未清白命中照样让 lead 进 sanctions_hold，与 accept 早已在做的一致。[制裁筛查设计](sanctions-screening-design.md) 顶部加了 as-built 注记，[运维刷新手册](../backend/sanctions-operator-refresh.md) 的 kill switch 一节写明关掉只停止新的筛查。
+- 测试：新增共用真值表 `sanctions-gate.test-fixture.ts`（这次 live 命中已清实体 / 命中新实体 / clear / not_screened × 库里无 / open / 已清白 / 已确认，共 16 格），qualify、accept（`decide`）、导出（`sanctionsDelivery`）三处的 spec 都跑这张表，三处给出同一个答案；qualify 另加混批用例（每家用自己的名称与国家筛查）。复审指出 accept 硬门此前没有任何测试（把 priorBlocking 或 liveBlocking 改成 false 照样全绿），现在这两个变异分别有 4 例、3 例失败，混批的两个变异（全批用第一家的筛查、丢掉国家）也各有用例失败。`storedScreeningBlocks` 4 例；`qualify.activities.spec.ts` 新增 9 例（open/confirmed × clear/not_screened 均 hold 且不写记录、已清白不 hold、无库存命中不 hold、未接筛查服务也按库存 hold、一批多家只 hold 有命中的那家、有命中照旧 upsert）；新增 `lead.service.sanctions-review.spec.ts` 2 例（清白回落 needs_review、确认的真命中不可清白）。先 RED（10 例失败）后 GREEN。真实数据：xin 上 8 条记录都是人工清白的误报，用本分支的匹配器对真实名单（12268 个实体）重筛仍全部命中且已清白，所以这次部署不改变任何现有 lead 的队列。
+- 未做：命中消失后的**自动关闭**（无人复核就放行）没有做。真要做，需要产品负责人拍板，并且至少要有三样东西：名单覆盖与版本单调的守卫、复核端点的条件写，以及带旧命中的审计事件。
+
+## 2026-10-19 · Wait minutes, not seconds, before retrying a discovery stage the model upstream could not answer, and never report DONE after a cut-short website profile (#666)
+
+- 起因：RL1 验收 run `097593b7`（xin，2026-10-19 11:33–12:03 UTC）跑完 14 条查询中的 9 条、已接受 45 条原始记录；12:03 openox 先回 521、再回 523，约 28 分钟后恢复。public_web 挖一个域名时模型调用失败，executeQuery 的 3 次尝试按默认退避（1 秒、2 秒）全部挤在 6 秒内（12:03:19 → :21 → :25），run 按 #653 判 `FAILED` 停在 query，物化没跑，45 条记录产出 0 家公司、0 条线索。同日 `f3439b0f` 跑完 24 条中的 16 条、92 条通过后，13:47 openox 回 503，3 次尝试 24 秒内用完，结局相同。预算账本早已按 D13 退回每次失败的预留，等待本来不花钱，只是没人等。
+- 改动：
+  - 新增 `apps/api/src/temporal/upstream-unavailable-retry.ts`：对 `definiteModelFailureCode` 判定的确定失败，活动抛出带 `nextRetryDelay` 的可重试 `ApplicationFailure`；其余错误原样抛出（504/524 超时、4xx、截断流、控制错误、无法重放的操作），行为不变。等待按活动自己的重试策略算：最后一次重试前等 25 分钟，更早的等 5 分钟；次数取重试策略的 `maximumAttempts`，并以账本上限 3 封顶（策略没报上来时也按 3）。所以 3 次尝试的查询与 fit 等 5 + 25 分钟，2 次尝试的官网画像等 25 分钟，都远在发现 run 3 小时准入租约之内。
+  - `discovery.activities.ts` 的四处重抛改用它：executeQuery 的数据源控制错误、executeQuery 词表归一没被吸收的错误（5xx 照旧降级为内置词表；429 与网关拒绝连接原来 3 秒内用完 3 次尝试）、qualifyFitForRun 停止 fit 的错误、profileWebsitesForRun 的控制错误。workflow 的重试策略与尝试次数都没改。
+  - 官网画像阶段因非控制错误提前结束（workflow 吞掉失败、fit 照常判定余下公司）时，run 不再报 `DONE`：`resolveRunStatus` 新增 `profileStageFailed`，至少判 `PARTIAL`，`stats.websiteProfile.stageFailed = true`（只在发生时出现）。原来画像被腰斩时 run 照样报 DONE；fit 现在会等上游恢复，这种情况更容易出现，所以一起修。`workspace-authority.workflow.spec.ts` 里锁住旧行为（后一批画像失败仍 DONE）的用例相应改为 PARTIAL。
+  - 开发快速通道的发现 run 执行超时 185 → 215 分钟（3 小时租约 + 最长 30 分钟等待 + 5 分钟收尾），免得 run 在等待中被整个 workflow 超时、停在 RUNNING 不收尾。环境一致性指纹不受影响（`environment-parity-policy.mjs` 通过）。
+  - 文档：`packages/contracts/INTEGRATION.md` 的 run 状态补上 `FAILED`；写明模型上游不可用会让整条查询失败（不是只跳过那个域名），等待间隔，画像阶段提前结束判 PARTIAL；更正「计划保持 READY 可以重跑」：同一计划再执行会得到 409 `EXECUTION_BUDGET_GRANT_REUSED`（xin 2026-10-19 实测）。`docs/backend/dev-fast-lane.md` 同步新超时。
+- 测试：
+  - 先 RED 后 GREEN。新增 `upstream-unavailable-retry.spec.ts`，共 28 例：
+    - 7 种确定失败转成带等待的可重试失败，8 种其他错误原样返回；
+    - 按重试策略读 attempt 与 maximumAttempts，6 种组合，含封顶与没有策略；
+    - 入参不被修改；
+    - 仓库失败转换器序列化后保留 `nextRetryDelay`（300 秒），其余字段与不加等待时相同；
+    - 用尽尝试后 `describeDiscoveryRunFailure` 仍是 `{stage:'query', errorType:'ProviderHttpError', control:false}`；
+    - 防漂移：查询与 fit 的尝试次数等于 `durable-result-strategies.json` 的 `maxReservationAttempts`，画像不超过它，等待合计 30 / 25 分钟。
+  - `discovery.activities.spec.ts` 新增 8 例：
+    - executeQuery 遇 521 抛带等待的失败；词表归一遇 429 同样等待、不调 provider；
+    - 网关拒绝连接（Node 系统错误形状）同样等待；
+    - 504 仍原样立即失败；
+    - fit 遇 523 等待、遇 401 立即失败；
+    - 画像遇 521 在第一家就停下并等待；
+    - `resolveRunStatus` 遇 `profileStageFailed` 判 PARTIAL。
+  - `discovery.rehearsal.spec.ts` 新增 1 例：一次上游故障覆盖画像的两次尝试、fit 时已恢复，run 判 PARTIAL 并带 `stageFailed`。
+  - `temporal/` 下 66 个文件 1012 例全绿；`dev-fast-lane` 两个 spec 21 例全绿。
+  - 合并前在 dev Temporal Server 1.31.2（与原生 platform 同版本）实测：活动第 1 次抛带 `nextRetryDelay: '5 minutes'` 的失败后，服务端把第 2 次尝试排在正好 300 秒后，没有被默认 `maximumInterval`（100 秒）截断。
+- 未做：
+  - 不扛超过约半小时的上游故障：13:47 那次 openox 故障持续约 2 小时 15 分钟，修复后照样会以 FAILED 停下。要扛就得接备用上游（PRD4-D14），产品负责人 10-19 决定暂不接。
+  - 连到网关超时（undici `UND_ERR_CONNECT_TIMEOUT`）在 public_web 和 fit 里仍按单个域名、单家公司的失败跳过，不会走到等待：这两处只把控制错误往上抛，没改。在 xin 上网关是 `127.0.0.1:3001`，它挂掉时是连接被拒绝，会走到等待。
+  - 一次尝试里已经发出、却没留下持久结果的调用（截断流等），重试时仍无法重放，这条查询仍按 #643 以零回执结束、计为失败：等待帮不了这种情况。
+  - 等待不看准入租约还剩多少：租约快到期时又遇上故障，等过之后下一次尝试以 `EXECUTION_BUDGET_GRANT_EXPIRED`（控制错误）失败，不等则以 `ProviderHttpError` 失败，两者都是 FAILED，只是失败分类与耗时不同。让等待感知租约要让活动拿到 `admission_lease_expires_at`，与 reserve() 把租约到期映射成授权错误、收尾窗口一起另开任务。另：24 条查询的计划不靠任何等待也可能跑不完 3 小时租约，这是计划规模的既有问题。运维对活动执行 unpause、update-options 或 reset 时，服务端按退避重算调度，会忽略 `nextRetryDelay`。
+  - 没有改成「一条查询失败时 run 判 PARTIAL、物化已成功查询的记录」：这要动物化准入「每条计划查询一份回执」的完整性不变量（#653 的理由），需要产品负责人拍板。
+
+## 2026-10-19 · Close the open documentation findings left by the reviews of #651, #658 and #659 (#667)
+
+- 起因：#651（2026-10 决定回写）、#658（changelog 片段）、#659（擦除全部对象版本）的独立复审留下一条 MEDIUM 和若干 LOW / NIT 文档问题，合入时没有修。逐条在 main `73f7749a` 上核对后，19 处仍然成立。
+- 改动：
+  - ADR registry「PRD 4.0 决定」表的「落地」列只留 PR 号，运行事实（schedule 暂停、开关状态、上线日期、行数、PR 是否已合并）只在 [当前状态](../status/current.md) 写一处；BI14 行原写 #649「在途、未合并」，它已于 10-15 合并。
+  - 冲突登记 §11.1 的状态口径照抄 §1 原文；`PRD4-D16` 改为 `RESOLVED_WITH_REMEDIATION`（PRD 4.0 L0/L2 的红线还待同步）。
+  - 发布计划：评分是确定性计算、不调用模型（模型调用在 ICP 资格门的 fit 判定）；X 减负线注明各项待定的决定。
+  - 当前状态：备份时间戳改为 08:33 UTC（xin 本地时区 CDT）；补上 #650、#652 的去向；注明 xin 上 `trade_fair` 实际为 DISABLED；`D-029` 的编号来源。
+  - AGENTS §6 的出网例外补全为五类（robots.txt、DNS、模型网关、outbox webhook，以及制裁名单运营刷新）。
+  - 擦除存储文档第 5 节：运行时 principal 的列出授权也改了条件，旧镜像影响与回退的说法改正；片段 README 写明改名片段时必须手填 `pr:`。
+- 测试：`pnpm docs:verify` 通过（0 错误，1 条原有警告）。每处改动起草时都核对了代码或只读查询，另由一个独立核查逐条复核，其中 3 处按核查意见改写。
+- 未做：#659 复审里的两条测试代码 NIT（MinIO spec 的 `denied()` 接受任何 403；部署合同没有禁止其他无限定条件运算符）不属于文档，另行处理。当前状态页里其他已过时的段落（在途表各行的 OPEN 状态等）留给下一次整页核验。
+
+## 2026-10-19 · Whitelist the condition operators a MinIO policy may put on s3:prefix (#668)
+
+- 起因：#659 把两条 `s3:ListBucketVersions` 授权改成 `ForAllValues:StringLike` 加 `"Null": {"s3:prefix": "false"}`，因为 MinIO 对重复的 prefix 参数，只要任一个值匹配就放行，而 ListObjectVersions 按第一个值列出。部署合同 spec 只用正则禁止了普通 `"StringLike"`，复审 NIT-3 指出 `StringEquals`、`StringNotLike`、`ForAnyValue:*` 同样只看任一值，却没有被禁。
+- 改动：`scripts/runtime-deployment-contract.spec.mjs` 不再解析 bootstrap.sh 的文本，而是在沙箱里真实执行它，用一个假 mc 截获 MinIO 实际会收到的调用和策略。
+  - 尽量贴近 minio-bootstrap 容器：
+    - 环境变量用 compose 默认值，并补上 `HOSTNAME`、`HOME`；
+    - PATH 里只放钉版 mc 镜像实际自带的工具（cat、tr、id、mktemp、paste）；
+    - stdin 关闭；
+    - dash 和以 sh 名义调用的 bash 各跑一遍（镜像的 /bin/sh 是 bash）；
+    - 首次部署和重复部署（桶已存在）也各跑一遍；
+    - `/config`、`/tmp` 按完整路径词改写到沙箱。
+  - 假 mc 只应答一次正常 provisioning 会发出的调用，其余一律记为「被拒」并以 97 退出，所以 `mc … || true` 也藏不住一条新命令。
+  - 断言：
+    - 没有被拒的调用，stderr 为空；
+    - 完整、未经过滤的 mc 调用序列逐条等于预期；
+    - 四种跑法得到的策略完全相同；
+    - 每个策略名收到的都是一份 JSON，顶层键恰好是 `Version` 和 `Statement`（MinIO 解析键名不分大小写，`statement` 能盖掉 `Statement`）；
+    - 三份策略都过白名单：「列出授权」按 MinIO 允许带 `s3:prefix` 的动作（`s3:ListBucket`、`s3:ListBucketVersions`）用 `*` / `?` 通配判定；语句只能是 Allow + Action（+ Resource、Condition）；`s3:prefix` 只能出现在 `ForAllValues:StringLike` 或 `Null`（值为 `"false"`）下；
+    - runtime 与 cleanup 的列出授权按名称逐字比对，personal-read 没有列出授权。
+  - 威胁模型：只防误改，以及看起来像正常改动的改动，不防蓄意绕过。用绝对路径 `/usr/bin/mc` 调用、或按只在镜像里存在的东西分支，仍然测不出来；要彻底拦住，需要在钉版 mc 镜像里跑截获。
+- 测试：当前 bootstrap.sh 下 18/18 通过，四种跑法都真实跑到 `OBJECT_STORAGE_PROVISIONED`。三轮独立复审找到的 42 种写法逐一回放，41 种被拦下：
+  - 第一、二轮的 31 种：通配动作、NotAction、shell 展开与转义、换写法或重复写入、`statement` 大小写变体、缩进 / 续行 / `command mc` / 双空格、if 块里的文件路径、对调 create 参数、heredoc 之后改写、附加策略、`mc anonymous set`、EOF 注入、注释诱饵；
+  - 第三轮的 11 种：`mc --quiet … || true`、`mc --json … || true`、只在重复部署时走的分支、`[[ … ]]` 与 `$BASH_VERSION`、`$HOSTNAME`、compose 默认值、镜像里没有 jq、删掉 stdin 重定向（不再挂死）、`[ -d /config ]`；
+  - 剩下的 1 种是用绝对路径调用 `/usr/bin/mc`，按威胁模型如实保留。
+- 未做：没有在钉版 mc 镜像里跑截获（那样能把绝对路径调用一起拦住）；同文件里的旧测试往宿主机固定的 /tmp 路径写文件、并发时会互相干扰，这也没修（复审 LOW-3，早就存在）。没有用 MinIO 自己的解析器做差分（复审用 minio/pkg 的 Go 探针核过通配匹配与 PREFIX_ACTIONS，0 处不一致）。#659 复审的 NIT-2（真 MinIO spec 的 `denied()` 只要 403 就算被拒）和「把真 MinIO spec 放进 CI」一起做，这样收紧后的断言每次都在真 MinIO 上验证。
+
+## 2026-10-19 · Map an authority refusal raised inside reserve to the same contract error as attest (#669)
+
+- 起因：准入之后，租约、撤销和作用域只在 `attest_authorized_tool_budget_v1` 里检查。它有两个入口：直接调用（`attestAuthorized`，已映射），以及在 `reserve_tool_budget` 内部调用（未映射）。第二个入口的标记以原始 `PrismaClientKnownRequestError` 冒出 `PostgresBudgetStore.reserve`，造成三个后果：
+  - 工作流把它记成 `{ errorType: 'PrismaClientKnownRequestError', control: false }`，看起来像数据库故障；
+  - 工作流层的尽力而为阶段（画像、signals）会把它吞掉，失败被记到下一个阶段（所有阶段开头都会 attest，所以 run 照样 FAILED，只是阶段记错）；
+  - HTTP 返回 500，而不是契约声明的 402 / 403。另外，ICP 查询计划的 TED / FDA 注入用的本地分类器认不出这个错误，会把撤销吞掉、照样落库并返回 201。
+  xin 上还没有出现过（13 个 FAILED run 里没有这种 errorType），#666 的重试等待让最后一次尝试跨过租约的可能变大。
+- 改动：
+  - `execution-budget-authority.repository.ts` 新增 `trustedExecutionBudgetGrantError`。它只认精确的可信标记（P2010、SQLSTATE P0001、消息恰为 `ERROR: <code>`），其余返回 undefined；`mapExecutionBudgetPersistenceError` 改用它，行为不变。
+  - `PostgresBudgetStore.reserve` 的 catch 按这个顺序判断：LIFECYCLE 映射照旧；可信授权标记映射成 `ExecutionBudgetGrantError`；ACCOUNT_UNAVAILABLE 照旧；其余数据库错误原样抛出。经 reserve 实际可达的只有 INVALID、EXPIRED、REVOKED、SCOPE_MISMATCH 四个：attest 不抛 REUSED；账户耗尽时，reserve 在 attest 之前就返回 DENIED（`BudgetExceededError`）。SCOPE_MISMATCH 与 `attestAuthorized` 保持一致，同样映射成 403；它只来自主体配置错误或数据完整性错误，在受管运行时里走不到。settle、release、status、close 不在这次范围内。
+  - ICP 本地分类器不用改：它按 `EXECUTION_BUDGET_` 前缀判断，映射后的错误能被识别。
+- 测试：
+  - `budget-store.spec.ts`：6 个标记映射，先 RED 后 GREEN；7 种不得映射的错误必须原样抛出（死锁、INVARIANT 标记、带后缀的标记、别的 SQLSTATE 下的同样文字、其他 Prisma 码、事务超时、普通 Error 带标记文字）；LIFECYCLE 与 ACCOUNT_UNAVAILABLE 照旧。
+  - 新增 `reserve-authority-failure.spec.ts`：把 reserve 抛出的错误经 `ensureApplicationFailure`、仓库的失败转换器和工作流解码，`describeDiscoveryRunFailure` 得到 `{ errorType: 'ExecutionBudgetGrantError', control: true }`；换回 main 的 store 会得到 `control: false`。
+  - CI 真库 spec：两处原来断言「reserve 抛原始标记」的地方，改为断言映射后的错误；补上撤销后 reserve 得 REVOKED 的用例；账户耗尽之后再 reserve 一次，断言仍是 `BudgetExceededError`，把「reserve 先查耗尽、再 attest」这一 SQL 时序锁住，否则 fit 的 skippedForBudget 会悄悄失效。
+- 未做：
+  - 同一原因在 errorType 上会有两种写法：10-09 批量收口的 733fbf03 写的是 `EXECUTION_BUDGET_GRANT_EXPIRED`，之后的新失败是 `ExecutionBudgetGrantError`。按 errorType 分组的看板要两个都认。
+  - 平台 scope 的 sweep（intent、acquisition）以前会按单个源吞掉这类失败，现在会让整次 sweep 停下。4 个平台 schedule 都暂停着，暂无影响。
+  - 收尾窗口与租约感知的软截止另起 PR。
+  - provider 层还有几处裸 catch，会在活动内部吞掉控制错误（复审 LOW，既有问题），另起 PR 处理。
+  - 既有问题（复审 INFO）：一次 DENIED 之后，后续每个活动开头的 attest 都会报 EXHAUSTED，所以对带授权的 run 来说，「预算截断 → PARTIAL」实际走不到，最终以 FAILED 收尾。这一点和租约感知软截止一起处理。
+
 ## 2026-10-15 · Say why stream failures still settle after the new-api first-byte fix went live
 
 - 起因：#652 收窄时，把「流在首个输出之前失败不释放预留」写成了暂缓措施，理由是现役 new-api 会对它回 HTTP 200 并按估算输入 token 计费，要等 mlhjyx/new-api#3 上线后再加回。W12 已于 2026-10-15 上线（new-api 6ea085c6，镜像由 #661 钉住）：首字节之前的失败现在由 new-api 回可重试的 HTTP 502、不计费，backend 的分类器本来就把 502 当作确定失败释放。
@@ -51,6 +168,27 @@
   - 独立复审 LOW：这两项的裸 append 原本会被两个延迟触发器（主体守卫、版本守卫）同时拒绝，命中 `SUBJECT_INVALID` 只是因为 PostgreSQL 按触发器名字顺序执行。现在先经运行时结算写入同字节的承载产物、钉住对象版本，再做裸 append，只剩主体守卫能拒绝，不再依赖触发器命名。
   - 按 CI 步骤的命令在一次性 pgvector/pg16 上模拟：主库已迁移、另建库、运行用例，退出码 0。
 - 未做：`packages/db/test` 里其余不在 CI 的用例没有逐个核查；#654 合入后可在本用例补 `company_profile` 主体的 tombstone 覆盖。
+
+## 2026-10-15 · Accept a direct changelog edit only from a branch cut before the fragment rule (#663)
+
+- 起因：#658 的过渡放行写成了「直接改 `changelog.md` 也算满足」，并且对任何 PR 都放行、没有终点，只能等仓外指令改掉。修复增量复审回放了 main 最近 40 个合入：36 个只改 `changelog.md`，规则实际上只剩一条 warning。复审建议按分支切出的位置放行：不看时钟，不写死 SHA，结果可复现，过渡会自然结束。第一版只看合并基点，二轮复审发现旧分支一旦 merge 进 main，合并基点就变成带 README 的 main，放行随之丢失，报错还说它是规则合入后切出的；唯一在途的旧分支（草稿，与 main 冲突）合入前必须先并入 main，正好会踩到。
+- 改动：
+  - `scripts/governance-changelog-fragments.mjs`：新增 `branchPredatesFragmentRule`。它用 `rev-list --boundary base..head` 找出分支离开 base 的所有分叉点，只要有一个分叉点里没有片段 README，就算规则合入前切出的分支。merge 进 main 后原来的分叉点还在（不论 merge 时谁是第一个父提交），放行保留；rebase 会把分叉点挪到新 main，之后只能写片段。分叉点找不到（无关或浅历史）或目录树读不出时失败，不放行；读树改用 `ls-tree`，路径缺失与读取出错不再混为一谈。`fragmentRequirement` 新增 `changelogEditAccepted` 参数，默认不放行。`require` 只对旧分支放行直接改 `changelog.md`（附 warning）；之后切出或 rebase 过的分支这样做会失败，报错提示把条目挪进片段。
+  - 片段 README 与 `CONTRIBUTING.md` 的「过渡」改为按分叉点，写明旧分支并入 main 要用 merge、不要 rebase；补一条：检查只管代码 PR 有没有片段，不禁止改 `changelog.md`。README 还补半句：`apps/`、`packages/` 下的 Markdown 也算代码路径（复审 N4）。
+  - `docs/governance/docs-verification.md`：§2 的检查说明、§4 的例外行改为新的放行条件；关闭条件改成可执行的检查：`gh pr list --state open` 的每个 PR 运行 `require` 都不再打印 cut-before warning。
+  - `docs/backend/ci-merge-automation.md`：汇编步骤加第 5 步，给出上述检查的命令；「冲突」改为旧 PR 用 merge 解冲突、不要 rebase；「回退」不再说片段检查本来就接受直接改 `changelog.md`（复审 N1）。
+  - `.github/workflows/governance.yml`：`require` 一步的注释不再说改 changelog 总能满足。
+- 测试：`node --test scripts/governance-changelog-fragments.spec.mjs` 40 项通过。先红后绿：
+  - 旧分支 merge 进 main（分支在前、main 在前两种父提交顺序），`require` 退出码 0 且带 cut-before warning，修复前退出码 1；
+  - 旧分支 rebase 到新 main 后，`require` 退出码 1，报错写明 rebase；
+  - 分叉点找不到、基点不存在、分叉点目录树被删时 `branchPredatesFragmentRule` 抛错，修复前目录树读不出被当成旧分支放行；
+  - `CONTRIBUTING.md` 与片段 README 的「过渡」、workflow 注释、§4 关闭条件的文字与实现一致；
+  - 单测：同样的改动，放行模式通过，不放行模式与默认参数都失败。
+  另在本仓真实历史上复现：唯一在途旧分支的 head 与 main 用 `merge-tree` 加 `commit-tree` 合成合并提交（不建引用），修复前 `require` 退出码 1，修复后 0。本 PR 自己在规则合入后切出，按新规则写了这个片段。
+- 未做：
+  - 叠在旧分支上切出的新分支同样有早于规则的分叉点，照样放行；它带着旧分支的 `changelog.md` 改动一起合入，按提交逐个归属改动得不偿失，登记为 §4 的风险。
+  - 复审 N2（片段改名后 PR 号记到改名的 PR）、N3（新增根目录文件在 push 到 main 时的分类用例）只是 NIT，没有改。
+  - 仓外 `/global/CLAUDE.md` §7 把新规则说成「直接改 changelog 会被拦下」，实际只拦没有片段的代码 PR；不在本仓，没有改。
 
 ## 2026-10-14 · Release the reservation of a definite failure before any output, and let the same key reserve again (D13, operational fix) (#652)
 
@@ -360,6 +498,48 @@
   - 改动：清理 principal 的列出授权改为 `ForAllValues:StringLike`，并加 `"Null": {"s3:prefix": "false"}`（`ForAllValues` 对空集合按真处理，不加 `Null` 时不带 `prefix` 的请求可能被放行）。运行时 principal 列 `readiness/*` 的授权在 main 上原本也是这种写法，同一文件里一并改掉，避免重跑两次 bootstrap。复审测过「保留 Allow、再加一条 `ForAnyValue:StringNotLike` 的 Deny」，无效，所以没有用。
   - 测试：`runtime-deployment-contract.spec.mjs` 钉住两条授权都是 `ForAllValues` 加 `Null`，并且两段策略里都不再有普通 `StringLike` 前缀条件；先红后绿，16 项通过。真 MinIO spec 新增「重复 `prefix`（短前缀加完整键、空前缀加完整键）必须被拒」两项：一次性 MinIO（同一 digest，开发用 KMS 密钥现场随机生成）上用原策略跑红 1 项，换新策略后 10 项全绿。
   - 上线顺序不变：先由运行时会话重跑 `minio-bootstrap`，核对清理凭据「列精确键允许、列 `personal-data/` 拒绝、重复 `prefix` 拒绝」，再换镜像。如果 xin 已经按本 PR 早先的策略跑过 bootstrap，要用最终版本再跑一次。
+
+## 2026-10-14 · Replace the single-file changelog with one fragment per PR, assembled later (#658)
+
+- 起因：每个 PR 都在 `changelog.md` 的同一处插入小节（最早是顶部，后来是当天小节末尾），任何一个合入都会让其余在途 PR 文本冲突。
+  - #596–#643 合入的 47 个 PR 里 45 个改了 `changelog.md`；47 个里有 24 个带着并入 main 的合并提交（共 32 个），每次并入都要再跑一轮完整 CI。派活方统计其中 22 次是这类冲突逼出来的，26 轮 merge-head CI 共 509 分钟（这两个数没有逐一复核）。
+  - ruleset 的 strict 在 2026-09-21 已关闭，这些并入不是 GitHub 要求的，只是为了解冲突。2026-10-14 起草时有 8 个在途 PR（#597、#646–#652）改 `changelog.md`；2026-10-15 开这个 PR 时还剩 2 个（#597、#651）。
+  - 被替换的设计：「单文件 changelog，每个 PR 直接插入小节」（Codex 时期沿用至今）。冲突是这个设计的结构性结果，与 PR 内容无关，在途 PR 越多越严重，所以整体替换，不再靠「插到当天末尾」之类的约定减轻。
+- 改动：
+  - **片段目录** `docs/roadmap/changelog.d/`：每个 PR 放一个 `<YYYY-MM-DD>-<slug>.md`，frontmatter 写 `date` / `pr` / `title`，正文依次写起因 / 改动 / 测试 / 未做。目录 README 写明格式、何时必需、slug 取分支 topic 以免撞名、汇编方法。`pr` 可以留空：汇编时从加入片段的 squash 提交标题里的 `(#N)` 取，不必为补 PR 号再推一次（本条目就留空）。
+  - **校验** `scripts/governance-changelog-fragments.mjs`：文件名、frontmatter（只允许三个键、日期须为真实日期且与文件名一致、PR 号为正整数或空、标题不带 `#` 与 `(#N)`）、正文四项的顺序与内容、正文不得有一二级标题、目录里只能有 README 与片段。`pnpm docs:verify` 调用它（`scripts/verify-docs.mjs`），片段改由 frontmatter 承担元数据，免去 `docs/roadmap/` 的「生命周期」行要求。报错直接给出应写成的样子：键名大写、冒号后缺空格、缩进、BOM 各有自己的提示，正文错误给文件里的行号，缺顶层条目时说明顶层条目的写法。
+  - **必需检查**：同一脚本的 `require` 子命令按 `git diff --name-status --no-renames <base>...<head>` 判断：改了 `apps/`、`packages/`、`scripts/`、`infra/` 任一路径或根目录的构建与运行时文件（`CODE_ROOT_FILES`，见下文复审一轮）时，必须新增或修改一个片段；只删片段、只改 README 不算。`governance.yml` 的 checkout 改为 `fetch-depth: 0`，新增只在 `pull_request` 上运行的一步（push 到 main 时跳过），传 `base.sha` 与 PR 的 `head.sha`，并用 `!cancelled()` 让它与 `governance:verify` 在同一轮里各自报错；算不出 diff 时失败而不是放行。
+  - **过渡**：直接改 `changelog.md` 的 PR，`require` 照样放行，只在日志里出一条 `::warning::` 指向片段格式，在途 PR 不会因此变红、也不必返工。放行不看 PR 何时开，关闭条件见下文复审一轮。
+  - **汇编** `scripts/changelog-assemble.mjs`（`--dry-run` 只列不写）：按日期倒序插入，同一天的条目接在当天已有小节之后、按 PR 号升序；片段里按片段目录写的相对链接改写成从 `changelog.md` 出发的路径；写入后删除片段。任何片段不合格时什么都不写。每班发版列车的 PR 合完后，由当班负责合并的开发代理运行一次，单独作为 `docs(changelog)` PR 提交，不由 bot 直接提交 main。
+  - 规则同步：`AGENTS.md` §9、`CONTRIBUTING.md` 新增「Changelog 片段」一节、PR 模板加一项勾选、`changelog.md` 开头加写法变更说明；`docs/backend/ci-merge-automation.md` 新增「Changelog 片段的汇编」一节（谁、何时、四步、冲突处理、回退），原来那句「changelog 冲突」指向它。本条目是第一个片段。
+- 测试：
+  - 先写 `scripts/governance-changelog-fragments.spec.mjs` 的 22 项用例，实现前因模块不存在整体失败；工作流与 `verify-docs` 接线的 2 项在改这两个文件之前单独失败过。复审时再加 4 项、并在 2 项里加断言（可读报错 3 项、汇编步骤写进合并流程文档 1 项；过渡期 warning、单个片段的单数措辞），先跑出 6 项失败，修好后 26 项全部通过：
+    - 解析：完整片段、`pr` 留空或缺省、带引号与含冒号的标题；22 种畸形输入各报自己的错误码；额外顶层条目、ASCII 冒号与代码块里的 `##` 不误报；键名大写、冒号后缺空格、无法解析的行、BOM、正文二级标题的行号、`* 起因：` 与非法文件名各自给出可照做的提示；
+    - 必需判定：四个前缀各自触发；新增或修改片段、改 `changelog.md` 都算满足；只删片段、只改 README、纯文档与 `.github/` 改动的各自结论；
+    - 汇编：跨日倒序、同日接在已有条目之后并按 PR 号升序、无 PR 号排最后；没有片段时输出与输入逐字节相同；早于所有条目的片段落在无日期的旧尾部之前；相对链接改写；
+    - 临时 git 仓库里的两个命令：`require` 在 main 于分叉后前进时只看 PR 自己的改动，加片段前失败、加片段后通过，只改 `changelog.md` 的旧式 PR 通过并带 warning，base 不存在时失败；汇编命令 `--dry-run` 不写文件，从 squash 提交补上 PR 号，取不到时不带号并提示，片段不合格时不动任何文件、修好后正常写入；
+    - 本仓的片段合格；`governance.yml` 的步骤形状、`verify-docs` 的接线、合并流程文档里的汇编一节。
+  - 该 spec 由 `scripts/governance-contracts.spec.mjs` 引入，随 `governance:verify` 在 CI 的 governance 工作流与 `docs:verify` 中运行。
+  - 过渡期回放：对 2026-10-15 的 2 个在途 PR（#597、#651）跑 `require`，都因改了 `changelog.md` 通过；对 main 最近 60 个 squash 提交逐个回放，56 个通过、2 个纯文档不需要（#625、#626），2 个只改测试且当时没写 changelog 的（#634、#637）在新规则下需要补片段。
+  - 对本仓真实 `changelog.md` 预演汇编（在副本上运行）：本片段落在 2026-10-14 最后一节（#655）之后、2026-10-13 之前，其余内容逐字节不变。
+  - 本分支对 `origin/main` 跑 `require`：识别出本片段，通过。
+- 未做：
+  - 没有改 ruleset，strict 维持关闭。
+  - 没有自动汇编：不加 bot、不加定时任务，片段会在目录里累积到下一班发版列车后有人运行汇编为止。
+  - 不校验片段里的 `pr` 是否等于当前 PR 号。
+  - `.github/` 与根目录的文档、编辑器和密钥扫描配置不在必需范围里：只改这些的 PR 不强制写片段。
+  - fork 来的 PR 可以连同检查脚本一起改，这一步和其他 `pull_request` 检查一样只防遗漏、不防恶意。
+  - 仓外的 `/global/CLAUDE.md` §7 与派活脚本里「在 changelog.md 当天小节末尾新增小节」的写法，要在本 PR 合入后改成写片段，不在本 PR 内。
+- 复审一轮（#658 独立复审 1 条 MEDIUM、5 条 LOW）：
+  - 起因：复审指出片段的生命周期豁免硬编码在 `verify-docs.mjs`、没进机器政策也没登记例外，治理页 `docs/governance/docs-verification.md` 不知道新检查的存在（M1）；汇编按最早一次加入提交取 PR 号，片段名在汇编后被重用会拿到旧 PR 号（L1）；没有用例钉住三点 diff（L2）；过渡放行的 warning 暗示有开 PR 日期判断、实际没有，也没有关闭条件（L3）；`Dockerfile`、`runtime-entrypoint.mjs` 等根目录运行时文件不在必需范围（L4），#661 就是只改根目录 `docker-compose.yml` 的 PR；尖括号目标、单引号标题与引用式定义的相对链接汇编时不改写（L5）。
+  - 改动：
+    - M1：豁免移进 `docs-verification-policy.json` 的 `lifecycleRequired.frontmatterFragmentDirectories`，`verify-docs.mjs` 改用 `lifecycleExemptFragment(policy, path)`，删掉该项片段就重新要求生命周期行；政策列了 `changelog.d` 以外的目录时报 `CHANGELOG_FRAGMENT_POLICY`。治理页 §1 写明 governance 工作流在 `pull_request` 上多跑 `require` 一步，§2 新增「Changelog 片段格式」「代码 PR 的 changelog 片段」两行，§3 写明政策豁免，§4 登记两条例外（片段免生命周期行、过渡放行），各带风险、Owner、关闭条件与 successor。
+    - L1：`prFromHistory` 改取最近一次加入该文件的提交；片段 README 改正「同日同 slug 必然冲突」的说法（前一个片段已汇编时不冲突）。
+    - L3：warning 改为「只在过渡期接受」，不再说「规则生效前开的 PR」；放行处加注释，关闭条件写进治理页 §4、片段 README 与 `CONTRIBUTING.md`：仓外 `/global/CLAUDE.md` §7 与派活脚本改为写片段后，删除 `|| changelogEdited`。
+    - L4：新增 `CODE_ROOT_FILES`（`.dockerignore`、`Dockerfile`、`docker-compose.yml`、`eslint.config.mjs`、`nx.json`、`package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、`runtime-entrypoint.mjs`、`tsconfig.base.json`），只认根目录同名文件；`AGENTS.md` §9、`CONTRIBUTING.md`、PR 模板、片段 README 与工作流注释同步。根目录 `package.json` 与 `pnpm-lock.yaml` 原先在「未做」里被排除，这次一并纳入：它们进运行时镜像，改它们的 PR 本来就要有人补 Copy 重签。
+    - L5：链接改写支持 `[t](<目标>)` 与单引号标题；引用式定义与脚注定义在片段里直接拒绝（`CHANGELOG_FRAGMENT_LINK`），因为 `docs:verify` 不检查它们、汇编也不改写。
+  - 测试：先写 9 项新用例并改 2 项既有用例（过渡 warning、`verify-docs` 接线），在只导出空桩的实现上跑出 10 项失败（除三点 diff 用例外的 8 项新用例与改过的 2 项），补实现后 35 项全部通过：根目录运行时文件触发必需判定且只认根目录；仓库根目录每个被跟踪文件都已归类（新增根文件不归类即失败）；尖括号与单引号链接改写；引用式与脚注定义被拒并给出行号、代码块与行内代码里不误报；过渡 warning 不再声称有开 PR 日期判断；汇编后重用片段名取 #705 而非 #700；政策豁免与政策漂移各自的判定；`verify-docs` 接线与政策内容；治理页 §1/§2/§3/§4 的记录。三点 diff 用例（main 在分叉后合入 `apps/` 改动、PR 只改文档）在现实现上本来就通过，把 `...` 临时改成 `..` 后它失败，确认能抓住这个变异。`pnpm docs:verify` 0 错误。
+  - 未做：没有给过渡放行加开 PR 日期判断或截止日期，派活指令改掉之前加门会让照旧写法的新 PR 变红；仓外指令的修改不在本 PR 内。
 
 ## 2026-10-13 · Let best-effort stages skip a company whose operation cannot be replayed, time-box enrichment, and rehearse a full-size run
 
