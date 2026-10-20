@@ -575,7 +575,8 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
  * This run's fit stage judged at least one company. finalizeRun uses it to request scoring
  * for a FAILED run.
  *
- * - Stats with `fit` (the normal end of a run) answer alone: some verdict count is above zero.
+ * - Stats with `fit` (the normal end of a run, and a run recorded FAILED at finalize, which keeps
+ *   the run's stats) answer alone: some verdict count is above zero.
  * - Stats without `fit` (the failure path) need a failure stage at or after fit, and then a fit
  *   verdict on a lead of this ICP for a company this run resolved: its accepted raw records →
  *   their company identity links → the leads. A fit pass that failed may have stored verdicts
@@ -2468,16 +2469,22 @@ export function createDiscoveryActivities(deps: {
       stats: Record<string, unknown>;
     }): Promise<void> {
       // A run's outcome is written once. A retry of a write that already committed (its
-      // result was lost) is answered from the row, without attesting again (the authority
-      // may have ended since), writing again or emitting a second event.
-      const current = await deps.prisma.withWorkspace(input.workspaceId, (tx) =>
-        lockDiscoveryRunReceiptState(tx, input),
-      );
-      if (current.status === input.status) return;
+      // result was lost) is answered from the row (a short row lock, no write), without
+      // attesting again (the authority may have ended since), writing again or emitting a
+      // second event. A legacy envelope is still parked by ensureRunBudget below.
+      if (input.executionContractVersion === 2) {
+        const current = await deps.prisma.withWorkspace(input.workspaceId, (tx) =>
+          lockDiscoveryRunReceiptState(tx, input),
+        );
+        if (current.status === input.status) return;
+      }
       // A DONE or PARTIAL write after the run's authority ended (lease expired, revoked,
-      // exhausted) records the run FAILED at the finalize stage, as ADR-024 records a run
-      // past its lease, and then fails without retrying: otherwise the run stays RUNNING
-      // for good, because the workflow fails on a finalize error.
+      // exhausted) records the run FAILED at the finalize stage, the outcome the admission
+      // lease design gives a run past its lease (docs/superpowers/plans/
+      // 2026-10-09-discovery-run-admission-lease.md §5), and then fails without retrying:
+      // otherwise the run stays RUNNING for good, because the workflow fails on a finalize
+      // error. stats.failure.errorType keeps the ended code (expired, revoked or exhausted
+      // call for different actions).
       let endedAuthority: ExecutionBudgetGrantError | undefined;
       try {
         await attestRunFinalization(input);
@@ -2497,18 +2504,26 @@ export function createDiscoveryActivities(deps: {
             status: 'FAILED' as const,
             stats: {
               ...input.stats,
-              failure: { stage: 'finalize', errorType: 'ExecutionBudgetGrantError', control: true },
+              failure: { stage: 'finalize', errorType: endedAuthority.code, control: true },
             },
           }
         : input;
+      let alreadyRecorded = false;
       await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const lockedRun = await lockDiscoveryRunReceiptState(tx, args);
         if (lockedRun.status !== 'RUNNING') {
+          // The requested outcome is already recorded (an overlapping attempt committed it
+          // after this one read RUNNING): this write succeeded, even if the authority
+          // ended in between.
+          if (lockedRun.status === input.status) {
+            alreadyRecorded = true;
+            return;
+          }
           // FAILED only closes a run that is still open: it never replaces a recorded
           // outcome (say, from a duplicate execution after the grant lapsed), and a
-          // retried FAILED write emits no second DiscoveryRunCompleted. The same
-          // outcome written concurrently is a retry; any other outcome is a conflict.
-          if (args.status === 'FAILED' || lockedRun.status === args.status) return;
+          // retried FAILED write emits no second DiscoveryRunCompleted. Any other
+          // outcome over a recorded one is a conflict.
+          if (args.status === 'FAILED') return;
           throw ApplicationFailure.nonRetryable(
             `discovery run already finalized as ${lockedRun.status}`,
             'DISCOVERY_RUN_ALREADY_FINALIZED',
@@ -2597,8 +2612,19 @@ export function createDiscoveryActivities(deps: {
             },
           });
         }
+      }).catch((error: unknown) => {
+        // The ended authority is why this write ran: a failed write (a receipt check, say)
+        // must not hide it behind its own error.
+        throw endedAuthority
+          ? ApplicationFailure.fromError(endedAuthority, {
+              nonRetryable: true,
+              cause: error instanceof Error ? error : undefined,
+            })
+          : error;
       });
-      if (endedAuthority) throw ApplicationFailure.fromError(endedAuthority, { nonRetryable: true });
+      if (endedAuthority && !alreadyRecorded) {
+        throw ApplicationFailure.fromError(endedAuthority, { nonRetryable: true });
+      }
     },
   };
   const { canonicalizeLegacyDiscoveryRun, ...publicActivities } = activities;
