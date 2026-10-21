@@ -136,7 +136,14 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
       return { workspaceId, authorityId, operationId };
     }
 
-    function manifest(fixture: ArtifactFixture): string {
+    /** The artifact fields a test may vary; the object row compares size, key and privacy class. */
+    interface ManifestOverrides {
+      readonly mediaType?: string;
+      readonly resultSchema?: string;
+      readonly sizeBytes?: string;
+    }
+
+    function manifest(fixture: ArtifactFixture, overrides: ManifestOverrides = {}): string {
       return JSON.stringify({
         schemaVersion: 'generic-operation-artifact/v1',
         artifactId: fixture.artifactId,
@@ -144,11 +151,11 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
         workspaceId: fixture.workspaceId,
         authorityId: fixture.authorityId,
         operationId: fixture.operationId,
-        resultSchema: 'http-get/v1',
+        resultSchema: overrides.resultSchema ?? 'http-get/v1',
         objectKey: objectKey(fixture.sha256),
         sha256: fixture.sha256,
-        sizeBytes: '1024',
-        mediaType: 'text/html',
+        sizeBytes: overrides.sizeBytes ?? '1024',
+        mediaType: overrides.mediaType ?? 'text/html',
         privacyClass: 'PERSONAL_DATA',
         sourceDigest: null,
         createdAt: CREATED_AT.toISOString(),
@@ -162,6 +169,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
       version: 'v3' | 'v4',
       fixture: ArtifactFixture,
       objectVersionId: string,
+      overrides: ManifestOverrides = {},
     ): Promise<unknown> {
       const call =
         version === 'v4'
@@ -169,7 +177,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
           : Prisma.sql`SELECT * FROM settle_tool_budget_artifact_manifest_with_receipt_v3(`;
       return tx.$queryRaw(Prisma.sql`${call}
         ${fixture.workspaceId}, ${fixture.operationId}::uuid,
-        ${10n}, ${manifest(fixture)}::jsonb,
+        ${10n}, ${manifest(fixture, overrides)}::jsonb,
         ${200}::smallint, ${true},
         ${'https://example.com/final'}, ${null}, ${null}, ${null},
         ${JSON.stringify({ currency: 'USD', unit: 'microusd', callCount: 1, upperBoundMicrousd: '10' })}::jsonb,
@@ -281,6 +289,64 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
       await withWorkspace((tx) => settle(tx, 'v4', concurrent, 'version-first-write'));
       expect(await pinnedVersion()).toBe('version-first-write');
       expect(await ledger()).toEqual(['version-first-write', 'version-refreshed-copy']);
+    });
+
+    // Content-addressed objects are shared by bytes. The empty object was first written by a
+    // crawl4ai-fetch/v1 result as text/markdown (xin, 2026-10-12); every empty http-get/v1 HEAD
+    // probe after it (text/plain) was refused by the media type check, so no HEAD probe ever
+    // settled and signal enrichment lost each company to an unreplayable operation (run
+    // c6b09756, 2026-10-20). Each artifact row keeps its own media type.
+    it('settles an artifact whose media type differs from the one that first wrote the same bytes', async () => {
+      const emptySha256 = digest();
+      // Its own subject, so the erasure cases below count only their own artifacts.
+      const emptySubjectId = randomUUID();
+      await seedContact(emptySubjectId);
+      const markdown = await settledFixture(emptySha256, emptySubjectId);
+      await withWorkspace((tx) =>
+        // The database check does not depend on the result schema; both use the
+        // http-get/v1 expected facts this fixture's settlement call carries.
+        settle(tx, 'v4', markdown, 'version-empty-markdown', {
+          mediaType: 'text/markdown',
+          sizeBytes: '0',
+        }),
+      );
+
+      const headProbe = await settledFixture(emptySha256, emptySubjectId);
+      await withWorkspace((tx) =>
+        settle(tx, 'v4', headProbe, 'version-empty-markdown', {
+          mediaType: 'text/plain',
+          sizeBytes: '0',
+        }),
+      );
+
+      const artifacts = await owner.$queryRaw<{ media_type: string }[]>`
+        SELECT media_type FROM generic_operation_artifact
+        WHERE sha256 = ${emptySha256} AND privacy_class = 'PERSONAL_DATA'
+        ORDER BY media_type`;
+      expect(artifacts).toEqual([{ media_type: 'text/markdown' }, { media_type: 'text/plain' }]);
+      const objects = await owner.$queryRaw<{ media_type: string }[]>`
+        SELECT media_type FROM generic_operation_artifact_object
+        WHERE sha256 = ${emptySha256} AND privacy_class = 'PERSONAL_DATA'`;
+      expect(objects).toEqual([{ media_type: 'text/markdown' }]);
+    });
+
+    it('still refuses to bind an object whose size differs from the one stored for the same bytes', async () => {
+      const sharedSha256 = digest();
+      const sizeSubjectId = randomUUID();
+      await seedContact(sizeSubjectId);
+      const first = await settledFixture(sharedSha256, sizeSubjectId);
+      await withWorkspace((tx) => settle(tx, 'v4', first, 'version-size-first', { sizeBytes: '0' }));
+
+      const differentSize = await settledFixture(sharedSha256, sizeSubjectId);
+      let message: string | null = null;
+      try {
+        await withWorkspace((tx) =>
+          settle(tx, 'v4', differentSize, 'version-size-first', { sizeBytes: '7', mediaType: 'text/plain' }),
+        );
+      } catch (error) {
+        message = raised(error);
+      }
+      expect(message).toBe('ERROR: GENERIC_OPERATION_ARTIFACT_INVALID');
     });
 
     it('settlement v3, which v4 replaces, still refuses a version that differs from the pin', async () => {
