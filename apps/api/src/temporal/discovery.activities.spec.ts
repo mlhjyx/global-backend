@@ -5806,9 +5806,10 @@ describe("executeQuery —— a query the run's admission lease has no room for 
       now: () => 0,
     }).executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
 
+    // Just short of one query unit: the query deadline has passed, whatever the other stages' units.
     const pastDeadline = await createDiscoveryActivities({
       ...replaying(makeDeps([]), first.queryReceipt),
-      runLease: leaseLeaving(0),
+      runLease: leaseLeaving(DISCOVERY_LEASE_UNIT_MS.query - 1),
       now: () => 0,
     }).executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
     expect(pastDeadline).toMatchObject({ skippedForLease: true, queryReceipt: first.queryReceipt });
@@ -5821,6 +5822,81 @@ describe("executeQuery —— a query the run's admission lease has no room for 
     }).executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
     expect(withRoom).toHaveProperty("skipReason");
     expect(withRoom).not.toHaveProperty("skippedForLease");
+  });
+
+  it("keeps the skip reason of a replayed zero receipt when the lease cannot be read, without attest or routing", async () => {
+    const first = await createDiscoveryActivities({
+      ...makeDeps([]),
+      runLease: leaseLeaving(0),
+      now: () => 0,
+    }).executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
+    const deps = replaying(makeDeps([]), first.queryReceipt);
+    const providers = deps.providers as unknown as { routeCompanyDiscovery: () => Promise<unknown> };
+    const routeCompanyDiscovery = vi.fn(providers.routeCompanyDiscovery);
+    const budgetStore = deps.budgetStore as unknown as { attestAuthorized: ReturnType<typeof vi.fn> };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    try {
+      const replayed = await createDiscoveryActivities({
+        ...deps,
+        providers: { ...providers, routeCompanyDiscovery } as never,
+        runLease: vi.fn(async () => {
+          throw new ExecutionBudgetGrantError("EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE");
+        }),
+        now: () => 0,
+      }).executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
+
+      expect(replayed).toHaveProperty("skipReason");
+      expect(replayed).not.toHaveProperty("skippedForLease");
+      expect(budgetStore.attestAuthorized).not.toHaveBeenCalled();
+      expect(routeCompanyDiscovery).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledOnce();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("never stops a query without a receipt identity (legacy history) for the lease", async () => {
+    const discoverCompanies = vi.fn(async () => ({ records: [], costCents: 0 }));
+    const acts = createDiscoveryActivities({
+      ...makeDeps([{ ...okAdapter("wikidata", []), discoverCompanies }]),
+      runLease: leaseLeaving(0),
+      now: () => 0,
+    });
+
+    const result = await acts.executeQuery({
+      workspaceId: DISCOVERY_BINDING.scopeKey,
+      runId: testRunId("run-legacy-lease"),
+      query: QUERY,
+      executionContractVersion: 2,
+      executionBudget: DISCOVERY_BINDING,
+    });
+    expect(result).not.toHaveProperty("skippedForLease");
+    expect(discoverCompanies).toHaveBeenCalledOnce();
+  });
+
+  it("starts the next attempt past the query deadline when term normalization meets an unavailable upstream", async () => {
+    const deps = makeDeps([
+      { ...lineageAdapter(vi.fn(noRecords)), consumesResolvedTaxonomy: true } as never,
+    ]);
+    const taxonomy = {
+      resolveMany: vi.fn(async () => {
+        throw http(429);
+      }),
+      resolve: vi.fn(async () => null),
+    };
+    const acts = createDiscoveryActivities({
+      ...deps,
+      taxonomy: taxonomy as never,
+      runLease: leaseLeaving(DISCOVERY_LEASE_UNIT_MS.query + 2 * MINUTE),
+      now: () => 0,
+    });
+
+    await expect(acts.executeQuery(discoveryArgs("run-ok-x", { query: QUERY }))).rejects.toMatchObject({
+      type: "ProviderHttpError",
+      nextRetryDelay: 2 * MINUTE + 1_000,
+    });
+    expect(taxonomy.resolveMany).toHaveBeenCalledOnce();
   });
 
   it("does not read the lease to replay a receipt that ran on a provider", async () => {

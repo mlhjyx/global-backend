@@ -829,6 +829,50 @@ describe("discoveryWorkflow stages that stopped for the run's admission lease", 
     expect(finalStats().status).toBe('FAILED');
   });
 
+  it('fails a run whose only other queries were skipped because their source is off', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: QUERIES.slice(0, 2) });
+    acts.executeQuery
+      .mockResolvedValueOnce(executed(0, 0, { skipReason: 'SOURCE_DISABLED' }))
+      .mockResolvedValueOnce(executed(1, 0, { skippedForLease: true }));
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(finalStats()).toMatchObject({
+      status: 'FAILED',
+      stats: { skippedQueries: { SOURCE_DISABLED: 1 }, skippedForLease: { queries: 1 } },
+    });
+  });
+
+  it('keeps a run PARTIAL when a query that lost one provider still brought records', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: QUERIES.slice(0, 2) });
+    acts.executeQuery
+      .mockResolvedValueOnce(executed(0, 7, { unreplayable: true }))
+      .mockResolvedValueOnce(executed(1, 0, { skippedForLease: true }));
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(finalStats()).toMatchObject({ status: 'PARTIAL', stats: { failures: 1, skippedForLease: { queries: 1 } } });
+  });
+
+  it('keeps the queries the lease left in the stats of a run a later stage fails (BI-25)', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: QUERIES.slice(0, 2) });
+    acts.executeQuery
+      .mockResolvedValueOnce(executed(0, 1))
+      .mockResolvedValueOnce(executed(1, 0, { skippedForLease: true }));
+    const control = activityFailure('enrichSignalsRun', 'ExecutionBudgetGrantError');
+    acts.enrichSignalsRun.mockRejectedValueOnce(control);
+
+    await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(control);
+
+    expect(finalStats()).toMatchObject({
+      status: 'FAILED',
+      stats: { skippedForLease: { queries: 1 }, failure: { stage: 'signals' } },
+    });
+  });
+
   it('keeps DONE and the stats shape of a run the lease did not cut short', async () => {
     primeDiscovery();
 

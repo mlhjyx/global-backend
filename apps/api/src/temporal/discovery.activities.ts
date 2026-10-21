@@ -281,16 +281,26 @@ function withReceiptSkip(
  * A replayed query result. A zero receipt replayed once the query deadline has passed is counted
  * as a lease stop: the deadline never comes back, so a receipt written then was one (a source
  * switched off just before the deadline is the rare exception, and the run is PARTIAL either way).
+ * The label is all the lease read decides: a replay answers from durable facts, so a failed read
+ * keeps the BI-30 label instead of failing the run.
  */
 async function replayedQueryResult(
   result: DiscoveryQueryExecutionResult,
   reason: () => DiscoveryQuerySkipReason,
   lease: () => Promise<DiscoveryRunLease>,
 ): Promise<DiscoveryQueryExecutionResult> {
-  if (result.queryReceipt?.providers.length === 0 && !(await lease()).allows(DISCOVERY_LEASE_UNIT_MS.query)) {
-    return { ...result, skippedForLease: true };
+  if (result.queryReceipt?.providers.length !== 0) return result;
+  let pastQueryDeadline = false;
+  try {
+    pastQueryDeadline = !(await lease()).allows(DISCOVERY_LEASE_UNIT_MS.query);
+  } catch (error) {
+    console.warn(
+      `[discovery] replayed zero receipt keeps its skip reason: the lease read failed (${
+        error instanceof Error ? error.name : 'unknown error'
+      })`,
+    );
   }
-  return withReceiptSkip(result, reason);
+  return pastQueryDeadline ? { ...result, skippedForLease: true } : withReceiptSkip(result, reason);
 }
 
 function invalidDiscoveryQueryReceiptIdentity(): never {

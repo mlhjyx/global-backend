@@ -593,9 +593,10 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     ) {
       status = 'FAILED';
     }
-    // The lease left no room for a single query that could bring data (the run started late, say):
-    // FAILED keeps the plan READY for another run instead of consuming it on nothing.
-    if (leaseSkippedQueries > 0 && leaseSkippedQueries + failures >= queries.length) {
+    // The lease cut the query stage short and no query brought a single accepted record (the run
+    // started late, say): the run found nothing, so it ends FAILED rather than a PARTIAL that marks
+    // the plan EXECUTED. The plan cannot run again either way; its grant was consumed.
+    if (leaseSkippedQueries > 0 && acceptedRaw === 0) {
       status = 'FAILED';
     }
     outcome = {
@@ -658,6 +659,8 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
               ...queryStats(),
               ...skipStats(),
               ...extractionStats(),
+              // A run the lease cut short before a later stage failed says so (stats only).
+              ...(leaseSkippedQueries > 0 ? { skippedForLease: { queries: leaseSkippedQueries } } : {}),
               queries: queryCount,
               failures,
               failure: describeDiscoveryRunFailure(stage, error),

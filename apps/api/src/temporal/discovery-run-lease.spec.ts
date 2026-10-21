@@ -1,5 +1,7 @@
 import { ApplicationFailure } from '@temporalio/activity';
 import { describe, expect, it, vi } from 'vitest';
+import { PUBLIC_HTTP_TIMEOUT_MAX_MS } from '../adapters/guarded-http';
+import { MAX_SITEMAP_HTTP_GETS } from '../discovery/execution-envelope';
 import { ExecutionBudgetGrantError } from '../execution-budget/execution-budget-authority.types';
 import { MAX_MODEL_GATEWAY_REQUEST_TIMEOUT_MS } from '../model-gateway/gateway-credential-boundary';
 import { MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND } from '../model-gateway/model-execution-envelope';
@@ -70,6 +72,12 @@ describe('discovery lease units', () => {
     );
     // One enrichment company stays within the enrichment proxy's timeout.
     expect(DISCOVERY_LEASE_UNIT_MS.enrich).toBeGreaterThanOrEqual(proxyTimeout('enrichRun'));
+    // One watch: robots.txt and the sitemaps it may read, each at the public HTTP timeout ceiling.
+    expect(DISCOVERY_LEASE_UNIT_MS.watches).toBeGreaterThanOrEqual(MAX_SITEMAP_HTTP_GETS * PUBLIC_HTTP_TIMEOUT_MAX_MS);
+  });
+
+  it('keep the 10-minute finalization reserve the integration guide states', () => {
+    expect(DISCOVERY_LEASE_FINALIZATION_RESERVE_MS).toBe(10 * MINUTE);
   });
 
   it('leave the finalization reserve for the activities that never stop for the lease', () => {

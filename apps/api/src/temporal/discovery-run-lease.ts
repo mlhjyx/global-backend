@@ -19,7 +19,13 @@ import {
  * ends PARTIAL with what it found; scoring still runs.
  */
 
-/** Kept at the end of the lease for the activities that never stop for it: canonicalize, patent enqueue, finalize. */
+/**
+ * Kept at the end of the lease for the activities that never stop for it: canonicalize, patent
+ * enqueue, finalize. The signals stage does not stop for the lease yet either: it runs in whatever
+ * fit and enrichment leave, about 20 minutes once fit stops (its 10-minute unit plus this reserve),
+ * where xin's signal reads take some 30 seconds a company; only a run of sites at their read
+ * timeouts still overruns the lease there.
+ */
 export const DISCOVERY_LEASE_FINALIZATION_RESERVE_MS = 10 * 60_000;
 
 /** The longest unit of work each stage starts, by stage. */
