@@ -461,11 +461,17 @@ const WEBSITE_PROFILE_TTL_MS = 30 * 24 * 3600 * 1000; // 官网画像较稳定�
 /**
  * A per-company pass stops starting companies once this much wall-clock time has gone by and
  * hands the rest to the next activity, so a run's company count never decides whether the pass
- * fits its start-to-close timeout. The company in progress still finishes: for fit one model
- * call, at most the gateway's 300-second ceiling (modelActs: 15 minutes); for a website profile
- * two page fetches, a render and one model call (signalActs: 30 minutes).
+ * fits its start-to-close timeout. The companies in progress still finish: for fit up to
+ * FIT_CONCURRENCY judgments, each a structured answer of at most two gateway requests at the
+ * 300-second ceiling (10 minutes), so 4 + 10 minutes stay inside modelActs' 15; for a website
+ * profile two page fetches, a render and one model call (signalActs: 30 minutes).
  */
-export const FIT_PASS_TIME_BOX_MS = 8 * 60_000;
+export const FIT_PASS_TIME_BOX_MS = 4 * 60_000;
+/**
+ * Fit judgments in flight at once. Fit was about half of a run's time when it judged one company
+ * after another; company extraction already calls the same model five at a time.
+ */
+export const FIT_CONCURRENCY = 3;
 export const PROFILE_PASS_TIME_BOX_MS = 15 * 60_000;
 /** Enrichment runs on the 2-minute proxy; one company is at most four GLEIF reads of about a second. */
 export const ENRICH_PASS_TIME_BOX_MS = 60_000;
@@ -1586,86 +1592,157 @@ export function createDiscoveryActivities(deps: {
       let judged = 0;
       let unjudged = 0;
 
-      // 逐家判别（事务外，可并发但这里顺序以控成本/限流）
       let skippedForBudget = 0;
       let unreplayable = 0;
-      // The previous company lost its fit call: to a stream the gateway settled as cut short, or,
-      // on a retry, to an operation an earlier attempt left without a durable result.
+      // The company before lost its fit call to a stream the gateway settled as cut short. A second
+      // such company in a row (in id order) looks like an outage and stops the activity.
       let previousCallCut = args.previousCallCut ?? false;
       let nextCompanyId: string | null = null;
       let skippedForLease = 0;
       const lease = await readRunLease(binding);
-      const startedAt = clock();
-      for (let i = 0; i < companies.length; i++) {
-        // A company the lease has no room for ends the stage: the rest count as skipped for the
-        // lease, nothing is handed on, and the run finishes PARTIAL.
-        if (!lease.allows(DISCOVERY_LEASE_UNIT_MS.fit)) {
-          skippedForLease = companies.length - i;
-          break;
-        }
-        // Hand the rest to the next activity rather than outrun this one's timeout; every
-        // activity judges at least one company, so the run always moves forward.
-        if (i > 0 && clock() - startedAt >= FIT_PASS_TIME_BOX_MS) {
-          nextCompanyId = companies[i - 1].id;
-          break;
-        }
-        const c = companies[i];
-        if (
-          !(await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-            companyMayUseExternalProcessing(tx, args.workspaceId, c.id),
-          ))
-        )
-          continue;
-        let judgment;
+
+      // Up to FIT_CONCURRENCY judgments run at once. Each company's verdict is stored as soon as it
+      // arrives, so a sibling's failure cannot lose it, and a retry, which lists only unjudged
+      // companies, never judges it again. A judgment never rejects: its outcome is folded below.
+      type FitOutcome =
+        | { kind: 'not-allowed' }
+        | { kind: 'judged'; verdict: string }
+        | { kind: 'unusable' }
+        | { kind: 'failed'; error: unknown };
+      const judgeCompany = async (c: (typeof companies)[number]): Promise<FitOutcome> => {
         try {
+          if (
+            !(await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+              companyMayUseExternalProcessing(tx, args.workspaceId, c.id),
+            ))
+          ) {
+            return { kind: 'not-allowed' };
+          }
           const authorizeExternalAction = authorizeCompanyExternalAction(args.workspaceId, c.id);
-          judgment = await judgeFitCompany(deps.gateway, args.workspaceId, icpBrief, c, {
+          const judgment = await judgeFitCompany(deps.gateway, args.workspaceId, icpBrief, c, {
             runId: binding.accountKey,
             runtimeTelemetry: deps.runtimeTelemetry,
             authorizeExternalAction,
           });
-        } catch (err) {
-          if (err instanceof BudgetExceededError) {
-            // 预算耗尽=本批余下全部会失败 → 中断并显性计数（复审 HIGH：绝不静默漏判假 DONE）
-            skippedForBudget = companies.length - i;
-            console.warn(
-              `[discovery] run ${args.runId} fit 预算耗尽：跳过余下 ${skippedForBudget} 家（进 stats，backlog sweep 兜底）`,
-            );
-            break;
-          }
-          // A transport failure usually hits every company, so it stops the activity. A single cut
-          // stream that the gateway settled without a result is the exception: retrying the
-          // activity could only replay it into BUDGET_OPERATION_REPLAY_UNAVAILABLE, so that one
-          // company counts as unjudged. The same goes for the company a retry finds an earlier
-          // attempt's call for, without a durable result: it is never sent again (D13). A second
-          // lost call in a row looks like an outage and stops.
-          const lostOnReplay = isUnreplayableOperation(err);
-          if (!previousCallCut && (lostOnReplay || settledModelFailureReason(err) !== undefined)) {
-            previousCallCut = true;
-            unjudged += 1;
-            if (lostOnReplay) unreplayable += 1;
-            continue;
-          }
-          // An unavailable upstream makes the next attempt wait; when the lease cannot hold the
-          // wait and one more judgment, the stage stops for the lease here instead of failing.
-          if (!upstreamWaitFitsLease(err, lease, DISCOVERY_LEASE_UNIT_MS.fit)) {
-            skippedForLease = companies.length - i;
-            break;
-          }
-          throw withUpstreamUnavailableRetryDelay(err);
+          if (!judgment) return { kind: 'unusable' };
+          await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+            upsertLeadFit(tx, args.workspaceId, args.icpId, c.id, judgment),
+          );
+          return { kind: 'judged', verdict: judgment.verdict };
+        } catch (error) {
+          return { kind: 'failed', error };
         }
-        if (!judgment) {
+      };
+
+      // Outcomes are folded in id order once every company before them has settled, so the counts,
+      // the two-in-a-row rule and the hand-off cursor read as if the companies ran one by one. The
+      // first failure that stops the activity is kept; nothing starts after it, and the companies in
+      // flight finish before the activity returns or fails, so a retry never meets a call that is
+      // still running.
+      let stop: { reason: 'failure'; error: unknown } | { reason: 'budget' | 'lease' } | undefined;
+      let accounted = 0;
+      const fold = (outcome: FitOutcome): void => {
+        if (outcome.kind === 'not-allowed') {
+          accounted += 1;
+          return;
+        }
+        if (outcome.kind === 'judged') {
+          accounted += 1;
+          previousCallCut = false;
+          verdicts[outcome.verdict] += 1;
+          judged += 1;
+          return;
+        }
+        if (outcome.kind === 'unusable') {
           // 单家判别失败不影响其余，但要计数：编排层据此判 PARTIAL / FAILED，绝不静默漏判假 DONE。
           // An unusable answer is no sign the upstream recovered: a cut after it is still in a row.
+          accounted += 1;
           unjudged += 1;
-          continue;
+          return;
         }
-        previousCallCut = false;
-        verdicts[judgment.verdict] += 1;
-        judged += 1;
-        await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-          upsertLeadFit(tx, args.workspaceId, args.icpId, c.id, judgment),
+        // After a stop, a failed company is left for whatever the stop means (a retry, or a count).
+        if (stop !== undefined) return;
+        const err = outcome.error;
+        if (err instanceof BudgetExceededError) {
+          // 预算耗尽=余下全部会失败 → 不再开始新的公司，显性计数（复审 HIGH：绝不静默漏判假 DONE）
+          stop = { reason: 'budget' };
+          return;
+        }
+        // A retry finds the call an earlier attempt left without a durable result: it is never sent
+        // again (D13), so that company stays unjudged. It says nothing about the upstream (up to
+        // FIT_CONCURRENCY such companies come together after an attempt timed out), so it neither
+        // starts nor continues the two-in-a-row rule.
+        if (isUnreplayableOperation(err)) {
+          accounted += 1;
+          unjudged += 1;
+          unreplayable += 1;
+          return;
+        }
+        // A transport failure usually hits every company, so it stops the activity. A single cut
+        // stream that the gateway settled without a result is the exception: retrying could only
+        // replay it into BUDGET_OPERATION_REPLAY_UNAVAILABLE, so that company counts as unjudged.
+        if (!previousCallCut && settledModelFailureReason(err) !== undefined) {
+          accounted += 1;
+          previousCallCut = true;
+          unjudged += 1;
+          return;
+        }
+        // An unavailable upstream makes the next attempt wait; when the lease cannot hold the wait
+        // and one more judgment, the stage stops for the lease instead of failing.
+        stop = upstreamWaitFitsLease(err, lease, DISCOVERY_LEASE_UNIT_MS.fit)
+          ? { reason: 'failure', error: err }
+          : { reason: 'lease' };
+      };
+
+      const inFlight = new Map<number, Promise<readonly [number, FitOutcome]>>();
+      const settled = new Map<number, FitOutcome>();
+      let started = 0;
+      let folded = 0;
+      let handOff = false;
+      const startedAt = clock();
+      for (;;) {
+        while (stop === undefined && !handOff && inFlight.size < FIT_CONCURRENCY && started < companies.length) {
+          // A company the lease has no room for ends the stage: the rest count as skipped for the
+          // lease, nothing is handed on, and the run finishes PARTIAL.
+          if (!lease.allows(DISCOVERY_LEASE_UNIT_MS.fit)) {
+            stop = { reason: 'lease' };
+            break;
+          }
+          // Hand the rest to the next activity rather than outrun this one's timeout; every
+          // activity starts at least one company, so the run always moves forward.
+          if (started > 0 && clock() - startedAt >= FIT_PASS_TIME_BOX_MS) {
+            handOff = true;
+            break;
+          }
+          const index = started;
+          started += 1;
+          inFlight.set(index, judgeCompany(companies[index]!).then((outcome) => [index, outcome] as const));
+        }
+        if (inFlight.size === 0) break;
+        const [index, outcome] = await Promise.race(inFlight.values());
+        inFlight.delete(index);
+        settled.set(index, outcome);
+        for (let ready = settled.get(folded); ready !== undefined; ready = settled.get(folded)) {
+          settled.delete(folded);
+          folded += 1;
+          fold(ready);
+        }
+      }
+
+      // Every company started has settled and been folded; the ones left are the companies never
+      // started, and after a stop the ones whose failure the stop covers.
+      const left = companies.length - accounted;
+      const stopped = stop as typeof stop;
+      if (stopped?.reason === 'failure') throw withUpstreamUnavailableRetryDelay(stopped.error);
+      if (stopped?.reason === 'budget') {
+        skippedForBudget = left;
+        console.warn(
+          `[discovery] run ${args.runId} fit 预算耗尽：跳过余下 ${skippedForBudget} 家（进 stats，不会自动补判）`,
         );
+      } else if (stopped?.reason === 'lease') {
+        skippedForLease = left;
+      } else if (handOff) {
+        nextCompanyId = companies[started - 1]!.id;
       }
       return {
         judged,
