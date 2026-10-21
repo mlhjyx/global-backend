@@ -15,6 +15,9 @@
  * PARTIAL，与 fit 的未判定同理，不单独判 FAILED。
  * 尽力而为的阶段（官网画像、信号、监控）因操作无法重放而跳过的公司，同样至少 PARTIAL；
  * 连续两家无法重放时阶段照旧失败，不在这里判。
+ * 准入租约没有余量而提前停下的阶段（查询、画像、fit、富集、监控）留下的查询或公司，同样至少
+ * PARTIAL，不单独判 FAILED：run 带着已有结果收尾，评分照跑。例外在工作流里判：查询阶段因租约提前
+ * 停下、且一条记录都没收到时判 FAILED（这次 run 什么都没找到）。
  */
 export function resolveRunStatus(args: {
   /**
@@ -39,6 +42,8 @@ export function resolveRunStatus(args: {
    * it unprofiled: fit then judged them without that evidence.
    */
   profileStageFailed?: boolean;
+  /** Queries and companies the stages left because the run's admission lease had no room for them. */
+  leaseSkips?: number;
 }): 'DONE' | 'PARTIAL' | 'FAILED' {
   const { failures, totalQueries, budgetTruncated } = args;
   const skipped = (args.skippedSubjects ?? 0) > 0;
@@ -47,6 +52,7 @@ export function resolveRunStatus(args: {
   const extractionsDropped = (args.droppedExtractions ?? 0) > 0;
   const unreplayableSkipped = (args.unreplayableSkips ?? 0) > 0;
   const profileStageFailed = args.profileStageFailed === true;
+  const leaseSkipped = (args.leaseSkips ?? 0) > 0;
   if (
     failures === 0 &&
     !budgetTruncated &&
@@ -55,7 +61,8 @@ export function resolveRunStatus(args: {
     !queriesSkipped &&
     !extractionsDropped &&
     !unreplayableSkipped &&
-    !profileStageFailed
+    !profileStageFailed &&
+    !leaseSkipped
   ) {
     return 'DONE';
   }

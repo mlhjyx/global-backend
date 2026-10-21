@@ -210,6 +210,16 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
   let queryCount = 0;
   // Queries counted as failed because their retries met an operation they cannot replay.
   let unreplayableQueries = 0;
+  // Queries and companies the stages left because the admission lease had no room for them, by
+  // stage, as each pass reports them. Kept outside the stages so a run a later stage fails (BI-25)
+  // still shows them; shown only for the stages that left any. Absent in results recorded before
+  // the lease soft deadline existed, so replays keep their status and stats.
+  const leaseSkips: Partial<Record<'queries' | 'websiteProfile' | 'fit' | 'enrich' | 'watches', number>> = {};
+  const countLeaseSkips = (stage: keyof typeof leaseSkips, count: number | undefined): void => {
+    if (count !== undefined && count > 0) leaseSkips[stage] = (leaseSkips[stage] ?? 0) + count;
+  };
+  const leaseStats = (): Record<string, unknown> =>
+    Object.keys(leaseSkips).length > 0 ? { skippedForLease: { ...leaseSkips } } : {};
   // Term normalization per query: lost its model call and ran on the providers' vocabularies,
   // or called no model because no routed source reads resolved codes (W2). Counts only.
   let taxonomyFallbacks = 0;
@@ -373,6 +383,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         // Absent in histories recorded before the counters existed.
         if (r.taxonomyFallback === true) taxonomyFallbacks += 1;
         if (r.taxonomyModelSkipped === true) taxonomyModelSkips += 1;
+        if (r.skippedForLease === true) countLeaseSkips('queries', 1);
         // Absent in histories recorded before the activity absorbed such a loss.
         previousQueryUnreplayable = r.unreplayable === true;
         if (previousQueryUnreplayable) {
@@ -423,6 +434,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
           );
           websiteProfile =
             profileContinuation === undefined ? pass : addWebsiteProfilePass(websiteProfile, pass);
+          countLeaseSkips('websiteProfile', pass.skippedForLease);
           profileContinuation =
             typeof pass.nextIndex === 'number' && !pass.budgetTruncated
               ? { startIndex: pass.nextIndex, previousUnreplayable: pass.previousUnreplayable === true }
@@ -447,6 +459,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         fitContinuation === undefined ? fitArgs : { ...fitArgs, ...fitContinuation },
       );
       fit = fit === undefined ? pass : addFitPass(fit, pass);
+      countLeaseSkips('fit', pass.skippedForLease);
       fitContinuation =
         typeof pass.nextCompanyId === 'string'
           ? { afterCompanyId: pass.nextCompanyId, previousCallCut: pass.previousCallCut === true }
@@ -465,6 +478,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         enrichIndex === undefined ? enrichArgs : { ...enrichArgs, startIndex: enrichIndex },
       );
       enrich = enrich === undefined ? pass : addEnrichPass(enrich, pass);
+      countLeaseSkips('enrich', pass.skippedForLease);
       enrichIndex = typeof pass.nextIndex === 'number' && !pass.budgetTruncated ? pass.nextIndex : undefined;
     } while (enrichIndex !== undefined);
 
@@ -496,6 +510,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       registered: number;
       skippedSubjects?: number;
       unreplayable?: number;
+      skippedForLease?: number;
     } = {
       candidates: 0,
       registered: 0,
@@ -503,6 +518,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     stage = 'watches';
     try {
       watches = await signalActs.registerWatchesForRun({ workspaceId, runId, icpId: input.icpId, ...authorityArgs });
+      countLeaseSkips('watches', watches.skippedForLease);
     } catch (error) {
       if (isExecutionControlError(error)) throw error;
       /* 监控注册是尽力而为的收口，失败不影响 run 状态 */
@@ -543,6 +559,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       watches: watches.unreplayable ?? 0,
     };
     const unreplayableSkipCount = Object.values(unreplayableSkips).reduce((sum, count) => sum + count, 0);
+    const leaseSkipCount = Object.values(leaseSkips).reduce((sum, count) => sum + count, 0);
     let status = resolveRunStatus({
       failures,
       totalQueries: queries.length,
@@ -554,6 +571,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       droppedExtractions: modelExtractions.failed,
       unreplayableSkips: unreplayableSkipCount,
       profileStageFailed: websiteProfileStageFailed,
+      leaseSkips: leaseSkipCount,
     });
     if (usesRawGovernance && governanceDenied > 0) {
       status = acceptedRaw === 0 ? 'FAILED' : status === 'DONE' ? 'PARTIAL' : status;
@@ -567,6 +585,12 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     ) {
       status = 'FAILED';
     }
+    // The lease cut the query stage short and no query brought a single accepted record (the run
+    // started late, say): the run found nothing, so it ends FAILED rather than a PARTIAL that marks
+    // the plan EXECUTED. The plan cannot run again either way; its grant was consumed.
+    if ((leaseSkips.queries ?? 0) > 0 && acceptedRaw === 0) {
+      status = 'FAILED';
+    }
     outcome = {
       status,
       stats: {
@@ -575,6 +599,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         ...extractionStats(),
         // Shown only when a company was skipped, so runs without a skip keep their stats shape.
         ...(unreplayableSkipCount > 0 ? { unreplayableSkips } : {}),
+        ...leaseStats(),
         // Shown only when it happened; neither changes the status (the queries ran).
         ...(taxonomyFallbacks > 0 ? { taxonomyFallback: taxonomyFallbacks } : {}),
         ...(taxonomyModelSkips > 0 ? { taxonomyModelSkipped: taxonomyModelSkips } : {}),
@@ -626,6 +651,8 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
               ...queryStats(),
               ...skipStats(),
               ...extractionStats(),
+              // A run the lease cut short before a later stage failed says so (stats only).
+              ...leaseStats(),
               queries: queryCount,
               failures,
               failure: describeDiscoveryRunFailure(stage, error),

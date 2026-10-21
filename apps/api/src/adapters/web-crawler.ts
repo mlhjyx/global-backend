@@ -22,6 +22,8 @@ import {
 
 export const MAX_CRAWL4AI_RENDER_ARTIFACT_BYTES =
   PLATFORM_CRAWL4AI_ARTIFACT_MAX_BYTES;
+/** How long one crawl4ai page read (crawl or render) may take before it is aborted. */
+export const CRAWL4AI_REQUEST_TIMEOUT_MS = 75_000;
 export interface CrawlResult {
   url: string;
   text: string;
@@ -49,7 +51,7 @@ export async function crawlUrl(
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
       body: JSON.stringify({ url: target.url.toString() }),
-      signal: AbortSignal.timeout(75_000),
+      signal: AbortSignal.timeout(CRAWL4AI_REQUEST_TIMEOUT_MS),
     });
     const responseBytes = await readFetchResponseBodyBounded(
       res,
@@ -113,7 +115,7 @@ export async function crawlHtml(
           },
         },
       }),
-      signal: AbortSignal.timeout(75_000),
+      signal: AbortSignal.timeout(CRAWL4AI_REQUEST_TIMEOUT_MS),
     });
     const responseBytes = await readFetchResponseBodyBounded(
       res,
