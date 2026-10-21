@@ -5220,6 +5220,60 @@ describe("qualifyFitForRun —— 按时限把余下公司交给下一次活动"
       expect(judgments.started).toEqual(["01 GmbH", "02 GmbH", "03 GmbH"]);
     });
 
+    // Review of #675 (HIGH): a failure that settled behind a slow judgment was only folded once the
+    // slow one settled, and the pool refilled meanwhile, starting all 60 companies of a probe.
+    it.each([
+      ["an unavailable upstream", () => http(503)],
+      ["a spent budget", () => new StoreBudgetExceededError("account", 1n, 0n)],
+      ["a cut stream", () => cut()],
+    ] as const)("starts nothing new while %s behind a slow judgment waits to be folded", async (_label, failure) => {
+      const judgments = heldJudgments();
+      const { acts } = passActivities([id(1), id(2), id(3), id(4), id(5), id(6)], () => 0);
+
+      const result = acts
+        .qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" }))
+        .then((value) => ({ value }), (error: unknown) => ({ error }));
+      await flush();
+      await judgments.fail("02 GmbH", failure());
+      await judgments.fail("03 GmbH", failure());
+      // Two slots are free and the run's first company still runs: nothing more starts.
+      expect(judgments.started).toEqual(["01 GmbH", "02 GmbH", "03 GmbH"]);
+      await judgments.judge("01 GmbH");
+
+      expect(judgments.started.length).toBeLessThanOrEqual(FIT_CONCURRENCY);
+      await result;
+    });
+
+    it("resumes starting once the failure it waited on is folded and absorbed", async () => {
+      const judgments = heldJudgments();
+      const { acts } = passActivities([id(1), id(2), id(3), id(4)], () => 0);
+
+      const pass = acts.qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" }));
+      await flush();
+      await judgments.fail("02 GmbH", cut());
+      expect(judgments.started).toEqual(["01 GmbH", "02 GmbH", "03 GmbH"]);
+      // c1 judged, then c2's cut is the first in a row and absorbed: the pool fills again.
+      await judgments.judge("01 GmbH");
+      expect(judgments.started).toEqual(["01 GmbH", "02 GmbH", "03 GmbH", "04 GmbH"]);
+      await judgments.judge("03 GmbH");
+      await judgments.judge("04 GmbH");
+
+      await expect(pass).resolves.toMatchObject({ judged: 3, unjudged: 1 });
+    });
+
+    it("counts a company lost on replay after a budget stop as unreplayable, not as skipped", async () => {
+      const judgments = heldJudgments();
+      const { acts } = passActivities([id(1), id(2), id(3)], () => 0);
+
+      const pass = acts.qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" }));
+      await flush();
+      await judgments.fail("01 GmbH", new StoreBudgetExceededError("account", 1n, 0n));
+      await judgments.fail("02 GmbH", new BudgetOperationReplayError("op-2"));
+      await judgments.fail("03 GmbH", new StoreBudgetExceededError("account", 1n, 0n));
+
+      await expect(pass).resolves.toMatchObject({ unjudged: 1, unreplayable: 1, skippedForBudget: 2 });
+    });
+
     it("keeps the pass, plus one judgment, inside the fit activity's timeout", () => {
       const timeout = Math.max(...discoveryActivityTimeouts().get("qualifyFitForRun")!.map(timeoutMilliseconds));
       expect(FIT_PASS_TIME_BOX_MS + DISCOVERY_LEASE_UNIT_MS.fit).toBeLessThanOrEqual(timeout - MINUTE);

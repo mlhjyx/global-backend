@@ -1636,9 +1636,11 @@ export function createDiscoveryActivities(deps: {
 
       // Outcomes are folded in id order once every company before them has settled, so the counts,
       // the two-in-a-row rule and the hand-off cursor read as if the companies ran one by one. The
-      // first failure that stops the activity is kept; nothing starts after it, and the companies in
-      // flight finish before the activity returns or fails, so a retry never meets a call that is
-      // still running.
+      // first failure that stops the activity is kept, and the companies in flight finish before the
+      // activity returns or fails, so a retry never meets a call that is still running. A failure
+      // that settled behind a company still in flight may turn out to be that stop, so nothing new
+      // starts while one waits to be folded: a fast-failing upstream cannot fill the pool again and
+      // again while a slow judgment runs.
       let stop: { reason: 'failure'; error: unknown } | { reason: 'budget' | 'lease' } | undefined;
       let accounted = 0;
       const fold = (outcome: FitOutcome): void => {
@@ -1660,22 +1662,22 @@ export function createDiscoveryActivities(deps: {
           unjudged += 1;
           return;
         }
-        // After a stop, a failed company is left for whatever the stop means (a retry, or a count).
-        if (stop !== undefined) return;
         const err = outcome.error;
-        if (err instanceof BudgetExceededError) {
-          // 预算耗尽=余下全部会失败 → 不再开始新的公司，显性计数（复审 HIGH：绝不静默漏判假 DONE）
-          stop = { reason: 'budget' };
-          return;
-        }
         // A retry finds the call an earlier attempt left without a durable result: it is never sent
-        // again (D13), so that company stays unjudged. It says nothing about the upstream (up to
-        // FIT_CONCURRENCY such companies come together after an attempt timed out), so it neither
-        // starts nor continues the two-in-a-row rule.
+        // again (D13), so that company stays unjudged, before a stop or after one. It says nothing
+        // about the upstream (the companies an attempt had in flight when it failed or its worker
+        // was lost come together), so it neither starts nor continues the two-in-a-row rule.
         if (isUnreplayableOperation(err)) {
           accounted += 1;
           unjudged += 1;
           unreplayable += 1;
+          return;
+        }
+        // After a stop, a failed company is left for whatever the stop means (a retry, or a count).
+        if (stop !== undefined) return;
+        if (err instanceof BudgetExceededError) {
+          // 预算耗尽=余下全部会失败 → 不再开始新的公司，显性计数（复审 HIGH：绝不静默漏判假 DONE）
+          stop = { reason: 'budget' };
           return;
         }
         // A transport failure usually hits every company, so it stops the activity. A single cut
@@ -1696,12 +1698,22 @@ export function createDiscoveryActivities(deps: {
 
       const inFlight = new Map<number, Promise<readonly [number, FitOutcome]>>();
       const settled = new Map<number, FitOutcome>();
+      // Settled, not yet folded failures that may stop the activity (a lost replay never does).
+      let pendingFailures = 0;
+      const mayStop = (outcome: FitOutcome): boolean =>
+        outcome.kind === 'failed' && !isUnreplayableOperation(outcome.error);
       let started = 0;
       let folded = 0;
       let handOff = false;
       const startedAt = clock();
       for (;;) {
-        while (stop === undefined && !handOff && inFlight.size < FIT_CONCURRENCY && started < companies.length) {
+        while (
+          stop === undefined &&
+          pendingFailures === 0 &&
+          !handOff &&
+          inFlight.size < FIT_CONCURRENCY &&
+          started < companies.length
+        ) {
           // A company the lease has no room for ends the stage: the rest count as skipped for the
           // lease, nothing is handed on, and the run finishes PARTIAL.
           if (!lease.allows(DISCOVERY_LEASE_UNIT_MS.fit)) {
@@ -1722,9 +1734,11 @@ export function createDiscoveryActivities(deps: {
         const [index, outcome] = await Promise.race(inFlight.values());
         inFlight.delete(index);
         settled.set(index, outcome);
+        if (mayStop(outcome)) pendingFailures += 1;
         for (let ready = settled.get(folded); ready !== undefined; ready = settled.get(folded)) {
           settled.delete(folded);
           folded += 1;
+          if (mayStop(ready)) pendingFailures -= 1;
           fold(ready);
         }
       }

@@ -61,7 +61,7 @@ import {
   discoveryActivityTimeouts,
   timeoutMilliseconds,
 } from './testing/discovery-activity-timeouts';
-import { createDiscoveryActivities } from './discovery.activities';
+import { createDiscoveryActivities, FIT_CONCURRENCY } from './discovery.activities';
 import { discoveryWorkflow } from './discovery.workflow';
 import { ProviderHttpError, ProviderTransportError } from '../model-gateway/providers/provider-output-error';
 import { BudgetOperationReplayError } from '../tools/budget-store';
@@ -298,6 +298,25 @@ function rehearse(options: { companies: number; slowdown?: number; faults?: Faul
   let fitCalls = 0;
   // The sum of every fit call's latency: what the fit stage would take one company at a time.
   let fitLatencyTotal = 0;
+  // Fit calls in flight settle by simulated end time, earliest first, so a call that started later
+  // but runs shorter settles first, as on the real gateway. One settles per macrotask, after the
+  // microtasks of the one before have started whatever the activity starts next.
+  const fitInFlight: Array<{ end: number; settle: () => void }> = [];
+  let fitPeak = 0;
+  let fitTickScheduled = false;
+  const settleNextFit = () => {
+    if (fitTickScheduled) return;
+    fitTickScheduled = true;
+    setImmediate(() => {
+      fitTickScheduled = false;
+      fitInFlight.sort((a, b) => a.end - b.end);
+      const next = fitInFlight.shift();
+      if (!next) return;
+      rehearsal.clock.now = Math.max(rehearsal.clock.now, next.end);
+      next.settle();
+      if (fitInFlight.length > 0) settleNextFit();
+    });
+  };
   // Companies whose fit call broke: the gateway has their operation, without a durable result.
   const unreplayableCompanies = new Set<string>();
   rehearsal.fitModel.mockImplementation(async (_gateway: unknown, request: unknown) => {
@@ -306,13 +325,14 @@ function rehearse(options: { companies: number; slowdown?: number; faults?: Faul
     // Numbered when the call starts: siblings in flight start their own calls while this one waits.
     fitCalls += 1;
     const call = fitCalls;
-    // Judgments in flight together overlap: each ends at its own start plus its latency. The
-    // macrotask lets the siblings the activity started alongside this one start first.
-    const startedAt = rehearsal.clock.now;
+    // Judgments in flight together overlap: each ends at its own start plus its latency.
     const latency = pick(LATENCY_MS.fit) * slowdown;
     fitLatencyTotal += latency;
-    await new Promise((resolve) => setImmediate(resolve));
-    rehearsal.clock.now = Math.max(rehearsal.clock.now, startedAt + latency);
+    await new Promise<void>((resolve) => {
+      fitInFlight.push({ end: rehearsal.clock.now + latency, settle: resolve });
+      fitPeak = Math.max(fitPeak, fitInFlight.length);
+      settleNextFit();
+    });
     if (faults.fitCuts?.includes(call)) {
       throw new ProviderTransportError('CHAT_COMPLETIONS_STREAM_TRUNCATED', { inputTokens: 520 });
     }
@@ -502,6 +522,7 @@ function rehearse(options: { companies: number; slowdown?: number; faults?: Faul
     judgedCompanies,
     fitWallClock,
     fitLatencyTotal: () => fitLatencyTotal,
+    fitPeak: () => fitPeak,
   };
 }
 
@@ -542,9 +563,9 @@ describe('discovery run rehearsal at measured latencies', () => {
 
     expect(rehearsalRun.overruns()).toEqual([]);
     expect(rehearsalRun.judgedCompanies()).toBe(100);
-    // The rehearsal clock only moves forward, so an overlap it cannot see counts against the pool:
-    // at least twice as fast here is a floor, not the expected speed-up.
-    expect(rehearsalRun.fitWallClock()).toBeLessThan(rehearsalRun.fitLatencyTotal() / 2);
+    expect(rehearsalRun.fitPeak()).toBe(FIT_CONCURRENCY);
+    // Replaying xin's measured fit latencies gives 0.37-0.38; each pass's tail keeps it above 1/3.
+    expect(rehearsalRun.fitWallClock()).toBeLessThan(rehearsalRun.fitLatencyTotal() * 0.45);
   });
 
   it('still fits every activity inside its timeout on a day when every call takes twice as long', async () => {
