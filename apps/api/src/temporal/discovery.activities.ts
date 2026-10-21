@@ -279,10 +279,10 @@ function withReceiptSkip(
 
 /**
  * A replayed query result. A zero receipt replayed once the query deadline has passed is counted
- * as a lease stop: the deadline never comes back, so a receipt written then was one (a source
- * switched off just before the deadline is the rare exception, and the run is PARTIAL either way).
- * The label is all the lease read decides: a replay answers from durable facts, so a failed read
- * keeps the BI-30 label instead of failing the run.
+ * as a lease stop: the deadline never comes back, so a receipt written then was one. The rare
+ * exception is a source switched off whose zero receipt is replayed past the deadline (within one
+ * attempt's start-to-close): it then counts as a lease stop, which can turn a run whose every
+ * query was skipped from PARTIAL into FAILED.
  */
 async function replayedQueryResult(
   result: DiscoveryQueryExecutionResult,
@@ -290,15 +290,14 @@ async function replayedQueryResult(
   lease: () => Promise<DiscoveryRunLease>,
 ): Promise<DiscoveryQueryExecutionResult> {
   if (result.queryReceipt?.providers.length !== 0) return result;
-  let pastQueryDeadline = false;
+  let pastQueryDeadline: boolean;
   try {
     pastQueryDeadline = !(await lease()).allows(DISCOVERY_LEASE_UNIT_MS.query);
   } catch (error) {
-    console.warn(
-      `[discovery] replayed zero receipt keeps its skip reason: the lease read failed (${
-        error instanceof Error ? error.name : 'unknown error'
-      })`,
-    );
+    // Retry rather than guess the label: the replay answers from durable facts, so a later attempt
+    // returns the same receipt, and only the lease tells a lease stop from a source switched off
+    // (the BI-30 reason of a source that is on would read SOURCE_DISABLED).
+    throw new Error('DISCOVERY_QUERY_LEASE_LABEL_UNAVAILABLE', { cause: error });
   }
   return pastQueryDeadline ? { ...result, skippedForLease: true } : withReceiptSkip(result, reason);
 }
@@ -1772,12 +1771,18 @@ export function createDiscoveryActivities(deps: {
       const startIndex = args.startIndex ?? 0;
       let nextIndex: number | null = null;
       let skippedForLease = 0;
+      // The companies from `from` on that an enricher still has to read (each skips the ones it did).
+      const unenrichedCompanies = (from: number): number =>
+        companies.slice(from).filter((company) => {
+          const existing = ((company.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
+          return enrichers.some((enricher) => !existing[enricher.key]);
+        }).length;
       const lease = await readRunLease(binding);
       const startedAt = clock();
       for (let i = startIndex; i < companies.length; i++) {
         // A company the lease has no room for ends the stage (see qualifyFitForRun).
         if (!lease.allows(DISCOVERY_LEASE_UNIT_MS.enrich)) {
-          skippedForLease = companies.length - i;
+          skippedForLease = unenrichedCompanies(i);
           break;
         }
         // Hand the rest to the next activity rather than outrun this one's timeout.

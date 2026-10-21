@@ -1,6 +1,7 @@
 import { ApplicationFailure } from '@temporalio/activity';
 import { describe, expect, it, vi } from 'vitest';
 import { PUBLIC_HTTP_TIMEOUT_MAX_MS } from '../adapters/guarded-http';
+import { CRAWL4AI_REQUEST_TIMEOUT_MS } from '../adapters/web-crawler';
 import { MAX_SITEMAP_HTTP_GETS } from '../discovery/execution-envelope';
 import { ExecutionBudgetGrantError } from '../execution-budget/execution-budget-authority.types';
 import { MAX_MODEL_GATEWAY_REQUEST_TIMEOUT_MS } from '../model-gateway/gateway-credential-boundary';
@@ -68,7 +69,7 @@ describe('discovery lease units', () => {
     );
     // One profile: three 75-second page reads and the same structured answer.
     expect(DISCOVERY_LEASE_UNIT_MS.websiteProfile).toBeGreaterThanOrEqual(
-      3 * 75_000 + MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND * MAX_MODEL_GATEWAY_REQUEST_TIMEOUT_MS,
+      3 * CRAWL4AI_REQUEST_TIMEOUT_MS + MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND * MAX_MODEL_GATEWAY_REQUEST_TIMEOUT_MS,
     );
     // One enrichment company stays within the enrichment proxy's timeout.
     expect(DISCOVERY_LEASE_UNIT_MS.enrich).toBeGreaterThanOrEqual(proxyTimeout('enrichRun'));

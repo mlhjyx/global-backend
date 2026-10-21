@@ -22,9 +22,10 @@ import {
 /**
  * Kept at the end of the lease for the activities that never stop for it: canonicalize, patent
  * enqueue, finalize. The signals stage does not stop for the lease yet either: it runs in whatever
- * fit and enrichment leave, about 20 minutes once fit stops (its 10-minute unit plus this reserve),
- * where xin's signal reads take some 30 seconds a company; only a run of sites at their read
- * timeouts still overruns the lease there.
+ * fit and enrichment leave, typically about 20 minutes (fit's 10-minute unit plus this reserve) but
+ * as little as this reserve when the last query, judgment or enrichment ran up to its deadline.
+ * xin's signal reads take some 30 seconds a company (6 to 12 minutes for 12), so the short end can
+ * overrun the lease there; the run then still ends FAILED.
  */
 export const DISCOVERY_LEASE_FINALIZATION_RESERVE_MS = 10 * 60_000;
 

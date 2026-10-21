@@ -856,21 +856,32 @@ describe("discoveryWorkflow stages that stopped for the run's admission lease", 
     expect(finalStats()).toMatchObject({ status: 'PARTIAL', stats: { failures: 1, skippedForLease: { queries: 1 } } });
   });
 
-  it('keeps the queries the lease left in the stats of a run a later stage fails (BI-25)', async () => {
+  it('keeps what every stage left for the lease in the stats of a run a later stage fails (BI-25)', async () => {
     primeDiscovery();
-    acts.loadPlanQueries.mockResolvedValue({ queries: QUERIES.slice(0, 2) });
+    acts.loadPlanQueries.mockResolvedValue({ queries: QUERIES });
     acts.executeQuery
       .mockResolvedValueOnce(executed(0, 1))
-      .mockResolvedValueOnce(executed(1, 0, { skippedForLease: true }));
+      .mockResolvedValueOnce(executed(1, 0, { skippedForLease: true }))
+      .mockResolvedValueOnce(executed(2, 0, { skippedForLease: true }));
+    acts.qualifyFitForRun.mockResolvedValueOnce({
+      judged: 2,
+      verdicts: { match: 2 },
+      skippedForBudget: 0,
+      unjudged: 0,
+      nextCompanyId: null,
+      previousCallCut: false,
+      skippedForLease: 4,
+    });
+    // The case the unchecked signals stage leaves: it overruns the lease and fails the run.
     const control = activityFailure('enrichSignalsRun', 'ExecutionBudgetGrantError');
     acts.enrichSignalsRun.mockRejectedValueOnce(control);
 
     await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(control);
 
-    expect(finalStats()).toMatchObject({
-      status: 'FAILED',
-      stats: { skippedForLease: { queries: 1 }, failure: { stage: 'signals' } },
-    });
+    const { status, stats } = finalStats();
+    expect(status).toBe('FAILED');
+    expect(stats.skippedForLease).toEqual({ queries: 2, fit: 4 });
+    expect(stats).toMatchObject({ failure: { stage: 'signals' } });
   });
 
   it('keeps DONE and the stats shape of a run the lease did not cut short', async () => {

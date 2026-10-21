@@ -3813,6 +3813,27 @@ describe("enrichRun —— 按时限把余下公司交给下一次活动", () =>
     expect(enricher.enrichCompany).toHaveBeenCalledOnce();
   });
 
+  it("does not count a company every enricher already read as left for the lease", async () => {
+    const enricher = gleif();
+    const deps = await withMatchCompanies(makeEnrichDeps([enricher]), ["c1", "c2"]);
+    const prisma = deps.prisma as unknown as {
+      withWorkspace: (ws: string, fn: (tx: Record<string, Record<string, unknown>>) => Promise<unknown>) => Promise<unknown>;
+    };
+    await prisma.withWorkspace("ws", async (tx) => {
+      const findMany = tx.canonicalCompany!.findMany as (args: unknown) => Promise<Array<Record<string, unknown>>>;
+      tx.canonicalCompany!.findMany = async (args: unknown) =>
+        (await findMany(args)).map((company) => ({ ...company, attributes: { gleif: { lei: "x" } } }));
+    });
+    Object.assign(deps, { now: () => 0, runLease: leaseLeaving(0) });
+
+    const result = await createDiscoveryActivities(deps).enrichRun(
+      discoveryArgs("run-enrich-lease-done", { icpId: "icp-1" }),
+    );
+    expect(result).toMatchObject({ enriched: 0, nextIndex: null });
+    expect(result).not.toHaveProperty("skippedForLease");
+    expect(enricher.enrichCompany).not.toHaveBeenCalled();
+  });
+
   it("reports no lease skip while the lease has room", async () => {
     const deps = await withMatchCompanies(makeEnrichDeps([gleif()]), ["c1", "c2"]);
     Object.assign(deps, { now: () => 0, runLease: leaseLeaving(DISCOVERY_LEASE_UNIT_MS.enrich) });
@@ -5824,36 +5845,52 @@ describe("executeQuery —— a query the run's admission lease has no room for 
     expect(withRoom).not.toHaveProperty("skippedForLease");
   });
 
-  it("keeps the skip reason of a replayed zero receipt when the lease cannot be read, without attest or routing", async () => {
+  it("retries a replayed zero receipt whose lease cannot be read rather than guess its label, without attest or routing", async () => {
+    const first = await createDiscoveryActivities({
+      ...makeDeps([lineageAdapter(vi.fn(noRecords))]),
+      runLease: leaseLeaving(0),
+      now: () => 0,
+    }).executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
+    expect(first).toMatchObject({ skippedForLease: true });
+    const deps = replaying(makeDeps([lineageAdapter(vi.fn(noRecords))]), first.queryReceipt);
+    const providers = deps.providers as unknown as { routeCompanyDiscovery: () => Promise<unknown> };
+    const routeCompanyDiscovery = vi.fn(providers.routeCompanyDiscovery);
+    const budgetStore = deps.budgetStore as unknown as { attestAuthorized: ReturnType<typeof vi.fn> };
+    const readFailure = new ExecutionBudgetGrantError("EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE");
+
+    const failure = await createDiscoveryActivities({
+      ...deps,
+      providers: { ...providers, routeCompanyDiscovery } as never,
+      runLease: vi.fn(async () => {
+        throw readFailure;
+      }),
+      now: () => 0,
+    })
+      .executeQuery(discoveryArgs("run-ok-x", { query: QUERY }))
+      .then(() => undefined, (reason: unknown) => reason);
+
+    // An ordinary error, so the activity retries: a source that is on would otherwise read SOURCE_DISABLED.
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure).not.toBeInstanceOf(ExecutionBudgetGrantError);
+    expect(failure).toMatchObject({ message: "DISCOVERY_QUERY_LEASE_LABEL_UNAVAILABLE", cause: readFailure });
+    expect(budgetStore.attestAuthorized).not.toHaveBeenCalled();
+    expect(routeCompanyDiscovery).not.toHaveBeenCalled();
+  });
+
+  it("keeps the skip reason of a replayed zero receipt while the lease still holds exactly one query", async () => {
     const first = await createDiscoveryActivities({
       ...makeDeps([]),
       runLease: leaseLeaving(0),
       now: () => 0,
     }).executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
-    const deps = replaying(makeDeps([]), first.queryReceipt);
-    const providers = deps.providers as unknown as { routeCompanyDiscovery: () => Promise<unknown> };
-    const routeCompanyDiscovery = vi.fn(providers.routeCompanyDiscovery);
-    const budgetStore = deps.budgetStore as unknown as { attestAuthorized: ReturnType<typeof vi.fn> };
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
-    try {
-      const replayed = await createDiscoveryActivities({
-        ...deps,
-        providers: { ...providers, routeCompanyDiscovery } as never,
-        runLease: vi.fn(async () => {
-          throw new ExecutionBudgetGrantError("EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE");
-        }),
-        now: () => 0,
-      }).executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
-
-      expect(replayed).toHaveProperty("skipReason");
-      expect(replayed).not.toHaveProperty("skippedForLease");
-      expect(budgetStore.attestAuthorized).not.toHaveBeenCalled();
-      expect(routeCompanyDiscovery).not.toHaveBeenCalled();
-      expect(warn).toHaveBeenCalledOnce();
-    } finally {
-      warn.mockRestore();
-    }
+    const replayed = await createDiscoveryActivities({
+      ...replaying(makeDeps([]), first.queryReceipt),
+      runLease: leaseLeaving(DISCOVERY_LEASE_UNIT_MS.query),
+      now: () => 0,
+    }).executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
+    expect(replayed).toHaveProperty("skipReason");
+    expect(replayed).not.toHaveProperty("skippedForLease");
   });
 
   it("never stops a query without a receipt identity (legacy history) for the lease", async () => {
