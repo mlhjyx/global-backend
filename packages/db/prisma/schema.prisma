@@ -400,7 +400,7 @@ model GenericOperationArtifact {
   workspace Workspace?                       @relation(fields: [workspaceId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_workspace_fkey")
   authority ExecutionBudgetAuthority         @relation(fields: [scopeKey, authorityId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_authority_scope_fkey")
   operation ToolBudgetOperation              @relation(fields: [scopeKey, operationId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_operation_scope_fkey")
-  object    GenericOperationArtifactObject   @relation(fields: [sha256, objectKey, sizeBytes, mediaType, privacyClass], references: [sha256, objectKey, sizeBytes, mediaType, privacyClass], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_object_metadata_fkey")
+  object    GenericOperationArtifactObject   @relation(fields: [sha256, objectKey, sizeBytes, privacyClass], references: [sha256, objectKey, sizeBytes, privacyClass], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_object_content_fkey")
   subject   GenericOperationArtifactSubject?
 
   @@unique([scopeKey, id], map: "generic_operation_artifact_scope_id_key")
@@ -608,7 +608,7 @@ model GenericOperationArtifactObject {
   versions  GenericOperationArtifactObjectVersion[]
 
   @@id([sha256, privacyClass], map: "generic_operation_artifact_object_pkey")
-  @@unique([sha256, objectKey, sizeBytes, mediaType, privacyClass], map: "generic_operation_artifact_object_metadata_key")
+  @@unique([sha256, objectKey, sizeBytes, privacyClass], map: "generic_operation_artifact_object_content_key")
   @@map("generic_operation_artifact_object")
 }
 
