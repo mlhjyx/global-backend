@@ -19,6 +19,20 @@ const statements = sql
   .join('\n');
 
 describe('generic operation artifact object media type migration', () => {
+  it('runs in one transaction with a lock timeout and locks both tables in the append function\'s order first', () => {
+    const begin = statements.indexOf('BEGIN;');
+    const timeout = statements.indexOf("SET LOCAL lock_timeout = '5s';");
+    const lock = statements.indexOf(
+      'LOCK TABLE "generic_operation_artifact", "generic_operation_artifact_object"\n  IN ACCESS EXCLUSIVE MODE;',
+    );
+    const firstDdl = statements.indexOf('ALTER TABLE');
+    expect(begin).toBeGreaterThan(-1);
+    expect(begin).toBeLessThan(timeout);
+    expect(timeout).toBeLessThan(lock);
+    expect(lock).toBeLessThan(firstDdl);
+    expect(statements.trimEnd().endsWith('COMMIT;')).toBe(true);
+  });
+
   it('moves the artifact-to-object key to the content columns, adding the new constraints before dropping the old', () => {
     const addKey = statements.indexOf('ADD CONSTRAINT "generic_operation_artifact_object_content_key"');
     const addForeignKey = statements.indexOf('ADD CONSTRAINT "generic_operation_artifact_object_content_fkey"');

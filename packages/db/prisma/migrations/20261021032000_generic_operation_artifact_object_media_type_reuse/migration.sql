@@ -22,6 +22,17 @@
 -- The function rewrite removes only the media type comparison. The object key,
 -- size and privacy class must still match, and an artifact that already exists
 -- must still match its own media type exactly.
+BEGIN;
+SET LOCAL lock_timeout = '5s';
+SET LOCAL row_security = off;
+
+-- Take both tables up front in the order the append function locks them
+-- (artifact, then object), so a settlement that started first cannot form a
+-- lock cycle with the DDL below; anything still holding them fails this
+-- migration after 5 s instead of queueing behind it forever.
+LOCK TABLE "generic_operation_artifact", "generic_operation_artifact_object"
+  IN ACCESS EXCLUSIVE MODE;
+
 ALTER TABLE "generic_operation_artifact_object"
   ADD CONSTRAINT "generic_operation_artifact_object_content_key"
   UNIQUE ("sha256", "object_key", "size_bytes", "privacy_class");
@@ -67,3 +78,5 @@ BEGIN
   EXECUTE definition;
 END
 $migration$;
+
+COMMIT;

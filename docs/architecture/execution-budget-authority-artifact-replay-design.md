@@ -239,9 +239,16 @@ manifest v1：
   manifest；不同 authority/operation 可以引用同一个内容对象，不能用 digest
   唯一性把合法引用误判为 replay。
 - 物理对象元数据单独规范化为全局 `GenericOperationArtifactObject`：以
-  `sha256` 为主键，并由复合外键固定 `objectKey + sizeBytes + mediaType +
-  privacyClass`。同一 digest 的并发引用先按 digest 串行化，再复用同一对象
-  行；任何固有元数据冲突 fail closed。
+  `sha256 + privacyClass` 为主键，并由复合外键固定内容列 `objectKey +
+  sizeBytes + privacyClass`。同一 digest 的并发引用先按 digest 串行化，再复用
+  同一对象行；内容列任何冲突 fail closed。
+- `mediaType` 属于每份 manifest，不属于对象的固有元数据：同样的字节可以被
+  不同 manifest 以不同 media type 引用（例如空 body 既是 crawl4ai 的
+  `text/markdown`，也是 HEAD 探测的 `text/plain`），对象行只记录第一位写入者
+  声明的值。已存在的同一 manifest 重放时 media type 仍须完全一致。
+  （2026-10-21 迁移 `generic_operation_artifact_object_media_type_reuse`
+  起；此前 media type 也在复合外键里，导致同一字节无法以第二种 media type
+  落库。）
 - `sourceDigest` 是每次 provider/operation 的来源回执，`createdAt/expiresAt`
   是每个 manifest 的 lineage 与读取有效期，允许在引用同一字节对象时不同；
   对象回收必须等所有引用过期，并遵守其中最严格的隐私删除/权利处理链，
