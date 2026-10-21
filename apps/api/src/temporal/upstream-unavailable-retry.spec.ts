@@ -23,6 +23,7 @@ import {
 } from './testing/discovery-activity-timeouts';
 import {
   upstreamUnavailableRetryDelay,
+  upstreamUnavailableRetryDelayMs,
   withUpstreamUnavailableRetryDelay,
 } from './upstream-unavailable-retry';
 
@@ -119,6 +120,40 @@ describe('withUpstreamUnavailableRetryDelay inside an Activity', () => {
     inActivity(info);
 
     expect(withUpstreamUnavailableRetryDelay(http(503))).toMatchObject({ nextRetryDelay: delay });
+  });
+});
+
+describe('upstreamUnavailableRetryDelayMs', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('gives the wait withUpstreamUnavailableRetryDelay sets, in milliseconds', () => {
+    for (const attempt of [
+      FIRST_OF_THREE,
+      { attempt: 2, maximumAttempts: 3 },
+      { attempt: 1, maximumAttempts: 2 },
+    ]) {
+      const failure = withUpstreamUnavailableRetryDelay(http(503), attempt) as ApplicationFailure;
+      expect(upstreamUnavailableRetryDelayMs(http(503), attempt)).toBe(
+        timeoutMilliseconds(failure.nextRetryDelay as string),
+      );
+    }
+  });
+
+  it('gives no wait for an error that does not wait, or when no attempt follows', () => {
+    expect(upstreamUnavailableRetryDelayMs(http(504), FIRST_OF_THREE)).toBeUndefined();
+    expect(upstreamUnavailableRetryDelayMs(new Error('boom'), FIRST_OF_THREE)).toBeUndefined();
+    expect(upstreamUnavailableRetryDelayMs(http(503), { attempt: 3, maximumAttempts: 3 })).toBeUndefined();
+    expect(upstreamUnavailableRetryDelayMs(http(503), { attempt: 2, maximumAttempts: 2 })).toBeUndefined();
+  });
+
+  it('reads the attempt and the retry policy inside an Activity, capped as before', () => {
+    vi.spyOn(Context, 'current').mockReturnValue({
+      info: { attempt: 2, retryPolicy: { maximumAttempts: 5 } },
+    } as unknown as Context);
+
+    expect(upstreamUnavailableRetryDelayMs(http(503))).toBe(25 * 60_000);
   });
 });
 

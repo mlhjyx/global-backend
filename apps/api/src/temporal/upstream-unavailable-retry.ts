@@ -5,6 +5,8 @@ import { definiteModelFailureCode } from '../model-gateway/definite-model-failur
 /** The ledger re-reserves one operation key at most this many times in all (D13). */
 const LEDGER_MAX_RESERVATION_ATTEMPTS = 3;
 
+const RETRY_DELAY_MS = Object.freeze({ '5 minutes': 5 * 60_000, '25 minutes': 25 * 60_000 });
+
 /**
  * How long the next attempt of a discovery model activity waits after the model upstream was
  * unavailable. Without it the proxies' default backoff (1 s, then 2 s) spends every attempt within
@@ -14,8 +16,25 @@ const LEDGER_MAX_RESERVATION_ATTEMPTS = 3;
  * minutes, with no more attempts than the ledger allows one operation key and well inside the
  * 3-hour discovery admission lease. A longer outage still stops the run where it was (#653).
  */
-export function upstreamUnavailableRetryDelay(attempt: number, maximumAttempts: number): Duration {
+export function upstreamUnavailableRetryDelay(
+  attempt: number,
+  maximumAttempts: number,
+): keyof typeof RETRY_DELAY_MS & Duration {
   return attempt >= maximumAttempts - 1 ? '25 minutes' : '5 minutes';
+}
+
+/**
+ * How long the attempt after `error` waits under withUpstreamUnavailableRetryDelay, in
+ * milliseconds; undefined when `error` makes no wait or no attempt follows. A discovery stage that
+ * stops for its admission lease asks whether this wait still fits (discovery-run-lease.ts).
+ */
+export function upstreamUnavailableRetryDelayMs(
+  error: unknown,
+  activityAttempt: ActivityAttempt = currentActivityAttempt(),
+): number | undefined {
+  if (definiteModelFailureCode(error) === undefined) return undefined;
+  if (activityAttempt.attempt >= activityAttempt.maximumAttempts) return undefined;
+  return RETRY_DELAY_MS[upstreamUnavailableRetryDelay(activityAttempt.attempt, activityAttempt.maximumAttempts)];
 }
 
 /** The attempt that failed and how many the activity's retry policy allows. */

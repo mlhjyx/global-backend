@@ -10,6 +10,7 @@ import { buildGatewayProvider } from "../model-gateway/model-providers.config";
 import { AiTraceSink } from "../model-gateway/ai-trace.sink";
 import { createUnderstandingActivities } from "./understanding.activities";
 import { createDiscoveryActivities } from "./discovery.activities";
+import { prismaDiscoveryRunLeaseReader } from "./discovery-run-lease";
 import { createQualifyActivities } from "./qualify.activities";
 import {
   costReconciliationCatalogCoversRoutes,
@@ -285,6 +286,7 @@ export async function runDevFastLaneWorker(
         broker,
         runtimeTelemetry: runtimeTelemetry.telemetry,
         budgetStore,
+        runLease: prismaDiscoveryRunLeaseReader(prisma),
       }),
       ...createQualifyActivities({ prisma, sanctionsScreening }),
     },

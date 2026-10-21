@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  CRAWL4AI_REQUEST_TIMEOUT_MS,
   crawlHtml,
   crawlUrl,
   MAX_CRAWL4AI_RENDER_ARTIFACT_BYTES,
@@ -67,6 +68,37 @@ describe("Crawl4AI adapter 的 API 侧入口闸", () => {
       expect(fetchMock).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("Crawl4AI read timeout", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // The discovery lease budgets a website profile on this timeout (discovery-run-lease.ts).
+  it.each([
+    ["crawlUrl", crawlUrl],
+    ["crawlHtml", crawlHtml],
+  ] as const)("%s aborts its Crawl4AI request after CRAWL4AI_REQUEST_TIMEOUT_MS", async (_name, crawl) => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ markdown: "ok", results: [{ html: "ok" }] }), { status: 200 })),
+    );
+
+    await crawl(
+      "https://company.example/",
+      undefined,
+      vi.fn(async (raw: string) => ({
+        url: new URL(raw),
+        ip: "203.0.113.10",
+        family: 4 as const,
+        addresses: [{ address: "203.0.113.10", family: 4 as const }],
+      })),
+    );
+
+    expect(timeout).toHaveBeenCalledWith(CRAWL4AI_REQUEST_TIMEOUT_MS);
+  });
 });
 
 describe("Crawl4AI artifact-result boundaries", () => {

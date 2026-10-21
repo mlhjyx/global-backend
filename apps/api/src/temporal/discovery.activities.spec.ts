@@ -51,6 +51,10 @@ import { PublicWebDiscoveryProvider } from "../discovery/providers/public-web.pr
 import { TedDiscoveryProvider } from "../discovery/providers/ted.provider";
 import { WikidataDiscoveryProvider } from "../discovery/providers/wikidata.provider";
 import { discoveryQueryKey } from "../discovery/discovery-query-receipt";
+import {
+  DISCOVERY_LEASE_FINALIZATION_RESERVE_MS,
+  DISCOVERY_LEASE_UNIT_MS,
+} from "./discovery-run-lease";
 
 const acknowledgementMocks = vi.hoisted(() => ({
   apply: vi.fn(
@@ -362,6 +366,16 @@ function discoveryArgs<T extends object>(runId: string, extra: T) {
     executionBudget: DISCOVERY_BINDING,
     ...extra,
   };
+}
+
+const MINUTE = 60_000;
+
+/**
+ * A run-lease reader that leaves `slackMs` before the finalization reserve when it is read; with a
+ * clock that stands still, every check in the activity sees the same room.
+ */
+function leaseLeaving(slackMs: number) {
+  return vi.fn(async () => DISCOVERY_LEASE_FINALIZATION_RESERVE_MS + slackMs);
 }
 
 function materializationSqlText(query: unknown): string {
@@ -3713,6 +3727,19 @@ describe("尽力而为的阶段：无法重放的公司跳过并计数", () => {
     ).resolves.toEqual({ candidates: 2, registered: 0, skippedSubjects: 1, unreplayable: 1 });
   });
 
+  it("watch registration stops for the admission lease and counts the companies it left", async () => {
+    const invoke = vi.fn();
+    const deps = await withMatchCompanies(watchDeps(invoke), ["c1", "c2"]);
+    Object.assign(deps, { now: () => 0, runLease: leaseLeaving(DISCOVERY_LEASE_UNIT_MS.watches - 1) });
+
+    await expect(
+      createDiscoveryActivities(deps as never).registerWatchesForRun(
+        discoveryArgs("run-watch-lease", { icpId: "icp-1" }) as never,
+      ),
+    ).resolves.toEqual({ candidates: 2, registered: 0, skippedSubjects: 0, unreplayable: 0, skippedForLease: 2 });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
   it("watch registration still stops when two companies in a row cannot be replayed", async () => {
     const second = unreplayable("op-2");
     const invoke = vi.fn().mockRejectedValueOnce(unreplayable("op-1")).mockRejectedValueOnce(second);
@@ -3769,6 +3796,73 @@ describe("enrichRun —— 按时限把余下公司交给下一次活动", () =>
       "c3.de",
     ]);
     expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ orderBy: { id: "asc" }, take: 50 }));
+  });
+
+  it("stops for the admission lease: the companies left count as skipped for it and nothing is handed on", async () => {
+    const enricher = gleif();
+    const deps = await withMatchCompanies(makeEnrichDeps([enricher]), ["c1", "c2", "c3"]);
+    let now = 0;
+    enricher.enrichCompany.mockImplementation(async () => {
+      now += MINUTE;
+      return { matched: false } as EnrichmentResult;
+    });
+    Object.assign(deps, { now: () => now, runLease: leaseLeaving(DISCOVERY_LEASE_UNIT_MS.enrich) });
+
+    await expect(
+      createDiscoveryActivities(deps).enrichRun(discoveryArgs("run-enrich-lease", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ enriched: 1, nextIndex: null, skippedForLease: 2 });
+    expect(enricher.enrichCompany).toHaveBeenCalledOnce();
+  });
+
+  it("does not count a company every enricher already read as left for the lease", async () => {
+    const enricher = gleif();
+    const deps = await withMatchCompanies(makeEnrichDeps([enricher]), ["c1", "c2"]);
+    const prisma = deps.prisma as unknown as {
+      withWorkspace: (ws: string, fn: (tx: Record<string, Record<string, unknown>>) => Promise<unknown>) => Promise<unknown>;
+    };
+    await prisma.withWorkspace("ws", async (tx) => {
+      const findMany = tx.canonicalCompany!.findMany as (args: unknown) => Promise<Array<Record<string, unknown>>>;
+      tx.canonicalCompany!.findMany = async (args: unknown) =>
+        (await findMany(args)).map((company) => ({ ...company, attributes: { gleif: { lei: "x" } } }));
+    });
+    Object.assign(deps, { now: () => 0, runLease: leaseLeaving(0) });
+
+    const result = await createDiscoveryActivities(deps).enrichRun(
+      discoveryArgs("run-enrich-lease-done", { icpId: "icp-1" }),
+    );
+    expect(result).toMatchObject({ enriched: 0, nextIndex: null });
+    expect(result).not.toHaveProperty("skippedForLease");
+    expect(enricher.enrichCompany).not.toHaveBeenCalled();
+  });
+
+  it("counts a company one of several enrichers has not read yet as left for the lease", async () => {
+    const enricher = gleif();
+    const wikidata = { key: "wikidata", enrichCompany: vi.fn(async () => ({ matched: false }) as EnrichmentResult) };
+    const deps = await withMatchCompanies(makeEnrichDeps([enricher, wikidata]), ["c1", "c2"]);
+    const prisma = deps.prisma as unknown as {
+      withWorkspace: (ws: string, fn: (tx: Record<string, Record<string, unknown>>) => Promise<unknown>) => Promise<unknown>;
+    };
+    await prisma.withWorkspace("ws", async (tx) => {
+      const findMany = tx.canonicalCompany!.findMany as (args: unknown) => Promise<Array<Record<string, unknown>>>;
+      tx.canonicalCompany!.findMany = async (args: unknown) =>
+        (await findMany(args)).map((company) => ({ ...company, attributes: { gleif: { lei: "x" } } }));
+    });
+    Object.assign(deps, { now: () => 0, runLease: leaseLeaving(0) });
+
+    await expect(
+      createDiscoveryActivities(deps).enrichRun(discoveryArgs("run-enrich-lease-partial", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ enriched: 0, nextIndex: null, skippedForLease: 2 });
+  });
+
+  it("reports no lease skip while the lease has room", async () => {
+    const deps = await withMatchCompanies(makeEnrichDeps([gleif()]), ["c1", "c2"]);
+    Object.assign(deps, { now: () => 0, runLease: leaseLeaving(DISCOVERY_LEASE_UNIT_MS.enrich) });
+
+    const result = await createDiscoveryActivities(deps).enrichRun(
+      discoveryArgs("run-enrich-lease-room", { icpId: "icp-1" }),
+    );
+    expect(result).toMatchObject({ enriched: 2, nextIndex: null });
+    expect(result).not.toHaveProperty("skippedForLease");
   });
 
   it.each([-1, 1.5, 51, "1"])("rejects a continuation index of %s before any enrichment", async (startIndex) => {
@@ -3924,12 +4018,14 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
       attributes?: Record<string, unknown>;
       companies?: string[];
       now?: () => number;
+      runLease?: () => Promise<number>;
     } = {},
   ) {
     const deps = makeEnrichDeps([]) as unknown as {
       prisma: { withWorkspace: (ws: string, fn: (tx: Record<string, Record<string, unknown>>) => Promise<unknown>) => Promise<unknown> };
       websiteProfile?: unknown;
       now?: () => number;
+      runLease?: () => Promise<number>;
     };
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const findMany = vi.fn(async () =>
@@ -3960,8 +4056,57 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
     });
     deps.websiteProfile = { profile };
     if (options.now) deps.now = options.now;
+    if (options.runLease) deps.runLease = options.runLease;
     return { acts: createDiscoveryActivities(deps as never), updateMany, findMany };
   }
+
+  it("stops for the admission lease and counts the run's companies it left unprofiled", async () => {
+    let now = 0;
+    const profile = vi.fn(async () => {
+      now += 2 * MINUTE;
+      return PROFILE;
+    });
+    const { acts } = await makeProfileDeps(profile, {
+      companies: ["c1", "c2", "c3"],
+      now: () => now,
+      runLease: leaseLeaving(DISCOVERY_LEASE_UNIT_MS.websiteProfile),
+    });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-profile-lease", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ profiled: 1, nextIndex: null, skippedForLease: 2 });
+    expect(profile).toHaveBeenCalledOnce();
+  });
+
+  it("does not count a fresh profile as left for the lease", async () => {
+    const profile = vi.fn();
+    const { acts } = await makeProfileDeps(profile, {
+      companies: ["c1", "c2"],
+      attributes: { website_profile: { _ts: new Date().toISOString() } },
+      now: () => 0,
+      runLease: leaseLeaving(0),
+    });
+
+    const result = await acts.profileWebsitesForRun(discoveryArgs("run-profile-lease-fresh", { icpId: "icp-1" }));
+    expect(result).toMatchObject({ profiled: 0, nextIndex: null });
+    expect(result).not.toHaveProperty("skippedForLease");
+    expect(profile).not.toHaveBeenCalled();
+  });
+
+  it("stops for the lease instead of failing when an unavailable upstream's wait does not fit", async () => {
+    const profile = vi.fn(async () => {
+      throw new ProviderHttpError({ status: 503, provider: "gateway", model: "deepseek-v4-pro" });
+    });
+    const { acts } = await makeProfileDeps(profile, {
+      companies: ["c1", "c2"],
+      now: () => 0,
+      runLease: leaseLeaving(DISCOVERY_LEASE_UNIT_MS.websiteProfile),
+    });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-profile-lease-upstream", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ profiled: 0, nextIndex: null, skippedForLease: 2 });
+  });
 
   it("is a no-op while the website_profile source is not ENABLED", async () => {
     const profile = vi.fn();
@@ -4821,7 +4966,7 @@ describe("qualifyFitForRun —— 按时限把余下公司交给下一次活动"
     new ProviderTransportError("CHAT_COMPLETIONS_STREAM_TRUNCATED", { inputTokens: 520 });
 
   /** Companies come back in id order after the cursor, as the database returns them. */
-  function passActivities(companyIds: string[], now: () => number) {
+  function passActivities(companyIds: string[], now: () => number, runLease?: () => Promise<number>) {
     const company = (companyId: string) => ({
       id: companyId,
       name: `${companyId.slice(-2)} GmbH`,
@@ -4875,6 +5020,7 @@ describe("qualifyFitForRun —— 按时限把余下公司交给下一次活动"
       gateway: {},
       budgetStore: authorityBudgetStore(),
       now,
+      ...(runLease ? { runLease } : {}),
     } as never);
     return { acts, findMany };
   }
@@ -4937,6 +5083,82 @@ describe("qualifyFitForRun —— 按时限把余下公司交给下一次活动"
       unjudged: 1,
       nextCompanyId: id(2),
       previousCallCut: true,
+    });
+  });
+
+  describe("near the end of the admission lease", () => {
+    const http = (status: number) =>
+      new ProviderHttpError({ status, provider: "gateway", model: "deepseek-v4-pro" });
+
+    it("judges nothing when the lease has no room for one judgment, and hands nothing on", async () => {
+      const { acts } = passActivities([id(1), id(2), id(3)], () => 0, leaseLeaving(DISCOVERY_LEASE_UNIT_MS.fit - 1));
+
+      await expect(acts.qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" }))).resolves.toMatchObject({
+        judged: 0,
+        nextCompanyId: null,
+        skippedForLease: 3,
+      });
+      expect(fitRuntimeMocks.execute).not.toHaveBeenCalled();
+    });
+
+    it("keeps the judgments it made and counts the rest once the lease runs out mid-pass", async () => {
+      let now = 0;
+      fitRuntimeMocks.execute.mockImplementation(async () => {
+        now += 6 * MINUTE;
+        return FIT;
+      });
+      const { acts } = passActivities(
+        [id(1), id(2), id(3)],
+        () => now,
+        leaseLeaving(DISCOVERY_LEASE_UNIT_MS.fit + 5 * MINUTE),
+      );
+
+      await expect(acts.qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" }))).resolves.toMatchObject({
+        judged: 1,
+        verdicts: { match: 1 },
+        nextCompanyId: null,
+        skippedForLease: 2,
+      });
+    });
+
+    it("reports no lease skip while the lease has room", async () => {
+      fitRuntimeMocks.execute.mockResolvedValue(FIT);
+      const { acts } = passActivities([id(1), id(2)], () => 0, leaseLeaving(DISCOVERY_LEASE_UNIT_MS.fit));
+
+      const result = await acts.qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" }));
+      expect(result).toMatchObject({ judged: 2, nextCompanyId: null });
+      expect(result).not.toHaveProperty("skippedForLease");
+    });
+
+    // The design review's blocking case: an outage in the lease's last half hour used to retry
+    // without the wait, spend the attempts within seconds and fail the run.
+    it("stops for the lease instead of failing when an unavailable upstream's wait does not fit", async () => {
+      fitRuntimeMocks.execute.mockResolvedValueOnce(FIT).mockRejectedValueOnce(http(503));
+      const { acts } = passActivities(
+        [id(1), id(2), id(3)],
+        () => 0,
+        leaseLeaving(DISCOVERY_LEASE_UNIT_MS.fit + 4 * MINUTE),
+      );
+
+      await expect(acts.qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" }))).resolves.toMatchObject({
+        judged: 1,
+        nextCompanyId: null,
+        skippedForLease: 2,
+      });
+    });
+
+    it("still waits for the upstream when the lease holds the wait and one more judgment", async () => {
+      fitRuntimeMocks.execute.mockRejectedValueOnce(http(503));
+      const { acts } = passActivities(
+        [id(1), id(2)],
+        () => 0,
+        leaseLeaving(5 * MINUTE + DISCOVERY_LEASE_UNIT_MS.fit),
+      );
+
+      await expect(acts.qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" }))).rejects.toMatchObject({
+        type: "ProviderHttpError",
+        nextRetryDelay: "5 minutes",
+      });
     });
   });
 
@@ -5502,5 +5724,307 @@ describe("executeQuery —— term normalization: keyed per query, skipped when 
       activities.executeQuery(discoveryArgs("run-taxonomy-closed", { query })),
     ).rejects.toBe(error);
     expect(discoverCompanies).not.toHaveBeenCalled();
+  });
+});
+
+describe("executeQuery —— a query the run's admission lease has no room for ends with a zero receipt", () => {
+  const http = (status: number) =>
+    new ProviderHttpError({ status, provider: "gateway", model: "deepseek-v4-pro" });
+  const lineageAdapter = (discoverCompanies: () => Promise<unknown>) => ({
+    key: "public_web",
+    classes: ["public_intelligence"],
+    companyResultLineage: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+    discoverCompanies,
+  });
+  const noRecords = async () => ({
+    records: [],
+    costCents: 0,
+    lineage: {
+      schemaVersion: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+      recordCount: 0,
+      attemptReceipts: [],
+      receiptCoverage: [],
+    },
+  });
+
+  /** makeDeps whose query lineage attest answers REPLAYED with `receipt`, as for a retried attempt. */
+  function replaying(deps: ReturnType<typeof makeDeps>, receipt: unknown) {
+    const prisma = deps.prisma as unknown as {
+      withWorkspace: <T>(ws: string, fn: (tx: Record<string, unknown>) => Promise<T>) => Promise<T>;
+    };
+    return {
+      ...deps,
+      prisma: {
+        ...prisma,
+        withWorkspace: <T>(ws: string, fn: (tx: Record<string, unknown>) => Promise<T>) =>
+          prisma.withWorkspace(ws, (tx) =>
+            fn({
+              ...tx,
+              $queryRaw: async (statement: { strings?: readonly string[] }) =>
+                statement.strings?.join("?").includes("attest_discovery_query_lineage_v2")
+                  ? [{
+                      status: "REPLAYED",
+                      query_receipt: receipt,
+                      budget_truncated: false,
+                      attempt_count: 1,
+                      item_count: 0,
+                      replay: true,
+                    }]
+                  : (tx.$queryRaw as (statement: unknown) => Promise<unknown>)(statement),
+            }),
+          ),
+      },
+    } as unknown as ReturnType<typeof makeDeps>;
+  }
+
+  it("routes nothing, normalizes no term and calls no provider, and says it stopped for the lease", async () => {
+    const discoverCompanies = vi.fn(noRecords);
+    const deps = makeDeps([lineageAdapter(discoverCompanies)]);
+    const providers = deps.providers as unknown as { routeCompanyDiscovery: () => Promise<unknown> };
+    const routeCompanyDiscovery = vi.fn(providers.routeCompanyDiscovery);
+    const taxonomy = { resolveMany: vi.fn(async () => []), resolve: vi.fn(async () => null) };
+    const runLease = leaseLeaving(DISCOVERY_LEASE_UNIT_MS.query - 1);
+    const acts = createDiscoveryActivities({
+      ...deps,
+      providers: { ...providers, routeCompanyDiscovery } as never,
+      taxonomy: taxonomy as never,
+      runLease,
+      now: () => 0,
+    });
+
+    const result = await acts.executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
+
+    expect(result).toMatchObject({
+      rawCount: 0,
+      costCents: 0,
+      provider: null,
+      skippedForLease: true,
+      // The materialization admission still gets its receipt for this plan query.
+      queryReceipt: { providers: [], accepted: 0, usageQuantity: 0, costCents: 0 },
+    });
+    expect(result).not.toHaveProperty("skipReason");
+    expect(routeCompanyDiscovery).not.toHaveBeenCalled();
+    expect(taxonomy.resolveMany).not.toHaveBeenCalled();
+    expect(discoverCompanies).not.toHaveBeenCalled();
+    expect(runLease).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authorityId: DISCOVERY_BINDING.authorityId,
+        scopeKey: DISCOVERY_BINDING.scopeKey,
+      }),
+    );
+  });
+
+  it("runs a query the lease has room for as before", async () => {
+    const discoverCompanies = vi.fn(noRecords);
+    const acts = createDiscoveryActivities({
+      ...makeDeps([lineageAdapter(discoverCompanies)]),
+      runLease: leaseLeaving(DISCOVERY_LEASE_UNIT_MS.query),
+      now: () => 0,
+    });
+
+    const result = await acts.executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
+    expect(result).toMatchObject({ queryReceipt: { providers: ["public_web"] } });
+    expect(result).not.toHaveProperty("skippedForLease");
+    expect(discoverCompanies).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the BI-30 skip reason for a query whose source is off while the lease has room", async () => {
+    const acts = createDiscoveryActivities({
+      ...makeDeps([]),
+      runLease: leaseLeaving(3 * 60 * MINUTE),
+      now: () => 0,
+    });
+
+    const result = await acts.executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
+    expect(result).toHaveProperty("skipReason");
+    expect(result).not.toHaveProperty("skippedForLease");
+  });
+
+  it("answers a replayed lease stop as a lease stop, and any other replayed zero receipt by its reason", async () => {
+    const first = await createDiscoveryActivities({
+      ...makeDeps([]),
+      runLease: leaseLeaving(0),
+      now: () => 0,
+    }).executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
+
+    // Just short of one query unit: the query deadline has passed, whatever the other stages' units.
+    const pastDeadline = await createDiscoveryActivities({
+      ...replaying(makeDeps([]), first.queryReceipt),
+      runLease: leaseLeaving(DISCOVERY_LEASE_UNIT_MS.query - 1),
+      now: () => 0,
+    }).executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
+    expect(pastDeadline).toMatchObject({ skippedForLease: true, queryReceipt: first.queryReceipt });
+    expect(pastDeadline).not.toHaveProperty("skipReason");
+
+    const withRoom = await createDiscoveryActivities({
+      ...replaying(makeDeps([]), first.queryReceipt),
+      runLease: leaseLeaving(3 * 60 * MINUTE),
+      now: () => 0,
+    }).executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
+    expect(withRoom).toHaveProperty("skipReason");
+    expect(withRoom).not.toHaveProperty("skippedForLease");
+  });
+
+  it("fails the attempt of a replayed zero receipt whose lease cannot be read rather than guess its label, without attest or routing", async () => {
+    const first = await createDiscoveryActivities({
+      ...makeDeps([lineageAdapter(vi.fn(noRecords))]),
+      runLease: leaseLeaving(0),
+      now: () => 0,
+    }).executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
+    expect(first).toMatchObject({ skippedForLease: true });
+    const deps = replaying(makeDeps([lineageAdapter(vi.fn(noRecords))]), first.queryReceipt);
+    const providers = deps.providers as unknown as { routeCompanyDiscovery: () => Promise<unknown> };
+    const routeCompanyDiscovery = vi.fn(providers.routeCompanyDiscovery);
+    const budgetStore = deps.budgetStore as unknown as { attestAuthorized: ReturnType<typeof vi.fn> };
+    const readFailure = new ExecutionBudgetGrantError("EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE");
+
+    const failure = await createDiscoveryActivities({
+      ...deps,
+      providers: { ...providers, routeCompanyDiscovery } as never,
+      runLease: vi.fn(async () => {
+        throw readFailure;
+      }),
+      now: () => 0,
+    })
+      .executeQuery(discoveryArgs("run-ok-x", { query: QUERY }))
+      .then(() => undefined, (reason: unknown) => reason);
+
+    // The read failure itself, as on a fresh query: the proxy retries it, and a source that is on
+    // is never reported as SOURCE_DISABLED.
+    expect(failure).toBe(readFailure);
+    expect(budgetStore.attestAuthorized).not.toHaveBeenCalled();
+    expect(routeCompanyDiscovery).not.toHaveBeenCalled();
+  });
+
+  it("keeps the skip reason of a replayed zero receipt while the lease still holds exactly one query", async () => {
+    const first = await createDiscoveryActivities({
+      ...makeDeps([]),
+      runLease: leaseLeaving(0),
+      now: () => 0,
+    }).executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
+
+    const replayed = await createDiscoveryActivities({
+      ...replaying(makeDeps([]), first.queryReceipt),
+      runLease: leaseLeaving(DISCOVERY_LEASE_UNIT_MS.query),
+      now: () => 0,
+    }).executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
+    expect(replayed).toHaveProperty("skipReason");
+    expect(replayed).not.toHaveProperty("skippedForLease");
+  });
+
+  it("never stops a query without a receipt identity (legacy history) for the lease", async () => {
+    const discoverCompanies = vi.fn(async () => ({ records: [], costCents: 0 }));
+    const acts = createDiscoveryActivities({
+      ...makeDeps([{ ...okAdapter("wikidata", []), discoverCompanies }]),
+      runLease: leaseLeaving(0),
+      now: () => 0,
+    });
+
+    const result = await acts.executeQuery({
+      workspaceId: DISCOVERY_BINDING.scopeKey,
+      runId: testRunId("run-legacy-lease"),
+      query: QUERY,
+      executionContractVersion: 2,
+      executionBudget: DISCOVERY_BINDING,
+    });
+    expect(result).not.toHaveProperty("skippedForLease");
+    expect(discoverCompanies).toHaveBeenCalledOnce();
+  });
+
+  it("starts the next attempt past the query deadline when term normalization meets an unavailable upstream", async () => {
+    const deps = makeDeps([
+      { ...lineageAdapter(vi.fn(noRecords)), consumesResolvedTaxonomy: true } as never,
+    ]);
+    const taxonomy = {
+      resolveMany: vi.fn(async () => {
+        throw http(429);
+      }),
+      resolve: vi.fn(async () => null),
+    };
+    const acts = createDiscoveryActivities({
+      ...deps,
+      taxonomy: taxonomy as never,
+      runLease: leaseLeaving(DISCOVERY_LEASE_UNIT_MS.query + 2 * MINUTE),
+      now: () => 0,
+    });
+
+    await expect(acts.executeQuery(discoveryArgs("run-ok-x", { query: QUERY }))).rejects.toMatchObject({
+      type: "ProviderHttpError",
+      nextRetryDelay: 2 * MINUTE + 1_000,
+    });
+    expect(taxonomy.resolveMany).toHaveBeenCalledOnce();
+  });
+
+  it("does not read the lease to replay a receipt that ran on a provider", async () => {
+    const first = await createDiscoveryActivities(
+      makeDeps([lineageAdapter(noRecords)]),
+    ).executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
+    const runLease = leaseLeaving(0);
+
+    await expect(
+      createDiscoveryActivities({
+        ...replaying(makeDeps([]), first.queryReceipt),
+        runLease,
+        now: () => 0,
+      }).executeQuery(discoveryArgs("run-ok-x", { query: QUERY })),
+    ).resolves.toMatchObject({ queryReceipt: { providers: ["public_web"] } });
+    expect(runLease).not.toHaveBeenCalled();
+  });
+
+  // The design review's blocking case for queries: a retry without the wait spent the attempts on
+  // the same outage within seconds. The next attempt now starts just past the query deadline and
+  // ends the query with a zero receipt for the lease.
+  it("starts the next attempt just past the query deadline when an unavailable upstream's wait does not fit", async () => {
+    const acts = createDiscoveryActivities({
+      ...makeDeps([
+        lineageAdapter(async () => {
+          throw http(521);
+        }),
+      ]),
+      runLease: leaseLeaving(DISCOVERY_LEASE_UNIT_MS.query + 3 * MINUTE),
+      now: () => 0,
+    });
+
+    const failure = await acts
+      .executeQuery(discoveryArgs("run-ok-x", { query: QUERY }))
+      .then(() => undefined, (reason: unknown) => reason);
+
+    expect(failure).toBeInstanceOf(ApplicationFailure);
+    expect(failure).toMatchObject({
+      type: "ProviderHttpError",
+      nonRetryable: false,
+      nextRetryDelay: 3 * MINUTE + 1_000,
+    });
+  });
+
+  it("still waits the full upstream delay when the lease holds it", async () => {
+    const acts = createDiscoveryActivities({
+      ...makeDeps([
+        lineageAdapter(async () => {
+          throw http(521);
+        }),
+      ]),
+      runLease: leaseLeaving(3 * 60 * MINUTE),
+      now: () => 0,
+    });
+
+    await expect(acts.executeQuery(discoveryArgs("run-ok-x", { query: QUERY }))).rejects.toMatchObject({
+      nextRetryDelay: "5 minutes",
+    });
+  });
+});
+
+describe("resolveRunStatus —— 准入租约没有余量而提前停下", () => {
+  it("never reports DONE when a stage left work for the lease", () => {
+    expect(resolveRunStatus({ failures: 0, totalQueries: 4, budgetTruncated: false, leaseSkips: 7 })).toBe("PARTIAL");
+  });
+
+  it("does not fail a run on lease skips alone", () => {
+    expect(resolveRunStatus({ failures: 3, totalQueries: 4, budgetTruncated: false, leaseSkips: 1 })).toBe("PARTIAL");
+  });
+
+  it("is unchanged without lease skips", () => {
+    expect(resolveRunStatus({ failures: 0, totalQueries: 4, budgetTruncated: false })).toBe("DONE");
+    expect(resolveRunStatus({ failures: 0, totalQueries: 4, budgetTruncated: false, leaseSkips: 0 })).toBe("DONE");
   });
 });
