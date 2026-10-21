@@ -3532,7 +3532,8 @@ describe("enrichRun / resetRunBudget —— 富集阶段截断也上报 + 未知
     expect(r.budgetTruncated).toBe(false);
   });
 
-  it.each(["enrichRun", "enrichSignalsRun"] as const)(
+  // enrichSignalsRun ACKs a miss's receipts one at a time: discovery.signals-retry.spec.ts.
+  it.each(["enrichRun"] as const)(
     "%s ACKs a valid no-match enrichment receipt on its exact workspace transaction",
     async (activityName) => {
       acknowledgementMocks.apply.mockClear();

@@ -123,6 +123,17 @@ async function assertPhysicalWireAuthorized(
   }
 }
 
+/**
+ * Errors Node raised on a pinned socket, TLS session or HTTP parser: the site itself dropped the
+ * connection. Membership is by identity and the error object is left as it is, so every caller
+ * that does not ask still classifies it exactly as before (a raw Node error fails closed).
+ */
+const PUBLIC_HTTP_TRANSPORT_FAILURES = new WeakSet<object>();
+
+export function isPublicHttpTransportFailure(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && PUBLIC_HTTP_TRANSPORT_FAILURES.has(error);
+}
+
 function normalizeHeaders(headers: IncomingHttpHeaders): Record<string, string> {
   const normalized: Record<string, string> = {};
   for (const [name, value] of Object.entries(headers)) {
@@ -156,6 +167,11 @@ const executePinnedHttp: PinnedHttpExecutor = async (target, options) =>
       settled = true;
       if (deadline) clearTimeout(deadline);
       resolve(value);
+    };
+    let deadlineError: Error | undefined;
+    const finishTransportReject = (error: Error) => {
+      if (error !== deadlineError) PUBLIC_HTTP_TRANSPORT_FAILURES.add(error);
+      finishReject(error);
     };
     const requestOptions: HappyEyeballsRequestOptions = {
       protocol: target.url.protocol,
@@ -217,14 +233,15 @@ const executePinnedHttp: PinnedHttpExecutor = async (target, options) =>
           text: body.toString('utf8'),
         });
       });
-      response.once('error', finishReject);
+      response.once('error', finishTransportReject);
     });
     // request.setTimeout 只是 socket 空闲超时；慢速端可定期吐 1 字节无限续命。
     // 用墙钟 deadline 给整次响应（含 body）设硬上限。
     const deadline = setTimeout(() => {
-      request.destroy(new Error('public_http_timeout'));
+      deadlineError = new Error('public_http_timeout');
+      request.destroy(deadlineError);
     }, options.timeoutMs);
-    request.once('error', finishReject);
+    request.once('error', finishTransportReject);
     request.end();
   });
 
