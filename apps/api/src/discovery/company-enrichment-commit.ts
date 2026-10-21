@@ -27,6 +27,38 @@ function validNamespaceMarkers(markers: Readonly<Record<string, string>> | undef
   return Object.fromEntries(entries);
 }
 
+/** One hit's namespace and field evidence after governance, or undefined when nothing survives. */
+function governHit(
+  hit: CompanyEnrichmentHit,
+  signalTimestamp: Date | undefined,
+  markers: Readonly<Record<string, string>>,
+): { namespace: unknown; evidence: Record<string, unknown> } | undefined {
+  const evidence = Object.fromEntries(
+    Object.entries(hit.result.attributes).flatMap(([field, value]) => {
+      if (value == null) return [];
+      const governed = sanitizeStoredCompanyFieldEvidence(`${hit.key}.${field}`, value);
+      return governed === undefined ? [] : [[field, governed]];
+    }),
+  );
+  if (Object.keys(evidence).length === 0) return undefined;
+  const candidate = {
+    ...evidence,
+    ...(signalTimestamp ? { _ts: signalTimestamp.toISOString() } : {}),
+    ...markers,
+  };
+  const namespace = sanitizeCanonicalCompanyAttributes({ [hit.key]: candidate })[hit.key];
+  return namespace === undefined ? undefined : { namespace, evidence };
+}
+
+/**
+ * Whether committing this hit would store anything. A caller that binds receipts to a hit's
+ * write asks first, so a hit that governance empties is handled as a miss, not as a write that
+ * silently does nothing.
+ */
+export function enrichmentHitSurvivesGovernance(hit: CompanyEnrichmentHit, signalTimestamp?: Date): boolean {
+  return governHit(hit, signalTimestamp, {}) !== undefined;
+}
+
 /**
  * Final transaction boundary for forward/backlog enrichment and signal activities.
  * It intentionally accepts no pre-wire attributes snapshot. `namespaceMarkers`
@@ -50,29 +82,14 @@ export async function commitCompanyEnrichmentResults(
   const merged: Record<string, unknown> = { ...current.attributes };
   const governedHits: CompanyEnrichmentHit[] = [];
   for (const hit of args.hits) {
-    const governedEvidence = Object.fromEntries(
-      Object.entries(hit.result.attributes).flatMap(([field, value]) => {
-        if (value == null) return [];
-        const governed = sanitizeStoredCompanyFieldEvidence(`${hit.key}.${field}`, value);
-        return governed === undefined ? [] : [[field, governed]];
-      }),
-    );
-    if (Object.keys(governedEvidence).length === 0) continue;
-    const candidate = {
-      ...governedEvidence,
-      ...(args.signalTimestamp ? { _ts: args.signalTimestamp.toISOString() } : {}),
-      ...markers,
-    };
-    const governed = sanitizeCanonicalCompanyAttributes({
-      [hit.key]: candidate,
-    })[hit.key];
+    const governed = governHit(hit, args.signalTimestamp, markers);
     if (governed === undefined) continue;
-    merged[hit.key] = governed;
+    merged[hit.key] = governed.namespace;
     governedHits.push({
       ...hit,
       result: {
         ...hit.result,
-        attributes: governedEvidence as Record<string, unknown>,
+        attributes: governed.evidence,
       },
     });
   }

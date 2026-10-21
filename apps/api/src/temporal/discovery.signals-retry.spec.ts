@@ -262,6 +262,31 @@ describe("enrichSignalsRun across an activity retry", () => {
     expect(companies.get("c1")?.attributes.structured_harvest).toMatchObject({ sitemap_url_count: 12 });
   });
 
+  it("treats a hit whose fields all fail governance as a miss, so its retry with one more read still settles", async () => {
+    let attempt = 1;
+    const withheld = { matched: true, confidence: 0.9, attributes: { not_a_governed_field: "x" }, costCents: 0 } as unknown as EnrichmentResult;
+    const harvest = {
+      key: "structured_harvest",
+      enrichCompany: vi.fn(async (company: { name: string }, ctx: ExecutionContext) => {
+        if (company.name === "C1") {
+          read(ctx, 1);
+          if (attempt === 2) read(ctx, 2);
+          return withheld;
+        }
+        if (attempt === 1) throw unmarkedSocketError();
+        return MISS;
+      }),
+    };
+    const { activities, companies } = world(["c1", "c2"], [harvest]);
+
+    await expect(activities.enrichSignalsRun(ARGS)).rejects.toMatchObject({ code: "ECONNRESET" });
+    attempt = 2;
+    const result = await activities.enrichSignalsRun(ARGS);
+
+    expect(result).toMatchObject({ enriched: 2, matched: 0, provider: null });
+    expect(companies.get("c1")?.attributes).not.toHaveProperty("structured_harvest");
+  });
+
   it("acknowledges an operation once per write when two reads of one company return it", async () => {
     const footprint = {
       key: "digital_footprint",

@@ -49,7 +49,10 @@ import {
   loadMaterializableCompanyState,
 } from '../discovery/company-suppression-gate';
 import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
-import { commitCompanyEnrichmentResults } from '../discovery/company-enrichment-commit';
+import {
+  commitCompanyEnrichmentResults,
+  enrichmentHitSurvivesGovernance,
+} from '../discovery/company-enrichment-commit';
 import {
   parseExecutionBudgetBinding,
   type ExecutionBudgetBinding,
@@ -454,7 +457,7 @@ export {
   MAX_DISCOVERY_PLAN_QUERIES,
   MAX_DISCOVERY_PROVIDER_RECORDS,
 };
-const SIGNAL_ENRICH_LIMIT = MAX_DISCOVERY_SIGNAL_COMPANIES; // 信号富集慢（抓官网/sitemap），单 run 上限更小；配长活动 + heartbeat
+const SIGNAL_ENRICH_LIMIT = MAX_DISCOVERY_SIGNAL_COMPANIES; // 信号富集慢（抓官网/sitemap），单 run 上限更小；配 30 分钟长活动
 const SIGNAL_TTL_MS = 7 * 24 * 3600 * 1000; // 信号时变 → 7 天 TTL 刷新（非 GLEIF/Wikidata 那种一次写死）
 
 /** One company's signal receipts, by the enricher that read them, one per operation. */
@@ -469,8 +472,9 @@ type SignalEnrichmentReceipts = ReadonlyMap<
  * names the namespace it writes; every other receipt is acknowledged on its own with nothing to
  * apply. So a retried activity never batches a receipt it already acknowledged with a new one: a
  * miss may read one page more on its second attempt (a robots check that now passes), and a
- * committed hit carries `_ts`, so its enricher does not run again. Returns the enricher keys whose
- * hit is in the database.
+ * committed hit carries `_ts`, so its enricher does not run again. A hit that governance would
+ * empty writes no `_ts` and so would run again; it is handled as a miss. Returns the enricher
+ * keys whose hit is in the database.
  */
 async function commitCompanySignals(
   tx: Prisma.TransactionClient,
@@ -483,7 +487,8 @@ async function commitCompanySignals(
   },
 ): Promise<string[]> {
   const committed: string[] = [];
-  for (const hit of args.hits) {
+  const writable = args.hits.filter((hit) => enrichmentHitSurvivesGovernance(hit, args.signalTimestamp));
+  for (const hit of writable) {
     const result = await applyDomainAckConsumerTransactions({
       transaction: tx,
       acknowledgements: [...(args.receipts.get(hit.key)?.values() ?? [])].map(({ producerId, receipt }) => ({
@@ -508,7 +513,7 @@ async function commitCompanySignals(
     });
     if (result.value) committed.push(hit.key);
   }
-  const hitKeys = new Set(args.hits.map((hit) => hit.key));
+  const hitKeys = new Set(writable.map((hit) => hit.key));
   const consumed = new Set<string>();
   for (const [enricherKey, receipts] of args.receipts) {
     if (hitKeys.has(enricherKey)) continue;
@@ -2283,10 +2288,13 @@ export function createDiscoveryActivities(deps: {
 
     /**
      * 信号富集（v3.0）——与 enrichRun **分开的独立活动**（抓官网/sitemap 慢且时变，绝不塞进
-     * enrichRun 的 2 分钟活动）。由 discoveryWorkflow 用**长 startToCloseTimeout + heartbeat** 代理。
+     * enrichRun 的 2 分钟活动）。由 discoveryWorkflow 用**长 startToCloseTimeout**（30 分钟、2 次尝试）代理，不发 heartbeat。
      *  - DAT-011：SUSPENDED 域名跳过（富集侧同样遵守 source_policy）。
      *  - TTL 刷新：命名空间 `_ts` 在 SIGNAL_TTL_MS 内则跳过（信号时变，不能像 GLEIF 静态事实那样一次写死）。
-     *  - 每家 heartbeat + 上限 SIGNAL_ENRICH_LIMIT，防长活动被判卡死。
+     *  - 上限 SIGNAL_ENRICH_LIMIT 家，让一次尝试落在 startToCloseTimeout 之内。
+     *  - 站点自己断开连接只跳过这家公司的那一个源（计 transportFailed）。那次读取留在 RESERVED：
+     *    同一 run 的第 2 次尝试会把这家记为不可重放；两家这样的公司在已尝试的公司里相邻时，
+     *    「连续两家不可重放」规则会让第 2 次尝试失败。只有第 1 次尝试另因别的原因失败时才会走到这里。
      */
     async enrichSignalsRun(args: DiscoveryActivityInput & { runId: string; icpId: string }): Promise<{
       enriched: number;

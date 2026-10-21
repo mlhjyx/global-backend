@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Prisma } from '@prisma/client';
-import { commitCompanyEnrichmentResults } from './company-enrichment-commit';
+import {
+  commitCompanyEnrichmentResults,
+  enrichmentHitSurvivesGovernance,
+} from './company-enrichment-commit';
 
 describe('company enrichment commit suppression boundary', () => {
   it('merges only owned namespaces into current scrubbed attributes after a pre-wire snapshot becomes stale', async () => {
@@ -439,5 +442,30 @@ describe('company enrichment commit suppression boundary', () => {
         evidence: create.mock.calls,
       }),
     ).not.toMatch(/digital_footprint|person@example\.test|Bearer secret|٥٥٥-٠١٠٠/u);
+  });
+
+  it('answers, without a transaction, whether a hit would store anything', () => {
+    const signalTimestamp = new Date('2026-10-21T00:00:00.000Z');
+    const governed = {
+      key: 'structured_harvest',
+      result: { matched: true, confidence: 0.9, attributes: { sitemap_url_count: 12 }, costCents: 0 },
+    };
+    const withheld = {
+      key: 'digital_footprint',
+      result: {
+        matched: true,
+        confidence: 0.9,
+        attributes: { structured_org: { contact_email: 'person@example.test', credential: 'Bearer secret' } },
+        costCents: 0,
+      },
+    };
+    const unknownField = {
+      key: 'structured_harvest',
+      result: { matched: true, confidence: 0.9, attributes: { not_a_governed_field: 'x' }, costCents: 0 },
+    };
+
+    expect(enrichmentHitSurvivesGovernance(governed, signalTimestamp)).toBe(true);
+    expect(enrichmentHitSurvivesGovernance(withheld, signalTimestamp)).toBe(false);
+    expect(enrichmentHitSurvivesGovernance(unknownField, signalTimestamp)).toBe(false);
   });
 });
