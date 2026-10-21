@@ -290,15 +290,10 @@ async function replayedQueryResult(
   lease: () => Promise<DiscoveryRunLease>,
 ): Promise<DiscoveryQueryExecutionResult> {
   if (result.queryReceipt?.providers.length !== 0) return result;
-  let pastQueryDeadline: boolean;
-  try {
-    pastQueryDeadline = !(await lease()).allows(DISCOVERY_LEASE_UNIT_MS.query);
-  } catch (error) {
-    // Retry rather than guess the label: the replay answers from durable facts, so a later attempt
-    // returns the same receipt, and only the lease tells a lease stop from a source switched off
-    // (the BI-30 reason of a source that is on would read SOURCE_DISABLED).
-    throw new Error('DISCOVERY_QUERY_LEASE_LABEL_UNAVAILABLE', { cause: error });
-  }
+  // A failed lease read fails the attempt as it would on a fresh query, and the activity retries:
+  // the replay answers from durable facts, so a later attempt returns the same receipt. Guessing the
+  // label instead would misreport it (the BI-30 reason of a source that is on reads SOURCE_DISABLED).
+  const pastQueryDeadline = !(await lease()).allows(DISCOVERY_LEASE_UNIT_MS.query);
   return pastQueryDeadline ? { ...result, skippedForLease: true } : withReceiptSkip(result, reason);
 }
 

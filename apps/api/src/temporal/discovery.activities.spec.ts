@@ -3834,6 +3834,25 @@ describe("enrichRun —— 按时限把余下公司交给下一次活动", () =>
     expect(enricher.enrichCompany).not.toHaveBeenCalled();
   });
 
+  it("counts a company one of several enrichers has not read yet as left for the lease", async () => {
+    const enricher = gleif();
+    const wikidata = { key: "wikidata", enrichCompany: vi.fn(async () => ({ matched: false }) as EnrichmentResult) };
+    const deps = await withMatchCompanies(makeEnrichDeps([enricher, wikidata]), ["c1", "c2"]);
+    const prisma = deps.prisma as unknown as {
+      withWorkspace: (ws: string, fn: (tx: Record<string, Record<string, unknown>>) => Promise<unknown>) => Promise<unknown>;
+    };
+    await prisma.withWorkspace("ws", async (tx) => {
+      const findMany = tx.canonicalCompany!.findMany as (args: unknown) => Promise<Array<Record<string, unknown>>>;
+      tx.canonicalCompany!.findMany = async (args: unknown) =>
+        (await findMany(args)).map((company) => ({ ...company, attributes: { gleif: { lei: "x" } } }));
+    });
+    Object.assign(deps, { now: () => 0, runLease: leaseLeaving(0) });
+
+    await expect(
+      createDiscoveryActivities(deps).enrichRun(discoveryArgs("run-enrich-lease-partial", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ enriched: 0, nextIndex: null, skippedForLease: 2 });
+  });
+
   it("reports no lease skip while the lease has room", async () => {
     const deps = await withMatchCompanies(makeEnrichDeps([gleif()]), ["c1", "c2"]);
     Object.assign(deps, { now: () => 0, runLease: leaseLeaving(DISCOVERY_LEASE_UNIT_MS.enrich) });
@@ -5845,7 +5864,7 @@ describe("executeQuery —— a query the run's admission lease has no room for 
     expect(withRoom).not.toHaveProperty("skippedForLease");
   });
 
-  it("retries a replayed zero receipt whose lease cannot be read rather than guess its label, without attest or routing", async () => {
+  it("fails the attempt of a replayed zero receipt whose lease cannot be read rather than guess its label, without attest or routing", async () => {
     const first = await createDiscoveryActivities({
       ...makeDeps([lineageAdapter(vi.fn(noRecords))]),
       runLease: leaseLeaving(0),
@@ -5869,10 +5888,9 @@ describe("executeQuery —— a query the run's admission lease has no room for 
       .executeQuery(discoveryArgs("run-ok-x", { query: QUERY }))
       .then(() => undefined, (reason: unknown) => reason);
 
-    // An ordinary error, so the activity retries: a source that is on would otherwise read SOURCE_DISABLED.
-    expect(failure).toBeInstanceOf(Error);
-    expect(failure).not.toBeInstanceOf(ExecutionBudgetGrantError);
-    expect(failure).toMatchObject({ message: "DISCOVERY_QUERY_LEASE_LABEL_UNAVAILABLE", cause: readFailure });
+    // The read failure itself, as on a fresh query: the proxy retries it, and a source that is on
+    // is never reported as SOURCE_DISABLED.
+    expect(failure).toBe(readFailure);
     expect(budgetStore.attestAuthorized).not.toHaveBeenCalled();
     expect(routeCompanyDiscovery).not.toHaveBeenCalled();
   });
