@@ -61,7 +61,7 @@ import {
   discoveryActivityTimeouts,
   timeoutMilliseconds,
 } from './testing/discovery-activity-timeouts';
-import { createDiscoveryActivities } from './discovery.activities';
+import { createDiscoveryActivities, FIT_CONCURRENCY } from './discovery.activities';
 import { discoveryWorkflow } from './discovery.workflow';
 import { ProviderHttpError, ProviderTransportError } from '../model-gateway/providers/provider-output-error';
 import { BudgetOperationReplayError } from '../tools/budget-store';
@@ -296,17 +296,47 @@ function rehearse(options: { companies: number; slowdown?: number; faults?: Faul
   const { tx, leads } = workspace(options.companies);
 
   let fitCalls = 0;
+  // The sum of every fit call's latency: what the fit stage would take one company at a time.
+  let fitLatencyTotal = 0;
+  // Fit calls in flight settle by simulated end time, earliest first, so a call that started later
+  // but runs shorter settles first, as on the real gateway. One settles per macrotask, after the
+  // microtasks of the one before have started whatever the activity starts next.
+  const fitInFlight: Array<{ end: number; settle: () => void }> = [];
+  let fitPeak = 0;
+  let fitTickScheduled = false;
+  const settleNextFit = () => {
+    if (fitTickScheduled) return;
+    fitTickScheduled = true;
+    setImmediate(() => {
+      fitTickScheduled = false;
+      fitInFlight.sort((a, b) => a.end - b.end);
+      const next = fitInFlight.shift();
+      if (!next) return;
+      rehearsal.clock.now = Math.max(rehearsal.clock.now, next.end);
+      next.settle();
+      if (fitInFlight.length > 0) settleNextFit();
+    });
+  };
   // Companies whose fit call broke: the gateway has their operation, without a durable result.
   const unreplayableCompanies = new Set<string>();
   rehearsal.fitModel.mockImplementation(async (_gateway: unknown, request: unknown) => {
     const company = companyOf(request);
     if (unreplayableCompanies.has(company)) throw new BudgetOperationReplayError(`fit-${company}`);
+    // Numbered when the call starts: siblings in flight start their own calls while this one waits.
     fitCalls += 1;
-    advance(LATENCY_MS.fit);
-    if (faults.fitCuts?.includes(fitCalls)) {
+    const call = fitCalls;
+    // Judgments in flight together overlap: each ends at its own start plus its latency.
+    const latency = pick(LATENCY_MS.fit) * slowdown;
+    fitLatencyTotal += latency;
+    await new Promise<void>((resolve) => {
+      fitInFlight.push({ end: rehearsal.clock.now + latency, settle: resolve });
+      fitPeak = Math.max(fitPeak, fitInFlight.length);
+      settleNextFit();
+    });
+    if (faults.fitCuts?.includes(call)) {
       throw new ProviderTransportError('CHAT_COMPLETIONS_STREAM_TRUNCATED', { inputTokens: 520 });
     }
-    if (faults.fitBreaks?.includes(fitCalls)) {
+    if (faults.fitBreaks?.includes(call)) {
       unreplayableCompanies.add(company);
       throw new ProviderTransportError('CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR', { inputTokens: 520 });
     }
@@ -482,7 +512,18 @@ function rehearse(options: { companies: number; slowdown?: number; faults?: Faul
   const finalized = () => acts.finalizeRun.mock.calls[0]![0] as { status: string; stats: Record<string, unknown> };
   /** Companies with a fit verdict stored for the ICP, whichever attempt judged them. */
   const judgedCompanies = () => new Set(leads.filter((lead) => lead.icpId === ICP_ID).map((lead) => lead.companyId)).size;
-  return { run: () => discoveryWorkflow(input), overruns, callsOf, finalized, judgedCompanies };
+  /** Wall-clock time the fit activities took, all attempts included. */
+  const fitWallClock = () => callsOf('qualifyFitForRun').reduce((sum, call) => sum + call.elapsedMs, 0);
+  return {
+    run: () => discoveryWorkflow(input),
+    overruns,
+    callsOf,
+    finalized,
+    judgedCompanies,
+    fitWallClock,
+    fitLatencyTotal: () => fitLatencyTotal,
+    fitPeak: () => fitPeak,
+  };
 }
 
 beforeEach(() => {
@@ -513,6 +554,18 @@ describe('discovery run rehearsal at measured latencies', () => {
     });
     const verdicts = stats.fit as Record<string, number>;
     expect(Object.values(verdicts).reduce((sum, count) => sum + count, 0)).toBe(99);
+  });
+
+  it('judges 100 companies in under half the time one at a time would take', async () => {
+    const rehearsalRun = rehearse({ companies: 100 });
+
+    await rehearsalRun.run();
+
+    expect(rehearsalRun.overruns()).toEqual([]);
+    expect(rehearsalRun.judgedCompanies()).toBe(100);
+    expect(rehearsalRun.fitPeak()).toBe(FIT_CONCURRENCY);
+    // Replaying xin's measured fit latencies gives 0.37-0.38; each pass's tail keeps it above 1/3.
+    expect(rehearsalRun.fitWallClock()).toBeLessThan(rehearsalRun.fitLatencyTotal() * 0.45);
   });
 
   it('still fits every activity inside its timeout on a day when every call takes twice as long', async () => {
