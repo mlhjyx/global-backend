@@ -35,6 +35,7 @@ import {
 import { TaxonomyResolver, type TaxonomyResolveOptions } from '../discovery/taxonomy-resolver';
 import { IntentProjectionService } from '../intent/intent-projection.service';
 import { enqueuePatentLookup, PATENT_PROVIDER_KEY } from '../adapters/patent-inventor-cache';
+import { isPublicHttpTransportFailure } from '../adapters/guarded-http';
 import {
   BudgetExceededError,
   BudgetOperationReplayError,
@@ -59,6 +60,7 @@ import {
 } from '../execution-budget/execution-control-error';
 import { ExecutionBudgetGrantError } from '../execution-budget/execution-budget-authority.types';
 import {
+  applyDomainAckConsumerTransaction,
   applyDomainAckConsumerTransactions,
 } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
@@ -419,6 +421,77 @@ export {
 };
 const SIGNAL_ENRICH_LIMIT = MAX_DISCOVERY_SIGNAL_COMPANIES; // 信号富集慢（抓官网/sitemap），单 run 上限更小；配长活动 + heartbeat
 const SIGNAL_TTL_MS = 7 * 24 * 3600 * 1000; // 信号时变 → 7 天 TTL 刷新（非 GLEIF/Wikidata 那种一次写死）
+
+/** One company's signal receipts, by the enricher that read them, one per operation. */
+type SignalEnrichmentReceipts = ReadonlyMap<
+  string,
+  ReadonlyMap<string, { producerId: string; receipt: DurableExecutionReceipt }>
+>;
+
+/**
+ * Writes one company's signal hits and acknowledges its receipts, in the caller's transaction.
+ * Each hit commits in one batch with exactly the receipts its enricher read, under a key that
+ * names the namespace it writes; every other receipt is acknowledged on its own with nothing to
+ * apply. So a retried activity never batches a receipt it already acknowledged with a new one: a
+ * miss may read one page more on its second attempt (a robots check that now passes), and a
+ * committed hit carries `_ts`, so its enricher does not run again. Returns the enricher keys whose
+ * hit is in the database.
+ */
+async function commitCompanySignals(
+  tx: Prisma.TransactionClient,
+  args: {
+    workspaceId: string;
+    companyId: string;
+    hits: readonly { key: string; result: EnrichmentResult }[];
+    receipts: SignalEnrichmentReceipts;
+    signalTimestamp: Date;
+  },
+): Promise<string[]> {
+  const committed: string[] = [];
+  for (const hit of args.hits) {
+    const result = await applyDomainAckConsumerTransactions({
+      transaction: tx,
+      acknowledgements: [...(args.receipts.get(hit.key)?.values() ?? [])].map(({ producerId, receipt }) => ({
+        producerId,
+        receipt,
+        domainAckKey: `${args.companyId}:${receipt.operationId}:signal-enrichment:${hit.key}`,
+        domainRevision: receipt.resultDigest,
+      })),
+      apply: (transaction) => commitCompanyEnrichmentResults(transaction, {
+        workspaceId: args.workspaceId,
+        companyId: args.companyId,
+        hits: [hit],
+        signalTimestamp: args.signalTimestamp,
+      }),
+      readback: async (transaction) => {
+        const current = await transaction.canonicalCompany.findUnique({
+          where: { id: args.companyId },
+          select: { attributes: true },
+        });
+        return Object.hasOwn((current?.attributes ?? {}) as Record<string, unknown>, hit.key);
+      },
+    });
+    if (result.value) committed.push(hit.key);
+  }
+  const hitKeys = new Set(args.hits.map((hit) => hit.key));
+  const consumed = new Set<string>();
+  for (const [enricherKey, receipts] of args.receipts) {
+    if (hitKeys.has(enricherKey)) continue;
+    for (const { producerId, receipt } of receipts.values()) {
+      if (consumed.has(receipt.operationId)) continue;
+      consumed.add(receipt.operationId);
+      await applyDomainAckConsumerTransaction({
+        transaction: tx,
+        producerId,
+        receipt,
+        domainAckKey: `${args.companyId}:${receipt.operationId}:signal-enrichment`,
+        domainRevision: receipt.resultDigest,
+        apply: async () => undefined,
+      });
+    }
+  }
+  return committed;
+}
 const WATCH_REGISTER_LIMIT = MAX_DISCOVERY_WATCH_COMPANIES; // 单 run 自动注册网站监控上限（每家一次 sitemap 探测，慢）
 const PATENT_ENQUEUE_LIMIT = 500; // 单 run 专利缓存预热 enqueue 上限（cheap upsert，非慢活动；超出记 log）
 const WEBSITE_PROFILE_TTL_MS = 30 * 24 * 3600 * 1000; // 官网画像较稳定：30 天内画像过的公司不重抓
@@ -2105,6 +2178,8 @@ export function createDiscoveryActivities(deps: {
       skippedSubjects: number;
       /** Companies skipped because an operation could not be replayed. */
       unreplayable: number;
+      /** Companies that lost an enricher because their site dropped the connection; only when > 0. */
+      transportFailed?: number;
     }> {
       const binding = await ensureRunBudget(args);
       const enrichers = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
@@ -2156,6 +2231,8 @@ export function createDiscoveryActivities(deps: {
             domain: { not: null },
             leads: { some: { icpId: args.icpId, fitVerdict: 'match' } },
           },
+          // 固定顺序：重试的活动按同样的顺序、同样的上限截断遇到同一批公司。
+          orderBy: { id: 'asc' },
           select: {
             id: true,
             name: true,
@@ -2172,25 +2249,29 @@ export function createDiscoveryActivities(deps: {
       let matched = 0;
       let skippedSubjects = 0;
       let unreplayable = 0;
+      let transportFailed = 0;
       let previousUnreplayable = false;
       const nowMs = Date.now();
       for (const c of companies.slice(0, SIGNAL_ENRICH_LIMIT)) {
-        const durableReceipts: Array<{
-          producerId: string;
-          receipt: DurableExecutionReceipt;
-        }> = [];
+        // 同一操作只记一次：careers 页就是首页、两个 sitemap 列出同一子图时，同一回执会到两次。
+        const durableReceipts = new Map<
+          string,
+          Map<string, { producerId: string; receipt: DurableExecutionReceipt }>
+        >();
         const captureEnrichmentReceipt = (
+          enricherKey: string,
           producerId: string,
           receipt: DurableExecutionReceipt,
         ): void => {
-          durableReceipts.push({ producerId, receipt });
+          const owned = durableReceipts.get(enricherKey) ?? new Map();
+          if (!owned.has(receipt.operationId)) owned.set(receipt.operationId, { producerId, receipt });
+          durableReceipts.set(enricherKey, owned);
         };
         const ctx: ExecutionContext = {
           workspaceId: args.workspaceId,
           runId: binding.accountKey,
           correlationId: binding.accountKey,
           authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
-          onDurableReceipt: captureEnrichmentReceipt,
           // G3 5.5：官网抓取（crawl4ai.render / http.get）的产物挂在这家已建档公司名下。
           artifactSubject: { subjectType: 'company', subjectId: c.id },
         };
@@ -2200,6 +2281,7 @@ export function createDiscoveryActivities(deps: {
         const hits: { key: string; result: EnrichmentResult }[] = [];
         let subjectDenied = false;
         let unreplayableSkip = false;
+        let transportLost = false;
         let attempted = false;
         for (const e of enrichers) {
           const prev = existing[e.key] as { _ts?: string } | undefined;
@@ -2219,7 +2301,11 @@ export function createDiscoveryActivities(deps: {
                 country: c.country ?? undefined,
                 region: c.region ?? undefined,
               },
-              ctx,
+              {
+                ...ctx,
+                onDurableReceipt: (producerId, receipt) =>
+                  captureEnrichmentReceipt(e.key, producerId, receipt),
+              },
             );
             if (r.matched) hits.push({ key: e.key, result: r });
           } catch (error) {
@@ -2232,6 +2318,15 @@ export function createDiscoveryActivities(deps: {
               unreplayableSkip = true;
               break;
             }
+            // 站点自己断开连接（TLS 重置、socket hang up）只是这家公司这一个信号源的损失，不是控制决定；
+            // 那次读取留在 RESERVED，下一个 run 换了操作键会重试。
+            if (isPublicHttpTransportFailure(error)) {
+              transportLost = true;
+              console.warn(
+                `[discovery] run ${args.runId} 信号源 ${e.key} 读公司 ${c.id} 时对方断开连接（${String((error as { code?: unknown }).code ?? 'UNKNOWN')}），只跳过这一源`,
+              );
+              continue;
+            }
             if (isExecutionControlError(error)) throw error;
             /* 单信号源失败不影响其余 */
           }
@@ -2239,41 +2334,25 @@ export function createDiscoveryActivities(deps: {
         if (attempted) previousUnreplayable = unreplayableSkip;
         if (unreplayableSkip) unreplayable += 1;
         else if (subjectDenied) skippedSubjects += 1;
-        else enriched += 1;
+        else {
+          enriched += 1;
+          if (transportLost) transportFailed += 1;
+        }
         // 不给被拒主体或跳过的公司写任何属性；已产生的回执照常 ACK（apply 为空操作）。
         const committedHits = subjectDenied || unreplayableSkip ? [] : hits;
-        if (!committedHits.length && !durableReceipts.length) continue;
-        const committed = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-          const result = await applyDomainAckConsumerTransactions({
-            transaction: tx,
-            acknowledgements: durableReceipts.map(({ producerId, receipt }) => ({
-              producerId,
-              receipt,
-              domainAckKey: `${c.id}:${receipt.operationId}:signal-enrichment`,
-              domainRevision: receipt.resultDigest,
-            })),
-            apply: (transaction) => committedHits.length
-              ? commitCompanyEnrichmentResults(transaction, {
-                  workspaceId: args.workspaceId,
-                  companyId: c.id,
-                  hits: committedHits,
-                  signalTimestamp: new Date(nowMs),
-                })
-              : Promise.resolve(false),
-            readback: async (transaction) => {
-              const current = await transaction.canonicalCompany.findUnique({
-                where: { id: c.id },
-                select: { attributes: true },
-              });
-              const attributes = (current?.attributes ?? {}) as Record<string, unknown>;
-              return committedHits.some((hit) => Object.hasOwn(attributes, hit.key));
-            },
-          });
-          return result.value;
-        });
-        if (!committed) continue;
+        if (!committedHits.length && !durableReceipts.size) continue;
+        const committed = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+          commitCompanySignals(tx, {
+            workspaceId: args.workspaceId,
+            companyId: c.id,
+            hits: committedHits,
+            receipts: durableReceipts,
+            signalTimestamp: new Date(nowMs),
+          }),
+        );
+        if (!committed.length) continue;
         matched += 1;
-        committedHits.forEach((h) => providersHit.add(h.key));
+        committed.forEach((key) => providersHit.add(key));
       }
       return {
         enriched,
@@ -2282,6 +2361,7 @@ export function createDiscoveryActivities(deps: {
         budgetTruncated: (await budgets.status({ workspaceId: binding.scopeKey, accountKey: binding.accountKey })).exhausted,
         skippedSubjects,
         unreplayable,
+        ...(transportFailed ? { transportFailed } : {}),
       };
     },
 

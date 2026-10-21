@@ -1,16 +1,19 @@
 import { createServer } from 'node:http';
+import { createServer as createNetServer, type Server as NetServer } from 'node:net';
 import { once } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { isExecutionControlError } from '../execution-budget/execution-control-error';
 import {
   EgressBlockedError,
   PUBLIC_HTTP_OPERATOR_TIMEOUT_MAX_MS,
   PUBLIC_HTTP_TIMEOUT_MAX_MS,
+  isPublicHttpTransportFailure,
   requestPublicHttp,
   type PinnedHttpExecutor,
   type PinnedPublicUrl,
   type PublicUrlResolver } from './guarded-http';
 
-const servers: ReturnType<typeof createServer>[] = [];
+const servers: NetServer[] = [];
 
 afterEach(async () => {
   await Promise.all(
@@ -295,5 +298,103 @@ describe('requestPublicHttp — per-hop deadline ceilings', () => {
     );
     expect(capped.mock.calls[0]![1].timeoutMs).toBe(PUBLIC_HTTP_OPERATOR_TIMEOUT_MAX_MS);
     expect(PUBLIC_HTTP_OPERATOR_TIMEOUT_MAX_MS).toBe(1_800_000);
+  });
+});
+
+describe('requestPublicHttp — a site\'s own transport failure is marked, nothing else is', () => {
+  const loopback: PublicUrlResolver = async (raw) => ({
+    url: new URL(raw),
+    ip: '127.0.0.1',
+    family: 4,
+    addresses: [{ address: '127.0.0.1', family: 4 }],
+  });
+
+  async function listen(server: NetServer): Promise<number> {
+    servers.push(server);
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('test server did not bind');
+    return address.port;
+  }
+
+  async function rejection(promise: Promise<unknown>): Promise<unknown> {
+    return promise.then(
+      () => { throw new Error('expected the request to fail'); },
+      (error: unknown) => error,
+    );
+  }
+
+  it('marks a TLS handshake the site resets, and leaves the classifier\'s verdict on it unchanged', async () => {
+    const port = await listen(createNetServer((socket) => socket.destroy()));
+
+    const error = await rejection(
+      requestPublicHttp(`https://reset.example:${port}/sitemap.xml`, { timeoutMs: 5_000 }, { resolver: loopback }),
+    );
+
+    expect(error).toBeInstanceOf(Error);
+    expect(isPublicHttpTransportFailure(error)).toBe(true);
+    // Only the consumer that opts in treats it as a site's miss; everyone else still fails closed.
+    expect(isExecutionControlError(error)).toBe(true);
+  });
+
+  it('marks a response socket the site hangs up', async () => {
+    const port = await listen(createServer((req) => req.socket.destroy()));
+
+    const error = await rejection(
+      requestPublicHttp(`http://hangup.example:${port}/`, { timeoutMs: 5_000 }, { resolver: loopback }),
+    );
+
+    expect(isPublicHttpTransportFailure(error)).toBe(true);
+  });
+
+  it('does not mark the wall-clock deadline, which is a plain failure already', async () => {
+    const port = await listen(createServer(() => undefined));
+
+    const error = await rejection(
+      requestPublicHttp(`http://slow.example:${port}/`, { timeoutMs: 100 }, { resolver: loopback }),
+    );
+
+    expect(error).toMatchObject({ message: 'public_http_timeout' });
+    expect(isPublicHttpTransportFailure(error)).toBe(false);
+    expect(isExecutionControlError(error)).toBe(false);
+  });
+
+  it('never marks a gate, an egress refusal or an oversized body', async () => {
+    const port = await listen(createServer((_req, res) => res.end('x'.repeat(64))));
+    const url = `http://gated.example:${port}/`;
+
+    const denied = await rejection(
+      requestPublicHttp(url, {}, { resolver: loopback, authorizeExternalAction: async () => false }),
+    );
+    const fenced = await rejection(
+      requestPublicHttp(url, {}, {
+        resolver: loopback,
+        beforePhysicalWire: async () => { throw new Error('wire counter exhausted'); },
+      }),
+    );
+    const blocked = await rejection(
+      requestPublicHttp(url, {}, {
+        resolver: async () => { throw new EgressBlockedError('non_global_address'); },
+      }),
+    );
+    const oversized = await rejection(requestPublicHttp(url, { maxBytes: 8 }, { resolver: loopback }));
+
+    for (const error of [denied, fenced, blocked, oversized]) {
+      expect(isPublicHttpTransportFailure(error)).toBe(false);
+    }
+    expect(oversized).toMatchObject({ name: 'EgressBlockedError', code: 'response_too_large' });
+  });
+
+  it('marks by identity only, so an error built to look like a socket failure is not marked', () => {
+    const lookalike = Object.assign(new Error('read ECONNRESET'), {
+      code: 'ECONNRESET',
+      host: 'reset.example',
+      port: 443,
+    });
+
+    expect(isPublicHttpTransportFailure(lookalike)).toBe(false);
+    expect(isPublicHttpTransportFailure(undefined)).toBe(false);
+    expect(isPublicHttpTransportFailure('ECONNRESET')).toBe(false);
   });
 });
