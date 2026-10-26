@@ -61,7 +61,7 @@ import {
   discoveryActivityTimeouts,
   timeoutMilliseconds,
 } from './testing/discovery-activity-timeouts';
-import { createDiscoveryActivities } from './discovery.activities';
+import { createDiscoveryActivities, FIT_CONCURRENCY } from './discovery.activities';
 import { discoveryWorkflow } from './discovery.workflow';
 import { ProviderHttpError, ProviderTransportError } from '../model-gateway/providers/provider-output-error';
 import { BudgetOperationReplayError } from '../tools/budget-store';
@@ -296,17 +296,47 @@ function rehearse(options: { companies: number; slowdown?: number; faults?: Faul
   const { tx, leads } = workspace(options.companies);
 
   let fitCalls = 0;
+  // The sum of every fit call's latency: what the fit stage would take one company at a time.
+  let fitLatencyTotal = 0;
+  // Fit calls in flight settle by simulated end time, earliest first, so a call that started later
+  // but runs shorter settles first, as on the real gateway. One settles per macrotask, after the
+  // microtasks of the one before have started whatever the activity starts next.
+  const fitInFlight: Array<{ end: number; settle: () => void }> = [];
+  let fitPeak = 0;
+  let fitTickScheduled = false;
+  const settleNextFit = () => {
+    if (fitTickScheduled) return;
+    fitTickScheduled = true;
+    setImmediate(() => {
+      fitTickScheduled = false;
+      fitInFlight.sort((a, b) => a.end - b.end);
+      const next = fitInFlight.shift();
+      if (!next) return;
+      rehearsal.clock.now = Math.max(rehearsal.clock.now, next.end);
+      next.settle();
+      if (fitInFlight.length > 0) settleNextFit();
+    });
+  };
   // Companies whose fit call broke: the gateway has their operation, without a durable result.
   const unreplayableCompanies = new Set<string>();
   rehearsal.fitModel.mockImplementation(async (_gateway: unknown, request: unknown) => {
     const company = companyOf(request);
     if (unreplayableCompanies.has(company)) throw new BudgetOperationReplayError(`fit-${company}`);
+    // Numbered when the call starts: siblings in flight start their own calls while this one waits.
     fitCalls += 1;
-    advance(LATENCY_MS.fit);
-    if (faults.fitCuts?.includes(fitCalls)) {
+    const call = fitCalls;
+    // Judgments in flight together overlap: each ends at its own start plus its latency.
+    const latency = pick(LATENCY_MS.fit) * slowdown;
+    fitLatencyTotal += latency;
+    await new Promise<void>((resolve) => {
+      fitInFlight.push({ end: rehearsal.clock.now + latency, settle: resolve });
+      fitPeak = Math.max(fitPeak, fitInFlight.length);
+      settleNextFit();
+    });
+    if (faults.fitCuts?.includes(call)) {
       throw new ProviderTransportError('CHAT_COMPLETIONS_STREAM_TRUNCATED', { inputTokens: 520 });
     }
-    if (faults.fitBreaks?.includes(fitCalls)) {
+    if (faults.fitBreaks?.includes(call)) {
       unreplayableCompanies.add(company);
       throw new ProviderTransportError('CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR', { inputTokens: 520 });
     }
@@ -482,7 +512,20 @@ function rehearse(options: { companies: number; slowdown?: number; faults?: Faul
   const finalized = () => acts.finalizeRun.mock.calls[0]![0] as { status: string; stats: Record<string, unknown> };
   /** Companies with a fit verdict stored for the ICP, whichever attempt judged them. */
   const judgedCompanies = () => new Set(leads.filter((lead) => lead.icpId === ICP_ID).map((lead) => lead.companyId)).size;
-  return { run: () => discoveryWorkflow(input), overruns, callsOf, finalized, judgedCompanies };
+  /** Wall-clock time the fit activities took, all attempts included. */
+  const fitWallClock = () => callsOf('qualifyFitForRun').reduce((sum, call) => sum + call.elapsedMs, 0);
+  return {
+    run: () => discoveryWorkflow(input),
+    overruns,
+    callsOf,
+    finalized,
+    judgedCompanies,
+    fitWallClock,
+    fitLatencyTotal: () => fitLatencyTotal,
+    fitPeak: () => fitPeak,
+    /** Fit calls that reached the model, the ones that broke included; a replay sends nothing. */
+    fitCallsSent: () => fitCalls,
+  };
 }
 
 beforeEach(() => {
@@ -515,6 +558,18 @@ describe('discovery run rehearsal at measured latencies', () => {
     expect(Object.values(verdicts).reduce((sum, count) => sum + count, 0)).toBe(99);
   });
 
+  it('judges 100 companies in under half the time one at a time would take', async () => {
+    const rehearsalRun = rehearse({ companies: 100 });
+
+    await rehearsalRun.run();
+
+    expect(rehearsalRun.overruns()).toEqual([]);
+    expect(rehearsalRun.judgedCompanies()).toBe(100);
+    expect(rehearsalRun.fitPeak()).toBe(FIT_CONCURRENCY);
+    // Replaying xin's measured fit latencies gives 0.37-0.38; each pass's tail keeps it above 1/3.
+    expect(rehearsalRun.fitWallClock()).toBeLessThan(rehearsalRun.fitLatencyTotal() * 0.45);
+  });
+
   it('still fits every activity inside its timeout on a day when every call takes twice as long', async () => {
     const rehearsalRun = rehearse({ companies: 100, slowdown: 2, seed: 7 });
 
@@ -538,6 +593,30 @@ describe('discovery run rehearsal at measured latencies', () => {
     // Every company but the broken one has a stored verdict. The run stats count only each
     // activity's last attempt, so verdicts stored by the attempt that broke are not in stats.fit.
     expect(rehearsalRun.judgedCompanies()).toBe(99);
+  });
+
+  // Review of #675 (LOW, kept as designed): a retry absorbs the calls an earlier attempt lost, so a
+  // lasting outage fails fit only while the activity still has new companies to call. On a short
+  // list every company ends up lost to replay and the run finishes PARTIAL with none judged.
+  it.each([
+    [3, 'PARTIAL'],
+    [6, 'PARTIAL'],
+    [9, 'FAILED'],
+  ] as const)('ends a lasting fit outage over %i companies %s, calling each company once', async (companies, status) => {
+    const rehearsalRun = rehearse({ companies, faults: { fitBreaks: Array.from({ length: 50 }, (_, call) => call + 1) } });
+
+    if (status === 'FAILED') await expect(rehearsalRun.run()).rejects.toBeInstanceOf(ActivityFailure);
+    else await rehearsalRun.run();
+
+    expect(rehearsalRun.judgedCompanies()).toBe(0);
+    // A lost call is never sent again (D13): each attempt loses at most FIT_CONCURRENCY new calls.
+    expect(rehearsalRun.fitCallsSent()).toBe(companies);
+    expect(rehearsalRun.fitCallsSent()).toBeLessThanOrEqual(3 * FIT_CONCURRENCY);
+    expect(rehearsalRun.finalized()).toMatchObject(
+      status === 'PARTIAL'
+        ? { status, stats: { fitUnjudged: companies, unreplayableSkips: { fit: companies } } }
+        : { status, stats: { failure: { stage: 'fit', errorType: 'ProviderTransportError', control: false } } },
+    );
   });
 
   it('counts a query whose retries meet an unreplayable call as failed and runs the rest', async () => {
