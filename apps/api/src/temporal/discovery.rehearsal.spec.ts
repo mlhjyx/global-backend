@@ -523,6 +523,8 @@ function rehearse(options: { companies: number; slowdown?: number; faults?: Faul
     fitWallClock,
     fitLatencyTotal: () => fitLatencyTotal,
     fitPeak: () => fitPeak,
+    /** Fit calls that reached the model, the ones that broke included; a replay sends nothing. */
+    fitCallsSent: () => fitCalls,
   };
 }
 
@@ -591,6 +593,30 @@ describe('discovery run rehearsal at measured latencies', () => {
     // Every company but the broken one has a stored verdict. The run stats count only each
     // activity's last attempt, so verdicts stored by the attempt that broke are not in stats.fit.
     expect(rehearsalRun.judgedCompanies()).toBe(99);
+  });
+
+  // Review of #675 (LOW, kept as designed): a retry absorbs the calls an earlier attempt lost, so a
+  // lasting outage fails fit only while the activity still has new companies to call. On a short
+  // list every company ends up lost to replay and the run finishes PARTIAL with none judged.
+  it.each([
+    [3, 'PARTIAL'],
+    [6, 'PARTIAL'],
+    [9, 'FAILED'],
+  ] as const)('ends a lasting fit outage over %i companies %s, calling each company once', async (companies, status) => {
+    const rehearsalRun = rehearse({ companies, faults: { fitBreaks: Array.from({ length: 50 }, (_, call) => call + 1) } });
+
+    if (status === 'FAILED') await expect(rehearsalRun.run()).rejects.toBeInstanceOf(ActivityFailure);
+    else await rehearsalRun.run();
+
+    expect(rehearsalRun.judgedCompanies()).toBe(0);
+    // A lost call is never sent again (D13): each attempt loses at most FIT_CONCURRENCY new calls.
+    expect(rehearsalRun.fitCallsSent()).toBe(companies);
+    expect(rehearsalRun.fitCallsSent()).toBeLessThanOrEqual(3 * FIT_CONCURRENCY);
+    expect(rehearsalRun.finalized()).toMatchObject(
+      status === 'PARTIAL'
+        ? { status, stats: { fitUnjudged: companies, unreplayableSkips: { fit: companies } } }
+        : { status, stats: { failure: { stage: 'fit', errorType: 'ProviderTransportError', control: false } } },
+    );
   });
 
   it('counts a query whose retries meet an unreplayable call as failed and runs the rest', async () => {

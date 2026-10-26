@@ -1721,6 +1721,8 @@ export function createDiscoveryActivities(deps: {
       // again while a slow judgment runs.
       let stop: { reason: 'failure'; error: unknown } | { reason: 'budget' | 'lease' } | undefined;
       let accounted = 0;
+      // Failures folded after the stop: one company after another would never have called them.
+      const leftOut: string[] = [];
       const fold = (outcome: FitOutcome): void => {
         if (outcome.kind === 'not-allowed') {
           accounted += 1;
@@ -1744,7 +1746,9 @@ export function createDiscoveryActivities(deps: {
         // A retry finds the call an earlier attempt left without a durable result: it is never sent
         // again (D13), so that company stays unjudged, before a stop or after one. It says nothing
         // about the upstream (the companies an attempt had in flight when it failed or its worker
-        // was lost come together), so it neither starts nor continues the two-in-a-row rule.
+        // was lost come together), so it neither starts nor continues the two-in-a-row rule. The
+        // price: a lasting outage fails fit only while companies are left that no attempt called;
+        // on a short list every company ends up lost to replay and the run finishes PARTIAL.
         if (isUnreplayableOperation(err)) {
           accounted += 1;
           unjudged += 1;
@@ -1752,7 +1756,10 @@ export function createDiscoveryActivities(deps: {
           return;
         }
         // After a stop, a failed company is left for whatever the stop means (a retry, or a count).
-        if (stop !== undefined) return;
+        if (stop !== undefined) {
+          leftOut.push(err instanceof Error ? err.name : typeof err);
+          return;
+        }
         if (err instanceof BudgetExceededError) {
           // 预算耗尽=余下全部会失败 → 不再开始新的公司，显性计数（复审 HIGH：绝不静默漏判假 DONE）
           stop = { reason: 'budget' };
@@ -1783,10 +1790,14 @@ export function createDiscoveryActivities(deps: {
       let started = 0;
       let folded = 0;
       let handOff = false;
+      // The first company the lease had no room for. The stop for the lease comes after the
+      // companies before it are folded, so a stop one of them makes comes first, in id order.
+      let leaseStopAt: number | undefined;
       const startedAt = clock();
       for (;;) {
         while (
           stop === undefined &&
+          leaseStopAt === undefined &&
           pendingFailures === 0 &&
           !handOff &&
           inFlight.size < FIT_CONCURRENCY &&
@@ -1795,7 +1806,7 @@ export function createDiscoveryActivities(deps: {
           // A company the lease has no room for ends the stage: the rest count as skipped for the
           // lease, nothing is handed on, and the run finishes PARTIAL.
           if (!lease.allows(DISCOVERY_LEASE_UNIT_MS.fit)) {
-            stop = { reason: 'lease' };
+            leaseStopAt = started;
             break;
           }
           // Hand the rest to the next activity rather than outrun this one's timeout; every
@@ -1823,6 +1834,12 @@ export function createDiscoveryActivities(deps: {
 
       // Every company started has settled and been folded; the ones left are the companies never
       // started, and after a stop the ones whose failure the stop covers.
+      if (stop === undefined && leaseStopAt !== undefined) stop = { reason: 'lease' };
+      if (leftOut.length > 0) {
+        console.warn(
+          `[discovery] run ${args.runId} fit 已停下，之后落定的 ${leftOut.length} 家失败按停下处理：${leftOut.join(', ')}`,
+        );
+      }
       const left = companies.length - accounted;
       const stopped = stop as typeof stop;
       if (stopped?.reason === 'failure') throw withUpstreamUnavailableRetryDelay(stopped.error);

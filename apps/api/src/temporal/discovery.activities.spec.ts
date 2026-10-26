@@ -5014,6 +5014,8 @@ describe("qualifyFitForRun —— 按时限把余下公司交给下一次活动"
         .filter((companyId) => where.id.gt === undefined || companyId > where.id.gt)
         .map(company),
     );
+    // A company the lookup does not find may not use external processing.
+    const findUnique = vi.fn(async ({ where }: { where: { id: string } }) => company(where.id) as ReturnType<typeof company> | null);
     const tx = {
       $queryRaw: legacyMaterializationQueryRaw(),
       rawSourceRecord: {
@@ -5034,7 +5036,7 @@ describe("qualifyFitForRun —— 按时限把余下公司交给下一次活动"
       },
       canonicalCompany: {
         findMany,
-        findUnique: async ({ where }: { where: { id: string } }) => company(where.id),
+        findUnique,
         updateMany: async () => ({ count: 0 }),
       },
       suppressionRecord: { findMany: async () => [] },
@@ -5054,7 +5056,7 @@ describe("qualifyFitForRun —— 按时限把余下公司交给下一次活动"
       now,
       ...(runLease ? { runLease } : {}),
     } as never);
-    return { acts, findMany, leadUpsert };
+    return { acts, findMany, findUnique, leadUpsert };
   }
 
   beforeEach(() => {
@@ -5183,6 +5185,8 @@ describe("qualifyFitForRun —— 按时限把余下公司交给下一次活动"
       await judgments.fail("02 GmbH", failure);
       expect(state.settled).toBe(false);
       await judgments.judge("01 GmbH");
+      // c2's failure is folded now and stops the activity, but c3 is still running.
+      expect(state.settled).toBe(false);
       await judgments.judge("03 GmbH");
 
       await expect(pass).rejects.toBe(failure);
@@ -5274,6 +5278,134 @@ describe("qualifyFitForRun —— 按时限把余下公司交给下一次活动"
 
       await expect(pass).resolves.toMatchObject({ unjudged: 1, unreplayable: 1, skippedForBudget: 2 });
     });
+
+    it("starts no company once a spent budget is folded", async () => {
+      const judgments = heldJudgments();
+      const { acts } = passActivities([id(1), id(2), id(3), id(4), id(5)], () => 0);
+
+      const pass = acts.qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" }));
+      await flush();
+      await judgments.fail("01 GmbH", new StoreBudgetExceededError("account", 1n, 0n));
+      await judgments.judge("02 GmbH");
+      await judgments.judge("03 GmbH");
+
+      expect(judgments.started).toEqual(["01 GmbH", "02 GmbH", "03 GmbH"]);
+      await expect(pass).resolves.toMatchObject({ judged: 2, skippedForBudget: 3, nextCompanyId: null });
+    });
+
+    it("starts no company once a second cut stream in a row is folded", async () => {
+      const judgments = heldJudgments();
+      const second = cut();
+      const { acts } = passActivities([id(1), id(2), id(3), id(4), id(5)], () => 0);
+
+      const failure = acts
+        .qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" }))
+        .then(() => undefined, (error: unknown) => error);
+      await flush();
+      // c1's cut is the first in a row: absorbed, and c4 takes its slot.
+      await judgments.fail("01 GmbH", cut());
+      await judgments.fail("02 GmbH", second);
+      await judgments.judge("03 GmbH");
+      await judgments.judge("04 GmbH");
+
+      expect(judgments.started).toEqual(["01 GmbH", "02 GmbH", "03 GmbH", "04 GmbH"]);
+      expect(await failure).toBe(second);
+    });
+
+    it("keeps the first stop in id order when a later company fails, and logs the failure it leaves out", async () => {
+      const judgments = heldJudgments();
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      try {
+        const { acts } = passActivities([id(1), id(2), id(3)], () => 0);
+
+        const pass = acts.qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" }));
+        await flush();
+        await judgments.fail("02 GmbH", http(401));
+        await judgments.fail("01 GmbH", new StoreBudgetExceededError("account", 1n, 0n));
+        await judgments.judge("03 GmbH");
+
+        // One company after another, c2 would never have been called: the budget stop stands.
+        await expect(pass).resolves.toMatchObject({ judged: 1, skippedForBudget: 2 });
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining("ProviderHttpError"));
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it("counts every company settled before a budget stop and skips only the rest", async () => {
+      const judgments = heldJudgments();
+      const { acts, findUnique } = passActivities([id(1), id(2), id(3), id(4), id(5), id(6)], () => 0);
+      // c1 may not use external processing, so its judgment never reaches the model.
+      findUnique.mockImplementationOnce(async () => null);
+
+      const pass = acts.qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" }));
+      await flush();
+      expect(judgments.started).toEqual(["02 GmbH", "03 GmbH", "04 GmbH"]);
+      await judgments.fail("02 GmbH", new Error("model answered nonsense"));
+      await judgments.fail("03 GmbH", new BudgetOperationReplayError("op-3"));
+      await judgments.fail("04 GmbH", new StoreBudgetExceededError("account", 1n, 0n));
+      await judgments.judge("05 GmbH");
+      await judgments.judge("06 GmbH");
+
+      // c1 not allowed, c2 unusable, c3 lost on replay, c5 and c6 judged: only c4 is left.
+      await expect(pass).resolves.toMatchObject({
+        judged: 2,
+        unjudged: 2,
+        unreplayable: 1,
+        skippedForBudget: 1,
+      });
+    });
+
+    it("fails the activity when a verdict cannot be stored", async () => {
+      fitRuntimeMocks.execute.mockResolvedValue(FIT);
+      const unavailable = new Error("lead table unavailable");
+      const { acts, leadUpsert } = passActivities([id(1)], () => 0);
+      leadUpsert.mockRejectedValueOnce(unavailable);
+
+      await expect(acts.qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" }))).rejects.toBe(unavailable);
+    });
+
+    // Review of #675 (LOW): the lease check before the next start ended the pass at once, so a
+    // budget stop or a failure of a company already in flight read as skipped for the lease.
+    it.each([
+      [
+        "a spent budget ends the pass for the budget",
+        () => new StoreBudgetExceededError("account", 1n, 0n),
+        { resolves: { judged: 2, skippedForBudget: 3 } },
+      ],
+      ["a rejected credential fails the activity", () => http(401), { rejects: true }],
+    ] as const)(
+      "lets a company that started before the lease ran short decide the stop: %s",
+      async (_label, failure, expected) => {
+        const judgments = heldJudgments();
+        let now = 0;
+        const { acts } = passActivities(
+          [id(1), id(2), id(3), id(4), id(5)],
+          () => now,
+          leaseLeaving(DISCOVERY_LEASE_UNIT_MS.fit + MINUTE),
+        );
+
+        const result = acts
+          .qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" }))
+          .then((value) => ({ value }), (error: unknown) => ({ error }));
+        await flush();
+        now = 2 * MINUTE;
+        // c1 frees a slot, but the lease has no room for another judgment: nothing more starts.
+        await judgments.judge("01 GmbH");
+        const error = failure();
+        await judgments.fail("02 GmbH", error);
+        await judgments.judge("03 GmbH");
+
+        expect(judgments.started).toEqual(["01 GmbH", "02 GmbH", "03 GmbH"]);
+        const outcome = await result;
+        if ("rejects" in expected) {
+          expect(outcome).toEqual({ error });
+        } else {
+          expect(outcome).toMatchObject({ value: expected.resolves });
+          expect((outcome as { value: object }).value).not.toHaveProperty("skippedForLease");
+        }
+      },
+    );
 
     it("keeps the pass, plus one judgment, inside the fit activity's timeout", () => {
       const timeout = Math.max(...discoveryActivityTimeouts().get("qualifyFitForRun")!.map(timeoutMilliseconds));
