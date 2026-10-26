@@ -3880,6 +3880,59 @@ describe("enrichRun —— 按时限把余下公司交给下一次活动", () =>
   });
 });
 
+describe("enrichSignalsRun —— 按时限把余下公司留给下一次 run", () => {
+  const signalEnricher = () => ({
+    key: "digital_footprint",
+    enrichCompany: vi.fn(async () => ({ matched: false }) as EnrichmentResult),
+  });
+
+  it("stops at the first company the lease has no room for and counts the rest", async () => {
+    const enricher = signalEnricher();
+    const deps = await withMatchCompanies(makeEnrichDeps([enricher]), ["c1", "c2", "c3"]);
+    Object.assign(deps, { now: () => 0, runLease: leaseLeaving(0) });
+
+    await expect(
+      createDiscoveryActivities(deps).enrichSignalsRun(discoveryArgs("run-signal-lease", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ enriched: 0, skippedForLease: 3 });
+    expect(enricher.enrichCompany).not.toHaveBeenCalled();
+  });
+
+  it("does not count a company every signal source already read as left for the lease", async () => {
+    const enricher = signalEnricher();
+    const deps = await withMatchCompanies(makeEnrichDeps([enricher]), ["c1", "c2"]);
+    const prisma = deps.prisma as unknown as {
+      withWorkspace: (ws: string, fn: (tx: Record<string, Record<string, unknown>>) => Promise<unknown>) => Promise<unknown>;
+    };
+    await prisma.withWorkspace("ws", async (tx) => {
+      const findMany = tx.canonicalCompany!.findMany as (args: unknown) => Promise<Array<Record<string, unknown>>>;
+      tx.canonicalCompany!.findMany = async (args: unknown) =>
+        (await findMany(args)).map((company) => ({
+          ...company,
+          attributes: { digital_footprint: { _ts: new Date().toISOString() } },
+        }));
+    });
+    Object.assign(deps, { now: () => 0, runLease: leaseLeaving(0) });
+
+    const result = await createDiscoveryActivities(deps).enrichSignalsRun(
+      discoveryArgs("run-signal-lease-done", { icpId: "icp-1" }),
+    );
+    expect(result).toMatchObject({ enriched: 0 });
+    expect(result).not.toHaveProperty("skippedForLease");
+    expect(enricher.enrichCompany).not.toHaveBeenCalled();
+  });
+
+  it("reports no lease skip while the lease has room", async () => {
+    const deps = await withMatchCompanies(makeEnrichDeps([signalEnricher()]), ["c1", "c2"]);
+    Object.assign(deps, { now: () => 0, runLease: leaseLeaving(DISCOVERY_LEASE_UNIT_MS.enrich) });
+
+    const result = await createDiscoveryActivities(deps).enrichSignalsRun(
+      discoveryArgs("run-signal-lease-room", { icpId: "icp-1" }),
+    );
+    expect(result).toMatchObject({ enriched: 2 });
+    expect(result).not.toHaveProperty("skippedForLease");
+  });
+});
+
 describe("company-subject call sites (G3 5.5)", () => {
   it("binds every signal-enrichment wire to the canonical company it enriches", async () => {
     const enricher = {
@@ -5552,6 +5605,20 @@ describe("resolveRunStatus —— 尽力而为的阶段跳过了无法重放的�
     ).toBe("FAILED");
     expect(
       resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, unreplayableSkips: 0 }),
+    ).toBe("DONE");
+  });
+});
+
+describe("resolveRunStatus —— 信号源所在站点断开连接", () => {
+  it("marks the run PARTIAL rather than DONE when a company lost one source", () => {
+    expect(
+      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, transportFailedSkips: 1 }),
+    ).toBe("PARTIAL");
+  });
+
+  it("stays DONE when no source was lost", () => {
+    expect(
+      resolveRunStatus({ failures: 0, totalQueries: 3, budgetTruncated: false, transportFailedSkips: 0 }),
     ).toBe("DONE");
   });
 });
