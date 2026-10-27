@@ -214,7 +214,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
   // stage, as each pass reports them. Kept outside the stages so a run a later stage fails (BI-25)
   // still shows them; shown only for the stages that left any. Absent in results recorded before
   // the lease soft deadline existed, so replays keep their status and stats.
-  const leaseSkips: Partial<Record<'queries' | 'websiteProfile' | 'fit' | 'enrich' | 'watches', number>> = {};
+  const leaseSkips: Partial<Record<'queries' | 'websiteProfile' | 'fit' | 'enrich' | 'signals' | 'watches', number>> = {};
   const countLeaseSkips = (stage: keyof typeof leaseSkips, count: number | undefined): void => {
     if (count !== undefined && count > 0) leaseSkips[stage] = (leaseSkips[stage] ?? 0) + count;
   };
@@ -490,6 +490,9 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       budgetTruncated?: boolean;
       skippedSubjects?: number;
       unreplayable?: number;
+      skippedForLease?: number;
+      /** Companies that lost a signal source to a dropped connection; present only when > 0. */
+      transportFailed?: number;
     } = {
       matched: 0,
       enriched: 0,
@@ -498,6 +501,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     stage = 'signals';
     try {
       signals = await signalActs.enrichSignalsRun({ workspaceId, runId, icpId: input.icpId, ...authorityArgs });
+      countLeaseSkips('signals', signals.skippedForLease);
     } catch (error) {
       if (isExecutionControlError(error)) throw error;
       /* 信号富集是尽力而为的富化，失败不影响 run 状态 */
@@ -559,6 +563,9 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       watches: watches.unreplayable ?? 0,
     };
     const unreplayableSkipCount = Object.values(unreplayableSkips).reduce((sum, count) => sum + count, 0);
+    // A signal source lost to a dropped connection is work left undone: the company keeps the
+    // sources it did get (it stays in the stage's `of` count), but the run is at least PARTIAL.
+    const transportFailedSkips = signals.transportFailed ?? 0;
     const leaseSkipCount = Object.values(leaseSkips).reduce((sum, count) => sum + count, 0);
     let status = resolveRunStatus({
       failures,
@@ -570,6 +577,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       skippedQueries: skippedQueryCount,
       droppedExtractions: modelExtractions.failed,
       unreplayableSkips: unreplayableSkipCount,
+      transportFailedSkips,
       profileStageFailed: websiteProfileStageFailed,
       leaseSkips: leaseSkipCount,
     });
@@ -599,6 +607,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         ...extractionStats(),
         // Shown only when a company was skipped, so runs without a skip keep their stats shape.
         ...(unreplayableSkipCount > 0 ? { unreplayableSkips } : {}),
+        ...(transportFailedSkips > 0 ? { transportFailed: { signals: transportFailedSkips } } : {}),
         ...leaseStats(),
         // Shown only when it happened; neither changes the status (the queries ran).
         ...(taxonomyFallbacks > 0 ? { taxonomyFallback: taxonomyFallbacks } : {}),

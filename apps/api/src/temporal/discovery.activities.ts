@@ -2414,6 +2414,8 @@ export function createDiscoveryActivities(deps: {
       unreplayable: number;
       /** Companies that lost an enricher because their site dropped the connection; only when > 0. */
       transportFailed?: number;
+      /** Companies left unenriched because the run's admission lease had no room for them; present only then. */
+      skippedForLease?: number;
     }> {
       const binding = await ensureRunBudget(args);
       const enrichers = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
@@ -2484,9 +2486,26 @@ export function createDiscoveryActivities(deps: {
       let skippedSubjects = 0;
       let unreplayable = 0;
       let transportFailed = 0;
+      let skippedForLease = 0;
       let previousUnreplayable = false;
       const nowMs = Date.now();
-      for (const c of companies.slice(0, SIGNAL_ENRICH_LIMIT)) {
+      const lease = await readRunLease(binding);
+      const signalCompanies = companies.slice(0, SIGNAL_ENRICH_LIMIT);
+      // The companies from `from` on that still have a signal source to read (the loop's own TTL
+      // and SUSPENDED checks decide each company the same way).
+      const signalsUnread = (from: number): number =>
+        signalCompanies
+          .slice(from)
+          .filter((company) => {
+            if (company.domain && suspended.has(company.domain.toLowerCase())) return false;
+            const existing = ((company.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
+            return enrichers.some((enricher) => {
+              const prev = existing[enricher.key] as { _ts?: string } | undefined;
+              return !(prev?._ts && nowMs - Date.parse(prev._ts) < SIGNAL_TTL_MS);
+            });
+          }).length;
+      for (let i = 0; i < signalCompanies.length; i++) {
+        const c = signalCompanies[i]!;
         // 同一操作只记一次：careers 页就是首页、两个 sitemap 列出同一子图时，同一回执会到两次。
         const durableReceipts = new Map<
           string,
@@ -2510,6 +2529,11 @@ export function createDiscoveryActivities(deps: {
           artifactSubject: { subjectType: 'company', subjectId: c.id },
         };
         if (c.domain && suspended.has(c.domain.toLowerCase())) continue; // DAT-011：富集侧跳过 SUSPENDED
+        // A company the lease has no room for ends the stage (see qualifyFitForRun).
+        if (!lease.allows(DISCOVERY_LEASE_UNIT_MS.enrich)) {
+          skippedForLease = signalsUnread(i);
+          break;
+        }
 
         const existing = ((c.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
         const hits: { key: string; result: EnrichmentResult }[] = [];
@@ -2596,6 +2620,7 @@ export function createDiscoveryActivities(deps: {
         skippedSubjects,
         unreplayable,
         ...(transportFailed ? { transportFailed } : {}),
+        ...(skippedForLease > 0 ? { skippedForLease } : {}),
       };
     },
 
