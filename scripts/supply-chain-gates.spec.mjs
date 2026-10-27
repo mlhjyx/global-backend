@@ -1775,3 +1775,81 @@ test("CodeQL is a non-required JavaScript and TypeScript canary with minimal per
     ),
   );
 });
+
+test("the same GHSA on two version lines is not a duplicate advisory", async () => {
+  const {
+    evaluateDependencyGraphDelta,
+    evaluateProductionAudit,
+    validateProductionAuditBaseline,
+  } = await import("./supply-chain-audit.mjs");
+  const undiciSeven = advisory({
+    ghsa_id: "GHSA-xjj6-f33q-929c",
+    package: "undici",
+    severity: "high",
+    vulnerable_versions: ">=7.18.0 <7.30.1",
+    patched_versions: ">=7.30.1",
+    url: "https://github.com/advisories/GHSA-xjj6-f33q-929c",
+    findings: [
+      {
+        version: "7.30.0",
+        paths: ["api > @ai-sdk/provider-utils@5.0.58 > undici@7.30.0"],
+      },
+    ],
+  });
+  const undiciEight = advisory({
+    ghsa_id: "GHSA-xjj6-f33q-929c",
+    package: "undici",
+    severity: "high",
+    vulnerable_versions: ">=8.0.0 <8.12.2",
+    patched_versions: ">=8.12.2",
+    url: "https://github.com/advisories/GHSA-xjj6-f33q-929c",
+    findings: [
+      {
+        version: "8.10.2",
+        paths: ["site-renderer > unifont@0.7.5 > undici@8.10.2"],
+      },
+    ],
+  });
+  const dualLineAudit = pnpmAudit([undiciSeven, undiciEight]);
+
+  const evaluated = evaluateProductionAudit(dualLineAudit, baseline([]), {
+    now: NOW,
+  });
+  assert.ok(!issueCodes(evaluated).includes("AUDIT_ADVISORY_DUPLICATE"));
+  assert.ok(issueCodes(evaluated).includes("AUDIT_NEW_ADVISORY"));
+
+  // Baseline admissions stay range-free: the ratchet only matches by GHSA and
+  // package, so admitting the same advisory twice (one entry per version line)
+  // would produce a baseline that can never match its own audit. Fail closed at
+  // validation time instead.
+  assert.ok(
+    issueCodes(
+      validateProductionAuditBaseline(baseline([undiciSeven, undiciEight]), {
+        now: NOW,
+      }),
+    ).includes("BASELINE_ADVISORY_DUPLICATE"),
+  );
+
+  // The 2026-10-27 failure: a trusted base whose audit carries one GHSA on two
+  // version lines was judged malformed, so every dependency-changing PR ended
+  // as AUDIT_SNAPSHOT_INCONCLUSIVE before the candidate was ever compared.
+  const delta = evaluateDependencyGraphDelta({
+    trustedBase: BASE_COMMIT,
+    candidate: "b".repeat(40),
+    relation: "CHANGED",
+    trustedBaseAudit: dualLineAudit,
+    candidateAudit: pnpmAudit([]),
+    baseline: baseline([]),
+    now: NOW,
+  });
+  assert.equal(delta.ok, true);
+  assert.equal(delta.result, "COMPARABLE_AUDIT_PASS");
+
+  assert.ok(
+    issueCodes(
+      evaluateProductionAudit(pnpmAudit([undiciSeven, undiciSeven]), baseline([]), {
+        now: NOW,
+      }),
+    ).includes("AUDIT_ADVISORY_DUPLICATE"),
+  );
+});
