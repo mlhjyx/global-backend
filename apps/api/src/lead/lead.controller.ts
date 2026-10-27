@@ -74,21 +74,21 @@ const LEAD_PACKAGE_SCHEMA = {
       properties: {
         canonical_company_id: { type: 'string', format: 'uuid' },
         name: { type: 'string' },
-        domain: { type: ['string', 'null'] },
-        country: { type: ['string', 'null'] },
-        city: { type: ['string', 'null'] },
+        domain: { type: 'string', nullable: true },
+        country: { type: 'string', nullable: true },
+        city: { type: 'string', nullable: true },
       },
     },
     company_profile: { type: 'object', additionalProperties: true },
-    registered_address: { type: ['string', 'null'] },
+    registered_address: { type: 'string', nullable: true },
     identifiers: {
       type: 'object',
       required: ['register_key', 'vat_id', 'lei', 'fda_reg'],
       properties: {
-        register_key: { type: ['string', 'null'] },
-        vat_id: { type: ['string', 'null'] },
-        lei: { type: ['string', 'null'] },
-        fda_reg: { type: ['string', 'null'] },
+        register_key: { type: 'string', nullable: true },
+        vat_id: { type: 'string', nullable: true },
+        lei: { type: 'string', nullable: true },
+        fda_reg: { type: 'string', nullable: true },
       },
     },
     contact_points: {
@@ -100,7 +100,8 @@ const LEAD_PACKAGE_SCHEMA = {
       },
     },
     suggested_contact_path: {
-      type: ['object', 'null'],
+      type: 'object',
+      nullable: true,
       required: ['kind', 'url', 'legal_note'],
       properties: {
         kind: { type: 'string' },
@@ -121,10 +122,10 @@ const LEAD_PACKAGE_SCHEMA = {
           type: 'string',
           enum: ['clear', 'cleared_false_positive', 'not_screened', 'potential_match', 'confirmed_true_hit'],
         },
-        screened_at: { type: ['string', 'null'], format: 'date-time' },
+        screened_at: { type: 'string', nullable: true, format: 'date-time' },
       },
     },
-    valid_until: { type: ['string', 'null'], format: 'date-time' },
+    valid_until: { type: 'string', nullable: true, format: 'date-time' },
   },
 } as const;
 

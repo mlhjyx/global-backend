@@ -9138,22 +9138,16 @@
                               "type": "string"
                             },
                             "domain": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
+                              "type": "string",
+                              "nullable": true
                             },
                             "country": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
+                              "type": "string",
+                              "nullable": true
                             },
                             "city": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
+                              "type": "string",
+                              "nullable": true
                             }
                           }
                         },
@@ -9162,10 +9156,8 @@
                           "additionalProperties": true
                         },
                         "registered_address": {
-                          "type": [
-                            "string",
-                            "null"
-                          ]
+                          "type": "string",
+                          "nullable": true
                         },
                         "identifiers": {
                           "type": "object",
@@ -9177,28 +9169,20 @@
                           ],
                           "properties": {
                             "register_key": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
+                              "type": "string",
+                              "nullable": true
                             },
                             "vat_id": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
+                              "type": "string",
+                              "nullable": true
                             },
                             "lei": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
+                              "type": "string",
+                              "nullable": true
                             },
                             "fda_reg": {
-                              "type": [
-                                "string",
-                                "null"
-                              ]
+                              "type": "string",
+                              "nullable": true
                             }
                           }
                         },
@@ -9225,10 +9209,8 @@
                           }
                         },
                         "suggested_contact_path": {
-                          "type": [
-                            "object",
-                            "null"
-                          ],
+                          "type": "object",
+                          "nullable": true,
                           "required": [
                             "kind",
                             "url",
@@ -9286,19 +9268,15 @@
                               ]
                             },
                             "screened_at": {
-                              "type": [
-                                "string",
-                                "null"
-                              ],
+                              "type": "string",
+                              "nullable": true,
                               "format": "date-time"
                             }
                           }
                         },
                         "valid_until": {
-                          "type": [
-                            "string",
-                            "null"
-                          ],
+                          "type": "string",
+                          "nullable": true,
                           "format": "date-time"
                         }
                       }
