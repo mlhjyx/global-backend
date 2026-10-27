@@ -321,7 +321,7 @@ function rehearse(options: { companies: number; slowdown?: number; faults?: Faul
   const unreplayableCompanies = new Set<string>();
   rehearsal.fitModel.mockImplementation(async (_gateway: unknown, request: unknown) => {
     const company = companyOf(request);
-    if (unreplayableCompanies.has(company)) throw new BudgetOperationReplayError(`fit-${company}`);
+    if (unreplayableCompanies.has(company)) throw new BudgetOperationReplayError(`fit-${company}`, "remnant");
     // Numbered when the call starts: siblings in flight start their own calls while this one waits.
     fitCalls += 1;
     const call = fitCalls;
@@ -359,7 +359,7 @@ function rehearse(options: { companies: number; slowdown?: number; faults?: Faul
       profiles += 1;
       advance(LATENCY_MS.profile);
       if (faults.profileUnreplayable?.includes(profiles)) {
-        throw new BudgetOperationReplayError(`profile-${profiles}`);
+        throw new BudgetOperationReplayError(`profile-${profiles}`, "remnant");
       }
       if (faults.profileUpstreamDown?.includes(profiles)) {
         throw new ProviderHttpError({ status: 521, provider: 'gateway', model: 'deepseek-v4-pro' });
@@ -385,7 +385,7 @@ function rehearse(options: { companies: number; slowdown?: number; faults?: Faul
         faults.signalUnreplayable === 'all' ||
         faults.signalUnreplayable?.includes(signalCalls)
       ) {
-        throw new BudgetOperationReplayError(`signal-${signalCalls}`);
+        throw new BudgetOperationReplayError(`signal-${signalCalls}`, "remnant");
       }
       return { matched: false };
     }),
@@ -415,7 +415,7 @@ function rehearse(options: { companies: number; slowdown?: number; faults?: Faul
 
   // The query stage answers at once. A configured query breaks on its first attempt; its retries
   // meet the call that attempt left behind and, as the activity does, end the query with a zero
-  // receipt, unless the query before ended the same way.
+  // receipt — in a row or not.
   const receipts = new Set<number>();
   const queryAttempts = new Map<number, number>();
   const executeQuery = async (args: { queryOrdinal: number; previousQueryUnreplayable?: boolean }) => {
@@ -427,7 +427,6 @@ function rehearse(options: { companies: number; slowdown?: number; faults?: Faul
       if (attempt === 1) {
         throw new ProviderTransportError('CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR', { inputTokens: 520 });
       }
-      if (args.previousQueryUnreplayable) throw new BudgetOperationReplayError(`query-${args.queryOrdinal}`);
       receipts.add(args.queryOrdinal);
       return lostQueryReceipt(args.queryOrdinal);
     }
@@ -630,26 +629,28 @@ describe('discovery run rehearsal at measured latencies', () => {
     expect(stats).toMatchObject({ failures: 1, queries: QUERY_COUNT, unreplayableSkips: { queries: 1 } });
   });
 
-  it('still fails the run when two queries in a row meet unreplayable calls', async () => {
+  it('counts two queries in a row lost to unreplayable calls and runs the rest', async () => {
     const rehearsalRun = rehearse({ companies: 100, faults: { queryBreaks: [1, 2] } });
 
-    await expect(rehearsalRun.run()).rejects.toBeInstanceOf(ActivityFailure);
-
-    expect(rehearsalRun.finalized()).toMatchObject({
-      status: 'FAILED',
-      stats: { failure: { stage: 'query', errorType: 'BudgetOperationReplayError', control: true } },
-    });
-  });
-
-  it('still fails the run when signal enrichment loses every company to unreplayable operations', async () => {
-    const rehearsalRun = rehearse({ companies: 100, faults: { signalUnreplayable: 'all' } });
-
-    await expect(rehearsalRun.run()).rejects.toBeInstanceOf(ActivityFailure);
+    await rehearsalRun.run();
 
     expect(rehearsalRun.overruns()).toEqual([]);
     expect(rehearsalRun.finalized()).toMatchObject({
-      status: 'FAILED',
-      stats: { failure: { stage: 'signals', errorType: 'BudgetOperationReplayError', control: true } },
+      status: 'PARTIAL',
+      stats: { failures: 2, unreplayableSkips: { queries: 2 } },
+    });
+  });
+
+  it('finishes PARTIAL when signal enrichment loses every company to unreplayable operations', async () => {
+    const rehearsalRun = rehearse({ companies: 100, faults: { signalUnreplayable: 'all' } });
+
+    await rehearsalRun.run();
+
+    expect(rehearsalRun.overruns()).toEqual([]);
+    // Every company the stage reaches (its per-run cap is below the run's 100) is counted.
+    expect(rehearsalRun.finalized()).toMatchObject({
+      status: 'PARTIAL',
+      stats: { unreplayableSkips: { signals: 12 } },
     });
   });
 

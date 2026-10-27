@@ -1085,21 +1085,24 @@ describe('discoveryWorkflow queries that lost a provider to an unreplayable oper
     );
   });
 
-  it('fails the run when the activity reports the second such query in a row', async () => {
+  it('counts a second query lost the same way in a row and runs the rest of the plan', async () => {
     primeDiscovery();
     acts.loadPlanQueries.mockResolvedValue({ queries: [query(1), query(2), query(3)] });
-    const second = unreplayable();
-    acts.executeQuery.mockResolvedValueOnce(await lostQuery()).mockRejectedValueOnce(second);
+    acts.executeQuery.mockResolvedValueOnce(await lostQuery()).mockResolvedValueOnce(await lostQuery());
 
-    await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(second);
+    await discoveryWorkflow(discoveryInput());
 
-    expect(acts.executeQuery).toHaveBeenCalledTimes(2);
+    // A lost operation is a remnant of an earlier attempt, never evidence about the upstream now:
+    // the second such query in a row is counted like the first, and the plan goes on.
+    expect(acts.executeQuery).toHaveBeenCalledTimes(3);
     expect(handOffOf(1)).toBe(true);
+    expect(handOffOf(2)).toBe(true);
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
-        status: 'FAILED',
+        status: 'PARTIAL',
         stats: expect.objectContaining({
-          failure: { stage: 'query', errorType: 'BudgetOperationReplayError', control: true },
+          failures: 2,
+          unreplayableSkips: expect.objectContaining({ queries: 2 }),
         }),
       }),
     );

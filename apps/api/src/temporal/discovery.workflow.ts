@@ -297,8 +297,9 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     queryCount = queries.length;
     stage = 'query';
     // A query that lost a provider to an operation it cannot replay ends with a zero receipt
-    // and counts as failed; the plan goes on. The activity hears whether the query before did
-    // the same: a second such query in a row looks like an outage, and the activity fails it.
+    // and counts as failed; the plan goes on. The hand-off flag kept below is read by activity
+    // code from before 2026-10-28 only: a lost operation is a remnant of an earlier attempt, so a
+    // second query in a row is absorbed exactly like the first and never fails the run.
     let previousQueryUnreplayable = false;
     for (const [queryOrdinal, query] of queries.entries()) {
       // Named only when set, so histories recorded before the hand-off replay unchanged. The
