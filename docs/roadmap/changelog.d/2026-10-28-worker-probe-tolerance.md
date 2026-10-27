@@ -1,6 +1,6 @@
 ---
 date: 2026-10-28
-pr:
+pr: 683
 title: Drain the worker only after three consecutive dependency failures
 ---
 
