@@ -158,6 +158,23 @@ describe('PublicWebDiscoveryProvider search-first discovery (G3 5.3)', () => {
     });
   });
 
+  it('skips a domain this run already accepted before spending a model call', async () => {
+    const executionBroker = searchBroker([
+      { url: 'https://already-seen.example/', title: 'Pumpen Handel GmbH – Großhandel' },
+      { url: 'https://fresh.example/', title: 'Frische Pumpen AG – Kreiselpumpen Vertrieb' },
+    ]);
+    mocks.executeStructuredTaskWithRuntime.mockResolvedValue({
+      data: { is_company_site: true, name: 'Frische Pumpen AG', country: 'Germany' },
+      provider: 'gateway', model: 'model', runtimeExecution: {},
+    });
+
+    const result = await new PublicWebDiscoveryProvider({ gateway: {} as never, broker: executionBroker })
+      .discoverCompanies(distributorQuery(), CTX, { knownExternalIds: ['already-seen.example'] });
+
+    expect(mocks.executeStructuredTaskWithRuntime).toHaveBeenCalledOnce();
+    expect(result.records.map((record) => record.externalId)).toEqual(['fresh.example']);
+  });
+
   it('skips candidates with no usable search text without a model call', async () => {
     mocks.executeStructuredTaskWithRuntime.mockResolvedValue({
       data: { is_company_site: true, name: 'X' }, provider: 'gateway', model: 'model', runtimeExecution: {},

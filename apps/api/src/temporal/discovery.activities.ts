@@ -1090,6 +1090,27 @@ export function createDiscoveryActivities(deps: {
       const blockedDomains = sourcePolicies
         .filter((policy) => policy.reviewStatus === 'SUSPENDED')
         .map((policy) => policy.domain);
+      // Search overlap between a plan's queries is heavy: a site found by query 3 often shows up
+      // again for query 7, and judging it twice spends a model call to produce a record ingestion
+      // would discard. Hand the adapters what this run already accepted so they can skip those
+      // candidates before any model call (2026-10-28, run 7d70d81d: 32% of records were such
+      // duplicates).
+      const knownExternalIds = (
+        await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+          tx.rawSourceRecord.findMany({
+            where: {
+              runId: args.runId,
+              ingestStatus: 'ACCEPTED',
+              providerKey: { in: adapters.map((a) => a.key) },
+              externalId: { not: null },
+            },
+            select: { externalId: true },
+            distinct: ['externalId'],
+          }),
+        )
+      )
+        .map((row) => row.externalId)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0);
       const dispatched: PromiseSettledResult<ProviderExecution>[] = await Promise.allSettled(
         adapters.map(async (a) => {
           const durableReceipts: Array<{
@@ -1104,7 +1125,7 @@ export function createDiscoveryActivities(deps: {
               }
               durableReceipts.push({ producerId, receipt });
             },
-          }, { blockedDomains });
+          }, { blockedDomains, knownExternalIds });
           return { key: a.key, r, durableReceipts };
         }),
       );

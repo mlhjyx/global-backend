@@ -153,6 +153,9 @@ export class PublicWebDiscoveryProvider
       };
     }
     const blocked = new Set((opts?.blockedDomains ?? []).map((d) => d.toLowerCase()));
+    // Domains this run already accepted: search overlap across a plan's queries is heavy, and
+    // judging one again only spends model calls to produce a record ingestion would discard.
+    const known = new Set((opts?.knownExternalIds ?? []).map((d) => d.toLowerCase()));
     const searches = buildSearchQueries(query);
     const language = searchLanguageFor(query);
     const targetTlds = targetCountryTlds(query);
@@ -172,6 +175,7 @@ export class PublicWebDiscoveryProvider
       if (!domain) continue;
       if (NOISE_DOMAINS.some((n) => domain === n || domain.endsWith(`.${n}`))) continue;
       if (blocked.has(domain)) continue;
+      if (known.has(domain)) continue;
       if (isForeignCountryDomain(domain, targetTlds)) continue;
       const hits = candidates.get(domain) ?? [];
       if (hits.length < MAX_HITS_PER_DOMAIN && !hits.some((h) => h.url === r.url)) {

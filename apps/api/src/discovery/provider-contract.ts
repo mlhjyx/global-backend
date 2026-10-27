@@ -100,6 +100,11 @@ export interface ProviderCompanyRecord {
 export interface DiscoveryOptions {
   /** Source Registry 中被 SUSPENDED 的域名 —— 适配器必须在爬取前跳过（DAT-011）。 */
   blockedDomains?: string[];
+  /**
+   * 本次 run 已经接受过的 external id（对 public_web 即域名）：同一 run 的后面几条查询经常搜到同一批站点，
+   * 判站与抽取的模型调用因此重复。适配器在搜索之后、调用模型之前跳过这些候选（2026-10-28 提速）。
+   */
+  knownExternalIds?: string[];
 }
 
 /**
