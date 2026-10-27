@@ -25,7 +25,7 @@ describe('ReportController (BI-22)', () => {
       reportId: '99999999-9999-4999-8999-999999999999',
       week: '2026-W42',
       icpId: ICP,
-      csv: '﻿公司名\r\n',
+      csv: '\uFEFF公司名\r\n',
       rows: 4,
       withheld: { rights: 2, sanctions: 1, quarantined: 0 },
     }));
@@ -36,7 +36,7 @@ describe('ReportController (BI-22)', () => {
     const body = await controller.weekly(ctx, ICP, '2026-W42', response as never);
 
     expect(weekly).toHaveBeenCalledWith(ctx, { icpId: ICP, week: '2026-W42' });
-    expect(body).toBe('﻿公司名\r\n');
+    expect(body).toBe('\uFEFF公司名\r\n');
     expect(Object.fromEntries(headers)).toEqual({
       'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': `attachment; filename="weekly-report-2026-W42-${ICP}.csv"`,
@@ -56,5 +56,19 @@ describe('ReportController (BI-22)', () => {
     const response = { setHeader: vi.fn() };
     await expect(controller.weekly(ctx, 'bad', undefined, response as never)).rejects.toBe(failure);
     expect(response.setHeader).not.toHaveBeenCalled();
+  });
+
+  it('accepts the filled weekly CSV back as text with acquisition:review', async () => {
+    const recordFeedback = vi.fn(async () => ({ accepted: 2, rejected: [], skipped: 1 }));
+    const controller = new ReportController({ recordFeedback } as never);
+    const body = await controller.feedback(ctx, '\uFEFF线索 ID\r\n11111111-1111-4111-8111-111111111111\r\n');
+
+    expect(Reflect.getMetadata(METHOD_METADATA, ReportController.prototype.feedback)).toBe(RequestMethod.POST);
+    expect(Reflect.getMetadata(PATH_METADATA, ReportController.prototype.feedback)).toBe('weekly/feedback');
+    expect(Reflect.getMetadata(REQUIRED_SCOPES_METADATA, ReportController.prototype.feedback)).toEqual([
+      'acquisition:review',
+    ]);
+    expect(recordFeedback).toHaveBeenCalledWith(ctx, { csv: '\uFEFF线索 ID\r\n11111111-1111-4111-8111-111111111111\r\n' });
+    expect(body).toEqual({ data: { accepted: 2, rejected: [], skipped: 1 } });
   });
 });

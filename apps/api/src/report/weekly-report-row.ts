@@ -1,11 +1,15 @@
 import { clamp01 } from '../lead/scoring';
+import { deriveFitReasonCodes } from '../lead/reason-codes';
+import { leadSignals } from '../lead/lead-package';
+import { SUGGESTED_CONTACT_LEGAL_NOTE, suggestedContactPath } from '../lead/suggested-contact-path';
 import type { CsvValue } from './csv';
 
 /**
  * Columns of the BI-22 weekly report (design `docs/superpowers/plans/2026-10-10-lead-delivery-loop-design.md`
- * §5), Chinese headers as in the PRD weekly report. 为什么现在 / 原因码 / 注册地址 / 开发信草稿 stay
- * empty until L1–L3 / L5 / L6 fill them; the five customer columns stay last so the filled file can
- * come back through the feedback upload (BI-23) keyed by 线索 ID.
+ * §5), Chinese headers as in the PRD weekly report. 为什么现在 / 原因码 / 注册地址 are filled from the
+ * company's green facts (signals, deterministic reason codes, Impressum address); 开发信草稿 stays empty
+ * until the L5 draft task fills it. The five customer columns stay last so the filled file can come back
+ * through the feedback upload (BI-23) keyed by 线索 ID.
  */
 export const WEEKLY_REPORT_COLUMNS = Object.freeze([
   '公司名',
@@ -50,6 +54,9 @@ export type WeeklyReportSanctionsStatus = 'clear' | 'cleared_false_positive' | '
 export interface WeeklyReportRowInput {
   readonly leadId: string;
   readonly fitVerdict: string | null;
+  /** lead.scoreDetail / lead.queue feed the deterministic reason codes (BI-20). */
+  readonly scoreDetail?: unknown;
+  readonly queue?: string | null;
   readonly totalScore: number | null;
   /** lead.scores as scoring writes it: `{fit, role, intent, dataQuality, reachability, engagement}`. */
   readonly scores: unknown;
@@ -92,6 +99,8 @@ const CONTACT_PATHS: readonly (readonly [kind: string, label: string])[] = Objec
   ['linkedin_company_page', 'LinkedIn 公司页'],
   ['x_company_account', 'X 账号'],
 ]);
+
+const CONTACT_LABELS: ReadonlyMap<string, string> = new Map(CONTACT_PATHS);
 
 const SANCTIONS_LABELS: Readonly<Record<WeeklyReportSanctionsStatus, string>> = Object.freeze({
   clear: '已筛查，无命中',
@@ -168,6 +177,22 @@ export function weeklyReportRow(input: WeeklyReportRowInput): readonly CsvValue[
   ];
   const tradeRole = text(profile.trade_role);
   const verdict = input.fitVerdict ?? '';
+  const whyNow = leadSignals(attributes)
+    .map((signal) => `${signal.at.slice(0, 10)} ${signal.type}${signal.url ? ` ${signal.url}` : ''}`)
+    .join('\n');
+  const reasonCodes = deriveFitReasonCodes({
+    fitVerdict: input.fitVerdict,
+    queue: input.queue,
+    scores: input.scores,
+    scoreDetail: input.scoreDetail,
+  }).join('; ');
+  const suggested = suggestedContactPath(input.contactPoints);
+  const suggestedLine = suggested
+    ? `建议联系路径（${CONTACT_LABELS.get(suggested.kind) ?? suggested.kind}）：${suggested.url}（${SUGGESTED_CONTACT_LEGAL_NOTE}）`
+    : '';
+  const pathLines = points.map(
+    (point) => `${point.label}：${point.value}${point.status === 'VALID' ? '（已人工确认）' : ''}`,
+  );
   const row: CsvValue[] = [
     input.company.name,
     input.company.domain ?? '',
@@ -179,15 +204,15 @@ export function weeklyReportRow(input: WeeklyReportRowInput): readonly CsvValue[
     carried.other,
     text(profile.register_key),
     text(profile.vat_id),
-    '', // 为什么现在: signals (L1 links them to domain-keyed companies)
+    whyNow,
     ...SCORE_KEYS.map((key) => decimal(scores[key])),
     decimal(input.totalScore),
     labelOf(FIT_VERDICT_LABELS, verdict),
-    '', // 原因码: reason codes (L2)
+    reasonCodes,
     evidenceLinks.join('\n'),
-    points.map((point) => `${point.label}：${point.value}${point.status === 'VALID' ? '（已人工确认）' : ''}`).join('\n'),
-    '', // 注册地址: Impressum registered address (L6)
-    '', // 开发信草稿: first-contact draft (L5)
+    [...pathLines, ...(suggestedLine ? [suggestedLine] : [])].join('\n'),
+    text(profile.registered_address),
+    '', // 开发信草稿: first-contact draft (L5 task, not generated in this PR)
     SANCTIONS_LABELS[input.sanctionsStatus],
     input.validUntil ? input.validUntil.slice(0, 10) : '',
     input.runCost?.chargedMicrousd == null ? '' : formatMicrousd(input.runCost.chargedMicrousd),

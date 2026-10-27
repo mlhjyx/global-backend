@@ -8,6 +8,7 @@
 
 import { clamp01 } from './scoring';
 import { leadQueueBasis, type LeadQueueBasis } from './lead-queue-basis';
+import type { LeadPackage } from './lead-package';
 
 export const LEAD_QUALIFIED_SCHEMA_VERSION = 1;
 /**
@@ -111,6 +112,25 @@ export interface LeadQualifiedSnapshotV1 {
   scored_at: string | null;
   /** 接受时这条线索所在队列的依据（lead-queue-basis.ts）。**可选字段**（同上）。 */
   queue_basis: LeadQueueBasis;
+  /**
+   * BI-19/BI-21/BI-15 交付事实（交付闭环设计 §3）：公司画像、扩展标识、公司级联系路径与
+   * 建议联系路径、最近信号、证据 URL、Fit 原因码。**可选字段**，v1 加字段，snapshot_version 仍 1；
+   * 旧载荷（缺这些键）仍通过新 schema。开发信草稿是销售底稿，不进事件。
+   */
+  company_profile?: {
+    trade_role: string | null;
+    trade_role_confidence: number | null;
+    own_manufacturing: boolean | null;
+    carried_brands: Array<{ name: string; country: string | null }>;
+    carries_chinese_brand: boolean | null;
+    carries_foreign_brand: boolean | null;
+  };
+  identifiers_ext?: { register_key: string | null; vat_id: string | null };
+  company_contact_points?: Array<{ kind: string; url: string; status: string }>;
+  suggested_contact_path?: { kind: string; url: string; legal_note: string } | null;
+  signals?: Array<{ type: string; at: string; url: string | null }>;
+  evidence_urls?: Array<{ field: string; source_url: string; fetched_at: string }>;
+  fit_reason_codes?: string[];
 }
 
 export interface LeadQualifiedSnapshotInput {
@@ -170,10 +190,15 @@ export interface LeadQualifiedSnapshotInput {
       contactPoints: Array<{ status: string }>;
     }>;
   };
+  /**
+   * 交付读模型（设计 §2/§3）：调用方（decide）在同一事务里组装后传入，快照挑其公司级字段写入
+   * 可选键。缺省时旧载荷形状不变（旧调用方/测试非破坏）。
+   */
+  delivery?: LeadPackage;
 }
 
 /** attributes 按源命名空间取标识符（attributes.gleif.lei / attributes.fda.registration_number），缺省 null。 */
-function extractIdentifiers(attributes: unknown): { lei: string | null; fda_reg: string | null } {
+export function extractIdentifiers(attributes: unknown): { lei: string | null; fda_reg: string | null } {
   const attrs = (attributes ?? {}) as Record<string, unknown>;
   const gleif = (attrs.gleif ?? {}) as Record<string, unknown>;
   const fda = (attrs.fda ?? {}) as Record<string, unknown>;
@@ -315,11 +340,47 @@ export function buildLeadQualifiedSnapshot(input: LeadQualifiedSnapshotInput): L
     valid_until: computeValidUntil(input.evidence ?? [], company.attributes),
     scored_at: isoOrNull(lead.scoredAt),
     queue_basis: leadQueueBasis(lead, input.humanRejected === true),
+    ...(input.delivery
+      ? {
+          company_profile: {
+            trade_role: input.delivery.company_profile.trade_role,
+            trade_role_confidence: input.delivery.company_profile.trade_role_confidence,
+            own_manufacturing: input.delivery.company_profile.own_manufacturing,
+            carried_brands: input.delivery.company_profile.carried_brands.map((brand) => ({
+              name: brand.name,
+              country: brand.country,
+            })),
+            carries_chinese_brand: input.delivery.company_profile.carries_chinese_brand,
+            carries_foreign_brand: input.delivery.company_profile.carries_foreign_brand,
+          },
+          identifiers_ext: {
+            register_key: input.delivery.identifiers.register_key,
+            vat_id: input.delivery.identifiers.vat_id,
+          },
+          company_contact_points: input.delivery.contact_points.map((point) => ({
+            kind: point.kind,
+            url: point.url,
+            status: point.status,
+          })),
+          suggested_contact_path: input.delivery.suggested_contact_path,
+          signals: input.delivery.signals.map((signal) => ({
+            type: signal.type,
+            at: signal.at,
+            url: signal.url,
+          })),
+          evidence_urls: input.delivery.evidence.map((row) => ({
+            field: row.field,
+            source_url: row.source_url,
+            fetched_at: row.fetched_at,
+          })),
+          fit_reason_codes: [...input.delivery.fit.reason_codes],
+        }
+      : {}),
   };
 }
 
-/** Date 或 ISO 串 → ISO 串；缺省/不可解析 → null（不注入 Invalid Date）。 */
-function isoOrNull(value: Date | string | null | undefined): string | null {
+/** Date 或 ISO 串 → ISO 串；缺省/不可解析 → null（不注入 Invalid Date）。快照与读模型共用。 */
+export function isoOrNull(value: Date | string | null | undefined): string | null {
   if (value == null) return null;
   const ms = value instanceof Date ? value.getTime() : Date.parse(value);
   return Number.isFinite(ms) ? new Date(ms).toISOString() : null;

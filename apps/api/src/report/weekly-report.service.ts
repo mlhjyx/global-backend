@@ -11,6 +11,7 @@ import { exportRightsContextForLead } from '../compliance/data-rights.context';
 import { DataRightsService, type PolicyDecisionEntry } from '../compliance/data-rights.service';
 import type { DataRightsDecision } from '../compliance/data-rights.types';
 import { isSyntheticDiscoveryProvenance } from '../discovery/evidence-license';
+import { reachableCompanyContactPoints } from '../discovery/company-contact-points';
 import { canonicalizeSuppressionValue, canonicalizeSuppressionValues } from '../discovery/suppression-value';
 import { computeValidUntil } from '../lead/lead-qualified-snapshot';
 import { PrismaService } from '../prisma/prisma.service';
@@ -29,6 +30,7 @@ import {
   type WeeklyReportRowInput,
   type WeeklyReportSanctionsStatus,
 } from './weekly-report-row';
+import { parseWeeklyFeedbackCsv, type FeedbackRejectionReason } from './weekly-feedback';
 
 /** A week's accepted leads are reviewed by hand; more than this is refused, never truncated. */
 export const WEEKLY_REPORT_MAX_LEADS = 1_000;
@@ -62,11 +64,22 @@ export interface WeeklyReport {
   };
 }
 
+export interface WeeklyFeedbackResult {
+  /** Rows appended to lead_outcome for leads of this workspace. */
+  readonly accepted: number;
+  /** Rows refused, with their line in the uploaded file and a stable reason. */
+  readonly rejected: readonly { readonly line: number; readonly reason: FeedbackRejectionReason | 'UNKNOWN_LEAD' }[];
+  /** Rows with no customer column filled (the untouched template lines). */
+  readonly skipped: number;
+}
+
 type Tx = Prisma.TransactionClient;
 interface ReportLead {
   id: string;
   canonicalCompanyId: string;
   fitVerdict: string | null;
+  scoreDetail: Prisma.JsonValue;
+  queue: string;
   totalScore: number | null;
   scores: Prisma.JsonValue;
   /** The latest decision only (ordered newest first, take 1). */
@@ -205,6 +218,79 @@ export class WeeklyReportService {
     };
   }
 
+  /**
+   * BI-23（设计 §6）：客户填好的周报 CSV 原样上传回来。按线索 ID 匹配本工作区的线索，
+   * 逐行校验后只追加写 `lead_outcome`（source = customer）。空行跳过，坏行计数拒绝；
+   * 文件缺「线索 ID」列时整份拒绝，不做部分解析。
+   */
+  async recordFeedback(
+    ctx: RequestContext,
+    request: { readonly csv?: unknown },
+  ): Promise<WeeklyFeedbackResult> {
+    if (typeof request.csv !== 'string' || request.csv.length === 0) {
+      throw invalid('csv must be a non-empty text/csv body');
+    }
+    const parsed = parseWeeklyFeedbackCsv(request.csv);
+    if (parsed.fatal === 'FEEDBACK_TOO_LARGE') {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'FEEDBACK_TOO_LARGE',
+          message: 'the uploaded CSV has more rows than one weekly export can carry',
+        },
+      });
+    }
+    if (parsed.fatal !== null) {
+      throw new BadRequestException({
+        error: {
+          code: parsed.fatal,
+          message: 'the uploaded CSV must carry the 线索 ID column of the weekly export',
+        },
+      });
+    }
+    if (parsed.rows.length === 0) {
+      return { accepted: 0, rejected: parsed.rejected, skipped: parsed.skipped };
+    }
+    return this.prisma.withWorkspace(
+      ctx.workspaceId,
+      async (tx) => {
+        // UUIDs compare case-insensitively in Postgres but the rows come back lower-case: normalise
+        // before matching, so an upper-cased id in a spreadsheet still finds its lead.
+        const leadIds = [...new Set(parsed.rows.map((row) => row.leadId.toLowerCase()))];
+        // Feedback is about delivered leads: the lead must have been accepted at least once, so a
+        // crafted file cannot attach outcomes to never-delivered leads — while a lead re-decided
+        // after its week was exported keeps its feedback.
+        const leads = await tx.lead.findMany({
+          where: { id: { in: leadIds }, decisions: { some: { action: 'accept' } } },
+          select: { id: true },
+        });
+        const known = new Set(leads.map((lead) => lead.id.toLowerCase()));
+        const accepted = parsed.rows.filter((row) => known.has(row.leadId.toLowerCase()));
+        const rejected = [
+          ...parsed.rejected,
+          ...parsed.rows
+            .filter((row) => !known.has(row.leadId.toLowerCase()))
+            .map((row) => ({ line: row.line, reason: 'UNKNOWN_LEAD' as const })),
+        ].sort((left, right) => left.line - right.line);
+        if (accepted.length > 0) {
+          await tx.leadOutcome.createMany({
+            data: accepted.map((row) => ({
+              workspaceId: ctx.workspaceId,
+              leadId: row.leadId.toLowerCase(),
+              relevance: row.relevance,
+              willingToContact: row.willingToContact,
+              reasonCode: row.reasonCode,
+              note: row.note,
+              contacted: row.contacted,
+              source: 'customer',
+            })),
+          });
+        }
+        return { accepted: accepted.length, rejected, skipped: parsed.skipped };
+      },
+      TRANSACTION,
+    );
+  }
+
   /** The week's delivered leads and their facts; null when the week has none. */
   private async read(tx: Tx, workspaceId: string, icpId: string, range: IsoWeekRange) {
     const icp = await tx.icpDefinition.findUnique({ where: { id: icpId }, select: { id: true } });
@@ -223,6 +309,8 @@ export class WeeklyReportService {
         id: true,
         canonicalCompanyId: true,
         fitVerdict: true,
+        scoreDetail: true,
+        queue: true,
         totalScore: true,
         scores: true,
         decisions: {
@@ -288,10 +376,12 @@ export class WeeklyReportService {
         ...weeklyReportRow({
           leadId: lead.id,
           fitVerdict: lead.fitVerdict,
+          scoreDetail: lead.scoreDetail,
+          queue: lead.queue,
           totalScore: lead.totalScore,
           scores: lead.scores,
           company,
-          contactPoints: facts.contactPoints.get(company.id) ?? [],
+          contactPoints: facts.reachablePoints(company),
           sanctionsStatus: sanctions.status,
           validUntil: computeValidUntil(freshness, company.attributes),
           runCost: facts.runCosts.get(company.id) ?? null,
@@ -349,10 +439,17 @@ export class WeeklyReportService {
       'company_name',
       suppressions.filter((row) => row.type === 'company_name').map((row) => row.value),
     );
+    const pointsByCompany = groupBy(contactPoints, (row) => row.companyId);
     return {
       companies: new Map(companies.map((company) => [company.id, company])),
       evidence: groupBy(evidence, (row) => row.entityId),
-      contactPoints: groupBy(contactPoints, (row) => row.companyId),
+      contactPoints: pointsByCompany,
+      /**
+       * The company's contact paths as the delivered read models see them: a link on a
+       * suppressed host (or a parent domain of one) is never exported or suggested.
+       */
+      reachablePoints: (company: ReportCompany) =>
+        reachableCompanyContactPoints(pointsByCompany.get(company.id) ?? [], suppressions, company),
       screenings: new Map<string, PriorScreening>(screenings.map((row) => [row.canonicalCompanyId, row])),
       /** Same canonical keys as the accept-time suppression check (companyMatchesSuppression). */
       isListed: (company: ReportCompany): boolean => {
