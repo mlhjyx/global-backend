@@ -488,7 +488,12 @@ export async function checkSiteBuildSettlementReadbackReadiness(
         gatewayOrigin: new URL(configured).origin,
         readerCredential,
         resolverId: NEW_API_REQUEST_BOUND_RESOLVER_ID,
-        maximumProbeDurationMs: 2_000,
+        // Under model load the settlement endpoint answered well inside 10 ms in
+        // production, yet a two-second ceiling timed out once on 2026-10-27 and the
+        // worker treats a failed probe as a lost dependency. Five seconds keeps the
+        // probe inside the worker's ten-second heartbeat while leaving room for a
+        // loaded host to answer.
+        maximumProbeDurationMs: 5_000,
       },
       { fetch: fetcher },
     );
