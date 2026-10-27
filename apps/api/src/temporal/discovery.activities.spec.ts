@@ -3669,11 +3669,14 @@ describe("尽力而为的阶段：无法重放的公司跳过并计数", () => {
     expect(enricher.enrichCompany).toHaveBeenCalledTimes(2);
   });
 
-  it("signals still stop when two companies in a row cannot be replayed", async () => {
-    const second = unreplayable("op-2");
+  it("signals absorb every company whose operation cannot be replayed, even in a row", async () => {
     const enricher = {
       key: "digital_footprint",
-      enrichCompany: vi.fn().mockRejectedValueOnce(unreplayable("op-1")).mockRejectedValueOnce(second),
+      enrichCompany: vi
+        .fn()
+        .mockRejectedValueOnce(unreplayable("op-1"))
+        .mockRejectedValueOnce(unreplayable("op-2"))
+        .mockResolvedValueOnce({ matched: false } as EnrichmentResult),
     };
     const deps = await withMatchCompanies(makeEnrichDeps([enricher]), ["c1", "c2", "c3"]);
 
@@ -3681,7 +3684,8 @@ describe("尽力而为的阶段：无法重放的公司跳过并计数", () => {
       createDiscoveryActivities(deps).enrichSignalsRun(
         discoveryArgs("run-signal-unreplayable-twice", { icpId: "icp-1" }),
       ),
-    ).rejects.toBe(second);
+    ).resolves.toMatchObject({ unreplayable: 2, enriched: 1, skippedSubjects: 0 });
+    expect(enricher.enrichCompany).toHaveBeenCalledTimes(3);
   });
 
   it("signals absorb unreplayable companies that an enriched company separates", async () => {
@@ -3742,9 +3746,10 @@ describe("尽力而为的阶段：无法重放的公司跳过并计数", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("watch registration still stops when two companies in a row cannot be replayed", async () => {
-    const second = unreplayable("op-2");
-    const invoke = vi.fn().mockRejectedValueOnce(unreplayable("op-1")).mockRejectedValueOnce(second);
+  it("watch registration absorbs every company whose sitemap read cannot be replayed", async () => {
+    const invoke = vi.fn().mockRejectedValueOnce(unreplayable("op-1")).mockRejectedValueOnce(
+      unreplayable("op-2"),
+    );
     const deps = await withMatchCompanies(watchDeps(invoke), ["c1", "c2"]);
     await deps.prisma.withWorkspace("ws", async (tx) => {
       tx.fieldEvidence!.findMany = async () => [];
@@ -3754,7 +3759,7 @@ describe("尽力而为的阶段：无法重放的公司跳过并计数", () => {
       createDiscoveryActivities(deps as never).registerWatchesForRun(
         discoveryArgs("run-watch-unreplayable-twice", { icpId: "icp-1" }) as never,
       ),
-    ).rejects.toBe(second);
+    ).resolves.toEqual({ candidates: 2, registered: 0, skippedSubjects: 0, unreplayable: 2 });
   });
 });
 
@@ -4311,22 +4316,22 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
     ).resolves.toMatchObject({ profiled: 1, unreplayable: 1, previousUnreplayable: false, nextIndex: null });
   });
 
-  it("still stops when two companies in a row cannot be replayed", async () => {
-    const second = new BudgetOperationReplayError("op-2");
+  it("absorbs every company whose profile cannot be replayed, even in a row", async () => {
     const profile = vi
       .fn()
       .mockRejectedValueOnce(new BudgetOperationReplayError("op-1"))
-      .mockRejectedValueOnce(second);
+      .mockRejectedValueOnce(new BudgetOperationReplayError("op-2"))
+      .mockResolvedValue(PROFILE);
     const { acts } = await makeProfileDeps(profile, { companies: ["c1", "c2", "c3"], now: () => 0 });
 
     await expect(
       acts.profileWebsitesForRun(discoveryArgs("run-profile-unreplayable-twice", { icpId: "icp-1" })),
-    ).rejects.toBe(second);
+    ).resolves.toMatchObject({ profiled: 1, unreplayable: 2, nextIndex: null });
+    expect(profile).toHaveBeenCalledTimes(3);
   });
 
-  it("stops on an unreplayable company that follows the one the previous pass ended on", async () => {
-    const second = new BudgetOperationReplayError("op-2");
-    const profile = vi.fn().mockRejectedValueOnce(second);
+  it("absorbs an unreplayable company that follows the one the previous pass ended on", async () => {
+    const profile = vi.fn().mockRejectedValueOnce(new BudgetOperationReplayError("op-2"));
     const { acts } = await makeProfileDeps(profile, { companies: ["c1", "c2"], now: () => 0 });
 
     await expect(
@@ -4337,7 +4342,7 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
           previousUnreplayable: true,
         }),
       ),
-    ).rejects.toBe(second);
+    ).resolves.toMatchObject({ profiled: 0, unreplayable: 1, previousUnreplayable: true });
   });
 
   it("tells the next pass that it ended on an unreplayable company", async () => {
@@ -5779,21 +5784,22 @@ describe("executeQuery —— a provider whose operation cannot be replayed ends
     expect(result).not.toHaveProperty("unreplayable");
   });
 
-  it("fails the query instead when the query before lost a provider the same way", async () => {
-    const error = lost();
+  it("absorbs an unreplayable provider even when the query before lost one the same way", async () => {
     const activities = createDiscoveryActivities(
       makeDeps([
         lineageAdapter(async () => {
-          throw error;
+          throw lost();
         }),
       ]),
     );
 
+    // A lost operation is a remnant of an earlier attempt; it says nothing about the upstream now,
+    // so even the second query in a row answers with a zero receipt instead of failing the run.
     await expect(
       activities.executeQuery(
         discoveryArgs("run-lost-twice", { query: QUERY, previousQueryUnreplayable: true }),
       ),
-    ).rejects.toBe(error);
+    ).resolves.toMatchObject({ rawCount: 0, unreplayable: true });
   });
 
   it("rejects a hand-off flag that is not a boolean before any call", async () => {
@@ -5970,7 +5976,8 @@ describe("executeQuery —— term normalization: keyed per query, skipped when 
   // Seller #26, run 3e78eb4e (xin, 2026-10-13 11:36 UTC): the taxonomy model answered 503 on
   // the first query and the gateway settled the operation without a result. Its key held only
   // run, task, prompt and schema, so every later query that shared the term met the dead
-  // operation on its first attempt, and the second one in a row failed the run.
+  // operation on its first attempt; the second one in a row then failed the run (replay remnants
+  // are absorbed per query since 2026-10-28, the keying fix here is what this suite pins).
   const TERMS = { industry: "pump", country: "Germany" };
   const query = { ...QUERY, filters: TERMS };
   type TaxonomyOptions = { correlationId?: string; allowLlm?: boolean };

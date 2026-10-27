@@ -567,11 +567,16 @@ function isContinuationIndex(value: unknown, limit: number): boolean {
 }
 
 /**
- * The best-effort per-company passes (website profile, signals, watches) skip a company whose
- * operation cannot be replayed and count it instead of failing the run. Such an operation's wire
- * already ran and left no durable result (an artifact that could not be stored, a call settled
- * without a result), so it is never retried: retrying could pay twice. A second such company in a
- * row looks like a storage or upstream outage rather than one bad page, and still stops the pass.
+ * The best-effort per-company passes (website profile, signals, watches) and the query stage skip
+ * an operation that cannot be replayed and count it instead of failing the run. Such an operation's
+ * wire already ran and left no durable result (an artifact that could not be stored, a call settled
+ * without a result), so it is never retried: retrying could pay twice.
+ *
+ * Such a remnant is always a leftover of an earlier attempt — an attempt that died before the
+ * operation got a durable result — so it says nothing about the upstream right now, and two in a
+ * row are just two such attempts, not an outage: they are counted like any other skip. (The fit
+ * pass has always read them this way.) Whether the upstream is healthy is judged by the control
+ * errors of the current attempt, which wait and stop for the lease instead of failing the run.
  */
 function isUnreplayableOperation(error: unknown): error is BudgetOperationReplayError {
   return error instanceof BudgetOperationReplayError;
@@ -989,12 +994,10 @@ export function createDiscoveryActivities(deps: {
       // result, the way a retry finds the call a broken attempt left behind) answers this query
       // with nothing instead of failing it: the query still ends with its receipt, which the
       // materialization admission requires for every plan query, and the workflow counts it.
-      // A second query in a row looks like an outage and still fails.
-      const lostOnReplay = (error: unknown): boolean => {
-        if (!isUnreplayableOperation(error)) return false;
-        if (args.previousQueryUnreplayable) throw error;
-        return true;
-      };
+      // The hand-off flag stays on the wire for older workflow histories, but a lost operation is
+      // a remnant of an earlier attempt, never evidence about the upstream now, so a second query
+      // in a row is absorbed exactly like the first.
+      const lostOnReplay = (error: unknown): boolean => isUnreplayableOperation(error);
       // The model is worth calling only for a source that reads the resolved codes (wikidata,
       // openstreetmap); a query routed to public_web or the registries alone keeps the
       // deterministic alias lookup. The model operation is keyed per query, not per run, and a
@@ -2277,7 +2280,7 @@ export function createDiscoveryActivities(deps: {
         } catch (error) {
           if (artifactSubjectSkipReason(error)) {
             subjectDenied = true;
-          } else if (isUnreplayableOperation(error) && !previousUnreplayable) {
+          } else if (isUnreplayableOperation(error)) {
             unreplayableSkip = true;
           } else if (isExecutionControlError(error)) {
             // An unavailable model upstream makes the next attempt wait instead of retrying within
@@ -2488,7 +2491,6 @@ export function createDiscoveryActivities(deps: {
       let unreplayable = 0;
       let transportFailed = 0;
       let skippedForLease = 0;
-      let previousUnreplayable = false;
       const nowMs = Date.now();
       const lease = await readRunLease(binding);
       const signalCompanies = companies.slice(0, SIGNAL_ENRICH_LIMIT);
@@ -2541,7 +2543,6 @@ export function createDiscoveryActivities(deps: {
         let subjectDenied = false;
         let unreplayableSkip = false;
         let transportLost = false;
-        let attempted = false;
         for (const e of enrichers) {
           const prev = existing[e.key] as { _ts?: string } | undefined;
           if (prev?._ts && nowMs - Date.parse(prev._ts) < SIGNAL_TTL_MS) continue; // TTL 新鲜 → 跳过（不刷）
@@ -2551,7 +2552,6 @@ export function createDiscoveryActivities(deps: {
             ))
           )
             break;
-          attempted = true;
           try {
             const r = await e.enrichCompany(
               {
@@ -2573,7 +2573,7 @@ export function createDiscoveryActivities(deps: {
               subjectDenied = true;
               break;
             }
-            if (isUnreplayableOperation(error) && !previousUnreplayable) {
+            if (isUnreplayableOperation(error)) {
               unreplayableSkip = true;
               break;
             }
@@ -2590,7 +2590,6 @@ export function createDiscoveryActivities(deps: {
             /* 单信号源失败不影响其余 */
           }
         }
-        if (attempted) previousUnreplayable = unreplayableSkip;
         if (unreplayableSkip) unreplayable += 1;
         else if (subjectDenied) skippedSubjects += 1;
         else {
@@ -2695,7 +2694,6 @@ export function createDiscoveryActivities(deps: {
       let registered = 0;
       let skippedSubjects = 0;
       let unreplayable = 0;
-      let previousUnreplayable = false;
       let skippedForLease = 0;
       const lease = await readRunLease(binding);
       const watchCompanies = companies.slice(0, WATCH_REGISTER_LIMIT);
@@ -2719,21 +2717,17 @@ export function createDiscoveryActivities(deps: {
             executionBudget: binding,
           });
           registered += 1;
-          previousUnreplayable = false;
         } catch (error) {
           // G3 5.5：sitemap 抓取挂在这家公司名下；主体被拒 → 跳过这家（计入 PARTIAL）。
           if (artifactSubjectSkipReason(error)) {
             skippedSubjects += 1;
-            previousUnreplayable = false;
             continue;
           }
-          if (isUnreplayableOperation(error) && !previousUnreplayable) {
+          if (isUnreplayableOperation(error)) {
             unreplayable += 1;
-            previousUnreplayable = true;
             continue;
           }
           if (isExecutionControlError(error)) throw error;
-          previousUnreplayable = false;
           /* 单家注册失败（无域名/sitemap 不可达/DAT-011）不影响其余 */
         }
       }
