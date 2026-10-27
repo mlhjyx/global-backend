@@ -1,6 +1,6 @@
 ---
 date: 2026-10-28
-pr:
+pr: 686
 title: Skip a company this run already accepted before calling the model again
 ---
 
