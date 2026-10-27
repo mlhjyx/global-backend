@@ -46,6 +46,9 @@ function leadRow(id: string, companyId: string, overrides: Record<string, unknow
     id,
     canonicalCompanyId: companyId,
     fitVerdict: 'match',
+    fitReasons: null,
+    scoreDetail: null,
+    queue: 'recommended',
     totalScore: 0.8,
     scores: { fit: 0.9, role: 0.8, intent: 0.2, dataQuality: 0.7, reachability: 1, engagement: 0 },
     // The lead's latest decision, as the report selects it.
@@ -289,7 +292,9 @@ describe('WeeklyReportService (BI-22)', () => {
       制裁状态: '未筛查（筛查未启用）',
       // green evidence fetched 2026-10-10 + 180 days.
       有效期至: '2027-04-08',
-      联系路径: '联系页：https://company-01.example/kontakt',
+      联系路径:
+        '联系页：https://company-01.example/kontakt\n' +
+        '建议联系路径（联系页）：https://company-01.example/kontakt（官网公开入口，未验证投递；首次联系请用询盘表单或电话说明来意，邮件广告需事先同意）',
     });
     expect(loggedDecisions(tx)).toEqual([
       expect.objectContaining({

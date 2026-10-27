@@ -9070,6 +9070,150 @@
         ]
       }
     },
+    "/api/v1/leads/{leadId}/package": {
+      "get": {
+        "operationId": "LeadController_leadPackage_v1",
+        "parameters": [
+          {
+            "name": "leadId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "LeadPackage（设计 §2）"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "交付读模型 LeadPackage：公司事实、建议联系路径、信号、证据 URL、原因码（不含具名联系人）",
+        "tags": [
+          "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ]
+      }
+    },
+    "/api/v1/leads/{leadId}/outcomes": {
+      "post": {
+        "operationId": "LeadController_recordOutcome_v1",
+        "parameters": [
+          {
+            "name": "leadId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeadOutcomeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "新建的 lead_outcome 行"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "空反馈、原因码不在枚举或备注超长",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "OUTCOME_EMPTY",
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "回写线索结果（BI-23）：只追加，客户或运营填写相关性/意愿/原因码/备注/是否已联系",
+        "tags": [
+          "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
+        ]
+      }
+    },
     "/api/v1/leads/{leadId}/accept": {
       "post": {
         "operationId": "LeadController_accept_v1",
@@ -9429,6 +9573,42 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "reject 缺少原因码或原因码不在枚举（BI-20）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "REASON_CODE_REQUIRED",
+                            "INVALID_REASON_CODE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -9713,6 +9893,151 @@
         "x-required-scopes": [
           "acquisition:read",
           "acquisition:export"
+        ]
+      }
+    },
+    "/api/v1/reports/weekly/feedback": {
+      "post": {
+        "operationId": "ReportController_feedback_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "description": "导出的周报 CSV 原样上传（客户填写五列）",
+          "content": {
+            "text/csv": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "接受与拒绝计数（拒绝行带文件内行号与稳定原因）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "accepted",
+                    "rejected",
+                    "skipped"
+                  ],
+                  "properties": {
+                    "accepted": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "skipped": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "rejected": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "line",
+                          "reason"
+                        ],
+                        "properties": {
+                          "line": {
+                            "type": "integer"
+                          },
+                          "reason": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "缺「线索 ID」列或请求体不是 CSV 文本",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FEEDBACK_HEADER_MISSING",
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "上传文件的行数超过一次导出可能包含的上限，整份拒绝而不截断",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FEEDBACK_TOO_LARGE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "周报反馈上传（BI-23）：按线索 ID 匹配，逐行校验，只追加写 lead_outcome；返回接受/拒绝/跳过计数",
+        "tags": [
+          "Reports"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
         ]
       }
     },
@@ -16229,9 +16554,77 @@
           "reasonCode"
         ]
       },
+      "LeadOutcomeDto": {
+        "type": "object",
+        "properties": {
+          "relevance": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 5,
+            "description": "客户判断：相关性 1–5"
+          },
+          "willingToContact": {
+            "type": "boolean",
+            "description": "客户判断：是否愿意联系"
+          },
+          "reasonCode": {
+            "type": "string",
+            "enum": [
+              "NOT_TARGET_ROLE",
+              "WRONG_PRODUCT",
+              "TOO_SMALL",
+              "TOO_LARGE",
+              "ALREADY_KNOWN",
+              "NO_IMPORT_SIGNAL",
+              "WRONG_COUNTRY",
+              "BAD_CONTACT_PATH",
+              "DUPLICATE",
+              "OTHER",
+              "GOOD_FIT",
+              "WILL_FOLLOW_UP"
+            ],
+            "description": "失败/未达成或正向结果原因码"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "客户备注（自由文本）"
+          },
+          "contacted": {
+            "type": "boolean",
+            "description": "客户判断：是否已联系"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "customer",
+              "operator"
+            ],
+            "description": "反馈来源；默认 operator"
+          }
+        }
+      },
       "AcceptLeadDto": {
         "type": "object",
         "properties": {
+          "reasonCode": {
+            "type": "string",
+            "enum": [
+              "NOT_TARGET_ROLE",
+              "WRONG_PRODUCT",
+              "TOO_SMALL",
+              "TOO_LARGE",
+              "ALREADY_KNOWN",
+              "NO_IMPORT_SIGNAL",
+              "WRONG_COUNTRY",
+              "BAD_CONTACT_PATH",
+              "DUPLICATE",
+              "OTHER",
+              "GOOD_FIT",
+              "WILL_FOLLOW_UP"
+            ],
+            "description": "接受原因码（可选，如 GOOD_FIT）"
+          },
           "reason": {
             "type": "string"
           }
@@ -16240,9 +16633,25 @@
       "RejectLeadDto": {
         "type": "object",
         "properties": {
+          "reasonCode": {
+            "type": "string",
+            "enum": [
+              "NOT_TARGET_ROLE",
+              "WRONG_PRODUCT",
+              "TOO_SMALL",
+              "TOO_LARGE",
+              "ALREADY_KNOWN",
+              "NO_IMPORT_SIGNAL",
+              "WRONG_COUNTRY",
+              "BAD_CONTACT_PATH",
+              "DUPLICATE",
+              "OTHER"
+            ],
+            "description": "BI-20 拒绝原因码（必填；自由文本放 reason）"
+          },
           "reason": {
             "type": "string",
-            "description": "拒绝原因（回流做评分质量反馈）"
+            "description": "拒绝原因备注（自由文本，回流做评分质量反馈）"
           }
         }
       },

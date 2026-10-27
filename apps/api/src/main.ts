@@ -100,6 +100,8 @@ async function bootstrap(): Promise<void> {
   // Exact signed-body parser and no-store boundary precede Nest's JSON parser
   // and all guards. Never expose compact JWS through enumerable request.body.
   installPlatformRevocationHttpBoundary(app);
+  // BI-23: the filled weekly CSV comes back as text/csv (never JSON), bounded and not parsed as JSON.
+  app.useBodyParser('text', { type: ['text/csv', 'application/csv'], limit: '5mb' });
   // Express 5 defaults to the simple query parser. Preserve the existing
   // nested-query contract while using the patched qs release from its tree.
   app.set('query parser', 'extended');

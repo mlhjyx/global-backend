@@ -2173,8 +2173,11 @@ model Lead {
 
   canonicalCompany CanonicalCompany @relation(fields: [canonicalCompanyId], references: [id], onDelete: Cascade)
   decisions        LeadDecision[]
+  outcomes         LeadOutcome[]
 
   @@unique([workspaceId, icpId, canonicalCompanyId])
+  // BI-23: composite tenant key for lead_outcome's (workspace_id, lead_id) foreign key.
+  @@unique([workspaceId, id])
   @@index([workspaceId])
   @@index([workspaceId, queue])
   // 下游阶段按「本 ICP 的 match」关联过滤 canonical（leads.some）+ qualify 查询「已判 Lead」。
@@ -2189,6 +2192,8 @@ model LeadDecision {
   leadId      String   @map("lead_id") @db.Uuid
   action      String // accept | reject
   reason      String?
+  /// BI-20：稳定的失败/未达成原因码（reason-codes.ts）。reject 必填（应用层强制），accept 可选。
+  reasonCode  String?  @map("reason_code") @db.VarChar(64)
   decidedBy   String   @map("decided_by") // 外部平台 user id（来自 token）
   createdAt   DateTime @default(now()) @map("created_at")
 
@@ -2197,6 +2202,29 @@ model LeadDecision {
   @@index([workspaceId])
   @@index([leadId])
   @@map("lead_decision")
+}
+
+/// 线索结果反馈（BI-23，交付闭环设计 §6）：客户或运营对已交付线索的判断。
+/// 只追加（改判再写一行）；按工作区 RLS 隔离，app_user 只有 SELECT/INSERT；
+/// 复合外键把每一行绑到同工作区的 lead，随 lead 删除。没有邮箱、电话或人名。
+model LeadOutcome {
+  id               String   @id @default(uuid()) @db.Uuid
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  leadId           String   @map("lead_id") @db.Uuid
+  /// 相关性 1–5（客户周报第 1 列）。
+  relevance        Int?
+  willingToContact Boolean? @map("willing_to_contact")
+  /// 失败/未达成或正向结果原因码（reason-codes.ts）。
+  reasonCode       String?  @map("reason_code") @db.VarChar(64)
+  note             String?
+  contacted        Boolean?
+  source           String // customer | operator
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  lead Lead @relation(fields: [workspaceId, leadId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict, map: "lead_outcome_lead_fkey")
+
+  @@index([workspaceId, leadId])
+  @@map("lead_outcome")
 }
 
 // ── ICP & Buying Committee (理想客户画像, PRD 7.5 / 5.4) ────────────────────

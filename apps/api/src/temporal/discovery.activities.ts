@@ -638,6 +638,7 @@ function websiteProfileEnrichment(profile: WebsiteProfile, fetchedAt: Date): Enr
       legal_name: profile.legalName,
       register_key: profile.register?.key ?? null,
       vat_id: profile.vatId,
+      registered_address: profile.registeredAddress,
       evidence: profile.evidence.length ? profile.evidence : null,
       source_url: sourceUrl,
     }).filter(([, value]) => value !== null && value !== undefined),

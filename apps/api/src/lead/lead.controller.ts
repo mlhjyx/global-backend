@@ -12,7 +12,7 @@ import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
 import { RequireScopes } from '../auth/require-scopes.decorator';
@@ -22,6 +22,7 @@ import { envelope, pageEnvelope } from '../common/envelope';
 import { ApiEnvelope, ApiPageEnvelope } from '../common/api-envelope.decorator';
 import { LeadService } from './lead.service';
 import { LEAD_QUEUE_BASES } from './lead-queue-basis';
+import { OUTCOME_REASON_CODES, REJECT_REASON_CODES } from './reason-codes';
 
 const LEAD_QUEUE_BASIS_SCHEMA = {
   type: 'string',
@@ -60,17 +61,65 @@ const leadDecisionErrorSchema = (codes: readonly string[]) => ({
 });
 
 class RejectLeadDto {
-  @ApiPropertyOptional({ description: '拒绝原因（回流做评分质量反馈）' })
+  @ApiPropertyOptional({
+    enum: [...REJECT_REASON_CODES],
+    description: 'BI-20 拒绝原因码（必填；自由文本放 reason）',
+  })
+  @IsOptional()
+  @IsIn(REJECT_REASON_CODES)
+  reasonCode?: string;
+
+  @ApiPropertyOptional({ description: '拒绝原因备注（自由文本，回流做评分质量反馈）' })
   @IsOptional()
   @IsString()
   reason?: string;
 }
 
 class AcceptLeadDto {
+  @ApiPropertyOptional({ enum: [...OUTCOME_REASON_CODES], description: '接受原因码（可选，如 GOOD_FIT）' })
+  @IsOptional()
+  @IsIn(OUTCOME_REASON_CODES)
+  reasonCode?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   reason?: string;
+}
+
+class LeadOutcomeDto {
+  @ApiPropertyOptional({ minimum: 1, maximum: 5, description: '客户判断：相关性 1–5' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(5)
+  relevance?: number;
+
+  @ApiPropertyOptional({ description: '客户判断：是否愿意联系' })
+  @IsOptional()
+  @IsBoolean()
+  willingToContact?: boolean;
+
+  @ApiPropertyOptional({ enum: [...OUTCOME_REASON_CODES], description: '失败/未达成或正向结果原因码' })
+  @IsOptional()
+  @IsIn(OUTCOME_REASON_CODES)
+  reasonCode?: string;
+
+  @ApiPropertyOptional({ maxLength: 2000, description: '客户备注（自由文本）' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  note?: string;
+
+  @ApiPropertyOptional({ description: '客户判断：是否已联系' })
+  @IsOptional()
+  @IsBoolean()
+  contacted?: boolean;
+
+  @ApiPropertyOptional({ enum: ['customer', 'operator'], description: '反馈来源；默认 operator' })
+  @IsOptional()
+  @IsIn(['customer', 'operator'])
+  source?: 'customer' | 'operator';
 }
 
 class SanctionsReviewDto {
@@ -176,6 +225,34 @@ export class LeadController {
     return envelope(await this.leads.get(ctx, leadId));
   }
 
+  @Get('leads/:leadId/package')
+  @RequireScopes('acquisition:read')
+  @ApiOperation({
+    summary: '交付读模型 LeadPackage：公司事实、建议联系路径、信号、证据 URL、原因码（不含具名联系人）',
+  })
+  @ApiEnvelope({ type: 'object', additionalProperties: true, description: 'LeadPackage（设计 §2）' })
+  async leadPackage(@Ctx() ctx: RequestContext, @Param('leadId', ParseUUIDPipe) leadId: string) {
+    return envelope(await this.leads.leadPackage(ctx, leadId));
+  }
+
+  @Post('leads/:leadId/outcomes')
+  @RequireScopes('acquisition:review')
+  @HttpCode(201)
+  @ApiOperation({ summary: '回写线索结果（BI-23）：只追加，客户或运营填写相关性/意愿/原因码/备注/是否已联系' })
+  @ApiResponse({
+    status: 422,
+    description: '空反馈、原因码不在枚举或备注超长',
+    schema: leadDecisionErrorSchema(['OUTCOME_EMPTY', 'VALIDATION_ERROR']),
+  })
+  @ApiEnvelope({ type: 'object', additionalProperties: true, description: '新建的 lead_outcome 行' })
+  async recordOutcome(
+    @Ctx() ctx: RequestContext,
+    @Param('leadId', ParseUUIDPipe) leadId: string,
+    @Body() dto: LeadOutcomeDto,
+  ) {
+    return envelope(await this.leads.recordOutcome(ctx, leadId, dto));
+  }
+
   @Post('leads/:leadId/accept')
   @RequireScopes('acquisition:review')
   @HttpCode(200)
@@ -208,7 +285,7 @@ export class LeadController {
     @Ctx() ctx: RequestContext,
     @Param('leadId', ParseUUIDPipe) leadId: string,
     @Body() dto: AcceptLeadDto) {
-    return envelope(await this.leads.decide(ctx, leadId, 'accept', dto.reason));
+    return envelope(await this.leads.decide(ctx, leadId, 'accept', dto.reason, dto.reasonCode));
   }
 
   @Post('leads/:leadId/reject')
@@ -219,6 +296,11 @@ export class LeadController {
     status: 400,
     description: '路径或请求体验证失败',
     schema: leadDecisionErrorSchema(['VALIDATION_ERROR']),
+  })
+  @ApiResponse({
+    status: 422,
+    description: 'reject 缺少原因码或原因码不在枚举（BI-20）',
+    schema: leadDecisionErrorSchema(['REASON_CODE_REQUIRED', 'INVALID_REASON_CODE']),
   })
   @ApiResponse({
     status: 404,
@@ -235,7 +317,7 @@ export class LeadController {
     @Ctx() ctx: RequestContext,
     @Param('leadId', ParseUUIDPipe) leadId: string,
     @Body() dto: RejectLeadDto) {
-    return envelope(await this.leads.decide(ctx, leadId, 'reject', dto.reason));
+    return envelope(await this.leads.decide(ctx, leadId, 'reject', dto.reason, dto.reasonCode));
   }
 
   @Post('leads/:leadId/sanctions-review')

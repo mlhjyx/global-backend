@@ -7,7 +7,7 @@ import {
   isStableSafeHttpsUrl,
 } from "./raw-source-provider-normalizer";
 import { sanitizeStructuredHarvestSiteSections } from "./structured-harvest-site-sections";
-import { isValidGermanVat } from "./website-profile/impressum";
+import { isValidGermanVat, isRegisteredAddressText } from "./website-profile/impressum";
 
 const RETAINED_TOP_LEVEL_KEYS = new Set([
   "digital_footprint",
@@ -80,6 +80,7 @@ const SEMANTIC_IDENTIFIER_KEYS = new Set([
   "publication_number",
   "qid",
   "register_key",
+  "registered_address",
   "registration_number",
   "source",
   "source_url",
@@ -212,6 +213,11 @@ const semanticIdentifierContracts = new Map<
     { validate: (value) => /^de-hr[ab]:[a-z0-9]+(?:-[a-z0-9]+)*:\d{1,6}[a-z]{0,2}$/u.test(value) },
   ],
   ["website_profile.vat_id", { validate: isValidGermanVat }],
+  // L6: the company's registered postal address (never a person's address, never a contact detail).
+  [
+    "website_profile.registered_address",
+    { validate: (value) => isRegisteredAddressText(value) && isContactFreeText(value) },
+  ],
   // BI-14 / A4: the page the profile facts came from (Impressum, else homepage).
   ["website_profile.source_url", { validate: (value) => safeHttpsSource(value) && isStableSafeHttpsUrl(value) }],
 ]);
@@ -254,6 +260,7 @@ const storedCompanyFieldAttributePaths = new Map<
   ["website_profile.legal_name", ["website_profile", "legal_name"]],
   ["website_profile.own_manufacturing", ["website_profile", "own_manufacturing"]],
   ["website_profile.register_key", ["website_profile", "register_key"]],
+  ["website_profile.registered_address", ["website_profile", "registered_address"]],
   ["website_profile.source_url", ["website_profile", "source_url"]],
   ["website_profile.trade_role", ["website_profile", "trade_role"]],
   ["website_profile.trade_role_confidence", ["website_profile", "trade_role_confidence"]],
@@ -325,6 +332,7 @@ export const STORED_COMPANY_FIELD_EVIDENCE_FIELDS = Object.freeze([
   "website_profile.legal_name",
   "website_profile.own_manufacturing",
   "website_profile.register_key",
+  "website_profile.registered_address",
   "website_profile.source_url",
   "website_profile.trade_role",
   "website_profile.trade_role_confidence",

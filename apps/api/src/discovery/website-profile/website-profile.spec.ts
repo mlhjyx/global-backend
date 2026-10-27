@@ -38,6 +38,7 @@ describe('parseImpressum (G3 5.4)', () => {
         key: 'de-hrb:charlottenburg-berlin:123456b',
       },
       vatId: 'DE136695976',
+      registeredAddress: null,
     });
   });
 
@@ -62,7 +63,12 @@ describe('parseImpressum (G3 5.4)', () => {
     expect(isValidGermanVat('DE136695977')).toBe(false);
     expect(isValidGermanVat('DE12345678')).toBe(false);
     expect(parseImpressum('USt-IdNr.: DE136695977')).toMatchObject({ vatId: null });
-    expect(parseImpressum('Willkommen bei uns')).toEqual({ legalName: null, register: null, vatId: null });
+    expect(parseImpressum('Willkommen bei uns')).toEqual({
+      legalName: null,
+      register: null,
+      vatId: null,
+      registeredAddress: null,
+    });
   });
 
   it('does not accept management/registry lines as the legal name', () => {

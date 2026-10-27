@@ -29,9 +29,12 @@ import {
   type WeeklyReportRowInput,
   type WeeklyReportSanctionsStatus,
 } from './weekly-report-row';
+import { parseWeeklyFeedbackCsv, type FeedbackRejectionReason } from './weekly-feedback';
 
 /** A week's accepted leads are reviewed by hand; more than this is refused, never truncated. */
 export const WEEKLY_REPORT_MAX_LEADS = 1_000;
+/** The feedback file comes back from one export; anything far larger is refused, never partially read. */
+export const WEEKLY_FEEDBACK_MAX_ROWS = 5_000;
 
 /** Lead states that still mean "delivered": accepted, and possibly followed up since. */
 const DELIVERED_LEAD_STATUSES = ['QUALIFIED', 'CONTACTED', 'CONVERTED'] as const;
@@ -62,11 +65,23 @@ export interface WeeklyReport {
   };
 }
 
+export interface WeeklyFeedbackResult {
+  /** Rows appended to lead_outcome for leads of this workspace. */
+  readonly accepted: number;
+  /** Rows refused, with their line in the uploaded file and a stable reason. */
+  readonly rejected: readonly { readonly line: number; readonly reason: FeedbackRejectionReason | 'UNKNOWN_LEAD' }[];
+  /** Rows with no customer column filled (the untouched template lines). */
+  readonly skipped: number;
+}
+
 type Tx = Prisma.TransactionClient;
 interface ReportLead {
   id: string;
   canonicalCompanyId: string;
   fitVerdict: string | null;
+  fitReasons: Prisma.JsonValue;
+  scoreDetail: Prisma.JsonValue;
+  queue: string;
   totalScore: number | null;
   scores: Prisma.JsonValue;
   /** The latest decision only (ordered newest first, take 1). */
@@ -205,6 +220,74 @@ export class WeeklyReportService {
     };
   }
 
+  /**
+   * BI-23（设计 §6）：客户填好的周报 CSV 原样上传回来。按线索 ID 匹配本工作区的线索，
+   * 逐行校验后只追加写 `lead_outcome`（source = customer）。空行跳过，坏行计数拒绝；
+   * 文件缺「线索 ID」列时整份拒绝，不做部分解析。
+   */
+  async recordFeedback(
+    ctx: RequestContext,
+    request: { readonly csv?: unknown },
+  ): Promise<WeeklyFeedbackResult> {
+    if (typeof request.csv !== 'string' || request.csv.length === 0) {
+      throw invalid('csv must be a non-empty text/csv body');
+    }
+    const parsed = parseWeeklyFeedbackCsv(request.csv);
+    if (parsed.fatal !== null) {
+      throw new BadRequestException({
+        error: {
+          code: parsed.fatal,
+          message: 'the uploaded CSV must carry the 线索 ID column of the weekly export',
+        },
+      });
+    }
+    if (parsed.rows.length + parsed.rejected.length > WEEKLY_FEEDBACK_MAX_ROWS) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'FEEDBACK_TOO_LARGE',
+          message: `the uploaded CSV has more than ${WEEKLY_FEEDBACK_MAX_ROWS} rows`,
+        },
+      });
+    }
+    if (parsed.rows.length === 0) {
+      return { accepted: 0, rejected: parsed.rejected, skipped: parsed.skipped };
+    }
+    return this.prisma.withWorkspace(
+      ctx.workspaceId,
+      async (tx) => {
+        const leadIds = [...new Set(parsed.rows.map((row) => row.leadId))];
+        const leads = await tx.lead.findMany({
+          where: { id: { in: leadIds } },
+          select: { id: true },
+        });
+        const known = new Set(leads.map((lead) => lead.id));
+        const accepted = parsed.rows.filter((row) => known.has(row.leadId));
+        const rejected = [
+          ...parsed.rejected,
+          ...parsed.rows
+            .filter((row) => !known.has(row.leadId))
+            .map((row) => ({ line: row.line, reason: 'UNKNOWN_LEAD' as const })),
+        ].sort((left, right) => left.line - right.line);
+        if (accepted.length > 0) {
+          await tx.leadOutcome.createMany({
+            data: accepted.map((row) => ({
+              workspaceId: ctx.workspaceId,
+              leadId: row.leadId,
+              relevance: row.relevance,
+              willingToContact: row.willingToContact,
+              reasonCode: row.reasonCode,
+              note: row.note,
+              contacted: row.contacted,
+              source: 'customer',
+            })),
+          });
+        }
+        return { accepted: accepted.length, rejected, skipped: parsed.skipped };
+      },
+      TRANSACTION,
+    );
+  }
+
   /** The week's delivered leads and their facts; null when the week has none. */
   private async read(tx: Tx, workspaceId: string, icpId: string, range: IsoWeekRange) {
     const icp = await tx.icpDefinition.findUnique({ where: { id: icpId }, select: { id: true } });
@@ -223,6 +306,9 @@ export class WeeklyReportService {
         id: true,
         canonicalCompanyId: true,
         fitVerdict: true,
+        fitReasons: true,
+        scoreDetail: true,
+        queue: true,
         totalScore: true,
         scores: true,
         decisions: {
@@ -288,6 +374,9 @@ export class WeeklyReportService {
         ...weeklyReportRow({
           leadId: lead.id,
           fitVerdict: lead.fitVerdict,
+          fitReasons: lead.fitReasons,
+          scoreDetail: lead.scoreDetail,
+          queue: lead.queue,
           totalScore: lead.totalScore,
           scores: lead.scores,
           company,

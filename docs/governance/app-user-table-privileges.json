@@ -66,6 +66,7 @@
     "knowledge_source": ["DELETE", "INSERT", "SELECT", "UPDATE"],
     "lead": ["DELETE", "INSERT", "SELECT", "UPDATE"],
     "lead_decision": ["DELETE", "INSERT", "SELECT", "UPDATE"],
+    "lead_outcome": ["INSERT", "SELECT"],
     "lia_record": ["INSERT", "SELECT", "UPDATE"],
     "monitored_source": ["INSERT", "SELECT", "UPDATE"],
     "offering": ["DELETE", "INSERT", "SELECT", "UPDATE"],

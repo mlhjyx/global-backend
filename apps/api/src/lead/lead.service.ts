@@ -1,12 +1,21 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
 import {
   buildLeadQualifiedSnapshot,
   classifyLeadQualified,
+  computeValidUntil,
   LEAD_QUALIFIED_SCHEMA_VERSION,
 } from './lead-qualified-snapshot';
+import { buildLeadPackage, type LeadPackage, type LeadPackageSanctionsStatus } from './lead-package';
+import { isOutcomeReasonCode, isRejectReasonCode, REJECT_REASON_CODES } from './reason-codes';
+import { reachableCompanyContactPoints } from '../discovery/company-contact-points';
 import { DataRightsService } from '../compliance/data-rights.service';
 import {
   canonicalizeSuppressionValue,
@@ -25,6 +34,30 @@ import { isLeadScored, leadQueueBasis, summarizeLeadQueues, withQueueBasis } fro
 
 /** 列表/详情行的队列依据探针：只取一条 reject 裁决（有界），不把裁决历史拉进行。 */
 const REJECT_DECISION_PROBE = { where: { action: 'reject' }, select: { id: true }, take: 1 } as const;
+
+/** BI-23 outcome write-back input; every column is optional, at least one must be filled. */
+export interface LeadOutcomeInput {
+  readonly relevance?: number | null;
+  readonly willingToContact?: boolean | null;
+  readonly reasonCode?: string | null;
+  readonly note?: string | null;
+  readonly contacted?: boolean | null;
+  readonly source?: 'customer' | 'operator';
+}
+
+/** Stored screening → package status; an unresolved live hit stays visible to operators. */
+function packageSanctionsStatus(
+  screening: { status: string; reviewState: string } | null,
+): LeadPackageSanctionsStatus {
+  if (!screening) return 'not_screened';
+  if (screening.status === 'clear') return 'clear';
+  if (screening.status === 'potential_match') {
+    if (screening.reviewState === 'cleared_false_positive') return 'cleared_false_positive';
+    if (screening.reviewState === 'confirmed_true_hit') return 'confirmed_true_hit';
+    return 'potential_match';
+  }
+  return 'not_screened';
+}
 
 @Injectable()
 export class LeadService {
@@ -173,10 +206,194 @@ export class LeadService {
   }
 
   /**
+   * 交付读模型（设计 §2/§3）：只读事务里组装 `LeadPackage`，不含具名联系人，只要 `acquisition:read`。
+   * 与 accept 快照、周报同一口径；合成来源（historical sandbox）不进产品读取。
+   */
+  async leadPackage(ctx: RequestContext, leadId: string): Promise<LeadPackage> {
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const lead = await tx.lead.findUnique({ where: { id: leadId } });
+      if (!lead) {
+        throw new NotFoundException({
+          error: { code: 'NOT_FOUND', message: 'lead not found' },
+        });
+      }
+      const company = await tx.canonicalCompany.findUnique({
+        where: { id: lead.canonicalCompanyId },
+      });
+      if (!company) {
+        throw new NotFoundException({
+          error: { code: 'NOT_FOUND', message: 'canonical company not found' },
+        });
+      }
+      const provenance = await tx.fieldEvidence.findMany({
+        where: { entityType: 'company', entityId: company.id },
+        select: { providerKey: true, license: true },
+      });
+      if (provenance.some(isSyntheticDiscoveryProvenance)) {
+        throw new ConflictException({
+          error: {
+            code: 'SYNTHETIC_PROVENANCE_QUARANTINED',
+            message: 'historical synthetic discovery evidence is quarantined from product reads',
+          },
+        });
+      }
+      const contactPoints = await tx.companyContactPoint.findMany({
+        where: { companyId: company.id },
+        select: { kind: true, value: true, status: true },
+        orderBy: [{ kind: 'asc' }, { value: 'asc' }],
+      });
+      const suppressions = await tx.suppressionRecord.findMany({
+        where: { type: { in: ['domain', 'company_name'] } },
+        select: { type: true, value: true },
+      });
+      const reachablePoints = reachableCompanyContactPoints(contactPoints, suppressions, company);
+      const freshness = await tx.fieldEvidence.groupBy({
+        by: ['dataClass'],
+        where: { entityType: 'company', entityId: company.id },
+        _min: { fetchedAt: true },
+      });
+      const evidenceRows = await tx.fieldEvidence.findMany({
+        where: { entityType: 'company', entityId: company.id },
+        select: { field: true, fetchedAt: true, rawRecordId: true },
+        orderBy: { fetchedAt: 'desc' },
+        take: 100,
+      });
+      const rawIds = [
+        ...new Set(evidenceRows.flatMap((row) => (row.rawRecordId ? [row.rawRecordId] : []))),
+      ];
+      const rawSources = rawIds.length
+        ? await tx.rawSourceRecord.findMany({
+            where: { id: { in: rawIds } },
+            select: { id: true, sourceUrl: true },
+          })
+        : [];
+      const sourceById = new Map(rawSources.map((row) => [row.id, row.sourceUrl]));
+      const screening = await tx.sanctionsScreeningResult.findFirst({
+        where: { canonicalCompanyId: company.id },
+        orderBy: { screenedAt: 'desc' },
+        select: { status: true, reviewState: true, screenedAt: true },
+      });
+      return buildLeadPackage({
+        lead,
+        company,
+        contactPoints: reachablePoints,
+        evidence: evidenceRows.map((row) => ({
+          field: row.field,
+          sourceUrl: row.rawRecordId ? sourceById.get(row.rawRecordId) ?? null : null,
+          fetchedAt: row.fetchedAt,
+        })),
+        sanctions: {
+          status: packageSanctionsStatus(screening),
+          screened_at: screening?.screenedAt.toISOString() ?? null,
+        },
+        validUntil: computeValidUntil(
+          freshness
+            .filter((group) => group._min.fetchedAt != null)
+            .map((group) => ({ dataClass: group.dataClass, fetchedAt: group._min.fetchedAt as Date })),
+          company.attributes,
+        ),
+      });
+    });
+  }
+
+  /**
+   * BI-23（设计 §6）：客户/运营回写线索结果。只追加：改判就再写一行。
+   * 空反馈拒绝；原因码必须是枚举；备注上限与数据库 CHECK 一致。
+   */
+  async recordOutcome(ctx: RequestContext, leadId: string, input: LeadOutcomeInput) {
+    const source = input.source ?? 'operator';
+    if (source !== 'customer' && source !== 'operator') {
+      throw new UnprocessableEntityException({
+        error: { code: 'VALIDATION_ERROR', message: 'source must be customer or operator' },
+      });
+    }
+    if (input.reasonCode !== undefined && input.reasonCode !== null && !isOutcomeReasonCode(input.reasonCode)) {
+      throw new UnprocessableEntityException({
+        error: { code: 'VALIDATION_ERROR', message: 'reasonCode is not in the outcome enum' },
+      });
+    }
+    const note = typeof input.note === 'string' && input.note.trim().length > 0 ? input.note : null;
+    if (note !== null && note.length > 2000) {
+      throw new UnprocessableEntityException({
+        error: { code: 'VALIDATION_ERROR', message: 'note must be at most 2000 characters' },
+      });
+    }
+    const relevance = input.relevance ?? null;
+    if (relevance !== null && !(Number.isInteger(relevance) && relevance >= 1 && relevance <= 5)) {
+      throw new UnprocessableEntityException({
+        error: { code: 'VALIDATION_ERROR', message: 'relevance must be an integer from 1 to 5' },
+      });
+    }
+    const hasValue =
+      relevance !== null ||
+      input.willingToContact != null ||
+      input.reasonCode != null ||
+      note !== null ||
+      input.contacted != null;
+    if (!hasValue) {
+      throw new UnprocessableEntityException({
+        error: { code: 'OUTCOME_EMPTY', message: 'an outcome needs at least one filled field' },
+      });
+    }
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const lead = await tx.lead.findUnique({ where: { id: leadId }, select: { id: true } });
+      if (!lead) {
+        throw new NotFoundException({
+          error: { code: 'NOT_FOUND', message: 'lead not found' },
+        });
+      }
+      return tx.leadOutcome.create({
+        data: {
+          workspaceId: ctx.workspaceId,
+          leadId,
+          relevance,
+          willingToContact: input.willingToContact ?? null,
+          reasonCode: input.reasonCode ?? null,
+          note,
+          contacted: input.contacted ?? null,
+          source,
+        },
+      });
+    });
+  }
+
+  /**
    * 人工裁决（LED-009）：accept → QUALIFIED（发 LeadQualified，Campaign 的入口）；
    * reject → REJECTED。裁决记录留痕，重评分不覆盖人工终态。
+   * BI-20：reject 必须带原因码（reason-codes.ts），accept 的原因码可选。
    */
-  async decide(ctx: RequestContext, leadId: string, action: 'accept' | 'reject', reason?: string) {
+  async decide(
+    ctx: RequestContext,
+    leadId: string,
+    action: 'accept' | 'reject',
+    reason?: string,
+    reasonCode?: string,
+  ) {
+    if (action === 'reject') {
+      if (reasonCode === undefined) {
+        throw new UnprocessableEntityException({
+          error: {
+            code: 'REASON_CODE_REQUIRED',
+            message: 'reject requires a reasonCode (see the reject DTO for the closed list)',
+          },
+        });
+      }
+      if (!isRejectReasonCode(reasonCode)) {
+        throw new UnprocessableEntityException({
+          error: {
+            code: 'INVALID_REASON_CODE',
+            message: `reasonCode must be one of ${REJECT_REASON_CODES.join(', ')}`,
+          },
+        });
+      }
+    } else if (reasonCode !== undefined && !isOutcomeReasonCode(reasonCode)) {
+      throw new UnprocessableEntityException({
+        error: {
+          code: 'INVALID_REASON_CODE',
+          message: `reasonCode must be one of ${REJECT_REASON_CODES.join(', ')}, GOOD_FIT, WILL_FOLLOW_UP`,
+        },
+      });
+    }
     const result = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const lead = await tx.lead.findUnique({ where: { id: leadId } });
       if (!lead)
@@ -237,6 +454,7 @@ export class LeadService {
             leadId,
             action,
             reason: reason ?? null,
+            reasonCode: reasonCode ?? null,
             decidedBy: ctx.userId,
           },
         });
@@ -458,6 +676,44 @@ export class LeadService {
         const humanRejected =
           lead.status === 'REJECTED' &&
           (await tx.leadDecision.findFirst({ where: { leadId, action: 'reject' }, select: { id: true } })) !== null;
+        // BI-19/BI-21/BI-15（设计 §2/§3）：同一事务里组装交付读模型；快照只取其公司级字段。
+        // 读取全部有界（单公司 ≤100 条证据 + 至多 6 条联系路径），不含 canonical_contact。
+        const companyContactPoints = await tx.companyContactPoint.findMany({
+          where: { companyId: effectiveCompany.id },
+          select: { kind: true, value: true, status: true },
+          orderBy: [{ kind: 'asc' }, { value: 'asc' }],
+        });
+        const deliveryEvidenceRows = await tx.fieldEvidence.findMany({
+          where: { entityType: 'company', entityId: effectiveCompany.id },
+          select: { field: true, fetchedAt: true, rawRecordId: true },
+          orderBy: { fetchedAt: 'desc' },
+          take: 100,
+        });
+        const deliveryRawIds = [
+          ...new Set(deliveryEvidenceRows.flatMap((row) => (row.rawRecordId ? [row.rawRecordId] : []))),
+        ];
+        const deliveryRawSources = deliveryRawIds.length
+          ? await tx.rawSourceRecord.findMany({
+              where: { id: { in: deliveryRawIds } },
+              select: { id: true, sourceUrl: true },
+            })
+          : [];
+        const deliverySourceById = new Map(deliveryRawSources.map((row) => [row.id, row.sourceUrl]));
+        const delivery = buildLeadPackage({
+          lead,
+          company: effectiveCompany,
+          contactPoints: reachableCompanyContactPoints(companyContactPoints, suppressionRows, effectiveCompany),
+          evidence: deliveryEvidenceRows.map((row) => ({
+            field: row.field,
+            sourceUrl: row.rawRecordId ? deliverySourceById.get(row.rawRecordId) ?? null : null,
+            fetchedAt: row.fetchedAt,
+          })),
+          sanctions: {
+            status: sanctionsScreening.status,
+            screened_at: sanctionsScreening.screenedAt,
+          },
+          validUntil: computeValidUntil(evidence, effectiveCompany.attributes),
+        });
         const snapshot = buildLeadQualifiedSnapshot({
           lead,
           humanRejected,
@@ -466,6 +722,7 @@ export class LeadService {
           storageRightsDecision: rights.effect,
           evidence,
           sanctionsScreening, // 第五门合规结论（clear/not_screened；命中 hold 上方已 throw 到不了这里）
+          delivery,
         });
         await tx.outboxEvent.create({
           data: {
