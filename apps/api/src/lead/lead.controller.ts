@@ -43,6 +43,91 @@ const LEAD_SCHEMA = {
   },
 };
 
+/**
+ * 交付读模型 LeadPackage（设计 §2，与 LeadQualified 交付字段同一套 snake_case 键）。
+ * 结构化到字段级，让 oasdiff 能拦截字段改名/删除；深层的品牌/信号/证据条目另行闭合。
+ */
+const LEAD_PACKAGE_SCHEMA = {
+  type: 'object',
+  required: [
+    'lead_id',
+    'status',
+    'company',
+    'company_profile',
+    'registered_address',
+    'identifiers',
+    'contact_points',
+    'suggested_contact_path',
+    'signals',
+    'scores',
+    'fit',
+    'evidence',
+    'sanctions',
+    'valid_until',
+  ],
+  properties: {
+    lead_id: { type: 'string', format: 'uuid' },
+    status: { type: 'string' },
+    company: {
+      type: 'object',
+      required: ['canonical_company_id', 'name', 'domain', 'country', 'city'],
+      properties: {
+        canonical_company_id: { type: 'string', format: 'uuid' },
+        name: { type: 'string' },
+        domain: { type: ['string', 'null'] },
+        country: { type: ['string', 'null'] },
+        city: { type: ['string', 'null'] },
+      },
+    },
+    company_profile: { type: 'object', additionalProperties: true },
+    registered_address: { type: ['string', 'null'] },
+    identifiers: {
+      type: 'object',
+      required: ['register_key', 'vat_id', 'lei', 'fda_reg'],
+      properties: {
+        register_key: { type: ['string', 'null'] },
+        vat_id: { type: ['string', 'null'] },
+        lei: { type: ['string', 'null'] },
+        fda_reg: { type: ['string', 'null'] },
+      },
+    },
+    contact_points: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['kind', 'url', 'status'],
+        properties: { kind: { type: 'string' }, url: { type: 'string' }, status: { type: 'string' } },
+      },
+    },
+    suggested_contact_path: {
+      type: ['object', 'null'],
+      required: ['kind', 'url', 'legal_note'],
+      properties: {
+        kind: { type: 'string' },
+        url: { type: 'string' },
+        legal_note: { type: 'string' },
+      },
+      additionalProperties: false,
+    },
+    signals: { type: 'array', additionalProperties: true, items: { type: 'object' } },
+    scores: { type: 'object', additionalProperties: true },
+    fit: { type: 'object', additionalProperties: true },
+    evidence: { type: 'array', items: { type: 'object' } },
+    sanctions: {
+      type: 'object',
+      required: ['status', 'screened_at'],
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['clear', 'cleared_false_positive', 'not_screened', 'potential_match', 'confirmed_true_hit'],
+        },
+        screened_at: { type: ['string', 'null'], format: 'date-time' },
+      },
+    },
+    valid_until: { type: ['string', 'null'], format: 'date-time' },
+  },
+} as const;
+
 const leadDecisionErrorSchema = (codes: readonly string[]) => ({
   type: 'object',
   additionalProperties: false,
@@ -69,9 +154,9 @@ class RejectLeadDto {
     enum: [...REJECT_REASON_CODES],
     description: 'BI-20 拒绝原因码（reject 必填，缺失返回 422 REASON_CODE_REQUIRED；自由文本放 reason）',
   })
-  @ValidateIf((dto: RejectLeadDto) => dto.reasonCode !== undefined)
+  @ValidateIf((dto: RejectLeadDto) => dto.reasonCode != null)
   @IsString()
-  reasonCode?: string;
+  reasonCode?: string | null;
 
   @ApiPropertyOptional({ description: '拒绝原因备注（自由文本，回流做评分质量反馈）' })
   @IsOptional()
@@ -83,7 +168,7 @@ class AcceptLeadDto {
   @ApiPropertyOptional({ enum: [...OUTCOME_REASON_CODES], description: '接受原因码（可选，如 GOOD_FIT）' })
   @IsOptional()
   @IsString()
-  reasonCode?: string;
+  reasonCode?: string | null;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -92,7 +177,7 @@ class AcceptLeadDto {
 }
 
 class LeadOutcomeDto {
-  @ApiPropertyOptional({ minimum: 1, maximum: 5, description: '客户判断：相关性 1–5' })
+  @ApiPropertyOptional({ type: 'integer', minimum: 1, maximum: 5, description: '客户判断：相关性 1–5' })
   @IsOptional()
   @IsInt()
   @Min(1)
@@ -234,7 +319,17 @@ export class LeadController {
   @ApiOperation({
     summary: '交付读模型 LeadPackage：公司事实、建议联系路径、信号、证据 URL、原因码（不含具名联系人）',
   })
-  @ApiEnvelope({ type: 'object', additionalProperties: true, description: 'LeadPackage（设计 §2）' })
+  @ApiResponse({
+    status: 404,
+    description: 'Lead 不存在',
+    schema: leadDecisionErrorSchema(['NOT_FOUND']),
+  })
+  @ApiResponse({
+    status: 409,
+    description: '该线索的历史证据为合成来源，产品读一律隔离',
+    schema: leadDecisionErrorSchema(['SYNTHETIC_PROVENANCE_QUARANTINED']),
+  })
+  @ApiEnvelope(LEAD_PACKAGE_SCHEMA)
   async leadPackage(@Ctx() ctx: RequestContext, @Param('leadId', ParseUUIDPipe) leadId: string) {
     return envelope(await this.leads.leadPackage(ctx, leadId));
   }

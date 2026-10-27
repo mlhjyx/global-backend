@@ -9096,8 +9096,282 @@
                   "properties": {
                     "data": {
                       "type": "object",
+                      "required": [
+                        "lead_id",
+                        "status",
+                        "company",
+                        "company_profile",
+                        "registered_address",
+                        "identifiers",
+                        "contact_points",
+                        "suggested_contact_path",
+                        "signals",
+                        "scores",
+                        "fit",
+                        "evidence",
+                        "sanctions",
+                        "valid_until"
+                      ],
+                      "properties": {
+                        "lead_id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "company": {
+                          "type": "object",
+                          "required": [
+                            "canonical_company_id",
+                            "name",
+                            "domain",
+                            "country",
+                            "city"
+                          ],
+                          "properties": {
+                            "canonical_company_id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "domain": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "country": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "city": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            }
+                          }
+                        },
+                        "company_profile": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "registered_address": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "identifiers": {
+                          "type": "object",
+                          "required": [
+                            "register_key",
+                            "vat_id",
+                            "lei",
+                            "fda_reg"
+                          ],
+                          "properties": {
+                            "register_key": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "vat_id": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "lei": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "fda_reg": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            }
+                          }
+                        },
+                        "contact_points": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "kind",
+                              "url",
+                              "status"
+                            ],
+                            "properties": {
+                              "kind": {
+                                "type": "string"
+                              },
+                              "url": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "suggested_contact_path": {
+                          "type": [
+                            "object",
+                            "null"
+                          ],
+                          "required": [
+                            "kind",
+                            "url",
+                            "legal_note"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "type": "string"
+                            },
+                            "url": {
+                              "type": "string"
+                            },
+                            "legal_note": {
+                              "type": "string"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "signals": {
+                          "type": "array",
+                          "additionalProperties": true,
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "scores": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "fit": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "evidence": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "sanctions": {
+                          "type": "object",
+                          "required": [
+                            "status",
+                            "screened_at"
+                          ],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "clear",
+                                "cleared_false_positive",
+                                "not_screened",
+                                "potential_match",
+                                "confirmed_true_hit"
+                              ]
+                            },
+                            "screened_at": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "format": "date-time"
+                            }
+                          }
+                        },
+                        "valid_until": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Lead 不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
                       "additionalProperties": true,
-                      "description": "LeadPackage（设计 §2）"
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "该线索的历史证据为合成来源，产品读一律隔离",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "SYNTHETIC_PROVENANCE_QUARANTINED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
                     }
                   }
                 }
@@ -16635,7 +16909,7 @@
         "type": "object",
         "properties": {
           "relevance": {
-            "type": "number",
+            "type": "integer",
             "minimum": 1,
             "maximum": 5,
             "description": "客户判断：相关性 1–5"

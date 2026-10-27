@@ -71,11 +71,13 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
 /**
  * The field separator: the exported file uses commas, but a German-locale Excel saves the
- * filled sheet with semicolons. The header decides (it always carries 线索 ID).
+ * filled sheet with semicolons. The record carrying the 线索 ID header decides (never the
+ * first physical line, which a customer may have typed a title above).
  */
 function delimiterOf(input: string): ',' | ';' {
-  const firstLine = input.split('\n', 1)[0] ?? '';
-  return firstLine.includes(';') && !firstLine.includes(',') ? ';' : ',';
+  const lines = input.split(/\r\n|\n|\r/u);
+  const headerLine = lines.find((line) => line.includes(FEEDBACK_COLUMNS.leadId)) ?? lines[0] ?? '';
+  return headerLine.includes(';') && !headerLine.includes(',') ? ';' : ',';
 }
 
 /**

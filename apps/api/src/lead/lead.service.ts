@@ -274,15 +274,17 @@ export class LeadService {
         });
       }
       const { canonicalCompany: { contacts, ...company }, ...leadFields } = lead;
-      await this.assertProductProvenance(tx, [company.id]);
+      // 与 get()/decide() 同一条规则：联系人的证据行也算在内（valid_until 同样用它们）。
+      const contactIds = contacts.map((contact) => contact.id);
+      await this.assertProductProvenance(tx, [company.id, ...contactIds]);
       const suppressions = await tx.suppressionRecord.findMany({
         where: { type: { in: ['domain', 'company_name'] } },
         select: { type: true, value: true },
       });
-      const { contactPoints, evidence } = await this.loadDeliveryFacts(tx, company, suppressions);
+      const facts = await this.loadDeliveryFacts(tx, company, suppressions);
       const freshness = await tx.fieldEvidence.groupBy({
         by: ['dataClass'],
-        where: { entityId: { in: [company.id, ...contacts.map((contact) => contact.id)] } },
+        where: { entityId: { in: [company.id, ...contactIds] } },
         _min: { fetchedAt: true },
       });
       const screening = await tx.sanctionsScreeningResult.findFirst({
@@ -290,13 +292,20 @@ export class LeadService {
         orderBy: { screenedAt: 'desc' },
         select: { status: true, reviewState: true, screenedAt: true },
       });
+      const sanctionsStatus = packageSanctionsStatus(screening);
+      // 交付闸门与 decide/周报一致：禁联公司与未清的制裁命中不提供联系路径与建议，
+      // 免得运营照着读模型去触达一个后端拒绝交付的主体。
+      const undeliverable =
+        company.status === 'SUPPRESSED' ||
+        sanctionsStatus === 'potential_match' ||
+        sanctionsStatus === 'confirmed_true_hit';
       return buildLeadPackage({
         lead: leadFields,
         company,
-        contactPoints,
-        evidence,
+        contactPoints: undeliverable ? [] : facts.contactPoints,
+        evidence: facts.evidence,
         sanctions: {
-          status: packageSanctionsStatus(screening),
+          status: sanctionsStatus,
           screened_at: screening?.screenedAt.toISOString() ?? null,
         },
         validUntil: computeValidUntil(
@@ -349,10 +358,15 @@ export class LeadService {
       });
     }
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const lead = await tx.lead.findUnique({ where: { id: leadId }, select: { id: true } });
+      // Outcomes judge a delivered lead (same rule as the weekly feedback upload): a lead that
+      // was never accepted cannot carry a customer judgement into the evaluation data.
+      const lead = await tx.lead.findFirst({
+        where: { id: leadId, decisions: { some: { action: 'accept' } } },
+        select: { id: true },
+      });
       if (!lead) {
         throw new NotFoundException({
-          error: { code: 'NOT_FOUND', message: 'lead not found' },
+          error: { code: 'NOT_FOUND', message: 'lead not found or never delivered' },
         });
       }
       return tx.leadOutcome.create({
@@ -380,8 +394,10 @@ export class LeadService {
     leadId: string,
     action: 'accept' | 'reject',
     reason?: string,
-    reasonCode?: string,
+    reasonCodeInput?: string | null,
   ) {
+    // A JSON null from an unset optional field means "absent", not an invalid value.
+    const reasonCode = reasonCodeInput ?? undefined;
     if (action === 'reject') {
       if (reasonCode === undefined) {
         throw new UnprocessableEntityException({

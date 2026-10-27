@@ -53,6 +53,24 @@ describe('LeadService.decide — reject reason code (BI-20)', () => {
     expect(withWorkspace).not.toHaveBeenCalled();
   });
 
+  it('treats a JSON null reason code as absent: reject 422 REQUIRED, accept proceeds', async () => {
+    const rejectWithWorkspace = vi.fn();
+    const rejectService = new LeadService({ withWorkspace: rejectWithWorkspace } as never, {} as never, {} as never);
+    await expect(rejectService.decide(ctx, 'lead-1', 'reject', undefined, null)).rejects.toMatchObject({
+      status: 422,
+      response: { error: { code: 'REASON_CODE_REQUIRED' } },
+    });
+    expect(rejectWithWorkspace).not.toHaveBeenCalled();
+
+    const acceptWithWorkspace = vi.fn(async (_ws: string, callback: (tx: unknown) => Promise<unknown>) =>
+      callback({ lead: { findUnique: vi.fn(async () => null) } }),
+    );
+    const acceptService = new LeadService({ withWorkspace: acceptWithWorkspace } as never, {} as never, {} as never);
+    await expect(acceptService.decide(ctx, 'lead-1', 'accept', undefined, null)).rejects.toMatchObject({
+      response: { error: { code: 'NOT_FOUND' } },
+    });
+  });
+
   it('refuses a reason code that is not in the reject enum', async () => {
     const withWorkspace = vi.fn();
     const service = new LeadService({ withWorkspace } as never, {} as never, {} as never);

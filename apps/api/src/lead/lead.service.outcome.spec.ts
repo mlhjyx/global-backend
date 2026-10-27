@@ -30,7 +30,7 @@ describe('LeadService.recordOutcome', () => {
       createdAt: new Date('2026-10-27T00:00:00.000Z'),
     };
     const tx = {
-      lead: { findUnique: vi.fn(async () => ({ id: 'lead-1' })) },
+      lead: { findFirst: vi.fn(async () => ({ id: 'lead-1' })) },
       leadOutcome: { create: vi.fn(async () => created) },
     };
 
@@ -60,7 +60,7 @@ describe('LeadService.recordOutcome', () => {
 
   it('defaults the source to operator and refuses an empty outcome', async () => {
     const tx = {
-      lead: { findUnique: vi.fn(async () => ({ id: 'lead-1' })) },
+      lead: { findFirst: vi.fn(async () => ({ id: 'lead-1' })) },
       leadOutcome: { create: vi.fn(async () => ({})) },
     };
     await serviceWithTx(tx).recordOutcome(ctx, 'lead-1', { note: 'nur Notiz' });
@@ -76,7 +76,7 @@ describe('LeadService.recordOutcome', () => {
 
   it('rejects an unknown reason code and a note beyond the storage bound', async () => {
     const tx = {
-      lead: { findUnique: vi.fn(async () => ({ id: 'lead-1' })) },
+      lead: { findFirst: vi.fn(async () => ({ id: 'lead-1' })) },
       leadOutcome: { create: vi.fn(async () => ({})) },
     };
     await expect(
@@ -88,9 +88,21 @@ describe('LeadService.recordOutcome', () => {
     expect(tx.leadOutcome.create).not.toHaveBeenCalled();
   });
 
+  it('only accepts outcomes for leads that were delivered (accepted at least once)', async () => {
+    const tx = {
+      lead: { findFirst: vi.fn(async () => ({ id: 'lead-1' })) },
+      leadOutcome: { create: vi.fn(async () => ({})) },
+    };
+    await serviceWithTx(tx).recordOutcome(ctx, 'lead-1', { relevance: 3 });
+    expect(tx.lead.findFirst).toHaveBeenCalledWith({
+      where: { id: 'lead-1', decisions: { some: { action: 'accept' } } },
+      select: { id: true },
+    });
+  });
+
   it('refuses an outcome for a lead outside the workspace', async () => {
     const tx = {
-      lead: { findUnique: vi.fn(async () => null) },
+      lead: { findFirst: vi.fn(async () => null) },
       leadOutcome: { create: vi.fn(async () => ({})) },
     };
     await expect(

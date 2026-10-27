@@ -105,13 +105,15 @@ describe('parseWeeklyFeedbackCsv', () => {
     ]);
   });
 
-  it('reads the semicolon file a German-locale Excel saves', () => {
+  it('reads the semicolon file a German-locale Excel saves, even under a typed title line', () => {
     const header = HEADER.replaceAll(',', ';');
-    const result = parseWeeklyFeedbackCsv(`\uFEFF${header}\r\nMuster GmbH;${LEAD};4;是;GOOD_FIT;guter Kontakt;否\r\n`);
+    const result = parseWeeklyFeedbackCsv(
+      `\uFEFFRückmeldung, KW 44\r\n${header}\r\nMuster GmbH;${LEAD};4;是;GOOD_FIT;guter Kontakt;否\r\n`,
+    );
     expect(result.fatal).toBeNull();
     expect(result.rows).toEqual([
       {
-        line: 2,
+        line: 3,
         leadId: LEAD,
         relevance: 4,
         willingToContact: true,

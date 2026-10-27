@@ -4,6 +4,7 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, VersioningType } from '@nestjs/common';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { apiReference } from '@scalar/nestjs-api-reference';
@@ -19,6 +20,61 @@ import {
 import { initializeRuntimeReleaseIdentity } from './runtime/runtime-release-identity';
 import { resolveDevFastLane } from './runtime/dev-fast-lane';
 import { installPlatformRevocationHttpBoundary } from './platform-authority/platform-revocation-http.middleware';
+
+/** The filled weekly CSV: UTF-8 text, one export back, bounded. */
+const CSV_BODY_ROUTE = '/api/v1/reports/weekly/feedback';
+const CSV_BODY_MAX_BYTES = 5 * 1024 * 1024;
+
+/**
+ * BI-23: read a text/csv body on the weekly-feedback route into `req.body` as a string.
+ * Plain listener (no parser dependency): applied after Nest's own parsers, it only touches
+ * this one route, and it answers 413 the moment the cap is crossed instead of buffering on.
+ */
+function installCsvTextBodyReader(app: { use: (handler: (req: IncomingMessage, res: ServerResponse, next: () => void) => void) => void }): void {
+  app.use((req, res, next) => {
+    const contentType = String(req.headers['content-type'] ?? '').toLowerCase();
+    if (
+      req.method !== 'POST' ||
+      !req.url?.split('?', 1)[0]?.startsWith(CSV_BODY_ROUTE) ||
+      !(contentType.startsWith('text/csv') || contentType.startsWith('application/csv'))
+    ) {
+      next();
+      return;
+    }
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    let settled = false;
+    req.on('data', (chunk: Buffer) => {
+      if (settled) return;
+      bytes += chunk.length;
+      if (bytes > CSV_BODY_MAX_BYTES) {
+        settled = true;
+        res.statusCode = 413;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(
+          JSON.stringify({
+            error: { code: 'PAYLOAD_TOO_LARGE', message: `csv body must not exceed ${CSV_BODY_MAX_BYTES} bytes` },
+          }),
+        );
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      if (settled) return;
+      settled = true;
+      (req as IncomingMessage & { body?: unknown }).body = Buffer.concat(chunks).toString('utf8');
+      next();
+    });
+    req.on('error', () => {
+      if (!settled) {
+        settled = true;
+        next();
+      }
+    });
+  });
+}
 
 /** code-first OpenAPI 文档（单一事实源：从实现的装饰器生成）。 */
 function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
@@ -100,8 +156,10 @@ async function bootstrap(): Promise<void> {
   // Exact signed-body parser and no-store boundary precede Nest's JSON parser
   // and all guards. Never expose compact JWS through enumerable request.body.
   installPlatformRevocationHttpBoundary(app);
-  // BI-23: the filled weekly CSV comes back as text/csv (never JSON), bounded and not parsed as JSON.
-  app.useBodyParser('text', { type: ['text/csv', 'application/csv'], limit: '5mb' });
+  // BI-23: the filled weekly CSV comes back as text/csv, which no built-in parser reads. This
+  // listener is scoped to its one route (no other path buffers a large text body before the
+  // guards), caps the size while reading, and answers 413 instead of buffering past the cap.
+  installCsvTextBodyReader(app);
   // Express 5 defaults to the simple query parser. Preserve the existing
   // nested-query contract while using the patched qs release from its tree.
   app.set('query parser', 'extended');

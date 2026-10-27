@@ -142,6 +142,52 @@ describe('LeadService.package', () => {
     });
   });
 
+  it('offers no contact path for a suppressed company or an unresolved sanctions hit', async () => {
+    const suppressed = txFor();
+    (suppressed.lead.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...lead,
+      canonicalCompany: { ...company, status: 'SUPPRESSED', contacts: [] },
+    });
+    const suppressedPkg = await serviceWithTx(suppressed).leadPackage(ctx, 'lead-1');
+    expect(suppressedPkg.contact_points).toEqual([]);
+    expect(suppressedPkg.suggested_contact_path).toBeNull();
+
+    const held = txFor({
+      sanctionsScreeningResult: {
+        findFirst: vi.fn(async () => ({ status: 'potential_match', reviewState: 'open', screenedAt: new Date('2026-10-19T00:00:00.000Z') })),
+      },
+    });
+    const heldPkg = await serviceWithTx(held).leadPackage(ctx, 'lead-1');
+    expect(heldPkg.contact_points).toEqual([]);
+    expect(heldPkg.suggested_contact_path).toBeNull();
+    expect(heldPkg.sanctions.status).toBe('potential_match');
+  });
+
+  it('quarantines the whole lead when only its contact evidence is synthetic', async () => {
+    const tx = txFor({
+      lead: {
+        findUnique: vi.fn(async () => ({
+          ...lead,
+          canonicalCompany: { ...company, contacts: [{ id: 'contact-1' }] },
+        })),
+      },
+      fieldEvidence: {
+        findMany: vi.fn(async (args: { select?: Record<string, unknown> }) =>
+          args?.select && 'providerKey' in args.select
+            ? [{ providerKey: 'sandbox', license: 'sandbox' }]
+            : [],
+        ),
+        groupBy: vi.fn(async () => []),
+      },
+    });
+    await expect(serviceWithTx(tx).leadPackage(ctx, 'lead-1')).rejects.toMatchObject({
+      response: { error: { code: 'SYNTHETIC_PROVENANCE_QUARANTINED' } },
+    });
+    expect(tx.fieldEvidence.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { entityId: { in: ['company-1', 'contact-1'] } } }),
+    );
+  });
+
   it('refuses historical synthetic provenance', async () => {
     const tx = txFor({
       fieldEvidence: {
