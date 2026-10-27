@@ -1818,8 +1818,12 @@ test("the same GHSA on two version lines is not a duplicate advisory", async () 
   assert.ok(!issueCodes(evaluated).includes("AUDIT_ADVISORY_DUPLICATE"));
   assert.ok(issueCodes(evaluated).includes("AUDIT_NEW_ADVISORY"));
 
+  // Baseline admissions stay range-free: the ratchet only matches by GHSA and
+  // package, so admitting the same advisory twice (one entry per version line)
+  // would produce a baseline that can never match its own audit. Fail closed at
+  // validation time instead.
   assert.ok(
-    !issueCodes(
+    issueCodes(
       validateProductionAuditBaseline(baseline([undiciSeven, undiciEight]), {
         now: NOW,
       }),

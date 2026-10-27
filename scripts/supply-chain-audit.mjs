@@ -450,13 +450,16 @@ export function validateProductionAuditBaseline(
   for (const advisory of advisories) {
     issues.push(...baselineAdvisoryIssues(advisory, governance?.valid_until));
   }
+  // Baseline admissions keep the range-free identity: the ratchet matches
+  // baseline advisories and finding exposure by GHSA + package only, so a
+  // baseline that listed the same GHSA twice (one entry per version line) could
+  // never match the audit it came from. Duplicate audit records are the ones
+  // pnpm legitimately emits per version line; those are handled in
+  // normalizePnpmAudit.
   const identities = advisories
     .filter((advisory) => isObject(advisory))
     .map(advisoryIdentity);
-  const lineIdentities = advisories
-    .filter((advisory) => isObject(advisory))
-    .map(advisoryLineIdentity);
-  if (new Set(lineIdentities).size !== lineIdentities.length) {
+  if (new Set(identities).size !== identities.length) {
     issues.push(
       issue(
         "BASELINE_ADVISORY_DUPLICATE",
