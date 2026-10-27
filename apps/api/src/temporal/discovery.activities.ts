@@ -2087,8 +2087,6 @@ export function createDiscoveryActivities(deps: {
         icpId: string;
         /** Continue at this position of the run's profile list; absent on the first profile activity. */
         startIndex?: number;
-        /** The previous profile activity ended on a company it skipped as unreplayable. */
-        previousUnreplayable?: boolean;
       },
     ): Promise<{
       profiled: number;
@@ -2101,8 +2099,6 @@ export function createDiscoveryActivities(deps: {
       nextIndex: number | null;
       /** Companies skipped because an operation could not be replayed. */
       unreplayable: number;
-      /** Carries the two-in-a-row rule for unreplayable companies over to the next profile activity. */
-      previousUnreplayable: boolean;
       /** Workspace companies outside the run profiled with the quota the run's own companies left (contact-path backfill). */
       backfilled: number;
       /**
@@ -2112,8 +2108,8 @@ export function createDiscoveryActivities(deps: {
       skippedForLease?: number;
     }> {
       if (
-        (args.startIndex !== undefined && !isContinuationIndex(args.startIndex, MAX_DISCOVERY_PROFILE_COMPANIES)) ||
-        (args.previousUnreplayable !== undefined && typeof args.previousUnreplayable !== 'boolean')
+        args.startIndex !== undefined &&
+        !isContinuationIndex(args.startIndex, MAX_DISCOVERY_PROFILE_COMPANIES)
       ) {
         invalidContinuation();
       }
@@ -2126,7 +2122,6 @@ export function createDiscoveryActivities(deps: {
         unclassified: 0,
         nextIndex: null,
         unreplayable: 0,
-        previousUnreplayable: args.previousUnreplayable ?? false,
         backfilled: 0,
       };
       const setup = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
@@ -2212,7 +2207,6 @@ export function createDiscoveryActivities(deps: {
       let unclassified = 0;
       let unreplayable = 0;
       let backfilled = 0;
-      let previousUnreplayable = args.previousUnreplayable ?? false;
       const startIndex = args.startIndex ?? 0;
       let nextIndex: number | null = null;
       let skippedForLease = 0;
@@ -2277,7 +2271,10 @@ export function createDiscoveryActivities(deps: {
         } catch (error) {
           if (artifactSubjectSkipReason(error)) {
             subjectDenied = true;
-          } else if (isUnreplayableOperation(error) && !previousUnreplayable) {
+          } else if (isUnreplayableOperation(error)) {
+            // A replay hit is this company's own earlier call coming back, not the upstream
+            // failing now (fit already counts it that way): skip it even when the company
+            // before it was skipped too, or one broken attempt fails the retried pass.
             unreplayableSkip = true;
           } else if (isExecutionControlError(error)) {
             // An unavailable model upstream makes the next attempt wait instead of retrying within
@@ -2291,7 +2288,6 @@ export function createDiscoveryActivities(deps: {
           }
           /* 单家画像失败不影响其余 */
         }
-        previousUnreplayable = unreplayableSkip;
         // BI-14：联系路径的观测时间取这家页面读完的时刻（不是活动开始时刻），供 last_seen_at 单调比较。
         const observedAt = new Date();
         // W5-f：profiled / matched / unclassified 只计本 run 的公司；补读的公司计入 backfilled。
@@ -2389,7 +2385,6 @@ export function createDiscoveryActivities(deps: {
         unclassified,
         nextIndex,
         unreplayable,
-        previousUnreplayable,
         backfilled,
         ...(skippedForLease > 0 ? { skippedForLease } : {}),
       };
@@ -2488,7 +2483,6 @@ export function createDiscoveryActivities(deps: {
       let unreplayable = 0;
       let transportFailed = 0;
       let skippedForLease = 0;
-      let previousUnreplayable = false;
       const nowMs = Date.now();
       const lease = await readRunLease(binding);
       const signalCompanies = companies.slice(0, SIGNAL_ENRICH_LIMIT);
@@ -2573,7 +2567,10 @@ export function createDiscoveryActivities(deps: {
               subjectDenied = true;
               break;
             }
-            if (isUnreplayableOperation(error) && !previousUnreplayable) {
+            // A replay hit is a ledger fact about this company's own earlier call, never proof
+            // that the upstream is down now (fit already says this): skip the company whatever
+            // the company before it did, or one broken attempt would fail the retried pass.
+            if (isUnreplayableOperation(error)) {
               unreplayableSkip = true;
               break;
             }
@@ -2590,7 +2587,6 @@ export function createDiscoveryActivities(deps: {
             /* 单信号源失败不影响其余 */
           }
         }
-        if (attempted) previousUnreplayable = unreplayableSkip;
         if (unreplayableSkip) unreplayable += 1;
         else if (subjectDenied) skippedSubjects += 1;
         else {
@@ -2695,7 +2691,6 @@ export function createDiscoveryActivities(deps: {
       let registered = 0;
       let skippedSubjects = 0;
       let unreplayable = 0;
-      let previousUnreplayable = false;
       let skippedForLease = 0;
       const lease = await readRunLease(binding);
       const watchCompanies = companies.slice(0, WATCH_REGISTER_LIMIT);
@@ -2719,21 +2714,19 @@ export function createDiscoveryActivities(deps: {
             executionBudget: binding,
           });
           registered += 1;
-          previousUnreplayable = false;
         } catch (error) {
           // G3 5.5：sitemap 抓取挂在这家公司名下；主体被拒 → 跳过这家（计入 PARTIAL）。
           if (artifactSubjectSkipReason(error)) {
             skippedSubjects += 1;
-            previousUnreplayable = false;
             continue;
           }
-          if (isUnreplayableOperation(error) && !previousUnreplayable) {
+          // Skip and count, like fit: a replay hit describes this company's earlier call, not
+          // the upstream now, so it never escalates to a control error.
+          if (isUnreplayableOperation(error)) {
             unreplayable += 1;
-            previousUnreplayable = true;
             continue;
           }
           if (isExecutionControlError(error)) throw error;
-          previousUnreplayable = false;
           /* 单家注册失败（无域名/sitemap 不可达/DAT-011）不影响其余 */
         }
       }

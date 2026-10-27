@@ -427,7 +427,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         const profileArgs = { workspaceId, runId, icpId: input.icpId, ...authorityArgs };
         // Each activity hands the companies it did not reach to the next one; a spent run budget
         // ends the stage. A result recorded before the hand-off has no index and ends it too.
-        let profileContinuation: { startIndex: number; previousUnreplayable: boolean } | undefined;
+        let profileContinuation: { startIndex: number } | undefined;
         do {
           const pass = await signalActs.profileWebsitesForRun(
             profileContinuation === undefined ? profileArgs : { ...profileArgs, ...profileContinuation },
@@ -437,7 +437,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
           countLeaseSkips('websiteProfile', pass.skippedForLease);
           profileContinuation =
             typeof pass.nextIndex === 'number' && !pass.budgetTruncated
-              ? { startIndex: pass.nextIndex, previousUnreplayable: pass.previousUnreplayable === true }
+              ? { startIndex: pass.nextIndex }
               : undefined;
         } while (profileContinuation !== undefined);
       } catch (error) {

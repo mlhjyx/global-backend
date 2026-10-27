@@ -1379,18 +1379,17 @@ describe('discoveryWorkflow company passes handed from one activity to the next'
     );
   });
 
-  it('hands the unreplayable flag of a profile pass to the next pass', async () => {
+  it('continues a profile pass at its index without carrying unreplayable state', async () => {
     primeDiscovery();
     acts.profileWebsitesForRun
-      .mockResolvedValueOnce(profilePass({ profiled: 1, unreplayable: 1, nextIndex: 2, previousUnreplayable: true }))
+      .mockResolvedValueOnce(profilePass({ profiled: 1, unreplayable: 1, nextIndex: 2 }))
       .mockResolvedValueOnce(profilePass({ profiled: 1 }));
 
     await discoveryWorkflow(discoveryInput());
 
-    expect(acts.profileWebsitesForRun.mock.calls[1]![0]).toMatchObject({
-      startIndex: 2,
-      previousUnreplayable: true,
-    });
+    const secondCall = acts.profileWebsitesForRun.mock.calls[1]![0];
+    expect(secondCall).toMatchObject({ startIndex: 2 });
+    expect(secondCall).not.toHaveProperty('previousUnreplayable');
   });
 
   it('finalizes PARTIAL and counts companies the best-effort stages skipped as unreplayable', async () => {

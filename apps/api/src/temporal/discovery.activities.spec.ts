@@ -3669,11 +3669,14 @@ describe("尽力而为的阶段：无法重放的公司跳过并计数", () => {
     expect(enricher.enrichCompany).toHaveBeenCalledTimes(2);
   });
 
-  it("signals still stop when two companies in a row cannot be replayed", async () => {
-    const second = unreplayable("op-2");
+  it("signals skip two companies in a row whose operations cannot be replayed, like fit does", async () => {
     const enricher = {
       key: "digital_footprint",
-      enrichCompany: vi.fn().mockRejectedValueOnce(unreplayable("op-1")).mockRejectedValueOnce(second),
+      enrichCompany: vi
+        .fn()
+        .mockRejectedValueOnce(unreplayable("op-1"))
+        .mockRejectedValueOnce(unreplayable("op-2"))
+        .mockResolvedValue({ matched: false } as EnrichmentResult),
     };
     const deps = await withMatchCompanies(makeEnrichDeps([enricher]), ["c1", "c2", "c3"]);
 
@@ -3681,7 +3684,8 @@ describe("尽力而为的阶段：无法重放的公司跳过并计数", () => {
       createDiscoveryActivities(deps).enrichSignalsRun(
         discoveryArgs("run-signal-unreplayable-twice", { icpId: "icp-1" }),
       ),
-    ).rejects.toBe(second);
+    ).resolves.toMatchObject({ unreplayable: 2, skippedSubjects: 0 });
+    expect(enricher.enrichCompany).toHaveBeenCalledTimes(3);
   });
 
   it("signals absorb unreplayable companies that an enriched company separates", async () => {
@@ -3742,9 +3746,11 @@ describe("尽力而为的阶段：无法重放的公司跳过并计数", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("watch registration still stops when two companies in a row cannot be replayed", async () => {
-    const second = unreplayable("op-2");
-    const invoke = vi.fn().mockRejectedValueOnce(unreplayable("op-1")).mockRejectedValueOnce(second);
+  it("watch registration skips two companies in a row whose reads cannot be replayed, like fit does", async () => {
+    const invoke = vi
+      .fn()
+      .mockRejectedValueOnce(unreplayable("op-1"))
+      .mockRejectedValueOnce(unreplayable("op-2"));
     const deps = await withMatchCompanies(watchDeps(invoke), ["c1", "c2"]);
     await deps.prisma.withWorkspace("ws", async (tx) => {
       tx.fieldEvidence!.findMany = async () => [];
@@ -3754,7 +3760,7 @@ describe("尽力而为的阶段：无法重放的公司跳过并计数", () => {
       createDiscoveryActivities(deps as never).registerWatchesForRun(
         discoveryArgs("run-watch-unreplayable-twice", { icpId: "icp-1" }) as never,
       ),
-    ).rejects.toBe(second);
+    ).resolves.toEqual({ candidates: 2, registered: 0, skippedSubjects: 0, unreplayable: 2 });
   });
 });
 
@@ -4177,7 +4183,6 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
       unclassified: 0,
       nextIndex: null,
       unreplayable: 0,
-      previousUnreplayable: false,
       backfilled: 0,
     });
     expect(profile).not.toHaveBeenCalled();
@@ -4308,25 +4313,25 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
 
     await expect(
       acts.profileWebsitesForRun(discoveryArgs("run-profile-unreplayable", { icpId: "icp-1" })),
-    ).resolves.toMatchObject({ profiled: 1, unreplayable: 1, previousUnreplayable: false, nextIndex: null });
+    ).resolves.toMatchObject({ profiled: 1, unreplayable: 1, nextIndex: null });
   });
 
-  it("still stops when two companies in a row cannot be replayed", async () => {
-    const second = new BudgetOperationReplayError("op-2");
+  it("skips two companies in a row whose fetches cannot be replayed, like fit does", async () => {
     const profile = vi
       .fn()
       .mockRejectedValueOnce(new BudgetOperationReplayError("op-1"))
-      .mockRejectedValueOnce(second);
+      .mockRejectedValueOnce(new BudgetOperationReplayError("op-2"))
+      .mockResolvedValue(PROFILE);
     const { acts } = await makeProfileDeps(profile, { companies: ["c1", "c2", "c3"], now: () => 0 });
 
     await expect(
       acts.profileWebsitesForRun(discoveryArgs("run-profile-unreplayable-twice", { icpId: "icp-1" })),
-    ).rejects.toBe(second);
+    ).resolves.toMatchObject({ profiled: 1, unreplayable: 2, nextIndex: null });
+    expect(profile).toHaveBeenCalledTimes(3);
   });
 
-  it("stops on an unreplayable company that follows the one the previous pass ended on", async () => {
-    const second = new BudgetOperationReplayError("op-2");
-    const profile = vi.fn().mockRejectedValueOnce(second);
+  it("continues a pass at its index without carrying any unreplayable state", async () => {
+    const profile = vi.fn(async () => PROFILE);
     const { acts } = await makeProfileDeps(profile, { companies: ["c1", "c2"], now: () => 0 });
 
     await expect(
@@ -4334,32 +4339,10 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
         discoveryArgs("run-profile-unreplayable-carried", {
           icpId: "icp-1",
           startIndex: 1,
-          previousUnreplayable: true,
         }),
       ),
-    ).rejects.toBe(second);
-  });
-
-  it("tells the next pass that it ended on an unreplayable company", async () => {
-    const profile = vi.fn().mockRejectedValueOnce(new BudgetOperationReplayError("op-1"));
-    const now = vi.fn().mockReturnValueOnce(0).mockReturnValue(PROFILE_PASS_TIME_BOX_MS);
-    const { acts } = await makeProfileDeps(profile, { companies: ["c1", "c2"], now });
-
-    await expect(
-      acts.profileWebsitesForRun(discoveryArgs("run-profile-unreplayable-handoff", { icpId: "icp-1" })),
-    ).resolves.toMatchObject({ unreplayable: 1, nextIndex: 1, previousUnreplayable: true });
-  });
-
-  it("rejects an unreplayable flag that is not a boolean", async () => {
-    const profile = vi.fn(async () => PROFILE);
-    const { acts } = await makeProfileDeps(profile);
-
-    await expect(
-      acts.profileWebsitesForRun(
-        discoveryArgs("run-profile-bad-flag", { icpId: "icp-1", previousUnreplayable: "yes" }) as never,
-      ),
-    ).rejects.toMatchObject({ type: "DISCOVERY_STAGE_CONTINUATION_INVALID", nonRetryable: true });
-    expect(profile).not.toHaveBeenCalled();
+    ).resolves.toMatchObject({ profiled: 1, unreplayable: 0 });
+    expect(profile).toHaveBeenCalledTimes(1);
   });
 
   it.each([-1, 1.5, 51, "1"])("rejects a continuation index of %s before any fetch", async (startIndex) => {
