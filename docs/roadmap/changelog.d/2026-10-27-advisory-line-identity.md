@@ -1,6 +1,6 @@
 ---
 date: 2026-10-27
-pr:
+pr: 680
 title: Judge duplicate advisories by GHSA, package and affected range
 ---
 
