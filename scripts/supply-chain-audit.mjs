@@ -126,6 +126,15 @@ function advisoryIdentity(advisory) {
   return `${advisory.ghsa_id}|${advisory.package}`;
 }
 
+// pnpm emits one advisory entry per affected version line, so the same GHSA can
+// legitimately appear twice with different ranges (undici 7 and 8 in one
+// workspace). Duplicate detection therefore keys on the range as well; matching
+// against the baseline and the exposure ledger keeps the range-free identity,
+// which stays the advisory's semantic identity.
+function advisoryLineIdentity(advisory) {
+  return `${advisoryIdentity(advisory)}|${advisory.vulnerable_versions ?? ""}`;
+}
+
 function findingFingerprint(advisory, version, path) {
   return JSON.stringify([advisory.ghsa_id, advisory.package, version, path]);
 }
@@ -444,7 +453,10 @@ export function validateProductionAuditBaseline(
   const identities = advisories
     .filter((advisory) => isObject(advisory))
     .map(advisoryIdentity);
-  if (new Set(identities).size !== identities.length) {
+  const lineIdentities = advisories
+    .filter((advisory) => isObject(advisory))
+    .map(advisoryLineIdentity);
+  if (new Set(lineIdentities).size !== lineIdentities.length) {
     issues.push(
       issue(
         "BASELINE_ADVISORY_DUPLICATE",
@@ -622,7 +634,7 @@ function normalizePnpmAudit(audit) {
     // list and the vulnerability-count contract distinct.
     findingCounts[raw.severity] += raw.findings.length;
   }
-  const identities = advisories.map(advisoryIdentity);
+  const identities = advisories.map(advisoryLineIdentity);
   if (new Set(identities).size !== identities.length) {
     issues.push(
       issue(
