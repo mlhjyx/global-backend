@@ -186,23 +186,75 @@ export class LeadService {
         include: { contacts: { include: { contactPoints: true } } },
       });
       if (company) {
-        const evidenceRows = await tx.fieldEvidence.findMany({
-          where: {
-            entityId: { in: [company.id, ...company.contacts.map((contact) => contact.id)] },
-          },
-          select: { providerKey: true, license: true },
-        });
-        if (evidenceRows.some(isSyntheticDiscoveryProvenance)) {
-          throw new ConflictException({
-            error: {
-              code: 'SYNTHETIC_PROVENANCE_QUARANTINED',
-              message: 'historical synthetic discovery evidence is quarantined from product reads',
-            },
-          });
-        }
+        await this.assertProductProvenance(tx, [company.id, ...company.contacts.map((contact) => contact.id)]);
       }
       return { ...lead, company };
     });
+  }
+
+  /** 产品读一律拒绝历史合成来源（get / package / decide 共用同一条规则与错误码）。 */
+  private async assertProductProvenance(tx: Prisma.TransactionClient, entityIds: readonly string[]): Promise<void> {
+    const provenance = await tx.fieldEvidence.findMany({
+      where: { entityId: { in: [...entityIds] } },
+      select: { providerKey: true, license: true },
+    });
+    if (provenance.some(isSyntheticDiscoveryProvenance)) {
+      throw new ConflictException({
+        error: {
+          code: 'SYNTHETIC_PROVENANCE_QUARANTINED',
+          message: 'historical synthetic discovery evidence is quarantined from product reads',
+        },
+      });
+    }
+  }
+
+  /**
+   * 交付事实（accept 快照与 GET /leads/:id/package 共用）：公司级联系路径（应用抑制规则）与
+   * 最近 100 条证据（附 raw_source_record 的来源 URL）。调用方已在事务里读过公司证据时可传入，
+   * 避免同一事务里再扫一遍。
+   */
+  private async loadDeliveryFacts(
+    tx: Prisma.TransactionClient,
+    company: { id: string; name: string; domain: string | null },
+    suppressions: ReadonlyArray<{ type: string; value: string }>,
+    companyEvidence?: ReadonlyArray<{ entityId: string; field: string; fetchedAt: Date; rawRecordId: string | null }>,
+  ): Promise<{
+    contactPoints: Array<{ kind: string; value: string; status: string }>;
+    evidence: Array<{ field: string; sourceUrl: string | null; fetchedAt: Date }>;
+  }> {
+    const contactPoints = await tx.companyContactPoint.findMany({
+      where: { companyId: company.id },
+      select: { kind: true, value: true, status: true },
+      orderBy: [{ kind: 'asc' }, { value: 'asc' }],
+    });
+    const evidenceRows =
+      companyEvidence ??
+      (await tx.fieldEvidence.findMany({
+        where: { entityType: 'company', entityId: company.id },
+        select: { entityId: true, field: true, fetchedAt: true, rawRecordId: true },
+        orderBy: { fetchedAt: 'desc' },
+        take: 100,
+      }));
+    const newest = [...evidenceRows]
+      .filter((row) => row.entityId === company.id)
+      .sort((left, right) => right.fetchedAt.getTime() - left.fetchedAt.getTime())
+      .slice(0, 100);
+    const rawIds = [...new Set(newest.flatMap((row) => (row.rawRecordId ? [row.rawRecordId] : [])))];
+    const rawSources = rawIds.length
+      ? await tx.rawSourceRecord.findMany({
+          where: { id: { in: rawIds } },
+          select: { id: true, sourceUrl: true },
+        })
+      : [];
+    const sourceById = new Map(rawSources.map((row) => [row.id, row.sourceUrl]));
+    return {
+      contactPoints: reachableCompanyContactPoints(contactPoints, suppressions, company),
+      evidence: newest.map((row) => ({
+        field: row.field,
+        sourceUrl: row.rawRecordId ? sourceById.get(row.rawRecordId) ?? null : null,
+        fetchedAt: row.fetchedAt,
+      })),
+    };
   }
 
   /**
@@ -211,77 +263,38 @@ export class LeadService {
    */
   async leadPackage(ctx: RequestContext, leadId: string): Promise<LeadPackage> {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const lead = await tx.lead.findUnique({ where: { id: leadId } });
+      // 联系人只取 id：valid_until 与 accept 快照一样要算上联系人证据的鲜度，但不读取任何个人字段。
+      const lead = await tx.lead.findUnique({
+        where: { id: leadId },
+        include: { canonicalCompany: { include: { contacts: { select: { id: true } } } } },
+      });
       if (!lead) {
         throw new NotFoundException({
           error: { code: 'NOT_FOUND', message: 'lead not found' },
         });
       }
-      const company = await tx.canonicalCompany.findUnique({
-        where: { id: lead.canonicalCompanyId },
-      });
-      if (!company) {
-        throw new NotFoundException({
-          error: { code: 'NOT_FOUND', message: 'canonical company not found' },
-        });
-      }
-      const provenance = await tx.fieldEvidence.findMany({
-        where: { entityType: 'company', entityId: company.id },
-        select: { providerKey: true, license: true },
-      });
-      if (provenance.some(isSyntheticDiscoveryProvenance)) {
-        throw new ConflictException({
-          error: {
-            code: 'SYNTHETIC_PROVENANCE_QUARANTINED',
-            message: 'historical synthetic discovery evidence is quarantined from product reads',
-          },
-        });
-      }
-      const contactPoints = await tx.companyContactPoint.findMany({
-        where: { companyId: company.id },
-        select: { kind: true, value: true, status: true },
-        orderBy: [{ kind: 'asc' }, { value: 'asc' }],
-      });
+      const { canonicalCompany: { contacts, ...company }, ...leadFields } = lead;
+      await this.assertProductProvenance(tx, [company.id]);
       const suppressions = await tx.suppressionRecord.findMany({
         where: { type: { in: ['domain', 'company_name'] } },
         select: { type: true, value: true },
       });
-      const reachablePoints = reachableCompanyContactPoints(contactPoints, suppressions, company);
+      const { contactPoints, evidence } = await this.loadDeliveryFacts(tx, company, suppressions);
       const freshness = await tx.fieldEvidence.groupBy({
         by: ['dataClass'],
-        where: { entityType: 'company', entityId: company.id },
+        where: { entityId: { in: [company.id, ...contacts.map((contact) => contact.id)] } },
         _min: { fetchedAt: true },
       });
-      const evidenceRows = await tx.fieldEvidence.findMany({
-        where: { entityType: 'company', entityId: company.id },
-        select: { field: true, fetchedAt: true, rawRecordId: true },
-        orderBy: { fetchedAt: 'desc' },
-        take: 100,
-      });
-      const rawIds = [
-        ...new Set(evidenceRows.flatMap((row) => (row.rawRecordId ? [row.rawRecordId] : []))),
-      ];
-      const rawSources = rawIds.length
-        ? await tx.rawSourceRecord.findMany({
-            where: { id: { in: rawIds } },
-            select: { id: true, sourceUrl: true },
-          })
-        : [];
-      const sourceById = new Map(rawSources.map((row) => [row.id, row.sourceUrl]));
       const screening = await tx.sanctionsScreeningResult.findFirst({
         where: { canonicalCompanyId: company.id },
         orderBy: { screenedAt: 'desc' },
         select: { status: true, reviewState: true, screenedAt: true },
       });
       return buildLeadPackage({
-        lead,
+        lead: leadFields,
         company,
-        contactPoints: reachablePoints,
-        evidence: evidenceRows.map((row) => ({
-          field: row.field,
-          sourceUrl: row.rawRecordId ? sourceById.get(row.rawRecordId) ?? null : null,
-          fetchedAt: row.fetchedAt,
-        })),
+        contactPoints,
+        evidence,
         sanctions: {
           status: packageSanctionsStatus(screening),
           screened_at: screening?.screenedAt.toISOString() ?? null,
@@ -486,17 +499,19 @@ export class LeadService {
             },
           });
         }
+        // 合成来源守卫与产品读同一条规则；顺带把这次读取的证据行（字段 + 抓取时间 + 原始记录）
+        // 交给交付事实装配，避免在同一把公司行锁里再扫一遍 field_evidence。
         const evidenceRows = await tx.fieldEvidence.findMany({
           where: {
             entityId: { in: [company.id, ...company.contacts.map((contact) => contact.id)] },
           },
-          select: { providerKey: true, license: true },
+          select: { entityId: true, providerKey: true, license: true, field: true, fetchedAt: true, rawRecordId: true },
         });
         if (evidenceRows.some(isSyntheticDiscoveryProvenance)) {
           throw new ConflictException({
             error: {
               code: 'SYNTHETIC_PROVENANCE_QUARANTINED',
-              message: 'historical synthetic discovery evidence is quarantined from product handoff',
+              message: 'historical synthetic discovery evidence is quarantined from product reads',
             },
           });
         }
@@ -677,37 +692,19 @@ export class LeadService {
           lead.status === 'REJECTED' &&
           (await tx.leadDecision.findFirst({ where: { leadId, action: 'reject' }, select: { id: true } })) !== null;
         // BI-19/BI-21/BI-15（设计 §2/§3）：同一事务里组装交付读模型；快照只取其公司级字段。
-        // 读取全部有界（单公司 ≤100 条证据 + 至多 6 条联系路径），不含 canonical_contact。
-        const companyContactPoints = await tx.companyContactPoint.findMany({
-          where: { companyId: effectiveCompany.id },
-          select: { kind: true, value: true, status: true },
-          orderBy: [{ kind: 'asc' }, { value: 'asc' }],
-        });
-        const deliveryEvidenceRows = await tx.fieldEvidence.findMany({
-          where: { entityType: 'company', entityId: effectiveCompany.id },
-          select: { field: true, fetchedAt: true, rawRecordId: true },
-          orderBy: { fetchedAt: 'desc' },
-          take: 100,
-        });
-        const deliveryRawIds = [
-          ...new Set(deliveryEvidenceRows.flatMap((row) => (row.rawRecordId ? [row.rawRecordId] : []))),
-        ];
-        const deliveryRawSources = deliveryRawIds.length
-          ? await tx.rawSourceRecord.findMany({
-              where: { id: { in: deliveryRawIds } },
-              select: { id: true, sourceUrl: true },
-            })
-          : [];
-        const deliverySourceById = new Map(deliveryRawSources.map((row) => [row.id, row.sourceUrl]));
+        // 读取全部有界（单公司 ≤100 条证据 + 至多 6 条联系路径），不含 canonical_contact；
+        // 证据行复用上面那次读取，公司行锁里不再额外扫表。
+        const { contactPoints: deliveryContactPoints, evidence: deliveryEvidence } = await this.loadDeliveryFacts(
+          tx,
+          effectiveCompany,
+          suppressionRows,
+          evidenceRows,
+        );
         const delivery = buildLeadPackage({
           lead,
           company: effectiveCompany,
-          contactPoints: reachableCompanyContactPoints(companyContactPoints, suppressionRows, effectiveCompany),
-          evidence: deliveryEvidenceRows.map((row) => ({
-            field: row.field,
-            sourceUrl: row.rawRecordId ? deliverySourceById.get(row.rawRecordId) ?? null : null,
-            fetchedAt: row.fetchedAt,
-          })),
+          contactPoints: deliveryContactPoints,
+          evidence: deliveryEvidence,
           sanctions: {
             status: sanctionsScreening.status,
             screened_at: sanctionsScreening.screenedAt,

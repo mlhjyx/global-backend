@@ -7,8 +7,14 @@
  * 缺失的事实留空（null / []），绝不猜。
  */
 
+import { clamp01 } from './scoring';
 import { deriveFitReasonCodes } from './reason-codes';
-import { suggestedContactPath, type SuggestedContactPath } from './suggested-contact-path';
+import { extractIdentifiers, isoOrNull } from './lead-qualified-snapshot';
+import {
+  CONTACT_PATH_DISPLAY_ORDER,
+  suggestedContactPath,
+  type SuggestedContactPath,
+} from './suggested-contact-path';
 
 export interface LeadPackageLead {
   readonly id: string;
@@ -123,8 +129,6 @@ export interface LeadPackage {
 const MAX_SIGNALS = 3;
 const MAX_EVIDENCE = 20;
 const MAX_BRANDS = 50;
-/** 联系路径展示顺序与建议规则同一优先级（设计 §7）。 */
-const CONTACT_KIND_ORDER = Object.freeze(['supplier_page', 'contact_form', 'contact_page', 'impressum_page']);
 
 function record(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -144,11 +148,9 @@ function bool(value: unknown): boolean | null {
   return typeof value === 'boolean' ? value : null;
 }
 
+/** Date 或 ISO 串 → ISO 串（与快照同一个归一策略）；其他类型 → null。 */
 function isoInstant(value: unknown): string | null {
-  if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.toISOString() : null;
-  if (typeof value !== 'string') return null;
-  const ms = Date.parse(value);
-  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+  return value instanceof Date || typeof value === 'string' ? isoOrNull(value) : null;
 }
 
 function isHttps(value: string | null): value is string {
@@ -156,8 +158,8 @@ function isHttps(value: string | null): value is string {
 }
 
 function contactKindRank(kind: string): number {
-  const index = CONTACT_KIND_ORDER.indexOf(kind);
-  return index < 0 ? CONTACT_KIND_ORDER.length : index;
+  const index = CONTACT_PATH_DISPLAY_ORDER.indexOf(kind as (typeof CONTACT_PATH_DISPLAY_ORDER)[number]);
+  return index < 0 ? CONTACT_PATH_DISPLAY_ORDER.length : index;
 }
 
 function companyProfile(attributes: Record<string, unknown>) {
@@ -173,7 +175,9 @@ function companyProfile(attributes: Record<string, unknown>) {
     .map((brand) => Object.freeze(brand));
   return Object.freeze({
     trade_role: text(profile.trade_role),
-    trade_role_confidence: finite(profile.trade_role_confidence),
+    // 契约是系统边界：与六维分一样 clamp 到 [0,1]，库里的历史越界值不外泄。
+    trade_role_confidence:
+      finite(profile.trade_role_confidence) == null ? null : clamp01(finite(profile.trade_role_confidence)!),
     own_manufacturing: bool(profile.own_manufacturing),
     carried_brands: Object.freeze(brands),
     carries_chinese_brand: bool(profile.carries_chinese_brand),
@@ -204,6 +208,8 @@ function evidenceList(
   profileSourceUrl: string | null,
 ) {
   const seen = new Set<string>();
+  // Newest first, then dedupe: the surviving row per (field, source) is the freshest one
+  // whatever order the caller read the rows in.
   return evidence
     .flatMap((row) => {
       const source = isHttps(row.sourceUrl)
@@ -213,12 +219,15 @@ function evidenceList(
           : null;
       const fetchedAt = isoInstant(row.fetchedAt);
       if (!isHttps(source) || !fetchedAt || !row.field) return [];
-      const key = `${row.field}\n${source}`;
-      if (seen.has(key)) return [];
-      seen.add(key);
       return [{ field: row.field, source_url: source, fetched_at: fetchedAt, sort: Date.parse(fetchedAt) }];
     })
     .sort((left, right) => right.sort - left.sort)
+    .filter((row) => {
+      const key = `${row.field}\n${row.source_url}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
     .slice(0, MAX_EVIDENCE)
     .map(({ sort: _sort, ...row }) => Object.freeze(row));
 }
@@ -241,8 +250,8 @@ export function buildLeadPackage(input: LeadPackageInput): LeadPackage {
     .map((point) => Object.freeze({ kind: point.kind, url: point.value, status: point.status }));
 
   const gleif = record(attributes.gleif);
-  const fda = record(attributes.fda);
   const profileSourceUrl = text(profile.source_url);
+  const { lei, fda_reg: fdaReg } = extractIdentifiers(attributes);
 
   return Object.freeze({
     lead_id: input.lead.id,
@@ -259,8 +268,8 @@ export function buildLeadPackage(input: LeadPackageInput): LeadPackage {
     identifiers: Object.freeze({
       register_key: text(profile.register_key),
       vat_id: text(profile.vat_id),
-      lei: text(gleif.lei),
-      fda_reg: text(fda.registration_number),
+      lei,
+      fda_reg: fdaReg,
     }),
     contact_points: Object.freeze(contactPoints),
     suggested_contact_path: suggestedContactPath(input.contactPoints),

@@ -379,7 +379,9 @@ describe.runIf(Boolean(ownerUrl && appUrl))('weekly report on PostgreSQL as app_
       税号: 'DE811255398',
       'Fit 结论': '匹配',
       证据链接: `${site}/impressum\n${site}/kontakt`,
-      联系路径: `联系页：${site}/kontakt`,
+      联系路径:
+        `联系页：${site}/kontakt\n` +
+        `建议联系路径（联系页）：${site}/kontakt（官网公开入口，未验证投递；首次联系请用询盘表单或电话说明来意，邮件广告需事先同意）`,
       制裁状态: '未筛查（筛查未启用）',
       有效期至: '2027-04-08',
       // The run created before the 2026-10-13 accept, read through RLS as app_user; the later run is not counted.

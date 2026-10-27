@@ -556,9 +556,17 @@ describe('LeadService.decide(accept) — 同事务取数、payload=快照（对�
     expect(tx.lead.updateMany).not.toHaveBeenCalled();
     expect(decisionCreate).not.toHaveBeenCalled();
     expect(outboxCreate).not.toHaveBeenCalled();
+    // 这次读取同时供合成来源守卫与交付事实装配使用（宽 select 省掉锁内的第二次扫表）。
     expect(tx.fieldEvidence.findMany).toHaveBeenCalledWith({
       where: { entityId: { in: [COMPANY_ID, CONTACT_ID] } },
-      select: { providerKey: true, license: true },
+      select: {
+        entityId: true,
+        providerKey: true,
+        license: true,
+        field: true,
+        fetchedAt: true,
+        rawRecordId: true,
+      },
     });
   });
 

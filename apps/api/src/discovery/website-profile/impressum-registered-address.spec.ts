@@ -29,6 +29,18 @@ describe('parseImpressum — registered address (L6)', () => {
     expect(parseImpressum(text).registeredAddress).toBe('Musterstraße 1, 12345 Musterstadt');
   });
 
+  it('continues an inline label value onto the next line', () => {
+    const text = 'Muster Pumpentechnik GmbH\nAnschrift: Musterstraße 1\n12345 Musterstadt';
+    expect(parseImpressum(text).registeredAddress).toBe('Musterstraße 1, 12345 Musterstadt');
+  });
+
+  it('never merges the register line or a bare year into the address', () => {
+    const gmbh = 'Muster Pumpentechnik GmbH\n';
+    expect(parseImpressum(`${gmbh}Anschrift:\nMusterstraße 1\nHRB 98765, Amtsgericht München`).registeredAddress).toBeNull();
+    expect(parseImpressum(`${gmbh}Seit 2019 in Musterstadt`).registeredAddress).toBeNull();
+    expect(parseImpressum(`${gmbh}Anschrift: Seit 2019 in Musterstadt`).registeredAddress).toBeNull();
+  });
+
   it('never stores an address for a sole trader (no capital form)', () => {
     const text = 'Max Mustermann e.K.\nInhaber: Max Mustermann\nSitz: Musterstraße 1, 12345 Musterstadt';
     expect(parseImpressum(text).registeredAddress).toBeNull();

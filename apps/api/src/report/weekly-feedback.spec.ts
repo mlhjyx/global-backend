@@ -104,4 +104,44 @@ describe('parseWeeklyFeedbackCsv', () => {
       },
     ]);
   });
+
+  it('reads the semicolon file a German-locale Excel saves', () => {
+    const header = HEADER.replaceAll(',', ';');
+    const result = parseWeeklyFeedbackCsv(`\uFEFF${header}\r\nMuster GmbH;${LEAD};4;是;GOOD_FIT;guter Kontakt;否\r\n`);
+    expect(result.fatal).toBeNull();
+    expect(result.rows).toEqual([
+      {
+        line: 2,
+        leadId: LEAD,
+        relevance: 4,
+        willingToContact: true,
+        reasonCode: 'GOOD_FIT',
+        note: 'guter Kontakt',
+        contacted: false,
+      },
+    ]);
+  });
+
+  it('keeps a stray quote inside an unquoted value instead of swallowing the file', () => {
+    const result = parseWeeklyFeedbackCsv(
+      csv(row('Muster "Best Pumps GmbH', '4,是,GOOD_FIT,ok,否'), row('Zweite GmbH', '5,否,WILL_FOLLOW_UP,,是')),
+    );
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows.map((entry) => entry.leadId)).toEqual([LEAD, LEAD]);
+  });
+
+  it('ends a record on a bare CR line ending', () => {
+    const result = parseWeeklyFeedbackCsv(
+      `\uFEFF${HEADER}\rMuster GmbH,${LEAD},4,是,GOOD_FIT,gut,否\rZweite GmbH,${LEAD},5,否,,,是\r`,
+    );
+    expect(result.rows).toHaveLength(2);
+    expect(result.rows[1]).toMatchObject({ contacted: true, relevance: 5 });
+  });
+
+  it('refuses a file longer than the record cap, blank lines counted', () => {
+    const blank = Array.from({ length: 20_001 }, () => ',,,');
+    const result = parseWeeklyFeedbackCsv(csv(...blank));
+    expect(result.fatal).toBe('FEEDBACK_TOO_LARGE');
+    expect(result.rows).toEqual([]);
+  });
 });

@@ -6,7 +6,9 @@
 --     per submission; a changed judgement is a new row. Composite foreign key
 --     (workspace_id, lead_id) keeps it on a lead of the same workspace and deletes it
 --     with the lead; the tenant key needs the new unique index on lead(workspace_id, id).
---     No column holds an email address, phone number or person name.
+--     There is no email, phone or name column; `note` is customer free text and may itself
+--     mention a person, so it follows the lead: DSR erasure of the company deletes the lead
+--     and the outcome rows cascade with it. Nothing updates or deletes an outcome on its own.
 --   * RLS: ENABLE + FORCE + the tenant policy of the discovery tables. app_user gets
 --     SELECT and INSERT only (append-only); docs/governance/app-user-table-privileges.json
 --     lists the same two.

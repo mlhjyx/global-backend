@@ -9143,7 +9143,7 @@
           }
         },
         "responses": {
-          "200": {
+          "201": {
             "description": "",
             "content": {
               "application/json": {
@@ -9163,8 +9163,8 @@
               }
             }
           },
-          "422": {
-            "description": "空反馈、原因码不在枚举或备注超长",
+          "400": {
+            "description": "字段类型或取值不合法（相关性不在 1–5、原因码不在枚举、备注超长）",
             "content": {
               "application/json": {
                 "schema": {
@@ -9185,8 +9185,42 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "OUTCOME_EMPTY",
                             "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "整条反馈没有任何已填字段",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "OUTCOME_EMPTY"
                           ]
                         },
                         "message": {
@@ -9376,6 +9410,41 @@
                             "STORAGE_RIGHTS_NOT_GRANTED",
                             "SANCTIONS_HOLD_UNRESOLVED",
                             "CONFLICT"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "accept 带的原因码不在枚举（可选字段，缺省不校验）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "INVALID_REASON_CODE"
                           ]
                         },
                         "message": {
@@ -9919,33 +9988,41 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "accepted",
-                    "rejected",
-                    "skipped"
+                    "data"
                   ],
                   "properties": {
-                    "accepted": {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    "skipped": {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    "rejected": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "required": [
-                          "line",
-                          "reason"
-                        ],
-                        "properties": {
-                          "line": {
-                            "type": "integer"
-                          },
-                          "reason": {
-                            "type": "string"
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "accepted",
+                        "rejected",
+                        "skipped"
+                      ],
+                      "properties": {
+                        "accepted": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "skipped": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "rejected": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "line",
+                              "reason"
+                            ],
+                            "properties": {
+                              "line": {
+                                "type": "integer"
+                              },
+                              "reason": {
+                                "type": "string"
+                              }
+                            }
                           }
                         }
                       }
@@ -16647,7 +16724,7 @@
               "DUPLICATE",
               "OTHER"
             ],
-            "description": "BI-20 拒绝原因码（必填；自由文本放 reason）"
+            "description": "BI-20 拒绝原因码（reject 必填，缺失返回 422 REASON_CODE_REQUIRED；自由文本放 reason）"
           },
           "reason": {
             "type": "string",

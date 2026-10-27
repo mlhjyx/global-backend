@@ -50,8 +50,9 @@ describe('WeeklyReportService.recordFeedback', () => {
       ],
       skipped: 1,
     });
+    // Only leads this workspace ever delivered (accepted at least once) take a customer outcome.
     expect(tx.lead.findMany).toHaveBeenCalledWith({
-      where: { id: { in: [LEAD, OTHER] } },
+      where: { id: { in: [LEAD, OTHER] }, decisions: { some: { action: 'accept' } } },
       select: { id: true },
     });
     expect(tx.leadOutcome.createMany).toHaveBeenCalledWith({
@@ -84,6 +85,24 @@ describe('WeeklyReportService.recordFeedback', () => {
     });
   });
 
+  it('matches ids whatever their case, and writes the normalised id', async () => {
+    const tx = {
+      lead: { findMany: vi.fn(async () => [{ id: LEAD }]) },
+      leadOutcome: { createMany: vi.fn(async (args: { data: unknown[] }) => ({ count: args.data.length })) },
+    };
+    const upper = LEAD.toUpperCase();
+    const result = await serviceWithTx(tx).recordFeedback(ctx, {
+      csv: csv(`Muster GmbH,${upper},4,是,GOOD_FIT,,`),
+    });
+    expect(result).toEqual({ accepted: 1, rejected: [], skipped: 0 });
+    expect(tx.lead.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: { in: [LEAD] } }) }),
+    );
+    expect(tx.leadOutcome.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: [expect.objectContaining({ leadId: LEAD })] }),
+    );
+  });
+
   it('refuses a body that is not a string', async () => {
     const service = serviceWithTx({});
     await expect(service.recordFeedback(ctx, { csv: 42 })).rejects.toMatchObject({
@@ -91,8 +110,8 @@ describe('WeeklyReportService.recordFeedback', () => {
     });
   });
 
-  it('refuses an upload with more rows than the weekly report could contain', async () => {
-    const rows = Array.from({ length: 5_001 }, () => `Muster GmbH,${LEAD},4,是,GOOD_FIT,,`);
+  it('refuses an upload with more records than a weekly export can carry, blank lines included', async () => {
+    const rows = Array.from({ length: 20_001 }, () => ',,,');
     await expect(serviceWithTx({}).recordFeedback(ctx, { csv: csv(...rows) })).rejects.toMatchObject({
       response: { error: { code: 'FEEDBACK_TOO_LARGE' } },
     });

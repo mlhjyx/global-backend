@@ -12,7 +12,7 @@ import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
 import { RequireScopes } from '../auth/require-scopes.decorator';
@@ -61,12 +61,16 @@ const leadDecisionErrorSchema = (codes: readonly string[]) => ({
 });
 
 class RejectLeadDto {
+  // Kept optional in the published contract (making it required is a breaking change needing a
+  // major bump): the service owns presence (422 REASON_CODE_REQUIRED, the design's status for a
+  // missing code) and membership (422 INVALID_REASON_CODE); the DTO only checks string-ness, so
+  // both documented service errors stay reachable over HTTP.
   @ApiPropertyOptional({
     enum: [...REJECT_REASON_CODES],
-    description: 'BI-20 拒绝原因码（必填；自由文本放 reason）',
+    description: 'BI-20 拒绝原因码（reject 必填，缺失返回 422 REASON_CODE_REQUIRED；自由文本放 reason）',
   })
-  @IsOptional()
-  @IsIn(REJECT_REASON_CODES)
+  @ValidateIf((dto: RejectLeadDto) => dto.reasonCode !== undefined)
+  @IsString()
   reasonCode?: string;
 
   @ApiPropertyOptional({ description: '拒绝原因备注（自由文本，回流做评分质量反馈）' })
@@ -78,7 +82,7 @@ class RejectLeadDto {
 class AcceptLeadDto {
   @ApiPropertyOptional({ enum: [...OUTCOME_REASON_CODES], description: '接受原因码（可选，如 GOOD_FIT）' })
   @IsOptional()
-  @IsIn(OUTCOME_REASON_CODES)
+  @IsString()
   reasonCode?: string;
 
   @ApiPropertyOptional()
@@ -240,11 +244,16 @@ export class LeadController {
   @HttpCode(201)
   @ApiOperation({ summary: '回写线索结果（BI-23）：只追加，客户或运营填写相关性/意愿/原因码/备注/是否已联系' })
   @ApiResponse({
-    status: 422,
-    description: '空反馈、原因码不在枚举或备注超长',
-    schema: leadDecisionErrorSchema(['OUTCOME_EMPTY', 'VALIDATION_ERROR']),
+    status: 400,
+    description: '字段类型或取值不合法（相关性不在 1–5、原因码不在枚举、备注超长）',
+    schema: leadDecisionErrorSchema(['VALIDATION_ERROR']),
   })
-  @ApiEnvelope({ type: 'object', additionalProperties: true, description: '新建的 lead_outcome 行' })
+  @ApiResponse({
+    status: 422,
+    description: '整条反馈没有任何已填字段',
+    schema: leadDecisionErrorSchema(['OUTCOME_EMPTY']),
+  })
+  @ApiEnvelope({ type: 'object', additionalProperties: true, description: '新建的 lead_outcome 行' }, { status: 201 })
   async recordOutcome(
     @Ctx() ctx: RequestContext,
     @Param('leadId', ParseUUIDPipe) leadId: string,
@@ -267,6 +276,11 @@ export class LeadController {
     status: 404,
     description: 'Lead 或其公司不存在',
     schema: leadDecisionErrorSchema(['NOT_FOUND']),
+  })
+  @ApiResponse({
+    status: 422,
+    description: 'accept 带的原因码不在枚举（可选字段，缺省不校验）',
+    schema: leadDecisionErrorSchema(['INVALID_REASON_CODE']),
   })
   @ApiResponse({
     status: 409,

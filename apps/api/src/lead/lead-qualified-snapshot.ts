@@ -198,7 +198,7 @@ export interface LeadQualifiedSnapshotInput {
 }
 
 /** attributes 按源命名空间取标识符（attributes.gleif.lei / attributes.fda.registration_number），缺省 null。 */
-function extractIdentifiers(attributes: unknown): { lei: string | null; fda_reg: string | null } {
+export function extractIdentifiers(attributes: unknown): { lei: string | null; fda_reg: string | null } {
   const attrs = (attributes ?? {}) as Record<string, unknown>;
   const gleif = (attrs.gleif ?? {}) as Record<string, unknown>;
   const fda = (attrs.fda ?? {}) as Record<string, unknown>;
@@ -379,8 +379,8 @@ export function buildLeadQualifiedSnapshot(input: LeadQualifiedSnapshotInput): L
   };
 }
 
-/** Date 或 ISO 串 → ISO 串；缺省/不可解析 → null（不注入 Invalid Date）。 */
-function isoOrNull(value: Date | string | null | undefined): string | null {
+/** Date 或 ISO 串 → ISO 串；缺省/不可解析 → null（不注入 Invalid Date）。快照与读模型共用。 */
+export function isoOrNull(value: Date | string | null | undefined): string | null {
   if (value == null) return null;
   const ms = value instanceof Date ? value.getTime() : Date.parse(value);
   return Number.isFinite(ms) ? new Date(ms).toISOString() : null;

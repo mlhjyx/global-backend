@@ -54,8 +54,7 @@ export type WeeklyReportSanctionsStatus = 'clear' | 'cleared_false_positive' | '
 export interface WeeklyReportRowInput {
   readonly leadId: string;
   readonly fitVerdict: string | null;
-  /** lead.fitReasons / lead.scoreDetail / lead.queue feed the deterministic reason codes (BI-20). */
-  readonly fitReasons?: unknown;
+  /** lead.scoreDetail / lead.queue feed the deterministic reason codes (BI-20). */
   readonly scoreDetail?: unknown;
   readonly queue?: string | null;
   readonly totalScore: number | null;

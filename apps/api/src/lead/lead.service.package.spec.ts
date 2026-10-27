@@ -47,7 +47,8 @@ const company = {
 
 function txFor(over?: Record<string, unknown>) {
   return {
-    lead: { findUnique: vi.fn(async () => lead) },
+    // 一次 include 读取 lead 与其公司（联系人只取 id）。
+    lead: { findUnique: vi.fn(async () => ({ ...lead, canonicalCompany: { ...company, contacts: [] } })) },
     canonicalCompany: { findUnique: vi.fn(async () => company) },
     fieldEvidence: {
       // First call is the provenance probe; the later one loads evidence detail.
@@ -55,8 +56,8 @@ function txFor(over?: Record<string, unknown>) {
         args?.select && 'providerKey' in args.select
           ? [{ providerKey: 'website_profile', license: 'public' }]
           : [
-              { field: 'website_profile.trade_role', dataClass: 'green', fetchedAt: new Date('2026-10-20T00:00:00.000Z'), rawRecordId: 'raw-1' },
-              { field: 'website_profile.vat_id', dataClass: 'green', fetchedAt: new Date('2026-10-21T00:00:00.000Z'), rawRecordId: null },
+              { entityId: 'company-1', field: 'website_profile.trade_role', fetchedAt: new Date('2026-10-20T00:00:00.000Z'), rawRecordId: 'raw-1' },
+              { entityId: 'company-1', field: 'website_profile.vat_id', fetchedAt: new Date('2026-10-21T00:00:00.000Z'), rawRecordId: null },
             ],
       ),
       groupBy: vi.fn(async () => [{ dataClass: 'green', _min: { fetchedAt: new Date('2026-10-20T00:00:00.000Z') } }]),

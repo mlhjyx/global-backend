@@ -5,14 +5,22 @@
  */
 
 import { isOutcomeReasonCode } from '../lead/reason-codes';
+import { WEEKLY_REPORT_COLUMNS } from './weekly-report-row';
+
+/** The columns come from the export's own header list, so a rename cannot desynchronise them. */
+function reportColumn(name: string): string {
+  const found = WEEKLY_REPORT_COLUMNS.find((column) => column === name);
+  if (!found) throw new Error(`WEEKLY_FEEDBACK_COLUMN_MISSING: ${name}`);
+  return found;
+}
 
 export const FEEDBACK_COLUMNS = Object.freeze({
-  leadId: '线索 ID',
-  relevance: '客户填写：相关性（1-5）',
-  willingToContact: '客户填写：愿意联系（是/否）',
-  reasonCode: '客户填写：原因码',
-  note: '客户填写：备注',
-  contacted: '客户填写：是否已联系（是/否）',
+  leadId: reportColumn('线索 ID'),
+  relevance: reportColumn('客户填写：相关性（1-5）'),
+  willingToContact: reportColumn('客户填写：愿意联系（是/否）'),
+  reasonCode: reportColumn('客户填写：原因码'),
+  note: reportColumn('客户填写：备注'),
+  contacted: reportColumn('客户填写：是否已联系（是/否）'),
 });
 
 export const FEEDBACK_MAX_NOTE_CHARS = 2_000;
@@ -41,12 +49,18 @@ export interface WeeklyFeedbackRejection {
 }
 
 export interface WeeklyFeedbackParseResult {
-  /** 'FEEDBACK_HEADER_MISSING' refuses the whole file; null means rows were read. */
-  readonly fatal: 'FEEDBACK_HEADER_MISSING' | null;
+  /**
+   * A whole-file refusal; null means rows were read: 'FEEDBACK_HEADER_MISSING' (no lead id
+   * column) or 'FEEDBACK_TOO_LARGE' (more records than one export can carry).
+   */
+  readonly fatal: 'FEEDBACK_HEADER_MISSING' | 'FEEDBACK_TOO_LARGE' | null;
   readonly rows: readonly WeeklyFeedbackRow[];
   readonly rejected: readonly WeeklyFeedbackRejection[];
   readonly skipped: number;
 }
+
+/** The feedback file comes back from one export; anything far larger is refused while parsing. */
+export const WEEKLY_FEEDBACK_MAX_RECORDS = 20_000;
 
 interface CsvRecord {
   readonly cells: readonly string[];
@@ -55,9 +69,25 @@ interface CsvRecord {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 
-/** RFC 4180 records: quoted fields, doubled quotes, commas and line breaks inside quotes. */
-function csvRecords(text: string): readonly CsvRecord[] {
+/**
+ * The field separator: the exported file uses commas, but a German-locale Excel saves the
+ * filled sheet with semicolons. The header decides (it always carries 线索 ID).
+ */
+function delimiterOf(input: string): ',' | ';' {
+  const firstLine = input.split('\n', 1)[0] ?? '';
+  return firstLine.includes(';') && !firstLine.includes(',') ? ';' : ',';
+}
+
+/**
+ * RFC 4180 records: quoted fields, doubled quotes, the file's separator and line breaks
+ * inside quotes. A quote only opens a quoted field at the start of a field (a stray `"`
+ * inside an unquoted value stays literal instead of swallowing the rest of the file);
+ * a bare CR or a CRLF ends a record. At most {@link WEEKLY_FEEDBACK_MAX_RECORDS} records
+ * are kept; a longer file reports itself and is not parsed further.
+ */
+function csvRecords(text: string, maxRecords: number): { records: readonly CsvRecord[]; tooLarge: boolean } {
   const input = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  const delimiter = delimiterOf(input);
   const records: CsvRecord[] = [];
   let cells: string[] = [];
   let field = '';
@@ -80,16 +110,16 @@ function csvRecords(text: string): readonly CsvRecord[] {
       }
       continue;
     }
-    if (char === '"') {
+    if (char === '"' && field.length === 0) {
       quoted = true;
-    } else if (char === ',') {
+    } else if (char === delimiter) {
       cells.push(field);
       field = '';
-    } else if (char === '\r') {
-      // CRLF: the \n ends the record.
-    } else if (char === '\n') {
+    } else if (char === '\r' || char === '\n') {
+      if (char === '\r' && input[index + 1] === '\n') index += 1;
       cells.push(field);
       records.push({ cells, line: recordLine });
+      if (records.length > maxRecords) return { records: [], tooLarge: true };
       cells = [];
       field = '';
       line += 1;
@@ -101,8 +131,9 @@ function csvRecords(text: string): readonly CsvRecord[] {
   if (field.length > 0 || cells.length > 0) {
     cells.push(field);
     records.push({ cells, line: recordLine });
+    if (records.length > maxRecords) return { records: [], tooLarge: true };
   }
-  return records;
+  return { records, tooLarge: false };
 }
 
 function columnIndex(header: readonly string[], name: string): number {
@@ -117,8 +148,14 @@ function yesNo(value: string): boolean | null | undefined {
 }
 
 /** Parse and validate the filled weekly CSV; never writes anything. */
-export function parseWeeklyFeedbackCsv(text: string): WeeklyFeedbackParseResult {
-  const records = csvRecords(text);
+export function parseWeeklyFeedbackCsv(
+  text: string,
+  maxRecords: number = WEEKLY_FEEDBACK_MAX_RECORDS,
+): WeeklyFeedbackParseResult {
+  const { records, tooLarge } = csvRecords(text, maxRecords);
+  if (tooLarge) {
+    return { fatal: 'FEEDBACK_TOO_LARGE', rows: [], rejected: [], skipped: 0 };
+  }
   const headerIndex = records.findIndex((record) => record.cells.some((cell) => cell.trim() === FEEDBACK_COLUMNS.leadId));
   if (headerIndex < 0) {
     return { fatal: 'FEEDBACK_HEADER_MISSING', rows: [], rejected: [], skipped: 0 };

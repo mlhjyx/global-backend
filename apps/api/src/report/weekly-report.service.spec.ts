@@ -46,7 +46,6 @@ function leadRow(id: string, companyId: string, overrides: Record<string, unknow
     id,
     canonicalCompanyId: companyId,
     fitVerdict: 'match',
-    fitReasons: null,
     scoreDetail: null,
     queue: 'recommended',
     totalScore: 0.8,

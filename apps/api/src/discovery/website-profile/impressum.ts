@@ -45,25 +45,30 @@ const ADDRESS_LABEL =
 /** Address candidates mentioning a person are dropped, never stored. */
 const ADDRESS_PERSON =
   /gesch(?:ä|ae)ftsf(?:ü|ue)hr|inhaber|vertreten|ansprechpartner|vorstand|\b(?:herr|frau|mr|mrs|ms|dr)\.?\s/iu;
-const ADDRESS_POSTAL_CODE = /(?<!\d)\d{4,5}(?!\d)/u;
+/** Register, tax and contact lines are company facts of another kind, never part of the address. */
+const ADDRESS_OTHER_FACT =
+  /\bH\s?R\s?[AB]\b|Amtsgericht|Registergericht|Handelsregister|Registernummer|\bUSt\b|Umsatzsteuer|Steuernummer|Steuer-?Nr|\bTel\b|\bFax\b|Telefon|Mobil|E-?Mail|@/iu;
+/** A German postal code followed by the city: 5 digits, whitespace, then a capitalised name. */
+const ADDRESS_POSTAL_CITY =
+  /(?<!\d)(\d{5})\s+([A-ZÄÖÜ][\p{L}.\- ]{0,60})(?:,\s*[A-ZÄÖÜ][\p{L}.\- ]{0,40})?$/u;
 const ADDRESS_PHONE_LIKE = /(?:\+?\p{Nd}[\s().\-/]*){7,}/u;
 const MAX_ADDRESS_BYTES = 200;
 
 /**
  * Whether a string is a company postal address worth storing: bounded, no email /
- * URL / phone / person markers, and carrying a 4–5 digit postal code next to a city.
- * Used by the Impressum parser and the canonical-attribute sanitizer.
+ * URL / phone / person / register markers, and ending in a German postal code (5 digits)
+ * followed by the city. Used by the Impressum parser and the canonical-attribute sanitizer.
  */
 export function isRegisteredAddressText(value: string): boolean {
   if (value.normalize('NFKC') !== value) return false;
   if (Buffer.byteLength(value, 'utf8') > MAX_ADDRESS_BYTES) return false;
-  if (/@/u.test(value) || /https?:\/\//iu.test(value) || /\bwww\./iu.test(value)) return false;
-  if (ADDRESS_PERSON.test(value) || ADDRESS_PHONE_LIKE.test(value)) return false;
-  const postal = ADDRESS_POSTAL_CODE.exec(value);
+  if (/https?:\/\//iu.test(value) || /\bwww\./iu.test(value)) return false;
+  if (ADDRESS_PERSON.test(value) || ADDRESS_OTHER_FACT.test(value) || ADDRESS_PHONE_LIKE.test(value)) return false;
+  const postal = ADDRESS_POSTAL_CITY.exec(value);
   if (!postal) return false;
-  const after = value.slice(postal.index + postal[0].length);
+  // Something street-like must precede the postal code ("Musterstraße 1", "Postfach 12").
   const before = value.slice(0, postal.index);
-  return /[A-Za-zÄÖÜäöüß]/u.test(after) || /[A-Za-zÄÖÜäöüß]/u.test(before);
+  return /[\p{L}]{3,}/u.test(before) && /\d/u.test(before);
 }
 
 /** German VAT id check digit (ISO 7064 MOD 11,10). */
@@ -133,29 +138,35 @@ function parseLegalName(text: string): string | null {
   return null;
 }
 
-/** The address after the first usable label, possibly continued on the next lines. */
+function cleanedAddress(candidate: string): string {
+  return candidate.replace(/^[,;:\-\s]+|[,;:\-\s]+$/gu, '').replace(/\s+/gu, ' ').trim();
+}
+
+/**
+ * The address after the first usable label. The value may sit on the label line, continue on
+ * the next one ("Anschrift: Musterstraße 1" / "12345 Musterstadt"), or follow a bare label;
+ * a line about a person or another company fact ends the candidate instead of being merged.
+ */
 function parseRegisteredAddress(text: string): string | null {
   const lines = text
     .split('\n')
     .map((line) => line.replace(/[*_#>`|]/gu, ' ').replace(/\s+/gu, ' ').trim());
+  const continues = (line: string | undefined): line is string =>
+    !!line && !ADDRESS_PERSON.test(line) && !ADDRESS_OTHER_FACT.test(line);
   for (let index = 0; index < lines.length; index += 1) {
     const match = ADDRESS_LABEL.exec(lines[index] ?? '');
     if (!match) continue;
     const inline = match[1]!.trim();
-    const candidates: string[] = inline ? [inline] : [];
-    if (!inline) {
-      const following: string[] = [];
-      for (let next = index + 1; next < lines.length && following.length < 2; next += 1) {
-        if (lines[next]) following.push(lines[next]!);
-      }
-      if (following.length >= 2) candidates.push(`${following[0]}, ${following[1]}`);
-      if (following.length >= 1) candidates.push(following[0]!);
-    }
+    const next = [lines[index + 1], lines[index + 2]];
+    const candidates = [
+      inline && continues(next[0]) ? `${inline}, ${next[0]}` : '',
+      inline,
+      !inline && continues(next[0]) && continues(next[1]) ? `${next[0]}, ${next[1]}` : '',
+      !inline && continues(next[0]) ? next[0]! : '',
+    ];
     for (const candidate of candidates) {
-      const cleaned = candidate
-        .replace(/^[,;:\-\s]+|[,;:\-\s]+$/gu, '')
-        .replace(/\s+/gu, ' ')
-        .trim();
+      if (!candidate) continue;
+      const cleaned = cleanedAddress(candidate);
       if (isRegisteredAddressText(cleaned)) return cleaned;
     }
   }

@@ -8,6 +8,8 @@
  * 自由文本仍保留在 lead_decision.reason 与 fit_reasons 里给人看。
  */
 
+import { MISSING_CONTACT_POINT } from './scoring';
+
 export const REJECT_REASON_CODES = Object.freeze([
   'NOT_TARGET_ROLE',
   'WRONG_PRODUCT',
@@ -114,8 +116,8 @@ export function deriveFitReasonCodes(input: FitReasonCodeInput): readonly string
   }
 
   const scores = record(input.scores);
-  if (scores?.reachability === 0) codes.push('MISSING_CONTACT_POINT');
-  if (array(detail?.reasonCodes).includes('MISSING_CONTACT_POINT')) codes.push('MISSING_CONTACT_POINT');
+  if (scores?.reachability === 0) codes.push(MISSING_CONTACT_POINT);
+  if (array(detail?.reasonCodes).includes(MISSING_CONTACT_POINT)) codes.push(MISSING_CONTACT_POINT);
 
   if (text(input.queue) === 'sanctions_hold') codes.push('SANCTIONS_HOLD');
 

@@ -9,7 +9,20 @@
 export const SUGGESTED_CONTACT_LEGAL_NOTE =
   '官网公开入口，未验证投递；首次联系请用询盘表单或电话说明来意，邮件广告需事先同意';
 
-/** 建议顺序即设计 §7 的优先级；kind 与 company_contact_point 的数据库 CHECK 一致。 */
+/**
+ * 交付面展示联系路径的完整顺序：前四种是设计 §7 的建议优先级，LinkedIn / X 只展示、不建议。
+ * kind 与 company_contact_point 的数据库 CHECK 一致（读模型的展示顺序与周报同一份）。
+ */
+export const CONTACT_PATH_DISPLAY_ORDER = Object.freeze([
+  'supplier_page',
+  'contact_form',
+  'contact_page',
+  'impressum_page',
+  'linkedin_company_page',
+  'x_company_account',
+] as const);
+
+/** 建议顺序即设计 §7 的优先级（展示顺序的前四种）。 */
 export const SUGGESTED_CONTACT_PATH_KINDS = Object.freeze([
   'supplier_page',
   'contact_form',

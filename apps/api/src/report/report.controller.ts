@@ -109,16 +109,22 @@ export class ReportController {
     description: '接受与拒绝计数（拒绝行带文件内行号与稳定原因）',
     schema: {
       type: 'object',
-      required: ['accepted', 'rejected', 'skipped'],
+      required: ['data'],
       properties: {
-        accepted: { type: 'integer', minimum: 0 },
-        skipped: { type: 'integer', minimum: 0 },
-        rejected: {
-          type: 'array',
-          items: {
-            type: 'object',
-            required: ['line', 'reason'],
-            properties: { line: { type: 'integer' }, reason: { type: 'string' } },
+        data: {
+          type: 'object',
+          required: ['accepted', 'rejected', 'skipped'],
+          properties: {
+            accepted: { type: 'integer', minimum: 0 },
+            skipped: { type: 'integer', minimum: 0 },
+            rejected: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['line', 'reason'],
+                properties: { line: { type: 'integer' }, reason: { type: 'string' } },
+              },
+            },
           },
         },
       },
