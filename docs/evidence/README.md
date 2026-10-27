@@ -31,6 +31,8 @@
 
 [2026-10-19 漏洞基线到期续期](security/20261019-baseline-renewal.json)：锁文件未变，只换绑定、延有效期。同一生产审计（零 advisory）在旧、新绑定下都是 `FRESH`；附两个到期边界的投影：旧基线自 2026-10-24T13:59:34Z 起 `BASELINE_EXPIRED`，新基线延至 2026-11-02T11:27:18Z；不作为运行或发布证明。
 
+[2026-10-27 新发布 advisory 修复与基线重绑](security/20261027-production-advisory-remediation.json)：10-19 之后 GitHub 新发布 13 条 production advisory（body-parser、multer、fast-uri、undici 7/8、zod），锁文件未动却让 main 的 freshness canary 变 `BASELINE_STALE`；把五条依赖线升到修复版本（contracts 由 zod 3 升 zod 4）后，同一生产审计零 advisory，旧绑定回执为 CI 上 fbfcccba 的 `BASELINE_STALE`（13 条），重绑到 c33861aa 后为 `FRESH`，有效期延至 2026-11-10T05:13:39Z；不作为运行或发布证明。
+
 [执行授权物理接线围栏复核](execution-authority-fence-review-20261001.md)：Router/ToolBroker 四个受保护文件自 `b8dd5eb0` 以来全部改动的逐提交静态复核（10-01），及 10-06 的复查与独立复审；Router 指纹据此更新，`execution-authority-policy` spec 回到 required 门。只是静态复核记录，不是 RuntimeEvidence，也不作为运行或发布证明。
 
 ## 1. 分类
