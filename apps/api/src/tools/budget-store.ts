@@ -243,7 +243,16 @@ export class BudgetUnsettledOperationsError extends Error {
 export class BudgetOperationReplayError extends Error {
   readonly code = 'BUDGET_OPERATION_REPLAY_UNAVAILABLE';
 
-  constructor(public readonly operationKey: string) {
+  /**
+   * 'remnant': the operation was found at reservation — an earlier attempt left it without a
+   * durable result, so it says nothing about the upstream right now. 'live': this attempt's own
+   * wire already ran and its result could not be stored or settled, which is a storage or ledger
+   * fault now. Defaults to 'live', so any site that forgets to say stays fail-closed.
+   */
+  constructor(
+    public readonly operationKey: string,
+    public readonly origin: 'remnant' | 'live' = 'live',
+  ) {
     super(`budget operation already exists without a durable result: ${operationKey}`);
     this.name = 'BudgetOperationReplayError';
   }

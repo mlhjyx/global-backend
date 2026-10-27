@@ -321,7 +321,7 @@ function rehearse(options: { companies: number; slowdown?: number; faults?: Faul
   const unreplayableCompanies = new Set<string>();
   rehearsal.fitModel.mockImplementation(async (_gateway: unknown, request: unknown) => {
     const company = companyOf(request);
-    if (unreplayableCompanies.has(company)) throw new BudgetOperationReplayError(`fit-${company}`);
+    if (unreplayableCompanies.has(company)) throw new BudgetOperationReplayError(`fit-${company}`, "remnant");
     // Numbered when the call starts: siblings in flight start their own calls while this one waits.
     fitCalls += 1;
     const call = fitCalls;
@@ -359,7 +359,7 @@ function rehearse(options: { companies: number; slowdown?: number; faults?: Faul
       profiles += 1;
       advance(LATENCY_MS.profile);
       if (faults.profileUnreplayable?.includes(profiles)) {
-        throw new BudgetOperationReplayError(`profile-${profiles}`);
+        throw new BudgetOperationReplayError(`profile-${profiles}`, "remnant");
       }
       if (faults.profileUpstreamDown?.includes(profiles)) {
         throw new ProviderHttpError({ status: 521, provider: 'gateway', model: 'deepseek-v4-pro' });
@@ -385,7 +385,7 @@ function rehearse(options: { companies: number; slowdown?: number; faults?: Faul
         faults.signalUnreplayable === 'all' ||
         faults.signalUnreplayable?.includes(signalCalls)
       ) {
-        throw new BudgetOperationReplayError(`signal-${signalCalls}`);
+        throw new BudgetOperationReplayError(`signal-${signalCalls}`, "remnant");
       }
       return { matched: false };
     }),

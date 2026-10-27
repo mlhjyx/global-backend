@@ -386,7 +386,7 @@ export class ToolBroker implements ExecutionBroker {
                 : undefined,
             );
           } catch {
-            throw new BudgetOperationReplayError(reservation.operationId);
+            throw new BudgetOperationReplayError(reservation.operationId, "remnant");
           }
           if (replay) {
             const returned = reservation.receipt
@@ -397,7 +397,7 @@ export class ToolBroker implements ExecutionBroker {
             }
             return returned;
           }
-          throw new BudgetOperationReplayError(reservation.operationId);
+          throw new BudgetOperationReplayError(reservation.operationId, "remnant");
         }
       } catch (err) {
         if (
@@ -443,7 +443,7 @@ export class ToolBroker implements ExecutionBroker {
         try {
           replay = await this.deps.artifactExecution!.replay({ reservation, tool });
         } catch {
-          throw new BudgetOperationReplayError(reservation.operationId);
+          throw new BudgetOperationReplayError(reservation.operationId, "remnant");
         }
         if (replay.durableReceipt) {
           ctx.onDurableReceipt?.(tool.id, replay.durableReceipt);

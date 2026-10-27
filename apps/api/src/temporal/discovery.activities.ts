@@ -572,14 +572,24 @@ function isContinuationIndex(value: unknown, limit: number): boolean {
  * wire already ran and left no durable result (an artifact that could not be stored, a call settled
  * without a result), so it is never retried: retrying could pay twice.
  *
- * Such a remnant is always a leftover of an earlier attempt — an attempt that died before the
- * operation got a durable result — so it says nothing about the upstream right now, and two in a
- * row are just two such attempts, not an outage: they are counted like any other skip. (The fit
- * pass has always read them this way.) Whether the upstream is healthy is judged by the control
- * errors of the current attempt, which wait and stop for the lease instead of failing the run.
+ * Two kinds share the error, told apart by `origin`:
+ * - a remnant ('remnant') is found at reservation: an earlier attempt left the operation without a
+ *   durable result. It says nothing about the upstream right now, so two in a row are just two
+ *   such attempts, not an outage, and every one is counted like any other skip (the fit pass has
+ *   always read them this way);
+ * - a live fault ('live') is this attempt's own wire that ran and whose result could not be stored,
+ *   projected or settled. That is a storage or ledger outage now, so the stage keeps its old
+ *   two-in-a-row stop for it.
+ * Whether the model upstream is healthy is judged by the control errors of the current attempt,
+ * which wait and stop for the lease instead of failing the run.
  */
 function isUnreplayableOperation(error: unknown): error is BudgetOperationReplayError {
   return error instanceof BudgetOperationReplayError;
+}
+
+/** A replay error found at reservation: a leftover of an earlier attempt, never evidence about now. */
+function isReplayRemnant(error: unknown): boolean {
+  return error instanceof BudgetOperationReplayError && error.origin === 'remnant';
 }
 
 /**
@@ -994,10 +1004,16 @@ export function createDiscoveryActivities(deps: {
       // result, the way a retry finds the call a broken attempt left behind) answers this query
       // with nothing instead of failing it: the query still ends with its receipt, which the
       // materialization admission requires for every plan query, and the workflow counts it.
-      // The hand-off flag stays on the wire for older workflow histories, but a lost operation is
-      // a remnant of an earlier attempt, never evidence about the upstream now, so a second query
-      // in a row is absorbed exactly like the first.
-      const lostOnReplay = (error: unknown): boolean => isUnreplayableOperation(error);
+      // A remnant (an earlier attempt's leftover) is absorbed exactly like any other skip. A live
+      // fault is this attempt's own wire failing to store its result: the old two-in-a-row stop
+      // stays for it, with the hand-off flag on the wire for older workflow histories. The flag
+      // cannot tell the two kinds apart, so a live fault next to any flagged loss still stops.
+      const lostOnReplay = (error: unknown): boolean => {
+        if (!isUnreplayableOperation(error)) return false;
+        if (isReplayRemnant(error)) return true;
+        if (args.previousQueryUnreplayable) throw error;
+        return true;
+      };
       // The model is worth calling only for a source that reads the resolved codes (wikidata,
       // openstreetmap); a query routed to public_web or the registries alone keeps the
       // deterministic alias lookup. The model operation is keyed per query, not per run, and a
@@ -2104,7 +2120,10 @@ export function createDiscoveryActivities(deps: {
       nextIndex: number | null;
       /** Companies skipped because an operation could not be replayed. */
       unreplayable: number;
-      /** Carries the two-in-a-row rule for unreplayable companies over to the next profile activity. */
+      /**
+       * Whether this pass ended on a company it skipped as unreplayable. Kept on the wire for older
+       * workflow histories; it no longer decides anything (a remnant is absorbed like any skip).
+       */
       previousUnreplayable: boolean;
       /** Workspace companies outside the run profiled with the quota the run's own companies left (contact-path backfill). */
       backfilled: number;
@@ -2262,6 +2281,7 @@ export function createDiscoveryActivities(deps: {
         let profile: WebsiteProfile | null = null;
         let subjectDenied = false;
         let unreplayableSkip = false;
+        let skipWasRemnant = false;
         try {
           const homeCountry = targetCountryCodes({ filters: { country: c.country } })[0] ?? icpHomeCountry;
           profile = await provider.profile(
@@ -2280,8 +2300,9 @@ export function createDiscoveryActivities(deps: {
         } catch (error) {
           if (artifactSubjectSkipReason(error)) {
             subjectDenied = true;
-          } else if (isUnreplayableOperation(error)) {
+          } else if (isUnreplayableOperation(error) && (isReplayRemnant(error) || !previousUnreplayable)) {
             unreplayableSkip = true;
+            skipWasRemnant = isReplayRemnant(error);
           } else if (isExecutionControlError(error)) {
             // An unavailable model upstream makes the next attempt wait instead of retrying within
             // seconds; when the lease cannot hold the wait and one more profile, the stage stops
@@ -2294,7 +2315,8 @@ export function createDiscoveryActivities(deps: {
           }
           /* 单家画像失败不影响其余 */
         }
-        previousUnreplayable = unreplayableSkip;
+        // Only a live fault carries the two-in-a-row rule on to the next company and the next pass.
+        previousUnreplayable = unreplayableSkip && !skipWasRemnant;
         // BI-14：联系路径的观测时间取这家页面读完的时刻（不是活动开始时刻），供 last_seen_at 单调比较。
         const observedAt = new Date();
         // W5-f：profiled / matched / unclassified 只计本 run 的公司；补读的公司计入 backfilled。
@@ -2405,8 +2427,9 @@ export function createDiscoveryActivities(deps: {
      *  - TTL 刷新：命名空间 `_ts` 在 SIGNAL_TTL_MS 内则跳过（信号时变，不能像 GLEIF 静态事实那样一次写死）。
      *  - 上限 SIGNAL_ENRICH_LIMIT 家，让一次尝试落在 startToCloseTimeout 之内。
      *  - 站点自己断开连接只跳过这家公司的那一个源（计 transportFailed）。那次读取留在 RESERVED：
-     *    同一 run 的第 2 次尝试会把这家记为不可重放；两家这样的公司在已尝试的公司里相邻时，
-     *    「连续两家不可重放」规则会让第 2 次尝试失败。只有第 1 次尝试另因别的原因失败时才会走到这里。
+     *    同一 run 的第 2 次尝试会把这家记为不可重放（残留，`origin=remnant`）并照常计数；
+     *    「连续两次」只对本次尝试自己的落库/结算失败（`origin=live`）保留。只有第 1 次尝试
+     *    另因别的原因失败时才会走到这里。
      */
     async enrichSignalsRun(args: DiscoveryActivityInput & { runId: string; icpId: string }): Promise<{
       enriched: number;
@@ -2491,6 +2514,9 @@ export function createDiscoveryActivities(deps: {
       let unreplayable = 0;
       let transportFailed = 0;
       let skippedForLease = 0;
+      // Only a live fault (this attempt's own wire failing to store its result) carries the
+      // two-in-a-row stop; a remnant is counted like any other skip.
+      let previousUnreplayable = false;
       const nowMs = Date.now();
       const lease = await readRunLease(binding);
       const signalCompanies = companies.slice(0, SIGNAL_ENRICH_LIMIT);
@@ -2542,7 +2568,9 @@ export function createDiscoveryActivities(deps: {
         const hits: { key: string; result: EnrichmentResult }[] = [];
         let subjectDenied = false;
         let unreplayableSkip = false;
+        let skipWasRemnant = false;
         let transportLost = false;
+        let attempted = false;
         for (const e of enrichers) {
           const prev = existing[e.key] as { _ts?: string } | undefined;
           if (prev?._ts && nowMs - Date.parse(prev._ts) < SIGNAL_TTL_MS) continue; // TTL 新鲜 → 跳过（不刷）
@@ -2552,6 +2580,7 @@ export function createDiscoveryActivities(deps: {
             ))
           )
             break;
+          attempted = true;
           try {
             const r = await e.enrichCompany(
               {
@@ -2573,8 +2602,9 @@ export function createDiscoveryActivities(deps: {
               subjectDenied = true;
               break;
             }
-            if (isUnreplayableOperation(error)) {
+            if (isUnreplayableOperation(error) && (isReplayRemnant(error) || !previousUnreplayable)) {
               unreplayableSkip = true;
+              skipWasRemnant = isReplayRemnant(error);
               break;
             }
             // 站点自己断开连接（TLS 重置、socket hang up）只是这家公司这一个信号源的损失，不是控制决定；
@@ -2590,6 +2620,7 @@ export function createDiscoveryActivities(deps: {
             /* 单信号源失败不影响其余 */
           }
         }
+        if (attempted) previousUnreplayable = unreplayableSkip && !skipWasRemnant;
         if (unreplayableSkip) unreplayable += 1;
         else if (subjectDenied) skippedSubjects += 1;
         else {
@@ -2694,6 +2725,8 @@ export function createDiscoveryActivities(deps: {
       let registered = 0;
       let skippedSubjects = 0;
       let unreplayable = 0;
+      // Only a live fault carries the two-in-a-row stop; a remnant is counted like any other skip.
+      let previousUnreplayable = false;
       let skippedForLease = 0;
       const lease = await readRunLease(binding);
       const watchCompanies = companies.slice(0, WATCH_REGISTER_LIMIT);
@@ -2717,17 +2750,21 @@ export function createDiscoveryActivities(deps: {
             executionBudget: binding,
           });
           registered += 1;
+          previousUnreplayable = false;
         } catch (error) {
           // G3 5.5：sitemap 抓取挂在这家公司名下；主体被拒 → 跳过这家（计入 PARTIAL）。
           if (artifactSubjectSkipReason(error)) {
             skippedSubjects += 1;
+            previousUnreplayable = false;
             continue;
           }
-          if (isUnreplayableOperation(error)) {
+          if (isUnreplayableOperation(error) && (isReplayRemnant(error) || !previousUnreplayable)) {
             unreplayable += 1;
+            previousUnreplayable = !isReplayRemnant(error);
             continue;
           }
           if (isExecutionControlError(error)) throw error;
+          previousUnreplayable = false;
           /* 单家注册失败（无域名/sitemap 不可达/DAT-011）不影响其余 */
         }
       }
