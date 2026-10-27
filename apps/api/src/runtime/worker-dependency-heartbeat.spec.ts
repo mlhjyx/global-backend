@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startWorkerDependencyHeartbeat } from './worker-dependency-heartbeat';
 
-type CheckResult = { status: 'ok' } | { status: 'failed'; code: string };
+type CheckResult =
+  | { status: 'ok' }
+  | { status: 'failed'; code: string; drainImmediately?: true };
 
 function harness(results: CheckResult[]) {
   const check = vi.fn<() => Promise<CheckResult>>();
@@ -94,6 +96,23 @@ describe('startWorkerDependencyHeartbeat', () => {
     expect(handle.admitted).toBe(false);
     expect(h.blocked).toHaveBeenCalledWith('SETTLEMENT_READBACK_UNAVAILABLE');
     expect(h.shutdown).toHaveBeenCalledOnce();
+  });
+
+  it('drains at once for a failure that marks itself immediate, such as a lost authority capability', async () => {
+    const h = harness([
+      { status: 'ok' },
+      {
+        status: 'failed',
+        code: 'PLATFORM_BUDGET_AUTHORITY_NOT_READY',
+        drainImmediately: true,
+      },
+    ]);
+    const handle = await h.start();
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(h.blocked).toHaveBeenCalledWith('PLATFORM_BUDGET_AUTHORITY_NOT_READY');
+    expect(h.shutdown).toHaveBeenCalledOnce();
+    handle.stop();
   });
 
   it('treats a thrown check as a failure, not as an immediate drain', async () => {

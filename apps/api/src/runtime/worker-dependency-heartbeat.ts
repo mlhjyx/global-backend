@@ -64,7 +64,7 @@ export async function startWorkerDependencyHeartbeat(input: {
       break;
     }
     consecutiveFailures += 1;
-    if (attempt >= failuresBeforeDrain) {
+    if (result.drainImmediately === true || attempt >= failuresBeforeDrain) {
       await drain(result.code);
       return Object.freeze({ admitted: false, stop: () => undefined });
     }
@@ -80,7 +80,12 @@ export async function startWorkerDependencyHeartbeat(input: {
         return;
       }
       consecutiveFailures += 1;
-      if (consecutiveFailures < failuresBeforeDrain || stopped) return;
+      if (
+        stopped ||
+        (result.drainImmediately !== true &&
+          consecutiveFailures < failuresBeforeDrain)
+      )
+        return;
       await drain(result.code);
     })();
   }, intervalMs);
