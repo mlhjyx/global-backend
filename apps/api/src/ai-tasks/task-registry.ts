@@ -514,6 +514,32 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     humanGate: true,
   },
 
+  // BI-15 / L5（交付闭环设计 §7）：给运营的首次联系开发信草稿。平台不发送——草稿只进
+  // 周报，正文末尾的回复入口（卖方官网/邮箱/wa.me）由代码追加，模型只写正文与译文。
+  'outreach.first_contact_draft': {
+    id: 'outreach.first_contact_draft',
+    allowedTools: [],
+    maxCostCents: 20,
+    maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
+    timeoutMs: 180000,
+    description:
+      '为一条已接受的线索写首次联系开发信草稿。只能使用提示中给出的事实（每条带事实键）：卖方资料、买方的贸易角色/在售品牌/匹配点与采购信号。不得编造合作经历、价格、认证或对买方的了解；不得写入任何个人姓名、邮箱或电话。subject 与 body 必须用提示指定的目标国语言书写；body_zh 是 body 的简体中文译文（供运营审阅）。used_facts 列出正文实际引用到的事实键，只能从提示的键表里选。',
+    outputSchema: closedObject({
+      subject: boundedString(200, { description: '邮件主题（目标国语言）' }),
+      body: boundedString(1200, { description: '邮件正文（目标国语言，纯文本，不含签名与联系入口）' }),
+      body_zh: boundedString(1200, { description: 'body 的简体中文译文' }),
+      used_facts: {
+        ...boundedArray(40, boundedString(120)),
+        minItems: 1,
+        description: '正文实际引用的事实键，必须来自提示的键表',
+      },
+    }, ['subject', 'body', 'body_zh', 'used_facts']),
+    model: 'deepseek-v4-pro',
+    // 发给潜在客户的底稿，人工审阅后才可用。
+    risk: 'medium',
+    humanGate: true,
+  },
+
   'site_builder.brand_profile': {
     id: 'site_builder.brand_profile',
     // 品牌 web 研究的两条出网通道（Broker allowedTools 白名单据此裁决，09 §2.4 / C1-C3）。

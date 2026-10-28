@@ -10,7 +10,7 @@ const postAdmissionCallers = [
   'apps/api/src/temporal/discovery.activities.ts',
   'apps/api/src/temporal/understanding.activities.ts',
   'apps/api/src/discovery/taxonomy-resolver.ts',
-  'apps/api/src/icp/icp-budget-execution.ts',
+  'apps/api/src/execution-budget/granted-model-task.ts',
   'apps/api/src/intent/intent-projection.service.ts',
   'apps/api/src/discovery/discovery.service.ts',
 ] as const;

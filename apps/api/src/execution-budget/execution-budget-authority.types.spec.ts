@@ -47,6 +47,7 @@ describe('execution budget authority claim types', () => {
     ['discovery.run', 'discovery_run'],
     ['discovery.run', 'company'],
     ['contact.verify', 'contact_point'],
+    ['outreach.draft', 'lead'],
   ] as const)(
     'accepts the workspace purpose and subject pair %s / %s',
     (purpose, subjectType) => {

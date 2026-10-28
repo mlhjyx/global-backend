@@ -11,6 +11,7 @@ const ICP_ID = '22222222-2222-4222-8222-222222222222';
 const PLAN_ID = '33333333-3333-4333-8333-333333333333';
 const CANONICAL_COMPANY_ID = '44444444-4444-4444-8444-444444444444';
 const POINT_ID = '55555555-5555-4555-8555-555555555555';
+const LEAD_ID = '66666666-6666-4666-8666-666666666666';
 
 const cases = [
   {
@@ -106,6 +107,19 @@ const cases = [
       subjectId: POINT_ID,
       requestSha256:
         'dc357eeb06f031ee9ef0a511c1aaa0561755e2def93e8a7f9518714c2cd19de8',
+    },
+  },
+  {
+    request: {
+      operation: 'POST /leads/:leadId/outreach-drafts',
+      leadId: LEAD_ID,
+    },
+    expected: {
+      purpose: 'outreach.draft',
+      subjectType: 'lead',
+      subjectId: LEAD_ID,
+      requestSha256:
+        '8d2035ba21b03d35f3a3f0708d1bf547c101b131c3510174e275abb4f9d10c62',
     },
   },
 ] as const satisfies readonly {

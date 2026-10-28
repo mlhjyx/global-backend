@@ -27,7 +27,7 @@ describe('AI task registry personal-data boundaries', () => {
 });
 
 describe('AI task registry model execution policy invariants', () => {
-  it('tightens only output contracts for the eleven projected tasks', () => {
+  it('tightens only output contracts for the twelve projected tasks', () => {
     const expected = {
       'company_understanding.extract_claims': {
         model: 'deepseek-v4-pro', risk: 'medium', humanGate: true,
@@ -78,6 +78,11 @@ describe('AI task registry model execution policy invariants', () => {
         allowedTools: ['searxng.search', 'crawl4ai.fetch'], maxCostCents: 15,
         timeoutMs: 120000,
       },
+      // BI-15: drafts go to operators for review; never sent by the platform.
+      'outreach.first_contact_draft': {
+        model: 'deepseek-v4-pro', risk: 'medium', humanGate: true,
+        allowedTools: [], maxCostCents: 20, timeoutMs: 180000,
+      },
     } as const;
 
     for (const [taskId, policy] of Object.entries(expected)) {
@@ -104,6 +109,7 @@ describe('AI task registry model execution policy invariants', () => {
       'company_understanding.extract_offerings',
       'taxonomy.normalize', 'discovery.qualify_fit', 'discovery.extract_company',
       'discovery.extract_list', 'discovery.classify_trade_role', 'contact.find_decision_makers',
+      'outreach.first_contact_draft',
     ];
     for (const taskId of reasoningTasks) {
       expect(getTask(taskId)?.model, taskId).toBe('deepseek-v4-pro');

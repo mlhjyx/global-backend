@@ -36,6 +36,7 @@ export const EXPECTED_MODEL_TASKS = Object.freeze([
   Object.freeze({ path: 'apps/api/src/temporal/understanding.activities.ts', taskId: 'company_understanding.extract_offerings', schema: 'understanding-offerings/v1' }),
   Object.freeze({ path: 'apps/api/src/icp/icp.service.ts', taskId: 'icp.design', schema: 'icp-design/v1' }),
   Object.freeze({ path: 'apps/api/src/icp/icp.service.ts', taskId: 'discovery.query_plan', schema: 'icp-query-plan/v1' }),
+  Object.freeze({ path: 'apps/api/src/lead/outreach-draft.service.ts', taskId: 'outreach.first_contact_draft', schema: 'outreach-first-contact-draft/v1' }),
   Object.freeze({ path: 'apps/api/src/discovery/taxonomy-resolver.ts', taskId: 'taxonomy.normalize', schema: 'taxonomy-code/v1' }),
   Object.freeze({ path: 'apps/api/src/discovery/fit-judge.ts', taskId: 'discovery.qualify_fit', schema: 'fit-judgment/v1' }),
   Object.freeze({ path: 'apps/api/src/discovery/providers/public-web.provider.ts', taskId: 'discovery.extract_company', schema: 'discovery-extract-company/v1' }),
