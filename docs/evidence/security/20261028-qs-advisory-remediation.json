@@ -1,0 +1,65 @@
+{
+  "classification": "FROZEN_AUDIT_EVIDENCE",
+  "scope": "Official npm production audit and exact-lock baseline-freshness for the 2026-10-28 remediation of GHSA-6pq8-jhm2-2vcw (qs.stringify DoS, moderate) published after the 2026-10-27 capture while the lockfile was unchanged, and the rebind of the production audit baseline to commit 6510fb5f1922384a58cac1cb01c2bf615da1646b; not runtime/release/UAT evidence",
+  "records": [
+    {
+      "audit": {
+        "advisories": {},
+        "muted": [],
+        "actions": [],
+        "metadata": {
+          "vulnerabilities": {
+            "info": 0,
+            "low": 0,
+            "moderate": 0,
+            "high": 0,
+            "critical": 0
+          },
+          "dependencies": 830,
+          "devDependencies": 0,
+          "optionalDependencies": 0,
+          "totalDependencies": 830
+        }
+      },
+      "before": {
+        "source": "GitHub Actions run 40675525935 job 122765931128 (main push a30ac929, Supply Chain Canary)",
+        "schema_version": "production-dependency-baseline-freshness-result/v1",
+        "result": "BASELINE_STALE",
+        "hold": true,
+        "current_advisories": 1,
+        "resolved_advisories": [],
+        "issues": [
+          "AUDIT_EXPOSURE_NOT_BASELINED",
+          "AUDIT_NEW_ADVISORY"
+        ],
+        "detail": "GHSA-6pq8-jhm2-2vcw|qs",
+        "provenance": {
+          "subject_commit": "a30ac929cbe4820d3f889f750dad2327ff9bcec8",
+          "lockfile_digest": "sha256:bdafde9dfeec7e1af295fc1679cca4c913b2ccf5cf1783cf4c245b462b3eca9d",
+          "verifier_digest": "sha256:fd2975544c95dee3cfe48f47ccd8c5dbf309a02a5918108572e4fb7257c38a63",
+          "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
+          "audit_digest": "sha256:8a91c627f11c6ae49ac319f8af1ce75b81615b8b1fbffe042a6ece42b2bcf184",
+          "observed_at": "2026-10-28T10:52:48.000Z",
+          "registry": "https://registry.npmjs.org/"
+        }
+      },
+      "after": {
+        "schema_version": "production-dependency-baseline-freshness-result/v1",
+        "result": "FRESH",
+        "hold": false,
+        "current_advisories": 0,
+        "resolved_advisories": [],
+        "issues": [],
+        "provenance": {
+          "subject_commit": "6510fb5f1922384a58cac1cb01c2bf615da1646b",
+          "lockfile_digest": "sha256:bbea0c51c69a24713ff7dc27dbf5c3ad0d8072866b0908d8df278cf2fe0a0677",
+          "verifier_digest": "sha256:fd2975544c95dee3cfe48f47ccd8c5dbf309a02a5918108572e4fb7257c38a63",
+          "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
+          "audit_digest": "sha256:87fa095799b94faa25cfec741792220f61eb5cbf2a5a5a350a5869f491a5e4ab",
+          "observed_at": "2026-10-28T13:18:19.000Z",
+          "registry": "https://registry.npmjs.org/"
+        }
+      }
+    }
+  ]
+}

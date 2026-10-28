@@ -33,6 +33,8 @@
 
 [2026-10-27 新发布 advisory 修复与基线重绑](security/20261027-production-advisory-remediation.json)：10-19 之后 GitHub 新发布 13 条 production advisory（body-parser、multer、fast-uri、undici 7/8、zod），锁文件未动却让 main 的 freshness canary 变 `BASELINE_STALE`；把五条依赖线升到修复版本（contracts 由 zod 3 升 zod 4）后，同一生产审计零 advisory，旧绑定回执为 CI 上 fbfcccba 的 `BASELINE_STALE`（13 条），重绑到 c33861aa 后为 `FRESH`，有效期延至 2026-11-10T05:13:39Z；不作为运行或发布证明。
 
+[2026-10-28 qs advisory 修复与基线重绑](security/20261028-qs-advisory-remediation.json)：10-27 之后 GitHub 发布 GHSA-6pq8-jhm2-2vcw（qs 6.16.0 及以下的 `qs.stringify` DoS，moderate），锁文件未动却让 main 的 freshness canary 变 `BASELINE_STALE`；root override 把 qs 全线升到修复版 6.16.1 后，同一生产审计零 advisory，旧绑定回执为 CI 上 a30ac929 的 `BASELINE_STALE`（1 条），重绑到 6510fb5f 后为 `FRESH`，有效期维持 2026-11-10T05:13:39Z；不作为运行或发布证明。
+
 [执行授权物理接线围栏复核](execution-authority-fence-review-20261001.md)：Router/ToolBroker 四个受保护文件自 `b8dd5eb0` 以来全部改动的逐提交静态复核（10-01），及 10-06 的复查与独立复审；Router 指纹据此更新，`execution-authority-policy` spec 回到 required 门。只是静态复核记录，不是 RuntimeEvidence，也不作为运行或发布证明。
 
 ## 1. 分类
