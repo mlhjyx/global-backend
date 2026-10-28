@@ -18,6 +18,8 @@ import {
   resolveRuntimeSettings,
 } from './runtime/runtime-environment';
 import { initializeRuntimeReleaseIdentity } from './runtime/runtime-release-identity';
+import { PORTAL_INTRO_MARKDOWN } from './docs/portal-intro';
+import { OPERATION_DESCRIPTIONS } from './docs/operation-descriptions';
 import { resolveDevFastLane } from './runtime/dev-fast-lane';
 import { installPlatformRevocationHttpBoundary } from './platform-authority/platform-revocation-http.middleware';
 
@@ -80,17 +82,21 @@ function installCsvTextBodyReader(app: { use: (handler: (req: IncomingMessage, r
 function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
   const config = new DocumentBuilder()
     .setTitle('Global API')
-    .setDescription('出海企业 AI 全球客户开发与增长平台 · 后端 API（前端接入见 packages/contracts/INTEGRATION.md）')
+    .setDescription(PORTAL_INTRO_MARKDOWN)
     .setVersion('0.1.0')
     .addServer('/', '同源部署（相对路径；具体 host 由部署环境决定）')
-    .addTag('Companies')
-    .addTag('Claims')
-    .addTag('ICP')
-    .addTag('Discovery')
-    .addTag('Leads')
-    .addTag('Events')
-    .addTag('System')
-    .addTag('PlatformAuthority')
+    .addTag('Companies', '企业画像：提交官网、看完整度、审批后人工确认')
+    .addTag('Claims', '企业事实与来源：审批 / 驳回 / 撤销、冲突裁决')
+    .addTag('ICP', '理想客户画像：规则、回溯测试、查询计划')
+    .addTag('Discovery', '查询计划执行、规范化公司、联系人补全、抑制名单')
+    .addTag('Leads', '评分产出与交付：交付包、接受 / 拒绝、制裁复核')
+    .addTag('Reports', '周报与反馈')
+    .addTag('Events', '事件投递账本与确认回执')
+    .addTag('Compliance', '数据主体删除请求（Art.17）')
+    .addTag('SiteBuilder', '独立站：intake、资料、素材、构建、预览')
+    .addTag('ExecutionBudget', '平台内部执行预算包络（服务间调用，普通前端不调用）')
+    .addTag('PlatformAuthority', '平台权威通道（服务间调用，普通前端不调用）')
+    .addTag('System', '健康探针与身份')
     .addBearerAuth()
     .addBearerAuth(
       {
@@ -109,6 +115,27 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
     )
     .build();
   const document = SwaggerModule.createDocument(app, config);
+  // 每个操作的正文说明集中维护在 docs/operation-descriptions.ts；控制器上已有的
+  // description 优先，这里只补空缺。新增端点漏写会被 operation-descriptions.spec.ts 拦下。
+  for (const [path, item] of Object.entries(document.paths ?? {})) {
+    const operations = item as Record<string, { description?: string } | undefined>;
+    for (const method of ['get', 'post', 'put', 'patch', 'delete'] as const) {
+      const operation = operations[method];
+      if (!operation || operation.description) continue;
+      const description = OPERATION_DESCRIPTIONS[`${method.toUpperCase()} ${path}`];
+      if (description) operation.description = description;
+    }
+  }
+  // 门户左侧按接入顺序分组，而不是按标签字母序。
+  Object.assign(document, {
+    'x-tagGroups': [
+      { name: '获客主链路', tags: ['Companies', 'Claims', 'ICP', 'Discovery', 'Leads'] },
+      { name: '运营与合规', tags: ['Reports', 'Events', 'Compliance'] },
+      { name: '建站', tags: ['SiteBuilder'] },
+      { name: '平台间通道', tags: ['ExecutionBudget', 'PlatformAuthority'] },
+      { name: '系统', tags: ['System'] },
+    ],
+  });
   const buildStatus = document.components?.schemas?.BuildStatusResponseDto;
   if (buildStatus && !('$ref' in buildStatus)) {
     // ApiProperty uses `required` both for the parent property flag and the
