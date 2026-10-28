@@ -41,6 +41,13 @@ export const DISCOVERY_FAILURE_FINALIZE_PATCH = 'discovery-failure-finalize-v1';
  * query stage instead of going on to the materialization hold it left behind.
  */
 export const DISCOVERY_QUERY_FAILURE_STOP_PATCH = 'discovery-query-failure-stop-v1';
+/**
+ * Queries run two at a time, so a plan's wall clock tracks its query count at half the slope.
+ * Accounting stays deterministic and in plan order; the unreplayable hand-off now describes a
+ * batch (every query in it lost a provider) instead of a single query.
+ */
+export const DISCOVERY_QUERY_BATCH_PATCH = 'discovery-query-batch-v1';
+const DISCOVERY_QUERY_BATCH = 2;
 export const DISCOVERY_QUERY_RECEIPT_MODE = QUERY_RECEIPT_MODE;
 const EXECUTION_CONTRACT_VERSION = 2 as const;
 
@@ -301,118 +308,171 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     // code from before 2026-10-28 only: a lost operation is a remnant of an earlier attempt, so a
     // second query in a row is absorbed exactly like the first and never fails the run.
     let previousQueryUnreplayable = false;
-    for (const [queryOrdinal, query] of queries.entries()) {
-      // Named only when set, so histories recorded before the hand-off replay unchanged. The
-      // annotation keeps the flag's control-flow type out of the activity result's inference.
-      const handOff: { previousQueryUnreplayable?: true } = previousQueryUnreplayable
-        ? { previousQueryUnreplayable: true }
-        : {};
-      try {
-        const r = await modelActs.executeQuery(
-          usesQueryReceipts
-            ? {
-                workspaceId,
-                runId,
-                planId,
-                queryOrdinal,
-                queryReceiptMode: DISCOVERY_QUERY_RECEIPT_MODE,
-                query,
-                ...authorityArgs,
-                ...handOff,
-              }
-            : { workspaceId, runId, query, ...authorityArgs, ...handOff },
-        );
-        acceptedRaw += r.rawCount;
-        if (usesQueryReceipts) {
-          const receipt = r.queryReceipt;
-          if (!receipt) {
-            throw ApplicationFailure.nonRetryable(
-              'DISCOVERY_QUERY_RECEIPT_MISSING',
-              'DISCOVERY_QUERY_RECEIPT_MISSING',
-            );
-          }
-          perQuery[receipt.queryKey] = receipt;
-          quarantinedRaw += receipt.quarantined;
-          rejectedRaw += receipt.rejected;
-          duplicateRaw += receipt.duplicate;
-          governanceDenied += receipt.governanceDenied;
-          const prior = perSource[receipt.sourceClass];
-          const providers = [
-            ...new Set([
-              ...(prior?.providers ?? []),
-              ...receipt.providers,
-            ]),
-          ].sort();
-          perSource[receipt.sourceClass] = {
-            rawCount: (prior?.rawCount ?? 0) + receipt.accepted,
-            quarantinedCount:
-              (prior?.quarantinedCount ?? 0) + receipt.quarantined,
-            rejectedCount: (prior?.rejectedCount ?? 0) + receipt.rejected,
-            governanceDenied:
-              (prior?.governanceDenied ?? 0) + receipt.governanceDenied,
-            duplicateCount: (prior?.duplicateCount ?? 0) + receipt.duplicate,
-            usageQuantity:
-              (prior?.usageQuantity ?? 0) + receipt.usageQuantity,
-            costCents: (prior?.costCents ?? 0) + receipt.costCents,
-            providers,
-            provider: providers.join('+') || null,
-          };
-        } else if (usesRawGovernance) {
-          quarantinedRaw += r.quarantinedCount;
-          rejectedRaw += r.rejectedCount;
-          duplicateRaw += r.duplicateCount;
-          governanceDenied += r.quarantinedCount + r.rejectedCount;
-          perSource[query.source_class] = {
-            rawCount: r.rawCount,
-            quarantinedCount: r.quarantinedCount,
-            rejectedCount: r.rejectedCount,
-            duplicateCount: r.duplicateCount,
-            provider: r.provider,
-          };
-        } else {
-          perSource[query.source_class] = { rawCount: r.rawCount, provider: r.provider };
+
+    type QueryPlanEntry = (typeof queries)[number];
+    type QueryExecutionResult = Awaited<ReturnType<DiscoveryActivities['executeQuery']>>;
+    const runQueryActivity = (
+      queryOrdinal: number,
+      query: QueryPlanEntry,
+      handOff: { previousQueryUnreplayable?: true },
+    ): Promise<QueryExecutionResult> =>
+      modelActs.executeQuery(
+        usesQueryReceipts
+          ? {
+              workspaceId,
+              runId,
+              planId,
+              queryOrdinal,
+              queryReceiptMode: DISCOVERY_QUERY_RECEIPT_MODE,
+              query,
+              ...authorityArgs,
+              ...handOff,
+            }
+          : { workspaceId, runId, query, ...authorityArgs, ...handOff },
+      );
+    /** Folds one query's result into the run totals; true when a provider was lost to an unreplayable call. */
+    const accountQueryResult = (query: QueryPlanEntry, r: QueryExecutionResult): boolean => {
+      acceptedRaw += r.rawCount;
+      if (usesQueryReceipts) {
+        const receipt = r.queryReceipt;
+        if (!receipt) {
+          throw ApplicationFailure.nonRetryable(
+            'DISCOVERY_QUERY_RECEIPT_MISSING',
+            'DISCOVERY_QUERY_RECEIPT_MISSING',
+          );
         }
-        // 某源打穿 run 预算 → 记账截断（run 收尾判 PARTIAL，绝不假 DONE）。
-        if (r.budgetTruncated) discoveryBudgetTruncated = true;
-        // BI-30：数据源已停用、查询被跳过 → 按原因计数（run 至少 PARTIAL，但不算失败）。
-        if (isDiscoveryQuerySkipReason(r.skipReason)) {
-          skippedQueries[r.skipReason] = (skippedQueries[r.skipReason] ?? 0) + 1;
-          skippedQueryCount += 1;
-        }
-        // Absent in histories recorded before the counter existed: replays keep their status.
-        modelExtractions = addQueryModelExtractions(modelExtractions, r.modelExtractions);
-        // Absent in histories recorded before the counters existed.
-        if (r.taxonomyFallback === true) taxonomyFallbacks += 1;
-        if (r.taxonomyModelSkipped === true) taxonomyModelSkips += 1;
-        if (r.skippedForLease === true) countLeaseSkips('queries', 1);
-        // Absent in histories recorded before the activity absorbed such a loss.
-        previousQueryUnreplayable = r.unreplayable === true;
-        if (previousQueryUnreplayable) {
-          unreplayableQueries += 1;
-          failures += 1;
-        }
-      } catch (err) {
-        if (isExecutionControlError(err)) throw err;
-        // The activity failed on an ordinary error after its retries, so the query left no
-        // receipt and no execution outcome. The materialization admission requires one of each
-        // per plan query, so going on would only hold the run at canonicalize, after the other
-        // queries' time and model spend. Stop here: the outer catch records the run FAILED at
-        // this stage with the error type, and the plan stays READY. Histories recorded before
-        // the patch keep counting the query and going on; so do runs without query receipts,
-        // whose materialization is not admitted by receipts, and they never ask for the patch.
-        if (usesQueryReceipts && patched(DISCOVERY_QUERY_FAILURE_STOP_PATCH)) throw err;
-        previousQueryUnreplayable = false;
+        perQuery[receipt.queryKey] = receipt;
+        quarantinedRaw += receipt.quarantined;
+        rejectedRaw += receipt.rejected;
+        duplicateRaw += receipt.duplicate;
+        governanceDenied += receipt.governanceDenied;
+        const prior = perSource[receipt.sourceClass];
+        const providers = [
+          ...new Set([
+            ...(prior?.providers ?? []),
+            ...receipt.providers,
+          ]),
+        ].sort();
+        perSource[receipt.sourceClass] = {
+          rawCount: (prior?.rawCount ?? 0) + receipt.accepted,
+          quarantinedCount:
+            (prior?.quarantinedCount ?? 0) + receipt.quarantined,
+          rejectedCount: (prior?.rejectedCount ?? 0) + receipt.rejected,
+          governanceDenied:
+            (prior?.governanceDenied ?? 0) + receipt.governanceDenied,
+          duplicateCount: (prior?.duplicateCount ?? 0) + receipt.duplicate,
+          usageQuantity:
+            (prior?.usageQuantity ?? 0) + receipt.usageQuantity,
+          costCents: (prior?.costCents ?? 0) + receipt.costCents,
+          providers,
+          provider: providers.join('+') || null,
+        };
+      } else if (usesRawGovernance) {
+        quarantinedRaw += r.quarantinedCount;
+        rejectedRaw += r.rejectedCount;
+        duplicateRaw += r.duplicateCount;
+        governanceDenied += r.quarantinedCount + r.rejectedCount;
+        perSource[query.source_class] = {
+          rawCount: r.rawCount,
+          quarantinedCount: r.quarantinedCount,
+          rejectedCount: r.rejectedCount,
+          duplicateCount: r.duplicateCount,
+          provider: r.provider,
+        };
+      } else {
+        perSource[query.source_class] = { rawCount: r.rawCount, provider: r.provider };
+      }
+      // 某源打穿 run 预算 → 记账截断（run 收尾判 PARTIAL，绝不假 DONE）。
+      if (r.budgetTruncated) discoveryBudgetTruncated = true;
+      // BI-30：数据源已停用、查询被跳过 → 按原因计数（run 至少 PARTIAL，但不算失败）。
+      if (isDiscoveryQuerySkipReason(r.skipReason)) {
+        skippedQueries[r.skipReason] = (skippedQueries[r.skipReason] ?? 0) + 1;
+        skippedQueryCount += 1;
+      }
+      // Absent in histories recorded before the counter existed: replays keep their status.
+      modelExtractions = addQueryModelExtractions(modelExtractions, r.modelExtractions);
+      // Absent in histories recorded before the counters existed.
+      if (r.taxonomyFallback === true) taxonomyFallbacks += 1;
+      if (r.taxonomyModelSkipped === true) taxonomyModelSkips += 1;
+      if (r.skippedForLease === true) countLeaseSkips('queries', 1);
+      // Absent in histories recorded before the activity absorbed such a loss.
+      const lost = r.unreplayable === true;
+      if (lost) {
+        unreplayableQueries += 1;
         failures += 1;
-        if (!usesQueryReceipts) {
-          perSource[query.source_class] = {
-            rawCount: 0,
-            provider: null,
-            error: 'QUERY_EXECUTION_FAILED',
-          };
+      }
+      return lost;
+    };
+    /** Counts a failed query, or stops the run under the failure-stop patch. Never returns a result. */
+    const accountQueryFailure = (query: QueryPlanEntry, err: unknown): void => {
+      if (isExecutionControlError(err)) throw err;
+      // The activity failed on an ordinary error after its retries, so the query left no
+      // receipt and no execution outcome. The materialization admission requires one of each
+      // per plan query, so going on would only hold the run at canonicalize, after the other
+      // queries' time and model spend. Stop here: the outer catch records the run FAILED at
+      // this stage with the error type, and the plan stays READY. Histories recorded before
+      // the patch keep counting the query and going on; so do runs without query receipts,
+      // whose materialization is not admitted by receipts, and they never ask for the patch.
+      if (usesQueryReceipts && patched(DISCOVERY_QUERY_FAILURE_STOP_PATCH)) throw err;
+      failures += 1;
+      if (!usesQueryReceipts) {
+        perSource[query.source_class] = {
+          rawCount: 0,
+          provider: null,
+          error: 'QUERY_EXECUTION_FAILED',
+        };
+      }
+    };
+
+    // A query that lost a provider to an operation it cannot replay ends with a zero receipt
+    // and counts as failed; the plan goes on. The hand-off flag below is read by activity code
+    // from before 2026-10-28 only: a lost operation is a remnant of an earlier attempt, so a
+    // second query in a row is absorbed exactly like the first and never fails the run.
+    if (patched(DISCOVERY_QUERY_BATCH_PATCH)) {
+      // Two queries at a time: each is a search fan-out plus per-domain model calls, and the
+      // batch halves the stage's wall clock. Accounting stays deterministic and in plan order;
+      // a failure still stops the run (under the failure-stop patch) after the batch settles.
+      for (let start = 0; start < queries.length; start += DISCOVERY_QUERY_BATCH) {
+        const batch = queries
+          .slice(start, start + DISCOVERY_QUERY_BATCH)
+          .map((query, offset) => [start + offset, query] as const);
+        // Named only when set, so histories recorded before the hand-off replay unchanged.
+        const handOff: { previousQueryUnreplayable?: true } = previousQueryUnreplayable
+          ? { previousQueryUnreplayable: true }
+          : {};
+        const settled = await Promise.allSettled(
+          batch.map(([queryOrdinal, query]) => runQueryActivity(queryOrdinal, query, handOff)),
+        );
+        let everyQueryLost = batch.length > 0;
+        for (const [offset, [, query]] of batch.entries()) {
+          const outcome = settled[offset]!;
+          if (outcome.status === 'fulfilled') {
+            if (!accountQueryResult(query, outcome.value)) everyQueryLost = false;
+          } else {
+            everyQueryLost = false;
+            accountQueryFailure(query, outcome.reason);
+          }
+        }
+        previousQueryUnreplayable = everyQueryLost;
+      }
+    } else {
+      for (const [queryOrdinal, query] of queries.entries()) {
+        // Named only when set, so histories recorded before the hand-off replay unchanged. The
+        // annotation keeps the flag's control-flow type out of the activity result's inference.
+        const handOff: { previousQueryUnreplayable?: true } = previousQueryUnreplayable
+          ? { previousQueryUnreplayable: true }
+          : {};
+        try {
+          previousQueryUnreplayable = accountQueryResult(
+            query,
+            await runQueryActivity(queryOrdinal, query, handOff),
+          );
+        } catch (err) {
+          previousQueryUnreplayable = false;
+          accountQueryFailure(query, err);
         }
       }
     }
-
     stage = 'canonicalize';
     const { companies, suppressed } = await acts.canonicalizeRun({ workspaceId, runId, ...authorityArgs });
 
