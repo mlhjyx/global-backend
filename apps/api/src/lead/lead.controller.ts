@@ -395,9 +395,9 @@ export class LeadController {
   @ApiOperation({
     summary: '生成首次联系开发信草稿（BI-15）：目标国语言 + 中文译文，只存储不发送',
     description:
-      '按线索的公司级事实与卖方资料生成一版草稿（版本号递增），末尾由平台追加卖方自己的回复入口（官网/邮箱/wa.me）。平台不发送、不提供发送按钮。模型网关结算了调用却没有可用答案时返回 502 MODEL_UPSTREAM_UNUSABLE；草稿引用了未提供的事实键时返回 502 OUTREACH_DRAFT_UNGROUNDED 并丢弃草稿；这两种情况预算授权都已消耗，重试需要新的授权。',
+      '按线索的公司级事实与卖方资料生成一版草稿（版本号递增），末尾由平台追加卖方自己的回复入口（官网/邮箱/wa.me）。平台不发送、不提供发送按钮。模型网关结算了调用却没有可用答案时返回 502 MODEL_UPSTREAM_UNUSABLE；草稿引用了未提供的事实键（或主题/正文/译文为空）时返回 422 OUTREACH_DRAFT_UNGROUNDED 并丢弃草稿；这两种情况预算授权都已消耗，重试需要新的授权。',
   })
-  @ApiExecutionBudgetGrant()
+  @ApiExecutionBudgetGrant({ additionalConflictCodes: ['OUTREACH_DRAFT_VERSION_CONFLICT'] })
   @ApiModelUpstreamUnusable()
   @ApiResponse({
     status: 404,
@@ -406,13 +406,11 @@ export class LeadController {
   })
   @ApiResponse({
     status: 422,
-    description: '线索尚未被运营接受（最新裁决不是 accept）',
-    schema: leadDecisionErrorSchema(['OUTREACH_DRAFT_LEAD_NOT_ACCEPTED']),
-  })
-  @ApiResponse({
-    status: 502,
-    description: '草稿引用了未提供的事实键，已丢弃',
-    schema: leadDecisionErrorSchema(['OUTREACH_DRAFT_UNGROUNDED']),
+    description: '线索尚未被运营接受（最新裁决不是 accept），或草稿引用了未提供的事实键/关键字段为空而被丢弃',
+    schema: leadDecisionErrorSchema([
+      'OUTREACH_DRAFT_LEAD_NOT_ACCEPTED',
+      'OUTREACH_DRAFT_UNGROUNDED',
+    ]),
   })
   @ApiEnvelope(OUTREACH_DRAFT_SCHEMA, { status: 201 })
   async outreachDraft(

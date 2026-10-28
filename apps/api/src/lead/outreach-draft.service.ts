@@ -1,5 +1,5 @@
 import {
-  BadGatewayException,
+  ConflictException,
   Inject,
   Injectable,
   NotFoundException,
@@ -27,11 +27,14 @@ import {
 import {
   buyerOutreachFacts,
   fitOutreachFacts,
+  isE164,
   outreachDraftLanguage,
   outreachDraftPrompt,
+  record,
   replyEntryFooter,
   sellerOutreachFacts,
   signalOutreachFacts,
+  text,
   ungroundedFacts,
   type OutreachFact,
 } from './outreach-draft';
@@ -66,17 +69,6 @@ function isUniqueViolation(error: unknown): boolean {
   );
 }
 
-function record(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function text(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-const E164 = /^\+[1-9][0-9]{7,14}$/u;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 
 @Injectable()
@@ -224,7 +216,7 @@ export class OutreachDraftService {
     const draftBody = out.body.trim();
     const bodyZh = out.body_zh.trim();
     if (!subject || !draftBody || !bodyZh) {
-      throw new BadGatewayException({
+      throw new UnprocessableEntityException({
         error: {
           code: 'OUTREACH_DRAFT_UNGROUNDED',
           message: 'draft left the subject, body or translation empty; discarded',
@@ -234,7 +226,7 @@ export class OutreachDraftService {
     const allowedKeys = new Set(facts.map((fact) => fact.key));
     const ungrounded = ungroundedFacts(out.used_facts, allowedKeys);
     if (ungrounded.length > 0) {
-      throw new BadGatewayException({
+      throw new UnprocessableEntityException({
         error: {
           code: 'OUTREACH_DRAFT_UNGROUNDED',
           message: `draft cited facts that were not provided (${ungrounded.slice(0, 3).join(', ')}); discarded`,
@@ -300,7 +292,15 @@ export class OutreachDraftService {
         return toRow(applied.value);
       } catch (error) {
         // Two operators drafting the same lead concurrently: recompute the next version.
-        if (isUniqueViolation(error) && attempt < MAX_VERSION_ATTEMPTS) continue;
+        if (isUniqueViolation(error)) {
+          if (attempt < MAX_VERSION_ATTEMPTS) continue;
+          throw new ConflictException({
+            error: {
+              code: 'OUTREACH_DRAFT_VERSION_CONFLICT',
+              message: 'another draft took the next version concurrently; retry',
+            },
+          });
+        }
         throw error;
       }
     }
@@ -313,9 +313,8 @@ function sellerReplyContact(
 ): { sellerName: string; website: string | null; email: string | null; whatsapp: string | null } {
   const site = record(siteProfile);
   const contact = record(site.contact);
-  const siteCompany = record(site.companyProfile);
-  const website =
-    text(seller.website) || text(siteCompany.website) || null;
+  // The seller website lives on CompanyProfile only; the site profile contract has no website.
+  const website = text(seller.website) || null;
   const publicContacts = Array.isArray(seller.publicContacts) ? seller.publicContacts : [];
   const publicEmail = publicContacts
     .map((entry) => record(entry))
@@ -326,7 +325,7 @@ function sellerReplyContact(
   const email = publicEmail ? text(publicEmail.value) : (siteEmail ?? null);
   const whatsapp = (Array.isArray(contact.whatsappNumbers) ? contact.whatsappNumbers : [])
     .map((value) => text(value))
-    .find((value) => E164.test(value));
+    .find((value) => isE164(value));
   return { sellerName: seller.name, website, email, whatsapp: whatsapp ?? null };
 }
 

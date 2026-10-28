@@ -42,7 +42,7 @@ describe('lead outreach draft migration (L5)', () => {
 
   it('creates the append-only lead_outreach_draft table with only the design columns', () => {
     expect(table).toContain('CREATE TABLE "lead_outreach_draft"');
-    const columns = [...table.matchAll(/"([a-z_]+)" (?:UUID|TEXT|VARCHAR\(16\)|VARCHAR\(200\)|VARCHAR\(100\)|INTEGER|JSONB|TIMESTAMP\(3\))/gu)].map(
+    const columns = [...table.matchAll(/"([a-z_]+)" (?:UUID|TEXT|VARCHAR\(16\)|VARCHAR\(200\)|VARCHAR\(120\)|INTEGER|JSONB|TIMESTAMP\(3\))/gu)].map(
       (match) => match[1],
     );
     expect(columns).toEqual([
@@ -64,6 +64,8 @@ describe('lead outreach draft migration (L5)', () => {
     expect(table).toContain('CONSTRAINT "lead_outreach_draft_body_check" CHECK (char_length("body") BETWEEN 1 AND 4000)');
     expect(table).toContain('CONSTRAINT "lead_outreach_draft_body_zh_check" CHECK (char_length("body_zh") BETWEEN 1 AND 4000)');
     expect(table).toContain(`jsonb_typeof("used_facts") = 'array' AND jsonb_array_length("used_facts") BETWEEN 1 AND 40`);
+    // The stored model identity matches the durable-projection bound (120), not a shorter one.
+    expect(table).toContain('CONSTRAINT "lead_outreach_draft_model_check" CHECK (char_length("model") BETWEEN 1 AND 120)');
   });
 
   it('binds each draft to a lead of the same workspace, one row per version, removed with the lead, under FORCE RLS', () => {
@@ -73,6 +75,10 @@ describe('lead outreach draft migration (L5)', () => {
     );
     expect(statements).toContain(
       'CREATE UNIQUE INDEX "lead_outreach_draft_workspace_id_lead_id_version_key" ON "lead_outreach_draft"("workspace_id", "lead_id", "version")',
+    );
+    // The weekly report's newest-version-per-lead lookup filters by lead_id under RLS.
+    expect(statements).toContain(
+      'CREATE INDEX "lead_outreach_draft_lead_id_version_idx" ON "lead_outreach_draft"("lead_id", "version")',
     );
     expect(statements).toContain('ALTER TABLE "lead_outreach_draft" ENABLE ROW LEVEL SECURITY');
     expect(statements).toContain('ALTER TABLE "lead_outreach_draft" FORCE ROW LEVEL SECURITY');

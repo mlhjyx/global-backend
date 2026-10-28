@@ -70,11 +70,12 @@ class WorkspaceTechnicalBudgetQuoteResponseDto {
       'icp.query_plan',
       'discovery.run',
       'contact.verify',
+      'outreach.draft',
     ],
   })
   purpose!: WorkspaceTechnicalBudgetQuote['purpose'];
 
-  @ApiProperty({ enum: ['company', 'icp', 'discovery_run', 'contact_point'] })
+  @ApiProperty({ enum: ['company', 'icp', 'discovery_run', 'contact_point', 'lead'] })
   subjectType!: string;
 
   @ApiProperty({ minLength: 1, maxLength: 200 })

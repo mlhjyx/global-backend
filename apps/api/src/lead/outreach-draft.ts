@@ -62,12 +62,17 @@ const LANGUAGE_NAMES: Readonly<Record<string, string>> = Object.freeze({
   pl: '波兰语（Polski）',
 });
 
-function record(value: unknown): Record<string, unknown> {
+export function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
-function text(value: unknown): string {
+export function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+/** Seller WhatsApp numbers are only linkable in E.164 form. */
+export function isE164(value: string): boolean {
+  return E164.test(value);
 }
 
 function clip(value: string, max = MAX_FACT_TEXT): string {
@@ -154,14 +159,16 @@ export function signalOutreachFacts(attributes: unknown): OutreachFact[] {
  * stopped.
  */
 export function replyEntryFooter(contact: SellerReplyContact): string {
+  // Every channel is clipped so a pathological profile cannot push the stored body
+  // past the table's 4,000-character bound (the model body itself is capped at 1,200).
   const lines: string[] = [];
-  if (contact.website) lines.push(`Website: ${contact.website}`);
-  if (contact.email) lines.push(`Email: ${contact.email}`);
-  if (contact.whatsapp && E164.test(contact.whatsapp)) {
+  if (contact.website) lines.push(`Website: ${clip(contact.website, 500)}`);
+  if (contact.email) lines.push(`Email: ${clip(contact.email, 320)}`);
+  if (contact.whatsapp && isE164(contact.whatsapp)) {
     lines.push(`WhatsApp: https://wa.me/${contact.whatsapp.slice(1)}`);
   }
   if (!lines.length) return '';
-  return ['—', `Reply directly to ${contact.sellerName}:`, ...lines].join('\n');
+  return ['—', `Reply directly to ${clip(contact.sellerName, 120)}:`, ...lines].join('\n');
 }
 
 export function outreachDraftPrompt(facts: readonly OutreachFact[], language: string): string {

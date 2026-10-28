@@ -9571,7 +9571,7 @@
     },
     "/api/v1/leads/{leadId}/outreach-drafts": {
       "post": {
-        "description": "按线索的公司级事实与卖方资料生成一版草稿（版本号递增），末尾由平台追加卖方自己的回复入口（官网/邮箱/wa.me）。平台不发送、不提供发送按钮。模型网关结算了调用却没有可用答案时返回 502 MODEL_UPSTREAM_UNUSABLE；草稿引用了未提供的事实键时返回 502 OUTREACH_DRAFT_UNGROUNDED 并丢弃草稿；这两种情况预算授权都已消耗，重试需要新的授权。",
+        "description": "按线索的公司级事实与卖方资料生成一版草稿（版本号递增），末尾由平台追加卖方自己的回复入口（官网/邮箱/wa.me）。平台不发送、不提供发送按钮。模型网关结算了调用却没有可用答案时返回 502 MODEL_UPSTREAM_UNUSABLE；草稿引用了未提供的事实键（或主题/正文/译文为空）时返回 422 OUTREACH_DRAFT_UNGROUNDED 并丢弃草稿；这两种情况预算授权都已消耗，重试需要新的授权。",
         "operationId": "LeadController_outreachDraft_v1",
         "parameters": [
           {
@@ -9771,7 +9771,7 @@
             }
           },
           "409": {
-            "description": "EXECUTION_BUDGET_GRANT_REUSED",
+            "description": "EXECUTION_BUDGET_GRANT_REUSED or OUTREACH_DRAFT_VERSION_CONFLICT",
             "content": {
               "application/json": {
                 "schema": {
@@ -9803,7 +9803,7 @@
             }
           },
           "422": {
-            "description": "线索尚未被运营接受（最新裁决不是 accept）",
+            "description": "线索尚未被运营接受（最新裁决不是 accept），或草稿引用了未提供的事实键/关键字段为空而被丢弃",
             "content": {
               "application/json": {
                 "schema": {
@@ -9824,7 +9824,8 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "OUTREACH_DRAFT_LEAD_NOT_ACCEPTED"
+                            "OUTREACH_DRAFT_LEAD_NOT_ACCEPTED",
+                            "OUTREACH_DRAFT_UNGROUNDED"
                           ]
                         },
                         "message": {
@@ -9838,7 +9839,7 @@
             }
           },
           "502": {
-            "description": "草稿引用了未提供的事实键，已丢弃\n\nMODEL_UPSTREAM_UNUSABLE：模型网关已结算这次调用，但没有可用的答案（details.reasonCode 为网关原因码）。预算授权已消耗，重试需要新的授权",
+            "description": "MODEL_UPSTREAM_UNUSABLE：模型网关已结算这次调用，但没有可用的答案（details.reasonCode 为网关原因码）。预算授权已消耗，重试需要新的授权",
             "content": {
               "application/json": {
                 "schema": {
@@ -16232,7 +16233,8 @@
               "icp.design",
               "icp.query_plan",
               "discovery.run",
-              "contact.verify"
+              "contact.verify",
+              "outreach.draft"
             ]
           },
           "subjectType": {
@@ -16241,7 +16243,8 @@
               "company",
               "icp",
               "discovery_run",
-              "contact_point"
+              "contact_point",
+              "lead"
             ]
           },
           "subjectId": {

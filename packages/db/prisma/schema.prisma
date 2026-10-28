@@ -2250,12 +2250,15 @@ model LeadOutreachDraft {
   /// 模型自称引用过的事实键，已校验 ⊆ 输入事实键（未通过的草稿不落库）。
   usedFacts   Json     @map("used_facts")
   /// 实际产出该草稿的模型身份（上游上报值，可能是部署批准的同义替换）。
-  model       String   @db.VarChar(100)
+  model       String   @db.VarChar(120)
   createdAt   DateTime @default(now()) @map("created_at")
 
   lead Lead @relation(fields: [workspaceId, leadId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict, map: "lead_outreach_draft_lead_fkey")
 
   @@unique([workspaceId, leadId, version])
+  // The weekly report reads the newest version per lead; RLS pins workspace_id, so the
+  // lookup is by lead_id and this index fronts it.
+  @@index([leadId, version])
   @@map("lead_outreach_draft")
 }
 

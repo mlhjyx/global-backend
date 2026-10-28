@@ -30,7 +30,7 @@ CREATE TABLE "lead_outreach_draft" (
   "body" TEXT NOT NULL,
   "body_zh" TEXT NOT NULL,
   "used_facts" JSONB NOT NULL,
-  "model" VARCHAR(100) NOT NULL,
+  "model" VARCHAR(120) NOT NULL,
   "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
   CONSTRAINT "lead_outreach_draft_pkey" PRIMARY KEY ("id"),
@@ -42,13 +42,16 @@ CREATE TABLE "lead_outreach_draft" (
   CONSTRAINT "lead_outreach_draft_used_facts_check" CHECK (
     jsonb_typeof("used_facts") = 'array' AND jsonb_array_length("used_facts") BETWEEN 1 AND 40
   ),
-  CONSTRAINT "lead_outreach_draft_model_check" CHECK (char_length("model") BETWEEN 1 AND 100),
+  CONSTRAINT "lead_outreach_draft_model_check" CHECK (char_length("model") BETWEEN 1 AND 120),
   CONSTRAINT "lead_outreach_draft_lead_fkey" FOREIGN KEY ("workspace_id", "lead_id")
     REFERENCES "lead"("workspace_id", "id") ON DELETE CASCADE ON UPDATE RESTRICT
 );
 
 CREATE UNIQUE INDEX "lead_outreach_draft_workspace_id_lead_id_version_key"
   ON "lead_outreach_draft"("workspace_id", "lead_id", "version");
+
+CREATE INDEX "lead_outreach_draft_lead_id_version_idx"
+  ON "lead_outreach_draft"("lead_id", "version");
 
 ALTER TABLE "lead_outreach_draft" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "lead_outreach_draft" FORCE ROW LEVEL SECURITY;

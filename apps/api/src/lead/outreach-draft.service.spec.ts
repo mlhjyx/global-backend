@@ -1,5 +1,5 @@
 import {
-  BadGatewayException,
+  ConflictException,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -71,9 +71,10 @@ function fixture(overrides: {
     offering: { findMany: vi.fn(async () => [{ id: 'offering-1', name: 'Pump X', description: null }]) },
     site: {
       findFirst: vi.fn(async () => ({
+        // Shape of Site.profile.contact (site-builder profile contract); the website is
+        // deliberately absent — the seller website comes from CompanyProfile only.
         profile: {
           contact: { publicEmails: ['sales@acme.test'], whatsappNumbers: ['+4915112345678'] },
-          companyProfile: { website: 'https://acme.test' },
         },
       })),
     },
@@ -237,8 +238,8 @@ describe('outreach draft generation (BI-15, design §7)', () => {
       .generate(ctx, LEAD_ID)
       .catch((caught: unknown) => caught);
 
-    expect(error).toBeInstanceOf(BadGatewayException);
-    expect((error as BadGatewayException).getResponse()).toMatchObject({
+    expect(error).toBeInstanceOf(UnprocessableEntityException);
+    expect((error as UnprocessableEntityException).getResponse()).toMatchObject({
       error: { code: 'OUTREACH_DRAFT_UNGROUNDED' },
     });
     expect(f.tx.leadOutreachDraft.create).not.toHaveBeenCalled();
@@ -289,6 +290,27 @@ describe('outreach draft generation (BI-15, design §7)', () => {
 
     expect(f.tx.leadOutreachDraft.create).not.toHaveBeenCalled();
     expect(draft).toMatchObject({ id: 'draft-1', version: 1 });
+  });
+
+  it('answers a retryable conflict when the version keeps moving under it', async () => {
+    const f = fixture();
+    stubModel();
+    stubAck();
+    f.tx.leadOutreachDraft.create.mockImplementation(async () => {
+      throw new Prisma.PrismaClientKnownRequestError('unique', {
+        code: 'P2002',
+        clientVersion: 'test',
+        meta: {},
+      });
+    });
+
+    const error = await f.service.generate(ctx, LEAD_ID).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as ConflictException).getResponse()).toMatchObject({
+      error: { code: 'OUTREACH_DRAFT_VERSION_CONFLICT' },
+    });
+    expect(f.tx.leadOutreachDraft.create).toHaveBeenCalledTimes(3);
   });
 
   it('recomputes the version when a concurrent draft took it first', async () => {
