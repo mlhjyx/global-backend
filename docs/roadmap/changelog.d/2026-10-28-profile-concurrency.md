@@ -1,6 +1,6 @@
 ---
 date: 2026-10-28
-pr:
+pr: 687
 title: Profile two companies at once, overlapping only the network work
 ---
 
