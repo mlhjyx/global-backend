@@ -2267,165 +2267,212 @@ export function createDiscoveryActivities(deps: {
           .length;
       const lease = await readRunLease(binding);
       const startedAt = clock();
-      for (let i = startIndex; i < setup.companies.length; i++) {
-        // A company the lease has no room for ends the stage (see qualifyFitForRun).
-        if (!lease.allows(DISCOVERY_LEASE_UNIT_MS.websiteProfile)) {
-          skippedForLease = unprofiledRunCompanies(i);
-          break;
-        }
-        // Hand the rest to the next activity rather than outrun this one's timeout.
-        if (i > startIndex && clock() - startedAt >= PROFILE_PASS_TIME_BOX_MS) {
-          nextIndex = i;
-          break;
-        }
-        const c = setup.companies[i];
-        // A workspace company outside the run, profiled with the quota the run's own companies left.
-        const backfill = i >= setup.runCount;
-        if (websiteProfileFreshAndCurrent(c.attributes, setup.contactPaths, nowMs) || !c.domain) continue;
-        // W5-f: with the switch on, read the stored company again right before the fetch. A company
-        // another run (or an earlier attempt of this activity) read since the list was taken is skipped,
-        // a backfill company tried within the cooldown too, and the attempt stamp starts from what is
-        // stored now.
-        const stored = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-          if (!(await companyMayUseExternalProcessing(tx, args.workspaceId, c.id))) return null;
-          if (!setup.runSince) return { attempt: null };
-          const row = await tx.canonicalCompany.findUnique({ where: { id: c.id }, select: { attributes: true } });
-          if (websiteProfileFreshAndCurrent(row?.attributes, true, nowMs)) return null;
-          return { attempt: contactPathAttempt(row?.attributes) };
-        });
-        if (!stored) continue;
-        const priorAttempt: ContactPathAttempt | null = stored.attempt;
-        if (backfill && priorAttempt && setup.runSince && contactPathAttemptCooling(priorAttempt, setup.runSince)) {
-          continue;
-        }
-        const durableReceipts: Array<{ producerId: string; receipt: DurableExecutionReceipt }> = [];
-        let profile: WebsiteProfile | null = null;
-        let subjectDenied = false;
-        let unreplayableSkip = false;
-        let skipWasRemnant = false;
-        try {
-          const homeCountry = targetCountryCodes({ filters: { country: c.country } })[0] ?? icpHomeCountry;
-          profile = await provider.profile(
-            { domain: c.domain, homeCountry, icpContext, contactPaths: setup.contactPaths },
-            {
-              workspaceId: args.workspaceId,
-              runId: binding.accountKey,
-              correlationId: binding.accountKey,
-              authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
-              onDurableReceipt: (producerId, receipt) => {
-                durableReceipts.push({ producerId, receipt });
-              },
-              artifactSubject: { subjectType: 'company', subjectId: c.id },
-            },
-          );
-        } catch (error) {
-          if (artifactSubjectSkipReason(error)) {
-            subjectDenied = true;
-          } else if (isUnreplayableOperation(error) && (isReplayRemnant(error) || !previousUnreplayable)) {
-            unreplayableSkip = true;
-            skipWasRemnant = isReplayRemnant(error);
-          } else if (isExecutionControlError(error)) {
-            // An unavailable model upstream makes the next attempt wait instead of retrying within
-            // seconds; when the lease cannot hold the wait and one more profile, the stage stops
-            // for the lease here instead.
-            if (!upstreamWaitFitsLease(error, lease, DISCOVERY_LEASE_UNIT_MS.websiteProfile)) {
-              skippedForLease = unprofiledRunCompanies(i);
-              break;
-            }
-            throw withUpstreamUnavailableRetryDelay(error);
+      // Two profiles at once: each is two page fetches, a render and one model call, so a batch
+      // halves the stage's wall clock. Everything before the fetch (lease, time box, freshness,
+      // stored-attempt checks) and everything after it (counters, ACKs, commits) stays sequential
+      // and in company order; only the network work overlaps.
+      const PROFILE_CONCURRENCY = 2;
+      interface ProfileBatchEntry {
+        index: number;
+        company: (typeof setup.companies)[number];
+        backfill: boolean;
+        priorAttempt: ContactPathAttempt | null;
+        durableReceipts: Array<{ producerId: string; receipt: DurableExecutionReceipt }>;
+      }
+      for (let i = startIndex; i < setup.companies.length; ) {
+        const batch: ProfileBatchEntry[] = [];
+        let j = i;
+        let stopAfterBatch = false;
+        while (j < setup.companies.length && batch.length < PROFILE_CONCURRENCY) {
+          // A company the lease has no room for ends the stage (see qualifyFitForRun). Reserve one
+          // unit per company already admitted to this batch: profiles only start after the scan,
+          // so the lease clock has not moved yet for them.
+          if (!lease.allows(DISCOVERY_LEASE_UNIT_MS.websiteProfile * (batch.length + 1))) {
+            skippedForLease = unprofiledRunCompanies(j);
+            stopAfterBatch = true;
+            break;
           }
-          /* 单家画像失败不影响其余 */
-        }
-        // Only a live fault carries the two-in-a-row rule on to the next company and the next pass.
-        previousUnreplayable = unreplayableSkip && !skipWasRemnant;
-        // BI-14：联系路径的观测时间取这家页面读完的时刻（不是活动开始时刻），供 last_seen_at 单调比较。
-        const observedAt = new Date();
-        // W5-f：profiled / matched / unclassified 只计本 run 的公司；补读的公司计入 backfilled。
-        if (unreplayableSkip) unreplayable += 1;
-        else if (subjectDenied) skippedSubjects += 1;
-        else if (backfill) backfilled += 1;
-        else profiled += 1;
-        if (!backfill && profile && profile.tradeRoleSource === null) unclassified += 1;
-        // W5-f：开关打开时每次尝试都记尝试时间（读到、空页、robots 拒绝、死站、超时、无法重放、主体被拒），
-        // 一直失败的公司歇满冷却期再排到从未尝试的公司之后，不再永远占着补读候选的最前面。
-        const attempt =
-          priorAttempt && setup.runSince ? nextContactPathAttempt(priorAttempt, observedAt, setup.runSince) : null;
-        // 不给被拒主体写任何事实（只记尝试时间）；已产生的回执照常 ACK（apply 为空操作）。
-        const hits = profile && !subjectDenied
-          ? [{ key: WEBSITE_PROFILE_PROVIDER_KEY, result: websiteProfileEnrichment(profile, new Date(nowMs)) }]
-          : [];
-        // BI-14: only while the switch is on; a provider answer for a switched-off run is ignored.
-        const contactPaths = profile && !subjectDenied && setup.contactPaths ? profile.contactPaths : undefined;
-        // The contact-page render is acknowledged as its own batch in the same transaction, so a
-        // profile replayed from an earlier attempt cannot mix replayed and new receipts.
-        const profileReceipts = durableReceipts.filter(({ producerId }) => producerId !== 'crawl4ai.render');
-        const contactReceipts = durableReceipts.filter(({ producerId }) => producerId === 'crawl4ai.render');
-        const stampAttempt = (tx: Prisma.TransactionClient) =>
-          attempt
-            ? recordContactPathAttempt(tx, { workspaceId: args.workspaceId, companyId: c.id, attempt })
-            : Promise.resolve(false);
-        if (!hits.length && !durableReceipts.length) {
-          if (attempt) await deps.prisma.withWorkspace(args.workspaceId, stampAttempt);
-          continue;
-        }
-        const committed = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-          const result = await applyDomainAckConsumerTransactions({
-            transaction: tx,
-            acknowledgements: profileReceipts.map(({ producerId, receipt }) => ({
-              producerId,
-              receipt,
-              domainAckKey: `${c.id}:${receipt.operationId}:website-profile`,
-              domainRevision: receipt.resultDigest,
-            })),
-            apply: (transaction) => hits.length
-              ? commitCompanyEnrichmentResults(transaction, {
-                  workspaceId: args.workspaceId,
-                  companyId: c.id,
-                  hits,
-                  signalTimestamp: new Date(nowMs),
-                  ...(contactPaths
-                    ? { namespaceMarkers: { [COMPANY_CONTACT_PARSER_MARKER]: COMPANY_CONTACT_PARSER_VERSION } }
-                    : {}),
-                })
-              : Promise.resolve(false),
-            readback: async (transaction) => {
-              const current = await transaction.canonicalCompany.findUnique({
-                where: { id: c.id },
-                select: { attributes: true },
-              });
-              const attributes = (current?.attributes ?? {}) as Record<string, unknown>;
-              // Profile facts carry `_ts`; a namespace holding only a contact-path attempt stamp (W5-f) is not a commit.
-              const namespace = attributes[WEBSITE_PROFILE_PROVIDER_KEY] as { _ts?: unknown } | undefined;
-              return hits.length > 0 && typeof namespace?._ts === 'string';
-            },
+          // Hand the rest to the next activity rather than outrun this one's timeout.
+          if (j > startIndex && clock() - startedAt >= PROFILE_PASS_TIME_BOX_MS) {
+            nextIndex = j;
+            stopAfterBatch = true;
+            break;
+          }
+          const index = j;
+          const c = setup.companies[j]!;
+          j += 1;
+          // A workspace company outside the run, profiled with the quota the run's own companies left.
+          const backfill = index >= setup.runCount;
+          if (websiteProfileFreshAndCurrent(c.attributes, setup.contactPaths, nowMs) || !c.domain) continue;
+          // W5-f: with the switch on, read the stored company again right before the fetch. A company
+          // another run (or an earlier attempt of this activity) read since the list was taken is skipped,
+          // a backfill company tried within the cooldown too, and the attempt stamp starts from what is
+          // stored now.
+          const stored = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+            if (!(await companyMayUseExternalProcessing(tx, args.workspaceId, c.id))) return null;
+            if (!setup.runSince) return { attempt: null };
+            const row = await tx.canonicalCompany.findUnique({ where: { id: c.id }, select: { attributes: true } });
+            if (websiteProfileFreshAndCurrent(row?.attributes, true, nowMs)) return null;
+            return { attempt: contactPathAttempt(row?.attributes) };
           });
-          if (contactPaths || contactReceipts.length > 0) {
-            // persistCompanyContactPoints takes the policy lock, re-reads the company FOR SHARE and
-            // the suppression facts itself; a suppressed company gets no point.
-            await applyDomainAckConsumerTransactions({
-              transaction: tx,
-              acknowledgements: contactReceipts.map(({ producerId, receipt }) => ({
-                producerId,
-                receipt,
-                domainAckKey: `${c.id}:${receipt.operationId}:company-contact`,
-                domainRevision: receipt.resultDigest,
-              })),
-              apply: (transaction) => contactPaths
-                ? persistCompanyContactPoints(transaction, {
-                    workspaceId: args.workspaceId,
-                    companyId: c.id,
-                    observation: companyContactObservation(contactPaths),
-                    seenAt: observedAt,
-                  })
-                : Promise.resolve(null),
-              readback: async () => null,
-            });
+          if (!stored) continue;
+          const priorAttempt: ContactPathAttempt | null = stored.attempt;
+          if (backfill && priorAttempt && setup.runSince && contactPathAttemptCooling(priorAttempt, setup.runSince)) {
+            continue;
           }
-          // After the profile commit, which rewrites the namespace: the stamp lands next to its facts.
-          await stampAttempt(tx);
-          return result.value;
-        });
-        if (committed && !backfill) matched += 1;
+          batch.push({ index, company: c, backfill, priorAttempt, durableReceipts: [] });
+        }
+        i = j;
+        if (batch.length > 0) {
+          const launched = await Promise.allSettled(
+            batch.map((entry) => {
+              const homeCountry = targetCountryCodes({ filters: { country: entry.company.country } })[0] ?? icpHomeCountry;
+              return provider.profile(
+                { domain: entry.company.domain!, homeCountry, icpContext, contactPaths: setup.contactPaths },
+                {
+                  workspaceId: args.workspaceId,
+                  runId: binding.accountKey,
+                  correlationId: binding.accountKey,
+                  authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, entry.company.id),
+                  onDurableReceipt: (producerId, receipt) => {
+                    entry.durableReceipts.push({ producerId, receipt });
+                  },
+                  artifactSubject: { subjectType: 'company', subjectId: entry.company.id },
+                },
+              );
+            }),
+          );
+          let leaseStopIndex: number | undefined;
+          for (const [k, entry] of batch.entries()) {
+            const { index, company: c, backfill, priorAttempt, durableReceipts } = entry;
+            let profile: WebsiteProfile | null = null;
+            let subjectDenied = false;
+            let unreplayableSkip = false;
+            let skipWasRemnant = false;
+            const outcome = launched[k]!;
+            if (outcome.status === 'fulfilled') {
+              profile = outcome.value;
+            } else {
+              const error = outcome.reason;
+              if (artifactSubjectSkipReason(error)) {
+                subjectDenied = true;
+              } else if (isUnreplayableOperation(error) && (isReplayRemnant(error) || !previousUnreplayable)) {
+                unreplayableSkip = true;
+                skipWasRemnant = isReplayRemnant(error);
+              } else if (isExecutionControlError(error)) {
+                // An unavailable model upstream makes the next attempt wait instead of retrying within
+                // seconds; when the lease cannot hold the wait and one more profile, the stage stops
+                // for the lease here instead. This company stays uncounted and resumes next pass; the
+                // rest of the batch already ran and is still committed below.
+                if (!upstreamWaitFitsLease(error, lease, DISCOVERY_LEASE_UNIT_MS.websiteProfile)) {
+                  leaseStopIndex = index;
+                  continue;
+                }
+                throw withUpstreamUnavailableRetryDelay(error);
+              }
+              /* 单家画像失败不影响其余 */
+            }
+            // Only a live fault carries the two-in-a-row rule on to the next company and the next pass.
+            previousUnreplayable = unreplayableSkip && !skipWasRemnant;
+            // BI-14：联系路径的观测时间取这家页面读完的时刻（不是活动开始时刻），供 last_seen_at 单调比较。
+            const observedAt = new Date();
+            // W5-f：profiled / matched / unclassified 只计本 run 的公司；补读的公司计入 backfilled。
+            if (unreplayableSkip) unreplayable += 1;
+            else if (subjectDenied) skippedSubjects += 1;
+            else if (backfill) backfilled += 1;
+            else profiled += 1;
+            if (!backfill && profile && profile.tradeRoleSource === null) unclassified += 1;
+            // W5-f：开关打开时每次尝试都记尝试时间（读到、空页、robots 拒绝、死站、超时、无法重放、主体被拒），
+            // 一直失败的公司歇满冷却期再排到从未尝试的公司之后，不再永远占着补读候选的最前面。
+            const attempt =
+              priorAttempt && setup.runSince ? nextContactPathAttempt(priorAttempt, observedAt, setup.runSince) : null;
+            // 不给被拒主体写任何事实（只记尝试时间）；已产生的回执照常 ACK（apply 为空操作）。
+            const hits = profile && !subjectDenied
+              ? [{ key: WEBSITE_PROFILE_PROVIDER_KEY, result: websiteProfileEnrichment(profile, new Date(nowMs)) }]
+              : [];
+            // BI-14: only while the switch is on; a provider answer for a switched-off run is ignored.
+            const contactPaths = profile && !subjectDenied && setup.contactPaths ? profile.contactPaths : undefined;
+            // The contact-page render is acknowledged as its own batch in the same transaction, so a
+            // profile replayed from an earlier attempt cannot mix replayed and new receipts.
+            const profileReceipts = durableReceipts.filter(({ producerId }) => producerId !== 'crawl4ai.render');
+            const contactReceipts = durableReceipts.filter(({ producerId }) => producerId === 'crawl4ai.render');
+            const stampAttempt = (tx: Prisma.TransactionClient) =>
+              attempt
+                ? recordContactPathAttempt(tx, { workspaceId: args.workspaceId, companyId: c.id, attempt })
+                : Promise.resolve(false);
+            if (!hits.length && !durableReceipts.length) {
+              if (attempt) await deps.prisma.withWorkspace(args.workspaceId, stampAttempt);
+              continue;
+            }
+            const committed = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+              const result = await applyDomainAckConsumerTransactions({
+                transaction: tx,
+                acknowledgements: profileReceipts.map(({ producerId, receipt }) => ({
+                  producerId,
+                  receipt,
+                  domainAckKey: `${c.id}:${receipt.operationId}:website-profile`,
+                  domainRevision: receipt.resultDigest,
+                })),
+                apply: (transaction) => hits.length
+                  ? commitCompanyEnrichmentResults(transaction, {
+                      workspaceId: args.workspaceId,
+                      companyId: c.id,
+                      hits,
+                      signalTimestamp: new Date(nowMs),
+                      ...(contactPaths
+                        ? { namespaceMarkers: { [COMPANY_CONTACT_PARSER_MARKER]: COMPANY_CONTACT_PARSER_VERSION } }
+                        : {}),
+                    })
+                  : Promise.resolve(false),
+                readback: async (transaction) => {
+                  const current = await transaction.canonicalCompany.findUnique({
+                    where: { id: c.id },
+                    select: { attributes: true },
+                  });
+                  const attributes = (current?.attributes ?? {}) as Record<string, unknown>;
+                  // Profile facts carry `_ts`; a namespace holding only a contact-path attempt stamp (W5-f) is not a commit.
+                  const namespace = attributes[WEBSITE_PROFILE_PROVIDER_KEY] as { _ts?: unknown } | undefined;
+                  return hits.length > 0 && typeof namespace?._ts === 'string';
+                },
+              });
+              if (contactPaths || contactReceipts.length > 0) {
+                // persistCompanyContactPoints takes the policy lock, re-reads the company FOR SHARE and
+                // the suppression facts itself; a suppressed company gets no point.
+                await applyDomainAckConsumerTransactions({
+                  transaction: tx,
+                  acknowledgements: contactReceipts.map(({ producerId, receipt }) => ({
+                    producerId,
+                    receipt,
+                    domainAckKey: `${c.id}:${receipt.operationId}:company-contact`,
+                    domainRevision: receipt.resultDigest,
+                  })),
+                  apply: (transaction) => contactPaths
+                    ? persistCompanyContactPoints(transaction, {
+                        workspaceId: args.workspaceId,
+                        companyId: c.id,
+                        observation: companyContactObservation(contactPaths),
+                        seenAt: observedAt,
+                      })
+                    : Promise.resolve(null),
+                  readback: async () => null,
+                });
+              }
+              // After the profile commit, which rewrites the namespace: the stamp lands next to its facts.
+              await stampAttempt(tx);
+              return result.value;
+            });
+            if (committed && !backfill) matched += 1;
+          }
+          if (leaseStopIndex !== undefined) {
+            // The company whose wait did not fit resumes in the next pass, as does everything after
+            // the batch; the other companies of the batch were committed above.
+            skippedForLease =
+              unprofiledRunCompanies(batch[batch.length - 1]!.index + 1) +
+              (leaseStopIndex < setup.runCount ? 1 : 0);
+            break;
+          }
+        }
+        if (stopAfterBatch) break;
       }
       return {
         profiled,
