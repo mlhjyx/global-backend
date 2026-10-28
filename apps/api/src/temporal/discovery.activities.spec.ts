@@ -4294,8 +4294,9 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
 
     expect(failure).toBeInstanceOf(ApplicationFailure);
     expect(failure).toMatchObject({ type: "ProviderHttpError", nonRetryable: false, nextRetryDelay: expect.any(String) });
-    // The outage stops the pass at the first company instead of burning through the rest.
-    expect(profile).toHaveBeenCalledOnce();
+    // The outage stops the pass at the first batch instead of burning through the rest: both
+    // companies of the batch may already be in flight, nothing after it starts, and nothing commits.
+    expect(profile).toHaveBeenCalledTimes(2);
     expect(updateMany).not.toHaveBeenCalled();
   });
 
@@ -4308,6 +4309,27 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
     await expect(
       acts.profileWebsitesForRun(discoveryArgs("run-profile-storage", { icpId: "icp-1" })),
     ).rejects.toThrow("GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE");
+  });
+
+  it("profiles two companies at once, so the stage's network work overlaps", async () => {
+    const started: string[] = [];
+    let releaseFirst: (() => void) | undefined;
+    const profile = vi.fn(async (input: { domain: string }) => {
+      started.push(input.domain);
+      if (started.length === 1) {
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+      }
+      return PROFILE;
+    });
+    const { acts } = await makeProfileDeps(profile, { companies: ["c1", "c2"], now: () => 0 });
+
+    const running = acts.profileWebsitesForRun(discoveryArgs("run-profile-concurrency", { icpId: "icp-1" }));
+    await vi.waitFor(() => expect(started).toHaveLength(2));
+    releaseFirst!();
+
+    await expect(running).resolves.toMatchObject({ profiled: 2, nextIndex: null });
   });
 
   it("hands the companies left to the next activity once its time box is spent", async () => {
