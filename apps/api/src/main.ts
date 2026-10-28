@@ -210,13 +210,17 @@ async function bootstrap(): Promise<void> {
   SwaggerModule.setup('api/docs', app, document); // 内部调试用（Swagger UI）
   // 给前端的统一门户（自托管 Scalar，数据全留本地）：可浏览 + try-it 调试。
   // 一个稳定入口 /api/portal，吃 code-first OpenAPI，无需外部 SaaS。
-  // Scalar 把整个 UI 内联成一段 <script>，全局 helmet 的 script-src 'self' 会把它拦掉、
-  // 页面渲染成白屏；这条文档路由单独放开内联脚本，其余指令沿用 helmet 默认。
+  // Scalar 的页面由两段脚本组成：页面里的内联配置（含整份 OpenAPI，数据不出本机），
+  // 以及由浏览器从 jsdelivr 取的 Scalar 运行时库。全局 helmet 的 script-src 'self'
+  // 会把两者都拦掉、页面渲染成白屏；这条文档路由单独放开这两处，其余指令沿用默认。
+  // 运行时库走 CDN 意味着门户需要浏览器能出网——这是当前实现的已知限制，接口与数据本身仍在本地。
   app.use(
     '/api/portal',
     helmet({
       contentSecurityPolicy: {
-        directives: { scriptSrc: ["'self'", "'unsafe-inline'"] },
+        directives: {
+          scriptSrc: ["'self'", "'unsafe-inline'", 'https://cdn.jsdelivr.net'],
+        },
       },
     }),
   );
