@@ -105,6 +105,13 @@ export async function commitCompanyEnrichmentResults(
   if (updated.count !== 1) return false;
 
   for (const hit of governedHits) {
+    // L1: the provenance URL is already in hand here; keep it with the evidence it backs
+    // (https and bounded, the same rule the migration's CHECK enforces).
+    const provenanceUrl = hit.result.provenance?.sourceUrl;
+    const sourceUrl =
+      typeof provenanceUrl === 'string' && provenanceUrl.startsWith('https://') && provenanceUrl.length <= 2048
+        ? provenanceUrl
+        : null;
     for (const [field, value] of Object.entries(hit.result.attributes)) {
       if (value == null) continue;
       await tx.fieldEvidence.create({
@@ -118,6 +125,7 @@ export async function commitCompanyEnrichmentResults(
           confidence: hit.result.confidence,
           license: 'public',
           allowedActions: ['display', 'match'] as Prisma.InputJsonValue,
+          ...(sourceUrl ? { sourceUrl } : {}),
           ...(hit.result.provenance ? { fetchedAt: new Date(hit.result.provenance.fetchedAt) } : {}),
         },
       });

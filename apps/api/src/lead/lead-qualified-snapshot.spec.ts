@@ -455,7 +455,7 @@ function makeDecideTx(
   company: Record<string, unknown>,
   outboxCreate: ReturnType<typeof vi.fn>,
   decisionCreate: ReturnType<typeof vi.fn>,
-  evidenceRows: Array<{ dataClass: string; fetchedAt: Date | string }> = [],
+  evidenceRows: Array<{ dataClass: string; fetchedAt: Date | string; field?: string }> = [],
 ) {
   return {
     // Art.17 竞态闸（PR #72）：decide 交棒前对公司行 SELECT … FOR UPDATE 加锁——
@@ -486,17 +486,26 @@ function makeDecideTx(
     companyContactPoint: { findMany: vi.fn(async () => []) },
     rawSourceRecord: { findMany: vi.fn(async () => []) },
     icpDefinition: { findUnique: async () => ({ version: 3 }) },
-    // 鲜度模型 v2：decide 用 groupBy 取每分级最早 fetchedAt。mock 忠实按 dataClass 归组取 min。
+    // L1：有效期按「每个字段取最新」（entityId+field+dataClass 上的 _max）聚合。mock 忠实按字段归组取 max。
     fieldEvidence: {
       findMany: vi.fn(async () => []),
       groupBy: async () => {
         const toMs = (v: Date | string): number => (v instanceof Date ? v.getTime() : Date.parse(String(v)));
-        const minByClass = new Map<string, Date | string>();
+        const maxByField = new Map<string, { field: string; dataClass: string; fetchedAt: Date | string }>();
         for (const r of evidenceRows) {
-          const cur = minByClass.get(r.dataClass);
-          if (cur === undefined || toMs(r.fetchedAt) < toMs(cur)) minByClass.set(r.dataClass, r.fetchedAt);
+          const field = r.field ?? 'attributes';
+          const key = `${field}:${r.dataClass}`;
+          const cur = maxByField.get(key);
+          if (cur === undefined || toMs(r.fetchedAt) > toMs(cur.fetchedAt)) {
+            maxByField.set(key, { field, dataClass: r.dataClass, fetchedAt: r.fetchedAt });
+          }
         }
-        return [...minByClass].map(([dataClass, fetchedAt]) => ({ dataClass, _min: { fetchedAt } }));
+        return [...maxByField.values()].map(({ field, dataClass, fetchedAt }) => ({
+          entityId: 'entity',
+          field,
+          dataClass,
+          _max: { fetchedAt },
+        }));
       },
     },
     // 第五门：这些用例不测制裁，无历史命中 → decide 的持久化命中读返回 null（不拦，走 clear/not_screened）。
@@ -566,6 +575,7 @@ describe('LeadService.decide(accept) — 同事务取数、payload=快照（对�
         field: true,
         fetchedAt: true,
         rawRecordId: true,
+        sourceUrl: true,
       },
     });
   });
@@ -1014,19 +1024,34 @@ describe('valid_until 鲜度模型 v2（computeValidUntil + decide 接线）', (
     expect(payload.valid_until).toBe(iso(Date.parse(fetchedAt) + 180 * day));
   });
 
-  it('decide 接线：同分级多条证据 → 取最早抓取（groupBy _min 语义，最早失效）', async () => {
+  it('decide 接线：同一字段重抓多次 → 取最新抓取（重抓可延长有效期，L1）', async () => {
     const earlier = '2026-01-01T00:00:00.000Z';
     const later = '2026-04-01T00:00:00.000Z';
     const outboxCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
     const svc = makeDecideService(
       makeDecideTx(makeLead(), makeCompany(), outboxCreate, vi.fn(), [
-        { dataClass: GREEN, fetchedAt: later },
-        { dataClass: GREEN, fetchedAt: earlier },
+        { dataClass: GREEN, fetchedAt: later, field: 'attributes' },
+        { dataClass: GREEN, fetchedAt: earlier, field: 'attributes' },
       ]),
     );
     await svc.decide(decideCtx, LEAD_ID, 'accept');
     const payload = (outboxCreate.mock.calls[0][0].data as Record<string, unknown>).payload as Record<string, unknown>;
-    expect(payload.valid_until).toBe(iso(Date.parse(earlier) + 180 * day)); // 最早抓取决定最早失效
+    expect(payload.valid_until).toBe(iso(Date.parse(later) + 180 * day));
+  });
+
+  it('decide 接线：不同字段之间仍取最早失效（L1）', async () => {
+    const olderField = '2026-01-01T00:00:00.000Z';
+    const newerField = '2026-04-01T00:00:00.000Z';
+    const outboxCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+    const svc = makeDecideService(
+      makeDecideTx(makeLead(), makeCompany(), outboxCreate, vi.fn(), [
+        { dataClass: GREEN, fetchedAt: newerField, field: 'domain' },
+        { dataClass: GREEN, fetchedAt: olderField, field: 'industry' },
+      ]),
+    );
+    await svc.decide(decideCtx, LEAD_ID, 'accept');
+    const payload = (outboxCreate.mock.calls[0][0].data as Record<string, unknown>).payload as Record<string, unknown>;
+    expect(payload.valid_until).toBe(iso(Date.parse(olderField) + 180 * day));
   });
 
   it('decide 接线：已评分 lead 的 scored_at 与 queue_basis=score 进入快照，且不查 lead_decision', async () => {

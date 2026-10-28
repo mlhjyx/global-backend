@@ -77,10 +77,12 @@ function company(id: string, overrides: Partial<CompanyFixture> = {}): CompanyFi
 function evidence(entityId: string, overrides: Record<string, unknown> = {}) {
   return {
     entityId,
+    field: 'attributes',
     dataClass: 'green',
     providerKey: 'public_web',
     license: 'licensed',
-    _min: { fetchedAt: new Date('2026-10-10T00:00:00.000Z') },
+    // L1：有效期按「每个字段取最新」（_max）聚合。
+    _max: { fetchedAt: new Date('2026-10-10T00:00:00.000Z') },
     ...overrides,
   };
 }

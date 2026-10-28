@@ -370,8 +370,8 @@ export class WeeklyReportService {
         continue;
       }
       const freshness = evidence
-        .filter((group) => group._min.fetchedAt != null)
-        .map((group) => ({ dataClass: group.dataClass, fetchedAt: group._min.fetchedAt as Date }));
+        .filter((group) => group._max.fetchedAt != null)
+        .map((group) => ({ dataClass: group.dataClass, fetchedAt: group._max.fetchedAt as Date }));
       rows.push([
         ...weeklyReportRow({
           leadId: lead.id,
@@ -413,10 +413,11 @@ export class WeeklyReportService {
       where: { id: { in: companyIds } },
       select: { id: true, name: true, domain: true, country: true, status: true, attributes: true },
     });
+    // L1：有效期按「每个字段取最新、字段之间取最早」；providerKey/license 仍随行供合成来源判定。
     const evidence = await tx.fieldEvidence.groupBy({
-      by: ['entityId', 'dataClass', 'providerKey', 'license'],
+      by: ['entityId', 'field', 'dataClass', 'providerKey', 'license'],
       where: { entityType: 'company', entityId: { in: companyIds } },
-      _min: { fetchedAt: true },
+      _max: { fetchedAt: true },
     });
     const contactPoints = await tx.companyContactPoint.findMany({
       where: { companyId: { in: companyIds } },

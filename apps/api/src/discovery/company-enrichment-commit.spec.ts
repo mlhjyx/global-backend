@@ -5,6 +5,82 @@ import {
   enrichmentHitSurvivesGovernance,
 } from './company-enrichment-commit';
 
+describe('company enrichment commit evidence provenance (L1)', () => {
+  function txWith(create: ReturnType<typeof vi.fn>) {
+    return {
+      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      canonicalCompany: {
+        findUnique: vi.fn(async () => ({
+          id: 'co-1',
+          name: 'Acme GmbH',
+          domain: 'acme.example',
+          status: 'NEW',
+          attributes: {},
+        })),
+        updateMany: vi.fn(async () => ({ count: 1 })),
+      },
+      suppressionRecord: { findMany: vi.fn(async () => []) },
+      fieldEvidence: { create },
+    } as unknown as Prisma.TransactionClient;
+  }
+
+  it('stores the provenance url and fetch time on every evidence row it writes', async () => {
+    const create = vi.fn(async () => ({}));
+    await commitCompanyEnrichmentResults(txWith(create), {
+      workspaceId: 'ws-1',
+      companyId: 'co-1',
+      hits: [
+        {
+          key: 'website_profile',
+          result: {
+            matched: true,
+            confidence: 0.7,
+            attributes: { trade_role: 'distributor' },
+            costCents: 0,
+            provenance: {
+              sourceUrl: 'https://acme.example/impressum',
+              fetchedAt: '2026-10-01T00:00:00.000Z',
+              parserVersion: 'website_profile/v1',
+            },
+          },
+        },
+      ],
+    });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0]![0]).toMatchObject({
+      data: {
+        entityType: 'company',
+        field: 'website_profile.trade_role',
+        sourceUrl: 'https://acme.example/impressum',
+        fetchedAt: new Date('2026-10-01T00:00:00.000Z'),
+      },
+    });
+  });
+
+  it('never stores a non-https provenance url', async () => {
+    const create = vi.fn(async () => ({}));
+    await commitCompanyEnrichmentResults(txWith(create), {
+      workspaceId: 'ws-1',
+      companyId: 'co-1',
+      hits: [
+        {
+          key: 'website_profile',
+          result: {
+            matched: true,
+            confidence: 0.7,
+            attributes: { trade_role: 'distributor' },
+            costCents: 0,
+            provenance: { sourceUrl: 'http://acme.example/impressum', fetchedAt: '2026-10-01T00:00:00.000Z' },
+          },
+        },
+      ],
+    });
+    const data = create.mock.calls[0]![0].data as Record<string, unknown>;
+    expect(data).not.toHaveProperty('sourceUrl');
+    expect(data.fetchedAt).toEqual(new Date('2026-10-01T00:00:00.000Z'));
+  });
+});
+
 describe('company enrichment commit suppression boundary', () => {
   it('merges only owned namespaces into current scrubbed attributes after a pre-wire snapshot becomes stale', async () => {
     const updateMany = vi.fn(async () => ({ count: 1 }));
