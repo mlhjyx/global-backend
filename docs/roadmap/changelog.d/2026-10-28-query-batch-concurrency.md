@@ -1,6 +1,6 @@
 ---
 date: 2026-10-28
-pr:
+pr: 690
 title: Run a plan's queries two at a time
 ---
 
