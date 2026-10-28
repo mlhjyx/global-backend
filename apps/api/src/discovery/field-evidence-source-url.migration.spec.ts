@@ -43,7 +43,9 @@ describe('field_evidence.source_url migration (L1)', () => {
     expect(statements).toContain('ALTER TABLE "field_evidence" ADD COLUMN "source_url" TEXT');
     const check = statements.find((statement) => statement.startsWith('ALTER TABLE "field_evidence" ADD CONSTRAINT'));
     expect(check).toContain('"field_evidence_source_url_check"');
-    expect(check).toContain(`CHECK ("source_url" IS NULL OR ("source_url" LIKE 'https://%' AND char_length("source_url") <= 2048))`);
+    expect(check).toContain(
+      `CHECK ("source_url" IS NULL OR ("source_url" LIKE 'https://%' AND char_length("source_url") <= 2048)) NOT VALID`,
+    );
     const schema = readFileSync(PRISMA_SCHEMA, 'utf8');
     const fieldEvidence = /model FieldEvidence \{[\s\S]*?\n\}/u.exec(schema)?.[0] ?? '';
     expect(fieldEvidence).toMatch(/sourceUrl\s+String\?\s+@map\("source_url"\)/u);
