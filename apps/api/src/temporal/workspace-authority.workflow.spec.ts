@@ -1071,8 +1071,9 @@ describe('discoveryWorkflow queries that lost a provider to an unreplayable oper
     await discoveryWorkflow(discoveryInput());
 
     expect(acts.executeQuery).toHaveBeenCalledTimes(2);
+    // Both queries are one batch: neither sees a hand-off, and the batch as a whole was not lost.
     expect(handOffOf(0)).toBeUndefined();
-    expect(handOffOf(1)).toBe(true);
+    expect(handOffOf(1)).toBeUndefined();
     expect(acts.canonicalizeRun).toHaveBeenCalled();
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1085,6 +1086,33 @@ describe('discoveryWorkflow queries that lost a provider to an unreplayable oper
     );
   });
 
+  it('runs the two queries of a batch at the same time', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: [query(1), query(2)] });
+    const base = acts.executeQuery.getMockImplementation()!;
+    let calls = 0;
+    let releaseFirst: (() => void) | undefined;
+    acts.executeQuery.mockImplementation((async (...args: unknown[]) => {
+      calls += 1;
+      if (calls === 1) {
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+      }
+      return base(...args);
+    }) as never);
+
+    const running = discoveryWorkflow(discoveryInput());
+    // The second query is issued while the first is still open: the batch really overlaps.
+    await vi.waitFor(() => expect(acts.executeQuery).toHaveBeenCalledTimes(2));
+    releaseFirst!();
+    await running;
+
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'DONE' }),
+    );
+  });
+
   it('counts a second query lost the same way in a row and runs the rest of the plan', async () => {
     primeDiscovery();
     acts.loadPlanQueries.mockResolvedValue({ queries: [query(1), query(2), query(3)] });
@@ -1092,10 +1120,11 @@ describe('discoveryWorkflow queries that lost a provider to an unreplayable oper
 
     await discoveryWorkflow(discoveryInput());
 
-    // A lost operation is a remnant of an earlier attempt, never evidence about the upstream now:
-    // the second such query in a row is counted like the first, and the plan goes on.
+    // A lost operation is a remnant of an earlier attempt, never evidence about the upstream now.
+    // The first batch is lost as a whole, so the next query is told; both are counted and the plan
+    // goes on.
     expect(acts.executeQuery).toHaveBeenCalledTimes(3);
-    expect(handOffOf(1)).toBe(true);
+    expect(handOffOf(1)).toBeUndefined();
     expect(handOffOf(2)).toBe(true);
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1119,7 +1148,8 @@ describe('discoveryWorkflow queries that lost a provider to an unreplayable oper
 
     await discoveryWorkflow(discoveryInput());
 
-    expect(handOffOf(1)).toBe(true);
+    // The first batch mixed a loss and a success, so the third query starts without a hand-off.
+    expect(handOffOf(1)).toBeUndefined();
     expect(handOffOf(2)).toBeUndefined();
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1140,7 +1170,8 @@ describe('discoveryWorkflow queries that lost a provider to an unreplayable oper
 
     await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(failed);
 
-    expect(acts.executeQuery).toHaveBeenCalledTimes(1);
+    // Both queries of the batch were already in flight when the control error surfaced.
+    expect(acts.executeQuery).toHaveBeenCalledTimes(2);
     expect(acts.canonicalizeRun).not.toHaveBeenCalled();
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
