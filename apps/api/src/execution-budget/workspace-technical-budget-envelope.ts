@@ -69,6 +69,7 @@ export const WORKSPACE_EXECUTION_QUOTE_OPERATIONS = Object.freeze([
   'POST /canonical-companies/:id/discover-contacts',
   'POST /canonical-companies/:id/guess-emails',
   'POST /contact-points/:pointId/verify',
+  'POST /leads/:leadId/outreach-drafts',
 ] as const satisfies readonly WorkspaceExecutionBudgetRequest['operation'][]);
 
 const MICROUSD_PER_CENT = 10_000n;
@@ -328,6 +329,11 @@ export function resolveWorkspaceTechnicalBudgetEnvelope(
   switch (request.operation) {
     case 'POST /companies/:companyId/icps':
       return ready(request, [model('icp.design', 1)], [], {
+        modelLogicalInvocations: 1,
+      });
+    case 'POST /leads/:leadId/outreach-drafts':
+      // One bounded structured call per draft; the schema repair retry is the second wire.
+      return ready(request, [model('outreach.first_contact_draft', 1)], [], {
         modelLogicalInvocations: 1,
       });
     case 'POST /icps/:icpId/query-plans': {

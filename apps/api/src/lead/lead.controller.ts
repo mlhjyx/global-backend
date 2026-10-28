@@ -21,8 +21,18 @@ import { ScopesGuard } from '../auth/scopes.guard';
 import { envelope, pageEnvelope } from '../common/envelope';
 import { ApiEnvelope, ApiPageEnvelope } from '../common/api-envelope.decorator';
 import { LeadService } from './lead.service';
+import { OutreachDraftService } from './outreach-draft.service';
 import { LEAD_QUEUE_BASES } from './lead-queue-basis';
 import { OUTCOME_REASON_CODES, REJECT_REASON_CODES } from './reason-codes';
+import {
+  ApiExecutionBudgetGrant,
+  asExecutionBudgetHttpBoundary,
+  ExecutionBudgetGrant,
+} from '../execution-budget/execution-budget-grant.decorator';
+import {
+  ApiModelUpstreamUnusable,
+  asModelUpstreamHttpBoundary,
+} from '../model-gateway/model-upstream-http-boundary';
 
 const LEAD_QUEUE_BASIS_SCHEMA = {
   type: 'string',
@@ -129,6 +139,24 @@ const LEAD_PACKAGE_SCHEMA = {
   },
 } as const;
 
+const OUTREACH_DRAFT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['id', 'leadId', 'version', 'language', 'subject', 'body', 'bodyZh', 'usedFacts', 'model', 'createdAt'],
+  properties: {
+    id: { type: 'string', format: 'uuid' },
+    leadId: { type: 'string', format: 'uuid' },
+    version: { type: 'integer', minimum: 1 },
+    language: { type: 'string', description: '目标国语言（BCP-47 主标签）' },
+    subject: { type: 'string', description: '主题（目标国语言）' },
+    body: { type: 'string', description: '正文（目标国语言），末尾附卖方自己的回复入口' },
+    bodyZh: { type: 'string', description: '中文译文（运营审阅用）' },
+    usedFacts: { type: 'array', items: { type: 'string' }, description: '草稿引用的事实键' },
+    model: { type: 'string', description: '实际产出该草稿的模型身份' },
+    createdAt: { type: 'string', format: 'date-time' },
+  },
+} as const;
+
 const leadDecisionErrorSchema = (codes: readonly string[]) => ({
   type: 'object',
   additionalProperties: false,
@@ -232,7 +260,10 @@ class SanctionsReviewDto {
 @UseGuards(AuthGuard, ScopesGuard)
 @RequireScopes('acquisition:read')
 export class LeadController {
-  constructor(private readonly leads: LeadService) {}
+  constructor(
+    private readonly leads: LeadService,
+    private readonly outreachDrafts: OutreachDraftService,
+  ) {}
 
   @Post('icps/:icpId/qualify')
   @RequireScopes('acquisition:write')
@@ -356,6 +387,46 @@ export class LeadController {
     @Body() dto: LeadOutcomeDto,
   ) {
     return envelope(await this.leads.recordOutcome(ctx, leadId, dto));
+  }
+
+  @Post('leads/:leadId/outreach-drafts')
+  @RequireScopes('acquisition:review')
+  @HttpCode(201)
+  @ApiOperation({
+    summary: '生成首次联系开发信草稿（BI-15）：目标国语言 + 中文译文，只存储不发送',
+    description:
+      '按线索的公司级事实与卖方资料生成一版草稿（版本号递增），末尾由平台追加卖方自己的回复入口（官网/邮箱/wa.me）。平台不发送、不提供发送按钮。模型网关结算了调用却没有可用答案时返回 502 MODEL_UPSTREAM_UNUSABLE；草稿引用了未提供的事实键时返回 502 OUTREACH_DRAFT_UNGROUNDED 并丢弃草稿；这两种情况预算授权都已消耗，重试需要新的授权。',
+  })
+  @ApiExecutionBudgetGrant()
+  @ApiModelUpstreamUnusable()
+  @ApiResponse({
+    status: 404,
+    description: 'Lead 不存在',
+    schema: leadDecisionErrorSchema(['NOT_FOUND']),
+  })
+  @ApiResponse({
+    status: 422,
+    description: '线索尚未被运营接受（最新裁决不是 accept）',
+    schema: leadDecisionErrorSchema(['OUTREACH_DRAFT_LEAD_NOT_ACCEPTED']),
+  })
+  @ApiResponse({
+    status: 502,
+    description: '草稿引用了未提供的事实键，已丢弃',
+    schema: leadDecisionErrorSchema(['OUTREACH_DRAFT_UNGROUNDED']),
+  })
+  @ApiEnvelope(OUTREACH_DRAFT_SCHEMA, { status: 201 })
+  async outreachDraft(
+    @Ctx() ctx: RequestContext,
+    @Param('leadId', ParseUUIDPipe) leadId: string,
+    @ExecutionBudgetGrant() compactJws?: string,
+  ) {
+    return envelope(
+      await asExecutionBudgetHttpBoundary(() =>
+        asModelUpstreamHttpBoundary(() =>
+          this.outreachDrafts.generate(ctx, leadId, compactJws),
+        ),
+      ),
+    );
   }
 
   @Post('leads/:leadId/accept')

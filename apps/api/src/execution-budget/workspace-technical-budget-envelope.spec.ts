@@ -8,9 +8,10 @@ const COMPANY_ID = '20000000-0000-4000-8000-000000000002';
 const ICP_ID = '30000000-0000-4000-8000-000000000003';
 const POINT_ID = '40000000-0000-4000-8000-000000000004';
 const PLAN_ID = '50000000-0000-4000-8000-000000000005';
+const LEAD_ID = '60000000-0000-4000-8000-000000000006';
 
 describe('workspace execution technical envelope catalog', () => {
-  it('machine-enumerates all and only the seven workspace operations', () => {
+  it('machine-enumerates all and only the eight workspace operations', () => {
     expect(WORKSPACE_EXECUTION_QUOTE_OPERATIONS).toEqual([
       'POST /companies',
       'POST /companies/:companyId/icps',
@@ -19,7 +20,26 @@ describe('workspace execution technical envelope catalog', () => {
       'POST /canonical-companies/:id/discover-contacts',
       'POST /canonical-companies/:id/guess-emails',
       'POST /contact-points/:pointId/verify',
+      'POST /leads/:leadId/outreach-drafts',
     ]);
+  });
+
+  it('quotes an outreach draft from one bounded structured task and its exact wire cap', () => {
+    const envelope = resolveWorkspaceTechnicalBudgetEnvelope({
+      operation: 'POST /leads/:leadId/outreach-drafts',
+      leadId: LEAD_ID,
+    });
+
+    expect(envelope.policy.models).toEqual([
+      expect.objectContaining({
+        taskId: 'outreach.first_contact_draft',
+        logicalInvocations: 1,
+        structuredWireUpperBound: 2,
+        maxCostCents: 20,
+        maxOutputTokens: 8_192,
+      }),
+    ]);
+    expect(envelope.policy.tools).toEqual([]);
   });
 
   it('quotes ICP design from one bounded structured task and its exact wire cap', () => {

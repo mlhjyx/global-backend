@@ -296,6 +296,12 @@ function parseRequest(value: unknown): WorkspaceExecutionBudgetRequest {
           ? {}
           : { body: complianceBody(input.body, false) }),
       });
+    case 'POST /leads/:leadId/outreach-drafts':
+      exactKeys(input, ['operation', 'leadId']);
+      return Object.freeze({
+        operation: input.operation,
+        leadId: uuid(input.leadId),
+      });
     default:
       return invalid();
   }
@@ -417,6 +423,11 @@ const WORKSPACE_QUOTE_REQUEST_SCHEMAS = [
       },
     },
     ['pointId'],
+  ),
+  operationVariant(
+    'POST /leads/:leadId/outreach-drafts',
+    { leadId: { type: 'string', format: 'uuid' } },
+    ['leadId'],
   ),
 ] as const;
 

@@ -451,6 +451,22 @@
       }
     },
     {
+      "taskId": "outreach.first_contact_draft",
+      "callsitePath": "apps/api/src/lead/outreach-draft.service.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "outreach-first-contact-draft/v1",
+      "operationIdentity": "model:outreach.first_contact_draft:<account-key>",
+      "privacyClass": "CONFIDENTIAL_TENANT",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "OutreachDraftService.generate",
+        "domainAggregateType": "LeadOutreachDraft",
+        "identitySource": "receipt-derived-draft-id-and-version",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
       "taskId": "discovery.query_plan",
       "callsitePath": "apps/api/src/icp/icp.service.ts",
       "resultStrategy": "typed_projection",

@@ -383,6 +383,7 @@ export class WeeklyReportService {
           scores: lead.scores,
           company,
           contactPoints: facts.reachablePoints(company),
+          draft: facts.draftsByLead.get(lead.id) ?? null,
           sanctionsStatus: sanctions.status,
           validUntil: computeValidUntil(freshness, company.attributes),
           runCost: facts.runCosts.get(company.id) ?? null,
@@ -447,12 +448,30 @@ export class WeeklyReportService {
       'company_name',
       suppressions.filter((row) => row.type === 'company_name').map((row) => row.value),
     );
+    // BI-15/L5: the newest stored first-contact draft per lead (the platform never sends it).
+    const drafts = await tx.leadOutreachDraft.findMany({
+      where: { leadId: { in: leads.map((lead) => lead.id) } },
+      select: { leadId: true, version: true, subject: true, body: true, bodyZh: true },
+      orderBy: [{ leadId: 'asc' }, { version: 'desc' }],
+    });
+    const draftsByLead = new Map<string, { subject: string; body: string; bodyZh: string }>();
+    for (const draft of drafts) {
+      if (!draftsByLead.has(draft.leadId)) {
+        draftsByLead.set(draft.leadId, {
+          subject: draft.subject,
+          body: draft.body,
+          bodyZh: draft.bodyZh,
+        });
+      }
+    }
     const pointsByCompany = groupBy(contactPoints, (row) => row.companyId);
     return {
       companies: new Map(companies.map((company) => [company.id, company])),
       evidence: groupBy(evidence, (row) => row.entityId),
       provenance: groupBy(provenance, (row) => row.entityId),
       contactPoints: pointsByCompany,
+      /** Latest draft version per lead, when one was generated. */
+      draftsByLead,
       /**
        * The company's contact paths as the delivered read models see them: a link on a
        * suppressed host (or a parent domain of one) is never exported or suggested.

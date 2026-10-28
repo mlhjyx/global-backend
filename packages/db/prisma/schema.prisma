@@ -2176,6 +2176,7 @@ model Lead {
   canonicalCompany CanonicalCompany @relation(fields: [canonicalCompanyId], references: [id], onDelete: Cascade)
   decisions        LeadDecision[]
   outcomes         LeadOutcome[]
+  outreachDrafts   LeadOutreachDraft[]
 
   @@unique([workspaceId, icpId, canonicalCompanyId])
   // BI-23: composite tenant key for lead_outcome's (workspace_id, lead_id) foreign key.
@@ -2227,6 +2228,35 @@ model LeadOutcome {
 
   @@index([workspaceId, leadId])
   @@map("lead_outcome")
+}
+
+/// 首次联系开发信草稿（BI-15，交付闭环设计 §7）：模型按公司级事实与卖方资料生成，
+/// 只追加（同一线索的每一版一行，版本号从 1 递增），周报取最新一版。
+/// 平台不发送；正文末尾由代码（非模型）附上卖方自己的回复入口。
+model LeadOutreachDraft {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  leadId      String   @map("lead_id") @db.Uuid
+  /// 同一线索内从 1 递增；与 (workspace_id, lead_id) 一起唯一。
+  version     Int
+  /// 目标国语言的 BCP-47 主标签，如 de / en（由买方国家确定性推出，不取模型自述）。
+  language    String   @db.VarChar(16)
+  /// 模型草稿主题（目标国语言）。
+  subject     String   @db.VarChar(200)
+  /// 模型草稿正文 + 代码追加的回复入口尾注。
+  body        String
+  /// 中文译文（供运营审阅）。
+  bodyZh      String   @map("body_zh")
+  /// 模型自称引用过的事实键，已校验 ⊆ 输入事实键（未通过的草稿不落库）。
+  usedFacts   Json     @map("used_facts")
+  /// 实际产出该草稿的模型身份（上游上报值，可能是部署批准的同义替换）。
+  model       String   @db.VarChar(100)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  lead Lead @relation(fields: [workspaceId, leadId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict, map: "lead_outreach_draft_lead_fkey")
+
+  @@unique([workspaceId, leadId, version])
+  @@map("lead_outreach_draft")
 }
 
 // ── ICP & Buying Committee (理想客户画像, PRD 7.5 / 5.4) ────────────────────

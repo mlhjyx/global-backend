@@ -39,6 +39,8 @@ interface Fixture {
   runs: Array<{ id: string; icpId: string; createdAt: Date }>;
   receipts: Array<{ runId: string; accountKey: string }>;
   accounts: Array<{ accountKey: string; chargedMicrousd: bigint; reservedMicrousd: bigint }>;
+  /** Stored outreach drafts (BI-15), any version order. */
+  drafts?: Array<{ leadId: string; version: number; subject: string; body: string; bodyZh: string }>;
 }
 
 function leadRow(id: string, companyId: string, overrides: Record<string, unknown> = {}) {
@@ -163,6 +165,13 @@ function harness(fixture: Fixture, screen = vi.fn(() => ({ status: 'not_screened
       ),
     },
     toolBudgetAccount: { findMany: vi.fn(async (_query: unknown) => fixture.accounts) },
+    leadOutreachDraft: {
+      findMany: vi.fn(async (query: { where: { leadId: { in: string[] } } }) =>
+        (fixture.drafts ?? [])
+          .filter((draft) => query.where.leadId.in.includes(draft.leadId))
+          .sort((left, right) => right.version - left.version),
+      ),
+    },
     policyDecisionLog: {
       createMany: vi.fn(async (args: { data: unknown[] }) => {
         transactionTrace.push({ call: 'log', inTransaction });
@@ -279,6 +288,28 @@ describe('WeeklyReportService (BI-22)', () => {
     expect(report).toMatchObject({ rows: 1, withheld: { rights: 0, sanctions: 0, quarantined: 0 } });
     expect(loggedDecisions(tx).map((entry) => entry.subjectId)).toEqual([leadIds[2]]);
     expect(tx.canonicalCompany.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: [kept] } } }));
+  });
+
+  it('fills 开发信草稿 from the newest stored draft of each lead, marked as unsent', async () => {
+    const leadId = '55555555-5555-4555-8555-555555555501';
+    const { service, tx } = harness(
+      baseFixture({
+        drafts: [
+          { leadId, version: 1, subject: 'Anfrage v1', body: 'v1 body', bodyZh: '第一版' },
+          { leadId, version: 2, subject: 'Anfrage v2', body: 'v2 body', bodyZh: '第二版' },
+          { leadId: '55555555-5555-4555-8555-555555555599', version: 9, subject: 'x', body: 'y', bodyZh: 'z' },
+        ],
+      }),
+    );
+    const report = await service.weekly(ctx, { icpId: ICP, week: '2026-W42' });
+    const [row] = records(report.csv);
+    expect(row!['开发信草稿']).toBe(
+      '主题：Anfrage v2\n\nv2 body\n\n中文译文：\n第二版\n\n草稿，需人工审阅；平台未发送',
+    );
+    // Only the report's own leads are looked up.
+    expect(tx.leadOutreachDraft.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { leadId: { in: [leadId] } } }),
+    );
   });
 
   it('defaults to the current UTC ISO week', async () => {

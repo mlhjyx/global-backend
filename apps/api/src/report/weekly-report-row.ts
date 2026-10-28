@@ -2,6 +2,7 @@ import { clamp01 } from '../lead/scoring';
 import { deriveFitReasonCodes } from '../lead/reason-codes';
 import { leadSignals } from '../lead/lead-package';
 import { SUGGESTED_CONTACT_LEGAL_NOTE, suggestedContactPath } from '../lead/suggested-contact-path';
+import { outreachDraftCell } from '../lead/outreach-draft';
 import type { CsvValue } from './csv';
 
 /**
@@ -73,6 +74,8 @@ export interface WeeklyReportRowInput {
   readonly validUntil: string | null;
   /** The discovery run the lead came from and its ledger total; null charge when not exactly known. */
   readonly runCost: { readonly runId: string; readonly chargedMicrousd: bigint | null } | null;
+  /** Newest stored outreach draft (BI-15), or null before one was generated. */
+  readonly draft?: { readonly subject: string; readonly body: string; readonly bodyZh: string } | null;
 }
 
 const TRADE_ROLE_LABELS: Readonly<Record<string, string>> = Object.freeze({
@@ -212,7 +215,7 @@ export function weeklyReportRow(input: WeeklyReportRowInput): readonly CsvValue[
     evidenceLinks.join('\n'),
     [...pathLines, ...(suggestedLine ? [suggestedLine] : [])].join('\n'),
     text(profile.registered_address),
-    '', // 开发信草稿: first-contact draft (L5 task, not generated in this PR)
+    outreachDraftCell(input.draft),
     SANCTIONS_LABELS[input.sanctionsStatus],
     input.validUntil ? input.validUntil.slice(0, 10) : '',
     input.runCost?.chargedMicrousd == null ? '' : formatMicrousd(input.runCost.chargedMicrousd),

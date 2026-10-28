@@ -626,6 +626,55 @@ describe.runIf(Boolean(ownerUrl && appUrl))('app_user table privileges on Postgr
     });
   }, 60_000);
 
+  // lead_outreach_draft (BI-15) is append-only: the draft writer inserts versions and the weekly
+  // report reads them; nothing ever updates or deletes a draft.
+  it('lets app_user append and read first-contact drafts', async () => {
+    const workspaceId = randomUUID();
+    const sellerId = randomUUID();
+    const icpId = randomUUID();
+    const companyId = randomUUID();
+    const leadId = randomUUID();
+    await rolledBack(app, async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceId}, true)`;
+      await tx.workspace.create({ data: { id: workspaceId, name: 'privileges probe' } });
+      await tx.companyProfile.create({
+        data: { id: sellerId, workspaceId, name: 'Privileges Seller GmbH' },
+      });
+      await tx.icpDefinition.create({
+        data: { id: icpId, workspaceId, companyId: sellerId, name: 'probe' },
+      });
+      await tx.canonicalCompany.create({
+        data: {
+          id: companyId,
+          workspaceId,
+          name: 'Privileges Buyer GmbH',
+          dedupeKey: 'domain:outreach-probe.example',
+        },
+      });
+      await tx.lead.create({ data: { id: leadId, workspaceId, icpId, canonicalCompanyId: companyId } });
+      for (const version of [1, 2]) {
+        await tx.leadOutreachDraft.create({
+          data: {
+            workspaceId,
+            leadId,
+            version,
+            language: 'de',
+            subject: `probe ${version}`,
+            body: 'probe body',
+            bodyZh: '探针正文',
+            usedFacts: ['seller.name'],
+            model: 'deepseek-v4-pro',
+          },
+        });
+      }
+      const drafts = await tx.leadOutreachDraft.findMany({
+        where: { leadId },
+        orderBy: { version: 'desc' },
+      });
+      expect(drafts.map((draft) => draft.version)).toEqual([2, 1]);
+    });
+  }, 60_000);
+
   // Negative: every INSERT, UPDATE, DELETE and TRUNCATE (and SELECT where the manifest lists
   // none) outside the manifest is refused with 42501 on the relation itself. Each statement needs
   // only its own privilege and touches no row.

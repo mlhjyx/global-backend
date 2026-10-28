@@ -119,6 +119,23 @@ describe('weekly report row (BI-22, design §5)', () => {
     expect(row['注册地址']).toBe('');
   });
 
+  it('fills 开发信草稿 with subject, body, Chinese translation and the review note (L5)', () => {
+    const row = byColumn(
+      weeklyReportRow(
+        input({
+          draft: {
+            subject: 'Erstkontakt',
+            body: 'Guten Tag,\n\n—\nReply directly to Acme: Website: https://acme.test',
+            bodyZh: '您好，\n\n—\n直接回复 Acme',
+          },
+        }),
+      ),
+    );
+    expect(row['开发信草稿']).toBe(
+      '主题：Erstkontakt\n\nGuten Tag,\n\n—\nReply directly to Acme: Website: https://acme.test\n\n中文译文：\n您好，\n\n—\n直接回复 Acme\n\n草稿，需人工审阅；平台未发送',
+    );
+  });
+
   it('fills why-now signals, deterministic reason codes and the registered address (L2/L6)', () => {
     const row = byColumn(
       weeklyReportRow(
