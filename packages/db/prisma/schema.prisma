@@ -1895,6 +1895,8 @@ model FieldEvidence {
   license        String   @default("sandbox") // sandbox | licensed | public | byo
   allowedActions Json?    @map("allowed_actions") // ['display','match','outreach']
   dataClass      String   @default("green") @map("data_class") // green（公司事实）| amber（职能邮箱 ePrivacy）| red（具名个人 GDPR Art.4）——收口⑥：替代 value JSON 里的 personal_data 代码纪律，可查询/可索引；喂 DataRightsService
+  /// 该事实来自哪个页面（https，≤2048；L1 交付闭环 §8）。可空：历史行与拿不到来源的写入点为 null，读时回退 raw_source_record 联表。
+  sourceUrl      String?  @map("source_url")
   fetchedAt      DateTime @default(now()) @map("fetched_at")
 
   cleanupAudits RawSourceFieldEvidenceCleanupAudit[]

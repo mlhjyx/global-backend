@@ -346,13 +346,14 @@ export class WeeklyReportService {
       const company = facts.companies.get(lead.canonicalCompanyId);
       if (!company) continue;
       const evidence = facts.evidence.get(company.id) ?? [];
+      const provenance = facts.provenance.get(company.id) ?? [];
       const rightsContext = exportRightsContextForLead({
         country: company.country,
         suppressed: company.status === 'SUPPRESSED' || facts.isListed(company),
         hasEvidence: evidence.length > 0,
       });
       const meta = { subjectType: 'lead', subjectId: lead.id, actorId: ctx.userId, correlationId: reportId };
-      if (evidence.some(isSyntheticDiscoveryProvenance)) {
+      if (provenance.some(isSyntheticDiscoveryProvenance)) {
         withheld.quarantined += 1;
         decisions.push({ ctx: rightsContext, decision: gateDenial('synthetic_quarantined'), meta });
         continue;
@@ -370,8 +371,8 @@ export class WeeklyReportService {
         continue;
       }
       const freshness = evidence
-        .filter((group) => group._min.fetchedAt != null)
-        .map((group) => ({ dataClass: group.dataClass, fetchedAt: group._min.fetchedAt as Date }));
+        .filter((group) => group._max.fetchedAt != null)
+        .map((group) => ({ dataClass: group.dataClass, fetchedAt: group._max.fetchedAt as Date }));
       rows.push([
         ...weeklyReportRow({
           leadId: lead.id,
@@ -413,10 +414,17 @@ export class WeeklyReportService {
       where: { id: { in: companyIds } },
       select: { id: true, name: true, domain: true, country: true, status: true, attributes: true },
     });
+    // L1：有效期按「每个字段取最新、字段之间取最早」——与 decide/package 同一 by 集合；来源与许可
+    // 另取一次（每个 entity×provider×license 一行，小结果集），供合成来源判定。
     const evidence = await tx.fieldEvidence.groupBy({
-      by: ['entityId', 'dataClass', 'providerKey', 'license'],
+      by: ['entityId', 'field', 'dataClass'],
       where: { entityType: 'company', entityId: { in: companyIds } },
-      _min: { fetchedAt: true },
+      _max: { fetchedAt: true },
+    });
+    const provenance = await tx.fieldEvidence.groupBy({
+      by: ['entityId', 'providerKey', 'license'],
+      where: { entityType: 'company', entityId: { in: companyIds } },
+      _count: { _all: true },
     });
     const contactPoints = await tx.companyContactPoint.findMany({
       where: { companyId: { in: companyIds } },
@@ -443,6 +451,7 @@ export class WeeklyReportService {
     return {
       companies: new Map(companies.map((company) => [company.id, company])),
       evidence: groupBy(evidence, (row) => row.entityId),
+      provenance: groupBy(provenance, (row) => row.entityId),
       contactPoints: pointsByCompany,
       /**
        * The company's contact paths as the delivered read models see them: a link on a

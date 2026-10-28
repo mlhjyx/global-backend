@@ -217,7 +217,13 @@ export class LeadService {
     tx: Prisma.TransactionClient,
     company: { id: string; name: string; domain: string | null },
     suppressions: ReadonlyArray<{ type: string; value: string }>,
-    companyEvidence?: ReadonlyArray<{ entityId: string; field: string; fetchedAt: Date; rawRecordId: string | null }>,
+    companyEvidence?: ReadonlyArray<{
+      entityId: string;
+      field: string;
+      fetchedAt: Date;
+      rawRecordId: string | null;
+      sourceUrl?: string | null;
+    }>,
   ): Promise<{
     contactPoints: Array<{ kind: string; value: string; status: string }>;
     evidence: Array<{ field: string; sourceUrl: string | null; fetchedAt: Date }>;
@@ -231,7 +237,7 @@ export class LeadService {
       companyEvidence ??
       (await tx.fieldEvidence.findMany({
         where: { entityType: 'company', entityId: company.id },
-        select: { entityId: true, field: true, fetchedAt: true, rawRecordId: true },
+        select: { entityId: true, field: true, fetchedAt: true, rawRecordId: true, sourceUrl: true },
         orderBy: { fetchedAt: 'desc' },
         take: 100,
       }));
@@ -239,7 +245,12 @@ export class LeadService {
       .filter((row) => row.entityId === company.id)
       .sort((left, right) => right.fetchedAt.getTime() - left.fetchedAt.getTime())
       .slice(0, 100);
-    const rawIds = [...new Set(newest.flatMap((row) => (row.rawRecordId ? [row.rawRecordId] : [])))];
+    // L1: an evidence row's own source_url wins; only rows without one fall back to the raw join.
+    const rawIds = [
+      ...new Set(
+        newest.flatMap((row) => (!row.sourceUrl && row.rawRecordId ? [row.rawRecordId] : [])),
+      ),
+    ];
     const rawSources = rawIds.length
       ? await tx.rawSourceRecord.findMany({
           where: { id: { in: rawIds } },
@@ -251,7 +262,7 @@ export class LeadService {
       contactPoints: reachableCompanyContactPoints(contactPoints, suppressions, company),
       evidence: newest.map((row) => ({
         field: row.field,
-        sourceUrl: row.rawRecordId ? sourceById.get(row.rawRecordId) ?? null : null,
+        sourceUrl: row.sourceUrl ?? (row.rawRecordId ? sourceById.get(row.rawRecordId) ?? null : null),
         fetchedAt: row.fetchedAt,
       })),
     };
@@ -282,10 +293,12 @@ export class LeadService {
         select: { type: true, value: true },
       });
       const facts = await this.loadDeliveryFacts(tx, company, suppressions);
+      // L1：有效期按「每个字段取最新、字段之间取最早」——每 (entityId, field, dataClass) 取最新抓取，
+      // 字段数有界（一家公司几十个字段），比旧的「每分级一行」略多但仍是小结果集。
       const freshness = await tx.fieldEvidence.groupBy({
-        by: ['dataClass'],
+        by: ['entityId', 'field', 'dataClass'],
         where: { entityId: { in: [company.id, ...contactIds] } },
-        _min: { fetchedAt: true },
+        _max: { fetchedAt: true },
       });
       const screening = await tx.sanctionsScreeningResult.findFirst({
         where: { canonicalCompanyId: company.id },
@@ -310,8 +323,8 @@ export class LeadService {
         },
         validUntil: computeValidUntil(
           freshness
-            .filter((group) => group._min.fetchedAt != null)
-            .map((group) => ({ dataClass: group.dataClass, fetchedAt: group._min.fetchedAt as Date })),
+            .filter((group) => group._max.fetchedAt != null)
+            .map((group) => ({ dataClass: group.dataClass, fetchedAt: group._max.fetchedAt as Date })),
           company.attributes,
         ),
       });
@@ -521,7 +534,15 @@ export class LeadService {
           where: {
             entityId: { in: [company.id, ...company.contacts.map((contact) => contact.id)] },
           },
-          select: { entityId: true, providerKey: true, license: true, field: true, fetchedAt: true, rawRecordId: true },
+          select: {
+            entityId: true,
+            providerKey: true,
+            license: true,
+            field: true,
+            fetchedAt: true,
+            rawRecordId: true,
+            sourceUrl: true,
+          },
         });
         if (evidenceRows.some(isSyntheticDiscoveryProvenance)) {
           throw new ConflictException({
@@ -674,23 +695,23 @@ export class LeadService {
           where: { id: lead.icpId },
           select: { version: true },
         });
-        // 鲜度模型（v2）：取本公司 + 其联系人 field_evidence **每个分级的最早抓取时刻**算 valid_until。
-        // groupBy 有界（每分级 1 行，≤3~4 条）——同一分级 TTL 恒定 → 最早抓取即该级最早失效；
-        // 避免把一家公司累积的全部证据行拉进 decide 写事务。entity_id 全局唯一 uuid + withWorkspace(RLS) 双重作用域。
-        const evidenceByClass = await tx.fieldEvidence.groupBy({
-          by: ['dataClass'],
+        // 鲜度模型（L1）：取本公司 + 其联系人 field_evidence **每个字段的最新抓取时刻**算 valid_until
+        //（重抓可延长该字段的有效期），字段之间再取最早失效。groupBy 有界（每字段一行，一家公司几十行）；
+        // entity_id 全局唯一 uuid + withWorkspace(RLS) 双重作用域。
+        const evidenceByField = await tx.fieldEvidence.groupBy({
+          by: ['entityId', 'field', 'dataClass'],
           where: {
             entityId: {
               in: [effectiveCompany.id, ...effectiveCompany.contacts.map((c) => c.id)],
             },
           },
-          _min: { fetchedAt: true },
+          _max: { fetchedAt: true },
         });
-        const evidence = evidenceByClass
-          .filter((g) => g._min.fetchedAt != null)
+        const evidence = evidenceByField
+          .filter((g) => g._max.fetchedAt != null)
           .map((g) => ({
             dataClass: g.dataClass,
-            fetchedAt: g._min.fetchedAt as Date,
+            fetchedAt: g._max.fetchedAt as Date,
           }));
         await persistDecision();
         // #72 P2：存储权利判定的审计留痕（policy_decision_log，append-only）——与 LeadQualified 交棒**同事务**

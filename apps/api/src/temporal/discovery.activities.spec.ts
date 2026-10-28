@@ -237,7 +237,7 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
         return {};
       },
     },
-    rawSourceRecord: {
+    rawSourceRecord: { findUnique: async () => null,
       findMany: async () => rows,
       count: async ({ where }: { where: { ingestStatus?: string } }) =>
         rows.filter(
@@ -445,7 +445,7 @@ const budgetSwallowingEnricher = {
 function makeEnrichDeps(enrichers: unknown[]) {
   const tx = {
     $queryRaw: async () => [{ locked: true }],
-    rawSourceRecord: { findMany: async () => [{ id: "raw1" }] },
+    rawSourceRecord: { findUnique: async () => null, findMany: async () => [{ id: "raw1" }] },
     identityLink: { findMany: async () => [{ canonicalId: "c1" }] },
     canonicalCompany: {
       findMany: async () => [
@@ -978,7 +978,7 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
     const tx = {
       $executeRaw: vi.fn(async () => 1),
       $queryRaw: queryRaw,
-      rawSourceRecord: {
+      rawSourceRecord: { findUnique: async () => null,
         findMany: vi.fn(async () => []),
         count: vi.fn(
           async ({ where }: { where: { ingestStatus: string } }) =>
@@ -1473,7 +1473,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     const canonicalUpsert = vi.fn();
     const tx = {
       $queryRaw: legacyMaterializationQueryRaw(),
-      rawSourceRecord: {
+      rawSourceRecord: { findUnique: async () => null,
         findMany: vi.fn(async () => [
           {
             id: "raw-no-name",
@@ -1506,7 +1506,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     const rawFindMany = vi.fn(async () => []);
     const tx = {
       $queryRaw: legacyMaterializationQueryRaw(),
-      rawSourceRecord: { findMany: rawFindMany },
+      rawSourceRecord: { findUnique: async () => null, findMany: rawFindMany },
       suppressionRecord: { findMany: vi.fn(async () => []) },
     };
     const withWorkspace = vi.fn(
@@ -1551,7 +1551,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
       const evidenceCreate = vi.fn();
       const tx = {
         $queryRaw: legacyMaterializationQueryRaw(),
-        rawSourceRecord: {
+        rawSourceRecord: { findUnique: async () => null,
           findMany: async () => [{ id: "raw-synthetic", ...raw }],
         },
         rawSourceGovernanceDisposition: { findMany: async () => [] },
@@ -1592,7 +1592,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
         order.push("lock");
         return [{ pg_advisory_xact_lock: null }];
       }),
-      rawSourceRecord: {
+      rawSourceRecord: { findUnique: async () => null,
         findMany: async () => [
           {
             id: "raw-1",
@@ -1648,7 +1648,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
   it("maps a post-read company IdentityLink P2002 to the stable identity conflict", async () => {
     const tx = {
       $queryRaw: legacyMaterializationQueryRaw(),
-      rawSourceRecord: { findMany: vi.fn(async () => [{
+      rawSourceRecord: { findUnique: async () => null, findMany: vi.fn(async () => [{
         id: "raw-p2002", providerKey: "registry", ingestStatus: "ACCEPTED",
         ingestVersion: "raw-source/v2", payload: { name: "Race GmbH", domain: "race.example" },
       }]) },
@@ -1691,7 +1691,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     const linkCreate = vi.fn(async () => ({}));
     const tx = {
       $queryRaw: legacyMaterializationQueryRaw(),
-      rawSourceRecord: {
+      rawSourceRecord: { findUnique: async () => null,
         findMany: async () => [
           {
             id: "raw-v2",
@@ -1827,7 +1827,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     const evidenceCreate = vi.fn();
     const tx = {
       $queryRaw: legacyMaterializationQueryRaw(),
-      rawSourceRecord: {
+      rawSourceRecord: { findUnique: async () => null,
         findMany: async () => [
           {
             id: "raw-1",
@@ -1935,7 +1935,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     );
     const tx = {
       $queryRaw: legacyMaterializationQueryRaw(),
-      rawSourceRecord: { findMany: vi.fn(async () => raws) },
+      rawSourceRecord: { findUnique: async () => null, findMany: vi.fn(async () => raws) },
       rawSourceGovernanceDisposition: { findMany: vi.fn(async () => []) },
       suppressionRecord: { findMany: vi.fn(async () => []) },
       canonicalCompany: {
@@ -2066,7 +2066,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     });
     const tx = {
       $queryRaw: legacyMaterializationQueryRaw(),
-      rawSourceRecord: { findMany: vi.fn(async () => [raw]) },
+      rawSourceRecord: { findUnique: async () => null, findMany: vi.fn(async () => [raw]) },
       rawSourceGovernanceDisposition: { findMany: vi.fn(async () => []) },
       suppressionRecord: { findMany: vi.fn(async () => []) },
       canonicalCompany: {
@@ -2525,7 +2525,11 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
       exactExistingOutcome: null, reusableIdentity: null,
       reusableManifestCandidates: [], companyParse: null, canonicalWrite: null,
     });
+    const rawFetchedAt = new Date("2026-10-01T00:00:00.000Z");
     const tx = {
+      rawSourceRecord: {
+        findUnique: async () => ({ sourceUrl: "https://acme.example/raw", fetchedAt: rawFetchedAt }),
+      },
       suppressionRecord: { findMany: vi.fn(async (args: {
         take?: number; where?: { id?: { gt?: string } };
       }) => args.take === 128
@@ -2640,6 +2644,10 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     expect(tx.canonicalCompany.upsert).toHaveBeenCalledOnce();
     expect(tx.identityLink.create).toHaveBeenCalledOnce();
     expect(tx.fieldEvidence.create).toHaveBeenCalledTimes(8);
+    // L1：物化证据补写来源 URL，fetched_at 用原始记录的抓取时间（不是提交时刻）。
+    for (const call of (tx.fieldEvidence.create as ReturnType<typeof vi.fn>).mock.calls) {
+      expect(call[0].data).toMatchObject({ sourceUrl: "https://acme.example/raw", fetchedAt: rawFetchedAt });
+    }
     expect(tx.canonicalCompany.upsert).toHaveBeenCalledOnce();
     expect(canonicalState).toMatchObject({
       domain: "acme.example", country: "DE", region: "BE", industry: "industrial",
@@ -2752,7 +2760,7 @@ describe("finalizeRun durable query receipt readback", () => {
       discoveryRun: { update },
       discoveryQueryPlan: { update: planUpdate },
       lead: { findFirst: leadFindFirst },
-      rawSourceRecord: { findMany: rawFindMany },
+      rawSourceRecord: { findUnique: async () => null, findMany: rawFindMany },
       identityLink: { findMany: identityLinkFindMany },
       outboxEvent: { create: outboxCreate },
     };
@@ -4950,7 +4958,7 @@ describe("qualifyFitForRun —— 流截断", () => {
     });
     const tx = {
       $queryRaw: legacyMaterializationQueryRaw(),
-      rawSourceRecord: {
+      rawSourceRecord: { findUnique: async () => null,
         findMany: async () =>
           companyIds.map((id) => ({
             id: `raw-${id}`,
@@ -5141,7 +5149,7 @@ describe("qualifyFitForRun —— 按时限把余下公司交给下一次活动"
     const findUnique = vi.fn(async ({ where }: { where: { id: string } }) => company(where.id) as ReturnType<typeof company> | null);
     const tx = {
       $queryRaw: legacyMaterializationQueryRaw(),
-      rawSourceRecord: {
+      rawSourceRecord: { findUnique: async () => null,
         findMany: async () =>
           companyIds.map((companyId) => ({
             id: `raw-${companyId}`,
@@ -5756,7 +5764,7 @@ describe("enqueuePatentLookupsForRun · P1-1 kill-switch", () => {
   it("provider ENABLED → 正常 enqueue 本 run fit=match 公司", async () => {
     const upserts: unknown[] = [];
     const tx = {
-      rawSourceRecord: { findMany: async () => [{ id: "raw1" }] },
+      rawSourceRecord: { findUnique: async () => null, findMany: async () => [{ id: "raw1" }] },
       identityLink: { findMany: async () => [{ canonicalId: "c1" }] },
       canonicalCompany: {
         findMany: async () => [{ name: "Acme GmbH", country: "DE" }],
@@ -5998,7 +6006,7 @@ describe("an unavailable model upstream makes the next activity attempt wait ins
     function fitActivities() {
       const tx = {
         $queryRaw: legacyMaterializationQueryRaw(),
-        rawSourceRecord: {
+        rawSourceRecord: { findUnique: async () => null,
           findMany: async () => [
             { id: "raw-c1", providerKey: "registry", payload: { externalId: "c1", name: "c1 GmbH", domain: "c1.example", country: "DE" } },
           ],

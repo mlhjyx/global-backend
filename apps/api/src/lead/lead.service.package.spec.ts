@@ -56,11 +56,14 @@ function txFor(over?: Record<string, unknown>) {
         args?.select && 'providerKey' in args.select
           ? [{ providerKey: 'website_profile', license: 'public' }]
           : [
-              { entityId: 'company-1', field: 'website_profile.trade_role', fetchedAt: new Date('2026-10-20T00:00:00.000Z'), rawRecordId: 'raw-1' },
-              { entityId: 'company-1', field: 'website_profile.vat_id', fetchedAt: new Date('2026-10-21T00:00:00.000Z'), rawRecordId: null },
+              { entityId: 'company-1', field: 'website_profile.trade_role', fetchedAt: new Date('2026-10-20T00:00:00.000Z'), rawRecordId: 'raw-1', sourceUrl: null },
+              { entityId: 'company-1', field: 'website_profile.vat_id', fetchedAt: new Date('2026-10-21T00:00:00.000Z'), rawRecordId: null, sourceUrl: null },
             ],
       ),
-      groupBy: vi.fn(async () => [{ dataClass: 'green', _min: { fetchedAt: new Date('2026-10-20T00:00:00.000Z') } }]),
+      // L1：有效期按「每个字段取最新」聚合（entityId+field+dataClass 上的 _max）。
+      groupBy: vi.fn(async () => [
+        { entityId: 'company-1', field: 'website_profile.trade_role', dataClass: 'green', _max: { fetchedAt: new Date('2026-10-20T00:00:00.000Z') } },
+      ]),
     },
     companyContactPoint: {
       findMany: vi.fn(async () => [
@@ -109,6 +112,12 @@ describe('LeadService.package', () => {
     expect(tx.sanctionsScreeningResult.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({ where: { canonicalCompanyId: 'company-1' } }),
     );
+    // L1: per field the latest fetch (by entity+field+class), not per data class.
+    expect(tx.fieldEvidence.groupBy).toHaveBeenCalledWith({
+      by: ['entityId', 'field', 'dataClass'],
+      where: { entityId: { in: ['company-1'] } },
+      _max: { fetchedAt: true },
+    });
   });
 
   it('drops contact paths on suppressed domains', async () => {
@@ -186,6 +195,47 @@ describe('LeadService.package', () => {
     expect(tx.fieldEvidence.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { entityId: { in: ['company-1', 'contact-1'] } } }),
     );
+  });
+
+  it('prefers the evidence row source url over the raw-record join (L1)', async () => {
+    const tx = txFor();
+    (tx.fieldEvidence.findMany as ReturnType<typeof vi.fn>).mockImplementation(
+      async (args: { select?: Record<string, unknown> }) =>
+        args?.select && 'providerKey' in args.select
+          ? [{ providerKey: 'website_profile', license: 'public' }]
+          : [
+              {
+                entityId: 'company-1',
+                field: 'website_profile.trade_role',
+                fetchedAt: new Date('2026-10-20T00:00:00.000Z'),
+                rawRecordId: 'raw-1',
+                sourceUrl: 'https://beispiel-pumpen.de/ueber-uns',
+              },
+            ],
+    );
+    const pkg = await serviceWithTx(tx).leadPackage(ctx, 'lead-1');
+    expect(pkg.evidence[0]!.source_url).toBe('https://beispiel-pumpen.de/ueber-uns');
+  });
+
+  it('takes each field at its latest fetch and the earliest field decides valid_until (L1)', async () => {
+    const tx = txFor({
+      fieldEvidence: {
+        findMany: vi.fn(async (args: { select?: Record<string, unknown> }) =>
+          args?.select && 'providerKey' in args.select
+            ? [{ providerKey: 'website_profile', license: 'public' }]
+            : [],
+        ),
+        groupBy: vi.fn(async () => [
+          // Same field fetched twice: the newer fetch decides its expiry.
+          { entityId: 'company-1', field: 'domain', dataClass: 'green', _max: { fetchedAt: new Date('2026-10-20T00:00:00.000Z') } },
+          // A different, older field still expires first.
+          { entityId: 'company-1', field: 'industry', dataClass: 'green', _max: { fetchedAt: new Date('2026-06-01T00:00:00.000Z') } },
+        ]),
+      },
+    });
+    const pkg = await serviceWithTx(tx).leadPackage(ctx, 'lead-1');
+    const DAY = 86_400_000;
+    expect(pkg.valid_until).toBe(new Date(Date.parse('2026-06-01T00:00:00.000Z') + 180 * DAY).toISOString());
   });
 
   it('refuses historical synthetic provenance', async () => {

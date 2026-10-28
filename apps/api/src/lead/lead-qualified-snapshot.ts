@@ -238,7 +238,10 @@ export function classifyLeadQualified(snapshot: LeadQualifiedSnapshotV1): 'RESTR
   return snapshot.contact_refs.length ? 'RESTRICTED' : 'CONFIDENTIAL';
 }
 
-/** 一条支撑事实的鲜度输入：分级 + 抓取时刻（Date 或 ISO 串皆可）。 */
+/**
+ * 一条支撑事实的鲜度输入：分级 + 抓取时刻（Date 或 ISO 串皆可）。调用方传入的是**每个字段的最新
+ * 抓取时刻**（L1：同一字段重抓可以延长其有效期）；字段之间由本函数取最早失效。
+ */
 export interface EvidenceFreshness {
   dataClass: string; // green | amber | red（field_evidence.data_class）
   fetchedAt: Date | string;
@@ -279,6 +282,10 @@ function latestIntentAtMs(attributes: unknown): number | null {
  * 取 min（最保守）：线索可行动性只与其**最易腐的关键事实**一样新——某条已过期即应先重新核实再触达。
  * 无任何 evidence 且无 intent 事件 → null（诚实：无鲜度依据，不臆造有效期）。
  * 纯函数、**不读时钟**（仅由输入时间戳与固定 TTL 决定，可复现）；不可解析时间戳跳过（不注入 NaN）。
+ */
+/**
+ * valid_until = min over fields (该字段最新 fetchedAt + 分级 TTL)，再与最新 intent 事件的时机窗取最早；
+ * 无任何依据 → null。字段个数的粒度由调用方决定（L1 起按 field 取最新）。
  */
 export function computeValidUntil(evidence: readonly EvidenceFreshness[], attributes: unknown): string | null {
   const expiries: number[] = [];
