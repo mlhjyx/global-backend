@@ -105,9 +105,12 @@ export async function commitCompanyEnrichmentResults(
   if (updated.count !== 1) return false;
 
   for (const hit of governedHits) {
-    // L1: the provenance URL is already in hand here; keep it with the evidence it backs
-    // (https and bounded, the same rule the migration's CHECK enforces).
-    const provenanceUrl = hit.result.provenance?.sourceUrl;
+    // L1: the website profile's provenance URL is the page its facts came from (design §8: BI-14's
+    // website_profile.source_url); keep it with the evidence it backs (https and bounded, the same
+    // rule the migration's CHECK enforces). Other enrichers fetch several pages or none for one hit
+    // (MX lookups, sitemap counts), so a single hit-level URL would cite the wrong page — they keep
+    // no row URL and the reader still falls back to the raw-record join.
+    const provenanceUrl = hit.key === 'website_profile' ? hit.result.provenance?.sourceUrl : undefined;
     const sourceUrl =
       typeof provenanceUrl === 'string' && provenanceUrl.startsWith('https://') && provenanceUrl.length <= 2048
         ? provenanceUrl

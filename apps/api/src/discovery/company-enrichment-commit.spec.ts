@@ -57,6 +57,28 @@ describe('company enrichment commit evidence provenance (L1)', () => {
     });
   });
 
+  it('never stamps a non-profile hit with a row url (the page would not be the source)', async () => {
+    const create = vi.fn(async () => ({}));
+    await commitCompanyEnrichmentResults(txWith(create), {
+      workspaceId: 'ws-1',
+      companyId: 'co-1',
+      hits: [
+        {
+          key: 'digital_footprint',
+          result: {
+            matched: true,
+            confidence: 0.9,
+            attributes: { email_provider: 'google' },
+            costCents: 0,
+            provenance: { sourceUrl: 'https://acme.example/', fetchedAt: '2026-10-01T00:00:00.000Z' },
+          },
+        },
+      ],
+    });
+    const data = create.mock.calls[0]![0].data as Record<string, unknown>;
+    expect(data).not.toHaveProperty('sourceUrl');
+  });
+
   it('never stores a non-https provenance url', async () => {
     const create = vi.fn(async () => ({}));
     await commitCompanyEnrichmentResults(txWith(create), {

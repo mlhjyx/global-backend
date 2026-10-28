@@ -112,6 +112,12 @@ describe('LeadService.package', () => {
     expect(tx.sanctionsScreeningResult.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({ where: { canonicalCompanyId: 'company-1' } }),
     );
+    // L1: per field the latest fetch (by entity+field+class), not per data class.
+    expect(tx.fieldEvidence.groupBy).toHaveBeenCalledWith({
+      by: ['entityId', 'field', 'dataClass'],
+      where: { entityId: { in: ['company-1'] } },
+      _max: { fetchedAt: true },
+    });
   });
 
   it('drops contact paths on suppressed domains', async () => {

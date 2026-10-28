@@ -489,7 +489,7 @@ function makeDecideTx(
     // L1：有效期按「每个字段取最新」（entityId+field+dataClass 上的 _max）聚合。mock 忠实按字段归组取 max。
     fieldEvidence: {
       findMany: vi.fn(async () => []),
-      groupBy: async () => {
+      groupBy: vi.fn(async () => {
         const toMs = (v: Date | string): number => (v instanceof Date ? v.getTime() : Date.parse(String(v)));
         const maxByField = new Map<string, { field: string; dataClass: string; fetchedAt: Date | string }>();
         for (const r of evidenceRows) {
@@ -506,7 +506,7 @@ function makeDecideTx(
           dataClass,
           _max: { fetchedAt },
         }));
-      },
+      }),
     },
     // 第五门：这些用例不测制裁，无历史命中 → decide 的持久化命中读返回 null（不拦，走 clear/not_screened）。
     sanctionsScreeningResult: { findFirst: async () => null },
@@ -1028,13 +1028,17 @@ describe('valid_until 鲜度模型 v2（computeValidUntil + decide 接线）', (
     const earlier = '2026-01-01T00:00:00.000Z';
     const later = '2026-04-01T00:00:00.000Z';
     const outboxCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
-    const svc = makeDecideService(
-      makeDecideTx(makeLead(), makeCompany(), outboxCreate, vi.fn(), [
-        { dataClass: GREEN, fetchedAt: later, field: 'attributes' },
-        { dataClass: GREEN, fetchedAt: earlier, field: 'attributes' },
-      ]),
-    );
+    const tx = makeDecideTx(makeLead(), makeCompany(), outboxCreate, vi.fn(), [
+      { dataClass: GREEN, fetchedAt: later, field: 'attributes' },
+      { dataClass: GREEN, fetchedAt: earlier, field: 'attributes' },
+    ]);
+    // L1：按字段取最新（by entity+field+class、_max），不是每分级最早。
+    expect(tx.fieldEvidence.groupBy).toBeDefined();
+    const svc = makeDecideService(tx);
     await svc.decide(decideCtx, LEAD_ID, 'accept');
+    expect(tx.fieldEvidence.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({ by: ['entityId', 'field', 'dataClass'], _max: { fetchedAt: true } }),
+    );
     const payload = (outboxCreate.mock.calls[0][0].data as Record<string, unknown>).payload as Record<string, unknown>;
     expect(payload.valid_until).toBe(iso(Date.parse(later) + 180 * day));
   });

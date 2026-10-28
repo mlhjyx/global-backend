@@ -128,7 +128,26 @@ function harness(fixture: Fixture, screen = vi.fn(() => ({ status: 'not_screened
     icpDefinition: { findUnique: vi.fn(async () => fixture.icp) },
     lead: { findMany: vi.fn(async (_query: unknown) => fixture.leads) },
     canonicalCompany: { findMany: vi.fn(async () => fixture.companies) },
-    fieldEvidence: { groupBy: vi.fn(async () => fixture.evidence) },
+    fieldEvidence: {
+      groupBy: vi.fn(async (args: { by: string[] }) =>
+        args.by.includes('field')
+          ? fixture.evidence
+          : // provenance pass: per (entity, provider, license), derived from the same fixture rows.
+            [
+              ...new Map(
+                fixture.evidence.map((row) => [
+                  `${String(row.entityId)}:${String(row.providerKey)}:${String(row.license)}`,
+                  {
+                    entityId: row.entityId,
+                    providerKey: row.providerKey,
+                    license: row.license,
+                    _count: { _all: 1 },
+                  },
+                ]),
+              ).values(),
+            ],
+      ),
+    },
     companyContactPoint: { findMany: vi.fn(async () => fixture.contactPoints) },
     sanctionsScreeningResult: { findMany: vi.fn(async () => fixture.sanctions) },
     suppressionRecord: { findMany: vi.fn(async () => fixture.suppressions) },

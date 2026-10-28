@@ -2525,8 +2525,11 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
       exactExistingOutcome: null, reusableIdentity: null,
       reusableManifestCandidates: [], companyParse: null, canonicalWrite: null,
     });
+    const rawFetchedAt = new Date("2026-10-01T00:00:00.000Z");
     const tx = {
-      rawSourceRecord: { findUnique: async () => null },
+      rawSourceRecord: {
+        findUnique: async () => ({ sourceUrl: "https://acme.example/raw", fetchedAt: rawFetchedAt }),
+      },
       suppressionRecord: { findMany: vi.fn(async (args: {
         take?: number; where?: { id?: { gt?: string } };
       }) => args.take === 128
@@ -2641,6 +2644,10 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     expect(tx.canonicalCompany.upsert).toHaveBeenCalledOnce();
     expect(tx.identityLink.create).toHaveBeenCalledOnce();
     expect(tx.fieldEvidence.create).toHaveBeenCalledTimes(8);
+    // L1：物化证据补写来源 URL，fetched_at 用原始记录的抓取时间（不是提交时刻）。
+    for (const call of (tx.fieldEvidence.create as ReturnType<typeof vi.fn>).mock.calls) {
+      expect(call[0].data).toMatchObject({ sourceUrl: "https://acme.example/raw", fetchedAt: rawFetchedAt });
+    }
     expect(tx.canonicalCompany.upsert).toHaveBeenCalledOnce();
     expect(canonicalState).toMatchObject({
       domain: "acme.example", country: "DE", region: "BE", industry: "industrial",
