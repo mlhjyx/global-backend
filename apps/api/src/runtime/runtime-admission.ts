@@ -194,41 +194,44 @@ function inspectGateway(
         code: "GATEWAY_SETTLEMENT_CREDENTIAL_SCOPE_INVALID",
       };
     }
-    if (role === "WORKER") {
-      if (!present(env.SITE_BUILD_PROVIDER_WIRE_DATABASE_URL)) {
-        return {
-          status: "failed",
-          code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_CONFIG_REQUIRED",
-        };
-      }
-      try {
-        withSiteBuildProviderWireStatementTimeout(
-          env.SITE_BUILD_PROVIDER_WIRE_DATABASE_URL,
-        );
-      } catch {
-        return {
-          status: "failed",
-          code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_CONFIG_INVALID",
-        };
-      }
-      if (
-        !env.APP_DATABASE_URL ||
-        !siteBuildProviderWireTargetsAppDatabase(
-          env.SITE_BUILD_PROVIDER_WIRE_DATABASE_URL,
-          env.APP_DATABASE_URL,
-        )
-      ) {
-        return {
-          status: "failed",
-          code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_TARGET_MISMATCH",
-        };
-      }
-    } else if (present(env.SITE_BUILD_PROVIDER_WIRE_DATABASE_URL)) {
+  }
+  // The provider-wire database is the worker's local wire-attempt ledger, not a
+  // billing-readback input: the worker bootstrap still requires it, so admission
+  // keeps checking it whether or not readback is enabled.
+  if (role === "WORKER") {
+    if (!present(env.SITE_BUILD_PROVIDER_WIRE_DATABASE_URL)) {
       return {
         status: "failed",
-        code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_SCOPE_INVALID",
+        code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_CONFIG_REQUIRED",
       };
     }
+    try {
+      withSiteBuildProviderWireStatementTimeout(
+        env.SITE_BUILD_PROVIDER_WIRE_DATABASE_URL,
+      );
+    } catch {
+      return {
+        status: "failed",
+        code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_CONFIG_INVALID",
+      };
+    }
+    if (
+      !env.APP_DATABASE_URL ||
+      !siteBuildProviderWireTargetsAppDatabase(
+        env.SITE_BUILD_PROVIDER_WIRE_DATABASE_URL,
+        env.APP_DATABASE_URL,
+      )
+    ) {
+      return {
+        status: "failed",
+        code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_TARGET_MISMATCH",
+      };
+    }
+  } else if (present(env.SITE_BUILD_PROVIDER_WIRE_DATABASE_URL)) {
+    return {
+      status: "failed",
+      code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_SCOPE_INVALID",
+    };
   }
   try {
     const url = new URL(env.MODEL_GATEWAY_URL);

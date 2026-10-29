@@ -130,16 +130,26 @@ describe("inspectRuntimeAdmission", () => {
       MODEL_GATEWAY_URL: "http://127.0.0.1:3001/v1",
       MODEL_GATEWAY_KEY: "secret",
     };
-    for (const role of ["API", "WORKER"] as const) {
-      expect(
-        inspectRuntimeAdmission(
-          { mode: "development", bindHost: "127.0.0.1", port: 3000 },
-          env,
-          attestedBuild,
-          role,
-        ).checks.gateway,
-      ).toEqual({ status: "ok" });
-    }
+    expect(
+      inspectRuntimeAdmission(
+        { mode: "development", bindHost: "127.0.0.1", port: 3000 },
+        env,
+        attestedBuild,
+        "API",
+      ).checks.gateway,
+    ).toEqual({ status: "ok" });
+    // The worker's local wire ledger is independent of billing readback.
+    expect(
+      inspectRuntimeAdmission(
+        { mode: "development", bindHost: "127.0.0.1", port: 3000 },
+        env,
+        attestedBuild,
+        "WORKER",
+      ).checks.gateway,
+    ).toEqual({
+      status: "failed",
+      code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_CONFIG_REQUIRED",
+    });
   });
 
   it("rejects a provider-wire writer pointed at a different application database", () => {
