@@ -8,8 +8,12 @@ import ipaddr from 'ipaddr.js';
  *
  * Ubuntu mihomo 会把公网域名全部映射到 RFC 2544 的 198.18/15；开启 IPv6 时 AAAA
  * 另映射到默认 `fake-ip-range6` 的 fdfe:dcba:9876::/64。只有当系统 DNS 的**全部**答案
- * 都属于这两个 fake-IP 段时，才向固定 Cloudflare DoH 端点查询真实答案；真私网或
+ * 都属于这两个 fake-IP 段时，才向 DoH 端点查询真实答案；真私网或
  * fake+private 混合答案绝不借 DoH 洗白。
+ *
+ * DoH 端点按 `NET_GUARD_DOH_ENDPOINTS`（逗号分隔、仅接受 https）顺序尝试，第一个给出
+ * 可用答案的端点胜出；缺省是 Cloudflare 再 Google。配置项全部非法时回落缺省。全部端点
+ * 失败仍是 fail-closed（dns_lookup_failed）——一个端点被掐断不应让整台机器的出网解析停摆。
  */
 
 export interface ResolvedAddress {
@@ -34,8 +38,37 @@ export interface PublicIpResolution {
 
 const FAKE_IPV4_RANGE = ipaddr.parseCIDR('198.18.0.0/15');
 const FAKE_IPV6_RANGE = ipaddr.parseCIDR('fdfe:dcba:9876::/64');
-const DOH_ENDPOINT = 'https://cloudflare-dns.com/dns-query';
+export const DEFAULT_DOH_ENDPOINTS: readonly string[] = Object.freeze([
+  'https://cloudflare-dns.com/dns-query',
+  'https://dns.google/resolve',
+]);
 const DNS_TIMEOUT_MS = 5_000;
+
+/**
+ * 解析 `NET_GUARD_DOH_ENDPOINTS`：逗号分隔，只保留合法的 https 绝对 URL，按序去重。
+ * 缺省 / 空串 / 全非法都回落 DEFAULT_DOH_ENDPOINTS（配错不应把整机出网解析打停）。
+ */
+export function parseDohEndpoints(raw: string | undefined): string[] {
+  const entries = (raw ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  const endpoints: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    let parsed: URL;
+    try {
+      parsed = new URL(entry);
+    } catch {
+      continue;
+    }
+    if (parsed.protocol !== 'https:' || parsed.hostname.length === 0) continue;
+    if (seen.has(entry)) continue;
+    seen.add(entry);
+    endpoints.push(entry);
+  }
+  return endpoints.length > 0 ? endpoints : [...DEFAULT_DOH_ENDPOINTS];
+}
 
 function parsedIp(ip: string): ipaddr.IPv4 | ipaddr.IPv6 | null {
   try {
@@ -81,8 +114,12 @@ interface DnsJsonResponse {
   Answer?: DnsJsonAnswer[];
 }
 
-async function queryDoh(host: string, type: 'A' | 'AAAA'): Promise<ResolvedAddress[]> {
-  const url = new URL(DOH_ENDPOINT);
+async function queryDoh(
+  host: string,
+  type: 'A' | 'AAAA',
+  endpoint: string,
+): Promise<ResolvedAddress[]> {
+  const url = new URL(endpoint);
   url.searchParams.set('name', host);
   url.searchParams.set('type', type);
   const response = await fetch(url, {
@@ -104,10 +141,20 @@ async function queryDoh(host: string, type: 'A' | 'AAAA'): Promise<ResolvedAddre
 }
 
 const dohLookup: HostResolver = async (host) => {
-  const [v4, v6] = await Promise.all([queryDoh(host, 'A'), queryDoh(host, 'AAAA')]);
-  const answers = [...v4, ...v6];
-  if (!answers.length) throw new Error('dns_lookup_failed');
-  return answers;
+  const endpoints = parseDohEndpoints(process.env.NET_GUARD_DOH_ENDPOINTS);
+  for (const endpoint of endpoints) {
+    try {
+      const [v4, v6] = await Promise.all([
+        queryDoh(host, 'A', endpoint),
+        queryDoh(host, 'AAAA', endpoint),
+      ]);
+      const answers = [...v4, ...v6];
+      if (answers.length) return answers;
+    } catch {
+      // 这个端点不可用（被掐、超时、非 JSON）；换下一个。
+    }
+  }
+  throw new Error('dns_lookup_failed');
 };
 
 /**
