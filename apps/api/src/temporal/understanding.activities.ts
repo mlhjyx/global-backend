@@ -588,12 +588,9 @@ export function createUnderstandingActivities(deps: {
               domainAckKey: `${args.companyId}:${page.url}:offerings`,
               domainRevision: page.durableReceipt.resultDigest,
             }] : []),
-            ...(page.crawlDurableReceipt ? [{
-              producerId: 'crawl4ai.fetch',
-              receipt: page.crawlDurableReceipt,
-              domainAckKey: `${args.companyId}:${page.url}:crawl`,
-              domainRevision: page.crawlDurableReceipt.resultDigest,
-            }] : []),
+            // 爬取回执已在 persistClaims 以同一 domainAckKey(:crawl)确认过;
+            // 这里再确认会得到 REPLAYED,与 offering 的 APPLIED 混批,
+            // applyDomainAckConsumerTransactions 会抛 DOMAIN_ACK_MIXED_REPLAY_STATE。
           ]),
           apply: async (transaction) => {
           for (const o of merged.values()) {
