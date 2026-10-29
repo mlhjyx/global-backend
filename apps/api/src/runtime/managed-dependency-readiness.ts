@@ -1,4 +1,5 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { settlementReadbackConfigured } from "./settlement-readback-config";
 import { S3Client } from "@aws-sdk/client-s3";
 import Redis from "ioredis";
 import { constants } from "node:fs";
@@ -459,6 +460,8 @@ export async function checkSiteBuildSettlementReadbackReadiness(
   fetcher: typeof fetch = fetch,
   keyringLoader: typeof loadSettlementDerivationKeyring = loadSettlementDerivationKeyring,
 ): Promise<RuntimeComponentStatus> {
+  // Opt-in capability: nothing to check when the deployment did not ask for it.
+  if (!settlementReadbackConfigured(env)) return { status: "ok" };
   const configured = env.MODEL_GATEWAY_URL?.trim();
   const readerCredential = canonicalGatewayCredential(
     env.MODEL_GATEWAY_SETTLEMENT_READBACK_CREDENTIAL,

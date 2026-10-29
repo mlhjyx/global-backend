@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { settlementReadbackConfigured } from "../runtime/settlement-readback-config";
 import "dotenv/config";
 import { resolve } from "node:path";
 import { Runtime, Worker } from "@temporalio/worker";
@@ -424,11 +425,12 @@ async function main(): Promise<void> {
     }
   })();
   if (
-    !activeSettlementRoutes ||
-    !costReconciliationCatalogCoversRoutes(
-      costReconciliationCatalog,
-      activeSettlementRoutes,
-    )
+    settlementReadbackConfigured(process.env) &&
+    (!activeSettlementRoutes ||
+      !costReconciliationCatalogCoversRoutes(
+        costReconciliationCatalog,
+        activeSettlementRoutes,
+      ))
   ) {
     await holdPlatformNotReady(
       "SITE_BUILD_COST_RECONCILIATION_CATALOG_UNAVAILABLE",
@@ -437,7 +439,9 @@ async function main(): Promise<void> {
   gateway.costReconciliationCatalog = costReconciliationCatalog;
   const settlementReadbackRuntime =
     createSiteBuildSettlementReadbackRuntimeFromEnv(costLedger);
-  if (!settlementReadbackRuntime) {
+  // Opt-in capability: only a configured-but-unusable runtime holds the worker;
+  // an unconfigured deployment simply has no paid settlement readback.
+  if (!settlementReadbackRuntime && settlementReadbackConfigured(process.env)) {
     await holdPlatformNotReady(
       "SITE_BUILD_MODEL_SETTLEMENT_READBACK_UNAVAILABLE",
     );

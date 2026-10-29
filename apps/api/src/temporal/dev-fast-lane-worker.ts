@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { settlementReadbackConfigured } from "../runtime/settlement-readback-config";
 import { resolve } from "node:path";
 import { NativeConnection, Worker } from "@temporalio/worker";
 import { workerIdentity } from "./worker-composition";
@@ -213,11 +214,12 @@ export async function runDevFastLaneWorker(
     }
   })();
   if (
-    !activeSettlementRoutes ||
-    !costReconciliationCatalogCoversRoutes(
-      costReconciliationCatalog,
-      activeSettlementRoutes,
-    )
+    settlementReadbackConfigured(process.env) &&
+    (!activeSettlementRoutes ||
+      !costReconciliationCatalogCoversRoutes(
+        costReconciliationCatalog,
+        activeSettlementRoutes,
+      ))
   ) {
     await holdLaneNotReady(
       "SITE_BUILD_COST_RECONCILIATION_CATALOG_UNAVAILABLE",
@@ -226,7 +228,8 @@ export async function runDevFastLaneWorker(
   gateway.costReconciliationCatalog = costReconciliationCatalog;
   const settlementReadbackRuntime =
     createSiteBuildSettlementReadbackRuntimeFromEnv(costLedger);
-  if (!settlementReadbackRuntime) {
+  // Opt-in capability: an unconfigured deployment has no paid settlement readback.
+  if (!settlementReadbackRuntime && settlementReadbackConfigured(process.env)) {
     await holdLaneNotReady("SITE_BUILD_MODEL_SETTLEMENT_READBACK_UNAVAILABLE");
   }
   gateway.settlementDerivationKeyring = settlementReadbackRuntime?.keyring;

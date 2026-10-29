@@ -1,4 +1,5 @@
 import type { RuntimeReleaseIdentity } from "./runtime-release-identity";
+import { settlementReadbackConfigured } from "./settlement-readback-config";
 import type { RuntimeSettings } from "./runtime-environment";
 import { createRolesToScopesPolicy } from "../auth/scopes";
 import { validateJwksTokenVerifierConfiguration } from "../auth/jwks-token-verifier";
@@ -169,61 +170,65 @@ function inspectGateway(
   if (parseModelGatewayRequestTimeout(env.MODEL_TIMEOUT_MS) === undefined) {
     return { status: "failed", code: "GATEWAY_TIMEOUT_INVALID" };
   }
-  const readerCredential = canonicalGatewayCredential(
-    env.MODEL_GATEWAY_SETTLEMENT_READBACK_CREDENTIAL,
-  );
-  if (
-    !readerCredential ||
-    !/^srb1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{43}$/u.test(readerCredential) ||
-    !present(env.SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE) ||
-    !isAbsolute(env.SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE) ||
-    !present(env.SITE_BUILD_COST_RECONCILIATION_CATALOG_JSON)
-  ) {
-    return {
-      status: "failed",
-      code: "GATEWAY_SETTLEMENT_READBACK_CONFIG_INCOMPLETE",
-    };
-  }
-  if (!gatewayCredentialsAreDistinct(dispatchCredential, readerCredential)) {
-    return {
-      status: "failed",
-      code: "GATEWAY_SETTLEMENT_CREDENTIAL_SCOPE_INVALID",
-    };
-  }
-  if (role === "WORKER") {
-    if (!present(env.SITE_BUILD_PROVIDER_WIRE_DATABASE_URL)) {
-      return {
-        status: "failed",
-        code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_CONFIG_REQUIRED",
-      };
-    }
-    try {
-      withSiteBuildProviderWireStatementTimeout(
-        env.SITE_BUILD_PROVIDER_WIRE_DATABASE_URL,
-      );
-    } catch {
-      return {
-        status: "failed",
-        code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_CONFIG_INVALID",
-      };
-    }
+  // Settlement readback is an opt-in deployment capability (product owner decision
+  // 2026-10-29); when none of its inputs is set the gateway only needs url/key/timeout.
+  if (settlementReadbackConfigured(env)) {
+    const readerCredential = canonicalGatewayCredential(
+      env.MODEL_GATEWAY_SETTLEMENT_READBACK_CREDENTIAL,
+    );
     if (
-      !env.APP_DATABASE_URL ||
-      !siteBuildProviderWireTargetsAppDatabase(
-        env.SITE_BUILD_PROVIDER_WIRE_DATABASE_URL,
-        env.APP_DATABASE_URL,
-      )
+      !readerCredential ||
+      !/^srb1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{43}$/u.test(readerCredential) ||
+      !present(env.SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE) ||
+      !isAbsolute(env.SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE) ||
+      !present(env.SITE_BUILD_COST_RECONCILIATION_CATALOG_JSON)
     ) {
       return {
         status: "failed",
-        code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_TARGET_MISMATCH",
+        code: "GATEWAY_SETTLEMENT_READBACK_CONFIG_INCOMPLETE",
       };
     }
-  } else if (present(env.SITE_BUILD_PROVIDER_WIRE_DATABASE_URL)) {
-    return {
-      status: "failed",
-      code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_SCOPE_INVALID",
-    };
+    if (!gatewayCredentialsAreDistinct(dispatchCredential, readerCredential)) {
+      return {
+        status: "failed",
+        code: "GATEWAY_SETTLEMENT_CREDENTIAL_SCOPE_INVALID",
+      };
+    }
+    if (role === "WORKER") {
+      if (!present(env.SITE_BUILD_PROVIDER_WIRE_DATABASE_URL)) {
+        return {
+          status: "failed",
+          code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_CONFIG_REQUIRED",
+        };
+      }
+      try {
+        withSiteBuildProviderWireStatementTimeout(
+          env.SITE_BUILD_PROVIDER_WIRE_DATABASE_URL,
+        );
+      } catch {
+        return {
+          status: "failed",
+          code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_CONFIG_INVALID",
+        };
+      }
+      if (
+        !env.APP_DATABASE_URL ||
+        !siteBuildProviderWireTargetsAppDatabase(
+          env.SITE_BUILD_PROVIDER_WIRE_DATABASE_URL,
+          env.APP_DATABASE_URL,
+        )
+      ) {
+        return {
+          status: "failed",
+          code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_TARGET_MISMATCH",
+        };
+      }
+    } else if (present(env.SITE_BUILD_PROVIDER_WIRE_DATABASE_URL)) {
+      return {
+        status: "failed",
+        code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_SCOPE_INVALID",
+      };
+    }
   }
   try {
     const url = new URL(env.MODEL_GATEWAY_URL);
