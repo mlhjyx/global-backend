@@ -176,7 +176,7 @@ describe('outreach draft generation (BI-15, design §7)', () => {
     ];
     void gateway;
     expect(input.task).toBe('outreach.first_contact_draft');
-    expect(input.model).toBe('deepseek-v4-pro');
+    expect(input.model).toBe('deepseek-flash');
     expect(input.prompt).toContain('德语（Deutsch）（de）');
     expect(input.prompt).toContain('- seller.name: Acme Pumps');
     expect(input.prompt).toContain('- seller.claim:claim-1: [certification] ISO 9001');

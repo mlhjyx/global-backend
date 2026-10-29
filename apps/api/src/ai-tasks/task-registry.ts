@@ -8,27 +8,25 @@ import {
 type OutputSchema = Record<string, unknown>;
 
 /**
- * Model for the flash-tier acquisition tasks (extraction, classification,
- * taxonomy). Pinned to deepseek-v4-pro on 2026-10-07: the only deployment's
- * acquisition gateway group (xin, OpenOx) serves no genuine deepseek-v4-flash.
- * It maps flash requests onto pro and reports a pro identity, which the
- * identity gate rightly refuses for a flash request. Requesting pro keeps the
- * identity check and spend records truthful; that gateway already charges
- * these calls at the pro ratio. Make this configurable per deployment before a
- * gateway that serves a real flash model is used.
- *
- * Since 2026-10-10 the same gateway also answers some pro requests with real
- * DeepSeek V4 Flash. Owner decision D14 (2026-10-11): a deployment may accept
- * that through MODEL_IDENTITY_SUBSTITUTES for the tasks marked
- * `acceptsModelSubstitute` below; such results are labelled Flash, not pro.
+ * Model for the acquisition tasks (2026-10-29 product owner decision: run on
+ * DeepSeek V4 Flash, no pro tier). Both tiers resolve from the deployment env so
+ * a new proxy model is a config change, not a code change:
+ *   MODEL_ACQUISITION_MODEL           — extraction / classification tier
+ *   MODEL_ACQUISITION_REASONING_MODEL — ICP design, fit judging, query planning, drafts
+ * The identity gate still requires the upstream to report the requested model
+ * (or an approved MODEL_IDENTITY_SUBSTITUTES entry), so a proxy that silently
+ * serves another model keeps failing closed.
  */
-const ACQUISITION_FLASH_TIER_MODEL = 'deepseek-v4-pro';
+const ACQUISITION_FLASH_TIER_MODEL =
+  process.env.MODEL_ACQUISITION_MODEL?.trim() || 'deepseek-flash';
+const ACQUISITION_REASONING_MODEL =
+  process.env.MODEL_ACQUISITION_REASONING_MODEL?.trim() || 'deepseek-flash';
 
 /**
- * deepseek-v4-pro is a reasoning model: its reasoning tokens count against the
- * same max_tokens as the answer. On 2026-10-08 icp.design hit 4,096 twice in a
- * row on xin and was truncated. The cap only bounds a call; the gateway charges
- * the tokens actually generated.
+ * The configured acquisition models are reasoning models: their reasoning
+ * tokens count against the same max_tokens as the answer. On 2026-10-08
+ * icp.design hit 4,096 twice in a row on xin and was truncated. The cap only
+ * bounds a call; the gateway charges the tokens actually generated.
  */
 const REASONING_TASK_MAX_OUTPUT_TOKENS = 8_192;
 
@@ -258,8 +256,8 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
       'value_props', 'target_markets', 'personas', 'buying_committee',
       'qualification_rules',
     ]),
-    // ICP 设计是低频、策略推理任务 → 用更强的 pro。
-    model: 'deepseek-v4-pro',
+    // ICP 设计是低频、策略推理任务 → 用推理档模型（MODEL_ACQUISITION_REASONING_MODEL）。
+    model: ACQUISITION_REASONING_MODEL,
     acceptsModelSubstitute: true,
     risk: 'medium',
     humanGate: true, // ICP 生成后为 HYPOTHESIS，回测/人工确认后才 ACTIVE。
@@ -448,7 +446,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     // ⚠️ 勿降到 deepseek-reasoner/deepseek-chat：官方已宣布 2026-07-24 彻底关停二别名（过渡期透传 v4-flash），
     // 用了既撞关停又重蹈 flash 召回过宽。全仓一律显式 deepseek-v4-pro / deepseek-v4-flash。
     // 额度恢复后可切回 gemini-2.5-pro。
-    model: 'deepseek-v4-pro',
+    model: ACQUISITION_REASONING_MODEL,
     acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false,
@@ -507,8 +505,8 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
         ...boundedNumber(0, 1_000_000_000, true), description: '预计候选公司量级',
       },
     }, ['queries', 'estimated_volume']),
-    // 计划生成是低频推理任务 → pro。
-    model: 'deepseek-v4-pro',
+    // 计划生成是低频推理任务 → 推理档模型（MODEL_ACQUISITION_REASONING_MODEL）。
+    model: ACQUISITION_REASONING_MODEL,
     acceptsModelSubstitute: true,
     risk: 'low', // 只产出计划，执行前还有成本 Dry Run 与人工确认
     humanGate: true,
@@ -534,7 +532,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
         description: '正文实际引用的事实键，必须来自提示的键表',
       },
     }, ['subject', 'body', 'body_zh', 'used_facts']),
-    model: 'deepseek-v4-pro',
+    model: ACQUISITION_REASONING_MODEL,
     // 发给潜在客户的底稿，人工审阅后才可用。
     risk: 'medium',
     humanGate: true,
