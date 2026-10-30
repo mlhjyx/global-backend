@@ -58,7 +58,7 @@ PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](..
 
 | 决定 | 当前事实 | 怎么回退 |
 | --- | --- | --- |
-| PRD4-D2 冻结 R4（2026-10-10） | 不在 R4 准入上继续投入；4 个平台 schedule 在 RL1 期间继续 paused；平台工作流迁进 customer worker 另出设计（未做）。每次换镜像仍要续 R4 部署绑定与准入回执（7 天）。R4 撤销投递链仍未打通（Backend 没有调用 GrowthOS HMAC 签发端点的客户端，`BLOCKED_PENDING_BACKEND_4A4`）：platform Worker 绿灯只代表「事实可观察」，不代表「撤销能真正送达」 | 冻结只是停止投入，没有删代码；恢复平台 schedule 是产品负责人的单独决定，且先要做平台写入者授权（L4-G23） |
+| PRD4-D2 冻结 R4（2026-10-10，**2026-10-31 重开**） | 冻结期间不追加 R4 投入、4 个平台 schedule 保持 paused、每次换镜像仍续 7 天绑定。**2026-10-31 产品负责人重开**：R4 恢复投入，唯一目的是把平台权威从 GrowthOS 迁到 gain-saas（机器 token、capability、撤销与恢复通道），迁完退役 GrowthOS；schedule 是否恢复运行另议。撤销投递链的现状：后端接收的是 RS256 签名的 JWS（不是 HMAC），发送侧已在 gain-saas 实现（P4），但尚未切换，`BLOCKED_PENDING_BACKEND_4A4` 仍然成立 | 重开只恢复「迁移」这一项投入；恢复平台 schedule 仍需平台写入者授权（L4-G23），且是产品负责人的单独决定 |
 | PRD4-D3 客户写入准入与 platform Worker 就绪解耦（2026-10-10） | #627 已合并，2026-10-11 上线：客户写入按客户依赖集合判定，platform Worker 恰为 `PLATFORM_WORKER_NOT_READY` 时不再关闭客户写入；`/health/ready` 的整体口径不变 | 换回 #627 之前的镜像 |
 | PRD4-D9 制裁名单与职能邮箱（2026-10-10，部分拍板） | 制裁名单走运营刷新（#629，不经平台 schedule），2026-10-11 打开三个源（OFAC SDN、OFAC Consolidated、EU FSF，`sanctions_source` 均 ENABLED，约 1.2 万条实体）；职能邮箱按 BI-14 做公司级（#630，开关 DISABLED）。LIA 时机未定 | `sanctions_source` 置 DISABLED |
 | PRD4-D14 模型供应（2026-10-11） | #633：11 个获客任务照旧请求 pro 档，上游换成 Flash 档时也接受，trace 与账本如实记为 Flash；建站等其他任务仍只认 pro。xin 已打开 `MODEL_IDENTITY_SUBSTITUTES`。官方备用上游未接 | 关掉 `MODEL_IDENTITY_SUBSTITUTES` |
