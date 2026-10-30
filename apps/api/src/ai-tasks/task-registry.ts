@@ -23,6 +23,39 @@ const ACQUISITION_REASONING_MODEL =
   process.env.MODEL_ACQUISITION_REASONING_MODEL?.trim() || 'deepseek-flash';
 
 /**
+ * Optional per-task override: `MODEL_ACQUISITION_TASK_MODELS` is a JSON object
+ * mapping task id to model name (e.g. {"discovery.qualify_fit":"gemini-4-argon-high"}).
+ * Listed tasks use their own model; everything else stays on the tier above.
+ * Non-string values and unknown task ids are ignored, and an unparseable value is
+ * ignored as a whole — a typo must not stop the process or silently unset the
+ * tier defaults for tasks the operator did not mention.
+ */
+export function parseTaskModelOverrides(raw: string | undefined): Record<string, string> {
+  const text = (raw ?? '').trim();
+  if (!text) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return {};
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  const overrides: Record<string, string> = {};
+  for (const [taskId, model] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof model !== 'string') continue;
+    const trimmed = model.trim();
+    if (!trimmed) continue;
+    overrides[taskId] = trimmed;
+  }
+  return overrides;
+}
+
+const TASK_MODEL_OVERRIDES = parseTaskModelOverrides(process.env.MODEL_ACQUISITION_TASK_MODELS);
+
+const acquisitionModel = (taskId: string, tierModel: string): string =>
+  TASK_MODEL_OVERRIDES[taskId] ?? tierModel;
+
+/**
  * The configured acquisition models are reasoning models: their reasoning
  * tokens count against the same max_tokens as the answer. On 2026-10-08
  * icp.design hit 4,096 twice in a row on xin and was truncated. The cap only
@@ -133,7 +166,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
       }, ['type', 'statement', 'evidence', 'confidence'])),
     }, ['claims']),
     // 抽取是高频、结构化任务：属 flash 档；获客网关暂无真 flash，见 ACQUISITION_FLASH_TIER_MODEL。
-    model: ACQUISITION_FLASH_TIER_MODEL,
+    model: acquisitionModel('company_understanding.extract_claims', ACQUISITION_FLASH_TIER_MODEL),
     acceptsModelSubstitute: true,
     risk: 'medium',
     humanGate: true, // Claims land as NEEDS_REVIEW; approval before outbound use.
@@ -151,7 +184,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
       industry: boundedString(500, { description: '主行业，如「精密金属加工设备制造」' }),
       summary: boundedString(8000, { description: '80-150 字中文简介' }),
     }, ['industry', 'summary']),
-    model: ACQUISITION_FLASH_TIER_MODEL,
+    model: acquisitionModel('company_understanding.extract_profile', ACQUISITION_FLASH_TIER_MODEL),
     acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false, // 画像随 Claim 审批可被人工修正
@@ -183,7 +216,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
       }, ['name', 'description', 'evidence', 'confidence'])),
     }, ['offerings']),
     // 与 Claim 抽取同为高频结构化任务：flash 档，见 ACQUISITION_FLASH_TIER_MODEL。
-    model: ACQUISITION_FLASH_TIER_MODEL,
+    model: acquisitionModel('company_understanding.extract_offerings', ACQUISITION_FLASH_TIER_MODEL),
     acceptsModelSubstitute: true,
     risk: 'low', // 只进结构化知识库，不直接对外
     humanGate: false,
@@ -257,7 +290,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
       'qualification_rules',
     ]),
     // ICP 设计是低频、策略推理任务 → 用推理档模型（MODEL_ACQUISITION_REASONING_MODEL）。
-    model: ACQUISITION_REASONING_MODEL,
+    model: acquisitionModel('icp.design', ACQUISITION_REASONING_MODEL),
     acceptsModelSubstitute: true,
     risk: 'medium',
     humanGate: true, // ICP 生成后为 HYPOTHESIS，回测/人工确认后才 ACTIVE。
@@ -294,7 +327,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
       confidence: boundedNumber(0, 1),
     }, ['is_company_site']),
     // 判站 + 抽取是高频任务：flash 档，见 ACQUISITION_FLASH_TIER_MODEL（路由沿革见 changelog）。
-    model: ACQUISITION_FLASH_TIER_MODEL,
+    model: acquisitionModel('discovery.extract_company', ACQUISITION_FLASH_TIER_MODEL),
     acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false,
@@ -327,7 +360,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
       },
     }, ['trade_role']),
     // 分类是高频便宜任务：flash 档（设计 §3.6），见 ACQUISITION_FLASH_TIER_MODEL。
-    model: ACQUISITION_FLASH_TIER_MODEL,
+    model: acquisitionModel('discovery.classify_trade_role', ACQUISITION_FLASH_TIER_MODEL),
     acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false,
@@ -367,7 +400,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
       },
     }, ['people']),
     // flash 档，见 ACQUISITION_FLASH_TIER_MODEL。
-    model: ACQUISITION_FLASH_TIER_MODEL,
+    model: acquisitionModel('contact.find_decision_makers', ACQUISITION_FLASH_TIER_MODEL),
     acceptsModelSubstitute: true,
     risk: 'medium', // 涉及个人数据抽取，下游必须过合规门
     humanGate: false,
@@ -400,7 +433,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
       has_next_page: { type: 'boolean', description: '页面是否有下一页/分页' },
     }, ['is_directory', 'companies']),
     // 列表抽取是长上下文任务（一页多公司）：flash 档，见 ACQUISITION_FLASH_TIER_MODEL。
-    model: ACQUISITION_FLASH_TIER_MODEL,
+    model: acquisitionModel('discovery.extract_list', ACQUISITION_FLASH_TIER_MODEL),
     acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false,
@@ -417,7 +450,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     maxCostCents: 5,
     maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 60000,
-    model: ACQUISITION_FLASH_TIER_MODEL, // 高频、冷路径（flash 档）
+    model: acquisitionModel('taxonomy.normalize', ACQUISITION_FLASH_TIER_MODEL), // 高频、冷路径（flash 档）
     acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false,
@@ -446,7 +479,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     // ⚠️ 勿降到 deepseek-reasoner/deepseek-chat：官方已宣布 2026-07-24 彻底关停二别名（过渡期透传 v4-flash），
     // 用了既撞关停又重蹈 flash 召回过宽。全仓一律显式 deepseek-v4-pro / deepseek-v4-flash。
     // 额度恢复后可切回 gemini-2.5-pro。
-    model: ACQUISITION_REASONING_MODEL,
+    model: acquisitionModel('discovery.qualify_fit', ACQUISITION_REASONING_MODEL),
     acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false,
@@ -506,7 +539,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
       },
     }, ['queries', 'estimated_volume']),
     // 计划生成是低频推理任务 → 推理档模型（MODEL_ACQUISITION_REASONING_MODEL）。
-    model: ACQUISITION_REASONING_MODEL,
+    model: acquisitionModel('discovery.query_plan', ACQUISITION_REASONING_MODEL),
     acceptsModelSubstitute: true,
     risk: 'low', // 只产出计划，执行前还有成本 Dry Run 与人工确认
     humanGate: true,
@@ -532,7 +565,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
         description: '正文实际引用的事实键，必须来自提示的键表',
       },
     }, ['subject', 'body', 'body_zh', 'used_facts']),
-    model: ACQUISITION_REASONING_MODEL,
+    model: acquisitionModel('outreach.first_contact_draft', ACQUISITION_REASONING_MODEL),
     // 发给潜在客户的底稿，人工审阅后才可用。
     risk: 'medium',
     humanGate: true,
