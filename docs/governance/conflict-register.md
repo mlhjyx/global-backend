@@ -254,7 +254,7 @@ PRD 4.0（L0 产品宪章 §9.4，目前在私有目录，入库待 `PRD4-D10`�
 | Decision ID | 主题 | 状态 | Decision Owner | 拍板日期与落地 / 未决原因 |
 |---|---|---|---|---|
 | `PRD4-D1` | Site Builder 正式冻结（文档、CI、ruleset） | `OPEN_DECISION` | `OWN-PRODUCT` | 2026-09-23 只说「维持现状」；ruleset 仍要求 `renderer visual scope`；ruleset 改动须随本项一并授权 |
-| `PRD4-D2` | R4 平台授权冻结范围 | `RESOLVED_WITH_REMEDIATION` | `OWN-PRODUCT` | 2026-10-10 拍板冻结；4 个平台 schedule 保持 paused；未做：平台工作流迁进 customer worker 的设计（减负线 X.2），每次换镜像仍续 R4 |
+| `PRD4-D2` | R4 平台授权冻结范围 | `RESOLVED_WITH_REMEDIATION` | `OWN-PRODUCT` | 2026-10-10 拍板冻结，4 个平台 schedule 保持 paused、每次换镜像仍续 R4。**2026-10-31 产品负责人重开**：R4 恢复投入，唯一目的是把平台权威（机器 token、capability、撤销与恢复通道）从 GrowthOS 迁到 gain-saas，迁完退役 GrowthOS；schedule 是否恢复运行仍是单独决定。计划与阶段见 gain-saas `docs/technical/r4-platform-authority-migration.md` |
 | `PRD4-D3` | 客户写入准入与 platform Worker 就绪解耦 | `RESOLVED` | `OWN-PRODUCT` | 2026-10-10 拍板方案 A；#627 于 2026-10-11 上线；方案 C 另立任务 |
 | `PRD4-D4` | QGO 宿主（本仓最小 `opportunity` 模块 vs GrowthOS） | `OPEN_DECISION` | `OWN-PRODUCT` | RL3 前定；PRD 4.0 L0/L1 建议本仓、2026-10-11 精读建议 GrowthOS、ADR-001 现行是 SaaS，三处相反 |
 | `PRD4-D5` | GrowthOS 转普通 git 仓；审阅 UI 放哪 | `OPEN_DECISION` | `OWN-PRODUCT` | 仍是归档 + 补丁栈形态 |
