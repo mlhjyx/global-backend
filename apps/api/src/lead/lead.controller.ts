@@ -8,7 +8,7 @@ import {
   Post,
   Query,
   UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery,
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -437,6 +437,7 @@ export class LeadController {
       'OUTREACH_DRAFT_UNGROUNDED',
     ]),
   })
+  @ApiBody({ type: OutreachDraftRequestDto, required: false })
   @ApiEnvelope(OUTREACH_DRAFT_SCHEMA, { status: 201 })
   async outreachDraft(
     @Ctx() ctx: RequestContext,
