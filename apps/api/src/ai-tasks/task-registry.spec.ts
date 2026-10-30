@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { AI_TASKS, getTask } from './task-registry';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { AI_TASKS, getTask, parseTaskModelOverrides } from './task-registry';
 
 describe('AI task registry personal-data boundaries', () => {
   it('keeps BrandProfile identity data in internal gaps while forbidding automatic public projection', () => {
@@ -154,5 +154,50 @@ describe('AI task registry model substitution opt-in (D14, 2026-10-11)', () => {
 
   it('keeps Site Builder on exact model identity', () => {
     expect(getTask('site_builder.brand_profile')?.acceptsModelSubstitute).toBeUndefined();
+  });
+});
+
+
+describe('acquisition per-task model overrides', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('parses the JSON map and drops non-string values', () => {
+    expect(parseTaskModelOverrides('{"icp.design":"gpt-6.1-terra","bad":1,"list":["x"]}')).toEqual({
+      'icp.design': 'gpt-6.1-terra',
+    });
+    expect(parseTaskModelOverrides('not json')).toEqual({});
+    expect(parseTaskModelOverrides('[]')).toEqual({});
+    expect(parseTaskModelOverrides(undefined)).toEqual({});
+    expect(parseTaskModelOverrides('   ')).toEqual({});
+  });
+
+  it('applies overrides to listed tasks only, keeping tier defaults elsewhere', async () => {
+    vi.resetModules();
+    vi.stubEnv('MODEL_ACQUISITION_MODEL', 'gemini-3.8-flash');
+    vi.stubEnv('MODEL_ACQUISITION_REASONING_MODEL', 'gpt-6.1-terra');
+    vi.stubEnv(
+      'MODEL_ACQUISITION_TASK_MODELS',
+      '{"discovery.qualify_fit":"gemini-4-argon-high","taxonomy.normalize":"deepseek-flash"}',
+    );
+
+    const mod = await import('./task-registry');
+
+    expect(mod.getTask('discovery.qualify_fit')?.model).toBe('gemini-4-argon-high');
+    expect(mod.getTask('taxonomy.normalize')?.model).toBe('deepseek-flash');
+    expect(mod.getTask('icp.design')?.model).toBe('gpt-6.1-terra');
+    expect(mod.getTask('company_understanding.extract_claims')?.model).toBe('gemini-3.8-flash');
+  });
+
+  it('an invalid map leaves every task on its tier default', async () => {
+    vi.resetModules();
+    vi.stubEnv('MODEL_ACQUISITION_TASK_MODELS', '{oops');
+
+    const mod = await import('./task-registry');
+
+    expect(mod.getTask('icp.design')?.model).toBe('deepseek-flash');
+    expect(mod.getTask('taxonomy.normalize')?.model).toBe('deepseek-flash');
   });
 });
