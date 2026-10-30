@@ -79,7 +79,7 @@ function fixture(overrides: {
       })),
     },
     leadOutreachDraft: {
-      findFirst: vi.fn(async () => ({ version: 2 })),
+      findFirst: vi.fn(async (args: any) => args?.select?.version ? { version: 2 } : null),
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
         createdAt: new Date('2026-10-28T10:00:00.000Z'),
         ...data,
@@ -91,7 +91,10 @@ function fixture(overrides: {
     withWorkspace: vi.fn(async (_workspace: string, operation: (client: typeof tx) => Promise<unknown>) =>
       operation(tx)),
   };
-  const authority = { consumeWorkspaceGrant: vi.fn().mockResolvedValue(binding()) };
+  const authority = {
+    verifyWorkspaceGrant: vi.fn().mockResolvedValue({}),
+    consumeVerifiedWorkspaceGrant: vi.fn().mockResolvedValue(binding()),
+  };
   const budgetStore = { attestAuthorized: vi.fn().mockResolvedValue(undefined) };
   const service = new OutreachDraftService(
     prisma as never,
@@ -154,7 +157,7 @@ describe('outreach draft generation (BI-15, design §7)', () => {
 
     await f.service.generate(ctx, LEAD_ID, 'compact-jws');
 
-    expect(f.authority.consumeWorkspaceGrant).toHaveBeenCalledWith({
+    expect(f.authority.verifyWorkspaceGrant).toHaveBeenCalledWith({
       compactJws: 'compact-jws',
       identity: ctx,
       scope: {
@@ -164,6 +167,7 @@ describe('outreach draft generation (BI-15, design §7)', () => {
         requestSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
       },
     });
+    expect(f.authority.consumeVerifiedWorkspaceGrant).toHaveBeenCalledOnce();
     expect(f.budgetStore.attestAuthorized).toHaveBeenCalledWith({
       authorityId: binding().authorityId,
       scopeKey: binding().scopeKey,
@@ -246,6 +250,60 @@ describe('outreach draft generation (BI-15, design §7)', () => {
     expect(ack).not.toHaveBeenCalled();
   });
 
+  it('returns the latest stored draft without consuming another grant', async () => {
+    const f = fixture();
+    const model = stubModel();
+    f.tx.leadOutreachDraft.findFirst.mockImplementation(async (args: any) =>
+      args?.select?.version
+        ? null
+        : {
+            id: 'draft-1',
+            leadId: LEAD_ID,
+            version: 1,
+            language: 'de',
+            subject: 'Erstkontakt',
+            body: 'Guten Tag',
+            bodyZh: '您好',
+            usedFacts: ['seller.name'],
+            model: 'deepseek-v4-pro',
+            createdAt: new Date('2026-10-28T09:00:00.000Z'),
+          });
+
+    const draft = await f.service.generate(ctx, LEAD_ID, 'compact-jws');
+
+    expect(draft).toMatchObject({ id: 'draft-1', version: 1, subject: 'Erstkontakt' });
+    expect(model).not.toHaveBeenCalled();
+    expect(f.authority.consumeVerifiedWorkspaceGrant).not.toHaveBeenCalled();
+  });
+
+  it('generates a new version when the caller explicitly asks to regenerate', async () => {
+    const f = fixture();
+    const model = stubModel();
+    stubAck();
+    // An existing draft must not short-circuit an explicit regeneration.
+    f.tx.leadOutreachDraft.findFirst.mockImplementation(async (args: any) =>
+      args?.select?.version
+        ? { version: 2 }
+        : {
+            id: 'draft-1',
+            leadId: LEAD_ID,
+            version: 1,
+            language: 'de',
+            subject: 'Alt',
+            body: 'Alt',
+            bodyZh: '旧',
+            usedFacts: ['seller.name'],
+            model: 'deepseek-flash',
+            createdAt: new Date('2026-10-28T09:00:00.000Z'),
+          });
+
+    const draft = await f.service.generate(ctx, LEAD_ID, 'compact-jws', { regenerate: true });
+
+    expect(model).toHaveBeenCalledOnce();
+    expect(f.authority.consumeVerifiedWorkspaceGrant).toHaveBeenCalledOnce();
+    expect(draft.version).toBe(3);
+  });
+
   it('refuses a lead whose latest decision is not an accept, before any model call', async () => {
     const f = fixture({ decisions: [{ action: 'reject' }] });
     const model = stubModel();
@@ -321,7 +379,8 @@ describe('outreach draft generation (BI-15, design §7)', () => {
       { version: 2 },
       { version: 3 },
     ];
-    f.tx.leadOutreachDraft.findFirst.mockImplementation(async () => rows.shift() ?? { version: 4 });
+    f.tx.leadOutreachDraft.findFirst.mockImplementation(async (args: any) =>
+      args?.select?.version ? (rows.shift() ?? { version: 4 }) : null);
     f.tx.leadOutreachDraft.create
       .mockImplementationOnce(async () => {
         throw new Prisma.PrismaClientKnownRequestError('unique', {

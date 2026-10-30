@@ -139,6 +139,16 @@ const LEAD_PACKAGE_SCHEMA = {
   },
 } as const;
 
+class OutreachDraftRequestDto {
+  @ApiPropertyOptional({
+    description:
+      '默认 false：该线索已有草稿时直接返回最新版（重试不重复付费）。true：重新生成并产出版本号 +1 的新草稿，客户端必须先取得新的预算 Grant。',
+  })
+  @IsOptional()
+  @IsBoolean()
+  regenerate?: boolean;
+}
+
 const OUTREACH_DRAFT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -389,6 +399,21 @@ export class LeadController {
     return envelope(await this.leads.recordOutcome(ctx, leadId, dto));
   }
 
+  @Get('leads/:leadId/outreach-drafts')
+  @RequireScopes('acquisition:read')
+  @ApiOperation({
+    summary: '读取该线索最近一版开发信草稿（没有则 data=null）',
+    description:
+      '只读：返回该线索最新一版已存储的开发信草稿（含中文译文与引用事实键），没有草稿时 data 为 null。不消耗预算、不调用模型；草稿只在生成时计费。',
+  })
+  @ApiEnvelope({ ...OUTREACH_DRAFT_SCHEMA, nullable: true })
+  async latestOutreachDraft(
+    @Ctx() ctx: RequestContext,
+    @Param('leadId', ParseUUIDPipe) leadId: string,
+  ) {
+    return envelope(await this.outreachDrafts.latest(ctx, leadId));
+  }
+
   @Post('leads/:leadId/outreach-drafts')
   @RequireScopes('acquisition:review')
   @HttpCode(201)
@@ -416,12 +441,15 @@ export class LeadController {
   async outreachDraft(
     @Ctx() ctx: RequestContext,
     @Param('leadId', ParseUUIDPipe) leadId: string,
+    @Body() dto?: OutreachDraftRequestDto,
     @ExecutionBudgetGrant() compactJws?: string,
   ) {
     return envelope(
       await asExecutionBudgetHttpBoundary(() =>
         asModelUpstreamHttpBoundary(() =>
-          this.outreachDrafts.generate(ctx, leadId, compactJws),
+          this.outreachDrafts.generate(ctx, leadId, compactJws, {
+            regenerate: dto?.regenerate === true,
+          }),
         ),
       ),
     );

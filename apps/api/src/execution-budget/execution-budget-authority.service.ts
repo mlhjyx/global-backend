@@ -134,19 +134,26 @@ export class ExecutionBudgetAuthorityService {
   async consumeWorkspaceGrant(
     input: WorkspaceExecutionBudgetGrantInput,
   ): Promise<ExecutionBudgetBinding> {
-    const authority = exactVerifiedAuthority(
+    return this.consumeVerifiedWorkspaceGrant(
       await this.verifyWorkspaceGrant(input),
     );
-    const { accountKey } = workspaceBindingIdentity(authority);
+  }
+
+  /**
+   * Consumes a grant that was already verified. Callers use this to check the
+   * operation's own preconditions first, so a rejected request never burns a
+   * one-time grant (and never leaves its request scope account occupied).
+   */
+  async consumeVerifiedWorkspaceGrant(
+    authority: VerifiedExecutionBudgetAuthority,
+  ): Promise<ExecutionBudgetBinding> {
+    const exact = exactVerifiedAuthority(authority);
+    const { accountKey } = workspaceBindingIdentity(exact);
     const consumed = await this.repository.consumeWorkspaceAndOpen(
-      authority,
+      exact,
       accountKey,
     );
-    return executionBudgetBinding(
-      authority,
-      consumed.authorityId,
-      consumed.replay,
-    );
+    return executionBudgetBinding(exact, consumed.authorityId, consumed.replay);
   }
 
   async consumeVerifiedWorkspaceGrantInTransaction(

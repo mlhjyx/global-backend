@@ -59,7 +59,10 @@ describe('IcpService receipt-aware domain consumer', () => {
       provider: 'test',
       model: 'test-model',
     }));
-    const authority = { consumeWorkspaceGrant: vi.fn(async () => binding) };
+    const authority = {
+      verifyWorkspaceGrant: vi.fn(async () => ({})),
+      consumeVerifiedWorkspaceGrant: vi.fn(async () => binding),
+    };
     const budgetStore = {
       attestAuthorized: vi.fn(async () => ({})),
     } as unknown as BudgetStore;
@@ -140,7 +143,10 @@ describe('IcpService receipt-aware domain consumer', () => {
       },
       provider: 'test', model: 'test-model',
     })) };
-    const authority = { consumeWorkspaceGrant: vi.fn(async () => queryBinding) };
+    const authority = {
+      verifyWorkspaceGrant: vi.fn(async () => ({})),
+      consumeVerifiedWorkspaceGrant: vi.fn(async () => queryBinding),
+    };
     const budgetStore = { attestAuthorized: vi.fn(async () => ({})) } as unknown as BudgetStore;
     const service = new IcpService(
       prisma as never,

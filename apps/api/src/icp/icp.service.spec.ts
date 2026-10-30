@@ -105,7 +105,8 @@ function fixture() {
     withWorkspace: vi.fn(async (_workspace, operation) => operation(tx)),
   };
   const authority = {
-    consumeWorkspaceGrant: vi.fn().mockResolvedValue(binding),
+    verifyWorkspaceGrant: vi.fn().mockResolvedValue({}),
+    consumeVerifiedWorkspaceGrant: vi.fn().mockResolvedValue(binding),
   };
   const gateway = {
     generateStructured: vi.fn(() => {
@@ -456,19 +457,21 @@ describe("ICP generation authority and controlled enrichment", () => {
       await expect(
         f.service.generateFromCompany(ctx, "company"),
       ).rejects.toThrow();
+      // 前置条件不满足时，一次性 Grant 必须原样保留。
+      expect(f.authority.consumeVerifiedWorkspaceGrant).not.toHaveBeenCalled();
       expect(f.runtime).not.toHaveBeenCalled();
     },
   );
-  it("refuses a consumed grant before reading tenant data", async () => {
+  it("refuses a consumed grant without dispatching a model", async () => {
     const f = generationFixture();
-    f.authority.consumeWorkspaceGrant.mockResolvedValue({
+    f.authority.consumeVerifiedWorkspaceGrant.mockResolvedValue({
       ...binding,
       replay: true,
     });
     await expect(f.service.generateFromCompany(ctx, "company")).rejects.toThrow(
       "REUSED",
     );
-    expect(f.prisma.withWorkspace).not.toHaveBeenCalled();
+    expect(f.runtime).not.toHaveBeenCalled();
   });
   it("stores missing optional generation fields with stable defaults", async () => {
     const f = generationFixture();
@@ -958,9 +961,9 @@ describe("a generation whose model answer the gateway settled as unusable", () =
 
     await expect(f.service.generateQueryPlan(ctx, f.icp.id)).rejects.toBe(failure);
 
-    expect(f.authority.consumeWorkspaceGrant).toHaveBeenCalledOnce();
+    expect(f.authority.consumeVerifiedWorkspaceGrant).toHaveBeenCalledOnce();
     expect(f.runtime).toHaveBeenCalledOnce();
-    expect(f.authority.consumeWorkspaceGrant.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(f.authority.consumeVerifiedWorkspaceGrant.mock.invocationCallOrder[0]).toBeLessThan(
       f.runtime.mock.invocationCallOrder[0],
     );
     expect(f.tx.discoveryQueryPlan.create).not.toHaveBeenCalled();
@@ -975,7 +978,7 @@ describe("a generation whose model answer the gateway settled as unusable", () =
 
     await expect(f.service.generateFromCompany(ctx, "company")).rejects.toBe(failure);
 
-    expect(f.authority.consumeWorkspaceGrant).toHaveBeenCalledOnce();
+    expect(f.authority.consumeVerifiedWorkspaceGrant).toHaveBeenCalledOnce();
     expect(f.runtime).toHaveBeenCalledOnce();
     expect(f.tx.icpDefinition.create).not.toHaveBeenCalled();
     expect(f.tx.persona.create).not.toHaveBeenCalled();
