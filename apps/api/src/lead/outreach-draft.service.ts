@@ -90,7 +90,7 @@ export class OutreachDraftService {
     leadId: string,
     compactJws?: string,
   ): Promise<OutreachDraftRow> {
-    const binding = await this.authority.consumeWorkspaceGrant({
+    const verifiedGrant = await this.authority.verifyWorkspaceGrant({
       compactJws,
       identity: ctx,
       scope: workspaceExecutionBudgetRequestScope({
@@ -98,7 +98,6 @@ export class OutreachDraftService {
         leadId,
       }),
     });
-    assertFreshExecutionBudgetBinding(binding);
 
     const loaded = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const lead = await tx.lead.findUnique({
@@ -157,7 +156,14 @@ export class OutreachDraftService {
             orderBy: { updatedAt: 'desc' },
           })
         : null;
-      return { lead, seller, buyer, claims, offerings, site };
+      // 同一个 lead 的草稿已经生成过时，直接返回最新版本；一次性 Grant 不再消耗。
+      // 这覆盖“浏览器超时/关闭页面但后端已写完”的常见重试场景。新版本（重新生成）
+      // 需要先解决预算账户与主体的绑定语义，见 PR 说明，本版不提供。
+      const latestDraft = await tx.leadOutreachDraft.findFirst({
+        where: { leadId },
+        orderBy: { version: 'desc' },
+      });
+      return { lead, seller, buyer, claims, offerings, site, latestDraft };
     });
     if (!loaded || !loaded.seller || !loaded.buyer) {
       throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'lead not found' } });
@@ -170,7 +176,12 @@ export class OutreachDraftService {
         },
       });
     }
+    if (loaded.latestDraft) {
+      return toRow(loaded.latestDraft);
+    }
 
+    const binding = await this.authority.consumeVerifiedWorkspaceGrant(verifiedGrant);
+    assertFreshExecutionBudgetBinding(binding);
     const { lead, seller, buyer } = loaded;
     const facts: OutreachFact[] = [
       ...sellerOutreachFacts({
@@ -304,6 +315,21 @@ export class OutreachDraftService {
         throw error;
       }
     }
+  }
+
+  /** 最近一版草稿；没有时返回 null，前端据此决定是否显示“生成”按钮。 */
+  async latest(ctx: RequestContext, leadId: string): Promise<OutreachDraftRow | null> {
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const lead = await tx.lead.findUnique({ where: { id: leadId }, select: { id: true } });
+      if (!lead) {
+        throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'lead not found' } });
+      }
+      const draft = await tx.leadOutreachDraft.findFirst({
+        where: { leadId },
+        orderBy: { version: 'desc' },
+      });
+      return draft ? toRow(draft) : null;
+    });
   }
 }
 

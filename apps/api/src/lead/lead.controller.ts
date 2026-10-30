@@ -389,13 +389,28 @@ export class LeadController {
     return envelope(await this.leads.recordOutcome(ctx, leadId, dto));
   }
 
+  @Get('leads/:leadId/outreach-drafts')
+  @RequireScopes('acquisition:read')
+  @ApiOperation({
+    summary: '读取该线索最近一版开发信草稿（没有则 data=null）',
+    description:
+      '只读：返回该线索最新一版已存储的开发信草稿（含中文译文与引用事实键），没有草稿时 data 为 null。不消耗预算、不调用模型；草稿只在生成时计费。',
+  })
+  @ApiEnvelope({ ...OUTREACH_DRAFT_SCHEMA, nullable: true })
+  async latestOutreachDraft(
+    @Ctx() ctx: RequestContext,
+    @Param('leadId', ParseUUIDPipe) leadId: string,
+  ) {
+    return envelope(await this.outreachDrafts.latest(ctx, leadId));
+  }
+
   @Post('leads/:leadId/outreach-drafts')
   @RequireScopes('acquisition:review')
   @HttpCode(201)
   @ApiOperation({
     summary: '生成首次联系开发信草稿（BI-15）：目标国语言 + 中文译文，只存储不发送',
     description:
-      '按线索的公司级事实与卖方资料生成一版草稿（版本号递增），末尾由平台追加卖方自己的回复入口（官网/邮箱/wa.me）。平台不发送、不提供发送按钮。模型网关结算了调用却没有可用答案时返回 502 MODEL_UPSTREAM_UNUSABLE；草稿引用了未提供的事实键（或主题/正文/译文为空）时返回 422 OUTREACH_DRAFT_UNGROUNDED 并丢弃草稿；这两种情况预算授权都已消耗，重试需要新的授权。',
+      '按线索的公司级事实与卖方资料生成一版草稿，末尾由平台追加卖方自己的回复入口（官网/邮箱/wa.me）。幂等：该线索已有草稿时直接返回最新一版，不调用模型、不消耗预算授权（浏览器超时/关页后的重试不会重复付费）；读取已有草稿请用 GET 同路径。平台不发送、不提供发送按钮。模型网关结算了调用却没有可用答案时返回 502 MODEL_UPSTREAM_UNUSABLE；草稿引用了未提供的事实键（或主题/正文/译文为空）时返回 422 OUTREACH_DRAFT_UNGROUNDED 并丢弃草稿——这两种情况授权已消耗且当前不提供重新生成，需要重新评估后再调用。',
   })
   @ApiExecutionBudgetGrant({ additionalConflictCodes: ['OUTREACH_DRAFT_VERSION_CONFLICT'] })
   @ApiModelUpstreamUnusable()
