@@ -8,7 +8,7 @@ import {
   Post,
   Query,
   UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery,
+import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
@@ -138,16 +138,6 @@ const LEAD_PACKAGE_SCHEMA = {
     valid_until: { type: 'string', nullable: true, format: 'date-time' },
   },
 } as const;
-
-class OutreachDraftRequestDto {
-  @ApiPropertyOptional({
-    description:
-      '默认 false：该线索已有草稿时直接返回最新版（重试不重复付费）。true：重新生成并产出版本号 +1 的新草稿，客户端必须先取得新的预算 Grant。',
-  })
-  @IsOptional()
-  @IsBoolean()
-  regenerate?: boolean;
-}
 
 const OUTREACH_DRAFT_SCHEMA = {
   type: 'object',
@@ -420,7 +410,7 @@ export class LeadController {
   @ApiOperation({
     summary: '生成首次联系开发信草稿（BI-15）：目标国语言 + 中文译文，只存储不发送',
     description:
-      '按线索的公司级事实与卖方资料生成一版草稿（版本号递增），末尾由平台追加卖方自己的回复入口（官网/邮箱/wa.me）。平台不发送、不提供发送按钮。模型网关结算了调用却没有可用答案时返回 502 MODEL_UPSTREAM_UNUSABLE；草稿引用了未提供的事实键（或主题/正文/译文为空）时返回 422 OUTREACH_DRAFT_UNGROUNDED 并丢弃草稿；这两种情况预算授权都已消耗，重试需要新的授权。',
+      '按线索的公司级事实与卖方资料生成一版草稿，末尾由平台追加卖方自己的回复入口（官网/邮箱/wa.me）。幂等：该线索已有草稿时直接返回最新一版，不调用模型、不消耗预算授权（浏览器超时/关页后的重试不会重复付费）；读取已有草稿请用 GET 同路径。平台不发送、不提供发送按钮。模型网关结算了调用却没有可用答案时返回 502 MODEL_UPSTREAM_UNUSABLE；草稿引用了未提供的事实键（或主题/正文/译文为空）时返回 422 OUTREACH_DRAFT_UNGROUNDED 并丢弃草稿——这两种情况授权已消耗且当前不提供重新生成，需要重新评估后再调用。',
   })
   @ApiExecutionBudgetGrant({ additionalConflictCodes: ['OUTREACH_DRAFT_VERSION_CONFLICT'] })
   @ApiModelUpstreamUnusable()
@@ -437,20 +427,16 @@ export class LeadController {
       'OUTREACH_DRAFT_UNGROUNDED',
     ]),
   })
-  @ApiBody({ type: OutreachDraftRequestDto, required: false })
   @ApiEnvelope(OUTREACH_DRAFT_SCHEMA, { status: 201 })
   async outreachDraft(
     @Ctx() ctx: RequestContext,
     @Param('leadId', ParseUUIDPipe) leadId: string,
-    @Body() dto?: OutreachDraftRequestDto,
     @ExecutionBudgetGrant() compactJws?: string,
   ) {
     return envelope(
       await asExecutionBudgetHttpBoundary(() =>
         asModelUpstreamHttpBoundary(() =>
-          this.outreachDrafts.generate(ctx, leadId, compactJws, {
-            regenerate: dto?.regenerate === true,
-          }),
+          this.outreachDrafts.generate(ctx, leadId, compactJws),
         ),
       ),
     );

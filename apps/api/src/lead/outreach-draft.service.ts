@@ -89,7 +89,6 @@ export class OutreachDraftService {
     ctx: RequestContext,
     leadId: string,
     compactJws?: string,
-    options: { regenerate?: boolean } = {},
   ): Promise<OutreachDraftRow> {
     const verifiedGrant = await this.authority.verifyWorkspaceGrant({
       compactJws,
@@ -158,14 +157,12 @@ export class OutreachDraftService {
           })
         : null;
       // 同一个 lead 的草稿已经生成过时，直接返回最新版本；一次性 Grant 不再消耗。
-      // 这覆盖“浏览器超时/关闭页面但后端已写完”的常见重试场景。显式要求重新生成
-      // （regenerate=true，客户端必须先取新 Grant）时跳过该捷径，产出版本号 +1 的新草稿。
-      const latestDraft = options.regenerate
-        ? null
-        : await tx.leadOutreachDraft.findFirst({
-            where: { leadId },
-            orderBy: { version: 'desc' },
-          });
+      // 这覆盖“浏览器超时/关闭页面但后端已写完”的常见重试场景。新版本（重新生成）
+      // 需要先解决预算账户与主体的绑定语义，见 PR 说明，本版不提供。
+      const latestDraft = await tx.leadOutreachDraft.findFirst({
+        where: { leadId },
+        orderBy: { version: 'desc' },
+      });
       return { lead, seller, buyer, claims, offerings, site, latestDraft };
     });
     if (!loaded || !loaded.seller || !loaded.buyer) {

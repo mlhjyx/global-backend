@@ -276,34 +276,6 @@ describe('outreach draft generation (BI-15, design §7)', () => {
     expect(f.authority.consumeVerifiedWorkspaceGrant).not.toHaveBeenCalled();
   });
 
-  it('generates a new version when the caller explicitly asks to regenerate', async () => {
-    const f = fixture();
-    const model = stubModel();
-    stubAck();
-    // An existing draft must not short-circuit an explicit regeneration.
-    f.tx.leadOutreachDraft.findFirst.mockImplementation(async (args: any) =>
-      args?.select?.version
-        ? { version: 2 }
-        : {
-            id: 'draft-1',
-            leadId: LEAD_ID,
-            version: 1,
-            language: 'de',
-            subject: 'Alt',
-            body: 'Alt',
-            bodyZh: '旧',
-            usedFacts: ['seller.name'],
-            model: 'deepseek-flash',
-            createdAt: new Date('2026-10-28T09:00:00.000Z'),
-          });
-
-    const draft = await f.service.generate(ctx, LEAD_ID, 'compact-jws', { regenerate: true });
-
-    expect(model).toHaveBeenCalledOnce();
-    expect(f.authority.consumeVerifiedWorkspaceGrant).toHaveBeenCalledOnce();
-    expect(draft.version).toBe(3);
-  });
-
   it('refuses a lead whose latest decision is not an accept, before any model call', async () => {
     const f = fixture({ decisions: [{ action: 'reject' }] });
     const model = stubModel();
@@ -317,6 +289,8 @@ describe('outreach draft generation (BI-15, design §7)', () => {
       error: { code: 'OUTREACH_DRAFT_LEAD_NOT_ACCEPTED' },
     });
     expect(model).not.toHaveBeenCalled();
+    // 被拒绝的请求不消耗一次性 Grant。
+    expect(f.authority.consumeVerifiedWorkspaceGrant).not.toHaveBeenCalled();
   });
 
   it('returns 404 for a lead the workspace cannot see', async () => {
@@ -369,6 +343,16 @@ describe('outreach draft generation (BI-15, design §7)', () => {
       error: { code: 'OUTREACH_DRAFT_VERSION_CONFLICT' },
     });
     expect(f.tx.leadOutreachDraft.create).toHaveBeenCalledTimes(3);
+  });
+
+  it('returns null from latest() when no draft exists and 404 for an unknown lead', async () => {
+    const f = fixture();
+    f.tx.leadOutreachDraft.findFirst.mockResolvedValue(null);
+    expect(await f.service.latest(ctx as never, LEAD_ID)).toBeNull();
+
+    f.tx.lead.findUnique.mockResolvedValue(null as never);
+    const error = await f.service.latest(ctx as never, LEAD_ID).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(NotFoundException);
   });
 
   it('recomputes the version when a concurrent draft took it first', async () => {

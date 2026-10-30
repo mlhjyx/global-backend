@@ -7,6 +7,6 @@ title: Read the latest outreach draft and consume a workspace grant only after t
 - 改动：
   - 新增 `GET /leads/{leadId}/outreach-drafts`（`acquisition:read`），返回该线索最新一版草稿（无草稿时 `data=null`，契约按 nullable 标注）。
   - 受控端点改为「先验证 Grant → 跑业务前置校验 → 才消费」：`ExecutionBudgetAuthorityService` 新增 `consumeVerifiedWorkspaceGrant`，ICP 设计、查询计划与开发信草稿三处接入；被拒绝的请求不再烧掉一次性 Grant。
-  - 开发信草稿生成默认幂等：该线索已有草稿时直接返回最新版、不再调用模型也不消耗 Grant（覆盖浏览器超时/关页后的重试）；请求体新增可选 `regenerate: true` 显式要求重新生成（版本号 +1，调用方须自备新的 Grant）。
+  - 开发信草稿生成默认幂等：该线索已有草稿时直接返回最新版、不再调用模型也不消耗 Grant（覆盖浏览器超时/关页后的重试）；读取已有草稿请用新增的 GET。
 - 测试：outreach 草稿服务新增「返回旧草稿不消费」「regenerate 生成新版本」「先校验后消费」用例；ICP 设计/查询计划相应断言更新；迁移无。
-- 未做：G5（租户侧线索/公司详情去 `personal-data:read`）是产品口径决定，未包含；PR #597 的重试语义未采用（本改动取代它）。
+- 未做：「重新生成/新版本」未提供——同一线索的预算账户键固定，第二次 Grant 在开户时必然 `409 EXECUTION_BUDGET_GRANT_REUSED`（账户与主体的绑定语义要另行设计）；G5（租户侧线索/公司详情去 `personal-data:read`）是产品口径决定，未包含。
