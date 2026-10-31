@@ -1,0 +1,49 @@
+# Changelog 片段
+
+> 生命周期：`GUIDE`
+> 生命周期依据：changelog 的现行写法；2026-10-14 起取代「每个 PR 在 changelog.md 顶部插入小节」
+
+每个 PR 不再直接改 [`../changelog.md`](../changelog.md)，而是在本目录放**一个片段文件**。所有 PR 都去改同一个文件的同一处，任何一个合入都会让其余在途 PR 冲突，只能并入 main 再跑一轮 CI；改成各写各的文件后就不会冲突。
+
+## 什么时候必须写
+
+PR 改了 `apps/`、`packages/`、`scripts/`、`infra/` 下任一路径，或根目录的构建与运行时文件（`Dockerfile`、`.dockerignore`、`runtime-entrypoint.mjs`、`docker-compose.yml`、`package.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、`tsconfig.base.json`、`nx.json`、`eslint.config.mjs`，即脚本里的 `CODE_ROOT_FILES`）时，必须新增（或修改）一个片段。governance 工作流（`governance · traceability · release`，必需检查）按 PR 的 diff（合并基点到 PR head）判断，缺了就失败。纯文档、`.github/` 等改动不强制，但写了也欢迎。注意按路径判断：`apps/`、`packages/` 下的 Markdown（如 `packages/contracts/INTEGRATION.md`）也算代码路径，改了就要片段。
+
+- **过渡**：只有**在片段规则合入 main 之前切出的分支**（它离开 main 的分叉点里还没有本 README）改了代码时，直接改 `changelog.md`、不加片段才放行（附一条 warning），不必返工。这类分支并入 main 要用 merge（GitHub 网页的 Update branch 或解冲突、`git merge origin/main`）：分叉点还在，放行保留；rebase 会把分叉点挪到新 main，之后只能写片段。之后切出的分支改了代码、没有片段而只改 `changelog.md` 会失败，报错提示把条目挪进片段。判断只看分叉点、不看日期，结果可复现，这些旧分支合完后例外自然结束（登记在 [文档校验治理页](../../governance/docs-verification.md#4-当前显式例外) §4）。
+- **检查不禁止改 `changelog.md`**：它只管代码 PR 有没有片段。纯文档 PR、已有片段又顺手改了 `changelog.md` 的 PR 照样通过，但仍会和别的 PR 在 changelog 上冲突，所以除汇编 PR 外都不要改它。
+- **Dependabot 安全更新 PR** 改到 `apps/` 或 `packages/` 下的 `package.json` 时同样会缺片段。开发代理给它补 Copy 重签的那次提交里一并加上片段。
+
+## 文件名与格式
+
+文件名：`<YYYY-MM-DD>-<slug>.md`，日期与 frontmatter 的 `date` 一致，slug 只用小写字母、数字和连字符。slug 用分支名里的 topic（`claude/changelog-fragments` → `2026-10-14-changelog-fragments.md`），这样两个在途 PR 不会撞名；万一同日同 slug 而前一个片段还没汇编，后合的那个会在 GitHub 上显示冲突，改个名重推即可。前一个片段已经汇编（文件已删）时不会冲突，同名片段照常加入，汇编取最近一次加入它的提交里的 PR 号。
+
+```markdown
+---
+date: 2026-10-14
+pr: 653
+title: Replace the single-file changelog with one fragment per PR
+---
+
+- 起因：……
+- 改动：
+  - ……
+- 测试：……
+- 未做：……
+```
+
+- `date`：条目日期（一般是开 PR 当天）。
+- `pr`：PR 号，可以先留空或不写。汇编时会从加入这个片段的 squash 提交标题（`… (#N)`）里取，所以**不需要为了补 PR 号再推一次**。有一种情况必须手填，而且汇编不会提示：给已经合入 main、还没汇编的片段改文件名（改 `date` 也得跟着改名）时，汇编只按新文件名查历史，改名那次 squash 提交会被当成「加入」，取到的是改名 PR 的号；这时把 `pr:` 填成原 PR 号，填了就不再查历史。
+- `title`：英文一句话，不带 `#` 和 `(#N)`，汇编器会生成 `## <date> · <title> (#N)` 标题。
+- 正文必须依次包含顶层条目 `- 起因：`、`- 改动：`、`- 测试：`、`- 未做：`，每项都要有内容（没有就写「无」）；中间可以加别的顶层条目（如 `- 部署：`）。正文里不要写一级、二级标题。
+- 相对链接按**本目录**的位置写（例如 `../../evidence/x.md`），汇编时会自动改成从 `changelog.md` 出发的路径。只用行内链接 `[文字](目标)`（目标可以写成 `<带空格的路径>`，可带双引号或单引号标题）；引用式定义 `[r]: 目标` 与脚注定义 `[^1]: …` 既不被 `docs:verify` 检查、也不会被改写，校验会拒绝（`CHANGELOG_FRAGMENT_LINK`）。
+
+`pnpm docs:verify`（`gctl check` 也会跑）检查格式；本目录只允许本 README 和片段文件。
+
+## 汇编
+
+```bash
+node scripts/changelog-assemble.mjs --dry-run   # 只列出将要写入的条目
+node scripts/changelog-assemble.mjs             # 写入 changelog.md 并删除片段
+```
+
+每班发版列车的 PR 合完后，由当班负责合并的开发代理运行：从刚 fetch 的 `origin/main` 建分支，运行汇编，`pnpm docs:verify` 通过后作为 `docs(changelog): …` PR 提交，不由 bot 直接提交 main。步骤、冲突处理与回退方法见 [CI / 审查与合并流程](../../backend/ci-merge-automation.md#changelog-片段的汇编)。条目按日期倒序插入；同一天的条目接在当天已有小节之后，按 PR 号升序。任何片段格式不合格时汇编器什么都不写。

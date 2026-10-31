@@ -52,6 +52,7 @@ export const DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS = Object.freeze([
   { producerId: 'discovery.qualify_fit', consumer: 'FitJudge.upsertLeadFit', domainAggregateType: 'Lead', identity: 'workspace-icp-company', resultStrategy: 'typed_projection', resultSchema: 'fit-judgment/v1' },
   { producerId: 'discovery.query_plan', consumer: 'IcpService.generateQueryPlan', domainAggregateType: 'DiscoveryQueryPlan', identity: 'icp-id', resultStrategy: 'typed_projection', resultSchema: 'icp-query-plan/v1' },
   { producerId: 'icp.design', consumer: 'IcpService.generateFromCompany', domainAggregateType: 'IcpDefinition', identity: 'company-id-and-icp-version', resultStrategy: 'typed_projection', resultSchema: 'icp-design/v1' },
+  { producerId: 'outreach.first_contact_draft', consumer: 'OutreachDraftService.generate', domainAggregateType: 'LeadOutreachDraft', identity: 'receipt-derived-draft-id-and-version', resultStrategy: 'typed_projection', resultSchema: 'outreach-first-contact-draft/v1' },
   { producerId: 'taxonomy.normalize', consumer: 'TaxonomyResolver', domainAggregateType: 'TermAlias', identity: 'taxonomy-kind-and-normalized-term', resultStrategy: 'typed_projection', resultSchema: 'taxonomy-code/v1' },
 ] as const satisfies readonly DomainAckProductConsumerBinding[]);
 

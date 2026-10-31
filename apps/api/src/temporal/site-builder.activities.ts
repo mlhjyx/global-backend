@@ -2234,7 +2234,7 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               OR (
                 COALESCE(MAX(att.last_attempt), '1970-01-01 00:00:00+00'::timestamptz) =
                   ${cursorAttempt}::timestamptz
-                AND s.workspace_id > ${cursor.workspaceId}
+                AND s.workspace_id > ${cursor.workspaceId}::uuid
               )
             )
           `
@@ -2291,8 +2291,8 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             WHERE rx.spend_id = s.id
               AND rx.status IN ('RESOLVED', 'CONFLICT', 'EXPIRED')
           )
-          ${cursorCondition}
         GROUP BY s.workspace_id
+        HAVING TRUE ${cursorCondition}
         ORDER BY MAX(att.last_attempt) ASC NULLS FIRST, s.workspace_id ASC
         LIMIT ${limit}
       `);
@@ -3839,6 +3839,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
             throw new Error(`run ${buildRunId} publication state is missing`);
           }
           if (input.qualityV1) {
+            // Locked by an owner routine: app_user may only read site_build_budget, and every
+            // row lock needs UPDATE. The lock holds until this transaction ends, so settlement
+            // cannot change the budget's state or reason between this check and the publication.
             const budgetRows = await tx.$queryRaw<
               Array<{
                 paid_calls_enabled: boolean;
@@ -3846,9 +3849,9 @@ export function createSiteBuilderActivities(deps: SiteBuilderActivityDeps) {
               }>
             >`
               SELECT paid_calls_enabled, disabled_reason
-              FROM site_build_budget
-              WHERE build_run_id = ${buildRunId}::uuid
-              FOR UPDATE
+              FROM lock_site_build_budget_for_publication(
+                ${workspaceId}::uuid, ${buildRunId}::uuid
+              )
             `;
             const budget = budgetRows[0];
             if (

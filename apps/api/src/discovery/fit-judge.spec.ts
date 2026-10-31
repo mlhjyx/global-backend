@@ -269,5 +269,22 @@ describe('Fit follows the ICP trade role (design §4 step 8)', () => {
     expect(input.prompt).not.toContain('DE136695976');
     expect(getTask('discovery.qualify_fit')!.description).toContain('website_profile');
   });
+
+  it('leaves website_profile out of the prompt when it holds only bookkeeping (a contact-path attempt, no profile facts)', async () => {
+    executeTask.mockReset();
+    executeTask.mockResolvedValue({ provider: 'stub', data: output } as never);
+
+    await judgeFitCompany({} as never, '10000000-0000-4000-8000-000000000001', { seller: 'S', seller_summary: null }, {
+      ...company,
+      attributes: {
+        products: ['Kreiselpumpen'],
+        website_profile: { _contact_attempt_at: '2026-10-14T06:00:00.000Z', _contact_attempt_prev: '2026-09-30T00:00:00.000Z' },
+      },
+    });
+
+    const [, input] = executeTask.mock.calls[0]!;
+    expect(input.prompt).not.toContain('website_profile');
+    expect(input.prompt).not.toContain('_contact_attempt');
+  });
 });
 

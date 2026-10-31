@@ -1,3 +1,4 @@
+import { SANCTIONS_GATE_CASES, liveScreen, storedScreening } from '../sanctions/sanctions-gate.test-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -5,6 +6,7 @@ import { ConflictException } from '@nestjs/common';
 import Ajv2020 from 'ajv/dist/2020';
 import addFormats from 'ajv-formats';
 import { buildLeadQualifiedSnapshot, classifyLeadQualified, computeValidUntil } from './lead-qualified-snapshot';
+import { buildLeadPackage } from './lead-package';
 import { LeadService } from './lead.service';
 import { contactSuppressionKeys } from '../discovery/identity';
 import { blindContactKey } from '../compliance/pii-crypto';
@@ -56,7 +58,7 @@ function makeLead(over: Record<string, unknown> = {}) {
     fitReasons: { material: 'm', reasons: [] },
     totalScore: 0.55,
     scores: { fit: 0.8, role: 0.5, intent: 0.3, dataQuality: 0.7, reachability: 0.6, engagement: 0 },
-    scoreDetail: { rules: [] },
+    scoreDetail: { rules: [], ruleVersion: 'additive-6dim-v3' },
     version: 2,
     ...over,
   };
@@ -128,7 +130,7 @@ describe('buildLeadQualifiedSnapshot — 快照 v1（Consumer Test：契约 sche
     });
     expect(snap.fit_verdict).toBe('match');
     expect(snap.evidence_refs).toEqual({ score_detail_available: true, fit_reasons_available: true });
-    expect(snap.qualification_rule_version).toBe('additive-6dim-v2');
+    expect(snap.qualification_rule_version).toBe('additive-6dim-v3');
     expect(snap.storage_rights_decision).toBeNull(); // 未传 storageRightsDecision → 缺省 null（非破坏）
     expect(snap.personal_data_class).toBe('named_person_refs');
     expect(snap.suppression_state).toBe('none');
@@ -219,6 +221,66 @@ describe('buildLeadQualifiedSnapshot — 快照 v1（Consumer Test：契约 sche
     expect(snap.suppression_state).toBe('suppressed');
   });
 
+  // 可选字段 scored_at / queue_basis（设计 E1：v1 加可选字段，snapshot_version 仍 1）：
+  // 消费方能看出这条线索被接受时，它所在的队列是评分算出的，还是 fit 门预置、或人工曾拒绝的。
+  it('已评分 lead → scored_at=评分时刻 ISO、queue_basis=score，仍过 v1 契约', () => {
+    const { validate } = loadValidator();
+    const snap = buildLeadQualifiedSnapshot({
+      lead: makeLead({ scoredAt: new Date('2026-10-14T01:02:03.000Z') }),
+      company: makeCompany(),
+      icpVersion: 3,
+    });
+    const ok = validate(snap);
+    expect(validate.errors ?? []).toEqual([]);
+    expect(ok).toBe(true);
+    expect(snap.scored_at).toBe('2026-10-14T01:02:03.000Z');
+    expect(snap.queue_basis).toBe('score');
+  });
+
+  it('列加进来之前评的分（scoredAt 缺）→ scored_at null 如实，queue_basis 仍是 score', () => {
+    const snap = buildLeadQualifiedSnapshot({ lead: makeLead(), company: makeCompany(), icpVersion: 3 });
+    expect(snap.scored_at).toBeNull();
+    expect(snap.queue_basis).toBe('score');
+  });
+
+  it('未评分（fit 门预置队列）→ scored_at null、queue_basis=fit_gate_preset', () => {
+    const { validate } = loadValidator();
+    const snap = buildLeadQualifiedSnapshot({
+      lead: makeLead({ status: 'DISCOVERED', queue: 'needs_review', scores: null, totalScore: null, scoredAt: null }),
+      company: makeCompany(),
+      icpVersion: 3,
+    });
+    expect(validate(snap)).toBe(true);
+    expect(snap.scored_at).toBeNull();
+    expect(snap.queue_basis).toBe('fit_gate_preset');
+  });
+
+  it('人工曾拒绝的 REJECTED lead 被接受 → queue_basis=human_reject（接受前队列的依据）', () => {
+    const snap = buildLeadQualifiedSnapshot({
+      lead: makeLead({ status: 'REJECTED', queue: 'rejected' }),
+      humanRejected: true,
+      company: makeCompany(),
+      icpVersion: 3,
+    });
+    expect(snap.queue_basis).toBe('human_reject');
+  });
+
+  it('schema：queue_basis 只收四个枚举值、scored_at 须是 date-time；旧载荷（无这两个字段）仍通过', () => {
+    const { validate } = loadValidator();
+    const good = buildLeadQualifiedSnapshot({ lead: makeLead(), company: makeCompany(), icpVersion: 3 });
+
+    const legacy = { ...(good as unknown as Record<string, unknown>) };
+    delete legacy.scored_at;
+    delete legacy.queue_basis;
+    expect(validate(legacy)).toBe(true);
+
+    expect(validate({ ...good, queue_basis: 'guess' })).toBe(false);
+    expect(validate({ ...good, scored_at: 'yesterday' })).toBe(false);
+    for (const basis of ['fit_gate_preset', 'score', 'human_accept', 'human_reject']) {
+      expect(validate({ ...good, queue_basis: basis })).toBe(true);
+    }
+  });
+
   it('schema 拒绝缺 required 字段与多余字段（additionalProperties:false）', () => {
     const { validate } = loadValidator();
     const good = buildLeadQualifiedSnapshot({ lead: makeLead(), company: makeCompany(), icpVersion: 3 });
@@ -237,8 +299,153 @@ describe('buildLeadQualifiedSnapshot — 快照 v1（Consumer Test：契约 sche
   });
 });
 
-// ── LeadService.decide：CAS + 幂等 + 快照 payload（C/H）────────────────────
+// ── qualification_rule_version：取这条 lead 实际计分时的规则版本（W5-f），不是决策时的代码常量 ──
+describe('buildLeadQualifiedSnapshot — qualification_rule_version 读 score_detail.ruleVersion', () => {
+  const snapshotFor = (scoreDetail: unknown) =>
+    buildLeadQualifiedSnapshot({ lead: makeLead({ scoreDetail }), company: makeCompany(), icpVersion: 3 });
 
+  it('score_detail 带 ruleVersion → 原样写进快照（即便代码常量已升到别的版本）', () => {
+    const { validate } = loadValidator();
+    const snap = snapshotFor({ rules: [], ruleVersion: 'additive-6dim-v9' });
+    expect(snap.qualification_rule_version).toBe('additive-6dim-v9');
+    expect(validate(snap)).toBe(true);
+  });
+
+  it('score_detail 存在但没有 ruleVersion（v3 之前计分、没有重评的存量 lead）→ additive-6dim-v2，不冒充 v3', () => {
+    const { validate } = loadValidator();
+    for (const detail of [{ rules: [] }, { rules: [], ruleVersion: '' }, { rules: [], ruleVersion: 3 }]) {
+      const snap = snapshotFor(detail);
+      expect(snap.qualification_rule_version, JSON.stringify(detail)).toBe('additive-6dim-v2');
+      expect(validate(snap)).toBe(true);
+    }
+  });
+
+  it('从未计分（score_detail 为 null）→ null，且仍过契约校验', () => {
+    const { validate } = loadValidator();
+    const snap = snapshotFor(null);
+    expect(snap.qualification_rule_version).toBeNull();
+    expect(snap.evidence_refs.score_detail_available).toBe(false);
+    const ok = validate(snap);
+    expect(validate.errors ?? []).toEqual([]);
+    expect(ok).toBe(true);
+  });
+});
+
+// ── delivery 可选字段（BI-19/21/15，设计 §3）：v1 加字段，旧载荷仍通过 ──────────
+
+function deliveryPackage() {
+  return buildLeadPackage({
+    lead: {
+      id: LEAD_ID,
+      status: 'REVIEW',
+      queue: 'recommended',
+      fitVerdict: 'match',
+      fitReasons: { reasons: ['在售 Grundfos'] },
+      scores: { fit: 0.8, role: 0.5, intent: 0.3, dataQuality: 0.7, reachability: 0.6, engagement: 0 },
+      scoreDetail: { ruleEvaluations: [], missingFields: [], reasonCodes: [] },
+      totalScore: 0.55,
+    },
+    company: {
+      id: COMPANY_ID,
+      name: 'Acme Pumpen GmbH',
+      domain: 'acme-pumpen.de',
+      country: 'DE',
+      attributes: {
+        website_profile: {
+          trade_role: 'distributor',
+          trade_role_confidence: 0.9,
+          own_manufacturing: false,
+          carried_brands: [{ name: 'Grundfos', country: 'DK' }],
+          carries_chinese_brand: false,
+          carries_foreign_brand: true,
+          register_key: 'de-hrb:muenchen:98765',
+          vat_id: 'DE136695976',
+          source_url: 'https://acme-pumpen.de/impressum',
+        },
+        intent: {
+          events: [{ type: 'TENDER_PUBLISHED', at: '2026-10-01T00:00:00.000Z', page_url: 'https://ted.europa.eu/1' }],
+        },
+      },
+    },
+    contactPoints: [{ kind: 'supplier_page', value: 'https://acme-pumpen.de/lieferanten', status: 'UNVERIFIED' }],
+    evidence: [
+      { field: 'website_profile.trade_role', sourceUrl: 'https://acme-pumpen.de/impressum', fetchedAt: '2026-10-20T00:00:00.000Z' },
+    ],
+    sanctions: { status: 'clear', screened_at: '2026-10-19T00:00:00.000Z' },
+    validUntil: '2026-11-19T00:00:00.000Z',
+  });
+}
+
+describe('buildLeadQualifiedSnapshot — delivery 可选字段', () => {
+  it('writes the company-level delivery facts and still validates against the v1 contract', () => {
+    const { validate } = loadValidator();
+    const snap = buildLeadQualifiedSnapshot({
+      lead: makeLead(),
+      company: makeCompany(),
+      icpVersion: 3,
+      delivery: deliveryPackage(),
+    });
+    expect(validate.errors ?? []).toEqual([]);
+    expect(validate(snap)).toBe(true);
+    expect(snap.company_profile).toEqual({
+      trade_role: 'distributor',
+      trade_role_confidence: 0.9,
+      own_manufacturing: false,
+      carried_brands: [{ name: 'Grundfos', country: 'DK' }],
+      carries_chinese_brand: false,
+      carries_foreign_brand: true,
+    });
+    expect(snap.identifiers_ext).toEqual({ register_key: 'de-hrb:muenchen:98765', vat_id: 'DE136695976' });
+    expect(snap.company_contact_points).toEqual([
+      { kind: 'supplier_page', url: 'https://acme-pumpen.de/lieferanten', status: 'UNVERIFIED' },
+    ]);
+    expect(snap.suggested_contact_path).toMatchObject({ kind: 'supplier_page' });
+    expect(snap.signals).toEqual([
+      { type: 'TENDER_PUBLISHED', at: '2026-10-01T00:00:00.000Z', url: 'https://ted.europa.eu/1' },
+    ]);
+    expect(snap.evidence_urls).toEqual([
+      {
+        field: 'website_profile.trade_role',
+        source_url: 'https://acme-pumpen.de/impressum',
+        fetched_at: '2026-10-20T00:00:00.000Z',
+      },
+    ]);
+    expect(snap.fit_reason_codes).toEqual(['FIT_MATCH']);
+    expect(snap.snapshot_version).toBe(1);
+  });
+
+  it('keeps older payloads (no delivery keys) valid — the contract never turns optional into required', () => {
+    const { validate } = loadValidator();
+    const snap = buildLeadQualifiedSnapshot({ lead: makeLead(), company: makeCompany(), icpVersion: 3 });
+    expect(snap).not.toHaveProperty('company_profile');
+    expect(snap).not.toHaveProperty('fit_reason_codes');
+    expect(validate.errors ?? []).toEqual([]);
+    expect(validate(snap)).toBe(true);
+  });
+
+  it('rejects personal data or malformed delivery keys inside the snapshot', () => {
+    const { validate } = loadValidator();
+    const base = buildLeadQualifiedSnapshot({
+      lead: makeLead(),
+      company: makeCompany(),
+      icpVersion: 3,
+      delivery: deliveryPackage(),
+    });
+    const leaked = JSON.parse(JSON.stringify(base));
+    leaked.company_contact_points[0].email = 'x@y.z';
+    expect(validate(leaked)).toBe(false);
+
+    const badSignal = JSON.parse(JSON.stringify(base));
+    delete badSignal.signals[0].at;
+    expect(validate(badSignal)).toBe(false);
+
+    const badCode = JSON.parse(JSON.stringify(base));
+    badCode.fit_reason_codes = ['fit_match'];
+    expect(validate(badCode)).toBe(false);
+  });
+});
+
+// ── LeadService.decide：CAS + 幂等 + 快照 payload（C/H）────────────────────
 /**
  * 有状态 decide mock tx：updateMany 按 version 做 CAS（命中才落状态并 version+1），
  * findUnique 每次返回当前快照——重复 decide/并发冲突两条路径都能真实走到。
@@ -248,7 +455,7 @@ function makeDecideTx(
   company: Record<string, unknown>,
   outboxCreate: ReturnType<typeof vi.fn>,
   decisionCreate: ReturnType<typeof vi.fn>,
-  evidenceRows: Array<{ dataClass: string; fetchedAt: Date | string }> = [],
+  evidenceRows: Array<{ dataClass: string; fetchedAt: Date | string; field?: string }> = [],
 ) {
   return {
     // Art.17 竞态闸（PR #72）：decide 交棒前对公司行 SELECT … FOR UPDATE 加锁——
@@ -276,19 +483,30 @@ function makeDecideTx(
       update: vi.fn(async ({ data }: { data: { status: string } }) => ({ ...company, ...data })),
     },
     suppressionRecord: { findMany: vi.fn(async () => []) },
+    companyContactPoint: { findMany: vi.fn(async () => []) },
+    rawSourceRecord: { findMany: vi.fn(async () => []) },
     icpDefinition: { findUnique: async () => ({ version: 3 }) },
-    // 鲜度模型 v2：decide 用 groupBy 取每分级最早 fetchedAt。mock 忠实按 dataClass 归组取 min。
+    // L1：有效期按「每个字段取最新」（entityId+field+dataClass 上的 _max）聚合。mock 忠实按字段归组取 max。
     fieldEvidence: {
       findMany: vi.fn(async () => []),
-      groupBy: async () => {
+      groupBy: vi.fn(async () => {
         const toMs = (v: Date | string): number => (v instanceof Date ? v.getTime() : Date.parse(String(v)));
-        const minByClass = new Map<string, Date | string>();
+        const maxByField = new Map<string, { field: string; dataClass: string; fetchedAt: Date | string }>();
         for (const r of evidenceRows) {
-          const cur = minByClass.get(r.dataClass);
-          if (cur === undefined || toMs(r.fetchedAt) < toMs(cur)) minByClass.set(r.dataClass, r.fetchedAt);
+          const field = r.field ?? 'attributes';
+          const key = `${field}:${r.dataClass}`;
+          const cur = maxByField.get(key);
+          if (cur === undefined || toMs(r.fetchedAt) > toMs(cur.fetchedAt)) {
+            maxByField.set(key, { field, dataClass: r.dataClass, fetchedAt: r.fetchedAt });
+          }
         }
-        return [...minByClass].map(([dataClass, fetchedAt]) => ({ dataClass, _min: { fetchedAt } }));
-      },
+        return [...maxByField.values()].map(({ field, dataClass, fetchedAt }) => ({
+          entityId: 'entity',
+          field,
+          dataClass,
+          _max: { fetchedAt },
+        }));
+      }),
     },
     // 第五门：这些用例不测制裁，无历史命中 → decide 的持久化命中读返回 null（不拦，走 clear/not_screened）。
     sanctionsScreeningResult: { findFirst: async () => null },
@@ -347,9 +565,18 @@ describe('LeadService.decide(accept) — 同事务取数、payload=快照（对�
     expect(tx.lead.updateMany).not.toHaveBeenCalled();
     expect(decisionCreate).not.toHaveBeenCalled();
     expect(outboxCreate).not.toHaveBeenCalled();
+    // 这次读取同时供合成来源守卫与交付事实装配使用（宽 select 省掉锁内的第二次扫表）。
     expect(tx.fieldEvidence.findMany).toHaveBeenCalledWith({
       where: { entityId: { in: [COMPANY_ID, CONTACT_ID] } },
-      select: { providerKey: true, license: true },
+      select: {
+        entityId: true,
+        providerKey: true,
+        license: true,
+        field: true,
+        fetchedAt: true,
+        rawRecordId: true,
+        sourceUrl: true,
+      },
     });
   });
 
@@ -648,7 +875,7 @@ describe('LeadService.decide — 幂等短路 + 并发 CAS（C）', () => {
     const decisionCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
     const svc = makeDecideService(makeDecideTx(lead, makeCompany(), outboxCreate, decisionCreate));
 
-    const r = (await svc.decide(decideCtx, LEAD_ID, 'reject')) as Record<string, unknown>;
+    const r = (await svc.decide(decideCtx, LEAD_ID, 'reject', undefined, 'OTHER')) as Record<string, unknown>;
 
     expect(r.status).toBe('REJECTED');
     expect(decisionCreate).toHaveBeenCalledTimes(1);
@@ -797,18 +1024,183 @@ describe('valid_until 鲜度模型 v2（computeValidUntil + decide 接线）', (
     expect(payload.valid_until).toBe(iso(Date.parse(fetchedAt) + 180 * day));
   });
 
-  it('decide 接线：同分级多条证据 → 取最早抓取（groupBy _min 语义，最早失效）', async () => {
+  it('decide 接线：同一字段重抓多次 → 取最新抓取（重抓可延长有效期，L1）', async () => {
     const earlier = '2026-01-01T00:00:00.000Z';
     const later = '2026-04-01T00:00:00.000Z';
     const outboxCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+    const tx = makeDecideTx(makeLead(), makeCompany(), outboxCreate, vi.fn(), [
+      { dataClass: GREEN, fetchedAt: later, field: 'attributes' },
+      { dataClass: GREEN, fetchedAt: earlier, field: 'attributes' },
+    ]);
+    // L1：按字段取最新（by entity+field+class、_max），不是每分级最早。
+    expect(tx.fieldEvidence.groupBy).toBeDefined();
+    const svc = makeDecideService(tx);
+    await svc.decide(decideCtx, LEAD_ID, 'accept');
+    expect(tx.fieldEvidence.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({ by: ['entityId', 'field', 'dataClass'], _max: { fetchedAt: true } }),
+    );
+    const payload = (outboxCreate.mock.calls[0][0].data as Record<string, unknown>).payload as Record<string, unknown>;
+    expect(payload.valid_until).toBe(iso(Date.parse(later) + 180 * day));
+  });
+
+  it('decide 接线：不同字段之间仍取最早失效（L1）', async () => {
+    const olderField = '2026-01-01T00:00:00.000Z';
+    const newerField = '2026-04-01T00:00:00.000Z';
+    const outboxCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
     const svc = makeDecideService(
       makeDecideTx(makeLead(), makeCompany(), outboxCreate, vi.fn(), [
-        { dataClass: GREEN, fetchedAt: later },
-        { dataClass: GREEN, fetchedAt: earlier },
+        { dataClass: GREEN, fetchedAt: newerField, field: 'domain' },
+        { dataClass: GREEN, fetchedAt: olderField, field: 'industry' },
       ]),
     );
     await svc.decide(decideCtx, LEAD_ID, 'accept');
     const payload = (outboxCreate.mock.calls[0][0].data as Record<string, unknown>).payload as Record<string, unknown>;
-    expect(payload.valid_until).toBe(iso(Date.parse(earlier) + 180 * day)); // 最早抓取决定最早失效
+    expect(payload.valid_until).toBe(iso(Date.parse(olderField) + 180 * day));
+  });
+
+  it('decide 接线：已评分 lead 的 scored_at 与 queue_basis=score 进入快照，且不查 lead_decision', async () => {
+    const { validate } = loadValidator();
+    const outboxCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+    const tx = makeDecideTx(makeLead({ scoredAt: new Date('2026-10-14T01:02:03.000Z') }), makeCompany(), outboxCreate, vi.fn());
+    const findFirst = vi.fn(async () => ({ id: 'decision-1' }));
+    (tx.leadDecision as Record<string, unknown>).findFirst = findFirst;
+    await makeDecideService(tx).decide(decideCtx, LEAD_ID, 'accept');
+    const payload = (outboxCreate.mock.calls[0][0].data as Record<string, unknown>).payload as Record<string, unknown>;
+    expect(validate(payload)).toBe(true);
+    expect(payload.scored_at).toBe('2026-10-14T01:02:03.000Z');
+    expect(payload.queue_basis).toBe('score');
+    expect(findFirst).not.toHaveBeenCalled();
+  });
+
+  it('decide 接线：REJECTED 且有 reject 裁决的 lead 被 accept → queue_basis=human_reject（只在 REJECTED 时查一条裁决）', async () => {
+    const outboxCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+    const tx = makeDecideTx(makeLead({ status: 'REJECTED', queue: 'rejected' }), makeCompany(), outboxCreate, vi.fn());
+    const findFirst = vi.fn(async () => ({ id: 'decision-1' }));
+    (tx.leadDecision as Record<string, unknown>).findFirst = findFirst;
+    await makeDecideService(tx).decide(decideCtx, LEAD_ID, 'accept');
+    expect(findFirst).toHaveBeenCalledWith({ where: { leadId: LEAD_ID, action: 'reject' }, select: { id: true } });
+    const payload = (outboxCreate.mock.calls[0][0].data as Record<string, unknown>).payload as Record<string, unknown>;
+    expect(payload.queue_basis).toBe('human_reject');
+  });
+});
+
+// ── POST /leads/:id/accept|reject 的响应：与 GET /leads 同一个 LEAD_SCHEMA（required scored/queueBasis）──
+
+/** 从 cwd 向上找 openapi.json（同 contractSchemaPath）。 */
+function openApiPath(): string {
+  let dir = process.cwd();
+  for (let i = 0; i < 6; i++) {
+    const p = path.join(dir, 'packages/contracts/openapi/openapi.json');
+    if (fs.existsSync(p)) return p;
+    dir = path.dirname(dir);
+  }
+  throw new Error('openapi.json not found — contract file missing');
+}
+
+/** 契约里 POST /leads/:id/{action} 200 响应 data 的 required 与 queueBasis 枚举。 */
+function decideResponseContract(action: 'accept' | 'reject'): { required: string[]; queueBases: string[] } {
+  const doc = JSON.parse(fs.readFileSync(openApiPath(), 'utf8'));
+  const data = doc.paths[`/api/v1/leads/{leadId}/${action}`].post.responses['200'].content['application/json'].schema
+    .properties.data;
+  return { required: data.required ?? [], queueBases: data.properties.queueBasis.enum };
+}
+
+function expectDecideResponseHonoursContract(action: 'accept' | 'reject', response: Record<string, unknown>) {
+  const { required, queueBases } = decideResponseContract(action);
+  expect(required).toEqual(expect.arrayContaining(['scored', 'queueBasis']));
+  for (const key of required) expect(response).toHaveProperty(key);
+  expect(typeof response.scored).toBe('boolean');
+  expect(queueBases).toContain(response.queueBasis);
+}
+
+describe('LeadService.decide — 响应带 scored / queueBasis（契约 LEAD_SCHEMA required）', () => {
+  it('accept → QUALIFIED：scored 按 total_score、queueBasis=human_accept', async () => {
+    const lead = makeLead();
+    const svc = makeDecideService(makeDecideTx(lead, makeCompany(), vi.fn(async () => ({})), vi.fn(async () => ({}))));
+
+    const r = (await svc.decide(decideCtx, LEAD_ID, 'accept')) as Record<string, unknown>;
+
+    expect(r).toMatchObject({ status: 'QUALIFIED', scored: true, queueBasis: 'human_accept' });
+    expectDecideResponseHonoursContract('accept', r);
+  });
+
+  it('重复 accept 的幂等早返回同样带 scored / queueBasis', async () => {
+    const lead = makeLead({ status: 'QUALIFIED', totalScore: null });
+    const svc = makeDecideService(makeDecideTx(lead, makeCompany(), vi.fn(), vi.fn()));
+
+    const r = (await svc.decide(decideCtx, LEAD_ID, 'accept')) as Record<string, unknown>;
+
+    expect(r).toMatchObject({ status: 'QUALIFIED', scored: false, queueBasis: 'human_accept' });
+    expectDecideResponseHonoursContract('accept', r);
+  });
+
+  it('reject → REJECTED：写入裁决后 queueBasis=human_reject', async () => {
+    const lead = makeLead();
+    const decisionCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+    const svc = makeDecideService(makeDecideTx(lead, makeCompany(), vi.fn(), decisionCreate));
+
+    const r = (await svc.decide(decideCtx, LEAD_ID, 'reject', undefined, 'OTHER')) as Record<string, unknown>;
+
+    expect(decisionCreate).toHaveBeenCalledTimes(1);
+    expect(r).toMatchObject({ status: 'REJECTED', scored: true, queueBasis: 'human_reject' });
+    expectDecideResponseHonoursContract('reject', r);
+  });
+
+  it('重复 reject（已有 reject 裁决）：幂等早返回，不建第二条裁决，响应带 human_reject', async () => {
+    const lead = makeLead({ status: 'REJECTED', queue: 'rejected' });
+    const decisionCreate = vi.fn();
+    const tx = makeDecideTx(lead, makeCompany(), vi.fn(), decisionCreate);
+    const findFirst = vi.fn(async () => ({ id: 'decision-1' }));
+    (tx.leadDecision as Record<string, unknown>).findFirst = findFirst;
+
+    const r = (await makeDecideService(tx).decide(decideCtx, LEAD_ID, 'reject', undefined, 'OTHER')) as Record<string, unknown>;
+
+    expect(findFirst).toHaveBeenCalledWith({ where: { leadId: LEAD_ID, action: 'reject' }, select: { id: true } });
+    expect(decisionCreate).not.toHaveBeenCalled();
+    expect(tx.lead.updateMany).not.toHaveBeenCalled();
+    expect(r).toMatchObject({ status: 'REJECTED', queueBasis: 'human_reject' });
+    expectDecideResponseHonoursContract('reject', r);
+  });
+
+  it('人工 reject 一条评分写的 REJECTED（还没有 reject 裁决）：照样记下裁决，让它成为人工终态', async () => {
+    // 评分阶段自己也写 REJECTED；只有一条 reject 裁决能让重评分把它当人工终态（scoreCandidates humanFinal）。
+    const lead = makeLead({ status: 'REJECTED', queue: 'rejected', totalScore: 0.1 });
+    const decisionCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+    const tx = makeDecideTx(lead, makeCompany(), vi.fn(), decisionCreate);
+    (tx.leadDecision as Record<string, unknown>).findFirst = vi.fn(async () => null);
+
+    const r = (await makeDecideService(tx).decide(decideCtx, LEAD_ID, 'reject', 'not a distributor', 'NOT_TARGET_ROLE')) as Record<
+      string,
+      unknown
+    >;
+
+    expect(decisionCreate).toHaveBeenCalledTimes(1);
+    expect(decisionCreate.mock.calls[0]![0]).toMatchObject({
+      data: { leadId: LEAD_ID, action: 'reject', reason: 'not a distributor' },
+    });
+    expect(r).toMatchObject({ status: 'REJECTED', scored: true, queueBasis: 'human_reject' });
+    expectDecideResponseHonoursContract('reject', r);
+  });
+});
+
+describe('LeadService.decide(accept) — 第五门与 qualify、导出同一张真值表（#665）', () => {
+  it.each(SANCTIONS_GATE_CASES)('live=$live × 库里=$stored → 拦=$blocks', async ({ live, stored, blocks }) => {
+    const outboxCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+    const decisionCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+    const tx = makeDecideTx(makeLead(), makeCompany(), outboxCreate, decisionCreate);
+    const findFirst = vi.fn(async () => storedScreening(stored));
+    tx.sanctionsScreeningResult = { findFirst } as never;
+    const svc = makeDecideService(tx, undefined, { screen: vi.fn(() => liveScreen(live)) });
+
+    const outcome = svc.decide(decideCtx, LEAD_ID, 'accept');
+
+    if (blocks) {
+      await expect(outcome).rejects.toMatchObject({ response: { error: { code: 'SANCTIONS_HOLD_UNRESOLVED' } } });
+      expect(outboxCreate).not.toHaveBeenCalled();
+    } else {
+      await expect(outcome).resolves.toBeDefined();
+      expect(outboxCreate).toHaveBeenCalledTimes(1);
+    }
+    expect(findFirst).toHaveBeenCalledTimes(1);
   });
 });

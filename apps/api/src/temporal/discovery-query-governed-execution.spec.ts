@@ -308,6 +308,11 @@ describe('governed Discovery execution commit', () => {
     expect(writer).toHaveBeenCalledOnce();
     expect(update).toHaveBeenCalledOnce();
     expect(usage).toHaveBeenCalledOnce();
+    // Prisma binds a string as text, and PostgreSQL has no uuid = text operator.
+    const runLock = tx.$queryRaw.mock.calls
+      .map(([statement]) => statement.strings.join('?'))
+      .find((sql) => sql.includes('FROM discovery_run'));
+    expect(runLock).toMatch(/WHERE id\s*=\s*\?::uuid\b/);
 
     const failingTx = {
       ...tx,

@@ -34,6 +34,8 @@ export const MAX_SINGLE_SEARCH_WIRES_PER_QUERY = 1 as const;
 /** Website profile (G3 5.4b): before fit, homepage + Impressum per company, at most one model call. */
 export const MAX_DISCOVERY_PROFILE_COMPANIES = 50 as const;
 export const MAX_WEBSITE_PROFILE_FETCHES_PER_COMPANY = 2 as const;
+/** BI-14 contact paths (switch company_contact): the linked contact page, rendered to look for a form. */
+export const MAX_WEBSITE_PROFILE_RENDERS_PER_COMPANY = 1 as const;
 export const MAX_DISCOVERY_ENRICH_COMPANIES = 50 as const;
 /** GLEIF: country search, name-only retry, direct and ultimate parent. */
 export const MAX_GLEIF_FETCHES_PER_COMPANY = 4 as const;
@@ -57,7 +59,7 @@ export const MAX_DIGITAL_FOOTPRINT_RENDERS = 1 as const;
 // Seller understanding (POST /companies): homepage plus selected subpages.
 export const MAX_UNDERSTANDING_SUBPAGES = 6 as const;
 
-export const MAX_CONTACT_DISCOVERY_ADAPTERS = 5 as const;
+export const MAX_CONTACT_DISCOVERY_ADAPTERS = 6 as const;
 export const MAX_CONTACTS_PER_DISCOVERY_ADAPTER = 25 as const;
 export const MAX_DECISION_MAKER_PAGES = 4 as const;
 export const MAX_EMAIL_GUESS_CONTACTS = 25 as const;

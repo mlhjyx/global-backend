@@ -8,9 +8,10 @@ const COMPANY_ID = '20000000-0000-4000-8000-000000000002';
 const ICP_ID = '30000000-0000-4000-8000-000000000003';
 const POINT_ID = '40000000-0000-4000-8000-000000000004';
 const PLAN_ID = '50000000-0000-4000-8000-000000000005';
+const LEAD_ID = '60000000-0000-4000-8000-000000000006';
 
 describe('workspace execution technical envelope catalog', () => {
-  it('machine-enumerates all and only the seven workspace operations', () => {
+  it('machine-enumerates all and only the eight workspace operations', () => {
     expect(WORKSPACE_EXECUTION_QUOTE_OPERATIONS).toEqual([
       'POST /companies',
       'POST /companies/:companyId/icps',
@@ -19,7 +20,26 @@ describe('workspace execution technical envelope catalog', () => {
       'POST /canonical-companies/:id/discover-contacts',
       'POST /canonical-companies/:id/guess-emails',
       'POST /contact-points/:pointId/verify',
+      'POST /leads/:leadId/outreach-drafts',
     ]);
+  });
+
+  it('quotes an outreach draft from one bounded structured task and its exact wire cap', () => {
+    const envelope = resolveWorkspaceTechnicalBudgetEnvelope({
+      operation: 'POST /leads/:leadId/outreach-drafts',
+      leadId: LEAD_ID,
+    });
+
+    expect(envelope.policy.models).toEqual([
+      expect.objectContaining({
+        taskId: 'outreach.first_contact_draft',
+        logicalInvocations: 1,
+        structuredWireUpperBound: 2,
+        maxCostCents: 20,
+        maxOutputTokens: 8_192,
+      }),
+    ]);
+    expect(envelope.policy.tools).toEqual([]);
   });
 
   it('quotes ICP design from one bounded structured task and its exact wire cap', () => {
@@ -34,7 +54,7 @@ describe('workspace execution technical envelope catalog', () => {
         logicalInvocations: 1,
         structuredWireUpperBound: 2,
         maxCostCents: 40,
-        maxOutputTokens: 4_096,
+        maxOutputTokens: 16_000,
       }),
     ]);
     expect(envelope.policy.tools).toEqual([]);
@@ -126,7 +146,9 @@ describe('workspace execution technical envelope catalog', () => {
       ['tradefair.algolia', 66],
       ['gleif.fetch', 50 * 4],
       ['wikidata.entity', 50 * 3],
-      ['crawl4ai.render', 12 * 2],
+      // digital footprint + structured harvest per signal company, and the contact page of
+      // each profiled company (BI-14, at most one render each)
+      ['crawl4ai.render', 12 * 2 + 50 * 1],
       // structured harvest (sitemap 8 + careers probes 6 + ATS 1) + watch sitemap 8
       ['http.get', 12 * 15 + 12 * 8],
     ]);
@@ -143,8 +165,8 @@ describe('workspace execution technical envelope catalog', () => {
       watchCompanies: 12,
     });
     // models: 396×2×5 + 924×2×15 + 1584×2×20 + 50×2×10 + 11550×2×20 = 558_040 cents;
-    // tools: crawl4ai.fetch 1684×1 + crawl4ai.render 24×1 = 1_708 cents.
-    expect(envelope.requiredCapMicrousd).toBe(559_748n * 10_000n);
+    // tools: crawl4ai.fetch 1684×1 + crawl4ai.render 74×1 = 1_758 cents.
+    expect(envelope.requiredCapMicrousd).toBe(559_798n * 10_000n);
   });
 
   it('quotes company creation from the bounded understanding crawl and per-page extraction', () => {

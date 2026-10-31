@@ -56,8 +56,8 @@
     {
       "workflow": ".github/workflows/ci.yml",
       "action": "actions/setup-node",
-      "revision": "820762786026740c76f36085b0efc47a31fe5020",
-      "version": "v7"
+      "revision": "949feb2413d6458794dcd2491c4babbbce0c15c1",
+      "version": "v7.1.0"
     },
     {
       "workflow": ".github/workflows/ci.yml",
@@ -92,8 +92,8 @@
     {
       "workflow": ".github/workflows/governance.yml",
       "action": "actions/setup-node",
-      "revision": "820762786026740c76f36085b0efc47a31fe5020",
-      "version": "v7"
+      "revision": "949feb2413d6458794dcd2491c4babbbce0c15c1",
+      "version": "v7.1.0"
     },
     {
       "workflow": ".github/workflows/supply-chain.yml",
@@ -116,8 +116,8 @@
     {
       "workflow": ".github/workflows/supply-chain.yml",
       "action": "actions/setup-node",
-      "revision": "820762786026740c76f36085b0efc47a31fe5020",
-      "version": "v7"
+      "revision": "949feb2413d6458794dcd2491c4babbbce0c15c1",
+      "version": "v7.1.0"
     },
     {
       "workflow": ".github/workflows/codeql-canary.yml",
@@ -128,14 +128,14 @@
     {
       "workflow": ".github/workflows/codeql-canary.yml",
       "action": "github/codeql-action/init",
-      "revision": "2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",
-      "version": "v4.38.2"
+      "revision": "24c54180a607b1449ed407dd24f251e4e9147c8d",
+      "version": "v4.38.3"
     },
     {
       "workflow": ".github/workflows/codeql-canary.yml",
       "action": "github/codeql-action/analyze",
-      "revision": "2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2",
-      "version": "v4.38.2"
+      "revision": "24c54180a607b1449ed407dd24f251e4e9147c8d",
+      "version": "v4.38.3"
     },
     {
       "workflow": ".github/workflows/publish-runtime-image.yml",

@@ -1,5 +1,9 @@
-import { GetBucketLocationCommand } from '@aws-sdk/client-s3';
+import {
+  GetBucketLocationCommand,
+  ListObjectVersionsCommand,
+} from '@aws-sdk/client-s3';
 import { describe, expect, it, vi } from 'vitest';
+import { contentAddressedObjectKey } from './artifact-key';
 import { createPersonalArtifactCleanupRuntime } from './personal-artifact-cleanup.runtime';
 
 const valid = Object.freeze({
@@ -14,7 +18,7 @@ const valid = Object.freeze({
 
 describe('personal artifact cleanup runtime configuration', () => {
   it('builds and probes a separate cleanup capability without exposing credentials', async () => {
-    const send = vi.fn(async () => ({ LocationConstraint: 'us-east-1' }));
+    const send = vi.fn(async (_command: object) => ({ LocationConstraint: 'us-east-1' }));
     const destroy = vi.fn();
     const runtime = createPersonalArtifactCleanupRuntime(
       { ...valid },
@@ -24,8 +28,36 @@ describe('personal artifact cleanup runtime configuration', () => {
     expect(runtime.destroy).toEqual(expect.any(Function));
     await expect(runtime.checkReadiness()).resolves.toEqual({ status: 'ok' });
     expect(send.mock.calls[0]?.[0]).toBeInstanceOf(GetBucketLocationCommand);
+    const probe = send.mock.calls[1]?.[0] as unknown;
+    expect(probe).toBeInstanceOf(ListObjectVersionsCommand);
+    expect((probe as ListObjectVersionsCommand).input).toEqual({
+      Bucket: 'personal-cleanup-test',
+      Prefix: contentAddressedObjectKey('0'.repeat(64), 'PERSONAL_DATA'),
+      MaxKeys: 1,
+    });
     runtime.destroy();
     expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  it('is not ready when the cleanup principal may not list personal-data versions', async () => {
+    const send = vi.fn(async (command: object) => {
+      if (command instanceof GetBucketLocationCommand) {
+        return { LocationConstraint: 'us-east-1' };
+      }
+      throw Object.assign(new Error('Access Denied'), {
+        name: 'AccessDenied',
+        $metadata: { httpStatusCode: 403 },
+      });
+    });
+    const runtime = createPersonalArtifactCleanupRuntime(
+      { ...valid },
+      () => ({ send, destroy: vi.fn() }),
+    );
+    await expect(runtime.checkReadiness()).resolves.toEqual({
+      status: 'failed',
+      code: 'PERSONAL_ARTIFACT_CLEANUP_STORE_UNAVAILABLE',
+    });
+    runtime.destroy();
   });
 
   it('returns a bounded not-ready code for cleanup-principal denial', async () => {

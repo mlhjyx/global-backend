@@ -56,7 +56,6 @@ function platformToolComposition() {
     release: vi.fn(),
     status: vi.fn(),
     open: vi.fn(),
-    admitPlatformRun: vi.fn(),
   } as unknown as BudgetStore;
   const limiter = {
     configure: vi.fn(),
@@ -96,7 +95,6 @@ function platformModelComposition() {
     release: vi.fn(),
     status: vi.fn(),
     open: vi.fn(),
-    admitPlatformRun: vi.fn(),
   } as unknown as BudgetStore;
   const gateway = new RouterModelGateway(router, undefined, budget);
   return { gateway, route, budget, generateText };
@@ -263,8 +261,7 @@ describe("4D dispatcher composition", () => {
       release: vi.fn(),
       status: vi.fn(),
       open: vi.fn(),
-      admitPlatformRun: vi.fn(),
-    } as unknown as BudgetStore;
+      } as unknown as BudgetStore;
     const dispatch = vi.fn(async (_operationKey: string, run: () => Promise<unknown>) => run());
     const broker = new ToolBroker({
       registry,

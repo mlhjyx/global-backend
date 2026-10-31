@@ -34,7 +34,8 @@
         "summary": "健康检查（存活）",
         "tags": [
           "System"
-        ]
+        ],
+        "description": "存活探针：不探测任何依赖，恒返回 200，供负载均衡与进程守护使用。响应不套 { data } 信封。"
       }
     },
     "/api/v1/health/live": {
@@ -80,7 +81,8 @@
         "summary": "进程存活检查（不探测任何依赖）",
         "tags": [
           "System"
-        ]
+        ],
+        "description": "进程存活检查：只证明事件循环仍在响应，不探测数据库、Temporal 等依赖。"
       }
     },
     "/api/v1/health/db": {
@@ -108,7 +110,8 @@
         "summary": "数据库连通性检查（以 app_user 连接）",
         "tags": [
           "System"
-        ]
+        ],
+        "description": "以 app_user 身份对数据库做一次连通性检查，验证连接与 RLS 角色可用；失败返回非 200。"
       }
     },
     "/api/v1/health/build": {
@@ -251,7 +254,8 @@
         "summary": "非敏感构建身份回执",
         "tags": [
           "System"
-        ]
+        ],
+        "description": "非敏感的构建身份回执：build_sha、镜像 digest、attestation 摘要。用来确认线上跑的到底是哪个提交。"
       }
     },
     "/api/v1/health/ready": {
@@ -730,6 +734,69 @@
                           ]
                         },
                         "platform_target_lookup": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        "dev_fast_lane": {
                           "oneOf": [
                             {
                               "type": "object",
@@ -2363,6 +2430,69 @@
                               }
                             }
                           ]
+                        },
+                        "dev_fast_lane": {
+                          "oneOf": [
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "ok"
+                                  ]
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "failed"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "status",
+                                "code"
+                              ],
+                              "properties": {
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "not_proven"
+                                  ]
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "minLength": 2,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Z][A-Z0-9_]{1,127}$"
+                                }
+                              }
+                            }
+                          ]
                         }
                       }
                     },
@@ -3407,7 +3537,8 @@
         "summary": "接流就绪检查（DB、Temporal control plane 与受控 admission）",
         "tags": [
           "System"
-        ]
+        ],
+        "description": "接流就绪检查：逐项给出数据库、Temporal control plane、worker、平台准入等组件状态；任一项不 ok 时整体不 ready（503）并列出原因。"
       }
     },
     "/api/v1/whoami": {
@@ -3449,15 +3580,17 @@
                         },
                         "scopes": {
                           "type": "array",
+                          "description": "服务端派生的 scope。取值集合会随新能力增长：客户端须容忍未列出的值（按未知 scope 忽略），不要按封闭枚举校验。",
                           "items": {
                             "type": "string",
-                            "enum": [
+                            "x-extensible-enum": [
                               "acquisition:read",
                               "acquisition:write",
                               "acquisition:review",
                               "acquisition:event:ack",
                               "acquisition:label:write",
                               "acquisition:identity:review",
+                              "acquisition:export",
                               "personal-data:read",
                               "compliance:manage",
                               "ops:read"
@@ -3483,7 +3616,8 @@
         ],
         "x-required-scopes": [
           "ops:read"
-        ]
+        ],
+        "description": "回显 token 解析出的身份与服务端派生的权限（userId / workspaceId / roles / scopes）。前端可用它决定页面可见性。需要 ops:read。"
       }
     },
     "/api/v1/health/clock": {
@@ -3559,7 +3693,8 @@
         "summary": "Nonce-bound admitted relative clock observation",
         "tags": [
           "System"
-        ]
+        ],
+        "description": "带 nonce 的准入相对时钟观测，供服务间判断时钟漂移；普通前端不需要。"
       }
     },
     "/api/v1/execution-budget/workspace-technical-quote": {
@@ -3786,6 +3921,26 @@
                         }
                       }
                     }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "operation",
+                      "leadId"
+                    ],
+                    "properties": {
+                      "operation": {
+                        "type": "string",
+                        "enum": [
+                          "POST /leads/:leadId/outreach-drafts"
+                        ]
+                      },
+                      "leadId": {
+                        "type": "string",
+                        "format": "uuid"
+                      }
+                    }
                   }
                 ]
               }
@@ -3894,7 +4049,8 @@
         ],
         "x-required-scopes": [
           "acquisition:write"
-        ]
+        ],
+        "description": "服务间：计算某个 workspace operation 的平台内部执行预算包络。它不是客户价格、余额或额度限制，数字不能展示给终端客户。"
       }
     },
     "/api/v1/platform-authority/technical-quote": {
@@ -4830,7 +4986,8 @@
           "algorithm": "RS256",
           "type": "execution-budget-authority-revocation+jwt",
           "user_token_fallback": false
-        }
+        },
+        "description": "服务间：应用一条已签名的撤销，或重放它已提交的 ACK。重复投递返回首次提交的 ACK（幂等），签名不合法直接拒绝。"
       }
     },
     "/api/v1/platform-authority/fence-ack-jwks": {
@@ -4849,7 +5006,8 @@
         "tags": [
           "PlatformAuthority"
         ],
-        "x-public-key-family": "platform-authority-fence-ack+jwt"
+        "x-public-key-family": "platform-authority-fence-ack+jwt",
+        "description": "服务间：只读返回 fence-ACK 的公钥族（JWKS），供对端验证确认签名；只含公钥。"
       }
     },
     "/api/v1/companies": {
@@ -5123,7 +5281,8 @@
         ],
         "x-required-scopes": [
           "acquisition:read"
-        ]
+        ],
+        "description": "游标分页列出本 workspace 的企业画像：limit 默认 20、上限 100，返回 { data, page: { next_cursor, has_more } }。"
       }
     },
     "/api/v1/companies/{companyId}": {
@@ -5170,7 +5329,8 @@
         ],
         "x-required-scopes": [
           "acquisition:read"
-        ]
+        ],
+        "description": "按 id 取单个企业画像。资源属于其他 workspace 时返回 404，而不是 403——不泄露存在性。"
       }
     },
     "/api/v1/companies/{companyId}/completeness": {
@@ -5241,7 +5401,8 @@
         ],
         "x-required-scopes": [
           "acquisition:read"
-        ]
+        ],
+        "description": "企业完整度：已批准事实、待审事实、产品条目、未决冲突的数量，以及企业当前状态。前端轮询理解进度用它。"
       }
     },
     "/api/v1/companies/{companyId}/confirm": {
@@ -5288,7 +5449,8 @@
         ],
         "x-required-scopes": [
           "acquisition:review"
-        ]
+        ],
+        "description": "人工确认企业可用：REVIEW → ACTIVE，是显式的 Gate 出口。需要 acquisition:review。"
       }
     },
     "/api/v1/companies/{companyId}/offerings": {
@@ -5338,7 +5500,8 @@
         ],
         "x-required-scopes": [
           "acquisition:read"
-        ]
+        ],
+        "description": "理解阶段抽取出的结构化产品/服务，每条带来源页 URL 与原文片段。数组响应，不分页。"
       }
     },
     "/api/v1/companies/{companyId}/claims": {
@@ -5396,7 +5559,8 @@
         ],
         "x-required-scopes": [
           "acquisition:read"
-        ]
+        ],
+        "description": "列出该企业的事实（Claim），可用 ?status=NEEDS_REVIEW 过滤；每条带来源与状态。"
       },
       "post": {
         "operationId": "ClaimController_createManual_v1",
@@ -5451,7 +5615,8 @@
         ],
         "x-required-scopes": [
           "acquisition:review"
-        ]
+        ],
+        "description": "手工录入一条企业事实（KNW-001 手工路径）。它与自动抽取的事实走同一套审批生命周期，初始状态为待审。"
       }
     },
     "/api/v1/claims/{claimId}/approve": {
@@ -5498,7 +5663,8 @@
         ],
         "x-required-scopes": [
           "acquisition:review"
-        ]
+        ],
+        "description": "审批通过一条待审事实：NEEDS_REVIEW → APPROVED，并发出 ClaimApproved 事件供下游使用。需要 acquisition:review。"
       }
     },
     "/api/v1/claims/{claimId}/reject": {
@@ -5545,7 +5711,8 @@
         ],
         "x-required-scopes": [
           "acquisition:review"
-        ]
+        ],
+        "description": "驳回一条待审事实：NEEDS_REVIEW → REVOKED。需要 acquisition:review。"
       }
     },
     "/api/v1/claims/{claimId}/revoke": {
@@ -5592,7 +5759,8 @@
         ],
         "x-required-scopes": [
           "acquisition:review"
-        ]
+        ],
+        "description": "撤销一条已批准事实：APPROVED → REVOKED，并发出 ClaimRevoked——下游必须停止使用该事实。"
       }
     },
     "/api/v1/companies/{companyId}/conflicts": {
@@ -5652,7 +5820,8 @@
         ],
         "x-required-scopes": [
           "acquisition:read"
-        ]
+        ],
+        "description": "列出该企业的知识冲突（KNW-004），可用 ?status=OPEN 只看未决的。"
       }
     },
     "/api/v1/conflicts/{conflictId}/resolve": {
@@ -5711,11 +5880,13 @@
         ],
         "x-required-scopes": [
           "acquisition:review"
-        ]
+        ],
+        "description": "裁决一条冲突：保留指定的事实，另一条置 REVOKED。"
       }
     },
     "/api/v1/companies/{companyId}/icps": {
       "post": {
+        "description": "模型网关结算了调用却没有可用答案（内容被过滤、输出截断、非 JSON、流被截断等）时返回 502 MODEL_UPSTREAM_UNUSABLE，details.reasonCode 为网关原因码；此时预算授权已消耗，重试需要新的授权。",
         "operationId": "IcpController_generate_v1",
         "parameters": [
           {
@@ -5853,6 +6024,56 @@
               }
             }
           },
+          "502": {
+            "description": "MODEL_UPSTREAM_UNUSABLE：模型网关已结算这次调用，但没有可用的答案（details.reasonCode 为网关原因码）。预算授权已消耗，重试需要新的授权",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message",
+                        "details"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "MODEL_UPSTREAM_UNUSABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "reasonCode"
+                          ],
+                          "properties": {
+                            "reasonCode": {
+                              "type": "string",
+                              "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+                              "description": "模型网关的原因码，例如 CHAT_COMPLETIONS_CONTENT_FILTERED、STRUCTURED_OUTPUT_TRUNCATED、CHAT_COMPLETIONS_STREAM_TRUNCATED；不含模型文本"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
           "503": {
             "description": "EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE",
             "content": {
@@ -5947,7 +6168,8 @@
         ],
         "x-required-scopes": [
           "acquisition:read"
-        ]
+        ],
+        "description": "列出 ICP，可用 ?companyId= 过滤到某家企业。数组响应，不分页。"
       }
     },
     "/api/v1/icps/{icpId}": {
@@ -5994,7 +6216,8 @@
         ],
         "x-required-scopes": [
           "acquisition:read"
-        ]
+        ],
+        "description": "ICP 详情，含 Persona 与买家委员会成员。"
       },
       "patch": {
         "operationId": "IcpController_update_v1",
@@ -6049,7 +6272,8 @@
         ],
         "x-required-scopes": [
           "acquisition:write"
-        ]
+        ],
+        "description": "人工修订 ICP（AI 产出只是假设，允许改）。带 version 乐观锁：传 expectedVersion，不一致返回 409 VERSION_CONFLICT。"
       }
     },
     "/api/v1/icps/{icpId}/activate": {
@@ -6096,7 +6320,8 @@
         ],
         "x-required-scopes": [
           "acquisition:review"
-        ]
+        ],
+        "description": "激活 ICP：→ ACTIVE；同一企业原先 ACTIVE 的 ICP 置 SUPERSEDED，并发出 ICPActivated 事件。需要 acquisition:review。"
       }
     },
     "/api/v1/icps/{icpId}/rules": {
@@ -6153,7 +6378,8 @@
         ],
         "x-required-scopes": [
           "acquisition:write"
-        ]
+        ],
+        "description": "为 ICP 新增一条机器可评估的验证规则，类型为 must_have / nice_to_have / exclusion。"
       }
     },
     "/api/v1/icp-rules/{ruleId}": {
@@ -6210,7 +6436,8 @@
         ],
         "x-required-scopes": [
           "acquisition:write"
-        ]
+        ],
+        "description": "局部修改一条验证规则：kind / field / operator / value / weight（≥0）/ rationale 都可选。返回更新后的规则及其 version。"
       },
       "delete": {
         "operationId": "IcpController_deleteRule_v1",
@@ -6263,7 +6490,8 @@
         ],
         "x-required-scopes": [
           "acquisition:write"
-        ]
+        ],
+        "description": "删除一条验证规则，返回 { deleted: true }。"
       }
     },
     "/api/v1/icps/{icpId}/backtests": {
@@ -6320,7 +6548,8 @@
         ],
         "x-required-scopes": [
           "acquisition:write"
-        ]
+        ],
+        "description": "用已知客户/非客户样例做确定性回测，检验规则命中率；ICP 由 HYPOTHESIS 转 VALIDATING。"
       },
       "get": {
         "operationId": "IcpController_listBacktests_v1",
@@ -6368,11 +6597,13 @@
         ],
         "x-required-scopes": [
           "acquisition:read"
-        ]
+        ],
+        "description": "该 ICP 的回测历史。"
       }
     },
     "/api/v1/icps/{icpId}/query-plans": {
       "post": {
+        "description": "只为当前已启用的数据源出查询，每条查询的 filters.source_hint 写明它执行的源；estimatedVolume 只计会执行的查询。没有可用的已启用数据源时返回 409 NO_ENABLED_DISCOVERY_SOURCE（不调用模型）；模型给出的查询全落在不可用的数据源上时返回 409 NO_RUNNABLE_QUERIES，不保存计划。模型网关结算了调用却没有可用答案（内容被过滤、输出截断、非 JSON、流被截断等）时返回 502 MODEL_UPSTREAM_UNUSABLE，details.reasonCode 为网关原因码，不保存计划；此时预算授权已消耗，重试需要新的授权。",
         "operationId": "IcpController_generateQueryPlan_v1",
         "parameters": [
           {
@@ -6479,7 +6710,7 @@
             }
           },
           "409": {
-            "description": "EXECUTION_BUDGET_GRANT_REUSED",
+            "description": "EXECUTION_BUDGET_GRANT_REUSED, INVALID_STATE, NO_ENABLED_DISCOVERY_SOURCE or NO_RUNNABLE_QUERIES",
             "content": {
               "application/json": {
                 "schema": {
@@ -6502,6 +6733,56 @@
                         },
                         "message": {
                           "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "MODEL_UPSTREAM_UNUSABLE：模型网关已结算这次调用，但没有可用的答案（details.reasonCode 为网关原因码）。预算授权已消耗，重试需要新的授权",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message",
+                        "details"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "MODEL_UPSTREAM_UNUSABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "reasonCode"
+                          ],
+                          "properties": {
+                            "reasonCode": {
+                              "type": "string",
+                              "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+                              "description": "模型网关的原因码，例如 CHAT_COMPLETIONS_CONTENT_FILTERED、STRUCTURED_OUTPUT_TRUNCATED、CHAT_COMPLETIONS_STREAM_TRUNCATED；不含模型文本"
+                            }
+                          }
                         }
                       }
                     }
@@ -6602,7 +6883,8 @@
         ],
         "x-required-scopes": [
           "acquisition:read"
-        ]
+        ],
+        "description": "该 ICP 的查询计划列表（含状态：DRAFT / READY）。"
       }
     },
     "/api/v1/query-plans/{planId}/confirm": {
@@ -6649,7 +6931,8 @@
         ],
         "x-required-scopes": [
           "acquisition:review"
-        ]
+        ],
+        "description": "人工确认查询计划：DRAFT → READY，确认后才能执行发现。需要 acquisition:review。"
       }
     },
     "/api/v1/query-plans/{planId}/execute": {
@@ -6848,7 +7131,8 @@
         ],
         "x-required-scopes": [
           "acquisition:write"
-        ]
+        ],
+        "description": "执行一个 READY 查询计划：多源发现 → Raw → Canonical，由 Temporal 异步编排。返回 202 与 runId，用 GET /discovery-runs/{runId} 轮询。"
       }
     },
     "/api/v1/discovery-runs/{runId}": {
@@ -6934,7 +7218,8 @@
         ],
         "x-required-scopes": [
           "acquisition:read"
-        ]
+        ],
+        "description": "发现运行的状态与统计（每源计数、归一、suppression）。completedAt 为空表示仍在跑。"
       }
     },
     "/api/v1/canonical-companies": {
@@ -7022,7 +7307,8 @@
         ],
         "x-required-scopes": [
           "acquisition:read"
-        ]
+        ],
+        "description": "归一后的目标公司，游标分页；可用 ?status=NEW|ENRICHED|SUPPRESSED 过滤。"
       }
     },
     "/api/v1/canonical-companies/{id}": {
@@ -7072,7 +7358,8 @@
         "x-required-scopes": [
           "acquisition:read",
           "personal-data:read"
-        ]
+        ],
+        "description": "公司详情：canonical 视图 + 联系人 + 字段级 Evidence（每个字段值来自哪一页、哪段原文）。需要 personal-data:read。"
       }
     },
     "/api/v1/canonical-companies/{id}/discover-contacts": {
@@ -7278,7 +7565,8 @@
           "acquisition:write",
           "personal-data:read",
           "compliance:manage"
-        ]
+        ],
+        "description": "按需发现联系人（Waterfall 第 5 步，只对高价值企业调用）：先过 suppression，再抽取联系人。必须带 lawfulBasis；缺 body 会在消耗预算前以 CONTACT_DISCOVERY_LAWFUL_BASIS_REQUIRED 拒绝。需要 personal-data:read 与 compliance:manage。"
       }
     },
     "/api/v1/contact-points/{pointId}/verify": {
@@ -7770,9 +8058,11 @@
         ],
         "x-required-scopes": [
           "compliance:manage"
-        ]
+        ],
+        "description": "加入禁联名单（email / domain / company_name）；命中的公司立即转 SUPPRESSED。需要 compliance:manage。"
       },
       "get": {
+        "description": "只返回调用方 workspace 的 suppression 记录。展示的是租户自己提交的合规登记，不是引擎采集的招揽联系人；个人数据面（联系人/事件流）仍要求 personal-data:read，不在此端点开放。",
         "operationId": "DiscoveryController_listSuppressions_v1",
         "parameters": [
           {
@@ -7884,12 +8174,11 @@
             "bearer": []
           }
         ],
-        "summary": "禁联名单",
+        "summary": "本 workspace 的禁联名单（workspace 隔离；租户 admin 可管理自己的禁联记录）",
         "tags": [
           "Discovery"
         ],
         "x-required-scopes": [
-          "personal-data:read",
           "compliance:manage"
         ]
       }
@@ -8244,7 +8533,8 @@
         ],
         "x-required-scopes": [
           "compliance:manage"
-        ]
+        ],
+        "description": "列出该条禁联的 append-only 解除/更正决策记录（请求本身不解除禁联）。"
       }
     },
     "/api/v1/suppressions/{id}": {
@@ -8439,7 +8729,8 @@
         ],
         "x-required-scopes": [
           "compliance:manage"
-        ]
+        ],
+        "description": "已弃用：不会物理删除，而是提交一条解除请求（append-only 决策）。法定禁联不可解除，返回 409。"
       }
     },
     "/api/v1/data-providers": {
@@ -8482,7 +8773,8 @@
         ],
         "x-required-scopes": [
           "ops:read"
-        ]
+        ],
+        "description": "平台级数据源注册表（状态与成本）。DISABLED 相当于该数据源的 Kill Switch。需要 ops:read。"
       }
     },
     "/api/v1/icps/{icpId}/qualify": {
@@ -8542,7 +8834,8 @@
         ],
         "x-required-scopes": [
           "acquisition:write"
-        ]
+        ],
+        "description": "对一个 ACTIVE ICP 的全部候选公司做六维评分，产出 Lead 与四个队列。异步，返回 202。"
       }
     },
     "/api/v1/leads": {
@@ -8609,7 +8902,27 @@
                       "items": {
                         "type": "object",
                         "additionalProperties": true,
-                        "description": "Lead（六维分+队列+裁决状态）"
+                        "description": "Lead（六维分+队列+裁决状态）",
+                        "required": [
+                          "scored",
+                          "queueBasis"
+                        ],
+                        "properties": {
+                          "scored": {
+                            "type": "boolean",
+                            "description": "total_score 非空：队列已由评分决定；false = 仍是 fit 门预置"
+                          },
+                          "queueBasis": {
+                            "type": "string",
+                            "enum": [
+                              "fit_gate_preset",
+                              "score",
+                              "human_accept",
+                              "human_reject"
+                            ],
+                            "description": "队列依据：fit_gate_preset = fit 门按 verdict 预置、评分从未跑过；score = 评分阶段算出；human_accept / human_reject = 人工裁决"
+                          }
+                        }
                       }
                     },
                     "page": {
@@ -8646,7 +8959,8 @@
         ],
         "x-required-scopes": [
           "acquisition:read"
-        ]
+        ],
+        "description": "Lead 列表，可按 ?icpId= 与 ?queue=recommended|needs_review|rejected|suppressed 过滤，按分数排序。"
       }
     },
     "/api/v1/icps/{icpId}/lead-queues": {
@@ -8679,7 +8993,10 @@
                         "recommended",
                         "needs_review",
                         "rejected",
-                        "suppressed"
+                        "suppressed",
+                        "sanctions_hold",
+                        "scored",
+                        "queueBasis"
                       ],
                       "properties": {
                         "recommended": {
@@ -8693,6 +9010,37 @@
                         },
                         "suppressed": {
                           "type": "integer"
+                        },
+                        "sanctions_hold": {
+                          "type": "integer"
+                        },
+                        "scored": {
+                          "type": "boolean",
+                          "description": "每条 lead 都有 total_score（计数全部出自评分或人工裁决）；false = 至少一条仍是 fit 门预置，或 ICP 无 lead"
+                        },
+                        "queueBasis": {
+                          "type": "object",
+                          "description": "按队列依据计数，四项之和 = lead 总数",
+                          "required": [
+                            "fit_gate_preset",
+                            "score",
+                            "human_accept",
+                            "human_reject"
+                          ],
+                          "properties": {
+                            "fit_gate_preset": {
+                              "type": "integer"
+                            },
+                            "score": {
+                              "type": "integer"
+                            },
+                            "human_accept": {
+                              "type": "integer"
+                            },
+                            "human_reject": {
+                              "type": "integer"
+                            }
+                          }
                         }
                       }
                     }
@@ -8707,13 +9055,14 @@
             "bearer": []
           }
         ],
-        "summary": "四队列计数（推荐/待确认/拒绝/禁联）",
+        "summary": "五队列计数（推荐/待确认/拒绝/禁联/制裁隔离）+ 队列依据（预置 / 评分 / 人工）",
         "tags": [
           "Leads"
         ],
         "x-required-scopes": [
           "acquisition:read"
-        ]
+        ],
+        "description": "五个队列的计数（推荐 / 待确认 / 拒绝 / 禁联 / 制裁隔离）与队列依据（预置 / 评分 / 人工）。"
       }
     },
     "/api/v1/leads/{leadId}": {
@@ -8743,7 +9092,27 @@
                     "data": {
                       "type": "object",
                       "additionalProperties": true,
-                      "description": "Lead（六维分+队列+裁决状态）"
+                      "description": "Lead（六维分+队列+裁决状态）",
+                      "required": [
+                        "scored",
+                        "queueBasis"
+                      ],
+                      "properties": {
+                        "scored": {
+                          "type": "boolean",
+                          "description": "total_score 非空：队列已由评分决定；false = 仍是 fit 门预置"
+                        },
+                        "queueBasis": {
+                          "type": "string",
+                          "enum": [
+                            "fit_gate_preset",
+                            "score",
+                            "human_accept",
+                            "human_reject"
+                          ],
+                          "description": "队列依据：fit_gate_preset = fit 门按 verdict 预置、评分从未跑过；score = 评分阶段算出；human_accept / human_reject = 人工裁决"
+                        }
+                      }
                     }
                   }
                 }
@@ -8763,6 +9132,910 @@
         "x-required-scopes": [
           "acquisition:read",
           "personal-data:read"
+        ],
+        "description": "Lead 详情：六维分、规则逐条评估依据、公司与联系人、裁决历史。需要 personal-data:read。"
+      }
+    },
+    "/api/v1/leads/{leadId}/package": {
+      "get": {
+        "operationId": "LeadController_leadPackage_v1",
+        "parameters": [
+          {
+            "name": "leadId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "lead_id",
+                        "status",
+                        "company",
+                        "company_profile",
+                        "registered_address",
+                        "identifiers",
+                        "contact_points",
+                        "suggested_contact_path",
+                        "signals",
+                        "scores",
+                        "fit",
+                        "evidence",
+                        "sanctions",
+                        "valid_until"
+                      ],
+                      "properties": {
+                        "lead_id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "company": {
+                          "type": "object",
+                          "required": [
+                            "canonical_company_id",
+                            "name",
+                            "domain",
+                            "country",
+                            "city"
+                          ],
+                          "properties": {
+                            "canonical_company_id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "domain": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "country": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "city": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          }
+                        },
+                        "company_profile": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "registered_address": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "identifiers": {
+                          "type": "object",
+                          "required": [
+                            "register_key",
+                            "vat_id",
+                            "lei",
+                            "fda_reg"
+                          ],
+                          "properties": {
+                            "register_key": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "vat_id": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "lei": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "fda_reg": {
+                              "type": "string",
+                              "nullable": true
+                            }
+                          }
+                        },
+                        "contact_points": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "kind",
+                              "url",
+                              "status"
+                            ],
+                            "properties": {
+                              "kind": {
+                                "type": "string"
+                              },
+                              "url": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        },
+                        "suggested_contact_path": {
+                          "type": "object",
+                          "nullable": true,
+                          "required": [
+                            "kind",
+                            "url",
+                            "legal_note"
+                          ],
+                          "properties": {
+                            "kind": {
+                              "type": "string"
+                            },
+                            "url": {
+                              "type": "string"
+                            },
+                            "legal_note": {
+                              "type": "string"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "signals": {
+                          "type": "array",
+                          "additionalProperties": true,
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "scores": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "fit": {
+                          "type": "object",
+                          "additionalProperties": true
+                        },
+                        "evidence": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "sanctions": {
+                          "type": "object",
+                          "required": [
+                            "status",
+                            "screened_at"
+                          ],
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "clear",
+                                "cleared_false_positive",
+                                "not_screened",
+                                "potential_match",
+                                "confirmed_true_hit"
+                              ]
+                            },
+                            "screened_at": {
+                              "type": "string",
+                              "nullable": true,
+                              "format": "date-time"
+                            }
+                          }
+                        },
+                        "valid_until": {
+                          "type": "string",
+                          "nullable": true,
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Lead 不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "该线索的历史证据为合成来源，产品读一律隔离",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "SYNTHETIC_PROVENANCE_QUARANTINED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "交付读模型 LeadPackage：公司事实、建议联系路径、信号、证据 URL、原因码（不含具名联系人）",
+        "tags": [
+          "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "交付读模型 LeadPackage：公司事实、建议联系路径、信号、证据 URL、原因码；不含具名联系人。历史证据为合成来源时返回 409（产品读一律隔离）。"
+      }
+    },
+    "/api/v1/leads/{leadId}/outcomes": {
+      "post": {
+        "operationId": "LeadController_recordOutcome_v1",
+        "parameters": [
+          {
+            "name": "leadId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LeadOutcomeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "新建的 lead_outcome 行"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "字段类型或取值不合法（相关性不在 1–5、原因码不在枚举、备注超长）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "整条反馈没有任何已填字段",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "OUTCOME_EMPTY"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "回写线索结果（BI-23）：只追加，客户或运营填写相关性/意愿/原因码/备注/是否已联系",
+        "tags": [
+          "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
+        ],
+        "description": "回写线索结果（BI-23），只追加：可填相关性 1–5、意愿、原因码、备注、是否已联系。整条没有任何已填字段返回 400。需要 acquisition:review。"
+      }
+    },
+    "/api/v1/leads/{leadId}/outreach-drafts": {
+      "get": {
+        "description": "只读：返回该线索最新一版已存储的开发信草稿（含中文译文与引用事实键），没有草稿时 data 为 null。不消耗预算、不调用模型；草稿只在生成时计费。",
+        "operationId": "LeadController_latestOutreachDraft_v1",
+        "parameters": [
+          {
+            "name": "leadId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "leadId",
+                        "version",
+                        "language",
+                        "subject",
+                        "body",
+                        "bodyZh",
+                        "usedFacts",
+                        "model",
+                        "createdAt"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "leadId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "version": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "language": {
+                          "type": "string",
+                          "description": "目标国语言（BCP-47 主标签）"
+                        },
+                        "subject": {
+                          "type": "string",
+                          "description": "主题（目标国语言）"
+                        },
+                        "body": {
+                          "type": "string",
+                          "description": "正文（目标国语言），末尾附卖方自己的回复入口"
+                        },
+                        "bodyZh": {
+                          "type": "string",
+                          "description": "中文译文（运营审阅用）"
+                        },
+                        "usedFacts": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "草稿引用的事实键"
+                        },
+                        "model": {
+                          "type": "string",
+                          "description": "实际产出该草稿的模型身份"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "读取该线索最近一版开发信草稿（没有则 data=null）",
+        "tags": [
+          "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ]
+      },
+      "post": {
+        "description": "按线索的公司级事实与卖方资料生成一版草稿，末尾由平台追加卖方自己的回复入口（官网/邮箱/wa.me）。幂等：该线索已有草稿时直接返回最新一版，不调用模型、不消耗预算授权（浏览器超时/关页后的重试不会重复付费）；读取已有草稿请用 GET 同路径。平台不发送、不提供发送按钮。模型网关结算了调用却没有可用答案时返回 502 MODEL_UPSTREAM_UNUSABLE；草稿引用了未提供的事实键（或主题/正文/译文为空）时返回 422 OUTREACH_DRAFT_UNGROUNDED 并丢弃草稿——这两种情况授权已消耗且当前不提供重新生成，需要重新评估后再调用。",
+        "operationId": "LeadController_outreachDraft_v1",
+        "parameters": [
+          {
+            "name": "leadId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Execution-Budget-Grant",
+            "in": "header",
+            "description": "SaaS signed authority bound to this exact workspace mutation",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "id",
+                        "leadId",
+                        "version",
+                        "language",
+                        "subject",
+                        "body",
+                        "bodyZh",
+                        "usedFacts",
+                        "model",
+                        "createdAt"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "leadId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "version": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "language": {
+                          "type": "string",
+                          "description": "目标国语言（BCP-47 主标签）"
+                        },
+                        "subject": {
+                          "type": "string",
+                          "description": "主题（目标国语言）"
+                        },
+                        "body": {
+                          "type": "string",
+                          "description": "正文（目标国语言），末尾附卖方自己的回复入口"
+                        },
+                        "bodyZh": {
+                          "type": "string",
+                          "description": "中文译文（运营审阅用）"
+                        },
+                        "usedFacts": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "description": "草稿引用的事实键"
+                        },
+                        "model": {
+                          "type": "string",
+                          "description": "实际产出该草稿的模型身份"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "EXECUTION_BUDGET_GRANT_REQUIRED, EXECUTION_BUDGET_GRANT_INVALID, EXECUTION_BUDGET_GRANT_EXPIRED or EXECUTION_BUDGET_AUTHORITY_EXHAUSTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH or EXECUTION_BUDGET_AUTHORITY_REVOKED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Lead 不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "EXECUTION_BUDGET_GRANT_REUSED or OUTREACH_DRAFT_VERSION_CONFLICT",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "线索尚未被运营接受（最新裁决不是 accept），或草稿引用了未提供的事实键/关键字段为空而被丢弃",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "OUTREACH_DRAFT_LEAD_NOT_ACCEPTED",
+                            "OUTREACH_DRAFT_UNGROUNDED"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "MODEL_UPSTREAM_UNUSABLE：模型网关已结算这次调用，但没有可用的答案（details.reasonCode 为网关原因码）。预算授权已消耗，重试需要新的授权",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message",
+                        "details"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "MODEL_UPSTREAM_UNUSABLE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "reasonCode"
+                          ],
+                          "properties": {
+                            "reasonCode": {
+                              "type": "string",
+                              "pattern": "^[A-Z][A-Z0-9_]{2,63}$",
+                              "description": "模型网关的原因码，例如 CHAT_COMPLETIONS_CONTENT_FILTERED、STRUCTURED_OUTPUT_TRUNCATED、CHAT_COMPLETIONS_STREAM_TRUNCATED；不含模型文本"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "生成首次联系开发信草稿（BI-15）：目标国语言 + 中文译文，只存储不发送",
+        "tags": [
+          "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
         ]
       }
     },
@@ -8803,7 +10076,27 @@
                     "data": {
                       "type": "object",
                       "additionalProperties": true,
-                      "description": "Lead（六维分+队列+裁决状态）"
+                      "description": "Lead（六维分+队列+裁决状态）",
+                      "required": [
+                        "scored",
+                        "queueBasis"
+                      ],
+                      "properties": {
+                        "scored": {
+                          "type": "boolean",
+                          "description": "total_score 非空：队列已由评分决定；false = 仍是 fit 门预置"
+                        },
+                        "queueBasis": {
+                          "type": "string",
+                          "enum": [
+                            "fit_gate_preset",
+                            "score",
+                            "human_accept",
+                            "human_reject"
+                          ],
+                          "description": "队列依据：fit_gate_preset = fit 门按 verdict 预置、评分从未跑过；score = 评分阶段算出；human_accept / human_reject = 人工裁决"
+                        }
+                      }
                     }
                   }
                 }
@@ -8919,6 +10212,41 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "accept 带的原因码不在枚举（可选字段，缺省不校验）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "INVALID_REASON_CODE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -8932,7 +10260,8 @@
         ],
         "x-required-scopes": [
           "acquisition:review"
-        ]
+        ],
+        "description": "接受 Lead：→ QUALIFIED，并发出 LeadQualified，这是交给 Campaign 的出口。当前 suppression / 合规 / 制裁状态阻断交付时返回 409。"
       }
     },
     "/api/v1/leads/{leadId}/reject": {
@@ -8972,7 +10301,27 @@
                     "data": {
                       "type": "object",
                       "additionalProperties": true,
-                      "description": "Lead（六维分+队列+裁决状态）"
+                      "description": "Lead（六维分+队列+裁决状态）",
+                      "required": [
+                        "scored",
+                        "queueBasis"
+                      ],
+                      "properties": {
+                        "scored": {
+                          "type": "boolean",
+                          "description": "total_score 非空：队列已由评分决定；false = 仍是 fit 门预置"
+                        },
+                        "queueBasis": {
+                          "type": "string",
+                          "enum": [
+                            "fit_gate_preset",
+                            "score",
+                            "human_accept",
+                            "human_reject"
+                          ],
+                          "description": "队列依据：fit_gate_preset = fit 门按 verdict 预置、评分从未跑过；score = 评分阶段算出；human_accept / human_reject = 人工裁决"
+                        }
+                      }
                     }
                   }
                 }
@@ -9085,6 +10434,42 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "reject 缺少原因码或原因码不在枚举（BI-20）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "REASON_CODE_REQUIRED",
+                            "INVALID_REASON_CODE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "security": [
@@ -9098,7 +10483,8 @@
         ],
         "x-required-scopes": [
           "acquisition:review"
-        ]
+        ],
+        "description": "拒绝 Lead：→ REJECTED。必须带原因码，缺失返回 422 REASON_CODE_REQUIRED；自由文本放 reason。"
       }
     },
     "/api/v1/leads/{leadId}/sanctions-review": {
@@ -9164,7 +10550,368 @@
         "x-required-scopes": [
           "acquisition:review",
           "compliance:manage"
-        ]
+        ],
+        "description": "制裁筛查的复核裁决（第五道门的人审）：判为误报则回落到正常队列并允许复发抑制；确认真命中则留在隔离，永不交付。"
+      }
+    },
+    "/api/v1/reports/weekly": {
+      "get": {
+        "operationId": "ReportController_weekly_v1",
+        "parameters": [
+          {
+            "name": "week",
+            "required": false,
+            "in": "query",
+            "description": "ISO 周，如 2026-W42；缺省为本周（UTC）",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-W\\d{2}$"
+            }
+          },
+          {
+            "name": "icpId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "UTF-8（带 BOM）CSV，中文表头；以 = + - @ 开头的单元格前加单引号防公式注入",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "headers": {
+              "Content-Disposition": {
+                "description": "附件文件名",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Report-Id": {
+                "description": "本次导出的 policy_decision_log correlation_id",
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "X-Report-Week": {
+                "description": "实际导出的 ISO 周",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Report-Rows": {
+                "description": "导出的行数",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Report-Withheld-Rights": {
+                "description": "DataRights EXPORT 拒绝而未导出的行数（每行已写 policy_decision_log）",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Report-Withheld-Sanctions": {
+                "description": "制裁命中未经人工清除而未导出的行数（每行写一条 EXPORT DENY，reason sanctions_hold）",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "X-Report-Withheld-Quarantined": {
+                "description": "历史合成来源被隔离而未导出的行数（每行写一条 EXPORT DENY，reason synthetic_quarantined）",
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "icpId 或 week 不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "当前 workspace 不可见该 ICP",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "NOT_FOUND"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "该周 accept 的线索超过 1000 条，拒绝而不截断",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WEEKLY_REPORT_TOO_LARGE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "周报 CSV：该 ICP 下最新一条裁决是该 ISO 周（UTC，周一起）accept 的线索；每行都写一条 EXPORT 判定到 policy_decision_log，被拒或被拦的行不导出",
+        "tags": [
+          "Reports"
+        ],
+        "x-required-scopes": [
+          "acquisition:read",
+          "acquisition:export"
+        ],
+        "description": "导出周报 CSV：该 ICP 下、指定 ISO 周（UTC，周一起）accept 的线索。每行写一条 EXPORT 判定到 policy_decision_log，被拒或被拦的行不导出；超过单次上限整份拒绝而不截断。需要 acquisition:export。"
+      }
+    },
+    "/api/v1/reports/weekly/feedback": {
+      "post": {
+        "operationId": "ReportController_feedback_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "description": "导出的周报 CSV 原样上传（客户填写五列）",
+          "content": {
+            "text/csv": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "接受与拒绝计数（拒绝行带文件内行号与稳定原因）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "accepted",
+                        "rejected",
+                        "skipped"
+                      ],
+                      "properties": {
+                        "accepted": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "skipped": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "rejected": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "line",
+                              "reason"
+                            ],
+                            "properties": {
+                              "line": {
+                                "type": "integer"
+                              },
+                              "reason": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "缺「线索 ID」列或请求体不是 CSV 文本",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FEEDBACK_HEADER_MISSING",
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "上传文件的行数超过一次导出可能包含的上限，整份拒绝而不截断",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "FEEDBACK_TOO_LARGE"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "周报反馈上传（BI-23）：按线索 ID 匹配，逐行校验，只追加写 lead_outcome；返回接受/拒绝/跳过计数",
+        "tags": [
+          "Reports"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
+        ],
+        "description": "上传客户填写后的周报 CSV 原文：按「线索 ID」列匹配、逐行校验，只追加写 lead_outcome，返回接受 / 拒绝 / 跳过计数与带文件行号的拒绝原因。"
       }
     },
     "/api/v1/events/{eventId}/ack-status": {
@@ -9237,7 +10984,8 @@
         ],
         "x-required-scopes": [
           "acquisition:event:ack"
-        ]
+        ],
+        "description": "读取某个事件的 ACK 状态。只有 ACKED 才代表已消费；404 不代表未消费。"
       }
     },
     "/api/v1/events": {
@@ -9389,7 +11137,8 @@
         "x-required-scopes": [
           "acquisition:read",
           "personal-data:read"
-        ]
+        ],
+        "description": "拉取集成事件流（envelope 形状），参数 cursor / limit / type。游标与 ACK 互不影响，可以重放。"
       }
     },
     "/api/v1/events/ack": {
@@ -9445,7 +11194,8 @@
         ],
         "x-required-scopes": [
           "acquisition:event:ack"
-        ]
+        ],
+        "description": "ACK 已消费的事件（pull sink 的消费真值）。幂等：重复 ACK 计 0。"
       }
     },
     "/api/v1/deletion-requests": {
@@ -9579,7 +11329,8 @@
         ],
         "x-required-scopes": [
           "compliance:manage"
-        ]
+        ],
+        "description": "受理数据主体删除请求（GDPR Art.17），异步编排，返回 202 与请求 id。需要 compliance:manage。"
       }
     },
     "/api/v1/deletion-requests/{id}": {
@@ -9712,7 +11463,8 @@
         ],
         "x-required-scopes": [
           "compliance:manage"
-        ]
+        ],
+        "description": "查询删除请求的状态与擦除回执；COMPLETED 后回执才有值，且只给计数、不含 PII。"
       }
     },
     "/api/v1/site-builder/intake": {
@@ -9988,7 +11740,8 @@
         ],
         "x-required-scopes": [
           "acquisition:write"
-        ]
+        ],
+        "description": "注册引导提交：无条件创建建站档案并立即触发 demo v0。需 acquisition:write；支持 idempotency-key，同 key 重放返回首个结果。"
       }
     },
     "/api/v1/site-builder/sites": {
@@ -10029,7 +11782,8 @@
         ],
         "x-required-scopes": [
           "acquisition:read"
-        ]
+        ],
+        "description": "列出本 workspace 的站点，含预览地址。"
       }
     },
     "/api/v1/site-builder/sites/{id}": {
@@ -10076,7 +11830,8 @@
         ],
         "x-required-scopes": [
           "acquisition:read"
-        ]
+        ],
+        "description": "站点详情：状态、模式、语言、当前生效版本与预览地址；demo 就绪前 previewUrl 为空。"
       }
     },
     "/api/v1/site-builder/sites/{id}/profile": {
@@ -10661,7 +12416,8 @@
         "x-required-scopes": [
           "acquisition:read",
           "personal-data:read"
-        ]
+        ],
+        "description": "建站向导档案，含 companyProfile / trustAssets / onlineAssets / brand / contact 五组。需要 personal-data:read。"
       },
       "patch": {
         "operationId": "SitesController_patchProfile_v1",
@@ -11950,7 +13706,8 @@
         ],
         "x-required-scopes": [
           "acquisition:write"
-        ]
+        ],
+        "description": "向导分步保存：按组整体替换（五组任选，可跳过）。并发用强 ETag 控制：If-Match 头与 body.baseVersionId 至少给一个，两者矛盾返回 400。"
       }
     },
     "/api/v1/site-builder/sites/{id}/assets/presign": {
@@ -12187,7 +13944,8 @@
         ],
         "x-required-scopes": [
           "acquisition:write"
-        ]
+        ],
+        "description": "素材上传第 1 步：校验请求并签发 15 分钟有效的直传 URL，客户端拿它直接传对象存储。"
       }
     },
     "/api/v1/site-builder/assets/{id}/commit": {
@@ -12504,7 +14262,8 @@
         ],
         "x-required-scopes": [
           "acquisition:write"
-        ]
+        ],
+        "description": "素材上传第 3 步：魔数、大小、去重校验后归位；doc 类素材进入知识库队列。"
       }
     },
     "/api/v1/site-builder/sites/{id}/assets": {
@@ -12705,7 +14464,8 @@
         ],
         "x-required-scopes": [
           "acquisition:read"
-        ]
+        ],
+        "description": "站点素材列表：每条的 kind、文件名、MIME、字节数、处理状态与内容哈希；数组响应，不分页。"
       }
     },
     "/api/v1/site-builder/assets/{id}": {
@@ -12912,7 +14672,8 @@
         ],
         "x-required-scopes": [
           "acquisition:write"
-        ]
+        ],
+        "description": "引用守卫通过后软删除素材；对象由异步清理回收。成功返回 204。"
       }
     },
     "/api/v1/site-builder/sites/{id}/kb/status": {
@@ -13062,7 +14823,8 @@
         ],
         "x-required-scopes": [
           "acquisition:read"
-        ]
+        ],
+        "description": "知识库状态：文档数与块计数，以及仍待补充的资料缺口。"
       }
     },
     "/api/v1/site-builder/sites/{id}/builds": {
@@ -13720,7 +15482,8 @@
         ],
         "x-required-scopes": [
           "acquisition:write"
-        ]
+        ],
+        "description": "触发精装修构建。已有构建在跑返回 409，当日配额用尽返回 429；支持 idempotency-key，同 key 异请求返回 409。"
       }
     },
     "/api/v1/site-builder/builds/{id}": {
@@ -13883,7 +15646,8 @@
         ],
         "x-required-scopes": [
           "acquisition:read"
-        ]
+        ],
+        "description": "构建进度，前端轮询用（SSE 事件流按设计后置，尚未提供）。"
       }
     },
     "/api/v1/site-builder/builds/{id}/cancel": {
@@ -14162,7 +15926,8 @@
         ],
         "x-required-scopes": [
           "acquisition:write"
-        ]
+        ],
+        "description": "取消构建；已处于终态返回 409。"
       }
     },
     "/api/v1/site-builder/intake-budget-quote": {
@@ -14281,7 +16046,8 @@
         ],
         "x-required-scopes": [
           "acquisition:write"
-        ]
+        ],
+        "description": "计算 intake 的内部技术预算包络：零模型调用、零工作流、零持久写入，纯计算。"
       }
     },
     "/api/v1/site-builder/sites/{id}/build-budget-quote": {
@@ -14444,48 +16210,65 @@
         ],
         "x-required-scopes": [
           "acquisition:write"
-        ]
+        ],
+        "description": "计算 refurbish 的内部技术预算包络；不构成客户报价，也不限制余额。"
       }
     }
   },
   "info": {
     "title": "Global API",
-    "description": "出海企业 AI 全球客户开发与增长平台 · 后端 API（前端接入见 packages/contracts/INTEGRATION.md）",
+    "description": "## 这是什么\n\n本页由服务自身生成：接口列表、参数与响应结构都来自正在运行的这个版本，接口变了这里同步变，不存在文档滞后的情况。每个端点都可以点开直接发请求（先点右上角 **Authorize** 填 token）。\n\n需要更完整的调用顺序与业务约束，看仓库里的 `packages/contracts/INTEGRATION.md`；需要把整套接口导入 Postman / Apifox / Bruno，导入 `/api/docs-json` 即可。\n\n## 地址\n\n| 环境 | Base URL |\n| --- | --- |\n| 开发（xin） | `http://100.68.31.20:3000/api/v1` |\n\n同源部署，路径里带版本号 `/api/v1`。本接口门户的地址是 `http://100.68.31.20:3000/api/portal`，可直接分享给对接方。\n\n## 认证\n\n每个请求都要带 `Authorization: Bearer <JWT>`。\n\n- JWT 由 **gain-saas（SaaS 平台）签发**（本地身份源 `https://127.0.0.1:18446`），本后端只验签，不接受任何未签名令牌。\n- 开发环境取 token（token 约 5 分钟有效，过期重取）：\n\n```bash\nssh xin@100.68.31.20 /global/local-config/bin/api-token\n```\n\n- token 里带 `sub`（用户）、`workspace`（租户）、`roles`。**所有业务数据按 workspace 隔离（数据库 RLS 强制），前端不需要也不应该传租户参数**；跨租户的资源按「不存在」处理，返回 404。\n- 角色映射到 scope，缺 scope 时返回 403 `SCOPE_REQUIRED`，`details.required` 会告诉你缺哪个：\n\n| 角色 | 可用 scope |\n| --- | --- |\n| `TENANT_OWNER` | acquisition 全读写 + review + 事件确认 + export + personal-data 读 + compliance 管理 |\n| `ADMIN` | 同上，但没有 compliance 管理 |\n| `MEMBER` | 仅 `acquisition:read` / `acquisition:write` |\n\n## 响应信封\n\n- 单资源：`{ \"data\": ... }`\n- 分页列表：`{ \"data\": [...], \"page\": { \"next_cursor\": \"…\", \"has_more\": true } }`，请求用 `?limit=&cursor=`；`next_cursor` 为 `null` 表示到底。**是游标分页，不是 offset 分页**。\n- 例外：`/health*` 探针不套信封。\n\n## 错误\n\n非 2xx 一律是同一个形状：\n\n```json\n{ \"error\": { \"code\": \"VALIDATION_ERROR\", \"message\": \"…\", \"details\": { } } }\n```\n\n常见 code：`TOKEN_MISSING` / `TOKEN_INVALID` / `SCOPE_REQUIRED` / `VALIDATION_ERROR` / `NOT_FOUND` / `INVALID_STATE` / `VERSION_CONFLICT` / `SUPPRESSED`。`code` 稳定可判断，`message` 只供人读，不要拿它做逻辑。\n\n## 幂等与并发\n\n- **只有 OpenAPI 里显式声明了 `idempotency-key` 请求头的端点才支持幂等**（如 `POST /companies`、Site Builder 的 intake/builds）。别把这条推广到所有 POST。\n- 可编辑对象带 `version`；PATCH 可传 `expectedVersion`，不一致返回 409 `VERSION_CONFLICT`，重读后再提交。\n\n## 异步\n\n理解、发现、评分这类长任务返回 **202**，建站构建返回 **201** 并带 buildId——都是异步的，前端轮询对应的状态端点，不要同步等待：\n\n| 动作 | 发起 | 轮询 |\n| --- | --- | --- |\n| 理解官网 | `POST /companies` | `GET /companies/{id}/completeness` |\n| 执行发现 | `POST /query-plans/{id}/execute` | `GET /discovery-runs/{id}` |\n| 建站 | `POST /site-builder/sites/{id}/builds` | `GET /site-builder/builds/{id}` |\n\n## 主链路（获客闭环）\n\n1. `POST /companies` 提交官网，返回 202，理解异步进行\n2. `GET /companies/{id}/completeness` 看进度；`GET /companies/{id}/offerings` 看抽出的产品\n3. `GET /companies/{id}/claims` → `POST /claims/{id}/approve` 审批事实\n4. `POST /companies/{id}/confirm` 人工确认，企业转 ACTIVE\n5. `POST /companies/{id}/icps` 建 ICP → `POST /icps/{id}/activate`\n6. `POST /icps/{id}/query-plans` 生成查询计划 → `POST /query-plans/{id}/confirm` → `POST /query-plans/{id}/execute`\n7. `GET /discovery-runs/{id}` 轮询发现进度；`GET /canonical-companies` 看规范化后的公司\n8. `POST /canonical-companies/{id}/discover-contacts`、`POST /canonical-companies/{id}/guess-emails`、`POST /contact-points/{id}/verify` 补决策人\n9. `POST /icps/{id}/qualify` 评分 → `GET /leads` / `GET /leads/{id}/package` 取交付包\n10. `POST /leads/{id}/accept` 或 `/reject` 回执；`GET /reports/weekly` 周报\n\n## 分域\n\n| 域 | 一句话 |\n| --- | --- |\n| Companies | 企业画像：提交官网、看完整度、审批事实后人工确认 |\n| Claims | 企业事实与来源：审批/驳回/撤销，冲突裁决 |\n| ICP | 理想客户画像：规则、回溯测试、查询计划 |\n| Discovery | 查询计划执行、规范化公司、联系人补全、抑制名单、数据源 |\n| Leads | 评分产出与交付：交付包、接受/拒绝、制裁复核 |\n| Reports | 周报与反馈 |\n| Events | 事件投递账本与确认回执 |\n| Compliance | 数据主体删除请求（Art.17） |\n| SiteBuilder | 独立站：intake、资料、素材、构建、预览 |\n| ExecutionBudget | 平台内部执行预算包络（服务间调用） |\n| PlatformAuthority | 平台权威通道：技术报价、目标查询、撤销（服务间调用） |\n| System | 健康探针与身份（`/whoami`） |\n\n> **ExecutionBudget / PlatformAuthority** 两组是 gain-saas 与服务间调用的机器通道，用的是另一套固定用途的服务身份，普通前端不要调用。",
     "version": "0.1.0",
     "contact": {}
   },
   "tags": [
     {
       "name": "Companies",
-      "description": ""
+      "description": "企业画像：提交官网、看完整度、审批后人工确认"
     },
     {
       "name": "Claims",
-      "description": ""
+      "description": "企业事实与来源：审批 / 驳回 / 撤销、冲突裁决"
     },
     {
       "name": "ICP",
-      "description": ""
+      "description": "理想客户画像：规则、回溯测试、查询计划"
     },
     {
       "name": "Discovery",
-      "description": ""
+      "description": "查询计划执行、规范化公司、联系人补全、抑制名单"
     },
     {
       "name": "Leads",
-      "description": ""
+      "description": "评分产出与交付：交付包、接受 / 拒绝、制裁复核"
+    },
+    {
+      "name": "Reports",
+      "description": "周报与反馈"
     },
     {
       "name": "Events",
-      "description": ""
+      "description": "事件投递账本与确认回执"
     },
     {
-      "name": "System",
-      "description": ""
+      "name": "Compliance",
+      "description": "数据主体删除请求（Art.17）"
+    },
+    {
+      "name": "SiteBuilder",
+      "description": "独立站：intake、资料、素材、构建、预览"
+    },
+    {
+      "name": "ExecutionBudget",
+      "description": "平台内部执行预算包络（服务间调用，普通前端不调用）"
     },
     {
       "name": "PlatformAuthority",
-      "description": ""
+      "description": "平台权威通道（服务间调用，普通前端不调用）"
+    },
+    {
+      "name": "System",
+      "description": "健康探针与身份"
     }
   ],
   "servers": [
@@ -14539,7 +16322,8 @@
               "POST /query-plans/:planId/execute",
               "POST /canonical-companies/:id/discover-contacts",
               "POST /canonical-companies/:id/guess-emails",
-              "POST /contact-points/:pointId/verify"
+              "POST /contact-points/:pointId/verify",
+              "POST /leads/:leadId/outreach-drafts"
             ]
           },
           "workspaceId": {
@@ -14553,7 +16337,8 @@
               "icp.design",
               "icp.query_plan",
               "discovery.run",
-              "contact.verify"
+              "contact.verify",
+              "outreach.draft"
             ]
           },
           "subjectType": {
@@ -14562,7 +16347,8 @@
               "company",
               "icp",
               "discovery_run",
-              "contact_point"
+              "contact_point",
+              "lead"
             ]
           },
           "subjectId": {
@@ -15092,6 +16878,13 @@
               "$ref": "#/components/schemas/IcpRuleDto"
             }
           },
+          "ruleLint": {
+            "description": "规则 lint（读取 / 激活时由 rules 推导，不落库）：每条否定操作符（neq / not_in / not_contains）的 EXCLUSION 一条提示——与 MUST_HAVE 同 field 同 value 的镜像（资格门已判 Fit 时只记录不排除，建议删除），或非镜像（资格门已判 Fit 时仍然排除，请确认取值写法）；无问题为空数组",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -15112,6 +16905,7 @@
           "personas",
           "buyingCommittee",
           "rules",
+          "ruleLint",
           "createdAt"
         ]
       },
@@ -15672,9 +17466,77 @@
           "reasonCode"
         ]
       },
+      "LeadOutcomeDto": {
+        "type": "object",
+        "properties": {
+          "relevance": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "description": "客户判断：相关性 1–5"
+          },
+          "willingToContact": {
+            "type": "boolean",
+            "description": "客户判断：是否愿意联系"
+          },
+          "reasonCode": {
+            "type": "string",
+            "enum": [
+              "NOT_TARGET_ROLE",
+              "WRONG_PRODUCT",
+              "TOO_SMALL",
+              "TOO_LARGE",
+              "ALREADY_KNOWN",
+              "NO_IMPORT_SIGNAL",
+              "WRONG_COUNTRY",
+              "BAD_CONTACT_PATH",
+              "DUPLICATE",
+              "OTHER",
+              "GOOD_FIT",
+              "WILL_FOLLOW_UP"
+            ],
+            "description": "失败/未达成或正向结果原因码"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "客户备注（自由文本）"
+          },
+          "contacted": {
+            "type": "boolean",
+            "description": "客户判断：是否已联系"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "customer",
+              "operator"
+            ],
+            "description": "反馈来源；默认 operator"
+          }
+        }
+      },
       "AcceptLeadDto": {
         "type": "object",
         "properties": {
+          "reasonCode": {
+            "type": "string",
+            "enum": [
+              "NOT_TARGET_ROLE",
+              "WRONG_PRODUCT",
+              "TOO_SMALL",
+              "TOO_LARGE",
+              "ALREADY_KNOWN",
+              "NO_IMPORT_SIGNAL",
+              "WRONG_COUNTRY",
+              "BAD_CONTACT_PATH",
+              "DUPLICATE",
+              "OTHER",
+              "GOOD_FIT",
+              "WILL_FOLLOW_UP"
+            ],
+            "description": "接受原因码（可选，如 GOOD_FIT）"
+          },
           "reason": {
             "type": "string"
           }
@@ -15683,9 +17545,25 @@
       "RejectLeadDto": {
         "type": "object",
         "properties": {
+          "reasonCode": {
+            "type": "string",
+            "enum": [
+              "NOT_TARGET_ROLE",
+              "WRONG_PRODUCT",
+              "TOO_SMALL",
+              "TOO_LARGE",
+              "ALREADY_KNOWN",
+              "NO_IMPORT_SIGNAL",
+              "WRONG_COUNTRY",
+              "BAD_CONTACT_PATH",
+              "DUPLICATE",
+              "OTHER"
+            ],
+            "description": "BI-20 拒绝原因码（reject 必填，缺失返回 422 REASON_CODE_REQUIRED；自由文本放 reason）"
+          },
           "reason": {
             "type": "string",
-            "description": "拒绝原因（回流做评分质量反馈）"
+            "description": "拒绝原因备注（自由文本，回流做评分质量反馈）"
           }
         }
       },
@@ -16541,5 +18419,44 @@
         ]
       }
     }
-  }
+  },
+  "x-tagGroups": [
+    {
+      "name": "获客主链路",
+      "tags": [
+        "Companies",
+        "Claims",
+        "ICP",
+        "Discovery",
+        "Leads"
+      ]
+    },
+    {
+      "name": "运营与合规",
+      "tags": [
+        "Reports",
+        "Events",
+        "Compliance"
+      ]
+    },
+    {
+      "name": "建站",
+      "tags": [
+        "SiteBuilder"
+      ]
+    },
+    {
+      "name": "平台间通道",
+      "tags": [
+        "ExecutionBudget",
+        "PlatformAuthority"
+      ]
+    },
+    {
+      "name": "系统",
+      "tags": [
+        "System"
+      ]
+    }
+  ]
 }

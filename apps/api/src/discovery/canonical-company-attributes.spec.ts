@@ -139,6 +139,8 @@ describe("CanonicalCompany derived-attribute sanitizer parity", () => {
       "website_profile.legal_name",
       "website_profile.own_manufacturing",
       "website_profile.register_key",
+      "website_profile.registered_address",
+      "website_profile.source_url",
       "website_profile.trade_role",
       "website_profile.trade_role_confidence",
       "website_profile.trade_role_source",
@@ -160,6 +162,29 @@ describe("CanonicalCompany derived-attribute sanitizer parity", () => {
       "wikidata.subsidiary_count",
       "wikidata.website",
     ]);
+  });
+
+  it("keeps a registered address only at the website profile and only with a postal code (L6)", () => {
+    const address = "Musterstraße 1, 12345 Musterstadt";
+    expect(
+      sanitizeCanonicalCompanyAttributes({
+        website_profile: { trade_role: "distributor", registered_address: address },
+      }),
+    ).toEqual({ website_profile: { trade_role: "distributor", registered_address: address } });
+    expect(sanitizeStored("website_profile.registered_address", address)).toBe(address);
+    for (const unsafe of [
+      "Musterstraße 1, Musterstadt",
+      "Musterstraße 1, 12345 Musterstadt, info@example.de",
+      "Geschäftsführer Erika Musterfrau, Musterstraße 1, 12345 Musterstadt",
+      "Musterstraße 1, 12345 Musterstadt, Tel. 030 1234567",
+    ]) {
+      expect(sanitizeStored("website_profile.registered_address", unsafe), unsafe).toBeUndefined();
+    }
+    expect(
+      sanitizeCanonicalCompanyAttributes({
+        digital_footprint: { registered_address: address },
+      }),
+    ).toEqual({});
   });
 
   it("keeps the company-level website profile and validates its identifiers (G3 5.4b)", () => {
@@ -184,6 +209,30 @@ describe("CanonicalCompany derived-attribute sanitizer parity", () => {
     ).toEqual({ website_profile: { trade_role: "distributor" } });
     expect(sanitizeStored("website_profile.vat_id", "DE136695976")).toBe("DE136695976");
     expect(sanitizeStored("website_profile.vat_id", "DE136695977")).toBeUndefined();
+  });
+
+  it("keeps the website profile's source page only as a plain https URL (BI-14 / A4)", () => {
+    const source = "https://pumpen-handel.example/impressum.html";
+    expect(
+      sanitizeCanonicalCompanyAttributes({
+        website_profile: { trade_role: "distributor", source_url: source },
+      }),
+    ).toEqual({ website_profile: { trade_role: "distributor", source_url: source } });
+    expect(sanitizeStored("website_profile.source_url", source)).toBe(source);
+    for (const unsafe of [
+      "http://pumpen-handel.example/impressum",
+      "https://pumpen-handel.example/impressum?session=1",
+      "https://pumpen-handel.example/impressum#top",
+      "/impressum",
+    ]) {
+      expect(sanitizeStored("website_profile.source_url", unsafe), unsafe).toBeUndefined();
+    }
+    // The key belongs to the website profile only; elsewhere it is withheld like other identifiers.
+    expect(
+      sanitizeCanonicalCompanyAttributes({
+        digital_footprint: { safe: "industrial", source_url: source },
+      }),
+    ).toEqual({ digital_footprint: { safe: "industrial" } });
   });
 
   it("adapts every admitted stored field to its exact Canonical or column value shape", () => {

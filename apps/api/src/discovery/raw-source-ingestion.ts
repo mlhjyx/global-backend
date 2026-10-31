@@ -4,6 +4,7 @@ import {
   createRawSourceIndexedResolver,
   type RawSourceIndexedResolution,
 } from "./raw-source-indexed-resolution";
+import { PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN } from "./source-policy-scope";
 
 export type { RawSourceIndexedResolution } from "./raw-source-indexed-resolution";
 
@@ -312,6 +313,9 @@ function provenanceOf(value: unknown): {
   fetchedAt: Date | null;
   contentHash: string | null;
   parserVersion: string | null;
+  /** Lower-case source host as written. */
+  host: string | null;
+  /** `host` without one leading "www."; site policies are matched against it. */
   hostname: string | null;
   invalid: boolean;
 } {
@@ -332,22 +336,24 @@ function provenanceOf(value: unknown): {
     provenance?.parserVersion,
     MAX_PROVENANCE_TOKEN_BYTES,
   );
-  let hostname: string | null = null;
+  let host: string | null = null;
   try {
     if (sourceUrl) {
       const parsed = new URL(sourceUrl);
       if (!["http:", "https:"].includes(parsed.protocol))
         throw new Error("unsupported protocol");
-      hostname = parsed.hostname.toLowerCase().replace(/^www\./u, "");
+      host = parsed.hostname.toLowerCase();
     }
   } catch {
-    hostname = null;
+    host = null;
   }
+  const hostname = host === null ? null : host.replace(/^www\./u, "");
   return {
     sourceUrl,
     fetchedAt,
     contentHash,
     parserVersion,
+    host,
     hostname,
     invalid:
       !exact ||
@@ -360,9 +366,72 @@ function provenanceOf(value: unknown): {
   };
 }
 
-function policyFor(
-  hostname: string | null,
+/**
+ * A site policy's domain as hosts are compared with it: ASCII letters folded to lower case, then
+ * one leading "www." dropped. The database writer folds the same way (`translate`, not the
+ * collation-dependent `lower`), so both sides agree on every policy row.
+ */
+function sitePolicyKey(domain: string): string {
+  return domain
+    .replace(/[A-Z]+/gu, (letters) => letters.toLowerCase())
+    .replace(/^www\./u, "");
+}
+
+/**
+ * Most specific first: the longest key, then a non-APPROVED row before an APPROVED one naming the
+ * same domain (a SUSPENDED spelling of a site always wins over an APPROVED one), then the longer
+ * spelling, then the id. The order never depends on the order the rows were read in.
+ */
+function bySpecificity(
+  left: { key: string; policy: RawSourcePolicySnapshot },
+  right: { key: string; policy: RawSourcePolicySnapshot },
+): number {
+  return (
+    right.key.length - left.key.length ||
+    Number(left.policy.reviewStatus === "APPROVED") -
+      Number(right.policy.reviewStatus === "APPROVED") ||
+    right.policy.domain.length - left.policy.domain.length ||
+    (left.policy.id < right.policy.id ? -1 : left.policy.id > right.policy.id ? 1 : 0)
+  );
+}
+
+/**
+ * The source_policy that governs a record (design: docs/superpowers/plans/
+ * 2026-10-09-public-web-company-site-source-policy.md §3.2). The database writer
+ * (`raw_source_policy_binding_v3`) re-checks the same rule and raises on any other binding.
+ *
+ * 1. The most specific site policy whose key equals the source host (without "www.") or is a
+ *    parent domain of it, whatever its review status or purpose.
+ * 2. Otherwise, for a public_web record whose source host is the record's own domain, the
+ *    company-site policy.
+ * 3. Otherwise none.
+ */
+function governingPolicy(
+  provenance: { host: string | null; hostname: string | null },
+  providerKey: string,
+  recordDomain: unknown,
   policies: readonly RawSourcePolicySnapshot[],
+): RawSourcePolicySnapshot | undefined {
+  const { host, hostname } = provenance;
+  if (!hostname) return undefined;
+  const site = policies
+    .filter(
+      (candidate) => candidate.domain !== PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN,
+    )
+    .map((policy) => ({ key: sitePolicyKey(policy.domain), policy }))
+    .filter(({ key }) => key === hostname || hostname.endsWith(`.${key}`))
+    .sort(bySpecificity)[0]?.policy;
+  if (site) return site;
+  return providerKey === "public_web" && host !== null && host === recordDomain
+    ? policies.find(
+        (candidate) =>
+          candidate.domain === PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN,
+      )
+    : undefined;
+}
+
+function policyFor(
+  policy: RawSourcePolicySnapshot | undefined,
   minimizedFields: readonly string[],
   fallbackDays: number,
 ): {
@@ -371,14 +440,6 @@ function policyFor(
   missing: boolean;
   purposeAllowed: boolean;
 } {
-  const policy = hostname
-    ? [...policies]
-        .filter((candidate) => {
-          const domain = candidate.domain.toLowerCase().replace(/^www\./u, "");
-          return domain === hostname || hostname.endsWith(`.${domain}`);
-        })
-        .sort((left, right) => right.domain.length - left.domain.length)[0]
-    : undefined;
   const retentionDays = Math.min(
     MAX_RETENTION_DAYS,
     Math.max(1, policy?.retentionDays ?? fallbackDays),
@@ -536,8 +597,7 @@ export function prepareRawSourceBatch(args: {
     const record = plainRecord(normalizedPayload);
     const provenance = provenanceOf(normalizedPayload);
     const policy = policyFor(
-      provenance.hostname,
-      args.policies,
+      governingPolicy(provenance, args.providerKey, record?.domain, args.policies),
       sanitized.minimizedFields,
       limits.defaultRetentionDays,
     );
@@ -557,12 +617,13 @@ export function prepareRawSourceBatch(args: {
     } else if (policy.missing) {
       ingestStatus = "QUARANTINED";
       dispositionCode = "SOURCE_POLICY_MISSING";
+    } else if (policy.snapshot.reviewStatus !== "APPROVED") {
+      // Before the purpose: a suspended site reads as suspended whatever purpose its row lists.
+      ingestStatus = "QUARANTINED";
+      dispositionCode = "SOURCE_POLICY_SUSPENDED";
     } else if (!policy.purposeAllowed) {
       ingestStatus = "QUARANTINED";
       dispositionCode = "SOURCE_POLICY_PURPOSE_NOT_ALLOWED";
-    } else if (policy.snapshot.reviewStatus !== "APPROVED") {
-      ingestStatus = "QUARANTINED";
-      dispositionCode = "SOURCE_POLICY_SUSPENDED";
     } else if (originalPayloadBytes > limits.maxRecordBytes) {
       ingestStatus = "QUARANTINED";
       dispositionCode = "PAYLOAD_TOO_LARGE";

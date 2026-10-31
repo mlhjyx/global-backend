@@ -6,6 +6,7 @@ export type ExecutionBudgetPurpose =
   | 'understanding.run'
   | 'discovery.run'
   | 'contact.verify'
+  | 'outreach.draft'
   | 'platform.acquisition'
   | 'platform.intent_watch'
   | 'platform.sanctions';
@@ -169,6 +170,7 @@ const WORKSPACE_PURPOSE_SUBJECT_TYPES: Readonly<
   'icp.query_plan': ['icp'],
   'discovery.run': ['discovery_run', 'company'],
   'contact.verify': ['contact_point'],
+  'outreach.draft': ['lead'],
 };
 
 const PLATFORM_PURPOSES = new Set<ExecutionBudgetPurpose>(

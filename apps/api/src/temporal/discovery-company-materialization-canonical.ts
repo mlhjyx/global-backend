@@ -46,6 +46,22 @@ function count(value: unknown, maximum = Number.MAX_SAFE_INTEGER): number {
 function optionalText(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
+/**
+ * The provenance the evidence rows of one raw record carry (L1, delivery loop §8): the page the
+ * record came from, if it is an https URL of bounded length (the migration's CHECK says the same),
+ * and the record's own fetch time so `fetched_at` reflects the source, not the commit.
+ */
+export function fieldEvidenceProvenance(
+  raw: Readonly<{ sourceUrl: string | null; fetchedAt: Date | null }> | null,
+): Readonly<{ sourceUrl: string | null; fetchedAt: Date | null }> {
+  const rawUrl = raw?.sourceUrl ?? null;
+  return {
+    sourceUrl:
+      typeof rawUrl === 'string' && rawUrl.startsWith('https://') && rawUrl.length <= 2048 ? rawUrl : null,
+    fetchedAt: raw?.fetchedAt ?? null,
+  };
+}
+
 function productRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) && !types.isProxy(value) &&
     Object.getPrototypeOf(value) === Object.prototype ? value as Record<string, unknown> : null;
@@ -58,7 +74,7 @@ async function readEvidenceManifest(transaction: Transaction, workspaceId: strin
       encode(digest(convert_to(coalesce(jsonb_agg(jsonb_build_array(
         evidence.field,evidence.id,encode(digest(evidence.value::text,'sha256'),'hex'),
         evidence.provider_key,evidence.license,
-        encode(digest(coalesce(evidence.allowed_actions,'null'::jsonb)::text,'sha256'),'hex')
+        encode(digest(coalesce(evidence.allowed_actions,'null'::jsonb)::text,'sha256'),'hex'))
         ORDER BY evidence.field,evidence.id),'[]'::jsonb)::text,'UTF8'),'sha256'),'hex')
         AS evidence_manifest_sha256
     FROM field_evidence evidence
@@ -214,6 +230,10 @@ export async function materializeDiscoveryCompanyCanonicalCandidate(
   const evidenceFields: readonly [string, unknown][] = [['name', name], ['domain', domain], ['country', country],
     ['region', region], ['industry', product.industry], ['employee_count', product.employeeCount],
     ['revenue_usd', product.revenueUsd], ['attributes', currentAttributes]];
+  // L1: the raw record carries the page and its fetch time; keep both on the evidence rows.
+  const rawRecord = await transaction.rawSourceRecord.findUnique({
+    where: { id: rawRecordId }, select: { sourceUrl: true, fetchedAt: true } });
+  const provenance = fieldEvidenceProvenance(rawRecord);
   for (const [evidenceField, value] of evidenceFields) {
     if (value === undefined || value === null) continue;
     const governedValue = sanitizeStoredCompanyFieldEvidence(evidenceField, value);
@@ -221,7 +241,9 @@ export async function materializeDiscoveryCompanyCanonicalCandidate(
     await transaction.fieldEvidence.create({ data: { workspaceId, entityType: 'company', entityId: canonical.id,
       field: evidenceField, value: governedValue as Prisma.InputJsonValue, providerKey, rawRecordId,
       license: resolveEvidenceLicense(optionalText(product.license), providerKey),
-      allowedActions: ['display', 'match'] as Prisma.InputJsonValue } });
+      allowedActions: ['display', 'match'] as Prisma.InputJsonValue,
+      ...(provenance.sourceUrl ? { sourceUrl: provenance.sourceUrl } : {}),
+      ...(provenance.fetchedAt ? { fetchedAt: provenance.fetchedAt } : {}) } });
   }
   const manifest = await readEvidenceManifest(transaction, workspaceId, canonical.id, rawRecordId);
   return Object.freeze({ ...candidate,

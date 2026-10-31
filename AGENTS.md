@@ -51,7 +51,7 @@ pnpm --filter @global/db exec prisma migrate deploy # 读 packages/db/.env
 - 环境差异只允许位于信任根、secret、endpoint、网络暴露、资源额度、可观测性和部署拓扑等配置边界；允许项及尚未清理的迁移债务必须逐项登记在 [`environment-parity-policy.json`](docs/governance/environment-parity-policy.json)，由 `pnpm governance:verify` 校验精确源码指纹。未登记分支、失效豁免和恢复旧分支一律失败。
 - 不因一致性复用生产密钥、生产租户或生产数据。开发使用独立凭据、JWKS、端点、数据与较低额度，但不得更换验证器、业务算法、状态模型或失败策略。
 - Stub、Fake、Sandbox、fixture、visual gallery、Dev Token verifier 和 evaluation runner 只可由测试入口或独立测试 workspace 注入；产品 composition root、运行依赖、OCI/Release 制品与用户站点不得包含或自动 fallback 到这些能力。单元测试可与源码相邻，但必须被产品编译与制品排除。
-- compiled development runtime 与 pilot/production 一样必须拥有 exact commit、artifact/image digest、迁移和 Worker 身份；缺依赖可启动诊断，但 readiness 必须失败、API 不接新工作、Worker 不消费，绝不切到合成结果或未钉住身份。
+- compiled development runtime 与 pilot/production 一样必须拥有 exact commit、artifact/image digest、迁移和 Worker 身份；缺依赖可启动诊断，但 readiness 必须失败、API 不接新工作、Worker 不消费，绝不切到合成结果或未钉住身份。「API 不接新工作」按该工作自身的依赖集合判定。唯一例外是登记的 development 快速通道（allowance `development-fast-lane-unattested-worker-trust`，见 [运维说明](docs/backend/dev-fast-lane.md)）：一个源码 customer worker 只服务一个 workspace 在开发用 Temporal 上的专属队列，API 仍须是受证镜像。
 
 ## 5. 所有权、worktree 与外部动作
 
@@ -71,7 +71,7 @@ pnpm --filter @global/db exec prisma migrate deploy # 读 packages/db/.env
 - 在系统边界做 schema 校验；外部数据、URL、身份、权限、费用和 provider 响应全部不可信，必须 fail closed。
 - 业务逻辑优先不可变数据与新对象；不得静默吞错。用户面返回稳定错误，服务端记录有界诊断且不泄露秘密或个人数据。
 - SQL 使用参数化/Prisma，租户数据遵守 `app_user` + `set_config('app.current_workspace_id')` + FORCE RLS；owner 连接只用于明确的平台级任务。
-- 出网只能经 ToolBroker 与 source policy；执行 SSRF/global-unicast、redirect 逐跳重验、凭据剥离、超时、字节上限、预算和幂等门。
+- 出网只能经 ToolBroker 与 source policy；执行 SSRF/global-unicast、redirect 逐跳重验、凭据剥离、超时、字节上限、预算和幂等门。已登记的例外：robots.txt、DNS、模型网关与 outbox webhook 四类（#51，见 [as-built 架构](docs/architecture/current.md) §8 第 2 项），以及制裁名单运营刷新（`apps/api/scripts/refresh-sanctions-lists.mts`，#629，PRD4-D9）：后者不经 ToolBroker 持有调用与预算回执，仍受 source_policy 与 net-guard 约束。
 - API 唯一真值是 code-first [`packages/contracts/openapi/openapi.json`](packages/contracts/openapi/openapi.json)。文档引用 operationId，不手抄 path/operation 总数。
 - 所有 GitHub Actions 外部 `uses:` 必须锁定已从官方 tag 只读解析的 40 位 commit SHA，并保留人类可读的版本注释。`pnpm governance:verify` 扫描全部 workflow；新增未登记或 moving-tag action 必须失败。治理脚本、机器政策、schema、runtime evidence 与 release 目录必须保持在 CODEOWNERS 最终规则块内。
 
@@ -80,7 +80,7 @@ pnpm --filter @global/db exec prisma migrate deploy # 读 packages/db/.env
 - Provider 当前机器真值为 [`docs/governance/provider-registry.json`](docs/governance/provider-registry.json)，人类页由 `pnpm governance:providers` 生成；seed key、SourceClass 与默认 enablement 漂移必须使 CI 失败。
 - Capability → Core Object → operationId → code → test → Scenario 的机器链位于 [`docs/governance/delivery-traceability.json`](docs/governance/delivery-traceability.json)。路径存在只证明 anchor 存在，不证明运行通过。
 - RuntimeEvidence 必须满足 [`runtime-evidence.schema.json`](docs/governance/runtime-evidence.schema.json)，包含 commit、environment、verified_at、valid_until、evidence_kind、result 与 artifact_digest。到期证据自动降为 `HISTORICAL`，不能用于晋级。
-- `PILOT`/`GA` 必须同时拥有当前 PASS RuntimeEvidence 与有效 Release Bundle。每条机器追踪链须声明 `required_evidence_kinds`，Release Bundle 的 `traceability_bindings` 必须把同一 chain、capability 与同一 evidence set 精确绑定。Release Bundle 使用 [`release-bundle.schema.json`](docs/governance/release-bundle.schema.json)，并分别记录机器检查、独立 reviewer、用户授权和 merge-method provenance。这些字段和 URL 仅是声明；在可信的独立外部 readback verifier 绑定其身份与内容前，`external_provenance` 必须保持 `EXTERNAL_UNVERIFIED`，验证器必须阻断晋级。伪造 `VERIFIED`、URL 或模板都不是发布证据。
+- `PILOT`/`GA` 必须同时拥有当前 PASS RuntimeEvidence 与有效 Release Bundle。每条机器追踪链须声明 `required_evidence_kinds`，Release Bundle 的 `traceability_bindings` 必须把同一 chain、capability 与同一 evidence set 精确绑定。Release Bundle 使用 [`release-bundle.schema.json`](docs/governance/release-bundle.schema.json)，并分别记录机器检查、独立 reviewer、用户授权和 merge-method provenance。这些字段和 URL 仅是声明；在可信的独立外部 readback verifier 绑定其身份与内容前，`external_provenance` 必须保持 `EXTERNAL_UNVERIFIED`，验证器必须阻断晋级。伪造 `VERIFIED`、URL 或模板都不是发布证据。**已知死锁（2026-10-14 登记）**：仓内原有的 approval/readback 回读器已由 #566 移除，`scripts/governance-delivery-contracts.mjs` 对 `PILOT`/`GA` 恒报 `RELEASE_EXTERNAL_PROVENANCE_UNVERIFIED`，晋级目前不可达；是否改为产品负责人签字待 PRD4-D12 拍板（见 conflict register），拍板前不改脚本。
 - 运行 `pnpm governance:verify` 与 `pnpm docs:verify`。不得为过 CI 删除历史、改写 evidence 或把文件移出受控范围。
 
 ## 8. 模型、评测与费用
@@ -89,12 +89,12 @@ pnpm --filter @global/db exec prisma migrate deploy # 读 packages/db/.env
 - 生产路由、评测基础设施、评测 evidence、promotion 和 runtime adoption 必须分开变更。
 - 正常产品 BuildRun 的费用权威来自 SaaS Control Plane 签发的一次性、短期、请求绑定 Budget Grant；本仓只验签、原子消费、reserve/settle/reconcile 并回报，不另设隐藏的产品总金额门。缺失、非法、过期、跨 workspace/operation/request（已有 Site 时还必须绑定 site）或重复挪用的 Grant 必须在创建 Run、启动 Workflow 和调用模型前拒绝。
 - “暂不调用模型”仍表示 Codex/operator/evaluation 的零费用、离线或 create-only 边界。此类 ad-hoc/evaluation 真实 dispatch 前必须有精确 alias/protocol/credential scope、有限额度、冻结价格、请求与 campaign cap、durable settlement 和用户明确费用授权；正常产品 Grant 与该授权不能互相推导。
-- 有效输出已经持久取得但精确费用暂不可得时，按完整 reservation 上界保守扣减、允许 BuildRun 继续并异步追加对账，不得冒充精确费用。没有有效输出，或物理调用/ACK 状态未知时，完整 reservation 保持占用、禁止自动发起第二次物理请求，并按稳定 request/operation identity 恢复事实。
+- 有效输出已经持久取得但精确费用暂不可得时，按完整 reservation 上界保守扣减、允许 BuildRun 继续并异步追加对账，不得冒充精确费用。没有有效输出，或物理调用/ACK 状态未知时，完整 reservation 保持占用、禁止自动发起第二次物理请求，并按稳定 request/operation identity 恢复事实。唯一例外是确定失败、因而网关没有计费的请求（HTTP 429 与除 504/524 超时外的 5xx、连接从未建立、Tool 在第一次物理请求之前失败；流式失败一律不算：首字节之前的失败由 new-api 回可重试的 HTTP 502、按 5xx 释放，仍以流式失败到达的都在 new-api 写出首字节（数据块或 keepalive ping）之后，即使还没有输出也可能已按估算计费）：reservation 释放，同一 operation key 最多再预留到第 3 次（账本计数，网关 RetryTimes=1 时最多 6 次物理请求）；机器声明见 `durable-result-strategies.json` 的 `resultDisposition`。
 - Provider kill switch、单次 task/wire/token/output 上限、幂等和异常停用继续保留；24 小时人工 settlement attestation 不得作为正常产品运行授权或调用门。
 
 ## 9. 文档与交付
 
-- 稳定规则写本文件或治理页；当前事实写 `docs/status/current.md`；追加历史写 changelog；原始/冻结证明写 evidence；架构承重决定写 ADR。
+- 稳定规则写本文件或治理页；当前事实写 `docs/status/current.md`；追加历史写 changelog 片段：每个 PR 在 [`docs/roadmap/changelog.d/`](docs/roadmap/changelog.d/README.md) 放一个 `<YYYY-MM-DD>-<slug>.md`（frontmatter `date` / `pr` / `title`，正文依次写起因 / 改动 / 测试 / 未做），不直接改 `changelog.md`，由 `scripts/changelog-assemble.mjs` 手动汇编并以 `docs(changelog)` PR 提交；改了 `apps/`、`packages/`、`scripts/`、`infra/` 或根目录构建与运行时文件（`Dockerfile`、`package.json`、`pnpm-lock.yaml` 等）的 PR 缺片段时 governance 检查失败。原始/冻结证明写 evidence；架构承重决定写 ADR。
 - 不在多个 current 文档复制同一事实。迁移旧文字时保留 Git provenance，并在 changelog/evidence 索引留下 successor 指针。
 - 代码改动后运行相关单元/集成/E2E、lint、build、docs、ContractGraph 与安全检查；同一相关源码、配置、依赖、环境和范围的可信结果可复用，相关变化或新疑点须重验，不按消息或固定时间机械重跑。必需门不得省略；真实 provider/数据库/Temporal 验证只在范围、成本、数据与外部动作均获授权时执行。
 - 提交使用 Conventional Commits。提交前检查 diff、秘密、输入校验、授权、RLS、错误泄露和回滚路径。

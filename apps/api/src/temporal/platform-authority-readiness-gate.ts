@@ -27,5 +27,11 @@ export async function checkPlatformAuthorityReady(
   } catch {
     // An unavailable dependency never grants admission or exposes transport details.
   }
-  return { status: "failed", code: "PLATFORM_BUDGET_AUTHORITY_NOT_READY" };
+  // A capability the worker could issue with a moment ago is gone: stop polling
+  // at once instead of riding out the heartbeat's transient-failure tolerance.
+  return {
+    status: "failed",
+    code: "PLATFORM_BUDGET_AUTHORITY_NOT_READY",
+    drainImmediately: true,
+  };
 }

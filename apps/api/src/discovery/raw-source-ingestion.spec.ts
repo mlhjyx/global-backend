@@ -9,6 +9,7 @@ import {
   resolveRawSourceBatchByIndex,
   type RawSourcePolicySnapshot,
 } from "./raw-source-ingestion";
+import { PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN } from "./source-policy-scope";
 
 function comparableRawRow(row: {
   fetchedAt: Date | null;
@@ -1801,5 +1802,304 @@ describe("Raw Source v2 ingestion boundary", () => {
       maxBatchBytes: 20 * 1024 * 1024,
       defaultRetentionDays: 365,
     });
+  });
+});
+
+describe("public_web company-site source policy", () => {
+  const COMPANY_SITE: RawSourcePolicySnapshot = Object.freeze({
+    id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    domain: PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN,
+    retentionDays: 365,
+    reviewStatus: "APPROVED",
+    allowedPurpose: ["discovery", "enrichment"],
+    updatedAt: new Date("2026-10-09T00:00:00.000Z"),
+  });
+
+  function sitePolicy(
+    ordinal: number,
+    domain: string,
+    overrides: Partial<RawSourcePolicySnapshot> = {},
+  ): RawSourcePolicySnapshot {
+    return {
+      id: `dddddddd-dddd-4ddd-8ddd-${String(ordinal).padStart(12, "0")}`,
+      domain,
+      retentionDays: 90,
+      reviewStatus: "APPROVED",
+      allowedPurpose: ["discovery"],
+      updatedAt: new Date("2026-10-01T00:00:00.000Z"),
+      ...overrides,
+    };
+  }
+
+  function publicWebRecord(domain: string) {
+    return companyRecord({
+      externalId: domain,
+      domain,
+      attributes: {
+        products: ["pump"],
+        keywords: ["industrial"],
+        extraction_confidence: 0.9,
+        extraction_evidence_digest: "b".repeat(64),
+        source_class: "public_intelligence",
+      },
+      provenance: {
+        ...companyRecord().provenance,
+        sourceUrl: `https://${domain}/company`,
+      },
+    });
+  }
+
+  function prepare(
+    providerKey: string,
+    record: unknown,
+    policies: readonly RawSourcePolicySnapshot[],
+  ) {
+    return prepareRawSourceBatch({
+      providerKey,
+      records: [record],
+      policies,
+      limits: { ...LIMITS, maxRecordBytes: 2_048, maxBatchBytes: 4_096 },
+      now: NOW,
+    }).rows[0]!;
+  }
+
+  it("accepts a public_web record under the company-site policy when no site policy covers its host", () => {
+    const row = prepare("public_web", publicWebRecord("pumpen-mueller.de"), [
+      ...POLICIES,
+      COMPANY_SITE,
+    ]);
+
+    expect(row).toMatchObject({
+      ingestStatus: "ACCEPTED",
+      dispositionCode: null,
+      externalId: "pumpen-mueller.de",
+      retentionDays: 365,
+      expiresAt: new Date(NOW.getTime() + 365 * 86_400_000),
+    });
+    expect(row.sourcePolicySnapshot).toEqual({
+      kind: "source_policy",
+      id: COMPANY_SITE.id,
+      domain: PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN,
+      retentionDays: 365,
+      reviewStatus: "APPROVED",
+      allowedPurpose: ["discovery"],
+      updatedAt: "2026-10-09T00:00:00.000Z",
+      minimizedFields: [],
+    });
+  });
+
+  it.each([
+    ["the exact domain", "pumpen-mueller.de", "pumpen-mueller.de", {}],
+    [
+      "a parent domain of the record's subdomain",
+      "shop.pumpen-mueller.de",
+      "pumpen-mueller.de",
+      {},
+    ],
+    ["the www. spelling", "pumpen-mueller.de", "www.pumpen-mueller.de", {}],
+    ["an upper-case spelling", "pumpen-mueller.de", "Pumpen-Mueller.DE", {}],
+    [
+      "a row without any purpose",
+      "pumpen-mueller.de",
+      "pumpen-mueller.de",
+      { allowedPurpose: null },
+    ],
+  ] as const)(
+    "quarantines a public_web record whose site is SUSPENDED by %s, never falling back to the company-site policy",
+    (_title, recordDomain, policyDomain, overrides) => {
+      const suspended = sitePolicy(1, policyDomain, {
+        reviewStatus: "SUSPENDED",
+        ...overrides,
+      });
+      const row = prepare("public_web", publicWebRecord(recordDomain), [
+        COMPANY_SITE,
+        suspended,
+      ]);
+
+      expect(row).toMatchObject({
+        ingestStatus: "QUARANTINED",
+        dispositionCode: "SOURCE_POLICY_SUSPENDED",
+        externalId: null,
+        retentionDays: 90,
+      });
+      expect(row.sourcePolicySnapshot).toMatchObject({
+        kind: "source_policy",
+        id: suspended.id,
+        domain: policyDomain,
+        reviewStatus: "SUSPENDED",
+      });
+    },
+  );
+
+  it("prefers an approved site policy covering the host over the company-site policy", () => {
+    const site = sitePolicy(2, "pumpen-mueller.de");
+    const row = prepare("public_web", publicWebRecord("shop.pumpen-mueller.de"), [
+      COMPANY_SITE,
+      site,
+    ]);
+
+    expect(row).toMatchObject({ ingestStatus: "ACCEPTED", retentionDays: 90 });
+    expect(row.sourcePolicySnapshot).toMatchObject({
+      id: site.id,
+      domain: "pumpen-mueller.de",
+    });
+  });
+
+  it.each([
+    [
+      "SUSPENDED",
+      { reviewStatus: "SUSPENDED" },
+      "SOURCE_POLICY_SUSPENDED",
+      ["discovery"],
+    ],
+    [
+      "without a purpose",
+      { allowedPurpose: null },
+      "SOURCE_POLICY_PURPOSE_NOT_ALLOWED",
+      [],
+    ],
+    [
+      "for enrichment only",
+      { allowedPurpose: ["enrichment"] },
+      "SOURCE_POLICY_PURPOSE_NOT_ALLOWED",
+      [],
+    ],
+    [
+      "SUSPENDED and without a purpose",
+      { reviewStatus: "SUSPENDED", allowedPurpose: [] },
+      "SOURCE_POLICY_SUSPENDED",
+      [],
+    ],
+  ] as const)(
+    "quarantines a public_web record when the company-site policy is %s",
+    (_title, overrides, reason, allowedPurpose) => {
+      const row = prepare("public_web", publicWebRecord("pumpen-mueller.de"), [
+        { ...COMPANY_SITE, ...overrides },
+      ]);
+
+      expect(row).toMatchObject({
+        ingestStatus: "QUARANTINED",
+        dispositionCode: reason,
+        retentionDays: 365,
+      });
+      expect(row.sourcePolicySnapshot).toMatchObject({
+        id: COMPANY_SITE.id,
+        domain: PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN,
+        allowedPurpose,
+      });
+    },
+  );
+
+  it("quarantines a public_web record as SOURCE_POLICY_MISSING without the company-site policy", () => {
+    const row = prepare("public_web", publicWebRecord("pumpen-mueller.de"), POLICIES);
+
+    expect(row).toMatchObject({
+      ingestStatus: "QUARANTINED",
+      dispositionCode: "SOURCE_POLICY_MISSING",
+      retentionDays: LIMITS.defaultRetentionDays,
+    });
+    expect(row.sourcePolicySnapshot).toEqual({
+      kind: "missing",
+      retentionDays: LIMITS.defaultRetentionDays,
+      allowedPurpose: [],
+      minimizedFields: [],
+    });
+  });
+
+  it.each([
+    ["registry", {}],
+    [
+      "trade_fair",
+      {
+        externalId: "fair-1:company-1",
+        attributes: {
+          stand: "A42",
+          products: ["pump"],
+          source_fair: "fair-1",
+          source_class: "industry_data",
+        },
+      },
+    ],
+  ] as const)(
+    "never applies the company-site policy to %s, even on the record's own host",
+    (providerKey, overrides) => {
+      const record = companyRecord({
+        ...overrides,
+        provenance: {
+          ...companyRecord().provenance,
+          sourceUrl: "https://acme.example/companies/1",
+        },
+      });
+      // Control: a site policy for that host accepts the record, so the provider alone decides.
+      expect(
+        prepare(providerKey, record, [sitePolicy(3, "acme.example")]).ingestStatus,
+      ).toBe("ACCEPTED");
+
+      const row = prepare(providerKey, record, [COMPANY_SITE]);
+      expect(row).toMatchObject({
+        ingestStatus: "QUARANTINED",
+        dispositionCode: "SOURCE_POLICY_MISSING",
+      });
+      expect(row.sourcePolicySnapshot).toMatchObject({ kind: "missing" });
+    },
+  );
+
+  it("reports a SUSPENDED policy before a missing purpose for every provider", () => {
+    const row = prepare("registry", companyRecord(), [
+      { ...POLICIES[0]!, reviewStatus: "SUSPENDED", allowedPurpose: ["enrichment"] },
+    ]);
+
+    expect(row.dispositionCode).toBe("SOURCE_POLICY_SUSPENDED");
+    expect(row.sourcePolicySnapshot).toMatchObject({ allowedPurpose: [] });
+  });
+
+  it("takes the most specific site policy after dropping www., not the longest spelling", () => {
+    const parent = sitePolicy(4, "www.pumpen-mueller.de");
+    const regional = sitePolicy(5, "eu.pumpen-mueller.de", {
+      reviewStatus: "SUSPENDED",
+    });
+    for (const policies of [
+      [parent, regional],
+      [regional, parent],
+    ]) {
+      const row = prepare("public_web", publicWebRecord("eu.pumpen-mueller.de"), [
+        COMPANY_SITE,
+        ...policies,
+      ]);
+      expect(row.dispositionCode).toBe("SOURCE_POLICY_SUSPENDED");
+      expect(row.sourcePolicySnapshot).toMatchObject({ id: regional.id });
+    }
+  });
+
+  it("lets a non-APPROVED row win among site policies naming the same domain, whatever their order", () => {
+    const approved = sitePolicy(6, "www.pumpen-mueller.de");
+    const suspended = sitePolicy(7, "PUMPEN-MUELLER.DE", {
+      reviewStatus: "SUSPENDED",
+    });
+    for (const policies of [
+      [approved, suspended],
+      [suspended, approved],
+    ]) {
+      const row = prepare("public_web", publicWebRecord("pumpen-mueller.de"), [
+        COMPANY_SITE,
+        ...policies,
+      ]);
+      expect(row.dispositionCode).toBe("SOURCE_POLICY_SUSPENDED");
+      expect(row.sourcePolicySnapshot).toMatchObject({ id: suspended.id });
+    }
+  });
+
+  it("breaks a tie among approved rows naming the same domain by the longer spelling, then by id", () => {
+    const plain = sitePolicy(8, "pumpen-mueller.de", { retentionDays: 30 });
+    const upper = sitePolicy(9, "PUMPEN-MUELLER.de", { retentionDays: 60 });
+    const www = sitePolicy(10, "www.pumpen-mueller.de", { retentionDays: 120 });
+    const chosen = (policies: RawSourcePolicySnapshot[]) =>
+      prepare("public_web", publicWebRecord("pumpen-mueller.de"), policies)
+        .sourcePolicySnapshot.id;
+
+    expect(chosen([plain, upper, www])).toBe(www.id);
+    expect(chosen([www, upper, plain])).toBe(www.id);
+    expect(chosen([upper, plain])).toBe(plain.id);
+    expect(chosen([plain, upper])).toBe(plain.id);
   });
 });

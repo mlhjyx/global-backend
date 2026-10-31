@@ -6,11 +6,11 @@
     "protectedFiles": [
       {
         "path": "apps/api/src/tools/tool-broker.ts",
-        "sha256": "03dea53bbafd35283a2dcae2cd0613df18dbbc24b1addbf1d5db9fd7b40a46c4"
+        "sha256": "e7710f6377d108d5843f8de3ba07ba47847c7eca8c1be9bfaa25387dfa409b5d"
       },
       {
         "path": "apps/api/src/model-gateway/router-model-gateway.ts",
-        "sha256": "0ad768f0edf1e1ef5160db6c58025c711def8fcde69b2b3db73bd6c1cd178198"
+        "sha256": "2dca8798932aff731286feb0732859b935d1c4c01edb67812634e11c3330938d"
       },
       {
         "path": "apps/api/src/tools/tool-broker.factory.ts",
@@ -69,12 +69,14 @@
     ]
   },
   "resultDisposition": {
-    "schema": "execution-result-disposition/v1",
-    "kinds": ["valid_output", "result_unknown", "control_error", "replay_error"],
-    "automaticPhysicalRetryAllowed": false,
+    "schema": "execution-result-disposition/v2",
+    "kinds": ["valid_output", "result_unknown", "control_error", "definite_failure", "replay_error"],
+    "automaticPhysicalRetryAllowed": "DEFINITE_FAILURE_BEFORE_OUTPUT_ONLY",
     "unknownStatus": "RESULT_UNKNOWN",
     "controlStatus": "RELEASED",
-    "replayStatus": "SETTLED"
+    "definiteFailureStatus": "RELEASED",
+    "replayStatus": "SETTLED",
+    "maxReservationAttempts": 3
   },
   "tools": [
     {
@@ -444,6 +446,22 @@
         "consumer": "IcpService.generateFromCompany",
         "domainAggregateType": "IcpDefinition",
         "identitySource": "preallocated-icp-id-and-version",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
+      "taskId": "outreach.first_contact_draft",
+      "callsitePath": "apps/api/src/lead/outreach-draft.service.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "outreach-first-contact-draft/v1",
+      "operationIdentity": "model:outreach.first_contact_draft:<account-key>",
+      "privacyClass": "CONFIDENTIAL_TENANT",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "OutreachDraftService.generate",
+        "domainAggregateType": "LeadOutreachDraft",
+        "identitySource": "receipt-derived-draft-id-and-version",
         "subjectRefRequired": false,
         "personalDataDsrCompatible": false
       }

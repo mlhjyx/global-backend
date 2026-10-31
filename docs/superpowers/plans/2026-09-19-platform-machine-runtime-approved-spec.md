@@ -1,7 +1,7 @@
 # R4 最小 machine/runtime 安全差额提案
 
-> 生命周期：`APPROVED`
-> 生命周期依据：用户已批准的 R4 规格；实现随 #545 与 GrowthOS 补丁线推进，尚无 RuntimeEvidence
+> 生命周期：`SUPERSEDED`
+> 生命周期依据：用户已批准的 R4 规格；实现随 #545 与 GrowthOS 补丁线推进，尚无 RuntimeEvidence。2026-10-14 改为 `SUPERSEDED`：PRD4-D2（2026-10-10）冻结 R4，不再推进本规格的剩余部分（出网围栏保留）；已合入的部分保留，本文件只作 provenance
 
 状态：**APPROVED_SPEC / IMPLEMENTATION_IN_PROGRESS / NO_RUNTIME_EVIDENCE**。
 
@@ -126,6 +126,8 @@ Runtime lease additive contract：加入 `temporal_cluster_id`、`temporal_names
 customer Worker 不加载 platform writer/Temporal platform 权限；platform Worker 不获得 customer scope 写权限。它们可以共享通用调用/预算库，但 composition 提供的 principal 与 task registry 不同且固定。新增进程凭据和 DB role 的权限清单必须独立 review；本提案不假定现有凭据可共享。
 
 平台启动链：native/JWKS/DB → GrowthOS 独立 revoke consumer → 无 RUNNING workflow 也可取得 capability → platform Worker admission → 用户/运维已授权的 schedule 工作。capability 的 Temporal 事实依旧不要求启动新 workflow。客户 Worker 按其客户能力 admission 接单；系统整体 readiness 可汇总所启用产品能力，但 revoke/lookup/bootstrap 的诊断与恢复入口不能依赖此 aggregate，从而不存在 Worker→consumer→Worker 环路。
+
+> 2026-10-10 注（D3，产品负责人批准）：上段的客户侧分离已延伸到 API 写入准入。全局写入守卫与建站门按客户依赖集合判定：硬组件仍须全部 ok，唯一例外是 platform Worker 恰为 `PLATFORM_WORKER_NOT_READY`（没有 READY 租约：租约不在、已停止，或同一发布仍在 STARTING/DRAINING）；platform Worker 混版本、Temporal 身份不符或租约查询失败仍关闭客户写入。整体 readiness（`/health/ready`）照旧汇总 platform Worker 并在其缺席时返回 503；platform Worker 自身的 admission 与 fail-closed 不变。
 
 ### 4.1 现有 cluster/history 的切换约束
 

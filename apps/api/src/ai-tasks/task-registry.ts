@@ -7,6 +7,71 @@ import {
 
 type OutputSchema = Record<string, unknown>;
 
+/**
+ * Model for the acquisition tasks (2026-10-29 product owner decision: run on
+ * DeepSeek V4 Flash, no pro tier). Both tiers resolve from the deployment env so
+ * a new proxy model is a config change, not a code change:
+ *   MODEL_ACQUISITION_MODEL           — extraction / classification tier
+ *   MODEL_ACQUISITION_REASONING_MODEL — ICP design, fit judging, query planning, drafts
+ * The identity gate still requires the upstream to report the requested model
+ * (or an approved MODEL_IDENTITY_SUBSTITUTES entry), so a proxy that silently
+ * serves another model keeps failing closed.
+ */
+const ACQUISITION_FLASH_TIER_MODEL =
+  process.env.MODEL_ACQUISITION_MODEL?.trim() || 'deepseek-flash';
+const ACQUISITION_REASONING_MODEL =
+  process.env.MODEL_ACQUISITION_REASONING_MODEL?.trim() || 'deepseek-flash';
+
+/**
+ * Optional per-task override: `MODEL_ACQUISITION_TASK_MODELS` is a JSON object
+ * mapping task id to model name (e.g. {"discovery.qualify_fit":"gemini-4-argon-high"}).
+ * Listed tasks use their own model; everything else stays on the tier above.
+ * Non-string values and unknown task ids are ignored, and an unparseable value is
+ * ignored as a whole — a typo must not stop the process or silently unset the
+ * tier defaults for tasks the operator did not mention.
+ */
+export function parseTaskModelOverrides(raw: string | undefined): Record<string, string> {
+  const text = (raw ?? '').trim();
+  if (!text) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return {};
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  const overrides: Record<string, string> = {};
+  for (const [taskId, model] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof model !== 'string') continue;
+    const trimmed = model.trim();
+    if (!trimmed) continue;
+    overrides[taskId] = trimmed;
+  }
+  return overrides;
+}
+
+const TASK_MODEL_OVERRIDES = parseTaskModelOverrides(process.env.MODEL_ACQUISITION_TASK_MODELS);
+
+const acquisitionModel = (taskId: string, tierModel: string): string =>
+  TASK_MODEL_OVERRIDES[taskId] ?? tierModel;
+
+/**
+ * The configured acquisition models are reasoning models: their reasoning
+ * tokens count against the same max_tokens as the answer. On 2026-10-08
+ * icp.design hit 4,096 twice in a row on xin and was truncated. The cap only
+ * bounds a call; the gateway charges the tokens actually generated.
+ */
+const REASONING_TASK_MAX_OUTPUT_TOKENS = 8_192;
+
+/**
+ * The two planning tasks write the longest answers. On 2026-10-08 one query
+ * plan used 10,568 output tokens and the next was cut off at 8,192, which
+ * spends the ICP's only planning attempt. 16,000 is the gateway provider's
+ * ceiling. At about 72 tokens a second it takes about 225 seconds, so the
+ * process-wide MODEL_TIMEOUT_MS must allow for it.
+ */
+const PLANNING_TASK_MAX_OUTPUT_TOKENS = 16_000;
+
 const boundedString = (maxLength: number, extra: OutputSchema = {}): OutputSchema => ({
   type: 'string', maxLength, ...extra,
 });
@@ -83,7 +148,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     // 理解管线的页面抓取以本契约身份经 Broker（understanding.activities）——白名单收口②填实。
     allowedTools: ['crawl4ai.fetch'],
     maxCostCents: 20,
-    maxOutputTokens: 4_096,
+    maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 180000,
     description:
       '从企业官网/文档文本中抽取带类型与置信度的企业事实（Claim）。覆盖 KNW-002 全范围：能力、认证、案例、参数、MOQ、交期、市场、企业基本面；发现营销性/绝对化表述时输出 forbidden_expression_candidate 供品牌审核。只抽文本中明确存在的信息。',
@@ -100,8 +165,9 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
         confidence: boundedNumber(0, 1),
       }, ['type', 'statement', 'evidence', 'confidence'])),
     }, ['claims']),
-    // 抽取是高频、结构化任务 → 用快而省的 flash（中转站里可配成带 fallback 的模型组）。
-    model: 'deepseek-v4-flash',
+    // 抽取是高频、结构化任务：属 flash 档；获客网关暂无真 flash，见 ACQUISITION_FLASH_TIER_MODEL。
+    model: acquisitionModel('company_understanding.extract_claims', ACQUISITION_FLASH_TIER_MODEL),
+    acceptsModelSubstitute: true,
     risk: 'medium',
     humanGate: true, // Claims land as NEEDS_REVIEW; approval before outbound use.
   },
@@ -110,7 +176,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     id: 'company_understanding.extract_profile',
     allowedTools: [],
     maxCostCents: 10,
-    maxOutputTokens: 4_096,
+    maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 120000,
     description:
       '从企业官网首页文本提炼企业画像：行业归类与一段话简介（中文，仅基于给定文本，不得编造规模/年份等未出现的信息）。',
@@ -118,7 +184,8 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
       industry: boundedString(500, { description: '主行业，如「精密金属加工设备制造」' }),
       summary: boundedString(8000, { description: '80-150 字中文简介' }),
     }, ['industry', 'summary']),
-    model: 'deepseek-v4-flash',
+    model: acquisitionModel('company_understanding.extract_profile', ACQUISITION_FLASH_TIER_MODEL),
+    acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false, // 画像随 Claim 审批可被人工修正
   },
@@ -127,7 +194,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     id: 'company_understanding.extract_offerings',
     allowedTools: [],
     maxCostCents: 20,
-    maxOutputTokens: 4_096,
+    maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 180000,
     description:
       '从企业官网页面文本中抽取结构化的产品/服务（Offering）：名称、简述、关键属性（MOQ/交期/参数/认证/材料等，仅当文本中明确出现时才填），并附来源原文片段。禁止编造文本中不存在的属性。',
@@ -148,8 +215,9 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
         confidence: boundedNumber(0, 1),
       }, ['name', 'description', 'evidence', 'confidence'])),
     }, ['offerings']),
-    // 与 Claim 抽取同为高频结构化任务 → flash。
-    model: 'deepseek-v4-flash',
+    // 与 Claim 抽取同为高频结构化任务：flash 档，见 ACQUISITION_FLASH_TIER_MODEL。
+    model: acquisitionModel('company_understanding.extract_offerings', ACQUISITION_FLASH_TIER_MODEL),
+    acceptsModelSubstitute: true,
     risk: 'low', // 只进结构化知识库，不直接对外
     humanGate: false,
   },
@@ -158,7 +226,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     id: 'icp.design',
     allowedTools: [],
     maxCostCents: 40,
-    maxOutputTokens: 4_096,
+    maxOutputTokens: PLANNING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 180000,
     description:
       '基于卖方企业的已确认事实(Claim)，设计理想客户画像(ICP)：目标公司属性、痛点、采购触发信号、排除条件、价值主张、目标市场、买家委员会角色，以及机器可评估的验证规则(qualification_rules)。规则的 field 使用规范属性名：industry/sub_industry/region/country/employee_count/revenue/certifications/keywords/tech/business_model/end_markets。',
@@ -221,8 +289,9 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
       'value_props', 'target_markets', 'personas', 'buying_committee',
       'qualification_rules',
     ]),
-    // ICP 设计是低频、策略推理任务 → 用更强的 pro。
-    model: 'deepseek-v4-pro',
+    // ICP 设计是低频、策略推理任务 → 用推理档模型（MODEL_ACQUISITION_REASONING_MODEL）。
+    model: acquisitionModel('icp.design', ACQUISITION_REASONING_MODEL),
+    acceptsModelSubstitute: true,
     risk: 'medium',
     humanGate: true, // ICP 生成后为 HYPOTHESIS，回测/人工确认后才 ACTIVE。
   },
@@ -233,10 +302,10 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     // G3（2026-09-24）：发现阶段只用搜索结果判站，建档前不抓页面，故不再允许 crawl4ai.fetch。
     allowedTools: ['searxng.search'],
     maxCostCents: 15,
-    maxOutputTokens: 4_096,
+    maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 180000,
     description:
-      '判断给定的一组搜索结果（同一域名的标题、摘要与 URL）是否指向一家真实企业自己的官网，若是则抽取结构化企业属性。只允许使用搜索结果中明确出现的信息，禁止编造或从画像上下文照抄；名称取搜索结果中的企业名称原文。若不是企业官网（是目录/百科/新闻/市场平台/博客），或信息不足以判断，is_company_site 置 false。',
+      '判断给定的一组搜索结果（同一域名的标题与 URL）是否指向一家真实企业自己的官网，若是则抽取结构化企业属性。只允许使用搜索结果中明确出现的信息，禁止编造或从画像上下文照抄；名称取搜索结果中的企业名称原文。若不是企业官网（是目录/百科/新闻/市场平台/博客），或信息不足以判断，is_company_site 置 false。',
     outputSchema: closedObject({
       is_company_site: { type: 'boolean', description: '该页面是否为某家企业自己的官网' },
       name: boundedString(500, { description: '企业名称（原文语言）' }),
@@ -257,9 +326,9 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
       evidence: boundedString(2000, { description: '支持判断的原文片段' }),
       confidence: boundedNumber(0, 1),
     }, ['is_company_site']),
-    // 判站 + 抽取是高频任务。原用 gemini-2.5-flash（快、长上下文、便宜）；2026-07-09 网关 Gemini
-    // 预付额度耗尽（429）→ 改路由到同为高频便宜档的 deepseek-v4-flash。额度恢复后可切回 gemini-2.5-flash。
-    model: 'deepseek-v4-flash',
+    // 判站 + 抽取是高频任务：flash 档，见 ACQUISITION_FLASH_TIER_MODEL（路由沿革见 changelog）。
+    model: acquisitionModel('discovery.extract_company', ACQUISITION_FLASH_TIER_MODEL),
+    acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false,
   },
@@ -267,9 +336,10 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
   'discovery.classify_trade_role': {
     id: 'discovery.classify_trade_role',
     // G3 5.4（2026-09-24）：官网画像富集以已建档公司为主体抓首页与 Impressum（ToolBroker 按调用绑定主体）。
-    allowedTools: ['crawl4ai.fetch'],
+    // BI-14（2026-10-10）：开关 company_contact 打开时，再以同一主体渲染首页链到的联系页（每家至多 1 页），只看有没有联系表单。
+    allowedTools: ['crawl4ai.fetch', 'crawl4ai.render'],
     maxCostCents: 10,
-    maxOutputTokens: 2_048,
+    maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 120000,
     description:
       '根据一家公司官网首页与 Impressum 的文本，判断它在所给品类上的贸易角色：distributor（分销/经销/代理，含进口商）、wholesaler（批发/B2B 大宗供货）、manufacturer（自有研发制造）、mixed（既制造又分销他牌）、service（安装/维修/工程服务为主）、other（无关或无法判断）。同时列出页面明确出现的在售第三方品牌名（只写品牌，不写人名、邮箱、电话），并判断是否有自有制造。只允许使用给定文本中明确出现的信息，禁止编造；证据片段逐字摘自文本且不得包含人名或联系方式。',
@@ -289,8 +359,9 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
         description: '支持判断的原文片段（不含人名与联系方式）',
       },
     }, ['trade_role']),
-    // 分类是高频便宜任务：flash 档（设计 §3.6）。
-    model: 'deepseek-v4-flash',
+    // 分类是高频便宜任务：flash 档（设计 §3.6），见 ACQUISITION_FLASH_TIER_MODEL。
+    model: acquisitionModel('discovery.classify_trade_role', ACQUISITION_FLASH_TIER_MODEL),
+    acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false,
   },
@@ -300,7 +371,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     // DecisionMaker/public_web 联系人路径以本契约身份经 Broker 搜索/抓取（收口②）。
     allowedTools: ['searxng.search', 'crawl4ai.fetch'],
     maxCostCents: 15,
-    maxOutputTokens: 4_096,
+    maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 120000,
     description:
       '从企业的 Impressum/法律声明/团队/管理层/联系页文本里抽取**具名的人**及其职务与联系方式，并按买家委员会角色分类。铁律：只抽取页面文本中**明确出现**的人名/职务/邮箱/电话，禁止编造或推断未写出的邮箱；抽不到就返回空数组。德国 Impressum 依法列 Geschäftsführer（总经理）——优先抽取。给定卖方 ICP 的目标买家角色时，标注每个人是否命中目标角色。所有具名人属个人数据。',
@@ -328,8 +399,9 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
         description: '页面明确出现的具名人员（去重）',
       },
     }, ['people']),
-    // 原 gemini-2.5-flash；2026-07-09 网关 Gemini 额度耗尽（429）→ 改 deepseek-v4-flash（额度恢复可切回）。
-    model: 'deepseek-v4-flash',
+    // flash 档，见 ACQUISITION_FLASH_TIER_MODEL。
+    model: acquisitionModel('contact.find_decision_makers', ACQUISITION_FLASH_TIER_MODEL),
+    acceptsModelSubstitute: true,
     risk: 'medium', // 涉及个人数据抽取，下游必须过合规门
     humanGate: false,
   },
@@ -339,7 +411,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     // DirectoryDiscoveryProvider 以本契约身份经 Broker 搜索/抓取（收口②）。
     allowedTools: ['searxng.search', 'crawl4ai.fetch'],
     maxCostCents: 20,
-    maxOutputTokens: 4_096,
+    maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 180000,
     description:
       '判断给定网页是否为一个企业名录/列表页（协会会员名录、展会参展商名单、行业目录），若是则抽取其中列出的**多家公司**。只允许使用页面文本中明确出现的公司，禁止编造。若页面只讲一家公司或根本不是名录，is_directory 置 false、companies 置空。每家公司尽量给出官网与所在地（仅当文本出现）。',
@@ -360,9 +432,9 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
       },
       has_next_page: { type: 'boolean', description: '页面是否有下一页/分页' },
     }, ['is_directory', 'companies']),
-    // 列表抽取是长上下文任务（一页多公司）。原 gemini-2.5-flash；2026-07-09 网关 Gemini 额度耗尽（429）
-    // → 改 deepseek-v4-flash（同为长上下文/便宜档，额度恢复可切回）。
-    model: 'deepseek-v4-flash',
+    // 列表抽取是长上下文任务（一页多公司）：flash 档，见 ACQUISITION_FLASH_TIER_MODEL。
+    model: acquisitionModel('discovery.extract_list', ACQUISITION_FLASH_TIER_MODEL),
+    acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false,
   },
@@ -376,9 +448,10 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     }, ['code']),
     allowedTools: [], // 纯生成，无工具
     maxCostCents: 5,
-    maxOutputTokens: 4_096,
+    maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 60000,
-    model: 'deepseek-v4-flash', // 高频、便宜、冷路径
+    model: acquisitionModel('taxonomy.normalize', ACQUISITION_FLASH_TIER_MODEL), // 高频、冷路径（flash 档）
+    acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false,
   },
@@ -387,7 +460,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     id: 'discovery.qualify_fit',
     allowedTools: [],
     maxCostCents: 20,
-    maxOutputTokens: 4_096,
+    maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 180000,
     description:
       '给定卖方 ICP 与一家候选公司，判断它是否为该卖方的真实目标客户。ICP 摘要中的 icp_trade_role 是目标客户的贸易角色：distributor = 分销/批发/进口/经销商，manufacturer = 生产型企业，null = 未指定（按 manufacturer 处理）。必须通过四个门：\n1) 材质门：候选的加工材质是否与 ICP 目标一致（如金属 vs 塑料/织物/粉体）——注意 "RF welding"（射频热合塑料）≠ 金属焊接，"toll processing/筛分" 处理粉末≠金属工件加工。ICP 未对材质提出要求时视为不适用，判 pass。\n2) 角色门：候选是卖方产品的下游买家，还是与卖方同类产品的制造商（竞品）？竞品判 mismatch。icp_trade_role 为 distributor 时，采购卖方同类产品用于转售的分销商/批发商/进口商/经销商就是下游买家。\n3) 工艺子集门：候选是否真正从事 ICP 核心工艺，还是仅相邻工艺（如纯机加/磨削而无激光/钣金/折弯/焊接）。ICP 未对工艺提出要求（如分销商 ICP）时视为不适用，判 pass。\n4) 商业模式门：icp_trade_role 为 distributor 时，采购并转售实物产品的分销商/批发商/进口商/经销商判 pass，只做信息撮合的平台、目录或门户判 weak；否则，自有产线的制造商判 pass，聚合第三方供应商的采购中介平台判 weak。\n候选的 website_profile 来自其官网首页与 Impressum（贸易角色、是否自有制造、在售品牌、证据片段），是角色门与商业模式门的直接证据，优先于从名称或行业词推断；在售外国品牌、尤其中国品牌是进口分销的强信号。\n任一硬门失败判 mismatch；边缘/相邻判 weak；全部通过判 match。只依据给定信息，理由需具体。',
@@ -406,7 +479,8 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     // ⚠️ 勿降到 deepseek-reasoner/deepseek-chat：官方已宣布 2026-07-24 彻底关停二别名（过渡期透传 v4-flash），
     // 用了既撞关停又重蹈 flash 召回过宽。全仓一律显式 deepseek-v4-pro / deepseek-v4-flash。
     // 额度恢复后可切回 gemini-2.5-pro。
-    model: 'deepseek-v4-pro',
+    model: acquisitionModel('discovery.qualify_fit', ACQUISITION_REASONING_MODEL),
+    acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false,
   },
@@ -415,10 +489,12 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     id: 'discovery.query_plan',
     allowedTools: [],
     maxCostCents: 40,
-    maxOutputTokens: 4_096,
+    maxOutputTokens: PLANNING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 180000,
+    // BI-30: the sources the planner may use are listed per request in the prompt
+    // (only the ENABLED ones), so this description names none of them.
     description:
-      '把 ICP 翻译成多数据源可执行的查询计划（LED-005）。针对 PRD 7.4.7 的七类 source_class 生成有序查询：按 ICP 行业与市场特征挑选最相关的源，发现类在前（contact/email 验证属后续补全，不出现在此）。\n当前每个 source_class 下真实可用的子源（可用 filters.source_hint 精确路由，省略=该类全跑）：\n- public_intelligence → public_web（SearXNG 官网挖掘，关键词驱动）、ted（欧盟招投标中标发现：需 filters.cpv + filters.buyer_country；CPV 由系统按 ICP 冷路径确定性注入，勿自行臆造码）\n- company_registry → wikidata（结构化：按行业+国家零爬取查公司+官网+员工数）\n- industry_data → openstreetmap（地理：按工业标签+地区枚举工厂）、public_web\n结构化源需要规范的 filters：industry（行业词，中/英均可，如「金属加工」/"metal fabrication"）、country 或 region（如「德国」/"Germany"/"Baden-Württemberg"）。这些词会经规范词表映射到 Wikidata QID / OSM 标签。keywords 用于 public_web 全文搜索。',
+      '把 ICP 翻译成多数据源可执行的查询计划（LED-005）：按 ICP 行业与市场特征挑选最相关的数据源，生成有序查询，发现类在前（contact/email 验证属后续补全，不出现在此）。\n只能使用提示中「可用数据源」清单列出的源：每条查询都要写 filters.source_hint，它和 source_class 都取自清单同一行；不要为清单之外的数据源或 source_class 出查询，系统会丢弃，也不会执行。\n结构化源需要规范的 filters：industry（行业词，中/英均可，如「金属加工」/"metal fabrication"）、country 或 region（如「德国」/"Germany"/"Baden-Württemberg"）。这些词会经规范词表映射到 Wikidata QID / OSM 标签。keywords 用于关键词搜索，必须用目标市场的语言书写（如德国、奥地利、瑞士用德语），不要用中文。',
     outputSchema: closedObject({
       queries: boundedArray(MAX_QUERY_PLANNER_QUERIES, closedObject({
         source_class: boundedString(80, {
@@ -426,8 +502,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
             'trade_data', 'b2b_company_person', 'company_registry',
             'public_intelligence', 'industry_data',
           ],
-          description:
-            'trade_data | b2b_company_person | company_registry | public_intelligence | industry_data',
+          description: '取提示「可用数据源」清单里与 source_hint 同一行的 source_class',
         }),
         filters: closedObject({
           industry: MODEL_FILTER_VALUE,
@@ -447,11 +522,11 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
           since_days: MODEL_FILTER_VALUE,
         }, [], {
           description:
-            '结构化过滤条件。发现类必备 industry + country/region（规范词表可映射的行业/国家词）；可选 source_hint（public_web|wikidata|openstreetmap|ted）精确路由；TED 专用 filters：cpv（逗号分隔 8 位 CPV 前缀码）+ buyer_country（ISO-3，如 DEU/FRA，均由系统冷路径注入）；可选 area_name/hs_code 等。',
+            '结构化过滤条件。发现类必备 industry + country/region（规范词表可映射的行业/国家词）；source_hint 必填，写提示「可用数据源」清单里的源键，查询只在这个源上执行；cpv、buyer_country、product_code 由系统按 ICP 冷路径注入，不要自己填；可选 area_name/hs_code 等。',
         }),
         keywords: {
           ...boundedArray(32, boundedString(200)),
-          description: '检索关键词（含本地语言变体）',
+          description: '检索关键词：用目标市场的语言书写，可给多个本地同义词，不要用中文',
         },
         rationale: boundedString(4000, { description: '为什么选这个源、这些条件' }),
         priority: {
@@ -463,9 +538,36 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
         ...boundedNumber(0, 1_000_000_000, true), description: '预计候选公司量级',
       },
     }, ['queries', 'estimated_volume']),
-    // 计划生成是低频推理任务 → pro。
-    model: 'deepseek-v4-pro',
+    // 计划生成是低频推理任务 → 推理档模型（MODEL_ACQUISITION_REASONING_MODEL）。
+    model: acquisitionModel('discovery.query_plan', ACQUISITION_REASONING_MODEL),
+    acceptsModelSubstitute: true,
     risk: 'low', // 只产出计划，执行前还有成本 Dry Run 与人工确认
+    humanGate: true,
+  },
+
+  // BI-15 / L5（交付闭环设计 §7）：给运营的首次联系开发信草稿。平台不发送——草稿只进
+  // 周报，正文末尾的回复入口（卖方官网/邮箱/wa.me）由代码追加，模型只写正文与译文。
+  'outreach.first_contact_draft': {
+    id: 'outreach.first_contact_draft',
+    allowedTools: [],
+    maxCostCents: 20,
+    maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
+    timeoutMs: 180000,
+    description:
+      '为一条已接受的线索写首次联系开发信草稿。只能使用提示中给出的事实（每条带事实键）：卖方资料、买方的贸易角色/在售品牌/匹配点与采购信号。不得编造合作经历、价格、认证或对买方的了解；不得写入任何个人姓名、邮箱或电话。subject 与 body 必须用提示指定的目标国语言书写；body_zh 是 body 的简体中文译文（供运营审阅）。used_facts 列出正文实际引用到的事实键，只能从提示的键表里选。',
+    outputSchema: closedObject({
+      subject: boundedString(200, { description: '邮件主题（目标国语言）' }),
+      body: boundedString(1200, { description: '邮件正文（目标国语言，纯文本，不含签名与联系入口）' }),
+      body_zh: boundedString(1200, { description: 'body 的简体中文译文' }),
+      used_facts: {
+        ...boundedArray(40, boundedString(120)),
+        minItems: 1,
+        description: '正文实际引用的事实键，必须来自提示的键表',
+      },
+    }, ['subject', 'body', 'body_zh', 'used_facts']),
+    model: acquisitionModel('outreach.first_contact_draft', ACQUISITION_REASONING_MODEL),
+    // 发给潜在客户的底稿，人工审阅后才可用。
+    risk: 'medium',
     humanGate: true,
   },
 

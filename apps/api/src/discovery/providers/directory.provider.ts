@@ -11,7 +11,7 @@ import {
 import { ModelGateway } from '../../model-gateway/model-gateway';
 import { getTask } from '../../ai-tasks/task-registry';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
-import type { SearxResult } from '../../adapters/searxng';
+import type { SearxngSearchOutput } from '../../tools/builtin-tools';
 import type { CrawlResult } from '../../adapters/web-crawler';
 import { extractSameSiteLinks } from '../../adapters/site-links';
 import { isAllowedByRobots } from '../../adapters/robots';
@@ -23,6 +23,8 @@ import {
 import type { RuntimeTelemetry } from '../../model-runtime/types';
 import { artifactSubjectSkipReason } from '../../tools/artifact-subject-denial';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
+import { MODEL_CALL_FAILED, tallyModelExtractions } from '../discovery-model-extractions';
+import { settledModelFailureReason } from '../settled-model-failure';
 import {
   DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
   buildDiscoveryCompanyResultLineage,
@@ -36,6 +38,7 @@ import {
   MAX_DIRECTORY_PAGINATION,
   MAX_DIRECTORY_SEARCHES_PER_QUERY,
 } from '../execution-envelope';
+import { searchCountryName, searchableTerms } from '../search-localization';
 
 const PARSER_VERSION = 'directory/v1';
 
@@ -72,6 +75,8 @@ type MinedDirectoryRecord = Readonly<{
 type MinedDirectoryListing = Readonly<{
   records: readonly MinedDirectoryRecord[];
   collectors: readonly DiscoveryCompanyReceiptCollector[];
+  /** One entry per model call on the listing's pages, with the failure reason if it was skipped. */
+  extractionCalls: readonly Readonly<{ failureReason?: string }>[];
 }>;
 
 /**
@@ -152,6 +157,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
     // 2) 抓每个名录页 + 列表抽取（有限并发），记录按 name+domain 去重
     const dedup = new Map<string, ProviderCompanyRecord>();
     const collectors: DiscoveryCompanyReceiptCollector[] = [];
+    const extractionCalls: Array<Readonly<{ failureReason?: string }>> = [];
     const collectorIndexes = new Map<DiscoveryCompanyReceiptCollector, readonly number[]>();
     for (let i = 0; i < urls.length; i += CRAWL_CONCURRENCY) {
       const batch = urls.slice(i, i + CRAWL_CONCURRENCY);
@@ -162,6 +168,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
         if (s.status === 'rejected' && isDiscoveryCompanyLineageInvalid(s.reason)) throw s.reason;
         if (s.status !== 'fulfilled') continue;
         collectors.push(...s.value.collectors);
+        extractionCalls.push(...s.value.extractionCalls);
         for (const item of s.value.records) {
           const key = item.record.domain ?? `n:${item.record.name.toLowerCase()}`;
           if (!dedup.has(key)) {
@@ -190,17 +197,18 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
       records,
       costCents: 0,
       ...(lineage ? { lineage } : {}),
+      modelExtractions: tallyModelExtractions(extractionCalls),
     };
   }
 
   /** SearXNG 元搜索（经 Broker：searxng.search 工具）。 */
   private async search(q: string, ctx: ExecutionContext): Promise<{ url: string; title: string }[]> {
-    const res = await this.deps.broker!.invoke<{ q: string; language?: string }, { results: SearxResult[] }>(
+    const res = await this.deps.broker!.invoke<{ q: string; language?: string }, SearxngSearchOutput>(
       'searxng.search',
       { q, language: 'en' },
       this.toolCtx(ctx, 'discovery.extract_list'),
     );
-    return res.data.results.slice(0, 20);
+    return res.data.results.slice(0, 20).map((r) => ({ url: r.url, title: r.title ?? '' }));
   }
 
   /** 抓一个名录页（含有限翻页）→ 列表抽取 → 该页所有公司记录。 */
@@ -211,6 +219,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
   ): Promise<MinedDirectoryListing> {
     const out: MinedDirectoryRecord[] = [];
     const collectors: DiscoveryCompanyReceiptCollector[] = [];
+    const extractionCalls: Array<Readonly<{ failureReason?: string }>> = [];
     let pageUrl: string | null = listUrl;
     const visited = new Set<string>();
 
@@ -252,6 +261,9 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
 
       const extraction = await this.extractList(pageUrl, text, query, ctx);
       collectors.push(extraction.collector);
+      extractionCalls.push(
+        extraction.failureReason === undefined ? {} : { failureReason: extraction.failureReason },
+      );
       const extracted = extraction.data;
       if (!extracted?.is_directory || !extracted.companies?.length) {
         if (page === 0) this.log(`${pageUrl}: not a directory (llm)`);
@@ -281,6 +293,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
     return Object.freeze({
       records: Object.freeze(out),
       collectors: Object.freeze(collectors),
+      extractionCalls: Object.freeze(extractionCalls),
     });
   }
 
@@ -292,6 +305,8 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
   ): Promise<Readonly<{
     data: ExtractedList | null;
     collector: DiscoveryCompanyReceiptCollector;
+    /** Why the call failed and the listing was skipped. */
+    failureReason?: string;
   }>> {
     const contract = getTask('discovery.extract_list');
     const collector = createDiscoveryCompanyReceiptCollector({
@@ -326,15 +341,24 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
       );
       return Object.freeze({ data: result.data, collector });
     } catch (err) {
+      const settledReason = settledModelFailureReason(err);
       if (
         collector.isForwardingFailure(err) ||
-        isExecutionControlError(err) ||
-        isDiscoveryCompanyLineageInvalid(err)
+        isDiscoveryCompanyLineageInvalid(err) ||
+        (settledReason === undefined && isExecutionControlError(err))
       ) {
         throw err;
       }
+      // The gateway settled the call without a durable result (an unusable answer or a cut
+      // stream): the listing is skipped, the query keeps its lineage, and the run counts the
+      // skip. Any other failure leaves the outcome unknown and voids the lineage.
+      if (settledReason !== undefined) collector.markInvocationFailed();
       this.log(`extract failed ${url}: ${String(err).slice(0, 80)}`);
-      return Object.freeze({ data: null, collector });
+      return Object.freeze({
+        data: null,
+        collector,
+        failureReason: settledReason ?? MODEL_CALL_FAILED,
+      });
     }
   }
 }
@@ -378,14 +402,27 @@ export function mapDirectoryCompanyToRecord(args: {
   };
 }
 
-/** 构造名录检索串：行业/关键词 × 意图词（EN + DE）× 地区。 */
+/**
+ * 构造名录检索串：行业/关键词 × 意图词（EN + DE）× 地区。中文等中日韩文字的词与空词不进检索串：
+ * 主题词全是中文时不检索（不退回通用的 manufacturing）；地区依次取可写的地区词、国家词、
+ * 目标国的当地名称，给了地理范围却一个都写不出时也不检索，免得搜成全球名录。
+ */
 export function buildDirectorySearches(query: CompanyDiscoveryQuery): string[] {
   const f = query.filters ?? {};
   const arr = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : v == null ? [] : [String(v)]);
-  const industries = [...arr(f.industry), ...arr(f.sub_industry)].slice(0, 2);
-  const keywords = (query.keywords ?? []).slice(0, 2);
-  const region = arr(f.region ?? f.country)[0];
-  const topic = [industries[0] ?? keywords[0] ?? 'manufacturing', ...keywords.slice(0, 1)].join(' ').trim();
+  const rawIndustries = [...arr(f.industry), ...arr(f.sub_industry)];
+  const rawKeywords = query.keywords ?? [];
+  const industries = searchableTerms(rawIndustries).slice(0, 2);
+  const keywords = searchableTerms(rawKeywords).slice(0, 2);
+  if (!industries.length && !keywords.length && (rawIndustries.length || rawKeywords.length)) return [];
+  const region = searchableTerms(arr(f.region))[0]
+    ?? searchableTerms(arr(f.country))[0]
+    ?? searchCountryName(query);
+  const geographyGiven = [...arr(f.region), ...arr(f.country)].some((value) => value.trim().length > 0);
+  if (region === undefined && geographyGiven) return [];
+  const topic = [...new Set([industries[0] ?? keywords[0] ?? 'manufacturing', ...keywords.slice(0, 1)])]
+    .join(' ')
+    .trim();
 
   const intents = [...DIRECTORY_INTENTS_EN.slice(0, 2), ...DIRECTORY_INTENTS_DE.slice(0, 2)];
   const searches = intents.map((intent) => [topic, intent, region ?? ''].filter(Boolean).join(' ').trim());

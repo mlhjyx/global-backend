@@ -35,6 +35,10 @@ import {
   asExecutionBudgetHttpBoundary,
   ExecutionBudgetGrant,
 } from '../execution-budget/execution-budget-grant.decorator';
+import {
+  ApiModelUpstreamUnusable,
+  asModelUpstreamHttpBoundary,
+} from '../model-gateway/model-upstream-http-boundary';
 
 @ApiTags('ICP')
 @ApiBearerAuth()
@@ -47,8 +51,13 @@ export class IcpController {
   @Post('companies/:companyId/icps')
   @RequireScopes('acquisition:write')
   @HttpCode(201)
-  @ApiOperation({ summary: '基于企业已确认事实，AI 生成理想客户画像(ICP) + 买家委员会（状态 HYPOTHESIS）' })
+  @ApiOperation({
+    summary: '基于企业已确认事实，AI 生成理想客户画像(ICP) + 买家委员会（状态 HYPOTHESIS）',
+    description:
+      '模型网关结算了调用却没有可用答案（内容被过滤、输出截断、非 JSON、流被截断等）时返回 502 MODEL_UPSTREAM_UNUSABLE，details.reasonCode 为网关原因码；此时预算授权已消耗，重试需要新的授权。',
+  })
   @ApiExecutionBudgetGrant()
+  @ApiModelUpstreamUnusable()
   @ApiEnvelope(IcpDto, { status: 201 })
   async generate(
     @Ctx() ctx: RequestContext,
@@ -58,7 +67,9 @@ export class IcpController {
     return envelope(
       IcpDto.from(
         await asExecutionBudgetHttpBoundary(() =>
-          this.icps.generateFromCompany(ctx, companyId, compactJws),
+          asModelUpstreamHttpBoundary(() =>
+            this.icps.generateFromCompany(ctx, companyId, compactJws),
+          ),
         ),
       ),
     );
@@ -181,8 +192,16 @@ export class IcpController {
   @Post('icps/:icpId/query-plans')
   @RequireScopes('acquisition:write')
   @HttpCode(201)
-  @ApiOperation({ summary: '从 ACTIVE ICP 生成多源查询计划（AI，DRAFT 状态，需人工确认）' })
-  @ApiExecutionBudgetGrant()
+  @ApiOperation({
+    summary: '从 ACTIVE ICP 生成多源查询计划（AI，DRAFT 状态，需人工确认）',
+    description:
+      '只为当前已启用的数据源出查询，每条查询的 filters.source_hint 写明它执行的源；estimatedVolume 只计会执行的查询。没有可用的已启用数据源时返回 409 NO_ENABLED_DISCOVERY_SOURCE（不调用模型）；模型给出的查询全落在不可用的数据源上时返回 409 NO_RUNNABLE_QUERIES，不保存计划。模型网关结算了调用却没有可用答案（内容被过滤、输出截断、非 JSON、流被截断等）时返回 502 MODEL_UPSTREAM_UNUSABLE，details.reasonCode 为网关原因码，不保存计划；此时预算授权已消耗，重试需要新的授权。',
+  })
+  @ApiExecutionBudgetGrant({
+    // BI-30: the planner only plans for ENABLED discovery sources.
+    additionalConflictCodes: ['INVALID_STATE', 'NO_ENABLED_DISCOVERY_SOURCE', 'NO_RUNNABLE_QUERIES'],
+  })
+  @ApiModelUpstreamUnusable()
   @ApiEnvelope(QueryPlanDto, { status: 201 })
   async generateQueryPlan(
     @Ctx() ctx: RequestContext,
@@ -192,7 +211,9 @@ export class IcpController {
     return envelope(
       QueryPlanDto.from(
         await asExecutionBudgetHttpBoundary(() =>
-          this.icps.generateQueryPlan(ctx, icpId, compactJws),
+          asModelUpstreamHttpBoundary(() =>
+            this.icps.generateQueryPlan(ctx, icpId, compactJws),
+          ),
         ),
       ),
     );

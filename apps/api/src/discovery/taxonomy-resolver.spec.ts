@@ -1,6 +1,8 @@
 import Ajv from 'ajv';
 import { describe, expect, it, vi } from 'vitest';
+import { getTask } from '../ai-tasks/task-registry';
 import { BudgetOperationReplayError } from '../tools/budget-store';
+import { ProviderOutputError } from '../model-gateway/providers/provider-output-error';
 import { TaxonomyResolver } from './taxonomy-resolver';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
@@ -198,6 +200,42 @@ describe('TaxonomyResolver — durable model budget binding', () => {
     expect(budgetStore.close).not.toHaveBeenCalled();
   });
 
+  it('treats an unusable model answer as a miss so the query can go on', async () => {
+    // 2026-10-08 xin: an 11-token non-JSON answer failed the executeQuery
+    // activity, and the retries could only replay the spent operation.
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
+        termAlias: { upsert: vi.fn(async () => ({})) },
+      })),
+      termAlias: { findUnique: vi.fn(async () => null) },
+      canonicalTaxonomy: { findMany: vi.fn(async () => [{ code: 'industry-1', labelEn: 'Pumps', labels: {} }]) },
+    };
+    const generateStructured = vi.fn(async () => {
+      throw new ProviderOutputError(
+        'gateway deepseek-v4-pro: structured output is not valid JSON',
+        { inputTokens: 520, outputTokens: 11 },
+        { provider: 'gateway', model: 'deepseek-v4-pro', reasonCode: 'STRUCTURED_OUTPUT_NOT_JSON' },
+      );
+    });
+    const resolver = new TaxonomyResolver(
+      prisma as never,
+      { generateStructured } as never,
+      undefined,
+      {
+        open: vi.fn(async () => undefined),
+        close: vi.fn(async () => undefined),
+        attestAuthorized: vi.fn(async () => undefined),
+      } as never,
+    );
+
+    await expect(resolver.resolve('industry', 'Pumpen Großhandel', {
+      workspaceId: TEST_BINDING.scopeKey,
+      runId: TEST_BINDING.accountKey,
+      executionBudget: TEST_BINDING,
+    })).resolves.toBeNull();
+    expect(generateStructured).toHaveBeenCalledOnce();
+  });
+
   it('sends all four real taxonomy wires an exact enum over the closed bounded task schema', async () => {
     const codesByKind: Record<string, string[]> = {
       industry: ['industry-1', 'industry-2'],
@@ -207,7 +245,7 @@ describe('TaxonomyResolver — durable model budget binding', () => {
     };
     const generateStructured = vi.fn(async (input, context) => {
       expect(input.task).toBe('taxonomy.normalize');
-      expect(input.model).toBe('deepseek-v4-flash');
+      expect(input.model).toBe(getTask('taxonomy.normalize')?.model);
       expect(context.durableResultSchema).toBe('taxonomy-code/v1');
       const code = ((input.schema as {
         properties: { code: { enum: (string | null)[] } };
@@ -325,4 +363,52 @@ describe('TaxonomyResolver — durable model budget binding', () => {
       expect(aliasUpsert).not.toHaveBeenCalled();
     },
   );
+});
+
+describe('TaxonomyResolver — operation identity per query (W2)', () => {
+  // Seller #26, run 3e78eb4e (xin, 2026-10-13 11:36 UTC): the gateway keys a paid model
+  // operation by run, task, prompt, schema and correlationId. The resolver sent no
+  // correlationId, so every query of the run that shared a term shared one operation;
+  // after a 503 settled it without a result, the next query met it and the run failed.
+  it('forwards the caller correlationId to the gateway context, and sends none without it', async () => {
+    const generateStructured = vi.fn(async (_input: unknown, context: { correlationId?: string }) => ({
+      data: { code: 'industry-1' }, provider: 'gateway', model: 'model', context,
+    }));
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId, fn) => fn({
+        termAlias: { upsert: vi.fn(async () => ({})) },
+      })),
+      termAlias: { findUnique: vi.fn(async () => null) },
+      canonicalTaxonomy: {
+        findMany: vi.fn(async () => [{ code: 'industry-1', labelEn: 'Pumps', labels: {} }]),
+        findUnique: vi.fn(async () => ({
+          kind: 'industry', scheme: 'isic', code: 'industry-1', labelEn: 'Pumps', labels: {},
+          wikidataQid: null, osmTags: null, crosswalks: null,
+        })),
+      },
+    };
+    const resolver = new TaxonomyResolver(
+      prisma as never,
+      { generateStructured } as never,
+      undefined,
+      { open: vi.fn(), close: vi.fn(), attestAuthorized: vi.fn() } as never,
+    );
+    const opts = { workspaceId: TEST_BINDING.scopeKey, runId: TEST_BINDING.accountKey, executionBudget: TEST_BINDING };
+
+    await resolver.resolve('industry', 'pumps', { ...opts, correlationId: 'query-key-1:0' });
+    await resolver.resolveMany('industry', ['pumps'], { ...opts, correlationId: 'query-key-2:1' });
+    await resolver.resolve('industry', 'pumps', opts);
+
+    expect(generateStructured).toHaveBeenCalledTimes(3);
+    expect(generateStructured.mock.calls.map(([, context]) => context.correlationId))
+      .toEqual(['query-key-1:0', 'query-key-2:1', undefined]);
+    expect(generateStructured.mock.calls[2]![1]).not.toHaveProperty('correlationId');
+    for (const [, context] of generateStructured.mock.calls) {
+      expect(context).toMatchObject({
+        workspaceId: TEST_BINDING.scopeKey,
+        runId: TEST_BINDING.accountKey,
+        durableResultSchema: 'taxonomy-code/v1',
+      });
+    }
+  });
 });

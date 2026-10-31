@@ -200,6 +200,9 @@ model ExecutionBudgetAuthority {
   notBefore               DateTime                     @map("not_before") @db.Timestamptz(3)
   expiresAt               DateTime                     @map("expires_at") @db.Timestamptz(3)
   consumedAt              DateTime?                    @map("consumed_at") @db.Timestamptz(3)
+  /// Post-admission validity: consumedAt + 3 hours for a discovery run, consumedAt + 30 minutes for
+  /// ICP design and ICP query planning; null keeps expiresAt.
+  admissionLeaseExpiresAt DateTime?                    @map("admission_lease_expires_at") @db.Timestamptz(3)
   revokedAt               DateTime?                    @map("revoked_at") @db.Timestamptz(3)
   createdAt               DateTime                     @default(now()) @map("created_at") @db.Timestamptz(3)
 
@@ -352,6 +355,8 @@ model ToolBudgetOperation {
   expectedBlockedCode         String?                   @map("expected_blocked_code") @db.VarChar(80)
   expectedRobotsBlocked       Boolean?                  @map("expected_robots_blocked")
   status                      ToolBudgetOperationStatus @default(RESERVED)
+  /// D13: reservations of this key; a RELEASED row may be reserved again until 3 (CHECK 1..3).
+  attempt                     Int                       @default(1)
   createdAt                   DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
   settledAt                   DateTime?                 @map("settled_at") @db.Timestamptz(3)
 
@@ -395,7 +400,7 @@ model GenericOperationArtifact {
   workspace Workspace?                       @relation(fields: [workspaceId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_workspace_fkey")
   authority ExecutionBudgetAuthority         @relation(fields: [scopeKey, authorityId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_authority_scope_fkey")
   operation ToolBudgetOperation              @relation(fields: [scopeKey, operationId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_operation_scope_fkey")
-  object    GenericOperationArtifactObject   @relation(fields: [sha256, objectKey, sizeBytes, mediaType, privacyClass], references: [sha256, objectKey, sizeBytes, mediaType, privacyClass], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_object_metadata_fkey")
+  object    GenericOperationArtifactObject   @relation(fields: [sha256, objectKey, sizeBytes, privacyClass], references: [sha256, objectKey, sizeBytes, privacyClass], onDelete: NoAction, onUpdate: NoAction, map: "generic_operation_artifact_object_content_fkey")
   subject   GenericOperationArtifactSubject?
 
   @@unique([scopeKey, id], map: "generic_operation_artifact_scope_id_key")
@@ -407,9 +412,10 @@ model GenericOperationArtifact {
   @@map("generic_operation_artifact")
 }
 
-/// Append-only PERSONAL_DATA lookup. It contains only the existing rights-flow
-/// subject discriminator and row UUID; identity text and artifact bytes remain
-/// forbidden. One artifact can bind to exactly one DSR subject.
+/// Append-only PERSONAL_DATA lookup. It contains only the subject discriminator
+/// (`contact` | `company`, the DSR subjects, or `company_profile`, the tenant's own
+/// seller profile since 2026-10-14) and row UUID; identity text and artifact bytes
+/// remain forbidden. One artifact can bind to exactly one subject.
 model GenericOperationArtifactSubject {
   artifactId  String   @id @map("artifact_id") @db.Uuid
   scopeKey    String   @map("scope_key") @db.VarChar(200)
@@ -599,10 +605,26 @@ model GenericOperationArtifactObject {
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   artifacts GenericOperationArtifact[]
+  versions  GenericOperationArtifactObjectVersion[]
 
   @@id([sha256, privacyClass], map: "generic_operation_artifact_object_pkey")
-  @@unique([sha256, objectKey, sizeBytes, mediaType, privacyClass], map: "generic_operation_artifact_object_metadata_key")
+  @@unique([sha256, objectKey, sizeBytes, privacyClass], map: "generic_operation_artifact_object_content_key")
   @@map("generic_operation_artifact_object")
+}
+
+/// Every immutable S3 version a settlement recorded for one content object:
+/// the first write, each retention refresh, each re-write after a lifecycle
+/// deletion. Append-only; personal-data erasure addresses each one exactly.
+model GenericOperationArtifactObjectVersion {
+  sha256          String   @db.Char(64)
+  privacyClass    String   @map("privacy_class") @db.VarChar(40)
+  objectVersionId String   @map("object_version_id") @db.VarChar(1024)
+  firstSettledAt  DateTime @default(now()) @map("first_settled_at") @db.Timestamptz(3)
+
+  object GenericOperationArtifactObject @relation(fields: [sha256, privacyClass], references: [sha256, privacyClass], onDelete: Restrict, onUpdate: Restrict, map: "generic_operation_artifact_object_version_object_fkey")
+
+  @@id([sha256, privacyClass, objectVersionId], map: "generic_operation_artifact_object_version_pkey")
+  @@map("generic_operation_artifact_object_version")
 }
 
 model PersonalArtifactCleanupCommand {
@@ -775,6 +797,10 @@ model CompanyProfile {
   version        Int           @default(1) // optimistic lock (PRD 11.16)
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
+  /// 企业理解失败回写（2026-10-13）：某阶段重试用尽时记 `阶段:错误类型`（各一个封闭 token，无消息、无抓取内容），
+  /// 状态回到 DRAFT；新一轮 ENRICHING 清空。两列同空同非空，迁移里的 CHECK 只收这个形状。
+  understandingFailedAt  DateTime? @map("understanding_failed_at") @db.Timestamptz(3)
+  understandingLastError String?   @map("understanding_last_error") @db.VarChar(120)
 
   workspace                 Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   offerings                 Offering[]
@@ -1751,6 +1777,7 @@ model CanonicalCompany {
   emailGuessAttemptedAt       DateTime? @map("email_guess_attempted_at") // 决策人邮箱猜测尝试（选项 B P0.4）
 
   contacts                CanonicalContact[]
+  companyContactPoints    CompanyContactPoint[]
   leads                   Lead[]
   materializationOutcomes DiscoveryCompanyMaterializationOutcome[]
 
@@ -1807,6 +1834,32 @@ model ContactPoint {
   @@map("contact_point")
 }
 
+/// 公司级联系路径（BI-14）：公司官网首页上链到的联系页、Impressum 页、供应商页、公司 LinkedIn 页与 X 账号，
+/// 以及联系页上是否有联系表单。只存链接（https，无 query 与 fragment），数据分级只允许 green；
+/// 表里没有邮箱、电话或人名字段，kind 与 value 形状由数据库 CHECK 约束（迁移 20261011090000）。
+/// 自动来源只写 UNVERIFIED；VALID 只能由人给出（须有 updated_by）。公司主体 DSR 擦除时删除，复合外键随公司级联删除。
+model CompanyContactPoint {
+  id            String   @id @default(uuid()) @db.Uuid
+  workspaceId   String   @map("workspace_id") @db.Uuid
+  companyId     String   @map("company_id") @db.Uuid
+  kind          String // contact_page | impressum_page | contact_form | supplier_page | linkedin_company_page | x_company_account
+  value         String // https URL without query or fragment
+  status        String   @default("UNVERIFIED") // UNVERIFIED | VALID | INVALID
+  statusReason  String?  @map("status_reason") // OPERATOR_CONFIRMED | OPERATOR_REJECTED | REMOVED_FROM_SITE | CUSTOMER_BAD_CONTACT_PATH
+  dataClass     String   @default("green") @map("data_class") // green only
+  sourceKind    String   @map("source_kind") // homepage | contact_page | operator
+  providerKey   String   @map("provider_key") // company_contact | operator
+  parserVersion String   @map("parser_version") // company_contact/v1
+  firstSeenAt   DateTime @default(now()) @map("first_seen_at")
+  lastSeenAt    DateTime @map("last_seen_at")
+  updatedBy     String?  @map("updated_by") // set when a person changes the status
+
+  company CanonicalCompany @relation(fields: [workspaceId, companyId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict, map: "company_contact_point_company_fkey")
+
+  @@unique([workspaceId, companyId, kind, value])
+  @@map("company_contact_point")
+}
+
 /// 身份解析连接（PRD 8.8）：canonical 实体 ↔ raw 记录，可审计可回溯。
 model IdentityLink {
   id            String   @id @default(uuid()) @db.Uuid
@@ -1842,6 +1895,8 @@ model FieldEvidence {
   license        String   @default("sandbox") // sandbox | licensed | public | byo
   allowedActions Json?    @map("allowed_actions") // ['display','match','outreach']
   dataClass      String   @default("green") @map("data_class") // green（公司事实）| amber（职能邮箱 ePrivacy）| red（具名个人 GDPR Art.4）——收口⑥：替代 value JSON 里的 personal_data 代码纪律，可查询/可索引；喂 DataRightsService
+  /// 该事实来自哪个页面（https，≤2048；L1 交付闭环 §8）。可空：历史行与拿不到来源的写入点为 null，读时回退 raw_source_record 联表。
+  sourceUrl      String?  @map("source_url")
   fetchedAt      DateTime @default(now()) @map("fetched_at")
 
   cleanupAudits RawSourceFieldEvidenceCleanupAudit[]
@@ -2111,14 +2166,21 @@ model Lead {
   scores             Json?
   /// 评分依据：规则逐条评估结果 + 各维输入（审计/申诉用）
   scoreDetail        Json?      @map("score_detail")
+  /// 评分阶段最近一次写分的时刻（scoreCandidates 的 upsert 盖）。null = 评分从未跑过（queue 仍是 fit 门
+  /// 预置）或在本列加入前评的分。API 的 scored/queueBasis 与 LeadQualified 快照的 scored_at 读它。
+  scoredAt           DateTime?  @map("scored_at")
   version            Int        @default(1)
   createdAt          DateTime   @default(now()) @map("created_at")
   updatedAt          DateTime   @updatedAt @map("updated_at")
 
   canonicalCompany CanonicalCompany @relation(fields: [canonicalCompanyId], references: [id], onDelete: Cascade)
   decisions        LeadDecision[]
+  outcomes         LeadOutcome[]
+  outreachDrafts   LeadOutreachDraft[]
 
   @@unique([workspaceId, icpId, canonicalCompanyId])
+  // BI-23: composite tenant key for lead_outcome's (workspace_id, lead_id) foreign key.
+  @@unique([workspaceId, id])
   @@index([workspaceId])
   @@index([workspaceId, queue])
   // 下游阶段按「本 ICP 的 match」关联过滤 canonical（leads.some）+ qualify 查询「已判 Lead」。
@@ -2133,6 +2195,8 @@ model LeadDecision {
   leadId      String   @map("lead_id") @db.Uuid
   action      String // accept | reject
   reason      String?
+  /// BI-20：稳定的失败/未达成原因码（reason-codes.ts）。reject 必填（应用层强制），accept 可选。
+  reasonCode  String?  @map("reason_code") @db.VarChar(64)
   decidedBy   String   @map("decided_by") // 外部平台 user id（来自 token）
   createdAt   DateTime @default(now()) @map("created_at")
 
@@ -2141,6 +2205,61 @@ model LeadDecision {
   @@index([workspaceId])
   @@index([leadId])
   @@map("lead_decision")
+}
+
+/// 线索结果反馈（BI-23，交付闭环设计 §6）：客户或运营对已交付线索的判断。
+/// 只追加（改判再写一行）；按工作区 RLS 隔离，app_user 只有 SELECT/INSERT；
+/// 复合外键把每一行绑到同工作区的 lead，随 lead 删除。没有邮箱、电话或人名。
+model LeadOutcome {
+  id               String   @id @default(uuid()) @db.Uuid
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  leadId           String   @map("lead_id") @db.Uuid
+  /// 相关性 1–5（客户周报第 1 列）。
+  relevance        Int?
+  willingToContact Boolean? @map("willing_to_contact")
+  /// 失败/未达成或正向结果原因码（reason-codes.ts）。
+  reasonCode       String?  @map("reason_code") @db.VarChar(64)
+  note             String?
+  contacted        Boolean?
+  source           String // customer | operator
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  lead Lead @relation(fields: [workspaceId, leadId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict, map: "lead_outcome_lead_fkey")
+
+  @@index([workspaceId, leadId])
+  @@map("lead_outcome")
+}
+
+/// 首次联系开发信草稿（BI-15，交付闭环设计 §7）：模型按公司级事实与卖方资料生成，
+/// 只追加（同一线索的每一版一行，版本号从 1 递增），周报取最新一版。
+/// 平台不发送；正文末尾由代码（非模型）附上卖方自己的回复入口。
+model LeadOutreachDraft {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  leadId      String   @map("lead_id") @db.Uuid
+  /// 同一线索内从 1 递增；与 (workspace_id, lead_id) 一起唯一。
+  version     Int
+  /// 目标国语言的 BCP-47 主标签，如 de / en（由买方国家确定性推出，不取模型自述）。
+  language    String   @db.VarChar(16)
+  /// 模型草稿主题（目标国语言）。
+  subject     String   @db.VarChar(200)
+  /// 模型草稿正文 + 代码追加的回复入口尾注。
+  body        String
+  /// 中文译文（供运营审阅）。
+  bodyZh      String   @map("body_zh")
+  /// 模型自称引用过的事实键，已校验 ⊆ 输入事实键（未通过的草稿不落库）。
+  usedFacts   Json     @map("used_facts")
+  /// 实际产出该草稿的模型身份（上游上报值，可能是部署批准的同义替换）。
+  model       String   @db.VarChar(120)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  lead Lead @relation(fields: [workspaceId, leadId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict, map: "lead_outreach_draft_lead_fkey")
+
+  @@unique([workspaceId, leadId, version])
+  // The weekly report reads the newest version per lead; RLS pins workspace_id, so the
+  // lookup is by lead_id and this index fronts it.
+  @@index([leadId, version])
+  @@map("lead_outreach_draft")
 }
 
 // ── ICP & Buying Committee (理想客户画像, PRD 7.5 / 5.4) ────────────────────

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
@@ -14,6 +14,12 @@ import {
 import {
   type ImagePipelineRunner,
 } from './image-pipeline-runner';
+import {
+  attemptKeysFromMetadata,
+  reclaimSupersededImageVariants,
+  variantAttemptKeys,
+  type ImageVariantReclaimResult,
+} from './image-variant-reclaim';
 import {
   buildAssetVariantRecipeHash,
   projectDerivedImageManifest,
@@ -74,15 +80,6 @@ function jsonRecord(value: Prisma.JsonValue | null): Record<string, Prisma.JsonV
     : {};
 }
 
-function attemptKeysFromMetadata(metadata: Record<string, Prisma.JsonValue>): string[] {
-  const keys = Array.isArray(metadata.attemptKeys)
-    ? metadata.attemptKeys.filter((value): value is string => typeof value === 'string')
-    : [];
-  const reservation = jsonRecord(metadata.reservation ?? null);
-  if (typeof reservation.attemptKey === 'string') keys.push(reservation.attemptKey);
-  return [...new Set(keys)];
-}
-
 function safeMessage(error: unknown): string {
   const value = error instanceof Error ? error.message : String(error);
   return value.replace(/[\r\n]+/g, ' ').slice(0, 500);
@@ -119,6 +116,8 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 
 @Injectable()
 export class ImagePipelineService {
+  private readonly log = new Logger(ImagePipelineService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
@@ -317,9 +316,26 @@ export class ImagePipelineService {
       sourceMeta: meta,
     };
     await this.reconcileAttemptKeys(job, signal);
+    const reclaimed = await this.reclaimSupersededVariants(job, plans, signal);
+    if (reclaimed.status === 'skipped') {
+      this.log.warn(`superseded image variants of asset ${input.assetId} were not reclaimed: ${reclaimed.reason}`);
+    } else if (reclaimed.rows > 0) {
+      this.log.log(
+        `reclaimed ${reclaimed.rows} superseded image variants (${reclaimed.objects} objects) of asset ${input.assetId}`,
+      );
+    }
     const producerToken = randomUUID();
+    const reserve = () =>
+      this.reserveVariantSet(job, inspection, plans, producerToken).catch((error: unknown) => {
+        // Name the skip on any reservation failure: a budget refusal after a skipped reclamation is
+        // otherwise indistinguishable from one that reclamation would have prevented.
+        if (reclaimed.status !== 'skipped') throw error;
+        throw new Error(`${safeMessage(error)}; superseded variants were not reclaimed (${reclaimed.reason})`, {
+          cause: error,
+        });
+      });
     const waitDeadline = Date.now() + VARIANT_WAIT_TIMEOUT_MS;
-    while (!(await this.reserveVariantSet(job, inspection, plans, producerToken))) {
+    while (!(await reserve())) {
       throwIfAborted(signal);
       if (Date.now() >= waitDeadline) throw new Error('image variant reservation wait timed out');
       await sleep(VARIANT_WAIT_MS, signal);
@@ -592,26 +608,7 @@ export class ImagePipelineService {
     });
     const keysByRow = new Map<string, string[]>();
     for (const row of candidates) {
-      const canonicalPrefix =
-        `ws/${input.workspaceId}/${input.siteId}/variants/${input.assetId}/${row.recipeHash}.`;
-      const ext = row.objectKey.startsWith(canonicalPrefix)
-        ? row.objectKey.slice(canonicalPrefix.length)
-        : '';
-      if (!['avif', 'webp', 'jpg', 'png'].includes(ext)) {
-        throw new Error(`image variant canonical provenance conflicts for ${row.recipeHash}`);
-      }
-      const prefix = `ws/${input.workspaceId}/${input.siteId}/variant-attempts/${input.assetId}/`;
-      const suffix = `/${row.recipeHash}.${ext}`;
-      const keys = attemptKeysFromMetadata(jsonRecord(row.metadata));
-      for (const key of keys) {
-        const token = key.startsWith(prefix) && key.endsWith(suffix)
-          ? key.slice(prefix.length, -suffix.length)
-          : '';
-        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(token)) {
-          throw new Error(`image variant attempt provenance conflicts for ${row.recipeHash}`);
-        }
-      }
-      keysByRow.set(row.id, keys);
+      keysByRow.set(row.id, variantAttemptKeys(input, row));
     }
     const allKeys = [...new Set([...keysByRow.values()].flat())];
     if (allKeys.length === 0) return;
@@ -682,6 +679,26 @@ export class ImagePipelineService {
         });
       }
     });
+  }
+
+  /** Frees the budget superseded variant sets hold before a new set is reserved. */
+  private reclaimSupersededVariants(
+    input: {
+      workspaceId: string;
+      siteId: string;
+      assetId: string;
+      sourceHash: string;
+      sourceObjectKey: string;
+    },
+    plans: readonly PlannedImageVariant[],
+    signal?: AbortSignal,
+  ): Promise<ImageVariantReclaimResult> {
+    return reclaimSupersededImageVariants(
+      { prisma: this.prisma, storage: this.storage },
+      input,
+      new Set(plans.map((plan) => plan.recipeHash)),
+      signal,
+    );
   }
 
   private async reserveVariantSet(

@@ -21,6 +21,7 @@ import {
   tradeRoleFor,
 } from './public-web.provider';
 import { getTask } from '../../ai-tasks/task-registry';
+import { validateRawSourceProviderPayload } from '../raw-source-provider-schema';
 
 const CTX: ExecutionContext = {
   workspaceId: '00000000-0000-4000-8000-0000000000a1',
@@ -94,10 +95,27 @@ describe('search language and trade role (G3 5.3)', () => {
     expect(queries.join(' | ')).not.toMatch(/manufacturer|supplier|Großhandel|Hersteller/i);
     expect(queries.length).toBeGreaterThan(0);
   });
+
+  it('never puts the Chinese words of a 2026-10-07 plan into a German search string', () => {
+    const queries = buildSearchQueries(distributorQuery({
+      filters: { country: '德国', industry: '工业泵', trade_side: 'distributor', source_hint: 'public_web' },
+      keywords: ['工业泵 分销商 进口商', 'Pumpen Vertrieb Importeur Deutschland', '流体技术 批发 库存', '潜污泵 离心泵 经销商'],
+    }));
+    expect(queries).toHaveLength(3);
+    expect(queries.join(' | ')).not.toMatch(/\p{Script=Han}/u);
+    expect(queries.every((q) => q.startsWith('Pumpen Vertrieb Importeur Deutschland '))).toBe(true);
+  });
+
+  it('builds no search at all when every planner word is Chinese', () => {
+    expect(buildSearchQueries(distributorQuery({
+      filters: { country: '德国', industry: '工业泵', trade_side: 'distributor' },
+      keywords: ['德国 泵 批发商'],
+    }))).toEqual([]);
+  });
 });
 
 describe('PublicWebDiscoveryProvider search-first discovery (G3 5.3)', () => {
-  function searchBroker(results: Array<{ url: string; title: string; content?: string }>) {
+  function searchBroker(results: Array<{ url: string; title?: string }>) {
     return broker(async (toolId) => {
       if (toolId === 'searxng.search') return { data: { results }, costCents: 0 };
       throw new Error(`unexpected tool ${toolId}`);
@@ -106,9 +124,9 @@ describe('PublicWebDiscoveryProvider search-first discovery (G3 5.3)', () => {
 
   it('never fetches a page before a company exists and judges from search hits in the target language', async () => {
     const executionBroker = searchBroker([
-      { url: 'https://www.pumpen-handel.example/', title: 'Pumpen Handel GmbH – Großhandel für Pumpen', content: 'Ihr Pumpen-Großhändler: Grundfos, Wilo, Leo' },
-      { url: 'https://www.pumpen-handel.example/produkte', title: 'Produkte', content: 'Kreiselpumpen und Tauchpumpen ab Lager' },
-      { url: 'https://pompes.example.fr/', title: 'Pompes France', content: 'distributeur' },
+      { url: 'https://www.pumpen-handel.example/', title: 'Pumpen Handel GmbH – Großhandel für Pumpen' },
+      { url: 'https://www.pumpen-handel.example/produkte', title: 'Produkte' },
+      { url: 'https://pompes.example.fr/', title: 'Pompes France' },
     ]);
     mocks.executeStructuredTaskWithRuntime.mockResolvedValue({
       data: { is_company_site: true, name: 'Pumpen Handel GmbH', country: 'Germany' },
@@ -127,7 +145,9 @@ describe('PublicWebDiscoveryProvider search-first discovery (G3 5.3)', () => {
     expect(mocks.executeStructuredTaskWithRuntime).toHaveBeenCalledOnce();
     const [, modelInput] = mocks.executeStructuredTaskWithRuntime.mock.calls[0]!;
     expect(modelInput.prompt).toContain('Pumpen Handel GmbH – Großhandel für Pumpen');
-    expect(modelInput.prompt).toContain('Kreiselpumpen und Tauchpumpen ab Lager');
+    expect(modelInput.prompt).toContain('- 标题：Produkte\n  URL：https://www.pumpen-handel.example/produkte');
+    // searxng.search returns only url and title (searxng-search/v1): no empty snippet lines.
+    expect(modelInput.prompt).not.toContain('摘要');
     expect(modelInput.prompt).not.toContain('Pompes France');
     expect(result.records).toHaveLength(1);
     expect(result.records[0]).toMatchObject({
@@ -138,6 +158,23 @@ describe('PublicWebDiscoveryProvider search-first discovery (G3 5.3)', () => {
     });
   });
 
+  it('skips a domain this run already accepted before spending a model call', async () => {
+    const executionBroker = searchBroker([
+      { url: 'https://already-seen.example/', title: 'Pumpen Handel GmbH – Großhandel' },
+      { url: 'https://fresh.example/', title: 'Frische Pumpen AG – Kreiselpumpen Vertrieb' },
+    ]);
+    mocks.executeStructuredTaskWithRuntime.mockResolvedValue({
+      data: { is_company_site: true, name: 'Frische Pumpen AG', country: 'Germany' },
+      provider: 'gateway', model: 'model', runtimeExecution: {},
+    });
+
+    const result = await new PublicWebDiscoveryProvider({ gateway: {} as never, broker: executionBroker })
+      .discoverCompanies(distributorQuery(), CTX, { knownExternalIds: ['already-seen.example'] });
+
+    expect(mocks.executeStructuredTaskWithRuntime).toHaveBeenCalledOnce();
+    expect(result.records.map((record) => record.externalId)).toEqual(['fresh.example']);
+  });
+
   it('skips candidates with no usable search text without a model call', async () => {
     mocks.executeStructuredTaskWithRuntime.mockResolvedValue({
       data: { is_company_site: true, name: 'X' }, provider: 'gateway', model: 'model', runtimeExecution: {},
@@ -145,6 +182,55 @@ describe('PublicWebDiscoveryProvider search-first discovery (G3 5.3)', () => {
     const result = await new PublicWebDiscoveryProvider({
       gateway: {} as never,
       broker: searchBroker([{ url: 'https://empty.example/', title: '   ' }]),
+    }).discoverCompanies(distributorQuery(), CTX);
+    expect(result.records).toEqual([]);
+    expect(mocks.executeStructuredTaskWithRuntime).not.toHaveBeenCalled();
+  });
+
+  it('returns records the Raw governance accepts from www hits and a German answer (run 733fbf03)', async () => {
+    const executionBroker = searchBroker([
+      { url: 'https://www.pumpen-mueller.de/', title: 'Pumpen Müller GmbH & Co. KG – Kreiselpumpen Großhandel' },
+      { url: 'https://www.pumpen-mueller.de/produkte/tauchpumpen', title: 'Tauchpumpen | Pumpen Müller' },
+    ]);
+    mocks.executeStructuredTaskWithRuntime.mockResolvedValue({
+      data: {
+        is_company_site: true,
+        name: 'Pumpen Müller GmbH & Co. KG',
+        country: 'Germany',
+        industry: 'pump wholesale',
+        products: ['Kreiselpumpen', 'Tauchpumpen', 'centrifugal pumps'],
+        keywords: ['Großhandel', 'industrial pumps'],
+        evidence: 'Pumpen Müller GmbH & Co. KG – Kreiselpumpen Großhandel',
+        confidence: 0.85,
+      },
+      provider: 'gateway', model: 'model', runtimeExecution: {},
+    });
+
+    const result = await new PublicWebDiscoveryProvider({ gateway: {} as never, broker: executionBroker })
+      .discoverCompanies(distributorQuery(), CTX);
+
+    expect(result.records).toHaveLength(1);
+    const validation = validateRawSourceProviderPayload('public_web', result.records[0]);
+    expect(validation).toMatchObject({
+      ok: true,
+      value: {
+        externalId: 'pumpen-mueller.de',
+        country: 'DE',
+        attributes: { products: ['centrifugal pumps'], keywords: ['industrial pumps'] },
+        provenance: { sourceUrl: 'https://pumpen-mueller.de/' },
+      },
+    });
+  });
+
+  it('never judges a Wikidata page as a company site', async () => {
+    // Raw would match the record to the seeded www.wikidata.org policy, which the database writer
+    // does not apply to the bare wikidata.org source page: the write would raise.
+    mocks.executeStructuredTaskWithRuntime.mockResolvedValue({
+      data: { is_company_site: true, name: 'Pumpen Müller GmbH' }, provider: 'gateway', model: 'model', runtimeExecution: {},
+    });
+    const result = await new PublicWebDiscoveryProvider({
+      gateway: {} as never,
+      broker: searchBroker([{ url: 'https://www.wikidata.org/wiki/Q42', title: 'Pumpen Müller GmbH - Wikidata' }]),
     }).discoverCompanies(distributorQuery(), CTX);
     expect(result.records).toEqual([]);
     expect(mocks.executeStructuredTaskWithRuntime).not.toHaveBeenCalled();
@@ -206,7 +292,7 @@ describe('search-first review follow-ups (G3 5.3)', () => {
 
   it('stores only the sanitized page URL (no query string) as provenance', async () => {
     const executionBroker = broker(async () => ({
-      data: { results: [{ url: 'https://shop.pumpen.example/kontakt?email=max%40pumpen.example&utm_source=x', title: 'Pumpen Shop GmbH', content: 'Großhandel' }] },
+      data: { results: [{ url: 'https://shop.pumpen.example/kontakt?email=max%40pumpen.example&utm_source=x', title: 'Pumpen Shop GmbH' }] },
       costCents: 0,
     }));
     mocks.executeStructuredTaskWithRuntime.mockResolvedValue({

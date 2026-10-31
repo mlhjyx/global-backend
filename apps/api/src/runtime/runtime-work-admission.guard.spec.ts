@@ -1,7 +1,10 @@
 import 'reflect-metadata';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
-import type { ExecutionContext } from '@nestjs/common';
+import {
+  type ExecutionContext,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { describe, expect, it } from 'vitest';
 
@@ -13,6 +16,45 @@ import { PlatformTargetLookupController } from '../platform-authority/platform-t
 import { READ_ONLY_CONTROL_PLANE_METADATA } from './read-only-control-plane.decorator';
 
 const readySnapshot = Object.freeze({ status: 'ready' as const });
+const PLATFORM_WORKER_NOT_READY = Object.freeze({
+  status: 'failed' as const,
+  code: 'PLATFORM_WORKER_NOT_READY',
+});
+// The hard component names the readiness service reports (its initial
+// snapshot carries every one of them).
+const HARD_COMPONENTS = Object.keys(
+  new RuntimeReadinessService(
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+  ).current().components,
+);
+
+function notReadySnapshot(overrides: Readonly<Record<string, unknown>>) {
+  return Object.freeze({
+    status: 'not_ready' as const,
+    components: Object.freeze({
+      ...Object.fromEntries(
+        HARD_COMPONENTS.map((name) => [name, { status: 'ok' }]),
+      ),
+      ...overrides,
+    }),
+  });
+}
+
+function guardWith(
+  admitted: boolean,
+  snapshot: Readonly<Record<string, unknown>>,
+): RuntimeWorkAdmissionGuard {
+  return new RuntimeWorkAdmissionGuard(
+    { current: () => ({ admitted }) } as never,
+    { current: () => snapshot } as never,
+    new Reflector(),
+  );
+}
 
 class OrdinaryController {
   mutate(): void {}
@@ -124,6 +166,82 @@ describe('RuntimeWorkAdmissionGuard', () => {
     expect(() => guard.canActivate(context('POST'))).toThrow(
       'RUNTIME_ADMISSION_CLOSED',
     );
+  });
+
+  it('admits customer writes while the separate platform worker is only absent or not yet READY', () => {
+    const guard = guardWith(
+      true,
+      notReadySnapshot({ platform_worker: PLATFORM_WORKER_NOT_READY }),
+    );
+
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+      expect(guard.canActivate(context(method))).toBe(true);
+    }
+  });
+
+  it('keeps the stable 503 for a platform worker integrity failure or a missing customer dependency', () => {
+    for (const overrides of [
+      {
+        platform_worker: {
+          status: 'failed',
+          code: 'PLATFORM_WORKER_MIXED_RELEASE_IDENTITY',
+        },
+      },
+      {
+        platform_worker: {
+          status: 'failed',
+          code: 'WORKER_TEMPORAL_IDENTITY_INVALID',
+        },
+      },
+      {
+        platform_worker: {
+          status: 'failed',
+          code: 'RUNTIME_PROCESS_LEASE_UNAVAILABLE',
+        },
+      },
+      {
+        platform_worker: {
+          status: 'not_proven',
+          code: 'RUNTIME_READINESS_SNAPSHOT_UNAVAILABLE',
+        },
+      },
+      { worker: { status: 'failed', code: 'MATCHING_WORKER_NOT_READY' } },
+      {
+        worker: { status: 'failed', code: 'MATCHING_WORKER_NOT_READY' },
+        platform_worker: PLATFORM_WORKER_NOT_READY,
+      },
+    ]) {
+      const guard = guardWith(true, notReadySnapshot(overrides));
+      let error: unknown;
+      try {
+        guard.canActivate(context('POST'));
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toBeInstanceOf(ServiceUnavailableException);
+      expect((error as ServiceUnavailableException).getStatus()).toBe(503);
+      expect((error as ServiceUnavailableException).getResponse()).toEqual({
+        message: 'RUNTIME_ADMISSION_CLOSED',
+        error: {
+          code: 'RUNTIME_ADMISSION_CLOSED',
+          message: 'managed runtime is not ready to accept new work',
+        },
+      });
+    }
+  });
+
+  it('keeps static release admission in front of the platform worker tolerance', () => {
+    const guard = guardWith(
+      false,
+      notReadySnapshot({ platform_worker: PLATFORM_WORKER_NOT_READY }),
+    );
+
+    expect(guard.canActivate(context('GET'))).toBe(true);
+    for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+      expect(() => guard.canActivate(context(method))).toThrow(
+        'RUNTIME_ADMISSION_CLOSED',
+      );
+    }
   });
 
   it('admits only code-owned read-only control-plane metadata while ordinary work stays closed', () => {

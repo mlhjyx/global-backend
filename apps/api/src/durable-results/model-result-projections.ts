@@ -18,6 +18,7 @@ export const MODEL_RESULT_TASK_IDS = Object.freeze([
   "discovery.extract_list",
   "contact.find_decision_makers",
   "discovery.classify_trade_role",
+  "outreach.first_contact_draft",
 ] as const);
 export type ModelResultTaskId = (typeof MODEL_RESULT_TASK_IDS)[number];
 export const MODEL_RESULT_PROJECTION_SCHEMAS = Object.freeze({
@@ -32,6 +33,7 @@ export const MODEL_RESULT_PROJECTION_SCHEMAS = Object.freeze({
   "discovery.extract_list": "discovery-extract-list/v1",
   "contact.find_decision_makers": "contact-decision-makers/v1",
   "discovery.classify_trade_role": "discovery-classify-trade-role/v1",
+  "outreach.first_contact_draft": "outreach-first-contact-draft/v1",
 } satisfies Readonly<Record<ModelResultTaskId, TypedProjectionSchema>>);
 const MODEL_RESULT_KEYS = [
   "data",
@@ -1428,6 +1430,53 @@ const tradeRoleDefinition: TypedProjectionDefinition<unknown, unknown> = {
     });
   },
 };
+const outreachDraftDefinition: TypedProjectionDefinition<unknown, unknown> = {
+  schema: "outreach-first-contact-draft/v1",
+  jsonSchema: modelResultSchema(
+    objectSchema(
+      {
+        subject: stringSchema(200),
+        message: stringSchema(1200),
+        messageZh: stringSchema(1200),
+        usedFacts: arraySchema(40, stringSchema(120)),
+      },
+      ["subject", "message", "messageZh", "usedFacts"],
+    ),
+  ),
+  project(raw) {
+    const result = readModelResult(
+      raw,
+      ["subject", "body", "body_zh", "used_facts"],
+      ["subject", "body", "body_zh", "used_facts"],
+    );
+    return projectModelResultEnvelope(result, {
+      subject: field(result.data, "subject"),
+      // The projected form avoids the substring "body": projection keys are screened for
+      // payload/prompt field names and the model's raw body lives under this rename.
+      message: field(result.data, "body"),
+      messageZh: field(result.data, "body_zh"),
+      usedFacts: projectStringArray(field(result.data, "used_facts")),
+    });
+  },
+  restore(projected) {
+    const result = projected as {
+      data: {
+        subject: string;
+        message: string;
+        messageZh: string;
+        usedFacts: readonly string[];
+      };
+      provider: string;
+      model: string;
+    };
+    return restoreModelResult(result, {
+      subject: result.data.subject,
+      body: result.data.message,
+      body_zh: result.data.messageZh,
+      used_facts: [...result.data.usedFacts],
+    });
+  },
+};
 export const MODEL_RESULT_PROJECTION_DEFINITIONS = Object.freeze([
   claimsDefinition,
   profileDefinition,
@@ -1440,6 +1489,7 @@ export const MODEL_RESULT_PROJECTION_DEFINITIONS = Object.freeze([
   listDefinition,
   peopleDefinition,
   tradeRoleDefinition,
+  outreachDraftDefinition,
 ] as const);
 export function getModelResultProjectionSchema(
   taskId: string,

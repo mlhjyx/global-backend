@@ -1,0 +1,107 @@
+{
+  "classification": "FROZEN_AUDIT_EVIDENCE",
+  "scope": "Official npm production audit and exact-lock freshness for the 2026-10-10 monthly dependency refresh and baseline renewal; not runtime/release/UAT evidence",
+  "release_age_review": {
+    "reason": "pnpm 9 has no minimum release age, and a monthly in-range update locks versions published only hours earlier; a freshly published version is the usual entry point of a compromised maintainer account.",
+    "method": "Registry publish time of every newly locked version; for versions published at or after 2026-10-06T00:00:00Z (UTC), versions whose publish time could not be read on the first fetch, and the four override bumps: npm provenance attestations (dist.attestations), the publishing account compared with the preceding versions, and install scripts.",
+    "newly_locked_versions": 164,
+    "reviewed_versions": 126,
+    "with_provenance": 99,
+    "without_provenance_same_publisher": 26,
+    "publisher_changes": 1,
+    "install_scripts": [
+      "nx@23.3.0 postinstall (provenance, GitHub Actions)"
+    ],
+    "publisher_change": {
+      "package": "chromium-bidi",
+      "from": "17.0.2 (GitHub Actions, provenance)",
+      "to": "157.0.8090-0 (chrome-devtools-npm, no provenance)",
+      "accepted_because": "puppeteer-core 25.13.0, itself published with provenance, pins this exact version; chromium-bidi's source moved into Chromium (third_party/chromium-bidi) and its versions now follow Chrome; chrome-devtools-npm is a listed maintainer next to mathias and google-wombot; no install scripts."
+    },
+    "result": "No version rolled back."
+  },
+  "records": [
+    {
+      "audit": {
+        "actions": [],
+        "advisories": {},
+        "muted": [],
+        "metadata": {
+          "vulnerabilities": {
+            "info": 0,
+            "low": 0,
+            "moderate": 0,
+            "high": 0,
+            "critical": 0
+          },
+          "dependencies": 831,
+          "devDependencies": 0,
+          "optionalDependencies": 0,
+          "totalDependencies": 831
+        }
+      },
+      "before": {
+        "schema_version": "production-dependency-baseline-freshness-result/v1",
+        "result": "AUDIT_INVALID_HOLD",
+        "hold": true,
+        "current_advisories": 0,
+        "resolved_advisories": [],
+        "issues": [
+          "BASELINE_SOURCE_LOCK_MISMATCH"
+        ],
+        "provenance": {
+          "subject_commit": "fb6adeb3d23f34ce955a6e597099dd61ef5c3ed1",
+          "lockfile_digest": "sha256:14962679245f94987162656a5c23354f5ca92f59d4643c2d74d1a9fbf17a80b5",
+          "verifier_digest": "sha256:3f85820122b15ca96ff62ecb7ec58e162b14ff2b4029355de0a4b0bee376539c",
+          "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
+          "audit_digest": "sha256:fdc6a5ead508bf04ea1bc35045ace0dd8ff7be76c8dcbed0834bde3ebcc1021a",
+          "observed_at": "2026-10-10T13:59:19.000Z",
+          "registry": "https://registry.npmjs.org/"
+        }
+      },
+      "after": {
+        "schema_version": "production-dependency-baseline-freshness-result/v1",
+        "result": "FRESH",
+        "hold": false,
+        "current_advisories": 0,
+        "resolved_advisories": [],
+        "issues": [],
+        "provenance": {
+          "subject_commit": "fb6adeb3d23f34ce955a6e597099dd61ef5c3ed1",
+          "lockfile_digest": "sha256:14962679245f94987162656a5c23354f5ca92f59d4643c2d74d1a9fbf17a80b5",
+          "verifier_digest": "sha256:3f85820122b15ca96ff62ecb7ec58e162b14ff2b4029355de0a4b0bee376539c",
+          "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
+          "audit_digest": "sha256:fdc6a5ead508bf04ea1bc35045ace0dd8ff7be76c8dcbed0834bde3ebcc1021a",
+          "observed_at": "2026-10-10T13:59:34.000Z",
+          "registry": "https://registry.npmjs.org/"
+        }
+      }
+    }
+  ],
+  "full_audit": {
+    "command": "pnpm audit --registry=https://registry.npmjs.org --json (development dependencies included)",
+    "subject_commit": "fb6adeb3d23f34ce955a6e597099dd61ef5c3ed1",
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 2,
+      "critical": 0
+    },
+    "advisories": [
+      {
+        "package": "@faker-js/faker",
+        "ghsa": "GHSA-qxc2-j82w-r537",
+        "severity": "high",
+        "vulnerable_versions": "<=10.4.0"
+      },
+      {
+        "package": "braces",
+        "ghsa": "GHSA-vfj7-8cjw-p6xm",
+        "severity": "high",
+        "vulnerable_versions": "<=3.0.3"
+      }
+    ],
+    "note": "Both were already open on main (Dependabot alerts 80 and 118): faker only in the Prism mock chain, braces with no patched release. The undici 7.29.0 that nx 23.3.0 pins exactly is overridden to 7.30.0 with the range selector undici@>=7.0.0 <7.29.1; pnpm applies it to every declared range that intersects the selector, so the production @ai-sdk/provider-utils (^7.29.0) is held at the same 7.30.0. A parent-scoped nx>undici key is not admitted by the dependency source policy."
+  }
+}

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { ProviderOutputError } from './provider-output-error';
+import {
+  ExternalActionDeniedError,
+  ProviderOutputError,
+  ProviderSettlementError,
+  TaskOutputValidationError,
+} from './provider-output-error';
 
 /**
  * ProviderOutputError（M1-b fast-follow · 改动 2）：provider 消费了 token 但结构化输出不可用
@@ -34,5 +39,42 @@ describe('ProviderOutputError', () => {
   it('can represent a failed schema-repair pair of provider calls', () => {
     const err = new ProviderOutputError('repair failed', undefined, { callCount: 2 });
     expect(err.callCount).toBe(2);
+  });
+
+  it('takes its reason code from the leading code token, never from the detail after it', () => {
+    expect(new ProviderOutputError('STRUCTURED_OUTPUT_TRUNCATED').reasonCode).toBe(
+      'STRUCTURED_OUTPUT_TRUNCATED',
+    );
+    expect(
+      new ProviderOutputError('VISION_REVIEW_SCHEMA_INVALID: /name must be shorter than 200: "Acme"')
+        .reasonCode,
+    ).toBe('VISION_REVIEW_SCHEMA_INVALID');
+  });
+
+  it('prefers an explicit reason code and marks a descriptive message without one as unclassified', () => {
+    expect(
+      new ProviderOutputError('gateway m: structured output is not valid JSON', undefined, {
+        reasonCode: 'STRUCTURED_OUTPUT_NOT_JSON',
+      }).reasonCode,
+    ).toBe('STRUCTURED_OUTPUT_NOT_JSON');
+    expect(new ProviderOutputError('gateway m: something odd').reasonCode).toBe(
+      'PROVIDER_OUTPUT_UNCLASSIFIED',
+    );
+  });
+
+  it('refuses an explicit reason code that could carry free text', () => {
+    expect(
+      () => new ProviderOutputError('boom', undefined, { reasonCode: 'not a code: Acme GmbH' }),
+    ).toThrow('PROVIDER_OUTPUT_REASON_CODE_INVALID');
+  });
+
+  it('gives task-gate rejections, settlement failures and compliance denials their own reason codes', () => {
+    expect(new TaskOutputValidationError('task output hard gate rejected: x').reasonCode).toBe(
+      'TASK_OUTPUT_REJECTED',
+    );
+    expect(new ProviderSettlementError('MODEL_SETTLEMENT_UPSTREAM_ACK_UNKNOWN').reasonCode).toBe(
+      'MODEL_SETTLEMENT_UPSTREAM_ACK_UNKNOWN',
+    );
+    expect(new ExternalActionDeniedError().reasonCode).toBe('EXTERNAL_ACTION_DENIED');
   });
 });

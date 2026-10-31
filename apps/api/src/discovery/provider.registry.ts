@@ -14,6 +14,7 @@ import { TradeFairDiscoveryProvider } from './providers/trade-fair.provider';
 import { TedDiscoveryProvider } from './providers/ted.provider';
 import { OpenFdaDiscoveryProvider } from './providers/openfda.provider';
 import { DecisionMakerContactAdapter } from './providers/decision-maker.provider';
+import { SocialPresenceContactAdapter } from './providers/social-presence.provider';
 import { CompaniesHouseContactProvider } from './providers/companies-house.provider';
 import { InpiRneContactProvider } from './providers/inpi-rne.provider';
 import { GooglePatentsInventorProvider } from './providers/bigquery-patents.provider';
@@ -31,6 +32,9 @@ import {
   MAX_COMPANY_DISCOVERY_ADAPTERS,
   MAX_CONTACT_DISCOVERY_ADAPTERS,
 } from './execution-envelope';
+import { PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN } from './source-policy-scope';
+import type { CompanyDiscoverySource } from './plan-query-sources';
+import { declaresDiscoveryCompanyLineage } from './company-discovery-lineage';
 
 /** data_provider（+ 可选 source_policy）表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
 type ProviderDb = {
@@ -115,6 +119,9 @@ export class DiscoveryProviderRegistry {
     // UK Companies House 董事发现（待办 3 第一个身份源；官方注册处 API，Basic auth）——contact_discovery 类。
     // 不依赖 gateway（结构化 API，无 LLM）；GB 门外/无 broker/无 API key 时 fail-safe 返空（天然 no-op）。
     // 董事经 externalIds(uk-ch-officer) 走 resolvePersonIdentity Tier 0 精确并（同一董事跨源自动并成一条）。
+    // 社媒/渠道发现（M2a：SearXNG 索引片段里的 LinkedIn/Xing 公开标题 → 姓名+职务）。
+    // 只读搜索引擎已索引的公开片段，不登录、不抓目标站；company 名不匹配的结果一律丢弃。
+    this.contacts.push(new SocialPresenceContactAdapter({ broker }));
     this.contacts.push(new CompaniesHouseContactProvider({ broker }));
     // 法国 dirigeants 发现（待办 3 第三个身份源；开放政务 API Recherche d'entreprises，无鉴权）——contact_discovery 类。
     // 不依赖 gateway（结构化 API，无 LLM）；FR 门外/无 broker 时 fail-safe 返空（天然 no-op）。
@@ -172,6 +179,30 @@ export class DiscoveryProviderRegistry {
       update: {},
       create: { key: 'public_web', class: 'public_intelligence', status: 'ENABLED', costPerCallCents: 0 },
     });
+    // public_web 的「公司自有官网」通用 source_policy（保留键，不是主机名，Broker 与各处 SUSPENDED
+    // 黑名单都查不到它）。只在 Raw 入库兜底：来源主机就是记录自己的域名、且没有逐域策略覆盖该主机
+    // 时才用；逐域策略（含 SUSPENDED）永远优先。update: {} —— 运维改成 SUSPENDED 或改保留期后，
+    // 启动 seed 不会改回；删掉无效（下次启动重建），全停请改 SUSPENDED。保留期只能在 1–3650 天，
+    // 越界会让每条带公开网页命中的查询在写入时失败；用 SQL 改时同时 SET updated_at = now()。设计：
+    // docs/superpowers/plans/2026-10-09-public-web-company-site-source-policy.md §4
+    if (db.sourcePolicy) {
+      await db.sourcePolicy.upsert({
+        where: { domain: PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN },
+        update: {},
+        create: {
+          domain: PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN,
+          sourceType: 'official_website',
+          accessMode: 'crawl',
+          reviewStatus: 'APPROVED',
+          robotsStatus: 'UNREVIEWED',
+          termsStatus: 'UNREVIEWED',
+          personalData: true,
+          allowedPurpose: ['discovery', 'enrichment'],
+          retentionDays: 365,
+          notes: 'public_web 公司自有官网通用策略（保留键，非主机名；产品负责人 2026-10-09 决定）。只在 Raw 入库兜底：来源主机等于记录自身域名、且没有逐域策略覆盖该主机时适用，逐域策略（含 SUSPENDED）优先。发现阶段只交搜索标题与 URL，不存页面正文。robots 与站点条款无法逐站审，如实 UNREVIEWED；站方有异议即逐域登记 SUSPENDED 封该站。',
+        },
+      });
+    }
     await db.dataProvider.upsert({
       where: { key: 'wikidata' },
       update: {},
@@ -297,6 +328,14 @@ export class DiscoveryProviderRegistry {
       update: {},
       create: { key: 'website_profile', class: 'public_intelligence', status: 'DISABLED', costPerCallCents: 0 },
     });
+    // BI-14 公司级联系路径（随官网画像：首页上的联系页 / Impressum / 供应商页 / 公司 LinkedIn 与 X 链接，
+    // 加渲染联系页看有没有表单，只存链接）。默认 DISABLED：开关由 D9 拍板；关闭时不渲染、不写 company_contact_point。
+    // update:{} 不覆盖运维手动改过的状态。
+    await db.dataProvider.upsert({
+      where: { key: 'company_contact' },
+      update: {},
+      create: { key: 'company_contact', class: 'public_intelligence', status: 'DISABLED', costPerCallCents: 0 },
+    });
     await db.dataProvider.upsert({
       where: { key: 'smtp_self' },
       update: {},
@@ -307,6 +346,12 @@ export class DiscoveryProviderRegistry {
       where: { key: 'decision_maker' },
       update: {},
       create: { key: 'decision_maker', class: 'contact_discovery', status: 'ENABLED', costPerCallCents: 0 },
+    });
+    // 社媒/渠道发现（SearXNG 索引里的 LinkedIn/Xing 公开标题）——零成本；kill-switch 走本表 status。
+    await db.dataProvider.upsert({
+      where: { key: 'social_presence' },
+      update: {},
+      create: { key: 'social_presence', class: 'contact_discovery', status: 'ENABLED', costPerCallCents: 0 },
     });
     // UK Companies House 董事发现（待办 3 第一个身份源）——官方注册处 API（Basic auth）。零鉴权成本、costPerCallCents=0。
     // 无 API key 时 provider fail-safe 返空即天然 no-op（key 缺失不阻断其余联系人源）。
@@ -442,10 +487,38 @@ export class DiscoveryProviderRegistry {
     });
   }
 
-  /** 某 source_class 当前 ENABLED 的公司发现适配器，保持显式注册顺序；调用方负责 fan-out。 */
+  /**
+   * Every (source class, provider key) a discovery plan query can route to, in
+   * registration order (BI-30), with whether its adapter declares governed
+   * company lineage. Fixed for the process; `data_provider.status` and the
+   * lineage gate decide which of them run.
+   */
+  companyDiscoverySources(): CompanyDiscoverySource[] {
+    return this.discovery.flatMap((adapter) => {
+      const hasCompanyLineage = declaresDiscoveryCompanyLineage(adapter);
+      return adapter.classes.map((sourceClass) => ({
+        sourceClass,
+        providerKey: adapter.key,
+        hasCompanyLineage,
+      }));
+    });
+  }
+
+  /** The company discovery sources whose data_provider row is ENABLED now (BI-30 planner input). */
+  async enabledCompanyDiscoverySources(db: ProviderDb): Promise<CompanyDiscoverySource[]> {
+    const enabled = await this.enabledKeys(db);
+    return this.companyDiscoverySources().filter((source) => enabled.has(source.providerKey));
+  }
+
+  /**
+   * 某 source_class 当前 ENABLED、且声明了受治理公司血缘的公司发现适配器，保持显式注册顺序；
+   * 调用方负责 fan-out。血缘闸门：没有血缘的源即使被误开也不路由（否则 run 会卡在物化），
+   * 路由不到任何适配器的查询由调用方跳过，原因由 planQuerySkipReason 判（无血缘记 SOURCE_LINEAGE_UNAVAILABLE）。
+   */
   async routeCompanyDiscovery(db: ProviderDb, sourceClass: SourceClass): Promise<CompanyDiscoveryAdapter[]> {
     const enabled = await this.enabledKeys(db);
-    return this.discovery.filter((a) => a.classes.includes(sourceClass) && enabled.has(a.key));
+    return this.discovery.filter((a) =>
+      a.classes.includes(sourceClass) && enabled.has(a.key) && declaresDiscoveryCompanyLineage(a));
   }
 
   async routeContactDiscovery(db: ProviderDb): Promise<ContactDiscoveryAdapter[]> {

@@ -23,6 +23,11 @@ export interface RuleEvaluation {
   field: string;
   operator: string;
   outcome: RuleOutcome;
+  /**
+   * 评分规则 v3：权威 Fit（ICP 资格门）存在时，MUST_HAVE 的镜像 EXCLUSION 的命中只记录、不改判定
+   *（`QualifyOptions.mirrorExclusionsAdvisory`）。只在为 true 时出现。
+   */
+  advisory?: true;
 }
 
 export interface QualifyResult {
@@ -33,16 +38,40 @@ export interface QualifyResult {
   evaluations: RuleEvaluation[];
 }
 
+export interface QualifyOptions {
+  /**
+   * MUST_HAVE 的镜像 EXCLUSION（`mirrorExclusionRuleIndexes`：同 field 同 value、否定操作符）只评估、只记录
+   *（evaluation.advisory=true），不产生 `exclude`。评分在 ICP 资格门（LLM 四门）已给出权威 Fit 时打开：ICP 生成
+   * 常把 MUST_HAVE 镜像成否定型 EXCLUSION（MUST_HAVE `keywords contains "泵"` + EXCLUSION `keywords not_contains "泵"`），
+   * 而公司属性是受控英文词表、永远不含中文，镜像规则对每家公司都 pass，带 keywords 的公司一律 rejected
+   *（xin ICP 22202d3c：6 条镜像）。
+   * 只降级镜像（W5-f 收窄）：不是镜像的否定型 EXCLUSION（如用户手加的 `country not_in [DE, AT, CH]`）与正向
+   * EXCLUSION（contains / in / eq / gte / lte / matches）一样照旧排除、最高优先；`lintQualificationRules` 对前者提示。
+   */
+  mirrorExclusionsAdvisory?: boolean;
+}
+
+/** 否定操作符：「属性存在且不含/不等/不在 → pass」，作为 EXCLUSION 时与 MUST_HAVE 互为镜像。 */
+export const NEGATIVE_OPERATORS: ReadonlySet<string> = new Set(['neq', 'not_in', 'not_contains']);
+
+export function isNegativeOperator(operator: string): boolean {
+  return NEGATIVE_OPERATORS.has(operator);
+}
+
 const norm = (v: unknown): string => String(v).trim().toLowerCase();
 
 /** Case-insensitive attribute lookup; supports snake/camel variants. */
 function getAttr(attributes: Record<string, unknown>, field: string): unknown {
   if (field in attributes) return attributes[field];
-  const target = field.toLowerCase().replace(/[_\s-]/g, '');
+  const target = normField(field);
   for (const [k, v] of Object.entries(attributes)) {
-    if (k.toLowerCase().replace(/[_\s-]/g, '') === target) return v;
+    if (normField(k) === target) return v;
   }
   return undefined;
+}
+
+function normField(field: unknown): string {
+  return String(field ?? '').toLowerCase().replace(/[_\s-]/g, '');
 }
 
 /** Parse numbers including range strings ("51-200", "200+") → [min, max]. */
@@ -126,19 +155,27 @@ export function evaluateRule(rule: RuleLike, attributes: Record<string, unknown>
  * Qualify one company's attributes against an ICP's rules.
  * Precedence (PRD 7.5): EXCLUSION hit → exclude; MUST_HAVE fail → no_match;
  * MUST_HAVE unknown → review (数据不足，不硬判); otherwise match + weighted score.
+ * With `mirrorExclusionsAdvisory`, an EXCLUSION that mirrors a MUST_HAVE is evaluated
+ * and recorded but never produces `exclude`; every other EXCLUSION still does (see QualifyOptions).
  */
-export function qualify(rules: RuleLike[], attributes: Record<string, unknown>): QualifyResult {
-  const evaluations: RuleEvaluation[] = rules.map((r) => ({
+export function qualify(
+  rules: RuleLike[],
+  attributes: Record<string, unknown>,
+  options?: QualifyOptions,
+): QualifyResult {
+  const advisory = new Set(options?.mirrorExclusionsAdvisory === true ? mirrorExclusionRuleIndexes(rules) : []);
+  const evaluations: RuleEvaluation[] = rules.map((r, index) => ({
     ruleId: r.id,
     kind: r.kind,
     field: r.field,
     operator: r.operator,
     outcome: evaluateRule(r, attributes),
+    ...(advisory.has(index) ? { advisory: true as const } : {}),
   }));
 
   const of = (kind: RuleKind) => evaluations.filter((e) => e.kind === kind);
 
-  if (of('EXCLUSION').some((e) => e.outcome === 'pass')) {
+  if (of('EXCLUSION').some((e) => e.outcome === 'pass' && !e.advisory)) {
     return { verdict: 'exclude', score: null, evaluations };
   }
   if (of('MUST_HAVE').some((e) => e.outcome === 'fail')) {
@@ -160,4 +197,55 @@ function scoreNiceToHave(rules: RuleLike[], evaluations: RuleEvaluation[]): numb
     .filter(({ ev }) => ev.outcome === 'pass')
     .reduce((s, { rule }) => s + (rule.weight ?? 1), 0);
   return total > 0 ? Number((got / total).toFixed(4)) : null;
+}
+
+// ── 镜像 EXCLUSION（评分规则 v3）──────────────────────────────────────────────
+
+/** 规则的「field + value」身份：field 归一化（大小写 / 下划线 / 空白），value 归一化为排序后的元素集合。 */
+function ruleIdentity(rule: Pick<RuleLike, 'field' | 'value'>): string {
+  const values = asArray(rule.value)
+    .map(norm)
+    .filter((v) => v.length > 0)
+    .sort();
+  return `${normField(rule.field)}\n${JSON.stringify(values)}`;
+}
+
+/**
+ * 与某条 MUST_HAVE 同 field 同 value、且用否定操作符的 EXCLUSION 规则的下标。
+ * 这样的规则是 MUST_HAVE 的镜像：MUST_HAVE 不满足时本就 no_match，镜像只会在词表不一致时把
+ * 本应「复核」的公司硬排除。ICP 生成时丢弃（icp.service），读取 / 激活时作 lint 提示（IcpDto.ruleLint）。
+ */
+export function mirrorExclusionRuleIndexes(rules: readonly RuleLike[]): number[] {
+  const mustHave = new Set(rules.filter((r) => r.kind === 'MUST_HAVE').map(ruleIdentity));
+  if (mustHave.size === 0) return [];
+  return rules.flatMap((rule, index) =>
+    rule.kind === 'EXCLUSION' && isNegativeOperator(rule.operator) && mustHave.has(ruleIdentity(rule))
+      ? [index]
+      : [],
+  );
+}
+
+/**
+ * 人可读的规则提示，供激活 / 读取 ICP 时展示（按规则顺序，一条规则至多一行）；无问题 → 空数组：
+ *  - MUST_HAVE 的镜像 EXCLUSION：资格门已判 Fit 时只记录不排除，建议删除；
+ *  - 不是镜像的否定型 EXCLUSION（W5-f）：资格门已判 Fit 时**仍然排除**——「属性有值且不在 / 不含 / 不等」
+ *    即排除，取值写法与公司属性不一致（中文词 vs 受控英文词表、「德国」vs ISO 代码）时会排除所有公司，请确认本意。
+ */
+export function lintQualificationRules(rules: readonly RuleLike[]): string[] {
+  const mirrors = new Set(mirrorExclusionRuleIndexes(rules));
+  return rules.flatMap((rule, index) => {
+    if (rule.kind !== 'EXCLUSION' || !isNegativeOperator(rule.operator)) return [];
+    const label = rule.id ? `规则 ${rule.id}` : `第 ${index + 1} 条规则`;
+    const subject = `${label}：EXCLUSION ${rule.field} ${rule.operator} ${JSON.stringify(rule.value)}`;
+    if (mirrors.has(index)) {
+      return [
+        `${subject} 是 MUST_HAVE 的镜像（同 field 同 value）。公司属性是受控英文词表时它对每家公司都命中；` +
+          `资格门已判 Fit 时只记录不排除。建议删除。`,
+      ];
+    }
+    return [
+      `${subject} 是否定型排除：属性有值且不满足所列取值的公司一律排除，资格门已判 Fit 时仍然排除。` +
+        `取值写法须与公司属性一致（受控英文词表、ISO 国家代码），否则会排除所有公司；请确认这是本意。`,
+    ];
+  });
 }

@@ -222,7 +222,7 @@ export function personalArtifactCleanupPersistence(
         tx.$queryRaw<CleanupRow[]>(Prisma.sql`
           SELECT * FROM complete_workspace_personal_artifact_cleanup_v1(
             ${command.workspaceId}::uuid, ${command.commandId}::uuid,
-            ${command.attempt}, ${objectStatus}
+            ${command.attempt}::integer, ${objectStatus}
           )
         `),
       ),
@@ -231,7 +231,7 @@ export function personalArtifactCleanupPersistence(
         tx.$queryRaw<CleanupRow[]>(Prisma.sql`
           SELECT * FROM retry_workspace_personal_artifact_cleanup_v1(
             ${command.workspaceId}::uuid, ${command.commandId}::uuid,
-            ${command.attempt}, ${code}
+            ${command.attempt}::integer, ${code}
           )
         `),
       ),

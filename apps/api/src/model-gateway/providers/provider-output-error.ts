@@ -1,3 +1,18 @@
+const REASON_CODE = /^[A-Z][A-Z0-9_]{2,63}$/u;
+const LEADING_REASON_CODE = /^([A-Z][A-Z0-9_]{2,63})(?::|$)/u;
+const UNCLASSIFIED_REASON_CODE = "PROVIDER_OUTPUT_UNCLASSIFIED";
+
+/** An explicit code, else the message's leading CODE token; never free text. */
+function providerOutputReasonCode(explicit: string | undefined, message: string): string {
+  if (explicit !== undefined) {
+    if (!REASON_CODE.test(explicit)) {
+      throw new TypeError("PROVIDER_OUTPUT_REASON_CODE_INVALID");
+    }
+    return explicit;
+  }
+  return LEADING_REASON_CODE.exec(message)?.[1] ?? UNCLASSIFIED_REASON_CODE;
+}
+
 /**
  * provider 消费了 token 但结构化输出不可用（空输出 / finish_reason=length 截断 / JSON 解析失败）
  * 时抛出。携带 `usage` 让网关 catch（router-model-gateway）能按真实消耗结算预算，而非静默记 0¢——
@@ -5,26 +20,36 @@
  */
 export class ProviderOutputError extends Error {
   readonly usage?: ModelUsage;
+  /** Why the answer was unusable, safe to persist: it never carries model text. */
+  readonly reasonCode: string;
   /** Number of provider requests represented by this error (schema repair may be two). */
   readonly callCount: number;
   readonly provider?: string;
   readonly model?: string;
   readonly reportedModel?: string;
   readonly modelResolutionSource?: ModelResolutionSource;
+  /**
+   * Whether any output (a content, reasoning or tool-call delta, or a counted
+   * output token) arrived before the failure. Only a stream parser that saw
+   * the whole stream sets it; undefined means unknown and is treated as true.
+   */
+  readonly outputStarted?: boolean;
 
   constructor(
     message: string,
     usage?: ModelUsage,
-    opts?: { cause?: unknown; callCount?: number } & ProviderErrorProvenance,
+    opts?: ProviderOutputErrorOptions,
   ) {
-    super(message, opts);
+    super(message, opts?.cause === undefined ? undefined : { cause: opts.cause });
     this.name = "ProviderOutputError";
+    this.reasonCode = providerOutputReasonCode(opts?.reasonCode, message);
     this.usage = usage;
     this.callCount = opts?.callCount ?? 1;
     this.provider = opts?.provider;
     this.model = opts?.model;
     this.reportedModel = opts?.reportedModel;
     this.modelResolutionSource = opts?.modelResolutionSource;
+    if (opts?.outputStarted !== undefined) this.outputStarted = opts.outputStarted;
   }
 }
 
@@ -38,9 +63,9 @@ export class TaskOutputValidationError extends ProviderOutputError {
   constructor(
     message: string,
     usage?: ModelUsage,
-    opts?: { cause?: unknown; callCount?: number } & ProviderErrorProvenance,
+    opts?: ProviderOutputErrorOptions,
   ) {
-    super(message, usage, opts);
+    super(message, usage, { ...opts, reasonCode: opts?.reasonCode ?? "TASK_OUTPUT_REJECTED" });
     this.name = "TaskOutputValidationError";
   }
 }
@@ -50,10 +75,43 @@ export class ProviderIdentityError extends ProviderOutputError {
   constructor(
     message: string,
     usage?: ModelUsage,
-    opts?: { cause?: unknown; callCount?: number } & ProviderErrorProvenance,
+    opts?: ProviderOutputErrorOptions,
   ) {
     super(message, usage, opts);
     this.name = "ProviderIdentityError";
+  }
+}
+
+/**
+ * The transport failed before a complete answer arrived: an unreadable or cut
+ * stream, a malformed event, an upstream error event or a body that is not
+ * JSON. Like an HTTP error it usually hits every call of a run, so it fails
+ * closed instead of letting each company's fallback absorb it.
+ */
+export class ProviderTransportError extends ProviderOutputError {
+  constructor(
+    message: string,
+    usage?: ModelUsage,
+    opts?: ProviderOutputErrorOptions,
+  ) {
+    super(message, usage, opts);
+    this.name = "ProviderTransportError";
+  }
+}
+
+/**
+ * A structured-output repair could not run because the first call's settlement
+ * is unresolved or the repair wire could not be prepared. The call's outcome is
+ * not known, so this fails closed like an unknown settlement.
+ */
+export class ProviderOutputUnresolvedError extends ProviderOutputError {
+  constructor(
+    message: string,
+    usage?: ModelUsage,
+    opts?: ProviderOutputErrorOptions,
+  ) {
+    super(message, usage, opts);
+    this.name = "ProviderOutputUnresolvedError";
   }
 }
 
@@ -76,7 +134,7 @@ export class ProviderSettlementError extends ProviderOutputError {
     usage?: ModelUsage,
     opts?: { callCount?: number } & ProviderErrorProvenance,
   ) {
-    super(`paid model settlement failed: ${errorCode}`, usage, opts);
+    super(`paid model settlement failed: ${errorCode}`, usage, { ...opts, reasonCode: errorCode });
     this.name = "ProviderSettlementError";
   }
 }
@@ -110,6 +168,7 @@ export class ExternalActionDeniedError extends ProviderOutputError {
     super("external action denied: suppression_action_gate", usage, {
       ...opts,
       callCount: opts?.callCount ?? 0,
+      reasonCode: "EXTERNAL_ACTION_DENIED",
     });
     this.name = "ExternalActionDeniedError";
   }
@@ -134,10 +193,41 @@ export class ProviderHttpError extends Error {
   }
 }
 import type { ModelResolutionSource, ModelUsage } from "../types";
+import {
+  isExecutionControlError,
+  registerRecoverableModelFailureClass,
+} from "../../execution-budget/execution-control-error";
 
 export interface ProviderErrorProvenance {
   provider?: string;
   model?: string;
   reportedModel?: string;
   modelResolutionSource?: ModelResolutionSource;
+}
+
+export type ProviderOutputErrorOptions = {
+  cause?: unknown;
+  callCount?: number;
+  /** Stable code for traces; defaults to the message's leading CODE token. */
+  reasonCode?: string;
+  /** See ProviderOutputError.outputStarted; omit when the parser cannot tell. */
+  outputStarted?: boolean;
+} & ProviderErrorProvenance;
+
+// One unusable answer (bad JSON, schema miss, task-gate rejection) is not a
+// control decision, so a caller with a deterministic fallback may absorb it
+// (isExecutionControlError). Every other subclass stays unregistered and fails
+// closed: transport, identity and HTTP failures usually hit every call of a
+// run, so absorbing them would end a run with nothing judged; unresolved
+// outcomes, unknown settlements and compliance denials are control decisions.
+registerRecoverableModelFailureClass(ProviderOutputError);
+registerRecoverableModelFailureClass(TaskOutputValidationError);
+
+/**
+ * One unusable model answer that a deterministic fallback may absorb: a
+ * registered class with no control failure in its cause chain. The gateway
+ * modules ask here because they must not import the shared classifier.
+ */
+export function isRecoverableModelFailure(error: unknown): error is ProviderOutputError {
+  return error instanceof ProviderOutputError && !isExecutionControlError(error);
 }

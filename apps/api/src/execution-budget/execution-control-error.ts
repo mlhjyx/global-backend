@@ -217,6 +217,72 @@ function isLegacyTemporalApplicationControl(
   return controlToken(snapshot.message);
 }
 
+const RECOVERABLE_MODEL_FAILURE_PROTOTYPES = new WeakSet<object>();
+// Host error classes (fetch's AbortError/TimeoutError are DOMExceptions) are
+// looked up defensively: Temporal's workflow sandbox may not define them.
+const HOST_ERROR_CLASSES: readonly unknown[] = [
+  (globalThis as { DOMException?: unknown }).DOMException,
+  (globalThis as { WebAssembly?: Record<string, unknown> }).WebAssembly?.CompileError,
+  (globalThis as { WebAssembly?: Record<string, unknown> }).WebAssembly?.LinkError,
+  (globalThis as { WebAssembly?: Record<string, unknown> }).WebAssembly?.RuntimeError,
+];
+const BUILT_IN_ERROR_PROTOTYPES: ReadonlySet<object> = new Set<object>(
+  [EvalError, RangeError, ReferenceError, SyntaxError, TypeError, URIError, AggregateError, ...HOST_ERROR_CLASSES]
+    .filter((errorClass): errorClass is { prototype: object } => typeof errorClass === 'function')
+    .map((errorClass) => errorClass.prototype),
+);
+
+/**
+ * Registers an error class whose own instances report one unusable model
+ * answer: bad JSON, a schema miss or a task-gate rejection. Such an answer is
+ * not a control-plane decision. The call was reserved and settled before the
+ * error left the gateway, so a caller with a deterministic fallback may absorb
+ * it. Only instances whose immediate prototype is a registered class qualify:
+ * a subclass fails closed until it is registered on its own.
+ */
+export function registerRecoverableModelFailureClass(
+  errorClass: abstract new (...args: never[]) => Error,
+): void {
+  const prototype: unknown = errorClass.prototype;
+  // Built-in errors (fetch's TypeError among them) must keep their shape check.
+  if (
+    typeof prototype !== 'object' ||
+    prototype === null ||
+    !(prototype instanceof Error) ||
+    BUILT_IN_ERROR_PROTOTYPES.has(prototype)
+  ) {
+    throw new TypeError('RECOVERABLE_MODEL_FAILURE_CLASS_INVALID');
+  }
+  RECOVERABLE_MODEL_FAILURE_PROTOTYPES.add(prototype);
+}
+
+
+/**
+ * The cause link of a registered recoverable model failure, or null when the
+ * value is not one. Own code/type/name fields must still be free of control
+ * tokens, and every field is read as a data descriptor, never through an
+ * accessor; anything unreadable fails closed.
+ */
+function recoverableModelFailureLink(value: object): { readonly cause: unknown } | null {
+  try {
+    if (!RECOVERABLE_MODEL_FAILURE_PROTOTYPES.has(Object.getPrototypeOf(value) as object)) {
+      return null;
+    }
+    for (const key of ['code', 'type', 'name'] as const) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor) continue;
+      if (!('value' in descriptor)) return null;
+      const field: unknown = descriptor.value;
+      if (field !== undefined && (typeof field !== 'string' || controlToken(field))) return null;
+    }
+    const cause = Object.getOwnPropertyDescriptor(value, 'cause');
+    if (!cause) return { cause: undefined };
+    return 'value' in cause ? { cause: cause.value as unknown } : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Temporal preserves application failures under one or more ActivityFailure /
  * ApplicationFailure `cause` wrappers. Control-plane denials must therefore be
@@ -231,6 +297,13 @@ export function isExecutionControlError(error: unknown): boolean {
     if (!current || typeof current !== 'object') return true;
     if (visited.has(current)) return true;
     visited.add(current);
+    const recoverable = recoverableModelFailureLink(current);
+    if (recoverable) {
+      if (recoverable.cause === null || recoverable.cause === undefined) return false;
+      if (typeof recoverable.cause !== 'object') return true;
+      current = recoverable.cause;
+      continue;
+    }
     const snapshot = safeFailureSnapshot(current);
     if (!snapshot) return true;
     if (

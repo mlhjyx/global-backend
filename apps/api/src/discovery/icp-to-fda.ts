@@ -1,6 +1,15 @@
 import { CanonicalNode, TaxonomyKind, type TaxonomyResolveOptions } from './taxonomy-resolver';
 import { PlanQueryShape } from './icp-to-cpv';
 
+/**
+ * The source an injected openFDA query routes to; the planner injects it only while
+ * that source is ENABLED (BI-30) and declares governed company lineage (lineage gate).
+ */
+export const FDA_QUERY_SOURCE = Object.freeze({
+  sourceClass: 'public_intelligence',
+  providerKey: 'openfda',
+} as const);
+
 // openFDA 仅美国市场 → ICP 目标市场门（镜像 TED 覆盖门，方向相反：非美国目标 → 不注入）。
 const US_MARKET: ReadonlySet<string> = new Set(['us', 'usa', 'united states', 'united states of america', 'america', '美国', '美国市场', 'u.s.', 'u.s.a.']);
 // 制造商侧 establishment_type 用**活值**（registrationlisting count 实测），非泛称 'Manufacturer'（exact 搜零命中）。
@@ -109,11 +118,14 @@ function uniq(arr: string[]): string[] {
  */
 export function buildFdaQuery(fda: IcpToFdaResult, planned: PlanQueryShape[]): PlanQueryShape[] {
   if (fda.productCodes.length) {
-    const filters: Record<string, unknown> = { source_hint: 'openfda', product_code: fda.productCodes.join(',') };
+    const filters: Record<string, unknown> = {
+      source_hint: FDA_QUERY_SOURCE.providerKey,
+      product_code: fda.productCodes.join(','),
+    };
     if (fda.importerOnly) filters.trade_side = 'importer';
     if (fda.establishmentTypes.length) filters.establishment_type = fda.establishmentTypes.join(',');
     const q: PlanQueryShape = {
-      source_class: 'public_intelligence',
+      source_class: FDA_QUERY_SOURCE.sourceClass,
       filters,
       keywords: [],
       rationale: 'openFDA 器械注册发现（ICP→FDA 产品码冷路径解析）' + (fda.warnings.length ? '；' + fda.warnings.join('；') : ''),

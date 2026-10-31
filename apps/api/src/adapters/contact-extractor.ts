@@ -11,9 +11,28 @@ export interface PublicContact {
   sourceUrl: string;
 }
 
-const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+// Characters that belong to the same word as an ASCII local part: Latin letters (incl. ü/ö/ß…),
+// combining marks (decomposed u + U+0308) and digits. CJK/Cyrillic text glued to an address is a
+// script boundary, not part of it ("邮箱sales@acme.cn" still yields sales@acme.cn).
+const WORD_CHARS = String.raw`\p{Script=Latin}\p{M}\p{N}`;
+// Apostrophe as typed in names: ' ’ ʼ ´ ‘ ` ＇ (O'Brien, O’Brien, O´Brien …).
+const APOSTROPHES = String.raw`\u0027\u2019\u02BC\u00B4\u2018\u0060\uFF07`;
+// Invisible format characters (soft hyphen, zero-width space …) never end a word: skip over them.
+const FORMAT = String.raw`\p{Cf}*`;
+// The match never starts inside a word: after a word character or local-part symbol, or after a
+// letter + apostrophe (o'brien@). Otherwise müller@ → "ller@", Jörg.Schmidt@ → "rg.schmidt@":
+// a wrong address attributed to the company. Local parts with non-ASCII letters are dropped,
+// not kept literally: cleanEmail, suppression canonicalization and verification are ASCII-only,
+// so such an address could be neither stored nor suppressed.
+const EMAIL_RE = new RegExp(
+  String.raw`(?<![${WORD_CHARS}._%+-]${FORMAT})(?<![${WORD_CHARS}]${FORMAT}[${APOSTROPHES}]${FORMAT})` +
+    String.raw`[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}`,
+  'gu',
+);
 // Emails regexes also match image names like "logo@2x.png" — reject asset-ish hits.
-const EMAIL_REJECT = /\.(png|jpe?g|gif|svg|webp|css|js)$|^[0-9.]+@/i;
+// A percent-encoded local part (mailto:m%C3%BCller@…) is an encoding of the address, not the address.
+// A local part never starts with "." — such a match is the tail of a mixed-script word (иван.petrov@).
+const EMAIL_REJECT = /\.(png|jpe?g|gif|svg|webp|css|js)$|^[0-9.]+@|%[0-9a-f]{2}|^\./i;
 
 // Phones: only explicit tel: links or clearly international "+" formats — plain
 // digit runs create too many false positives (dates, ids) to be trustworthy.

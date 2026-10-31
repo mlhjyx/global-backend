@@ -7,6 +7,9 @@
 > 内容 Owner：`OWN-PRODUCT`
 > 数据来源：[能力登记](../governance/capability-register.md)与 Gate 2 Page ID；不是最终路由表
 
+> **2026-10-30 现状注记**：产品前端已迁到 [gain-saas](https://github.com/mlhjyx/gain-saas)（本机 `127.0.0.1:4020`，PRD 见该仓 `docs/prd/phase-1-01-04.md`）。本目录描述的 GrowthOS 页面/契约是 2026-08 的基线，只保留作历史对照；GrowthOS 目前仅承担 R4 平台权威，P8 退役。新前端工作以 gain-saas 仓为准。
+
+
 ## 1. 如何读这份目录
 
 本文件是“整个项目的前端需要哪些能力”的人类入口。Capability ID、多轴状态和 SoR 仍由治理 Registry 承重；页面名称、路由、布局和交互进入模块 Capability Pack 后才可称 Dev-Ready。

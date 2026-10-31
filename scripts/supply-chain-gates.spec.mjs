@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -10,7 +10,7 @@ const repositoryRoot = new URL("../", import.meta.url);
 const BASE_COMMIT = "a8fedc721bda57ef9d2aeb16a7838a24db4f4a99";
 const LOCKFILE_DIGEST = `sha256:${"a".repeat(64)}`;
 const NOW = new Date("2026-08-09T12:00:00.000Z");
-const REPOSITORY_BASELINE_NOW = new Date("2026-10-06T07:38:20.344Z");
+const REPOSITORY_BASELINE_NOW = new Date("2026-10-28T13:18:17.000Z");
 
 async function readRepositoryFile(path) {
   return readFile(new URL(path, repositoryRoot), "utf8");
@@ -960,7 +960,7 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
   );
   const validation = validateProductionAuditBaseline(repositoryBaseline, {
     now: REPOSITORY_BASELINE_NOW,
-    expectedBootstrapBase: "14ca4d1f70b9c4590e6df32130cab490aa2979ed",
+    expectedBootstrapBase: "6510fb5f1922384a58cac1cb01c2bf615da1646b",
   });
   assert.deepEqual(validation.issues, []);
   assert.equal(repositoryBaseline.summary.advisories, 0);
@@ -973,13 +973,13 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
   });
   assert.equal(
     repositoryBaseline.source.base_commit,
-    "14ca4d1f70b9c4590e6df32130cab490aa2979ed",
+    "6510fb5f1922384a58cac1cb01c2bf615da1646b",
   );
   const clear = evaluateProductionAudit(pnpmAudit([]), repositoryBaseline, {
     now: REPOSITORY_BASELINE_NOW,
-    expectedBootstrapBase: "14ca4d1f70b9c4590e6df32130cab490aa2979ed",
+    expectedBootstrapBase: "6510fb5f1922384a58cac1cb01c2bf615da1646b",
     expectedSourceLockfileDigest:
-      "sha256:8d264dde4d325f5136cf7efc2c858d29393d29d1e5c8c12dc9362cb45e172d58",
+      "sha256:bbea0c51c69a24713ff7dc27dbf5c3ad0d8072866b0908d8df278cf2fe0a0677",
   });
   assert.equal(clear.ok, true);
   const vulnerable = evaluateProductionAudit(
@@ -993,7 +993,7 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
     repositoryBaseline,
     {
       now: REPOSITORY_BASELINE_NOW,
-      expectedBootstrapBase: "14ca4d1f70b9c4590e6df32130cab490aa2979ed",
+      expectedBootstrapBase: "6510fb5f1922384a58cac1cb01c2bf615da1646b",
     },
   );
   assert.equal(vulnerable.ok, false);
@@ -1129,7 +1129,11 @@ test("dependency graph delta and baseline freshness are pinned, bounded canaries
   assert.match(auditScript, /DEPENDENCY_GRAPH_COMPARABLE_AUDIT_PROTOCOL/);
   assert.match(
     workflow,
-    /git show "\$PR_BASE_SHA:scripts\/supply-chain-audit\.mjs" \| grep -Fq "DEPENDENCY_GRAPH_COMPARABLE_AUDIT_PROTOCOL"/,
+    /git show "\$PR_BASE_SHA:scripts\/supply-chain-audit\.mjs" > "\$TRUSTED_VERIFIER"/,
+  );
+  assert.match(
+    workflow,
+    /grep -Fq "DEPENDENCY_GRAPH_COMPARABLE_AUDIT_PROTOCOL" "\$TRUSTED_VERIFIER"/,
   );
   assert.match(auditScript, /COMPARABLE_AUDIT_PASS/);
   assert.match(auditScript, /AUDIT_SNAPSHOT_INCONCLUSIVE/);
@@ -1139,6 +1143,108 @@ test("dependency graph delta and baseline freshness are pinned, bounded canaries
     "production advisory baseline freshness · canary",
   ]) {
     assert.ok(!requiredContexts.required_contexts.includes(canaryContext));
+  }
+});
+
+test("the trusted-base verifier probe reads git show from a file, never through a pipe", async () => {
+  // Under `set -o pipefail`, piping git show into a grep that quits on its
+  // first match fails with SIGPIPE (141) whenever git show still has more to
+  // write. A trusted base was then sent down the protocol bootstrap path at
+  // random, rejecting ordinary PRs (seen on PR #628, 2026-10-10).
+  const workflow = await readRepositoryFile(
+    ".github/workflows/supply-chain.yml",
+  );
+  const commandText = workflow
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("#"))
+    .join("\n");
+  assert.doesNotMatch(
+    commandText,
+    /(?<!\|)\|(?!\|)\s*(?:grep\b[^\n|]*\s(?:-[A-Za-z]*[lmq]\w*|--quiet|--silent|--files-with-matches|--max-count(?:=\d+)?)(?=\s|$)|head\b)/,
+    "no step may pipe into a command that can stop reading early",
+  );
+  const probeStart =
+    '          if git cat-file -e "$PR_BASE_SHA:scripts/supply-chain-audit.mjs" 2>/dev/null; then\n';
+  const probeEnd = '          if [ "$marker_status" -ne 0 ]; then\n';
+  const start = workflow.indexOf(probeStart);
+  const end = workflow.indexOf(probeEnd, start);
+  assert.ok(
+    start >= 0 && end > start,
+    "production-audit-delta must probe the base verifier from a file",
+  );
+  const probe = workflow
+    .slice(start, end + probeEnd.length)
+    .replace(/^ {10}/gm, "");
+
+  const directory = await mkdtemp(join(tmpdir(), "supply-chain-verifier-probe-"));
+  // The developer's global hooks would scan every fixture commit.
+  const git = (...arguments_) => {
+    const execution = spawnSync(
+      "git",
+      ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", ...arguments_],
+      { cwd: directory, encoding: "utf8", env: createSafeGitEnvironment() },
+    );
+    assert.equal(
+      execution.status,
+      0,
+      `${arguments_.join(" ")} failed: ${execution.stderr}`,
+    );
+    return execution.stdout.trim();
+  };
+  const verifier = join(directory, "trusted-verifier.mjs");
+  const runProbe = (baseSha, trustedVerifier = verifier) =>
+    spawnSync(
+      "bash",
+      ["-c", `set -euo pipefail\n${probe}  echo BOOTSTRAP\nelse\n  echo TRUSTED\nfi\n`],
+      {
+        cwd: directory,
+        encoding: "utf8",
+        env: {
+          ...createSafeGitEnvironment(),
+          PR_BASE_SHA: baseSha,
+          TRUSTED_VERIFIER: trustedVerifier,
+        },
+      },
+    );
+  const decision = (baseSha) => {
+    const execution = runProbe(baseSha);
+    assert.equal(execution.status, 0, execution.stderr);
+    return execution.stdout.trim();
+  };
+
+  try {
+    git("init", "--initial-branch=main", "--quiet");
+    git("config", "user.email", "governance@example.invalid");
+    git("config", "user.name", "Governance Test");
+    await mkdir(join(directory, "scripts"));
+    const auditPath = join(directory, "scripts", "supply-chain-audit.mjs");
+    // Larger than a pipe buffer with the marker first: the shape that raced.
+    const trustedVerifier = `// DEPENDENCY_GRAPH_COMPARABLE_AUDIT_PROTOCOL\n${"x".repeat(1024 * 1024)}\n`;
+    await writeFile(auditPath, trustedVerifier);
+    git("add", "scripts/supply-chain-audit.mjs");
+    git("commit", "--quiet", "-m", "trusted base verifier");
+    const trustedBase = git("rev-parse", "HEAD");
+    await writeFile(auditPath, "// verifier before the comparable audit protocol\n");
+    git("commit", "--quiet", "-am", "legacy base verifier");
+    const legacyBase = git("rev-parse", "HEAD");
+    git("rm", "--quiet", "scripts/supply-chain-audit.mjs");
+    git("commit", "--quiet", "-m", "base without a verifier");
+    const missingBase = git("rev-parse", "HEAD");
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      assert.equal(decision(trustedBase), "TRUSTED");
+      assert.equal(await readFile(verifier, "utf8"), trustedVerifier);
+    }
+    assert.equal(decision(legacyBase), "BOOTSTRAP");
+    assert.equal(decision(missingBase), "BOOTSTRAP");
+    assert.equal(await readFile(verifier, "utf8"), "");
+
+    // A copy that cannot be written stops the job instead of bootstrapping.
+    const unwritable = runProbe(trustedBase, directory);
+    assert.notEqual(unwritable.status, 0);
+    assert.equal(unwritable.stdout.trim(), "");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 });
 
@@ -1654,11 +1760,11 @@ test("CodeQL is a non-required JavaScript and TypeScript canary with minimal per
   );
   assert.match(
     workflow,
-    /github\/codeql-action\/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4\.38\.2/,
+    /github\/codeql-action\/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4\.38\.3/,
   );
   assert.match(
     workflow,
-    /github\/codeql-action\/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4\.38\.2/,
+    /github\/codeql-action\/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4\.38\.3/,
   );
   assert.match(workflow, /^          languages: javascript-typescript$/m);
   assert.match(workflow, /^          queries: security-extended$/m);
@@ -1667,5 +1773,83 @@ test("CodeQL is a non-required JavaScript and TypeScript canary with minimal per
     !requiredContexts.required_contexts.includes(
       "CodeQL JavaScript/TypeScript · canary",
     ),
+  );
+});
+
+test("the same GHSA on two version lines is not a duplicate advisory", async () => {
+  const {
+    evaluateDependencyGraphDelta,
+    evaluateProductionAudit,
+    validateProductionAuditBaseline,
+  } = await import("./supply-chain-audit.mjs");
+  const undiciSeven = advisory({
+    ghsa_id: "GHSA-xjj6-f33q-929c",
+    package: "undici",
+    severity: "high",
+    vulnerable_versions: ">=7.18.0 <7.30.1",
+    patched_versions: ">=7.30.1",
+    url: "https://github.com/advisories/GHSA-xjj6-f33q-929c",
+    findings: [
+      {
+        version: "7.30.0",
+        paths: ["api > @ai-sdk/provider-utils@5.0.58 > undici@7.30.0"],
+      },
+    ],
+  });
+  const undiciEight = advisory({
+    ghsa_id: "GHSA-xjj6-f33q-929c",
+    package: "undici",
+    severity: "high",
+    vulnerable_versions: ">=8.0.0 <8.12.2",
+    patched_versions: ">=8.12.2",
+    url: "https://github.com/advisories/GHSA-xjj6-f33q-929c",
+    findings: [
+      {
+        version: "8.10.2",
+        paths: ["site-renderer > unifont@0.7.5 > undici@8.10.2"],
+      },
+    ],
+  });
+  const dualLineAudit = pnpmAudit([undiciSeven, undiciEight]);
+
+  const evaluated = evaluateProductionAudit(dualLineAudit, baseline([]), {
+    now: NOW,
+  });
+  assert.ok(!issueCodes(evaluated).includes("AUDIT_ADVISORY_DUPLICATE"));
+  assert.ok(issueCodes(evaluated).includes("AUDIT_NEW_ADVISORY"));
+
+  // Baseline admissions stay range-free: the ratchet only matches by GHSA and
+  // package, so admitting the same advisory twice (one entry per version line)
+  // would produce a baseline that can never match its own audit. Fail closed at
+  // validation time instead.
+  assert.ok(
+    issueCodes(
+      validateProductionAuditBaseline(baseline([undiciSeven, undiciEight]), {
+        now: NOW,
+      }),
+    ).includes("BASELINE_ADVISORY_DUPLICATE"),
+  );
+
+  // The 2026-10-27 failure: a trusted base whose audit carries one GHSA on two
+  // version lines was judged malformed, so every dependency-changing PR ended
+  // as AUDIT_SNAPSHOT_INCONCLUSIVE before the candidate was ever compared.
+  const delta = evaluateDependencyGraphDelta({
+    trustedBase: BASE_COMMIT,
+    candidate: "b".repeat(40),
+    relation: "CHANGED",
+    trustedBaseAudit: dualLineAudit,
+    candidateAudit: pnpmAudit([]),
+    baseline: baseline([]),
+    now: NOW,
+  });
+  assert.equal(delta.ok, true);
+  assert.equal(delta.result, "COMPARABLE_AUDIT_PASS");
+
+  assert.ok(
+    issueCodes(
+      evaluateProductionAudit(pnpmAudit([undiciSeven, undiciSeven]), baseline([]), {
+        now: NOW,
+      }),
+    ).includes("AUDIT_ADVISORY_DUPLICATE"),
   );
 });

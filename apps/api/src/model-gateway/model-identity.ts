@@ -19,6 +19,30 @@ const TRUSTED_MODEL_IDENTITY_ALIASES: Readonly<
       transport: 'google-generate-content',
     },
   ]),
+  // OpenOx (observed 2026-10-07): the same DeepSeek v4 pro model is reported
+  // with a provider prefix in stream chunks and as a dated GA build in plain
+  // chat-completions bodies. Any other name, including another vendor family,
+  // still fails closed.
+  'deepseek-v4-pro': Object.freeze([
+    {
+      reportedModel: 'deepseek.deepseek-v4-pro',
+      transport: 'openai-chat-completions',
+    },
+    {
+      reportedModel: 'deepseek-v4-pro-ga-260813',
+      transport: 'openai-chat-completions',
+    },
+  ]),
+  // OpenOx (observed 2026-10-10/11): requests for deepseek-v4-pro were at
+  // times served by DeepSeek V4 Flash and reported under this build name. The
+  // alias proves only a flash identity; a pro request accepts it solely through
+  // a deployment-approved substitution (model-identity-substitutes.ts).
+  'deepseek-v4-flash': Object.freeze([
+    {
+      reportedModel: 'deepseek-ai/DeepSeek-V4-Flash-0731',
+      transport: 'openai-chat-completions',
+    },
+  ]),
 });
 
 const REPORTED_MODEL_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,119}$/u;
@@ -63,6 +87,43 @@ export function resolveReportedModelIdentity(
       candidate.reportedModel === reported && candidate.transport === transport,
   );
   return alias ? requestedModel : undefined;
+}
+
+/** Models whose upstream identity this repository has reviewed. */
+export function isReviewedModelIdentity(model: string): boolean {
+  return Object.prototype.hasOwnProperty.call(
+    TRUSTED_MODEL_IDENTITY_ALIASES,
+    model,
+  );
+}
+
+/**
+ * Resolve a reported identity to the requested model or, failing that, to one
+ * of the substitutes the caller was explicitly allowed for this call. Each
+ * candidate resolves only through its own exact name or reviewed aliases.
+ */
+export function resolveReportedModelIdentityAmong(
+  requestedModel: string,
+  substitutes: readonly string[],
+  reportedModel?: string | null,
+  transport?: string,
+): string | undefined {
+  const requested = resolveReportedModelIdentity(
+    requestedModel,
+    reportedModel,
+    transport,
+  );
+  if (requested) return requested;
+  for (const substitute of substitutes) {
+    if (substitute === requestedModel) continue;
+    const resolved = resolveReportedModelIdentity(
+      substitute,
+      reportedModel,
+      transport,
+    );
+    if (resolved) return resolved;
+  }
+  return undefined;
 }
 
 export function hasTrustedModelIdentity(

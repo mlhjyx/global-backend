@@ -22,10 +22,24 @@ export interface PublicHttpResponse {
   finalUrl: string;
 }
 
+/** Per-hop wall-clock ceiling, response body included, for every Tool and workflow activity. */
+export const PUBLIC_HTTP_TIMEOUT_MAX_MS = 30_000;
+/**
+ * Per-hop ceiling an owner-run operator download may ask for (the official sanctions lists are
+ * 25-30 MB and the dev host's route to them is slow). No Tool input reaches it.
+ */
+export const PUBLIC_HTTP_OPERATOR_TIMEOUT_MAX_MS = 1_800_000;
+
 export interface PublicHttpRequestOptions {
   method?: 'GET' | 'HEAD';
   headers?: Record<string, string>;
+  /** Per-hop deadline; clamped to [100 ms, PUBLIC_HTTP_TIMEOUT_MAX_MS]. */
   timeoutMs?: number;
+  /**
+   * Owner-run operator downloads only, never a Tool, provider or activity: replaces timeoutMs
+   * and may exceed PUBLIC_HTTP_TIMEOUT_MAX_MS, clamped to PUBLIC_HTTP_OPERATOR_TIMEOUT_MAX_MS.
+   */
+  operatorTimeoutMs?: number;
   maxBytes?: number;
   maxRedirects?: number;
 }
@@ -46,7 +60,7 @@ type HappyEyeballsRequestOptions = RequestOptions & {
 
 export type PinnedHttpExecutor = (
   target: PinnedPublicUrl,
-  options: Required<Omit<PublicHttpRequestOptions, 'headers'>> & {
+  options: Required<Omit<PublicHttpRequestOptions, 'headers' | 'operatorTimeoutMs'>> & {
     headers: Record<string, string>;
   },
 ) => Promise<PinnedHttpResult>;
@@ -109,6 +123,17 @@ async function assertPhysicalWireAuthorized(
   }
 }
 
+/**
+ * Errors Node raised on a pinned socket, TLS session or HTTP parser: the site itself dropped the
+ * connection. Membership is by identity and the error object is left as it is, so every caller
+ * that does not ask still classifies it exactly as before (a raw Node error fails closed).
+ */
+const PUBLIC_HTTP_TRANSPORT_FAILURES = new WeakSet<object>();
+
+export function isPublicHttpTransportFailure(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && PUBLIC_HTTP_TRANSPORT_FAILURES.has(error);
+}
+
 function normalizeHeaders(headers: IncomingHttpHeaders): Record<string, string> {
   const normalized: Record<string, string> = {};
   for (const [name, value] of Object.entries(headers)) {
@@ -142,6 +167,11 @@ const executePinnedHttp: PinnedHttpExecutor = async (target, options) =>
       settled = true;
       if (deadline) clearTimeout(deadline);
       resolve(value);
+    };
+    let deadlineError: Error | undefined;
+    const finishTransportReject = (error: Error) => {
+      if (error !== deadlineError) PUBLIC_HTTP_TRANSPORT_FAILURES.add(error);
+      finishReject(error);
     };
     const requestOptions: HappyEyeballsRequestOptions = {
       protocol: target.url.protocol,
@@ -203,14 +233,15 @@ const executePinnedHttp: PinnedHttpExecutor = async (target, options) =>
           text: body.toString('utf8'),
         });
       });
-      response.once('error', finishReject);
+      response.once('error', finishTransportReject);
     });
     // request.setTimeout 只是 socket 空闲超时；慢速端可定期吐 1 字节无限续命。
     // 用墙钟 deadline 给整次响应（含 body）设硬上限。
     const deadline = setTimeout(() => {
-      request.destroy(new Error('public_http_timeout'));
+      deadlineError = new Error('public_http_timeout');
+      request.destroy(deadlineError);
     }, options.timeoutMs);
-    request.once('error', finishReject);
+    request.once('error', finishTransportReject);
     request.end();
   });
 
@@ -226,7 +257,9 @@ export async function requestPublicHttp(
   const effective = {
     method: options.method ?? 'GET',
     headers: sanitizeRequestHeaders(options.headers),
-    timeoutMs: Math.min(Math.max(options.timeoutMs ?? 15_000, 100), 30_000),
+    timeoutMs: options.operatorTimeoutMs === undefined
+      ? Math.min(Math.max(options.timeoutMs ?? 15_000, 100), PUBLIC_HTTP_TIMEOUT_MAX_MS)
+      : Math.min(Math.max(options.operatorTimeoutMs, 100), PUBLIC_HTTP_OPERATOR_TIMEOUT_MAX_MS),
     maxBytes: Math.min(
       Math.max(options.maxBytes ?? 1_000_000, 1),
       PLATFORM_PUBLIC_HTTP_RESPONSE_MAX_BYTES,

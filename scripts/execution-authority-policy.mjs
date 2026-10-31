@@ -16,6 +16,11 @@ const TOOL_SOURCE_PATHS = Object.freeze([
 ]);
 const RECEIPT_PATH = 'apps/api/src/durable-results/durable-execution-receipt.ts';
 const ACK_PATH = 'apps/api/src/durable-results/domain-ack-contract.ts';
+/** D13: the ledger's bound on reservations of one released operation key. */
+const MAX_RESERVATION_ATTEMPTS = 3;
+const RESERVED_ATTEMPT_MIGRATION =
+  'packages/db/prisma/migrations/20261015045032_tool_budget_released_rereserve/migration.sql';
+const DEFINITE_FAILURE_CLASSIFIER_PATH = 'apps/api/src/model-gateway/definite-model-failure.ts';
 
 export const EXPECTED_TOOL_IDS = Object.freeze([
   'searxng.search', 'crawl4ai.fetch', 'wikidata.sparql', 'osm.overpass',
@@ -31,6 +36,7 @@ export const EXPECTED_MODEL_TASKS = Object.freeze([
   Object.freeze({ path: 'apps/api/src/temporal/understanding.activities.ts', taskId: 'company_understanding.extract_offerings', schema: 'understanding-offerings/v1' }),
   Object.freeze({ path: 'apps/api/src/icp/icp.service.ts', taskId: 'icp.design', schema: 'icp-design/v1' }),
   Object.freeze({ path: 'apps/api/src/icp/icp.service.ts', taskId: 'discovery.query_plan', schema: 'icp-query-plan/v1' }),
+  Object.freeze({ path: 'apps/api/src/lead/outreach-draft.service.ts', taskId: 'outreach.first_contact_draft', schema: 'outreach-first-contact-draft/v1' }),
   Object.freeze({ path: 'apps/api/src/discovery/taxonomy-resolver.ts', taskId: 'taxonomy.normalize', schema: 'taxonomy-code/v1' }),
   Object.freeze({ path: 'apps/api/src/discovery/fit-judge.ts', taskId: 'discovery.qualify_fit', schema: 'fit-judgment/v1' }),
   Object.freeze({ path: 'apps/api/src/discovery/providers/public-web.provider.ts', taskId: 'discovery.extract_company', schema: 'discovery-extract-company/v1' }),
@@ -78,12 +84,14 @@ export const EXPECTED_TOOL_CALLSITES = Object.freeze([
   'apps/api/src/discovery/providers/openfda.provider.ts#openfda.search#1',
   'apps/api/src/discovery/providers/osm.provider.ts#osm.overpass#1',
   'apps/api/src/discovery/providers/public-web.provider.ts#crawl4ai.fetch#1',
+  'apps/api/src/discovery/providers/social-presence.provider.ts#searxng.search#1',
   'apps/api/src/discovery/providers/public-web.provider.ts#searxng.search#1',
   'apps/api/src/discovery/providers/structured-harvest.provider.ts#crawl4ai.render#1',
   'apps/api/src/discovery/providers/structured-harvest.provider.ts#http.get#1',
   'apps/api/src/discovery/providers/ted.provider.ts#ted.search#1',
   'apps/api/src/discovery/providers/trade-fair.provider.ts#tradefair.algolia#1',
   'apps/api/src/discovery/providers/website-profile.provider.ts#crawl4ai.fetch#1',
+  'apps/api/src/discovery/providers/website-profile.provider.ts#crawl4ai.render#1',
   'apps/api/src/discovery/providers/wikidata-enrich.provider.ts#wikidata.entity#1',
   'apps/api/src/discovery/providers/wikidata-enrich.provider.ts#wikidata.entity#2',
   'apps/api/src/discovery/providers/wikidata.provider.ts#wikidata.sparql#1',
@@ -334,22 +342,31 @@ function validateReceipt(manifest, path, issues) {
   ) {
     issues.push(issue('EXECUTION_AUTHORITY_RECEIPT_CONTRACT_INVALID', path, 'receipt must be closed, ledger-authored at cutover and payload-free'));
   }
+  // D13: the only physical retry is one more reservation of a RELEASED key
+  // after a definite failure before any output, bounded by the ledger
+  // (RESERVED_ATTEMPT_MIGRATION) to MAX_RESERVATION_ATTEMPTS per key. Unknown
+  // results, settled operations and control errors never permit a retry.
   const disposition = manifest.resultDisposition;
   if (!closedKeys(
     disposition,
-    ['schema', 'kinds', 'automaticPhysicalRetryAllowed', 'unknownStatus', 'controlStatus', 'replayStatus'],
+    [
+      'schema', 'kinds', 'automaticPhysicalRetryAllowed', 'unknownStatus', 'controlStatus',
+      'definiteFailureStatus', 'replayStatus', 'maxReservationAttempts',
+    ],
     issues,
     path,
     'EXECUTION_AUTHORITY_RESULT_DISPOSITION_INVALID',
   )) return;
   if (
-    disposition.schema !== 'execution-result-disposition/v1' ||
-    !exactArray(disposition.kinds, ['valid_output', 'result_unknown', 'control_error', 'replay_error']) ||
-    disposition.automaticPhysicalRetryAllowed !== false ||
+    disposition.schema !== 'execution-result-disposition/v2' ||
+    !exactArray(disposition.kinds, ['valid_output', 'result_unknown', 'control_error', 'definite_failure', 'replay_error']) ||
+    disposition.automaticPhysicalRetryAllowed !== 'DEFINITE_FAILURE_BEFORE_OUTPUT_ONLY' ||
     disposition.unknownStatus !== 'RESULT_UNKNOWN' ||
     disposition.controlStatus !== 'RELEASED' ||
-    disposition.replayStatus !== 'SETTLED'
-  ) issues.push(issue('EXECUTION_AUTHORITY_RESULT_DISPOSITION_INVALID', path, 'result dispositions must prohibit automatic physical retries'));
+    disposition.definiteFailureStatus !== 'RELEASED' ||
+    disposition.replayStatus !== 'SETTLED' ||
+    disposition.maxReservationAttempts !== MAX_RESERVATION_ATTEMPTS
+  ) issues.push(issue('EXECUTION_AUTHORITY_RESULT_DISPOSITION_INVALID', path, 'result dispositions may allow a physical retry only after a definite failure before output, at most MAX_RESERVATION_ATTEMPTS reservations per operation key'));
 }
 
 function validateDomainAck(entry, path, issues, producerId) {
@@ -946,8 +963,39 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
   for (const token of ['status', 'SETTLED', 'parseDurableExecutionReceipt', 'artifactId', 'costBasis']) {
     if (!receiptSource.includes(token)) issues.push(issue('EXECUTION_AUTHORITY_RECEIPT_SCHEMA_MISSING', RECEIPT_PATH, `receipt contract missing ${token}`));
   }
-  for (const token of ['parseDomainAckContract', 'parseExecutionResultDisposition', 'PERSONAL_DATA', 'subjectIdHash', 'automaticPhysicalRetryAllowed']) {
+  for (const token of [
+    'parseDomainAckContract', 'parseExecutionResultDisposition', 'PERSONAL_DATA', 'subjectIdHash',
+    'automaticPhysicalRetryAllowed', "'execution-result-disposition/v2'", "kind === 'definite_failure'",
+  ]) {
     if (!ackSource.includes(token)) issues.push(issue('EXECUTION_AUTHORITY_DOMAIN_ACK_SCHEMA_MISSING', ACK_PATH, `ACK contract missing ${token}`));
+  }
+  // D13: the declared retry bound is the ledger's, and only a RELEASED row qualifies.
+  const attemptMigration = existsSync(resolve(repoRoot, RESERVED_ATTEMPT_MIGRATION))
+    ? await readText(repoRoot, RESERVED_ATTEMPT_MIGRATION)
+    : '';
+  for (const token of [
+    `CHECK ("attempt" BETWEEN 1 AND ${MAX_RESERVATION_ATTEMPTS})`,
+    `IF operation."status" <> 'RELEASED' OR operation."attempt" >= ${MAX_RESERVATION_ATTEMPTS} THEN`,
+    'CREATE OR REPLACE FUNCTION reserve_tool_budget_microusd_v1(',
+  ]) {
+    if (!attemptMigration.includes(token)) {
+      issues.push(issue('EXECUTION_AUTHORITY_RESULT_DISPOSITION_INVALID', RESERVED_ATTEMPT_MIGRATION, `re-reservation bound missing ${token}`));
+    }
+  }
+  const definiteClassifier = existsSync(resolve(repoRoot, DEFINITE_FAILURE_CLASSIFIER_PATH))
+    ? await readText(repoRoot, DEFINITE_FAILURE_CLASSIFIER_PATH)
+    : '';
+  for (const token of ['definiteModelFailureCode', 'new Set([504, 524])', '!UPSTREAM_TIMEOUT_STATUSES.has(status)']) {
+    if (!definiteClassifier.includes(token)) {
+      issues.push(issue('EXECUTION_AUTHORITY_RESULT_DISPOSITION_INVALID', DEFINITE_FAILURE_CLASSIFIER_PATH, `definite-failure classifier missing ${token}`));
+    }
+  }
+  // No stream or output failure may release: since new-api 6ea085c6 a failure
+  // before the first byte arrives as an HTTP 502 (released as unavailable), so a
+  // stream failure that reaches the classifier began after the first byte and may
+  // have been billed; the older fork billed even pre-output failures.
+  if (/ProviderTransportError|ProviderOutputError/.test(definiteClassifier)) {
+    issues.push(issue('EXECUTION_AUTHORITY_RESULT_DISPOSITION_INVALID', DEFINITE_FAILURE_CLASSIFIER_PATH, 'definite-failure classifier must not release a stream or output failure: one that reaches the backend may have been billed'));
   }
   const artifactRegistry = await readText(repoRoot, 'apps/api/src/durable-results/artifact/artifact-materializer.registry.ts');
   for (const schema of Object.keys(ARTIFACT_CONTRACTS)) {

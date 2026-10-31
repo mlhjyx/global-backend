@@ -1,7 +1,6 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import {
-  EXECUTION_BUDGET_PLATFORM_PURPOSES,
   ExecutionBudgetGrantError,
   type ExecutionBudgetPurpose,
 } from '../execution-budget/execution-budget-authority.types';
@@ -12,6 +11,7 @@ import {
   isExecutionBudgetUuid,
   isTrustedExecutionBudgetDatabaseMarker,
   mapExecutionBudgetPersistenceError,
+  trustedExecutionBudgetGrantError,
 } from '../execution-budget/execution-budget-authority.repository';
 import {
   parseGenericOperationProjection,
@@ -143,20 +143,6 @@ export interface BudgetAccountAuthorization {
   readonly generation: number;
 }
 
-export interface PlatformBudgetRunAdmissionInput {
-  readonly purpose: ExecutionBudgetPurpose;
-  readonly subjectType: 'schedule';
-  readonly subjectId: string;
-  readonly scheduleId: string;
-  readonly requestSha256: string;
-  readonly workflowRunId: string;
-  readonly accountKey: string;
-}
-
-export interface PlatformBudgetRunAdmission extends BudgetAccountAuthorization {
-  readonly replay: boolean;
-}
-
 /** Authoritative budget surface. Product composition must use a shared durable implementation. */
 export interface BudgetStore {
   open(input: {
@@ -165,10 +151,6 @@ export interface BudgetStore {
     accountKey: string;
     replayScope?: boolean;
   }): Promise<BudgetAccountAuthorization>;
-  /** Atomically selects a fresh exact schedule authority and opens one run. */
-  admitPlatformRun(
-    input: PlatformBudgetRunAdmissionInput,
-  ): Promise<PlatformBudgetRunAdmission>;
   /** Read-only verification of an account opened by HTTP/schedule admission. */
   attestAuthorized(input: {
     authorityId: string;
@@ -242,7 +224,16 @@ export class BudgetUnsettledOperationsError extends Error {
 export class BudgetOperationReplayError extends Error {
   readonly code = 'BUDGET_OPERATION_REPLAY_UNAVAILABLE';
 
-  constructor(public readonly operationKey: string) {
+  /**
+   * 'remnant': the operation was found at reservation — an earlier attempt left it without a
+   * durable result, so it says nothing about the upstream right now. 'live': this attempt's own
+   * wire already ran and its result could not be stored or settled, which is a storage or ledger
+   * fault now. Defaults to 'live', so any site that forgets to say stays fail-closed.
+   */
+  constructor(
+    public readonly operationKey: string,
+    public readonly origin: 'remnant' | 'live' = 'live',
+  ) {
     super(`budget operation already exists without a durable result: ${operationKey}`);
     this.name = 'BudgetOperationReplayError';
   }
@@ -271,10 +262,6 @@ export class UnavailableBudgetStore implements BudgetStore {
   }
 
   async open(): Promise<BudgetAccountAuthorization> {
-    return this.unavailable();
-  }
-
-  async admitPlatformRun(): Promise<PlatformBudgetRunAdmission> {
     return this.unavailable();
   }
 
@@ -401,27 +388,6 @@ function parseBudgetAccountAuthorization(
   };
 }
 
-function parsePlatformBudgetRunAdmission(
-  rows: readonly PlatformAdmissionRow[],
-): PlatformBudgetRunAdmission {
-  const row = rows[0];
-  if (
-    !row ||
-    typeof row.replay !== 'boolean' ||
-    typeof row.campaign_cap_microusd !== 'bigint' ||
-    row.campaign_cap_microusd < 1n ||
-    typeof row.max_runs !== 'bigint' ||
-    row.max_runs < 1n
-  ) {
-    throw new ExecutionBudgetGrantError(
-      'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
-    );
-  }
-  return {
-    ...parseBudgetAccountAuthorization(rows, row.authority_id),
-    replay: row.replay,
-  };
-}
 
 function assertKey(name: string, value: string): void {
   if (!value || value.length > MAX_KEY_LENGTH || [...value].some((character) => character.charCodeAt(0) < 32)) {
@@ -429,30 +395,6 @@ function assertKey(name: string, value: string): void {
   }
 }
 
-function assertPlatformBudgetRunAdmission(
-  input: PlatformBudgetRunAdmissionInput,
-): void {
-  if (
-    !EXECUTION_BUDGET_PLATFORM_PURPOSES.includes(
-      input.purpose as (typeof EXECUTION_BUDGET_PLATFORM_PURPOSES)[number],
-    ) ||
-    input.subjectType !== 'schedule' ||
-    input.subjectId !== input.scheduleId ||
-    !/^[0-9a-f]{64}$/.test(input.requestSha256) ||
-    !input.workflowRunId ||
-    input.workflowRunId.length > 100 ||
-    [...input.workflowRunId].some((character) => character.charCodeAt(0) < 32) ||
-    input.accountKey !==
-      `platform:${input.requestSha256}:${input.workflowRunId}`
-  ) {
-    throw new ExecutionBudgetGrantError(
-      'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
-    );
-  }
-  assertKey('subjectId', input.subjectId);
-  assertKey('scheduleId', input.scheduleId);
-  assertKey('accountKey', input.accountKey);
-}
 
 function projectionResultStrategy(
   schemaVersion: string | null | undefined,
@@ -817,33 +759,6 @@ export class PostgresBudgetStore implements BudgetStore {
     }
   }
 
-  async admitPlatformRun(
-    input: PlatformBudgetRunAdmissionInput,
-  ): Promise<PlatformBudgetRunAdmission> {
-    assertPlatformBudgetRunAdmission(input);
-    try {
-      const rows = await this.inAuthorityScope('platform', (transaction) =>
-        transaction.$queryRaw<PlatformAdmissionRow[]>(
-          Prisma.sql`SELECT * FROM admit_platform_execution_budget_run_v1(
-            ${input.purpose}::"execution_budget_purpose",
-            ${input.subjectType}, ${input.subjectId}, ${input.scheduleId},
-            ${input.requestSha256}, ${input.workflowRunId}, ${input.accountKey}
-          )`,
-        ),
-      );
-      return parsePlatformBudgetRunAdmission(rows);
-    } catch (error) {
-      if (
-        isTrustedExecutionBudgetDatabaseMarker(
-          error,
-          'TOOL_BUDGET_UNSETTLED_OPERATIONS',
-        )
-      ) {
-        throw new BudgetUnsettledOperationsError(input.accountKey);
-      }
-      throw mapExecutionBudgetPersistenceError(error);
-    }
-  }
 
   async attestAuthorized(input: {
     authorityId: string;
@@ -884,6 +799,15 @@ export class PostgresBudgetStore implements BudgetStore {
       if (isAuthorityLifecycleUnavailable(error)) {
         throw authorityLifecycleUnavailable();
       }
+      // reserve_tool_budget attests the authority itself: an expired lease, a
+      // revocation, an invalid grant or a scope mismatch arrives here as the same
+      // trusted marker attestAuthorized maps, and leaves as the same contract error
+      // (the scope mismatch included, as attestAuthorized maps it). REUSED and
+      // EXHAUSTED cannot come from here: attest never raises REUSED, and reserve
+      // answers an exhausted account with a DENIED row (BudgetExceededError below)
+      // before it attests; the live lease spec pins that order.
+      const grantError = trustedExecutionBudgetGrantError(error);
+      if (grantError) throw grantError;
       if (isBudgetAccountUnavailable(error)) throw new BudgetAccountUnavailableError(input.accountKey);
       throw error;
     }
@@ -1024,7 +948,7 @@ export class PostgresBudgetStore implements BudgetStore {
           Prisma.sql`SELECT * FROM mark_tool_budget_result_unknown_v5(
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
             ${durable ? JSON.stringify(durable.manifest) : null}::jsonb,
-            ${facts?.expectedHttpStatus ?? null},
+            ${facts?.expectedHttpStatus ?? null}::smallint,
             ${facts?.expectedHttpOk ?? null},
             ${facts?.expectedSanitizedUrl ?? null},
             ${facts?.expectedContentHash ?? null},
@@ -1164,10 +1088,10 @@ export class PostgresBudgetStore implements BudgetStore {
       return await this.inAuthorityScope(reservation.workspaceId, async (tx) => {
         const rows = await tx.$queryRaw<MicrousdSettleRow[]>(
           objectVersionId
-            ? Prisma.sql`SELECT * FROM settle_tool_budget_artifact_manifest_with_receipt_v3(
+            ? Prisma.sql`SELECT * FROM settle_tool_budget_artifact_manifest_with_receipt_v4(
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
             ${observedMicrousd}, ${JSON.stringify(manifest)}::jsonb,
-            ${facts.expectedHttpStatus}, ${facts.expectedHttpOk},
+            ${facts.expectedHttpStatus}::smallint, ${facts.expectedHttpOk},
             ${facts.expectedSanitizedUrl}, ${facts.expectedContentHash},
             ${facts.expectedBlockedCode}, ${facts.expectedRobotsBlocked},
             ${JSON.stringify(explicitFacts.usage)}::jsonb,
@@ -1179,7 +1103,7 @@ export class PostgresBudgetStore implements BudgetStore {
             : Prisma.sql`SELECT * FROM settle_tool_budget_artifact_manifest_with_receipt_v2(
             ${reservation.workspaceId}, ${reservation.operationId}::uuid,
             ${observedMicrousd}, ${JSON.stringify(manifest)}::jsonb,
-            ${facts.expectedHttpStatus}, ${facts.expectedHttpOk},
+            ${facts.expectedHttpStatus}::smallint, ${facts.expectedHttpOk},
             ${facts.expectedSanitizedUrl}, ${facts.expectedContentHash},
             ${facts.expectedBlockedCode}, ${facts.expectedRobotsBlocked},
             ${JSON.stringify(explicitFacts.usage)}::jsonb,

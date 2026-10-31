@@ -55,7 +55,7 @@ function rejectingHarness(code: ExecutionBudgetGrantError['code']) {
     providers,
     withWorkspace,
     company: new CompanyService(prisma, authority),
-    icp: new IcpService(prisma, {} as never, {} as never, authority, budget as never),
+    icp: new IcpService(prisma, {} as never, {} as never, authority, {} as never, budget as never),
     discovery: new DiscoveryService(prisma, providers as never, authority, budget as never),
   };
 }
@@ -88,8 +88,10 @@ describe('workspace HTTP authority cutover', () => {
       await expect(call()).rejects.toMatchObject({ code });
     }
 
-    expect(harness.consumeWorkspaceGrant).toHaveBeenCalledTimes(5);
-    expect(harness.verifyWorkspaceGrant).toHaveBeenCalledTimes(2);
+    // ICP 设计与查询计划自 2026-10-30 起先验证 Grant、跑完业务前置校验才消费，
+    // 因此拒绝路径上它们只计一次 verify；其余端点仍直接消费。
+    expect(harness.consumeWorkspaceGrant).toHaveBeenCalledTimes(3);
+    expect(harness.verifyWorkspaceGrant).toHaveBeenCalledTimes(4);
     expect(harness.withWorkspace).not.toHaveBeenCalled();
     expect(harness.providers.routeContactDiscovery).not.toHaveBeenCalled();
     expect(harness.providers.routeEmailVerification).not.toHaveBeenCalled();

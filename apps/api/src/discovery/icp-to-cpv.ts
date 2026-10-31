@@ -1,4 +1,5 @@
 import { CanonicalNode, TaxonomyKind, type TaxonomyResolveOptions } from './taxonomy-resolver';
+import { expandMarketRegions } from './vocab';
 
 /**
  * TED 覆盖的买方国别（EU-27 + EEA(ISL/LIE/NOR) + CHE + GBR），ISO-3。
@@ -8,6 +9,15 @@ export const TED_COVERAGE: ReadonlySet<string> = new Set([
   'AUT', 'BEL', 'BGR', 'CHE', 'CYP', 'CZE', 'DEU', 'DNK', 'ESP', 'EST', 'FIN', 'FRA', 'GBR', 'GRC', 'HRV', 'HUN',
   'IRL', 'ISL', 'ITA', 'LIE', 'LTU', 'LUX', 'LVA', 'MLT', 'NLD', 'NOR', 'POL', 'PRT', 'ROU', 'SVK', 'SVN', 'SWE',
 ]);
+
+/**
+ * The source an injected TED query routes to; the planner injects it only while
+ * that source is ENABLED (BI-30) and declares governed company lineage (lineage gate).
+ */
+export const TED_QUERY_SOURCE = Object.freeze({
+  sourceClass: 'public_intelligence',
+  providerKey: 'ted',
+} as const);
 
 /** Technical execution envelope for request-bound query-plan taxonomy work. */
 export const MAX_QUERY_PLAN_INDUSTRY_TERMS = 64;
@@ -109,9 +119,13 @@ export function collectIndustryTerms(companyAttributes: unknown, planned: PlanQu
   ]).slice(0, MAX_QUERY_PLAN_INDUSTRY_TERMS);
 }
 
-/** Stable first-seen market set shared by CPV, FDA and scheduled intent consumers. */
+/**
+ * Stable first-seen market set shared by CPV, FDA and scheduled intent consumers. A region market such as
+ * "DACH" becomes its member countries' alpha-2 codes (DE, AT, CH), which the taxonomy resolves without the
+ * model; left as one term, the model would have to pick a single country for it.
+ */
 export function boundedTargetCountries(value: unknown): string[] {
-  return uniq(splitTerms(value)).slice(0, MAX_QUERY_PLAN_TARGET_COUNTRIES);
+  return uniq(expandMarketRegions(splitTerms(value))).slice(0, MAX_QUERY_PLAN_TARGET_COUNTRIES);
 }
 
 /** 查询计划条目形状（与 discovery.query_plan 输出的 queries[] 结构一致）。 */
@@ -132,8 +146,12 @@ export interface PlanQueryShape {
 export function buildTedQuery(cpv: IcpToCpvResult, planned: PlanQueryShape[]): PlanQueryShape[] {
   if (cpv.cpvCodes.length && cpv.buyerCountries.length) {
     const ted: PlanQueryShape = {
-      source_class: 'public_intelligence',
-      filters: { source_hint: 'ted', cpv: cpv.cpvCodes.join(','), buyer_country: cpv.buyerCountries.join(',') },
+      source_class: TED_QUERY_SOURCE.sourceClass,
+      filters: {
+        source_hint: TED_QUERY_SOURCE.providerKey,
+        cpv: cpv.cpvCodes.join(','),
+        buyer_country: cpv.buyerCountries.join(','),
+      },
       keywords: [],
       rationale: 'TED 欧盟中标发现（ICP→CPV 冷路径解析）' + (cpv.warnings.length ? '；' + cpv.warnings.join('；') : ''),
       priority: 1,

@@ -84,3 +84,141 @@
   - 复审没有发现依赖旧行为的调用方：Temporal 重试经 `reserveModelOperation` 重放终态行，不会再次结算。
 - **未覆盖**：没有用真实 PostgreSQL 做往返验证。`router-model-gateway.postgres.spec.ts` 会在库里留下夹具且不清理，所以没有对共用的 `global_dev` 运行。jsonb 规范化、Prisma 的 Json 解析与触发器的行为只做了静态核对，并用单测模拟。
 - **结论**：更新 `router-model-gateway.ts` 指纹为 `0ad768f0edf1e1ef5160db6c58025c711def8fcde69b2b3db73bd6c1cd178198`。
+
+## 2026-10-08 Router 改动复核（模型失败原因码与可恢复分类）
+
+起因：xin 上一次发现 run 因为一次 11 token 的非 JSON 归一回答整体失败。`isExecutionControlError` 把所有 `ProviderOutputError` 判成控制错误，发现流程里「单家失败不影响其余」的退路因此一处都没生效。修复的主体在 `execution-control-error.ts` 与 `provider-output-error.ts`，不在本围栏内。Router 只做了下面几处配套改动，按围栏规则先复核、再更新指纹。
+
+- **改动**：
+  - 修复路径上四处已有的抛错补了 `reasonCode`：修复被抑制、修复准备失败、修复调用失败、修复后仍不合 schema。
+  - 其中「首次结算未定所以禁止修复」与「修复准备失败」两处，改抛 `ProviderOutputUnresolvedError`。它是 `ProviderOutputError` 的子类，但没有登记为可恢复，所以仍被判为控制错误。准备失败的那一处现在带上 `cause`，不再丢掉原错误。
+  - 「修复调用失败」的外层包装按修复错误本身选类：修复又回了不能用的答案（可恢复的模型失败），仍是可恢复的 `ProviderOutputError`；网络失败、传输失败等其他情况，修复的结果未知，改抛 `ProviderOutputUnresolvedError`。判断用 `provider-output-error.ts` 导出的 `isRecoverableModelFailure`，Router 仍然不直接引入共享判定（静态规格要求它作为例外边界的消费方不引入）。
+  - 通用 trace 的 `errorMessage` 对 `ProviderOutputError` 记 `类名:原因码`，其余错误仍记类名。
+- **没有放宽任何约束**：
+  - 授权检查（`assertExternalActionAuthorized`）、预算预留与结算、持久回执与重放投影、出网围栏、物理调用的分配与计数都没有改动。
+  - 失败结算仍按 `err instanceof ProviderOutputError` 分支计费，子类走同一分支，金额不变。
+  - 付费路径的 `safeProviderErrorCode` 仍返回 `PROVIDER_OUTPUT_ERROR`。
+  - 没有新增物理调用路径。
+  - trace 只多了原因码。原因码只能是大写代码：显式给定的必须通过 `^[A-Z][A-Z0-9_]{2,63}$`，推导的只取消息开头的代码，不会带进模型文本。
+- **围栏外的配套改动**：
+  - `ProviderOutputError` 与 `TaskOutputValidationError` 登记为「可恢复的模型失败」，有确定性退路的调用方可以吸收。
+  - 判定只认实例的直接原型。未登记的子类，以及自身 `code`/`type`/`name` 带控制标记的实例，一律仍按控制错误处理；字段只按数据属性读取，`cause` 链照常追查。
+  - 传输失败（流不可读、被截断、格式错误、上游错误事件、响应体不是 JSON）改抛未登记的 `ProviderTransportError`，与非流式下的 HTTP 错误一样失败即停。
+  - 身份不符、结算未知的 `ProviderSettlementError`、合规拦截保持控制错误。付费路径上的普通 `ProviderOutputError` 即使用量里带着未知的网关结算，现在也算可恢复；付费路径只有建站在用，它不用 `isExecutionControlError` 做退路，所以行为不变。
+- **独立复审**（只读代理）：
+  - 第一轮：HIGH 一项是本指纹，即本节；另有 MEDIUM 五项、LOW 一项。
+    - 传输失败被当作可恢复：已改为 `ProviderTransportError`。
+    - 标记可被继承、并且跳过了控制标记检查：已改为按类显式登记，并在已登记的实例上照查控制标记。
+    - 修复被抑制、修复准备失败被当作可恢复：已改为 `ProviderOutputUnresolvedError`，并补上 `cause`。
+    - 两个子类缺原因码：已补。
+    - 吸收失败后，若活动因别的原因重试，重放那次已结算的调用仍会被拒；被吸收的官网画像分类失败会写入一份没有贸易角色的画像，30 天内不重新画像。这两项列为后续事项，因为它们不比改动前更差：改动前同样的失败会让整个 run 直接失败。
+  - 第二轮：没有 CRITICAL 或 HIGH，第一轮五项都核实已修；`bundleWorkflowCode` 能打包，工作流里的分类不变。新提出 MEDIUM 两项、LOW 四项，处理如下。
+    - `finish_reason` 与 Responses 的 `status` 把整批失败（如 DeepSeek 的 `insufficient_system_resource`、`failed`）也当成单次回答不能用：现在只有 `content_filter`、工具调用与 `incomplete` 可恢复，各有原因码，其余报 `ProviderTransportError`。
+    - 被吸收的失败到不了 run 状态，所有 Fit 判定都失败时 run 仍会 DONE：`qualifyFitForRun` 统计 `unjudged`，大于零时 run 至少 PARTIAL；官网画像统计 `unclassified`，只进 stats。
+    - 200 响应体带 `error` 或没有 `choices` 被当成空回答：现在报 `ProviderTransportError`（`CHAT_COMPLETIONS_BODY_INVALID`）。
+    - 修复调用遇到网络失败会被外层包装成可恢复：已按上文选类。
+    - 登记入口不受限制：拒绝 `Error` 与内置错误类，并有测试限定只有 `provider-output-error.ts` 登记、且只有两个类。
+    - 活动边界上丢失控制属性（Temporal 只保留类名）是改动前就有的问题，记为后续事项。
+  - 第三轮：没有 CRITICAL 或 HIGH；全量 API 单测 8,970 项通过，指纹与执行授权策略检查都核过。提出 MEDIUM 两项、LOW 三项。
+    - 「一家都没判出来则 FAILED」按活动的单次尝试计数：重试时已有结论的公司不再重判，可能把已有 9 家结论的 run 判成 FAILED，结论也就不进评分。已改为只降到 PARTIAL，FAILED 仍只由查询全部失败决定。
+    - Fit 阶段遇传输失败时，工作流没有兜底，run 停在 RUNNING。这是已登记的 BI-25；改动前所有模型失败都会这样，现在只剩传输类，另开后续任务。
+    - 登记防护漏了宿主错误类：已补 `DOMException` 与 WebAssembly 错误类（在工作流沙箱里按需查找）；扫描测试改为限定只有两个文件提到该函数，并容忍换行与尾逗号。
+    - `"error": null` 会被当成错误：已改为 `!= null`（响应体与流事件两处）。
+    - 修复调用会把 `ProviderWireInFlightError` 包起来，付费路径因此认不出、仍去结算别的 worker 正在用的调用。这是改动前就有的问题，只在建站付费路径；修它要改结算语义，另开后续任务，本次 Router 不再改动。
+  - 没有发现合规绕过：`ExternalActionDeniedError` 仍是控制错误，修复路径照旧直接抛出。
+- **结论**：更新 `router-model-gateway.ts` 指纹为 `c9fc50b3fb17090441cc36e535f78643371a1d7fabbb8468ad47e9ab96f5122a`。
+
+## 2026-10-09 Router 改动复核（修复调用遇到「调用进行中」）
+
+本节对应上文 2026-10-08 第三轮复审另开的后续事项：修复调用把 `ProviderWireInFlightError` 包起来，付费路径认不出。处理它要改 `router-model-gateway.ts`，所以按围栏规则先复核、再更新指纹。
+
+- **改动**：只改 `generateStructured` 里修复调用外层的 `catch`。原来只把 `ExternalActionDeniedError` 原样抛出，其余错误一律包成 `ProviderOutputError` 或 `ProviderOutputUnresolvedError`（「repair call failed」）；现在 `ProviderWireInFlightError` 也原样抛出。没有新增引入（该类本来就从 `./providers/provider-output-error` 引入），没有新增错误构造，Router 仍不引入 `execution-budget/execution-control-error`。
+- **改后的走向**：错误原样到达 `runPersistent` 已有的「调用进行中」分支：记 `MODEL_WIRE_IN_FLIGHT` trace，抛 `PaidOperationUnknownError(operationKey, "MODEL_WIRE_IN_FLIGHT")`。不结算、不收为未发出、不停用付费调用，也不换下一个 provider。这与首次调用遇到「调用进行中」时的处理相同，10-06 复审已确认过这一分支。
+- **首次物理调用的结算仍然完整**（动手前逐段核对）：
+  - 物理调用层面：provider 在返回首次结果之前，已经经 `physicalWireRuntime().resolve` 自己落了账。网关回读已结算时先写回执（`recordModelPhysicalWireReceipt`），再终结这次调用（`finalizeModelPhysicalWire`）。观测未知或写库 ACK 丢失时，首次结果的用量里是 `unknown`，`initialSettlementUnknown` 直接禁止修复。数据库函数 `allocate_site_build_provider_wire_v1` 也要求首次调用已是 `OBSERVED`、`settlement_status = SETTLED`、载荷可用且派生密钥相同，否则拒绝分配第二次调用（`SITE_BUILD_PROVIDER_REPAIR_NOT_AUTHORIZED`）。所以只要修复调用存在，首次调用的精确回执就已持久。修复 `catch` 从不碰首次调用的记录，本次改动也不碰。
+  - 支出层面：这次支出保持 `RESERVED`，按两次调用（`MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND`）算的预留原样占着，不释放。触发器 `guard_site_build_provider_spend_settlement_v1` 只在全部物理调用都已终结（`OBSERVED`/`UNKNOWN`/`NOT_DISPATCHED`）、且 `call_count` 等于实际物理调用数时，才允许支出离开 `RESERVED`，所以只能由终结修复调用的一方来结算。目前这一方是 provider-spend 恢复任务，它的 `completeProviderSpendReconciliation` 按持久回执结算：修复调用为 `NOT_DISPATCHED` 时，按首次调用的回执精确记 `FAILED`（`MODEL_OUTPUT_UNAVAILABLE_AFTER_RECOVERY`，`call_count` 为 1）；有 `UNKNOWN` 或回执不全时，按预留记 `UNKNOWN` 并停用付费调用。两种情况下，首次调用的费用都计入最终扣费：要么按回执精确计入，要么连同修复调用按整笔预留保守计入。恢复任务少数情况下会停在未结算（见下文复审第 5 点），这时预留一直占着，费用同样没有丢。
+  - 重试与退路：Temporal 重试经 `reserveModelOperation` 重放。支出仍是 `RESERVED`、首次调用已不是 `ALLOCATED` 时，抛 `PaidOperationUnknownError("MODEL_WIRE_ALREADY_ALLOCATED")`；支出已被恢复任务记为 `FAILED` 或 `UNKNOWN` 时，按记录的错误码抛 `PaidOperationUnknownError`。两种情况都不会再发物理调用。`site-builder/agents/ai-task.ts` 把 `PaidOperationUnknownError` 当作终态，不换下一个模型。
+- **改动前的实际后果**：包装后的错误 `callCount` 为 2，合并用量里只有首次调用的已结算观测。`modelCostMeasurement` 因此给出 `estimated_upper_bound`；`site_builder.brand_profile` 用价目表里的模型时，则是只按首次调用 token 计的 `token_pricing`。Router 随后调用 `settlePersistentOperation`，状态 `FAILED`、`call_count` 2、错误码 `PROVIDER_OUTPUT_ERROR`（新增用例在改动前实测如此）。放到真库上：
+  - 修复调用尚未终结或已是 `NOT_DISPATCHED` 时，实际物理调用数 1 不等于 2，或观测不全，守卫拒绝。两次结算都失败后走 `freezeUnknownSettlement("MODEL_SETTLEMENT_DATABASE_ACK_UNKNOWN")`，以错误的原因停用整个 BuildRun 的付费调用，`MODEL_WIRE_IN_FLIGHT` trace 也丢了；
+  - 恢复任务已先结算时，首次结算即返回 `REPLAY`，冻结并报 `SETTLEMENT_REPLAY`；恢复任务若在两次结算之间完成，重试拿到 `REPLAY` 却回读不符，冻结并报 `SETTLEMENT_REPLAY_UNCONFIRMED`；
+  - 修复调用若已被别人终结、而支出尚未结算，`call_count` 2 恰好对上，守卫放行。这包括修复调用为 `OBSERVED`，或为终态阶段 `gateway_log_missing`/`gateway_log_unavailable` 的 `UNKNOWN`（这两个阶段不强制 `UNKNOWN` 状态）。这时 Router 会抢在所有者之前终结这次支出，品牌画像任务还只按首次调用的 token 计费、少记修复调用；随后抛不属于终态的 `ProviderOutputUnresolvedError`，AiTask 换下一个模型，开一次新的付费操作。
+- **可达性**：按现有 SQL，只有发出首次调用的那次执行能分配修复调用：分配要求首次调用已是 `OBSERVED`；重放时支出仍是 `RESERVED`、首次调用不是 `ALLOCATED`，就直接抛 `MODEL_WIRE_ALREADY_ALLOCATED`；`begin_site_build_provider_wire_v1` 还校验支出自身的 fence。修复调用要拿到 `READBACK_ONLY`，必须有别人在支出仍是 `RESERVED` 时把它移出 `ALLOCATED`。目前只有恢复任务会这样做：分配满 24 小时（`RECONCILIATION_EXPIRY_MS`）仍未发出的调用会被收为 `NOT_DISPATCHED`，然后才结算支出。这两步是分开的事务，后一步也可能失败，窗口就在两步之间；原执行要在分配与 `begin` 之间停顿满 24 小时才会撞上。所以这是防御性修复，针对的是罕见路径。
+- **没有放宽任何约束**：授权检查（`assertExternalActionAuthorized`）、预算预留与结算、持久回执与重放、出网围栏、物理调用的分配与计数都没有改动，也没有新增物理调用路径。行为上唯一的变化：修复调用遇到「调用进行中」时，本次执行不再去结算不归它的支出，也不再以错误的原因停用整个 BuildRun 的付费调用，预留照旧保留。非付费路径不会出现这个错误，因为 `paidFetch` 只在 `ctx.paidCost` 存在时才调用 `begin`；即使出现，通用 `catch` 也会扣减整笔预留，比原来按 token 计费更保守。
+- **相邻路径，未改**：修复准备阶段的 `catch` 也会遇到「修复调用已存在、且不是 `ALLOCATED`」：`allocateModelPhysicalWire` 此时抛 `PaidOperationUnknownError`，被包成 `callCount` 为 1 的 `ProviderOutputUnresolvedError`，Router 再按首次调用的回执结算 `FAILED`。守卫只在修复调用已是 `NOT_DISPATCHED` 时放行，这时金额正确，之后 AiTask 与其他修复准备失败一样换下一个模型；其余情况被拒后冻结，抛终态的 `PaidOperationUnknownError`。两种结局计费都正确，所以本次不改；只是支出上记的错误码是 `PROVIDER_OUTPUT_ERROR`，看不出是分配阶段的原因。
+- **测试**：新增 3 项，改动前都失败，拿到的是包装后的 `ProviderOutputUnresolvedError`。
+  - `router-model-settlement-v1.spec.ts`：照真实 provider 的做法，修复调用的 `begin` 返回 `READBACK_ONLY` 时抛 `ProviderWireInFlightError`。断言调用方拿到 `PaidOperationUnknownError(MODEL_WIRE_IN_FLIGHT)`；首次调用的回执与终结各写一次，且为已结算；修复调用既不终结也不收为未发出；不结算支出、不停用付费调用；trace 只记 `MODEL_WIRE_IN_FLIGHT`。
+  - `paid-execution-gates.spec.ts`：付费门夹具下，修复确实发生在第二次物理调用上，同样不结算、不停用，trace 为 `MODEL_WIRE_IN_FLIGHT`。
+  - `router-model-gateway.spec.ts`：调用方拿到的正是修复调用抛出的那个 `ProviderWireInFlightError` 实例，判为控制错误，预留整笔扣减。
+- **独立复审**（只读代理）：没有 CRITICAL、HIGH 或 MEDIUM。上面关于首次调用（物理调用层面与支出层面）、改动前后果与可达性的推理，逐条对照源码成立，没有找到其他可达路径；授权、出网、回执、分配与计数都没有被削弱；三项测试去掉修复都会失败。LOW 五项：
+  1. 改动前的计量不总是 `estimated_upper_bound`，守卫放行的情形也不止 `OBSERVED`，还漏了 `SETTLEMENT_REPLAY_UNCONFIRMED`：已在上文改正。
+  2. 本节当时还留着复审占位：已填。
+  3. 相邻的修复准备路径结局不同（守卫放行时 AiTask 会换模型，错误码记成 `PROVIDER_OUTPUT_ERROR`）：两条路径计费都正确，不改，已写进「相邻路径」一条。
+  4. 代码注释说「另一个 worker 持有」不准确，目前唯一可达的情形是恢复任务把修复调用收为 `NOT_DISPATCHED`：注释已改为「另一个 worker 或恢复任务」，指纹按改后的内容更新。`MODEL_WIRE_IN_FLIGHT` trace 不带 token：首次调用的 token 已在它的回执里，本次不改。
+  5. 改动前就有：恢复任务 EXPIRE 时，`completeProviderSpendReconciliation` 若返回 UNRESOLVED 而不抛错，会记 EXPIRED 并停止巡检，支出可能一直停在 `RESERVED`、预留一直占着。这是保守的，费用以预留的形式占着、没有丢，记为后续事项。
+- **未覆盖**：没有用真实 PostgreSQL 做往返；守卫与恢复任务的行为只做了静态核对。
+- **结论**：更新 `router-model-gateway.ts` 指纹为 `bf31b8ee89249aece725d72cc18ad97ee00fbd3ddcb86e4c147d6bf6817fb9df`。
+
+## 2026-10-11 Router 改动复核（D14 模型身份替代）
+
+起因：获客唯一的模型上游（new-api 渠道 24 → OpenOx）会把部分 `deepseek-v4-pro` 请求交给 DeepSeek V4 Flash 应答，身份门照规定判 `MODEL_IDENTITY_MISMATCH`，验收 run 因此中断。产品负责人 2026-10-11 决定（D14）：在接入真正的 pro 第二上游之前，获客链路接受 Flash，结果如实标注。改动要动 `router-model-gateway.ts`，所以按围栏规则先复核、再更新指纹。
+
+- **改动（Router）**：
+  - 构造时解析部署设置 `MODEL_IDENTITY_SUBSTITUTES`（默认空），格式错误、未知模型或未审查的组合直接抛错，API 与 Worker 启动失败。解析结果放在 ES 私有字段里。
+  - `run` 的第一句：调用方的上下文只要带着 `modelIdentitySubstitutes`（自有或继承），就抛 `MODEL_IDENTITY_SUBSTITUTES_CALLER_SUPPLIED`，发生在出网断言、路由、预留与任何物理请求之前。不拷贝上下文，付费路径（`ctx.paidCost` → `runPersistent`）拿到的仍是调用方原对象，其余逻辑不变：照旧要求 `result.model` 等于请求模型。
+  - 非付费路径只在 generateText / generateStructured、请求模型在部署设置里有替代、且注册表任务标了 `acceptsModelSubstitute` 时，才把允许的替代放进交给 provider 的上下文。注册表仍只查一次：沿用原有的那一处 `getTask(input.task)`，只是在部署设置给出替代时也加载（执行授权策略要求 Router 里恰好一处通用查表）。默认关闭时，加载条件与改动前逐字相同。
+  - 有允许的替代时，provider 外面套一层只做记录的包装 `observingSubstituteAnswers`：原样转发每个方法，记下答案或失败答案由替代应答的每次物理请求；它不发请求、不重试、不做授权。出网分支照旧经 `call()` 在 `authorizeAndDispatch` 内派发同一个操作，`providerId` 仍是真实 provider。
+  - trace：有任何一次物理请求由替代应答，就写 `modelSubstitution { requestedModel, substituteModels }`；`model` 列记返回答案（或失败答案）的模型。失败路径的 `model` 只在失败答案由允许的替代产出时改记替代，其余照旧记请求模型。允许替代、而上游对成功答案完全没有署名时，另写 `modelIdentityUnproven`。
+  - 结算：一字未改。观测额（provider 报价 → 模型无关的 token 混合价 → 按次上限）原样交给预算账本，`settle_tool_budget` 照旧按 `LEAST(观测, 预留)` 扣费，超出时记 `cap_variance` 并耗尽账户。
+- **围栏外的配套改动**：provider 只在非付费上下文、只认代码审查过的组合时才接受替代；任何名字解析为替代，答案就记为替代；两个不同替代则失败；流解析失败时已出现的替代名也记入失败。别名表新增 `deepseek-v4-flash` ← `deepseek-ai/DeepSeek-V4-Flash-0731`（仅 chat-completions）。trace 落库把这些标记写进 `ai_trace.meta` 与 `usage_ledger.meta`。注册表给 11 个获客任务加 `acceptsModelSubstitute`。
+- **放宽了什么**：这是一次经产品负责人批准的、有意的身份门放宽，而且很窄。只在部署显式开启、任务显式标记、非付费路径、文本与结构化调用、代码审查过的组合（目前仅 pro → flash）这几个条件同时满足时才生效；放行的答案按实际模型记录，不冒充请求的模型。授权检查（`assertExternalActionAuthorized`）、预算预留与结算、持久回执与重放投影、出网围栏、物理调用的分配与计数都没有改动，也没有新增物理调用路径。默认关闭时唯一的行为差异来自新别名：请求 `deepseek-v4-flash` 的调用现在承认审查过的 Flash 构建名，这是同一模型的身份事实。
+- **独立复审**（只读代理，三轮）：
+  - 第一轮：HIGH 一项、MEDIUM 一项、LOW 四项，处理如下。
+    - HIGH：初版在两条路径上把替代调用的观测额封顶在预留以内。账本本来就按 `LEAST` 扣费，封顶反而让替代调用绕过 `cap_variance` 与账户耗尽，也压低了 `observed_microusd`。已改回原样结算；用例改为断言替代调用的定价与 pro 应答完全相同，且持久回执的扣费不超过预留。
+    - MEDIUM：结构化输出首调由 Flash 应答、修复由 pro 应答时，整次调用记为 pro 且不带标记，按 `modelSubstituted` 统计的跑测报告会漏掉。已改为观察每次物理请求，补了首调与修复分属不同模型的三项用例。
+    - LOW：继承来的替代字段能穿过剥离，provider 也未复核审查组合（provider 已补复核，剥离见第二轮）；默认关闭「行为不变」的说法不准（文档已改）；流解析失败记成 pro（已改）；配置可被 `Map.prototype.set` 改写、Router 字段只在类型上只读（已改为私有 Map 的只读视图与 ES 私有字段）。
+    - 修正前的源码上，对应新用例 13 项失败；修正后全绿。
+  - 第二轮：没有 CRITICAL、HIGH、MEDIUM，确认包装层不新增路径、默认关闭路径与 main 相同，同意更新指纹。LOW 四项：
+    - 剩余拷贝会连带丢掉继承来的 `paidCost`、`platformEgress`、`authorizeExternalAction`：改为直接拒绝调用方自带的字段，不再拷贝上下文。
+    - 无署名的答案记为 pro、trace 看不出是兜底：允许替代时加 `modelIdentityUnproven` 标记。
+    - 流解析失败按尚未过完身份门的名字记 Flash：偏向 Flash，按设计保留。
+    - 首调 Flash、修复 pro 的行整行记在 pro 下：文档要求统计 pro 时排除带标记的行。
+    - 对应新用例在修正前 6 项失败，修正后全绿。
+  - 第三轮：没有 CRITICAL、HIGH、MEDIUM，同意以下文指纹更新。确认拒绝发生在 `run` 的第一句，早于出网断言、路由与预留；`authorizeExternalAction()` 不带参数，provider 也不回调网关，所以带替代的调用上下文到不了能再交回 Router 的调用方；付费路径重新拿到调用方原对象；默认关闭时 `ai_trace.meta` 与 `usage_ledger` 的 `{task, model}` 与改动前逐字相同，唯一差异仍是新别名。可选 LOW 一项不改：允许替代时，失败且无署名的答案仍按 pro 记在 ERROR 行、不带标记。ERROR 行不写 `usage_ledger`，但 `ai_trace` 的 token 列有值，所以按 `ai_trace` 汇总 pro 的 token 时要排除开关开启期间的 ERROR 行，已写进文档；要加标记还得再改一次 Router。
+- **测试**：新 `router-model-identity-substitution.spec.ts`（真实 provider + 模拟上游）、`model-identity-substitutes.spec.ts`，以及身份别名、trace 落库、注册表标记的用例。覆盖：替代被接受且处处记 Flash；线上仍请求 pro；文本、非流式、Responses 传输；混合署名与未署名内容；首调与修复分属不同模型；截断与流解析失败；定价与 pro 相同、持久回执扣费不超过预留、持久重放记 Flash；启动失败。以下情形仍为 `MODEL_IDENTITY_MISMATCH`：默认关闭、空设置、任务未标记（含建站）、其他模型族、未审查的 Flash 名、反方向、付费上下文、未审查组合。调用方自带替代字段（含继承）在预留前被拒；无署名答案带 `modelIdentityUnproven`。API 全量单测 9,398 项通过，唯一失败为已知负载假红 `browser-readiness-probe`（单独重跑 24/24 通过）。
+- **未覆盖**：没有用真实 PostgreSQL 往返，也没有在 xin 上开启开关跑测；账本的 `LEAST`、`cap_variance` 与账户耗尽是既有 SQL 行为，只做了静态核对。
+- **结论**：更新 `router-model-gateway.ts` 指纹为 `d3194efcca04fefa9cce175a2e9b11772613aa9c9c4b813d2109c539435ec964`。
+
+## 2026-10-14 Router 与 ToolBroker 改动复核（D13：确定失败释放预留）
+
+起因：非付费路径把「在任何输出之前就确定失败」与「结果未知」一样结算为「已结算、无结果」或保留 RESERVED，账本又对已存在的 key 一律 `REPLAY`，于是 HTTP 503、首个输出之前的上游错误事件这类免费的失败成了 run 的终点（10 月 SETTLED 无结果 31 行、RESERVED 19 行）。改动涉及 `router-model-gateway.ts` 与 `tool-broker.ts`，并修订治理声明里 `automaticPhysicalRetryAllowed: false` 的口径，所以先复核、再更新指纹。设计须由运行时会话确认后才能合并（PR 为 draft）。
+
+- **改动（Router）**：
+  - catch 中新增一个释放条件：非平台出网调用的错误经 `definiteModelFailureCode` 判为确定失败（HTTP 429/5xx；`fetch failed` 的 cause 为连接阶段错误码，双栈时每个地址都是；`CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR`/`_TRUNCATED`/`_EMPTY` 且解析器标记 `outputStarted === false`、`callCount === 1`、无 cause、输出 token 与上报费用为 0）时，与零调用的禁联拒绝一样调用 `release`。其余错误一律照旧 `settle`，观测额计算一字未改。
+  - 判定在 `definite-model-failure.ts`（围栏外），Router 只调用它；修复调用的失败被包装成 `ProviderOutputError`/`ProviderOutputUnresolvedError`（`callCount` 2），不可能被判为确定失败。平台出网调用（`ctx.platformEgress`）不走这条释放，结果由出网围栏负责。付费路径（`runPersistent`）未改。
+  - trace：失败行增加 `budgetOperationId` 与 `budgetDisposition`（`RELEASED_CONTROL_DENIAL` / `RELEASED_DEFINITE_FAILURE` / `SETTLED_NO_RESULT`）；`ProviderHttpError` 的 `errorMessage` 带状态码。只是记录，不影响控制流。
+- **改动（ToolBroker）**：
+  - 工作区路径上，只有声明了 `physicalWireObservation: "before_each_wire"` 的工具，执行上下文才换成 `{ ...ctx, beforePhysicalWire }`：观察钩子先记下「请求了物理请求」，再调用调用方原有的钩子（产品代码里没有调用方设置它）。观察钩子自身从不抛错，所以 guarded-http 的 `ExternalHttpPhysicalWireDeniedError` 语义不变。未声明的工具拿到的仍是调用方原对象（`platform-egress-fence.composition.spec.ts` 的同一性用例照旧通过）。
+  - `execute()` 失败、不是禁联拒绝、非付费、预留不是重放，且 broker 能证明一个物理请求都没发出（平台路径：`!platformWireStarted && !platformWireFailed`；工作区路径：已声明且观察钩子未被调用）时 `release` 后原样抛出。调度器失败、已发出过请求、未声明的工具与付费路径都照旧。
+  - 声明的工具（`source-tools.ts`，围栏外）：`http.get`、`crawl4ai.render`、`tradefair.algolia`、`mapyourshow.fetch`、`sanctions.download`。`source-tools-wire-observation.spec.ts` 锁住声明清单，并证明它们把 broker 的钩子原样交给每个适配器；适配器各自的用例（guarded-http 每一跳、web-crawler 在 fetch 之前、Algolia 每一页）证明钩子在每个物理请求之前被调用。
+- **账本**：迁移 `20261015045032` 只替换 `reserve_tool_budget_microusd_v1`（签名、返回形状、属主、授权、`search_path` 含 `pg_temp`、两层包装都不变），新增 `attempt` 列（CHECK 1..3）。只有 RELEASED 且 `attempt < 3` 的行会被重开为 RESERVED（同一 id、`attempt + 1`、与新插入相同的额度检查与 DENIED/exhausted 处理）；RESERVED、RESULT_UNKNOWN、SETTLED（有无结果）照旧 `REPLAY`，所以「结果未知不付两次」的保证不变。
+- **放宽了什么**：这是一次有意的放宽，治理声明同步改口径：`automaticPhysicalRetryAllowed` 由 `false` 改为 `"DEFINITE_FAILURE_BEFORE_OUTPUT_ONLY"`，`maxReservationAttempts: 3`，`execution-authority-policy.mjs` 逐值校验并要求迁移与分类器里的关键条件存在。放宽只覆盖「已证明没有输出」的失败；授权检查、预算预留与结算的金额、持久回执与重放投影、出网围栏、物理调用分配都没有改，也没有新增物理调用路径——再次物理请求只来自调用方（Temporal 重试、下一条查询）用同一 key 重新走完整的预留与授权。
+- **已知残余风险**：
+  - 重开沿用同一 operation id。若某次执行在释放之后又对同一预留发出迟到的 `release`/`settle`，会作用在下一次尝试上。当前没有这样的路径（每条释放路径都是该次执行对账本的最后一次写入，且没有对 `release` 的重试）；可在 PR-2 把 `release`/`settle` 绑定到 `attempt` 加固。
+  - new-api 对流式请求在没有上游 usage 时可能按本地估算的输入 token 计费。若如此，释放流式确定失败会少记这部分（每个 key 至多 3 次输入 token 的费用）。需要运行时会话用 new-api 日志核对 10-13 12:27 那几次 `reason=eof` 是否计费，再确认流式三类是否保留。
+  - 平台路径的证明依赖平台合同工具的每个物理请求都经 broker 调度器发出；这与出网围栏本身依赖的前提相同（10-06 复审后续事项 2）。
+- **独立复审**：首版所在的工作流里没有可用的子代理，只做了作者逐行自审与先红后绿的测试。运行时会话的设计确认见下方「收窄」一条；收窄后 head 的独立复审另行贴到 PR。
+- **测试**：见 PR 与 changelog（2026-10-14 小节）。网关、流解析器、broker、处置合同、治理脚本、工具声明清单的新用例先红后绿；账本 6 项在一次性 PostgreSQL 上以 app_user 先红后绿，其中一项用真实 `PostgresBudgetStore` + 网关证明 503 之后的重试真正跑完。
+- **结论**：更新指纹 `router-model-gateway.ts` → `fd3e6091271280c547aa84b2bb89fbf1cea067572824987911bcba356e0e935c`，`tool-broker.ts` → `659bb26d8bd6a2c9c6b2b3e47ce3ca5b585208fd581ec23ba0c9d7e0c2aec685`。`tool-broker.factory.ts` 与 `model-gateway.module.ts` 未改。
+- **运行时会话核对后的收窄（2026-10-14，同一 PR 追加提交）**：
+  - 运行时会话在 PR 评论（issuecomment-6182377079）里贴了 new-api 计费日志的只读核对结果：宿主侧以 `mode=ro&immutable=1` 打开 SQLite，只读计费列。上面「已知残余风险」第二条得到证实：10-13 12:27 那批 `reason=eof`（log 5734–5738）各有一行 consume，completion 为 0，按本地估算的输入 token 计费。HTTP 429/5xx 在 new-api 侧没有计费行。
+  - 处置如下：
+    - 分类器去掉三种流式失败。`definite-model-failure.ts` 不再引用 `ProviderTransportError`。
+    - `isUnavailableStatus` 排除 504、524（超时：请求已到达上游，可能已经计费），与 new-api 的重试状态码对齐。
+    - 处置合同的 `DEFINITE_FAILURE_CODES` 去掉 `MODEL_PROVIDER_STREAM_FAILED_BEFORE_OUTPUT`。
+    - `execution-authority-policy.mjs` 的分类器检查改为：要求有 `new Set([504, 524])` 和 `!UPSTREAM_TIMEOUT_STATUSES.has(status)`，并反向检查分类器不得引用 `ProviderTransportError`/`ProviderOutputError`。这样，在 mlhjyx/new-api#3 上线前，任何人加回流式释放都会被治理门拦下。
+  - Router 本身只改了一段注释，控制流与上一版逐字相同，释放的范围只会因分类器收窄而变小。这次收窄没有放宽任何东西。
+  - 测试先红后绿：三种流式用例移到「照旧结算」，另加 HTTP 504、524 两项，处置合同把流式码加进拒收列表，收窄前共 6 项红，收窄后网关与处置合同 103 项全绿。
+  - 「每个 key 最多 3 次」是账本层的预留次数。new-api `RetryTimes=1`，最多对应 6 次物理请求，已写入 AGENTS 与执行预算设计文档。
+  - 运行时会话的结论：按这两处修改后同意合并。独立复审由续跑工作流的复审 agent 对收窄后的 head 进行，结论贴在 PR 上。
+  - 更新指纹 `router-model-gateway.ts` → `3887cf6307cd829c8a529fab092e52644c6eab0c53eae5455ca26fa9c0ad36a1`；`tool-broker.ts` 未改，仍为 `659bb26d…`。
+- **迁移改名（2026-10-15）**：#654 已把 `20261014120000_company_profile_understanding_failure` 带进 main。本 PR 的迁移原名 `20261014095011`，按名字排在它之前：落到不同班车时，`finished_at` 最新的会是本迁移，而镜像的 `migration_revision` 按名字取的是 120000，会报 `MIGRATION_REVISION_MISMATCH`。因此改名为 `20261015045032_tool_budget_released_rereserve`，SQL 内容逐字不变，排在 main 上所有迁移之后。

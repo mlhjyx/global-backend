@@ -1,5 +1,6 @@
 import { Injectable, ServiceUnavailableException } from "@nestjs/common";
 import { RuntimeReadinessService } from "../health/runtime-readiness.service";
+import { customerWriteAdmission } from "./customer-write-admission";
 
 @Injectable()
 export class SiteBuildRuntimeGuard {
@@ -28,8 +29,10 @@ export class SiteBuildRuntimeGuard {
         ];
       }
     }
+    // Same customer dependency set as the global write guard; failedComponents
+    // above still lists every failed component, the tolerated one included.
     if (
-      report.status === "ready" &&
+      customerWriteAdmission(report).open &&
       (!input.paidReachable || failedCapabilities.length === 0)
     ) {
       return;

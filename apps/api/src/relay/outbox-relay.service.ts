@@ -7,7 +7,10 @@ import {
   Optional,
 } from "@nestjs/common";
 import { PrismaClient } from "@prisma/client";
+import { WorkflowIdReusePolicy } from "@temporalio/client";
 import { TemporalClient } from "../temporal/temporal.client";
+import { DevFastLaneTemporalClient } from "../temporal/dev-fast-lane-temporal.client";
+import { DEV_FAST_LANE_ACQUISITION_COMMANDS } from "../runtime/dev-fast-lane";
 import {
   DELETION_WORKFLOW,
   DISCOVERY_WORKFLOW,
@@ -95,6 +98,12 @@ interface OutboxEventRecord {
   parkedAt: Date | null;
 }
 
+/** Development fast lane only: the outbox filter for the lane workspace's acquisition commands. */
+type LaneCommandFilter = Readonly<{
+  workspaceId: string;
+  eventType: { in: string[] };
+}>;
+
 /** fetch 的最小可注入面（单测 mock 用，绝不真发网络）。 */
 type FetchLike = (
   url: string,
@@ -119,6 +128,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   private leaseStartingPublished = false;
   private shuttingDown = false;
   private managedTickInFlight?: Promise<void>;
+  // Development fast lane only: the in-flight lane pass (scheduleLanePass).
+  private laneInFlight?: Promise<void>;
   private readonly shutdownAbort = new AbortController();
   private readiness:
     | Readonly<{ status: "ready" }>
@@ -142,6 +153,9 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     @Optional() private readonly admission?: RuntimeAdmissionService,
     @Optional()
     private readonly releaseIdentity?: RuntimeReleaseIdentityService,
+    // Development fast lane only (dev-fast-lane.ts); absent or disabled keeps
+    // every command on the managed Temporal and the 'understanding' queue.
+    @Optional() private readonly devFastLane?: DevFastLaneTemporalClient,
   ) {
     this.db =
       db ?? new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
@@ -243,8 +257,13 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         this.logger.error("outbox relay draining heartbeat failed");
       }
     }
-    const inFlight = this.managedTickInFlight;
-    const drained = inFlight ? await completesWithin(inFlight) : true;
+    const inFlight = [this.managedTickInFlight, this.laneInFlight].filter(
+      (pending): pending is Promise<void> => pending !== undefined,
+    );
+    const drained =
+      inFlight.length > 0
+        ? await completesWithin(Promise.allSettled(inFlight))
+        : true;
     if (this.leaseStartingPublished) {
       if (drained) {
         const stoppedPublished = await settlesWithin(
@@ -345,8 +364,14 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       await this.expireDueClaims();
       if (this.shuttingDown) return;
       // parked 事件排除在轮询外：未注册类型只报一次错并停靠，不每 2s 重试刷日志。
+      const laneCommands = this.devFastLaneCommands();
       const events = (await this.db.outboxEvent.findMany({
-        where: { publishedAt: null, parkedAt: null },
+        // Lane commands are polled in their own pass (scheduleLanePass), so
+        // commands that wait for an unavailable development Temporal never
+        // fill this batch.
+        where: laneCommands
+          ? { publishedAt: null, parkedAt: null, NOT: laneCommands }
+          : { publishedAt: null, parkedAt: null },
         orderBy: { id: "asc" },
         take: BATCH_SIZE,
       })) as OutboxEventRecord[];
@@ -354,6 +379,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         if (this.shuttingDown) break;
         await this.routeEvent(ev);
       }
+      if (laneCommands) this.scheduleLanePass(laneCommands);
       // webhook 派送循环：仅推模式启用时才扫账本（与 routeEvent 的 sink 判定共用同一谓词，消除漂移）。
       if (!this.shuttingDown && this.webhookEnabled()) {
         await this.pumpWebhookDeliveries(new Date());
@@ -362,6 +388,52 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(`relay tick failed: ${String(err)}`);
     } finally {
       this.running = false;
+    }
+  }
+
+  private devFastLaneCommands(): LaneCommandFilter | undefined {
+    const lane = this.devFastLane?.lane;
+    return lane?.enabled
+      ? {
+          workspaceId: lane.workspaceId,
+          eventType: { in: [...DEV_FAST_LANE_ACQUISITION_COMMANDS] },
+        }
+      : undefined;
+  }
+
+  /**
+   * Development fast lane only. Routes the lane workspace's acquisition
+   * commands in a single-flight pass that the managed tick starts but does not
+   * await. A slow or unreachable development Temporal therefore never delays
+   * the OUTBOX_RELAY heartbeat or any other workspace's commands. Shutdown
+   * aborts a pending lane start and drains the pass with the managed tick.
+   */
+  private scheduleLanePass(laneCommands: LaneCommandFilter): void {
+    if (this.shuttingDown || this.laneInFlight) return;
+    const pending = this.lanePass(laneCommands)
+      .catch((err: unknown) => {
+        this.logger.error(`dev fast lane pass failed: ${String(err)}`);
+      })
+      .finally(() => {
+        if (this.laneInFlight === pending) this.laneInFlight = undefined;
+      });
+    this.laneInFlight = pending;
+  }
+
+  private async lanePass(laneCommands: LaneCommandFilter): Promise<void> {
+    const devFastLane = this.devFastLane;
+    if (!devFastLane || devFastLane.coolingDown()) return;
+    const events = (await this.db.outboxEvent.findMany({
+      where: { publishedAt: null, parkedAt: null, ...laneCommands },
+      orderBy: { id: "asc" },
+      take: BATCH_SIZE,
+    })) as OutboxEventRecord[];
+    for (const ev of events) {
+      // A failure to reach the development Temporal starts the client's
+      // cool-down; the rest of the batch waits for the next attempt instead of
+      // paying the connect budget once per command.
+      if (this.shuttingDown || devFastLane.coolingDown()) break;
+      await this.routeEvent(ev);
     }
   }
 
@@ -623,19 +695,50 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   /**
    * 幂等启动工作流（B）：已有同 workflowId 在跑 → 视为已处理（合并语义，事件照常标 published）。
    * 否则事件每 2s 重试直到实例结束——日志风暴 + 假积压。其余错误照旧抛出（下轮重试）。
-   * 三个 internal command 共用，不改各自 workflowId reuse policy。
+   * 各 internal command 共用；reuse policy 由调用方逐个决定，未指定时用 Temporal 默认
+   * （同 ID 的上一次执行结束后允许再启动）。指定 REJECT_DUPLICATE 时，同 ID 已结束也报
+   * WorkflowExecutionAlreadyStartedError，同样按合并处理。
    */
   private async startWorkflowIdempotent(
     workflowType: string,
-    options: { taskQueue: string; workflowId: string; args: unknown[] },
+    options: {
+      taskQueue: string;
+      workflowId: string;
+      args: unknown[];
+      workflowIdReusePolicy?: WorkflowIdReusePolicy;
+    },
     what: string,
+    acquisitionCommand?: { eventType: string; workspaceId: string },
   ): Promise<void> {
+    // Development fast lane: only the three acquisition commands pass
+    // `acquisitionCommand`, and only the lane workspace's get a route.
+    const laneRoute = acquisitionCommand
+      ? (this.devFastLane?.route(
+          acquisitionCommand.eventType,
+          acquisitionCommand.workspaceId,
+        ) ?? null)
+      : null;
+    const described = laneRoute
+      ? `${what} on dev fast lane task queue '${laneRoute.taskQueue}'`
+      : what;
     try {
-      await this.temporal.client.workflow.start(workflowType, options);
-      this.logger.log(`started ${what}`);
+      if (laneRoute && this.devFastLane) {
+        await this.devFastLane.start(
+          workflowType,
+          {
+            ...options,
+            taskQueue: laneRoute.taskQueue,
+            workflowExecutionTimeout: laneRoute.workflowExecutionTimeout,
+          },
+          this.shutdownAbort.signal,
+        );
+      } else {
+        await this.temporal.client.workflow.start(workflowType, options);
+      }
+      this.logger.log(`started ${described}`);
     } catch (err) {
       if ((err as Error)?.name === "WorkflowExecutionAlreadyStartedError") {
-        this.logger.log(`${what} already running — merged`);
+        this.logger.log(`${described} already started — merged`);
       } else throw err;
     }
   }
@@ -682,6 +785,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           ],
         },
         `understanding workflow for company ${ev.aggregateId}`,
+        ev,
       );
     }
     if (ev.eventType === "DiscoveryRunRequested") {
@@ -708,6 +812,9 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         {
           taskQueue: UNDERSTANDING_TASK_QUEUE,
           workflowId: `discovery-${ev.aggregateId}`,
+          // 准入租约（3 小时）内 binding 一直可花钱：同一事件再投递不能在 run 结束后
+          // 用同一 binding 另起一次执行。已结束的同 ID 报 AlreadyStarted，按合并处理。
+          workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
           args: [
             {
               workspaceId: ev.workspaceId,
@@ -720,6 +827,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           ],
         },
         `discovery workflow for run ${ev.aggregateId}`,
+        ev,
       );
     }
     if (ev.eventType === "QualifyRequested") {
@@ -732,6 +840,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           args: [{ workspaceId: ev.workspaceId, icpId: ev.aggregateId }],
         },
         `qualify workflow for icp ${ev.aggregateId}`,
+        ev,
       );
     }
     if (ev.eventType === "DeletionRequested") {

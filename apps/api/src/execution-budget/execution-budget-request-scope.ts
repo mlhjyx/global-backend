@@ -35,6 +35,10 @@ export type WorkspaceExecutionBudgetRequest =
       operation: 'POST /contact-points/:pointId/verify';
       pointId: string;
       body?: unknown;
+    }>
+  | Readonly<{
+      operation: 'POST /leads/:leadId/outreach-drafts';
+      leadId: string;
     }>;
 
 export interface GuessEmailsHttpRequestBody {
@@ -104,6 +108,8 @@ function requestMaterial(request: WorkspaceExecutionBudgetRequest): JsonValue {
         pointId: request.pointId,
         body: (request.body ?? null) as JsonValue,
       };
+    case 'POST /leads/:leadId/outreach-drafts':
+      return { operation: request.operation, leadId: request.leadId };
   }
 }
 
@@ -156,6 +162,13 @@ export function workspaceExecutionBudgetRequestScope(
         purpose: 'contact.verify',
         subjectType: 'contact_point',
         subjectId: request.pointId,
+        requestSha256,
+      });
+    case 'POST /leads/:leadId/outreach-drafts':
+      return Object.freeze({
+        purpose: 'outreach.draft',
+        subjectType: 'lead',
+        subjectId: request.leadId,
         requestSha256,
       });
   }

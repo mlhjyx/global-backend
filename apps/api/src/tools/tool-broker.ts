@@ -386,7 +386,7 @@ export class ToolBroker implements ExecutionBroker {
                 : undefined,
             );
           } catch {
-            throw new BudgetOperationReplayError(reservation.operationId);
+            throw new BudgetOperationReplayError(reservation.operationId, "remnant");
           }
           if (replay) {
             const returned = reservation.receipt
@@ -397,7 +397,7 @@ export class ToolBroker implements ExecutionBroker {
             }
             return returned;
           }
-          throw new BudgetOperationReplayError(reservation.operationId);
+          throw new BudgetOperationReplayError(reservation.operationId, "remnant");
         }
       } catch (err) {
         if (
@@ -443,7 +443,7 @@ export class ToolBroker implements ExecutionBroker {
         try {
           replay = await this.deps.artifactExecution!.replay({ reservation, tool });
         } catch {
-          throw new BudgetOperationReplayError(reservation.operationId);
+          throw new BudgetOperationReplayError(reservation.operationId, "remnant");
         }
         if (replay.durableReceipt) {
           ctx.onDurableReceipt?.(tool.id, replay.durableReceipt);
@@ -539,6 +539,9 @@ export class ToolBroker implements ExecutionBroker {
       let result: ToolResult<O>;
       let platformWireStarted = false;
       let platformWireFailed = false;
+      // D13: a Tool that declares physicalWireObservation calls
+      // beforePhysicalWire immediately before each of its workspace wires.
+      let workspaceWireRequested = false;
       try {
         const operationKey = paidScope?.operationKey ?? paidOperationKey([
           ctx.runId ?? ctx.workspaceId,
@@ -563,6 +566,12 @@ export class ToolBroker implements ExecutionBroker {
               platformWireFailed = true;
               throw error;
             }
+          } };
+        } else if (tool.physicalWireObservation === "before_each_wire") {
+          const callerBeforePhysicalWire = ctx.beforePhysicalWire;
+          executionContext = { ...ctx, beforePhysicalWire: async () => {
+            workspaceWireRequested = true;
+            await callerBeforePhysicalWire?.();
           } };
         }
         result = await tool.execute(input, executionContext);
@@ -592,6 +601,27 @@ export class ToolBroker implements ExecutionBroker {
             now() - started,
           );
           throw new ToolPolicyDenied(toolId, "suppression_action_gate");
+        }
+        // D13: a failure the Broker can prove sent nothing (a Platform Tool
+        // whose dispatcher was never entered, or a declared workspace Tool
+        // that never asked for a wire: DNS/SSRF refusals, unavailable wire
+        // contracts) cost nothing, so it releases like a pre-wire denial and
+        // a retry may reserve the same key again.
+        const noPhysicalWireStarted = ctx.platformEgress
+          ? !platformWireStarted && !platformWireFailed
+          : tool.physicalWireObservation === "before_each_wire" &&
+            !workspaceWireRequested;
+        if (!paidScope && reservation && !reservation.replay && noPhysicalWireStarted) {
+          await this.budget.release(reservation);
+          this.trace(
+            ctx,
+            tool,
+            "ERROR",
+            `released before any physical wire: ${String(err).slice(0, 160)}`,
+            0,
+            now() - started,
+          );
+          throw err;
         }
         if (paidScope) {
           await this.settlePersistentOperation({

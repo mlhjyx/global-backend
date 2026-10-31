@@ -8,6 +8,10 @@ vi.mock('../../model-runtime/structured-task-runtime-bridge', () => ({
 
 import { WebsiteProfileProvider } from './website-profile.provider';
 import { ToolPolicyDenied } from '../../tools/tool-broker';
+import {
+  ProviderOutputError,
+  ProviderTransportError,
+} from '../../model-gateway/providers/provider-output-error';
 
 const COMPANY = '00000000-0000-4000-8000-0000000000c3';
 const CTX = {
@@ -119,6 +123,40 @@ describe('WebsiteProfileProvider (G3 5.4)', () => {
     expect(profile).toMatchObject({ tradeRole: null, tradeRoleSource: null, register: { number: '98765' } });
   });
 
+  it('falls back to deterministic facts when the model answer is unusable', async () => {
+    mocks.executeStructuredTaskWithRuntime.mockRejectedValueOnce(
+      new ProviderOutputError('gateway deepseek-v4-pro: structured output is not valid JSON', {
+        inputTokens: 900,
+        outputTokens: 40,
+      }, { reasonCode: 'STRUCTURED_OUTPUT_NOT_JSON' }),
+    );
+    const profile = await new WebsiteProfileProvider({
+      gateway: {} as never,
+      broker: broker({ 'https://pumpen-handel.example/': 'Pumpen', 'https://pumpen-handel.example/impressum': IMPRESSUM }),
+    }).profile(INPUT, CTX);
+    expect(profile).toMatchObject({ tradeRole: null, tradeRoleSource: null, register: { number: '98765' } });
+  });
+
+  it('stops instead of absorbing a transport failure, which usually hits every company of the run', async () => {
+    const unreadable = new ProviderTransportError('CHAT_COMPLETIONS_BODY_NOT_JSON', { inputTokens: 900 });
+    mocks.executeStructuredTaskWithRuntime.mockRejectedValueOnce(unreadable);
+    await expect(new WebsiteProfileProvider({
+      gateway: {} as never,
+      broker: broker({ 'https://pumpen-handel.example/': 'Pumpen', 'https://pumpen-handel.example/impressum': IMPRESSUM }),
+    }).profile(INPUT, CTX)).rejects.toBe(unreadable);
+  });
+
+  it('keeps the deterministic facts when the gateway settled the call as a cut stream', async () => {
+    // A lone cut (seller #21 run, 2026-10-12) is one company's failure; the fit pass stops an outage.
+    const cut = new ProviderTransportError('CHAT_COMPLETIONS_STREAM_TRUNCATED', { inputTokens: 900, outputTokens: 40 });
+    mocks.executeStructuredTaskWithRuntime.mockRejectedValueOnce(cut);
+    const profile = await new WebsiteProfileProvider({
+      gateway: {} as never,
+      broker: broker({ 'https://pumpen-handel.example/': 'Pumpen', 'https://pumpen-handel.example/impressum': IMPRESSUM }),
+    }).profile(INPUT, CTX);
+    expect(profile).toMatchObject({ tradeRole: null, tradeRoleSource: null, register: { number: '98765' } });
+  });
+
   it('keeps only company-level evidence: person lines are dropped, phones and emails redacted', async () => {
     mocks.executeStructuredTaskWithRuntime.mockResolvedValueOnce({
       data: {
@@ -135,6 +173,36 @@ describe('WebsiteProfileProvider (G3 5.4)', () => {
       'Großhandel für Pumpen',
       'Vertrieb: Tel. [redacted-phone], [redacted-email]',
     ]);
+  });
+
+  it('sends the model no person lines, emails or phones, but keeps the register and VAT IDs', async () => {
+    mocks.executeStructuredTaskWithRuntime.mockResolvedValueOnce({ data: { trade_role: 'mixed' } });
+    await new WebsiteProfileProvider({
+      gateway: {} as never,
+      broker: broker({
+        'https://pumpen-handel.example/':
+          'Hersteller und Händler von Pumpen.\nIhr Ansprechpartner: Herr Max Muster, max.muster@pumpen-handel.example',
+        'https://pumpen-handel.example/impressum': [
+          IMPRESSUM,
+          'Geschäftsführer: Max Mustermann',
+          'Vertreten durch:',
+          'Erika Musterfrau',
+          'Vertretungsberechtigte Personen:',
+          'Geschäftsführer:',
+          'Hans Beispiel',
+          'Telefon: +49 89 1234567',
+          'E-Mail: erika.musterfrau@pumpen-handel.example',
+        ].join('\n'),
+      }),
+    }).profile(INPUT, CTX);
+
+    const [, modelInput] = mocks.executeStructuredTaskWithRuntime.mock.calls[0]!;
+    expect(modelInput.prompt).toContain('Hersteller und Händler von Pumpen.');
+    expect(modelInput.prompt).toContain('HRB 98765');
+    expect(modelInput.prompt).toContain('DE136695976');
+    for (const personal of ['Max Muster', 'Erika Musterfrau', 'Hans Beispiel', 'max.muster@', 'erika.musterfrau@', '1234567']) {
+      expect(modelInput.prompt).not.toContain(personal);
+    }
   });
 });
 

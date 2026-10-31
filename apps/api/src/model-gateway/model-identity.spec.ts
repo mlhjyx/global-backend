@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   canonicalReportedModelIdentifier,
   hasTrustedModelIdentity,
+  isReviewedModelIdentity,
   resolveReportedModelIdentity,
 } from './model-identity';
 
@@ -52,5 +53,101 @@ describe('model identity aliases', () => {
     ['gpt-5.6-terra', 'gpt-5.6-terra'],
   ])('bounds an untrusted reported-model value %j', (value, expected) => {
     expect(canonicalReportedModelIdentifier(value)).toBe(expected);
+  });
+});
+
+describe('DeepSeek v4 pro upstream identity aliases (OpenOx, observed 2026-10-07)', () => {
+  // The same model is reported as a provider-prefixed name in stream chunks
+  // and as a dated GA build in plain bodies. Only these two reviewed names
+  // resolve, and only on the chat-completions transport that produced them.
+  it.each(['deepseek.deepseek-v4-pro', 'deepseek-v4-pro-ga-260813'])(
+    'resolves the reviewed pro alias %s on chat completions',
+    (reported) => {
+      expect(
+        resolveReportedModelIdentity(
+          'deepseek-v4-pro',
+          reported,
+          'openai-chat-completions',
+        ),
+      ).toBe('deepseek-v4-pro');
+    },
+  );
+
+  it.each([undefined, 'openai-responses', 'anthropic-messages'])(
+    'rejects the reviewed pro alias without its exact transport (%s)',
+    (transport) => {
+      expect(
+        resolveReportedModelIdentity(
+          'deepseek-v4-pro',
+          'deepseek.deepseek-v4-pro',
+          transport,
+        ),
+      ).toBeUndefined();
+    },
+  );
+
+  it('still rejects another model family reported for pro', () => {
+    expect(
+      resolveReportedModelIdentity(
+        'deepseek-v4-pro',
+        'gpt-5.6-sol',
+        'openai-chat-completions',
+      ),
+    ).toBeUndefined();
+  });
+
+  it.each(['deepseek-v4-pro', 'deepseek.deepseek-v4-pro'])(
+    'never lets a pro identity (%s) stand in for a flash request',
+    (reported) => {
+      expect(
+        resolveReportedModelIdentity(
+          'deepseek-v4-flash',
+          reported,
+          'openai-chat-completions',
+        ),
+      ).toBeUndefined();
+    },
+  );
+});
+
+describe('DeepSeek v4 flash upstream identity alias (OpenOx, observed 2026-10-10/11)', () => {
+  it('resolves the reviewed flash build name on chat completions', () => {
+    expect(
+      resolveReportedModelIdentity(
+        'deepseek-v4-flash',
+        'deepseek-ai/DeepSeek-V4-Flash-0731',
+        'openai-chat-completions',
+      ),
+    ).toBe('deepseek-v4-flash');
+  });
+
+  it.each([undefined, 'openai-responses', 'anthropic-messages'])(
+    'rejects the flash build name without its exact transport (%s)',
+    (transport) => {
+      expect(
+        resolveReportedModelIdentity(
+          'deepseek-v4-flash',
+          'deepseek-ai/DeepSeek-V4-Flash-0731',
+          transport,
+        ),
+      ).toBeUndefined();
+    },
+  );
+
+  it('never lets the flash build stand in for a pro request on its own', () => {
+    expect(
+      resolveReportedModelIdentity(
+        'deepseek-v4-pro',
+        'deepseek-ai/DeepSeek-V4-Flash-0731',
+        'openai-chat-completions',
+      ),
+    ).toBeUndefined();
+  });
+
+  it('lists the reviewed model identities used to validate deployment settings', () => {
+    expect(isReviewedModelIdentity('deepseek-v4-flash')).toBe(true);
+    expect(isReviewedModelIdentity('deepseek-v4-pro')).toBe(true);
+    expect(isReviewedModelIdentity('deepseek-v4-pr')).toBe(false);
+    expect(isReviewedModelIdentity('constructor')).toBe(false);
   });
 });

@@ -9,6 +9,11 @@ import * as BudgetExecution from "./icp-budget-execution";
 import * as RuntimeBridge from "../model-runtime/structured-task-runtime-bridge";
 import * as Cpv from "../discovery/icp-to-cpv";
 import * as Fda from "../discovery/icp-to-fda";
+import { DiscoveryProviderRegistry } from "../discovery/provider.registry";
+import {
+  ProviderOutputError,
+  ProviderTransportError,
+} from "../model-gateway/providers/provider-output-error";
 
 const ctx = {
   workspaceId: "10000000-0000-4000-8000-000000000001",
@@ -90,26 +95,51 @@ function fixture() {
       findMany: vi.fn().mockResolvedValue([]),
       findUniqueOrThrow: vi.fn(),
     },
+    // data_provider kill switch: only public_web is ENABLED, as on the dev host.
+    dataProvider: {
+      findMany: vi.fn(async () => enabledProviders.map((key) => ({ key }))),
+    },
   };
+  const enabledProviders = ["public_web"];
   const prisma = {
     withWorkspace: vi.fn(async (_workspace, operation) => operation(tx)),
   };
   const authority = {
-    consumeWorkspaceGrant: vi.fn().mockResolvedValue(binding),
+    verifyWorkspaceGrant: vi.fn().mockResolvedValue({}),
+    consumeVerifiedWorkspaceGrant: vi.fn().mockResolvedValue(binding),
   };
   const gateway = {
     generateStructured: vi.fn(() => {
       throw new Error("unexpected external dispatch");
     }),
   };
+  const providers = new DiscoveryProviderRegistry({ gateway: gateway as never });
   const service = new IcpService(
     prisma as never,
     gateway as never,
     {} as never,
     authority as never,
+    providers,
   );
-  return { icp, tx, prisma, authority, gateway, service };
+  const enable = (...keys: string[]) => enabledProviders.splice(0, enabledProviders.length, ...keys);
+  /** As if `keys` declared governed company lineage, as TED and openFDA will once theirs lands. */
+  const declareLineage = (...keys: string[]) => {
+    const registered = providers.companyDiscoverySources.bind(providers);
+    vi.spyOn(providers, "companyDiscoverySources").mockImplementation(() =>
+      registered().map((source) =>
+        keys.includes(source.providerKey) ? { ...source, hasCompanyLineage: true } : source));
+  };
+  return { icp, tx, prisma, authority, gateway, service, enable, declareLineage };
 }
+
+/** One planner query for keyword discovery, the only source ENABLED on the dev host. */
+const PUBLIC_WEB_QUERY = Object.freeze({
+  source_class: "public_intelligence",
+  filters: { industry: "Pumpen", country: "Germany", source_hint: "public_web" },
+  keywords: ["Kreiselpumpen"],
+  rationale: "keyword discovery",
+  priority: 2,
+});
 afterEach(() => vi.restoreAllMocks());
 
 describe("ICP human state and workspace boundaries", () => {
@@ -427,19 +457,21 @@ describe("ICP generation authority and controlled enrichment", () => {
       await expect(
         f.service.generateFromCompany(ctx, "company"),
       ).rejects.toThrow();
+      // 前置条件不满足时，一次性 Grant 必须原样保留。
+      expect(f.authority.consumeVerifiedWorkspaceGrant).not.toHaveBeenCalled();
       expect(f.runtime).not.toHaveBeenCalled();
     },
   );
-  it("refuses a consumed grant before reading tenant data", async () => {
+  it("refuses a consumed grant without dispatching a model", async () => {
     const f = generationFixture();
-    f.authority.consumeWorkspaceGrant.mockResolvedValue({
+    f.authority.consumeVerifiedWorkspaceGrant.mockResolvedValue({
       ...binding,
       replay: true,
     });
     await expect(f.service.generateFromCompany(ctx, "company")).rejects.toThrow(
       "REUSED",
     );
-    expect(f.prisma.withWorkspace).not.toHaveBeenCalled();
+    expect(f.runtime).not.toHaveBeenCalled();
   });
   it("stores missing optional generation fields with stable defaults", async () => {
     const f = generationFixture();
@@ -494,6 +526,41 @@ describe("ICP generation authority and controlled enrichment", () => {
     expect(f.tx.persona.create).toHaveBeenCalledOnce();
     expect(f.tx.buyingCommitteeRole.create).toHaveBeenCalledOnce();
   });
+  it("drops a proposed EXCLUSION that mirrors a MUST_HAVE (same field and value, negated operator) and keeps the positive one", async () => {
+    // ICP 22202d3c on xin: six EXCLUSION rules mirrored the MUST_HAVEs; the company keywords are an
+    // English controlled vocabulary, so `keywords not_contains "泵"` passed for every company.
+    const f = generationFixture();
+    f.result.data = {
+      name: "Generated",
+      company_attributes: {},
+      pain_points: [],
+      trigger_signals: [],
+      exclusions: [],
+      value_props: [],
+      target_markets: [],
+      personas: [],
+      buying_committee: [],
+      qualification_rules: [
+        { kind: "MUST_HAVE", field: "keywords", operator: "contains", value: "泵" },
+        { kind: "MUST_HAVE", field: "business_model", operator: "in", value: ["分销商", "进口商"] },
+        { kind: "EXCLUSION", field: "keywords", operator: "not_contains", value: "泵" },
+        { kind: "EXCLUSION", field: "business_model", operator: "not_in", value: ["进口商", "分销商"] },
+        { kind: "EXCLUSION", field: "region", operator: "not_contains", value: "DACH" },
+        { kind: "EXCLUSION", field: "business_model", operator: "contains", value: "终端工厂" },
+      ],
+    };
+    await f.service.generateFromCompany(ctx, "company");
+    const created = f.tx.qualificationRule.create.mock.calls.map(
+      ([call]: [{ data: { kind: string; field: string; operator: string } }]) =>
+        [call.data.kind, call.data.field, call.data.operator],
+    );
+    expect(created).toEqual([
+      ["MUST_HAVE", "keywords", "contains"],
+      ["MUST_HAVE", "business_model", "in"],
+      ["EXCLUSION", "region", "not_contains"], // no MUST_HAVE on region → not a mirror, kept
+      ["EXCLUSION", "business_model", "contains"],
+    ]);
+  });
   it.each(["missing", "HYPOTHESIS"])(
     "refuses query generation for %s ICP",
     async (status) => {
@@ -510,7 +577,7 @@ describe("ICP generation authority and controlled enrichment", () => {
     async (volume) => {
       const f = generationFixture();
       f.icp.status = "ACTIVE";
-      f.result.data = { estimated_volume: volume };
+      f.result.data = { queries: [PUBLIC_WEB_QUERY], estimated_volume: volume };
       const plan = await f.service.generateQueryPlan(ctx, f.icp.id);
       expect(plan).toMatchObject({
         status: "DRAFT",
@@ -518,9 +585,248 @@ describe("ICP generation authority and controlled enrichment", () => {
       });
     },
   );
+  it.each([
+    ["no provider row", []],
+    ["only a non-discovery provider", ["gleif", "decision_maker"]],
+    ["only the cold-path sources", ["ted", "openfda"]],
+    ["only sources without governed lineage", ["wikidata", "openstreetmap", "ted", "openfda"]],
+  ])(
+    "refuses to plan with %s ENABLED, before any model call (BI-30)",
+    async (_label, enabled) => {
+      const f = generationFixture();
+      f.icp.status = "ACTIVE";
+      f.enable(...enabled);
+
+      await expect(f.service.generateQueryPlan(ctx, f.icp.id)).rejects.toMatchObject({
+        status: 409,
+        response: {
+          error: {
+            code: "NO_ENABLED_DISCOVERY_SOURCE",
+            message: "no ENABLED discovery data source with governed company lineage that the query planner can use",
+          },
+        },
+      });
+      expect(f.runtime).not.toHaveBeenCalled();
+      expect(f.cpv).not.toHaveBeenCalled();
+      expect(f.tx.discoveryQueryPlan.create).not.toHaveBeenCalled();
+    },
+  );
+  it("tells the planner which sources it may use and nothing about the others (BI-30)", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.result.data = { queries: [PUBLIC_WEB_QUERY], estimated_volume: 10 };
+
+    await f.service.generateQueryPlan(ctx, f.icp.id);
+
+    const prompt = f.runtime.mock.calls[0]![1].prompt as string;
+    expect(prompt).toContain("source_hint=public_web");
+    expect(prompt).toContain("不要为表外的数据源出查询");
+    for (const disabled of ["wikidata", "openstreetmap", "directory", "trade_fair", "openfda"]) {
+      expect(prompt).not.toContain(disabled);
+    }
+    expect(prompt).not.toMatch(/\bted\b/u);
+  });
+  it("keeps only queries for ENABLED sources, names each query's source and scales the estimate (BI-30)", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.result.data = {
+      estimated_volume: 1_000,
+      queries: [
+        { ...PUBLIC_WEB_QUERY, filters: { industry: "Pumpen", country: "Germany" } },
+        { ...PUBLIC_WEB_QUERY, source_class: "industry_data", filters: { source_hint: "directory" } },
+        { ...PUBLIC_WEB_QUERY, source_class: "industry_data", filters: { source_hint: "trade_fair" } },
+        { ...PUBLIC_WEB_QUERY, filters: { source_hint: "ted" } },
+        { ...PUBLIC_WEB_QUERY, source_class: "trade_data", filters: {} },
+      ],
+    };
+
+    const plan = await f.service.generateQueryPlan(ctx, f.icp.id);
+
+    const queries = plan.queries as Array<{ source_class: string; filters: Record<string, unknown>; rationale: string }>;
+    expect(queries).toHaveLength(1);
+    expect(queries[0]).toMatchObject({
+      source_class: "public_intelligence",
+      filters: { industry: "Pumpen", country: "Germany", source_hint: "public_web" },
+    });
+    expect(queries[0]!.rationale).toContain(
+      "[source_filter] 已移出 4 条规划查询：SOURCE_DISABLED 2 条、SOURCE_UNKNOWN 1 条、SOURCE_SYSTEM_PLANNED 1 条",
+    );
+    // One of five planned queries will run: the estimate covers that one only.
+    expect(plan).toMatchObject({ status: "DRAFT", estimatedVolume: 200 });
+  });
+  it("neither resolves nor injects TED or openFDA queries while those sources are DISABLED (BI-30)", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.icp.companyAttributes = { industry: "devices", product: "pump", trade_side: "importer" };
+    f.result.data = { queries: [PUBLIC_WEB_QUERY], estimated_volume: 10 };
+    f.cpv.mockResolvedValue({ cpvCodes: ["42120000"], buyerCountries: ["DEU"], warnings: [] });
+    f.fda.mockResolvedValue({
+      productCodes: ["ABC"], panels: ["CV"], importerOnly: true, establishmentTypes: [], warnings: [],
+    });
+
+    const plan = await f.service.generateQueryPlan(ctx, f.icp.id);
+
+    expect(f.cpv).not.toHaveBeenCalled();
+    expect(f.fda).not.toHaveBeenCalled();
+    expect((plan.queries as Array<{ filters: { source_hint: string } }>).map((q) => q.filters.source_hint))
+      .toEqual(["public_web"]);
+  });
+  it("neither resolves nor injects TED or openFDA queries while they lack governed lineage, even ENABLED (lineage gate)", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.enable("public_web", "ted", "openfda");
+    f.icp.companyAttributes = { industry: "devices", product: "pump", trade_side: "importer" };
+    f.result.data = { queries: [PUBLIC_WEB_QUERY], estimated_volume: 10 };
+    f.cpv.mockResolvedValue({ cpvCodes: ["42120000"], buyerCountries: ["DEU"], warnings: [] });
+    f.fda.mockResolvedValue({
+      productCodes: ["ABC"], panels: ["CV"], importerOnly: true, establishmentTypes: [], warnings: [],
+    });
+
+    const plan = await f.service.generateQueryPlan(ctx, f.icp.id);
+
+    expect(f.cpv).not.toHaveBeenCalled();
+    expect(f.fda).not.toHaveBeenCalled();
+    const queries = plan.queries as Array<{ filters: { source_hint: string }; rationale: string }>;
+    expect(queries.map((q) => q.filters.source_hint)).toEqual(["public_web"]);
+    // The plan review sees why the ENABLED cold-path sources added nothing.
+    expect(queries[0]!.rationale).toBe(
+      "keyword discovery\n[source_filter] 已移出 2 条规划查询：SOURCE_LINEAGE_UNAVAILABLE 2 条",
+    );
+  });
+  it("keeps an ENABLED source without governed lineage out of the prompt and the plan, with its own reason (lineage gate)", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.enable("public_web", "wikidata", "openstreetmap");
+    f.result.data = {
+      estimated_volume: 10,
+      queries: [
+        PUBLIC_WEB_QUERY,
+        { ...PUBLIC_WEB_QUERY, source_class: "company_registry", filters: { source_hint: "wikidata" } },
+      ],
+    };
+
+    const plan = await f.service.generateQueryPlan(ctx, f.icp.id);
+
+    const prompt = f.runtime.mock.calls[0]![1].prompt as string;
+    expect(prompt).not.toContain("wikidata");
+    expect(prompt).not.toContain("openstreetmap");
+    const queries = plan.queries as Array<{ filters: Record<string, unknown>; rationale: string }>;
+    expect(queries.map((q) => q.filters.source_hint)).toEqual(["public_web"]);
+    expect(queries[0]!.rationale).toBe(
+      "keyword discovery\n[source_filter] 已移出 1 条规划查询：SOURCE_LINEAGE_UNAVAILABLE 1 条",
+    );
+  });
+  it("notes the left-out planner queries on the first planner query, not on an injected one (BI-30)", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.enable("public_web", "ted");
+    f.declareLineage("ted");
+    f.result.data = {
+      estimated_volume: 10,
+      queries: [
+        PUBLIC_WEB_QUERY,
+        { ...PUBLIC_WEB_QUERY, source_class: "industry_data", filters: { source_hint: "directory" } },
+      ],
+    };
+    f.cpv.mockResolvedValue({ cpvCodes: ["42120000"], buyerCountries: ["DEU"], warnings: [] });
+
+    const plan = await f.service.generateQueryPlan(ctx, f.icp.id);
+
+    const queries = plan.queries as Array<{ filters: Record<string, unknown>; rationale: string }>;
+    expect(queries.map((q) => q.filters.source_hint)).toEqual(["ted", "public_web"]);
+    expect(queries[0]!.rationale).not.toContain("[source_filter]");
+    expect(queries[1]!.rationale).toBe(
+      "keyword discovery\n[source_filter] 已移出 1 条规划查询：SOURCE_DISABLED 1 条",
+    );
+  });
+  it("keeps an injected TED query as the whole plan, with the note, when no planner query can run (BI-30)", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.enable("public_web", "ted");
+    f.declareLineage("ted");
+    f.result.data = {
+      estimated_volume: 10,
+      queries: [{ ...PUBLIC_WEB_QUERY, source_class: "trade_data", filters: {} }],
+    };
+    f.cpv.mockResolvedValue({ cpvCodes: ["42120000"], buyerCountries: ["DEU"], warnings: [] });
+
+    const plan = await f.service.generateQueryPlan(ctx, f.icp.id);
+
+    const queries = plan.queries as Array<{ filters: Record<string, unknown>; rationale: string }>;
+    expect(queries).toHaveLength(1);
+    expect(queries[0]!.filters).toMatchObject({ source_hint: "ted", cpv: "42120000" });
+    expect(queries[0]!.rationale).toContain("[source_filter] 已移出 1 条规划查询：SOURCE_UNKNOWN 1 条");
+    // The model's estimate covered only queries that will not run: the scale is unknown.
+    expect(plan).toMatchObject({ estimatedVolume: null });
+  });
+  it("fails with NO_RUNNABLE_QUERIES and stores no plan when no planned query can run (BI-30)", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.result.data = {
+      estimated_volume: 50,
+      queries: [{ ...PUBLIC_WEB_QUERY, source_class: "company_registry", filters: { source_hint: "wikidata" } }],
+    };
+
+    await expect(f.service.generateQueryPlan(ctx, f.icp.id)).rejects.toMatchObject({
+      status: 409,
+      response: { error: { code: "NO_RUNNABLE_QUERIES" } },
+    });
+    expect(f.runtime).toHaveBeenCalledOnce();
+    expect(f.tx.discoveryQueryPlan.create).not.toHaveBeenCalled();
+  });
+  it("asks the planner for keywords in the target market's language instead of Chinese", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    Object.assign(f.icp, { targetMarkets: ["德国", "奥地利", "瑞士（德语区优先）"] });
+    f.result.data = { queries: [PUBLIC_WEB_QUERY], estimated_volume: 1 };
+    await f.service.generateQueryPlan(ctx, f.icp.id);
+    const prompt = f.runtime.mock.calls[0]![1].prompt as string;
+    expect(prompt).toContain("keywords");
+    expect(prompt).toContain("必须全部用德语书写");
+    expect(prompt).toContain("不得出现中文");
+    expect(prompt).toContain("输出中文 rationale");
+  });
+  it("ties each query's keywords to its own country when the ICP spans several languages", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    Object.assign(f.icp, { targetMarkets: ["德国", "法国"] });
+    f.result.data = { queries: [PUBLIC_WEB_QUERY], estimated_volume: 1 };
+    await f.service.generateQueryPlan(ctx, f.icp.id);
+    const prompt = f.runtime.mock.calls[0]![1].prompt as string;
+    expect(prompt).toContain("每条查询的 keywords 必须用该查询 filters.country 所在国家的语言书写");
+    expect(prompt).toContain("德语、法语");
+    expect(prompt).toContain("不得出现中文");
+  });
+  it("names the local language generically when no target market is recognised", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    Object.assign(f.icp, { targetMarkets: ["火星"] });
+    f.result.data = { queries: [PUBLIC_WEB_QUERY], estimated_volume: 1 };
+    await f.service.generateQueryPlan(ctx, f.icp.id);
+    const prompt = f.runtime.mock.calls[0]![1].prompt as string;
+    expect(prompt).toContain("必须全部用目标市场的当地语言书写");
+    expect(prompt).toContain("无法确定时用英语");
+    expect(prompt).toContain("不得出现中文");
+  });
+  it("expands a DACH target market to Germany, Austria and Switzerland for the planner and its cold paths", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.enable("public_web", "ted", "openfda");
+    f.declareLineage("ted", "openfda");
+    Object.assign(f.icp, { targetMarkets: ["DACH区域"] });
+    f.result.data = { queries: [PUBLIC_WEB_QUERY], estimated_volume: 1 };
+    await f.service.generateQueryPlan(ctx, f.icp.id);
+    const prompt = f.runtime.mock.calls[0]![1].prompt as string;
+    expect(prompt).toContain("必须全部用德语书写");
+    expect(prompt).not.toContain("无法确定时用英语");
+    expect(f.cpv.mock.calls[0]![1]).toMatchObject({ targetCountries: ["DE", "AT", "CH"] });
+    expect(f.fda.mock.calls[0]![1]).toMatchObject({ targetCountries: ["DE", "AT", "CH"] });
+  });
   it("injects deterministic TED/FDA facts from the taxonomy mapping, preserving seller filters", async () => {
     const f = generationFixture();
     f.icp.status = "ACTIVE";
+    f.enable("public_web", "ted", "openfda");
+    f.declareLineage("ted", "openfda");
     f.icp.companyAttributes = {
       industry: "devices",
       product: "pump",
@@ -546,6 +852,8 @@ describe("ICP generation authority and controlled enrichment", () => {
   it("carries the ICP trade role into planner queries before the cold-path injections", async () => {
     const f = generationFixture();
     f.icp.status = "ACTIVE";
+    f.enable("public_web", "ted");
+    f.declareLineage("ted");
     f.icp.companyAttributes = { industry: "Pumpen", business_model: "Großhandel" };
     f.result.data = {
       estimated_volume: 20,
@@ -579,11 +887,15 @@ describe("ICP generation authority and controlled enrichment", () => {
     async (resolver) => {
       const f = generationFixture();
       f.icp.status = "ACTIVE";
+      f.enable("public_web", "ted", "openfda");
+      f.declareLineage("ted", "openfda");
       f.icp.companyAttributes = null;
+      f.result.data = { queries: [PUBLIC_WEB_QUERY], estimated_volume: 10 };
       f[resolver].mockRejectedValue(new Error("synthetic unavailable"));
       expect(await f.service.generateQueryPlan(ctx, f.icp.id)).toMatchObject({
         status: "DRAFT",
       });
+      expect(f[resolver]).toHaveBeenCalledOnce();
     },
   );
   it.each([{ code: "BUDGET_EXCEEDED" }, { code: "EXECUTION_BUDGET_EXPIRED" }])(
@@ -591,6 +903,9 @@ describe("ICP generation authority and controlled enrichment", () => {
     async (failure) => {
       const f = generationFixture();
       f.icp.status = "ACTIVE";
+      f.enable("public_web", "ted", "openfda");
+      f.declareLineage("ted", "openfda");
+      f.result.data = { queries: [PUBLIC_WEB_QUERY], estimated_volume: 10 };
       f.cpv.mockRejectedValue(failure);
       await expect(f.service.generateQueryPlan(ctx, f.icp.id)).rejects.toBe(
         failure,
@@ -617,10 +932,55 @@ describe("ICP generation authority and controlled enrichment", () => {
     async (failure) => {
       const f = generationFixture();
       f.icp.status = "ACTIVE";
+      f.enable("public_web", "ted");
+      f.declareLineage("ted");
+      f.result.data = { queries: [PUBLIC_WEB_QUERY], estimated_volume: 10 };
       f.cpv.mockRejectedValue(failure);
       expect(await f.service.generateQueryPlan(ctx, f.icp.id)).toMatchObject({
         status: "DRAFT",
       });
     },
   );
+});
+
+/**
+ * Grant semantics of a generation whose model answer the gateway settled as
+ * unusable: the grant was consumed (its jti durably, in its own transaction)
+ * before the model call, the gateway charged the real usage to it, and the
+ * service writes no ICP or plan. The error leaves the service as the gateway
+ * raised it; the controller boundary turns it into 502 MODEL_UPSTREAM_UNUSABLE.
+ */
+describe("a generation whose model answer the gateway settled as unusable", () => {
+  it.each([
+    ["an unusable answer", new ProviderOutputError("CHAT_COMPLETIONS_CONTENT_FILTERED")],
+    ["a cut stream", new ProviderTransportError("CHAT_COMPLETIONS_STREAM_TRUNCATED")],
+  ])("consumes the grant once, stores no plan and rethrows %s untouched", async (_case, failure) => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.runtime.mockRejectedValue(failure);
+
+    await expect(f.service.generateQueryPlan(ctx, f.icp.id)).rejects.toBe(failure);
+
+    expect(f.authority.consumeVerifiedWorkspaceGrant).toHaveBeenCalledOnce();
+    expect(f.runtime).toHaveBeenCalledOnce();
+    expect(f.authority.consumeVerifiedWorkspaceGrant.mock.invocationCallOrder[0]).toBeLessThan(
+      f.runtime.mock.invocationCallOrder[0],
+    );
+    expect(f.tx.discoveryQueryPlan.create).not.toHaveBeenCalled();
+    expect(f.cpv).not.toHaveBeenCalled();
+    expect(f.fda).not.toHaveBeenCalled();
+  });
+
+  it("consumes the grant once, stores no ICP and rethrows the failure untouched", async () => {
+    const f = generationFixture();
+    const failure = new ProviderOutputError("STRUCTURED_OUTPUT_TRUNCATED");
+    f.runtime.mockRejectedValue(failure);
+
+    await expect(f.service.generateFromCompany(ctx, "company")).rejects.toBe(failure);
+
+    expect(f.authority.consumeVerifiedWorkspaceGrant).toHaveBeenCalledOnce();
+    expect(f.runtime).toHaveBeenCalledOnce();
+    expect(f.tx.icpDefinition.create).not.toHaveBeenCalled();
+    expect(f.tx.persona.create).not.toHaveBeenCalled();
+  });
 });

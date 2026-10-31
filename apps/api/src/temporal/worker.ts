@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { settlementReadbackConfigured } from "../runtime/settlement-readback-config";
 import "dotenv/config";
 import { resolve } from "node:path";
 import { Runtime, Worker } from "@temporalio/worker";
@@ -17,6 +18,7 @@ import { buildGatewayProvider } from "../model-gateway/model-providers.config";
 import { AiTraceSink } from "../model-gateway/ai-trace.sink";
 import { createUnderstandingActivities } from "./understanding.activities";
 import { createDiscoveryActivities } from "./discovery.activities";
+import { prismaDiscoveryRunLeaseReader } from "./discovery-run-lease";
 import { createRawSourceActivities } from "./raw-source.activities";
 import { createQualifyActivities } from "./qualify.activities";
 import { createBacklogActivities } from "./backlog.activities";
@@ -96,6 +98,12 @@ import {
   waitForWorkerDependencyAdmission,
 } from "../runtime/worker-dependency-admission";
 import { startWorkerDependencyHeartbeat } from "../runtime/worker-dependency-heartbeat";
+import {
+  devFastLaneWorkerLane,
+  resolveDevFastLane,
+  type DevFastLane,
+} from "../runtime/dev-fast-lane";
+import { runDevFastLaneWorker } from "./dev-fast-lane-worker";
 
 const WORKER_NOT_READY_LOG_INTERVAL_MS = 30_000;
 
@@ -123,10 +131,21 @@ async function holdWorkerNotReady(
 async function main(): Promise<void> {
   Runtime.install({ shutdownSignals: [] });
   const runtimeSettings = resolveRuntimeSettings(process.env);
+  let devFastLane: DevFastLane;
+  try {
+    devFastLane = resolveDevFastLane(runtimeSettings.mode, process.env);
+  } catch (error) {
+    // main().catch prints only a generic line; name the refused variable first.
+    console.error(
+      `[worker] ${error instanceof Error ? error.message : String(error)}`,
+    );
+    throw error;
+  }
   const releaseIdentity = await loadRuntimeReleaseIdentity({
     mode: runtimeSettings.mode,
     artifactRoot: resolve(__dirname, ".."),
     env: process.env,
+    devFastLane,
   });
   const admission = inspectRuntimeAdmission(
     runtimeSettings,
@@ -134,6 +153,19 @@ async function main(): Promise<void> {
     releaseIdentity,
     "WORKER",
   );
+  // Development fast lane: an unattested source build whose only failed check
+  // is the missing receipt serves the lane queue instead (dev-fast-lane.ts).
+  // Every other process, including an attested one with the switch set,
+  // continues on the unchanged managed path below.
+  const lane = devFastLaneWorkerLane(devFastLane, releaseIdentity, admission);
+  if (lane.active && devFastLane.enabled) {
+    return runDevFastLaneWorker(devFastLane);
+  }
+  if (devFastLane.enabled) {
+    console.warn(
+      "[worker] RUNTIME_DEV_FAST_LANE_WORKSPACE_ID is set but this process is not the fast-lane worker (attested build, or admission fails beyond the missing receipt); it keeps the managed path",
+    );
+  }
   if (!admission.admitted) {
     const failed = Object.entries(admission.checks)
       .filter(([, check]) => check.status === "failed")
@@ -393,11 +425,12 @@ async function main(): Promise<void> {
     }
   })();
   if (
-    !activeSettlementRoutes ||
-    !costReconciliationCatalogCoversRoutes(
-      costReconciliationCatalog,
-      activeSettlementRoutes,
-    )
+    settlementReadbackConfigured(process.env) &&
+    (!activeSettlementRoutes ||
+      !costReconciliationCatalogCoversRoutes(
+        costReconciliationCatalog,
+        activeSettlementRoutes,
+      ))
   ) {
     await holdPlatformNotReady(
       "SITE_BUILD_COST_RECONCILIATION_CATALOG_UNAVAILABLE",
@@ -406,7 +439,9 @@ async function main(): Promise<void> {
   gateway.costReconciliationCatalog = costReconciliationCatalog;
   const settlementReadbackRuntime =
     createSiteBuildSettlementReadbackRuntimeFromEnv(costLedger);
-  if (!settlementReadbackRuntime) {
+  // Opt-in capability: only a configured-but-unusable runtime holds the worker;
+  // an unconfigured deployment simply has no paid settlement readback.
+  if (!settlementReadbackRuntime && settlementReadbackConfigured(process.env)) {
     await holdPlatformNotReady(
       "SITE_BUILD_MODEL_SETTLEMENT_READBACK_UNAVAILABLE",
     );
@@ -484,6 +519,7 @@ async function main(): Promise<void> {
         broker,
         runtimeTelemetry: runtimeTelemetry.telemetry,
         budgetStore,
+        runLease: prismaDiscoveryRunLeaseReader(prisma),
       }),
       ...createRawSourceActivities({ prisma }),
       ...createQualifyActivities({ prisma, sanctionsScreening }),

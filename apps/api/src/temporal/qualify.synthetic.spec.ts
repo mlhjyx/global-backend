@@ -17,19 +17,21 @@ describe('QualifyActivities synthetic provenance quarantine', () => {
       attributes: {},
       status: 'NEW',
       contacts: [],
+      companyContactPoints: [],
     };
     const tx = {
       icpDefinition: {
         findUnique: vi.fn(async () => ({ status: 'ACTIVE', rules: [], roles: [], triggerSignals: [] })),
       },
       canonicalCompany: { findMany: vi.fn(async () => [company]) },
+      suppressionRecord: { findMany: vi.fn(async () => []) },
       fieldEvidence: {
         findMany: vi.fn(async () => [
           { entityId: company.id, providerKey: 'sandbox', license: 'sandbox' },
         ]),
       },
       lead: { findUnique: vi.fn(async () => null), upsert: leadUpsert },
-      sanctionsScreeningResult: { findFirst: vi.fn(), upsert: vi.fn() },
+      sanctionsScreeningResult: { findFirst: vi.fn(), upsert: vi.fn(), findMany: vi.fn(async () => []) },
       outboxEvent: { create: outboxCreate },
     };
     const prisma = {
@@ -65,19 +67,21 @@ describe('QualifyActivities synthetic provenance quarantine', () => {
       attributes: {},
       status: 'NEW',
       contacts: [],
+      companyContactPoints: [],
     };
     const tx = {
       icpDefinition: {
         findUnique: vi.fn(async () => ({ status: 'ACTIVE', rules: [], roles: [], triggerSignals: [] })),
       },
       canonicalCompany: { findMany: vi.fn(async () => [company]) },
+      suppressionRecord: { findMany: vi.fn(async () => []) },
       fieldEvidence: {
         findMany: vi.fn(async () => [
           { entityId: company.id, providerKey: 'companies_house', license: 'OGL-UK-3.0' },
         ]),
       },
       lead: { findUnique: vi.fn(async () => null), upsert: leadUpsert },
-      sanctionsScreeningResult: { findFirst: vi.fn(), upsert: vi.fn() },
+      sanctionsScreeningResult: { findFirst: vi.fn(), upsert: vi.fn(), findMany: vi.fn(async () => []) },
       outboxEvent: { create: vi.fn(async () => ({})) },
     };
     const activities = createQualifyActivities({

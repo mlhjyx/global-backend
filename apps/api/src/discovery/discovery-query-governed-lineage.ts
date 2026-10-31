@@ -332,8 +332,20 @@ function text(value: unknown, pattern: RegExp, code = INVALID): string {
   return value;
 }
 
+/**
+ * Whether the governed query lineage contract covers this provider key. A
+ * provider that declares company lineage must be covered here and by the
+ * receipt contract (`isDiscoveryCompanyLineageProviderKey`); the registry spec
+ * checks both against every declaring adapter.
+ */
+export function isDiscoveryQueryLineageProviderKey(
+  value: unknown,
+): value is DiscoveryCompanyLineageProviderKey {
+  return typeof value === 'string' && Object.hasOwn(PROVIDER_CONTRACT, value);
+}
+
 function providerKey(value: unknown): DiscoveryCompanyLineageProviderKey {
-  if (value !== 'trade_fair' && value !== 'public_web' && value !== 'directory') fail();
+  if (!isDiscoveryQueryLineageProviderKey(value)) fail();
   return value;
 }
 

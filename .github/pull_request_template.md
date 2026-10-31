@@ -21,6 +21,7 @@
 - [ ] `pnpm --filter @global/api build` 绿（nest build = tsc 全量类型检查）
 - [ ] `pnpm --filter @global/api test` 绿（vitest）
 - [ ] **真实数据实测**（provider/采集/富集类改动必填；无 sandbox，见 AGENTS.md §5）—— 附命令与结果：
+- [ ] changelog 片段：`docs/roadmap/changelog.d/<YYYY-MM-DD>-<slug>.md`（改了 `apps/` `packages/` `scripts/` `infra/` 或根目录构建与运行时文件时必需，格式见该目录 README）
 - [ ] CI 绿
 
 ## 给产品负责人的说明

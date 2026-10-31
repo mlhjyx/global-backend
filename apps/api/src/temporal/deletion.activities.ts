@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { ApplicationFailure } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { decryptPii } from '../compliance/pii-crypto';
 import { inventorErasureKeys } from '../adapters/patent-inventor-cache';
@@ -10,6 +11,7 @@ import {
   countsFromLocated,
 } from '../compliance/deletion-snapshot';
 import {
+  DELETION_SUBJECT_TYPES,
   DeletionWorkflowInput,
   ErasureCounts,
   LocatedErasureTargets,
@@ -39,6 +41,16 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
 
   return {
     async freezeSubject(input: DeletionWorkflowInput): Promise<LocatedErasureTargets> {
+      // 只受理 DSR 主体种类（contact | company）。产物主体函数自 2026-10-14 起也认卖方
+      // company_profile，DB tombstone 不再替本流程拒掉它；而本流程的定位分支、回执与
+      // DeletionCompleted 契约都只认这两种，别的种类在任何写入之前失败、不重试。
+      if (!(DELETION_SUBJECT_TYPES as readonly string[]).includes(input.subjectType)) {
+        throw ApplicationFailure.create({
+          type: 'DELETION_SUBJECT_TYPE_INVALID',
+          message: 'DELETION_SUBJECT_TYPE_INVALID',
+          nonRetryable: true,
+        });
+      }
       return prisma.withWorkspace(input.workspaceId, async (tx) => {
         await lockWorkspaceSuppressionPolicy(tx, input.workspaceId);
         const { located, suppressionEntries } = await locateInTransaction(tx, input);
@@ -165,6 +177,16 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
           // canonical_contact 硬删 → DB 级联删 contact_point（onDelete: Cascade）
           await tx.canonicalContact.deleteMany({ where: { id: { in: eraseContactIds } },
           });
+        }
+
+        // BI-14：company 主体擦除同时删掉该公司的公司级联系路径（company_contact_point，只有链接、green），
+        // 计数并入 contactPointsErased（DeletionCompleted 契约不加字段）。公司行已在上面 FOR UPDATE，
+        // 画像写入侧在同一 advisory lock 下 FOR SHARE 复读 status，SUPPRESSED 后不再写入。
+        if (located.companyIdsToSuppress.length) {
+          const companyPoints = await tx.companyContactPoint.deleteMany({
+            where: { companyId: { in: located.companyIdsToSuppress } },
+          });
+          contactPointsErased += companyPoints.count;
         }
 
         // 🔴 Art.17 扫描面（scale-safe #89）：平台级专利发明人缓存（patent_inventor_cache，无 RLS/无 workspace）

@@ -247,6 +247,32 @@ ExecutionAuthority
 | `DEC-AIDEV-003` | 批准四 PR 的 AI 记忆与代码智能实施计划：ContractGraph 补动态契约，CodeGraph 仅作受控静态试点，运行证据关闭静态推断；本计划各 PR 在独立只读审查通过、CI 全绿、审查线程清零且基于最新 main 后由 Codex 合并，无需逐 PR 重复授权；不授权生产观测、产品范围变化或把派生图升级为真值 | `APPROVED_AT_GATE_AIDEV_1` | `OWN-PRODUCT` | [代码智能使用与边界](../ai-development/code-intelligence.md) |
 | `DEC-AIDEV-004` | 常规 PR 的常设合并授权：开发代理对每个 PR 做独立审查（发现问题先修复并重验），在必需检查于当前 head 全绿、审查线程清零，且 PR 与最新 main 的组合已在本地复核（`governance:verify`、`docs:verify`、Copy 指纹）后可直接合并，无需逐 PR 重复授权；PR 正文以不经机器解析的「给产品负责人的说明」取代非技术合并决策卡。不授权 ruleset/仓库设置/权限变更、部署与发布、付费调用或产品范围变化；产品负责人可随时撤回或对单个 PR 另行指示 | `APPROVED` | `OWN-PRODUCT` | [AI 辅助开发运行模型 §3.4](../ai-development/operating-model.md) |
 
+## 11.1 PRD 4.0 待拍板项 PRD4-D1…D19（2026-10-14 登记）
+
+PRD 4.0（L0 产品宪章 §9.4，目前在私有目录，入库待 `PRD4-D10`）列出 D1–D19 共 19 项待拍板。为避免与 Site Builder 线的 D9/D13 等编号同号异义，本表与其他仓内文档一律写 `PRD4-D<n>`。状态口径沿用 §1：`RESOLVED` = 矛盾已由明确权威/Decision 关闭，后续文档只引用裁决；`RESOLVED_WITH_REMEDIATION` = 事实/边界已裁决，但旧实现、文档或安全处置仍需独立收口；`OPEN_DECISION` = 需要产品/设计/技术/合规 Owner 拍板（本表各项 Owner 均为 `OWN-PRODUCT`）。已拍板的承重决定另登记在 [ADR registry](../adr/registry.md) 的「PRD 4.0 决定」一节；落地事实以 [current status](../status/current.md) 为准。本表核验时间 2026-10-14，依据 2026-10-13 评审稿 §3.3 的逐项核实与当日 Git / GitHub / xin 只读回读。
+
+| Decision ID | 主题 | 状态 | Decision Owner | 拍板日期与落地 / 未决原因 |
+|---|---|---|---|---|
+| `PRD4-D1` | Site Builder 正式冻结（文档、CI、ruleset） | `OPEN_DECISION` | `OWN-PRODUCT` | 2026-09-23 只说「维持现状」；ruleset 仍要求 `renderer visual scope`；ruleset 改动须随本项一并授权 |
+| `PRD4-D2` | R4 平台授权冻结范围 | `RESOLVED_WITH_REMEDIATION` | `OWN-PRODUCT` | 2026-10-10 拍板冻结，4 个平台 schedule 保持 paused、每次换镜像仍续 R4。**2026-10-31 产品负责人重开**：R4 恢复投入，唯一目的是把平台权威（机器 token、capability、撤销与恢复通道）从 GrowthOS 迁到 gain-saas，迁完退役 GrowthOS；schedule 是否恢复运行仍是单独决定。计划与阶段见 gain-saas `docs/technical/r4-platform-authority-migration.md` |
+| `PRD4-D3` | 客户写入准入与 platform Worker 就绪解耦 | `RESOLVED` | `OWN-PRODUCT` | 2026-10-10 拍板方案 A；#627 于 2026-10-11 上线；方案 C 另立任务 |
+| `PRD4-D4` | QGO 宿主（本仓最小 `opportunity` 模块 vs GrowthOS） | `OPEN_DECISION` | `OWN-PRODUCT` | RL3 前定；PRD 4.0 L0/L1 建议本仓、2026-10-11 精读建议 GrowthOS、ADR-001 现行是 SaaS，三处相反 |
+| `PRD4-D5` | GrowthOS 转普通 git 仓；审阅 UI 放哪 | `OPEN_DECISION` | `OWN-PRODUCT` | 仍是归档 + 补丁栈形态 |
+| `PRD4-D6` | 开发期允许本地 Grant issuer | `OPEN_DECISION` | `OWN-PRODUCT` | 现由 GrowthOS 签发 Grant |
+| `PRD4-D7` | 官方搜索 API（Brave 免费档）注册 | `RESOLVED_WITH_REMEDIATION` | `OWN-PRODUCT` | 2026-10-11「同意，授权」；key 已入运行配置；代码与 provider-registry 尚无消费者，存储权方案未执行 |
+| `PRD4-D8` | design partner 人选与数据使用授权 | `OPEN_DECISION` | `OWN-PRODUCT` | 没有人选、合同或数据授权记录；卡 RL1「商机」「节奏」与客户打分 |
+| `PRD4-D9` | 制裁源 ENABLED；LIA 时机；职能邮箱策略 | `RESOLVED_WITH_REMEDIATION` | `OWN-PRODUCT` | 2026-10-10 部分拍板：制裁名单运营刷新（#629），2026-10-11 打开三源；职能邮箱按 BI-14 做公司级（#630，开关 DISABLED；评分侧 #649 在途）；LIA 时机仍未拍板 |
+| `PRD4-D10` | PRD 4.0 与评审报告放新私有仓 | `OPEN_DECISION` | `OWN-PRODUCT` | 私有目录不是 git 仓，Golden Set 无处放 |
+| `PRD4-D11` | 文档归档清单 | `OPEN_DECISION` | `OWN-PRODUCT` | 2026-10-14 本次回写只归档了 status 旧正文与 architecture 头部历史横幅，不代表批准整份清单 |
+| `PRD4-D12` | 流程瘦身（RuntimeEvidence / Release Bundle / 外部 readback 不再作为 Release 条件） | `OPEN_DECISION` | `OWN-PRODUCT` | AGENTS §7 的 `PILOT`/`GA` 晋级门在它拍板前是已知死锁（approval/readback 回读器已由 #566 移除，`scripts/governance-delivery-contracts.mjs` 恒阻断）；PRD 4.0 L2 §5 已把它写成既成，应先标「待 D12」 |
+| `PRD4-D13` | 失败后重试（请求带尝试编号） | `RESOLVED_WITH_REMEDIATION` | `OWN-PRODUCT` | 2026-10-13：阶段级恢复已上线（#642、#643），根治（受保护网关与 broker）定为验收通过后做；L0 仍写「RL1 内做」；是否拆为账户层与操作层两步待拍板；#597 draft 且冲突 |
+| `PRD4-D14` | 模型供应：备用上游与 Flash 档 | `RESOLVED_WITH_REMEDIATION` | `OWN-PRODUCT` | 2026-10-11 拍板「先用 Flash 跑通 + 接官方备用」；#633 上线、xin 已开开关；官方备用上游未接 |
+| `PRD4-D15` | 成本口径与上限 | `OPEN_DECISION` | `OWN-PRODUCT` | 网关对 pro 仍是兜底倍率、线索级成本未实现、每个 run 的上限未定；卡 RL1「成本」 |
+| `PRD4-D16` | 个人数据源开关 | `RESOLVED_WITH_REMEDIATION` | `OWN-PRODUCT` | 2026-10-11 拍板保持现状（风险由产品负责人承担）；四源 ENABLED；PRD 4.0 L0/L2 仍写「不探 SMTP、不猜邮箱」，待同步 |
+| `PRD4-D17` | 只追加表的 `app_user` 权限漂移 | `RESOLVED` | `OWN-PRODUCT` | 2026-10-10 并入 PRD4-D18 的设计，#621 上线后逐表核对零差异 |
+| `PRD4-D18` | 无 RLS 平台表的 `app_user` 写权限 | `RESOLVED_WITH_REMEDIATION` | `OWN-PRODUCT` | 2026-10-09 拍板；#619、#621 于 2026-10-10 上线；平台写入者授权（L4-G23）未做，恢复任何平台 schedule 前必做 |
+| `PRD4-D19` | Raw 记录保留期 | `OPEN_DECISION` | `OWN-PRODUCT` | 代码与真库均为 365 天；PRD 4.0 L0/L3 建议 365 天，2026-10-11 精读建议 90 天 + 回执长期，两案并列待定 |
+
 ## 12. 关闭冲突的证据要求
 
 1. 产品冲突：Decision/PDR、真实批准人、范围和被放弃方案。

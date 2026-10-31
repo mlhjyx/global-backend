@@ -15,6 +15,7 @@ interface Company {
   id: string;
   name: string;
   domain: string | null;
+  country?: string | null;
   dedupeKey: string;
   attributes: Record<string, unknown>;
   status: string;
@@ -77,10 +78,12 @@ function fakePrisma(f: Fixture): PrismaService {
   return {
     withWorkspace: async (_ws: string, fn: (t: typeof tx) => Promise<unknown>) => fn(tx),
     sourceSignal: {
-      findMany: async ({ where }: { where: { subjectKey: string; status: string } }) =>
-        f.signals
-          .filter((s) => s.subjectKey === where.subjectKey && s.status === where.status)
-          .sort((a, b) => (b.occurredAt as Date).getTime() - (a.occurredAt as Date).getTime()),
+      findMany: async ({ where }: { where: { subjectKey: string | { in: string[] }; status: string } }) => {
+        const wanted = typeof where.subjectKey === 'string' ? [where.subjectKey] : where.subjectKey.in;
+        return f.signals
+          .filter((s) => wanted.includes(s.subjectKey as string) && s.status === where.status)
+          .sort((a, b) => (b.occurredAt as Date).getTime() - (a.occurredAt as Date).getTime());
+      },
     },
     monitoredSource: {
       findUnique: async ({ where }: { where: { sourceKey: string } }) => f.watchSources.get(where.sourceKey) ?? null,
@@ -171,6 +174,43 @@ describe('IntentRecomputeService —— 收口⑤「信号可复算」（surface
       at: new Date(now - 3 * DAY_MS).toISOString(),
       strength: 0.9,
     });
+  });
+
+  it('🔒 E7：有域名的公司也按「名称+国家」键匹配信号（设计 §1.5）', async () => {
+    const nameKey = companyIdentity({ name: 'Beispiel Pumpen GmbH', country: 'DE' }).dedupeKey;
+    const domainKey = companyIdentity({
+      name: 'Beispiel Pumpen GmbH',
+      country: 'DE',
+      domain: 'pumpen-beispiel.de',
+    }).dedupeKey;
+    expect(domainKey).not.toBe(nameKey);
+    const f = fixture({
+      companies: new Map([
+        ['co-2', {
+          id: 'co-2',
+          name: 'Beispiel Pumpen GmbH',
+          domain: 'pumpen-beispiel.de',
+          country: 'DE',
+          dedupeKey: domainKey,
+          attributes: {},
+          status: 'NEW',
+          version: 1,
+        }],
+      ]),
+      signals: [
+        tedSignalRow({
+          subjectName: 'Beispiel Pumpen GmbH',
+          subjectCountry: 'DE',
+          subjectKey: nameKey,
+        }),
+      ],
+    });
+    const svc = new IntentRecomputeService({ prisma: fakePrisma(f) });
+
+    expect(await svc.recomputeCompany(WS, 'co-2', { surfaces: SURFACES })).toBe('rebuilt');
+    const intent = f.companies.get('co-2')!.attributes.intent as IntentAttr;
+    expect(intent.events).toHaveLength(1);
+    expect(intent.events[0]).toMatchObject({ type: 'TENDER_PUBLISHED' });
   });
 
   it('写回前以 append-only suppression authority 复核 stale derived status', async () => {

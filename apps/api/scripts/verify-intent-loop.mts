@@ -10,6 +10,7 @@
  *   node --import tsx scripts/verify-intent-loop.mts
  */
 import { readFileSync } from 'node:fs';
+import { PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { IntentProjectionService } from '../src/intent/intent-projection.service';
 import { WebsiteWatchService } from '../src/intent/website-watch.service';
@@ -33,6 +34,10 @@ const icp: IcpForScoring = {
 
 const prisma = new PrismaService();
 await prisma.$connect();
+// 夹具步骤（清场、伪造上周基线）走 owner 连接：app_user 对 source_entity 没有 DELETE
+// （20261010090000_app_user_table_privileges）。注册、抓取、投影仍走 app_user，与生产同一路径。
+const ownerDb = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+await ownerDb.$connect();
 const broker = buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma) });
 const intentSvc = new IntentProjectionService({ prisma, broker });
 const watchSvc = new WebsiteWatchService({ prisma, fetcher: new Crawl4aiPageFetcher(broker) });
@@ -53,8 +58,8 @@ console.log(`① canonical 公司 TRUMPF (fit=match) = ${companyId}`);
 const reg = await intentSvc.registerWatch(WS, companyId, { pages: [{ url: SUPPLIER_URL, kind: 'sourcing' }] });
 console.log(`② registerWatch → source=${reg.sourceKey} (${reg.created ? '新建' : '已存在'}), ${reg.pages} 页`);
 // 幂等清场：清掉本源历史快照/变更，保证每次跑都是干净基线
-await prisma.sourceEntityChange.deleteMany({ where: { sourceId: reg.sourceId } });
-await prisma.sourceEntity.deleteMany({ where: { sourceId: reg.sourceId } });
+await ownerDb.sourceEntityChange.deleteMany({ where: { sourceId: reg.sourceId } });
+await ownerDb.sourceEntity.deleteMany({ where: { sourceId: reg.sourceId } });
 
 // ③ 真 crawl 建基线
 const w1 = await watchSvc.watch(reg.sourceId);
@@ -66,7 +71,7 @@ console.log(`   基线 sourcing = ${JSON.stringify((baseline?.cleaned as { sourc
 if (baseline) {
   const cleaned = { ...(baseline.cleaned as Record<string, unknown>) };
   delete cleaned.sourcing;
-  await prisma.sourceEntity.update({ where: { id: baseline.id }, data: { cleaned: cleaned as never, contentHash: 'seed-prior-no-sourcing' } });
+  await ownerDb.sourceEntity.update({ where: { id: baseline.id }, data: { cleaned: cleaned as never, contentHash: 'seed-prior-no-sourcing' } });
 }
 const w2 = await watchSvc.watch(reg.sourceId);
 console.log(`④ watch#2（真 crawl vs 无招募基线）：changed=${w2.changed}，intentEvents=${w2.intentEvents}`);
@@ -88,7 +93,7 @@ console.log(`   总分      : ${before.totalScore}  →  ${after.totalScore}`);
 console.log(`   队列      : ${before.queue}  →  ${after.queue}`);
 console.log(`   来源标注  : ${after.detail.notes.find((n) => n.includes('Intent')) ?? ''}`);
 
-await prisma.$disconnect();
+await Promise.all([prisma.$disconnect(), ownerDb.$disconnect()]);
 
 async function scoreOne() {
   return prisma.withWorkspace(WS, async (tx) => {

@@ -36,8 +36,10 @@ services:
   # Model aggregation gateway (中转站). Manage models/channels/keys/quotas in its
   # Web UI at http://localhost:3001 — the app calls only its one OpenAI-compatible
   # endpoint (http://localhost:3001/v1). First-run admin: root / 123456.
+  # Image: mlhjyx/new-api fork release of 6ea085c6 (upstream v1.0.0-rc.44 + request-bound settlement
+  # readback + first-byte failure handling), built and attested by growthos-new-api-release.yml.
   new-api:
-    image: ghcr.io/mlhjyx/new-api@sha256:b72f2290d67d7f73bb47c9e7e52d6a9d3b78ce5a873695ea6b636c181829e299
+    image: ghcr.io/mlhjyx/new-api@sha256:79850cd29f69ed2aee892dcd944c1fb479a6d71d96b5a9d4faff65e32f298da6
     container_name: global-new-api
     restart: unless-stopped
     ports:

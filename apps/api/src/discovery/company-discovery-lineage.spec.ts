@@ -195,6 +195,96 @@ describe('company discovery receipt lineage', () => {
     })).toBeUndefined();
   });
 
+  it('leaves a call that failed before any durable receipt out of the lineage instead of voiding it', () => {
+    const settled = createDiscoveryCompanyReceiptCollector({
+      providerKey: 'public_web',
+      producerId: 'discovery.extract_company',
+    });
+    settled.markExpectedInvocation();
+    settled.onDurableReceipt('discovery.extract_company', receipt(OPERATION_A));
+    const failed = createDiscoveryCompanyReceiptCollector({
+      providerKey: 'public_web',
+      producerId: 'discovery.extract_company',
+    });
+    failed.markExpectedInvocation();
+    failed.markInvocationFailed();
+    const observation = failed.finish([]);
+
+    expect(observation).toEqual({
+      producerId: 'discovery.extract_company',
+      invoked: true,
+      failed: true,
+      receipt: null,
+      recordIndexes: [],
+    });
+    expect(buildDiscoveryCompanyResultLineage({
+      providerKey: 'public_web',
+      recordCount: 1,
+      observations: [settled.finish([0]), observation],
+    })).toEqual({
+      schemaVersion: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+      recordCount: 1,
+      attemptReceipts: [],
+      receiptCoverage: [{
+        producerId: 'discovery.extract_company',
+        receipt: receipt(OPERATION_A),
+        recordIndexes: [0],
+      }],
+    });
+  });
+
+  it('keeps the receipt of a call that failed after its receipt arrived', () => {
+    const collector = createDiscoveryCompanyReceiptCollector({
+      providerKey: 'public_web',
+      producerId: 'discovery.extract_company',
+    });
+    collector.markExpectedInvocation();
+    collector.onDurableReceipt('discovery.extract_company', receipt(OPERATION_A));
+    collector.markInvocationFailed();
+
+    expect(buildDiscoveryCompanyResultLineage({
+      providerKey: 'public_web',
+      recordCount: 0,
+      observations: [collector.finish([])],
+    })?.attemptReceipts).toEqual([
+      { producerId: 'discovery.extract_company', receipt: receipt(OPERATION_A) },
+    ]);
+  });
+
+  it('accepts a failure mark only once for an invoked call, never with records or a late receipt', () => {
+    const collector = () => createDiscoveryCompanyReceiptCollector({
+      providerKey: 'public_web',
+      producerId: 'discovery.extract_company',
+    });
+
+    const idle = collector();
+    expect(() => idle.markInvocationFailed()).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+
+    const twice = collector();
+    twice.markExpectedInvocation();
+    twice.markInvocationFailed();
+    expect(() => twice.markInvocationFailed()).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+
+    const covering = collector();
+    covering.markExpectedInvocation();
+    covering.markInvocationFailed();
+    expect(() => covering.finish([0])).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+
+    const late = collector();
+    late.markExpectedInvocation();
+    late.markInvocationFailed();
+    expect(() => late.onDurableReceipt(
+      'discovery.extract_company',
+      receipt(OPERATION_A),
+    )).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+
+    const finished = collector();
+    finished.markExpectedInvocation();
+    finished.markInvocationFailed();
+    finished.finish([]);
+    expect(() => finished.markInvocationFailed()).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+  });
+
   it('rejects accessor observations without invoking their getters', () => {
     let getterCalls = 0;
     const observation = Object.defineProperty({
@@ -533,6 +623,7 @@ describe('company discovery receipt lineage', () => {
       observations: [{
         producerId: 'discovery.extract_company',
         invoked: 'yes',
+        failed: false,
         receipt: null,
         recordIndexes: [],
       } as never],
@@ -543,9 +634,24 @@ describe('company discovery receipt lineage', () => {
       observations: [{
         producerId: 'discovery.extract_company',
         invoked: false,
+        failed: false,
         receipt: receipt(OPERATION_A),
         recordIndexes: [],
       }],
+    })).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
+  });
+
+  it.each([
+    ['a non-boolean failure flag', { invoked: true, failed: 'yes', receipt: null, recordIndexes: [] }, 0],
+    ['a failure without an invocation', { invoked: false, failed: true, receipt: null, recordIndexes: [] }, 0],
+    ['a failure that carries a receipt', { invoked: true, failed: true, receipt: receipt(OPERATION_A), recordIndexes: [] }, 0],
+    ['a failure that covers a record', { invoked: true, failed: true, receipt: null, recordIndexes: [0] }, 1],
+    ['an observation without the failure flag', { invoked: true, receipt: receipt(OPERATION_A), recordIndexes: [] }, 0],
+  ])('rejects %s', (_case, fields, recordCount) => {
+    expect(() => buildDiscoveryCompanyResultLineage({
+      providerKey: 'public_web',
+      recordCount,
+      observations: [{ producerId: 'discovery.extract_company', ...fields } as never],
     })).toThrow(DISCOVERY_COMPANY_LINEAGE_INVALID);
   });
 });

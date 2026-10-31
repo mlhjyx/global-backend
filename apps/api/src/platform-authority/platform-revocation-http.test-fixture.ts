@@ -4,7 +4,7 @@ import {
   sign,
   type KeyObject,
 } from "node:crypto";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -38,6 +38,8 @@ export async function revocationFixture() {
     ],
     { stdio: "ignore" },
   );
+  // The trust runtime rejects group/other-writable anchor files; openssl honors umask.
+  chmodSync(certificate, 0o644);
   const names = [
     "execution",
     "identity",

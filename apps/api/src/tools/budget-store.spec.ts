@@ -965,85 +965,7 @@ describe('PostgresBudgetStore', () => {
     ).toContain('open_tool_budget');
   });
 
-  it('admits a platform schedule run atomically through the writer with no caller cap or owner fallback', async () => {
-    const ownerDb = {
-      $transaction: vi.fn(async () => []),
-    } as unknown as PrismaClient;
-    const queryRaw = vi
-      .fn()
-      .mockResolvedValueOnce([SAFE_PLATFORM_PRINCIPAL])
-      .mockResolvedValueOnce([{
-        account_id: '89528818-13ab-4a46-9dfd-6fbcdba6943e',
-        generation: 1,
-        authority_id: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
-        authorized_cap_microusd: 1_000_000n,
-        campaign_cap_microusd: 10_000_000n,
-        max_runs: 10n,
-        replay: false,
-      }]);
-    const platformWriter = {
-      $transaction: vi.fn(async (fn) => fn({
-        $executeRawUnsafe: vi.fn(async () => 0),
-        $queryRaw: queryRaw,
-      } as never)),
-    } as unknown as PrismaClient;
-    const store = new PostgresBudgetStore(fakePrisma([]), platformWriter);
-    const input = {
-      purpose: 'platform.acquisition' as const,
-      subjectType: 'schedule' as const,
-      subjectId: 'acq-sweep',
-      scheduleId: 'acq-sweep',
-      requestSha256: '5e960ccef72129aa32bdd9464c9d7b546e5ed6dd7a639caad46df77edea3448e',
-      workflowRunId: 'workflow-run-1',
-      accountKey: 'platform:5e960ccef72129aa32bdd9464c9d7b546e5ed6dd7a639caad46df77edea3448e:workflow-run-1',
-    };
 
-    await expect(store.admitPlatformRun(input)).resolves.toEqual({
-      accountId: '89528818-13ab-4a46-9dfd-6fbcdba6943e',
-      authorityId: '42c863b9-7c7e-4d28-8678-60ef9a20219b',
-      authorizedCapMicrousd: 1_000_000n,
-      generation: 1,
-      replay: false,
-    });
-
-    expect(ownerDb.$transaction).not.toHaveBeenCalled();
-    expect(platformWriter.$transaction).toHaveBeenCalledOnce();
-    const admission = queryRaw.mock.calls[1]?.[0] as {
-      strings?: readonly string[];
-      values?: readonly unknown[];
-    };
-    expect(admission.strings?.join('')).toContain('admit_platform_execution_budget_run_v1');
-    expect(admission.strings?.join('')).not.toMatch(/cap|workspace/i);
-    expect(admission.values).toEqual([
-      input.purpose,
-      input.subjectType,
-      input.subjectId,
-      input.scheduleId,
-      input.requestSha256,
-      input.workflowRunId,
-      input.accountKey,
-    ]);
-  });
-
-  it('does not use the legacy owner connection when the platform writer is absent', async () => {
-    const ownerDb = {
-      $transaction: vi.fn(async () => []),
-    } as unknown as PrismaClient;
-    const store = new PostgresBudgetStore(fakePrisma([]));
-
-    await expect(store.admitPlatformRun({
-      purpose: 'platform.sanctions',
-      subjectType: 'schedule',
-      subjectId: 'sanctions-refresh',
-      scheduleId: 'sanctions-refresh',
-      requestSha256: '50b8dfae274bb16a825147c648f46789ea0eb291b3d32964c8bacf385340dffe',
-      workflowRunId: 'workflow-run-1',
-      accountKey: 'platform:50b8dfae274bb16a825147c648f46789ea0eb291b3d32964c8bacf385340dffe:workflow-run-1',
-    })).rejects.toEqual(
-      new ExecutionBudgetGrantError('EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE'),
-    );
-    expect(ownerDb.$transaction).not.toHaveBeenCalled();
-  });
 
   it('attests an existing authority account without calling the holder-incrementing open function', async () => {
     const queryRaw = vi.fn().mockResolvedValue([{
@@ -1635,5 +1557,79 @@ describe('InMemoryBudgetStoreAdapter', () => {
     await expect(
       store.settleArtifactManifest(reservation, 130_000n, ARTIFACT_SNAPSHOT),
     ).rejects.toThrow('BUDGET_STORE_UNAVAILABLE');
+  });
+});
+
+/**
+ * Post-admission, the only check of the lease, revocation and scope is
+ * attest_authorized_tool_budget_v1, called directly (attestAuthorized, mapped)
+ * or from inside reserve_tool_budget (unmapped until now). An unmapped marker
+ * left the Activity as a raw PrismaClientKnownRequestError: the workflow then
+ * recorded `{ errorType: 'PrismaClientKnownRequestError', control: false }` and
+ * HTTP answered 500 instead of the 402/403 the contract declares.
+ */
+describe('PostgresBudgetStore.reserve — authority markers raised by attest inside reserve', () => {
+  const reserveInput = {
+    workspaceId: TEST_WORKSPACE_ID,
+    accountKey: 'icp:design:req',
+    operationKey: 'op:lease-boundary',
+    estimatedMicrousd: 0n,
+  };
+  const storeFailingWith = (failure: unknown) =>
+    new PostgresBudgetStore({
+      withWorkspace: vi.fn(async (_workspaceId, fn) =>
+        fn({
+          $queryRaw: vi.fn(async () => {
+            throw failure;
+          }),
+        } as never),
+      ),
+    } as unknown as PrismaService);
+
+  it.each([
+    'EXECUTION_BUDGET_GRANT_INVALID',
+    'EXECUTION_BUDGET_GRANT_EXPIRED',
+    'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
+    'EXECUTION_BUDGET_GRANT_REUSED',
+    'EXECUTION_BUDGET_AUTHORITY_REVOKED',
+    'EXECUTION_BUDGET_AUTHORITY_EXHAUSTED',
+  ] as const)('maps the trusted marker %s to the authority contract', async (marker) => {
+    await expect(storeFailingWith(rawQueryMarkerError(marker)).reserve(reserveInput)).rejects.toEqual(
+      new ExecutionBudgetGrantError(marker),
+    );
+  });
+
+  const rawQuery = (meta: Record<string, string>) =>
+    new Prisma.PrismaClientKnownRequestError('raw query failed', { code: 'P2010', clientVersion: 'test', meta });
+  it.each([
+    ['a deadlock', rawQuery({ code: '40P01', message: 'ERROR: deadlock detected' })],
+    ['an invariant marker', rawQueryMarkerError('TOOL_BUDGET_MICROUSD_INVARIANT')],
+    ['a marker with a suffix', rawQueryMarkerError('EXECUTION_BUDGET_GRANT_EXPIRED; injected detail')],
+    ['the marker text under another SQLSTATE', rawQuery({ code: '23505', message: 'ERROR: EXECUTION_BUDGET_GRANT_EXPIRED' })],
+    [
+      'another Prisma code',
+      new Prisma.PrismaClientKnownRequestError('value too long', { code: 'P2000', clientVersion: 'test' }),
+    ],
+    [
+      'a transaction timeout',
+      new Prisma.PrismaClientKnownRequestError('Transaction already closed', { code: 'P2028', clientVersion: 'test' }),
+    ],
+    ['a plain Error carrying the marker text', new Error('EXECUTION_BUDGET_GRANT_EXPIRED')],
+  ])('keeps %s unchanged', async (_label, failure) => {
+    await expect(storeFailingWith(failure).reserve(reserveInput)).rejects.toBe(failure);
+  });
+
+  it('still maps the lifecycle and account markers as before', async () => {
+    await expect(
+      storeFailingWith(rawQueryMarkerError('EXECUTION_BUDGET_AUTHORITY_LIFECYCLE_UNAVAILABLE')).reserve(reserveInput),
+    ).rejects.toEqual(new ExecutionBudgetGrantError('EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE'));
+    // Prisma's P2010 message carries the database message, which the account check matches.
+    const accountUnavailable = new Prisma.PrismaClientKnownRequestError(
+      'Raw query failed. Code: `P0001`. Message: `ERROR: TOOL_BUDGET_ACCOUNT_UNAVAILABLE`',
+      { code: 'P2010', clientVersion: 'test', meta: { code: 'P0001', message: 'ERROR: TOOL_BUDGET_ACCOUNT_UNAVAILABLE' } },
+    );
+    await expect(storeFailingWith(accountUnavailable).reserve(reserveInput)).rejects.toBeInstanceOf(
+      BudgetAccountUnavailableError,
+    );
   });
 });

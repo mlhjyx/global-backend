@@ -1,14 +1,17 @@
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { scoreLead } from '../lead/scoring';
+import { QUALIFICATION_RULE_VERSION } from '../lead/lead-qualified-snapshot';
 import { RuleLike } from '../icp/rule-engine';
 import {
   SanctionsScreeningService,
   reconcileReviewState,
   matchesFromJson,
+  storedScreeningBlocks,
 } from '../sanctions/sanctions-screening.service';
 import type { ScreenMatch } from '../sanctions/sanctions-matcher';
 import { syntheticDiscoveryEntityIds } from '../discovery/evidence-license';
+import { reachableCompanyContactPoints } from '../discovery/company-contact-points';
 
 export interface QualifyRunInput {
   workspaceId: string;
@@ -64,9 +67,22 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
             take: batchSize,
             ...(cursor ? { where: { id: { gt: cursor } } } : {}),
             orderBy: { id: 'asc' },
-            include: { contacts: { include: { contactPoints: true } } },
+            include: {
+              contacts: { include: { contactPoints: true } },
+              // 评分规则 v3：公司级联系路径（BI-14 company_contact_point）进可达性。只读 VALID / UNVERIFIED
+              //（INVALID 不是渠道）；禁联不是状态，在下面读时过滤（设计 §4.5）。
+              companyContactPoints: {
+                where: { status: { in: ['VALID', 'UNVERIFIED'] } },
+                select: { kind: true, value: true, status: true },
+              },
+            },
           });
           if (!companies.length) return true;
+          // 一批一次：公司 / 域名禁联事实，用于联系路径的读时过滤（公司被禁联 → 无点；被禁联域名覆盖的点剔除）。
+          const suppressions = await tx.suppressionRecord.findMany({
+            where: { type: { in: ['domain', 'company_name'] } },
+            select: { type: true, value: true },
+          });
           const evidenceEntityOwners = new Map<string, string>();
           for (const company of companies) {
             evidenceEntityOwners.set(company.id, company.id);
@@ -82,7 +98,27 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
               .map((entityId) => evidenceEntityOwners.get(entityId))
               .filter((companyId): companyId is string => companyId !== undefined),
           );
-          for (const c of companies.filter((company) => !quarantinedCompanyIds.has(company.id))) {
+          const scoredCompanies = companies.filter((company) => !quarantinedCompanyIds.has(company.id));
+          // 第五门制裁筛查（召回优先，内存索引）先对整批算完：这次没有命中的公司，要一次读出库里的命中。
+          const screens = new Map(
+            scoredCompanies.map((company) => [company.id, deps.sanctionsScreening?.screen(company.name, company.country)]),
+          );
+          // (q) 这次 live 无命中（clear / not_screened / 未接筛查服务）的公司，库里若还留着未清白的命中，
+          // accept 与周报导出照拦（复审 #1 的跨进程兜底），队列要与之一致：lead 进 sanctions_hold，等人在
+          // 复核端点清白。qualify 不改写记录——命中只由人关闭（#665 复审：自动改写在索引覆盖不全时会误放）。
+          // 批首读一次：同一批里若复核人刚清白了某家，这一批仍可能把它的 lead 写回 sanctions_hold，
+          // 下次 qualify 读到已清白就回落；方向只会多拦（accept 读库里的最新复核态，照常放行）。
+          const unmatchedIds = scoredCompanies
+            .filter((company) => screens.get(company.id)?.status !== 'potential_match')
+            .map((company) => company.id);
+          const storedHits = unmatchedIds.length
+            ? await tx.sanctionsScreeningResult.findMany({
+                where: { workspaceId: args.workspaceId, canonicalCompanyId: { in: unmatchedIds }, status: 'potential_match' },
+                select: { canonicalCompanyId: true, status: true, reviewState: true },
+              })
+            : [];
+          const storedHitByCompany = new Map(storedHits.map((row) => [row.canonicalCompanyId, row]));
+          for (const c of scoredCompanies) {
             // 该 (icpId, company) 的既有 Lead——资格门① 写在这里（fitVerdict/fitReasons），是 CandidateAssessment。
             // 权威 Fit 来自**本 ICP 的 Lead**（不再读 canonical，那是「上一个判定该公司的 ICP」的值 → 串 ICP 的根 bug）。
             const existing = await tx.lead.findUnique({
@@ -93,14 +129,20 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                   canonicalCompanyId: c.id,
                 },
               },
-              select: { id: true, status: true, fitVerdict: true },
+              // 一条 reject 裁决作证人工拒绝（有界：只探一条），判据与 API 的 queueBasis=human_reject 相同。
+              select: {
+                id: true,
+                status: true,
+                fitVerdict: true,
+                decisions: { where: { action: 'reject' }, select: { id: true }, take: 1 },
+              },
             });
             const authoritativeFit = (existing?.fitVerdict ?? null) as 'match' | 'weak' | 'mismatch' | null;
 
-            // 第五门制裁筛查（召回优先，内存索引）：命中且未被人工清 → sanctionsHold（queue 强制 sanctions_hold）。
-            // DISABLED/清白 → not_screened/clear → sanctionsHold=false（fail-open，不影响队列）。
-            const screen = deps.sanctionsScreening?.screen(c.name, c.country);
-            let sanctionsHold = false;
+            // 第五门：这次命中且未被人工清 → sanctionsHold（queue 强制 sanctions_hold）。这次没有命中时，
+            // 与 accept 同一条规则：库里的命中未被清白就 hold（storedScreeningBlocks），否则不 hold。
+            const screen = screens.get(c.id);
+            let sanctionsHold = storedScreeningBlocks(storedHitByCompany.get(c.id));
             let screenMatches: ScreenMatch[] = [];
             let screenReviewState: 'open' | 'cleared_false_positive' | 'confirmed_true_hit' = 'open';
             let screenListVersions: Record<string, string> = {};
@@ -135,6 +177,9 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                   seniority: ct.seniority,
                   contactPoints: ct.contactPoints.map((p) => ({ type: p.type, status: p.status })),
                 })),
+                companyContactPoints: reachableCompanyContactPoints(c.companyContactPoints, suppressions, c).map(
+                  (p) => ({ kind: p.kind, status: p.status }),
+                ),
               },
               icpForScoring,
               // ICP 资格门（LLM 四门）作为权威 Fit 传入：只覆盖 Fit 维，队列归属由六维总分 +
@@ -144,9 +189,19 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
             const queue = result.queue;
             const status =
               queue === 'suppressed' ? 'SUPPRESSED' : queue === 'rejected' ? 'REJECTED' : 'REVIEW';
-            const scoreDetail = { ...result.detail, fitVerdict: authoritativeFit };
-            // 人工已裁决（QUALIFIED/REJECTED via decision/CONTACTED+）的 Lead 不被重评覆盖状态
-            const humanFinal = existing && ['QUALIFIED', 'CONTACTED', 'CONVERTED'].includes(existing.status);
+            // ruleVersion：这次计分用的规则版本。LeadQualified 快照读它，而不是决策时的代码常量——
+            // 规则升级后没有重评的 lead 仍如实标注旧版本（W5-f）。
+            const scoreDetail = { ...result.detail, fitVerdict: authoritativeFit, ruleVersion: QUALIFICATION_RULE_VERSION };
+            // 人工已裁决（QUALIFIED/REJECTED via decision/CONTACTED+）的 Lead 不被重评覆盖状态。
+            // 评分自己也写 REJECTED，所以 REJECTED 只在有 reject 裁决时才算人工终态；评分写的 REJECTED
+            // 仍由重评分决定。
+            const humanFinal =
+              existing !== null &&
+              (['QUALIFIED', 'CONTACTED', 'CONVERTED'].includes(existing.status) ||
+                (existing.status === 'REJECTED' && existing.decisions.length > 0));
+            // scored_at：这条 lead 的队列从此由评分决定（fit 门预置结束）。API 的 scored/queueBasis 与
+            // LeadQualified 快照的 scored_at 读它。
+            const scoredAt = new Date();
             // 评分只写 scores/queue/status —— **绝不覆盖 fitVerdict/fitReasons**（那是资格门① 的产物）。
             await tx.lead.upsert({
               where: {
@@ -160,6 +215,7 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                 totalScore: result.totalScore,
                 scores: result.scores as unknown as Prisma.InputJsonValue,
                 scoreDetail: scoreDetail as unknown as Prisma.InputJsonValue,
+                scoredAt,
                 ...(humanFinal ? {} : { status: status as never, queue }),
                 version: { increment: 1 },
               },
@@ -172,6 +228,7 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                 totalScore: result.totalScore,
                 scores: result.scores as unknown as Prisma.InputJsonValue,
                 scoreDetail: scoreDetail as unknown as Prisma.InputJsonValue,
+                scoredAt,
               },
             });
             // 记/更制裁审计件（命中时）：名单/条目 ref/版本/分数/复核态——🔴 非个人传记（只公司名 + 名单条目引用）。

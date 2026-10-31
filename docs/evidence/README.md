@@ -23,6 +23,18 @@
 
 [2026-10-06 生产漏洞修复](security/20261006-production-advisory-remediation.json)：main 定时 canary 检出的 `http-cache-semantics`（范围内升到 4.3.0；维护者对 advisory 有异议，非实质修复，本仓不暴露）与 `smol-toml`（override 升到修复版 1.9.0）两条生产 advisory 处理后，同一生产审计（零 advisory）在旧绑定下 `BASELINE_SOURCE_LOCK_MISMATCH`、重新绑定后 `FRESH`；`valid_until` 未延长；不作为运行或发布证明。
 
+[2026-10-07 sharp 漏洞修复](security/20261007-sharp-advisory-remediation.json)：main 每次 push 的 canary 自 10-06 起检出的 sharp 生产 advisory（GHSA-wq5f-xc86-pv6w，自带 librsvg 的释放后重用）随 `apps/api` 精确钉版升到修复版 0.35.5 处理后，同一生产审计（零 advisory）在旧绑定下 `BASELINE_SOURCE_LOCK_MISMATCH`、重新绑定后 `FRESH`；`valid_until` 未延长；不作为运行或发布证明。
+
+[2026-10-08 legacy-javascript 钉版](security/20261008-legacy-javascript-dist-tag-pin.json)：上游把 dist-tag `latest` 移到 0.0.3 后，镜像构建的 `pnpm deploy` 与锁文件 SBOM 不一致；加精确 override 后全新缓存 deploy 回到 0.0.1。同一生产审计（零 advisory）在旧绑定下 `BASELINE_SOURCE_LOCK_MISMATCH`、重新绑定后 `FRESH`；`valid_until` 未延长；不作为运行或发布证明。
+
+[2026-10-10 月度依赖刷新与基线续期](security/20261010-monthly-dependency-refresh-baseline-renewal.json)：范围内批量升级、四条安全 override 升到最新补丁、撤掉已离开依赖图的 axios override、OpenTelemetry SDK 整族锁步到 2.12.0/0.223.0、把 nx 钉的 undici 7.29.0 覆盖到 7.30.0 后，同一生产审计（零 advisory）在旧绑定下 `BASELINE_SOURCE_LOCK_MISMATCH`、重新绑定后 `FRESH`，`valid_until` 延至 2026-10-24T13:59:34Z；附新发布版本的 provenance 与发布账号核对；不作为运行或发布证明。
+
+[2026-10-19 漏洞基线到期续期](security/20261019-baseline-renewal.json)：锁文件未变，只换绑定、延有效期。同一生产审计（零 advisory）在旧、新绑定下都是 `FRESH`；附两个到期边界的投影：旧基线自 2026-10-24T13:59:34Z 起 `BASELINE_EXPIRED`，新基线延至 2026-11-02T11:27:18Z；不作为运行或发布证明。
+
+[2026-10-27 新发布 advisory 修复与基线重绑](security/20261027-production-advisory-remediation.json)：10-19 之后 GitHub 新发布 13 条 production advisory（body-parser、multer、fast-uri、undici 7/8、zod），锁文件未动却让 main 的 freshness canary 变 `BASELINE_STALE`；把五条依赖线升到修复版本（contracts 由 zod 3 升 zod 4）后，同一生产审计零 advisory，旧绑定回执为 CI 上 fbfcccba 的 `BASELINE_STALE`（13 条），重绑到 c33861aa 后为 `FRESH`，有效期延至 2026-11-10T05:13:39Z；不作为运行或发布证明。
+
+[2026-10-28 qs advisory 修复与基线重绑](security/20261028-qs-advisory-remediation.json)：10-27 之后 GitHub 发布 GHSA-6pq8-jhm2-2vcw（qs 6.16.0 及以下的 `qs.stringify` DoS，moderate），锁文件未动却让 main 的 freshness canary 变 `BASELINE_STALE`；root override 把 qs 全线升到修复版 6.16.1 后，同一生产审计零 advisory，旧绑定回执为 CI 上 a30ac929 的 `BASELINE_STALE`（1 条），重绑到 6510fb5f 后为 `FRESH`，有效期维持 2026-11-10T05:13:39Z；不作为运行或发布证明。
+
 [执行授权物理接线围栏复核](execution-authority-fence-review-20261001.md)：Router/ToolBroker 四个受保护文件自 `b8dd5eb0` 以来全部改动的逐提交静态复核（10-01），及 10-06 的复查与独立复审；Router 指纹据此更新，`execution-authority-policy` spec 回到 required 门。只是静态复核记录，不是 RuntimeEvidence，也不作为运行或发布证明。
 
 ## 1. 分类
@@ -50,6 +62,8 @@ RuntimeEvidence 文件必须位于 `docs/evidence/runtime/`、使用 [RuntimeEvi
   `..` 的普通文件、不得是符号链接且最大 10 MiB，验证器才会有界读取并重算摘要。
 
 时间到达 `valid_until` 后，记录自动成为 `HISTORICAL`：保留 provenance，但不能满足 `PILOT`/`GA` 门。TEST_ANCHOR、旧真机日志、手工日期和“命令曾通过”的叙述都不能替代这张记录。
+
+开发快速通道（[运维说明](../backend/dev-fast-lane.md)）开启期间：`/health/ready` 带 `capabilities.dev_fast_lane` 的任何时段、在 `understanding-dev-fast-lane-*` 队列上执行的任何 run，都不能作为 RuntimeEvidence PASS 依据，也不能进入 PILOT/GA Release Bundle。要记录车道观察时，`evidence_kind` 以 `dev-fast-lane-` 开头、`environment` 为 `development`，正文写明「worker 为源码 unattested，API 为受证镜像，绿灯只代表事实可观察」。验证器会拒绝非 development 的车道证据（`EVIDENCE_FAST_LANE_ENVIRONMENT_INVALID`），也拒绝把车道 kind 写进 traceability chain 的 `required_evidence_kinds`（`TRACE_FAST_LANE_EVIDENCE_KIND_FORBIDDEN`）。
 
 ## 3. Release 与决策边界
 
@@ -88,6 +102,10 @@ Bundle 内的 provenance 枚举、actor、SHA、时间和 URL 都是 documentary
 - Copy Sonnet recovery v18 零调用停止记录：[stopped evidence](site-builder/m1-g-copy-sonnet-recovery-v18-zero-call-preflight-stopped-evidence.json)。它只证明 #385 后获授权的单次 preflight 在 token 创建前因 ToolBroker 无法连接 OpenOx public pricing source 而 fail closed，且 route #20、v16 #24 与 v17 #25 的脱敏 readback 处于 disabled；它不产生 v18 token、成功 artifact、模型请求、模型 wire 或模型费用，也不证明 capability、质量、promotion 或 production route adoption。
 - Copy Sonnet recovery v19 零调用停止记录：[stopped evidence](site-builder/m1-g-copy-sonnet-recovery-v19-zero-call-preflight-stopped-evidence.json)。它只证明 #387 后的单次 preflight 已通过 ToolBroker 读取 OpenOx 价格，但在 post-create New API readback 发生控制面不可用；token #26 已由 cleanup 禁用，route #20、v16 #24 与 v17 #25 仍 disabled，且无成功 artifact、模型请求、模型 wire 或模型费用。它不证明 capability、质量、promotion 或 production route adoption。
 - Copy Sonnet recovery v13 历史 create-only 交付：[实施/TDD 记录](../implementation-records/copy-sonnet-recovery-v13-create-only-tdd.md)、[manifest](site-builder/m1-g-copy-sonnet-recovery-manifest-v13.json)与 [runtime binding](site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v13.json)；tracked artifact 不回写后续私有 stopped run，且不能作为 v14 authorization 或执行输入。
+
+## Platform authority
+
+- [2026-11-01 平台准入 v2 与撤销 fence 实测](2026-11-01-platform-admission-v2-and-revocation-fence.md)：平台 schedule 手动运行经 v2 拿到真实 `PLATFORM_GRANT`（jti `2401bb26…`），并用它完成撤销签发 → 投递 → fence 提交 → ACK 验签（`ed59f901…`，generation 1→2）；途中修复平台 worker 信任根与 gain-saas Grant claims 两处缺口。不生成 RuntimeEvidence，schedule 仍 paused，自动撤销触发未接线。
 
 ## Production dependency audit snapshots
 

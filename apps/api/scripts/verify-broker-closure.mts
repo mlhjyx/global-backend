@@ -23,6 +23,7 @@ import { ModelProviderRegistry } from '../src/model-gateway/model-provider.regis
 import { ModelRouter } from '../src/model-gateway/model-router';
 import { RouterModelGateway } from '../src/model-gateway/router-model-gateway';
 import { buildGatewayProvider } from '../src/model-gateway/model-providers.config';
+import { getTask } from '../src/ai-tasks/task-registry';
 import { AiTraceSink } from '../src/model-gateway/ai-trace.sink';
 import { buildToolBroker, sourcePolicyReaderFrom } from '../src/tools/tool-broker.factory';
 import { BudgetLedger, BudgetExceededError } from '../src/tools/budget';
@@ -129,7 +130,7 @@ async function main(): Promise<void> {
       task: 'taxonomy.normalize',
       prompt: '把词「Germany」归一到候选码表 [{"code":"DE","en":"Germany"},{"code":"FR","en":"France"}] 中的一个 code，只输出 JSON：{"code":"..."}',
       schema: { type: 'object', required: ['code'], properties: { code: { type: ['string', 'null'] } } },
-      model: 'deepseek-v4-flash',
+      model: getTask('taxonomy.normalize')?.model,
     },
     { workspaceId: WS, correlationId: 'verify-broker-closure' },
   );

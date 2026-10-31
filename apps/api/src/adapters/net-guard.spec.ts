@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest';
-import { isPrivateIp, resolvePublicIp, type HostResolver } from './net-guard';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { isPrivateIp, parseDohEndpoints, resolvePublicIp, type HostResolver } from './net-guard';
 
 describe('SSRF 出网护栏', () => {
   it('isPrivateIp：所有非全局地址与 IPv6 过渡形态均拒绝', () => {
@@ -166,5 +166,91 @@ describe('SSRF 出网护栏', () => {
     });
 
     expect(result).toMatchObject({ safe: false, reason: 'non_global_address' });
+  });
+});
+
+
+describe('DoH 端点：可配置与顺序回退', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  const DEFAULTS = [
+    'https://cloudflare-dns.com/dns-query',
+    'https://dns.google/resolve',
+  ];
+
+  it('parseDohEndpoints：缺省两个端点；空串回落缺省；非法项剔除；去重保序', () => {
+    expect(parseDohEndpoints(undefined)).toEqual(DEFAULTS);
+    expect(parseDohEndpoints('   ')).toEqual(DEFAULTS);
+    expect(
+      parseDohEndpoints(
+        ' https://a.example/q , http://insecure.example/q, not-a-url, https://a.example/q, https://b.example/q ',
+      ),
+    ).toEqual(['https://a.example/q', 'https://b.example/q']);
+    // 全部非法 → 回落缺省，而不是空列表（防一处配错误伤全部出网解析）
+    expect(parseDohEndpoints('http://insecure.example/q, ://bad')).toEqual(DEFAULTS);
+  });
+
+  it('第一个端点失败时按配置顺序回退到下一个', async () => {
+    vi.stubEnv('NET_GUARD_DOH_ENDPOINTS', 'https://broken.example/q,https://working.example/q');
+    const calls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: URL | string) => {
+        const url = String(input);
+        calls.push(url);
+        if (url.startsWith('https://broken.example/')) throw new Error('econnreset');
+        const type = new URL(url).searchParams.get('type');
+        const answer =
+          type === 'A'
+            ? [{ type: 1, data: '104.20.23.154' }]
+            : [{ type: 28, data: '2606:4700:10::6814:179a' }];
+        return { ok: true, json: async () => ({ Status: 0, Answer: answer }) } as unknown as Response;
+      }),
+    );
+
+    const result = await resolvePublicIp('example.com', {
+      systemLookup: async () => [{ address: '198.18.0.25', family: 4 }],
+    });
+
+    expect(result).toMatchObject({ safe: true, ip: '104.20.23.154', family: 4 });
+    expect(calls.some((u) => u.startsWith('https://broken.example/'))).toBe(true);
+    expect(calls.some((u) => u.startsWith('https://working.example/'))).toBe(true);
+  });
+
+  it('所有端点都失败 → dns_lookup_failed（fail-closed）', async () => {
+    vi.stubEnv('NET_GUARD_DOH_ENDPOINTS', 'https://a.example/q,https://b.example/q');
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('blocked'); }));
+
+    const result = await resolvePublicIp('example.com', {
+      systemLookup: async () => [{ address: '198.18.0.25', family: 4 }],
+    });
+
+    expect(result).toMatchObject({ safe: false, reason: 'dns_lookup_failed' });
+  });
+
+  it('未配置时按缺省顺序先 Cloudflare 再 Google', async () => {
+    const hosts: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: URL | string) => {
+        const url = new URL(String(input));
+        hosts.push(url.host);
+        if (url.host === 'cloudflare-dns.com') throw new Error('blocked');
+        const type = url.searchParams.get('type');
+        const answer = type === 'A' ? [{ type: 1, data: '93.184.216.34' }] : [];
+        return { ok: true, json: async () => ({ Status: 0, Answer: answer }) } as unknown as Response;
+      }),
+    );
+
+    const result = await resolvePublicIp('example.com', {
+      systemLookup: async () => [{ address: '198.18.0.25', family: 4 }],
+    });
+
+    expect(result).toMatchObject({ safe: true, ip: '93.184.216.34' });
+    expect(hosts[0]).toBe('cloudflare-dns.com');
+    expect(hosts).toContain('dns.google');
   });
 });

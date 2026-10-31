@@ -5,6 +5,7 @@ import {
   ProviderIdentityError,
   ProviderOutputError,
   ProviderSettlementError,
+  ProviderTransportError,
   ProviderWireInFlightError,
 } from "./provider-output-error";
 import {
@@ -23,7 +24,9 @@ import {
 import {
   canonicalReportedModelIdentifier,
   resolveReportedModelIdentity,
+  resolveReportedModelIdentityAmong,
 } from "../model-identity";
+import { isReviewedModelSubstitution } from "../model-identity-substitutes";
 import { NEW_API_REQUEST_BOUND_RESOLVER_ID } from "../new-api-request-bound-settlement";
 import { boundedModelUsage } from "../model-usage-boundary";
 import {
@@ -88,18 +91,25 @@ export function stripJsonFence(content: string): string {
   return fenced ? fenced[1].trim() : trimmed;
 }
 
+/**
+ * `substitutes` are the identities the gateway admitted for this one call
+ * (D14). A reported name that resolves to one of them makes the result that
+ * substitute's, so the result never carries the requested model's name.
+ */
 function resolutionProvenance(
   requestedModel: string,
-  reportedModel?: unknown,
-  transport?: GatewayVisionTransport,
+  reportedModel: unknown,
+  transport: GatewayVisionTransport,
+  substitutes: readonly string[] = [],
 ): {
   model: string;
   reportedModel?: string;
   modelResolutionSource: ModelResolutionSource;
 } {
   const reported = canonicalReportedModelIdentifier(reportedModel);
-  const canonical = resolveReportedModelIdentity(
+  const canonical = resolveReportedModelIdentityAmong(
     requestedModel,
+    substitutes,
     reported,
     transport,
   );
@@ -298,6 +308,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     ctx?: AiContext,
   ): Promise<ModelResult<string>> {
     const model = input.model ?? this.cfg.model;
+    const transport = this.transportFor(model);
     const {
       content,
       usage,
@@ -319,7 +330,12 @@ export class OpenAICompatibleProvider implements ModelProvider {
     return {
       data: content,
       provider: this.id,
-      ...resolutionProvenance(model, resolvedModel),
+      ...resolutionProvenance(
+        model,
+        resolvedModel,
+        transport,
+        this.substitutesFor(ctx, model),
+      ),
       usage,
     };
   }
@@ -329,8 +345,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     ctx?: AiContext,
   ): Promise<ModelResult<T>> {
     const model = input.model ?? this.cfg.model;
-    const transport =
-      this.cfg.modelTransports?.[model] ?? "openai-chat-completions";
+    const transport = this.transportFor(model);
     const system =
       transport === "anthropic-messages"
         ? (input.system ?? "")
@@ -356,6 +371,12 @@ export class OpenAICompatibleProvider implements ModelProvider {
       },
       ctx,
     );
+    const provenance = resolutionProvenance(
+      model,
+      resolvedModel,
+      transport,
+      this.substitutesFor(ctx, model),
+    );
     if (!content.trim()) {
       // Empty content is an explicit failure, not JSON.parse(''). A length
       // finish can indicate an exhausted reasoning/output budget; a stop
@@ -367,10 +388,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
           ? "STRUCTURED_OUTPUT_EMPTY_TRUNCATED"
           : "STRUCTURED_OUTPUT_EMPTY",
         usage,
-        {
-          provider: this.id,
-          ...resolutionProvenance(model, resolvedModel),
-        },
+        { provider: this.id, ...provenance },
       );
     }
     // 剥 markdown 围栏（真机实证：glm-5.2 在 json_object 模式下仍偶发 ```json…``` 包裹）。
@@ -379,7 +397,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       return {
         data: JSON.parse(payload) as T,
         provider: this.id,
-        ...resolutionProvenance(model, resolvedModel),
+        ...provenance,
         usage,
       };
     } catch {
@@ -388,7 +406,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       if (finishReason === "length") {
         throw new ProviderOutputError("STRUCTURED_OUTPUT_TRUNCATED", usage, {
           provider: this.id,
-          ...resolutionProvenance(model, resolvedModel),
+          ...provenance,
         });
       }
       // ② 非截断的解析失败（模型返回非 JSON 文本）。原始文本和
@@ -396,10 +414,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
       throw new ProviderOutputError(
         `${this.id} ${model}: structured output is not valid JSON`,
         usage,
-        {
-          provider: this.id,
-          ...resolutionProvenance(model, resolvedModel),
-        },
+        { provider: this.id, ...provenance, reasonCode: "STRUCTURED_OUTPUT_NOT_JSON" },
       );
     }
   }
@@ -474,12 +489,14 @@ export class OpenAICompatibleProvider implements ModelProvider {
     usage: ModelUsage | undefined,
     required: boolean,
     errorCode = "MODEL_IDENTITY_MISMATCH",
+    substitutes: readonly string[] = [],
   ): string | undefined {
     const absent = value === undefined || value === null || value === "";
     if (absent && !required) return undefined;
     const reportedModel = canonicalReportedModelIdentifier(value);
-    const resolvedModel = resolveReportedModelIdentity(
+    const resolvedModel = resolveReportedModelIdentityAmong(
       requestedModel,
+      substitutes,
       reportedModel,
       transport,
     );
@@ -491,6 +508,100 @@ export class OpenAICompatibleProvider implements ModelProvider {
       });
     }
     return reportedModel;
+  }
+
+  /**
+   * Substitute identities admitted for this call (D14). Only the gateway sets
+   * them; paid calls are priced by the requested alias and never take one,
+   * and nothing outside the repository-reviewed pairs is ever honoured.
+   */
+  private substitutesFor(
+    ctx: AiContext | undefined,
+    requestedModel: string,
+  ): readonly string[] {
+    const substitutes = ctx?.paidCost
+      ? undefined
+      : ctx?.modelIdentitySubstitutes;
+    return Array.isArray(substitutes)
+      ? substitutes.filter(
+          (substitute): substitute is string =>
+            typeof substitute === "string" &&
+            isReviewedModelSubstitution(requestedModel, substitute),
+        )
+      : [];
+  }
+
+  /**
+   * Identity of a stream that failed before the identity gate ran (D14). If a
+   * name seen so far resolves to an admitted substitute, the failed wire is
+   * that substitute's; otherwise it stays under the requested model.
+   */
+  private failedStreamProvenance(
+    requestedModel: string,
+    names: readonly unknown[],
+    substitutes: readonly string[],
+  ): {
+    model: string;
+    reportedModel?: string;
+    modelResolutionSource?: ModelResolutionSource;
+  } {
+    for (const value of names) {
+      const name = canonicalReportedModelIdentifier(value);
+      const resolved = resolveReportedModelIdentityAmong(
+        requestedModel,
+        substitutes,
+        name,
+        "openai-chat-completions",
+      );
+      if (name && resolved && resolved !== requestedModel) {
+        return {
+          model: resolved,
+          reportedModel: name,
+          modelResolutionSource: "upstream_response",
+        };
+      }
+    }
+    return { model: requestedModel };
+  }
+
+  /**
+   * The reported name a text answer is recorded under, from names that have
+   * already passed the identity gate. With admitted substitutes, one name that
+   * resolves to a substitute anywhere in the response makes the answer that
+   * substitute's: the requested model is claimed only when nothing named
+   * another. Names resolving to two different substitutes fail closed.
+   */
+  private answerReportedModel(
+    requestedModel: string,
+    preferred: string | undefined,
+    otherNames: readonly unknown[],
+    transport: GatewayVisionTransport,
+    usage: ModelUsage | undefined,
+    substitutes: readonly string[],
+  ): string | undefined {
+    if (substitutes.length === 0) return preferred;
+    let substituteName: string | undefined;
+    let substituteModel: string | undefined;
+    for (const value of [preferred, ...otherNames]) {
+      const name = canonicalReportedModelIdentifier(value);
+      const model = resolveReportedModelIdentityAmong(
+        requestedModel,
+        substitutes,
+        name,
+        transport,
+      );
+      if (!name || !model || model === requestedModel) continue;
+      if (substituteModel !== undefined && model !== substituteModel) {
+        throw new ProviderIdentityError("MODEL_IDENTITY_MISMATCH", usage, {
+          provider: this.id,
+          model: requestedModel,
+          modelResolutionSource: "requested_fallback",
+        });
+      }
+      substituteModel = model;
+      substituteName ??= name;
+    }
+    return substituteName ?? preferred;
   }
 
   private async complete(
@@ -512,9 +623,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     /** OpenAI-compatible gateways may expose the post-alias/upstream model here. */
     model?: string;
   }> {
-    const transport =
-      this.cfg.modelTransports?.[opts.model] ?? "openai-chat-completions";
-    switch (transport) {
+    switch (this.transportFor(opts.model)) {
       case "openai-chat-completions":
         return this.chatCompletions(messages, opts, ctx);
       case "openai-responses":
@@ -522,6 +631,15 @@ export class OpenAICompatibleProvider implements ModelProvider {
       case "anthropic-messages":
         return this.anthropicMessages(messages, opts, ctx);
     }
+  }
+
+  /**
+   * The wire protocol complete() dispatches a model on. Reviewed upstream
+   * aliases resolve only on the transport that produced them, so provenance
+   * must be derived from this same choice.
+   */
+  private transportFor(model: string): GatewayModelTransport {
+    return this.cfg.modelTransports?.[model] ?? "openai-chat-completions";
   }
 
   private async settledUsage(
@@ -715,37 +833,68 @@ export class OpenAICompatibleProvider implements ModelProvider {
    * Reassembles an SSE chat-completions stream into the non-streamed body shape.
    * Fails closed on unreadable bodies, malformed data lines, upstream error
    * events and streams without any completion chunk. An upstream that ignores
-   * `stream` and answers with a plain JSON body is accepted as such.
+   * `stream` and answers with a plain JSON body is accepted as such. A stream
+   * that never carried a finish reason was cut short (new-api still closes it
+   * with a locally counted usage chunk), which the caller reports once usage
+   * and identity are known.
    */
   private async parseChatCompletionStream(
     response: Response,
     model: string,
-  ): Promise<ChatCompletionBody> {
-    const invalid = (reason: string): never => {
-      throw new ProviderOutputError(
+    substitutes: readonly string[] = [],
+  ): Promise<{
+    body: ChatCompletionBody;
+    streamedModels: readonly unknown[];
+    truncated: boolean;
+    outputStarted: boolean;
+  }> {
+    const streamedModels: unknown[] = [];
+    // D13: whether any output delta or counted output token arrived. Only a
+    // failure with none of either is a definite failure the gateway releases.
+    let outputStarted = false;
+    const invalid = (
+      reason: string,
+      reasonCode: string,
+      outputState: { outputStarted?: boolean } = {},
+    ): never => {
+      throw new ProviderTransportError(
         `${this.id} ${model}: ${reason}`,
         undefined,
-        { provider: this.id, model },
+        {
+          provider: this.id,
+          ...this.failedStreamProvenance(model, streamedModels, substitutes),
+          reasonCode,
+          ...outputState,
+        },
       );
     };
     let text: string;
     try {
       text = await response.text();
     } catch {
-      return invalid("stream body unavailable");
+      return invalid("stream body unavailable", "CHAT_COMPLETIONS_STREAM_UNREADABLE");
     }
     const trimmed = text.trimStart();
     if (trimmed.startsWith("{")) {
       try {
-        return JSON.parse(trimmed) as ChatCompletionBody;
+        return {
+          body: JSON.parse(trimmed) as ChatCompletionBody,
+          streamedModels: [],
+          truncated: false,
+          // A whole JSON body is an answer, not a stream; it is never cut.
+          outputStarted: true,
+        };
       } catch {
-        return invalid("response body is not valid JSON");
+        return invalid("response body is not valid JSON", "CHAT_COMPLETIONS_BODY_NOT_JSON");
       }
     }
     let content = "";
     let chunks = 0;
     let finishReason: string | undefined;
-    let reportedModel: string | undefined;
+    let lastNamedModel: string | undefined;
+    let contentModel: string | undefined;
+    let unnamedContentChunks = 0;
+    const seenModels = new Set<string>();
     let usage: ChatCompletionBody["usage"];
     for (const rawLine of text.split(/\r?\n/u)) {
       const line = rawLine.trim();
@@ -756,21 +905,58 @@ export class OpenAICompatibleProvider implements ModelProvider {
       try {
         event = JSON.parse(payload) as ChatCompletionStreamEvent;
       } catch {
-        return invalid("stream data line is not valid JSON");
+        return invalid("stream data line is not valid JSON", "CHAT_COMPLETIONS_STREAM_LINE_INVALID");
       }
-      if (event.error !== undefined) return invalid("stream carried an upstream error");
+      if (event.error != null) {
+        return invalid("stream carried an upstream error", "CHAT_COMPLETIONS_STREAM_UPSTREAM_ERROR", {
+          outputStarted,
+        });
+      }
       chunks += 1;
-      if (typeof event.model === "string" && event.model) reportedModel = event.model;
+      if (streamEventCarriesOutput(event)) outputStarted = true;
+      const model: unknown = (event as { model?: unknown }).model;
+      const named = model !== undefined && model !== null && model !== "";
+      if (named) {
+        if (typeof model !== "string") {
+          streamedModels.push(model); // a present non-string name fails the gate
+        } else {
+          lastNamedModel = model;
+          if (!seenModels.has(model)) {
+            seenModels.add(model);
+            streamedModels.push(model);
+          }
+        }
+      }
       if (event.usage) usage = event.usage;
       const choice = event.choices?.[0];
-      if (typeof choice?.delta?.content === "string") content += choice.delta.content;
+      const piece = typeof choice?.delta?.content === "string" ? choice.delta.content : "";
+      if (piece) {
+        content += piece;
+        if (!named) unnamedContentChunks += 1;
+        else if (contentModel === undefined && typeof model === "string") {
+          contentModel = model;
+        }
+      }
       if (typeof choice?.finish_reason === "string") finishReason = choice.finish_reason;
     }
-    if (chunks === 0) return invalid("stream carried no completion chunk");
+    if (chunks === 0) {
+      return invalid("stream carried no completion chunk", "CHAT_COMPLETIONS_STREAM_EMPTY", {
+        outputStarted: false,
+      });
+    }
+    // Provenance names the model that produced the content. Content on chunks
+    // that named no model leaves the upstream identity unproven.
+    const reportedModel =
+      unnamedContentChunks > 0 ? undefined : (contentModel ?? lastNamedModel);
     return {
-      choices: [{ message: { content }, finish_reason: finishReason }],
-      ...(usage ? { usage } : {}),
-      ...(reportedModel ? { model: reportedModel } : {}),
+      body: {
+        choices: [{ message: { content }, finish_reason: finishReason }],
+        ...(usage ? { usage } : {}),
+        ...(reportedModel ? { model: reportedModel } : {}),
+      },
+      streamedModels,
+      truncated: finishReason === undefined,
+      outputStarted,
     };
   }
 
@@ -783,10 +969,10 @@ export class OpenAICompatibleProvider implements ModelProvider {
       return (await response.json()) as T;
     } catch {
       if (!ctx?.paidCost) {
-        throw new ProviderOutputError(
+        throw new ProviderTransportError(
           `${this.id} ${model}: response body is not valid JSON`,
           undefined,
-          { provider: this.id, model },
+          { provider: this.id, model, reasonCode: "CHAT_COMPLETIONS_BODY_NOT_JSON" },
         );
       }
       const usage = await this.settledUsage(
@@ -883,40 +1069,112 @@ export class OpenAICompatibleProvider implements ModelProvider {
     if (!res.ok) {
       return this.throwHttpFailure(res, opts.model, ctx);
     }
-    const json = stream
-      ? await this.parseChatCompletionStream(res, opts.model)
-      : await this.parseResponseJson<ChatCompletionBody>(res, ctx, opts.model);
+    const substitutes = this.substitutesFor(ctx, opts.model);
+    const { body: json, streamedModels, truncated, outputStarted } = stream
+      ? await this.parseChatCompletionStream(res, opts.model, substitutes)
+      : {
+          body: await this.parseResponseJson<ChatCompletionBody>(
+            res,
+            ctx,
+            opts.model,
+          ),
+          streamedModels: [] as readonly unknown[],
+          truncated: false,
+          outputStarted: true,
+        };
     const bodyUsage = {
       inputTokens: json.usage?.prompt_tokens,
       outputTokens: json.usage?.completion_tokens,
     };
     const settlementUsage = await this.settledUsage(res, bodyUsage, ctx);
     const usage = this.reconcileBodyUsage(settlementUsage, bodyUsage);
-    const reportedModel = this.trustedReportedModel(
+    if (
+      (json as { error?: unknown }).error != null ||
+      !Array.isArray(json.choices) ||
+      json.choices.length === 0
+    ) {
+      // An error body or a body without choices is the gateway failing, not
+      // the model answering with nothing.
+      throw new ProviderTransportError("CHAT_COMPLETIONS_BODY_INVALID", usage, {
+        provider: this.id,
+        model: opts.model,
+      });
+    }
+    // Every model name a stream carries, string or not, must pass the gate;
+    // otherwise content from an untrusted model could ride under a trusted
+    // name carried only by a later chunk.
+    for (const streamedModel of streamedModels) {
+      this.trustedReportedModel(
+        opts.model,
+        streamedModel,
+        "openai-chat-completions",
+        usage,
+        true,
+        undefined,
+        substitutes,
+      );
+    }
+    const reportedModel = this.answerReportedModel(
       opts.model,
-      json.model,
+      this.trustedReportedModel(
+        opts.model,
+        json.model,
+        "openai-chat-completions",
+        usage,
+        false,
+        undefined,
+        substitutes,
+      ),
+      streamedModels,
       "openai-chat-completions",
       usage,
-      false,
+      substitutes,
     );
+    if (truncated) {
+      // Half an answer is never a usable one: report the cut instead of
+      // letting the caller misread it as invalid JSON or an empty output.
+      throw new ProviderTransportError("CHAT_COMPLETIONS_STREAM_TRUNCATED", usage, {
+        provider: this.id,
+        ...resolutionProvenance(
+          opts.model,
+          reportedModel,
+          "openai-chat-completions",
+          substitutes,
+        ),
+        outputStarted,
+      });
+    }
     const finishReason = json.choices?.[0]?.finish_reason;
     if (
       finishReason !== undefined &&
       finishReason !== "stop" &&
       finishReason !== "length"
     ) {
-      throw new ProviderOutputError(
-        "CHAT_COMPLETIONS_FINISH_REASON_INVALID",
-        usage,
-        {
-          provider: this.id,
-          ...resolutionProvenance(
-            opts.model,
-            reportedModel,
-            "openai-chat-completions",
-          ),
-        },
-      );
+      const provenance = {
+        provider: this.id,
+        ...resolutionProvenance(
+          opts.model,
+          reportedModel,
+          "openai-chat-completions",
+          substitutes,
+        ),
+      };
+      // Only reasons about this one answer are recoverable. Anything else,
+      // such as DeepSeek's `insufficient_system_resource`, is the upstream
+      // failing and usually hits every call of a run.
+      const answerReason =
+        finishReason === "content_filter"
+          ? "CHAT_COMPLETIONS_CONTENT_FILTERED"
+          : finishReason === "tool_calls" || finishReason === "function_call"
+            ? "CHAT_COMPLETIONS_TOOL_CALL_UNEXPECTED"
+            : null;
+      if (answerReason) {
+        throw new ProviderOutputError("CHAT_COMPLETIONS_FINISH_REASON_INVALID", usage, {
+          ...provenance,
+          reasonCode: answerReason,
+        });
+      }
+      throw new ProviderTransportError("CHAT_COMPLETIONS_FINISH_REASON_INVALID", usage, provenance);
     }
     return {
       content: json.choices?.[0]?.message?.content ?? "",
@@ -1548,18 +1806,35 @@ export class OpenAICompatibleProvider implements ModelProvider {
     };
     const settlementUsage = await this.settledUsage(res, bodyUsage, ctx);
     const usage = this.reconcileBodyUsage(settlementUsage, bodyUsage);
+    const substitutes = this.substitutesFor(ctx, opts.model);
     const reportedModel = this.trustedReportedModel(
       opts.model,
       json.model,
       "openai-responses",
       usage,
       false,
+      undefined,
+      substitutes,
     );
     if (json.status !== "completed") {
-      throw new ProviderOutputError("RESPONSES_STATUS_INVALID", usage, {
+      const provenance = {
         provider: this.id,
-        ...resolutionProvenance(opts.model, reportedModel, "openai-responses"),
-      });
+        ...resolutionProvenance(
+          opts.model,
+          reportedModel,
+          "openai-responses",
+          substitutes,
+        ),
+      };
+      // `incomplete` is about this answer (output limit, content filter);
+      // `failed`, `cancelled` and anything else are the upstream failing.
+      if (json.status === "incomplete") {
+        throw new ProviderOutputError("RESPONSES_STATUS_INVALID", usage, {
+          ...provenance,
+          reasonCode: "RESPONSES_INCOMPLETE",
+        });
+      }
+      throw new ProviderTransportError("RESPONSES_STATUS_INVALID", usage, provenance);
     }
     return {
       content: nestedContent || json.output_text || "",
@@ -1670,12 +1945,15 @@ export class OpenAICompatibleProvider implements ModelProvider {
     };
     const settlementUsage = await this.settledUsage(res, bodyUsage, ctx);
     const usage = this.reconcileBodyUsage(settlementUsage, bodyUsage);
+    const substitutes = this.substitutesFor(ctx, opts.model);
     const reportedModel = this.trustedReportedModel(
       opts.model,
       json.model,
       "anthropic-messages",
       usage,
       false,
+      undefined,
+      substitutes,
     );
     if (
       json.stop_reason === "max_tokens" ||
@@ -1687,6 +1965,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
           opts.model,
           reportedModel,
           "anthropic-messages",
+          substitutes,
         ),
       });
     }
@@ -1701,6 +1980,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
           opts.model,
           reportedModel,
           "anthropic-messages",
+          substitutes,
         ),
       });
     }
@@ -1713,11 +1993,13 @@ export class OpenAICompatibleProvider implements ModelProvider {
         `${this.id} ${opts.model}: Anthropic structured response missing JSON tool output`,
         usage,
         {
+          reasonCode: "ANTHROPIC_TOOL_OUTPUT_MISSING",
           provider: this.id,
           ...resolutionProvenance(
             opts.model,
             reportedModel,
             "anthropic-messages",
+            substitutes,
           ),
         },
       );
@@ -1752,4 +2034,32 @@ interface ChatCompletionStreamEvent {
   choices?: { delta?: { content?: string }; finish_reason?: string | null }[];
   usage?: { prompt_tokens?: number; completion_tokens?: number };
   error?: unknown;
+}
+
+/**
+ * D13: true when a stream event shows the model produced output: a counted
+ * output token, or a delta field other than `role` that carries a value
+ * (content, reasoning under any name, tool calls). A role-only opening chunk
+ * or an empty content string is not output.
+ */
+function streamEventCarriesOutput(event: ChatCompletionStreamEvent): boolean {
+  const outputTokens = event.usage?.completion_tokens;
+  if (typeof outputTokens === "number" && outputTokens > 0) return true;
+  const choices: unknown = event.choices;
+  if (!Array.isArray(choices)) return false;
+  return choices.some((choice: unknown) => {
+    const delta =
+      choice && typeof choice === "object"
+        ? (choice as { delta?: unknown }).delta
+        : undefined;
+    if (!delta || typeof delta !== "object" || Array.isArray(delta)) {
+      return false;
+    }
+    return Object.entries(delta).some(([field, value]) => {
+      if (field === "role" || value === null || value === undefined) return false;
+      if (typeof value === "string") return value.length > 0;
+      if (Array.isArray(value)) return value.length > 0;
+      return true;
+    });
+  });
 }

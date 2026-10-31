@@ -56,8 +56,8 @@ function cleanupPort(
   order: string[] = [],
 ): PrivilegedPersonalArtifactCleanupPort {
   return {
-    deleteFinalVersion: vi.fn(async () => {
-      order.push("delete-final-version");
+    eraseFinalObject: vi.fn(async () => {
+      order.push("erase-final-object");
       return result;
     }),
   };
@@ -72,7 +72,7 @@ describe("PersonalArtifactCleanupService", () => {
       workspaceId: WORKSPACE_ID,
       deletionRequestId: DELETION_REQUEST_ID,
     })).resolves.toEqual({ status: "NO_ACTION", reason: "NO_CLEANUP_REQUIRED" });
-    expect(store.deleteFinalVersion).not.toHaveBeenCalled();
+    expect(store.eraseFinalObject).not.toHaveBeenCalled();
   });
   it("does not delete before the database tombstone and audit fence are committed", async () => {
     const commands = repository({ status: "TOMBSTONE_FENCE_NOT_COMMITTED" });
@@ -88,7 +88,7 @@ describe("PersonalArtifactCleanupService", () => {
       status: "HOLD",
       reason: "TOMBSTONE_FENCE_NOT_COMMITTED",
     });
-    expect(store.deleteFinalVersion).not.toHaveBeenCalled();
+    expect(store.eraseFinalObject).not.toHaveBeenCalled();
     expect(commands.complete).not.toHaveBeenCalled();
     expect(commands.scheduleRetry).not.toHaveBeenCalled();
   });
@@ -107,10 +107,10 @@ describe("PersonalArtifactCleanupService", () => {
       status: "DENIED",
       reason: "CROSS_WORKSPACE_DENIED",
     });
-    expect(store.deleteFinalVersion).not.toHaveBeenCalled();
+    expect(store.eraseFinalObject).not.toHaveBeenCalled();
   });
 
-  it("deletes only the digest-derived exact final version after claiming the committed durable command", async () => {
+  it("hands only the digest and the command version to the erasure port after claiming the committed durable command", async () => {
     const order: string[] = [];
     const durable = command();
     const commands = repository({ status: "CLAIMED", command: durable }, order);
@@ -131,14 +131,14 @@ describe("PersonalArtifactCleanupService", () => {
 
     expect(order).toEqual([
       "claim-committed",
-      "delete-final-version",
+      "erase-final-object",
       "complete",
     ]);
-    expect(store.deleteFinalVersion).toHaveBeenCalledWith({
+    expect(store.eraseFinalObject).toHaveBeenCalledWith({
       sha256: SHA256,
       versionId: VERSION_ID,
     });
-    const storeInput = vi.mocked(store.deleteFinalVersion).mock.calls[0]?.[0];
+    const storeInput = vi.mocked(store.eraseFinalObject).mock.calls[0]?.[0];
     expect(Reflect.ownKeys(storeInput ?? {})).toEqual(["sha256", "versionId"]);
     expect(durable).not.toHaveProperty("objectKey");
     expect(durable).not.toHaveProperty("body");
@@ -146,7 +146,7 @@ describe("PersonalArtifactCleanupService", () => {
     expect(commands.complete).toHaveBeenCalledWith(durable, "DELETED");
   });
 
-  it("treats an absent exact version as an idempotent completed cleanup", async () => {
+  it("completes a command whose version was already gone with an ABSENT receipt", async () => {
     const durable = command();
     const commands = repository({ status: "CLAIMED", command: durable });
     const store = cleanupPort("ABSENT");
@@ -188,7 +188,7 @@ describe("PersonalArtifactCleanupService", () => {
       objectStatus: "ABSENT",
       replay: true,
     });
-    expect(store.deleteFinalVersion).not.toHaveBeenCalled();
+    expect(store.eraseFinalObject).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -270,7 +270,7 @@ describe("PersonalArtifactCleanupService", () => {
       status: "DENIED",
       reason: "INVALID_DURABLE_CLEANUP_COMMAND",
     });
-    expect(store.deleteFinalVersion).not.toHaveBeenCalled();
+    expect(store.eraseFinalObject).not.toHaveBeenCalled();
   });
 
   it("rejects replay accessors without evaluating them", async () => {
@@ -308,14 +308,14 @@ describe("PersonalArtifactCleanupService", () => {
       reason: "INVALID_DURABLE_CLEANUP_COMMAND",
     });
     expect(accessorRead).toBe(false);
-    expect(store.deleteFinalVersion).not.toHaveBeenCalled();
+    expect(store.eraseFinalObject).not.toHaveBeenCalled();
   });
 
   it("bounds provider failures and durably schedules the same command for retry", async () => {
     const durable = command({ attempt: 2 });
     const commands = repository({ status: "CLAIMED", command: durable });
     const store: PrivilegedPersonalArtifactCleanupPort = {
-      deleteFinalVersion: vi.fn(async () => {
+      eraseFinalObject: vi.fn(async () => {
         throw new Error("provider request leaked secret=do-not-persist");
       }),
     };
@@ -364,7 +364,7 @@ describe("PersonalArtifactCleanupService", () => {
         status: "DENIED",
         reason: "INVALID_DURABLE_CLEANUP_COMMAND",
       });
-      expect(store.deleteFinalVersion).not.toHaveBeenCalled();
+      expect(store.eraseFinalObject).not.toHaveBeenCalled();
     },
   );
 });

@@ -434,7 +434,7 @@ export class GenericOperationArtifactRepository {
                   ${BigInt(value.sizeBytes)}, ${value.mediaType},
                   ${value.privacyClass}, ${value.sourceDigest},
                   ${new Date(value.createdAt)}, ${new Date(value.expiresAt)},
-                  ${facts.expectedHttpStatus}, ${facts.expectedHttpOk},
+                  ${facts.expectedHttpStatus}::smallint, ${facts.expectedHttpOk},
                   ${facts.expectedSanitizedUrl}, ${facts.expectedContentHash},
                   ${facts.expectedBlockedCode}, ${facts.expectedRobotsBlocked}
                 )
@@ -448,7 +448,7 @@ export class GenericOperationArtifactRepository {
                   ${value.objectKey}, ${value.sha256}, ${BigInt(value.sizeBytes)},
                   ${value.mediaType}, ${value.privacyClass},
                   ${value.sourceDigest}, ${new Date(value.createdAt)},
-                  ${new Date(value.expiresAt)}, ${facts.expectedHttpStatus},
+                  ${new Date(value.expiresAt)}, ${facts.expectedHttpStatus}::smallint,
                   ${facts.expectedHttpOk}, ${facts.expectedSanitizedUrl},
                   ${facts.expectedContentHash}, ${facts.expectedBlockedCode},
                   ${facts.expectedRobotsBlocked}

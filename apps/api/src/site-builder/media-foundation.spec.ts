@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAssetVariantRecipeHash,
   projectDerivedImageManifest,
+  readPublishedVariantKeys,
   type AssetVariantProjectionRow,
   type AssetVariantRecipe,
   type AssetVariantRecipeV2,
@@ -378,5 +379,78 @@ describe("derivedKeys compatibility projection", () => {
         bytes: 120_000,
       },
     ]);
+  });
+});
+
+describe("published derivedKeys object keys", () => {
+  const published = () =>
+    projectDerivedImageManifest({
+      pipelineVersion: "sharp-v2",
+      sourceHash: SOURCE_HASH,
+      variants: [
+        variant({ pipelineVersion: "sharp-v2" }),
+        variant({
+          id: "00000000-0000-4000-8000-000000000002",
+          variantType: "card",
+          mime: "image/webp",
+          width: 640,
+          height: 360,
+          objectKey: "ws/w/s/generated/card-640.webp",
+          recipeHash: "d".repeat(64),
+          pipelineVersion: "sharp-v2",
+        }),
+        variant({
+          id: "00000000-0000-4000-8000-000000000003",
+          objectKey: "ws/w/s/generated/hero-1440-old.avif",
+          recipeHash: "e".repeat(64),
+        }),
+      ],
+    });
+
+  it("reads exactly the object keys a projected manifest publishes", () => {
+    const result = readPublishedVariantKeys(published(), SOURCE_HASH);
+
+    expect(result.status).toBe("present");
+    if (result.status !== "present") return;
+    expect(result.pipelineVersion).toBe("sharp-v2");
+    expect([...result.keys].sort()).toEqual([
+      "ws/w/s/generated/card-640.webp",
+      "ws/w/s/generated/hero-1440.avif",
+    ]);
+  });
+
+  it("treats a missing manifest as publishing nothing", () => {
+    expect(readPublishedVariantKeys(null, SOURCE_HASH)).toEqual({ status: "absent" });
+    expect(readPublishedVariantKeys(undefined, SOURCE_HASH)).toEqual({ status: "absent" });
+  });
+
+  it("reads an empty projection as a manifest without published keys", () => {
+    const result = readPublishedVariantKeys(
+      projectDerivedImageManifest({ pipelineVersion: "sharp-v2", sourceHash: SOURCE_HASH, variants: [] }),
+      SOURCE_HASH,
+    );
+
+    expect(result).toEqual({ status: "present", pipelineVersion: "sharp-v2", keys: new Set() });
+  });
+
+  it.each([
+    ["a string", () => "derived"],
+    ["an array", () => []],
+    ["another schema version", () => ({ ...published(), schemaVersion: "2.0" })],
+    ["a blank pipeline version", () => ({ ...published(), pipelineVersion: " " })],
+    ["another source hash", () => ({ ...published(), sourceHash: "f".repeat(64) })],
+    ["an unknown role", () => ({ ...published(), variants: { banner: { webp: [] } } })],
+    ["an unknown format", () => ({ ...published(), variants: { hero: { gif: [] } } })],
+    ["a non-array format set", () => ({ ...published(), variants: { hero: { webp: {} } } })],
+    [
+      "an entry without a key",
+      () => ({ ...published(), variants: { hero: { webp: [{ width: 1, height: 1, bytes: 1 }] } } }),
+    ],
+    [
+      "an entry with invalid dimensions",
+      () => ({ ...published(), variants: { hero: { webp: [{ key: "k", width: 0, height: 1, bytes: 1 }] } } }),
+    ],
+  ] as const)("refuses a manifest with %s", (_label, build) => {
+    expect(readPublishedVariantKeys(build(), SOURCE_HASH)).toEqual({ status: "invalid" });
   });
 });

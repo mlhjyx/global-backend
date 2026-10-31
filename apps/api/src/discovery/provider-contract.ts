@@ -8,6 +8,7 @@ import type { CompanyIdentifier } from './identity';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 import type { ArtifactSubjectRef } from '../tools/artifact-execution-port';
 import type { DiscoveryCompanyResultLineageV1 } from './company-discovery-lineage';
+import type { DiscoveryModelExtractions } from './discovery-model-extractions';
 
 export type SourceClass =
   | 'trade_data'
@@ -99,6 +100,11 @@ export interface ProviderCompanyRecord {
 export interface DiscoveryOptions {
   /** Source Registry 中被 SUSPENDED 的域名 —— 适配器必须在爬取前跳过（DAT-011）。 */
   blockedDomains?: string[];
+  /**
+   * 本次 run 已经接受过的 external id（对 public_web 即域名）：同一 run 的后面几条查询经常搜到同一批站点，
+   * 判站与抽取的模型调用因此重复。适配器在搜索之后、调用模型之前跳过这些候选（2026-10-28 提速）。
+   */
+  knownExternalIds?: string[];
 }
 
 /**
@@ -138,6 +144,8 @@ export interface DiscoveryResult {
   costCents: number;
   /** Optional closed lineage for providers that advertise the v1 capability. */
   lineage?: DiscoveryCompanyResultLineageV1;
+  /** Model extractions behind the result, and the ones skipped after a failed call. */
+  modelExtractions?: DiscoveryModelExtractions;
 }
 
 export interface ContactDiscoveryResult {
@@ -183,6 +191,13 @@ export interface CompanyDiscoveryAdapter {
   key: string;
   classes: SourceClass[];
   readonly companyResultLineage?: 'discovery-company-result-lineage/v1';
+  /**
+   * The adapter reads the resolved taxonomy executeQuery injects into the query filters
+   * (`_industryQids`, `_osmTags`, `_industryCodes`, `_countryQid`, `_countryCode`) before its
+   * built-in vocabulary. executeQuery calls the taxonomy model for a query only when at least
+   * one routed adapter declares this; public_web and the registries match on their own terms.
+   */
+  readonly consumesResolvedTaxonomy?: boolean;
   discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, opts?: DiscoveryOptions,
   ): Promise<DiscoveryResult>;
 }

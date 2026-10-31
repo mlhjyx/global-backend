@@ -24,11 +24,11 @@ import {
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 
-test('inventory is locked to 18 Tools and 11 product Model tasks', () => {
+test('inventory is locked to 18 Tools and 12 product Model tasks', () => {
   assert.equal(EXPECTED_TOOL_IDS.length, 18);
-  assert.equal(EXPECTED_MODEL_TASKS.length, 11);
+  assert.equal(EXPECTED_MODEL_TASKS.length, 12);
   assert.equal(new Set(EXPECTED_TOOL_IDS).size, 18);
-  assert.equal(new Set(EXPECTED_MODEL_TASKS.map((entry) => entry.taskId)).size, 11);
+  assert.equal(new Set(EXPECTED_MODEL_TASKS.map((entry) => entry.taskId)).size, 12);
   assert.equal(EXPECTED_GENERIC_MODEL_TASK_LOOKUPS.length, 4);
   assert.deepEqual(EXPECTED_MODEL_GATEWAY_BOUNDARIES, [
     'apps/api/src/model-runtime/site-builder-ai-task-bridge.ts#generateStructured#1',
@@ -40,7 +40,7 @@ test('inventory is locked to 18 Tools and 11 product Model tasks', () => {
     'apps/api/src/tools/tool-broker.factory.ts',
     'apps/api/src/tools/tool-broker.ts',
   ]);
-  assert.equal(EXPECTED_TOOL_CALLSITES.length, 36);
+  assert.equal(EXPECTED_TOOL_CALLSITES.length, 38);
   assert.deepEqual(EXPECTED_NON_TOOL_INVOKE_BOUNDARIES, [
     'apps/api/src/site-builder/eval/copy-sonnet-recovery-zero-call-preflight.ts#input.pricingBroker#1',
   ]);
@@ -274,10 +274,46 @@ test('pure contracts preserve typed authority wiring and the artifact pre-wire h
   const result = await verifyExecutionAuthorityPolicy({ repoRoot: repositoryRoot });
   assert.deepEqual(result.issues, []);
   assert.equal(result.toolCount, 18);
-  assert.equal(result.modelTaskCount, 11);
+  assert.equal(result.modelTaskCount, 12);
   assert.equal(result.physicalExecutionWiring, 'PARTIAL_HOLD');
-  assert.equal(result.physicalToolCallsiteCount, 36);
+  assert.equal(result.physicalToolCallsiteCount, 38);
   assert.equal(result.modelGatewayBoundaryCount, 2);
+});
+
+test('a physical retry is allowed only after a definite failure before output, bounded per operation key (D13)', async () => {
+  const manifest = JSON.parse(await readFile(resolve(repositoryRoot, 'docs/governance/durable-result-strategies.json'), 'utf8'));
+  assert.deepEqual(manifest.resultDisposition, {
+    schema: 'execution-result-disposition/v2',
+    kinds: ['valid_output', 'result_unknown', 'control_error', 'definite_failure', 'replay_error'],
+    automaticPhysicalRetryAllowed: 'DEFINITE_FAILURE_BEFORE_OUTPUT_ONLY',
+    unknownStatus: 'RESULT_UNKNOWN',
+    controlStatus: 'RELEASED',
+    definiteFailureStatus: 'RELEASED',
+    replayStatus: 'SETTLED',
+    maxReservationAttempts: 3,
+  });
+  const drifts = [
+    { automaticPhysicalRetryAllowed: true },
+    { automaticPhysicalRetryAllowed: false },
+    { automaticPhysicalRetryAllowed: 'ANY_FAILURE' },
+    { schema: 'execution-result-disposition/v1' },
+    { definiteFailureStatus: 'SETTLED' },
+    { replayStatus: 'RELEASED' },
+    { maxReservationAttempts: 4 },
+    { maxReservationAttempts: '3' },
+    { kinds: ['valid_output', 'result_unknown', 'control_error', 'replay_error'] },
+    { reservationAttempts: 'unbounded' },
+  ];
+  for (const drift of drifts) {
+    const result = await verifyExecutionAuthorityPolicy({
+      repoRoot: repositoryRoot,
+      manifest: { ...manifest, resultDisposition: { ...manifest.resultDisposition, ...drift } },
+    });
+    assert.ok(
+      result.issues.some((entry) => entry.code === 'EXECUTION_AUTHORITY_RESULT_DISPOSITION_INVALID'),
+      JSON.stringify(drift),
+    );
+  }
 });
 
 test('policy errors enumerate exact paths and producers', async () => {

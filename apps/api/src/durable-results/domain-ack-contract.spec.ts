@@ -114,7 +114,7 @@ describe('domain ACK declaration contract', () => {
 describe('valid/unknown/control/replay disposition contract', () => {
   it('accepts valid output only with a settled receipt and no result body', () => {
     expect(parseExecutionResultDisposition({
-      schemaVersion: 'execution-result-disposition/v1',
+      schemaVersion: 'execution-result-disposition/v2',
       kind: 'valid_output',
       receipt,
       automaticPhysicalRetryAllowed: false,
@@ -136,7 +136,7 @@ describe('valid/unknown/control/replay disposition contract', () => {
     },
   ])('locks $kind to no automatic physical retry', (input) => {
     expect(parseExecutionResultDisposition({
-      schemaVersion: 'execution-result-disposition/v1',
+      schemaVersion: 'execution-result-disposition/v2',
       ...input,
       operationId: receipt.operationId,
       operationKey: receipt.operationKey,
@@ -144,9 +144,62 @@ describe('valid/unknown/control/replay disposition contract', () => {
     })).toMatchObject(input);
   });
 
+  it.each([
+    'MODEL_PROVIDER_HTTP_UNAVAILABLE',
+    'MODEL_PROVIDER_CONNECTION_NOT_ESTABLISHED',
+    'TOOL_FAILED_BEFORE_PHYSICAL_WIRE',
+  ])('allows a bounded physical retry only for the definite failure %s on a released operation (D13)', (code) => {
+    const input = { kind: 'definite_failure', code, operationStatus: 'RELEASED' };
+    expect(parseExecutionResultDisposition({
+      schemaVersion: 'execution-result-disposition/v2',
+      ...input,
+      operationId: receipt.operationId,
+      operationKey: receipt.operationKey,
+      automaticPhysicalRetryAllowed: true,
+    })).toMatchObject({ ...input, automaticPhysicalRetryAllowed: true });
+  });
+
+  it('rejects a definite failure that is not released, not retryable or not a known code (D13)', () => {
+    const base = {
+      schemaVersion: 'execution-result-disposition/v2',
+      kind: 'definite_failure',
+      code: 'MODEL_PROVIDER_HTTP_UNAVAILABLE',
+      operationStatus: 'RELEASED',
+      operationId: receipt.operationId,
+      operationKey: receipt.operationKey,
+      automaticPhysicalRetryAllowed: true,
+    };
+    for (const drift of [
+      { operationStatus: 'SETTLED' },
+      { operationStatus: 'RESULT_UNKNOWN' },
+      { automaticPhysicalRetryAllowed: false },
+      { code: 'GENERIC_OPERATION_RESULT_UNKNOWN' },
+      { code: 'CHAT_COMPLETIONS_CONTENT_FILTERED' },
+      // A stream failure that reaches the backend may have been billed (a
+      // failure before the first byte arrives as HTTP 502 since new-api 6ea085c6).
+      { code: 'MODEL_PROVIDER_STREAM_FAILED_BEFORE_OUTPUT' },
+      { schemaVersion: 'execution-result-disposition/v1' },
+    ]) {
+      expect(() => parseExecutionResultDisposition({ ...base, ...drift }), JSON.stringify(drift))
+        .toThrow('EXECUTION_RESULT_DISPOSITION_INVALID');
+    }
+  });
+
+  it('keeps a control error free of physical retries: nothing was sent to retry', () => {
+    expect(() => parseExecutionResultDisposition({
+      schemaVersion: 'execution-result-disposition/v2',
+      kind: 'control_error',
+      code: 'TOOL_RATE_LIMITED',
+      operationStatus: 'RELEASED',
+      operationId: receipt.operationId,
+      operationKey: receipt.operationKey,
+      automaticPhysicalRetryAllowed: true,
+    })).toThrow('EXECUTION_RESULT_DISPOSITION_INVALID');
+  });
+
   it('rejects unknown/control/replay outcomes that permit a second physical call', () => {
     expect(() => parseExecutionResultDisposition({
-      schemaVersion: 'execution-result-disposition/v1',
+      schemaVersion: 'execution-result-disposition/v2',
       kind: 'result_unknown',
       code: 'GENERIC_OPERATION_RESULT_UNKNOWN',
       operationStatus: 'RESULT_UNKNOWN',
@@ -159,19 +212,19 @@ describe('valid/unknown/control/replay disposition contract', () => {
   it('rejects mismatched status/code pairs and malformed valid receipts', () => {
     for (const candidate of [
       {
-        schemaVersion: 'execution-result-disposition/v1', kind: 'control_error',
+        schemaVersion: 'execution-result-disposition/v2', kind: 'control_error',
         code: 'GENERIC_OPERATION_RESULT_UNKNOWN', operationStatus: 'RELEASED',
         operationId: receipt.operationId, operationKey: receipt.operationKey,
         automaticPhysicalRetryAllowed: false,
       },
       {
-        schemaVersion: 'execution-result-disposition/v1', kind: 'replay_error',
+        schemaVersion: 'execution-result-disposition/v2', kind: 'replay_error',
         code: 'GENERIC_OPERATION_REPLAY_INVALID', operationStatus: 'RESULT_UNKNOWN',
         operationId: receipt.operationId, operationKey: receipt.operationKey,
         automaticPhysicalRetryAllowed: false,
       },
       {
-        schemaVersion: 'execution-result-disposition/v1', kind: 'valid_output',
+        schemaVersion: 'execution-result-disposition/v2', kind: 'valid_output',
         receipt: { ...receipt, status: 'RESULT_UNKNOWN' },
         automaticPhysicalRetryAllowed: false,
       },
@@ -184,7 +237,7 @@ describe('valid/unknown/control/replay disposition contract', () => {
   it('rejects a Proxy before invoking any descriptor trap', () => {
     let descriptorTrapCalls = 0;
     const candidate = new Proxy({
-      schemaVersion: 'execution-result-disposition/v1',
+      schemaVersion: 'execution-result-disposition/v2',
       kind: 'result_unknown',
       code: 'GENERIC_OPERATION_RESULT_UNKNOWN',
       operationStatus: 'RESULT_UNKNOWN',

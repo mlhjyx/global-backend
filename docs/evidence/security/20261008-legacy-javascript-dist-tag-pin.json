@@ -1,0 +1,80 @@
+{
+  "classification": "FROZEN_AUDIT_EVIDENCE",
+  "scope": "Official npm production audit and exact-lock freshness for the 2026-10-08 legacy-javascript dist-tag pin (lockfile overrides only); not runtime/release/UAT evidence",
+  "detected": {
+    "source": "GitHub Actions run 37741056381 (ci.yml, build · typecheck · test, step \"Build and inspect immutable OCI runtime\") on main 698b4518; main 64614baf (run 37665962216) had passed",
+    "error": "runtime SBOM omits installed packages: legacy-javascript@0.0.3",
+    "cause": "@paulirish/trace_engine 0.0.65 (via lighthouse) declares legacy-javascript as the \"latest\" dist-tag. 0.0.1 had been latest since 2025-03-27; 0.0.2 (2026-10-07T22:13:23Z) and 0.0.3 (2026-10-08T00:08:53Z) were then published, so the OCI build's fresh pnpm deploy installed 0.0.3 while the lockfile-derived SBOM lists 0.0.1. third-party-web, declared the same way, already had an exact root override."
+  },
+  "deploy_check": {
+    "command": "pnpm --filter @global/api deploy --prod --frozen-lockfile --ignore-scripts --registry=https://registry.npmjs.org with an empty --cache-dir (user/global npm config at /dev/null), as in a fresh OCI build layer",
+    "before": {
+      "subject_commit": "698b45184821c2f478dcd623d83c4ddfd3617962",
+      "legacy_javascript": "0.0.3",
+      "third_party_web": "0.29.2"
+    },
+    "after": {
+      "subject_commit": "9e3dae0dd933e01c56e39a5eed72e3aede2421d0",
+      "legacy_javascript": "0.0.1",
+      "third_party_web": "0.29.2"
+    }
+  },
+  "records": [
+    {
+      "audit": {
+        "actions": [],
+        "advisories": {},
+        "muted": [],
+        "metadata": {
+          "vulnerabilities": {
+            "info": 0,
+            "low": 0,
+            "moderate": 0,
+            "high": 0,
+            "critical": 0
+          },
+          "dependencies": 830,
+          "devDependencies": 0,
+          "optionalDependencies": 0,
+          "totalDependencies": 830
+        }
+      },
+      "before": {
+        "schema_version": "production-dependency-baseline-freshness-result/v1",
+        "result": "AUDIT_INVALID_HOLD",
+        "hold": true,
+        "current_advisories": 0,
+        "resolved_advisories": [],
+        "issues": [
+          "BASELINE_SOURCE_LOCK_MISMATCH"
+        ],
+        "provenance": {
+          "subject_commit": "9e3dae0dd933e01c56e39a5eed72e3aede2421d0",
+          "lockfile_digest": "sha256:90fd84a7699e6fe2def09b43a9772ce2d66212cb80a12e010a819cc44da21dbe",
+          "verifier_digest": "sha256:3f85820122b15ca96ff62ecb7ec58e162b14ff2b4029355de0a4b0bee376539c",
+          "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
+          "audit_digest": "sha256:87fa095799b94faa25cfec741792220f61eb5cbf2a5a5a350a5869f491a5e4ab",
+          "observed_at": "2026-10-08T08:08:08.000Z",
+          "registry": "https://registry.npmjs.org/"
+        }
+      },
+      "after": {
+        "schema_version": "production-dependency-baseline-freshness-result/v1",
+        "result": "FRESH",
+        "hold": false,
+        "current_advisories": 0,
+        "resolved_advisories": [],
+        "issues": [],
+        "provenance": {
+          "subject_commit": "9e3dae0dd933e01c56e39a5eed72e3aede2421d0",
+          "lockfile_digest": "sha256:90fd84a7699e6fe2def09b43a9772ce2d66212cb80a12e010a819cc44da21dbe",
+          "verifier_digest": "sha256:3f85820122b15ca96ff62ecb7ec58e162b14ff2b4029355de0a4b0bee376539c",
+          "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
+          "audit_digest": "sha256:87fa095799b94faa25cfec741792220f61eb5cbf2a5a5a350a5869f491a5e4ab",
+          "observed_at": "2026-10-08T08:08:08.000Z",
+          "registry": "https://registry.npmjs.org/"
+        }
+      }
+    }
+  ]
+}

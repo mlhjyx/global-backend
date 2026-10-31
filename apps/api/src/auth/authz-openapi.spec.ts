@@ -97,9 +97,10 @@ describe('OpenAPI authorization scope contract', () => {
         'x-required-scopes'
       ],
     ).toEqual(['compliance:manage']);
+    // G5/D2-B：禁联名单是 workspace 隔离的租户合规登记，只要求 compliance:manage。
     expect(
       operation(spec, 'get', '/api/v1/suppressions')['x-required-scopes'],
-    ).toEqual(['personal-data:read', 'compliance:manage']);
+    ).toEqual(['compliance:manage']);
     expect(
       operation(spec, 'get', '/api/v1/canonical-companies/{id}')[
         'x-required-scopes'
@@ -114,6 +115,24 @@ describe('OpenAPI authorization scope contract', () => {
       'personal-data:read',
       'compliance:manage',
     ]);
+    // BI-22: the weekly CSV leaves the platform, so reading leads is not enough.
+    expect(
+      operation(spec, 'get', '/api/v1/reports/weekly')['x-required-scopes'],
+    ).toEqual(['acquisition:read', 'acquisition:export']);
+  });
+
+  it('lists the whoami scopes as an extensible value set, so a new scope is not a breaking response change', () => {
+    const whoami = operation(document(), 'get', '/api/v1/whoami') as unknown as {
+      responses: Record<string, { content: Record<string, { schema: Record<string, unknown> }> }>;
+    };
+    const envelope = whoami.responses['200']!.content['application/json']!.schema as {
+      properties: { data: { properties: { scopes: { items: Record<string, unknown> } } } };
+    };
+    const items = envelope.properties.data.properties.scopes.items;
+    // A closed `enum` makes every added scope an oasdiff ERR (response-property-enum-value-added).
+    expect(items.enum).toBeUndefined();
+    expect(items['x-extensible-enum']).toEqual([...AUTHORIZATION_SCOPES]);
+    expect(items.type).toBe('string');
   });
 
   it('keeps infrastructure health probes public', () => {

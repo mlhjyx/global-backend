@@ -1,0 +1,43 @@
+---
+date: 2026-10-20
+title: Stop discovery stages before the admission lease ends, so a long run finishes PARTIAL instead of FAILED
+---
+
+- 起因：发现 run 的准入租约是准入后 3 小时，过期后每次核验、每次预留都被拒，run 只能判 `FAILED`，计划也就白跑了。xin 上 14 条查询的计划约 139 分钟，24 条约 257 分钟；28 条查询的 run f92ea357 在 fit 阶段撞上租约，06:38 判 `FAILED`。产品负责人已定：不限计划大小、不延长租约，改为快到期时提前收工判 `PARTIAL`。
+- 改动：
+  - 新增 `apps/api/src/temporal/discovery-run-lease.ts`：
+    - 活动在核验之后读一次剩余租约，口径与 `attest_authorized_tool_budget_v1` 相同：`COALESCE(admission_lease_expires_at, expires_at)`，按数据库时钟计，不含 60 秒容差。读法是只读 SELECT，app_user 在 RLS 下只看得到本工作区的授权。
+    - 读不到恰好一行有限值时，按控制错误拒绝。
+    - 不加迁移，不改 SQL 函数、binding 信封和 `BudgetStore`。
+  - 查询、官网画像、fit、富集、监控注册五个阶段，每开始一条查询或一家公司前，先看剩余租约够不够在收尾预留（10 分钟）之前做完这一单位。单位按阶段取：查询 15 分钟、fit 10 分钟、画像 15 分钟、富集 2 分钟、监控 5 分钟。不够就停下，余下的计入结果的 `skippedForLease`（只在发生时出现），不交续跑游标。
+  - 查询因租约停下时不路由、不做词表归一、不调 provider，照常落零回执，结果带 `skippedForLease: true`，不带 `skipReason`。重放的零回执若已过查询截止点，同样按租约跳过计；这时读租约失败，这次尝试按原错误失败、活动重试，与新执行的查询一样，不去猜标签（已启用的源按 BI-30 规则会被说成 `SOURCE_DISABLED`）；三次都失败时 run 在 query 阶段记 `FAILED`。
+  - #666 的上游等待：新增 `upstreamUnavailableRetryDelayMs`（读 retryPolicy、封顶 3 次的逻辑不变）。租约装不下「等待 + 再做一个单位」时：
+    - fit 和官网画像就地按租约停下，不再抛错；
+    - 查询把下一次尝试推迟到刚过查询截止点，那次尝试以租约零回执结束。
+    - 这修的是设计复审指出的阻塞问题：原方案在这种情况下会不等就重试，几秒内用完 3 次尝试，run 判 `FAILED`。
+  - 工作流：
+    - 各阶段的 `skippedForLease` 汇总成 `stats.skippedForLease`（按阶段，只列有跳过的阶段）；
+    - `resolveRunStatus` 新增 `leaseSkips`，大于 0 时至少 `PARTIAL`，不单独判 `FAILED`；
+    - 查询阶段因租约提前停下、且一条记录都没收到时判 `FAILED`（这次 run 什么都没找到；同一计划照旧不能再执行）；
+    - 各阶段的跳过数在阶段之外累计，所以之后某个阶段失败、按 BI-25 记 `FAILED` 时，stats 仍带上失败之前各阶段的跳过数。
+    - 富集只计还有数据源没读过的公司，已全部读过的不再算作被租约跳过（否则本应 DONE 的 run 会判 `PARTIAL`）。
+    - 只读活动结果里新增的可选字段，旧历史没有这些字段，重放不变，不需要 `patched()`。
+  - `worker.ts` 和 `dev-fast-lane-worker.ts` 接入 `runLease: prismaDiscoveryRunLeaseReader(prisma)`。没接时行为与以前一样。
+  - `packages/contracts/INTEGRATION.md` 和 `docs/backend/discovery-sources.md` 写明口径。
+- 测试：先 RED 后 GREEN，共新增 57 例，另加 1 例真库用例。
+  - `web-crawler.spec.ts` 新增 2 例：两处读页请求都按 `CRAWL4AI_REQUEST_TIMEOUT_MS` 中止。
+  - `discovery-run-lease.spec.ts` 16 例：租约计算；各阶段单位（含监控注册）与代理超时、网关上限、读页超时（`CRAWL4AI_REQUEST_TIMEOUT_MS`，本 PR 从 `web-crawler.ts` 导出）、HTTP 超时上限的防漂移；收尾预留覆盖不检查租约的三个活动；读取的 SQL 形状与失败即拒；等待装不装得下；查询下一次尝试的推迟量。
+  - `upstream-unavailable-retry.spec.ts` 新增 3 例；原有用例（含防漂移）一行未改。
+  - `discovery.activities.spec.ts` 新增 27 例，覆盖五个阶段：没余量就停、中途用完、等待装不下时就地停、有余量时结果形状不变；BI-30 跳过原因与重放的区分（含恰好够一条查询的边界）；重放时读租约失败改为重试；没有回执身份的旧历史不按租约停；词表归一遇上游不可用；富集不把已读完的公司计入、但计入还有数据源没读的公司。其中 13 例先确认为 RED（11 例在 main 上，2 例在复审前的 head 上），其余是「行为不变」或杀变异的守卫。
+  - `workspace-authority.workflow.spec.ts` 新增 9 例：按阶段汇总、跨轮次累加、「没收到记录才判 `FAILED`」的边界（BI-30 跳过与有记录的丢失）、BI-25 失败收尾保留各阶段的租约计数、没跳过时保持 `DONE` 和原 stats 形状。其中 8 例先确认为 RED（5 例在 main 上，3 例在复审前的 head 上）。
+  - 三轮复审指出的非等价存活变异现在都被杀死（第一轮 5 个，第二轮 2 个，第三轮 2 个；第二轮另一个出在警告日志上，那条日志已删掉），各轮新规则的变异也都被杀死。
+  - `worker-dev-fast-lane.source.spec.ts` 断言 managed worker 接了 `runLease`（两处一致由既有断言保证）。
+  - `discovery-run-admission-lease.postgres.spec.ts` 新增 1 例真库用例：以 app_user 读剩余租约约为 3 小时、随行老化同步减少、没有租约的行回退到授权窗口、别的工作区读不到。本机没有 `*_test` 库，由 CI 跑。
+  - temporal、discovery 下全部通过。
+- 未做：
+  - 信号阶段（`enrichSignalsRun`）暂未接入：同伴会话正在修这个阶段，等它合入后再补那几行。在那之前，它开始时剩余租约通常约 20 分钟，最少只剩 10 分钟收尾预留；按 xin 实测每家约 30 秒，12 家约 6–12 分钟，所以剩余偏少时仍可能越过租约，那时 run 记 `FAILED`。
+  - 画像比 fit 先停，fit 可能判几家没有画像证据的公司；联系路径补读打开时会在 fit 之前用掉租约（开关目前停用）。两者都写进了 INTEGRATION.md。
+  - fit 并发 3 另起 PR，同时处理并发下的「已落定前缀」游标、时间盒和重放丢失的计数。
+  - 查询阶段没有给 fit 预留时间：计划很大时，查询可能用到截止点，fit 一家都判不了，run 以零判定的 `PARTIAL` 收尾。要不要给 fit 预留时间，由产品负责人定。
+  - 被跳过的公司不会补判：`qualifyFitBacklog` 目前停用（`authorityHold`），`stats.skippedForBudget` 的公司同样如此。
+  - 「一次 DENIED 之后核验报 EXHAUSTED，预算截断走不到 PARTIAL」（#669 片段里提到的问题）不在本 PR 范围内，另起 PR。

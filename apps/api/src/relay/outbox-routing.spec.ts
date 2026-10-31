@@ -1,8 +1,11 @@
 import { createHmac } from "node:crypto";
+import { WorkflowClient, WorkflowIdReusePolicy } from "@temporalio/client";
+import { temporal as temporalProto } from "@temporalio/proto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OutboxRelayService } from "./outbox-relay.service";
 import {
   ASSET_OBJECT_CLEANUP_WORKFLOW,
+  DISCOVERY_WORKFLOW,
   PERSONAL_ARTIFACT_CLEANUP_WORKFLOW,
 } from "../temporal/understanding.constants";
 
@@ -506,6 +509,125 @@ describe("routeEvent — 三分支路由（收口③核心）", () => {
       expect(ev.parkedAt).toBeInstanceOf(Date);
     },
   );
+
+  it("只有发现 run 以 REJECT_DUPLICATE 启动；其余 internal command 不设 reuse policy（qualify 跑完可再触发）", async () => {
+    const commands = [
+      {
+        eventType: "DiscoveryRunRequested",
+        aggregateType: "DiscoveryRun",
+        schemaVersion: 2,
+        payload: {
+          planId: "plan-1",
+          icpId: "icp-1",
+          executionBudget: DISCOVERY_EXECUTION_BUDGET,
+        },
+      },
+      {
+        eventType: "CompanyProfileCreated",
+        aggregateType: "Company",
+        schemaVersion: 2,
+        payload: {
+          website: "https://acme.example/",
+          executionBudget: EXECUTION_BUDGET,
+        },
+      },
+      {
+        eventType: "QualifyRequested",
+        aggregateType: "ICP",
+        schemaVersion: 1,
+        payload: {},
+      },
+      {
+        eventType: "DeletionRequested",
+        aggregateType: "DeletionRequest",
+        schemaVersion: 1,
+        payload: { subjectType: "contact", subjectId: "contact-1" },
+      },
+    ];
+    const policies: Record<string, unknown> = {};
+    for (const command of commands) {
+      const ev = makeEvent({
+        ...command,
+        aggregateId: `agg-${command.eventType}`,
+      });
+      const temporal = makeTemporal();
+      const { db } = makeDb([ev]);
+
+      await makeService(db, temporal).routeEvent(ev);
+
+      expect(ev.publishedAt, command.eventType).toBeInstanceOf(Date);
+      const [, options] = vi.mocked(temporal.client.workflow.start).mock
+        .calls[0] as unknown as [string, Record<string, unknown>];
+      policies[command.eventType] = Object.hasOwn(
+        options,
+        "workflowIdReusePolicy",
+      )
+        ? options.workflowIdReusePolicy
+        : "UNSET";
+    }
+
+    expect(policies).toEqual({
+      DiscoveryRunRequested: WorkflowIdReusePolicy.REJECT_DUPLICATE,
+      CompanyProfileCreated: "UNSET",
+      QualifyRequested: "UNSET",
+      DeletionRequested: "UNSET",
+    });
+  });
+
+  it("发现 run 已结束时，SDK 把 REJECT_DUPLICATE 的拒绝报成 AlreadyStarted，relay 记为合并并标 published", async () => {
+    // Real SDK client over a stub gRPC service: the server answers a closed
+    // workflow ID under REJECT_DUPLICATE with ALREADY_EXISTS (gRPC status 6).
+    const GRPC_ALREADY_EXISTS = 6;
+    const requests: Array<Record<string, unknown>> = [];
+    const workflow = new WorkflowClient({
+      connection: {
+        workflowService: {
+          startWorkflowExecution: async (request: Record<string, unknown>) => {
+            requests.push(request);
+            throw Object.assign(
+              new Error("ALREADY_EXISTS: workflow execution already finished"),
+              { code: GRPC_ALREADY_EXISTS },
+            );
+          },
+        },
+      } as never,
+      namespace: "default",
+    });
+    const ev = makeEvent({
+      eventType: "DiscoveryRunRequested",
+      schemaVersion: 2,
+      aggregateType: "DiscoveryRun",
+      aggregateId: "run-closed",
+      payload: {
+        planId: "plan-1",
+        icpId: "icp-1",
+        executionBudget: DISCOVERY_EXECUTION_BUDGET,
+      },
+    });
+    const { db } = makeDb([ev]);
+    const svc = makeService(db, { client: { workflow } });
+    const logSpy = vi.spyOn(svc["logger"], "log");
+
+    await svc.routeEvent(ev);
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      workflowId: "discovery-run-closed",
+      workflowType: { name: DISCOVERY_WORKFLOW },
+      workflowIdReusePolicy:
+        temporalProto.api.enums.v1.WorkflowIdReusePolicy
+          .WORKFLOW_ID_REUSE_POLICY_REJECT_DUPLICATE,
+    });
+    expect(ev.publishedAt).toBeInstanceOf(Date);
+    expect(ev.parkedAt).toBeNull();
+    expect(
+      logSpy.mock.calls.some((call) =>
+        String(call[0]).includes(
+          "discovery workflow for run run-closed already started — merged",
+        ),
+      ),
+    ).toBe(true);
+  });
 
   it("internal command dispatch 失败 → 不标 published（下轮重试）", async () => {
     const ev = makeEvent({

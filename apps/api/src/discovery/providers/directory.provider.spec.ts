@@ -32,6 +32,30 @@ describe('名录发现检索串构造', () => {
     expect(searches.every((s) => /CNC machining/i.test(s))).toBe(true);
   });
 
+  it('中文行业词、地区词不进检索串，地区换成目标国的当地名称', () => {
+    const searches = buildDirectorySearches(q({ industry: '工业泵', country: '德国' }, ['Pumpen Großhandel', '泵 批发']));
+    expect(searches.length).toBeGreaterThan(0);
+    expect(searches.join(' | ')).not.toMatch(/\p{Script=Han}/u);
+    expect(searches.every((s) => /Pumpen Großhandel/.test(s) && /Deutschland/.test(s))).toBe(true);
+    expect(searches.some((s) => s.includes('Pumpen Großhandel Pumpen Großhandel'))).toBe(false);
+  });
+
+  it('主题词全是中文时不构造检索串，也不退回通用的 manufacturing', () => {
+    expect(buildDirectorySearches(q({ industry: '工业泵', country: '德国' }, ['泵 批发']))).toEqual([]);
+    expect(buildDirectorySearches(q({ industry: '', country: '德国' }, ['泵 批发']))).toEqual([]);
+    expect(buildDirectorySearches(q({ industry: ['工业泵', ''] }, ['', '泵']))).toEqual([]);
+  });
+
+  it('给了地理范围却写不出当地名称时不检索，避免全球名录', () => {
+    expect(buildDirectorySearches(q({ industry: 'pumps', country: '加拿大' }))).toEqual([]);
+  });
+
+  it('中文地区词让位给可用的拉丁文国家词', () => {
+    const searches = buildDirectorySearches(q({ industry: 'pumps', region: '巴伐利亚', country: 'Japan' }));
+    expect(searches.length).toBeGreaterThan(0);
+    expect(searches.every((s) => /Japan/.test(s) && !/\p{Script=Han}/u.test(s))).toBe(true);
+  });
+
   it('结果去重（同一串不重复出现）', () => {
     const searches = buildDirectorySearches(q({ industry: 'metalworking', region: 'France' }));
     expect(new Set(searches).size).toBe(searches.length);

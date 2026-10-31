@@ -3,6 +3,7 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { ApplicationFailure } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
+import { ProviderHttpError } from '../model-gateway/providers/provider-output-error';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import {
   MAX_COMPANY_DISCOVERY_ADAPTERS,
@@ -15,21 +16,32 @@ import {
   MAX_DISCOVERY_WATCH_COMPANIES,
 } from '../discovery/execution-envelope';
 import { queryTaxonomyTerms } from '../discovery/query-taxonomy-terms';
+import { discoverContactsCore } from '../discovery/contact-discovery-core';
+import { parseConfiguredLawfulBasis } from './backlog.activities';
+import { stampLawfulBasis } from '../discovery/compliance/email-verification-gate';
 import { artifactSubjectSkipReason } from '../tools/artifact-subject-denial';
 import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-judge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
-import { CompanyDiscoveryQuery, EnrichmentResult, ExecutionContext, SourceClass } from '../discovery/provider-contract';
+import {
+  CompanyDiscoveryQuery,
+  DiscoveryResult,
+  EnrichmentResult,
+  ExecutionContext,
+  SourceClass,
+} from '../discovery/provider-contract';
 import { companyIdentity } from '../discovery/identity';
 import {
   assertProductDiscoveryProvenance,
   isProductDiscoveryRawRecord,
   resolveEvidenceLicense,
 } from '../discovery/evidence-license';
-import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
+import { TaxonomyResolver, type TaxonomyResolveOptions } from '../discovery/taxonomy-resolver';
 import { IntentProjectionService } from '../intent/intent-projection.service';
 import { enqueuePatentLookup, PATENT_PROVIDER_KEY } from '../adapters/patent-inventor-cache';
+import { isPublicHttpTransportFailure } from '../adapters/guarded-http';
 import {
   BudgetExceededError,
+  BudgetOperationReplayError,
   type BudgetAccountAuthorization,
   type BudgetStore,
   UnavailableBudgetStore,
@@ -40,7 +52,10 @@ import {
   loadMaterializableCompanyState,
 } from '../discovery/company-suppression-gate';
 import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
-import { commitCompanyEnrichmentResults } from '../discovery/company-enrichment-commit';
+import {
+  commitCompanyEnrichmentResults,
+  enrichmentHitSurvivesGovernance,
+} from '../discovery/company-enrichment-commit';
 import {
   parseExecutionBudgetBinding,
   type ExecutionBudgetBinding,
@@ -49,7 +64,9 @@ import {
   ExecutionControlError,
   isExecutionControlError,
 } from '../execution-budget/execution-control-error';
+import { ExecutionBudgetGrantError } from '../execution-budget/execution-budget-authority.types';
 import {
+  applyDomainAckConsumerTransaction,
   applyDomainAckConsumerTransactions,
 } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
@@ -65,6 +82,11 @@ import {
   projectDiscoveryQueryLineageAttestKey,
 } from '../discovery/discovery-query-governed-lineage';
 import { attestQueryLineageV2 } from '../discovery/discovery-query-lineage.repository';
+import {
+  buildDiscoveryCompanyResultLineage,
+  declaresDiscoveryCompanyLineage,
+  isDiscoveryCompanyLineageProviderKey,
+} from '../discovery/company-discovery-lineage';
 import {
   buildGovernedDiscoveryQueryExecutionPlan,
   commitGovernedDiscoveryQueryExecution,
@@ -88,14 +110,48 @@ import {
   sanitizeCanonicalCompanyAttributes,
   sanitizeStoredCompanyFieldEvidence,
 } from '../discovery/canonical-company-attributes';
-import { executeDiscoveryCompanyMaterialization } from './discovery-company-materialization';
+import {
+  DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS,
+  executeDiscoveryCompanyMaterialization,
+} from './discovery-company-materialization';
 import {
   WEBSITE_PROFILE_PROVIDER_KEY,
   WebsiteProfileProvider,
   type WebsiteProfile,
 } from '../discovery/providers/website-profile.provider';
+import {
+  COMPANY_CONTACT_PARSER_MARKER,
+  COMPANY_CONTACT_PARSER_VERSION,
+  COMPANY_CONTACT_PROVIDER_KEY,
+  companyContactObservation,
+  contactPathAttempt,
+  contactPathAttemptCooling,
+  contactPathBackfillCandidates,
+  nextContactPathAttempt,
+  persistCompanyContactPoints,
+  recordContactPathAttempt,
+  type ContactPathAttempt,
+} from '../discovery/company-contact-points';
 import { targetCountryCodes } from '../discovery/search-localization';
 import { companyMatchesSuppression } from '../discovery/suppression-value';
+import type { DiscoveryQuerySkipReason } from '../discovery/discovery-query-skip';
+import {
+  sumModelExtractions,
+  type DiscoveryModelExtractions,
+} from '../discovery/discovery-model-extractions';
+import { settledModelFailureReason } from '../discovery/settled-model-failure';
+import { narrowBySourceHints, planQuerySkipReason } from '../discovery/plan-query-sources';
+import type { DiscoveryRunStage } from './discovery.run-failure';
+import { withUpstreamUnavailableRetryDelay } from './upstream-unavailable-retry';
+import {
+  DISCOVERY_LEASE_UNIT_MS,
+  startDiscoveryRunLease,
+  UNBOUNDED_DISCOVERY_RUN_LEASE,
+  upstreamWaitFitsLease,
+  withLeaseAwareQueryRetryDelay,
+  type DiscoveryRunLease,
+  type DiscoveryRunLeaseReader,
+} from './discovery-run-lease';
 
 export interface DiscoveryRunInput {
   workspaceId: string;
@@ -128,6 +184,125 @@ interface DiscoveryQueryExecutionResult {
   provider: string | null;
   budgetTruncated: boolean;
   queryReceipt?: DiscoveryQueryReceipt;
+  /** BI-30: the query ran on no provider; the workflow counts the reason in the run's stats. */
+  skipReason?: DiscoveryQuerySkipReason;
+  /**
+   * The query ran on no provider because the run's admission lease had no room left for it: it
+   * ended with a zero receipt, and the workflow counts it in stats.skippedForLease. Never set
+   * together with `skipReason`.
+   */
+  skippedForLease?: true;
+  /**
+   * Model extractions the providers made for this query and the ones they skipped after a
+   * failed call. Absent when no provider called a model, and on a replay that ran no provider.
+   */
+  modelExtractions?: DiscoveryModelExtractions;
+  /**
+   * A provider of this query lost its operation to a replay the gateway refuses (settled or in
+   * flight without a durable result): the query ended with a zero receipt for that provider,
+   * and the workflow counts it. Absent when every provider answered.
+   */
+  unreplayable?: boolean;
+  /**
+   * Term normalization lost its model call (an operation that cannot be replayed, or an upstream
+   * 5xx the gateway settled without a result): the providers ran this query on their built-in
+   * vocabularies. The workflow counts it; the run's status is unchanged.
+   */
+  taxonomyFallback?: boolean;
+  /**
+   * No routed provider reads the resolved taxonomy, so normalization kept to the deterministic
+   * alias lookup and called no model. The workflow counts it.
+   */
+  taxonomyModelSkipped?: boolean;
+}
+
+type TaxonomyOutcome = Readonly<{ fallback: boolean; modelSkipped: boolean }>;
+
+function withTaxonomyOutcome(
+  result: DiscoveryQueryExecutionResult,
+  outcome: TaxonomyOutcome,
+): DiscoveryQueryExecutionResult {
+  return {
+    ...result,
+    ...(outcome.fallback ? { taxonomyFallback: true } : {}),
+    ...(outcome.modelSkipped ? { taxonomyModelSkipped: true } : {}),
+  };
+}
+
+function withModelExtractions(
+  result: DiscoveryQueryExecutionResult,
+  modelExtractions: DiscoveryModelExtractions | undefined,
+): DiscoveryQueryExecutionResult {
+  return modelExtractions ? { ...result, modelExtractions } : result;
+}
+
+function withUnreplayable(
+  result: DiscoveryQueryExecutionResult,
+  unreplayable: boolean,
+): DiscoveryQueryExecutionResult {
+  return unreplayable ? { ...result, unreplayable: true } : result;
+}
+
+type ProviderExecution = {
+  key: string;
+  r: DiscoveryResult;
+  durableReceipts: Array<{ producerId: string; receipt: DurableExecutionReceipt }>;
+};
+
+/**
+ * What a provider whose operation cannot be replayed contributes to a query: no records, no
+ * cost and, for a provider with governed lineage, an empty lineage, so the query's receipt
+ * lists the provider as routed with nothing to show. The calls the provider made before are on
+ * the budget ledger; the run's stats count the query.
+ */
+function unreplayableProviderExecution(
+  adapter: Readonly<{ key: string; companyResultLineage?: unknown }>,
+): PromiseFulfilledResult<ProviderExecution> {
+  const lineage =
+    declaresDiscoveryCompanyLineage(adapter) && isDiscoveryCompanyLineageProviderKey(adapter.key)
+      ? buildDiscoveryCompanyResultLineage({ providerKey: adapter.key, recordCount: 0, observations: [] })
+      : undefined;
+  return {
+    status: 'fulfilled',
+    value: {
+      key: adapter.key,
+      r: { records: [], costCents: 0, ...(lineage ? { lineage } : {}) },
+      durableReceipts: [],
+    },
+  };
+}
+
+/**
+ * BI-30: a governed query receipt lists every provider the query was routed
+ * to, so an empty list on it means the query was skipped.
+ */
+function withReceiptSkip(
+  result: DiscoveryQueryExecutionResult,
+  reason: () => DiscoveryQuerySkipReason,
+): DiscoveryQueryExecutionResult {
+  return result.queryReceipt?.providers.length === 0
+    ? { ...result, skipReason: reason() }
+    : result;
+}
+
+/**
+ * A replayed query result. A zero receipt replayed once the query deadline has passed is counted
+ * as a lease stop: the deadline never comes back, so a receipt written then was one. The rare
+ * exception is a source switched off whose zero receipt is replayed past the deadline (within one
+ * attempt's start-to-close): it then counts as a lease stop, which can turn a run whose every
+ * query was skipped from PARTIAL into FAILED.
+ */
+async function replayedQueryResult(
+  result: DiscoveryQueryExecutionResult,
+  reason: () => DiscoveryQuerySkipReason,
+  lease: () => Promise<DiscoveryRunLease>,
+): Promise<DiscoveryQueryExecutionResult> {
+  if (result.queryReceipt?.providers.length !== 0) return result;
+  // A failed lease read fails the attempt as it would on a fresh query, and the activity retries:
+  // the replay answers from durable facts, so a later attempt returns the same receipt. Guessing the
+  // label instead would misreport it (the BI-30 reason of a source that is on reads SOURCE_DISABLED).
+  const pastQueryDeadline = !(await lease()).allows(DISCOVERY_LEASE_UNIT_MS.query);
+  return pastQueryDeadline ? { ...result, skippedForLease: true } : withReceiptSkip(result, reason);
 }
 
 function invalidDiscoveryQueryReceiptIdentity(): never {
@@ -160,6 +335,7 @@ interface LockedDiscoveryRunReceiptState {
   id: string;
   plan_id: string;
   stats: unknown;
+  status: string;
 }
 
 async function lockDiscoveryRunReceiptState(
@@ -167,9 +343,9 @@ async function lockDiscoveryRunReceiptState(
   args: { runId: string; planId: string },
 ): Promise<LockedDiscoveryRunReceiptState> {
   const rows = await transaction.$queryRaw<LockedDiscoveryRunReceiptState[]>(
-    Prisma.sql`SELECT id::text, plan_id::text, stats
+    Prisma.sql`SELECT id::text, plan_id::text, stats, status
       FROM discovery_run
-      WHERE id = ${args.runId}
+      WHERE id = ${args.runId}::uuid
       FOR UPDATE`,
   );
   const row = rows[0];
@@ -184,10 +360,11 @@ async function lockCompanyRawIdentity(
   workspaceId: string,
   rawRecordId: string,
 ): Promise<void> {
+  // Prisma cannot deserialize PostgreSQL void; cast only the result, not the lock key.
   await transaction.$queryRaw(
     Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(
       ${`discovery-company-raw-identity:${workspaceId}:${rawRecordId}`}, 0
-    ))`,
+    ))::text AS locked`,
   );
 }
 
@@ -283,11 +460,159 @@ export {
   MAX_DISCOVERY_PLAN_QUERIES,
   MAX_DISCOVERY_PROVIDER_RECORDS,
 };
-const SIGNAL_ENRICH_LIMIT = MAX_DISCOVERY_SIGNAL_COMPANIES; // 信号富集慢（抓官网/sitemap），单 run 上限更小；配长活动 + heartbeat
+const SIGNAL_ENRICH_LIMIT = MAX_DISCOVERY_SIGNAL_COMPANIES; // 信号富集慢（抓官网/sitemap），单 run 上限更小；配 30 分钟长活动
 const SIGNAL_TTL_MS = 7 * 24 * 3600 * 1000; // 信号时变 → 7 天 TTL 刷新（非 GLEIF/Wikidata 那种一次写死）
+
+/** One company's signal receipts, by the enricher that read them, one per operation. */
+type SignalEnrichmentReceipts = ReadonlyMap<
+  string,
+  ReadonlyMap<string, { producerId: string; receipt: DurableExecutionReceipt }>
+>;
+
+/**
+ * Writes one company's signal hits and acknowledges its receipts, in the caller's transaction.
+ * Each hit commits in one batch with exactly the receipts its enricher read, under a key that
+ * names the namespace it writes; every other receipt is acknowledged on its own with nothing to
+ * apply. So a retried activity never batches a receipt it already acknowledged with a new one: a
+ * miss may read one page more on its second attempt (a robots check that now passes), and a
+ * committed hit carries `_ts`, so its enricher does not run again. A hit that governance would
+ * empty writes no `_ts` and so would run again; it is handled as a miss. Returns the enricher
+ * keys whose hit is in the database.
+ */
+async function commitCompanySignals(
+  tx: Prisma.TransactionClient,
+  args: {
+    workspaceId: string;
+    companyId: string;
+    hits: readonly { key: string; result: EnrichmentResult }[];
+    receipts: SignalEnrichmentReceipts;
+    signalTimestamp: Date;
+  },
+): Promise<string[]> {
+  const committed: string[] = [];
+  const writable = args.hits.filter((hit) => enrichmentHitSurvivesGovernance(hit, args.signalTimestamp));
+  for (const hit of writable) {
+    const result = await applyDomainAckConsumerTransactions({
+      transaction: tx,
+      acknowledgements: [...(args.receipts.get(hit.key)?.values() ?? [])].map(({ producerId, receipt }) => ({
+        producerId,
+        receipt,
+        domainAckKey: `${args.companyId}:${receipt.operationId}:signal-enrichment:${hit.key}`,
+        domainRevision: receipt.resultDigest,
+      })),
+      apply: (transaction) => commitCompanyEnrichmentResults(transaction, {
+        workspaceId: args.workspaceId,
+        companyId: args.companyId,
+        hits: [hit],
+        signalTimestamp: args.signalTimestamp,
+      }),
+      readback: async (transaction) => {
+        const current = await transaction.canonicalCompany.findUnique({
+          where: { id: args.companyId },
+          select: { attributes: true },
+        });
+        return Object.hasOwn((current?.attributes ?? {}) as Record<string, unknown>, hit.key);
+      },
+    });
+    if (result.value) committed.push(hit.key);
+  }
+  const hitKeys = new Set(writable.map((hit) => hit.key));
+  const consumed = new Set<string>();
+  for (const [enricherKey, receipts] of args.receipts) {
+    if (hitKeys.has(enricherKey)) continue;
+    for (const { producerId, receipt } of receipts.values()) {
+      if (consumed.has(receipt.operationId)) continue;
+      consumed.add(receipt.operationId);
+      await applyDomainAckConsumerTransaction({
+        transaction: tx,
+        producerId,
+        receipt,
+        domainAckKey: `${args.companyId}:${receipt.operationId}:signal-enrichment`,
+        domainRevision: receipt.resultDigest,
+        apply: async () => undefined,
+      });
+    }
+  }
+  return committed;
+}
 const WATCH_REGISTER_LIMIT = MAX_DISCOVERY_WATCH_COMPANIES; // 单 run 自动注册网站监控上限（每家一次 sitemap 探测，慢）
 const PATENT_ENQUEUE_LIMIT = 500; // 单 run 专利缓存预热 enqueue 上限（cheap upsert，非慢活动；超出记 log）
 const WEBSITE_PROFILE_TTL_MS = 30 * 24 * 3600 * 1000; // 官网画像较稳定：30 天内画像过的公司不重抓
+
+/**
+ * A per-company pass stops starting companies once this much wall-clock time has gone by and
+ * hands the rest to the next activity, so a run's company count never decides whether the pass
+ * fits its start-to-close timeout. The companies in progress still finish: for fit up to
+ * FIT_CONCURRENCY judgments, each a structured answer of at most two gateway requests at the
+ * 300-second ceiling (10 minutes), so 4 + 10 minutes stay inside modelActs' 15; for a website
+ * profile two page fetches, a render and one model call (signalActs: 30 minutes).
+ */
+export const FIT_PASS_TIME_BOX_MS = 4 * 60_000;
+/**
+ * Fit judgments in flight at once. Fit was about half of a run's time when it judged one company
+ * after another; company extraction already calls the same model five at a time.
+ */
+export const FIT_CONCURRENCY = 3;
+export const PROFILE_PASS_TIME_BOX_MS = 15 * 60_000;
+/** Enrichment runs on the 2-minute proxy; one company is at most four GLEIF reads of about a second. */
+export const ENRICH_PASS_TIME_BOX_MS = 60_000;
+const CONTINUATION_COMPANY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+
+function invalidContinuation(): never {
+  throw ApplicationFailure.nonRetryable(
+    'DISCOVERY_STAGE_CONTINUATION_INVALID',
+    'DISCOVERY_STAGE_CONTINUATION_INVALID',
+  );
+}
+
+function isContinuationIndex(value: unknown, limit: number): boolean {
+  return Number.isInteger(value) && (value as number) >= 0 && (value as number) <= limit;
+}
+
+/**
+ * The best-effort per-company passes (website profile, signals, watches) and the query stage skip
+ * an operation that cannot be replayed and count it instead of failing the run. Such an operation's
+ * wire already ran and left no durable result (an artifact that could not be stored, a call settled
+ * without a result), so it is never retried: retrying could pay twice.
+ *
+ * Two kinds share the error, told apart by `origin`:
+ * - a remnant ('remnant') is found at reservation: an earlier attempt left the operation without a
+ *   durable result. It says nothing about the upstream right now, so two in a row are just two
+ *   such attempts, not an outage, and every one is counted like any other skip (the fit pass has
+ *   always read them this way);
+ * - a live fault ('live') is this attempt's own wire that ran and whose result could not be stored,
+ *   projected or settled. That is a storage or ledger outage now, so the stage keeps its old
+ *   two-in-a-row stop for it.
+ * Whether the model upstream is healthy is judged by the control errors of the current attempt,
+ * which wait and stop for the lease instead of failing the run.
+ */
+function isUnreplayableOperation(error: unknown): error is BudgetOperationReplayError {
+  return error instanceof BudgetOperationReplayError;
+}
+
+/** A replay error found at reservation: a leftover of an earlier attempt, never evidence about now. */
+function isReplayRemnant(error: unknown): boolean {
+  return error instanceof BudgetOperationReplayError && error.origin === 'remnant';
+}
+
+/**
+ * Term normalization refines a query; it is not the query's work. A provider without resolved
+ * codes falls back to its built-in vocabulary (wikidata, openstreetmap) or never read them
+ * (public_web, the registries). So a query whose normalization call is lost goes on without it
+ * instead of ending with nothing (#643) or failing: the operation cannot be replayed (the call
+ * ran and left no result; a retry finds it this way), or the upstream answered 5xx and the
+ * gateway settled the operation without a result (seller #26, run 3e78eb4e: one 503 on the
+ * first query, and every later query met the dead operation because the key was per run).
+ * This is the one place a ProviderHttpError is absorbed; elsewhere it stays a control error,
+ * since an outage usually hits every call of a run. A 4xx (credentials, quota, request) still
+ * fails closed here too, as does every other control error.
+ */
+function isLostTaxonomyNormalization(error: unknown): boolean {
+  return (
+    isUnreplayableOperation(error) ||
+    (error instanceof ProviderHttpError && error.status >= 500)
+  );
+}
 
 /** ICP 品类上下文（只供模型判断相关品类，不进输出）。 */
 function icpProductContext(companyAttributes: unknown): string {
@@ -299,8 +624,23 @@ function icpProductContext(companyAttributes: unknown): string {
     .slice(0, 600);
 }
 
+/**
+ * 画像在 30 天内、且（开关打开时）联系路径已按当前规则读过 → 这家不用再画像。
+ * BI-14：开关打开时，30 天内的画像在联系路径按当前规则读过之前仍算过期（每家每个规则版本一次）。
+ */
+function websiteProfileFreshAndCurrent(attributes: unknown, contactPaths: boolean, nowMs: number): boolean {
+  const existing = ((attributes as Record<string, unknown> | null) ?? {})[WEBSITE_PROFILE_PROVIDER_KEY] as
+    | { _ts?: string; [COMPANY_CONTACT_PARSER_MARKER]?: string }
+    | undefined;
+  const fresh = Boolean(existing?._ts) && nowMs - Date.parse(existing!._ts!) < WEBSITE_PROFILE_TTL_MS;
+  const contactPathsCurrent = !contactPaths || existing?.[COMPANY_CONTACT_PARSER_MARKER] === COMPANY_CONTACT_PARSER_VERSION;
+  return fresh && contactPathsCurrent;
+}
+
 /** 官网画像 → 只含公司级事实的富集结果（命名空间 `website_profile`）。 */
 function websiteProfileEnrichment(profile: WebsiteProfile, fetchedAt: Date): EnrichmentResult {
+  // 画像事实所在的页（有 Impressum 用 Impressum，否则首页）；A4：贸易角色、登记号、税号据此有来源 URL。
+  const sourceUrl = profile.impressumUrl ?? profile.homepageUrl;
   const attributes = Object.fromEntries(
     Object.entries({
       trade_role: profile.tradeRole,
@@ -316,10 +656,11 @@ function websiteProfileEnrichment(profile: WebsiteProfile, fetchedAt: Date): Enr
       legal_name: profile.legalName,
       register_key: profile.register?.key ?? null,
       vat_id: profile.vatId,
+      registered_address: profile.registeredAddress,
       evidence: profile.evidence.length ? profile.evidence : null,
+      source_url: sourceUrl,
     }).filter(([, value]) => value !== null && value !== undefined),
   );
-  const sourceUrl = profile.impressumUrl ?? profile.homepageUrl;
   return {
     matched: true,
     confidence: profile.tradeRoleConfidence ?? 0.5,
@@ -333,6 +674,19 @@ function websiteProfileEnrichment(profile: WebsiteProfile, fetchedAt: Date): Enr
     costCents: 0,
   };
 }
+/**
+ * Attestation outcomes that only say the run's authority has ended. The
+ * database raises them after its scope check and authority lookup, so the
+ * authority belongs to this workspace. For a revoked or expired authority the
+ * run's budget account is not checked; the write is still bound to the run and
+ * plan ids under the workspace's row-level security.
+ */
+const ENDED_AUTHORITY_CODES: ReadonlySet<string> = new Set([
+  'EXECUTION_BUDGET_GRANT_EXPIRED',
+  'EXECUTION_BUDGET_AUTHORITY_REVOKED',
+  'EXECUTION_BUDGET_AUTHORITY_EXHAUSTED',
+]);
+
 const DISCOVERY_DOMAIN_ACK_PRODUCERS = new Set([
   'companies_house.search', 'crawl4ai.fetch', 'crawl4ai.render', 'gleif.fetch',
   'http.get', 'inpi_rne.search', 'mapyourshow.fetch', 'openfda.search',
@@ -340,6 +694,69 @@ const DISCOVERY_DOMAIN_ACK_PRODUCERS = new Set([
   'wikidata.entity', 'wikidata.sparql', 'discovery.extract_company',
   'discovery.extract_list', 'contact.find_decision_makers',
 ]);
+
+/** Failure stages a run reaches only after canonicalization, with the fit stage started. */
+const FIT_REACHED_FAILURE_STAGES: ReadonlySet<string> = new Set<DiscoveryRunStage>([
+  'fit',
+  'enrich',
+  'signals',
+  'watches',
+  'patentEnqueue',
+  'finalize',
+]);
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * This run's fit stage judged at least one company. finalizeRun uses it to request scoring
+ * for a FAILED run.
+ *
+ * - Stats with `fit` (the normal end of a run, and a run recorded FAILED at finalize, which keeps
+ *   the run's stats) answer alone: some verdict count is above zero.
+ * - Stats without `fit` (the failure path) need a failure stage at or after fit, and then a fit
+ *   verdict on a lead of this ICP for a company this run resolved: its accepted raw records →
+ *   their company identity links → the leads. A fit pass that failed may have stored verdicts
+ *   before it threw, so the lead rows are the record. Verdicts on companies this run never
+ *   touched do not count.
+ */
+async function fitStageJudged(
+  tx: Prisma.TransactionClient,
+  run: { runId: string; icpId: string },
+  stats: Record<string, unknown>,
+): Promise<boolean> {
+  if (Object.prototype.hasOwnProperty.call(stats, 'fit')) {
+    const fit = stats.fit;
+    return (
+      isPlainRecord(fit) && Object.values(fit).some((count) => typeof count === 'number' && count > 0)
+    );
+  }
+  const failure = stats.failure;
+  if (
+    !isPlainRecord(failure) ||
+    typeof failure.stage !== 'string' ||
+    !FIT_REACHED_FAILURE_STAGES.has(failure.stage)
+  ) {
+    return false;
+  }
+  const rawRecords = await tx.rawSourceRecord.findMany({
+    where: { runId: run.runId, ingestStatus: 'ACCEPTED' },
+    select: { id: true },
+  });
+  if (!rawRecords.length) return false;
+  const links = await tx.identityLink.findMany({
+    where: { canonicalType: 'company', rawRecordId: { in: rawRecords.map((record) => record.id) } },
+    select: { canonicalId: true },
+  });
+  const companyIds = [...new Set(links.map((link) => link.canonicalId))];
+  if (!companyIds.length) return false;
+  const judged = await tx.lead.findFirst({
+    where: { icpId: run.icpId, canonicalCompanyId: { in: companyIds }, fitVerdict: { not: null } },
+    select: { id: true },
+  });
+  return judged !== null;
+}
 
 /**
  * Discover 阶段活动（PRD 5.5 / 8.7 流水线）：
@@ -359,7 +776,18 @@ export function createDiscoveryActivities(deps: {
   rawIngestLimits?: RawSourceIngestLimits;
   /** G3 5.4b website profile; defaults to the provider over `gateway` + `broker`. */
   websiteProfile?: Pick<WebsiteProfileProvider, 'profile'>;
+  /** Wall clock for the per-company pass time boxes. */
+  now?: () => number;
+  /**
+   * Reads the time left on the run's admission lease, so a stage stops while the run can still
+   * finish PARTIAL (discovery-run-lease.ts). Without it nothing stops early.
+   */
+  runLease?: DiscoveryRunLeaseReader;
 }) {
+  const clock = deps.now ?? Date.now;
+  /** Read once per activity, after its attest: the lease never changes once admitted. */
+  const readRunLease = async (binding: ExecutionBudgetBinding): Promise<DiscoveryRunLease> =>
+    deps.runLease ? startDiscoveryRunLease(await deps.runLease(binding), clock) : UNBOUNDED_DISCOVERY_RUN_LEASE;
   const budgets =
     deps.budgetStore ?? new UnavailableBudgetStore('discovery activities require an authoritative BudgetStore');
   const ensureRunBudget = async (
@@ -385,6 +813,31 @@ export function createDiscoveryActivities(deps: {
       accountKey: binding.accountKey,
     });
     return binding;
+  };
+  /**
+   * A FAILED outcome spends nothing: the plan stays READY, and the only thing
+   * it may start is scoring (QualifyRequested, when the fit stage already
+   * judged companies), which is deterministic and makes no provider call. It
+   * may therefore still be recorded after the run's authority has ended;
+   * otherwise a run whose grant lapsed or was revoked mid-way would stay
+   * RUNNING forever. A legacy envelope stays parked, and every other
+   * attestation failure still refuses the write.
+   */
+  const attestRunFinalization = async (
+    args: DiscoveryActivityInput & { status: 'DONE' | 'PARTIAL' | 'FAILED' },
+  ): Promise<void> => {
+    try {
+      await ensureRunBudget(args);
+    } catch (error) {
+      if (
+        args.status === 'FAILED' &&
+        error instanceof ExecutionBudgetGrantError &&
+        ENDED_AUTHORITY_CODES.has(error.code)
+      ) {
+        return;
+      }
+      throw error;
+    }
   };
   const authorizeCompanyExternalAction =
     (workspaceId: string, companyId: string): (() => Promise<boolean>) =>
@@ -425,7 +878,7 @@ export function createDiscoveryActivities(deps: {
     },
 
     /**
-     * Waterfall 步骤 3：fan-out 调用该 source_class 下全部 ENABLED 发现源（source_hint 可收窄），
+     * Waterfall 步骤 3：fan-out 调用该 source_class 下全部 ENABLED 且有受治理公司血缘的发现源（source_hint 可收窄），
      * raw 原样落地（幂等 by externalId）。
      * 网络调用（搜索/爬取/LLM）在事务外完成，结果才进事务持久化——避免长事务。
      */
@@ -435,7 +888,15 @@ export function createDiscoveryActivities(deps: {
       planId?: string;
       queryOrdinal?: number;
       query: PlanQuery;
+      /** The query before this one lost a provider to an unreplayable operation (workflow hand-off). */
+      previousQueryUnreplayable?: boolean;
     }): Promise<DiscoveryQueryExecutionResult> {
+      if (
+        args.previousQueryUnreplayable !== undefined &&
+        typeof args.previousQueryUnreplayable !== 'boolean'
+      ) {
+        invalidContinuation();
+      }
       let binding: ExecutionBudgetBinding;
       try {
         if (args.executionContractVersion !== 2) throw new Error('invalid version');
@@ -457,6 +918,9 @@ export function createDiscoveryActivities(deps: {
         keywords: args.query.keywords ?? [],
         priority: args.query.priority ?? 99,
       };
+      // BI-30: why a query routed to no provider, judged against every registered source.
+      const skipReason = (): DiscoveryQuerySkipReason =>
+        planQuerySkipReason(args.query, deps.providers.companyDiscoverySources());
       const queryKey = receiptIdentity
         ? discoveryQueryKey({
             runId: args.runId,
@@ -489,9 +953,10 @@ export function createDiscoveryActivities(deps: {
               'DOMAIN_ACK_DISCOVERY_GOVERNED_LINEAGE_REPLAY_INTEGRITY_HOLD',
             );
           }
-          return executionResult(
-            prior.queryReceipt as DiscoveryQueryReceipt,
-            prior.budgetTruncated,
+          return replayedQueryResult(
+            executionResult(prior.queryReceipt as DiscoveryQueryReceipt, prior.budgetTruncated),
+            skipReason,
+            () => readRunLease(binding),
           );
         }
         if (prior.status === 'NOT_FOUND') {
@@ -507,40 +972,101 @@ export function createDiscoveryActivities(deps: {
         scopeKey: binding.scopeKey,
         accountKey: binding.accountKey,
       });
-      // 词表归一（冷路径，docs/backend/vocab-taxonomy.md）：把 filters 里的行业/国家
-      // 自由词（中/英/德）归一到规范节点，注入 resolved 码供各源精确路由。
-      // 未接 resolver 或未命中时，provider 回退到内置 vocab.ts。
+      // 多源 fan-out：该 source_class 下**全部 ENABLED 且声明了受治理公司血缘的适配器**并行召回（蓝图集成点 1；
+      // 血缘闸门：没有血缘的源即使 ENABLED 也不路由，否则 run 会卡在物化）。
+      // 可选 source_hint 收窄到具体子源；否则全跑，统一进 raw → canonicalize 去重归并。
+      // BI-30：先路由、再做词表归一。路由不到适配器的查询（数据源在规划后被停用、源没有受治理血缘，或旧计划
+      // 里没有 provider 的 source_class）就此跳过：不调词表归一模型、不调 provider，照常落一条零回执
+      // （物化准入要求每条计划查询都有回执），并把跳过原因交给工作流按原因计数，run 不因此失败。
+      // A query the run's admission lease has no room for ends the same way, counted as a lease stop.
+      const lease = await readRunLease(binding);
+      const leaseStop = lineageLookup !== null && !lease.allows(DISCOVERY_LEASE_UNIT_MS.query);
+      const sourceClass = args.query.source_class as SourceClass;
+      const classAdapters = leaseStop
+        ? []
+        : await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+            deps.providers.routeCompanyDiscovery(tx as never, sourceClass),
+          );
+      const adapters = narrowBySourceHints(args.query.filters, classAdapters, (adapter) => adapter.key);
+      if (adapters.length > MAX_DISCOVERY_PROVIDER_ADAPTERS) {
+        throw ApplicationFailure.nonRetryable(
+          'EXECUTION_BUDGET_ENVELOPE_EXCEEDED',
+          'EXECUTION_BUDGET_ENVELOPE_EXCEEDED',
+        );
+      }
+      for (const adapter of adapters) {
+        assertProductDiscoveryProvenance({ providerKey: adapter.key });
+      }
+      // 词表归一（docs/backend/vocab-taxonomy.md）：把 filters 里的行业/国家自由词（中/英/德）
+      // 归一到规范节点，注入 resolved 码供会读它们的源精确路由。未接 resolver 或未命中时，
+      // provider 回退到内置 vocab.ts。
       const enriched: Record<string, unknown> = {
         ...(args.query.filters ?? {}),
       };
-      if (deps.taxonomy) {
-        // Bounded per query: each unresolved term costs one taxonomy.normalize call.
-        const { industryTerms, countryTerms } = queryTaxonomyTerms(enriched);
-        const inds = await deps.taxonomy.resolveMany('industry', industryTerms, {
+      // A provider whose operation cannot be replayed (settled or in flight without a durable
+      // result, the way a retry finds the call a broken attempt left behind) answers this query
+      // with nothing instead of failing it: the query still ends with its receipt, which the
+      // materialization admission requires for every plan query, and the workflow counts it.
+      // A remnant (an earlier attempt's leftover) is absorbed exactly like any other skip. A live
+      // fault is this attempt's own wire failing to store its result: the old two-in-a-row stop
+      // stays for it, with the hand-off flag on the wire for older workflow histories. The flag
+      // cannot tell the two kinds apart, so a live fault next to any flagged loss still stops.
+      const lostOnReplay = (error: unknown): boolean => {
+        if (!isUnreplayableOperation(error)) return false;
+        if (isReplayRemnant(error)) return true;
+        if (args.previousQueryUnreplayable) throw error;
+        return true;
+      };
+      // The model is worth calling only for a source that reads the resolved codes (wikidata,
+      // openstreetmap); a query routed to public_web or the registries alone keeps the
+      // deterministic alias lookup. The model operation is keyed per query, not per run, and a
+      // lost call falls back to the providers' vocabularies (isLostTaxonomyNormalization).
+      const taxonomyConsumed = adapters.some((adapter) => adapter.consumesResolvedTaxonomy === true);
+      // Bounded per query: each unresolved term costs one taxonomy.normalize call.
+      const { industryTerms, countryTerms } = queryTaxonomyTerms(enriched);
+      const taxonomy = adapters.length > 0 ? deps.taxonomy : undefined;
+      let taxonomyFallback = false;
+      if (taxonomy) {
+        const resolveOptions: TaxonomyResolveOptions = {
           workspaceId: args.workspaceId,
           runId: binding.accountKey,
           executionBudget: binding,
-        });
-        if (inds.length) {
-          enriched._industryQids = inds.map((n) => n.wikidataQid).filter(Boolean);
-          enriched._osmTags = inds.flatMap((n) => n.osmTags ?? []);
-          enriched._industryCodes = inds.map((n) => n.code);
-        }
-        for (const ct of countryTerms) {
-          const c = await deps.taxonomy.resolve('country', ct, {
-            workspaceId: args.workspaceId,
-            runId: binding.accountKey,
-            executionBudget: binding,
-          });
-          if (c?.wikidataQid) {
-            enriched._countryQid = c.wikidataQid;
-            enriched._countryCode = c.code;
-            break;
+          ...(receiptIdentity && queryKey
+            ? { correlationId: `${queryKey}:${receiptIdentity.queryOrdinal}` }
+            : {}),
+          ...(taxonomyConsumed ? {} : { allowLlm: false }),
+        };
+        try {
+          const inds = await taxonomy.resolveMany('industry', industryTerms, resolveOptions);
+          if (inds.length) {
+            enriched._industryQids = inds.map((n) => n.wikidataQid).filter(Boolean);
+            enriched._osmTags = inds.flatMap((n) => n.osmTags ?? []);
+            enriched._industryCodes = inds.map((n) => n.code);
           }
+          for (const ct of countryTerms) {
+            const c = await taxonomy.resolve('country', ct, resolveOptions);
+            if (c?.wikidataQid) {
+              enriched._countryQid = c.wikidataQid;
+              enriched._countryCode = c.code;
+              break;
+            }
+          }
+        } catch (error) {
+          // The terms resolved before the loss stay; the rest use the providers' vocabularies.
+          // A 429 or a refused gateway connection is not absorbed: the next attempt waits for it,
+          // or starts past the query deadline when the lease cannot hold the wait.
+          if (!isLostTaxonomyNormalization(error)) throw withLeaseAwareQueryRetryDelay(error, lease);
+          taxonomyFallback = true;
         }
       }
+      // Counted only when there was a term the model could have been asked about.
+      const taxonomyOutcome: TaxonomyOutcome = {
+        fallback: taxonomyFallback,
+        modelSkipped:
+          taxonomy !== undefined && !taxonomyConsumed && industryTerms.length + countryTerms.length > 0,
+      };
       const q: CompanyDiscoveryQuery = {
-        sourceClass: args.query.source_class as SourceClass,
+        sourceClass,
         filters: enriched,
         keywords: args.query.keywords ?? [],
         limit: PER_SOURCE_LIMIT,
@@ -557,22 +1083,6 @@ export function createDiscoveryActivities(deps: {
           updatedAt: true,
         },
       });
-      // 多源 fan-out：该 source_class 下**全部 ENABLED 适配器**并行召回（蓝图集成点 1）。
-      // 可选 source_hint 收窄到具体子源；否则全跑，统一进 raw → canonicalize 去重归并。
-      const hint = (args.query.filters?.source_hint as string | undefined)?.toLowerCase();
-      let adapters = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-        deps.providers.routeCompanyDiscovery(tx as never, q.sourceClass),
-      );
-      if (hint) adapters = adapters.filter((a) => a.key === hint || a.key.includes(hint));
-      if (adapters.length > MAX_DISCOVERY_PROVIDER_ADAPTERS) {
-        throw ApplicationFailure.nonRetryable(
-          'EXECUTION_BUDGET_ENVELOPE_EXCEEDED',
-          'EXECUTION_BUDGET_ENVELOPE_EXCEEDED',
-        );
-      }
-      for (const adapter of adapters) {
-        assertProductDiscoveryProvenance({ providerKey: adapter.key });
-      }
       // ── 事务外：各源真实发现（可能耗时数十秒），单源失败不影响其余 ──
       // 收口②：ExecutionContext 贯穿到 provider——LLM/工具出网按真租户/run 归属（灭伪 workspace）。
       const ctx: ExecutionContext = {
@@ -583,7 +1093,28 @@ export function createDiscoveryActivities(deps: {
       const blockedDomains = sourcePolicies
         .filter((policy) => policy.reviewStatus === 'SUSPENDED')
         .map((policy) => policy.domain);
-      const settled = await Promise.allSettled(
+      // Search overlap between a plan's queries is heavy: a site found by query 3 often shows up
+      // again for query 7, and judging it twice spends a model call to produce a record ingestion
+      // would discard. Hand the adapters what this run already accepted so they can skip those
+      // candidates before any model call (2026-10-28, run 7d70d81d: 32% of records were such
+      // duplicates).
+      const knownExternalIds = (
+        await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+          tx.rawSourceRecord.findMany({
+            where: {
+              runId: args.runId,
+              ingestStatus: 'ACCEPTED',
+              providerKey: { in: adapters.map((a) => a.key) },
+              externalId: { not: null },
+            },
+            select: { externalId: true },
+            distinct: ['externalId'],
+          }),
+        )
+      )
+        .map((row) => row.externalId)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0);
+      const dispatched: PromiseSettledResult<ProviderExecution>[] = await Promise.allSettled(
         adapters.map(async (a) => {
           const durableReceipts: Array<{
             producerId: string;
@@ -597,15 +1128,25 @@ export function createDiscoveryActivities(deps: {
               }
               durableReceipts.push({ producerId, receipt });
             },
-          }, { blockedDomains });
+          }, { blockedDomains, knownExternalIds });
           return { key: a.key, r, durableReceipts };
         }),
+      );
+      // Every provider has finished by now, so nothing is sent after a lost operation is seen.
+      const lostProviders = dispatched.flatMap((result, index) =>
+        result.status === 'rejected' && lostOnReplay(result.reason) ? [index] : [],
+      );
+      const unreplayable = lostProviders.length > 0;
+      const settled: PromiseSettledResult<ProviderExecution>[] = dispatched.map((result, index) =>
+        lostProviders.includes(index) ? unreplayableProviderExecution(adapters[index]!) : result,
       );
       for (const result of settled) {
         if (result.status === 'rejected' && isExecutionControlError(result.reason)) {
           // UNKNOWN physical-call/ACK state is a control failure: throw it and
-          // never issue another provider wire from this Activity.
-          throw result.reason;
+          // never issue another provider wire from this Activity. An unavailable model
+          // upstream makes the next attempt wait instead of retrying within seconds, or start
+          // past the query deadline when the lease cannot hold the wait.
+          throw withLeaseAwareQueryRetryDelay(result.reason, lease);
         }
         if (result.status !== 'fulfilled') continue;
         assertProductDiscoveryProvenance({ providerKey: result.value.key });
@@ -621,6 +1162,11 @@ export function createDiscoveryActivities(deps: {
         adapters,
         settled,
       });
+      const modelExtractions = sumModelExtractions(
+        settled.map((item) =>
+          item.status === 'fulfilled' ? item.value.r.modelExtractions : undefined,
+        ),
+      );
       // 预算耗尽绝不被吞成假成功。**不能**靠「某源 reject」判断——provider 的 fail-safe catch 会把
       // BudgetExceededError 吞成空结果（对源失败是对的），编排层从返回值区分不出「真没数据」还是「打穿被吞」。
       // 改由持久预算账户唯一真相点判：本 run 预算若在 fan-out 中被任一源的 broker/gateway reserve 打穿，
@@ -633,7 +1179,7 @@ export function createDiscoveryActivities(deps: {
             'DOMAIN_ACK_DISCOVERY_GOVERNED_LINEAGE_REPLAY_INTEGRITY_HOLD',
           );
         }
-        return commitGovernedDiscoveryQueryExecution({
+        const governed = await commitGovernedDiscoveryQueryExecution({
           prisma: deps.prisma,
           workspaceId: args.workspaceId,
           runId: args.runId,
@@ -648,9 +1194,17 @@ export function createDiscoveryActivities(deps: {
           budgetAuthorization,
           budgetTruncated,
         });
+        if (leaseStop) return { ...governed, skippedForLease: true };
+        return withTaxonomyOutcome(
+          withUnreplayable(
+            withModelExtractions(withReceiptSkip(governed, skipReason), modelExtractions),
+            unreplayable,
+          ),
+          taxonomyOutcome,
+        );
       }
       // ── 事务内：bounded Raw v2 receipt + deterministic reconciliation ──
-      return deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+      const legacy = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const persisted = await applyDomainAckConsumerTransactions({
           transaction: tx,
           acknowledgements: settled.flatMap((item) => item.status === 'fulfilled'
@@ -835,8 +1389,20 @@ export function createDiscoveryActivities(deps: {
             return executionResult(receipt, budgetTruncated);
           },
         });
-        return persisted.value;
+        // Only a query with no receipt identity can reach this path with no
+        // adapter; a legacy receipt omits providers that failed, so its
+        // provider list cannot tell a skip apart.
+        return withUnreplayable(
+          withModelExtractions(
+            adapters.length === 0
+              ? { ...persisted.value, skipReason: skipReason() }
+              : persisted.value,
+            modelExtractions,
+          ),
+          unreplayable,
+        );
       });
+      return withTaxonomyOutcome(legacy, taxonomyOutcome);
     },
 
     /**
@@ -1040,7 +1606,7 @@ export function createDiscoveryActivities(deps: {
           }
         }
         return { companies, suppressed };
-      });
+      }, DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS);
     },
 
     /**
@@ -1050,11 +1616,37 @@ export function createDiscoveryActivities(deps: {
      * 判定即 CandidateAssessment：发现候选就建 Lead 行（status=DISCOVERED、无 scores），评分阶段再填 scores。
      * fit 挂 Lead 而非 canonical —— 同 workspace 多 ICP 各自独立判，互不覆盖。网络调用在事务外，落库在事务内。
      */
-    async qualifyFitForRun(args: DiscoveryActivityInput & { runId: string; icpId: string }): Promise<{
+    async qualifyFitForRun(
+      args: DiscoveryActivityInput & {
+        runId: string;
+        icpId: string;
+        /** Continue after this company in id order; absent on a run's first fit activity. */
+        afterCompanyId?: string;
+        /** The previous fit activity ended on a cut stream. */
+        previousCallCut?: boolean;
+      },
+    ): Promise<{
       judged: number;
       verdicts: Record<string, number>;
       skippedForBudget: number;
+      /** Companies whose judgment failed (an absorbed model failure); they lower the run status. */
+      unjudged: number;
+      /** The last company this activity reached once its time box ran out; null when none is left. */
+      nextCompanyId: string | null;
+      /** Carries the two-in-a-row rule for lost calls over to the next fit activity. */
+      previousCallCut: boolean;
+      /** Companies left unjudged because their operation could not be replayed (part of `unjudged`). */
+      unreplayable: number;
+      /** Companies left unjudged because the run's admission lease had no room for them; present only then. */
+      skippedForLease?: number;
     }> {
+      if (
+        (args.afterCompanyId !== undefined &&
+          (typeof args.afterCompanyId !== 'string' || !CONTINUATION_COMPANY_ID.test(args.afterCompanyId))) ||
+        (args.previousCallCut !== undefined && typeof args.previousCallCut !== 'boolean')
+      ) {
+        invalidContinuation();
+      }
       const binding = await ensureRunBudget(args); // fit 判定（LLM）消耗计入同一 authority 账户
       // ICP 摘要 + 本 run 待判公司（事务内只读，快）
       const { icpBrief, companies } = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
@@ -1082,7 +1674,7 @@ export function createDiscoveryActivities(deps: {
             // 尚无「本 run ICP」的已判 Lead（无 Lead 或该 Lead.fitVerdict 为 null）才判定——防重复判、
             // 且以 icpId 限定 → 别的 ICP 判过的公司在本 ICP 仍会被判（修「后判 ICP 判不了」的漏斗断流）。
             where: {
-              id: { in: ids },
+              id: { in: ids, ...(args.afterCompanyId === undefined ? {} : { gt: args.afterCompanyId }) },
               status: { not: 'SUPPRESSED' },
               NOT: {
                 leads: {
@@ -1098,6 +1690,8 @@ export function createDiscoveryActivities(deps: {
               industry: true,
               attributes: true,
             },
+            // The hand-off cursor walks companies in id order.
+            orderBy: { id: 'asc' },
           })
         ).map((company) => ({
           ...company,
@@ -1118,44 +1712,201 @@ export function createDiscoveryActivities(deps: {
         mismatch: 0,
       };
       let judged = 0;
+      let unjudged = 0;
 
-      // 逐家判别（事务外，可并发但这里顺序以控成本/限流）
       let skippedForBudget = 0;
-      for (let i = 0; i < companies.length; i++) {
-        const c = companies[i];
-        if (
-          !(await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-            companyMayUseExternalProcessing(tx, args.workspaceId, c.id),
-          ))
-        )
-          continue;
-        let judgment;
+      let unreplayable = 0;
+      // The company before lost its fit call to a stream the gateway settled as cut short. A second
+      // such company in a row (in id order) looks like an outage and stops the activity.
+      let previousCallCut = args.previousCallCut ?? false;
+      let nextCompanyId: string | null = null;
+      let skippedForLease = 0;
+      const lease = await readRunLease(binding);
+
+      // Up to FIT_CONCURRENCY judgments run at once. Each company's verdict is stored as soon as it
+      // arrives, so a sibling's failure cannot lose it, and a retry, which lists only unjudged
+      // companies, never judges it again. A judgment never rejects: its outcome is folded below.
+      type FitOutcome =
+        | { kind: 'not-allowed' }
+        | { kind: 'judged'; verdict: string }
+        | { kind: 'unusable' }
+        | { kind: 'failed'; error: unknown };
+      const judgeCompany = async (c: (typeof companies)[number]): Promise<FitOutcome> => {
         try {
+          if (
+            !(await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+              companyMayUseExternalProcessing(tx, args.workspaceId, c.id),
+            ))
+          ) {
+            return { kind: 'not-allowed' };
+          }
           const authorizeExternalAction = authorizeCompanyExternalAction(args.workspaceId, c.id);
-          judgment = await judgeFitCompany(deps.gateway, args.workspaceId, icpBrief, c, {
+          const judgment = await judgeFitCompany(deps.gateway, args.workspaceId, icpBrief, c, {
             runId: binding.accountKey,
             runtimeTelemetry: deps.runtimeTelemetry,
             authorizeExternalAction,
           });
-        } catch (err) {
-          if (err instanceof BudgetExceededError) {
-            // 预算耗尽=本批余下全部会失败 → 中断并显性计数（复审 HIGH：绝不静默漏判假 DONE）
-            skippedForBudget = companies.length - i;
-            console.warn(
-              `[discovery] run ${args.runId} fit 预算耗尽：跳过余下 ${skippedForBudget} 家（进 stats，backlog sweep 兜底）`,
-            );
+          if (!judgment) return { kind: 'unusable' };
+          await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+            upsertLeadFit(tx, args.workspaceId, args.icpId, c.id, judgment),
+          );
+          return { kind: 'judged', verdict: judgment.verdict };
+        } catch (error) {
+          return { kind: 'failed', error };
+        }
+      };
+
+      // Outcomes are folded in id order once every company before them has settled, so the counts,
+      // the two-in-a-row rule and the hand-off cursor read as if the companies ran one by one. The
+      // first failure that stops the activity is kept, and the companies in flight finish before the
+      // activity returns or fails, so a retry never meets a call that is still running. A failure
+      // that settled behind a company still in flight may turn out to be that stop, so nothing new
+      // starts while one waits to be folded: a fast-failing upstream cannot fill the pool again and
+      // again while a slow judgment runs.
+      let stop: { reason: 'failure'; error: unknown } | { reason: 'budget' | 'lease' } | undefined;
+      let accounted = 0;
+      // Failures folded after the stop: one company after another would never have called them.
+      const leftOut: string[] = [];
+      const fold = (outcome: FitOutcome): void => {
+        if (outcome.kind === 'not-allowed') {
+          accounted += 1;
+          return;
+        }
+        if (outcome.kind === 'judged') {
+          accounted += 1;
+          previousCallCut = false;
+          verdicts[outcome.verdict] += 1;
+          judged += 1;
+          return;
+        }
+        if (outcome.kind === 'unusable') {
+          // 单家判别失败不影响其余，但要计数：编排层据此判 PARTIAL / FAILED，绝不静默漏判假 DONE。
+          // An unusable answer is no sign the upstream recovered: a cut after it is still in a row.
+          accounted += 1;
+          unjudged += 1;
+          return;
+        }
+        const err = outcome.error;
+        // A retry finds the call an earlier attempt left without a durable result: it is never sent
+        // again (D13), so that company stays unjudged, before a stop or after one. It says nothing
+        // about the upstream (the companies an attempt had in flight when it failed or its worker
+        // was lost come together), so it neither starts nor continues the two-in-a-row rule. The
+        // price: a lasting outage fails fit only while companies are left that no attempt called;
+        // on a short list every company ends up lost to replay and the run finishes PARTIAL.
+        if (isUnreplayableOperation(err)) {
+          accounted += 1;
+          unjudged += 1;
+          unreplayable += 1;
+          return;
+        }
+        // After a stop, a failed company is left for whatever the stop means (a retry, or a count).
+        if (stop !== undefined) {
+          leftOut.push(err instanceof Error ? err.name : typeof err);
+          return;
+        }
+        if (err instanceof BudgetExceededError) {
+          // 预算耗尽=余下全部会失败 → 不再开始新的公司，显性计数（复审 HIGH：绝不静默漏判假 DONE）
+          stop = { reason: 'budget' };
+          return;
+        }
+        // A transport failure usually hits every company, so it stops the activity. A single cut
+        // stream that the gateway settled without a result is the exception: retrying could only
+        // replay it into BUDGET_OPERATION_REPLAY_UNAVAILABLE, so that company counts as unjudged.
+        if (!previousCallCut && settledModelFailureReason(err) !== undefined) {
+          accounted += 1;
+          previousCallCut = true;
+          unjudged += 1;
+          return;
+        }
+        // An unavailable upstream makes the next attempt wait; when the lease cannot hold the wait
+        // and one more judgment, the stage stops for the lease instead of failing.
+        stop = upstreamWaitFitsLease(err, lease, DISCOVERY_LEASE_UNIT_MS.fit)
+          ? { reason: 'failure', error: err }
+          : { reason: 'lease' };
+      };
+
+      const inFlight = new Map<number, Promise<readonly [number, FitOutcome]>>();
+      const settled = new Map<number, FitOutcome>();
+      // Settled, not yet folded failures that may stop the activity (a lost replay never does).
+      let pendingFailures = 0;
+      const mayStop = (outcome: FitOutcome): boolean =>
+        outcome.kind === 'failed' && !isUnreplayableOperation(outcome.error);
+      let started = 0;
+      let folded = 0;
+      let handOff = false;
+      // The first company the lease had no room for. The stop for the lease comes after the
+      // companies before it are folded, so a stop one of them makes comes first, in id order.
+      let leaseStopAt: number | undefined;
+      const startedAt = clock();
+      for (;;) {
+        while (
+          stop === undefined &&
+          leaseStopAt === undefined &&
+          pendingFailures === 0 &&
+          !handOff &&
+          inFlight.size < FIT_CONCURRENCY &&
+          started < companies.length
+        ) {
+          // A company the lease has no room for ends the stage: the rest count as skipped for the
+          // lease, nothing is handed on, and the run finishes PARTIAL.
+          if (!lease.allows(DISCOVERY_LEASE_UNIT_MS.fit)) {
+            leaseStopAt = started;
             break;
           }
-          throw err;
+          // Hand the rest to the next activity rather than outrun this one's timeout; every
+          // activity starts at least one company, so the run always moves forward.
+          if (started > 0 && clock() - startedAt >= FIT_PASS_TIME_BOX_MS) {
+            handOff = true;
+            break;
+          }
+          const index = started;
+          started += 1;
+          inFlight.set(index, judgeCompany(companies[index]!).then((outcome) => [index, outcome] as const));
         }
-        if (!judgment) continue; // 单家判别失败不影响其余
-        verdicts[judgment.verdict] += 1;
-        judged += 1;
-        await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-          upsertLeadFit(tx, args.workspaceId, args.icpId, c.id, judgment),
+        if (inFlight.size === 0) break;
+        const [index, outcome] = await Promise.race(inFlight.values());
+        inFlight.delete(index);
+        settled.set(index, outcome);
+        if (mayStop(outcome)) pendingFailures += 1;
+        for (let ready = settled.get(folded); ready !== undefined; ready = settled.get(folded)) {
+          settled.delete(folded);
+          folded += 1;
+          if (mayStop(ready)) pendingFailures -= 1;
+          fold(ready);
+        }
+      }
+
+      // Every company started has settled and been folded; the ones left are the companies never
+      // started, and after a stop the ones whose failure the stop covers.
+      if (stop === undefined && leaseStopAt !== undefined) stop = { reason: 'lease' };
+      if (leftOut.length > 0) {
+        console.warn(
+          `[discovery] run ${args.runId} fit 已停下，之后落定的 ${leftOut.length} 家失败按停下处理：${leftOut.join(', ')}`,
         );
       }
-      return { judged, verdicts, skippedForBudget };
+      const left = companies.length - accounted;
+      const stopped = stop as typeof stop;
+      if (stopped?.reason === 'failure') throw withUpstreamUnavailableRetryDelay(stopped.error);
+      if (stopped?.reason === 'budget') {
+        skippedForBudget = left;
+        console.warn(
+          `[discovery] run ${args.runId} fit 预算耗尽：跳过余下 ${skippedForBudget} 家（进 stats，不会自动补判）`,
+        );
+      } else if (stopped?.reason === 'lease') {
+        skippedForLease = left;
+      } else if (handOff) {
+        nextCompanyId = companies[started - 1]!.id;
+      }
+      return {
+        judged,
+        verdicts,
+        skippedForBudget,
+        unjudged,
+        nextCompanyId,
+        previousCallCut,
+        unreplayable,
+        ...(skippedForLease > 0 ? { skippedForLease } : {}),
+      };
     },
 
     /**
@@ -1166,12 +1917,26 @@ export function createDiscoveryActivities(deps: {
      * 幂等：按 enricher key 命名空间存 attributes，已有该源命名空间则跳过（重跑不重复写证据）。
      * 网络调用在事务外，每家命中后单独落库（attributes 命名空间合并 + 逐字段 field_evidence）。
      */
-    async enrichRun(args: DiscoveryActivityInput & { runId: string; icpId: string }): Promise<{
+    async enrichRun(
+      args: DiscoveryActivityInput & {
+        runId: string;
+        icpId: string;
+        /** Continue at this position of the run's enrichment list; absent on the first enrich activity. */
+        startIndex?: number;
+      },
+    ): Promise<{
       enriched: number;
       matched: number;
       provider: string | null;
       budgetTruncated: boolean;
+      /** Where the next enrich activity continues once this one's time box ran out; null when none is left. */
+      nextIndex: number | null;
+      /** Companies left unenriched because the run's admission lease had no room for them; present only then. */
+      skippedForLease?: number;
     }> {
+      if (args.startIndex !== undefined && !isContinuationIndex(args.startIndex, ENRICH_LIMIT)) {
+        invalidContinuation();
+      }
       const binding = await ensureRunBudget(args);
       const enrichers = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         deps.providers.routeEnrichment(tx as never),
@@ -1182,6 +1947,7 @@ export function createDiscoveryActivities(deps: {
           matched: 0,
           provider: null,
           budgetTruncated: false,
+          nextIndex: null,
         };
 
       // 本 run 归一出、且过了本 run ICP 资格门（Lead.fitVerdict='match'）的公司
@@ -1218,13 +1984,38 @@ export function createDiscoveryActivities(deps: {
             region: true,
             attributes: true,
           },
+          // A total order, so every enrich activity of the run sees the same list behind its index.
+          orderBy: { id: 'asc' },
+          take: ENRICH_LIMIT,
         });
       });
 
       const providersHit = new Set<string>();
       let enriched = 0;
       let matched = 0;
-      for (const c of companies.slice(0, ENRICH_LIMIT)) {
+      const startIndex = args.startIndex ?? 0;
+      let nextIndex: number | null = null;
+      let skippedForLease = 0;
+      // The companies from `from` on that an enricher still has to read (each skips the ones it did).
+      const unenrichedCompanies = (from: number): number =>
+        companies.slice(from).filter((company) => {
+          const existing = ((company.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
+          return enrichers.some((enricher) => !existing[enricher.key]);
+        }).length;
+      const lease = await readRunLease(binding);
+      const startedAt = clock();
+      for (let i = startIndex; i < companies.length; i++) {
+        // A company the lease has no room for ends the stage (see qualifyFitForRun).
+        if (!lease.allows(DISCOVERY_LEASE_UNIT_MS.enrich)) {
+          skippedForLease = unenrichedCompanies(i);
+          break;
+        }
+        // Hand the rest to the next activity rather than outrun this one's timeout.
+        if (i > startIndex && clock() - startedAt >= ENRICH_PASS_TIME_BOX_MS) {
+          nextIndex = i;
+          break;
+        }
+        const c = companies[i];
         const durableReceipts: Array<{
           producerId: string;
           receipt: DurableExecutionReceipt;
@@ -1310,6 +2101,8 @@ export function createDiscoveryActivities(deps: {
         matched,
         provider: providersHit.size ? [...providersHit].join('+') : null,
         budgetTruncated: (await budgets.status({ workspaceId: binding.scopeKey, accountKey: binding.accountKey })).exhausted,
+        nextIndex,
+        ...(skippedForLease > 0 ? { skippedForLease } : {}),
       };
     },
 
@@ -1319,21 +2112,80 @@ export function createDiscoveryActivities(deps: {
      *  - kill-switch：data_provider `website_profile` 非 ENABLED → 整段不出网。
      *  - 上限 MAX_DISCOVERY_PROFILE_COMPANIES；30 天内画像过的公司不重抓。
      *  - 主体被拒（tombstone/SUPPRESSED/失效）→ 只跳过这家，计入 skippedSubjects；控制错误让 run 失败。
+     *  - BI-14 联系路径：开关 `company_contact`（种子 DISABLED）为 ENABLED 时，画像顺带从首页链接里找联系页、
+     *    Impressum、供应商页、公司 LinkedIn 与 X，并渲染联系页（每家至多 1 页）看有没有联系表单；在同一事务里
+     *    经禁联闸门写 company_contact_point。开关关闭时不渲染、不写点。画像在 30 天内、但还没用当前规则读过
+     *    联系路径的公司，开关打开后会重画像一次。
+     *  - 补联系路径（评分规则 v3）：开关打开、且本 run 的公司没用完画像配额时，用余量读工作区里还没按当前规则
+     *    读过联系路径的公司（contactPathBackfillCandidates），不必等新 run 再找到它们；计入 `backfilled`
+     *   （profiled / matched / unclassified 只计本 run 的公司）。配额、时间盒与续接下标对本 run 公司 + 补读公司的
+     *    合并列表一体生效。
+     *  - 尝试水位（W5-f）：开关打开时每次尝试都在 website_profile 记 `_contact_attempt_at`（无论结果）；补读候选
+     *    从未尝试的优先、再按上次尝试时间升序，run 创建前 7 天内尝试过的不入选；补读每家前重读一次，别的 run
+     *    刚尝试过的跳过。
      */
-    async profileWebsitesForRun(args: DiscoveryActivityInput & { runId: string; icpId: string }): Promise<{
+    async profileWebsitesForRun(
+      args: DiscoveryActivityInput & {
+        runId: string;
+        icpId: string;
+        /** Continue at this position of the run's profile list; absent on the first profile activity. */
+        startIndex?: number;
+        /** The previous profile activity ended on a company it skipped as unreplayable. */
+        previousUnreplayable?: boolean;
+      },
+    ): Promise<{
       profiled: number;
       matched: number;
       skippedSubjects: number;
       budgetTruncated: boolean;
+      /** Profiles without a trade role: rules were not decisive and the model gave no verdict. */
+      unclassified: number;
+      /** Where the next profile activity continues once this one's time box ran out; null when none is left. */
+      nextIndex: number | null;
+      /** Companies skipped because an operation could not be replayed. */
+      unreplayable: number;
+      /**
+       * Whether this pass ended on a company it skipped as unreplayable. Kept on the wire for older
+       * workflow histories; it no longer decides anything (a remnant is absorbed like any skip).
+       */
+      previousUnreplayable: boolean;
+      /** Workspace companies outside the run profiled with the quota the run's own companies left (contact-path backfill). */
+      backfilled: number;
+      /**
+       * The run's own companies left unprofiled because the admission lease had no room for them
+       * (backfill companies are not counted); present only then.
+       */
+      skippedForLease?: number;
     }> {
+      if (
+        (args.startIndex !== undefined && !isContinuationIndex(args.startIndex, MAX_DISCOVERY_PROFILE_COMPANIES)) ||
+        (args.previousUnreplayable !== undefined && typeof args.previousUnreplayable !== 'boolean')
+      ) {
+        invalidContinuation();
+      }
       const binding = await ensureRunBudget(args);
-      const idle = { profiled: 0, matched: 0, skippedSubjects: 0, budgetTruncated: false };
+      const idle = {
+        profiled: 0,
+        matched: 0,
+        skippedSubjects: 0,
+        budgetTruncated: false,
+        unclassified: 0,
+        nextIndex: null,
+        unreplayable: 0,
+        previousUnreplayable: args.previousUnreplayable ?? false,
+        backfilled: 0,
+      };
       const setup = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const source = await tx.dataProvider.findUnique({
           where: { key: WEBSITE_PROFILE_PROVIDER_KEY },
           select: { status: true },
         });
         if (source?.status !== 'ENABLED') return null;
+        // BI-14: the contact paths ride on the same profile behind their own switch (seeded DISABLED).
+        const contactSource = await tx.dataProvider.findUnique({
+          where: { key: COMPANY_CONTACT_PROVIDER_KEY },
+          select: { status: true },
+        });
         const icp = await tx.icpDefinition.findUnique({
           where: { id: args.icpId },
           select: { companyAttributes: true, targetMarkets: true },
@@ -1348,17 +2200,41 @@ export function createDiscoveryActivities(deps: {
           where: { canonicalType: 'company', rawRecordId: { in: rawIds.map((r) => r.id) } },
           select: { canonicalId: true },
         });
-        const companies = await tx.canonicalCompany.findMany({
+        const runCompanies = await tx.canonicalCompany.findMany({
           where: {
             id: { in: [...new Set(links.map((l) => l.canonicalId))] },
             status: { not: 'SUPPRESSED' },
             domain: { not: null },
           },
           select: { id: true, name: true, domain: true, country: true, attributes: true },
-          orderBy: { createdAt: 'asc' },
+          // A total order, so every profile activity of the run sees the same list behind its index.
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
           take: MAX_DISCOVERY_PROFILE_COMPANIES,
         });
-        return { icp, companies };
+        const contactPaths = contactSource?.status === 'ENABLED';
+        // W5-f: the attempt watermark and its cooldown count from the run's creation, the same instant
+        // for every profile activity of the run.
+        const runSince = contactPaths
+          ? (await tx.discoveryRun.findUnique({ where: { id: args.runId }, select: { createdAt: true } }))
+              ?.createdAt ?? new Date()
+          : null;
+        // Scoring rules v3: the quota the run's own companies leave goes to the workspace companies
+        // whose contact paths were never read (same total order, appended, so indexes still hold).
+        const backfill = runSince
+          ? await contactPathBackfillCandidates(tx, {
+              workspaceId: args.workspaceId,
+              runSince,
+              excludeCompanyIds: runCompanies.map((company) => company.id),
+              limit: MAX_DISCOVERY_PROFILE_COMPANIES - runCompanies.length,
+            })
+          : [];
+        return {
+          icp,
+          companies: [...runCompanies, ...backfill],
+          runCount: runCompanies.length,
+          contactPaths,
+          runSince,
+        };
       });
       if (!setup) return idle;
       const provider =
@@ -1379,95 +2255,252 @@ export function createDiscoveryActivities(deps: {
       let profiled = 0;
       let matched = 0;
       let skippedSubjects = 0;
-      for (const c of setup.companies) {
-        const existing = ((c.attributes as Record<string, unknown> | null) ?? {})[WEBSITE_PROFILE_PROVIDER_KEY] as
-          | { _ts?: string }
-          | undefined;
-        if (existing?._ts && nowMs - Date.parse(existing._ts) < WEBSITE_PROFILE_TTL_MS) continue;
-        if (
-          !c.domain ||
-          !(await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-            companyMayUseExternalProcessing(tx, args.workspaceId, c.id),
-          ))
-        )
-          continue;
-        const durableReceipts: Array<{ producerId: string; receipt: DurableExecutionReceipt }> = [];
-        let profile: WebsiteProfile | null = null;
-        let subjectDenied = false;
-        try {
-          const homeCountry = targetCountryCodes({ filters: { country: c.country } })[0] ?? icpHomeCountry;
-          profile = await provider.profile(
-            { domain: c.domain, homeCountry, icpContext },
-            {
-              workspaceId: args.workspaceId,
-              runId: binding.accountKey,
-              correlationId: binding.accountKey,
-              authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
-              onDurableReceipt: (producerId, receipt) => {
-                durableReceipts.push({ producerId, receipt });
-              },
-              artifactSubject: { subjectType: 'company', subjectId: c.id },
-            },
-          );
-        } catch (error) {
-          if (artifactSubjectSkipReason(error)) {
-            subjectDenied = true;
-          } else if (isExecutionControlError(error)) {
-            throw error;
+      let unclassified = 0;
+      let unreplayable = 0;
+      let backfilled = 0;
+      let previousUnreplayable = args.previousUnreplayable ?? false;
+      const startIndex = args.startIndex ?? 0;
+      let nextIndex: number | null = null;
+      let skippedForLease = 0;
+      // The run's own companies from `from` on that still wanted a profile.
+      const unprofiledRunCompanies = (from: number): number =>
+        setup.companies
+          .slice(from, setup.runCount)
+          .filter((company) => company.domain && !websiteProfileFreshAndCurrent(company.attributes, setup.contactPaths, nowMs))
+          .length;
+      const lease = await readRunLease(binding);
+      const startedAt = clock();
+      // Two profiles at once: each is two page fetches, a render and one model call, so a batch
+      // halves the stage's wall clock. Everything before the fetch (lease, time box, freshness,
+      // stored-attempt checks) and everything after it (counters, ACKs, commits) stays sequential
+      // and in company order; only the network work overlaps.
+      const PROFILE_CONCURRENCY = 2;
+      interface ProfileBatchEntry {
+        index: number;
+        company: (typeof setup.companies)[number];
+        backfill: boolean;
+        priorAttempt: ContactPathAttempt | null;
+        durableReceipts: Array<{ producerId: string; receipt: DurableExecutionReceipt }>;
+      }
+      for (let i = startIndex; i < setup.companies.length; ) {
+        const batch: ProfileBatchEntry[] = [];
+        let j = i;
+        let stopAfterBatch = false;
+        while (j < setup.companies.length && batch.length < PROFILE_CONCURRENCY) {
+          // A company the lease has no room for ends the stage (see qualifyFitForRun). Reserve one
+          // unit per company already admitted to this batch: profiles only start after the scan,
+          // so the lease clock has not moved yet for them.
+          if (!lease.allows(DISCOVERY_LEASE_UNIT_MS.websiteProfile * (batch.length + 1))) {
+            skippedForLease = unprofiledRunCompanies(j);
+            stopAfterBatch = true;
+            break;
           }
-          /* 单家画像失败不影响其余 */
-        }
-        if (subjectDenied) skippedSubjects += 1;
-        else profiled += 1;
-        // 不给被拒主体写任何属性；已产生的回执照常 ACK（apply 为空操作）。
-        const hits = profile && !subjectDenied
-          ? [{ key: WEBSITE_PROFILE_PROVIDER_KEY, result: websiteProfileEnrichment(profile, new Date(nowMs)) }]
-          : [];
-        if (!hits.length && !durableReceipts.length) continue;
-        const committed = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-          const result = await applyDomainAckConsumerTransactions({
-            transaction: tx,
-            acknowledgements: durableReceipts.map(({ producerId, receipt }) => ({
-              producerId,
-              receipt,
-              domainAckKey: `${c.id}:${receipt.operationId}:website-profile`,
-              domainRevision: receipt.resultDigest,
-            })),
-            apply: (transaction) => hits.length
-              ? commitCompanyEnrichmentResults(transaction, {
-                  workspaceId: args.workspaceId,
-                  companyId: c.id,
-                  hits,
-                  signalTimestamp: new Date(nowMs),
-                })
-              : Promise.resolve(false),
-            readback: async (transaction) => {
-              const current = await transaction.canonicalCompany.findUnique({
-                where: { id: c.id },
-                select: { attributes: true },
-              });
-              const attributes = (current?.attributes ?? {}) as Record<string, unknown>;
-              return hits.length > 0 && Object.hasOwn(attributes, WEBSITE_PROFILE_PROVIDER_KEY);
-            },
+          // Hand the rest to the next activity rather than outrun this one's timeout.
+          if (j > startIndex && clock() - startedAt >= PROFILE_PASS_TIME_BOX_MS) {
+            nextIndex = j;
+            stopAfterBatch = true;
+            break;
+          }
+          const index = j;
+          const c = setup.companies[j]!;
+          j += 1;
+          // A workspace company outside the run, profiled with the quota the run's own companies left.
+          const backfill = index >= setup.runCount;
+          if (websiteProfileFreshAndCurrent(c.attributes, setup.contactPaths, nowMs) || !c.domain) continue;
+          // W5-f: with the switch on, read the stored company again right before the fetch. A company
+          // another run (or an earlier attempt of this activity) read since the list was taken is skipped,
+          // a backfill company tried within the cooldown too, and the attempt stamp starts from what is
+          // stored now.
+          const stored = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+            if (!(await companyMayUseExternalProcessing(tx, args.workspaceId, c.id))) return null;
+            if (!setup.runSince) return { attempt: null };
+            const row = await tx.canonicalCompany.findUnique({ where: { id: c.id }, select: { attributes: true } });
+            if (websiteProfileFreshAndCurrent(row?.attributes, true, nowMs)) return null;
+            return { attempt: contactPathAttempt(row?.attributes) };
           });
-          return result.value;
-        });
-        if (committed) matched += 1;
+          if (!stored) continue;
+          const priorAttempt: ContactPathAttempt | null = stored.attempt;
+          if (backfill && priorAttempt && setup.runSince && contactPathAttemptCooling(priorAttempt, setup.runSince)) {
+            continue;
+          }
+          batch.push({ index, company: c, backfill, priorAttempt, durableReceipts: [] });
+        }
+        i = j;
+        if (batch.length > 0) {
+          const launched = await Promise.allSettled(
+            batch.map((entry) => {
+              const homeCountry = targetCountryCodes({ filters: { country: entry.company.country } })[0] ?? icpHomeCountry;
+              return provider.profile(
+                { domain: entry.company.domain!, homeCountry, icpContext, contactPaths: setup.contactPaths },
+                {
+                  workspaceId: args.workspaceId,
+                  runId: binding.accountKey,
+                  correlationId: binding.accountKey,
+                  authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, entry.company.id),
+                  onDurableReceipt: (producerId, receipt) => {
+                    entry.durableReceipts.push({ producerId, receipt });
+                  },
+                  artifactSubject: { subjectType: 'company', subjectId: entry.company.id },
+                },
+              );
+            }),
+          );
+          let leaseStopIndex: number | undefined;
+          for (const [k, entry] of batch.entries()) {
+            const { index, company: c, backfill, priorAttempt, durableReceipts } = entry;
+            let profile: WebsiteProfile | null = null;
+            let subjectDenied = false;
+            let unreplayableSkip = false;
+            let skipWasRemnant = false;
+            const outcome = launched[k]!;
+            if (outcome.status === 'fulfilled') {
+              profile = outcome.value;
+            } else {
+              const error = outcome.reason;
+              if (artifactSubjectSkipReason(error)) {
+                subjectDenied = true;
+              } else if (isUnreplayableOperation(error) && (isReplayRemnant(error) || !previousUnreplayable)) {
+                unreplayableSkip = true;
+                skipWasRemnant = isReplayRemnant(error);
+              } else if (isExecutionControlError(error)) {
+                // An unavailable model upstream makes the next attempt wait instead of retrying within
+                // seconds; when the lease cannot hold the wait and one more profile, the stage stops
+                // for the lease here instead. This company stays uncounted and resumes next pass; the
+                // rest of the batch already ran and is still committed below.
+                if (!upstreamWaitFitsLease(error, lease, DISCOVERY_LEASE_UNIT_MS.websiteProfile)) {
+                  leaseStopIndex = index;
+                  continue;
+                }
+                throw withUpstreamUnavailableRetryDelay(error);
+              }
+              /* 单家画像失败不影响其余 */
+            }
+            // Only a live fault carries the two-in-a-row rule on to the next company and the next pass.
+            previousUnreplayable = unreplayableSkip && !skipWasRemnant;
+            // BI-14：联系路径的观测时间取这家页面读完的时刻（不是活动开始时刻），供 last_seen_at 单调比较。
+            const observedAt = new Date();
+            // W5-f：profiled / matched / unclassified 只计本 run 的公司；补读的公司计入 backfilled。
+            if (unreplayableSkip) unreplayable += 1;
+            else if (subjectDenied) skippedSubjects += 1;
+            else if (backfill) backfilled += 1;
+            else profiled += 1;
+            if (!backfill && profile && profile.tradeRoleSource === null) unclassified += 1;
+            // W5-f：开关打开时每次尝试都记尝试时间（读到、空页、robots 拒绝、死站、超时、无法重放、主体被拒），
+            // 一直失败的公司歇满冷却期再排到从未尝试的公司之后，不再永远占着补读候选的最前面。
+            const attempt =
+              priorAttempt && setup.runSince ? nextContactPathAttempt(priorAttempt, observedAt, setup.runSince) : null;
+            // 不给被拒主体写任何事实（只记尝试时间）；已产生的回执照常 ACK（apply 为空操作）。
+            const hits = profile && !subjectDenied
+              ? [{ key: WEBSITE_PROFILE_PROVIDER_KEY, result: websiteProfileEnrichment(profile, new Date(nowMs)) }]
+              : [];
+            // BI-14: only while the switch is on; a provider answer for a switched-off run is ignored.
+            const contactPaths = profile && !subjectDenied && setup.contactPaths ? profile.contactPaths : undefined;
+            // The contact-page render is acknowledged as its own batch in the same transaction, so a
+            // profile replayed from an earlier attempt cannot mix replayed and new receipts.
+            const profileReceipts = durableReceipts.filter(({ producerId }) => producerId !== 'crawl4ai.render');
+            const contactReceipts = durableReceipts.filter(({ producerId }) => producerId === 'crawl4ai.render');
+            const stampAttempt = (tx: Prisma.TransactionClient) =>
+              attempt
+                ? recordContactPathAttempt(tx, { workspaceId: args.workspaceId, companyId: c.id, attempt })
+                : Promise.resolve(false);
+            if (!hits.length && !durableReceipts.length) {
+              if (attempt) await deps.prisma.withWorkspace(args.workspaceId, stampAttempt);
+              continue;
+            }
+            const committed = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+              const result = await applyDomainAckConsumerTransactions({
+                transaction: tx,
+                acknowledgements: profileReceipts.map(({ producerId, receipt }) => ({
+                  producerId,
+                  receipt,
+                  domainAckKey: `${c.id}:${receipt.operationId}:website-profile`,
+                  domainRevision: receipt.resultDigest,
+                })),
+                apply: (transaction) => hits.length
+                  ? commitCompanyEnrichmentResults(transaction, {
+                      workspaceId: args.workspaceId,
+                      companyId: c.id,
+                      hits,
+                      signalTimestamp: new Date(nowMs),
+                      ...(contactPaths
+                        ? { namespaceMarkers: { [COMPANY_CONTACT_PARSER_MARKER]: COMPANY_CONTACT_PARSER_VERSION } }
+                        : {}),
+                    })
+                  : Promise.resolve(false),
+                readback: async (transaction) => {
+                  const current = await transaction.canonicalCompany.findUnique({
+                    where: { id: c.id },
+                    select: { attributes: true },
+                  });
+                  const attributes = (current?.attributes ?? {}) as Record<string, unknown>;
+                  // Profile facts carry `_ts`; a namespace holding only a contact-path attempt stamp (W5-f) is not a commit.
+                  const namespace = attributes[WEBSITE_PROFILE_PROVIDER_KEY] as { _ts?: unknown } | undefined;
+                  return hits.length > 0 && typeof namespace?._ts === 'string';
+                },
+              });
+              if (contactPaths || contactReceipts.length > 0) {
+                // persistCompanyContactPoints takes the policy lock, re-reads the company FOR SHARE and
+                // the suppression facts itself; a suppressed company gets no point.
+                await applyDomainAckConsumerTransactions({
+                  transaction: tx,
+                  acknowledgements: contactReceipts.map(({ producerId, receipt }) => ({
+                    producerId,
+                    receipt,
+                    domainAckKey: `${c.id}:${receipt.operationId}:company-contact`,
+                    domainRevision: receipt.resultDigest,
+                  })),
+                  apply: (transaction) => contactPaths
+                    ? persistCompanyContactPoints(transaction, {
+                        workspaceId: args.workspaceId,
+                        companyId: c.id,
+                        observation: companyContactObservation(contactPaths),
+                        seenAt: observedAt,
+                      })
+                    : Promise.resolve(null),
+                  readback: async () => null,
+                });
+              }
+              // After the profile commit, which rewrites the namespace: the stamp lands next to its facts.
+              await stampAttempt(tx);
+              return result.value;
+            });
+            if (committed && !backfill) matched += 1;
+          }
+          if (leaseStopIndex !== undefined) {
+            // The company whose wait did not fit resumes in the next pass, as does everything after
+            // the batch; the other companies of the batch were committed above.
+            skippedForLease =
+              unprofiledRunCompanies(batch[batch.length - 1]!.index + 1) +
+              (leaseStopIndex < setup.runCount ? 1 : 0);
+            break;
+          }
+        }
+        if (stopAfterBatch) break;
       }
       return {
         profiled,
         matched,
         skippedSubjects,
         budgetTruncated: (await budgets.status({ workspaceId: binding.scopeKey, accountKey: binding.accountKey })).exhausted,
+        unclassified,
+        nextIndex,
+        unreplayable,
+        previousUnreplayable,
+        backfilled,
+        ...(skippedForLease > 0 ? { skippedForLease } : {}),
       };
     },
 
     /**
      * 信号富集（v3.0）——与 enrichRun **分开的独立活动**（抓官网/sitemap 慢且时变，绝不塞进
-     * enrichRun 的 2 分钟活动）。由 discoveryWorkflow 用**长 startToCloseTimeout + heartbeat** 代理。
+     * enrichRun 的 2 分钟活动）。由 discoveryWorkflow 用**长 startToCloseTimeout**（30 分钟、2 次尝试）代理，不发 heartbeat。
      *  - DAT-011：SUSPENDED 域名跳过（富集侧同样遵守 source_policy）。
      *  - TTL 刷新：命名空间 `_ts` 在 SIGNAL_TTL_MS 内则跳过（信号时变，不能像 GLEIF 静态事实那样一次写死）。
-     *  - 每家 heartbeat + 上限 SIGNAL_ENRICH_LIMIT，防长活动被判卡死。
+     *  - 上限 SIGNAL_ENRICH_LIMIT 家，让一次尝试落在 startToCloseTimeout 之内。
+     *  - 站点自己断开连接只跳过这家公司的那一个源（计 transportFailed）。那次读取留在 RESERVED：
+     *    同一 run 的第 2 次尝试会把这家记为不可重放（残留，`origin=remnant`）并照常计数；
+     *    「连续两次」只对本次尝试自己的落库/结算失败（`origin=live`）保留。只有第 1 次尝试
+     *    另因别的原因失败时才会走到这里。
      */
     async enrichSignalsRun(args: DiscoveryActivityInput & { runId: string; icpId: string }): Promise<{
       enriched: number;
@@ -1475,6 +2508,12 @@ export function createDiscoveryActivities(deps: {
       provider: string | null;
       budgetTruncated: boolean;
       skippedSubjects: number;
+      /** Companies skipped because an operation could not be replayed. */
+      unreplayable: number;
+      /** Companies that lost an enricher because their site dropped the connection; only when > 0. */
+      transportFailed?: number;
+      /** Companies left unenriched because the run's admission lease had no room for them; present only then. */
+      skippedForLease?: number;
     }> {
       const binding = await ensureRunBudget(args);
       const enrichers = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
@@ -1487,6 +2526,7 @@ export function createDiscoveryActivities(deps: {
           provider: null,
           budgetTruncated: false,
           skippedSubjects: 0,
+          unreplayable: 0,
         };
 
       // DAT-011：SUSPENDED 域名黑名单（平台级 source_policy，富集侧同样遵守 —— 富集也会抓这些域名）
@@ -1525,6 +2565,8 @@ export function createDiscoveryActivities(deps: {
             domain: { not: null },
             leads: { some: { icpId: args.icpId, fitVerdict: 'match' } },
           },
+          // 固定顺序：重试的活动按同样的顺序、同样的上限截断遇到同一批公司。
+          orderBy: { id: 'asc' },
           select: {
             id: true,
             name: true,
@@ -1540,32 +2582,66 @@ export function createDiscoveryActivities(deps: {
       let enriched = 0;
       let matched = 0;
       let skippedSubjects = 0;
+      let unreplayable = 0;
+      let transportFailed = 0;
+      let skippedForLease = 0;
+      // Only a live fault (this attempt's own wire failing to store its result) carries the
+      // two-in-a-row stop; a remnant is counted like any other skip.
+      let previousUnreplayable = false;
       const nowMs = Date.now();
-      for (const c of companies.slice(0, SIGNAL_ENRICH_LIMIT)) {
-        const durableReceipts: Array<{
-          producerId: string;
-          receipt: DurableExecutionReceipt;
-        }> = [];
+      const lease = await readRunLease(binding);
+      const signalCompanies = companies.slice(0, SIGNAL_ENRICH_LIMIT);
+      // The companies from `from` on that still have a signal source to read (the loop's own TTL
+      // and SUSPENDED checks decide each company the same way).
+      const signalsUnread = (from: number): number =>
+        signalCompanies
+          .slice(from)
+          .filter((company) => {
+            if (company.domain && suspended.has(company.domain.toLowerCase())) return false;
+            const existing = ((company.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
+            return enrichers.some((enricher) => {
+              const prev = existing[enricher.key] as { _ts?: string } | undefined;
+              return !(prev?._ts && nowMs - Date.parse(prev._ts) < SIGNAL_TTL_MS);
+            });
+          }).length;
+      for (let i = 0; i < signalCompanies.length; i++) {
+        const c = signalCompanies[i]!;
+        // 同一操作只记一次：careers 页就是首页、两个 sitemap 列出同一子图时，同一回执会到两次。
+        const durableReceipts = new Map<
+          string,
+          Map<string, { producerId: string; receipt: DurableExecutionReceipt }>
+        >();
         const captureEnrichmentReceipt = (
+          enricherKey: string,
           producerId: string,
           receipt: DurableExecutionReceipt,
         ): void => {
-          durableReceipts.push({ producerId, receipt });
+          const owned = durableReceipts.get(enricherKey) ?? new Map();
+          if (!owned.has(receipt.operationId)) owned.set(receipt.operationId, { producerId, receipt });
+          durableReceipts.set(enricherKey, owned);
         };
         const ctx: ExecutionContext = {
           workspaceId: args.workspaceId,
           runId: binding.accountKey,
           correlationId: binding.accountKey,
           authorizeExternalAction: authorizeCompanyExternalAction(args.workspaceId, c.id),
-          onDurableReceipt: captureEnrichmentReceipt,
           // G3 5.5：官网抓取（crawl4ai.render / http.get）的产物挂在这家已建档公司名下。
           artifactSubject: { subjectType: 'company', subjectId: c.id },
         };
         if (c.domain && suspended.has(c.domain.toLowerCase())) continue; // DAT-011：富集侧跳过 SUSPENDED
+        // A company the lease has no room for ends the stage (see qualifyFitForRun).
+        if (!lease.allows(DISCOVERY_LEASE_UNIT_MS.enrich)) {
+          skippedForLease = signalsUnread(i);
+          break;
+        }
 
         const existing = ((c.attributes as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
         const hits: { key: string; result: EnrichmentResult }[] = [];
         let subjectDenied = false;
+        let unreplayableSkip = false;
+        let skipWasRemnant = false;
+        let transportLost = false;
+        let attempted = false;
         for (const e of enrichers) {
           const prev = existing[e.key] as { _ts?: string } | undefined;
           if (prev?._ts && nowMs - Date.parse(prev._ts) < SIGNAL_TTL_MS) continue; // TTL 新鲜 → 跳过（不刷）
@@ -1575,6 +2651,7 @@ export function createDiscoveryActivities(deps: {
             ))
           )
             break;
+          attempted = true;
           try {
             const r = await e.enrichCompany(
               {
@@ -1583,7 +2660,11 @@ export function createDiscoveryActivities(deps: {
                 country: c.country ?? undefined,
                 region: c.region ?? undefined,
               },
-              ctx,
+              {
+                ...ctx,
+                onDurableReceipt: (producerId, receipt) =>
+                  captureEnrichmentReceipt(e.key, producerId, receipt),
+              },
             );
             if (r.matched) hits.push({ key: e.key, result: r });
           } catch (error) {
@@ -1592,46 +2673,46 @@ export function createDiscoveryActivities(deps: {
               subjectDenied = true;
               break;
             }
+            if (isUnreplayableOperation(error) && (isReplayRemnant(error) || !previousUnreplayable)) {
+              unreplayableSkip = true;
+              skipWasRemnant = isReplayRemnant(error);
+              break;
+            }
+            // 站点自己断开连接（TLS 重置、socket hang up）只是这家公司这一个信号源的损失，不是控制决定；
+            // 那次读取留在 RESERVED，下一个 run 换了操作键会重试。
+            if (isPublicHttpTransportFailure(error)) {
+              transportLost = true;
+              console.warn(
+                `[discovery] run ${args.runId} 信号源 ${e.key} 读公司 ${c.id} 时对方断开连接（${String((error as { code?: unknown }).code ?? 'UNKNOWN')}），只跳过这一源`,
+              );
+              continue;
+            }
             if (isExecutionControlError(error)) throw error;
             /* 单信号源失败不影响其余 */
           }
         }
-        if (subjectDenied) skippedSubjects += 1;
-        else enriched += 1;
-        // 不给被拒主体写任何属性；已产生的回执照常 ACK（apply 为空操作）。
-        const committedHits = subjectDenied ? [] : hits;
-        if (!committedHits.length && !durableReceipts.length) continue;
-        const committed = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-          const result = await applyDomainAckConsumerTransactions({
-            transaction: tx,
-            acknowledgements: durableReceipts.map(({ producerId, receipt }) => ({
-              producerId,
-              receipt,
-              domainAckKey: `${c.id}:${receipt.operationId}:signal-enrichment`,
-              domainRevision: receipt.resultDigest,
-            })),
-            apply: (transaction) => committedHits.length
-              ? commitCompanyEnrichmentResults(transaction, {
-                  workspaceId: args.workspaceId,
-                  companyId: c.id,
-                  hits: committedHits,
-                  signalTimestamp: new Date(nowMs),
-                })
-              : Promise.resolve(false),
-            readback: async (transaction) => {
-              const current = await transaction.canonicalCompany.findUnique({
-                where: { id: c.id },
-                select: { attributes: true },
-              });
-              const attributes = (current?.attributes ?? {}) as Record<string, unknown>;
-              return committedHits.some((hit) => Object.hasOwn(attributes, hit.key));
-            },
-          });
-          return result.value;
-        });
-        if (!committed) continue;
+        if (attempted) previousUnreplayable = unreplayableSkip && !skipWasRemnant;
+        if (unreplayableSkip) unreplayable += 1;
+        else if (subjectDenied) skippedSubjects += 1;
+        else {
+          enriched += 1;
+          if (transportLost) transportFailed += 1;
+        }
+        // 不给被拒主体或跳过的公司写任何属性；已产生的回执照常 ACK（apply 为空操作）。
+        const committedHits = subjectDenied || unreplayableSkip ? [] : hits;
+        if (!committedHits.length && !durableReceipts.size) continue;
+        const committed = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+          commitCompanySignals(tx, {
+            workspaceId: args.workspaceId,
+            companyId: c.id,
+            hits: committedHits,
+            receipts: durableReceipts,
+            signalTimestamp: new Date(nowMs),
+          }),
+        );
+        if (!committed.length) continue;
         matched += 1;
-        committedHits.forEach((h) => providersHit.add(h.key));
+        committed.forEach((key) => providersHit.add(key));
       }
       return {
         enriched,
@@ -1639,6 +2720,9 @@ export function createDiscoveryActivities(deps: {
         provider: providersHit.size ? [...providersHit].join('+') : null,
         budgetTruncated: (await budgets.status({ workspaceId: binding.scopeKey, accountKey: binding.accountKey })).exhausted,
         skippedSubjects,
+        unreplayable,
+        ...(transportFailed ? { transportFailed } : {}),
+        ...(skippedForLease > 0 ? { skippedForLease } : {}),
       };
     },
 
@@ -1647,19 +2731,148 @@ export function createDiscoveryActivities(deps: {
      * （与 enrichSignalsRun 同口径）建平台级 web_watch monitored_source（dedup by 域名，sitemap 推监控页），
      * 交给独立 intentSweep 持续盯产品/招聘/供应商招募/新闻页变更 → intent 事件 → 投影进 attributes.intent.*。
      * 慢（每家一次 sitemap 探测）→ 走长活动；best-effort，单家失败不影响其余与 run 状态。
+     * 只在持有平台写入者的进程里注册；客户 worker 没有平台写入者，只数候选、不出网（见函数内注释）。
      */
+    /**
+     * Named-contact discovery inside a discovery run: after the signals stage, take the run's
+     * fit=match companies (highest score first, bounded) and run every enabled contact adapter.
+     * Fail-closed without a deployment-level lawful basis: the `decision_maker` provider config
+     * must carry one, exactly like the parked email-guess path. Best-effort per company.
+     */
+    async discoverRunContacts(
+      args: DiscoveryActivityInput & { runId: string; icpId: string; limit?: number },
+    ): Promise<{
+      companies: number;
+      people: number;
+      emails: number;
+      phones: number;
+      skipped: boolean;
+      reason?: string;
+      failed?: number;
+      budgetTruncated: boolean;
+    }> {
+      const binding = await ensureRunBudget(args);
+      const limit = Math.min(Math.max(args.limit ?? 8, 1), 25);
+      const providerRow = await deps.prisma.dataProvider.findUnique({
+        where: { key: 'decision_maker' },
+        select: { config: true },
+      });
+      const configured = parseConfiguredLawfulBasis(providerRow?.config);
+      if (!configured) {
+        return {
+          companies: 0,
+          people: 0,
+          emails: 0,
+          phones: 0,
+          skipped: true,
+          reason: 'no_lawful_basis_configured',
+          budgetTruncated: false,
+        };
+      }
+      const lawfulBasis = stampLawfulBasis(
+        configured,
+        `discovery-run:${args.runId}`,
+        new Date().toISOString(),
+      );
+      const targets = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        const outcomes = await tx.discoveryCompanyMaterializationOutcome.findMany({
+          where: { runId: args.runId, outcome: 'CANONICALIZED' },
+          select: { canonicalCompanyId: true },
+        });
+        const ids = [
+          ...new Set(
+            outcomes
+              .map((outcome) => outcome.canonicalCompanyId)
+              .filter((id): id is string => Boolean(id)),
+          ),
+        ];
+        if (!ids.length) return [];
+        return tx.lead.findMany({
+          where: { icpId: args.icpId, canonicalCompanyId: { in: ids }, fitVerdict: 'match' },
+          orderBy: [{ totalScore: 'desc' }, { id: 'asc' }],
+          take: limit,
+          select: { canonicalCompanyId: true },
+        });
+      });
+      let companies = 0;
+      let people = 0;
+      let emails = 0;
+      let phones = 0;
+      let failed = 0;
+      for (const target of targets) {
+        try {
+          const result = await discoverContactsCore(
+            { prisma: deps.prisma, providers: deps.providers, budgetStore: budgets },
+            {
+              workspaceId: args.workspaceId,
+              companyId: target.canonicalCompanyId,
+              lawfulBasis,
+              binding: {
+                authorityId: binding.authorityId,
+                scopeKey: binding.scopeKey,
+                accountKey: binding.accountKey,
+              },
+            },
+          );
+          companies += 1;
+          people += result.contacts.length;
+          for (const contact of result.contacts) {
+            for (const point of contact.contactPoints) {
+              if (point.type === 'email') emails += 1;
+              if (point.type === 'phone') phones += 1;
+            }
+          }
+        } catch (error) {
+          failed += 1;
+          const message = error instanceof Error ? error.message : String(error);
+          console.warn(
+            `[discoverRunContacts] company ${target.canonicalCompanyId} failed: ${message.slice(0, 150)}`,
+          );
+        }
+        if (
+          (
+            await budgets.status({
+              workspaceId: binding.scopeKey,
+              accountKey: binding.accountKey,
+            })
+          ).exhausted
+        ) {
+          return {
+            companies,
+            people,
+            emails,
+            phones,
+            skipped: false,
+            failed: failed || undefined,
+            budgetTruncated: true,
+          };
+        }
+      }
+      return {
+        companies,
+        people,
+        emails,
+        phones,
+        skipped: false,
+        failed: failed || undefined,
+        budgetTruncated: false,
+      };
+    },
+
     async registerWatchesForRun(args: DiscoveryActivityInput & {
       workspaceId: string;
       runId: string;
       icpId: string;
-    }): Promise<{ candidates: number; registered: number; skippedSubjects: number }> {
+    }): Promise<{
+      candidates: number;
+      registered: number;
+      skippedSubjects: number;
+      /** Companies skipped because an operation could not be replayed. */
+      unreplayable: number;
+      /** Companies left unwatched because the run's admission lease had no room for them; present only then. */
+      skippedForLease?: number;
+    }> {
       const binding = await ensureRunBudget(args);
-      const intentSvc = new IntentProjectionService({
-        prisma: deps.prisma,
-        broker: deps.broker,
-        budgetStore: budgets,
-        platformWriter: deps.platformWriter,
-      });
       const companies = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const rawIds = (
           await tx.rawSourceRecord.findMany({
@@ -1689,9 +2902,37 @@ export function createDiscoveryActivities(deps: {
           select: { id: true },
         });
       });
+      // 监控是平台行：注册前的 sitemap 读取会带回持久回执，回执只能在平台写入者的事务里确认
+      // （DomainAck）。客户 worker 不持有平台写入者，硬注册必报 DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE，
+      // 这是控制错误，会在线索已经写入之后打挂整个 run。所以在任何出网之前跳过，留给有平台写入者的进程。
+      if (!deps.platformWriter) {
+        if (companies.length) {
+          console.warn(
+            `[discovery] run ${args.runId} 跳过 ${companies.length} 家的网站监控注册：本进程没有平台写入者`,
+          );
+        }
+        return { candidates: companies.length, registered: 0, skippedSubjects: 0, unreplayable: 0 };
+      }
+      const intentSvc = new IntentProjectionService({
+        prisma: deps.prisma,
+        broker: deps.broker,
+        budgetStore: budgets,
+        platformWriter: deps.platformWriter,
+      });
       let registered = 0;
       let skippedSubjects = 0;
-      for (const c of companies.slice(0, WATCH_REGISTER_LIMIT)) {
+      let unreplayable = 0;
+      // Only a live fault carries the two-in-a-row stop; a remnant is counted like any other skip.
+      let previousUnreplayable = false;
+      let skippedForLease = 0;
+      const lease = await readRunLease(binding);
+      const watchCompanies = companies.slice(0, WATCH_REGISTER_LIMIT);
+      for (const [index, c] of watchCompanies.entries()) {
+        // A company the lease has no room for ends the stage (see qualifyFitForRun).
+        if (!lease.allows(DISCOVERY_LEASE_UNIT_MS.watches)) {
+          skippedForLease = watchCompanies.length - index;
+          break;
+        }
         try {
           if (
             !(await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
@@ -1706,17 +2947,31 @@ export function createDiscoveryActivities(deps: {
             executionBudget: binding,
           });
           registered += 1;
+          previousUnreplayable = false;
         } catch (error) {
           // G3 5.5：sitemap 抓取挂在这家公司名下；主体被拒 → 跳过这家（计入 PARTIAL）。
           if (artifactSubjectSkipReason(error)) {
             skippedSubjects += 1;
+            previousUnreplayable = false;
+            continue;
+          }
+          if (isUnreplayableOperation(error) && (isReplayRemnant(error) || !previousUnreplayable)) {
+            unreplayable += 1;
+            previousUnreplayable = !isReplayRemnant(error);
             continue;
           }
           if (isExecutionControlError(error)) throw error;
+          previousUnreplayable = false;
           /* 单家注册失败（无域名/sitemap 不可达/DAT-011）不影响其余 */
         }
       }
-      return { candidates: companies.length, registered, skippedSubjects };
+      return {
+        candidates: companies.length,
+        registered,
+        skippedSubjects,
+        unreplayable,
+        ...(skippedForLease > 0 ? { skippedForLease } : {}),
+      };
     },
 
     /**
@@ -1789,7 +3044,7 @@ export function createDiscoveryActivities(deps: {
       return { candidates: companies.length, enqueued };
     },
 
-    async finalizeRun(args: DiscoveryActivityInput & {
+    async finalizeRun(input: DiscoveryActivityInput & {
       workspaceId: string;
       runId: string;
       planId: string;
@@ -1797,9 +3052,67 @@ export function createDiscoveryActivities(deps: {
       status: 'DONE' | 'PARTIAL' | 'FAILED';
       stats: Record<string, unknown>;
     }): Promise<void> {
-      await ensureRunBudget(args);
+      // A run's outcome is written once. A retry of a write that already committed (its
+      // result was lost) is answered from the row (a short row lock, no write), without
+      // attesting again (the authority may have ended since), writing again or emitting a
+      // second event. A legacy envelope is still parked by ensureRunBudget below.
+      if (input.executionContractVersion === 2) {
+        const current = await deps.prisma.withWorkspace(input.workspaceId, (tx) =>
+          lockDiscoveryRunReceiptState(tx, input),
+        );
+        if (current.status === input.status) return;
+      }
+      // A DONE or PARTIAL write after the run's authority ended (lease expired, revoked,
+      // exhausted) records the run FAILED at the finalize stage, the outcome the admission
+      // lease design gives a run past its lease (docs/superpowers/plans/
+      // 2026-10-09-discovery-run-admission-lease.md §5), and then fails without retrying:
+      // otherwise the run stays RUNNING for good, because the workflow fails on a finalize
+      // error. stats.failure.errorType keeps the ended code (expired, revoked or exhausted
+      // call for different actions).
+      let endedAuthority: ExecutionBudgetGrantError | undefined;
+      try {
+        await attestRunFinalization(input);
+      } catch (error) {
+        if (
+          input.status === 'FAILED' ||
+          !(error instanceof ExecutionBudgetGrantError) ||
+          !ENDED_AUTHORITY_CODES.has(error.code)
+        ) {
+          throw error;
+        }
+        endedAuthority = error;
+      }
+      const args = endedAuthority
+        ? {
+            ...input,
+            status: 'FAILED' as const,
+            stats: {
+              ...input.stats,
+              failure: { stage: 'finalize', errorType: endedAuthority.code, control: true },
+            },
+          }
+        : input;
+      let alreadyRecorded = false;
       await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const lockedRun = await lockDiscoveryRunReceiptState(tx, args);
+        if (lockedRun.status !== 'RUNNING') {
+          // The requested outcome is already recorded (an overlapping attempt committed it
+          // after this one read RUNNING): this write succeeded, even if the authority
+          // ended in between.
+          if (lockedRun.status === input.status) {
+            alreadyRecorded = true;
+            return;
+          }
+          // FAILED only closes a run that is still open: it never replaces a recorded
+          // outcome (say, from a duplicate execution after the grant lapsed), and a
+          // retried FAILED write emits no second DiscoveryRunCompleted. Any other
+          // outcome over a recorded one is a conflict.
+          if (args.status === 'FAILED') return;
+          throw ApplicationFailure.nonRetryable(
+            `discovery run already finalized as ${lockedRun.status}`,
+            'DISCOVERY_RUN_ALREADY_FINALIZED',
+          );
+        }
         if (
           lockedRun.stats !== null &&
           (typeof lockedRun.stats !== 'object' || Array.isArray(lockedRun.stats))
@@ -1857,9 +3170,19 @@ export function createDiscoveryActivities(deps: {
             } as Prisma.InputJsonValue,
           },
         });
-        // 发现→评分自动衔接：run 完成即请求重评分（relay 启 qualifyWorkflow，重复请求合并到在跑实例）。
+        // 发现→评分自动衔接：run 收尾即请求重评分（relay 启 qualifyWorkflow，重复请求合并到在跑实例）。
         // 之前评分只能人工触发 —— 新公司判了 fit 也进不了 lead 队列，漏斗断在这一步。
-        if (args.status !== 'FAILED' && args.icpId) {
+        // FAILED 的 run 也请求，只要本 run 的 fit 阶段已经给过判定（fitStageJudged：只看本 run 的
+        // stats.fit；失败路径先看 failure.stage 是否已到 fit，再查本 run 解析出的公司的 lead）：已物化的
+        // 公司就该拿到评分（分数是幂等 upsert，之后的 run 再刷新）。此前 FAILED 一律不写——xin 上 11 次
+        // 验收 run 全部 FAILED，179 条 lead 六维分全 NULL、队列只是 fit 门预置，评分、制裁第五门、
+        // LeadsScored 从未在真实数据上跑过。评分是确定性的、不调 provider、不花预算，所以不需要仍然
+        // 有效的授权；plan 仍留 READY，DiscoveryRunCompleted 照旧带 status=FAILED。
+        if (
+          args.icpId &&
+          (args.status !== 'FAILED' ||
+            (await fitStageJudged(tx, { runId: args.runId, icpId: args.icpId }, finalStats)))
+        ) {
           await tx.outboxEvent.create({
             data: {
               workspaceId: args.workspaceId,
@@ -1867,13 +3190,25 @@ export function createDiscoveryActivities(deps: {
               aggregateType: 'ICP',
               aggregateId: args.icpId,
               payload: {
-                reason: 'discovery_run_completed',
+                reason: args.status === 'FAILED' ? 'discovery_run_failed_after_fit' : 'discovery_run_completed',
                 runId: args.runId,
               } as Prisma.InputJsonValue,
             },
           });
         }
+      }).catch((error: unknown) => {
+        // The ended authority is why this write ran: a failed write (a receipt check, say)
+        // must not hide it behind its own error.
+        throw endedAuthority
+          ? ApplicationFailure.fromError(endedAuthority, {
+              nonRetryable: true,
+              cause: error instanceof Error ? error : undefined,
+            })
+          : error;
       });
+      if (endedAuthority && !alreadyRecorded) {
+        throw ApplicationFailure.fromError(endedAuthority, { nonRetryable: true });
+      }
     },
   };
   const { canonicalizeLegacyDiscoveryRun, ...publicActivities } = activities;

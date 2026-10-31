@@ -89,7 +89,9 @@ import { decodeJsonBytes } from "../adapters/bounded-fetch-response";
  *  - robots.txt 抓取（adapters/robots.ts）——合规探测本身；
  *  - DNS 解析（resolveMx/lookup，net-guard/digital-footprint/email-verify）——非 HTTP，SSRF 护栏原语；
  *  - 模型网关 new-api（model-gateway/*）——内部基座，预算/trace 由 ModelGateway 层强制；
- *  - outbox relay webhook（relay/outbox-relay.service.ts）——B 侧交付契约，由 outbox_delivery 账本治理。
+ *  - outbox relay webhook（relay/outbox-relay.service.ts）——B 侧交付契约，由 outbox_delivery 账本治理；
+ *  - 运营制裁名单刷新（sanctions/sanctions-operator-download.ts）——R4 冻结期的属主运营命令（2026-10-10 计划 B0）：
+ *    只下种子里的官方端点，经 guarded HTTP 与 ToolBroker 的 source_policy 判定，不产生预算回执。
  */
 
 const hash = (s: string): string =>
@@ -161,6 +163,8 @@ export const crawl4aiRenderTool: Tool<
     ttlSeconds: 86_400,
   },
   healthCheck: async () => ({ healthy: true, detail: "crawl4ai" }),
+  // robots fetch and renderer dispatch both take ctx.beforePhysicalWire (D13).
+  physicalWireObservation: "before_each_wire",
   execute: async (input, ctx) => {
     if (
       !(await isAllowedByRobots(input.url, {
@@ -274,6 +278,8 @@ export const httpGetTool: Tool<HttpGetInput, HttpGetOutput> = {
     ttlSeconds: 86_400,
   },
   healthCheck: async () => ({ healthy: true, detail: "fetch" }),
+  // One guarded request; every redirect hop calls ctx.beforePhysicalWire (D13).
+  physicalWireObservation: "before_each_wire",
   execute: async (input, ctx) => {
     try {
       const res = await requestPublicHttp(
@@ -898,6 +904,8 @@ export const tradeFairAlgoliaTool: Tool<
     schema: CATALOG_RESULT_PROJECTION_SCHEMAS["tradefair.algolia"],
   },
   healthCheck: async () => ({ healthy: true, detail: "algolia" }),
+  // Every Algolia page calls ctx.beforePhysicalWire before its POST (D13).
+  physicalWireObservation: "before_each_wire",
   execute: async (input, ctx) => ({
     data: {
       exhibitors: await queryAlgoliaExhibitors(
@@ -959,6 +967,8 @@ export const mapYourShowFetchTool: Tool<
     schema: CATALOG_RESULT_PROJECTION_SCHEMAS["mapyourshow.fetch"],
   },
   healthCheck: async () => ({ healthy: true, detail: "mapyourshow" }),
+  // One guarded request that takes ctx.beforePhysicalWire (D13).
+  physicalWireObservation: "before_each_wire",
   execute: async (input, ctx) => {
     const base = `https://${input.host}/8_0`;
     const limit = input.limit === undefined
@@ -1118,6 +1128,8 @@ export const sanctionsDownloadTool: Tool<
     ttlSeconds: 86_400,
   },
   healthCheck: async () => ({ healthy: true, detail: "sanctions" }),
+  // One guarded request; every redirect hop calls ctx.beforePhysicalWire (D13).
+  physicalWireObservation: "before_each_wire",
   execute: async (input, ctx) => {
     let res;
     try {

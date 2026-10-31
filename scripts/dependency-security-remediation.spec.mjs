@@ -139,7 +139,8 @@ test(
         join(workspace, "pnpm-workspace.yaml"),
         "packages:\n  - app\n",
       );
-      // The real trace_engine manifest uses this same dist-tag. A tiny local package
+      // The real trace_engine (TRACE_ENGINE_REVIEWED_VERSION) declares every package in
+      // TRACE_ENGINE_DIST_TAG_DEPENDENCIES with this same dist-tag. A tiny local package
       // lets us observe pnpm's actual resolver without network or lifecycle scripts.
       await writeFile(
         join(workspace, "app/package.json"),
@@ -220,40 +221,82 @@ test(
   },
 );
 
+// @paulirish/trace_engine (via lighthouse) declares these as the "latest" dist-tag, so a fresh
+// `pnpm deploy` follows upstream unless an exact root override holds the reviewed version.
+// legacy-javascript 0.0.1 had been latest since 2025-03; 0.0.2 and 0.0.3 were published on
+// 2026-10-07/08 and the OCI build then deployed 0.0.3 beside a lockfile SBOM of 0.0.1. The
+// lockfile does not record how a dependency was declared, so this list is only as good as the
+// review of the trace_engine version it was read from: a new version must be re-reviewed first.
+const TRACE_ENGINE_REVIEWED_VERSION = "0.0.65";
+const TRACE_ENGINE_DIST_TAG_DEPENDENCIES = Object.freeze([
+  "third-party-web",
+  "legacy-javascript",
+]);
+
+test("every dist-tag dependency of @paulirish/trace_engine stays on its reviewed lockfile version", async () => {
+  const manifest = JSON.parse(
+    await readFile(new URL("package.json", repositoryRoot), "utf8"),
+  );
+  const lockfile = await readFile(
+    new URL("pnpm-lock.yaml", repositoryRoot),
+    "utf8",
+  );
+  const resolved = resolvedPackageVersions(lockfile);
+  const traceEngine = resolved.get("@paulirish/trace_engine");
+  assert.deepEqual(
+    traceEngine,
+    [TRACE_ENGINE_REVIEWED_VERSION],
+    traceEngine === undefined
+      ? "@paulirish/trace_engine left the dependency graph: retire this guard and the overrides it holds"
+      : `@paulirish/trace_engine is not exactly ${TRACE_ENGINE_REVIEWED_VERSION}: read its new manifest, make TRACE_ENGINE_DIST_TAG_DEPENDENCIES list exactly its dist-tag dependencies, give each an exact root override equal to its locked version, drop overrides no longer needed, then update TRACE_ENGINE_REVIEWED_VERSION`,
+  );
+  for (const name of TRACE_ENGINE_DIST_TAG_DEPENDENCIES) {
+    const pin = manifest.pnpm?.overrides?.[name];
+    assert.equal(typeof pin, "string", `${name} needs an exact root override`);
+    assert.deepEqual(
+      resolved.get(name),
+      [pin],
+      `${name} must resolve only to its pinned version`,
+    );
+  }
+});
+
 // Removed outright: no patched release exists to hold a floor for.
 const FORBIDDEN_LOCKFILE_SNAPSHOTS = Object.freeze(["extract-zip@2.0.1"]);
 
 // Minimum reviewed versions in the resolved graph. Routine upgrades pass without
 // editing this table; an older release of a listed package fails wherever it is
-// pulled in. `from` confines a floor to the remediated line where an older line
-// legitimately coexists (undici 7, file-type 3). The root pnpm.overrides are one
+// pulled in. `from` confines a floor to the remediated line where another line
+// legitimately coexists (undici 7 and 8 each carry their own floor; file-type 3). The root pnpm.overrides are one
 // way to hold a floor, so an override may retire once upstream ranges hold it.
 const SECURITY_FLOORS = Object.freeze(
   [
     { name: "nanoid", floor: "3.3.18" },
     { name: "postcss", floor: "8.5.26" },
     { name: "js-yaml", floor: "4.3.2" },
-    { name: "fast-uri", floor: "3.1.8" },
+    { name: "fast-uri", floor: "3.1.9" },
     { name: "deepmerge-ts", floor: "8.0.1" },
-    { name: "multer", floor: "2.4.0" },
+    { name: "multer", floor: "2.5.0" },
     { name: "smol-toml", floor: "1.9.0" },
     { name: "svgo", floor: "4.1.0" },
     { name: "lodash", floor: "4.18.1" },
     { name: "uuid", floor: "11.1.1" },
-    { name: "undici", from: "8.0.0", floor: "8.10.2" },
+    { name: "undici", from: "7.0.0", floor: "7.30.1" },
+    { name: "undici", from: "8.0.0", floor: "8.12.2" },
     { name: "@nestjs/core", floor: "11.2.3" },
     { name: "express", floor: "5.2.1" },
-    { name: "body-parser", floor: "2.3.0" },
-    { name: "qs", floor: "6.16.0" },
+    { name: "body-parser", floor: "2.4.0" },
+    { name: "zod", floor: "4.6.6" },
+    { name: "qs", floor: "6.16.1" },
     { name: "browserslist", floor: "4.28.7" },
     { name: "baseline-browser-mapping", floor: "2.11.25" },
     { name: "path-to-regexp", floor: "8.4.2" },
     { name: "file-type", from: "20.0.0", floor: "21.3.4" },
     { name: "fast-xml-parser", floor: "5.11.0" },
     { name: "@grpc/grpc-js", floor: "1.14.5" },
-    { name: "axios", floor: "1.20.0" },
     { name: "brace-expansion", from: "4.0.0", floor: "5.0.12" },
     { name: "http-cache-semantics", floor: "4.3.0" },
+    { name: "sharp", floor: "0.35.5" },
   ].map((entry) => Object.freeze(entry)),
 );
 
@@ -265,26 +308,35 @@ const VULNERABLE_PREDECESSORS = Object.freeze([
   "nanoid@3.3.17",
   "fast-uri@3.1.5",
   "fast-uri@3.1.6",
+  "fast-uri@3.1.8",
   "browserslist@4.28.6",
   "baseline-browser-mapping@2.10.43",
   "@nestjs/core@10.4.22",
   "express@4.22.1",
   "body-parser@1.20.4",
+  "body-parser@2.3.0",
   "qs@6.15.3",
   "qs@6.14.2",
+  "qs@6.16.0",
   "multer@2.0.2",
   "multer@2.3.0",
+  "multer@2.4.0",
+  "undici@7.29.0",
+  "undici@7.30.0",
   "undici@8.10.0",
+  "undici@8.10.2",
+  "zod@3.25.76",
+  "zod@4.6.5",
   "path-to-regexp@0.1.13",
   "path-to-regexp@0.2.5",
   "path-to-regexp@3.3.0",
   "file-type@20.4.1",
   "fast-xml-parser@4.5.7",
   "@grpc/grpc-js@1.14.4",
-  "axios@1.18.1",
   "brace-expansion@5.0.9",
   "smol-toml@1.7.1",
   "http-cache-semantics@4.2.0",
+  "sharp@0.35.4",
 ]);
 
 function resolvedPackageVersions(lockfile) {

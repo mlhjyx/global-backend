@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { normalizeDomain } from '../discovery/identity';
+import { companyIdentity, normalizeDomain } from '../discovery/identity';
 import { toAlpha2 } from '../discovery/providers/ted.provider';
 import { cpvOverlap } from '../intent/ted-intent-projection.service';
 import { naicsOverlap } from '../intent/sam-intent-projection.service';
@@ -100,10 +100,17 @@ export class IntentRecomputeService {
     const now = Date.now();
 
     // ① 平台一等信号：ACTIVE + 投影面过滤（与增量投影同一谓词），全部匹配信号入事件集。
+    // E7（交付闭环设计 §1.5）：信号以「名称+国家」为主体键，有域名的公司却以域名键去重——
+    // 两个键都匹配，否则公开网页发现的公司永远挂不上招标/FDA 等一等信号。
     const surfaces = opts?.surfaces ?? [];
     if (surfaces.length) {
+      const nameKey =
+        typeof company.name === 'string' && company.name.length > 0
+          ? companyIdentity({ name: company.name, country: company.country ?? null }).dedupeKey
+          : null;
+      const subjectKeys = nameKey ? [company.dedupeKey, nameKey] : [company.dedupeKey];
       const signals = await prisma.sourceSignal.findMany({
-        where: { subjectKey: company.dedupeKey, status: 'ACTIVE' },
+        where: { subjectKey: { in: [...new Set(subjectKeys)] }, status: 'ACTIVE' },
         orderBy: { occurredAt: 'desc' },
       });
       for (const s of signals) {

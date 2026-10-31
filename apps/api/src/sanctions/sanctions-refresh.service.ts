@@ -49,10 +49,20 @@ export function countryToAlpha2(raw: string | null | undefined): string | null {
   return null;
 }
 
-const PARSERS: Record<string, (xml: string) => ParsedSanctionsList> = {
-  ofac_sdn_xml: parseOfacXml,
-  eu_fsf_xml: parseEuFsf,
-};
+const PARSERS: ReadonlyMap<string, (xml: string) => ParsedSanctionsList> = new Map([
+  ['ofac_sdn_xml', parseOfacXml],
+  ['eu_fsf_xml', parseEuFsf],
+]);
+
+/** The parser for a recorded `sanctions_source.format`, or undefined for any other value. */
+export function sanctionsParserFor(format: string): ((xml: string) => ParsedSanctionsList) | undefined {
+  return PARSERS.get(format);
+}
+
+/** List version stamped on every row: the publish date, or the refresh day for an undated list. */
+export function sanctionsListVersion(parsed: Pick<ParsedSanctionsList, 'publishDate'>, now: Date = new Date()): string {
+  return parsed.publishDate ?? now.toISOString().slice(0, 10);
+}
 
 /** 归一后的目标实体行（persist 用；normalizedName + alpha-2 国别 + contentHash 均在此算一次）。 */
 export interface DesiredSanctionsEntity {
@@ -157,6 +167,19 @@ export interface SanctionsRefreshDeps {
 const CHUNK = 1000;
 // C1：本次解析活跃数 < 现有活跃数 × 此比例 → 判异常（坏下载/截断/schema 漂移），拒撤全表、保留上次好数据。
 const SHRINK_GUARD = 0.5;
+
+/** C1 shrink guard: an empty parse, or one below half of the active rows, must never replace the stored list. */
+export function sanctionsShrinkGuardTripped(parsedEntities: number, existingActive: number): boolean {
+  return parsedEntities === 0 || (existingActive > 0 && parsedEntities < existingActive * SHRINK_GUARD);
+}
+
+/**
+ * The unreceipted owner path writes one source's whole diff in a single transaction, so a failure
+ * part-way leaves the previous list exactly as it was. A first load or a full re-hash of a ~10k-row
+ * list runs one UPDATE per changed row, far past Prisma's 5-second default.
+ */
+export const OWNER_PERSIST_TRANSACTION_OPTIONS = Object.freeze({ maxWait: 10_000, timeout: 600_000 });
+
 function chunks<T>(arr: readonly T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
@@ -170,6 +193,18 @@ export class SanctionsRefreshService {
   async refreshAll(budgetKey?: string): Promise<SanctionsRefreshSummary[]> {
     const sources = await this.deps.ownerDb.sanctionsSource.findMany({ where: { status: 'ENABLED' } });
     return this.refreshSources(sources, budgetKey);
+  }
+
+  /**
+   * Operator refresh (B0) of the named sources whatever their status: enabling a source stays a
+   * separate owner step. Same per-source fail-safe as refreshAll, in key order.
+   */
+  async refreshSourcesByKey(keys: readonly string[]): Promise<SanctionsRefreshSummary[]> {
+    const sources = await this.deps.ownerDb.sanctionsSource.findMany({
+      where: { key: { in: [...keys] } },
+      orderBy: { key: 'asc' },
+    });
+    return this.refreshSources(sources);
   }
 
   /**
@@ -214,7 +249,7 @@ export class SanctionsRefreshService {
   /** 刷新单源：broker 下载 → 解析 → diff → 批量 upsert + 撤下 → 更新审计。 */
   async refreshSource(sourceId: string, budgetKey?: string): Promise<SanctionsRefreshSummary> {
     const src = await this.deps.ownerDb.sanctionsSource.findUniqueOrThrow({ where: { id: sourceId } });
-    const parse = PARSERS[src.format];
+    const parse = sanctionsParserFor(src.format);
     if (!parse) throw new Error(`unsupported sanctions format: ${src.format}`);
 
     const userAgent = (src.config as { userAgent?: string } | null)?.userAgent;
@@ -229,7 +264,7 @@ export class SanctionsRefreshService {
       },
     );
     const parsed = parse(res.data.body);
-    const listVersion = parsed.publishDate ?? new Date().toISOString().slice(0, 10);
+    const listVersion = sanctionsListVersion(parsed);
     const desired = parsed.entities.map((e) => toDesiredEntity(e, listVersion));
 
     const existing = await this.deps.ownerDb.sanctionsEntity.findMany({
@@ -239,7 +274,7 @@ export class SanctionsRefreshService {
     const existingActive = existing.filter((e) => !e.withdrawnAt).length;
     // 🔴 C1：空/暴跌解析（坏下载/HTML/截断/schema 漂移——两解析器 fail-safe 返 []）**绝不撤下整表**——
     // 否则索引清空 → screen 全 not_screened → 门 fail-open。判 FAILED、保留上次好数据、上抛（refreshAll 记 FAILED）。
-    if (desired.length === 0 || (existingActive > 0 && desired.length < existingActive * SHRINK_GUARD)) {
+    if (sanctionsShrinkGuardTripped(desired.length, existingActive)) {
       await this.deps.ownerDb.sanctionsSource.update({
         where: { id: sourceId },
         data: { lastRefreshedAt: new Date(), lastFetchStatus: 'FAILED' },
@@ -300,7 +335,9 @@ export class SanctionsRefreshService {
 
     return summary;
     };
-    if (!res.durableReceipt) return persist(this.deps.ownerDb);
+    if (!res.durableReceipt) {
+      return this.deps.ownerDb.$transaction((tx) => persist(tx), OWNER_PERSIST_TRANSACTION_OPTIONS);
+    }
     if (!this.deps.platformWriter) {
       throw new ExecutionControlError('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE');
     }

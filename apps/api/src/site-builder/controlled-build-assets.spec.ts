@@ -10,6 +10,39 @@ import {
 
 let golden: Awaited<ReturnType<typeof buildM1ebGoldenFixtures>>[number];
 
+function publishedManifest(sourceHash: string, keys: string[]) {
+  return {
+    schemaVersion: "1.0",
+    pipelineVersion: "sharp-test-m1c.1",
+    sourceHash,
+    variants: {
+      card: {
+        webp: keys.map((key, index) => ({
+          key,
+          width: 320 * (index + 1),
+          height: 240 * (index + 1),
+          bytes: 1_000 + index,
+        })),
+      },
+    },
+  };
+}
+
+async function tenantEntries(rows: unknown[]) {
+  const manifest = await buildControlledAssetManifest(
+    { asset: { findMany: vi.fn(async () => rows) } } as unknown as Pick<
+      Prisma.TransactionClient,
+      "asset"
+    >,
+    {
+      siteId: "site-1",
+      brief: golden.designBrief,
+      catalog: STATIC_DESIGN_CATALOG_V2,
+    },
+  );
+  return Object.values(manifest).filter((asset) => asset.source === "tenant");
+}
+
 beforeAll(async () => {
   golden = (
     await buildM1ebGoldenFixtures(
@@ -26,11 +59,13 @@ describe("M1-e-B controlled runtime assets", () => {
         id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         kind: "factory_image",
         contentHash: "b".repeat(64),
+        derivedKeys: publishedManifest("b".repeat(64), ["tenant/factory.webp"]),
         variants: [
           {
             id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
             contentHash: "c".repeat(64),
             mime: "image/webp",
+            objectKey: "tenant/factory.webp",
           },
         ],
       },
@@ -38,17 +73,20 @@ describe("M1-e-B controlled runtime assets", () => {
         id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
         kind: "product_image",
         contentHash: "not-a-sha",
+        derivedKeys: null,
         variants: [],
       },
       {
         id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
         kind: "cert",
         contentHash: "d".repeat(64),
+        derivedKeys: publishedManifest("d".repeat(64), ["tenant/cert.pdf"]),
         variants: [
           {
             id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
             contentHash: "e".repeat(64),
             mime: "application/pdf",
+            objectKey: "tenant/cert.pdf",
           },
         ],
       },
@@ -96,6 +134,68 @@ describe("M1-e-B controlled runtime assets", () => {
       }),
     );
   });
+
+  it("uses only the variant the asset's derived manifest publishes", async () => {
+    const sourceHash = "b".repeat(64);
+    const superseded = {
+      id: "11111111-1111-4111-8111-111111111111",
+      contentHash: "d".repeat(64),
+      mime: "image/webp",
+      objectKey: "tenant/superseded.webp",
+    };
+    const current = {
+      id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      contentHash: "c".repeat(64),
+      mime: "image/webp",
+      objectKey: "tenant/current.webp",
+    };
+
+    await expect(
+      tenantEntries([
+        {
+          id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          kind: "factory_image",
+          contentHash: sourceHash,
+          derivedKeys: publishedManifest(sourceHash, [current.objectKey]),
+          // The query orders by role then id, so the superseded row sorts first.
+          variants: [superseded, current],
+        },
+      ]),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        variantId: current.id,
+        variantHash: current.contentHash,
+      }),
+    ]);
+  });
+
+  it.each([
+    ["no", null],
+    ["an unreadable", { schemaVersion: "1.0" }],
+    ["another source's", publishedManifest("f".repeat(64), ["tenant/current.webp"])],
+  ] as const)(
+    "offers no tenant variant for an asset with %s derived manifest",
+    async (_label, derivedKeys) => {
+      await expect(
+        tenantEntries([
+          {
+            id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            kind: "factory_image",
+            contentHash: "b".repeat(64),
+            derivedKeys,
+            variants: [
+              {
+                id: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+                contentHash: "c".repeat(64),
+                mime: "image/webp",
+                objectKey: "tenant/current.webp",
+              },
+            ],
+          },
+        ]),
+      ).resolves.toEqual([]);
+    },
+  );
 
   it("reads a tenant variant only through tenant-scoped DB lookup and bounded storage", async () => {
     const findFirst = vi.fn(async () => ({

@@ -195,13 +195,31 @@ describe("managed dependency readiness", () => {
     expect(loadKeyring).not.toHaveBeenCalled();
   });
 
-  it("fails settlement readiness before network when either secret family is missing", async () => {
+  it("skips settlement readiness entirely when the deployment never configured it", async () => {
     const fetcher = vi.fn();
     const loadKeyring = vi.fn();
 
     await expect(
       checkSiteBuildSettlementReadbackReadiness(
         { MODEL_GATEWAY_URL: "http://127.0.0.1:3010/v1" },
+        fetcher,
+        loadKeyring as never,
+      ),
+    ).resolves.toEqual({ status: "ok" });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(loadKeyring).not.toHaveBeenCalled();
+  });
+
+  it("fails settlement readiness before network when it is partially configured", async () => {
+    const fetcher = vi.fn();
+    const loadKeyring = vi.fn();
+
+    await expect(
+      checkSiteBuildSettlementReadbackReadiness(
+        {
+          MODEL_GATEWAY_URL: "http://127.0.0.1:3010/v1",
+          MODEL_GATEWAY_SETTLEMENT_READBACK_CREDENTIAL: `srb1.${"L".repeat(16)}.${"S".repeat(43)}`,
+        },
         fetcher,
         loadKeyring as never,
       ),
