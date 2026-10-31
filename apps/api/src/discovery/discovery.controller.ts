@@ -517,8 +517,12 @@ export class DiscoveryController {
   }
 
   @Get('suppressions')
-  @RequireScopes('compliance:manage', 'personal-data:read')
-  @ApiOperation({ summary: '禁联名单' })
+  @RequireScopes('compliance:manage')
+  @ApiOperation({
+    summary: '本 workspace 的禁联名单（workspace 隔离；租户 admin 可管理自己的禁联记录）',
+    description:
+      '只返回调用方 workspace 的 suppression 记录。展示的是租户自己提交的合规登记，不是引擎采集的招揽联系人；个人数据面（联系人/事件流）仍要求 personal-data:read，不在此端点开放。',
+  })
   @ApiPageEnvelope({ type: 'object', additionalProperties: true, description: 'Suppression 记录',
   })
   @ApiResponse({ status: 400, description: '分页参数校验失败', schema: SUPPRESSION_PATH_VALIDATION_ERROR_SCHEMA,
