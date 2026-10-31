@@ -45,6 +45,21 @@ RuntimeEvidence，不改变 4 个平台 schedule 的 paused 状态，也不构�
    `RevocationIssuer` 的 `target_jti` 原为随机 UUID，后端 fence 按 `(issuer, jti)` 精确匹配已 committed
    的 `PLATFORM_GRANT`，永远命中不到。两处均已修复并有单测。
 
+## fence 之后的 dev 环境恢复（如实记录）
+
+撤销按设计把 `acq-sweep` 的出网围栏置为 `state = DISABLED`（generation 2）：这正是 `OPERATOR_HOLD` 的语义，但代价是
+`platform_budget_authority` 报告 `PLATFORM_AUTOMATION_ACQ_SWEEP_BLOCKED`、platform worker 不就绪、整体
+`/health/ready` 为 503。**产品没有设计好的「重开」路径**（`install_platform_egress_policy_v2` 要求 state 为
+`ACTIVE`；2026-10-01 归档也写明围栏只能前进，重开需要新代码/迁移）。
+
+为把 dev 恢复到实测前的可用状态，在库属主（`global`）下执行了一次手工 UPDATE：
+`platform_egress_schedule_fence` 中 `acq-sweep` 的 `state` 置回 `ACTIVE`、`generation` 2→3（打断一切观察过
+generation 2 的在途尝试），`fence_sequence` 保持 1，策略三列未动。之后 `platform_budget_authority` 为 ok、四行
+`ISSUABLE`/`INTENTIONALLY_DISABLED_NO_EGRESS`、整体 readiness 回到 ready。
+
+这是**库属主带外操作**，不是产品能力：生产环境要重开被撤销的 schedule，需要先设计受审计的重开路径（谁有权、
+如何与撤销请求配对、如何留痕），不应复制这段 SQL。
+
 ## 边界（这份记录不证明什么）
 
 - 4 个 schedule 仍全部 paused；恢复运行是产品负责人的单独决定。
