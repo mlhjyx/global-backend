@@ -1,7 +1,7 @@
 # 政策停用 → 平台撤销的自动触发（设计稿）
 
-> 生命周期：`DRAFT`
-> 生命周期依据：2026-11-01 会话派单——撤销链已用真实 Grant 实测（[证据](../../evidence/2026-11-01-platform-admission-v2-and-revocation-fence.md)），但 `gain-saas` 的 `RevocationIssuer` 没有任何生产调用方，政策停用、部署绑定撤销与安全响应都不会自动签发撤销。本文只做设计，§8 的决策经产品负责人拍板前不写实现代码。
+> 生命周期：`APPROVED`
+> 生命周期依据：产品负责人 2026-11-01 按建议批准 §8 D1–D8（会话内「按建议批准」）。gain-saas 实现已合并（PR #25，默认关闭、尚未部署），dev 试运行验证了签发 → 投递 → 后端验签 → 错误分类（[证据](../../evidence/2026-11-01-platform-revocation-autotrigger-dryrun.md)）；成功 fence/ACK 走新触发路径与开启操作待后端受审计重开路径就绪后单独窗口，届时改 `CLOSED`。原 DRAFT 依据：撤销链已用真实 Grant 实测，但 `RevocationIssuer` 没有任何生产调用方。
 
 ## 0. 一页结论
 
