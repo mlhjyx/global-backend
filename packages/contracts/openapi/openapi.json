@@ -8062,6 +8062,7 @@
         "description": "加入禁联名单（email / domain / company_name）；命中的公司立即转 SUPPRESSED。需要 compliance:manage。"
       },
       "get": {
+        "description": "只返回调用方 workspace 的 suppression 记录。展示的是租户自己提交的合规登记，不是引擎采集的招揽联系人；个人数据面（联系人/事件流）仍要求 personal-data:read，不在此端点开放。",
         "operationId": "DiscoveryController_listSuppressions_v1",
         "parameters": [
           {
@@ -8173,15 +8174,13 @@
             "bearer": []
           }
         ],
-        "summary": "禁联名单",
+        "summary": "本 workspace 的禁联名单（workspace 隔离；租户 admin 可管理自己的禁联记录）",
         "tags": [
           "Discovery"
         ],
         "x-required-scopes": [
-          "personal-data:read",
           "compliance:manage"
-        ],
-        "description": "禁联名单，游标分页。需要 compliance:manage 与 personal-data:read。"
+        ]
       }
     },
     "/api/v1/suppressions/{id}/decisions": {

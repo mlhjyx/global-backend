@@ -102,7 +102,7 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
   'POST /api/v1/suppressions':
     '加入禁联名单（email / domain / company_name）；命中的公司立即转 SUPPRESSED。需要 compliance:manage。',
   'GET /api/v1/suppressions':
-    '禁联名单，游标分页。需要 compliance:manage 与 personal-data:read。',
+    '本 workspace 的禁联名单，游标分页。需要 compliance:manage（workspace 隔离，租户 admin 可管理自己的禁联记录）。',
   'GET /api/v1/suppressions/{id}/decisions':
     '列出该条禁联的 append-only 解除/更正决策记录（请求本身不解除禁联）。',
   'DELETE /api/v1/suppressions/{id}':
