@@ -17,20 +17,20 @@ export const PORTAL_INTRO_MARKDOWN = `## 这是什么
 | --- | --- |
 | 开发（xin） | \`http://100.68.31.20:3000/api/v1\` |
 
-同源部署，路径里带版本号 \`/api/v1\`。
+同源部署，路径里带版本号 \`/api/v1\`。本接口门户的地址是 \`http://100.68.31.20:3000/api/portal\`，可直接分享给对接方。
 
 ## 认证
 
 每个请求都要带 \`Authorization: Bearer <JWT>\`。
 
-- JWT 由 **GrowthOS（SaaS 平台）签发**，本后端只验签，不接受任何未签名令牌；开发环境同样由本地 GrowthOS 身份源签发。
+- JWT 由 **gain-saas（SaaS 平台）签发**（本地身份源 `https://127.0.0.1:18446`），本后端只验签，不接受任何未签名令牌。
 - 开发环境取 token（token 约 5 分钟有效，过期重取）：
 
 \`\`\`bash
 ssh xin@100.68.31.20 /global/local-config/bin/api-token
 \`\`\`
 
-- token 里带 \`sub\`（用户）、\`workspace_id\`（租户）、\`roles\`。**所有业务数据按 workspace 隔离（数据库 RLS 强制），前端不需要也不应该传租户参数**；跨租户的资源按「不存在」处理，返回 404。
+- token 里带 \`sub\`（用户）、\`workspace\`（租户）、\`roles\`。**所有业务数据按 workspace 隔离（数据库 RLS 强制），前端不需要也不应该传租户参数**；跨租户的资源按「不存在」处理，返回 404。
 - 角色映射到 scope，缺 scope 时返回 403 \`SCOPE_REQUIRED\`，\`details.required\` 会告诉你缺哪个：
 
 | 角色 | 可用 scope |
@@ -100,4 +100,4 @@ ssh xin@100.68.31.20 /global/local-config/bin/api-token
 | PlatformAuthority | 平台权威通道：技术报价、目标查询、撤销（服务间调用） |
 | System | 健康探针与身份（\`/whoami\`） |
 
-> **ExecutionBudget / PlatformAuthority** 两组是 GrowthOS 与服务间调用的机器通道，用的是另一套固定用途的服务身份，普通前端不要调用。`;
+> **ExecutionBudget / PlatformAuthority** 两组是 gain-saas 与服务间调用的机器通道，用的是另一套固定用途的服务身份，普通前端不要调用。`;
