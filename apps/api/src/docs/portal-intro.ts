@@ -23,7 +23,7 @@ export const PORTAL_INTRO_MARKDOWN = `## 这是什么
 
 每个请求都要带 \`Authorization: Bearer <JWT>\`。
 
-- JWT 由 **gain-saas（SaaS 平台）签发**（本地身份源 `https://127.0.0.1:18446`），本后端只验签，不接受任何未签名令牌。
+- JWT 由 **gain-saas（SaaS 平台）签发**（本地身份源 \`https://127.0.0.1:18446\`），本后端只验签，不接受任何未签名令牌。
 - 开发环境取 token（token 约 5 分钟有效，过期重取）：
 
 \`\`\`bash
