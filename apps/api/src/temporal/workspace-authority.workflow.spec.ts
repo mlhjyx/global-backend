@@ -21,6 +21,7 @@ import {
   DISCOVERY_AUTHORITY_PATCH,
   DISCOVERY_FAILURE_FINALIZE_PATCH,
   DISCOVERY_RAW_GOVERNANCE_PATCH,
+  DISCOVERY_RUN_CONTACTS_PATCH,
   DISCOVERY_WEBSITE_PROFILE_PATCH,
   discoveryWorkflow,
 } from './discovery.workflow';
@@ -105,6 +106,14 @@ function primeDiscovery() {
     provider: 'public_web',
     budgetTruncated: false,
   });
+  acts.discoverRunContacts.mockResolvedValue({
+    companies: 1,
+    people: 2,
+    emails: 1,
+    phones: 1,
+    skipped: false,
+    budgetTruncated: false,
+  });
   acts.registerWatchesForRun.mockResolvedValue({
     candidates: 1,
     registered: 1,
@@ -187,6 +196,63 @@ describe('discoveryWorkflow execution-control propagation', () => {
       expect.objectContaining({
         status: 'PARTIAL',
         stats: expect.objectContaining({ skippedSubjects: 1 }),
+      }),
+    );
+  });
+
+  it('discovers named contacts after the signals stage and records the stage stats (P0)', async () => {
+    primeDiscovery();
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.discoverRunContacts).toHaveBeenCalledOnce();
+    const [signalsAt] = acts.enrichSignalsRun.mock.invocationCallOrder;
+    const [contactsAt] = acts.discoverRunContacts.mock.invocationCallOrder;
+    expect(contactsAt).toBeGreaterThan(signalsAt!);
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stats: expect.objectContaining({
+          contacts: {
+            companies: 1,
+            people: 2,
+            emails: 1,
+            phones: 1,
+            skipped: false,
+            budgetTruncated: false,
+          },
+        }),
+      }),
+    );
+  });
+
+  it('keeps replayed histories without the contacts patch on the old command sequence', async () => {
+    primeDiscovery();
+    setPatched((patchId) => patchId !== DISCOVERY_RUN_CONTACTS_PATCH);
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.discoverRunContacts).not.toHaveBeenCalled();
+    const lastFinalize = acts.finalizeRun.mock.calls.at(-1)?.[0] as { stats?: Record<string, unknown> };
+    expect(lastFinalize.stats && 'contacts' in lastFinalize.stats).toBeFalsy();
+  });
+
+  it('marks the run PARTIAL when the contact stage exhausts the run budget', async () => {
+    primeDiscovery();
+    acts.discoverRunContacts.mockResolvedValue({
+      companies: 1,
+      people: 1,
+      emails: 0,
+      phones: 0,
+      skipped: false,
+      budgetTruncated: true,
+    });
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'PARTIAL',
+        stats: expect.objectContaining({ budgetTruncated: true }),
       }),
     );
   });
@@ -1071,8 +1137,9 @@ describe('discoveryWorkflow queries that lost a provider to an unreplayable oper
     await discoveryWorkflow(discoveryInput());
 
     expect(acts.executeQuery).toHaveBeenCalledTimes(2);
+    // Both queries are one batch: neither sees a hand-off, and the batch as a whole was not lost.
     expect(handOffOf(0)).toBeUndefined();
-    expect(handOffOf(1)).toBe(true);
+    expect(handOffOf(1)).toBeUndefined();
     expect(acts.canonicalizeRun).toHaveBeenCalled();
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1085,21 +1152,52 @@ describe('discoveryWorkflow queries that lost a provider to an unreplayable oper
     );
   });
 
-  it('fails the run when the activity reports the second such query in a row', async () => {
+  it('runs the two queries of a batch at the same time', async () => {
+    primeDiscovery();
+    acts.loadPlanQueries.mockResolvedValue({ queries: [query(1), query(2)] });
+    const base = acts.executeQuery.getMockImplementation()!;
+    let calls = 0;
+    let releaseFirst: (() => void) | undefined;
+    acts.executeQuery.mockImplementation((async (...args: unknown[]) => {
+      calls += 1;
+      if (calls === 1) {
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+      }
+      return base(...args);
+    }) as never);
+
+    const running = discoveryWorkflow(discoveryInput());
+    // The second query is issued while the first is still open: the batch really overlaps.
+    await vi.waitFor(() => expect(acts.executeQuery).toHaveBeenCalledTimes(2));
+    releaseFirst!();
+    await running;
+
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'DONE' }),
+    );
+  });
+
+  it('counts a second query lost the same way in a row and runs the rest of the plan', async () => {
     primeDiscovery();
     acts.loadPlanQueries.mockResolvedValue({ queries: [query(1), query(2), query(3)] });
-    const second = unreplayable();
-    acts.executeQuery.mockResolvedValueOnce(await lostQuery()).mockRejectedValueOnce(second);
+    acts.executeQuery.mockResolvedValueOnce(await lostQuery()).mockResolvedValueOnce(await lostQuery());
 
-    await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(second);
+    await discoveryWorkflow(discoveryInput());
 
-    expect(acts.executeQuery).toHaveBeenCalledTimes(2);
-    expect(handOffOf(1)).toBe(true);
+    // A lost operation is a remnant of an earlier attempt, never evidence about the upstream now.
+    // The first batch is lost as a whole, so the next query is told; both are counted and the plan
+    // goes on.
+    expect(acts.executeQuery).toHaveBeenCalledTimes(3);
+    expect(handOffOf(1)).toBeUndefined();
+    expect(handOffOf(2)).toBe(true);
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
-        status: 'FAILED',
+        status: 'PARTIAL',
         stats: expect.objectContaining({
-          failure: { stage: 'query', errorType: 'BudgetOperationReplayError', control: true },
+          failures: 2,
+          unreplayableSkips: expect.objectContaining({ queries: 2 }),
         }),
       }),
     );
@@ -1116,7 +1214,8 @@ describe('discoveryWorkflow queries that lost a provider to an unreplayable oper
 
     await discoveryWorkflow(discoveryInput());
 
-    expect(handOffOf(1)).toBe(true);
+    // The first batch mixed a loss and a success, so the third query starts without a hand-off.
+    expect(handOffOf(1)).toBeUndefined();
     expect(handOffOf(2)).toBeUndefined();
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1137,7 +1236,8 @@ describe('discoveryWorkflow queries that lost a provider to an unreplayable oper
 
     await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(failed);
 
-    expect(acts.executeQuery).toHaveBeenCalledTimes(1);
+    // Both queries of the batch were already in flight when the control error surfaced.
+    expect(acts.executeQuery).toHaveBeenCalledTimes(2);
     expect(acts.canonicalizeRun).not.toHaveBeenCalled();
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1557,6 +1657,14 @@ describe('discoveryWorkflow failure finalization (BI-25)', () => {
       stats: {
         ...HAPPY_QUERY_STATS,
         companies: 1,
+        contacts: {
+          companies: 1,
+          people: 2,
+          emails: 1,
+          phones: 1,
+          skipped: false,
+          budgetTruncated: false,
+        },
         suppressed: 0,
         fit: { match: 1 },
         fitSkippedForBudget: 0,

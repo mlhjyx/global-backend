@@ -205,15 +205,16 @@ describe.runIf(Boolean(ownerUrl && appUrl))('lead queue basis on PostgreSQL', { 
 
   // Runs last: it turns the score-written rejection into a human one.
   it('decide(reject) on a score-written REJECTED lead records the decision as app_user and answers human_reject; a retry adds none', async () => {
-    const first = await service().decide(ctx, leads.scoreRejected.id, 'reject', 'not a distributor');
+    // BI-20: every reject carries a reason code; the free-text note stays beside it.
+    const first = await service().decide(ctx, leads.scoreRejected.id, 'reject', 'not a distributor', 'NOT_TARGET_ROLE');
     expect(first).toMatchObject({ id: leads.scoreRejected.id, status: 'REJECTED', scored: true, queueBasis: 'human_reject' });
 
-    const retry = await service().decide(ctx, leads.scoreRejected.id, 'reject');
+    const retry = await service().decide(ctx, leads.scoreRejected.id, 'reject', undefined, 'NOT_TARGET_ROLE');
     expect(retry).toMatchObject({ status: 'REJECTED', scored: true, queueBasis: 'human_reject' });
 
-    const decisions = await owner.$queryRaw<{ action: string; reason: string | null }[]>`
-      SELECT action, reason FROM lead_decision WHERE lead_id = ${leads.scoreRejected.id}::uuid`;
-    expect(decisions).toEqual([{ action: 'reject', reason: 'not a distributor' }]);
+    const decisions = await owner.$queryRaw<{ action: string; reason: string | null; reason_code: string | null }[]>`
+      SELECT action, reason, reason_code FROM lead_decision WHERE lead_id = ${leads.scoreRejected.id}::uuid`;
+    expect(decisions).toEqual([{ action: 'reject', reason: 'not a distributor', reason_code: 'NOT_TARGET_ROLE' }]);
     await expect(service().queueSummary(ctx, icp)).resolves.toMatchObject({
       queueBasis: { fit_gate_preset: 1, score: 1, human_accept: 1, human_reject: 3 },
     });

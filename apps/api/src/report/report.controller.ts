@@ -1,11 +1,12 @@
-import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, HttpCode, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
 import { RequireScopes } from '../auth/require-scopes.decorator';
 import { RequestContext } from '../auth/request-context';
 import { ScopesGuard } from '../auth/scopes.guard';
+import { envelope } from '../common/envelope';
 import { WEEKLY_REPORT_MAX_LEADS, WeeklyReportService } from './weekly-report.service';
 
 const errorSchema = (codes: readonly string[]) => ({
@@ -93,5 +94,53 @@ export class ReportController {
     response.setHeader('X-Report-Withheld-Sanctions', String(report.withheld.sanctions));
     response.setHeader('X-Report-Withheld-Quarantined', String(report.withheld.quarantined));
     return report.csv;
+  }
+
+  @Post('weekly/feedback')
+  @RequireScopes('acquisition:review')
+  @HttpCode(200)
+  @ApiConsumes('text/csv')
+  @ApiBody({ schema: { type: 'string' }, description: '导出的周报 CSV 原样上传（客户填写五列）' })
+  @ApiOperation({
+    summary: '周报反馈上传（BI-23）：按线索 ID 匹配，逐行校验，只追加写 lead_outcome；返回接受/拒绝/跳过计数',
+  })
+  @ApiResponse({
+    status: 200,
+    description: '接受与拒绝计数（拒绝行带文件内行号与稳定原因）',
+    schema: {
+      type: 'object',
+      required: ['data'],
+      properties: {
+        data: {
+          type: 'object',
+          required: ['accepted', 'rejected', 'skipped'],
+          properties: {
+            accepted: { type: 'integer', minimum: 0 },
+            skipped: { type: 'integer', minimum: 0 },
+            rejected: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['line', 'reason'],
+                properties: { line: { type: 'integer' }, reason: { type: 'string' } },
+              },
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: '缺「线索 ID」列或请求体不是 CSV 文本',
+    schema: errorSchema(['FEEDBACK_HEADER_MISSING', 'VALIDATION_ERROR']),
+  })
+  @ApiResponse({
+    status: 422,
+    description: '上传文件的行数超过一次导出可能包含的上限，整份拒绝而不截断',
+    schema: errorSchema(['FEEDBACK_TOO_LARGE']),
+  })
+  async feedback(@Ctx() ctx: RequestContext, @Body() csv: string) {
+    return envelope(await this.reports.recordFeedback(ctx, { csv }));
   }
 }

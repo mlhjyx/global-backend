@@ -22,6 +22,7 @@ const typedProjectionSchemaValues = [
   'wikidata-sparql/v1', 'osm-overpass/v1', 'wikidata-entity/v1',
   'gleif-fetch/v1', 'companies-house-search/v1', 'inpi-rne-search/v1',
   'google-patents-search/v1', 'tradefair-algolia/v1', 'mapyourshow-fetch/v1',
+  'outreach-first-contact-draft/v1',
 ] as const;
 
 export const TYPED_PROJECTION_SCHEMAS = Object.freeze([

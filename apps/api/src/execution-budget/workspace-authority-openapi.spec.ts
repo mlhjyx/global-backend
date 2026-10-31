@@ -11,6 +11,7 @@ const operations = [
   '/api/v1/canonical-companies/{id}/discover-contacts',
   '/api/v1/canonical-companies/{id}/guess-emails',
   '/api/v1/contact-points/{pointId}/verify',
+  '/api/v1/leads/{leadId}/outreach-drafts',
 ] as const;
 
 describe('workspace execution authority OpenAPI', () => {

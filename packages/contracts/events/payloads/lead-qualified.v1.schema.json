@@ -118,6 +118,99 @@
       "type": "string",
       "enum": ["fit_gate_preset", "score", "human_accept", "human_reject"],
       "description": "What decided the queue the lead sat in when it was accepted: the fit gate's preset (never scored), the scoring stage, or a human decision. Optional since 2026-10-14; absent in older payloads."
+    },
+    "company_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "BI-19 delivery facts (design 2026-10-10 §3): the company's website-profile facts, green data only. Optional since 2026-10-27; absent in older payloads.",
+      "required": ["trade_role", "trade_role_confidence", "own_manufacturing", "carried_brands", "carries_chinese_brand", "carries_foreign_brand"],
+      "properties": {
+        "trade_role": { "type": ["string", "null"], "description": "distributor | wholesaler | manufacturer | mixed | service | other" },
+        "trade_role_confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "own_manufacturing": { "type": ["boolean", "null"] },
+        "carried_brands": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "country"],
+            "properties": {
+              "name": { "type": "string" },
+              "country": { "type": ["string", "null"], "description": "ISO 3166 alpha-2 when known" }
+            }
+          }
+        },
+        "carries_chinese_brand": { "type": ["boolean", "null"] },
+        "carries_foreign_brand": { "type": ["boolean", "null"] }
+      }
+    },
+    "identifiers_ext": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "BI-19: register and VAT identifiers extracted from the Impressum. Optional; absent in older payloads.",
+      "required": ["register_key", "vat_id"],
+      "properties": {
+        "register_key": { "type": ["string", "null"], "description": "Court-qualified German register key, e.g. de-hrb:muenchen:98765" },
+        "vat_id": { "type": ["string", "null"], "description": "Checksum-valid VAT id, e.g. DE136695976" }
+      }
+    },
+    "company_contact_points": {
+      "type": "array",
+      "description": "BI-14 company-level contact links (green, https, no query/fragment, no personal data). Optional; absent in older payloads.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "url", "status"],
+        "properties": {
+          "kind": { "type": "string", "enum": ["contact_page", "impressum_page", "contact_form", "supplier_page", "linkedin_company_page", "x_company_account"] },
+          "url": { "type": "string", "format": "uri" },
+          "status": { "type": "string", "enum": ["UNVERIFIED", "VALID", "INVALID"] }
+        }
+      }
+    },
+    "suggested_contact_path": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "description": "BI-15 deterministic contact path (supplier page > contact form > contact page > Impressum). Optional; null when no path qualifies.",
+      "required": ["kind", "url", "legal_note"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["supplier_page", "contact_form", "contact_page", "impressum_page"] },
+        "url": { "type": "string", "format": "uri" },
+        "legal_note": { "type": "string" }
+      }
+    },
+    "signals": {
+      "type": "array",
+      "description": "Up to three newest public intent signals backing 'why now'. Optional; absent in older payloads.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "at", "url"],
+        "properties": {
+          "type": { "type": "string" },
+          "at": { "type": "string", "format": "date-time" },
+          "url": { "type": ["string", "null"], "format": "uri" }
+        }
+      }
+    },
+    "evidence_urls": {
+      "type": "array",
+      "description": "URLs of the field evidence backing this snapshot, each with its field and fetch time. Optional; absent in older payloads.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "source_url", "fetched_at"],
+        "properties": {
+          "field": { "type": "string" },
+          "source_url": { "type": "string", "format": "uri" },
+          "fetched_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "fit_reason_codes": {
+      "type": "array",
+      "description": "BI-20 deterministic fit reason codes (FIT_MATCH / FIT_WEAK / FIT_MISMATCH, RULE_<kind>_FAIL, MISSING_<field>, MISSING_CONTACT_POINT, SANCTIONS_HOLD). Optional; absent in older payloads.",
+      "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }
     }
   }
 }

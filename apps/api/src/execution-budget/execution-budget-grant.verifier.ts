@@ -47,6 +47,7 @@ const PURPOSES = new Set<ExecutionBudgetPurpose>([
   'understanding.run',
   'discovery.run',
   'contact.verify',
+  'outreach.draft',
   ...EXECUTION_BUDGET_PLATFORM_PURPOSES,
 ]);
 

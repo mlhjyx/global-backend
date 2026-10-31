@@ -4,31 +4,35 @@
 > 生命周期：`CURRENT`
 > 状态：`CURRENT`
 > 当前事实来源：[产品范围](../product-scope.md)、[当前架构](../architecture/current.md)、[ADR registry](../adr/registry.md)、[发布路线](../roadmap/release-plan.md)、[冲突与开放决策登记](../governance/conflict-register.md)，以及本页逐项注明的 Git/GitHub 回读与 xin `global_dev` 只读查询
-> 最后核验：2026-10-14T10:05Z（`origin/main@33339fb4`、GitHub PR 列表、xin 运行容器的镜像 revision 与 `global_dev` 只读计数；本页是人工核验的读数，不是 RuntimeEvidence）
+> 最后核验：2026-10-30T19:45Z（`origin/main@1ce1b7ba`、xin 运行镜像 `sha256:4a76e2c3…`（build `348fa0cb`）、`global_dev` 只读计数；本页是人工核验的读数，不是 RuntimeEvidence）
 > 写法：按 PRD 4.0 L2 §5 的四问填写——做了什么（四态：未做 / 可运行 / 已验证 / 已验收）、证据、谁验收、怎么回退。四态口径（PRD 4.0 L0 §9.3「4.0 新锁定」的 `D-029`，与待拍板项 `PRD4-D<n>` 不是同一编号序列）尚未逐条拍板，本页先按它组织。2026-09-20 核验的旧版正文见文末[历史](#历史2026-09-20-核验)。
 
 ## 一页结论
 
 当前 Release 是 **RL1 线索试点**：一个 ICP（德国 / DACH 工业泵进口商与分销商）、一个国家、一个品类，Managed 周报交付，目标是拿到第一个人工 QGO 判断并记下每条线索的成本。产品负责人 2026-10-10 批准按 PRD 4.0 开发（「同意，继续，需要闭环，按照 prd 中的需求进行开发实施」）。
 
-**RL1 还没有达成任何一条产出类退出指标。** xin 上 `discovery_run` 全部 11 行都是 `FAILED`，没有一行 `COMPLETED` 或 `PARTIAL`（截至 2026-10-14 08:33 UTC；本次 10:05 UTC 复核没有新 run）。八条退出指标里，真实产出、精度、可达、证据、成本、商机六条没有数据可填；合规可以计数（个人数据三张表 0 行，制裁门从未执行所以命中为 0）；节奏为 0（还没有发出过一份周报）。
+**2026-10-30 复核：主链路已经跑出产出，但离退出指标仍有距离。** xin 上 `discovery_run` 25 行：`PARTIAL` 8、`FAILED` 17、`COMPLETED` 0（最近一次 2026-10-30 18:12Z `e54604d0` 为 PARTIAL，7 条查询、79.8 分钟、产出 5 条 recommended）。`lead` 3 629 行且 `total_score` **全部非空**：recommended 23、needs_review 2 073、rejected 1 503、sanctions_hold 30；其中 21 条已被客户接受（QUALIFIED）。`outbox_delivery` 321 行 **全部 ACKED**、无 PENDING（gain-saas 事件消费者按 2 分钟一轮）——交付最后一跳由 **gain-saas** 走通。`company_profile` 2 ACTIVE / 28 ENRICHING / 29 DRAFT / 1 REVIEW；个人数据：`canonical_contact` 与 `contact_point` 仍 0 行，`company_contact_point` 136 行（公司级联系路径，VALID/UNVERIFIED）。
 
-阻塞 RL1 的不止「run 跑不完」：评分从未在验收数据上跑过，可达性结构上为 0，交付最后一跳（GrowthOS ACK）从未走通，卖方自助入驻自 08-24 起不可运行。逐项见下表。
+仍未达成：**没有一次 `COMPLETED` run**；具名个人数据（决策人/个人邮箱）仍为 0 行；周报 CSV 已能按 ICP 真实导出（2026-W44 已在 4 个 ICP 上导出 1/3/5/7 行），但试点客户的交付节奏尚未开始。评分、制裁门与交付 ACK 这三项 2026-10-14 时「从未执行」的判断**已过时**——它们现在都有真实数据。逐项见下表。
 
 ## 1. RL1 主链：做了什么、证据、谁验收、怎么回退
 
 | 项 | 做了什么（四态） | 证据 | 谁验收 | 怎么回退 |
 | --- | --- | --- | --- | --- |
-| 发现 run（ICP → 查询计划 → run） | **可运行，未验证**：11 次全部 FAILED，最远走到信号阶段（卖方 #23、#28）；10-11 起每次失败都由一个 PR 修了倒下的那一处（#638–#645，见 §2），#644、#645 尚未上线 | `discovery_run` 只读查询（status、`stats.failure`）；RL1 执行计划 §15 | 产品负责人（RL1 内部验收） | 运行镜像按 digest 钉在 `local-config/global/runtime.compose.env`，每次换镜像的前后 digest 与验收记录在 `/global/_archive/backend-runtime-switch-*`；带迁移的窗口先 `pg_dump`，另有每日 `db-backup` |
-| 评分与制裁第五门 | **未验证**：从未在验收数据上执行。179 条 lead 的 `total_score` 全部为 NULL，队列只是 fit 阶段按判定预置的值；`sanctions_screening_result` 0 行。原因：`finalizeRun` 只在 run 不是 FAILED 时发 `QualifyRequested`，而 run 全部 FAILED。修复 #648 在途 | `lead`、`sanctions_screening_result`、`outbox_event` 只读计数 | 产品负责人 | 评分是确定性重算、可重跑，不改源数据，规则版本写进快照；#648 随镜像回退 |
-| 可达性（BI-14 公司级联系路径） | **可运行（开关关闭），未验证**：#630（PR-1，只存联系页 / Impressum / 表单等链接）已合并，`company_contact` 为 DISABLED，`company_contact_point` 0 行；评分侧（可达性按公司级联系路径计分、评分规则 v3）在 #649，未合并。在它上线前 recommended 结构上为 0（当前 179 条 lead：62 条 needs_review、117 条 rejected、0 条 recommended） | `data_provider`、`company_contact_point` 只读查询；#630、#649 | 产品负责人 | `company_contact` 置回 DISABLED；#649 随镜像回退 |
-| 交付最后一跳（`LeadQualified` → GrowthOS ACK） | **未验证**：`outbox_delivery` 154 行全部是 `sink=saas`、`PENDING`（2026-09-01 至 2026-10-13），GrowthOS 从未 ACK 过任何事件；xin 没有配置 webhook sink，只能由 GrowthOS 调 `POST /events/ack`；GrowthOS 前台只拉前 50 条、只给前 3 条 ACK 按钮 | `outbox_delivery` 只读计数；评审稿 2026-10-13 §1.5 | 产品负责人；GrowthOS 侧消费需走 `growthos-dev` 补丁线 | 不涉及数据回退（事件只读交付） |
-| 卖方自助入驻（understanding 官网抓取） | **不可运行**：自 2026-08-24（#413）起，ToolBroker 的 artifactPrecheck 对 understanding 的 `crawl4ai-fetch/v1` 抓取一律 HOLD，`company_profile` 28 行 ENRICHING、9 行 DRAFT、历史上 0 行 ACTIVE；工作流没有失败终态，同一公司不可重跑。验收靠手工 `POST /companies/:id/claims` 再审批绕过。已派任务卡 E（扩主体种类 + 失败终态 + 重跑入口） | `company_profile` 按 status 分组；评审稿 2026-10-13 §1.1 | 产品负责人 | 修复随镜像回退。修复前不影响验收 run 产出 lead，但 pilot 客户经 GrowthOS 自助入驻会 100% 失败且不报错 |
-| 交付包 v1.1、周报 CSV、反馈端点、Golden Set（BI-19–BI-24） | **未做**（RL1 执行计划 §15 第 5–9 项）。交付闭环设计已批准：[`2026-10-10-lead-delivery-loop-design.md`](../superpowers/plans/2026-10-10-lead-delivery-loop-design.md) | 仓内无 `/reports` 路径、无反馈端点；Golden Set 不在仓内 | 产品负责人；design partner（商机，PRD4-D8 未定人选） | — |
+| 发现 run（ICP → 查询计划 → run） | **可运行，部分验证**：25 次 run，`PARTIAL` 8、`FAILED` 17、`COMPLETED` 0；最近一次 2026-10-30 18:12Z（`e54604d0`，7 条查询、79.8 分钟、5 条 recommended）为 PARTIAL。历史失败逐项见 §2 | `discovery_run` 只读查询（status、`stats`） | 产品负责人（RL1 内部验收） | 运行镜像按 digest 钉在 `local-config/global/runtime.compose.env`，每次换镜像的前后 digest 与验收记录在 `/global/_archive/backend-runtime-switch-*`；带迁移的窗口先 `pg_dump`，另有每日 `db-backup` |
+| 评分与制裁第五门 | **已验证（有真实数据）**：`lead` 3 629 行，`total_score` NULL 为 **0**；队列 recommended 23 / needs_review 2 073 / rejected 1 503 / sanctions_hold 30，其中 21 条已被客户接受（QUALIFIED）；`sanctions_screening_result` 18 行 | `lead`（status、queue、total_score）、`sanctions_screening_result` 只读计数 | 产品负责人 | 评分是确定性重算、可重跑，不改源数据，规则版本写进快照 |
+| 可达性（BI-14 公司级联系路径） | **可运行**：`company_contact` 已 ENABLED，`company_contact_point` 已有 136 行公司级路径（contact_page/contact_form/impressum_page，UNVERIFIED）。**具名联系人仍是缺口**：`decision_maker`、`companies_house`、`inpi_rne`、`smtp_self` 四个 provider 均为 ENABLED，但发现 run 不调用联系人发现——`POST /canonical-companies/:id/discover-contacts`、`/guess-emails`、`/contact-points/:id/verify` 只能按需调用；`email_guess` provider 仍 DISABLED；gain-saas 前端与 BFF 未暴露这三个端点，所以客户点不到入口。`canonical_contact`、`contact_point` 因此仍 0 行 | `data_provider`、`company_contact_point` 只读查询 | 产品负责人 | `company_contact` 置回 DISABLED |
+| 交付最后一跳（`LeadQualified` → 事件 ACK） | **已验证**：`outbox_delivery` 321 行 `ACKED`（sink=saas；其中 LeadQualified 16 行全 ACK），增益事件由 gain-saas 事件消费者每 2 分钟消费；GrowthOS 不再是消费方 | `outbox_delivery` 按 sink/status 计数 | 产品负责人 | 不涉及数据回退（事件只读交付） |
+| 卖方自助入驻（understanding 官网抓取） | **部分恢复但未闭环**：`company_profile` 2 ACTIVE、1 REVIEW、29 DRAFT、28 ENRICHING——#654 之后抓取能过产物门，但抽取阶段仍频繁失败，档案停在 DRAFT/ENRICHING；验收主要靠手工 claims 路径 | `company_profile` 按 status 分组 | 产品负责人 | 修复随镜像回退 |
+| 交付包 v1.1、周报 CSV、反馈端点、Golden Set（BI-19–BI-24） | **部分完成**：周报 CSV（#650，BI-22）与反馈端点（BI-23）已上线并在真实数据上导出；LeadPackage v1.1（#681）已上线；Golden Set 仍未做 | 仓内 `/reports/weekly` 与 `/reports/weekly/feedback` 已注册；Golden Set 不在仓内 | 产品负责人；design partner（商机，PRD4-D8 未定人选） | — |
 
-运行时：xin 的 API / Worker / platform Worker 运行 `9b94ee53`（#643，镜像 `sha256:72b8504c…`，2026-10-13 窗口 7 上线，无迁移）。#644、#645 已于 2026-10-14 合并，**尚未上线**。
+运行时：xin 的 API / Worker / platform Worker 运行 **`348fa0cb`**（#699，镜像 `sha256:4a76e2c3…`，2026-10-30 晚间切换，含 #697 DoH 可配置、#698 状态回读与 #699 开发信读取端点）。`origin/main` 已到 `1ce1b7ba`（#700，纯文档，未进镜像亦无需补发）。获客模型：抽取档 `gemini-3.8-flash`、推理档 `gpt-6.1-terra`，任务级覆盖 `taxonomy.normalize→deepseek-flash`、`discovery.qualify_fit→gemini-4-argon-high`。
 
-## 2. 验收 run 记录（11 次，全部 FAILED）
+身份分工（2026-10-30 核实）：产品登录/身份由 **gain-saas** 签发（`AUTH_ISSUER` / `AUTH_JWKS_URI` = `https://127.0.0.1:18446`）；**R4 平台权威仍在 GrowthOS**（`CAPABILITY_MACHINE_JWKS_URI`、`PLATFORM_CAPABILITY_JWKS_URI`、`TEMPORAL_MACHINE_JWKS_URI`、`PLATFORM_TECHNICAL_QUOTE_AUTH_ISSUER` 均指向 `https://127.0.0.1:18444`，`PLATFORM_CAPABILITY_GROWTHOS_SHA=6bbfa1cc…`）。GrowthOS 侧容器与 `frontend/growthos-source`、`frontend/growthos-work` 仍在服役。
+
+## 2. 历史验收 run 记录（2026-10-08 → 10-13，11 次全部 FAILED）
+
+> 下表是当时的失败归因，保留作证据；**当前计数以 §1 为准**（25 次：8 PARTIAL / 17 FAILED / 0 COMPLETED）。
 
 | 卖方 | run | 启动（UTC） | 倒在 | 直接原因 | 修复 |
 | --- | --- | --- | --- | --- | --- |
@@ -54,7 +58,7 @@ PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](..
 
 | 决定 | 当前事实 | 怎么回退 |
 | --- | --- | --- |
-| PRD4-D2 冻结 R4（2026-10-10） | 不在 R4 准入上继续投入；4 个平台 schedule 在 RL1 期间继续 paused；平台工作流迁进 customer worker 另出设计（未做）。每次换镜像仍要续 R4 部署绑定与准入回执（7 天）。R4 撤销投递链仍未打通（Backend 没有调用 GrowthOS HMAC 签发端点的客户端，`BLOCKED_PENDING_BACKEND_4A4`）：platform Worker 绿灯只代表「事实可观察」，不代表「撤销能真正送达」 | 冻结只是停止投入，没有删代码；恢复平台 schedule 是产品负责人的单独决定，且先要做平台写入者授权（L4-G23） |
+| PRD4-D2 冻结 R4（2026-10-10，**2026-10-31 重开**） | 冻结期间不追加 R4 投入、4 个平台 schedule 保持 paused、每次换镜像仍续 7 天绑定。**2026-10-31 产品负责人重开**：R4 恢复投入，唯一目的是把平台权威从 GrowthOS 迁到 gain-saas（机器 token、capability、撤销与恢复通道），迁完退役 GrowthOS；schedule 是否恢复运行另议。撤销投递链的现状：后端接收的是 RS256 签名的 JWS（不是 HMAC），发送侧已在 gain-saas 实现（P4），但尚未切换，`BLOCKED_PENDING_BACKEND_4A4` 仍然成立 | 重开只恢复「迁移」这一项投入；恢复平台 schedule 仍需平台写入者授权（L4-G23），且是产品负责人的单独决定 |
 | PRD4-D3 客户写入准入与 platform Worker 就绪解耦（2026-10-10） | #627 已合并，2026-10-11 上线：客户写入按客户依赖集合判定，platform Worker 恰为 `PLATFORM_WORKER_NOT_READY` 时不再关闭客户写入；`/health/ready` 的整体口径不变 | 换回 #627 之前的镜像 |
 | PRD4-D9 制裁名单与职能邮箱（2026-10-10，部分拍板） | 制裁名单走运营刷新（#629，不经平台 schedule），2026-10-11 打开三个源（OFAC SDN、OFAC Consolidated、EU FSF，`sanctions_source` 均 ENABLED，约 1.2 万条实体）；职能邮箱按 BI-14 做公司级（#630，开关 DISABLED）。LIA 时机未定 | `sanctions_source` 置 DISABLED |
 | PRD4-D14 模型供应（2026-10-11） | #633：11 个获客任务照旧请求 pro 档，上游换成 Flash 档时也接受，trace 与账本如实记为 Flash；建站等其他任务仍只认 pro。xin 已打开 `MODEL_IDENTITY_SUBSTITUTES`。官方备用上游未接 | 关掉 `MODEL_IDENTITY_SUBSTITUTES` |
@@ -107,11 +111,11 @@ PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](..
 | G0 — Truth & Ownership | PARTIAL | 权威文档已回写到 2026-10 决定；PRD 4.0 仍只在私有目录（PRD4-D10 未拍板），不是仓内权威 |
 | G1 — Product/UX/Contract | PARTIAL | 交付包 v1.1、反馈端点的机器合同未做（周报 CSV 已有端点与 OpenAPI，#650，2026-10-15 合并、未上线）；可达性口径改为公司级联系路径尚未写入产品范围 |
 | G2 — Source/TDD/Security | PARTIAL / MERGED_FIXES_VERIFIED | 每个修复 PR 自带 TDD 与必需检查；不推广到未改动的模块 |
-| G3 — Integration/Data | PARTIAL / PRODUCT_E2E_NOT_RUN | 没有一次发现 run 跑完；评分、制裁门与 GrowthOS ACK 从未在验收数据上执行 |
+| G3 — Integration/Data | PARTIAL / PRODUCT_E2E_PARTIAL | 已有 7 次 PARTIAL run、3 369 条真实评分、309 条 ACK；仍没有一次 `COMPLETED` run |
 | G4 — Release Candidate | DEVELOPMENT_CANDIDATE_ONLY | xin 运行的是按 digest 钉住、带构建证明的开发镜像；没有可信外部 provenance readback |
 | G5-Site — Runtime Observed | HISTORICAL_ONLY | Site 线未推进（PRD4-D1 未拍板）；历史观察不可晋级 |
-| G5-Acquisition — Runtime Observed | NOT_VERIFIED | 11 次 run 全部 FAILED；没有当前 RuntimeEvidence |
-| G6 — UAT Accepted | NOT_RUN | RL1 退出指标（≥3 个跑完的 run、≥15 条 recommended、design partner 回填）都没有数据 |
+| G5-Acquisition — Runtime Observed | NOT_VERIFIED | 有 7 次 PARTIAL run，但没有 `COMPLETED`，也没有当前 RuntimeEvidence（PARTIAL 不构成 RuntimeEvidence PASS） |
+| G6 — UAT Accepted | NOT_RUN | RL1 退出指标：recommended 18 / 目标 ≥15 已达，跑完的 run 与 design partner 回填仍未达成 |
 | G7 — Pilot/GA Authorized | NOT_AUTHORIZED | 晋级门当前不可达（见上一条死锁）；也没有产品授权 |
 
 相同动作、目标和范围的有效授权继续沿用。源码 / PR 合入不自动授权生产部署、保留数据库迁移、凭据与端口修改、付费调用或 Pilot/GA。

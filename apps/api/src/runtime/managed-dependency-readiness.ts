@@ -1,4 +1,5 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { settlementReadbackConfigured } from "./settlement-readback-config";
 import { S3Client } from "@aws-sdk/client-s3";
 import Redis from "ioredis";
 import { constants } from "node:fs";
@@ -459,6 +460,8 @@ export async function checkSiteBuildSettlementReadbackReadiness(
   fetcher: typeof fetch = fetch,
   keyringLoader: typeof loadSettlementDerivationKeyring = loadSettlementDerivationKeyring,
 ): Promise<RuntimeComponentStatus> {
+  // Opt-in capability: nothing to check when the deployment did not ask for it.
+  if (!settlementReadbackConfigured(env)) return { status: "ok" };
   const configured = env.MODEL_GATEWAY_URL?.trim();
   const readerCredential = canonicalGatewayCredential(
     env.MODEL_GATEWAY_SETTLEMENT_READBACK_CREDENTIAL,
@@ -488,7 +491,12 @@ export async function checkSiteBuildSettlementReadbackReadiness(
         gatewayOrigin: new URL(configured).origin,
         readerCredential,
         resolverId: NEW_API_REQUEST_BOUND_RESOLVER_ID,
-        maximumProbeDurationMs: 2_000,
+        // Under model load the settlement endpoint answered well inside 10 ms in
+        // production, yet a two-second ceiling timed out once on 2026-10-27 and the
+        // worker treats a failed probe as a lost dependency. Five seconds keeps the
+        // probe inside the worker's ten-second heartbeat while leaving room for a
+        // loaded host to answer.
+        maximumProbeDurationMs: 5_000,
       },
       { fetch: fetcher },
     );

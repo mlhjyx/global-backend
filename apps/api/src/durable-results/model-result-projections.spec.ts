@@ -274,7 +274,30 @@ const contactDecisionMakersData: JsonRecord = {
 };
 const contactDecisionMakersRaw = rawResult(contactDecisionMakersData);
 
+const outreachDraftData: JsonRecord = {
+  subject: 's'.repeat(200),
+  body: 'b'.repeat(1200),
+  body_zh: '译'.repeat(1200),
+  used_facts: ['seller.name', ...Array.from({ length: 39 }, (_, index) => `fact-${index}`)],
+};
+const outreachDraftRaw = rawResult(outreachDraftData);
+
 const REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES: readonly ProjectionFixture[] = [
+  {
+    taskId: 'outreach.first_contact_draft', schema: 'outreach-first-contact-draft/v1', raw: outreachDraftRaw,
+    restored: restoredResult(outreachDraftData),
+    invalid: [
+      invalid('subject maxLength + 1', outreachDraftRaw, (copy) => { copy.data.subject = 's'.repeat(201); }),
+      invalid('used_facts maxItems + 1', outreachDraftRaw, (copy) => {
+        (copy.data.used_facts as unknown[]).push('one-more');
+      }),
+      invalid('unknown ModelResult root', outreachDraftRaw, (copy) => { copy.unexpected = true; }, false),
+      invalid('unknown draft field', outreachDraftRaw, (copy) => { copy.data.signature = 'forbidden'; }),
+      invalid('non-canonical draft text', outreachDraftRaw, (copy) => {
+        (copy.data as JsonRecord).body = '\ud800';
+      }),
+    ],
+  },
   {
     taskId: 'icp.design', schema: 'icp-design/v1', raw: icpDesignRaw,
     restored: restoredResult(icpDesignData),
@@ -497,7 +520,7 @@ function expectRecursivelyClosedAndBounded(schema: unknown, propertyNames?: stri
 }
 
 describe('non-Site-Builder model result projection registry', () => {
-  it('locks the exact eleven task IDs and their exact schema IDs', () => {
+  it('locks the exact twelve task IDs and their exact schema IDs', () => {
     expect(MODEL_RESULT_TASK_IDS).toEqual([
       'company_understanding.extract_claims',
       'company_understanding.extract_profile',
@@ -510,6 +533,7 @@ describe('non-Site-Builder model result projection registry', () => {
       'discovery.extract_list',
       'contact.find_decision_makers',
       'discovery.classify_trade_role',
+      'outreach.first_contact_draft',
     ]);
     expect(MODEL_RESULT_PROJECTION_SCHEMAS).toEqual({
       'company_understanding.extract_claims': 'understanding-claims/v1',
@@ -523,6 +547,7 @@ describe('non-Site-Builder model result projection registry', () => {
       'discovery.extract_list': 'discovery-extract-list/v1',
       'contact.find_decision_makers': 'contact-decision-makers/v1',
       'discovery.classify_trade_role': 'discovery-classify-trade-role/v1',
+      'outreach.first_contact_draft': 'outreach-first-contact-draft/v1',
     });
     expect(MODEL_RESULT_PROJECTION_DEFINITIONS.map((definition) => definition.schema)).toEqual([
       'understanding-claims/v1',
@@ -536,6 +561,7 @@ describe('non-Site-Builder model result projection registry', () => {
       'discovery-extract-list/v1',
       'contact-decision-makers/v1',
       'discovery-classify-trade-role/v1',
+      'outreach-first-contact-draft/v1',
     ]);
   });
 
@@ -554,7 +580,7 @@ describe('non-Site-Builder model result projection registry', () => {
   });
 
   it('registers only closed, bounded, ASCII-camelCase, non-sensitive projection schemas', () => {
-    expect(MODEL_RESULT_PROJECTION_DEFINITIONS).toHaveLength(11);
+    expect(MODEL_RESULT_PROJECTION_DEFINITIONS).toHaveLength(12);
     for (const definition of MODEL_RESULT_PROJECTION_DEFINITIONS) {
       const names: string[] = [];
       expectRecursivelyClosedAndBounded(definition.jsonSchema, names);

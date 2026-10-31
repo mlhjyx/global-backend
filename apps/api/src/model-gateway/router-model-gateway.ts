@@ -619,10 +619,10 @@ export class RouterModelGateway extends ModelGateway {
             }
             return returned;
           } catch {
-            throw new BudgetOperationReplayError(operationKey);
+            throw new BudgetOperationReplayError(operationKey, "remnant");
           }
         }
-        throw new BudgetOperationReplayError(operationKey);
+        throw new BudgetOperationReplayError(operationKey, "remnant");
       }
     } catch (err) {
       // 预算拒绝必须可审计（对齐 ToolBroker 的 DENIED trace）：否则截断完全不可观测。

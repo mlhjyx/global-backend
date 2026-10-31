@@ -1,4 +1,5 @@
 import type { RuntimeReleaseIdentity } from "./runtime-release-identity";
+import { settlementReadbackConfigured } from "./settlement-readback-config";
 import type { RuntimeSettings } from "./runtime-environment";
 import { createRolesToScopesPolicy } from "../auth/scopes";
 import { validateJwksTokenVerifierConfiguration } from "../auth/jwks-token-verifier";
@@ -169,27 +170,34 @@ function inspectGateway(
   if (parseModelGatewayRequestTimeout(env.MODEL_TIMEOUT_MS) === undefined) {
     return { status: "failed", code: "GATEWAY_TIMEOUT_INVALID" };
   }
-  const readerCredential = canonicalGatewayCredential(
-    env.MODEL_GATEWAY_SETTLEMENT_READBACK_CREDENTIAL,
-  );
-  if (
-    !readerCredential ||
-    !/^srb1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{43}$/u.test(readerCredential) ||
-    !present(env.SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE) ||
-    !isAbsolute(env.SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE) ||
-    !present(env.SITE_BUILD_COST_RECONCILIATION_CATALOG_JSON)
-  ) {
-    return {
-      status: "failed",
-      code: "GATEWAY_SETTLEMENT_READBACK_CONFIG_INCOMPLETE",
-    };
+  // Settlement readback is an opt-in deployment capability (product owner decision
+  // 2026-10-29); when none of its inputs is set the gateway only needs url/key/timeout.
+  if (settlementReadbackConfigured(env)) {
+    const readerCredential = canonicalGatewayCredential(
+      env.MODEL_GATEWAY_SETTLEMENT_READBACK_CREDENTIAL,
+    );
+    if (
+      !readerCredential ||
+      !/^srb1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{43}$/u.test(readerCredential) ||
+      !present(env.SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE) ||
+      !isAbsolute(env.SITE_BUILD_SETTLEMENT_DERIVATION_KEYRING_FILE) ||
+      !present(env.SITE_BUILD_COST_RECONCILIATION_CATALOG_JSON)
+    ) {
+      return {
+        status: "failed",
+        code: "GATEWAY_SETTLEMENT_READBACK_CONFIG_INCOMPLETE",
+      };
+    }
+    if (!gatewayCredentialsAreDistinct(dispatchCredential, readerCredential)) {
+      return {
+        status: "failed",
+        code: "GATEWAY_SETTLEMENT_CREDENTIAL_SCOPE_INVALID",
+      };
+    }
   }
-  if (!gatewayCredentialsAreDistinct(dispatchCredential, readerCredential)) {
-    return {
-      status: "failed",
-      code: "GATEWAY_SETTLEMENT_CREDENTIAL_SCOPE_INVALID",
-    };
-  }
+  // The provider-wire database is the worker's local wire-attempt ledger, not a
+  // billing-readback input: the worker bootstrap still requires it, so admission
+  // keeps checking it whether or not readback is enabled.
   if (role === "WORKER") {
     if (!present(env.SITE_BUILD_PROVIDER_WIRE_DATABASE_URL)) {
       return {

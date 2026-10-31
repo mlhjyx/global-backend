@@ -237,7 +237,7 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
         return {};
       },
     },
-    rawSourceRecord: {
+    rawSourceRecord: { findUnique: async () => null,
       findMany: async () => rows,
       count: async ({ where }: { where: { ingestStatus?: string } }) =>
         rows.filter(
@@ -248,6 +248,7 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
     usageLedger: { create: async () => ({}) },
   };
   const prisma = {
+    dataProvider: { findUnique: async () => null },
     sourcePolicy: {
       findMany: async () => [
         {
@@ -445,7 +446,7 @@ const budgetSwallowingEnricher = {
 function makeEnrichDeps(enrichers: unknown[]) {
   const tx = {
     $queryRaw: async () => [{ locked: true }],
-    rawSourceRecord: { findMany: async () => [{ id: "raw1" }] },
+    rawSourceRecord: { findUnique: async () => null, findMany: async () => [{ id: "raw1" }] },
     identityLink: { findMany: async () => [{ canonicalId: "c1" }] },
     canonicalCompany: {
       findMany: async () => [
@@ -639,6 +640,25 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
       duplicateCount: 0,
       provider: null,
       queryReceipt: { providers: [], usageQuantity: 0 },
+    });
+  });
+
+  it("discoverRunContacts skips fail-closed when no deployment lawful basis is configured", async () => {
+    const acts = createDiscoveryActivities(makeDeps([]));
+
+    const result = await acts.discoverRunContacts({
+      ...discoveryArgs("contacts-no-basis", {}),
+      icpId: "icp-1",
+    });
+
+    expect(result).toEqual({
+      companies: 0,
+      people: 0,
+      emails: 0,
+      phones: 0,
+      skipped: true,
+      reason: "no_lawful_basis_configured",
+      budgetTruncated: false,
     });
   });
 
@@ -892,7 +912,7 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
       {
         ...okAdapter("ted", []),
         discoverCompanies: async () => {
-          throw new BudgetOperationReplayError("ted-op");
+          throw new BudgetOperationReplayError("ted-op", "remnant");
         },
       },
     ]);
@@ -978,7 +998,7 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
     const tx = {
       $executeRaw: vi.fn(async () => 1),
       $queryRaw: queryRaw,
-      rawSourceRecord: {
+      rawSourceRecord: { findUnique: async () => null,
         findMany: vi.fn(async () => []),
         count: vi.fn(
           async ({ where }: { where: { ingestStatus: string } }) =>
@@ -1473,7 +1493,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     const canonicalUpsert = vi.fn();
     const tx = {
       $queryRaw: legacyMaterializationQueryRaw(),
-      rawSourceRecord: {
+      rawSourceRecord: { findUnique: async () => null,
         findMany: vi.fn(async () => [
           {
             id: "raw-no-name",
@@ -1506,7 +1526,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     const rawFindMany = vi.fn(async () => []);
     const tx = {
       $queryRaw: legacyMaterializationQueryRaw(),
-      rawSourceRecord: { findMany: rawFindMany },
+      rawSourceRecord: { findUnique: async () => null, findMany: rawFindMany },
       suppressionRecord: { findMany: vi.fn(async () => []) },
     };
     const withWorkspace = vi.fn(
@@ -1551,7 +1571,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
       const evidenceCreate = vi.fn();
       const tx = {
         $queryRaw: legacyMaterializationQueryRaw(),
-        rawSourceRecord: {
+        rawSourceRecord: { findUnique: async () => null,
           findMany: async () => [{ id: "raw-synthetic", ...raw }],
         },
         rawSourceGovernanceDisposition: { findMany: async () => [] },
@@ -1592,7 +1612,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
         order.push("lock");
         return [{ pg_advisory_xact_lock: null }];
       }),
-      rawSourceRecord: {
+      rawSourceRecord: { findUnique: async () => null,
         findMany: async () => [
           {
             id: "raw-1",
@@ -1648,7 +1668,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
   it("maps a post-read company IdentityLink P2002 to the stable identity conflict", async () => {
     const tx = {
       $queryRaw: legacyMaterializationQueryRaw(),
-      rawSourceRecord: { findMany: vi.fn(async () => [{
+      rawSourceRecord: { findUnique: async () => null, findMany: vi.fn(async () => [{
         id: "raw-p2002", providerKey: "registry", ingestStatus: "ACCEPTED",
         ingestVersion: "raw-source/v2", payload: { name: "Race GmbH", domain: "race.example" },
       }]) },
@@ -1691,7 +1711,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     const linkCreate = vi.fn(async () => ({}));
     const tx = {
       $queryRaw: legacyMaterializationQueryRaw(),
-      rawSourceRecord: {
+      rawSourceRecord: { findUnique: async () => null,
         findMany: async () => [
           {
             id: "raw-v2",
@@ -1827,7 +1847,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     const evidenceCreate = vi.fn();
     const tx = {
       $queryRaw: legacyMaterializationQueryRaw(),
-      rawSourceRecord: {
+      rawSourceRecord: { findUnique: async () => null,
         findMany: async () => [
           {
             id: "raw-1",
@@ -1935,7 +1955,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     );
     const tx = {
       $queryRaw: legacyMaterializationQueryRaw(),
-      rawSourceRecord: { findMany: vi.fn(async () => raws) },
+      rawSourceRecord: { findUnique: async () => null, findMany: vi.fn(async () => raws) },
       rawSourceGovernanceDisposition: { findMany: vi.fn(async () => []) },
       suppressionRecord: { findMany: vi.fn(async () => []) },
       canonicalCompany: {
@@ -2066,7 +2086,7 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     });
     const tx = {
       $queryRaw: legacyMaterializationQueryRaw(),
-      rawSourceRecord: { findMany: vi.fn(async () => [raw]) },
+      rawSourceRecord: { findUnique: async () => null, findMany: vi.fn(async () => [raw]) },
       rawSourceGovernanceDisposition: { findMany: vi.fn(async () => []) },
       suppressionRecord: { findMany: vi.fn(async () => []) },
       canonicalCompany: {
@@ -2525,7 +2545,11 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
       exactExistingOutcome: null, reusableIdentity: null,
       reusableManifestCandidates: [], companyParse: null, canonicalWrite: null,
     });
+    const rawFetchedAt = new Date("2026-10-01T00:00:00.000Z");
     const tx = {
+      rawSourceRecord: {
+        findUnique: async () => ({ sourceUrl: "https://acme.example/raw", fetchedAt: rawFetchedAt }),
+      },
       suppressionRecord: { findMany: vi.fn(async (args: {
         take?: number; where?: { id?: { gt?: string } };
       }) => args.take === 128
@@ -2640,6 +2664,10 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     expect(tx.canonicalCompany.upsert).toHaveBeenCalledOnce();
     expect(tx.identityLink.create).toHaveBeenCalledOnce();
     expect(tx.fieldEvidence.create).toHaveBeenCalledTimes(8);
+    // L1：物化证据补写来源 URL，fetched_at 用原始记录的抓取时间（不是提交时刻）。
+    for (const call of (tx.fieldEvidence.create as ReturnType<typeof vi.fn>).mock.calls) {
+      expect(call[0].data).toMatchObject({ sourceUrl: "https://acme.example/raw", fetchedAt: rawFetchedAt });
+    }
     expect(tx.canonicalCompany.upsert).toHaveBeenCalledOnce();
     expect(canonicalState).toMatchObject({
       domain: "acme.example", country: "DE", region: "BE", industry: "industrial",
@@ -2752,7 +2780,7 @@ describe("finalizeRun durable query receipt readback", () => {
       discoveryRun: { update },
       discoveryQueryPlan: { update: planUpdate },
       lead: { findFirst: leadFindFirst },
-      rawSourceRecord: { findMany: rawFindMany },
+      rawSourceRecord: { findUnique: async () => null, findMany: rawFindMany },
       identityLink: { findMany: identityLinkFindMany },
       outboxEvent: { create: outboxCreate },
     };
@@ -3649,7 +3677,7 @@ async function withMatchCompanies<T>(deps: T, ids: string[]): Promise<T> {
 }
 
 describe("尽力而为的阶段：无法重放的公司跳过并计数", () => {
-  const unreplayable = (operationId: string) => new BudgetOperationReplayError(operationId);
+  const unreplayable = (operationId: string) => new BudgetOperationReplayError(operationId, "remnant");
 
   it("signals skip a company whose operation cannot be replayed, count it, and enrich the rest", async () => {
     const enricher = {
@@ -3669,17 +3697,39 @@ describe("尽力而为的阶段：无法重放的公司跳过并计数", () => {
     expect(enricher.enrichCompany).toHaveBeenCalledTimes(2);
   });
 
-  it("signals still stop when two companies in a row cannot be replayed", async () => {
-    const second = unreplayable("op-2");
+  it("signals absorb every company whose operation cannot be replayed, even in a row", async () => {
     const enricher = {
       key: "digital_footprint",
-      enrichCompany: vi.fn().mockRejectedValueOnce(unreplayable("op-1")).mockRejectedValueOnce(second),
+      enrichCompany: vi
+        .fn()
+        .mockRejectedValueOnce(unreplayable("op-1"))
+        .mockRejectedValueOnce(unreplayable("op-2"))
+        .mockResolvedValueOnce({ matched: false } as EnrichmentResult),
     };
     const deps = await withMatchCompanies(makeEnrichDeps([enricher]), ["c1", "c2", "c3"]);
 
     await expect(
       createDiscoveryActivities(deps).enrichSignalsRun(
         discoveryArgs("run-signal-unreplayable-twice", { icpId: "icp-1" }),
+      ),
+    ).resolves.toMatchObject({ unreplayable: 2, enriched: 1, skippedSubjects: 0 });
+    expect(enricher.enrichCompany).toHaveBeenCalledTimes(3);
+  });
+
+  it("signals still stop when a live write failure hits two companies in a row", async () => {
+    const second = new BudgetOperationReplayError("live-op-2", "live");
+    const enricher = {
+      key: "digital_footprint",
+      enrichCompany: vi
+        .fn()
+        .mockRejectedValueOnce(new BudgetOperationReplayError("live-op-1", "live"))
+        .mockRejectedValueOnce(second),
+    };
+    const deps = await withMatchCompanies(makeEnrichDeps([enricher]), ["c1", "c2", "c3"]);
+
+    await expect(
+      createDiscoveryActivities(deps).enrichSignalsRun(
+        discoveryArgs("run-signal-live-twice", { icpId: "icp-1" }),
       ),
     ).rejects.toBe(second);
   });
@@ -3729,6 +3779,24 @@ describe("尽力而为的阶段：无法重放的公司跳过并计数", () => {
     ).resolves.toEqual({ candidates: 2, registered: 0, skippedSubjects: 1, unreplayable: 1 });
   });
 
+  it("watch registration still stops when a live write failure hits two companies in a row", async () => {
+    const second = new BudgetOperationReplayError("live-op-2", "live");
+    const invoke = vi
+      .fn()
+      .mockRejectedValueOnce(new BudgetOperationReplayError("live-op-1", "live"))
+      .mockRejectedValueOnce(second);
+    const deps = await withMatchCompanies(watchDeps(invoke), ["c1", "c2"]);
+    await deps.prisma.withWorkspace("ws", async (tx) => {
+      tx.fieldEvidence!.findMany = async () => [];
+    });
+
+    await expect(
+      createDiscoveryActivities(deps as never).registerWatchesForRun(
+        discoveryArgs("run-watch-live-twice", { icpId: "icp-1" }) as never,
+      ),
+    ).rejects.toBe(second);
+  });
+
   it("watch registration stops for the admission lease and counts the companies it left", async () => {
     const invoke = vi.fn();
     const deps = await withMatchCompanies(watchDeps(invoke), ["c1", "c2"]);
@@ -3742,9 +3810,10 @@ describe("尽力而为的阶段：无法重放的公司跳过并计数", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("watch registration still stops when two companies in a row cannot be replayed", async () => {
-    const second = unreplayable("op-2");
-    const invoke = vi.fn().mockRejectedValueOnce(unreplayable("op-1")).mockRejectedValueOnce(second);
+  it("watch registration absorbs every company whose sitemap read cannot be replayed", async () => {
+    const invoke = vi.fn().mockRejectedValueOnce(unreplayable("op-1")).mockRejectedValueOnce(
+      unreplayable("op-2"),
+    );
     const deps = await withMatchCompanies(watchDeps(invoke), ["c1", "c2"]);
     await deps.prisma.withWorkspace("ws", async (tx) => {
       tx.fieldEvidence!.findMany = async () => [];
@@ -3754,7 +3823,7 @@ describe("尽力而为的阶段：无法重放的公司跳过并计数", () => {
       createDiscoveryActivities(deps as never).registerWatchesForRun(
         discoveryArgs("run-watch-unreplayable-twice", { icpId: "icp-1" }) as never,
       ),
-    ).rejects.toBe(second);
+    ).resolves.toEqual({ candidates: 2, registered: 0, skippedSubjects: 0, unreplayable: 2 });
   });
 });
 
@@ -4253,8 +4322,9 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
 
     expect(failure).toBeInstanceOf(ApplicationFailure);
     expect(failure).toMatchObject({ type: "ProviderHttpError", nonRetryable: false, nextRetryDelay: expect.any(String) });
-    // The outage stops the pass at the first company instead of burning through the rest.
-    expect(profile).toHaveBeenCalledOnce();
+    // The outage stops the pass at the first batch instead of burning through the rest: both
+    // companies of the batch may already be in flight, nothing after it starts, and nothing commits.
+    expect(profile).toHaveBeenCalledTimes(2);
     expect(updateMany).not.toHaveBeenCalled();
   });
 
@@ -4267,6 +4337,27 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
     await expect(
       acts.profileWebsitesForRun(discoveryArgs("run-profile-storage", { icpId: "icp-1" })),
     ).rejects.toThrow("GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE");
+  });
+
+  it("profiles two companies at once, so the stage's network work overlaps", async () => {
+    const started: string[] = [];
+    let releaseFirst: (() => void) | undefined;
+    const profile = vi.fn(async (input: { domain: string }) => {
+      started.push(input.domain);
+      if (started.length === 1) {
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+      }
+      return PROFILE;
+    });
+    const { acts } = await makeProfileDeps(profile, { companies: ["c1", "c2"], now: () => 0 });
+
+    const running = acts.profileWebsitesForRun(discoveryArgs("run-profile-concurrency", { icpId: "icp-1" }));
+    await vi.waitFor(() => expect(started).toHaveLength(2));
+    releaseFirst!();
+
+    await expect(running).resolves.toMatchObject({ profiled: 2, nextIndex: null });
   });
 
   it("hands the companies left to the next activity once its time box is spent", async () => {
@@ -4302,7 +4393,7 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
   it("skips a company whose fetch cannot be replayed, counts it, and profiles the rest", async () => {
     const profile = vi
       .fn()
-      .mockRejectedValueOnce(new BudgetOperationReplayError("op-1"))
+      .mockRejectedValueOnce(new BudgetOperationReplayError("op-1", "remnant"))
       .mockResolvedValue(PROFILE);
     const { acts } = await makeProfileDeps(profile, { companies: ["c1", "c2"], now: () => 0 });
 
@@ -4311,24 +4402,53 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
     ).resolves.toMatchObject({ profiled: 1, unreplayable: 1, previousUnreplayable: false, nextIndex: null });
   });
 
-  it("still stops when two companies in a row cannot be replayed", async () => {
-    const second = new BudgetOperationReplayError("op-2");
+  it("absorbs every company whose profile cannot be replayed, even in a row", async () => {
     const profile = vi
       .fn()
-      .mockRejectedValueOnce(new BudgetOperationReplayError("op-1"))
-      .mockRejectedValueOnce(second);
+      .mockRejectedValueOnce(new BudgetOperationReplayError("op-1", "remnant"))
+      .mockRejectedValueOnce(new BudgetOperationReplayError("op-2", "remnant"))
+      .mockResolvedValue(PROFILE);
     const { acts } = await makeProfileDeps(profile, { companies: ["c1", "c2", "c3"], now: () => 0 });
 
     await expect(
       acts.profileWebsitesForRun(discoveryArgs("run-profile-unreplayable-twice", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ profiled: 1, unreplayable: 2, nextIndex: null });
+    expect(profile).toHaveBeenCalledTimes(3);
+  });
+
+  it("still stops when a live write failure hits two companies in a row", async () => {
+    const second = new BudgetOperationReplayError("live-op-2", "live");
+    const profile = vi
+      .fn()
+      .mockRejectedValueOnce(new BudgetOperationReplayError("live-op-1", "live"))
+      .mockRejectedValueOnce(second);
+    const { acts } = await makeProfileDeps(profile, { companies: ["c1", "c2", "c3"], now: () => 0 });
+
+    // A live fault means this attempt's own wire ran and its result could not be stored: two in a
+    // row is a storage outage, not a remnant, and still stops the pass.
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-profile-live-twice", { icpId: "icp-1" })),
     ).rejects.toBe(second);
   });
 
-  it("stops on an unreplayable company that follows the one the previous pass ended on", async () => {
-    const second = new BudgetOperationReplayError("op-2");
-    const profile = vi.fn().mockRejectedValueOnce(second);
+  it("absorbs a live write failure that follows a remnant", async () => {
+    const profile = vi
+      .fn()
+      .mockRejectedValueOnce(new BudgetOperationReplayError("op-1", "remnant"))
+      .mockRejectedValueOnce(new BudgetOperationReplayError("live-op-1", "live"))
+      .mockResolvedValue(PROFILE);
+    const { acts } = await makeProfileDeps(profile, { companies: ["c1", "c2", "c3"], now: () => 0 });
+
+    await expect(
+      acts.profileWebsitesForRun(discoveryArgs("run-profile-remnant-then-live", { icpId: "icp-1" })),
+    ).resolves.toMatchObject({ profiled: 1, unreplayable: 2 });
+  });
+
+  it("absorbs a remnant even when the previous pass flagged a loss, and does not carry the flag", async () => {
+    const profile = vi.fn().mockRejectedValueOnce(new BudgetOperationReplayError("op-2", "remnant"));
     const { acts } = await makeProfileDeps(profile, { companies: ["c1", "c2"], now: () => 0 });
 
+    // The flag only exists for live faults now: a remnant is absorbed and leaves it unset.
     await expect(
       acts.profileWebsitesForRun(
         discoveryArgs("run-profile-unreplayable-carried", {
@@ -4337,11 +4457,11 @@ describe("profileWebsitesForRun (G3 5.4b)", () => {
           previousUnreplayable: true,
         }),
       ),
-    ).rejects.toBe(second);
+    ).resolves.toMatchObject({ profiled: 0, unreplayable: 1, previousUnreplayable: false });
   });
 
-  it("tells the next pass that it ended on an unreplayable company", async () => {
-    const profile = vi.fn().mockRejectedValueOnce(new BudgetOperationReplayError("op-1"));
+  it("tells the next pass that it ended on a live write failure", async () => {
+    const profile = vi.fn().mockRejectedValueOnce(new BudgetOperationReplayError("live-op", "live"));
     const now = vi.fn().mockReturnValueOnce(0).mockReturnValue(PROFILE_PASS_TIME_BOX_MS);
     const { acts } = await makeProfileDeps(profile, { companies: ["c1", "c2"], now });
 
@@ -4880,7 +5000,7 @@ describe("qualifyFitForRun —— 流截断", () => {
     });
     const tx = {
       $queryRaw: legacyMaterializationQueryRaw(),
-      rawSourceRecord: {
+      rawSourceRecord: { findUnique: async () => null,
         findMany: async () =>
           companyIds.map((id) => ({
             id: `raw-${id}`,
@@ -4976,7 +5096,7 @@ describe("qualifyFitForRun —— 流截断", () => {
     // What a retry meets after the previous attempt lost this company's call to a broken stream.
     fitRuntimeMocks.execute
       .mockResolvedValueOnce(FIT)
-      .mockRejectedValueOnce(new BudgetOperationReplayError("op-2"))
+      .mockRejectedValueOnce(new BudgetOperationReplayError("op-2", "remnant"))
       .mockResolvedValueOnce(FIT);
 
     await expect(
@@ -4989,7 +5109,7 @@ describe("qualifyFitForRun —— 流截断", () => {
   it("absorbs an unreplayable company right after a cut stream, and keeps the cut in the row", async () => {
     fitRuntimeMocks.execute
       .mockRejectedValueOnce(cut())
-      .mockRejectedValueOnce(new BudgetOperationReplayError("op-2"))
+      .mockRejectedValueOnce(new BudgetOperationReplayError("op-2", "remnant"))
       .mockResolvedValueOnce(FIT);
 
     await expect(
@@ -5001,7 +5121,7 @@ describe("qualifyFitForRun —— 流截断", () => {
     const second = cut();
     fitRuntimeMocks.execute
       .mockRejectedValueOnce(cut())
-      .mockRejectedValueOnce(new BudgetOperationReplayError("op-2"))
+      .mockRejectedValueOnce(new BudgetOperationReplayError("op-2", "remnant"))
       .mockRejectedValueOnce(second);
 
     await expect(
@@ -5011,9 +5131,9 @@ describe("qualifyFitForRun —— 流截断", () => {
 
   it("absorbs several unreplayable companies in a row", async () => {
     fitRuntimeMocks.execute
-      .mockRejectedValueOnce(new BudgetOperationReplayError("op-1"))
-      .mockRejectedValueOnce(new BudgetOperationReplayError("op-2"))
-      .mockRejectedValueOnce(new BudgetOperationReplayError("op-3"))
+      .mockRejectedValueOnce(new BudgetOperationReplayError("op-1", "remnant"))
+      .mockRejectedValueOnce(new BudgetOperationReplayError("op-2", "remnant"))
+      .mockRejectedValueOnce(new BudgetOperationReplayError("op-3", "remnant"))
       .mockResolvedValueOnce(FIT);
 
     await expect(
@@ -5071,7 +5191,7 @@ describe("qualifyFitForRun —— 按时限把余下公司交给下一次活动"
     const findUnique = vi.fn(async ({ where }: { where: { id: string } }) => company(where.id) as ReturnType<typeof company> | null);
     const tx = {
       $queryRaw: legacyMaterializationQueryRaw(),
-      rawSourceRecord: {
+      rawSourceRecord: { findUnique: async () => null,
         findMany: async () =>
           companyIds.map((companyId) => ({
             id: `raw-${companyId}`,
@@ -5326,7 +5446,7 @@ describe("qualifyFitForRun —— 按时限把余下公司交给下一次活动"
       const pass = acts.qualifyFitForRun(discoveryArgs("run-1", { icpId: "icp-1" }));
       await flush();
       await judgments.fail("01 GmbH", new StoreBudgetExceededError("account", 1n, 0n));
-      await judgments.fail("02 GmbH", new BudgetOperationReplayError("op-2"));
+      await judgments.fail("02 GmbH", new BudgetOperationReplayError("op-2", "remnant"));
       await judgments.fail("03 GmbH", new StoreBudgetExceededError("account", 1n, 0n));
 
       await expect(pass).resolves.toMatchObject({ unjudged: 1, unreplayable: 1, skippedForBudget: 2 });
@@ -5395,7 +5515,7 @@ describe("qualifyFitForRun —— 按时限把余下公司交给下一次活动"
       await flush();
       expect(judgments.started).toEqual(["02 GmbH", "03 GmbH", "04 GmbH"]);
       await judgments.fail("02 GmbH", new Error("model answered nonsense"));
-      await judgments.fail("03 GmbH", new BudgetOperationReplayError("op-3"));
+      await judgments.fail("03 GmbH", new BudgetOperationReplayError("op-3", "remnant"));
       await judgments.fail("04 GmbH", new StoreBudgetExceededError("account", 1n, 0n));
       await judgments.judge("05 GmbH");
       await judgments.judge("06 GmbH");
@@ -5686,7 +5806,7 @@ describe("enqueuePatentLookupsForRun · P1-1 kill-switch", () => {
   it("provider ENABLED → 正常 enqueue 本 run fit=match 公司", async () => {
     const upserts: unknown[] = [];
     const tx = {
-      rawSourceRecord: { findMany: async () => [{ id: "raw1" }] },
+      rawSourceRecord: { findUnique: async () => null, findMany: async () => [{ id: "raw1" }] },
       identityLink: { findMany: async () => [{ canonicalId: "c1" }] },
       canonicalCompany: {
         findMany: async () => [{ name: "Acme GmbH", country: "DE" }],
@@ -5721,7 +5841,7 @@ describe("enqueuePatentLookupsForRun · P1-1 kill-switch", () => {
 });
 
 describe("executeQuery —— a provider whose operation cannot be replayed ends the query with a zero receipt (#643)", () => {
-  const lost = () => new BudgetOperationReplayError("public-web-op");
+  const lost = () => new BudgetOperationReplayError("public-web-op", "remnant");
   const lineageAdapter = (discoverCompanies: () => Promise<unknown>) => ({
     key: "public_web",
     classes: ["public_intelligence"],
@@ -5779,21 +5899,41 @@ describe("executeQuery —— a provider whose operation cannot be replayed ends
     expect(result).not.toHaveProperty("unreplayable");
   });
 
-  it("fails the query instead when the query before lost a provider the same way", async () => {
-    const error = lost();
+  it("absorbs an unreplayable provider even when the query before lost one the same way", async () => {
     const activities = createDiscoveryActivities(
       makeDeps([
         lineageAdapter(async () => {
-          throw error;
+          throw lost();
         }),
       ]),
     );
 
+    // A lost operation is a remnant of an earlier attempt; it says nothing about the upstream now,
+    // so even the second query in a row answers with a zero receipt instead of failing the run.
     await expect(
       activities.executeQuery(
         discoveryArgs("run-lost-twice", { query: QUERY, previousQueryUnreplayable: true }),
       ),
-    ).rejects.toBe(error);
+    ).resolves.toMatchObject({ rawCount: 0, unreplayable: true });
+  });
+
+  it("fails the query when a live write failure follows a flagged loss", async () => {
+    const live = new BudgetOperationReplayError("live-op", "live");
+    const activities = createDiscoveryActivities(
+      makeDeps([
+        lineageAdapter(async () => {
+          throw live;
+        }),
+      ]),
+    );
+
+    // The hand-off flag cannot tell a remnant from a live fault (the workflow passes one boolean),
+    // so a live failure next to any flagged loss stays the old outage signal.
+    await expect(
+      activities.executeQuery(
+        discoveryArgs("run-live-after-flagged", { query: QUERY, previousQueryUnreplayable: true }),
+      ),
+    ).rejects.toBe(live);
   });
 
   it("rejects a hand-off flag that is not a boolean before any call", async () => {
@@ -5908,7 +6048,7 @@ describe("an unavailable model upstream makes the next activity attempt wait ins
     function fitActivities() {
       const tx = {
         $queryRaw: legacyMaterializationQueryRaw(),
-        rawSourceRecord: {
+        rawSourceRecord: { findUnique: async () => null,
           findMany: async () => [
             { id: "raw-c1", providerKey: "registry", payload: { externalId: "c1", name: "c1 GmbH", domain: "c1.example", country: "DE" } },
           ],
@@ -5970,7 +6110,8 @@ describe("executeQuery —— term normalization: keyed per query, skipped when 
   // Seller #26, run 3e78eb4e (xin, 2026-10-13 11:36 UTC): the taxonomy model answered 503 on
   // the first query and the gateway settled the operation without a result. Its key held only
   // run, task, prompt and schema, so every later query that shared the term met the dead
-  // operation on its first attempt, and the second one in a row failed the run.
+  // operation on its first attempt; the second one in a row then failed the run (replay remnants
+  // are absorbed per query since 2026-10-28, the keying fix here is what this suite pins).
   const TERMS = { industry: "pump", country: "Germany" };
   const query = { ...QUERY, filters: TERMS };
   type TaxonomyOptions = { correlationId?: string; allowLlm?: boolean };
@@ -6061,7 +6202,7 @@ describe("executeQuery —— term normalization: keyed per query, skipped when 
     const discoverCompanies = discoverer();
     const deps = makeDeps([consumer(discoverCompanies)]);
     deps.taxonomy = taxonomySpy(async () => {
-      throw new BudgetOperationReplayError("taxonomy-op");
+      throw new BudgetOperationReplayError("taxonomy-op", "remnant");
     }) as never;
     const activities = createDiscoveryActivities(deps);
 

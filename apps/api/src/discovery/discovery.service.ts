@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
 import { DiscoveryProviderRegistry } from './provider.registry';
 import { persistDiscoveredContacts } from './contact-persist';
+import { discoverContactsCore } from './contact-discovery-core';
 import { EmailGuesser, GuessResult } from './email-guesser';
 import { persistGuessedEmail, readbackGuessedEmail } from './email-guess-persist';
 import {
@@ -52,15 +53,6 @@ import type { DurableExecutionReceipt } from '../durable-results/durable-executi
 import { DISCOVERY_COMPANY_MATERIALIZATION_CONTRACT_VERSION } from './discovery-company-materialization-ctx';
 
 const PREFERENCE_SUPPRESSION_REASONS = new Set(['manual', 'bounce']);
-const CONTACT_DISCOVERY_RECEIPT_PRODUCERS = Object.freeze([
-  'crawl4ai.fetch',
-  'companies_house.search',
-  'inpi_rne.search',
-  'google_patents.search',
-  'contact.find_decision_makers',
-] as const);
-type ContactDiscoveryReceiptProducer =
-  (typeof CONTACT_DISCOVERY_RECEIPT_PRODUCERS)[number];
 export const SUPPRESSION_DECISIONS = ['RELEASE_REQUESTED', 'IDENTITY_CORRECTION_REQUESTED'] as const;
 export const SUPPRESSION_DECISION_REASONS = [
   'USER_PREFERENCE_CHANGED',
@@ -77,14 +69,6 @@ export type SuppressionDecisionRequest = {
 };
 
 export type SuppressionPageRequest = { cursor?: string; limit?: number };
-
-function contactReceiptProducer(
-  producerId: string,
-): producerId is ContactDiscoveryReceiptProducer {
-  return CONTACT_DISCOVERY_RECEIPT_PRODUCERS.includes(
-    producerId as ContactDiscoveryReceiptProducer,
-  );
-}
 
 @Injectable()
 export class DiscoveryService {
@@ -261,191 +245,15 @@ export class DiscoveryService {
       }),
     });
     assertFreshExecutionBudgetBinding(binding);
-    const loaded = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const company = await tx.canonicalCompany.findUnique({
-        where: { id: companyId },
-      });
-      if (!company)
-        throw new NotFoundException({
-          error: { code: 'NOT_FOUND', message: 'company not found' },
-        });
-      const evidenceRows = await tx.fieldEvidence.findMany({
-        where: {
-          entityType: 'company',
-          entityId: companyId,
-        },
-        select: { providerKey: true, license: true },
-      });
-      if (evidenceRows.some(isSyntheticDiscoveryProvenance)) {
-        throw new ConflictException({
-          error: {
-            code: 'SYNTHETIC_PROVENANCE_QUARANTINED',
-            message: 'historical synthetic discovery evidence is quarantined from product actions',
-          },
-        });
-      }
-      const companySuppressions = await tx.suppressionRecord.findMany({
-        where: { type: { in: ['domain', 'company_name'] } },
-        select: { type: true, value: true },
-      });
-      if (company.status === 'SUPPRESSED' || companyMatchesSuppression(companySuppressions, company)) {
-        throw new ConflictException({
-          error: {
-            code: 'SUPPRESSED',
-            message: 'company is suppressed; contact discovery blocked',
-          },
-        });
-      }
-      const adapters = await this.providers.routeContactDiscovery(tx as never);
-      assertContactDiscoveryAdapterFanout(adapters.length);
-      if (!adapters.length) {
-        throw new ConflictException({
-          error: {
-            code: 'NO_PROVIDER',
-            message: 'no contact discovery provider enabled',
-          },
-        });
-      }
-      const suppressedEmails = canonicalizeSuppressionValues(
-        'email',
-        (await tx.suppressionRecord.findMany({ where: { type: 'email' } })).map((s) => s.value),
-      );
-      return { company, adapters, suppressedEmails };
-    });
-
-    // 事务外 fan-out：遍历全部 enabled 的联系人 adapter（decision_maker/public_web/companies_house…）。
-    // 🔴 单 adapter 失败/闸门拒绝不阻断其余（fail-safe）；各自保留自己的 adapterKey。
-    const perAdapter: {
-      key: string;
-      contacts: ProviderContactRecord[];
-      costCents: number;
-      durableReceipts: Array<{
-        producerId: ContactDiscoveryReceiptProducer;
-        receipt: DurableExecutionReceipt;
-      }>;
-    }[] = [];
-    const authorizeExternalAction = () =>
-      this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-        companyMayUseExternalProcessing(tx, ctx.workspaceId, companyId),
-      );
-    const accountKey = binding.accountKey;
-    const budgets = this.budgets();
-    await budgets.attestAuthorized({
-      authorityId: binding.authorityId,
-      scopeKey: binding.scopeKey,
-      accountKey,
-    });
-    for (const adapter of loaded.adapters) {
-        try {
-          const authorized = await authorizeExternalAction();
-          if (!authorized) break;
-          const durableReceipts: Array<{
-            producerId: ContactDiscoveryReceiptProducer;
-            receipt: DurableExecutionReceipt;
-          }> = [];
-          const captureContactReceipt = (
-            producerId: string,
-            receipt: DurableExecutionReceipt,
-          ): void => {
-            if (!contactReceiptProducer(producerId)) {
-              throw new ExecutionControlError('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
-            }
-            durableReceipts.push({ producerId, receipt });
-          };
-          const result = await adapter.discoverContacts(
-            {
-              name: loaded.company.name,
-              domain: loaded.company.domain ?? undefined,
-              country: loaded.company.country ?? undefined,
-            },
-            {
-              workspaceId: binding.scopeKey,
-              runId: accountKey,
-              correlationId: companyId,
-              lawfulBasis: recordedBasis,
-              authorizeExternalAction,
-              onDurableReceipt: captureContactReceipt,
-            },
-          );
-          assertContactDiscoveryResultBound(result.contacts.length);
-          perAdapter.push({
-            key: adapter.key,
-            contacts: result.contacts,
-            costCents: result.costCents,
-            durableReceipts,
-          });
-        } catch (err) {
-          if (
-            isExecutionControlError(err) ||
-            err instanceof Error &&
-              err.message === 'DOMAIN_ACK_CONSUMER_BINDING_MISSING'
-          ) throw err;
-          console.warn(`[discoverContacts] adapter ${adapter.key} failed for ${companyId}: ${String(err).slice(0, 150)}`);
-        }
-        if ((await budgets.status({ workspaceId: binding.scopeKey, accountKey })).exhausted) break;
-    }
-
-    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const persisted = await applyDomainAckConsumerTransactions({
-        transaction: tx,
-        acknowledgements: perAdapter.flatMap((adapterResult) =>
-          adapterResult.durableReceipts.map(({ producerId, receipt }) => ({
-            producerId,
-            receipt,
-            domainAckKey:
-              `contact:${loaded.company.id}:${adapterResult.key}:${receipt.operationId}`,
-            domainRevision: receipt.resultDigest,
-          }))),
-        apply: async (transaction) => {
-          // 同一 tx 内顺序 persist：后一 adapter 的 resolve 看得到前一 adapter 刚插入的行 →
-          // 同一人经 resolvePersonIdentity 合并（decision_maker 的 email + CH 的 officer_id 落同一条）。
-          let skippedSuppressed = 0;
-          let skippedInvalid = 0;
-          for (const pa of perAdapter) {
-            const res = await persistDiscoveredContacts(transaction, {
-              workspaceId: ctx.workspaceId,
-              company: {
-                id: loaded.company.id,
-                dedupeKey: loaded.company.dedupeKey,
-              },
-              adapterKey: pa.key,
-              contacts: pa.contacts,
-              suppressedEmails: loaded.suppressedEmails,
-              lawfulBasis: recordedBasis,
-            });
-            skippedSuppressed += res.skippedSuppressed;
-            skippedInvalid += res.skippedInvalid;
-            if (pa.costCents > 0) {
-              await transaction.usageLedger.create({
-                data: {
-                  workspaceId: ctx.workspaceId,
-                  resourceType: 'provider_call',
-                  quantity: pa.contacts.length,
-                  costUsd: pa.costCents / 100,
-                  refType: 'canonical_company',
-                  refId: loaded.company.id,
-                  meta: { provider: pa.key, op: 'contact_discovery' },
-                },
-              });
-            }
-          }
-          const contacts = await transaction.canonicalContact.findMany({
-            where: { companyId: loaded.company.id },
-            include: { contactPoints: true },
-          });
-          return { contacts, skippedSuppressed, skippedInvalid };
-        },
-        readback: async (transaction) => ({
-          contacts: await transaction.canonicalContact.findMany({
-            where: { companyId: loaded.company.id },
-            include: { contactPoints: true },
-          }),
-          skippedSuppressed: 0,
-          skippedInvalid: 0,
-        }),
-      });
-      return persisted.value;
-    });
+    return discoverContactsCore(
+      { prisma: this.prisma, providers: this.providers, budgetStore: this.budgets() },
+      {
+        workspaceId: ctx.workspaceId,
+        companyId,
+        lawfulBasis: recordedBasis,
+        binding,
+      },
+    );
   }
 
   /**

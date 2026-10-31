@@ -102,10 +102,9 @@ describe('weekly report row (BI-22, design §5)', () => {
 
   it('leaves the columns that later PRs fill, and the customer columns, empty', () => {
     const row = byColumn(weeklyReportRow(input()));
+    // Deterministic reason codes come from the stored verdict even without a score detail.
+    expect(row['原因码']).toBe('FIT_MATCH');
     for (const column of [
-      '为什么现在',
-      '原因码',
-      '注册地址',
       '开发信草稿',
       '客户填写：相关性（1-5）',
       '客户填写：愿意联系（是/否）',
@@ -115,6 +114,69 @@ describe('weekly report row (BI-22, design §5)', () => {
     ]) {
       expect(row[column], column).toBe('');
     }
+    // No intent events and no Impressum address in this fixture: empty, never guessed.
+    expect(row['为什么现在']).toBe('');
+    expect(row['注册地址']).toBe('');
+  });
+
+  it('fills 开发信草稿 with subject, body, Chinese translation and the review note (L5)', () => {
+    const row = byColumn(
+      weeklyReportRow(
+        input({
+          draft: {
+            subject: 'Erstkontakt',
+            body: 'Guten Tag,\n\n—\nReply directly to Acme: Website: https://acme.test',
+            bodyZh: '您好，\n\n—\n直接回复 Acme',
+          },
+        }),
+      ),
+    );
+    expect(row['开发信草稿']).toBe(
+      '主题：Erstkontakt\n\nGuten Tag,\n\n—\nReply directly to Acme: Website: https://acme.test\n\n中文译文：\n您好，\n\n—\n直接回复 Acme\n\n草稿，需人工审阅；平台未发送',
+    );
+  });
+
+  it('fills why-now signals, deterministic reason codes and the registered address (L2/L6)', () => {
+    const row = byColumn(
+      weeklyReportRow(
+        input({
+          queue: 'needs_review',
+          scores: { fit: 0.6, role: 0, intent: 0.5, dataQuality: 0.5, reachability: 0, engagement: 0 },
+          scoreDetail: {
+            ruleEvaluations: [{ kind: 'MUST_HAVE', outcome: 'fail' }],
+            missingFields: ['employee_count'],
+            reasonCodes: ['MISSING_CONTACT_POINT'],
+          },
+          company: {
+            name: 'Pumpen Handel GmbH',
+            domain: 'pumpen-handel.example',
+            country: 'DE',
+            attributes: {
+              website_profile: {
+                trade_role: 'distributor',
+                register_key: 'de-hrb:siegburg:1525',
+                vat_id: 'DE811255398',
+                registered_address: 'Musterstraße 1, 12345 Musterstadt',
+                source_url: 'https://pumpen-handel.example/impressum',
+              },
+              intent: {
+                events: [
+                  { type: 'TENDER_PUBLISHED', at: '2026-10-01T00:00:00.000Z', page_url: 'https://ted.europa.eu/1' },
+                  { type: 'SOURCING_OPENED', at: '2026-10-10T00:00:00.000Z' },
+                ],
+              },
+            },
+          },
+        }),
+      ),
+    );
+    expect(row['为什么现在']).toBe(
+      ['2026-10-10 SOURCING_OPENED', '2026-10-01 TENDER_PUBLISHED https://ted.europa.eu/1'].join('\n'),
+    );
+    expect(row['原因码']).toBe(
+      'FIT_MATCH; RULE_MUST_HAVE_FAIL; MISSING_EMPLOYEE_COUNT; MISSING_CONTACT_POINT',
+    );
+    expect(row['注册地址']).toBe('Musterstraße 1, 12345 Musterstadt');
   });
 
   it('lists contact paths by preference without rejected ones, and links each piece of evidence once', () => {
@@ -124,6 +186,7 @@ describe('weekly report row (BI-22, design §5)', () => {
         '供应商入驻页：https://pumpen-handel.example/lieferanten',
         '联系页：https://pumpen-handel.example/kontakt（已人工确认）',
         'Impressum 页：https://pumpen-handel.example/impressum',
+        '建议联系路径（供应商入驻页）：https://pumpen-handel.example/lieferanten（官网公开入口，未验证投递；首次联系请用询盘表单或电话说明来意，邮件广告需事先同意）',
       ].join('\n'),
     );
     expect(row['证据链接']).toBe(

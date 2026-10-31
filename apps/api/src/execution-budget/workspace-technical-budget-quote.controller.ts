@@ -70,11 +70,12 @@ class WorkspaceTechnicalBudgetQuoteResponseDto {
       'icp.query_plan',
       'discovery.run',
       'contact.verify',
+      'outreach.draft',
     ],
   })
   purpose!: WorkspaceTechnicalBudgetQuote['purpose'];
 
-  @ApiProperty({ enum: ['company', 'icp', 'discovery_run', 'contact_point'] })
+  @ApiProperty({ enum: ['company', 'icp', 'discovery_run', 'contact_point', 'lead'] })
   subjectType!: string;
 
   @ApiProperty({ minLength: 1, maxLength: 200 })
@@ -296,6 +297,12 @@ function parseRequest(value: unknown): WorkspaceExecutionBudgetRequest {
           ? {}
           : { body: complianceBody(input.body, false) }),
       });
+    case 'POST /leads/:leadId/outreach-drafts':
+      exactKeys(input, ['operation', 'leadId']);
+      return Object.freeze({
+        operation: input.operation,
+        leadId: uuid(input.leadId),
+      });
     default:
       return invalid();
   }
@@ -417,6 +424,11 @@ const WORKSPACE_QUOTE_REQUEST_SCHEMAS = [
       },
     },
     ['pointId'],
+  ),
+  operationVariant(
+    'POST /leads/:leadId/outreach-drafts',
+    { leadId: { type: 'string', format: 'uuid' } },
+    ['leadId'],
   ),
 ] as const;
 

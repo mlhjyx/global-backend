@@ -8,8 +8,16 @@ import {
 
 export type RuntimeComponentStatus =
   | Readonly<{ status: 'ok' }>
-  | Readonly<{ status: 'failed'; code: string }>
-  | Readonly<{ status: 'not_proven'; code: string }>;
+  /**
+   * A failed capability that must stop the worker at once, not after the
+   * heartbeat's consecutive-failure tolerance: losing a previously available
+   * issuance capability (or any comparable authority) means continuing to poll
+   * would act on authority the worker can no longer prove. Infrastructure
+   * probes stay tolerant because a single timed-out probe under load is not a
+   * lost dependency.
+   */
+  | Readonly<{ status: 'failed'; code: string; drainImmediately?: true }>
+  | Readonly<{ status: 'not_proven'; code: string; drainImmediately?: true }>;
 
 export type RuntimeReadinessContributor = () =>
   | (RuntimeComponentStatus & Readonly<{ platformAutomation?: unknown }>)

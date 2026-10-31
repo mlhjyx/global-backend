@@ -273,6 +273,16 @@ const EXPECTED_BOUNDS: Readonly<Partial<Record<TypedProjectionSchema, Readonly<R
     model: { maxLength: 120 },
     ...COMMON_MODEL_METADATA_BOUNDS,
   },
+  'outreach-first-contact-draft/v1': {
+    'data.subject': { maxLength: 200 },
+    'data.message': { maxLength: 1200 },
+    'data.messageZh': { maxLength: 1200 },
+    'data.usedFacts': { maxItems: 40 },
+    'data.usedFacts[]': { maxLength: 120 },
+    provider: { maxLength: 120 },
+    model: { maxLength: 120 },
+    ...COMMON_MODEL_METADATA_BOUNDS,
+  },
   'discovery-classify-trade-role/v1': {
     'data.tradeRole': { maxLength: 40 },
     'data.confidence': { minimum: 0, maximum: 1 },

@@ -208,7 +208,11 @@ describe("executeQuery Raw Source v2 persistence", () => {
       $executeRaw: vi.fn(async () => 1),
       $queryRaw: queryRaw,
       rawSourceRecord: {
-        findMany: vi.fn(async () => []),
+        // The run already accepted `safe`; executeQuery hands it to the adapters as a known id.
+        // Other lookups (prior receipts by ingest key) keep their empty answer.
+        findMany: vi.fn(async (input: { distinct?: unknown } = {}) =>
+          input.distinct ? [{ externalId: "safe" }] : [],
+        ),
         createMany: directCreateMany,
         count: vi.fn(
           async ({ where }: { where: { ingestStatus?: string } }) =>
@@ -339,6 +343,12 @@ describe("executeQuery Raw Source v2 persistence", () => {
       rejectedCount: 1,
     });
     expect(created).toHaveLength(2);
+    const [adapter] = await providers.routeCompanyDiscovery.mock.results[0]!.value;
+    expect(adapter.discoverCompanies).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ knownExternalIds: ["safe"] }),
+    );
     expect(directCreateMany).not.toHaveBeenCalled();
     expect(writer).toHaveBeenCalledTimes(2);
     for (const [statement] of writer.mock.calls) {

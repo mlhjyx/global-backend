@@ -128,7 +128,7 @@ export class IcpService {
     companyId: string,
     compactJws?: string,
   ) {
-    const binding = await this.authority.consumeWorkspaceGrant({
+    const verifiedGrant = await this.authority.verifyWorkspaceGrant({
       compactJws,
       identity: ctx,
       scope: workspaceExecutionBudgetRequestScope({
@@ -136,7 +136,6 @@ export class IcpService {
         companyId,
       }),
     });
-    assertFreshExecutionBudgetBinding(binding);
     const { company, claims, offerings } = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const company = await tx.companyProfile.findUnique({ where: { id: companyId } });
       if (!company) {
@@ -156,6 +155,11 @@ export class IcpService {
         error: { code: 'NO_APPROVED_CLAIMS', message: '先审批一些企业事实(Claim)再生成 ICP' },
       });
     }
+
+    // 前置条件不满足时不能消耗一次性 Grant：同一 company 的 request scope 固定，
+    // 旧授权先占住账号后，重新取的 Grant 也会被 EXECUTION_BUDGET_GRANT_REUSED 拒绝。
+    const binding = await this.authority.consumeVerifiedWorkspaceGrant(verifiedGrant);
+    assertFreshExecutionBudgetBinding(binding);
 
     const contract = getTask('icp.design')!;
     const facts = claims.map((c) => `- [${c.type}] ${c.statement}`).join('\n');
@@ -518,7 +522,7 @@ export class IcpService {
     icpId: string,
     compactJws?: string,
   ) {
-    const binding = await this.authority.consumeWorkspaceGrant({
+    const verifiedGrant = await this.authority.verifyWorkspaceGrant({
       compactJws,
       identity: ctx,
       scope: workspaceExecutionBudgetRequestScope({
@@ -526,7 +530,6 @@ export class IcpService {
         icpId,
       }),
     });
-    assertFreshExecutionBudgetBinding(binding);
     // BI-30：规划时刻的数据源开关（data_provider.status）快照：提示词、查询过滤与冷路径注入都按它。
     const { icp, enabledSources } = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => ({
       icp: await tx.icpDefinition.findUnique({ where: { id: icpId }, include: { rules: true } }),
@@ -548,6 +551,10 @@ export class IcpService {
         },
       });
     }
+
+    // 同 generateFromCompany：只有前置状态合法才消耗一次性 Grant。
+    const binding = await this.authority.consumeVerifiedWorkspaceGrant(verifiedGrant);
+    assertFreshExecutionBudgetBinding(binding);
 
     const contract = getTask('discovery.query_plan')!;
     const icpBrief = {

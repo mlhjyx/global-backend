@@ -103,6 +103,8 @@ export interface WebsiteProfile {
   readonly legalName: string | null;
   readonly register: ImpressumRegister | null;
   readonly vatId: string | null;
+  /** BI-15 / L6: registered postal address; null for sole traders and unstated addresses. */
+  readonly registeredAddress: string | null;
   readonly evidence: readonly string[];
   /** Present only when the caller asked for contact paths (data_provider company_contact). */
   readonly contactPaths?: CompanyContactPaths;
@@ -197,6 +199,7 @@ export class WebsiteProfileProvider {
       legalName: identifiers.legalName,
       register: identifiers.register,
       vatId: identifiers.vatId,
+      registeredAddress: identifiers.registeredAddress,
       evidence: companyEvidence(classified?.evidence ?? []),
       ...(contactPaths ? { contactPaths } : {}),
     };

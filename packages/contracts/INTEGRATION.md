@@ -98,7 +98,7 @@
      - 官网画像、信号富集、网站监控跳过这一家公司；
      - fit 把这一家记为未判定；
      - 查询的某个数据源在重试时遇到这种操作，这条查询就以零回执结束（回执列出该源、0 条记录，所以物化准入仍然见到每条计划查询一份回执），记为失败，计划继续往下跑。
-     - 以上任何一种，run 都至少判 `PARTIAL`；同一阶段连续两次遇到时视为故障，run 判 `FAILED`。fit 例外：它同时判最多 3 家（`FIT_CONCURRENCY`），一次尝试失败或 worker 丢失后，重试会一起遇到当时在途的这几家留下的调用，所以 fit 里这种公司只记未判定，不算进「连续两次」；同一次尝试里连续两家的流被截断仍会让这次尝试失败。代价是：模型上游持续出那种按无结果结算的故障（504/524 超时、流截断）时，每次重试先把前面尝试留下的公司记为未判定，只有还有没调用过的公司时才会再次失败。活动余下的公司不多时（小 run 或最后一个续跑活动，约 6–9 家以内），fit 会一家没判出就正常结束，run 判 `PARTIAL` 而不是 `FAILED`，这些公司计入 `stats.unreplayableSkips.fit`。每家公司最多调用一次；这种故障里一个 run 最多约有 12 次调用按预留计费（一家一家判时是 2 次）。
+     - 以上任何一种，run 都至少判 `PARTIAL`。其中「重试时在预留处命中旧操作」属于更早一次尝试留下的残留，任何阶段都只按跳过计数，不再升级（2026-10-28 起）；而「本次尝试自己已出网、结果却没能落库/投影/结算」（`origin=live` 的同一错误）仍是存储或账本故障的现场证据，查询、画像、信号、监控四个阶段对它在同一阶段连续两次遇到时判 `FAILED`。fit 例外：它同时判最多 3 家（`FIT_CONCURRENCY`），一次尝试失败或 worker 丢失后，重试会一起遇到当时在途的这几家留下的调用，所以 fit 里这种公司只记未判定，不算进「连续两次」；同一次尝试里连续两家的流被截断仍会让这次尝试失败。代价是：模型上游持续出那种按无结果结算的故障（504/524 超时、流截断）时，每次重试先把前面尝试留下的公司记为未判定，只有还有没调用过的公司时才会再次失败。活动余下的公司不多时（小 run 或最后一个续跑活动，约 6–9 家以内），fit 会一家没判出就正常结束，run 判 `PARTIAL` 而不是 `FAILED`，这些公司计入 `stats.unreplayableSkips.fit`。每家公司最多调用一次；这种故障里一个 run 最多约有 12 次调用按预留计费（一家一家判时是 2 次）。
      - `stats.unreplayableSkips` 只在有跳过时出现，按阶段计数：`queries`、`websiteProfile`、`fit`、`signals`、`watches`。
    - 词表归一（把查询里的行业/国家词归一到标准码）只为会读归一结果的数据源（`wikidata`、`openstreetmap`）调用模型，其余查询只查已沉淀的别名；一条查询的归一调用丢失（上游 5xx、操作无法重放）时，这条查询照常用各源内置词表执行，不算失败、不改状态。`stats.taxonomyFallback`（回退的查询数）与 `stats.taxonomyModelSkipped`（有词可归一却没有调用模型的查询数）只在大于 0 时出现。
    - 查询活动因**普通**错误（不是控制错误）用尽重试时，这条查询没有回执，run 立即停在查询阶段：判 `FAILED`，`stats.failure = { stage: 'query', errorType, control: false }`（`errorType` 是活动最后一次尝试的错误类型，不含消息），后面的查询不再执行；计划保持 `READY`，但同一计划不能再执行（见上面「公司抽取」一条）。活动最多尝试 3 次（等于预算账本对同一操作的预留上限）。失败是模型上游不可用时（网关回 429 或除 504/524 以外的 5xx，此时 `control: false`；或网关地址拒绝连接，此时按控制错误记 `control: true`），第 2 次尝试前等 5 分钟、第 3 次前等 25 分钟，所以半小时左右以内恢复的上游故障不会让 run 停；这类失败的预留已退回，等待不花钱；更长的故障照旧停在查询阶段。fit 阶段遇到同样的失败按同样的间隔重试。`stats.failures` 只计数据源在重试时遇到无法重放的操作、因而以零回执结束的查询（与 `stats.unreplayableSkips.queries` 相同）；没找到记录、或数据源被停用而以 `accepted: 0` 回执结束的查询不计，这次停止也不计。
@@ -148,3 +148,56 @@
 - **Claim = 事实**：永远带来源 URL + 原文片段，建议 UI 提供「查看原文」
 - **ICP = 推断**（`HYPOTHESIS`）：建议 UI 标注「AI 生成，待回测/确认」
 - 联系方式发送前必须 `VALID`（邮箱验证状态在 `contactPoints[].status`）
+
+## 6. 模块与接口覆盖（给对接开发者的地图）
+
+接口的权威清单永远是运行中服务的 `/api/docs-json`（门户 `http://100.68.31.20:3000/api/portal` 同源）。这里回答的是另一个问题：**后端的每个功能模块，是否都有对应的 HTTP 接口**，以及没有接口的模块从哪里取数据。
+
+### 6.1 有完整 HTTP 接口的模块（按门户分域）
+
+| 后端模块（`apps/api/src/`） | 门户分域 | 主要接口 |
+| --- | --- | --- |
+| `company/` `claim/` | Companies · Claims | 提交官网、完整度、产品、事实审批/驳回/撤销、冲突裁决 |
+| `icp/` | ICP | ICP 生成/修订/激活、规则、回测、查询计划 |
+| `discovery/` | Discovery | 执行查询计划、发现 run 状态、规范化公司、联系人补全、禁联名单、数据源注册表 |
+| `lead/` | Leads | 六维评分、队列计数、Lead 详情/交付包、结果回写、开发信草稿、接受/拒绝、制裁复核 |
+| `report/` | Reports | 周报 CSV、周报反馈 |
+| `events/` | Events | 事件拉取 / ACK / ACK 状态 |
+| `compliance/` | Compliance | 删除请求受理与状态（Art.17） |
+| `site-builder/` | SiteBuilder | intake、向导档案、素材、知识库状态、构建、预算 quote；预览页 `GET /api/v1/preview/{slug}`（含静态资源）返回渲染后的 HTML，**不在 OpenAPI 里**（`@ApiExcludeController`，给 iframe 用），预览地址从 `GET /site-builder/sites` 的响应里取 |
+| `execution-budget/` | ExecutionBudget | 工作区技术报价（服务间） |
+| `platform-authority/` | PlatformAuthority | 技术报价、目标查询、撤销、fence-ack JWKS（服务间） |
+| `health/` | System | 存活/就绪/构建身份/时钟 |
+| `whoami/` `runtime/` | System | 身份与 scope、admitted clock |
+
+### 6.2 没有独立 HTTP 接口的模块（设计如此）
+
+数据不丢，只是不单独暴露接口——经由别的接口或后台工作流交付：
+
+| 模块 | 为什么没有接口 | 数据从哪来 |
+| --- | --- | --- |
+| `intent/` `signals/` | 意图信号是发现与评分流程的内部产物（`signal-ingest` / `intent-recompute` 由 worker 跑，`signal-query` 是内部读服务） | 信号随交付包一起给：`GET /leads/{id}/package` 的 `signals`；发现过程的中间状态看 `GET /discovery-runs/{id}` |
+| `sanctions/` | 名单刷新是后台工作流；复核在 Lead 流程里 | 命中与复核走 `POST /leads/{id}/sanctions-review`；数据源状态看 `GET /data-providers` |
+| `acquisition/` | 执行/投影内部层（source adapter、租户投影、执行包络），被工作流调用 | 结果落库后经 Discovery / Leads 接口读出 |
+| `ai-tasks/` `model-runtime/` `model-gateway/` | 模型路由是部署配置（env：`MODEL_ACQUISITION_*`），不是运行时 API | 运营侧改 env 后重建容器，见 RUNBOOK |
+| `auth/` | 守卫与令牌校验 | 身份与权限看 `GET /whoami` |
+| `relay/` `temporal/` `tools/` `durable-results/` `prisma/` `adapters/` `common/` `docs/` | 基础设施（Temporal 编排、事件 relay、工具预算、持久化） | 状态经健康探针与业务接口体现 |
+
+### 6.3 对接时最容易踩的三件事
+
+1. **工作区（租户）来自 JWT 的 `workspace` claim，接口不收租户参数**；跨租户一律 404。开发取 token 用 `ssh xin@100.68.31.20 /global/local-config/bin/api-token`（300 秒有效）。
+2. **长任务是异步的**：`POST /companies`、`POST /query-plans/{id}/execute`、`POST /icps/{id}/qualify`、建站构建都返回 202/201 + id，轮询对应状态接口，别同步等。
+3. **服务间通道不要给前端用**：ExecutionBudget / PlatformAuthority 两组用固定用途机器身份（mTLS/JWT），普通前端调用只会拿到 401/403。
+
+### 6.4 前端 SaaS 的调用路径（与直接调引擎的区别）
+
+前端 SaaS（gain-saas 租户端）**不直接调本引擎**：它调 gain-saas 的 BFF（`http://100.68.31.20:4020/api/...`），BFF 按会话身份做 member/admin 鉴权、必要时先取 `workspace-technical-quote` 并签一次性 Grant，再以短时服务 token 转发到本引擎。BFF 的映射表在 `gain-saas` 仓 `apps/server/src/bff/routes.ts`（当前 52 条），覆盖 Companies、Claims、ICP、Discovery、Leads（含开发信草稿与制裁复核）、Reports、Suppressions、DeletionRequests、DataProviders 与执行预算报价。
+
+BFF 目前**没有**映射、前端如需使用要直接对接引擎（用本文档的 token 方式）或先在 gain-saas 补一条路由：
+
+| 引擎域 | 现状 |
+| --- | --- |
+| SiteBuilder | 未映射；且站点预览页 `/api/v1/preview/{slug}` 返回 HTML，给 iframe 用 |
+| Events | 服务端集成用（pull + ACK），前端一般不需要 |
+| System（health / whoami） | BFF 有自己的健康与身份接口，前端用 BFF 的 |
+| ExecutionBudget / PlatformAuthority | 服务间通道，两端都不给前端 |

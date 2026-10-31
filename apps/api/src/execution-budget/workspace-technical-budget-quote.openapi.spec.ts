@@ -54,7 +54,7 @@ describe('Workspace technical budget quote OpenAPI', () => {
     );
     const variants = operation.requestBody?.content?.['application/json']
       ?.schema?.oneOf;
-    expect(variants).toHaveLength(7);
+    expect(variants).toHaveLength(8);
     expect(
       variants?.every((variant) => variant.additionalProperties === false),
     ).toBe(true);

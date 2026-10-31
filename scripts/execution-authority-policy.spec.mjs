@@ -24,11 +24,11 @@ import {
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 
-test('inventory is locked to 18 Tools and 11 product Model tasks', () => {
+test('inventory is locked to 18 Tools and 12 product Model tasks', () => {
   assert.equal(EXPECTED_TOOL_IDS.length, 18);
-  assert.equal(EXPECTED_MODEL_TASKS.length, 11);
+  assert.equal(EXPECTED_MODEL_TASKS.length, 12);
   assert.equal(new Set(EXPECTED_TOOL_IDS).size, 18);
-  assert.equal(new Set(EXPECTED_MODEL_TASKS.map((entry) => entry.taskId)).size, 11);
+  assert.equal(new Set(EXPECTED_MODEL_TASKS.map((entry) => entry.taskId)).size, 12);
   assert.equal(EXPECTED_GENERIC_MODEL_TASK_LOOKUPS.length, 4);
   assert.deepEqual(EXPECTED_MODEL_GATEWAY_BOUNDARIES, [
     'apps/api/src/model-runtime/site-builder-ai-task-bridge.ts#generateStructured#1',
@@ -274,7 +274,7 @@ test('pure contracts preserve typed authority wiring and the artifact pre-wire h
   const result = await verifyExecutionAuthorityPolicy({ repoRoot: repositoryRoot });
   assert.deepEqual(result.issues, []);
   assert.equal(result.toolCount, 18);
-  assert.equal(result.modelTaskCount, 11);
+  assert.equal(result.modelTaskCount, 12);
   assert.equal(result.physicalExecutionWiring, 'PARTIAL_HOLD');
   assert.equal(result.physicalToolCallsiteCount, 37);
   assert.equal(result.modelGatewayBoundaryCount, 2);

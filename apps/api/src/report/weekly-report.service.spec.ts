@@ -39,6 +39,8 @@ interface Fixture {
   runs: Array<{ id: string; icpId: string; createdAt: Date }>;
   receipts: Array<{ runId: string; accountKey: string }>;
   accounts: Array<{ accountKey: string; chargedMicrousd: bigint; reservedMicrousd: bigint }>;
+  /** Stored outreach drafts (BI-15), any version order. */
+  drafts?: Array<{ leadId: string; version: number; subject: string; body: string; bodyZh: string }>;
 }
 
 function leadRow(id: string, companyId: string, overrides: Record<string, unknown> = {}) {
@@ -46,6 +48,8 @@ function leadRow(id: string, companyId: string, overrides: Record<string, unknow
     id,
     canonicalCompanyId: companyId,
     fitVerdict: 'match',
+    scoreDetail: null,
+    queue: 'recommended',
     totalScore: 0.8,
     scores: { fit: 0.9, role: 0.8, intent: 0.2, dataQuality: 0.7, reachability: 1, engagement: 0 },
     // The lead's latest decision, as the report selects it.
@@ -75,10 +79,12 @@ function company(id: string, overrides: Partial<CompanyFixture> = {}): CompanyFi
 function evidence(entityId: string, overrides: Record<string, unknown> = {}) {
   return {
     entityId,
+    field: 'attributes',
     dataClass: 'green',
     providerKey: 'public_web',
     license: 'licensed',
-    _min: { fetchedAt: new Date('2026-10-10T00:00:00.000Z') },
+    // L1：有效期按「每个字段取最新」（_max）聚合。
+    _max: { fetchedAt: new Date('2026-10-10T00:00:00.000Z') },
     ...overrides,
   };
 }
@@ -124,7 +130,26 @@ function harness(fixture: Fixture, screen = vi.fn(() => ({ status: 'not_screened
     icpDefinition: { findUnique: vi.fn(async () => fixture.icp) },
     lead: { findMany: vi.fn(async (_query: unknown) => fixture.leads) },
     canonicalCompany: { findMany: vi.fn(async () => fixture.companies) },
-    fieldEvidence: { groupBy: vi.fn(async () => fixture.evidence) },
+    fieldEvidence: {
+      groupBy: vi.fn(async (args: { by: string[] }) =>
+        args.by.includes('field')
+          ? fixture.evidence
+          : // provenance pass: per (entity, provider, license), derived from the same fixture rows.
+            [
+              ...new Map(
+                fixture.evidence.map((row) => [
+                  `${String(row.entityId)}:${String(row.providerKey)}:${String(row.license)}`,
+                  {
+                    entityId: row.entityId,
+                    providerKey: row.providerKey,
+                    license: row.license,
+                    _count: { _all: 1 },
+                  },
+                ]),
+              ).values(),
+            ],
+      ),
+    },
     companyContactPoint: { findMany: vi.fn(async () => fixture.contactPoints) },
     sanctionsScreeningResult: { findMany: vi.fn(async () => fixture.sanctions) },
     suppressionRecord: { findMany: vi.fn(async () => fixture.suppressions) },
@@ -140,6 +165,13 @@ function harness(fixture: Fixture, screen = vi.fn(() => ({ status: 'not_screened
       ),
     },
     toolBudgetAccount: { findMany: vi.fn(async (_query: unknown) => fixture.accounts) },
+    leadOutreachDraft: {
+      findMany: vi.fn(async (query: { where: { leadId: { in: string[] } } }) =>
+        (fixture.drafts ?? [])
+          .filter((draft) => query.where.leadId.in.includes(draft.leadId))
+          .sort((left, right) => right.version - left.version),
+      ),
+    },
     policyDecisionLog: {
       createMany: vi.fn(async (args: { data: unknown[] }) => {
         transactionTrace.push({ call: 'log', inTransaction });
@@ -258,6 +290,28 @@ describe('WeeklyReportService (BI-22)', () => {
     expect(tx.canonicalCompany.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: { in: [kept] } } }));
   });
 
+  it('fills 开发信草稿 from the newest stored draft of each lead, marked as unsent', async () => {
+    const leadId = '55555555-5555-4555-8555-555555555501';
+    const { service, tx } = harness(
+      baseFixture({
+        drafts: [
+          { leadId, version: 1, subject: 'Anfrage v1', body: 'v1 body', bodyZh: '第一版' },
+          { leadId, version: 2, subject: 'Anfrage v2', body: 'v2 body', bodyZh: '第二版' },
+          { leadId: '55555555-5555-4555-8555-555555555599', version: 9, subject: 'x', body: 'y', bodyZh: 'z' },
+        ],
+      }),
+    );
+    const report = await service.weekly(ctx, { icpId: ICP, week: '2026-W42' });
+    const [row] = records(report.csv);
+    expect(row!['开发信草稿']).toBe(
+      '主题：Anfrage v2\n\nv2 body\n\n中文译文：\n第二版\n\n草稿，需人工审阅；平台未发送',
+    );
+    // Only the report's own leads are looked up.
+    expect(tx.leadOutreachDraft.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { leadId: { in: [leadId] } } }),
+    );
+  });
+
   it('defaults to the current UTC ISO week', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-10-18T23:30:00.000Z'));
@@ -289,7 +343,9 @@ describe('WeeklyReportService (BI-22)', () => {
       制裁状态: '未筛查（筛查未启用）',
       // green evidence fetched 2026-10-10 + 180 days.
       有效期至: '2027-04-08',
-      联系路径: '联系页：https://company-01.example/kontakt',
+      联系路径:
+        '联系页：https://company-01.example/kontakt\n' +
+        '建议联系路径（联系页）：https://company-01.example/kontakt（官网公开入口，未验证投递；首次联系请用询盘表单或电话说明来意，邮件广告需事先同意）',
     });
     expect(loggedDecisions(tx)).toEqual([
       expect.objectContaining({

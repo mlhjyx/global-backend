@@ -116,6 +116,42 @@ describe("inspectRuntimeAdmission", () => {
     });
   });
 
+  it("admits the gateway without settlement readback when the deployment did not configure it", () => {
+    const env = {
+      NODE_ENV: "production",
+      DATA_PROCESSOR_JURISDICTION: "EU",
+      PII_ENCRYPTION_KEY: "a".repeat(64),
+      APP_DATABASE_URL:
+        "postgresql://app_user:secret@127.0.0.1:5432/global_dev",
+      AUTH_JWKS_URI: "http://127.0.0.1:3100/.well-known/jwks.json",
+      AUTH_ISSUER: "http://127.0.0.1:3100/",
+      AUTH_AUDIENCE: "global-api",
+      AUTH_ROLE_SCOPE_MAP_JSON: '{"viewer":["acquisition:read"]}',
+      MODEL_GATEWAY_URL: "http://127.0.0.1:3001/v1",
+      MODEL_GATEWAY_KEY: "secret",
+    };
+    expect(
+      inspectRuntimeAdmission(
+        { mode: "development", bindHost: "127.0.0.1", port: 3000 },
+        env,
+        attestedBuild,
+        "API",
+      ).checks.gateway,
+    ).toEqual({ status: "ok" });
+    // The worker's local wire ledger is independent of billing readback.
+    expect(
+      inspectRuntimeAdmission(
+        { mode: "development", bindHost: "127.0.0.1", port: 3000 },
+        env,
+        attestedBuild,
+        "WORKER",
+      ).checks.gateway,
+    ).toEqual({
+      status: "failed",
+      code: "SITE_BUILD_PROVIDER_WIRE_DATABASE_CONFIG_REQUIRED",
+    });
+  });
+
   it("rejects a provider-wire writer pointed at a different application database", () => {
     const env = {
       ...SETTLEMENT_ENV,

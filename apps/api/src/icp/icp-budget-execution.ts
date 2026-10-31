@@ -1,22 +1,15 @@
-import type { AiContext } from '../model-gateway/types';
 import type { ModelResult } from '../model-gateway/types';
 import type { TypedProjectionSchema } from '../durable-results/durable-result-strategy';
 import type { BudgetStore } from '../tools/budget-store';
 import type { ExecutionBudgetBinding } from '../execution-budget/execution-budget-authority.service';
+import { executeGrantedModelTask } from '../execution-budget/granted-model-task';
 
-export async function executeIcpBudgetedTask<Output>(input: {
+/** ICP-side name of the shared granted-model-task runner (kept for existing callers). */
+export function executeIcpBudgetedTask<Output>(input: {
   budgetStore: BudgetStore;
   binding: ExecutionBudgetBinding;
   durableResultSchema: TypedProjectionSchema;
-  execute: (context: Pick<AiContext, 'runId' | 'durableResultSchema'>) => Promise<ModelResult<Output>>;
+  execute: Parameters<typeof executeGrantedModelTask<Output>>[0]['execute'];
 }): Promise<ModelResult<Output>> {
-  await input.budgetStore.attestAuthorized({
-    authorityId: input.binding.authorityId,
-    scopeKey: input.binding.scopeKey,
-    accountKey: input.binding.accountKey,
-  });
-  return input.execute({
-    runId: input.binding.accountKey,
-    durableResultSchema: input.durableResultSchema,
-  });
+  return executeGrantedModelTask<Output>(input);
 }
