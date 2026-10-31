@@ -62,6 +62,8 @@ export const MAX_UNDERSTANDING_SUBPAGES = 6 as const;
 export const MAX_CONTACT_DISCOVERY_ADAPTERS = 6 as const;
 export const MAX_CONTACTS_PER_DISCOVERY_ADAPTER = 25 as const;
 export const MAX_DECISION_MAKER_PAGES = 4 as const;
+/** social_presence 档案/直抓层：每家最多补抓的候选个人页数（D5 每家页数上限的社媒部分）。 */
+export const MAX_SOCIAL_PROFILE_FETCHES = 4 as const;
 export const MAX_EMAIL_GUESS_CONTACTS = 25 as const;
 export const MAX_EMAIL_PROBE_CANDIDATES = 8 as const;
 export const MAX_EMAIL_VERIFY_PHYSICAL_CALLS_PER_TARGET = 1 as const;

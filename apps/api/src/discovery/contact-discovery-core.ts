@@ -19,6 +19,11 @@ const CONTACT_DISCOVERY_RECEIPT_PRODUCERS = Object.freeze([
   'inpi_rne.search',
   'google_patents.search',
   'contact.find_decision_makers',
+  // M2b：社媒适配器的出网工具回执（此前这些生产者不在名单 → 回执回调会在
+  // 真实 Broker 下抛 DOMAIN_ACK_CONSUMER_BINDING_MISSING，被 adapter catch 吞成静默空结果）。
+  'social.search',
+  'searxng.search',
+  'http.get',
 ] as const);
 type ContactDiscoveryReceiptProducer = (typeof CONTACT_DISCOVERY_RECEIPT_PRODUCERS)[number];
 
@@ -115,6 +120,7 @@ export async function discoverContactsCore(
         producerId: ContactDiscoveryReceiptProducer;
         receipt: DurableExecutionReceipt;
       }>;
+      diagnostics?: Record<string, number>;
     }[] = [];
     const authorizeExternalAction = () =>
       deps.prisma.withWorkspace(input.workspaceId, (tx) =>
@@ -157,6 +163,10 @@ export async function discoverContactsCore(
               lawfulBasis: input.lawfulBasis,
               authorizeExternalAction,
               onDurableReceipt: captureContactReceipt,
+              // G3 5.5：crawl4ai.fetch / http.get 等 PERSONAL_DATA 工件工具是 subject-bound——
+              // 没有 company 主体就被 Broker 持有（_BINDING_HOLD），decision_maker/社媒的抓取
+              // 会在真实 Broker 下静默失败。联系人发现的主体就是正在被补全的公司。
+              artifactSubject: { subjectType: 'company', subjectId: input.companyId },
             },
           );
           assertContactDiscoveryResultBound(result.contacts.length);
@@ -165,6 +175,7 @@ export async function discoverContactsCore(
             contacts: result.contacts,
             costCents: result.costCents,
             durableReceipts,
+            ...(result.diagnostics ? { diagnostics: result.diagnostics } : {}),
           });
         } catch (err) {
           if (
@@ -175,6 +186,13 @@ export async function discoverContactsCore(
           console.warn(`[discoverContacts] adapter ${adapter.key} failed for ${input.companyId}: ${String(err).slice(0, 150)}`);
         }
         if ((await budgets.status({ workspaceId: binding.scopeKey, accountKey })).exhausted) break;
+    }
+
+    const adapterDiagnostics: Record<string, number> = {};
+    for (const entry of perAdapter) {
+      for (const [name, count] of Object.entries(entry.diagnostics ?? {})) {
+        adapterDiagnostics[name] = (adapterDiagnostics[name] ?? 0) + count;
+      }
     }
 
     return deps.prisma.withWorkspace(input.workspaceId, async (tx) => {
@@ -236,6 +254,9 @@ export async function discoverContactsCore(
           skippedInvalid: 0,
         }),
       });
-      return persisted.value;
+      return {
+        ...persisted.value,
+        ...(Object.keys(adapterDiagnostics).length ? { diagnostics: adapterDiagnostics } : {}),
+      };
     });
   }

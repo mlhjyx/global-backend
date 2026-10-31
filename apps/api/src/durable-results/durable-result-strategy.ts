@@ -18,7 +18,7 @@ const typedProjectionSchemaValues = [
   'fit-judgment/v1', 'discovery-extract-company/v1', 'discovery-extract-list/v1',
   'discovery-classify-trade-role/v1',
   'contact-decision-makers/v1', 'ted-search/v1', 'openfda-search/v1',
-  'samgov-search/v1', 'smtp-probe-verdict/v1', 'searxng-search/v1',
+  'samgov-search/v1', 'smtp-probe-verdict/v1', 'searxng-search/v1', 'social-search/v1',
   'wikidata-sparql/v1', 'osm-overpass/v1', 'wikidata-entity/v1',
   'gleif-fetch/v1', 'companies-house-search/v1', 'inpi-rne-search/v1',
   'google-patents-search/v1', 'tradefair-algolia/v1', 'mapyourshow-fetch/v1',
