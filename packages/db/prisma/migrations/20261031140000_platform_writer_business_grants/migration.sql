@@ -75,7 +75,7 @@ BEGIN
       ('patent_cache_refresh_audit', ARRAY['SELECT','UPDATE']),
       ('patent_inventor_cache', ARRAY['DELETE','INSERT','SELECT','UPDATE']),
       ('patent_inventor_tombstone', ARRAY['SELECT'])
-    ) AS t(table_name TEXT, privileges TEXT[])
+    ) AS t(table_name, privileges)
   LOOP
     SELECT array_agg(privilege ORDER BY privilege) INTO actual
     FROM unnest(ARRAY['DELETE','INSERT','REFERENCES','SELECT','TRIGGER','TRUNCATE','UPDATE']) AS privilege
