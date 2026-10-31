@@ -7,6 +7,14 @@ import {
 } from './execution-budget-authority.types';
 import { ExecutionBudgetAuthorityRepository } from './execution-budget-authority.repository';
 
+const retryAccount = vi.hoisted(() => ({
+  resolveRetryableWorkspaceAccountKey: vi.fn(
+    async (_tx: unknown, input: { primaryAccountKey: string }) =>
+      input.primaryAccountKey,
+  ),
+}));
+vi.mock('./execution-budget-retry-account', () => retryAccount);
+
 const WORKSPACE_ID = 'e03abddd-1307-47cb-a731-7e7a786615a0';
 const AUTHORITY_ID = '42c863b9-7c7e-4d28-8678-60ef9a20219b';
 const ACCOUNT_ID = '8cf66f2a-1780-453e-8d7d-f70e36cb22a6';
@@ -196,6 +204,7 @@ describe('ExecutionBudgetAuthorityRepository', () => {
     ).resolves.toEqual({
       authorityId: AUTHORITY_ID,
       replay: false,
+      accountKey: ACCOUNT_KEY,
       accountId: ACCOUNT_ID,
       generation: 1,
       authorizedCapMicrousd: 2_000_000n,
@@ -221,6 +230,44 @@ describe('ExecutionBudgetAuthorityRepository', () => {
     expect(queries.flatMap(({ query }) => query.values ?? [])).not.toContain(
       COMPACT_JWS,
     );
+  });
+
+  it('opens the account the retry policy selects and reports it', async () => {
+    const retryKey = `${ACCOUNT_KEY}:retry:${AUTHORITY_ID}`;
+    retryAccount.resolveRetryableWorkspaceAccountKey.mockResolvedValueOnce(retryKey);
+    const queries: Array<{ strings?: readonly string[]; values?: readonly unknown[] }> = [];
+    const prisma = fakeWorkspacePrisma(async (query) => {
+      queries.push(query);
+      return queries.length === 1
+        ? [{ authority_id: AUTHORITY_ID, replay: false }]
+        : [
+            {
+              account_id: ACCOUNT_ID,
+              generation: 1,
+              authority_id: AUTHORITY_ID,
+              authorized_cap_microusd: 2_000_000n,
+            },
+          ];
+    });
+    const repository = new ExecutionBudgetAuthorityRepository(prisma);
+
+    await expect(
+      repository.consumeWorkspaceAndOpen(workspaceAuthority(), ACCOUNT_KEY),
+    ).resolves.toMatchObject({ accountKey: retryKey, accountId: ACCOUNT_ID });
+
+    expect(retryAccount.resolveRetryableWorkspaceAccountKey).toHaveBeenLastCalledWith(
+      expect.anything(),
+      {
+        scopeKey: WORKSPACE_ID,
+        authorityId: AUTHORITY_ID,
+        purpose: 'icp.design',
+        subjectType: 'company',
+        subjectId: 'f5ba98f2-a0e2-4e85-b799-e85568877702',
+        requestSha256: 'a'.repeat(64),
+        primaryAccountKey: ACCOUNT_KEY,
+      },
+    );
+    expect(queries[1]?.values).toEqual([WORKSPACE_ID, AUTHORITY_ID, retryKey, true]);
   });
 
   it('returns replay from the consumption transaction without opening or incrementing the account', async () => {

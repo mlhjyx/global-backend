@@ -246,6 +246,9 @@ jobs:
             src/site-builder/site-build-provider-wire.database.spec.ts \
             src/durable-results/model-result-projection-bounds.spec.ts \
             src/model-gateway/router-model-gateway.postgres.spec.ts
+          EXECUTION_BUDGET_RETRY_ACCOUNT_DATABASE_TEST=1 \
+            pnpm --filter @global/api exec vitest run \
+              src/execution-budget/execution-budget-retry-account.postgres.spec.ts
           EXECUTION_BUDGET_ADMISSION_LEASE_DATABASE_TEST=1 \
             pnpm --filter @global/api exec vitest run \
               src/execution-budget/discovery-run-admission-lease.postgres.spec.ts
