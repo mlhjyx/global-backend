@@ -79,6 +79,7 @@
     "persona": ["DELETE", "INSERT", "SELECT", "UPDATE"],
     "personal_artifact_cleanup_command": [],
     "platform_egress_attempt": [],
+    "platform_egress_fence_reopen_receipt": [],
     "platform_egress_schedule_fence": [],
     "platform_fence_ack_delivery": [],
     "platform_revocation_receipt": [],
