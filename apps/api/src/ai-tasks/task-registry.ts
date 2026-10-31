@@ -370,7 +370,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     id: 'contact.find_decision_makers',
     // DecisionMaker/public_web 联系人路径以本契约身份经 Broker 搜索/抓取（收口②）。
     // social.search：个人主页索引（personalData 独立工具，D1）；http.get：社媒档案/直抓层（M2b）。
-    allowedTools: ['social.search', 'crawl4ai.fetch', 'http.get'],
+    allowedTools: ['social.search', 'social.fetch', 'crawl4ai.fetch'],
     maxCostCents: 15,
     maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 120000,

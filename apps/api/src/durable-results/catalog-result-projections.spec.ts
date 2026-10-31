@@ -470,9 +470,20 @@ const MAPYOURSHOW_RAW: RawToolResult = {
   degraded: true,
 };
 
+/** social.fetch 的最小合法投影：{url, status, text}，文本贴近上限的 1/10。 */
+const SOCIAL_FETCH_RAW: Readonly<Record<string, unknown>> = {
+  data: {
+    url: 'https://web.archive.org/web/20260101000000/https://www.linkedin.com/in/max-mustermann',
+    status: 200,
+    text: 'Max Mustermann Einkaufsleiter Pumpen Schmid GmbH Stuttgart '.repeat(10),
+  },
+  costCents: 0,
+};
+
 const REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES: readonly ProjectionFixture[] = [
   { toolId: 'searxng.search', schema: 'searxng-search/v1', raw: SEARX_RAW },
   { toolId: 'social.search', schema: 'social-search/v1', raw: SEARX_RAW },
+  { toolId: 'social.fetch', schema: 'social-fetch/v1', raw: SOCIAL_FETCH_RAW },
   { toolId: 'wikidata.sparql', schema: 'wikidata-sparql/v1', raw: WIKIDATA_SPARQL_RAW },
   { toolId: 'osm.overpass', schema: 'osm-overpass/v1', raw: OSM_RAW, restored: OSM_RESTORED },
   { toolId: 'wikidata.entity', schema: 'wikidata-entity/v1', raw: WIKIDATA_ENTITY_RAW },
@@ -569,6 +580,13 @@ const EXPECTED_BOUNDS: Readonly<Record<string, JsonRecord>> = {
     '$.data.results.maxItems': 20,
     '$.data.results[].url.maxLength': 2048,
     '$.data.results[].title.maxLength': 2000,
+  },
+  'social-fetch/v1': {
+    ...COMMON_RESULT_BOUNDS,
+    '$.data.url.maxLength': 3000,
+    '$.data.status.minimum': 0,
+    '$.data.status.maximum': 599,
+    '$.data.text.maxLength': 36_000,
   },
   'wikidata-sparql/v1': {
     ...COMMON_RESULT_BOUNDS,
@@ -808,13 +826,14 @@ function setAtPath(root: unknown, path: Path, value: unknown): void {
 describe('closed catalog Tool result projections', () => {
   it('locks the exact immutable toolId-to-schema mapping and definition order', () => {
     expect(CATALOG_RESULT_TOOL_IDS).toEqual([
-      'searxng.search', 'social.search', 'wikidata.sparql', 'osm.overpass', 'wikidata.entity',
-      'gleif.fetch', 'companies_house.search', 'inpi_rne.search',
+      'searxng.search', 'social.search', 'social.fetch', 'wikidata.sparql', 'osm.overpass',
+      'wikidata.entity', 'gleif.fetch', 'companies_house.search', 'inpi_rne.search',
       'google_patents.search', 'tradefair.algolia', 'mapyourshow.fetch',
     ]);
     expect(CATALOG_RESULT_PROJECTION_SCHEMAS).toEqual({
       'searxng.search': 'searxng-search/v1',
       'social.search': 'social-search/v1',
+      'social.fetch': 'social-fetch/v1',
       'wikidata.sparql': 'wikidata-sparql/v1',
       'osm.overpass': 'osm-overpass/v1',
       'wikidata.entity': 'wikidata-entity/v1',

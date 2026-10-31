@@ -15,14 +15,15 @@ type JsonSchema = Readonly<Record<string, unknown>>;
 type UnknownRecord = Record<string, unknown>;
 type Transform = (value: unknown) => unknown;
 export const CATALOG_RESULT_TOOL_IDS = Object.freeze([
-  'searxng.search', 'social.search', 'wikidata.sparql', 'osm.overpass', 'wikidata.entity',
-  'gleif.fetch', 'companies_house.search', 'inpi_rne.search',
+  'searxng.search', 'social.search', 'social.fetch', 'wikidata.sparql', 'osm.overpass',
+  'wikidata.entity', 'gleif.fetch', 'companies_house.search', 'inpi_rne.search',
   'google_patents.search', 'tradefair.algolia', 'mapyourshow.fetch',
 ] as const);
 export type CatalogResultToolId = (typeof CATALOG_RESULT_TOOL_IDS)[number];
 export const CATALOG_RESULT_PROJECTION_SCHEMAS = Object.freeze({
   'searxng.search': 'searxng-search/v1',
   'social.search': 'social-search/v1',
+  'social.fetch': 'social-fetch/v1',
   'wikidata.sparql': 'wikidata-sparql/v1',
   'osm.overpass': 'osm-overpass/v1',
   'wikidata.entity': 'wikidata-entity/v1',
@@ -287,6 +288,20 @@ const socialSearchDefinition = definition(
   'social-search/v1',
   objectSchema({ results: arraySchema(20, searxResultSchema) }, ['results']),
   searxData,
+);
+
+/** social.fetch 的持久形态：{url, status, text(≤36k chars)}——PERSONAL_DATA 页面抓取投影。 */
+const socialFetchData = (value: unknown) => mapClosedRecord(
+  value, ['url', 'status', 'text'], ['url', 'status', 'text'],
+);
+const socialFetchDefinition = definition(
+  'social-fetch/v1',
+  objectSchema({
+    url: stringSchema(3000),
+    status: numberSchema(0, 599),
+    text: stringSchema(36_000),
+  }, ['url', 'status', 'text']),
+  socialFetchData,
 );
 
 const wikidataCompanySchema = objectSchema({
@@ -911,9 +926,9 @@ const mapYourShowDefinition = definition(
 );
 
 export const CATALOG_RESULT_PROJECTION_DEFINITIONS = Object.freeze([
-  searxDefinition, socialSearchDefinition, wikidataSparqlDefinition, osmDefinition,
-  wikidataEntityDefinition, gleifDefinition, companiesHouseDefinition, inpiDefinition,
-  googlePatentsDefinition, tradeFairDefinition, mapYourShowDefinition,
+  searxDefinition, socialSearchDefinition, socialFetchDefinition, wikidataSparqlDefinition,
+  osmDefinition, wikidataEntityDefinition, gleifDefinition, companiesHouseDefinition,
+  inpiDefinition, googlePatentsDefinition, tradeFairDefinition, mapYourShowDefinition,
 ] as const);
 
 export function getCatalogResultProjectionSchema(toolId: string): TypedProjectionSchema {

@@ -18,6 +18,7 @@ import {
   discoverCompaniesByIndustry,
   WikidataCompany,
 } from "../adapters/wikidata";
+import { EgressBlockedError, requestPublicHttp } from "../adapters/guarded-http";
 import { discoverByArea, OsmPlace } from "../adapters/openstreetmap";
 import { resolvePublicIp } from "../adapters/net-guard";
 import { smtpRcptProbe, SENDER_DOMAIN } from "../adapters/smtp-probe";
@@ -130,6 +131,110 @@ export const searxngSearchTool: Tool<
       input.pages ?? 1,
     );
     return { data: { results: durableSearxResults(results) }, costCents: 0 };
+  },
+};
+
+/** social.fetch 的持久化文本上限（字符）：最坏 UTF-8 逐字 3 字节仍 < 119 KiB projection 上限。 */
+const MAX_SOCIAL_FETCH_TEXT_CHARS = 36_000;
+const SOCIAL_FETCH_UA = "Mozilla/5.0 (compatible; GlobalBot/1.0; contact-discovery)";
+
+/** social.fetch 允许的主机：Wayback（availability API 与快照）+ LinkedIn/Xing 公开个人页（D1 例外域）。 */
+function isSocialFetchTarget(url: URL): boolean {
+  const host = url.hostname.replace(/\.$/u, "").toLowerCase();
+  if (host === "archive.org" && url.pathname.startsWith("/wayback/")) return true;
+  if (host === "web.archive.org" && url.pathname.startsWith("/web/")) return true;
+  const linkedin = host === "linkedin.com" || host.endsWith(".linkedin.com");
+  if (linkedin && (url.pathname.startsWith("/in/") || url.pathname.startsWith("/pub/"))) return true;
+  const xing = host === "xing.com" || host.endsWith(".xing.com");
+  if (xing && url.pathname.startsWith("/profile/")) return true;
+  return false;
+}
+
+/**
+ * social.fetch —— 联系人挖掘社媒层的专用抓取工具（D1 例外域）。
+ *
+ * 为什么不用 http.get/crawl4ai：这两者的 subject-bound artifact 契约要求持久化 URL
+ * 「无 query、纯小写、数字 <9 位」（durable-results/artifact/artifact-expected-facts.ts），
+ * 而社媒层要抓的 URL 天生违反它——Wayback availability 带 `?url=`、快照路径内嵌原 URL 且
+ * 含 14 位时间戳、个人页 slug 可能带数字。2026-11-01 验收 run 1c233bb6 正是因此
+ * `GENERIC_OPERATION_ARTIFACT_INVALID` 把整条工作流拖失败。本工具用 typed projection
+ *（social-fetch/v1，PERSONAL_DATA）持久化 {url,status,text}，不经工件层；文本上限
+ * 36k 字符保证投影 < 119 KiB。broker 的 perDomainCrawlDelayMs=3000 给它提供跨进程的
+ * 每域 ≤1 req/3s 节流（Redis limiter）。robots 不查：LinkedIn/Xing 是产品负责人
+ * 2026-10-31 明确接受的例外域；被拒（999/403/登录墙）由适配器熔断，不重试。
+ */
+export const socialFetchTool: Tool<
+  { url: string; maxChars?: number },
+  { url: string; status: number; text: string }
+> = {
+  id: "social.fetch",
+  version: "1.0.0",
+  category: "fetch",
+  sourceClass: "public_intelligence",
+  cost: { unit: "page", estimatedCents: 1, external: false },
+  rateLimit: { rps: 2, concurrency: 2, perDomainCrawlDelayMs: 3000 },
+  compliance: {
+    sourcePolicy: "advisory",
+    respectsRobots: false,
+    personalData: true,
+    allowedPurpose: ["discovery", "enrichment"],
+    reversible: true,
+    authRequired: false,
+    risk: "medium",
+  },
+  capabilities: { produces: ["contact"], accepts: ["domain"] },
+  idempotencyKey: (i) => `social.fetch:${stableKey({ url: i.url, maxChars: i.maxChars ?? null })}`,
+  durableResultStrategy: {
+    kind: "typed_projection",
+    schema: CATALOG_RESULT_PROJECTION_SCHEMAS["social.fetch"],
+  },
+  durableReplayResult: (result) => ({
+    data: {
+      url: result.data.url,
+      status: result.data.status,
+      text: result.data.text.slice(0, MAX_SOCIAL_FETCH_TEXT_CHARS),
+    },
+    costCents: result.costCents,
+    ...(result.degraded === undefined ? {} : { degraded: result.degraded }),
+  }),
+  healthCheck: async () => ({ healthy: true, detail: "social-fetch" }),
+  // 与 http.get 同款：每一跳重定向都过 egress 授权（D13）。
+  physicalWireObservation: "before_each_wire",
+  execute: async (input, ctx) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(input.url);
+    } catch {
+      throw new Error("SOCIAL_FETCH_URL_INVALID");
+    }
+    if (!isSocialFetchTarget(parsed)) throw new Error("SOCIAL_FETCH_HOST_NOT_ALLOWED");
+    const maxChars = Math.min(
+      Math.max(input.maxChars ?? MAX_SOCIAL_FETCH_TEXT_CHARS, 1),
+      MAX_SOCIAL_FETCH_TEXT_CHARS,
+    );
+    try {
+      const response = await requestPublicHttp(
+        input.url,
+        {
+          method: "GET",
+          headers: { "User-Agent": SOCIAL_FETCH_UA },
+          timeoutMs: 15_000,
+          maxBytes: 3_000_000,
+          maxRedirects: 5,
+        },
+        {
+          authorizeExternalAction: ctx.authorizeExternalAction,
+          beforePhysicalWire: ctx.beforePhysicalWire,
+        },
+      );
+      const text = response.body.toString("utf8").slice(0, maxChars);
+      return { data: { url: input.url, status: response.status, text }, costCents: 0 };
+    } catch (error) {
+      if (error instanceof EgressBlockedError) {
+        return { data: { url: input.url, status: 0, text: "" }, costCents: 0 };
+      }
+      throw error;
+    }
   },
 };
 
@@ -598,6 +703,7 @@ export const smtpRcptProbeTool = createSmtpRcptProbeTool();
 export function registerBuiltinTools(registry: ToolRegistry): ToolRegistry {
   registry.register(searxngSearchTool as Tool);
   registry.register(socialSearchTool as Tool);
+  registry.register(socialFetchTool as Tool);
   registry.register(crawl4aiFetchTool as Tool);
   registry.register(wikidataTool as Tool);
   registry.register(osmOverpassTool as Tool);

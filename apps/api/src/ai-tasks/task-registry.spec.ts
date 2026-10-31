@@ -75,7 +75,7 @@ describe('AI task registry model execution policy invariants', () => {
       },
       'contact.find_decision_makers': {
         model: 'deepseek-flash', risk: 'medium', humanGate: false,
-        allowedTools: ['social.search', 'crawl4ai.fetch', 'http.get'],
+        allowedTools: ['social.search', 'social.fetch', 'crawl4ai.fetch'],
         maxCostCents: 15,
         timeoutMs: 120000,
       },
