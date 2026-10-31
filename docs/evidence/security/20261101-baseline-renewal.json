@@ -1,0 +1,169 @@
+{
+  "classification": "FROZEN_AUDIT_EVIDENCE",
+  "scope": "Official npm production audit and exact-lock freshness for the 2026-11-01 audit baseline renewal (lockfile unchanged since the 2026-10-28 qs rebind; production audit byte-identical to that capture); not runtime/release/UAT evidence",
+  "records": [
+    {
+      "audit": {
+        "actions": [],
+        "advisories": {},
+        "muted": [],
+        "metadata": {
+          "vulnerabilities": {
+            "info": 0,
+            "low": 0,
+            "moderate": 0,
+            "high": 0,
+            "critical": 0
+          },
+          "dependencies": 830,
+          "devDependencies": 0,
+          "optionalDependencies": 0,
+          "totalDependencies": 830
+        }
+      },
+      "before": {
+        "schema_version": "production-dependency-baseline-freshness-result/v1",
+        "result": "FRESH",
+        "hold": false,
+        "current_advisories": 0,
+        "resolved_advisories": [],
+        "issues": [],
+        "provenance": {
+          "subject_commit": "9fa20859e0bb8bc5809b1cadb8181003204df069",
+          "lockfile_digest": "sha256:bbea0c51c69a24713ff7dc27dbf5c3ad0d8072866b0908d8df278cf2fe0a0677",
+          "verifier_digest": "sha256:fd2975544c95dee3cfe48f47ccd8c5dbf309a02a5918108572e4fb7257c38a63",
+          "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
+          "audit_digest": "sha256:87fa095799b94faa25cfec741792220f61eb5cbf2a5a5a350a5869f491a5e4ab",
+          "observed_at": "2026-10-31T18:26:58.000Z",
+          "registry": "https://registry.npmjs.org/"
+        }
+      },
+      "after": {
+        "schema_version": "production-dependency-baseline-freshness-result/v1",
+        "result": "FRESH",
+        "hold": false,
+        "current_advisories": 0,
+        "resolved_advisories": [],
+        "issues": [],
+        "provenance": {
+          "subject_commit": "9fa20859e0bb8bc5809b1cadb8181003204df069",
+          "lockfile_digest": "sha256:bbea0c51c69a24713ff7dc27dbf5c3ad0d8072866b0908d8df278cf2fe0a0677",
+          "verifier_digest": "sha256:fd2975544c95dee3cfe48f47ccd8c5dbf309a02a5918108572e4fb7257c38a63",
+          "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
+          "audit_digest": "sha256:87fa095799b94faa25cfec741792220f61eb5cbf2a5a5a350a5869f491a5e4ab",
+          "observed_at": "2026-10-31T18:27:19.000Z",
+          "registry": "https://registry.npmjs.org/"
+        }
+      }
+    }
+  ],
+  "expiry_projection": {
+    "method": "evaluateProductionAuditBaselineFreshness from scripts/supply-chain-audit.mjs called with an explicit now; the baseline-freshness CLI evaluates validity against the wall clock and records --observed-at only as provenance",
+    "audit_digest": "sha256:87fa095799b94faa25cfec741792220f61eb5cbf2a5a5a350a5869f491a5e4ab",
+    "results": [
+      {
+        "binding": "old_binding",
+        "valid_until": "2026-11-10T05:13:39.000Z",
+        "evaluated_at": "2026-11-10T05:13:38.999Z",
+        "result": "FRESH",
+        "issues": []
+      },
+      {
+        "binding": "old_binding",
+        "valid_until": "2026-11-10T05:13:39.000Z",
+        "evaluated_at": "2026-11-10T05:13:39.000Z",
+        "result": "AUDIT_INVALID_HOLD",
+        "issues": [
+          "BASELINE_EXPIRED"
+        ]
+      },
+      {
+        "binding": "new_binding",
+        "valid_until": "2026-11-14T18:27:04.000Z",
+        "evaluated_at": "2026-11-10T05:13:39.000Z",
+        "result": "FRESH",
+        "issues": []
+      },
+      {
+        "binding": "new_binding",
+        "valid_until": "2026-11-14T18:27:04.000Z",
+        "evaluated_at": "2026-11-14T18:27:03.999Z",
+        "result": "FRESH",
+        "issues": []
+      },
+      {
+        "binding": "new_binding",
+        "valid_until": "2026-11-14T18:27:04.000Z",
+        "evaluated_at": "2026-11-14T18:27:04.000Z",
+        "result": "AUDIT_INVALID_HOLD",
+        "issues": [
+          "BASELINE_EXPIRED"
+        ]
+      }
+    ]
+  },
+  "full_audit": {
+    "command": "pnpm audit --registry=https://registry.npmjs.org --json (development dependencies included)",
+    "subject_commit": "9fa20859e0bb8bc5809b1cadb8181003204df069",
+    "vulnerabilities": {
+      "info": 0,
+      "low": 1,
+      "moderate": 9,
+      "high": 1,
+      "critical": 0
+    },
+    "dependencies": 1413,
+    "production_dependencies": 830,
+    "advisories": [
+      {
+        "package": "@faker-js/faker",
+        "ghsa": "GHSA-qxc2-j82w-r537",
+        "severity": "high",
+        "vulnerable_versions": "<=10.4.0",
+        "patched_versions": ">=10.5.0",
+        "scope": "development"
+      },
+      {
+        "package": "@vitest/mocker",
+        "ghsa": "GHSA-qxg6-89mg-rqv8",
+        "severity": "moderate",
+        "vulnerable_versions": ">=2.1.0-beta.7 <4.1.12",
+        "patched_versions": ">=4.1.12",
+        "scope": "development"
+      },
+      {
+        "package": "@vitest/mocker",
+        "ghsa": "GHSA-xp26-3454-mjgp",
+        "severity": "moderate",
+        "vulnerable_versions": ">=4.1.11 <4.1.12",
+        "patched_versions": ">=4.1.12",
+        "scope": "development"
+      },
+      {
+        "package": "deepmerge",
+        "ghsa": "GHSA-gcqx-w48m-w2h4",
+        "severity": "low",
+        "vulnerable_versions": ">=4.2.0 <=4.3.1",
+        "patched_versions": "<0.0.0",
+        "scope": "development"
+      },
+      {
+        "package": "minimatch",
+        "ghsa": "GHSA-g3hv-75wg-m249",
+        "severity": "moderate",
+        "vulnerable_versions": "<11.0.1",
+        "patched_versions": ">=11.0.1",
+        "scope": "development"
+      },
+      {
+        "package": "glob",
+        "ghsa": "GHSA-3g3m-2fjr-6pw4",
+        "severity": "moderate",
+        "vulnerable_versions": ">=9.0.0 <=14.0.1",
+        "patched_versions": ">=14.0.2",
+        "scope": "development"
+      }
+    ],
+    "note": "All advisories are outside the pnpm production dependency graph (the --prod audit is zero across 830 packages); they sit in development-only chains (vitest mocker, glob/minimatch tooling, deepmerge, and the Prism mock chain faker 5.5.3 already tracked as Dependabot alert 80). No new production advisory. Not remediated here: the runbook monthly batch handles minor/patch upgrades, and these need a separate dependency PR."
+  }
+}

@@ -10,7 +10,7 @@ const repositoryRoot = new URL("../", import.meta.url);
 const BASE_COMMIT = "a8fedc721bda57ef9d2aeb16a7838a24db4f4a99";
 const LOCKFILE_DIGEST = `sha256:${"a".repeat(64)}`;
 const NOW = new Date("2026-08-09T12:00:00.000Z");
-const REPOSITORY_BASELINE_NOW = new Date("2026-10-28T13:18:17.000Z");
+const REPOSITORY_BASELINE_NOW = new Date("2026-10-31T18:27:05.000Z");
 
 async function readRepositoryFile(path) {
   return readFile(new URL(path, repositoryRoot), "utf8");
@@ -960,7 +960,7 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
   );
   const validation = validateProductionAuditBaseline(repositoryBaseline, {
     now: REPOSITORY_BASELINE_NOW,
-    expectedBootstrapBase: "6510fb5f1922384a58cac1cb01c2bf615da1646b",
+    expectedBootstrapBase: "9fa20859e0bb8bc5809b1cadb8181003204df069",
   });
   assert.deepEqual(validation.issues, []);
   assert.equal(repositoryBaseline.summary.advisories, 0);
@@ -973,11 +973,11 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
   });
   assert.equal(
     repositoryBaseline.source.base_commit,
-    "6510fb5f1922384a58cac1cb01c2bf615da1646b",
+    "9fa20859e0bb8bc5809b1cadb8181003204df069",
   );
   const clear = evaluateProductionAudit(pnpmAudit([]), repositoryBaseline, {
     now: REPOSITORY_BASELINE_NOW,
-    expectedBootstrapBase: "6510fb5f1922384a58cac1cb01c2bf615da1646b",
+    expectedBootstrapBase: "9fa20859e0bb8bc5809b1cadb8181003204df069",
     expectedSourceLockfileDigest:
       "sha256:bbea0c51c69a24713ff7dc27dbf5c3ad0d8072866b0908d8df278cf2fe0a0677",
   });
@@ -993,7 +993,7 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
     repositoryBaseline,
     {
       now: REPOSITORY_BASELINE_NOW,
-      expectedBootstrapBase: "6510fb5f1922384a58cac1cb01c2bf615da1646b",
+      expectedBootstrapBase: "9fa20859e0bb8bc5809b1cadb8181003204df069",
     },
   );
   assert.equal(vulnerable.ok, false);

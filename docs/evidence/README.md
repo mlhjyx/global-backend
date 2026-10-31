@@ -35,6 +35,8 @@
 
 [2026-10-28 qs advisory 修复与基线重绑](security/20261028-qs-advisory-remediation.json)：10-27 之后 GitHub 发布 GHSA-6pq8-jhm2-2vcw（qs 6.16.0 及以下的 `qs.stringify` DoS，moderate），锁文件未动却让 main 的 freshness canary 变 `BASELINE_STALE`；root override 把 qs 全线升到修复版 6.16.1 后，同一生产审计零 advisory，旧绑定回执为 CI 上 a30ac929 的 `BASELINE_STALE`（1 条），重绑到 6510fb5f 后为 `FRESH`，有效期维持 2026-11-10T05:13:39Z；不作为运行或发布证明。
 
+[2026-11-01 漏洞基线到期续期](security/20261101-baseline-renewal.json)：锁文件未变，只换绑定、延有效期。同一生产审计（零 advisory，830 个依赖）在旧、新绑定下都是 `FRESH`；附两个到期边界的投影：旧基线自 2026-11-10T05:13:39Z 起 `BASELINE_EXPIRED`，新基线延至 2026-11-14T18:27:04Z；含开发依赖的全量审计的 6 条 advisory 均在生产图之外；不作为运行或发布证明。
+
 [执行授权物理接线围栏复核](execution-authority-fence-review-20261001.md)：Router/ToolBroker 四个受保护文件自 `b8dd5eb0` 以来全部改动的逐提交静态复核（10-01），及 10-06 的复查与独立复审；Router 指纹据此更新，`execution-authority-policy` spec 回到 required 门。只是静态复核记录，不是 RuntimeEvidence，也不作为运行或发布证明。
 
 ## 1. 分类
