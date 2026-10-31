@@ -16,6 +16,9 @@ import {
   MAX_DISCOVERY_WATCH_COMPANIES,
 } from '../discovery/execution-envelope';
 import { queryTaxonomyTerms } from '../discovery/query-taxonomy-terms';
+import { discoverContactsCore } from '../discovery/contact-discovery-core';
+import { parseConfiguredLawfulBasis } from './backlog.activities';
+import { stampLawfulBasis } from '../discovery/compliance/email-verification-gate';
 import { artifactSubjectSkipReason } from '../tools/artifact-subject-denial';
 import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-judge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
@@ -2730,6 +2733,132 @@ export function createDiscoveryActivities(deps: {
      * 慢（每家一次 sitemap 探测）→ 走长活动；best-effort，单家失败不影响其余与 run 状态。
      * 只在持有平台写入者的进程里注册；客户 worker 没有平台写入者，只数候选、不出网（见函数内注释）。
      */
+    /**
+     * Named-contact discovery inside a discovery run: after the signals stage, take the run's
+     * fit=match companies (highest score first, bounded) and run every enabled contact adapter.
+     * Fail-closed without a deployment-level lawful basis: the `decision_maker` provider config
+     * must carry one, exactly like the parked email-guess path. Best-effort per company.
+     */
+    async discoverRunContacts(
+      args: DiscoveryActivityInput & { runId: string; icpId: string; limit?: number },
+    ): Promise<{
+      companies: number;
+      people: number;
+      emails: number;
+      phones: number;
+      skipped: boolean;
+      reason?: string;
+      failed?: number;
+      budgetTruncated: boolean;
+    }> {
+      const binding = await ensureRunBudget(args);
+      const limit = Math.min(Math.max(args.limit ?? 8, 1), 25);
+      const providerRow = await deps.prisma.dataProvider.findUnique({
+        where: { key: 'decision_maker' },
+        select: { config: true },
+      });
+      const configured = parseConfiguredLawfulBasis(providerRow?.config);
+      if (!configured) {
+        return {
+          companies: 0,
+          people: 0,
+          emails: 0,
+          phones: 0,
+          skipped: true,
+          reason: 'no_lawful_basis_configured',
+          budgetTruncated: false,
+        };
+      }
+      const lawfulBasis = stampLawfulBasis(
+        configured,
+        `discovery-run:${args.runId}`,
+        new Date().toISOString(),
+      );
+      const targets = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        const outcomes = await tx.discoveryCompanyMaterializationOutcome.findMany({
+          where: { runId: args.runId, outcome: 'CANONICALIZED' },
+          select: { canonicalCompanyId: true },
+        });
+        const ids = [
+          ...new Set(
+            outcomes
+              .map((outcome) => outcome.canonicalCompanyId)
+              .filter((id): id is string => Boolean(id)),
+          ),
+        ];
+        if (!ids.length) return [];
+        return tx.lead.findMany({
+          where: { icpId: args.icpId, canonicalCompanyId: { in: ids }, fitVerdict: 'match' },
+          orderBy: [{ totalScore: 'desc' }, { id: 'asc' }],
+          take: limit,
+          select: { canonicalCompanyId: true },
+        });
+      });
+      let companies = 0;
+      let people = 0;
+      let emails = 0;
+      let phones = 0;
+      let failed = 0;
+      for (const target of targets) {
+        try {
+          const result = await discoverContactsCore(
+            { prisma: deps.prisma, providers: deps.providers, budgetStore: budgets },
+            {
+              workspaceId: args.workspaceId,
+              companyId: target.canonicalCompanyId,
+              lawfulBasis,
+              binding: {
+                authorityId: binding.authorityId,
+                scopeKey: binding.scopeKey,
+                accountKey: binding.accountKey,
+              },
+            },
+          );
+          companies += 1;
+          people += result.contacts.length;
+          for (const contact of result.contacts) {
+            for (const point of contact.contactPoints) {
+              if (point.type === 'email') emails += 1;
+              if (point.type === 'phone') phones += 1;
+            }
+          }
+        } catch (error) {
+          failed += 1;
+          const message = error instanceof Error ? error.message : String(error);
+          console.warn(
+            `[discoverRunContacts] company ${target.canonicalCompanyId} failed: ${message.slice(0, 150)}`,
+          );
+        }
+        if (
+          (
+            await budgets.status({
+              workspaceId: binding.scopeKey,
+              accountKey: binding.accountKey,
+            })
+          ).exhausted
+        ) {
+          return {
+            companies,
+            people,
+            emails,
+            phones,
+            skipped: false,
+            failed: failed || undefined,
+            budgetTruncated: true,
+          };
+        }
+      }
+      return {
+        companies,
+        people,
+        emails,
+        phones,
+        skipped: false,
+        failed: failed || undefined,
+        budgetTruncated: false,
+      };
+    },
+
     async registerWatchesForRun(args: DiscoveryActivityInput & {
       workspaceId: string;
       runId: string;

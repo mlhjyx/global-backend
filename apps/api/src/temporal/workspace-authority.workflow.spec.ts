@@ -21,6 +21,7 @@ import {
   DISCOVERY_AUTHORITY_PATCH,
   DISCOVERY_FAILURE_FINALIZE_PATCH,
   DISCOVERY_RAW_GOVERNANCE_PATCH,
+  DISCOVERY_RUN_CONTACTS_PATCH,
   DISCOVERY_WEBSITE_PROFILE_PATCH,
   discoveryWorkflow,
 } from './discovery.workflow';
@@ -105,6 +106,14 @@ function primeDiscovery() {
     provider: 'public_web',
     budgetTruncated: false,
   });
+  acts.discoverRunContacts.mockResolvedValue({
+    companies: 1,
+    people: 2,
+    emails: 1,
+    phones: 1,
+    skipped: false,
+    budgetTruncated: false,
+  });
   acts.registerWatchesForRun.mockResolvedValue({
     candidates: 1,
     registered: 1,
@@ -187,6 +196,63 @@ describe('discoveryWorkflow execution-control propagation', () => {
       expect.objectContaining({
         status: 'PARTIAL',
         stats: expect.objectContaining({ skippedSubjects: 1 }),
+      }),
+    );
+  });
+
+  it('discovers named contacts after the signals stage and records the stage stats (P0)', async () => {
+    primeDiscovery();
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.discoverRunContacts).toHaveBeenCalledOnce();
+    const [signalsAt] = acts.enrichSignalsRun.mock.invocationCallOrder;
+    const [contactsAt] = acts.discoverRunContacts.mock.invocationCallOrder;
+    expect(contactsAt).toBeGreaterThan(signalsAt!);
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stats: expect.objectContaining({
+          contacts: {
+            companies: 1,
+            people: 2,
+            emails: 1,
+            phones: 1,
+            skipped: false,
+            budgetTruncated: false,
+          },
+        }),
+      }),
+    );
+  });
+
+  it('keeps replayed histories without the contacts patch on the old command sequence', async () => {
+    primeDiscovery();
+    setPatched((patchId) => patchId !== DISCOVERY_RUN_CONTACTS_PATCH);
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.discoverRunContacts).not.toHaveBeenCalled();
+    const lastFinalize = acts.finalizeRun.mock.calls.at(-1)?.[0] as { stats?: Record<string, unknown> };
+    expect(lastFinalize.stats && 'contacts' in lastFinalize.stats).toBeFalsy();
+  });
+
+  it('marks the run PARTIAL when the contact stage exhausts the run budget', async () => {
+    primeDiscovery();
+    acts.discoverRunContacts.mockResolvedValue({
+      companies: 1,
+      people: 1,
+      emails: 0,
+      phones: 0,
+      skipped: false,
+      budgetTruncated: true,
+    });
+
+    await discoveryWorkflow(discoveryInput());
+
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'PARTIAL',
+        stats: expect.objectContaining({ budgetTruncated: true }),
       }),
     );
   });
@@ -1591,6 +1657,14 @@ describe('discoveryWorkflow failure finalization (BI-25)', () => {
       stats: {
         ...HAPPY_QUERY_STATS,
         companies: 1,
+        contacts: {
+          companies: 1,
+          people: 2,
+          emails: 1,
+          phones: 1,
+          skipped: false,
+          budgetTruncated: false,
+        },
         suppressed: 0,
         fit: { match: 1 },
         fitSkippedForBudget: 0,
