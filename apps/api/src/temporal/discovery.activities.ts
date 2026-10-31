@@ -2750,6 +2750,8 @@ export function createDiscoveryActivities(deps: {
       reason?: string;
       failed?: number;
       budgetTruncated: boolean;
+      /** Adapter diagnostics summed over companies (e.g. social fetch/blocked counters). */
+      diagnostics?: Record<string, number>;
     }> {
       const binding = await ensureRunBudget(args);
       const limit = Math.min(Math.max(args.limit ?? 8, 1), 25);
@@ -2799,6 +2801,7 @@ export function createDiscoveryActivities(deps: {
       let emails = 0;
       let phones = 0;
       let failed = 0;
+      const diagnostics: Record<string, number> = {};
       for (const target of targets) {
         try {
           const result = await discoverContactsCore(
@@ -2821,6 +2824,9 @@ export function createDiscoveryActivities(deps: {
               if (point.type === 'email') emails += 1;
               if (point.type === 'phone') phones += 1;
             }
+          }
+          for (const [name, count] of Object.entries(result.diagnostics ?? {})) {
+            diagnostics[name] = (diagnostics[name] ?? 0) + count;
           }
         } catch (error) {
           failed += 1;
@@ -2845,6 +2851,7 @@ export function createDiscoveryActivities(deps: {
             skipped: false,
             failed: failed || undefined,
             budgetTruncated: true,
+            ...(Object.keys(diagnostics).length ? { diagnostics } : {}),
           };
         }
       }
@@ -2856,6 +2863,7 @@ export function createDiscoveryActivities(deps: {
         skipped: false,
         failed: failed || undefined,
         budgetTruncated: false,
+        ...(Object.keys(diagnostics).length ? { diagnostics } : {}),
       };
     },
 

@@ -15,13 +15,14 @@ type JsonSchema = Readonly<Record<string, unknown>>;
 type UnknownRecord = Record<string, unknown>;
 type Transform = (value: unknown) => unknown;
 export const CATALOG_RESULT_TOOL_IDS = Object.freeze([
-  'searxng.search', 'wikidata.sparql', 'osm.overpass', 'wikidata.entity',
+  'searxng.search', 'social.search', 'wikidata.sparql', 'osm.overpass', 'wikidata.entity',
   'gleif.fetch', 'companies_house.search', 'inpi_rne.search',
   'google_patents.search', 'tradefair.algolia', 'mapyourshow.fetch',
 ] as const);
 export type CatalogResultToolId = (typeof CATALOG_RESULT_TOOL_IDS)[number];
 export const CATALOG_RESULT_PROJECTION_SCHEMAS = Object.freeze({
   'searxng.search': 'searxng-search/v1',
+  'social.search': 'social-search/v1',
   'wikidata.sparql': 'wikidata-sparql/v1',
   'osm.overpass': 'osm-overpass/v1',
   'wikidata.entity': 'wikidata-entity/v1',
@@ -277,6 +278,13 @@ const searxData = (value: unknown) => mapClosedRecord(value, ['results'], ['resu
 });
 const searxDefinition = definition(
   'searxng-search/v1',
+  objectSchema({ results: arraySchema(20, searxResultSchema) }, ['results']),
+  searxData,
+);
+
+/** social.search 的持久形态与 searxng 同形（url+title ≤20），独立 schema 因为它是 PERSONAL_DATA。 */
+const socialSearchDefinition = definition(
+  'social-search/v1',
   objectSchema({ results: arraySchema(20, searxResultSchema) }, ['results']),
   searxData,
 );
@@ -903,9 +911,9 @@ const mapYourShowDefinition = definition(
 );
 
 export const CATALOG_RESULT_PROJECTION_DEFINITIONS = Object.freeze([
-  searxDefinition, wikidataSparqlDefinition, osmDefinition, wikidataEntityDefinition,
-  gleifDefinition, companiesHouseDefinition, inpiDefinition, googlePatentsDefinition,
-  tradeFairDefinition, mapYourShowDefinition,
+  searxDefinition, socialSearchDefinition, wikidataSparqlDefinition, osmDefinition,
+  wikidataEntityDefinition, gleifDefinition, companiesHouseDefinition, inpiDefinition,
+  googlePatentsDefinition, tradeFairDefinition, mapYourShowDefinition,
 ] as const);
 
 export function getCatalogResultProjectionSchema(toolId: string): TypedProjectionSchema {

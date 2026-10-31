@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import { ModelGateway } from '../../model-gateway/model-gateway';
 import { getTask } from '../../ai-tasks/task-registry';
+import {
+  ExtractedPerson,
+  extractPeopleFromPage,
+} from './contact-extraction';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import type { CrawlResult } from '../../adapters/web-crawler';
 import { extractSameSiteLinks } from '../../adapters/site-links';
@@ -15,7 +19,6 @@ import {
   MAX_CONTACTS_PER_DISCOVERY_ADAPTER,
   MAX_DECISION_MAKER_PAGES,
 } from '../execution-envelope';
-import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
 
@@ -57,19 +60,7 @@ export interface DecisionMakerContact {
   parserVersion: string;
 }
 
-interface ExtractedPeople {
-  people?: {
-    full_name?: string;
-    title?: string;
-    email?: string;
-    phone?: string;
-    department?: string;
-    seniority?: string;
-    buying_role?: string;
-    is_target_role?: boolean;
-    evidence?: string;
-  }[];
-}
+type ExtractedPeople = { people?: ExtractedPerson[] };
 
 /**
  * 决策人抽取 Provider（获客命门：找对的人，不是 info@）。
@@ -247,25 +238,17 @@ export class DecisionMakerProvider {
       offering?: string;
     },
   ): Promise<NonNullable<ExtractedPeople['people']>> {
-    const contract = getTask('contact.find_decision_makers');
     try {
-      const result = await executeStructuredTaskWithRuntime<ExtractedPeople>(
+      // 与 social_presence 共用的抽取入口（contact-extraction.ts）：prompt 骨架/durable schema
+      // 只有一份，页面类型由 label 区分。真租户归属随 ctx 透传（ai_trace/usage_ledger 记账）。
+      return await extractPeopleFromPage(
         this.deps.gateway,
-        {
-          task: contract?.id ?? 'contact.find_decision_makers',
-          prompt:
-            `卖方/ICP 上下文（用于判断谁是目标买家角色；禁止照抄进字段）：${JSON.stringify(
-              sellerContext ?? {}).slice(0, 600)}\n\n` +
-            `企业页面文本（URL: ${url}）：\n${text}`,
-          system: contract?.description,
-          model: contract?.model,
-          schema: contract?.outputSchema ?? { required: ['people'] },
-        },
-        // 真租户归属（收口②）：ai_trace/usage_ledger 按真实 workspace 记账；runId 供预算归账。
-        { ...ctx, durableResultSchema: 'contact-decision-makers/v1' },
-        { telemetry: this.deps.runtimeTelemetry },
+        getTask('contact.find_decision_makers'),
+        { url, text, label: '企业页面文本' },
+        ctx,
+        sellerContext,
+        this.deps.runtimeTelemetry,
       );
-      return result.data?.people ?? [];
     } catch (err) {
       if (isExecutionControlError(err)) throw err;
       this.log(`extract failed ${url}: ${String(err).slice(0, 80)}`);

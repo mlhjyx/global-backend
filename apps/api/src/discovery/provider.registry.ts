@@ -119,9 +119,13 @@ export class DiscoveryProviderRegistry {
     // UK Companies House 董事发现（待办 3 第一个身份源；官方注册处 API，Basic auth）——contact_discovery 类。
     // 不依赖 gateway（结构化 API，无 LLM）；GB 门外/无 broker/无 API key 时 fail-safe 返空（天然 no-op）。
     // 董事经 externalIds(uk-ch-officer) 走 resolvePersonIdentity Tier 0 精确并（同一董事跨源自动并成一条）。
-    // 社媒/渠道发现（M2a：SearXNG 索引片段里的 LinkedIn/Xing 公开标题 → 姓名+职务）。
-    // 只读搜索引擎已索引的公开片段，不登录、不抓目标站；company 名不匹配的结果一律丢弃。
-    this.contacts.push(new SocialPresenceContactAdapter({ broker }));
+    // 社媒/渠道发现（M2a 索引片段 + M2b 档案副本/公开页直抓，见 social-presence.provider.ts）。
+    // company 名不匹配的结果一律丢弃；LLM 抽取需 gateway，缺省时只保留索引层结果。
+    this.contacts.push(new SocialPresenceContactAdapter({
+      broker,
+      gateway: deps?.gateway,
+      runtimeTelemetry: deps?.runtimeTelemetry,
+    }));
     this.contacts.push(new CompaniesHouseContactProvider({ broker }));
     // 法国 dirigeants 发现（待办 3 第三个身份源；开放政务 API Recherche d'entreprises，无鉴权）——contact_discovery 类。
     // 不依赖 gateway（结构化 API，无 LLM）；FR 门外/无 broker 时 fail-safe 返空（天然 no-op）。
@@ -305,6 +309,55 @@ export class DiscoveryProviderRegistry {
             robotsStatus: 'ALLOWS',
             termsStatus: row.termsStatus,
             personalData: row.personalData,
+            allowedPurpose: ['discovery', 'enrichment'],
+            retentionDays: 365,
+            notes: row.notes,
+          },
+        });
+      }
+    }
+    // 社媒公开个人页与档案副本（D1，产品负责人 2026-10-31 决定：允许直爬无需登录的公开个人页；
+    // LinkedIn/Xing 为显式 robots 例外域，抓取失败或 999/403 即停，不重试不换 IP）。
+    // 逐域行 = 逐域 kill switch：ops 改 SUSPENDED 即该域全链停抓。Broker 的 extractDomain 会剥
+    // www.（www.* 行永远查不到，故不登记）；它按 hostname 精确匹配——de. 等国家子域未逐个登记时
+    // 按 advisory 默认放行，这是已知边界（熔断/节拍在 adapter 内按键归并到注册域）。
+    if (db.sourcePolicy) {
+      const socialSourceRows = [
+        {
+          domain: 'linkedin.com',
+          notes: 'LinkedIn 公开个人页（/in/*，含国家子域）。产品负责人 2026-10-31 接受的 robots 例外域：只读无需登录的公开页，被拒（999/403/登录墙）即停；ToS 风险由负责人承担。节拍与熔断在 adapter 内：按注册域 ≤1 req/3s、连续 3 拒冷却 30 分钟。',
+        },
+        {
+          domain: 'de.linkedin.com',
+          notes: 'LinkedIn 德国子域（dork 常直接命中；Broker 精确匹配，单独登记才可 SUSPENDED 停抓）。边界同 linkedin.com 行。',
+        },
+        {
+          domain: 'xing.com',
+          notes: 'Xing 公开个人页（/profile/*）。产品负责人 2026-10-31 接受的 robots 例外域，边界同 LinkedIn 行；Xing 访客页是 SPA 壳，实际只走档案副本层。',
+        },
+        {
+          domain: 'archive.org',
+          notes: 'Wayback availability API（L1 档案副本定位；只读公共档案，不触目标站）。',
+        },
+        {
+          domain: 'web.archive.org',
+          notes: 'Wayback 快照页（L1 档案副本内容；公共档案读取）。',
+        },
+      ];
+      for (const row of socialSourceRows) {
+        await db.sourcePolicy.upsert({
+          where: { domain: row.domain },
+          update: {},
+          create: {
+            domain: row.domain,
+            sourceType: 'search_engine',
+            accessMode: 'crawl',
+            reviewStatus: 'APPROVED',
+            robotsStatus: row.domain.startsWith('archive') || row.domain === 'web.archive.org'
+              ? 'ALLOWS'
+              : 'RESTRICTS',
+            termsStatus: 'REVIEWED_RESTRICTED',
+            personalData: true,
             allowedPurpose: ['discovery', 'enrichment'],
             retentionDays: 365,
             notes: row.notes,

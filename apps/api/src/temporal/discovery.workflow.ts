@@ -582,6 +582,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
           reason?: string;
           failed?: number;
           budgetTruncated: boolean;
+          diagnostics?: Record<string, number>;
         }
       | undefined;
     if (patched(DISCOVERY_RUN_CONTACTS_PATCH)) {

@@ -472,6 +472,7 @@ const MAPYOURSHOW_RAW: RawToolResult = {
 
 const REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES: readonly ProjectionFixture[] = [
   { toolId: 'searxng.search', schema: 'searxng-search/v1', raw: SEARX_RAW },
+  { toolId: 'social.search', schema: 'social-search/v1', raw: SEARX_RAW },
   { toolId: 'wikidata.sparql', schema: 'wikidata-sparql/v1', raw: WIKIDATA_SPARQL_RAW },
   { toolId: 'osm.overpass', schema: 'osm-overpass/v1', raw: OSM_RAW, restored: OSM_RESTORED },
   { toolId: 'wikidata.entity', schema: 'wikidata-entity/v1', raw: WIKIDATA_ENTITY_RAW },
@@ -558,6 +559,12 @@ const PROVENANCE_BOUNDS = {
 
 const EXPECTED_BOUNDS: Readonly<Record<string, JsonRecord>> = {
   'searxng-search/v1': {
+    ...COMMON_RESULT_BOUNDS,
+    '$.data.results.maxItems': 20,
+    '$.data.results[].url.maxLength': 2048,
+    '$.data.results[].title.maxLength': 2000,
+  },
+  'social-search/v1': {
     ...COMMON_RESULT_BOUNDS,
     '$.data.results.maxItems': 20,
     '$.data.results[].url.maxLength': 2048,
@@ -801,12 +808,13 @@ function setAtPath(root: unknown, path: Path, value: unknown): void {
 describe('closed catalog Tool result projections', () => {
   it('locks the exact immutable toolId-to-schema mapping and definition order', () => {
     expect(CATALOG_RESULT_TOOL_IDS).toEqual([
-      'searxng.search', 'wikidata.sparql', 'osm.overpass', 'wikidata.entity',
+      'searxng.search', 'social.search', 'wikidata.sparql', 'osm.overpass', 'wikidata.entity',
       'gleif.fetch', 'companies_house.search', 'inpi_rne.search',
       'google_patents.search', 'tradefair.algolia', 'mapyourshow.fetch',
     ]);
     expect(CATALOG_RESULT_PROJECTION_SCHEMAS).toEqual({
       'searxng.search': 'searxng-search/v1',
+      'social.search': 'social-search/v1',
       'wikidata.sparql': 'wikidata-sparql/v1',
       'osm.overpass': 'osm-overpass/v1',
       'wikidata.entity': 'wikidata-entity/v1',
@@ -881,6 +889,8 @@ describe('closed catalog Tool result projections', () => {
     const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
     for (const [index, fixture] of REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES.entries()) {
       const definition = CATALOG_RESULT_PROJECTION_DEFINITIONS[index];
+      // 夹具与定义按位置配对：错位必须立刻失败（新增工具时两个清单要同步插入）。
+      expect(definition.schema).toBe(fixture.schema);
       const envelope = registry.project(definition.schema, fixture.raw);
       const mutations = collectBoundaryMutations(
         definition.jsonSchema as JsonRecord,

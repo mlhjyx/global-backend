@@ -760,16 +760,58 @@
       ]
     },
     {
-      "key": "apps/api/src/discovery/providers/social-presence.provider.ts#searxng.search#1",
+      "key": "apps/api/src/discovery/providers/social-presence.provider.ts#social.search#1",
       "kind": "tool",
-      "producerId": "searxng.search",
+      "producerId": "social.search",
       "resultStrategy": "typed_projection",
-      "resultSchema": "searxng-search/v1",
+      "resultSchema": "social-search/v1",
       "receiptMode": "ACK_REQUIRED",
       "consumerChecks": [
         {
-          "path": "apps/api/src/temporal/discovery.activities.ts",
-          "anchor": "onDurableReceipt"
+          "path": "apps/api/src/discovery/contact-discovery-core.ts",
+          "anchor": "captureContactReceipt"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/social-presence.provider.ts#http.get#1",
+      "kind": "tool",
+      "producerId": "http.get",
+      "resultStrategy": "artifact_reference",
+      "resultSchema": "http-get/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/discovery/contact-discovery-core.ts",
+          "anchor": "captureContactReceipt"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/social-presence.provider.ts#http.get#2",
+      "kind": "tool",
+      "producerId": "http.get",
+      "resultStrategy": "artifact_reference",
+      "resultSchema": "http-get/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/discovery/contact-discovery-core.ts",
+          "anchor": "captureContactReceipt"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/social-presence.provider.ts#http.get#3",
+      "kind": "tool",
+      "producerId": "http.get",
+      "resultStrategy": "artifact_reference",
+      "resultSchema": "http-get/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/discovery/contact-discovery-core.ts",
+          "anchor": "captureContactReceipt"
         }
       ]
     }

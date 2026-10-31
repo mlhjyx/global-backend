@@ -135,6 +135,67 @@ export const searxngSearchTool: Tool<
 
 /** searxng-search/v1 bounds: at most 20 results, url ≤ 2048 and title ≤ 2000 characters. */
 const SEARX_DURABLE_RESULT_LIMIT = 20;
+
+/**
+ * social.search —— 元搜索，**只保留公开个人主页**（LinkedIn `/in|/pub`、Xing `/profile`）的
+ * URL + 标题。与 `searxng.search` 分工具存在：个人主页的 URL 与标题本身就是具名人（GDPR
+ * 个人数据），`searxng.search` 声明 personalData:false 并把这类结果整体丢弃
+ * （见 durableSearxResults）；本工具声明 personalData:true、独立 typed projection
+ *（social-search/v1，PERSONAL_DATA），只允许在 `contact.find_decision_makers`
+ *（lawful-basis 门之后的联系人发现）契约下使用。产品负责人 2026-10-31 拍板 D1。
+ */
+export const socialSearchTool: Tool<
+  { q: string; pages?: number; language?: string },
+  SearxngSearchOutput
+> = {
+  id: "social.search",
+  version: "1.0.0",
+  category: "search",
+  sourceClass: "public_intelligence",
+  cost: { unit: "request", estimatedCents: 0, external: false },
+  rateLimit: { rps: 3, concurrency: 3 },
+  compliance: {
+    sourcePolicy: "none",
+    respectsRobots: false,
+    personalData: true,
+    allowedPurpose: ["discovery", "enrichment"],
+    reversible: true,
+    authRequired: false,
+    risk: "medium",
+  },
+  capabilities: { produces: ["contact"], accepts: ["keywords"] },
+  idempotencyKey: (i) => `social.search:${stableKey(i)}`,
+  durableResultStrategy: {
+    kind: "typed_projection",
+    schema: CATALOG_RESULT_PROJECTION_SCHEMAS["social.search"],
+  },
+  durableReplayResult: (result) => ({
+    data: {
+      results: result.data.results.map((item) =>
+        typeof item.title === "string" && item.title.length > 0
+          ? { url: item.url, title: item.title }
+          : { url: item.url },
+      ),
+    },
+    costCents: result.costCents,
+    ...(result.degraded === undefined ? {} : { degraded: result.degraded }),
+  }),
+  healthCheck: async () => {
+    try {
+      const r = await searxSearchPaged({ q: "test", language: "en" }, 1, 8000);
+      return { healthy: r.length >= 0 };
+    } catch {
+      return { healthy: false };
+    }
+  },
+  execute: async (input) => {
+    const results = await searxSearchPaged(
+      { q: input.q, language: input.language },
+      input.pages ?? 1,
+    );
+    return { data: { results: personProfileSearxResults(results) }, costCents: 0 };
+  },
+};
 const SEARX_DURABLE_URL_CHARS = 2048;
 const SEARX_DURABLE_TITLE_CHARS = 2000;
 
@@ -184,6 +245,23 @@ function durableTitle(raw: string): string | null {
     if (/[\uD800-\uDBFF]$/u.test(title)) title = title.slice(0, -1);
   }
   return isDurableText(title) ? title : null;
+}
+
+/** social.search 的持久形态：只保留个人主页 URL（含完整路径——路径即被检索人）+ 标题。 */
+function personProfileSearxResults(results: readonly SearxResult[]): SearxngSearchResult[] {
+  return results
+    .flatMap((result): SearxngSearchResult[] => {
+      const url: unknown = result.url;
+      if (
+        typeof url !== "string" || url.length === 0 || url.length > SEARX_DURABLE_URL_CHARS ||
+        !isDurableText(url) || !isPersonProfileUrl(url)
+      ) {
+        return [];
+      }
+      const title = typeof result.title === "string" ? durableTitle(result.title) : null;
+      return [title === null ? { url } : { url, title }];
+    })
+    .slice(0, SEARX_DURABLE_RESULT_LIMIT);
 }
 
 function isPersonProfileUrl(url: string): boolean {
@@ -519,6 +597,7 @@ export const smtpRcptProbeTool = createSmtpRcptProbeTool();
 /** 注册全部内置工具（启动期调用）。 */
 export function registerBuiltinTools(registry: ToolRegistry): ToolRegistry {
   registry.register(searxngSearchTool as Tool);
+  registry.register(socialSearchTool as Tool);
   registry.register(crawl4aiFetchTool as Tool);
   registry.register(wikidataTool as Tool);
   registry.register(osmOverpassTool as Tool);

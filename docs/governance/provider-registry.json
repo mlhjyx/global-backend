@@ -511,7 +511,7 @@
       "source_classes": [
         "contact_discovery"
       ],
-      "purpose": "Discover named people and roles from search-indexed public social profiles (LinkedIn and Xing titles returned by the self-hosted metasearch); no target-site fetch, no login, no captcha bypass.",
+      "purpose": "Discover named people, roles and public contact details from social profiles in three layers: Wayback archive copies (default, no target-site fetch), direct fetch of public no-login profile pages (LinkedIn only, product-owner-approved robots exception, stop on 999/403/login wall), and search-index title snippets (self-hosted metasearch). No login walls, no captcha bypass, no account pools or IP rotation.",
       "taxonomy": [
         "company name",
         "target role terms",
@@ -519,7 +519,7 @@
       ],
       "license": {
         "classification": "SOURCE_SPECIFIC",
-        "note": "Only the public search title and URL are retained as provenance; named people are personal data and require a lawful basis before outreach."
+        "note": "Index snippets keep only the public search title and URL; archive/live layers keep the profile page text (PERSONAL_DATA, 24h artifact TTL) as evidence for extracted titles/departments/emails, with per-layer license tokens public-index / public-archive / public-page. Named people are personal data and require a lawful basis before outreach; LinkedIn/Xing crawling risk accepted by the product owner 2026-10-31 (D1)."
       },
       "personal_data_class": "PERSONAL_DATA",
       "default_enablement": "ENABLED",

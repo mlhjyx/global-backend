@@ -52,7 +52,9 @@
       "costBasis",
       "status"
     ],
-    "allowedStatus": ["SETTLED"],
+    "allowedStatus": [
+      "SETTLED"
+    ],
     "tokenCountsOnly": true,
     "payloadExclusions": [
       "body",
@@ -70,7 +72,13 @@
   },
   "resultDisposition": {
     "schema": "execution-result-disposition/v2",
-    "kinds": ["valid_output", "result_unknown", "control_error", "definite_failure", "replay_error"],
+    "kinds": [
+      "valid_output",
+      "result_unknown",
+      "control_error",
+      "definite_failure",
+      "replay_error"
+    ],
     "automaticPhysicalRetryAllowed": "DEFINITE_FAILURE_BEFORE_OUTPUT_ONLY",
     "unknownStatus": "RESULT_UNKNOWN",
     "controlStatus": "RELEASED",
@@ -93,6 +101,22 @@
         "identitySource": "query-digest-and-result-url",
         "subjectRefRequired": false,
         "personalDataDsrCompatible": false
+      }
+    },
+    {
+      "id": "social.search",
+      "declarationPath": "apps/api/src/tools/builtin-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "social-search/v1",
+      "operationIdentity": "tool:social.search:<version>:<idempotencyKey>",
+      "privacyClass": "PERSONAL_DATA",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "SocialPresenceContactAdapter",
+        "domainAggregateType": "SearchResultEvidence",
+        "identitySource": "result-url-and-query-digest",
+        "subjectRefRequired": true,
+        "personalDataDsrCompatible": true
       }
     },
     {
@@ -300,7 +324,9 @@
         "maxInventorsPerPatent": 25,
         "typedProjectionMaxPatents": 50,
         "rawBigQueryRowsRetained": false,
-        "inventorFields": ["name"]
+        "inventorFields": [
+          "name"
+        ]
       },
       "costConstraints": {
         "configuredDefaultMaximumBytesBilled": "214748364800",
@@ -584,7 +610,9 @@
       "schema": "crawl4ai-fetch/v1",
       "artifactIdRequired": true,
       "privacyClass": "PERSONAL_DATA",
-      "mediaTypes": ["text/markdown"],
+      "mediaTypes": [
+        "text/markdown"
+      ],
       "maxBytes": 300000,
       "ttlSeconds": 86400
     },
@@ -592,7 +620,9 @@
       "schema": "crawl4ai-render/v1",
       "artifactIdRequired": true,
       "privacyClass": "PERSONAL_DATA",
-      "mediaTypes": ["text/html"],
+      "mediaTypes": [
+        "text/html"
+      ],
       "maxBytes": 3000000,
       "ttlSeconds": 86400
     },
@@ -600,7 +630,9 @@
       "schema": "http-get/v1",
       "artifactIdRequired": true,
       "privacyClass": "PERSONAL_DATA",
-      "mediaTypes": ["text/plain"],
+      "mediaTypes": [
+        "text/plain"
+      ],
       "maxBytes": 3000000,
       "ttlSeconds": 86400
     },
@@ -608,7 +640,10 @@
       "schema": "sanctions-download/v1",
       "artifactIdRequired": true,
       "privacyClass": "PERSONAL_DATA",
-      "mediaTypes": ["application/xml", "text/xml"],
+      "mediaTypes": [
+        "application/xml",
+        "text/xml"
+      ],
       "maxBytes": 33554432,
       "ttlSeconds": 86400
     }

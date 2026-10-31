@@ -151,6 +151,8 @@ export interface DiscoveryResult {
 export interface ContactDiscoveryResult {
   contacts: ProviderContactRecord[];
   costCents: number;
+  /** Adapter-internal diagnostics (e.g. social fetch/blocked counters) — summed into run stats. */
+  diagnostics?: Record<string, number>;
 }
 
 /** 联系人发现的卖方上下文（用于买家角色分类；可选，缺省则通用分类）。 */

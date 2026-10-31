@@ -249,6 +249,9 @@ describe('actual discovery receipt consumers', () => {
           recordedBy: CTX.userId,
           recordedAt: expect.any(String),
         }),
+        // G3 5.5：subject-bound 工件工具（crawl4ai.fetch/http.get）需要公司主体，缺了会被
+        // Broker 静默持有——此处锁定 core 必须把公司主体交给每个联系人适配器。
+        artifactSubject: { subjectType: 'company', subjectId: COMPANY_ID },
       }),
     );
     expect(tx.usageLedger.create).toHaveBeenCalledOnce();
@@ -273,6 +276,15 @@ describe('actual discovery receipt consumers', () => {
       skippedInvalid: 0,
     });
     expect(mocks.persistDiscoveredContacts).toHaveBeenCalledOnce();
+
+    adapter.discoverContacts.mockImplementationOnce(async () => ({
+      contacts: [],
+      costCents: 0,
+      diagnostics: { social_fetches: 2, social_blocked: 1 },
+    }));
+    await expect(service.discoverContacts(CTX, COMPANY_ID, CONTACT_DISCOVERY_OPTIONS)).resolves.toMatchObject({
+      diagnostics: { social_fetches: 2, social_blocked: 1 },
+    });
 
     adapter.discoverContacts.mockImplementationOnce(async (
       _company: unknown,
