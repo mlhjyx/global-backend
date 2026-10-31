@@ -109,9 +109,9 @@ PLATFORM_EGRESS_FENCE_REOPEN_DISPOSABLE_TEST=1 \
   node --test packages/db/test/platform-egress-fence-reopen.disposable.spec.mjs
 ```
 
-## 8. dev 演示（需先部署含本迁移的镜像）
+## 8. dev 演示（2026-11-01 已执行）
 
-运行中的 managed runtime 只有在镜像 `migration_revision` 等于库中最新迁移时才会 ready。演示步骤：
+live 演示已于 2026-11-01 在 dev 完成：镜像 `d391a5f5`、真实 Grant 准入、真实撤销、`/health/ready` 503 → 重开 → ready；记录见 [live 证据](../evidence/2026-11-01-egress-fence-reopen-live-dev.md)。以下步骤保留为复现说明。运行中的 managed runtime 只有在镜像 `migration_revision` 等于库中最新迁移时才会 ready。演示步骤：
 
 1. 手动启动一次 `acq-sweep`（schedule 保持 paused），取得真实 `PLATFORM_GRANT`；
 2. 用 gain-saas 的 `RevocationIssuer` / `RevocationClient` 投递真实撤销，确认围栏 `DISABLED`、`/health/ready` 503、`platform_budget_authority` 报 `PLATFORM_AUTOMATION_ACQ_SWEEP_BLOCKED`；

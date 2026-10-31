@@ -72,11 +72,12 @@ SELECT * FROM reopen_platform_egress_fence_v1(
 
 ## 边界（这份记录不证明什么）
 
-- **不是 live `/health/ready`**：readiness 由运行镜像的编译产物在一次性克隆库上计算；外部探针
+- **不是 live `/health/ready`**：本页只记录克隆库演示；live dev 的 `/health/ready` 已验证，见
+  [出网围栏受审计重开：dev live 演示](2026-11-01-egress-fence-reopen-live-dev.md)。readiness 由运行镜像的编译产物在一次性克隆库上计算；外部探针
   `temporal_proof`、`issuer`、`revocation_delivery` 与 quote 认证被替身为 `ok`，数据库探针
   （平台写入者 attestation、`inspect_platform_egress_policy_v2`）与 quote/policy 计算是真实代码。
   live `/health/ready` 恢复需要先发布并切换含本迁移的镜像（`migration_revision` 必须等于库中
-  最新迁移），那是产品负责人的单独决定。
+  最新迁移）；该步骤已于 2026-11-01 由 live 演示完成。
 - **DISABLED 状态是重建的**：live `acq-sweep` 已在 2026-10-31 由库属主手工恢复到 generation 3；
   克隆库按真实回执的 `generation = 2` 置回。演示没有签发新的真实 Grant/撤销（那会再次 fence
   live schedule），因此不证明新撤销命令与重开的组合，只证明重开与既有真实回执的配对。
