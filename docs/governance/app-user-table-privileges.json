@@ -3,8 +3,18 @@
   "role": "app_user",
   "schema": "public",
   "defaultPrivileges": [
-    { "owner": "global", "schema": "public", "objectType": "tables", "privileges": ["SELECT"] },
-    { "owner": "global", "schema": "public", "objectType": "sequences", "privileges": ["SELECT", "USAGE"] }
+    {
+      "owner": "global",
+      "schema": "public",
+      "objectType": "tables",
+      "privileges": ["SELECT"]
+    },
+    {
+      "owner": "global",
+      "schema": "public",
+      "objectType": "sequences",
+      "privileges": ["SELECT", "USAGE"]
+    }
   ],
   "tables": {
     "_prisma_migrations": ["SELECT"],
@@ -66,7 +76,8 @@
     "knowledge_source": ["DELETE", "INSERT", "SELECT", "UPDATE"],
     "lead": ["DELETE", "INSERT", "SELECT", "UPDATE"],
     "lead_decision": ["DELETE", "INSERT", "SELECT", "UPDATE"],
-    "lead_outcome": ["INSERT", "SELECT"], "lead_outreach_draft": ["INSERT", "SELECT"],
+    "lead_outcome": ["INSERT", "SELECT"],
+    "lead_outreach_draft": ["INSERT", "SELECT"],
     "lia_record": ["INSERT", "SELECT", "UPDATE"],
     "monitored_source": ["INSERT", "SELECT", "UPDATE"],
     "offering": ["DELETE", "INSERT", "SELECT", "UPDATE"],
@@ -79,6 +90,7 @@
     "persona": ["DELETE", "INSERT", "SELECT", "UPDATE"],
     "personal_artifact_cleanup_command": [],
     "platform_egress_attempt": [],
+    "platform_egress_fence_reopen_receipt": [],
     "platform_egress_schedule_fence": [],
     "platform_fence_ack_delivery": [],
     "platform_revocation_receipt": [],

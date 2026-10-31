@@ -289,11 +289,40 @@ model PlatformRevocationReceipt {
   committedAt      DateTime @map("committed_at") @db.Timestamptz(6)
   inFlightAttempts BigInt   @map("in_flight_attempts")
 
-  ackDelivery PlatformFenceAckDelivery?
+  ackDelivery     PlatformFenceAckDelivery?
+  reopenReceipts  PlatformEgressFenceReopenReceipt[]
 
   @@unique([issuer, revocationJti], map: "platform_revocation_receipt_issuer_jti_key")
   @@unique([scheduleId, fenceSequence], map: "platform_revocation_receipt_schedule_sequence_key")
   @@map("platform_revocation_receipt")
+}
+
+/// Immutable operator audit of a receipt-paired egress fence reopen. Only
+/// reopen_platform_egress_fence_v1 may insert; direct DML is a policy violation.
+model PlatformEgressFenceReopenReceipt {
+  id                       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  reopenJti                String   @unique(map: "platform_egress_fence_reopen_receipt_reopen_jti_key") @map("reopen_jti") @db.Uuid
+  operator                 String   @db.VarChar(200)
+  dbPrincipal              String   @map("db_principal") @db.VarChar(200)
+  scheduleId               String   @map("schedule_id") @db.VarChar(191)
+  fenceSequence            BigInt   @map("fence_sequence")
+  revocationReceiptId      String   @map("revocation_receipt_id") @db.Uuid
+  revocationIssuer         String   @map("revocation_issuer") @db.VarChar(2048)
+  revocationJti            String   @map("revocation_jti") @db.Uuid
+  priorGeneration          BigInt   @map("prior_generation")
+  generation               BigInt
+  reasonCode               String   @map("reason_code") @db.VarChar(80)
+  policyArtifactSha256     String?  @map("policy_artifact_sha256") @db.VarChar(64)
+  executionEnvelopeSha256  String?  @map("execution_envelope_sha256") @db.VarChar(64)
+  requiredCapMicrousd      BigInt?  @map("required_cap_microusd")
+  committedAt              DateTime @map("committed_at") @db.Timestamptz(6)
+  inFlightAttempts         BigInt   @map("in_flight_attempts")
+  blockedAttempts          BigInt   @map("blocked_attempts")
+
+  revocationReceipt PlatformRevocationReceipt @relation(fields: [revocationReceiptId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "platform_egress_fence_reopen_receipt_revocation_fkey")
+
+  @@unique([scheduleId, fenceSequence], map: "platform_egress_fence_reopen_receipt_schedule_sequence_key")
+  @@map("platform_egress_fence_reopen_receipt")
 }
 
 /// First committed encrypted ACK is immutable and replayed without re-signing.
