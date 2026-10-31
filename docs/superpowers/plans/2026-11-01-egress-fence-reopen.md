@@ -1,7 +1,7 @@
 # 平台出网围栏的受审计重开路径
 
-> 生命周期：`APPROVED`
-> 生命周期依据：父会话 2026-11-01 下达的施工任务（产品负责人确定的「把重开做成受审计能力」方向；不含 unpause schedule、发布镜像与恢复平台运行的授权）。实现按 DEC-AIDEV-004 自审自合；§2 的 owner-only 取舍沿用既有 `install_platform_egress_policy_v2` 的运维边界，不新增信任根。
+> 生命周期：`CLOSED`
+> 生命周期依据：CLOSED 2026-11-01 —— 迁移、测试与文档随 #711 合入；克隆演示与 live dev 演示均完成（live 记录见 [出网围栏受审计重开：dev live 演示](../../evidence/2026-11-01-egress-fence-reopen-live-dev.md)）。4 个 schedule 仍 paused；发布与切换由产品负责人授权，切换由 root 进程执行。原 APPROVED 依据：父会话 2026-11-01 下达的施工任务（产品负责人确定的「把重开做成受审计能力」方向）；实现按 DEC-AIDEV-004 自审自合；§2 的 owner-only 取舍沿用既有 `install_platform_egress_policy_v2` 的运维边界，不新增信任根。
 
 事实基线：`origin/main@7a7ece0f`（#708 已合）。相关代码与迁移：`packages/db/prisma/migrations/20260907100000_platform_egress_fence/`、`20260908120000_platform_signed_revocation_receipt/`、`20260908130000_platform_egress_budget_policy_v2/`、`20260907110000_platform_egress_fence_privilege_hardening/`、`20260907120000_platform_egress_fence_readiness/`；现场经过见 [2026-11-01 平台准入 v2 与撤销 fence 实测](../../evidence/2026-11-01-platform-admission-v2-and-revocation-fence.md)。
 
@@ -221,5 +221,5 @@ reopen_platform_egress_fence_v1(
   `DISABLED` 状态、用真实撤销回执调用重开，运行镜像的 readiness 计算从 `not_ready`/`BLOCKED`
   回到 `ready`/`ISSUABLE`。记录与边界见
   [出网围栏受审计重开：dev 数据克隆演示](../../evidence/2026-11-01-egress-fence-reopen-dev-clone.md)。
-- live `/health/ready` 演示仍待产品负责人决定发布/切换含本迁移的镜像；本 PR 不发布、不 unpause、
-  不改 `global_dev`。
+- live `/health/ready` 演示已于 2026-11-01 在 dev 完成（见上方 live 证据）；切换由 root 进程执行，
+  4 个 schedule 仍 paused。
