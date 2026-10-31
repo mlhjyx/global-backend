@@ -7,7 +7,6 @@ import { ExecutionBudgetGrantError } from "../execution-budget/execution-budget-
 import {
   BudgetStoreUnavailableError,
   type BudgetStore,
-  UnavailableBudgetStore,
 } from "../tools/budget-store";
 import {
   PLATFORM_SCHEDULE_AUTHORITY_CONTRACT_VERSION,
@@ -22,6 +21,7 @@ import {
 } from "./platform-schedule-authority";
 import type { PlatformEgressFence } from "../platform-authority/platform-egress-fence";
 import type { PlatformEgressBinding } from "../platform-authority/platform-egress-fence";
+import type { PlatformRunAdmissionPort } from "./platform-grant-admission";
 
 export interface AdmitPlatformScheduleInput {
   readonly executionContractVersion?: 1;
@@ -105,13 +105,9 @@ export function platformEgressDispatcher(input: {
 }
 
 export function createPlatformScheduleAuthorityActivities(deps: {
-  budgetStore?: BudgetStore;
+  /** 准入 v2：quote → 权威签发 Grant → 验签 + ingest/admit（v1 已对平台写入者撤销执行权）。 */
+  platformAdmission: PlatformRunAdmissionPort;
 }) {
-  const budgets =
-    deps.budgetStore ??
-    new UnavailableBudgetStore(
-      "platform schedule authority requires an authoritative BudgetStore",
-    );
   return {
     async admitPlatformSchedule(
       input: AdmitPlatformScheduleInput,
@@ -130,10 +126,11 @@ export function createPlatformScheduleAuthorityActivities(deps: {
           executionScope,
           input.workflowRunId,
         );
-        const admitted = await budgets.admitPlatformRun({
-          ...executionScope,
+        const admitted = await deps.platformAdmission.admit({
+          executionScope,
+          // workflowId 只从 Temporal 读，活动参数不能伪造
+          workflowId: activityWorkflowId() ?? "",
           workflowRunId: input.workflowRunId,
-          accountKey,
         });
         return parsePlatformExecutionBudgetBinding({
           authorityId: admitted.authorityId,
