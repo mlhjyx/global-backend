@@ -58,7 +58,7 @@ describe('social presence contact adapter (M2a: search index only)', () => {
 
   it('queries searxng through the broker and tolerates a failing dork', async () => {
     const invoke = vi.fn(async (_tool: string, input: { q: string }) => {
-      if (input.q.includes('xing.com')) throw new Error('search down');
+      if (input.q.startsWith('site:xing.com/profile')) throw new Error('search down');
       return {
         data: {
           results: [
