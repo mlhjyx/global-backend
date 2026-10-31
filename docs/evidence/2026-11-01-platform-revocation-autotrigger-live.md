@@ -1,6 +1,6 @@
 # 平台撤销自动触发：dev live 闭环（绑定撤销 → ACK → 受审计重开）
 
-本记录在 xin 的 dev 环境完成「部署绑定显式撤销 → gain-saas 自动产生撤销请求 → 用真实 live Grant 投递 → 后端 fence 提交 → ACK → 受审计重开 → readiness 恢复」的完整闭环。这是 P9（gain-saas #25）在**线上服务实例**上的首次成功 fence/ACK，也是 [D4](../../superpowers/plans/2026-11-01-platform-revocation-autotrigger.md) 所述「重开路径上线后自动来源直接投递」开关的首次启用。4 个 Temporal schedule 仍全部 paused；本记录不 unpause、不构成 RuntimeEvidence 或 Pilot/GA 证据。
+本记录在 xin 的 dev 环境完成「部署绑定显式撤销 → gain-saas 自动产生撤销请求 → 用真实 live Grant 投递 → 后端 fence 提交 → ACK → 受审计重开 → readiness 恢复」的完整闭环。这是 P9（gain-saas #25）在**线上服务实例**上的首次成功 fence/ACK，也是 [D4](../superpowers/plans/2026-11-01-platform-revocation-autotrigger.md) 所述「重开路径上线后自动来源直接投递」开关的首次启用。4 个 Temporal schedule 仍全部 paused；本记录不 unpause、不构成 RuntimeEvidence 或 Pilot/GA 证据。
 
 ## 绑定身份
 
@@ -49,7 +49,7 @@ R4_REVOCATION_AUTO_CONFIRM=true
 ## 围栏 generation 历史（dev，供审计对账）
 
 acq-sweep：`ed59f901…` seq1 gen2（10-31 16:14，手工撤销实测）→ 属主带外恢复 gen3 →
-`7dcc7c65…` seq2 gen4（10-31 21:11，[#715 live 演示](../2026-11-01-egress-fence-reopen-live-dev.md)）→ 重开 gen5 →
+`7dcc7c65…` seq2 gen4（10-31 21:11，[#715 live 演示](2026-11-01-egress-fence-reopen-live-dev.md)）→ 重开 gen5 →
 `ca11e502…` seq3 gen6（本记录步骤 4）→ 重开 gen7（本记录步骤 6）。
 
 ## 边界（本记录不证明什么）
