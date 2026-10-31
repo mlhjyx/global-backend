@@ -1,7 +1,7 @@
 # 政策停用 → 平台撤销的自动触发（设计稿）
 
-> 生命周期：`APPROVED`
-> 生命周期依据：产品负责人 2026-11-01 按建议批准 §8 D1–D8（会话内「按建议批准」）。gain-saas 实现已合并（PR #25，默认关闭、尚未部署），dev 试运行验证了签发 → 投递 → 后端验签 → 错误分类（[证据](../../evidence/2026-11-01-platform-revocation-autotrigger-dryrun.md)）；成功 fence/ACK 走新触发路径与开启操作待后端受审计重开路径就绪后单独窗口，届时改 `CLOSED`。原 DRAFT 依据：撤销链已用真实 Grant 实测，但 `RevocationIssuer` 没有任何生产调用方。
+> 生命周期：`CLOSED`
+> 生命周期依据：CLOSED 2026-11-01 —— 按本文施工完毕：gain-saas #25 实现上线（dev 线上开启 `R4_REVOCATION_TRIGGER_ENABLED` + `R4_REVOCATION_AUTO_CONFIRM`），绑定显式撤销 → 自动请求 → 真实 live Grant 投递 → fence 提交 → ACK → 受审计重开（#711）全链实测通过，证据见 [2026-11-01 平台撤销自动触发 live 闭环](../../evidence/2026-11-01-platform-revocation-autotrigger-live.md)。原 APPROVED 依据：产品负责人 2026-11-01 按建议批准 §8 D1–D8（会话内「按建议批准」）；实现先合并（PR #25）；试运行证据见 [dryrun](../../evidence/2026-11-01-platform-revocation-autotrigger-dryrun.md)。
 
 ## 0. 一页结论
 
