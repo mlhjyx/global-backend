@@ -148,3 +148,43 @@
 - **Claim = 事实**：永远带来源 URL + 原文片段，建议 UI 提供「查看原文」
 - **ICP = 推断**（`HYPOTHESIS`）：建议 UI 标注「AI 生成，待回测/确认」
 - 联系方式发送前必须 `VALID`（邮箱验证状态在 `contactPoints[].status`）
+
+## 6. 模块与接口覆盖（给对接开发者的地图）
+
+接口的权威清单永远是运行中服务的 `/api/docs-json`（门户 `http://100.68.31.20:3000/api/portal` 同源）。这里回答的是另一个问题：**后端的每个功能模块，是否都有对应的 HTTP 接口**，以及没有接口的模块从哪里取数据。
+
+### 6.1 有完整 HTTP 接口的模块（按门户分域）
+
+| 后端模块（`apps/api/src/`） | 门户分域 | 主要接口 |
+| --- | --- | --- |
+| `company/` `claim/` | Companies · Claims | 提交官网、完整度、产品、事实审批/驳回/撤销、冲突裁决 |
+| `icp/` | ICP | ICP 生成/修订/激活、规则、回测、查询计划 |
+| `discovery/` | Discovery | 执行查询计划、发现 run 状态、规范化公司、联系人补全、禁联名单、数据源注册表 |
+| `lead/` | Leads | 六维评分、队列计数、Lead 详情/交付包、结果回写、开发信草稿、接受/拒绝、制裁复核 |
+| `report/` | Reports | 周报 CSV、周报反馈 |
+| `events/` | Events | 事件拉取 / ACK / ACK 状态 |
+| `compliance/` | Compliance | 删除请求受理与状态（Art.17） |
+| `site-builder/` | SiteBuilder | intake、向导档案、素材、知识库状态、构建、预算 quote、预览 |
+| `execution-budget/` | ExecutionBudget | 工作区技术报价（服务间） |
+| `platform-authority/` | PlatformAuthority | 技术报价、目标查询、撤销、fence-ack JWKS（服务间） |
+| `health/` | System | 存活/就绪/构建身份/时钟 |
+| `whoami/` `runtime/` | System | 身份与 scope、admitted clock |
+
+### 6.2 没有独立 HTTP 接口的模块（设计如此）
+
+数据不丢，只是不单独暴露接口——经由别的接口或后台工作流交付：
+
+| 模块 | 为什么没有接口 | 数据从哪来 |
+| --- | --- | --- |
+| `intent/` `signals/` | 意图信号是发现与评分流程的内部产物（`signal-ingest` / `intent-recompute` 由 worker 跑，`signal-query` 是内部读服务） | 信号随交付包一起给：`GET /leads/{id}/package` 的 `signals`；发现过程的中间状态看 `GET /discovery-runs/{id}` |
+| `sanctions/` | 名单刷新是后台工作流；复核在 Lead 流程里 | 命中与复核走 `POST /leads/{id}/sanctions-review`；数据源状态看 `GET /data-providers` |
+| `acquisition/` | 执行/投影内部层（source adapter、租户投影、执行包络），被工作流调用 | 结果落库后经 Discovery / Leads 接口读出 |
+| `ai-tasks/` `model-runtime/` `model-gateway/` | 模型路由是部署配置（env：`MODEL_ACQUISITION_*`），不是运行时 API | 运营侧改 env 后重建容器，见 RUNBOOK |
+| `auth/` | 守卫与令牌校验 | 身份与权限看 `GET /whoami` |
+| `relay/` `temporal/` `tools/` `durable-results/` `prisma/` `adapters/` `common/` `docs/` | 基础设施（Temporal 编排、事件 relay、工具预算、持久化） | 状态经健康探针与业务接口体现 |
+
+### 6.3 对接时最容易踩的三件事
+
+1. **工作区（租户）来自 JWT 的 `workspace` claim，接口不收租户参数**；跨租户一律 404。开发取 token 用 `ssh xin@100.68.31.20 /global/local-config/bin/api-token`（300 秒有效）。
+2. **长任务是异步的**：`POST /companies`、`POST /query-plans/{id}/execute`、`POST /icps/{id}/qualify`、建站构建都返回 202/201 + id，轮询对应状态接口，别同步等。
+3. **服务间通道不要给前端用**：ExecutionBudget / PlatformAuthority 两组用固定用途机器身份（mTLS/JWT），普通前端调用只会拿到 401/403。
