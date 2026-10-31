@@ -97,9 +97,10 @@ describe('OpenAPI authorization scope contract', () => {
         'x-required-scopes'
       ],
     ).toEqual(['compliance:manage']);
+    // G5/D2-B：禁联名单是 workspace 隔离的租户合规登记，只要求 compliance:manage。
     expect(
       operation(spec, 'get', '/api/v1/suppressions')['x-required-scopes'],
-    ).toEqual(['personal-data:read', 'compliance:manage']);
+    ).toEqual(['compliance:manage']);
     expect(
       operation(spec, 'get', '/api/v1/canonical-companies/{id}')[
         'x-required-scopes'
