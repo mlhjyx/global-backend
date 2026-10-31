@@ -164,7 +164,7 @@
 | `report/` | Reports | 周报 CSV、周报反馈 |
 | `events/` | Events | 事件拉取 / ACK / ACK 状态 |
 | `compliance/` | Compliance | 删除请求受理与状态（Art.17） |
-| `site-builder/` | SiteBuilder | intake、向导档案、素材、知识库状态、构建、预算 quote、预览 |
+| `site-builder/` | SiteBuilder | intake、向导档案、素材、知识库状态、构建、预算 quote；预览页 `GET /api/v1/preview/{slug}`（含静态资源）返回渲染后的 HTML，**不在 OpenAPI 里**（`@ApiExcludeController`，给 iframe 用），预览地址从 `GET /site-builder/sites` 的响应里取 |
 | `execution-budget/` | ExecutionBudget | 工作区技术报价（服务间） |
 | `platform-authority/` | PlatformAuthority | 技术报价、目标查询、撤销、fence-ack JWKS（服务间） |
 | `health/` | System | 存活/就绪/构建身份/时钟 |
