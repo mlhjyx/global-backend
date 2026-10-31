@@ -103,6 +103,10 @@ Bundle 内的 provenance 枚举、actor、SHA、时间和 URL 都是 documentary
 - Copy Sonnet recovery v19 零调用停止记录：[stopped evidence](site-builder/m1-g-copy-sonnet-recovery-v19-zero-call-preflight-stopped-evidence.json)。它只证明 #387 后的单次 preflight 已通过 ToolBroker 读取 OpenOx 价格，但在 post-create New API readback 发生控制面不可用；token #26 已由 cleanup 禁用，route #20、v16 #24 与 v17 #25 仍 disabled，且无成功 artifact、模型请求、模型 wire 或模型费用。它不证明 capability、质量、promotion 或 production route adoption。
 - Copy Sonnet recovery v13 历史 create-only 交付：[实施/TDD 记录](../implementation-records/copy-sonnet-recovery-v13-create-only-tdd.md)、[manifest](site-builder/m1-g-copy-sonnet-recovery-manifest-v13.json)与 [runtime binding](site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v13.json)；tracked artifact 不回写后续私有 stopped run，且不能作为 v14 authorization 或执行输入。
 
+## Platform authority
+
+- [2026-11-01 平台准入 v2 与撤销 fence 实测](2026-11-01-platform-admission-v2-and-revocation-fence.md)：平台 schedule 手动运行经 v2 拿到真实 `PLATFORM_GRANT`（jti `2401bb26…`），并用它完成撤销签发 → 投递 → fence 提交 → ACK 验签（`ed59f901…`，generation 1→2）；途中修复平台 worker 信任根与 gain-saas Grant claims 两处缺口。不生成 RuntimeEvidence，schedule 仍 paused，自动撤销触发未接线。
+
 ## Production dependency audit snapshots
 
 - [2026-09-20 baseline refresh](security/20260920-baseline-refresh.json)：冻结的官方生产依赖审计及精确锁文件新鲜度前后回执，不作为运行或发布证明。

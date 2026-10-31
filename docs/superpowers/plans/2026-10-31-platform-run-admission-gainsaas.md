@@ -1,7 +1,7 @@
 # 平台运行准入改走 v2：权威方 gain-saas 持久签发
 
-> 生命周期：`APPROVED`
-> 生命周期依据：产品负责人 2026-10-31 在会话内批准施工（「批准施工」），金额上限按 policy matrix 原值；同日重开 PRD4-D2 并把 R4 平台权威迁到 gain-saas（P7/P8 已完成）。本文取代 2026-10-10《平台 schedule 准入与平台写入者授权》中随 D2 冻结而关闭的「方案 A」。
+> 生命周期：`CLOSED`
+> 生命周期依据：CLOSED 2026-11-01 —— 按本文施工完毕（gain-saas #21/#23、引擎 #704/#706），镜像 `7cea82b9`/`5f661ac0` 已上线；手动 acq-sweep 真实准入与撤销 fence 实测通过，证据见 [2026-11-01 平台准入 v2 与撤销 fence 实测](../../evidence/2026-11-01-platform-admission-v2-and-revocation-fence.md)。原 APPROVED 依据：产品负责人 2026-10-31 在会话内批准施工（「批准施工」），金额上限按 policy matrix 原值；同日重开 PRD4-D2 并把 R4 平台权威迁到 gain-saas（P7/P8 已完成）。本文取代 2026-10-10《平台 schedule 准入与平台写入者授权》中随 D2 冻结而关闭的「方案 A」。
 
 ## 0. 现状（2026-10-31 核实，事实基线 `origin/main@527c70ef`）
 
