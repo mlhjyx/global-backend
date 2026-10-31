@@ -153,4 +153,6 @@ Goal（业务目标：如进入德国市场）
 2. **商机域**（SaaS 侧）：Opportunity 单一聚合（CANDIDATE→QGO→SAO→CLOSED），附属记录对象 QualificationSnapshot（证据快照防漂移）、SalesAcceptance（owner/stage/nextStep/dueAt/reason 五字段必填）、CommercialOutcome+Verification（验证来源三分）。结构化拒绝原因码回流本仓 backtest。Touchpoint append-only 单表、归因不物化（First/Last Touch=查询视图）；多触点归因门槛（月 QGO≥30、解析率≥80%、标签≥1 季度、渠道≥3）达标前不上。
 3. **Pack 机制**：Pack=版本化 jsonb 文档（5 表：pack/version/dependency/binding/snapshot）+ zod 校验 + 纯函数解析（禁止项单向传播）+ 不可变 ResolvedStrategySnapshot；本仓 taxonomy/crosswalks 即 Data Source Pack 运行时、source_policy 即 Compliance Pack 执行面；Motion=横切默认值（第一刀：六维权重外部化）；M2 前 Studio=git；Marketplace 不设计；三交付模式三机制（actor 双字段/责任矩阵数据化/审批路由读矩阵）尽早长进骨架。
 4. **前端 IA**：导航分期点亮（M0-M1 四项：今日/客户/企业/设置；终态含一级「机会」；交付包另提「今日/研究/战役/内容/互动/增长」六项方案，随 A 定夺）；AIEnvelope 类型化产物信封（objects/actions/evidence/cost/risks），对象持久化、聊天只是索引；自动化等级 MVP 收敛 L0/L1/L2 三档；首次价值=「30 分钟拿到第一批可解释推荐线索」（现有端点已全部支撑）；不可裁红线：证据可回溯/L2 审批闸/未确认事实阻断/🔴个人数据遮罩。
+
+> 2026-10-31 注：`PRD4-D16`（2026-10-11）拍板个人数据源保持 ENABLED（`decision_maker`/`companies_house`/`inpi_rne`/`smtp_self`），风险由产品负责人承担——「个人数据遮罩」指前端展示与导出侧的红线，不是采集侧开关；PRD 4.0 L0/L2 中「不探 SMTP、不猜邮箱」的旧表述以 D16 为准。
 5. **市场研究域**（本仓可承接，R3 可选提前）：最小 4 层（全球筛选/贸易/买家地图/风险），90% 复用已建件；MarketScorecard 9 维确定性聚合；Trade Intelligence 起步=Comtrade/Census/Eurostat 国家级免费统计；研究→ICP 一键草案+溯源+改版事件。

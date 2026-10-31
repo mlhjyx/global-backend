@@ -7,6 +7,9 @@
 > 内容 Owner：`OWN-SAAS-FE`
 > 后端合同 Owner：按 [核心对象登记](../governance/core-object-register.md)分域
 
+> **2026-10-31 现状注记**：产品前端已迁到 [gain-saas](https://github.com/mlhjyx/gain-saas)（本机 `127.0.0.1:4020`，PRD 见该仓 `docs/prd/phase-1-01-04.md`）。本目录描述的 GrowthOS 页面/契约是 2026-08 的基线，只保留作历史对照；GrowthOS 目前仅承担 R4 平台权威，P8 退役。新前端工作以 gain-saas 仓为准。
+
+
 ## 1. 当前边界
 
 本仓 code-first OpenAPI 与 event schema 是本仓 HTTP/事件合同的机器真值；身份、Workspace 控制面、完整 SaaS UI 和 Campaign/Conversation/Opportunity 等由外部 SaaS 拥有。本文件同时区分已观察的 GrowthOS local source 与批准的 target contract，不能把两者合并成 as-built release claim。
