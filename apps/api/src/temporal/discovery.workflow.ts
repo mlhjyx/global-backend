@@ -47,6 +47,8 @@ export const DISCOVERY_QUERY_FAILURE_STOP_PATCH = 'discovery-query-failure-stop-
  * batch (every query in it lost a provider) instead of a single query.
  */
 export const DISCOVERY_QUERY_BATCH_PATCH = 'discovery-query-batch-v1';
+/** Named-contact discovery after the signals stage (fit=match companies, bounded, best-effort). */
+export const DISCOVERY_RUN_CONTACTS_PATCH = 'discovery-run-contacts-v1';
 const DISCOVERY_QUERY_BATCH = 2;
 export const DISCOVERY_QUERY_RECEIPT_MODE = QUERY_RECEIPT_MODE;
 const EXECUTION_CONTRACT_VERSION = 2 as const;
@@ -568,6 +570,35 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       /* 信号富集是尽力而为的富化，失败不影响 run 状态 */
     }
 
+    // 具名联系人发现（P0：run 内接线）：对 fit=match 的公司跑已启用的联系人适配器，
+    // 无 lawful basis 时活动自身 fail-closed 返回 skipped；best-effort，失败不影响 run 状态。
+    let contacts:
+      | {
+          companies: number;
+          people: number;
+          emails: number;
+          phones: number;
+          skipped: boolean;
+          reason?: string;
+          failed?: number;
+          budgetTruncated: boolean;
+        }
+      | undefined;
+    if (patched(DISCOVERY_RUN_CONTACTS_PATCH)) {
+      stage = 'contacts';
+      try {
+        contacts = await signalActs.discoverRunContacts({
+          workspaceId,
+          runId,
+          icpId: input.icpId,
+          ...authorityArgs,
+        });
+      } catch (error) {
+        if (isExecutionControlError(error)) throw error;
+        /* 联系人发现是尽力而为的补全，失败不影响 run 状态 */
+      }
+    }
+
     // 从 ICP 短名单自动注册网站变更监控（#4 loop）：对本 run ICP fit=match 公司建 web_watch，交给 intentSweep 持续盯变更。
     // best-effort（每家一次 sitemap 探测，慢）→ 长活动；失败不影响 run 状态。
     let watches: {
@@ -608,6 +639,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       discoveryBudgetTruncated ||
       enrich.budgetTruncated ||
       (signals.budgetTruncated ?? false) ||
+      (contacts?.budgetTruncated ?? false) ||
       (websiteProfile.budgetTruncated ?? false);
     // G3 5.5：按公司跳过的被拒主体（tombstone/SUPPRESSED/失效）意味着漏了活儿 → 至少 PARTIAL。
     const skippedSubjects =
@@ -695,6 +727,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         },
         enrich: { matched: enrich.matched, of: enrich.enriched, provider: enrich.provider },
         signals: { matched: signals.matched, of: signals.enriched, provider: signals.provider },
+        ...(contacts ? { contacts } : {}),
         watches: { registered: watches.registered, of: watches.candidates },
         patentEnqueue: { enqueued: patentEnqueue.enqueued, of: patentEnqueue.candidates },
         queries: queries.length,

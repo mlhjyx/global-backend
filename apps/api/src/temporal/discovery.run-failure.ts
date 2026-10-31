@@ -12,6 +12,7 @@ export type DiscoveryRunStage =
   | 'fit'
   | 'enrich'
   | 'signals'
+  | 'contacts'
   | 'watches'
   | 'patentEnqueue'
   | 'finalize';

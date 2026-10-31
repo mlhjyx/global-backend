@@ -248,6 +248,7 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
     usageLedger: { create: async () => ({}) },
   };
   const prisma = {
+    dataProvider: { findUnique: async () => null },
     sourcePolicy: {
       findMany: async () => [
         {
@@ -639,6 +640,25 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
       duplicateCount: 0,
       provider: null,
       queryReceipt: { providers: [], usageQuantity: 0 },
+    });
+  });
+
+  it("discoverRunContacts skips fail-closed when no deployment lawful basis is configured", async () => {
+    const acts = createDiscoveryActivities(makeDeps([]));
+
+    const result = await acts.discoverRunContacts({
+      ...discoveryArgs("contacts-no-basis", {}),
+      icpId: "icp-1",
+    });
+
+    expect(result).toEqual({
+      companies: 0,
+      people: 0,
+      emails: 0,
+      phones: 0,
+      skipped: true,
+      reason: "no_lawful_basis_configured",
+      budgetTruncated: false,
     });
   });
 

@@ -62,10 +62,15 @@ describe('suppression writer/action linearization topology', () => {
   });
 
   it('manual contact/email paths authorize each candidate and backlog has no network-processing path', () => {
+    // Contact discovery fan-out moved into the shared core (contact-discovery-core.ts) so the
+    // discovery run and the HTTP endpoint use the same suppression gate; keep asserting both
+    // halves rather than one file.
     const service = read('apps/api/src/discovery/discovery.service.ts');
+    const contactCore = read('apps/api/src/discovery/contact-discovery-core.ts');
     const backlog = read('apps/api/src/temporal/backlog.activities.ts');
     expect(service).toContain('contactMayUseExternalProcessing');
-    expect(service.match(/companyMayUseExternalProcessing/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+    expect(service.match(/companyMayUseExternalProcessing/g)?.length ?? 0).toBeGreaterThanOrEqual(1);
+    expect(contactCore).toContain('companyMayUseExternalProcessing');
     expect(backlog).toContain('EXECUTION_BUDGET_PLATFORM_AUTHORITY_REQUIRED');
     expect(backlog).not.toContain('mayUseExternalProcessing');
   });
