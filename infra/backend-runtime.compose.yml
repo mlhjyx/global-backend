@@ -122,6 +122,8 @@ services:
       MACHINE_BOOTSTRAP_KEY_FILE: /run/secrets/machine/client-key.pem
       TEMPORAL_TLS_CA_FILE: /run/secrets/machine/temporal-ca.pem
       PLATFORM_CAPABILITY_CA_FILE: /run/secrets/machine/capability-ca.pem
+      # 平台运行准入 v2：权威方（gain-saas）的平台 Grant 签发端点（mTLS 18448）
+      PLATFORM_GRANT_ENDPOINT: https://172.20.0.1:18448/api/internal/v1/platform-schedule-grants
     command: ["platform-worker"]
     volumes:
       - type: bind

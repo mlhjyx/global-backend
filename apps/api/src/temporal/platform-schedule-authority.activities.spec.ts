@@ -1,7 +1,6 @@
 import { ApplicationFailure } from '@temporalio/activity';
 import { describe, expect, it, vi } from 'vitest';
 import { ExecutionBudgetGrantError } from '../execution-budget/execution-budget-authority.types';
-import type { BudgetStore } from '../tools/budget-store';
 import {
   PLATFORM_SCHEDULE_AUTHORITY_CONTRACT_VERSION,
   PLATFORM_SCHEDULE_AUTHORITY_SCOPES,
@@ -35,15 +34,9 @@ describe('platform schedule authority admission activity', () => {
   });
   it('opens one exact platform run without accepting a caller cap or workspace', async () => {
     const scope = PLATFORM_SCHEDULE_AUTHORITY_SCOPES['acq-sweep'];
-    const admitPlatformRun = vi.fn(async () => ({
-      accountId: '89528818-13ab-4a46-9dfd-6fbcdba6943e',
-      authorityId: AUTHORITY_ID,
-      authorizedCapMicrousd: 2_000_000n,
-      generation: 1,
-      replay: false,
-    }));
+    const admit = vi.fn(async () => ({ authorityId: AUTHORITY_ID, replay: false }));
     const activities = createPlatformScheduleAuthorityActivities({
-      budgetStore: { admitPlatformRun } as unknown as BudgetStore,
+      platformAdmission: { admit },
     });
 
     const binding = await activities.admitPlatformSchedule({
@@ -52,10 +45,10 @@ describe('platform schedule authority admission activity', () => {
       workflowRunId: 'workflow-run-1',
     });
 
-    expect(admitPlatformRun).toHaveBeenCalledWith({
-      ...scope,
+    expect(admit).toHaveBeenCalledWith({
+      executionScope: scope,
+      workflowId: '',
       workflowRunId: 'workflow-run-1',
-      accountKey: `platform:${scope.requestSha256}:workflow-run-1`,
     });
     expect(binding).toMatchObject({
       authorityId: AUTHORITY_ID,
@@ -75,11 +68,11 @@ describe('platform schedule authority admission activity', () => {
     'EXECUTION_BUDGET_AUTHORITY_EXHAUSTED',
     'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
   ] as const)('parks %s nonretryably without leaking persistence details', async (code) => {
-    const admitPlatformRun = vi.fn(async () => {
+    const admit = vi.fn(async () => {
       throw new ExecutionBudgetGrantError(code);
     });
     const activities = createPlatformScheduleAuthorityActivities({
-      budgetStore: { admitPlatformRun } as unknown as BudgetStore,
+      platformAdmission: { admit },
     });
 
     await expect(activities.admitPlatformSchedule({
@@ -87,6 +80,6 @@ describe('platform schedule authority admission activity', () => {
       executionScope: PLATFORM_SCHEDULE_AUTHORITY_SCOPES['intent-sweep'],
       workflowRunId: 'workflow-run-1',
     })).rejects.toEqual(ApplicationFailure.nonRetryable(code, code));
-    expect(admitPlatformRun).toHaveBeenCalledOnce();
+    expect(admit).toHaveBeenCalledOnce();
   });
 });

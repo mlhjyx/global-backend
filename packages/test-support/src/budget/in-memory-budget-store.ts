@@ -96,7 +96,6 @@ export class InMemoryBudgetStoreAdapter {
   constructor(readonly ledger = new BudgetLedger()) {}
 
   async open(): Promise<never> { throw new Error('EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE'); }
-  async admitPlatformRun(): Promise<never> { throw new Error('EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE'); }
   async attestAuthorized(): Promise<never> { throw new Error('EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE'); }
 
   async reserve(input: {

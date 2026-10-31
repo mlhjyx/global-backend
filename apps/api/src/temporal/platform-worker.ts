@@ -33,6 +33,13 @@ import { startWorkerDependencyHeartbeat } from "../runtime/worker-dependency-hea
 import { waitForWorkerDependencyAdmission } from "../runtime/worker-dependency-admission";
 import { waitForWorkerQueueAdmission } from "../runtime/worker-queue-admission";
 import { PostgresBudgetStore } from "../tools/budget-store";
+import { ExecutionBudgetGrantVerifier } from "../execution-budget/execution-budget-grant.verifier";
+import { PlatformExecutionBudgetAuthorityIngestionService } from "../execution-budget/platform-authority-ingestion.service";
+import { loadVerifiedPlatformAuthorityPolicyAsset } from "../platform-authority/platform-authority-policy-asset";
+import { PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 } from "../platform-authority/platform-execution-contract";
+import { PlatformExecutionTechnicalQuoteService } from "../platform-authority/platform-execution-technical-quote";
+import { PlatformGrantClient } from "./platform-grant.client";
+import { PlatformGrantAdmission } from "./platform-grant-admission";
 import {
   buildToolBroker,
   sourcePolicyReaderFrom,
@@ -180,6 +187,20 @@ async function main(): Promise<void> {
   );
   const sanctionsScreening = new SanctionsScreeningService(prisma);
   await sanctionsScreening.rebuildIndex();
+  // 平台运行准入 v2：quote → 权威（gain-saas）签发 Grant → 验签并 ingest+admit。
+  // v1 准入已对平台写入者 REVOKE EXECUTE，这里不再回退到它。
+  const quoteService = new PlatformExecutionTechnicalQuoteService({
+    policyAsset: loadVerifiedPlatformAuthorityPolicyAsset(),
+    technicalContract: PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1,
+  });
+  const platformAdmission = new PlatformGrantAdmission({
+    quoteService,
+    ingestion: new PlatformExecutionBudgetAuthorityIngestionService(
+      new ExecutionBudgetGrantVerifier(process.env),
+      repository,
+    ),
+    client: new PlatformGrantClient(process.env),
+  });
   const machine = await createRuntimeMachineTokenClient(
     composition.profile,
     identity.artifact_digest.replace(/^sha256:/, ""),
@@ -198,7 +219,7 @@ async function main(): Promise<void> {
       failureConverterPath: require.resolve("./diagnostic-failure-converter"),
     },
     activities: {
-      ...createPlatformScheduleAuthorityActivities({ budgetStore }),
+      ...createPlatformScheduleAuthorityActivities({ platformAdmission }),
       ...createAcquisitionActivities({
         prisma,
         registry: buildSourceAdapterRegistry(broker),

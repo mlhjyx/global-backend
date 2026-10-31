@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "platform-writer-table-privileges/v1",
+  "role": "execution_budget_platform_writer",
+  "schema": "public",
+  "tables": {
+    "monitored_source": ["SELECT", "UPDATE"],
+    "patent_cache_refresh_audit": ["SELECT", "UPDATE"],
+    "patent_inventor_cache": ["DELETE", "INSERT", "SELECT", "UPDATE"],
+    "patent_inventor_tombstone": ["SELECT"],
+    "patent_lookup_request": ["SELECT", "UPDATE"],
+    "sanctions_entity": ["INSERT", "SELECT", "UPDATE"],
+    "sanctions_source": ["SELECT", "UPDATE"],
+    "source_entity": ["INSERT", "SELECT", "UPDATE"],
+    "source_entity_change": ["INSERT"],
+    "source_fetch": ["SELECT", "UPDATE"]
+  }
+}
