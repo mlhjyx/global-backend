@@ -9,6 +9,7 @@ import { companyMayUseExternalProcessing } from './company-suppression-gate';
 import { type BudgetStore } from '../tools/budget-store';
 import { isSyntheticDiscoveryProvenance } from './evidence-license';
 import type { ExecutionBudgetBinding } from '../execution-budget/execution-budget-authority.service';
+import type { ContactDiscoveryBudgetGuard } from '../execution-budget/contact-discovery-budget';
 import { ExecutionControlError, isExecutionControlError } from '../execution-budget/execution-control-error';
 import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
@@ -45,6 +46,12 @@ export interface ContactDiscoveryCoreInput {
   /** Already stamped with actor + timestamp by the caller (HTTP path or run activity). */
   lawfulBasis: LawfulBasis;
   binding: ContactDiscoveryCoreBinding;
+  /**
+   * D7: the contact stage's own sub-budget (derived `contact.discovery` account). When the stage
+   * has spent it, no further adapter starts for this company. The HTTP path omits it and stays
+   * bounded by its own grant account alone.
+   */
+  contactBudget?: ContactDiscoveryBudgetGuard;
 }
 
 /**
@@ -133,7 +140,12 @@ export async function discoverContactsCore(
       scopeKey: binding.scopeKey,
       accountKey,
     });
+    let budgetTruncated = false;
     for (const adapter of loaded.adapters) {
+        if (input.contactBudget?.exhausted()) {
+          budgetTruncated = true;
+          break;
+        }
         try {
           const authorized = await authorizeExternalAction();
           if (!authorized) break;
@@ -185,7 +197,9 @@ export async function discoverContactsCore(
           ) throw err;
           console.warn(`[discoverContacts] adapter ${adapter.key} failed for ${input.companyId}: ${String(err).slice(0, 150)}`);
         }
-        if ((await budgets.status({ workspaceId: binding.scopeKey, accountKey })).exhausted) break;
+        const runStatus = await budgets.status({ workspaceId: binding.scopeKey, accountKey });
+        input.contactBudget?.observe(runStatus.remainingMicrousd);
+        if (runStatus.exhausted) break;
     }
 
     const adapterDiagnostics: Record<string, number> = {};
@@ -195,8 +209,8 @@ export async function discoverContactsCore(
       }
     }
 
-    return deps.prisma.withWorkspace(input.workspaceId, async (tx) => {
-      const persisted = await applyDomainAckConsumerTransactions({
+    const persisted = await deps.prisma.withWorkspace(input.workspaceId, async (tx) => {
+      const acknowledged = await applyDomainAckConsumerTransactions({
         transaction: tx,
         acknowledgements: perAdapter.flatMap((adapterResult) =>
           adapterResult.durableReceipts.map(({ producerId, receipt }) => ({
@@ -255,8 +269,14 @@ export async function discoverContactsCore(
         }),
       });
       return {
-        ...persisted.value,
+        ...acknowledged.value,
         ...(Object.keys(adapterDiagnostics).length ? { diagnostics: adapterDiagnostics } : {}),
       };
     });
+
+    // Only the run path carries a sub-budget; the HTTP response shape stays as it was.
+    return {
+      ...persisted,
+      ...(input.contactBudget ? { budgetTruncated } : {}),
+    };
   }

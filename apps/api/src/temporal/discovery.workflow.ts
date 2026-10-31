@@ -583,6 +583,25 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
           failed?: number;
           budgetTruncated: boolean;
           diagnostics?: Record<string, number>;
+          /** D7: derived contact-stage sub-account summary (microusd as decimal strings). */
+          contactBudget?: {
+            accountKey: string;
+            capMicrousd: string;
+            spentMicrousd: string;
+            exhausted: boolean;
+          };
+          /** M3: automated email completion totals. */
+          emailGuess?: {
+            enabled: true;
+            emaillessContacts: number;
+            attempted: number;
+            probes: number;
+            persisted: number;
+            verified: number;
+            risky: number;
+            blocked: number;
+            failed: number;
+          };
         }
       | undefined;
     if (patched(DISCOVERY_RUN_CONTACTS_PATCH)) {
