@@ -66,4 +66,6 @@ export const MAX_DECISION_MAKER_PAGES = 4 as const;
 export const MAX_SOCIAL_PROFILE_FETCHES = 4 as const;
 export const MAX_EMAIL_GUESS_CONTACTS = 25 as const;
 export const MAX_EMAIL_PROBE_CANDIDATES = 8 as const;
+/** 发现 run 的邮箱补全：每公司 ≤6 次 SMTP 探测（D5 §六），跨该公司全部联系人共享。 */
+export const MAX_RUN_EMAIL_PROBES_PER_COMPANY = 6 as const;
 export const MAX_EMAIL_VERIFY_PHYSICAL_CALLS_PER_TARGET = 1 as const;

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { guessEmailsForRunCompany } from './contact-stage-email-guess';
 import { EmailGuesser, type GuessResult } from './email-guesser';
 import type { EmailVerdict, EmailVerificationAdapter } from './provider-contract';
-import { MAX_RUN_EMAIL_PROBES_PER_COMPANY } from '../execution-budget/contact-discovery-budget';
+import { MAX_RUN_EMAIL_PROBES_PER_COMPANY } from './execution-envelope';
 import { validateDomainAckRawIdentity } from '../durable-results/domain-ack';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
@@ -207,7 +207,6 @@ describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', ()
         workspaceId: WS,
         runId: RUN_ID,
         accountKey: ACCOUNT_KEY,
-        companyId: 'c1',
         domain: 'acme.de',
         contacts: [
           contact('ct1', 'Hans Herold'),
@@ -237,7 +236,6 @@ describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', ()
         workspaceId: WS,
         runId: RUN_ID,
         accountKey: ACCOUNT_KEY,
-        companyId: 'c1',
         domain: 'acme.de',
         contacts: [contact('ct1', 'Hans Herold')],
         lawfulBasis: GLOBAL_LIA,
@@ -261,7 +259,6 @@ describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', ()
         workspaceId: WS,
         runId: RUN_ID,
         accountKey: ACCOUNT_KEY,
-        companyId: 'c1',
         domain: 'acme.de',
         contacts: [contact('ct1', 'Hans Herold')],
         lawfulBasis: GLOBAL_LIA,
@@ -291,7 +288,6 @@ describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', ()
         workspaceId: WS,
         runId: RUN_ID,
         accountKey: ACCOUNT_KEY,
-        companyId: 'c1',
         domain: 'acme.de',
         contacts: [contact('ct1', 'Hans Herold')],
         lawfulBasis: GLOBAL_LIA,
@@ -323,7 +319,6 @@ describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', ()
         workspaceId: WS,
         runId: RUN_ID,
         accountKey: ACCOUNT_KEY,
-        companyId: 'c1',
         domain: 'acme.de',
         contacts: [contact('ct1', 'Hans Herold')],
         lawfulBasis: GLOBAL_LIA,
@@ -351,7 +346,6 @@ describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', ()
         workspaceId: WS,
         runId: RUN_ID,
         accountKey: ACCOUNT_KEY,
-        companyId: 'c1',
         domain: 'acme.de',
         contacts: [contact('ct1', 'Hans Herold')],
         lawfulBasis: GLOBAL_LIA,
@@ -363,6 +357,39 @@ describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', ()
     expect(calls).toHaveLength(0);
     expect(result.blocked).toBe(1);
     expect(result.probes).toBe(0);
+  });
+
+  it('单个联系人的普通错误不丢已完成的猜测：失败计数、其余联系人照常落库', async () => {
+    const { deps, contactById, upsertedPoints } = makeDeps();
+    contactById.set('ct1', contact('ct1', 'Hans Herold'));
+    contactById.set('ct2', contact('ct2', 'Sabine Vogt'));
+    const verifier: EmailVerificationAdapter = {
+      key: 'smtp_self',
+      verifyEmail: vi.fn(async (email: string): Promise<EmailVerdict> => {
+        if (email.includes('sabine')) throw new Error('smtp blew up');
+        return RISKY_VERDICT;
+      }),
+    };
+
+    const result = await guessEmailsForRunCompany(
+      deps as never,
+      {
+        workspaceId: WS,
+        runId: RUN_ID,
+        accountKey: ACCOUNT_KEY,
+        domain: 'acme.de',
+        contacts: [contact('ct1', 'Hans Herold'), contact('ct2', 'Sabine Vogt')],
+        lawfulBasis: GLOBAL_LIA,
+        maxProbes: MAX_RUN_EMAIL_PROBES_PER_COMPANY,
+        verifier,
+      },
+    );
+
+    expect(result.failed).toBe(1);
+    expect(result.attempted).toBe(1);
+    expect(result.persisted).toBe(1);
+    expect(upsertedPoints).toHaveLength(1);
+    expect(upsertedPoints[0]!.contactId).toBe('ct1');
   });
 
   it('SMTP 回执的 domainAckKey 通过 domain-ack 身份校验（原始键不得含 PII 提示词）', async () => {
@@ -392,7 +419,6 @@ describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', ()
         workspaceId: WS,
         runId: RUN_ID,
         accountKey: ACCOUNT_KEY,
-        companyId: 'c1',
         domain: 'acme.de',
         contacts: [contact('ct1', 'Hans Herold')],
         lawfulBasis: GLOBAL_LIA,
@@ -436,7 +462,6 @@ describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', ()
           workspaceId: WS,
           runId: RUN_ID,
           accountKey: ACCOUNT_KEY,
-          companyId: 'c1',
           domain: 'acme.de',
           contacts: [contact('ct1', 'Hans Herold')],
           lawfulBasis: GLOBAL_LIA,
@@ -463,7 +488,6 @@ describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', ()
         workspaceId: WS,
         runId: RUN_ID,
         accountKey: ACCOUNT_KEY,
-        companyId: 'c1',
         domain: 'acme.de',
         contacts: [
           contact('ct1', 'Hans Herold', [

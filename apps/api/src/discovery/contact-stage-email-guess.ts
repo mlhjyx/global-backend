@@ -25,6 +25,7 @@ import { EmailGuesser, GuessResult } from './email-guesser';
 import {
   buildGuessTargets,
   DEFAULT_MAX_GUESS_CONTACTS,
+  MAX_EMAIL_PROBE_CANDIDATES,
 } from './email-guess-targets';
 import {
   persistGuessedEmail,
@@ -33,9 +34,11 @@ import {
 import { contactMayUseExternalProcessing } from './company-suppression-gate';
 import { canonicalizeSuppressionValues } from './suppression-value';
 import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';
-import { ExecutionControlError } from '../execution-budget/execution-control-error';
-import { MAX_EMAIL_PROBE_CANDIDATES } from './execution-envelope';
-import { MAX_RUN_EMAIL_PROBES_PER_COMPANY } from '../execution-budget/contact-discovery-budget';
+import {
+  ExecutionControlError,
+  isExecutionControlError,
+} from '../execution-budget/execution-control-error';
+import { MAX_RUN_EMAIL_PROBES_PER_COMPANY } from './execution-envelope';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 
 const SMTP_PROBE_PRODUCER = 'smtp.rcpt_probe' as const;
@@ -51,7 +54,6 @@ export interface RunContactEmailGuessInput {
   runId: string;
   /** The run's ledger account (ToolBroker attributes every physical SMTP probe to it). */
   accountKey: string;
-  companyId: string;
   domain: string;
   contacts: readonly RunEmailGuessContact[];
   lawfulBasis: LawfulBasis;
@@ -68,6 +70,8 @@ export interface RunContactEmailGuessResult {
   verified: number;
   risky: number;
   blocked: number;
+  /** Contacts whose guess threw an ordinary error (one contact never aborts the company). */
+  failed: number;
 }
 
 interface PendingGuess {
@@ -94,6 +98,7 @@ export async function guessEmailsForRunCompany(
     verified: 0,
     risky: 0,
     blocked: 0,
+    failed: 0,
   };
   if (!targets.emailless.length || !Number.isSafeInteger(allowance) || allowance < 1) {
     return summary;
@@ -123,33 +128,46 @@ export async function guessEmailsForRunCompany(
       continue;
     }
     const receipts: DurableExecutionReceipt[] = [];
-    const result = await guesser.guess(
-      { fullName: target.fullName, domain: input.domain, knownSamples: targets.knownSamples },
-      {
-        workspaceId: input.workspaceId,
-        // ToolBroker 的预算/Trace 归属：run 的账本账户（联系人子账户按窗口差值隔离计量）。
-        runId: input.accountKey,
-        lawfulBasis: input.lawfulBasis,
-        actor: `discovery-run:${input.runId}`,
-        // 自动路径不传 allowPersonalWithoutBasis（红线）。
-        maxProbe: Math.min(remaining, MAX_EMAIL_PROBE_CANDIDATES),
-        suppressedEmails,
-        authorizeCandidate: (email) =>
-          deps.prisma.withWorkspace(input.workspaceId, (tx) =>
-            contactMayUseExternalProcessing(tx, {
-              workspaceId: input.workspaceId,
-              contactId: target.contactId,
-              email,
-            }),
-          ),
-        onDurableReceipt: (producerId, receipt) => {
-          if (producerId !== SMTP_PROBE_PRODUCER) {
-            throw new ExecutionControlError('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
-          }
-          receipts.push(receipt);
+    let result: GuessResult;
+    try {
+      result = await guesser.guess(
+        { fullName: target.fullName, domain: input.domain, knownSamples: targets.knownSamples },
+        {
+          workspaceId: input.workspaceId,
+          // ToolBroker 的预算/Trace 归属：run 的账本账户（联系人子账户按窗口差值隔离计量）。
+          runId: input.accountKey,
+          lawfulBasis: input.lawfulBasis,
+          actor: `discovery-run:${input.runId}`,
+          // 自动路径不传 allowPersonalWithoutBasis（红线）。
+          maxProbe: Math.min(remaining, MAX_EMAIL_PROBE_CANDIDATES),
+          suppressedEmails,
+          authorizeCandidate: (email) =>
+            deps.prisma.withWorkspace(input.workspaceId, (tx) =>
+              contactMayUseExternalProcessing(tx, {
+                workspaceId: input.workspaceId,
+                contactId: target.contactId,
+                email,
+              }),
+            ),
+          onDurableReceipt: (producerId, receipt) => {
+            if (producerId !== SMTP_PROBE_PRODUCER) {
+              throw new ExecutionControlError('DOMAIN_ACK_CONSUMER_BINDING_MISSING');
+            }
+            receipts.push(receipt);
+          },
         },
-      },
-    );
+      );
+    } catch (error) {
+      // One contact's failure must not discard the contacts already guessed (and their receipts);
+      // control errors stay fail-closed and propagate to the caller.
+      if (isExecutionControlError(error)) throw error;
+      summary.failed += 1;
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[contact-stage-email-guess] contact ${target.contactId} failed: ${message.slice(0, 150)}`,
+      );
+      continue;
+    }
     summary.attempted += 1;
     summary.probes += result.triedCount;
     if (result.status === 'blocked') summary.blocked += 1;

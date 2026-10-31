@@ -4,7 +4,6 @@ import {
   CONTACT_DISCOVERY_PER_COMPANY_CAP_MICROUSD,
   CONTACT_DISCOVERY_RUN_CAP_MICROUSD,
   DEFAULT_CONTACT_DISCOVERY_COMPANIES,
-  MAX_RUN_EMAIL_PROBES_PER_COMPANY,
   contactDiscoveryCapMicrousd,
   createContactDiscoverySubBudget,
   deriveContactDiscoveryAccountKey,
@@ -47,9 +46,6 @@ describe('contact.discovery 预算账户派生（D7）', () => {
     expect(() => contactDiscoveryCapMicrousd(Number.NaN)).toThrow(TypeError);
   });
 
-  it('每公司 ≤6 次 SMTP 探测（D5 §六；MAX_EMAIL_PROBE_CANDIDATES=8 是单次调用上界）', () => {
-    expect(MAX_RUN_EMAIL_PROBES_PER_COMPANY).toBe(6);
-  });
 });
 
 describe('联系人子账户的窗口计量', () => {
@@ -84,7 +80,7 @@ describe('联系人子账户的窗口计量', () => {
     expect(budget.exhausted()).toBe(false);
   });
 
-  it('剩余额回升（预留释放）不会把已花费算成负数', () => {
+  it('剩余额回升（预留释放/低结算）不会抹掉已观察到的花费（单调高水位）', () => {
     const budget = createContactDiscoverySubBudget({
       runId: 'run-1',
       companyCount: 8,
@@ -92,17 +88,27 @@ describe('联系人子账户的窗口计量', () => {
     });
     budget.observe(900_000n);
     expect(budget.spentMicrousd).toBe(100_000n);
+    // 阶段开始前持有的预留释放 → 剩余额升回起点之上；已观察的花费保持，不重开整份额度。
     budget.observe(1_200_000n);
-    expect(budget.spentMicrousd).toBe(0n);
+    expect(budget.spentMicrousd).toBe(100_000n);
+    budget.observe(800_000n);
+    expect(budget.spentMicrousd).toBe(200_000n);
   });
 
-  it('非法起点（负数）拒绝', () => {
+  it('非法起点（负数/超出账本 BIGINT 上界）拒绝', () => {
     expect(() =>
       createContactDiscoverySubBudget({
         runId: 'run-1',
         companyCount: 8,
         startRemainingMicrousd: -1n,
       }),
-    ).toThrow(TypeError);
+    ).toThrow(RangeError);
+    expect(() =>
+      createContactDiscoverySubBudget({
+        runId: 'run-1',
+        companyCount: 8,
+        startRemainingMicrousd: 9_223_372_036_854_775_808n,
+      }),
+    ).toThrow(RangeError);
   });
 });

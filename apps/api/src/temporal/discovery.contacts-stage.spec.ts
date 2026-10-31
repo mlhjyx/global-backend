@@ -332,6 +332,7 @@ describe('discoverRunContacts —— email_guess M3 双闸接线', () => {
       verified: 0,
       risky: 1,
       blocked: 0,
+      failed: 0,
     });
     const adapter = contactAdapter('decision_maker', { contacts: [CONTACT_RECORD] });
     const harness = makeDeps({
@@ -349,7 +350,6 @@ describe('discoverRunContacts —— email_guess M3 双闸接线', () => {
       workspaceId: string;
       runId: string;
       accountKey: string;
-      companyId: string;
       domain: string;
       maxProbes: number;
       lawfulBasis: { basis: string; recordedBy?: string };
@@ -358,7 +358,6 @@ describe('discoverRunContacts —— email_guess M3 双闸接线', () => {
     expect(firstCall.workspaceId).toBe(WS);
     expect(firstCall.runId).toBe(RUN_ID);
     expect(firstCall.accountKey).toBe(DISCOVERY_BINDING.accountKey);
-    expect(firstCall.companyId).toBe('c1');
     expect(firstCall.domain).toBe('acme.de');
     expect(firstCall.maxProbes).toBe(6);
     expect(firstCall.lawfulBasis).toMatchObject({
@@ -368,16 +367,19 @@ describe('discoverRunContacts —— email_guess M3 双闸接线', () => {
     });
     expect(firstCall.contacts).toEqual([{ id: 'ct1', fullName: 'Hans Herold', contactPoints: [] }]);
 
-    // 两家各自的补全结果聚合进 contacts stats。
+    // 两家各自的补全结果聚合进 contacts stats；落库的猜测邮箱计入 contacts.emails。
     expect(result.emailGuess).toMatchObject({
       enabled: true,
+      emaillessContacts: 2,
       attempted: 2,
       probes: 4,
       persisted: 2,
       verified: 0,
       risky: 2,
       blocked: 0,
+      failed: 0,
     });
+    expect(result.emails).toBe(2);
   });
 
   it('kill switch 开但无验证器 → 跳过补全，不失败', async () => {
@@ -394,6 +396,82 @@ describe('discoverRunContacts —— email_guess M3 双闸接线', () => {
 
     expect(runGuessMock).not.toHaveBeenCalled();
     expect(result.companies).toBe(1);
+  });
+
+  it('非 smtp_self 验证器（public_web 只剩 MX）不得服务自动补全', async () => {
+    const adapter = contactAdapter('decision_maker', { contacts: [CONTACT_RECORD] });
+    const harness = makeDeps({
+      companies: [company('c1')],
+      contactsByCompany: { c1: [CONTACT_RECORD] },
+      adapters: [adapter],
+      emailGuessStatus: 'ENABLED',
+      verifiers: [{ key: 'public_web', verifyEmail: vi.fn() } as unknown as EmailVerificationAdapter],
+    });
+
+    const result = await createDiscoveryActivities(harness.deps).discoverRunContacts(args());
+
+    expect(runGuessMock).not.toHaveBeenCalled();
+    expect(result.emailGuess).toBeUndefined();
+  });
+
+  it('run 账户耗尽后，本公司的邮箱补全也不再发起（探测不落在已耗尽的账本上）', async () => {
+    runGuessMock.mockResolvedValue({
+      emaillessContacts: 0,
+      attempted: 0,
+      probes: 0,
+      persisted: 0,
+      verified: 0,
+      risky: 0,
+      blocked: 0,
+      failed: 0,
+    });
+    const adapter = contactAdapter('decision_maker', { contacts: [CONTACT_RECORD] });
+    const harness = makeDeps({
+      companies: [company('c1')],
+      contactsByCompany: { c1: [CONTACT_RECORD] },
+      adapters: [adapter],
+      emailGuessStatus: 'ENABLED',
+      verifiers: [{ key: 'smtp_self', verifyEmail: vi.fn() } as unknown as EmailVerificationAdapter],
+      exhaustAfterStatusCalls: 1,
+    });
+
+    const result = await createDiscoveryActivities(harness.deps).discoverRunContacts(args());
+
+    expect(runGuessMock).not.toHaveBeenCalled();
+    expect(result.budgetTruncated).toBe(true);
+  });
+
+  it('美元子预算耗尽不影响零成本的邮箱补全；最后一家跑完不算截断', async () => {
+    runGuessMock.mockResolvedValue({
+      emaillessContacts: 1,
+      attempted: 1,
+      probes: 1,
+      persisted: 1,
+      verified: 0,
+      risky: 1,
+      blocked: 0,
+      failed: 0,
+    });
+    const adapter = contactAdapter('decision_maker');
+    const harness = makeDeps({
+      companies: [company('c1')],
+      contactsByCompany: { c1: [CONTACT_RECORD] },
+      adapters: [adapter],
+      emailGuessStatus: 'ENABLED',
+      verifiers: [{ key: 'smtp_self', verifyEmail: vi.fn() } as unknown as EmailVerificationAdapter],
+    });
+    adapter.discoverContacts.mockImplementation(async () => {
+      harness.drain(70_000n); // 单家上限 $0.0625 → 这家已超过上限，但所有 adapter 都跑完了
+      return { contacts: [CONTACT_RECORD], costCents: 0 };
+    });
+
+    const result = await createDiscoveryActivities(harness.deps).discoverRunContacts(args());
+
+    expect(runGuessMock).toHaveBeenCalledTimes(1);
+    expect(result.budgetTruncated).toBe(false);
+    expect(result.contactBudget?.exhausted).toBe(true);
+    expect(result.emailGuess?.persisted).toBe(1);
+    expect(result.emails).toBe(1);
   });
 
   it('补全抛错不影响公司级联系人结果（best-effort）', async () => {
@@ -413,6 +491,7 @@ describe('discoverRunContacts —— email_guess M3 双闸接线', () => {
     expect(result.companies).toBe(1);
     expect(result.people).toBe(1);
     expect(result.failed).toBeUndefined();
+    expect(result.emailGuess?.failed).toBe(1);
     expect(warn).toHaveBeenCalled();
   });
 });

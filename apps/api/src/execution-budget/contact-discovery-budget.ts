@@ -13,8 +13,12 @@
  * 以新 purpose 签发 Grant（仓外，见 PR「未做」）。
  *
  * 计量粒度是 adapter / 公司（每次模型或工具调用后账本都会落账）：单次调用最多让子账户小幅越过
- * 上限，上限之后的工作绝不会启动。
+ * 上限，上限之后的工作绝不会启动。计量是单调高水位：阶段开始前就持有、阶段中才释放的预留不会把
+ * 已观察到的花费抹掉（只会更保守）。注意 Temporal 重试会重新取基线（每 attempt 一份上限）——
+ * 已结算的操作经账本幂等重放不重复计费，但统计口径按 attempt 计。
  */
+import { assertMicrousd } from '../tools/microusd';
+
 export const CONTACT_DISCOVERY_BUDGET_SCOPE = 'contact.discovery' as const;
 
 /** D5 的基准口径：8 家公司 $0.50（discoverRunContacts 的默认 Top N）。 */
@@ -23,9 +27,6 @@ export const CONTACT_DISCOVERY_RUN_CAP_MICROUSD = 500_000n;
 export const CONTACT_DISCOVERY_PER_COMPANY_CAP_MICROUSD =
   CONTACT_DISCOVERY_RUN_CAP_MICROUSD /
   BigInt(DEFAULT_CONTACT_DISCOVERY_COMPANIES);
-
-/** D5 §六：每公司 ≤6 次 SMTP 探测（跨该公司全部联系人共享）。 */
-export const MAX_RUN_EMAIL_PROBES_PER_COMPANY = 6 as const;
 
 /** Same bound the ledger's account/operation keys use. */
 const MAX_ACCOUNT_KEY_LENGTH = 200;
@@ -78,17 +79,12 @@ export function createContactDiscoverySubBudget(input: {
   /** The run account's remaining microusd when the contact stage starts. */
   startRemainingMicrousd: bigint;
 }): ContactDiscoverySubBudget {
-  if (
-    typeof input.startRemainingMicrousd !== 'bigint' ||
-    input.startRemainingMicrousd < 0n
-  ) {
-    throw new TypeError('startRemainingMicrousd must be a non-negative bigint');
-  }
+  const start = assertMicrousd('startRemainingMicrousd', input.startRemainingMicrousd);
   const accountKey = deriveContactDiscoveryAccountKey(input.runId);
   const capMicrousd = contactDiscoveryCapMicrousd(input.companyCount);
-  // Reservations released above their settled charge can push the remaining back up; the sub
-  // account never reports negative spend for that.
-  const start = input.startRemainingMicrousd;
+  // High-water mark: reservations held at stage start can be released (or settle below their
+  // reservation) during the stage and push the remaining back above `start`. Erasing the spend
+  // already observed would reopen the whole cap, so the sub account only ever grows.
   let spent = 0n;
   return Object.freeze({
     accountKey,
@@ -97,10 +93,9 @@ export function createContactDiscoverySubBudget(input: {
       return spent;
     },
     observe(remainingMicrousd: bigint): bigint {
-      if (typeof remainingMicrousd !== 'bigint') {
-        throw new TypeError('remainingMicrousd must be a bigint');
+      if (remainingMicrousd < start && start - remainingMicrousd > spent) {
+        spent = start - remainingMicrousd;
       }
-      spent = remainingMicrousd >= start ? 0n : start - remainingMicrousd;
       return spent;
     },
     exhausted(): boolean {

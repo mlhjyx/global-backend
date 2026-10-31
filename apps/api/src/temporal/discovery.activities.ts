@@ -14,14 +14,12 @@ import {
   MAX_DISCOVERY_PROVIDER_RECORDS,
   MAX_DISCOVERY_SIGNAL_COMPANIES,
   MAX_DISCOVERY_WATCH_COMPANIES,
+  MAX_RUN_EMAIL_PROBES_PER_COMPANY,
 } from '../discovery/execution-envelope';
 import { queryTaxonomyTerms } from '../discovery/query-taxonomy-terms';
 import { discoverContactsCore } from '../discovery/contact-discovery-core';
 import { guessEmailsForRunCompany } from '../discovery/contact-stage-email-guess';
-import {
-  MAX_RUN_EMAIL_PROBES_PER_COMPANY,
-  createContactDiscoverySubBudget,
-} from '../execution-budget/contact-discovery-budget';
+import { createContactDiscoverySubBudget } from '../execution-budget/contact-discovery-budget';
 import { parseConfiguredLawfulBasis } from './backlog.activities';
 import { stampLawfulBasis } from '../discovery/compliance/email-verification-gate';
 import { artifactSubjectSkipReason } from '../tools/artifact-subject-denial';
@@ -2765,15 +2763,17 @@ export function createDiscoveryActivities(deps: {
         spentMicrousd: string;
         exhausted: boolean;
       };
-      /** M3: automated email completion (kill switch on and a verifier routed). */
+      /** M3: automated email completion (kill switch on and the smtp_self verifier routed). */
       emailGuess?: {
         enabled: true;
+        emaillessContacts: number;
         attempted: number;
         probes: number;
         persisted: number;
         verified: number;
         risky: number;
         blocked: number;
+        failed: number;
       };
     }> {
       const binding = await ensureRunBudget(args);
@@ -2859,7 +2859,9 @@ export function createDiscoveryActivities(deps: {
           const verifiers = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
             deps.providers.routeEmailVerification(tx as never),
           );
-          emailVerifier = verifiers[0];
+          // Only the SMTP RCPT verifier may serve the automated path: routing e.g. `public_web`
+          // would degrade to MX-only guesses and quietly bypass the smtp_self kill switch.
+          emailVerifier = verifiers.find((verifier) => verifier.key === 'smtp_self');
         }
       }
       let companies = 0;
@@ -2870,12 +2872,14 @@ export function createDiscoveryActivities(deps: {
       let budgetTruncated = false;
       const diagnostics: Record<string, number> = {};
       const emailGuess = {
+        emaillessContacts: 0,
         attempted: 0,
         probes: 0,
         persisted: 0,
         verified: 0,
         risky: 0,
         blocked: 0,
+        failed: 0,
       };
       for (let index = 0; index < targets.length; index += 1) {
         const target = targets[index]!;
@@ -2883,8 +2887,9 @@ export function createDiscoveryActivities(deps: {
           budgetTruncated = true;
           break;
         }
+        let result: Awaited<ReturnType<typeof discoverContactsCore>> | undefined;
         try {
-          const result = await discoverContactsCore(
+          result = await discoverContactsCore(
             { prisma: deps.prisma, providers: deps.providers, budgetStore: budgets },
             {
               workspaceId: args.workspaceId,
@@ -2910,45 +2915,8 @@ export function createDiscoveryActivities(deps: {
             diagnostics[name] = (diagnostics[name] ?? 0) + count;
           }
           if (result.budgetTruncated) budgetTruncated = true;
-          // M3: complete missing named emails for this company (best-effort, bounded per company).
-          if (emailVerifier && target.domain && !contactBudget?.exhausted()) {
-            try {
-              const guess = await guessEmailsForRunCompany(
-                { prisma: deps.prisma },
-                {
-                  workspaceId: args.workspaceId,
-                  runId: args.runId,
-                  accountKey: binding.accountKey,
-                  companyId: target.canonicalCompanyId,
-                  domain: target.domain,
-                  contacts: result.contacts.map((contact) => ({
-                    id: contact.id,
-                    fullName: contact.fullName,
-                    contactPoints: contact.contactPoints.map((point) => ({
-                      type: point.type,
-                      value: point.value,
-                      status: point.status,
-                    })),
-                  })),
-                  lawfulBasis,
-                  maxProbes: MAX_RUN_EMAIL_PROBES_PER_COMPANY,
-                  verifier: emailVerifier,
-                },
-              );
-              emailGuess.attempted += guess.attempted;
-              emailGuess.probes += guess.probes;
-              emailGuess.persisted += guess.persisted;
-              emailGuess.verified += guess.verified;
-              emailGuess.risky += guess.risky;
-              emailGuess.blocked += guess.blocked;
-            } catch (error) {
-              const message = error instanceof Error ? error.message : String(error);
-              console.warn(
-                `[discoverRunContacts] email guess for ${target.canonicalCompanyId} failed: ${message.slice(0, 150)}`,
-              );
-            }
-          }
         } catch (error) {
+          if (isExecutionControlError(error)) throw error;
           failed += 1;
           const message = error instanceof Error ? error.message : String(error);
           console.warn(
@@ -2964,10 +2932,48 @@ export function createDiscoveryActivities(deps: {
           budgetTruncated = true;
           break;
         }
-        // The sub-account is a per-run cap, not the ledger account itself: hitting it exactly on
-        // the last company left no work undone.
-        if (contactBudget?.exhausted() && index < targets.length - 1) {
-          budgetTruncated = true;
+        // M3: complete missing named emails for this company. SMTP probes are priced at zero, so
+        // this step spends none of the D7 sub-budget; it is bounded by its own per-company probe
+        // allowance and never runs after the run account itself is exhausted.
+        if (!result || !emailVerifier || !target.domain) continue;
+        try {
+          const guess = await guessEmailsForRunCompany(
+            { prisma: deps.prisma },
+            {
+              workspaceId: args.workspaceId,
+              runId: args.runId,
+              accountKey: binding.accountKey,
+              domain: target.domain,
+              contacts: result.contacts.map((contact) => ({
+                id: contact.id,
+                fullName: contact.fullName,
+                contactPoints: contact.contactPoints.map((point) => ({
+                  type: point.type,
+                  value: point.value,
+                  status: point.status,
+                })),
+              })),
+              lawfulBasis,
+              maxProbes: MAX_RUN_EMAIL_PROBES_PER_COMPANY,
+              verifier: emailVerifier,
+            },
+          );
+          emailGuess.emaillessContacts += guess.emaillessContacts;
+          emailGuess.attempted += guess.attempted;
+          emailGuess.probes += guess.probes;
+          emailGuess.persisted += guess.persisted;
+          emailGuess.verified += guess.verified;
+          emailGuess.risky += guess.risky;
+          emailGuess.blocked += guess.blocked;
+          emailGuess.failed += guess.failed;
+          emails += guess.persisted;
+        } catch (error) {
+          if (isExecutionControlError(error)) throw error;
+          emailGuess.failed += 1;
+          const message = error instanceof Error ? error.message : String(error);
+          console.warn(
+            `[discoverRunContacts] email guess for ${target.canonicalCompanyId} failed: ${message.slice(0, 150)}`,
+          );
         }
       }
       return {
