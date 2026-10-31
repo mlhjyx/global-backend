@@ -188,3 +188,16 @@
 1. **工作区（租户）来自 JWT 的 `workspace` claim，接口不收租户参数**；跨租户一律 404。开发取 token 用 `ssh xin@100.68.31.20 /global/local-config/bin/api-token`（300 秒有效）。
 2. **长任务是异步的**：`POST /companies`、`POST /query-plans/{id}/execute`、`POST /icps/{id}/qualify`、建站构建都返回 202/201 + id，轮询对应状态接口，别同步等。
 3. **服务间通道不要给前端用**：ExecutionBudget / PlatformAuthority 两组用固定用途机器身份（mTLS/JWT），普通前端调用只会拿到 401/403。
+
+### 6.4 前端 SaaS 的调用路径（与直接调引擎的区别）
+
+前端 SaaS（gain-saas 租户端）**不直接调本引擎**：它调 gain-saas 的 BFF（`http://100.68.31.20:4020/api/...`），BFF 按会话身份做 member/admin 鉴权、必要时先取 `workspace-technical-quote` 并签一次性 Grant，再以短时服务 token 转发到本引擎。BFF 的映射表在 `gain-saas` 仓 `apps/server/src/bff/routes.ts`（当前 52 条），覆盖 Companies、Claims、ICP、Discovery、Leads（含开发信草稿与制裁复核）、Reports、Suppressions、DeletionRequests、DataProviders 与执行预算报价。
+
+BFF 目前**没有**映射、前端如需使用要直接对接引擎（用本文档的 token 方式）或先在 gain-saas 补一条路由：
+
+| 引擎域 | 现状 |
+| --- | --- |
+| SiteBuilder | 未映射；且站点预览页 `/api/v1/preview/{slug}` 返回 HTML，给 iframe 用 |
+| Events | 服务端集成用（pull + ACK），前端一般不需要 |
+| System（health / whoami） | BFF 有自己的健康与身份接口，前端用 BFF 的 |
+| ExecutionBudget / PlatformAuthority | 服务间通道，两端都不给前端 |
