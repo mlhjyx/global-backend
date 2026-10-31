@@ -14,6 +14,7 @@ import { TradeFairDiscoveryProvider } from './providers/trade-fair.provider';
 import { TedDiscoveryProvider } from './providers/ted.provider';
 import { OpenFdaDiscoveryProvider } from './providers/openfda.provider';
 import { DecisionMakerContactAdapter } from './providers/decision-maker.provider';
+import { SocialPresenceContactAdapter } from './providers/social-presence.provider';
 import { CompaniesHouseContactProvider } from './providers/companies-house.provider';
 import { InpiRneContactProvider } from './providers/inpi-rne.provider';
 import { GooglePatentsInventorProvider } from './providers/bigquery-patents.provider';
@@ -118,6 +119,9 @@ export class DiscoveryProviderRegistry {
     // UK Companies House 董事发现（待办 3 第一个身份源；官方注册处 API，Basic auth）——contact_discovery 类。
     // 不依赖 gateway（结构化 API，无 LLM）；GB 门外/无 broker/无 API key 时 fail-safe 返空（天然 no-op）。
     // 董事经 externalIds(uk-ch-officer) 走 resolvePersonIdentity Tier 0 精确并（同一董事跨源自动并成一条）。
+    // 社媒/渠道发现（M2a：SearXNG 索引片段里的 LinkedIn/Xing 公开标题 → 姓名+职务）。
+    // 只读搜索引擎已索引的公开片段，不登录、不抓目标站；company 名不匹配的结果一律丢弃。
+    this.contacts.push(new SocialPresenceContactAdapter({ broker }));
     this.contacts.push(new CompaniesHouseContactProvider({ broker }));
     // 法国 dirigeants 发现（待办 3 第三个身份源；开放政务 API Recherche d'entreprises，无鉴权）——contact_discovery 类。
     // 不依赖 gateway（结构化 API，无 LLM）；FR 门外/无 broker 时 fail-safe 返空（天然 no-op）。
@@ -342,6 +346,12 @@ export class DiscoveryProviderRegistry {
       where: { key: 'decision_maker' },
       update: {},
       create: { key: 'decision_maker', class: 'contact_discovery', status: 'ENABLED', costPerCallCents: 0 },
+    });
+    // 社媒/渠道发现（SearXNG 索引里的 LinkedIn/Xing 公开标题）——零成本；kill-switch 走本表 status。
+    await db.dataProvider.upsert({
+      where: { key: 'social_presence' },
+      update: {},
+      create: { key: 'social_presence', class: 'contact_discovery', status: 'ENABLED', costPerCallCents: 0 },
     });
     // UK Companies House 董事发现（待办 3 第一个身份源）——官方注册处 API（Basic auth）。零鉴权成本、costPerCallCents=0。
     // 无 API key 时 provider fail-safe 返空即天然 no-op（key 缺失不阻断其余联系人源）。

@@ -59,7 +59,7 @@ export const MAX_DIGITAL_FOOTPRINT_RENDERS = 1 as const;
 // Seller understanding (POST /companies): homepage plus selected subpages.
 export const MAX_UNDERSTANDING_SUBPAGES = 6 as const;
 
-export const MAX_CONTACT_DISCOVERY_ADAPTERS = 5 as const;
+export const MAX_CONTACT_DISCOVERY_ADAPTERS = 6 as const;
 export const MAX_CONTACTS_PER_DISCOVERY_ADAPTER = 25 as const;
 export const MAX_DECISION_MAKER_PAGES = 4 as const;
 export const MAX_EMAIL_GUESS_CONTACTS = 25 as const;
