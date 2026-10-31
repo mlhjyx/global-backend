@@ -1,7 +1,7 @@
 # 平台运行准入改走 v2：权威方 gain-saas 持久签发
 
-> 生命周期：`DRAFT`
-> 生命周期依据：2026-10-31 产品负责人重开 PRD4-D2 并把 R4 平台权威迁到 gain-saas（P7/P8 已完成）；本文取代 2026-10-10《平台 schedule 准入与平台写入者授权》中随 D2 冻结而关闭的「方案 A」，等待产品负责人拍板后方可施工。
+> 生命周期：`APPROVED`
+> 生命周期依据：产品负责人 2026-10-31 在会话内批准施工（「批准施工」），金额上限按 policy matrix 原值；同日重开 PRD4-D2 并把 R4 平台权威迁到 gain-saas（P7/P8 已完成）。本文取代 2026-10-10《平台 schedule 准入与平台写入者授权》中随 D2 冻结而关闭的「方案 A」。
 
 ## 0. 现状（2026-10-31 核实，事实基线 `origin/main@527c70ef`）
 
@@ -72,3 +72,10 @@
 
 1. 批准方案 A' 施工？（没有它，平台 schedule 无法恢复，撤销 fence 无法实测）
 2. 逐 schedule 的金额上限用哪组值（建议先用 policy matrix 的 `required_cap_per_run_microusd` 原值，不额外放大）。
+
+## 6. 施工注记（2026-10-31）
+
+- **部署绑定的 `scheduleActions[].actionSha256` 不是 policy 行的 `schedule_request_sha256`**（前者是 Temporal schedule action 的摘要，两者实测不同）。施工时改为：权威侧持有自己的策略副本 `R4_PLATFORM_GRANT_EXPECTED`（逐 schedule 的 request/envelope 摘要，默认取 policy matrix v2 的 2026-10-31 值），§1.1 的对应校验以此为准；部署绑定仍用于证明有效期与 schedule 存在。
+- 金额上限默认取 policy matrix `required_cap_per_run_microusd` 实测值：acq-sweep 1、patents 1、sanctions 1、intent-sweep 10,000,000 µUSD。
+- 引擎侧删除 `BudgetStore.admitPlatformRun`（v1）及其替身与测试；准入活动只经 `PlatformGrantAdmission`（quote → Grant → ingest/admit）。
+- 平台写入者权限清单以「迁移文本 ↔ `docs/governance/platform-writer-table-privileges.json`」逐字一致的零容器测试守住，执行期由迁移内 DO 自检 fail closed。

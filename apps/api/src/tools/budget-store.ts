@@ -1,7 +1,6 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import {
-  EXECUTION_BUDGET_PLATFORM_PURPOSES,
   ExecutionBudgetGrantError,
   type ExecutionBudgetPurpose,
 } from '../execution-budget/execution-budget-authority.types';
@@ -144,20 +143,6 @@ export interface BudgetAccountAuthorization {
   readonly generation: number;
 }
 
-export interface PlatformBudgetRunAdmissionInput {
-  readonly purpose: ExecutionBudgetPurpose;
-  readonly subjectType: 'schedule';
-  readonly subjectId: string;
-  readonly scheduleId: string;
-  readonly requestSha256: string;
-  readonly workflowRunId: string;
-  readonly accountKey: string;
-}
-
-export interface PlatformBudgetRunAdmission extends BudgetAccountAuthorization {
-  readonly replay: boolean;
-}
-
 /** Authoritative budget surface. Product composition must use a shared durable implementation. */
 export interface BudgetStore {
   open(input: {
@@ -166,10 +151,6 @@ export interface BudgetStore {
     accountKey: string;
     replayScope?: boolean;
   }): Promise<BudgetAccountAuthorization>;
-  /** Atomically selects a fresh exact schedule authority and opens one run. */
-  admitPlatformRun(
-    input: PlatformBudgetRunAdmissionInput,
-  ): Promise<PlatformBudgetRunAdmission>;
   /** Read-only verification of an account opened by HTTP/schedule admission. */
   attestAuthorized(input: {
     authorityId: string;
@@ -281,10 +262,6 @@ export class UnavailableBudgetStore implements BudgetStore {
   }
 
   async open(): Promise<BudgetAccountAuthorization> {
-    return this.unavailable();
-  }
-
-  async admitPlatformRun(): Promise<PlatformBudgetRunAdmission> {
     return this.unavailable();
   }
 
@@ -411,27 +388,6 @@ function parseBudgetAccountAuthorization(
   };
 }
 
-function parsePlatformBudgetRunAdmission(
-  rows: readonly PlatformAdmissionRow[],
-): PlatformBudgetRunAdmission {
-  const row = rows[0];
-  if (
-    !row ||
-    typeof row.replay !== 'boolean' ||
-    typeof row.campaign_cap_microusd !== 'bigint' ||
-    row.campaign_cap_microusd < 1n ||
-    typeof row.max_runs !== 'bigint' ||
-    row.max_runs < 1n
-  ) {
-    throw new ExecutionBudgetGrantError(
-      'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',
-    );
-  }
-  return {
-    ...parseBudgetAccountAuthorization(rows, row.authority_id),
-    replay: row.replay,
-  };
-}
 
 function assertKey(name: string, value: string): void {
   if (!value || value.length > MAX_KEY_LENGTH || [...value].some((character) => character.charCodeAt(0) < 32)) {
@@ -439,30 +395,6 @@ function assertKey(name: string, value: string): void {
   }
 }
 
-function assertPlatformBudgetRunAdmission(
-  input: PlatformBudgetRunAdmissionInput,
-): void {
-  if (
-    !EXECUTION_BUDGET_PLATFORM_PURPOSES.includes(
-      input.purpose as (typeof EXECUTION_BUDGET_PLATFORM_PURPOSES)[number],
-    ) ||
-    input.subjectType !== 'schedule' ||
-    input.subjectId !== input.scheduleId ||
-    !/^[0-9a-f]{64}$/.test(input.requestSha256) ||
-    !input.workflowRunId ||
-    input.workflowRunId.length > 100 ||
-    [...input.workflowRunId].some((character) => character.charCodeAt(0) < 32) ||
-    input.accountKey !==
-      `platform:${input.requestSha256}:${input.workflowRunId}`
-  ) {
-    throw new ExecutionBudgetGrantError(
-      'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
-    );
-  }
-  assertKey('subjectId', input.subjectId);
-  assertKey('scheduleId', input.scheduleId);
-  assertKey('accountKey', input.accountKey);
-}
 
 function projectionResultStrategy(
   schemaVersion: string | null | undefined,
@@ -827,33 +759,6 @@ export class PostgresBudgetStore implements BudgetStore {
     }
   }
 
-  async admitPlatformRun(
-    input: PlatformBudgetRunAdmissionInput,
-  ): Promise<PlatformBudgetRunAdmission> {
-    assertPlatformBudgetRunAdmission(input);
-    try {
-      const rows = await this.inAuthorityScope('platform', (transaction) =>
-        transaction.$queryRaw<PlatformAdmissionRow[]>(
-          Prisma.sql`SELECT * FROM admit_platform_execution_budget_run_v1(
-            ${input.purpose}::"execution_budget_purpose",
-            ${input.subjectType}, ${input.subjectId}, ${input.scheduleId},
-            ${input.requestSha256}, ${input.workflowRunId}, ${input.accountKey}
-          )`,
-        ),
-      );
-      return parsePlatformBudgetRunAdmission(rows);
-    } catch (error) {
-      if (
-        isTrustedExecutionBudgetDatabaseMarker(
-          error,
-          'TOOL_BUDGET_UNSETTLED_OPERATIONS',
-        )
-      ) {
-        throw new BudgetUnsettledOperationsError(input.accountKey);
-      }
-      throw mapExecutionBudgetPersistenceError(error);
-    }
-  }
 
   async attestAuthorized(input: {
     authorityId: string;
