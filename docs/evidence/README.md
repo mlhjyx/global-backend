@@ -106,6 +106,7 @@ Bundle 内的 provenance 枚举、actor、SHA、时间和 URL 都是 documentary
 ## Platform authority
 
 - [2026-11-01 平台准入 v2 与撤销 fence 实测](2026-11-01-platform-admission-v2-and-revocation-fence.md)：平台 schedule 手动运行经 v2 拿到真实 `PLATFORM_GRANT`（jti `2401bb26…`），并用它完成撤销签发 → 投递 → fence 提交 → ACK 验签（`ed59f901…`，generation 1→2）；途中修复平台 worker 信任根与 gain-saas Grant claims 两处缺口。不生成 RuntimeEvidence，schedule 仍 paused，自动撤销触发未接线。
+- [2026-11-01 平台撤销自动触发 dev 试运行](2026-11-01-platform-revocation-autotrigger-dryrun.md)：gain-saas P9（PR #25，默认关闭）的绑定撤销事件源 → 逻辑请求 → 真实预算钥签发 → 投递到真实后端 → **验签通过后**返回 403 `PLATFORM_REVOCATION_SCOPE_MISMATCH`（假 target、无 authority）→ 退避重试 → `NO_LIVE_TARGET`；围栏与 receipt 未被改变。不证明成功 fence/ACK 走新触发路径，也未部署线上实例。
 
 ## Production dependency audit snapshots
 

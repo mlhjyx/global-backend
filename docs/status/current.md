@@ -58,7 +58,7 @@ PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](..
 
 | 决定 | 当前事实 | 怎么回退 |
 | --- | --- | --- |
-| PRD4-D2 冻结 R4（2026-10-10，**2026-10-31 重开**） | 冻结期间不追加 R4 投入、4 个平台 schedule 保持 paused、每次换镜像仍续 7 天绑定。**2026-10-31 产品负责人重开**：R4 恢复投入，唯一目的是把平台权威从 GrowthOS 迁到 gain-saas（机器 token、capability、撤销与恢复通道），迁完退役 GrowthOS；schedule 是否恢复运行另议。撤销投递链现状（2026-11-01）：gain-saas 签发 → 后端接收（RS256 JWS，不是 HMAC）→ fence 提交 → ACK 验签已用真实 committed Grant 实测通过（[证据](../evidence/2026-11-01-platform-admission-v2-and-revocation-fence.md)）；政策停用 → 撤销的自动触发尚未接线，`BLOCKED_PENDING_BACKEND_4A4` 不再成立 | 重开只恢复「迁移」这一项投入；平台运行准入的写入者授权缺口（L4-G23）已于 2026-11-01 随准入 v2 上线闭合，恢复平台 schedule（unpause）仍是产品负责人的单独决定 |
+| PRD4-D2 冻结 R4（2026-10-10，**2026-10-31 重开**） | 冻结期间不追加 R4 投入、4 个平台 schedule 保持 paused、每次换镜像仍续 7 天绑定。**2026-10-31 产品负责人重开**：R4 恢复投入，唯一目的是把平台权威从 GrowthOS 迁到 gain-saas（机器 token、capability、撤销与恢复通道），迁完退役 GrowthOS；schedule 是否恢复运行另议。撤销投递链现状（2026-11-01）：gain-saas 签发 → 后端接收（RS256 JWS，不是 HMAC）→ fence 提交 → ACK 验签已用真实 committed Grant 实测通过（[证据](../evidence/2026-11-01-platform-admission-v2-and-revocation-fence.md)）；政策停用 → 撤销的自动触发已实现（gain-saas #25，默认关闭、尚未部署）：事件源=政策状态/绑定显式撤销/运营台，dev 试运行验证了签发 → 投递 → 后端验签 → 错误分类，成功的 fence/ACK 走新触发路径待受审计重开路径（[试运行证据](../evidence/2026-11-01-platform-revocation-autotrigger-dryrun.md)），`BLOCKED_PENDING_BACKEND_4A4` 不再成立 | 重开只恢复「迁移」这一项投入；平台运行准入的写入者授权缺口（L4-G23）已于 2026-11-01 随准入 v2 上线闭合，恢复平台 schedule（unpause）仍是产品负责人的单独决定 |
 | PRD4-D3 客户写入准入与 platform Worker 就绪解耦（2026-10-10） | #627 已合并，2026-10-11 上线：客户写入按客户依赖集合判定，platform Worker 恰为 `PLATFORM_WORKER_NOT_READY` 时不再关闭客户写入；`/health/ready` 的整体口径不变 | 换回 #627 之前的镜像 |
 | PRD4-D9 制裁名单与职能邮箱（2026-10-10，部分拍板） | 制裁名单走运营刷新（#629，不经平台 schedule），2026-10-11 打开三个源（OFAC SDN、OFAC Consolidated、EU FSF，`sanctions_source` 均 ENABLED，约 1.2 万条实体）；职能邮箱按 BI-14 做公司级（#630，开关 DISABLED）。LIA 时机未定 | `sanctions_source` 置 DISABLED |
 | PRD4-D14 模型供应（2026-10-11） | #633：11 个获客任务照旧请求 pro 档，上游换成 Flash 档时也接受，trace 与账本如实记为 Flash；建站等其他任务仍只认 pro。xin 已打开 `MODEL_IDENTITY_SUBSTITUTES`。官方备用上游未接 | 关掉 `MODEL_IDENTITY_SUBSTITUTES` |
@@ -87,7 +87,7 @@ PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](..
 | 项 | 当前事实 | 不得外推 |
 | --- | --- | --- |
 | 改变的 | 开关置位时，受证 API 的 relay 把该 workspace 的三条获客命令投到开发用 Temporal 的专属队列（带执行超时），源码 worker 只 poll 该队列；`/health/ready` 多一个恒为 `not_proven` 的 `capabilities.dev_fast_lane` | 运行镜像何时采用另行记录，采用前行为不变；尚无本机运行观察，不是 RuntimeEvidence |
-| 不变的 | 开关为空时 API、relay、worker 行为逐字不变；其余 workspace、擦除与建站命令、整体 readiness、客户写入准入、`/health/build`、租约与准入代码都不变；pilot/production 启动即拒绝车道变量 | 车道 worker 是 unattested 源码进程，车道时段的任何观察都不能作为 RuntimeEvidence PASS 或进入 Release Bundle；R4 撤销投递链 2026-11-01 已用真实 Grant 实测打通（见证据页），自动触发未接线 |
+| 不变的 | 开关为空时 API、relay、worker 行为逐字不变；其余 workspace、擦除与建站命令、整体 readiness、客户写入准入、`/health/build`、租约与准入代码都不变；pilot/production 启动即拒绝车道变量 | 车道 worker 是 unattested 源码进程，车道时段的任何观察都不能作为 RuntimeEvidence PASS 或进入 Release Bundle；R4 撤销投递链 2026-11-01 已用真实 Grant 实测打通（见证据页）；自动触发已实现但默认关闭、未部署，成功 fence/ACK 走新触发路径未验证 |
 | 代价 | 车道只覆盖三个 workflow 的 workflow 体与活动体，workflow 输入、outbox payload、事件注册表与 API 内的同步获客操作仍是镜像代码；开关、迭代、关闭都要先排空在途 run（路由在投递时决定）；换镜像前要关车道 | 首次落地仍需发布并切换一次含本改动的镜像 |
 
 ## 5. 下一步与需要的决定
