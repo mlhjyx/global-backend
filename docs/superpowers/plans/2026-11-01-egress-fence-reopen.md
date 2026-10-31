@@ -165,10 +165,10 @@ reopen_platform_egress_fence_v1(
 迁移 `20261101010000_platform_egress_fence_reopen`（forward-only）：
 
 1. 建表、约束、索引、注释、RLS、不可变触发器；`REVOKE ALL` 给所有运行角色。
-2. 建函数 `reopen_platform_egress_fence_v1`：`SECURITY DEFINER`、`SET search_path = pg_catalog, public`、表引用全部 schema 限定、owner principal 断言、advisory lock（同 `reopen_jti`）、fence 行锁、回执配对、generation CAS、attempt 收口、审计插入。
+2. 建函数 `reopen_platform_egress_fence_v1`：`SECURITY DEFINER`、`SET search_path = pg_catalog, public, pg_temp`、表引用全部 schema 限定、owner principal 断言、advisory lock（同 `reopen_jti`）、fence 行锁、回执配对、generation CAS、attempt 收口、审计插入。
 3. `REVOKE ALL ON FUNCTION ... FROM PUBLIC, app_user, runtime_api, runtime_worker, runtime_outbox_relay, execution_budget_platform_writer, runtime_platform_worker`；**不 GRANT**。
 4. 迁移内 `DO` 自检（fail closed）：
-   - 函数 `prosecdef = true`、`proconfig = ARRAY['search_path=pg_catalog, public']`；
+   - 函数 `prosecdef = true`、`proconfig = ARRAY['search_path=pg_catalog, public, pg_temp']`；
    - 函数属主是 superuser 或 `BYPASSRLS`（FORCE RLS 表上没有 policy，属主必须能绕过 RLS，否则函数运行时静默看不到行）；
    - 上述七个角色对函数无 EXECUTE、对审计表无任何表级权限；
    - 审计表 `relrowsecurity AND relforcerowsecurity`，两个不可变触发器存在；

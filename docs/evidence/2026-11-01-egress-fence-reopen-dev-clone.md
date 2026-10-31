@@ -11,10 +11,10 @@
 ## 绑定身份
 
 - 工作分支：`claude/amazing-wozniak-4cbf1b`，基线 `origin/main@7a7ece0f`；迁移文件 SHA-256
-  `6ee98b806e98de3f875eb5812e5a79dd7e2cf6e54f5f000ae1b2b5028fe5927e`（squash 合并后以 main 提交为准）。
+  `c73a28fd887df3c9227eadef1da9613893f0d24d3e65e446fe7506160158cdd0`（squash 合并后以 main 提交为准）。
 - 运行镜像：`ghcr.io/mlhjyx/global-backend@sha256:5f661ac07ce790a2a271d95e7149aec30e0317de5448c75f4c8cf93ffd766e16`
   （源提交 `7cea82b9`）。readiness 计算代码来自该镜像的 `/app/apps/api/dist`，本 PR 未改这段代码。
-- 克隆源：`global_dev`（121 MB，2026-10-31T17:0xZ `pg_dump` 只读导出）→ 一次性库
+- 克隆源：`global_dev`（121 MB，2026-10-31T17:00Z–17:09Z 演示窗口内 `pg_dump` 只读导出；克隆库已丢弃，导出时刻未单独留存）→ 一次性库
   `global_reopen_demo`，用后已 `DROP`。`global_dev` 自身零写入：演示前后 `acq-sweep` 都保持
   `ACTIVE`、generation 3、fence_sequence 1，且 `platform_egress_fence_reopen_receipt` 在
   `global_dev` 中不存在（迁移未应用）。
@@ -67,6 +67,8 @@ SELECT * FROM reopen_platform_egress_fence_v1(
    （`PLATFORM_AUTOMATION_ACQ_SWEEP_ISSUABLE`），其余三行与重开前一致。
 8. 重放与拒绝：同一 `reopen_jti` 与全部输入重发 → `replay = true`、generation 仍 3、审计行仍 1；
    换一个新 `reopen_jti` 再重开 → `PLATFORM_EGRESS_REOPEN_NOT_DISABLED`（围栏已 `ACTIVE`）。
+
+补充（测试证据）：真库一次性容器用例（`PLATFORM_EGRESS_FENCE_REOPEN_DISPOSABLE_TEST=1 node --test packages/db/test/platform-egress-fence-reopen.disposable.spec.mjs`）同日运行 **10/10 通过**。它独立于上面的克隆演示，覆盖并发（同/不同 JTI）、同 JTI 重放与篡改、跨 schedule 配对、无回执与二次关闭、最大 generation、`SECURITY_RESPONSE → SECURITY_CLEARED` 映射、事务回滚与 owner-only 权限负例。
 
 ## 边界（这份记录不证明什么）
 

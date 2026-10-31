@@ -246,6 +246,25 @@ REVOKE ALL ON FUNCTION public.reopen_platform_egress_fence_v1(TEXT,BIGINT,BIGINT
   FROM PUBLIC, app_user, runtime_api, runtime_worker, runtime_outbox_relay,
        execution_budget_platform_writer, runtime_platform_worker;
 
+-- Precise GRANT means no grant at all. The explicit list above covers the
+-- known runtime principals; this loop also removes any deployment-specific
+-- default or direct grant on the new function, trigger helper and table.
+DO $$
+DECLARE
+  role_row RECORD;
+  fn_signature CONSTANT TEXT :=
+    'public.reopen_platform_egress_fence_v1(text,bigint,bigint,text,uuid,uuid,text,text)';
+BEGIN
+  FOR role_row IN
+    SELECT r.rolname FROM pg_roles r
+    WHERE r.rolname <> current_user AND r.rolname !~ '^pg_'
+  LOOP
+    EXECUTE format('REVOKE ALL ON FUNCTION %s FROM %I', fn_signature, role_row.rolname);
+    EXECUTE format('REVOKE ALL ON FUNCTION public.reject_platform_egress_fence_reopen_mutation_v1() FROM %I', role_row.rolname);
+    EXECUTE format('REVOKE ALL ON TABLE public.platform_egress_fence_reopen_receipt FROM %I', role_row.rolname);
+  END LOOP;
+END $$;
+
 -- Migration-time self-check: any privilege drift, missing trigger or an owner
 -- that cannot bypass the FORCE RLS tables fails the migration, never runtime.
 DO $$
@@ -254,7 +273,6 @@ DECLARE
     'public.reopen_platform_egress_fence_v1(text,bigint,bigint,text,uuid,uuid,text,text)';
   owner_bypasses_rls BOOLEAN;
   role_name TEXT;
-  trigger_count INTEGER;
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_proc p
@@ -294,17 +312,28 @@ BEGIN
     RAISE EXCEPTION 'PLATFORM_EGRESS_REOPEN_RLS_INVALID' USING ERRCODE = 'P0001';
   END IF;
 
-  SELECT count(*) INTO trigger_count FROM pg_trigger t
+  -- Enabled BEFORE UPDATE OR DELETE FOR EACH ROW (tgtype 27) and enabled
+  -- BEFORE TRUNCATE FOR EACH STATEMENT (tgtype 34), both attached to the
+  -- rejecting helper. A disabled or repointed trigger fails the migration.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger t
     WHERE t.tgrelid = 'public.platform_egress_fence_reopen_receipt'::regclass
-      AND NOT t.tgisinternal
-      AND t.tgname IN (
-        'platform_egress_fence_reopen_receipt_immutable',
-        'platform_egress_fence_reopen_receipt_no_truncate');
-  IF trigger_count <> 2 THEN
+      AND t.tgname = 'platform_egress_fence_reopen_receipt_immutable'
+      AND NOT t.tgisinternal AND t.tgenabled = 'O' AND t.tgtype = 27
+      AND t.tgfoid = 'public.reject_platform_egress_fence_reopen_mutation_v1()'::regprocedure
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_trigger t
+    WHERE t.tgrelid = 'public.platform_egress_fence_reopen_receipt'::regclass
+      AND t.tgname = 'platform_egress_fence_reopen_receipt_no_truncate'
+      AND NOT t.tgisinternal AND t.tgenabled = 'O' AND t.tgtype = 34
+      AND t.tgfoid = 'public.reject_platform_egress_fence_reopen_mutation_v1()'::regprocedure
+  ) THEN
     RAISE EXCEPTION 'PLATFORM_EGRESS_REOPEN_TRIGGER_INVALID' USING ERRCODE = 'P0001';
   END IF;
 
-  IF (SELECT count(*) FROM public.platform_egress_schedule_fence) <> 4 THEN
+  IF (SELECT count(*) FROM public.platform_egress_schedule_fence f
+      WHERE f.schedule_id IN (
+        'acq-sweep','intent-sweep','sanctions-refresh','patents-cache-refresh')) <> 4 THEN
     RAISE EXCEPTION 'PLATFORM_EGRESS_REOPEN_FENCE_ROWS_INVALID' USING ERRCODE = 'P0001';
   END IF;
 END $$;

@@ -184,6 +184,7 @@ test("fence reopen pairs the disabled fence to one revocation receipt and advanc
   );
   assert.match(
     reopenMigration,
+    /revocation\.schedule_id IS DISTINCT FROM p_schedule_id/u,
     /revocation\.fence_sequence IS DISTINCT FROM p_fence_sequence/u,
   );
   assert.match(
@@ -206,7 +207,10 @@ test("fence reopen pairs the disabled fence to one revocation receipt and advanc
     reopenMigration,
     /SET generation = f\.generation \+ 1,\s+state = 'ACTIVE'/u,
   );
-  assert.doesNotMatch(reopenMigration, /SET[^;]*fence_sequence\s*=/su);
+  assert.doesNotMatch(
+    reopenMigration,
+    /UPDATE public\.platform_egress_schedule_fence f\s+SET[^;]*fence_sequence/su,
+  );
   assert.match(reopenMigration, /REOPEN_GENERATION_ADVANCED/u);
 });
 
@@ -222,7 +226,7 @@ test("fence reopen reason codes correspond to the revocation reason", () => {
   assert.match(reopenMigration, /WHEN 'OPERATOR_HOLD' THEN 'HOLD_RELEASED'/u);
   assert.doesNotMatch(
     reopenMigration,
-    /PLATFORM_EGRESS_REOPEN_POLICY_UNAVAILABLE/u,
+    /UPDATE public\.platform_egress_schedule_fence f\s+SET[^;]*(policy_artifact_sha256|execution_envelope_sha256|required_cap_microusd)/su,
   );
 });
 

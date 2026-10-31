@@ -522,7 +522,7 @@ describe("audited platform egress fence reopen on self-owned disposable PostgreS
           expectedGeneration: "9223372036854775807",
         }).call,
       ),
-      /PLATFORM_EGRESS_REOPEN_UNPAIRED_FENCE|PLATFORM_EGRESS_REOPEN_GENERATION_CONFLICT/,
+      /PLATFORM_EGRESS_REOPEN_GENERATION_CONFLICT/,
     );
 
     for (const mutation of [
@@ -550,6 +550,60 @@ describe("audited platform egress fence reopen on self-owned disposable PostgreS
       }
     }
     assert.equal(auditCount(), "0");
+  });
+
+  it("refuses to pair a schedule with another schedule's revocation receipt", () => {
+    const a = target("acq-sweep");
+    const b = target("intent-sweep");
+    const revokedA = revoke(a);
+    revoke(b);
+    assert.equal(fenceState("acq-sweep").generation, "2");
+    assert.equal(fenceState("intent-sweep").generation, "2");
+    // Both receipts have fence_sequence 1 and generation 2: only the schedule
+    // identity distinguishes them.
+    sql(
+      owner(
+        reopenArgs(revokedA.command, {
+          schedule: "intent-sweep",
+          expectedGeneration: "2",
+          fenceSequence: "1",
+        }).call,
+      ),
+      /PLATFORM_EGRESS_REOPEN_UNPAIRED_FENCE/,
+    );
+    assert.equal(fenceState("intent-sweep").state, "DISABLED");
+    assert.equal(auditCount(), "0");
+    // A receipt whose sequence no longer matches the fence sequence while the
+    // generation still matches is also refused (defense in depth).
+    sql(
+      owner(
+        `UPDATE platform_egress_schedule_fence SET fence_sequence=2 WHERE schedule_id='acq-sweep'`,
+      ),
+    );
+    sql(
+      owner(
+        reopenArgs(revokedA.command, {
+          expectedGeneration: "2",
+          fenceSequence: "1",
+        }).call,
+      ),
+      /PLATFORM_EGRESS_REOPEN_UNPAIRED_FENCE/,
+    );
+    assert.equal(fenceState("acq-sweep").state, "DISABLED");
+    assert.equal(auditCount(), "0");
+  });
+
+  it("maps SECURITY_RESPONSE to SECURITY_CLEARED and rejects other reasons", () => {
+    const t = target("sanctions-refresh");
+    const revoked = revoke(t, { reason: "SECURITY_RESPONSE" });
+    sql(
+      owner(reopenArgs(revoked.command, { reasonCode: "HOLD_RELEASED" }).call),
+      /PLATFORM_EGRESS_REOPEN_REASON_MISMATCH/,
+    );
+    const { args, result } = reopen(revoked.command);
+    assert.equal(result.replay, false);
+    assert.equal(fenceState("sanctions-refresh").state, "ACTIVE");
+    assert.equal(auditRow(args.reopenJti).reason_code, "SECURITY_CLEARED");
   });
 
   it("allows reopen without a published policy while keeping egress closed, then installs on the new generation", () => {
@@ -694,7 +748,7 @@ describe("audited platform egress fence reopen on self-owned disposable PostgreS
     const rejection = results.find((result) => result.status === "rejected");
     assert.match(
       String(rejection.reason),
-      /PLATFORM_EGRESS_REOPEN_(GENERATION_CONFLICT|NOT_DISABLED|UNPAIRED_FENCE)/,
+      /PLATFORM_EGRESS_REOPEN_NOT_DISABLED/,
     );
     assert.equal(fenceState("sanctions-refresh").state, "ACTIVE");
     assert.equal(auditCount(), "2");
@@ -714,7 +768,7 @@ describe("audited platform egress fence reopen on self-owned disposable PostgreS
     assert.equal(auditCount(), "1");
   });
 
-  it("requires the exact function owner even when the owner is not a superuser role", () => {
+  it("requires the exact function owner and rejects every other principal", () => {
     const t = target();
     const revoked = revoke(t);
     const { call } = reopenArgs(revoked.command);

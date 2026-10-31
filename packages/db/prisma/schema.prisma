@@ -298,7 +298,8 @@ model PlatformRevocationReceipt {
 }
 
 /// Immutable operator audit of a receipt-paired egress fence reopen. Only
-/// reopen_platform_egress_fence_v1 may insert; direct DML is a policy violation.
+/// reopen_platform_egress_fence_v1 may insert; never write through Prisma
+/// nested creates or direct DML (policy violation; DB grants deny it anyway).
 model PlatformEgressFenceReopenReceipt {
   id                       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   reopenJti                String   @unique(map: "platform_egress_fence_reopen_receipt_reopen_jti_key") @map("reopen_jti") @db.Uuid
