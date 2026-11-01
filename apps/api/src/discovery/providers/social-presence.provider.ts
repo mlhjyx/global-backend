@@ -11,6 +11,7 @@ import {
 } from '../provider-contract';
 import {
   MAX_CONTACTS_PER_DISCOVERY_ADAPTER,
+  MAX_SOCIAL_DORKS,
   MAX_SOCIAL_PROFILE_FETCHES,
 } from '../execution-envelope';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
@@ -96,7 +97,7 @@ export function buildSocialDorks(
   if (company.domain) {
     queries.push(`site:linkedin.com/in "${company.name.trim()}" "${company.domain}"`);
   }
-  return [...new Set(queries)].slice(0, 4);
+  return [...new Set(queries)].slice(0, MAX_SOCIAL_DORKS);
 }
 
 const HEADLINE_SEGMENT = /\s*[|·]\s*|\s+[–—-]\s+/;

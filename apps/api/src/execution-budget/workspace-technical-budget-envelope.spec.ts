@@ -188,13 +188,32 @@ describe('workspace execution technical envelope catalog', () => {
     expect(envelope.requiredCapMicrousd).toBe(587n * 10_000n);
   });
 
-  it('fails closed for contact discovery, which stays outside the company-level chain', () => {
-    expect(() =>
-      resolveWorkspaceTechnicalBudgetEnvelope({
-        operation: 'POST /canonical-companies/:id/discover-contacts',
-        companyId: COMPANY_ID,
+  it('quotes one on-demand contact discovery from the per-company adapter ceilings', () => {
+    const envelope = resolveWorkspaceTechnicalBudgetEnvelope({
+      operation: 'POST /canonical-companies/:id/discover-contacts',
+      companyId: COMPANY_ID,
+    });
+
+    expect(envelope.policy.models).toEqual([
+      expect.objectContaining({
+        taskId: 'contact.find_decision_makers',
+        logicalInvocations: 8,
+        structuredWireUpperBound: 2,
+        maxCostCents: 15,
       }),
-    ).toThrow('EXECUTION_BUDGET_QUOTE_UNAVAILABLE');
+    ]);
+    expect(
+      envelope.policy.tools.map((item) => [item.toolId, item.maxPhysicalInvocations]),
+    ).toEqual([
+      ['crawl4ai.fetch', 8],
+      ['social.search', 4],
+      ['social.fetch', 12],
+      ['companies_house.search', 2],
+      ['inpi_rne.search', 1],
+      ['google_patents.search', 1],
+    ]);
+    // 8×2×15 (model reservation) + 8×1 (crawl4ai.fetch) + 12×1 (social.fetch) = 260 cents.
+    expect(envelope.requiredCapMicrousd).toBe(260n * 10_000n);
   });
 
   it.each([

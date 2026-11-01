@@ -88,12 +88,19 @@ describe('WorkspaceTechnicalBudgetQuoteController', () => {
     });
   });
 
-  it('keeps incomplete physical envelopes fail-closed as 503', () => {
-    expect(() =>
+  it('quotes on-demand contact discovery bound to the company subject', () => {
+    expect(
       controller().quote(CTX, {
         operation: 'POST /canonical-companies/:id/discover-contacts',
         companyId: '30000000-0000-4000-8000-000000000003',
       }),
-    ).toThrow('EXECUTION_BUDGET_QUOTE_UNAVAILABLE');
+    ).toEqual({
+      data: expect.objectContaining({
+        purpose: 'discovery.run',
+        subjectType: 'company',
+        subjectId: '30000000-0000-4000-8000-000000000003',
+        requiredCapMicrousd: '2600000',
+      }),
+    });
   });
 });

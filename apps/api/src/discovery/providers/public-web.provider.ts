@@ -28,7 +28,10 @@ import { cleanEmail } from '../../acquisition/clean';
 import { canonicalizeSuppressionValue } from '../suppression-value';
 import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
-import { MAX_PUBLIC_WEB_DOMAINS_PER_QUERY } from '../execution-envelope';
+import {
+  MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES,
+  MAX_PUBLIC_WEB_DOMAINS_PER_QUERY,
+} from '../execution-envelope';
 import { isControlledBusinessTerm, isStableSafeHttpsUrl } from '../raw-source-provider-normalizer';
 import { COUNTRY_ISO, lookupCountryIso } from '../vocab';
 import { sanitizeEvidenceUrl } from '../../site-builder/agents/evidence-ref';
@@ -359,7 +362,7 @@ export class PublicWebDiscoveryProvider
       const links = extractSameSiteLinks(home.data.text, base).filter((l) =>
         /contact|kontakt|impressum|imprint|about|legal/i.test(l),
       );
-      for (const link of links.slice(0, 2)) {
+      for (const link of links.slice(0, MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES)) {
         try {
           const p = await crawl(link);
           pages.push({ url: link, text: p.data.text.slice(0, 40_000) });
