@@ -101,20 +101,24 @@ describe('OpenAPI authorization scope contract', () => {
     expect(
       operation(spec, 'get', '/api/v1/suppressions')['x-required-scopes'],
     ).toEqual(['compliance:manage']);
+    // M4: named-contact surfaces use the narrow contact-discovery:read, not personal-data:read,
+    // so saas-admin can work on contacts without opening events/lead detail/site-builder PII.
     expect(
       operation(spec, 'get', '/api/v1/canonical-companies/{id}')[
         'x-required-scopes'
       ],
-    ).toEqual(['acquisition:read', 'personal-data:read']);
-    expect(
-      operation(spec, 'post', '/api/v1/canonical-companies/{id}/guess-emails')[
-        'x-required-scopes'
-      ],
-    ).toEqual([
-      'acquisition:write',
-      'personal-data:read',
-      'compliance:manage',
-    ]);
+    ).toEqual(['acquisition:read', 'contact-discovery:read']);
+    for (const path of [
+      '/api/v1/canonical-companies/{id}/discover-contacts',
+      '/api/v1/canonical-companies/{id}/guess-emails',
+      '/api/v1/contact-points/{pointId}/verify',
+    ]) {
+      expect(operation(spec, 'post', path)['x-required-scopes']).toEqual([
+        'acquisition:write',
+        'contact-discovery:read',
+        'compliance:manage',
+      ]);
+    }
     // BI-22: the weekly CSV leaves the platform, so reading leads is not enough.
     expect(
       operation(spec, 'get', '/api/v1/reports/weekly')['x-required-scopes'],
