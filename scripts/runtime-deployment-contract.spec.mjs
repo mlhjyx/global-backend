@@ -950,8 +950,12 @@ function assertGhcrPublicationContract(workflow) {
   assert.match(workflow, /docker save/);
   assert.match(workflow, /manifest\.json/);
   assert.match(workflow, /sha256sum/);
-  assert.equal(workflow.match(/node scripts\/docker-image-config-path\.mjs/g)?.length, 2);
-  assert.match(workflow, /docker image inspect --format '\{\{\.Id\}\}' "\$\{IMAGE_REFERENCE\}"\)" = "\$\{LOCAL_IMAGE_ID\}"/);
+  assert.equal(workflow.match(/node scripts\/docker-image-config-path\.mjs/g)?.length, 3);
+  // 身份校验与 Docker 存储驱动无关（2026-11-01 runner 切到 containerd 存储后 .Id 变为
+  // manifest 摘要）：构建侧自校验归档内 Config 条目，发布侧比对拉回镜像的 config 字节哈希。
+  assert.match(workflow, /printf 'config_digest=%s\\n' "\$\{CONFIG_DIGEST\}" >> "\$\{GITHUB_OUTPUT\}"/);
+  assert.match(workflow, /docker save --output "\$\{PULLED_ARCHIVE\}" "\$\{IMAGE_REFERENCE\}"/);
+  assert.match(workflow, /test "sha256:\$\(sha256sum "\$\{PULLED_CONFIG\}" \| cut -d ' ' -f 1\)" = "\$\{LOCAL_CONFIG_DIGEST\}"/);
   assert.match(workflow, /docker pull "\$\{IMAGE_REFERENCE\}"/);
   assert.equal(workflow.match(/runtime-image-verifier\.mjs \/app/g)?.length, 2);
   assert.equal(workflow.match(/gh attestation verify/g)?.length, 3);
