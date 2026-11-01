@@ -62,6 +62,14 @@ export const MAX_UNDERSTANDING_SUBPAGES = 6 as const;
 export const MAX_CONTACT_DISCOVERY_ADAPTERS = 6 as const;
 export const MAX_CONTACTS_PER_DISCOVERY_ADAPTER = 25 as const;
 export const MAX_DECISION_MAKER_PAGES = 4 as const;
+/** public_web 联系人路径：首页之外最多再抓的 contact/impressum/about 页数。 */
+export const MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES = 2 as const;
+/** social_presence 索引层：每家最多发出的社媒 dork 数（buildSocialDorks 上限）。 */
+export const MAX_SOCIAL_DORKS = 4 as const;
+/** social_presence 档案/直抓层：每个候选页最多 3 次抓取（Wayback availability + 档案副本 + 直抓）。 */
+export const MAX_SOCIAL_FETCHES_PER_CANDIDATE = 3 as const;
+/** companies_house 联系人发现：公司搜索 + officers 两次调用。 */
+export const MAX_COMPANIES_HOUSE_CONTACT_CALLS = 2 as const;
 /** social_presence 档案/直抓层：每家最多补抓的候选个人页数（D5 每家页数上限的社媒部分）。 */
 export const MAX_SOCIAL_PROFILE_FETCHES = 4 as const;
 export const MAX_EMAIL_GUESS_CONTACTS = 25 as const;
