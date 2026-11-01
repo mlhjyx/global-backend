@@ -38,6 +38,22 @@ describe('WorkspaceTechnicalBudgetQuoteController', () => {
     });
   });
 
+  it('quotes an understanding retry for the addressed company', () => {
+    expect(
+      controller().quote(CTX, {
+        operation: 'POST /companies/:companyId/understanding/retry',
+        companyId: '30000000-0000-4000-8000-000000000003',
+      }),
+    ).toEqual({
+      data: expect.objectContaining({
+        schemaVersion: 'execution-budget-technical-quote/v1',
+        authorityKind: 'WORKSPACE_GRANT',
+        purpose: 'understanding.run',
+        requiredCapMicrousd: '5870000',
+      }),
+    });
+  });
+
   it('rejects unknown top-level fields instead of hashing a silently stripped request', () => {
     expect(() =>
       controller().quote(CTX, {

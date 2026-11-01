@@ -83,6 +83,7 @@ export const WORKSPACE_EXECUTION_QUOTE_OPERATIONS = Object.freeze([
   'POST /canonical-companies/:id/guess-emails',
   'POST /contact-points/:pointId/verify',
   'POST /leads/:leadId/outreach-drafts',
+  'POST /companies/:companyId/understanding/retry',
 ] as const satisfies readonly WorkspaceExecutionBudgetRequest['operation'][]);
 
 const MICROUSD_PER_CENT = 10_000n;
@@ -447,6 +448,8 @@ export function resolveWorkspaceTechnicalBudgetEnvelope(
         },
       );
     case 'POST /companies':
+      return understandingRunEnvelope(request);
+    case 'POST /companies/:companyId/understanding/retry':
       return understandingRunEnvelope(request);
     case 'POST /query-plans/:planId/execute':
       return discoveryRunEnvelope(request);
