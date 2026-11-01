@@ -16683,7 +16683,7 @@
             "type": "string",
             "format": "date-time",
             "nullable": true,
-            "description": "最近一次理解失败的时间；非空且状态为 DRAFT 时表示可以重试"
+            "description": "最近一次理解失败的时间；非空且状态为 DRAFT 时表示可以重试（老响应没有该字段时视为未知）"
           },
           "understandingLastError": {
             "type": "string",
@@ -16703,8 +16703,6 @@
           "industry",
           "summary",
           "publicContacts",
-          "understandingFailedAt",
-          "understandingLastError",
           "createdAt"
         ]
       },

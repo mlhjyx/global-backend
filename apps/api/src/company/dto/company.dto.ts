@@ -40,13 +40,15 @@ export class CompanyDto {
     type: String,
     format: 'date-time',
     nullable: true,
-    description: '最近一次理解失败的时间；非空且状态为 DRAFT 时表示可以重试',
+    required: false,
+    description: '最近一次理解失败的时间；非空且状态为 DRAFT 时表示可以重试（老响应没有该字段时视为未知）',
   })
   understandingFailedAt!: string | null;
 
   @ApiProperty({
     type: String,
     nullable: true,
+    required: false,
     description: '最近一次理解失败的错误标签（stage:ErrorType，如 extract:ProviderHttpError）',
   })
   understandingLastError!: string | null;
