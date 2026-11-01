@@ -202,15 +202,18 @@ jobs:
           test "${SUBJECT_SHA}" = "${MAIN_SHA}"
           test "$(git rev-parse HEAD)" = "${SUBJECT_SHA}"
           timeout 15m docker push "${IMAGE_TAG}"
-          # GHCR 标签可见性是最终一致的（2026-11-01 实测可超过 30 秒）；resolve 脚本自身
-          # 的 --wait-ms 上限为 60s，因此在其外层再包一层有限重试（每轮 60s+15s 间隔）。
+          # GHCR 标签可见性是最终一致的（2026-11-01 实测可超过 60 秒）；resolve 脚本
+          # 无论 FOUND/NOT_FOUND 都以退出码 0 返回（NOT_FOUND 会向 GITHUB_OUTPUT 写
+          # exists=false），因此按其 stdout 的 status 字段重试，而不是看退出码。
           RESOLVED=0
           for attempt in 1 2 3 4; do
-            if node scripts/ghcr-runtime-publication.mjs resolve \
+            RESOLVE_OUT="$(node scripts/ghcr-runtime-publication.mjs resolve \
               --image mlhjyx/global-backend \
               --tag "${SUBJECT_SHA}" \
               --github-output "${GITHUB_OUTPUT}" \
-              --wait-ms 60000; then
+              --wait-ms 60000)"
+            printf '%s\n' "${RESOLVE_OUT}"
+            if printf '%s' "${RESOLVE_OUT}" | grep -q '"status":"FOUND"'; then
               RESOLVED=1
               break
             fi
