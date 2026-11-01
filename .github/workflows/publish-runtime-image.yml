@@ -89,7 +89,14 @@ jobs:
           docker save --output "${ARCHIVE}" "${IMAGE_REFERENCE}"
           CONFIG_NAME="$(tar -xOf "${ARCHIVE}" manifest.json | node scripts/docker-image-config-path.mjs)"
           tar -xOf "${ARCHIVE}" "${CONFIG_NAME}" > "${CONFIG_PATH}"
-          test "sha256:$(sha256sum "${CONFIG_PATH}" | cut -d ' ' -f 1)" = "${IMAGE_ID}"
+          CONFIG_DIGEST="sha256:$(sha256sum "${CONFIG_PATH}" | cut -d ' ' -f 1)"
+          CONFIG_NAME_HEX="$(basename "${CONFIG_NAME}")"
+          CONFIG_NAME_HEX="${CONFIG_NAME_HEX%.json}"
+          CONFIG_NAME_HEX="${CONFIG_NAME_HEX#sha256:}"
+          # 与构建步骤相同的存储驱动无关自校验（containerd 存储下 .Id 是 manifest/index 摘要）。
+          if [ "${IMAGE_ID}" != "${CONFIG_DIGEST}" ]; then
+            test "sha256:${CONFIG_NAME_HEX}" = "${CONFIG_DIGEST}"
+          fi
 
           set +e
           gh attestation verify "oci://${IMAGE_REFERENCE}" \
@@ -199,7 +206,7 @@ jobs:
             --image mlhjyx/global-backend \
             --tag "${SUBJECT_SHA}" \
             --github-output "${GITHUB_OUTPUT}" \
-            --wait-ms 30000
+            --wait-ms 120000
           IMAGE_REFERENCE="$(sed -n 's/^image_reference=//p' "${GITHUB_OUTPUT}" | tail -n 1)"
           DIGEST="$(sed -n 's/^image_digest=//p' "${GITHUB_OUTPUT}" | tail -n 1)"
           [[ "${IMAGE_REFERENCE}" =~ ^ghcr\.io/mlhjyx/global-backend@sha256:[0-9a-f]{64}$ ]]

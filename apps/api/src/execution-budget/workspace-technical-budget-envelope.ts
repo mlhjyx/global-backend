@@ -1,6 +1,10 @@
 import { getTask } from '../ai-tasks/task-registry';
 import {
+  MAX_COMPANIES_HOUSE_CONTACT_CALLS,
   MAX_COMPANY_DISCOVERY_ADAPTERS,
+  MAX_CONTACT_DISCOVERY_ADAPTERS,
+  MAX_CONTACTS_PER_DISCOVERY_ADAPTER,
+  MAX_DECISION_MAKER_PAGES,
   MAX_DIGITAL_FOOTPRINT_RENDERS,
   MAX_DIRECTORY_LISTING_PAGES,
   MAX_DIRECTORY_PAGINATION,
@@ -18,12 +22,16 @@ import {
   MAX_EMAIL_PROBE_CANDIDATES,
   MAX_EMAIL_VERIFY_PHYSICAL_CALLS_PER_TARGET,
   MAX_GLEIF_FETCHES_PER_COMPANY,
+  MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES,
   MAX_PUBLIC_WEB_DOMAINS_PER_QUERY,
   MAX_PUBLIC_WEB_SEARCHES_PER_QUERY,
   MAX_QUERY_TAXONOMY_COUNTRY_TERMS,
   MAX_QUERY_TAXONOMY_INDUSTRY_TERMS,
   MAX_SINGLE_SEARCH_WIRES_PER_QUERY,
   MAX_SITEMAP_HTTP_GETS,
+  MAX_SOCIAL_DORKS,
+  MAX_SOCIAL_FETCHES_PER_CANDIDATE,
+  MAX_SOCIAL_PROFILE_FETCHES,
   MAX_STRUCTURED_HARVEST_HTTP_GETS,
   MAX_STRUCTURED_HARVEST_RENDERS,
   MAX_UNDERSTANDING_SUBPAGES,
@@ -40,12 +48,17 @@ import {
   osmOverpassTool,
   searxngSearchTool,
   smtpRcptProbeTool,
+  socialFetchTool,
+  socialSearchTool,
   wikidataTool,
 } from '../tools/builtin-tools';
 import {
+  companiesHouseSearchTool,
   crawl4aiRenderTool,
   gleifFetchTool,
+  googlePatentsSearchTool,
   httpGetTool,
+  inpiRneSearchTool,
   openFdaSearchTool,
   tedSearchTool,
   tradeFairAlgoliaTool,
@@ -224,6 +237,51 @@ function discoveryRunEnvelope(
   );
 }
 
+/**
+ * On-demand named-contact discovery for one company (M4): the worst-case fan-out of the six
+ * contact adapters at their own enforced ceilings. Adapter bounds mirrored here:
+ * - decision_maker: homepage + MAX_DECISION_MAKER_PAGES pages, one extraction per page;
+ * - public_web: homepage + MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES linked pages (deterministic, no model);
+ * - companies_house: MAX_COMPANIES_HOUSE_CONTACT_CALLS registry calls (search + officers);
+ * - inpi_rne: one registry call;
+ * - social_presence: MAX_SOCIAL_DORKS index searches + MAX_SOCIAL_PROFILE_FETCHES candidates ×
+ *   MAX_SOCIAL_FETCHES_PER_CANDIDATE fetches (wayback availability + archive + live), one
+ *   extraction per fetched page;
+ * - bigquery_patents: one BigQuery call (cache mode may skip it).
+ * The cap is a reservation ceiling, not the D5 spend target: actual usage settles per call, so a
+ * company that hits fewer adapters spends far less.
+ */
+function contactDiscoveryEnvelope(
+  request: WorkspaceExecutionBudgetRequest,
+): WorkspaceTechnicalBudgetEnvelope {
+  const decisionMakerFetches = 1 + MAX_DECISION_MAKER_PAGES;
+  const publicWebFetches = 1 + MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES;
+  const extractInvocations = MAX_DECISION_MAKER_PAGES + MAX_SOCIAL_PROFILE_FETCHES;
+  const socialFetches = MAX_SOCIAL_PROFILE_FETCHES * MAX_SOCIAL_FETCHES_PER_CANDIDATE;
+  return ready(
+    request,
+    [model('contact.find_decision_makers', extractInvocations)],
+    [
+      tool(contract(crawl4aiFetchTool), decisionMakerFetches + publicWebFetches),
+      tool(contract(socialSearchTool), MAX_SOCIAL_DORKS),
+      tool(contract(socialFetchTool), socialFetches),
+      tool(contract(companiesHouseSearchTool), MAX_COMPANIES_HOUSE_CONTACT_CALLS),
+      tool(contract(inpiRneSearchTool), 1),
+      tool(contract(googlePatentsSearchTool), 1),
+    ],
+    {
+      adapters: MAX_CONTACT_DISCOVERY_ADAPTERS,
+      contactsPerAdapter: MAX_CONTACTS_PER_DISCOVERY_ADAPTER,
+      decisionMakerPages: MAX_DECISION_MAKER_PAGES,
+      publicWebLinkedPages: MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES,
+      socialDorks: MAX_SOCIAL_DORKS,
+      socialProfileFetches: MAX_SOCIAL_PROFILE_FETCHES,
+      socialFetchesPerCandidate: MAX_SOCIAL_FETCHES_PER_CANDIDATE,
+      modelLogicalInvocations: extractInvocations,
+    },
+  );
+}
+
 /** Seller understanding (POST /companies): homepage + subpages, per-page extraction. */
 function understandingRunEnvelope(
   request: WorkspaceExecutionBudgetRequest,
@@ -396,7 +454,8 @@ export function resolveWorkspaceTechnicalBudgetEnvelope(
     case 'POST /query-plans/:planId/execute':
       return discoveryRunEnvelope(request);
     case 'POST /canonical-companies/:id/discover-contacts':
-      // Contact discovery is outside the company-level acquisition chain.
-      return unavailable();
+      // M4: on-demand contact discovery gets its own bounded per-company envelope (D5 bounds)
+      // instead of fail-closed; actual spend still settles per call against the workspace ledger.
+      return contactDiscoveryEnvelope(request);
   }
 }
