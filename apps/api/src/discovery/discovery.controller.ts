@@ -351,7 +351,7 @@ export class DiscoveryController {
   }
 
   @Get('canonical-companies/:id')
-  @RequireScopes('acquisition:read', 'personal-data:read')
+  @RequireScopes('acquisition:read', 'contact-discovery:read')
   @ApiOperation({ summary: '公司详情：canonical 视图 + 联系人 + 字段级 Evidence（每个字段值的来源）',
   })
   @ApiEnvelope(CANONICAL_COMPANY_SCHEMA)
@@ -362,7 +362,7 @@ export class DiscoveryController {
   @Post('canonical-companies/:id/discover-contacts')
   @RequireScopes(
     'acquisition:write',
-    'personal-data:read',
+    'contact-discovery:read',
     'compliance:manage')
   @HttpCode(201)
   @ApiOperation({ summary: '按需发现联系人（Waterfall 第5步：仅高价值企业；Suppression 先行过滤）',
@@ -412,7 +412,7 @@ export class DiscoveryController {
   @Post('contact-points/:pointId/verify')
   @RequireScopes(
     'acquisition:write',
-    'personal-data:read',
+    'contact-discovery:read',
     'compliance:manage')
   @HttpCode(200)
   @ApiOperation({
@@ -456,7 +456,7 @@ export class DiscoveryController {
   @Post('canonical-companies/:id/guess-emails')
   @RequireScopes(
     'acquisition:write',
-    'personal-data:read',
+    'contact-discovery:read',
     'compliance:manage')
   @HttpCode(200)
   @ApiOperation({
@@ -521,7 +521,7 @@ export class DiscoveryController {
   @ApiOperation({
     summary: '本 workspace 的禁联名单（workspace 隔离；租户 admin 可管理自己的禁联记录）',
     description:
-      '只返回调用方 workspace 的 suppression 记录。展示的是租户自己提交的合规登记，不是引擎采集的招揽联系人；个人数据面（联系人/事件流）仍要求 personal-data:read，不在此端点开放。',
+      '只返回调用方 workspace 的 suppression 记录。展示的是租户自己提交的合规登记，不是引擎采集的招揽联系人；个人数据面（事件流）仍要求 personal-data:read，联系人面走 contact-discovery:read，都不在此端点开放。',
   })
   @ApiPageEnvelope({ type: 'object', additionalProperties: true, description: 'Suppression 记录',
   })

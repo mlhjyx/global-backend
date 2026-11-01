@@ -96,9 +96,9 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
   'GET /api/v1/canonical-companies':
     '归一后的目标公司，游标分页；可用 ?status=NEW|ENRICHED|SUPPRESSED 过滤。',
   'GET /api/v1/canonical-companies/{id}':
-    '公司详情：canonical 视图 + 联系人 + 字段级 Evidence（每个字段值来自哪一页、哪段原文）。需要 personal-data:read。',
+    '公司详情：canonical 视图 + 联系人 + 字段级 Evidence（每个字段值来自哪一页、哪段原文）。需要 contact-discovery:read（只覆盖联系人数据面，不等于 personal-data:read）。',
   'POST /api/v1/canonical-companies/{id}/discover-contacts':
-    '按需发现联系人（Waterfall 第 5 步，只对高价值企业调用）：先过 suppression，再抽取联系人。必须带 lawfulBasis；缺 body 会在消耗预算前以 CONTACT_DISCOVERY_LAWFUL_BASIS_REQUIRED 拒绝。需要 personal-data:read 与 compliance:manage。',
+    '按需发现联系人（Waterfall 第 5 步，只对高价值企业调用）：先过 suppression，再抽取联系人。必须带 lawfulBasis；缺 body 会在消耗预算前以 CONTACT_DISCOVERY_LAWFUL_BASIS_REQUIRED 拒绝。需要 contact-discovery:read 与 compliance:manage。',
   'POST /api/v1/suppressions':
     '加入禁联名单（email / domain / company_name）；命中的公司立即转 SUPPRESSED。需要 compliance:manage。',
   'GET /api/v1/suppressions':
