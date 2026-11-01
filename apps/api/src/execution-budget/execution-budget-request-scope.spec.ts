@@ -30,6 +30,19 @@ const cases = [
   },
   {
     request: {
+      operation: 'POST /companies/:companyId/understanding/retry',
+      companyId: COMPANY_ID,
+    },
+    expected: {
+      purpose: 'understanding.run',
+      subjectType: 'company',
+      subjectId: COMPANY_ID,
+      requestSha256:
+        'c0e10394b44c3292380e11872247c73e289da634fd3bc4710768734521197feb',
+    },
+  },
+  {
+    request: {
       operation: 'POST /companies/:companyId/icps',
       companyId: COMPANY_ID,
     },
@@ -165,7 +178,7 @@ describe('workspaceExecutionBudgetRequestScope', () => {
         operation: 'POST /contact-points/:pointId/verify',
         pointId: POINT_ID,
       }),
-    ).toEqual(cases[6]!.expected);
+    ).toEqual(cases[7]!.expected);
 
     expect(() =>
       workspaceExecutionBudgetRequestScope({

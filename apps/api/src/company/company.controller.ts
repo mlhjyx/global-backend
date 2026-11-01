@@ -78,6 +78,28 @@ export class CompanyController {
     return pageEnvelope(r.data.map(CompanyDto.from), r);
   }
 
+  @Post(':companyId/understanding/retry')
+  @RequireScopes('acquisition:write')
+  @HttpCode(202)
+  @ApiOperation({
+    summary: '重试最近一次失败的企业官网理解（需要新的 Execution Budget Grant）',
+    description:
+      '只允许对最近一次理解失败、仍为 DRAFT 的档案重试；成功时重新入队理解工作流。' +
+      '原创建请求的 Grant 已消费，调用方必须先为 `POST /companies/:companyId/understanding/retry` 取新 quote 并签发 Grant。',
+  })
+  @ApiExecutionBudgetGrant()
+  @ApiEnvelope(CompanyDto, { status: 202 })
+  async retryUnderstanding(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId', ParseUUIDPipe) companyId: string,
+    @ExecutionBudgetGrant() compactJws?: string,
+  ): Promise<Enveloped<CompanyDto>> {
+    const { company } = await asExecutionBudgetHttpBoundary(() =>
+      this.companies.retryUnderstanding(ctx, companyId, compactJws),
+    );
+    return envelope(CompanyDto.from(company));
+  }
+
   @Get(':companyId')
   @ApiOperation({ summary: '按 id 获取企业画像（跨租户返回 404）' })
   @ApiEnvelope(CompanyDto)

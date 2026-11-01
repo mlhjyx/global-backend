@@ -3766,6 +3766,26 @@
                     "additionalProperties": false,
                     "required": [
                       "operation",
+                      "companyId"
+                    ],
+                    "properties": {
+                      "operation": {
+                        "type": "string",
+                        "enum": [
+                          "POST /companies/:companyId/understanding/retry"
+                        ]
+                      },
+                      "companyId": {
+                        "type": "string",
+                        "format": "uuid"
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "operation",
                       "icpId"
                     ],
                     "properties": {
@@ -5284,6 +5304,193 @@
           "acquisition:read"
         ],
         "description": "游标分页列出本 workspace 的企业画像：limit 默认 20、上限 100，返回 { data, page: { next_cursor, has_more } }。"
+      }
+    },
+    "/api/v1/companies/{companyId}/understanding/retry": {
+      "post": {
+        "description": "只允许对最近一次理解失败、仍为 DRAFT 的档案重试；成功时重新入队理解工作流。原创建请求的 Grant 已消费，调用方必须先为 `POST /companies/:companyId/understanding/retry` 取新 quote 并签发 Grant。",
+        "operationId": "CompanyController_retryUnderstanding_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Execution-Budget-Grant",
+            "in": "header",
+            "description": "SaaS signed authority bound to this exact workspace mutation",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/CompanyDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "EXECUTION_BUDGET_GRANT_REQUIRED, EXECUTION_BUDGET_GRANT_INVALID, EXECUTION_BUDGET_GRANT_EXPIRED or EXECUTION_BUDGET_AUTHORITY_EXHAUSTED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH or EXECUTION_BUDGET_AUTHORITY_REVOKED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "EXECUTION_BUDGET_GRANT_REUSED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "重试最近一次失败的企业官网理解（需要新的 Execution Budget Grant）",
+        "tags": [
+          "Companies"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ]
       }
     },
     "/api/v1/companies/{companyId}": {
@@ -16324,7 +16531,8 @@
               "POST /canonical-companies/:id/discover-contacts",
               "POST /canonical-companies/:id/guess-emails",
               "POST /contact-points/:pointId/verify",
-              "POST /leads/:leadId/outreach-drafts"
+              "POST /leads/:leadId/outreach-drafts",
+              "POST /companies/:companyId/understanding/retry"
             ]
           },
           "workspaceId": {
@@ -16471,6 +16679,17 @@
               "$ref": "#/components/schemas/PublicContactDto"
             }
           },
+          "understandingFailedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "description": "最近一次理解失败的时间；非空且状态为 DRAFT 时表示可以重试"
+          },
+          "understandingLastError": {
+            "type": "string",
+            "nullable": true,
+            "description": "最近一次理解失败的错误标签（stage:ErrorType，如 extract:ProviderHttpError）"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -16484,6 +16703,8 @@
           "industry",
           "summary",
           "publicContacts",
+          "understandingFailedAt",
+          "understandingLastError",
           "createdAt"
         ]
       },

@@ -39,6 +39,10 @@ export type WorkspaceExecutionBudgetRequest =
   | Readonly<{
       operation: 'POST /leads/:leadId/outreach-drafts';
       leadId: string;
+    }>
+  | Readonly<{
+      operation: 'POST /companies/:companyId/understanding/retry';
+      companyId: string;
     }>;
 
 export interface GuessEmailsHttpRequestBody {
@@ -110,6 +114,8 @@ function requestMaterial(request: WorkspaceExecutionBudgetRequest): JsonValue {
       };
     case 'POST /leads/:leadId/outreach-drafts':
       return { operation: request.operation, leadId: request.leadId };
+    case 'POST /companies/:companyId/understanding/retry':
+      return { operation: request.operation, companyId: request.companyId };
   }
 }
 
@@ -131,6 +137,13 @@ export function workspaceExecutionBudgetRequestScope(
     case 'POST /companies/:companyId/icps':
       return Object.freeze({
         purpose: 'icp.design',
+        subjectType: 'company',
+        subjectId: request.companyId,
+        requestSha256,
+      });
+    case 'POST /companies/:companyId/understanding/retry':
+      return Object.freeze({
+        purpose: 'understanding.run',
         subjectType: 'company',
         subjectId: request.companyId,
         requestSha256,

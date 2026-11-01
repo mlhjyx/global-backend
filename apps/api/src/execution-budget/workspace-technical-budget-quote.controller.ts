@@ -261,6 +261,12 @@ function parseRequest(value: unknown): WorkspaceExecutionBudgetRequest {
         operation: input.operation,
         companyId: uuid(input.companyId),
       });
+    case 'POST /companies/:companyId/understanding/retry':
+      exactKeys(input, ['operation', 'companyId']);
+      return Object.freeze({
+        operation: input.operation,
+        companyId: uuid(input.companyId),
+      });
     case 'POST /icps/:icpId/query-plans':
       exactKeys(input, ['operation', 'icpId']);
       return Object.freeze({
@@ -371,6 +377,11 @@ const WORKSPACE_QUOTE_REQUEST_SCHEMAS = [
   ),
   operationVariant(
     'POST /companies/:companyId/icps',
+    { companyId: { type: 'string', format: 'uuid' } },
+    ['companyId'],
+  ),
+  operationVariant(
+    'POST /companies/:companyId/understanding/retry',
     { companyId: { type: 'string', format: 'uuid' } },
     ['companyId'],
   ),

@@ -305,6 +305,62 @@ export class CompanyService {
     });
   }
 
+  /**
+   * 重新驱动一次理解：只允许对「最近一次理解失败、仍为 DRAFT」的档案使用。
+   * 需要调用方带来一份**新的** workspace Execution Budget Grant（原 Grant 在创建时
+   * 已消费，重试不能复用）；事件与创建路径同形（CompanyProfileCreated v2），
+   * outbox relay 以同一个 workflowId 重启工作流——Temporal 默认只允许复用已失败
+   * 的 workflowId，而这里恰好只在失败后开放重试。
+   */
+  async retryUnderstanding(
+    ctx: RequestContext,
+    companyId: string,
+    compactJws?: string,
+  ): Promise<{ company: CompanyRow }> {
+    const scope = workspaceExecutionBudgetRequestScope({
+      operation: 'POST /companies/:companyId/understanding/retry',
+      companyId,
+    });
+    const verified = await this.authority.verifyWorkspaceGrant({
+      compactJws,
+      identity: ctx,
+      scope,
+    });
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const company = await tx.companyProfile.findUnique({ where: { id: companyId } });
+      if (!company) {
+        throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'company not found' } });
+      }
+      if (company.status !== 'DRAFT' || company.understandingFailedAt === null) {
+        throw new ConflictException({
+          error: {
+            code: 'UNDERSTANDING_RETRY_NOT_ALLOWED',
+            message: '只在最近一次理解失败的 DRAFT 档案上允许重试',
+          },
+        });
+      }
+      const binding = await this.authority.consumeVerifiedWorkspaceGrantInTransaction(
+        verified,
+        tx,
+      );
+      assertFreshExecutionBudgetBinding(binding);
+      await tx.outboxEvent.create({
+        data: {
+          workspaceId: ctx.workspaceId,
+          eventType: 'CompanyProfileCreated',
+          schemaVersion: 2,
+          aggregateType: 'CompanyProfile',
+          aggregateId: company.id,
+          payload: {
+            website: company.website,
+            executionBudget: this.outboxBinding(binding),
+          },
+        },
+      });
+      return { company };
+    });
+  }
+
   /** 结构化产品/服务（理解工作流抽取，带溯源）。company 不存在时 404。 */
   async listOfferings(ctx: RequestContext, companyId: string) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {

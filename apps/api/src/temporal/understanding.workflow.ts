@@ -22,9 +22,17 @@ const crawlActs = proxyActivities<UnderstandingActivities>({
 });
 
 // Model extraction: one page per call; reasoning models can take a while.
+// 429 bursts from the model gateway last tens of seconds (2026-11-01: an
+// understanding run burned its 3 quick attempts in ~3s). Back off long enough
+// that a burst can clear: 5s → 10s → 20s → 40s, ~75s of cover.
 const modelActs = proxyActivities<UnderstandingActivities>({
   startToCloseTimeout: '3 minutes',
-  retry: { maximumAttempts: 3 },
+  retry: {
+    maximumAttempts: 5,
+    initialInterval: '5 seconds',
+    backoffCoefficient: 2,
+    maximumInterval: '60 seconds',
+  },
 });
 
 // DB writes are fast and idempotent enough for quick retries.

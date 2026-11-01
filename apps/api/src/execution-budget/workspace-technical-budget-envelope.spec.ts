@@ -11,7 +11,7 @@ const PLAN_ID = '50000000-0000-4000-8000-000000000005';
 const LEAD_ID = '60000000-0000-4000-8000-000000000006';
 
 describe('workspace execution technical envelope catalog', () => {
-  it('machine-enumerates all and only the eight workspace operations', () => {
+  it('machine-enumerates all and only the nine workspace operations', () => {
     expect(WORKSPACE_EXECUTION_QUOTE_OPERATIONS).toEqual([
       'POST /companies',
       'POST /companies/:companyId/icps',
@@ -21,6 +21,7 @@ describe('workspace execution technical envelope catalog', () => {
       'POST /canonical-companies/:id/guess-emails',
       'POST /contact-points/:pointId/verify',
       'POST /leads/:leadId/outreach-drafts',
+      'POST /companies/:companyId/understanding/retry',
     ]);
   });
 
@@ -185,6 +186,24 @@ describe('workspace execution technical envelope catalog', () => {
     ).toEqual([['crawl4ai.fetch', 7]]);
     expect(envelope.policy.executionLimits).toEqual({ pages: 7, subpages: 6 });
     // 7×2×20 + 7×2×20 + 1×2×10 + 7×1 = 587 cents
+    expect(envelope.requiredCapMicrousd).toBe(587n * 10_000n);
+  });
+
+  it('quotes understanding retry with the same bounded envelope as creation', () => {
+    const envelope = resolveWorkspaceTechnicalBudgetEnvelope({
+      operation: 'POST /companies/:companyId/understanding/retry',
+      companyId: COMPANY_ID,
+    });
+
+    expect(envelope.policy.models).toEqual([
+      expect.objectContaining({ taskId: 'company_understanding.extract_claims', logicalInvocations: 7 }),
+      expect.objectContaining({ taskId: 'company_understanding.extract_offerings', logicalInvocations: 7 }),
+      expect.objectContaining({ taskId: 'company_understanding.extract_profile', logicalInvocations: 1 }),
+    ]);
+    expect(
+      envelope.policy.tools.map((item) => [item.toolId, item.maxPhysicalInvocations]),
+    ).toEqual([['crawl4ai.fetch', 7]]);
+    expect(envelope.policy.executionLimits).toEqual({ pages: 7, subpages: 6 });
     expect(envelope.requiredCapMicrousd).toBe(587n * 10_000n);
   });
 

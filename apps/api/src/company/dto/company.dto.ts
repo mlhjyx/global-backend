@@ -36,6 +36,21 @@ export class CompanyDto {
   })
   publicContacts!: PublicContactDto[];
 
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: '最近一次理解失败的时间；非空且状态为 DRAFT 时表示可以重试',
+  })
+  understandingFailedAt!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: '最近一次理解失败的错误标签（stage:ErrorType，如 extract:ProviderHttpError）',
+  })
+  understandingLastError!: string | null;
+
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;
 
@@ -47,6 +62,8 @@ export class CompanyDto {
     industry?: string | null;
     summary?: string | null;
     publicContacts?: unknown;
+    understandingFailedAt?: Date | null;
+    understandingLastError?: string | null;
     createdAt: Date;
   }): CompanyDto {
     return {
@@ -57,6 +74,8 @@ export class CompanyDto {
       industry: c.industry ?? null,
       summary: c.summary ?? null,
       publicContacts: Array.isArray(c.publicContacts) ? (c.publicContacts as PublicContactDto[]) : [],
+      understandingFailedAt: c.understandingFailedAt ? c.understandingFailedAt.toISOString() : null,
+      understandingLastError: c.understandingLastError ?? null,
       createdAt: c.createdAt.toISOString(),
     };
   }
