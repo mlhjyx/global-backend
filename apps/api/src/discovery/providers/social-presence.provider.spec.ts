@@ -10,7 +10,6 @@ import {
   pickCandidatePerson,
   pickWaybackSnapshot,
   SocialHostCircuit,
-  SocialHostPacer,
   SocialPresenceContactAdapter,
   socialHostKey,
 } from './social-presence.provider';
@@ -91,7 +90,6 @@ describe('social presence contact adapter (M2a: search index only)', () => {
     });
     const adapter = new SocialPresenceContactAdapter({
       broker: { invoke } as never,
-      pacer: new SocialHostPacer(0),
     });
 
     const result = await adapter.discoverContacts(COMPANY, {
@@ -233,7 +231,7 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
           costCents: 0,
         };
       }
-      if (tool === 'http.get' && input.url?.startsWith('https://archive.org/wayback/available')) {
+      if (tool === 'social.fetch' && input.url?.startsWith('https://archive.org/wayback/available')) {
         return {
           data: {
             status: 200,
@@ -245,7 +243,7 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
           costCents: 0,
         };
       }
-      if (tool === 'http.get' && input.url?.startsWith('https://web.archive.org/')) {
+      if (tool === 'social.fetch' && input.url?.startsWith('https://web.archive.org/')) {
         return {
           data: { status: 200, ok: true, text: `<html><body>${PROFILE_TEXT}</body></html>` },
           costCents: 0,
@@ -267,7 +265,6 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
     const adapter = new SocialPresenceContactAdapter({
       broker: { invoke } as never,
       extract,
-      pacer: new SocialHostPacer(0),
     });
 
     const result = await adapter.discoverContacts(COMPANY, {
@@ -308,10 +305,10 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
           costCents: 0,
         };
       }
-      if (tool === 'http.get' && input.url?.startsWith('https://archive.org/wayback/available')) {
+      if (tool === 'social.fetch' && input.url?.startsWith('https://archive.org/wayback/available')) {
         return { data: { status: 200, ok: true, text: '{"archived_snapshots":{}}' }, costCents: 0 };
       }
-      if (tool === 'http.get') {
+      if (tool === 'social.fetch') {
         liveCalls += 1;
         return {
           data: {
@@ -328,7 +325,6 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
     const adapter = new SocialPresenceContactAdapter({
       broker: { invoke } as never,
       extract,
-      pacer: new SocialHostPacer(0),
     });
 
     const result = await adapter.discoverContacts(COMPANY, { workspaceId: 'ws-1', runId: 'run-1' } as never);
@@ -363,7 +359,6 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
     const adapter = new SocialPresenceContactAdapter({
       broker: { invoke: refusalInvoke } as never,
       extract: async () => [{ full_name: 'Max Mustermann', title: 'Einkaufsleiter' }],
-      pacer: new SocialHostPacer(0),
       circuit,
     });
     const first = await adapter.discoverContacts(COMPANY, { workspaceId: 'ws-1', runId: 'run-1' } as never);
@@ -391,7 +386,6 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
     const blockedResult = await new SocialPresenceContactAdapter({
       broker: { invoke: blockedInvoke } as never,
       extract: async () => [],
-      pacer: new SocialHostPacer(0),
       circuit: new SocialHostCircuit(),
     }).discoverContacts(COMPANY, { workspaceId: 'ws-1', runId: 'run-1' } as never);
     expect(blockedResult.diagnostics?.social_blocked).toBeUndefined();
@@ -439,7 +433,6 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
       extract: async (_u, text) => (text.includes('Musterfrau')
         ? [{ full_name: 'Erika Musterfrau', title: 'Einkauf' }]
         : [{ full_name: 'Max Mustermann', title: 'Einkaufsleiter' }]),
-      pacer: new SocialHostPacer(0),
       circuit,
     });
 
@@ -481,7 +474,6 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
       extract: async () => [
         { full_name: 'Max Mustermann', title: 'Einkaufsleiter', email: 'max.mustermann(at)pumpen-schmid.de' },
       ],
-      pacer: new SocialHostPacer(0),
     });
 
     const result = await adapter.discoverContacts(COMPANY, { workspaceId: 'ws-1', runId: 'run-1' } as never);
@@ -502,23 +494,6 @@ describe('social presence M2b: archive copies and live public pages (D1)', () =>
     expect(circuit.isOpen('linkedin.com')).toBe(false);
     circuit.recordRefusal('linkedin.com');
     expect(circuit.isOpen('linkedin.com')).toBe(false); // strike counter was reset after cooldown
-  });
-
-  it('paces live fetches per host at one request per interval', async () => {
-    const sleeps: number[] = [];
-    let now = 0;
-    const pacer = new SocialHostPacer(3_000, {
-      now: () => now,
-      sleep: async (ms) => {
-        sleeps.push(ms);
-        now += ms;
-      },
-    });
-    await pacer.wait('linkedin.com'); // 首次无等待
-    now += 1_000;
-    await pacer.wait('linkedin.com'); // 距上次 1s → 等 2s
-    await pacer.wait('xing.com'); // 另一域名 → 无等待
-    expect(sleeps).toEqual([2_000]);
   });
 
   it('returns nothing without a broker (fail-closed, no raw egress)', async () => {

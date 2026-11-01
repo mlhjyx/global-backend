@@ -774,11 +774,11 @@
       ]
     },
     {
-      "key": "apps/api/src/discovery/providers/social-presence.provider.ts#http.get#1",
+      "key": "apps/api/src/discovery/providers/social-presence.provider.ts#social.fetch#1",
       "kind": "tool",
-      "producerId": "http.get",
-      "resultStrategy": "artifact_reference",
-      "resultSchema": "http-get/v1",
+      "producerId": "social.fetch",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "social-fetch/v1",
       "receiptMode": "ACK_REQUIRED",
       "consumerChecks": [
         {
@@ -788,11 +788,11 @@
       ]
     },
     {
-      "key": "apps/api/src/discovery/providers/social-presence.provider.ts#http.get#2",
+      "key": "apps/api/src/discovery/providers/social-presence.provider.ts#social.fetch#2",
       "kind": "tool",
-      "producerId": "http.get",
-      "resultStrategy": "artifact_reference",
-      "resultSchema": "http-get/v1",
+      "producerId": "social.fetch",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "social-fetch/v1",
       "receiptMode": "ACK_REQUIRED",
       "consumerChecks": [
         {
@@ -802,11 +802,11 @@
       ]
     },
     {
-      "key": "apps/api/src/discovery/providers/social-presence.provider.ts#http.get#3",
+      "key": "apps/api/src/discovery/providers/social-presence.provider.ts#social.fetch#3",
       "kind": "tool",
-      "producerId": "http.get",
-      "resultStrategy": "artifact_reference",
-      "resultSchema": "http-get/v1",
+      "producerId": "social.fetch",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "social-fetch/v1",
       "receiptMode": "ACK_REQUIRED",
       "consumerChecks": [
         {

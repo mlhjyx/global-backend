@@ -4,7 +4,7 @@ import { requestPublicHttp, type PublicHttpResponse } from "../adapters/guarded-
 import { isAllowedByRobots } from "../adapters/robots";
 import { crawlHtml } from "../adapters/web-crawler";
 import { queryAlgoliaExhibitors } from "../adapters/trade-fair-algolia";
-import { registerBuiltinTools } from "./builtin-tools";
+import { registerBuiltinTools, socialFetchTool } from "./builtin-tools";
 import {
   crawl4aiRenderTool,
   httpGetTool,
@@ -43,6 +43,7 @@ const DECLARED = [
   "http.get",
   "mapyourshow.fetch",
   "sanctions.download",
+  "social.fetch",
   "tradefair.algolia",
 ];
 
@@ -75,6 +76,13 @@ describe("Tools that declare their physical wires to ToolBroker (D13)", () => {
       .map((tool) => tool.id)
       .sort();
     expect(declared).toEqual(DECLARED);
+  });
+
+  it("social.fetch hands the Broker's hook to its one guarded request", async () => {
+    vi.mocked(requestPublicHttp).mockResolvedValueOnce(response({ body: Buffer.from("profile"), text: "profile" }));
+    await socialFetchTool.execute({ url: "https://www.linkedin.com/in/max-mustermann" }, context);
+    expect(requestPublicHttp).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(requestPublicHttp).mock.calls[0]![2]).toMatchObject({ beforePhysicalWire });
   });
 
   it("http.get hands the Broker's hook to its one guarded request (every hop calls it)", async () => {

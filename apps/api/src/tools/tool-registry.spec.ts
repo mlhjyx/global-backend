@@ -85,7 +85,7 @@ describe("ToolRegistry durable result strategy admission", () => {
       ...Object.values(SOURCE_RESULT_PROJECTION_SCHEMAS),
     ]);
 
-    expect(tools).toHaveLength(19);
+    expect(tools).toHaveLength(20);
     for (const registered of tools) {
       const strategy = Reflect.get(registered, "durableResultStrategy");
       expect(isDurableResultStrategy(strategy), registered.id).toBe(true);

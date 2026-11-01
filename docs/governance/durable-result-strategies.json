@@ -120,6 +120,22 @@
       }
     },
     {
+      "id": "social.fetch",
+      "declarationPath": "apps/api/src/tools/builtin-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "social-fetch/v1",
+      "operationIdentity": "tool:social.fetch:<version>:<idempotencyKey>",
+      "privacyClass": "PERSONAL_DATA",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "SocialPresenceContactAdapter",
+        "domainAggregateType": "ExternalPageEvidence",
+        "identitySource": "url-and-content-digest",
+        "subjectRefRequired": true,
+        "personalDataDsrCompatible": true
+      }
+    },
+    {
       "id": "crawl4ai.fetch",
       "declarationPath": "apps/api/src/tools/builtin-tools.ts",
       "resultStrategy": "artifact_reference",

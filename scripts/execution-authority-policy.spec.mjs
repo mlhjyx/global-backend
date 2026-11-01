@@ -24,10 +24,10 @@ import {
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 
-test('inventory is locked to 19 Tools and 12 product Model tasks', () => {
-  assert.equal(EXPECTED_TOOL_IDS.length, 19);
+test('inventory is locked to 20 Tools and 12 product Model tasks', () => {
+  assert.equal(EXPECTED_TOOL_IDS.length, 20);
   assert.equal(EXPECTED_MODEL_TASKS.length, 12);
-  assert.equal(new Set(EXPECTED_TOOL_IDS).size, 19);
+  assert.equal(new Set(EXPECTED_TOOL_IDS).size, 20);
   assert.equal(new Set(EXPECTED_MODEL_TASKS.map((entry) => entry.taskId)).size, 12);
   assert.equal(EXPECTED_GENERIC_MODEL_TASK_LOOKUPS.length, 4);
   assert.deepEqual(EXPECTED_MODEL_GATEWAY_BOUNDARIES, [
@@ -273,7 +273,7 @@ test('artifact bounds are read only from the durableResultStrategy object and mu
 test('pure contracts preserve typed authority wiring and the artifact pre-wire hold', async () => {
   const result = await verifyExecutionAuthorityPolicy({ repoRoot: repositoryRoot });
   assert.deepEqual(result.issues, []);
-  assert.equal(result.toolCount, 19);
+  assert.equal(result.toolCount, 20);
   assert.equal(result.modelTaskCount, 12);
   assert.equal(result.physicalExecutionWiring, 'PARTIAL_HOLD');
   assert.equal(result.physicalToolCallsiteCount, 41);

@@ -23,6 +23,7 @@ const CONTACT_DISCOVERY_RECEIPT_PRODUCERS = Object.freeze([
   // M2b：社媒适配器的出网工具回执（此前这些生产者不在名单 → 回执回调会在
   // 真实 Broker 下抛 DOMAIN_ACK_CONSUMER_BINDING_MISSING，被 adapter catch 吞成静默空结果）。
   'social.search',
+  'social.fetch',
   'searxng.search',
   'http.get',
 ] as const);

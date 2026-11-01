@@ -29,17 +29,20 @@ import {
  * `docs/superpowers/plans/2026-10-31-contact-discovery.md`）：
  *  L1 档案副本 —— Wayback availability API 找快照，`http.get` 读 web.archive.org 副本
  *     （不触目标站；只认 3 年内、200 状态的快照，过旧档案只当不存在）；
- *  L2 公开页直抓 —— `http.get` 读无需登录的公开个人页。LinkedIn 是产品负责人显式接受的
- *     robots 例外域：抓取失败或 999/403/登录墙即停，不重试、不换 IP；每域 ≤1 req/3s
- *     （进程内节拍器），连续 3 次被拒熔断 30 分钟。Xing 公开页实测是 SPA 壳（可见文本仅
- *     "XING"），直抓无收益，只走 L1 档案层。
+ *  L2 公开页直抓 —— `social.fetch` 读无需登录的公开个人页。LinkedIn 是产品负责人显式
+ *     接受的 robots 例外域：抓取失败或 999/403/登录墙即停，不重试、不换 IP；连续 3 次被拒
+ *     熔断 30 分钟。Xing 公开页实测是 SPA 壳（可见文本仅 "XING"），直抓无收益，只走 L1。
+ *     抓取不走 http.get/crawl4ai：它们的 subject-bound 工件契约要求 URL 无 query/纯小写/
+ *     数字 <9 位，而 Wayback availability 与快照 URL 天生违反（2026-11-01 验收 run
+ *     1c233bb6 因此 FAILED）；`social.fetch` 用 typed projection 持久化，且 broker 按域
+ *     ≤1 req/3s（Redis limiter，跨进程）。
  *  L3 搜索索引 —— `social.search` 只读已索引标题（M2a；个人主页 URL/标题即具名人，
  *     searxng.search 会按 personalData:false 把它们全部过滤，故用独立工具）。
  *
  * 铁律：永不登录、不绕验证码、不逆向平台 API；抽到的人必须同时命中「候选姓名」与
  * 「公司名」，否则丢弃（防张冠李戴）。证据许可按层标注 public-index / public-archive /
- * public-page。熔断与节拍是**进程级**状态：API 与 worker 进程各一份，最坏上限是每条
- * 3s 节拍的两倍——这是有意的保守边界，不是跨进程精确限速。
+ * public-page。节流由 broker 的 perDomainCrawlDelayMs=3000 跨进程执行；熔断是进程级
+ * 状态（API 与 worker 各一份），最坏为 3×进程数 次拒绝后全开——有意的保守边界。
  */
 
 export type SearxResultLike = { url: string; title?: string };
@@ -394,27 +397,6 @@ export class SocialHostCircuit {
   }
 }
 
-/** 每域 ≤1 req/3s 的进程级节拍器（D1；作用于 L2 直抓）。先占槽再睡，并发调用者不会同时放行。 */
-export class SocialHostPacer {
-  private readonly lastHit = new Map<string, number>();
-  constructor(
-    private readonly delayMs = 3_000,
-    private readonly deps: { now?: () => number; sleep?: (ms: number) => Promise<void> } = {},
-  ) {}
-
-  async wait(host: string): Promise<void> {
-    const now = this.deps.now ?? Date.now;
-    const sleep =
-      this.deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-    const nowMs = now();
-    const last = this.lastHit.get(host);
-    const slot = last === undefined ? nowMs : Math.max(nowMs, last + this.delayMs);
-    this.lastHit.set(host, slot);
-    const wait = slot - nowMs;
-    if (wait > 0) await sleep(wait);
-  }
-}
-
 type ProfilePage = {
   text: string;
   sourcePage: string;
@@ -424,7 +406,6 @@ type ProfilePage = {
 export class SocialPresenceContactAdapter implements ContactDiscoveryAdapter {
   readonly key = 'social_presence';
   private readonly circuit: SocialHostCircuit;
-  private readonly pacer: SocialHostPacer;
 
   constructor(
     private readonly deps: {
@@ -439,11 +420,9 @@ export class SocialPresenceContactAdapter implements ContactDiscoveryAdapter {
         sellerCtx?: ContactDiscoveryContext,
       ) => Promise<ExtractedPerson[]>;
       circuit?: SocialHostCircuit;
-      pacer?: SocialHostPacer;
     },
   ) {
     this.circuit = deps.circuit ?? new SocialHostCircuit();
-    this.pacer = deps.pacer ?? new SocialHostPacer();
   }
 
   private toolCtx(ctx: ExecutionContext): ToolContext {
@@ -585,9 +564,9 @@ export class SocialPresenceContactAdapter implements ContactDiscoveryAdapter {
       try {
         const archived = await broker.invoke<
           { url: string },
-          { status: number; ok: boolean; text: string }
-        >('http.get', { url: snapshot }, this.toolCtx(ctx));
-        if (archived.data?.ok) {
+          { url: string; status: number; text: string }
+        >('social.fetch', { url: snapshot }, this.toolCtx(ctx));
+        if (archived.data?.status === 200) {
           const text = htmlToVisibleText(
             (archived.data.text ?? '').slice(0, RAW_HTML_SLICE_CHARS),
           ).slice(0, 30_000);
@@ -607,20 +586,20 @@ export class SocialPresenceContactAdapter implements ContactDiscoveryAdapter {
       bump('social_circuit_open');
       return null;
     }
-    await this.pacer.wait(hostKey);
+    // 每域 ≤1 req/3s 由 social.fetch 工具的 perDomainCrawlDelayMs（broker/Redis）执行。
     try {
       const response = await broker.invoke<
         { url: string },
-        { status: number; ok: boolean; text: string; blocked?: string }
-      >('http.get', { url }, this.toolCtx(ctx));
+        { url: string; status: number; text: string }
+      >('social.fetch', { url }, this.toolCtx(ctx));
       const status = response.data?.status ?? 0;
-      // 只有目标站明确拒绝（403/429/999）与登录墙计入熔断；本地闸门/超时/网络错误不算。
+      // 只有目标站明确拒绝（403/429/999）与登录墙计入熔断；本地闸门（status 0）/超时不算。
       if (status === 403 || status === 429 || status === 999) {
         this.circuit.recordRefusal(hostKey);
         bump('social_blocked');
         return null;
       }
-      if (response.data?.blocked || status === 0 || !response.data?.ok) return null;
+      if (status === 0 || status < 200 || status >= 300) return null;
       const text = htmlToVisibleText(
         (response.data.text ?? '').slice(0, RAW_HTML_SLICE_CHARS),
       ).slice(0, 30_000);
@@ -644,14 +623,14 @@ export class SocialPresenceContactAdapter implements ContactDiscoveryAdapter {
   ): Promise<string | null> {
     try {
       const availability = await this.deps.broker!.invoke<
-        { url: string },
-        { status: number; ok: boolean; text: string }
+        { url: string; maxChars?: number },
+        { url: string; status: number; text: string }
       >(
-        'http.get',
-        { url: `https://archive.org/wayback/available?url=${encodeURIComponent(url)}` },
+        'social.fetch',
+        { url: `https://archive.org/wayback/available?url=${encodeURIComponent(url)}`, maxChars: 8_000 },
         this.toolCtx(ctx),
       );
-      if (!availability.data?.ok) return null;
+      if (availability.data?.status !== 200) return null;
       let parsed: unknown;
       try {
         parsed = JSON.parse(availability.data.text || 'null');
