@@ -202,11 +202,21 @@ jobs:
           test "${SUBJECT_SHA}" = "${MAIN_SHA}"
           test "$(git rev-parse HEAD)" = "${SUBJECT_SHA}"
           timeout 15m docker push "${IMAGE_TAG}"
-          node scripts/ghcr-runtime-publication.mjs resolve \
-            --image mlhjyx/global-backend \
-            --tag "${SUBJECT_SHA}" \
-            --github-output "${GITHUB_OUTPUT}" \
-            --wait-ms 120000
+          # GHCR 标签可见性是最终一致的（2026-11-01 实测可超过 30 秒）；resolve 脚本自身
+          # 的 --wait-ms 上限为 60s，因此在其外层再包一层有限重试（每轮 60s+15s 间隔）。
+          RESOLVED=0
+          for attempt in 1 2 3 4; do
+            if node scripts/ghcr-runtime-publication.mjs resolve \
+              --image mlhjyx/global-backend \
+              --tag "${SUBJECT_SHA}" \
+              --github-output "${GITHUB_OUTPUT}" \
+              --wait-ms 60000; then
+              RESOLVED=1
+              break
+            fi
+            sleep 15
+          done
+          test "${RESOLVED}" = "1"
           IMAGE_REFERENCE="$(sed -n 's/^image_reference=//p' "${GITHUB_OUTPUT}" | tail -n 1)"
           DIGEST="$(sed -n 's/^image_digest=//p' "${GITHUB_OUTPUT}" | tail -n 1)"
           [[ "${IMAGE_REFERENCE}" =~ ^ghcr\.io/mlhjyx/global-backend@sha256:[0-9a-f]{64}$ ]]
