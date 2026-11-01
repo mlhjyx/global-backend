@@ -105,6 +105,10 @@ Bundle 内的 provenance 枚举、actor、SHA、时间和 URL 都是 documentary
 - Copy Sonnet recovery v19 零调用停止记录：[stopped evidence](site-builder/m1-g-copy-sonnet-recovery-v19-zero-call-preflight-stopped-evidence.json)。它只证明 #387 后的单次 preflight 已通过 ToolBroker 读取 OpenOx 价格，但在 post-create New API readback 发生控制面不可用；token #26 已由 cleanup 禁用，route #20、v16 #24 与 v17 #25 仍 disabled，且无成功 artifact、模型请求、模型 wire 或模型费用。它不证明 capability、质量、promotion 或 production route adoption。
 - Copy Sonnet recovery v13 历史 create-only 交付：[实施/TDD 记录](../implementation-records/copy-sonnet-recovery-v13-create-only-tdd.md)、[manifest](site-builder/m1-g-copy-sonnet-recovery-manifest-v13.json)与 [runtime binding](site-builder/m1-g-copy-sonnet-recovery-runtime-binding-v13.json)；tracked artifact 不回写后续私有 stopped run，且不能作为 v14 authorization 或执行输入。
 
+## Tenant-facing reliability
+
+- [2026-11-02 理解失败可见与受控重试 live 实测](2026-11-02-understanding-retry-live-test.md)：GainOS 中卡住的「具安科技」定位为官网理解在抽取阶段被模型网关 429 打断且 UI 不可见；上线失败字段 + 受控重试端点（新 Grant）并实测入队（DRAFT→ENRICHING），同时暴露并修复「模型预算操作键缺运行/尝试维度 → 重试撞 remnant」缺陷（#726）。最终 REVIEW 验证待下一班镜像。
+
 ## Platform authority
 
 - [2026-11-01 平台准入 v2 与撤销 fence 实测](2026-11-01-platform-admission-v2-and-revocation-fence.md)：平台 schedule 手动运行经 v2 拿到真实 `PLATFORM_GRANT`（jti `2401bb26…`），并用它完成撤销签发 → 投递 → fence 提交 → ACK 验签（`ed59f901…`，generation 1→2）；途中修复平台 worker 信任根与 gain-saas Grant claims 两处缺口。不生成 RuntimeEvidence，schedule 仍 paused，自动撤销触发未接线。
