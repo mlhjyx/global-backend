@@ -134,7 +134,13 @@ jobs:
           set -euo pipefail
           BUILT_AT="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
           IMAGE_TAG="${IMAGE_NAME}:${SUBJECT_SHA}"
+          # containerd 镜像存储下，buildx 默认给构建产物附带 provenance/SBOM attestation
+          # 清单，推送出的标签因此指向 OCI index——而发布契约刻意只接受单清单（resolve
+          # 的 Accept 不含 index 类型，spec 有「拒绝 attest 未检验平台」的断言）。本
+          # workflow 用 actions/attest 单独做 provenance，构建内嵌证明被关闭。
           docker build \
+            --provenance=false \
+            --sbom=false \
             --build-arg "BUILD_SHA=${SUBJECT_SHA}" \
             --build-arg "BUILT_AT=${BUILT_AT}" \
             --tag "${IMAGE_TAG}" \
