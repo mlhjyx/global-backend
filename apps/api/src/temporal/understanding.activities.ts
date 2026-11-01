@@ -29,6 +29,36 @@ import {
   type UnderstandingFailure,
 } from './understanding.run-failure';
 
+/**
+ * 预算操作键的运行/尝试维度。
+ *
+ * 模型调用的付费操作键（paidOperationKey）包含 context.correlationId；理解活动此前不传，
+ * 于是同一公司的不同 workflow run、以及同一活动的不同 Temporal attempt 会生成相同的键。
+ * 首次失败后预算行以 RELEASED 保留，后续尝试/重试在 reserve 时被判为「已有操作且无 durable
+ * result」的 remnant（BudgetOperationReplayError），永远失败。把 run/activity/attempt 放进
+ * correlationId，让每次真实尝试各用独立预算操作行；Temporal 重试仍有活动级幂等（同 attempt
+ * 内不会重复执行）。
+ */
+export function modelOperationCorrelationId(info: {
+  workflowExecution?: { runId?: string };
+  activityId?: string;
+  attempt?: number;
+}): string | undefined {
+  const runId = info.workflowExecution?.runId;
+  if (typeof runId !== 'string' || runId.length === 0) return undefined;
+  if (typeof info.activityId !== 'string' || info.activityId.length === 0) return undefined;
+  if (typeof info.attempt !== 'number' || !Number.isInteger(info.attempt) || info.attempt < 1) return undefined;
+  return `${runId}:${info.activityId}:a${info.attempt}`;
+}
+
+function attemptCorrelationId(): string | undefined {
+  try {
+    return modelOperationCorrelationId(Context.current().info);
+  } catch {
+    return undefined;
+  }
+}
+
 export interface UnderstandingInput {
   workspaceId: string;
   companyId: string;
@@ -179,7 +209,7 @@ export function createUnderstandingActivities(deps: {
         {
           workspaceId,
           taskContractId: 'company_understanding.extract_claims',
-          correlationId: url,
+          correlationId: attemptCorrelationId() ? `${url}#${attemptCorrelationId()}` : url,
           purpose: ['discovery', 'enrichment'],
           runId: accountKey,
           // G3 5.1：产物挂在正被理解的卖方 company_profile 名下（见 sellerSubject）。
@@ -331,6 +361,7 @@ export function createUnderstandingActivities(deps: {
           {
             workspaceId: args.workspaceId,
             runId: accountKey,
+            correlationId: attemptCorrelationId(),
             durableResultSchema: 'understanding-claims/v1',
           },
           { telemetry: deps.runtimeTelemetry },
@@ -360,6 +391,7 @@ export function createUnderstandingActivities(deps: {
           {
             workspaceId: args.workspaceId,
             runId: accountKey,
+            correlationId: attemptCorrelationId(),
             durableResultSchema: 'understanding-profile/v1',
           },
           { telemetry: deps.runtimeTelemetry },
@@ -415,6 +447,7 @@ export function createUnderstandingActivities(deps: {
           {
             workspaceId: args.workspaceId,
             runId: accountKey,
+            correlationId: attemptCorrelationId(),
             durableResultSchema: 'understanding-offerings/v1',
           },
           { telemetry: deps.runtimeTelemetry },
