@@ -142,8 +142,18 @@ jobs:
           docker save --output "${ARCHIVE}" "${IMAGE_TAG}"
           CONFIG_NAME="$(tar -xOf "${ARCHIVE}" manifest.json | node scripts/docker-image-config-path.mjs)"
           tar -xOf "${ARCHIVE}" "${CONFIG_NAME}" > "${CONFIG_PATH}"
-          test "sha256:$(sha256sum "${CONFIG_PATH}" | cut -d ' ' -f 1)" = "${LOCAL_IMAGE_ID}"
+          CONFIG_DIGEST="sha256:$(sha256sum "${CONFIG_PATH}" | cut -d ' ' -f 1)"
+          CONFIG_NAME_HEX="$(basename "${CONFIG_NAME}")"
+          CONFIG_NAME_HEX="${CONFIG_NAME_HEX%.json}"
+          CONFIG_NAME_HEX="${CONFIG_NAME_HEX#sha256:}"
+          # 存储驱动无关的自校验：classic image store 下 .Id 等于 config 摘要；containerd
+          # 镜像存储（Docker 28+/GitHub runner 2026-11 起）下 .Id 是 manifest 摘要，此时用
+          # docker save 归档里 manifest.json 的 Config 条目校验 config 与归档一致。
+          if [ "${LOCAL_IMAGE_ID}" != "${CONFIG_DIGEST}" ]; then
+            test "sha256:${CONFIG_NAME_HEX}" = "${CONFIG_DIGEST}"
+          fi
           printf 'local_image_id=%s\n' "${LOCAL_IMAGE_ID}" >> "${GITHUB_OUTPUT}"
+          printf 'config_digest=%s\n' "${CONFIG_DIGEST}" >> "${GITHUB_OUTPUT}"
           printf 'config_path=%s\n' "${CONFIG_PATH}" >> "${GITHUB_OUTPUT}"
 
       - name: Attest the local image config before publication
@@ -176,6 +186,7 @@ jobs:
           GHCR_USERNAME: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LOCAL_IMAGE_ID: ${{ steps.build.outputs.local_image_id }}
+          LOCAL_CONFIG_DIGEST: ${{ steps.build.outputs.config_digest }}
         run: |
           set -euo pipefail
           IMAGE_TAG="${IMAGE_NAME}:${SUBJECT_SHA}"
@@ -194,7 +205,14 @@ jobs:
           [[ "${IMAGE_REFERENCE}" =~ ^ghcr\.io/mlhjyx/global-backend@sha256:[0-9a-f]{64}$ ]]
           [[ "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
           timeout 10m docker pull "${IMAGE_REFERENCE}"
-          test "$(docker image inspect --format '{{.Id}}' "${IMAGE_REFERENCE}")" = "${LOCAL_IMAGE_ID}"
+          # 身份校验与存储驱动无关：拉回的镜像存档后其 config 字节必须与构建时被 atttest 的
+          # config 完全一致（containerd 存储下 .Id 是 manifest 摘要，不能直接比较）。
+          PULLED_ARCHIVE="${RUNNER_TEMP}/pulled-runtime-image.tar"
+          PULLED_CONFIG="${RUNNER_TEMP}/pulled-runtime-image-config.json"
+          docker save --output "${PULLED_ARCHIVE}" "${IMAGE_REFERENCE}"
+          PULLED_CONFIG_NAME="$(tar -xOf "${PULLED_ARCHIVE}" manifest.json | node scripts/docker-image-config-path.mjs)"
+          tar -xOf "${PULLED_ARCHIVE}" "${PULLED_CONFIG_NAME}" > "${PULLED_CONFIG}"
+          test "sha256:$(sha256sum "${PULLED_CONFIG}" | cut -d ' ' -f 1)" = "${LOCAL_CONFIG_DIGEST}"
           test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "${IMAGE_REFERENCE}")" = "${SUBJECT_SHA}"
           test "$(docker image inspect --format '{{.Config.User}}' "${IMAGE_REFERENCE}")" = global
           test "$(docker image inspect --format '{{json .Config.Entrypoint}}' "${IMAGE_REFERENCE}")" = '["node","/app/runtime-entrypoint.mjs"]'
