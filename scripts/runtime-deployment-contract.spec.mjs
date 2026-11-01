@@ -943,6 +943,10 @@ function assertGhcrPublicationContract(workflow) {
   assert.match(workflow, /node scripts\/ghcr-runtime-publication\.mjs resolve[\s\S]*--github-output "\$\{GITHUB_OUTPUT\}"/);
   assert.match(workflow, /if: steps\.existing\.outputs\.exists != 'true'/);
   assert.match(workflow, /--build-arg "BUILD_SHA=\$\{SUBJECT_SHA\}"/);
+  // resolve 只接受单清单（拒绝 index，见 ghcr-runtime-publication.spec.mjs）；containerd
+  // 存储下必须关掉 buildx 内嵌 provenance/SBOM 清单，否则推送的标签会指向 OCI index。
+  assert.match(workflow, /--provenance=false/);
+  assert.match(workflow, /--sbom=false/);
   assert.match(workflow, /--build-arg "BUILT_AT=\$\{BUILT_AT\}"/);
   assert.match(workflow, /docker push "\$\{IMAGE_TAG\}"/);
   assert.doesNotMatch(workflow, /PUSH_OUTPUT|digest: \(sha256:/);
