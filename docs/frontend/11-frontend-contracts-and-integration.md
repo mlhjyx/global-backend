@@ -47,6 +47,7 @@ Route / Page composition
 - Program C 的 durable handoff consumer 只允许 internal server identity 使用固定 Backend audience、单一 workspace/service identity 与最小 scopes：`acquisition:read`、`personal-data:read`、`acquisition:event:ack`。
 - service credential 必须受审计、轮换和 kill switch 约束；scope/audience/workspace 任一不匹配均 fail closed。
 - browser/user token 永不获得 `acquisition:event:ack` 或不受限的 `personal-data:read`；浏览器不能消费 `RESTRICTED` event payload，也不能作为 durable consumer 发 ACK。
+- 例外（M4，2026-11-01）：具名联系人面（canonical 公司详情、发现/猜测/验证）使用独立窄 scope `contact-discovery:read`，只授予 SaaS 工作空间管理员（`saas-admin`）；它不覆盖事件流、线索详情或建站档案的个人数据读取。
 - 该边界当前是 `PRODUCT_SPECIFIED / PROGRAM_C_SOURCE_NOT_IMPLEMENTED / TEST_RUNTIME_RELEASE_UAT_NOT_RUN_OR_UNVERIFIED`。
 
 ## 4. HTTP/命令合同

@@ -14,12 +14,13 @@ const EXPECTED_SCOPES = [
   'acquisition:identity:review',
   'acquisition:export',
   'personal-data:read',
+  'contact-discovery:read',
   'compliance:manage',
   'ops:read',
 ] as const;
 
 describe('roles to scopes policy', () => {
-  it('exposes only the ten approved server scopes', () => {
+  it('exposes only the eleven approved server scopes', () => {
     expect(AUTHORIZATION_SCOPES).toEqual(EXPECTED_SCOPES);
   });
 

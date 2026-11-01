@@ -18,9 +18,9 @@
 ## 用户旅程与安全保证
 
 1. SaaS token 只提供签名后的 `sub`、`workspace_id` 与 `roles[]`；客户端自报的 `scope`/`scp` 永远不进入授权上下文。
-2. 服务端只承认九个闭合 scope；未知 role 映射为空权限，已知 role 仍可贡献其受控权限；pilot/production 缺显式 role map 时启动失败。
+2. 服务端只承认十一个闭合 scope；未知 role 映射为空权限，已知 role 仍可贡献其受控权限；pilot/production 缺显式 role map 时启动失败。
 3. 每个现有 bearer controller 都必须先运行 `AuthGuard`，再运行 `ScopesGuard`；缺 scope 元数据、缺认证上下文或缺任一 required scope 都 fail-closed。
-4. PII-bearing 读取额外要求 `personal-data:read`；Suppression/DataRights 使用 `compliance:manage`；事件 ACK 使用独立 `acquisition:event:ack`；身份 review scope 不替代制裁合规裁决。
+4. PII-bearing 读取额外要求 `personal-data:read`；具名联系人面（canonical 公司详情/发现/猜测/验证）使用更窄的 `contact-discovery:read`（M4，2026-11-01），不复用 `personal-data:read`；Suppression/DataRights 使用 `compliance:manage`；事件 ACK 使用独立 `acquisition:event:ack`；身份 review scope 不替代制裁合规裁决。
 5. OpenAPI 的每个 bearer operation 都必须携带非空、闭合的 `x-required-scopes`；health probes 保持公开，未来新增非公开 controller 若遗漏双 guard 或 scope decorator，结构测试失败。
 6. JWKS 合同覆盖 issuer、audience、subject、workspace、roles、`exp`、`nbf`、`kid` 与 old/new key overlap；半配置 JWKS 不得回退到 dev token。
 7. DevTokenVerifier 仅允许显式 `APP_ENVIRONMENT=development`、显式 `AUTH_ALLOW_DEV_TOKENS=true` 与 loopback `API_BIND_HOST` 同时成立；test/pilot/production 和非 loopback 永远拒绝。
@@ -53,7 +53,7 @@
 
 ## 配置与运维边界
 
-- 外部 token 继续只携带 `roles[]`；`AUTH_ROLE_SCOPE_MAP_JSON` 是服务端受控 JSON 对象，值只能引用九个闭合 scope。pilot/production 必填，development/test 可使用代码内固定映射。
+- 外部 token 继续只携带 `roles[]`；`AUTH_ROLE_SCOPE_MAP_JSON` 是服务端受控 JSON 对象，值只能引用十一个闭合 scope。pilot/production 必填，development/test 可使用代码内固定映射。
 - `AUTH_JWKS_URI`、`AUTH_ISSUER` 与 `AUTH_AUDIENCE` 必须同时配置；controlled runtime 还由 runtime admission 要求 canonical HTTPS identity configuration。
 - CI 的 create-only OpenAPI export 显式使用 development、loopback 与 dev-token opt-in；这只是构建期 schema 生成，不是部署身份边界。
 - `ScopesGuard` 与 RLS 分工不变：scope 控制同一 workspace 内最小权限，签名 token 的 workspace 与 DB RLS 控制租户隔离。真实跨 workspace 负例仍须 PostgreSQL/JWKS E2E。

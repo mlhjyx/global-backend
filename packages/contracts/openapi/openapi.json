@@ -3592,6 +3592,7 @@
                               "acquisition:identity:review",
                               "acquisition:export",
                               "personal-data:read",
+                              "contact-discovery:read",
                               "compliance:manage",
                               "ops:read"
                             ]
@@ -7357,9 +7358,9 @@
         ],
         "x-required-scopes": [
           "acquisition:read",
-          "personal-data:read"
+          "contact-discovery:read"
         ],
-        "description": "公司详情：canonical 视图 + 联系人 + 字段级 Evidence（每个字段值来自哪一页、哪段原文）。需要 personal-data:read。"
+        "description": "公司详情：canonical 视图 + 联系人 + 字段级 Evidence（每个字段值来自哪一页、哪段原文）。需要 contact-discovery:read（只覆盖联系人数据面，不等于 personal-data:read）。"
       }
     },
     "/api/v1/canonical-companies/{id}/discover-contacts": {
@@ -7563,10 +7564,10 @@
         ],
         "x-required-scopes": [
           "acquisition:write",
-          "personal-data:read",
+          "contact-discovery:read",
           "compliance:manage"
         ],
-        "description": "按需发现联系人（Waterfall 第 5 步，只对高价值企业调用）：先过 suppression，再抽取联系人。必须带 lawfulBasis；缺 body 会在消耗预算前以 CONTACT_DISCOVERY_LAWFUL_BASIS_REQUIRED 拒绝。需要 personal-data:read 与 compliance:manage。"
+        "description": "按需发现联系人（Waterfall 第 5 步，只对高价值企业调用）：先过 suppression，再抽取联系人。必须带 lawfulBasis；缺 body 会在消耗预算前以 CONTACT_DISCOVERY_LAWFUL_BASIS_REQUIRED 拒绝。需要 contact-discovery:read 与 compliance:manage。"
       }
     },
     "/api/v1/contact-points/{pointId}/verify": {
@@ -7765,7 +7766,7 @@
         ],
         "x-required-scopes": [
           "acquisition:write",
-          "personal-data:read",
+          "contact-discovery:read",
           "compliance:manage"
         ]
       }
@@ -7966,7 +7967,7 @@
         ],
         "x-required-scopes": [
           "acquisition:write",
-          "personal-data:read",
+          "contact-discovery:read",
           "compliance:manage"
         ]
       }
@@ -8062,7 +8063,7 @@
         "description": "加入禁联名单（email / domain / company_name）；命中的公司立即转 SUPPRESSED。需要 compliance:manage。"
       },
       "get": {
-        "description": "只返回调用方 workspace 的 suppression 记录。展示的是租户自己提交的合规登记，不是引擎采集的招揽联系人；个人数据面（联系人/事件流）仍要求 personal-data:read，不在此端点开放。",
+        "description": "只返回调用方 workspace 的 suppression 记录。展示的是租户自己提交的合规登记，不是引擎采集的招揽联系人；个人数据面（事件流）仍要求 personal-data:read，联系人面走 contact-discovery:read，都不在此端点开放。",
         "operationId": "DiscoveryController_listSuppressions_v1",
         "parameters": [
           {

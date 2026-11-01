@@ -10,6 +10,10 @@ export const AUTHORIZATION_SCOPES = Object.freeze([
   // BI-22: data leaving the platform as a file (weekly report CSV). Reading leads does not imply it.
   'acquisition:export',
   'personal-data:read',
+  // M4: named-contact surfaces (canonical contacts/contact points and their evidence) for
+  // workspace admins. Deliberately narrower than personal-data:read: granting it must not open
+  // the event stream, lead detail or site-builder personal-data reads.
+  'contact-discovery:read',
   'compliance:manage',
   'ops:read',
 ] as const);
