@@ -68,6 +68,43 @@ describe('social.fetch (D1 social layer fetch tool)', () => {
     });
   });
 
+  it('normalizes NUL, lone surrogates and NFD text so real pages satisfy the projection', async () => {
+    const raw = `\u0000Fr\u00fchjahr \ud800 NFD: Bu\u0308hne ${'x'.repeat(50)}`;
+    http.requestPublicHttp.mockResolvedValueOnce(okResponse(raw));
+    const result = await socialFetchTool.execute(
+      { url: 'https://www.linkedin.com/in/max-mustermann' },
+      CTX,
+    );
+    expect(result.data.text.includes('\u0000')).toBe(false);
+    expect(result.data.text).toBe(result.data.text.normalize('NFC'));
+    const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
+    expect(() => registry.project('social-fetch/v1', result)).not.toThrow();
+  });
+
+  it('never slices through a surrogate pair at the text bound', async () => {
+    const raw = 'a'.repeat(35_999) + '\u{1F600}' + 'b'.repeat(10);
+    http.requestPublicHttp.mockResolvedValueOnce(okResponse(raw));
+    const result = await socialFetchTool.execute(
+      { url: 'https://www.linkedin.com/in/max-mustermann' },
+      CTX,
+    );
+    expect(result.data.text.length).toBeLessThanOrEqual(36_000);
+    expect(/[\uD800-\uDBFF]$/u.test(result.data.text)).toBe(false);
+    const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
+    expect(() => registry.project('social-fetch/v1', result)).not.toThrow();
+  });
+
+  it('projects nonstandard anti-bot statuses such as LinkedIn 999', async () => {
+    http.requestPublicHttp.mockResolvedValueOnce(okResponse('Request Denied', 999));
+    const result = await socialFetchTool.execute(
+      { url: 'https://www.linkedin.com/in/max-mustermann' },
+      CTX,
+    );
+    expect(result.data.status).toBe(999);
+    const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
+    expect(() => registry.project('social-fetch/v1', result)).not.toThrow();
+  });
+
   it('projects and restores through social-fetch/v1', async () => {
     http.requestPublicHttp.mockResolvedValueOnce(okResponse('<html>Max Mustermann</html>'));
     const result = await socialFetchTool.execute(

@@ -15,6 +15,7 @@ import { EgressBlockedError } from "../adapters/url-guard";
 import type { ArtifactExecutionPort } from "./artifact-execution-port";
 import type { DurableExecutionReceipt } from "../durable-results/durable-execution-receipt";
 import { TypedProjectionRegistry } from "../durable-results/typed-projection.registry";
+import { isExecutionControlError } from "../execution-budget/execution-control-error";
 import { registerCatalogResultProjections } from "../durable-results/catalog-result-projections";
 
 const DURABLE_RECEIPT: DurableExecutionReceipt = {
@@ -367,6 +368,74 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
     );
   });
 
+  it("refuses an unregistered typed projection schema before any wire or reservation", async () => {
+    const execute = vi.fn(async () => ({ ok: true }));
+    const tool = fakeTool("t.unregistered", 1, execute);
+    // Allowlisted for model projections, but never registered in the ToolBroker's
+    // catalog/source projection registry: a tool declaring it is a deployment defect.
+    tool.durableResultStrategy = {
+      kind: "typed_projection",
+      schema: "fit-judgment/v1",
+    };
+    const reserve = vi.fn();
+    const budgetStore = {
+      reserve,
+      settle: vi.fn(),
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    await expect(
+      broker.invoke(tool.id, {}, { workspaceId: "w", runId: "run" }),
+    ).rejects.toThrow("durable projection schema not registered");
+    expect(execute).not.toHaveBeenCalled();
+    expect(reserve).not.toHaveBeenCalled();
+  });
+
+  it("settles without a durable result when the tool output leaves the approved projection contract", async () => {
+    const tool = fakeTool("searxng.search", 1, async () => ({
+      results: Array.from({ length: 21 }, (_, index) => ({
+        url: `https://example.com/result-${index}`,
+        title: `Example ${index}`,
+      })),
+    }));
+    tool.durableResultStrategy = {
+      kind: "typed_projection",
+      schema: "searxng-search/v1",
+    };
+    tool.durableReplayResult = (result) => result;
+    const settle = vi.fn(async () => ({
+      chargedMicrousd: BigInt(1) * 10_000n,
+      observedMicrousd: BigInt(1) * 10_000n,
+      capVariance: false,
+      replay: false,
+    }));
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: "w",
+        accountKey: "run",
+        operationId: "op-reject",
+        estimatedMicrousd: BigInt(1) * 10_000n,
+        replay: false,
+      })),
+      settle,
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    // Out-of-contract upstream answers must not leave the operation RESERVED: that
+    // turns into a fail-closed control error on this call and on every replay.
+    const error = await broker
+      .invoke(tool.id, {}, { workspaceId: "w", runId: "run" })
+      .catch((thrown: unknown) => thrown);
+    expect(error).toMatchObject({
+      code: "TOOL_DURABLE_RESULT_PROJECTION_REJECTED",
+    });
+    expect(isExecutionControlError(error)).toBe(false);
+    expect(settle).toHaveBeenCalledWith(
+      expect.objectContaining({ operationId: "op-reject" }),
+      10_000n,
+    );
+  });
+
   it("settles typed Tool output with the registered durable result schema instead of tool-result/v1", async () => {
     const tool = fakeTool("searxng.search", 1, async () => ({
       results: [{ url: "https://example.com/result", title: "Example" }],
@@ -689,9 +758,11 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
     });
   });
 
-  it("converts a first-success replay projector failure into the stable no-second-wire error", async () => {
+  it("keeps a throwing durable replay hook fail-closed without opening a second wire", async () => {
     const execute = vi.fn(async () => ({ value: "live" }));
     const tool = fakeTool("t.projector-failure", 1, execute);
+    // The replay hook is broker-owned code: a hook that throws is a defect, not an
+    // out-of-contract upstream answer, so the operation stays unresolved (control).
     tool.durableReplayResult = () => {
       throw new Error("projection contract unavailable");
     };

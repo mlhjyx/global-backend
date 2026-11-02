@@ -585,7 +585,7 @@ const EXPECTED_BOUNDS: Readonly<Record<string, JsonRecord>> = {
     ...COMMON_RESULT_BOUNDS,
     '$.data.url.maxLength': 3000,
     '$.data.status.minimum': 0,
-    '$.data.status.maximum': 599,
+    '$.data.status.maximum': 999,
     '$.data.text.maxLength': 36_000,
   },
   'wikidata-sparql/v1': {

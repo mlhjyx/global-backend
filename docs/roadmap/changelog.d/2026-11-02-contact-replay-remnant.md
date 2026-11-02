@@ -10,3 +10,4 @@ title: Keep contact discovery alive across attendant replay remnants and activit
 - 测试：`execution-receipt-consumers.spec.ts` 新增「remnant 吸收 + 其余适配器继续 + live 仍失败」用例；联系人相关套件 314 项全绿；全量门待 CI。
 - 部署：无迁移；随下一班车（含 #726）上线后重跑联系人验收。
 - 未做：工具类操作键（如 SMTP 探测）本身仍未带 attempt 维度——靠残留吸收兜底；若要根治需把 attempt 透传到 ToolContext 的操作键派生（另行评估）。
+- 2026-11-02 #734 更正：本条「attempt 并入模型 correlationId」的做法已撤销（重试改为重放已结算操作，避免 APPLIED/REPLAYED 混合回执）；remnant 吸收保留。
