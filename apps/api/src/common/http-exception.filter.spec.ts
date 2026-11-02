@@ -55,7 +55,7 @@ describe('unknown HTTP exception diagnostics', () => {
     const { response, host } = responseHost();
     const error = new Error('synthetic-token-canary', { cause: new Error('private-body-canary') });
     new GlobalHttpExceptionFilter().catch(error, host);
-    expect(log.mock.calls).toEqual([[{ code: 'INTERNAL', status: 500 }]]);
+    expect(log.mock.calls).toEqual([[{ code: 'INTERNAL', status: 500, errorName: 'Error' }]]);
     expect(response.status).toHaveBeenCalledWith(500);
     expect(response.json).toHaveBeenCalledWith({ error: { code: 'INTERNAL', message: 'internal server error' } });
   });
@@ -106,7 +106,7 @@ describe('unknown HTTP exception diagnostics', () => {
     const log = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     const { response, host } = responseHost(null);
     new GlobalHttpExceptionFilter().catch(failure, host);
-    expect(log.mock.calls).toEqual([[{ code: 'INTERNAL', status: 500 }]]);
+    expect(log.mock.calls).toEqual([[{ code: 'INTERNAL', status: 500, errorName: 'Unknown' }]]);
     expect(response.status).toHaveBeenCalledWith(500);
   });
 });
