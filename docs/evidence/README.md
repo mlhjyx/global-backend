@@ -107,7 +107,7 @@ Bundle 内的 provenance 枚举、actor、SHA、时间和 URL 都是 documentary
 
 ## Tenant-facing reliability
 
-- [2026-11-02 理解失败可见与受控重试 live 实测](2026-11-02-understanding-retry-live-test.md)：GainOS 中卡住的「具安科技」定位为官网理解在抽取阶段被模型网关 429 打断且 UI 不可见；上线失败字段 + 受控重试端点（新 Grant）并实测入队（DRAFT→ENRICHING），同时暴露并修复「模型预算操作键缺运行/尝试维度 → 重试撞 remnant」缺陷（#726）。最终 REVIEW 验证待下一班镜像。
+- [2026-11-02 理解失败可见与受控重试 live 实测](2026-11-02-understanding-retry-live-test.md)：GainOS 中卡住的「具安科技」定位为官网理解在抽取阶段被模型网关 429 打断且 UI 不可见；上线失败字段 + 受控重试端点（新 Grant）并实测入队（DRAFT→ENRICHING），同时暴露并修复「模型预算操作键缺运行/尝试维度 → 重试撞 remnant」缺陷（#726）。终验在 `c034010b`/`56c55bd8` 上通过：`DRAFT→ENRICHING→REVIEW`，行业/简介/70 条 claims 落库，0 次 remnant/复用错误。
 
 ## Platform authority
 
