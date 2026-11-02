@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { ApplicationFailure } from '@temporalio/activity';
+import { ApplicationFailure, activityInfo } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { ProviderHttpError } from '../model-gateway/providers/provider-output-error';
@@ -2870,6 +2870,15 @@ export function createDiscoveryActivities(deps: {
       let phones = 0;
       let failed = 0;
       let budgetTruncated = false;
+      // 付费操作键必须在 Temporal 重试 attempt 间隔离（与 #726 同款纪律）：
+      // attempt N 的模型 correlationId 带上 `aN` 后缀，绝不继承上一次尝试的未结算账本行。
+      const attemptTag = (() => {
+        try {
+          return `a${activityInfo().attempt}`;
+        } catch {
+          return undefined; // 单测等非活动上下文
+        }
+      })();
       const diagnostics: Record<string, number> = {};
       const emailGuess = {
         emaillessContacts: 0,
@@ -2901,6 +2910,7 @@ export function createDiscoveryActivities(deps: {
                 accountKey: binding.accountKey,
               },
               ...(contactBudget ? { contactBudget } : {}),
+              ...(attemptTag ? { attemptTag } : {}),
             },
           );
           companies += 1;
@@ -2968,12 +2978,18 @@ export function createDiscoveryActivities(deps: {
           emailGuess.failed += guess.failed;
           emails += guess.persisted;
         } catch (error) {
-          if (isExecutionControlError(error)) throw error;
           emailGuess.failed += 1;
           const message = error instanceof Error ? error.message : String(error);
-          console.warn(
-            `[discoverRunContacts] email guess for ${target.canonicalCompanyId} failed: ${message.slice(0, 150)}`,
-          );
+          if (error instanceof BudgetOperationReplayError && error.origin === 'remnant') {
+            // 残留吸收（#684 纪律）：先前的尝试留下的未结算 SMTP 探测行不该拖垮活动。
+            console.warn(
+              `[discoverRunContacts] email guess for ${target.canonicalCompanyId} absorbed a remnant replay row: ${message.slice(0, 150)}`,
+            );
+          } else if (isExecutionControlError(error)) throw error;
+          else
+            console.warn(
+              `[discoverRunContacts] email guess for ${target.canonicalCompanyId} failed: ${message.slice(0, 150)}`,
+            );
         }
       }
       return {

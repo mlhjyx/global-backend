@@ -6,7 +6,7 @@ import { assertContactDiscoveryAdapterFanout, assertContactDiscoveryResultBound 
 import { LawfulBasis, ProviderContactRecord } from './provider-contract';
 import { canonicalizeSuppressionValues, companyMatchesSuppression } from './suppression-value';
 import { companyMayUseExternalProcessing } from './company-suppression-gate';
-import { type BudgetStore } from '../tools/budget-store';
+import { BudgetOperationReplayError, type BudgetStore } from '../tools/budget-store';
 import { isSyntheticDiscoveryProvenance } from './evidence-license';
 import type { ExecutionBudgetBinding } from '../execution-budget/execution-budget-authority.service';
 import type { ContactDiscoveryBudgetGuard } from '../execution-budget/contact-discovery-budget';
@@ -53,6 +53,12 @@ export interface ContactDiscoveryCoreInput {
    * bounded by its own grant account alone.
    */
   contactBudget?: ContactDiscoveryBudgetGuard;
+  /**
+   * Per-execution tag (e.g. `a2` for Temporal attempt 2) appended to the model
+   * correlationId so paid-operation keys never collide across activity retries —
+   * a retried attempt must not inherit the previous attempt's unresolved ledger rows.
+   */
+  attemptTag?: string;
 }
 
 /**
@@ -172,7 +178,9 @@ export async function discoverContactsCore(
             {
               workspaceId: binding.scopeKey,
               runId: accountKey,
-              correlationId: input.companyId,
+              correlationId: input.attemptTag
+                ? `${input.companyId}:${input.attemptTag}`
+                : input.companyId,
               lawfulBasis: input.lawfulBasis,
               authorizeExternalAction,
               onDurableReceipt: captureContactReceipt,
@@ -191,12 +199,20 @@ export async function discoverContactsCore(
             ...(result.diagnostics ? { diagnostics: result.diagnostics } : {}),
           });
         } catch (err) {
-          if (
+          // #684 残留吸收：`remnant` 表示先前的尝试留下了未结算的账本行、对上游没有断言——
+          // Temporal 重试（或同 attempt 内的瞬时重试）撞上它时按「该适配器本轮跳过」吸收，
+          // 绝不让一行残影把整家公司（乃至整个 run）打挂。`live` 仍是活故障，照旧上抛。
+          if (err instanceof BudgetOperationReplayError && err.origin === 'remnant') {
+            console.warn(
+              `[discoverContacts] adapter ${adapter.key} absorbed a remnant replay row for ${input.companyId}; skipping the adapter for this attempt`,
+            );
+          } else if (
             isExecutionControlError(err) ||
             err instanceof Error &&
               err.message === 'DOMAIN_ACK_CONSUMER_BINDING_MISSING'
           ) throw err;
-          console.warn(`[discoverContacts] adapter ${adapter.key} failed for ${input.companyId}: ${String(err).slice(0, 150)}`);
+          else
+            console.warn(`[discoverContacts] adapter ${adapter.key} failed for ${input.companyId}: ${String(err).slice(0, 150)}`);
         }
         const runStatus = await budgets.status({ workspaceId: binding.scopeKey, accountKey });
         input.contactBudget?.observe(runStatus.remainingMicrousd);
