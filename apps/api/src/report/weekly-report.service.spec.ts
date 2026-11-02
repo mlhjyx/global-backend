@@ -41,6 +41,8 @@ interface Fixture {
   accounts: Array<{ accountKey: string; chargedMicrousd: bigint; reservedMicrousd: bigint }>;
   /** Stored outreach drafts (BI-15), any version order. */
   drafts?: Array<{ leadId: string; version: number; subject: string; body: string; bodyZh: string }>;
+  /** M4 named decision makers, as canonicalContact.findMany returns them. */
+  contacts?: Array<Record<string, unknown>>;
 }
 
 function leadRow(id: string, companyId: string, overrides: Record<string, unknown> = {}) {
@@ -99,6 +101,7 @@ function baseFixture(overrides: Partial<Fixture> = {}): Fixture {
     contactPoints: [
       { companyId, kind: 'contact_page', value: 'https://company-01.example/kontakt', status: 'UNVERIFIED' },
     ],
+    contacts: [],
     sanctions: [],
     suppressions: [],
     outcomes: [
@@ -151,6 +154,7 @@ function harness(fixture: Fixture, screen = vi.fn(() => ({ status: 'not_screened
       ),
     },
     companyContactPoint: { findMany: vi.fn(async () => fixture.contactPoints) },
+    canonicalContact: { findMany: vi.fn(async () => fixture.contacts ?? []) },
     sanctionsScreeningResult: { findMany: vi.fn(async () => fixture.sanctions) },
     suppressionRecord: { findMany: vi.fn(async () => fixture.suppressions) },
     discoveryCompanyMaterializationOutcome: { findMany: vi.fn(async () => fixture.outcomes) },
@@ -323,6 +327,32 @@ describe('WeeklyReportService (BI-22)', () => {
       gte: new Date('2026-10-12T00:00:00.000Z'),
       lt: new Date('2026-10-19T00:00:00.000Z'),
     });
+  });
+
+  it('exports decision makers with statuses and drops suppressed emails', async () => {
+    const companyId = '44444444-4444-4444-8444-444444444401';
+    const fixture = baseFixture({
+      contacts: [
+        {
+          companyId,
+          fullName: 'Marek Havlicek',
+          title: 'Geschäftsführer',
+          department: 'management',
+          contactPoints: [
+            { type: 'email', value: 'marek@company-01.example', status: 'RISKY' },
+            { type: 'email', value: 'blocked@company-01.example', status: 'VALID' },
+          ],
+        },
+      ],
+      suppressions: [{ type: 'email', value: 'blocked@company-01.example' }],
+    });
+    const { service } = harness(fixture);
+    const report = await service.weekly(ctx, { icpId: ICP, week: '2026-W42' });
+
+    const [row] = records(report.csv);
+    expect(row['决策人（联系人 / 联系方式 / 状态）']).toBe(
+      'Marek Havlicek（Geschäftsführer · management）：邮箱 marek@company-01.example（RISKY）',
+    );
   });
 
   it('exports an allowed lead and logs its EXPORT decision under the report id', async () => {

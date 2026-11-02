@@ -179,6 +179,31 @@ describe('weekly report row (BI-22, design §5)', () => {
     expect(row['注册地址']).toBe('Musterstraße 1, 12345 Musterstadt');
   });
 
+  it('lists named decision makers with their contact points and raw verification status', () => {
+    const row = byColumn(
+      weeklyReportRow(
+        input({
+          decisionMakers: [
+            {
+              fullName: 'Marek Havlicek',
+              title: 'Geschäftsführer',
+              department: 'management',
+              points: [
+                { type: 'email', value: 'marek@example.de', status: 'RISKY' },
+                { type: 'phone', value: '+49 30 1234', status: 'VALID' },
+                { type: 'external_id', value: 'linkedin:marek', status: 'UNVERIFIED' },
+              ],
+            },
+            { fullName: 'Anna Beispiel', title: null, department: null, points: [] },
+          ],
+        }),
+      ),
+    );
+    expect(row['决策人（联系人 / 联系方式 / 状态）']).toBe(
+      'Marek Havlicek（Geschäftsführer · management）：邮箱 marek@example.de（RISKY）；电话 +49 30 1234（VALID）；Anna Beispiel',
+    );
+  });
+
   it('lists contact paths by preference without rejected ones, and links each piece of evidence once', () => {
     const row = byColumn(weeklyReportRow(input()));
     expect(row['联系路径']).toBe(

@@ -176,8 +176,9 @@ function gateDenial(reason: 'synthetic_quarantined' | 'sanctions_hold'): DataRig
  * the in-memory index) and the per-row decisions run outside it; every decision — exported, denied
  * by DataRights, or withheld for sanctions or synthetic provenance — is then written to
  * policy_decision_log in its own transaction, and the CSV is returned only after that commits.
- * Only company-level facts and company contact links are read — never canonical_contact or
- * contact_point.
+ * Alongside company-level facts and company contact links it reads the company's named decision
+ * makers (M4: canonical_contact + contact_point) for the dedicated 决策人 column — only for rows
+ * whose EXPORT decision allowed the lead, and with suppressed emails/domains filtered out.
  */
 @Injectable()
 export class WeeklyReportService {
@@ -383,6 +384,7 @@ export class WeeklyReportService {
           scores: lead.scores,
           company,
           contactPoints: facts.reachablePoints(company),
+          decisionMakers: facts.decisionMakers.get(company.id) ?? [],
           draft: facts.draftsByLead.get(lead.id) ?? null,
           sanctionsStatus: sanctions.status,
           validUntil: computeValidUntil(freshness, company.attributes),
@@ -432,17 +434,34 @@ export class WeeklyReportService {
       select: { companyId: true, kind: true, value: true, status: true },
       orderBy: [{ kind: 'asc' }, { value: 'asc' }],
     });
+    // M4: named decision makers + their contact points. The PII read extension decrypts fullName
+    // and contact_point.value on this transaction; suppressed emails/domains are filtered below.
+    const decisionMakerRows = await tx.canonicalContact.findMany({
+      where: { companyId: { in: companyIds } },
+      select: {
+        companyId: true,
+        fullName: true,
+        title: true,
+        department: true,
+        contactPoints: { select: { type: true, value: true, status: true } },
+      },
+      orderBy: [{ companyId: 'asc' }, { fullName: 'asc' }],
+    });
     const screenings = await tx.sanctionsScreeningResult.findMany({
       where: { canonicalCompanyId: { in: companyIds } },
       select: { canonicalCompanyId: true, status: true, reviewState: true, matches: true },
     });
     const suppressions = await tx.suppressionRecord.findMany({
-      where: { type: { in: ['domain', 'company_name'] } },
+      where: { type: { in: ['domain', 'company_name', 'email'] } },
       select: { type: true, value: true },
     });
     const suppressedDomains = canonicalizeSuppressionValues(
       'domain',
       suppressions.filter((row) => row.type === 'domain').map((row) => row.value),
+    );
+    const suppressedEmails = canonicalizeSuppressionValues(
+      'email',
+      suppressions.filter((row) => row.type === 'email').map((row) => row.value),
     );
     const suppressedNames = canonicalizeSuppressionValues(
       'company_name',
@@ -465,11 +484,34 @@ export class WeeklyReportService {
       }
     }
     const pointsByCompany = groupBy(contactPoints, (row) => row.companyId);
+    // Suppressed emails/domains never leave the platform, even when they still sit on a contact.
+    const decisionMakersByCompany = new Map<
+      string,
+      NonNullable<WeeklyReportRowInput['decisionMakers']>[number][]
+    >();
+    for (const contact of decisionMakerRows) {
+      const points = contact.contactPoints
+        .map((point) => {
+          if (point.type !== 'email') return point;
+          const email = canonicalizeSuppressionValue('email', point.value);
+          const domain = email ? canonicalizeSuppressionValue('domain', email.split('@')[1]) : null;
+          if (!email || suppressedEmails.has(email) || (!!domain && suppressedDomains.has(domain))) {
+            return null;
+          }
+          return point;
+        })
+        .filter((point): point is { type: string; value: string; status: string } => point !== null);
+      const list = decisionMakersByCompany.get(contact.companyId) ?? [];
+      list.push({ fullName: contact.fullName, title: contact.title, department: contact.department, points });
+      decisionMakersByCompany.set(contact.companyId, list);
+    }
     return {
       companies: new Map(companies.map((company) => [company.id, company])),
       evidence: groupBy(evidence, (row) => row.entityId),
       provenance: groupBy(provenance, (row) => row.entityId),
       contactPoints: pointsByCompany,
+      /** M4 named decision makers per company, suppressed emails already removed. */
+      decisionMakers: decisionMakersByCompany,
       /** Latest draft version per lead, when one was generated. */
       draftsByLead,
       /**
