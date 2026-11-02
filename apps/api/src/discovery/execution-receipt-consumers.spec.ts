@@ -25,6 +25,7 @@ vi.mock('../durable-results/domain-ack-consumer-bindings', () => ({
 }));
 
 import { DiscoveryService } from './discovery.service';
+import { BudgetOperationReplayError } from '../tools/budget-store';
 
 const WORKSPACE_ID = '11111111-1111-4111-8111-111111111111';
 const COMPANY_ID = '22222222-2222-4222-8222-222222222222';
@@ -295,6 +296,71 @@ describe('actual discovery receipt consumers', () => {
     });
     await expect(service.discoverContacts(CTX, COMPANY_ID, CONTACT_DISCOVERY_OPTIONS)).rejects.toThrow(
       'DOMAIN_ACK_CONSUMER_BINDING_MISSING',
+    );
+  });
+
+  it('absorbs a remnant replay row from one adapter and keeps the others working', async () => {
+    const company = {
+      id: COMPANY_ID,
+      name: 'Acme GmbH',
+      domain: 'acme.example',
+      country: 'DE',
+      status: 'NEW',
+      dedupeKey: 'd:acme.example',
+    };
+    const remnantAdapter = {
+      key: 'decision_maker',
+      discoverContacts: vi.fn(async () => {
+        throw new BudgetOperationReplayError('deadbeef', 'remnant');
+      }),
+    };
+    const survivorAdapter = {
+      key: 'public_web',
+      discoverContacts: vi.fn(async () => ({
+        contacts: [{
+          externalId: 'public-source-1',
+          fullName: 'Named Person',
+          personalData: true,
+          sourcePage: 'https://acme.example/kontakt',
+        }],
+        costCents: 0,
+      })),
+    };
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ locked: true }]),
+      canonicalCompany: { findUnique: vi.fn(async () => company) },
+      suppressionRecord: { findMany: vi.fn(async () => []) },
+      canonicalContact: { findMany: vi.fn(async () => []) },
+      usageLedger: { create: vi.fn(async () => ({})) },
+      fieldEvidence: { findMany: vi.fn(async () => []) },
+    };
+    const prisma = {
+      withWorkspace: vi.fn(async (
+        _workspaceId: string,
+        callback: (transaction: typeof tx) => Promise<unknown>,
+      ) => callback(tx)),
+    };
+    const service = new DiscoveryService(
+      prisma as never,
+      { routeContactDiscovery: vi.fn(async () => [remnantAdapter, survivorAdapter]) } as never,
+      authority('contact-discovery-account') as never,
+      budgetStore() as never,
+    );
+
+    await expect(service.discoverContacts(CTX, COMPANY_ID, CONTACT_DISCOVERY_OPTIONS)).resolves.toMatchObject({
+      skippedSuppressed: 0,
+    });
+    expect(survivorAdapter.discoverContacts).toHaveBeenCalledOnce();
+    expect(mocks.persistDiscoveredContacts).toHaveBeenCalledWith(
+      tx,
+      expect.objectContaining({ adapterKey: 'public_web' }),
+    );
+
+    remnantAdapter.discoverContacts.mockImplementationOnce(async () => {
+      throw new BudgetOperationReplayError('feedface', 'live');
+    });
+    await expect(service.discoverContacts(CTX, COMPANY_ID, CONTACT_DISCOVERY_OPTIONS)).rejects.toThrow(
+      'budget operation already exists without a durable result',
     );
   });
 

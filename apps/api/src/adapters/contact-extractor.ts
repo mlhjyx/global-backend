@@ -78,7 +78,14 @@ export function extractPublicContacts(pages: { url: string; text: string }[], ca
     let t: RegExpExecArray | null;
     TEL_LINK_RE.lastIndex = 0;
     while ((t = TEL_LINK_RE.exec(page.text)) !== null) {
-      const v = normalizePhone(decodeURIComponent(t[1]));
+      let tel: string;
+      try {
+        tel = decodeURIComponent(t[1]);
+      } catch {
+        // 非法的百分号序列（页面里常见的坏 tel: 链接）不能让整页抽取崩掉。
+        tel = t[1];
+      }
+      const v = normalizePhone(tel);
       if (v.replace(/\D/g, '').length >= 7) push({ type: 'phone', value: v, sourceUrl: page.url });
     }
     for (const m of page.text.match(INTL_PHONE_RE) ?? []) {

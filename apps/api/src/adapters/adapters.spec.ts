@@ -40,6 +40,16 @@ describe('contact-extractor（确定性，非 LLM —— 命中的必然真实�
     expect(contacts.some((c) => c.value.includes('2x.png'))).toBe(false);
   });
 
+  it('非法的 tel: 百分号序列不会中断整页抽取', () => {
+    const contacts = extractPublicContacts([
+      {
+        url: 'https://ftc-de.com/kontakt',
+        text: 'Kaputte Links: tel:0049%zz und tel:%E0%A4%A sowie Email: info@ftc-de.com',
+      },
+    ]);
+    expect(contacts).toContainEqual({ type: 'email', value: 'info@ftc-de.com', sourceUrl: 'https://ftc-de.com/kontakt' });
+  });
+
   it('去重（同值不同页只记一次）', () => {
     const contacts = extractPublicContacts([
       { url: 'https://a.com/1', text: 'x@a.com' },
