@@ -53,7 +53,7 @@ export class CompanyController {
     @Headers('idempotency-key') idempotencyKey?: string,
     @ExecutionBudgetGrant() compactJws?: string,
   ): Promise<Enveloped<CompanyDto>> {
-    const { company } = await asExecutionBudgetHttpBoundary(() =>
+    const { company, understanding } = await asExecutionBudgetHttpBoundary(() =>
       this.companies.create(
         ctx,
         dto,
@@ -61,7 +61,7 @@ export class CompanyController {
         compactJws,
       ),
     );
-    return envelope(CompanyDto.from(company));
+    return envelope(CompanyDto.from({ ...company, understanding }));
   }
 
   @Get()

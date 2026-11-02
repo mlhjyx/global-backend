@@ -3725,9 +3725,7 @@
                       "body": {
                         "type": "object",
                         "additionalProperties": false,
-                        "required": [
-                          "website"
-                        ],
+                        "required": [],
                         "properties": {
                           "website": {
                             "type": "string",
@@ -3736,6 +3734,33 @@
                           "name": {
                             "type": "string",
                             "maxLength": 200
+                          },
+                          "industry": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 120
+                          },
+                          "targetMarkets": {
+                            "type": "array",
+                            "maxItems": 20,
+                            "items": {
+                              "type": "string",
+                              "pattern": "^[A-Z]{2}$"
+                            }
+                          },
+                          "products": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 5,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            }
+                          },
+                          "businessEmail": {
+                            "type": "string",
+                            "maxLength": 254
                           }
                         }
                       }
@@ -16730,7 +16755,19 @@
           "industry": {
             "type": "string",
             "nullable": true,
-            "description": "行业（理解工作流回填）"
+            "description": "行业（注册引导填写或理解工作流回填）"
+          },
+          "targetMarkets": {
+            "description": "目标市场（ISO 3166-1 alpha-2；注册引导填写，卖家事实 SoR）",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "businessEmail": {
+            "type": "string",
+            "nullable": true,
+            "description": "业务邮箱（公司级询盘接收缺省值；注册引导填写）"
           },
           "summary": {
             "type": "string",
@@ -16758,6 +16795,14 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "understanding": {
+            "type": "string",
+            "enum": [
+              "started",
+              "not_started"
+            ],
+            "description": "仅创建响应携带：理解是否已触发；无官网时恒为 not_started（D17），档案字段仍已保存"
           }
         },
         "required": [
@@ -16777,17 +16822,44 @@
           "website": {
             "type": "string",
             "example": "https://acme-tech.com",
-            "description": "企业官网 URL"
+            "description": "企业官网 URL（可选；缺省时不会触发官网理解）"
           },
           "name": {
             "type": "string",
             "example": "Shenzhen Acme Tech Co.",
-            "description": "企业名称（可选；未填则先用域名占位，理解后回填）"
+            "description": "企业名称（可选；有官网未填则先用域名占位，理解后回填；无官网时必填其一）"
+          },
+          "industry": {
+            "type": "string",
+            "example": "isic-2813",
+            "description": "所属行业（taxonomy id 或自由文本，注册引导必填项之一）"
+          },
+          "targetMarkets": {
+            "example": [
+              "DE",
+              "US"
+            ],
+            "description": "目标市场（ISO 3166-1 alpha-2，大写；最多 20 个）",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "products": {
+            "description": "主营产品关键词 1~5 个（落 Offering，source=onboarding）",
+            "minItems": 1,
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "businessEmail": {
+            "type": "string",
+            "example": "sales@acme-tech.com",
+            "description": "业务邮箱（公司级询盘接收缺省值）"
           }
-        },
-        "required": [
-          "website"
-        ]
+        }
       },
       "RetryUnderstandingDto": {
         "type": "object",

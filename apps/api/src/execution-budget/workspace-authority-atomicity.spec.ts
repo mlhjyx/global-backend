@@ -198,7 +198,11 @@ describe('workspace authority transaction and replay semantics', () => {
     );
 
     expect(first.replayed).toBe(false);
-    expect(replay).toEqual({ company, replayed: true });
+    expect(replay).toEqual({
+      company,
+      replayed: true,
+      understanding: 'started',
+    });
     expect(consume).toHaveBeenCalledTimes(1);
     expect(tx.companyProfile.create).toHaveBeenCalledTimes(1);
     expect(tx.outboxEvent.create).toHaveBeenCalledTimes(1);

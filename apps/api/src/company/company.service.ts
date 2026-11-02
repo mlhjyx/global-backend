@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -83,12 +83,32 @@ export class CompanyService {
     dto: CreateCompanyDto,
     idempotencyKey?: string,
     compactJws?: string,
-  ): Promise<{ company: CompanyRow; replayed: boolean }> {
+  ): Promise<{
+    company: CompanyRow;
+    replayed: boolean;
+    understanding: 'started' | 'not_started';
+  }> {
+    if (!dto.website && !dto.name) {
+      throw new BadRequestException({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'website 与 name 至少提供一个',
+        },
+      });
+    }
     const scope = workspaceExecutionBudgetRequestScope({
       operation: 'POST /companies',
       body: {
-        website: dto.website,
+        ...(dto.website !== undefined ? { website: dto.website } : {}),
         ...(dto.name !== undefined ? { name: dto.name } : {}),
+        ...(dto.industry !== undefined ? { industry: dto.industry } : {}),
+        ...(dto.targetMarkets !== undefined
+          ? { targetMarkets: dto.targetMarkets }
+          : {}),
+        ...(dto.products !== undefined ? { products: dto.products } : {}),
+        ...(dto.businessEmail !== undefined
+          ? { businessEmail: dto.businessEmail }
+          : {}),
       },
     });
     let verified;
@@ -117,7 +137,11 @@ export class CompanyService {
           stored.authorityTokenSha256 === tokenSha256 &&
           company
         ) {
-          return { company, replayed: true };
+          return {
+            company,
+            replayed: true,
+            understanding: dto.website ? 'started' : 'not_started',
+          };
         }
       }
       throw error;
@@ -128,7 +152,9 @@ export class CompanyService {
       if (prior) return this.replay(prior, scope.requestSha256);
     }
 
-    await assertPublicHttpUrl(dto.website);
+    if (dto.website) {
+      await assertPublicHttpUrl(dto.website);
+    }
     const companyId = randomUUID();
 
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
@@ -154,36 +180,65 @@ export class CompanyService {
         create: { id: ctx.workspaceId },
       });
 
-      const binding = await this.authority.consumeVerifiedWorkspaceGrantInTransaction(
-        verified,
-        tx,
-      );
-      assertFreshExecutionBudgetBinding(binding);
+      // 无官网即无理解（D17）：不消费 Grant、不发 CompanyProfileCreated——
+      // 档案字段（行业/产品/目标市场/业务邮箱）照常落库，下游 ICP 以它们为输入。
+      let binding: ExecutionBudgetBinding | null = null;
+      if (dto.website) {
+        binding = await this.authority.consumeVerifiedWorkspaceGrantInTransaction(
+          verified,
+          tx,
+        );
+        assertFreshExecutionBudgetBinding(binding);
+      }
 
       const company = await tx.companyProfile.create({
         data: {
           id: companyId,
           workspaceId: ctx.workspaceId,
-          name: dto.name ?? new URL(dto.website).hostname,
-          website: dto.website,
+          name:
+            dto.name ??
+            (dto.website ? new URL(dto.website).hostname : '未命名企业'),
+          website: dto.website ?? null,
+          ...(dto.industry !== undefined ? { industry: dto.industry } : {}),
+          ...(dto.targetMarkets !== undefined
+            ? { targetMarkets: dto.targetMarkets }
+            : {}),
+          ...(dto.businessEmail !== undefined
+            ? { businessEmail: dto.businessEmail }
+            : {}),
           status: 'DRAFT',
         },
       });
 
+      // 注册引导填写的主营产品即卖家事实 SoR（D16）：落 Offering(source=onboarding)。
+      if (dto.products && dto.products.length > 0) {
+        await tx.offering.createMany({
+          data: dto.products.map((name) => ({
+            workspaceId: ctx.workspaceId,
+            companyId: company.id,
+            name,
+            source: 'onboarding',
+          })),
+          skipDuplicates: true,
+        });
+      }
+
       // Transactional outbox (ADR-009): understanding pipeline consumes this.
-      await tx.outboxEvent.create({
-        data: {
-          workspaceId: ctx.workspaceId,
-          eventType: 'CompanyProfileCreated',
-          schemaVersion: 2,
-          aggregateType: 'CompanyProfile',
-          aggregateId: company.id,
-          payload: {
-            website: dto.website,
-            executionBudget: this.outboxBinding(binding),
+      if (binding && dto.website) {
+        await tx.outboxEvent.create({
+          data: {
+            workspaceId: ctx.workspaceId,
+            eventType: 'CompanyProfileCreated',
+            schemaVersion: 2,
+            aggregateType: 'CompanyProfile',
+            aggregateId: company.id,
+            payload: {
+              website: dto.website,
+              executionBudget: this.outboxBinding(binding),
+            },
           },
-        },
-      });
+        });
+      }
 
       if (idempotencyKey) {
         await tx.idempotencyKey.create({
@@ -202,7 +257,13 @@ export class CompanyService {
         });
       }
 
-      return { company, replayed: false };
+      return {
+        company,
+        replayed: false,
+        understanding: dto.website
+          ? ('started' as const)
+          : ('not_started' as const),
+      };
     });
   }
 
@@ -223,12 +284,20 @@ export class CompanyService {
   private replay(
     prior: { response: Prisma.JsonValue; requestHash: string | null },
     requestSha256: string,
-  ): { company: CompanyRow; replayed: true } {
+  ): {
+    company: CompanyRow;
+    replayed: true;
+    understanding: 'started' | 'not_started';
+  } {
     const company = restoreCompany(prior.response);
     if (prior.requestHash !== requestSha256 || !company) {
       throw idempotencyConflict();
     }
-    return { company, replayed: true };
+    return {
+      company,
+      replayed: true,
+      understanding: company.website ? 'started' : 'not_started',
+    };
   }
 
   private outboxBinding(binding: ExecutionBudgetBinding) {
