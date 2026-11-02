@@ -20,6 +20,7 @@ import { normalizePersonName } from '../person-name';
 import { cleanEmail, cleanPhone } from '../../acquisition/clean';
 import {
   ExtractedPerson,
+  cleanPersonName,
   extractPeopleFromPage,
 } from './contact-extraction';
 
@@ -143,6 +144,7 @@ function matchesCompany(text: string, company: { name: string; domain?: string }
 export function parseSocialResults(
   results: readonly SearxResultLike[],
   company: { name: string; domain?: string },
+  onDropped?: (reason: 'namesake' | 'organisation') => void,
 ): ProviderContactRecord[] {
   const found = new Map<string, ProviderContactRecord>();
   for (const result of results) {
@@ -161,14 +163,26 @@ export function parseSocialResults(
     if (!spec) continue;
     const headline = (result.title ?? '').trim();
     if (!headline) continue;
-    if (!matchesCompany(headline, company)) continue;
     const parsed = parseSocialHeadline(headline);
     if (!parsed) continue;
+    // 机构名冒充人名（M5：公司页整条入库）直接丢弃。
+    const fullName = cleanPersonName(parsed.fullName);
+    if (fullName === null) {
+      onDropped?.('organisation');
+      continue;
+    }
+    // 同姓守卫（M5）：公司 token 如果只是与这个人名本身重合（公司名恰为姓氏），
+    // 就不能证明此人是该公司员工；标题里去掉人名后必须仍有独立的公司佐证。
+    const remainder = headline.split(parsed.fullName).join(' ');
+    if (!matchesCompany(remainder, company)) {
+      onDropped?.('namesake');
+      continue;
+    }
     const key = `${url.hostname}${url.pathname}`.replace(/\/+$/, '').toLowerCase();
     if (found.has(key)) continue;
     found.set(key, {
       externalId: key,
-      fullName: parsed.fullName,
+      fullName,
       ...(parsed.title ? { title: parsed.title } : {}),
       ...(spec.host === 'linkedin.com' ? { linkedin: `https://${url.hostname}${url.pathname}` } : {}),
       personalData: true,
@@ -483,7 +497,11 @@ export class SocialPresenceContactAdapter implements ContactDiscoveryAdapter {
           { q: string; pages?: number },
           { results: SearxResultLike[] }
         >('social.search', { q, pages: 1 }, this.toolCtx(ctx));
-        for (const contact of parseSocialResults(output.data?.results ?? [], company)) {
+        for (const contact of parseSocialResults(
+          output.data?.results ?? [],
+          company,
+          (reason) => bump(`social_${reason}_dropped`),
+        )) {
           if (!seen.has(contact.externalId)) seen.set(contact.externalId, contact);
         }
       } catch (err) {

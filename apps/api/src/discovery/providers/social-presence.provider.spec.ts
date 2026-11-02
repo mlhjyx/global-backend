@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { looksLikeOrganizationName } from './contact-extraction';
 import {
   buildSocialDorks,
   choosePersonTitle,
@@ -70,6 +71,30 @@ describe('social presence contact adapter (M2a: search index only)', () => {
     });
     expect(contacts[1]).toMatchObject({ fullName: 'Erika Musterfrau', title: 'Geschäftsführerin' });
     expect(contacts[1]!.linkedin).toBeUndefined();
+  });
+
+  it('rejects same-name namesakes and organisation-shaped person names (M5 golden set)', () => {
+    const contacts = parseSocialResults(
+      [
+        // 公司名恰为姓氏：印度同名者的标题里没有该公司，只有自己的名字。
+        { url: 'https://www.linkedin.com/in/ravi-abendi', title: 'Ravi Abendi – Guru Nanak Dev Engineering College, BIDAR | LinkedIn' },
+        // 同姓但标题里另有独立的公司佐证：保留。
+        { url: 'https://www.linkedin.com/in/max-abendi', title: 'Max Abendi – Geschäftsführer – Abendi Pumpen GmbH | LinkedIn' },
+        // 机构名冒充人名：丢弃。
+        { url: 'https://www.linkedin.com/in/bts-org', title: 'BTS Engineering Consultants (Projects, Training) | LinkedIn' },
+      ],
+      { name: 'Abendi', domain: 'abendi.de' },
+    );
+    expect(contacts.map((contact) => contact.fullName)).toEqual(['Max Abendi']);
+  });
+
+  it('flags organisation-shaped names wherever a person name is extracted', () => {
+    expect(looksLikeOrganizationName('BTS Engineering Consultants (Projects, Training)')).toBe(true);
+    expect(looksLikeOrganizationName('Pumpen Schmidt GmbH')).toBe(true);
+    expect(looksLikeOrganizationName('Max Mustermann')).toBe(false);
+    expect(looksLikeOrganizationName('Marek Havlicek')).toBe(false);
+    // 姓氏不误伤：`Co` 是真实姓氏，只有带点的 `Co.` 才算公司。
+    expect(looksLikeOrganizationName('Jose Co')).toBe(false);
   });
 
   it('queries social.search through the broker and tolerates a failing dork', async () => {

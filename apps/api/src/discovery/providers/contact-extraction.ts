@@ -45,6 +45,49 @@ export interface ContactSellerContext {
   offering?: string;
 }
 
+/**
+ * 「人名字段」带组织特征说明抽取把公司/机构当成了人（M5 评估：LinkedIn 的机构页
+ * 曾以整条公司名入库）。词表只收「作为整个人名 token 出现就基本不可能是姓」的
+ * 法律形式与机构词；`Co`（华人/荷兰姓氏）与 `ag` 不在其中，全大写 `AG` 与带点的
+ * `Co.` 走单独的、区分大小写的规则。
+ */
+const ORGANIZATION_NAME_TOKENS = new Set([
+  'gmbh','mbh','kg','ohg','ug','gbr','ek','inc','incorporated','ltd','limited',
+  'plc','llc','corp','corporation','company','consulting','consultants','solutions',
+  'services','systems','technologies','technology','engineering','engineers',
+  'industries','institute','holding','holdings','group','gruppe','international',
+  'sa','sas','sarl','bv','nv',
+]);
+
+export function looksLikeOrganizationName(name: string): boolean {
+  if (!name) return false;
+  // 全大写 AG / 带点的 Co. 几乎只出现在公司名里；混写的人名姓氏（Ag/Co）不误伤。
+  if (/(?:^|\s)AG(?:\s|$)/u.test(name)) return true;
+  if (/(?:^|\s)Co\.(?:\s|$)/u.test(name)) return true;
+  return name
+    .toLowerCase()
+    .split(/[^a-z0-9äöüß]+/u)
+    .filter(Boolean)
+    .some((token) => ORGANIZATION_NAME_TOKENS.has(token));
+}
+
+/**
+ * 抽取出的人名字段规范化：去掉括号注记（模型常写成 `Max Mustermann (Geschäftsführer)`
+ * 或 `(MBA)`），剩余部分仍带机构特征才丢弃；清洗后至少两个词。
+ */
+export function cleanPersonName(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const stripped = trimmed
+    .replace(/[(（][^()（）]*[)）]/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim();
+  const candidate = stripped || trimmed;
+  if (looksLikeOrganizationName(candidate)) return null;
+  if (candidate.split(/\s+/u).filter(Boolean).length < 2) return null;
+  return candidate;
+}
+
 export async function extractPeopleFromPage(
   gateway: ModelGateway,
   contract: ContactExtractionContract | undefined,
@@ -69,5 +112,11 @@ export async function extractPeopleFromPage(
     { ...ctx, durableResultSchema: 'contact-decision-makers/v1' },
     { telemetry },
   );
-  return result.data?.people ?? [];
+  const people: ExtractedPerson[] = [];
+  for (const person of result.data?.people ?? []) {
+    const name = cleanPersonName(person.full_name ?? '');
+    if (name === null) continue;
+    people.push({ ...person, full_name: name });
+  }
+  return people;
 }
