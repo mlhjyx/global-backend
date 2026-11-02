@@ -1,7 +1,7 @@
 # 联系人挖掘（决策人 · 联系方式 · 职位）设计稿
 
 > 生命周期：`APPROVED`
-> 依据：D1–D8 已由产品负责人拍板（D1/D6/D7/D8 于 2026-10-31；D2–D5 于 2026-11-01，见 §八）；M1 #703、M2a #707 已合入 main，M2b #709 施工中。
+> 依据：D1–D8 已由产品负责人拍板（D1/D6/D7/D8 于 2026-10-31；D2–D5 于 2026-11-01，见 §八）；M1–M4 已上线（#703/#707/#709/#717/#728/#733/#734 + gain-saas #26/#27/#28），M5 未开始——落地状态与剩余见 §十一。
 > 调研依据：2026-10-31 实读代码与文档（`decision-maker-multi-source-spec.md`、`decision-maker-p0.4-mainchain-wiring-design.md`、`decision-maker-cross-source-identity-design.md`、`provider-registry.md`、`docs/status/current.md`）+ `global_dev` 只读计数。
 > 目标：客户拿到的是**具体的人**（姓名 + 职位 + 部门/资历）、**可用且经验证的联系方式**（邮箱/电话/职业社交主页），而不是只有询盘表单。多源、可审计、合规。
 
@@ -204,3 +204,26 @@
 - 不买私库、不绕任何访问控制（登录墙/验证码/账号池/换 IP）、SMTP 不投递。社媒公开个人页按 D1 执行：档案副本优先，直抓仅限无需登录的公开页，被拒（999/403/登录墙）即停。
 - 不做个人手机号的「猜号」（SIM 段推断属高风险，不做）。
 - 不把联系人塞进公司级 reachability 分数（评分口径另行评估，避免联系人质量污染推荐）。
+
+## 十一、落地状态与剩余工作（2026-11-02 更新）
+
+> 本节是这条能力线的「现状总表」；每随相关 PR 更新。设计决策仍以 §八 为准。
+
+| 阶段 | 状态 | 锚点 |
+| --- | --- | --- |
+| **M1** run 内接线 + 证据/统计 | ✅ 已上线 | #703（10-31 镜像 7cea82b9） |
+| **M2a** 社媒索引适配器 | ✅ 已上线 | #707；M2a 在现网曾被 `searxng.search` 的 personalData 过滤成空转，随 M2b 的 `social.search` 修复 |
+| **M2b** 社媒三层降级 + 直播抓取 | ✅ 已上线 | #709 + #717（`social.fetch` typed projection）；随六/七/八班上线 |
+| **M3** 邮箱补全（`email_guess` 双闸）+ D7 独立子账户 | ✅ 代码已上线 | #728（残留吸收）、#733（覆盖全部匹配、$2 封顶）、#734（999 状态/重试回放修复）；**运行时开关 `data_provider.email_guess` 当前为 DISABLED，需确认后重新打开** |
+| **M4** gain-saas 决策人卡片与三个操作入口 | ✅ 已上线 | gain-saas #26/#27/#28 + 引擎 #718/#729/#731；第十班（54e8632f）复验通过 |
+| **M5** Golden Set 质量评估（20 家：人命中率/邮箱命中率/误报率） | ⬜ 未开始 | 设计 §七；依赖 M1–M4（已满足） |
+
+**剩余工作（2026-11-02 盘点）**
+
+1. **失败后无法重试同一主体**：一次性授权 + 请求作用域账户绑定，使「建 ICP / 生成查询计划 / 联系人发现」失败后同一公司或 ICP 无法再次执行（`EXECUTION_BUDGET_GRANT_REUSED`）。引擎 retry-account 机制已存在但条件过严（仅「从未发出付费调用」可换账户）。放宽属授权语义设计变更，待产品负责人拍板后出评估。
+2. **两个已记录的 fail-closed 残留**（有意延后）：model 侧投影拒绝（router-model-gateway）仍留 RESERVED + control；同一适配器在同次重试里新增回执的极端混合仍按失败关闭（与 signals 阶段现状一致）。
+3. **D6 per-tenant LIA 采集页**：gain-saas 侧「数据处理声明」页，多租户前必须（当前是全局 interim LIA）。
+4. **D8 OSS 融合与社媒增强**：theHarvester + social-analyzer 工具化先行、JobSpy 次之、Trafilatura 作清洗件；Common Crawl 作为 L1 档案副本的另一路源；`SocialHostCircuit` 跨进程化（现为进程级）。
+5. **`google_patents` 仍 DISABLED**（D2 的专利源半程）：等 patent cache 刷新计划恢复并完成 BQ 实测后启用。
+6. **M5 前置数据**：Golden Set 名单（20 家已知公司）需要与产品负责人确认取样口径。
+
