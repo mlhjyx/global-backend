@@ -7,6 +7,9 @@ import { ProviderHttpError } from '../model-gateway/providers/provider-output-er
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import {
   MAX_COMPANY_DISCOVERY_ADAPTERS,
+  CONTACT_DISCOVERY_COMPANY_CONCURRENCY,
+  CONTACT_DISCOVERY_SOFT_DEADLINE_MS,
+  MAX_CONTACT_DISCOVERY_COMPANIES,
   MAX_DISCOVERY_ENRICH_COMPANIES,
   MAX_DISCOVERY_FIT_COMPANIES,
   MAX_DISCOVERY_PLAN_QUERIES,
@@ -2754,6 +2757,8 @@ export function createDiscoveryActivities(deps: {
       reason?: string;
       failed?: number;
       budgetTruncated: boolean;
+      /** Companies left because the run's admission lease had no room for them (PARTIAL, not FAILED). */
+      skippedForLease?: number;
       /** Adapter diagnostics summed over companies (e.g. social fetch/blocked counters). */
       diagnostics?: Record<string, number>;
       /** D7: the derived contact-stage sub-account and what it spent (bigints as decimal strings). */
@@ -2777,7 +2782,12 @@ export function createDiscoveryActivities(deps: {
       };
     }> {
       const binding = await ensureRunBudget(args);
-      const limit = Math.min(Math.max(args.limit ?? 8, 1), 25);
+      // D5（2026-11-02 重校）：默认覆盖全部 fit=match 公司；25 家只是安全上限，
+      // 30 分钟活动窗口由下面的软时限保护，真正的停点由 D7 联系人预算给。
+      const limit = Math.min(
+        Math.max(args.limit ?? MAX_CONTACT_DISCOVERY_COMPANIES, 1),
+        MAX_CONTACT_DISCOVERY_COMPANIES,
+      );
       const providerRow = await deps.prisma.dataProvider.findUnique({
         where: { key: 'decision_maker' },
         select: { config: true },
@@ -2890,11 +2900,46 @@ export function createDiscoveryActivities(deps: {
         blocked: 0,
         failed: 0,
       };
-      for (let index = 0; index < targets.length; index += 1) {
-        const target = targets[index]!;
+      // 覆盖全部匹配公司：并发 2 的工位池（逐家串行会让十几家×2.5 分钟越过 30 分钟活动窗口）。
+      // 窗口保护有两层：18 分钟软时限先停「新公司开工」，在飞的两家仍能收尾；家数上限只是
+      // 兜底，真正的停点通常是 D7 联系人预算。30 分钟 startToClose 超时会被判为 control stop
+      // 并让整个 run FAILED（fail-closed，discovery.run-failure.ts），所以宁可提前截断（PARTIAL）。
+      // 截断语义不变：只停新公司，在飞公司完成收尾，绝不半途丢结果。
+      const stageStartedAt = Date.now();
+      const lease = await readRunLease(binding);
+      let skippedForLease = 0;
+      let stop = false;
+      const truncate = (): void => {
+        budgetTruncated = true;
+        stop = true;
+      };
+      let nextIndex = 0;
+      const processCompany = async (index: number, target: (typeof targets)[number]): Promise<void> => {
         if (contactBudget?.exhausted()) {
-          budgetTruncated = true;
-          break;
+          truncate();
+          return;
+        }
+        if (Date.now() - stageStartedAt >= CONTACT_DISCOVERY_SOFT_DEADLINE_MS) {
+          truncate();
+          return;
+        }
+        if (!lease.allows(DISCOVERY_LEASE_UNIT_MS.contact)) {
+          // 准入租约（3 小时）没有余量了：预算 attest 会在租约后一律被拒，而那是 control error，
+          // 会把整个 run 打成 FAILED（丢失 fit/signals 结果）。此处按其它阶段的同一口径停手。
+          skippedForLease = Math.max(skippedForLease, targets.length - index);
+          stop = true;
+          return;
+        }
+        // 并发下「开工前」也要复读 run 账户：另一工位可能已在飞时把账户打穿，
+        // 不能再往一个已耗尽的账本上发起新的公司。
+        const startStatus = await budgets.status({
+          workspaceId: binding.scopeKey,
+          accountKey: binding.accountKey,
+        });
+        contactBudget?.observe(startStatus.remainingMicrousd);
+        if (startStatus.exhausted) {
+          truncate();
+          return;
         }
         let result: Awaited<ReturnType<typeof discoverContactsCore>> | undefined;
         try {
@@ -2924,7 +2969,7 @@ export function createDiscoveryActivities(deps: {
           for (const [name, count] of Object.entries(result.diagnostics ?? {})) {
             diagnostics[name] = (diagnostics[name] ?? 0) + count;
           }
-          if (result.budgetTruncated) budgetTruncated = true;
+          if (result.budgetTruncated) truncate();
         } catch (error) {
           if (isExecutionControlError(error)) throw error;
           failed += 1;
@@ -2939,13 +2984,13 @@ export function createDiscoveryActivities(deps: {
         });
         contactBudget?.observe(runStatus.remainingMicrousd);
         if (runStatus.exhausted) {
-          budgetTruncated = true;
-          break;
+          truncate();
+          return;
         }
         // M3: complete missing named emails for this company. SMTP probes are priced at zero, so
         // this step spends none of the D7 sub-budget; it is bounded by its own per-company probe
         // allowance and never runs after the run account itself is exhausted.
-        if (!result || !emailVerifier || !target.domain) continue;
+        if (!result || !emailVerifier || !target.domain) return;
         try {
           const guess = await guessEmailsForRunCompany(
             { prisma: deps.prisma },
@@ -2991,7 +3036,28 @@ export function createDiscoveryActivities(deps: {
               `[discoverRunContacts] email guess for ${target.canonicalCompanyId} failed: ${message.slice(0, 150)}`,
             );
         }
-      }
+      };
+      const companyWorker = async (): Promise<void> => {
+        while (!stop) {
+          const index = nextIndex;
+          nextIndex += 1;
+          if (index >= targets.length) return;
+          try {
+            await processCompany(index, targets[index]!);
+          } catch (error) {
+            // 一个工位抛出执行控制错误时，另一工位不再认领新公司（在飞的那家收尾后退出），
+            // 而不是把剩下的公司全部跑完再把活动报失败。
+            stop = true;
+            throw error;
+          }
+        }
+      };
+      await Promise.all(
+        Array.from(
+          { length: Math.min(CONTACT_DISCOVERY_COMPANY_CONCURRENCY, targets.length) },
+          () => companyWorker(),
+        ),
+      );
       return {
         companies,
         people,
@@ -3000,6 +3066,7 @@ export function createDiscoveryActivities(deps: {
         skipped: false,
         failed: failed || undefined,
         budgetTruncated,
+        skippedForLease: skippedForLease || undefined,
         ...(Object.keys(diagnostics).length ? { diagnostics } : {}),
         ...(contactBudget
           ? {

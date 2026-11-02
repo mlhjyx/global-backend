@@ -41,6 +41,8 @@ export const DISCOVERY_LEASE_UNIT_MS = Object.freeze({
   enrich: 2 * 60_000,
   /** One company: a sitemap probe and the watch's registration. */
   watches: 5 * 60_000,
+  /** One company: six page reads, the social layer and up to six SMTP probes. */
+  contact: 10 * 60_000,
 });
 
 export interface DiscoveryRunLease {

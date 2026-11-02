@@ -2,8 +2,9 @@
  * D7 联系人阶段独立预算账户（设计稿 docs/superpowers/plans/2026-10-31-contact-discovery.md §5.3d）。
  *
  * 联系人发现（含社媒与邮箱补全）用自己一侧的额度，不挤占 run 的查询/画像/评分预算：
- * 每轮按公司数派生一个子账户键（scope=contact.discovery、按 run 命名），上限 = 每家公司上限 ×
- * 本轮公司数，默认对齐 D5（$0.50 / 8 家 ⇒ 每家 $0.0625 = 6 页 × $0.01/页）。
+ * 每轮按公司数派生一个子账户键（scope=contact.discovery、按 run 命名），
+ * 上限 = min(每家公司上限 × 本轮公司数, 整轮上限)。D5 于 2026-11-02 重校为
+ * 每家 20¢、整轮封顶 $2（见下方常量注释）；旧的「8 家 $0.50、每家 $0.0625」口径已废止。
  * 撞自己的上限即停；实际花费仍按账本用量结算。
  *
  * 🔴 账本事实：workspace grant 的 authority 只允许开一本 `tool_budget_account`
@@ -14,19 +15,22 @@
  *
  * 计量粒度是 adapter / 公司（每次模型或工具调用后账本都会落账）：单次调用最多让子账户小幅越过
  * 上限，上限之后的工作绝不会启动。计量是单调高水位：阶段开始前就持有、阶段中才释放的预留不会把
- * 已观察到的花费抹掉（只会更保守）。注意 Temporal 重试会重新取基线（每 attempt 一份上限）——
- * 已结算的操作经账本幂等重放不重复计费，但统计口径按 attempt 计。
+ * 已观察到的花费抹掉（只会更保守）。注意 Temporal 重试会重新取基线（每 attempt 一份上限）：
+ * 自 #728 起 model 操作键按 attempt 隔离（correlationId 带 a<attempt>），重试**不会**重放上一
+ * attempt 已结算的操作、会重新计费——单 run 的联系人花费上界是两个 attempt 的上限之和，且仍受
+ * run 账户剩余额约束。
  */
 import { assertMicrousd } from '../tools/microusd';
 
 export const CONTACT_DISCOVERY_BUDGET_SCOPE = 'contact.discovery' as const;
 
-/** D5 的基准口径：8 家公司 $0.50（discoverRunContacts 的默认 Top N）。 */
-export const DEFAULT_CONTACT_DISCOVERY_COMPANIES = 8 as const;
-export const CONTACT_DISCOVERY_RUN_CAP_MICROUSD = 500_000n;
-export const CONTACT_DISCOVERY_PER_COMPANY_CAP_MICROUSD =
-  CONTACT_DISCOVERY_RUN_CAP_MICROUSD /
-  BigInt(DEFAULT_CONTACT_DISCOVERY_COMPANIES);
+/**
+ * D5 于 2026-11-02 重校（产品负责人拍板「覆盖全部 fit=match 公司」）：
+ * 实测单家 ≈$0.09（官网 4 页 + 社媒 + 邮箱探测），单家上限 20¢、整轮上限 $2；
+ * 整轮上限 = min(公司数 × 20¢, $2)，覆盖典型 8–16 家。旧的「8 家 $0.50」口径废止。
+ */
+export const CONTACT_DISCOVERY_RUN_CAP_MICROUSD = 2_000_000n;
+export const CONTACT_DISCOVERY_PER_COMPANY_CAP_MICROUSD = 200_000n;
 
 /** Same bound the ledger's account/operation keys use. */
 const MAX_ACCOUNT_KEY_LENGTH = 200;
@@ -50,12 +54,13 @@ export function deriveContactDiscoveryAccountKey(runId: string): string {
   return accountKey;
 }
 
-/** 上限动态计算：每家上限 × 本轮公司数（不写死单轮金额）。 */
+/** 上限动态计算：min(公司数 × 每家上限, 整轮上限)。 */
 export function contactDiscoveryCapMicrousd(companyCount: number): bigint {
   if (!Number.isSafeInteger(companyCount) || companyCount < 0) {
     throw new TypeError('companyCount must be a non-negative safe integer');
   }
-  return BigInt(companyCount) * CONTACT_DISCOVERY_PER_COMPANY_CAP_MICROUSD;
+  const scaled = BigInt(companyCount) * CONTACT_DISCOVERY_PER_COMPANY_CAP_MICROUSD;
+  return scaled < CONTACT_DISCOVERY_RUN_CAP_MICROUSD ? scaled : CONTACT_DISCOVERY_RUN_CAP_MICROUSD;
 }
 
 /**
