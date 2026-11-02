@@ -26,8 +26,10 @@ import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import {
   countLineageGatedColdPaths,
   hasPlannableSource,
+  icpMatchesRegisteredFairs,
   isSourceRunnable,
   plannerSourcePrompt,
+  plannerVisibleSources,
   routePlannerQueries,
   scaleEstimatedVolume,
   withDroppedQueryNote,
@@ -541,9 +543,16 @@ export class IcpService {
         error: { code: 'INVALID_STATE', message: `icp is ${icp.status}; query plans require an ACTIVE icp` },
       });
     }
+    // 展会源只能跑注册表里已登记的展会（selectFairs 用 ICP 行业词/关键词匹配模板 topics）：
+    // 无命中时 provider 静默返回零记录（2026-11-02 run 3212f6f3 的 8 条 trade_fair 查询全空），
+    // 规划时不向模型列出这个注定空跑的源；路由校验仍用完整 enabledSources。
+    const plannerSources = plannerVisibleSources(
+      enabledSources,
+      icpMatchesRegisteredFairs(icp.companyAttributes),
+    );
     // 没有任何可规划的已启用数据源时，计划只会是空的：在调用模型之前拒绝，不花钱。
     // ted / openfda 只承载冷路径确定性生成的查询，单独启用它们不足以规划。
-    if (!hasPlannableSource(enabledSources)) {
+    if (!hasPlannableSource(plannerSources)) {
       throw new ConflictException({
         error: {
           code: 'NO_ENABLED_DISCOVERY_SOURCE',
@@ -565,7 +574,7 @@ export class IcpService {
       exclusions: icp.exclusions,
       rules: icp.rules.map((r) => ({ kind: r.kind, field: r.field, operator: r.operator, value: r.value })),
     };
-    const queryPlanPrompt = `ICP 定义：\n${JSON.stringify(icpBrief, null, 2)}\n\n请生成多源查询计划，输出中文 rationale。\n${plannerSourcePrompt(enabledSources)}\n${plannerKeywordLanguage(icp.targetMarkets, icp.companyAttributes)}`;
+    const queryPlanPrompt = `ICP 定义：\n${JSON.stringify(icpBrief, null, 2)}\n\n请生成多源查询计划，输出中文 rationale。\n${plannerSourcePrompt(plannerSources)}\n${plannerKeywordLanguage(icp.targetMarkets, icp.companyAttributes)}`;
     const result = await executeIcpBudgetedTask<QueryPlanModelOutput>({
       budgetStore: this.budgetStore ?? new UnavailableBudgetStore('ICP query-plan generation requires an authoritative BudgetStore'),
       binding,
