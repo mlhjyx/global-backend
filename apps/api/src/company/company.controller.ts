@@ -20,6 +20,7 @@ import { Enveloped, envelope, PageEnveloped, pageEnvelope } from '../common/enve
 import { ApiEnvelope, ApiListEnvelope, ApiPageEnvelope } from '../common/api-envelope.decorator';
 import { CompanyService } from './company.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
+import { RetryUnderstandingDto } from './dto/retry-understanding.dto';
 import { CompanyDto, OfferingDto } from './dto/company.dto';
 import {
   ApiExecutionBudgetGrant,
@@ -92,10 +93,11 @@ export class CompanyController {
   async retryUnderstanding(
     @Ctx() ctx: RequestContext,
     @Param('companyId', ParseUUIDPipe) companyId: string,
+    @Body() dto: RetryUnderstandingDto,
     @ExecutionBudgetGrant() compactJws?: string,
   ): Promise<Enveloped<CompanyDto>> {
     const { company } = await asExecutionBudgetHttpBoundary(() =>
-      this.companies.retryUnderstanding(ctx, companyId, compactJws),
+      this.companies.retryUnderstanding(ctx, companyId, dto.attemptId, compactJws),
     );
     return envelope(CompanyDto.from(company));
   }

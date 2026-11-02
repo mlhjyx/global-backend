@@ -193,6 +193,7 @@ describe('workspace execution technical envelope catalog', () => {
     const envelope = resolveWorkspaceTechnicalBudgetEnvelope({
       operation: 'POST /companies/:companyId/understanding/retry',
       companyId: COMPANY_ID,
+      body: { attemptId: '6d5c4b3a-2918-4f7e-8d9c-0b1a2c3d4e5f' },
     });
 
     expect(envelope.policy.models).toEqual([

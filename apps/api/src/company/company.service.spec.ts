@@ -13,7 +13,8 @@ const CTX: RequestContext = {
   scopes: ['acquisition:read', 'acquisition:write'],
 };
 const COMPANY_ID = '30000000-0000-4000-8000-000000000003';
-const REQUEST_SHA = 'e4a4d55a5edaf24769beabeaef26b31c501c9ee50c61bbdb1167b063dd6f87bb';
+const ATTEMPT_ID = '5a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d';
+const REQUEST_SHA = '3dc3a2999f48c19806265db8cc7941af75a496c4f65a630ec4f2c62fcb68d8fd';
 
 const BINDING: ExecutionBudgetBinding = {
   authorityId: '90000000-0000-4000-8000-000000000009',
@@ -61,7 +62,7 @@ const FAILED_COMPANY = {
 describe('CompanyService.retryUnderstanding', () => {
   it('requires a workspace grant for the retry operation itself', async () => {
     const { service, verify } = fixture(FAILED_COMPANY);
-    await service.retryUnderstanding(CTX, COMPANY_ID, 'jws');
+    await service.retryUnderstanding(CTX, COMPANY_ID, ATTEMPT_ID, 'jws');
     expect(verify).toHaveBeenCalledWith(
       expect.objectContaining({
         compactJws: 'jws',
@@ -78,7 +79,7 @@ describe('CompanyService.retryUnderstanding', () => {
 
   it('rejects a company outside the workspace with 404 before consuming the grant', async () => {
     const { service, consume } = fixture(null);
-    await expect(service.retryUnderstanding(CTX, COMPANY_ID, 'jws')).rejects.toBeInstanceOf(
+    await expect(service.retryUnderstanding(CTX, COMPANY_ID, ATTEMPT_ID, 'jws')).rejects.toBeInstanceOf(
       NotFoundException,
     );
     expect(consume).not.toHaveBeenCalled();
@@ -87,14 +88,14 @@ describe('CompanyService.retryUnderstanding', () => {
   it('rejects retries when the profile is not a failed DRAFT', async () => {
     const enriching = { ...FAILED_COMPANY, status: 'ENRICHING' };
     const first = fixture(enriching);
-    await expect(first.service.retryUnderstanding(CTX, COMPANY_ID, 'jws')).rejects.toBeInstanceOf(
+    await expect(first.service.retryUnderstanding(CTX, COMPANY_ID, ATTEMPT_ID, 'jws')).rejects.toBeInstanceOf(
       ConflictException,
     );
     expect(first.consume).not.toHaveBeenCalled();
 
     const neverFailed = { ...FAILED_COMPANY, understandingFailedAt: null };
     const second = fixture(neverFailed);
-    await expect(second.service.retryUnderstanding(CTX, COMPANY_ID, 'jws')).rejects.toBeInstanceOf(
+    await expect(second.service.retryUnderstanding(CTX, COMPANY_ID, ATTEMPT_ID, 'jws')).rejects.toBeInstanceOf(
       ConflictException,
     );
     expect(second.consume).not.toHaveBeenCalled();
@@ -102,7 +103,7 @@ describe('CompanyService.retryUnderstanding', () => {
 
   it('consumes the grant and re-emits the CompanyProfileCreated event for the same company', async () => {
     const { service, outboxCreate, consume } = fixture(FAILED_COMPANY);
-    const result = await service.retryUnderstanding(CTX, COMPANY_ID, 'jws');
+    const result = await service.retryUnderstanding(CTX, COMPANY_ID, ATTEMPT_ID, 'jws');
     expect(result.company).toBe(FAILED_COMPANY);
     expect(consume).toHaveBeenCalledTimes(1);
     expect(outboxCreate).toHaveBeenCalledWith({
