@@ -448,7 +448,6 @@ const WORKSPACE_QUOTE_REQUEST_SCHEMAS = [
       body: {
         type: 'object',
         additionalProperties: false,
-        required: [],
         properties: {
           website: { type: 'string', minLength: 1 },
           name: { type: 'string', maxLength: 200 },

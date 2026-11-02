@@ -3725,7 +3725,6 @@
                       "body": {
                         "type": "object",
                         "additionalProperties": false,
-                        "required": [],
                         "properties": {
                           "website": {
                             "type": "string",
