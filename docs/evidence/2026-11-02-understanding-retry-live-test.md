@@ -1,6 +1,6 @@
-# 理解失败可见与受控重试：dev live 实测（PARTIAL）
+# 理解失败可见与受控重试：dev live 实测（闭环）
 
-本记录是 2026-11-02（UTC 前夜）在 xin 的 dev 环境对「企业官网理解失败可见 + 受控重试」做的 live 实测。**结论是 PARTIAL**：从失败可见到重试入队的全链已实测打通；但同一公司的第 2 次真实尝试暴露出一个既有缺陷（预算操作键缺运行/尝试维度 → remnant 重放），修复已合入 main（#726），**「重试成功跑到 REVIEW」的最终验证要等下一班镜像（含 `9351507f`）**。4 个 Temporal schedule 仍全部 paused；本记录不构成 RuntimeEvidence。
+本记录是 2026-11-02 在 xin 的 dev 环境对「企业官网理解失败可见 + 受控重试」做的 live 实测。**结论：闭环通过**——`DRAFT（失败）→ ENRICHING → REVIEW` 全链在修复后的运行时（`c034010b` / `56c55bd8`、gain-saas #29）上实测通过，理解产出（行业、简介、70 条 claims）落库，全程 0 次 remnant / 0 次授权复用错误。过程中先后暴露并修复了两层既有缺陷（#726 预算操作键缺运行/尝试维度；#730 + gain-saas #29 账户级授权复用）。4 个 Temporal schedule 仍全部 paused；本记录不构成 RuntimeEvidence。
 
 ## 起因（用户可见症状）
 
@@ -21,9 +21,27 @@ GainOS 里 gmq@demo.cn 的「具安科技」（gianttek.cn）长期停在「待�
 5. **修复**：#726（`9351507f`，已合入 main、待下一班镜像）：理解活动为模型调用与 crawl broker 传入 `correlationId=<workflowRunId>:<activityId>:a<attempt>`，每次真实尝试各用独立预算操作键；同一 attempt 内仍幂等。
 6. 旁证：实测后单独发起一次更大的 `gemini-3.8-flash` 请求返回 200，429 属瞬时突发（与并发验收 run 的负载相关），非当日配额耗尽。
 
+## 第二层根因与修复（2026-11-02 上午）
+
+用户在实际界面点击「重试理解」仍收到「这次授权已经使用过」（`EXECUTION_BUDGET_GRANT_REUSED`）后的深挖：
+
+- 复现：以临时测试账号经 BFF 与引擎直连均为 409 `EXECUTION_BUDGET_GRANT_REUSED`；数据库无新 authority 行、BFF 无错误日志。
+- 根因（账户层）：工作空间 Grant 的消费会把预算账户绑定到首个 authority（账户键 `purpose:subject:请求摘要`）。重试操作的请求摘要对同一公司恒定，因此同一公司的**第二次**重试必然在开户时被拒；`understanding.run` 也不在 `RETRYABLE_WORKSPACE_PURPOSES`（该集合要求旧账户从未真正派发付费调用，理解失败前通常已派发 crawl/模型调用）。本记录第一轮排障中的一次实测消耗了该公司的首个作用域，之后任何点击都撞此错——与用户账号无关。
+- 修复：
+  1. #730（`c034010b`）：重试端点要求 `body.attemptId`（客户端每次点击生成的新 UUID）——每次重试获得独立 requestSha256、预算账户与 authority；同一 attemptId 的重复提交仍被一次性 Grant 语义挡住（幂等）；quote 契约同步校验。
+  2. gain-saas #29（`104547e`）：BFF 透传 attemptId、前端每次点击 `crypto.randomUUID()`（需 gain-saas-web 重建生效）。
+  与 #726（`9351507f`，预算操作键按 run/attempt 隔离）三层一起构成完整修复。
+
+## 终验（2026-11-02 10:03–10:10 +08，镜像 `c034010b` / `56c55bd8`，attested）
+
+- 运行时：`/health/build` attested、build_sha `c034010b`；gain-saas-web 已含 #29。
+- 经 BFF（与界面按钮相同的路径）`POST /api/companies/29905a58…/understanding/retry`，body `{attemptId: <新 UUID>}` → **202**（不再 409）。
+- 状态链：`DRAFT（understandingFailedAt 非空）→ ENRICHING（失败字段清空）→ REVIEW`；抽取产出落库：industry「科研仪器与医疗器械研发制造」、中文 summary、claims 70 条（待人工审批，符合 REVIEW 语义）。
+- 运行期间模型网关仍有 `gemini-3.8-flash` 429 突发（与并行验收 run 抢同一模型）；#722 的 5 次/5s 指数退避与 #726 的按尝试键使其在活动层被吸收，工作流最终完成；worker 日志中该 run 的 `BudgetOperationReplayError` 计数为 0。
+
 ## 边界与后续
 
-- 最终验证（重试成功后 `status=REVIEW`、失败字段保持清空、无 remnant 错误）推迟到下一班含 `#726` 的镜像；届时回写本记录并将其状态改为 PASS/PARTIAL 的最终结论。
+- 最终验证已完成（见「终验」一节）；排障用的临时测试账号已删除。
 - 其它域的模型活动（discovery / icp / outreach 等）存在同类「操作键无运行维度」风险，需逐域评估后单独处理（#726 未扩大范围）。
 - 4 个平台 schedule 仍 paused；本记录不 unpause、不改策略、不构成 RuntimeEvidence。
 
