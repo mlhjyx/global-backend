@@ -626,6 +626,48 @@ describe("ICP generation authority and controlled enrichment", () => {
     }
     expect(prompt).not.toMatch(/\bted\b/u);
   });
+  it("lists trade_fair for an ICP that matches a registered fair (2026-11-02)", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.enable("public_web", "trade_fair");
+    f.icp.companyAttributes = { industry: ["sheet metal working"] };
+    f.result.data = { queries: [PUBLIC_WEB_QUERY], estimated_volume: 10 };
+
+    await f.service.generateQueryPlan(ctx, f.icp.id);
+
+    const prompt = f.runtime.mock.calls[0]![1].prompt as string;
+    expect(prompt).toContain("source_hint=trade_fair");
+  });
+  it("leaves trade_fair out of the planner prompt when no registered fair matches the ICP", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.enable("public_web", "trade_fair");
+    f.icp.companyAttributes = {
+      industry: ["生命科学研究", "生物医药"],
+      keywords: ["神经退行性疾病", "听觉发育"],
+    };
+    f.result.data = { queries: [PUBLIC_WEB_QUERY], estimated_volume: 10 };
+
+    const plan = await f.service.generateQueryPlan(ctx, f.icp.id);
+
+    const prompt = f.runtime.mock.calls[0]![1].prompt as string;
+    expect(prompt).toContain("source_hint=public_web");
+    expect(prompt).not.toContain("trade_fair");
+    expect(plan).toMatchObject({ status: "DRAFT" });
+  });
+  it("refuses to plan when trade_fair is the only ENABLED source and the ICP matches no fair", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.enable("trade_fair");
+    f.icp.companyAttributes = { industry: ["生命科学研究"] };
+
+    await expect(f.service.generateQueryPlan(ctx, f.icp.id)).rejects.toMatchObject({
+      status: 409,
+      response: { error: { code: "NO_ENABLED_DISCOVERY_SOURCE" } },
+    });
+    expect(f.runtime).not.toHaveBeenCalled();
+    expect(f.authority.consumeVerifiedWorkspaceGrant).not.toHaveBeenCalled();
+  });
   it("keeps only queries for ENABLED sources, names each query's source and scales the estimate (BI-30)", async () => {
     const f = generationFixture();
     f.icp.status = "ACTIVE";

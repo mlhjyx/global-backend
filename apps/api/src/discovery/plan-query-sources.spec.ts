@@ -8,11 +8,13 @@ import {
   SYSTEM_PLANNED_SOURCE_KEYS,
   countLineageGatedColdPaths,
   hasPlannableSource,
+  icpMatchesRegisteredFairs,
   isSourceRunnable,
   planQueryRoutes,
   planQuerySkipReason,
   planQuerySourceHints,
   plannerSourcePrompt,
+  plannerVisibleSources,
   routePlannerQueries,
   scaleEstimatedVolume,
   withDroppedQueryNote,
@@ -331,6 +333,34 @@ describe('planner source prompt (BI-30)', () => {
     for (const key of keys) {
       expect(keys.filter((other) => other !== key && other.includes(key)), key).toEqual([]);
     }
+  });
+});
+
+describe('trade_fair visibility follows the registered fairs (2026-11-02)', () => {
+  it('matches an ICP whose industry terms or keywords hit a registered fair', () => {
+    expect(icpMatchesRegisteredFairs({ industry: 'sheet metal working' })).toBe(true);
+    expect(icpMatchesRegisteredFairs({ industry: ['生命科学研究'], keywords: ['激光切割'] })).toBe(true);
+    expect(icpMatchesRegisteredFairs({ keywords: ['钣金'] })).toBe(true);
+  });
+
+  it('matches nothing for an ICP the only registered fair does not serve', () => {
+    expect(
+      icpMatchesRegisteredFairs({ industry: ['生命科学研究', '生物医药'], keywords: ['神经退行性疾病'] }),
+    ).toBe(false);
+    expect(icpMatchesRegisteredFairs({})).toBe(false);
+    expect(icpMatchesRegisteredFairs(null)).toBe(false);
+  });
+
+  it('leaves trade_fair out of the planner sources when no registered fair matches', () => {
+    expect(plannerVisibleSources(only('public_web', 'trade_fair'), false).map((s) => s.providerKey))
+      .toEqual(['public_web', 'public_web']);
+    expect(plannerVisibleSources(only('public_web', 'trade_fair'), true).map((s) => s.providerKey))
+      .toEqual(['public_web', 'public_web', 'trade_fair']);
+  });
+
+  it('reports no plannable source when trade_fair would be the only one and nothing matches', () => {
+    expect(hasPlannableSource(plannerVisibleSources(only('trade_fair'), false))).toBe(false);
+    expect(hasPlannableSource(plannerVisibleSources(only('trade_fair'), true))).toBe(true);
   });
 });
 

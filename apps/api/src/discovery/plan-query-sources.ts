@@ -2,6 +2,7 @@ import { MAX_QUERY_PLANNER_QUERIES } from './execution-envelope';
 import type { DiscoveryQuerySkipReason } from './discovery-query-skip';
 import type { PlanQueryShape } from './icp-to-cpv';
 import type { SourceClass } from './provider-contract';
+import { selectFairs } from './trade-fairs';
 
 /**
  * Which data source a discovery plan query runs on (BI-30).
@@ -198,6 +199,46 @@ export function plannerSourcePrompt(enabled: readonly CompanyDiscoverySource[]):
       ? [`${systemPlanned.join('、')} 的查询由系统按 ICP 确定性生成，不要自己写。`]
       : []),
   ].join('\n');
+}
+
+/**
+ * Whether the ICP's own terms match any registered trade-fair template. The
+ * trade-fair provider selects fairs with `selectFairs` from the query's
+ * industry terms and keywords; an ICP matching none would only get trade_fair
+ * queries that run on nothing and return zero records without an error
+ * (2026-11-02: run 3212f6f3 ran eight such queries, all empty).
+ */
+export function icpMatchesRegisteredFairs(attributes: unknown): boolean {
+  const record =
+    attributes !== null && typeof attributes === 'object' && !Array.isArray(attributes)
+      ? (attributes as Record<string, unknown>)
+      : {};
+  const strings = (value: unknown): string[] =>
+    (Array.isArray(value) ? value : [value]).filter(
+      (item): item is string => typeof item === 'string' && item.length > 0,
+    );
+  return (
+    selectFairs({
+      industryTerms: [...strings(record.industry), ...strings(record.sub_industry)],
+      keywords: strings(record.keywords),
+      region: '',
+    }).length > 0
+  );
+}
+
+/**
+ * The enabled sources the planner prompt may list for this ICP: trade_fair is
+ * left out when no registered fair matches (see icpMatchesRegisteredFairs).
+ * The full enabled list still routes the model's queries, so a trade_fair query
+ * the model writes anyway is not dropped as SOURCE_DISABLED — it just runs empty.
+ */
+export function plannerVisibleSources(
+  enabled: readonly CompanyDiscoverySource[],
+  tradeFairMatches: boolean,
+): CompanyDiscoverySource[] {
+  return tradeFairMatches
+    ? [...enabled]
+    : enabled.filter((source) => source.providerKey !== 'trade_fair');
 }
 
 /** Why the planner left a model query (or, for PLAN_QUERY_CAP, a source copy of one) out of the plan. */
