@@ -15,7 +15,7 @@
 | 本仓架构（as-built + 缺口）   | [docs/architecture/current.md](docs/architecture/current.md)                                                       |
 | 架构/产品决策注册表           | [docs/adr/registry.md](docs/adr/registry.md)                                                                       |
 | 当前状态与待拍板              | [docs/status/current.md](docs/status/current.md)                                                                   |
-| 当前门与路线                  | [docs/roadmap/release-plan.md](docs/roadmap/release-plan.md)（历史见 [changelog](docs/roadmap/changelog.md)）      |
+| 当前门与路线                  | [docs/status/release-plan.md](docs/status/release-plan.md)（历史见 [changelog](docs/roadmap/changelog.md)）      |
 | Site Builder 域文档与历史设计 | [docs/site-builder/](docs/site-builder/) 00–14；当前施工选择仍以 status/release-plan 为准                          |
 | 全平台顶层基底（L0/L1）       | [docs/platform/](docs/platform/) 交付包（待批准评审稿）                                                            |
 | 研究归档                      | [docs/research/](docs/research/)（含冻结期保留的 v3.0 相关研究；两份 v3.0 Word 评审稿=研究综合稿，不再是权威基线） |

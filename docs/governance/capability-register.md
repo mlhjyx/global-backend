@@ -5,7 +5,7 @@
 > 状态：`CURRENT`
 > 事实 Owner：`OWN-PRODUCT`
 > 产品批准来源：Gate 2 推荐组合；全局前端来源：Gate 4；Site UX 来源：Gate 5；非 Site 产品域来源：Gate 6；外部采用组合来源：Gate 7（2026-07-20）
-> 工程核验基线：`origin/main@23d111f7b400403deb7466abf34ab709685b8376`
+> 历史工程核验基线（2026-08，仅作本表多轴状态的 provenance）：`origin/main@23d111f7b400403deb7466abf34ab709685b8376`；当前实现事实以 [status/current.md](../status/current.md) 为准，本表的 Capability 多轴状态不因该基线过期而自动晋级或降级
 
 本表是 Capability ID、用户结果和多轴状态的唯一登记。当前前端规范、页面目录和 Capability Pack 只能引用本表 ID；审批与审计过程保留在 Git/PR，不再维护平行能力清单。
 

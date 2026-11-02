@@ -50,7 +50,7 @@ const NOW = new Date("2026-08-07T12:00:00.000Z");
 
 test("the stable roadmap and ADR registry reject live-status and superseded product drift", () => {
   const releasePlan = readFileSync(
-    new URL("../docs/roadmap/release-plan.md", import.meta.url),
+    new URL("../docs/status/release-plan.md", import.meta.url),
     "utf8",
   );
   const decisions = readFileSync(
@@ -280,7 +280,7 @@ test("the discovery lineage successor is current-main based and the quarantined 
     "utf8",
   );
   const releasePlan = readFileSync(
-    new URL("../docs/roadmap/release-plan.md", import.meta.url),
+    new URL("../docs/status/release-plan.md", import.meta.url),
     "utf8",
   );
   const closeoutPlan = readFileSync(

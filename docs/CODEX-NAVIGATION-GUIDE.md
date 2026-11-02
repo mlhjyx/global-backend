@@ -24,7 +24,7 @@ Finish local preparation and validation before requesting a still-missing extern
 Use the first applicable source in this order and resolve conflicts upward:
 
 1. Current code, machine contracts, migrations, and tests at the exact commit/worktree: code-first [OpenAPI](../packages/contracts/openapi/openapi.json), contract schemas, and Prisma schema define executable interfaces and storage.
-2. [Product scope](product-scope.md), [current status](status/current.md), [current architecture](architecture/current.md), [ADR registry](adr/registry.md), and [release plan](roadmap/release-plan.md) define product intent, accepted decisions, and the next gates. A code discrepancy is evidence of an implementation gap, not permission to change the approved product or security policy.
+2. [Product scope](product-scope.md), [current status](status/current.md), [current architecture](architecture/current.md), [ADR registry](adr/registry.md), and [release plan](status/release-plan.md) define product intent, accepted decisions, and the next gates. A code discrepancy is evidence of an implementation gap, not permission to change the approved product or security policy.
 3. Live, read-only external evidence for drift-prone state such as Git branches, PR checks, development services, provider configuration, or deployed health.
 4. Repository history and implementation records, which explain provenance but do not override current documents or code.
 5. Long-term memory and historical task transcripts, which are navigation hints only.

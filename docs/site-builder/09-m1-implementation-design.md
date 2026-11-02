@@ -2,7 +2,7 @@
 
 > 文档 ID：`SITE-M1-001`
 > 生命周期：`CURRENT`
-> 当前事实来源：[状态](../status/current.md)、[路线](../roadmap/release-plan.md)、当前代码与候选基线 `site-builder-model-candidate-baseline/2026-08-07-v3`。
+> 当前事实来源：[状态](../status/current.md)、[路线](../status/release-plan.md)、当前代码与候选基线 `site-builder-model-candidate-baseline/2026-08-07-v3`。
 > 历史设计记录：**已认可（2026-07-14 用户拍板；2026-07-17 ADR-020 模型组合补充；2026-07-27 ADR-021 候选重基线）**。设计真值 = 本目录活文档；决策真值 = `docs/adr/registry.md`（ADR-013~021）。本文是 M1 的**施工图**：实测证实的承重假设 + 镜像 M0 as-built 的 grounded 落地触点 + 合规 + 关键决策 + 主动风险/权衡 + TDD 步骤。对标先例：`docs/implementation-records/ted-provider-spec.md`。实现按 §7 分 PR 交付，每 PR 本地全绿 + 真机 verify + 对抗复审。
 >
 > **2026-07-16 回写（v3.2 §24/§26 分发入本文，Reviewed against 12 v3.2）**：新增 §10 生产化审计（R0–R4 定点修复 + 各阶段前置门）、§11 施工 PR 图（粒度/顺序/风险分级）、§12 目标态消费契约与 schema；并就地校正过时表述（组件库 17→55 型/ADR-015；rembg 移出 M1-c/ADR-018；「终选」改四态路由 currentRoute/targetCandidate/ADR-016；R0-3 禁虚构身份引 ADR-017）。**严格区分 as-built（§2 触点 + `@global/contracts` SiteSpec 1.0.0 type-only）与目标态（§12，SiteSpec 1.1 / 内容生命周期，未落地）**。

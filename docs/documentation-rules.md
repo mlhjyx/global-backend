@@ -36,7 +36,7 @@ docs/
 
 新目录和文件随实际内容按需建立。现有 ADR、治理登记、证据、发布制品、changelog、生成页面与其他机器绑定材料属于保留区，处理方式见第 6 节；上图只列日常维护结构。
 
-在新文档完成承接、相关引用与机器规则完成更新之前，继续使用[产品范围](product-scope.md)、[当前架构](architecture/current.md)、[ADR 注册表](adr/registry.md)、[当前状态](status/current.md)和[现行发布路线](roadmap/release-plan.md)。新的目录分类不改变产品对象归属、实现责任或现有工程门。
+在新文档完成承接、相关引用与机器规则完成更新之前，继续使用[产品范围](product-scope.md)、[当前架构](architecture/current.md)、[ADR 注册表](adr/registry.md)、[当前状态](status/current.md)和[现行发布路线](status/release-plan.md)。新的目录分类不改变产品对象归属、实现责任或现有工程门。
 
 ## 2. 内容放置边界
 

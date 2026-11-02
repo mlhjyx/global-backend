@@ -3,7 +3,7 @@
 > 文档 ID：`DOC-ARCH-001`
 > 生命周期：`CURRENT`
 > 当前事实来源：当前代码、共享合同与 [当前状态](../status/current.md)。
-> 2026-07-10 v2（合流定稿）。上游：[../product-scope.md](../product-scope.md)（边界与决策）、[../adr/registry.md](../adr/registry.md)（决策注册表）。缺口的整改排期见 [../roadmap/release-plan.md](../roadmap/release-plan.md)。
+> 2026-07-10 v2（合流定稿）。上游：[../product-scope.md](../product-scope.md)（边界与决策）、[../adr/registry.md](../adr/registry.md)（决策注册表）。缺口的整改排期见 [../status/release-plan.md](../status/release-plan.md)。
 >
 > **as-built 与运行身份边界**：本文描述源码结构和目标收敛，不复制当前提交、工作区状态、审查数量、端口或运行证据计数；这些时间绑定事实只见[当前状态](../status/current.md)。历史观察保留在 changelog/evidence。Program C 的 Opportunity 主聚合与服务端消费边界不由既有 browser ACK 或 Conversation shell 替代；任何源码合入都不能自动证明 runtime adoption。
 > **结构**：本文 §1–§8 主体描述**获客后端**（C 核心）as-built 架构；独立站建设子系统（Site Builder）的 as-built 快照见 §1A，细节与承重决策见 [../site-builder/02-architecture.md](../site-builder/02-architecture.md)、[../site-builder/09-m1-implementation-design.md](../site-builder/09-m1-implementation-design.md) 和 [../adr/registry.md](../adr/registry.md) ADR-013~021。当前产品主线是获客 RL1（见[当前状态](../status/current.md)），Site Builder 线未推进（PRD4-D1 未拍板）。旧 Word、v3.1/v3.2 和研究稿不是 as-built 权威。

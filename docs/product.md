@@ -5,7 +5,7 @@
 > 维护 Owner：`OWN-PRODUCT`（具体人员与模块分工由责任表承接）
 > 最近实质更新：2026-10-27
 > 适用范围：整个 Global 产品的目标、模块职责、核心业务对象和跨模块协作。
-> 当前事实来源：[产品范围与本仓边界](product-scope.md)、[当前架构](architecture/current.md)、[ADR/PDR 注册表](adr/registry.md)、[当前状态](status/current.md)及[发布路线](roadmap/release-plan.md)。
+> 当前事实来源：[产品范围与本仓边界](product-scope.md)、[当前架构](architecture/current.md)、[ADR/PDR 注册表](adr/registry.md)、[当前状态](status/current.md)及[发布路线](status/release-plan.md)。
 > 文档规则：[文档目录与维护规则](documentation-rules.md)。
 > 来源承接：原工作区根目录 `global-backend-product-logic-guide.md`，本次整体迁移至 `docs/product.md`。
 

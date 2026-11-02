@@ -20,7 +20,7 @@
 | 当前已实现架构 | [architecture/current.md](../architecture/current.md) | 引用代码或机器契约补证 |
 | 承重决策 | [adr/registry.md](../adr/registry.md) | 用 Decision ID 引用 |
 | 当前主线与完成度 | [status/current.md](../status/current.md) | 只写本能力局部状态和核验点 |
-| 施工顺序 | [release-plan.md](../roadmap/release-plan.md) | 用 milestone ID 引用 |
+| 施工顺序 | [release-plan.md](../status/release-plan.md) | 用 milestone ID 引用 |
 | 文档、能力、对象、场景、冲突和追踪 ID | [governance/](README.md) 对应登记表 | 形成读者视图，不再建平行清单 |
 | OSS/外部能力 Card、采用决定与状态 | [OSS / 外部能力注册表](../backend/oss-registry.md) | 其他文档只引用 Card；PRD/代码不得形成影子采用清单 |
 | API | `packages/contracts/openapi/openapi.json` | 使用 operationId/路径引用，不手抄总数作长期真值 |
