@@ -116,6 +116,30 @@ const REVIEWED_STALE_SCOPES = Object.freeze([
       "pnpm-lock.yaml",
     ]),
   }),
+  // 2026-11-02：`docs/roadmap/release-plan.md` 迁到 `docs/status/release-plan.md`
+  // （documentation-rules 的目录结构）后，生成的重基线工件
+  // `apps/api/src/site-builder/agents/model-candidate-baseline.json` 的
+  // documentationPolicy 引用路径同步更新，相对 v22 绑定多出这一条漂移；
+  // Copy 资格仍为 BLOCKED / NOT_AUTHORIZED，无任何运行时或 dispatch 变化。
+  Object.freeze({
+    scope: "PRODUCTION_PARITY_PLATFORM_AUTHORITY_POLICY_V2_DOC_PATH_MIGRATION",
+    paths: Object.freeze([
+      "apps/api/nest-cli.json",
+      "apps/api/package.json",
+      "apps/api/src/model-gateway/new-api-request-bound-settlement.ts",
+      "apps/api/src/model-runtime/site-builder-ai-task-bridge.ts",
+      "apps/api/src/model-runtime/structured-task-runtime-bridge.ts",
+      "apps/api/src/site-builder/agents/ai-task.ts",
+      "apps/api/src/site-builder/agents/model-candidate-baseline.json",
+      "apps/api/tsconfig.build.json",
+      "package.json",
+      "packages/contracts/package.json",
+      "packages/contracts/src/index.ts",
+      "packages/contracts/src/site-builder/component-qualification.ts",
+      "packages/db/prisma/schema.prisma",
+      "pnpm-lock.yaml",
+    ]),
+  }),
 ]);
 
 function fail(code) {

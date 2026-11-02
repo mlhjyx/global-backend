@@ -21,7 +21,7 @@
 
 ## Stable product sequence
 
-This document owns the stable product sequence and gate definitions; it does not own a live phase verdict, branch/PR head, runtime observation or authorization state. Live gate verdicts and time-bound execution facts are maintained only in [current status](current.md).
+This document owns the stable product sequence and gate definitions; it does not own a live phase verdict, branch/PR head, runtime observation or authorization state. Live gate verdicts and time-bound execution facts are maintained only in [current status](../status/current.md).
 
 The stable product spine is `Onboarding → ICP → LeadQualifiedPackage → Opportunity → Human QGO → Feedback`; the parallel Site spine `Quote → Grant → Build → Preview` does not replace QGO.
 
@@ -51,7 +51,7 @@ The G0–G7 meanings below are stable. Their current verdicts are intentionally 
 
 ### Ordered delivery
 
-1. **Phase 0 — Truth and ownership:** establish current authority, Program A/B/C ownership and accepted interfaces before any product implementation; live completion and merge/readback facts remain in [current status](current.md).
+1. **Phase 0 — Truth and ownership:** establish current authority, Program A/B/C ownership and accepted interfaces before any product implementation; live completion and merge/readback facts remain in [current status](../status/current.md).
 2. **MVP-0:** accept Program A current-main slices, establish formal GrowthOS source/Builder/remote/CI, recover Backend runtime and expose authentic capability availability/onboarding.
 3. **MVP-1 — Program C:** establish the service principal, durable package handoff with commit-before-ACK, Opportunity aggregate, Human QGO, SalesAcceptance/Outcome feedback and Conversation linkage.
 4. **Pilot 3-A:** after the required gates pass, run one separately authorized internal Germany industrial-pump importer/procurement pilot using TED, GLEIF and exact official sites only; caps are 50 raw / 30 canonical / 10 enrich / 5 review / 3 packages, zero model / paid / send, and 0–3 honest results.

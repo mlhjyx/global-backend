@@ -5,7 +5,8 @@
 > 状态：`CURRENT`
 > 事实 Owner：`OWN-DOC-GOV`
 > 决策基线：Gate 2 推荐组合、`DEC-FE-P4-001..011`、`DEC-FE-P5-001..010`、`DEC-FE-P6-001..012`、`DEC-FE-P7-001..012` 与 `DEC-FE-P8-001..012` 于 2026-07-20 获产品负责人批准；`DEC-AIDEV-001..002` 于 2026-07-24、`DEC-AIDEV-003` 于 2026-07-25 获产品负责人批准；`DEC-FE-POSTGATE-001` 于 2026-08-02 获产品负责人批准；2026-07-23 文档瘦身授权仅取代其中历史工作包处置方式
-> 历史工程核验基线（2026-08，仅作该次审计的 provenance；当前工程门与事实基线以 [status/current.md](../status/current.md) 为准）：`origin/main@d2c93dd6bea0348381286558896b395c84945171`；Program A historical delta-audit base=`23d111f7b400403deb7466abf34ab709685b8376`，closing packet=`91cae351795cceced59893bcf552c2b502a4ebaa`，clean、`MERGE_HEAD=NONE`、在 `ed615d1b` 后有 41 commits；`b57af498` 是整合 historical base `23d111f7` 的 two-parent provenance。该 packet 不是已接纳的 Program A source；表中各条的“最新关闭条件”引用的提交均为其当时的 readback。
+> 当前工程核验基线：`origin/main@d2c93dd6bea0348381286558896b395c84945171`；Program A historical delta-audit base=`23d111f7b400403deb7466abf34ab709685b8376`，closing packet=`91cae351795cceced59893bcf552c2b502a4ebaa`，clean、`MERGE_HEAD=NONE`、在 `ed615d1b` 后有 41 commits；`b57af498` 是整合 historical base `23d111f7` 的 two-parent provenance。该 packet 不是已接纳的 Program A source，任何后续 head/dirty/index/merge 变化均须重开 delta audit。
+> 注（2026-11-02）：上一行是 2026-08 那次 G0 审计的 provenance；当前工程门裁决与事实基线以 [status/current.md](../status/current.md) 为准。
 
 本表是 Conflict/Decision ID、当前状态、唯一 Owner 和裁决位置的当前唯一登记。方案比较、作者 dry-run 和阶段审批过程保留在 Git/PR；稳定结论、阻塞项和后续替代必须回写本表或相应主题事实源。
 
