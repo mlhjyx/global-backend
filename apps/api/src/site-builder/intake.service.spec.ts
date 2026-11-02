@@ -40,6 +40,7 @@ interface FakeDb {
   keys: Record<string, unknown>[];
   budgets: Record<string, unknown>[];
   grants: Record<string, unknown>[];
+  outboxEvents: Record<string, unknown>[];
 }
 
 function callCreate(
@@ -48,6 +49,7 @@ function callCreate(
   input: IntakeInput,
   idempotencyKey?: string,
   verifiedGrant?: VerifiedSiteBuildBudgetGrant,
+  executionGrant?: string,
 ): Promise<IntakeResult> {
   const instant = new Date();
   const grant: VerifiedSiteBuildBudgetGrant = {
@@ -69,7 +71,13 @@ function callCreate(
     expiresAt: new Date(instant.getTime() + 300_000),
     expiredAtVerification: false,
   };
-  return service.create(ctx, input, idempotencyKey, verifiedGrant ?? grant);
+  return service.create(
+    ctx,
+    input,
+    idempotencyKey,
+    verifiedGrant ?? grant,
+    executionGrant,
+  );
 }
 
 function clone<T>(value: T): T {
@@ -93,6 +101,7 @@ function makeService(
     keys: [],
     budgets: [],
     grants: [],
+    outboxEvents: [],
   };
   let companyProfileSeq = 0;
   let siteSeq = 0;
@@ -299,6 +308,12 @@ function makeService(
         return row;
       },
     },
+    outboxEvent: {
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        db.outboxEvents.push(clone(data));
+        return data;
+      },
+    },
   };
 
   const prisma = {
@@ -321,13 +336,30 @@ function makeService(
     } as unknown as DemoV0Launcher);
 
   const assertReady = vi.fn(async () => undefined);
+  const authority = {
+    verifyWorkspaceGrant: vi.fn(async () => ({ tokenSha256: "e".repeat(64) })),
+    consumeVerifiedWorkspaceGrantInTransaction: vi.fn(async () => ({
+      authorityId: "authority-1",
+      replay: false,
+      scopeKey: CTX.workspaceId,
+      accountKey: "account-1",
+      purpose: "understanding.run",
+      subjectType: "company",
+      subjectId: "request:test",
+      requestSha256: "a".repeat(64),
+    })),
+  };
   return {
-    service: new IntakeService(prisma as never, launcher, {
-      assertReady,
-    } as never),
+    service: new IntakeService(
+      prisma as never,
+      launcher,
+      { assertReady } as never,
+      authority as never,
+    ),
     db,
     launches,
     assertReady,
+    authority,
   };
 }
 
@@ -420,6 +452,7 @@ describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
       siteId: "site-1",
       buildId: "run-1",
       status: "generating_demo",
+      understanding: "not_started",
     });
     expect(result).not.toHaveProperty("mode");
     expect(db.sites).toHaveLength(1);
@@ -498,6 +531,7 @@ describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
       siteId: "site-1",
       buildId: "run-1",
       status: "generating_demo",
+      understanding: "not_started",
     });
     expect(db.runs).toHaveLength(1);
     expect((db.sites[0]?.intake as Record<string, unknown>).websiteUrl).toBe(
@@ -728,6 +762,7 @@ describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
         siteId: "legacy-site",
         buildId: "legacy-run",
         status: "generating_demo",
+        understanding: "not_started",
       },
     });
 
@@ -808,6 +843,7 @@ describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
       siteId: "site-1",
       buildId: "run-1",
       status: "generating_demo",
+      understanding: "not_started",
     });
     expect(db.sites).toHaveLength(1);
     expect(db.runs).toHaveLength(1);
@@ -839,6 +875,7 @@ describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
       siteId: "site-1",
       buildId: "run-1",
       status: "generating_demo",
+      understanding: "not_started",
     });
     Object.assign(db.sites[0]!, { status: "setup_failed" });
     Object.assign(db.runs[0]!, { status: "failed", finishedAt: new Date() });
@@ -849,6 +886,7 @@ describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
       siteId: "site-1",
       buildId: "run-1",
       status: "generating_demo",
+      understanding: "not_started",
     });
     expect(launchCount).toBe(1);
     expect(recoverCount).toBe(1);
@@ -963,6 +1001,7 @@ describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
       siteId: "site-1",
       buildId: "run-1",
       status: "generating_demo",
+      understanding: "not_started",
     });
     expect(db.companyProfiles).toHaveLength(1);
     expect(db.sites).toHaveLength(1);
@@ -1007,6 +1046,7 @@ describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
       siteId: "site-1",
       buildId: "run-1",
       status: "generating_demo",
+      understanding: "not_started",
     });
     expect(harness.db.sites).toHaveLength(1);
     expect(harness.db.runs).toEqual([
@@ -1045,6 +1085,7 @@ describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
       siteId: "site-1",
       buildId: "run-1",
       status: "generating_demo",
+      understanding: "not_started",
     });
     expect(harness.db.sites).toEqual([
       expect.objectContaining({ id: "site-1", status: "ready" }),
@@ -1104,6 +1145,7 @@ describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
       siteId: "site-1",
       buildId: "run-2",
       status: "generating_demo",
+      understanding: "not_started",
     });
     expect(db.sites).toHaveLength(1);
     expect(db.sites[0]?.status).toBe("building");
@@ -1160,5 +1202,48 @@ describe("IntakeService R0 contract（POST /site-builder/intake）", () => {
       (caught: unknown) => caught,
     );
     expect(error).toBeInstanceOf(BadGatewayException);
+  });
+});
+
+describe("IntakeService execution grant wiring", () => {
+  it("有执行授权：在同一事务消费并写 CompanyProfileCreated v2，响应 understanding=started", async () => {
+    const { service, db, authority } = makeService();
+    const result = await callCreate(
+      service,
+      CTX,
+      BASE_INTAKE,
+      "exec-grant-key",
+      undefined,
+      "signed-execution-grant",
+    );
+
+    expect(result.understanding).toBe("started");
+    expect(authority.verifyWorkspaceGrant).toHaveBeenCalledWith(
+      expect.objectContaining({
+        compactJws: "signed-execution-grant",
+        identity: CTX,
+        scope: expect.objectContaining({
+          purpose: "understanding.run",
+          subjectType: "company",
+        }),
+      }),
+    );
+    expect(authority.consumeVerifiedWorkspaceGrantInTransaction).toHaveBeenCalledTimes(1);
+    expect(db.outboxEvents).toEqual([
+      expect.objectContaining({
+        eventType: "CompanyProfileCreated",
+        schemaVersion: 2,
+        aggregateType: "CompanyProfile",
+        aggregateId: "company-1",
+      }),
+    ]);
+  });
+
+  it("无执行授权：不写理解事件，响应 understanding=not_started", async () => {
+    const { service, db } = makeService();
+    const result = await callCreate(service, CTX, BASE_INTAKE, "no-exec-grant-key");
+
+    expect(result.understanding).toBe("not_started");
+    expect(db.outboxEvents).toEqual([]);
   });
 });

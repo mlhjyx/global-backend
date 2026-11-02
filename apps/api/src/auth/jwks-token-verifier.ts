@@ -1,5 +1,5 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { createRemoteJWKSet, jwtVerify, JWTPayload } from 'jose';
+import { createRemoteJWKSet, customFetch, jwtVerify, JWTPayload } from 'jose';
 import { TokenVerifier } from './token-verifier';
 import { RequestContext } from './request-context';
 import { normalizeTokenRoles } from './scopes';
@@ -76,6 +76,37 @@ export function validateJwksTokenVerifierConfiguration(
  *
  * ⚠️ 上线前必须与 SaaS 平台**书面确认** claim 名与命名空间、一人多 workspace 的传法。
  */
+const JWKS_FETCH_TIMEOUT_MS = 2_000;
+const JWKS_MAX_BYTES = 64 * 1024;
+
+/**
+ * 有界 JWKS 拉取：2 秒超时 + 64 KiB 上限。
+ * createRemoteJWKSet 的默认 fetch 没有超时与大小限制；未知 kid 触发拉取时，
+ * 外部端点变慢/返回超大文档会把每个认证请求挂住。
+ */
+export async function boundedJwksFetch(
+  input: Parameters<typeof fetch>[0],
+  init?: Parameters<typeof fetch>[1],
+): Promise<Response> {
+  const response = await fetch(input, {
+    ...init,
+    signal: AbortSignal.timeout(JWKS_FETCH_TIMEOUT_MS),
+  });
+  const declared = Number(response.headers.get('content-length') ?? 0);
+  if (Number.isFinite(declared) && declared > JWKS_MAX_BYTES) {
+    throw new Error('JWKS document exceeds size limit');
+  }
+  const body = await response.arrayBuffer();
+  if (body.byteLength > JWKS_MAX_BYTES) {
+    throw new Error('JWKS document exceeds size limit');
+  }
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
 @Injectable()
 export class JwksTokenVerifier extends TokenVerifier {
   private readonly jwks: ReturnType<typeof createRemoteJWKSet>;
@@ -90,7 +121,9 @@ export class JwksTokenVerifier extends TokenVerifier {
     const configuration = validateJwksTokenVerifierConfiguration(env);
     this.issuer = configuration.issuer;
     this.audience = configuration.audience;
-    this.jwks = createRemoteJWKSet(configuration.jwks); // 内部按 kid 缓存/轮换
+    this.jwks = createRemoteJWKSet(configuration.jwks, {
+      [customFetch]: boundedJwksFetch,
+    }); // 内部按 kid 缓存/轮换；拉取走有界 fetch
     this.clockSkewS = configuration.clockSkewS;
     this.wsClaim = configuration.workspaceClaim;
     this.rolesClaim = configuration.rolesClaim;

@@ -27,6 +27,10 @@ import {
   SITE_BUILD_BUDGET_GRANT_HEADER,
   SiteBuildBudgetGrantVerifier,
 } from "./site-build-budget-grant";
+import {
+  EXECUTION_BUDGET_GRANT_HEADER,
+  asExecutionBudgetHttpBoundary,
+} from "../execution-budget/execution-budget-grant.decorator";
 
 function intakeErrorSchema(codes: string[]) {
   return {
@@ -79,6 +83,13 @@ export class IntakeController {
     schema: { type: "string", minLength: 1, maxLength: 16_384 },
     description: "SaaS 签发、绑定本次 intake 请求的一次性费用授权 JWS",
   })
+  @ApiHeader({
+    name: EXECUTION_BUDGET_GRANT_HEADER,
+    required: false,
+    schema: { type: "string", minLength: 1, maxLength: 16_384 },
+    description:
+      "可选：SaaS 签发的 understanding.run 授权；缺失时公司理解不触发，响应 understanding=not_started",
+  })
   @ApiResponse({
     status: 402,
     description: "费用授权缺失、非法或过期",
@@ -126,6 +137,7 @@ export class IntakeController {
     @Body() dto: IntakeDto,
     @Headers("idempotency-key") idempotencyKey?: string,
     @Headers(SITE_BUILD_BUDGET_GRANT_HEADER) rawBudgetGrant?: string,
+    @Headers(EXECUTION_BUDGET_GRANT_HEADER) rawExecutionGrant?: string,
   ): Promise<Enveloped<IntakeResultDto>> {
     const budgetGrant = await this.budgetGrants.verify(rawBudgetGrant, {
       workspaceId: ctx.workspaceId,
@@ -134,7 +146,15 @@ export class IntakeController {
     });
     return envelope(
       IntakeResultDto.from(
-        await this.intake.create(ctx, dto, idempotencyKey, budgetGrant),
+        await asExecutionBudgetHttpBoundary(() =>
+          this.intake.create(
+            ctx,
+            dto,
+            idempotencyKey,
+            budgetGrant,
+            rawExecutionGrant,
+          ),
+        ),
       ),
     );
   }

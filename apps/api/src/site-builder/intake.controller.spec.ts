@@ -51,6 +51,7 @@ describe("IntakeController R0 header bridge", () => {
       DTO,
       "request-key-1",
       expect.objectContaining({ tokenSha256: "a".repeat(64) }),
+      undefined,
     );
   });
 });
