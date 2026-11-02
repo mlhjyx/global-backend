@@ -223,7 +223,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
   // stage, as each pass reports them. Kept outside the stages so a run a later stage fails (BI-25)
   // still shows them; shown only for the stages that left any. Absent in results recorded before
   // the lease soft deadline existed, so replays keep their status and stats.
-  const leaseSkips: Partial<Record<'queries' | 'websiteProfile' | 'fit' | 'enrich' | 'signals' | 'watches', number>> = {};
+  const leaseSkips: Partial<Record<'queries' | 'websiteProfile' | 'fit' | 'enrich' | 'signals' | 'contacts' | 'watches', number>> = {};
   const countLeaseSkips = (stage: keyof typeof leaseSkips, count: number | undefined): void => {
     if (count !== undefined && count > 0) leaseSkips[stage] = (leaseSkips[stage] ?? 0) + count;
   };
@@ -582,6 +582,8 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
           reason?: string;
           failed?: number;
           budgetTruncated: boolean;
+          /** Companies left because the admission lease had no room for them. */
+          skippedForLease?: number;
           diagnostics?: Record<string, number>;
           /** D7: derived contact-stage sub-account summary (microusd as decimal strings). */
           contactBudget?: {
@@ -613,6 +615,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
           icpId: input.icpId,
           ...authorityArgs,
         });
+        countLeaseSkips('contacts', contacts.skippedForLease);
       } catch (error) {
         if (isExecutionControlError(error)) throw error;
         /* 联系人发现是尽力而为的补全，失败不影响 run 状态 */

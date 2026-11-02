@@ -10,7 +10,7 @@ import type {
 /**
  * D7 联系人阶段独立预算账户（设计稿 §5.3d）在 run 内的接线：
  *  - 派生 scope=contact.discovery、按 run 命名的子账户；
- *  - 上限 = 每家上限 × 本轮公司数（默认对齐 D5：$0.5 / 8 家），撞顶即停；
+ *  - 上限 = min(每家上限 × 本轮公司数, 整轮上限)（D5 重校 2026-11-02：每家 20¢、封顶 $2），撞顶即停；
  *  - 结果进现有 contacts.budgetTruncated 口径（run stats → PARTIAL）；
  *  - email_guess M3 双闸：data_provider.email_guess ENABLED + lawfulBasis，每公司 ≤6 探测。
  */
@@ -86,6 +86,8 @@ function makeDeps(opts: {
   decisionMakerConfig?: unknown;
   emailGuessStatus?: 'ENABLED' | 'DISABLED' | null;
   verifiers?: EmailVerificationAdapter[];
+  /** Reads the run's admission lease (milliseconds left); absent → unbounded. */
+  runLease?: () => Promise<number>;
 }) {
   let remaining = opts.remainingMicrousd ?? 10_000_000n;
   let statusCalls = 0;
@@ -164,7 +166,13 @@ function makeDeps(opts: {
     remaining -= microusd;
   };
   return {
-    deps: { prisma, providers, gateway: {}, budgetStore } as unknown as Parameters<
+    deps: {
+      prisma,
+      providers,
+      gateway: {},
+      budgetStore,
+      ...(opts.runLease ? { runLease: opts.runLease } : {}),
+    } as unknown as Parameters<
       typeof createDiscoveryActivities
     >[0],
     drain,
@@ -224,7 +232,7 @@ afterEach(() => {
 });
 
 describe('discoverRunContacts —— D7 独立预算子账户', () => {
-  it('按 run 派生 contact.discovery 账户，上限 = 每家 × 公司数，撞顶即停并上报 budgetTruncated', async () => {
+  it('按 run 派生 contact.discovery 账户，上限 = 每家 × 公司数（整轮封顶 $2），未撞顶则全部跑完', async () => {
     const adapter = contactAdapter('decision_maker');
     const harness = makeDeps({
       companies: [company('c1'), company('c2'), company('c3')],
@@ -237,26 +245,27 @@ describe('discoverRunContacts —— D7 独立预算子账户', () => {
 
     const result = await createDiscoveryActivities(harness.deps).discoverRunContacts(args());
 
-    // 3 家 → 上限 3 × $0.0625 = $0.1875；每家用 $0.10 → 第 3 家不再启动。
-    expect(adapter.discoverContacts).toHaveBeenCalledTimes(2);
-    expect(result.companies).toBe(2);
-    expect(result.budgetTruncated).toBe(true);
+    // D5 重校（2026-11-02）：3 家 → 上限 min(3 × $0.20, $2) = $0.60；每家用 $0.10 → 全部 3 家跑完，
+    // 花费 $0.30 未撞顶。
+    expect(adapter.discoverContacts).toHaveBeenCalledTimes(3);
+    expect(result.companies).toBe(3);
+    expect(result.budgetTruncated).toBe(false);
     expect(result.contactBudget).toMatchObject({
       accountKey: `contact.discovery:${RUN_ID}`,
-      capMicrousd: '187500',
-      exhausted: true,
+      capMicrousd: '600000',
+      exhausted: false,
     });
-    expect(result.contactBudget?.spentMicrousd).toBe('200000');
+    expect(result.contactBudget?.spentMicrousd).toBe('300000');
   });
 
-  it('公司数减少时上限同步收缩：2 家 × $0.0625 = $0.125，最后一家跑完才撞顶不算截断', async () => {
+  it('公司数减少时上限同步收缩：2 家 × $0.20 = $0.40，最后一家跑完才撞顶不算截断', async () => {
     const adapter = contactAdapter('decision_maker');
     const harness = makeDeps({
       companies: [company('c1'), company('c2')],
       adapters: [adapter],
     });
     adapter.discoverContacts.mockImplementation(async () => {
-      harness.drain(100_000n);
+      harness.drain(250_000n); // 每家 $0.25 → 2 家共 $0.50，超出 $0.40 上限
       return { contacts: [CONTACT_RECORD], costCents: 0 };
     });
 
@@ -264,10 +273,10 @@ describe('discoverRunContacts —— D7 独立预算子账户', () => {
 
     expect(adapter.discoverContacts).toHaveBeenCalledTimes(2);
     expect(result.companies).toBe(2);
-    // 全部目标公司都跑过：撞顶发生在最后一家 → 没有漏活，不上报截断。
+    // 撞顶发生在最后一家跑完之后 → 没有漏掉任何公司，不上报截断（截断只表示「有活被跳过」）。
     expect(result.budgetTruncated).toBe(false);
-    expect(result.contactBudget?.capMicrousd).toBe('125000');
-    expect(result.contactBudget?.exhausted).toBe(true);
+    expect(result.contactBudget).toMatchObject({ capMicrousd: '400000', exhausted: true });
+    expect(result.contactBudget?.spentMicrousd).toBe('500000');
   });
 
   it('单家公司内子账户撞顶 → 后续 adapter 不再调用，并上报截断', async () => {
@@ -278,7 +287,7 @@ describe('discoverRunContacts —— D7 独立预算子账户', () => {
       adapters: [first, second],
     });
     first.discoverContacts.mockImplementation(async () => {
-      harness.drain(70_000n); // 单家上限 $0.0625 → 70k microusd 已撞顶
+      harness.drain(250_000n); // 单家上限 $0.20 → 250k microusd 已撞顶
       return { contacts: [CONTACT_RECORD], costCents: 0 };
     });
 
@@ -287,16 +296,18 @@ describe('discoverRunContacts —— D7 独立预算子账户', () => {
     expect(first.discoverContacts).toHaveBeenCalledTimes(1);
     expect(second.discoverContacts).not.toHaveBeenCalled();
     expect(result.budgetTruncated).toBe(true);
-    expect(result.contactBudget?.exhausted).toBe(true);
+    expect(result.contactBudget).toMatchObject({ capMicrousd: '200000', exhausted: true });
+    expect(result.contactBudget?.spentMicrousd).toBe('250000');
   });
 
   it('run 账户自身耗尽 → 沿用原口径 budgetTruncated，停止后续公司', async () => {
     const adapter = contactAdapter('decision_maker');
     const harness = makeDeps({
-      companies: [company('c1'), company('c2')],
+      companies: [company('c1'), company('c2'), company('c3')],
       adapters: [adapter],
-      // core 每家一次 + 活动每家一次 status：第 2 次（活动）起报耗尽 → 第 1 家处理完即停。
-      exhaustAfterStatusCalls: 1,
+      // status 调用序：基线 #1 → 第 1 家开工复读 #2（ok）→ core 内每家一次 #3（耗尽）；
+      // 第 2 家的开工复读起全部报耗尽 → 只跑第 1 家。
+      exhaustAfterStatusCalls: 2,
     });
 
     const result = await createDiscoveryActivities(harness.deps).discoverRunContacts(args());
@@ -304,6 +315,48 @@ describe('discoverRunContacts —— D7 独立预算子账户', () => {
     expect(adapter.discoverContacts).toHaveBeenCalledTimes(1);
     expect(result.companies).toBe(1);
     expect(result.budgetTruncated).toBe(true);
+  });
+
+  it('24 分钟软时限到点后不再开工新公司（30 分钟活动窗口保护）', async () => {
+    const adapter = contactAdapter('decision_maker');
+    const harness = makeDeps({
+      companies: [company('c1'), company('c2'), company('c3')],
+      adapters: [adapter],
+    });
+    let fakeNow = Date.now();
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => fakeNow);
+    try {
+      adapter.discoverContacts.mockImplementation(async () => {
+        fakeNow += 25 * 60_000; // 每家用掉 25 分钟：第 3 家开工前已越过 24 分钟软时限
+        return { contacts: [CONTACT_RECORD], costCents: 0 };
+      });
+
+      const result = await createDiscoveryActivities(harness.deps).discoverRunContacts(args());
+
+      // 并发 2：c1、c2 同时开工（都在时限前），完成后 c3 不再开工，但已跑的两家结果照常返回。
+      expect(adapter.discoverContacts).toHaveBeenCalledTimes(2);
+      expect(result.companies).toBe(2);
+      expect(result.budgetTruncated).toBe(true);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('准入租约无余量 → 不开工新公司、计 skippedForLease（收口 PARTIAL 而不是 FAILED）', async () => {
+    const adapter = contactAdapter('decision_maker');
+    const harness = makeDeps({
+      companies: [company('c1'), company('c2'), company('c3')],
+      adapters: [adapter],
+      // 剩余 60 秒 < 最终保留 10 分钟 → 任何一家都放不进租约。
+      runLease: async () => 60_000,
+    });
+
+    const result = await createDiscoveryActivities(harness.deps).discoverRunContacts(args());
+
+    expect(adapter.discoverContacts).not.toHaveBeenCalled();
+    expect(result.companies).toBe(0);
+    expect(result.skippedForLease).toBe(3);
+    expect(result.budgetTruncated).toBe(false);
   });
 });
 
@@ -432,7 +485,8 @@ describe('discoverRunContacts —— email_guess M3 双闸接线', () => {
       adapters: [adapter],
       emailGuessStatus: 'ENABLED',
       verifiers: [{ key: 'smtp_self', verifyEmail: vi.fn() } as unknown as EmailVerificationAdapter],
-      exhaustAfterStatusCalls: 1,
+      // 基线 #1、开工复读 #2 均 ok；core 内 #3 报耗尽 → 公司跑完后不再发起邮箱补全。
+      exhaustAfterStatusCalls: 2,
     });
 
     const result = await createDiscoveryActivities(harness.deps).discoverRunContacts(args());
@@ -461,7 +515,7 @@ describe('discoverRunContacts —— email_guess M3 双闸接线', () => {
       verifiers: [{ key: 'smtp_self', verifyEmail: vi.fn() } as unknown as EmailVerificationAdapter],
     });
     adapter.discoverContacts.mockImplementation(async () => {
-      harness.drain(70_000n); // 单家上限 $0.0625 → 这家已超过上限，但所有 adapter 都跑完了
+      harness.drain(250_000n); // 单家上限 $0.20 → 这家已超过上限，但所有 adapter 都跑完了
       return { contacts: [CONTACT_RECORD], costCents: 0 };
     });
 

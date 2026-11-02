@@ -3,7 +3,6 @@ import {
   CONTACT_DISCOVERY_BUDGET_SCOPE,
   CONTACT_DISCOVERY_PER_COMPANY_CAP_MICROUSD,
   CONTACT_DISCOVERY_RUN_CAP_MICROUSD,
-  DEFAULT_CONTACT_DISCOVERY_COMPANIES,
   contactDiscoveryCapMicrousd,
   createContactDiscoverySubBudget,
   deriveContactDiscoveryAccountKey,
@@ -12,7 +11,7 @@ import {
 /**
  * D7 联系人阶段独立预算账户（设计稿 §5.3d / D5）：
  * - scope=contact.discovery，accountKey 按 run 派生；
- * - 上限动态计算 = 每家上限 × 本轮公司数，默认对齐 D5（$0.5 / 8 家 → 每家 $0.0625）；
+ * - 上限动态计算 = min(每家上限 × 本轮公司数, 整轮上限)（2026-11-02 重校：每家 20¢、封顶 $2）；
  * - 撞自己的上限即停，不挤占 run 的查询/画像/评分额度。
  */
 describe('contact.discovery 预算账户派生（D7）', () => {
@@ -30,13 +29,12 @@ describe('contact.discovery 预算账户派生（D7）', () => {
     expect(() => deriveContactDiscoveryAccountKey('r'.repeat(190))).toThrow(TypeError);
   });
 
-  it('默认值对齐 D5：$0.50 / 8 家，每家 $0.0625', () => {
-    expect(DEFAULT_CONTACT_DISCOVERY_COMPANIES).toBe(8);
-    expect(CONTACT_DISCOVERY_RUN_CAP_MICROUSD).toBe(500_000n);
-    expect(CONTACT_DISCOVERY_PER_COMPANY_CAP_MICROUSD).toBe(62_500n);
-    expect(contactDiscoveryCapMicrousd(8)).toBe(500_000n);
-    expect(contactDiscoveryCapMicrousd(1)).toBe(62_500n);
-    expect(contactDiscoveryCapMicrousd(16)).toBe(1_000_000n);
+  it('D5 重校（2026-11-02）：每家 $0.20、整轮封顶 $2.00，8 家 → $1.60', () => {
+    expect(CONTACT_DISCOVERY_RUN_CAP_MICROUSD).toBe(2_000_000n);
+    expect(CONTACT_DISCOVERY_PER_COMPANY_CAP_MICROUSD).toBe(200_000n);
+    expect(contactDiscoveryCapMicrousd(8)).toBe(1_600_000n);
+    expect(contactDiscoveryCapMicrousd(1)).toBe(200_000n);
+    expect(contactDiscoveryCapMicrousd(16)).toBe(2_000_000n);
   });
 
   it('0 家 → 0 上限；非法公司数拒绝', () => {
@@ -56,27 +54,27 @@ describe('联系人子账户的窗口计量', () => {
       startRemainingMicrousd: 10_000_000n,
     });
     expect(budget.accountKey).toBe('contact.discovery:run-1');
-    expect(budget.capMicrousd).toBe(500_000n);
+    expect(budget.capMicrousd).toBe(1_600_000n);
     expect(budget.spentMicrousd).toBe(0n);
     expect(budget.exhausted()).toBe(false);
 
-    expect(budget.observe(9_600_000n)).toBe(400_000n);
-    expect(budget.spentMicrousd).toBe(400_000n);
+    expect(budget.observe(8_600_000n)).toBe(1_400_000n);
+    expect(budget.spentMicrousd).toBe(1_400_000n);
     expect(budget.exhausted()).toBe(false);
 
-    expect(budget.observe(9_500_000n)).toBe(500_000n);
+    expect(budget.observe(8_300_000n)).toBe(1_700_000n);
     expect(budget.exhausted()).toBe(true);
   });
 
-  it('上限随本轮公司数放大：16 家 → $1.00', () => {
+  it('整轮上限封顶 $2：16 家也只到 $2.00', () => {
     const budget = createContactDiscoverySubBudget({
       runId: 'run-1',
       companyCount: 16,
       startRemainingMicrousd: 10_000_000n,
     });
-    expect(budget.capMicrousd).toBe(1_000_000n);
-    budget.observe(9_400_000n);
-    expect(budget.spentMicrousd).toBe(600_000n);
+    expect(budget.capMicrousd).toBe(2_000_000n);
+    budget.observe(8_400_000n);
+    expect(budget.spentMicrousd).toBe(1_600_000n);
     expect(budget.exhausted()).toBe(false);
   });
 

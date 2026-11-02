@@ -43,6 +43,19 @@ export const MAX_GLEIF_FETCHES_PER_COMPANY = 4 as const;
 export const MAX_WIKIDATA_ENTITY_READS_PER_COMPANY = 3 as const;
 export const MAX_DISCOVERY_SIGNAL_COMPANIES = 12 as const;
 export const MAX_DISCOVERY_WATCH_COMPANIES = 12 as const;
+
+// Contact stage: `discoverRunContacts` runs inside the 30-minute start-to-close
+// activity window (discovery.workflow.ts signalActs). Two companies are in
+// flight at a time and the soft deadline stops claiming new ones so the pair
+// in flight can finish inside the window; the hard count is only a safety
+// bound because the D7 sub-budget usually truncates earlier.
+export const CONTACT_DISCOVERY_COMPANY_CONCURRENCY = 2 as const;
+export const MAX_CONTACT_DISCOVERY_COMPANIES = 25 as const;
+/**
+ * 18 minutes: the two companies still in flight at the deadline finish inside the
+ * 30-minute window even at the 10-minute worst-case unit (18 + 10 < 30).
+ */
+export const CONTACT_DISCOVERY_SOFT_DEADLINE_MS = 1_080_000 as const;
 export const MAX_SITEMAP_ROOTS = 4 as const;
 export const MAX_CHILD_SITEMAPS = 3 as const;
 /** robots.txt, then the sitemap roots and index children. */
