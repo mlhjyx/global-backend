@@ -53,12 +53,6 @@ export interface ContactDiscoveryCoreInput {
    * bounded by its own grant account alone.
    */
   contactBudget?: ContactDiscoveryBudgetGuard;
-  /**
-   * Per-execution tag (e.g. `a2` for Temporal attempt 2) appended to the model
-   * correlationId so paid-operation keys never collide across activity retries —
-   * a retried attempt must not inherit the previous attempt's unresolved ledger rows.
-   */
-  attemptTag?: string;
 }
 
 /**
@@ -178,9 +172,11 @@ export async function discoverContactsCore(
             {
               workspaceId: binding.scopeKey,
               runId: accountKey,
-              correlationId: input.attemptTag
-                ? `${input.companyId}:${input.attemptTag}`
-                : input.companyId,
+              // 跨 attempt 用同一 correlationId：重试**重放**已结算的 model 操作（不重跑、
+              // 不重复计费），残留（RESERVED 无结果）由下方 catch 按 remnant 吸收。此前按
+              // attempt 隔离键会让重试产生新回执，与重放的工具回执在持久化批次里混合成
+              // APPLIED/REPLAYED 并触发 DOMAIN_ACK_MIXED_REPLAY_STATE（2026-11-02 验收 run 4fe3e874）。
+              correlationId: input.companyId,
               lawfulBasis: input.lawfulBasis,
               authorizeExternalAction,
               onDurableReceipt: captureContactReceipt,
@@ -227,66 +223,73 @@ export async function discoverContactsCore(
     }
 
     const persisted = await deps.prisma.withWorkspace(input.workspaceId, async (tx) => {
-      const acknowledged = await applyDomainAckConsumerTransactions({
-        transaction: tx,
-        acknowledgements: perAdapter.flatMap((adapterResult) =>
-          adapterResult.durableReceipts.map(({ producerId, receipt }) => ({
+      // 回执按适配器分批确认（对齐 signals 阶段的 ack-split 先例，2026-10-21）：部分重试会天然
+      // 出现「上一 attempt 已确认过的适配器（REPLAYED）」与「本 attempt 首次成功的适配器
+      // （APPLIED）」并存在一个批次里；全部回执塞一个批次会抛 DOMAIN_ACK_MIXED_REPLAY_STATE
+      // （control）把整个 run 打成失败。每个适配器自己的批次要么全 APPLIED 要么全 REPLAYED。
+      // 残留风险：同一适配器在同一次重试里多出全新回执（新页面/新搜索结果）仍可能混合，
+      // 与 signals 阶段的现状一致，按失败关闭处理。
+      let skippedSuppressed = 0;
+      let skippedInvalid = 0;
+      const persistAdapter = async (
+        transaction: typeof tx,
+        pa: (typeof perAdapter)[number],
+      ): Promise<null> => {
+        // 同一 tx 内顺序 persist：后一 adapter 的 resolve 看得到前一 adapter 刚插入的行 →
+        // 同一人经 resolvePersonIdentity 合并（decision_maker 的 email + CH 的 officer_id 落同一条）。
+        const res = await persistDiscoveredContacts(transaction, {
+          workspaceId: input.workspaceId,
+          company: {
+            id: loaded.company.id,
+            dedupeKey: loaded.company.dedupeKey,
+          },
+          adapterKey: pa.key,
+          contacts: pa.contacts,
+          suppressedEmails: loaded.suppressedEmails,
+          lawfulBasis: input.lawfulBasis,
+        });
+        skippedSuppressed += res.skippedSuppressed;
+        skippedInvalid += res.skippedInvalid;
+        if (pa.costCents > 0) {
+          await transaction.usageLedger.create({
+            data: {
+              workspaceId: input.workspaceId,
+              resourceType: 'provider_call',
+              quantity: pa.contacts.length,
+              costUsd: pa.costCents / 100,
+              refType: 'canonical_company',
+              refId: loaded.company.id,
+              meta: { provider: pa.key, op: 'contact_discovery' },
+            },
+          });
+        }
+        return null;
+      };
+      for (const pa of perAdapter) {
+        if (pa.durableReceipts.length === 0) {
+          await persistAdapter(tx, pa);
+          continue;
+        }
+        await applyDomainAckConsumerTransactions({
+          transaction: tx,
+          acknowledgements: pa.durableReceipts.map(({ producerId, receipt }) => ({
             producerId,
             receipt,
-            domainAckKey:
-              `contact:${loaded.company.id}:${adapterResult.key}:${receipt.operationId}`,
+            domainAckKey: `contact:${loaded.company.id}:${pa.key}:${receipt.operationId}`,
             domainRevision: receipt.resultDigest,
-          }))),
-        apply: async (transaction) => {
-          // 同一 tx 内顺序 persist：后一 adapter 的 resolve 看得到前一 adapter 刚插入的行 →
-          // 同一人经 resolvePersonIdentity 合并（decision_maker 的 email + CH 的 officer_id 落同一条）。
-          let skippedSuppressed = 0;
-          let skippedInvalid = 0;
-          for (const pa of perAdapter) {
-            const res = await persistDiscoveredContacts(transaction, {
-              workspaceId: input.workspaceId,
-              company: {
-                id: loaded.company.id,
-                dedupeKey: loaded.company.dedupeKey,
-              },
-              adapterKey: pa.key,
-              contacts: pa.contacts,
-              suppressedEmails: loaded.suppressedEmails,
-              lawfulBasis: input.lawfulBasis,
-            });
-            skippedSuppressed += res.skippedSuppressed;
-            skippedInvalid += res.skippedInvalid;
-            if (pa.costCents > 0) {
-              await transaction.usageLedger.create({
-                data: {
-                  workspaceId: input.workspaceId,
-                  resourceType: 'provider_call',
-                  quantity: pa.contacts.length,
-                  costUsd: pa.costCents / 100,
-                  refType: 'canonical_company',
-                  refId: loaded.company.id,
-                  meta: { provider: pa.key, op: 'contact_discovery' },
-                },
-              });
-            }
-          }
-          const contacts = await transaction.canonicalContact.findMany({
-            where: { companyId: loaded.company.id },
-            include: { contactPoints: true },
-          });
-          return { contacts, skippedSuppressed, skippedInvalid };
-        },
-        readback: async (transaction) => ({
-          contacts: await transaction.canonicalContact.findMany({
-            where: { companyId: loaded.company.id },
-            include: { contactPoints: true },
-          }),
-          skippedSuppressed: 0,
-          skippedInvalid: 0,
-        }),
+          })),
+          apply: (transaction) => persistAdapter(transaction, pa),
+          readback: async () => null,
+        });
+      }
+      const contacts = await tx.canonicalContact.findMany({
+        where: { companyId: loaded.company.id },
+        include: { contactPoints: true },
       });
       return {
-        ...acknowledged.value,
+        contacts,
+        skippedSuppressed,
+        skippedInvalid,
         ...(Object.keys(adapterDiagnostics).length ? { diagnostics: adapterDiagnostics } : {}),
       };
     });

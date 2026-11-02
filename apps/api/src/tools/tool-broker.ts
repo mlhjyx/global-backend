@@ -94,6 +94,24 @@ export class ToolPolicyDenied extends Error {
   }
 }
 
+/**
+ * The physical tool ran, but its result cannot be represented by the approved
+ * durable projection (an out-of-contract upstream answer, e.g. LinkedIn's 999
+ * status). The operation was settled without a durable result and the caller
+ * skips this source. Deliberately NOT an execution-control error: own fields
+ * stay within the control classifier's plain-error allowlist (the operation id
+ * travels in the message), so a caller that rethrows control errors skips this
+ * one, and a replay of the same operation key is absorbed as a remnant.
+ */
+export class ToolDurableResultProjectionError extends Error {
+  readonly code = "TOOL_DURABLE_RESULT_PROJECTION_REJECTED";
+
+  constructor(operationId: string) {
+    super(`TOOL_DURABLE_RESULT_PROJECTION_REJECTED: ${operationId}`);
+    this.name = "ToolDurableResultProjectionError";
+  }
+}
+
 export interface BrokerDeps {
   registry: ToolRegistry;
   budgetStore?: BudgetStore;
@@ -234,6 +252,18 @@ export class ToolBroker implements ExecutionBroker {
     const started = now();
     const tool = this.registry.get(toolId) as Tool<I, O> | undefined;
     if (!tool) throw new ToolPolicyDenied(toolId, "not registered");
+
+    if (
+      tool.durableResultStrategy.kind === "typed_projection" &&
+      !this.projectionRegistry.has(tool.durableResultStrategy.schema)
+    ) {
+      // Deployment/config defect (schema never registered): refuse before any wire
+      // or reservation instead of paying for results the projection cannot store.
+      throw new ToolPolicyDenied(
+        tool.id,
+        "durable projection schema not registered",
+      );
+    }
 
     // 1) allowedTools 白名单（有界工具的代码强制，PRD 9.11）
     if (ctx.taskContractId) {
@@ -694,9 +724,9 @@ export class ToolBroker implements ExecutionBroker {
           throw new BudgetOperationReplayError(reservation.operationId);
         }
       } else if (reservation) {
-        let projection: GenericOperationProjection | undefined;
+        let durableReplay: unknown;
         try {
-          const durableReplay =
+          durableReplay =
             tool.durableResultStrategy.kind === "typed_projection"
               ? result
               : (tool.durableReplayResult?.(result) ?? null);
@@ -707,15 +737,62 @@ export class ToolBroker implements ExecutionBroker {
           ) {
             throw new Error("approved durable replay hook returned no result");
           }
-          projection = durableReplay
-            ? this.projectToolDurableResult(tool, durableReplay)
-            : undefined;
         } catch {
-          // The physical tool succeeded, but its result cannot satisfy the
-          // approved durable contract. Keep the operation unresolved and make
-          // the caller fail explicitly; never downgrade to an empty provider
-          // result or allow a second physical request.
+          // The replay hook is broker-owned code, not an upstream answer: a hook
+          // that throws or returns nothing is a defect and keeps the operation
+          // fail-closed (control error), unlike an out-of-contract result below.
           throw new BudgetOperationReplayError(reservation.operationId);
+        }
+        let projection: GenericOperationProjection | undefined;
+        try {
+          projection = durableReplay
+            ? this.projectToolDurableResult(tool, durableReplay as never)
+            : undefined;
+        } catch (error) {
+          if (
+            error instanceof Error &&
+            error.message === "TOOL_DURABLE_RESULT_STRATEGY_MISSING"
+          ) {
+            // Registry/config defect, not an untrusted answer: keep fail-closed.
+            throw new BudgetOperationReplayError(reservation.operationId);
+          }
+          // The physical tool succeeded, but its result cannot satisfy the approved
+          // durable contract (an out-of-contract upstream answer). Charge what was
+          // actually spent and settle without a durable result: leaving the
+          // reservation unresolved would surface as a fail-closed control error on
+          // this call AND on every later replay (2026-11-02 acceptance run 4fe3e874:
+          // LinkedIn's 999 status against a ≤599 projection bound failed the whole
+          // contact stage). The caller sees a definite failure for this source and
+          // skips it; a replay of the same operation key reads back the settled
+          // no-result row and is absorbed as a remnant.
+          this.trace(
+            ctx,
+            tool,
+            "ERROR",
+            "durable projection rejected the tool result",
+            0,
+            now() - started,
+          );
+          try {
+            await this.budget.settle(
+              reservation,
+              BigInt(result.costCents) * 10_000n,
+            );
+          } catch (settleError) {
+            // Bounded diagnostic, no secrets: the row stays unresolved and a
+            // replay absorbs it as a remnant.
+            this.trace(
+              ctx,
+              tool,
+              "ERROR",
+              `projection-rejected settlement failed: ${
+                settleError instanceof Error ? settleError.name : "unknown"
+              }`,
+              0,
+              now() - started,
+            );
+          }
+          throw new ToolDurableResultProjectionError(reservation.operationId);
         }
         const receiptFacts = projection
           ? toolExecutionReceiptFacts({

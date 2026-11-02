@@ -192,7 +192,7 @@ export const socialFetchTool: Tool<
     data: {
       url: result.data.url,
       status: result.data.status,
-      text: result.data.text.slice(0, MAX_SOCIAL_FETCH_TEXT_CHARS),
+      text: durableSocialPageText(result.data.text, MAX_SOCIAL_FETCH_TEXT_CHARS),
     },
     costCents: result.costCents,
     ...(result.degraded === undefined ? {} : { degraded: result.degraded }),
@@ -227,7 +227,7 @@ export const socialFetchTool: Tool<
           beforePhysicalWire: ctx.beforePhysicalWire,
         },
       );
-      const text = response.body.toString("utf8").slice(0, maxChars);
+      const text = durableSocialPageText(response.body.toString("utf8"), maxChars);
       return { data: { url: input.url, status: response.status, text }, costCents: 0 };
     } catch (error) {
       if (error instanceof EgressBlockedError) {
@@ -336,6 +336,21 @@ function durableSearxResults(results: readonly SearxResult[]): SearxngSearchResu
 
 /** With the u flag a surrogate pair reads as one astral code point, so this matches lone surrogates only. */
 const LONE_SURROGATE = /[\uD800-\uDFFF]/u;
+/**
+ * social.fetch 的页面文本按 durable 契约整形：去 NUL、孤立代理项替换为 U+FFFD、NFC，
+ * 并在上限处按码点边界切（劈开代理对同样是投影拒绝）。原始 HTML 里 NUL/孤立代理项/NFD
+ * 文本都真实存在；不整形会让 registry.project 拒绝一个合法的上游结果（2026-11-02
+ * acceptance run：这类拒绝曾把已付费操作留在 RESERVED 并打死整条活动）。
+ */
+function durableSocialPageText(raw: string, maxChars: number): string {
+  let text = raw.replaceAll("\0", "").replace(/[\uD800-\uDFFF]/gu, "�").normalize("NFC");
+  if (text.length > maxChars) {
+    text = text.slice(0, maxChars);
+    if (/[\uD800-\uDBFF]$/u.test(text)) text = text.slice(0, -1);
+  }
+  return text;
+}
+
 
 /** Text the typed projection accepts: NFC, without NUL and without lone surrogates. */
 function isDurableText(value: string): boolean {

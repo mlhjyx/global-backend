@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { ApplicationFailure, activityInfo } from '@temporalio/activity';
+import { ApplicationFailure } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { ProviderHttpError } from '../model-gateway/providers/provider-output-error';
@@ -54,6 +54,7 @@ import {
   UnavailableBudgetStore,
 } from '../tools/budget-store';
 import type { ExecutionBroker } from '../tools/tool-contract';
+import { ToolDurableResultProjectionError } from '../tools/tool-broker';
 import {
   companyMayUseExternalProcessing,
   loadMaterializableCompanyState,
@@ -1019,6 +1020,13 @@ export function createDiscoveryActivities(deps: {
       // stays for it, with the hand-off flag on the wire for older workflow histories. The flag
       // cannot tell the two kinds apart, so a live fault next to any flagged loss still stops.
       const lostOnReplay = (error: unknown): boolean => {
+        // A tool whose result left its durable projection contract is settled without
+        // a result and can never be replayed: the provider can only answer nothing.
+        // It is a definite per-source skip (an upstream-answer event, not a ledger
+        // fault), so it neither starts nor continues the two-in-a-row live rule —
+        // without this branch a governed query would fail with a lineage-receipt
+        // mismatch control error instead of ending this provider with a zero receipt.
+        if (error instanceof ToolDurableResultProjectionError) return true;
         if (!isUnreplayableOperation(error)) return false;
         if (isReplayRemnant(error)) return true;
         if (args.previousQueryUnreplayable) throw error;
@@ -2880,15 +2888,6 @@ export function createDiscoveryActivities(deps: {
       let phones = 0;
       let failed = 0;
       let budgetTruncated = false;
-      // 付费操作键必须在 Temporal 重试 attempt 间隔离（与 #726 同款纪律）：
-      // attempt N 的模型 correlationId 带上 `aN` 后缀，绝不继承上一次尝试的未结算账本行。
-      const attemptTag = (() => {
-        try {
-          return `a${activityInfo().attempt}`;
-        } catch {
-          return undefined; // 单测等非活动上下文
-        }
-      })();
       const diagnostics: Record<string, number> = {};
       const emailGuess = {
         emaillessContacts: 0,
@@ -2955,7 +2954,6 @@ export function createDiscoveryActivities(deps: {
                 accountKey: binding.accountKey,
               },
               ...(contactBudget ? { contactBudget } : {}),
-              ...(attemptTag ? { attemptTag } : {}),
             },
           );
           companies += 1;

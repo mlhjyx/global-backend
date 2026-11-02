@@ -294,11 +294,14 @@ const socialSearchDefinition = definition(
 const socialFetchData = (value: unknown) => mapClosedRecord(
   value, ['url', 'status', 'text'], ['url', 'status', 'text'],
 );
+// 真实上游会给非标准状态码：LinkedIn 对爬虫 UA 直接回 999（"Request Denied"），
+// 而状态码只是事实记录。上界必须覆盖 000–999 的三位约定，否则投影拒绝会让
+// 物理调用成功、账本却留 RESERVED，把整条活动打成 control 错误（2026-11-02 验收 run 4fe3e874）。
 const socialFetchDefinition = definition(
   'social-fetch/v1',
   objectSchema({
     url: stringSchema(3000),
-    status: numberSchema(0, 599),
+    status: numberSchema(0, 999),
     text: stringSchema(36_000),
   }, ['url', 'status', 'text']),
   socialFetchData,

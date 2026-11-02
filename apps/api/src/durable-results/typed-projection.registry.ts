@@ -354,6 +354,11 @@ export class TypedProjectionRegistry {
     this.#registrationsFrozen = true;
   }
 
+  /** Whether a typed projection schema is registered (broker prechecks config defects). */
+  has(schema: string): boolean {
+    return this.#definitions.has(schema as TypedProjectionSchema);
+  }
+
   project(schema: TypedProjectionSchema, raw: unknown): TypedProjectionEnvelope {
     try {
       if (!isTypedProjectionSchema(schema)) invalid();
