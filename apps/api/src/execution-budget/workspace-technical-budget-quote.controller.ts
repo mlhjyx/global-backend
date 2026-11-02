@@ -253,20 +253,79 @@ function parseRequest(value: unknown): WorkspaceExecutionBudgetRequest {
     case 'POST /companies': {
       exactKeys(input, ['operation', 'body']);
       const body = record(input.body);
-      exactKeys(body, ['website'], ['name']);
+      exactKeys(body, [], [
+        'website',
+        'name',
+        'industry',
+        'targetMarkets',
+        'products',
+        'businessEmail',
+      ]);
+      const websiteOk =
+        body.website === undefined ||
+        (typeof body.website === 'string' && body.website.length >= 1);
+      const nameOk =
+        body.name === undefined ||
+        (typeof body.name === 'string' && body.name.length <= 200);
+      const industryOk =
+        body.industry === undefined ||
+        (typeof body.industry === 'string' &&
+          body.industry.length >= 1 &&
+          body.industry.length <= 120);
+      const marketsOk =
+        body.targetMarkets === undefined ||
+        (Array.isArray(body.targetMarkets) &&
+          body.targetMarkets.length <= 20 &&
+          body.targetMarkets.every(
+            (market) =>
+              typeof market === 'string' && /^[A-Z]{2}$/.test(market),
+          ));
+      const productsOk =
+        body.products === undefined ||
+        (Array.isArray(body.products) &&
+          body.products.length >= 1 &&
+          body.products.length <= 5 &&
+          body.products.every(
+            (product) =>
+              typeof product === 'string' &&
+              product.length >= 1 &&
+              product.length <= 120,
+          ));
+      const businessEmailOk =
+        body.businessEmail === undefined ||
+        (typeof body.businessEmail === 'string' &&
+          body.businessEmail.length <= 254 &&
+          /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(body.businessEmail));
       if (
-        typeof body.website !== 'string' ||
-        body.website.length < 1 ||
-        (body.name !== undefined &&
-          (typeof body.name !== 'string' || body.name.length > 200))
+        !websiteOk ||
+        !nameOk ||
+        !industryOk ||
+        !marketsOk ||
+        !productsOk ||
+        !businessEmailOk ||
+        (body.website === undefined && body.name === undefined)
       ) {
         invalid();
       }
       return Object.freeze({
         operation: input.operation,
         body: Object.freeze({
-          website: body.website,
-          ...(body.name === undefined ? {} : { name: body.name }),
+          ...(body.website === undefined
+            ? {}
+            : { website: body.website as string }),
+          ...(body.name === undefined ? {} : { name: body.name as string }),
+          ...(body.industry === undefined
+            ? {}
+            : { industry: body.industry as string }),
+          ...(body.targetMarkets === undefined
+            ? {}
+            : { targetMarkets: body.targetMarkets as string[] }),
+          ...(body.products === undefined
+            ? {}
+            : { products: body.products as string[] }),
+          ...(body.businessEmail === undefined
+            ? {}
+            : { businessEmail: body.businessEmail as string }),
         }),
       });
     }
@@ -389,10 +448,22 @@ const WORKSPACE_QUOTE_REQUEST_SCHEMAS = [
       body: {
         type: 'object',
         additionalProperties: false,
-        required: ['website'],
         properties: {
           website: { type: 'string', minLength: 1 },
           name: { type: 'string', maxLength: 200 },
+          industry: { type: 'string', minLength: 1, maxLength: 120 },
+          targetMarkets: {
+            type: 'array',
+            maxItems: 20,
+            items: { type: 'string', pattern: '^[A-Z]{2}$' },
+          },
+          products: {
+            type: 'array',
+            minItems: 1,
+            maxItems: 5,
+            items: { type: 'string', minLength: 1, maxLength: 120 },
+          },
+          businessEmail: { type: 'string', maxLength: 254 },
         },
       },
     },

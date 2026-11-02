@@ -8,7 +8,14 @@ type JsonValue = JsonPrimitive | readonly JsonValue[] | { readonly [key: string]
 export type WorkspaceExecutionBudgetRequest =
   | Readonly<{
       operation: 'POST /companies';
-      body: Readonly<{ website: string; name?: string }>;
+      body: Readonly<{
+        website?: string;
+        name?: string;
+        industry?: string;
+        targetMarkets?: string[];
+        products?: string[];
+        businessEmail?: string;
+      }>;
     }>
   | Readonly<{
       operation: 'POST /companies/:companyId/icps';

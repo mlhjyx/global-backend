@@ -1,5 +1,18 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
+
+// 单测不依赖真实 DNS/网络：URL 守卫只做协议层校验（生产路径仍走完整 net-guard）。
+vi.mock('../adapters/url-guard', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../adapters/url-guard')>();
+  return {
+    ...actual,
+    assertPublicHttpUrl: vi.fn(async (raw: string) => new URL(raw)),
+  };
+});
 import type { RequestContext } from '../auth/request-context';
 import type { ExecutionBudgetAuthorityService } from '../execution-budget/execution-budget-authority.service';
 import type { ExecutionBudgetBinding } from '../execution-budget/execution-budget-binding';
@@ -29,8 +42,15 @@ const BINDING: ExecutionBudgetBinding = {
 
 function fixture(company: Record<string, unknown> | null) {
   const outboxCreate = vi.fn(async () => ({ id: 'event-1' }));
+  const companyCreate = vi.fn(async () => company);
+  const offeringCreateMany = vi.fn(async () => ({ count: 0 }));
   const tx = {
-    companyProfile: { findUnique: vi.fn(async () => company) },
+    companyProfile: {
+      findUnique: vi.fn(async () => company),
+      create: companyCreate,
+    },
+    offering: { createMany: offeringCreateMany },
+    workspace: { upsert: vi.fn(async () => ({})) },
     outboxEvent: { create: outboxCreate },
   };
   const prisma = {
@@ -46,7 +66,15 @@ function fixture(company: Record<string, unknown> | null) {
     prisma as unknown as PrismaService,
     authority as unknown as ExecutionBudgetAuthorityService,
   );
-  return { service, outboxCreate, consume, verify, tx };
+  return {
+    service,
+    outboxCreate,
+    consume,
+    verify,
+    tx,
+    companyCreate,
+    offeringCreateMany,
+  };
 }
 
 const FAILED_COMPANY = {
@@ -58,6 +86,91 @@ const FAILED_COMPANY = {
   understandingFailedAt: new Date('2026-11-01T13:53:51Z'),
   understandingLastError: 'extract:ProviderHttpError',
 };
+
+describe('CompanyService.create（D16/D17：注册引导字段与无官网建档）', () => {
+  const created = {
+    id: COMPANY_ID,
+    workspaceId: CTX.workspaceId,
+    name: '具安科技',
+    website: null,
+    status: 'DRAFT',
+    industry: 'isic-2813',
+    targetMarkets: ['DE', 'US'],
+    businessEmail: 'sales@example.test',
+    version: 1,
+    createdAt: new Date('2026-11-02T00:00:00Z'),
+    updatedAt: new Date('2026-11-02T00:00:00Z'),
+  };
+
+  it('无官网建档：不发 CompanyProfileCreated、不消费 Grant', async () => {
+    const { service, consume, outboxCreate } = fixture(created);
+    const result = await service.create(
+      CTX,
+      {
+        name: '具安科技',
+        industry: 'isic-2813',
+        targetMarkets: ['DE', 'US'],
+        businessEmail: 'sales@example.test',
+      },
+      undefined,
+      'jws',
+    );
+    expect(result.understanding).toBe('not_started');
+    expect(result.company).toBe(created);
+    expect(consume).not.toHaveBeenCalled();
+    expect(outboxCreate).not.toHaveBeenCalled();
+  });
+
+  it('有官网建档照常触发理解并消费 Grant', async () => {
+    const web = { ...created, website: 'https://93.184.216.34' };
+    const { service, consume, outboxCreate } = fixture(web);
+    const result = await service.create(
+      CTX,
+      { website: 'https://93.184.216.34' },
+      undefined,
+      'jws',
+    );
+    expect(result.understanding).toBe('started');
+    expect(consume).toHaveBeenCalledTimes(1);
+    expect(outboxCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('注册引导的主营产品落 Offering（source=onboarding，幂等跳过重名）', async () => {
+    const web = { ...created, website: 'https://93.184.216.34' };
+    const { service, offeringCreateMany } = fixture(web);
+    await service.create(
+      CTX,
+      { website: 'https://93.184.216.34', products: ['精密轴承', 'CNC 加工件'] },
+      undefined,
+      'jws',
+    );
+    expect(offeringCreateMany).toHaveBeenCalledWith({
+      data: [
+        {
+          workspaceId: CTX.workspaceId,
+          companyId: COMPANY_ID,
+          name: '精密轴承',
+          source: 'onboarding',
+        },
+        {
+          workspaceId: CTX.workspaceId,
+          companyId: COMPANY_ID,
+          name: 'CNC 加工件',
+          source: 'onboarding',
+        },
+      ],
+      skipDuplicates: true,
+    });
+  });
+
+  it('website 与 name 都缺省时 400，且不验签', async () => {
+    const { service, verify } = fixture(created);
+    await expect(
+      service.create(CTX, {}, undefined, 'jws'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(verify).not.toHaveBeenCalled();
+  });
+});
 
 describe('CompanyService.retryUnderstanding', () => {
   it('requires a workspace grant for the retry operation itself', async () => {

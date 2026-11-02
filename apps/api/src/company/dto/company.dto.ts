@@ -24,8 +24,21 @@ export class CompanyDto {
   @ApiProperty({ enum: ['DRAFT', 'ENRICHING', 'REVIEW', 'ACTIVE'] })
   status!: string;
 
-  @ApiProperty({ type: String, nullable: true, description: '行业（理解工作流回填）' })
+  @ApiProperty({ type: String, nullable: true, description: '行业（注册引导填写或理解工作流回填）' })
   industry!: string | null;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: '目标市场（ISO 3166-1 alpha-2；注册引导填写，卖家事实 SoR）',
+  })
+  targetMarkets!: string[];
+
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: '业务邮箱（公司级询盘接收缺省值；注册引导填写）',
+  })
+  businessEmail!: string | null;
 
   @ApiProperty({ type: String, nullable: true, description: '企业简介（抽取，可人工修正）' })
   summary!: string | null;
@@ -56,29 +69,44 @@ export class CompanyDto {
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;
 
-  static from(c: {
-    id: string;
-    name: string;
-    website: string | null;
-    status: string;
-    industry?: string | null;
-    summary?: string | null;
-    publicContacts?: unknown;
-    understandingFailedAt?: Date | null;
-    understandingLastError?: string | null;
-    createdAt: Date;
-  }): CompanyDto {
+  @ApiPropertyOptional({
+    enum: ['started', 'not_started'],
+    description:
+      '仅创建响应携带：理解是否已触发；无官网时恒为 not_started（D17），档案字段仍已保存',
+  })
+  understanding?: 'started' | 'not_started';
+
+  static from(
+    c: {
+      id: string;
+      name: string;
+      website: string | null;
+      status: string;
+      industry?: string | null;
+      targetMarkets?: string[];
+      businessEmail?: string | null;
+      summary?: string | null;
+      publicContacts?: unknown;
+      understandingFailedAt?: Date | null;
+      understandingLastError?: string | null;
+      createdAt: Date;
+      understanding?: 'started' | 'not_started';
+    },
+  ): CompanyDto {
     return {
       id: c.id,
       name: c.name,
       website: c.website,
       status: c.status,
       industry: c.industry ?? null,
+      targetMarkets: c.targetMarkets ?? [],
+      businessEmail: c.businessEmail ?? null,
       summary: c.summary ?? null,
       publicContacts: Array.isArray(c.publicContacts) ? (c.publicContacts as PublicContactDto[]) : [],
       understandingFailedAt: c.understandingFailedAt ? c.understandingFailedAt.toISOString() : null,
       understandingLastError: c.understandingLastError ?? null,
       createdAt: c.createdAt.toISOString(),
+      ...(c.understanding === undefined ? {} : { understanding: c.understanding }),
     };
   }
 }
