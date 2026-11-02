@@ -55,6 +55,7 @@ import {
 } from '../tools/budget-store';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { ToolDurableResultProjectionError } from '../tools/tool-broker';
+import { ModelDurableResultProjectionError } from '../model-gateway/router-model-gateway';
 import {
   companyMayUseExternalProcessing,
   loadMaterializableCompanyState,
@@ -618,6 +619,7 @@ function isReplayRemnant(error: unknown): boolean {
 function isLostTaxonomyNormalization(error: unknown): boolean {
   return (
     isUnreplayableOperation(error) ||
+    error instanceof ModelDurableResultProjectionError ||
     (error instanceof ProviderHttpError && error.status >= 500)
   );
 }

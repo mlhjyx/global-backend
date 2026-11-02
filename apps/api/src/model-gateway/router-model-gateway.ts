@@ -204,6 +204,23 @@ function modelSubstitution(
 }
 
 /**
+ * The provider returned a valid answer, but it cannot be represented by the approved
+ * durable projection. The operation was settled without a durable result and the
+ * caller sees a definite non-control failure (fit counts it unjudged, extraction
+ * skips the source). Own fields stay within the control classifier's plain-error
+ * allowlist so this shape is machine-readable as non-control; the operation id
+ * travels in the message.
+ */
+export class ModelDurableResultProjectionError extends Error {
+  readonly code = 'MODEL_DURABLE_RESULT_PROJECTION_REJECTED';
+
+  constructor(operationId: string) {
+    super(`MODEL_DURABLE_RESULT_PROJECTION_REJECTED: ${operationId}`);
+    this.name = 'ModelDurableResultProjectionError';
+  }
+}
+
+/**
  * Routes each call across the provider chain, falling back on failure (PRD 9.5).
  * Adds the gateway-level guarantees business code relies on:
  * - every call is traced (ai_trace + usage_ledger, PRD 9.10) — fire-and-forget
@@ -211,7 +228,6 @@ function modelSubstitution(
  *   retry that feeds schema errors, or an explicitly opted-in task-gate error,
  *   back to the same model (PRD 9.6)
  */
-@Injectable()
 export class RouterModelGateway extends ModelGateway {
   private readonly unavailableBudgetStore = new UnavailableBudgetStore(
     "RouterModelGateway requires an authoritative BudgetStore",
@@ -758,10 +774,45 @@ export class RouterModelGateway extends ModelGateway {
           )
         : undefined;
     } catch {
-      // A valid provider output exists, but it cannot be represented by the
-      // approved durable contract. Keep the operation unresolved so a retry
-      // cannot issue a second physical request or settle an empty result.
-      throw new BudgetOperationReplayError(operationKey);
+      // A valid provider output exists, but it cannot be represented by the approved
+      // durable contract. Charge what the provider reported and settle without a
+      // durable result — the tool-side twin of this path (#734): leaving the
+      // reservation unresolved made this a fail-closed control error on the call and
+      // a permanent remnant skip on every replay (2026-11-02, contact stage).
+      const observedMicrousd =
+        providerReportedMicrousd(result.usage) ??
+        centsToMicrousd(
+          centsFromTokens(result.usage) ?? baseCents * (result.callCount ?? 1),
+        );
+      const projectionRejectedTrace = (errorMessage: string) => ({
+        workspaceId: ctx.workspaceId,
+        task: input.task,
+        op,
+        provider: provider.id,
+        model: input.model ?? "unknown",
+        status: "ERROR" as const,
+        errorMessage,
+        latencyMs: Date.now() - started,
+        inputTokens: result.usage?.inputTokens,
+        outputTokens: result.usage?.outputTokens,
+        correlationId: ctx.correlationId,
+        modelPolicy: ctx.modelPolicy,
+        budgetOperationId: reservation.operationId,
+        budgetDisposition: "SETTLED_NO_RESULT" as const,
+      });
+      try {
+        await this.budgetStore.settle(reservation, observedMicrousd);
+        this.trace?.record(projectionRejectedTrace("ModelDurableResultProjectionError"));
+      } catch (settleError) {
+        // Bounded diagnostic, no secrets: the row stays unresolved and a replay
+        // absorbs it as a remnant.
+        this.trace?.record(projectionRejectedTrace(
+          `model projection-rejected settlement failed: ${
+            settleError instanceof Error ? settleError.name : "unknown"
+          }`,
+        ));
+      }
+      throw new ModelDurableResultProjectionError(reservation.operationId);
     }
     const reservedMicrousd = reservation.estimatedMicrousd;
     const reportedMicrousd = providerReportedMicrousd(result.usage);

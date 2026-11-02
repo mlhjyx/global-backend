@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ModelDurableResultProjectionError } from '../model-gateway/router-model-gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { getTask } from '../ai-tasks/task-registry';
@@ -190,7 +191,7 @@ export class TaxonomyResolver {
       );
       return node;
     } catch (e) {
-      if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
+      if (e instanceof BudgetExceededError || isExecutionControlError(e) || e instanceof ModelDurableResultProjectionError) throw e;
       this.logger.warn(`llm normalize failed for "${term}": ${String(e).slice(0, 120)}`);
       return null;
     }
@@ -268,7 +269,7 @@ export class TaxonomyResolver {
       );
       return code;
     } catch (e) {
-      if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
+      if (e instanceof BudgetExceededError || isExecutionControlError(e) || e instanceof ModelDurableResultProjectionError) throw e;
       this.logger.warn(`cpv refine failed for "${product}": ${String(e).slice(0, 120)}`);
       return null;
     }
@@ -346,7 +347,7 @@ export class TaxonomyResolver {
       );
       return code;
     } catch (e) {
-      if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
+      if (e instanceof BudgetExceededError || isExecutionControlError(e) || e instanceof ModelDurableResultProjectionError) throw e;
       this.logger.warn(`naics refine failed for "${product}": ${String(e).slice(0, 120)}`);
       return null;
     }
@@ -430,7 +431,7 @@ export class TaxonomyResolver {
       );
       return code;
     } catch (e) {
-      if (e instanceof BudgetExceededError || isExecutionControlError(e)) throw e;
+      if (e instanceof BudgetExceededError || isExecutionControlError(e) || e instanceof ModelDurableResultProjectionError) throw e;
       this.logger.warn(`fda refine failed for "${product}": ${String(e).slice(0, 120)}`);
       return null;
     }

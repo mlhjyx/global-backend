@@ -278,6 +278,10 @@ export async function discoverContactsCore(
             domainAckKey: `contact:${loaded.company.id}:${pa.key}:${receipt.operationId}`,
             domainRevision: receipt.resultDigest,
           })),
+          // 同一适配器在重试里可能同时出现「上一 attempt 已确认」与「新抓取」的回执
+          // （如进程级熔断在两次 attempt 间清零后补抓的页面）。persist 按身份 upsert/合并、
+          // 可安全重放，所以混合态按 APPLIED 处理一次，而不是把整条 run 打成失败。
+          onMixed: 'apply',
           apply: (transaction) => persistAdapter(transaction, pa),
           readback: async () => null,
         });

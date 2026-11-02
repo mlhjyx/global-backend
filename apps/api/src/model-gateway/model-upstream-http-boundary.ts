@@ -1,4 +1,5 @@
 import { HttpException, HttpStatus, Logger } from '@nestjs/common';
+import { ModelDurableResultProjectionError } from './router-model-gateway';
 import { ApiResponse } from '@nestjs/swagger';
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { isExecutionControlError } from '../execution-budget/execution-control-error';
@@ -46,6 +47,9 @@ const SETTLED_UNREGISTERED_PROTOTYPES: ReadonlySet<object> = new Set<object>([
  * errors and unknown settlements above all, is left to its own boundary.
  */
 export function settledModelUpstreamFailureReason(error: unknown): string | undefined {
+  // A settled call whose valid answer left the durable projection contract: the grant
+  // was consumed and charged, so the client needs the documented 502 contract.
+  if (error instanceof ModelDurableResultProjectionError) return error.code;
   if (isRecoverableModelFailure(error)) return error.reasonCode;
   if (
     error instanceof ProviderHttpError &&

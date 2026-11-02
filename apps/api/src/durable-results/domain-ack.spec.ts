@@ -404,6 +404,34 @@ describe('DomainAckService', () => {
     expect(readback).not.toHaveBeenCalled();
   });
 
+  it('lets an idempotent caller apply a mixed APPLIED/REPLAYED batch once (contact persist)', async () => {
+    const mutation = vi.fn(async () => 'applied-once');
+    const readback = vi.fn(async () => 'must-not-read');
+    const transaction = {
+      $queryRaw: vi.fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ status: 'APPLIED', ack_json: ackRecord() }])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ status: 'REPLAYED', ack_json: ackRecord() }]),
+    };
+    const acknowledgement = {
+      producerId: 'taxonomy.normalize',
+      receipt: receipt(),
+      domainAckKey: 'taxonomy:cpv:pump',
+      domainRevision: '0',
+    };
+
+    await expect(applyDomainAckConsumerTransactions({
+      transaction,
+      acknowledgements: [acknowledgement, acknowledgement],
+      onMixed: 'apply',
+      apply: mutation,
+      readback,
+    })).resolves.toMatchObject({ status: 'APPLIED', value: 'applied-once' });
+    expect(mutation).toHaveBeenCalledTimes(1);
+    expect(readback).not.toHaveBeenCalled();
+  });
+
   it('rejects an unknown producer before any transaction mutation', async () => {
     const apply = vi.fn(async () => undefined);
     await expect(applyDomainAckConsumerTransaction({

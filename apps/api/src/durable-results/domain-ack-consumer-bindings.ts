@@ -318,6 +318,13 @@ export async function applyDomainAckConsumerTransactions<
   }>[];
   readonly apply: (transaction: TTransaction) => Promise<TValue>;
   readonly readback: (transaction: TTransaction) => Promise<TValue>;
+  /**
+   * What a batch that mixes already-applied and fresh receipts (a partial retry)
+   * does. 'reject' (default) keeps the fail-closed invariant; 'apply' runs the
+   * single apply callback once. Only opt in when the caller's apply is idempotent
+   * (the contact stage persists via upsert/merge by identity).
+   */
+  readonly onMixed?: 'reject' | 'apply';
 }): Promise<DomainAckConsumerBatchResult<TValue>> {
   for (const acknowledgement of input.acknowledgements) {
     const binding = getDomainAckProductConsumerBinding(
@@ -364,10 +371,10 @@ export async function applyDomainAckConsumerTransactions<
     }));
   }
   const statuses = new Set(states.map((state) => state.status));
-  if (statuses.size !== 1) {
+  if (statuses.size !== 1 && input.onMixed !== 'apply') {
     throw new ExecutionControlError('DOMAIN_ACK_MIXED_REPLAY_STATE');
   }
-  const status = states[0]!.status as 'APPLIED' | 'REPLAYED';
+  const status = statuses.has('APPLIED') ? 'APPLIED' : 'REPLAYED';
   const value = status === 'APPLIED'
     ? await input.apply(input.transaction)
     : await input.readback(input.transaction);

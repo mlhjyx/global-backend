@@ -14,6 +14,7 @@ import {
   ProviderWireInFlightError,
   TaskOutputValidationError,
 } from './providers/provider-output-error';
+import { ModelDurableResultProjectionError } from './router-model-gateway';
 import {
   MODEL_UPSTREAM_UNUSABLE,
   asModelUpstreamHttpBoundary,
@@ -27,6 +28,14 @@ class DerivedTransportError extends ProviderTransportError {}
 const MODEL_TEXT = 'Acme GmbH sells Kreiselpumpen';
 
 afterEach(() => vi.restoreAllMocks());
+
+describe('a settled answer outside the durable projection', () => {
+  it('maps to the documented 502 contract with its stable reason code', () => {
+    expect(settledModelUpstreamFailureReason(new ModelDurableResultProjectionError('op-1'))).toBe(
+      'MODEL_DURABLE_RESULT_PROJECTION_REJECTED',
+    );
+  });
+});
 
 describe('a model call the gateway settled without a usable answer', () => {
   it.each([
