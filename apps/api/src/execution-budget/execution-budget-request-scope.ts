@@ -45,6 +45,11 @@ export type WorkspaceExecutionBudgetRequest =
       companyId: string;
       /** 每次重试点击生成的幂等键；让同一公司的多次重试各用独立请求作用域与预算账户。 */
       body: Readonly<{ attemptId: string }>;
+    }>
+  | Readonly<{
+      operation: 'POST /site-builder/intake';
+      /** intake 的语义请求哈希；SaaS 用同一 DTO 计算后签发 understanding.run 授权。 */
+      body: Readonly<{ requestHash: string }>;
     }>;
 
 export interface GuessEmailsHttpRequestBody {
@@ -122,6 +127,8 @@ function requestMaterial(request: WorkspaceExecutionBudgetRequest): JsonValue {
         companyId: request.companyId,
         body: request.body as JsonValue,
       };
+    case 'POST /site-builder/intake':
+      return { operation: request.operation, body: request.body };
   }
 }
 
@@ -152,6 +159,13 @@ export function workspaceExecutionBudgetRequestScope(
         purpose: 'understanding.run',
         subjectType: 'company',
         subjectId: request.companyId,
+        requestSha256,
+      });
+    case 'POST /site-builder/intake':
+      return Object.freeze({
+        purpose: 'understanding.run',
+        subjectType: 'company',
+        subjectId: `request:${requestSha256}`,
         requestSha256,
       });
     case 'POST /icps/:icpId/query-plans':

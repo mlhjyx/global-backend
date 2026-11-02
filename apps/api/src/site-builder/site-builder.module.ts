@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { PrismaModule } from '../prisma/prisma.module';
+import { ExecutionBudgetModule } from '../execution-budget/execution-budget.module';
 import { AssetsController } from './assets.controller';
 import { AssetsService } from './assets.service';
 import { BuildsController } from './builds.controller';
@@ -37,7 +38,7 @@ import { SiteBuildTechnicalBudgetQuoteService } from './site-build-technical-bud
  * DEMO_V0_LAUNCHER 在 M0-⑥ 换成 Temporal 实现（siteBuilderWorkflow 快速通道）。
  */
 @Module({
-  imports: [PrismaModule, AuthModule],
+  imports: [PrismaModule, AuthModule, ExecutionBudgetModule],
   controllers: [
     IntakeController,
     SitesController,

@@ -20,6 +20,16 @@ import {
   type VerifiedSiteBuildBudgetGrant,
 } from "./site-build-budget-grant";
 import { SiteBuildRuntimeGuard } from "../runtime/site-build-runtime.guard";
+import {
+  ExecutionBudgetAuthorityService,
+  assertFreshExecutionBudgetBinding,
+  type ExecutionBudgetBinding,
+} from "../execution-budget/execution-budget-authority.service";
+import {
+  ExecutionBudgetGrantError,
+  type VerifiedExecutionBudgetAuthority,
+} from "../execution-budget/execution-budget-authority.types";
+import { workspaceExecutionBudgetRequestScope } from "../execution-budget/execution-budget-request-scope";
 
 /** 注册引导 6 项（01 §3.1）。DTO 层已校验形状，此处保留业务不变式。 */
 export interface IntakeInput {
@@ -36,6 +46,8 @@ export interface IntakeResult {
   siteId: string;
   buildId: string;
   status: "generating_demo";
+  /** 公司理解是否已随本次 intake 触发；缺授权时为 not_started，绝不留死档案。 */
+  understanding: "started" | "not_started";
 }
 
 const INTAKE_ENDPOINT = "POST /api/v1/site-builder/intake";
@@ -149,6 +161,7 @@ function storedIntakeResult(value: Prisma.JsonValue): IntakeResult {
     siteId: value.siteId,
     buildId: value.buildId,
     status: value.status,
+    understanding: value.understanding === "started" ? "started" : "not_started",
   };
 }
 
@@ -164,7 +177,21 @@ export class IntakeService {
     private readonly prisma: PrismaService,
     @Inject(DEMO_V0_LAUNCHER) private readonly demoLauncher: DemoV0Launcher,
     private readonly runtimeGuard: SiteBuildRuntimeGuard,
+    private readonly authority: ExecutionBudgetAuthorityService,
   ) {}
+
+  private outboxBinding(binding: ExecutionBudgetBinding) {
+    return {
+      authorityId: binding.authorityId,
+      replay: binding.replay,
+      scopeKey: binding.scopeKey,
+      accountKey: binding.accountKey,
+      purpose: binding.purpose,
+      subjectType: binding.subjectType,
+      subjectId: binding.subjectId,
+      requestSha256: binding.requestSha256,
+    };
+  }
 
   private async persistTemporalAck(
     workspaceId: string,
@@ -209,6 +236,7 @@ export class IntakeService {
     input: IntakeInput,
     rawIdempotencyKey?: string,
     budgetGrant?: VerifiedSiteBuildBudgetGrant,
+    compactExecutionGrant?: string,
   ): Promise<IntakeResult> {
     if (input.hasWebsite && !input.websiteUrl) {
       throw new BadRequestException(
@@ -237,6 +265,28 @@ export class IntakeService {
         "BUDGET_GRANT_SCOPE_MISMATCH",
         HttpStatus.FORBIDDEN,
       );
+    }
+    // 无条件进校验：缺授权由验证器给出 GRANT_REQUIRED，再降级为 not_started。
+    // 不用“请求头是否存在”决定是否调用校验，避免用户输入控制安全校验的绕过模式。
+    let verifiedExecution: VerifiedExecutionBudgetAuthority | null = null;
+    try {
+      verifiedExecution = await this.authority.verifyWorkspaceGrant({
+        compactJws: compactExecutionGrant,
+        identity: ctx,
+        scope: workspaceExecutionBudgetRequestScope({
+          operation: "POST /site-builder/intake",
+          body: { requestHash },
+        }),
+      });
+    } catch (error) {
+      if (
+        error instanceof ExecutionBudgetGrantError &&
+        error.code === "EXECUTION_BUDGET_GRANT_REQUIRED"
+      ) {
+        verifiedExecution = null;
+      } else {
+        throw error;
+      }
     }
     const readinessFailure = await this.runtimeGuard
       .assertReady({ paidReachable: false })
@@ -366,6 +416,7 @@ export class IntakeService {
               siteId: run.siteId,
               buildId: run.id,
               status: "generating_demo" as const,
+              understanding: "not_started" as const,
             },
             run,
           };
@@ -434,6 +485,7 @@ export class IntakeService {
                   siteId: existing.id,
                   buildId: active.id,
                   status: "generating_demo" as const,
+                  understanding: "not_started" as const,
                 },
                 run: active,
               };
@@ -468,6 +520,29 @@ export class IntakeService {
               },
               select: { id: true },
             });
+        let understanding: IntakeResult["understanding"] = "not_started";
+        if (companyProfile && verifiedExecution) {
+          const binding =
+            await this.authority.consumeVerifiedWorkspaceGrantInTransaction(
+              verifiedExecution,
+              tx,
+            );
+          assertFreshExecutionBudgetBinding(binding);
+          await tx.outboxEvent.create({
+            data: {
+              workspaceId: ctx.workspaceId,
+              eventType: "CompanyProfileCreated",
+              schemaVersion: 2,
+              aggregateType: "CompanyProfile",
+              aggregateId: companyProfile.id,
+              payload: {
+                website: input.hasWebsite ? (input.websiteUrl ?? "") : "",
+                executionBudget: this.outboxBinding(binding),
+              } as Prisma.InputJsonValue,
+            },
+          });
+          understanding = "started";
+        }
         const shared = {
           name: nameEn ?? input.company.nameZh,
           mode: "builder",
@@ -531,6 +606,7 @@ export class IntakeService {
           siteId: site.id,
           buildId: run.id,
           status: "generating_demo",
+          understanding,
         };
 
         if (idempotencyKey) {

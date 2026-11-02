@@ -3976,6 +3976,35 @@
                         "format": "uuid"
                       }
                     }
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "operation",
+                      "body"
+                    ],
+                    "properties": {
+                      "operation": {
+                        "type": "string",
+                        "enum": [
+                          "POST /site-builder/intake"
+                        ]
+                      },
+                      "body": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "requestHash"
+                        ],
+                        "properties": {
+                          "requestHash": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$"
+                          }
+                        }
+                      }
+                    }
                   }
                 ]
               }
@@ -11725,6 +11754,17 @@
               "minLength": 1,
               "maxLength": 16384
             }
+          },
+          {
+            "name": "X-Execution-Budget-Grant",
+            "required": false,
+            "in": "header",
+            "description": "可选：SaaS 签发的 understanding.run 授权；缺失时公司理解不触发，响应 understanding=not_started",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384
+            }
           }
         ],
         "requestBody": {
@@ -16556,7 +16596,8 @@
               "POST /canonical-companies/:id/guess-emails",
               "POST /contact-points/:pointId/verify",
               "POST /leads/:leadId/outreach-drafts",
-              "POST /companies/:companyId/understanding/retry"
+              "POST /companies/:companyId/understanding/retry",
+              "POST /site-builder/intake"
             ]
           },
           "workspaceId": {
@@ -17913,6 +17954,14 @@
               "generating_demo"
             ],
             "description": "demo v0 已确认进入编排"
+          },
+          "understanding": {
+            "type": "string",
+            "enum": [
+              "started",
+              "not_started"
+            ],
+            "description": "公司理解是否已随 intake 触发；缺执行授权时为 not_started"
           }
         },
         "required": [

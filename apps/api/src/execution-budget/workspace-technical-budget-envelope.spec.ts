@@ -11,7 +11,7 @@ const PLAN_ID = '50000000-0000-4000-8000-000000000005';
 const LEAD_ID = '60000000-0000-4000-8000-000000000006';
 
 describe('workspace execution technical envelope catalog', () => {
-  it('machine-enumerates all and only the nine workspace operations', () => {
+  it('machine-enumerates all and only the ten workspace operations', () => {
     expect(WORKSPACE_EXECUTION_QUOTE_OPERATIONS).toEqual([
       'POST /companies',
       'POST /companies/:companyId/icps',
@@ -22,6 +22,7 @@ describe('workspace execution technical envelope catalog', () => {
       'POST /contact-points/:pointId/verify',
       'POST /leads/:leadId/outreach-drafts',
       'POST /companies/:companyId/understanding/retry',
+      'POST /site-builder/intake',
     ]);
   });
 

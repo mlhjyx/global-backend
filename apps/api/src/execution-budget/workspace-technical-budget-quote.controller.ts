@@ -235,6 +235,21 @@ function parseRequest(value: unknown): WorkspaceExecutionBudgetRequest {
     invalid();
   }
   switch (input.operation) {
+    case 'POST /site-builder/intake': {
+      exactKeys(input, ['operation', 'body']);
+      const body = record(input.body);
+      exactKeys(body, ['requestHash']);
+      if (
+        typeof body.requestHash !== 'string' ||
+        !/^[0-9a-f]{64}$/.test(body.requestHash)
+      ) {
+        invalid();
+      }
+      return Object.freeze({
+        operation: input.operation,
+        body: Object.freeze({ requestHash: body.requestHash }),
+      });
+    }
     case 'POST /companies': {
       exactKeys(input, ['operation', 'body']);
       const body = record(input.body);
@@ -456,6 +471,20 @@ const WORKSPACE_QUOTE_REQUEST_SCHEMAS = [
     'POST /leads/:leadId/outreach-drafts',
     { leadId: { type: 'string', format: 'uuid' } },
     ['leadId'],
+  ),
+  operationVariant(
+    'POST /site-builder/intake',
+    {
+      body: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['requestHash'],
+        properties: {
+          requestHash: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+        },
+      },
+    },
+    ['body'],
   ),
 ] as const;
 
