@@ -169,6 +169,9 @@ describe("OpenAPI header 参数大小写唯一性（oasdiff 破坏性门防误�
       siteId: expect.objectContaining({}),
       buildId: expect.objectContaining({}),
       status: expect.objectContaining({ enum: ["generating_demo"] }),
+      understanding: expect.objectContaining({
+        enum: ["started", "not_started"],
+      }),
     });
     expect(result?.properties).not.toHaveProperty("mode");
 
