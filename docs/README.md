@@ -20,7 +20,21 @@
 
 任何“已完成、已接入、已发布、生产可用”声明都必须回到上述事实源、机器合同和相应证据核验。旧 Word、研究稿、原型、历史分支或外部项目不能升级当前状态。
 
-## 2. 按任务下钻
+## 2. 模块设计文档（docs/modules/）
+
+按 [文档目录与维护规则](documentation-rules.md) 建立的模块产品与技术方案；当前为 `DRAFT`，实现状态见 [实现状态矩阵](status/implementation-matrix.md)。
+
+| 模块 | 产品说明 | 技术方案 |
+| --- | --- | --- |
+| 账户与工作空间 | [product](modules/account-workspace/product.md) | [technical](modules/account-workspace/technical.md) |
+| 卖家知识中心 | [product](modules/seller-knowledge/product.md) | [technical](modules/seller-knowledge/technical.md) |
+| 买家知识网络 | [product](modules/buyer-knowledge/product.md) | [technical](modules/buyer-knowledge/technical.md) |
+| 买家发现与资格判断 | [product](modules/discovery-qualification/product.md) | [technical](modules/discovery-qualification/technical.md) |
+| 独立站建设 | [product](modules/site-builder/product.md) | [technical](modules/site-builder/technical.md) |
+
+开发与实施流程见 [development-process.md](shared/development-process.md)。
+
+## 3. 按任务下钻
 
 | 任务 | 入口 | 说明 |
 |---|---|---|
