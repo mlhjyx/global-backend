@@ -128,11 +128,12 @@ describe('workspace execution authority OpenAPI', () => {
     ).toBeUndefined();
   });
 
-  it('publishes the required lawful-basis body and stable 403 code for contact discovery', () => {
+  it('publishes the optional lawful-basis body and stable 403 code for contact discovery', () => {
     type OpenApiSchema = {
       required?: string[];
       properties?: Record<string, OpenApiSchema>;
       enum?: string[];
+      description?: string;
     };
     type OpenApiOperation = {
       requestBody?: { required?: boolean };
@@ -158,9 +159,21 @@ describe('workspace execution authority OpenAPI', () => {
       document.paths['/api/v1/canonical-companies/{id}/discover-contacts']
         ?.post;
     expect(operation?.requestBody).toMatchObject({ required: false });
-    expect(
-      document.components?.schemas?.DiscoverContactsDto?.required,
-    ).toContain('lawfulBasis');
+    // The body is optional and the field is not schema-required: a missing basis must reach the
+    // service, which rejects it with the stable 403 below rather than a 400 validation error.
+    const dto = document.components?.schemas?.DiscoverContactsDto;
+    expect(dto?.required ?? []).not.toContain('lawfulBasis');
+    expect(dto?.properties?.lawfulBasis?.enum).toEqual(
+      expect.arrayContaining([
+        'legitimate_interest',
+        'consent',
+        'contract',
+        'legal_obligation',
+      ]),
+    );
+    expect(dto?.properties?.lawfulBasis?.description).toContain(
+      'CONTACT_DISCOVERY_LAWFUL_BASIS_REQUIRED',
+    );
     expect(
       operation?.responses?.['403']?.content?.['application/json']?.schema
         ?.properties?.error?.properties?.code?.enum,

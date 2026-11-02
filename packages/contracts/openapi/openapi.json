@@ -17528,7 +17528,7 @@
               "contract",
               "legal_obligation"
             ],
-            "description": "发现并持久化具名联系人的合法性基础（GDPR Art.6）"
+            "description": "发现并持久化具名联系人的合法性基础（GDPR Art.6）。缺失时不在这里返回 400，而是交给服务层在消耗预算前以 CONTACT_DISCOVERY_LAWFUL_BASIS_REQUIRED 拒绝（与 OpenAPI 合同一致）。"
           },
           "lawfulBasisRef": {
             "type": "string",
@@ -17542,10 +17542,7 @@
             "maxLength": 1000,
             "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
           }
-        },
-        "required": [
-          "lawfulBasis"
-        ]
+        }
       },
       "VerifyContactPointDto": {
         "type": "object",

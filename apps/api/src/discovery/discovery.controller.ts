@@ -135,13 +135,16 @@ class VerifyContactPointDto {
  * must carry an explicit, auditable Art. 6 basis. There is deliberately no
  * development or policy-override bypass on this endpoint.
  */
-class DiscoverContactsDto {
-  @ApiProperty({
+export class DiscoverContactsDto {
+  @ApiPropertyOptional({
     enum: LAWFUL_BASIS_KINDS,
-    description: '发现并持久化具名联系人的合法性基础（GDPR Art.6）',
+    description:
+      '发现并持久化具名联系人的合法性基础（GDPR Art.6）。缺失时不在这里返回 400，' +
+      '而是交给服务层在消耗预算前以 CONTACT_DISCOVERY_LAWFUL_BASIS_REQUIRED 拒绝（与 OpenAPI 合同一致）。',
   })
+  @IsOptional()
   @IsIn(LAWFUL_BASIS_KINDS as unknown as string[])
-  lawfulBasis!: LawfulBasisKind;
+  lawfulBasis?: LawfulBasisKind;
 
   @ApiPropertyOptional({
     description: 'LIA / 工单 / 合同 / 同意记录的引用（可审计）',
@@ -395,7 +398,7 @@ export class DiscoveryController {
           ctx,
           id,
           {
-            lawfulBasis: dto
+            lawfulBasis: dto?.lawfulBasis
               ? {
                   basis: dto.lawfulBasis,
                   ref: dto.lawfulBasisRef,
