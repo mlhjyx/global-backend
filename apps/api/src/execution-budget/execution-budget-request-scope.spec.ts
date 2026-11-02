@@ -32,13 +32,14 @@ const cases = [
     request: {
       operation: 'POST /companies/:companyId/understanding/retry',
       companyId: COMPANY_ID,
+      body: { attemptId: '7e6f6f43-8f8d-4c2a-9b1e-2a3b4c5d6e7f' },
     },
     expected: {
       purpose: 'understanding.run',
       subjectType: 'company',
       subjectId: COMPANY_ID,
       requestSha256:
-        'c0e10394b44c3292380e11872247c73e289da634fd3bc4710768734521197feb',
+        '5bcc5f858ba0f89e1a71a89debab5dfa67b847691ee69c5b2c11cfaef6879d89',
     },
   },
   {

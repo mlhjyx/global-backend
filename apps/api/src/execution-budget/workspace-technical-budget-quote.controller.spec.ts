@@ -43,6 +43,7 @@ describe('WorkspaceTechnicalBudgetQuoteController', () => {
       controller().quote(CTX, {
         operation: 'POST /companies/:companyId/understanding/retry',
         companyId: '30000000-0000-4000-8000-000000000003',
+        body: { attemptId: '5a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d' },
       }),
     ).toEqual({
       data: expect.objectContaining({

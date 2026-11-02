@@ -3766,7 +3766,8 @@
                     "additionalProperties": false,
                     "required": [
                       "operation",
-                      "companyId"
+                      "companyId",
+                      "body"
                     ],
                     "properties": {
                       "operation": {
@@ -3778,6 +3779,19 @@
                       "companyId": {
                         "type": "string",
                         "format": "uuid"
+                      },
+                      "body": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "attemptId"
+                        ],
+                        "properties": {
+                          "attemptId": {
+                            "type": "string",
+                            "format": "uuid"
+                          }
+                        }
                       }
                     }
                   },
@@ -5331,6 +5345,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetryUnderstandingDto"
+              }
+            }
+          }
+        },
         "responses": {
           "202": {
             "description": "",
@@ -16722,6 +16746,19 @@
         },
         "required": [
           "website"
+        ]
+      },
+      "RetryUnderstandingDto": {
+        "type": "object",
+        "properties": {
+          "attemptId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "本次重试尝试的客户端幂等键"
+          }
+        },
+        "required": [
+          "attemptId"
         ]
       },
       "OfferingDto": {

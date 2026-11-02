@@ -43,6 +43,8 @@ export type WorkspaceExecutionBudgetRequest =
   | Readonly<{
       operation: 'POST /companies/:companyId/understanding/retry';
       companyId: string;
+      /** 每次重试点击生成的幂等键；让同一公司的多次重试各用独立请求作用域与预算账户。 */
+      body: Readonly<{ attemptId: string }>;
     }>;
 
 export interface GuessEmailsHttpRequestBody {
@@ -115,7 +117,11 @@ function requestMaterial(request: WorkspaceExecutionBudgetRequest): JsonValue {
     case 'POST /leads/:leadId/outreach-drafts':
       return { operation: request.operation, leadId: request.leadId };
     case 'POST /companies/:companyId/understanding/retry':
-      return { operation: request.operation, companyId: request.companyId };
+      return {
+        operation: request.operation,
+        companyId: request.companyId,
+        body: request.body as JsonValue,
+      };
   }
 }
 

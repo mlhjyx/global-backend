@@ -315,11 +315,13 @@ export class CompanyService {
   async retryUnderstanding(
     ctx: RequestContext,
     companyId: string,
+    attemptId: string,
     compactJws?: string,
   ): Promise<{ company: CompanyRow }> {
     const scope = workspaceExecutionBudgetRequestScope({
       operation: 'POST /companies/:companyId/understanding/retry',
       companyId,
+      body: { attemptId },
     });
     const verified = await this.authority.verifyWorkspaceGrant({
       compactJws,
