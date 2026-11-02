@@ -17967,8 +17967,7 @@
         "required": [
           "siteId",
           "buildId",
-          "status",
-          "understanding"
+          "status"
         ]
       },
       "IntakeCompanyDto": {

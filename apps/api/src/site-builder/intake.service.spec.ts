@@ -10,6 +10,7 @@ import {
 } from "./intake.service";
 import { intakeRequestHash } from "./intake.service";
 import type { VerifiedSiteBuildBudgetGrant } from "./site-build-budget-grant";
+import { ExecutionBudgetGrantError } from "../execution-budget/execution-budget-authority.types";
 
 const CTX: RequestContext = {
   userId: "u1",
@@ -337,7 +338,16 @@ function makeService(
 
   const assertReady = vi.fn(async () => undefined);
   const authority = {
-    verifyWorkspaceGrant: vi.fn(async () => ({ tokenSha256: "e".repeat(64) })),
+    verifyWorkspaceGrant: vi.fn(
+      async (input: { compactJws?: string }) => {
+        if (!input.compactJws) {
+          throw new ExecutionBudgetGrantError(
+            "EXECUTION_BUDGET_GRANT_REQUIRED",
+          );
+        }
+        return { tokenSha256: "e".repeat(64) };
+      },
+    ),
     consumeVerifiedWorkspaceGrantInTransaction: vi.fn(async () => ({
       authorityId: "authority-1",
       replay: false,

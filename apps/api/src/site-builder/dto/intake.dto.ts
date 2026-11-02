@@ -101,11 +101,11 @@ export class IntakeResultDto {
   })
   status!: "generating_demo";
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     enum: ["started", "not_started"],
     description: "公司理解是否已随 intake 触发；缺执行授权时为 not_started",
   })
-  understanding!: "started" | "not_started";
+  understanding?: "started" | "not_started";
 
   static from(result: IntakeResult): IntakeResultDto {
     return Object.assign(new IntakeResultDto(), result);

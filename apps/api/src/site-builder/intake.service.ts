@@ -25,6 +25,10 @@ import {
   assertFreshExecutionBudgetBinding,
   type ExecutionBudgetBinding,
 } from "../execution-budget/execution-budget-authority.service";
+import {
+  ExecutionBudgetGrantError,
+  type VerifiedExecutionBudgetAuthority,
+} from "../execution-budget/execution-budget-authority.types";
 import { workspaceExecutionBudgetRequestScope } from "../execution-budget/execution-budget-request-scope";
 
 /** 注册引导 6 项（01 §3.1）。DTO 层已校验形状，此处保留业务不变式。 */
@@ -262,16 +266,28 @@ export class IntakeService {
         HttpStatus.FORBIDDEN,
       );
     }
-    const verifiedExecution = compactExecutionGrant
-      ? await this.authority.verifyWorkspaceGrant({
-          compactJws: compactExecutionGrant,
-          identity: ctx,
-          scope: workspaceExecutionBudgetRequestScope({
-            operation: "POST /site-builder/intake",
-            body: { requestHash },
-          }),
-        })
-      : null;
+    // 无条件进校验：缺授权由验证器给出 GRANT_REQUIRED，再降级为 not_started。
+    // 不用“请求头是否存在”决定是否调用校验，避免用户输入控制安全校验的绕过模式。
+    let verifiedExecution: VerifiedExecutionBudgetAuthority | null = null;
+    try {
+      verifiedExecution = await this.authority.verifyWorkspaceGrant({
+        compactJws: compactExecutionGrant,
+        identity: ctx,
+        scope: workspaceExecutionBudgetRequestScope({
+          operation: "POST /site-builder/intake",
+          body: { requestHash },
+        }),
+      });
+    } catch (error) {
+      if (
+        error instanceof ExecutionBudgetGrantError &&
+        error.code === "EXECUTION_BUDGET_GRANT_REQUIRED"
+      ) {
+        verifiedExecution = null;
+      } else {
+        throw error;
+      }
+    }
     const readinessFailure = await this.runtimeGuard
       .assertReady({ paidReachable: false })
       .then(() => null)
