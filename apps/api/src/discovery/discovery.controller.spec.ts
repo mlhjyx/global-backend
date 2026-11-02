@@ -1,5 +1,7 @@
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import { describe, expect, it, vi } from 'vitest';
-import { DiscoveryController } from './discovery.controller';
+import { DiscoverContactsDto, DiscoveryController } from './discovery.controller';
 import type { DiscoveryService } from './discovery.service';
 import type { RequestContext } from '../auth/request-context';
 
@@ -112,5 +114,21 @@ describe('DiscoveryController.guessEmails — DTO → service 入参透传', () 
         allowPersonalWithoutBasis: true,
       },
     );
+  });
+});
+
+describe('DiscoverContactsDto 合规校验（M4 契约）', () => {
+  // 缺 lawfulBasis 不能在这里变成 400：必须以 CONTACT_DISCOVERY_LAWFUL_BASIS_REQUIRED（403）
+  // 由服务层在消耗预算前拒绝，与 OpenAPI 与 @ApiExecutionBudgetGrant 的声明一致。
+  it('empty body passes validation so the service can answer 403', async () => {
+    const errors = await validate(plainToInstance(DiscoverContactsDto, {}));
+    expect(errors).toEqual([]);
+  });
+
+  it('still rejects an unknown lawfulBasis value', async () => {
+    const errors = await validate(
+      plainToInstance(DiscoverContactsDto, { lawfulBasis: 'made_up' }),
+    );
+    expect(errors.map((error) => error.property)).toContain('lawfulBasis');
   });
 });
