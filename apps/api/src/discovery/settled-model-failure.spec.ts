@@ -7,6 +7,7 @@ import {
   ProviderTransportError,
   TaskOutputValidationError,
 } from '../model-gateway/providers/provider-output-error';
+import { ModelDurableResultProjectionError } from '../model-gateway/router-model-gateway';
 import { settledModelFailureReason } from './settled-model-failure';
 
 class DerivedTransportError extends ProviderTransportError {}
@@ -20,6 +21,11 @@ describe('a discovery model call the gateway settled without a result', () => {
       'a cut stream behind a non-control cause',
       new ProviderTransportError('CHAT_COMPLETIONS_STREAM_TRUNCATED', undefined, { cause: new TypeError('terminated') }),
       'CHAT_COMPLETIONS_STREAM_TRUNCATED',
+    ],
+    [
+      'an answer outside the durable projection',
+      new ModelDurableResultProjectionError('op-1'),
+      'MODEL_DURABLE_RESULT_PROJECTION_REJECTED',
     ],
   ])('is recognised for %s', (_case, error, reason) => {
     expect(settledModelFailureReason(error)).toBe(reason);

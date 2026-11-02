@@ -527,6 +527,54 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
     expect(provider.generateStructured).not.toHaveBeenCalled();
   });
 
+  it('settles a model projection rejection without a durable result instead of failing the stage closed', async () => {
+    const provider = fakeProvider();
+    vi.mocked(provider.generateStructured).mockResolvedValueOnce({
+      // A valid wire answer the durable contract cannot represent (lone surrogate).
+      data: { code: '\ud800' } as never,
+      provider: 'fake',
+      model: 'm',
+    });
+    const reserve = vi.fn(async () => ({
+      workspaceId: 'ws-1', accountKey: 'run-1', operationId: 'op-reject',
+      estimatedMicrousd: BigInt(20) * 10_000n, replay: false,
+    }));
+    const settle = vi.fn(async () => ({
+      chargedMicrousd: BigInt(10) * 10_000n,
+      observedMicrousd: BigInt(10) * 10_000n,
+      capVariance: false,
+      replay: false,
+    }));
+    const budgetStore = { reserve, settle } as unknown as BudgetStore;
+    const gateway = new RouterModelGateway(
+      { route: () => [provider] } as unknown as ModelRouter,
+      undefined,
+      budgetStore,
+    );
+
+    const error = await gateway.generateStructured(
+      {
+        task: 'taxonomy.normalize',
+        prompt: 'p',
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['code'],
+          properties: { code: { type: 'string' } },
+        },
+      },
+      { workspaceId: 'ws-1', runId: 'run-1', durableResultSchema: 'taxonomy-code/v1' },
+    ).catch((thrown: unknown) => thrown);
+
+    expect(error).toMatchObject({ code: 'MODEL_DURABLE_RESULT_PROJECTION_REJECTED' });
+    expect(isExecutionControlError(error)).toBe(false);
+    expect(settle).toHaveBeenCalledWith(
+      expect.objectContaining({ operationId: 'op-reject' }),
+      expect.any(BigInt),
+    );
+    expect(provider.generateStructured).toHaveBeenCalledTimes(1);
+  });
+
   it('未开账户 → 不限预算（内部调用照常）', async () => {
     const budget = new BudgetLedger();
     const gw = gatewayWith(fakeProvider(), budget);

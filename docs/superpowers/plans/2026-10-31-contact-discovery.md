@@ -221,7 +221,7 @@
 **剩余工作（2026-11-02 盘点）**
 
 1. **失败后无法重试同一主体**：一次性授权 + 请求作用域账户绑定，使「建 ICP / 生成查询计划 / 联系人发现」失败后同一公司或 ICP 无法再次执行（`EXECUTION_BUDGET_GRANT_REUSED`）。引擎 retry-account 机制已存在但条件过严（仅「从未发出付费调用」可换账户）。放宽属授权语义设计变更，待产品负责人拍板后出评估。
-2. **两个已记录的 fail-closed 残留**（有意延后）：model 侧投影拒绝（router-model-gateway）仍留 RESERVED + control；同一适配器在同次重试里新增回执的极端混合仍按失败关闭（与 signals 阶段现状一致）。
+2. ~~两个已记录的 fail-closed 残留~~ **已于 2026-11-02 晚间修复**：model 侧投影拒绝改为「按实付结算 + 非控制错误」（`router-model-gateway`，重钉受保护文件）；联系人回执的同一适配器混合态改按 APPLIED 执行一次（持久化可安全重放）。
 3. **D6 per-tenant LIA 采集页**：gain-saas 侧「数据处理声明」页，多租户前必须（当前是全局 interim LIA）。
 4. **D8 OSS 融合与社媒增强**：theHarvester + social-analyzer 工具化先行、JobSpy 次之、Trafilatura 作清洗件；Common Crawl 作为 L1 档案副本的另一路源；`SocialHostCircuit` 跨进程化（现为进程级）。
 5. **`google_patents` 仍 DISABLED**（D2 的专利源半程）：等 patent cache 刷新计划恢复并完成 BQ 实测后启用。

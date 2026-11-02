@@ -3,6 +3,7 @@ import {
   ProviderTransportError,
   isRecoverableModelFailure,
 } from '../model-gateway/providers/provider-output-error';
+import { ModelDurableResultProjectionError } from '../model-gateway/router-model-gateway';
 
 /**
  * The one transport failure discovery treats as a single call's failure: the
@@ -34,6 +35,10 @@ const ABSORBED_TRANSPORT_FAILURES: ReadonlySet<string> = new Set([
  * nothing accepted ends FAILED, and the fit pass stops on two cuts in a row.
  */
 export function settledModelFailureReason(error: unknown): string | undefined {
+  // The gateway settled (and charged) this call without a durable result because the
+  // valid answer left the durable projection contract. The provider can only answer
+  // this query with nothing: skip the domain with a zero-record lineage, never void it.
+  if (error instanceof ModelDurableResultProjectionError) return error.code;
   if (isRecoverableModelFailure(error)) return error.reasonCode;
   if (
     error instanceof ProviderTransportError &&
