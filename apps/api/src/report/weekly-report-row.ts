@@ -35,6 +35,7 @@ export const WEEKLY_REPORT_COLUMNS = Object.freeze([
   '原因码',
   '证据链接',
   '联系路径',
+  '决策人（联系人 / 联系方式 / 状态）',
   '注册地址',
   '开发信草稿',
   '制裁状态',
@@ -69,6 +70,17 @@ export interface WeeklyReportRowInput {
   };
   /** company_contact_point rows of the company (green links only, by database CHECK). */
   readonly contactPoints: readonly { readonly kind: string; readonly value: string; readonly status: string }[];
+  /**
+   * Named decision makers of the company (M4): name/title/department plus contact points and their
+   * verification status. Personal data; the caller only passes rows whose EXPORT decision allowed the
+   * lead, and filters the workspace's suppressed emails before this point.
+   */
+  readonly decisionMakers?: readonly {
+    readonly fullName: string;
+    readonly title: string | null;
+    readonly department: string | null;
+    readonly points: readonly { readonly type: string; readonly value: string; readonly status: string }[];
+  }[];
   readonly sanctionsStatus: WeeklyReportSanctionsStatus;
   /** ISO timestamp from computeValidUntil, or null without freshness evidence. */
   readonly validUntil: string | null;
@@ -112,6 +124,42 @@ const SANCTIONS_LABELS: Readonly<Record<WeeklyReportSanctionsStatus, string>> = 
 });
 
 const SCORE_KEYS = ['fit', 'role', 'intent', 'dataQuality', 'reachability', 'engagement'] as const;
+
+/** M4 decision-maker cell bounds: a weekly row stays readable and bounded in a spreadsheet. */
+const MAX_DECISION_MAKERS = 5;
+const MAX_POINTS_PER_DECISION_MAKER = 3;
+const MAX_DECISION_MAKER_CELL_CHARS = 2_000;
+
+const CONTACT_POINT_TYPE_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  email: '邮箱',
+  phone: '电话',
+  linkedin: 'LinkedIn',
+});
+
+/**
+ * One cell: `姓名（职务 · 部门）：邮箱 x（VALID）；电话 y（RISKY）`. Statuses stay the engine's raw
+ * codes (VALID/RISKY/INVALID/UNVERIFIED) — the same wording the decision-maker card uses — so a
+ * guessed or unverified address is never presented as certain.
+ */
+function decisionMakersCell(contacts: NonNullable<WeeklyReportRowInput['decisionMakers']>): string {
+  const lines: string[] = [];
+  for (const contact of contacts.slice(0, MAX_DECISION_MAKERS)) {
+    if (!contact.fullName) continue;
+    const role = [contact.title, contact.department]
+      .filter((part): part is string => !!part && part.length > 0)
+      .join(' · ');
+    const points = contact.points
+      .filter((point) => point.value.length > 0 && Object.hasOwn(CONTACT_POINT_TYPE_LABELS, point.type))
+      .slice(0, MAX_POINTS_PER_DECISION_MAKER)
+      .map((point) => `${labelOf(CONTACT_POINT_TYPE_LABELS, point.type)} ${point.value}（${point.status}）`);
+    const head = role ? `${contact.fullName}（${role}）` : contact.fullName;
+    lines.push(points.length > 0 ? `${head}：${points.join('；')}` : head);
+  }
+  const cell = lines.join('；');
+  return cell.length > MAX_DECISION_MAKER_CELL_CHARS
+    ? `${cell.slice(0, MAX_DECISION_MAKER_CELL_CHARS - 1)}…`
+    : cell;
+}
 
 /** Own-property lookup, so a stored value such as `constructor` never reads the prototype. */
 function labelOf(labels: Readonly<Record<string, string>>, key: string): string {
@@ -214,6 +262,7 @@ export function weeklyReportRow(input: WeeklyReportRowInput): readonly CsvValue[
     reasonCodes,
     evidenceLinks.join('\n'),
     [...pathLines, ...(suggestedLine ? [suggestedLine] : [])].join('\n'),
+    decisionMakersCell(input.decisionMakers ?? []),
     text(profile.registered_address),
     outreachDraftCell(input.draft),
     SANCTIONS_LABELS[input.sanctionsStatus],
