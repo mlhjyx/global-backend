@@ -5,7 +5,7 @@ vi.mock('../model-runtime/structured-task-runtime-bridge', () => ({
 }));
 
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
-import { judgeFitCompany, loadIcpBrief } from './fit-judge';
+import { judgeFitCompany, loadIcpBrief, looksLikeModelRefusal } from './fit-judge';
 import { getTask } from '../ai-tasks/task-registry';
 import { BudgetOperationReplayError } from '../tools/budget-store';
 import {
@@ -180,6 +180,82 @@ describe('judgeFitCompany provider-independent result semantics', () => {
         company,
       ),
     ).resolves.toBeNull();
+  });
+});
+
+describe('Model refusals never become mismatch (2026-11-02 incident)', () => {
+  beforeEach(() => {
+    executeTask.mockReset();
+  });
+
+  // 真实事故原文（run 3212f6f3，Clinique Pasteur Tunis）：模型 200 响应里各门填拒绝文案，
+  // verdict 却填了合法枚举 mismatch——schema 校验完全看不出问题。
+  const refusalOutput = {
+    verdict: 'mismatch',
+    material_gate: '无法评估：本服务不支持开展、推进或评估任何涉及生命科学、生物医学或临床前研究的目标客户筛选。',
+    role_gate: 'unclear：本服务不能协助判断该机构是否为科研仪器卖方的下游客户。',
+    process_gate: 'unclear：不能协助分析该机构的研发流程。',
+    business_model_gate: 'unclear：本服务不能为生命科学研究相关商业拓展判断候选机构的适配性。',
+    reasons: ['抱歉，本服务不支持主要使用俄语提出的请求；此外，也不能协助开展、推进或评估任何涉及生命科学的研究。'],
+  };
+
+  it('downgrades a refusal-shaped mismatch to weak with an auditable reason and keeps the durable receipt', async () => {
+    executeTask.mockResolvedValue({
+      provider: 'new-api', data: refusalOutput, durableReceipt: FIT_RECEIPT,
+    } as never);
+
+    const judgment = await judgeFitCompany(
+      {} as never,
+      FIT_RECEIPT.scopeKey,
+      { seller: 'Seller', seller_summary: null },
+      company,
+      { runId: 'run-1' },
+    );
+
+    expect(judgment).toMatchObject({
+      verdict: 'weak',
+      durableReceipt: FIT_RECEIPT,
+    });
+    expect(judgment?.fitReasons.reasons[0]).toContain('拒答');
+    expect(judgment?.fitReasons.reasons[1]).toContain('原文摘录');
+    expect(judgment?.fitReasons.reasons[1]).toContain('本服务不支持');
+  });
+
+  it('leaves an evidence-based mismatch untouched', async () => {
+    executeTask.mockResolvedValue({
+      provider: 'new-api',
+      data: {
+        verdict: 'mismatch',
+        material_gate: 'fail：候选加工塑料，ICP 要求金属。',
+        role_gate: 'fail：候选是同类设备制造商（竞品）。',
+        process_gate: 'unclear：官网未展示相关工艺。',
+        business_model_gate: 'fail：仅做信息撮合的平台。',
+        reasons: ['与 ICP 的材质与角色门不符。'],
+      },
+    } as never);
+
+    await expect(
+      judgeFitCompany(
+        {} as never,
+        '10000000-0000-4000-8000-000000000001',
+        { seller: 'Seller', seller_summary: null },
+        company,
+      ),
+    ).resolves.toMatchObject({ verdict: 'mismatch' });
+  });
+
+  it('does not treat a legitimate unclear gate as a refusal', () => {
+    expect(
+      looksLikeModelRefusal({
+        verdict: 'weak',
+        material_gate: 'unclear：官网未找到材质信息。',
+        role_gate: 'unclear：无法判定其贸易角色。',
+        process_gate: 'pass：从事相关工艺。',
+        business_model_gate: 'unclear：信息不足。',
+        reasons: ['证据有限，交人工复核。'],
+      }),
+    ).toBe(false);
+    expect(looksLikeModelRefusal(refusalOutput)).toBe(true);
   });
 });
 

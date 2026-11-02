@@ -118,6 +118,46 @@ export async function loadIcpBrief(tx: Prisma.TransactionClient, icpId: string,
 }
 
 /**
+ * 上游模型拒答时（HTTP 200，各门填“本服务不支持……”类拒绝文案，verdict 仍是合法枚举），
+ * schema 校验看不出问题。拒答不是证据不足，更不能被当成 mismatch 自动拒绝——2026-11-02 实测：
+ * gpt-5.6-sol 对生命科学域 ICP 的 4 次调用拒答 3 次，3 家候选因此被误导为 mismatch 进 rejected。
+ * 命中拒答签名 → 按 fail-safe 归一为 weak（needs_review 人工复核），绝不 mismatch。
+ * 不在此处自动重试：同一请求材料的 durable 预算操作键相同，重放只会拿回同一份拒答（或撞
+ * BudgetOperationReplayError）；真正的解法是换不拒答的模型路由。
+ */
+const REFUSAL_MARKERS = [
+  '本服务不支持',
+  '本服务不能',
+  '不能协助',
+  '无法协助',
+  '不支持以中文',
+  '不支持主要使用',
+  '不构成对',
+  '抱歉，本服务',
+  '抱歉，我无法',
+] as const;
+
+function refusalExcerpt(out: FitOutput): string | null {
+  const texts = [
+    out.material_gate,
+    out.role_gate,
+    out.process_gate,
+    out.business_model_gate,
+    ...(Array.isArray(out.reasons) ? out.reasons : []),
+  ].filter((value): value is string => typeof value === 'string');
+  for (const text of texts) {
+    if (REFUSAL_MARKERS.some((marker) => text.includes(marker))) {
+      return text.length > 160 ? `${text.slice(0, 160)}…` : text;
+    }
+  }
+  return null;
+}
+
+export function looksLikeModelRefusal(out: FitOutput): boolean {
+  return refusalExcerpt(out) !== null;
+}
+
+/**
  * 对一家公司跑四门判别（网络调用，事务外执行）。失败返回 null（单家失败不影响其余，§5 fail-safe）。
  * 非法 verdict 归一为 weak（与既有行为一致——宁进人工复核，不误杀/误放）。
  */
@@ -193,6 +233,23 @@ export async function judgeFitCompany(
       isExecutionControlError(err)
     ) throw err;
     return null;
+  }
+  const refusal = refusalExcerpt(out);
+  if (refusal !== null) {
+    return {
+      verdict: 'weak',
+      fitReasons: {
+        material: 'unclear：模型拒答，未提供实质判定',
+        role: 'unclear：模型拒答，未提供实质判定',
+        process: 'unclear：模型拒答，未提供实质判定',
+        business_model: 'unclear：模型拒答，未提供实质判定',
+        reasons: [
+          'qualify_fit 模型返回拒绝文案，未对该候选做实质判定（疑似上游内容策略拒答）；按 fail-safe 转人工复核，不自动拒绝。',
+          `原文摘录：${refusal}`,
+        ],
+      },
+      ...(durableReceipt ? { durableReceipt } : {}),
+    };
   }
   const verdict = (
     ['match', 'weak', 'mismatch'].includes(out.verdict) ? out.verdict : 'weak'
