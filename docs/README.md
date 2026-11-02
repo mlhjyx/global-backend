@@ -4,7 +4,7 @@
 > 层级：`L1 / Navigation`
 > 状态：`CURRENT`
 > 维护 Owner：`OWN-DOC-GOV`
-> 最后核验：2026-08-07；当前主线提交只见 [`status/current.md`](status/current.md)，本页不复制 SHA
+> 最后核验：2026-11-02；当前主线提交只见 [`status/current.md`](status/current.md)，本页不复制 SHA
 
 这是 `/global/backend` 的唯一人类文档入口。项目是统一的出海企业 AI 全球客户开发与增长执行 SaaS；Site Builder M1 收口已经进入历史，当前在为获客侧恢复施工补齐治理、授权、运行身份、可观测性与首个受控 pilot 门。独立站管理仍属于 SaaS 的一级产品区域，Astro 公开站是它管理的版本化输出，不是另一套 SaaS 前端。
 
@@ -16,9 +16,16 @@
 2. [当前状态](status/current.md)：当前真正合入了什么、主线和已知限制。
 3. [as-built 架构](architecture/current.md)：代码和运行结构的当前事实。
 4. [ADR 注册表](adr/registry.md)：仍然生效的承重决策。
-5. [发布路线](roadmap/release-plan.md)：下一施工顺序。
+5. [发布路线](status/release-plan.md)：下一施工顺序。
 
 任何“已完成、已接入、已发布、生产可用”声明都必须回到上述事实源、机器合同和相应证据核验。旧 Word、研究稿、原型、历史分支或外部项目不能升级当前状态。
+
+### 1.1 历史与冻结文档的定位（2026-11-02 标注）
+
+- [`research/platform-top-level-design-v1.md`](research/platform-top-level-design-v1.md)：**SUPERSEDED**——顶层设计 v1，已被 [产品边界](product-scope.md) + [as-built 架构](architecture/current.md) + [ADR 注册表](adr/registry.md) 取代，其中「QGO 归本仓」等表述已被 ADR-001 改判，只作研究归档，不得再当现行设计引用。
+- `docs/frontend/` 系列（19 份）：**目标规范 / 设计基线，不是 as-built**；实际运行的 SaaS 前端以 gain-saas 仓库为准，本目录不描述其实现状态。
+- `docs/site-builder/` 与 `docs/design/` 中独立站相关文档：**冻结线文档**——Site Builder 正式冻结仍待 PRD4-D1 拍板，冻结期间不作为当前施工依据；M1 收口属历史。
+- `docs/archive/`：只读历史，正文不改写，链接问题按历史结构告警处理。
 
 ## 2. 模块设计文档（docs/modules/）
 
@@ -99,7 +106,7 @@
 
 | 层级 | 用途 | 主要位置 |
 |---|---|---|
-| Authority | 当前边界、架构、决策、状态和路线 | `product-scope.md`、`architecture/`、`adr/`、`status/`、`roadmap/release-plan.md` |
+| Authority | 当前边界、架构、决策、状态和路线 | `product-scope.md`、`architecture/`、`adr/`、`status/`、`status/release-plan.md` |
 | Normative / Registry | 当前目标规则、稳定 ID、责任和关系 | `frontend/`、`governance/`、`backend/oss-registry.md` |
 | Capability / Guide | 完成具体产品或运行任务 | `frontend/modules/independent-site-management/`、`site-builder/`、`backend/`、`ai-development/` |
 | Evidence / Record | 实现、测试、模型和专题实施证明 | `evidence/`、`implementation-records/`、`roadmap/changelog.md` |

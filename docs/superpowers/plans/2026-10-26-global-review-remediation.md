@@ -172,7 +172,7 @@ v3.0 要求 13 个阶段闭环，当前代码只覆盖 Understand 到 Qualify �
 
 ## 6. 规划：重定基线的 Release 梯子与门
 
-来源：PRD 4.0 L2（DRAFT）+ `docs/roadmap/release-plan.md` + 《后续规划核对》（10-21）。时间线以 10-07 为第 0 周——**原定第 4 周（≈11-04）RL1 退出评审大概率延后**，需负责人改期或明说。
+来源：PRD 4.0 L2（DRAFT）+ `docs/status/release-plan.md` + 《后续规划核对》（10-21）。时间线以 10-07 为第 0 周——**原定第 4 周（≈11-04）RL1 退出评审大概率延后**，需负责人改期或明说。
 
 | Release | 目标 | 退出标志（摘要） | 当前 |
 | --- | --- | --- | --- |
@@ -278,5 +278,5 @@ v3.0 要求 13 个阶段闭环，当前代码只覆盖 Understand 到 Qualify �
 
 - **恢复的原始材料**（来自 2026-10-21 会话转录与工作流 journal，完整找回）：11 节大纲与第 2 节原文；八份调研报告——《工程量化指标》《已实现功能盘点》《工程与流程健康度评估》《文档体系现状与缺口评估》《团队分工调研》《PRD 4.0 文档包》《后续规划核对》《GrowthOS 与 R4 现状》《产品定位与 as-built 架构》《汇报教练复核》，以及《从 v3.0 愿景到今天：项目分叉史》（含 git 考古时间线与逐条出处）。
 - **10-26 现场复核**：main=`6392e1b1`(#674)；#675 分支状态与未提交改动（已备份）；compose 漂移处置；`gctl doctor` 38 项警告摘要。
-- 权威文档：`/global/CLAUDE.md`、`backend/AGENTS.md`、`docs/status/current.md`(10-14 版)、`docs/adr/registry.md`、`docs/governance/conflict-register.md`、`docs/roadmap/release-plan.md`、`docs/product-scope.md`、`docs/architecture/current.md`。
+- 权威文档：`/global/CLAUDE.md`、`backend/AGENTS.md`、`docs/status/current.md`(10-14 版)、`docs/adr/registry.md`、`docs/governance/conflict-register.md`、`docs/status/release-plan.md`、`docs/product-scope.md`、`docs/architecture/current.md`。
 - 数据口径：库内数字均为 2026-10-21 对 `global_dev` 的只读 SELECT；10-26 未重新查询业务表。

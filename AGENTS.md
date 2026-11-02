@@ -7,7 +7,7 @@
 发生冲突时按以下顺序取真：
 
 1. 仓库代码、机器合同、迁移和测试；
-2. [`docs/product-scope.md`](docs/product-scope.md)、[`docs/status/current.md`](docs/status/current.md)、[`docs/architecture/current.md`](docs/architecture/current.md)、[`docs/adr/registry.md`](docs/adr/registry.md)、[`docs/roadmap/release-plan.md`](docs/roadmap/release-plan.md)；
+2. [`docs/product-scope.md`](docs/product-scope.md)、[`docs/status/current.md`](docs/status/current.md)、[`docs/architecture/current.md`](docs/architecture/current.md)、[`docs/adr/registry.md`](docs/adr/registry.md)、[`docs/status/release-plan.md`](docs/status/release-plan.md)；
 3. 当前外部系统与运行证据；
 4. changelog、evidence、实施记录和研究；
 5. 历史聊天、旧分支、旧 worktree、Word、原型和记忆。

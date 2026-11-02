@@ -34,7 +34,7 @@ R1-min 任务提方案前必须完整阅读：
 1. `AGENTS.md`
 2. `CONTRIBUTING.md`
 3. `docs/status/current.md`
-4. `docs/roadmap/release-plan.md`
+4. `docs/status/release-plan.md`
 5. `docs/product-scope.md`
 6. `docs/architecture/current.md`
 7. `docs/adr/registry.md`，重点为 ADR-013、ADR-014、ADR-015、ADR-018、ADR-019

@@ -65,7 +65,7 @@ const REQUIRED_BASELINE_REFERENCE_PATHS = [
   'docs/status/current.md',
   'docs/architecture/current.md',
   'docs/adr/registry.md',
-  'docs/roadmap/release-plan.md',
+  'docs/status/release-plan.md',
   'docs/site-builder/00-decisions-and-coordination.md',
   'docs/site-builder/02-architecture.md',
   'docs/site-builder/03-agents.md',

@@ -5,7 +5,7 @@
 开始任何工作前，依次读取：
 
 1. [AGENTS.md](AGENTS.md)：跨会话稳定规则与权威顺序；
-2. [docs/status/current.md](docs/status/current.md) 与 [docs/roadmap/release-plan.md](docs/roadmap/release-plan.md)：当前状态、阻塞、owner 和下一决策；
+2. [docs/status/current.md](docs/status/current.md) 与 [docs/status/release-plan.md](docs/status/release-plan.md)：当前状态、阻塞、owner 和下一决策；
 3. [docs/product-scope.md](docs/product-scope.md)、[docs/architecture/current.md](docs/architecture/current.md) 与 [docs/adr/registry.md](docs/adr/registry.md)：边界、as-built 与承重决策；
 4. [docs/roadmap/changelog.md](docs/roadmap/changelog.md) 与 [docs/evidence/README.md](docs/evidence/README.md)：历史与证据索引。
 

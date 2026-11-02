@@ -104,7 +104,7 @@ pnpm docs:verify
 
 任何 PR 若改变当前能力、阶段完成度、运行时合同、模型晋级或发布边界，审查必须逐项确认并在 PR 中列出更新或不适用原因：
 
-1. [当前状态](../status/current.md)、[路线图](../roadmap/release-plan.md) 与 [as-built 架构](../architecture/current.md)；
+1. [当前状态](../status/current.md)、[路线图](../status/release-plan.md) 与 [as-built 架构](../architecture/current.md)；
 2. [产品边界](../product-scope.md) 与相关 ADR 的 dated as-built 注记；
 3. 对应 Site Builder 专题合同页、API/评测/媒体页；
 4. 历史入口、handoff、实施记录是否仍须显著标记为历史，而非改写 provenance；

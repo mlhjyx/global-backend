@@ -2,7 +2,7 @@
 
 > 文档 ID：`SITE-ARCH-001`
 > 生命周期：`CURRENT`
-> 当前事实来源：当前代码、[状态](../status/current.md) 与 [路线](../roadmap/release-plan.md)。
+> 当前事实来源：当前代码、[状态](../status/current.md) 与 [路线](../status/release-plan.md)。
 > 配套 [01-prd.md](01-prd.md)。2026-07-13 起草；模型/素材库研究结论见 §6/§8（web 调研回填）。
 
 ## 0. 设计原则（五条）

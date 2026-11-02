@@ -2,7 +2,7 @@
 
 > 文档 ID：`SITE-DEC-001`
 > 生命周期：`CURRENT`
-> 当前事实来源：当前代码、[状态](../status/current.md)、[路线](../roadmap/release-plan.md) 与 ADR-013~021。
+> 当前事实来源：当前代码、[状态](../status/current.md)、[路线](../status/release-plan.md) 与 ADR-013~021。
 > **Site Builder 协同事实源**。开工前先读这份，并以代码、[09 施工图](09-m1-implementation-design.md)、[10 选型](10-model-selection-study.md) 和 `docs/adr/registry.md` 交叉核验。
 > **2026-07-16 当前基线**：DOC-12 已由 #119/#120 形成并分发，[12 v3.2](12-site-builder-design-intelligence-and-cc-implementation-v3.2.md) 现为归档 proposal；#125 已完成项目 truth-sync，#126 已完成 R0 contract closeout。施工真值是代码 + 00–14 + ADR/status/roadmap。
 

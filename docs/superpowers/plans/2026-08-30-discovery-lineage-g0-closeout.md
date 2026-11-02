@@ -17,7 +17,7 @@
 
 - Exact base is `origin/main@d2c93dd6bea0348381286558896b395c84945171`, merge result of PR #425.
 - Unique closeout writer is `codex/discovery-lineage-g0-closeout` at `/global/backend/.codex/worktrees/discovery-lineage-g0-closeout`.
-- Change only this plan, `docs/governance/conflict-register.md`, `docs/status/current.md`, `docs/roadmap/release-plan.md`, and `scripts/governance-contracts.spec.mjs`.
+- Change only this plan, `docs/governance/conflict-register.md`, `docs/status/current.md`, `docs/status/release-plan.md`, and `scripts/governance-contracts.spec.mjs`.
 - `GPP-B-LINEAGE-001` remains zero product code. G0 PASS means ownership truth is closed; it does not mean G2 source, G3 data integration, runtime, Release, UAT or Pilot pass.
 - Preserve G1–G7 rows byte-for-byte except references whose only meaning is the now-closed G0 condition.
 - Preserve `DISCOVERY_GOVERNED_LINEAGE_NOT_READY`; no product source, schema, migration, Provider/model/tool wire, paid call, service, runtime, deploy, image, GrowthOS, PII, Billing/Credits, RuntimeEvidence or Release Bundle mutation.
@@ -31,7 +31,7 @@
 - Create: `docs/superpowers/plans/2026-08-30-discovery-lineage-g0-closeout.md`
 - Modify: `docs/governance/conflict-register.md`
 - Modify: `docs/status/current.md`
-- Modify: `docs/roadmap/release-plan.md`
+- Modify: `docs/status/release-plan.md`
 - Test: `scripts/governance-contracts.spec.mjs`
 
 **Interfaces:**
@@ -66,7 +66,7 @@
 
   Require 0 Critical/High/Medium findings for ownership consistency, exact-state tests, G1–G7 preservation and external-action boundaries.
 
-  Run: `git add docs/superpowers/plans/2026-08-30-discovery-lineage-g0-closeout.md docs/governance/conflict-register.md docs/status/current.md docs/roadmap/release-plan.md scripts/governance-contracts.spec.mjs && git commit -m "docs: close discovery lineage ownership gate"`
+  Run: `git add docs/superpowers/plans/2026-08-30-discovery-lineage-g0-closeout.md docs/governance/conflict-register.md docs/status/current.md docs/status/release-plan.md scripts/governance-contracts.spec.mjs && git commit -m "docs: close discovery lineage ownership gate"`
 
   Stop after the clean local commit. Report exact base/head, diff, tests and review. Obtain separate user authorization before push, PR creation/update and merge; after any authorized merge, synchronize and independently read back current main before starting a product implementation plan.
 

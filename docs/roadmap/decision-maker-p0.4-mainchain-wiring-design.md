@@ -5,7 +5,7 @@
 
 > 2026-07-10 设计（会话内已过目、拍板：混合姿态 + interim 全局 LIA 默认关 + 加水位列迁移）。
 > 关联：[decision-maker-multi-source-spec.md](decision-maker-multi-source-spec.md)（立项 spec，本文件是其 P0.3「遗留：接入主链」的落地设计）·
-> [../product-scope.md](../product-scope.md)（合规红线）· [../adr/registry.md](../adr/registry.md) ADR-010（存储侧合规）· [release-plan.md](release-plan.md) §1.6。
+> [../product-scope.md](../product-scope.md)（合规红线）· [../adr/registry.md](../adr/registry.md) ADR-010（存储侧合规）· [../status/release-plan.md](../status/release-plan.md) §1.6。
 
 ## 0. 一句话
 

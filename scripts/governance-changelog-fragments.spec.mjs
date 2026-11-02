@@ -1105,7 +1105,7 @@ test("only the docs-verification policy exempts fragments from the lifecycle lin
     false,
   );
   assert.equal(
-    lifecycleExemptFragment(listed, "docs/roadmap/release-plan.md"),
+    lifecycleExemptFragment(listed, "docs/status/release-plan.md"),
     false,
   );
   // Take the directory out of the policy and fragments need the line again.

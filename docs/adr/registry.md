@@ -2,7 +2,7 @@
 
 > 文档 ID：`DOC-ADR-001`
 > 生命周期：`CURRENT`
-> 当前事实来源：[当前状态](../status/current.md) · [as-built 架构](../architecture/current.md) · [路线](../roadmap/release-plan.md)
+> 当前事实来源：[当前状态](../status/current.md) · [as-built 架构](../architecture/current.md) · [路线](../status/release-plan.md)
 > 2026-07-10 v2（合流定稿）。PRD v3.0 内两套同号 ADR（§11.6 的 001-018 与 §11.20 的 001-012 含义冲突）**整体作废**；交付包附录 D 清单已并入（其 ADR-002→本 ADR-011、ADR-012→本 ADR-012、ADR-005 水位公平性→并入本 ADR-008、ADR-011 AiToEarn/Chatwoot ACL→SaaS 侧随 product-scope 附录 A，其余主题一一对应）。ADR 增多后再拆单文件。
 > 状态词表（与需求/实现状态分开，避免词汇污染）：PROPOSED / ACCEPTED / SUPERSEDED。**ACCEPTED 只表示决策生效，不表示代码已落地**。每条决策以本表行内状态为准；标注 ⚠ 者待 A/B 会签，SUPERSEDED 条目只保留历史 provenance。
 > 2026-07-16 追加 **ADR-013~019**，2026-07-17 追加 **ADR-020**，2026-07-27 追加 **ADR-021**，2026-07-29 追加 **ADR-022**，2026-08-04 追加 **ADR-023**，2026-08-16 追加 **ADR-024**（独立站建设子系统承重决策，来源 `docs/site-builder/` 活文档与用户拍板的单一产品运行路径），2026-08-29 追加 **ADR-025**，2026-09-04 追加 **PDR-004** 作为 PDR-003 的 forward supersession。v3.1/v3.2 与旧 Word/研究稿只是历史输入，不能直接成为 ADR 或施工真值；实现状态统一见 [status/current](../status/current.md)。
@@ -78,11 +78,11 @@ PRD 4.0（L0 产品宪章 / L2 路线图与 Release 门等，目前在私有目�
 
 | ID | 决策 | 拍板 | 落地（PR） | 与既有 ADR 的关系 | 状态 |
 | --- | --- | --- | --- | --- | --- |
-| PRD4-D2 | R4 平台授权冻结：不在 R4 准入（capability、撤销、fence-ack、target-lookup、机器 token）上继续投入，保留出网围栏；平台 schedule 在 RL1 期间继续暂停；平台工作流迁进 customer worker 另出设计 | 2026-10-10 | 设计见 [`2026-10-10-platform-schedule-admission-and-writer-grants.md`](../superpowers/plans/2026-10-10-platform-schedule-admission-and-writer-grants.md)（#625） | 不改 ADR-024 的 Budget Grant 路径。R4 撤销投递链仍未打通（`BLOCKED_PENDING_BACKEND_4A4`），platform Worker 就绪只代表事实可观察，不代表撤销能真正送达；三个 R4 计划因此改为 `SUPERSEDED` | ACCEPTED |
+| PRD4-D2 | R4 平台授权冻结：不在 R4 准入（capability、撤销、fence-ack、target-lookup、机器 token）上继续投入，保留出网围栏；平台 schedule 在 RL1 期间继续暂停；平台工作流迁进 customer worker 另出设计。**2026-10-31 产品负责人重开**：唯一目的是把平台权威从 GrowthOS 迁到 gain-saas，当日完成迁移并退役 GrowthOS（卷保留） | 2026-10-10（2026-10-31 重开） | 设计见 [`2026-10-10-platform-schedule-admission-and-writer-grants.md`](../superpowers/plans/2026-10-10-platform-schedule-admission-and-writer-grants.md)（#625）；迁移见 gain-saas `docs/technical/r4-platform-authority-migration.md`；撤销链 live 证据见 [2026-11-01 证据](../evidence/2026-11-01-platform-revocation-autotrigger-live.md) | 不改 ADR-024 的 Budget Grant 路径。撤销投递链 2026-11-01 已用真实 committed Grant 实测打通（签发→接收→fence→ACK→自动触发→受审计重开），`BLOCKED_PENDING_BACKEND_4A4` 不再成立；4 个平台 schedule 是否恢复运行仍是产品负责人的单独决定 | ACCEPTED |
 | PRD4-D3 | 客户写入准入按客户依赖集合判定，与 platform Worker 就绪解耦（方案 A，含建站写入） | 2026-10-10 | #627；方案 C 另立任务 | 细化 ADR-024 与 AGENTS §4「API 不接新工作按该工作自身的依赖集合判定」 | ACCEPTED |
 | PRD4-D9 | 制裁名单先走运营刷新、核对后打开三个源；职能邮箱按 BI-14 做公司级；LIA 时机未定 | 2026-10-10（部分拍板） | #629 的运营刷新命令 | ADR-005 出网门的登记例外（AGENTS §6）：该命令不经 ToolBroker 持有调用与预算回执，仍受 source_policy 与 net-guard 约束；ADR-010 的制裁第五门不变 | ACCEPTED |
 | PRD4-D14 | 获客任务允许上游以 Flash 档替代所请求的 pro 档，trace 与账本如实记为 Flash；建站等其他任务仍只认 pro；官方备用上游可选 | 2026-10-11 | #633（部署级开关 `MODEL_IDENTITY_SUBSTITUTES`，默认关闭） | 不改 ADR-016、ADR-020…023 管辖的建站任务路由与执行语义 | ACCEPTED |
 | PRD4-D16 | 个人数据路径保持现状：`decision_maker`、`companies_house`、`inpi_rne`、`smtp_self` 保持 ENABLED，展会 Algolia 来源保留，产品负责人风险自担；验收 run 存下个人数据不再停止，改为如实计数并注明来源；不新写抽邮箱、电话的自动化 | 2026-10-11 | 无代码改动 | 没有修订 ADR-010 的存储侧条款（列级加密、删除链、个人数据不写 Trace / 日志 / Prompt、无 LIA 不解锁触达）；PRD 4.0 L0 的「不探 SMTP、不猜邮箱」红线与本决定冲突，待 PRD 4.0 同步 | ACCEPTED |
 | PRD4-BI14 | 可达性改按公司级联系路径计分：联系页、Impressum、联系表单、供应商页任一存在即可达；只存链接，不抽邮箱和电话 | 2026-10-10 | PR-1 #630（链接通路，`company_contact` 默认 DISABLED）；评分侧 #649（评分规则 v3，同一 PR 改了 `docs/product-scope.md` 的可达性定义） | 改变 ADR-010 评分中可达性一维的输入口径，不改评分确定性、版本化与 feature snapshot 原则 | ACCEPTED |
 
-> Site Builder 的滚动实现状态与施工顺序不在 ADR 注册表维护；统一见 [status/current](../status/current.md) 与 [release-plan](../roadmap/release-plan.md)。`ACCEPTED` 始终不等于已实现。
+> Site Builder 的滚动实现状态与施工顺序不在 ADR 注册表维护；统一见 [status/current](../status/current.md) 与 [release-plan](../status/release-plan.md)。`ACCEPTED` 始终不等于已实现。
