@@ -47,6 +47,12 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '人工确认企业可用：REVIEW → ACTIVE，是显式的 Gate 出口。需要 acquisition:review。',
   'GET /api/v1/companies/{companyId}/offerings':
     '理解阶段抽取出的结构化产品/服务，每条带来源页 URL 与原文片段。数组响应，不分页。',
+  'PATCH /api/v1/companies/{companyId}':
+    '编辑 DRAFT 档案的卖家自查事实（名称/官网/行业/目标市场/业务邮箱）。补填官网后，调用方需另取 quote 与 Grant 调 retry 端点启动理解；本接口不消费 Grant。非 DRAFT 档案返回 409 COMPANY_NOT_EDITABLE。',
+  'DELETE /api/v1/companies/{companyId}':
+    '软删除 DRAFT 档案：列表与详情不再可见，关联事实与审计保留；物理删除归 owner/DSR。非 DRAFT 返回 409 COMPANY_NOT_DELETABLE。',
+  'POST /api/v1/companies/{companyId}/website-candidates':
+    '按公司名用自托管 SearXNG 搜索官网候选（两个有界查询），过滤企业信息聚合站/社交/搜索引擎并按标题与公司名的匹配度排序，最多 5 条；只返回 {url,title,score}，不抓页面，需人工确认后通过 PATCH 采用。',
 
   // ── SellerDocuments（模块 02 · Phase 2）──────────────────────────────────────
   'POST /api/v1/companies/{companyId}/seller-documents/presign':

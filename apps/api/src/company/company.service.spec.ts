@@ -40,18 +40,24 @@ const BINDING: ExecutionBudgetBinding = {
   requestSha256: REQUEST_SHA,
 } as ExecutionBudgetBinding;
 
-function fixture(company: Record<string, unknown> | null) {
+function fixture(company: Record<string, unknown> | null, options: { pendingEvent?: unknown } = {}) {
   const outboxCreate = vi.fn(async () => ({ id: 'event-1' }));
+  const outboxFindFirst = vi.fn(async () => options.pendingEvent ?? null);
   const companyCreate = vi.fn(async () => company);
+  const companyUpdate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+    ...(company ?? {}),
+    ...data,
+  }));
   const offeringCreateMany = vi.fn(async () => ({ count: 0 }));
   const tx = {
     companyProfile: {
       findUnique: vi.fn(async () => company),
       create: companyCreate,
+      update: companyUpdate,
     },
     offering: { createMany: offeringCreateMany },
     workspace: { upsert: vi.fn(async () => ({})) },
-    outboxEvent: { create: outboxCreate },
+    outboxEvent: { create: outboxCreate, findFirst: outboxFindFirst },
   };
   const prisma = {
     withWorkspace: vi.fn(async (_ws: string, fn: (t: typeof tx) => unknown) => fn(tx)),
@@ -69,6 +75,8 @@ function fixture(company: Record<string, unknown> | null) {
   return {
     service,
     outboxCreate,
+    outboxFindFirst,
+    companyUpdate,
     consume,
     verify,
     tx,
@@ -206,8 +214,8 @@ describe('CompanyService.retryUnderstanding', () => {
     );
     expect(first.consume).not.toHaveBeenCalled();
 
-    const neverFailed = { ...FAILED_COMPANY, understandingFailedAt: null };
-    const second = fixture(neverFailed);
+    const noWebsite = { ...FAILED_COMPANY, website: null, understandingFailedAt: null };
+    const second = fixture(noWebsite);
     await expect(second.service.retryUnderstanding(CTX, COMPANY_ID, ATTEMPT_ID, 'jws')).rejects.toBeInstanceOf(
       ConflictException,
     );
@@ -234,5 +242,131 @@ describe('CompanyService.retryUnderstanding', () => {
         }),
       }),
     });
+  });
+});
+
+describe('CompanyService.update（公司档案编辑）', () => {
+  const EDITABLE = { ...FAILED_COMPANY, understandingFailedAt: null };
+
+  it('补官网与卖家事实：按字段更新并递增版本', async () => {
+    const { service, companyUpdate } = fixture(EDITABLE);
+    const result = await service.update(CTX, COMPANY_ID, {
+      website: 'https://new-site.example',
+      industry: '电力工程',
+      targetMarkets: ['AE'],
+      businessEmail: 'sales@jiuan.example',
+    });
+    expect(companyUpdate).toHaveBeenCalledWith({
+      where: { id: COMPANY_ID },
+      data: expect.objectContaining({
+        website: 'https://new-site.example',
+        industry: '电力工程',
+        targetMarkets: ['AE'],
+        businessEmail: 'sales@jiuan.example',
+        version: { increment: 1 },
+      }),
+    });
+    expect(result.website).toBe('https://new-site.example');
+  });
+
+  it('website 仍走 SSRF 守卫', async () => {
+    const urlGuard = await import('../adapters/url-guard');
+    const guard = vi.mocked(urlGuard.assertPublicHttpUrl);
+    guard.mockClear();
+    const { service } = fixture(EDITABLE);
+    await service.update(CTX, COMPANY_ID, { website: 'https://93.184.216.34' });
+    expect(guard).toHaveBeenCalledWith('https://93.184.216.34');
+  });
+
+  it('非 DRAFT 档案不可编辑（409 COMPANY_NOT_EDITABLE）', async () => {
+    const { service, companyUpdate } = fixture({ ...FAILED_COMPANY, status: 'REVIEW' });
+    await expect(
+      service.update(CTX, COMPANY_ID, { website: 'https://x.example' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(companyUpdate).not.toHaveBeenCalled();
+  });
+
+  it('不存在或已删除的档案 404', async () => {
+    await expect(fixture(null).service.update(CTX, COMPANY_ID, { name: 'x' })).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    const deleted = { ...EDITABLE, deletedAt: new Date('2026-11-03T00:00:00Z') };
+    await expect(fixture(deleted).service.update(CTX, COMPANY_ID, { name: 'x' })).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+});
+
+describe('CompanyService.remove（软删除）', () => {
+  const DRAFT = { ...FAILED_COMPANY, understandingFailedAt: null };
+
+  it('DRAFT 档案软删除：deletedAt 置位', async () => {
+    const { service, companyUpdate } = fixture(DRAFT);
+    await service.remove(CTX, COMPANY_ID);
+    expect(companyUpdate).toHaveBeenCalledWith({
+      where: { id: COMPANY_ID },
+      data: expect.objectContaining({ deletedAt: expect.any(Date) }),
+    });
+  });
+
+  it('非 DRAFT 档案拒绝删除（409 COMPANY_NOT_DELETABLE）', async () => {
+    const { service, companyUpdate } = fixture({ ...FAILED_COMPANY, status: 'ACTIVE' });
+    await expect(service.remove(CTX, COMPANY_ID)).rejects.toBeInstanceOf(ConflictException);
+    expect(companyUpdate).not.toHaveBeenCalled();
+  });
+
+  it('不存在或已删除的档案 404', async () => {
+    await expect(fixture(null).service.remove(CTX, COMPANY_ID)).rejects.toBeInstanceOf(NotFoundException);
+    const deleted = { ...DRAFT, deletedAt: new Date('2026-11-03T00:00:00Z') };
+    await expect(fixture(deleted).service.remove(CTX, COMPANY_ID)).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+describe('CompanyService.retryUnderstanding（补官网后首次启动）', () => {
+  const NEVER_STARTED = { ...FAILED_COMPANY, understandingFailedAt: null };
+
+  it('DRAFT + 有官网 + 从未失败且无排队事件：允许启动理解并消费 Grant', async () => {
+    const { service, consume, outboxCreate } = fixture(NEVER_STARTED);
+    const result = await service.retryUnderstanding(CTX, COMPANY_ID, ATTEMPT_ID, 'jws');
+    expect(result.company).toBe(NEVER_STARTED);
+    expect(consume).toHaveBeenCalledTimes(1);
+    expect(outboxCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('DRAFT + 无官网：409 UNDERSTANDING_WEBSITE_REQUIRED 且不消费 Grant', async () => {
+    const noWebsite = { ...NEVER_STARTED, website: null };
+    const { service, consume } = fixture(noWebsite);
+    try {
+      await service.retryUnderstanding(CTX, COMPANY_ID, ATTEMPT_ID, 'jws');
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as ConflictException).getResponse()).toMatchObject({
+        error: { code: 'UNDERSTANDING_WEBSITE_REQUIRED' },
+      });
+    }
+    expect(consume).not.toHaveBeenCalled();
+  });
+
+  it('10 分钟内已有排队事件：409 UNDERSTANDING_ALREADY_PENDING，防重复理解', async () => {
+    const { service, consume } = fixture(NEVER_STARTED, {
+      pendingEvent: { id: 'evt-9', occurredAt: new Date() },
+    });
+    try {
+      await service.retryUnderstanding(CTX, COMPANY_ID, ATTEMPT_ID, 'jws');
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as ConflictException).getResponse()).toMatchObject({
+        error: { code: 'UNDERSTANDING_ALREADY_PENDING' },
+      });
+    }
+    expect(consume).not.toHaveBeenCalled();
+  });
+
+  it('失败过的档案不受排队检查影响（旧行为保留）', async () => {
+    const { service, consume } = fixture(FAILED_COMPANY, { pendingEvent: { id: 'evt-9' } });
+    await service.retryUnderstanding(CTX, COMPANY_ID, ATTEMPT_ID, 'jws');
+    expect(consume).toHaveBeenCalledTimes(1);
   });
 });

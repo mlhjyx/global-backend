@@ -835,6 +835,8 @@ model CompanyProfile {
   /// 状态回到 DRAFT；新一轮 ENRICHING 清空。两列同空同非空，迁移里的 CHECK 只收这个形状。
   understandingFailedAt  DateTime? @map("understanding_failed_at") @db.Timestamptz(3)
   understandingLastError String?   @map("understanding_last_error") @db.VarChar(120)
+  /// 软删除（2026-11-03）：卖家删除 DRAFT 档案后从列表/详情消失；关联事实与审计保留。
+  deletedAt              DateTime? @map("deleted_at") @db.Timestamptz(3)
 
   workspace                 Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   offerings                 Offering[]
