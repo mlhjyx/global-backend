@@ -192,19 +192,21 @@ export class SellerDocumentsService {
         error: { code: 'SELLER_DOCUMENT_TYPE_MISMATCH', message: '上传内容类型与申报不一致' },
       });
     }
-    if (body.length === 0 || BigInt(body.length) !== row.sizeBytes) {
+    // 显式运行时护栏：请求体只能按二进制字节处理（CodeQL 类型混淆门也依赖这一层）。
+    const bytes = body instanceof Uint8Array ? body : null;
+    if (!bytes || bytes.byteLength === 0 || BigInt(bytes.byteLength) !== row.sizeBytes) {
       throw new BadRequestException({
         error: { code: 'SELLER_DOCUMENT_SIZE_MISMATCH', message: '上传字节数与申报大小不一致' },
       });
     }
     const spec = MIME_KIND[row.mime];
-    if (!spec || body.length > spec.maxBytes) {
+    if (!spec || bytes.byteLength > spec.maxBytes) {
       throw new BadRequestException({
         error: { code: 'DOCUMENT_TOO_LARGE', message: '文件超过该类型上限' },
       });
     }
     try {
-      await this.storage.putObject(row.objectKey, body, row.mime);
+      await this.storage.putObject(row.objectKey, Buffer.from(bytes), row.mime);
     } catch {
       throw storageUnavailable();
     }
