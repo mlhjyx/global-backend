@@ -65,3 +65,24 @@
 - 3 家 GT 不可得、1 家找不到 Impressum；1 家被授权复用挡下未评估。
 - 样本为单一 workspace 的德奥泵业公司（单 ICP 行业），外推到其他行业需另行采样。
 - 本轮花费与统计来自 E2E 工作区账本；人名数据仅存于本机临时目录，报告不含任何个人姓名。
+
+## 7. 第二轮：邮箱维度（2026-11-03 晚，`email_guess` 已开）
+
+- **方法**：对同一 Golden Set 中已有联系人的 12 家公司 / 37 人，经管理端
+  `POST /canonical-companies/:id/guess-emails`（每公司一次性授权，`lawfulBasis=legitimate_interest`）补全邮箱。
+- **结果**：
+  | 指标 | 补全前 | 补全后 |
+  | --- | --- | --- |
+  | 有邮箱候选的人 | 4 / 37（3 UNVERIFIED 直抽 + 1 RISKY） | **37 / 37** |
+  | 状态分布 | — | RISKY 34、UNVERIFIED 3（直抽）、**VALID 0** |
+- **VALID 为 0 的原因（已实测，非逻辑缺陷）**：本机到外部 MX 的 **25 端口不可出网**
+  （实测 `gmail-smtp-in.l.google.com:25` 连接 12 秒无 banner 超时；宿主走 Clash TUN，通常不转发 25）。
+  SMTP RCPT 握手无法进行，所有猜测邮箱停留在 RISKY（姓名+域名的强模式，但未经可达性确认）。
+- **意义**：`email_guess` 把「有邮箱候选」从 11% 提到 100%，德国 SME 的
+  `vorname.nachname@domain` 模式命中率高；但外发前仍需人工确认或打通验证通道。
+- **建议**：
+  1. 检查出口能否放行 25 端口（需用户在 Clash/ISP 侧操作；本机不擅动代理）；
+  2. 若长期不可放行，评估免费可用的替代验证通道（MX/SMTP 以外），或接受
+     「RISKY → 人工确认」工作流并在 UI 上标注；
+  3. 真实客户外发保持现行质量门：RISKY 不自动进入 VALID、外发前人工确认。
+
