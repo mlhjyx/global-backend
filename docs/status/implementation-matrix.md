@@ -8,9 +8,9 @@
 | 模块 | 能力 | 设计 | 实现 | 测试 | 运行 | 缺口/下一步 |
 | --- | --- | --- | --- | --- | --- | --- |
 | 01 账户与工作空间 | 注册/登录/会话 | APPROVED | gain-saas as-built | 部分 | 运行 | 限流落库、CSRF、cookie Secure |
-| 01 | 工作空间/成员/切换 | APPROVED | as-built | 少 | 运行 | Workspace/Role/Entitlement 合同（Phase 1） |
-| 01 | 注册引导 | APPROVED | 缺 | 无 | — | 向导+OnboardingGuard（Phase 1） |
-| 02 卖家知识中心 | 公司档案/Offering/Claim | APPROVED | 引擎 as-built | 中 | 运行 | 产品/目标市场结构化（Phase 1） |
+| 01 | 工作空间/成员/切换 | APPROVED | as-built | 少 | 运行 | `/api/workspace/context`（角色/允许动作/引导态）已上线（2026-11-03）；Entitlement 预算与计费仍待 Phase 1b/二期 |
+| 01 | 注册引导 | APPROVED | gain-saas as-built（2026-11-03 上线） | 有（onboarding 控制器 8 例 + BFF 门禁） | 运行 | 注册页「创建账号」口径与邀请码显隐已整改；公司名去留等字段细则留 Phase 5 |
+| 02 卖家知识中心 | 公司档案/Offering/Claim | APPROVED | 引擎 as-built | 中 | 运行 | `targetMarkets`/`businessEmail`/`Offering.source` 已落（#743，2026-11-02 迁移）；资料库仍缺 |
 | 02 | 资料库（上传/解析/检索） | APPROVED | 缺（site-builder KB 可复用） | — | — | seller_document + ingest（Phase 2） |
 | 02 | 文档事实抽取/审批 | APPROVED | 缺 | — | — | extract_facts + 证据门（Phase 3） |
 | 02 | 理解双源/ICP 消费 | APPROVED | 官网-only | 中 | 运行 | 双源 + ICP 上下文（Phase 3） |
