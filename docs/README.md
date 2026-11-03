@@ -54,6 +54,10 @@
 | 运行和维护开发环境 | [后端运行文档](backend/compose-project-migration.md) | Compose 迁移、Worktree、CI 及现役后端专题 |
 | 用自然语言需求与 Codex 协作开发 | [AI 辅助开发协作入口](ai-development/README.md) | 运行模式、需求验收、升级规则与记忆/检索边界 |
 | 核验文档一致性 | [文档自动校验](governance/docs-verification.md) | 运行 `pnpm docs:verify` |
+| 改获客主链（发现 / 评分 / 联系人） | [AGENTS.md](../AGENTS.md) → [当前状态](status/current.md) → [模块技术方案](modules/discovery-qualification/technical.md) | 先读 no-go 与不变量；代码地图随治理计划补齐 |
+| 做验收、交付或回填 | [当前状态](status/current.md) → [证据索引](evidence/README.md) | 四态与 RuntimeEvidence 口径，不把「跑通」当「验收」 |
+| 查「为什么这样决定」 | [ADR registry](adr/registry.md) → [冲突与开放决策登记](governance/conflict-register.md) | 决策与冲突分开，不按更新时间判断 |
+| 日常运维与排障 | 工作区 `local-config/RUNBOOK.md` → [后端专题](backend/) | 按 RUNBOOK 顺序，不裸跑 `docker compose` |
 
 ### 产品、设计与前端交接
 
@@ -89,7 +93,7 @@
 - [状态、错误、降级与恢复](frontend/07-state-error-degradation-and-recovery.md)
 - [独立站管理运营与验收](frontend/modules/independent-site-management/operations-and-acceptance.md)
 
-## 3. 当前产品深度
+## 4. 当前产品深度
 
 | 区域 | 当前深度 | 不应误读为 |
 |---|---|---|
@@ -102,7 +106,7 @@
 
 多轴状态只在 [能力登记](governance/capability-register.md)维护。
 
-## 4. 文档分层与生命周期
+## 5. 文档分层与生命周期
 
 | 层级 | 用途 | 主要位置 |
 |---|---|---|
@@ -114,7 +118,9 @@
 
 历史输入只能被当前文档引用，不能反向覆盖当前真值。Phase 1–8 工作包已在 2026-07-23 授权的文档瘦身中退出工作树；它们的审计 provenance 仍可由 Git 历史与已关闭的 PR #158 恢复，不再占用日常阅读面。
 
-## 5. 当前承诺与阻塞
+角色→路径→Owner→机器校验的完整对照见 [文档目录与维护规则](documentation-rules.md) 第 8 节。
+
+## 6. 当前承诺与阻塞
 
 独立站管理当前优先纵切为：
 
@@ -126,7 +132,7 @@
 
 当前不承诺公网发布、域名/SSL、用户可操作回滚、询盘、站点分析、诊断、任意语言、任意风格或生产就绪。`BLK-FE-001..007`、`GAP-FE-P6-001..012`、OSS 准入门、独立人工验收和首个真实 Release 前置门继续有效，统一在[冲突登记](governance/conflict-register.md)、[能力登记](governance/capability-register.md)和[发布证据规范](frontend/12-analytics-testing-and-release-evidence.md)中维护。
 
-## 6. 维护规则
+## 7. 维护规则
 
 1. 先修改主题事实源，再更新 Registry、读者视图和证据；不得在多个文档复制同一真值。
 2. 一个新文件必须有明确读者、任务、Owner、状态和不可替代性；阶段过程默认留在 PR，不再生成常驻工作包。

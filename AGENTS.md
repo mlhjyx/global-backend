@@ -2,6 +2,9 @@
 
 本文件只保留跨会话、低漂移的执行规则。当前提交、在途工作、阻塞和下一决策见 [`docs/status/current.md`](docs/status/current.md)；历史事实见 [`docs/roadmap/changelog.md`](docs/roadmap/changelog.md) 与 [`docs/evidence/README.md`](docs/evidence/README.md)。不要把本文件扩写成日期化实施日志。
 
+## 0. 最小工作循环
+开工读 §1 与 [`docs/status/current.md`](docs/status/current.md)、按任务查 [`docs/README.md`](docs/README.md) 第 3 节、跑 `gctl doctor`；一个任务一个 worktree、先写 RED、不越 §2 no-go；收尾跑 `pnpm docs:verify`、写 changelog 片段、如实披露未验证项。全文见 [`docs/shared/development-process.md`](docs/shared/development-process.md)。
+
 ## 1. 权威顺序
 
 发生冲突时按以下顺序取真：
@@ -66,7 +69,6 @@ pnpm --filter @global/db exec prisma migrate deploy # 读 packages/db/.env
 - 技术完成、机器检查、独立 review、PR 里给产品负责人的说明、用户合并/发布授权是分离的门。任何一门都不能推导另一门；Codex 不自行推断合并授权。产品负责人的常设合并授权（开发代理独立审查通过、必需检查全绿后可 squash 合并）见 `DEC-AIDEV-004`，不含 ruleset/仓库设置/权限变更、部署发布与付费调用。
 
 ## 6. 实现与安全门
-
 - 复杂改动先计划；新功能和 bugfix 必须按 RED → GREEN → refactor 做 TDD，并维持相关范围 80%+ 覆盖。
 - 在系统边界做 schema 校验；外部数据、URL、身份、权限、费用和 provider 响应全部不可信，必须 fail closed。
 - 业务逻辑优先不可变数据与新对象；不得静默吞错。用户面返回稳定错误，服务端记录有界诊断且不泄露秘密或个人数据。
@@ -76,7 +78,6 @@ pnpm --filter @global/db exec prisma migrate deploy # 读 packages/db/.env
 - 所有 GitHub Actions 外部 `uses:` 必须锁定已从官方 tag 只读解析的 40 位 commit SHA，并保留人类可读的版本注释。`pnpm governance:verify` 扫描全部 workflow；新增未登记或 moving-tag action 必须失败。治理脚本、机器政策、schema、runtime evidence 与 release 目录必须保持在 CODEOWNERS 最终规则块内。
 
 ## 7. Provider、追踪、证据与发布
-
 - Provider 当前机器真值为 [`docs/governance/provider-registry.json`](docs/governance/provider-registry.json)，人类页由 `pnpm governance:providers` 生成；seed key、SourceClass 与默认 enablement 漂移必须使 CI 失败。
 - Capability → Core Object → operationId → code → test → Scenario 的机器链位于 [`docs/governance/delivery-traceability.json`](docs/governance/delivery-traceability.json)。路径存在只证明 anchor 存在，不证明运行通过。
 - RuntimeEvidence 必须满足 [`runtime-evidence.schema.json`](docs/governance/runtime-evidence.schema.json)，包含 commit、environment、verified_at、valid_until、evidence_kind、result 与 artifact_digest。到期证据自动降为 `HISTORICAL`，不能用于晋级。
@@ -84,7 +85,6 @@ pnpm --filter @global/db exec prisma migrate deploy # 读 packages/db/.env
 - 运行 `pnpm governance:verify` 与 `pnpm docs:verify`。不得为过 CI 删除历史、改写 evidence 或把文件移出受控范围。
 
 ## 8. 模型、评测与费用
-
 - 当前非运行时候选合同只认 `site-builder-model-candidate-baseline/2026-08-07-v3` 及其[生成页](docs/site-builder/model-candidate-baseline.md)；这个 ID 不是 active route、质量 evidence 或 dispatch 授权。
 - 生产路由、评测基础设施、评测 evidence、promotion 和 runtime adoption 必须分开变更。
 - 正常产品 BuildRun 的费用权威来自 SaaS Control Plane 签发的一次性、短期、请求绑定 Budget Grant；本仓只验签、原子消费、reserve/settle/reconcile 并回报，不另设隐藏的产品总金额门。缺失、非法、过期、跨 workspace/operation/request（已有 Site 时还必须绑定 site）或重复挪用的 Grant 必须在创建 Run、启动 Workflow 和调用模型前拒绝。
