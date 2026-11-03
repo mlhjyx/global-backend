@@ -4,16 +4,16 @@
 > 生命周期：`CURRENT`
 > 状态：`CURRENT`
 > 当前事实来源：[产品范围](../product-scope.md)、[当前架构](../architecture/current.md)、[ADR registry](../adr/registry.md)、[发布路线](../status/release-plan.md)、[冲突与开放决策登记](../governance/conflict-register.md)，以及本页逐项注明的 Git/GitHub 回读与 xin `global_dev` 只读查询
-> 最后核验：2026-11-03T03:35Z（`origin/main@2a5efa33`、xin 运行镜像 `sha256:36412147…`（build `5a526747`）、`global_dev` 与 gain-saas 库只读计数；本页是人工核验的读数，不是 RuntimeEvidence）
+> 最后核验：2026-11-04T01:40Z（`origin/main@8b142f53`、运行镜像以 `local-config/global/runtime.compose.env` 的 `GLOBAL_BACKEND_IMAGE` 为准（核验时 `sha256:e2cfa8cc…`）、`global_dev` 只读计数；本页是人工核验的读数，不是 RuntimeEvidence；计数快照会漂移，引用前先重跑只读查询）
 > 写法：按 PRD 4.0 L2 §5 的四问填写——做了什么（四态：未做 / 可运行 / 已验证 / 已验收）、证据、谁验收、怎么回退。四态口径（PRD 4.0 L0 §9.3「4.0 新锁定」的 `D-029`，与待拍板项 `PRD4-D<n>` 不是同一编号序列）尚未逐条拍板，本页先按它组织。2026-09-20 核验的旧版正文见文末[历史](#历史2026-09-20-核验)。
 
 ## 一页结论
 
 当前 Release 是 **RL1 线索试点**：一个 ICP（德国 / DACH 工业泵进口商与分销商）、一个国家、一个品类，Managed 周报交付，目标是拿到第一个人工 QGO 判断并记下每条线索的成本。产品负责人 2026-10-10 批准按 PRD 4.0 开发（「同意，继续，需要闭环，按照 prd 中的需求进行开发实施」）。
 
-**2026-11-03 复核：主链路首次跑出 `DONE` 终态 run，Phase 1 已上线。** xin 上 `discovery_run` 36 行：`PARTIAL` 13、`FAILED` 22、`DONE` 1（首次非失败终态，2026-11-03 02:07 `5e7401f6`；此前最近一次常规 run `3ad22469`（11-02）为 PARTIAL：21/21 条查询、29 条原始记录 → 28 家公司、fit 4 match / 4 weak / 20 mismatch / 1 unjudged、**零拒答**，判定路由 `gemini-3.8-flash`）。`lead` 5 689 行：recommended 52、needs_review 3 168、rejected 2 397、sanctions_hold 72；21 条已被客户接受（QUALIFIED）。具名个人数据：`canonical_contact` 80、`contact_point` 61、`company_contact_point` 268（联系人线 M1–M4 落地）。`outbox_delivery` 468 行 **全部 ACKED**（sink=saas）。`company_profile` 6 ACTIVE / 13 REVIEW / 28 ENRICHING / 30 DRAFT；`icp_definition` 46（ACTIVE 45、HYPOTHESIS 1）；gain-saas 侧 7 users / 10 workspace / 5 membership（含 2 个注册引导验收账号）。
+**2026-11-04 复核：主链路已跑出首个 `DONE` 终态 run，Phase 1 已上线。本段是唯一计数快照（2026-11-04T01:40Z），之后引用请重跑只读查询，不在其他章节复制计数。** xin 上 `discovery_run` 39 行：`DONE` 1（首次非失败终态，2026-11-03 02:07 `5e7401f6`）、`PARTIAL` 13、`FAILED` 25；11-03 之后新增的 3 条 run 均以 FAILED 收尾。`lead` 6 212 行：recommended 63、needs_review 3 345、rejected 2 717、sanctions_hold 87；其中 21 条已被客户接受（QUALIFIED），DISCOVERED（未评分）138。具名个人数据：`canonical_contact` 129、`contact_point` 134、`company_contact_point` 280（联系人线 M1–M4 落地）。`outbox_delivery` 475 行 ACKED、49 行 PENDING（11-04 读数；消费者按 2 分钟一轮消费，PENDING 属在途，不构成交付结论）。`company_profile` 8 ACTIVE / 17 REVIEW / 28 ENRICHING / 35 DRAFT；`icp_definition` 50（ACTIVE 49、HYPOTHESIS 1）；gain-saas 侧 7 users / 10 workspace / 5 membership（2026-11-03 读数，未复验）。
 
-**2026-11-02 Phase 1a 安全热修已上线**（运行镜像 `a428afab`→夜间 `a12503e6`→现 `36412147`）：#737 intake 同事务消费执行授权并写 `CompanyProfileCreated` v2（缺授权显式 `understanding: not_started`）、JWKS 拉取有界（2s/64KiB）、`POST /site-builder/intake` 纳入技术报价；#736 拒答不再进入 rejected 队列（weak/unjudged，含事故原文单测）；#739 trade_fair 按展会注册表裁剪；#740 model 侧投影拒绝与联系人回执混合态修复；gain-saas #30 关闭 settlement-readback 开放代理、登录/注册限流落库；Postgres `pg_hba` 移除 127.0.0.1 trust 改 scram。**R4 平台权威已在 gain-saas**（2026-10-31 迁移完成、GrowthOS 当日退役），撤销投递链 2026-11-01 用真实 Grant 实测打通（含自动触发与受审计重开，见证据页）；4 个平台 schedule 仍全部 paused，unpause 是产品负责人的单独决定。
+**2026-11-02 Phase 1a 安全热修已上线**（运行镜像 `a428afab`→`a12503e6`→`36412147`，均为历史批次；当前以 `runtime.compose.env` 为准）：#737 intake 同事务消费执行授权并写 `CompanyProfileCreated` v2（缺授权显式 `understanding: not_started`）、JWKS 拉取有界（2s/64KiB）、`POST /site-builder/intake` 纳入技术报价；#736 拒答不再进入 rejected 队列（weak/unjudged，含事故原文单测）；#739 trade_fair 按展会注册表裁剪；#740 model 侧投影拒绝与联系人回执混合态修复；gain-saas #30 关闭 settlement-readback 开放代理、登录/注册限流落库；Postgres `pg_hba` 移除 127.0.0.1 trust 改 scram。**R4 平台权威已在 gain-saas**（2026-10-31 迁移完成、GrowthOS 当日退役），撤销投递链 2026-11-01 用真实 Grant 实测打通（含自动触发与受审计重开，见证据页）；4 个平台 schedule 仍全部 paused，unpause 是产品负责人的单独决定。
 
 **2026-11-03 Phase 1 已上线并验收**（运行镜像 `36412147`，build `5a526747`，带迁移 `20261102170000_phase1_seller_sourcing_fields`；gain-saas #32/#33/#34 同批部署）：`POST /companies` 支持无官网建档与 `industry/targetMarkets/products/businessEmail`（products 落 `Offering(source=onboarding)`），无官网不发理解事件、不消费 Grant；gain-saas 注册后强制三步引导向导（中英双语）、`GET /api/workspace/context`、BFF `ONBOARDING_INCOMPLETE` 门禁、注册页「创建账号」口径与邀请码按配置显隐、头部工作空间切换器。端到端验收（有官网/无官网/门禁/重复提交）通过，记录在 `_archive/backend-runtime-switch-5a526747-xin-20261102/README.md`。
 
@@ -23,20 +23,20 @@
 
 | 项 | 做了什么（四态） | 证据 | 谁验收 | 怎么回退 |
 | --- | --- | --- | --- | --- |
-| 发现 run（ICP → 查询计划 → run） | **可运行，部分验证**：36 次 run，`PARTIAL` 13、`FAILED` 22、`DONE` 1（首次非失败终态，2026-11-03 02:07 `5e7401f6`）；此前最近一次常规 run 2026-11-02（`3ad22469`）21/21 条查询、28 家公司、fit 4/4/20/1、零拒答。历史失败逐项见 §2 | `discovery_run` 只读查询（status、`stats`）；[联系人线设计稿 §十一](../superpowers/plans/2026-10-31-contact-discovery.md) | 产品负责人（RL1 内部验收） | 运行镜像按 digest 钉在 `local-config/global/runtime.compose.env`，每次换镜像的前后 digest 与验收记录在 `/global/_archive/backend-runtime-switch-*`；带迁移的窗口先 `pg_dump`，另有每日 `db-backup` |
-| 评分与制裁第五门 | **已验证（有真实数据）**：`lead` 5 689 行；队列 recommended 52 / needs_review 3 168 / rejected 2 397 / sanctions_hold 72，其中 21 条已被客户接受（QUALIFIED）；`sanctions_screening_result` 22 行、三个制裁源 ENABLED | `lead`（status、queue、total_score）、`sanctions_screening_result`、`sanctions_source` 只读计数 | 产品负责人 | 评分是确定性重算、可重跑，不改源数据，规则版本写进快照 |
+| 发现 run（ICP → 查询计划 → run） | **可运行，部分验证**：当前计数见「一页结论」的 2026-11-04 快照（单一来源）；首个非失败终态 run 为 2026-11-03 02:07 `5e7401f6`；此前最近一次常规 run 2026-11-02（`3ad22469`）21/21 条查询、28 家公司、fit 4/4/20/1、零拒答。历史失败逐项见 §2 | `discovery_run` 只读查询（status、`stats`）；[联系人线设计稿 §十一](../superpowers/plans/2026-10-31-contact-discovery.md) | 产品负责人（RL1 内部验收） | 运行镜像按 digest 钉在 `local-config/global/runtime.compose.env`，每次换镜像的前后 digest 与验收记录在 `/global/_archive/backend-runtime-switch-*`；带迁移的窗口先 `pg_dump`，另有每日 `db-backup` |
+| 评分与制裁第五门 | **已验证（有真实数据）**：`lead` 与队列计数见「一页结论」的 2026-11-04 快照（单一来源），其中 21 条已被客户接受（QUALIFIED）；`sanctions_screening_result` 28 行、三个制裁源 ENABLED | `lead`（status、queue、total_score）、`sanctions_screening_result`、`sanctions_source` 只读计数 | 产品负责人 | 评分是确定性重算、可重跑，不改源数据，规则版本写进快照 |
 | 可达性与联系人（BI-14 / 联系人线 M1–M4） | **已验证（链路）；质量待验证**：`company_contact` ENABLED，`company_contact_point` 268 行公司级路径；联系人线 M1–M4 已上线（#703/#707/#709/#717/#728/#733/#734 + gain-saas #26/#27/#28），run 内联系人阶段覆盖全部 match 公司、$2 子预算封顶；当前 4 家 match 产出 38 个决策人、0 邮箱/0 电话（社交源 blocked 3 / circuit open 9）。`canonical_contact` 80、`contact_point` 61；`email_guess` 2026-11-02 按 D3 重开（双闸：lawfulBasis interim LIA + smtp_self），待验证 | `data_provider`、`canonical_contact`、`contact_point`、`company_contact_point` 只读查询；run `3ad22469` stats | 产品负责人 | `company_contact` / `email_guess` 置回 DISABLED |
 | 交付最后一跳（`LeadQualified` → 事件 ACK） | **已验证**：`outbox_delivery` 468 行 `ACKED`（sink=saas），无 PENDING；事件由 gain-saas 消费者按 2 分钟一轮消费；GrowthOS 不再是消费方 | `outbox_delivery` 按 sink/status 计数 | 产品负责人 | 不涉及数据回退（事件只读交付） |
 | 卖方自助入驻（understanding + 注册引导） | **可运行，部分验证**：`company_profile` 6 ACTIVE、13 REVIEW、28 ENRICHING、30 DRAFT；#722/#730 之后失败可见、可按 attempt 换新 Grant 重试，live 实测闭环（[证据](../evidence/README.md)）；#737 修复 intake 创建档案后不发 `CompanyProfileCreated` 的断链；**Phase 1（#743 + gain-saas #32）**：`POST /companies` 支持无官网建档与六项引导事实（`targetMarkets`/`businessEmail` 落库、products→`Offering(source=onboarding)`），gain-saas 注册后强制三步向导、BFF 门禁 409 `ONBOARDING_INCOMPLETE`，端到端验收通过 | `company_profile`/`offering` 只读查询；`_archive/backend-runtime-switch-5a526747-xin-20261102/README.md` | 产品负责人 | 修复随镜像回退（列保留无害） |
 | 交付包 v1.1、周报 CSV、反馈端点、Golden Set（BI-19–BI-24） | **部分完成**：周报 CSV（#650，BI-22；#729 增加决策人列）与反馈端点（BI-23）已上线并在真实数据上导出；LeadPackage v1.1（#681）已上线；Golden Set 仍未做 | 仓内 `/reports/weekly` 与 `/reports/weekly/feedback` 已注册；Golden Set 不在仓内 | 产品负责人；design partner（商机，PRD4-D8 未定人选） | — |
 
-运行时：xin 的 API / Worker / platform Worker 运行 **`2fa46564`**（#737，镜像 `sha256:a428afab…`，2026-11-02 切换，无迁移；归档 `_archive/backend-runtime-switch-2fa46564-xin-20261102/`）。`origin/main` 已到 `0f075ae2`（#738，纯文档）。获客模型：抽取档 `gemini-3.8-flash`、推理档 `gpt-5.6-sol`，任务级覆盖 `taxonomy.normalize→deepseek-flash`、`discovery.qualify_fit→gemini-3.8-flash`（2026-11-02 因 `gpt-5.6-sol` 内容拒答切换，护栏 #736 已同版上线）。
+运行时：xin 的 API / Worker / platform Worker 的运行镜像以 `local-config/global/runtime.compose.env` 的 `GLOBAL_BACKEND_IMAGE` 为准（2026-11-04 核验：`sha256:e2cfa8cc…`），本页不复写 digest；历史切换归档见 `_archive/backend-runtime-switch-*`。`origin/main` 已到 `8b142f53`（#762，seller-documents 上传中继）。获客模型：抽取档 `gemini-3.8-flash`、推理档 `gpt-5.6-sol`，任务级覆盖 `taxonomy.normalize→deepseek-flash`、`discovery.qualify_fit→gemini-3.8-flash`（2026-11-02 因 `gpt-5.6-sol` 内容拒答切换，护栏 #736 已同版上线）。
 
 身份分工（2026-11-02 核实）：产品登录/身份与 **R4 平台权威**都在 **gain-saas**——`AUTH_ISSUER`/`AUTH_JWKS_URI` = `https://127.0.0.1:18446`；机器 token / capability / Temporal 运行时 JWKS 指向 gain-saas mTLS 端点 `https://172.20.0.1:18447/…`；GrowthOS 九容器已于 2026-10-31 退役（卷保留作回退）。`CAPABILITY_MACHINE_ISSUER`/`TEMPORAL_MACHINE_ISSUER`/`PLATFORM_TECHNICAL_QUOTE_AUTH_ISSUER` 的字符串仍写作 `…:18444/…` 是**故意**的：引擎逐字节比对 `iss`，gain-saas 按同一字符串签发。
 
 ## 2. 历史验收 run 记录（2026-10-08 → 10-13，11 次全部 FAILED）
 
-> 下表是当时的失败归因，保留作证据；**当前计数以 §1 为准**（35 次：13 PARTIAL / 22 FAILED / 0 COMPLETED）。
+> 下表是当时的失败归因，保留作证据；**当前计数以「一页结论」的 2026-11-04 快照为准**，本表不复写计数。
 
 | 卖方 | run | 启动（UTC） | 倒在 | 直接原因 | 修复 |
 | --- | --- | --- | --- | --- | --- |
@@ -102,11 +102,11 @@ PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](..
 | G0 — Truth & Ownership | PARTIAL | 权威文档已回写到 2026-11 决定；PRD 4.0 仍只在私有目录（PRD4-D10 未拍板），不是仓内权威 |
 | G1 — Product/UX/Contract | PARTIAL | 周报 CSV 与反馈端点已有机器合同（#650/#729）；交付包 v1.1 合同、可达性口径写入产品范围仍待补 |
 | G2 — Source/TDD/Security | PARTIAL / MERGED_FIXES_VERIFIED | 每个修复 PR 自带 TDD 与必需检查；不推广到未改动的模块 |
-| G3 — Integration/Data | PARTIAL / PRODUCT_E2E_PARTIAL | 13 次 PARTIAL + 首次 `DONE` run（11-03）、5 689 条真实评分、468 条 ACK；`DONE` 之外的 run 仍以 PARTIAL/FAILED 收尾 |
+| G3 — Integration/Data | PARTIAL / PRODUCT_E2E_PARTIAL | 13 次 PARTIAL + 首次 `DONE` run（11-03）；真实评分与 ACK 计数见「一页结论」；`DONE` 之外的 run 仍以 PARTIAL/FAILED 收尾 |
 | G4 — Release Candidate | DEVELOPMENT_CANDIDATE_ONLY | xin 运行的是按 digest 钉住、带构建证明的开发镜像；没有可信外部 provenance readback |
 | G5-Site — Runtime Observed | HISTORICAL_ONLY | Site 线未推进（PRD4-D1 未拍板）；历史观察不可晋级 |
 | G5-Acquisition — Runtime Observed | NOT_VERIFIED | 有首次 `DONE` run，但没有当前 RuntimeEvidence（普通 run 观察不构成 RuntimeEvidence PASS） |
-| G6 — UAT Accepted | NOT_RUN | RL1 退出指标：recommended 52 / 目标 ≥15 已达，`DONE` run 与 design partner 回填仍未达成 |
+| G6 — UAT Accepted | NOT_RUN | RL1 退出指标：推荐队列计数见「一页结论」（目标 ≥15 已达），`DONE` run 与 design partner 回填仍未达成 |
 | G7 — Pilot/GA Authorized | NOT_AUTHORIZED | 晋级门当前不可达（见上一条死锁）；也没有产品授权 |
 
 相同动作、目标和范围的有效授权继续沿用。源码 / PR 合入不自动授权生产部署、保留数据库迁移、凭据与端口修改、付费调用或 Pilot/GA。

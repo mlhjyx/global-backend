@@ -114,3 +114,23 @@ docs/
 4. 负责人明确，受影响的文档与治理检查通过。
 
 本规则本身不授权批量迁移、删除历史材料、变更机器合同或调整产品范围。具体迁移仍按各自任务范围与仓库既有执行规则推进。
+
+## 8. 文档角色表
+
+每类文档只承担一个角色，一类事实只有一个家；其他文档只引用、不复制。
+
+| 角色 | 规范位置 | Owner | 机器校验 |
+| --- | --- | --- | --- |
+| 执行入口 | `AGENTS.md`、`CLAUDE.md` | 文档治理 Owner | 人审 |
+| 门户与导航 | `docs/README.md` | 文档治理 Owner | 结构、链接、生命周期 |
+| 放置规则 | `docs/documentation-rules.md`（本文件） | 文档治理 Owner | 人审 |
+| 术语与事实状态 | `docs/governance/terminology-and-status.md` | 文档治理 Owner | 链接、Registry 引用 |
+| 当前状态 | `docs/status/current.md` | 产品负责人 | 权威页元数据 |
+| 待验证台账 | `docs/status/pending-verification.md` | 产品负责人 | 生命周期、链接 |
+| 决策 | `docs/adr/registry.md` | 架构 Owner | 权威页元数据 |
+| 证据 | `docs/evidence/` | 对应证据 Owner | RuntimeEvidence schema |
+| 运维专题 | `docs/backend/*.md` | 各专题 Owner | 生命周期、链接 |
+| 模块设计 | `docs/modules/<模块>/product.md`、`technical.md` | 模块 Owner | 生命周期 |
+| 历史 | `docs/archive/` | 文档治理 Owner | 历史 banner |
+
+新增角色、改变归属或改变存储位置必须先改本表并走 PR；不得在正文中自行建立平行清单。

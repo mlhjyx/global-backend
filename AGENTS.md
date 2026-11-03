@@ -2,6 +2,13 @@
 
 本文件只保留跨会话、低漂移的执行规则。当前提交、在途工作、阻塞和下一决策见 [`docs/status/current.md`](docs/status/current.md)；历史事实见 [`docs/roadmap/changelog.md`](docs/roadmap/changelog.md) 与 [`docs/evidence/README.md`](docs/evidence/README.md)。不要把本文件扩写成日期化实施日志。
 
+## 0. 最小工作循环
+
+- **开工**：按 §1 权威顺序先读 [`docs/status/current.md`](docs/status/current.md)；按任务查 [`docs/README.md`](docs/README.md) 第 3 节「按任务下钻」；跑 `gctl doctor` 与 `pnpm worktree:inventory`，确认无漂移、无 file owner 冲突。
+- **动手**：一个任务一个 writer 一个 worktree；先写 RED 测试；不越过 §2 no-go；改 schema / API / provider 时同步机器合同与文档。
+- **收尾**：跑相关测试与 `pnpm docs:verify`；按 §9 写 changelog 片段；PR 正文如实列「已验证 / 未验证」；未获验收的增量登记到 `docs/status/pending-verification.md`。
+- 流程全文（适用判断、Definition of Ready、提案生命周期、自审清单、Definition of Done）见 [`docs/shared/development-process.md`](docs/shared/development-process.md)。
+
 ## 1. 权威顺序
 
 发生冲突时按以下顺序取真：
