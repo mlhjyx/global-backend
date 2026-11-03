@@ -10,6 +10,7 @@ import {
   verifyFragmentPolicy,
 } from "./governance-changelog-fragments.mjs";
 import { verifyModelCandidateBaseline } from "./model-candidate-baseline.mjs";
+import { freshnessVerdict } from "./docs-freshness.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const policyPath = join(root, "docs/governance/docs-verification-policy.json");
@@ -466,6 +467,28 @@ for (const [path, content] of markdownByPath) {
       path,
       "possible credential or private key in documentation",
     );
+  }
+}
+
+const freshnessPolicy = policy.freshness;
+if (freshnessPolicy && Array.isArray(policy.authoritativeCurrent?.exact)) {
+  const severity = freshnessPolicy.mode === "error" ? "error" : "warning";
+  const maxAgeDays = freshnessPolicy.authoritativeMaxAgeDays ?? 90;
+  for (const pathFromRoot of policy.authoritativeCurrent.exact) {
+    const path = join(root, pathFromRoot);
+    if (!existsSync(path)) continue;
+    const content = markdownByPath.get(path) ?? readFileSync(path, "utf8");
+    const verdict = freshnessVerdict({ text: content, maxAgeDays });
+    if (verdict.status === "stale") {
+      report(
+        severity,
+        verdict.code,
+        path,
+        `last verified ${verdict.date} is ${verdict.ageDays} days old (max ${maxAgeDays})`,
+      );
+    } else if (verdict.status !== "ok") {
+      report(severity, verdict.code, path, "missing or invalid 最后核验 date");
+    }
   }
 }
 

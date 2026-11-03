@@ -240,7 +240,7 @@ test("heavy Temporal and OCI gates are path-scoped and fail closed", async () =>
   const ciWorkflow = await readRepositoryFile(".github/workflows/ci.yml");
   const scopeJob = jobBlock(ciWorkflow, "renderer-visual-scope");
   const buildJob = jobBlock(ciWorkflow, "build-test");
-  for (const output of ["run_temporal_go", "run_oci"]) {
+  for (const output of ["run_temporal_go", "run_oci", "run_db_tests"]) {
     assert.match(
       scopeJob,
       new RegExp(`\\n      ${output}: \\$\\{\\{ steps\\.scope\\.outputs\\.${output} \\}\\}`),
@@ -288,20 +288,20 @@ test("heavy Temporal and OCI gates are path-scoped and fail closed", async () =>
 
   const script = scopeScript(ciWorkflow);
   const cases = [
-    [["docs/status/current.md", "README.md", ".claude/skills/x/SKILL.md"], "false", "false", "false"],
-    [["infra/temporal-platform/server/go.mod"], "false", "true", "true"],
-    [["apps/api/src/main.ts"], "false", "false", "true"],
-    [["pnpm-lock.yaml"], "true", "false", "true"],
-    [["apps/site-renderer/src/index.ts"], "true", "false", "true"],
-    [[".github/workflows/ci.yml"], "true", "true", "true"],
-    [[".github/workflows/security.yml"], "false", "false", "false"],
-    [["brand-new-top-level-dir/file.txt"], "false", "false", "true"],
-    [["apps/api/src/prompts/notes.md"], "false", "false", "true"],
+    [["docs/status/current.md", "README.md", ".claude/skills/x/SKILL.md"], "false", "false", "false", "false"],
+    [["infra/temporal-platform/server/go.mod"], "false", "true", "true", "false"],
+    [["apps/api/src/main.ts"], "false", "false", "true", "true"],
+    [["pnpm-lock.yaml"], "true", "false", "true", "true"],
+    [["apps/site-renderer/src/index.ts"], "true", "false", "true", "false"],
+    [[".github/workflows/ci.yml"], "true", "true", "true", "true"],
+    [[".github/workflows/security.yml"], "false", "false", "false", "false"],
+    [["brand-new-top-level-dir/file.txt"], "false", "false", "true", "false"],
+    [["apps/api/src/prompts/notes.md"], "false", "false", "true", "true"],
   ];
-  for (const [paths, visual, temporal, oci] of cases) {
+  for (const [paths, visual, temporal, oci, dbTests] of cases) {
     assert.deepEqual(
       await runScope(script, paths),
-      { run_visual: visual, run_temporal_go: temporal, run_oci: oci },
+      { run_visual: visual, run_temporal_go: temporal, run_oci: oci, run_db_tests: dbTests },
       paths.join(", "),
     );
   }
@@ -309,6 +309,7 @@ test("heavy Temporal and OCI gates are path-scoped and fail closed", async () =>
     run_visual: "true",
     run_temporal_go: "true",
     run_oci: "true",
+    run_db_tests: "true",
   });
 });
 

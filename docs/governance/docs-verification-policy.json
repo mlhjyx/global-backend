@@ -66,6 +66,10 @@
     ],
     "requiredMetadata": ["文档 ID", "生命周期", "当前事实来源"]
   },
+  "freshness": {
+    "mode": "warn",
+    "authoritativeMaxAgeDays": 90
+  },
   "historicalProvenance": {
     "exact": [
       "docs/site-builder/DQ-1-shared-sitespec-contract.md",
