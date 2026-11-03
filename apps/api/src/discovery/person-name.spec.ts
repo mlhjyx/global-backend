@@ -101,27 +101,40 @@ describe('person-name · 身份归一不塌真实姓名里的学位同形 token�
 
 describe('person-name · 德语学位串剥离（Dipl.-Wirt.-Ing. / Dipl.-Kfm. / Ing.，M5 第三轮）', () => {
   it('多段学位串剥离后与无称号名归一相等', () => {
-    expect(normalizePersonName('Dipl.-Wirt.-Ing. Marek Havlicek')).toBe('marek havlicek');
-    expect(normalizePersonName('Dipl.-Wirt.-Ing. Marek Havlicek')).toBe(
-      normalizePersonName('Marek Havlicek'),
+    expect(normalizePersonName('Dipl.-Wirt.-Ing. Tobias Krüger')).toBe('tobias krueger');
+    expect(normalizePersonName('Dipl.-Wirt.-Ing. Tobias Krüger')).toBe(
+      normalizePersonName('Tobias Krüger'),
     );
     expect(normalizePersonName('Dipl.-Kfm. Anna Weber')).toBe('anna weber');
   });
 
-  it('带点单 token 头衔 Ing. 剥离；无点真实姓名 Ing 不误伤', () => {
-    expect(normalizePersonName('Ing. Klaus Weber')).toBe('klaus weber');
-    expect(normalizePersonName('Erik Ing')).toBe('erik ing');
-    expect(normalizePersonName('Ing.')).toBe('');
+  it('空格分写学位串（"Dipl. Kfm." / "Dipl. Wirt. Ing."）同样剥离', () => {
+    expect(normalizePersonName('Dipl. Kfm. Anna Weber')).toBe('anna weber');
+    expect(normalizePersonName('Dipl. Wirt. Ing. Anna Weber')).toBe('anna weber');
   });
 
-  it('学位词作为真实姓名 token 位于首位时不误剥（保守白名单）', () => {
+  it('带点单 token 头衔 Ing. 只在名前位置剥；名字中后段的带点形不误伤', () => {
+    expect(normalizePersonName('Ing. Klaus Weber')).toBe('klaus weber');
+    expect(normalizePersonName('Dr. Ing. Klaus Weber')).toBe('klaus weber');
+    expect(normalizePersonName('Ing.')).toBe('');
+    expect(normalizePersonName('Erik Ing')).toBe('erik ing');
+    expect(normalizePersonName('Erik Ing.')).toBe('erik ing'); // 带点姓氏
+    expect(normalizePersonName('Anna Ing.')).toBe('anna ing');
+  });
+
+  it('学位词作为真实姓名 token 时不误剥（保守白名单）', () => {
     expect(normalizePersonName('Wirt Anna')).toBe('wirt anna');
     expect(normalizePersonName('Kfm Peter')).toBe('kfm peter');
+    expect(normalizePersonName('Dr. Wirt')).toBe('wirt'); // 无点为姓，不按学位后缀剥
   });
 
-  it('personNameKeyVariants 同享学位串剥离（Art.17 禁联/对账键集）', () => {
-    const bare = new Set(personNameKeyVariants('Marek Havlicek'));
-    expect(personNameKeyVariants('Dipl.-Wirt.-Ing. Marek Havlicek').some((k) => bare.has(k))).toBe(true);
+  it('personNameKeyVariants 同享学位串剥离，且保留旧规则变体（只增不减兼容）', () => {
+    const bare = new Set(personNameKeyVariants('Tobias Krüger'));
+    const merged = personNameKeyVariants('Dipl.-Wirt.-Ing. Tobias Krüger');
+    expect(merged.some((k) => bare.has(k))).toBe(true);
+    // 本 PR 前按旧规则写入的禁联键/墓碑盲键（学位串未剥的形）必须仍在键集里。
+    expect(merged).toContain('diplwirting tobias krueger');
+    expect(merged).toContain('diplwirting tobias kruger');
   });
 });
 

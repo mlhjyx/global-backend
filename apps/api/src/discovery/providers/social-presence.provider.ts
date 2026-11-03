@@ -163,17 +163,18 @@ const ROLE_WORDS: readonly string[] = [
   'buchhaltung', 'finanzen', 'controlling', 'controller', 'logistik', 'logistikleiter', 'produktion',
   'produktionsleiter', 'fertigung', 'montage', 'monteur', 'servicetechniker', 'kundenbetreuung',
   'kundenberater', 'recruiting', 'ausbilder', 'trainee', 'werkstudent', 'praktikant',
+  'mitarbeiter', 'mitarbeiterin', 'angestellte', 'angestellter',
   // 英语
-  'manager', 'management', 'director', 'managing', 'head', 'lead', 'leader', 'chief', 'officer',
-  'executive', 'president', 'founder', 'owner', 'partner', 'principal', 'consultant', 'consulting',
-  'specialist', 'expert', 'coordinator', 'administrator', 'assistant', 'associate', 'analyst',
-  'architect', 'designer', 'developer', 'engineer', 'engineering', 'technician', 'supervisor',
-  'foreman', 'representative', 'agent', 'advisor', 'adviser', 'strategist', 'planner', 'buyer',
-  'purchasing', 'procurement', 'supply', 'logistics', 'operations', 'finance', 'financial',
+  'manager', 'management', 'director', 'managing', 'head', 'lead', 'leader', 'leadership', 'chief',
+  'officer', 'executive', 'president', 'founder', 'owner', 'partner', 'principal', 'consultant',
+  'consulting', 'specialist', 'expert', 'coordinator', 'administrator', 'assistant', 'associate',
+  'analyst', 'architect', 'designer', 'developer', 'engineer', 'engineering', 'technician',
+  'supervisor', 'foreman', 'representative', 'agent', 'advisor', 'adviser', 'strategist', 'planner',
+  'buyer', 'purchasing', 'procurement', 'supply', 'logistics', 'operations', 'finance', 'financial',
   'accounting', 'accountant', 'auditor', 'legal', 'counsel', 'lawyer', 'attorney', 'sales',
   'marketing', 'business', 'development', 'research', 'researcher', 'scientist', 'quality', 'product',
   'program', 'project', 'account', 'customer', 'revenue', 'growth', 'strategy', 'technical',
-  'service', 'support',
+  'service', 'support', 'teamlead',
 ];
 
 /** 极短 C-level 缩写：只认整 token（子串匹配会撞进普通单词）。 */
@@ -193,18 +194,23 @@ function foldRoleText(value: string): string {
     .trim();
 }
 
-const ROLE_KEYS: readonly string[] = [...new Set(ROLE_WORDS.map(foldRoleText))].filter(
-  (key) => key.length >= 4,
-);
+const ROLE_KEYS: readonly string[] = [...new Set(ROLE_WORDS.map(foldRoleText))];
+// ≥6 字符按词内子串匹配（德语复合词 "Einkaufsleiterin" ⊃ einkauf/leiter）；≤5 字符只认整 token——
+// "headquarters" ⊃ head、"Agentur" ⊃ agent 这类普通词命中会让垃圾档案原路漏回（审查实测）。
+const ROLE_SUBSTRING_KEYS: readonly string[] = ROLE_KEYS.filter((key) => key.length >= 6);
+const ROLE_EXACT_KEYS = new Set(ROLE_KEYS.filter((key) => key.length < 6));
 
-/** 公司名的匹配 token（与 {@link matchesCompany} 同源：≥3 字符、去法律形式）+ 域名词根，折叠形。 */
+/** 公司名的匹配 token（与 {@link matchesCompany} 同源：≥3 字符、去法律形式）+ 域名词根分词，折叠形。 */
 function companyRoleMatchTokens(company: { name: string; domain?: string }): Set<string> {
   const tokens = new Set<string>();
   for (const raw of company.name.toLowerCase().split(/[^\p{L}\p{N}]+/u)) {
     if (raw.length >= 3 && !LEGAL_FORM_TOKENS.has(raw)) tokens.add(foldRoleText(raw));
   }
   const root = company.domain?.toLowerCase().split('.')[0];
-  if (root && root.length >= 3) tokens.add(foldRoleText(root));
+  if (root && root.length >= 3) {
+    // 域名词根按词逐个收（"it-service.de" → it + service）：整串折叠后会带空格，永远匹配不到单个 token。
+    for (const part of foldRoleText(root).split(' ').filter(Boolean)) tokens.add(part);
+  }
   return tokens;
 }
 
@@ -212,19 +218,21 @@ function companyRoleMatchTokens(company: { name: string; domain?: string }): Set
  * headline 里是否除**人名与公司名**之外仍有职位/职能词（M5 第三轮收紧，`social_uninformative_dropped`）。
  * 与 #744 的公司佐证互补：只管"这像不像一个真实职场人的自述"，不管"是不是这家公司"。
  */
-export function hasRoleEvidence(
+function hasRoleEvidence(
   headline: string,
   personName: string,
   company: { name: string; domain?: string },
 ): boolean {
-  const drop = new Set<string>(
-    [...foldRoleText(personName).split(' '), ...companyRoleMatchTokens(company)].filter(Boolean),
-  );
+  const drop = new Set<string>([...foldRoleText(personName).split(' '), ...companyRoleMatchTokens(company)]);
+  drop.delete('');
   const residual = foldRoleText(headline)
     .split(' ')
     .filter((token) => token && !drop.has(token));
   return residual.some(
-    (token) => SHORT_ROLE_WORDS.has(token) || ROLE_KEYS.some((key) => token.includes(key)),
+    (token) =>
+      SHORT_ROLE_WORDS.has(token) ||
+      ROLE_EXACT_KEYS.has(token) ||
+      ROLE_SUBSTRING_KEYS.some((key) => token.includes(key)),
   );
 }
 
@@ -266,8 +274,8 @@ export function parseSocialResults(
       onDropped?.('namesake');
       continue;
     }
-    // 专业佐证（M5 第三轮）：公司名之外必须仍有职位/职能词——"gerry garry - Abendi" 这类只有公司名的
-    // headline 不再因「含公司名」放行（URL slug 与姓名一致也不足以证明其与本公司的关系）。
+    // 专业佐证（M5 第三轮）：公司名之外必须仍有职位/职能词——只有公司名的 headline（「<人名> - 公司」）
+    // 不再因「含公司名」放行（URL slug 与姓名一致也不足以证明其与本公司的关系）。
     if (!hasRoleEvidence(headline, parsed.fullName, company)) {
       onDropped?.('uninformative');
       continue;

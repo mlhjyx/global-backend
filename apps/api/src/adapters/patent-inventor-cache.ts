@@ -27,7 +27,7 @@ import {
   MAX_INVENTORS_PER_ASSIGNEE,
 } from './bigquery-patents';
 import { normForMatch } from '../discovery/name-match';
-import { foldedPersonNameKey, personNameKeyVariants } from '../discovery/person-name';
+import { foldedPersonNameKey, legacyFoldedPersonNameKey, personNameKeyVariants } from '../discovery/person-name';
 import { encryptPii, decryptPii, blindContactKey, piiKeyConfigured } from '../compliance/pii-crypto';
 import {
   ExecutionControlError,
@@ -90,6 +90,15 @@ function piiPreflightOk(): boolean {
  */
 export function inventorBlindKey(rawInventorName: string): string {
   const folded = foldedPersonNameKey(rawInventorName);
+  return folded ? blindContactKey(folded) : '';
+}
+
+/**
+ * **旧规则**折叠形的盲键（本 PR 前学位串不剥时写入的缓存/墓碑）。只用于墓碑**兼容查询**：
+ * 旧墓碑按旧形存的盲键，新规则的 {@link inventorBlindKey} 命中不了，刷新时会误把被擦除人重建回来（Art.17）。
+ */
+export function legacyInventorBlindKey(rawInventorName: string): string {
+  const folded = legacyFoldedPersonNameKey(rawInventorName);
   return folded ? blindContactKey(folded) : '';
 }
 
@@ -449,10 +458,18 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
         return !!qCountries && qCountries.some((qc) => !countriesConflict(qc, e.country));
       });
     // 盲键只对 scoped 子集算（HMAC 有成本）；供墓碑去重 + upsert 复用。
-    const enriched = scoped.map((e) => ({ ...e, nameKey: inventorBlindKey(e.r.inventorName) }));
+    // legacyNameKey 只为命中**旧规则**写下的墓碑（学位串未剥的形），新行永不写该形。
+    const enriched = scoped.map((e) => ({
+      ...e,
+      nameKey: inventorBlindKey(e.r.inventorName),
+      legacyNameKey: legacyInventorBlindKey(e.r.inventorName),
+    }));
 
     // P2-5：按盲键查墓碑，被擦除人绝不重物化（over-suppress 侧：宁跳过也不重建被擦除 PII）。
-    const candidateKeys = [...new Set(enriched.map((e) => e.nameKey).filter(Boolean))];
+    // 新旧两形都查：变体面只增不减（见 person-name.personNameKeyVariants 的兼容说明）。
+    const candidateKeys = [
+      ...new Set(enriched.flatMap((e) => [e.nameKey, e.legacyNameKey]).filter(Boolean)),
+    ];
     const tombstoned = candidateKeys.length
       ? new Set(
           (
@@ -463,7 +480,9 @@ export async function refreshPatentCache(deps: PatentRefreshDeps): Promise<Paten
           ).map((t) => t.inventorNameKey),
         )
       : new Set<string>();
-    const notErased = enriched.filter((e) => !(e.nameKey && tombstoned.has(e.nameKey)));
+    const notErased = enriched.filter(
+      (e) => !(e.nameKey && tombstoned.has(e.nameKey)) && !(e.legacyNameKey && tombstoned.has(e.legacyNameKey)),
+    );
 
     // P2-6：确定性排序 → 每 (assigneeNorm,country) cap 到 MAX_INVENTORS_PER_ASSIGNEE（幂等：同批每次落同一 25 位）。
     notErased.sort(

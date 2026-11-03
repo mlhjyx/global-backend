@@ -11,11 +11,14 @@
  * 误报行不是数据主体擦除请求，不该永久禁联同名真实联系人。
  *
  * 安全栏：
- *  - 连接必须是非 superuser 的 app_user（RLS 生效，跨 workspace 的行天然不可见）；
+ *  - 连接必须是运行时同款受限 app_user（`isAuthorizedAppDatabasePrincipal`：非 superuser、无 BYPASSRLS、
+ *    无角色成员关系），否则 RLS 隔离不成立，拒绝运行；
  *  - `--expect-companies` 校验每行所属公司域，防把 id 抄错到别的公司；
  *  - 任一目标行带 VALID 联系方式即拒绝（除非显式 `--allow-valid`）——VALID 只由人工给出，
- *    误删代价高；误报行的邮箱猜测是 RISKY，不会被误伤；
- *  - `--audit-out` 写 PII-free JSON（只有 opaque id、公司域、字段名、计数），便于事后对账。
+ *    误删代价高；误报行的邮箱猜测是 RISKY，不会被误伤。`--apply` 事务内会锁住 contact_point 并**重检**
+ *    VALID（防 dry-run 后被人工验成 VALID 的点被连带删除），计数也在同一事务里取；
+ *  - `--audit-out` 写 PII-free JSON（只有 opaque id、公司域、字段/联系点类型与计数，无姓名/值/去重键），
+ *    便于事后对账。
  *
  * 运行（在 apps/api 下）：
  *   1) dry-run（默认）：
@@ -31,9 +34,15 @@
  *
  * ⚠️ dry-run 输出含解密后的姓名（本机 PII），只在本机终端核对，不要贴进仓库或工单。
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { Prisma } from '@prisma/client';
-import { PrismaService } from '../src/prisma/prisma.service';
+import {
+  PrismaService,
+  isAuthorizedAppDatabasePrincipal,
+  type DatabasePrincipalEvidence,
+} from '../src/prisma/prisma.service';
+import { DATABASE_PRINCIPAL_QUERY } from '../src/compliance/pii-crypto.extension';
 
 for (const line of readFileSync(new URL('../.env', import.meta.url), 'utf8').split('\n')) {
   const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
@@ -92,6 +101,14 @@ function parseArgs(argv: string[]): Args {
   if (apply && !reason) fail('--apply 必须带 --reason（写进审计输出，说明这批行为什么该删）');
   const auditOut = values.get('audit-out');
   if (apply && !auditOut) fail('--apply 必须带 --audit-out <path>（留下删除对账）');
+  if (apply && auditOut) {
+    // 删除已提交后才发现审计目录不可写，会留下“删了但无对账”的状态——动手前先验目录。
+    try {
+      accessSync(dirname(auditOut), constants.W_OK);
+    } catch {
+      fail(`--audit-out 的目录不可写：${dirname(auditOut)}`);
+    }
+  }
   return { workspace, deleteIds, expectCompanies, reason, auditOut, apply, allowValid: flags.has('allow-valid') };
 }
 
@@ -99,10 +116,16 @@ const args = parseArgs(process.argv.slice(2));
 const prisma = new PrismaService();
 await prisma.$connect();
 
-const principal = await prisma.$queryRaw<{ is_superuser: string; usr: string }[]>`
-  SELECT current_setting('is_superuser') AS is_superuser, current_user AS usr`;
-if (principal[0]?.is_superuser !== 'off') {
-  fail(`app 连接是 superuser（user=${principal[0]?.usr}）→ RLS 被绕。请用 APP_DATABASE_URL=app_user 跑。`);
+// 与运行时启动自检同一把尺：不只查 superuser，也拒绝 BYPASSRLS / 角色成员关系（后者会让 withWorkspace
+// 的 RLS 隔离失效，而 --expect-companies 只校验域、跨 workspace 同行可能被误删）。
+const principal = (
+  await prisma.$queryRawUnsafe<DatabasePrincipalEvidence[]>(DATABASE_PRINCIPAL_QUERY)
+)[0];
+if (!isAuthorizedAppDatabasePrincipal(principal)) {
+  fail(
+    `app 连接不是受限的 app_user（session=${principal?.sessionUser} current=${principal?.currentUser} ` +
+      `super=${principal?.rolSuper} bypassRls=${principal?.rolBypassRls}）→ 拒绝运行。请用 APP_DATABASE_URL=app_user。`,
+  );
 }
 
 type TargetRow = Prisma.CanonicalContactGetPayload<{
@@ -157,7 +180,7 @@ if (validRows.length && !args.allowValid) {
 
 const evidenceRows = await prisma.withWorkspace(args.workspace, (tx) =>
   tx.fieldEvidence.findMany({
-    where: { entityType: 'contact', entityId: { in: args.deleteIds.map((id) => id) } },
+    where: { entityType: 'contact', entityId: { in: args.deleteIds } },
     select: { entityId: true, field: true, dataClass: true },
     orderBy: [{ entityId: 'asc' }, { field: 'asc' }],
   }),
@@ -208,11 +231,26 @@ const deleted = await prisma.withWorkspace(args.workspace, async (tx) => {
   if (locked.length !== ids.length) {
     throw new Error(`行在核对与删除之间消失（locked=${locked.length}/${ids.length}），已回滚`);
   }
+  // contact_point 行也锁住（contact 锁拦不住点更新）：dry-run 与 --apply 之间若有人把某点验成 VALID，
+  // 不重检就会把脚本承诺「默认拒删」的行连点删掉（TOCTOU）。锁后重检，任何 VALID 点都让整批回滚。
+  await tx.$queryRaw(Prisma.sql`
+    SELECT id FROM contact_point
+    WHERE contact_id::text IN (${Prisma.join(ids)})
+    ORDER BY id
+    FOR UPDATE`);
+  const validLeft = await tx.contactPoint.count({
+    where: { contactId: { in: ids }, status: 'VALID' },
+  });
+  if (validLeft > 0 && !args.allowValid) {
+    throw new Error(`apply 事务内重检出 ${validLeft} 个 VALID 联系方式（核对后被人工验证？），已回滚；确需删除请显式 --allow-valid`);
+  }
+  // 计数在**同一事务**内取：核对快照与删除之间新增的点/证据也要如实进审计，不能只报快照数。
+  const pointCountInTx = await tx.contactPoint.count({ where: { contactId: { in: ids } } });
   const evidence = await tx.fieldEvidence.deleteMany({
     where: { entityType: 'contact', entityId: { in: ids } },
   });
   const contacts = await tx.canonicalContact.deleteMany({ where: { id: { in: ids } } });
-  return { evidence: evidence.count, contacts: contacts.count };
+  return { evidence: evidence.count, contacts: contacts.count, contactPoints: pointCountInTx };
 });
 
 const audit = {
@@ -222,7 +260,7 @@ const audit = {
   reason: args.reason,
   deleted: {
     contacts: deleted.contacts,
-    contactPoints: pointCount,
+    contactPoints: deleted.contactPoints,
     fieldEvidence: deleted.evidence,
   },
   rows: rows.map((row) => ({
@@ -230,7 +268,6 @@ const audit = {
     companyId: row.company.id,
     companyDomain: row.company.domain ?? null,
     createdAt: row.createdAt.toISOString(),
-    dedupeKey: row.dedupeKey,
     contactPoints: row.contactPoints.map((point) => ({ type: point.type, status: point.status })),
     evidenceFields: (evidenceByContact.get(row.id) ?? []).map((entry) => entry.field),
   })),
@@ -241,6 +278,6 @@ if (args.auditOut) {
 }
 
 console.log(
-  `✅ 已删除 ${deleted.contacts} 行 contact、${pointCount} 个 contact_point（级联）、${deleted.evidence} 条 field_evidence。`,
+  `✅ 已删除 ${deleted.contacts} 行 contact、${deleted.contactPoints} 个 contact_point（级联）、${deleted.evidence} 条 field_evidence。`,
 );
 await prisma.$disconnect();

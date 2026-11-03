@@ -93,7 +93,7 @@ describe('social presence contact adapter (M2a: search index only)', () => {
     const contacts = parseSocialResults(
       [
         // 垃圾档案：headline 里公司名之外没有任何职位/职能词（URL slug 与姓名一致也不放行）。
-        { url: 'https://www.linkedin.com/in/gerry-garry-38a74539b', title: 'gerry garry - Abendi | LinkedIn' },
+        { url: 'https://www.linkedin.com/in/jane-doe-123456789', title: 'Jane Doe - Abendi | LinkedIn' },
         // 正常档案：职位词提供独立的专业佐证。
         { url: 'https://www.linkedin.com/in/max-abendi', title: 'Max Abendi – Geschäftsführer – Abendi Pumpen GmbH | LinkedIn' },
       ],
@@ -104,7 +104,7 @@ describe('social presence contact adapter (M2a: search index only)', () => {
     expect(dropped).toEqual(['uninformative']);
   });
 
-  it('keeps compound German role words even when the company token is embedded in them', () => {
+  it('keeps German compound role words and multi-word English roles', () => {
     const contacts = parseSocialResults(
       [
         { url: 'https://www.linkedin.com/in/erika-musterfrau', title: 'Erika Musterfrau - Einkaufsleiterin - Pumpen Schmid GmbH | XING' },
@@ -113,6 +113,31 @@ describe('social presence contact adapter (M2a: search index only)', () => {
       COMPANY,
     );
     expect(contacts.map((contact) => contact.fullName)).toEqual(['Erika Musterfrau', 'Max Mustermann']);
+  });
+
+  it('does not count accidental substrings as role words (headquarters / Agentur)', () => {
+    const dropped: string[] = [];
+    const contacts = parseSocialResults(
+      [
+        { url: 'https://www.linkedin.com/in/jane-doe-1', title: 'Jane Doe - Abendi Headquarters | LinkedIn' },
+        { url: 'https://www.linkedin.com/in/jane-doe-2', title: 'Jane Doe - Personalagentur Abendi | LinkedIn' },
+      ],
+      { name: 'Abendi', domain: 'abendi.de' },
+      (reason) => dropped.push(reason),
+    );
+    expect(contacts).toEqual([]);
+    expect(dropped).toEqual(['uninformative', 'uninformative']);
+  });
+
+  it('strips hyphenated domain roots word by word before looking for role evidence', () => {
+    const dropped: string[] = [];
+    const contacts = parseSocialResults(
+      [{ url: 'https://www.linkedin.com/in/jane-doe-3', title: 'Jane Doe - IT-Service - PSG | LinkedIn' }],
+      { name: 'PSG GmbH', domain: 'it-service.de' },
+      (reason) => dropped.push(reason),
+    );
+    expect(contacts).toEqual([]);
+    expect(dropped).toEqual(['uninformative']);
   });
 
   it('flags organisation-shaped names wherever a person name is extracted', () => {
@@ -160,7 +185,7 @@ describe('social presence contact adapter (M2a: search index only)', () => {
     const invoke = vi.fn(async () => ({
       data: {
         results: [
-          { url: 'https://www.linkedin.com/in/gerry-garry-38a74539b', title: 'gerry garry - Abendi | LinkedIn' },
+          { url: 'https://www.linkedin.com/in/jane-doe-123456789', title: 'Jane Doe - Abendi | LinkedIn' },
         ],
       },
       costCents: 0,

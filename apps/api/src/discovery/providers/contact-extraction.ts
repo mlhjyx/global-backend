@@ -84,11 +84,13 @@ export function cleanPersonName(raw: string): string | null {
     .replace(/[(（][^()（）]*[)）]/gu, ' ')
     .replace(/\s+/gu, ' ')
     .trim();
-  const candidate = stripAcademicTitles(stripped || trimmed);
-  if (!candidate) return null;
-  if (looksLikeOrganizationName(candidate)) return null;
-  if (candidate.split(/\s+/u).filter(Boolean).length < 2) return null;
-  return candidate;
+  const base = stripped || trimmed;
+  if (looksLikeOrganizationName(base)) return null;
+  // 词数按**剥称号前**判定：保留「Dr. Müller」这类只有姓、但在源页上成对出现的条目（旧行为），
+  // 落库名仍是剥过称号的形；纯称号（"Dr."）仍按单 token 拒绝。
+  if (base.split(/\s+/u).filter(Boolean).length < 2) return null;
+  const candidate = stripAcademicTitles(base);
+  return candidate || null;
 }
 
 export async function extractPeopleFromPage(

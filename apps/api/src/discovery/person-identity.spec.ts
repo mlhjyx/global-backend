@@ -46,8 +46,8 @@ describe('resolveAmongCandidates · 四 Tier 命中', () => {
 
   it('Tier 2：德语学位串前缀不影响同一人（M5 第三轮 trik-pumpen 回归）', () => {
     const hit = resolveAmongCandidates(
-      { fullName: 'Marek Havlicek' },
-      [cand('c1', 'Dipl.-Wirt.-Ing. Marek Havlicek')],
+      { fullName: 'Tobias Krüger' },
+      [cand('c1', 'Dipl.-Wirt.-Ing. Tobias Krüger')],
     );
     expect(hit).toEqual({ contactId: 'c1', matchRule: 'name_exact' });
   });
