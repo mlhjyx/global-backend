@@ -7,6 +7,7 @@ import {
 } from './contact-extraction';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import type { CrawlResult } from '../../adapters/web-crawler';
+import type { HttpGetOutput } from '../../tools/source-tools';
 import { extractSameSiteLinks } from '../../adapters/site-links';
 import { isAllowedByRobots } from '../../adapters/robots';
 import {
@@ -36,6 +37,61 @@ const PEOPLE_PATTERNS: { re: RegExp; w: number }[] = [
 ];
 /** 常见固定路径（未被首页链接也直接试）。 */
 const FIXED_PATHS = ['/impressum', '/kontakt', '/en/imprint', '/impressum.html', '/team', '/ueber-uns'];
+
+/**
+ * 从原始 HTML 抽同站锚点（www 不敏感、去 query/hash、相对链接按 base 解析）。
+ * 为什么需要：crawl4ai 的 markdown 会丢掉导航栏/JS 菜单里的链接——M5 评估里多家
+ * 公司的 Impressum 在原始 HTML 有、markdown 里没有，固定路径又全是 404
+ * （如 `/ando-technik/impressum/`、`common/info/impressum.html` 这类非标准路径）。
+ */
+const MAX_ANCHOR_HTML_CHARS = 1_000_000;
+
+export function extractAnchorsFromHtml(html: string, baseUrl: string): string[] {
+  const base = new URL(baseUrl);
+  const seen = new Set<string>();
+  // 线性扫描：逐标签找 `<a` → 最近的 `>`，属性正则在单个标签内跑。
+  // 正则 `[^>]*` 在未闭合/恶意的 3MB 页面上是 O(n²)（实测 384KB 即 ~66s），
+  // 会把事件循环卡死——不可信的抓取结果不能走回溯正则。
+  const bounded = html.slice(0, MAX_ANCHOR_HTML_CHARS);
+  const lower = bounded.toLowerCase();
+  let cursor = 0;
+  while (cursor < bounded.length) {
+    const start = lower.indexOf('<a', cursor);
+    if (start === -1) break;
+    const after = bounded[start + 2];
+    cursor = start + 2;
+    // `<article`、`<aside` 等不是锚点。
+    if (after !== undefined && !/[\s>/]/.test(after)) continue;
+    const end = bounded.indexOf('>', start + 2);
+    if (end === -1) break;
+    const tag = bounded.slice(start, end + 1);
+    cursor = end + 1;
+    const m = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i.exec(tag);
+    if (!m) continue;
+    const raw = (m[1] ?? m[2] ?? m[3] ?? '').trim();
+    if (!raw || raw.startsWith('#') || /^(mailto|tel|javascript):/i.test(raw)) continue;
+    try {
+      const url = new URL(raw, base);
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') continue;
+      if (url.hostname.replace(/^www\./, '') !== base.hostname.replace(/^www\./, '')) continue;
+      url.hash = '';
+      url.search = '';
+      const normalized = url.toString().replace(/\/$/, '');
+      if (normalized && normalized !== baseUrl.replace(/\/$/, '')) seen.add(normalized);
+    } catch {
+      // unparseable href — ignore
+    }
+  }
+  return [...seen];
+}
+
+/** 两个主机是否同一可注册域（末两段，忽略 www 大小写）：停车页/过期域名的跨站
+ *  跳转不配当「公司首页的最终地址」。 */
+export function sameRegistrableHost(a: string, b: string): boolean {
+  const tail = (host: string): string =>
+    host.toLowerCase().replace(/^www\./, '').split('.').slice(-2).join('.');
+  return tail(a) === tail(b);
+}
 
 /** 人物页优先级打分（纯函数，可测）：Impressum > 管理层 > 团队 > 关于 > 联系。0 = 非人物页。 */
 export function scorePeoplePageUrl(url: string): number {
@@ -185,6 +241,18 @@ export class DecisionMakerProvider {
 
   private async selectPeoplePages(domain: string, base: string, ctx: ExecutionContext): Promise<string[]> {
     const picked: string[] = [];
+    const pickedKeys = new Set<string>();
+    const addPicked = (url: string): void => {
+      // www / 大小写 / 尾斜杠不敏感：markdown（按裸域解析）与原始 HTML（按 finalUrl
+      // 解析）常给出同一页的两种 host 形态，去重避免占用预抓名额。
+      const key = url.toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
+      if (pickedKeys.has(key)) return;
+      pickedKeys.add(key);
+      picked.push(url);
+    };
+    let scoredFromMarkdown = 0;
+    let fixedHost = domain;
+    let anchorBase = base;
     try {
       const home = await this.deps.broker!.invoke<{ url: string }, CrawlResult>(
         'crawl4ai.fetch',
@@ -200,14 +268,44 @@ export class DecisionMakerProvider {
         .map((l) => ({ l, w: scorePeoplePageUrl(l) }))
         .filter((s) => s.w > 0)
         .sort((a, b) => b.w - a.w);
-      for (const s of scored) if (!picked.includes(s.l)) picked.push(s.l);
+      scoredFromMarkdown = scored.length;
+      for (const s of scored) addPicked(s.l);
     } catch (err) {
       if (isExecutionControlError(err)) throw err;
       // 首页抓不到也无妨，走固定路径兜底
     }
+    // markdown 丢链接时（导航/JS 菜单）用原始 HTML 补抽人物页锚点；finalUrl 同时给出
+    // 重定向后的主机（裸域→www），固定路径改用它拼，避免落到坏跳转上。
+    if (scoredFromMarkdown < 3 && ctx.artifactSubject) {
+      try {
+        const raw = await this.deps.broker!.invoke<{ url: string }, HttpGetOutput>(
+          'http.get',
+          { url: base },
+          { ...this.toolCtx(ctx, 'contact.find_decision_makers'), purpose: ['discovery', 'enrichment'] },
+        );
+        if (raw.data.finalUrl) {
+          try {
+            const finalHost = new URL(raw.data.finalUrl).host;
+            // 仅当最终主机与原域同一可注册域才采纳（过期/停放域名的跨站跳转不跟）。
+            if (sameRegistrableHost(finalHost, domain)) {
+              fixedHost = finalHost;
+              anchorBase = raw.data.finalUrl;
+            }
+          } catch {
+            /* keep stored domain */
+          }
+        }
+        const extra = extractAnchorsFromHtml(raw.data.text ?? '', anchorBase)
+          .map((l) => ({ l, w: scorePeoplePageUrl(l) }))
+          .filter((s) => s.w > 0)
+          .sort((a, b) => b.w - a.w);
+        for (const s of extra) addPicked(s.l);
+      } catch (err) {
+        if (isExecutionControlError(err)) throw err;
+      }
+    }
     for (const p of FIXED_PATHS) {
-      const u = `https://${domain}${p}`;
-      if (!picked.includes(u)) picked.push(u);
+      addPicked(`https://${fixedHost}${p}`);
     }
     return picked.slice(0, MAX_DECISION_MAKER_PAGES + 2);
   }

@@ -264,7 +264,7 @@
       "receiptMode": "ACK_REQUIRED",
       "consumerChecks": [
         {
-          "path": "apps/api/src/discovery/discovery.service.ts",
+          "path": "apps/api/src/discovery/contact-discovery-core.ts",
           "anchor": "captureContactReceipt"
         }
       ]
@@ -278,7 +278,21 @@
       "receiptMode": "ACK_REQUIRED",
       "consumerChecks": [
         {
-          "path": "apps/api/src/discovery/discovery.service.ts",
+          "path": "apps/api/src/discovery/contact-discovery-core.ts",
+          "anchor": "captureContactReceipt"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/decision-maker.provider.ts#http.get#1",
+      "kind": "tool",
+      "producerId": "http.get",
+      "resultStrategy": "artifact_reference",
+      "resultSchema": "http-get/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/discovery/contact-discovery-core.ts",
           "anchor": "captureContactReceipt"
         }
       ]
@@ -698,7 +712,7 @@
       "receiptMode": "ACK_REQUIRED",
       "consumerChecks": [
         {
-          "path": "apps/api/src/discovery/discovery.service.ts",
+          "path": "apps/api/src/discovery/contact-discovery-core.ts",
           "anchor": "captureContactReceipt"
         }
       ]

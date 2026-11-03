@@ -74,6 +74,7 @@ export const EXPECTED_TOOL_CALLSITES = Object.freeze([
   'apps/api/src/discovery/providers/companies-house.provider.ts#companies_house.search#2',
   'apps/api/src/discovery/providers/decision-maker.provider.ts#crawl4ai.fetch#1',
   'apps/api/src/discovery/providers/decision-maker.provider.ts#crawl4ai.fetch#2',
+  'apps/api/src/discovery/providers/decision-maker.provider.ts#http.get#1',
   'apps/api/src/discovery/providers/digital-footprint.provider.ts#crawl4ai.render#1',
   'apps/api/src/discovery/providers/directory.provider.ts#crawl4ai.fetch#1',
   'apps/api/src/discovery/providers/directory.provider.ts#searxng.search#1',
