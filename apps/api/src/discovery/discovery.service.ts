@@ -27,6 +27,7 @@ import {
 import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
 import { companyMayUseExternalProcessing, contactMayUseExternalProcessing } from './company-suppression-gate';
 import { recordPersonalDataAccess } from '../compliance/personal-data-access-audit';
+import { TemporalClient } from '../temporal/temporal.client';
 import { type BudgetStore, TOOL_BUDGET_STORE, UnavailableBudgetStore } from '../tools/budget-store';
 import {
   assertProductDiscoveryProvenance,
@@ -79,6 +80,7 @@ export class DiscoveryService {
     private readonly providers: DiscoveryProviderRegistry,
     private readonly authority: ExecutionBudgetAuthorityService,
     @Optional() @Inject(TOOL_BUDGET_STORE) private readonly budgetStore?: BudgetStore,
+    @Optional() private readonly temporal?: TemporalClient,
   ) {}
 
   private budgets(): BudgetStore {
@@ -161,6 +163,38 @@ export class DiscoveryService {
       });
       return run;
     });
+  }
+
+  /**
+   * Run 2.0（M0④/⑤）：「停止深挖」。向 Temporal 发 RequestCancel（机器身份只被允许 Start/Describe/
+   * History/RequestCancel——不发信号）。工作流在不可取消作用域里把未完成公司标 skipped(DEEP_STOPPED)
+   * 并以 CANCELLED 收尾；已完成/部分完成的名单与结果保留，下一次 run 会把这批公司重新排队（可续）。
+   */
+  async cancelRun(ctx: RequestContext, runId: string) {
+    const run = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.discoveryRun.findUnique({ where: { id: runId }, select: { id: true, status: true } }),
+    );
+    if (!run) {
+      throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'run not found' } });
+    }
+    if (!['RUNNING', 'QUEUED'].includes(run.status)) {
+      // 已结束的 run：幂等返回当前状态，不重复发取消。
+      return { runId: run.id, status: run.status };
+    }
+    if (!this.temporal) {
+      throw new ConflictException({
+        error: { code: 'TEMPORAL_UNAVAILABLE', message: 'temporal client is not connected' },
+      });
+    }
+    try {
+      await this.temporal.client.workflow.getHandle(`discovery-${runId}`).cancel();
+    } catch (error) {
+      // 工作流尚未被 relay 拉起（outbox 在途）：等价于「在开工前取消」，收尾由工作流启动后按
+      // 取消语义处理；连接级错误照旧上抛。
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/not found|NotFound|does not exist/i.test(message)) throw error;
+    }
+    return { runId: run.id, status: 'CANCEL_REQUESTED' };
   }
 
   async getRun(ctx: RequestContext, runId: string) {

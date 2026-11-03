@@ -1,5 +1,6 @@
 export { understandingWorkflow } from "./understanding.workflow";
 export { discoveryWorkflow } from "./discovery.workflow";
+export { companyPipelineWorkflow } from "./discovery.run2.pipeline.workflow";
 export { rawRetentionSweepWorkflow } from "./raw-retention.workflow";
 export { qualifyWorkflow } from "./qualify.workflow";
 export { backlogSweepWorkflow } from "./backlog.workflow";

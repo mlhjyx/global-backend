@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@temporalio/workflow', async () => await import('./testing/temporal-workflow.mock'));
+const child = vi.hoisted(() => ({ executeChild: vi.fn() }));
+vi.mock('@temporalio/workflow', async () => ({
+  ...(await import('./testing/temporal-workflow.mock')),
+  executeChild: child.executeChild,
+}));
 
 import { acts, resetActivities } from './testing/temporal-workflow.mock';
 import { discoveryWorkflow } from './discovery.workflow';
@@ -64,6 +68,10 @@ function mockLegacyPipeline(): void {
   });
   acts.enqueuePatentLookupsForRun.mockResolvedValue({ candidates: 0, enqueued: 0 });
   acts.finalizeRun.mockResolvedValue(undefined);
+  acts.listDeepTargets.mockResolvedValue({ companyIds: [] });
+  acts.deepStageSummary.mockResolvedValue({ done: 0, failed: 0, skipped: 0, remaining: 0 });
+  acts.skipUnfinishedDeepJobs.mockResolvedValue({ skipped: 0 });
+  child.executeChild.mockResolvedValue({ stage: 'done' });
 }
 
 beforeEach(() => {
@@ -159,6 +167,71 @@ describe('M0③ 快扫编排（patched + 启动开关）', () => {
 
     expect(acts.finalizeRun).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'FAILED' }),
+    );
+  });
+
+  it('runs one child workflow per deep target and finalizes from the deep summary', async () => {
+    acts.prefilterPool.mockResolvedValue({ poolSize: 30, candidates: 25, prefilteredOut: 5 });
+    acts.quickJudgeBatch.mockResolvedValue({
+      judged: 25,
+      verdicts: { match: 10, weak: 15 },
+      fallbackPerCompany: 0,
+      ruleFallback: 0,
+      failed: 0,
+      skipped: 0,
+    });
+    acts.materializeProvisionalLeads.mockResolvedValue({ leads: 25 });
+    acts.listDeepTargets.mockResolvedValue({ companyIds: ['c1', 'c2', 'c3'] });
+    acts.deepStageSummary.mockResolvedValue({ done: 3, failed: 0, skipped: 0, remaining: 0 });
+
+    await discoveryWorkflow(input(true));
+
+    expect(child.executeChild).toHaveBeenCalledTimes(3);
+    expect(child.executeChild).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({
+        workflowId: expect.stringContaining('discovery-'),
+      }),
+    );
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'DONE',
+        stats: expect.objectContaining({
+          deep: expect.objectContaining({ targets: 3, done: 3, stopped: false }),
+        }),
+      }),
+    );
+  });
+
+  it('marks unfinished companies and finalizes CANCELLED when the run is cancelled mid-deep', async () => {
+    acts.prefilterPool.mockResolvedValue({ poolSize: 30, candidates: 25, prefilteredOut: 5 });
+    acts.quickJudgeBatch.mockResolvedValue({
+      judged: 25,
+      verdicts: { match: 10, weak: 15 },
+      fallbackPerCompany: 0,
+      ruleFallback: 0,
+      failed: 0,
+      skipped: 0,
+    });
+    acts.materializeProvisionalLeads.mockResolvedValue({ leads: 25 });
+    acts.listDeepTargets.mockResolvedValue({ companyIds: ['c1', 'c2'] });
+    child.executeChild.mockRejectedValueOnce(
+      Object.assign(new Error('cancelled'), { name: 'CancelledFailure' }),
+    );
+    acts.deepStageSummary.mockResolvedValue({ done: 0, failed: 0, skipped: 2, remaining: 0 });
+
+    await discoveryWorkflow(input(true));
+
+    expect(acts.skipUnfinishedDeepJobs).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: RUN_ID, errorCode: 'DEEP_STOPPED' }),
+    );
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'CANCELLED',
+        stats: expect.objectContaining({
+          deep: expect.objectContaining({ stopped: true }),
+        }),
+      }),
     );
   });
 });
