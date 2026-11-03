@@ -446,14 +446,20 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
           batch.map(([queryOrdinal, query]) => runQueryActivity(queryOrdinal, query, handOff)),
         );
         let everyQueryLost = batch.length > 0;
+        // 先折叠所有已成功查询，再处理失败：失败会（在 failure-stop patch 下）立即停 run，
+        // 若按计划顺序边走边抛，排在失败查询之后的成功查询——它的收据已经落盘——就进不了
+        // FAILED 收尾统计，finalize 的收据核对会以 FINALIZE_DRIFT 拒绝整轮（2026-11-03 实踩）。
         for (const [offset, [, query]] of batch.entries()) {
           const outcome = settled[offset]!;
           if (outcome.status === 'fulfilled') {
             if (!accountQueryResult(query, outcome.value)) everyQueryLost = false;
           } else {
             everyQueryLost = false;
-            accountQueryFailure(query, outcome.reason);
           }
+        }
+        for (const [offset, [, query]] of batch.entries()) {
+          const outcome = settled[offset]!;
+          if (outcome.status !== 'fulfilled') accountQueryFailure(query, outcome.reason);
         }
         previousQueryUnreplayable = everyQueryLost;
       }

@@ -3255,8 +3255,10 @@ describe("finalizeRun durable query receipt readback", () => {
     },
   );
 
-  it("keeps the ended authority as the error when the FAILED write it falls back to is refused", async () => {
-    // The stored receipts are missing from the requested stats, so the FAILED write is refused.
+  it("records the FAILED fallback with the locked receipts, then surfaces the ended authority", async () => {
+    // The requested DONE stats omit the stored receipts; the fallback FAILED write now records
+    // them (2026-11-03: a refusal here left runs RUNNING forever), and the ended authority is
+    // still the error the activity reports.
     const { activities, outboxCreate, update } = finalizeHarness(
       undefined,
       endedAuthorityStore("EXECUTION_BUDGET_AUTHORITY_REVOKED"),
@@ -3273,7 +3275,34 @@ describe("finalizeRun durable query receipt readback", () => {
     ).rejects.toMatchObject({
       type: "ExecutionBudgetGrantError",
       nonRetryable: true,
-      cause: { message: "DISCOVERY_QUERY_RECEIPT_FINALIZE_MISSING" },
+    });
+    expect(update).toHaveBeenCalledOnce();
+    const written = update.mock.calls[0]![0].data.stats as Record<string, unknown>;
+    expect(Object.keys(written.perQuery as Record<string, unknown>)).toEqual(
+      Object.keys(derived.perQuery),
+    );
+    expect(outboxCreate).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the ended authority as the error when the FAILED write it falls back to is refused", async () => {
+    // Corrupt stored receipts make the FAILED write itself fail; the authority error must win.
+    const { activities, outboxCreate, update } = finalizeHarness(
+      { perQuery: "not-a-map" },
+      endedAuthorityStore("EXECUTION_BUDGET_AUTHORITY_REVOKED"),
+    );
+
+    await expect(
+      activities.finalizeRun(
+        discoveryArgs("40000000-0000-4000-8000-000000000001", {
+          planId: "50000000-0000-4000-8000-000000000001",
+          status: "DONE" as const,
+          stats: { failures: 0 },
+        }),
+      ),
+    ).rejects.toMatchObject({
+      type: "ExecutionBudgetGrantError",
+      nonRetryable: true,
+      cause: { message: "DISCOVERY_QUERY_RECEIPT_STORE_INVALID" },
     });
     expect(update).not.toHaveBeenCalled();
     expect(outboxCreate).not.toHaveBeenCalled();
@@ -3456,13 +3485,51 @@ describe("finalizeRun durable query receipt readback", () => {
     expect(outboxCreate).toHaveBeenCalledOnce();
   });
 
+  it("records a FAILED outcome even when the workflow stopped before folding the locked receipts", async () => {
+    const { activities, outboxCreate, update } = finalizeHarness();
+    const stats = {
+      perSource: {},
+      perQuery: {},
+      rawGovernance: {
+        accepted: 0,
+        quarantined: 0,
+        rejected: 0,
+        governanceDenied: 0,
+        duplicate: 0,
+        usageQuantity: 0,
+        costCents: 0,
+      },
+      queries: 2,
+      failures: 1,
+      failure: { stage: "query", errorType: "ProviderTransportError", control: false },
+    };
+
+    await activities.finalizeRun(
+      discoveryArgs("40000000-0000-4000-8000-000000000001", {
+        planId: "50000000-0000-4000-8000-000000000001",
+        icpId: "60000000-0000-4000-8000-000000000001",
+        status: "FAILED" as const,
+        stats,
+      }),
+    );
+
+    const written = update.mock.calls[0]![0].data.stats as Record<string, unknown>;
+    expect(written.status ?? undefined).toBeUndefined();
+    expect(Object.keys(written.perQuery as Record<string, unknown>)).toEqual(
+      Object.keys(derived.perQuery),
+    );
+    expect(written.rawGovernance).toEqual(derived.rawGovernance);
+    expect(written.failure).toMatchObject({ stage: "query", errorType: "ProviderTransportError" });
+    expect(outboxCreate).toHaveBeenCalledOnce();
+  });
+
   it("rejects finalization that omits a receipt already stored on the locked run", async () => {
     const { activities, outboxCreate, update } = finalizeHarness();
     await expect(
       activities.finalizeRun(
         discoveryArgs("40000000-0000-4000-8000-000000000001", {
           planId: "50000000-0000-4000-8000-000000000001",
-          status: "FAILED" as const,
+          status: "PARTIAL" as const,
           stats: { failures: 1 },
         }),
       ),

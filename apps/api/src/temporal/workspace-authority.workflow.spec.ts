@@ -1986,7 +1986,10 @@ describe('discoveryWorkflow failure finalization (BI-25)', () => {
     expect(outboxCreate).toHaveBeenCalledOnce();
   });
 
-  it('reports the stage error, and leaves the run open, when the store holds a receipt the workflow never saw', async () => {
+  it('reports the stage error and records the FAILED outcome over every locked receipt, seen or not', async () => {
+    // 2026-11-03: leaving the run open here left it RUNNING forever once finalize retries ran
+    // out (finalize input is fixed, so no retry could ever see the missing receipt). The FAILED
+    // write now records the union of the locked receipts and surfaces the stage error.
     primeDiscovery();
     const unseen = { ...HAPPY_RECEIPT, queryKey: 'b'.repeat(64), queryOrdinal: 1 };
     const { update, outboxCreate } = realFinalizeRun({
@@ -1999,8 +2002,16 @@ describe('discoveryWorkflow failure finalization (BI-25)', () => {
     await expect(discoveryWorkflow(discoveryInput())).rejects.toBe(replay);
 
     expect(acts.finalizeRun).toHaveBeenCalledOnce();
-    expect(update).not.toHaveBeenCalled();
-    expect(outboxCreate).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledOnce();
+    const written = update.mock.calls[0]![0].data.stats as {
+      perQuery: Record<string, unknown>;
+      failure?: { stage?: string };
+    };
+    expect(Object.keys(written.perQuery).sort()).toEqual(
+      [HAPPY_RECEIPT.queryKey, unseen.queryKey].sort(),
+    );
+    expect(written.failure).toMatchObject({ stage: 'fit' });
+    expect(outboxCreate).toHaveBeenCalledOnce();
   });
 
   it('does not follow a failed normal finalization with a FAILED one', async () => {

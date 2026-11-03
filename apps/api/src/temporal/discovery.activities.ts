@@ -3343,9 +3343,20 @@ export function createDiscoveryActivities(deps: {
           throw new Error('DISCOVERY_QUERY_RECEIPT_STORE_INVALID');
         }
         const storedStats = (lockedRun.stats ?? {}) as Record<string, unknown>;
+        const storedDerived = summarizeDiscoveryQueryReceipts(storedStats);
         let finalStats: Record<string, unknown> = args.stats;
-        if (Object.prototype.hasOwnProperty.call(args.stats, 'perQuery')) {
-          const derived = summarizeDiscoveryQueryReceipts(storedStats);
+        if (args.status === 'FAILED') {
+          // 失败的 run 以库内已落盘的收据为准：查询活动可能在落收据之后才失败（429/超时后
+          // 重试耗尽），工作流侧的 perQuery 因此必然可能不完整甚至为空；此时核对必「漂移」，
+          // 而拒绝写入会让 run 永远停在 RUNNING（2026-11-03 实踩）。用派生值补齐并记录。
+          if (Object.keys(storedDerived.perQuery).length) {
+            finalStats = {
+              ...storedStats,
+              ...args.stats,
+              ...storedDerived,
+            };
+          }
+        } else if (Object.prototype.hasOwnProperty.call(args.stats, 'perQuery')) {
           if (
             !canonicalCompanyAttributesEqual(
               {
@@ -3353,7 +3364,7 @@ export function createDiscoveryActivities(deps: {
                 perSource: args.stats.perSource,
                 rawGovernance: args.stats.rawGovernance,
               },
-              derived,
+              storedDerived,
             )
           ) {
             throw new Error('DISCOVERY_QUERY_RECEIPT_FINALIZE_DRIFT');
@@ -3361,9 +3372,9 @@ export function createDiscoveryActivities(deps: {
           finalStats = {
             ...storedStats,
             ...args.stats,
-            ...derived,
+            ...storedDerived,
           };
-        } else if (Object.keys(summarizeDiscoveryQueryReceipts(storedStats).perQuery).length) {
+        } else if (Object.keys(storedDerived.perQuery).length) {
           throw new Error('DISCOVERY_QUERY_RECEIPT_FINALIZE_MISSING');
         }
         await tx.discoveryRun.update({
