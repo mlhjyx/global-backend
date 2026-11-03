@@ -7,6 +7,7 @@ import { WsThrottlerGuard } from './common/ws-throttler.guard';
 import { AuthModule } from './auth/auth.module';
 import { ModelGatewayModule } from './model-gateway/model-gateway.module';
 import { TemporalModule } from './temporal/temporal.module';
+import { SweepSchedulerService } from './temporal/sweep-scheduler.service';
 import { RelayModule } from './relay/relay.module';
 import { HealthController } from './health/health.controller';
 import { WhoamiController } from './whoami/whoami.controller';
@@ -68,6 +69,8 @@ import { PlatformRevocationHttpModule } from './platform-authority/platform-revo
   providers: [
     { provide: APP_GUARD, useClass: WsThrottlerGuard },
     { provide: APP_GUARD, useClass: RuntimeWorkAdmissionGuard },
+    // R7-A：客户侧周期 sweep 的 API 内调度器（StartWorkflowExecution + workflowId 周期桶去重）。
+    SweepSchedulerService,
   ],
 })
 export class AppModule {}
