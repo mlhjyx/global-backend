@@ -65,7 +65,7 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
         SET "status" = 'processing',
             "processing_stage" = 'download',
             "processing_attempt" = "processing_attempt" + 1,
-            "lease_token" = ${leaseToken}::uuid,
+            "lease_token" = ${leaseToken},
             "lease_until" = now() + interval '10 minutes',
             "processing_error_code" = NULL,
             "updated_at" = now()
@@ -106,7 +106,7 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
             "updated_at" = now()
         WHERE "id" = ${input.documentId}::uuid
           AND "workspace_id" = ${input.workspaceId}::uuid
-          AND "lease_token" = ${leaseToken}::uuid
+          AND "lease_token" = ${leaseToken}
           AND "status" = 'processing'
       `);
       return updated === 1;
@@ -137,7 +137,7 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
             "updated_at" = now()
         WHERE "id" = ${input.documentId}::uuid
           AND "workspace_id" = ${input.workspaceId}::uuid
-          AND "lease_token" = ${leaseToken}::uuid
+          AND "lease_token" = ${leaseToken}
           AND "status" = 'processing'
       `);
     });
