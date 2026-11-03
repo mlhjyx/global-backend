@@ -16637,6 +16637,102 @@
         "description": "确认上传完成：对 staging 对象做 HEAD、流式 sha256 与魔数校验（声明的 MIME 必须与实际内容相符），通过后转存 canonical 对象并将文档置为 queued、入队解析。上传未完成返回 409 并留在 pending_upload；内容不符置 rejected；同一公司已存在相同内容时返回 409 并清理已复制副本。"
       }
     },
+    "/api/v1/companies/{companyId}/seller-documents/search": {
+      "get": {
+        "operationId": "SellerCompanyDocumentsController_search_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 500
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 10,
+              "maximum": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "documentId",
+                          "filename",
+                          "seq",
+                          "text",
+                          "score"
+                        ],
+                        "properties": {
+                          "documentId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "filename": {
+                            "type": "string"
+                          },
+                          "seq": {
+                            "type": "integer"
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "score": {
+                            "type": "number"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "资料库混合检索（向量 + 全文），限定公司与可检索状态",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "资料库混合检索：查询词经本机 BGE-M3 嵌入后与分块向量做余弦（权重 0.7）并与全文 ts_rank_cd（权重 0.3）合成排序；只检索该公司 status=ready 且未删除的资料，limit 上限 50。"
+      }
+    },
     "/api/v1/companies/{companyId}/seller-documents": {
       "get": {
         "operationId": "SellerCompanyDocumentsController_list_v1",

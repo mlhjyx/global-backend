@@ -60,6 +60,35 @@ export class SellerCompanyDocumentsController {
     return envelope(SellerDocumentDto.from(row));
   }
 
+  @Get('search')
+  @RequireScopes('acquisition:read')
+  @ApiOperation({ summary: '资料库混合检索（向量 + 全文），限定公司与可检索状态' })
+  @ApiQuery({ name: 'q', required: true, schema: { type: 'string', minLength: 2, maxLength: 500 } })
+  @ApiQuery({ name: 'limit', required: false, schema: { type: 'integer', default: 10, maximum: 50 } })
+  @ApiEnvelope({
+    type: 'array',
+    items: {
+      type: 'object',
+      required: ['documentId', 'filename', 'seq', 'text', 'score'],
+      properties: {
+        documentId: { type: 'string', format: 'uuid' },
+        filename: { type: 'string' },
+        seq: { type: 'integer' },
+        text: { type: 'string' },
+        score: { type: 'number' },
+      },
+    },
+  })
+  async search(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId', ParseUUIDPipe) companyId: string,
+    @Query('q') q: string,
+    @Query('limit') limit?: string,
+  ): Promise<Enveloped<Array<Record<string, unknown>>>> {
+    const n = Math.min(Math.max(Number(limit) || 10, 1), 50);
+    return envelope(await this.documents.search(ctx, companyId, q ?? '', n));
+  }
+
   @Get()
   @RequireScopes('acquisition:read')
   @ApiOperation({ summary: '列出公司资料库（游标分页，软删不可见）' })
