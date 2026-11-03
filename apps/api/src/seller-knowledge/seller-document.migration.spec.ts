@@ -107,7 +107,7 @@ describe('seller documents migration（模块 02 · Phase 2）', () => {
       tables: Record<string, string[]>;
     };
     expect(privileges.tables.seller_document).toEqual(['INSERT', 'SELECT', 'UPDATE']);
-    expect(privileges.tables.seller_document_chunk).toEqual(['INSERT', 'SELECT', 'UPDATE']);
+    expect(privileges.tables.seller_document_chunk).toEqual(['DELETE', 'INSERT', 'SELECT', 'UPDATE']);
   });
 
   it('keeps the Prisma models in sync with the designed tables', () => {
