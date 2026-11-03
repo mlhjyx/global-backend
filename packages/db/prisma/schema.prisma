@@ -839,6 +839,7 @@ model CompanyProfile {
   workspace                 Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   offerings                 Offering[]
   sources                   KnowledgeSource[]
+  sellerDocuments           SellerDocument[]
   claims                    Claim[]
   icps                      IcpDefinition[]
   sites                     Site[]
@@ -848,6 +849,68 @@ model CompanyProfile {
   @@unique([id, workspaceId], map: "company_profile_id_workspace_id_key")
   @@index([workspaceId])
   @@map("company_profile")
+}
+
+/// 卖家资料库文档（模块 02，Phase 2）：挂公司档案的原始资料。
+/// 原始文档严格按空间隔离（RLS + bucket 前缀，CONFIDENTIAL_TENANT）；软删 + DSR 物理删。
+/// 活跃内容唯一性由迁移里的部分唯一索引持有（WHERE deleted_at IS NULL）——Prisma 不表达。
+model SellerDocument {
+  id                  String    @id @default(uuid()) @db.Uuid
+  workspaceId         String    @map("workspace_id") @db.Uuid
+  companyId           String    @map("company_id") @db.Uuid
+  uploadedBy          String    @map("uploaded_by") @db.Uuid
+  filename            String
+  mime                String
+  sizeBytes           BigInt    @map("size_bytes")
+  kind                String // pdf | docx | pptx | txt | md | other
+  objectKey           String    @map("object_key")
+  contentHash         String?   @map("content_hash") @db.VarChar(64)
+  /// pending_upload → committing → queued → processing → ready | failed_terminal | rejected | deleted
+  status              String    @default("pending_upload")
+  processingStage     String?   @map("processing_stage")
+  processingAttempt   Int       @default(0) @map("processing_attempt")
+  leaseToken          String?   @map("lease_token")
+  leaseUntil          DateTime? @map("lease_until") @db.Timestamptz(3)
+  retryAt             DateTime? @map("retry_at") @db.Timestamptz(3)
+  processingErrorCode String?   @map("processing_error_code") @db.VarChar(120)
+  parsedMeta          Json?     @map("parsed_meta")
+  chunkCount          Int       @default(0) @map("chunk_count")
+  factsExtractedAt    DateTime? @map("facts_extracted_at") @db.Timestamptz(3)
+  deletedAt           DateTime? @map("deleted_at") @db.Timestamptz(3)
+  deletedBy           String?   @map("deleted_by") @db.Uuid
+  cleanupEventId      String?   @map("cleanup_event_id") @db.Uuid
+  cleanupCompletedAt  DateTime? @map("cleanup_completed_at") @db.Timestamptz(3)
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  company CompanyProfile       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  chunks  SellerDocumentChunk[]
+
+  @@unique([id, workspaceId])
+  @@index([workspaceId, companyId, status, createdAt])
+  @@map("seller_document")
+}
+
+/// 文档分块（BGE-M3 1024 维，pgvector）。`text_tsv` 是迁移里生成的 tsvector 列，
+/// Prisma 不建模（检索一律 raw SQL，混合分数 = 0.7×cosine + 0.3×ts_rank_cd）。
+model SellerDocumentChunk {
+  id           String                       @id @default(uuid()) @db.Uuid
+  workspaceId  String                       @map("workspace_id") @db.Uuid
+  documentId   String                       @map("document_id") @db.Uuid
+  seq          Int
+  text         String
+  meta         Json? // 章节路径/页码/表格标记（结构感知切块产物）
+  embedModel   String?                      @map("embed_model")
+  embedVersion String?                      @map("embed_version")
+  embedding    Unsupported("vector(1024)")?
+  createdAt    DateTime                     @default(now()) @map("created_at")
+
+  document SellerDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, seq])
+  @@unique([id, workspaceId])
+  @@index([workspaceId, documentId])
+  @@map("seller_document_chunk")
 }
 
 model Offering {

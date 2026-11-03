@@ -92,6 +92,8 @@
     "sanctions_entity": ["SELECT"],
     "sanctions_screening_result": ["DELETE", "INSERT", "SELECT", "UPDATE"],
     "sanctions_source": ["SELECT"],
+    "seller_document": ["INSERT", "SELECT", "UPDATE"],
+    "seller_document_chunk": ["INSERT", "SELECT", "UPDATE"],
     "signal_ingest": ["INSERT", "SELECT", "UPDATE"],
     "site": ["DELETE", "INSERT", "SELECT", "UPDATE"],
     "site_build_budget": ["SELECT"],
