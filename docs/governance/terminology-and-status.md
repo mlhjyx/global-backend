@@ -251,6 +251,57 @@ Fixture 必须使用合成企业、合成联系人和有明确使用权的资产
 | `LeadQualifiedPackage` | 本仓交给 SaaS 的不可变合格线索包 | 不等于 SaaS Opportunity/QGO/SAO |
 | Capability Pack | 围绕一个用户结果的规范、设计、契约、场景、证据、指南和发布引用集合 | 不是复制所有事实的新巨型文档 |
 
+## 10A. 运行时与获客术语
+
+面向开发代理的运行概念表；与 §3 的事实状态、§10 的产品术语配合使用。
+
+| 术语 | 定义 | 禁止叫法 / 易混 | 落点 |
+| --- | --- | --- | --- |
+| 卖家档案 | 卖家公司在引擎侧的事实档案（产品、目标市场、业务邮箱等 onboarding 事实） | 不叫「客户画像」 | `company_profile` |
+| ICP | 目标买家画像（任务级）；ACTIVE 后才能生成查询计划 | 不叫「客户画像」 | `icp_definition` |
+| 查询计划 | 可人工确认的寻源方案；READY 才能执行 | 不叫「搜索任务」 | `icp.controller.ts` |
+| DiscoveryRun（获客 run） | 一次查询计划的执行实例，终态 DONE / PARTIAL / FAILED | 不要叫「任务」；TaskRun 是 SaaS 侧概念（Phase 4，未上线） | `discovery_run`；`discovery.workflow.ts` |
+| Lead | 公司 × ICP 的资格对象，fit 门创建、评分后入队列 | 不叫 candidate | `lead` |
+| LeadQualifiedPackage | 交给 SaaS 的不可变合格线索包 | 不等于 Opportunity / QGO | `lead.service.ts` |
+| 四队列 | recommended / needs_review / rejected / sanctions_hold | 不要自造第五队列 | `lead.queue` |
+| 裁决 | 人工 accept / reject / sanctions-review | 不等于自动发送 | `lead.controller.ts` |
+| fit（资格门） | run 内对每家公司 × ICP 的 LLM 判定（match / weak / mismatch） | 不要与 qualify 混用 | `discovery.workflow.ts` fit 阶段 |
+| qualify（评分） | 确定性六维评分与队列分配 | 不要叫「资格判断」 | `qualify.workflow.ts` |
+| 制裁第五门 | qualify 时的制裁名单筛查；命中 → `sanctions_hold` 并硬拦 accept | 不等于一般评分维度 | `apps/api/src/sanctions/` |
+| 联系人发现 | fit=match 公司上的具名联系人发现，受 lawful basis 门约束 | 不叫「爬邮箱」 | `discovery/contact-*.ts` |
+| email_guess | 邮箱补全（双闸：interim LIA + smtp_self） | 不要写成「猜邮箱已全面放开」 | `contact-stage-email-guess.ts` |
+| 禁联（suppression） | 不可删除的禁止联系事实 | 不等于 rejected 队列 | suppression 迁移与 `suppression_decision` |
+| Grant（执行预算授权） | SaaS 签发的一次性、短期、请求绑定的 JWS | 不要叫「预算额度」 | `execution-budget/` |
+| capability | R4 平台权威签发的机器能力凭证 | 不要与 Grant 混用 | `platform-authority/` |
+| deployment binding | 绑定后端镜像 sha 的 R4 部署绑定，7 天有效 | 不要叫「许可证」 | gain-saas `deploy/r4/` |
+| platform-automation | 平台 Temporal 命名空间，承载 4 个平台 schedule | 不要叫「生产环境」 | Temporal 17233 |
+| fence（出网围栏） | 撤销后阻断平台 schedule 的受审计开关 | 不要裸 UPDATE；用产品函数重开 | RUNBOOK §12 |
+| PLATFORM_GRANT | `execution_budget_authority` 中由平台准入写下的 Grant 行 | 不等于 workspace Grant | `execution_budget_authority` |
+| 准入租约 | 发现 run 3 小时、ICP 操作 30 分钟的可花钱窗口 | 不等于 Grant 本身有效期 | ADR-024 租约补充 |
+| managed runtime | 由已钉镜像运行的 API / worker | 不叫「生产」 | `runtime.compose.env` |
+| dev fast lane | 单 workspace、单队列的开发快速通道 | 不等于生产路径 | `environment-parity-policy.json` |
+| customer worker | 客户侧 Temporal worker（`global-worker`，default 命名空间） | 不要只说 worker | runtime compose |
+| platform worker | 平台侧 worker（`global-platform-worker`，platform-automation） | 不要与 customer worker 混用 | runtime compose |
+| understanding 队列 | 客户与平台工作流共用的 Temporal task queue 名 | 不是业务概念 | `understanding.constants.ts` |
+| dev Temporal | 本地开发 Temporal（7233，含 8233 UI） | 不是当前编排引擎 | `infra.local.yaml` |
+| 平台 Temporal | R4 原生 Temporal（17233），当前 managed runtime 连接它 | 不要与 7233 混用 | `temporal-platform.env` |
+| outbox relay | 事务性 outbox 的消费者，负责起工作流与投递事件 | 不叫「消息队列」 | `relay/outbox-relay.service.ts` |
+| RuntimeEvidence | 带 commit / 环境 / valid_until / digest 的运行证据；过期降 `HISTORICAL` | 不等于日志或普通观察 | `runtime-evidence.schema.json` |
+| Provider | 外部数据源适配器；机器真值在 provider registry | 不叫「渠道」 | `docs/governance/provider-registry.json` |
+| SourceClass | provider 的源类别（public_intelligence 等） | 不要自造类别 | provider registry |
+| raw source record | 摄取并治理后的原始记录 | 不等于 canonical company | `raw_source_record` |
+| canonical company | 归一后的公司实体 | 不叫「客户」 | `canonical_company` |
+| lawful basis | 处理个人数据的合法性基础；无 LIA 不解锁触达 | 不叫「用户同意」 | `compliance/` |
+| LIA | 合法利益评估记录，OUTREACH 的前置 | 不等于 DPIA | `lia_record` |
+| Data Rights | STORE / OUTREACH 等 7 个动作的确定性判定 | 不叫「权限」 | `data-rights.service.ts` |
+| RLS | `app_user` + `set_config('app.current_workspace_id')` + FORCE RLS | 不要用 owner 连接跑租户查询 | `packages/db` |
+| 四态 | 未做 / 可运行 / 已验证 / 已验收（D-029，随 2026-11-04 文档治理计划批准） | 不要用「完成」替代 | `status/current.md` |
+| run 终态 | DONE / PARTIAL / FAILED；预算截断或跳过记为 PARTIAL，绝不假 DONE | 不要写「完成」 | `discovery.run-status.ts` |
+| 文档生命周期 | CURRENT / DRAFT / GUIDE / SUPERSEDED / CLOSED | 不要自造状态词 | §4 |
+| GrowthOS | 2026-10-31 退役的旧 SaaS；其名字不再指现行任何服务 | 不要把遗留 issuer 字符串当成现行服务 | `_archive/p8-*` |
+| gain-saas | 现行 SaaS 控制面与 R4 平台权威 | 不叫 GrowthOS | `https://127.0.0.1:18446` |
+| 平台 ≠ 生产 | 平台是 R4 授权 / 准入层，不等于生产环境 | 不要把「平台」当环境名 | 本文 §2 权威层 |
+
 ## 11. 状态使用红线
 
 - “完成”“已上线”“生产就绪”“全绿”“已审核”必须说明哪个轴、环境、日期、Owner 和证据。
