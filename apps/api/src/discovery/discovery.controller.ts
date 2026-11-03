@@ -167,6 +167,16 @@ export class DiscoverContactsDto {
   @MaxLength(1000)
   @Matches(NO_CONTROL_CHARS)
   lawfulBasisNote?: string;
+
+  @ApiPropertyOptional({
+    description:
+      '客户端每次点击生成的幂等键（UUID）。用于把同一公司的多次联系人发现隔离到各自预算账户，' +
+      '避免重复点击触发 EXECUTION_BUDGET_GRANT_REUSED；缺省时保持旧请求哈希。',
+    format: 'uuid',
+  })
+  @IsOptional()
+  @IsUUID()
+  attemptId?: string;
 }
 
 /**
@@ -405,6 +415,7 @@ export class DiscoveryController {
                   note: dto.lawfulBasisNote,
                 }
               : undefined,
+            attemptId: dto?.attemptId,
           },
           compactJws,
         ),

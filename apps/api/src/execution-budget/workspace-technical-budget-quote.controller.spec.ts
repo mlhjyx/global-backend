@@ -120,4 +120,33 @@ describe('WorkspaceTechnicalBudgetQuoteController', () => {
       }),
     });
   });
+
+  it('quotes on-demand contact discovery with a client attemptId', () => {
+    const quote = controller().quote(CTX, {
+      operation: 'POST /canonical-companies/:id/discover-contacts',
+      companyId: '30000000-0000-4000-8000-000000000003',
+      body: { attemptId: '5a7b8c9d-0e1f-4a2b-8c3d-4e5f6a7b8c9d' },
+    });
+
+    expect(quote).toEqual({
+      data: expect.objectContaining({
+        purpose: 'discovery.run',
+        subjectType: 'company',
+        subjectId: '30000000-0000-4000-8000-000000000003',
+        requiredCapMicrousd: '2600000',
+        requestSha256:
+          'dc8a43b2754f37639a57df618ab09e857364052abd7f1eca46b06da212ea18c6',
+      }),
+    });
+  });
+
+  it('rejects a discover attemptId that is not a UUID', () => {
+    expect(() =>
+      controller().quote(CTX, {
+        operation: 'POST /canonical-companies/:id/discover-contacts',
+        companyId: '30000000-0000-4000-8000-000000000003',
+        body: { attemptId: 'not-a-uuid' },
+      }),
+    ).toThrow('EXECUTION_BUDGET_QUOTE_INVALID');
+  });
 });
