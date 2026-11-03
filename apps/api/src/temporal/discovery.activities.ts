@@ -169,6 +169,11 @@ export interface DiscoveryRunInput {
   icpId: string;
   executionContractVersion?: 2;
   executionBudget?: ExecutionBudgetBinding;
+  /**
+   * M0③（Run 2.0）：快扫编排开关，由 relay 在启动时读部署开关写入。
+   * 旧历史没有该字段（undefined）→ 走原编排；patch 守卫见 discovery.workflow.ts。
+   */
+  run2QuickScan?: boolean;
 }
 
 type DiscoveryActivityInput = Readonly<{
