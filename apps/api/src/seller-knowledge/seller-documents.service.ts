@@ -166,6 +166,51 @@ export class SellerDocumentsService {
     return { documentId, uploadUrl: signed.url, expiresAt: signed.expiresAt };
   }
 
+  /**
+   * 浏览器直传中转（2026-11-03）：浏览器到不了对象存储（presign 主机是引擎侧的
+   * 127.0.0.1:9000），所以文件先经 BFF→引擎，由引擎按 presign 时的 staging key 写入。
+   * 校验：pending_upload、MIME 与 presign 一致、字节数与申报大小相等（不静默截断）。
+   */
+  async uploadContent(
+    ctx: RequestContext,
+    companyId: string,
+    documentId: string,
+    body: Buffer,
+    contentType: string,
+  ): Promise<SellerDocumentRow> {
+    const row = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.sellerDocument.findFirst({ where: { id: documentId, companyId, deletedAt: null } }),
+    );
+    if (!row) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'document not found' } });
+    if (row.status !== 'pending_upload') {
+      throw new ConflictException({
+        error: { code: 'SELLER_DOCUMENT_NOT_PENDING_UPLOAD', message: '资料已上传或正在处理，不能重复上传' },
+      });
+    }
+    if (contentType !== row.mime) {
+      throw new BadRequestException({
+        error: { code: 'SELLER_DOCUMENT_TYPE_MISMATCH', message: '上传内容类型与申报不一致' },
+      });
+    }
+    if (body.length === 0 || BigInt(body.length) !== row.sizeBytes) {
+      throw new BadRequestException({
+        error: { code: 'SELLER_DOCUMENT_SIZE_MISMATCH', message: '上传字节数与申报大小不一致' },
+      });
+    }
+    const spec = MIME_KIND[row.mime];
+    if (!spec || body.length > spec.maxBytes) {
+      throw new BadRequestException({
+        error: { code: 'DOCUMENT_TOO_LARGE', message: '文件超过该类型上限' },
+      });
+    }
+    try {
+      await this.storage.putObject(row.objectKey, body, row.mime);
+    } catch {
+      throw storageUnavailable();
+    }
+    return row;
+  }
+
   async commit(ctx: RequestContext, companyId: string, documentId: string): Promise<SellerDocumentRow> {
     const claimed = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
       tx.$queryRaw<Array<{ object_key: string; mime: string; size_bytes: bigint }>>(Prisma.sql`

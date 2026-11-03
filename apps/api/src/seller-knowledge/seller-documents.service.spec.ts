@@ -188,3 +188,79 @@ describe('SellerDocumentsService', () => {
     expect(updates[0]).toMatchObject({ status: 'deleted' });
   });
 });
+
+describe('SellerDocumentsService.uploadContent（浏览器直传：引擎代传暂存区）', () => {
+  function uploadFixture(row: Record<string, unknown> | null, putError?: Error) {
+    const putObject = vi.fn(async () => {
+      if (putError) throw putError;
+    });
+    const prisma = {
+      withWorkspace: vi.fn(async (_ws: string, fn: (tx: unknown) => unknown) =>
+        fn({
+          sellerDocument: { findFirst: vi.fn(async () => row) },
+        }),
+      ),
+    };
+    const storage = { putObject };
+    const service = new SellerDocumentsService(
+      prisma as unknown as PrismaService,
+      storage as unknown as SellerDocumentsStorage,
+      {} as never,
+      {} as never,
+    );
+    return { service, putObject };
+  }
+
+  const PENDING = {
+    id: DOC_ID,
+    companyId: COMPANY_ID,
+    status: 'pending_upload',
+    objectKey: sellerDocumentStagingKey(CTX.workspaceId, DOC_ID),
+    mime: 'text/markdown',
+    sizeBytes: 4n,
+    deletedAt: null,
+  };
+
+  it('校验通过后把字节写进暂存对象并返回资料行', async () => {
+    const { service, putObject } = uploadFixture(PENDING);
+    const body = Buffer.from('# hi');
+    const row = await service.uploadContent(CTX, COMPANY_ID, DOC_ID, body, 'text/markdown');
+    expect(putObject).toHaveBeenCalledWith(PENDING.objectKey, body, PENDING.mime);
+    expect(row).toBe(PENDING);
+  });
+
+  it('状态不是 pending_upload 时 409', async () => {
+    const { service } = uploadFixture({ ...PENDING, status: 'queued' });
+    await expect(
+      service.uploadContent(CTX, COMPANY_ID, DOC_ID, Buffer.from('# hi'), 'text/markdown'),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('声明的 MIME 与实际 Content-Type 不一致时 400', async () => {
+    const { service } = uploadFixture(PENDING);
+    await expect(
+      service.uploadContent(CTX, COMPANY_ID, DOC_ID, Buffer.from('# hi'), 'image/png'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('字节数不等于 presign 申报大小时 400，避免静默截断', async () => {
+    const { service } = uploadFixture(PENDING);
+    await expect(
+      service.uploadContent(CTX, COMPANY_ID, DOC_ID, Buffer.from('too long!'), 'application/markdown'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('不存在或已删除时 404', async () => {
+    const { service } = uploadFixture(null);
+    await expect(
+      service.uploadContent(CTX, COMPANY_ID, DOC_ID, Buffer.from('# hi'), 'text/markdown'),
+    ).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('存储失败时 503', async () => {
+    const { service } = uploadFixture(PENDING, new Error('minio down'));
+    await expect(
+      service.uploadContent(CTX, COMPANY_ID, DOC_ID, Buffer.from('# hi'), 'text/markdown'),
+    ).rejects.toMatchObject({ status: 503 });
+  });
+});

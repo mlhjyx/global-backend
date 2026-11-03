@@ -16815,6 +16815,70 @@
         "description": "确认上传完成：对 staging 对象做 HEAD、流式 sha256 与魔数校验（声明的 MIME 必须与实际内容相符），通过后转存 canonical 对象并将文档置为 queued、入队解析。上传未完成返回 409 并留在 pending_upload；内容不符置 rejected；同一公司已存在相同内容时返回 409 并清理已复制副本。"
       }
     },
+    "/api/v1/companies/{companyId}/seller-documents/{documentId}/content": {
+      "put": {
+        "description": "仅 pending_upload 状态可用；Content-Type 必须与 presign 申报一致，字节数必须等于申报大小。写入后照常调用 commit 校验并入队。",
+        "operationId": "SellerCompanyDocumentsController_uploadContent_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "documentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "content-type",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SellerDocumentDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "浏览器直传：把文件字节经引擎写入暂存对象（presign 主机对浏览器不可达时的中转）",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ]
+      }
+    },
     "/api/v1/companies/{companyId}/seller-documents/search": {
       "get": {
         "operationId": "SellerCompanyDocumentsController_search_v1",
