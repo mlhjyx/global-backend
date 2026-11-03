@@ -1,6 +1,6 @@
 # Run 2.0 详细设计：任务对象、公司级流水线、两档编排与进度闭环
 
-> 生命周期：`DRAFT`
+> 生命周期：`DRAFT`（中间稿，已并入 `2026-11-04-acquisition-system-complete-design.md`；编排细节以完整设计为准）
 > 依据：产品负责人 2026-11-04「run 的研究设计要全面，不要嫌麻烦，该重构就重构」。上位设计：总规划（`2026-11-04-acquisition-system-master-plan.md`）、两档设计（`2026-11-04-discovery-quick-deep-tiers.md`，已批）。本文是 Run 2.0 的实施级设计，含域模型、Temporal 编排、状态机、预算、失败语义、迁移与验收。
 
 ## 一、设计结论先行（本文件拍板的工程决策）

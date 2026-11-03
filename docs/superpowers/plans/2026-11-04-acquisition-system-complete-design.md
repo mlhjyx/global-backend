@@ -67,8 +67,9 @@
               "country": ".country", "products": ".products li" } } }
 ```
 
-- 复用 crawl4ai 0.9.1（Apache-2.0，CVE-2026-57572 已在该版本修复）；单域限速（默认 1 req/2s）、页数上限（默认 500/天/渠道）、超时、UA 标识、robots.txt 强制检查（未放行拒绝运行）、抓取留痕（URL/时间/截图可选）。
+- 复用 crawl4ai 0.9.1（Apache-2.0，CVE-2026-57572 已在该版本修复；支持 `js_code`/`wait_for`/`js_only` 处理 JS 渲染与翻页；最新 0.9.5，升级按发布纪律）；单域限速（默认 1 req/2s）、页数上限（默认 500/天/渠道）、超时、UA 标识、robots.txt 强制检查（未放行拒绝运行）、抓取留痕（URL/时间/截图可选）。
 - 产出先落 raw（带 channelId/evidence）→ 规范化/去重/抑制门 → 公司池；`source_channel_run` 记每轮抓取量/失败/耗时。
+- **个人字段保留（2026-11-04 决策）**：渠道页面上的人名/职位/邮箱/电话**不丢弃**——加密存入平台受限存储（与公司/渠道/证据绑定、180 天滚动保留），租户默认不可见；仅当租户 run 处理该公司时物化为该租户的联系人候选（过抑制/制裁门），租户之间互不可见。每次访问/物化记访问审计（谁/何时/公司/字段类/用途）。
 
 ### 4.3 治理（硬闸门）
 
@@ -78,7 +79,17 @@
 
 ### 4.4 渠道目录（首版）
 
-见 `acquisition-system-master-plan.md` §3.3（A/B/C 标注）；P0：展会官网 exhibitor、海关名单导入；P1：协会名录、企业注册补充、招标、Trade Map；P2：B2B 目录（逐站核条款）、招聘/新闻信号、OSM；C：LinkedIn 自动化与付费联系人库。
+P0：展会官网 exhibitor、海关名单导入；P1：协会名录、企业注册补充、招标、Trade Map；P2：B2B 目录（逐站核条款）、招聘/新闻信号、OSM；C：LinkedIn 自动化与付费联系人库。
+
+**2026-11-04 可爬性实证（三个代表站点）**：
+
+| 站点 | robots | 渲染 | 结论 |
+| --- | --- | --- | --- |
+| Hannover Messe | 允许 `/en/search/`、`/exhibitor/`；禁 `/autocomplete` | 搜索首屏/字母索引/详情页均 SSR，条目有稳定 `data-cy` 属性 | **可配置抓取**（深翻页需浏览器/state+CSRF） |
+| Messe Frankfurt（展会子域） | 允许 | 纯 JS（`#mf-ex-root`），条目走 JSON API（前端公开 apikey，`findEventVariable` 分页，含 `contacts` 字段） | **需专用适配器**（API 型；旧中央目录已不可达） |
+| 10times | 展会页未禁，但 `/ajax*?*` 等禁 | Cloudflare 挑战 403（"Just a moment..."） | **不可抓（C）**，从渠道目录移除 |
+
+结论：配置化抓取覆盖 SSR 友好站点（Hannover 类），JS/API 站点落专用适配器（Messe Frankfurt 类），Cloudflare 站点不做——验证了 Q4「配置优先、专用兜底」的边界。
 
 ### 4.5 管理后台（gain-saas）
 
@@ -119,6 +130,12 @@ CompanyPool(canonical) → CompanyChannelSighting/Evidence（渠道来源与证�
 
 客户侧周期任务自平台迁移后全部停摆（`ensurePlatformSchedules` 无调用方；机器身份无 ScheduleService）。修复 R7-A（推荐）：API 内定时器启动 sweep（StartWorkflowExecution 允许；workflowId=xxx-<period> 去重；启动补跑过期项）；R7-B（后续可选）：扩展平台 Temporal 机器策略并重发镜像。旧 dev Temporal（7233/8233）的 10 个空转 schedule 已删除，容器与卷保留待退役。
 
+### 6.5 公司池的合并与休眠（2026-11-04 决策）
+
+- **自动合并为主**：强信号（同注册域名/同注册号/同官网）自动合并；中等信号（名称相似度≥0.92＋同国家＋同城市或电话区号）自动合并但打标、30 天内可一键撤销；弱信号进疑似重复队列。所有合并写审计（来源两条、合并规则、操作者=系统），保留拆分入口。
+- **休眠**：连续 12 个月无信号且无租户跟进的公司标记 dormant（默认排序靠后、仍可搜索与点名深挖）；不删除。
+- 共享池边界：平台渠道产出进共享池；租户导入名单只进该租户私有池、不共享。
+
 ## 7. 闭环设计
 
 ### 7.1 反馈闭环（判断→学习）
@@ -140,6 +157,12 @@ CompanyPool(canonical) → CompanyChannelSighting/Evidence（渠道来源与证�
 - 通道：先自建 SMTP（专用企业邮箱，SPF/DKIM/DMARC 检查，发送窗口+日上限）；ESP 作为可选。
 - 回复处理（借 Mautic 模式）：IMAP 监控，In-Reply-To/Message-ID 关联，回复→停序列+分类（感兴趣/不感兴趣/退订/自动回复），退信→DNC，退订链接 + List-Unsubscribe(-Post)。
 - 审计：每次发送落审计（谁/何时/模板版本）；per-tenant 配额；四门（lawful-basis/制裁/抑制/频控）前置。
+
+### 7.4 lawful basis 与访问审计（2026-11-04 决策：取消租户声明）
+
+- 取消租户侧的"数据处理声明"（D6 声明功能退役：设置页入口下架，历史声明只读留存）；BFF 统一注入**平台级 lawful-basis 引用**（平台 LIA，OWNER-DECISION 口径），引擎请求级字段与审计保持不变（随时可恢复声明模式）。
+- 补偿控制：个人数据每次访问/物化写访问审计（谁/何时/公司/字段类/用途），保留 180 天；DSR 擦除链不变。
+- 隐私政策/LIA 文本同步更新（产品负责人最终签字）。
 
 ## 8. 评分与意图（两轴）
 
@@ -179,6 +202,7 @@ CompanyPool(canonical) → CompanyChannelSighting/Evidence（渠道来源与证�
 
 ## 11. 落地计划（PR 序列）
 
+- **M0-pre（先行小项）**：⓪ 取消租户声明（BFF 注入平台级 lawful-basis 引用 + 设置页入口下架 + 访问审计字段与隐私/LIA 文本更新）——独立小 PR，先于编排重构。
 - **M0（P0，编排重构）**：① 域模型迁移（jobs/events/task/taskRef/pool freshness）② Task/TaskRun+BFF+taskRef ③ 快扫阶段 ④ 深挖流水线+取消/暂停 ⑤ 进度 API+run 页最小改造 ⑥ finalize V2+影子模式+告警 ⑦ R7 sweep 调度修复（可与①并行）。
 - **M1（P0.5，渠道平台）**：⑧ source_channel+导入器 ⑨ 通用爬虫 v0+试跑 ⑩ 管理后台渠道页+租户导入 ⑪ 观察名单与失败告警。
 - **M2（P1，闭环）**：⑫ icp_feedback+查询权重+建议卡 ⑬ watches 修复+refresh run 调度。
@@ -200,7 +224,7 @@ CompanyPool(canonical) → CompanyChannelSighting/Evidence（渠道来源与证�
 ## 13. 合规与风险
 
 - 爬取：逐源 A/B/C 判定 + robots 强制 + 条款登记；被抓站投诉→立即停用（后台一键）。
-- 个人数据：联系人仅在 lawful-basis 门后处理；资料库与线索按租户隔离；DSR 级联不变。
+- 个人数据：渠道个人字段加密入平台受限存储（180 天滚动），按租户物化时过抑制/制裁门并记访问审计；lawful basis 采用平台级 LIA 引用（租户声明已取消）；资料库与线索按租户隔离；DSR 级联不变。
 - 触达：EU 禁发邮件、退订/频控/DNC 全局；发送域 SPF/DKIM/DMARC 检查。
 - 许可：AGPL 类（Firecrawl/Twenty/listmonk）只作参考或外围评估；数据许可（OpenSanctions NC）不用于商业路径。
 - 重构风险：patch 守卫 + Build ID 版本化 + 影子模式 + 迁移 expand-only。
