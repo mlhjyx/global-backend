@@ -78,6 +78,7 @@
     "patent_lookup_request": ["INSERT", "SELECT", "UPDATE"],
     "persona": ["DELETE", "INSERT", "SELECT", "UPDATE"],
     "personal_artifact_cleanup_command": [],
+    "personal_data_access_audit": ["INSERT", "SELECT"],
     "platform_egress_attempt": [],
     "platform_egress_fence_reopen_receipt": [],
     "platform_egress_schedule_fence": [],

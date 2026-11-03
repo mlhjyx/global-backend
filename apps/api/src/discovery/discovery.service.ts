@@ -26,6 +26,7 @@ import {
 } from './suppression-value';
 import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
 import { companyMayUseExternalProcessing, contactMayUseExternalProcessing } from './company-suppression-gate';
+import { recordPersonalDataAccess } from '../compliance/personal-data-access-audit';
 import { type BudgetStore, TOOL_BUDGET_STORE, UnavailableBudgetStore } from '../tools/budget-store';
 import {
   assertProductDiscoveryProvenance,
@@ -252,6 +253,12 @@ export class DiscoveryService {
         companyId,
         lawfulBasis: recordedBasis,
         binding,
+        audit: {
+          actorId: ctx.userId,
+          actorKind: 'user',
+          purpose: 'contact_discovery',
+          correlationId: opts?.attemptId ?? null,
+        },
       },
     );
   }
@@ -478,6 +485,17 @@ export class DiscoveryService {
           pointStatus: out.value.status ?? null,
         });
       }
+      // Q25：人名/邮箱访问审计，与落库同事务（谁/何时/公司/字段类/用途）。
+      await recordPersonalDataAccess(tx, {
+        workspaceId: ctx.workspaceId,
+        actorId: ctx.userId,
+        actorKind: 'user',
+        purpose: 'email_guess',
+        companyId,
+        fieldClasses: ['person_name', 'email'],
+        subjectCount: summary.attempted,
+        lawfulBasisRef: opts?.lawfulBasis?.ref ?? null,
+      });
       return summary;
     });
   }
@@ -568,6 +586,7 @@ export class DiscoveryService {
       return {
         pointValue: point.value,
         contactId: point.contactId,
+        companyId: company.id,
         kind: cleanEmail(point.value)?.kind,
         suppressed,
         adapter: adapters[0] as (typeof adapters)[number] | undefined,
@@ -750,6 +769,17 @@ export class DiscoveryService {
       const updated = await transaction.contactPoint.update({
         where: { id: pointId },
         data: { status: committedVerdict.status, verifiedAt: new Date() },
+      });
+      // Q25：邮箱验证访问审计（与状态回写同事务）。
+      await recordPersonalDataAccess(transaction, {
+        workspaceId: ctx.workspaceId,
+        actorId: ctx.userId,
+        actorKind: 'user',
+        purpose: 'email_verification',
+        companyId: loaded.companyId,
+        fieldClasses: ['email'],
+        subjectCount: 1,
+        lawfulBasisRef: recordedBasis?.ref ?? opts?.lawfulBasis?.ref ?? null,
       });
       return {
         ...updated,

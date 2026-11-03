@@ -13,6 +13,12 @@ import type { ContactDiscoveryBudgetGuard } from '../execution-budget/contact-di
 import { ExecutionControlError, isExecutionControlError } from '../execution-budget/execution-control-error';
 import { applyDomainAckConsumerTransactions } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+import {
+  fieldClassesForContacts,
+  recordPersonalDataAccess,
+  type PersonalDataAccessActorKind,
+  type PersonalDataAccessPurpose,
+} from '../compliance/personal-data-access-audit';
 
 const CONTACT_DISCOVERY_RECEIPT_PRODUCERS = Object.freeze([
   'crawl4ai.fetch',
@@ -53,6 +59,19 @@ export interface ContactDiscoveryCoreInput {
    * bounded by its own grant account alone.
    */
   contactBudget?: ContactDiscoveryBudgetGuard;
+  /**
+   * Q25（2026-11-04）：个人数据访问/物化审计的归因——谁（用户 id 或 discovery-run:<runId>）
+   * 在什么用途下访问了这家公司的联系人。
+   */
+  audit: {
+    actorId: string;
+    actorKind: PersonalDataAccessActorKind;
+    purpose: Extract<
+      PersonalDataAccessPurpose,
+      'contact_discovery' | 'run_contact_materialization'
+    >;
+    correlationId?: string | null;
+  };
 }
 
 /**
@@ -289,6 +308,18 @@ export async function discoverContactsCore(
       const contacts = await tx.canonicalContact.findMany({
         where: { companyId: loaded.company.id },
         include: { contactPoints: true },
+      });
+      // Q25：物化与审计同事务——物化了联系人却没有审计行的情况不出现。
+      await recordPersonalDataAccess(tx, {
+        workspaceId: input.workspaceId,
+        actorId: input.audit.actorId,
+        actorKind: input.audit.actorKind,
+        purpose: input.audit.purpose,
+        companyId: loaded.company.id,
+        fieldClasses: fieldClassesForContacts(contacts),
+        subjectCount: contacts.length,
+        lawfulBasisRef: input.lawfulBasis.ref ?? null,
+        correlationId: input.audit.correlationId ?? null,
       });
       return {
         contacts,

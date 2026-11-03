@@ -2149,6 +2149,29 @@ model LiaRecord {
   @@map("lia_record")
 }
 
+/// personal_data_access_audit（PR0 2026-11-04，决策 Q25「取消租户声明」的补偿控制）：
+/// 个人数据每次访问/物化写一行——谁（actor_id/kind）、何时、哪家公司、哪些字段类、什么用途。
+/// 租户 RLS，**append-only**（app_user 只有 SELECT/INSERT，migration 不授予 UPDATE/DELETE）；
+/// 保留 180 天，由 expire_personal_data_access_audit_v1 在 raw-retention sweep 中清理。
+/// 🔴 内容最小化：只记主体计数与字段类别（person_name/email/…），绝不存字段值或人名明文。
+model PersonalDataAccessAudit {
+  id             String   @id @default(uuid()) @db.Uuid
+  workspaceId    String   @map("workspace_id") @db.Uuid
+  actorId        String   @map("actor_id") @db.VarChar(200) // userId | system:discovery-run | …
+  actorKind      String   @map("actor_kind") @db.VarChar(16) // user | system | platform
+  purpose        String   @db.VarChar(48) // contact_discovery | email_guess | email_verification | run_contact_materialization | run_email_guess
+  companyId      String?  @map("company_id") @db.Uuid
+  fieldClasses   String[] @map("field_classes") // person_name | job_title | email | phone | linkedin | contact_path
+  subjectCount   Int      @default(0) @map("subject_count") // 涉及的自然人/联系方式条数（非明文字段值）
+  lawfulBasisRef String?  @map("lawful_basis_ref") @db.VarChar(512)
+  correlationId  String?  @map("correlation_id") @db.VarChar(200) // runId / attemptId / requestId
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, companyId, createdAt])
+  @@map("personal_data_access_audit")
+}
+
 /// article14_notice（收口⑥）：GDPR Art.14 间接收集透明义务记录（获取后 1 个月内 / 首次接触时告知）。
 /// 租户 RLS。obligation 判定由 DataRightsService 产出，履行状态在此追踪。
 model Article14Notice {

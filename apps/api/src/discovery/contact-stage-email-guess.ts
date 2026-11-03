@@ -40,6 +40,7 @@ import {
 } from '../execution-budget/execution-control-error';
 import { MAX_RUN_EMAIL_PROBES_PER_COMPANY } from './execution-envelope';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+import { recordPersonalDataAccess } from '../compliance/personal-data-access-audit';
 
 const SMTP_PROBE_PRODUCER = 'smtp.rcpt_probe' as const;
 
@@ -54,6 +55,8 @@ export interface RunContactEmailGuessInput {
   runId: string;
   /** The run's ledger account (ToolBroker attributes every physical SMTP probe to it). */
   accountKey: string;
+  /** Q25 审计归因：本批联系人所属的 canonical 公司。 */
+  companyId: string;
   domain: string;
   contacts: readonly RunEmailGuessContact[];
   lawfulBasis: LawfulBasis;
@@ -210,6 +213,19 @@ export async function guessEmailsForRunCompany(
       if (outcome.value.status === 'VALID') summary.verified += 1;
       else summary.risky += 1;
     }
+    // Q25：run 内邮箱补全的访问审计（与落库同事务）。只在真正探测过时记录——
+    // 一人都没探的调用没有额外处理个人数据。
+    await recordPersonalDataAccess(tx, {
+      workspaceId: input.workspaceId,
+      actorId: `discovery-run:${input.runId}`,
+      actorKind: 'system',
+      purpose: 'run_email_guess',
+      companyId: input.companyId,
+      fieldClasses: ['person_name', 'email'],
+      subjectCount: summary.attempted,
+      lawfulBasisRef: input.lawfulBasis.ref ?? null,
+      correlationId: input.runId,
+    });
   });
   return summary;
 }
