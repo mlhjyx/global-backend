@@ -75,14 +75,20 @@
   | --- | --- | --- |
   | 有邮箱候选的人 | 4 / 37（3 UNVERIFIED 直抽 + 1 RISKY） | **37 / 37** |
   | 状态分布 | — | RISKY 34、UNVERIFIED 3（直抽）、**VALID 0** |
-- **VALID 为 0 的原因（已实测，非逻辑缺陷）**：本机到外部 MX 的 **25 端口不可出网**
-  （实测 `gmail-smtp-in.l.google.com:25` 连接 12 秒无 banner 超时；宿主走 Clash TUN，通常不转发 25）。
-  SMTP RCPT 握手无法进行，所有猜测邮箱停留在 RISKY（姓名+域名的强模式，但未经可达性确认）。
+- **25 出站的根因与修复（已查明）**：本机防火墙 OUTPUT 全放行；根因是 Clash TUN 把所有流量
+  MATCH 到机场节点，而**该节点只转发 80/443**（实测经它 CONNECT 25/587/22 一律无数据，80/443 正常）。
+  在 Clash Verge 的 Merge 配置加 `DST-PORT,25,DIRECT` / `DST-PORT,587,DIRECT`（持久化）并热重载后，
+  25 直连恢复正常（Gmail / Outlook / iCloud MX 实测均返回 `220` banner，TUN 保持开启）。
+- **SMTP 验证的真实结果（网络修复后重跑）**：37 个点全部完成：
+  **2 INVALID、35 RISKY、0 VALID**。2 个 INVALID 均属同一域名（RCPT 明确拒收——该域的邮箱
+  命名模式与 `vorname.nachname@` 不符）；0 VALID 是验证器的**诚实口径**而非缺陷：VALID 要求
+  「RCPT 接受 + 随机地址被拒（catch-all 证伪）+ 非反枚举」，而德国 SME 大量使用 catch-all 域名或
+  灰名单应答，多数候选只能停在 RISKY（`buyer-intelligence-v3.md` §10.3 的既定上限）。
 - **意义**：`email_guess` 把「有邮箱候选」从 11% 提到 100%，德国 SME 的
   `vorname.nachname@domain` 模式命中率高；但外发前仍需人工确认或打通验证通道。
 - **建议**：
-  1. 检查出口能否放行 25 端口（需用户在 Clash/ISP 侧操作；本机不擅动代理）；
-  2. 若长期不可放行，评估免费可用的替代验证通道（MX/SMTP 以外），或接受
-     「RISKY → 人工确认」工作流并在 UI 上标注；
-  3. 真实客户外发保持现行质量门：RISKY 不自动进入 VALID、外发前人工确认。
+  1. 25 出站已修复（Clash Merge 配置已持久化），无需再动网络；
+  2. 邮箱可用性的现实路径是「RISKY（catch-all 证伪未遂）→ 人工确认」；UI 上可把
+     INVALID（RCPT 拒收，不可用）与 RISKY（可能可用）区分展示，避免人工逐个排查；
+  3. 真实客户外发保持现行质量门：RISKY 不自动进入 VALID、外发前人工确认；INVALID 不再重试。
 
