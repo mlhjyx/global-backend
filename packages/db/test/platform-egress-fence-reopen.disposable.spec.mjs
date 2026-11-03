@@ -242,7 +242,7 @@ describe("audited platform egress fence reopen on self-owned disposable PostgreS
       "POSTGRES_HOST_AUTH_METHOD=trust",
       "-e",
       "POSTGRES_DB=reopen_test",
-      "pgvector/pgvector:pg16",
+      "pgvector/pgvector@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b",
     ]);
     assert.equal(started.status, 0, started.stderr);
     created = true;
