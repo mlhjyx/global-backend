@@ -1,7 +1,8 @@
 # D6：per-tenant LIA 采集（多租户前的合法依据声明）
 
-> 生命周期：`DRAFT`
-> 依据：产品负责人 2026-11-03 拍板「现在做」；待确认 D6-1~D6-4 设计要点后改 APPROVED 再实施。
+> 生命周期：`CLOSED`
+> 依据：产品负责人 2026-11-03 拍板「现在做」，并确认 D6-1 最小版 / D6-2 403+引导 / D6-3 保留版本历史 / D6-4 立即生效。
+> 落地：gain-saas PR #40 已合并（squash `c555122`，2026-11-03）；迁移与 systemd 服务重建待部署授权，见 §七。
 > 依据：联系人发现设计稿 §5.3d / D6；产品负责人 2026-11-03 拍板「现在需要多租户，现在做」。
 
 ## 一、现状（实读代码）
@@ -53,3 +54,22 @@
 
 - BFF 注入让「每次显式操作声明」变成「租户级一次性声明」——审计形态变化由 note 快照 + 声明表版本补偿。
 - 多租户角色：谁能声明/修改（建议 admin/owner，member 只读）。
+
+## 七、实施记录（2026-11-03）
+
+**已合并**：gain-saas PR `mlhjyx/gain-saas#40`（squash `c555122`）。改动：声明表
+`workspace_compliance_declaration`（手写迁移 `20261103120000`，`version` 自增、历史保留）+
+`ComplianceDeclarationService`（枚举/长度校验、并发 P2002 重试、审计 `compliance.declare`）+
+BFF `GET/PUT /api/settings/compliance`（写仅 admin）与三路由注入（quote 之前）+ 设置页与决策人卡片改造。
+服务端 34 文件 / 181 测试全绿；web 构建绿（vue-tsc 仅余主干既有的 2 条 vxe-pc-ui 声明缺失）。
+
+**实施中的两处设计修正**（独立审查后落地，与 §三 的初稿表述不同，以此处为准）：
+
+1. **注入的 `lawfulBasisNote` 只放版本戳**（`declared vN YYYY-MM-DD`），不附 note 全文。引擎合同限
+   note ≤1000 字符且禁控制字符（`NO_CONTROL_CHARS`，多行直接 400/502），而声明摘要允许 4000 字符多行。
+   声明全文保存在 SaaS 声明表（版本 + `declared_by`/`declared_at` + 审计），引擎侧凭版本戳回溯。
+2. **`lawfulBasisRef` 在注入时压成单行并截断 ≤480**，历史脏行也不会打挂联系人操作。
+
+**待办（部署，需产品负责人逐次授权）**：合并只落了代码；上线还需在 gain-saas 根 checkout（已同步到
+`c555122`）执行 `prisma migrate deploy`（迁移 `20261103120000_workspace_compliance_declaration`），
+然后重建并重启 gain-saas systemd 服务。未部署前，生产/现网行为不变。
