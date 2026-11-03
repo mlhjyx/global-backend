@@ -7435,6 +7435,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecuteQueryPlanDto"
+              }
+            }
+          }
+        },
         "responses": {
           "202": {
             "description": "",
@@ -18458,6 +18468,36 @@
           "version",
           "createdAt"
         ]
+      },
+      "ExecuteTaskRefDto": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "taskRunId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "taskId",
+          "taskRunId"
+        ]
+      },
+      "ExecuteQueryPlanDto": {
+        "type": "object",
+        "properties": {
+          "taskRef": {
+            "description": "Run 2.0 任务归因；旧调用方不传时行为不变。",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ExecuteTaskRefDto"
+              }
+            ]
+          }
+        }
       },
       "DiscoverContactsDto": {
         "type": "object",
