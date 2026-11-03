@@ -42,7 +42,10 @@ tmp/
 __pycache__/
 *.py[cod]
 
-# repo-local Codex runtime state; policy lives in .codex/README.md
+# repo-local Claude Code runtime state; policy lives in .claude/README.md
+/.claude/worktrees/
+/.claude/audits/
+# legacy Codex-era worktrees (pre-2026-11-04 in-flight worktrees only)
 /.codex/worktrees/
 /.codex/audits/
 /.code-intelligence/
