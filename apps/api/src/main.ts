@@ -86,6 +86,7 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
     .setVersion('0.1.0')
     .addServer('/', '同源部署（相对路径；具体 host 由部署环境决定）')
     .addTag('Companies', '企业画像：提交官网、看完整度、审批后人工确认')
+    .addTag('Seller Documents', '卖家资料库：上传签票、提交校验、列表 / 下载 / 重试 / 软删')
     .addTag('Claims', '企业事实与来源：审批 / 驳回 / 撤销、冲突裁决')
     .addTag('ICP', '理想客户画像：规则、回溯测试、查询计划')
     .addTag('Discovery', '查询计划执行、规范化公司、联系人补全、抑制名单')

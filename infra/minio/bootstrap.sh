@@ -126,6 +126,9 @@ fi
 mc mb --ignore-existing "deployment/$S3_BUCKET"
 mc ilm rule import "deployment/$S3_BUCKET" < /config/site-builder-lifecycle.json
 
+mc mb --ignore-existing "deployment/$SELLER_DOCUMENTS_S3_BUCKET"
+mc ilm rule import "deployment/$SELLER_DOCUMENTS_S3_BUCKET" < /config/seller-documents-lifecycle.json
+
 mc mb --ignore-existing "deployment/$GENERIC_OPERATION_ARTIFACT_S3_BUCKET"
 mc version enable "deployment/$GENERIC_OPERATION_ARTIFACT_S3_BUCKET"
 mc encrypt set SSE-S3 "deployment/$GENERIC_OPERATION_ARTIFACT_S3_BUCKET"
@@ -141,6 +144,15 @@ assert_contains "$compact_content" '"ID":"global-variant-attempt-ttl"' site-buil
 assert_contains "$compact_content" '"Status":"Enabled"' site-builder-lifecycle
 assert_contains "$compact_content" '"Expiration":{"Days":1}' site-builder-lifecycle
 assert_contains "$compact_content" '"Tag":{"Key":"global-lifecycle","Value":"variant-attempt"}' site-builder-lifecycle
+
+seller_actual=/tmp/seller-documents-lifecycle.actual.json
+seller_compact=/tmp/seller-documents-lifecycle.compact.json
+mc ilm rule export "deployment/$SELLER_DOCUMENTS_S3_BUCKET" > "$seller_actual"
+tr -d '[:space:]' < "$seller_actual" > "$seller_compact"
+seller_compact_content=$(cat "$seller_compact")
+assert_contains "$seller_compact_content" '"ID":"seller-document-staging-ttl"' seller-documents-lifecycle
+assert_contains "$seller_compact_content" '"Tag":{"Key":"global-lifecycle","Value":"seller-document-staging"}' seller-documents-lifecycle
+assert_contains "$seller_compact_content" '"Expiration":{"Days":1}' seller-documents-lifecycle
 
 artifact_actual=/tmp/generic-operation-artifact-lifecycle.actual.json
 artifact_compact=/tmp/generic-operation-artifact-lifecycle.compact.json
