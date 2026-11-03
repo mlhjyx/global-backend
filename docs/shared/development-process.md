@@ -51,7 +51,7 @@ ADR 的 `ACCEPTED` 只表示决定生效，不等于实现或验收；`docs/evid
 
 ## 2B. 变更通道与 PR 触发规则
 
-**总原则：进入 `backend` / `gain-saas` git 仓库的变更一律走 PR；触发看变更类型，不看改动行数。** 一个任务一个 PR，一个 PR 只做一件事。
+**总原则：进入 `backend` / `gain-saas` git 仓库的变更一律走 PR；触发看变更类型，PR 按逻辑单元计数（见 2B-1），不按改动行数或编辑次数。** 一个任务一个 PR，一个 PR 只做一件事。
 
 | 通道 | 适用 | 需要 | 不需要 |
 | --- | --- | --- | --- |
@@ -61,6 +61,23 @@ ADR 的 `ACCEPTED` 只表示决定生效，不等于实现或验收；`docs/evid
 | 不走 PR | 工作区非 git 文件（`/global/CLAUDE.md`、RUNBOOK、记忆、`_archive`） | 直接修改并留痕 | 分支、PR |
 
 **触发条件**：任何会进入 main 的改动都必须开 PR——包括一行修复、文档、依赖补丁。不需要开 PR 的只有：本地临时文件（不入库）、记忆文件、工作区运维文件（改了要留痕）。**永远不做**：直接 push main、在根 checkout 做功能修改、`--no-verify` 绕过门禁、把多个不相干任务塞进一个 PR。
+
+### 2B-1 粒度与批次（PR 的计数单位）
+
+**PR 的计数单位是「一个可独立审查、可独立回滚的逻辑变更」，不是一次编辑、一个文件或一个 commit。**
+
+| 粒度 | 判定 | 怎么提 |
+| --- | --- | --- |
+| micro | ≤1 文件、纯文档/注释/配置、无行为变化 | 不单独开 PR：攒进同主题批次 PR，或搭同主题在途 PR |
+| small | 单点修复/小功能；diff 目标 ≤300–400 行（不含锁文件与生成物） | 独立 PR；一个任务内多个 commit 走同一个 PR |
+| feature | 多文件或跨层（数据/合同/逻辑/文档） | 拆成可独立合入的步骤；有依赖时用 stacked PR（base 指向前一层），每步合入后 main 可运行 |
+| epic | 新能力、架构或安全边界变化 | 先计划/ADR（T2），再按 feature 拆 |
+
+**批次规则**：同主题的 micro 改动可以攒一个工作段（或一天）合成一个 PR；不相关的修复不合并，保留 bisect 与 revert 的清晰度；紧急热修单独走 T3。**已开 PR 的同主题修正追加到该 PR，不新开**——例如 PR 因门禁超限需要压缩入口文件、或补一条规则，属于原 PR 的收尾。
+
+**为什么不是「改一下就提 PR」**：入库必须经过 PR（主干保护），但 PR 按逻辑单元开，不按编辑次数开。审查经济学也支持这一点：业界综述给出的量级是 <200 行的变更批准快约 3 倍、缺陷少约 40%，每多 100 行约多 25 分钟审查，超过约 1,000 行缺陷检出率明显下降。参考：Google [Small CLs](https://google.github.io/eng-practices/review/developer/small-cls.html)、GitHub 原生 stacked PR（2026-10 GA）、Graphite merge queue 指南。
+
+**拆不动怎么办**：先把纯重构或 expand 步骤单独合入（与行为变化分开）；宽范围机械改动（整文件删除、自动重命名）按 Google 规则视为小改动。
 
 **PR 生命周期**：`git fetch` → worktree（`pnpm worktree:new`，分支 `codex/<topic>` 或 `claude/<topic>`）→ Conventional Commits → 开 PR（「给产品负责人的说明」四行 + 已执行/未执行检查）→ 独立自审 → 必需检查在**当前 head** 全绿 → squash 合并（DEC-AIDEV-004）→ 删 worktree/分支并用 `node scripts/governance-main-worktree-sync.mjs apply` 同步 main。部署与发布是独立门，不在 PR 内完成。PR 正文必须如实列：已执行的检查、未执行或因环境跳过的检查、关联计划/ADR、回退方式。
 
