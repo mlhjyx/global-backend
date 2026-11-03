@@ -1,6 +1,7 @@
 # 获客挖掘体系总体规划（v1）：渠道数据源平台 + Run 2.0 + 反馈闭环 + 管理后台
 
-> 生命周期：`DRAFT`（中间稿，已并入 `2026-11-04-acquisition-system-complete-design.md`，以完整设计为准）
+> 生命周期：`DRAFT`
+> 说明：中间稿，已并入 `2026-11-04-acquisition-system-complete-design.md`，以完整设计为准
 > 依据：产品负责人 2026-11-04 要求「一个总的方案」「新增渠道数据源，没有 API 的就爬取」「gain-saas 管理后台要有渠道管理」。本文是总规划；子设计：快扫/深挖（`2026-11-04-discovery-quick-deep-tiers.md`，已批）、闭环改造细节（`2026-11-04-discovery-run-closed-loop-redesign.md`，并入本文 §4）。
 
 ## 一、目标与原则
