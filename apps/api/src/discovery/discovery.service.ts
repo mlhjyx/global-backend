@@ -38,6 +38,7 @@ import {
   type ExecutionBudgetBinding,
 } from '../execution-budget/execution-budget-authority.service';
 import {
+  discoverContactsExecutionBudgetRequestScope,
   guessEmailsExecutionBudgetRequestScope,
   verifyContactPointExecutionBudgetRequestScope,
   workspaceExecutionBudgetRequestScope,
@@ -220,7 +221,7 @@ export class DiscoveryService {
   async discoverContacts(
     ctx: RequestContext,
     companyId: string,
-    opts?: { lawfulBasis?: LawfulBasis },
+    opts?: { lawfulBasis?: LawfulBasis; attemptId?: string },
     compactJws?: string,
   ) {
     if (!isValidLawfulBasis(opts?.lawfulBasis)) {
@@ -239,9 +240,8 @@ export class DiscoveryService {
     const binding = await this.authority.consumeWorkspaceGrant({
       compactJws,
       identity: ctx,
-      scope: workspaceExecutionBudgetRequestScope({
-        operation: 'POST /canonical-companies/:id/discover-contacts',
-        companyId,
+      scope: discoverContactsExecutionBudgetRequestScope(companyId, {
+        attemptId: opts.attemptId,
       }),
     });
     assertFreshExecutionBudgetBinding(binding);

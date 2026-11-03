@@ -361,12 +361,20 @@ function parseRequest(value: unknown): WorkspaceExecutionBudgetRequest {
         operation: input.operation,
         planId: uuid(input.planId),
       });
-    case 'POST /canonical-companies/:id/discover-contacts':
-      exactKeys(input, ['operation', 'companyId']);
+    case 'POST /canonical-companies/:id/discover-contacts': {
+      exactKeys(input, ['operation', 'companyId'], ['body']);
+      const companyId = uuid(input.companyId);
+      if (input.body === undefined) {
+        return Object.freeze({ operation: input.operation, companyId });
+      }
+      const bodyRecord = record(input.body);
+      exactKeys(bodyRecord, ['attemptId']);
       return Object.freeze({
         operation: input.operation,
-        companyId: uuid(input.companyId),
+        companyId,
+        body: Object.freeze({ attemptId: uuid(bodyRecord.attemptId) }),
       });
+    }
     case 'POST /canonical-companies/:id/guess-emails':
       exactKeys(input, ['operation', 'companyId'], ['body']);
       return Object.freeze({
@@ -499,7 +507,15 @@ const WORKSPACE_QUOTE_REQUEST_SCHEMAS = [
   ),
   operationVariant(
     'POST /canonical-companies/:id/discover-contacts',
-    { companyId: { type: 'string', format: 'uuid' } },
+    {
+      companyId: { type: 'string', format: 'uuid' },
+      body: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['attemptId'],
+        properties: { attemptId: { type: 'string', format: 'uuid' } },
+      },
+    },
     ['companyId'],
   ),
   operationVariant(

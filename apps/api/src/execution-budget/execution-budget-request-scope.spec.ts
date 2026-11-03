@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  discoverContactsExecutionBudgetRequestScope,
   guessEmailsExecutionBudgetRequestScope,
   verifyContactPointExecutionBudgetRequestScope,
   workspaceExecutionBudgetRequestScope,
@@ -97,6 +98,20 @@ const cases = [
   },
   {
     request: {
+      operation: 'POST /canonical-companies/:id/discover-contacts',
+      companyId: CANONICAL_COMPANY_ID,
+      body: { attemptId: '7e6f6f43-8f8d-4c2a-9b1e-2a3b4c5d6e7f' },
+    },
+    expected: {
+      purpose: 'discovery.run',
+      subjectType: 'company',
+      subjectId: CANONICAL_COMPANY_ID,
+      requestSha256:
+        '1f4adbb5fdcbf99b63844a6d011a1e11316f81098f287d069b8689efd57386c4',
+    },
+  },
+  {
+    request: {
       operation: 'POST /canonical-companies/:id/guess-emails',
       companyId: CANONICAL_COMPANY_ID,
       body: undefined,
@@ -179,7 +194,7 @@ describe('workspaceExecutionBudgetRequestScope', () => {
         operation: 'POST /contact-points/:pointId/verify',
         pointId: POINT_ID,
       }),
-    ).toEqual(cases[7]!.expected);
+    ).toEqual(cases[8]!.expected);
 
     expect(() =>
       workspaceExecutionBudgetRequestScope({
@@ -188,6 +203,18 @@ describe('workspaceExecutionBudgetRequestScope', () => {
         body: { invalid: 1n } as never,
       }),
     ).toThrow('EXECUTION_BUDGET_REQUEST_INVALID');
+  });
+
+  it('hashes Discover Contacts from attemptId while preserving the legacy hash when absent', () => {
+    expect(discoverContactsExecutionBudgetRequestScope(CANONICAL_COMPANY_ID)).toEqual(
+      cases[5]!.expected,
+    );
+
+    expect(
+      discoverContactsExecutionBudgetRequestScope(CANONICAL_COMPANY_ID, {
+        attemptId: '7e6f6f43-8f8d-4c2a-9b1e-2a3b4c5d6e7f',
+      }),
+    ).toEqual(cases[6]!.expected);
   });
 
   it('hashes Guess Emails from the exact public HTTP DTO before lawful-basis reshaping', () => {

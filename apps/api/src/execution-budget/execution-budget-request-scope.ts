@@ -32,6 +32,8 @@ export type WorkspaceExecutionBudgetRequest =
   | Readonly<{
       operation: 'POST /canonical-companies/:id/discover-contacts';
       companyId: string;
+      /** 每次点击联系人发现生成的幂等键；缺省时请求哈希与旧版一致。 */
+      body?: Readonly<{ attemptId: string }>;
     }>
   | Readonly<{
       operation: 'POST /canonical-companies/:id/guess-emails';
@@ -113,7 +115,14 @@ function requestMaterial(request: WorkspaceExecutionBudgetRequest): JsonValue {
     case 'POST /query-plans/:planId/execute':
       return { operation: request.operation, planId: request.planId };
     case 'POST /canonical-companies/:id/discover-contacts':
-      return { operation: request.operation, companyId: request.companyId };
+      return {
+        operation: request.operation,
+        companyId: request.companyId,
+        // 仅当客户端带 attemptId 时才进入哈希，保证旧请求的账户键不变。
+        ...(request.body === undefined
+          ? {}
+          : { body: request.body as JsonValue }),
+      };
     case 'POST /canonical-companies/:id/guess-emails':
       return {
         operation: request.operation,
@@ -232,6 +241,19 @@ export function guessEmailsExecutionBudgetRequestScope(
           maxProbe: body.maxProbe,
         }
       : undefined,
+  });
+}
+
+/** Canonical public DTO boundary used by both the HTTP adapter and grant issuer. */
+export function discoverContactsExecutionBudgetRequestScope(
+  companyId: string,
+  body?: { readonly attemptId?: string },
+): Readonly<WorkspaceExecutionBudgetScope> {
+  const attemptId = body?.attemptId;
+  return workspaceExecutionBudgetRequestScope({
+    operation: 'POST /canonical-companies/:id/discover-contacts',
+    companyId,
+    ...(attemptId === undefined ? {} : { body: { attemptId } }),
   });
 }
 
