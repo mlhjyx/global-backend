@@ -48,6 +48,22 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
   'GET /api/v1/companies/{companyId}/offerings':
     '理解阶段抽取出的结构化产品/服务，每条带来源页 URL 与原文片段。数组响应，不分页。',
 
+  // ── SellerDocuments（模块 02 · Phase 2）──────────────────────────────────────
+  'POST /api/v1/companies/{companyId}/seller-documents/presign':
+    '为卖家资料上传签发短时 presigned PUT（15 分钟）。校验 MIME 白名单与单文件上限（PDF/Word/PPT/Excel ≤50MB，文本/Markdown ≤10MB）与配额（每空间 500 份/2 GiB、每公司 200 份，env 可调）；超限返回 409。返回 documentId 与 uploadUrl，上传对象带 1 天过期的 staging 生命周期标签。',
+  'POST /api/v1/companies/{companyId}/seller-documents/{documentId}/commit':
+    '确认上传完成：对 staging 对象做 HEAD、流式 sha256 与魔数校验（声明的 MIME 必须与实际内容相符），通过后转存 canonical 对象并将文档置为 queued、入队解析。上传未完成返回 409 并留在 pending_upload；内容不符置 rejected；同一公司已存在相同内容时返回 409 并清理已复制副本。',
+  'GET /api/v1/companies/{companyId}/seller-documents':
+    '游标分页列出公司的卖家资料（软删不可见）：limit 默认 20、上限 100，返回 { data, page: { next_cursor, has_more } }。每条含状态（pending_upload/committing/queued/processing/ready/failed_terminal/rejected）、类型与字节数。',
+  'GET /api/v1/seller-documents/{documentId}':
+    '按 id 取单份资料详情。资源属于其他 workspace 或已软删时返回 404，不泄露存在性。',
+  'GET /api/v1/seller-documents/{documentId}/download-url':
+    '返回 10 分钟有效的 presigned GET；尚未上传完成（pending_upload/committing）或已被拒绝时返回 409。',
+  'POST /api/v1/seller-documents/{documentId}/retry':
+    '重试解析：仅 failed_terminal 或 queued 状态可调用，重置错误码后重新入队（202）。需要 acquisition:write。',
+  'DELETE /api/v1/seller-documents/{documentId}':
+    '软删一份资料：置 deleted_at 并从列表与下载中消失；对象与分块的物理清理在受控清理管线（DSR 同路径）完成。需要 acquisition:review。',
+
   // ── Claims ────────────────────────────────────────────────────────────────
   'GET /api/v1/companies/{companyId}/claims':
     '列出该企业的事实（Claim），可用 ?status=NEEDS_REVIEW 过滤；每条带来源与状态。',
