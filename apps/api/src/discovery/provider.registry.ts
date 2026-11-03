@@ -472,7 +472,7 @@ export class DiscoveryProviderRegistry {
       create: { key: 'google_patents', class: 'contact_discovery', status: 'DISABLED', costPerCallCents: 0 },
     });
     // 合规注册：官方 BigQuery 公共数据集（非爬，平台合约轨干净）；personalData=true —— inventors 是具名发明人（GDPR）。
-    // CC BY 4.0 绿事实可商用**但署名是 license 义务**（⚠️ ENABLE 前按数据集元数据核实确切文案）；
+    // CC BY 4.0 绿事实可商用**但署名是 license 义务**（确切文案 2026-11-03 已核实，见 plans/2026-11-03-google-patents-enablement-lia.md）；
     // 数据最小化（只 name，无 residence/国籍）在 adapter 层强制；成本护栏 maximumBytesBilled 硬顶护 1TB/月免费额度。
     if (db.sourcePolicy) {
       await db.sourcePolicy.upsert({
@@ -489,7 +489,7 @@ export class DiscoveryProviderRegistry {
           allowedPurpose: ['discovery', 'enrichment'],
           retentionDays: 365,
           notes:
-            'BigQuery Google Patents Public Data（bigquery.googleapis.com；patents-public-data.patents.publications，IFI CLAIMS 谐调）。服务账号鉴权 + maximumBytesBilled 成本护栏（护 1TB/月免费额度）。CC BY 4.0 绿事实可商用但署名义务（Google Patents Public Data / IFI CLAIMS，⚠️ ENABLE 前核实确切文案）；发明人 = 🔴 具名个人（GDPR），数据最小化（只 name，不摄 residence/国籍），触达前过 lawful-basis 门。scale-safe #89：逐公司查改走 postgres scoped 缓存（patent_inventor_cache）——一次共享大扫落库、逐公司零 BQ 字节读；缓存 inventorName 列级 encryptPii 落盘 + 盲键 inventorNameKey，TTL≤180d（严于 retentionDays）到期/出窗自动清理，Art.17 擦除按盲键扫描面命中删。§8.8 用途门刷新侧自守（SUSPENDED→DENIED 不扫）。🔴 翻 ENABLED（缓存把 lawful-basis 门前 PII 静态化多一存储面）须用户先签 LIA/DPIA——在此之前 data_provider.google_patents=DISABLED 且 PATENT_SOURCE_MODE=off。',
+            'BigQuery Google Patents Public Data（bigquery.googleapis.com；patents-public-data.patents.publications，IFI CLAIMS 谐调）。服务账号鉴权 + maximumBytesBilled 成本护栏（护 1TB/月免费额度）。CC BY 4.0 绿事实可商用但署名义务（文案 2026-11-03 已核实："Google Patents Public Data" by IFI CLAIMS Patent Services and Google, CC BY 4.0）；发明人 = 🔴 具名个人（GDPR），数据最小化（只 name，不摄 residence/国籍），触达前过 lawful-basis 门。scale-safe #89：逐公司查改走 postgres scoped 缓存（patent_inventor_cache）——一次共享大扫落库、逐公司零 BQ 字节读；缓存 inventorName 列级 encryptPii 落盘 + 盲键 inventorNameKey，TTL≤180d（严于 retentionDays）到期/出窗自动清理，Art.17 擦除按盲键扫描面命中删。§8.8 用途门刷新侧自守（SUSPENDED→DENIED 不扫）。🔴 翻 ENABLED（缓存把 lawful-basis 门前 PII 静态化多一存储面）须用户先签 LIA/DPIA——在此之前 data_provider.google_patents=DISABLED 且 PATENT_SOURCE_MODE=off。',
         },
       });
     }

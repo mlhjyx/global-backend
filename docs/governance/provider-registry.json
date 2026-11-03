@@ -265,8 +265,8 @@
         "inventor identity"
       ],
       "license": {
-        "classification": "CC-BY-4.0_UNCONFIRMED",
-        "note": "Dataset wording must be reverified before enablement; attribution is treated as required."
+        "classification": "CC-BY-4.0_CONFIRMED",
+        "note": "Google Cloud 官方公告原文：\"Google Patents Public Data\" by IFI CLAIMS Patent Services and Google, CC BY 4.0（署名照此格式；商用允许；\"for public use\" 属同页 CPC 数据，不适用）。核实于 2026-11-03，见 docs/superpowers/plans/2026-11-03-google-patents-enablement-lia.md。启用仍受 LIA/DPIA 与平台执行契约约束。"
       },
       "personal_data_class": "PERSONAL_DATA",
       "default_enablement": "DISABLED",
