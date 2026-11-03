@@ -1,7 +1,8 @@
 name: CI
 
 # 每个 PR 与 main 推送自动跑：install → prisma generate → build(=tsc 类型检查) → test(vitest)。
-# 三类重门按改动路径触发（同一个 scope job 计算，拿不到可用 diff 时一律全跑）：
+# 四类重门按改动路径触发（同一个 scope job 计算，拿不到可用 diff 时一律全跑）：
+#   · packages/db 数据库测试（service PostgreSQL 组 + 自起 pgvector 组）：代码改动时运行，纯文档跳过
 #   · 55 型三断点视觉回归：渲染输出、其消费的契约或本工作流变更时
 #   · 原生 Temporal reader 服务（Go race，约 14 分钟）：infra/temporal-platform/server 或本工作流变更时
 #   · OCI 运行镜像构建与三项镜像冒烟：除纯文档与代理元数据外的任何改动
@@ -42,6 +43,7 @@ jobs:
       run_visual: ${{ steps.scope.outputs.run_visual }}
       run_temporal_go: ${{ steps.scope.outputs.run_temporal_go }}
       run_oci: ${{ steps.scope.outputs.run_oci }}
+      run_db_tests: ${{ steps.scope.outputs.run_db_tests }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -66,6 +68,7 @@ jobs:
             echo "run_visual=true" >> "$GITHUB_OUTPUT"
             echo "run_temporal_go=true" >> "$GITHUB_OUTPUT"
             echo "run_oci=true" >> "$GITHUB_OUTPUT"
+            echo "run_db_tests=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -74,12 +77,14 @@ jobs:
             echo "run_visual=true" >> "$GITHUB_OUTPUT"
             echo "run_temporal_go=true" >> "$GITHUB_OUTPUT"
             echo "run_oci=true" >> "$GITHUB_OUTPUT"
+            echo "run_db_tests=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           run_visual=false
           run_temporal_go=false
           run_oci=false
+          run_db_tests=false
           while IFS= read -r -d '' path; do
             case "$path" in
               apps/site-renderer/* | \
@@ -113,6 +118,13 @@ jobs:
                 run_oci=true
                 ;;
             esac
+            # DB 测试只随其真实输入改动运行（db schema/迁移、API 源码、合同、脚本与锁文件）。
+            case "$path" in
+              .github/workflows/ci.yml | packages/db/* | apps/api/* | packages/contracts/* | \
+              scripts/* | package.json | pnpm-lock.yaml | pnpm-workspace.yaml)
+                run_db_tests=true
+                ;;
+            esac
           done < "$scope_paths"
 
           if [[ "$run_visual" == true ]]; then
@@ -122,6 +134,7 @@ jobs:
           fi
           echo "run_temporal_go=${run_temporal_go}" >> "$GITHUB_OUTPUT"
           echo "run_oci=${run_oci}" >> "$GITHUB_OUTPUT"
+          echo "run_db_tests=${run_db_tests}" >> "$GITHUB_OUTPUT"
 
   build-test:
     name: build · typecheck · test
@@ -727,3 +740,74 @@ jobs:
           fail-on: ERR
           # 私有契约不外发：v0.1.6 默认 review:true 会把 spec 上传 oasdiff.com 并发 PR 评论
           review: "false"
+
+  db-tests-service:
+    name: db tests · service Postgres
+    needs: renderer-visual-scope
+    if: ${{ !cancelled() && needs.renderer-visual-scope.outputs.run_db_tests == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: pgvector/pgvector@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+        env:
+          POSTGRES_USER: global
+          POSTGRES_PASSWORD: global-test-only
+          POSTGRES_DB: global_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U global -d global_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+      APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+      - name: Prisma generate
+        run: pnpm --filter @global/db generate
+      - name: Migrate service database
+        run: pnpm --filter @global/db exec prisma migrate deploy
+      - name: DB test manifest spec
+        run: node --test scripts/run-db-tests.spec.mjs
+      - name: Docs freshness spec
+        run: node --test scripts/docs-freshness.spec.mjs
+      - name: Service-backed DB tests
+        run: node scripts/run-db-tests.mjs --group service
+
+  db-tests-isolated:
+    name: db tests · isolated ${{ matrix.shard }}/2
+    needs: renderer-visual-scope
+    if: ${{ !cancelled() && needs.renderer-visual-scope.outputs.run_db_tests == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+      - name: Prisma generate
+        run: pnpm --filter @global/db generate
+      - name: Isolated DB tests（self-provisioned pgvector）
+        run: node scripts/run-db-tests.mjs --group isolated --shard ${{ matrix.shard }}/2

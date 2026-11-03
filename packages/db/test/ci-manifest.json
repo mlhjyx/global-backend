@@ -1,0 +1,36 @@
+{
+  "service": [
+    "execution-budget-authority.rls.spec.mjs",
+    "generic-operation-artifact-expected-facts.migration.spec.mjs",
+    "generic-operation-artifact-expected-facts.rls.spec.mjs",
+    "generic-operation-artifact.migration.spec.mjs",
+    "generic-operation-artifact-recovery.rls.spec.mjs",
+    "generic-operation-artifact.rls.spec.mjs",
+    "generic-operation-artifact-subject.rls.spec.mjs",
+    "platform-schedule-authority.rls.spec.mjs",
+    "site-build-provider-transport.rls.spec.mjs",
+    "tool-budget-microusd.rls.spec.mjs"
+  ],
+  "isolated": [
+    "discovery-company-materialization-functions.disposable.spec.mjs",
+    "discovery-company-materialization-schema.disposable.spec.mjs",
+    "discovery-query-lineage-functions.rls.spec.mjs",
+    "discovery-query-lineage-schema.rls.spec.mjs",
+    "events-ack-status.rls.spec.mjs",
+    "execution-budget-authority-cutover.spec.mjs",
+    "execution-domain-ack.disposable.spec.mjs",
+    "governed-subject-relation-append-attest-catalog.rls.spec.mjs",
+    "governed-subject-relation-append-attest-lifecycle.rls.spec.mjs",
+    "governed-subject-relation-graph-concurrency.rls.spec.mjs",
+    "governed-subject-relation-path-locks.rls.spec.mjs",
+    "governed-subject-relation.rls.spec.mjs",
+    "governed-subject-tombstone-concurrency.rls.spec.mjs",
+    "governed-subject-tombstone.rls.spec.mjs",
+    "platform-egress-fence-reopen.disposable.spec.mjs",
+    "platform-signed-revocation.disposable.spec.mjs",
+    "raw-source-governance.disposable.spec.mjs"
+  ],
+  "static": [
+    "personal-artifact-cleanup.migration.spec.mjs"
+  ]
+}
