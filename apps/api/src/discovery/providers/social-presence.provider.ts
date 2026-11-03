@@ -140,11 +140,99 @@ function matchesCompany(text: string, company: { name: string; domain?: string }
   return false;
 }
 
+/**
+ * 职位/职能词表（M5 第三轮）：社媒标题里公司名之外的**专业佐证**。
+ * 折叠后比对（小写、ß→ss、去变音、德语转写 ae/oe/ue→a/o/u）；≥4 字符按词内子串匹配以覆盖德语复合词
+ * （"Einkaufsleiterin" ⊃ leiter），极短 C-level 缩写只认整 token。词表刻意保守：漏词 → 少召回（宁缺勿错），
+ * 不收 "professional"/"student" 这类无区分度或非职位的词。
+ */
+const ROLE_WORDS: readonly string[] = [
+  // 德语
+  'geschäftsführer', 'geschäftsführerin', 'geschäftsführung', 'geschäftsleitung', 'geschäftsleiter',
+  'vorstand', 'vorständin', 'vorstandsvorsitzender', 'leiter', 'leiterin', 'leitung', 'teamleiter',
+  'teamleitung', 'abteilungsleiter', 'bereichsleiter', 'gruppenleiter', 'projektleiter', 'projektleitung',
+  'produktleiter', 'produktmanagement', 'produktmanager', 'betriebsleiter', 'werkleiter', 'bauleiter',
+  'einkaufsleiter', 'einkauf', 'einkäufer', 'beschaffung', 'beschaffungsleiter', 'vertrieb',
+  'vertriebsleiter', 'vertriebsingenieur', 'verkauf', 'verkäufer', 'marketing', 'marketingleiter',
+  'personalleiter', 'personalreferent', 'personalwesen', 'personalabteilung', 'prokurist', 'inhaber',
+  'gesellschafter', 'gründer', 'mitgründer', 'berater', 'beraterin', 'spezialist', 'spezialistin',
+  'experte', 'expertin', 'sachbearbeiter', 'sachbearbeiterin', 'fachkraft', 'meister', 'techniker',
+  'technikerin', 'technik', 'ingenieur', 'ingenieurin', 'konstrukteur', 'entwicklung', 'entwickler',
+  'entwicklerin', 'softwareentwickler', 'anwendungsentwickler', 'kaufmann', 'kauffrau', 'assistent',
+  'assistentin', 'assistenz', 'sekretariat', 'referent', 'referentin', 'koordinator', 'koordinatorin',
+  'buchhaltung', 'finanzen', 'controlling', 'controller', 'logistik', 'logistikleiter', 'produktion',
+  'produktionsleiter', 'fertigung', 'montage', 'monteur', 'servicetechniker', 'kundenbetreuung',
+  'kundenberater', 'recruiting', 'ausbilder', 'trainee', 'werkstudent', 'praktikant',
+  // 英语
+  'manager', 'management', 'director', 'managing', 'head', 'lead', 'leader', 'chief', 'officer',
+  'executive', 'president', 'founder', 'owner', 'partner', 'principal', 'consultant', 'consulting',
+  'specialist', 'expert', 'coordinator', 'administrator', 'assistant', 'associate', 'analyst',
+  'architect', 'designer', 'developer', 'engineer', 'engineering', 'technician', 'supervisor',
+  'foreman', 'representative', 'agent', 'advisor', 'adviser', 'strategist', 'planner', 'buyer',
+  'purchasing', 'procurement', 'supply', 'logistics', 'operations', 'finance', 'financial',
+  'accounting', 'accountant', 'auditor', 'legal', 'counsel', 'lawyer', 'attorney', 'sales',
+  'marketing', 'business', 'development', 'research', 'researcher', 'scientist', 'quality', 'product',
+  'program', 'project', 'account', 'customer', 'revenue', 'growth', 'strategy', 'technical',
+  'service', 'support',
+];
+
+/** 极短 C-level 缩写：只认整 token（子串匹配会撞进普通单词）。 */
+const SHORT_ROLE_WORDS = new Set(['ceo', 'cfo', 'cto', 'coo', 'cio', 'cmo', 'vp', 'svp', 'evp']);
+
+/** 职位词比对折叠：小写、ß→ss、去组合变音、德语转写收敛（ae/oe/ue→a/o/u）、标点→空格。 */
+function foldRoleText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/ß/g, 'ss')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/ae/g, 'a')
+    .replace(/oe/g, 'o')
+    .replace(/ue/g, 'u')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+const ROLE_KEYS: readonly string[] = [...new Set(ROLE_WORDS.map(foldRoleText))].filter(
+  (key) => key.length >= 4,
+);
+
+/** 公司名的匹配 token（与 {@link matchesCompany} 同源：≥3 字符、去法律形式）+ 域名词根，折叠形。 */
+function companyRoleMatchTokens(company: { name: string; domain?: string }): Set<string> {
+  const tokens = new Set<string>();
+  for (const raw of company.name.toLowerCase().split(/[^\p{L}\p{N}]+/u)) {
+    if (raw.length >= 3 && !LEGAL_FORM_TOKENS.has(raw)) tokens.add(foldRoleText(raw));
+  }
+  const root = company.domain?.toLowerCase().split('.')[0];
+  if (root && root.length >= 3) tokens.add(foldRoleText(root));
+  return tokens;
+}
+
+/**
+ * headline 里是否除**人名与公司名**之外仍有职位/职能词（M5 第三轮收紧，`social_uninformative_dropped`）。
+ * 与 #744 的公司佐证互补：只管"这像不像一个真实职场人的自述"，不管"是不是这家公司"。
+ */
+export function hasRoleEvidence(
+  headline: string,
+  personName: string,
+  company: { name: string; domain?: string },
+): boolean {
+  const drop = new Set<string>(
+    [...foldRoleText(personName).split(' '), ...companyRoleMatchTokens(company)].filter(Boolean),
+  );
+  const residual = foldRoleText(headline)
+    .split(' ')
+    .filter((token) => token && !drop.has(token));
+  return residual.some(
+    (token) => SHORT_ROLE_WORDS.has(token) || ROLE_KEYS.some((key) => token.includes(key)),
+  );
+}
+
 /** 只保留个人主页 URL，并从标题解析出人；公司不匹配的一律丢弃（防张冠李戴）。 */
 export function parseSocialResults(
   results: readonly SearxResultLike[],
   company: { name: string; domain?: string },
-  onDropped?: (reason: 'namesake' | 'organisation') => void,
+  onDropped?: (reason: 'namesake' | 'organisation' | 'uninformative') => void,
 ): ProviderContactRecord[] {
   const found = new Map<string, ProviderContactRecord>();
   for (const result of results) {
@@ -176,6 +264,12 @@ export function parseSocialResults(
     const remainder = headline.split(parsed.fullName).join(' ');
     if (!matchesCompany(remainder, company)) {
       onDropped?.('namesake');
+      continue;
+    }
+    // 专业佐证（M5 第三轮）：公司名之外必须仍有职位/职能词——"gerry garry - Abendi" 这类只有公司名的
+    // headline 不再因「含公司名」放行（URL slug 与姓名一致也不足以证明其与本公司的关系）。
+    if (!hasRoleEvidence(headline, parsed.fullName, company)) {
+      onDropped?.('uninformative');
       continue;
     }
     const key = `${url.hostname}${url.pathname}`.replace(/\/+$/, '').toLowerCase();

@@ -99,6 +99,32 @@ describe('person-name · 身份归一不塌真实姓名里的学位同形 token�
   });
 });
 
+describe('person-name · 德语学位串剥离（Dipl.-Wirt.-Ing. / Dipl.-Kfm. / Ing.，M5 第三轮）', () => {
+  it('多段学位串剥离后与无称号名归一相等', () => {
+    expect(normalizePersonName('Dipl.-Wirt.-Ing. Marek Havlicek')).toBe('marek havlicek');
+    expect(normalizePersonName('Dipl.-Wirt.-Ing. Marek Havlicek')).toBe(
+      normalizePersonName('Marek Havlicek'),
+    );
+    expect(normalizePersonName('Dipl.-Kfm. Anna Weber')).toBe('anna weber');
+  });
+
+  it('带点单 token 头衔 Ing. 剥离；无点真实姓名 Ing 不误伤', () => {
+    expect(normalizePersonName('Ing. Klaus Weber')).toBe('klaus weber');
+    expect(normalizePersonName('Erik Ing')).toBe('erik ing');
+    expect(normalizePersonName('Ing.')).toBe('');
+  });
+
+  it('学位词作为真实姓名 token 位于首位时不误剥（保守白名单）', () => {
+    expect(normalizePersonName('Wirt Anna')).toBe('wirt anna');
+    expect(normalizePersonName('Kfm Peter')).toBe('kfm peter');
+  });
+
+  it('personNameKeyVariants 同享学位串剥离（Art.17 禁联/对账键集）', () => {
+    const bare = new Set(personNameKeyVariants('Marek Havlicek'));
+    expect(personNameKeyVariants('Dipl.-Wirt.-Ing. Marek Havlicek').some((k) => bare.has(k))).toBe(true);
+  });
+});
+
 describe('person-name · 身份归一保留非拉丁 token（#54 P2）', () => {
   it('CJK 姓保留 → 张 Wei ≠ 李 Wei（不塌成 wei）', () => {
     expect(normalizePersonName('张 Wei')).not.toBe(normalizePersonName('李 Wei'));

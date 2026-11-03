@@ -39,6 +39,14 @@ const IDENTITY_TITLE_PREFIX = new Set([
 // 独立出现（"Dr. Ma" 的 Ma、"Erik Ing" 的 Ing）绝不剥。🔴 ma/ba **不**入此集（常见真实姓氏，永不剥）。
 const IDENTITY_TITLE_SUFFIX = new Set(['med', 'rer', 'nat', 'ing', 'mag', 'hon']);
 
+// 德语多段学位串的组成词（"Dipl.-Wirt.-Ing." 拆 . / - 后 = dipl/wirt/ing；"Dipl.-Kfm." = dipl/kfm）。
+// 🔴 只用于**多段 token** 的全段判定（`isIdentityTitlePrefix`），不进 HONORIFICS（email 侧行为冻结）；
+// 单 token 出现（"Anna Wirt"/"Peter Kfm"）绝不剥——这些词同时可能是真实姓名。
+const IDENTITY_DEGREE_PARTS = new Set([
+  'dipl', 'wirt', 'kfm', 'kffr', 'betriebswirt', 'volkswirt', 'sozialwirt', 'verwaltungswirt',
+  'verw', 'iur', 'jur', 'oec', 'paed', 'phil', 'chem', 'phys', 'math', 'inform', 'inf',
+]);
+
 // 贵族/介词前缀（归入姓；小写比对）。
 const SURNAME_PARTICLES = new Set([
   'von', 'van', 'vom', 'zum', 'zur', 'zu', 'de', 'del', 'della', 'der', 'den', 'di',
@@ -51,12 +59,14 @@ function isHonorific(token: string): boolean {
   return parts.length > 0 && parts.every((p) => HONORIFICS.has(p));
 }
 
-/** 单 token 是否明确**前置**称谓（含多段学位串 "dipl.-ing."：拆 . / - 后各段皆全量 HONORIFICS 即算）。 */
+/** 单 token 是否明确**前置**称谓（含多段学位串 "dipl.-wirt.-ing."：拆 . / - 后各段皆称谓或学位组成词即算）。 */
 function isIdentityTitlePrefix(token: string): boolean {
   const parts = token.toLowerCase().split(/[-.]/).filter(Boolean);
   if (parts.length === 0) return false;
-  if (parts.length > 1) return parts.every((p) => HONORIFICS.has(p));
-  return IDENTITY_TITLE_PREFIX.has(parts[0]);
+  if (parts.length > 1) return parts.every((p) => HONORIFICS.has(p) || IDENTITY_DEGREE_PARTS.has(p));
+  if (IDENTITY_TITLE_PREFIX.has(parts[0])) return true;
+  // 单 token "Ing."（工程师头衔，德语缩写必带点）：只在名前位置剥；无点的 "Ing"（真实姓氏/名，如 "Erik Ing"）不误伤。
+  return parts[0] === 'ing' && token.trim().endsWith('.');
 }
 
 /** 单 token 是否学术**后缀**（med/rer/nat/ing…）——仅供"紧跟称谓才剥"的位置判定。 */
@@ -213,6 +223,17 @@ export function parsePersonName(raw: string): ParsedPersonName {
 /** 归一全名（= parsePersonName().normalizedFull）——Tier 2 精确匹配 / keying 共用。 */
 export function normalizePersonName(raw: string): string {
   return parsePersonName(raw).normalizedFull;
+}
+
+/**
+ * 抽取/存储边界用：剥掉**名前位置**的学术称号（Dr./Prof./Dipl.-Wirt.-Ing./Ing.…）后返回姓名原文。
+ * 与身份归一共用同一位置感知剥离（遇非称号 token 即停，不误剥真实姓名）；无称号时原样返回（仅空白归一）。
+ * 供 `contact-extraction.cleanPersonName` 落库前净化，令存储姓名、dedupeKey 与身份合并键在源头一致。
+ */
+export function stripAcademicTitles(raw: string): string {
+  const tokens = (raw ?? '').normalize('NFC').trim().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return '';
+  return stripIdentityTitles(tokens).join(' ');
 }
 
 /**
