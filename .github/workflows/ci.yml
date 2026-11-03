@@ -700,8 +700,6 @@ jobs:
 
   contracts:
     name: contracts · drift · lint · breaking
-    needs: renderer-visual-scope
-    if: needs.renderer-visual-scope.outputs.run_code != 'false'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

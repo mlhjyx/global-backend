@@ -319,9 +319,6 @@ test("heavy Temporal and OCI gates are path-scoped and fail closed", async () =>
     ["        if: needs.renderer-visual-scope.outputs.run_code != 'false'"],
     "code steps must default to running unless the classifier explicitly says docs-only",
   );
-  const contractsJob = jobBlock(ciWorkflow, "contracts");
-  assert.match(contractsJob, /^    needs: renderer-visual-scope$/m);
-  assert.match(contractsJob, /^    if: needs\.renderer-visual-scope\.outputs\.run_code != 'false'$/m);
 });
 
 test("the Copy recovery rebuild gate rederives both fixed-source artifacts", async () => {
