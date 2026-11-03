@@ -22,7 +22,7 @@ const EXCLUDE_PATTERN =
 /** Extract absolute same-host links from Crawl4AI markdown output. */
 export function extractSameSiteLinks(markdown: string, baseUrl: string): string[] {
   const base = new URL(baseUrl);
-  const seen = new Set<string>();
+  const linksByKey = new Map<string, string>();
   // markdown links [text](url) — Crawl4AI resolves most hrefs to absolute already.
   const re = /\]\(\s*(<[^>]+>|[^)\s]+)/g;
   let m: RegExpExecArray | null;
@@ -34,13 +34,22 @@ export function extractSameSiteLinks(markdown: string, baseUrl: string): string[
       if (url.hostname.replace(/^www\./, '') !== base.hostname.replace(/^www\./, '')) continue;
       url.hash = '';
       url.search = '';
-      const normalized = url.toString().replace(/\/$/, '');
-      if (normalized && normalized !== baseUrl.replace(/\/$/, '')) seen.add(normalized);
+      // 保留站点给出的原始形态（含尾斜杠）：同一路径的两种写法可能返回不同内容
+      // （M5：michalowski-gmbh.de 对无尾斜杠的 /impressum 回 39 字节反爬空壳，
+      // crawl4ai 直接 500；/impressum/ 才是真页面）。去重只用归一化键；两种写法
+      // 都出现时优先带尾斜杠的形态（Map 保持首次出现的顺序）。
+      const href = url.toString();
+      const key = href.replace(/\/$/, '');
+      if (!key || key === baseUrl.replace(/\/$/, '')) continue;
+      const existing = linksByKey.get(key);
+      if (existing === undefined || (href.endsWith('/') && !existing.endsWith('/'))) {
+        linksByKey.set(key, href);
+      }
     } catch {
       // unparseable href — ignore
     }
   }
-  return [...seen];
+  return [...linksByKey.values()];
 }
 
 /**
