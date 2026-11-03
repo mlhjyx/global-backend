@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import type { RequestContext } from '../auth/request-context';
 import { mimeMatchesSniffed, sniffMime } from '../site-builder/object-key';
+import { EmbeddingsClient } from '../site-builder/embeddings.client';
 import { SellerDocumentsStorage } from './seller-documents.storage';
 
 /** 允许的资料类型 → kind 与单文件上限（字节）。HTML/SVG/可执行类永不入列。 */
@@ -94,6 +95,7 @@ export class SellerDocumentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: SellerDocumentsStorage,
+    private readonly embeddings: EmbeddingsClient,
     @Inject(SELLER_DOCUMENTS_INGEST_LAUNCHER)
     private readonly launcher: SellerDocumentsIngestLauncher,
   ) {}
@@ -301,6 +303,66 @@ export class SellerDocumentsService {
     } catch {
       throw storageUnavailable();
     }
+  }
+
+  /**
+   * 混合检索（0.7×余弦 + 0.3×ts_rank_cd），限定公司、ready、未删；RLS 由 withWorkspace 承担。
+   * 查询文本走本机 BGE-M3 嵌入（数据不出域）；limit 上限 50。
+   */
+  async search(
+    ctx: RequestContext,
+    companyId: string,
+    query: string,
+    limit: number,
+  ): Promise<
+    Array<{ documentId: string; filename: string; seq: number; text: string; score: number }>
+  > {
+    const trimmed = query.trim();
+    if (trimmed.length < 2 || trimmed.length > 500) {
+      throw new BadRequestException({
+        error: { code: 'SELLER_DOCUMENT_SEARCH_INVALID', message: '检索词长度须为 2–500' },
+      });
+    }
+    const n = Math.min(Math.max(limit, 1), 50);
+    let vector: number[];
+    try {
+      const [embedded] = await this.embeddings.embed([trimmed]);
+      if (!Array.isArray(embedded) || embedded.length === 0) {
+        throw new Error('empty embedding');
+      }
+      vector = embedded;
+    } catch {
+      throw new ServiceUnavailableException({
+        error: { code: 'SELLER_DOCUMENT_SEARCH_UNAVAILABLE', message: '资料检索暂时不可用，请稍后重试' },
+      });
+    }
+    const literal = `[${vector.join(',')}]`;
+    return this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.$queryRaw<
+        Array<{ document_id: string; filename: string; seq: number; text: string; score: number }>
+      >(Prisma.sql`
+        SELECT c."document_id", d."filename", c."seq", c."text",
+               0.7 * (1 - (c."embedding"::halfvec(1024) <=> ${literal}::halfvec(1024)))
+             + 0.3 * ts_rank_cd(c."text_tsv", plainto_tsquery('simple', ${trimmed})) AS score
+        FROM "seller_document_chunk" c
+        JOIN "seller_document" d
+          ON d."id" = c."document_id" AND d."workspace_id" = c."workspace_id"
+        WHERE c."workspace_id" = ${ctx.workspaceId}::uuid
+          AND d."company_id" = ${companyId}::uuid
+          AND d."status" = 'ready'
+          AND d."deleted_at" IS NULL
+        ORDER BY score DESC
+        LIMIT ${n}
+      `),
+    ).then((rows) =>
+      rows.map((row) => ({
+        documentId: row.document_id,
+        filename: row.filename,
+        seq: Number(row.seq),
+        text: row.text,
+        score: Number(row.score),
+      })),
+    );
   }
 
   async retry(ctx: RequestContext, documentId: string): Promise<SellerDocumentRow> {

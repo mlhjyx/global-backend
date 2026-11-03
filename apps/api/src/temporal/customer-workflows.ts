@@ -11,5 +11,6 @@ export { siteReleaseMaintenanceSweepWorkflow } from "./site-release-maintenance.
 export { siteBuildCostReconciliationSweepWorkflow } from "./site-build-cost-reconciliation.workflow";
 export { refurbishWorkflow } from "./refurbish.workflow";
 export { kbIngestWorkflow } from "./kb-ingest.workflow";
+export { sellerDocumentIngestWorkflow } from "../seller-knowledge/seller-document-ingest.workflow";
 export { kbRecoverySweepWorkflow } from "./kb-recovery.workflow";
 export { assetObjectCleanupWorkflow } from "./asset-cleanup.workflow";

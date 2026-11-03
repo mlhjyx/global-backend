@@ -32,6 +32,8 @@ import {
 } from "../durable-results/artifact/personal-artifact-cleanup.repository";
 import { createPersonalArtifactCleanupRuntime } from "../durable-results/artifact/personal-artifact-cleanup.runtime";
 import { createSiteBuilderActivities } from "./site-builder.activities";
+import { createSellerDocumentActivities } from "../seller-knowledge/seller-document.activities";
+import { SellerDocumentsStorage } from "../seller-knowledge/seller-documents.storage";
 import {
   costReconciliationCatalogCoversRoutes,
   createSiteBuildCostReconciliationCatalogFromEnv,
@@ -567,6 +569,12 @@ async function main(): Promise<void> {
           new DoclingClient(),
           siteBuilderStorage,
         ),
+      }),
+      ...createSellerDocumentActivities({
+        prisma,
+        storage: new SellerDocumentsStorage(),
+        docling: new DoclingClient(),
+        embeddings: new EmbeddingsClient(),
       }),
       ...createAssetCleanupActivities({
         prisma,

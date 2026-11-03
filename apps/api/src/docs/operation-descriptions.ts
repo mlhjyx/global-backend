@@ -55,6 +55,8 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '确认上传完成：对 staging 对象做 HEAD、流式 sha256 与魔数校验（声明的 MIME 必须与实际内容相符），通过后转存 canonical 对象并将文档置为 queued、入队解析。上传未完成返回 409 并留在 pending_upload；内容不符置 rejected；同一公司已存在相同内容时返回 409 并清理已复制副本。',
   'GET /api/v1/companies/{companyId}/seller-documents':
     '游标分页列出公司的卖家资料（软删不可见）：limit 默认 20、上限 100，返回 { data, page: { next_cursor, has_more } }。每条含状态（pending_upload/committing/queued/processing/ready/failed_terminal/rejected）、类型与字节数。',
+  'GET /api/v1/companies/{companyId}/seller-documents/search':
+    '资料库混合检索：查询词经本机 BGE-M3 嵌入后与分块向量做余弦（权重 0.7）并与全文 ts_rank_cd（权重 0.3）合成排序；只检索该公司 status=ready 且未删除的资料，limit 上限 50。',
   'GET /api/v1/seller-documents/{documentId}':
     '按 id 取单份资料详情。资源属于其他 workspace 或已软删时返回 404，不泄露存在性。',
   'GET /api/v1/seller-documents/{documentId}/download-url':

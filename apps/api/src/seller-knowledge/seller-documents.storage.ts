@@ -103,6 +103,26 @@ export class SellerDocumentsStorage {
     return { sha256: hash.digest('hex'), head, size };
   }
 
+  /** 有界整段读取（解析用；超限即失败，不截断）。 */
+  async getBufferBounded(key: string, maxBytes: number): Promise<Buffer> {
+    const res = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
+    const stream = res.Body as Readable | undefined;
+    if (!stream) throw new Error(`empty object body: ${key}`);
+    const chunks: Buffer[] = [];
+    let size = 0;
+    for await (const chunk of stream) {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+      size += buf.length;
+      if (size > maxBytes) {
+        stream.destroy();
+        throw new Error(`object exceeds ${maxBytes} bytes: ${key}`);
+      }
+      chunks.push(buf);
+    }
+    if (size === 0) throw new Error(`empty object body: ${key}`);
+    return Buffer.concat(chunks, size);
+  }
+
   async copy(fromKey: string, toKey: string): Promise<void> {
     await this.client.send(
       new CopyObjectCommand({

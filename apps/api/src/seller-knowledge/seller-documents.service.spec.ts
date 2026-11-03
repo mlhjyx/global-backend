@@ -21,6 +21,7 @@ function fixture(overrides: {
   companyCount?: number;
   sumBytes?: bigint;
   claimRows?: Array<{ object_key: string; mime: string; size_bytes: bigint }>;
+  searchRows?: Array<{ document_id: string; filename: string; seq: number; text: string; score: number }>;
   hashHead?: Buffer;
   updateError?: unknown;
 } = {}) {
@@ -52,6 +53,7 @@ function fixture(overrides: {
       }),
     },
     $queryRaw: vi.fn(async () =>
+      overrides.searchRows ??
       overrides.claimRows ?? [
         { object_key: sellerDocumentStagingKey(CTX.workspaceId, DOC_ID), mime: 'application/pdf', size_bytes: 1024n },
       ],
@@ -72,13 +74,15 @@ function fixture(overrides: {
     copy: vi.fn(async () => undefined),
     delete: vi.fn(async () => undefined),
   };
+  const embeddings = { embed: vi.fn(async (texts: string[]) => texts.map(() => [0.1, 0.2, 0.3])) };
   const launcher = { launchIngest: vi.fn(async () => undefined) };
   const service = new SellerDocumentsService(
     prisma as unknown as PrismaService,
     storage as unknown as SellerDocumentsStorage,
+    embeddings as never,
     launcher,
   );
-  return { service, prisma, tx, storage, launcher, created, updates };
+  return { service, prisma, tx, storage, embeddings, launcher, created, updates };
 }
 
 describe('SellerDocumentsService', () => {
@@ -156,6 +160,26 @@ describe('SellerDocumentsService', () => {
     storage.head.mockResolvedValueOnce(null);
     await expect(service.commit(CTX, COMPANY_ID, DOC_ID)).rejects.toBeInstanceOf(ConflictException);
     expect(storage.hashObject).not.toHaveBeenCalled();
+  });
+
+  it('混合检索：查询词过短拒绝且不调用嵌入', async () => {
+    const { service, embeddings } = fixture();
+    await expect(service.search(CTX, COMPANY_ID, 'a', 10)).rejects.toBeInstanceOf(BadRequestException);
+    expect(embeddings.embed).not.toHaveBeenCalled();
+  });
+
+  it('混合检索：嵌入查询并映射命中分块', async () => {
+    const { service, embeddings, tx } = fixture({
+      searchRows: [
+        { document_id: DOC_ID, filename: '目录.pdf', seq: 0, text: '精密轴承规格', score: 0.83 },
+      ],
+    });
+    const rows = await service.search(CTX, COMPANY_ID, '轴承', 10);
+    expect(embeddings.embed).toHaveBeenCalledWith(['轴承']);
+    expect(tx.$queryRaw).toHaveBeenCalled();
+    expect(rows).toEqual([
+      { documentId: DOC_ID, filename: '目录.pdf', seq: 0, text: '精密轴承规格', score: 0.83 },
+    ]);
   });
 
   it('软删置 deleted 并从列表与下载中消失', async () => {
