@@ -25,6 +25,11 @@ import { isExecutionControlError } from '../../execution-budget/execution-contro
 
 const PARSER_VERSION = 'decision_maker/v1';
 
+/** 页面文本是否值得发一次抽取（与逐页抓取的 120 字符门一致）。 */
+function hasPeopleText(text: string | null): text is string {
+  return typeof text === 'string' && text.trim().length >= 120;
+}
+
 /** 人物页优先级（Impressum 最高——德国 §5 DDG 依法列 Geschäftsführer；然后管理层/团队）。 */
 const PEOPLE_PATTERNS: { re: RegExp; w: number }[] = [
   { re: /impressum|imprint|legal-?notice|mentions-legales/i, w: 100 },
@@ -43,12 +48,14 @@ const FIXED_PATHS = ['/impressum', '/kontakt', '/en/imprint', '/impressum.html',
  * 为什么需要：crawl4ai 的 markdown 会丢掉导航栏/JS 菜单里的链接——M5 评估里多家
  * 公司的 Impressum 在原始 HTML 有、markdown 里没有，固定路径又全是 404
  * （如 `/ando-technik/impressum/`、`common/info/impressum.html` 这类非标准路径）。
+ * 保留站点给出的原始路径形态（含尾斜杠）：同一路径的两种写法可能内容不同（M5：
+ * michalowski-gmbh.de 无尾斜杠形态回 39 字节反爬空壳），去重按归一化键。
  */
 const MAX_ANCHOR_HTML_CHARS = 1_000_000;
 
 export function extractAnchorsFromHtml(html: string, baseUrl: string): string[] {
   const base = new URL(baseUrl);
-  const seen = new Set<string>();
+  const anchorsByKey = new Map<string, string>();
   // 线性扫描：逐标签找 `<a` → 最近的 `>`，属性正则在单个标签内跑。
   // 正则 `[^>]*` 在未闭合/恶意的 3MB 页面上是 O(n²)（实测 384KB 即 ~66s），
   // 会把事件循环卡死——不可信的抓取结果不能走回溯正则。
@@ -76,13 +83,19 @@ export function extractAnchorsFromHtml(html: string, baseUrl: string): string[] 
       if (url.hostname.replace(/^www\./, '') !== base.hostname.replace(/^www\./, '')) continue;
       url.hash = '';
       url.search = '';
-      const normalized = url.toString().replace(/\/$/, '');
-      if (normalized && normalized !== baseUrl.replace(/\/$/, '')) seen.add(normalized);
+      const href = url.toString();
+      const key = href.replace(/\/$/, '');
+      if (!key || key === baseUrl.replace(/\/$/, '')) continue;
+      // 同一页的两种写法都出现时优先带尾斜杠的形态（Map 保持首次出现的顺序）。
+      const existing = anchorsByKey.get(key);
+      if (existing === undefined || (href.endsWith('/') && !existing.endsWith('/'))) {
+        anchorsByKey.set(key, href);
+      }
     } catch {
       // unparseable href — ignore
     }
   }
-  return [...seen];
+  return [...anchorsByKey.values()];
 }
 
 /** 两个主机是否同一可注册域（末两段，忽略 www 大小写）：停车页/过期域名的跨站
@@ -165,27 +178,33 @@ export class DecisionMakerProvider {
       this.log('skip: broker unavailable (fail-closed, no raw egress)');
       return [];
     }
-    const base = `https://${company.domain}/`;
-    if (!(await isAllowedByRobots(base, {
-        authorizeExternalAction: ctx.authorizeExternalAction,
-      }))) {
-      this.log(`skip ${company.domain}: robots disallow`);
-      return [];
+    const robotDeps = { authorizeExternalAction: ctx.authorizeExternalAction };
+    let base = `https://${company.domain}/`;
+    if (!(await isAllowedByRobots(base, robotDeps))) {
+      // 裸域 robots.txt 的坏跳转会连累整站：Apache 少写斜杠时 Location 变成不存在的
+      // 伪主机（M5：https://avag-pumpen.de/robots.txt → https://www.avag-pumpen.derobots.txt），
+      // SSRF 护栏拒绝解析后被 fail-closed 成「全站禁抓」；而首页本身 301 到 www
+      // origin，那里 robots 明确放行。robots 约束实际被抓取的 origin：改从同注册域
+      // 的另一主机形态（裸域 ⇄ www，站点常只在其一上配好 robots）抓取并以该 origin
+      // 自身 robots 为准；两个 origin 都拒绝才放弃。
+      const host = company.domain.toLowerCase();
+      const altHost = host.startsWith('www.') ? host.slice(4) : `www.${host}`;
+      const altBase = `https://${altHost}/`;
+      if (!(await isAllowedByRobots(altBase, robotDeps))) {
+        this.log(`skip ${company.domain}: robots disallow`);
+        return [];
+      }
+      base = altBase;
     }
 
     // 1) 选人物页：首页链接里按 people-pattern 打分 + 固定路径兜底
-    const pages = await this.selectPeoplePages(company.domain, base, ctx);
-    if (!pages.length) return [];
+    const selection = await this.selectPeoplePages(company.domain, base, ctx);
+    if (!selection.pages.length && !hasPeopleText(selection.homeText)) return [];
 
     // 2) 逐页抓取 + LLM 抽取分类，按人名去重合并
     const dedup = new Map<string, DecisionMakerContact>();
-    for (const url of pages.slice(0, MAX_DECISION_MAKER_PAGES)) {
-      if (
-        !(await isAllowedByRobots(url, {
-          authorizeExternalAction: ctx.authorizeExternalAction,
-        }))
-      )
-        continue;
+    for (const url of selection.pages.slice(0, MAX_DECISION_MAKER_PAGES)) {
+      if (!(await isAllowedByRobots(url, robotDeps))) continue;
       let text: string;
       try {
         const crawled = await this.deps.broker!.invoke<{ url: string }, CrawlResult>(
@@ -205,32 +224,16 @@ export class DecisionMakerProvider {
       if (text.trim().length < 120) continue;
 
       const people = await this.extract(url, text, ctx, sellerContext);
-      for (const p of people) {
-        const name = p.full_name?.trim();
-        if (!name) continue;
-        const key = name.toLowerCase().replace(/\s+/g, ' ');
-        if (dedup.has(key)) {
-          // 合并：补邮箱/电话/角色（后到只补缺）
-          const ex = dedup.get(key)!;
-          if (!ex.email && p.email) ex.email = p.email;
-          if (!ex.phone && p.phone) ex.phone = p.phone;
-          continue;
-        }
-        dedup.set(key, {
-          fullName: name,
-          title: p.title?.trim() || undefined,
-          email: p.email?.trim() || undefined,
-          phone: p.phone?.trim() || undefined,
-          department: p.department || undefined,
-          seniority: p.seniority || undefined,
-          buyingRole: p.buying_role || undefined,
-          isTargetRole: !!p.is_target_role,
-          personalData: true,
-          sourcePage: url,
-          contentHash: createHash('sha256').update(text).digest('hex'),
-          parserVersion: PARSER_VERSION,
-        });
-      }
+      this.mergePeople(dedup, people, url, text);
+    }
+    // 2b) 兜底：小站把团队/决策人直接铺在首页（M5：jaeckel-ohg.de 的 geschäftsführende
+    // Gesellschafter 只在首页团队区块出现，Impressum 反倒没有具名人）。选定的人物页
+    // 一个人都没抽到时，抽取已抓到的首页文本本身。
+    const homeText = selection.homeText;
+    if (dedup.size === 0 && hasPeopleText(homeText)) {
+      const pageText = homeText.slice(0, 30_000);
+      const people = await this.extract(selection.homeUrl, pageText, ctx, sellerContext);
+      this.mergePeople(dedup, people, selection.homeUrl, pageText);
     }
     const out = [...dedup.values()];
     this.log(
@@ -239,18 +242,57 @@ export class DecisionMakerProvider {
     return out.slice(0, MAX_CONTACTS_PER_DISCOVERY_ADAPTER);
   }
 
-  private async selectPeoplePages(domain: string, base: string, ctx: ExecutionContext): Promise<string[]> {
-    const picked: string[] = [];
+  /** 把一页的抽取结果并入去重表：姓名归一化键；后到者只补缺邮箱/电话。 */
+  private mergePeople(
+    dedup: Map<string, DecisionMakerContact>,
+    people: ExtractedPerson[],
+    sourcePage: string,
+    text: string,
+  ): void {
+    const contentHash = createHash('sha256').update(text).digest('hex');
+    for (const p of people) {
+      const name = p.full_name?.trim();
+      if (!name) continue;
+      const key = name.toLowerCase().replace(/\s+/g, ' ');
+      if (dedup.has(key)) {
+        const ex = dedup.get(key)!;
+        if (!ex.email && p.email) ex.email = p.email;
+        if (!ex.phone && p.phone) ex.phone = p.phone;
+        continue;
+      }
+      dedup.set(key, {
+        fullName: name,
+        title: p.title?.trim() || undefined,
+        email: p.email?.trim() || undefined,
+        phone: p.phone?.trim() || undefined,
+        department: p.department || undefined,
+        seniority: p.seniority || undefined,
+        buyingRole: p.buying_role || undefined,
+        isTargetRole: !!p.is_target_role,
+        personalData: true,
+        sourcePage,
+        contentHash,
+        parserVersion: PARSER_VERSION,
+      });
+    }
+  }
+
+  private async selectPeoplePages(
+    domain: string,
+    base: string,
+    ctx: ExecutionContext,
+  ): Promise<{ pages: string[]; homeUrl: string; homeText: string | null }> {
+    const picked: { url: string; w: number }[] = [];
     const pickedKeys = new Set<string>();
-    const addPicked = (url: string): void => {
+    const addPicked = (url: string, w: number): void => {
       // www / 大小写 / 尾斜杠不敏感：markdown（按裸域解析）与原始 HTML（按 finalUrl
       // 解析）常给出同一页的两种 host 形态，去重避免占用预抓名额。
       const key = url.toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
       if (pickedKeys.has(key)) return;
       pickedKeys.add(key);
-      picked.push(url);
+      picked.push({ url, w });
     };
-    let scoredFromMarkdown = 0;
+    let homeText: string | null = null;
     let fixedHost = domain;
     let anchorBase = base;
     try {
@@ -263,20 +305,22 @@ export class DecisionMakerProvider {
           purpose: ['discovery', 'enrichment'],
         },
       );
+      homeText = home.data.text ?? null;
       const links = extractSameSiteLinks(home.data.text, base);
-      const scored = links
+      for (const s of links
         .map((l) => ({ l, w: scorePeoplePageUrl(l) }))
-        .filter((s) => s.w > 0)
-        .sort((a, b) => b.w - a.w);
-      scoredFromMarkdown = scored.length;
-      for (const s of scored) addPicked(s.l);
+        .filter((s) => s.w > 0)) {
+        addPicked(s.l, s.w);
+      }
     } catch (err) {
       if (isExecutionControlError(err)) throw err;
       // 首页抓不到也无妨，走固定路径兜底
     }
-    // markdown 丢链接时（导航/JS 菜单）用原始 HTML 补抽人物页锚点；finalUrl 同时给出
-    // 重定向后的主机（裸域→www），固定路径改用它拼，避免落到坏跳转上。
-    if (scoredFromMarkdown < 3 && ctx.artifactSubject) {
+    // 无论 markdown 给没给链接都用原始 HTML 补抽人物页锚点：markdown 会丢导航/JS
+    // 菜单里的链接（M5：ava-berlin.de 的 markdown 恰好只有 3 条人物页链接、真实
+    // Impressum 只在原始 HTML 里，按「不足 3 条才补」的旧门槛从未被选中）；同时
+    // finalUrl 给出重定向后的主机（裸域→www），固定路径改用它拼，避免坏跳转。
+    if (ctx.artifactSubject) {
       try {
         const raw = await this.deps.broker!.invoke<{ url: string }, HttpGetOutput>(
           'http.get',
@@ -295,19 +339,26 @@ export class DecisionMakerProvider {
             /* keep stored domain */
           }
         }
-        const extra = extractAnchorsFromHtml(raw.data.text ?? '', anchorBase)
+        for (const s of extractAnchorsFromHtml(raw.data.text ?? '', anchorBase)
           .map((l) => ({ l, w: scorePeoplePageUrl(l) }))
-          .filter((s) => s.w > 0)
-          .sort((a, b) => b.w - a.w);
-        for (const s of extra) addPicked(s.l);
+          .filter((s) => s.w > 0)) {
+          addPicked(s.l, s.w);
+        }
       } catch (err) {
         if (isExecutionControlError(err)) throw err;
       }
     }
+    // 两路候选合并后统一按权重排序（稳定排序，同分保持 markdown 先、锚点后的原次序）：
+    // 锚点里的 Impressum(100) 不能因为追加在 markdown 链接之后而被预抓名额挤掉。
+    picked.sort((a, b) => b.w - a.w);
     for (const p of FIXED_PATHS) {
-      addPicked(`https://${fixedHost}${p}`);
+      addPicked(`https://${fixedHost}${p}`, 0);
     }
-    return picked.slice(0, MAX_DECISION_MAKER_PAGES + 2);
+    return {
+      pages: picked.slice(0, MAX_DECISION_MAKER_PAGES + 2).map((p) => p.url),
+      homeUrl: base,
+      homeText,
+    };
   }
 
   static toContactRecords(people: DecisionMakerContact[]): ContactDiscoveryResult['contacts'] {

@@ -24,6 +24,22 @@ describe('site-links（多页抓取的确定性选页）', () => {
     expect(picked).toContain('https://acme.com/contact');
     expect(picked.some((l) => l.includes('/blog') || l.includes('privacy') || l.endsWith('.pdf'))).toBe(false);
   });
+
+  it('保留链接的原始形态（尾斜杠），只用归一化键去重', () => {
+    // M5：michalowski-gmbh.de 对无尾斜杠形态回 39 字节反爬空壳，crawl4ai 直接 500；
+    // 把 /impressum/ 归一成 /impressum 会把可抓页面换成抓不到的页面。
+    const links = extractSameSiteLinks(
+      '[A](https://acme.com/team/) [B](https://acme.com/team) [C](/impressum/?x=1#top) ' +
+        // 两种写法都出现时，不管先后都留下带斜杠的形态。
+        '[D](/kontakt) [E](/kontakt/)',
+      'https://acme.com/',
+    );
+    expect(links).toEqual([
+      'https://acme.com/team/',
+      'https://acme.com/impressum/',
+      'https://acme.com/kontakt/',
+    ]);
+  });
 });
 
 describe('contact-extractor（确定性，非 LLM —— 命中的必然真实存在于页面）', () => {
