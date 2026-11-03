@@ -35,9 +35,22 @@ const IDENTITY_TITLE_PREFIX = new Set([
   'dr', 'prof', 'dipl', 'phd', 'mba', 'bsc', 'msc',
   'herr', 'frau', 'mr', 'mrs', 'ms', 'mx', 'habil',
 ]);
+// 德语多段学位串的组成词（"Dipl.-Wirt.-Ing." 拆 . / - 后 = dipl/wirt/ing；"Dipl.-Kfm." = dipl/kfm）。
+// 🔴 只用于**多段 token** 的全段判定（`isIdentityTitlePrefix`）与「紧跟称谓的带点后缀」，不进 HONORIFICS
+// （email 侧行为冻结）；单 token 出现（"Anna Wirt"/"Peter Kfm"）绝不剥——这些词同时可能是真实姓名。
+const IDENTITY_DEGREE_PARTS = new Set([
+  'dipl', 'wirt', 'kfm', 'kffr', 'betriebswirt', 'volkswirt', 'sozialwirt', 'verwaltungswirt',
+  'verw', 'iur', 'jur', 'oec', 'paed', 'phil', 'chem', 'phys', 'math', 'inform', 'inf',
+]);
+
 // 学术**后缀**：仅当**紧跟已剥的称谓**时才剥（"Dr. med."/"Dr. rer. nat."/"Dipl. Ing." 的空格分写形；#77 P2）——
 // 独立出现（"Dr. Ma" 的 Ma、"Erik Ing" 的 Ing）绝不剥。🔴 ma/ba **不**入此集（常见真实姓氏，永不剥）。
 const IDENTITY_TITLE_SUFFIX = new Set(['med', 'rer', 'nat', 'ing', 'mag', 'hon']);
+
+// 本 PR（M5 第三轮）之前的身份称谓剥离规则——只用于**兼容**：变体集/禁联键/专利墓碑在本次改动前按这些
+// 规则写过盲键（带学位串的名字归一形含 diplwirting 之类），不动就等于缩小匹配面（identity.ts 的不变式
+// 「变体集只增不减」）。新写入一律用新规则；旧形只在键集里并列保留。
+const LEGACY_IDENTITY_TITLE_SUFFIX = IDENTITY_TITLE_SUFFIX;
 
 // 贵族/介词前缀（归入姓；小写比对）。
 const SURNAME_PARTICLES = new Set([
@@ -51,30 +64,68 @@ function isHonorific(token: string): boolean {
   return parts.length > 0 && parts.every((p) => HONORIFICS.has(p));
 }
 
-/** 单 token 是否明确**前置**称谓（含多段学位串 "dipl.-ing."：拆 . / - 后各段皆全量 HONORIFICS 即算）。 */
-function isIdentityTitlePrefix(token: string): boolean {
+/** 单 token 是否明确**前置**称谓（含多段学位串 "dipl.-wirt.-ing."：拆 . / - 后各段皆称谓或学位组成词即算）。 */
+function isIdentityTitlePrefix(token: string, atLeading = true): boolean {
+  const parts = token.toLowerCase().split(/[-.]/).filter(Boolean);
+  if (parts.length === 0) return false;
+  if (parts.length > 1) return parts.every((p) => HONORIFICS.has(p) || IDENTITY_DEGREE_PARTS.has(p));
+  if (IDENTITY_TITLE_PREFIX.has(parts[0])) return true;
+  // 单 token "Ing."（工程师头衔，德语缩写必带点）：**只在名前位置**剥；无点的 "Ing"（真实姓氏/名，如
+  // "Erik Ing"）与名字中后段的带点形（"Anna Ing." 的姓）都不误伤。
+  return atLeading && parts[0] === 'ing' && token.trim().endsWith('.');
+}
+
+/** 单 token 是否学术**后缀**（med/rer/nat/ing…）——仅供"紧跟称谓才剥"的位置判定。
+ *  学位组成词（wirt/kfm…）只认**带点缩写形**："Dr. Wirt"（真实姓氏）不剥，"Dipl. Kfm. Anna"（空格分写学位串）剥。 */
+function isIdentityTitleSuffix(token: string): boolean {
+  const parts = token.toLowerCase().split(/[-.]/).filter(Boolean);
+  if (parts.length !== 1) return false;
+  const part = parts[0]!;
+  return IDENTITY_TITLE_SUFFIX.has(part) || (IDENTITY_DEGREE_PARTS.has(part) && token.trim().endsWith('.'));
+}
+
+/** 旧规则的前置判定（本 PR 前：多段 token 各段皆 HONORIFICS；含点单 token 走 IDENTITY_TITLE_PREFIX）。 */
+function isLegacyIdentityTitlePrefix(token: string): boolean {
   const parts = token.toLowerCase().split(/[-.]/).filter(Boolean);
   if (parts.length === 0) return false;
   if (parts.length > 1) return parts.every((p) => HONORIFICS.has(p));
   return IDENTITY_TITLE_PREFIX.has(parts[0]);
 }
 
-/** 单 token 是否学术**后缀**（med/rer/nat/ing…）——仅供"紧跟称谓才剥"的位置判定。 */
-function isIdentityTitleSuffix(token: string): boolean {
+/** 旧规则的后缀判定。 */
+function isLegacyIdentityTitleSuffix(token: string): boolean {
   const parts = token.toLowerCase().split(/[-.]/).filter(Boolean);
-  return parts.length === 1 && IDENTITY_TITLE_SUFFIX.has(parts[0]);
+  return parts.length === 1 && LEGACY_IDENTITY_TITLE_SUFFIX.has(parts[0]);
 }
 
 /**
  * 身份归一称谓剥离（**位置感知**，防误剥真实姓名 token）：从前往后剥明确前置称谓；紧跟已剥称谓的学术后缀
  * （"Dr. med. Anna"/"Dipl. Ing. Klaus"/"Dr. rer. nat."）也剥；**一旦遇到非称谓 token，其后全部保留**——
  * "Anna Ma" 的 Ma、"Ma Yun" 的 Ma、"Dr. Ma" 的 Ma（Ma 不在后缀集）都不剥（#54/#77 P2）。方向偏欠并。
+ * 带点单 token "Ing." 只在名字**前导称谓段**（尚未遇到真实姓名 token）内剥。
  */
 function stripIdentityTitles(tokens: string[]): string[] {
   const out: string[] = [];
   let prevStripped = false;
+  let atLeading = true;
   for (const t of tokens) {
-    if (isIdentityTitlePrefix(t) || (prevStripped && isIdentityTitleSuffix(t))) {
+    if (isIdentityTitlePrefix(t, atLeading) || (prevStripped && isIdentityTitleSuffix(t))) {
+      prevStripped = true;
+      continue;
+    }
+    out.push(t);
+    prevStripped = false;
+    atLeading = false;
+  }
+  return out;
+}
+
+/** 旧规则剥离（仅键集兼容用，见 LEGACY_IDENTITY_TITLE_SUFFIX）。 */
+function stripIdentityTitlesLegacy(tokens: string[]): string[] {
+  const out: string[] = [];
+  let prevStripped = false;
+  for (const t of tokens) {
+    if (isLegacyIdentityTitlePrefix(t) || (prevStripped && isLegacyIdentityTitleSuffix(t))) {
       prevStripped = true;
       continue;
     }
@@ -216,6 +267,17 @@ export function normalizePersonName(raw: string): string {
 }
 
 /**
+ * 抽取/存储边界用：剥掉**名前位置**的学术称号（Dr./Prof./Dipl.-Wirt.-Ing./Ing.…）后返回姓名原文。
+ * 与身份归一共用同一位置感知剥离（遇非称号 token 即停，不误剥真实姓名）；无称号时原样返回（仅空白归一）。
+ * 供 `contact-extraction.cleanPersonName` 落库前净化，令存储姓名、dedupeKey 与身份合并键在源头一致。
+ */
+export function stripAcademicTitles(raw: string): string {
+  const tokens = (raw ?? '').normalize('NFC').trim().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return '';
+  return stripIdentityTitles(tokens).join(' ');
+}
+
+/**
  * 身份归一「纯去音标」变体（NFKD 兼容分解 + 去组合记号，**保 Unicode 字母/数字**）：与 {@link identityVariant}
  * 的**德语标准音译**（ä→ae）互补——此变体 ä→a（丢音标形）、é→e、ñ→n…，并 NFKC/NFKD 折叠兼容字（全角/连字）。
  * 二者并入 {@link personNameKeyVariants} 变体集，令「Müller / Mueller / Muller」等跨源拼写在 Art.17 禁联/对账上收敛。
@@ -247,7 +309,10 @@ function umlautFoldVariant(raw: string): string {
  * 归一人名的**多变体键集**（Art.17 禁联/对账用，方向偏 **over-suppress**——宁多误禁不漏禁）。对同一自然人产出
  * 三归一全名变体覆盖：**变音丢弃**（ä→a，pureStripVariant）/ **德语标准音译**（ä→ae，identityVariant）/
  * **德语 umlaut 折叠**（ä|ae→a、无变音锚点的 Mueller↔Muller 也收敛，umlautFoldVariant）/ **分解 Unicode**（NFC 先归）/
- * **"Surname, Given" 语序** / 称谓剥离。去重、稳定排序（≤3 形）。空/纯称谓 → []（调用方回退明文键，保留可区分性）。
+ * **"Surname, Given" 语序** / 称谓剥离。去重、稳定排序（通常 ≤3 形）。空/纯称谓 → []（调用方回退明文键，保留可区分性）。
+ *
+ * 🔴 **旧剥离形并列保留**（变体集只增不减）：本 PR 前学位串（`Dipl.-Wirt.-Ing.` 等）不剥，按旧规则写过盲键的
+ * contact_key / 专利墓碑 / 缓存仍以「含学位串」的归一名为准；新规则只**新增**剥离后的形，绝不缩减匹配面。
  *
  * 🔴 与 {@link normalizePersonName}（**单值**·德语形，跨源同一人**合并**键 / resolver 模糊并用）刻意分离：合并方向偏
  * **欠并**（信息缺失时宁欠并不误并两人），禁联方向偏 **过禁**（宁误禁同名另一人也不漏禁被擦除人——over-suppress 于
@@ -256,14 +321,16 @@ function umlautFoldVariant(raw: string): string {
 export function personNameKeyVariants(raw: string): string[] {
   const nfc = (raw ?? '').normalize('NFC').trim();
   if (!nfc) return [];
-  const parsed = parseName(reorderSurnameComma(nfc), stripIdentityTitles);
-  if (!parsed) return [];
-  const assemble = (variant: (s: string) => string): string =>
-    [parsed.given, ...parsed.middles, parsed.surname].map(variant).filter(Boolean).join(' ');
   const forms = new Set<string>();
-  for (const variant of [identityVariant, pureStripVariant, umlautFoldVariant]) {
-    const full = assemble(variant);
-    if (full) forms.add(full);
+  for (const strip of [stripIdentityTitles, stripIdentityTitlesLegacy]) {
+    const parsed = parseName(reorderSurnameComma(nfc), strip);
+    if (!parsed) continue;
+    const assemble = (variant: (s: string) => string): string =>
+      [parsed.given, ...parsed.middles, parsed.surname].map(variant).filter(Boolean).join(' ');
+    for (const variant of [identityVariant, pureStripVariant, umlautFoldVariant]) {
+      const full = assemble(variant);
+      if (full) forms.add(full);
+    }
   }
   return [...forms].sort();
 }
@@ -277,6 +344,18 @@ export function foldedPersonNameKey(raw: string): string {
   const nfc = (raw ?? '').normalize('NFC').trim();
   if (!nfc) return '';
   const parsed = parseName(reorderSurnameComma(nfc), stripIdentityTitles);
+  if (!parsed) return '';
+  return [parsed.given, ...parsed.middles, parsed.surname].map(umlautFoldVariant).filter(Boolean).join(' ');
+}
+
+/**
+ * 旧规则的**最大折叠**形（本 PR 前学位串不剥时写入的缓存行/墓碑盲键）。仅用于**兼容查询**：
+ * 专利缓存刷新时墓碑查重需同时命中新旧两形，否则旧墓碑挡不住重物化（Art.17）。新写入从不使用本形。
+ */
+export function legacyFoldedPersonNameKey(raw: string): string {
+  const nfc = (raw ?? '').normalize('NFC').trim();
+  if (!nfc) return '';
+  const parsed = parseName(reorderSurnameComma(nfc), stripIdentityTitlesLegacy);
   if (!parsed) return '';
   return [parsed.given, ...parsed.middles, parsed.surname].map(umlautFoldVariant).filter(Boolean).join(' ');
 }

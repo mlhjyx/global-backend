@@ -88,6 +88,58 @@ describe('social presence contact adapter (M2a: search index only)', () => {
     expect(contacts.map((contact) => contact.fullName)).toEqual(['Max Abendi']);
   });
 
+  it('drops company-only headlines without role evidence (M5 round 3: abendi)', () => {
+    const dropped: string[] = [];
+    const contacts = parseSocialResults(
+      [
+        // 垃圾档案：headline 里公司名之外没有任何职位/职能词（URL slug 与姓名一致也不放行）。
+        { url: 'https://www.linkedin.com/in/jane-doe-123456789', title: 'Jane Doe - Abendi | LinkedIn' },
+        // 正常档案：职位词提供独立的专业佐证。
+        { url: 'https://www.linkedin.com/in/max-abendi', title: 'Max Abendi – Geschäftsführer – Abendi Pumpen GmbH | LinkedIn' },
+      ],
+      { name: 'Abendi', domain: 'abendi.de' },
+      (reason) => dropped.push(reason),
+    );
+    expect(contacts.map((contact) => contact.fullName)).toEqual(['Max Abendi']);
+    expect(dropped).toEqual(['uninformative']);
+  });
+
+  it('keeps German compound role words and multi-word English roles', () => {
+    const contacts = parseSocialResults(
+      [
+        { url: 'https://www.linkedin.com/in/erika-musterfrau', title: 'Erika Musterfrau - Einkaufsleiterin - Pumpen Schmid GmbH | XING' },
+        { url: 'https://www.linkedin.com/in/max-mustermann', title: 'Max Mustermann – Head of Procurement – Pumpen Schmid GmbH | LinkedIn' },
+      ],
+      COMPANY,
+    );
+    expect(contacts.map((contact) => contact.fullName)).toEqual(['Erika Musterfrau', 'Max Mustermann']);
+  });
+
+  it('does not count accidental substrings as role words (headquarters / Agentur)', () => {
+    const dropped: string[] = [];
+    const contacts = parseSocialResults(
+      [
+        { url: 'https://www.linkedin.com/in/jane-doe-1', title: 'Jane Doe - Abendi Headquarters | LinkedIn' },
+        { url: 'https://www.linkedin.com/in/jane-doe-2', title: 'Jane Doe - Personalagentur Abendi | LinkedIn' },
+      ],
+      { name: 'Abendi', domain: 'abendi.de' },
+      (reason) => dropped.push(reason),
+    );
+    expect(contacts).toEqual([]);
+    expect(dropped).toEqual(['uninformative', 'uninformative']);
+  });
+
+  it('strips hyphenated domain roots word by word before looking for role evidence', () => {
+    const dropped: string[] = [];
+    const contacts = parseSocialResults(
+      [{ url: 'https://www.linkedin.com/in/jane-doe-3', title: 'Jane Doe - IT-Service - PSG | LinkedIn' }],
+      { name: 'PSG GmbH', domain: 'it-service.de' },
+      (reason) => dropped.push(reason),
+    );
+    expect(contacts).toEqual([]);
+    expect(dropped).toEqual(['uninformative']);
+  });
+
   it('flags organisation-shaped names wherever a person name is extracted', () => {
     expect(looksLikeOrganizationName('BTS Engineering Consultants (Projects, Training)')).toBe(true);
     expect(looksLikeOrganizationName('Pumpen Schmidt GmbH')).toBe(true);
@@ -127,6 +179,28 @@ describe('social presence contact adapter (M2a: search index only)', () => {
     expect(result.contacts).toHaveLength(1);
     expect(result.contacts[0]).toMatchObject({ fullName: 'Max Mustermann', personalData: true });
     expect(result.costCents).toBe(0);
+  });
+
+  it('counts company-only headlines in diagnostics (social_uninformative_dropped)', async () => {
+    const invoke = vi.fn(async () => ({
+      data: {
+        results: [
+          { url: 'https://www.linkedin.com/in/jane-doe-123456789', title: 'Jane Doe - Abendi | LinkedIn' },
+        ],
+      },
+      costCents: 0,
+    }));
+    const adapter = new SocialPresenceContactAdapter({ broker: { invoke } as never });
+
+    const result = await adapter.discoverContacts(
+      { name: 'Abendi', domain: 'abendi.de' },
+      { workspaceId: 'ws-1', runId: 'run-1' } as never,
+    );
+
+    expect(result.contacts).toEqual([]);
+    // 计数发生在索引层去重之前：3 条 dork（linkedin/xing/域名锚定）各回同一结果 → 计 3 次（与既有
+    // namesake/organisation 计数同口径）。
+    expect(result.diagnostics).toMatchObject({ social_uninformative_dropped: 3 });
   });
 
   it('skips the archive/live layers entirely when no extractor is wired (no wasted egress)', async () => {

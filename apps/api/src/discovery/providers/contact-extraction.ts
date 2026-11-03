@@ -2,6 +2,7 @@ import { ModelGateway } from '../../model-gateway/model-gateway';
 import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
 import type { ExecutionContext } from '../provider-contract';
+import { stripAcademicTitles } from '../person-name';
 
 /**
  * `contact.find_decision_makers` 契约的共享抽取入口（decision_maker 官网页与 social_presence
@@ -73,7 +74,8 @@ export function looksLikeOrganizationName(name: string): boolean {
 
 /**
  * 抽取出的人名字段规范化：去掉括号注记（模型常写成 `Max Mustermann (Geschäftsführer)`
- * 或 `(MBA)`），剩余部分仍带机构特征才丢弃；清洗后至少两个词。
+ * 或 `(MBA)`），剥掉名前位置的德语学术称号（`Dr.` / `Dipl.-Wirt.-Ing.` / `Ing.`…，M5 第三轮：
+ * 同一人带/不带称号必须落同一存储名与去重键），剩余部分仍带机构特征才丢弃；清洗后至少两个词。
  */
 export function cleanPersonName(raw: string): string | null {
   const trimmed = raw.trim();
@@ -82,10 +84,13 @@ export function cleanPersonName(raw: string): string | null {
     .replace(/[(（][^()（）]*[)）]/gu, ' ')
     .replace(/\s+/gu, ' ')
     .trim();
-  const candidate = stripped || trimmed;
-  if (looksLikeOrganizationName(candidate)) return null;
-  if (candidate.split(/\s+/u).filter(Boolean).length < 2) return null;
-  return candidate;
+  const base = stripped || trimmed;
+  if (looksLikeOrganizationName(base)) return null;
+  // 词数按**剥称号前**判定：保留「Dr. Müller」这类只有姓、但在源页上成对出现的条目（旧行为），
+  // 落库名仍是剥过称号的形；纯称号（"Dr."）仍按单 token 拒绝。
+  if (base.split(/\s+/u).filter(Boolean).length < 2) return null;
+  const candidate = stripAcademicTitles(base);
+  return candidate || null;
 }
 
 export async function extractPeopleFromPage(

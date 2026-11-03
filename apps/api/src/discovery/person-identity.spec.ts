@@ -44,6 +44,20 @@ describe('resolveAmongCandidates · 四 Tier 命中', () => {
     expect(hit).toEqual({ contactId: 'c1', matchRule: 'name_exact' });
   });
 
+  it('Tier 2：德语学位串前缀不影响同一人（M5 第三轮 trik-pumpen 回归）', () => {
+    const hit = resolveAmongCandidates(
+      { fullName: 'Tobias Krüger' },
+      [cand('c1', 'Dipl.-Wirt.-Ing. Tobias Krüger')],
+    );
+    expect(hit).toEqual({ contactId: 'c1', matchRule: 'name_exact' });
+  });
+
+  it('Tier 2：学位串剥离后不同人仍不误并', () => {
+    expect(
+      resolveAmongCandidates({ fullName: 'Anna Weber' }, [cand('c1', 'Dipl.-Kfm. Klaus Weber')]),
+    ).toBeNull();
+  });
+
   it('Tier 3 高置信模糊（token 重排，score≥0.9 且 margin≥0.1）', () => {
     const hit = resolveAmongCandidates(
       { fullName: 'Johann Schmidt' },

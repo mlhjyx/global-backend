@@ -136,7 +136,8 @@ function extensionContext(value: object): object & {
   };
 }
 
-const DATABASE_PRINCIPAL_QUERY = `
+/** 受限 app 角色的会话证据查询（启动自检与运维脚本共用；只读 pg_catalog，无 PII）。 */
+export const DATABASE_PRINCIPAL_QUERY = `
   SELECT session_user::text AS "sessionUser",
          current_user::text AS "currentUser",
          principal.rolsuper AS "rolSuper",

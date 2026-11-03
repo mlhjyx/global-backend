@@ -6,12 +6,14 @@ import {
   refreshPatentCache,
   inventorBlindKey,
   inventorErasureKeys,
+  legacyInventorBlindKey,
   PATENT_POLICY_DOMAIN,
   type CacheInventorRow,
   type PatentRefreshDb,
 } from './patent-inventor-cache';
 import { MAX_INVENTORS_PER_ASSIGNEE, type RefreshScanResult } from './bigquery-patents';
-import { encryptPii, decryptPii } from '../compliance/pii-crypto';
+import { encryptPii, decryptPii, blindContactKey } from '../compliance/pii-crypto';
+import { legacyFoldedPersonNameKey } from '../discovery/person-name';
 import { toReadableName } from '../discovery/providers/bigquery-patents.provider';
 
 // vitest.config.ts 注入固定 PII_ENCRYPTION_KEY，故 encryptPii/decryptPii 直接可用。
@@ -110,6 +112,18 @@ describe('inventorBlindKey / inventorErasureKeys（Art.17 擦除不变式）', (
   it('空/纯称谓名 → 擦除键集为空（不误删）', () => {
     expect(inventorErasureKeys('')).toEqual([]);
     expect(inventorErasureKeys('   ')).toEqual([]);
+  });
+
+  it('学位串名：同一原始名的擦除键集既含新剥离形，也含旧规则形（变体只增不减）', () => {
+    // 本 PR 前 "Dipl.-Wirt.-Ing." 不剥，缓存/墓碑盲键按含称号的折叠形写入——按同名擦除时必须仍命中旧形。
+    const raw = 'Dipl.-Wirt.-Ing. Hans Schmidt';
+    const legacyStored = blindContactKey(legacyFoldedPersonNameKey(raw));
+    expect(inventorErasureKeys(raw)).toContain(legacyStored);
+    expect(legacyInventorBlindKey(raw)).toBe(legacyStored);
+    // 新剥离形也在键集里（同一原始名两种规则都覆盖）。
+    expect(inventorErasureKeys(raw)).toContain(inventorBlindKey('Hans Schmidt'));
+    // 普通名新旧规则同形：兼容键 == 新键（不多出无意义盲键）。
+    expect(legacyInventorBlindKey('Hans Schmidt')).toBe(inventorBlindKey('Hans Schmidt'));
   });
 });
 

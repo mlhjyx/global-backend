@@ -49,4 +49,16 @@ describe('contact extraction person-name hygiene (M5 guards)', () => {
     expect(cleanPersonName('Pumpen Schmid GmbH (Impressum)')).toBeNull();
     expect(cleanPersonName('Max')).toBeNull();
   });
+
+  it('strips leading German academic titles so stored names and dedupe keys converge (M5 round 3)', () => {
+    expect(cleanPersonName('Dipl.-Wirt.-Ing. Tobias Krüger')).toBe('Tobias Krüger');
+    expect(cleanPersonName('Dr. Max Mustermann')).toBe('Max Mustermann');
+    expect(cleanPersonName('Ing. Klaus Weber')).toBe('Klaus Weber');
+    // 真实姓名 token 不误伤（位置感知：非首位不剥，单 token 学位同形词不剥）。
+    expect(cleanPersonName('Anna Wirt')).toBe('Anna Wirt');
+    expect(cleanPersonName('Erik Ing')).toBe('Erik Ing');
+    // 词数按剥称号前判定：只有姓的条目（"Dr. Müller"）保留旧有的收录行为，落库名去称号。
+    expect(cleanPersonName('Dr. Müller')).toBe('Müller');
+    expect(cleanPersonName('Dr.')).toBeNull();
+  });
 });
