@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
 import { CreateCompanyDto } from './dto/create-company.dto';
+import { UpdateCompanyDto } from './dto/update-company.dto';
 import { assertPublicHttpUrl } from '../adapters/url-guard';
 import {
   ExecutionBudgetAuthorityService,
@@ -316,6 +317,7 @@ export class CompanyService {
   async list(ctx: RequestContext, limit: number, cursor?: string) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const rows = await tx.companyProfile.findMany({
+        where: { deletedAt: null },
         take: limit + 1,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -335,17 +337,68 @@ export class CompanyService {
     const company = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
       tx.companyProfile.findUnique({ where: { id } }),
     );
-    if (!company) {
+    if (!company || company.deletedAt) {
       throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'company not found' } });
     }
     return company;
   }
 
+  /**
+   * 编辑公司档案（2026-11-03）：只开放卖家自查事实（D16）与官网；DRAFT 内可改。
+   * 补官网后由调用方另取 quote/Grant 调 retry 端点启动理解——PATCH 本身不消费 Grant。
+   */
+  async update(ctx: RequestContext, id: string, dto: UpdateCompanyDto) {
+    if (dto.website !== undefined) {
+      await assertPublicHttpUrl(dto.website);
+    }
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const company = await tx.companyProfile.findUnique({ where: { id } });
+      if (!company || company.deletedAt) {
+        throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'company not found' } });
+      }
+      if (company.status !== 'DRAFT') {
+        throw new ConflictException({
+          error: { code: 'COMPANY_NOT_EDITABLE', message: '只有 DRAFT 档案可以编辑' },
+        });
+      }
+      const data: Prisma.CompanyProfileUpdateInput = { version: { increment: 1 } };
+      if (dto.name !== undefined) data.name = dto.name.trim();
+      if (dto.website !== undefined) data.website = dto.website;
+      if (dto.industry !== undefined) data.industry = dto.industry.trim();
+      if (dto.targetMarkets !== undefined) data.targetMarkets = dto.targetMarkets;
+      if (dto.businessEmail !== undefined) data.businessEmail = dto.businessEmail.trim();
+      return tx.companyProfile.update({ where: { id }, data });
+    });
+  }
+
+  /** 软删除 DRAFT 档案（2026-11-03）：行保留、列表/详情不再可见；物理删除归 owner/DSR。 */
+  async remove(ctx: RequestContext, id: string): Promise<{ id: string }> {
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const company = await tx.companyProfile.findUnique({ where: { id } });
+      if (!company || company.deletedAt) {
+        throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'company not found' } });
+      }
+      if (company.status !== 'DRAFT') {
+        throw new ConflictException({
+          error: { code: 'COMPANY_NOT_DELETABLE', message: '只有 DRAFT 档案可以删除' },
+        });
+      }
+      await tx.companyProfile.update({
+        where: { id },
+        data: { deletedAt: new Date(), version: { increment: 1 } },
+      });
+      return { id };
+    });
+  }
+
   /** 完整度视图（5.2.7）：企业当前可用性的量化依据。 */
   async completeness(ctx: RequestContext, id: string) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const company = await tx.companyProfile.findUnique({ where: { id }, select: { id: true, status: true } });
-      if (!company) {
+      const company = await tx.companyProfile.findUnique({
+        where: { id },
+        select: { id: true, status: true, deletedAt: true },
+      });
+      if (!company || company.deletedAt) {
         throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'company not found' } });
       }
       const [approved, pending, offerings, conflictsOpen] = await Promise.all([
@@ -399,16 +452,43 @@ export class CompanyService {
     });
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const company = await tx.companyProfile.findUnique({ where: { id: companyId } });
-      if (!company) {
+      if (!company || company.deletedAt) {
         throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'company not found' } });
       }
-      if (company.status !== 'DRAFT' || company.understandingFailedAt === null) {
+      if (company.status !== 'DRAFT') {
         throw new ConflictException({
           error: {
             code: 'UNDERSTANDING_RETRY_NOT_ALLOWED',
-            message: '只在最近一次理解失败的 DRAFT 档案上允许重试',
+            message: '只在 DRAFT 档案上允许启动/重试理解',
           },
         });
+      }
+      if (!company.website) {
+        throw new ConflictException({
+          error: {
+            code: 'UNDERSTANDING_WEBSITE_REQUIRED',
+            message: '先补企业官网，才能启动理解',
+          },
+        });
+      }
+      // 失败过的档案直接允许重试；从未失败的档案要防重复启动（10 分钟内的排队事件算已排队）。
+      if (company.understandingFailedAt === null) {
+        const pending = await tx.outboxEvent.findFirst({
+          where: {
+            aggregateId: companyId,
+            eventType: 'CompanyProfileCreated',
+            occurredAt: { gt: new Date(Date.now() - 10 * 60_000) },
+          },
+          orderBy: { occurredAt: 'desc' },
+        });
+        if (pending) {
+          throw new ConflictException({
+            error: {
+              code: 'UNDERSTANDING_ALREADY_PENDING',
+              message: '理解已排队或正在进行，请稍后刷新状态',
+            },
+          });
+        }
       }
       const binding = await this.authority.consumeVerifiedWorkspaceGrantInTransaction(
         verified,
@@ -435,8 +515,11 @@ export class CompanyService {
   /** 结构化产品/服务（理解工作流抽取，带溯源）。company 不存在时 404。 */
   async listOfferings(ctx: RequestContext, companyId: string) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const company = await tx.companyProfile.findUnique({ where: { id: companyId }, select: { id: true } });
-      if (!company) {
+      const company = await tx.companyProfile.findUnique({
+        where: { id: companyId },
+        select: { id: true, deletedAt: true },
+      });
+      if (!company || company.deletedAt) {
         throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'company not found' } });
       }
       return tx.offering.findMany({

@@ -1,11 +1,13 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Headers,
   HttpCode,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -19,7 +21,9 @@ import { ScopesGuard } from '../auth/scopes.guard';
 import { Enveloped, envelope, PageEnveloped, pageEnvelope } from '../common/envelope';
 import { ApiEnvelope, ApiListEnvelope, ApiPageEnvelope } from '../common/api-envelope.decorator';
 import { CompanyService } from './company.service';
+import { WebsiteCandidatesService } from './website-candidates';
 import { CreateCompanyDto } from './dto/create-company.dto';
+import { UpdateCompanyDto } from './dto/update-company.dto';
 import { RetryUnderstandingDto } from './dto/retry-understanding.dto';
 import { CompanyDto, OfferingDto } from './dto/company.dto';
 import {
@@ -34,7 +38,10 @@ import {
 @UseGuards(AuthGuard, ScopesGuard)
 @RequireScopes('acquisition:read')
 export class CompanyController {
-  constructor(private readonly companies: CompanyService) {}
+  constructor(
+    private readonly companies: CompanyService,
+    private readonly websiteCandidates: WebsiteCandidatesService,
+  ) {}
 
   @Post()
   @RequireScopes('acquisition:write')
@@ -142,6 +149,62 @@ export class CompanyController {
     @Param('companyId', ParseUUIDPipe) companyId: string,
   ): Promise<Enveloped<CompanyDto>> {
     return envelope(CompanyDto.from(await this.companies.confirm(ctx, companyId)));
+  }
+
+  @Patch(':companyId')
+  @RequireScopes('acquisition:write')
+  @ApiOperation({
+    summary: '编辑公司档案（DRAFT 内可改：名称/官网/行业/目标市场/业务邮箱）',
+    description:
+      '补填官网后，调用方需为 `POST /companies/:companyId/understanding/retry` 另取 quote 与 Grant 来启动理解；本接口不消费 Grant。',
+  })
+  @ApiEnvelope(CompanyDto)
+  async update(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId', ParseUUIDPipe) companyId: string,
+    @Body() dto: UpdateCompanyDto,
+  ): Promise<Enveloped<CompanyDto>> {
+    return envelope(CompanyDto.from(await this.companies.update(ctx, companyId, dto)));
+  }
+
+  @Delete(':companyId')
+  @RequireScopes('acquisition:write')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: '软删除 DRAFT 档案（行保留、列表与详情不再可见；物理删除归 owner/DSR）',
+  })
+  @ApiEnvelope({
+    type: 'object',
+    required: ['id'],
+    properties: { id: { type: 'string', format: 'uuid' } },
+  })
+  async remove(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId', ParseUUIDPipe) companyId: string,
+  ): Promise<Enveloped<{ id: string }>> {
+    return envelope(await this.companies.remove(ctx, companyId));
+  }
+
+  @Post(':companyId/website-candidates')
+  @RequireScopes('acquisition:write')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: '按公司名搜索官网候选（SearXNG，人工确认后自行采用；不抓页面）',
+  })
+  @ApiListEnvelope({
+    type: 'object',
+    required: ['url', 'title', 'score'],
+    properties: {
+      url: { type: 'string' },
+      title: { type: 'string' },
+      score: { type: 'number' },
+    },
+  })
+  async listWebsiteCandidates(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId', ParseUUIDPipe) companyId: string,
+  ): Promise<Enveloped<Array<{ url: string; title: string; score: number }>>> {
+    return envelope(await this.websiteCandidates.find(ctx, companyId));
   }
 
   @Get(':companyId/offerings')

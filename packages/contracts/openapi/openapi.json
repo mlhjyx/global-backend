@@ -5629,6 +5629,117 @@
           "acquisition:read"
         ],
         "description": "按 id 取单个企业画像。资源属于其他 workspace 时返回 404，而不是 403——不泄露存在性。"
+      },
+      "patch": {
+        "description": "补填官网后，调用方需为 `POST /companies/:companyId/understanding/retry` 另取 quote 与 Grant 来启动理解；本接口不消费 Grant。",
+        "operationId": "CompanyController_update_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCompanyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/CompanyDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "编辑公司档案（DRAFT 内可改：名称/官网/行业/目标市场/业务邮箱）",
+        "tags": [
+          "Companies"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ]
+      },
+      "delete": {
+        "operationId": "CompanyController_remove_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "id"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "软删除 DRAFT 档案（行保留、列表与详情不再可见；物理删除归 owner/DSR）",
+        "tags": [
+          "Companies"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ],
+        "description": "软删除 DRAFT 档案：列表与详情不再可见，关联事实与审计保留；物理删除归 owner/DSR。非 DRAFT 返回 409 COMPANY_NOT_DELETABLE。"
       }
     },
     "/api/v1/companies/{companyId}/completeness": {
@@ -5749,6 +5860,73 @@
           "acquisition:review"
         ],
         "description": "人工确认企业可用：REVIEW → ACTIVE，是显式的 Gate 出口。需要 acquisition:review。"
+      }
+    },
+    "/api/v1/companies/{companyId}/website-candidates": {
+      "post": {
+        "operationId": "CompanyController_listWebsiteCandidates_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "url",
+                          "title",
+                          "score"
+                        ],
+                        "properties": {
+                          "url": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "score": {
+                            "type": "number"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "按公司名搜索官网候选（SearXNG，人工确认后自行采用；不抓页面）",
+        "tags": [
+          "Companies"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ],
+        "description": "按公司名用自托管 SearXNG 搜索官网候选（两个有界查询），过滤企业信息聚合站/社交/搜索引擎并按标题与公司名的匹配度排序，最多 5 条；只返回 {url,title,score}，不抓页面，需人工确认后通过 PATCH 采用。"
       }
     },
     "/api/v1/companies/{companyId}/offerings": {
@@ -17388,6 +17566,41 @@
         "required": [
           "attemptId"
         ]
+      },
+      "UpdateCompanyDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "企业名称"
+          },
+          "website": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048,
+            "description": "企业官网（http/https）；补填后将可启动理解"
+          },
+          "industry": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "所属行业"
+          },
+          "targetMarkets": {
+            "description": "目标市场（ISO 3166-1 alpha-2），最多 30 个",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "businessEmail": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 320,
+            "description": "业务邮箱"
+          }
+        }
       },
       "OfferingDto": {
         "type": "object",
