@@ -22,7 +22,7 @@
 
 ### 1.1 历史与冻结文档的定位（2026-11-02 标注）
 
-- [`research/platform-top-level-design-v1.md`](research/platform-top-level-design-v1.md)：**SUPERSEDED**——顶层设计 v1，已被 [产品边界](product-scope.md) + [as-built 架构](architecture/current.md) + [ADR 注册表](adr/registry.md) 取代，其中「QGO 归本仓」等表述已被 ADR-001 改判，只作研究归档，不得再当现行设计引用。
+- [`archive/research/platform-top-level-design-v1.md`](archive/research/platform-top-level-design-v1.md)：**SUPERSEDED**——顶层设计 v1，已被 [产品边界](product-scope.md) + [as-built 架构](architecture/current.md) + [ADR 注册表](adr/registry.md) 取代，其中「QGO 归本仓」等表述已被 ADR-001 改判，已归档，不得再当现行设计引用。
 - `docs/frontend/` 系列（19 份）：**目标规范 / 设计基线，不是 as-built**；实际运行的 SaaS 前端以 gain-saas 仓库为准，本目录不描述其实现状态。
 - `docs/site-builder/` 与 `docs/design/` 中独立站相关文档：**冻结线文档**——Site Builder 正式冻结仍待 PRD4-D1 拍板，冻结期间不作为当前施工依据；M1 收口属历史。
 - `docs/archive/`：只读历史，正文不改写，链接问题按历史结构告警处理。
@@ -88,6 +88,7 @@
 
 - [场景目录](governance/scenario-catalog.md)
 - [追踪矩阵](governance/traceability-matrix.md)
+- [AI 可观测性开发 profile](backend/ai-observability.md)
 - [响应式、a11y 与性能](frontend/10-responsive-accessibility-and-performance.md)
 - [分析、测试与发布证据](frontend/12-analytics-testing-and-release-evidence.md)
 - [状态、错误、降级与恢复](frontend/07-state-error-degradation-and-recovery.md)
