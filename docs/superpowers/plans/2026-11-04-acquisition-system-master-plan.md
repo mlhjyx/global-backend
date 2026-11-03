@@ -11,6 +11,18 @@
 - **可扩展**：新增渠道数据源不需要改代码——管理后台配置即可（API / 爬取 / 导入三种形态）。
 - **合规与免费优先**：每渠道登记许可与条款；能爬的必看 robots 与 ToS；不允许爬/无 API 的走导入或付费开关。
 
+## 一之二、外贸获客标准工作流与我们的映射
+
+| # | 标准步骤 | 现状 | 缺口 / 本计划改造 |
+| --- | --- | --- | --- |
+| 1 | 选市场（Trade Map/Comtrade） | 无 | 新增 Trade Map 渠道（宏观，进 ICP 建议） |
+| 2 | 定 ICP | 已有 | 接入市场建议与反馈闭环 |
+| 3 | 找名单（海关→展会→协会→目录→搜索） | 仅搜索 | **渠道平台**：API/爬取/导入三形态养公司池 |
+| 4 | 验证与画像 | 官网/注册/GLEIF 已有 | 渠道 lineage；海关频次作 intent 信号 |
+| 5 | 找决策人 | decision_maker/email_guess/SMTP 已有 | LinkedIn 保持手工 |
+| 6 | 触达（邮件/WhatsApp/电话） | 仅草稿 | 触达闭环（M3，市场分级） |
+| 7 | 跟进与沉淀 | 无 | 反馈闭环 + CRM 投影 |
+
 ## 二、总体架构
 
 ```
@@ -62,17 +74,21 @@
 
 ### 3.3 首批候选渠道（逐源接入前核条款/robots）
 
-| 类别 | 候选 | 形态 | 备注 |
+判定口径：**A=公开可爬**（robots 放行+条款允许）；**B=只导入/付费**；**C=不做**。
+
+| 类别 | 候选 | 形态与判定 | 备注 |
 | --- | --- | --- | --- |
-| 海关提单 | ImportInfo / Port Examiner（查询页）、TradeData.io（API）、ImportYeti（付费 API） | import 优先；api 付费可选 | ImportYeti 明确禁爬；公开舱单是公开记录，合规路径=导入或付费 API |
-| 展会 | 10times、展会官网 exhibitor 列表（逐站）、mapyourshow（已有）、trade_fair（已有） | crawl / api | 展会官网列表是最"可爬"的高质量买家源 |
-| 协会/商会 | VDMA/HK 等行业协会会员名录、各国商会 | crawl | 逐站核 robots 与条款 |
-| B2B 目录 | Europages、DirectIndustry | crawl（评估） | 先评估 ToS；命中率中等 |
-| 企业注册 | Companies House、INPI、GLEIF（均已接）；DE Handelsregister（评估） | api | 用于补全与核验，不作第一发现源 |
-| 招标 | TED、SAM.gov（已接、可再启用） | api | 意图信号强 |
-| 招聘/官网信号 | 公司官网 careers、新闻页 | crawl | 信号层（M2） |
-| 宏观市场 | Trade Map（ITC） | api | 只进 ICP 市场建议 |
-| 明确不做 | LinkedIn 自动化、X/FB 抓取、Apollo 类付费库 | — | ToS/付费原则 |
+| 海关提单 | ImportYeti（免费浏览、无 API、明确禁爬）；ImportInfo / Port Examiner（查询页）；TradeData.io / Apify（付费 API）；ImportGenius/Panjiva/Volza/腾道（付费） | **B**：import 先行；api 付费可选 | 公开舱单是公开记录，合规路径=导入或付费 API |
+| 宏观贸易 | Trade Map（ITC）、UN Comtrade、中国海关统计 | A / API | 只进 ICP 市场建议 |
+| 展会 | 10times、TradeFairDates（目录页）；**各展会官网 exhibitor 列表**；mapyourshow、trade_fair（已有） | **A**（展会官网为主）+ 已有 API | 最快出高可信名单的源 |
+| 协会/商会 | VDMA、ZVEI、VDA、各国 AHK 商会、Eurochambres 名录 | A（逐站核 robots） | 会员名录常需登录 → 视情况转 B |
+| B2B 目录 | Europages、DirectIndustry、Kompass、ThomasNet、GlobalSpec | B 评估 | ToS 不一 |
+| 企业注册/信用 | Companies House、INPI、GLEIF（已接）；Handelsregister/KvK/CVR/Bolagsverket（评估）；OpenCorporates、SEC EDGAR | A / API | 补全与核验 |
+| 招标 | TED、SAM.gov（已接）；UK Contracts Finder、AusTender、UNGM、World Bank/ADB | A / API | 意图信号强 |
+| 招聘/官网信号 | 公司官网 careers、press 页 | A | 信号层 |
+| 新闻/融资 | Google News RSS；Crunchbase（付费） | A / 付费可选 | 信号层 |
+| 地图/POI | OpenStreetMap Overpass（已接、可再启用）；Google Places（付费） | A / 付费可选 | 补全 |
+| 明确不做 | LinkedIn 自动化、X/FB/IG 抓取、Apollo/ZoomInfo/Lusha/Cognism、Instantly/Smartlead/Hunter/Snov 等 | **C** | ToS/付费原则，仅借鉴模式 |
 
 ### 3.4 管理后台（gain-saas）
 
@@ -119,6 +135,12 @@
 - **D2 爬虫运行时**：复用 crawl4ai（推荐，已在栈内）vs 独立 Playwright 服务。
 - **D3 海关数据**：导入通道先行（推荐）；TradeData.io/ImportYeti 付费 API 作为可选开关，条款评估后进行。
 - **D4 管理后台权限**：平台管理员（saas-admin/ops）管理全局渠道；工作空间 admin 只能启用/停用已批准的渠道。
+
+## 七之二、新增决策（2026-11-04）
+
+- **D5 渠道与 run 解耦**：渠道按周期持续养公司池、run 只消费池（推荐）vs run 内现抓。
+- **D6 触达市场分级**：US/UK 自动发送 + EU 只草稿（推荐，UWG §7）。
+- **D7 需要产品负责人提供的资源**：海关名单样例 CSV、重点展会名单、协会会员账号/名录、历史客户名单（冷启动+抑制）、发送邮箱域名与 DNS 权限、目标市场优先级、付费 API 预算、落地页承接、LinkedIn 账号范围、法务文本确认。
 
 ## 八、风险
 
