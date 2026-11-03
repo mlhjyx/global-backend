@@ -20,6 +20,7 @@ import { EventsModule } from './events/events.module';
 import { ComplianceModule } from './compliance/compliance.module';
 import { SanctionsModule } from './sanctions/sanctions.module';
 import { SiteBuilderModule } from './site-builder/site-builder.module';
+import { SellerKnowledgeModule } from './seller-knowledge/seller-knowledge.module';
 import { ModelRuntimeModule } from './model-runtime';
 import { RuntimeModule } from './runtime/runtime.module';
 import { RuntimeClockModule } from './runtime/runtime-clock.module';
@@ -61,6 +62,7 @@ import { PlatformRevocationHttpModule } from './platform-authority/platform-revo
     ComplianceModule,
     SanctionsModule,
     SiteBuilderModule,
+    SellerKnowledgeModule,
   ],
   controllers: [HealthController, WhoamiController],
   providers: [

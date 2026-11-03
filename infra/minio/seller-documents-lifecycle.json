@@ -1,0 +1,17 @@
+{
+  "Rules": [
+    {
+      "ID": "seller-document-staging-ttl",
+      "Status": "Enabled",
+      "Filter": {
+        "Tag": {
+          "Key": "global-lifecycle",
+          "Value": "seller-document-staging"
+        }
+      },
+      "Expiration": {
+        "Days": 1
+      }
+    }
+  ]
+}

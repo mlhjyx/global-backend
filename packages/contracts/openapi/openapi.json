@@ -16522,6 +16522,402 @@
         ],
         "description": "计算 refurbish 的内部技术预算包络；不构成客户报价，也不限制余额。"
       }
+    },
+    "/api/v1/companies/{companyId}/seller-documents/presign": {
+      "post": {
+        "operationId": "SellerCompanyDocumentsController_presign_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PresignSellerDocumentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PresignSellerDocumentResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "为卖家资料上传签发短时 presigned PUT（校验类型与配额）",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ]
+      }
+    },
+    "/api/v1/companies/{companyId}/seller-documents/{documentId}/commit": {
+      "post": {
+        "operationId": "SellerCompanyDocumentsController_commit_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "documentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SellerDocumentDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "确认上传：HEAD/魔数/sha256 校验、转存 canonical 并入队解析",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ]
+      }
+    },
+    "/api/v1/companies/{companyId}/seller-documents": {
+      "get": {
+        "operationId": "SellerCompanyDocumentsController_list_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "page"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SellerDocumentDto"
+                      }
+                    },
+                    "page": {
+                      "type": "object",
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
+                      "properties": {
+                        "next_cursor": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "下一页游标；null = 没有更多"
+                        },
+                        "has_more": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "列出公司资料库（游标分页，软删不可见）",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ]
+      }
+    },
+    "/api/v1/seller-documents/{documentId}": {
+      "get": {
+        "operationId": "SellerDocumentsController_get_v1",
+        "parameters": [
+          {
+            "name": "documentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SellerDocumentDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "资料详情（跨租户 404）",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ]
+      },
+      "delete": {
+        "operationId": "SellerDocumentsController_remove_v1",
+        "parameters": [
+          {
+            "name": "documentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SellerDocumentDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "软删资料（恢复窗口内可由运营恢复；物理清理见 DSR/清理管线）",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
+        ]
+      }
+    },
+    "/api/v1/seller-documents/{documentId}/download-url": {
+      "get": {
+        "operationId": "SellerDocumentsController_downloadUrl_v1",
+        "parameters": [
+          {
+            "name": "documentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "url"
+                      ],
+                      "properties": {
+                        "url": {
+                          "type": "string",
+                          "format": "uri"
+                        },
+                        "expiresInSeconds": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "短时 presigned GET 下载地址",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ]
+      }
+    },
+    "/api/v1/seller-documents/{documentId}/retry": {
+      "post": {
+        "operationId": "SellerDocumentsController_retry_v1",
+        "parameters": [
+          {
+            "name": "documentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SellerDocumentDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "重试失败或排队中的资料解析",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ]
+      }
     }
   },
   "info": {
@@ -16534,6 +16930,10 @@
     {
       "name": "Companies",
       "description": "企业画像：提交官网、看完整度、审批后人工确认"
+    },
+    {
+      "name": "Seller Documents",
+      "description": "卖家资料库：上传签票、提交校验、列表 / 下载 / 重试 / 软删"
     },
     {
       "name": "Claims",
@@ -18808,6 +19208,127 @@
         },
         "required": [
           "scope"
+        ]
+      },
+      "PresignSellerDocumentResponseDto": {
+        "type": "object",
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "uploadUrl": {
+            "type": "string",
+            "format": "uri"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "documentId",
+          "uploadUrl",
+          "expiresAt"
+        ]
+      },
+      "PresignSellerDocumentDto": {
+        "type": "object",
+        "properties": {
+          "filename": {
+            "type": "string",
+            "example": "产品目录-2026.pdf"
+          },
+          "mime": {
+            "type": "string",
+            "example": "application/pdf",
+            "description": "pdf / docx / pptx / xlsx / text/plain / text/markdown"
+          },
+          "size": {
+            "type": "number",
+            "description": "字节数（≤50MB，txt/md ≤10MB）",
+            "minimum": 1,
+            "maximum": 52428800
+          }
+        },
+        "required": [
+          "filename",
+          "mime",
+          "size"
+        ]
+      },
+      "SellerDocumentDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "companyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "mime": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "string",
+            "description": "字节数（字符串表示，避免 JSON 大整数截断）"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "pdf",
+              "docx",
+              "pptx",
+              "txt",
+              "md",
+              "other"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending_upload",
+              "committing",
+              "queued",
+              "processing",
+              "ready",
+              "failed_terminal",
+              "rejected",
+              "deleted"
+            ]
+          },
+          "processingErrorCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "chunkCount": {
+            "type": "number"
+          },
+          "factsExtractedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "companyId",
+          "filename",
+          "mime",
+          "sizeBytes",
+          "kind",
+          "status",
+          "chunkCount",
+          "createdAt"
         ]
       }
     }

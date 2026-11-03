@@ -145,6 +145,7 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-global}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-global-minio-dev}
       S3_BUCKET: ${S3_BUCKET:-global-site-builder}
+      SELLER_DOCUMENTS_S3_BUCKET: ${SELLER_DOCUMENTS_S3_BUCKET:-global-seller-documents}
       GENERIC_OPERATION_ARTIFACT_S3_BUCKET: ${GENERIC_OPERATION_ARTIFACT_S3_BUCKET:?set the dedicated artifact bucket}
       GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY: ${GENERIC_OPERATION_ARTIFACT_S3_ACCESS_KEY:?set the artifact runtime access key}
       GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY: ${GENERIC_OPERATION_ARTIFACT_S3_SECRET_KEY:?set the artifact runtime secret key}
