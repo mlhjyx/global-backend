@@ -27,6 +27,56 @@ import { installPlatformRevocationHttpBoundary } from './platform-authority/plat
 const CSV_BODY_ROUTE = '/api/v1/reports/weekly/feedback';
 const CSV_BODY_MAX_BYTES = 5 * 1024 * 1024;
 
+/** 浏览器直传：资料暂存内容经引擎中转（presign 主机是引擎侧 127.0.0.1，浏览器到不了）。 */
+const SELLER_DOCUMENT_CONTENT_ROUTE =
+  /^\/api\/v1\/companies\/[0-9a-f-]{36}\/seller-documents\/[0-9a-f-]{36}\/content$/u;
+const SELLER_DOCUMENT_CONTENT_MAX_BYTES = 51 * 1024 * 1024;
+
+/**
+ * 把资料上传路由的请求体读成 Buffer（raw 监听，不经 JSON 解析器）。
+ * 与 CSV 读取同构：只碰这一条路由，超限立即 413，不缓冲到底。
+ */
+function installSellerDocumentContentBodyReader(app: { use: (handler: (req: IncomingMessage, res: ServerResponse, next: () => void) => void) => void }): void {
+  app.use((req, res, next) => {
+    if (req.method !== 'PUT' || !SELLER_DOCUMENT_CONTENT_ROUTE.test(req.url?.split('?', 1)[0] ?? '')) {
+      next();
+      return;
+    }
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    let settled = false;
+    req.on('data', (chunk: Buffer) => {
+      if (settled) return;
+      bytes += chunk.length;
+      if (bytes > SELLER_DOCUMENT_CONTENT_MAX_BYTES) {
+        settled = true;
+        res.statusCode = 413;
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.end(
+          JSON.stringify({
+            error: { code: 'PAYLOAD_TOO_LARGE', message: `document body must not exceed ${SELLER_DOCUMENT_CONTENT_MAX_BYTES} bytes` },
+          }),
+        );
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      if (settled) return;
+      settled = true;
+      (req as IncomingMessage & { body?: unknown }).body = Buffer.concat(chunks);
+      next();
+    });
+    req.on('error', () => {
+      if (!settled) {
+        settled = true;
+        next();
+      }
+    });
+  });
+}
+
 /**
  * BI-23: read a text/csv body on the weekly-feedback route into `req.body` as a string.
  * Plain listener (no parser dependency): applied after Nest's own parsers, it only touches
@@ -188,6 +238,7 @@ async function bootstrap(): Promise<void> {
   // listener is scoped to its one route (no other path buffers a large text body before the
   // guards), caps the size while reading, and answers 413 instead of buffering past the cap.
   installCsvTextBodyReader(app);
+  installSellerDocumentContentBodyReader(app);
   // Express 5 defaults to the simple query parser. Preserve the existing
   // nested-query contract while using the patched qs release from its tree.
   app.set('query parser', 'extended');

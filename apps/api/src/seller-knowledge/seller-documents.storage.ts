@@ -103,6 +103,19 @@ export class SellerDocumentsStorage {
     return { sha256: hash.digest('hex'), head, size };
   }
 
+  /** 浏览器直传中转（BFF→引擎）：把整段字节写进暂存对象，签名/标签与 presignPut 一致。 */
+  async putObject(key: string, body: Buffer, mime: string): Promise<void> {
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+        Body: body,
+        ContentType: mime,
+        Tagging: `${SELLER_DOCUMENTS_STAGING_TAG_KEY}=${SELLER_DOCUMENTS_STAGING_TAG_VALUE}`,
+      }),
+    );
+  }
+
   /** 有界整段读取（解析用；超限即失败，不截断）。 */
   async getBufferBounded(key: string, maxBytes: number): Promise<Buffer> {
     const res = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));

@@ -3,11 +3,14 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   HttpCode,
   Param,
   ParseUUIDPipe,
   Post,
+  Put,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
@@ -57,6 +60,27 @@ export class SellerCompanyDocumentsController {
     @Param('documentId', ParseUUIDPipe) documentId: string,
   ): Promise<Enveloped<SellerDocumentDto>> {
     const row = await this.documents.commit(ctx, companyId, documentId);
+    return envelope(SellerDocumentDto.from(row));
+  }
+
+  @Put(':documentId/content')
+  @RequireScopes('acquisition:write')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: '浏览器直传：把文件字节经引擎写入暂存对象（presign 主机对浏览器不可达时的中转）',
+    description:
+      '仅 pending_upload 状态可用；Content-Type 必须与 presign 申报一致，字节数必须等于申报大小。写入后照常调用 commit 校验并入队。',
+  })
+  @ApiEnvelope(SellerDocumentDto)
+  async uploadContent(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId', ParseUUIDPipe) companyId: string,
+    @Param('documentId', ParseUUIDPipe) documentId: string,
+    @Req() req: { body?: unknown },
+    @Headers('content-type') contentType?: string,
+  ): Promise<Enveloped<SellerDocumentDto>> {
+    const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    const row = await this.documents.uploadContent(ctx, companyId, documentId, body, (contentType ?? '').split(';', 1)[0]!.trim());
     return envelope(SellerDocumentDto.from(row));
   }
 
