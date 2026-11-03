@@ -7682,6 +7682,234 @@
         "description": "停止深挖：向 Temporal 发取消请求。已完成公司的结果保留，未完成公司标 skipped（下一次 run 会重新排队），run 以 CANCELLED 收尾。已结束的 run 幂等返回当前状态。"
       }
     },
+    "/api/v1/discovery-runs/{runId}/events": {
+      "get": {
+        "operationId": "DiscoveryController_listRunEvents_v1",
+        "parameters": [
+          {
+            "name": "runId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "after",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 200,
+              "maximum": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "status",
+                        "events",
+                        "nextAfter"
+                      ],
+                      "properties": {
+                        "status": {
+                          "type": "string"
+                        },
+                        "events": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        },
+                        "nextAfter": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "run 进度事件（按 seq 增量拉取；?after=<seq> 断点续拉）",
+        "tags": [
+          "Discovery"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "run 进度事件（append-only，按 seq 增量拉取）：阶段开始/完成、公司进出阶段、预算耗尽、租约跳过、run 收尾。用 ?after=<上次的 nextAfter> 断点续拉，事件可重放。"
+      }
+    },
+    "/api/v1/discovery-runs/{runId}/jobs": {
+      "get": {
+        "operationId": "DiscoveryController_listRunJobs_v1",
+        "parameters": [
+          {
+            "name": "runId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "page"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "companyId",
+                          "stage"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "companyId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "name": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "domain": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "country": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "stage": {
+                            "type": "string"
+                          },
+                          "verdictQuick": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "verdictDeep": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "lastErrorCode": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "costCents": {
+                            "type": "integer"
+                          },
+                          "startedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          },
+                          "finishedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          }
+                        }
+                      }
+                    },
+                    "page": {
+                      "type": "object",
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
+                      "properties": {
+                        "next_cursor": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "下一页游标；null = 没有更多"
+                        },
+                        "has_more": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "run 的公司级 job 队列（快扫名单 + 深挖逐家状态；游标分页）",
+        "tags": [
+          "Discovery"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "run 的公司级队列（快扫名单 + 深挖逐家状态：stage/粗判/精判/失败码/耗时），游标分页。"
+      }
+    },
     "/api/v1/discovery-runs/{runId}": {
       "get": {
         "operationId": "DiscoveryController_getRun_v1",
@@ -7736,6 +7964,19 @@
                         "stats": {
                           "type": "object",
                           "additionalProperties": true
+                        },
+                        "taskRef": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "nullable": true
+                        },
+                        "phases": {
+                          "type": "object",
+                          "additionalProperties": true,
+                          "nullable": true
+                        },
+                        "mode": {
+                          "type": "string"
                         },
                         "createdAt": {
                           "type": "string",
