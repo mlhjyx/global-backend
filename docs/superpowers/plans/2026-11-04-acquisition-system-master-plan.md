@@ -1,0 +1,128 @@
+# 获客挖掘体系总体规划（v1）：渠道数据源平台 + Run 2.0 + 反馈闭环 + 管理后台
+
+> 生命周期：`DRAFT`
+> 依据：产品负责人 2026-11-04 要求「一个总的方案」「新增渠道数据源，没有 API 的就爬取」「gain-saas 管理后台要有渠道管理」。本文是总规划；子设计：快扫/深挖（`2026-11-04-discovery-quick-deep-tiers.md`，已批）、闭环改造细节（`2026-11-04-discovery-run-closed-loop-redesign.md`，并入本文 §4）。
+
+## 一、目标与原则
+
+- **快**：导入名单 ≤2 分钟可见；搜索通道首批名单 ≤8 分钟；完整链路 ≤15 分钟。
+- **准**：意图源优先（海关/展会/招标），搜索兜底；两轴打分（ICP 匹配 × 意图强度）。
+- **闭环**：你的判断与触达结果反哺 ICP 与查询权重；公司池随变化增量更新。
+- **可扩展**：新增渠道数据源不需要改代码——管理后台配置即可（API / 爬取 / 导入三种形态）。
+- **合规与免费优先**：每渠道登记许可与条款；能爬的必看 robots 与 ToS；不允许爬/无 API 的走导入或付费开关。
+
+## 二、总体架构
+
+```
+                 ┌────────────────── gain-saas 管理后台 ──────────────────┐
+                 │ 渠道管理: 列表/新增/试跑/启停/产出统计/治理信息          │
+                 └───────────────▲────────────────────────────────────────┘
+                                 │ BFF（admin 路由）
+┌────────────────────────────────┴───────────────────────────────────────┐
+│ 引擎: 渠道数据源平台（新增第 0 层）                                       │
+│  source_channel（api | crawl | import）+ 通用爬虫运行时 + 导入器           │
+│        │ 产出统一入公司池（raw→canonical，过治理/去重/抑制门）              │
+└────────┼───────────────────────────────────────────────────────────────┘
+         ▼
+  公司池 canonical（freshness）──► Run 2.0 流水线（公司级 job：快扫→深挖）
+         ▲                                  │
+         │ watches/定时复检                   ▼
+  反馈闭环（判断/来源质量 → 查询权重/ICP 建议）   线索 leads ──► 触达闭环（M3，市场分级）
+```
+
+## 三、渠道数据源平台（本次新增的核心）
+
+### 3.1 三种接入形态
+
+| 形态 | 适用 | 运行方式 |
+| --- | --- | --- |
+| **api** | 有官方/付费 API 的源（TED、SAM.gov、Companies House、GLEIF、TradeData.io 等） | 已有 provider 适配器 + 统一调度 |
+| **crawl** | 无 API 但公开可爬的源（展会参展商列表、协会名录、企业官网、招聘页） | **配置驱动的通用爬虫**（见 3.2） |
+| **import** | 不允许爬/无公开接口的源（ImportYeti 类海关数据、用户自有名单） | 管理后台上传/粘贴 CSV → 规范化入池 |
+
+### 3.2 通用爬虫运行时（crawl 模式）
+
+配置即渠道（新增源不改代码）：
+
+```json
+{
+  "mode": "crawl",
+  "list": { "url": "https://expo.example/exhibitors?page={page}", "maxPages": 20,
+            "itemSelector": ".exhibitor-card", "itemUrlSelector": "a::attr(href)" },
+  "detail": { "enabled": true, "fields": {
+      "name": "h1.company-name", "website": "a.website::attr(href)",
+      "country": ".country", "products": ".products li" } }
+}
+```
+
+- 基于现有 crawl4ai/Playwright 渲染栈，单域速率限制、最大页数、超时与 UA 标识；
+- **robots.txt 自动检查**，未放行即拒绝运行；每渠道必须登记 `license` + `tos_url` + `robots_policy`（管理后台强制填）；
+- 产出先落 raw（带来源 URL/抓取时间），再走既有规范化/去重/抑制门；`source_channel_run` 记录每轮抓取量、失败与耗时（产出统计进管理后台）；
+- 官网变化检测复用该运行时（快照 diff → 增量闭环）。
+
+### 3.3 首批候选渠道（逐源接入前核条款/robots）
+
+| 类别 | 候选 | 形态 | 备注 |
+| --- | --- | --- | --- |
+| 海关提单 | ImportInfo / Port Examiner（查询页）、TradeData.io（API）、ImportYeti（付费 API） | import 优先；api 付费可选 | ImportYeti 明确禁爬；公开舱单是公开记录，合规路径=导入或付费 API |
+| 展会 | 10times、展会官网 exhibitor 列表（逐站）、mapyourshow（已有）、trade_fair（已有） | crawl / api | 展会官网列表是最"可爬"的高质量买家源 |
+| 协会/商会 | VDMA/HK 等行业协会会员名录、各国商会 | crawl | 逐站核 robots 与条款 |
+| B2B 目录 | Europages、DirectIndustry | crawl（评估） | 先评估 ToS；命中率中等 |
+| 企业注册 | Companies House、INPI、GLEIF（均已接）；DE Handelsregister（评估） | api | 用于补全与核验，不作第一发现源 |
+| 招标 | TED、SAM.gov（已接、可再启用） | api | 意图信号强 |
+| 招聘/官网信号 | 公司官网 careers、新闻页 | crawl | 信号层（M2） |
+| 宏观市场 | Trade Map（ITC） | api | 只进 ICP 市场建议 |
+| 明确不做 | LinkedIn 自动化、X/FB 抓取、Apollo 类付费库 | — | ToS/付费原则 |
+
+### 3.4 管理后台（gain-saas）
+
+设置 → **数据源管理**（平台管理员 `saas-admin` 可见）：
+
+- 渠道列表：状态（启用/停用）、模式、类别、近 30 天产出（公司数/入池率/失败率）、最近运行时间；
+- 新增渠道向导：选模式 → 填配置（api 填 endpoint/密钥引用；crawl 填列表/字段选择器；import 上传文件）→ **试跑预览**（抓 1 页/前 20 条）→ 填治理信息（许可、条款 URL、robots 策略确认）→ 启用；
+- 操作：启停、编辑配置、立即运行、查看运行日志/失败原因、删除（软删）；
+- 引擎侧 API：`GET/POST/PATCH /source-channels`、`POST /:id/preview`、`POST /:id/run`、`POST /:id/import`（admin scope），全部经 BFF 透传与审计；渠道密钥只存引用（环境变量名），不在 UI 显示值。
+
+## 四、Run 2.0（并入此前两份子设计）
+
+1. **两档**：快扫（意图源/导入 → 规则预筛 → flash 粗判，≤8 分钟出名单）→ 自动深挖（画像→精判→信号→联系人，≤15 分钟，可随时停止）。
+2. **公司级流水线**：`discovery_company_job` + Temporal 子工作流；废阶段屏障；run 事件表驱动界面进度。
+3. **反馈闭环**：判断/拒绝理由 → `icp_feedback` → 查询权重（自动）+ ICP 建议（人工采纳，不自动改）。
+4. **增量闭环**：公司池 freshness + watches 定时复检 + 变化触发重评分。
+5. **触达闭环（M3）**：草稿先行；发送按市场分级（美国可自动发送＋退订/频控；德国等 EU 市场只出草稿，UWG 要求事先同意）；回复识别/退信 DNC/退订链接（Mautic 模式）。
+
+## 五、数据模型变更总表
+
+| 表 | 用途 | 里程碑 |
+| --- | --- | --- |
+| `source_channel` / `source_channel_run` | 渠道注册与运行统计 | M0 |
+| `imported_buyer` | 导入原始行与去重键 | M0 |
+| `discovery_company_job` | 公司级流水线状态 | M1 |
+| `run_event` | 增量进度事件 | M1 |
+| `icp_feedback` / `icp_query_performance` | 反馈闭环与查询权重 | M2 |
+| `outreach_message` / `reply_event` | 触达闭环 | M3 |
+| canonical_company 增 `last_seen_at/last_checked_at` | 增量 | M2 |
+
+## 六、里程碑
+
+- **M0 渠道平台（先做）**：source_channel + 导入器 + 通用爬虫 v0 + 引擎 admin API + BFF + gain-saas 数据源管理页。
+  验收：后台新增一个展会 exhibitor 源并试跑抓到 ≥10 家公司；上传一份 CSV 名单 ≤2 分钟进快扫名单。
+- **M1 Run 2.0 骨架**：两档 + 公司级流水线 + run 事件/进度 UI。
+  验收：搜索通道首批 ≤8 分钟、完整链路 ≤15 分钟。
+- **M2 闭环**：反馈（查询权重+ICP 建议卡）+ 增量（watches 修复与复检）。
+- **M3 触达**：草稿→发送（美国）→回复/退信/退订闭环（EU 只出草稿）。
+- **M4 调度与成本**：多租户并发/优先级、成本面板。
+
+## 七、决策点
+
+- **D1 渠道配置的归属**：平台级（运营统一维护，推荐）vs 工作空间级（租户自配）；首版平台级+按工作空间启用白名单。
+- **D2 爬虫运行时**：复用 crawl4ai（推荐，已在栈内）vs 独立 Playwright 服务。
+- **D3 海关数据**：导入通道先行（推荐）；TradeData.io/ImportYeti 付费 API 作为可选开关，条款评估后进行。
+- **D4 管理后台权限**：平台管理员（saas-admin/ops）管理全局渠道；工作空间 admin 只能启用/停用已批准的渠道。
+
+## 八、风险
+
+- 爬取的条款合规：每源在启用前必须人工登记 ToS/robots 结论；运行时强制 robots 检查；被拒的源退回导入模式。
+- 通用爬虫的脆弱性：页面结构变化导致选择器失效——运行统计会暴露失败率，管理后台可一键试跑修正。
+- 渠道爆炸后的治理：每渠道产出必须过既有 source_policy/抑制/去重门；新渠道默认停用，试跑通过后启用。
+- 触达合规：市场分级硬编码在发送门（EU 默认禁发邮件，仅草稿）；退订/DNC 全局生效。
