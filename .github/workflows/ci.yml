@@ -796,6 +796,9 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2]
+    env:
+      PLATFORM_EGRESS_FENCE_REOPEN_DISPOSABLE_TEST: "1"
+      PLATFORM_REVOCATION_DISPOSABLE_TEST: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -809,5 +812,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Prisma generate
         run: pnpm --filter @global/db generate
+      - name: Pre-pull pgvector image（platform-signed-revocation 使用 --pull=never）
+        run: docker pull pgvector/pgvector@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
       - name: Isolated DB tests（self-provisioned pgvector）
         run: node scripts/run-db-tests.mjs --group isolated --shard ${{ matrix.shard }}/2

@@ -5,6 +5,7 @@ import {
   GROUPS,
   listTestFiles,
   loadManifest,
+  rewriteDatabaseUrl,
   selectFiles,
   validateManifest,
 } from "./run-db-tests.mjs";
@@ -41,11 +42,21 @@ describe("db test CI manifest", () => {
     assert.deepEqual(selectFiles(manifest, "isolated", 1, 1), ["a", "b", "c", "d", "e"]);
   });
 
+  it("rewrites the database name while preserving credentials and parameters", () => {
+    assert.equal(
+      rewriteDatabaseUrl(
+        "postgresql://app_user:app_pw@127.0.0.1:5432/global_test?schema=public",
+        "svc_1",
+      ),
+      "postgresql://app_user:app_pw@127.0.0.1:5432/svc_1?schema=public",
+    );
+  });
+
   it("rejects invalid groups and shards", () => {
     const manifest = { service: ["a"], isolated: [], static: [] };
     assert.throws(() => selectFiles(manifest, "legacy"), /unknown group/);
     assert.throws(() => selectFiles(manifest, "service", 0, 2), /invalid shard/);
     assert.throws(() => selectFiles(manifest, "service", 3, 2), /invalid shard/);
-    assert.deepEqual(GROUPS, ["service", "isolated", "static"]);
+    assert.deepEqual(GROUPS, ["service", "isolated", "manual", "static"]);
   });
 });

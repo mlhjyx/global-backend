@@ -11,7 +11,7 @@ const scriptDir = dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = resolve(scriptDir, "..");
 export const TEST_DIR = join(REPO_ROOT, "packages/db/test");
 export const MANIFEST_PATH = join(TEST_DIR, "ci-manifest.json");
-export const GROUPS = ["service", "isolated", "static"];
+export const GROUPS = ["service", "isolated", "manual", "static"];
 
 export function loadManifest(manifestPath = MANIFEST_PATH) {
   return JSON.parse(readFileSync(manifestPath, "utf8"));
@@ -48,6 +48,13 @@ export function validateManifest(manifest, files) {
     }
   }
   return errors;
+}
+
+/** 把连接串里的数据库名替换为 db（保留凭据、主机与参数）。 */
+export function rewriteDatabaseUrl(url, db) {
+  const parsed = new URL(url);
+  parsed.pathname = `/${db}`;
+  return parsed.toString();
 }
 
 /** 轮转分片：第 shardIndex 片（1 起）取索引 i 满足 (i % shardCount) === shardIndex - 1 的文件。 */
@@ -98,6 +105,14 @@ function main() {
   console.log(`db tests: ${options.group} shard ${options.shardIndex}/${options.shardCount} -> ${selected.length} files`);
   for (const file of selected) console.log(`  ${file}`);
   if (options.checkOnly) return;
+  if (options.group === "manual") {
+    console.log("manual group: 需要外部预置容器的测试只登记、不在 CI 运行；按文件头注释中的环境变量手工执行。");
+    return;
+  }
+  if (options.group === "service") {
+    runServiceGroup(selected);
+    return;
+  }
   const result = spawnSync(
     "pnpm",
     ["exec", "tsx", "--test", "--test-concurrency=2", ...selected.map((file) => join(TEST_DIR, file))],
@@ -109,6 +124,63 @@ function main() {
     return;
   }
   process.exitCode = result.status ?? 1;
+}
+
+/**
+ * service 组的测试会重置 schema、创建临时库或断言全局角色，
+ * 共享一个库时互相污染；每个文件使用独立的新库并串行执行。
+ */
+function runServiceGroup(files) {
+  const adminUrl = process.env.DATABASE_URL;
+  const appUrl = process.env.APP_DATABASE_URL;
+  if (!adminUrl) {
+    console.error("DB_TEST_ENV DATABASE_URL is required for the service group");
+    process.exitCode = 1;
+    return;
+  }
+  const prisma = ["--filter", "@global/db", "exec", "prisma"];
+  const runPsql = (url, sql) =>
+    spawnSync("pnpm", [...prisma, "db", "execute", "--url", url, "--stdin"], {
+      cwd: REPO_ROOT,
+      input: sql,
+      encoding: "utf8",
+    });
+  let failed = false;
+  for (const [index, file] of files.entries()) {
+    const db = `global_test_svc_${process.pid}_${index}`;
+    const ownerUrl = rewriteDatabaseUrl(adminUrl, db);
+    const perFileAppUrl = appUrl ? rewriteDatabaseUrl(appUrl, db) : ownerUrl;
+    console.log(`db tests: service file ${index + 1}/${files.length} -> ${file} (db ${db})`);
+    const created = runPsql(adminUrl, `CREATE DATABASE "${db}";`);
+    if (created.status !== 0) {
+      console.error(`DB_TEST_CREATE ${file}: ${created.stderr || created.stdout}`);
+      failed = true;
+      continue;
+    }
+    const migrated = spawnSync("pnpm", [...prisma, "migrate", "deploy"], {
+      cwd: REPO_ROOT,
+      stdio: "inherit",
+      env: { ...process.env, DATABASE_URL: ownerUrl },
+    });
+    const tested =
+      migrated.status === 0
+        ? spawnSync("pnpm", ["exec", "tsx", "--test", "--test-concurrency=1", join(TEST_DIR, file)], {
+            cwd: REPO_ROOT,
+            stdio: "inherit",
+            env: { ...process.env, DATABASE_URL: ownerUrl, APP_DATABASE_URL: perFileAppUrl },
+          })
+        : { status: 1 };
+    if (migrated.status !== 0) console.error(`DB_TEST_MIGRATE ${file}`);
+    const dropped = runPsql(adminUrl, `DROP DATABASE IF EXISTS "${db}" WITH (FORCE);`);
+    if (dropped.status !== 0) {
+      console.error(`DB_TEST_DROP ${file}: ${dropped.stderr || dropped.stdout}`);
+    }
+    if (tested.status !== 0) {
+      console.error(`DB_TEST_FAIL ${file}`);
+      failed = true;
+    }
+  }
+  process.exitCode = failed ? 1 : 0;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
