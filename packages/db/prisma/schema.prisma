@@ -1507,6 +1507,24 @@ model DiscoveryCompanyJob {
   @@map("discovery_company_job")
 }
 
+/// Run 2.0（M0⑥）影子对比：同一 run 上新旧两套判定的召回与一致率（连续两轮召回不降才切默认）。
+model RunShadowDiff {
+  id             String   @id @default(uuid()) @db.Uuid
+  workspaceId    String   @map("workspace_id") @db.Uuid
+  runId          String   @unique @map("run_id") @db.Uuid
+  legacyJudged   Int      @map("legacy_judged")
+  legacyPositive Int      @map("legacy_positive") // match + weak
+  shadowJudged   Int      @map("shadow_judged")
+  shadowPositive Int      @map("shadow_positive")
+  agreement      Int
+  compared       Int
+  shadowFallback Int      @map("shadow_fallback")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([workspaceId, createdAt])
+  @@map("run_shadow_diff")
+}
+
 /// Run 2.0（M0）：run 进度事件（append-only，按 seq 增量拉取/重放；保留 90 天）。
 model RunEvent {
   id          String   @id @default(uuid()) @db.Uuid

@@ -60,6 +60,8 @@ export const DISCOVERY_RUN_CONTACTS_PATCH = 'discovery-run-contacts-v1';
  * 影子验收后再切默认（M0⑥）。
  */
 export const DISCOVERY_RUN2_QUICK_SCAN_PATCH = 'discovery-run2-quick-scan-v1';
+/** M0⑥：影子对比——老路径照跑，同时用新快扫判定做对比（不产出名单），连续两轮召回不降才切默认。 */
+export const DISCOVERY_RUN2_SHADOW_PATCH = 'discovery-run2-shadow-v1';
 /** 公司池候选少于此数才触发有界搜索兜底（设计 R3）。 */
 const RUN2_POOL_SEARCH_FALLBACK_THRESHOLD = 20;
 /** 深挖父工作流同时推进的公司数（设计 R2/Q8）。 */
@@ -527,6 +529,43 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     suppressed = canonical.suppressed;
     }
 
+    // M0⑥ 影子模式：老路径是主产出；同一 run 上再跑一遍新快扫（不物化名单）用于对比召回与一致率。
+    const usesRun2Shadow =
+      !usesRun2QuickScan &&
+      patched(DISCOVERY_RUN2_SHADOW_PATCH) &&
+      input.run2Shadow === true;
+    let shadowQuick:
+      | {
+          judged: number;
+          verdicts: Record<string, number>;
+          fallbackPerCompany: number;
+          ruleFallback: number;
+          failed: number;
+          skipped: number;
+        }
+      | undefined;
+    let shadowDiff:
+      | {
+          legacyJudged: number;
+          legacyPositive: number;
+          shadowJudged: number;
+          shadowPositive: number;
+          agreement: number;
+          compared: number;
+          recallNotLower: boolean;
+        }
+      | undefined;
+    if (usesRun2Shadow) {
+      stage = 'quickScan';
+      await acts.prefilterPool({ workspaceId, runId, icpId: input.icpId, ...authorityArgs });
+      shadowQuick = await modelActs.quickJudgeBatch({
+        workspaceId,
+        runId,
+        icpId: input.icpId,
+        ...authorityArgs,
+      });
+    }
+
     // Run 2.0（M0③）：快扫出口——搜索兜底跑过一轮后再预筛一次纳新，然后批量粗判与临时候选物化。
     if (usesRun2QuickScan) {
       if (needSearch) {
@@ -537,6 +576,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
           ...authorityArgs,
         });
       }
+      await acts.markRunPhase({ workspaceId, runId, phase: 'quick_started' });
       const quick = await modelActs.quickJudgeBatch({
         workspaceId,
         runId,
@@ -552,7 +592,9 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
 
       // M0④：深挖——每家公司一个子工作流（父并发 16、上限 500）。被 RequestCancel 时停止推进新公司、
       // 取消在飞子工作流，未完成公司标 skipped(DEEP_STOPPED)，run 以 CANCELLED 收尾（可续：下一次 run 重新排队）。
+      await acts.markRunPhase({ workspaceId, runId, phase: 'quick_done' });
       const deepTargets = await acts.listDeepTargets({ workspaceId, runId });
+      await acts.markRunPhase({ workspaceId, runId, phase: 'deep_started' });
       let deepStopped = false;
       const deepStages: string[] = [];
       try {
@@ -590,6 +632,9 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         deepStopped = true;
       }
       let deepSummary = await acts.deepStageSummary({ workspaceId, runId });
+      if (!deepStopped) {
+        await acts.markRunPhase({ workspaceId, runId, phase: 'deep_done' });
+      }
       if (deepStopped) {
         await CancellationScope.nonCancellable(async () => {
           await acts.skipUnfinishedDeepJobs({ workspaceId, runId, errorCode: 'DEEP_STOPPED' });
@@ -617,6 +662,15 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         });
         return;
       }
+      // M0⑥ 告警：预算耗尽 / 失败率 >30% / 超过 30 分钟未完成 → stats.alerts（站内通知与运维共用）。
+      const elapsed = await acts.runElapsedMinutes({ workspaceId, runId });
+      const deepTargetCount = deepTargets.companyIds.length;
+      const failureRate =
+        deepTargetCount > 0 ? (deepSummary.failed + deepSummary.skipped + quick.failed) / deepTargetCount : 0;
+      const alerts: string[] = [];
+      if (discoveryBudgetTruncated) alerts.push('budget_exhausted');
+      if (failureRate > 0.3) alerts.push('failure_rate_high');
+      if (elapsed.minutes > 30) alerts.push('duration_exceeded');
       // 空池、或粗判全部失败 → FAILED（本次 run 没有可用名单）；有失败/跳过/规则兜底/深挖未完成 → PARTIAL。
       let quickStatus: DiscoveryRunOutcome['status'] = 'DONE';
       if (
@@ -645,6 +699,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
             leads: provisional.leads,
           },
           deep: { ...deepSummary, targets: deepTargets.companyIds.length, stopped: false },
+          ...(alerts.length ? { alerts } : {}),
         },
       };
       await finalize(outcome);
@@ -701,6 +756,17 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
           ? { afterCompanyId: pass.nextCompanyId, previousCallCut: pass.previousCallCut === true }
           : undefined;
     } while (fitContinuation !== undefined);
+
+    // M0⑥：老路径的 fit 判定已经落库，取它与影子快扫判定的对比（召回/一致率）写 run_shadow_diff。
+    if (usesRun2Shadow) {
+      shadowDiff = await acts.recordRunShadowDiff({
+        workspaceId,
+        runId,
+        icpId: input.icpId,
+        shadowFallback: shadowQuick?.ruleFallback ?? 0,
+        ...authorityArgs,
+      });
+    }
 
     // 富集（Waterfall 富化段）：只给过了本 run ICP fit 门的高价值公司补 GLEIF 法律身份 + 母子关系（快事实，2 分钟活动）
     stage = 'enrich';
@@ -926,6 +992,8 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         ...(contacts ? { contacts } : {}),
         watches: { registered: watches.registered, of: watches.candidates },
         patentEnqueue: { enqueued: patentEnqueue.enqueued, of: patentEnqueue.candidates },
+        // M0⑥：影子对比只在影子 run 上出现（新旧召回/一致率，连续两轮召回不降才切默认）。
+        ...(shadowDiff ? { shadow: { ...shadowQuick, ...shadowDiff } } : {}),
         queries: queryCount,
         failures,
       },

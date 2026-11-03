@@ -413,6 +413,101 @@ export function createRun2Activities(deps: {
       return { judged, verdicts, fallbackPerCompany, ruleFallback, failed, skipped };
     },
 
+    /** M0⑥：记录阶段时间戳到 discovery_run.phases（DB/活动时间，回放安全）。 */
+    async markRunPhase(args: { workspaceId: string; runId: string;
+      phase: 'quick_started' | 'quick_done' | 'deep_started' | 'deep_done';
+    }): Promise<void> {
+      await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        const run = await tx.discoveryRun.findUnique({
+          where: { id: args.runId },
+          select: { phases: true },
+        });
+        if (!run) return;
+        const phases =
+          run.phases && typeof run.phases === 'object' && !Array.isArray(run.phases)
+            ? { ...(run.phases as Record<string, unknown>) }
+            : {};
+        const phaseKey = {
+          quick_started: 'quickStartedAt',
+          quick_done: 'quickDoneAt',
+          deep_started: 'deepStartedAt',
+          deep_done: 'deepDoneAt',
+        }[args.phase];
+        phases[phaseKey] = new Date().toISOString();
+        await tx.discoveryRun.update({
+          where: { id: args.runId },
+          data: { phases: phases as never },
+        });
+      });
+    },
+
+    /** M0⑥ 告警：run 从创建到现在的分钟数（DB 读数，活动返回值记录在历史里，回放安全）。 */
+    async runElapsedMinutes(args: { workspaceId: string; runId: string }): Promise<{ minutes: number }> {
+      return deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        const run = await tx.discoveryRun.findUnique({
+          where: { id: args.runId },
+          select: { createdAt: true },
+        });
+        if (!run) return { minutes: 0 };
+        return { minutes: Math.max(0, Math.round((Date.now() - run.createdAt.getTime()) / 60_000)) };
+      });
+    },
+
+    /**
+     * M0⑥ 影子对比：同一 run 上旧判定（legacy fit 写进 Lead 的 verdict，排除快扫占位）
+     * vs 新快扫判定（discovery_company_job.verdict_quick）的召回与一致率。
+     * 只存聚合计数；连续两轮 shadowPositive ≥ legacyPositive 才切默认（台账可查 run_shadow_diff）。
+     */
+    async recordRunShadowDiff(args: Run2ActivityInput & { shadowFallback: number }): Promise<{
+      legacyJudged: number;
+      legacyPositive: number;
+      shadowJudged: number;
+      shadowPositive: number;
+      agreement: number;
+      compared: number;
+      recallNotLower: boolean;
+    }> {
+      const { leads, jobs } = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        const leads = await tx.lead.findMany({
+          where: { icpId: args.icpId, fitVerdict: { not: null } },
+          select: { canonicalCompanyId: true, fitVerdict: true, fitReasons: true },
+        });
+        const jobs = await tx.discoveryCompanyJob.findMany({
+          where: { runId: args.runId, verdictQuick: { not: null } },
+          select: { canonicalCompanyId: true, verdictQuick: true },
+        });
+        return { leads, jobs };
+      });
+      const isProvisional = (reasons: unknown): boolean =>
+        Boolean(reasons && typeof reasons === 'object' && (reasons as { source?: unknown }).source === 'quick_scan');
+      const legacy = leads.filter((lead) => !isProvisional(lead.fitReasons));
+      const legacyByCompany = new Map(legacy.map((lead) => [lead.canonicalCompanyId, lead.fitVerdict]));
+      const shadowByCompany = new Map(jobs.map((job) => [job.canonicalCompanyId, job.verdictQuick]));
+      const positive = (verdict: string | null | undefined): boolean =>
+        verdict === 'match' || verdict === 'weak';
+      const comparedIds = [...legacyByCompany.keys()].filter((id) => shadowByCompany.has(id));
+      const agreement = comparedIds.filter(
+        (id) => legacyByCompany.get(id) === shadowByCompany.get(id),
+      ).length;
+      const summary = {
+        legacyJudged: legacy.length,
+        legacyPositive: legacy.filter((lead) => positive(lead.fitVerdict)).length,
+        shadowJudged: jobs.length,
+        shadowPositive: jobs.filter((job) => positive(job.verdictQuick)).length,
+        agreement,
+        compared: comparedIds.length,
+        shadowFallback: Math.max(0, Math.trunc(args.shadowFallback)),
+      };
+      await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+        tx.runShadowDiff.upsert({
+          where: { runId: args.runId },
+          create: { workspaceId: args.workspaceId, runId: args.runId, ...summary },
+          update: summary,
+        }),
+      );
+      return { ...summary, recallNotLower: summary.shadowPositive >= summary.legacyPositive };
+    },
+
     /**
      * 临时候选物化：quick_judged 的 match/weak 幂等 upsert 成 Lead（queue=needs_review，
      * fitReasons.source=quick_scan）。深挖阶段（M0④）会用完整四门理由覆盖这条记录。
