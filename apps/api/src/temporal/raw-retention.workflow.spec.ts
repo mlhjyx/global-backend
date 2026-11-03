@@ -17,6 +17,8 @@ import { rawRetentionSweepWorkflow } from "./raw-retention.workflow";
 beforeEach(() => {
   resetActivities();
   temporal.continueAsNew.mockReset();
+  // Q25：访问审计保留期清理的默认回执（无更多到期行）。
+  acts.expirePersonalDataAccessAudit.mockResolvedValue({ expired: 0, hasMore: false });
 });
 
 describe("rawRetentionSweepWorkflow deterministic orchestration", () => {
@@ -94,6 +96,44 @@ describe("rawRetentionSweepWorkflow deterministic orchestration", () => {
       afterWorkspaceId: "ws-1",
       accumulated: { workspaces: 1, expired: 2, deferredForConflict: 0 },
     });
+  });
+
+  it("expires the personal-data access audit per workspace until no due row remains", async () => {
+    acts.listRawRetentionWorkspaces.mockResolvedValue({
+      workspaceIds: ["ws-1"],
+      nextCursor: null,
+    });
+    acts.expireRawSourceRecords.mockResolvedValue({
+      expired: 1,
+      deferredForConflict: 0,
+    });
+    acts.expirePersonalDataAccessAudit
+      .mockResolvedValueOnce({ expired: 1000, hasMore: true })
+      .mockResolvedValueOnce({ expired: 2, hasMore: false });
+
+    await expect(
+      rawRetentionSweepWorkflow({ batchSize: 10 }),
+    ).resolves.toEqual({ workspaces: 1, expired: 1, deferredForConflict: 0 });
+    expect(acts.expirePersonalDataAccessAudit).toHaveBeenCalledTimes(2);
+    expect(acts.expirePersonalDataAccessAudit).toHaveBeenCalledWith({
+      workspaceId: "ws-1",
+      limit: 1000,
+    });
+  });
+
+  it("never schedules the audit-retention activity on a history recorded before the patch", async () => {
+    setPatched(() => false);
+    acts.listRawRetentionWorkspaces.mockResolvedValue({
+      workspaceIds: ["legacy-ws"],
+      nextCursor: "ignored",
+    });
+    acts.expireRawSourceRecords.mockResolvedValue({
+      expired: 1,
+      deferredForConflict: 0,
+    });
+
+    await rawRetentionSweepWorkflow({ workspaceLimit: 10, batchSize: 10 });
+    expect(acts.expirePersonalDataAccessAudit).not.toHaveBeenCalled();
   });
 
   it("preserves the pre-pagination activity command sequence on replay", async () => {

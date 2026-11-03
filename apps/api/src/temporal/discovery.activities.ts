@@ -2956,6 +2956,13 @@ export function createDiscoveryActivities(deps: {
                 accountKey: binding.accountKey,
               },
               ...(contactBudget ? { contactBudget } : {}),
+              // Q25：run 内物化个人数据的审计归因（系统主体 + runId）。
+              audit: {
+                actorId: `discovery-run:${args.runId}`,
+                actorKind: 'system',
+                purpose: 'run_contact_materialization',
+                correlationId: args.runId,
+              },
             },
           );
           companies += 1;
@@ -2998,6 +3005,7 @@ export function createDiscoveryActivities(deps: {
               workspaceId: args.workspaceId,
               runId: args.runId,
               accountKey: binding.accountKey,
+              companyId: target.canonicalCompanyId,
               domain: target.domain,
               contacts: result.contacts.map((contact) => ({
                 id: contact.id,

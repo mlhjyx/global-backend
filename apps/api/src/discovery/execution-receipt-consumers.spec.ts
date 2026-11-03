@@ -204,6 +204,7 @@ describe('actual discovery receipt consumers', () => {
       usageLedger: { create: vi.fn(async () => ({})) },
       fieldEvidence: { findMany: vi.fn(async () => []) },
       suppressionRecord: { findMany: vi.fn(async () => []) },
+      personalDataAccessAudit: { create: vi.fn(async () => ({})) },
     };
     const prisma = {
       withWorkspace: vi.fn(async (
@@ -333,6 +334,7 @@ describe('actual discovery receipt consumers', () => {
       canonicalContact: { findMany: vi.fn(async () => []) },
       usageLedger: { create: vi.fn(async () => ({})) },
       fieldEvidence: { findMany: vi.fn(async () => []) },
+      personalDataAccessAudit: { create: vi.fn(async () => ({})) },
     };
     const prisma = {
       withWorkspace: vi.fn(async (
@@ -478,6 +480,7 @@ describe('actual discovery receipt consumers', () => {
       },
       suppressionRecord: { findMany: vi.fn(async () => []) },
       fieldEvidence: { create: vi.fn(async () => ({})) },
+      personalDataAccessAudit: { create: vi.fn(async () => ({})) },
     };
     const prisma = {
       withWorkspace: vi.fn(async (
@@ -587,6 +590,7 @@ describe('actual discovery receipt consumers', () => {
         findUnique: vi.fn(async () => contact),
       },
       suppressionRecord: { findMany: vi.fn(async () => []) },
+      personalDataAccessAudit: { create: vi.fn(async () => ({})) },
     };
     const prisma = {
       withWorkspace: vi.fn(async (

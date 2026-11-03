@@ -7,9 +7,13 @@ const activities = proxyActivities<RawSourceActivities>({
 });
 const PAGINATION_PATCH = "raw-retention-fair-pagination-v2";
 const TRUTHFUL_LOCK_PATCH = "raw-retention-truthful-lock-conflicts-v3";
+/** Q25（2026-11-04）：个人数据访问审计 180 天保留期清理并入本 sweep。 */
+const PERSONAL_DATA_AUDIT_RETENTION_PATCH = "personal-data-access-audit-retention-v1";
 const MAX_BATCHES_PER_WORKSPACE = 20;
 const DEFAULT_PAGES_PER_RUN = 2;
 const MAX_PAGES_PER_RUN = 5;
+/** 每批删除的审计行数（活动上限 5000；20 批覆盖单个 workspace 一个 sweep 的 2 万行）。 */
+const PERSONAL_DATA_AUDIT_BATCH = 1000;
 
 export interface RawRetentionSweepInput {
   workspaceLimit?: number;
@@ -29,6 +33,7 @@ async function expireWorkspace(
   workspaceId: string,
   batchSize: number,
   truthfulLocks: boolean,
+  personalDataAuditRetention: boolean,
 ): Promise<{ expired: number; deferredForConflict: number }> {
   let expired = 0;
   let deferredForConflict = 0;
@@ -55,6 +60,17 @@ async function expireWorkspace(
     }
   }
   if (!complete) throw new Error("RAW_RETENTION_WORKSPACE_INCOMPLETE");
+  // Q25：个人数据访问审计的 180 天保留期清理。patch 之前记录的旧历史没有这一步，
+  // 重放时命令序列保持不变。
+  if (personalDataAuditRetention) {
+    for (let batch = 0; batch < MAX_BATCHES_PER_WORKSPACE; batch += 1) {
+      const receipt = await activities.expirePersonalDataAccessAudit({
+        workspaceId,
+        limit: PERSONAL_DATA_AUDIT_BATCH,
+      });
+      if (!receipt.hasMore) break;
+    }
+  }
   return { expired, deferredForConflict };
 }
 
@@ -63,6 +79,7 @@ async function processPage(
   batchSize: number,
   aggregate: RawRetentionSweepResult,
   truthfulLocks: boolean,
+  personalDataAuditRetention: boolean,
 ): Promise<{ aggregate: RawRetentionSweepResult; failures: number }> {
   let current = { ...aggregate };
   let failures = 0;
@@ -73,6 +90,7 @@ async function processPage(
         workspaceId,
         batchSize,
         truthfulLocks,
+        personalDataAuditRetention,
       );
       current = {
         ...current,
@@ -98,6 +116,9 @@ export async function rawRetentionSweepWorkflow(
   const batchSize = Math.max(1, Math.min(input.batchSize ?? 500, 500));
   const usesPagination = patched(PAGINATION_PATCH);
   const truthfulLocks = patched(TRUTHFUL_LOCK_PATCH);
+  const personalDataAuditRetention = patched(
+    PERSONAL_DATA_AUDIT_RETENTION_PATCH,
+  );
 
   if (!usesPagination) {
     const page = await activities.listRawRetentionWorkspaces({
@@ -112,6 +133,7 @@ export async function rawRetentionSweepWorkflow(
         deferredForConflict: 0,
       },
       truthfulLocks,
+      personalDataAuditRetention,
     );
     if (result.failures) {
       throw new Error(`RAW_RETENTION_WORKSPACE_FAILURE:${result.failures}`);
@@ -142,6 +164,7 @@ export async function rawRetentionSweepWorkflow(
       batchSize,
       aggregate,
       truthfulLocks,
+      personalDataAuditRetention,
     );
     aggregate = result.aggregate;
     if (result.failures) {

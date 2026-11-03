@@ -123,6 +123,7 @@ function makeDeps(opts: {
     fieldEvidence: { findMany: async () => [], create: async () => ({}) },
     suppressionRecord: { findMany: async () => [] },
     usageLedger: { create: async () => ({}) },
+    personalDataAccessAudit: { create: async () => ({}) },
   };
   const prisma = {
     dataProvider: {

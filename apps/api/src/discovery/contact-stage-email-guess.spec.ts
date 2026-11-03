@@ -17,6 +17,7 @@ import type { DurableExecutionReceipt } from '../durable-results/durable-executi
 
 const WS = '10000000-0000-4000-8000-000000000001';
 const RUN_ID = '60000000-0000-4000-8000-000000000006';
+const COMPANY_ID = '70000000-0000-4000-8000-000000000007';
 const ACCOUNT_KEY = `discovery.run:discovery_run:request:${'a'.repeat(64)}:${'a'.repeat(64)}`;
 const GLOBAL_LIA = { basis: 'legitimate_interest' as const, ref: 'OWNER-DECISION-2026-10-11' };
 const SMTP_RECEIPT = Object.freeze({
@@ -74,6 +75,7 @@ function makeDeps(opts?: {
   contactAllowedAfterProbe?: (email: string) => boolean;
 }) {
   const upsertedPoints: { contactId: string; value: string; status: string }[] = [];
+  const audits: Record<string, unknown>[] = [];
   const evidence: Array<{ field: string; allowedActions: unknown; status?: string }> = [];
   const contactById = new Map<string, FakeContact>();
   const tx = {
@@ -140,6 +142,12 @@ function makeDeps(opts?: {
     $queryRaw: async () => [
       { id: 'c1', name: 'Acme', domain: 'acme.de', status: 'NEW' },
     ],
+    personalDataAccessAudit: {
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        audits.push(data);
+        return {};
+      },
+    },
   };
   const prisma = {
     withWorkspace: async <T>(_ws: string, fn: (tx: unknown) => Promise<T>): Promise<T> => {
@@ -156,7 +164,7 @@ function makeDeps(opts?: {
       return fn(wired);
     },
   };
-  return { deps: { prisma }, upsertedPoints, evidence, contactById };
+  return { deps: { prisma }, upsertedPoints, evidence, contactById, audits };
 }
 
 function contact(id: string, fullName: string, contactPoints: FakePoint[] = []): FakeContact {
@@ -196,7 +204,7 @@ afterEach(() => vi.restoreAllMocks());
 
 describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', () => {
   it('对缺邮箱的联系人按每公司 ≤6 次探测（跨联系人共享），剩余额度为 0 即停', async () => {
-    const { deps, contactById } = makeDeps();
+    const { deps, contactById, audits } = makeDeps();
     contactById.set('ct1', contact('ct1', 'Hans Herold'));
     contactById.set('ct2', contact('ct2', 'Sabine Vogt'));
     const { adapter, calls } = verifierReturning(INVALID_VERDICT);
@@ -207,6 +215,7 @@ describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', ()
         workspaceId: WS,
         runId: RUN_ID,
         accountKey: ACCOUNT_KEY,
+        companyId: COMPANY_ID,
         domain: 'acme.de',
         contacts: [
           contact('ct1', 'Hans Herold'),
@@ -223,6 +232,20 @@ describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', ()
     expect(result.probes).toBe(MAX_RUN_EMAIL_PROBES_PER_COMPANY);
     expect(result.attempted).toBe(1);
     expect(result.emaillessContacts).toBe(2);
+    // Q25：探测过即写一行访问审计（谁/何时/公司/字段类/用途；不含任何字段值）。
+    expect(audits).toEqual([
+      expect.objectContaining({
+        workspaceId: WS,
+        actorId: `discovery-run:${RUN_ID}`,
+        actorKind: 'system',
+        purpose: 'run_email_guess',
+        companyId: COMPANY_ID,
+        fieldClasses: ['person_name', 'email'],
+        subjectCount: 1,
+        lawfulBasisRef: GLOBAL_LIA.ref,
+        correlationId: RUN_ID,
+      }),
+    ]);
   });
 
   it('调用方传入更大的探测额度也不会突破每公司 6 次', async () => {
@@ -236,6 +259,7 @@ describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', ()
         workspaceId: WS,
         runId: RUN_ID,
         accountKey: ACCOUNT_KEY,
+        companyId: COMPANY_ID,
         domain: 'acme.de',
         contacts: [contact('ct1', 'Hans Herold')],
         lawfulBasis: GLOBAL_LIA,
@@ -259,6 +283,7 @@ describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', ()
         workspaceId: WS,
         runId: RUN_ID,
         accountKey: ACCOUNT_KEY,
+        companyId: COMPANY_ID,
         domain: 'acme.de',
         contacts: [contact('ct1', 'Hans Herold')],
         lawfulBasis: GLOBAL_LIA,
@@ -288,6 +313,7 @@ describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', ()
         workspaceId: WS,
         runId: RUN_ID,
         accountKey: ACCOUNT_KEY,
+        companyId: COMPANY_ID,
         domain: 'acme.de',
         contacts: [contact('ct1', 'Hans Herold')],
         lawfulBasis: GLOBAL_LIA,
@@ -319,6 +345,7 @@ describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', ()
         workspaceId: WS,
         runId: RUN_ID,
         accountKey: ACCOUNT_KEY,
+        companyId: COMPANY_ID,
         domain: 'acme.de',
         contacts: [contact('ct1', 'Hans Herold')],
         lawfulBasis: GLOBAL_LIA,
@@ -346,6 +373,7 @@ describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', ()
         workspaceId: WS,
         runId: RUN_ID,
         accountKey: ACCOUNT_KEY,
+        companyId: COMPANY_ID,
         domain: 'acme.de',
         contacts: [contact('ct1', 'Hans Herold')],
         lawfulBasis: GLOBAL_LIA,
@@ -377,6 +405,7 @@ describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', ()
         workspaceId: WS,
         runId: RUN_ID,
         accountKey: ACCOUNT_KEY,
+        companyId: COMPANY_ID,
         domain: 'acme.de',
         contacts: [contact('ct1', 'Hans Herold'), contact('ct2', 'Sabine Vogt')],
         lawfulBasis: GLOBAL_LIA,
@@ -419,6 +448,7 @@ describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', ()
         workspaceId: WS,
         runId: RUN_ID,
         accountKey: ACCOUNT_KEY,
+        companyId: COMPANY_ID,
         domain: 'acme.de',
         contacts: [contact('ct1', 'Hans Herold')],
         lawfulBasis: GLOBAL_LIA,
@@ -488,6 +518,7 @@ describe('guessEmailsForRunCompany —— M3 自动补全的双闸与红线', ()
         workspaceId: WS,
         runId: RUN_ID,
         accountKey: ACCOUNT_KEY,
+        companyId: COMPANY_ID,
         domain: 'acme.de',
         contacts: [
           contact('ct1', 'Hans Herold', [
