@@ -18,7 +18,6 @@ const MAX_INGEST_ATTEMPTS = 8;
 const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024 + 1024 * 1024;
 const MAX_CHUNKS = 512;
 const EMBED_BATCH = 32;
-const LEASE_MINUTES = 10;
 
 const TEXT_MIMES = new Set(['text/plain', 'text/markdown']);
 
@@ -67,7 +66,7 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
             "processing_stage" = 'download',
             "processing_attempt" = "processing_attempt" + 1,
             "lease_token" = ${leaseToken}::uuid,
-            "lease_until" = now() + interval '${Prisma.raw(String(LEASE_MINUTES))} minutes',
+            "lease_until" = now() + interval '10 minutes',
             "processing_error_code" = NULL,
             "updated_at" = now()
         WHERE "id" = ${input.documentId}::uuid
