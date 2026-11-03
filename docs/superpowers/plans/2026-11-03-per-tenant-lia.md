@@ -2,7 +2,7 @@
 
 > 生命周期：`CLOSED`
 > 依据：产品负责人 2026-11-03 拍板「现在做」，并确认 D6-1 最小版 / D6-2 403+引导 / D6-3 保留版本历史 / D6-4 立即生效。
-> 落地：gain-saas PR #40 已合并（squash `c555122`，2026-11-03）；迁移与 systemd 服务重建待部署授权，见 §七。
+> 落地：gain-saas PR #40 已合并（squash `c555122`，2026-11-03）并已部署上线（migrate + 重建 + systemd 重启，见 §七）。
 > 依据：联系人发现设计稿 §5.3d / D6；产品负责人 2026-11-03 拍板「现在需要多租户，现在做」。
 
 ## 一、现状（实读代码）
@@ -70,6 +70,8 @@ BFF `GET/PUT /api/settings/compliance`（写仅 admin）与三路由注入（quo
    声明全文保存在 SaaS 声明表（版本 + `declared_by`/`declared_at` + 审计），引擎侧凭版本戳回溯。
 2. **`lawfulBasisRef` 在注入时压成单行并截断 ≤480**，历史脏行也不会打挂联系人操作。
 
-**待办（部署，需产品负责人逐次授权）**：合并只落了代码；上线还需在 gain-saas 根 checkout（已同步到
-`c555122`）执行 `prisma migrate deploy`（迁移 `20261103120000_workspace_compliance_declaration`），
-然后重建并重启 gain-saas systemd 服务。未部署前，生产/现网行为不变。
+**部署（2026-11-03 21:08 CST，产品负责人「现在部署」授权）**：迁移前 dump 备份
+`/root/DbBackup/gain-saas-pre-d6-20261103T130740Z`；`prisma migrate deploy` 应用
+`20261103120000_workspace_compliance_declaration`；重建 shared/ops-pg/server + web 产物；`systemctl
+restart gain-saas-web`（4020/18447/18448 正常）。线上验证：登录后 `GET /api/settings/compliance`
+返回 200（部署前 404），声明表按 workspace 版本化生效。
