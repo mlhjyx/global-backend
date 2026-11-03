@@ -61,11 +61,15 @@ function makePrisma(state: {
   jobs?: Array<Record<string, unknown>>;
   leads?: Array<Record<string, unknown>>;
   mayUse?: (companyId: string) => boolean;
+  leads?: Array<Record<string, unknown>>;
+  run?: Record<string, unknown>;
 }) {
   const jobUpserts: Array<{ where: unknown; create: Record<string, unknown> }> = [];
   const jobUpdates: Array<{ where: { id: string }; data: Record<string, unknown> }> = [];
   const events: Array<Record<string, unknown>> = [];
   const leadUpserts: Array<Record<string, unknown>> = [];
+  const phaseUpdates: Array<Record<string, unknown>> = [];
+  const shadowUpserts: Array<Record<string, unknown>> = [];
   let seq = 0n;
   const tx = {
     $queryRaw: vi.fn(async () => []),
@@ -108,6 +112,20 @@ function makePrisma(state: {
         leadUpserts.push(args);
         return {};
       }),
+      findMany: vi.fn(async () => state.leads ?? []),
+    },
+    discoveryRun: {
+      findUnique: vi.fn(async () => state.run ?? { phases: null, createdAt: new Date(Date.now() - 5 * 60_000) }),
+      update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        phaseUpdates.push(data);
+        return {};
+      }),
+    },
+    runShadowDiff: {
+      upsert: vi.fn(async (args: Record<string, unknown>) => {
+        shadowUpserts.push(args);
+        return {};
+      }),
     },
     // companyMayUseExternalProcessing reads suppression records + company status.
     canonicalContact: { findUnique: vi.fn(async () => null) },
@@ -117,7 +135,7 @@ function makePrisma(state: {
   const prisma = {
     withWorkspace: vi.fn(async (_workspaceId: string, callback: (client: typeof tx) => Promise<unknown>) => callback(tx)),
   };
-  return { prisma, tx, jobUpserts, jobUpdates, events, leadUpserts };
+  return { prisma, tx, jobUpserts, jobUpdates, events, leadUpserts, phaseUpdates, shadowUpserts };
 }
 
 function makeActivities(state: Parameters<typeof makePrisma>[0]) {
@@ -247,5 +265,62 @@ describe('M0③ materializeProvisionalLeads', () => {
         fitReasons: { source: 'quick_scan', tier: 'quick' },
       });
     }
+  });
+});
+
+describe('M0⑥ finalize V2 辅助（阶段时间/告警/影子对比）', () => {
+  it('merges a phase timestamp into discovery_run.phases without dropping earlier phases', async () => {
+    const { activities, phaseUpdates } = makeActivities({
+      run: { phases: { quickStartedAt: '2026-11-04T04:00:00.000Z' }, createdAt: new Date() },
+    });
+    await activities.markRunPhase({ workspaceId: WORKSPACE_ID, runId: RUN_ID, phase: 'quick_done' });
+    const phases = phaseUpdates[0]!.phases as Record<string, unknown>;
+    expect(phases.quickStartedAt).toBe('2026-11-04T04:00:00.000Z');
+    expect(typeof phases.quickDoneAt).toBe('string');
+  });
+
+  it('reports the elapsed minutes of a run for the duration alert', async () => {
+    const { activities } = makeActivities({
+      run: { phases: null, createdAt: new Date(Date.now() - 42 * 60_000) },
+    });
+    const elapsed = await activities.runElapsedMinutes({ workspaceId: WORKSPACE_ID, runId: RUN_ID });
+    expect(elapsed.minutes).toBeGreaterThanOrEqual(41);
+  });
+
+  it('compares legacy fit verdicts with shadow quick verdicts and records recall/agreement', async () => {
+    const { activities, shadowUpserts } = makeActivities({
+      leads: [
+        { canonicalCompanyId: 'c1', fitVerdict: 'match', fitReasons: { material: 'x' } },
+        { canonicalCompanyId: 'c2', fitVerdict: 'weak', fitReasons: { material: 'x' } },
+        { canonicalCompanyId: 'c3', fitVerdict: 'mismatch', fitReasons: { material: 'x' } },
+        { canonicalCompanyId: 'c9', fitVerdict: 'match', fitReasons: { source: 'quick_scan' } },
+      ],
+      jobs: [
+        { canonicalCompanyId: 'c1', verdictQuick: 'match' },
+        { canonicalCompanyId: 'c2', verdictQuick: 'weak' },
+        { canonicalCompanyId: 'c3', verdictQuick: 'weak' },
+        { canonicalCompanyId: 'c4', verdictQuick: 'match' },
+      ],
+    });
+
+    const diff = await activities.recordRunShadowDiff({
+      ...ARGS,
+      shadowFallback: 1,
+    });
+    expect(diff).toEqual({
+      legacyJudged: 3,
+      legacyPositive: 2,
+      shadowJudged: 4,
+      shadowPositive: 4,
+      agreement: 2,
+      compared: 3,
+      shadowFallback: 1,
+      recallNotLower: true,
+    });
+    expect(shadowUpserts).toHaveLength(1);
+    expect(shadowUpserts[0]).toMatchObject({
+      where: { runId: RUN_ID },
+      create: expect.objectContaining({ workspaceId: WORKSPACE_ID, runId: RUN_ID, shadowPositive: 4 }),
+    });
   });
 });

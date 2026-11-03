@@ -174,6 +174,8 @@ export interface DiscoveryRunInput {
    * 旧历史没有该字段（undefined）→ 走原编排；patch 守卫见 discovery.workflow.ts。
    */
   run2QuickScan?: boolean;
+  /** M0⑥：影子对比（老路径主产出 + 新快扫判定对比，不物化名单）。 */
+  run2Shadow?: boolean;
 }
 
 type DiscoveryActivityInput = Readonly<{

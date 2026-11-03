@@ -704,6 +704,11 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     return /^(1|true|on|yes)$/i.test(process.env.DISCOVERY_RUN2_QUICK_SCAN ?? "");
   }
 
+  /** M0⑥：影子对比开关（默认关；连续两轮召回不降后再开快扫默认）。 */
+  private run2ShadowEnabled(): boolean {
+    return /^(1|true|on|yes)$/i.test(process.env.DISCOVERY_RUN2_SHADOW ?? "");
+  }
+
   private async startWorkflowIdempotent(
     workflowType: string,
     options: {
@@ -831,6 +836,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
               // M0③（Run 2.0）：部署开关决定这一轮 run 是否走快扫编排；启动参数一旦记录，
               // 重放按历史输入走同一路径。
               ...(this.run2QuickScanEnabled() ? { run2QuickScan: true } : {}),
+              // M0⑥：影子对比（老路径主产出 + 新快扫对比，不物化名单）。
+              ...(this.run2ShadowEnabled() ? { run2Shadow: true } : {}),
             },
           ],
         },
