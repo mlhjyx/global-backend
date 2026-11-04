@@ -1454,10 +1454,16 @@ model DiscoveryRun {
   workspaceId                    String    @map("workspace_id") @db.Uuid
   planId                         String    @map("plan_id") @db.Uuid
   icpId                          String    @map("icp_id") @db.Uuid
-  status                         String    @default("RUNNING") // RUNNING | DONE | PARTIAL | FAILED
+  status                         String    @default("RUNNING") // RUNNING | DONE | PARTIAL | FAILED (+ QUEUED/QUICK/DEEP/FINALIZING/CANCELLED from Run 2.0)
   stats                          Json? // 每源计数/成本/去重结果
   /// SHA-256 contract: 558e526a674a7eac4e5e83d03fcf4f635c15b1b3081cffc7f03c2d9213c0c9fe
   materializationContractVersion String?   @map("materialization_contract_version") @db.VarChar(64)
+  /// Run 2.0（M0）：gain-saas 任务归因 {taskId, taskRunId}；null = 旧 run（保留兼容读取）。
+  taskRef                        Json?     @map("task_ref")
+  /// Run 2.0（M0）：阶段时间戳 {quickStartedAt, quickDoneAt, deepStartedAt, deepDoneAt}。
+  phases                         Json?
+  /// Run 2.0（M0）：full | quick_only | refresh。
+  mode                           String    @default("full") @db.VarChar(16)
   createdAt                      DateTime  @default(now()) @map("created_at")
   completedAt                    DateTime? @map("completed_at")
 
@@ -1465,11 +1471,61 @@ model DiscoveryRun {
   queryReceipts             DiscoveryQueryReceipt[]
   materializationAdmission  DiscoveryCompanyMaterializationAdmission?
   materializationRunReceipt DiscoveryCompanyMaterializationRunReceipt?
+  companyJobs               DiscoveryCompanyJob[]
+  runEvents                 RunEvent[]
 
   @@unique([workspaceId, id], map: "discovery_run_workspace_id_id_key")
   @@index([workspaceId])
   @@index([planId])
   @@map("discovery_run")
+}
+
+/// Run 2.0（M0）：公司级流水线状态（每家 × 每 run 一行）。stage 状态机见
+/// docs/superpowers/plans/2026-11-04-acquisition-system-complete-design.md §6.1。
+model DiscoveryCompanyJob {
+  id                 String    @id @default(uuid()) @db.Uuid
+  workspaceId        String    @map("workspace_id") @db.Uuid
+  runId              String    @map("run_id") @db.Uuid
+  canonicalCompanyId String    @map("canonical_company_id") @db.Uuid
+  /// queued | prefiltered_out | quick_judged | profiling | fitting | signals | contacts | done | failed | skipped
+  stage              String    @default("queued") @db.VarChar(32)
+  verdictQuick       String?   @map("verdict_quick") @db.VarChar(16) // match | weak | mismatch
+  verdictDeep        String?   @map("verdict_deep") @db.VarChar(16)
+  attempts           Int       @default(0)
+  lastErrorCode      String?   @map("last_error_code") @db.VarChar(64)
+  leaseUntil         DateTime? @map("lease_until") @db.Timestamptz(3)
+  costCents          Int       @default(0) @map("cost_cents")
+  startedAt          DateTime? @map("started_at") @db.Timestamptz(3)
+  finishedAt         DateTime? @map("finished_at") @db.Timestamptz(3)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  run DiscoveryRun @relation(fields: [workspaceId, runId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict, map: "discovery_company_job_run_fkey")
+
+  @@unique([workspaceId, runId, canonicalCompanyId], map: "discovery_company_job_run_company_key")
+  @@index([workspaceId, runId, stage])
+  @@map("discovery_company_job")
+}
+
+/// Run 2.0（M0）：run 进度事件（append-only，按 seq 增量拉取/重放；保留 90 天）。
+model RunEvent {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  runId       String   @map("run_id") @db.Uuid
+  seq         BigInt
+  at          DateTime @default(now()) @db.Timestamptz(3)
+  level       String   @default("info") @db.VarChar(16) // info | warn | error
+  /// phase_started | phase_completed | company_entered_stage | company_done | company_failed |
+  /// budget_exhausted | lease_skipped | run_finished
+  type        String   @db.VarChar(48)
+  payload     Json?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  run DiscoveryRun @relation(fields: [workspaceId, runId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict, map: "run_event_run_fkey")
+
+  @@unique([runId, seq], map: "run_event_run_seq_key")
+  @@index([workspaceId, runId, seq])
+  @@map("run_event")
 }
 
 /// Raw Zone（PRD 8.7）：Raw v2 是 provider-bound、governed/minimized 的不可变 observation receipt，不是 untouched wire capture；永不直接进领域层（ADR-017）。
@@ -1876,9 +1932,14 @@ model CanonicalCompany {
   lastWatchAt                 DateTime? @map("last_watch_at") // web_watch 监控注册
   contactDiscoveryAttemptedAt DateTime? @map("contact_discovery_attempted_at") // 联系人发现尝试
   emailGuessAttemptedAt       DateTime? @map("email_guess_attempted_at") // 决策人邮箱猜测尝试（选项 B P0.4）
+  // Run 2.0（M0）公司池新鲜度：渠道/导入最近看到、画像最近复查、画像内容指纹（供 fit 缓存与增量闭环）。
+  lastSeenAt                  DateTime? @map("last_seen_at") @db.Timestamptz(3)
+  lastCheckedAt               DateTime? @map("last_checked_at") @db.Timestamptz(3)
+  profileHash                 String?   @map("profile_hash") @db.VarChar(64)
 
   contacts                CanonicalContact[]
   companyContactPoints    CompanyContactPoint[]
+  channelSightings        CompanyChannelSighting[]
   leads                   Lead[]
   materializationOutcomes DiscoveryCompanyMaterializationOutcome[]
 
@@ -1892,7 +1953,28 @@ model CanonicalCompany {
   @@index([workspaceId, lastWatchAt])
   @@index([workspaceId, contactDiscoveryAttemptedAt])
   @@index([workspaceId, emailGuessAttemptedAt])
+  @@index([workspaceId, lastSeenAt])
   @@map("canonical_company")
+}
+
+/// Run 2.0 / M1（M0 先建表）：公司的渠道来源证据——某渠道在某时刻看到过这家公司。
+/// channel_id 暂为无外键的 UUID（source_channel 在 M1 引入，届时加 FK）；证据 URL 只存 https。
+model CompanyChannelSighting {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  companyId   String   @map("company_id") @db.Uuid
+  channelId   String?  @map("channel_id") @db.Uuid
+  evidenceUrl String?  @map("evidence_url") @db.VarChar(2048)
+  externalRef String?  @map("external_ref") @db.VarChar(200)
+  seenAt      DateTime @map("seen_at") @db.Timestamptz(3)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  company CanonicalCompany @relation(fields: [workspaceId, companyId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict, map: "company_channel_sighting_company_fkey")
+
+  @@unique([workspaceId, companyId, channelId, externalRef], map: "company_channel_sighting_identity_key")
+  @@index([workspaceId, companyId, seenAt])
+  @@index([workspaceId, channelId, seenAt])
+  @@map("company_channel_sighting")
 }
 
 /// Canonical 联系人（PRD 8.9 个人分层：按需、最小化、可验证）。
@@ -2293,6 +2375,8 @@ model Lead {
   /// 评分阶段最近一次写分的时刻（scoreCandidates 的 upsert 盖）。null = 评分从未跑过（queue 仍是 fit 门
   /// 预置）或在本列加入前评的分。API 的 scored/queueBasis 与 LeadQualified 快照的 scored_at 读它。
   scoredAt           DateTime?  @map("scored_at")
+  /// Run 2.0（M0）fit 缓存键：SHA-256(画像 hash + ICP revision)；输入不变则复用判定，不重调模型。
+  fitInputHash       String?    @map("fit_input_hash") @db.VarChar(64)
   version            Int        @default(1)
   createdAt          DateTime   @default(now()) @map("created_at")
   updatedAt          DateTime   @updatedAt @map("updated_at")
