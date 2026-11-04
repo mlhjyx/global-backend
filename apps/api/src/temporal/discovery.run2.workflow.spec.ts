@@ -6,7 +6,7 @@ vi.mock('@temporalio/workflow', async () => ({
   executeChild: child.executeChild,
 }));
 
-import { acts, resetActivities } from './testing/temporal-workflow.mock';
+import { TemporalFailure, acts, resetActivities } from './testing/temporal-workflow.mock';
 import { discoveryWorkflow } from './discovery.workflow';
 
 const WORKSPACE_ID = '11111111-1111-4111-8111-111111111111';
@@ -210,6 +210,33 @@ describe('M0③ 快扫编排（patched + 启动开关）', () => {
         status: 'DONE',
         stats: expect.objectContaining({
           deep: expect.objectContaining({ targets: 3, done: 3, stopped: false }),
+        }),
+      }),
+    );
+  });
+
+  it('labels a deep-stage child failure with its own stage instead of quickScan (2026-11-04)', async () => {
+    acts.prefilterPool.mockResolvedValue({ poolSize: 30, candidates: 25, prefilteredOut: 5 });
+    acts.quickJudgeBatch.mockResolvedValue({
+      judged: 25,
+      verdicts: { match: 10, weak: 15 },
+      fallbackPerCompany: 0,
+      ruleFallback: 0,
+      failed: 0,
+      skipped: 0,
+    });
+    acts.materializeProvisionalLeads.mockResolvedValue({ leads: 25 });
+    acts.listDeepTargets.mockResolvedValue({ companyIds: ['c1'] });
+    child.executeChild.mockRejectedValueOnce(new TemporalFailure('boom', new Error('socket hang up')));
+    acts.deepStageSummary.mockResolvedValue({ done: 0, failed: 0, skipped: 0, remaining: 1 });
+
+    await discoveryWorkflow(input(true)).catch(() => undefined);
+
+    expect(acts.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'FAILED',
+        stats: expect.objectContaining({
+          failure: expect.objectContaining({ stage: 'deep' }),
         }),
       }),
     );
