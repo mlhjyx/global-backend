@@ -59,6 +59,7 @@ export class MachineTokenClient {
           "temporal-platform-worker",
           "temporal-customer-worker",
           "temporal-customer-client",
+          "temporal-platform-client",
         ].includes(config.profile) ||
         [config.ca, config.certificate, config.privateKey].some(
           (bytes) =>

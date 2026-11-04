@@ -25,6 +25,20 @@ describe("machine runtime configuration", () => {
       }),
     ).rejects.toThrow("MACHINE_RUNTIME_CONFIGURATION_INVALID");
   });
+  it("requires the platform client's own certificate trio and subject", async () => {
+    const env = {
+      MACHINE_BOOTSTRAP_ENDPOINT: "https://127.0.0.1:18448",
+      MACHINE_BOOTSTRAP_CONFIGURATION_REVISION: "a".repeat(64),
+      TEMPORAL_MACHINE_JWKS_URI: "https://127.0.0.1:18446/temporal-runtime-jwks.json",
+      TEMPORAL_MACHINE_ISSUER: "https://127.0.0.1:18446/temporal-runtime",
+      TEMPORAL_MACHINE_AUDIENCE: "global-backend:platform-temporal",
+      TEMPORAL_MACHINE_SUBJECT: "backend-customer-client",
+    };
+    await expect(
+      machineTokenConfiguration("temporal-platform-client", "b".repeat(64), env),
+    ).rejects.toThrow("MACHINE_RUNTIME_CONFIGURATION_INVALID");
+  });
+
   it("only loads private bounded regular mode0600 files", async () => {
     const dir = await mkdtemp(join(tmpdir(), "machine-secret-test-"));
     temporaryDirectories.push(dir);
