@@ -1,6 +1,6 @@
 ---
 date: 2026-11-05
-pr:
+pr: 810
 title: Harden the OCI build against Debian archive outages
 ---
 
