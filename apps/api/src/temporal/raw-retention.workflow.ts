@@ -9,6 +9,10 @@ const PAGINATION_PATCH = "raw-retention-fair-pagination-v2";
 const TRUTHFUL_LOCK_PATCH = "raw-retention-truthful-lock-conflicts-v3";
 /** Q25（2026-11-04）：个人数据访问审计 180 天保留期清理并入本 sweep。 */
 const PERSONAL_DATA_AUDIT_RETENTION_PATCH = "personal-data-access-audit-retention-v1";
+/** 巡检（2026-11-04）：超时 RESERVED 的工具预算操作清收并入本 sweep。 */
+const BUDGET_OPERATION_RECONCILE_PATCH = "budget-operation-reconcile-v1";
+const BUDGET_RECONCILE_BATCH = 200;
+const MAX_BUDGET_RECONCILE_BATCHES = 5;
 const MAX_BATCHES_PER_WORKSPACE = 20;
 const DEFAULT_PAGES_PER_RUN = 2;
 const MAX_PAGES_PER_RUN = 5;
@@ -34,6 +38,7 @@ async function expireWorkspace(
   batchSize: number,
   truthfulLocks: boolean,
   personalDataAuditRetention: boolean,
+  budgetOperationReconcile: boolean,
 ): Promise<{ expired: number; deferredForConflict: number }> {
   let expired = 0;
   let deferredForConflict = 0;
@@ -71,6 +76,16 @@ async function expireWorkspace(
       if (!receipt.hasMore) break;
     }
   }
+  // 巡检（2026-11-04）：超时 RESERVED 工具预算操作清收（释放孤儿预留；patch 前旧历史不调度）。
+  if (budgetOperationReconcile) {
+    for (let batch = 0; batch < MAX_BUDGET_RECONCILE_BATCHES; batch += 1) {
+      const receipt = await activities.reconcileStaleToolBudgetOperations({
+        workspaceId,
+        limit: BUDGET_RECONCILE_BATCH,
+      });
+      if (!receipt?.hasMore) break;
+    }
+  }
   return { expired, deferredForConflict };
 }
 
@@ -80,6 +95,7 @@ async function processPage(
   aggregate: RawRetentionSweepResult,
   truthfulLocks: boolean,
   personalDataAuditRetention: boolean,
+  budgetOperationReconcile: boolean,
 ): Promise<{ aggregate: RawRetentionSweepResult; failures: number }> {
   let current = { ...aggregate };
   let failures = 0;
@@ -91,6 +107,7 @@ async function processPage(
         batchSize,
         truthfulLocks,
         personalDataAuditRetention,
+        budgetOperationReconcile,
       );
       current = {
         ...current,
@@ -119,6 +136,7 @@ export async function rawRetentionSweepWorkflow(
   const personalDataAuditRetention = patched(
     PERSONAL_DATA_AUDIT_RETENTION_PATCH,
   );
+  const budgetOperationReconcile = patched(BUDGET_OPERATION_RECONCILE_PATCH);
 
   if (!usesPagination) {
     const page = await activities.listRawRetentionWorkspaces({
@@ -134,6 +152,7 @@ export async function rawRetentionSweepWorkflow(
       },
       truthfulLocks,
       personalDataAuditRetention,
+      budgetOperationReconcile,
     );
     if (result.failures) {
       throw new Error(`RAW_RETENTION_WORKSPACE_FAILURE:${result.failures}`);
@@ -165,6 +184,7 @@ export async function rawRetentionSweepWorkflow(
       aggregate,
       truthfulLocks,
       personalDataAuditRetention,
+      budgetOperationReconcile,
     );
     aggregate = result.aggregate;
     if (result.failures) {

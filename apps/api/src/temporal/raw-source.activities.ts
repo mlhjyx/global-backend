@@ -122,6 +122,44 @@ export function createRawSourceActivities(deps: { prisma: PrismaService }) {
         return { expired: row.expired, hasMore: row.has_more };
       });
     },
+
+    /** 巡检（2026-11-04）：清收超时 RESERVED 的工具预算操作。孤儿预留既占住账户额度，又让同一
+     *  operation_key 的重试活动撞 BudgetOperationReplayError。释放语义与 release 一致（不扣费）。 */
+    async reconcileStaleToolBudgetOperations(args: {
+      workspaceId: string;
+      limit?: number;
+      olderThanHours?: number;
+    }): Promise<{ released: number; hasMore: boolean }> {
+      const scopedWorkspaceId = workspaceId(args.workspaceId);
+      const limit = boundedLimit(args.limit, 1000);
+      const olderThanHours = Math.max(
+        1,
+        Math.min(
+          Number.isSafeInteger(args.olderThanHours) ? args.olderThanHours! : 24,
+          720,
+        ),
+      );
+      return deps.prisma.withWorkspace(scopedWorkspaceId, async (tx) => {
+        // 注意：pg 函数返回 INTEGER/BOOLEAN 实体列（不是 void）——#788 的教训是
+        // $queryRaw 里 SELECT 返回 void 的函数会在真库反序列化失败。
+        const rows = await tx.$queryRaw<
+          Array<{ released: number; has_more: boolean }>
+        >(Prisma.sql`SELECT released, has_more
+          FROM reconcile_stale_tool_budget_operations_v1(
+            ${scopedWorkspaceId}::uuid, ${olderThanHours}::integer, ${limit}::integer
+          )`);
+        const row = rows[0];
+        if (
+          !row ||
+          !Number.isSafeInteger(row.released) ||
+          row.released < 0 ||
+          typeof row.has_more !== "boolean"
+        ) {
+          throw new Error("STALE_TOOL_RESERVATION_RECONCILE_RECEIPT_INVALID");
+        }
+        return { released: row.released, hasMore: row.has_more };
+      });
+    },
   };
 }
 
