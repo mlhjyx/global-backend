@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://contracts.global/events/payloads/platform-execution-budget-authority-upserted.v1.schema.json",
   "title": "PlatformExecutionBudgetAuthorityUpsertedV1",
-  "description": "Closed claims contract carried inside the signed compact JWS registered externally as PlatformExecutionBudgetAuthorityUpserted/v1. This is not an outbound DomainEventEnvelope and does not describe an outer transport wrapper.",
+  "description": "Closed claims contract carried inside the signed compact JWS registered externally as PlatformExecutionBudgetAuthorityUpserted/v1. Two mutually exclusive shapes share the envelope: schedule-bound platform grants (platform.acquisition/intent_watch/sanctions) and channel-crawl grants (platform.channel_crawl, bound to request_sha256 + crawl_run_id). Cross-field equality rules stay with the verified claim shape, not this schema.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -17,11 +17,6 @@
     "purpose",
     "subject_type",
     "subject_id",
-    "schedule_id",
-    "schedule_request_sha256",
-    "workflow_id",
-    "workflow_run_id",
-    "technical_policy_revision",
     "currency",
     "unit",
     "cap_per_run_microusd",
@@ -29,62 +24,158 @@
     "max_runs"
   ],
   "properties": {
-    "schema_version": { "const": "execution-budget-grant/v1" },
+    "schema_version": {
+      "const": "execution-budget-grant/v1"
+    },
     "iss": {
       "type": "string",
       "format": "uri",
       "minLength": 1,
       "maxLength": 512
     },
-    "aud": { "const": "global-backend:execution-budget" },
+    "aud": {
+      "const": "global-backend:execution-budget"
+    },
     "jti": {
       "type": "string",
       "format": "uuid",
       "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
     },
-    "iat": { "$ref": "#/$defs/numericDate" },
-    "nbf": { "$ref": "#/$defs/numericDate" },
-    "exp": { "$ref": "#/$defs/numericDate" },
-    "authority_kind": { "const": "PLATFORM_GRANT" },
+    "iat": {
+      "$ref": "#/$defs/numericDate"
+    },
+    "nbf": {
+      "$ref": "#/$defs/numericDate"
+    },
+    "exp": {
+      "$ref": "#/$defs/numericDate"
+    },
+    "authority_kind": {
+      "const": "PLATFORM_GRANT"
+    },
     "purpose": {
       "enum": [
         "platform.acquisition",
         "platform.intent_watch",
-        "platform.sanctions"
+        "platform.sanctions",
+        "platform.channel_crawl"
       ]
     },
-    "subject_type": { "const": "schedule" },
-    "subject_id": { "$ref": "#/$defs/boundedIdentifier" },
+    "subject_type": {
+      "enum": [
+        "schedule",
+        "source_channel"
+      ]
+    },
+    "subject_id": {
+      "$ref": "#/$defs/boundedIdentifier"
+    },
     "schedule_id": {
       "$ref": "#/$defs/boundedIdentifier",
-      "description": "Must equal subject_id; equality is enforced after signature verification."
+      "description": "Schedule-bound shape only. Must equal subject_id; equality is enforced after signature verification."
+    },
+    "request_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Channel-crawl shape only: sha256 over the canonical {channelId, mode, pageCap} request binding."
+    },
+    "crawl_run_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "Channel-crawl shape only: one signed grant binds one crawl run."
     },
     "schedule_request_sha256": {
       "type": "string",
-      "pattern": "^[0-9a-f]{64}$"
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Schedule-bound shape only."
     },
     "workflow_id": {
       "type": "string",
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$"
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$",
+      "description": "Schedule-bound shape only."
     },
     "workflow_run_id": {
       "type": "string",
       "format": "uuid",
-      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "Schedule-bound shape only."
     },
     "technical_policy_revision": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
-    "currency": { "const": "USD" },
-    "unit": { "const": "microusd" },
-    "cap_per_run_microusd": { "$ref": "#/$defs/positiveDecimal" },
+    "currency": {
+      "const": "USD"
+    },
+    "unit": {
+      "const": "microusd"
+    },
+    "cap_per_run_microusd": {
+      "$ref": "#/$defs/positiveDecimal"
+    },
     "campaign_cap_microusd": {
       "$ref": "#/$defs/positiveDecimal",
-      "description": "Must equal cap_per_run_microusd; equality is enforced after signature verification."
+      "description": "Schedule-bound shape: must equal cap_per_run_microusd. Channel-crawl shape: single-channel daily-equivalent cap and may differ from the per-run cap; equality rules are enforced after signature verification where they apply."
     },
-    "max_runs": { "const": "1" }
+    "max_runs": {
+      "const": "1"
+    }
   },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "purpose"
+        ],
+        "properties": {
+          "purpose": {
+            "const": "platform.channel_crawl"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "subject_type": {
+            "const": "source_channel"
+          },
+          "schedule_id": false,
+          "schedule_request_sha256": false,
+          "workflow_id": false,
+          "workflow_run_id": false,
+          "request_sha256": true,
+          "crawl_run_id": true,
+          "technical_policy_revision": true
+        },
+        "required": [
+          "request_sha256",
+          "crawl_run_id",
+          "technical_policy_revision"
+        ]
+      },
+      "else": {
+        "properties": {
+          "subject_type": {
+            "const": "schedule"
+          },
+          "request_sha256": false,
+          "crawl_run_id": false,
+          "schedule_id": true,
+          "schedule_request_sha256": true,
+          "workflow_id": true,
+          "workflow_run_id": true,
+          "technical_policy_revision": true
+        },
+        "required": [
+          "schedule_id",
+          "schedule_request_sha256",
+          "workflow_id",
+          "workflow_run_id",
+          "technical_policy_revision"
+        ]
+      }
+    }
+  ],
   "$defs": {
     "numericDate": {
       "type": "integer",

@@ -64,6 +64,8 @@ const PLATFORM_COMMAND_CLAIMS = new Set([
   'subject_type',
   'subject_id',
   'schedule_id',
+  'request_sha256',
+  'crawl_run_id',
   'schedule_request_sha256',
   'workflow_id',
   'workflow_run_id',
@@ -91,7 +93,7 @@ type WorkspaceExpectedScope = Readonly<
   }
 >;
 
-type PlatformExpectedScope = Readonly<
+type PlatformScheduleExpectedScope = Readonly<
   PlatformExecutionInvocation &
     Pick<
       VerifiedExecutionBudgetAuthority,
@@ -101,6 +103,31 @@ type PlatformExpectedScope = Readonly<
       scheduleId: string;
     }
 >;
+
+/** P4：渠道抓取 Grant 的运行时期望作用域（request 摘要 + crawlRunId + 策略版本）。 */
+export type PlatformChannelCrawlExpectedScope = Readonly<
+  Pick<
+    VerifiedExecutionBudgetAuthority,
+    | 'authorityKind'
+    | 'purpose'
+    | 'subjectType'
+    | 'subjectId'
+    | 'requestSha256'
+    | 'crawlRunId'
+    | 'technicalPolicyRevision'
+  > & {
+    authorityKind: 'PLATFORM_GRANT';
+    purpose: 'platform.channel_crawl';
+    subjectType: 'source_channel';
+    requestSha256: string;
+    crawlRunId: string;
+    technicalPolicyRevision: string;
+  }
+>;
+
+export type PlatformExpectedScope =
+  | PlatformScheduleExpectedScope
+  | PlatformChannelCrawlExpectedScope;
 
 export type ExecutionBudgetGrantExpectedScope =
   WorkspaceExpectedScope | PlatformExpectedScope;
@@ -460,11 +487,15 @@ function assertExpectedScope(
     expected.authorityKind === 'WORKSPACE_GRANT'
       ? authority.workspaceId !== expected.workspaceId ||
         authority.requestSha256 !== expected.requestSha256
-      : authority.scheduleId !== expected.scheduleId ||
-        authority.scheduleRequestSha256 !== expected.scheduleRequestSha256 ||
-        authority.workflowId !== expected.workflowId ||
-        authority.workflowRunId !== expected.workflowRunId ||
-        authority.technicalPolicyRevision !== expected.technicalPolicyRevision;
+      : 'crawlRunId' in expected
+        ? authority.requestSha256 !== expected.requestSha256 ||
+          authority.crawlRunId !== expected.crawlRunId ||
+          authority.technicalPolicyRevision !== expected.technicalPolicyRevision
+        : authority.scheduleId !== expected.scheduleId ||
+          authority.scheduleRequestSha256 !== expected.scheduleRequestSha256 ||
+          authority.workflowId !== expected.workflowId ||
+          authority.workflowRunId !== expected.workflowRunId ||
+          authority.technicalPolicyRevision !== expected.technicalPolicyRevision;
   if (commonMismatch || kindMismatch) {
     throw new ExecutionBudgetGrantError(
       'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
@@ -647,6 +678,7 @@ export class ExecutionBudgetGrantVerifier {
         scheduleId: nullableBoundedIdentifier(payload.schedule_id),
         ...(authorityKind === 'PLATFORM_GRANT'
           ? {
+              crawlRunId: nullableUuid(payload.crawl_run_id) ?? undefined,
               scheduleRequestSha256:
                 nullableSha256(payload.schedule_request_sha256) ?? undefined,
               workflowId:

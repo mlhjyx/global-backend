@@ -185,6 +185,7 @@ model ExecutionBudgetAuthority {
   subjectId               String                       @map("subject_id") @db.VarChar(191)
   requestSha256           String?                      @map("request_sha256") @db.VarChar(64)
   scheduleId              String?                      @map("schedule_id") @db.VarChar(191)
+  crawlRunId              String?                      @map("crawl_run_id") @db.VarChar(36)
   scheduleRequestSha256   String?                      @map("schedule_request_sha256") @db.VarChar(64)
   workflowId              String?                      @map("workflow_id") @db.VarChar(200)
   workflowRunId           String?                      @map("workflow_run_id") @db.VarChar(36)

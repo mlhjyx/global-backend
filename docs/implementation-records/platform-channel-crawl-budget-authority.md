@@ -48,7 +48,11 @@
 3. **P3（gain-saas 签发）**：内部端点 + 配额/审计 + 单测。
 4. **P4（执行接线）**：渠道抓取工作流（platform worker）+ `source_channel_run` + 页数/花费硬执行 + 撤销演练；抓取端点从 409 切到授权路径，保留无 Grant 即拒。
 
-## 6. 未做（本文档范围）
+## 6. 实施进度
+
+- 2026-11-05：**P1（引擎契约）已实施**——purpose 枚举（两段式迁移）、形状/绑定 CHECK 的 channel-crawl 分支、`crawl_run_id` 列与唯一索引、`ingest_and_admit_platform_channel_crawl_run_v1` 摄入函数（仅 platform writer 可执行）、verifier/types/contracts 双形状。schedule 摄入函数与 4 个平台 schedule 不变量未改动。P2（策略矩阵新版）、P3（gain-saas 签发）、P4（执行接线/409 切换）仍待实施。
+
+## 7. 未做（本文档范围）
 
 - 不包含任何代码改动；抓取端点在 P4 前保持 `409 CHANNEL_CRAWL_REQUIRES_PLATFORM_AUTHORITY`。
 - M2 watches 周期刷新的调度（复用本 purpose 的 refresh run）随 P4 一并接线。
