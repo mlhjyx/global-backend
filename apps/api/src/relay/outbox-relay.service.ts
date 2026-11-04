@@ -699,6 +699,11 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
    * （同 ID 的上一次执行结束后允许再启动）。指定 REJECT_DUPLICATE 时，同 ID 已结束也报
    * WorkflowExecutionAlreadyStartedError，同样按合并处理。
    */
+  /** M0③：Run 2.0 快扫编排的部署开关（默认关；影子验收后由 M0⑥ 切默认）。 */
+  private run2QuickScanEnabled(): boolean {
+    return /^(1|true|on|yes)$/i.test(process.env.DISCOVERY_RUN2_QUICK_SCAN ?? "");
+  }
+
   private async startWorkflowIdempotent(
     workflowType: string,
     options: {
@@ -823,6 +828,9 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
               icpId: payload.icpId ?? "",
               executionContractVersion: 2,
               executionBudget,
+              // M0③（Run 2.0）：部署开关决定这一轮 run 是否走快扫编排；启动参数一旦记录，
+              // 重放按历史输入走同一路径。
+              ...(this.run2QuickScanEnabled() ? { run2QuickScan: true } : {}),
             },
           ],
         },

@@ -6,6 +6,7 @@ import {
   proxyActivities,
 } from '@temporalio/workflow';
 import type { DiscoveryActivities, DiscoveryRunInput } from './discovery.activities';
+import type { Run2Activities } from './discovery.run2.activities';
 import { resolveRunStatus } from './discovery.run-status';
 import {
   describeDiscoveryRunFailure,
@@ -49,6 +50,14 @@ export const DISCOVERY_QUERY_FAILURE_STOP_PATCH = 'discovery-query-failure-stop-
 export const DISCOVERY_QUERY_BATCH_PATCH = 'discovery-query-batch-v1';
 /** Named-contact discovery after the signals stage (fit=match companies, bounded, best-effort). */
 export const DISCOVERY_RUN_CONTACTS_PATCH = 'discovery-run-contacts-v1';
+/**
+ * M0③（Run 2.0）：快扫编排——池优先（候选不足阈值才跑整轮搜索）+ 规则预筛 +
+ * 批量粗判（8 家/次，逐家降级）+ 临时候选物化。默认关闭（启动参数 run2QuickScan），
+ * 影子验收后再切默认（M0⑥）。
+ */
+export const DISCOVERY_RUN2_QUICK_SCAN_PATCH = 'discovery-run2-quick-scan-v1';
+/** 公司池候选少于此数才触发有界搜索兜底（设计 R3）。 */
+const RUN2_POOL_SEARCH_FALLBACK_THRESHOLD = 20;
 const DISCOVERY_QUERY_BATCH = 2;
 export const DISCOVERY_QUERY_RECEIPT_MODE = QUERY_RECEIPT_MODE;
 const EXECUTION_CONTRACT_VERSION = 2 as const;
@@ -65,7 +74,9 @@ function invalidAuthorityInput(): never {
   );
 }
 
-const acts = proxyActivities<DiscoveryActivities>({
+type DiscoveryWorkflowActivities = DiscoveryActivities & Run2Activities;
+
+const acts = proxyActivities<DiscoveryWorkflowActivities>({
   startToCloseTimeout: '2 minutes',
   retry: { maximumAttempts: 3 },
 });
@@ -75,7 +86,7 @@ const acts = proxyActivities<DiscoveryActivities>({
 // which outruns the 2-minute default and turns into replay failures on retry.
 // The fit pass hands the companies it did not reach within its time box to the
 // next activity, so 15 minutes bounds one activity, not the whole pass.
-const modelActs = proxyActivities<DiscoveryActivities>({
+const modelActs = proxyActivities<DiscoveryWorkflowActivities>({
   startToCloseTimeout: '15 minutes',
   retry: { maximumAttempts: 3 },
 });
@@ -302,6 +313,29 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     if (!usesAuthority) {
       await acts.resetRunBudget({ workspaceId, runId });
     }
+    // Run 2.0（M0③，默认关闭）：池优先——先对现有公司池做规则预筛；
+    // 候选达到阈值就跳过整轮搜索，只有池子不够时才跑一次有界搜索兜底（R3）。
+    const usesRun2QuickScan =
+      patched(DISCOVERY_RUN2_QUICK_SCAN_PATCH) && input.run2QuickScan === true;
+    let run2Prefilter:
+      | { poolSize: number; candidates: number; prefilteredOut: number }
+      | undefined;
+    if (usesRun2QuickScan) {
+      stage = 'quickScan';
+      run2Prefilter = await acts.prefilterPool({
+        workspaceId,
+        runId,
+        icpId: input.icpId,
+        ...authorityArgs,
+      });
+    }
+    const needSearch =
+      !usesRun2QuickScan ||
+      (run2Prefilter?.candidates ?? 0) < RUN2_POOL_SEARCH_FALLBACK_THRESHOLD;
+
+    let companies = 0;
+    let suppressed = 0;
+    if (needSearch) {
     const { queries } = await acts.loadPlanQueries({ workspaceId, planId, ...authorityArgs });
     queryCount = queries.length;
     stage = 'query';
@@ -482,7 +516,59 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       }
     }
     stage = 'canonicalize';
-    const { companies, suppressed } = await acts.canonicalizeRun({ workspaceId, runId, ...authorityArgs });
+    const canonical = await acts.canonicalizeRun({ workspaceId, runId, ...authorityArgs });
+    companies = canonical.companies;
+    suppressed = canonical.suppressed;
+    }
+
+    // Run 2.0（M0③）：快扫出口——搜索兜底跑过一轮后再预筛一次纳新，然后批量粗判与临时候选物化。
+    if (usesRun2QuickScan) {
+      if (needSearch) {
+        run2Prefilter = await acts.prefilterPool({
+          workspaceId,
+          runId,
+          icpId: input.icpId,
+          ...authorityArgs,
+        });
+      }
+      const quick = await modelActs.quickJudgeBatch({
+        workspaceId,
+        runId,
+        icpId: input.icpId,
+        ...authorityArgs,
+      });
+      const provisional = await acts.materializeProvisionalLeads({
+        workspaceId,
+        runId,
+        icpId: input.icpId,
+        ...authorityArgs,
+      });
+      // 空池、或判定全部失败 → FAILED（本次 run 没有可用名单）；有失败/跳过/规则兜底 → PARTIAL。
+      let quickStatus: DiscoveryRunOutcome['status'] = 'DONE';
+      if (quick.failed > 0 || quick.skipped > 0 || quick.ruleFallback > 0) {
+        quickStatus = 'PARTIAL';
+      }
+      if (quick.judged === 0) {
+        quickStatus = (run2Prefilter?.candidates ?? 0) === 0 ? 'PARTIAL' : 'FAILED';
+      }
+      outcome = {
+        status: quickStatus,
+        stats: {
+          ...queryStats(),
+          ...skipStats(),
+          ...extractionStats(),
+          companies,
+          suppressed,
+          quickScan: {
+            ...(run2Prefilter ?? { poolSize: 0, candidates: 0, prefilteredOut: 0 }),
+            ...quick,
+            leads: provisional.leads,
+          },
+        },
+      };
+      await finalize(outcome);
+      return;
+    }
 
     // 官网画像（G3 5.4b）：Fit 之前以已建档公司为主体抓首页与 Impressum（慢 → 长活动）；
     // 尽力而为，失败不影响 run 状态，控制错误照旧上抛。patch 守卫：旧历史重放不产生新命令。
@@ -691,7 +777,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     const leaseSkipCount = Object.values(leaseSkips).reduce((sum, count) => sum + count, 0);
     let status = resolveRunStatus({
       failures,
-      totalQueries: queries.length,
+      totalQueries: queryCount,
       budgetTruncated,
       skippedSubjects,
       // Absent in histories recorded before the counter existed: replays keep their status.
@@ -759,7 +845,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         ...(contacts ? { contacts } : {}),
         watches: { registered: watches.registered, of: watches.candidates },
         patentEnqueue: { enqueued: patentEnqueue.enqueued, of: patentEnqueue.candidates },
-        queries: queries.length,
+        queries: queryCount,
         failures,
       },
     };
