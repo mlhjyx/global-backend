@@ -119,6 +119,10 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '执行一个 READY 查询计划：多源发现 → Raw → Canonical，由 Temporal 异步编排。返回 202 与 runId，用 GET /discovery-runs/{runId} 轮询。',
   'POST /api/v1/discovery-runs/{runId}/cancel':
     '停止深挖：向 Temporal 发取消请求。已完成公司的结果保留，未完成公司标 skipped（下一次 run 会重新排队），run 以 CANCELLED 收尾。已结束的 run 幂等返回当前状态。',
+  'GET /api/v1/icps/{icpId}/feedback':
+    'M2 反馈闭环：按来源/渠道/行业/国家聚合的接受率与拒绝理由分布，以及 ICP 建议卡（只给建议，人工采纳后才改 ICP）。',
+  'POST /api/v1/icps/{icpId}/feedback/recompute':
+    '重算该 ICP 的反馈聚合（幂等；通常由接受/拒绝动作自动触发，这里是手动补偿入口）。',
   'GET /api/v1/discovery-runs/{runId}/events':
     'run 进度事件（append-only，按 seq 增量拉取）：阶段开始/完成、公司进出阶段、预算耗尽、租约跳过、run 收尾。用 ?after=<上次的 nextAfter> 断点续拉，事件可重放。',
   'GET /api/v1/discovery-runs/{runId}/jobs':

@@ -215,6 +215,18 @@
       "SELECT",
       "UPDATE"
     ],
+    "icp_feedback": [
+      "DELETE",
+      "INSERT",
+      "SELECT",
+      "UPDATE"
+    ],
+    "icp_query_performance": [
+      "DELETE",
+      "INSERT",
+      "SELECT",
+      "UPDATE"
+    ],
     "idempotency_key": [
       "DELETE",
       "INSERT",

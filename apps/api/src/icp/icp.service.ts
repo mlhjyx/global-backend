@@ -45,6 +45,7 @@ import {
   type ExecutionBudgetBinding,
 } from '../execution-budget/execution-budget-authority.service';
 import { workspaceExecutionBudgetRequestScope } from '../execution-budget/execution-budget-request-scope';
+import { IcpFeedbackService } from './icp-feedback.service';
 import {
   applyDomainAckConsumerTransaction,
   domainAggregateIdForReceipt,
@@ -122,6 +123,7 @@ export class IcpService {
     private readonly authority: ExecutionBudgetAuthorityService,
     private readonly providers: DiscoveryProviderRegistry,
     @Optional() @Inject(TOOL_BUDGET_STORE) private readonly budgetStore?: BudgetStore,
+    @Optional() private readonly feedback?: IcpFeedbackService,
   ) {}
 
   /** AI-design an ICP from the seller company's APPROVED claims (PRD 5.4 / 7.5). */
@@ -574,7 +576,11 @@ export class IcpService {
       exclusions: icp.exclusions,
       rules: icp.rules.map((r) => ({ kind: r.kind, field: r.field, operator: r.operator, value: r.value })),
     };
-    const queryPlanPrompt = `ICP 定义：\n${JSON.stringify(icpBrief, null, 2)}\n\n请生成多源查询计划，输出中文 rationale。\n${plannerSourcePrompt(plannerSources)}\n${plannerKeywordLanguage(icp.targetMarkets, icp.companyAttributes)}`;
+    // M2：历史判断反馈（来源接受率 EMA）参与加权——低接受率来源少生成、高接受率多生成。
+    const feedbackNote = this.feedback
+      ? await this.feedback.plannerNote(ctx, icpId).catch(() => null)
+      : null;
+    const queryPlanPrompt = `ICP 定义：\n${JSON.stringify(icpBrief, null, 2)}\n\n请生成多源查询计划，输出中文 rationale。\n${plannerSourcePrompt(plannerSources)}\n${plannerKeywordLanguage(icp.targetMarkets, icp.companyAttributes)}${feedbackNote ? `\n\n${feedbackNote}` : ''}`;
     const result = await executeIcpBudgetedTask<QueryPlanModelOutput>({
       budgetStore: this.budgetStore ?? new UnavailableBudgetStore('ICP query-plan generation requires an authoritative BudgetStore'),
       binding,

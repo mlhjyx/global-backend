@@ -1507,6 +1507,43 @@ model DiscoveryCompanyJob {
   @@map("discovery_company_job")
 }
 
+/// M2 反馈闭环：ICP 维度的接受/拒绝聚合（来源/渠道/行业/国家的接受率与 mismatch 理由分布）。
+/// 人工判断 → 聚合 → 查询权重与 ICP 建议卡（人工采纳才改 ICP，绝不自动改）。
+model IcpFeedback {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  icpId       String   @map("icp_id") @db.Uuid
+  /// source | channel | industry | country
+  dimension   String   @db.VarChar(16)
+  dimensionKey String  @map("dimension_key") @db.VarChar(200)
+  accepted    Int      @default(0)
+  rejected    Int      @default(0)
+  /// 拒绝理由分布 {reasonCode: count}
+  reasonCounts Json?   @map("reason_counts")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, icpId, dimension, dimensionKey], map: "icp_feedback_identity_key")
+  @@index([workspaceId, icpId])
+  @@map("icp_feedback")
+}
+
+/// M2 反馈闭环：查询族（当前按来源类目聚合）的 EMA 质量分（接受率滑动平均）。
+model IcpQueryPerformance {
+  id           String   @id @default(uuid()) @db.Uuid
+  workspaceId  String   @map("workspace_id") @db.Uuid
+  icpId        String   @map("icp_id") @db.Uuid
+  queryFamily  String   @map("query_family") @db.VarChar(200)
+  samples      Int      @default(0)
+  accepted     Int      @default(0)
+  /// 指数滑动平均接受率（0..1），Alpha=0.3
+  qualityEma   Float    @map("quality_ema")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, icpId, queryFamily], map: "icp_query_performance_identity_key")
+  @@index([workspaceId, icpId])
+  @@map("icp_query_performance")
+}
+
 /// M1 渠道数据源平台：平台级渠道注册表（api | crawl | import 三形态）。
 /// 治理硬闸门：license/tosUrl/robotsPolicy 必填后才能 ENABLED；失败率连续 3 轮 >30% 自动停用。
 model SourceChannel {
