@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { lstatSync, mkdirSync, openSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, openSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -185,11 +185,11 @@ if (process.env.WORKTREE_SKIP_INSTALL === "1") {
       "dependencies: gctl link-env unavailable; link apps/api/.env and packages/db/.env manually",
     );
   }
-  const installLog = path.join(
-    tmpdir(),
-    `global-worktree-install-${process.pid}.log`,
+  const installDir = mkdtempSync(
+    path.join(tmpdir(), "global-worktree-install-"),
   );
-  const logFd = openSync(installLog, "a");
+  const installLog = path.join(installDir, "install.log");
+  const logFd = openSync(installLog, "a", 0o600);
   const install = spawn(
     "pnpm",
     ["install", "--frozen-lockfile", "--prefer-offline"],
