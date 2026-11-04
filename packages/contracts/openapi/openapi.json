@@ -3594,7 +3594,8 @@
                               "personal-data:read",
                               "contact-discovery:read",
                               "compliance:manage",
-                              "ops:read"
+                              "ops:read",
+                              "ops:write"
                             ]
                           }
                         }
@@ -9721,9 +9722,9 @@
           "Channels"
         ],
         "x-required-scopes": [
-          "acquisition:read"
+          "ops:read"
         ],
-        "description": "渠道列表（状态/模式/类别/最近运行与失败率）。平台级渠道注册表，所有租户可见；写入需要管理员权限。"
+        "description": "渠道列表（状态/模式/类别/最近运行与失败率）。平台级渠道注册表，运营台读取（ops:read）；租户侧只看 /available。"
       },
       "post": {
         "operationId": "ChannelsController_create_v1",
@@ -9759,9 +9760,9 @@
           "Channels"
         ],
         "x-required-scopes": [
-          "acquisition:write"
+          "ops:write"
         ],
-        "description": "新建渠道（默认停用 DISABLED）。配置按形态校验：crawl 需 https 列表页与选择器；api 需适配器名；import 直接可用。启用前必须登记许可、条款与 robots 结论。"
+        "description": "新建平台渠道（默认停用 DISABLED）。仅运营身份（ops:write）；配置按形态校验：crawl 需 https 列表页与选择器；api 需适配器名；import 直接可用。启用前必须登记许可、条款与 robots 结论。"
       }
     },
     "/api/v1/source-channels/available": {
@@ -9825,11 +9826,25 @@
                     "data": {
                       "type": "object",
                       "required": [
-                        "csv"
+                        "csv",
+                        "columns",
+                        "mapping"
                       ],
                       "properties": {
                         "csv": {
                           "type": "string"
+                        },
+                        "columns": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "mapping": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "string"
+                          }
                         }
                       }
                     }
@@ -9844,14 +9859,14 @@
             "bearer": []
           }
         ],
-        "summary": "导入通道示例 CSV（10 行，列映射与导入验收用）",
+        "summary": "导入通道示例 CSV（10 行，列映射与导入验收用；附建议 mapping 与可用列）",
         "tags": [
           "Channels"
         ],
         "x-required-scopes": [
           "acquisition:read"
         ],
-        "description": "导入通道的示例 CSV（10 行，列：company/website/country/industry），用于列映射与验收。"
+        "description": "导入通道的示例 CSV（10 行，列：company/website/country/industry），附 columns 与建议 mapping；预览/提交缺少或错配 mapping 时，错误信息会列出可用列并给出示例。"
       }
     },
     "/api/v1/source-channels/{channelId}": {
@@ -9898,9 +9913,9 @@
           "Channels"
         ],
         "x-required-scopes": [
-          "acquisition:write"
+          "ops:write"
         ],
-        "description": "更新渠道配置/治理信息/状态。启用硬闸门：license+tosUrl+robots 结论齐全，robots=C 永不启用，crawl 仅允许 robots=A。"
+        "description": "更新渠道配置/治理信息/状态。仅运营身份（ops:write）。启用硬闸门：license+tosUrl+robots 结论齐全，robots=C 永不启用，crawl 仅允许 robots=A。"
       }
     },
     "/api/v1/source-channels/{channelId}/enable": {
@@ -10067,9 +10082,9 @@
           "Channels"
         ],
         "x-required-scopes": [
-          "acquisition:write"
+          "ops:write"
         ],
-        "description": "试跑抓取通道（抓 1 页/前 20 条）。抓取出网需要平台级抓取预算权威（channel.crawl purpose 或平台自动化），获批前该端点 fail-closed 返回 409 CHANNEL_CRAWL_REQUIRES_PLATFORM_AUTHORITY。"
+        "description": "试跑抓取通道（抓 1 页/前 20 条）。仅运营身份（ops:write）。抓取出网需要平台级抓取预算权威（platform.channel_crawl purpose），授权链落地前该端点 fail-closed 返回 409 CHANNEL_CRAWL_REQUIRES_PLATFORM_AUTHORITY。"
       }
     },
     "/api/v1/source-channels/{channelId}/run": {
@@ -10116,9 +10131,9 @@
           "Channels"
         ],
         "x-required-scopes": [
-          "acquisition:write"
+          "ops:write"
         ],
-        "description": "立即运行抓取通道（同 preview 的门槛与限额；失败率连续 3 轮 >30% 自动停用）。"
+        "description": "立即运行抓取通道（同 preview 的门槛与限额，仅运营身份 ops:write；失败率连续 3 轮 >30% 自动停用）。"
       }
     },
     "/api/v1/imported-buyers/preview": {
@@ -18295,6 +18310,10 @@
     {
       "name": "Leads",
       "description": "评分产出与交付：交付包、接受 / 拒绝、制裁复核"
+    },
+    {
+      "name": "Channels",
+      "description": "渠道数据源：平台渠道注册/治理/试跑（运营身份 ops:*），租户启用与私有导入"
     },
     {
       "name": "Reports",

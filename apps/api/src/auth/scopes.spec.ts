@@ -17,10 +17,11 @@ const EXPECTED_SCOPES = [
   'contact-discovery:read',
   'compliance:manage',
   'ops:read',
+  'ops:write',
 ] as const;
 
 describe('roles to scopes policy', () => {
-  it('exposes only the eleven approved server scopes', () => {
+  it('exposes only the twelve approved server scopes', () => {
     expect(AUTHORIZATION_SCOPES).toEqual(EXPECTED_SCOPES);
   });
 
