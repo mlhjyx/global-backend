@@ -93,6 +93,7 @@ export class DiscoveryService {
     planId: string,
     compactJws?: string,
     taskRef?: { taskId: string; taskRunId: string },
+    attemptId?: string,
   ) {
     // M0②（Run 2.0）：任务归因是可选元数据；形状不合法在任何授权消耗之前拒绝。
     if (taskRef !== undefined) {
@@ -117,6 +118,7 @@ export class DiscoveryService {
       scope: workspaceExecutionBudgetRequestScope({
         operation: 'POST /query-plans/:planId/execute',
         planId,
+        ...(attemptId === undefined ? {} : { body: { attemptId } }),
       }),
     });
     const runId = randomUUID();

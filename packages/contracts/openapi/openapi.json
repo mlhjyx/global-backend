@@ -6385,6 +6385,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateWithAttemptDto"
+              }
+            }
+          }
+        },
         "responses": {
           "201": {
             "description": "",
@@ -7102,6 +7112,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateWithAttemptDto"
+              }
+            }
+          }
+        },
         "responses": {
           "201": {
             "description": "",
@@ -19051,6 +19071,16 @@
           "createdAt"
         ]
       },
+      "GenerateWithAttemptDto": {
+        "type": "object",
+        "properties": {
+          "attemptId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "「重新生成」的幂等键（BFF 或客户端生成）。"
+          }
+        }
+      },
       "UpdateIcpDto": {
         "type": "object",
         "properties": {
@@ -19466,6 +19496,11 @@
                 "$ref": "#/components/schemas/ExecuteTaskRefDto"
               }
             ]
+          },
+          "attemptId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "P1 attempt 维度：「重试」的幂等键；同一 attempt 重放被拒（GRANT_REUSED），新 attempt 放行。缺省时行为与旧版一致。"
           }
         }
       },

@@ -55,6 +55,37 @@ describe('WorkspaceTechnicalBudgetQuoteController', () => {
     });
   });
 
+  it('binds the attempt id into the quote hash for plan generation (P1 attempt 维度)', () => {
+    const base = {
+      operation: 'POST /icps/:icpId/query-plans',
+      icpId: '40000000-0000-4000-8000-000000000004',
+    };
+    const without = controller().quote(CTX, base).data.requestSha256;
+    const withAttempt = controller().quote(CTX, {
+      ...base,
+      body: { attemptId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' },
+    }).data.requestSha256;
+    expect(withAttempt).toMatch(/^[0-9a-f]{64}$/);
+    expect(withAttempt).not.toBe(without);
+    // 同一 attempt 幂等：重复 quoting 同一请求得到同一哈希（同一 Grant 作用域，重放会被 GRANT_REUSED 拒绝）。
+    expect(
+      controller().quote(CTX, {
+        ...base,
+        body: { attemptId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd' },
+      }).data.requestSha256,
+    ).toBe(withAttempt);
+  });
+
+  it('rejects a malformed attempt id instead of hashing it', () => {
+    expect(() =>
+      controller().quote(CTX, {
+        operation: 'POST /query-plans/:planId/execute',
+        planId: '50000000-0000-4000-8000-000000000005',
+        body: { attemptId: 'not-a-uuid' },
+      }),
+    ).toThrow(/EXECUTION_BUDGET_QUOTE_INVALID/);
+  });
+
   it('rejects unknown top-level fields instead of hashing a silently stripped request', () => {
     expect(() =>
       controller().quote(CTX, {
