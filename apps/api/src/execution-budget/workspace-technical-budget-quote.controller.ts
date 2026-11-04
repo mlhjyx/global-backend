@@ -224,6 +224,15 @@ function complianceBody(
   });
 }
 
+function attemptBody(
+  value: unknown,
+): { readonly body?: Readonly<{ attemptId: string }> } {
+  if (value === undefined) return {};
+  const body = record(value);
+  exactKeys(body, ['attemptId']);
+  return { body: Object.freeze({ attemptId: uuid(body.attemptId) }) };
+}
+
 function parseRequest(value: unknown): WorkspaceExecutionBudgetRequest {
   const input = record(value);
   if (
@@ -330,10 +339,11 @@ function parseRequest(value: unknown): WorkspaceExecutionBudgetRequest {
       });
     }
     case 'POST /companies/:companyId/icps':
-      exactKeys(input, ['operation', 'companyId']);
+      exactKeys(input, ['operation', 'companyId'], ['body']);
       return Object.freeze({
         operation: input.operation,
         companyId: uuid(input.companyId),
+        ...attemptBody(input.body),
       });
     case 'POST /companies/:companyId/understanding/retry': {
       exactKeys(input, ['operation', 'companyId', 'body']);
@@ -350,16 +360,18 @@ function parseRequest(value: unknown): WorkspaceExecutionBudgetRequest {
       });
     }
     case 'POST /icps/:icpId/query-plans':
-      exactKeys(input, ['operation', 'icpId']);
+      exactKeys(input, ['operation', 'icpId'], ['body']);
       return Object.freeze({
         operation: input.operation,
         icpId: uuid(input.icpId),
+        ...attemptBody(input.body),
       });
     case 'POST /query-plans/:planId/execute':
-      exactKeys(input, ['operation', 'planId']);
+      exactKeys(input, ['operation', 'planId'], ['body']);
       return Object.freeze({
         operation: input.operation,
         planId: uuid(input.planId),
+        ...attemptBody(input.body),
       });
     case 'POST /canonical-companies/:id/discover-contacts': {
       exactKeys(input, ['operation', 'companyId'], ['body']);

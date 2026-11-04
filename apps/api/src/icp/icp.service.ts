@@ -131,6 +131,7 @@ export class IcpService {
     ctx: RequestContext,
     companyId: string,
     compactJws?: string,
+    attemptId?: string,
   ) {
     const verifiedGrant = await this.authority.verifyWorkspaceGrant({
       compactJws,
@@ -138,6 +139,7 @@ export class IcpService {
       scope: workspaceExecutionBudgetRequestScope({
         operation: 'POST /companies/:companyId/icps',
         companyId,
+        ...(attemptId === undefined ? {} : { body: { attemptId } }),
       }),
     });
     const { company, claims, offerings } = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
@@ -525,6 +527,7 @@ export class IcpService {
     ctx: RequestContext,
     icpId: string,
     compactJws?: string,
+    attemptId?: string,
   ) {
     const verifiedGrant = await this.authority.verifyWorkspaceGrant({
       compactJws,
@@ -532,6 +535,7 @@ export class IcpService {
       scope: workspaceExecutionBudgetRequestScope({
         operation: 'POST /icps/:icpId/query-plans',
         icpId,
+        ...(attemptId === undefined ? {} : { body: { attemptId } }),
       }),
     });
     // BI-30：规划时刻的数据源开关（data_provider.status）快照：提示词、查询过滤与冷路径注入都按它。

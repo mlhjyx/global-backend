@@ -11,7 +11,8 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiPropertyOptional, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { IsOptional, IsUUID } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
 import { RequireScopes } from '../auth/require-scopes.decorator';
@@ -41,6 +42,14 @@ import {
   asModelUpstreamHttpBoundary,
 } from '../model-gateway/model-upstream-http-boundary';
 
+/** P1 attempt 维度：同一次点击的重试/重新生成带同一幂等键；缺省时请求哈希与旧版一致。 */
+class GenerateWithAttemptDto {
+  @ApiPropertyOptional({ type: 'string', format: 'uuid', description: '「重新生成」的幂等键（BFF 或客户端生成）。' })
+  @IsOptional()
+  @IsUUID()
+  attemptId?: string;
+}
+
 @ApiTags('ICP')
 @ApiBearerAuth()
 @Controller()
@@ -61,18 +70,20 @@ export class IcpController {
       '模型网关结算了调用却没有可用答案（内容被过滤、输出截断、非 JSON、流被截断等）时返回 502 MODEL_UPSTREAM_UNUSABLE，details.reasonCode 为网关原因码；此时预算授权已消耗，重试需要新的授权。',
   })
   @ApiExecutionBudgetGrant()
+  @ApiBody({ type: GenerateWithAttemptDto, required: false })
   @ApiModelUpstreamUnusable()
   @ApiEnvelope(IcpDto, { status: 201 })
   async generate(
     @Ctx() ctx: RequestContext,
     @Param('companyId', ParseUUIDPipe) companyId: string,
+    @Body() dto?: GenerateWithAttemptDto,
     @ExecutionBudgetGrant() compactJws?: string,
   ): Promise<Enveloped<IcpDto>> {
     return envelope(
       IcpDto.from(
         await asExecutionBudgetHttpBoundary(() =>
           asModelUpstreamHttpBoundary(() =>
-            this.icps.generateFromCompany(ctx, companyId, compactJws),
+            this.icps.generateFromCompany(ctx, companyId, compactJws, dto?.attemptId),
           ),
         ),
       ),
@@ -205,18 +216,20 @@ export class IcpController {
     // BI-30: the planner only plans for ENABLED discovery sources.
     additionalConflictCodes: ['INVALID_STATE', 'NO_ENABLED_DISCOVERY_SOURCE', 'NO_RUNNABLE_QUERIES'],
   })
+  @ApiBody({ type: GenerateWithAttemptDto, required: false })
   @ApiModelUpstreamUnusable()
   @ApiEnvelope(QueryPlanDto, { status: 201 })
   async generateQueryPlan(
     @Ctx() ctx: RequestContext,
     @Param('icpId', ParseUUIDPipe) icpId: string,
+    @Body() dto?: GenerateWithAttemptDto,
     @ExecutionBudgetGrant() compactJws?: string,
   ): Promise<Enveloped<QueryPlanDto>> {
     return envelope(
       QueryPlanDto.from(
         await asExecutionBudgetHttpBoundary(() =>
           asModelUpstreamHttpBoundary(() =>
-            this.icps.generateQueryPlan(ctx, icpId, compactJws),
+            this.icps.generateQueryPlan(ctx, icpId, compactJws, dto?.attemptId),
           ),
         ),
       ),

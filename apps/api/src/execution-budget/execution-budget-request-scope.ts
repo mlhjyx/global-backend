@@ -20,14 +20,20 @@ export type WorkspaceExecutionBudgetRequest =
   | Readonly<{
       operation: 'POST /companies/:companyId/icps';
       companyId: string;
+      /** 「重新生成」的幂等键；缺省时请求哈希与旧版一致（旧 Grant 语义不变）。 */
+      body?: Readonly<{ attemptId: string }>;
     }>
   | Readonly<{
       operation: 'POST /icps/:icpId/query-plans';
       icpId: string;
+      /** 「重新生成」的幂等键；缺省时请求哈希与旧版一致（旧 Grant 语义不变）。 */
+      body?: Readonly<{ attemptId: string }>;
     }>
   | Readonly<{
       operation: 'POST /query-plans/:planId/execute';
       planId: string;
+      /** 「重试」的幂等键；缺省时请求哈希与旧版一致（旧 Grant 语义不变）。 */
+      body?: Readonly<{ attemptId: string }>;
     }>
   | Readonly<{
       operation: 'POST /canonical-companies/:id/discover-contacts';
@@ -109,11 +115,24 @@ function requestMaterial(request: WorkspaceExecutionBudgetRequest): JsonValue {
     case 'POST /companies':
       return { operation: request.operation, body: request.body } as JsonValue;
     case 'POST /companies/:companyId/icps':
-      return { operation: request.operation, companyId: request.companyId };
+      return {
+        operation: request.operation,
+        companyId: request.companyId,
+        // 仅当客户端带 attemptId 时才进入哈希，保证旧请求的账户键不变。
+        ...(request.body === undefined ? {} : { body: request.body as JsonValue }),
+      };
     case 'POST /icps/:icpId/query-plans':
-      return { operation: request.operation, icpId: request.icpId };
+      return {
+        operation: request.operation,
+        icpId: request.icpId,
+        ...(request.body === undefined ? {} : { body: request.body as JsonValue }),
+      };
     case 'POST /query-plans/:planId/execute':
-      return { operation: request.operation, planId: request.planId };
+      return {
+        operation: request.operation,
+        planId: request.planId,
+        ...(request.body === undefined ? {} : { body: request.body as JsonValue }),
+      };
     case 'POST /canonical-companies/:id/discover-contacts':
       return {
         operation: request.operation,

@@ -299,6 +299,16 @@ class ExecuteQueryPlanDto {
   @ValidateNested()
   @Type(() => ExecuteTaskRefDto)
   taskRef?: ExecuteTaskRefDto;
+
+  @ApiPropertyOptional({
+    type: 'string',
+    format: 'uuid',
+    description:
+      'P1 attempt 维度：「重试」的幂等键；同一 attempt 重放被拒（GRANT_REUSED），新 attempt 放行。缺省时行为与旧版一致。',
+  })
+  @IsOptional()
+  @IsUUID()
+  attemptId?: string;
 }
 
 @ApiTags('Discovery')
@@ -334,7 +344,7 @@ export class DiscoveryController {
     @ExecutionBudgetGrant() compactJws?: string,
   ) {
     const run = await asExecutionBudgetHttpBoundary(() =>
-      this.discovery.executePlan(ctx, planId, compactJws, dto?.taskRef),
+      this.discovery.executePlan(ctx, planId, compactJws, dto?.taskRef, dto?.attemptId),
     );
     return envelope({ runId: run.id, status: run.status });
   }

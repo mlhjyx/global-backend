@@ -58,6 +58,20 @@ const cases = [
   },
   {
     request: {
+      operation: 'POST /companies/:companyId/icps',
+      companyId: COMPANY_ID,
+      body: { attemptId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
+    },
+    expected: {
+      purpose: 'icp.design',
+      subjectType: 'company',
+      subjectId: COMPANY_ID,
+      requestSha256:
+        '81d596bf8a472e3ec91439c96f07e285291284a5614d32108678241dc0fa9acb',
+    },
+  },
+  {
+    request: {
       operation: 'POST /icps/:icpId/query-plans',
       icpId: ICP_ID,
     },
@@ -67,6 +81,20 @@ const cases = [
       subjectId: ICP_ID,
       requestSha256:
         '258de2b957b0a75a2379fbc70bbb3b49cf1beb142357315159acb1549158b3b7',
+    },
+  },
+  {
+    request: {
+      operation: 'POST /icps/:icpId/query-plans',
+      icpId: ICP_ID,
+      body: { attemptId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' },
+    },
+    expected: {
+      purpose: 'icp.query_plan',
+      subjectType: 'icp',
+      subjectId: ICP_ID,
+      requestSha256:
+        '07ccd26d081c04933361aaf8a9349dede4e20cc54bb3b15daa213b9ea8fb9385',
     },
   },
   {
@@ -81,6 +109,21 @@ const cases = [
         'request:3358f06f16eb5fc6a1afe5aa048fe3fba46aaef9f06b04c5d943abde8574754b',
       requestSha256:
         '3358f06f16eb5fc6a1afe5aa048fe3fba46aaef9f06b04c5d943abde8574754b',
+    },
+  },
+  {
+    request: {
+      operation: 'POST /query-plans/:planId/execute',
+      planId: PLAN_ID,
+      body: { attemptId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' },
+    },
+    expected: {
+      purpose: 'discovery.run',
+      subjectType: 'discovery_run',
+      subjectId:
+        'request:34c02d1307a14f659414c3a7dacf6ccd4b47385b6a918a464d3d16ac515e84ae',
+      requestSha256:
+        '34c02d1307a14f659414c3a7dacf6ccd4b47385b6a918a464d3d16ac515e84ae',
     },
   },
   {
@@ -194,7 +237,9 @@ describe('workspaceExecutionBudgetRequestScope', () => {
         operation: 'POST /contact-points/:pointId/verify',
         pointId: POINT_ID,
       }),
-    ).toEqual(cases[8]!.expected);
+    ).toEqual(
+      cases.find((c) => c.request.operation === 'POST /contact-points/:pointId/verify')!.expected,
+    );
 
     expect(() =>
       workspaceExecutionBudgetRequestScope({
@@ -207,14 +252,24 @@ describe('workspaceExecutionBudgetRequestScope', () => {
 
   it('hashes Discover Contacts from attemptId while preserving the legacy hash when absent', () => {
     expect(discoverContactsExecutionBudgetRequestScope(CANONICAL_COMPANY_ID)).toEqual(
-      cases[5]!.expected,
+      cases.find(
+        (c) =>
+          c.request.operation === 'POST /canonical-companies/:id/discover-contacts' &&
+          !('body' in c.request),
+      )!.expected,
     );
 
     expect(
       discoverContactsExecutionBudgetRequestScope(CANONICAL_COMPANY_ID, {
         attemptId: '7e6f6f43-8f8d-4c2a-9b1e-2a3b4c5d6e7f',
       }),
-    ).toEqual(cases[6]!.expected);
+    ).toEqual(
+      cases.find(
+        (c) =>
+          c.request.operation === 'POST /canonical-companies/:id/discover-contacts' &&
+          'body' in c.request,
+      )!.expected,
+    );
   });
 
   it('hashes Guess Emails from the exact public HTTP DTO before lawful-basis reshaping', () => {
