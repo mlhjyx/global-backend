@@ -24,6 +24,7 @@ describe("closed runtime workload composition", () => {
   it("does not expose platform handlers to customer workers or customer handlers to platform workers", () => {
     expect(Object.keys(platformWorkflows).sort()).toEqual([
       "acquisitionSweepWorkflow",
+      "channelCrawlWorkflow",
       "intentSweepWorkflow",
       "patentsCacheRefreshWorkflow",
       "sanctionsRefreshWorkflow",

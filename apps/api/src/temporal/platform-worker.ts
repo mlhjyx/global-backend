@@ -40,6 +40,9 @@ import { PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1 } from "../platform-authority/
 import { PlatformExecutionTechnicalQuoteService } from "../platform-authority/platform-execution-technical-quote";
 import { PlatformGrantClient } from "./platform-grant.client";
 import { PlatformGrantAdmission } from "./platform-grant-admission";
+import { PlatformCrawlGrantClient } from "./platform-crawl-grant.client";
+import { createChannelCrawlActivities } from "./channel-crawl.activities";
+import { recordChannelRunInTransaction } from "../channels/channel-run-recorder";
 import {
   buildToolBroker,
   sourcePolicyReaderFrom,
@@ -250,6 +253,22 @@ async function main(): Promise<void> {
         budgetStore,
         platformWriter: writer,
         platformEgressFence,
+      }),
+      ...createChannelCrawlActivities({
+        prisma,
+        recordRun: (input) =>
+          prisma.$transaction((tx) =>
+            recordChannelRunInTransaction(tx as never, input),
+          ),
+        grantClient: new PlatformCrawlGrantClient(process.env),
+        ingestion: new PlatformExecutionBudgetAuthorityIngestionService(
+          new ExecutionBudgetGrantVerifier(process.env),
+          repository,
+        ),
+        budgetStore,
+        fence: platformEgressFence,
+        fetchPage: (url, context) =>
+          new Crawl4aiPageFetcher(broker).fetch(url, context),
       }),
     },
   });

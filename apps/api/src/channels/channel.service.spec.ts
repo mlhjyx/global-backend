@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChannelService } from './channel.service';
+import { channelCrawlRequestSha256 } from '../temporal/platform-crawl-grant.client';
+import { PLATFORM_CHANNEL_CRAWL_ENVELOPE_SHA256 } from '../platform-authority/platform-authority-policy-asset';
 
 const WORKSPACE_ID = '11111111-1111-4111-8111-111111111111';
 const USER_ID = '22222222-2222-4222-8222-222222222222';
@@ -11,13 +13,16 @@ const CRAWL_CONFIG = {
   detail: { enabled: true, fields: { name: 'h1' } },
 };
 
-function makeService(state: {
-  channel?: Record<string, unknown> | null;
-  suppression?: Array<{ type: string; value: string }>;
-  canonical?: (dedupeKey: string) => { id: string } | null;
-  existingStreak?: number;
-  existingStatus?: string;
-} = {}) {
+function makeService(
+  state: {
+    channel?: Record<string, unknown> | null;
+    suppression?: Array<{ type: string; value: string }>;
+    canonical?: (dedupeKey: string) => { id: string } | null;
+    existingStreak?: number;
+    existingStatus?: string;
+  } = {},
+  options: { platformTemporal?: unknown } = {},
+) {
   const writes = {
     channels: [] as Array<{ op: string; data: Record<string, unknown> }>,
     runs: [] as Array<Record<string, unknown>>,
@@ -87,8 +92,13 @@ function makeService(state: {
   };
   const prisma = {
     withWorkspace: async <T>(_ws: string, fn: (client: typeof tx) => Promise<T>): Promise<T> => fn(tx),
+    $transaction: async <T>(fn: (client: typeof tx) => Promise<T>): Promise<T> => fn(tx),
   };
-  return { service: new ChannelService(prisma as never), writes, tx };
+  return {
+    service: new ChannelService(prisma as never, options.platformTemporal as never),
+    writes,
+    tx,
+  };
 }
 
 const SAMPLE = 'company,website,country\nAcme,https://acme.de,DE\nAcme Duplicate,https://acme.de,DE\nBlocked GmbH,https://blocked.de,DE';
@@ -134,11 +144,11 @@ describe('M1 渠道服务：治理闸门', () => {
     });
   });
 
-  it('fail-closes crawl execution until the platform crawl authority exists', async () => {
+  it('fails closed with 503 when the platform workflow starter is not wired', async () => {
     const { service } = makeService({ channel: { id: CHANNEL_ID, mode: 'crawl', status: 'ENABLED' } });
     await expect(service.requestCrawl(CTX, CHANNEL_ID, 'preview')).rejects.toMatchObject({
-      status: 409,
-      response: { error: { code: 'CHANNEL_CRAWL_REQUIRES_PLATFORM_AUTHORITY' } },
+      status: 503,
+      response: { error: { code: 'PLATFORM_TEMPORAL_UNAVAILABLE' } },
     });
   });
 });
@@ -214,5 +224,60 @@ describe('M1 渠道运行统计与自动停用', () => {
     });
     expect(result).toMatchObject({ autoDisabled: false, failureStreak: 0 });
     expect(writes.channels.at(-1)).toMatchObject({ op: 'update', data: { failureStreak: 0 } });
+  });
+});
+
+describe('渠道抓取启动（P4-P4c）', () => {
+  it('starts channelCrawlWorkflow with the canonical request binding for a run', async () => {
+    const startWorkflow = vi.fn(async () => ({ workflowId: 'channel-crawl-x', runId: 'run-1' }));
+    const { service } = makeService(
+      { channel: { id: CHANNEL_ID, mode: 'crawl', status: 'ENABLED' } },
+      { platformTemporal: { startWorkflow } },
+    );
+    const result = await service.requestCrawl(CTX, CHANNEL_ID, 'run');
+    expect(result).toMatchObject({
+      mode: 'run',
+      pageCap: 50,
+      accepted: true,
+      workflowId: 'channel-crawl-x',
+    });
+    const options = startWorkflow.mock.calls[0]![0] as {
+      workflowType: string;
+      workflowId: string;
+      args: [Record<string, unknown>];
+    };
+    expect(options.workflowType).toBe('channelCrawlWorkflow');
+    expect(options.workflowId).toBe(`channel-crawl-${result.crawlRunId}`);
+    expect(options.args[0]).toMatchObject({
+      executionContractVersion: 1,
+      channelId: CHANNEL_ID,
+      mode: 'run',
+      pageCap: 50,
+      technicalPolicyRevision: PLATFORM_CHANNEL_CRAWL_ENVELOPE_SHA256,
+    });
+    expect(options.args[0]!.requestSha256).toBe(
+      channelCrawlRequestSha256(CHANNEL_ID, 'run', '50'),
+    );
+  });
+
+  it('preview requests exactly one page and maps start failures to 503', async () => {
+    const startWorkflow = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('PLATFORM_TEMPORAL_UNAVAILABLE'))
+      .mockResolvedValueOnce({ workflowId: 'wf', runId: 'run' });
+    const { service } = makeService(
+      { channel: { id: CHANNEL_ID, mode: 'crawl', status: 'ENABLED' } },
+      { platformTemporal: { startWorkflow } },
+    );
+    await expect(service.requestCrawl(CTX, CHANNEL_ID, 'preview')).rejects.toMatchObject({
+      status: 503,
+      response: { error: { code: 'PLATFORM_TEMPORAL_UNAVAILABLE' } },
+    });
+    const result = await service.requestCrawl(CTX, CHANNEL_ID, 'preview');
+    expect(result).toMatchObject({ mode: 'preview', pageCap: 1 });
+    expect((startWorkflow.mock.calls[1]![0] as { args: [Record<string, unknown>] }).args[0]).toMatchObject({
+      mode: 'preview',
+      pageCap: 1,
+    });
   });
 });

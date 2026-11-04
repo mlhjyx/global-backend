@@ -10,7 +10,7 @@ import {
   parseChannelConfig,
 } from "../channels/channel-config";
 import { crawlChannel, type CrawlPageFetcher } from "../channels/channel-crawler";
-import type { ChannelService } from "../channels/channel.service";
+import { recordChannelRunInTransaction, type RecordChannelRunInput } from "../channels/channel-run-recorder";
 import {
   PlatformCrawlGrantClient,
   type PlatformCrawlGrantClientError,
@@ -53,7 +53,8 @@ function startOfUtcDay(now: number): Date {
  */
 export function createChannelCrawlActivities(deps: {
   prisma: PrismaService;
-  channelService: ChannelService;
+  /** 平台上下文的运行落账（worker 内以 prisma 事务实现，无租户 RLS）。 */
+  recordRun: (input: RecordChannelRunInput) => Promise<{ runId: string; autoDisabled: boolean }>;
   grantClient: PlatformCrawlGrantClient;
   ingestion: PlatformExecutionBudgetAuthorityIngestionService;
   budgetStore: BudgetStore;
@@ -200,9 +201,8 @@ export function createChannelCrawlActivities(deps: {
     }): Promise<{ runId: string; autoDisabled: boolean }> {
       assertChannelCrawlWorkflowInput(args.input);
       const outcome = args.outcome;
-      const recorded = await deps.channelService.recordChannelRun({
+      const recorded = await deps.recordRun({
         channelId: args.input.channelId,
-        platform: true,
         status: outcome.status,
         pagesFetched: outcome.pagesFetched,
         recordsFound: outcome.recordsFound,
