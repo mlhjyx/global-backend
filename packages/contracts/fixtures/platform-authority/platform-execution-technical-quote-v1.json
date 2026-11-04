@@ -33,7 +33,7 @@
       },
       "expected_quote": {
         "schema_version": "platform-execution-technical-quote/v1",
-        "quote_id": "0ea71bcc-d7bb-5ed1-9517-b37a054ef974",
+        "quote_id": "7e42cc79-39c5-507b-8751-0a7e6ca037ba",
         "issued_at": "1788472800",
         "expires_at": "1788473100",
         "purpose": "platform.acquisition",
@@ -46,9 +46,9 @@
         "required_cap_per_run_microusd": "1",
         "required_max_runs": "1",
         "required_campaign_cap_microusd": "1",
-        "policy_revision": "09433cbfa171be7944481cb91f261e64e5631955233a9a1936ac2a82a1a02c11",
+        "policy_revision": "786593a73cd8f41b627322d8281dc0396c48646e30c1e8ec6bbfb7939c9ebc4c",
         "policy_artifact_id": "platform-authority-policy-matrix/2026-11-05-reviewed-v3",
-        "policy_artifact_sha256": "84e6a8a1121024dc4232b0eaf16cb84af18626e604db1f01881a9d6af2262fab",
+        "policy_artifact_sha256": "f521671e2c4058025b99b9a6e646a1534645a35b6191288516583704cfa2dbd4",
         "policy_matrix_revision": "reviewed-v3",
         "request_contract_version": "platform-schedule-authority-v1",
         "execution_envelope_schema_version": "platform-execution-envelope/v1",
@@ -76,7 +76,7 @@
         "maximum_fallback_wires": "0",
         "maximum_input_tokens": "0",
         "maximum_output_tokens": "0",
-        "quote_sha256": "671c3132c1efaeeac88a2dbe0e044a16637f95134039ae86d0382e0580622282"
+        "quote_sha256": "65263feeea7650ac89d5854c5c89b613ffa696c70d2692c42ccf42c19c9b8d99"
       }
     },
     {
@@ -104,7 +104,7 @@
       },
       "expected_quote": {
         "schema_version": "platform-execution-technical-quote/v1",
-        "quote_id": "403ac12b-d128-575a-b445-42351e19d8a2",
+        "quote_id": "f48e112d-9903-5905-999b-01852970c5a8",
         "issued_at": "1788472800",
         "expires_at": "1788473100",
         "purpose": "platform.acquisition",
@@ -117,9 +117,9 @@
         "required_cap_per_run_microusd": "1",
         "required_max_runs": "1",
         "required_campaign_cap_microusd": "1",
-        "policy_revision": "feceaadf73cd019c0a0f79bc71ee8644240f311b48757735f1a348dd3936b34e",
+        "policy_revision": "dc47f5bba227efbb4c22ffd312fd88a97a1cd19b5bb2209544846613afd6dd16",
         "policy_artifact_id": "platform-authority-policy-matrix/2026-11-05-reviewed-v3",
-        "policy_artifact_sha256": "84e6a8a1121024dc4232b0eaf16cb84af18626e604db1f01881a9d6af2262fab",
+        "policy_artifact_sha256": "f521671e2c4058025b99b9a6e646a1534645a35b6191288516583704cfa2dbd4",
         "policy_matrix_revision": "reviewed-v3",
         "request_contract_version": "platform-schedule-authority-v1",
         "execution_envelope_schema_version": "platform-execution-envelope/v1",
@@ -147,7 +147,7 @@
         "maximum_fallback_wires": "0",
         "maximum_input_tokens": "0",
         "maximum_output_tokens": "0",
-        "quote_sha256": "04c8c674d24cb1259cb2fba8a64aa36a97915f04aacedd56da5030eb243ec414"
+        "quote_sha256": "eb66d3159cca39714245e982a10f878c54ca75249c9583979fc24daffaf77ff8"
       }
     },
     {
@@ -175,7 +175,7 @@
       },
       "expected_quote": {
         "schema_version": "platform-execution-technical-quote/v1",
-        "quote_id": "bdb8d584-6000-5d11-b9c5-8c1a7081f74d",
+        "quote_id": "32c5b824-a1c5-5d10-9293-99c7a5f2309b",
         "issued_at": "1788472800",
         "expires_at": "1788473100",
         "purpose": "platform.intent_watch",
@@ -188,9 +188,9 @@
         "required_cap_per_run_microusd": "10000000",
         "required_max_runs": "1",
         "required_campaign_cap_microusd": "10000000",
-        "policy_revision": "6d18694bfd4eae335ce8e39d1d06e291d38a681705bc23d06778d1f0c12c3b59",
+        "policy_revision": "f33e8986178dd613ddd5b998c2769aebdd4ac67f5fb97de90ad547dd5e62d3b8",
         "policy_artifact_id": "platform-authority-policy-matrix/2026-11-05-reviewed-v3",
-        "policy_artifact_sha256": "84e6a8a1121024dc4232b0eaf16cb84af18626e604db1f01881a9d6af2262fab",
+        "policy_artifact_sha256": "f521671e2c4058025b99b9a6e646a1534645a35b6191288516583704cfa2dbd4",
         "policy_matrix_revision": "reviewed-v3",
         "request_contract_version": "platform-schedule-authority-v1",
         "execution_envelope_schema_version": "platform-execution-envelope/v1",
@@ -218,7 +218,7 @@
         "maximum_fallback_wires": "0",
         "maximum_input_tokens": "0",
         "maximum_output_tokens": "0",
-        "quote_sha256": "c5dd44bce14a8800212ffc2b933220ae82d3e8d864cd14e698a751fa6645c638"
+        "quote_sha256": "164d4d0a261951c5c76e23a7fcc9920acd849209bc53ec00d0828cd28eb8772d"
       }
     },
     {
@@ -252,7 +252,7 @@
       },
       "expected_quote": {
         "schema_version": "platform-execution-technical-quote/v1",
-        "quote_id": "892976f9-269d-56bf-8fc5-1c3c7ef2cd2e",
+        "quote_id": "909d1acf-5219-5ffe-adef-bb336c794bcf",
         "issued_at": "1788472800",
         "expires_at": "1788473100",
         "purpose": "platform.sanctions",
@@ -265,9 +265,9 @@
         "required_cap_per_run_microusd": "1",
         "required_max_runs": "1",
         "required_campaign_cap_microusd": "1",
-        "policy_revision": "6ab42d3069811aad1fae33c230c5af82c692911683a98cbbbf5e50408cfe7eea",
+        "policy_revision": "985d9947f991413db04492737aae777088873a2aea468b875f14312e9f68bff8",
         "policy_artifact_id": "platform-authority-policy-matrix/2026-11-05-reviewed-v3",
-        "policy_artifact_sha256": "84e6a8a1121024dc4232b0eaf16cb84af18626e604db1f01881a9d6af2262fab",
+        "policy_artifact_sha256": "f521671e2c4058025b99b9a6e646a1534645a35b6191288516583704cfa2dbd4",
         "policy_matrix_revision": "reviewed-v3",
         "request_contract_version": "platform-schedule-authority-v1",
         "execution_envelope_schema_version": "platform-execution-envelope/v1",
@@ -295,7 +295,7 @@
         "maximum_fallback_wires": "0",
         "maximum_input_tokens": "0",
         "maximum_output_tokens": "0",
-        "quote_sha256": "1872fe740e1ce3a7f71afeecf9901cedc50f95f0b0256ad8026c01a34a0e2385"
+        "quote_sha256": "bc9f0b8b6035f4445592bb0c6db468bbd67aeca818add08a13977ec30f301e84"
       }
     }
   ]

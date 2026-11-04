@@ -47,9 +47,9 @@ describe("backend-reviewed platform authority policy successor v3", () => {
       PLATFORM_AUTHORITY_POLICY_ARTIFACT_SHA256,
     );
     expect(loaded).toMatchObject({
-      byteLength: 15_996,
+      byteLength: 15996,
       sha256:
-        "84e6a8a1121024dc4232b0eaf16cb84af18626e604db1f01881a9d6af2262fab",
+        "f521671e2c4058025b99b9a6e646a1534645a35b6191288516583704cfa2dbd4",
       policy: {
         schema_version: "platform-authority-policy-matrix/v3",
         artifact_id:
@@ -124,7 +124,7 @@ describe("backend-reviewed platform authority policy successor v3", () => {
           "apps/api/src/platform-authority/platform-authority-policy-matrix-v3.json",
         byte_length: 15_996,
         sha256:
-          "84e6a8a1121024dc4232b0eaf16cb84af18626e604db1f01881a9d6af2262fab",
+          "f521671e2c4058025b99b9a6e646a1534645a35b6191288516583704cfa2dbd4",
       },
       predecessor: {
         materialized_path:

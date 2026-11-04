@@ -3,9 +3,9 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { types } from "node:util";
 
-export const PLATFORM_AUTHORITY_POLICY_ARTIFACT_BYTES = 15_996 as const;
+export const PLATFORM_AUTHORITY_POLICY_ARTIFACT_BYTES = 15996 as const;
 export const PLATFORM_AUTHORITY_POLICY_ARTIFACT_SHA256 =
-  "84e6a8a1121024dc4232b0eaf16cb84af18626e604db1f01881a9d6af2262fab" as const;
+  "f521671e2c4058025b99b9a6e646a1534645a35b6191288516583704cfa2dbd4" as const;
 export const PLATFORM_AUTHORITY_POLICY_ARTIFACT_ID =
   "platform-authority-policy-matrix/2026-11-05-reviewed-v3" as const;
 export const PLATFORM_AUTHORITY_POLICY_MATRIX_REVISION = "reviewed-v3" as const;
