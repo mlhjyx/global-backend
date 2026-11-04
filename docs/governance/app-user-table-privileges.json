@@ -343,7 +343,9 @@
       "INSERT",
       "SELECT"
     ],
+    "platform_channel_crawl_egress_attempt": [],
     "platform_egress_attempt": [],
+    "platform_egress_capability_fence": [],
     "platform_egress_fence_reopen_receipt": [],
     "platform_egress_schedule_fence": [],
     "platform_fence_ack_delivery": [],
@@ -553,9 +555,7 @@
       "INSERT",
       "SELECT",
       "UPDATE"
-    ],
-    "platform_channel_crawl_egress_attempt": [],
-    "platform_egress_capability_fence": []
+    ]
   },
   "columns": {}
 }
