@@ -46,7 +46,7 @@ import {
 } from '../execution-budget/execution-budget-authority.service';
 import { workspaceExecutionBudgetRequestScope } from '../execution-budget/execution-budget-request-scope';
 import { COUNTRY_NAME_BY_ISO } from '../discovery/vocab';
-import { targetCountryCodes } from '../discovery/search-localization';
+import { partitionSearchTerms, targetCountryCodes } from '../discovery/search-localization';
 import { IcpFeedbackService } from './icp-feedback.service';
 import {
   applyDomainAckConsumerTransaction,
@@ -153,6 +153,23 @@ function plannerKeywordLanguage(targetMarkets: unknown, companyAttributes: unkno
     : `keywords 必须全部用${names[0] ?? '目标市场的当地语言'}书写`;
   const fallback = names.length ? '' : '无法确定时用英语。';
   return `keywords 会直接交给目标市场的搜索引擎。${rule}，使用当地行业的常用说法与同义词，不得出现中文。${fallback}filters 里的 industry、country 仍可用中文，供规范词表映射。`;
+}
+
+/** P2 §2.3：关键词存在却全部不能用于目标语言的检索 → 规划器语言不符（触发一次重写）。 */
+function plannerKeywordsMismatch(
+  queries: readonly { keywords?: readonly string[]; filters?: Record<string, unknown> }[],
+  fallbackLanguage: SearchLanguage | undefined,
+): boolean {
+  return queries.some((query) => {
+    const keywords = (query.keywords ?? []).filter(
+      (keyword): keyword is string => typeof keyword === 'string' && keyword.trim().length > 0,
+    );
+    if (keywords.length === 0) return false;
+    const byCountry = searchLanguagesForMarkets((query.filters ?? {}).country)[0];
+    const language = (byCountry ?? fallbackLanguage) as SearchLanguage | undefined;
+    if (!language) return false;
+    return partitionSearchTerms(keywords, language).usable.length === 0;
+  });
 }
 
 @Injectable()
@@ -637,7 +654,7 @@ export class IcpService {
       ? await this.feedback.plannerNote(ctx, icpId).catch(() => null)
       : null;
     const queryPlanPrompt = `ICP 定义：\n${JSON.stringify(icpBrief, null, 2)}\n\n请生成多源查询计划，输出中文 rationale。\n${plannerSourcePrompt(plannerSources)}\n${plannerKeywordLanguage(icp.targetMarkets, icp.companyAttributes)}${feedbackNote ? `\n\n${feedbackNote}` : ''}`;
-    const result = await executeIcpBudgetedTask<QueryPlanModelOutput>({
+    const runPlanner = (prompt: string) => executeIcpBudgetedTask<QueryPlanModelOutput>({
       budgetStore: this.budgetStore ?? new UnavailableBudgetStore('ICP query-plan generation requires an authoritative BudgetStore'),
       binding,
       durableResultSchema: 'icp-query-plan/v1',
@@ -645,7 +662,7 @@ export class IcpService {
         this.gateway,
         {
           task: contract.id,
-          prompt: queryPlanPrompt,
+          prompt,
           system: contract.description,
           model: contract.model,
           schema: contract.outputSchema,
@@ -654,15 +671,42 @@ export class IcpService {
         { telemetry: this.runtimeTelemetry },
       ),
     });
-    const out = result.data;
+    const marketList = (value: unknown): unknown[] => (Array.isArray(value) ? value : value == null ? [] : [value]);
+    const primaryLanguage = searchLanguagesForMarkets([
+      ...marketList(icp.targetMarkets),
+      ...marketList((icp.companyAttributes as { country?: unknown } | null)?.country),
+    ])[0] as SearchLanguage | undefined;
+    const routePlanned = (modelOut: QueryPlanModelOutput) => routePlannerQueries(
+      (modelOut.queries ?? []) as QueryPlanModelOutput['queries'],
+      {
+        enabled: enabledSources,
+        registered: this.providers.companyDiscoverySources(),
+      },
+    );
 
-    // BI-30：只保留路由得到已启用数据源的查询，每条写明唯一的源（filters.source_hint = 源键）；
-    // 不可执行的查询按原因计数，记在首条规划查询的 rationale 里（与冷路径 warning 同处），人工门可见。
+    let result = await runPlanner(queryPlanPrompt);
+    let out = result.data;
+    // BI-30：只保留路由得到已启用数据源的查询，每条写明唯一的源（filters.source_hint = 源键）。
+    let routing = routePlanned(out);
+    // P2 §2.3：关键词语言校验——关键词存在却全部不能用于目标市场语言时，重写一次；
+    // 仍不符则显性失败（不再静默产出一份「检索必然全空」的计划）。
+    if (plannerKeywordsMismatch(routing.queries, primaryLanguage)) {
+      const languageName = primaryLanguage ? PLANNER_LANGUAGE_NAMES[primaryLanguage] : undefined;
+      result = await runPlanner(
+        `${queryPlanPrompt}\n\n上一次输出的 keywords 语言与目标市场不符：所有 keywords 必须用${languageName ?? '目标市场语言'}书写（不得出现中文）。请重写整个查询计划。`,
+      );
+      out = result.data;
+      routing = routePlanned(out);
+      if (plannerKeywordsMismatch(routing.queries, primaryLanguage)) {
+        throw new ConflictException({
+          error: {
+            code: 'DISCOVERY_KEYWORDS_LANGUAGE_MISMATCH',
+            message: `planner keywords do not match the target market language${languageName ? ` (${languageName})` : ''}; adjust the target markets or keywords and retry`,
+          },
+        });
+      }
+    }
     const modelQueries = (out.queries ?? []) as QueryPlanModelOutput['queries'];
-    const routing = routePlannerQueries(modelQueries, {
-      enabled: enabledSources,
-      registered: this.providers.companyDiscoverySources(),
-    });
     // 血缘闸门：已启用却没有受治理血缘的冷路径源（TED/openFDA）不注入，也按 SOURCE_LINEAGE_UNAVAILABLE 记进移出说明。
     const dropped = countLineageGatedColdPaths(routing.dropped, enabledSources, [
       TED_QUERY_SOURCE,
