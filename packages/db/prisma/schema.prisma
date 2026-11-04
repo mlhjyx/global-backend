@@ -1601,6 +1601,7 @@ model SourceChannelRun {
   pagesFetched       Int       @default(0) @map("pages_fetched")
   recordsFound       Int       @default(0) @map("records_found")
   recordsMaterialized Int      @default(0) @map("records_materialized")
+  truncated   Boolean  @default(false)
   failures           Int       @default(0)
   errorCode          String?   @map("error_code") @db.VarChar(64)
   startedAt          DateTime  @default(now()) @map("started_at") @db.Timestamptz(3)

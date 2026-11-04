@@ -5,6 +5,20 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { ServiceUnavailableException } from '@nestjs/common';
+import { Optional } from '@nestjs/common';
+import type { PlatformTemporalClient } from '../temporal/platform-temporal.client';
+import { channelCrawlRequestSha256 } from '../temporal/platform-crawl-grant.client';
+import {
+  CHANNEL_RUN_MAX_PAGES,
+} from './channel-config';
+import { PLATFORM_CHANNEL_CRAWL_ENVELOPE_SHA256 } from '../platform-authority/platform-authority-policy-asset';
+import {
+  CHANNEL_CRAWL_CONTRACT_VERSION,
+  CHANNEL_CRAWL_WORKFLOW_TYPE,
+  type ChannelCrawlWorkflowInput,
+} from '../temporal/platform-channel-crawl';
+import { recordChannelRunInTransaction } from './channel-run-recorder';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
 import { companyIdentity } from '../discovery/identity';
@@ -77,7 +91,12 @@ function channelView(row: ChannelRow & { runs?: Array<Record<string, unknown>> }
  */
 @Injectable()
 export class ChannelService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    /** P4-P4c：平台抓取运行的启动器（TemporalModule 全局提供；单测缺省）。 */
+    @Optional()
+    private readonly platformTemporal?: PlatformTemporalClient,
+  ) {}
 
   async listChannels(ctx: RequestContext) {
     const rows = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
@@ -96,6 +115,7 @@ export class ChannelService {
           recordsFound: run.recordsFound,
           recordsMaterialized: run.recordsMaterialized,
           failures: run.failures,
+          truncated: run.truncated,
           errorCode: run.errorCode,
           startedAt: run.startedAt.toISOString(),
           finishedAt: run.finishedAt?.toISOString() ?? null,
@@ -458,71 +478,126 @@ export class ChannelService {
   /** 渠道运行收尾：落 source_channel_run，失败率 >30% 记 streak，连续 3 轮自动停用。 */
   async recordChannelRun(input: {
     channelId: string;
-    workspaceId: string;
+    workspaceId?: string;
+    platform?: boolean;
     status: 'SUCCEEDED' | 'FAILED';
     pagesFetched: number;
     recordsFound: number;
     recordsMaterialized: number;
     failures: number;
+    truncated?: boolean;
     errorCode?: string;
   }) {
-    return this.prisma.withWorkspace(input.workspaceId, async (tx) => {
-      const run = await tx.sourceChannelRun.create({
-        data: {
-          channelId: input.channelId,
-          triggeredByWorkspaceId: input.workspaceId,
-          status: input.status,
-          pagesFetched: input.pagesFetched,
-          recordsFound: input.recordsFound,
-          recordsMaterialized: input.recordsMaterialized,
-          failures: input.failures,
-          ...(input.errorCode ? { errorCode: input.errorCode } : {}),
-          finishedAt: new Date(),
+    const body = (tx: Parameters<typeof recordChannelRunInTransaction>[0]) =>
+      recordChannelRunInTransaction(tx, {
+        channelId: input.channelId,
+        ...(input.platform ? {} : { triggeredByWorkspaceId: input.workspaceId }),
+        status: input.status,
+        pagesFetched: input.pagesFetched,
+        recordsFound: input.recordsFound,
+        recordsMaterialized: input.recordsMaterialized,
+        failures: input.failures,
+        ...(input.truncated === undefined ? {} : { truncated: input.truncated }),
+        ...(input.errorCode ? { errorCode: input.errorCode } : {}),
+      });
+    if (input.platform) {
+      return this.prisma.$transaction(body as never) as unknown as Promise<{
+        runId: string;
+        autoDisabled: boolean;
+        failureStreak: number;
+      }>;
+    }
+    if (!input.workspaceId) {
+      throw new ServiceUnavailableException({
+        error: {
+          code: 'CHANNEL_RUN_CONTEXT_MISSING',
+          message: 'recordChannelRun requires a workspace or platform context',
         },
       });
-      const channel = await tx.sourceChannel.findUnique({
-        where: { id: input.channelId },
-        select: { failureStreak: true, status: true },
-      });
-      if (!channel) return { runId: run.id, autoDisabled: false };
-      const failureRate = input.pagesFetched > 0 ? input.failures / input.pagesFetched : input.failures > 0 ? 1 : 0;
-      const badRound = input.status === 'FAILED' || failureRate > 0.3;
-      const streak = badRound ? channel.failureStreak + 1 : 0;
-      const autoDisabled = badRound && streak >= 3 && channel.status === 'ENABLED';
-      await tx.sourceChannel.update({
-        where: { id: input.channelId },
-        data: {
-          lastRunAt: new Date(),
-          failureStreak: streak,
-          ...(autoDisabled ? { status: 'AUTO_DISABLED' } : {}),
-        },
-      });
-      return { runId: run.id, autoDisabled, failureStreak: streak };
-    });
+    }
+    return this.prisma.withWorkspace(input.workspaceId, body as never) as Promise<{
+      runId: string;
+      autoDisabled: boolean;
+      failureStreak: number;
+    }>;
   }
 
   /**
-   * 抓取通道的试跑/运行入口。抓取出网需要平台级抓取预算权威（新 `channel.crawl` purpose
-   * 或平台自动化窗口），在获批前 fail-closed 返回 409——绝不绕过 ToolBroker 直连出网。
+   * 抓取通道的试跑/运行入口（P4-P4c）：校验渠道后启动 platform-automation 的
+   * channelCrawlWorkflow。Grant 的获取/摄入在平台 worker 内完成（那里持有
+   * worker mTLS 证书与 platform writer）；API 只负责发起并返回已受理的运行。
+   * 引擎缺平台客户端或端点不可用时 fail-closed（503），不再返回占位 409。
    */
-  async requestCrawl(ctx: RequestContext, channelId: string, _kind: 'preview' | 'run') {
-    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const channel = await tx.sourceChannel.findUnique({ where: { id: channelId }, select: { id: true, mode: true, status: true } });
-      if (!channel) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'channel not found' } });
-      if (channel.mode !== 'crawl') {
-        throw new ConflictException({ error: { code: 'CHANNEL_NOT_CRAWL', message: 'channel is not a crawl channel' } });
-      }
-      if (channel.status !== 'ENABLED') {
-        throw new ConflictException({ error: { code: 'CHANNEL_NOT_APPROVED', message: 'channel must be ENABLED before a trial run' } });
-      }
-      throw new ConflictException({
+  async requestCrawl(ctx: RequestContext, channelId: string, kind: 'preview' | 'run') {
+    const channel = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.sourceChannel.findUnique({
+        where: { id: channelId },
+        select: { id: true, mode: true, status: true },
+      }),
+    );
+    if (!channel) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'channel not found' } });
+    if (channel.mode !== 'crawl') {
+      throw new ConflictException({ error: { code: 'CHANNEL_NOT_CRAWL', message: 'channel is not a crawl channel' } });
+    }
+    if (channel.status !== 'ENABLED') {
+      throw new ConflictException({ error: { code: 'CHANNEL_NOT_APPROVED', message: 'channel must be ENABLED before a trial run' } });
+    }
+    if (!this.platformTemporal) {
+      throw new ServiceUnavailableException({
         error: {
-          code: 'CHANNEL_CRAWL_REQUIRES_PLATFORM_AUTHORITY',
-          message:
-            'crawl execution needs the platform crawl budget authority (channel.crawl purpose or platform automation); it is pending the product-owner decision — use an import channel meanwhile',
+          code: 'PLATFORM_TEMPORAL_UNAVAILABLE',
+          message: 'platform crawl execution is not wired in this process',
         },
       });
-    });
+    }
+    const cap = (process.env.CHANNEL_CRAWL_CAP_PER_RUN_MICROUSD ?? '5000000').trim();
+    if (!/^[1-9][0-9]*$/u.test(cap)) {
+      throw new ServiceUnavailableException({
+        error: {
+          code: 'CHANNEL_CRAWL_CAP_UNAVAILABLE',
+          message: 'channel crawl cap configuration is invalid',
+        },
+      });
+    }
+    const mode = kind === 'preview' ? 'preview' : 'run';
+    const pageCap = mode === 'preview' ? 1 : CHANNEL_RUN_MAX_PAGES;
+    const crawlRunId = randomUUID();
+    const input: ChannelCrawlWorkflowInput = {
+      executionContractVersion: CHANNEL_CRAWL_CONTRACT_VERSION,
+      channelId,
+      crawlRunId,
+      mode,
+      pageCap,
+      requestSha256: channelCrawlRequestSha256(channelId, mode, String(pageCap)),
+      technicalPolicyRevision: PLATFORM_CHANNEL_CRAWL_ENVELOPE_SHA256,
+      capPerRunMicrousd: cap,
+      campaignCapMicrousd: cap,
+    };
+    try {
+      const started = await this.platformTemporal.startWorkflow({
+        workflowType: CHANNEL_CRAWL_WORKFLOW_TYPE,
+        workflowId: `channel-crawl-${crawlRunId}`,
+        args: [input],
+      });
+      return {
+        crawlRunId,
+        workflowId: started.workflowId,
+        runId: started.runId,
+        mode,
+        pageCap,
+        accepted: true,
+      };
+    } catch (error) {
+      if (error instanceof Error && error.message === 'PLATFORM_TEMPORAL_UNAVAILABLE') {
+        throw new ServiceUnavailableException({
+          error: {
+            code: 'PLATFORM_TEMPORAL_UNAVAILABLE',
+            message: 'platform workflow start is unavailable',
+          },
+        });
+      }
+      throw error;
+    }
   }
 
   async listImportedBuyers(ctx: RequestContext, batchId: string) {

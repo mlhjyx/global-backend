@@ -4,6 +4,7 @@ import {
   type ExecutionBudgetPlatformAccountPersistenceResult,
 } from './execution-budget-authority.repository';
 import type {
+  PlatformChannelCrawlRunExpectation,
   PlatformExecutionBudgetRunExpectation,
   VerifiedExecutionBudgetAuthority,
 } from './execution-budget-authority.types';
@@ -29,6 +30,9 @@ function exactVerifiedPlatformAuthority(
     subjectId: authority.subjectId,
     requestSha256: authority.requestSha256,
     scheduleId: authority.scheduleId,
+    ...(authority.crawlRunId === undefined
+      ? {}
+      : { crawlRunId: authority.crawlRunId }),
     scheduleRequestSha256: authority.scheduleRequestSha256,
     workflowId: authority.workflowId,
     workflowRunId: authority.workflowRunId,
@@ -52,6 +56,20 @@ export class PlatformExecutionBudgetAuthorityIngestionService {
     private readonly verifier: ExecutionBudgetGrantVerifier,
     private readonly repository: ExecutionBudgetAuthorityRepository,
   ) {}
+
+  /** P4-P4c：channel-crawl Grant 的摄入与开户（与 schedule 摄入互不复用）。 */
+  async ingestChannelCrawlAndAdmit(input: {
+    readonly compactJws: string;
+    readonly expected: PlatformChannelCrawlRunExpectation;
+  }): Promise<Readonly<ExecutionBudgetPlatformAccountPersistenceResult>> {
+    const verified = exactVerifiedPlatformAuthority(
+      await this.verifier.verifyPlatform(input.compactJws),
+    );
+    return this.repository.ingestPlatformChannelCrawlAndAdmit(
+      verified,
+      input.expected,
+    );
+  }
 
   async ingestAndAdmit(
     input: PlatformExecutionBudgetAuthorityAdmissionInput,
