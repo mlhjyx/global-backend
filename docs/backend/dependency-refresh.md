@@ -24,7 +24,7 @@
 
 ```bash
 pnpm worktree:new deps-refresh-YYYYMMDD
-cd /global/backend/.codex/worktrees/deps-refresh-YYYYMMDD
+cd /global/backend/.claude/worktrees/deps-refresh-YYYYMMDD
 pnpm install --frozen-lockfile
 pnpm update -r                                   # 范围内的 minor / patch
 rm -rf node_modules apps/*/node_modules packages/*/node_modules

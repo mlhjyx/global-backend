@@ -45,7 +45,7 @@ docker-compose.yml   10 服务：PG/Redis/new-api/openox-video-compat/crawl4ai/M
 
 工具链：Node 22、pnpm 9.15.9（由 `package.json` 的 `packageManager` 锁定，`corepack enable` 即可）、Docker（xin 原生 dockerd，global 容器位于 `default` context；root 的 currentContext 指向空的 Docker Desktop，工作区工具固定使用 `DOCKER_CONTEXT=default`），与 CI 一致。
 
-功能施工遵循「一个任务一个 writer 一个 worktree」：Claude Code 使用 `/global/backend/.claude/worktrees/<topic>` 与 `claude/<topic>`，也可用 `pnpm worktree:new <topic>` 创建 `.codex/worktrees/<topic>` 与 `codex/<topic>`。新 worktree 没有被 gitignore 的 `.env`：本机用 `gctl link-env <worktree>` 链接根 checkout 的 `apps/api/.env` 与 `packages/db/.env`；全新克隆则从两处 `.env.example` 复制后修改。依赖装在 worktree 内：
+功能施工遵循「一个任务一个 writer 一个 worktree」：`pnpm worktree:new <topic>` 在 `/global/backend/.claude/worktrees/<topic>` 创建 `claude/<topic>`；`.codex/worktrees/` 只剩迁移前的在飞 worktree。新 worktree 没有被 gitignore 的 `.env`：本机用 `gctl link-env <worktree>` 链接根 checkout 的 `apps/api/.env` 与 `packages/db/.env`；全新克隆则从两处 `.env.example` 复制后修改。依赖装在 worktree 内：
 
 ```bash
 gctl link-env "$PWD"

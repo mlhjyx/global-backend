@@ -41,7 +41,7 @@ Before editing:
 - stop writes on overlapping ownership, an unexplained change to the intended write surface, a base mismatch, or reuse of unique commits whose owner is unknown; preserve unrelated dirty state and isolate the task rather than stopping independent read-only investigation;
 - preserve `main`, other worktrees, historical branches, user deletions and untracked files.
 
-One task has one writer and one isolated worktree. Claude Code may use `.claude/worktrees/<topic>` with `claude/<topic>`, or `.codex/worktrees/<topic>` with `codex/<topic>` created by `pnpm worktree:new`; both conventions are valid. Read-only audits may inspect other refs, but they do not edit, rebase, clean, delete, or reuse another task's worktree. Branch, worktree and PR state are transient and must never be copied from an old status note without live verification.
+One task has one writer and one isolated worktree. `pnpm worktree:new` creates `.claude/worktrees/<topic>` with `claude/<topic>`; `.codex/worktrees/<topic>` with `codex/<topic>` remains only for pre-2026-11-04 in-flight worktrees and receives no new ones. Read-only audits may inspect other refs, but they do not edit, rebase, clean, delete, or reuse another task's worktree. Branch, worktree and PR state are transient and must never be copied from an old status note without live verification.
 
 ## 3. Module map
 
@@ -111,12 +111,12 @@ pnpm --silent worktree:inventory
 TASK_SLUG=short-lowercase-topic
 pnpm worktree:new "$TASK_SLUG" --dry-run
 pnpm worktree:new "$TASK_SLUG"
-cd "/global/backend/.codex/worktrees/$TASK_SLUG"
+cd "/global/backend/.claude/worktrees/$TASK_SLUG"
 ```
 
 `worktree:inventory` emits one deterministic `git-worktree-inventory/v1` JSON document. Every entry includes its upstream state; `ahead`, `behind`, relationship and merge base relative to the locally available `origin/main`; typed dirty/untracked and last-commit observations; and explicit `owner`, `activeTask` and `pullRequest` provenance. This repository currently has no local ownership registry, so those three provenance fields must remain structured `UNKNOWN` rather than being inferred from a branch name. Missing paths and local Git failures remain typed `UNAVAILABLE`; a configured upstream whose local ref has disappeared is `GONE`. These states are evidence for review, never permission to prune.
 
-The commands above illustrate the `.codex/worktrees/` convention. `worktree:new` fetches `origin`, requires exactly one `main` worktree, rejects existing paths or branches, creates `codex/<topic>` from the then-current `origin/main`, and verifies the new worktree is clean. When an approved task specifies a fixed base, create from that exact commit instead and verify it before any edit:
+The commands above use the `.claude/worktrees/` convention. `worktree:new` fetches `origin`, requires exactly one `main` worktree, rejects existing paths or branches, creates `claude/<topic>` from the then-current `origin/main`, and verifies the new worktree is clean. When an approved task specifies a fixed base, create from that exact commit instead and verify it before any edit:
 
 ```bash
 git rev-parse HEAD

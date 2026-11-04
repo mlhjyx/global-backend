@@ -26,8 +26,8 @@ R4 冻结期间平台 schedule 保持暂停，`sanctionsRefreshWorkflow` 不运�
 在合入本命令之后的 main 上建一个 worktree（根 checkout 不装 `node_modules`），装依赖并链接 `.env`：
 
 ```bash
-cd /global/backend && node scripts/create-codex-worktree.mjs sanctions-refresh
-cd /global/backend/.codex/worktrees/sanctions-refresh
+cd /global/backend && pnpm worktree:new sanctions-refresh
+cd /global/backend/.claude/worktrees/sanctions-refresh
 gctl link-env "$PWD"
 pnpm install --frozen-lockfile --prefer-offline
 pnpm --filter @global/db generate

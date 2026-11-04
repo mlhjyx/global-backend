@@ -252,13 +252,13 @@ test("apply refuses a noncanonical invocation directory before any Git command",
 
   const result = await applyMainWorktreeSync({
     git: git.run,
-    invocationCwd: "/global/backend/.codex/worktrees/topic",
+    invocationCwd: "/global/backend/.claude/worktrees/topic",
     resolveRealpath: fakeRealpath,
   });
 
   assert.equal(result.state, "WRONG_CLI_CWD_HOLD");
   assert.equal(result.canApply, false);
-  assert.equal(result.invokedFrom, "/global/backend/.codex/worktrees/topic");
+  assert.equal(result.invokedFrom, "/global/backend/.claude/worktrees/topic");
   assert.deepEqual(git.calls, []);
 });
 

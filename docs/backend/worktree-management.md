@@ -9,22 +9,23 @@
 
 ```text
 /global/backend/                                  # 只承载 main
-/global/backend/.claude/worktrees/<topic>/        # Claude Code 正式开发 worktree
-/global/backend/.codex/worktrees/<topic>/         # worktree:new 创建的正式开发 worktree
-/global/backend/.codex/audits/                    # 本机只读审计产物，可选
+/global/backend/.claude/worktrees/<topic>/        # worktree:new 创建的正式开发 worktree
+/global/backend/.claude/audits/                   # 本机只读审计产物，可选
+/global/backend/.codex/worktrees/<topic>/         # legacy：2026-11-04 前创建的在飞 worktree，只审计/清理，不再新建
+/global/backend/.codex/audits/                    # legacy 审计产物
 /global/wt/<topic>/                               # legacy，只审计，不再新建
 /root/.codex/worktrees/...                        # Codex App 管理，不作为正式持久施工目标
 ```
 
-- 当前开发主体为 Claude Code（2026-09-21 起接替 Codex）；Codex 只在 Claude Code 指派下执行边界明确的任务。`.claude/worktrees/<topic>` 与 `claude/<topic>`、`.codex/worktrees/<topic>` 与 `codex/<topic>` 两种约定都合法，遵循「一个任务一个 writer 一个 worktree」，每个逻辑改动一个分支和 PR。
+- 当前开发主体为 Claude Code（2026-09-21 起接替 Codex）；Codex 只在 Claude Code 指派下执行边界明确的任务。2026-11-04 起默认约定为 `.claude/worktrees/<topic>` 与 `claude/<topic>`；`.codex/worktrees/<topic>` 与 `codex/<topic>` 只剩迁移前已在飞的 worktree，不再新建。遵循「一个任务一个 writer 一个 worktree」，每个逻辑改动一个分支和 PR。
 - 新 worktree 默认从刚 fetch 的 `origin/main` 创建；任务明确指定固定基线时，按[导航指南](../CODEX-NAVIGATION-GUIDE.md#51-inventory-and-create)从该精确 commit 创建并验证，不静默切换。不得把未核验的本地 `main` 当作远端当前基线。
-- `.claude/worktrees/`、`.codex/worktrees/` 与 `.codex/audits/` 只保存本机运行态，不提交、不存密钥，也不承担备份职责。
+- `.claude/worktrees/`、`.claude/audits/` 与 legacy `.codex/worktrees/`、`.codex/audits/` 只保存本机运行态，不提交、不存密钥，也不承担备份职责。
 - `/global/backend` 不做功能修改；其现有未跟踪文件不得因创建或迁移 worktree 被覆盖。
 - 不手工移动 Git worktree。合法移动只能使用 `git worktree move`；合法删除只能在清理门满足后使用 `git worktree remove`。
 
 ## 2. 创建新 worktree
 
-选择 `.codex/worktrees/` 约定时使用仓库助手（Claude Code 也可采用 `.claude/worktrees/` 约定）：
+使用仓库助手创建 `.claude/worktrees/` 约定下的 worktree：
 
 ```bash
 cd /global/backend
@@ -34,9 +35,9 @@ pnpm worktree:new r4-b-min
 助手固定执行以下护栏：
 
 1. topic 只允许小写字母、数字和连字符；
-2. 定位唯一的 `main` worktree，验证 `.codex/worktrees/` 已被父仓库忽略；
+2. 定位唯一的 `main` worktree，验证 `.claude/worktrees/` 已被父仓库忽略；
 3. `git fetch origin --prune` 后解析 `origin/main`；
-4. 目标目录、`codex/<topic>` 本地/远端分支或 worktree 登记已存在时 fail-closed，不复用、不覆盖；
+4. 目标目录、`claude/<topic>` 本地/远端分支或 worktree 登记已存在时 fail-closed，不复用、不覆盖；
 5. 使用参数数组调用 Git，不拼 shell 命令，不使用 `--force`；
 6. 创建后验证分支、HEAD 基线和 clean status。
 
@@ -99,7 +100,7 @@ node scripts/governance-main-worktree-sync.mjs apply   # fetch origin --prune，
 ```bash
 git worktree move \
   /global/wt/<topic> \
-  /global/backend/.codex/worktrees/<topic>
+  /global/backend/.claude/worktrees/<topic>
 ```
 
 移动前后都要记录并比较：路径、分支、HEAD、`git status --short` 和 `git worktree list --porcelain`。迁移不授予删除分支、覆盖文件或清理旧现场的权限。
@@ -122,7 +123,7 @@ git worktree move \
 1. 冻结原路径，不继续写入，不先宣称内容丢失；
 2. 记录 `git worktree list --porcelain`、分支、HEAD、status、tracked diff、untracked manifest、字节数与 SHA-256；
 3. 核对 PR/远端、reflog/stash、Codex 任务 UI/rollout、附件与工具任务；
-4. 从最后可信 commit 在 `.codex/worktrees/<topic>-recovery` 创建隔离候选；
+4. 从最后可信 commit 在 `.claude/worktrees/<topic>-recovery` 创建隔离候选；
 5. 机械重放后做路径、hash、diff 三方对账；存在未解释反证时不得宣告恢复完成；
 6. 先交付隔离候选及 manifest/hash/diff 对账和验证证据；只有对应动作已获明确授权时才 checkpoint commit、push 或开 PR，缺少这些未请求的动作不阻断本地恢复交付。合入仍须独立 PR、检查、review 与用户合并授权。
 
@@ -132,8 +133,9 @@ git worktree move \
 
 ```text
 git clean -fdx
+rm -rf /global/backend/.claude
 rm -rf /global/backend/.codex
-手工 mv/rm .codex/worktrees 下的 worktree
+手工 mv/rm .claude/worktrees 或 .codex/worktrees 下的 worktree
 ```
 
 如确需空间清理，先按第 4 节逐个解析精确目标，再使用 Git 原生 worktree 命令。

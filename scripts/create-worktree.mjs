@@ -84,10 +84,10 @@ if (mainWorktrees.length !== 1) {
 }
 
 const mainRoot = mainWorktrees[0].get("worktree");
-const worktreeRoot = path.join(mainRoot, ".codex", "worktrees");
+const worktreeRoot = path.join(mainRoot, ".claude", "worktrees");
 const destination = path.join(worktreeRoot, topic);
 const relativeDestination = path.relative(worktreeRoot, destination);
-const branch = `codex/${topic}`;
+const branch = `claude/${topic}`;
 
 if (
   relativeDestination.startsWith("..") ||
@@ -108,7 +108,7 @@ if (
   fail(`destination is already registered as a worktree: ${destination}`);
 }
 if (
-  !gitSucceeds(["check-ignore", "--quiet", ".codex/worktrees/.probe"], {
+  !gitSucceeds(["check-ignore", "--quiet", ".claude/worktrees/.probe"], {
     cwd: mainRoot,
   })
 ) {

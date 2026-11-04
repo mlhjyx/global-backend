@@ -34,6 +34,7 @@ const EXCLUDED_SEGMENTS = new Set([
   ".git",
   ".codegraph",
   ".code-intelligence",
+  ".claude",
   ".codex",
   ".nx",
   ".astro",

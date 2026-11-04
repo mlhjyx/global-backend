@@ -5,13 +5,13 @@
 ## 分支
 
 - **不在 `main` 上直接提交**。`main` 受保护，只经 PR 合入。
-- 当前开发主体为 Claude Code（2026-09-21 起接替 Codex），分支可使用 `claude/<topic>` 或 `codex/<topic>`，从最新 `main` 切出；改动类型用 Conventional Commit 的 `feat` / `fix` / `docs` 等表达。
-- `/global/backend` 只承载 `main`。正式施工遵循「一个任务一个 writer 一个 worktree」；Claude Code 可使用 `/global/backend/.claude/worktrees/<topic>` 与 `claude/<topic>`，也可使用 `pnpm worktree:new <topic>` 从最新 `origin/main` 创建 `.codex/worktrees/<topic>` 与 `codex/<topic>`；两种约定都合法。禁止在 `/tmp`、`/private/tmp`、`/root/.codex/worktrees` 或 legacy `/global/wt` 新建正式施工目录。完整创建、迁移、恢复与清理规则见 [worktree 管理 runbook](docs/backend/worktree-management.md)。
+- 当前开发主体为 Claude Code（2026-09-21 起接替 Codex），分支使用 `claude/<topic>`（`codex/<topic>` 仅限迁移前的在飞分支），从最新 `main` 切出；改动类型用 Conventional Commit 的 `feat` / `fix` / `docs` 等表达。
+- `/global/backend` 只承载 `main`。正式施工遵循「一个任务一个 writer 一个 worktree」；`pnpm worktree:new <topic>` 从最新 `origin/main` 在 `/global/backend/.claude/worktrees/<topic>` 创建 `claude/<topic>`；`.codex/worktrees/` 只剩迁移前的在飞 worktree，不再新建。禁止在 `/tmp`、`/private/tmp`、`/root/.codex/worktrees` 或 legacy `/global/wt` 新建正式施工目录。完整创建、迁移、恢复与清理规则见 [worktree 管理 runbook](docs/backend/worktree-management.md)。
 - 远端 PR 合入后，本地根 `main` 的跟随使用 `node scripts/governance-main-worktree-sync.mjs status` / `node scripts/governance-main-worktree-sync.mjs apply`。`apply` 只允许 fetch 后把 `origin/main` 解析成精确 commit，再对该 commit 纯 fast-forward，且必须证明远端入站路径不触碰本地 tracked、untracked 或 ignored 现场；任何 ahead/diverged、路径冲突、ref 新鲜度变化或事后状态变化都 fail-closed。它不 stash/reset/clean，不处理 PR、push、merge 授权或分支清理。
 - **新鲜度门**：规划、只读审计和实施开始前先执行 `git fetch origin --prune` 与 `git rev-list --count HEAD..origin/main`。若结果非 `0`，该 worktree 已落后，不能据此给出“当前事实”结论；必须从刚 fetch 的 `origin/main` 新建正式 worktree，或先完成受控同步后再继续。功能分支上的已提交工作不免除此门。
 - 已有 `/global/wt/*` 不批量迁移：干净且确认仍需开发的才可用 `git worktree move` 迁入；脏、锁定、失联或承载 provenance 的现场原地冻结并先审计。工具管理且仍被活跃任务持有的 worktree 不得手工移动。
 - **PR 合入即删 worktree**：PR 合入后依次删除该任务的 worktree（`git worktree remove`）与本地分支，再在 `/global/backend` 用 `node scripts/governance-main-worktree-sync.mjs apply` 跟随 `main`。删除前确认目标提交已进入 `main`（本仓 squash 合并，要与已合并 PR 交叉核对，不能只看 `rev-list`）、工作区干净、未跟踪文件已逐项归属；有未推送提交或无法归属的文件时先推送或归档，不得强删。常驻的 `local-development` worktree 不在此列。
-- 项目内 worktree 位于父 `main` 工作区的 ignored 子树；禁止在 `/global/backend` 运行 `git clean -fdx`、递归删除 `.codex/` 或绕过 `git worktree move/remove` 手工搬删目录。
+- 项目内 worktree 位于父 `main` 工作区的 ignored 子树；禁止在 `/global/backend` 运行 `git clean -fdx`、递归删除 `.claude/` 或 `.codex/`，或绕过 `git worktree move/remove` 手工搬删目录。
 
 ## 异常恢复审计（先取证，后重做）
 

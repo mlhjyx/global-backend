@@ -166,7 +166,7 @@ Release Bundle 中的 `CHECK_RUN`、`GITHUB_REVIEW`、`SIGNED_AUTHORIZATION`、m
 
 ## 开发代理收口步骤
 
-1. 按 [worktree 管理 runbook](worktree-management.md) 从最新 `origin/main` 建 `.claude/worktrees/<topic>` 与 `claude/<topic>`，或用 `pnpm worktree:new <topic>` 建 `.codex/worktrees/<topic>` 与 `codex/<topic>`；两种约定都合法，一个任务一个 writer 一个 worktree，一个逻辑改动一个 PR。
+1. 按 [worktree 管理 runbook](worktree-management.md) 用 `pnpm worktree:new <topic>` 从最新 `origin/main` 建 `.claude/worktrees/<topic>` 与 `claude/<topic>`；一个任务一个 writer 一个 worktree，一个逻辑改动一个 PR。
 2. 按 [CONTRIBUTING.md](../../CONTRIBUTING.md) 跑 lint/build/test；provider/采集/富集另附真源验证。
 3. 开 PR 后等待 required-context 清单中的 CI、Security 与 Governance 门，触发独立 review，逐条处置 inline comment 并 resolve。
 4. 向用户报告改动、风险、验证和未完成项；按用户对当次 PR 的明确授权合并，或在 `DEC-AIDEV-004` 常设授权下于独立审查通过、必需检查在当前 head 全绿、审查线程清零，且 PR 与最新 main 的组合已在本地复核（ruleset 不再强制 strict）后合并。
