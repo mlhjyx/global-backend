@@ -119,6 +119,10 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '执行一个 READY 查询计划：多源发现 → Raw → Canonical，由 Temporal 异步编排。返回 202 与 runId，用 GET /discovery-runs/{runId} 轮询。',
   'POST /api/v1/discovery-runs/{runId}/cancel':
     '停止深挖：向 Temporal 发取消请求。已完成公司的结果保留，未完成公司标 skipped（下一次 run 会重新排队），run 以 CANCELLED 收尾。已结束的 run 幂等返回当前状态。',
+  'GET /api/v1/discovery-runs/{runId}/events':
+    'run 进度事件（append-only，按 seq 增量拉取）：阶段开始/完成、公司进出阶段、预算耗尽、租约跳过、run 收尾。用 ?after=<上次的 nextAfter> 断点续拉，事件可重放。',
+  'GET /api/v1/discovery-runs/{runId}/jobs':
+    'run 的公司级队列（快扫名单 + 深挖逐家状态：stage/粗判/精判/失败码/耗时），游标分页。',
   'GET /api/v1/discovery-runs/{runId}':
     '发现运行的状态与统计（每源计数、归一、suppression）。completedAt 为空表示仍在跑。',
   'GET /api/v1/canonical-companies':

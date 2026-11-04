@@ -197,6 +197,89 @@ export class DiscoveryService {
     return { runId: run.id, status: 'CANCEL_REQUESTED' };
   }
 
+  /** M0⑤：run 的进度事件，按 seq 增量拉取（after=已拉到的最大 seq）。 */
+  async listRunEvents(ctx: RequestContext, runId: string, after?: number, limit = 200) {
+    const take = Math.min(Math.max(limit, 1), 500);
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const run = await tx.discoveryRun.findUnique({
+        where: { id: runId },
+        select: { id: true, status: true },
+      });
+      if (!run) {
+        throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'run not found' } });
+      }
+      const events = await tx.runEvent.findMany({
+        where: { runId, ...(after !== undefined ? { seq: { gt: BigInt(after) } } : {}) },
+        orderBy: { seq: 'asc' },
+        take,
+        select: { seq: true, at: true, level: true, type: true, payload: true },
+      });
+      return {
+        status: run.status,
+        events: events.map((event) => ({
+          seq: Number(event.seq),
+          at: event.at.toISOString(),
+          level: event.level,
+          type: event.type,
+          payload: (event.payload ?? null) as Record<string, unknown> | null,
+        })),
+        nextAfter: events.length > 0 ? Number(events[events.length - 1]!.seq) : (after ?? 0),
+      };
+    });
+  }
+
+  /** M0⑤：run 的公司级 job 队列（快扫名单 + 深挖逐家状态），游标分页。 */
+  async listRunJobs(
+    ctx: RequestContext,
+    runId: string,
+    opts: { limit: number; cursor?: string },
+  ) {
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const run = await tx.discoveryRun.findUnique({
+        where: { id: runId },
+        select: { id: true },
+      });
+      if (!run) {
+        throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'run not found' } });
+      }
+      const rows = await tx.discoveryCompanyJob.findMany({
+        where: { runId },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        take: opts.limit + 1,
+        ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
+      });
+      const page = rows.slice(0, opts.limit);
+      const companies = page.length
+        ? await tx.canonicalCompany.findMany({
+            where: { id: { in: page.map((job) => job.canonicalCompanyId) } },
+            select: { id: true, name: true, domain: true, country: true },
+          })
+        : [];
+      const byId = new Map(companies.map((company) => [company.id, company]));
+      return {
+        data: page.map((job) => {
+          const company = byId.get(job.canonicalCompanyId);
+          return {
+            id: job.id,
+            companyId: job.canonicalCompanyId,
+            name: company?.name ?? null,
+            domain: company?.domain ?? null,
+            country: company?.country ?? null,
+            stage: job.stage,
+            verdictQuick: job.verdictQuick,
+            verdictDeep: job.verdictDeep,
+            lastErrorCode: job.lastErrorCode,
+            costCents: job.costCents,
+            startedAt: job.startedAt?.toISOString() ?? null,
+            finishedAt: job.finishedAt?.toISOString() ?? null,
+          };
+        }),
+        nextCursor: rows.length > opts.limit ? (page[page.length - 1]?.id ?? null) : null,
+        hasMore: rows.length > opts.limit,
+      };
+    });
+  }
+
   async getRun(ctx: RequestContext, runId: string) {
     const run = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
       tx.discoveryRun.findUnique({ where: { id: runId } }),
