@@ -15,6 +15,7 @@ import { CompanyModule } from './company/company.module';
 import { ClaimModule } from './claim/claim.module';
 import { IcpModule } from './icp/icp.module';
 import { DiscoveryModule } from './discovery/discovery.module';
+import { ChannelsModule } from './channels/channels.module';
 import { LeadModule } from './lead/lead.module';
 import { ReportModule } from './report/report.module';
 import { EventsModule } from './events/events.module';
@@ -57,6 +58,7 @@ import { PlatformRevocationHttpModule } from './platform-authority/platform-revo
     ClaimModule,
     IcpModule,
     DiscoveryModule,
+    ChannelsModule,
     LeadModule,
     ReportModule,
     EventsModule,

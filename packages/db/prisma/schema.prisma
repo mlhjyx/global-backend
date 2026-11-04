@@ -1507,6 +1507,92 @@ model DiscoveryCompanyJob {
   @@map("discovery_company_job")
 }
 
+/// M1 渠道数据源平台：平台级渠道注册表（api | crawl | import 三形态）。
+/// 治理硬闸门：license/tosUrl/robotsPolicy 必填后才能 ENABLED；失败率连续 3 轮 >30% 自动停用。
+model SourceChannel {
+  id            String    @id @default(uuid()) @db.Uuid
+  name          String    @db.VarChar(200)
+  /// api | crawl | import
+  mode          String    @db.VarChar(16)
+  /// trade_fair | customs | association | directory | tender | other
+  category      String    @db.VarChar(32)
+  /// DISABLED | ENABLED | AUTO_DISABLED
+  status        String    @default("DISABLED") @db.VarChar(16)
+  /// crawl：{list:{url,maxPages,itemSelector,itemUrlSelector}, detail:{enabled,fields}}；api：{adapter}; import：{columns}
+  config        Json
+  license       String?   @db.VarChar(200)
+  tosUrl        String?   @map("tos_url") @db.VarChar(2048)
+  /// A 公开可爬 | B 只导入或付费 | C 不做
+  robotsPolicy  String?   @map("robots_policy") @db.VarChar(8)
+  owner         String?   @db.VarChar(200)
+  failureStreak Int       @default(0) @map("failure_streak")
+  lastRunAt     DateTime? @map("last_run_at") @db.Timestamptz(3)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  runs       SourceChannelRun[]
+  enablements SourceChannelEnablement[]
+
+  @@index([status, category])
+  @@map("source_channel")
+}
+
+/// 租户启用已批准渠道（租户只能启用，不能新建平台渠道）。
+model SourceChannelEnablement {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  channelId   String   @map("channel_id") @db.Uuid
+  enabledBy   String   @map("enabled_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  channel SourceChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, channelId])
+  @@index([workspaceId])
+  @@map("source_channel_enablement")
+}
+
+/// 渠道每次试跑/运行的记录：抓取量、产出、失败率与错误码（失败率连续 3 轮 >30% 自动停用）。
+model SourceChannelRun {
+  id                 String    @id @default(uuid()) @db.Uuid
+  channelId          String    @map("channel_id") @db.Uuid
+  /// 发起本次运行的工作空间（可选来源标注；本表是平台级运行统计，不承载租户数据）。
+  triggeredByWorkspaceId String? @map("triggered_by_workspace_id") @db.Uuid
+  /// RUNNING | SUCCEEDED | FAILED
+  status             String    @default("RUNNING") @db.VarChar(16)
+  pagesFetched       Int       @default(0) @map("pages_fetched")
+  recordsFound       Int       @default(0) @map("records_found")
+  recordsMaterialized Int      @default(0) @map("records_materialized")
+  failures           Int       @default(0)
+  errorCode          String?   @map("error_code") @db.VarChar(64)
+  startedAt          DateTime  @default(now()) @map("started_at") @db.Timestamptz(3)
+  finishedAt         DateTime? @map("finished_at") @db.Timestamptz(3)
+
+  channel SourceChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@index([channelId, startedAt])
+  @@map("source_channel_run")
+}
+
+/// 导入通道：租户上传的名单原始行与去重键（私有池，不共享）。
+model ImportedBuyer {
+  id                 String   @id @default(uuid()) @db.Uuid
+  workspaceId        String   @map("workspace_id") @db.Uuid
+  batchId            String   @map("batch_id") @db.Uuid
+  channelId          String?  @map("channel_id") @db.Uuid
+  rowNumber          Int      @map("row_number")
+  rawRow             Json     @map("raw_row")
+  dedupeKey          String   @map("dedupe_key") @db.VarChar(200)
+  /// MATERIALIZED | DUPLICATE | SUPPRESSED
+  status             String   @default("MATERIALIZED") @db.VarChar(16)
+  canonicalCompanyId String?  @map("canonical_company_id") @db.Uuid
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([workspaceId, batchId])
+  @@index([workspaceId, dedupeKey])
+  @@map("imported_buyer")
+}
+
 /// Run 2.0（M0⑥）影子对比：同一 run 上新旧两套判定的召回与一致率（连续两轮召回不降才切默认）。
 model RunShadowDiff {
   id             String   @id @default(uuid()) @db.Uuid

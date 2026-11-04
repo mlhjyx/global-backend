@@ -123,6 +123,30 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     'run 进度事件（append-only，按 seq 增量拉取）：阶段开始/完成、公司进出阶段、预算耗尽、租约跳过、run 收尾。用 ?after=<上次的 nextAfter> 断点续拉，事件可重放。',
   'GET /api/v1/discovery-runs/{runId}/jobs':
     'run 的公司级队列（快扫名单 + 深挖逐家状态：stage/粗判/精判/失败码/耗时），游标分页。',
+  'GET /api/v1/source-channels':
+    '渠道列表（状态/模式/类别/最近运行与失败率）。平台级渠道注册表，所有租户可见；写入需要管理员权限。',
+  'GET /api/v1/source-channels/available':
+    '租户可用的已批准渠道（status=ENABLED），并标注本工作空间是否已启用。',
+  'GET /api/v1/source-channels/import-template':
+    '导入通道的示例 CSV（10 行，列：company/website/country/industry），用于列映射与验收。',
+  'POST /api/v1/source-channels':
+    '新建渠道（默认停用 DISABLED）。配置按形态校验：crawl 需 https 列表页与选择器；api 需适配器名；import 直接可用。启用前必须登记许可、条款与 robots 结论。',
+  'PATCH /api/v1/source-channels/{channelId}':
+    '更新渠道配置/治理信息/状态。启用硬闸门：license+tosUrl+robots 结论齐全，robots=C 永不启用，crawl 仅允许 robots=A。',
+  'POST /api/v1/source-channels/{channelId}/enable':
+    '租户启用一个已批准（ENABLED）渠道；只能启用，不能新建平台渠道。',
+  'DELETE /api/v1/source-channels/{channelId}/enable':
+    '租户停用渠道（平台渠道本身不受影响）。',
+  'POST /api/v1/source-channels/{channelId}/preview':
+    '试跑抓取通道（抓 1 页/前 20 条）。抓取出网需要平台级抓取预算权威（channel.crawl purpose 或平台自动化），获批前该端点 fail-closed 返回 409 CHANNEL_CRAWL_REQUIRES_PLATFORM_AUTHORITY。',
+  'POST /api/v1/source-channels/{channelId}/run':
+    '立即运行抓取通道（同 preview 的门槛与限额；失败率连续 3 轮 >30% 自动停用）。',
+  'POST /api/v1/imported-buyers/preview':
+    '导入预览：解析 CSV、校验列映射（至少公司名列）、给出前 10 行样例与去重/抑制命中计数，不写库。',
+  'POST /api/v1/imported-buyers':
+    '导入提交：原始行落 imported_buyer，按域名/名称+国家去重并过抑制门后物化进本租户的公司池（私有），并写渠道 sighting。',
+  'GET /api/v1/imported-buyers/{batchId}':
+    '导入批次明细（每行状态 MATERIALIZED/DUPLICATE/SUPPRESSED 与去重键）。',
   'GET /api/v1/discovery-runs/{runId}':
     '发现运行的状态与统计（每源计数、归一、suppression）。completedAt 为空表示仍在跑。',
   'GET /api/v1/canonical-companies':
