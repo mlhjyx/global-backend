@@ -553,7 +553,9 @@
       "INSERT",
       "SELECT",
       "UPDATE"
-    ]
+    ],
+    "platform_channel_crawl_egress_attempt": [],
+    "platform_egress_capability_fence": []
   },
   "columns": {}
 }
