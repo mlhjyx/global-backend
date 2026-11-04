@@ -92,6 +92,7 @@
     "raw_source_governance_disposition": ["SELECT"],
     "raw_source_record": ["SELECT"],
     "run_event": ["INSERT", "SELECT"],
+    "run_shadow_diff": ["INSERT", "SELECT"],
     "runtime_process_lease": ["SELECT"],
     "sanctions_entity": ["SELECT"],
     "sanctions_screening_result": ["DELETE", "INSERT", "SELECT", "UPDATE"],
