@@ -87,7 +87,11 @@ export class DiscoveryService {
     return this.budgetStore ?? new UnavailableBudgetStore('DiscoveryService requires an authoritative BudgetStore');
   }
 
-  /** 触发执行：READY 计划 → DiscoveryRun + outbox 事件（relay 启动 Temporal workflow）。 */
+  /**
+   * 触发执行：READY 计划首跑 → DiscoveryRun + outbox 事件（relay 启动 Temporal workflow）。
+   * P1：EXECUTED 计划凭**新 attemptId** 重跑（同 plan 的新请求哈希/新 Grant/新预算账户）；
+   * 不带 attemptId 对 EXECUTED 计划的调用 fail-closed 报 RERUN_REQUIRES_ATTEMPT。
+   */
   async executePlan(
     ctx: RequestContext,
     planId: string,
@@ -132,9 +136,15 @@ export class DiscoveryService {
       });
       if (!plan) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'query plan not found' },
         });
-      if (plan.status !== 'READY') {
+      if (plan.status !== 'READY' && plan.status !== 'EXECUTED') {
         throw new ConflictException({
           error: { code: 'INVALID_STATE', message: `plan is ${plan.status}; confirm it (READY) before executing`,
+          },
+        });
+      }
+      if (plan.status === 'EXECUTED' && attemptId === undefined) {
+        throw new ConflictException({
+          error: { code: 'RERUN_REQUIRES_ATTEMPT', message: 'plan is EXECUTED; rerun requires a new attemptId',
           },
         });
       }

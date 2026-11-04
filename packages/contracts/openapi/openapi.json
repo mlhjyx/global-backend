@@ -7660,7 +7660,7 @@
             }
           },
           "409": {
-            "description": "EXECUTION_BUDGET_GRANT_REUSED",
+            "description": "EXECUTION_BUDGET_GRANT_REUSED, INVALID_STATE or RERUN_REQUIRES_ATTEMPT",
             "content": {
               "application/json": {
                 "schema": {
@@ -7729,14 +7729,14 @@
             "bearer": []
           }
         ],
-        "summary": "执行 READY 查询计划：多源发现 → Raw → Canonical（异步，Temporal 编排）",
+        "summary": "执行查询计划（READY 首跑；EXECUTED 重跑须携带新 attemptId）：多源发现 → Raw → Canonical（异步，Temporal 编排）",
         "tags": [
           "Discovery"
         ],
         "x-required-scopes": [
           "acquisition:write"
         ],
-        "description": "执行一个 READY 查询计划：多源发现 → Raw → Canonical，由 Temporal 异步编排。返回 202 与 runId，用 GET /discovery-runs/{runId} 轮询。"
+        "description": "执行一个查询计划：READY 首跑；EXECUTED 计划携带新 attemptId 即重跑（新请求哈希/新预算 Grant，同一 attempt 重放报 EXECUTION_BUDGET_GRANT_REUSED，缺 attemptId 报 RERUN_REQUIRES_ATTEMPT）。多源发现 → Raw → Canonical，由 Temporal 异步编排，返回 202 与 runId。"
       }
     },
     "/api/v1/discovery-runs/{runId}/cancel": {
@@ -19500,7 +19500,7 @@
           "attemptId": {
             "type": "string",
             "format": "uuid",
-            "description": "P1 attempt 维度：「重试」的幂等键；同一 attempt 重放被拒（GRANT_REUSED），新 attempt 放行。缺省时行为与旧版一致。"
+            "description": "P1 attempt 维度：「重试」的幂等键；同一 attempt 重放被拒（GRANT_REUSED），新 attempt 放行。READY 计划首跑可缺省（行为与旧版一致）；EXECUTED 计划重跑必填，缺省返回 409 RERUN_REQUIRES_ATTEMPT。"
           }
         }
       },

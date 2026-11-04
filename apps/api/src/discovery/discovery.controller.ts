@@ -304,7 +304,7 @@ class ExecuteQueryPlanDto {
     type: 'string',
     format: 'uuid',
     description:
-      'P1 attempt 维度：「重试」的幂等键；同一 attempt 重放被拒（GRANT_REUSED），新 attempt 放行。缺省时行为与旧版一致。',
+      'P1 attempt 维度：「重试」的幂等键；同一 attempt 重放被拒（GRANT_REUSED），新 attempt 放行。READY 计划首跑可缺省（行为与旧版一致）；EXECUTED 计划重跑必填，缺省返回 409 RERUN_REQUIRES_ATTEMPT。',
   })
   @IsOptional()
   @IsUUID()
@@ -322,9 +322,9 @@ export class DiscoveryController {
   @Post('query-plans/:planId/execute')
   @RequireScopes('acquisition:write')
   @HttpCode(202)
-  @ApiOperation({ summary: '执行 READY 查询计划：多源发现 → Raw → Canonical（异步，Temporal 编排）',
+  @ApiOperation({ summary: '执行查询计划（READY 首跑；EXECUTED 重跑须携带新 attemptId）：多源发现 → Raw → Canonical（异步，Temporal 编排）',
   })
-  @ApiExecutionBudgetGrant()
+  @ApiExecutionBudgetGrant({ additionalConflictCodes: ['INVALID_STATE', 'RERUN_REQUIRES_ATTEMPT'] })
   @ApiBody({ type: ExecuteQueryPlanDto, required: false })
   @ApiEnvelope(
     {
