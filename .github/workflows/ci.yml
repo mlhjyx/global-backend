@@ -457,6 +457,20 @@ jobs:
           pnpm --filter @global/db exec prisma migrate deploy
           pnpm --filter @global/api exec vitest run src/prisma/app-user-table-privileges.postgres.spec.ts
 
+      # The run-event seq allocator takes a transaction advisory lock whose function
+      # returns PostgreSQL void; reading it through $queryRaw once reached production
+      # (2026-11-04) and failed every discovery run at quickScan in ten seconds. This
+      # exercises the real statement against the migrated database above.
+      - name: Run-event seq advisory lock on PostgreSQL
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        env:
+          DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+          RUN_EVENTS_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+        run: |
+          set -euo pipefail
+          pnpm --filter @global/db exec prisma migrate deploy
+          pnpm --filter @global/api exec vitest run src/discovery/run2/run-events.postgres.spec.ts
+
       # The operator sanctions refresh writes the official lists through the refresh service's
       # owner transaction: entities only, refresh metadata updated, status untouched, a repeat
       # changes nothing, a failed write rolls back, app_user is refused. Synthetic lists, no
