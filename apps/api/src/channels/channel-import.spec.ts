@@ -21,6 +21,7 @@ describe('M1 导入通道：CSV 解析与列映射', () => {
   it('rejects empty, headerless, duplicate-column and oversized inputs', () => {
     expect(() => parseCsv('')).toThrow(ImportCsvError);
     expect(() => parseCsv('a,a\n1,2')).toThrow(/duplicate/);
+    expect(() => parseCsv('__proto__,x\n1,2')).toThrow(/reserved/);
     const tooMany = ['company', ...Array.from({ length: IMPORT_MAX_ROWS + 1 }, (_, index) => `Row ${index}`)].join('\n');
     expect(() => parseCsv(tooMany)).toThrow(/more than/);
   });

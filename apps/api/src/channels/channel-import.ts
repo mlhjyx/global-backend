@@ -82,6 +82,11 @@ export function parseCsv(text: string): ParsedCsv {
     throw new ImportCsvError('CSV needs a header row');
   }
   if (headerRow.some((value) => value.length === 0)) throw new ImportCsvError('CSV header has an empty column');
+  // 表头会被当作对象键：拒绝原型链相关的保留名（防原型污染/意外覆盖）。
+  const reserved = new Set(['__proto__', 'prototype', 'constructor']);
+  if (headerRow.some((value) => reserved.has(value.toLowerCase()))) {
+    throw new ImportCsvError('CSV header contains a reserved column name');
+  }
   if (new Set(headerRow).size !== headerRow.length) throw new ImportCsvError('CSV header has duplicate columns');
   if (rows.length > IMPORT_MAX_ROWS) throw new ImportCsvError(`CSV has more than ${IMPORT_MAX_ROWS} rows`);
 
@@ -173,11 +178,11 @@ export function buildImportRows(
       result.invalid.push({ rowNumber, reason: 'COMPANY_NAME_INVALID' });
       return;
     }
-    const raw: Record<string, string> = {};
-    headers.forEach((header, index) => {
-      const value = values[index]?.trim();
-      if (value) raw[header] = value;
-    });
+    const raw = Object.fromEntries(
+      headers
+        .map((header, index) => [header, values[index]?.trim()] as const)
+        .filter((entry): entry is readonly [string, string] => Boolean(entry[1])),
+    );
     result.rows.push({
       rowNumber,
       name,

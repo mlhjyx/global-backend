@@ -127,13 +127,24 @@ export function parseChannelConfig(mode: string, raw: unknown): ChannelConfig {
       if (!detailRecord.fields || typeof detailRecord.fields !== 'object' || Array.isArray(detailRecord.fields)) {
         invalid('config.detail.fields must be an object');
       }
-      const fields: Record<string, string> = {};
+      // 只把白名单字段写进显式属性（不用动态键赋值，避免原型污染类风险）。
+      const parsedFields: { name?: string; website?: string; country?: string; industry?: string; products?: string; keywords?: string } = {};
       for (const [key, value] of Object.entries(detailRecord.fields as Record<string, unknown>)) {
-        if (!(CHANNEL_FIELD_KEYS as readonly string[]).includes(key)) {
-          invalid(`config.detail.fields.${key} is not a channel field (${CHANNEL_FIELD_KEYS.join(', ')})`);
+        const selectorValue = selector(value, `config.detail.fields.${key}`);
+        switch (key) {
+          case 'name':
+          case 'website':
+          case 'country':
+          case 'industry':
+          case 'products':
+          case 'keywords':
+            parsedFields[key] = selectorValue;
+            break;
+          default:
+            invalid(`config.detail.fields.${key} is not a channel field (${CHANNEL_FIELD_KEYS.join(', ')})`);
         }
-        fields[key] = selector(value, `config.detail.fields.${key}`);
       }
+      const fields: Record<string, string> = { ...parsedFields };
       parsedDetail = { enabled: detailRecord.enabled === true, fields };
     }
   }
