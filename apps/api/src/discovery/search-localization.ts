@@ -8,7 +8,7 @@
 import { MAX_PUBLIC_WEB_SEARCHES_PER_QUERY } from './execution-envelope';
 import { lookupMarketRegion } from './vocab';
 
-export type SearchLanguage = 'de' | 'en' | 'fr' | 'it' | 'es' | 'nl' | 'pl';
+export type SearchLanguage = 'de' | 'en' | 'fr' | 'it' | 'es' | 'nl' | 'pl' | 'zh';
 export type TradeRole = 'distributor' | 'manufacturer';
 
 /** `name` is the country as a search in its own language would write it. */
@@ -23,11 +23,12 @@ const COUNTRIES: readonly CountryEntry[] = Object.freeze([
   { iso2: 'es', language: 'es', name: 'España', aliases: ['spain', 'españa', 'espana', 'es', 'esp', '西班牙'] },
   { iso2: 'nl', language: 'nl', name: 'Nederland', aliases: ['netherlands', 'nederland', 'holland', 'nl', 'nld', '荷兰'] },
   { iso2: 'pl', language: 'pl', name: 'Polska', aliases: ['poland', 'polska', 'pl', 'pol', '波兰'] },
+  { iso2: 'cn', language: 'zh', name: '中国', aliases: ['china', 'cn', 'chn', '中国'] },
   { iso2: 'gb', language: 'en', name: 'United Kingdom', aliases: ['united kingdom', 'uk', 'gb', 'gbr', 'great britain', '英国'] },
   { iso2: 'us', language: 'en', name: 'United States', aliases: ['united states', 'usa', 'us', 'america', '美国'] },
 ]);
 
-/** Han, kana and Hangul: none of the supported search languages is written in them. */
+/** Han, kana and Hangul. Only `zh` searches are written in Han; every other supported language strips these terms. */
 const CJK_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 
 /**
@@ -48,6 +49,8 @@ const REGION_COUNTRY: Readonly<Record<string, string>> = Object.freeze({
   wien: 'at', vienna: 'at', niederösterreich: 'at', oberösterreich: 'at', salzburg: 'at',
   steiermark: 'at', styria: 'at', tirol: 'at', tyrol: 'at', kärnten: 'at', vorarlberg: 'at',
   burgenland: 'at',
+  '珠三角': 'cn', '长三角': 'cn', '京津冀': 'cn', '粤港澳': 'cn', '粤港澳大湾区': 'cn', '大湾区': 'cn',
+  '环渤海': 'cn', '华东': 'cn', '华南': 'cn', '华北': 'cn', '华中': 'cn', '西南': 'cn', '西北': 'cn', '东北': 'cn',
 });
 
 /** Two-letter TLDs that are routinely used as generic brands, not as a country. */
@@ -67,6 +70,7 @@ const ROLE_TERMS: Readonly<Record<TradeRole, Readonly<Record<SearchLanguage, rea
     es: ['distribuidor', 'mayorista', 'proveedor'],
     nl: ['groothandel', 'distributeur', 'dealer'],
     pl: ['hurtownia', 'dystrybutor', 'sprzedaż'],
+    zh: ['经销商', '分销商', '批发商', '进口商'],
   },
   manufacturer: {
     de: ['Hersteller'],
@@ -76,6 +80,7 @@ const ROLE_TERMS: Readonly<Record<TradeRole, Readonly<Record<SearchLanguage, rea
     es: ['fabricante'],
     nl: ['fabrikant'],
     pl: ['producent'],
+    zh: ['制造商', '厂家', '工厂'],
   },
 });
 
@@ -104,7 +109,8 @@ function targetCountries(filters: Record<string, unknown>): CountryEntry[] {
   for (const value of values) {
     const members = marketRegionCodes(value);
     if (members) members.forEach((iso2) => add(byCode(iso2)));
-    else add(COUNTRIES.find((c) => c.aliases.includes(value)));
+    // 国家字段里也可能写区域名（「珠三角」「Bayern」）——与国家别名同等对待。
+    else add(COUNTRIES.find((c) => c.aliases.includes(value)) ?? byCode(REGION_COUNTRY[value]));
   }
   if (found.length) return found;
   // Region-only plans ("industry + country OR region") imply their country, or each country of a "DACH" region.
@@ -119,14 +125,16 @@ export function searchLanguageFor(query: { filters?: Record<string, unknown> }):
 }
 
 /**
- * Trimmed, non-empty terms a search in a supported language can use. The
- * planner may keep Chinese industry and country words for the taxonomy
- * mapping, but they must never become part of a search string.
+ * Trimmed, non-empty terms a search in the given language can use. The planner
+ * may keep Chinese industry and country words for the taxonomy mapping; in a
+ * `zh` search they are the query itself, in every other supported language they
+ * must never become part of a search string.
  */
-export function searchableTerms(terms: readonly string[]): string[] {
+export function searchableTerms(terms: readonly string[], language?: SearchLanguage): string[] {
+  const keepCjk = language === 'zh';
   return terms
     .map((term) => term.trim())
-    .filter((term) => term.length > 0 && !CJK_SCRIPT.test(term));
+    .filter((term) => term.length > 0 && (keepCjk || !CJK_SCRIPT.test(term)));
 }
 
 /** The first target country as its own language writes it; undefined when unknown. */

@@ -106,6 +106,43 @@ describe('search language and trade role (G3 5.3)', () => {
     expect(queries.every((q) => q.startsWith('Pumpen Vertrieb Importeur Deutschland '))).toBe(true);
   });
 
+  it('builds Chinese distributor queries for a mainland-China market', () => {
+    const queries = buildSearchQueries(distributorQuery({
+      filters: { country: '中国', industry: '工业泵', sub_industry: '工业泵分销', trade_side: '分销商' },
+      keywords: ['离心泵', '流体设备'],
+    }));
+    expect(queries.length).toBeGreaterThan(0);
+    expect(queries.length).toBeLessThanOrEqual(3);
+    expect(queries.every((q) => /\p{Script=Han}/u.test(q))).toBe(true);
+    expect(queries.some((q) => /经销商|分销商|批发商|进口商/.test(q))).toBe(true);
+    expect(queries.some((q) => /离心泵|流体设备|工业泵/.test(q))).toBe(true);
+  });
+
+  it('builds Chinese queries from a 珠三角 region plan', () => {
+    const queries = buildSearchQueries(distributorQuery({
+      filters: { region: '珠三角', industry: '电子制造', trade_side: '制造商' },
+      keywords: ['线路板制造商'],
+    }));
+    expect(queries.length).toBeGreaterThan(0);
+    expect(queries.some((q) => /制造商|厂家|工厂/.test(q))).toBe(true);
+  });
+
+  it('fails loudly instead of silently returning nothing when no search string can be built', async () => {
+    const provider = new PublicWebDiscoveryProvider({
+      gateway: {} as never,
+      broker: broker(async () => ({}) as never),
+    });
+    await expect(
+      provider.discoverCompanies(
+        distributorQuery({
+          filters: { country: '德国', industry: '工业泵', trade_side: '分销商' },
+          keywords: ['离心泵', '流体技术'],
+        }),
+        CTX,
+      ),
+    ).rejects.toMatchObject({ type: 'DISCOVERY_MARKET_UNSUPPORTED' });
+  });
+
   it('builds no search at all when every planner word is Chinese', () => {
     expect(buildSearchQueries(distributorQuery({
       filters: { country: '德国', industry: '工业泵', trade_side: 'distributor' },
