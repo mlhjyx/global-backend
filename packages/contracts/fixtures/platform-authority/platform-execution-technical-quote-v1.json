@@ -17,13 +17,23 @@
         "schemaVersion": "platform-execution-provider-snapshot/v1",
         "scheduleId": "acq-sweep",
         "providers": [
-          { "providerId": "tradefair.algolia", "providerVersion": "1.0.0", "enablement": "ENABLED", "bytePriceCatalogRevision": null },
-          { "providerId": "mapyourshow.fetch", "providerVersion": "1.0.0", "enablement": "ENABLED", "bytePriceCatalogRevision": null }
+          {
+            "providerId": "tradefair.algolia",
+            "providerVersion": "1.0.0",
+            "enablement": "ENABLED",
+            "bytePriceCatalogRevision": null
+          },
+          {
+            "providerId": "mapyourshow.fetch",
+            "providerVersion": "1.0.0",
+            "enablement": "ENABLED",
+            "bytePriceCatalogRevision": null
+          }
         ]
       },
       "expected_quote": {
         "schema_version": "platform-execution-technical-quote/v1",
-        "quote_id": "c196478a-0a30-5fd1-99cf-5f0c02f2b1c1",
+        "quote_id": "0ea71bcc-d7bb-5ed1-9517-b37a054ef974",
         "issued_at": "1788472800",
         "expires_at": "1788473100",
         "purpose": "platform.acquisition",
@@ -36,10 +46,10 @@
         "required_cap_per_run_microusd": "1",
         "required_max_runs": "1",
         "required_campaign_cap_microusd": "1",
-        "policy_revision": "ce564b6a96f73ea485efb936d9a7a18c460ee11d535d52b4ab16708df6433649",
-        "policy_artifact_id": "platform-authority-policy-matrix/2026-09-04-reviewed-v2",
-        "policy_artifact_sha256": "f9e9591731772f974b087307b5d0365c58c86b501232804c77a20fd3592db01b",
-        "policy_matrix_revision": "reviewed-v2",
+        "policy_revision": "09433cbfa171be7944481cb91f261e64e5631955233a9a1936ac2a82a1a02c11",
+        "policy_artifact_id": "platform-authority-policy-matrix/2026-11-05-reviewed-v3",
+        "policy_artifact_sha256": "84e6a8a1121024dc4232b0eaf16cb84af18626e604db1f01881a9d6af2262fab",
+        "policy_matrix_revision": "reviewed-v3",
         "request_contract_version": "platform-schedule-authority-v1",
         "execution_envelope_schema_version": "platform-execution-envelope/v1",
         "execution_envelope_sha256": "73a3bfea34b90f0c0916cd55a051cbfd3ce704656431362aacb9e6d012f1c44f",
@@ -66,7 +76,7 @@
         "maximum_fallback_wires": "0",
         "maximum_input_tokens": "0",
         "maximum_output_tokens": "0",
-        "quote_sha256": "7875c1f1613ddd4d2cddd0c214a36121c6916e8658815f59ef15905d771cfa6a"
+        "quote_sha256": "671c3132c1efaeeac88a2dbe0e044a16637f95134039ae86d0382e0580622282"
       }
     },
     {
@@ -84,12 +94,17 @@
         "schemaVersion": "platform-execution-provider-snapshot/v1",
         "scheduleId": "patents-cache-refresh",
         "providers": [
-          { "providerId": "google_patents", "providerVersion": "1.0.0", "enablement": "DISABLED", "bytePriceCatalogRevision": null }
+          {
+            "providerId": "google_patents",
+            "providerVersion": "1.0.0",
+            "enablement": "DISABLED",
+            "bytePriceCatalogRevision": null
+          }
         ]
       },
       "expected_quote": {
         "schema_version": "platform-execution-technical-quote/v1",
-        "quote_id": "03efc08d-57d6-5068-ada8-8b3a667f0770",
+        "quote_id": "403ac12b-d128-575a-b445-42351e19d8a2",
         "issued_at": "1788472800",
         "expires_at": "1788473100",
         "purpose": "platform.acquisition",
@@ -102,10 +117,10 @@
         "required_cap_per_run_microusd": "1",
         "required_max_runs": "1",
         "required_campaign_cap_microusd": "1",
-        "policy_revision": "6a6bf0c295f9116a919ab1fbd67b47942a3e5b7c20de1f7a56421b170c9e442a",
-        "policy_artifact_id": "platform-authority-policy-matrix/2026-09-04-reviewed-v2",
-        "policy_artifact_sha256": "f9e9591731772f974b087307b5d0365c58c86b501232804c77a20fd3592db01b",
-        "policy_matrix_revision": "reviewed-v2",
+        "policy_revision": "feceaadf73cd019c0a0f79bc71ee8644240f311b48757735f1a348dd3936b34e",
+        "policy_artifact_id": "platform-authority-policy-matrix/2026-11-05-reviewed-v3",
+        "policy_artifact_sha256": "84e6a8a1121024dc4232b0eaf16cb84af18626e604db1f01881a9d6af2262fab",
+        "policy_matrix_revision": "reviewed-v3",
         "request_contract_version": "platform-schedule-authority-v1",
         "execution_envelope_schema_version": "platform-execution-envelope/v1",
         "execution_envelope_sha256": "5988e194df7c1a3b911964b5d6e9ee3cb5a0e18b38aecff247a7d8017da65caf",
@@ -132,7 +147,7 @@
         "maximum_fallback_wires": "0",
         "maximum_input_tokens": "0",
         "maximum_output_tokens": "0",
-        "quote_sha256": "ec8317a07ffeaacf31bfb6b140ab9a05396fe4b24e34227895a5d843dc7ab09c"
+        "quote_sha256": "04c8c674d24cb1259cb2fba8a64aa36a97915f04aacedd56da5030eb243ec414"
       }
     },
     {
@@ -150,12 +165,17 @@
         "schemaVersion": "platform-execution-provider-snapshot/v1",
         "scheduleId": "intent-sweep",
         "providers": [
-          { "providerId": "crawl4ai.render", "providerVersion": "1.0.0", "enablement": "ENABLED", "bytePriceCatalogRevision": null }
+          {
+            "providerId": "crawl4ai.render",
+            "providerVersion": "1.0.0",
+            "enablement": "ENABLED",
+            "bytePriceCatalogRevision": null
+          }
         ]
       },
       "expected_quote": {
         "schema_version": "platform-execution-technical-quote/v1",
-        "quote_id": "2e34d134-63c1-5800-addd-3267a9e2a06f",
+        "quote_id": "bdb8d584-6000-5d11-b9c5-8c1a7081f74d",
         "issued_at": "1788472800",
         "expires_at": "1788473100",
         "purpose": "platform.intent_watch",
@@ -168,10 +188,10 @@
         "required_cap_per_run_microusd": "10000000",
         "required_max_runs": "1",
         "required_campaign_cap_microusd": "10000000",
-        "policy_revision": "7977ae59f9df0c6dc48587bcc8468d02fe986d47f24f09ca5d6f770722aa3265",
-        "policy_artifact_id": "platform-authority-policy-matrix/2026-09-04-reviewed-v2",
-        "policy_artifact_sha256": "f9e9591731772f974b087307b5d0365c58c86b501232804c77a20fd3592db01b",
-        "policy_matrix_revision": "reviewed-v2",
+        "policy_revision": "6d18694bfd4eae335ce8e39d1d06e291d38a681705bc23d06778d1f0c12c3b59",
+        "policy_artifact_id": "platform-authority-policy-matrix/2026-11-05-reviewed-v3",
+        "policy_artifact_sha256": "84e6a8a1121024dc4232b0eaf16cb84af18626e604db1f01881a9d6af2262fab",
+        "policy_matrix_revision": "reviewed-v3",
         "request_contract_version": "platform-schedule-authority-v1",
         "execution_envelope_schema_version": "platform-execution-envelope/v1",
         "execution_envelope_sha256": "9d41fe91658a834aec03ee3f235b92494c5171ed5c877f2e7b7f75b3923d6688",
@@ -198,7 +218,7 @@
         "maximum_fallback_wires": "0",
         "maximum_input_tokens": "0",
         "maximum_output_tokens": "0",
-        "quote_sha256": "a384fc3f9d96690879fd8e889fa4316368560fb8f155e95a3bb802d5bf502d15"
+        "quote_sha256": "c5dd44bce14a8800212ffc2b933220ae82d3e8d864cd14e698a751fa6645c638"
       }
     },
     {
@@ -216,13 +236,23 @@
         "schemaVersion": "platform-execution-provider-snapshot/v1",
         "scheduleId": "sanctions-refresh",
         "providers": [
-          { "providerId": "ofac_sdn", "providerVersion": "1.0.0", "enablement": "ENABLED", "bytePriceCatalogRevision": null },
-          { "providerId": "eu_fsf", "providerVersion": "1.0.0", "enablement": "ENABLED", "bytePriceCatalogRevision": null }
+          {
+            "providerId": "ofac_sdn",
+            "providerVersion": "1.0.0",
+            "enablement": "ENABLED",
+            "bytePriceCatalogRevision": null
+          },
+          {
+            "providerId": "eu_fsf",
+            "providerVersion": "1.0.0",
+            "enablement": "ENABLED",
+            "bytePriceCatalogRevision": null
+          }
         ]
       },
       "expected_quote": {
         "schema_version": "platform-execution-technical-quote/v1",
-        "quote_id": "85f4c113-4290-5ba9-9e66-44a427f1f3ab",
+        "quote_id": "892976f9-269d-56bf-8fc5-1c3c7ef2cd2e",
         "issued_at": "1788472800",
         "expires_at": "1788473100",
         "purpose": "platform.sanctions",
@@ -235,10 +265,10 @@
         "required_cap_per_run_microusd": "1",
         "required_max_runs": "1",
         "required_campaign_cap_microusd": "1",
-        "policy_revision": "975287015c37953b1b42d92565808c125bbaa6666f0a9e6f34c6ff16fbfae5c4",
-        "policy_artifact_id": "platform-authority-policy-matrix/2026-09-04-reviewed-v2",
-        "policy_artifact_sha256": "f9e9591731772f974b087307b5d0365c58c86b501232804c77a20fd3592db01b",
-        "policy_matrix_revision": "reviewed-v2",
+        "policy_revision": "6ab42d3069811aad1fae33c230c5af82c692911683a98cbbbf5e50408cfe7eea",
+        "policy_artifact_id": "platform-authority-policy-matrix/2026-11-05-reviewed-v3",
+        "policy_artifact_sha256": "84e6a8a1121024dc4232b0eaf16cb84af18626e604db1f01881a9d6af2262fab",
+        "policy_matrix_revision": "reviewed-v3",
         "request_contract_version": "platform-schedule-authority-v1",
         "execution_envelope_schema_version": "platform-execution-envelope/v1",
         "execution_envelope_sha256": "c9e22f1fdad8d91f459dc084aa779c195c38dc3f018f158fd8b4987a0f088e64",
@@ -265,7 +295,7 @@
         "maximum_fallback_wires": "0",
         "maximum_input_tokens": "0",
         "maximum_output_tokens": "0",
-        "quote_sha256": "44ab1b2355490623db24468259ead8879db5abdd2c5ff6606a838fcea0429ef6"
+        "quote_sha256": "1872fe740e1ce3a7f71afeecf9901cedc50f95f0b0256ad8026c01a34a0e2385"
       }
     }
   ]

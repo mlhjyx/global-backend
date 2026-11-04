@@ -52,7 +52,7 @@ describe("compiled platform authority runtime boundary", () => {
     });
   });
 
-  it("loads the exact embedded GrowthOS policy through the compiled API module", async () => {
+  it("loads the exact embedded reviewed-v3 policy through the compiled API module", async () => {
     const runtime = (await import(
       resolve(
         REPOSITORY_ROOT,
@@ -66,21 +66,21 @@ describe("compiled platform authority runtime boundary", () => {
     };
 
     expect(runtime.loadVerifiedPlatformAuthorityPolicyAsset()).toMatchObject({
-      byteLength: 15_583,
+      byteLength: 15_996,
       sha256:
-        "f9e9591731772f974b087307b5d0365c58c86b501232804c77a20fd3592db01b",
+        "84e6a8a1121024dc4232b0eaf16cb84af18626e604db1f01881a9d6af2262fab",
     });
     const { createHash } = await import("node:crypto");
     const { readFile } = await import("node:fs/promises");
     const emitted = await readFile(
       resolve(
         REPOSITORY_ROOT,
-        "apps/api/dist/platform-authority/platform-authority-policy-matrix-v2.json",
+        "apps/api/dist/platform-authority/platform-authority-policy-matrix-v3.json",
       ),
     );
-    expect(emitted.byteLength).toBe(15_583);
+    expect(emitted.byteLength).toBe(15_996);
     expect(createHash("sha256").update(emitted).digest("hex")).toBe(
-      "f9e9591731772f974b087307b5d0365c58c86b501232804c77a20fd3592db01b",
+      "84e6a8a1121024dc4232b0eaf16cb84af18626e604db1f01881a9d6af2262fab",
     );
   });
 });
