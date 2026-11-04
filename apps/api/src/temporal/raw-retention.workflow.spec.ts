@@ -19,6 +19,8 @@ beforeEach(() => {
   temporal.continueAsNew.mockReset();
   // Q25：访问审计保留期清理的默认回执（无更多到期行）。
   acts.expirePersonalDataAccessAudit.mockResolvedValue({ expired: 0, hasMore: false });
+  // 巡检（2026-11-04）：超时 RESERVED 工具预算操作清收的默认回执（无更多孤儿预留）。
+  acts.reconcileStaleToolBudgetOperations.mockResolvedValue({ released: 0, hasMore: false });
 });
 
 describe("rawRetentionSweepWorkflow deterministic orchestration", () => {
@@ -119,6 +121,38 @@ describe("rawRetentionSweepWorkflow deterministic orchestration", () => {
       workspaceId: "ws-1",
       limit: 1000,
     });
+  });
+
+  it("releases stale tool-budget reservations per workspace until no stale row remains", async () => {
+    acts.listRawRetentionWorkspaces.mockResolvedValue({
+      workspaceIds: ["ws-1"],
+      nextCursor: null,
+    });
+    acts.expireRawSourceRecords.mockResolvedValue({ expired: 0, deferredForConflict: 0 });
+    acts.reconcileStaleToolBudgetOperations
+      .mockResolvedValueOnce({ released: 200, hasMore: true })
+      .mockResolvedValueOnce({ released: 3, hasMore: false });
+
+    await rawRetentionSweepWorkflow({ batchSize: 10 });
+
+    expect(acts.reconcileStaleToolBudgetOperations).toHaveBeenCalledTimes(2);
+    expect(acts.reconcileStaleToolBudgetOperations).toHaveBeenCalledWith({
+      workspaceId: "ws-1",
+      limit: 200,
+    });
+  });
+
+  it("never schedules the budget reconcile on a history recorded before the patch", async () => {
+    setPatched((patchId) => patchId !== "budget-operation-reconcile-v1");
+    acts.listRawRetentionWorkspaces.mockResolvedValue({
+      workspaceIds: ["legacy-ws"],
+      nextCursor: null,
+    });
+    acts.expireRawSourceRecords.mockResolvedValue({ expired: 1, deferredForConflict: 0 });
+
+    await rawRetentionSweepWorkflow({ workspaceLimit: 10, batchSize: 10 });
+
+    expect(acts.reconcileStaleToolBudgetOperations).not.toHaveBeenCalled();
   });
 
   it("never schedules the audit-retention activity on a history recorded before the patch", async () => {
