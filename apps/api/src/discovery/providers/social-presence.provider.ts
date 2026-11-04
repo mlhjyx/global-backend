@@ -42,8 +42,9 @@ import {
  *     searxng.search 会按 personalData:false 把它们全部过滤，故用独立工具）。
  *
  * 铁律：永不登录、不绕验证码、不逆向平台 API；抽到的人必须同时命中「候选姓名」与
- * 「公司名」，否则丢弃（防张冠李戴）。证据许可按层标注 public-index / public-archive /
- * public-page。节流由 broker 的 perDomainCrawlDelayMs=3000 跨进程执行；熔断是进程级
+ * 「公司名」——泛词公司名（Technical/Industries/Solutions…）还须完整域名或多词全名短语级
+ * 佐证，否则丢弃（防张冠李戴）。证据许可按层标注 public-index / public-archive / public-page。
+ * 节流由 broker 的 perDomainCrawlDelayMs=3000 跨进程执行；熔断是进程级
  * 状态（API 与 worker 各一份），最坏为 3×进程数 次拒绝后全开——有意的保守边界。
  */
 
@@ -125,19 +126,97 @@ const LEGAL_FORM_TOKENS = new Set([
   'international', 'und', 'the', 'der', 'die', 'das',
 ]);
 
-function matchesCompany(text: string, company: { name: string; domain?: string }): boolean {
-  const haystack = text.toLowerCase();
-  const tokens = company.name
+/**
+ * 泛词公司名 token（M5 第四轮，r14 验收残留类）：作为公司名出现时不具备区分度的业务通用词。
+ * 泛词**单独命中不算公司佐证**——"Technical Manager at Redline Technical…" 对公司「Technical」
+ * 天然命中，收进来的是别家公司的员工。有区分度的 token（BTS、Havlicek）照常放行；公司名本身是
+ * 泛词时须升级为完整域名或多词全名短语（{@link hasDistinctiveCompanyEvidence}）。
+ * 折叠形（小写、ß→ss、去变音、ae/oe/ue 收敛）；词表刻意保守：只收毫无区分度的业务/职能词，
+ * 漏词只会回到原守卫（少收紧），不会误伤。
+ */
+const GENERIC_NAME_TOKENS: ReadonlySet<string> = new Set([
+  // 英语
+  'technical', 'technics', 'technology', 'technologies', 'tech',
+  'industry', 'industries', 'industrial',
+  'system', 'systems', 'solution', 'solutions',
+  'consult', 'consulting', 'consultancy', 'consultant', 'consultants',
+  'engineering', 'engineer', 'engineers',
+  'service', 'services', 'partner', 'partners',
+  'global', 'digital', 'media', 'software', 'business', 'management',
+  'agency', 'agencies', 'sales', 'marketing', 'development',
+  'innovation', 'innovations', 'integration', 'automation',
+  'logistics', 'energy', 'construction', 'manufacturing', 'production', 'operations',
+  // 德语（折叠后）
+  'technik', 'industrie', 'systeme', 'losung', 'losungen', 'beratung',
+  'unternehmensberatung', 'dienstleistung', 'dienstleistungen',
+  'produktion', 'fertigung', 'konstruktion', 'entwicklung', 'planung', 'vertrieb',
+]);
+
+/** 公司名的可比 token（≥3 字符、去法律形式）：raw 供包含匹配，folded 供泛词分类。 */
+function companyNameTokens(company: { name: string }): { raw: string; folded: string }[] {
+  return company.name
     .toLowerCase()
-    .split(/[^a-z0-9äöüß]+/i)
-    .filter((token) => token.length >= 3 && !LEGAL_FORM_TOKENS.has(token));
-  if (tokens.some((token) => haystack.includes(token))) return true;
-  if (company.domain) {
-    const root = company.domain.toLowerCase().split('.')[0];
-    if (root && root.length >= 3 && haystack.includes(root)) return true;
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((token) => token.length >= 3 && !LEGAL_FORM_TOKENS.has(token))
+    .map((token) => ({ raw: token, folded: foldRoleText(token) }));
+}
+
+type CompanyMatchLevel = 'distinctive' | 'generic' | 'none';
+
+/**
+ * 公司佐证强度：命中的是有区分度的公司名 token / 域名词根（distinctive），还是只有泛词（generic），
+ * 还是没有（none）。泛词单独命中不构成「这就是这家公司」——L3 对 'generic' 要求升级佐证。
+ */
+function companyMatchLevel(
+  text: string,
+  company: { name: string; domain?: string },
+): CompanyMatchLevel {
+  const haystack = text.toLowerCase();
+  let generic = false;
+  for (const token of companyNameTokens(company)) {
+    if (!haystack.includes(token.raw)) continue;
+    if (!GENERIC_NAME_TOKENS.has(token.folded)) return 'distinctive';
+    generic = true;
   }
-  // 公司名全是法律形式/短词（如 "AB GmbH"）时无从校验：宁缺勿错，丢弃。
-  return false;
+  const root = company.domain?.toLowerCase().split('.')[0];
+  if (root && root.length >= 3 && haystack.includes(root)) {
+    if (!GENERIC_NAME_TOKENS.has(foldRoleText(root))) return 'distinctive';
+    generic = true;
+  }
+  return generic ? 'generic' : 'none';
+}
+
+/** 任何公司名 token / 域名词根出现即算命中（L2 富化门：只为已过 L3 证据门的候选补数据）。 */
+function matchesCompany(text: string, company: { name: string; domain?: string }): boolean {
+  return companyMatchLevel(text, company) !== 'none';
+}
+
+/** 公司域名整体出现（边界匹配：允许 www./路径前缀，拒绝 technical.design 这类同前缀 TLD）。 */
+function textMentionsDomain(text: string, domain: string | undefined): boolean {
+  const needle = domain?.toLowerCase().replace(/^www\./, '');
+  if (!needle) return false;
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^a-z0-9-])${escaped}(?![a-z0-9-])`, 'i').test(text);
+}
+
+/** 多词公司名的完整短语（折叠后按 token 边界连续出现）：比单个泛词更有区分度。 */
+function textContainsCompanyPhrase(text: string, company: { name: string }): boolean {
+  const tokens = companyNameTokens(company)
+    .map((token) => token.folded)
+    .filter(Boolean);
+  if (tokens.length < 2) return false;
+  return ` ${foldRoleText(text)} `.includes(` ${tokens.join(' ')} `);
+}
+
+/**
+ * 泛词命中时的升级佐证：完整域名出现，或多词公司名以完整短语出现。单字泛词名（如「Technical」）
+ * 在社媒索引层实际只能靠域名过门——这正是期望的保守边界：它的公司名无法从文本自证，宁缺勿错。
+ */
+function hasDistinctiveCompanyEvidence(
+  text: string,
+  company: { name: string; domain?: string },
+): boolean {
+  return textMentionsDomain(text, company.domain) || textContainsCompanyPhrase(text, company);
 }
 
 /**
@@ -236,11 +315,14 @@ function hasRoleEvidence(
   );
 }
 
-/** 只保留个人主页 URL，并从标题解析出人；公司不匹配的一律丢弃（防张冠李戴）。 */
+/**
+ * 只保留个人主页 URL，并从标题解析出人；公司佐证不足的一律丢弃（防张冠李戴）：
+ * 无佐证/仅同名 → namesake，仅泛词 → generic_name，缺职位词 → uninformative。
+ */
 export function parseSocialResults(
   results: readonly SearxResultLike[],
   company: { name: string; domain?: string },
-  onDropped?: (reason: 'namesake' | 'organisation' | 'uninformative') => void,
+  onDropped?: (reason: 'namesake' | 'organisation' | 'uninformative' | 'generic_name') => void,
 ): ProviderContactRecord[] {
   const found = new Map<string, ProviderContactRecord>();
   for (const result of results) {
@@ -270,8 +352,16 @@ export function parseSocialResults(
     // 同姓守卫（M5）：公司 token 如果只是与这个人名本身重合（公司名恰为姓氏），
     // 就不能证明此人是该公司员工；标题里去掉人名后必须仍有独立的公司佐证。
     const remainder = headline.split(parsed.fullName).join(' ');
-    if (!matchesCompany(remainder, company)) {
+    const companyEvidence = companyMatchLevel(remainder, company);
+    if (companyEvidence === 'none') {
       onDropped?.('namesake');
+      continue;
+    }
+    // 泛词公司名（M5 第四轮，r14 验收残留类）：只命中泛词不算公司佐证——「Technical/Industries/
+    // Solutions…」既可能只是职务词，也可能属于别家公司（Redline Technical）；公司名本身是泛词
+    // （technical.de 名为「Technical」）时更是天然命中。必须有完整域名或多词全名短语才放行。
+    if (companyEvidence === 'generic' && !hasDistinctiveCompanyEvidence(remainder, company)) {
+      onDropped?.('generic_name');
       continue;
     }
     // 专业佐证（M5 第三轮）：公司名之外必须仍有职位/职能词——只有公司名的 headline（「<人名> - 公司」）
@@ -629,6 +719,7 @@ export class SocialPresenceContactAdapter implements ContactDiscoveryAdapter {
         const hostKey = socialHostKey(hostname);
         const page = await this.fetchProfilePage(candidate.sourcePage, hostname, hostKey, ctx, bump);
         if (!page) continue;
+        // 富化门只服务已过 L3 证据门的候选，弱匹配（含泛词）即可；收录与否由 L3 决定。
         if (!matchesCompany(page.text, company)) continue;
         if (!pageTextMentionsName(page.text, candidate.fullName)) continue;
         let people: ExtractedPerson[];
