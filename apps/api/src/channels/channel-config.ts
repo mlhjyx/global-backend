@@ -133,12 +133,22 @@ export function parseChannelConfig(mode: string, raw: unknown): ChannelConfig {
         const selectorValue = selector(value, `config.detail.fields.${key}`);
         switch (key) {
           case 'name':
+            parsedFields.name = selectorValue;
+            break;
           case 'website':
+            parsedFields.website = selectorValue;
+            break;
           case 'country':
+            parsedFields.country = selectorValue;
+            break;
           case 'industry':
+            parsedFields.industry = selectorValue;
+            break;
           case 'products':
+            parsedFields.products = selectorValue;
+            break;
           case 'keywords':
-            parsedFields[key] = selectorValue;
+            parsedFields.keywords = selectorValue;
             break;
           default:
             invalid(`config.detail.fields.${key} is not a channel field (${CHANNEL_FIELD_KEYS.join(', ')})`);
