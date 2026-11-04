@@ -81,6 +81,21 @@ ADR 的 `ACCEPTED` 只表示决定生效，不等于实现或验收；`docs/evid
 
 **PR 生命周期**：`git fetch` → worktree（`pnpm worktree:new`，分支 `codex/<topic>` 或 `claude/<topic>`）→ Conventional Commits → 开 PR（「给产品负责人的说明」四行 + 已执行/未执行检查）→ 独立自审 → 必需检查在**当前 head** 全绿 → squash 合并（DEC-AIDEV-004）→ 删 worktree/分支并用 `node scripts/governance-main-worktree-sync.mjs apply` 同步 main。部署与发布是独立门，不在 PR 内完成。PR 正文必须如实列：已执行的检查、未执行或因环境跳过的检查、关联计划/ADR、回退方式。
 
+### 2B-2 本地验证阶梯（推送前）
+
+目标：能在本地判定的问题留在本地；CI 只做干净复现与无法本地化的重型门（视觉回归、OCI 镜像、Go race、供应链扫描）。
+
+| 改动范围 | 推送前自动（pre-push） | 建议额外手动 | 交给 CI/发布 |
+| --- | --- | --- | --- |
+| 纯文档（`docs/`、根 Markdown、代理元数据） | `verify-docs`（无依赖） | — | — |
+| 一般代码 | `gctl check --fast` + affected 单测（`vitest related`，≤30 个改动源文件） | `gctl check`（全量含零容器单测） | 视觉回归、OCI、Go race |
+| DB / schema / 迁移 | 上述 + `node scripts/run-db-tests.mjs --group service`（一次性库） | 相关 RLS disposable 组 | 真库全量 |
+| 功能 / 接口联调 | 源码热重载：`gctl up core` + `pnpm api:dev` | Playwright 主链路（如可用） | managed runtime 镜像切换 |
+
+- 新 worktree 用 `pnpm worktree:new <topic>`：自动 `gctl link-env` 并后台 `pnpm install`；装完前推送会被 pre-push 明确拦截（不再静默跳过本地门）。
+- `GLOBAL_PREPUSH_FULL=1` 把本地门升为全量（含零容器单测）；`GLOBAL_SKIP_PREPUSH=1` 只跳检查、仍扫密钥。
+- 本地镜像构建不替代 CI 制品门：运行镜像必须来自发布工作流（build-once + 构建证明），本地构建没有 provenance。
+
 ## 3. Definition of Done
 
 - 代码 + 测试（单元/集成/RLS）+ 文档（模块 technical + status）+ 证据（运行/验收）+ 回退方案。
