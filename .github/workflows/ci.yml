@@ -44,6 +44,7 @@ jobs:
       run_temporal_go: ${{ steps.scope.outputs.run_temporal_go }}
       run_oci: ${{ steps.scope.outputs.run_oci }}
       run_db_tests: ${{ steps.scope.outputs.run_db_tests }}
+      run_code: ${{ steps.scope.outputs.run_code }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -69,6 +70,7 @@ jobs:
             echo "run_temporal_go=true" >> "$GITHUB_OUTPUT"
             echo "run_oci=true" >> "$GITHUB_OUTPUT"
             echo "run_db_tests=true" >> "$GITHUB_OUTPUT"
+            echo "run_code=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -78,6 +80,7 @@ jobs:
             echo "run_temporal_go=true" >> "$GITHUB_OUTPUT"
             echo "run_oci=true" >> "$GITHUB_OUTPUT"
             echo "run_db_tests=true" >> "$GITHUB_OUTPUT"
+            echo "run_code=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -85,6 +88,7 @@ jobs:
           run_temporal_go=false
           run_oci=false
           run_db_tests=false
+          run_code=false
           while IFS= read -r -d '' path; do
             case "$path" in
               apps/site-renderer/* | \
@@ -125,6 +129,16 @@ jobs:
                 run_db_tests=true
                 ;;
             esac
+            # 文档快通道：只有「所有改动都是文档/元数据」才跳过代码门。CI 配置（.github/）
+            # 与脚本永远算代码，避免改 CI 把自己藏起来；逐条 AND 的语义由 run_code 起始 false 实现。
+            case "$path" in
+              docs/* | README.md | AGENTS.md | CLAUDE.md | CONTRIBUTING.md | \
+              .claude/* | .agents/* | .codex/* | .superpowers/*)
+                ;;
+              *)
+                run_code=true
+                ;;
+            esac
           done < "$scope_paths"
 
           if [[ "$run_visual" == true ]]; then
@@ -135,6 +149,7 @@ jobs:
           echo "run_temporal_go=${run_temporal_go}" >> "$GITHUB_OUTPUT"
           echo "run_oci=${run_oci}" >> "$GITHUB_OUTPUT"
           echo "run_db_tests=${run_db_tests}" >> "$GITHUB_OUTPUT"
+          echo "run_code=${run_code}" >> "$GITHUB_OUTPUT"
 
   build-test:
     name: build · typecheck · test
@@ -187,14 +202,17 @@ jobs:
         run: pnpm docs:verify
 
       - name: Memory control transaction tests
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: pnpm memory:test
 
       - name: ContractGraph extractor tests and deterministic full-repository gate
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: |
           pnpm code-intelligence:test
           pnpm code-intelligence:check
 
       - name: Prisma generate（build/test 依赖 @prisma/client 类型）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: pnpm --filter @global/db generate
 
       - name: Native Temporal reader server（verified modules · offline race · build）
@@ -222,6 +240,7 @@ jobs:
           awk '$1 == "total:" { seen=1; if ($3+0 < 80) exit 1 } END { if (!seen) exit 1 }' "$temporal_cache/coverage.txt"
 
       - name: Runtime lease principal PostgreSQL permissions
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         shell: bash
         env:
           DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
@@ -323,18 +342,23 @@ jobs:
           trap - EXIT
 
       - name: Lint（eslint flat config，typescript-eslint）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: pnpm --filter @global/api lint
 
       - name: Build 契约包（@global/api 依赖其 dist d.ts，DQ-1）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: pnpm --filter @global/contracts build
 
       - name: Build（nest build = tsc 全量类型检查）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: pnpm --filter @global/api build
 
       - name: Test（vitest 纯单测）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: pnpm --filter @global/api test
 
       - name: Suppression lock Prisma PostgreSQL semantics
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         env:
           SUPPRESSION_LOCK_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
         run: pnpm --filter @global/api exec vitest run src/discovery/suppression-policy-lock.postgres.spec.ts
@@ -347,6 +371,7 @@ jobs:
       # The seller company_profile artifact subject kind binds, holds, tombstones and
       # guards its profile's deletion as app_user on the same schema.
       - name: Raw SQL parameter types on PostgreSQL
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         env:
           DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
           RAW_SQL_TYPES_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
@@ -375,12 +400,14 @@ jobs:
             src/lead/lead-queue-basis.postgres.spec.ts
 
       - name: Site Builder isolated zero-dispatch evaluation boundary
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: pnpm --filter @global/site-builder-eval-runner test
 
       # Raw ingestion and the database writer bind each record to the same source_policy
       # (company-site fallback, most specific site policy, SUSPENDED first). The database was
       # migrated by the Raw SQL step above; every Raw write in the spec is rolled back.
       - name: Raw source company-site policy on PostgreSQL
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         env:
           RAW_SOURCE_POLICY_DATABASE_TEST: "1"
           RAW_SOURCE_POLICY_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
@@ -392,6 +419,7 @@ jobs:
       # the index raw nor mutate it. The spec seeds fixed ids and keeps its rows,
       # so it gets a database of its own and deploys every migration into it.
       - name: Generic operation artifact subject RLS on PostgreSQL
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         env:
           ADMIN_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
           DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_artifact_subject_test
@@ -405,6 +433,7 @@ jobs:
       # source_policy and data_provider are written by the owner connection only.
       # app_user keeps SELECT; no other role, runtime logins included, may write them.
       - name: Governance tables read-only for app_user on PostgreSQL
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         env:
           DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
           GOVERNANCE_TABLES_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
@@ -418,6 +447,7 @@ jobs:
       # docs/governance/app-user-table-privileges.json, new tables start SELECT-only for it,
       # and the writes its code paths perform still succeed (all rolled back).
       - name: app_user table privileges on PostgreSQL
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         env:
           DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
           APP_USER_PRIVILEGES_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
@@ -432,6 +462,7 @@ jobs:
       # changes nothing, a failed write rolls back, app_user is refused. Synthetic lists, no
       # network; the database was migrated by the step above and the suite removes its rows.
       - name: Sanctions operator refresh on PostgreSQL
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         env:
           SANCTIONS_OPERATOR_REFRESH_DATABASE_TEST: "1"
           SANCTIONS_OPERATOR_REFRESH_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
@@ -445,6 +476,7 @@ jobs:
       # run then materializes, row triggers reject changes to the activation row and pre-C runs keep
       # the legacy path.
       - name: Discovery company materialization activation on PostgreSQL
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         shell: bash
         env:
           DISCOVERY_MATERIALIZATION_ACTIVATION_DATABASE_TEST: "1"
@@ -480,7 +512,7 @@ jobs:
         run: node scripts/copy-fixed-source-impact.mjs --github-output "$GITHUB_OUTPUT"
 
       - name: Copy Sonnet recovery fixed-source rebuild（顺序隔离）
-        if: steps.copy-impact.outputs.status == 'CURRENT'
+        if: steps.copy-impact.outputs.status == 'CURRENT' && needs.renderer-visual-scope.outputs.run_code != 'false'
         run: >-
           COPY_SONNET_RECOVERY_MANIFEST_REBUILD_TEST=1
           COPY_SONNET_RECOVERY_REBUILD_TEST=1
@@ -489,6 +521,7 @@ jobs:
           src/site-builder/eval/copy-sonnet-recovery-runtime-binding-prep.spec.ts
 
       - name: Generate and verify API build attestation
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         shell: bash
         env:
           BUILD_SHA: ${{ github.sha }}

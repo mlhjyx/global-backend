@@ -240,7 +240,7 @@ test("heavy Temporal and OCI gates are path-scoped and fail closed", async () =>
   const ciWorkflow = await readRepositoryFile(".github/workflows/ci.yml");
   const scopeJob = jobBlock(ciWorkflow, "renderer-visual-scope");
   const buildJob = jobBlock(ciWorkflow, "build-test");
-  for (const output of ["run_temporal_go", "run_oci", "run_db_tests"]) {
+  for (const output of ["run_temporal_go", "run_oci", "run_db_tests", "run_code"]) {
     assert.match(
       scopeJob,
       new RegExp(`\\n      ${output}: \\$\\{\\{ steps\\.scope\\.outputs\\.${output} \\}\\}`),
@@ -288,20 +288,20 @@ test("heavy Temporal and OCI gates are path-scoped and fail closed", async () =>
 
   const script = scopeScript(ciWorkflow);
   const cases = [
-    [["docs/status/current.md", "README.md", ".claude/skills/x/SKILL.md"], "false", "false", "false", "false"],
-    [["infra/temporal-platform/server/go.mod"], "false", "true", "true", "false"],
-    [["apps/api/src/main.ts"], "false", "false", "true", "true"],
-    [["pnpm-lock.yaml"], "true", "false", "true", "true"],
-    [["apps/site-renderer/src/index.ts"], "true", "false", "true", "false"],
-    [[".github/workflows/ci.yml"], "true", "true", "true", "true"],
-    [[".github/workflows/security.yml"], "false", "false", "false", "false"],
-    [["brand-new-top-level-dir/file.txt"], "false", "false", "true", "false"],
-    [["apps/api/src/prompts/notes.md"], "false", "false", "true", "true"],
+    [["docs/status/current.md", "README.md", ".claude/skills/x/SKILL.md"], "false", "false", "false", "false", "false"],
+    [["infra/temporal-platform/server/go.mod"], "false", "true", "true", "false", "true"],
+    [["apps/api/src/main.ts"], "false", "false", "true", "true", "true"],
+    [["pnpm-lock.yaml"], "true", "false", "true", "true", "true"],
+    [["apps/site-renderer/src/index.ts"], "true", "false", "true", "false", "true"],
+    [[".github/workflows/ci.yml"], "true", "true", "true", "true", "true"],
+    [[".github/workflows/security.yml"], "false", "false", "false", "false", "true"],
+    [["brand-new-top-level-dir/file.txt"], "false", "false", "true", "false", "true"],
+    [["apps/api/src/prompts/notes.md"], "false", "false", "true", "true", "true"],
   ];
-  for (const [paths, visual, temporal, oci, dbTests] of cases) {
+  for (const [paths, visual, temporal, oci, dbTests, code] of cases) {
     assert.deepEqual(
       await runScope(script, paths),
-      { run_visual: visual, run_temporal_go: temporal, run_oci: oci, run_db_tests: dbTests },
+      { run_visual: visual, run_temporal_go: temporal, run_oci: oci, run_db_tests: dbTests, run_code: code },
       paths.join(", "),
     );
   }
@@ -310,7 +310,15 @@ test("heavy Temporal and OCI gates are path-scoped and fail closed", async () =>
     run_temporal_go: "true",
     run_oci: "true",
     run_db_tests: "true",
+    run_code: "true",
   });
+
+  const testStep = namedStepBlock(buildJob, "Test（vitest 纯单测）");
+  assert.deepEqual(
+    testStep.match(/^        if:.*$/gm),
+    ["        if: needs.renderer-visual-scope.outputs.run_code != 'false'"],
+    "code steps must default to running unless the classifier explicitly says docs-only",
+  );
 });
 
 test("the Copy recovery rebuild gate rederives both fixed-source artifacts", async () => {
@@ -341,7 +349,7 @@ test("the Copy recovery rebuild gate rederives both fixed-source artifacts", asy
   );
   assert.match(
     rebuildStep,
-    /^        if: steps\.copy-impact\.outputs\.status == 'CURRENT'$/m,
+    /^        if: steps\.copy-impact\.outputs\.status == 'CURRENT' && needs\.renderer-visual-scope\.outputs\.run_code != 'false'$/m,
   );
   assert.match(
     rebuildStep,
