@@ -526,6 +526,109 @@ describe("ICP generation authority and controlled enrichment", () => {
     expect(f.tx.persona.create).toHaveBeenCalledOnce();
     expect(f.tx.buyingCommitteeRole.create).toHaveBeenCalledOnce();
   });
+  it("injects the seller profile's authoritative target markets and industry into the prompt (P1-B2)", async () => {
+    const f = generationFixture();
+    f.tx.companyProfile.findUnique.mockResolvedValue({
+      name: "Synthetic Seller",
+      website: null,
+      industry: "塑料包装制品制造",
+      targetMarkets: ["MY"],
+    });
+    f.result.data = {
+      name: "Generated",
+      company_attributes: {},
+      pain_points: [],
+      trigger_signals: [],
+      exclusions: [],
+      value_props: [],
+      target_markets: ["马来西亚"],
+      personas: [],
+      buying_committee: [],
+      qualification_rules: [],
+    };
+
+    await f.service.generateFromCompany(ctx, "company");
+    const prompt = f.runtime.mock.calls[0][1].prompt as string;
+    expect(prompt).toContain("MY（马来西亚）");
+    expect(prompt).toContain("塑料包装制品制造");
+    expect(prompt).toContain("权威");
+    expect(f.tx.icpDefinition.create.mock.calls[0][0].data.targetMarkets).toEqual(["马来西亚"]);
+  });
+
+  it("completes the ICP's target markets from the profile when the model omits them (P1-B2)", async () => {
+    const f = generationFixture();
+    f.tx.companyProfile.findUnique.mockResolvedValue({
+      name: "Synthetic Seller",
+      website: null,
+      industry: null,
+      targetMarkets: ["MY"],
+    });
+    f.result.data = {
+      name: "Generated",
+      company_attributes: {},
+      pain_points: [],
+      trigger_signals: [],
+      exclusions: [],
+      value_props: [],
+      target_markets: ["珠三角电子制造企业"],
+      personas: [],
+      buying_committee: [],
+      qualification_rules: [],
+    };
+
+    await f.service.generateFromCompany(ctx, "company");
+    expect(f.tx.icpDefinition.create.mock.calls[0][0].data.targetMarkets).toEqual([
+      "珠三角电子制造企业",
+      "马来西亚",
+    ]);
+  });
+
+  it("does not duplicate a seller market the model already wrote in another form (P1-B2)", async () => {
+    const f = generationFixture();
+    f.tx.companyProfile.findUnique.mockResolvedValue({
+      name: "Synthetic Seller",
+      website: null,
+      industry: null,
+      targetMarkets: ["DE"],
+    });
+    f.result.data = {
+      name: "Generated",
+      company_attributes: {},
+      pain_points: [],
+      trigger_signals: [],
+      exclusions: [],
+      value_props: [],
+      target_markets: ["德国"],
+      personas: [],
+      buying_committee: [],
+      qualification_rules: [],
+    };
+
+    await f.service.generateFromCompany(ctx, "company");
+    expect(f.tx.icpDefinition.create.mock.calls[0][0].data.targetMarkets).toEqual(["德国"]);
+  });
+
+  it("keeps generation unchanged when the profile declares no markets or industry (P1-B2)", async () => {
+    const f = generationFixture();
+    f.result.data = {
+      name: "Generated",
+      company_attributes: {},
+      pain_points: [],
+      trigger_signals: [],
+      exclusions: [],
+      value_props: [],
+      target_markets: ["德国"],
+      personas: [],
+      buying_committee: [],
+      qualification_rules: [],
+    };
+
+    await f.service.generateFromCompany(ctx, "company");
+    const prompt = f.runtime.mock.calls[0][1].prompt as string;
+    expect(prompt).not.toContain("卖方档案（权威输入）");
+    expect(f.tx.icpDefinition.create.mock.calls[0][0].data.targetMarkets).toEqual(["德国"]);
+  });
+
   it("drops a proposed EXCLUSION that mirrors a MUST_HAVE (same field and value, negated operator) and keeps the positive one", async () => {
     // ICP 22202d3c on xin: six EXCLUSION rules mirrored the MUST_HAVEs; the company keywords are an
     // English controlled vocabulary, so `keywords not_contains "泵"` passed for every company.

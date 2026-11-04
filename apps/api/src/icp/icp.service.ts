@@ -45,6 +45,8 @@ import {
   type ExecutionBudgetBinding,
 } from '../execution-budget/execution-budget-authority.service';
 import { workspaceExecutionBudgetRequestScope } from '../execution-budget/execution-budget-request-scope';
+import { COUNTRY_NAME_BY_ISO } from '../discovery/vocab';
+import { targetCountryCodes } from '../discovery/search-localization';
 import { IcpFeedbackService } from './icp-feedback.service';
 import {
   applyDomainAckConsumerTransaction,
@@ -93,6 +95,44 @@ const RULE_KINDS = ['MUST_HAVE', 'NICE_TO_HAVE', 'EXCLUSION'] as const;
 const RULE_OPERATORS = ['eq', 'neq', 'in', 'not_in', 'contains', 'not_contains', 'gte', 'lte', 'matches'];
 
 const json = (v: unknown): Prisma.InputJsonValue => (v ?? []) as Prisma.InputJsonValue;
+
+/**
+ * P1-B2（方案 §2.2）：卖方档案的目标市场是权威输入。档案存 ISO 3166-1 alpha-2；模型输出是自由文本
+ * （「德国」「珠三角电子制造企业」…），两者都要归一成 ISO 才能比对与补齐。
+ */
+function sellerIsoMarkets(profile: { targetMarkets?: unknown } | null | undefined): string[] {
+  const raw = Array.isArray(profile?.targetMarkets) ? profile?.targetMarkets : [];
+  return [
+    ...new Set(
+      raw
+        .filter((market): market is string => typeof market === 'string')
+        .map((market) => market.trim().toUpperCase())
+        .filter((market) => /^[A-Z]{2}$/.test(market)),
+    ),
+  ];
+}
+
+function marketDisplayName(iso: string): string {
+  return COUNTRY_NAME_BY_ISO[iso] ?? iso;
+}
+
+/**
+ * 模型输出的 target_markets 必须覆盖档案市场（可追加、不得替换）：缺哪个补哪个，已覆盖的不重复追加。
+ * 覆盖判定同时看两路：`targetCountryCodes` 能解析的中文/英文/地区词，以及直接写出的中文国名。
+ */
+export function completeTargetMarkets(modelMarkets: unknown, sellerMarkets: readonly string[]): unknown[] {
+  const model = Array.isArray(modelMarkets) ? modelMarkets : [];
+  if (sellerMarkets.length === 0) return model;
+  const modelText = model.filter((market): market is string => typeof market === 'string');
+  const covered = new Set(
+    targetCountryCodes({ filters: { country: modelText } }).map((iso) => iso.toUpperCase()),
+  );
+  for (const iso of sellerMarkets) {
+    if (modelText.some((market) => market.includes(marketDisplayName(iso)))) covered.add(iso);
+  }
+  const missing = sellerMarkets.filter((iso) => !covered.has(iso));
+  return [...model, ...missing.map(marketDisplayName)];
+}
 
 const PLANNER_LANGUAGE_NAMES: Readonly<Record<SearchLanguage, string>> = Object.freeze({
   de: '德语', en: '英语', fr: '法语', it: '意大利语', es: '西班牙语', nl: '荷兰语', pl: '波兰语', zh: '中文',
@@ -172,7 +212,18 @@ export class IcpService {
     const products = offerings.length
       ? `\n产品/服务（官网抽取）：\n${offerings.map((o) => `- ${o.name}${o.description ? `：${o.description}` : ''}`).join('\n')}`
       : '';
-    const prompt = `卖方企业：${company.name}${company.website ? ` (${company.website})` : ''}\n已确认的企业事实：\n${facts}${products}\n\n请据此设计其理想客户画像(ICP)、买家委员会与机器可评估的验证规则，输出中文。`;
+    // P1-B2（方案 §2.2）：档案的 targetMarkets/industry 是权威输入，必须进提示词；输出后还要确定性补齐。
+    const sellerMarkets = sellerIsoMarkets(company);
+    const sellerProfile = [
+      sellerMarkets.length
+        ? `目标市场（ISO 3166-1）：${sellerMarkets.map((iso) => `${iso}（${marketDisplayName(iso)}）`).join('、')}`
+        : '',
+      company.industry ? `行业：${company.industry}` : '',
+    ].filter(Boolean);
+    const sellerAuthority = sellerProfile.length
+      ? `\n卖方档案（权威输入）：\n${sellerProfile.join('\n')}\n目标市场以卖方档案为权威：输出的 target_markets 必须覆盖以上市场（可追加其他市场，但不得替换；追加请在 value_props 或说明中给出理由）。`
+      : '';
+    const prompt = `卖方企业：${company.name}${company.website ? ` (${company.website})` : ''}\n已确认的企业事实：\n${facts}${products}${sellerAuthority}\n\n请据此设计其理想客户画像(ICP)、买家委员会与机器可评估的验证规则，输出中文。`;
 
     const result = await executeIcpBudgetedTask<IcpModelOutput>({
       budgetStore: this.budgetStore ?? new UnavailableBudgetStore('ICP generation requires an authoritative BudgetStore'),
@@ -216,7 +267,7 @@ export class IcpService {
           triggerSignals: json(out.trigger_signals),
           exclusions: json(out.exclusions),
           valueProps: json(out.value_props),
-          targetMarkets: json(out.target_markets),
+          targetMarkets: json(completeTargetMarkets(out.target_markets, sellerMarkets)),
         },
       });
       for (const p of out.personas ?? []) {

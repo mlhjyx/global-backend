@@ -131,6 +131,15 @@ export const COUNTRY_ISO: Record<string, string> = {
   espana: 'ES',
 };
 
+/** ISO 3166-1 alpha-2 → 中文国名（ICP 提示词与目标市场补齐展示用；未收录的回退为代码本身）。 */
+export const COUNTRY_NAME_BY_ISO: Record<string, string> = {
+  DE: '德国', AT: '奥地利', CH: '瑞士', FR: '法国', IT: '意大利', ES: '西班牙', NL: '荷兰', PL: '波兰',
+  GB: '英国', US: '美国', CN: '中国', JP: '日本', KR: '韩国', IN: '印度', MY: '马来西亚',
+  SG: '新加坡', ID: '印度尼西亚', VN: '越南', TH: '泰国', PH: '菲律宾', PT: '葡萄牙', TR: '土耳其',
+  AE: '阿联酋', SA: '沙特阿拉伯', AU: '澳大利亚', NZ: '新西兰', CA: '加拿大', MX: '墨西哥',
+  BR: '巴西', ZA: '南非', RU: '俄罗斯',
+};
+
 const DACH: readonly string[] = Object.freeze(['DE', 'AT', 'CH']);
 
 /**
