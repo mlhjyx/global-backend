@@ -62,6 +62,8 @@ export const DISCOVERY_RUN_CONTACTS_PATCH = 'discovery-run-contacts-v1';
 export const DISCOVERY_RUN2_QUICK_SCAN_PATCH = 'discovery-run2-quick-scan-v1';
 /** M0⑥：影子对比——老路径照跑，同时用新快扫判定做对比（不产出名单），连续两轮召回不降才切默认。 */
 export const DISCOVERY_RUN2_SHADOW_PATCH = 'discovery-run2-shadow-v1';
+/** 巡检（2026-11-04）：深挖段失败/取消时 stats.failure.stage 记 'deep'，不再沿用 quickScan。 */
+export const DISCOVERY_DEEP_STAGE_LABEL_PATCH = 'discovery-deep-stage-label-v1';
 /** 公司池候选少于此数才触发有界搜索兜底（设计 R3）。 */
 const RUN2_POOL_SEARCH_FALLBACK_THRESHOLD = 20;
 /** 深挖父工作流同时推进的公司数（设计 R2/Q8）。 */
@@ -595,6 +597,8 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       await acts.markRunPhase({ workspaceId, runId, phase: 'quick_done' });
       const deepTargets = await acts.listDeepTargets({ workspaceId, runId });
       await acts.markRunPhase({ workspaceId, runId, phase: 'deep_started' });
+      // 巡检（2026-11-04）：进入深挖后失败记录应写 'deep'；patch 前记录的旧历史重放保持原值。
+      if (patched(DISCOVERY_DEEP_STAGE_LABEL_PATCH)) stage = 'deep';
       let deepStopped = false;
       const deepStages: string[] = [];
       try {

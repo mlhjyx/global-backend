@@ -9,6 +9,7 @@ export type DiscoveryRunStage =
   | 'query'
   | 'canonicalize'
   | 'quickScan'
+  | 'deep'
   | 'websiteProfile'
   | 'fit'
   | 'enrich'
