@@ -758,6 +758,68 @@ describe("ICP generation authority and controlled enrichment", () => {
     expect(prompt).not.toContain("trade_fair");
     expect(plan).toMatchObject({ status: "DRAFT" });
   });
+  it("rewrites the planner output once when keywords do not fit the market language (P2)", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.icp.targetMarkets = ["马来西亚"];
+    const chineseQuery = {
+      ...PUBLIC_WEB_QUERY,
+      filters: { industry: "泵", country: "马来西亚", source_hint: "public_web" },
+      keywords: ["工业泵"],
+    };
+    const malayQuery = {
+      ...PUBLIC_WEB_QUERY,
+      filters: { industry: "pam", country: "马来西亚", source_hint: "public_web" },
+      keywords: ["pam industri"],
+    };
+    f.runtime
+      .mockResolvedValueOnce({ data: { queries: [chineseQuery], estimated_volume: 10 } } as never)
+      .mockResolvedValueOnce({ data: { queries: [malayQuery], estimated_volume: 10 } } as never);
+
+    const plan = await f.service.generateQueryPlan(ctx, f.icp.id);
+
+    expect(f.runtime).toHaveBeenCalledTimes(2);
+    const retryPrompt = f.runtime.mock.calls[1]![1].prompt as string;
+    expect(retryPrompt).toContain("马来语");
+    const queries = plan.queries as Array<{ keywords?: string[] }>;
+    expect(queries[0]!.keywords).toEqual(["pam industri"]);
+  });
+
+  it("fails with DISCOVERY_KEYWORDS_LANGUAGE_MISMATCH when the rewrite still does not fit (P2)", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.icp.targetMarkets = ["马来西亚"];
+    const chineseQuery = {
+      ...PUBLIC_WEB_QUERY,
+      filters: { industry: "泵", country: "马来西亚", source_hint: "public_web" },
+      keywords: ["工业泵"],
+    };
+    f.runtime.mockResolvedValue({ data: { queries: [chineseQuery], estimated_volume: 10 } } as never);
+
+    await expect(f.service.generateQueryPlan(ctx, f.icp.id)).rejects.toMatchObject({
+      status: 409,
+      response: { error: { code: "DISCOVERY_KEYWORDS_LANGUAGE_MISMATCH" } },
+    });
+    expect(f.runtime).toHaveBeenCalledTimes(2);
+    expect(f.tx.discoveryQueryPlan.create).not.toHaveBeenCalled();
+  });
+
+  it("keeps a single planner call when the keywords already fit the market language (P2)", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.icp.targetMarkets = ["马来西亚"];
+    const malayQuery = {
+      ...PUBLIC_WEB_QUERY,
+      filters: { industry: "pam", country: "马来西亚", source_hint: "public_web" },
+      keywords: ["pam industri"],
+    };
+    f.result.data = { queries: [malayQuery], estimated_volume: 10 };
+
+    await f.service.generateQueryPlan(ctx, f.icp.id);
+
+    expect(f.runtime).toHaveBeenCalledTimes(1);
+  });
+
   it("refuses to plan when trade_fair is the only ENABLED source and the ICP matches no fair", async () => {
     const f = generationFixture();
     f.icp.status = "ACTIVE";
