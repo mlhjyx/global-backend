@@ -5,18 +5,24 @@ FROM node:22.18.0-bookworm-slim@sha256:752ea8a2f758c34002a0461bd9f1cee4f9a3c36d4
 COPY --from=ca-bootstrap /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
 # Bootstrap CA bytes come from the digest-pinned stage above. APT then verifies
-# both snapshot TLS and Debian Release signatures; trust-bypass options are forbidden.
+# both archive TLS and Debian Release signatures; trust-bypass options are forbidden.
+# The pinned archive is served through Debian's official Cloudflare frontend
+# (snapshot-cloudflare.debian.org) rather than snapshot.debian.org: identical
+# archive bytes, timestamp and Release signatures, but a separate CDN path, so a
+# single frontend outage cannot take builds down. Rollback is swapping the
+# hostname back. Connection timeouts keep a degraded archive from hanging the
+# layer indefinitely (retries alone do not bound a slow trickle).
 RUN echo '766392c21c0baf5fa722cb309dc576b89d9fb3323dd32aa45a939dd575db6d1c  /etc/ssl/certs/ca-certificates.crt' | sha256sum -c - && \
     rm -f /etc/apt/sources.list.d/debian.sources && \
     test -z "$(find /etc/apt/sources.list.d -maxdepth 1 -type f -print -quit)" && \
     rm -rf /var/lib/apt/lists/* && \
     printf '%s\n' \
-      'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20260826T000000Z/ bookworm main' \
-      'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/20260826T000000Z/ bookworm-updates main' \
-      'deb [check-valid-until=no] https://snapshot.debian.org/archive/debian-security/20260826T000000Z/ bookworm-security main' \
+      'deb [check-valid-until=no] https://snapshot-cloudflare.debian.org/archive/debian/20260826T000000Z/ bookworm main' \
+      'deb [check-valid-until=no] https://snapshot-cloudflare.debian.org/archive/debian/20260826T000000Z/ bookworm-updates main' \
+      'deb [check-valid-until=no] https://snapshot-cloudflare.debian.org/archive/debian-security/20260826T000000Z/ bookworm-security main' \
       > /etc/apt/sources.list && \
-    apt-get -o Acquire::Retries=3 update && \
-    apt-get install -y --no-install-recommends \
+    apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update && \
+    apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends \
       ca-certificates \
       chromium=151.0.7922.173-1~deb12u1 \
       util-linux=2.38.1-5+deb12u3 \
