@@ -39,6 +39,7 @@ import { sanitizeEvidenceUrl } from '../../site-builder/agents/evidence-ref';
 import {
   MAX_SEARCHES_PER_QUERY,
   isForeignCountryDomain,
+  partitionSearchTerms,
   searchLanguageFor,
   searchableTerms,
   targetCountryTlds,
@@ -161,6 +162,19 @@ export class PublicWebDiscoveryProvider
     // judging one again only spends model calls to produce a record ingestion would discard.
     const known = new Set((opts?.knownExternalIds ?? []).map((d) => d.toLowerCase()));
     const searches = buildSearchQueries(query);
+    // P2 §2.3：被剥离的词留痕（规划器关键词语言与目标市场不一致的直接证据；截断防日志放大）。
+    {
+      const filters = (query.filters ?? {}) as Record<string, unknown>;
+      const asList = (value: unknown): string[] =>
+        Array.isArray(value) ? value.map(String) : value == null ? [] : [String(value)];
+      const { stripped } = partitionSearchTerms(
+        [...(query.keywords ?? []), ...asList(filters.industry), ...asList(filters.sub_industry), ...asList(filters.product)],
+        searchLanguageFor(query),
+      );
+      if (stripped.length > 0) {
+        this.log(`dropped terms that do not fit the search language: ${stripped.slice(0, 5).join(' | ')}`);
+      }
+    }
     // 空检索串不发起任何搜索、静默产出 0 结果曾让「目标市场语言不受支持」以 4 秒 PARTIAL 收场
     // （2026-11-04 产品反馈：中国/中文关键词的 ICP）。这里显式失败，给出可操作的错误码。
     if (searches.length === 0) {

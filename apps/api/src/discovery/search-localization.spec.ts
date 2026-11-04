@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  partitionSearchTerms,
   searchableTerms,
   searchCountryName,
   searchLanguageFor,
@@ -122,9 +123,54 @@ describe('中文（zh）检索本地化', () => {
     expect(tradeRoleTerms('manufacturer', 'zh')).toEqual(['制造商', '厂家', '工厂']);
   });
 
-  it('keeps Han terms for zh searches and still strips them for other languages', () => {
-    expect(searchableTerms(['工业泵 分销商', 'Pumpen'], 'zh')).toEqual(['工业泵 分销商', 'Pumpen']);
+  it('keeps Han terms for zh searches (dropping Latin-only ones) and still strips CJK for other languages', () => {
+    expect(searchableTerms(['工业泵 分销商', 'Pumpen'], 'zh')).toEqual(['工业泵 分销商']);
     expect(searchableTerms(['工业泵 分销商', 'Pumpen'], 'de')).toEqual(['Pumpen']);
     expect(searchableTerms(['工业泵 分销商'])).toEqual([]);
+  });
+});
+
+describe('P2 八语言扩展（ms/id/vi/th/ja/ko/pt/tr）', () => {
+  it.each([
+    [{ country: '马来西亚' }, 'ms'],
+    [{ country: 'Malaysia' }, 'ms'],
+    [{ country: 'MY' }, 'ms'],
+    [{ country: '印度尼西亚' }, 'id'],
+    [{ country: '越南' }, 'vi'],
+    [{ country: '泰国' }, 'th'],
+    [{ country: '日本' }, 'ja'],
+    [{ country: '韩国' }, 'ko'],
+    [{ country: '葡萄牙' }, 'pt'],
+    [{ country: '土耳其' }, 'tr'],
+  ])('resolves %o to %s', (filters, language) => {
+    expect(searchLanguageFor({ filters })).toBe(language);
+  });
+
+  it('maps ICP markets to the new languages', () => {
+    expect(searchLanguagesForMarkets(['马来西亚'])).toEqual(['ms']);
+    expect(searchLanguagesForMarkets(['Vietnam', 'Thailand'])).toEqual(['vi', 'th']);
+    expect(searchLanguagesForMarkets(['日本、韩国'])).toEqual(['ja', 'ko']);
+  });
+
+  it('provides localized role terms', () => {
+    expect(tradeRoleTerms('distributor', 'ms')).toEqual(['pemborong', 'peniaga', 'pengedar']);
+    expect(tradeRoleTerms('manufacturer', 'ms')).toEqual(['pengeluar', 'pembuat']);
+    expect(tradeRoleTerms('distributor', 'ja')).toEqual(['販売代理店', '卸売業者', 'ディーラー']);
+    expect(tradeRoleTerms('distributor', 'tr')).toEqual(['distribütör', 'toptancı', 'bayi']);
+    expect(tradeRoleTerms('manufacturer', 'th')).toEqual(['ผู้ผลิต']);
+  });
+
+  it('keeps script-appropriate terms and reports the stripped ones', () => {
+    expect(partitionSearchTerms(['pemborong pam', '工业泵'], 'ms')).toEqual({
+      usable: ['pemborong pam'],
+      stripped: ['工业泵'],
+    });
+    expect(partitionSearchTerms(['工業用ポンプ 卸売業者', 'Pumpen'], 'ja').usable).toEqual(['工業用ポンプ 卸売業者']);
+    expect(partitionSearchTerms(['산업용 펌프 도매'], 'ko').usable).toEqual(['산업용 펌프 도매']);
+    expect(partitionSearchTerms(['工业泵 分销商', 'Pumpen'], 'zh')).toEqual({
+      usable: ['工业泵 分销商'],
+      stripped: ['Pumpen'],
+    });
+    expect(partitionSearchTerms(['Pumpen', '工业泵'])).toEqual({ usable: ['Pumpen'], stripped: ['工业泵'] });
   });
 });

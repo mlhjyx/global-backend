@@ -127,6 +127,26 @@ describe('search language and trade role (G3 5.3)', () => {
     expect(queries.some((q) => /制造商|厂家|工厂/.test(q))).toBe(true);
   });
 
+  it('builds Malay distributor queries for a Malaysian market (P2)', () => {
+    const queries = buildSearchQueries(distributorQuery({
+      filters: { country: '马来西亚', industry: 'pam industri', trade_side: 'distributor' },
+      keywords: ['pam empar'],
+    }));
+    expect(queries.length).toBeGreaterThan(0);
+    expect(queries.some((q) => /pemborong|peniaga|pengedar/.test(q))).toBe(true);
+    expect(queries.every((q) => !/[\p{Script=Han}]/u.test(q))).toBe(true);
+    expect(queries.join(' | ')).not.toMatch(/manufacturer|Großhandel/);
+  });
+
+  it('builds Japanese queries from Japanese keywords (P2)', () => {
+    const queries = buildSearchQueries(distributorQuery({
+      filters: { country: '日本', industry: '産業用ポンプ', trade_side: 'distributor' },
+      keywords: ['遠心ポンプ'],
+    }));
+    expect(queries.length).toBeGreaterThan(0);
+    expect(queries.some((q) => /販売代理店|卸売業者|ディーラー/.test(q))).toBe(true);
+  });
+
   it('fails loudly instead of silently returning nothing when no search string can be built', async () => {
     const provider = new PublicWebDiscoveryProvider({
       gateway: {} as never,

@@ -8,7 +8,9 @@
 import { MAX_PUBLIC_WEB_SEARCHES_PER_QUERY } from './execution-envelope';
 import { lookupMarketRegion } from './vocab';
 
-export type SearchLanguage = 'de' | 'en' | 'fr' | 'it' | 'es' | 'nl' | 'pl' | 'zh';
+export type SearchLanguage =
+  | 'de' | 'en' | 'fr' | 'it' | 'es' | 'nl' | 'pl' | 'zh'
+  | 'ms' | 'id' | 'vi' | 'th' | 'ja' | 'ko' | 'pt' | 'tr';
 export type TradeRole = 'distributor' | 'manufacturer';
 
 /** `name` is the country as a search in its own language would write it. */
@@ -24,12 +26,37 @@ const COUNTRIES: readonly CountryEntry[] = Object.freeze([
   { iso2: 'nl', language: 'nl', name: 'Nederland', aliases: ['netherlands', 'nederland', 'holland', 'nl', 'nld', '荷兰'] },
   { iso2: 'pl', language: 'pl', name: 'Polska', aliases: ['poland', 'polska', 'pl', 'pol', '波兰'] },
   { iso2: 'cn', language: 'zh', name: '中国', aliases: ['china', 'cn', 'chn', '中国'] },
+  { iso2: 'my', language: 'ms', name: 'Malaysia', aliases: ['malaysia', 'my', 'mys', '马来西亚'] },
+  { iso2: 'id', language: 'id', name: 'Indonesia', aliases: ['indonesia', 'id', 'idn', '印度尼西亚', '印尼'] },
+  { iso2: 'vn', language: 'vi', name: 'Việt Nam', aliases: ['vietnam', 'viet nam', 'việt nam', 'vn', 'vnm', '越南'] },
+  { iso2: 'th', language: 'th', name: 'ประเทศไทย', aliases: ['thailand', 'th', 'tha', '泰国'] },
+  { iso2: 'jp', language: 'ja', name: '日本', aliases: ['japan', 'jp', 'jpn', '日本'] },
+  { iso2: 'kr', language: 'ko', name: '대한민국', aliases: ['south korea', 'korea', 'kr', 'kor', '韩国', '南韩'] },
+  { iso2: 'pt', language: 'pt', name: 'Portugal', aliases: ['portugal', 'pt', 'prt', '葡萄牙'] },
+  { iso2: 'tr', language: 'tr', name: 'Türkiye', aliases: ['turkey', 'türkiye', 'turkiye', 'tr', 'tur', '土耳其'] },
   { iso2: 'gb', language: 'en', name: 'United Kingdom', aliases: ['united kingdom', 'uk', 'gb', 'gbr', 'great britain', '英国'] },
   { iso2: 'us', language: 'en', name: 'United States', aliases: ['united states', 'usa', 'us', 'america', '美国'] },
 ]);
 
-/** Han, kana and Hangul. Only `zh` searches are written in Han; every other supported language strips these terms. */
+/** Han, kana and Hangul：zh/ja/ko 的检索串由这些文字构成，其余支持的语言一律剔除。 */
 const CJK_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+const HAN_SCRIPT = /\p{Script=Han}/u;
+const KANA_SCRIPT = /[\p{Script=Hiragana}\p{Script=Katakana}]/u;
+const HANGUL_SCRIPT = /\p{Script=Hangul}/u;
+
+/** 词是否属于目标语言的检索文字（P2 §2.3：zh/ja/ko 保留本地文字并剥离纯拉丁词，其余语言剔除 CJK）。 */
+function termFitsLanguage(term: string, language: SearchLanguage): boolean {
+  switch (language) {
+    case 'zh':
+      return HAN_SCRIPT.test(term);
+    case 'ja':
+      return HAN_SCRIPT.test(term) || KANA_SCRIPT.test(term);
+    case 'ko':
+      return HANGUL_SCRIPT.test(term);
+    default:
+      return !CJK_SCRIPT.test(term);
+  }
+}
 
 /**
  * A trailing "(…)" or "（…）" qualifier, as in 「瑞士（德语区优先）」. The body
@@ -71,6 +98,14 @@ const ROLE_TERMS: Readonly<Record<TradeRole, Readonly<Record<SearchLanguage, rea
     nl: ['groothandel', 'distributeur', 'dealer'],
     pl: ['hurtownia', 'dystrybutor', 'sprzedaż'],
     zh: ['经销商', '分销商', '批发商', '进口商'],
+    ms: ['pemborong', 'peniaga', 'pengedar'],
+    id: ['distributor', 'grosir', 'penyalur'],
+    vi: ['nhà phân phối', 'đại lý', 'bán buôn'],
+    th: ['ผู้จัดจำหน่าย', 'ตัวแทนจำหน่าย', 'ค้าส่ง'],
+    ja: ['販売代理店', '卸売業者', 'ディーラー'],
+    ko: ['유통업체', '도매업체', '대리점'],
+    pt: ['distribuidor', 'atacadista', 'revendedor'],
+    tr: ['distribütör', 'toptancı', 'bayi'],
   },
   manufacturer: {
     de: ['Hersteller'],
@@ -81,6 +116,14 @@ const ROLE_TERMS: Readonly<Record<TradeRole, Readonly<Record<SearchLanguage, rea
     nl: ['fabrikant'],
     pl: ['producent'],
     zh: ['制造商', '厂家', '工厂'],
+    ms: ['pengeluar', 'pembuat'],
+    id: ['produsen', 'pabrikan'],
+    vi: ['nhà sản xuất'],
+    th: ['ผู้ผลิต'],
+    ja: ['製造業者', 'メーカー'],
+    ko: ['제조업체', '제조사'],
+    pt: ['fabricante'],
+    tr: ['üretici'],
   },
 });
 
@@ -125,16 +168,30 @@ export function searchLanguageFor(query: { filters?: Record<string, unknown> }):
 }
 
 /**
- * Trimmed, non-empty terms a search in the given language can use. The planner
- * may keep Chinese industry and country words for the taxonomy mapping; in a
- * `zh` search they are the query itself, in every other supported language they
- * must never become part of a search string.
+ * 把词分成「目标语言可用」与「被剥离」两组（P2 §2.3）：被剥离的词要留痕——它们说明规划器
+ * 给的市场语言与关键词语言不一致。未指定语言时按旧行为只看「是否含 CJK」。
  */
+export function partitionSearchTerms(
+  terms: readonly string[],
+  language?: SearchLanguage,
+): { usable: string[]; stripped: string[] } {
+  const usable: string[] = [];
+  const stripped: string[] = [];
+  for (const raw of terms) {
+    const term = raw.trim();
+    if (!term) continue;
+    if (language === undefined ? !CJK_SCRIPT.test(term) : termFitsLanguage(term, language)) {
+      usable.push(term);
+    } else {
+      stripped.push(term);
+    }
+  }
+  return { usable, stripped };
+}
+
+/** Trimmed, non-empty terms a search in the given language can use. */
 export function searchableTerms(terms: readonly string[], language?: SearchLanguage): string[] {
-  const keepCjk = language === 'zh';
-  return terms
-    .map((term) => term.trim())
-    .filter((term) => term.length > 0 && (keepCjk || !CJK_SCRIPT.test(term)));
+  return partitionSearchTerms(terms, language).usable;
 }
 
 /** The first target country as its own language writes it; undefined when unknown. */

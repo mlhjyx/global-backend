@@ -136,6 +136,7 @@ export function completeTargetMarkets(modelMarkets: unknown, sellerMarkets: read
 
 const PLANNER_LANGUAGE_NAMES: Readonly<Record<SearchLanguage, string>> = Object.freeze({
   de: '德语', en: '英语', fr: '法语', it: '意大利语', es: '西班牙语', nl: '荷兰语', pl: '波兰语', zh: '中文',
+  ms: '马来语', id: '印度尼西亚语', vi: '越南语', th: '泰语', ja: '日语', ko: '韩语', pt: '葡萄牙语', tr: '土耳其语',
 });
 
 /**
