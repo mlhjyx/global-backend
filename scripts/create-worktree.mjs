@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
-import { execFileSync, spawnSync } from "node:child_process";
-import { lstatSync, mkdirSync } from "node:fs";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { lstatSync, mkdirSync, mkdtempSync, openSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 
@@ -168,3 +169,39 @@ if (createdHead !== base || createdBranch !== branch || createdStatus !== "") {
 console.log(
   `created\nbranch=${branch}\nbase=${base}\ndestination=${destination}`,
 );
+
+// 创建即就绪：链接根 checkout 的 .env，并在后台安装依赖。
+// pre-push 对代码改动要求 node_modules；缺依赖会被明确拦截，不再静默跳过本地门。
+if (process.env.WORKTREE_SKIP_INSTALL === "1") {
+  console.log(
+    "dependencies: skipped (WORKTREE_SKIP_INSTALL=1); run pnpm install --frozen-lockfile before pushing",
+  );
+} else {
+  const linkEnv = spawnSync("gctl", ["link-env", destination], {
+    stdio: "inherit",
+  });
+  if (linkEnv.error) {
+    console.log(
+      "dependencies: gctl link-env unavailable; link apps/api/.env and packages/db/.env manually",
+    );
+  }
+  const installDir = mkdtempSync(
+    path.join(tmpdir(), "global-worktree-install-"),
+  );
+  const installLog = path.join(installDir, "install.log");
+  const logFd = openSync(installLog, "a", 0o600);
+  const install = spawn(
+    "pnpm",
+    ["install", "--frozen-lockfile", "--prefer-offline"],
+    {
+      cwd: destination,
+      detached: true,
+      stdio: ["ignore", logFd, logFd],
+    },
+  );
+  install.unref();
+  console.log(`dependencies: installing in background (log: ${installLog})`);
+  console.log(
+    "dependencies: pushing before it finishes fails the pre-push dependency gate",
+  );
+}
