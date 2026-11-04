@@ -2,6 +2,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Optional,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
@@ -17,6 +18,7 @@ import { buildLeadPackage, type LeadPackage, type LeadPackageSanctionsStatus } f
 import { isOutcomeReasonCode, isRejectReasonCode, REJECT_REASON_CODES } from './reason-codes';
 import { reachableCompanyContactPoints } from '../discovery/company-contact-points';
 import { DataRightsService } from '../compliance/data-rights.service';
+import { IcpFeedbackService } from '../icp/icp-feedback.service';
 import {
   canonicalizeSuppressionValue,
   canonicalizeSuppressionValues,
@@ -65,6 +67,7 @@ export class LeadService {
     private readonly prisma: PrismaService,
     private readonly dataRights: DataRightsService,
     private readonly sanctions: SanctionsScreeningService,
+    @Optional() private readonly feedback?: IcpFeedbackService,
   ) {}
 
   /** 触发对某 ACTIVE ICP 的评分（异步，Temporal）。 */

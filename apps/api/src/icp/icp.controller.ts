@@ -20,6 +20,7 @@ import { ScopesGuard } from '../auth/scopes.guard';
 import { Enveloped, envelope } from '../common/envelope';
 import { ApiEnvelope, ApiListEnvelope } from '../common/api-envelope.decorator';
 import { IcpService } from './icp.service';
+import { IcpFeedbackService } from './icp-feedback.service';
 import { IcpDto } from './dto/icp.dto';
 import {
   BacktestDto,
@@ -46,7 +47,10 @@ import {
 @UseGuards(AuthGuard, ScopesGuard)
 @RequireScopes('acquisition:read')
 export class IcpController {
-  constructor(private readonly icps: IcpService) {}
+  constructor(
+    private readonly icps: IcpService,
+    private readonly feedback: IcpFeedbackService,
+  ) {}
 
   @Post('companies/:companyId/icps')
   @RequireScopes('acquisition:write')
@@ -217,6 +221,22 @@ export class IcpController {
         ),
       ),
     );
+  }
+
+  @Get('icps/:icpId/feedback')
+  @RequireScopes('acquisition:read')
+  @ApiOperation({ summary: 'M2 反馈闭环：接受/拒绝聚合（来源/渠道/行业/国家）与 ICP 建议卡（只建议，人工采纳才改 ICP）' })
+  @ApiEnvelope({ type: 'object', additionalProperties: true })
+  async feedbackReport(@Ctx() ctx: RequestContext, @Param('icpId', ParseUUIDPipe) icpId: string) {
+    return envelope(await this.feedback.suggestions(ctx, icpId));
+  }
+
+  @Post('icps/:icpId/feedback/recompute')
+  @RequireScopes('acquisition:write')
+  @ApiOperation({ summary: '重算该 ICP 的反馈聚合（幂等；通常由判断动作自动触发）' })
+  @ApiEnvelope({ type: 'object', additionalProperties: true })
+  async recomputeFeedback(@Ctx() ctx: RequestContext, @Param('icpId', ParseUUIDPipe) icpId: string) {
+    return envelope(await this.feedback.recompute(ctx, icpId));
   }
 
   @Get('icps/:icpId/query-plans')

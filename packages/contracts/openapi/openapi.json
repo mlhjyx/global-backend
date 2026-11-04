@@ -7363,6 +7363,104 @@
         "description": "该 ICP 的查询计划列表（含状态：DRAFT / READY）。"
       }
     },
+    "/api/v1/icps/{icpId}/feedback": {
+      "get": {
+        "operationId": "IcpController_feedbackReport_v1",
+        "parameters": [
+          {
+            "name": "icpId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "M2 反馈闭环：接受/拒绝聚合（来源/渠道/行业/国家）与 ICP 建议卡（只建议，人工采纳才改 ICP）",
+        "tags": [
+          "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "M2 反馈闭环：按来源/渠道/行业/国家聚合的接受率与拒绝理由分布，以及 ICP 建议卡（只给建议，人工采纳后才改 ICP）。"
+      }
+    },
+    "/api/v1/icps/{icpId}/feedback/recompute": {
+      "post": {
+        "operationId": "IcpController_recomputeFeedback_v1",
+        "parameters": [
+          {
+            "name": "icpId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "重算该 ICP 的反馈聚合（幂等；通常由判断动作自动触发）",
+        "tags": [
+          "ICP"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ],
+        "description": "重算该 ICP 的反馈聚合（幂等；通常由接受/拒绝动作自动触发，这里是手动补偿入口）。"
+      }
+    },
     "/api/v1/query-plans/{planId}/confirm": {
       "post": {
         "operationId": "IcpController_confirmQueryPlan_v1",
