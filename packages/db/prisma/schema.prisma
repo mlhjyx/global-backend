@@ -1556,7 +1556,8 @@ model SourceChannelEnablement {
 model SourceChannelRun {
   id                 String    @id @default(uuid()) @db.Uuid
   channelId          String    @map("channel_id") @db.Uuid
-  workspaceId        String?   @map("workspace_id") @db.Uuid
+  /// 发起本次运行的工作空间（可选来源标注；本表是平台级运行统计，不承载租户数据）。
+  triggeredByWorkspaceId String? @map("triggered_by_workspace_id") @db.Uuid
   /// RUNNING | SUCCEEDED | FAILED
   status             String    @default("RUNNING") @db.VarChar(16)
   pagesFetched       Int       @default(0) @map("pages_fetched")
