@@ -4,6 +4,8 @@ import {
   crawlHtml,
   crawlUrl,
   MAX_CRAWL4AI_RENDER_ARTIFACT_BYTES,
+  renderCacheMode,
+  renderDelaySeconds,
 } from "./web-crawler";
 
 afterEach(() => {
@@ -254,5 +256,20 @@ describe("Crawl4AI artifact-result boundaries", () => {
         })),
       ),
     ).rejects.toThrow("CRAWL4AI_RENDER_RESULT_TOO_LARGE");
+  });
+});
+
+describe("Crawl4AI render request parameters are env-configurable", () => {
+  it("defaults to a 0.5s settle delay and an enabled cache", () => {
+    expect(renderDelaySeconds({})).toBe(0.5);
+    expect(renderCacheMode({})).toBe("ENABLED");
+  });
+
+  it("reads overrides and falls back on invalid values", () => {
+    expect(renderDelaySeconds({ CRAWLER_RENDER_DELAY_MS: "0" })).toBe(0);
+    expect(renderDelaySeconds({ CRAWLER_RENDER_DELAY_MS: "1500" })).toBe(1.5);
+    expect(renderDelaySeconds({ CRAWLER_RENDER_DELAY_MS: "abc" })).toBe(0.5);
+    expect(renderCacheMode({ CRAWLER_CACHE_MODE: "bypass" })).toBe("BYPASS");
+    expect(renderCacheMode({ CRAWLER_CACHE_MODE: "nope" })).toBe("ENABLED");
   });
 });
