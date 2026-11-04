@@ -204,19 +204,19 @@ test("single OCI Dockerfile uses one non-root runtime with api and worker entryp
   assert.deepEqual(aptSources, [
     {
       protocol: "https:",
-      hostname: "snapshot.debian.org",
+      hostname: "snapshot-cloudflare.debian.org",
       pathname: "/archive/debian/20260826T000000Z/",
       suite: "bookworm",
     },
     {
       protocol: "https:",
-      hostname: "snapshot.debian.org",
+      hostname: "snapshot-cloudflare.debian.org",
       pathname: "/archive/debian/20260826T000000Z/",
       suite: "bookworm-updates",
     },
     {
       protocol: "https:",
-      hostname: "snapshot.debian.org",
+      hostname: "snapshot-cloudflare.debian.org",
       pathname: "/archive/debian-security/20260826T000000Z/",
       suite: "bookworm-security",
     },
@@ -245,7 +245,14 @@ test("single OCI Dockerfile uses one non-root runtime with api and worker entryp
     dockerfile,
     /test -z "\$\(find \/etc\/apt\/sources\.list\.d -maxdepth 1 -type f -print -quit\)"/,
   );
-  assert.match(dockerfile, /apt-get -o Acquire::Retries=3 update/);
+  assert.match(
+    dockerfile,
+    /apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update/,
+  );
+  assert.match(
+    dockerfile,
+    /apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends/,
+  );
   assert.match(dockerfile, /rm -rf \/var\/lib\/apt\/lists\/\*.*apt-get/s);
   assert.match(dockerfile, /chromium=151\.0\.7922\.173-1~deb12u1/);
   assert.match(dockerfile, /util-linux=2\.38\.1-5\+deb12u3/);

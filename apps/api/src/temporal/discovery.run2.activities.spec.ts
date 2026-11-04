@@ -324,4 +324,46 @@ describe('M0⑥ finalize V2 辅助（阶段时间/告警/影子对比）', () =>
       create: expect.objectContaining({ workspaceId: WORKSPACE_ID, runId: RUN_ID, shadowPositive: 4 }),
     });
   });
+
+  it('judges recall within the compared companies, not on unequal pool totals', async () => {
+    // 2026-11-04 影子验收第二轮实况：老路径判 66 家（正面 27），快扫只判 27 家（正面 6，
+    // 其中与老路径重叠的 27 家里正面 4 家）。按两侧总数比 6<27 会误报「召回下降」；
+    // 同集合口径 6>=4 才是正确结论。
+    const { activities } = makeActivities({
+      leads: [
+        { canonicalCompanyId: 'c1', fitVerdict: 'match', fitReasons: { material: 'x' } },
+        { canonicalCompanyId: 'c2', fitVerdict: 'weak', fitReasons: { material: 'x' } },
+        { canonicalCompanyId: 'c3', fitVerdict: 'mismatch', fitReasons: { material: 'x' } },
+        { canonicalCompanyId: 'c4', fitVerdict: 'match', fitReasons: { material: 'x' } },
+        { canonicalCompanyId: 'c5', fitVerdict: 'mismatch', fitReasons: { material: 'x' } },
+        // The legacy path judges the whole canonicalized pool; these positives lie
+        // outside the prefiltered set the shadow quick pass ever saw.
+        { canonicalCompanyId: 'x1', fitVerdict: 'match', fitReasons: { material: 'x' } },
+        { canonicalCompanyId: 'x2', fitVerdict: 'match', fitReasons: { material: 'x' } },
+        { canonicalCompanyId: 'x3', fitVerdict: 'match', fitReasons: { material: 'x' } },
+        { canonicalCompanyId: 'x4', fitVerdict: 'match', fitReasons: { material: 'x' } },
+      ],
+      jobs: [
+        { canonicalCompanyId: 'c1', verdictQuick: 'match' },
+        { canonicalCompanyId: 'c2', verdictQuick: 'weak' },
+        { canonicalCompanyId: 'c3', verdictQuick: 'weak' },
+        { canonicalCompanyId: 'c4', verdictQuick: 'match' },
+        { canonicalCompanyId: 'c5', verdictQuick: 'mismatch' },
+      ],
+    });
+
+    const diff = await activities.recordRunShadowDiff({
+      ...ARGS,
+      shadowFallback: 0,
+    });
+    // Aggregates stay as recorded (they describe each path's reach)…
+    expect(diff.legacyJudged).toBe(9);
+    expect(diff.legacyPositive).toBe(7);
+    expect(diff.shadowJudged).toBe(5);
+    expect(diff.shadowPositive).toBe(4);
+    expect(diff.compared).toBe(5);
+    // …but recall is judged on the same-company set: legacy 3 positive vs shadow 4
+    // (aggregate 4 < 7 would have reported a false recall drop).
+    expect(diff.recallNotLower).toBe(true);
+  });
 });

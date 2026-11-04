@@ -505,7 +505,16 @@ export function createRun2Activities(deps: {
           update: summary,
         }),
       );
-      return { ...summary, recallNotLower: summary.shadowPositive >= summary.legacyPositive };
+      // 召回不降的判定只在**两侧都判过的公司**上比较：老路径判整个 canonicalized
+      // 池、影子只判预筛后的候选集，池子天然不等（2026-11-04 验收实况 66 vs 27），
+      // 按总数比会把「覆盖差异」误读成「召回下降」。summary 仍保留两侧各自的覆盖数。
+      const legacyPositiveCompared = comparedIds.filter((id) =>
+        positive(legacyByCompany.get(id)),
+      ).length;
+      const shadowPositiveCompared = comparedIds.filter((id) =>
+        positive(shadowByCompany.get(id)),
+      ).length;
+      return { ...summary, recallNotLower: shadowPositiveCompared >= legacyPositiveCompared };
     },
 
     /**

@@ -141,6 +141,7 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
     .addTag('ICP', '理想客户画像：规则、回溯测试、查询计划')
     .addTag('Discovery', '查询计划执行、规范化公司、联系人补全、抑制名单')
     .addTag('Leads', '评分产出与交付：交付包、接受 / 拒绝、制裁复核')
+    .addTag('Channels', '渠道数据源：平台渠道注册/治理/试跑（运营身份 ops:*），租户启用与私有导入')
     .addTag('Reports', '周报与反馈')
     .addTag('Events', '事件投递账本与确认回执')
     .addTag('Compliance', '数据主体删除请求（Art.17）')
