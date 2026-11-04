@@ -2,11 +2,15 @@ import {
   ApplicationFailure,
   CancellationScope,
   TemporalFailure,
+  executeChild,
+  isCancellation,
   patched,
   proxyActivities,
 } from '@temporalio/workflow';
+import { companyPipelineWorkflow } from './discovery.run2.pipeline.workflow';
 import type { DiscoveryActivities, DiscoveryRunInput } from './discovery.activities';
 import type { Run2Activities } from './discovery.run2.activities';
+import type { Run2PipelineActivities } from './discovery.run2.pipeline.activities';
 import { resolveRunStatus } from './discovery.run-status';
 import {
   describeDiscoveryRunFailure,
@@ -58,12 +62,14 @@ export const DISCOVERY_RUN_CONTACTS_PATCH = 'discovery-run-contacts-v1';
 export const DISCOVERY_RUN2_QUICK_SCAN_PATCH = 'discovery-run2-quick-scan-v1';
 /** 公司池候选少于此数才触发有界搜索兜底（设计 R3）。 */
 const RUN2_POOL_SEARCH_FALLBACK_THRESHOLD = 20;
+/** 深挖父工作流同时推进的公司数（设计 R2/Q8）。 */
+const DEEP_COMPANY_CONCURRENCY = 16;
 const DISCOVERY_QUERY_BATCH = 2;
 export const DISCOVERY_QUERY_RECEIPT_MODE = QUERY_RECEIPT_MODE;
 const EXECUTION_CONTRACT_VERSION = 2 as const;
 
 interface DiscoveryRunOutcome {
-  status: 'DONE' | 'PARTIAL' | 'FAILED';
+  status: 'DONE' | 'PARTIAL' | 'FAILED' | 'CANCELLED';
   stats: Record<string, unknown>;
 }
 
@@ -74,7 +80,7 @@ function invalidAuthorityInput(): never {
   );
 }
 
-type DiscoveryWorkflowActivities = DiscoveryActivities & Run2Activities;
+type DiscoveryWorkflowActivities = DiscoveryActivities & Run2Activities & Run2PipelineActivities;
 
 const acts = proxyActivities<DiscoveryWorkflowActivities>({
   startToCloseTimeout: '2 minutes',
@@ -543,9 +549,83 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         icpId: input.icpId,
         ...authorityArgs,
       });
-      // 空池、或判定全部失败 → FAILED（本次 run 没有可用名单）；有失败/跳过/规则兜底 → PARTIAL。
+
+      // M0④：深挖——每家公司一个子工作流（父并发 16、上限 500）。被 RequestCancel 时停止推进新公司、
+      // 取消在飞子工作流，未完成公司标 skipped(DEEP_STOPPED)，run 以 CANCELLED 收尾（可续：下一次 run 重新排队）。
+      const deepTargets = await acts.listDeepTargets({ workspaceId, runId });
+      let deepStopped = false;
+      const deepStages: string[] = [];
+      try {
+        let cursor = 0;
+        const runCompany = async (): Promise<void> => {
+          while (true) {
+            const index = cursor;
+            cursor += 1;
+            if (index >= deepTargets.companyIds.length) return;
+            const companyId = deepTargets.companyIds[index]!;
+            const result = await executeChild(companyPipelineWorkflow, {
+              workflowId: `discovery-${runId}-company-${companyId}`,
+              args: [
+                {
+                  workspaceId,
+                  runId,
+                  icpId: input.icpId,
+                  companyId,
+                  executionContractVersion: EXECUTION_CONTRACT_VERSION,
+                  executionBudget: executionBudget!,
+                },
+              ],
+            });
+            deepStages.push(result.stage);
+          }
+        };
+        await Promise.all(
+          Array.from(
+            { length: Math.min(DEEP_COMPANY_CONCURRENCY, deepTargets.companyIds.length) },
+            () => runCompany(),
+          ),
+        );
+      } catch (error) {
+        if (!isCancellation(error)) throw error;
+        deepStopped = true;
+      }
+      let deepSummary = await acts.deepStageSummary({ workspaceId, runId });
+      if (deepStopped) {
+        await CancellationScope.nonCancellable(async () => {
+          await acts.skipUnfinishedDeepJobs({ workspaceId, runId, errorCode: 'DEEP_STOPPED' });
+          deepSummary = await acts.deepStageSummary({ workspaceId, runId });
+          await finalize({
+            status: 'CANCELLED',
+            stats: {
+              ...queryStats(),
+              ...skipStats(),
+              ...extractionStats(),
+              companies,
+              suppressed,
+              quickScan: {
+                ...(run2Prefilter ?? { poolSize: 0, candidates: 0, prefilteredOut: 0 }),
+                ...quick,
+                leads: provisional.leads,
+              },
+              deep: {
+                ...deepSummary,
+                targets: deepTargets.companyIds.length,
+                stopped: true,
+              },
+            },
+          });
+        });
+        return;
+      }
+      // 空池、或粗判全部失败 → FAILED（本次 run 没有可用名单）；有失败/跳过/规则兜底/深挖未完成 → PARTIAL。
       let quickStatus: DiscoveryRunOutcome['status'] = 'DONE';
-      if (quick.failed > 0 || quick.skipped > 0 || quick.ruleFallback > 0) {
+      if (
+        quick.failed > 0 ||
+        quick.skipped > 0 ||
+        quick.ruleFallback > 0 ||
+        deepSummary.failed > 0 ||
+        deepSummary.skipped > 0
+      ) {
         quickStatus = 'PARTIAL';
       }
       if (quick.judged === 0) {
@@ -564,6 +644,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
             ...quick,
             leads: provisional.leads,
           },
+          deep: { ...deepSummary, targets: deepTargets.companyIds.length, stopped: false },
         },
       };
       await finalize(outcome);

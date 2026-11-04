@@ -339,6 +339,25 @@ export class DiscoveryController {
     return envelope({ runId: run.id, status: run.status });
   }
 
+  @Post('discovery-runs/:runId/cancel')
+  @RequireScopes('acquisition:write')
+  @HttpCode(202)
+  @ApiOperation({ summary: '停止深挖：取消 run 的 Temporal 工作流（未完成公司标 skipped，可续；已完成结果保留）' })
+  @ApiEnvelope(
+    {
+      type: 'object',
+      required: ['runId', 'status'],
+      properties: {
+        runId: { type: 'string', format: 'uuid' },
+        status: { type: 'string' },
+      },
+    },
+    { status: 202 },
+  )
+  async cancelRun(@Ctx() ctx: RequestContext, @Param('runId', ParseUUIDPipe) runId: string) {
+    return envelope(await this.discovery.cancelRun(ctx, runId));
+  }
+
   @Get('discovery-runs/:runId')
   @ApiOperation({ summary: '发现执行状态与统计（每源计数/归一/Suppression）' })
   @ApiEnvelope({
