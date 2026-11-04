@@ -156,6 +156,7 @@ jobs:
     needs: renderer-visual-scope
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     services:
       postgres:
         image: pgvector/pgvector@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
@@ -581,16 +582,29 @@ jobs:
         env:
           BUILD_SHA: ${{ github.sha }}
           OCI_IMAGE: global-backend-ci:${{ github.sha }}
+          PR_IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
         run: |
           set -euo pipefail
           git diff --exit-code
           test -z "$(git ls-files --others --exclude-standard)"
           BUILT_AT="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
           export BUILT_AT
-          docker build \
+          # Layer cache lives in the Actions cache service (type=gha), so repeat
+          # builds reuse the runtime-base (Debian packages, chromium) and build
+          # layers instead of re-downloading the pinned archive on every run.
+          # Fork PRs receive read-only tokens, so they only read the cache.
+          docker buildx create --name ci-oci --driver docker-container --use >/dev/null
+          cache_to=()
+          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" || "${PR_IS_FORK}" == "false" ]]; then
+            cache_to=(--cache-to "type=gha,scope=runtime-image,mode=max,ignore-error=true")
+          fi
+          docker buildx build \
             --build-arg "BUILD_SHA=${BUILD_SHA}" \
             --build-arg "BUILT_AT=${BUILT_AT}" \
             --tag "${OCI_IMAGE}" \
+            --load \
+            --cache-from "type=gha,scope=runtime-image" \
+            "${cache_to[@]}" \
             .
           test "$(docker image inspect --format '{{.Config.User}}' "${OCI_IMAGE}")" = global
           test "$(docker image inspect --format '{{json .Config.Entrypoint}}' "${OCI_IMAGE}")" = '["node","/app/runtime-entrypoint.mjs"]'
