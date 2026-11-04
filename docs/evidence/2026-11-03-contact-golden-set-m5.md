@@ -6,6 +6,9 @@
 > 评测数据来自第十一班镜像（build 8f204960），未含任何改进。
 > **第三轮复测（§9，第十三班镜像 `fe0c7d71`，含 #744/#748）**：零产出 5→4、公司级命中 10→11/15、
 > 人级召回 14→17/22、新行误报 19.6%→7.7%（1 条社媒垃圾档案漏网）；存量误报行仍在，称号去重缺陷新发现。
+> **第四轮复测（§10，第十四班镜像 `8b142f53`，含 #760/#761）**：零产出 4→2、公司级命中按 §2 口径 12→14/16、
+> 人级召回 17→19/22、称号去重成立（trik 重抓 0 重复）；新行误报 2/12（同名异公司 LinkedIn 残留 2 条，
+> 守卫把 bts 的 6 条垃圾档案压到 2 条）；邮箱 58/60 仍全 RISKY、VALID 0。
 
 ## 1. 范围与样本
 
@@ -142,3 +145,70 @@ Golden Set，逐家 `POST /canonical-companies/:id/discover-contacts`（本轮�
 
 **下一步建议**：① 修称号去重（引擎侧小改动，同一 PR 可加上述职位的守卫收紧）；② 存量误报清理方案；
 ③ 剩余 4 家零产出逐家排查；④ 邮箱维度维持「RISKY + 人工确认」外发口径。
+
+## 10. 第四轮：修复后复测（2026-11-04，第十四班镜像 `8b142f53`，含 #760/#761）
+
+**镜像与前置**：第十四班镜像 `8b142f53`（digest `e2cfa8cc…`），含 #760（零产出三类根因：robots 坏跳转、
+原始 HTML 补抽门槛、尾斜杠规范化 + 首页兜底）与 #761（德语学术称号去重 + 社媒岗位词守卫）；`email_guess`
+保持 ENABLED。方法与第三轮一致：同一 20 家 Golden Set、同一 GT，逐家
+`POST /canonical-companies/:id/discover-contacts`（`attemptId` 作用域键；`lawfulBasis=legitimate_interest`），
+缺邮箱联系人经 `guess-emails` 补全，产出经 `GET /canonical-companies/:id` 读取；采集窗口起点
+`T0=2026-11-04T05:38:41Z`，新增行按 `createdAt > T0` 判定。**基线与中断**：第三轮清理后
+（`_archive/m5-contact-cleanup-20261104/`，删 11 行）在库 48 行；采集进行到 05:56Z 时发布线把运行时切换到
+第十六班镜像（`fb02916c`，含 5 个迁移），后 10 家的 discover 被 502 打断后在新镜像上补跑——两镜像间联系人
+发现链路只新增 Q25 访问审计、无行为变化；零产出 4 家与 bts 守卫的全部观察都在 `8b142f53` 上完成。
+评估仍只出聚合与域名计数，不含个人姓名。
+
+**结果**：
+
+| 指标 | 第三轮（fe0c7d71） | 第四轮（8b142f53；后 10 家 fb02916c） |
+| --- | --- | --- |
+| 引擎在库联系人总数（同 20 家） | 48（清理后） | **60**（+12 新行；无重复行） |
+| 零产出公司 | 4 | **2**（`ava-berlin.de`、`abendi.de`） |
+| 公司级 GT 命中（§2 口径，16 家） | 12/16（§9 的「11/15」按 15 家记；见下方订正） | **14/16** |
+| 人级 GT 召回（22 人 GT 集） | 17/22 | **19/22** |
+| 新行中的误报 | 1/13（7.7%） | **2/12（16.7%）**：2 条同名异公司 LinkedIn 档案 |
+| 存量误报行 | 9（本轮前已清理） | **0**（旧 9 条均未复现，被守卫在源头丢弃） |
+| 有邮箱候选的联系人 | 53/59（≈90%） | **58/60（96.7%）**；RISKY 57、INVALID 1、**VALID 0**（口径同 §7） |
+| `trik-pumpen.de` 重复行 | 1 条（称号重复） | **0**（重抓并入原行，id 与 `createdAt` 未变） |
+
+**修复验证**：
+
+1. **#760 尾斜杠规范化 + 首页兜底成立（4 家零产出恢复 3 家）**：
+   - `avag-pumpen.de`：恢复 1 人，即其 Impressum 具名决策人（GT 1/1）；证据页为
+     `…/unternehmen/impressum/`（带尾斜杠）。
+   - `michalowski-gmbh.de`：恢复 3 人（1 名 Impressum 决策人 + 2 名团队页成员，均在官网可佐证）；
+     证据页含 `…/impressum/`（带尾斜杠）与团队子页。
+   - `jaeckel-ohg.de`：恢复 6 人（含 2 名 geschäftsführender Gesellschafter），全部 6 人可在其首页佐证；
+     证据页为首页 `https://jaeckel-ohg.de/`（首页兜底）。
+   - `ava-berlin.de` 仍零产出（根因见「残留」2）。
+2. **#761 称号去重成立**：`trik-pumpen.de` 重抓后仍为 1 行、0 新增，原行 id 与 `createdAt` 未变（并入而非重复）；
+   全批 14 家有存量行的公司本轮重抓均 0 新增（ando/biergans/bridge/heide/mms/nodes/pt-naegel/pumatec/
+   pumpen-dunkel/pumpen-schmid/rudolf-schabmueller/schmedding/trik/viptech），去重面整体成立。
+3. **#761 岗位词守卫成立（部分）**：`bts-engineering.de` 第三轮被清理的 6 条垃圾社媒档案（1 条机构当人 +
+   5 条无职位词）本轮只回来 2 条——1 条机构当人（`social_organisation_dropped`）与 3 条无职位词
+   （`social_uninformative_dropped`）被源头丢弃。20 家诊断合计：namesake 丢弃 24、无信息丢弃 4、机构丢弃 1、
+   社媒拉取 4（第三轮 7）、`social_circuit_open` 0（第三轮 5）。
+
+**残留与新发现（按优先级）**：
+
+1. **同名异公司仍漏 2 条（守卫语义上限）**：`bts-engineering.de` 的 2 条 LinkedIn 档案 headline 同时含
+   真实职位词与「BTS Engineering」公司名，通过两层守卫，但实为美国同名结构工程公司（德方是泵店，两人
+   姓名在德方官网不可见）。守卫只能证明「headline 里有职位 + 公司名」，区分不了同名实体；要归零需引入
+   国家/域名级消歧（档案地域/行业信号，或要求公司名与域名同时匹配）。两条档案 **SMTP 探测均未落库**
+   （attempted 2、persisted 0），不进入外发。
+2. **残留零产出 2 家同根因（Impressum 路径非常规）**：`abendi.de` 与 `ava-berlin.de` 的 Impressum 位于
+   `/info/impressum.html`、`/common/info/impressum.html`（Shopware/Siquando 结构），两站首页均有直链、
+   robots 不拦，但引擎的页面选取未跟进该链接（`/impressum` 返回 404）。两家 Impressum 均有具名决策人
+   （ava 为 2 名 Geschäftsleitung），建议页面选取覆盖嵌套 Impressum 链接（或按站内链接文本「Impressum」跟进）。
+3. **GT 分母订正**：按 §2 口径（Impressum 具名 Geschäftsführer/Geschäftsleitung/Vertreten durch/Inhaber），
+   `ava-berlin.de` 的 2 名 Geschäftsleitung 应计入 GT——GT 共 16 家/22 人，§3/§9 的「15 家」系算术笔误
+   （人级分母 22 不受影响）。本轮统一按 16/22 口径把第三轮快照重放为 12/16、17/22（人级与 §9 一致）。
+
+**耗时与成本**：20 家 discover 机器时间合计 ≈31 分钟（单家 49–129 秒，中位 ≈89 秒）；含两次外部栈中断
+（第十六班切换 + 一次重启）的墙钟约 40 分钟。本轮窗口 `usage_ledger` 记 ai_tokens 295,071（第三轮首小时
+≈206k，同量级）；HTTP 路径仍不落 `cost_usd`，按第三轮同口径（≈8¢/家）估算 ≈$1.6–2.0。
+
+**下一步建议**：① 同名异公司消歧（bts 2 条残留，国家/域名级证据）；② 嵌套 Impressum 链接纳入页面选取
+（abendi/ava 两家）；③ 存量误报清零后以「0 存量 + 新行误报率」为每轮复测口径（本轮 2/12）；④ 邮箱维度
+维持「RISKY + 人工确认」外发口径。
