@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   searchableTerms,
   searchCountryName,
+  searchLanguageFor,
   searchLanguagesForMarkets,
   targetCountryCodes,
   targetCountryTlds,
+  tradeRoleTerms,
 } from './search-localization';
 
 describe('searchableTerms', () => {
@@ -92,5 +94,37 @@ describe('searchLanguagesForMarkets', () => {
     const started = performance.now();
     expect(searchLanguagesForMarkets(['('.repeat(100_000), `${' '.repeat(100_000)}x`])).toEqual([]);
     expect(performance.now() - started).toBeLessThan(1_000);
+  });
+});
+
+describe('中文（zh）检索本地化', () => {
+  it.each([
+    [{ country: '中国' }],
+    [{ country: 'China' }],
+    [{ country: 'CN' }],
+    [{ country: 'chn' }],
+    [{ country: ['中国', '德国'] }],
+    [{ region: '珠三角' }],
+    [{ region: '长三角' }],
+    [{ region: '粤港澳大湾区' }],
+  ])('resolves %o to the zh search language', (filters) => {
+    expect(searchLanguageFor({ filters })).toBe('zh');
+  });
+
+  it('maps China to its ISO code and local name', () => {
+    expect(targetCountryCodes({ filters: { country: '中国' } })).toEqual(['cn']);
+    expect(searchCountryName({ filters: { country: '珠三角' } })).toBe('中国');
+    expect(searchLanguagesForMarkets(['中国', '珠三角'])).toEqual(['zh']);
+  });
+
+  it('provides Chinese role terms', () => {
+    expect(tradeRoleTerms('distributor', 'zh')).toEqual(['经销商', '分销商', '批发商', '进口商']);
+    expect(tradeRoleTerms('manufacturer', 'zh')).toEqual(['制造商', '厂家', '工厂']);
+  });
+
+  it('keeps Han terms for zh searches and still strips them for other languages', () => {
+    expect(searchableTerms(['工业泵 分销商', 'Pumpen'], 'zh')).toEqual(['工业泵 分销商', 'Pumpen']);
+    expect(searchableTerms(['工业泵 分销商', 'Pumpen'], 'de')).toEqual(['Pumpen']);
+    expect(searchableTerms(['工业泵 分销商'])).toEqual([]);
   });
 });

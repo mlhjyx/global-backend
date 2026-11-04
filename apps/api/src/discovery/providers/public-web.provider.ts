@@ -17,6 +17,7 @@ import {
   ProviderContactRecord,
   SourceClass,
 } from '../provider-contract';
+import { ApplicationFailure } from '@temporalio/activity';
 import { ModelGateway } from '../../model-gateway/model-gateway';
 import { getTask } from '../../ai-tasks/task-registry';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
@@ -160,6 +161,14 @@ export class PublicWebDiscoveryProvider
     // judging one again only spends model calls to produce a record ingestion would discard.
     const known = new Set((opts?.knownExternalIds ?? []).map((d) => d.toLowerCase()));
     const searches = buildSearchQueries(query);
+    // 空检索串不发起任何搜索、静默产出 0 结果曾让「目标市场语言不受支持」以 4 秒 PARTIAL 收场
+    // （2026-11-04 产品反馈：中国/中文关键词的 ICP）。这里显式失败，给出可操作的错误码。
+    if (searches.length === 0) {
+      throw ApplicationFailure.nonRetryable(
+        'DISCOVERY_MARKET_UNSUPPORTED: 无法为目标市场/语言构造检索串（该市场语言暂无本地化支持，或关键词全为不可检索字符）；请调整目标市场或关键词',
+        'DISCOVERY_MARKET_UNSUPPORTED',
+      );
+    }
     const language = searchLanguageFor(query);
     const targetTlds = targetCountryTlds(query);
     // G3（规格 2026-09-24 §3）：搜索优先、建档后再抓——发现阶段只用搜索结果判站，不抓任何页面。
@@ -649,14 +658,14 @@ export function searchEvidenceText(hits: readonly SearchHit[]): string {
 export function buildSearchQueries(query: CompanyDiscoveryQuery): string[] {
   const f = query.filters ?? {};
   const arr = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : v == null ? [] : [String(v)]);
-  const industries = searchableTerms([...arr(f.industry), ...arr(f.sub_industry)]).slice(0, 2);
-  const products = searchableTerms(arr(f.product)).slice(0, 2);
-  const keywords = searchableTerms(query.keywords ?? []).slice(0, 3);
+  const language = searchLanguageFor(query);
+  const industries = searchableTerms([...arr(f.industry), ...arr(f.sub_industry)], language).slice(0, 2);
+  const products = searchableTerms(arr(f.product), language).slice(0, 2);
+  const keywords = searchableTerms(query.keywords ?? [], language).slice(0, 3);
   const terms = [...keywords, ...products, ...industries]
     .map((t) => t.trim())
     .filter((t, i, a) => t.length > 0 && a.indexOf(t) === i);
   if (!terms.length) return [];
-  const language = searchLanguageFor(query);
   const roleTerms = tradeRoleTerms(tradeRoleFor(query), language);
 
   const queries = roleTerms.length

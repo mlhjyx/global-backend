@@ -95,7 +95,7 @@ const RULE_OPERATORS = ['eq', 'neq', 'in', 'not_in', 'contains', 'not_contains',
 const json = (v: unknown): Prisma.InputJsonValue => (v ?? []) as Prisma.InputJsonValue;
 
 const PLANNER_LANGUAGE_NAMES: Readonly<Record<SearchLanguage, string>> = Object.freeze({
-  de: '德语', en: '英语', fr: '法语', it: '意大利语', es: '西班牙语', nl: '荷兰语', pl: '波兰语',
+  de: '德语', en: '英语', fr: '法语', it: '意大利语', es: '西班牙语', nl: '荷兰语', pl: '波兰语', zh: '中文',
 });
 
 /**
