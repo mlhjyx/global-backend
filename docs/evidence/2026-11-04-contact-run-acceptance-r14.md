@@ -52,3 +52,15 @@
 - 第十四班镜像的 **run 路径联系人阶段验收通过**（首次在单次 run 内 `DONE` 且全量覆盖 fit=match）。
 - 下一步：① 泛词公司名的守卫收紧（引擎侧小改动，与 Golden Set 第三轮 §9 的两类残留同属社媒层）；
   ② 用同一批 20 家 Golden Set 在第十四班镜像上跑第四轮复测（#760/#761 上线后的首个完整对比）。
+
+## 5. 泛词残留的存量行与修复（2026-11-04 追记）
+
+- 上文 §3 的 2 条泛词残留已定位到 `canonical_contact` 行 `1f98349f-be00-4df2-a40f-6668f43b1f78`
+  （title「Technical Director at Treefrog Cinegraphix」）与 `53d28bef-ea7e-4cff-89b5-b0aa29ddcbad`
+  （title「Technical Manager at Redline Technical...」），均为 `social_presence` / `public-index`，
+  个人档案 URL 在 `field_evidence.person.profile`（不在此抄录）。
+- 守卫修复随 changelog 片段 `2026-11-04-social-generic-name-guard` 落地：泛词单独命中不再构成公司佐证，
+  须完整域名或多词全名短语才放行，丢弃计入 `social_generic_name_dropped`；单测以这两行的 headline
+  职务段回放（姓名/档案 URL 已虚构化）。
+- 两行**未删除**：存量误报按 `cleanup-contact-false-positives.mts` 的显式 id 流程清理
+  （dry-run 核对后 `--apply`），等产品负责人确认后再做。

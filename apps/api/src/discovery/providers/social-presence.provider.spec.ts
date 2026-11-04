@@ -223,6 +223,107 @@ describe('social presence contact adapter (M2a: search index only)', () => {
   });
 });
 
+describe('social presence M5 round 4: generic company names (r14 replay)', () => {
+  const TECHNICAL = { name: 'Technical', domain: 'technical.de' };
+
+  it('drops other companies that merely share the generic company word (technical.de replay)', () => {
+    // r14 验收 run d6ea63da 的两条真实残留（global_dev canonical_contact 1f98349f / 53d28bef）：
+    // 职务段保留生产值（「at Treefrog Cinegraphix」/「at Redline Technical…」），姓名与档案 slug 用虚构值
+    // ——守卫只依赖职务段，真实人名/个人档案 URL 不进公开仓。
+    const dropped: string[] = [];
+    const contacts = parseSocialResults(
+      [
+        { url: 'https://www.linkedin.com/in/jane-doe-treefrog', title: 'Jane Doe - Technical Director at Treefrog Cinegraphix | LinkedIn' },
+        { url: 'https://www.linkedin.com/in/max-mustermann-redline', title: 'Max Mustermann - Technical Manager at Redline Technical... | LinkedIn' },
+      ],
+      TECHNICAL,
+      (reason) => dropped.push(reason),
+    );
+    expect(contacts).toEqual([]);
+    expect(dropped).toEqual(['generic_name', 'generic_name']);
+  });
+
+  it('keeps generic-named companies when the headline carries the full company domain', () => {
+    const contacts = parseSocialResults(
+      [
+        { url: 'https://www.linkedin.com/in/max-mustermann-domain', title: 'Max Mustermann – Technical Manager – technical.de | LinkedIn' },
+        { url: 'https://www.linkedin.com/in/erika-musterfrau-domain', title: 'Erika Musterfrau – Einkaufsleiterin – www.technical.de | LinkedIn' },
+      ],
+      TECHNICAL,
+    );
+    expect(contacts.map((contact) => contact.fullName)).toEqual(['Max Mustermann', 'Erika Musterfrau']);
+  });
+
+  it('does not accept a same-prefix TLD as domain evidence', () => {
+    const dropped: string[] = [];
+    const contacts = parseSocialResults(
+      [{ url: 'https://www.linkedin.com/in/jane-doe-9', title: 'Jane Doe – Technische Leiterin – technical.design | LinkedIn' }],
+      TECHNICAL,
+      (reason) => dropped.push(reason),
+    );
+    expect(contacts).toEqual([]);
+    expect(dropped).toEqual(['generic_name']);
+  });
+
+  it('requires the full multi-word name phrase when every name token is generic', () => {
+    const dropped: string[] = [];
+    const contacts = parseSocialResults(
+      [
+        { url: 'https://www.linkedin.com/in/jane-doe-1', title: 'Jane Doe – Vertriebsleiterin – Technical Solutions | LinkedIn' },
+        { url: 'https://www.linkedin.com/in/jane-doe-2', title: 'Jane Doe – Vertriebsleiterin – Technical | LinkedIn' },
+        { url: 'https://www.linkedin.com/in/jane-doe-3', title: 'Jane Doe – Vertriebsleiterin – Solutions | LinkedIn' },
+      ],
+      { name: 'Technical Solutions GmbH', domain: 'technical-solutions.de' },
+      (reason) => dropped.push(reason),
+    );
+    expect(contacts.map((contact) => contact.fullName)).toEqual(['Jane Doe']);
+    expect(dropped).toEqual(['generic_name', 'generic_name']);
+  });
+
+  it('keeps distinctive name tokens working and drops headlines that only repeat the generic half', () => {
+    const dropped: string[] = [];
+    const bts = parseSocialResults(
+      [{ url: 'https://www.linkedin.com/in/jane-doe-4', title: 'Jane Doe – Einkaufsleiterin – BTS Engineering GmbH | LinkedIn' }],
+      { name: 'BTS Engineering', domain: 'bts-engineering.de' },
+      (reason) => dropped.push(reason),
+    );
+    expect(bts.map((contact) => contact.fullName)).toEqual(['Jane Doe']);
+
+    // 泛词不能单独作证：标题只提 Engineering、没提 BTS 时，说的是别家公司。
+    const genericOnly = parseSocialResults(
+      [{ url: 'https://www.linkedin.com/in/jane-doe-5', title: 'Jane Doe – Engineering Manager – Redline Engineering | LinkedIn' }],
+      { name: 'BTS Engineering', domain: 'bts-engineering.de' },
+      (reason) => dropped.push(reason),
+    );
+    expect(genericOnly).toEqual([]);
+    expect(dropped).toEqual(['generic_name']);
+
+    const havlicek = parseSocialResults(
+      [{ url: 'https://www.linkedin.com/in/marek-havlicek', title: 'Marek Havlicek – Einkaufsleiter – Havlicek Pumpen GmbH | LinkedIn' }],
+      { name: 'Havlicek Pumpen GmbH', domain: 'havlicek-pumpen.de' },
+    );
+    expect(havlicek.map((contact) => contact.fullName)).toEqual(['Marek Havlicek']);
+  });
+
+  it('counts generic-name drops in diagnostics (social_generic_name_dropped)', async () => {
+    const invoke = vi.fn(async () => ({
+      data: {
+        results: [
+          { url: 'https://www.linkedin.com/in/jane-doe-treefrog', title: 'Jane Doe - Technical Director at Treefrog Cinegraphix | LinkedIn' },
+        ],
+      },
+      costCents: 0,
+    }));
+    const adapter = new SocialPresenceContactAdapter({ broker: { invoke } as never });
+
+    const result = await adapter.discoverContacts(TECHNICAL, { workspaceId: 'ws-1', runId: 'run-1' } as never);
+
+    expect(result.contacts).toEqual([]);
+    // 与既有 namesake/uninformative 同口径：3 条 dork 各回同一结果 → 计 3 次。
+    expect(result.diagnostics).toMatchObject({ social_generic_name_dropped: 3 });
+  });
+});
+
 describe('social presence M2b: archive copies and live public pages (D1)', () => {
   it('accepts http and https Wayback snapshots, normalizes to https and rejects stale/foreign ones', () => {
     const fresh = {
