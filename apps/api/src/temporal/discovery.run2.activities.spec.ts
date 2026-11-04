@@ -99,6 +99,7 @@ function makePrisma(state: {
         return {};
       }),
     },
+    $queryRaw: vi.fn(async () => []),
     runEvent: {
       aggregate: vi.fn(async () => ({ _max: { seq: seq === 0n ? null : seq } })),
       create: vi.fn(async (args: { data: Record<string, unknown> }) => {
