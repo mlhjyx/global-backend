@@ -72,7 +72,7 @@ CREATE POLICY "source_channel_enablement_tenant_isolation" ON "source_channel_en
 CREATE TABLE "source_channel_run" (
   "id" UUID NOT NULL,
   "channel_id" UUID NOT NULL,
-  "workspace_id" UUID,
+  "triggered_by_workspace_id" UUID,
   "status" VARCHAR(16) NOT NULL DEFAULT 'RUNNING',
   "pages_fetched" INTEGER NOT NULL DEFAULT 0,
   "records_found" INTEGER NOT NULL DEFAULT 0,

@@ -470,7 +470,7 @@ export class ChannelService {
       const run = await tx.sourceChannelRun.create({
         data: {
           channelId: input.channelId,
-          workspaceId: input.workspaceId,
+          triggeredByWorkspaceId: input.workspaceId,
           status: input.status,
           pagesFetched: input.pagesFetched,
           recordsFound: input.recordsFound,
