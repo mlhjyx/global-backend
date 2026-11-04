@@ -29,7 +29,7 @@ describe('run shadow diff migration (M0 finalize/shadow)', () => {
     expect(sql).not.toMatch(/\b(?:DROP|TRUNCATE|DELETE FROM|UPDATE "|INSERT INTO)\b/u);
   });
 
-  it('stores aggregate counts only, under tenant RLS, append-only for app_user', () => {
+  it('stores aggregate counts only, under tenant RLS; the follow-up migration adds UPDATE', () => {
     expect(sql).toContain('CREATE TABLE "run_shadow_diff"');
     for (const column of [
       '"legacy_judged"',
@@ -43,14 +43,16 @@ describe('run shadow diff migration (M0 finalize/shadow)', () => {
     }
     expect(sql).toContain('ALTER TABLE "run_shadow_diff" FORCE ROW LEVEL SECURITY');
     expect(sql).toContain('USING ("workspace_id" = current_workspace_id())');
+    // This migration's own grant is history and stays as written; recordRunShadowDiff's
+    // upsert needs UPDATE, added by 20261104190000_run_shadow_diff_app_user_grants.
     expect(sql).toMatch(/GRANT SELECT, INSERT ON TABLE "run_shadow_diff" TO app_user/u);
     expect(sql).not.toMatch(/GRANT [^;]*(?:UPDATE|DELETE)[^;]* ON TABLE "run_shadow_diff"/u);
   });
 
-  it('is registered in the app_user privilege manifest', () => {
+  it('is registered in the app_user privilege manifest with the upsert UPDATE grant', () => {
     const manifest = JSON.parse(readFileSync(PRIVILEGES, 'utf8')) as {
       tables: Record<string, string[]>;
     };
-    expect(manifest.tables.run_shadow_diff).toEqual(['INSERT', 'SELECT']);
+    expect(manifest.tables.run_shadow_diff).toEqual(['INSERT', 'SELECT', 'UPDATE']);
   });
 });
