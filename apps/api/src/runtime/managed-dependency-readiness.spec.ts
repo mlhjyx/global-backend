@@ -731,6 +731,42 @@ describe("managed dependency readiness", () => {
     ).not.toContain("must-not-be-returned");
   });
 
+  it("aborts a hung probe only after ten seconds so a busy loop cannot fake a dead gateway", async () => {
+    // 2026-11-04: the 2s abort fired under an extraction burst while the gateway
+    // kept answering in milliseconds; three such ticks drained the customer
+    // worker and the run hung with no worker polling.
+    vi.useFakeTimers();
+    try {
+      const fetcher = vi.fn(
+        (_url: string, init?: { signal?: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+              reject(new DOMException("aborted", "AbortError")),
+            );
+          }),
+      );
+      let settled = false;
+      const pending = checkModelGatewayReadiness(
+        {
+          MODEL_GATEWAY_URL: "http://127.0.0.1:3001/v1",
+          MODEL_GATEWAY_KEY: "probe-key",
+        },
+        fetcher as never,
+      ).finally(() => {
+        settled = true;
+      });
+      await vi.advanceTimersByTimeAsync(2_500);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(8_000);
+      await expect(pending).resolves.toEqual({
+        status: "failed",
+        code: "MODEL_GATEWAY_UNAVAILABLE",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("never sends the gateway key to an unsafe probe origin", async () => {
     for (const url of [
       "http://gateway.example.test/v1",

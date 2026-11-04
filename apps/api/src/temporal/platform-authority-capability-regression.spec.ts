@@ -30,6 +30,8 @@ describe("platform authority capability regression", () => {
         leases: { heartbeat } as never,
         worker: { shutdown }, taskQueue: "understanding", intervalMs: 100,
         onBlocked: blocked,
+        // Healthy loop: this case exercises the drain path, not the lag guard.
+        loopLag: async () => 0,
       });
       expect(handle.admitted).toBe(true);
       available = false;

@@ -434,8 +434,12 @@ export async function checkModelGatewayReadiness(
   } catch {
     return { status: "failed", code: "MODEL_GATEWAY_CONFIG_INVALID" };
   }
+  // 10s, not 2s: the probe rides the same event loop as extraction payloads, and
+  // a busy loop can hold its response past a 2s abort while the gateway keeps
+  // answering in milliseconds (2026-11-04: three such ticks drained the customer
+  // worker and the run hung with no worker polling).
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 2_000);
+  const timeout = setTimeout(() => controller.abort(), 10_000);
   timeout.unref();
   try {
     const response = await fetcher(endpoint.href, {

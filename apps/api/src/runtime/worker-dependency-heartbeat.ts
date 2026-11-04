@@ -18,6 +18,22 @@ const DEFAULT_INTERVAL_MS = 10_000;
 const DEFAULT_FAILURES_BEFORE_DRAIN = 3;
 /** Startup probes retry at this spacing before refusing admission. */
 const DEFAULT_STARTUP_RETRY_DELAY_MS = 1_000;
+/**
+ * A round is skipped (not counted) when a zero-delay timer fires this late: the
+ * event loop itself is busy, so a probe's own abort window can expire while the
+ * dependency keeps answering. 2026-11-04: an extraction burst starved the loop
+ * past the gateway probe's 2s abort on three consecutive ticks; the customer
+ * worker drained with a live gateway and the in-flight discovery run hung until
+ * the container was restarted.
+ */
+const DEFAULT_LOOP_LAG_SKIP_MS = 1_000;
+
+/** How late a zero-delay timer fires right now: the event loop's own backlog. */
+const defaultLoopLag = (): Promise<number> =>
+  new Promise((resolve) => {
+    const scheduled = performance.now();
+    setTimeout(() => resolve(performance.now() - scheduled), 0);
+  });
 
 export async function startWorkerDependencyHeartbeat(input: {
   role?: "WORKER" | "PLATFORM_WORKER";
@@ -28,6 +44,8 @@ export async function startWorkerDependencyHeartbeat(input: {
   intervalMs?: number;
   failuresBeforeDrain?: number;
   startupRetryDelayMs?: number;
+  loopLag?: () => Promise<number>;
+  loopLagSkipMs?: number;
   onBlocked: (code: string) => void;
 }): Promise<WorkerDependencyHeartbeatHandle> {
   const intervalMs = input.intervalMs ?? DEFAULT_INTERVAL_MS;
@@ -35,6 +53,8 @@ export async function startWorkerDependencyHeartbeat(input: {
     input.failuresBeforeDrain ?? DEFAULT_FAILURES_BEFORE_DRAIN;
   const startupRetryDelayMs =
     input.startupRetryDelayMs ?? DEFAULT_STARTUP_RETRY_DELAY_MS;
+  const loopLag = input.loopLag ?? defaultLoopLag;
+  const loopLagSkipMs = input.loopLagSkipMs ?? DEFAULT_LOOP_LAG_SKIP_MS;
   let stopped = false;
   let consecutiveFailures = 0;
   const timer = { current: undefined as NodeJS.Timeout | undefined };
@@ -74,6 +94,10 @@ export async function startWorkerDependencyHeartbeat(input: {
   timer.current = setInterval(() => {
     void (async () => {
       if (stopped) return;
+      // A busy loop is our own load, not a missing dependency: skip this round
+      // entirely so its probe abort cannot count toward a drain.
+      const lagMs = await loopLag();
+      if (stopped || lagMs >= loopLagSkipMs) return;
       const result = await probe();
       if (result.status === "ok") {
         consecutiveFailures = 0;

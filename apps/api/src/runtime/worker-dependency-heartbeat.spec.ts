@@ -19,6 +19,8 @@ function harness(results: CheckResult[]) {
       leases: { heartbeat },
       taskQueue: 'understanding',
       onBlocked: blocked,
+      // Healthy loop: these cases exercise failure counting, not the lag guard.
+      loopLag: async () => 0,
     });
   return { check, heartbeat, shutdown, blocked, start };
 }
@@ -129,6 +131,7 @@ describe('startWorkerDependencyHeartbeat', () => {
       leases: { heartbeat },
       taskQueue: 'understanding',
       onBlocked: blocked,
+      loopLag: async () => 0,
     });
     await vi.advanceTimersByTimeAsync(1_000);
     const handle = await started;
@@ -136,6 +139,49 @@ describe('startWorkerDependencyHeartbeat', () => {
     expect(handle.admitted).toBe(true);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(blocked).not.toHaveBeenCalled();
+    handle.stop();
+  });
+
+  it('skips probe rounds while the event loop lags instead of counting the failure', async () => {
+    // 2026-11-04: an extraction burst starved the loop past the probe's own abort
+    // window three ticks in a row; the worker drained on a live gateway and the
+    // in-flight discovery run hung until the container was restarted.
+    const check = vi
+      .fn<() => Promise<CheckResult>>()
+      .mockResolvedValueOnce({ status: 'ok' } as CheckResult)
+      .mockResolvedValue({
+        status: 'failed',
+        code: 'MODEL_GATEWAY_UNAVAILABLE',
+      } as CheckResult);
+    const lag = vi
+      .fn<() => Promise<number>>()
+      .mockResolvedValueOnce(3_000)
+      .mockResolvedValueOnce(3_000)
+      .mockResolvedValueOnce(3_000)
+      .mockResolvedValue(0);
+    const heartbeat = vi.fn(async () => undefined);
+    const shutdown = vi.fn();
+    const blocked = vi.fn();
+    const started = startWorkerDependencyHeartbeat({
+      check,
+      worker: { shutdown },
+      leases: { heartbeat },
+      taskQueue: 'understanding',
+      onBlocked: blocked,
+      loopLag: lag,
+    });
+    const handle = await started;
+    expect(handle.admitted).toBe(true);
+
+    // Three ticks under load: the probe never runs, nothing is counted.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(check).toHaveBeenCalledTimes(1);
+    expect(blocked).not.toHaveBeenCalled();
+
+    // The loop recovers; three real failures now drain.
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(blocked).toHaveBeenCalledWith('MODEL_GATEWAY_UNAVAILABLE');
+    expect(shutdown).toHaveBeenCalledOnce();
     handle.stop();
   });
 });
