@@ -24,6 +24,28 @@ export const MAX_CRAWL4AI_RENDER_ARTIFACT_BYTES =
   PLATFORM_CRAWL4AI_ARTIFACT_MAX_BYTES;
 /** How long one crawl4ai page read (crawl or render) may take before it is aborted. */
 export const CRAWL4AI_REQUEST_TIMEOUT_MS = 75_000;
+
+/**
+ * 渲染请求的 settle 延迟（秒）：env `CRAWLER_RENDER_DELAY_MS`，默认 500ms。
+ * 2026-11-04 前硬编码 3.0 秒——每页白等 3 秒（主计划 §3.5b）。
+ */
+export function renderDelaySeconds(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.CRAWLER_RENDER_DELAY_MS;
+  if (raw === undefined || raw.trim() === "") return 0.5;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed / 1000 : 0.5;
+}
+
+/**
+ * 页面缓存模式：env `CRAWLER_CACHE_MODE`（ENABLED|BYPASS|READ_ONLY|WRITE_ONLY|DISABLED），
+ * 默认 ENABLED。换抓取配置（如渲染参数）时手动设 BYPASS 验证一次。
+ */
+export function renderCacheMode(env: NodeJS.ProcessEnv = process.env): string {
+  const value = (env.CRAWLER_CACHE_MODE ?? "").trim().toUpperCase();
+  return ["ENABLED", "BYPASS", "READ_ONLY", "WRITE_ONLY", "DISABLED"].includes(value)
+    ? value
+    : "ENABLED";
+}
 export interface CrawlResult {
   url: string;
   text: string;
@@ -109,9 +131,9 @@ export async function crawlHtml(
         crawler_config: {
           type: "CrawlerRunConfig",
           params: {
-            delay_before_return_html: 3.0,
+            delay_before_return_html: renderDelaySeconds(),
             page_timeout: 45000,
-            cache_mode: "BYPASS",
+            cache_mode: renderCacheMode(),
           },
         },
       }),

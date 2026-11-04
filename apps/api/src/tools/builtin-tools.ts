@@ -13,6 +13,7 @@ import {
   SearxCategory,
 } from "../adapters/searxng";
 import { crawlUrl } from "../adapters/web-crawler";
+import { fetchPageHttpFirst } from "../adapters/http-first-fetch";
 import { isAllowedByRobots } from "../adapters/robots";
 import {
   discoverCompaniesByIndustry,
@@ -34,6 +35,41 @@ const stableKey = (obj: unknown): string => hash(JSON.stringify(obj));
 export const MAX_CRAWL4AI_FETCH_ARTIFACT_BYTES = 300_000;
 const DEFAULT_CRAWL4AI_FETCH_CHARS = 40_000;
 const MAX_CRAWL4AI_FETCH_CHARS = 100_000;
+
+/**
+ * crawl4ai.fetch 的限速/并发（主计划 §3.5b PR-A：env 可调，默认即生产目标值）。
+ * env：CRAWL4AI_FETCH_RPS（4）/ CRAWL4AI_FETCH_CONCURRENCY（6）/ CRAWL4AI_FETCH_DOMAIN_DELAY_MS（2000）。
+ */
+export function readCrawl4aiFetchLimits(env: NodeJS.ProcessEnv = process.env): {
+  rps: number;
+  concurrency: number;
+  perDomainCrawlDelayMs: number;
+} {
+  const int = (value: string | undefined, fallback: number, min: number): number => {
+    if (value === undefined || value.trim() === "") return fallback;
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed >= min ? parsed : fallback;
+  };
+  return {
+    rps: int(env.CRAWL4AI_FETCH_RPS, 4, 1),
+    concurrency: int(env.CRAWL4AI_FETCH_CONCURRENCY, 6, 1),
+    perDomainCrawlDelayMs: int(env.CRAWL4AI_FETCH_DOMAIN_DELAY_MS, 2_000, 0),
+  };
+}
+
+/** HTTP-first 抓取开关：默认 on；只有显式 `off` 才回纯渲染（回落方向安全）。 */
+export function httpFirstEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.HTTP_FIRST_FETCH ?? "on").trim().toLowerCase() !== "off";
+}
+
+/** 渲染 429 一次重试前的等待（env CRAWLER_429_RETRY_DELAY_MS，默认 1s）。 */
+function render429RetryDelayMs(env: NodeJS.ProcessEnv = process.env): number {
+  const parsed = Number(env.CRAWLER_429_RETRY_DELAY_MS ?? "");
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1_000;
+}
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 
 function boundedCrawl4aiFetchChars(value: number | undefined): number {
   if (!Number.isSafeInteger(value) || value === undefined || value < 0) {
@@ -402,6 +438,8 @@ function isPersonProfileUrl(url: string): boolean {
 export interface Crawl4aiFetchToolDependencies {
   crawlUrl: typeof crawlUrl;
   isAllowedByRobots: typeof isAllowedByRobots;
+  /** HTTP-first 正文抓取（测试注入点）；默认走受治理的 fetchPageHttpFirst。 */
+  fetchHttpFirst?: typeof fetchPageHttpFirst;
 }
 
 export function createCrawl4aiFetchTool(
@@ -416,7 +454,7 @@ export function createCrawl4aiFetchTool(
     category: "fetch",
     sourceClass: "public_intelligence",
     cost: { unit: "page", estimatedCents: 1, external: false },
-    rateLimit: { rps: 2, concurrency: 3, perDomainCrawlDelayMs: 2000 },
+    rateLimit: readCrawl4aiFetchLimits(),
     // advisory：标的=任意公司官网（未登记放行，登记即强制 SUSPENDED/用途门）；robots 在 execute 内强制。
     // site_builder：品牌研究抓站主自有官网——advisory 用途门下必须声明，否则 purpose=['site_builder'] 空集被拒。
     compliance: {
@@ -477,9 +515,51 @@ export function createCrawl4aiFetchTool(
           costCents: 0,
         };
       }
-      const r = await dependencies.crawlUrl(input.url, () =>
-        assertToolExternalActionAuthorized(ctx),
-      );
+      // HTTP-first（主计划 §3.5b PR-A）：先走受治理的普通 HTTP + readability 抽取；
+      // 薄页/失败/关闭开关时回落浏览器渲染（fail-safe 方向 = 渲染）。
+      if (httpFirstEnabled()) {
+        const httpFirst = dependencies.fetchHttpFirst ?? fetchPageHttpFirst;
+        const page = await httpFirst(input.url, {
+          hooks: {
+            authorizeExternalAction: ctx.authorizeExternalAction,
+            beforePhysicalWire: async () => {
+              await ctx.beforePhysicalWire?.();
+            },
+          },
+        }).catch(() => null);
+        if (page) {
+          const httpText = page.markdown.slice(0, boundedCrawl4aiFetchChars(input.maxChars));
+          if (Buffer.byteLength(httpText, "utf8") > MAX_CRAWL4AI_FETCH_ARTIFACT_BYTES) {
+            throw new Error("CRAWL4AI_FETCH_RESULT_TOO_LARGE");
+          }
+          const contentHash = hash(httpText);
+          return {
+            data: { url: input.url, text: httpText, contentHash },
+            costCents: 0,
+            provenance: {
+              sourceUrl: input.url,
+              fetchedAt: new Date().toISOString(),
+              contentHash,
+              parserVersion: "http-first/1",
+            },
+          };
+        }
+      }
+      const invokeRender = () =>
+        dependencies.crawlUrl(input.url, () =>
+          assertToolExternalActionAuthorized(ctx),
+        );
+      let r: Awaited<ReturnType<typeof invokeRender>>;
+      try {
+        r = await invokeRender();
+      } catch (error) {
+        // 429/限流：尊重上游节奏，单次重试（自适应衰减留 PR-B/C，避免双层限流打架）。
+        if (!/\b429\b|too many requests/i.test(String((error as Error)?.message ?? error))) {
+          throw error;
+        }
+        await sleep(render429RetryDelayMs());
+        r = await invokeRender();
+      }
       const text = r.text.slice(0, boundedCrawl4aiFetchChars(input.maxChars));
       if (Buffer.byteLength(text, "utf8") > MAX_CRAWL4AI_FETCH_ARTIFACT_BYTES) {
         throw new Error("CRAWL4AI_FETCH_RESULT_TOO_LARGE");
