@@ -18,6 +18,8 @@ import { buildGatewayProvider } from "../model-gateway/model-providers.config";
 import { AiTraceSink } from "../model-gateway/ai-trace.sink";
 import { createUnderstandingActivities } from "./understanding.activities";
 import { createDiscoveryActivities } from "./discovery.activities";
+import { createRun2Activities } from "./discovery.run2.activities";
+import { createRun2PipelineActivities } from "./discovery.run2.pipeline.activities";
 import { prismaDiscoveryRunLeaseReader } from "./discovery-run-lease";
 import { createRawSourceActivities } from "./raw-source.activities";
 import { createQualifyActivities } from "./qualify.activities";
@@ -522,6 +524,22 @@ async function main(): Promise<void> {
         runtimeTelemetry: runtimeTelemetry.telemetry,
         budgetStore,
         runLease: prismaDiscoveryRunLeaseReader(prisma),
+      }),
+      // Run 2.0（M0③）：快扫三段——规则预筛 / 批量粗判 / 临时候选物化。
+      ...createRun2Activities({
+        prisma,
+        gateway,
+        runtimeTelemetry: runtimeTelemetry.telemetry,
+        budgetStore,
+      }),
+      // Run 2.0（M0④）：深挖单公司活动（画像/精判/信号/联系人 + job 状态写回）。
+      ...createRun2PipelineActivities({
+        prisma,
+        providers,
+        gateway,
+        broker,
+        runtimeTelemetry: runtimeTelemetry.telemetry,
+        budgetStore,
       }),
       ...createRawSourceActivities({ prisma }),
       ...createQualifyActivities({ prisma, sanctionsScreening }),

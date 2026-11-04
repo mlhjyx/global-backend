@@ -1,4 +1,5 @@
 import {
+  Optional,
   Body,
   Controller,
   Get,
@@ -21,6 +22,7 @@ import { ScopesGuard } from '../auth/scopes.guard';
 import { envelope, pageEnvelope } from '../common/envelope';
 import { ApiEnvelope, ApiPageEnvelope } from '../common/api-envelope.decorator';
 import { LeadService } from './lead.service';
+import { IcpFeedbackService } from '../icp/icp-feedback.service';
 import { OutreachDraftService } from './outreach-draft.service';
 import { LEAD_QUEUE_BASES } from './lead-queue-basis';
 import { OUTCOME_REASON_CODES, REJECT_REASON_CODES } from './reason-codes';
@@ -263,6 +265,7 @@ export class LeadController {
   constructor(
     private readonly leads: LeadService,
     private readonly outreachDrafts: OutreachDraftService,
+    @Optional() private readonly feedback?: IcpFeedbackService,
   ) {}
 
   @Post('icps/:icpId/qualify')
@@ -479,7 +482,12 @@ export class LeadController {
     @Ctx() ctx: RequestContext,
     @Param('leadId', ParseUUIDPipe) leadId: string,
     @Body() dto: AcceptLeadDto) {
-    return envelope(await this.leads.decide(ctx, leadId, 'accept', dto.reason, dto.reasonCode));
+    const result = await this.leads.decide(ctx, leadId, 'accept', dto.reason, dto.reasonCode);
+    // M2：人工判断回流（best-effort；失败不影响决定本身）。
+    if ('icpId' in result) {
+      void this.feedback?.recompute(ctx, result.icpId).catch(() => undefined);
+    }
+    return envelope(result);
   }
 
   @Post('leads/:leadId/reject')
@@ -511,7 +519,11 @@ export class LeadController {
     @Ctx() ctx: RequestContext,
     @Param('leadId', ParseUUIDPipe) leadId: string,
     @Body() dto: RejectLeadDto) {
-    return envelope(await this.leads.decide(ctx, leadId, 'reject', dto.reason, dto.reasonCode));
+    const result = await this.leads.decide(ctx, leadId, 'reject', dto.reason, dto.reasonCode);
+    if ('icpId' in result) {
+      void this.feedback?.recompute(ctx, result.icpId).catch(() => undefined);
+    }
+    return envelope(result);
   }
 
   @Post('leads/:leadId/sanctions-review')

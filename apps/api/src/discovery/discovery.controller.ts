@@ -14,7 +14,7 @@ import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiProperty, ApiPropert
 import { Type } from 'class-transformer';
 import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID,
   Matches,
-  Max, MaxLength, Min, MinLength,
+  Max, MaxLength, Min, MinLength, ValidateNested,
 } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
@@ -279,6 +279,28 @@ const SUPPRESSION_DECISION_CONFLICT_SCHEMA = suppressionErrorSchema(
   true,
 );
 
+/** M0②（Run 2.0）：gain-saas 任务归因（AcquisitionTask/TaskRun 的引擎侧引用）。 */
+class ExecuteTaskRefDto {
+  @ApiProperty({ type: 'string', format: 'uuid' })
+  @IsUUID()
+  taskId!: string;
+
+  @ApiProperty({ type: 'string', format: 'uuid' })
+  @IsUUID()
+  taskRunId!: string;
+}
+
+class ExecuteQueryPlanDto {
+  @ApiPropertyOptional({
+    type: ExecuteTaskRefDto,
+    description: 'Run 2.0 任务归因；旧调用方不传时行为不变。',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ExecuteTaskRefDto)
+  taskRef?: ExecuteTaskRefDto;
+}
+
 @ApiTags('Discovery')
 @ApiBearerAuth()
 @Controller()
@@ -293,6 +315,7 @@ export class DiscoveryController {
   @ApiOperation({ summary: '执行 READY 查询计划：多源发现 → Raw → Canonical（异步，Temporal 编排）',
   })
   @ApiExecutionBudgetGrant()
+  @ApiBody({ type: ExecuteQueryPlanDto, required: false })
   @ApiEnvelope(
     {
       type: 'object',
@@ -307,12 +330,90 @@ export class DiscoveryController {
   async execute(
     @Ctx() ctx: RequestContext,
     @Param('planId', ParseUUIDPipe) planId: string,
+    @Body() dto?: ExecuteQueryPlanDto,
     @ExecutionBudgetGrant() compactJws?: string,
   ) {
     const run = await asExecutionBudgetHttpBoundary(() =>
-      this.discovery.executePlan(ctx, planId, compactJws),
+      this.discovery.executePlan(ctx, planId, compactJws, dto?.taskRef),
     );
     return envelope({ runId: run.id, status: run.status });
+  }
+
+  @Post('discovery-runs/:runId/cancel')
+  @RequireScopes('acquisition:write')
+  @HttpCode(202)
+  @ApiOperation({ summary: '停止深挖：取消 run 的 Temporal 工作流（未完成公司标 skipped，可续；已完成结果保留）' })
+  @ApiEnvelope(
+    {
+      type: 'object',
+      required: ['runId', 'status'],
+      properties: {
+        runId: { type: 'string', format: 'uuid' },
+        status: { type: 'string' },
+      },
+    },
+    { status: 202 },
+  )
+  async cancelRun(@Ctx() ctx: RequestContext, @Param('runId', ParseUUIDPipe) runId: string) {
+    return envelope(await this.discovery.cancelRun(ctx, runId));
+  }
+
+  @Get('discovery-runs/:runId/events')
+  @ApiOperation({ summary: 'run 进度事件（按 seq 增量拉取；?after=<seq> 断点续拉）' })
+  @ApiQuery({ name: 'after', required: false, schema: { type: 'integer' } })
+  @ApiQuery({ name: 'limit', required: false, schema: { type: 'integer', default: 200, maximum: 500 } })
+  @ApiEnvelope({
+    type: 'object',
+    required: ['status', 'events', 'nextAfter'],
+    properties: {
+      status: { type: 'string' },
+      events: { type: 'array', items: { type: 'object', additionalProperties: true } },
+      nextAfter: { type: 'integer' },
+    },
+  })
+  async listRunEvents(
+    @Ctx() ctx: RequestContext,
+    @Param('runId', ParseUUIDPipe) runId: string,
+    @Query('after') after?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const afterSeq = after === undefined ? undefined : Math.max(0, Math.trunc(Number(after)) || 0);
+    return envelope(
+      await this.discovery.listRunEvents(ctx, runId, afterSeq, Number(limit) || 200),
+    );
+  }
+
+  @Get('discovery-runs/:runId/jobs')
+  @ApiOperation({ summary: 'run 的公司级 job 队列（快扫名单 + 深挖逐家状态；游标分页）' })
+  @ApiQuery({ name: 'limit', required: false, schema: { type: 'integer', default: 50, maximum: 200 } })
+  @ApiQuery({ name: 'cursor', required: false })
+  @ApiPageEnvelope({
+    type: 'object',
+    required: ['id', 'companyId', 'stage'],
+    properties: {
+      id: { type: 'string', format: 'uuid' },
+      companyId: { type: 'string', format: 'uuid' },
+      name: { type: 'string', nullable: true },
+      domain: { type: 'string', nullable: true },
+      country: { type: 'string', nullable: true },
+      stage: { type: 'string' },
+      verdictQuick: { type: 'string', nullable: true },
+      verdictDeep: { type: 'string', nullable: true },
+      lastErrorCode: { type: 'string', nullable: true },
+      costCents: { type: 'integer' },
+      startedAt: { type: 'string', format: 'date-time', nullable: true },
+      finishedAt: { type: 'string', format: 'date-time', nullable: true },
+    },
+  })
+  async listRunJobs(
+    @Ctx() ctx: RequestContext,
+    @Param('runId', ParseUUIDPipe) runId: string,
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    const n = Math.min(Math.max(Number(limit) || 50, 1), 200);
+    const result = await this.discovery.listRunJobs(ctx, runId, { limit: n, cursor });
+    return pageEnvelope(result.data, result);
   }
 
   @Get('discovery-runs/:runId')
@@ -326,6 +427,9 @@ export class DiscoveryController {
       icpId: { type: 'string', format: 'uuid' },
       status: { type: 'string' },
       stats: { type: 'object', additionalProperties: true },
+      taskRef: { type: 'object', additionalProperties: true, nullable: true },
+      phases: { type: 'object', additionalProperties: true, nullable: true },
+      mode: { type: 'string' },
       createdAt: { type: 'string', format: 'date-time' },
       completedAt: { type: 'string', format: 'date-time', nullable: true },
     },
@@ -338,6 +442,9 @@ export class DiscoveryController {
       icpId: run.icpId,
       status: run.status,
       stats: run.stats,
+      taskRef: run.taskRef ?? null,
+      phases: run.phases ?? null,
+      mode: run.mode,
       createdAt: run.createdAt.toISOString(),
       completedAt: run.completedAt?.toISOString() ?? null,
     });

@@ -26,6 +26,8 @@ import {
 } from './suppression-value';
 import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
 import { companyMayUseExternalProcessing, contactMayUseExternalProcessing } from './company-suppression-gate';
+import { recordPersonalDataAccess } from '../compliance/personal-data-access-audit';
+import { TemporalClient } from '../temporal/temporal.client';
 import { type BudgetStore, TOOL_BUDGET_STORE, UnavailableBudgetStore } from '../tools/budget-store';
 import {
   assertProductDiscoveryProvenance,
@@ -78,6 +80,7 @@ export class DiscoveryService {
     private readonly providers: DiscoveryProviderRegistry,
     private readonly authority: ExecutionBudgetAuthorityService,
     @Optional() @Inject(TOOL_BUDGET_STORE) private readonly budgetStore?: BudgetStore,
+    @Optional() private readonly temporal?: TemporalClient,
   ) {}
 
   private budgets(): BudgetStore {
@@ -85,7 +88,29 @@ export class DiscoveryService {
   }
 
   /** 触发执行：READY 计划 → DiscoveryRun + outbox 事件（relay 启动 Temporal workflow）。 */
-  async executePlan(ctx: RequestContext, planId: string, compactJws?: string) {
+  async executePlan(
+    ctx: RequestContext,
+    planId: string,
+    compactJws?: string,
+    taskRef?: { taskId: string; taskRunId: string },
+  ) {
+    // M0②（Run 2.0）：任务归因是可选元数据；形状不合法在任何授权消耗之前拒绝。
+    if (taskRef !== undefined) {
+      const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+      if (
+        typeof taskRef !== 'object' ||
+        taskRef === null ||
+        !uuid.test(taskRef.taskId ?? '') ||
+        !uuid.test(taskRef.taskRunId ?? '')
+      ) {
+        throw new BadRequestException({
+          error: {
+            code: 'TASK_REF_INVALID',
+            message: 'taskRef must be {taskId, taskRunId} with UUIDs',
+          },
+        });
+      }
+    }
     const verified = await this.authority.verifyWorkspaceGrant({
       compactJws,
       identity: ctx,
@@ -118,6 +143,7 @@ export class DiscoveryService {
           planId,
           icpId: plan.icpId,
           materializationContractVersion: DISCOVERY_COMPANY_MATERIALIZATION_CONTRACT_VERSION,
+          ...(taskRef ? { taskRef: { taskId: taskRef.taskId, taskRunId: taskRef.taskRunId } } : {}),
         },
       });
       await tx.outboxEvent.create({
@@ -131,10 +157,126 @@ export class DiscoveryService {
             planId,
             icpId: plan.icpId,
             executionBudget: this.outboxBinding(binding),
+            ...(taskRef ? { taskRef: { taskId: taskRef.taskId, taskRunId: taskRef.taskRunId } } : {}),
           },
         },
       });
       return run;
+    });
+  }
+
+  /**
+   * Run 2.0（M0④/⑤）：「停止深挖」。向 Temporal 发 RequestCancel（机器身份只被允许 Start/Describe/
+   * History/RequestCancel——不发信号）。工作流在不可取消作用域里把未完成公司标 skipped(DEEP_STOPPED)
+   * 并以 CANCELLED 收尾；已完成/部分完成的名单与结果保留，下一次 run 会把这批公司重新排队（可续）。
+   */
+  async cancelRun(ctx: RequestContext, runId: string) {
+    const run = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.discoveryRun.findUnique({ where: { id: runId }, select: { id: true, status: true } }),
+    );
+    if (!run) {
+      throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'run not found' } });
+    }
+    if (!['RUNNING', 'QUEUED'].includes(run.status)) {
+      // 已结束的 run：幂等返回当前状态，不重复发取消。
+      return { runId: run.id, status: run.status };
+    }
+    if (!this.temporal) {
+      throw new ConflictException({
+        error: { code: 'TEMPORAL_UNAVAILABLE', message: 'temporal client is not connected' },
+      });
+    }
+    try {
+      await this.temporal.client.workflow.getHandle(`discovery-${runId}`).cancel();
+    } catch (error) {
+      // 工作流尚未被 relay 拉起（outbox 在途）：等价于「在开工前取消」，收尾由工作流启动后按
+      // 取消语义处理；连接级错误照旧上抛。
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/not found|NotFound|does not exist/i.test(message)) throw error;
+    }
+    return { runId: run.id, status: 'CANCEL_REQUESTED' };
+  }
+
+  /** M0⑤：run 的进度事件，按 seq 增量拉取（after=已拉到的最大 seq）。 */
+  async listRunEvents(ctx: RequestContext, runId: string, after?: number, limit = 200) {
+    const take = Math.min(Math.max(limit, 1), 500);
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const run = await tx.discoveryRun.findUnique({
+        where: { id: runId },
+        select: { id: true, status: true },
+      });
+      if (!run) {
+        throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'run not found' } });
+      }
+      const events = await tx.runEvent.findMany({
+        where: { runId, ...(after !== undefined ? { seq: { gt: BigInt(after) } } : {}) },
+        orderBy: { seq: 'asc' },
+        take,
+        select: { seq: true, at: true, level: true, type: true, payload: true },
+      });
+      return {
+        status: run.status,
+        events: events.map((event) => ({
+          seq: Number(event.seq),
+          at: event.at.toISOString(),
+          level: event.level,
+          type: event.type,
+          payload: (event.payload ?? null) as Record<string, unknown> | null,
+        })),
+        nextAfter: events.length > 0 ? Number(events[events.length - 1]!.seq) : (after ?? 0),
+      };
+    });
+  }
+
+  /** M0⑤：run 的公司级 job 队列（快扫名单 + 深挖逐家状态），游标分页。 */
+  async listRunJobs(
+    ctx: RequestContext,
+    runId: string,
+    opts: { limit: number; cursor?: string },
+  ) {
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const run = await tx.discoveryRun.findUnique({
+        where: { id: runId },
+        select: { id: true },
+      });
+      if (!run) {
+        throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'run not found' } });
+      }
+      const rows = await tx.discoveryCompanyJob.findMany({
+        where: { runId },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        take: opts.limit + 1,
+        ...(opts.cursor ? { cursor: { id: opts.cursor }, skip: 1 } : {}),
+      });
+      const page = rows.slice(0, opts.limit);
+      const companies = page.length
+        ? await tx.canonicalCompany.findMany({
+            where: { id: { in: page.map((job) => job.canonicalCompanyId) } },
+            select: { id: true, name: true, domain: true, country: true },
+          })
+        : [];
+      const byId = new Map(companies.map((company) => [company.id, company]));
+      return {
+        data: page.map((job) => {
+          const company = byId.get(job.canonicalCompanyId);
+          return {
+            id: job.id,
+            companyId: job.canonicalCompanyId,
+            name: company?.name ?? null,
+            domain: company?.domain ?? null,
+            country: company?.country ?? null,
+            stage: job.stage,
+            verdictQuick: job.verdictQuick,
+            verdictDeep: job.verdictDeep,
+            lastErrorCode: job.lastErrorCode,
+            costCents: job.costCents,
+            startedAt: job.startedAt?.toISOString() ?? null,
+            finishedAt: job.finishedAt?.toISOString() ?? null,
+          };
+        }),
+        nextCursor: rows.length > opts.limit ? (page[page.length - 1]?.id ?? null) : null,
+        hasMore: rows.length > opts.limit,
+      };
     });
   }
 
@@ -252,6 +394,12 @@ export class DiscoveryService {
         companyId,
         lawfulBasis: recordedBasis,
         binding,
+        audit: {
+          actorId: ctx.userId,
+          actorKind: 'user',
+          purpose: 'contact_discovery',
+          correlationId: opts?.attemptId ?? null,
+        },
       },
     );
   }
@@ -478,6 +626,17 @@ export class DiscoveryService {
           pointStatus: out.value.status ?? null,
         });
       }
+      // Q25：人名/邮箱访问审计，与落库同事务（谁/何时/公司/字段类/用途）。
+      await recordPersonalDataAccess(tx, {
+        workspaceId: ctx.workspaceId,
+        actorId: ctx.userId,
+        actorKind: 'user',
+        purpose: 'email_guess',
+        companyId,
+        fieldClasses: ['person_name', 'email'],
+        subjectCount: summary.attempted,
+        lawfulBasisRef: opts?.lawfulBasis?.ref ?? null,
+      });
       return summary;
     });
   }
@@ -568,6 +727,7 @@ export class DiscoveryService {
       return {
         pointValue: point.value,
         contactId: point.contactId,
+        companyId: company.id,
         kind: cleanEmail(point.value)?.kind,
         suppressed,
         adapter: adapters[0] as (typeof adapters)[number] | undefined,
@@ -750,6 +910,17 @@ export class DiscoveryService {
       const updated = await transaction.contactPoint.update({
         where: { id: pointId },
         data: { status: committedVerdict.status, verifiedAt: new Date() },
+      });
+      // Q25：邮箱验证访问审计（与状态回写同事务）。
+      await recordPersonalDataAccess(transaction, {
+        workspaceId: ctx.workspaceId,
+        actorId: ctx.userId,
+        actorKind: 'user',
+        purpose: 'email_verification',
+        companyId: loaded.companyId,
+        fieldClasses: ['email'],
+        subjectCount: 1,
+        lawfulBasisRef: recordedBasis?.ref ?? opts?.lawfulBasis?.ref ?? null,
       });
       return {
         ...updated,

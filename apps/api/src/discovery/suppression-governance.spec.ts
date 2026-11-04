@@ -477,6 +477,7 @@ describe('Suppression governance', () => {
         findMany: vi.fn(async () => [{ type: 'company_name', value: ' ACME   PUMPEN GmbH ' }]),
       },
       fieldEvidence: { create: vi.fn(async () => ({})) },
+      personalDataAccessAudit: { create: vi.fn(async () => ({})) },
     };
     const prisma = {
       withWorkspace: async (_workspaceId: string, fn: (scoped: typeof tx) => Promise<unknown>) => fn(tx),
@@ -537,6 +538,7 @@ describe('Suppression governance', () => {
         }),
       },
       fieldEvidence: { create: vi.fn(async () => ({})) },
+      personalDataAccessAudit: { create: vi.fn(async () => ({})) },
     };
     const prisma = {
       withWorkspace: async (_workspaceId: string, fn: (scoped: typeof tx) => Promise<unknown>) => fn(tx),

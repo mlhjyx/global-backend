@@ -169,6 +169,13 @@ export interface DiscoveryRunInput {
   icpId: string;
   executionContractVersion?: 2;
   executionBudget?: ExecutionBudgetBinding;
+  /**
+   * M0③（Run 2.0）：快扫编排开关，由 relay 在启动时读部署开关写入。
+   * 旧历史没有该字段（undefined）→ 走原编排；patch 守卫见 discovery.workflow.ts。
+   */
+  run2QuickScan?: boolean;
+  /** M0⑥：影子对比（老路径主产出 + 新快扫判定对比，不物化名单）。 */
+  run2Shadow?: boolean;
 }
 
 type DiscoveryActivityInput = Readonly<{
@@ -470,10 +477,10 @@ export {
   MAX_DISCOVERY_PROVIDER_RECORDS,
 };
 const SIGNAL_ENRICH_LIMIT = MAX_DISCOVERY_SIGNAL_COMPANIES; // 信号富集慢（抓官网/sitemap），单 run 上限更小；配 30 分钟长活动
-const SIGNAL_TTL_MS = 7 * 24 * 3600 * 1000; // 信号时变 → 7 天 TTL 刷新（非 GLEIF/Wikidata 那种一次写死）
+export const SIGNAL_TTL_MS = 7 * 24 * 3600 * 1000; // 信号时变 → 7 天 TTL 刷新（非 GLEIF/Wikidata 那种一次写死）
 
 /** One company's signal receipts, by the enricher that read them, one per operation. */
-type SignalEnrichmentReceipts = ReadonlyMap<
+export type SignalEnrichmentReceipts = ReadonlyMap<
   string,
   ReadonlyMap<string, { producerId: string; receipt: DurableExecutionReceipt }>
 >;
@@ -488,7 +495,7 @@ type SignalEnrichmentReceipts = ReadonlyMap<
  * empty writes no `_ts` and so would run again; it is handled as a miss. Returns the enricher
  * keys whose hit is in the database.
  */
-async function commitCompanySignals(
+export async function commitCompanySignals(
   tx: Prisma.TransactionClient,
   args: {
     workspaceId: string;
@@ -625,7 +632,7 @@ function isLostTaxonomyNormalization(error: unknown): boolean {
 }
 
 /** ICP 品类上下文（只供模型判断相关品类，不进输出）。 */
-function icpProductContext(companyAttributes: unknown): string {
+export function icpProductContext(companyAttributes: unknown): string {
   const attributes = (companyAttributes ?? {}) as Record<string, unknown>;
   return [attributes.industry, attributes.sub_industry, attributes.product]
     .flat()
@@ -638,7 +645,7 @@ function icpProductContext(companyAttributes: unknown): string {
  * 画像在 30 天内、且（开关打开时）联系路径已按当前规则读过 → 这家不用再画像。
  * BI-14：开关打开时，30 天内的画像在联系路径按当前规则读过之前仍算过期（每家每个规则版本一次）。
  */
-function websiteProfileFreshAndCurrent(attributes: unknown, contactPaths: boolean, nowMs: number): boolean {
+export function websiteProfileFreshAndCurrent(attributes: unknown, contactPaths: boolean, nowMs: number): boolean {
   const existing = ((attributes as Record<string, unknown> | null) ?? {})[WEBSITE_PROFILE_PROVIDER_KEY] as
     | { _ts?: string; [COMPANY_CONTACT_PARSER_MARKER]?: string }
     | undefined;
@@ -648,7 +655,7 @@ function websiteProfileFreshAndCurrent(attributes: unknown, contactPaths: boolea
 }
 
 /** 官网画像 → 只含公司级事实的富集结果（命名空间 `website_profile`）。 */
-function websiteProfileEnrichment(profile: WebsiteProfile, fetchedAt: Date): EnrichmentResult {
+export function websiteProfileEnrichment(profile: WebsiteProfile, fetchedAt: Date): EnrichmentResult {
   // 画像事实所在的页（有 Impressum 用 Impressum，否则首页）；A4：贸易角色、登记号、税号据此有来源 URL。
   const sourceUrl = profile.impressumUrl ?? profile.homepageUrl;
   const attributes = Object.fromEntries(
@@ -834,13 +841,13 @@ export function createDiscoveryActivities(deps: {
    * attestation failure still refuses the write.
    */
   const attestRunFinalization = async (
-    args: DiscoveryActivityInput & { status: 'DONE' | 'PARTIAL' | 'FAILED' },
+    args: DiscoveryActivityInput & { status: 'DONE' | 'PARTIAL' | 'FAILED' | 'CANCELLED' },
   ): Promise<void> => {
     try {
       await ensureRunBudget(args);
     } catch (error) {
       if (
-        args.status === 'FAILED' &&
+        (args.status === 'FAILED' || args.status === 'CANCELLED') &&
         error instanceof ExecutionBudgetGrantError &&
         ENDED_AUTHORITY_CODES.has(error.code)
       ) {
@@ -2956,6 +2963,13 @@ export function createDiscoveryActivities(deps: {
                 accountKey: binding.accountKey,
               },
               ...(contactBudget ? { contactBudget } : {}),
+              // Q25：run 内物化个人数据的审计归因（系统主体 + runId）。
+              audit: {
+                actorId: `discovery-run:${args.runId}`,
+                actorKind: 'system',
+                purpose: 'run_contact_materialization',
+                correlationId: args.runId,
+              },
             },
           );
           companies += 1;
@@ -2998,6 +3012,7 @@ export function createDiscoveryActivities(deps: {
               workspaceId: args.workspaceId,
               runId: args.runId,
               accountKey: binding.accountKey,
+              companyId: target.canonicalCompanyId,
               domain: target.domain,
               contacts: result.contacts.map((contact) => ({
                 id: contact.id,
@@ -3272,7 +3287,7 @@ export function createDiscoveryActivities(deps: {
       runId: string;
       planId: string;
       icpId?: string;
-      status: 'DONE' | 'PARTIAL' | 'FAILED';
+      status: 'DONE' | 'PARTIAL' | 'FAILED' | 'CANCELLED';
       stats: Record<string, unknown>;
     }): Promise<void> {
       // A run's outcome is written once. A retry of a write that already committed (its

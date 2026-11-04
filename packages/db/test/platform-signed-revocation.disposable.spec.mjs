@@ -134,7 +134,7 @@ describe('signed platform revocation on self-owned disposable PostgreSQL 16', ()
     assert.equal(process.env.PLATFORM_REVOCATION_DISPOSABLE_TEST, '1', 'explicit disposable test opt-in required');
     const started = docker(['run', '--pull=never', '--rm', '-d', '--name', container, '--network=none',
       '--tmpfs', '/var/lib/postgresql/data', '-e', 'POSTGRES_HOST_AUTH_METHOD=trust',
-      '-e', 'POSTGRES_DB=revocation_test', 'pgvector/pgvector:pg16']);
+      '-e', 'POSTGRES_DB=revocation_test', 'pgvector/pgvector@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b']);
     assert.equal(started.status, 0, started.stderr); created = true;
     let ready = false;
     for (let n = 0; n < 100; n++) {
