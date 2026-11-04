@@ -675,6 +675,60 @@ describe.runIf(Boolean(ownerUrl && appUrl))('app_user table privileges on Postgr
     });
   }, 60_000);
 
+  // run_shadow_diff (M0⑥) is written by recordRunShadowDiff with runShadowDiff.upsert: the same
+  // run is created once and updated on every shadow pass. The 20261104130000 migration granted
+  // INSERT, SELECT only (copied from run_event's append-only pattern) and the first real shadow
+  // run failed with 42501 permission denied; 20261104190000 adds UPDATE. No code path deletes
+  // rows, so DELETE stays refused.
+  it('lets app_user upsert the shadow comparison row of a run', async () => {
+    const workspaceId = randomUUID();
+    await rolledBack(app, async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceId}, true)`;
+      await tx.workspace.create({ data: { id: workspaceId, name: 'privileges probe' } });
+      const seller = await tx.companyProfile.create({
+        data: { workspaceId, name: 'Privileges Seller GmbH' },
+      });
+      const icp = await tx.icpDefinition.create({
+        data: { workspaceId, companyId: seller.id, name: 'probe' },
+      });
+      const plan = await tx.discoveryQueryPlan.create({
+        data: { workspaceId, icpId: icp.id, status: 'CONFIRMED', queries: [] },
+      });
+      const run = await tx.discoveryRun.create({
+        data: {
+          workspaceId,
+          planId: plan.id,
+          icpId: icp.id,
+          // guard_discovery_materialization_marker_v1: runs created after the governed
+          // activation must carry the v1 contract marker.
+          materializationContractVersion: 'discovery-company-materialization/v1',
+        },
+      });
+      const summary = {
+        workspaceId,
+        runId: run.id,
+        legacyJudged: 4,
+        legacyPositive: 2,
+        shadowJudged: 4,
+        shadowPositive: 2,
+        agreement: 3,
+        compared: 4,
+        shadowFallback: 0,
+      };
+      // recordRunShadowDiff: create on the first pass, update on a replayed or repeat pass.
+      for (const attempt of [0, 1]) {
+        await tx.runShadowDiff.upsert({
+          where: { runId: run.id },
+          create: summary,
+          update: { ...summary, agreement: 4 },
+        });
+      }
+      const stored = await tx.runShadowDiff.findUnique({ where: { runId: run.id } });
+      expect(stored?.agreement).toBe(4);
+      expect(stored?.shadowPositive).toBe(2);
+    });
+  }, 60_000);
+
   // Negative: every INSERT, UPDATE, DELETE and TRUNCATE (and SELECT where the manifest lists
   // none) outside the manifest is refused with 42501 on the relation itself. Each statement needs
   // only its own privilege and touches no row.

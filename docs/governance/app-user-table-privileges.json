@@ -373,7 +373,8 @@
     ],
     "run_shadow_diff": [
       "INSERT",
-      "SELECT"
+      "SELECT",
+      "UPDATE"
     ],
     "runtime_process_lease": [
       "SELECT"
