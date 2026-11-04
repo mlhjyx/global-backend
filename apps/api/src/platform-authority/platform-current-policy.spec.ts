@@ -1,6 +1,13 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { CurrentPlatformExecutionPolicy } from "./platform-current-policy";
+import {
+  CurrentPlatformChannelCrawlPolicy,
+  CurrentPlatformExecutionPolicy,
+} from "./platform-current-policy";
+import {
+  PLATFORM_CHANNEL_CRAWL_ENVELOPE_SHA256,
+  loadVerifiedPlatformAuthorityPolicyAsset,
+} from "./platform-authority-policy-asset";
 
 const corpus = JSON.parse(readFileSync(new URL("../../../../packages/contracts/fixtures/platform-authority/platform-execution-technical-quote-v1.json", import.meta.url), "utf8"));
 const vector = corpus.vectors.find((row: { input: { schedule_id: string } }) => row.input.schedule_id === "acq-sweep");
@@ -51,5 +58,59 @@ describe("current platform execution policy projection", () => {
     { kind: "model", modelOp: "generateText", taskId: "invented", providerId: "new-api" },
   ])("rejects execution outside the current closed tool envelope", execution => {
     expect(() => new CurrentPlatformExecutionPolicy().attest(authority(), execution, new Date())).toThrow("PLATFORM_EGRESS_CURRENT_POLICY_UNAVAILABLE");
+  });
+});
+
+describe("current platform channel-crawl policy projection (P4-P4)", () => {
+  const crawlAuthority = {
+    purpose: "platform.channel_crawl",
+    subjectType: "source_channel",
+    subjectId: "55555555-5555-4555-8555-555555555555",
+    requestSha256: "a".repeat(64),
+    crawlRunId: "66666666-6666-4666-8666-666666666666",
+    technicalPolicyRevision: PLATFORM_CHANNEL_CRAWL_ENVELOPE_SHA256,
+    authorizedCapMicrousd: 5_000_000n,
+  };
+  const crawlExecution = { kind: "tool" as const, toolId: "crawl4ai.render", toolVersion: "1.0.0" };
+
+  it("pins the reviewed-v3 channel_crawl envelope digest shared with gain-saas", () => {
+    expect(PLATFORM_CHANNEL_CRAWL_ENVELOPE_SHA256).toBe(
+      "e22cfd856be8698114106b1b24dd39232151c80b2ca22d3fd067b0caad15aa72",
+    );
+  });
+
+  it("projects the crawl envelope with the frozen artifact identity and tool reservation", () => {
+    const projection = new CurrentPlatformChannelCrawlPolicy().attest(crawlAuthority, crawlExecution);
+    expect(projection).toEqual({
+      policyRevision: PLATFORM_CHANNEL_CRAWL_ENVELOPE_SHA256,
+      executionEnvelopeSha256: PLATFORM_CHANNEL_CRAWL_ENVELOPE_SHA256,
+      policyArtifactSha256: loadVerifiedPlatformAuthorityPolicyAsset().sha256,
+      requiredCapMicrousd: 5_000_000n,
+      operationReservationMicrousd: expect.any(BigInt),
+    });
+  });
+
+  it.each([
+    [{ purpose: "platform.acquisition" }],
+    [{ subjectType: "schedule" }],
+    [{ subjectId: "not-a-uuid" }],
+    [{ crawlRunId: "not-a-uuid" }],
+    [{ requestSha256: "short" }],
+    [{ technicalPolicyRevision: "f".repeat(64) }],
+    [{ authorizedCapMicrousd: 0n }],
+  ])("rejects a malformed crawl authority case %#", (override) => {
+    expect(() =>
+      new CurrentPlatformChannelCrawlPolicy().attest({ ...crawlAuthority, ...override } as never, crawlExecution),
+    ).toThrow("PLATFORM_EGRESS_CURRENT_POLICY_UNAVAILABLE");
+  });
+
+  it.each([
+    [{ kind: "model", modelOp: "generateText" }],
+    [{ kind: "tool", toolId: "http.get", toolVersion: "1.0.0" }],
+    [{ kind: "tool", toolId: "crawl4ai.render", toolVersion: "2.0.0" }],
+  ])("rejects execution outside the closed crawl tool envelope %#", (execution) => {
+    expect(() =>
+      new CurrentPlatformChannelCrawlPolicy().attest(crawlAuthority, execution as never),
+    ).toThrow("PLATFORM_EGRESS_CURRENT_POLICY_UNAVAILABLE");
   });
 });

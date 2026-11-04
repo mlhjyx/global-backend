@@ -351,3 +351,16 @@ const CURRENT_POLICY = verifyPlatformAuthorityPolicyAsset({
 export function loadVerifiedPlatformAuthorityPolicyAsset(): VerifiedPlatformAuthorityPolicyAsset {
   return CURRENT_POLICY;
 }
+
+/**
+ * sha256(canonicalJson(channel_crawl section) + "\n") — the technical policy
+ * revision every channel-crawl grant must carry. Locked on both sides of the
+ * authority boundary (gain-saas config
+ * R4_CHANNEL_CRAWL_EXPECTED_TECHNICAL_POLICY_REVISION).
+ */
+export const PLATFORM_CHANNEL_CRAWL_ENVELOPE_SHA256: string = (() => {
+  const policy = loadVerifiedPlatformAuthorityPolicyAsset();
+  return createHash("sha256")
+    .update(`${canonicalJson(policy.policy.channel_crawl)}\n`, "utf8")
+    .digest("hex");
+})();

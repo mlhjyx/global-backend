@@ -155,3 +155,57 @@ describe("Platform egress fence v1", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 });
+
+describe("channel-crawl egress binding (P4-P4)", () => {
+  const CRAWL: PlatformEgressBinding = Object.freeze({
+    subjectKind: "source_channel",
+    authorityId: "11111111-1111-4111-8111-111111111111",
+    channelId: "55555555-5555-4555-8555-555555555555",
+    crawlRunId: "66666666-6666-4666-8666-666666666666",
+    requestSha256: "a".repeat(64),
+    technicalPolicyRevision: "b".repeat(64),
+    accountKey: `platform:${"a".repeat(64)}:66666666-6666-4666-8666-666666666666`,
+  });
+
+  it("dispatches crawl attempts through the crawl ACK transitions", async () => {
+    const acknowledgedChannelCrawl = vi.fn(async () => undefined);
+    const unknownChannelCrawl = vi.fn(async () => undefined);
+    const acknowledged = vi.fn(async () => undefined);
+    const fence = new PlatformEgressFence(
+      port({ acknowledged, acknowledgedChannelCrawl, unknownChannelCrawl }),
+    );
+    await expect(
+      fence.authorizeAndDispatchPlatformEgress(CRAWL, operation("crawl-wire"), async () => "ok"),
+    ).resolves.toBe("ok");
+    expect(acknowledgedChannelCrawl).toHaveBeenCalledTimes(1);
+    expect(acknowledged).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { accountKey: `platform:${"a".repeat(64)}:11111111-1111-4111-8111-111111111111` },
+    { channelId: "not-a-uuid" },
+    { crawlRunId: "not-a-uuid" },
+    { requestSha256: "short" },
+    { technicalPolicyRevision: "short" },
+  ])("rejects an invalid crawl binding case %#", async (override) => {
+    const durable = port();
+    await expect(
+      new PlatformEgressFence(durable).authorizeAndDispatchPlatformEgress(
+        { ...CRAWL, ...override } as PlatformEgressBinding,
+        operation("crawl-wire"),
+        async () => "must-not-run",
+      ),
+    ).rejects.toMatchObject({ code: "PLATFORM_EGRESS_BINDING_INVALID" });
+    expect(durable.authorize).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the durable port has no crawl ACK transitions", async () => {
+    await expect(
+      new PlatformEgressFence(port()).authorizeAndDispatchPlatformEgress(
+        CRAWL,
+        operation("crawl-wire"),
+        async () => "must-not-run",
+      ),
+    ).rejects.toMatchObject({ code: PLATFORM_EGRESS_FENCE_UNAVAILABLE });
+  });
+});
