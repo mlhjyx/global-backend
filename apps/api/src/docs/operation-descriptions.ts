@@ -116,7 +116,7 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
 
   // ── Discovery ─────────────────────────────────────────────────────────────
   'POST /api/v1/query-plans/{planId}/execute':
-    '执行一个 READY 查询计划：多源发现 → Raw → Canonical，由 Temporal 异步编排。返回 202 与 runId，用 GET /discovery-runs/{runId} 轮询。',
+    '执行一个查询计划：READY 首跑；EXECUTED 计划携带新 attemptId 即重跑（新请求哈希/新预算 Grant，同一 attempt 重放报 EXECUTION_BUDGET_GRANT_REUSED，缺 attemptId 报 RERUN_REQUIRES_ATTEMPT）。多源发现 → Raw → Canonical，由 Temporal 异步编排，返回 202 与 runId。',
   'POST /api/v1/discovery-runs/{runId}/cancel':
     '停止深挖：向 Temporal 发取消请求。已完成公司的结果保留，未完成公司标 skipped（下一次 run 会重新排队），run 以 CANCELLED 收尾。已结束的 run 幂等返回当前状态。',
   'GET /api/v1/icps/{icpId}/feedback':

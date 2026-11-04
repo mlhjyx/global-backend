@@ -3392,7 +3392,7 @@ export function createDiscoveryActivities(deps: {
         } else if (Object.keys(storedDerived.perQuery).length) {
           throw new Error('DISCOVERY_QUERY_RECEIPT_FINALIZE_MISSING');
         }
-        await tx.discoveryRun.update({
+        const completedRun = await tx.discoveryRun.update({
           where: { id: args.runId },
           data: {
             status: args.status,
@@ -3416,6 +3416,8 @@ export function createDiscoveryActivities(deps: {
               planId: args.planId,
               status: args.status,
               stats: finalStats,
+              // P1：SaaS 在同一次尝试的『引擎已建 run、BFF 丢响应』窗口里靠它回填 engineRunId。
+              ...(completedRun?.taskRef ? { taskRef: completedRun.taskRef } : {}),
             } as Prisma.InputJsonValue,
           },
         });

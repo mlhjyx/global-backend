@@ -87,7 +87,7 @@ describe('workspace execution authority OpenAPI', () => {
     // The other grant-bound operations keep their own 409 text.
     expect(
       document.paths['/api/v1/query-plans/{planId}/execute']?.post?.responses?.['409']?.description,
-    ).toBe('EXECUTION_BUDGET_GRANT_REUSED');
+    ).toBe('EXECUTION_BUDGET_GRANT_REUSED, INVALID_STATE or RERUN_REQUIRES_ATTEMPT');
   });
 
   it('documents a settled unusable model answer of the two generation endpoints as 502 MODEL_UPSTREAM_UNUSABLE', () => {

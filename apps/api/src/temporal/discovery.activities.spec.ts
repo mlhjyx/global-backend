@@ -2849,6 +2849,37 @@ describe("finalizeRun durable query receipt readback", () => {
     },
   );
 
+  it("carries the run's taskRef on DiscoveryRunCompleted for SaaS backfill (P1 attempt 维度)", async () => {
+    const { activities, outboxCreate, update } = finalizeHarness(null);
+    update.mockResolvedValueOnce({
+      taskRef: {
+        taskId: "70000000-0000-4000-8000-000000000001",
+        taskRunId: "80000000-0000-4000-8000-000000000001",
+      },
+    });
+
+    await activities.finalizeRun(
+      discoveryArgs("40000000-0000-4000-8000-000000000001", {
+        planId: "50000000-0000-4000-8000-000000000001",
+        icpId: "60000000-0000-4000-8000-000000000001",
+        status: "DONE" as const,
+        stats: { failures: 0, fit: { match: 0, weak: 0, mismatch: 0 } },
+      }),
+    );
+
+    expect(outboxCreate.mock.calls[0]![0]).toMatchObject({
+      data: {
+        eventType: "DiscoveryRunCompleted",
+        payload: {
+          taskRef: {
+            taskId: "70000000-0000-4000-8000-000000000001",
+            taskRunId: "80000000-0000-4000-8000-000000000001",
+          },
+        },
+      },
+    });
+  });
+
   // A run that failed after the fit stage leaves judged-but-unscored companies behind: their
   // queue is the fit-gate preset, their six scores are NULL and the sanctions gate never ran
   // (xin, 2026-10-14: 179 such leads from 11 FAILED runs). Scoring is deterministic and spends

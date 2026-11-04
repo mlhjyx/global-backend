@@ -950,7 +950,8 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     }
     // The lease cut the query stage short and no query brought a single accepted record (the run
     // started late, say): the run found nothing, so it ends FAILED rather than a PARTIAL that marks
-    // the plan EXECUTED. The plan cannot run again either way; its grant was consumed.
+    // the plan EXECUTED. FAILED keeps the plan READY for another run (BI-25); since P1 an EXECUTED
+    // plan can also be rerun with a fresh attemptId, so a consumed grant no longer bricks it.
     if ((leaseSkips.queries ?? 0) > 0 && acceptedRaw === 0) {
       status = 'FAILED';
     }

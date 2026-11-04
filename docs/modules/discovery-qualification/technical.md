@@ -48,16 +48,17 @@
 
 **目标**：首批线索 ≤10 分钟；25 家整轮 ≤30 分钟；召回不降。
 
-## 6. 任务与 rerun（Phase 4）
+## 6. 任务与 rerun（Phase 4，2026-11-04 P1 修订）
 
-- `DiscoveryRun` 增 `attemptNo`/`rerunOfRunId`；`POST /query-plans/:planId/rerun` 以 `planId+attemptId` 新 request hash/新 Grant；同 plan 并发 run 拒绝（advisory lock）。
-- execute/rerun 支持 `Idempotency-Key`：先查后消费，避免双扣费与孤儿 run。
-- SaaS `AcquisitionTask`/`TaskRun` 映射；事件消费更新 TaskRun 状态。
+- **不再新增独立 rerun 端点**（原计划的 `POST /query-plans/:planId/rerun` 由本节取代）：execute 的状态门放宽为 READY | EXECUTED；EXECUTED 计划凭**新 attemptId** 重跑（`planId+attemptId` 进请求哈希 → 新 Grant/新预算账户），缺 attemptId 返回 409 `RERUN_REQUIRES_ATTEMPT`，同 attempt 重放仍 `EXECUTION_BUDGET_GRANT_REUSED`。
+- attempt 的业务语义（第 N 次、`rerunOf`、重试历史）唯一权威在 SaaS `TaskRun`；`DiscoveryRun` 不新增 attempt 列，归因继续走 `taskRef`。引擎不落 attemptId。
+- `DiscoveryRunCompleted` payload 追加 `taskRef`（additive）：SaaS 在「引擎已建 run、BFF 丢响应」窗口据此回填 `engineRunId`。
+- 同 plan 并发 run 的 advisory lock 与 `Idempotency-Key` 头仍属后续改造（当前以 workspace 配额计数兜底）。
 
 ## 7. 实现状态与缺口
 
 **已实现**：ICP/规则/回测/计划/确认/执行/run/线索/评分/交付包/周报；联系人阶段 M1–M4；lease 软截止。
-**缺口**：query 阶段 50–70% 耗时；fit 逐公司 LLM；qualify 5 分钟超时无 heartbeat；run 无流式线索；Grant 一次性无 rerun；幂等覆盖不足；平台 schedule 暂停。
+**缺口**：query 阶段 50–70% 耗时；fit 逐公司 LLM；qualify 5 分钟超时无 heartbeat；run 无流式线索；同 plan 并发 run 无锁（Grant 凭 attemptId 已可重跑，见 §6）；幂等覆盖不足；平台 schedule 暂停。
 
 ## 8. 测试
 
