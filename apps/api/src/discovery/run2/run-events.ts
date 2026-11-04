@@ -48,7 +48,9 @@ export async function appendRunEvent(
   input: RunEventInput,
 ): Promise<void> {
   // 同一 run 的写入串行化；事务级锁随调用方事务提交/回滚自动释放。
-  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`run-event:${input.runId}`}, 0))`;
+  // Prisma 无法反序列化 PostgreSQL void：锁函数的结果必须显式转成 text
+  // （2026-11-04 首次上生产即以 42501 式的反序列化错误卡死 quickScan）。
+  await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`run-event:${input.runId}`}, 0))::text AS locked`;
   const current = await tx.runEvent.aggregate({
     where: { runId: input.runId },
     _max: { seq: true },
