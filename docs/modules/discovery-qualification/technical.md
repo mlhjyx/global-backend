@@ -14,7 +14,7 @@
 ## 2. 技术概览
 
 - 归属：引擎 `/global/backend`（NestJS + Temporal + ToolBroker + 模型网关）。
-- 编排：`discoveryWorkflow`（阶段严格串行；query 内批 2）；活动超时 2/15/30 分钟；lease 软截止 → PARTIAL。
+- 编排：`discoveryWorkflow`（阶段严格串行；query 内批 2，常量 `DISCOVERY_QUERY_BATCH` 在 `apps/api/src/temporal/discovery.workflow.ts`）；活动超时 2/15/30 分钟；lease 软截止 → PARTIAL。
 - 预算：每操作一次性 Grant（purpose/subject/request hash 绑定）；消费后不可复用；重试=新 request/新 Grant。
 
 ## 3. Run 阶段与并发（as-built）
