@@ -70,6 +70,7 @@ export class IcpController {
       '模型网关结算了调用却没有可用答案（内容被过滤、输出截断、非 JSON、流被截断等）时返回 502 MODEL_UPSTREAM_UNUSABLE，details.reasonCode 为网关原因码；此时预算授权已消耗，重试需要新的授权。',
   })
   @ApiExecutionBudgetGrant()
+  @ApiBody({ type: GenerateWithAttemptDto, required: false })
   @ApiModelUpstreamUnusable()
   @ApiEnvelope(IcpDto, { status: 201 })
   async generate(
