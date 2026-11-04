@@ -86,7 +86,29 @@ export class DiscoveryService {
   }
 
   /** 触发执行：READY 计划 → DiscoveryRun + outbox 事件（relay 启动 Temporal workflow）。 */
-  async executePlan(ctx: RequestContext, planId: string, compactJws?: string) {
+  async executePlan(
+    ctx: RequestContext,
+    planId: string,
+    compactJws?: string,
+    taskRef?: { taskId: string; taskRunId: string },
+  ) {
+    // M0②（Run 2.0）：任务归因是可选元数据；形状不合法在任何授权消耗之前拒绝。
+    if (taskRef !== undefined) {
+      const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+      if (
+        typeof taskRef !== 'object' ||
+        taskRef === null ||
+        !uuid.test(taskRef.taskId ?? '') ||
+        !uuid.test(taskRef.taskRunId ?? '')
+      ) {
+        throw new BadRequestException({
+          error: {
+            code: 'TASK_REF_INVALID',
+            message: 'taskRef must be {taskId, taskRunId} with UUIDs',
+          },
+        });
+      }
+    }
     const verified = await this.authority.verifyWorkspaceGrant({
       compactJws,
       identity: ctx,
@@ -119,6 +141,7 @@ export class DiscoveryService {
           planId,
           icpId: plan.icpId,
           materializationContractVersion: DISCOVERY_COMPANY_MATERIALIZATION_CONTRACT_VERSION,
+          ...(taskRef ? { taskRef: { taskId: taskRef.taskId, taskRunId: taskRef.taskRunId } } : {}),
         },
       });
       await tx.outboxEvent.create({
@@ -132,6 +155,7 @@ export class DiscoveryService {
             planId,
             icpId: plan.icpId,
             executionBudget: this.outboxBinding(binding),
+            ...(taskRef ? { taskRef: { taskId: taskRef.taskId, taskRunId: taskRef.taskRunId } } : {}),
           },
         },
       });

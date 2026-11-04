@@ -14,7 +14,7 @@ import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiProperty, ApiPropert
 import { Type } from 'class-transformer';
 import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID,
   Matches,
-  Max, MaxLength, Min, MinLength,
+  Max, MaxLength, Min, MinLength, ValidateNested,
 } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
@@ -279,6 +279,28 @@ const SUPPRESSION_DECISION_CONFLICT_SCHEMA = suppressionErrorSchema(
   true,
 );
 
+/** M0②（Run 2.0）：gain-saas 任务归因（AcquisitionTask/TaskRun 的引擎侧引用）。 */
+class ExecuteTaskRefDto {
+  @ApiProperty({ type: 'string', format: 'uuid' })
+  @IsUUID()
+  taskId!: string;
+
+  @ApiProperty({ type: 'string', format: 'uuid' })
+  @IsUUID()
+  taskRunId!: string;
+}
+
+class ExecuteQueryPlanDto {
+  @ApiPropertyOptional({
+    type: ExecuteTaskRefDto,
+    description: 'Run 2.0 任务归因；旧调用方不传时行为不变。',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ExecuteTaskRefDto)
+  taskRef?: ExecuteTaskRefDto;
+}
+
 @ApiTags('Discovery')
 @ApiBearerAuth()
 @Controller()
@@ -293,6 +315,7 @@ export class DiscoveryController {
   @ApiOperation({ summary: '执行 READY 查询计划：多源发现 → Raw → Canonical（异步，Temporal 编排）',
   })
   @ApiExecutionBudgetGrant()
+  @ApiBody({ type: ExecuteQueryPlanDto, required: false })
   @ApiEnvelope(
     {
       type: 'object',
@@ -307,10 +330,11 @@ export class DiscoveryController {
   async execute(
     @Ctx() ctx: RequestContext,
     @Param('planId', ParseUUIDPipe) planId: string,
+    @Body() dto?: ExecuteQueryPlanDto,
     @ExecutionBudgetGrant() compactJws?: string,
   ) {
     const run = await asExecutionBudgetHttpBoundary(() =>
-      this.discovery.executePlan(ctx, planId, compactJws),
+      this.discovery.executePlan(ctx, planId, compactJws, dto?.taskRef),
     );
     return envelope({ runId: run.id, status: run.status });
   }
