@@ -4,7 +4,8 @@ import { appendRunEvent } from './run-events';
 function makeTx(maxSeq: bigint | null) {
   const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ ...data }));
   const aggregate = vi.fn(async () => ({ _max: { seq: maxSeq } }));
-  return { tx: { runEvent: { aggregate, create } }, aggregate, create };
+  const queryRaw = vi.fn(async () => [{ pg_advisory_xact_lock: null }]);
+  return { tx: { $queryRaw: queryRaw, runEvent: { aggregate, create } }, aggregate, create, queryRaw };
 }
 
 describe('M0③ run 进度事件（append-only，seq 单调）', () => {
@@ -27,18 +28,29 @@ describe('M0③ run 进度事件（append-only，seq 单调）', () => {
     });
   });
 
-  it('retries the allocation when a concurrent writer took the same seq', async () => {
-    const { tx, create, aggregate } = makeTx(10n);
-    create
-      .mockRejectedValueOnce(Object.assign(new Error('unique'), { code: 'P2002' }))
-      .mockResolvedValueOnce({});
-    aggregate
-      .mockResolvedValueOnce({ _max: { seq: 10n } })
-      .mockResolvedValueOnce({ _max: { seq: 11n } });
-
+  it('serializes writers per run with a transaction-scoped advisory lock before allocating seq', async () => {
+    const { tx, queryRaw, aggregate } = makeTx(7n);
     await appendRunEvent(tx as never, { workspaceId: 'ws-1', runId: 'run-1', type: 'company_done' });
-    expect(create).toHaveBeenCalledTimes(2);
-    expect((create.mock.calls[1]![0] as { data: { seq: bigint } }).data.seq).toBe(12n);
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    // Prisma 的标签模板把锁键作为绑定值传入，SQL 文本里只有占位符。
+    const sql = (queryRaw.mock.calls[0]![0] as TemplateStringsArray).join('?');
+    expect(sql).toContain('pg_advisory_xact_lock');
+    expect(String(queryRaw.mock.calls[0]![1])).toBe('run-event:run-1');
+    expect(queryRaw.mock.invocationCallOrder[0]!).toBeLessThan(aggregate.mock.invocationCallOrder[0]!);
+  });
+
+  it('does not retry a unique collision inside the transaction (PostgreSQL aborts it with 25P02)', async () => {
+    const { tx, create, queryRaw } = makeTx(10n);
+    // 2026-11-04 实测：唯一冲突后事务被 PostgreSQL 标为 aborted，事务内再取号只会报 25P02，
+    // 且同事务的状态更新全部回滚。冲突必须直接上抛，由外层事务重试。
+    create.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('unique'), { code: 'P2002' });
+    });
+    await expect(
+      appendRunEvent(tx as never, { workspaceId: 'ws-1', runId: 'run-1', type: 'company_done' }),
+    ).rejects.toMatchObject({ code: 'P2002' });
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(queryRaw).toHaveBeenCalledTimes(1);
   });
 
   it('surfaces a non-unique database error without retrying', async () => {
