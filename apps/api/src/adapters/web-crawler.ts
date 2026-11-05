@@ -46,6 +46,22 @@ export function renderCacheMode(env: NodeJS.ProcessEnv = process.env): string {
     ? value
     : "ENABLED";
 }
+
+/**
+ * 单页导航超时（毫秒）：env `CRAWLER_PAGE_TIMEOUT_MS`，默认 45000。
+ * 上限必须低于本次 /crawl 请求的客户端中止时间（`CRAWL4AI_REQUEST_TIMEOUT_MS`，
+ * 75s，同时是 discovery 租约预算的计量基准）：crawl4ai 的 /crawl 是同步接口，
+ * page_timeout 高于客户端中止只会在客户端先超时并把慢页计成 pageFailures。
+ * 因此钳制在 5s–70s（仍留出 delay_before_return_html 与响应传输余量）。
+ */
+export function pageTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.CRAWLER_PAGE_TIMEOUT_MS;
+  if (raw === undefined || raw.trim() === "") return 45_000;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 45_000;
+  const ceiling = CRAWL4AI_REQUEST_TIMEOUT_MS - 5_000;
+  return Math.min(ceiling, Math.max(5_000, Math.round(parsed)));
+}
 export interface CrawlResult {
   url: string;
   text: string;
@@ -132,7 +148,7 @@ export async function crawlHtml(
           type: "CrawlerRunConfig",
           params: {
             delay_before_return_html: renderDelaySeconds(),
-            page_timeout: 45000,
+            page_timeout: pageTimeoutMs(),
             cache_mode: renderCacheMode(),
           },
         },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseHtml, selectAll, selectAttr, selectText } from './html-select';
+import { decodeHtmlEntities, parseHtml, selectAll, selectAttr, selectText } from './html-select';
 
 const PAGE = `<!doctype html><html><head><title>t</title><style>.x{}</style></head>
 <body>
@@ -45,5 +45,23 @@ describe('M1 极简 HTML 选择器', () => {
   it('returns empty results for unsupported selectors instead of throwing', () => {
     expect(selectAll(PAGE, 'div > .card')).toEqual([]);
     expect(selectText(PAGE, 'nope')).toBeNull();
+  });
+
+  it('decodes named and numeric HTML entities in extracted text', () => {
+    const html =
+      '<div class="c"><p>A&amp;D &#40;THAILAND&#41; &#x26; CO.</p><p>&nbsp;Ges.m.b.H.</p><p>&unknown; stays</p></div>';
+    expect(selectText(html, '.c')).toBe('A&D (THAILAND) & CO. Ges.m.b.H. &unknown; stays');
+    // Invalid references stay literal instead of turning into control characters.
+    expect(decodeHtmlEntities('A&amp;D &#x41;&#66; &bogus; &#0; &lt;x&gt;')).toBe(
+      'A&D AB &bogus; &#0; <x>',
+    );
+  });
+
+  it('decodes each text segment exactly once regardless of selector depth', () => {
+    // Double-escaped input renders as "Foo &amp; Bar" in a browser; matching the
+    // container or the leaf must yield the same single-decoded text.
+    const html = '<div class="item"><span>Foo &amp;amp; Bar</span></div>';
+    expect(selectText(html, '.item')).toBe('Foo &amp; Bar');
+    expect(selectText(html, '.item span')).toBe('Foo &amp; Bar');
   });
 });

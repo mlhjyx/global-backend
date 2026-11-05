@@ -80,10 +80,44 @@ export function parseHtml(html: string): HtmlNode {
   return root;
 }
 
-export function nodeText(node: HtmlNode): string {
+const NAMED_ENTITIES: Readonly<Record<string, string>> = Object.freeze({
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+  ndash: '–', mdash: '—', hellip: '…', middot: '·', bull: '•',
+  copy: '©', reg: '®', trade: '™', laquo: '«', raquo: '»',
+  lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”',
+});
+
+/**
+ * 解码文本里的 HTML 实体（命名 + 十进制/十六进制数字）。未知命名实体原样保留：
+ * 宁可留下原样文本，也不猜测一个可能错误的字符。
+ */
+export function decodeHtmlEntities(value: string): string {
+  return value.replace(
+    /&(#[xX][0-9a-fA-F]{1,6}|#[0-9]{1,7}|[A-Za-z][A-Za-z0-9]{1,31});/gu,
+    (match, body: string) => {
+      if (body[0] === '#') {
+        const hex = body[1] === 'x' || body[1] === 'X';
+        const code = Number.parseInt(body.slice(hex ? 2 : 1), hex ? 16 : 10);
+        return Number.isSafeInteger(code) && code > 0 && code <= 0x10ffff
+          ? String.fromCodePoint(code)
+          : match;
+      }
+      return NAMED_ENTITIES[body.toLowerCase()] ?? match;
+    },
+  );
+}
+
+function rawNodeText(node: HtmlNode): string {
   const parts = [...node.texts];
-  for (const child of node.children) parts.push(nodeText(child));
-  return parts.join(' ').replace(/\s+/gu, ' ').trim();
+  for (const child of node.children) parts.push(rawNodeText(child));
+  return parts.join(' ');
+}
+
+export function nodeText(node: HtmlNode): string {
+  // Decode exactly once, after collecting the raw subtree text: decoding per
+  // recursion level would decode nested content N+1 times and make the same
+  // company name depend on which level the selector matched.
+  return decodeHtmlEntities(rawNodeText(node)).replace(/\s+/gu, ' ').trim();
 }
 
 interface Compound {

@@ -4,6 +4,7 @@ import {
   crawlHtml,
   crawlUrl,
   MAX_CRAWL4AI_RENDER_ARTIFACT_BYTES,
+  pageTimeoutMs,
   renderCacheMode,
   renderDelaySeconds,
 } from "./web-crawler";
@@ -271,5 +272,22 @@ describe("Crawl4AI render request parameters are env-configurable", () => {
     expect(renderDelaySeconds({ CRAWLER_RENDER_DELAY_MS: "abc" })).toBe(0.5);
     expect(renderCacheMode({ CRAWLER_CACHE_MODE: "bypass" })).toBe("BYPASS");
     expect(renderCacheMode({ CRAWLER_CACHE_MODE: "nope" })).toBe("ENABLED");
+  });
+
+  it("reads the page navigation timeout with a safe default and clamps", () => {
+    expect(pageTimeoutMs({})).toBe(45_000);
+    expect(pageTimeoutMs({ CRAWLER_PAGE_TIMEOUT_MS: "60000" })).toBe(60_000);
+    expect(pageTimeoutMs({ CRAWLER_PAGE_TIMEOUT_MS: "1000" })).toBe(5_000);
+    // The ceiling stays below the /crawl client abort: a larger page_timeout can
+    // never succeed because the request is aborted first and the page is counted
+    // as a failure.
+    expect(pageTimeoutMs({ CRAWLER_PAGE_TIMEOUT_MS: "999999" })).toBe(
+      CRAWL4AI_REQUEST_TIMEOUT_MS - 5_000,
+    );
+    expect(pageTimeoutMs({ CRAWLER_PAGE_TIMEOUT_MS: "120000" })).toBe(
+      CRAWL4AI_REQUEST_TIMEOUT_MS - 5_000,
+    );
+    expect(pageTimeoutMs({ CRAWLER_PAGE_TIMEOUT_MS: "abc" })).toBe(45_000);
+    expect(pageTimeoutMs({ CRAWLER_PAGE_TIMEOUT_MS: "-5" })).toBe(45_000);
   });
 });
