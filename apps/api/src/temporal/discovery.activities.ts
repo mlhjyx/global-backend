@@ -3468,7 +3468,7 @@ export function createDiscoveryActivities(deps: {
     async canonicalizeRun(args: DiscoveryActivityInput & {
       workspaceId: string;
       runId: string;
-    }): Promise<{ companies: number; suppressed: number }> {
+    }): Promise<{ companies: number; suppressed: number; poolCap?: { cap: number; skipped: number } }> {
       return executeDiscoveryCompanyMaterialization(args, {
         prisma: deps.prisma,
         canonicalizeLegacyDiscoveryRun,

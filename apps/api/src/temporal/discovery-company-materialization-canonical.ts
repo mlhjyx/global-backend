@@ -11,6 +11,11 @@ import {
   sanitizeCanonicalCompanyAttributes,
   sanitizeStoredCompanyFieldEvidence,
 } from '../discovery/canonical-company-attributes';
+import {
+  poolCapBlocks,
+  RUN_POOL_CAP_REACHED_REASON,
+  type RunPoolGate,
+} from '../discovery/run-pool-cap';
 
 type Data = Readonly<Record<string, unknown>>;
 type Transaction = Prisma.TransactionClient;
@@ -67,6 +72,16 @@ function productRecord(value: unknown): Record<string, unknown> | null {
     Object.getPrototypeOf(value) === Object.prototype ? value as Record<string, unknown> : null;
 }
 
+/**
+ * 总池帽跳过：该行本可 CANONICALIZED，但 run 池已满且它会新增公司——落 NOT_CANONICALIZABLE +
+ * RUN_POOL_CAP_REACHED（设计 2026-11-05-run-pool-cap.md §4.1）。itemPlan 对 INVALID 解析优先于
+ * reusable 分支，因此复用行的跳过同样生效。
+ */
+function poolCapSkipped(candidate: Data): Data {
+  return Object.freeze({ ...candidate,
+    companyParse: Object.freeze({ status: 'INVALID', reasonCode: RUN_POOL_CAP_REACHED_REASON }) });
+}
+
 async function readEvidenceManifest(transaction: Transaction, workspaceId: string,
   canonicalCompanyId: string, rawRecordId: string): Promise<Readonly<{ count: number; sha256: string }>> {
   const rows = await transaction.$queryRaw<unknown[]>(Prisma.sql`
@@ -95,6 +110,7 @@ export async function materializeDiscoveryCompanyCanonicalCandidate(
   candidate: Data,
   suppressionDecision?: PrecomputedCompanySuppressionDecision,
   reusableCanonical?: Readonly<{ id: string; dedupeKey: string; name: string; domain: string | null; status: string }>,
+  poolCap?: RunPoolGate,
 ): Promise<Data> {
   const qItem = record(field(candidate, 'qItem'), Q_KEYS);
   const facts = record(field(candidate, 'lockedFacts'), FACT_KEYS);
@@ -123,6 +139,8 @@ export async function materializeDiscoveryCompanyCanonicalCandidate(
       return candidate;
     }
     if (!state.allowed) fail('DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INCOMPLETE_HOLD');
+    if (poolCap && poolCapBlocks(poolCap, reusableCanonical.id)) return poolCapSkipped(candidate);
+    poolCap?.note(reusableCanonical.id);
     return candidate;
   }
   if (field(candidate, 'exactExistingOutcome') !== null || field(qItem, 'qIngestStatus') !== 'ACCEPTED' ||
@@ -172,6 +190,8 @@ export async function materializeDiscoveryCompanyCanonicalCandidate(
     if (!materialization.prior || existingLink.canonicalId !== materialization.prior.id ||
         existingLink.matchRule !== identity.matchRule || existingLink.confidence !== expectedConfidence)
       fail('DOMAIN_ACK_DISCOVERY_COMPANY_IDENTITY_CONFLICT');
+    if (poolCap && poolCapBlocks(poolCap, existingLink.canonicalId)) return poolCapSkipped(candidate);
+    poolCap?.note(existingLink.canonicalId);
     const manifest = await readEvidenceManifest(transaction, workspaceId, existingLink.canonicalId, rawRecordId);
     return Object.freeze({ ...candidate,
       companyParse: Object.freeze({ status: 'VALID', dedupeKey: identity.dedupeKey }),
@@ -181,6 +201,8 @@ export async function materializeDiscoveryCompanyCanonicalCandidate(
         matchRule: existingLink.matchRule, confidence: existingLink.confidence, mutationClass: 'LINKED',
         evidenceCount: manifest.count, evidenceManifestSha256: manifest.sha256 }) });
   }
+  // Decided before the attribute merge and the scalar re-read: a skipped candidate needs neither.
+  if (poolCap && poolCapBlocks(poolCap, materialization.prior?.id ?? null)) return poolCapSkipped(candidate);
   const attributes = product.attributes && typeof product.attributes === 'object' && !Array.isArray(product.attributes)
     ? product.attributes as Record<string, unknown> : undefined;
   const currentAttributes = sanitizeCanonicalCompanyAttributes(attributes), prior = materialization.prior;
@@ -217,6 +239,7 @@ export async function materializeDiscoveryCompanyCanonicalCandidate(
       attributes: canonicalAttributes as Prisma.InputJsonValue, status: 'NEW', dedupeKey: identity.dedupeKey },
     select: { id: true },
   }) : { id: prior!.id };
+  poolCap?.note(canonical.id);
   let identityLink: { id: string };
   try {
     identityLink = await transaction.identityLink.create({ data: { workspaceId, canonicalType: 'company',
