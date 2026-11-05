@@ -5,6 +5,7 @@ import {
   ImportCsvError,
   buildImportRows,
   parseCsv,
+  suggestImportMapping,
   validateImportMapping,
 } from './channel-import';
 
@@ -33,6 +34,30 @@ describe('M1 导入通道：CSV 解析与列映射', () => {
     });
     expect(() => validateImportMapping(['company'], {})).toThrow(/mapping.name/);
     expect(() => validateImportMapping(['company'], { name: 'nope' })).toThrow(/unknown column/);
+  });
+
+  it('suggests a column mapping from header aliases (P3 import contract)', () => {
+    expect(suggestImportMapping(['Company', 'Website', 'Country', 'Industry'])).toEqual({
+      name: 'Company',
+      website: 'Website',
+      country: 'Country',
+      industry: 'Industry',
+    });
+    expect(suggestImportMapping(['公司名称', '官网', '国家', '行业'])).toEqual({
+      name: '公司名称',
+      website: '官网',
+      country: '国家',
+      industry: '行业',
+    });
+    expect(suggestImportMapping(['company', 'domain'])).toEqual({ name: 'company', domain: 'domain' });
+    expect(suggestImportMapping(['weird'])).toEqual({});
+  });
+
+  it('names the available columns and an example when the mapping is missing or wrong', () => {
+    expect(() => validateImportMapping(['company', 'site'], {})).toThrow(/available columns: company, site/);
+    expect(() => validateImportMapping(['company', 'site'], {})).toThrow(/"name":"company"/);
+    expect(() => validateImportMapping(['company'], { name: 'nope' })).toThrow(/available columns: company/);
+    expect(() => validateImportMapping(['company'], 'not-an-object')).toThrow(/available columns: company/);
   });
 
   it('builds rows with normalized https hostnames and collects invalid rows', () => {

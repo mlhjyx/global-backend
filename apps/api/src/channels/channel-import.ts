@@ -109,18 +109,59 @@ export interface ImportMapping {
   industry?: string;
 }
 
+/**
+ * 常见表头别名 → 导入字段的确定性建议映射（P3 导入契约：模板与错误提示都会带上）。
+ * 只做精确（大小写不敏感）匹配，不做模糊猜测——猜错列比不猜更危险。
+ */
+const IMPORT_FIELD_ALIASES: ReadonlyArray<readonly [keyof ImportMapping, readonly string[]]> = [
+  ['name', ['company', 'company name', 'name', '公司', '公司名称', '企业', '企业名称']],
+  ['domain', ['domain', '域名']],
+  ['website', ['website', 'web', 'url', 'site', '官网', '网站', '网址']],
+  ['country', ['country', '国家']],
+  ['industry', ['industry', '行业']],
+];
+
+export function suggestImportMapping(headers: readonly string[]): Partial<ImportMapping> {
+  const byLower = new Map(headers.map((header) => [header.toLowerCase(), header]));
+  const suggested: Partial<ImportMapping> = {};
+  for (const [field, aliases] of IMPORT_FIELD_ALIASES) {
+    const header = aliases.map((alias) => byLower.get(alias)).find((value) => value !== undefined);
+    if (header !== undefined) suggested[field] = header;
+  }
+  return suggested;
+}
+
+/** 把可用列与示例拼进映射错误，页面不必再猜「该传什么」。 */
+function mappingHint(headers: readonly string[]): string {
+  const columns = headers
+    .slice(0, 30)
+    .map((header) => header.slice(0, 64))
+    .join(', ');
+  const example =
+    headers.length > 0
+      ? `{"name":"${headers[0]!.slice(0, 64).replaceAll('"', "'")}"}`
+      : '{"name":"<公司名列>"}';
+  return `; available columns: ${columns || '(none)'}; example: ${example}`;
+}
+
 export function validateImportMapping(headers: readonly string[], raw: unknown): ImportMapping {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ImportCsvError('mapping must be an object');
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ImportCsvError(`mapping must be an object${mappingHint(headers)}`);
+  }
   const record = raw as Record<string, unknown>;
   const byName = new Map(headers.map((header) => [header.toLowerCase(), header]));
   const pick = (value: unknown, field: string, required: boolean): string | undefined => {
     if (value === undefined || value === null || value === '') {
-      if (required) throw new ImportCsvError(`mapping.${field} is required`);
+      if (required) throw new ImportCsvError(`mapping.${field} is required${mappingHint(headers)}`);
       return undefined;
     }
-    if (typeof value !== 'string') throw new ImportCsvError(`mapping.${field} must be a header name`);
+    if (typeof value !== 'string') {
+      throw new ImportCsvError(`mapping.${field} must be a header name${mappingHint(headers)}`);
+    }
     const header = byName.get(value.toLowerCase());
-    if (!header) throw new ImportCsvError(`mapping.${field} names an unknown column: ${value}`);
+    if (!header) {
+      throw new ImportCsvError(`mapping.${field} names an unknown column: ${value}${mappingHint(headers)}`);
+    }
     return header;
   };
   return {
