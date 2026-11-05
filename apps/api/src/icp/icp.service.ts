@@ -32,9 +32,12 @@ import {
   plannerVisibleSources,
   routePlannerQueries,
   scaleEstimatedVolume,
+  sourceQueryBudgetConfig,
+  sourceQueryBudgets,
   withCheapFirstShadowNote,
   withDroppedQueryNote,
 } from '../discovery/plan-query-sources';
+import { trialSourceProviders } from '../discovery/source-trial';
 import { searchLanguagesForMarkets, type SearchLanguage } from '../discovery/search-localization';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import { LangfuseRuntimeTelemetryService } from '../model-runtime';
@@ -609,10 +612,21 @@ export class IcpService {
       }),
     });
     // BI-30：规划时刻的数据源开关（data_provider.status）快照：提示词、查询过滤与冷路径注入都按它。
-    const { icp, enabledSources } = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => ({
-      icp: await tx.icpDefinition.findUnique({ where: { id: icpId }, include: { rules: true } }),
-      enabledSources: await this.providers.enabledCompanyDiscoverySources(tx),
-    }));
+    const { icp, enabledSources, trialProviders } = await this.prisma.withWorkspace(
+      ctx.workspaceId,
+      async (tx) => ({
+        icp: await tx.icpDefinition.findUnique({ where: { id: icpId }, include: { rules: true } }),
+        enabledSources: await this.providers.enabledCompanyDiscoverySources(tx),
+        trialProviders: await trialSourceProviders(tx, ctx.workspaceId),
+      }),
+    );
+    // Q33② cheap-first：每源每轮查询预算（结构化源默认 4 条 ≈ ≤100 家；试跑源 1 条 ≈ ≤25 家；
+    // public_web 兜底不设预算）。enforce 时才实际裁剪，shadow 由 routePlannerQueries 只统计。
+    const sourceBudgets = sourceQueryBudgets(
+      trialProviders,
+      sourceQueryBudgetConfig(),
+      [...new Set(enabledSources.map((source) => source.providerKey))],
+    );
     if (!icp) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'icp not found' } });
     if (icp.status !== 'ACTIVE') {
       throw new ConflictException({
@@ -682,6 +696,7 @@ export class IcpService {
       {
         enabled: enabledSources,
         registered: this.providers.companyDiscoverySources(),
+        sourceBudgets,
       },
     );
 

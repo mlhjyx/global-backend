@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelGateway } from '../model-gateway/model-gateway';
 import { MAX_QUERY_PLANNER_QUERIES } from './execution-envelope';
@@ -18,6 +18,8 @@ import {
   plannerVisibleSources,
   routePlannerQueries,
   scaleEstimatedVolume,
+  sourceQueryBudgetConfig,
+  sourceQueryBudgets,
   withCheapFirstShadowNote,
   withDroppedQueryNote,
   type CompanyDiscoverySource,
@@ -277,6 +279,10 @@ describe('planner query routing (BI-30)', () => {
 });
 
 describe('cheap-first source priority (Q33②, PR-1)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('parses the switch defensively with shadow as the default', () => {
     expect(cheapFirstMode(undefined)).toBe('shadow');
     expect(cheapFirstMode(' enforce ')).toBe('enforce');
@@ -330,12 +336,93 @@ describe('cheap-first source priority (Q33②, PR-1)', () => {
     vi.unstubAllEnvs();
   });
 
+  it('drops copies beyond a source query budget when enforcing', () => {
+    vi.stubEnv('DISCOVERY_CHEAP_FIRST', 'enforce');
+    const planned = Array.from({ length: 6 }, (_, index) =>
+      query('industry_data', { area_name: `area-${index}` }, index + 1));
+
+    const routed = routePlannerQueries(planned, {
+      enabled: only('directory'),
+      registered: REGISTERED,
+      sourceBudgets: { directory: 2 },
+    });
+
+    expect(routed.queries.map((q) => q.filters.area_name)).toEqual(['area-0', 'area-1']);
+    expect(routed.dropped).toEqual({ SOURCE_QUERY_BUDGET: 4 });
+    vi.unstubAllEnvs();
+  });
+
+  it('never applies a query budget to public_web (the fallback source)', () => {
+    vi.stubEnv('DISCOVERY_CHEAP_FIRST', 'enforce');
+    const planned = Array.from({ length: 6 }, (_, index) =>
+      query('public_intelligence', { area_name: `area-${index}` }));
+
+    const routed = routePlannerQueries(planned, {
+      enabled: only('public_web'),
+      registered: REGISTERED,
+      sourceBudgets: { public_web: 2 },
+    });
+
+    expect(routed.queries).toHaveLength(6);
+    vi.unstubAllEnvs();
+  });
+
+  it('reports budget drops in shadow without applying them', () => {
+    const planned = Array.from({ length: 6 }, (_, index) =>
+      query('industry_data', { area_name: `area-${index}` }));
+
+    const routed = routePlannerQueries(planned, {
+      enabled: only('directory'),
+      registered: REGISTERED,
+      sourceBudgets: { directory: 2 },
+    });
+
+    expect(routed.queries).toHaveLength(6);
+    expect(routed.cheapFirstShadow?.budgetDropped ?? 0).toBe(4);
+  });
+
+  it('derives budgets: structured sources capped, trial sources tighter, public_web exempt', () => {
+    const config = sourceQueryBudgetConfig({} as NodeJS.ProcessEnv);
+    const budgets = sourceQueryBudgets(new Set(['directory']), config, [
+      'directory',
+      'wikidata',
+      'public_web',
+    ]);
+
+    expect(budgets.directory).toBe(1);
+    expect(budgets.wikidata).toBe(4);
+    expect(budgets.public_web).toBeUndefined();
+  });
+
+  it('parses the budget knobs with safe defaults and clamps', () => {
+    expect(sourceQueryBudgetConfig({} as NodeJS.ProcessEnv)).toEqual({
+      structuredRunCap: 100,
+      trialMaxCompanies: 20,
+      trialMaxRuns: 10,
+    });
+    expect(
+      sourceQueryBudgetConfig({
+        DISCOVERY_STRUCTURED_SOURCE_RUN_CAP: '50',
+        DISCOVERY_TRIAL_MAX_COMPANIES: '25',
+        DISCOVERY_TRIAL_MAX_RUNS: '5',
+      } as NodeJS.ProcessEnv),
+    ).toEqual({ structuredRunCap: 50, trialMaxCompanies: 25, trialMaxRuns: 5 });
+    expect(
+      sourceQueryBudgetConfig({
+        DISCOVERY_STRUCTURED_SOURCE_RUN_CAP: 'banana',
+        DISCOVERY_TRIAL_MAX_COMPANIES: '-3',
+        DISCOVERY_TRIAL_MAX_RUNS: '0',
+      } as NodeJS.ProcessEnv),
+    ).toEqual({ structuredRunCap: 100, trialMaxCompanies: 20, trialMaxRuns: 10 });
+  });
+
   it('writes the shadow replacement count onto the plan review note', () => {
     const queries = [query('industry_data', { source_hint: 'directory' })];
-    const noted = withCheapFirstShadowNote(queries, { replacedCopies: 3 });
+    const noted = withCheapFirstShadowNote(queries, { replacedCopies: 3, budgetDropped: 2 });
 
     expect(noted[0]?.rationale).toContain('[cheap-first shadow]');
     expect(noted[0]?.rationale).toContain('3');
+    expect(noted[0]?.rationale).toContain('2');
   });
 });
 

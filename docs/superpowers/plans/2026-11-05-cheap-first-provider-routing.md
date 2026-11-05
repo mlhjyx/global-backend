@@ -131,3 +131,12 @@
 - **D-c 试跑限额**：前 10 次运行 × 每次 ≤20 家（推荐：是）
 - **D-d 上线方式**：先 shadow 一轮 golden mini-run 再 enforce（推荐：是）
 - **D-e PR 拆分**：规划层（PR-1）与执行层（PR-2）分两步（推荐：是）
+
+## 11. 实现裁定（2026-11-05，PR-2 落地时）
+
+- **裁定：每源公司帽以「每源每轮查询预算」等价落地，不在查询时逐家计数。** 原因：物化（`discovery_company_materialization_outcome`）发生在查询阶段之后，查询期无法用已物化公司数做闸门；而查询收据是严格键契约（`discovery-query-receipt/v1`，加字段需升 v2 并改工作流），为一次配额引入公开契约变更不划算。
+- **等价关系**：每查询每源记录上限 `MAX_DISCOVERY_PROVIDER_RECORDS = 25`。结构化源预算 = `floor(DISCOVERY_STRUCTURED_SOURCE_RUN_CAP / 25)`（默认 100 → 4 条查询 ≈ ≤100 条原始公司记录，去重后 ≤100 家，满足 Q33 上限）；试跑源预算 = `max(1, floor(DISCOVERY_TRIAL_MAX_COMPANIES / 25))`（默认 20 → 1 条 ≈ ≤25 条）；`public_web` 兜底源不设查询预算，其总量由既有公司池上限（`QUICK_SCAN_POOL_LIMIT = 500`）约束。
+- **试跑判定**：`trialSourceProviders` 按工作空间统计 `raw_source_record` 的 distinct run 数，`< DISCOVERY_TRIAL_MAX_RUNS`（默认 10）视为试跑期；查询失败按「无试跑源」降级，不阻塞规划。
+- **观测**：shadow 模式下，计划 review 注记同时给出「将替换副本数」与「将按预算移出查询数」；enforce 模式下预算移出计入 `dropped.SOURCE_QUERY_BUDGET`（计划落库，可审计）。
+- **未改变**：收据契约、工作流/活动接口、`data_provider` 启停门、血缘闸门均未动；回退仍为 `DISCOVERY_CHEAP_FIRST=off`。
+- **后续（PR-3 候选）**：gain-saas 归因页增加「查询数」列；若需要严格的「按家数」实时闸门，再评估收据 v2 或物化期闸门。
