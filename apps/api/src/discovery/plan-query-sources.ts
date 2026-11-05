@@ -1,4 +1,4 @@
-import { MAX_QUERY_PLANNER_QUERIES } from './execution-envelope';
+import { MAX_QUERY_PLANNER_QUERIES, MAX_DISCOVERY_PROVIDER_RECORDS } from './execution-envelope';
 import type { DiscoveryQuerySkipReason } from './discovery-query-skip';
 import type { PlanQueryShape } from './icp-to-cpv';
 import type { SourceClass } from './provider-contract';
@@ -75,6 +75,52 @@ export function cheapFirstMode(
 ): CheapFirstMode {
   const value = (raw ?? '').trim().toLowerCase();
   return value === 'off' || value === 'enforce' ? value : 'shadow';
+}
+
+/** Q33② 预算配置（env 可调）：结构化源每轮公司帽、新源试跑次数与每轮公司帽。 */
+export interface SourceQueryBudgetConfig {
+  readonly structuredRunCap: number;
+  readonly trialMaxCompanies: number;
+  readonly trialMaxRuns: number;
+}
+
+export function sourceQueryBudgetConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): SourceQueryBudgetConfig {
+  const positive = (raw: string | undefined, fallback: number): number => {
+    const text = (raw ?? '').trim();
+    // 只接受纯十进制数字串：parseInt 会把 '1e3'/'100abc' 截成前缀，畸形值必须回退默认而不是静默缩水。
+    if (!/^\d+$/.test(text)) return fallback;
+    const parsed = Number.parseInt(text, 10);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+  };
+  return {
+    structuredRunCap: positive(env.DISCOVERY_STRUCTURED_SOURCE_RUN_CAP, 100),
+    trialMaxCompanies: positive(env.DISCOVERY_TRIAL_MAX_COMPANIES, 20),
+    trialMaxRuns: positive(env.DISCOVERY_TRIAL_MAX_RUNS, 10),
+  };
+}
+
+/**
+ * 每个源的每轮查询预算：结构化源 = floor(公司帽 / 每查询每源记录上限)（默认 100/25 = 4 条，
+ * 等价于每轮每源 ≤100 条原始公司记录；公司帽 <25 时为 0 条，即一轮不跑该源）；
+ * 试跑源按 §11 收紧为 max(1, floor(20/25)) = 1 条（≤25 条）。
+ * public_web 是兜底源，不设查询预算（其总量由下游公司池约束，见设计 §11 更正）。
+ */
+export function sourceQueryBudgets(
+  trialProviders: ReadonlySet<string>,
+  config: SourceQueryBudgetConfig,
+  providerKeys: readonly string[],
+): Record<string, number | undefined> {
+  const budgets: Record<string, number | undefined> = {};
+  for (const key of providerKeys) {
+    if (key === 'public_web') continue;
+    const trial = trialProviders.has(key);
+    const cap = trial ? config.trialMaxCompanies : config.structuredRunCap;
+    const budget = Math.floor(cap / MAX_DISCOVERY_PROVIDER_RECORDS);
+    budgets[key] = trial ? Math.max(1, budget) : budget;
+  }
+  return budgets;
 }
 
 /** What the planner model is told about each source it may write queries for. */
@@ -287,6 +333,8 @@ export const PLANNER_DROP_REASONS = Object.freeze([
   'SOURCE_SYSTEM_PLANNED',
   /** More source copies than the planner query ceiling; the least urgent are left out. */
   'PLAN_QUERY_CAP',
+  /** More copies for one source than its per-run query budget (Q33② cheap-first). */
+  'SOURCE_QUERY_BUDGET',
 ] as const);
 
 export type PlannerDropReason = (typeof PLANNER_DROP_REASONS)[number];
@@ -298,8 +346,8 @@ export interface PlannerQueryRouting<Q> {
   readonly dropped: PlannerDropCounts;
   /** How many model queries kept at least one runnable copy. */
   readonly keptModelQueries: number;
-  /** cheap-first shadow（默认）下：按结构化源优先裁剪会替换掉的副本数；off/enforce 时缺省。 */
-  readonly cheapFirstShadow?: Readonly<{ replacedCopies: number }>;
+  /** cheap-first shadow（默认）下：按结构化源优先裁剪会替换掉的副本数与每源预算将移出数；off/enforce 时缺省。 */
+  readonly cheapFirstShadow?: Readonly<{ replacedCopies: number; budgetDropped: number }>;
 }
 
 /**
@@ -347,6 +395,8 @@ export function routePlannerQueries<Q extends PlanQueryShape>(
   sources: Readonly<{
     enabled: readonly CompanyDiscoverySource[];
     registered: readonly CompanyDiscoverySource[];
+    /** Q33②：每源每轮查询预算（provider 键 → 预算条数；public_web 不在表内=不设预算）。 */
+    sourceBudgets?: Readonly<Record<string, number | undefined>>;
   }>,
   cap: number = MAX_QUERY_PLANNER_QUERIES,
 ): PlannerQueryRouting<Q> {
@@ -378,40 +428,87 @@ export function routePlannerQueries<Q extends PlanQueryShape>(
       });
     }
   });
-  let kept = copies;
-  let cheapFirstShadow: { replacedCopies: number } | undefined;
-  if (copies.length > cap) {
-    // 两套排序只在「同 priority 时谁先保留」上不同：legacy 按原序号；cheap-first 先结构化源
-    // （SOURCE_ROUTE_PRIORITY），public_web 副本最后保留。扇出本身不变，召回不降。
-    const keepWithinCap = (withSourcePriority: boolean): ReadonlySet<number> =>
-      new Set(
-        copies
-          .map((copy, index) => ({
-            index,
-            priority: planPriority(copy.query.priority),
-            source: withSourcePriority
-              ? sourceRoutePriority(filtersRecord(copy.query.filters).source_hint)
-              : 0,
-          }))
-          .sort((left, right) =>
-            left.priority - right.priority ||
-            left.source - right.source ||
-            left.index - right.index,
-          )
-          .slice(0, cap)
-          .map((entry) => entry.index),
+  const mode = cheapFirstMode();
+  // Q33② 每源查询预算：超出预算的副本按 query priority（再原序号）裁掉，enforce 才实际移除；
+  // shadow 只统计将移出量；public_web 由兜底语义豁免（budgets 里没有它的键）。
+  let budgetDropped = 0;
+  let underBudget = copies;
+  let budgetApplied = copies;
+  if (mode !== 'off' && sources.sourceBudgets) {
+    const bySource = new Map<string, Array<{ index: number; priority: number }>>();
+    copies.forEach((copy, index) => {
+      const hint = filtersRecord(copy.query.filters).source_hint;
+      // public_web 是兜底源：即使调用方误传预算也永不裁剪。
+      if (typeof hint !== 'string' || hint === 'public_web') return;
+      const budget = sources.sourceBudgets?.[hint];
+      if (budget === undefined) return;
+      const list = bySource.get(hint) ?? [];
+      list.push({ index, priority: planPriority(copy.query.priority) });
+      bySource.set(hint, list);
+    });
+    if (bySource.size) {
+      const budgeted = new Set<number>();
+      const keep = new Set<number>();
+      for (const [hint, list] of bySource) {
+        const budget = sources.sourceBudgets[hint] ?? 0;
+        for (const entry of list) budgeted.add(entry.index);
+        list
+          .sort((left, right) => left.priority - right.priority || left.index - right.index)
+          .slice(0, budget)
+          .forEach((entry) => keep.add(entry.index));
+      }
+      underBudget = copies.filter(
+        (_, index) => !budgeted.has(index) || keep.has(index),
       );
-    const mode = cheapFirstMode();
-    const legacyKeep = keepWithinCap(false);
-    const keep = mode === 'enforce' ? keepWithinCap(true) : legacyKeep;
-    if (mode === 'shadow') {
-      const cheapKeep = keepWithinCap(true);
-      cheapFirstShadow = {
-        replacedCopies: [...cheapKeep].filter((index) => !legacyKeep.has(index)).length,
-      };
+      budgetDropped = copies.length - underBudget.length;
+      if (mode === 'enforce') {
+        budgetApplied = underBudget;
+        if (budgetDropped > 0) count('SOURCE_QUERY_BUDGET', budgetDropped);
+      }
     }
-    kept = copies.filter((_, index) => keep.has(index));
-    count('PLAN_QUERY_CAP', copies.length - kept.length);
+  }
+  // 两套排序只在「同 priority 时谁先保留」上不同：legacy 按原序号；cheap-first 先结构化源
+  // （SOURCE_ROUTE_PRIORITY），public_web 副本最后保留。扇出本身不变，召回不降。
+  const keepWithinCap = (
+    input: typeof copies,
+    withSourcePriority: boolean,
+  ): ReadonlySet<number> =>
+    new Set(
+      input
+        .map((copy, index) => ({
+          index,
+          priority: planPriority(copy.query.priority),
+          source: withSourcePriority
+            ? sourceRoutePriority(filtersRecord(copy.query.filters).source_hint)
+            : 0,
+        }))
+        .sort((left, right) =>
+          left.priority - right.priority ||
+          left.source - right.source ||
+          left.index - right.index,
+        )
+        .slice(0, cap)
+        .map((entry) => entry.index),
+    );
+  // shadow 的「将替换」必须与 enforce 同口径：在预算移除后的副本上计算，否则灰度注记会高估影响。
+  const replacedWithinCap = (input: typeof copies): number => {
+    if (input.length <= cap) return 0;
+    const legacy = keepWithinCap(input, false);
+    const cheap = keepWithinCap(input, true);
+    return [...cheap].filter((index) => !legacy.has(index)).length;
+  };
+  let kept = budgetApplied;
+  let cheapFirstShadow: { replacedCopies: number; budgetDropped: number } | undefined;
+  if (kept.length > cap) {
+    const keep = mode === 'enforce' ? keepWithinCap(kept, true) : keepWithinCap(kept, false);
+    if (mode === 'shadow') {
+      cheapFirstShadow = { replacedCopies: replacedWithinCap(underBudget), budgetDropped };
+    }
+    const withinCap = kept;
+    kept = withinCap.filter((_, index) => keep.has(index));
+    count('PLAN_QUERY_CAP', withinCap.length - kept.length);
+  } else if (mode === 'shadow') {
+    cheapFirstShadow = { replacedCopies: replacedWithinCap(underBudget), budgetDropped };
   }
   return {
     queries: kept.map((copy) => copy.query),
@@ -463,10 +560,15 @@ export function withDroppedQueryNote<Q extends PlanQueryShape>(
  */
 export function withCheapFirstShadowNote<Q extends PlanQueryShape>(
   queries: Q[],
-  shadow: Readonly<{ replacedCopies: number }> | undefined,
+  shadow: Readonly<{ replacedCopies: number; budgetDropped?: number }> | undefined,
 ): Q[] {
   const [first, ...rest] = queries;
-  if (!shadow || shadow.replacedCopies <= 0 || first === undefined) return queries;
-  const note = `[cheap-first shadow] 按结构化源优先裁剪将替换 ${shadow.replacedCopies} 条查询副本（当前 DISCOVERY_CHEAP_FIRST=shadow，未实际启用）`;
+  const replaced = shadow?.replacedCopies ?? 0;
+  const budgetDropped = shadow?.budgetDropped ?? 0;
+  if (!shadow || (replaced <= 0 && budgetDropped <= 0) || first === undefined) return queries;
+  const parts: string[] = [];
+  if (replaced > 0) parts.push(`按结构化源优先裁剪将替换 ${replaced} 条查询副本`);
+  if (budgetDropped > 0) parts.push(`按每源查询预算将移出 ${budgetDropped} 条查询`);
+  const note = `[cheap-first shadow] ${parts.join('；')}（当前 DISCOVERY_CHEAP_FIRST=shadow，未实际启用）`;
   return [{ ...first, rationale: `${first.rationale ?? ''}\n${note}` }, ...rest];
 }
