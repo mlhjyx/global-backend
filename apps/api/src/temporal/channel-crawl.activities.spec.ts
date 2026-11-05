@@ -37,6 +37,7 @@ function makeActivities(overrides: {
   channel?: Record<string, unknown> | null;
   grantError?: Error;
   fence?: unknown;
+  materializeError?: Error;
 } = {}) {
   const fenceBindings: unknown[] = [];
   const authorizeAndDispatch = vi.fn(
@@ -56,6 +57,11 @@ function makeActivities(overrides: {
       }))) as { url: string; html: string },
   );
   const recordRun = vi.fn(async () => ({ runId: 'run-1', autoDisabled: false }));
+  const materializeRecords = overrides.materializeError
+    ? vi.fn(async () => {
+        throw overrides.materializeError;
+      })
+    : vi.fn(async (input: { records: unknown[] }) => input.records.length);
   const attestAuthorized = vi.fn(async () => ({}));
   const requestChannelCrawlGrant = overrides.grantError
     ? vi.fn(async () => {
@@ -96,6 +102,7 @@ function makeActivities(overrides: {
         authorizeAndDispatch(binding, operation, execute),
     }) as never,
     fetchPage,
+    materializeRecords,
     now: () => Date.UTC(2026, 10, 5, 8, 0, 0),
   });
   return {
@@ -106,6 +113,7 @@ function makeActivities(overrides: {
     authorizeAndDispatch,
     fetchPage,
     recordRun,
+    materializeRecords,
     fenceBindings,
   };
 }
@@ -180,6 +188,7 @@ describe('channelCrawlActivities（P4-P4c）', () => {
       status: 'SUCCEEDED',
       pagesFetched: 0,
       recordsFound: 0,
+      recordsMaterialized: 0,
       failures: 0,
       truncated: true,
     });
@@ -196,18 +205,46 @@ describe('channelCrawlActivities（P4-P4c）', () => {
     });
   });
 
-  it('records the run in the platform context with the truncation marker', async () => {
+  it('materializes crawled records inside the run activity and reports the count', async () => {
+    const { activities, materializeRecords } = makeActivities({ used: 498n });
+    const outcome = await activities.runChannelCrawl({ input: INPUT, binding: BINDING });
+    expect(outcome.recordsFound).toBe(2);
+    expect(outcome.recordsMaterialized).toBe(2);
+    expect(materializeRecords).toHaveBeenCalledWith({
+      channelId: INPUT.channelId,
+      crawlRunId: INPUT.crawlRunId,
+      records: expect.arrayContaining([
+        expect.objectContaining({ name: 'Acme Pumpen' }),
+      ]),
+    });
+  });
+
+  it('fails non-retryably when materialization throws (never masks records as success)', async () => {
+    const { activities } = makeActivities({ used: 498n, materializeError: new Error('db down') });
+    await expect(activities.runChannelCrawl({ input: INPUT, binding: BINDING })).rejects.toMatchObject({
+      message: 'CHANNEL_MATERIALIZATION_FAILED',
+    });
+  });
+
+  it('records the run in the platform context with the truncation marker and materialized count', async () => {
     const { activities, recordRun } = makeActivities();
     await activities.finalizeChannelCrawl({
       input: INPUT,
-      outcome: { status: 'SUCCEEDED', pagesFetched: 3, recordsFound: 1, failures: 0, truncated: true },
+      outcome: {
+        status: 'SUCCEEDED',
+        pagesFetched: 3,
+        recordsFound: 1,
+        recordsMaterialized: 1,
+        failures: 0,
+        truncated: true,
+      },
     });
     expect(recordRun).toHaveBeenCalledWith({
       channelId: INPUT.channelId,
       status: 'SUCCEEDED',
       pagesFetched: 3,
       recordsFound: 1,
-      recordsMaterialized: 0,
+      recordsMaterialized: 1,
       failures: 0,
       truncated: true,
     });

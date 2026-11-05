@@ -1570,6 +1570,7 @@ model SourceChannel {
 
   runs       SourceChannelRun[]
   enablements SourceChannelEnablement[]
+  records    SourceChannelRecord[]
 
   @@index([status, category])
   @@map("source_channel")
@@ -1594,6 +1595,8 @@ model SourceChannelEnablement {
 model SourceChannelRun {
   id                 String    @id @default(uuid()) @db.Uuid
   channelId          String    @map("channel_id") @db.Uuid
+  /// 工作流稳定标识（workflowId 的 crawlRunId）；唯一约束让 finalize 幂等。
+  crawlRunId         String?   @unique @map("crawl_run_id") @db.Uuid
   /// 发起本次运行的工作空间（可选来源标注；本表是平台级运行统计，不承载租户数据）。
   triggeredByWorkspaceId String? @map("triggered_by_workspace_id") @db.Uuid
   /// RUNNING | SUCCEEDED | FAILED
@@ -1611,6 +1614,40 @@ model SourceChannelRun {
 
   @@index([channelId, startedAt])
   @@map("source_channel_run")
+}
+
+/// 渠道抓取记录池（平台级，无 RLS）：(channel_id, dedupe_key) 跨轮 upsert，crawl_run_id 归轮次。
+/// PII_PENDING_ENCRYPTION：联系人字段当前明文存储——列级加密、Q25 访问审计与保留期按
+/// OWNER-DECISION-2026-11-05 延后到后续任务（届时补加密列改造，不改本表语义）。
+model SourceChannelRecord {
+  id           String    @id @default(uuid()) @db.Uuid
+  channelId    String    @map("channel_id") @db.Uuid
+  crawlRunId   String    @map("crawl_run_id") @db.Uuid
+  dedupeKey    String    @map("dedupe_key") @db.VarChar(200)
+  name         String    @db.VarChar(300)
+  website      String?   @db.VarChar(2048)
+  country      String?   @db.VarChar(100)
+  industry     String?   @db.VarChar(200)
+  products     Json?
+  keywords     Json?
+  /// PII_PENDING_ENCRYPTION（OWNER-DECISION-2026-11-05 延后加密与审计）。
+  contactName  String?   @map("contact_name") @db.VarChar(200)
+  /// PII_PENDING_ENCRYPTION
+  contactTitle String?   @map("contact_title") @db.VarChar(200)
+  /// PII_PENDING_ENCRYPTION
+  email        String?   @db.VarChar(320)
+  /// PII_PENDING_ENCRYPTION
+  phone        String?   @db.VarChar(64)
+  sourceUrl    String    @map("source_url") @db.VarChar(2048)
+  firstSeenAt  DateTime  @default(now()) @map("first_seen_at") @db.Timestamptz(3)
+  lastSeenAt   DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+  contentHash  String?   @map("content_hash") @db.VarChar(64)
+
+  channel SourceChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@unique([channelId, dedupeKey])
+  @@index([channelId, lastSeenAt(sort: Desc)])
+  @@map("source_channel_record")
 }
 
 /// 导入通道：租户上传的名单原始行与去重键（私有池，不共享）。

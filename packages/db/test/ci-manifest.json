@@ -3,7 +3,8 @@
     "generic-operation-artifact-subject.rls.spec.mjs",
     "platform-channel-crawl-authority.rls.spec.mjs",
     "platform-schedule-authority.rls.spec.mjs",
-    "site-build-provider-transport.rls.spec.mjs"
+    "site-build-provider-transport.rls.spec.mjs",
+    "source-channel-records.disposable.spec.mjs"
   ],
   "isolated": [
     "discovery-company-materialization-functions.disposable.spec.mjs",

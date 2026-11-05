@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
@@ -124,6 +124,20 @@ export class ChannelsController {
   @ApiEnvelope({ type: 'object', additionalProperties: true })
   async run(@Ctx() ctx: RequestContext, @Param('channelId', ParseUUIDPipe) channelId: string) {
     return envelope(await this.channels.requestCrawl(ctx, channelId, 'run'));
+  }
+
+  @Get('source-channels/:channelId/records')
+  @RequireScopes('ops:read')
+  @ApiOperation({
+    summary: '查看渠道最近物化的抓取记录（含联系人字段；PII 按 OWNER-DECISION-2026-11-05 明文存储）',
+  })
+  @ApiEnvelope({ type: 'object', additionalProperties: true })
+  async records(
+    @Ctx() ctx: RequestContext,
+    @Param('channelId', ParseUUIDPipe) channelId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return envelope(await this.channels.listChannelRecords(ctx, channelId, limit));
   }
 
   @Post('imported-buyers/preview')
