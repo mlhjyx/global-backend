@@ -56,9 +56,9 @@
 
 - `RecordChannelRunInput` 增加 `readonly crawlRunId?: string`；`finalizeChannelCrawl` 传 `args.input.crawlRunId`（Temporal 每次活动尝试携带同一 UUID）。
 - 记录器在事务内：
-  1. `findUnique({ where: { crawlRunId } })`：存在 → 只更新 outcome 字段（status/pagesFetched/recordsFound/recordsMaterialized/failures/truncated/errorCode/finishedAt），**不推进 failureStreak**，返回既有 runId；
-  2. 不存在 → 创建（含 `crawl_run_id`）并执行现有 failureStreak 逻辑；
-  3. 创建撞唯一约束（并发重试）→ 回读并按 1 处理（不重复推进 streak）。
+  1. `findUnique({ where: { crawlRunId } })`：存在 → 只更新 outcome 字段（status/pagesFetched/recordsFound/recordsMaterialized/failures/truncated/errorCode/finishedAt），**不推进 failureStreak / lastRunAt**，返回既有 runId；
+  2. 不存在 → `createMany({ skipDuplicates: true })`（Postgres `ON CONFLICT DO NOTHING`，撞键**不 abort 事务**）后回读该行；`count=1` 视为本次首写、继续执行现有 failureStreak 逻辑，`count=0` 视为并发 finalize 先提交、按重放处理（不推进 streak）；
+  3. 交叉复审确认：同 `crawlRunId` 的重试携带相同 outcome（Temporal at-least-once、参数一致），重放命中用收敛更新而不是「首写胜」是安全的。
 - 无 `crawlRunId` 的调用方（如 `channel.service.recordChannelRun` 的租户路径）行为不变。
 
 ## 5. 闭环设计（§0.6 ②）

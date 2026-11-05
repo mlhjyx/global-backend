@@ -1,3 +1,4 @@
+import { ExecutionControlError } from '../execution-budget/execution-control-error';
 import type { PrismaService } from '../prisma/prisma.service';
 
 export interface RecordChannelRunInput {
@@ -31,6 +32,7 @@ export async function recordChannelRunInTransaction(
     sourceChannelRun: {
       findUnique: (args: never) => Promise<{ id: string } | null>;
       create: (args: never) => Promise<{ id: string }>;
+      createMany: (args: never) => Promise<{ count: number }>;
       update: (args: never) => Promise<{ id: string }>;
     };
     sourceChannel: {
@@ -50,10 +52,12 @@ export async function recordChannelRunInTransaction(
     ...(input.errorCode ? { errorCode: input.errorCode } : {}),
     finishedAt: new Date(),
   };
-  // A finalize retry carries the same crawlRunId: converge the outcome onto the
-  // existing row and leave the failure streak untouched (it advanced once when
-  // the row was first recorded, inside that same transaction).
+  // A finalize retry carries the same crawlRunId and the same outcome (Temporal
+  // at-least-once with identical inputs); a replay hit converges the outcome onto
+  // the existing row and leaves failureStreak/lastRunAt untouched — they advanced
+  // once when the row was first recorded, inside that same transaction.
   let run: { id: string } | null = null;
+  let replayed = false;
   if (input.crawlRunId) {
     const existing = await tx.sourceChannelRun.findUnique({
       where: { crawlRunId: input.crawlRunId },
@@ -64,14 +68,36 @@ export async function recordChannelRunInTransaction(
         where: { crawlRunId: input.crawlRunId },
         data: outcome,
       } as never);
+      replayed = true;
+    } else {
+      // ON CONFLICT DO NOTHING keeps a concurrent duplicate from aborting this
+      // transaction (a caught unique violation would take the streak update down
+      // with it); the read-back below then sees whichever row committed first.
+      const created = await tx.sourceChannelRun.createMany({
+        data: [
+          {
+            channelId: input.channelId,
+            crawlRunId: input.crawlRunId,
+            triggeredByWorkspaceId: input.triggeredByWorkspaceId ?? null,
+            ...outcome,
+          },
+        ],
+        skipDuplicates: true,
+      } as never);
+      const stored = await tx.sourceChannelRun.findUnique({
+        where: { crawlRunId: input.crawlRunId },
+        select: { id: true },
+      } as never);
+      if (!stored) throw new ExecutionControlError('CHANNEL_RUN_RECORD_UNAVAILABLE');
+      run = stored;
+      // count=0: a concurrent finalize won the unique key and committed first.
+      replayed = created.count === 0;
     }
   }
-  const replayed = run !== null;
   if (!run) {
     run = await tx.sourceChannelRun.create({
       data: {
         channelId: input.channelId,
-        ...(input.crawlRunId ? { crawlRunId: input.crawlRunId } : {}),
         triggeredByWorkspaceId: input.triggeredByWorkspaceId ?? null,
         ...outcome,
       },
