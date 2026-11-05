@@ -13,6 +13,13 @@ import {
   parseExecutionBudgetBinding,
   type ExecutionBudgetBinding,
 } from '../execution-budget/execution-budget-binding';
+import { appendRunEvent } from '../discovery/run2/run-events';
+import {
+  createRunPoolGate,
+  parseRunPoolCap,
+  RUN_POOL_CAP_REACHED_REASON,
+  type RunPoolGate,
+} from '../discovery/run-pool-cap';
 import { materializeDiscoveryCompanyCanonicalCandidate } from './discovery-company-materialization-canonical';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const SHA256 = /^[0-9a-f]{64}$/u;
@@ -296,10 +303,69 @@ async function lockDiscoveryCompanyMaterializationBatchFacts(
     facts,
   });
 }
+/**
+ * The run's materialized companies so far (the pool the quick-scan/contact stages see): distinct
+ * canonical companies over this run's CANONICALIZED outcomes. Read inside the batch transaction,
+ * so committed earlier batches are visible and the in-flight batch is not; the gate tracks this
+ * batch's additions in memory. Index prefix `(workspace_id, run_id)` serves the scan.
+ */
+async function loadRunPoolCompanyIds(
+  transaction: Transaction,
+  input: DiscoveryCompanyMaterializationInput,
+): Promise<string[]> {
+  const rows = await databaseCall(() => transaction.$queryRaw<unknown[]>(
+    Prisma.sql`SELECT DISTINCT canonical_company_id
+      FROM public.discovery_company_materialization_outcome
+      WHERE workspace_id=${input.workspaceId}::uuid AND run_id=${input.runId}::uuid
+        AND outcome='CANONICALIZED' AND canonical_company_id IS NOT NULL`,
+  ));
+  if (!Array.isArray(rows)) fail('DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INVALID');
+  return rows.map((row) => {
+    const value = field(record(row, ['canonical_company_id']), 'canonical_company_id');
+    return value === null ? null : uuid(value);
+  }).filter((id): id is string => id !== null);
+}
+
+/** Outcome rows the run pool cap skipped (only called when the cap is enforced). */
+async function countRunPoolCapSkips(
+  transaction: Transaction,
+  input: DiscoveryCompanyMaterializationInput,
+): Promise<number> {
+  const rows = await databaseCall(() => transaction.$queryRaw<unknown[]>(
+    Prisma.sql`SELECT count(*) AS skipped
+      FROM public.discovery_company_materialization_outcome
+      WHERE workspace_id=${input.workspaceId}::uuid AND run_id=${input.runId}::uuid
+        AND outcome='NOT_CANONICALIZABLE'
+        AND not_canonicalizable_reason_code=${RUN_POOL_CAP_REACHED_REASON}`,
+  ));
+  return bigintCount(field(oneRow(rows, ['skipped']), 'skipped'));
+}
+
 const FACT_CANDIDATE_KEYS = [
   'qItem', 'lockedFacts', 'exactExistingOutcome', 'reusableIdentity',
   'reusableManifestCandidates', 'companyParse', 'canonicalWrite',
 ] as const;
+/**
+ * True when some fact could still reach a canonical write (identity or reuse), i.e. when a
+ * pool-cap decision can occur at all; a terminal-only batch skips the seed scan entirely.
+ * A conservative superset: malformed facts keep the gate on and fail later with their own error.
+ */
+function batchCouldCanonicalize(facts: LockedDiscoveryCompanyMaterializationBatchFacts): boolean {
+  return facts.facts.some((value) => {
+    try {
+      const candidate = record(value, FACT_CANDIDATE_KEYS);
+      if (field(candidate, 'exactExistingOutcome') !== null) return false;
+      if (field(candidate, 'reusableIdentity') !== null) return true;
+      const q = record(field(candidate, 'qItem'), Q_ITEM_KEYS);
+      const locked = record(field(candidate, 'lockedFacts'), LOCKED_FACT_KEYS);
+      return field(q, 'qIngestStatus') === 'ACCEPTED'
+        && field(locked, 'restrictedDispositionId') === null
+        && field(locked, 'rawStatus') !== 'EXPIRED';
+    } catch {
+      return true;
+    }
+  });
+}
 const Q_ITEM_KEYS = [
   'queryItemId', 'queryKey', 'queryOrdinal', 'providerKey', 'recordIndex',
   'operationId', 'rawRecordId', 'rawGovernedSubjectId', 'qRelationId', 'qIngestStatus',
@@ -330,7 +396,13 @@ function optionalText(value: unknown): string | undefined {
   nextWork: Extract<NextWork, { kind: 'BATCH' }>,
   facts: LockedDiscoveryCompanyMaterializationBatchFacts,
   deps: DiscoveryCompanyMaterializationDependencies,
+  poolCapCap: number | null,
 ): Promise<DiscoveryCompanyMaterializationAppendCommand> {
+  // Seeded from committed outcomes only; this batch's additions are tracked on the gate as they
+  // are written, so intra-batch duplicates and repeat hits of a pool member do not double-count.
+  const poolCap: RunPoolGate | null = poolCapCap === null || !batchCouldCanonicalize(facts)
+    ? null
+    : createRunPoolGate(poolCapCap, await loadRunPoolCompanyIds(transaction, input));
   const rawCandidates = facts.facts.map((value) => record(value, FACT_CANDIDATE_KEYS))
     .sort((left, right) => {
       const key = (candidate: Data) => {
@@ -446,7 +518,7 @@ function optionalText(value: unknown): string | undefined {
     }
     const canonical = identity ? canonicalByIdentity.get(identity.dedupeKey) ?? undefined : undefined;
     enriched.push(await materializeDiscoveryCompanyCanonicalCandidate(
-      transaction, input.workspaceId, candidate, decision, canonical,
+      transaction, input.workspaceId, candidate, decision, canonical, poolCap ?? undefined,
     ));
   }
   const plan = buildDiscoveryCompanyMaterializationBatchPlanV1({
@@ -530,7 +602,8 @@ async function finalizeDiscoveryCompanyMaterializationRun(
   input: DiscoveryCompanyMaterializationInput,
   admission: Admission,
   deps: DiscoveryCompanyMaterializationDependencies,
-): Promise<{ companies: number; suppressed: number }> {
+  poolCapCap: number | null,
+): Promise<{ companies: number; suppressed: number; poolCap?: { cap: number; skipped: number } }> {
   return deps.prisma.withWorkspace(input.workspaceId, async (transaction) => {
     const rows = await databaseCall(() => transaction.$queryRaw<unknown[]>(
       Prisma.sql`SELECT * FROM public.finalize_discovery_company_materialization_run_v1(
@@ -541,10 +614,29 @@ async function finalizeDiscoveryCompanyMaterializationRun(
     if (!['APPLIED', 'REPLAYED'].includes(String(field(row, 'status')))) {
       fail('DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INVALID');
     }
-    return Object.freeze({
+    const summary = Object.freeze({
       companies: bigintCount(field(row, 'companies')),
       suppressed: bigintCount(field(row, 'suppressed')),
     });
+    if (poolCapCap === null) return summary;
+    const skipped = await countRunPoolCapSkips(transaction, input);
+    if (skipped === 0) return summary;
+    // Same transaction as the run receipt: the note lands with the receipt or not at all, and the
+    // existence check keeps a retried finalize from adding a second one.
+    const existing = await transaction.runEvent.findFirst({
+      where: { runId: input.runId, type: 'pool_cap_reached' },
+      select: { id: true },
+    });
+    if (!existing) {
+      await appendRunEvent(transaction as never, {
+        workspaceId: input.workspaceId,
+        runId: input.runId,
+        type: 'pool_cap_reached',
+        level: 'warn',
+        payload: { cap: poolCapCap, skipped },
+      });
+    }
+    return Object.freeze({ ...summary, poolCap: Object.freeze({ cap: poolCapCap, skipped }) });
   });
 }
 function replayDiscoveryCompanyMaterializationRunReceipt(
@@ -565,7 +657,7 @@ function heartbeatDiscoveryCompanyMaterializationBatch(value: {
 export async function executeDiscoveryCompanyMaterialization(
   input: DiscoveryCompanyMaterializationInput,
   deps: DiscoveryCompanyMaterializationDependencies,
-): Promise<{ companies: number; suppressed: number }> {
+): Promise<{ companies: number; suppressed: number; poolCap?: { cap: number; skipped: number } }> {
   const { canonicalizeLegacyDiscoveryRun } = deps;
   let binding: ExecutionBudgetBinding;
   try {
@@ -583,8 +675,12 @@ export async function executeDiscoveryCompanyMaterialization(
     nextWork: Extract<NextWork, { kind: 'FINALIZE_QUERY' }>,
   ) => commitDiscoveryCompanyMaterializationQuery(nextWork, input, admission, deps);
   if (admission.mode === 'LEGACY') {
+    // Pre-contract histories replay through the legacy path; the pool cap must not change what
+    // they materialize (determinism), so it applies to governed runs only.
     return canonicalizeLegacyDiscoveryRun(input);
   }
+  const poolCap = parseRunPoolCap();
+  const poolCapCap = poolCap.mode === 'enforce' ? poolCap.cap : null;
   let inspection = await inspectDiscoveryCompanyMaterialization(input, admission, deps);
   while (true) {
     if (inspection.status === 'REPLAYED') {
@@ -607,6 +703,7 @@ export async function executeDiscoveryCompanyMaterialization(
             nextWork,
             facts,
             deps,
+            poolCapCap,
           );
           await appendDiscoveryCompanyMaterializationBatch(transaction, {
             ...command,
@@ -624,7 +721,7 @@ export async function executeDiscoveryCompanyMaterialization(
         await finalizeDiscoveryCompanyMaterializationQuery(inspection.nextWork);
         break;
       case 'FINALIZE_RUN':
-        return finalizeDiscoveryCompanyMaterializationRun(input, admission, deps);
+        return finalizeDiscoveryCompanyMaterializationRun(input, admission, deps, poolCapCap);
     }
     inspection = await inspectDiscoveryCompanyMaterialization(input, admission, deps);
   }

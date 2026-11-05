@@ -327,6 +327,13 @@ function parseExistingOutcome(
   return snapshotPlain(row, snapshotBudget) as Readonly<Data>;
 }
 
+/** `companyParse.status` as the materializer left it on the candidate (null when absent). */
+function parseStatus(source: Data): unknown {
+  const rawParser = field(source, 'companyParse');
+  return rawParser && typeof rawParser === 'object' && !types.isProxy(rawParser)
+    ? Object.getOwnPropertyDescriptor(rawParser, 'status')?.value : null;
+}
+
 function itemPlan(raw: unknown, context: Data, snapshotBudget: SnapshotBudget): Readonly<Data> {
   const source = record(raw, CANDIDATE_KEYS);
   const q = parseQ(field(source, 'qItem'));
@@ -352,17 +359,21 @@ function itemPlan(raw: unknown, context: Data, snapshotBudget: SnapshotBudget): 
   let reason: string | null = null;
   if (facts.restrictedDispositionId !== null) outcome = 'RESTRICTED_PROCESSING';
   else if ((facts.suppressionRecordIds as readonly string[]).length > 0) outcome = 'SUPPRESSED';
-  else if (
+  else if (parseStatus(source) === 'INVALID') {
+    // A batch may veto canonicalization for a candidate that would otherwise be written —
+    // including a reusable one (run pool cap, 2026-11-05-run-pool-cap.md): the INVALID parse
+    // outranks the reuse branch so its skip reason lands in the outcome.
+    const parser = record(field(source, 'companyParse'), ['status', 'reasonCode']);
+    outcome = 'NOT_CANONICALIZABLE'; reason = text(field(parser, 'reasonCode'), /^[A-Z][A-Z0-9_]{0,63}$/u);
+  } else if (
     field(source, 'reusableIdentity') !== null &&
     (facts.rawStatus !== 'EXPIRED' || manifestCandidateCount > 0)
   ) {
     outcome = 'CANONICALIZED'; canonical = parseCanonical(field(source, 'reusableIdentity'), 'reuse');
   } else if (facts.rawStatus === 'EXPIRED') outcome = 'EXPIRED_BEFORE_CANONICALIZATION';
   else {
-    const rawParser = field(source, 'companyParse');
-    const status = rawParser && typeof rawParser === 'object' && !types.isProxy(rawParser)
-      ? Object.getOwnPropertyDescriptor(rawParser, 'status')?.value : null;
-    const parser = record(rawParser, status === 'INVALID' ? ['status', 'reasonCode'] : ['status', 'dedupeKey']);
+    const parser = record(field(source, 'companyParse'),
+      parseStatus(source) === 'INVALID' ? ['status', 'reasonCode'] : ['status', 'dedupeKey']);
     if (field(parser, 'status') === 'INVALID') {
       outcome = 'NOT_CANONICALIZABLE'; reason = text(field(parser, 'reasonCode'), /^[A-Z][A-Z0-9_]{0,63}$/u);
     } else {

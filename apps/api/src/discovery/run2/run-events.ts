@@ -19,6 +19,7 @@ export type RunEventType =
   | 'company_failed'
   | 'budget_exhausted'
   | 'lease_skipped'
+  | 'pool_cap_reached'
   | 'run_finished';
 
 export interface RunEventInput {
