@@ -8,13 +8,18 @@ import { ScopesGuard } from '../auth/scopes.guard';
 import { envelope } from '../common/envelope';
 import { ApiEnvelope } from '../common/api-envelope.decorator';
 import { ChannelService } from './channel.service';
-import { IMPORT_SAMPLE_CSV } from './channel-import';
+import {
+  IMPORT_SAMPLE_CSV,
+  parseCsv,
+  suggestImportMapping,
+} from './channel-import';
 
 /**
  * M1 渠道数据源平台 API。
  *
- * - 平台渠道注册/治理/启停：acquisition:write（BFF 管理员路由）。
+ * - 平台渠道注册/治理/启停/试跑：ops:write（仅运营身份 saas-ops）；平台渠道登记表读取用 ops:read。
  * - 租户启用/停用已批准渠道、导入自己的名单：acquisition:write（租户管理员）。
+ *   平台渠道的写权限不再与租户共享（数据源归属 P3：租户身份调用平台端点必须 403）。
  * - 抓取通道的试跑/运行：在平台抓取预算权威获批前 fail-closed（409），不绕过 ToolBroker。
  */
 @ApiTags('Channels')
@@ -25,7 +30,7 @@ export class ChannelsController {
   constructor(private readonly channels: ChannelService) {}
 
   @Get('source-channels')
-  @RequireScopes('acquisition:read')
+  @RequireScopes('ops:read')
   @ApiOperation({ summary: '渠道列表（状态/模式/类别/最近运行；平台渠道对所有租户可见）' })
   @ApiEnvelope({ type: 'array', items: { type: 'object', additionalProperties: true } })
   async list(@Ctx() ctx: RequestContext) {
@@ -42,18 +47,27 @@ export class ChannelsController {
 
   @Get('source-channels/import-template')
   @RequireScopes('acquisition:read')
-  @ApiOperation({ summary: '导入通道示例 CSV（10 行，列映射与导入验收用）' })
+  @ApiOperation({ summary: '导入通道示例 CSV（10 行，列映射与导入验收用；附建议 mapping 与可用列）' })
   @ApiEnvelope({
     type: 'object',
-    required: ['csv'],
-    properties: { csv: { type: 'string' } },
+    required: ['csv', 'columns', 'mapping'],
+    properties: {
+      csv: { type: 'string' },
+      columns: { type: 'array', items: { type: 'string' } },
+      mapping: { type: 'object', additionalProperties: { type: 'string' } },
+    },
   })
   async importTemplate() {
-    return envelope({ csv: IMPORT_SAMPLE_CSV });
+    const { headers } = parseCsv(IMPORT_SAMPLE_CSV);
+    return envelope({
+      csv: IMPORT_SAMPLE_CSV,
+      columns: headers,
+      mapping: suggestImportMapping(headers),
+    });
   }
 
   @Post('source-channels')
-  @RequireScopes('acquisition:write')
+  @RequireScopes('ops:write')
   @ApiOperation({ summary: '新建渠道（默认 DISABLED；治理信息齐全并经人工确认后才能启用）' })
   @ApiEnvelope({ type: 'object', additionalProperties: true })
   async create(@Ctx() ctx: RequestContext, @Body() body: Record<string, unknown>) {
@@ -61,7 +75,7 @@ export class ChannelsController {
   }
 
   @Patch('source-channels/:channelId')
-  @RequireScopes('acquisition:write')
+  @RequireScopes('ops:write')
   @ApiOperation({ summary: '更新渠道配置/治理信息/状态（crawl 仅允许 robots A 启用，C 永不启用）' })
   @ApiEnvelope({ type: 'object', additionalProperties: true })
   async patch(
@@ -97,7 +111,7 @@ export class ChannelsController {
   }
 
   @Post('source-channels/:channelId/preview')
-  @RequireScopes('acquisition:write')
+  @RequireScopes('ops:write')
   @ApiOperation({ summary: '试跑抓取通道（抓 1 页/前 20 条）——平台抓取预算权威获批前 fail-closed 409' })
   @ApiEnvelope({ type: 'object', additionalProperties: true })
   async preview(@Ctx() ctx: RequestContext, @Param('channelId', ParseUUIDPipe) channelId: string) {
@@ -105,7 +119,7 @@ export class ChannelsController {
   }
 
   @Post('source-channels/:channelId/run')
-  @RequireScopes('acquisition:write')
+  @RequireScopes('ops:write')
   @ApiOperation({ summary: '立即运行抓取通道——平台抓取预算权威获批前 fail-closed 409' })
   @ApiEnvelope({ type: 'object', additionalProperties: true })
   async run(@Ctx() ctx: RequestContext, @Param('channelId', ParseUUIDPipe) channelId: string) {

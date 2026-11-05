@@ -16,6 +16,9 @@ export const AUTHORIZATION_SCOPES = Object.freeze([
   'contact-discovery:read',
   'compliance:manage',
   'ops:read',
+  // 平台渠道治理（数据源归属 P3）：平台级渠道注册/治理/启停/试跑只属于运营身份（saas-ops），
+  // 租户的 acquisition:write 不再隐含平台写权限。详见 implementation-records P3。
+  'ops:write',
 ] as const);
 
 export type AuthorizationScope = (typeof AUTHORIZATION_SCOPES)[number];

@@ -156,6 +156,7 @@ jobs:
     needs: renderer-visual-scope
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     services:
       postgres:
         image: pgvector/pgvector@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
@@ -457,6 +458,20 @@ jobs:
           pnpm --filter @global/db exec prisma migrate deploy
           pnpm --filter @global/api exec vitest run src/prisma/app-user-table-privileges.postgres.spec.ts
 
+      # The run-event seq allocator takes a transaction advisory lock whose function
+      # returns PostgreSQL void; reading it through $queryRaw once reached production
+      # (2026-11-04) and failed every discovery run at quickScan in ten seconds. This
+      # exercises the real statement against the migrated database above.
+      - name: Run-event seq advisory lock on PostgreSQL
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        env:
+          DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+          RUN_EVENTS_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+        run: |
+          set -euo pipefail
+          pnpm --filter @global/db exec prisma migrate deploy
+          pnpm --filter @global/api exec vitest run src/discovery/run2/run-events.postgres.spec.ts
+
       # The operator sanctions refresh writes the official lists through the refresh service's
       # owner transaction: entities only, refresh metadata updated, status untouched, a repeat
       # changes nothing, a failed write rolls back, app_user is refused. Synthetic lists, no
@@ -567,16 +582,29 @@ jobs:
         env:
           BUILD_SHA: ${{ github.sha }}
           OCI_IMAGE: global-backend-ci:${{ github.sha }}
+          PR_IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
         run: |
           set -euo pipefail
           git diff --exit-code
           test -z "$(git ls-files --others --exclude-standard)"
           BUILT_AT="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
           export BUILT_AT
-          docker build \
+          # Layer cache lives in the Actions cache service (type=gha), so repeat
+          # builds reuse the runtime-base (Debian packages, chromium) and build
+          # layers instead of re-downloading the pinned archive on every run.
+          # Fork PRs receive read-only tokens, so they only read the cache.
+          docker buildx create --name ci-oci --driver docker-container --use >/dev/null
+          cache_to=()
+          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" || "${PR_IS_FORK}" == "false" ]]; then
+            cache_to=(--cache-to "type=gha,scope=runtime-image,mode=max,ignore-error=true")
+          fi
+          docker buildx build \
             --build-arg "BUILD_SHA=${BUILD_SHA}" \
             --build-arg "BUILT_AT=${BUILT_AT}" \
             --tag "${OCI_IMAGE}" \
+            --load \
+            --cache-from "type=gha,scope=runtime-image" \
+            "${cache_to[@]}" \
             .
           test "$(docker image inspect --format '{{.Config.User}}' "${OCI_IMAGE}")" = global
           test "$(docker image inspect --format '{{json .Config.Entrypoint}}' "${OCI_IMAGE}")" = '["node","/app/runtime-entrypoint.mjs"]'
