@@ -9,7 +9,11 @@ import {
   CHANNEL_RUN_MAX_PAGES,
   parseChannelConfig,
 } from "../channels/channel-config";
-import { crawlChannel, type CrawlPageFetcher } from "../channels/channel-crawler";
+import {
+  crawlChannel,
+  type CrawledRecord,
+  type CrawlPageFetcher,
+} from "../channels/channel-crawler";
 import { recordChannelRunInTransaction, type RecordChannelRunInput } from "../channels/channel-run-recorder";
 import {
   PlatformCrawlGrantClient,
@@ -27,6 +31,7 @@ export interface ChannelCrawlRunOutcome {
   readonly status: "SUCCEEDED" | "FAILED";
   readonly pagesFetched: number;
   readonly recordsFound: number;
+  readonly recordsMaterialized: number;
   readonly failures: number;
   readonly truncated: boolean;
   readonly errorCode?: string;
@@ -61,6 +66,12 @@ export function createChannelCrawlActivities(deps: {
   fence?: PlatformEgressFence;
   /** 生产为 Crawl4aiPageFetcher(broker) 的逐页闭包；测试注入假实现。 */
   fetchPage?: (url: string, context: ToolContext) => Promise<{ url: string; html: string } | null>;
+  /** 记录物化（平台 record 池 upsert）；生产注入 Prisma 版，测试注入假实现。 */
+  materializeRecords?: (input: {
+    channelId: string;
+    crawlRunId: string;
+    records: CrawledRecord[];
+  }) => Promise<number>;
   now?: () => number;
 }) {
   const now = deps.now ?? Date.now;
@@ -167,6 +178,7 @@ export function createChannelCrawlActivities(deps: {
           status: "SUCCEEDED",
           pagesFetched: 0,
           recordsFound: 0,
+          recordsMaterialized: 0,
           failures: 0,
           truncated: true,
         };
@@ -186,10 +198,28 @@ export function createChannelCrawlActivities(deps: {
           platformEgress,
         });
       const result = await crawlChannel(config, fetchPage, { pageCap });
+      // 记录物化在活动内完成（记录不进 Temporal 历史）。物化失败按不可重试失败：
+      // 活动重试会因围栏拒绝重发已 ACK 的 URL 而拿到空页，重试只会把「已抓未写」伪装成「无记录」。
+      let recordsMaterialized = 0;
+      if (result.records.length > 0) {
+        if (!deps.materializeRecords) {
+          throw nonRetryable("CHANNEL_MATERIALIZATION_UNAVAILABLE");
+        }
+        try {
+          recordsMaterialized = await deps.materializeRecords({
+            channelId: args.input.channelId,
+            crawlRunId: args.input.crawlRunId,
+            records: result.records,
+          });
+        } catch {
+          throw nonRetryable("CHANNEL_MATERIALIZATION_FAILED");
+        }
+      }
       return {
         status: "SUCCEEDED",
         pagesFetched: result.pagesFetched,
         recordsFound: result.records.length,
+        recordsMaterialized,
         failures: result.pageFailures,
         truncated: result.truncatedByCap || pageCap < args.input.pageCap,
       };
@@ -206,7 +236,7 @@ export function createChannelCrawlActivities(deps: {
         status: outcome.status,
         pagesFetched: outcome.pagesFetched,
         recordsFound: outcome.recordsFound,
-        recordsMaterialized: 0,
+        recordsMaterialized: outcome.recordsMaterialized,
         failures: outcome.failures,
         truncated: outcome.truncated,
         ...(outcome.errorCode ? { errorCode: outcome.errorCode } : {}),

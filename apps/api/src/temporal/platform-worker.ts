@@ -43,6 +43,8 @@ import { PlatformGrantAdmission } from "./platform-grant-admission";
 import { PlatformCrawlGrantClient } from "./platform-crawl-grant.client";
 import { createChannelCrawlActivities } from "./channel-crawl.activities";
 import { recordChannelRunInTransaction } from "../channels/channel-run-recorder";
+import { materializeChannelRecords } from "../channels/channel-records";
+import { createPrismaChannelRecordWriter } from "../channels/channel-records.prisma";
 import {
   buildToolBroker,
   sourcePolicyReaderFrom,
@@ -269,6 +271,12 @@ async function main(): Promise<void> {
         fence: platformEgressFence,
         fetchPage: (url, context) =>
           new Crawl4aiPageFetcher(broker).fetch(url, context),
+        // 紧急停写开关：CHANNEL_CRAWL_MATERIALIZE=off 回到「仅计数」行为（记录丢弃），默认开。
+        materializeRecords:
+          (process.env.CHANNEL_CRAWL_MATERIALIZE ?? "").trim() === "off"
+            ? async () => 0
+            : (input) =>
+                materializeChannelRecords(createPrismaChannelRecordWriter(prisma), input),
       }),
     },
   });

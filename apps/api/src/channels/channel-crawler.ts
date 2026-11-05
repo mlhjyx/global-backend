@@ -33,6 +33,14 @@ export interface CrawledRecord {
   industry?: string;
   products?: string[];
   keywords?: string[];
+  /** PII_PENDING_ENCRYPTION：联系人字段（OWNER-DECISION-2026-11-05 延后加密与审计）。只在详情页模式下抽取。 */
+  contactName?: string;
+  /** PII_PENDING_ENCRYPTION */
+  contactTitle?: string;
+  /** PII_PENDING_ENCRYPTION */
+  email?: string;
+  /** PII_PENDING_ENCRYPTION */
+  phone?: string;
   /** 该条目的证据页（列表条目页或详情页）。 */
   sourceUrl: string;
   externalRef?: string;
@@ -58,6 +66,13 @@ function absolutize(href: string | null, base: string): string | null {
   } catch {
     return null;
   }
+}
+
+function normalizeEmail(value: string | null): string | undefined {
+  const text = value?.trim().toLowerCase();
+  if (!text || text.length > 320) return undefined;
+  // 只做最小形态过滤：含 @ 且无空白；格式强校验交给下游使用方。
+  return /^[^\s@]+@[^\s@]+$/u.test(text) ? text : undefined;
 }
 
 function normalizeWebsite(value: string | null): string | undefined {
@@ -148,6 +163,20 @@ export async function crawlChannel(
           : {}),
         ...(fields.keywords && listValues(html, fields.keywords)
           ? { keywords: listValues(html, fields.keywords) }
+          : {}),
+        // 联系人字段（PII）双保险：只从详情页 HTML 抽取——列表页回退时 detail.fields
+        // 选择器作用于整张列表页，会把同一值复制给整页条目（配置校验已拦截，这里再兜一层）。
+        ...(detailHtml && fields.contactName && selectText(detailHtml, fields.contactName)
+          ? { contactName: selectText(detailHtml, fields.contactName)!.slice(0, 200) }
+          : {}),
+        ...(detailHtml && fields.contactTitle && selectText(detailHtml, fields.contactTitle)
+          ? { contactTitle: selectText(detailHtml, fields.contactTitle)!.slice(0, 200) }
+          : {}),
+        ...(detailHtml && fields.email && normalizeEmail(selectText(detailHtml, fields.email))
+          ? { email: normalizeEmail(selectText(detailHtml, fields.email))! }
+          : {}),
+        ...(detailHtml && fields.phone && selectText(detailHtml, fields.phone)
+          ? { phone: selectText(detailHtml, fields.phone)!.trim().slice(0, 64) }
           : {}),
       };
       records.push(record);

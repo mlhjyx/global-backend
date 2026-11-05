@@ -55,6 +55,7 @@ const service = {
   createChannel: counted(channelRow()),
   patchChannel: counted(channelRow()),
   requestCrawl: counted({ requested: true }),
+  listChannelRecords: counted({ channelId: CHANNEL, records: [] }),
   enableChannel: counted({ channelId: CHANNEL, enabled: true }),
   disableChannel: counted({ channelId: CHANNEL, enabled: false }),
   previewImport: counted({ totalRows: 0 }),
@@ -145,6 +146,7 @@ describe("channel data-source ownership HTTP contract (P3)", () => {
     ["PATCH", `/source-channels/${CHANNEL}`, { name: "y" }],
     ["POST", `/source-channels/${CHANNEL}/preview` as string, undefined],
     ["POST", `/source-channels/${CHANNEL}/run`, undefined],
+    ["GET", `/source-channels/${CHANNEL}/records` as string, undefined],
   ] as const;
 
   it.each(platformEndpoints)(

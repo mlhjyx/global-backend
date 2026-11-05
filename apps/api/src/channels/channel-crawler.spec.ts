@@ -95,6 +95,51 @@ describe('M1 配置驱动通用爬虫 v0', () => {
     expect(() => parseChannelConfig('crawl', { list: { url: 'http://expo.example/?page={page}', maxPages: 1, itemSelector: '.x' } })).toThrow(ChannelConfigError);
     expect(() => parseChannelConfig('crawl', { list: { url: 'https://expo.example/?page={page}', maxPages: 99, itemSelector: '.x' } })).toThrow(ChannelConfigError);
     expect(() => parseChannelConfig('crawl', { list: { url: 'https://expo.example/list', maxPages: 1, itemSelector: '.x' } })).toThrow(/pageParam/);
-    expect(() => parseChannelConfig('crawl', { list: { url: 'https://e.example/?page={page}', maxPages: 1, itemSelector: '.x' }, detail: { enabled: true, fields: { email: '.mail' } } })).toThrow(/channel field/);
+    expect(() => parseChannelConfig('crawl', { list: { url: 'https://e.example/?page={page}', maxPages: 1, itemSelector: '.x' }, detail: { enabled: true, fields: { fax: '.fax' } } })).toThrow(/channel field/);
+  });
+
+  it('only accepts contact fields in detail-page mode (enabled + itemUrlSelector)', () => {
+    // detail 未启用：拒绝。
+    expect(() => parseChannelConfig('crawl', { list: { url: 'https://e.example/?page={page}', maxPages: 1, itemSelector: '.x', itemUrlSelector: 'a' }, detail: { enabled: false, fields: { email: '.mail' } } })).toThrow(/detail-page mode/);
+    // 详情启用但无 itemUrlSelector：同样拒绝（没有逐条详情就没有可信的字段作用域）。
+    expect(() => parseChannelConfig('crawl', { list: { url: 'https://e.example/?page={page}', maxPages: 1, itemSelector: '.x' }, detail: { enabled: true, fields: { email: '.mail' } } })).toThrow(/detail-page mode/);
+    // 完整详情模式：允许全部联系人字段。
+    expect(() => parseChannelConfig('crawl', {
+      list: { url: 'https://e.example/?page={page}', maxPages: 1, itemSelector: '.x', itemUrlSelector: 'a' },
+      detail: { enabled: true, fields: { contactName: '.name', contactTitle: '.title', email: '.mail', phone: '.tel' } },
+    })).not.toThrow();
+  });
+
+  it('extracts contact fields from detail pages only, with PII cleaning', async () => {
+    const config = parseChannelConfig('crawl', {
+      list: { url: 'https://expo.example/exhibitors?page={page}', maxPages: 1, itemSelector: '.card', itemUrlSelector: 'a::attr(href)' },
+      detail: { enabled: true, fields: { name: 'h1.company', contactName: '.cname', contactTitle: '.ctitle', email: '.mail', phone: '.tel' } },
+    });
+    const fetchPage = fetcher({
+      'https://expo.example/exhibitors?page=1': '<div class="card"><a href="/exhibitor/acme">Acme</a></div>',
+      'https://expo.example/exhibitor/acme': '<h1 class="company">Acme Pumpen GmbH</h1><span class="cname">Max Mustermann</span><span class="ctitle">Sales Manager</span><span class="mail"> Sales@Acme-Pumpen.DE </span><span class="tel"> +49 30 123456 </span>',
+    });
+    const result = await crawlChannel(config, fetchPage, { pageCap: 5, perRequestDelayMs: 0, sleep: async () => {} });
+    expect(result.records[0]).toMatchObject({
+      name: 'Acme Pumpen GmbH',
+      contactName: 'Max Mustermann',
+      contactTitle: 'Sales Manager',
+      email: 'sales@acme-pumpen.de',
+      phone: '+49 30 123456',
+    });
+  });
+
+  it('never extracts contact fields from list-page fallback (defense in depth)', async () => {
+    const config = parseChannelConfig('crawl', {
+      list: { url: 'https://expo.example/exhibitors?page={page}', maxPages: 1, itemSelector: '.card', itemUrlSelector: 'a::attr(href)' },
+      detail: { enabled: true, fields: { name: 'h1.company', email: '.mail' } },
+    });
+    // 绕过校验器直接构造 detail.enabled=false 的退化配置，验证爬虫层兜底：列表页回退不抽联系人字段。
+    const degraded = { ...config, detail: { enabled: false, fields: config.detail.fields } };
+    const fetchPage = fetcher({
+      'https://expo.example/exhibitors?page=1': '<div class="card"><a href="/exhibitor/acme">Acme Co</a></div><span class="mail">x@y.z</span>',
+    });
+    const result = await crawlChannel(degraded as never, fetchPage, { pageCap: 1, perRequestDelayMs: 0, sleep: async () => {} });
+    expect(result.records[0]!.email).toBeUndefined();
   });
 });

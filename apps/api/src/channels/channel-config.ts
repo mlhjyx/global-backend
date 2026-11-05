@@ -29,9 +29,24 @@ export type ChannelConfig =
   | { mode: 'api'; adapter: string }
   | { mode: 'import'; columns?: Record<string, string> };
 
-/** 渠道记录允许抽取的字段（与 canonical 公司属性对齐）。 */
-export const CHANNEL_FIELD_KEYS = ['name', 'website', 'country', 'industry', 'products', 'keywords'] as const;
+/** 渠道记录允许抽取的字段（公司属性 + 联系人字段）。 */
+export const CHANNEL_FIELD_KEYS = [
+  'name',
+  'website',
+  'country',
+  'industry',
+  'products',
+  'keywords',
+  'contactName',
+  'contactTitle',
+  'email',
+  'phone',
+] as const;
 export type ChannelFieldKey = (typeof CHANNEL_FIELD_KEYS)[number];
+
+/** 联系人字段（PII）：只允许在详情页模式下抽取，防止列表页作用域把同一值复制给整页条目。 */
+export const CHANNEL_CONTACT_FIELD_KEYS = ['contactName', 'contactTitle', 'email', 'phone'] as const;
+export type ChannelContactFieldKey = (typeof CHANNEL_CONTACT_FIELD_KEYS)[number];
 
 export const CHANNEL_MODES = ['api', 'crawl', 'import'] as const;
 export const CHANNEL_CATEGORIES = ['trade_fair', 'customs', 'association', 'directory', 'tender', 'other'] as const;
@@ -128,7 +143,18 @@ export function parseChannelConfig(mode: string, raw: unknown): ChannelConfig {
         invalid('config.detail.fields must be an object');
       }
       // 只把白名单字段写进显式属性（不用动态键赋值，避免原型污染类风险）。
-      const parsedFields: { name?: string; website?: string; country?: string; industry?: string; products?: string; keywords?: string } = {};
+      const parsedFields: {
+        name?: string;
+        website?: string;
+        country?: string;
+        industry?: string;
+        products?: string;
+        keywords?: string;
+        contactName?: string;
+        contactTitle?: string;
+        email?: string;
+        phone?: string;
+      } = {};
       for (const [key, value] of Object.entries(detailRecord.fields as Record<string, unknown>)) {
         const selectorValue = selector(value, `config.detail.fields.${key}`);
         switch (key) {
@@ -150,12 +176,32 @@ export function parseChannelConfig(mode: string, raw: unknown): ChannelConfig {
           case 'keywords':
             parsedFields.keywords = selectorValue;
             break;
+          case 'contactName':
+            parsedFields.contactName = selectorValue;
+            break;
+          case 'contactTitle':
+            parsedFields.contactTitle = selectorValue;
+            break;
+          case 'email':
+            parsedFields.email = selectorValue;
+            break;
+          case 'phone':
+            parsedFields.phone = selectorValue;
+            break;
           default:
             invalid(`config.detail.fields.${key} is not a channel field (${CHANNEL_FIELD_KEYS.join(', ')})`);
         }
       }
       const fields: Record<string, string> = { ...parsedFields };
       parsedDetail = { enabled: detailRecord.enabled === true, fields };
+      // 联系人字段专项防线：只允许详情页模式（detail.enabled 且逐条详情 URL）。
+      // 列表页回退时 detail.fields 选择器是对整张列表页匹配，同一值会被复制给整页条目。
+      const usesContactField = CHANNEL_CONTACT_FIELD_KEYS.some((key) => key in fields);
+      if (usesContactField && (!parsedDetail.enabled || !parsedList.itemUrlSelector)) {
+        invalid(
+          'contact fields (contactName/contactTitle/email/phone) require detail.enabled=true and list.itemUrlSelector (detail-page mode)',
+        );
+      }
     }
   }
   return { mode: 'crawl', list: parsedList, detail: parsedDetail };

@@ -531,6 +531,44 @@ export class ChannelService {
    * worker mTLS 证书与 platform writer）；API 只负责发起并返回已受理的运行。
    * 引擎缺平台客户端或端点不可用时 fail-closed（503），不再返回占位 409。
    */
+  /** 渠道最近物化的抓取记录（ops:read）：选择器校验与联系使用；PII 按 OWNER-DECISION-2026-11-05 明文存储。 */
+  async listChannelRecords(ctx: RequestContext, channelId: string, limitRaw?: string) {
+    const parsed = limitRaw === undefined ? 50 : Number(limitRaw);
+    const limit = Number.isInteger(parsed) && parsed >= 1 && parsed <= 100 ? parsed : 50;
+    const channel = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.sourceChannel.findUnique({ where: { id: channelId }, select: { id: true } }),
+    );
+    if (!channel) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'channel not found' } });
+    const rows = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.sourceChannelRecord.findMany({
+        where: { channelId },
+        orderBy: { lastSeenAt: 'desc' },
+        take: limit,
+      }),
+    );
+    return {
+      channelId,
+      records: rows.map((row) => ({
+        id: row.id,
+        crawlRunId: row.crawlRunId,
+        name: row.name,
+        website: row.website,
+        country: row.country,
+        industry: row.industry,
+        products: row.products,
+        keywords: row.keywords,
+        contactName: row.contactName,
+        contactTitle: row.contactTitle,
+        email: row.email,
+        phone: row.phone,
+        sourceUrl: row.sourceUrl,
+        firstSeenAt: row.firstSeenAt.toISOString(),
+        lastSeenAt: row.lastSeenAt.toISOString(),
+        contentHash: row.contentHash,
+      })),
+    };
+  }
+
   async requestCrawl(ctx: RequestContext, channelId: string, kind: 'preview' | 'run') {
     const channel = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
       tx.sourceChannel.findUnique({

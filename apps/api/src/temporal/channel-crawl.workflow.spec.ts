@@ -39,6 +39,7 @@ describe('channelCrawlWorkflow（P4-P4c）', () => {
       status: 'SUCCEEDED',
       pagesFetched: 10,
       recordsFound: 4,
+      recordsMaterialized: 3,
       failures: 1,
       truncated: false,
     });
@@ -49,7 +50,12 @@ describe('channelCrawlWorkflow（P4-P4c）', () => {
     expect(acts.admitChannelCrawl).toHaveBeenCalledWith(INPUT);
     expect(acts.finalizeChannelCrawl).toHaveBeenCalledWith({
       input: INPUT,
-      outcome: expect.objectContaining({ status: 'SUCCEEDED', pagesFetched: 10, recordsFound: 4 }),
+      outcome: expect.objectContaining({
+        status: 'SUCCEEDED',
+        pagesFetched: 10,
+        recordsFound: 4,
+        recordsMaterialized: 3,
+      }),
     });
   });
 
