@@ -32,6 +32,7 @@ import {
   plannerVisibleSources,
   routePlannerQueries,
   scaleEstimatedVolume,
+  withCheapFirstShadowNote,
   withDroppedQueryNote,
 } from '../discovery/plan-query-sources';
 import { searchLanguagesForMarkets, type SearchLanguage } from '../discovery/search-localization';
@@ -713,9 +714,12 @@ export class IcpService {
       FDA_QUERY_SOURCE,
     ]);
     // G3 5.3：ICP 的贸易角色（分销商/制造商）确定性写进未带角色的 planner 查询，关键词搜索据此构造角色词。
-    const planned = withDroppedQueryNote(
-      withIcpTradeRole(routing.queries, icp.companyAttributes),
-      dropped,
+    const planned = withCheapFirstShadowNote(
+      withDroppedQueryNote(
+        withIcpTradeRole(routing.queries, icp.companyAttributes),
+        dropped,
+      ),
+      routing.cheapFirstShadow,
     );
     // §8.7 稳健：行业词仍从模型给出的全部查询采集（与数据源开关无关，只作冷路径解析的输入）。
     const industryTerms = collectIndustryTerms(icp.companyAttributes, modelQueries);
