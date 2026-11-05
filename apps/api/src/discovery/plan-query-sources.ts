@@ -45,6 +45,38 @@ export interface PlanQueryRouting {
  */
 export const SYSTEM_PLANNED_SOURCE_KEYS: ReadonlySet<string> = new Set(['ted', 'openfda']);
 
+/**
+ * Q33②（cheap-first）：默认路由顺序的结构化源优先级，数值越小越先保留。
+ * 超出查询帽裁剪时先丢 public_web 副本（最贵：抓取 + LLM 抽取），结构化源副本优先；
+ * 未列出的源取中间档 50。仅影响「裁剪时谁先留下」，不改变扇出语义（召回不降）。
+ */
+const SOURCE_ROUTE_PRIORITY: Readonly<Record<string, number>> = Object.freeze({
+  wikidata: 10,
+  openstreetmap: 15,
+  ted: 20,
+  openfda: 20,
+  directory: 30,
+  trade_fair: 35,
+  structured_harvest: 40,
+  digital_footprint: 45,
+  public_web: 90,
+});
+
+/** 源键的路由优先级；非字符串或未登记取中间档 50。 */
+function sourceRoutePriority(providerKey: unknown): number {
+  return typeof providerKey === 'string' ? (SOURCE_ROUTE_PRIORITY[providerKey] ?? 50) : 50;
+}
+
+/** Q33② 开关：off 恢复旧行为；shadow（默认）保持旧行为但报告将替换量；enforce 应用结构化源优先裁剪。 */
+export type CheapFirstMode = 'off' | 'shadow' | 'enforce';
+
+export function cheapFirstMode(
+  raw: string | undefined = process.env.DISCOVERY_CHEAP_FIRST,
+): CheapFirstMode {
+  const value = (raw ?? '').trim().toLowerCase();
+  return value === 'off' || value === 'enforce' ? value : 'shadow';
+}
+
 /** What the planner model is told about each source it may write queries for. */
 export const PLANNER_SOURCE_GUIDE: Readonly<Record<string, string>> = Object.freeze({
   public_web:
@@ -181,10 +213,12 @@ export function plannerSourcePrompt(enabled: readonly CompanyDiscoverySource[]):
       source.sourceClass,
     ]);
   }
-  const rows = [...classesByKey].map(
-    ([key, classes]) =>
-      `- source_hint=${key}（source_class：${classes.join(' 或 ')}）：${PLANNER_SOURCE_GUIDE[key] ?? '按 filters 检索'}`,
-  );
+  const rows = [...classesByKey]
+    .sort(([left], [right]) => sourceRoutePriority(left) - sourceRoutePriority(right))
+    .map(
+      ([key, classes]) =>
+        `- source_hint=${key}（source_class：${classes.join(' 或 ')}）：${PLANNER_SOURCE_GUIDE[key] ?? '按 filters 检索'}`,
+    );
   const systemPlanned = [
     ...new Set(
       runnable
@@ -194,6 +228,8 @@ export function plannerSourcePrompt(enabled: readonly CompanyDiscoverySource[]):
   ];
   return [
     '可用数据源（当前已启用）。每条查询的 source_class 与 filters.source_hint 必须取下表同一行，不要为表外的数据源出查询，系统会丢弃：',
+    '路由优先级：结构化源优先（公司库 → 名录/展会 → 官方采购/认证源），public_web 仅作兜底——只用于结构化源覆盖不到的行业、地区或角色。',
+    '配额：结构化源每轮各约 ≤100 家公司；public_web 把公司池补到 500；新源前 10 次运行限量试跑。',
     ...rows,
     ...(systemPlanned.length
       ? [`${systemPlanned.join('、')} 的查询由系统按 ICP 确定性生成，不要自己写。`]
@@ -262,6 +298,8 @@ export interface PlannerQueryRouting<Q> {
   readonly dropped: PlannerDropCounts;
   /** How many model queries kept at least one runnable copy. */
   readonly keptModelQueries: number;
+  /** cheap-first shadow（默认）下：按结构化源优先裁剪会替换掉的副本数；off/enforce 时缺省。 */
+  readonly cheapFirstShadow?: Readonly<{ replacedCopies: number }>;
 }
 
 /**
@@ -341,14 +379,37 @@ export function routePlannerQueries<Q extends PlanQueryShape>(
     }
   });
   let kept = copies;
+  let cheapFirstShadow: { replacedCopies: number } | undefined;
   if (copies.length > cap) {
-    const keep = new Set(
-      copies
-        .map((copy, index) => ({ index, priority: planPriority(copy.query.priority) }))
-        .sort((left, right) => left.priority - right.priority || left.index - right.index)
-        .slice(0, cap)
-        .map((entry) => entry.index),
-    );
+    // 两套排序只在「同 priority 时谁先保留」上不同：legacy 按原序号；cheap-first 先结构化源
+    // （SOURCE_ROUTE_PRIORITY），public_web 副本最后保留。扇出本身不变，召回不降。
+    const keepWithinCap = (withSourcePriority: boolean): ReadonlySet<number> =>
+      new Set(
+        copies
+          .map((copy, index) => ({
+            index,
+            priority: planPriority(copy.query.priority),
+            source: withSourcePriority
+              ? sourceRoutePriority(filtersRecord(copy.query.filters).source_hint)
+              : 0,
+          }))
+          .sort((left, right) =>
+            left.priority - right.priority ||
+            left.source - right.source ||
+            left.index - right.index,
+          )
+          .slice(0, cap)
+          .map((entry) => entry.index),
+      );
+    const mode = cheapFirstMode();
+    const legacyKeep = keepWithinCap(false);
+    const keep = mode === 'enforce' ? keepWithinCap(true) : legacyKeep;
+    if (mode === 'shadow') {
+      const cheapKeep = keepWithinCap(true);
+      cheapFirstShadow = {
+        replacedCopies: [...cheapKeep].filter((index) => !legacyKeep.has(index)).length,
+      };
+    }
     kept = copies.filter((_, index) => keep.has(index));
     count('PLAN_QUERY_CAP', copies.length - kept.length);
   }
@@ -356,6 +417,7 @@ export function routePlannerQueries<Q extends PlanQueryShape>(
     queries: kept.map((copy) => copy.query),
     dropped,
     keptModelQueries: new Set(kept.map((copy) => copy.origin)).size,
+    ...(cheapFirstShadow ? { cheapFirstShadow } : {}),
   };
 }
 
@@ -392,5 +454,19 @@ export function withDroppedQueryNote<Q extends PlanQueryShape>(
   const note = `[source_filter] 已移出 ${total} 条规划查询：${reasons
     .map((reason) => `${reason} ${dropped[reason]} 条`)
     .join('、')}`;
+  return [{ ...first, rationale: `${first.rationale ?? ''}\n${note}` }, ...rest];
+}
+
+/**
+ * cheap-first shadow（默认）下把「按结构化源优先裁剪将替换多少副本」写进计划首条查询的
+ * rationale（与 [source_filter] 同位置），供人工计划 review 看到影子差异；enforce/off 无此注记。
+ */
+export function withCheapFirstShadowNote<Q extends PlanQueryShape>(
+  queries: Q[],
+  shadow: Readonly<{ replacedCopies: number }> | undefined,
+): Q[] {
+  const [first, ...rest] = queries;
+  if (!shadow || shadow.replacedCopies <= 0 || first === undefined) return queries;
+  const note = `[cheap-first shadow] 按结构化源优先裁剪将替换 ${shadow.replacedCopies} 条查询副本（当前 DISCOVERY_CHEAP_FIRST=shadow，未实际启用）`;
   return [{ ...first, rationale: `${first.rationale ?? ''}\n${note}` }, ...rest];
 }

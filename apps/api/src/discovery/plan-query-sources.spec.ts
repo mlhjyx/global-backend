@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { ModelGateway } from '../model-gateway/model-gateway';
 import { MAX_QUERY_PLANNER_QUERIES } from './execution-envelope';
@@ -6,6 +6,7 @@ import { DiscoveryProviderRegistry } from './provider.registry';
 import {
   PLANNER_SOURCE_GUIDE,
   SYSTEM_PLANNED_SOURCE_KEYS,
+  cheapFirstMode,
   countLineageGatedColdPaths,
   hasPlannableSource,
   icpMatchesRegisteredFairs,
@@ -17,6 +18,7 @@ import {
   plannerVisibleSources,
   routePlannerQueries,
   scaleEstimatedVolume,
+  withCheapFirstShadowNote,
   withDroppedQueryNote,
   type CompanyDiscoverySource,
 } from './plan-query-sources';
@@ -274,6 +276,69 @@ describe('planner query routing (BI-30)', () => {
   });
 });
 
+describe('cheap-first source priority (Q33②, PR-1)', () => {
+  it('parses the switch defensively with shadow as the default', () => {
+    expect(cheapFirstMode(undefined)).toBe('shadow');
+    expect(cheapFirstMode(' enforce ')).toBe('enforce');
+    expect(cheapFirstMode('OFF')).toBe('off');
+    expect(cheapFirstMode('banana')).toBe('shadow');
+  });
+
+  it('keeps structured copies over public_web when trimming to the ceiling (enforce)', () => {
+    vi.stubEnv('DISCOVERY_CHEAP_FIRST', 'enforce');
+    const planned = Array.from({ length: MAX_QUERY_PLANNER_QUERIES }, (_, index) =>
+      query('industry_data', { area_name: `area-${index}` }, 5));
+
+    const routed = routePlannerQueries(planned, {
+      enabled: only('public_web', 'directory'),
+      registered: REGISTERED,
+    });
+
+    expect(routed.queries).toHaveLength(MAX_QUERY_PLANNER_QUERIES);
+    expect(new Set(routed.queries.map((q) => q.filters.source_hint))).toEqual(new Set(['directory']));
+    expect(routed.dropped).toEqual({ PLAN_QUERY_CAP: MAX_QUERY_PLANNER_QUERIES });
+    vi.unstubAllEnvs();
+  });
+
+  it('keeps the legacy selection but reports what cheap-first would replace (shadow, default)', () => {
+    const planned = Array.from({ length: 33 }, (_, index) =>
+      query('industry_data', { area_name: `area-${index}` }, 5));
+
+    const routed = routePlannerQueries(planned, {
+      enabled: only('public_web', 'directory'),
+      registered: REGISTERED,
+    });
+
+    expect(routed.queries.map((q) => q.filters.source_hint).slice(0, 2)).toEqual([
+      'public_web',
+      'directory',
+    ]);
+    expect(routed.cheapFirstShadow?.replacedCopies ?? 0).toBeGreaterThan(0);
+  });
+
+  it('leaves the plan and the shadow report untouched when the switch is off', () => {
+    vi.stubEnv('DISCOVERY_CHEAP_FIRST', 'off');
+    const planned = Array.from({ length: 33 }, (_, index) =>
+      query('industry_data', { area_name: `area-${index}` }, 5));
+
+    const routed = routePlannerQueries(planned, {
+      enabled: only('public_web', 'directory'),
+      registered: REGISTERED,
+    });
+
+    expect(routed.cheapFirstShadow).toBeUndefined();
+    vi.unstubAllEnvs();
+  });
+
+  it('writes the shadow replacement count onto the plan review note', () => {
+    const queries = [query('industry_data', { source_hint: 'directory' })];
+    const noted = withCheapFirstShadowNote(queries, { replacedCopies: 3 });
+
+    expect(noted[0]?.rationale).toContain('[cheap-first shadow]');
+    expect(noted[0]?.rationale).toContain('3');
+  });
+});
+
 describe('planner source prompt (BI-30)', () => {
   it('lists only the ENABLED sources the planner may write, with their classes', () => {
     const prompt = plannerSourcePrompt(only('public_web'));
@@ -284,6 +349,18 @@ describe('planner source prompt (BI-30)', () => {
     for (const absent of ['wikidata', 'openstreetmap', 'directory', 'trade_fair', 'ted', 'openfda']) {
       expect(prompt).not.toContain(absent);
     }
+  });
+
+  it('states the cheap-first priority and quota guidance without naming absent sources', () => {
+    const prompt = plannerSourcePrompt(only('public_web', 'directory'));
+
+    expect(prompt).toContain('结构化源优先');
+    expect(prompt).toContain('public_web 仅作兜底');
+    expect(prompt).toContain('≤100');
+    expect(prompt).toContain('500');
+    expect(prompt.indexOf('source_hint=directory')).toBeLessThan(
+      prompt.indexOf('source_hint=public_web'),
+    );
   });
 
   it('tells the planner the system writes TED and openFDA queries only when they can run', () => {
