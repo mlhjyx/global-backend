@@ -1,7 +1,7 @@
 # Q33② discovery run 总池硬闸门（DISCOVERY_RUN_POOL_CAP）· 落地设计文档（2026-11-05）
 
-> 生命周期：`DRAFT`
-> 生命周期依据：承 `2026-11-05-cheap-first-provider-routing.md` §11 自审核正（PR #819：`QUICK_SCAN_POOL_LIMIT` 是消费侧上限，不是物化闸门；`DISCOVERY_RUN_POOL_CAP`/`POOL_CAP_REACHED` 未实现、另行排期）与本任务定义；待产品负责人批准后转 `APPROVED` 并进入 TDD。
+> 生命周期：`APPROVED`
+> 生命周期依据：产品负责人 2026-11-05 批准开工（决策点 D-a~D-e 按推荐值）；承 `2026-11-05-cheap-first-provider-routing.md` §11 自审核正（PR #819：`QUICK_SCAN_POOL_LIMIT` 是消费侧上限，不是物化闸门；`DISCOVERY_RUN_POOL_CAP`/`POOL_CAP_REACHED` 未实现、另行排期）与本任务定义。
 > 任务启动门（计划 §0.6）：① 设计文档 ② 闭环设计 ③ 联网研究（§7）→ 产品负责人过目批准 → 开工。
 
 ## 1. 背景与目标
@@ -104,8 +104,8 @@ Q33② 的验收口径包含「public_web 把总池补到 500」。cheap-first �
 ## 6. 测试与 TDD 步骤（先红后绿）
 
 1. 新模块 `discovery/run-pool-cap.ts`（env 解析 + 批内闸门纯逻辑）单测：默认 500、`off`、非法值回退、恰好 cap 边界、dedupe。
-2. 物化批接线单测（mock tx，沿用 `discovery.activities.spec.ts` 的 `$queryRaw` 分派模式）：达界跳过、已入池放行、终态优先级、REPLAYED 路径不变；同步补齐既有用例的 seed 查询 mock。
-3. 真库 postgres spec（env 门控，沿用 activation spec 的脚手架：`prisma migrate deploy` + owner SQL 构造 governed 行）：500 边界、跨查询累计、混合源、stats、run_event、env=off。
+2. 物化批接线单测（mock tx，沿用 `discovery.activities.spec.ts` 的 `$queryRaw` 分派模式）：达界跳过、已入池放行、终态优先级、复用行跳过（INVALID 优先于 reuse）、retried finalize 不重复写事件、REPLAYED 路径不变；同步补齐既有用例的 seed 查询 mock。
+3. 真库 postgres spec（env 门控，沿用 activation spec 的脚手架：`prisma migrate deploy` + owner SQL 构造 governed 行）：500 边界、跨查询累计、混合源、stats、run_event、env=off；照 activation 套件接入 CI（独立一次性 PostgreSQL）。
 4. 工作流 stats 形状单测（有条件字段）。
 5. `gctl check` 全绿 → 自审 → PR。
 
@@ -126,7 +126,7 @@ Q33② 的验收口径包含「public_web 把总池补到 500」。cheap-first �
 
 ## 8. 迁移与回滚
 
-- 一个新迁移：放宽 `discovery_company_materialization_outcome_shape_check` 的 reason code 枚举（加 `RUN_POOL_CAP_REACHED`）。无表/列变更、无 `schema.prisma` 变更（Prisma 不建模 CHECK）、不触碰收据/合约 SHA。
+- 一个新迁移：放宽两个枚举 CHECK——`discovery_company_materialization_outcome_shape_check` 的 reason code（加 `RUN_POOL_CAP_REACHED`）与 `run_event_type_check` 的事件词汇表（加 `pool_cap_reached`；run_event 的类型列本身有 CHECK，实现时核实）。无表/列变更、无 `schema.prisma` 变更（Prisma 不建模 CHECK）、不触碰收据/合约 SHA。
 - 回滚：env=off 立即生效（重启 worker）；迁移可保留（放宽约束对旧代码无影响）。
 
 ## 9. 风险与开放问题
@@ -137,6 +137,7 @@ Q33② 的验收口径包含「public_web 把总池补到 500」。cheap-first �
 | 计数查询开销 | 每批一次、索引前缀；量级评估见 §4.6，慢则 v2 汇总 |
 | 「500」口径争议（distinct 公司 vs outcome 行数） | 取 distinct 公司（与下游消费一致，D-a）；outcome 行可能多于 500 |
 | LEGACY 不设闸 | 历史重放确定性优先（D-d）；新 run 全是 governed |
+| 跨活动重试期间改 env | stats/run_event 报 finalize 当次读到的 cap；若 run 中途换过 worker 且 env 改过，早期批次实际生效的 cap 无法从 run 记录还原（env 变更本就要求重启 worker，与其他 kill switch 同）——已知并接受 |
 | quick-scan 消费侧上限 | 不动（仍是全工作区池 take 500），与本闸门无关 |
 
 ## 10. 决策点（请产品负责人确认）
@@ -146,3 +147,11 @@ Q33② 的验收口径包含「public_web 把总池补到 500」。cheap-first �
 - **D-c 默认与开关**：默认 500 enforce；`DISCOVERY_RUN_POOL_CAP=off` 关闭；非法值回退 500。（推荐：是）
 - **D-d LEGACY 范围**：契约前历史 run 不设闸，保持重放确定性。（推荐：是）
 - **D-e run 状态**：达界不改 run 状态（不算 PARTIAL/FAILED），仅 stats + run_event 观测。（推荐：是）
+
+## 11. 实现记录（2026-11-05，施工时核实与偏差）
+
+- **run_event 的类型列本身有 CHECK**（`run_event_type_check`，20261104110000_run2_domain_model）：新事件类型不能只改 TS union，同一迁移里一并放宽 CHECK（§8 已更新）。设计时按「表无枚举约束」预判，实际有，已修正。
+- **闸门判定提前到身份解析后、属性合并前**：跳过行不需要再读 prior 标量或合并属性，省一次 `canonicalCompany.findUnique`。
+- **`companyParse INVALID` 在 itemPlan 中优先于 reusable 分支**：复用行的跳过必须能覆盖 reuse 判定，否则跳过原因会被 CANONICALIZED(REUSED) 吞掉。
+- **工作流 stats 无独立 workflow 单测可加**（仓库没有 discovery.workflow.spec）；`poolCap` 为有条件字段、活动返回值契约由 `discovery.activities.spec` 覆盖。
+- **postgres spec 的数据要点**：wikidata 原始记录必须 `source_class=company_registry|industry_data` 且经 normalizer 默认 CC0-1.0；public_web 走 `public_web:company_site` 源策略，wikidata 走 `wikidata.org`；后一个 run 必须换域名/名称索引，否则 CREATED 变 LINKED、`companies` 计数不可比。

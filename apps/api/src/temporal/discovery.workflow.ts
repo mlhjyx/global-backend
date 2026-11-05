@@ -345,6 +345,8 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
 
     let companies = 0;
     let suppressed = 0;
+    // Q33② run 总池帽的观测（只在有跳过时出现，旧历史重放形状不变）。
+    let poolCapSummary: { cap: number; skipped: number } | undefined;
     if (needSearch) {
     const { queries } = await acts.loadPlanQueries({ workspaceId, planId, ...authorityArgs });
     queryCount = queries.length;
@@ -529,6 +531,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     const canonical = await acts.canonicalizeRun({ workspaceId, runId, ...authorityArgs });
     companies = canonical.companies;
     suppressed = canonical.suppressed;
+    poolCapSummary = canonical.poolCap;
     }
 
     // M0⑥ 影子模式：老路径是主产出；同一 run 上再跑一遍新快扫（不物化名单）用于对比召回与一致率。
@@ -967,6 +970,8 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         ...extractionStats(),
         // Shown only when a company was skipped, so runs without a skip keep their stats shape.
         ...(unreplayableSkipCount > 0 ? { unreplayableSkips } : {}),
+        // Q33② 总池帽达界：只在真跳过时出现。
+        ...(poolCapSummary ? { poolCap: poolCapSummary } : {}),
         ...(transportFailedSkips > 0 ? { transportFailed: { signals: transportFailedSkips } } : {}),
         ...leaseStats(),
         // Shown only when it happened; neither changes the status (the queries ran).

@@ -10,6 +10,7 @@ import {
   PROFILE_PASS_TIME_BOX_MS,
 } from "./discovery.activities";
 import { ExecutionControlError } from "../execution-budget/execution-control-error";
+import { companyIdentity } from "../discovery/identity";
 import { DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS } from "./discovery-company-materialization";
 import { ToolPolicyDenied } from "../tools/tool-broker";
 import { MAX_DISCOVERY_PLAN_QUERIES, MAX_DISCOVERY_PROFILE_COMPANIES } from "../discovery/execution-envelope";
@@ -2267,6 +2268,8 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
         if (sql.includes("finalize_discovery_company_materialization_run_v1")) {
           return [{ status: "APPLIED", companies: 0n, suppressed: 1n }];
         }
+        if (sql.includes("SELECT DISTINCT canonical_company_id")) return [];
+        if (sql.includes("count(*) AS skipped")) return [{ skipped: 0n }];
         if (sql.includes("pg_advisory_xact_lock")) return [{ pg_advisory_xact_lock: null }];
         throw new Error(`unexpected governed C-TX query: ${sql}`);
       }),
@@ -2474,6 +2477,8 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
               suppressed: 0n,
             }];
           }
+          if (sql.includes("SELECT DISTINCT canonical_company_id")) return [];
+          if (sql.includes("count(*) AS skipped")) return [{ skipped: 0n }];
           if (sql.includes("pg_advisory_xact_lock")) return [{ pg_advisory_xact_lock: null }];
           throw new Error(`unexpected malformed-output query: ${sql}`);
         }),
@@ -2648,6 +2653,8 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
         if (sql.includes("finalize_discovery_company_materialization_run_v1")) {
           return [{ status: "APPLIED", companies: 1n, suppressed: 3n }];
         }
+        if (sql.includes("SELECT DISTINCT canonical_company_id")) return [];
+        if (sql.includes("count(*) AS skipped")) return [{ skipped: 0n }];
         if (sql.includes("pg_advisory_xact_lock")) return [{ pg_advisory_xact_lock: null }];
         throw new Error(`unexpected governed canonical query: ${sql}`);
       }),
@@ -2702,6 +2709,292 @@ describe("canonicalizeRun —— suppression authority 线性化", () => {
     expect(tx.suppressionRecord.findMany).toHaveBeenCalledWith(expect.objectContaining({
       orderBy: { id: "asc" }, take: 128,
     }));
+  });
+
+  /**
+   * Run pool cap（docs/superpowers/plans/2026-11-05-run-pool-cap.md）：governed 批在 run 池达到
+   * DISCOVERY_RUN_POOL_CAP 后，跳过会新增公司的物化（NOT_CANONICALIZABLE + RUN_POOL_CAP_REACHED），
+   * 已在池的公司与终态行（隔离/受限）不受影响。
+   */
+  const POOL_COMPANY_ID = "76000000-0000-4000-8000-000000000007";
+  const POOL_DEDUPE_KEY = companyIdentity({ name: "Pool Pumpen GmbH", domain: "pool-pumpen.example" }).dedupeKey;
+  const REUSED_COMPANY_ID = "79000000-0000-4000-8000-00000000000a";
+  const REUSED_DEDUPE_KEY = companyIdentity({ name: "Reused Pumpen GmbH", domain: "reused-pumpen.example" }).dedupeKey;
+  const POOL_CAP_QUERY_KEY = "e".repeat(64);
+
+  function poolCapFact(
+    index: number,
+    product: Record<string, unknown> | null,
+    qIngestStatus = "ACCEPTED",
+    restrictedDispositionId: string | null = null,
+  ) {
+    return {
+      qItem: {
+        queryItemId: `8${index}000000-0000-4000-8000-00000000000a`,
+        queryKey: POOL_CAP_QUERY_KEY,
+        queryOrdinal: 0, providerKey: "registry", recordIndex: index,
+        operationId: `9${index}000000-0000-4000-8000-00000000000a`,
+        rawRecordId: `f${index}000000-0000-4000-8000-00000000000a`,
+        rawGovernedSubjectId: `b${index}000000-0000-4000-8000-00000000000a`,
+        qRelationId: `c${index}000000-0000-4000-8000-00000000000a`,
+        qIngestStatus,
+      },
+      lockedFacts: {
+        rawStatus: qIngestStatus === "QUARANTINED" ? "QUARANTINED" : "ACCEPTED",
+        rawExpiredAt: null, restrictedDispositionId,
+        suppressionSnapshotCount: 0, suppressionSnapshotSha256: suppressionSnapshotDigest([]),
+        product,
+      },
+      exactExistingOutcome: null, reusableIdentity: null,
+      reusableManifestCandidates: [], companyParse: null, canonicalWrite: null,
+    };
+  }
+
+  /** 复用行（reusableIdentity）：本条记录的公司在早前尝试里已解决，candidate 本人不需要再解析。 */
+  function poolCapReusableFact(index: number) {
+    return {
+      qItem: {
+        queryItemId: `8${index}000000-0000-4000-8000-00000000000b`,
+        queryKey: POOL_CAP_QUERY_KEY,
+        queryOrdinal: 0, providerKey: "registry", recordIndex: index,
+        operationId: `9${index}000000-0000-4000-8000-00000000000b`,
+        rawRecordId: `f${index}000000-0000-4000-8000-00000000000b`,
+        rawGovernedSubjectId: `b${index}000000-0000-4000-8000-00000000000b`,
+        qRelationId: `c${index}000000-0000-4000-8000-00000000000b`,
+        qIngestStatus: "ACCEPTED",
+      },
+      lockedFacts: {
+        rawStatus: "ACCEPTED", rawExpiredAt: null, restrictedDispositionId: null,
+        suppressionSnapshotCount: 0, suppressionSnapshotSha256: suppressionSnapshotDigest([]),
+        product: null,
+      },
+      exactExistingOutcome: null,
+      reusableIdentity: {
+        canonicalCompanyId: REUSED_COMPANY_ID,
+        identityLinkId: "8a000000-0000-4000-8000-00000000000b",
+        identityCanonicalType: "company",
+        canonicalGovernedSubjectId: "8b000000-0000-4000-8000-00000000000b",
+        cRelationId: null,
+        cRelationKey: `discovery.canonical_company:${index}`,
+        matchRule: "domain_exact", confidence: 1, mutationClass: "REUSED",
+        evidenceCount: 1, evidenceManifestSha256: "f".repeat(64),
+      },
+      reusableManifestCandidates: [], companyParse: null, canonicalWrite: null,
+    };
+  }
+
+  function poolCapHarness(options: {
+    seed: readonly string[];
+    seedSkips: number;
+    facts: readonly unknown[];
+    /** The run already carries a pool_cap_reached event (a retried finalize must not add another). */
+    existingPoolCapEvent?: boolean;
+  }) {
+    const queryKey = POOL_CAP_QUERY_KEY;
+    const emptySha = suppressionSnapshotDigest([]);
+    let inspection = 0;
+    let seedQueries = 0;
+    let appendCommand: Record<string, unknown> | null = null;
+    const tx = {
+      rawSourceRecord: { findUnique: vi.fn(async () => ({
+        sourceUrl: "https://pool-pumpen.example/raw", fetchedAt: new Date("2026-10-01T00:00:00.000Z") })) },
+      suppressionRecord: { findMany: vi.fn(async () => []) },
+      canonicalCompany: {
+        findUnique: vi.fn(async (args: { where: {
+          id?: string; workspaceId_dedupeKey?: { dedupeKey: string };
+        } }) => {
+          const dedupeKey = args.where.workspaceId_dedupeKey?.dedupeKey;
+          const row = (id: string, key: string, name: string, domain: string) => ({
+            id, name, domain, country: null, region: null, industry: null,
+            employeeCount: null, revenueUsd: null, dedupeKey: key, attributes: {},
+            status: "NEW", version: 1, updatedAt: new Date(),
+          });
+          if (args.where.id === POOL_COMPANY_ID || dedupeKey === POOL_DEDUPE_KEY) {
+            return row(POOL_COMPANY_ID, POOL_DEDUPE_KEY, "Pool Pumpen GmbH", "pool-pumpen.example");
+          }
+          if (args.where.id === REUSED_COMPANY_ID || dedupeKey === REUSED_DEDUPE_KEY) {
+            return row(REUSED_COMPANY_ID, REUSED_DEDUPE_KEY, "Reused Pumpen GmbH", "reused-pumpen.example");
+          }
+          return null;
+        }),
+        upsert: vi.fn(async () => ({ id: "77000000-0000-4000-8000-00000000000a" })),
+        updateMany: vi.fn(async () => ({ count: 0 })),
+      },
+      identityLink: {
+        findFirst: vi.fn(async () => null),
+        create: vi.fn(async () => ({ id: "78000000-0000-4000-8000-00000000000a" })),
+      },
+      fieldEvidence: { create: vi.fn(async () => ({})) },
+      runEvent: {
+        findFirst: vi.fn(async () => options.existingPoolCapEvent
+          ? { id: "e0000000-0000-4000-8000-00000000000a" } : null),
+        aggregate: vi.fn(async () => ({ _max: { seq: 0n } })),
+        create: vi.fn(async () => ({})),
+      },
+      $queryRaw: vi.fn(async (query: unknown) => {
+        const sql = materializationSqlText(query);
+        if (sql.includes("admit_discovery_company_materialization_v1")) {
+          return [{ status: "APPLIED", admission_id: "60000000-0000-4000-8000-000000000006",
+            mode: "GOVERNED_C_TX" }];
+        }
+        if (sql.includes("inspect_discovery_company_materialization_v1")) {
+          inspection += 1;
+          if (inspection === 1) return [{ status: "NOT_FOUND", next_work: {
+            kind: "BATCH", queryKey, queryOrdinal: 0, batchOrdinal: 0 }, run_summary: null }];
+          if (inspection === 2) return [{ status: "PARTIAL_RESUMABLE", next_work: {
+            kind: "FINALIZE_QUERY", queryKey, queryOrdinal: 0 }, run_summary: null }];
+          return [{ status: "PARTIAL_RESUMABLE", next_work: { kind: "FINALIZE_RUN" }, run_summary: null }];
+        }
+        if (sql.includes("lock_discovery_company_materialization_batch_facts_v1")) {
+          return [{ status: "APPLIED", fence_id: "70000000-0000-4000-8000-000000000007",
+            snapshot_sha256: emptySha, facts: options.facts }];
+        }
+        if (sql.includes("SELECT DISTINCT canonical_company_id")) {
+          seedQueries += 1;
+          return options.seed.map((id) => ({ canonical_company_id: id }));
+        }
+        if (sql.includes("FROM field_evidence evidence")) {
+          return [{ evidence_count: 1, evidence_manifest_sha256: "f".repeat(64) }];
+        }
+        if (sql.includes("append_discovery_company_materialization_batch_v1")) {
+          const values = Object.getOwnPropertyDescriptor(query as object, "values")?.value;
+          appendCommand = JSON.parse(String(values?.[0]));
+          return [{ status: "APPLIED", batch_ordinal: 0 }];
+        }
+        if (sql.includes("finalize_discovery_company_materialization_query_v1")) {
+          return [{ status: "APPLIED", query_key: queryKey }];
+        }
+        if (sql.includes("finalize_discovery_company_materialization_run_v1")) {
+          return [{ status: "APPLIED", companies: 0n, suppressed: 0n }];
+        }
+        if (sql.includes("count(*) AS skipped")) return [{ skipped: BigInt(options.seedSkips) }];
+        if (sql.includes("pg_advisory_xact_lock")) return [{ pg_advisory_xact_lock: null }];
+        throw new Error(`unexpected pool-cap query: ${sql}`);
+      }),
+    };
+    const activities = createDiscoveryActivities({
+      prisma: { withWorkspace: vi.fn(async (_workspaceId, callback) => callback(tx)) },
+      providers: {}, gateway: {}, budgetStore: { attestAuthorized: vi.fn() } as never,
+    } as never);
+    return {
+      activities, tx, queryKey,
+      get seedQueries() { return seedQueries; },
+      get appendCommand() { return appendCommand; },
+    };
+  }
+
+  it("run pool cap: at cap new companies are skipped, pool members and terminal rows pass", async () => {
+    vi.stubEnv("DISCOVERY_RUN_POOL_CAP", "500");
+    try {
+      // 恰好 500 家已入池（边界值）——池已满。
+      const seeded = Array.from({ length: 499 }, (_, index) =>
+        `${(index + 1).toString(16).padStart(8, "0")}-0000-4000-8000-00000000000a`);
+      seeded.push(POOL_COMPANY_ID);
+      const harness = poolCapHarness({
+        seed: seeded,
+        seedSkips: 1,
+        facts: [
+          poolCapFact(0, { name: "New Pumpen GmbH", domain: "new-pumpen.example" }),
+          poolCapFact(1, { name: "Pool Pumpen GmbH", domain: "pool-pumpen.example" }),
+          poolCapFact(2, null, "QUARANTINED"),
+          poolCapFact(3, null, "ACCEPTED", "a1000000-0000-4000-8000-00000000000a"),
+        ],
+      });
+      await expect(harness.activities.canonicalizeRun(discoveryArgs("run-pool-cap", {})))
+        .resolves.toEqual({ companies: 0, suppressed: 0, poolCap: { cap: 500, skipped: 1 } });
+      const items = harness.appendCommand?.items as Record<string, unknown>[];
+      expect(items.map((item) => item.outcome)).toEqual([
+        "NOT_CANONICALIZABLE", "CANONICALIZED", "RAW_QUARANTINED", "RESTRICTED_PROCESSING",
+      ]);
+      expect(items[0]).toMatchObject({ notCanonicalizableReasonCode: "RUN_POOL_CAP_REACHED" });
+      // 新公司没有写 canonical；入池公司的链接照常写。
+      expect(harness.tx.canonicalCompany.upsert).not.toHaveBeenCalled();
+      expect(harness.tx.identityLink.create).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("run pool cap: DISCOVERY_RUN_POOL_CAP=off restores uncapped materialization", async () => {
+    vi.stubEnv("DISCOVERY_RUN_POOL_CAP", "off");
+    try {
+      const harness = poolCapHarness({
+        seed: [],
+        seedSkips: 0,
+        facts: [poolCapFact(0, { name: "New Pumpen GmbH", domain: "new-pumpen.example" })],
+      });
+      await expect(harness.activities.canonicalizeRun(discoveryArgs("run-pool-off", {})))
+        .resolves.toEqual({ companies: 0, suppressed: 0 });
+      expect(harness.seedQueries).toBe(0);
+      const items = harness.appendCommand?.items as Record<string, unknown>[];
+      expect(items[0]?.outcome).toBe("CANONICALIZED");
+      expect(harness.tx.canonicalCompany.upsert).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("run pool cap: a reusable candidate is skipped at cap and the skip reason outranks reuse", async () => {
+    vi.stubEnv("DISCOVERY_RUN_POOL_CAP", "500");
+    try {
+      // 池满，且复用目标（REUSED_COMPANY_ID）不在池里：复用不能绕过总池帽。
+      const seeded = Array.from({ length: 499 }, (_, index) =>
+        `${(index + 1).toString(16).padStart(8, "0")}-0000-4000-8000-00000000000c`);
+      seeded.push(POOL_COMPANY_ID);
+      const harness = poolCapHarness({
+        seed: seeded,
+        seedSkips: 1,
+        facts: [poolCapReusableFact(0)],
+      });
+      await expect(harness.activities.canonicalizeRun(discoveryArgs("run-pool-reuse", {})))
+        .resolves.toEqual({ companies: 0, suppressed: 0, poolCap: { cap: 500, skipped: 1 } });
+      const items = harness.appendCommand?.items as Record<string, unknown>[];
+      // itemPlan 的 INVALID 判定先于 reuse 分支，跳过原因不会被 CANONICALIZED(REUSED) 吞掉。
+      expect(items[0]).toMatchObject({
+        outcome: "NOT_CANONICALIZABLE",
+        notCanonicalizableReasonCode: "RUN_POOL_CAP_REACHED",
+      });
+      expect(harness.tx.identityLink.create).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("run pool cap: a terminal-only batch skips the pool seed scan", async () => {
+    vi.stubEnv("DISCOVERY_RUN_POOL_CAP", "500");
+    try {
+      const harness = poolCapHarness({
+        seed: [],
+        seedSkips: 0,
+        facts: [poolCapFact(0, null, "QUARANTINED")],
+      });
+      await expect(harness.activities.canonicalizeRun(discoveryArgs("run-pool-terminal", {})))
+        .resolves.toEqual({ companies: 0, suppressed: 0 });
+      expect(harness.seedQueries).toBe(0);
+      const items = harness.appendCommand?.items as Record<string, unknown>[];
+      expect(items[0]?.outcome).toBe("RAW_QUARANTINED");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("run pool cap: a retried finalize does not duplicate the pool_cap_reached event", async () => {
+    vi.stubEnv("DISCOVERY_RUN_POOL_CAP", "500");
+    try {
+      const seeded = Array.from({ length: 500 }, (_, index) =>
+        `${(index + 1).toString(16).padStart(8, "0")}-0000-4000-8000-00000000000d`);
+      const harness = poolCapHarness({
+        seed: seeded,
+        seedSkips: 2,
+        existingPoolCapEvent: true,
+        facts: [poolCapFact(0, { name: "New Pumpen GmbH", domain: "new-pumpen.example" })],
+      });
+      await expect(harness.activities.canonicalizeRun(discoveryArgs("run-pool-retry", {})))
+        .resolves.toEqual({ companies: 0, suppressed: 0, poolCap: { cap: 500, skipped: 2 } });
+      expect(harness.tx.runEvent.create).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 
