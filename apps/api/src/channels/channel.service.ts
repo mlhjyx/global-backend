@@ -7,7 +7,10 @@ import {
 import { randomUUID } from 'node:crypto';
 import { ServiceUnavailableException } from '@nestjs/common';
 import { Optional } from '@nestjs/common';
-import type { PlatformTemporalClient } from '../temporal/platform-temporal.client';
+// 必须是值导入：构造函数参数的类型元数据（design:paramtypes）据此生成 Nest 注入令牌；
+// `import type` 会在编译期被擦除，参数类型退化为 Function，@Optional() 将永远注入 undefined，
+// requestCrawl 在真实进程里恒返回 PLATFORM_TEMPORAL_UNAVAILABLE（单测直接 new 时无法暴露）。
+import { PlatformTemporalClient } from '../temporal/platform-temporal.client';
 import { channelCrawlRequestSha256 } from '../temporal/platform-crawl-grant.client';
 import {
   CHANNEL_RUN_MAX_PAGES,
