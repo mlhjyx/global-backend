@@ -1,6 +1,6 @@
 ---
 date: 2026-11-05
-pr:
+pr: 813
 title: Share the GHCR layer cache with the runtime image publication build
 ---
 
