@@ -35,6 +35,8 @@ export async function readMachineSecretFile(path: string): Promise<Buffer> {
   }
 }
 
+const PLATFORM_CLIENT_PROFILE = "temporal-platform-client" as const;
+
 export async function machineTokenConfiguration(
   profile: RemoteMachineProfile,
   runtimeIdentity: string,
@@ -49,10 +51,20 @@ export async function machineTokenConfiguration(
     profile === "capability-request"
       ? "CAPABILITY_MACHINE"
       : "TEMPORAL_MACHINE";
+  // The platform-client identity carries its own certificate (CN must equal the
+  // platform authorizer's schedule-writer subject) and subject; it deliberately
+  // never falls back to the API process's customer-client bootstrap material.
+  const platformClient = profile === PLATFORM_CLIENT_PROFILE;
+  const secretFile = (kind: "CA" | "CERT" | "KEY"): string =>
+    required(
+      platformClient
+        ? `TEMPORAL_PLATFORM_CLIENT_${kind}_FILE`
+        : `MACHINE_BOOTSTRAP_${kind}_FILE`,
+    );
   const [ca, certificate, privateKey] = await Promise.all([
-    readMachineSecretFile(required("MACHINE_BOOTSTRAP_CA_FILE")),
-    readMachineSecretFile(required("MACHINE_BOOTSTRAP_CERT_FILE")),
-    readMachineSecretFile(required("MACHINE_BOOTSTRAP_KEY_FILE")),
+    readMachineSecretFile(secretFile("CA")),
+    readMachineSecretFile(secretFile("CERT")),
+    readMachineSecretFile(secretFile("KEY")),
   ]);
   return Object.freeze({
     profile,
@@ -61,7 +73,11 @@ export async function machineTokenConfiguration(
     jwksUri: required(`${prefix}_JWKS_URI`),
     issuer: required(`${prefix}_ISSUER`),
     audience: required(`${prefix}_AUDIENCE`),
-    subject: required(`${prefix}_SUBJECT`),
+    subject: required(
+      platformClient
+        ? "TEMPORAL_PLATFORM_CLIENT_SUBJECT"
+        : `${prefix}_SUBJECT`,
+    ),
     configurationRevision: required("MACHINE_BOOTSTRAP_CONFIGURATION_REVISION"),
     ca,
     certificate,

@@ -2,7 +2,11 @@ export type RemoteMachineProfile =
   | "capability-request"
   | "temporal-platform-worker"
   | "temporal-customer-worker"
-  | "temporal-customer-client";
+  | "temporal-customer-client"
+  // P4-P4b: the engine API's platform-automation writer identity. Its tokens are
+  // minted for outbound Temporal connections (verified here on receipt, like the
+  // other temporal profiles).
+  | "temporal-platform-client";
 
 export interface MachineTokenTrust {
   readonly profile: RemoteMachineProfile;
@@ -133,6 +137,7 @@ export async function verifyMachineTokenResponse(
         "temporal-platform-worker": ["platform-automation:worker"],
         "temporal-customer-worker": ["default:worker"],
         "temporal-customer-client": ["default:read", "default:write"],
+        "temporal-platform-client": ["platform-automation:write"],
       };
       const expected = permissions[trust.profile];
       const actualPermissions = claims.permissions;
