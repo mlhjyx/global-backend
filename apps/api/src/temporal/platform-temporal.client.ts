@@ -49,7 +49,12 @@ export class PlatformTemporalClient implements OnModuleInit, OnModuleDestroy {
     );
     this.machineToken = client;
     try {
-      return await Connection.connect({
+      // 必须用 lazy 而不是 connect：connect 会先调用 GetSystemInfo 做连通性预检，
+      // 而 schedule-writer 身份在平台授权器里只被允许 StartWorkflowExecution，
+      // 预检被拒（PLATFORM_TEMPORAL_READER_AUTH_DENIED）会让整条启动链不可用
+      //（2026-11-05 真机验收暴露；单测用私有 connect 覆盖不到真实 SDK 路径）。
+      // lazy 不做预检，失败由既有收敛与下次重连逻辑处理。
+      return Connection.lazy({
         ...(await temporalTlsConfiguration()),
         apiKey: () => client.currentToken(),
       });
