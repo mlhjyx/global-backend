@@ -10189,7 +10189,8 @@
         ],
         "x-required-scopes": [
           "ops:read"
-        ]
+        ],
+        "description": "渠道最近物化的抓取记录（默认最近 50 条，limit 1–100）：公司/官网/国家/行业/产品/关键词与联系人（人名/职位/邮箱/电话，均为渠道页公开信息）。仅运营身份（ops:read），用于选择器校验与获客联系；同一公司跨轮去重合并（渠道+去重键 upsert），重跑不重复。"
       }
     },
     "/api/v1/imported-buyers/preview": {

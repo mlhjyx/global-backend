@@ -145,6 +145,8 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '试跑抓取通道（抓 1 页/前 20 条）。仅运营身份（ops:write）。抓取出网需要平台级抓取预算权威（platform.channel_crawl purpose），授权链落地前该端点 fail-closed 返回 409 CHANNEL_CRAWL_REQUIRES_PLATFORM_AUTHORITY。',
   'POST /api/v1/source-channels/{channelId}/run':
     '立即运行抓取通道（同 preview 的门槛与限额，仅运营身份 ops:write；失败率连续 3 轮 >30% 自动停用）。',
+  'GET /api/v1/source-channels/{channelId}/records':
+    '渠道最近物化的抓取记录（默认最近 50 条，limit 1–100）：公司/官网/国家/行业/产品/关键词与联系人（人名/职位/邮箱/电话，均为渠道页公开信息）。仅运营身份（ops:read），用于选择器校验与获客联系；同一公司跨轮去重合并（渠道+去重键 upsert），重跑不重复。',
   'POST /api/v1/imported-buyers/preview':
     '导入预览：解析 CSV、校验列映射（至少公司名列）、给出前 10 行样例与去重/抑制命中计数，不写库。',
   'POST /api/v1/imported-buyers':
