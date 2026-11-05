@@ -8,13 +8,22 @@ import {
  * Q33② 新源试跑判定的纯函数部分：把「每个 provider 历史上用过几次 run」的计数行，
  * 映射为仍处于试跑期的 provider 集合（run 数 < trialMaxRuns）。计数只增不减，
  * 因此同一 run 重放不会把源提前推过试跑期。
+ *
+ * `providerKeys` 是本次规划实际在用的源全集：SQL 只对已有 raw_source_record 行的源产出
+ * 计数行（分组键存在即 count ≥ 1），真正的新源（0 条记录）不会出现在结果集里——按 §11
+ * 「distinct run 数 < maxRuns 视为试跑期」，缺失行必须按 0 次运行处理，否则新源首轮
+ * 会按成熟源的预算放行，试跑窗口永远不生效。
  */
 export function trialProvidersFromCounts(
   rows: ReadonlyArray<{ provider_key: string; runs: unknown }>,
   maxRuns: number,
+  providerKeys: readonly string[] = [],
 ): ReadonlySet<string> {
   const trial = new Set<string>();
+  const seen = new Set<string>();
   for (const row of rows) {
+    if (typeof row.provider_key !== 'string') continue;
+    seen.add(row.provider_key);
     // count(*)::int 正常返回 number；bigint/数字字符串兼容；null/其它非法值按「不可判定」处理，
     // 不把源误判成试跑期。
     const runs =
@@ -23,9 +32,10 @@ export function trialProvidersFromCounts(
         : typeof row.runs === 'string'
           ? Number(row.runs)
           : Number.NaN;
-    if (typeof row.provider_key === 'string' && Number.isFinite(runs) && runs < maxRuns) {
-      trial.add(row.provider_key);
-    }
+    if (Number.isFinite(runs) && runs < maxRuns) trial.add(row.provider_key);
+  }
+  for (const key of providerKeys) {
+    if (!seen.has(key)) trial.add(key);
   }
   return trial;
 }
@@ -40,6 +50,7 @@ type TrialDb = Pick<Prisma.TransactionClient, '$queryRaw'>;
 export async function trialSourceProviders(
   db: TrialDb,
   workspaceId: string,
+  providerKeys: readonly string[],
   config: SourceQueryBudgetConfig = sourceQueryBudgetConfig(),
 ): Promise<ReadonlySet<string>> {
   try {
@@ -50,7 +61,7 @@ export async function trialSourceProviders(
         AND run_id IS NOT NULL
       GROUP BY provider_key
     `;
-    return trialProvidersFromCounts(rows, config.trialMaxRuns);
+    return trialProvidersFromCounts(rows, config.trialMaxRuns, providerKeys);
   } catch {
     return new Set();
   }

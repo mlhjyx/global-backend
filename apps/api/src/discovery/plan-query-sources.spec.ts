@@ -381,6 +381,28 @@ describe('cheap-first source priority (Q33②, PR-1)', () => {
     expect(routed.cheapFirstShadow?.budgetDropped ?? 0).toBe(4);
   });
 
+  it('computes the shadow replacement count on the post-budget copies, matching enforce', () => {
+    const planned = Array.from({ length: 10 }, () => query('industry_data'));
+    const sources = {
+      enabled: only('public_web', 'directory', 'trade_fair'),
+      registered: REGISTERED,
+      sourceBudgets: { directory: 1, trade_fair: 1 },
+    };
+
+    // 10 queries × 3 sources = 30 copies; budgets drop 18, leaving 12; cap 8 then trims 4.
+    // The pre-budget array would report 5 replacements that enforce never makes.
+    const shadow = routePlannerQueries(planned, sources, 8);
+    expect(shadow.queries).toHaveLength(8);
+    expect(shadow.cheapFirstShadow).toEqual({ replacedCopies: 0, budgetDropped: 18 });
+
+    vi.stubEnv('DISCOVERY_CHEAP_FIRST', 'enforce');
+    const enforce = routePlannerQueries(planned, sources, 8);
+    expect(enforce.queries).toHaveLength(8);
+    expect(enforce.dropped).toEqual({ SOURCE_QUERY_BUDGET: 18, PLAN_QUERY_CAP: 4 });
+    expect(enforce.cheapFirstShadow).toBeUndefined();
+    vi.unstubAllEnvs();
+  });
+
   it('derives budgets: structured sources capped, trial sources tighter, public_web exempt', () => {
     const config = sourceQueryBudgetConfig({} as NodeJS.ProcessEnv);
     const budgets = sourceQueryBudgets(new Set(['directory']), config, [
@@ -414,6 +436,26 @@ describe('cheap-first source priority (Q33②, PR-1)', () => {
         DISCOVERY_TRIAL_MAX_RUNS: '0',
       } as NodeJS.ProcessEnv),
     ).toEqual({ structuredRunCap: 100, trialMaxCompanies: 20, trialMaxRuns: 10 });
+    // parseInt would silently truncate these to a prefix (1e3→1, 100abc→100): malformed values
+    // must fall back to the defaults instead of shrinking the budget.
+    expect(
+      sourceQueryBudgetConfig({
+        DISCOVERY_STRUCTURED_SOURCE_RUN_CAP: '1e3',
+        DISCOVERY_TRIAL_MAX_COMPANIES: '100abc',
+        DISCOVERY_TRIAL_MAX_RUNS: '1_000',
+      } as NodeJS.ProcessEnv),
+    ).toEqual({ structuredRunCap: 100, trialMaxCompanies: 20, trialMaxRuns: 10 });
+  });
+
+  it('gives a structured source zero queries when its company cap is below one query of records', () => {
+    const budgets = sourceQueryBudgets(
+      new Set(),
+      { structuredRunCap: 10, trialMaxCompanies: 20, trialMaxRuns: 10 },
+      ['directory'],
+    );
+
+    // §11 formula floor(10 / 25) = 0: the operator asked for fewer companies than one query yields.
+    expect(budgets.directory).toBe(0);
   });
 
   it('writes the shadow replacement count onto the plan review note', () => {

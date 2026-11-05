@@ -135,8 +135,14 @@
 ## 11. 实现裁定（2026-11-05，PR-2 落地时）
 
 - **裁定：每源公司帽以「每源每轮查询预算」等价落地，不在查询时逐家计数。** 原因：物化（`discovery_company_materialization_outcome`）发生在查询阶段之后，查询期无法用已物化公司数做闸门；而查询收据是严格键契约（`discovery-query-receipt/v1`，加字段需升 v2 并改工作流），为一次配额引入公开契约变更不划算。
-- **等价关系**：每查询每源记录上限 `MAX_DISCOVERY_PROVIDER_RECORDS = 25`。结构化源预算 = `floor(DISCOVERY_STRUCTURED_SOURCE_RUN_CAP / 25)`（默认 100 → 4 条查询 ≈ ≤100 条原始公司记录，去重后 ≤100 家，满足 Q33 上限）；试跑源预算 = `max(1, floor(DISCOVERY_TRIAL_MAX_COMPANIES / 25))`（默认 20 → 1 条 ≈ ≤25 条）；`public_web` 兜底源不设查询预算，其总量由既有公司池上限（`QUICK_SCAN_POOL_LIMIT = 500`）约束。
+- **等价关系**：每查询每源记录上限 `MAX_DISCOVERY_PROVIDER_RECORDS = 25`。结构化源预算 = `floor(DISCOVERY_STRUCTURED_SOURCE_RUN_CAP / 25)`（默认 100 → 4 条查询 ≈ ≤100 条原始公司记录，去重后 ≤100 家，满足 Q33 上限；公司帽 <25 时预算为 0 条）；试跑源预算 = `max(1, floor(DISCOVERY_TRIAL_MAX_COMPANIES / 25))`（默认 20 → 1 条 ≈ ≤25 条）；`public_web` 兜底源不设查询预算（其总量约束见下方自审核正：既有 500 池帽并不存在，真正的总池闸门另行排期）。
 - **试跑判定**：`trialSourceProviders` 按工作空间统计 `raw_source_record` 的 distinct run 数，`< DISCOVERY_TRIAL_MAX_RUNS`（默认 10）视为试跑期；查询失败按「无试跑源」降级，不阻塞规划。
+- **自审核正（2026-11-05 深夜，合入前）**：
+  - **零运行源必须进试跑期**：计数 SQL 只对已有 `raw_source_record` 行的 provider 产出行（分组键存在即 count≥1），原先实现只按结果行判定，导致真正的新源（0 行）与长期零产出的源永远拿结构化预算（4 条），试跑窗口在首次运行即失效。现 `trialSourceProviders` 接收本次在用的 provider 全集，缺失行按 0 次运行处理（0 < 10 → 试跑）。
+  - **public_web「既有 500 池上限」不成立**：`QUICK_SCAN_POOL_LIMIT` 只是 quick-scan 消费侧 take 上限（`discovery.run2.activities.ts`），不约束发现阶段的抓取/物化；§4.3 要求的 `DISCOVERY_RUN_POOL_CAP`/`POOL_CAP_REACHED` 本轮未实现。public_web 当前实际只受 `MAX_QUERY_PLANNER_QUERIES`（64 条计划副本）与每查询每源记录上限约束；run 总池硬闸门需要单独设计（物化期闸门或 public_web 查询帽），另行排期，不随本 PR 交付。
+  - **data_provider.config 试跑覆盖未实现**：§4.3/§4.4 的 `{"trial":{"maxRuns":…,"maxCompaniesPerRun":…}}` config 覆盖本轮未接线，试跑参数只取 `DISCOVERY_TRIAL_*` env；config 覆盖记为 PR-3 候选。
+  - **shadow 口径与 enforce 对齐**：`replacedCopies` 改在「预算移除后」的副本上计算（与 enforce 同口径）；原实现用全量副本计算会高估灰度影响（预算已把副本压到 cap 以下时仍报告将替换）。
+  - **env 解析收紧**：预算参数只接受纯十进制数字串，畸形值（`1e3`/`100abc` 等）回退默认，不再被 `parseInt` 静默截断。
 - **观测**：shadow 模式下，计划 review 注记同时给出「将替换副本数」与「将按预算移出查询数」；enforce 模式下预算移出计入 `dropped.SOURCE_QUERY_BUDGET`（计划落库，可审计）。
 - **未改变**：收据契约、工作流/活动接口、`data_provider` 启停门、血缘闸门均未动；回退仍为 `DISCOVERY_CHEAP_FIRST=off`。
 - **后续（PR-3 候选）**：gain-saas 归因页增加「查询数」列；若需要严格的「按家数」实时闸门，再评估收据 v2 或物化期闸门。

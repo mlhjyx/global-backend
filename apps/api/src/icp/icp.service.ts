@@ -614,11 +614,17 @@ export class IcpService {
     // BI-30：规划时刻的数据源开关（data_provider.status）快照：提示词、查询过滤与冷路径注入都按它。
     const { icp, enabledSources, trialProviders } = await this.prisma.withWorkspace(
       ctx.workspaceId,
-      async (tx) => ({
-        icp: await tx.icpDefinition.findUnique({ where: { id: icpId }, include: { rules: true } }),
-        enabledSources: await this.providers.enabledCompanyDiscoverySources(tx),
-        trialProviders: await trialSourceProviders(tx, ctx.workspaceId),
-      }),
+      async (tx) => {
+        const icp = await tx.icpDefinition.findUnique({ where: { id: icpId }, include: { rules: true } });
+        const enabledSources = await this.providers.enabledCompanyDiscoverySources(tx);
+        // 零记录源不出现在计数行里，按 0 次运行处理（真正的「新源」正是试跑窗口的对象）。
+        const trialProviders = await trialSourceProviders(
+          tx,
+          ctx.workspaceId,
+          enabledSources.map((source) => source.providerKey),
+        );
+        return { icp, enabledSources, trialProviders };
+      },
     );
     // Q33② cheap-first：每源每轮查询预算（结构化源默认 4 条 ≈ ≤100 家；试跑源 1 条 ≈ ≤25 家；
     // public_web 兜底不设预算）。enforce 时才实际裁剪，shadow 由 routePlannerQueries 只统计。

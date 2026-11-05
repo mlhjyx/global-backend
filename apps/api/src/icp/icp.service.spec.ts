@@ -99,6 +99,8 @@ function fixture() {
     dataProvider: {
       findMany: vi.fn(async () => enabledProviders.map((key) => ({ key }))),
     },
+    // trial source counting (raw_source_record distinct runs); no recorded runs by default.
+    $queryRaw: vi.fn().mockResolvedValue([]),
   };
   const enabledProviders = ["public_web"];
   const prisma = {
@@ -860,6 +862,37 @@ describe("ICP generation authority and controlled enrichment", () => {
     );
     // One of five planned queries will run: the estimate covers that one only.
     expect(plan).toMatchObject({ status: "DRAFT", estimatedVolume: 200 });
+  });
+  it("feeds per-source query budgets from trial detection into routing (Q33② PR-2)", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.enable("public_web", "directory");
+    // The SQL cannot emit a row for a zero-run provider, so a fresh directory source has
+    // no counts row here and must be treated as trial (budget 1), not mature (budget 4).
+    f.tx.$queryRaw.mockResolvedValue([{ provider_key: "public_web", runs: 49 }]);
+    f.result.data = {
+      estimated_volume: 60,
+      queries: Array.from({ length: 6 }, (_, index) => ({
+        ...PUBLIC_WEB_QUERY,
+        source_class: "industry_data",
+        filters: { industry: "Pumpen", country: "Germany" },
+        rationale: `industry sweep ${index}`,
+      })),
+    };
+
+    const shadowPlan = await f.service.generateQueryPlan(ctx, f.icp.id);
+    // 6 queries × fan-out {public_web, directory} = 12 copies; shadow keeps all 12 and notes 5.
+    const shadowQueries = shadowPlan.queries as Array<{ rationale: string }>;
+    expect(shadowQueries).toHaveLength(12);
+    expect(shadowQueries[0]!.rationale).toContain("按每源查询预算将移出 5 条查询");
+
+    vi.stubEnv("DISCOVERY_CHEAP_FIRST", "enforce");
+    const enforcePlan = await f.service.generateQueryPlan(ctx, f.icp.id);
+    const queries = enforcePlan.queries as Array<{ filters: { source_hint: string }; rationale: string }>;
+    expect(queries).toHaveLength(7);
+    expect(queries.filter((query) => query.filters.source_hint === "directory")).toHaveLength(1);
+    expect(queries[0]!.rationale).toContain("SOURCE_QUERY_BUDGET 5 条");
+    expect(f.tx.$queryRaw).toHaveBeenCalledTimes(2);
   });
   it("neither resolves nor injects TED or openFDA queries while those sources are DISABLED (BI-30)", async () => {
     const f = generationFixture();
