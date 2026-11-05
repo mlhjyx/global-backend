@@ -162,6 +162,10 @@ export const crawl4aiRenderTool: Tool<
     privacyClass: "PERSONAL_DATA",
     ttlSeconds: 86_400,
   },
+  // Platform channel crawls parse public organizer directories and persist the
+  // extracted records with per-record provenance; the raw page itself is used
+  // transiently (no subjectless PERSONAL_DATA copy is kept).
+  transientResultScopes: ["platform_channel_crawl"],
   healthCheck: async () => ({ healthy: true, detail: "crawl4ai" }),
   // robots fetch and renderer dispatch both take ctx.beforePhysicalWire (D13).
   physicalWireObservation: "before_each_wire",

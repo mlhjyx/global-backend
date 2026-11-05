@@ -10,6 +10,7 @@ import {
   ToolResult,
 } from "./tool-contract";
 import { ToolRegistry } from "./tool-registry";
+import { isTransientResultScope, type TransientResultScope } from "./transient-result-scope";
 import type {
   ArtifactExecutionPort,
   ArtifactSubjectRef,
@@ -456,8 +457,45 @@ export class ToolBroker implements ExecutionBroker {
     // proceed; otherwise release (execute() has not started) and fail closed.
     // Site Builder's separately governed paid ledger remains outside this
     // generic authority/artifact cutover.
+    //
+    // Declared platform scopes (closed set in transient-result-scope.ts) are the
+    // one reviewed exception: a tool that lists the scope may execute with a
+    // transient result — the physical answer is used and discarded, no
+    // PERSONAL_DATA artifact row is created. Every other combination still holds.
+    let transientScope: TransientResultScope | undefined;
+    if (ctx.transientResultScope !== undefined) {
+      const scope = ctx.transientResultScope;
+      const allowed =
+        !ctx.paidCost &&
+        isTransientResultScope(scope) &&
+        ctx.workspaceId === "platform" &&
+        (tool.transientResultScopes ?? []).includes(scope);
+      if (!allowed) {
+        // The paid ledger (or the generic budget store) reserved before this
+        // check: close that reservation exactly like the other post-reserve
+        // denial paths so nothing is left unresolved before the wire.
+        if (paidScope) {
+          await this.settlePersistentOperation({
+            scope: paidScope,
+            status: "RELEASED",
+            measurement: this.notIncurredMeasurement(),
+            errorCode: "TRANSIENT_RESULT_SCOPE_DENIED",
+          });
+        } else if (reservation && !reservation.replay) {
+          await this.budget.release(reservation);
+        }
+        this.trace(ctx, tool, "DENIED", "TRANSIENT_RESULT_SCOPE_DENIED", 0, now() - started);
+        throw new ToolPolicyDenied(toolId, "TRANSIENT_RESULT_SCOPE_DENIED");
+      }
+      transientScope = scope;
+      if (reservation?.replay) {
+        // A transient result is deliberately not persisted, so a settled
+        // operation has nothing to replay; fail closed instead of re-sending.
+        throw new BudgetOperationReplayError(reservation.operationId, "remnant");
+      }
+    }
     let artifactSubject: ArtifactSubjectRef | undefined;
-    if (!ctx.paidCost && reservation && subjectBoundArtifactSchema(tool)) {
+    if (!ctx.paidCost && reservation && subjectBoundArtifactSchema(tool) && !transientScope) {
       const precheck = this.artifactPrecheck(tool, ctx);
       if ("reason" in precheck) {
         if (!reservation.replay) await this.budget.release(reservation);
@@ -832,7 +870,9 @@ export class ToolBroker implements ExecutionBroker {
         ctx,
         tool,
         "OK",
-        undefined,
+        transientScope
+          ? `transient result scope ${transientScope} (no artifact persisted)`
+          : undefined,
         result.costCents,
         now() - started,
         tool.idempotencyKey(input),
