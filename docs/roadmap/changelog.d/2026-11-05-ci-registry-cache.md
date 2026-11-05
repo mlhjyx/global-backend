@@ -1,6 +1,6 @@
 ---
 date: 2026-11-05
-pr:
+pr: 811
 title: Move the OCI build layer cache to a GHCR registry manifest
 ---
 
