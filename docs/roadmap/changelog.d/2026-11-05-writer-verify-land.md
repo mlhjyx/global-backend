@@ -1,6 +1,6 @@
 ---
 date: 2026-11-05
-pr:
+pr: 816
 title: Land the writer fixed-identity verifier change that #815 missed
 ---
 
