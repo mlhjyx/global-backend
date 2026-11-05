@@ -182,6 +182,47 @@ async function platformToken(
   });
 }
 
+const CHANNEL_ID = '55555555-5555-4555-8555-555555555555';
+const CRAWL_RUN_ID = '66666666-6666-4666-8666-666666666666';
+
+async function channelCrawlToken(
+  claims: Record<string, unknown> = {},
+  options: Omit<TokenOptions, 'claims'> = {},
+): Promise<string> {
+  return signedToken({
+    ...options,
+    claims: {
+      authority_kind: 'PLATFORM_GRANT',
+      purpose: 'platform.channel_crawl',
+      workspace_id: undefined,
+      subject_type: 'source_channel',
+      subject_id: CHANNEL_ID,
+      request_sha256: REQUEST_HASH,
+      crawl_run_id: CRAWL_RUN_ID,
+      schedule_id: undefined,
+      schedule_request_sha256: undefined,
+      workflow_id: undefined,
+      workflow_run_id: undefined,
+      technical_policy_revision: TECHNICAL_POLICY_REVISION,
+      cap_microusd: undefined,
+      cap_per_run_microusd: '5000000',
+      campaign_cap_microusd: '250000000',
+      max_runs: '1',
+      ...claims,
+    },
+  });
+}
+
+const CHANNEL_CRAWL_SCOPE: ExecutionBudgetGrantExpectedScope = {
+  authorityKind: 'PLATFORM_GRANT',
+  purpose: 'platform.channel_crawl',
+  subjectType: 'source_channel',
+  subjectId: CHANNEL_ID,
+  requestSha256: REQUEST_HASH,
+  crawlRunId: CRAWL_RUN_ID,
+  technicalPolicyRevision: TECHNICAL_POLICY_REVISION,
+};
+
 async function loadPlatformClaimsSchema(): Promise<Record<string, unknown>> {
   const candidates = [
     resolve(
@@ -590,12 +631,73 @@ describe('ExecutionBudgetGrantVerifier', () => {
     ).rejects.toMatchObject({ code: 'EXECUTION_BUDGET_GRANT_INVALID' });
   });
 
-  it.each(PLATFORM_EXECUTION_BUDGET_PURPOSES)(
-    'accepts exactly the contract platform purpose %s after signature verification',
+  it.each(
+    PLATFORM_EXECUTION_BUDGET_PURPOSES.filter(
+      (purpose) => purpose !== 'platform.channel_crawl',
+    ),
+  )(
+    'accepts exactly the schedule-bound contract platform purpose %s after signature verification',
     async (purpose) => {
       await expect(
         verifier().verifyPlatform(await platformToken({ purpose })),
       ).resolves.toMatchObject({ purpose });
+    },
+  );
+
+  it('accepts a channel-crawl platform grant bound to request, crawl run and policy revision', async () => {
+    await expect(
+      verifier().verifyPlatform(await channelCrawlToken()),
+    ).resolves.toMatchObject({
+      purpose: 'platform.channel_crawl',
+      subjectType: 'source_channel',
+      subjectId: CHANNEL_ID,
+      requestSha256: REQUEST_HASH,
+      crawlRunId: CRAWL_RUN_ID,
+      scheduleId: null,
+      technicalPolicyRevision: TECHNICAL_POLICY_REVISION,
+    });
+  });
+
+  it.each([
+    ['schedule subject type', { subject_type: 'schedule' }],
+    ['non-uuid channel id', { subject_id: 'not-a-uuid' }],
+    ['missing crawl run', { crawl_run_id: undefined }],
+    ['non-uuid crawl run', { crawl_run_id: 'NOT-A-UUID' }],
+    ['missing request hash', { request_sha256: undefined }],
+    ['schedule id present', { schedule_id: SCHEDULE_ID }],
+    ['schedule request present', { schedule_request_sha256: REQUEST_HASH }],
+    ['workflow id present', { workflow_id: WORKFLOW_ID }],
+    ['multiple runs', { max_runs: '2' }],
+    ['zero per-run cap', { cap_per_run_microusd: '0' }],
+  ])(
+    'rejects a channel-crawl grant with %s',
+    async (_name, claims) => {
+      await expect(
+        verifier().verifyPlatform(await channelCrawlToken(claims)),
+      ).rejects.toMatchObject({
+        code: expect.stringMatching(
+          /EXECUTION_BUDGET_GRANT_(INVALID|SCOPE_MISMATCH)/,
+        ),
+      });
+    },
+  );
+
+  it.each([
+    ['request hash', { requestSha256: 'f'.repeat(64) }],
+    ['crawl run', { crawlRunId: '77777777-7777-4777-8777-777777777777' }],
+    ['policy revision', { technicalPolicyRevision: 'f'.repeat(64) }],
+    ['subject id', { subjectId: '77777777-7777-4777-8777-777777777777' }],
+  ] as const)(
+    'rejects a channel-crawl grant with mismatched expected %s binding',
+    async (_name, mismatch) => {
+      await expect(
+        verifier().verify(await channelCrawlToken(), {
+          ...CHANNEL_CRAWL_SCOPE,
+          ...mismatch,
+        }),
+      ).rejects.toMatchObject({
+        code: 'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
+      });
     },
   );
 
@@ -676,7 +778,7 @@ describe('ExecutionBudgetGrantVerifier', () => {
     [
       'request hash',
       { request_sha256: REQUEST_HASH },
-      'EXECUTION_BUDGET_GRANT_INVALID',
+      'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
     ],
     ['workspace cap', { cap_microusd: '1' }, 'EXECUTION_BUDGET_GRANT_INVALID'],
   ] as const)(

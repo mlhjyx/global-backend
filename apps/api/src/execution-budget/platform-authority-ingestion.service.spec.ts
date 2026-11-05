@@ -42,6 +42,33 @@ const TECHNICAL_POLICY_REVISION =
 const ISSUER = 'https://control-plane.example.test/';
 const AUDIENCE = 'global-backend:execution-budget';
 
+const CHANNEL_ID = '55555555-5555-4555-8555-555555555555';
+const CRAWL_RUN_ID = '66666666-6666-4666-8666-666666666666';
+const CRAWL_REQUEST_SHA256 =
+  'aa11bb22cc33dd44ee55ff66aa77bb88cc99dd00ee11ff22aa33bb44cc55dd66';
+
+const CHANNEL_CRAWL_CLAIMS = {
+  schema_version: 'execution-budget-grant/v1',
+  iss: ISSUER,
+  aud: AUDIENCE,
+  jti: JTI,
+  iat: 1_788_472_800,
+  nbf: 1_788_472_800,
+  exp: 1_788_473_100,
+  authority_kind: 'PLATFORM_GRANT',
+  purpose: 'platform.channel_crawl',
+  subject_type: 'source_channel',
+  subject_id: CHANNEL_ID,
+  request_sha256: CRAWL_REQUEST_SHA256,
+  crawl_run_id: CRAWL_RUN_ID,
+  technical_policy_revision: TECHNICAL_POLICY_REVISION,
+  currency: 'USD',
+  unit: 'microusd',
+  cap_per_run_microusd: '5000000',
+  campaign_cap_microusd: '250000000',
+  max_runs: '1',
+} as const satisfies PlatformExecutionBudgetAuthorityUpsertedV1Claims;
+
 const VALID_CLAIMS = {
   schema_version: 'execution-budget-grant/v1',
   iss: ISSUER,
@@ -227,8 +254,12 @@ describe('PlatformExecutionBudgetAuthorityUpserted/v1 contract', () => {
     );
   });
 
-  it.each(PLATFORM_EXECUTION_BUDGET_PURPOSES)(
-    'accepts the contract platform purpose %s in the signed-claims schema',
+  it.each(
+    PLATFORM_EXECUTION_BUDGET_PURPOSES.filter(
+      (purpose) => purpose !== 'platform.channel_crawl',
+    ),
+  )(
+    'accepts the schedule-bound platform purpose %s in the signed-claims schema',
     async (purpose) => {
       const schema = await loadSchema();
       const validate = addFormats(
@@ -241,6 +272,39 @@ describe('PlatformExecutionBudgetAuthorityUpserted/v1 contract', () => {
       ).toBe(true);
     },
   );
+
+  it('accepts the channel-crawl claims shape and rejects cross-shape mixtures', async () => {
+    const schema = await loadSchema();
+    const validate = addFormats(
+      new Ajv2020({ allErrors: true, strict: true }),
+    ).compile(schema);
+
+    expect(
+      validate(CHANNEL_CRAWL_CLAIMS),
+      JSON.stringify(validate.errors),
+    ).toBe(true);
+    // channel 形状缺 crawl_run_id / 带 schedule 字段 → 拒绝
+    expect(
+      validate({ ...CHANNEL_CRAWL_CLAIMS, crawl_run_id: undefined }),
+    ).toBe(false);
+    expect(validate({ ...CHANNEL_CRAWL_CLAIMS, schedule_id: SCHEDULE_ID })).toBe(
+      false,
+    );
+    expect(
+      validate({ ...CHANNEL_CRAWL_CLAIMS, workflow_id: WORKFLOW_ID }),
+    ).toBe(false);
+    // schedule 形状带 channel 字段 → 拒绝
+    expect(
+      validate({ ...VALID_CLAIMS, crawl_run_id: CRAWL_RUN_ID }),
+    ).toBe(false);
+    expect(
+      validate({ ...VALID_CLAIMS, request_sha256: CRAWL_REQUEST_SHA256 }),
+    ).toBe(false);
+    // scheduled purpose 用 channel 形状 → 拒绝（subject_type/required 双保险）
+    expect(
+      validate({ ...CHANNEL_CRAWL_CLAIMS, purpose: 'platform.acquisition' }),
+    ).toBe(false);
+  });
 
   it.each([
     ['nil UUID', '00000000-0000-0000-0000-000000000000'],

@@ -168,6 +168,85 @@ describe('execution budget authority claim types', () => {
     ).toThrow('EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH');
   });
 
+  it('accepts a channel-crawl platform authority bound to request + crawl run', () => {
+    expect(() =>
+      assertAuthorityPurposeShape({
+        authorityKind: 'PLATFORM_GRANT',
+        purpose: 'platform.channel_crawl',
+        workspaceId: null,
+        subjectType: 'source_channel',
+        subjectId: '55555555-5555-4555-8555-555555555555',
+        scheduleId: null,
+        requestSha256: 'a'.repeat(64),
+        crawlRunId: '66666666-6666-4666-8666-666666666666',
+        technicalPolicyRevision: 'b'.repeat(64),
+        capMicrousd: null,
+        capPerRunMicrousd: 5_000_000n,
+        campaignCapMicrousd: 250_000_000n,
+        maxRuns: 1n,
+      }),
+    ).not.toThrow();
+  });
+
+  it.each([
+    { subjectType: 'schedule' },
+    { subjectId: 'not-a-uuid' },
+    { scheduleId: 'channel-crawl' },
+    { requestSha256: null },
+    { requestSha256: 'wrong-hash' },
+    { crawlRunId: undefined },
+    { crawlRunId: 'not-a-uuid' },
+    { technicalPolicyRevision: undefined },
+    { scheduleRequestSha256: 'a'.repeat(64) },
+    { workflowId: 'channel-crawl-2026-11-05' },
+    { workflowRunId: '66666666-6666-4666-8666-666666666666' },
+    { maxRuns: 2n },
+    { capPerRunMicrousd: 0n },
+    { campaignCapMicrousd: 0n },
+  ])('rejects a malformed channel-crawl authority case %#', (override) => {
+    expect(() =>
+      assertAuthorityPurposeShape({
+        authorityKind: 'PLATFORM_GRANT',
+        purpose: 'platform.channel_crawl',
+        workspaceId: null,
+        subjectType: 'source_channel',
+        subjectId: '55555555-5555-4555-8555-555555555555',
+        scheduleId: null,
+        requestSha256: 'a'.repeat(64),
+        crawlRunId: '66666666-6666-4666-8666-666666666666',
+        technicalPolicyRevision: 'b'.repeat(64),
+        capMicrousd: null,
+        capPerRunMicrousd: 5_000_000n,
+        campaignCapMicrousd: 250_000_000n,
+        maxRuns: 1n,
+        ...override,
+      }),
+    ).toThrow('EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH');
+  });
+
+  it('rejects schedule-purpose platform grants carrying crawl-run fields', () => {
+    expect(() =>
+      assertAuthorityPurposeShape({
+        authorityKind: 'PLATFORM_GRANT',
+        purpose: 'platform.acquisition',
+        workspaceId: null,
+        requestSha256: null,
+        subjectType: 'schedule',
+        subjectId: 'acq-sweep',
+        scheduleId: 'acq-sweep',
+        crawlRunId: '66666666-6666-4666-8666-666666666666',
+        capMicrousd: null,
+        capPerRunMicrousd: 1n,
+        campaignCapMicrousd: 1n,
+        maxRuns: 1n,
+        scheduleRequestSha256: 'a'.repeat(64),
+        workflowId: 'acq-sweep-2026-09-05',
+        workflowRunId: '44444444-4444-4444-8444-444444444444',
+        technicalPolicyRevision: 'b'.repeat(64),
+      }),
+    ).toThrow('EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH');
+  });
+
   it('keeps the canonical error code and HTTP mapping separate from the error object', () => {
     const error = new ExecutionBudgetGrantError(
       'EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE',

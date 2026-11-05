@@ -9,12 +9,14 @@ export type ExecutionBudgetPurpose =
   | 'outreach.draft'
   | 'platform.acquisition'
   | 'platform.intent_watch'
-  | 'platform.sanctions';
+  | 'platform.sanctions'
+  | 'platform.channel_crawl';
 
 export const EXECUTION_BUDGET_PLATFORM_PURPOSES = [
   'platform.acquisition',
   'platform.intent_watch',
   'platform.sanctions',
+  'platform.channel_crawl',
 ] as const satisfies readonly ExecutionBudgetPurpose[];
 
 export interface VerifiedExecutionBudgetAuthority {
@@ -29,7 +31,9 @@ export interface VerifiedExecutionBudgetAuthority {
   readonly subjectId: string;
   readonly requestSha256: string | null;
   readonly scheduleId: string | null;
-  /** Required only for platform grants; absent from the workspace contract. */
+  /** Required only for platform.channel_crawl grants (one run per bound crawl). */
+  readonly crawlRunId?: string;
+  /** Required only for schedule platform grants; absent from other contracts. */
   readonly scheduleRequestSha256?: string;
   readonly workflowId?: string;
   readonly workflowRunId?: string;
@@ -98,6 +102,7 @@ type AuthorityPurposeShape = Pick<
   | 'capPerRunMicrousd'
   | 'campaignCapMicrousd'
   | 'maxRuns'
+  | 'crawlRunId'
   | 'scheduleRequestSha256'
   | 'workflowId'
   | 'workflowRunId'
@@ -142,6 +147,34 @@ export function assertPlatformExecutionInvocation(
     !runId.test(authority.workflowRunId)
   )
     scopeMismatch();
+}
+
+export interface PlatformChannelCrawlRunExpectation {
+  readonly purpose: 'platform.channel_crawl';
+  readonly subjectType: 'source_channel';
+  /** channelId：渠道抓取的一次运行绑定到一个渠道。 */
+  readonly subjectId: string;
+  readonly requestSha256: string;
+  readonly crawlRunId: string;
+  readonly technicalPolicyRevision: string;
+}
+
+export function assertPlatformChannelCrawlRunExpectation(
+  expected: PlatformChannelCrawlRunExpectation,
+): void {
+  const sha = /^[0-9a-f]{64}$/;
+  const uuid =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  if (
+    expected.purpose !== 'platform.channel_crawl' ||
+    expected.subjectType !== 'source_channel' ||
+    !uuid.test(expected.subjectId) ||
+    !sha.test(expected.requestSha256) ||
+    !uuid.test(expected.crawlRunId) ||
+    !sha.test(expected.technicalPolicyRevision)
+  ) {
+    scopeMismatch();
+  }
 }
 
 export function assertPlatformExecutionBudgetRunExpectation(
@@ -233,15 +266,49 @@ export function assertAuthorityPurposeShape(
     authority.authorityKind !== 'PLATFORM_GRANT' ||
     !PLATFORM_PURPOSES.has(authority.purpose) ||
     authority.workspaceId !== null ||
+    authority.capMicrousd !== null ||
+    !isPositiveBigInt(authority.capPerRunMicrousd) ||
+    !isPositiveBigInt(authority.campaignCapMicrousd) ||
+    authority.maxRuns !== 1n
+  ) {
+    scopeMismatch();
+  }
+
+  if (authority.purpose === 'platform.channel_crawl') {
+    // 渠道抓取分支（P4）：subject 绑定渠道，一次性绑定 request 摘要；crawlRunId +
+    // 策略版本替代 schedule 四字段。campaignCap 是单渠道日上限等值，允许与单轮
+    // 上限不同——不沿用 schedule 分支的相等不变量。
+    const sha = /^[0-9a-f]{64}$/;
+    const uuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+    if (
+      authority.subjectType !== 'source_channel' ||
+      !isNonEmptyString(authority.subjectId) ||
+      !uuid.test(authority.subjectId) ||
+      authority.scheduleId !== null ||
+      typeof authority.requestSha256 !== 'string' ||
+      !sha.test(authority.requestSha256) ||
+      typeof authority.crawlRunId !== 'string' ||
+      !uuid.test(authority.crawlRunId) ||
+      typeof authority.technicalPolicyRevision !== 'string' ||
+      !sha.test(authority.technicalPolicyRevision) ||
+      authority.scheduleRequestSha256 !== undefined ||
+      authority.workflowId !== undefined ||
+      authority.workflowRunId !== undefined
+    ) {
+      scopeMismatch();
+    }
+    return;
+  }
+
+  // schedule 分支：既有不变量逐字节保持（subjectType/scheduleId/相等 cap/调用四字段）。
+  if (
     authority.requestSha256 !== null ||
+    authority.crawlRunId !== undefined ||
     authority.subjectType !== 'schedule' ||
     !isNonEmptyString(authority.subjectId) ||
     !isNonEmptyString(authority.scheduleId) ||
     authority.subjectId !== authority.scheduleId ||
-    authority.capMicrousd !== null ||
-    !isPositiveBigInt(authority.capPerRunMicrousd) ||
-    !isPositiveBigInt(authority.campaignCapMicrousd) ||
-    authority.maxRuns !== 1n ||
     authority.campaignCapMicrousd !== authority.capPerRunMicrousd
   ) {
     scopeMismatch();

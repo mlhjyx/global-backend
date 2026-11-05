@@ -3,9 +3,11 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   assertAuthorityPurposeShape,
+  assertPlatformChannelCrawlRunExpectation,
   assertPlatformExecutionBudgetRunExpectation,
   ExecutionBudgetGrantError,
   type ExecutionBudgetGrantErrorCode,
+  type PlatformChannelCrawlRunExpectation,
   type PlatformExecutionBudgetRunExpectation,
   type VerifiedExecutionBudgetAuthority,
 } from './execution-budget-authority.types';
@@ -131,6 +133,22 @@ type VerifiedPlatformExecutionBudgetAuthority =
     scheduleRequestSha256: string;
     workflowId: string;
     workflowRunId: string;
+    technicalPolicyRevision: string;
+    capMicrousd: null;
+    capPerRunMicrousd: bigint;
+    campaignCapMicrousd: bigint;
+    maxRuns: 1n;
+  };
+
+/** P4：channel_crawl Grant 的运行期形状（request 摘要 + crawlRunId 绑定）。 */
+type VerifiedPlatformChannelCrawlAuthority =
+  VerifiedExecutionBudgetAuthority & {
+    authorityKind: 'PLATFORM_GRANT';
+    purpose: 'platform.channel_crawl';
+    workspaceId: null;
+    requestSha256: string;
+    crawlRunId: string;
+    scheduleId: null;
     technicalPolicyRevision: string;
     capMicrousd: null;
     capPerRunMicrousd: bigint;
@@ -404,6 +422,30 @@ function assertPlatformAuthority(
   assertExecutionBudgetAuthorityId(authority.jti);
 }
 
+function assertPlatformChannelCrawlAuthority(
+  authority: VerifiedExecutionBudgetAuthority,
+): asserts authority is VerifiedPlatformChannelCrawlAuthority {
+  assertAuthorityPurposeShape(authority);
+  if (
+    authority.authorityKind !== 'PLATFORM_GRANT' ||
+    authority.purpose !== 'platform.channel_crawl' ||
+    authority.workspaceId !== null ||
+    authority.requestSha256 === null ||
+    authority.crawlRunId === undefined ||
+    authority.scheduleId !== null ||
+    authority.technicalPolicyRevision === undefined ||
+    authority.capMicrousd !== null ||
+    authority.capPerRunMicrousd === null ||
+    authority.campaignCapMicrousd === null ||
+    authority.maxRuns !== 1n
+  ) {
+    throw new ExecutionBudgetGrantError(
+      'EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH',
+    );
+  }
+  assertExecutionBudgetAuthorityId(authority.jti);
+}
+
 function consumeWorkspaceWithTransaction(
   tx: Prisma.TransactionClient,
   authority: VerifiedWorkspaceExecutionBudgetAuthority,
@@ -596,6 +638,49 @@ export class ExecutionBudgetAuthorityRepository {
             ${expected.subjectType}, ${expected.subjectId},
             ${expected.scheduleId}, ${expected.scheduleRequestSha256},
             ${expected.workflowId}, ${expected.workflowRunId},
+            ${expected.technicalPolicyRevision}
+          )`,
+          );
+        },
+        { maxWait: 1_000, timeout: 2_500 },
+      );
+      return parsePlatformAuthorizedOpenRow(rows);
+    } catch (error) {
+      throw mapExecutionBudgetPersistenceError(error);
+    }
+  }
+
+  async ingestPlatformChannelCrawlAndAdmit(
+    authority: VerifiedExecutionBudgetAuthority,
+    expected: PlatformChannelCrawlRunExpectation,
+  ): Promise<ExecutionBudgetPlatformAccountPersistenceResult> {
+    try {
+      assertPlatformChannelCrawlAuthority(authority);
+      assertPlatformChannelCrawlRunExpectation(expected);
+      if (!this.platformWriter) throw unavailable();
+      const issuedAt = numericDateToDatabaseTimestamp(authority.issuedAt);
+      const notBefore = numericDateToDatabaseTimestamp(authority.notBefore);
+      const expiresAt = numericDateToDatabaseTimestamp(authority.expiresAt);
+
+      const rows = await this.platformWriter.$transaction(
+        async (tx) => {
+          await tx.$executeRawUnsafe('SET LOCAL statement_timeout = 2000');
+          await attestExecutionBudgetPlatformWriterTransaction(tx);
+          return tx.$queryRaw<PlatformAuthorizedOpenRow[]>(
+            Prisma.sql`SELECT * FROM ingest_and_admit_platform_channel_crawl_run_v1(
+            ${authority.issuer}, ${authority.audience}, ${authority.jti}::uuid,
+            ${authority.tokenSha256}, ${authority.schemaVersion},
+            ${authority.purpose}::"execution_budget_purpose",
+            ${authority.subjectType}, ${authority.subjectId},
+            ${authority.requestSha256}, ${authority.crawlRunId},
+            ${authority.technicalPolicyRevision}, ${authority.currency},
+            ${authority.unit},
+            ${authority.capPerRunMicrousd}, ${authority.campaignCapMicrousd},
+            ${authority.maxRuns}, ${issuedAt}, ${notBefore},
+            ${expiresAt},
+            ${expected.purpose}::"execution_budget_purpose",
+            ${expected.subjectType}, ${expected.subjectId},
+            ${expected.requestSha256}, ${expected.crawlRunId},
             ${expected.technicalPolicyRevision}
           )`,
           );
