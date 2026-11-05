@@ -1,6 +1,6 @@
 ---
 date: 2026-11-05
-pr:
+pr: 814
 title: Use a lazy Temporal connection so the writer identity can start workflows
 ---
 
