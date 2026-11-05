@@ -179,6 +179,9 @@ describe('channelCrawlActivities（P4-P4c）', () => {
       workspaceId: 'platform',
       runId: BINDING.accountKey,
       platformEgress: expect.objectContaining({ authorizeAndDispatch: expect.any(Function) }),
+      // Declared platform scope: page HTML is parsed transiently, never stored
+      // as a subjectless PERSONAL_DATA artifact (design 2026-11-06 §4.1).
+      transientResultScope: 'platform_channel_crawl',
     });
   });
 
@@ -241,6 +244,8 @@ describe('channelCrawlActivities（P4-P4c）', () => {
     });
     expect(recordRun).toHaveBeenCalledWith({
       channelId: INPUT.channelId,
+      // finalize 幂等键：同一工作流重试收敛到同一行（设计 2026-11-06 §4.2）。
+      crawlRunId: INPUT.crawlRunId,
       status: 'SUCCEEDED',
       pagesFetched: 3,
       recordsFound: 1,

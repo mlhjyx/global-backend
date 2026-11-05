@@ -1364,8 +1364,11 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
     persistError?: Error;
     schema?: string;
     noPort?: boolean;
+    platform?: boolean;
+    toolId?: string;
   } = {}) {
     const { tool, execute } = fetchTool();
+    if (options.toolId) tool.id = options.toolId;
     if (options.schema) {
       tool.durableResultStrategy = {
         ...(tool.durableResultStrategy as Extract<Tool["durableResultStrategy"], { kind: "artifact_reference" }>),
@@ -1373,8 +1376,8 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
       };
     }
     const reservation = {
-      workspaceId: WORKSPACE,
-      accountKey: "run",
+      workspaceId: options.platform ? "platform" : WORKSPACE,
+      accountKey: options.platform ? "platform:run" : "run",
       operationId: "1b3d6096-b924-4bc8-bb4f-8436efb37b07",
       estimatedMicrousd: 10_000n,
       replay: options.replay ?? false,
@@ -1521,5 +1524,85 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
     ).rejects.toMatchObject({ code: "BUDGET_OPERATION_REPLAY_UNAVAILABLE" });
     expect(execute).toHaveBeenCalledOnce();
     expect(release).not.toHaveBeenCalled();
+  });
+
+  it("executes a declared platform scope transiently and settles without an artifact", async () => {
+    // The platform execution contract enumerates crawl4ai.render (1.0.0) with its wires.
+    const { broker, tool, execute, port, release, settle, reservation } = harness({
+      platform: true,
+      toolId: "crawl4ai.render",
+    });
+    tool.transientResultScopes = ["platform_channel_crawl"];
+    const result = await broker.invoke(
+      "crawl4ai.render",
+      { url: "https://fair.example/list" },
+      {
+        workspaceId: "platform",
+        runId: "platform:run",
+        transientResultScope: "platform_channel_crawl",
+        platformEgress: { authorizeAndDispatch: (_operation, send) => send() },
+      },
+    );
+    expect(execute).toHaveBeenCalledOnce();
+    expect(port.admit).not.toHaveBeenCalled();
+    expect(port.persist).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
+    // Plain cost settlement: no projection and no artifact reference.
+    expect(settle).toHaveBeenCalledWith(reservation, 10_000n, undefined, undefined);
+    expect(result.durableReceipt).toBeUndefined();
+  });
+
+  it("denies a transient scope on a tenant workspace and releases the reservation", async () => {
+    const { broker, tool, execute, release, reservation } = harness();
+    tool.transientResultScopes = ["platform_channel_crawl"];
+    await expect(
+      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, {
+        workspaceId: WORKSPACE, runId: "run", transientResultScope: "platform_channel_crawl",
+      }),
+    ).rejects.toMatchObject({ name: "ToolPolicyDenied", reason: "TRANSIENT_RESULT_SCOPE_DENIED" });
+    expect(release).toHaveBeenCalledWith(reservation);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("denies a transient scope for a tool that does not declare it", async () => {
+    const { broker, execute } = harness({ platform: true });
+    await expect(
+      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, {
+        workspaceId: "platform",
+        runId: "platform:run",
+        transientResultScope: "platform_channel_crawl",
+        platformEgress: { authorizeAndDispatch: (_operation, send) => send() },
+      }),
+    ).rejects.toMatchObject({ name: "ToolPolicyDenied", reason: "TRANSIENT_RESULT_SCOPE_DENIED" });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("denies a transient scope outside the closed set", async () => {
+    const { broker, tool, execute } = harness({ platform: true });
+    tool.transientResultScopes = ["platform_channel_crawl"];
+    await expect(
+      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, {
+        workspaceId: "platform",
+        runId: "platform:run",
+        transientResultScope: "some_other_scope" as never,
+        platformEgress: { authorizeAndDispatch: (_operation, send) => send() },
+      }),
+    ).rejects.toMatchObject({ name: "ToolPolicyDenied", reason: "TRANSIENT_RESULT_SCOPE_DENIED" });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("fails a settled transient operation closed instead of re-sending the wire", async () => {
+    const { broker, tool, execute, port } = harness({ platform: true, replay: true });
+    tool.transientResultScopes = ["platform_channel_crawl"];
+    await expect(
+      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, {
+        workspaceId: "platform",
+        runId: "platform:run",
+        transientResultScope: "platform_channel_crawl",
+        platformEgress: { authorizeAndDispatch: (_operation, send) => send() },
+      }),
+    ).rejects.toMatchObject({ code: "BUDGET_OPERATION_REPLAY_UNAVAILABLE" });
+    expect(port.replay).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
   });
 });

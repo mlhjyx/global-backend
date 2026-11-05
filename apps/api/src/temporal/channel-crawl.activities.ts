@@ -196,6 +196,9 @@ export function createChannelCrawlActivities(deps: {
           runId: binding.accountKey,
           correlationId: binding.accountKey,
           platformEgress,
+          // Declared platform scope: the page HTML is parsed transiently and not
+          // persisted as a subjectless PERSONAL_DATA artifact (design 2026-11-06 §4.1).
+          transientResultScope: "platform_channel_crawl",
         });
       const result = await crawlChannel(config, fetchPage, { pageCap });
       // 记录物化在活动内完成（记录不进 Temporal 历史）。物化失败按不可重试失败：
@@ -233,6 +236,7 @@ export function createChannelCrawlActivities(deps: {
       const outcome = args.outcome;
       const recorded = await deps.recordRun({
         channelId: args.input.channelId,
+        crawlRunId: args.input.crawlRunId,
         status: outcome.status,
         pagesFetched: outcome.pagesFetched,
         recordsFound: outcome.recordsFound,

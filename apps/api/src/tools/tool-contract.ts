@@ -7,6 +7,7 @@ import type { PlatformEgressOperation } from "../platform-authority/platform-egr
  */
 
 import type { DurableResultStrategy } from "../durable-results/durable-result-strategy";
+import type { TransientResultScope } from "./transient-result-scope";
 import type { DurableExecutionReceipt } from "../durable-results/durable-execution-receipt";
 import type { PaidCostContext } from "../site-builder/site-build-cost-ledger";
 
@@ -114,6 +115,14 @@ export interface ToolContext {
    * to. Absent → ToolBroker keeps the subject-binding hold for that call.
    */
   artifactSubject?: ArtifactSubjectRef;
+  /**
+   * Declares that this call runs inside one of the closed platform scopes in
+   * which a declared artifact tool may execute transiently: the result is used
+   * and discarded, no artifact is persisted. Admitted only when the tool lists
+   * the scope in `transientResultScopes` and `workspaceId === 'platform'`;
+   * every other combination fails closed (TRANSIENT_RESULT_SCOPE_DENIED).
+   */
+  transientResultScope?: TransientResultScope;
   /** Collects only a closed ledger receipt after settlement; never receives result data. */
   onDurableReceipt?: (
     producerId: string,
@@ -230,6 +239,11 @@ export interface Tool<I = unknown, O = unknown> {
   idempotencyKey(input: I): string;
   /** Required declaration for the one durable-result path; v1 replay callbacks remain until cutover. */
   durableResultStrategy: DurableResultStrategy;
+  /**
+   * Platform scopes in which this artifact producer may execute with a transient
+   * (non-persisted) result. Absent/empty: never — the subject-binding hold applies.
+   */
+  transientResultScopes?: readonly TransientResultScope[];
   /**
    * Optional fail-closed durable replay projection. Paid ToolBroker calls only
    * persist this bounded/scrubbed shape; raw provider payloads are never copied
