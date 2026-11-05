@@ -149,6 +149,55 @@ describe("machine bootstrap signed response", () => {
     ).rejects.toThrow("PLATFORM_MACHINE_TOKEN_DENIED");
   });
 
+  it("accepts the writer fixed identity only as typ=JWT without a profile claim", async () => {
+    const writerTrust: MachineTokenTrust = {
+      ...trust,
+      profile: "temporal-platform-client",
+      subject: "platform-temporal-schedule-writer",
+    };
+    const fixed = await response(
+      {
+        sub: writerTrust.subject,
+        profile: undefined,
+        permissions: ["platform-automation:write"],
+      },
+      { profile: "temporal-platform-client", subject: writerTrust.subject },
+      { typ: "JWT" },
+      );
+    const verified = await verifyMachineTokenResponse(
+      fixed.body,
+      NONCE,
+      writerTrust,
+      NOW,
+    );
+    expect(verified.subject).toBe("platform-temporal-schedule-writer");
+    // 旧的可调度档案形状（typ=temporal-runtime+jwt 且带 profile）必须被拒——
+    // 平台授权器不接受该身份带 profile，引擎侧同样不得放行。
+    const profiled = await response(
+      {
+        sub: writerTrust.subject,
+        permissions: ["platform-automation:write"],
+      },
+      { profile: "temporal-platform-client", subject: writerTrust.subject },
+    );
+    await expect(
+      verifyMachineTokenResponse(profiled.body, NONCE, writerTrust, NOW),
+    ).rejects.toThrow("PLATFORM_MACHINE_TOKEN_DENIED");
+    // 固定身份令牌携带 profile 声明同样必须被拒。
+    const withProfile = await response(
+      {
+        sub: writerTrust.subject,
+        profile: "temporal-platform-client",
+        permissions: ["platform-automation:write"],
+      },
+      { profile: "temporal-platform-client", subject: writerTrust.subject },
+      { typ: "JWT" },
+    );
+    await expect(
+      verifyMachineTokenResponse(withProfile.body, NONCE, writerTrust, NOW),
+    ).rejects.toThrow("PLATFORM_MACHINE_TOKEN_DENIED");
+  });
+
   it.each([
     ["temporal-platform-worker", ["platform-automation:worker"]],
     ["temporal-customer-client", ["default:read", "default:write"]],
