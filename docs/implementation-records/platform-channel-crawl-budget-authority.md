@@ -50,7 +50,8 @@
 
 ## 6. 实施进度
 
-- 2026-11-05：**P1（引擎契约）已实施**——purpose 枚举（两段式迁移）、形状/绑定 CHECK 的 channel-crawl 分支、`crawl_run_id` 列与唯一索引、`ingest_and_admit_platform_channel_crawl_run_v1` 摄入函数（仅 platform writer 可执行）、verifier/types/contracts 双形状。schedule 摄入函数与 4 个平台 schedule 不变量未改动。P2（策略矩阵新版）、P3（gain-saas 签发）、P4（执行接线/409 切换）仍待实施。
+- 2026-11-05：**P1（引擎契约）已实施**——purpose 枚举（两段式迁移）、形状/绑定 CHECK 的 channel-crawl 分支、`crawl_run_id` 列与唯一索引、`ingest_and_admit_platform_channel_crawl_run_v1` 摄入函数（仅 platform writer 可执行）、verifier/types/contracts 双形状。schedule 摄入函数与 4 个平台 schedule 不变量未改动。P3（gain-saas 签发）、P4（执行接线/409 切换）此时仍待实施。
+- 2026-11-05：**P2（策略矩阵新版）已实施**——新增 reviewed-v3 工件与 provenance v3：四个 schedule 行与 reviewed-v2 逐字节相同（行集 sha256 钉住），仅新增 `channel_crawl` 小节（DENIED、页数上限与引擎常量绑定）；readiness/能力签名/技术报价的四行不变量未动。GrowthOS 已退役，v3 按 backend-authored successor 发布：provenance 保留 v2 的 GrowthOS 溯源与字节基线，`backend_review` 记录独立 diff review。报价夹具在 v3 身份下确定性重算。
 
 ## 7. 未做（本文档范围）
 

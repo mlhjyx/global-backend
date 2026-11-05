@@ -3,12 +3,15 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { types } from "node:util";
 
-export const PLATFORM_AUTHORITY_POLICY_ARTIFACT_BYTES = 15_583 as const;
+export const PLATFORM_AUTHORITY_POLICY_ARTIFACT_BYTES = 15996 as const;
 export const PLATFORM_AUTHORITY_POLICY_ARTIFACT_SHA256 =
-  "f9e9591731772f974b087307b5d0365c58c86b501232804c77a20fd3592db01b" as const;
+  "f521671e2c4058025b99b9a6e646a1534645a35b6191288516583704cfa2dbd4" as const;
 export const PLATFORM_AUTHORITY_POLICY_ARTIFACT_ID =
-  "platform-authority-policy-matrix/2026-09-04-reviewed-v2" as const;
-export const PLATFORM_AUTHORITY_POLICY_MATRIX_REVISION = "reviewed-v2" as const;
+  "platform-authority-policy-matrix/2026-11-05-reviewed-v3" as const;
+export const PLATFORM_AUTHORITY_POLICY_MATRIX_REVISION = "reviewed-v3" as const;
+/** Channel-crawl capability section of the reviewed-v3 successor (P4-P2). */
+export const PLATFORM_AUTHORITY_CHANNEL_CRAWL_PURPOSE =
+  "platform.channel_crawl" as const;
 
 const EXPECTED_ROW_IDS = Object.freeze([
   "platform.acquisition/acq-sweep",
@@ -17,7 +20,7 @@ const EXPECTED_ROW_IDS = Object.freeze([
   "platform.sanctions/sanctions-refresh",
 ] as const);
 
-export interface PlatformAuthorityPolicySuccessorRowV2 {
+export interface PlatformAuthorityPolicyScheduleRowV3 {
   readonly row_id: (typeof EXPECTED_ROW_IDS)[number];
   readonly purpose:
     | "platform.acquisition"
@@ -38,23 +41,35 @@ export interface PlatformAuthorityPolicySuccessorRowV2 {
   readonly reviewed_predecessor_quote_vector: Readonly<Record<string, unknown>>;
 }
 
-export interface PlatformAuthorityPolicySuccessorV2 {
-  readonly schema_version: "platform-authority-policy-matrix/v2";
+export interface PlatformAuthorityChannelCrawlSection {
+  readonly purpose: typeof PLATFORM_AUTHORITY_CHANNEL_CRAWL_PURPOSE;
+  readonly temporal_namespace: "platform-automation";
+  readonly default_issuance_state: "DENIED";
+  readonly execution_envelope: Readonly<{
+    readonly execution_envelope_schema_version: "platform-execution-envelope/v1";
+    readonly maximum_pages_per_run: "50";
+    readonly maximum_pages_per_channel_per_day: "500";
+    readonly preview_pages: "1";
+    readonly required_max_runs: "1";
+  }>;
+}
+
+export interface PlatformAuthorityPolicySuccessorV3 {
+  readonly schema_version: "platform-authority-policy-matrix/v3";
   readonly artifact_id: typeof PLATFORM_AUTHORITY_POLICY_ARTIFACT_ID;
   readonly matrix_revision: typeof PLATFORM_AUTHORITY_POLICY_MATRIX_REVISION;
   readonly currency: "USD";
   readonly unit: "microusd";
   readonly predecessor: Readonly<{
-    readonly artifact_id: "platform-authority-policy-matrix/2026-09-04-candidate-v1";
-    readonly artifact_sha256: "248a416e72a8c2590a5c6c8adb941f4105c6ac3e722bc85ced3a77f404784fa1";
-    readonly matrix_revision: "candidate-v1";
+    readonly artifact_id: "platform-authority-policy-matrix/2026-09-04-reviewed-v2";
+    readonly artifact_sha256: "f9e9591731772f974b087307b5d0365c58c86b501232804c77a20fd3592db01b";
+    readonly matrix_revision: "reviewed-v2";
   }>;
   readonly backend_review: Readonly<{
-    readonly exact_commit: "061892b0159c9eb01b589465e60605ffa6591244";
-    readonly review_kind: "independent_read_only_source_review";
-    readonly review_scope_base_commit: "50267cb505379ed3658798e7c381c9614364808f";
-    readonly review_scope_head_commit: "061892b0159c9eb01b589465e60605ffa6591244";
+    readonly review_kind: "independent_read_only_diff_review";
     readonly review_verdict: "APPROVE";
+    readonly review_scope_base_commit: string;
+    readonly review_scope_head_commit: string;
     readonly technical_contract_sha256: "230c0252403f401f35003d3cd3e7d99912ae5689fb84c37bbd50ed624cd9325b";
   }>;
   readonly policy_revision_contract: Readonly<{
@@ -63,17 +78,29 @@ export interface PlatformAuthorityPolicySuccessorV2 {
     readonly schema_version: "platform-execution-technical-policy/v1";
   }>;
   readonly issuability_requirements: readonly string[];
-  readonly rows: readonly PlatformAuthorityPolicySuccessorRowV2[];
+  /** The four schedule rows stay byte-identical to the reviewed-v2 predecessor. */
+  readonly rows: readonly PlatformAuthorityPolicyScheduleRowV3[];
+  /** Channel crawl is a per-run capability, deliberately outside the schedule row set. */
+  readonly channel_crawl: PlatformAuthorityChannelCrawlSection;
 }
 
-export interface PlatformAuthorityPolicyProvenanceV2 {
-  readonly schema_version: "growthos-platform-authority-policy-provenance/v2";
+export interface PlatformAuthorityPolicyProvenanceV3 {
+  readonly schema_version: "growthos-platform-authority-policy-provenance/v3";
   readonly artifact: Readonly<{
-    readonly materialized_path: "ops/policy/platform-authority-policy-matrix-v2.json";
+    readonly materialized_path: "apps/api/src/platform-authority/platform-authority-policy-matrix-v3.json";
     readonly byte_length: typeof PLATFORM_AUTHORITY_POLICY_ARTIFACT_BYTES;
     readonly sha256: typeof PLATFORM_AUTHORITY_POLICY_ARTIFACT_SHA256;
   }>;
-  readonly growthos_authority: Readonly<{
+  readonly predecessor: Readonly<{
+    readonly materialized_path: "apps/api/src/platform-authority/platform-authority-policy-matrix-v2.json";
+    readonly byte_length: 15_583;
+    readonly sha256: "f9e9591731772f974b087307b5d0365c58c86b501232804c77a20fd3592db01b";
+    readonly artifact_id: "platform-authority-policy-matrix/2026-09-04-reviewed-v2";
+    readonly matrix_revision: "reviewed-v2";
+    readonly schedule_rows_sha256: "a148e6ea30b7781a52fd4351319c3383641db9f2db9f557adceb13e00cf2d948";
+  }>;
+  /** The reviewed GrowthOS provenance of the v2 base stays pinned verbatim. */
+  readonly base_authority: Readonly<{
     readonly reviewed_head_commit: "17e68953ff2e26ac8433db5aa49689e5f9283659";
     readonly reviewed_head_tree: "46832215fc8189b4c2c71dc56b653d2eac401d7c";
     readonly artifact_commit: "cb572a149d44ab402d5cfcdaaa0aeb21c053ad9e";
@@ -84,13 +111,18 @@ export interface PlatformAuthorityPolicyProvenanceV2 {
     readonly artifact_commit_patch_stack_sha256: "a660488367c5197f84469c39524ae322cdb50973493ba9c3066e8346156143ce";
     readonly source_archive_sha256: "5906e7a287843c7bafd8d7bb20aa930d1ae97eb6cf2946110d27ecc3a5dfc75a";
   }>;
+  readonly successor: Readonly<{
+    readonly authorship: "backend_authored_successor";
+    readonly decision_ref: "docs/implementation-records/platform-channel-crawl-budget-authority.md";
+    readonly change_summary: "adds the channel_crawl capability section; the four schedule rows are byte-identical to the predecessor";
+  }>;
 }
 
 export interface VerifiedPlatformAuthorityPolicyAsset {
   readonly byteLength: typeof PLATFORM_AUTHORITY_POLICY_ARTIFACT_BYTES;
   readonly sha256: typeof PLATFORM_AUTHORITY_POLICY_ARTIFACT_SHA256;
-  readonly policy: PlatformAuthorityPolicySuccessorV2;
-  readonly provenance: PlatformAuthorityPolicyProvenanceV2;
+  readonly policy: PlatformAuthorityPolicySuccessorV3;
+  readonly provenance: PlatformAuthorityPolicyProvenanceV3;
 }
 
 export class PlatformAuthorityPolicyDriftError extends Error {
@@ -185,14 +217,24 @@ function deepFreeze<T>(value: T): T {
 }
 
 const FROZEN_PROVENANCE = deepFreeze({
-  schema_version: "growthos-platform-authority-policy-provenance/v2",
+  schema_version: "growthos-platform-authority-policy-provenance/v3",
   artifact: {
     materialized_path:
-      "ops/policy/platform-authority-policy-matrix-v2.json",
+      "apps/api/src/platform-authority/platform-authority-policy-matrix-v3.json",
     byte_length: PLATFORM_AUTHORITY_POLICY_ARTIFACT_BYTES,
     sha256: PLATFORM_AUTHORITY_POLICY_ARTIFACT_SHA256,
   },
-  growthos_authority: {
+  predecessor: {
+    materialized_path:
+      "apps/api/src/platform-authority/platform-authority-policy-matrix-v2.json",
+    byte_length: 15_583,
+    sha256: "f9e9591731772f974b087307b5d0365c58c86b501232804c77a20fd3592db01b",
+    artifact_id: "platform-authority-policy-matrix/2026-09-04-reviewed-v2",
+    matrix_revision: "reviewed-v2",
+    schedule_rows_sha256:
+      "a148e6ea30b7781a52fd4351319c3383641db9f2db9f557adceb13e00cf2d948",
+  },
+  base_authority: {
     reviewed_head_commit: "17e68953ff2e26ac8433db5aa49689e5f9283659",
     reviewed_head_tree: "46832215fc8189b4c2c71dc56b653d2eac401d7c",
     artifact_commit: "cb572a149d44ab402d5cfcdaaa0aeb21c053ad9e",
@@ -206,10 +248,17 @@ const FROZEN_PROVENANCE = deepFreeze({
     source_archive_sha256:
       "5906e7a287843c7bafd8d7bb20aa930d1ae97eb6cf2946110d27ecc3a5dfc75a",
   },
+  successor: {
+    authorship: "backend_authored_successor",
+    decision_ref:
+      "docs/implementation-records/platform-channel-crawl-budget-authority.md",
+    change_summary:
+      "adds the channel_crawl capability section; the four schedule rows are byte-identical to the predecessor",
+  },
 } as const);
 
 export const PLATFORM_AUTHORITY_POLICY_PROVENANCE =
-  FROZEN_PROVENANCE as PlatformAuthorityPolicyProvenanceV2;
+  FROZEN_PROVENANCE as PlatformAuthorityPolicyProvenanceV3;
 
 function exactProvenance(value: unknown): boolean {
   try {
@@ -219,7 +268,7 @@ function exactProvenance(value: unknown): boolean {
   }
 }
 
-function exactPolicy(value: unknown): PlatformAuthorityPolicySuccessorV2 {
+function exactPolicy(value: unknown): PlatformAuthorityPolicySuccessorV3 {
   const canonical = canonicalJson(value);
   const bytes = Buffer.from(`${canonical}\n`, "utf8");
   if (
@@ -229,13 +278,31 @@ function exactPolicy(value: unknown): PlatformAuthorityPolicySuccessorV2 {
   ) {
     drift();
   }
-  const parsed = JSON.parse(canonical) as PlatformAuthorityPolicySuccessorV2;
+  const parsed = JSON.parse(canonical) as PlatformAuthorityPolicySuccessorV3;
   if (
-    parsed.schema_version !== "platform-authority-policy-matrix/v2" ||
+    parsed.schema_version !== "platform-authority-policy-matrix/v3" ||
     parsed.artifact_id !== PLATFORM_AUTHORITY_POLICY_ARTIFACT_ID ||
     parsed.matrix_revision !== PLATFORM_AUTHORITY_POLICY_MATRIX_REVISION ||
     parsed.rows.length !== EXPECTED_ROW_IDS.length ||
-    !parsed.rows.every((row, index) => row.row_id === EXPECTED_ROW_IDS[index])
+    !parsed.rows.every((row, index) => row.row_id === EXPECTED_ROW_IDS[index]) ||
+    parsed.backend_review.review_kind !== "independent_read_only_diff_review" ||
+    parsed.backend_review.review_verdict !== "APPROVE" ||
+    parsed.backend_review.technical_contract_sha256 !==
+      "230c0252403f401f35003d3cd3e7d99912ae5689fb84c37bbd50ed624cd9325b"
+  ) {
+    drift();
+  }
+  const crawl = parsed.channel_crawl;
+  if (
+    crawl.purpose !== PLATFORM_AUTHORITY_CHANNEL_CRAWL_PURPOSE ||
+    crawl.temporal_namespace !== "platform-automation" ||
+    crawl.default_issuance_state !== "DENIED" ||
+    crawl.execution_envelope.execution_envelope_schema_version !==
+      "platform-execution-envelope/v1" ||
+    crawl.execution_envelope.maximum_pages_per_run !== "50" ||
+    crawl.execution_envelope.maximum_pages_per_channel_per_day !== "500" ||
+    crawl.execution_envelope.preview_pages !== "1" ||
+    crawl.execution_envelope.required_max_runs !== "1"
   ) {
     drift();
   }
@@ -270,13 +337,17 @@ export function verifyPlatformAuthorityPolicyAsset(input: {
 
 const CURRENT_POLICY = verifyPlatformAuthorityPolicyAsset({
   artifact: bundledJson(
-    "platform-authority-policy-matrix-v2.json",
+    "platform-authority-policy-matrix-v3.json",
     PLATFORM_AUTHORITY_POLICY_ARTIFACT_BYTES,
   ),
-  provenance: bundledJson("platform-authority-policy-provenance-v2.json", 2048),
+  provenance: bundledJson("platform-authority-policy-provenance-v3.json", 4096),
 });
 
-/** The unique current product policy. Candidate-v1 remains historical data only. */
+/**
+ * The unique current product policy (reviewed-v3). Candidate-v1 and reviewed-v2
+ * remain historical data: reviewed-v2 is still the byte-exact GrowthOS base the
+ * successor's schedule rows are verified against.
+ */
 export function loadVerifiedPlatformAuthorityPolicyAsset(): VerifiedPlatformAuthorityPolicyAsset {
   return CURRENT_POLICY;
 }

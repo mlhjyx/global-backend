@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { CHANNEL_DAILY_PAGE_CAP, CHANNEL_RUN_MAX_PAGES } from "../channels/channel-config";
 import {
   PLATFORM_AUTHORITY_POLICY_ARTIFACT_BYTES,
   PLATFORM_AUTHORITY_POLICY_ARTIFACT_SHA256,
@@ -20,6 +21,12 @@ const EXPECTED_ROW_IDS = [
 
 function sourceArtifactBytes(): Buffer {
   return readFileSync(
+    resolve(__dirname, "platform-authority-policy-matrix-v3.json"),
+  );
+}
+
+function reviewedV2Bytes(): Buffer {
+  return readFileSync(
     resolve(__dirname, "platform-authority-policy-matrix-v2.json"),
   );
 }
@@ -30,8 +37,8 @@ function expectDeepFrozen(value: unknown): void {
   for (const child of Object.values(value)) expectDeepFrozen(child);
 }
 
-describe("GrowthOS-owned current platform authority policy successor", () => {
-  it("loads the byte-exact reviewed-v2 artifact as the unique current policy", () => {
+describe("backend-reviewed platform authority policy successor v3", () => {
+  it("loads the byte-exact reviewed-v3 artifact as the unique current policy", () => {
     const bytes = sourceArtifactBytes();
     const loaded = loadVerifiedPlatformAuthorityPolicyAsset();
 
@@ -40,14 +47,14 @@ describe("GrowthOS-owned current platform authority policy successor", () => {
       PLATFORM_AUTHORITY_POLICY_ARTIFACT_SHA256,
     );
     expect(loaded).toMatchObject({
-      byteLength: 15_583,
+      byteLength: 15996,
       sha256:
-        "f9e9591731772f974b087307b5d0365c58c86b501232804c77a20fd3592db01b",
+        "f521671e2c4058025b99b9a6e646a1534645a35b6191288516583704cfa2dbd4",
       policy: {
-        schema_version: "platform-authority-policy-matrix/v2",
+        schema_version: "platform-authority-policy-matrix/v3",
         artifact_id:
-          "platform-authority-policy-matrix/2026-09-04-reviewed-v2",
-        matrix_revision: "reviewed-v2",
+          "platform-authority-policy-matrix/2026-11-05-reviewed-v3",
+        matrix_revision: "reviewed-v3",
         policy_revision_contract: {
           mode: "RECOMPUTE_ACTUAL_RUN_WITH_SUCCESSOR_IDENTITY",
           sample_values_authoritative: false,
@@ -69,17 +76,69 @@ describe("GrowthOS-owned current platform authority policy successor", () => {
     expectDeepFrozen(loaded);
   });
 
-  it("pins the exact GrowthOS source commit, tree, patch blob, patch bytes and materialization inputs", () => {
+  it("keeps the four schedule rows byte-identical to the reviewed-v2 successor base", () => {
+    const loaded = loadVerifiedPlatformAuthorityPolicyAsset();
+    const v2 = JSON.parse(reviewedV2Bytes().toString("utf8")) as {
+      rows: unknown[];
+    };
+
+    expect(loaded.policy.rows).toEqual(v2.rows);
+    expect(loaded.policy.predecessor).toEqual({
+      artifact_id: "platform-authority-policy-matrix/2026-09-04-reviewed-v2",
+      artifact_sha256:
+        "f9e9591731772f974b087307b5d0365c58c86b501232804c77a20fd3592db01b",
+      matrix_revision: "reviewed-v2",
+    });
+    // The provenance pins the same schedule-row digest, so a silent row edit
+    // breaks both the successor digest and the predecessor-row identity.
+    const rowsDigest = createHash("sha256")
+      .update(`${JSON.stringify(v2.rows)}\n`)
+      .digest("hex");
+    expect(rowsDigest).toBe(
+      PLATFORM_AUTHORITY_POLICY_PROVENANCE.predecessor.schedule_rows_sha256,
+    );
+  });
+
+  it("adds a channel-crawl capability section bound to the engine page caps", () => {
+    const loaded = loadVerifiedPlatformAuthorityPolicyAsset();
+
+    expect(loaded.policy.channel_crawl).toEqual({
+      purpose: "platform.channel_crawl",
+      temporal_namespace: "platform-automation",
+      default_issuance_state: "DENIED",
+      execution_envelope: {
+        execution_envelope_schema_version: "platform-execution-envelope/v1",
+        maximum_pages_per_run: String(CHANNEL_RUN_MAX_PAGES),
+        maximum_pages_per_channel_per_day: String(CHANNEL_DAILY_PAGE_CAP),
+        preview_pages: "1",
+        required_max_runs: "1",
+      },
+    });
+  });
+
+  it("pins the successor provenance chain: reviewed-v2 base plus backend authorship", () => {
     expect(PLATFORM_AUTHORITY_POLICY_PROVENANCE).toEqual({
-      schema_version: "growthos-platform-authority-policy-provenance/v2",
+      schema_version: "growthos-platform-authority-policy-provenance/v3",
       artifact: {
         materialized_path:
-          "ops/policy/platform-authority-policy-matrix-v2.json",
+          "apps/api/src/platform-authority/platform-authority-policy-matrix-v3.json",
+        byte_length: 15_996,
+        sha256:
+          "f521671e2c4058025b99b9a6e646a1534645a35b6191288516583704cfa2dbd4",
+      },
+      predecessor: {
+        materialized_path:
+          "apps/api/src/platform-authority/platform-authority-policy-matrix-v2.json",
         byte_length: 15_583,
         sha256:
           "f9e9591731772f974b087307b5d0365c58c86b501232804c77a20fd3592db01b",
+        artifact_id:
+          "platform-authority-policy-matrix/2026-09-04-reviewed-v2",
+        matrix_revision: "reviewed-v2",
+        schedule_rows_sha256:
+          "a148e6ea30b7781a52fd4351319c3383641db9f2db9f557adceb13e00cf2d948",
       },
-      growthos_authority: {
+      base_authority: {
         reviewed_head_commit:
           "17e68953ff2e26ac8433db5aa49689e5f9283659",
         reviewed_head_tree: "46832215fc8189b4c2c71dc56b653d2eac401d7c",
@@ -95,6 +154,13 @@ describe("GrowthOS-owned current platform authority policy successor", () => {
         source_archive_sha256:
           "5906e7a287843c7bafd8d7bb20aa930d1ae97eb6cf2946110d27ecc3a5dfc75a",
       },
+      successor: {
+        authorship: "backend_authored_successor",
+        decision_ref:
+          "docs/implementation-records/platform-channel-crawl-budget-authority.md",
+        change_summary:
+          "adds the channel_crawl capability section; the four schedule rows are byte-identical to the predecessor",
+      },
     });
   });
 
@@ -109,6 +175,10 @@ describe("GrowthOS-owned current platform authority policy successor", () => {
     ["desired mode", (value: Record<string, unknown>) => {
       const rows = value.rows as Array<Record<string, unknown>>;
       rows[1]!.desired_mode = "ENABLED";
+    }],
+    ["channel crawl purpose", (value: Record<string, unknown>) => {
+      (value.channel_crawl as Record<string, unknown>).purpose =
+        "platform.acquisition";
     }],
   ])("rejects %s drift", (_label, mutate) => {
     const artifact = JSON.parse(sourceArtifactBytes().toString("utf8")) as Record<
@@ -129,9 +199,9 @@ describe("GrowthOS-owned current platform authority policy successor", () => {
     const provenance = structuredClone(
       PLATFORM_AUTHORITY_POLICY_PROVENANCE,
     ) as unknown as {
-      growthos_authority: { patch_sha256: string };
+      predecessor: { schedule_rows_sha256: string };
     };
-    provenance.growthos_authority.patch_sha256 = "0".repeat(64);
+    provenance.predecessor.schedule_rows_sha256 = "0".repeat(64);
 
     expect(() =>
       verifyPlatformAuthorityPolicyAsset({
