@@ -83,6 +83,10 @@ export async function verifyMachineTokenResponse(
     const payload = decode(segments[1]!);
     decode(segments[2]!);
     const capability = trust.profile === "capability-request";
+    // P4-P4b：平台 schedule-writer 是「无 profile 的固定身份」——平台授权器要求
+    // typ 恰为 JWT 且禁止 profile 声明（见 platform-temporal machine_policy）；
+    // 引擎侧验证必须与该契约一致，其余 temporal 档案仍使用带 profile 的身份令牌。
+    const fixedIdentity = trust.profile === "temporal-platform-client";
     if (
       header.alg !== "RS256" ||
       typeof header.kid !== "string" ||
@@ -90,16 +94,22 @@ export async function verifyMachineTokenResponse(
       header.typ !==
         (capability
           ? "platform-automation-capability-reader+jwt"
-          : "temporal-runtime+jwt")
+          : fixedIdentity
+            ? "JWT"
+            : "temporal-runtime+jwt")
     )
       throw new MachineTokenDeniedError();
     const common = ["iss", "aud", "sub", "jti", "iat", "nbf", "exp"];
     const claims = capability
       ? new Parser(strictUtf8(payload)).parse([...common, "scope"])
-      : new Parser(strictUtf8(payload)).parse(
-          [...common, "profile", "permissions"],
-          ["permissions"],
-        );
+      : fixedIdentity
+        ? new Parser(strictUtf8(payload)).parse([...common, "permissions"], [
+            "permissions",
+          ])
+        : new Parser(strictUtf8(payload)).parse(
+            [...common, "profile", "permissions"],
+            ["permissions"],
+          );
     const { iat, nbf, exp } = claims;
     if (
       claims.iss !== trust.issuer ||
@@ -141,9 +151,12 @@ export async function verifyMachineTokenResponse(
       };
       const expected = permissions[trust.profile];
       const actualPermissions = claims.permissions;
+      const profileBound = fixedIdentity
+        ? claims.profile === undefined
+        : claims.profile === trust.profile;
       if (
         !expected ||
-        claims.profile !== trust.profile ||
+        !profileBound ||
         !Array.isArray(actualPermissions) ||
         actualPermissions.length !== expected.length ||
         !expected.every((value, index) => actualPermissions[index] === value)
