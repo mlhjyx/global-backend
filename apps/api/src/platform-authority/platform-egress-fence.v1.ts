@@ -21,7 +21,9 @@ export class PlatformEgressFenceError extends ExecutionControlError {
   }
 }
 
-export interface PlatformEgressBinding {
+export interface PlatformScheduleEgressBinding {
+  /** Absent means the schedule binding (historical callers). */
+  readonly subjectKind?: "schedule";
   readonly authorityId: string;
   readonly scheduleId: string;
   readonly workflowId: string;
@@ -37,6 +39,22 @@ export interface PlatformEgressBinding {
   /** Optional local hint; PostgreSQL rechecks the authoritative expiry. */
   readonly expiresAt?: Date;
 }
+
+/** P4-P4: per-request channel-crawl binding, parallel to the schedule shape. */
+export interface PlatformChannelCrawlEgressBinding {
+  readonly subjectKind: "source_channel";
+  readonly authorityId: string;
+  readonly channelId: string;
+  readonly crawlRunId: string;
+  readonly requestSha256: string;
+  readonly technicalPolicyRevision?: string;
+  readonly accountKey: string;
+  readonly expiresAt?: Date;
+}
+
+export type PlatformEgressBinding =
+  | PlatformScheduleEgressBinding
+  | PlatformChannelCrawlEgressBinding;
 
 export interface PlatformEgressAuthorization {
   readonly attemptId: string;
@@ -62,6 +80,9 @@ export interface PlatformEgressFencePort {
   ): Promise<PlatformEgressDispatchCapability>;
   acknowledged(attemptId: string, meta: Readonly<Record<string, unknown>>): Promise<void>;
   unknown(attemptId: string, meta: Readonly<Record<string, unknown>>): Promise<void>;
+  /** Crawl attempts live in their own durable table; the port must expose its transitions. */
+  acknowledgedChannelCrawl?(attemptId: string, meta: Readonly<Record<string, unknown>>): Promise<void>;
+  unknownChannelCrawl?(attemptId: string, meta: Readonly<Record<string, unknown>>): Promise<void>;
 }
 
 function invalid(code: string): never {
@@ -69,9 +90,29 @@ function invalid(code: string): never {
 }
 
 function validateBinding(binding: PlatformEgressBinding): void {
+  if (binding && typeof binding === "object" && binding.subjectKind === "source_channel") {
+    if (
+      !UUID.test(binding.authorityId) ||
+      !UUID.test(binding.channelId) ||
+      !UUID.test(binding.crawlRunId) ||
+      !SHA256.test(binding.requestSha256) ||
+      (binding.technicalPolicyRevision !== undefined &&
+        !SHA256.test(binding.technicalPolicyRevision)) ||
+      typeof binding.accountKey !== "string" ||
+      binding.accountKey !==
+        `platform:${binding.requestSha256}:${binding.crawlRunId}` ||
+      (binding.expiresAt !== undefined &&
+        (!(binding.expiresAt instanceof Date) ||
+          !Number.isFinite(binding.expiresAt.getTime())))
+    ) {
+      invalid("PLATFORM_EGRESS_BINDING_INVALID");
+    }
+    return;
+  }
   if (
     !binding ||
     typeof binding !== "object" ||
+    binding.subjectKind !== undefined ||
     !UUID.test(binding.authorityId) ||
     !SCHEDULES.has(binding.scheduleId) ||
     typeof binding.workflowId !== "string" ||
@@ -114,14 +155,20 @@ export class PlatformEgressFence {
     const capability: PlatformEgressDispatchCapability =
       await this.port.claimSend(binding, authorization, immutableOperation);
 
+    const crawl = binding.subjectKind === "source_channel";
+    const acknowledged = crawl
+      ? this.port.acknowledgedChannelCrawl?.bind(this.port)
+      : this.port.acknowledged.bind(this.port);
+    const unknown = crawl
+      ? this.port.unknownChannelCrawl?.bind(this.port)
+      : this.port.unknown.bind(this.port);
+    if (!acknowledged || !unknown) invalid(PLATFORM_EGRESS_FENCE_UNAVAILABLE);
     try {
       const result = await capability.dispatch(executePhysicalWire);
-      await this.port.acknowledged(capability.attemptId, {
-        state: "ACKNOWLEDGED",
-      });
+      await acknowledged(capability.attemptId, { state: "ACKNOWLEDGED" });
       return result;
     } catch (error) {
-      await this.port.unknown(capability.attemptId, {
+      await unknown(capability.attemptId, {
         state: "UNKNOWN",
         reason: "PHYSICAL_CALL_OR_ACK_UNKNOWN",
       });

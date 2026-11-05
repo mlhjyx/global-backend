@@ -1,14 +1,26 @@
 import { Injectable, Optional } from "@nestjs/common";
 import type { PlatformEgressOperation } from "./platform-egress-operation";
-import { CurrentPlatformExecutionPolicy, type CurrentPlatformPolicyProjection } from "./platform-current-policy";
+import {
+  CurrentPlatformChannelCrawlPolicy,
+  CurrentPlatformExecutionPolicy,
+  type CurrentPlatformPolicyProjection,
+} from "./platform-current-policy";
 
 import type { PrismaService } from "../prisma/prisma.service";
 import type {
+  PlatformChannelCrawlEgressBinding,
   PlatformEgressAuthorization,
   PlatformEgressBinding,
   PlatformEgressDispatchCapability,
   PlatformEgressFencePort,
+  PlatformScheduleEgressBinding,
 } from "./platform-egress-fence.v1";
+
+function isCrawlBinding(
+  binding: PlatformEgressBinding,
+): binding is PlatformChannelCrawlEgressBinding {
+  return binding.subjectKind === "source_channel";
+}
 
 type AuthorizationRow = Readonly<{
   attempt_id: string;
@@ -47,15 +59,74 @@ function confirmed(rows: unknown, field: string, code: string): void {
  */
 @Injectable()
 export class PrismaPlatformEgressFencePort implements PlatformEgressFencePort {
+  private readonly currentCrawlPolicy = new CurrentPlatformChannelCrawlPolicy();
+
   constructor(
     private readonly database: Pick<PrismaService, "$queryRaw">,
     @Optional() private readonly currentPolicy = new CurrentPlatformExecutionPolicy(),
   ) {}
 
-  private async effectivePolicy(
-    binding: PlatformEgressBinding,
+  private async effectiveCrawlPolicy(
+    binding: PlatformChannelCrawlEgressBinding,
     operation: PlatformEgressOperation,
-  ): Promise<{ effective: PlatformEgressBinding; policy: CurrentPlatformPolicyProjection }> {
+  ): Promise<{ effective: PlatformChannelCrawlEgressBinding; policy: CurrentPlatformPolicyProjection }> {
+    const rows = await this.database.$queryRaw<
+      ReadonlyArray<{
+        purpose: string;
+        subject_type: string;
+        subject_id: string;
+        request_sha256: string | null;
+        crawl_run_id: string | null;
+        technical_policy_revision: string | null;
+        cap_per_run_microusd: bigint | null;
+      }>
+    >`
+      SELECT purpose, subject_type, subject_id, request_sha256, crawl_run_id,
+             technical_policy_revision, cap_per_run_microusd
+      FROM "execution_budget_authority"
+      WHERE id = ${binding.authorityId}::uuid
+        AND scope_key = 'platform'
+        AND authority_kind = 'PLATFORM_GRANT'
+    `;
+    const row = rows[0];
+    if (
+      rows.length !== 1 || !row ||
+      row.subject_type !== "source_channel" ||
+      row.subject_id !== binding.channelId ||
+      row.request_sha256 !== binding.requestSha256 ||
+      row.crawl_run_id !== binding.crawlRunId ||
+      binding.accountKey !==
+        `platform:${row.request_sha256}:${row.crawl_run_id}` ||
+      typeof row.technical_policy_revision !== "string" ||
+      typeof row.cap_per_run_microusd !== "bigint" ||
+      (binding.technicalPolicyRevision !== undefined &&
+        binding.technicalPolicyRevision !== row.technical_policy_revision)
+    ) {
+      throw new Error("PLATFORM_EGRESS_BINDING_INVALID");
+    }
+    const effective = Object.freeze({
+      ...binding,
+      technicalPolicyRevision: row.technical_policy_revision,
+    });
+    const policy = this.currentCrawlPolicy.attest(
+      {
+        purpose: row.purpose,
+        subjectType: row.subject_type,
+        subjectId: row.subject_id,
+        requestSha256: row.request_sha256,
+        crawlRunId: row.crawl_run_id,
+        technicalPolicyRevision: row.technical_policy_revision,
+        authorizedCapMicrousd: row.cap_per_run_microusd,
+      },
+      operation.execution,
+    );
+    return { effective, policy };
+  }
+
+  private async effectivePolicy(
+    binding: PlatformScheduleEgressBinding,
+    operation: PlatformEgressOperation,
+  ): Promise<{ effective: PlatformScheduleEgressBinding; policy: CurrentPlatformPolicyProjection }> {
     const rows = await this.database.$queryRaw<
       ReadonlyArray<{
         workflow_id: string | null;
@@ -101,6 +172,29 @@ export class PrismaPlatformEgressFencePort implements PlatformEgressFencePort {
     binding: PlatformEgressBinding,
     operation: PlatformEgressOperation,
   ): Promise<PlatformEgressAuthorization> {
+    if (isCrawlBinding(binding)) {
+      const { effective, policy } = await this.effectiveCrawlPolicy(binding, operation);
+      const rows = await this.database.$queryRaw<AuthorizationRow[]>`
+        SELECT * FROM authorize_platform_channel_crawl_egress_v1(
+          ${effective.authorityId}::uuid,
+          ${effective.channelId}::uuid,
+          ${effective.crawlRunId}::uuid,
+          ${effective.requestSha256}::text,
+          ${operation.operationKey}::text,
+          ${policy.policyRevision}::text,
+          ${effective.accountKey}::text,
+          ${operation.budgetOperationId}::uuid,
+          ${operation.budgetOperationKey}::text,
+          ${operation.reservedMicrousd}::bigint,
+          ${policy.requiredCapMicrousd}::bigint,
+          ${policy.operationReservationMicrousd}::bigint,
+          ${policy.policyArtifactSha256}::text,
+          ${policy.executionEnvelopeSha256}::text
+        )
+      `;
+      const row = one(rows, "PLATFORM_EGRESS_AUTHORIZATION_UNAVAILABLE");
+      return Object.freeze({ attemptId: row.attempt_id });
+    }
     const { effective, policy } = await this.effectivePolicy(binding, operation);
     const rows = await this.database.$queryRaw<AuthorizationRow[]>`
       SELECT * FROM authorize_platform_egress_v2(
@@ -125,6 +219,38 @@ export class PrismaPlatformEgressFencePort implements PlatformEgressFencePort {
     authorization: PlatformEgressAuthorization,
     operation: PlatformEgressOperation,
   ): Promise<PlatformEgressDispatchCapability> {
+    if (isCrawlBinding(binding)) {
+      const { effective, policy } = await this.effectiveCrawlPolicy(binding, operation);
+      const rows = await this.database.$queryRaw<ClaimRow[]>`
+        SELECT * FROM claim_platform_channel_crawl_egress_send_v1(
+          ${authorization.attemptId}::uuid,
+          ${effective.authorityId}::uuid,
+          ${effective.channelId}::uuid,
+          ${effective.crawlRunId}::uuid,
+          ${effective.requestSha256}::text,
+          ${operation.operationKey}::text,
+          ${policy.policyRevision}::text,
+          ${effective.accountKey}::text,
+          ${operation.budgetOperationId}::uuid,
+          ${operation.budgetOperationKey}::text,
+          ${operation.reservedMicrousd}::bigint,
+          ${policy.requiredCapMicrousd}::bigint,
+          ${policy.operationReservationMicrousd}::bigint,
+          ${policy.policyArtifactSha256}::text,
+          ${policy.executionEnvelopeSha256}::text
+        )
+      `;
+      const row = one(rows, "PLATFORM_EGRESS_SEND_CAS_REJECTED");
+      let consumed = false;
+      return Object.freeze({
+        attemptId: row.attempt_id,
+        dispatch: async <T>(executePhysicalWire: () => Promise<T>): Promise<T> => {
+          if (consumed) throw new Error("PLATFORM_EGRESS_CAPABILITY_REUSED");
+          consumed = true;
+          return executePhysicalWire();
+        },
+      });
+    }
     const { effective, policy } = await this.effectivePolicy(binding, operation);
     const rows = await this.database.$queryRaw<ClaimRow[]>`
       SELECT * FROM claim_platform_egress_send_v2(
@@ -173,5 +299,35 @@ export class PrismaPlatformEgressFencePort implements PlatformEgressFencePort {
       SELECT mark_unknown_platform_egress_v1(${attemptId}::uuid, ${reason}::text)
     `;
     confirmed(rows, "mark_unknown_platform_egress_v1", "PLATFORM_EGRESS_UNKNOWN_NOT_CONFIRMED");
+  }
+
+  async acknowledgedChannelCrawl(
+    attemptId: string,
+    meta: Readonly<Record<string, unknown>>,
+  ): Promise<void> {
+    const digest = typeof meta.digest === "string" ? meta.digest : null;
+    const rows = await this.database.$queryRaw`
+      SELECT acknowledge_platform_channel_crawl_egress_v1(${attemptId}::uuid, ${digest}::text)
+    `;
+    confirmed(
+      rows,
+      "acknowledge_platform_channel_crawl_egress_v1",
+      "PLATFORM_EGRESS_ACK_NOT_CONFIRMED",
+    );
+  }
+
+  async unknownChannelCrawl(
+    attemptId: string,
+    meta: Readonly<Record<string, unknown>>,
+  ): Promise<void> {
+    const reason = typeof meta.reason === "string" ? meta.reason : "PHYSICAL_CALL_OR_ACK_UNKNOWN";
+    const rows = await this.database.$queryRaw`
+      SELECT mark_unknown_platform_channel_crawl_egress_v1(${attemptId}::uuid, ${reason}::text)
+    `;
+    confirmed(
+      rows,
+      "mark_unknown_platform_channel_crawl_egress_v1",
+      "PLATFORM_EGRESS_UNKNOWN_NOT_CONFIRMED",
+    );
   }
 }
