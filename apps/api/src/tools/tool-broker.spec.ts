@@ -1605,4 +1605,47 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
     expect(port.replay).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();
   });
+
+  it("keeps the subject-binding hold for a platform call without a transient scope", async () => {
+    const { broker, tool, execute, port, release } = harness({ platform: true, toolId: "crawl4ai.render" });
+    tool.transientResultScopes = ["platform_channel_crawl"];
+    await expect(
+      broker.invoke("crawl4ai.render", { url: "https://fair.example/list" }, {
+        workspaceId: "platform",
+        runId: "platform:run",
+        platformEgress: { authorizeAndDispatch: (_operation, send) => send() },
+      }),
+    ).rejects.toMatchObject({ name: "ToolPolicyDenied", reason: "GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD" });
+    expect(port.admit).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledOnce();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("denies a transient scope on a paid call and releases the paid reservation", async () => {
+    const { tool } = fetchTool();
+    tool.transientResultScopes = ["platform_channel_crawl"];
+    const settleOperation = vi.fn(async () => "SETTLED");
+    const paidLedger = {
+      reserveOperation: vi.fn(async () => ({ kind: "execute" as const })),
+      settleOperation,
+    };
+    const { broker } = makeBroker(tool, { paidLedger: paidLedger as never });
+    await expect(
+      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, {
+        workspaceId: "00000000-0000-4000-8000-000000000001",
+        siteId: "00000000-0000-4000-8000-000000000002",
+        runId: "00000000-0000-4000-8000-000000000003",
+        taskContractId: "site_builder.brand_profile",
+        paidCost: { scopeKey: "brand-profile-research" },
+        transientResultScope: "platform_channel_crawl",
+      }),
+    ).rejects.toMatchObject({ name: "ToolPolicyDenied", reason: "TRANSIENT_RESULT_SCOPE_DENIED" });
+    // The paid reservation taken before this check must be closed, not leaked.
+    expect(settleOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: "RELEASED",
+        errorCode: "TRANSIENT_RESULT_SCOPE_DENIED",
+      }),
+    );
+  });
 });

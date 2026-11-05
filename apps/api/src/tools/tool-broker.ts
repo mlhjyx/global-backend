@@ -471,7 +471,19 @@ export class ToolBroker implements ExecutionBroker {
         ctx.workspaceId === "platform" &&
         (tool.transientResultScopes ?? []).includes(scope);
       if (!allowed) {
-        if (reservation && !reservation.replay) await this.budget.release(reservation);
+        // The paid ledger (or the generic budget store) reserved before this
+        // check: close that reservation exactly like the other post-reserve
+        // denial paths so nothing is left unresolved before the wire.
+        if (paidScope) {
+          await this.settlePersistentOperation({
+            scope: paidScope,
+            status: "RELEASED",
+            measurement: this.notIncurredMeasurement(),
+            errorCode: "TRANSIENT_RESULT_SCOPE_DENIED",
+          });
+        } else if (reservation && !reservation.replay) {
+          await this.budget.release(reservation);
+        }
         this.trace(ctx, tool, "DENIED", "TRANSIENT_RESULT_SCOPE_DENIED", 0, now() - started);
         throw new ToolPolicyDenied(toolId, "TRANSIENT_RESULT_SCOPE_DENIED");
       }
