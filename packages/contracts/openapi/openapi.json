@@ -10136,6 +10136,62 @@
         "description": "立即运行抓取通道（同 preview 的门槛与限额，仅运营身份 ops:write；失败率连续 3 轮 >30% 自动停用）。"
       }
     },
+    "/api/v1/source-channels/{channelId}/records": {
+      "get": {
+        "operationId": "ChannelsController_records_v1",
+        "parameters": [
+          {
+            "name": "channelId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "查看渠道最近物化的抓取记录（含联系人字段；PII 按 OWNER-DECISION-2026-11-05 明文存储）",
+        "tags": [
+          "Channels"
+        ],
+        "x-required-scopes": [
+          "ops:read"
+        ]
+      }
+    },
     "/api/v1/imported-buyers/preview": {
       "post": {
         "operationId": "ChannelsController_previewImport_v1",
