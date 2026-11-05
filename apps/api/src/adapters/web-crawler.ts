@@ -46,6 +46,18 @@ export function renderCacheMode(env: NodeJS.ProcessEnv = process.env): string {
     ? value
     : "ENABLED";
 }
+
+/**
+ * 单页导航超时（毫秒）：env `CRAWLER_PAGE_TIMEOUT_MS`，默认 45000，钳制在 5s–180s。
+ * 慢站（1MB+ 服务端渲染页）实测 25–45s 贴边，需要时抬高而不是改代码重新发版。
+ */
+export function pageTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.CRAWLER_PAGE_TIMEOUT_MS;
+  if (raw === undefined || raw.trim() === "") return 45_000;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 45_000;
+  return Math.min(180_000, Math.max(5_000, Math.round(parsed)));
+}
 export interface CrawlResult {
   url: string;
   text: string;
@@ -132,7 +144,7 @@ export async function crawlHtml(
           type: "CrawlerRunConfig",
           params: {
             delay_before_return_html: renderDelaySeconds(),
-            page_timeout: 45000,
+            page_timeout: pageTimeoutMs(),
             cache_mode: renderCacheMode(),
           },
         },
