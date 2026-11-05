@@ -56,4 +56,12 @@ describe('M1 极简 HTML 选择器', () => {
       'A&D AB &bogus; &#0; <x>',
     );
   });
+
+  it('decodes each text segment exactly once regardless of selector depth', () => {
+    // Double-escaped input renders as "Foo &amp; Bar" in a browser; matching the
+    // container or the leaf must yield the same single-decoded text.
+    const html = '<div class="item"><span>Foo &amp;amp; Bar</span></div>';
+    expect(selectText(html, '.item')).toBe('Foo &amp; Bar');
+    expect(selectText(html, '.item span')).toBe('Foo &amp; Bar');
+  });
 });

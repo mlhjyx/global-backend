@@ -276,9 +276,17 @@ describe("Crawl4AI render request parameters are env-configurable", () => {
 
   it("reads the page navigation timeout with a safe default and clamps", () => {
     expect(pageTimeoutMs({})).toBe(45_000);
-    expect(pageTimeoutMs({ CRAWLER_PAGE_TIMEOUT_MS: "120000" })).toBe(120_000);
+    expect(pageTimeoutMs({ CRAWLER_PAGE_TIMEOUT_MS: "60000" })).toBe(60_000);
     expect(pageTimeoutMs({ CRAWLER_PAGE_TIMEOUT_MS: "1000" })).toBe(5_000);
-    expect(pageTimeoutMs({ CRAWLER_PAGE_TIMEOUT_MS: "999999" })).toBe(180_000);
+    // The ceiling stays below the /crawl client abort: a larger page_timeout can
+    // never succeed because the request is aborted first and the page is counted
+    // as a failure.
+    expect(pageTimeoutMs({ CRAWLER_PAGE_TIMEOUT_MS: "999999" })).toBe(
+      CRAWL4AI_REQUEST_TIMEOUT_MS - 5_000,
+    );
+    expect(pageTimeoutMs({ CRAWLER_PAGE_TIMEOUT_MS: "120000" })).toBe(
+      CRAWL4AI_REQUEST_TIMEOUT_MS - 5_000,
+    );
     expect(pageTimeoutMs({ CRAWLER_PAGE_TIMEOUT_MS: "abc" })).toBe(45_000);
     expect(pageTimeoutMs({ CRAWLER_PAGE_TIMEOUT_MS: "-5" })).toBe(45_000);
   });

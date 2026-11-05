@@ -107,10 +107,17 @@ export function decodeHtmlEntities(value: string): string {
   );
 }
 
-export function nodeText(node: HtmlNode): string {
+function rawNodeText(node: HtmlNode): string {
   const parts = [...node.texts];
-  for (const child of node.children) parts.push(nodeText(child));
-  return decodeHtmlEntities(parts.join(' ')).replace(/\s+/gu, ' ').trim();
+  for (const child of node.children) parts.push(rawNodeText(child));
+  return parts.join(' ');
+}
+
+export function nodeText(node: HtmlNode): string {
+  // Decode exactly once, after collecting the raw subtree text: decoding per
+  // recursion level would decode nested content N+1 times and make the same
+  // company name depend on which level the selector matched.
+  return decodeHtmlEntities(rawNodeText(node)).replace(/\s+/gu, ' ').trim();
 }
 
 interface Compound {
