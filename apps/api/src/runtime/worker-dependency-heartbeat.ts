@@ -47,8 +47,10 @@ export async function startWorkerDependencyHeartbeat(input: {
   loopLag?: () => Promise<number>;
   loopLagSkipMs?: number;
   onBlocked: (code: string) => void;
+  log?: (line: string) => void;
 }): Promise<WorkerDependencyHeartbeatHandle> {
   const intervalMs = input.intervalMs ?? DEFAULT_INTERVAL_MS;
+  const log = input.log ?? ((line: string) => console.error(line));
   const failuresBeforeDrain =
     input.failuresBeforeDrain ?? DEFAULT_FAILURES_BEFORE_DRAIN;
   const startupRetryDelayMs =
@@ -70,6 +72,18 @@ export async function startWorkerDependencyHeartbeat(input: {
   const drain = async (code: string): Promise<void> => {
     stopped = true;
     if (timer.current) clearInterval(timer.current);
+    // One structured line so a drain can be found, counted and alarmed on
+    // without reading the free-form logs around it.
+    log(
+      JSON.stringify({
+        event: 'worker_dependency_drain',
+        role: input.role ?? 'WORKER',
+        taskQueue: input.taskQueue,
+        code,
+        consecutiveFailures,
+        at: new Date().toISOString(),
+      }),
+    );
     input.onBlocked(code);
     await input.leases
       .heartbeat(input.role ?? "WORKER", "DRAINING", input.taskQueue)

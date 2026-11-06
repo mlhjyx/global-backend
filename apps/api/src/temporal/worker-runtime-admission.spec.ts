@@ -107,7 +107,8 @@ describe("worker runtime admission wiring", () => {
     const lease = source.indexOf("new PrismaRuntimeProcessLeaseStore");
     expect(databaseAdmission).toBeGreaterThan(-1);
     expect(databaseAdmission).toBeLessThan(lease);
-    expect(source).toContain("check: async () => {");
+    // The pre-poll gate reuses the same full dependency check as the heartbeat.
+    expect(source).toContain("check: dependencyCheck(false)");
     expect(source).not.toContain(
       "await holdWorkerNotReady(appDatabaseReadiness.code",
     );
@@ -124,15 +125,19 @@ describe("worker runtime admission wiring", () => {
   });
 
   it("includes app-user database and exact migration compatibility in the recurring drain gate", () => {
-    const recurring = source.slice(
-      source.indexOf("startWorkerDependencyHeartbeat"),
+    const shared = source.slice(
+      source.indexOf("const dependencyCheck ="),
+      source.indexOf("Worker.create"),
     );
-    expect(recurring).toContain("prisma.reconnect()");
-    expect(recurring).toContain(
+    expect(shared).toContain("prisma.reconnect()");
+    expect(shared).toContain(
       "assertMigrationCompatible(prisma, releaseIdentity)",
     );
-    expect(recurring).toContain(
+    expect(shared).toContain(
       "checkGenericArtifactStorageReadiness(process.env)",
     );
+    // The startup gate and the recurring heartbeat share that exact check.
+    expect(source).toContain("check: dependencyCheck(false)");
+    expect(source).toContain("check: dependencyCheck(true)");
   });
 });

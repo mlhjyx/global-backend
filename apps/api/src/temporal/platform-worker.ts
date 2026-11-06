@@ -30,7 +30,14 @@ import {
   startWorkerProcessSignalCoordinator,
 } from "../runtime/worker-lease-heartbeat";
 import { startWorkerDependencyHeartbeat } from "../runtime/worker-dependency-heartbeat";
-import { waitForWorkerDependencyAdmission } from "../runtime/worker-dependency-admission";
+import {
+  migrationCheckFailure,
+  waitForWorkerDependencyAdmission,
+} from "../runtime/worker-dependency-admission";
+import {
+  WORKER_SHUTDOWN_OPTIONS,
+  armWorkerExitDeadline,
+} from "../runtime/worker-shutdown-policy";
 import { waitForWorkerQueueAdmission } from "../runtime/worker-queue-admission";
 import { PostgresBudgetStore } from "../tools/budget-store";
 import { ExecutionBudgetGrantVerifier } from "../execution-budget/execution-budget-grant.verifier";
@@ -168,6 +175,15 @@ async function main(): Promise<void> {
       return { status: "failed", code: database.code } as const;
     try {
       await assertMigrationCompatible(prisma, identity);
+    } catch (error) {
+      // Only the deterministic revision mismatch drains at once; an unreadable
+      // database stays on the heartbeat's consecutive-failure tolerance.
+      return migrationCheckFailure(
+        error,
+        "PLATFORM_WORKER_DATABASE_UNAVAILABLE",
+      );
+    }
+    try {
       await ownerDb.$connect();
       await writer.$connect();
     } catch {
@@ -220,6 +236,7 @@ async function main(): Promise<void> {
       leases.instanceId("PLATFORM_WORKER"),
     ),
     workflowsPath: require.resolve("./platform-workflows"),
+    ...WORKER_SHUTDOWN_OPTIONS,
     dataConverter: {
       failureConverterPath: require.resolve("./diagnostic-failure-converter"),
     },
@@ -325,6 +342,10 @@ async function main(): Promise<void> {
     shutdown.markRunning();
     await running;
   } finally {
+    // The worker has stopped polling. If anything below hangs, the process
+    // must still exit so the container's restart policy re-enters the startup
+    // gates instead of leaving a drained container alive (2026-11-05).
+    const exitDeadline = armWorkerExitDeadline();
     capability?.stop();
     unbind();
     machine.client.close();
@@ -337,6 +358,7 @@ async function main(): Promise<void> {
       .catch(() => undefined);
     await connection.close().catch(() => undefined);
     await cleanup();
+    exitDeadline.clear();
   }
 }
 

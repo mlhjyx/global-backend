@@ -1,7 +1,7 @@
 # platform-worker 依赖排空策略修正 · 落地设计文档（2026-11-06）
 
-> 生命周期：`DRAFT`
-> 生命周期依据：2026-11-05/06 发车 #822 时 platform-worker 因平台权威瞬时故障自行排空、约 1 小时无人消费、需人工重启（见 §1）。本文件待产品负责人过目批准后转 `APPROVED` 并进入 TDD。
+> 生命周期：`APPROVED`
+> 生命周期依据：2026-11-06 产品负责人批准 D-a~D-f 推荐值（「批准开工」）；批准前已完成 §0.6 三项门禁（设计文档 §4 / 闭环设计 §5 / 联网研究 §10）。
 > 任务启动门（计划 §0.6）：① 设计文档（本文）② 闭环设计（§5）③ 联网研究（§10）→ 产品负责人过目批准 → TDD。
 
 ## 1. 背景与目标
@@ -45,10 +45,10 @@
 
 | 文件 | 现状 | 改动 |
 | --- | --- | --- |
-| `apps/api/src/platform-authority/platform-capability-cache.ts` | 刷新失败即 `cached = undefined` | 刷新失败**保留**仍在上 `validUntil` 内的最后良好快照；到期后照旧 unavailable |
+| `apps/api/src/platform-authority/platform-capability-cache.ts` | 刷新失败即 `cached = undefined` | 刷新失败**保留**仍在上 `validUntil` 内的最后良好快照；到期后照旧 unavailable；新增 `verified()`——`refresh()` 失败也会 resolve，运行时只有持有已验证快照的新缓存才允许替换旧缓存 |
 | `apps/api/src/platform-authority/platform-capability-runtime.ts` | 刷新周期固定 10s；失败外层 `invalidate()` 丢弃缓存对象 | 失败后 2s 快速重试、成功后回到 10s；普通刷新失败不再 `invalidate()`（身份/pin/token 失效仍立即清空） |
 | `apps/api/src/temporal/platform-worker.ts` | `Worker.create` 无 `shutdownGraceTime/shutdownForceTime`；finally 清理无兜底退出；迁移不一致按 3 连败 | 加 `shutdownGraceTime: '30s'`、`shutdownForceTime: '60s'`；finally 内装 15s 强制退出兜底；`MIGRATION_REVISION_MISMATCH` 返回 `drainImmediately: true` |
-| `apps/api/src/temporal/worker.ts`（客户 worker） | 同一套关停/心跳接线 | 同样的关停有界参数与退出兜底、迁移不一致立即排空（机制共享，行为一致） |
+| `apps/api/src/temporal/worker.ts`（客户 worker） | 同一套关停/心跳接线；启动期排空后 `holdWorkerNotReady` 永久等待、不再探测 | 同样的关停有界参数与退出兜底、迁移不一致立即排空；抽出完整的依赖检查并加启动门（`requireReady:false`），重启后等依赖恢复再自动重新准入，不再永久 hold |
 | 新文件 `apps/api/src/runtime/worker-exit-deadline.ts` | — | 强制退出兜底的可注入实现（`exit`/定时器可测） |
 | `apps/api/src/runtime/worker-dependency-heartbeat.ts` | 排空仅经 `onBlocked(code)` 打一行字符串 | 排空时额外输出一条结构化事件行（role/taskQueue/code/连续失败次数/时间），`log` 可注入 |
 | `apps/api/src/runtime/worker-dependency-heartbeat.spec.ts` | 锁 3 连败/立即排空/loop-lag | 增：结构化排空事件；既有断言保持 |
@@ -65,6 +65,7 @@
 - `createCapabilityCache.refresh()` 失败时**不再清空** `cached`：`check()` 仍按每行 `validUntil`（≤ `expiresAt` ≤ `issuedAt+30s`）判定，到期即 unavailable——容忍窗口完全由签发方签名定义，不是本地启发式。
 - `CapabilityRuntime.refresh()`：普通刷新失败保留上一份缓存对象；`current()`（身份/pin/机器令牌）失败、配置指纹变化、`stop()` 仍立即清空。
 - 刷新节奏：成功后 10s 下一次；失败后 2s 重试（快照最多 30s 有效，2s 重试可在到期前追回；恢复时也更快补齐）。失败计数与退避不进持久层。
+- 新缓存只有在 `verified()`（确实装入了已验证快照）时才替换旧缓存：`refresh()` 对失败也会 resolve（缓存层自己的旧语义），不设这道门会把**空缓存**装上去顶掉好的。
 - 结果：第 1 条链路里「单次刷新失败 → 下一探针立即不可证明」不再成立；≤30s 的 gain-saas 抖动对心跳完全不可见。
 
 ### 4.2 排空后自动恢复：有界关停 + 确定退出 + 启动门重准入

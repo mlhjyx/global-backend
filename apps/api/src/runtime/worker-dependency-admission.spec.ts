@@ -1,8 +1,47 @@
 import { describe, expect, it, vi } from 'vitest';
+import { MigrationRevisionMismatchError } from './runtime-process-lease';
 import {
+  migrationCheckFailure,
+  migrationMismatchFailure,
   selectWorkerDependencyAdmission,
   waitForWorkerDependencyAdmission,
 } from './worker-dependency-admission';
+
+describe('migrationMismatchFailure', () => {
+  it('marks a migration revision mismatch as an immediate drain, not a tolerated probe failure', () => {
+    // The mismatch is a deterministic fact read from the database; polling on a
+    // schema the image does not match must stop at the first probe.
+    expect(migrationMismatchFailure()).toEqual({
+      status: 'failed',
+      code: 'MIGRATION_REVISION_MISMATCH',
+      drainImmediately: true,
+    });
+  });
+
+  it('keeps a transport failure on the tolerated path', () => {
+    expect(
+      migrationCheckFailure(new Error('boom'), 'WORKER_DATABASE_UNAVAILABLE'),
+    ).toEqual({ status: 'failed', code: 'WORKER_DATABASE_UNAVAILABLE' });
+    // Only the sentinel type drains at once; a plain error that merely carries
+    // the code text is still a probe failure to tolerate.
+    expect(
+      migrationCheckFailure(
+        new Error('MIGRATION_REVISION_MISMATCH'),
+        'WORKER_DATABASE_UNAVAILABLE',
+      ),
+    ).toEqual({ status: 'failed', code: 'WORKER_DATABASE_UNAVAILABLE' });
+    expect(
+      migrationCheckFailure(
+        new MigrationRevisionMismatchError(),
+        'WORKER_DATABASE_UNAVAILABLE',
+      ),
+    ).toEqual({
+      status: 'failed',
+      code: 'MIGRATION_REVISION_MISMATCH',
+      drainImmediately: true,
+    });
+  });
+});
 
 describe('waitForWorkerDependencyAdmission', () => {
   it('fails Worker admission when an authority capability is unavailable after cutover', () => {

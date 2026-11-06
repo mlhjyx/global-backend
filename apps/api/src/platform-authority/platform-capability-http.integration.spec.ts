@@ -218,7 +218,7 @@ describe("capability receiver real HTTP integration", () => {
     expect(fixture.cache.check("acq-sweep").status).toBe("failed");
     expect(fixture.seen).toHaveLength(1);
   });
-  it("rejects a previously valid response replayed for a fresh request", async () => {
+  it("rejects a previously valid response replayed for a fresh request without displacing the verified snapshot", async () => {
     let previous = "";
     const fixture = await setup({
       reply: async (nonce) => {
@@ -229,15 +229,21 @@ describe("capability receiver real HTTP integration", () => {
     await fixture.cache.refresh();
     expect(fixture.cache.check("acq-sweep").status).toBe("ok");
     await fixture.cache.refresh();
+    // The replayed response is refused, but the still-signed snapshot it would
+    // have replaced stays usable until its own validUntil.
+    expect(fixture.cache.check("acq-sweep").status).toBe("ok");
+    now = NOW + 1000;
     expect(fixture.cache.check("acq-sweep").status).toBe("failed");
   });
-  it("clears a good cache when the service later refuses authentication", async () => {
+  it("keeps the good cache until its signed deadline when the service later refuses authentication", async () => {
     let deny = false;
     const fixture = await setup({ deny: () => deny });
     await fixture.cache.refresh();
     expect(fixture.cache.check("acq-sweep").status).toBe("ok");
     deny = true;
     await fixture.cache.refresh();
+    expect(fixture.cache.check("acq-sweep").status).toBe("ok");
+    now = NOW + 1000;
     expect(fixture.cache.check("acq-sweep").status).toBe("failed");
   });
 });

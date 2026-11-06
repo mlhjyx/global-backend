@@ -8,7 +8,10 @@ import {
   vi,
 } from "vitest";
 import { chmodSync } from "node:fs";
-import { CapabilityRuntime } from "./platform-capability-runtime";
+import {
+  CapabilityRuntime,
+  nextCapabilityRefreshDelayMs,
+} from "./platform-capability-runtime";
 import { RuntimeReadinessContributorRegistry } from "../runtime/runtime-readiness-registry";
 import type { RuntimeReleaseIdentity } from "../runtime/runtime-release-identity";
 import { capabilityRuntimeFixture } from "./platform-capability-runtime.test-fixture";
@@ -79,9 +82,12 @@ describe("shared capability lifecycle fail-closed composition", () => {
       expect(fixture.state.bodyBytes).toBeLessThanOrEqual(4096);
       fixture.state.mode = "denied";
       await runtime.refresh();
+      // A failed refresh must not install the rejected snapshot, but it also
+      // must not discard the last one the issuer signed: that still-valid
+      // snapshot keeps the fact ok until its own validUntil (≤30s).
       expect(
         (await registry.check("platform_acq_sweep_temporal_proof")).status,
-      ).toBe("failed");
+      ).toBe("ok");
       fixture.state.mode = "good";
       await runtime.refresh();
       expect(
@@ -91,7 +97,7 @@ describe("shared capability lifecycle fail-closed composition", () => {
       await runtime.refresh();
       expect(
         (await registry.check("platform_acq_sweep_temporal_proof")).status,
-      ).toBe("failed");
+      ).toBe("ok");
     } finally {
       runtime.stop();
       fixture.state.mode = "good";
@@ -107,7 +113,7 @@ describe("shared capability lifecycle fail-closed composition", () => {
     "oversize",
     "enableDisabled",
   ])(
-    "clears the previously valid fact on %s without another mint",
+    "keeps the previously valid fact through a failed refresh on %s without another mint",
     async (mode) => {
       const registry = new RuntimeReadinessContributorRegistry();
       const runtime = new CapabilityRuntime({
@@ -123,8 +129,10 @@ describe("shared capability lifecycle fail-closed composition", () => {
         );
         fixture.state.mode = mode;
         await runtime.refresh();
+        // Neither a rejected snapshot nor a failed transport may displace the
+        // last verified one; its signed validUntil (≤30s) is the tolerance.
         expect((await registry.check("platform_acq_sweep_issuer")).status).toBe(
-          "failed",
+          "ok",
         );
         expect(fixture.state.mints).toBe(1);
       } finally {
@@ -270,5 +278,14 @@ describe("shared capability lifecycle fail-closed composition", () => {
         }),
     ).toThrow("already registered");
     remove();
+  });
+});
+
+describe("capability refresh cadence", () => {
+  it("retries a failed refresh quickly and returns to the steady interval after a success", () => {
+    // The signed snapshot lives at most 30s; a 2s retry can still recover it
+    // before it expires, while 10s would spend a third of the window per miss.
+    expect(nextCapabilityRefreshDelayMs(false)).toBe(2_000);
+    expect(nextCapabilityRefreshDelayMs(true)).toBe(10_000);
   });
 });

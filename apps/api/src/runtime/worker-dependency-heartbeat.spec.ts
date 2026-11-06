@@ -117,6 +117,38 @@ describe('startWorkerDependencyHeartbeat', () => {
     handle.stop();
   });
 
+  it('emits one structured drain event carrying the reason and failure count', async () => {
+    const log = vi.fn<(line: string) => void>();
+    const started = startWorkerDependencyHeartbeat({
+      check: vi
+        .fn<() => Promise<CheckResult>>()
+        .mockResolvedValue({
+          status: 'failed',
+          code: 'PLATFORM_BUDGET_AUTHORITY_NOT_READY',
+          drainImmediately: true,
+        } as CheckResult),
+      worker: { shutdown: vi.fn() },
+      leases: { heartbeat: vi.fn(async () => undefined) },
+      taskQueue: 'understanding',
+      onBlocked: vi.fn(),
+      log,
+      loopLag: async () => 0,
+    });
+    const handle = await started;
+
+    expect(handle.admitted).toBe(false);
+    expect(log).toHaveBeenCalledTimes(1);
+    const event = JSON.parse(log.mock.calls[0]![0]);
+    expect(event).toMatchObject({
+      event: 'worker_dependency_drain',
+      role: 'WORKER',
+      taskQueue: 'understanding',
+      code: 'PLATFORM_BUDGET_AUTHORITY_NOT_READY',
+      consecutiveFailures: 1,
+    });
+    expect(typeof event.at).toBe('string');
+  });
+
   it('treats a thrown check as a failure, not as an immediate drain', async () => {
     const check = vi
       .fn<() => Promise<CheckResult>>()
