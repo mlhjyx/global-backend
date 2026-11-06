@@ -167,12 +167,16 @@ describe('AiTraceSink', () => {
     });
     expect(usageLedgerCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
+        // The gateway reported no cost: the ledger carries the token-based
+        // upper-bound estimate annotated with its source (cost-dimension §4.0).
+        costUsd: 0.01,
         meta: {
           task: 'discovery.qualify_fit',
           model: 'deepseek-v4-flash',
           requestedModel: 'deepseek-v4-pro',
           modelSubstituted: true,
           substituteModels: ['deepseek-v4-flash'],
+          costSource: 'token_estimate',
         },
       }),
     });
@@ -213,10 +217,12 @@ describe('AiTraceSink', () => {
     });
     expect(usageLedgerCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
+        costUsd: 0.01,
         meta: {
           task: 'discovery.qualify_fit',
           model: 'deepseek-v4-pro',
           modelIdentityUnproven: true,
+          costSource: 'token_estimate',
         },
       }),
     });
@@ -253,7 +259,46 @@ describe('AiTraceSink', () => {
     });
     expect(usageLedgerCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
-        meta: { task: 'discovery.qualify_fit', model: 'deepseek-v4-pro' },
+        meta: {
+          task: 'discovery.qualify_fit',
+          model: 'deepseek-v4-pro',
+          costSource: 'token_estimate',
+        },
+      }),
+    });
+  });
+
+  it('keeps a provider-reported cost and marks its source (cost-dimension §4.0)', async () => {
+    const aiTraceCreate = vi.fn(async () => ({ id: 'trace-cost-1' }));
+    const usageLedgerCreate = vi.fn(async () => ({}));
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId: string, fn: (tx: unknown) => Promise<unknown>) =>
+        fn({
+          aiTrace: { create: aiTraceCreate },
+          usageLedger: { create: usageLedgerCreate },
+        }),
+      ),
+    } as unknown as PrismaService;
+    const sink = new AiTraceSink(prisma);
+
+    sink.record({
+      workspaceId: '00000000-0000-0000-0000-000000000001',
+      task: 'discovery.qualify_fit',
+      op: 'generateStructured',
+      provider: 'gateway',
+      model: 'deepseek-v4-pro',
+      status: 'OK',
+      latencyMs: 12,
+      inputTokens: 7,
+      outputTokens: 3,
+      costUsd: 0.42,
+    });
+
+    await vi.waitFor(() => expect(usageLedgerCreate).toHaveBeenCalledTimes(1));
+    expect(usageLedgerCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        costUsd: 0.42,
+        meta: expect.objectContaining({ costSource: 'provider' }),
       }),
     });
   });

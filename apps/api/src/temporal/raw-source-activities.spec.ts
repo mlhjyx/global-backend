@@ -223,6 +223,7 @@ describe("executeQuery Raw Source v2 persistence", () => {
         ),
       },
       discoveryRun: {
+        findUnique: vi.fn(async () => ({ icpId: null })),
         update: vi.fn(async ({ data }: { data: { stats: Record<string, unknown> } }) => {
           runStats = data.stats;
           return {};

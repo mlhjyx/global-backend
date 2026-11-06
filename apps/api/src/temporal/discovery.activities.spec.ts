@@ -237,6 +237,11 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
         runStats = data.stats;
         return {};
       },
+      // 发现阶段的 artifact 主体解析（G3 5.5）：run → ICP → 卖家 company_profile。
+      findUnique: async () => ({ icpId: "60000000-0000-4000-8000-000000000001" }),
+    },
+    icpDefinition: {
+      findUnique: async () => ({ companyId: "60000000-0000-4000-8000-000000000002" }),
     },
     rawSourceRecord: { findUnique: async () => null,
       findMany: async () => rows,
@@ -715,7 +720,14 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
         }),
         keywords: [],
       }),
-      expect.any(Object),
+      // G3 5.5: the discovery-stage fetches (no company yet) bind their artifacts
+      // to the seller's company_profile — otherwise every crawl is held.
+      expect.objectContaining({
+        artifactSubject: {
+          subjectType: "company_profile",
+          subjectId: "60000000-0000-4000-8000-000000000002",
+        },
+      }),
       expect.any(Object),
     );
   });
@@ -1015,6 +1027,11 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
             return {};
           },
         ),
+        // 发现阶段的 artifact 主体解析（G3 5.5）：run → ICP → 卖家 company_profile。
+        findUnique: vi.fn(async () => ({ icpId: "60000000-0000-4000-8000-000000000001" })),
+      },
+      icpDefinition: {
+        findUnique: vi.fn(async () => ({ companyId: "60000000-0000-4000-8000-000000000002" })),
       },
       usageLedger: { create: vi.fn(async () => ({})) },
     };
@@ -3199,7 +3216,15 @@ describe("finalizeRun durable query receipt readback", () => {
     expect(leadFindFirst).not.toHaveBeenCalled();
     expect(outboxCreate).toHaveBeenCalledTimes(2);
     expect(outboxCreate.mock.calls[0]![0]).toMatchObject({
-      data: { eventType: "DiscoveryRunCompleted", payload: { status: "FAILED" } },
+      data: {
+        eventType: "DiscoveryRunCompleted",
+        payload: {
+          status: "FAILED",
+          // 花费维度（1b）：结算事件必须带成本与口径标注。
+          cost: expect.any(Number),
+          costBasis: "usage_ledger-window/v1",
+        },
+      },
     });
     expect(outboxCreate.mock.calls[1]![0]).toMatchObject({
       data: {
@@ -3290,7 +3315,14 @@ describe("finalizeRun durable query receipt readback", () => {
       expect(leadFindFirst).not.toHaveBeenCalled();
       expect(outboxCreate).toHaveBeenCalledOnce();
       expect(outboxCreate.mock.calls[0]![0]).toMatchObject({
-        data: { eventType: "DiscoveryRunCompleted", payload: { status: "FAILED" } },
+        data: {
+          eventType: "DiscoveryRunCompleted",
+          payload: {
+            status: "FAILED",
+            cost: expect.any(Number),
+            costBasis: "usage_ledger-window/v1",
+          },
+        },
       });
     },
   );

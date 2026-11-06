@@ -1,7 +1,7 @@
 # 1b 花费维度补口 · run 成本结算设计文档（2026-11-06）
 
-> 生命周期：`DRAFT`
-> 生命周期依据：协调计划 §0.2 步 3「1b 花费维度补口」+ 2026-11-04 评审结论「`$15/30 天`花费上限因 cost_ledger 恒 0 实际未生效」；产品负责人 2026-11-06 同意开工设计。待产品负责人过目，批准后改 `APPROVED` 并施工。
+> 生命周期：`APPROVED`
+> 生命周期依据：协调计划 §0.2 步 3「1b 花费维度补口」+ 2026-11-04 评审结论「`$15/30 天`花费上限因 cost_ledger 恒 0 实际未生效」；产品负责人 2026-11-06 批准 D-a~D-e 推荐值开工（「批准开工（推荐）」）。
 > 任务启动门（计划 §0.6）：① 设计文档（本文）② 闭环设计（§5）③ 联网研究（§9）→ 产品负责人过目批准 → TDD。
 
 ## 1. 背景与目标
@@ -56,7 +56,7 @@ SELECT COALESCE(SUM(cost_usd), 0)::float8 AS cost_usd
 FROM usage_ledger
 WHERE workspace_id = $1::uuid
   AND ref_type = 'ai_trace'
-  AND created_at >= $2            -- run.started_at
+  AND created_at >= $2            -- run.created_at（DiscoveryRun 无 startedAt 字段，实现按 §7 步 1 采用 createdAt）
   AND created_at <= now()
 ```
 

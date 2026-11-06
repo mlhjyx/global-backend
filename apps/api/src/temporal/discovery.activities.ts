@@ -1109,10 +1109,34 @@ export function createDiscoveryActivities(deps: {
       });
       // ── 事务外：各源真实发现（可能耗时数十秒），单源失败不影响其余 ──
       // 收口②：ExecutionContext 贯穿到 provider——LLM/工具出网按真租户/run 归属（灭伪 workspace）。
+      // G3 5.5：发现阶段的页面抓取发生在找到任何公司之前，没有 company 主体可挂——
+      // ArtifactSubjectRef 明确允许把产物挂在卖家的 company_profile 名下（富集阶段绑 company）。
+      // 不挂主体时 crawl4ai-fetch/render 的每次抓取都会被主体绑定闸门拒绝（2026-11-06 真实
+      // ICP run：directory 的 10 条查询因抓取全被拒而零产出）。
+      const runIcp = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        const run = await tx.discoveryRun.findUnique({
+          where: { id: args.runId },
+          select: { icpId: true },
+        });
+        return run?.icpId
+          ? tx.icpDefinition.findUnique({
+              where: { id: run.icpId },
+              select: { companyId: true },
+            })
+          : null;
+      });
       const ctx: ExecutionContext = {
         workspaceId: args.workspaceId,
         runId: binding.accountKey,
         correlationId: binding.accountKey,
+        ...(runIcp?.companyId
+          ? {
+              artifactSubject: {
+                subjectType: 'company_profile' as const,
+                subjectId: runIcp.companyId,
+              },
+            }
+          : {}),
       };
       const blockedDomains = sourcePolicies
         .filter((policy) => policy.reviewStatus === 'SUSPENDED')
@@ -3406,6 +3430,21 @@ export function createDiscoveryActivities(deps: {
             data: { status: 'EXECUTED', version: { increment: 1 } },
           });
         }
+        // 花费维度（1b，设计 2026-11-06-cost-dimension-settlement §4.1）：把本 run 时间窗内
+        // 已落账的模型成本汇总进事件。口径 = 工作空间 + ai_trace 时间窗（runId 精确归属列为
+        // 后续项）；cost_usd 缺失的调用不计入。SaaS 消费端按事件幂等落 cost_ledger。
+        const [runCost] = await tx.$queryRaw<Array<{ cost_usd: number }>>`
+          SELECT COALESCE(SUM(cost_usd), 0)::float8 AS cost_usd
+          FROM usage_ledger
+          WHERE workspace_id = ${args.workspaceId}::uuid
+            AND ref_type = 'ai_trace'
+            AND created_at >= ${completedRun.createdAt}
+            AND created_at <= now()
+        `;
+        const runCostUsd =
+          typeof runCost?.cost_usd === 'number' && Number.isFinite(runCost.cost_usd)
+            ? runCost.cost_usd
+            : 0;
         await tx.outboxEvent.create({
           data: {
             workspaceId: args.workspaceId,
@@ -3416,6 +3455,8 @@ export function createDiscoveryActivities(deps: {
               planId: args.planId,
               status: args.status,
               stats: finalStats,
+              cost: runCostUsd,
+              costBasis: 'usage_ledger-window/v1',
               // P1：SaaS 在同一次尝试的『引擎已建 run、BFF 丢响应』窗口里靠它回填 engineRunId。
               ...(completedRun?.taskRef ? { taskRef: completedRun.taskRef } : {}),
             } as Prisma.InputJsonValue,

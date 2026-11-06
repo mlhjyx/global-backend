@@ -66,23 +66,7 @@ import type {
 } from "./paid-model-settlement";
 import { modelExecutionReceiptFacts } from "../durable-results/execution-receipt-facts";
 import { centsToMicrousd, usdToMicrousdCeil } from "../tools/microusd";
-
-/**
- * provider 不上报 costUsd 时按 token 折算实际成本（复审 HIGH 修复）：否则 settle 恒按
- * 声明上限（15-20¢/次 vs 真实 ~0.05-0.5¢）记账，$20 run 预算实为 ~100 次调用的硬顶，
- * 规模 run 中后段 fit 判定被静默截断。保守混合价 env 可调（LLM_CENTS_PER_MTOK，默认
- * 100¢/M tok ≈ $1/M——对 flash 档仍高估数倍，作预算上界足够诚实）。
- */
-function centsFromTokens(usage?: {
-  inputTokens?: number;
-  outputTokens?: number;
-}): number | null {
-  const tokens = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
-  if (tokens <= 0) return null;
-  const env = Number(process.env.LLM_CENTS_PER_MTOK);
-  const perMtok = Number.isFinite(env) && env > 0 ? env : 100;
-  return Math.max(1, Math.ceil((tokens * perMtok) / 1_000_000));
-}
+import { centsFromTokens } from "./model-token-cost";
 
 function providerReportedMicrousd(usage?: ModelUsage): bigint | null {
   const costUsd = usage?.costUsd;

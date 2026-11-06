@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { ModelExecutionTrace } from '@global/contracts';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { centsFromTokens } from './model-token-cost';
 
 export interface TraceEntry {
   workspaceId: string;
@@ -44,6 +45,30 @@ export interface TraceEntry {
     | 'RELEASED_CONTROL_DENIAL'
     | 'RELEASED_DEFINITE_FAILURE'
     | 'SETTLED_NO_RESULT';
+}
+
+/**
+ * Usage-ledger cost basis (2026-11-06, cost-dimension settlement §4.0): the
+ * provider-reported costUsd wins; when the gateway reports none and the call
+ * succeeded with tokens, fall back to the shared token-based upper-bound price
+ * (`LLM_CENTS_PER_MTOK`). Without this fallback every usage_ledger row stayed
+ * NULL (10,769/10,769 measured) and the workspace spend cap read zero forever.
+ * ai_trace keeps the raw provider-reported value; only the ledger carries the
+ * settled estimate, annotated with its source.
+ */
+function settledCost(
+  entry: TraceEntry,
+): { costUsd: number | null; costSource?: 'provider' | 'token_estimate' } {
+  if (Number.isFinite(entry.costUsd) && (entry.costUsd as number) >= 0) {
+    return { costUsd: entry.costUsd as number, costSource: 'provider' };
+  }
+  if (entry.status !== 'OK') return { costUsd: null };
+  const cents = centsFromTokens({
+    inputTokens: entry.inputTokens ?? 0,
+    outputTokens: entry.outputTokens ?? 0,
+  });
+  if (cents === null) return { costUsd: null };
+  return { costUsd: cents / 100, costSource: 'token_estimate' };
 }
 
 /** D14 model-identity markers for ai_trace.meta and usage_ledger.meta. */
@@ -121,15 +146,21 @@ export class AiTraceSink {
         });
         const tokens = (entry.inputTokens ?? 0) + (entry.outputTokens ?? 0);
         if (entry.status === 'OK' && tokens > 0) {
+          const settled = settledCost(entry);
           await tx.usageLedger.create({
             data: {
               workspaceId: entry.workspaceId,
               resourceType: 'ai_tokens',
               quantity: tokens,
-              costUsd: entry.costUsd ?? null,
+              costUsd: settled.costUsd,
               refType: 'ai_trace',
               refId: trace.id,
-              meta: { task: entry.task, model: entry.model, ...identity },
+              meta: {
+                task: entry.task,
+                model: entry.model,
+                ...identity,
+                ...(settled.costSource ? { costSource: settled.costSource } : {}),
+              },
             },
           });
         }
