@@ -3430,16 +3430,17 @@ export function createDiscoveryActivities(deps: {
             data: { status: 'EXECUTED', version: { increment: 1 } },
           });
         }
-        // 花费维度（1b，设计 2026-11-06-cost-dimension-settlement §4.1）：把本 run 时间窗内
-        // 已落账的模型成本汇总进事件。口径 = 工作空间 + ai_trace 时间窗（runId 精确归属列为
-        // 后续项）；cost_usd 缺失的调用不计入。SaaS 消费端按事件幂等落 cost_ledger。
+        // 花费维度（1b，设计 2026-11-06-cost-dimension-settlement §4.1）：把本 run 的模型
+        // 成本汇总进事件。口径 = usage_ledger 行按 meta.runId 精确归属（sink 从
+        // ExecutionContext.runId 写入）；不用时间窗——并发 run 会互相计入，且事务 now()
+        // 会永久漏掉 finalize 前仍在飞的 trace 写入。cost_usd 为 NULL 的调用（释放的
+        // 预算操作）不计入。SaaS 消费端按事件幂等落 cost_ledger。
         const [runCost] = await tx.$queryRaw<Array<{ cost_usd: number }>>`
           SELECT COALESCE(SUM(cost_usd), 0)::float8 AS cost_usd
           FROM usage_ledger
           WHERE workspace_id = ${args.workspaceId}::uuid
             AND ref_type = 'ai_trace'
-            AND created_at >= ${completedRun.createdAt}
-            AND created_at <= now()
+            AND meta->>'runId' = ${args.runId}
         `;
         const runCostUsd =
           typeof runCost?.cost_usd === 'number' && Number.isFinite(runCost.cost_usd)
@@ -3456,7 +3457,7 @@ export function createDiscoveryActivities(deps: {
               status: args.status,
               stats: finalStats,
               cost: runCostUsd,
-              costBasis: 'usage_ledger-window/v1',
+              costBasis: 'usage_ledger-runid/v1',
               // P1：SaaS 在同一次尝试的『引擎已建 run、BFF 丢响应』窗口里靠它回填 engineRunId。
               ...(completedRun?.taskRef ? { taskRef: completedRun.taskRef } : {}),
             } as Prisma.InputJsonValue,

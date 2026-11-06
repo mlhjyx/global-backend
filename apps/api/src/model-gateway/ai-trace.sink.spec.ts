@@ -88,7 +88,7 @@ describe('AiTraceSink', () => {
     });
   });
 
-  it('persists rejected-attempt tokens without creating a second usage-ledger row', async () => {
+  it('records a charged failed attempt once: its token estimate reaches the ledger exactly one row (1b)', async () => {
     const aiTraceCreate = vi.fn(async () => ({ id: 'trace-error-1' }));
     const usageLedgerCreate = vi.fn(async () => ({}));
     const prisma = {
@@ -122,7 +122,16 @@ describe('AiTraceSink', () => {
         outputTokens: 3,
       }),
     });
-    expect(usageLedgerCreate).not.toHaveBeenCalled();
+    // The hard gate rejected the output after the provider ran (charged via
+    // settle): exactly ONE ledger row carries the spend, no second copy.
+    expect(usageLedgerCreate).toHaveBeenCalledTimes(1);
+    expect(usageLedgerCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        quantity: 10,
+        costUsd: 0.01,
+        meta: expect.objectContaining({ costSource: 'token_estimate', status: 'ERROR' }),
+      }),
+    });
   });
 
   it('names a substitute model and keeps the requested model beside it (D14)', async () => {
@@ -148,6 +157,7 @@ describe('AiTraceSink', () => {
       latencyMs: 12,
       inputTokens: 7,
       outputTokens: 3,
+      runId: '40000000-0000-4000-8000-000000000001',
       modelSubstitution: {
         requestedModel: 'deepseek-v4-pro',
         substituteModels: ['deepseek-v4-flash'],
@@ -177,9 +187,83 @@ describe('AiTraceSink', () => {
           modelSubstituted: true,
           substituteModels: ['deepseek-v4-flash'],
           costSource: 'token_estimate',
+          runId: '40000000-0000-4000-8000-000000000001',
         },
       }),
     });
+  });
+
+  it('records the token estimate of a charged failed call so its spend stays visible (1b)', async () => {
+    const aiTraceCreate = vi.fn(async () => ({ id: 'trace-error-1' }));
+    const usageLedgerCreate = vi.fn(async () => ({}));
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId: string, fn: (tx: unknown) => Promise<unknown>) =>
+        fn({
+          aiTrace: { create: aiTraceCreate },
+          usageLedger: { create: usageLedgerCreate },
+        }),
+      ),
+    } as unknown as PrismaService;
+
+    new AiTraceSink(prisma).record({
+      workspaceId: '00000000-0000-0000-0000-000000000001',
+      task: 'discovery.extract_company',
+      op: 'generateStructured',
+      provider: 'gateway',
+      model: 'deepseek-v4-pro',
+      status: 'ERROR',
+      errorMessage: 'ProviderOutputError',
+      latencyMs: 4000,
+      inputTokens: 600_000,
+      outputTokens: 400_000,
+      runId: '40000000-0000-4000-8000-000000000001',
+    });
+
+    await vi.waitFor(() => expect(usageLedgerCreate).toHaveBeenCalledTimes(1));
+    expect(usageLedgerCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        // Settled ProviderOutputError: the gateway charged this call and the
+        // ledger must carry its upper-bound estimate (cost-dimension rework).
+        quantity: 1_000_000,
+        costUsd: 1,
+        meta: expect.objectContaining({
+          costSource: 'token_estimate',
+          status: 'ERROR',
+          runId: '40000000-0000-4000-8000-000000000001',
+        }),
+      }),
+    });
+  });
+
+  it('does not record spend for a released budget operation (D13 release)', async () => {
+    const aiTraceCreate = vi.fn(async () => ({ id: 'trace-released-1' }));
+    const usageLedgerCreate = vi.fn(async () => ({}));
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId: string, fn: (tx: unknown) => Promise<unknown>) =>
+        fn({
+          aiTrace: { create: aiTraceCreate },
+          usageLedger: { create: usageLedgerCreate },
+        }),
+      ),
+    } as unknown as PrismaService;
+
+    new AiTraceSink(prisma).record({
+      workspaceId: '00000000-0000-0000-0000-000000000001',
+      task: 'discovery.extract_company',
+      op: 'generateStructured',
+      provider: 'gateway',
+      model: 'deepseek-v4-pro',
+      status: 'ERROR',
+      errorMessage: 'ProviderTransportError',
+      latencyMs: 50,
+      inputTokens: 500,
+      outputTokens: 0,
+      budgetOperationId: '7d5e8f1a-2b3c-4d5e-8f90-a1b2c3d4e5f6',
+      budgetDisposition: 'RELEASED_DEFINITE_FAILURE',
+    });
+
+    await vi.waitFor(() => expect(aiTraceCreate).toHaveBeenCalledTimes(1));
+    expect(usageLedgerCreate).not.toHaveBeenCalled();
   });
 
   it('marks an answer whose identity the upstream never stated (D14)', async () => {

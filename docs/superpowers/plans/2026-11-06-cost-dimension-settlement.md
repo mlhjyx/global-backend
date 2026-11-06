@@ -21,10 +21,10 @@
 ## 2. 承重假设（可证伪）
 
 1. ~~`usage_ledger` 的 `cost_usd` 对模型调用可用~~ —— **已证伪（2026-11-06 实测）**：`usage_ledger` 中 `ref_type='ai_trace'` 共 10,769 行，`cost_usd` **全部为 NULL**（0 行 >0）。根因：`ai_trace`/`usage_ledger` 记的是 `result.usage?.costUsd`（provider 上报值），而 new-api 网关响应不带 cost；预算 settle 用的是另一条 `centsFromTokens`（token 折算）路径，没回写账本。**因此「成本基准」是本设计的前置子项（§4.0）。**
-2. run 的时间窗聚合（`created_at BETWEEN run.started_at AND now()`）在「同 workspace 同一时刻只有一个 discovery run」的常规语义下精确；并发 run 会互相计入（现行产品语义：BFF 每 workspace 串行发起，见 `discovery_run_link`；风险登记 §8）。
+2. ~~run 的时间窗聚合在「同 workspace 同一时刻只有一个 discovery run」下精确~~ —— **已证伪（2026-11-06 自审）**：代码里不存在「每 workspace 串行」的约束（引擎 executePlan 只查 plan 状态、BFF allocateRun 只锁 task 行），并发 run 重叠窗口会互相计入；且事务内 `now()`=事务开始时刻会永久漏掉 finalize 前仍在飞的 trace。**改为 `meta.runId` 精确归属（D-a v2，§4.1）**。
 3. `ai_trace → usage_ledger` 的异步写入（fire-and-forget + catch warn）在 finalize 时刻可能仍有极少量尾部落账（毫秒~秒级）；接受 v1 的轻微尾部误差，用 `costBasis` 字段标注口径。
 4. 事件载荷加字段对消费端向后兼容（`DiscoveryRunCompleted` 无 contracts 载荷 schema；SaaS 读取是宽容的）。
-5. token 折算价（`LLM_CENTS_PER_MTOK`，默认 100¢/M tok ≈ $1/M）作为花费**上界**是诚实的（该口径已在预算 settle 复审中采用，见 `router-model-gateway.ts` 注释）；花费上限用上界口径只会提前拒绝，不会少计。
+5. token 折算价（`LLM_CENTS_PER_MTOK`，默认 100¢/M tok ≈ $1/M）作为花费**上界**是诚实的（该口径已在预算 settle 复审中采用，见 `router-model-gateway.ts` 注释）；花费上限用上界口径只会提前拒绝，不会少计。**注意（2026-11-06 自审）**：上界只在成本行存在时成立——初版只给 status=OK 的调用落行，已结算的失败调用（ProviderOutputError 等，实测 110/958 条 error trace 共 469k tokens 真实扣费）曾是盲区；现改为失败调用同样按上界落行（§4.0）。
 
 ## 3. 触点（已核对）
 
@@ -56,14 +56,15 @@ SELECT COALESCE(SUM(cost_usd), 0)::float8 AS cost_usd
 FROM usage_ledger
 WHERE workspace_id = $1::uuid
   AND ref_type = 'ai_trace'
-  AND created_at >= $2            -- run.created_at（DiscoveryRun 无 startedAt 字段，实现按 §7 步 1 采用 createdAt）
-  AND created_at <= now()
+  AND meta->>'runId' = $2            -- sink 从 ExecutionContext.runId 写入（D-a v2，见下）
 ```
 
-- 载荷新增：`cost`（USD，number）与 `costBasis: 'usage_ledger-window/v1'`（口径标注：工作空间 + 时间窗）。
+- **D-a v2（2026-11-06 自审改版）**：初版用「工作空间 + run 时间窗」聚合，审查确认两处实质缺陷——① 同 workspace 并发 run 的重叠窗口把同一笔成本计入多个 run 的事件（代码里不存在「BFF 每 workspace 串行」的约束），cost_ledger 双计、$15 上限虚高；② 事务内 `created_at <= now()` 是事务开始时刻，finalize 前仍在飞的 trace 写入被永久漏计（真实数据：run 939221cb 有 7/29 条 trace 在 finalize 后落账）。改为 `meta.runId` 精确归属并去掉时间上界。
+- sink 侧：`usage_ledger.meta` 写入 `runId`（网关从 `ctx.runId` 透传）；`status='ERROR'` 但已被预算结算（非 `RELEASED_*`）且 tokens>0 的调用也写成本行（`meta.status='ERROR'`），否则失败调用的花费对上限不可见（实测 110/958 条 error trace 合计 469k tokens 已真实扣费）。
+- 载荷新增：`cost`（USD，number）与 `costBasis: 'usage_ledger-runid/v1'`。
 - 无成本行时 `cost: 0`（消费端 `> 0` 才记账，等价不记）。
 - finalize 活动是 at-least-once：其幂等已由 run 状态机保证（重复 finalize 会被拒/返回），事件只发一次。
-- 不在 finalize 之外另发「成本补发」事件；如后续发现尾部误差不可接受，再评估「先刷 ai_trace 队列再 finalize」或 runId 归属（§9 D-a 备选）。
+- 剩余已知误差：finalize 提交后仍未落账的极尾部 trace 不再有窗口兜底（每 run 一次性事件，不补发）；`meta.runId` 为空的存量行（上线前的调用）不计入任何 run。
 
 ### 4.2 SaaS 侧：真正落账且幂等（D-b/D-c）
 
@@ -113,7 +114,8 @@ if (typeof cost === 'number' && cost > 0) {
 
 - **时间窗口径**：同 workspace 并发 run 会互相计入（短期双计/漏计）。现行 BFF 流程每 workspace 串行发起 run，常规不并发；风险登记，后续用「runId 写入 usage_ledger.meta 或独立列」做精确归属（见 D-a 备选）。
 - **尾部未落账**：ai_trace 异步写入的毫秒级尾部可能漏计；`costBasis` 标注口径。
-- **`amountMicros` int4 上限**：单笔 >$2147 会溢出报错（极端场景）；必要时改 BigInt 列（另立项）。
+- **`amountMicros` int4 上限**：SaaS 端已钳制到 int4 上限并 warn（不再毒化事件流）；若上游出现真实大额事件再评估 BigInt 列（另立项）。
+- **发现阶段主体绑定的合规姿态（自审 P3，待产品负责人定）**：directory 等发现阶段抓取的产物现绑定卖家 `company_profile`——它不是 DSR 主体（公开删除 API 只收 contact/company），页面上第三方的个人数据副本（24h TTL）无法被其擦除请求命中；这与 G3 5.1「发现阶段建档前无主体即 HOLD」的注释约定存在张力。备选 (a) 给租户发现阶段引入与 `platform_channel_crawl` 同类的瞬态结果作用域（不落副本，合规上最干净）；(b) 明确接受「24h TTL 缓存 + 公开名录页」的姿态并更新 tool-broker 注释与本文。v1 暂按 (b) 发布，待产品负责人确认后收敛。
 - **NULL 成本条目**：若网关返回 `costUsd=null` 的调用较多，结算会低估；施工前先跑一条量的 SQL 作为门槛（假设 1 的可证伪检查）。
 - **存量 26 空间 policy 豁免**：花费上限对新空间生效即可，不回溯改存量（用户既有决定）。
 
@@ -125,7 +127,7 @@ if (typeof cost === 'number' && cost > 0) {
 
 ## 10. 决策点（请产品负责人确认）
 
-- **D-a 成本归属口径**：v1 采用「工作空间 + run 时间窗」从 `usage_ledger` 聚合（改动面最小），把「runId 精确归属」列为后续项（需在网关链路传 runId 或加列）。
+- **D-a 成本归属口径（v2，2026-11-06 自审修订）**：采用 `usage_ledger.meta.runId` 精确归属——网关从 `ExecutionContext.runId` 透传到 sink，finalize 按 `meta->>'runId'` 聚合、无时间窗。v1 的「工作空间 + 时间窗」在自审中被确认为并发双计与事务 now() 漏计，已废弃。
 - **D-b 消费端位置**：把成本处理移到事件类型分支之前，对所有带 `payload.cost` 的事件生效（修掉 `DiscoveryRunCompleted` 分支提前 return 的盲区）。
 - **D-c 幂等实现**：partial unique `(workspace_id, source_event_id)` + `skipDuplicates`（先查后写被否，见 §9）。
 - **D-d 上线顺序**：先发 gain-saas（消费端宽容），再发引擎（开始发 `cost`），同班车完成。

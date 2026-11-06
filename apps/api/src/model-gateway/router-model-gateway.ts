@@ -637,6 +637,7 @@ export class RouterModelGateway extends ModelGateway {
           errorMessage: `budget exceeded (DENIED before call): ${err.message.slice(0, 300)}`,
           latencyMs: 0,
           correlationId: ctx.correlationId,
+          runId: ctx.runId,
           modelPolicy: ctx.modelPolicy,
         });
       }
@@ -737,6 +738,7 @@ export class RouterModelGateway extends ModelGateway {
         inputTokens: failedUsage?.inputTokens,
         outputTokens: failedUsage?.outputTokens,
         correlationId: ctx.correlationId,
+        runId: ctx.runId,
         modelPolicy: ctx.modelPolicy,
         // Durable link from this failure to its ledger row and what became of it.
         budgetOperationId: reservation.operationId,
@@ -780,6 +782,7 @@ export class RouterModelGateway extends ModelGateway {
         inputTokens: result.usage?.inputTokens,
         outputTokens: result.usage?.outputTokens,
         correlationId: ctx.correlationId,
+        runId: ctx.runId,
         modelPolicy: ctx.modelPolicy,
         budgetOperationId: reservation.operationId,
         budgetDisposition: "SETTLED_NO_RESULT" as const,
@@ -856,6 +859,7 @@ export class RouterModelGateway extends ModelGateway {
       outputTokens: result.usage?.outputTokens,
       costUsd: result.usage?.costUsd,
       correlationId: ctx.correlationId,
+      runId: ctx.runId,
       modelPolicy: ctx.modelPolicy,
     });
     if (returnedResult.durableReceipt) {
@@ -1239,6 +1243,7 @@ export class RouterModelGateway extends ModelGateway {
             errorMessage: `paid call denied before execution: ${error.decision}`,
             latencyMs: 0,
             correlationId: ctx.correlationId,
+            runId: ctx.runId,
             modelPolicy: ctx.modelPolicy,
           });
         }
@@ -1374,6 +1379,7 @@ export class RouterModelGateway extends ModelGateway {
             errorMessage: error.errorCode,
             latencyMs: Date.now() - started,
             correlationId: ctx.correlationId,
+            runId: ctx.runId,
             modelPolicy: ctx.modelPolicy,
           });
           throw new PaidOperationUnknownError(
@@ -1417,6 +1423,7 @@ export class RouterModelGateway extends ModelGateway {
             errorMessage: this.safeProviderErrorCode(error),
             latencyMs: Date.now() - started,
             correlationId: ctx.correlationId,
+            runId: ctx.runId,
             modelPolicy: ctx.modelPolicy,
           });
           throw error;
@@ -1510,6 +1517,7 @@ export class RouterModelGateway extends ModelGateway {
           inputTokens: providerError?.usage?.inputTokens,
           outputTokens: providerError?.usage?.outputTokens,
           correlationId: ctx.correlationId,
+          runId: ctx.runId,
           modelPolicy: ctx.modelPolicy,
         });
         throw error;
@@ -1580,6 +1588,7 @@ export class RouterModelGateway extends ModelGateway {
         outputTokens: result.usage?.outputTokens,
         costUsd: result.usage?.costUsd,
         correlationId: ctx.correlationId,
+        runId: ctx.runId,
         modelPolicy: ctx.modelPolicy,
       });
       return result;
