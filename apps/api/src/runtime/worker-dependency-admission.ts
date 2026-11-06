@@ -1,3 +1,4 @@
+import { MigrationRevisionMismatchError } from './runtime-process-lease';
 import type { RuntimeComponentStatus } from './runtime-readiness-registry';
 
 export interface WorkerDependencyAdmissionInput {
@@ -28,6 +29,35 @@ export function selectWorkerDependencyAdmission(
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+/**
+ * A migration revision mismatch is a deterministic fact read from the
+ * database, unlike a transport probe that can time out under load: continue
+ * polling against a schema the image does not match is never right, so the
+ * heartbeat must stop at the first observation instead of after its usual
+ * consecutive-failure tolerance.
+ */
+export function migrationMismatchFailure(): RuntimeComponentStatus {
+  return Object.freeze({
+    status: 'failed' as const,
+    code: 'MIGRATION_REVISION_MISMATCH',
+    drainImmediately: true as const,
+  });
+}
+
+/**
+ * The migration probe can also throw a transport error. Only the deterministic
+ * revision mismatch drains at once; an unreadable database stays on the
+ * heartbeat's consecutive-failure tolerance under the caller's own code.
+ */
+export function migrationCheckFailure(
+  error: unknown,
+  fallbackCode: string,
+): RuntimeComponentStatus {
+  return error instanceof MigrationRevisionMismatchError
+    ? migrationMismatchFailure()
+    : Object.freeze({ status: 'failed' as const, code: fallbackCode });
 }
 
 /**

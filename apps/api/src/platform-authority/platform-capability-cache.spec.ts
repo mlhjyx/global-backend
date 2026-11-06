@@ -82,13 +82,15 @@ describe("verified capability cache lifecycle", () => {
       () => now,
     );
     expect(cache.check("acq-sweep").status).toBe("failed");
+    expect(cache.hasVerifiedSnapshot()).toBe(false);
     await cache.refresh();
+    expect(cache.hasVerifiedSnapshot()).toBe(true);
     expect(cache.check("acq-sweep").status).toBe("ok");
     now = NOW + 1000;
     expect(cache.check("acq-sweep").status).toBe("failed");
     cache.stop();
   });
-  it("deduplicates concurrent refresh and clears previously good cache on failure", async () => {
+  it("deduplicates concurrent refresh and keeps the last verified snapshot until its signed deadline", async () => {
     let fail = false;
     const transport = vi.fn(async (nonce: string) => {
       if (fail) throw new Error("secret");
@@ -101,13 +103,20 @@ describe("verified capability cache lifecycle", () => {
     expect(transport).toHaveBeenCalledTimes(1);
     fail = true;
     await cache.refresh();
+    // A failed refresh must not discard a snapshot the issuer still vouches for
+    // (2026-11-05: one gain-saas blip cleared the cache and drained the worker).
+    expect(cache.hasVerifiedSnapshot()).toBe(true);
+    expect(cache.check("acq-sweep").status).toBe("ok");
+    now = NOW + 999;
+    expect(cache.check("acq-sweep").status).toBe("ok");
+    now = NOW + 1000;
     expect(cache.check("acq-sweep")).toEqual({
       status: "failed",
       code: "PLATFORM_CAPABILITY_UNAVAILABLE",
     });
     cache.stop();
   });
-  it("rejects a replayed nonce response", async () => {
+  it("rejects a replayed nonce response without displacing the last verified snapshot", async () => {
     let previous = "";
     const cache = createCapabilityCache(
       config(),
@@ -121,6 +130,8 @@ describe("verified capability cache lifecycle", () => {
     await cache.refresh();
     expect(cache.check("acq-sweep").status).toBe("ok");
     await cache.refresh();
+    expect(cache.check("acq-sweep").status).toBe("ok");
+    now = NOW + 1000;
     expect(cache.check("acq-sweep").status).toBe("failed");
     cache.stop();
   });

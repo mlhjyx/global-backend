@@ -89,9 +89,11 @@ export function createCapabilityCache(
         if (!stopped && generation === version && !active.signal.aborted)
           cached = snapshot;
       })
-      .catch(() => {
-        if (generation === version) cached = undefined;
-      })
+      // A failed refresh keeps the last verified snapshot: check() already
+      // refuses rows at their signed validUntil, so the issuer's own ≤30s
+      // window bounds staleness. Clearing it on a single failed refresh turned
+      // one gain-saas blip into a permanent worker drain (2026-11-05).
+      .catch(() => undefined)
       .finally(() => {
         clearTimeout(timeout);
         active.signal.removeEventListener("abort", onAbort);
@@ -102,6 +104,12 @@ export function createCapabilityCache(
   }
   return Object.freeze({
     refresh,
+    /** Whether a verified snapshot is installed. Not a liveness signal: it
+     * says nothing about `now` vs the snapshot's signed deadline — only
+     * check() does. refresh() itself resolves even on failure. */
+    hasVerifiedSnapshot(): boolean {
+      return Boolean(cached);
+    },
     check(scheduleId: string) {
       try {
         const current = now();

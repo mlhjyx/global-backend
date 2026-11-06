@@ -98,10 +98,15 @@ import {
 } from "../runtime/worker-lease-heartbeat";
 import { waitForWorkerQueueAdmission } from "../runtime/worker-queue-admission";
 import {
+  migrationCheckFailure,
   selectWorkerDependencyAdmission,
   waitForWorkerDependencyAdmission,
 } from "../runtime/worker-dependency-admission";
 import { startWorkerDependencyHeartbeat } from "../runtime/worker-dependency-heartbeat";
+import {
+  WORKER_SHUTDOWN_OPTIONS,
+  armWorkerExitDeadline,
+} from "../runtime/worker-shutdown-policy";
 import {
   devFastLaneWorkerLane,
   resolveDevFastLane,
@@ -488,6 +493,49 @@ async function main(): Promise<void> {
 
   if (!releaseIdentity.attested)
     throw new Error("RUNTIME_RELEASE_IDENTITY_UNAVAILABLE");
+  const dependencyCheck = (requireReady: boolean) => async () => {
+    const queueIdentity = await runtimeLeases.inspectWorkerQueue(
+      UNDERSTANDING_TASK_QUEUE,
+      { requireReady },
+    );
+    if (queueIdentity.status !== "ok") return queueIdentity;
+    const database = await prisma.reconnect();
+    if (database.status !== "ready") {
+      return { status: "failed", code: database.code } as const;
+    }
+    try {
+      await assertMigrationCompatible(prisma, releaseIdentity);
+    } catch (error) {
+      // Only the deterministic revision mismatch drains at once; an
+      // unreadable database stays on the consecutive-failure tolerance.
+      return migrationCheckFailure(error, "WORKER_DATABASE_UNAVAILABLE");
+    }
+    const checks = await Promise.all([
+      providerWireDatabase.checkReadiness(),
+      siteBuilderStorage.checkReadiness(),
+      checkGenericArtifactStorageReadiness(process.env),
+      personalArtifactCleanupRuntime.checkReadiness(),
+      checkRedisReadiness(process.env),
+      checkModelGatewayReadiness(process.env),
+      checkSiteBuildSettlementReadbackReadiness(process.env),
+      checkBrowserReadiness(process.env),
+      checkImagePipelineIsolationReadiness(),
+    ]);
+    return selectWorkerDependencyAdmission({
+      hardChecks: checks,
+      authorityCapabilities: [],
+    });
+  };
+  // Same gate as the platform worker: after a restart the process waits here
+  // (STARTING, no polling) until every dependency probe passes, so a drain
+  // that outlives the restart recovers on its own instead of holding forever.
+  await waitForWorkerDependencyAdmission({
+    check: dependencyCheck(false),
+    onBlocked: (code) =>
+      console.error(
+        `[worker] not ready: ${code}; Temporal polling remains disabled`,
+      ),
+  });
   const machine = await createRuntimeMachineTokenClient(
     "temporal-customer-worker",
     releaseIdentity.artifact_digest.replace(/^sha256:/, ""),
@@ -507,6 +555,7 @@ async function main(): Promise<void> {
     ),
     taskQueue: UNDERSTANDING_TASK_QUEUE,
     workflowsPath: require.resolve("./customer-workflows"),
+    ...WORKER_SHUTDOWN_OPTIONS,
     activities: {
       ...createUnderstandingActivities({
         prisma,
@@ -639,39 +688,7 @@ async function main(): Promise<void> {
     credentialFailure.fail,
   );
   const dependencyHeartbeat = await startWorkerDependencyHeartbeat({
-    check: async () => {
-      const queueIdentity = await runtimeLeases.inspectWorkerQueue(
-        UNDERSTANDING_TASK_QUEUE,
-      );
-      if (queueIdentity.status !== "ok") return queueIdentity;
-      const database = await prisma.reconnect();
-      if (database.status !== "ready") {
-        return { status: "failed", code: database.code } as const;
-      }
-      try {
-        await assertMigrationCompatible(prisma, releaseIdentity);
-      } catch {
-        return {
-          status: "failed",
-          code: "MIGRATION_REVISION_MISMATCH",
-        } as const;
-      }
-      const checks = await Promise.all([
-        providerWireDatabase.checkReadiness(),
-        siteBuilderStorage.checkReadiness(),
-        checkGenericArtifactStorageReadiness(process.env),
-        personalArtifactCleanupRuntime.checkReadiness(),
-        checkRedisReadiness(process.env),
-        checkModelGatewayReadiness(process.env),
-        checkSiteBuildSettlementReadbackReadiness(process.env),
-        checkBrowserReadiness(process.env),
-        checkImagePipelineIsolationReadiness(),
-      ]);
-      return selectWorkerDependencyAdmission({
-        hardChecks: checks,
-        authorityCapabilities: [],
-      });
-    },
+    check: dependencyCheck(true),
     leases: runtimeLeases,
     worker: workerShutdown,
     taskQueue: UNDERSTANDING_TASK_QUEUE,
@@ -699,6 +716,10 @@ async function main(): Promise<void> {
   try {
     await runPromise;
   } finally {
+    // The worker has stopped polling. If anything below hangs, the process
+    // must still exit so the container's restart policy re-enters the startup
+    // gates instead of leaving a drained container alive (2026-11-05).
+    const exitDeadline = armWorkerExitDeadline();
     await controlledSignals.stop();
     stopCredentialBinding();
     machine.client.close();
@@ -714,6 +735,7 @@ async function main(): Promise<void> {
     await ownerDb.$disconnect().catch(() => undefined);
     await runtimeLeaseStore.disconnectWriters();
     await prisma.$disconnect().catch(() => undefined);
+    exitDeadline.clear();
   }
 }
 

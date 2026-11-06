@@ -39,6 +39,14 @@ const failure = () => ({
   status: "failed" as const,
   code: "PLATFORM_CAPABILITY_UNAVAILABLE",
 });
+/** Steady refresh cadence while snapshots verify. */
+export const CAPABILITY_REFRESH_INTERVAL_MS = 10_000;
+/** Fast retry after a failed refresh: the signed snapshot lives at most 30s,
+ * and a 10s cadence would spend a third of that window per missed attempt. */
+export const CAPABILITY_REFRESH_RETRY_MS = 2_000;
+export function nextCapabilityRefreshDelayMs(succeeded: boolean): number {
+  return succeeded ? CAPABILITY_REFRESH_INTERVAL_MS : CAPABILITY_REFRESH_RETRY_MS;
+}
 function fileRevision(path: string): string {
   const stat = lstatSync(path);
   if (
@@ -290,6 +298,9 @@ export class CapabilityRuntime {
       );
       try {
         await next.refresh();
+        // refresh() resolves even when verification failed; only a cache that
+        // actually holds a verified snapshot may displace the current one.
+        if (!next.hasVerifiedSnapshot()) throw new Error();
         guard();
         this.invalidate();
         this.cached = next;
@@ -298,15 +309,27 @@ export class CapabilityRuntime {
         throw error;
       }
     };
+    let succeeded = false;
     this.inFlight = Promise.race([work(), expired])
-      .catch(() => this.invalidate())
+      .then(() => {
+        succeeded = true;
+      })
+      // A failed refresh must not discard the last verified snapshot: the
+      // issuer's signed validUntil (≤30s) is the tolerance that applies.
+      // Identity, pin and machine-token failures still invalidate at once —
+      // current(), guard() and the machine-token subscription call
+      // invalidate() themselves.
+      .catch(() => undefined)
       .finally(() => {
         clearTimeout(timer);
         controller.abort();
         if (this.active === controller) this.active = undefined;
         this.inFlight = undefined;
         if (this.started && !this.stopped) {
-          this.timer = setTimeout(() => void this.refresh(), 10000);
+          this.timer = setTimeout(
+            () => void this.refresh(),
+            nextCapabilityRefreshDelayMs(succeeded),
+          );
           this.timer.unref();
         }
       });

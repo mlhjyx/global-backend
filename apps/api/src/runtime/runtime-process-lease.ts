@@ -559,6 +559,14 @@ export class RuntimeProcessLeaseService {
   }
 }
 
+/** Deterministic schema mismatch: not a transport failure a probe may retry. */
+export class MigrationRevisionMismatchError extends Error {
+  constructor() {
+    super("MIGRATION_REVISION_MISMATCH");
+    this.name = "MigrationRevisionMismatchError";
+  }
+}
+
 export async function assertMigrationCompatible(
   prisma: Pick<PrismaService, "$queryRawUnsafe">,
   identity: RuntimeReleaseIdentity,
@@ -585,6 +593,6 @@ export async function assertMigrationRevision(
       LIMIT 1`,
   );
   if (rows[0]?.migration_name !== expected) {
-    throw new Error("MIGRATION_REVISION_MISMATCH");
+    throw new MigrationRevisionMismatchError();
   }
 }
