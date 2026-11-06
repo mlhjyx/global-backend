@@ -237,6 +237,11 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
         runStats = data.stats;
         return {};
       },
+      // 发现阶段的 artifact 主体解析（G3 5.5）：run → ICP → 卖家 company_profile。
+      findUnique: async () => ({ icpId: "60000000-0000-4000-8000-000000000001" }),
+    },
+    icpDefinition: {
+      findUnique: async () => ({ companyId: "60000000-0000-4000-8000-000000000002" }),
     },
     rawSourceRecord: { findUnique: async () => null,
       findMany: async () => rows,
@@ -715,7 +720,14 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
         }),
         keywords: [],
       }),
-      expect.any(Object),
+      // G3 5.5: the discovery-stage fetches (no company yet) bind their artifacts
+      // to the seller's company_profile — otherwise every crawl is held.
+      expect.objectContaining({
+        artifactSubject: {
+          subjectType: "company_profile",
+          subjectId: "60000000-0000-4000-8000-000000000002",
+        },
+      }),
       expect.any(Object),
     );
   });
@@ -1015,6 +1027,11 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
             return {};
           },
         ),
+        // 发现阶段的 artifact 主体解析（G3 5.5）：run → ICP → 卖家 company_profile。
+        findUnique: vi.fn(async () => ({ icpId: "60000000-0000-4000-8000-000000000001" })),
+      },
+      icpDefinition: {
+        findUnique: vi.fn(async () => ({ companyId: "60000000-0000-4000-8000-000000000002" })),
       },
       usageLedger: { create: vi.fn(async () => ({})) },
     };
@@ -3061,15 +3078,27 @@ describe("finalizeRun durable query receipt readback", () => {
     ]);
     const statuses = typeof runStatus === "string" ? [runStatus] : runStatus;
     let runReads = 0;
-    const tx = {
-      $queryRaw: vi.fn(async () => [
+    const sqlOf = (statement: unknown): string =>
+      Array.isArray(statement)
+        ? (statement as readonly string[]).join("?")
+        : ((statement as { strings?: readonly string[] } | null)?.strings ?? []).join("?");
+    const queryRaw = vi.fn(async (statement: unknown) => {
+      // The cost aggregation (1b) reads usage_ledger inside the finalize
+      // transaction; every other $queryRaw is the run-row lock/attest read.
+      if (sqlOf(statement).includes("FROM usage_ledger")) {
+        return [{ cost_usd: 7.25 }];
+      }
+      return [
         {
           id: "40000000-0000-4000-8000-000000000001",
           plan_id: "50000000-0000-4000-8000-000000000001",
           stats,
           status: statuses[Math.min(runReads++, statuses.length - 1)],
         },
-      ]),
+      ];
+    });
+    const tx = {
+      $queryRaw: queryRaw,
       discoveryRun: { update },
       discoveryQueryPlan: { update: planUpdate },
       lead: { findFirst: leadFindFirst },
@@ -3085,7 +3114,7 @@ describe("finalizeRun durable query receipt readback", () => {
       gateway: {},
       budgetStore,
     } as never);
-    return { activities, outboxCreate, update, planUpdate, leadFindFirst, rawFindMany, identityLinkFindMany };
+    return { activities, outboxCreate, update, planUpdate, leadFindFirst, rawFindMany, identityLinkFindMany, queryRaw };
   }
 
   const RUN_RAW_RECORD_ID = "80000000-0000-4000-8000-000000000001";
@@ -3183,6 +3212,36 @@ describe("finalizeRun durable query receipt readback", () => {
     failure: { stage: "signals", errorType: "ProviderTransportError", control: false },
   });
 
+  it("attributes the completed event's cost to this run via meta.runId, not a time window", async () => {
+    const { activities, outboxCreate, queryRaw } = finalizeHarness(null);
+
+    await activities.finalizeRun(
+      discoveryArgs("40000000-0000-4000-8000-000000000001", {
+        planId: "50000000-0000-4000-8000-000000000001",
+        icpId: "60000000-0000-4000-8000-000000000001",
+        status: "DONE" as const,
+        stats: { failures: 0, fit: { match: 0, weak: 0, mismatch: 0 } },
+      }),
+    );
+
+    const parts = (statement: unknown): readonly string[] =>
+      Array.isArray(statement)
+        ? (statement as readonly string[])
+        : ((statement as { strings?: readonly string[] } | null)?.strings ?? []);
+    const costQuery = queryRaw.mock.calls.find(([statement]) =>
+      parts(statement).join("?").includes("FROM usage_ledger"),
+    );
+    expect(costQuery).toBeDefined();
+    const sql = parts(costQuery![0]).join("?");
+    expect(sql).toContain("meta->>'runId'");
+    expect(sql).not.toContain("created_at <=");
+    expect((costQuery as unknown[]).slice(1)).toContain("40000000-0000-4000-8000-000000000001");
+    expect(outboxCreate.mock.calls[0]![0].data.payload).toMatchObject({
+      cost: 7.25,
+      costBasis: "usage_ledger-runid/v1",
+    });
+  });
+
   it("requests scoring for a FAILED run whose stats show the fit stage judged companies", async () => {
     const { activities, outboxCreate, planUpdate, leadFindFirst } = finalizeHarness(null);
 
@@ -3199,7 +3258,15 @@ describe("finalizeRun durable query receipt readback", () => {
     expect(leadFindFirst).not.toHaveBeenCalled();
     expect(outboxCreate).toHaveBeenCalledTimes(2);
     expect(outboxCreate.mock.calls[0]![0]).toMatchObject({
-      data: { eventType: "DiscoveryRunCompleted", payload: { status: "FAILED" } },
+      data: {
+        eventType: "DiscoveryRunCompleted",
+        payload: {
+          status: "FAILED",
+          // 花费维度（1b）：结算事件必须带本 run 的成本与口径标注。
+          cost: 7.25,
+          costBasis: "usage_ledger-runid/v1",
+        },
+      },
     });
     expect(outboxCreate.mock.calls[1]![0]).toMatchObject({
       data: {
@@ -3290,7 +3357,14 @@ describe("finalizeRun durable query receipt readback", () => {
       expect(leadFindFirst).not.toHaveBeenCalled();
       expect(outboxCreate).toHaveBeenCalledOnce();
       expect(outboxCreate.mock.calls[0]![0]).toMatchObject({
-        data: { eventType: "DiscoveryRunCompleted", payload: { status: "FAILED" } },
+        data: {
+          eventType: "DiscoveryRunCompleted",
+          payload: {
+            status: "FAILED",
+            cost: 7.25,
+            costBasis: "usage_ledger-runid/v1",
+          },
+        },
       });
     },
   );

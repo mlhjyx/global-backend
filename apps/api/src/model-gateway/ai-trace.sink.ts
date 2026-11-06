@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { ModelExecutionTrace } from '@global/contracts';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { centsFromTokens } from './model-token-cost';
 
 export interface TraceEntry {
   workspaceId: string;
@@ -16,6 +17,8 @@ export interface TraceEntry {
   outputTokens?: number;
   costUsd?: number;
   correlationId?: string;
+  /** Execution run this call belongs to (discovery run cost attribution, 1b). */
+  runId?: string;
   /** Site Builder resolved policy + selected fallback position, when applicable. */
   modelPolicy?: ModelExecutionTrace;
   /**
@@ -44,6 +47,37 @@ export interface TraceEntry {
     | 'RELEASED_CONTROL_DENIAL'
     | 'RELEASED_DEFINITE_FAILURE'
     | 'SETTLED_NO_RESULT';
+}
+
+/**
+ * Usage-ledger cost basis (2026-11-06, cost-dimension settlement §4.0): the
+ * provider-reported costUsd wins; when the gateway reports none, fall back to
+ * the shared token-based upper-bound price (`LLM_CENTS_PER_MTOK`) — for charged
+ * failed calls as well, since a settled ProviderOutputError already spent
+ * tokens (measured: 110 of 958 error traces carried 469k tokens on xin).
+ * Without this every usage_ledger row stayed NULL (10,769/10,769 measured) and
+ * the workspace spend cap read zero forever.
+ * ai_trace keeps the raw provider-reported value; only the ledger carries the
+ * settled estimate, annotated with its source.
+ */
+function settledCost(
+  entry: TraceEntry,
+): { costUsd: number | null; costSource?: 'provider' | 'token_estimate' } {
+  if (Number.isFinite(entry.costUsd) && (entry.costUsd as number) >= 0) {
+    return { costUsd: entry.costUsd as number, costSource: 'provider' };
+  }
+  // A released budget operation (D13) was never charged, so a failed call with
+  // no provider-reported cost has no spend to record. ProviderOutputError and
+  // other settled failures are charged (`SETTLED_NO_RESULT` or no disposition)
+  // and DO carry tokens — their estimate must reach the ledger, or failed-call
+  // spend stays invisible to the workspace cap.
+  if (entry.budgetDisposition?.startsWith('RELEASED')) return { costUsd: null };
+  const cents = centsFromTokens({
+    inputTokens: entry.inputTokens ?? 0,
+    outputTokens: entry.outputTokens ?? 0,
+  });
+  if (cents === null) return { costUsd: null };
+  return { costUsd: cents / 100, costSource: 'token_estimate' };
 }
 
 /** D14 model-identity markers for ai_trace.meta and usage_ledger.meta. */
@@ -120,16 +154,27 @@ export class AiTraceSink {
           },
         });
         const tokens = (entry.inputTokens ?? 0) + (entry.outputTokens ?? 0);
-        if (entry.status === 'OK' && tokens > 0) {
+        const settled = settledCost(entry);
+        // Charged failed calls get a ledger row too (settled.costUsd set): without
+        // it the run cost aggregation can never see their spend. Released
+        // operations and token-less errors keep the original no-row behavior.
+        if (settled.costUsd !== null || (entry.status === 'OK' && tokens > 0)) {
           await tx.usageLedger.create({
             data: {
               workspaceId: entry.workspaceId,
               resourceType: 'ai_tokens',
               quantity: tokens,
-              costUsd: entry.costUsd ?? null,
+              costUsd: settled.costUsd,
               refType: 'ai_trace',
               refId: trace.id,
-              meta: { task: entry.task, model: entry.model, ...identity },
+              meta: {
+                task: entry.task,
+                model: entry.model,
+                ...identity,
+                ...(settled.costSource ? { costSource: settled.costSource } : {}),
+                ...(entry.runId ? { runId: entry.runId } : {}),
+                ...(entry.status !== 'OK' ? { status: entry.status } : {}),
+              },
             },
           });
         }
