@@ -81,6 +81,37 @@ describe("actual provider mapper output → governed Raw boundary", () => {
     });
   });
 
+  // 2026-11-06 真实 run：名录页托管在 www 主机时，attributes.source_directory 已被
+  // normalizeDomain 去掉 www.，而 binding 比较用原始 hostname —— 41 条记录全部被拒。
+  it("accepts Directory records mined from a www-hosted listing page", () => {
+    const mapped = mapDirectoryCompanyToRecord({
+      company: { name: "Dongguan Example Electronics Co., Ltd.", website: "https://example-electronics.com/" },
+      listKind: "directory",
+      pageUrl: "https://www.directory.example/members",
+      sourceClass: "industry_data",
+    });
+    const row = prepare("directory", mapped, "directory.example");
+    expect(row.ingestStatus).toBe("ACCEPTED");
+    expect(row.payload).toMatchObject({
+      attributes: expect.objectContaining({ source_directory: "directory.example" }),
+    });
+  });
+
+  it("still rejects a Directory payload whose sourceUrl names a different site", () => {
+    const mapped = mapDirectoryCompanyToRecord({
+      company: { name: "Dongguan Example Electronics Co., Ltd." },
+      listKind: "directory",
+      pageUrl: "https://directory.example/members",
+      sourceClass: "industry_data",
+    });
+    const forged = {
+      ...mapped,
+      provenance: { ...mapped.provenance, sourceUrl: "https://other.example/members" },
+    };
+    const row = prepare("directory", forged, "directory.example");
+    expect(row.ingestStatus).toBe("REJECTED");
+  });
+
   it("keeps Directory consumer output intact while withholding listing prose from Raw", () => {
     const mapped = mapDirectoryCompanyToRecord({
       company: {
