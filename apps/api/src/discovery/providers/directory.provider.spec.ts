@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDirectorySearches } from './directory.provider';
+import { buildDirectorySearches, isDirectoryListingShaped } from './directory.provider';
 import { CompanyDiscoveryQuery } from '../provider-contract';
 
 function q(filters: Record<string, unknown>, keywords: string[] = []): CompanyDiscoveryQuery {
@@ -59,5 +59,36 @@ describe('名录发现检索串构造', () => {
   it('结果去重（同一串不重复出现）', () => {
     const searches = buildDirectorySearches(q({ industry: 'metalworking', region: 'France' }));
     expect(new Set(searches).size).toBe(searches.length);
+  });
+
+  // 2026-11-06：中文市场回归——旧版把中文主题词整段剥掉，检索退化为
+  // "manufacturing members directory 中国"，真实 ICP 两轮 10 查询零名录页。
+  it('中文市场保留中文主题词、配中文名录意图词与中文地区词', () => {
+    const searches = buildDirectorySearches(
+      q({ industry: '电子元件制造', region: '珠三角', country: '中国' }, ['线路板制造', '精密电子零件']),
+    );
+    expect(searches.length).toBeGreaterThan(0);
+    expect(searches.length).toBeLessThanOrEqual(4);
+    // 每条都带中文名录意图词，且以中文主题词开头（不退化成 manufacturing）
+    expect(
+      searches.every((s) => /企业名录|企业黄页|参展商名单|供应商目录/.test(s)),
+    ).toBe(true);
+    expect(searches.every((s) => /电子元件制造/.test(s))).toBe(true);
+    expect(searches.every((s) => /珠三角/.test(s))).toBe(true);
+    expect(searches.join(' | ')).not.toMatch(/manufacturing|members directory|Mitglied/i);
+  });
+
+  it('中文市场只有中文关键词（无行业）时也能构造检索串', () => {
+    const searches = buildDirectorySearches(q({ country: '中国' }, ['电子元件制造']));
+    expect(searches.length).toBeGreaterThan(0);
+    expect(searches.every((s) => /电子元件制造/.test(s))).toBe(true);
+  });
+
+  it('名录/黄页相貌识别覆盖中文标题与 URL', () => {
+    expect(isDirectoryListingShaped('https://www.example.cn/企业名录/', '')).toBe(true);
+    expect(isDirectoryListingShaped('https://www.huangye88.com/shandong/', '黄页88 - 企业黄页')).toBe(true);
+    expect(isDirectoryListingShaped('https://x.example.com/a', '中国电子元件企业大全')).toBe(true);
+    expect(isDirectoryListingShaped('https://x.example.com/a', '参展商名单 | 2026 展会')).toBe(true);
+    expect(isDirectoryListingShaped('https://baike.baidu.com/item/电子', '电子元件 - 百科')).toBe(false);
   });
 });

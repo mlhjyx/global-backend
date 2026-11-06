@@ -38,7 +38,7 @@ import {
   MAX_DIRECTORY_PAGINATION,
   MAX_DIRECTORY_SEARCHES_PER_QUERY,
 } from '../execution-envelope';
-import { searchCountryName, searchableTerms } from '../search-localization';
+import { searchCountryName, searchLanguageFor, searchableTerms, type SearchLanguage } from '../search-localization';
 
 const PARSER_VERSION = 'directory/v1';
 
@@ -50,12 +50,18 @@ const NOISE_DOMAINS = [
   'yelp.com', 'trustpilot.com', 'indeed.com', 'stepstone.de', 'google.com',
 ];
 
-/** 定位名录/列表页的检索意图词（EN + DE，覆盖协会名录 / 展会参展商 / 行业目录）。 */
+/** 定位名录/列表页的检索意图词（按目标市场语言选族；zh 用中文名录词，其余沿用 EN + DE）。 */
 const DIRECTORY_INTENTS_EN = ['members directory', 'member companies', 'exhibitor list', 'industry directory'];
 const DIRECTORY_INTENTS_DE = ['Mitgliederverzeichnis', 'Mitglieder', 'Ausstellerverzeichnis', 'Aussteller'];
+const DIRECTORY_INTENTS_ZH = ['企业名录', '企业黄页', '参展商名单', '供应商目录'];
 
-/** 列表页 URL/标题的正向信号（用于从搜索命中里挑真正的名录页）。 */
-const LISTING_HINT = /member|mitglied|exhibitor|aussteller|directory|verzeichnis|list|catalog|katalog|branchenbuch/i;
+/** 列表页 URL/标题的正向信号（用于从搜索命中里挑真正的名录页）。含中文名录/黄页词。 */
+const LISTING_HINT = /member|mitglied|exhibitor|aussteller|directory|verzeichnis|list|catalog|katalog|branchenbuch|名录|黄页|企业库|企业大全|参展商|会员企业|供应商目录/i;
+
+/** 搜索结果是否名录/黄页相貌（URL 或标题命中正向信号）。 */
+export function isDirectoryListingShaped(url: string, title: string): boolean {
+  return LISTING_HINT.test(url) || LISTING_HINT.test(title);
+}
 
 const CRAWL_CONCURRENCY = 4;
 
@@ -128,16 +134,17 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
     }
     const blocked = new Set((opts?.blockedDomains ?? []).map((d) => d.toLowerCase()));
     const searches = buildDirectorySearches(query);
+    const language = searchLanguageFor(query);
 
     // 1) 找候选名录页（跨多条意图查询取并集，正向信号优先）
     const listingUrls = new Map<string, string>(); // url → title
     for (const q of searches) {
-      const hits = await this.search(q, ctx);
+      const hits = await this.search(q, ctx, language);
       for (const h of hits) {
         const domain = normalizeDomain(h.url);
         if (!domain || blocked.has(domain)) continue;
         if (NOISE_DOMAINS.some((n) => domain === n || domain.endsWith(`.${n}`))) continue;
-        if (!LISTING_HINT.test(h.url) && !LISTING_HINT.test(h.title)) continue; // 非名录相貌的先跳过
+        if (!isDirectoryListingShaped(h.url, h.title)) continue; // 非名录相貌的先跳过
         if (!listingUrls.has(h.url)) listingUrls.set(h.url, h.title);
       }
     }
@@ -201,11 +208,18 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
     };
   }
 
-  /** SearXNG 元搜索（经 Broker：searxng.search 工具）。 */
-  private async search(q: string, ctx: ExecutionContext): Promise<{ url: string; title: string }[]> {
+  /**
+   * SearXNG 元搜索（经 Broker：searxng.search 工具）。language 跟随目标市场语言——
+   * 中文市场固定 language=en 时搜索结果会退化成无关页面（2026-11-06 实测）。
+   */
+  private async search(
+    q: string,
+    ctx: ExecutionContext,
+    language: SearchLanguage,
+  ): Promise<{ url: string; title: string }[]> {
     const res = await this.deps.broker!.invoke<{ q: string; language?: string }, SearxngSearchOutput>(
       'searxng.search',
-      { q, language: 'en' },
+      { q, language },
       this.toolCtx(ctx, 'discovery.extract_list'),
     );
     return res.data.results.slice(0, 20).map((r) => ({ url: r.url, title: r.title ?? '' }));
@@ -403,20 +417,29 @@ export function mapDirectoryCompanyToRecord(args: {
 }
 
 /**
- * 构造名录检索串：行业/关键词 × 意图词（EN + DE）× 地区。中文等中日韩文字的词与空词不进检索串：
- * 主题词全是中文时不检索（不退回通用的 manufacturing）；地区依次取可写的地区词、国家词、
- * 目标国的当地名称，给了地理范围却一个都写不出时也不检索，免得搜成全球名录。
+ * 构造名录检索串：行业/关键词 × 意图词（按目标市场语言选族）× 地区。词的可写性按目标语言判定：
+ * 中文市场保留中文主题词、配中文名录意图词（2026-11-06 修复——旧版一律按「非 CJK 才可用」把
+ * 中文主题整段剥掉，检索退化成 "manufacturing members directory 中国"，实测只返回无关页面）；
+ * 其它市场维持旧行为（本地语言词 + EN/DE 意图词）。主题词一个都写不出时不检索（不退回通用的
+ * manufacturing）；地区依次取可写的地区词、国家词、目标国的当地名称，给了地理范围却一个都写不出
+ * 时也不检索，免得搜成全球名录。
  */
 export function buildDirectorySearches(query: CompanyDiscoveryQuery): string[] {
   const f = query.filters ?? {};
   const arr = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : v == null ? [] : [String(v)]);
   const rawIndustries = [...arr(f.industry), ...arr(f.sub_industry)];
   const rawKeywords = query.keywords ?? [];
-  const industries = searchableTerms(rawIndustries).slice(0, 2);
-  const keywords = searchableTerms(rawKeywords).slice(0, 2);
+  const language = searchLanguageFor(query);
+  // 主题词的语言化过滤只对 zh 启用：其它市场规划器可能合法地给拉丁主题词（如 "pumps" 对
+  // 日本市场），按语言剥掉会把检索串清空；zh 则必须保留中文主题词（2026-11-06 修复）。
+  const topicLanguage = language === 'zh' ? language : undefined;
+  const industries = searchableTerms(rawIndustries, topicLanguage).slice(0, 2);
+  const keywords = searchableTerms(rawKeywords, topicLanguage).slice(0, 2);
   if (!industries.length && !keywords.length && (rawIndustries.length || rawKeywords.length)) return [];
-  const region = searchableTerms(arr(f.region))[0]
-    ?? searchableTerms(arr(f.country))[0]
+  // 地区词：zh 市场保留中文地区/国家词（珠三角、中国）；其它语言维持旧行为
+  // （中文地区词让位给可写的拉丁国家词或目标国当地名）。
+  const region = (language === 'zh' ? searchableTerms(arr(f.region), 'zh')[0] : searchableTerms(arr(f.region))[0])
+    ?? (language === 'zh' ? searchableTerms(arr(f.country), 'zh')[0] : searchableTerms(arr(f.country))[0])
     ?? searchCountryName(query);
   const geographyGiven = [...arr(f.region), ...arr(f.country)].some((value) => value.trim().length > 0);
   if (region === undefined && geographyGiven) return [];
@@ -424,7 +447,9 @@ export function buildDirectorySearches(query: CompanyDiscoveryQuery): string[] {
     .join(' ')
     .trim();
 
-  const intents = [...DIRECTORY_INTENTS_EN.slice(0, 2), ...DIRECTORY_INTENTS_DE.slice(0, 2)];
+  const intents = language === 'zh'
+    ? [...DIRECTORY_INTENTS_ZH]
+    : [...DIRECTORY_INTENTS_EN.slice(0, 2), ...DIRECTORY_INTENTS_DE.slice(0, 2)];
   const searches = intents.map((intent) => [topic, intent, region ?? ''].filter(Boolean).join(' ').trim());
   // 去重 + 去过短
   return [...new Set(searches)].filter((q) => q.length > 5).slice(0, MAX_DIRECTORY_SEARCHES_PER_QUERY);
