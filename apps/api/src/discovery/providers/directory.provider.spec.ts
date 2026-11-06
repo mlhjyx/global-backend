@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDirectorySearches, isDirectoryListingShaped } from './directory.provider';
+import { buildDirectorySearches, isDirectoryListingShaped, mapDirectoryCompanyToRecord } from './directory.provider';
 import { CompanyDiscoveryQuery } from '../provider-contract';
 
 function q(filters: Record<string, unknown>, keywords: string[] = []): CompanyDiscoveryQuery {
@@ -82,6 +82,32 @@ describe('名录发现检索串构造', () => {
     const searches = buildDirectorySearches(q({ country: '中国' }, ['电子元件制造']));
     expect(searches.length).toBeGreaterThan(0);
     expect(searches.every((s) => /电子元件制造/.test(s))).toBe(true);
+  });
+
+  // 2026-11-06 真实 run：无 website 的目录记录 externalId 含中文 slug，违反 ASCII 契约
+  // 被整批拒绝（1878 条）。中文名必须生成 ASCII、稳定且不碰撞的 externalId。
+  it('中文公司名（无 website）生成 ASCII、稳定且不碰撞的 externalId', () => {
+    const ASI = /^[A-Za-z0-9][A-Za-z0-9:._/-]{0,255}$/u;
+    const map = (name: string) =>
+      mapDirectoryCompanyToRecord({
+        company: { name },
+        pageUrl: 'https://dongguan.11467.com/fenggang/s3343/',
+        sourceClass: 'industry_data',
+      });
+    const a = map('东莞市盛源鑫实业有限公司');
+    expect(a.externalId).toMatch(ASI);
+    expect(a.externalId).not.toMatch(/\p{Script=Han}/u);
+    expect(a.externalId.startsWith('directory:dongguan.11467.com:')).toBe(true);
+    // 稳定：同名再映射得到同一 id
+    expect(map('东莞市盛源鑫实业有限公司').externalId).toBe(a.externalId);
+    // 不碰撞：同 ASCII 前缀的不同中文名互相区分
+    expect(map('东莞市盛源鑫电子有限公司').externalId).not.toBe(a.externalId);
+    // 拉丁名保持旧行为（可读 slug）
+    expect(map('Dongguan Example Electronics Co., Ltd.').externalId).toBe(
+      'directory:dongguan.11467.com:dongguan-example-electronics-co-ltd',
+    );
+    // 全角括号等经 NFKC 归一，名字仍可读且通过载荷契约
+    expect(map('ABB（中国）有限公司').name).toBe('ABB(中国)有限公司');
   });
 
   it('名录/黄页相貌识别覆盖中文标题与 URL', () => {
