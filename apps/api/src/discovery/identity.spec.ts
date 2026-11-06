@@ -30,6 +30,21 @@ describe('identity resolution（PRD 8.8 确定性规则）', () => {
     });
   });
 
+  // 2026-11-06 真实 run：中文名录公司名（无域名）让 name_country 键含汉字，公司物化契约
+  // （^[a-z][a-z0-9._:-]{0,255}$）拒绝整批 canonicalize。键必须 ASCII 且等值稳定。
+  it('name_country 键对空格/非 ASCII 名称保持 ASCII 且确定（物化契约要求）', () => {
+    const ascii = /^[a-z][a-z0-9._:-]{0,255}$/u;
+    const cn = companyIdentity({ name: '东莞市盛源鑫实业有限公司' });
+    expect(cn.matchRule).toBe('name_country');
+    expect(cn.dedupeKey).toMatch(ascii);
+    // 稳定：同名再解析得到同一键；不同名区分
+    expect(companyIdentity({ name: '东莞市盛源鑫实业有限公司' }).dedupeKey).toBe(cn.dedupeKey);
+    expect(companyIdentity({ name: '东莞市盛源鑫电子有限公司' }).dedupeKey).not.toBe(cn.dedupeKey);
+    // 含空格的拉丁名同样落到 ASCII 形式；纯 ASCII 单词名保持旧的可读键
+    expect(companyIdentity({ name: 'Beta Werke GmbH' }).dedupeKey).toMatch(ascii);
+    expect(companyIdentity({ name: 'Acme GmbH', country: 'DE' }).dedupeKey).toBe('n:acme:de');
+  });
+
   it('同公司不同来源（www 变体）解析到同一 dedupeKey', () => {
     const a = companyIdentity({ name: 'Acme', domain: 'www.acme.com' });
     const b = companyIdentity({ name: 'ACME Inc.', domain: 'https://acme.com' });

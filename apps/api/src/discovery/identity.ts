@@ -2,6 +2,7 @@
  * 身份解析（PRD 8.8）：确定性规则优先 —— 域名精确匹配 > 名称+国家规范化。
  * 纯函数，可测试；匹配规则名记入 identity_link.match_rule 供审计。
  */
+import { createHash } from 'node:crypto';
 import { normalizePersonName, personNameKeyVariants } from './person-name';
 
 const LEGAL_SUFFIXES =
@@ -43,6 +44,20 @@ export function normalizeIdentifier(id?: CompanyIdentifier | null): string | nul
   return `${id.scheme.toLowerCase()}:${value}`;
 }
 
+/**
+ * name_country 去重键。消费方（公司物化快照契约）要求键为 ASCII
+ * （`^[a-z][a-z0-9._:-]{0,255}$`）：纯 ASCII 名保持可读的 `n:<name>:<country>`；
+ * 名称含空格/非 ASCII（"müller gmbh"、中文名）时改用 `n:h<sha256>` 形式——
+ * 键只参与相等比较（无反向解析），等值语义与稳定性不变。
+ * （2026-11-06 真实 run：中文名录公司名让 canonicalize 阶段的物化契约 INVALID 拒绝整批。）
+ */
+function nameCountryDedupeKey(normalizedName: string, country: string): string {
+  const namePart = /^[a-z0-9._-]+$/.test(normalizedName)
+    ? `n:${normalizedName}`
+    : `n:h${createHash('sha256').update(normalizedName).digest('hex')}`;
+  return `${namePart}:${country}`;
+}
+
 export function companyIdentity(rec: {
   name: string;
   domain?: string | null;
@@ -56,7 +71,7 @@ export function companyIdentity(rec: {
   const id = normalizeIdentifier(rec.identifier);
   if (id) return { dedupeKey: `id:${id}`, matchRule: 'identifier_exact' };
   return {
-    dedupeKey: `n:${normalizeCompanyName(rec.name)}:${(rec.country ?? '').toLowerCase()}`,
+    dedupeKey: nameCountryDedupeKey(normalizeCompanyName(rec.name), (rec.country ?? '').toLowerCase()),
     matchRule: 'name_country',
   };
 }
