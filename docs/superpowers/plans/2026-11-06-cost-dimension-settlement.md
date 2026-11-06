@@ -56,10 +56,10 @@ SELECT COALESCE(SUM(cost_usd), 0)::float8 AS cost_usd
 FROM usage_ledger
 WHERE workspace_id = $1::uuid
   AND ref_type = 'ai_trace'
-  AND meta->>'runId' = $2            -- sink 从 ExecutionContext.runId 写入（D-a v2，见下）
+  AND meta->>'runId' = $2            -- = binding.accountKey（预算账户键，每 run 唯一；discovery 的 ctx.runId 即此值，非 run UUID）
 ```
 
-- **D-a v2（2026-11-06 自审改版）**：初版用「工作空间 + run 时间窗」聚合，审查确认两处实质缺陷——① 同 workspace 并发 run 的重叠窗口把同一笔成本计入多个 run 的事件（代码里不存在「BFF 每 workspace 串行」的约束），cost_ledger 双计、$15 上限虚高；② 事务内 `created_at <= now()` 是事务开始时刻，finalize 前仍在飞的 trace 写入被永久漏计（真实数据：run 939221cb 有 7/29 条 trace 在 finalize 后落账）。改为 `meta.runId` 精确归属并去掉时间上界。
+- **D-a v2（2026-11-06 自审改版）**：初版用「工作空间 + run 时间窗」聚合，审查确认两处实质缺陷——① 同 workspace 并发 run 的重叠窗口把同一笔成本计入多个 run 的事件（代码里不存在「BFF 每 workspace 串行」的约束），cost_ledger 双计、$15 上限虚高；② 事务内 `created_at <= now()` 是事务开始时刻，finalize 前仍在飞的 trace 写入被永久漏计（真实数据：run 939221cb 有 7/29 条 trace 在 finalize 后落账）。改为 `meta.runId` 精确归属并去掉时间上界。**v2.1（真实 run 验证修正）**：discovery 链路的 `ExecutionContext.runId` 实际是预算账户键（`binding.accountKey`，`discovery.run:discovery_run:request:<sha>:<sha>`，每 run 唯一），不是 run UUID；finalize 从 `args.executionBudget` 解析同一账户键过滤（首版按 UUID 过滤导致真实 run 事件 cost=0，2026-11-06 实跑发现）。
 - sink 侧：`usage_ledger.meta` 写入 `runId`（网关从 `ctx.runId` 透传）；`status='ERROR'` 但已被预算结算（非 `RELEASED_*`）且 tokens>0 的调用也写成本行（`meta.status='ERROR'`），否则失败调用的花费对上限不可见（实测 110/958 条 error trace 合计 469k tokens 已真实扣费）。
 - 载荷新增：`cost`（USD，number）与 `costBasis: 'usage_ledger-runid/v1'`。
 - 无成本行时 `cost: 0`（消费端 `> 0` 才记账，等价不记）。

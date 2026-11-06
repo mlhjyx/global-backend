@@ -3235,7 +3235,10 @@ describe("finalizeRun durable query receipt readback", () => {
     const sql = parts(costQuery![0]).join("?");
     expect(sql).toContain("meta->>'runId'");
     expect(sql).not.toContain("created_at <=");
-    expect((costQuery as unknown[]).slice(1)).toContain("40000000-0000-4000-8000-000000000001");
+    // The sink records the run's budget account key as meta.runId (discovery sets
+    // ctx.runId = binding.accountKey), so the filter must use the parsed account
+    // key from the execution budget envelope — not the run UUID.
+    expect((costQuery as unknown[]).slice(1)).toContain(DISCOVERY_BINDING.accountKey);
     expect(outboxCreate.mock.calls[0]![0].data.payload).toMatchObject({
       cost: 7.25,
       costBasis: "usage_ledger-runid/v1",

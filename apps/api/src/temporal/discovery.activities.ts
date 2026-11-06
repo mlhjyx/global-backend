@@ -3431,16 +3431,28 @@ export function createDiscoveryActivities(deps: {
           });
         }
         // 花费维度（1b，设计 2026-11-06-cost-dimension-settlement §4.1）：把本 run 的模型
-        // 成本汇总进事件。口径 = usage_ledger 行按 meta.runId 精确归属（sink 从
-        // ExecutionContext.runId 写入）；不用时间窗——并发 run 会互相计入，且事务 now()
-        // 会永久漏掉 finalize 前仍在飞的 trace 写入。cost_usd 为 NULL 的调用（释放的
-        // 预算操作）不计入。SaaS 消费端按事件幂等落 cost_ledger。
+        // 成本汇总进事件。口径 = usage_ledger 行按 meta.runId 精确归属——sink 写入的值来自
+        // ExecutionContext.runId，而 discovery 链路把它设为预算账户键（binding.accountKey，
+        // 形如 discovery.run:discovery_run:request:<sha>:<sha>，每 run 唯一），不是 run UUID；
+        // 这里从执行预算信封解析同一账户键再过滤。不用时间窗——并发 run 会互相计入，且
+        // 事务 now() 会永久漏掉 finalize 前仍在飞的 trace 写入。cost_usd 为 NULL 的调用
+        // （释放的预算操作）不计入。SaaS 消费端按事件幂等落 cost_ledger。
+        let costAccountKey: string | null = null;
+        try {
+          costAccountKey = parseExecutionBudgetBinding(args.executionBudget, {
+            scopeKey: args.workspaceId,
+            purpose: 'discovery.run',
+            subjectType: 'discovery_run',
+          }).accountKey;
+        } catch {
+          costAccountKey = null;
+        }
         const [runCost] = await tx.$queryRaw<Array<{ cost_usd: number }>>`
           SELECT COALESCE(SUM(cost_usd), 0)::float8 AS cost_usd
           FROM usage_ledger
           WHERE workspace_id = ${args.workspaceId}::uuid
             AND ref_type = 'ai_trace'
-            AND meta->>'runId' = ${args.runId}
+            AND meta->>'runId' = ${costAccountKey ?? args.runId}
         `;
         const runCostUsd =
           typeof runCost?.cost_usd === 'number' && Number.isFinite(runCost.cost_usd)
