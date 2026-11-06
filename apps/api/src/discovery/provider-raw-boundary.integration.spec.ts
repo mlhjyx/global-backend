@@ -83,6 +83,22 @@ describe("actual provider mapper output → governed Raw boundary", () => {
 
   // 2026-11-06 真实 run：名录页托管在 www 主机时，attributes.source_directory 已被
   // normalizeDomain 去掉 www.，而 binding 比较用原始 hostname —— 41 条记录全部被拒。
+  // 2026-11-06 真实 run：无 website 的中文公司记录 externalId 违反 ASCII 契约（1878 条被拒）。
+  it("accepts a Directory record for a Chinese-named company without a website", () => {
+    const mapped = mapDirectoryCompanyToRecord({
+      company: { name: "东莞市盛源鑫实业有限公司" },
+      listKind: "directory",
+      pageUrl: "https://dongguan.11467.com/fenggang/s3343/",
+      sourceClass: "industry_data",
+    });
+    const row = prepare("directory", mapped, "dongguan.11467.com");
+    expect(row.ingestStatus).toBe("ACCEPTED");
+    expect(row.payload).toMatchObject({
+      externalId: expect.stringMatching(/^directory:dongguan\.11467\.com:[a-z0-9-]+$/u),
+      name: "东莞市盛源鑫实业有限公司",
+    });
+  });
+
   it("accepts Directory records mined from a www-hosted listing page", () => {
     const mapped = mapDirectoryCompanyToRecord({
       company: { name: "Dongguan Example Electronics Co., Ltd.", website: "https://example-electronics.com/" },

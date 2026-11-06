@@ -396,7 +396,9 @@ export function mapDirectoryCompanyToRecord(args: {
     externalId: domain
       ? `directory:${domain}`
       : `directory:${sourceDomain}:${slug(args.company.name)}`,
-    name: args.company.name.trim(),
+    // 载荷契约要求 NFKC 恒等（validCompanyName）：中文名常用全角括号/全角字母
+    // （如「ABB（中国）有限公司」），在这里先归一，否则整条记录被拒（2026-11-06 实测）。
+    name: args.company.name.normalize('NFKC').trim(),
     domain: domain || undefined,
     attributes: {
       source_kind: args.listKind ?? 'directory',
@@ -456,11 +458,18 @@ export function buildDirectorySearches(query: CompanyDiscoveryQuery): string[] {
 }
 
 function slug(s: string): string {
-  return s
+  const base = s
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 60);
+    .replace(/^-+|-+$/g, '');
+  const ascii = base.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  if (base === ascii) return ascii.slice(0, 60);
+  // 外部 ID 契约是 ASCII（EXTERNAL_ID，raw-source-provider-schema）；中文名保留可读的
+  // ASCII 前缀并追加名称哈希——同一公司跨 run/跨页稳定、同前缀中文名不会互相碰撞。
+  // （2026-11-06 真实 run：中文名 slug 让 1878 条无 website 的目录记录全部载荷校验被拒。）
+  const digest = createHash('sha256').update(s).digest('hex').slice(0, 16);
+  const prefix = ascii.slice(0, 40).replace(/-+$/g, '');
+  return prefix ? `${prefix}-${digest}` : digest;
 }
 
 /** 从当前页文本里找"下一页"链接（同站，含 next/weiter 或数字页码）。 */
