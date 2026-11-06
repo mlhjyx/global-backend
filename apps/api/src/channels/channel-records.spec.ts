@@ -45,12 +45,16 @@ describe('channel records 物化（buildChannelRecordRows）', () => {
   });
 
   it('falls back to name+country identity when no website exists', () => {
-    const rows = buildChannelRecordRows({
-      channelId: CHANNEL_ID,
-      crawlRunId: CRAWL_RUN_ID,
-      records: [record({ website: undefined, name: 'Beta Werke GmbH', country: 'Austria' })],
-    });
-    expect(rows[0]!.dedupeKey).toBe('n:beta werke:austria');
+    // 含空格/非 ASCII 的名称走 name_country 的 ASCII 形式（n:h<sha256>，物化契约要求）；
+    // 键只做相等比较，跨轮 upsert 稳定性由同名同键保证。
+    const build = () =>
+      buildChannelRecordRows({
+        channelId: CHANNEL_ID,
+        crawlRunId: CRAWL_RUN_ID,
+        records: [record({ website: undefined, name: 'Beta Werke GmbH', country: 'Austria' })],
+      });
+    expect(build()[0]!.dedupeKey).toMatch(/^n:h[0-9a-f]{64}:austria$/u);
+    expect(build()[0]!.dedupeKey).toBe(build()[0]!.dedupeKey);
   });
 
   it('folds duplicates within a run (same dedupe key, first wins)', () => {
