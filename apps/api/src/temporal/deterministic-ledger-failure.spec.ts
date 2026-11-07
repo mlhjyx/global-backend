@@ -12,6 +12,7 @@ import {
   ExecutionControlError,
   isExecutionControlError,
 } from '../execution-budget/execution-control-error';
+import { ExecutionBudgetGrantError } from '../execution-budget/execution-budget-authority.types';
 import { ToolDurableResultProjectionError } from '../tools/tool-broker';
 import { ModelDurableResultProjectionError } from '../model-gateway/router-model-gateway';
 import {
@@ -27,7 +28,6 @@ import {
 describe('确定性账本/控制错误分类（B2）', () => {
   it.each([
     ['replay（remnant）', new BudgetOperationReplayError('op-1', 'remnant')],
-    ['replay（live）', new BudgetOperationReplayError('op-1', 'live')],
     ['预算耗尽', new BudgetExceededError('acct', 10n, 0n)],
     ['账户不可用', new BudgetAccountUnavailableError('acct')],
     ['存在未结操作', new BudgetUnsettledOperationsError('acct')],
@@ -37,7 +37,12 @@ describe('确定性账本/控制错误分类（B2）', () => {
     ['确定性控制错误（MISMATCH）', new ExecutionControlError('DOMAIN_ACK_RECEIPT_BINDING_MISMATCH')],
     ['确定性控制错误（MIXED）', new ExecutionControlError('DOMAIN_ACK_MIXED_REPLAY_STATE')],
     ['确定性控制错误（EXHAUSTED）', new ExecutionControlError('EXECUTION_BUDGET_EXHAUSTED')],
-    ['确定性控制错误（REUSED）', new ExecutionControlError('EXECUTION_BUDGET_GRANT_REUSED')],
+    ['确定性控制错误（REQUIRED）', new ExecutionControlError('DURABLE_EXECUTION_RECEIPT_FACTS_REQUIRED')],
+    ['确定性控制错误（REVOKED）', new ExecutionControlError('EXECUTION_BUDGET_AUTHORITY_REVOKED')],
+    // 生产上 Grant 被拒以 ExecutionBudgetGrantError 抛出（platform-grant-admission 自注不可重试）。
+    ['Grant 过期', new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_EXPIRED')],
+    ['Grant 重复使用', new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_REUSED')],
+    ['Grant 作用域不符', new ExecutionBudgetGrantError('EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH')],
   ])('%s → nonRetryable', (_label, error) => {
     const failure = classifyDeterministicLedgerFailure(error);
     expect(failure).toBeInstanceOf(ApplicationFailure);
@@ -46,10 +51,16 @@ describe('确定性账本/控制错误分类（B2）', () => {
   });
 
   it.each([
+    // live：本次尝试的物理调用已发生、结果未存证。重试会读到已结清行或吸收 remnant
+    //（#642 的恢复设计），因此必须保持可重试。
+    ['replay（live）', new BudgetOperationReplayError('op-1', 'live')],
     ['预算存储不可用', new BudgetStoreUnavailableError()],
     ['验证服务不可用', new ExecutionControlError('EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE')],
+    ['Grant 验证服务不可用', new ExecutionBudgetGrantError('EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE')],
     ['平台围栏不可用', new ExecutionControlError('PLATFORM_EGRESS_FENCE_UNAVAILABLE')],
     ['事务上下文不可用', new ExecutionControlError('DOMAIN_ACK_PLATFORM_TRANSACTION_UNAVAILABLE')],
+    // `_UNAVAILABLE` 优先排除：即使码形同时命中确定性规则（_MIXED_/后缀），瞬时故障保持可重试。
+    ['混合形态但不可用', new ExecutionControlError('DOMAIN_ACK_MIXED_RECEIPT_UNAVAILABLE')],
     ['普通错误', new Error('socket hang up')],
     ['非错误值', 'boom'],
   ])('%s → 保持可重试（不转换）', (_label, error) => {

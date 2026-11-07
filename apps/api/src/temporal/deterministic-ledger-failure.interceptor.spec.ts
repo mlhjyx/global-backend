@@ -38,6 +38,15 @@ describe('DeterministicLedgerFailureInterceptor', () => {
     expect(failure).toBe(unavailable);
   });
 
+  it('live 来源的 replay 错误原样透传（重试吸收 remnant 的恢复路径，#642）', async () => {
+    const live = new BudgetOperationReplayError('op-1', 'live');
+    const failure = await run(async () => {
+      throw live;
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBe(live);
+  });
+
   it('普通错误原样透传', async () => {
     const plain = new Error('socket hang up');
     const failure = await run(async () => {
@@ -47,9 +56,9 @@ describe('DeterministicLedgerFailureInterceptor', () => {
     expect(failure).toBe(plain);
   });
 
-  it('记录到的 cause 链命中同样转换（被包装的 replay 错误）', async () => {
+  it('把被包装的 remnant replay 错误同样转换（cause 链识别）', async () => {
     const wrapped = Object.assign(new Error('activity wrapper'), {
-      cause: new BudgetOperationReplayError('op-1', 'live'),
+      cause: new BudgetOperationReplayError('op-1', 'remnant'),
     });
     const failure = await run(async () => {
       throw wrapped;

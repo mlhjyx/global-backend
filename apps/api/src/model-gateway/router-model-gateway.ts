@@ -697,6 +697,7 @@ export class RouterModelGateway extends ModelGateway {
       const definiteFailure = ctx.platformEgress
         ? undefined
         : definiteModelFailureCode(err);
+      let settleFailed = false;
       if (controlDenial || definiteFailure !== undefined) {
         await this.budgetStore.release(reservation);
       } else {
@@ -720,6 +721,7 @@ export class RouterModelGateway extends ModelGateway {
             // F4（B2）：物理调用已经发生、记账两次都失败——行不能停在裸 RESERVED。
             // 尽力标 RESULT_UNKNOWN（结果未知、按预留额保守对待），再抛原 provider 错误
             // 保持调用方语义不变。
+            settleFailed = true;
             await this.markResultUnknownAfterSettleFailure(reservation);
           }
         }
@@ -759,7 +761,9 @@ export class RouterModelGateway extends ModelGateway {
           ? "RELEASED_CONTROL_DENIAL"
           : definiteFailure !== undefined
             ? "RELEASED_DEFINITE_FAILURE"
-            : "SETTLED_NO_RESULT",
+            : settleFailed
+              ? "RESERVED_SETTLE_FAILED"
+              : "SETTLED_NO_RESULT",
       });
       throw err;
     }
@@ -803,14 +807,20 @@ export class RouterModelGateway extends ModelGateway {
       try {
         await this.budgetStore.settle(reservation, observedMicrousd);
         this.trace?.record(projectionRejectedTrace("ModelDurableResultProjectionError"));
-      } catch (settleError) {
-        // Bounded diagnostic, no secrets: the row stays unresolved and a replay
-        // absorbs it as a remnant.
-        this.trace?.record(projectionRejectedTrace(
-          `model projection-rejected settlement failed: ${
-            settleError instanceof Error ? settleError.name : "unknown"
-          }`,
-        ));
+      } catch {
+        try {
+          // ACK 丢失：同样的 operation/成本重放一次是安全的。
+          await this.budgetStore.settle(reservation, observedMicrousd);
+          this.trace?.record(projectionRejectedTrace("ModelDurableResultProjectionError"));
+        } catch (settleError) {
+          // B2/F4：双败同样要把行带离裸 RESERVED——先尽力标 RESULT_UNKNOWN。
+          await this.markResultUnknownAfterSettleFailure(reservation);
+          this.trace?.record(projectionRejectedTrace(
+            `model projection-rejected settlement failed: ${
+              settleError instanceof Error ? settleError.name : "unknown"
+            }`,
+          ));
+        }
       }
       throw new ModelDurableResultProjectionError(reservation.operationId);
     }
@@ -873,7 +883,7 @@ export class RouterModelGateway extends ModelGateway {
           budgetOperationId: reservation.operationId,
           budgetDisposition: 'RESERVED_SETTLE_FAILED',
         });
-        throw new BudgetOperationReplayError(reservation.operationId);
+        throw new BudgetOperationReplayError(operationKey);
       }
     }
     const returnedResult = settled?.receipt

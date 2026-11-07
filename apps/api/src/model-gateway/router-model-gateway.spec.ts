@@ -2193,3 +2193,139 @@ describe('RouterModelGateway — settle 双败的账本兜底（B2/F4）', () =>
     expect(budgetStore.markResultUnknown).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('RouterModelGateway — settle 失败后的安全重试与观测（B2/F4）', () => {
+  const reservation = {
+    workspaceId: 'ws-1',
+    accountKey: 'run-1',
+    operationId: 'op',
+    estimatedMicrousd: BigInt(40) * 10_000n,
+    replay: false,
+  };
+  const schema = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['code'],
+    properties: { code: { type: 'string' } },
+  } as const;
+
+  it('ACK 丢失：第一次 settle 失败、第二次成功 → 正常返回，不标记 RESULT_UNKNOWN，且重试参数逐字节一致', async () => {
+    const provider = fakeProvider();
+    vi.mocked(provider.generateStructured).mockResolvedValueOnce({
+      data: { code: 'CPV-1' },
+      provider: 'fake',
+      model: 'm',
+    });
+    const settle = vi
+      .fn(async (_r: unknown, observed: bigint) => ({
+        chargedMicrousd: observed,
+        observedMicrousd: observed,
+        capVariance: false,
+        replay: false,
+      }))
+      .mockRejectedValueOnce(new Error('ACK lost'));
+    const markResultUnknown = vi.fn();
+    const budgetStore = {
+      reserve: vi.fn(async () => reservation),
+      settle,
+      markResultUnknown,
+    } as unknown as BudgetStore;
+    const gateway = new RouterModelGateway(
+      { route: () => [provider] } as unknown as ModelRouter,
+      undefined,
+      budgetStore,
+    );
+
+    await gateway.generateStructured(
+      { task: 'taxonomy.normalize', prompt: 'p', schema },
+      { workspaceId: 'ws-1', runId: 'run-1' },
+    );
+
+    expect(settle).toHaveBeenCalledTimes(2);
+    // 重试必须与第一次逐参一致（PostgreSQL 拒绝任何结算漂移）。
+    expect(settle.mock.calls[1]).toEqual(settle.mock.calls[0]);
+    expect(markResultUnknown).not.toHaveBeenCalled();
+  });
+
+  it('成功路径双败：trace 记录 RESERVED_SETTLE_FAILED 且两次 settle 参数一致', async () => {
+    const provider = fakeProvider();
+    vi.mocked(provider.generateStructured).mockResolvedValueOnce({
+      data: { code: 'CPV-1' },
+      provider: 'fake',
+      model: 'm',
+    });
+    const settle = vi.fn(async () => {
+      throw new Error('connection reset');
+    });
+    const trace = { record: vi.fn() };
+    const budgetStore = {
+      reserve: vi.fn(async () => reservation),
+      settle,
+      markResultUnknown: vi.fn(async () => ({
+        reservedMicrousd: reservation.estimatedMicrousd,
+        replay: false,
+      })),
+    } as unknown as BudgetStore;
+    const gateway = new RouterModelGateway(
+      { route: () => [provider] } as unknown as ModelRouter,
+      trace as unknown as AiTraceSink,
+      budgetStore,
+    );
+
+    await expect(
+      gateway.generateStructured(
+        { task: 'taxonomy.normalize', prompt: 'p', schema },
+        { workspaceId: 'ws-1', runId: 'run-1' },
+      ),
+    ).rejects.toBeInstanceOf(BudgetOperationReplayError);
+
+    expect(settle.mock.calls[1]).toEqual(settle.mock.calls[0]);
+    expect(trace.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ERROR',
+        errorMessage: 'BUDGET_SETTLE_FAILED',
+        budgetOperationId: 'op',
+        budgetDisposition: 'RESERVED_SETTLE_FAILED',
+      }),
+    );
+  });
+
+  it('provider 失败路径 settle 双败：trace disposition 记录 RESERVED_SETTLE_FAILED（不再谎称已结清）', async () => {
+    const provider = fakeProvider();
+    const providerError = new ProviderOutputError('STRUCTURED_OUTPUT_EMPTY_TRUNCATED: empty answer', {
+      outputTokens: 10,
+    });
+    vi.mocked(provider.generateStructured).mockRejectedValueOnce(providerError);
+    const trace = { record: vi.fn() };
+    const budgetStore = {
+      reserve: vi.fn(async () => reservation),
+      settle: vi.fn(async () => {
+        throw new Error('connection reset');
+      }),
+      markResultUnknown: vi.fn(async () => ({
+        reservedMicrousd: reservation.estimatedMicrousd,
+        replay: false,
+      })),
+    } as unknown as BudgetStore;
+    const gateway = new RouterModelGateway(
+      { route: () => [provider] } as unknown as ModelRouter,
+      trace as unknown as AiTraceSink,
+      budgetStore,
+    );
+
+    await expect(
+      gateway.generateStructured(
+        { task: QUALIFY_TASK, prompt: 'p', schema: {} },
+        { workspaceId: 'ws-1', runId: 'run-1' },
+      ),
+    ).rejects.toBe(providerError);
+
+    expect(trace.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'ERROR',
+        budgetDisposition: 'RESERVED_SETTLE_FAILED',
+        budgetOperationId: 'op',
+      }),
+    );
+  });
+});

@@ -16,6 +16,7 @@ import {
   BudgetOperationReplayError,
   BudgetUnsettledOperationsError,
 } from '../tools/budget-store';
+import { ExecutionBudgetGrantError } from '../execution-budget/execution-budget-authority.types';
 import { ExecutionControlError } from '../execution-budget/execution-control-error';
 import { ToolDurableResultProjectionError } from '../tools/tool-broker';
 import { ModelDurableResultProjectionError } from '../model-gateway/router-model-gateway';
@@ -33,6 +34,7 @@ const DETERMINISTIC_CODE_SUFFIXES = Object.freeze([
   '_REUSED',
   '_REVOKED',
   '_EXHAUSTED',
+  '_EXPIRED',
 ] as const);
 const DETERMINISTIC_CODE_INFIXES = Object.freeze(['_MIXED_'] as const);
 
@@ -45,8 +47,13 @@ function isDeterministicControlCode(code: string): boolean {
 }
 
 function classifies(error: object): boolean {
+  // replay 错误只在 remnant 时是确定性的：重试必然再撞同一行。origin='live' 表示
+  // 本次尝试的物理调用已发生而结果未能存证——按 #642 的设计，让 Temporal 重试一次，
+  // 重试会读到已结清行（含投影则直接复用结果）或把 remnant 吸收掉，整段活动得以续跑。
+  if (error instanceof BudgetOperationReplayError) {
+    return error.origin === 'remnant';
+  }
   if (
-    error instanceof BudgetOperationReplayError ||
     error instanceof BudgetExceededError ||
     error instanceof BudgetAccountUnavailableError ||
     error instanceof BudgetUnsettledOperationsError ||
@@ -54,6 +61,11 @@ function classifies(error: object): boolean {
     error instanceof ModelDurableResultProjectionError
   ) {
     return true;
+  }
+  // 授权 Grant 被拒（过期/作用域不符/已用/撤销/耗尽）是确定性判定；唯一瞬时的
+  // EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE 以 _UNAVAILABLE 结尾、保持可重试。
+  if (error instanceof ExecutionBudgetGrantError) {
+    return !error.code.endsWith('_UNAVAILABLE');
   }
   if (error instanceof ExecutionControlError) {
     return isDeterministicControlCode(error.code);

@@ -1707,3 +1707,38 @@ describe("ToolBroker — settle 双败的账本兜底（B2/F4）", () => {
     expect(budgetStore.markResultUnknown).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("ToolBroker — settle 失败后的安全重试（B2/F4）", () => {
+  it("ACK 丢失：第一次 settle 失败、第二次成功 → 正常返回，不标记 RESULT_UNKNOWN，重试参数逐字节一致", async () => {
+    const tool = durableArtifactTool("t.settle-retry", 1);
+    const settle = vi
+      .fn(async (_r: unknown, observed: bigint) => ({
+        chargedMicrousd: observed,
+        observedMicrousd: observed,
+        capVariance: false,
+        replay: false,
+      }))
+      .mockRejectedValueOnce(new Error("ACK lost"));
+    const markResultUnknown = vi.fn();
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: "w",
+        accountKey: "run",
+        operationId: "op",
+        estimatedMicrousd: BigInt(1) * 10_000n,
+        replay: false,
+      })),
+      settle,
+      markResultUnknown,
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    await expect(
+      broker.invoke(tool.id, {}, { workspaceId: "w", runId: "run" }),
+    ).resolves.toMatchObject({ costCents: 1 });
+
+    expect(settle).toHaveBeenCalledTimes(2);
+    expect(settle.mock.calls[1]).toEqual(settle.mock.calls[0]);
+    expect(markResultUnknown).not.toHaveBeenCalled();
+  });
+});
