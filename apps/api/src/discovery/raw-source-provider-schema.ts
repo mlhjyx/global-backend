@@ -684,6 +684,82 @@ function validProviderBindings(
   }
 }
 
+/**
+ * 受控取样探针（2026-11-07，RAW_SOURCE_SCHEMA_PROBE=1 时才运行）：载荷被拒时把「失败子句名 +
+ * 结构摘要」打到 worker 日志，供定位真实拒绝形状。绝不输出字段值：名称只给字节数/词数/NFC 是否漂移，
+ * URL 只给 scheme 类别，其余只给键集合。
+ */
+export type RawProviderSchemaProbe = Readonly<{
+  providerKey: string;
+  stage: string;
+  failed: readonly string[];
+  shape: Readonly<Record<string, unknown>>;
+}>;
+
+function probeEnabled(): boolean {
+  return (process.env.RAW_SOURCE_SCHEMA_PROBE ?? '').trim() === "1";
+}
+
+function stringShape(value: unknown): Record<string, unknown> {
+  return typeof value === "string"
+    ? {
+        kind: "string",
+        bytes: Buffer.byteLength(value, "utf8"),
+        words: value.split(/\s+/u).filter(Boolean).length,
+        nfcStable: value.normalize("NFC") === value,
+        asciiOnly: !/[^\x20-\x7e]/u.test(value),
+      }
+    : { kind: value === null ? "null" : typeof value };
+}
+
+function keyShape(value: unknown): unknown {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? Object.keys(value).sort()
+    : value === null ? "null" : typeof value;
+}
+
+export function describeRawProviderSchemaFailure(
+  providerKey: string,
+  stage: string,
+  value: unknown,
+  failed: readonly string[],
+): RawProviderSchemaProbe {
+  const input = value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+  const attributes = input ? (input.attributes as Record<string, unknown> | undefined) : undefined;
+  const provenance = input ? (input.provenance as Record<string, unknown> | undefined) : undefined;
+  const detail = attributes?.detail_url;
+  return Object.freeze({
+    providerKey,
+    stage,
+    failed: Object.freeze([...failed]),
+    shape: Object.freeze({
+      topKeys: keyShape(value),
+      name: input ? stringShape(input.name) : undefined,
+      domain: input ? stringShape(input.domain) : undefined,
+      externalId: input ? stringShape(input.externalId) : undefined,
+      attributesKeys: keyShape(attributes),
+      provenanceKeys: keyShape(provenance),
+      detailUrlScheme:
+        typeof detail === "string"
+          ? (detail.startsWith("https://") ? "https" : detail.startsWith("http://") ? "http" : "other")
+          : detail === undefined ? "absent" : typeof detail,
+      identifierKeys: input ? keyShape(input.identifier) : undefined,
+      license: input ? stringShape(input.license) : undefined,
+    }),
+  });
+}
+
+function probeFail(providerKey: string, stage: string, value: unknown, failed: readonly string[]): void {
+  if (!probeEnabled()) return;
+  try {
+    console.warn("[raw-source-schema-probe]", JSON.stringify(describeRawProviderSchemaFailure(providerKey, stage, value, failed)));
+  } catch {
+    // 探针绝不改变校验结果。
+  }
+}
+
 export function validateRawSourceProviderPayload(
   providerKey: string,
   value: unknown,
@@ -696,11 +772,13 @@ export function validateRawSourceProviderPayload(
     normalized = withoutUndefined(value);
   } catch (error) {
     if (!(error instanceof InvalidProviderContainerError)) throw error;
+    probeFail(providerKey, "container", value, ["InvalidProviderContainer"]);
     return { ok: false, reason: "PROVIDER_PAYLOAD_SCHEMA_INVALID" };
   }
   const input = record(normalized);
   if (!input) return { ok: false, reason: "MALFORMED_PAYLOAD" };
   if (Object.keys(input).some((key) => !TOP_LEVEL_KEYS.has(key))) {
+    probeFail(providerKey, "top-level-keys", normalized, ["UNKNOWN_PAYLOAD_FIELD"]);
     return { ok: false, reason: "UNKNOWN_PAYLOAD_FIELD" };
   }
   if (typeof input.name !== "string" || !input.name.trim()) {
@@ -708,42 +786,42 @@ export function validateRawSourceProviderPayload(
   }
   const governed = normalizeRawSourceProviderPayload(providerKey, input);
   if (!governed) {
+    probeFail(providerKey, "normalize", input, ["normalizeAttributesOrProvenance"]);
     return { ok: false, reason: "PROVIDER_PAYLOAD_SCHEMA_INVALID" };
   }
-  if (
-    (governed.externalId !== undefined &&
-      !validExternalId(providerKey, governed.externalId)) ||
-    !validCompanyName(governed.name) ||
-    (governed.domain !== undefined && !validDomain(governed.domain)) ||
-    (governed.country !== undefined &&
-      (typeof governed.country !== "string" ||
-        !/^[A-Z]{2}$/u.test(governed.country))) ||
-    (governed.employeeCount !== undefined &&
-      (!Number.isSafeInteger(governed.employeeCount) ||
-        Number(governed.employeeCount) < 0 ||
-        Number(governed.employeeCount) > 10_000_000_000)) ||
-    (governed.revenueUsd !== undefined &&
-      (typeof governed.revenueUsd !== "number" ||
-        !Number.isFinite(governed.revenueUsd) ||
-        governed.revenueUsd < 0 ||
-        governed.revenueUsd > 1_000_000_000_000_000)) ||
-    !validAttributes(providerKey, governed.attributes) ||
-    !validProviderBindings(providerKey, governed) ||
-    !validIdentifier(providerKey, governed.identifier) ||
-    !validProvenance(governed.provenance) ||
-    (governed.license !== undefined &&
-      (typeof governed.license !== "string" ||
-        !LICENSES_BY_PROVIDER[providerKey]?.has(governed.license))) ||
-    (["wikidata", "openstreetmap", "ted", "openfda"].includes(providerKey) &&
-      governed.license === undefined) ||
-    (providerKey === "trade_fair"
-      ? !validMonitoredSource(governed.monitoredSource)
-      : governed.monitoredSource !== undefined) ||
-    (providerKey === "trade_fair" &&
-      governed.monitoredSource === undefined &&
-      (record(governed.attributes)?.source_fair === undefined ||
-        record(governed.attributes)?.source_class !== "industry_data"))
-  ) {
+  const checks: ReadonlyArray<readonly [string, boolean]> = [
+    ["externalId", governed.externalId === undefined || validExternalId(providerKey, governed.externalId)],
+    ["companyName", validCompanyName(governed.name)],
+    ["domain", governed.domain === undefined || validDomain(governed.domain)],
+    ["country", governed.country === undefined ||
+      (typeof governed.country === "string" && /^[A-Z]{2}$/u.test(governed.country))],
+    ["employeeCount", governed.employeeCount === undefined ||
+      (Number.isSafeInteger(governed.employeeCount) &&
+        Number(governed.employeeCount) >= 0 &&
+        Number(governed.employeeCount) <= 10_000_000_000)],
+    ["revenueUsd", governed.revenueUsd === undefined ||
+      (typeof governed.revenueUsd === "number" &&
+        Number.isFinite(governed.revenueUsd) &&
+        governed.revenueUsd >= 0 &&
+        governed.revenueUsd <= 1_000_000_000_000_000)],
+    ["attributes", validAttributes(providerKey, governed.attributes)],
+    ["bindings", validProviderBindings(providerKey, governed)],
+    ["identifier", validIdentifier(providerKey, governed.identifier)],
+    ["provenance", validProvenance(governed.provenance)],
+    ["license", governed.license === undefined ||
+      (typeof governed.license === "string" && LICENSES_BY_PROVIDER[providerKey]?.has(governed.license) === true) ||
+      (["wikidata", "openstreetmap", "ted", "openfda"].includes(providerKey) && governed.license === undefined)],
+    ["monitoredSource", providerKey === "trade_fair"
+      ? validMonitoredSource(governed.monitoredSource)
+      : governed.monitoredSource === undefined],
+    ["tradeFairAttributes", providerKey !== "trade_fair" ||
+      governed.monitoredSource !== undefined ||
+      (record(governed.attributes)?.source_fair !== undefined &&
+        record(governed.attributes)?.source_class === "industry_data")],
+  ];
+  const failed = checks.filter(([, ok]) => !ok).map(([name]) => name);
+  if (failed.length > 0) {
+    probeFail(providerKey, "checks", governed, failed);
     return { ok: false, reason: "PROVIDER_PAYLOAD_SCHEMA_INVALID" };
   }
   return { ok: true, value: governed };
