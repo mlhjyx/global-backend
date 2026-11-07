@@ -42,6 +42,23 @@ class ResolveConflictDto {
 /** 知识冲突行（KNW-004）；结构化 DTO 待冲突裁决 UI 定型。 */
 const CONFLICT_SCHEMA = { type: 'object', additionalProperties: true, description: '知识冲突（两条矛盾 Claim + 状态）' };
 
+/** P5 草稿合成结果：新建数、去重跳过数、本次新建的草稿（含证据）。 */
+const CLAIM_DRAFTS_SCHEMA = {
+  type: 'object',
+  required: ['created', 'skipped', 'claims'],
+  properties: {
+    created: { type: 'number', description: '本次新建的草稿数量' },
+    skipped: { type: 'number', description: '因既有同文事实或 REVOKED 去重而跳过的数量' },
+    claims: {
+      type: 'array',
+      items: { type: 'object', additionalProperties: true },
+      description: '本次新建的 Claim 草稿（NEEDS_REVIEW，带注册引导证据）',
+    },
+  },
+  additionalProperties: false,
+  description: '从公司档案确定性生成的 Claim 草稿（幂等：重复调用不再新增）',
+};
+
 @ApiTags('Claims')
 @ApiBearerAuth()
 @Controller()
@@ -98,6 +115,29 @@ export class ClaimController {
     @Body() dto: CreateManualClaimDto,
   ): Promise<Enveloped<ClaimDto>> {
     return envelope(ClaimDto.from(await this.claims.createManual(ctx, companyId, dto)));
+  }
+
+  @Post('companies/:companyId/claim-drafts')
+  @RequireScopes('acquisition:review')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: '从公司档案生成企业事实草稿（NEEDS_REVIEW，幂等，不消费 Grant）',
+  })
+  @ApiEnvelope(CLAIM_DRAFTS_SCHEMA, {
+    description:
+      '把注册引导/档案里的主营产品、行业、目标市场确定性映射为待审事实草稿；' +
+      '批准后 ICP 生成不再被 NO_APPROVED_CLAIMS 阻断。重复调用按归一化语句去重。',
+  })
+  async synthesizeDrafts(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId', ParseUUIDPipe) companyId: string,
+  ): Promise<Enveloped<{ created: number; skipped: number; claims: ClaimDto[] }>> {
+    const result = await this.claims.synthesizeDrafts(ctx, companyId);
+    return envelope({
+      created: result.created,
+      skipped: result.skipped,
+      claims: result.claims.map(ClaimDto.from),
+    });
   }
 
   @Post('claims/:claimId/revoke')
