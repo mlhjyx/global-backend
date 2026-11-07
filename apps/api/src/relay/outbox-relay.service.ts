@@ -8,6 +8,7 @@ import {
 } from "@nestjs/common";
 import { PrismaClient } from "@prisma/client";
 import { WorkflowIdReusePolicy } from "@temporalio/client";
+import type { Duration } from "@temporalio/common";
 import { TemporalClient } from "../temporal/temporal.client";
 import { DevFastLaneTemporalClient } from "../temporal/dev-fast-lane-temporal.client";
 import { DEV_FAST_LANE_ACQUISITION_COMMANDS } from "../runtime/dev-fast-lane";
@@ -781,7 +782,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       args: unknown[];
       workflowIdReusePolicy?: WorkflowIdReusePolicy;
       /** B3（F2）：discovery 等长任务的总时限；超时终止后由 stale-run 看门狗收尾。 */
-      workflowExecutionTimeout?: string;
+      workflowExecutionTimeout?: Duration;
     },
     what: string,
     acquisitionCommand?: { eventType: string; workspaceId: string },
