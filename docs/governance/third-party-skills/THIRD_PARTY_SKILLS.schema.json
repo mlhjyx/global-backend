@@ -1,0 +1,226 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "third-party-skills/v1",
+  "title": "Third-party SKILL.md import catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "generatedAt",
+    "spec",
+    "decision",
+    "firstBatchSelection",
+    "policies",
+    "sources",
+    "skills",
+    "excludedSources"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "third-party-skills/v1" },
+    "generatedAt": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "spec": { "type": "string", "format": "uri" },
+    "firstBatchSelection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decidedAt", "decidedBy", "batches", "skills", "note"],
+      "properties": {
+        "decidedAt": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "decidedBy": { "type": "string" },
+        "batches": {
+          "type": "array",
+          "items": { "enum": ["A", "B", "C"] },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "skills": { "type": "array", "items": { "type": "string" }, "minItems": 1, "uniqueItems": true },
+        "note": { "type": "string" }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "approvedAt", "scope"],
+      "properties": {
+        "id": { "type": "string" },
+        "approvedAt": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        "scope": { "type": "string" }
+      }
+    },
+    "policies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["licenseTiers", "scriptsPolicy", "allowedToolsPolicy", "approvalPolicy", "derivativeRule"],
+      "properties": {
+        "licenseTiers": { "type": "object", "additionalProperties": { "type": "string" } },
+        "scriptsPolicy": { "type": "string" },
+        "allowedToolsPolicy": { "type": "string" },
+        "approvalPolicy": { "type": "string" },
+        "derivativeRule": { "type": "string" }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "repo", "commit", "commitDate", "license", "author"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+          "repo": { "type": "string", "format": "uri" },
+          "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+          "commitDate": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+          "license": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["spdx", "textPath", "noticeTextPath", "note"],
+            "properties": {
+              "spdx": { "type": "string" },
+              "textPath": { "type": "string" },
+              "noticeTextPath": { "type": ["string", "null"] },
+              "note": { "type": "string" }
+            }
+          },
+          "author": { "type": "string" }
+        }
+      }
+    },
+    "skills": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "sourceId",
+          "repo",
+          "commit",
+          "originalPath",
+          "snapshotPath",
+          "snapshotFiles",
+          "snapshotSha256",
+          "name",
+          "domain",
+          "spdxLicense",
+          "author",
+          "licenseTextPath",
+          "noticeTextPath",
+          "hasScripts",
+          "upstreamEvalsPath",
+          "validation",
+          "securityReview",
+          "goldenSet",
+          "importRecommendation",
+          "importBlockers",
+          "owner",
+          "exitPlan",
+          "notes"
+        ],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+          "sourceId": { "type": "string" },
+          "repo": { "type": "string", "format": "uri" },
+          "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+          "originalPath": { "type": "string" },
+          "snapshotPath": { "type": "string" },
+          "snapshotFiles": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "snapshotSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "name": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 64 },
+          "domain": { "type": "string" },
+          "spdxLicense": { "type": "string" },
+          "author": { "type": "string" },
+          "licenseTextPath": { "type": "string" },
+          "noticeTextPath": { "type": ["string", "null"] },
+          "hasScripts": { "const": false },
+          "upstreamEvalsPath": { "type": ["string", "null"] },
+          "validation": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["status", "spec", "bodyLines", "descriptionLength", "referencedFiles", "issues", "warnings", "report"],
+            "properties": {
+              "status": { "enum": ["pass", "pass-with-notes", "fail"] },
+              "spec": { "type": "string", "format": "uri" },
+              "bodyLines": { "type": "integer", "minimum": 1, "maximum": 499 },
+              "descriptionLength": { "type": "integer", "minimum": 1, "maximum": 1024 },
+              "referencedFiles": { "type": "array", "items": { "type": "string" } },
+              "issues": { "type": "array", "items": { "type": "string" } },
+              "warnings": { "type": "array", "items": { "type": "string" } },
+              "report": { "type": "string" }
+            }
+          },
+          "securityReview": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "promptInjectionRisk",
+              "externalLinks",
+              "externalLinkDomains",
+              "marketingContent",
+              "personalData",
+              "approvalRequired",
+              "approvalChainActions",
+              "toolBrokerMapping",
+              "report"
+            ],
+            "properties": {
+              "promptInjectionRisk": { "type": "string" },
+              "externalLinks": { "type": "integer", "minimum": 0 },
+              "externalLinkDomains": { "type": "object", "additionalProperties": { "type": "integer" } },
+              "marketingContent": { "type": "string" },
+              "personalData": { "type": "string" },
+              "approvalRequired": { "type": "boolean" },
+              "approvalChainActions": { "type": "array", "items": { "type": "string" } },
+              "toolBrokerMapping": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["suggestedAllowedTools", "unsupportedToolTypes", "note"],
+                "properties": {
+                  "suggestedAllowedTools": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "uniqueItems": true
+                  },
+                  "unsupportedToolTypes": { "type": "array", "items": { "type": "string" } },
+                  "note": { "type": "string" }
+                }
+              },
+              "report": { "type": "string" }
+            }
+          },
+          "goldenSet": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["caseCount", "report"],
+            "properties": {
+              "caseCount": { "type": "integer", "minimum": 5, "maximum": 10 },
+              "report": { "type": "string" }
+            }
+          },
+          "importRecommendation": { "enum": ["A", "B", "C"] },
+          "importBlockers": { "type": "array", "items": { "type": "string" } },
+          "owner": { "type": "string" },
+          "exitPlan": { "type": "string" },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "excludedSources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "repo", "commit", "commitDate", "spdx", "skillCount", "reason"],
+        "properties": {
+          "id": { "type": "string" },
+          "repo": { "type": "string", "format": "uri" },
+          "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+          "commitDate": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+          "spdx": { "type": "string" },
+          "skillCount": { "type": "integer", "minimum": 0 },
+          "reason": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -2,14 +2,18 @@ import { ApplicationFailure } from '@temporalio/workflow';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { ModelGateway } from '../model-gateway/model-gateway';
 import type { RuntimeTelemetry } from '../model-runtime/types';
-import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import { getTask } from '../ai-tasks/task-registry';
 import {
   judgeFitCompany,
   loadIcpBrief,
   type FitJudgeCompany,
 } from '../discovery/fit-judge';
-import type { SkillResolver } from '../skills/skill-runtime';
+import {
+  executeSkillWithRuntime,
+  SkillUnavailableError,
+  STATIC_SKILL_RESOLVER,
+  type SkillResolver,
+} from '../skills/skill-runtime';
 import { companyMayUseExternalProcessing } from '../discovery/company-suppression-gate';
 import {
   QUICK_JUDGE_BATCH_SIZE,
@@ -338,8 +342,10 @@ export function createRun2Activities(deps: {
             batchVerdicts = [await judgeOne(eligible[0]!.company)];
           } else {
             try {
-              const result = await executeStructuredTaskWithRuntime<{ judgments?: unknown }>(
+              const result = await executeSkillWithRuntime<{ judgments?: unknown }>(
+                deps.skills ?? STATIC_SKILL_RESOLVER,
                 deps.gateway,
+                'discovery.qualify_fit',
                 {
                   task: task.id,
                   prompt: buildQuickJudgePrompt(icpBrief, eligible.map((entry) => entry.company as PrefilterCompany)),
@@ -364,8 +370,10 @@ export function createRun2Activities(deps: {
               if (
                 error instanceof BudgetExceededError ||
                 error instanceof BudgetOperationReplayError ||
-                error instanceof ExecutionControlError
+                error instanceof ExecutionControlError ||
+                error instanceof SkillUnavailableError
               ) {
+                // 技能不可用是运维策略，不是上游抖动：不得降级成逐家/规则兜底继续跑。
                 throw error;
               }
               batchVerdicts = eligible.map(() => null); // 整批不可用 → 全批逐家降级
@@ -393,8 +401,10 @@ export function createRun2Activities(deps: {
             if (
               error instanceof BudgetExceededError ||
               error instanceof BudgetOperationReplayError ||
-              error instanceof ExecutionControlError
+              error instanceof ExecutionControlError ||
+              error instanceof SkillUnavailableError
             ) {
+              // 停用/未登记/契约漂移不得落入规则兜底（那会绕过 kill switch）。
               throw error;
             }
           }
