@@ -10,12 +10,24 @@
   "firstBatchSelection": {
     "decidedAt": "2026-11-08",
     "decidedBy": "product-owner",
-    "batch": "A",
+    "batches": [
+      "A",
+      "B",
+      "C"
+    ],
     "skills": [
       "kwp-sales-account-research",
-      "kwp-sales-lead-triage"
+      "kwp-sales-lead-triage",
+      "mks-prospecting",
+      "mks-cold-email",
+      "kwp-sales-draft-outreach",
+      "kwp-sales-stakeholder-map",
+      "kwp-sales-account-tiering",
+      "kwp-sales-competitive-intelligence",
+      "mks-customer-research",
+      "mks-pricing"
     ],
-    "note": "产品负责人 2026-11-08 选定 A 档 2 个进入 S1；B/C 档保留在 catalog，未入选首批。"
+    "note": "产品负责人 2026-11-08 确认首批 10 个：A 档 2 + B 档 5 + C 档 3（competitive-intelligence、customer-research、pricing）；其余 4 个 C 档保留待后续。"
   },
   "policies": {
     "licenseTiers": {
@@ -127,7 +139,7 @@
         "frontmatter 需补 allowed-tools，且与绑定 AI Task 的 allowedTools 集合严格相等",
         "需把聊天界面/connector 语义改写为引擎输出与 ToolBroker 调用"
       ],
-      "owner": "UNASSIGNED",
+      "owner": "产品负责人 + 平台工程（本工作区）",
       "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
       "notes": "导入适配：把聊天界面的 artifact/Page/Slides/connector 规则改写为引擎输出与 ToolBroker 语义；CRM 为可选输入。"
     },
@@ -188,7 +200,7 @@
         "frontmatter 需补 allowed-tools，且与绑定 AI Task 的 allowedTools 集合严格相等",
         "需把聊天界面/connector 语义改写为引擎输出与 ToolBroker 调用"
       ],
-      "owner": "UNASSIGNED",
+      "owner": "产品负责人 + 平台工程（本工作区）",
       "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
       "notes": "只读技能：路由建议与 CRM 更新建议均以文本输出，不自行写入。"
     },
@@ -246,7 +258,7 @@
         "frontmatter 需补 allowed-tools，且与绑定 AI Task 的 allowedTools 集合严格相等",
         "需把聊天界面/connector 语义改写为引擎输出与 ToolBroker 调用"
       ],
-      "owner": "UNASSIGNED",
+      "owner": "产品负责人 + 平台工程（本工作区）",
       "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
       "notes": "依赖账户清单（CRM 读取或上传表格）；纯评分可零工具运行。"
     },
@@ -307,7 +319,7 @@
         "frontmatter 需补 allowed-tools，且与绑定 AI Task 的 allowedTools 集合严格相等",
         "需把聊天界面/connector 语义改写为引擎输出与 ToolBroker 调用"
       ],
-      "owner": "UNASSIGNED",
+      "owner": "产品负责人 + 平台工程（本工作区）",
       "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
       "notes": "生成与草稿本身可自动；发送/加入序列必须走审批链。"
     },
@@ -367,7 +379,7 @@
         "frontmatter 需补 allowed-tools，且与绑定 AI Task 的 allowedTools 集合严格相等",
         "需把聊天界面/connector 语义改写为引擎输出与 ToolBroker 调用"
       ],
-      "owner": "UNASSIGNED",
+      "owner": "产品负责人 + 平台工程（本工作区）",
       "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
       "notes": "暗联系人（dark contacts）创建必须经用户接受或审批链。"
     },
@@ -428,7 +440,7 @@
         "frontmatter 需补 allowed-tools，且与绑定 AI Task 的 allowedTools 集合严格相等",
         "需把聊天界面/connector 语义改写为引擎输出与 ToolBroker 调用"
       ],
-      "owner": "UNASSIGNED",
+      "owner": "产品负责人 + 平台工程（本工作区）",
       "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
       "notes": "赢单/输单数据最佳；引擎当前无 CRM 赢单数据，web-only 模式可做竞品公开动态与战卡。"
     },
@@ -486,7 +498,7 @@
         "frontmatter 需补 allowed-tools，且与绑定 AI Task 的 allowedTools 集合严格相等",
         "需把聊天界面/connector 语义改写为引擎输出与 ToolBroker 调用"
       ],
-      "owner": "UNASSIGNED",
+      "owner": "产品负责人 + 平台工程（本工作区）",
       "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
       "notes": "依赖日历/转录/邮件/聊天数据源，引擎侧暂无；可先支持上传文件输入。"
     },
@@ -576,7 +588,7 @@
         "需补不可信内容（提示注入）规则",
         "需适配 .agents/product-marketing.md 上下文文件约定"
       ],
-      "owner": "UNASSIGNED",
+      "owner": "产品负责人 + 平台工程（本工作区）",
       "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
       "notes": "去营销化：删除 Tool Integrations 表与赞助商行，保留合规护栏与验证/抑制名单要求。"
     },
@@ -662,7 +674,7 @@
         "需补不可信内容（提示注入）规则",
         "需适配 .agents/product-marketing.md 上下文文件约定"
       ],
-      "owner": "UNASSIGNED",
+      "owner": "产品负责人 + 平台工程（本工作区）",
       "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
       "notes": "发送前验证名单、关闭打开/点击追踪、每封含退订与邮寄地址等要求保留。"
     },
@@ -732,7 +744,7 @@
         "frontmatter 需补 allowed-tools，且与绑定 AI Task 的 allowedTools 集合严格相等",
         "需适配 .agents/product-marketing.md 上下文文件约定"
       ],
-      "owner": "UNASSIGNED",
+      "owner": "产品负责人 + 平台工程（本工作区）",
       "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
       "notes": "研究综合技能，无对外动作。"
     },
@@ -801,7 +813,7 @@
         "frontmatter 需补 allowed-tools，且与绑定 AI Task 的 allowedTools 集合严格相等",
         "需适配 .agents/product-marketing.md 上下文文件约定"
       ],
-      "owner": "UNASSIGNED",
+      "owner": "产品负责人 + 平台工程（本工作区）",
       "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
       "notes": "策略/内容类，零工具。"
     },
@@ -862,7 +874,7 @@
         "需去营销化编辑",
         "需把 $ARGUMENTS 改为引擎输入契约"
       ],
-      "owner": "UNASSIGNED",
+      "owner": "产品负责人 + 平台工程（本工作区）",
       "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
       "notes": "使用 $ARGUMENTS 传参（Claude Code 插件惯例），导入版需改为引擎输入契约。"
     },
@@ -923,7 +935,7 @@
         "需去营销化编辑",
         "需把 $ARGUMENTS 改为引擎输入契约"
       ],
-      "owner": "UNASSIGNED",
+      "owner": "产品负责人 + 平台工程（本工作区）",
       "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
       "notes": "使用 $ARGUMENTS 传参，导入版需改为引擎输入契约。"
     },
@@ -984,7 +996,7 @@
         "需去营销化编辑",
         "需把 $ARGUMENTS 改为引擎输入契约"
       ],
-      "owner": "UNASSIGNED",
+      "owner": "产品负责人 + 平台工程（本工作区）",
       "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
       "notes": "使用 $ARGUMENTS 传参，导入版需改为引擎输入契约。"
     }
