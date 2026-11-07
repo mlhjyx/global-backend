@@ -316,7 +316,11 @@ const FAILED_FINALIZE_INPUT = {
   ...AUTHORITY,
 };
 
-/** Everything a search-path run records up to its two plan queries loading. */
+/**
+ * A search-path run up to its two plan queries loading. Activity input payloads
+ * here are plausible placeholders: replay matches command type and order, not
+ * payloads, so exact activity arguments belong in the workflow unit specs.
+ */
 function historyThroughPlanQueries(startInput: Record<string, unknown>): {
   history: DiscoveryHistory;
   task: string;
@@ -395,7 +399,10 @@ describe('discovery workflow knob replay (B1/L01)', () => {
     await Worker.runReplayHistory({ workflowBundle }, { events: history.events }, 'batch-size-three');
   }, 120_000);
 
-  function quickScanStart(startInput: Record<string, unknown>): {
+  function quickScanStart(
+    startInput: Record<string, unknown>,
+    candidates = 10,
+  ): {
     history: DiscoveryHistory;
     task: string;
   } {
@@ -407,7 +414,7 @@ describe('discovery workflow knob replay (B1/L01)', () => {
       'prefilterPool',
       { ...RUN_ICP, ...AUTHORITY },
       '120s',
-      { result: { poolSize: 30, candidates: 10, prefilteredOut: 20 } },
+      { result: { poolSize: candidates + 20, candidates, prefilteredOut: 20 } },
     );
     return { history, task: history.workflowTask() };
   }
@@ -449,6 +456,30 @@ describe('discovery workflow knob replay (B1/L01)', () => {
     );
     history.workflowCompleted(history.workflowTask(), undefined);
   }
+
+  it('replays a pre-knob quick-scan history (no threshold field) on the frozen default 20', async () => {
+    // 25 个候选 < 冻结默认 20 为假 → 不搜索。默认值一旦被改大（如 30），重放会调度
+    // loadPlanQueries 而与历史不符 → 本用例转红。
+    const { history, task: throughQuickDone } = quickScanStart(
+      {
+        ...RUN_ICP,
+        planId: 'plan-1',
+        run2QuickScan: true,
+        ...AUTHORITY,
+      },
+      25,
+    );
+    let task = runQuickScanThroughDeepTargets(history, throughQuickDone);
+    const phase = (value: string) => ({ workspaceId: WORKSPACE, runId: 'run-1', phase: value });
+    history.activity(task, 'listDeepTargets', RUN, '120s', { result: { companyIds: [] } });
+    task = history.workflowTask();
+    history.activity(task, 'markRunPhase', phase('deep_started'), '120s', { result: undefined });
+    task = history.workflowTask();
+    history.patch(DEEP_STAGE_LABEL_PATCH, task);
+    finishDeepRun(history, task);
+
+    await Worker.runReplayHistory({ workflowBundle }, { events: history.events }, 'legacy-quick-scan');
+  }, 120_000);
 
   it('replays a quick-scan history recorded with a lower pool threshold past where the default would search', async () => {
     const { history, task: throughQuickDone } = quickScanStart({

@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
   WORKFLOW_CONSTANT_ALLOWLIST,
   inspectWorkflowConstants,
+  main,
   numericConstantsInSource,
   parseArguments,
 } from "./governance-workflow-constants.mjs";
@@ -29,13 +30,14 @@ async function withFixture(files, run) {
   }
 }
 
-test("reads module-level numeric constants with values, including `as const`, negatives and `let`", () => {
+test("reads module-level numeric constants with values, including `as const`, `satisfies`, negatives and `let`", () => {
   const source = [
     "const VISIBLE = 20;",
     "const NEGATIVE = -3;",
     "const VERSION = 2 as const;",
     "const SEPARATED = 1_000;",
     "let LIMIT = 5;",
+    "const CHECKED = 16 satisfies number;",
     "const NAME = 'x';",
     "const DERIVED = OTHER;",
     "const EXPRESSION = 2 * 2;",
@@ -50,6 +52,7 @@ test("reads module-level numeric constants with values, including `as const`, ne
       ["VERSION", 2, 3],
       ["SEPARATED", 1000, 4],
       ["LIMIT", 5, 5],
+      ["CHECKED", 16, 6],
     ],
   );
 });
@@ -113,13 +116,31 @@ test("fails a stale allowlist entry", async () => {
       const issues = await inspectWorkflowConstants(root, {
         allowlist: {
           [`${TEMPORAL_DIRECTORY}/sample.workflow.ts`]: { KNOB: "frozen" },
+          [`${TEMPORAL_DIRECTORY}/missing.workflow.ts`]: { GONE: "frozen" },
         },
       });
-      assert.equal(issues.length, 2);
+      assert.equal(issues.length, 3);
       assert.deepEqual(
         issues.map(({ code }) => code).sort(),
-        ["WORKFLOW_CONSTANT_ALLOWLIST_STALE", "WORKFLOW_CONSTANT_NOT_ALLOWLISTED"],
+        [
+          "WORKFLOW_CONSTANT_ALLOWLIST_STALE",
+          "WORKFLOW_CONSTANT_ALLOWLIST_STALE",
+          "WORKFLOW_CONSTANT_NOT_ALLOWLISTED",
+        ],
       );
+    },
+  );
+});
+
+test("scans the worker bundle entrypoints", async () => {
+  await withFixture(
+    {
+      [`${TEMPORAL_DIRECTORY}/workflows.ts`]: "const QUERY_BATCH = 4;\nexport {};\n",
+    },
+    async (root) => {
+      const issues = await inspectWorkflowConstants(root, { allowlist: {} });
+      assert.equal(issues.length, 1);
+      assert.match(issues[0].path, /workflows\.ts:1$/);
     },
   );
 });
@@ -178,4 +199,25 @@ test("argument parsing rejects unknown flags and a missing --root value", () => 
 test("the repository's workflow files pass the check", async () => {
   const issues = await inspectWorkflowConstants(REPOSITORY_ROOT);
   assert.deepEqual(issues, []);
+});
+
+test("main() fails the gate on a violation and passes a clean tree", async () => {
+  await withFixture(
+    {
+      [`${TEMPORAL_DIRECTORY}/clean.workflow.ts`]: "export const ok = true;\n",
+      [`${TEMPORAL_DIRECTORY}/dirty.workflow.ts`]: "const KNOB = 3;\n",
+    },
+    async (root) => {
+      assert.equal(await main(["verify", "--root", join(root, "clean-tree")]), 1);
+      const cleanRoot = join(root, "clean-tree");
+      await mkdir(join(cleanRoot, TEMPORAL_DIRECTORY), { recursive: true });
+      await writeFile(
+        join(cleanRoot, TEMPORAL_DIRECTORY, "ok.workflow.ts"),
+        "export const ok = true;\n",
+        "utf8",
+      );
+      assert.equal(await main(["verify", "--root", cleanRoot]), 0);
+      assert.equal(await main(["verify", "--bogus"]), 1);
+    },
+  );
 });

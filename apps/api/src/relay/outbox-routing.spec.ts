@@ -1722,6 +1722,13 @@ describe("B1（L01）：discovery 启动参数携带可调常量（输入化，�
     });
   }
 
+  beforeEach(() => {
+    // 缺省值断言不能受调用者 shell 的 env 影响（B1/L01）。
+    delete process.env.DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD;
+    delete process.env.DISCOVERY_DEEP_COMPANY_CONCURRENCY;
+    delete process.env.DISCOVERY_QUERY_BATCH_SIZE;
+  });
+
   afterEach(() => {
     delete process.env.DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD;
     delete process.env.DISCOVERY_DEEP_COMPANY_CONCURRENCY;

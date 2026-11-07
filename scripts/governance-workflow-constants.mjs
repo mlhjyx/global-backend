@@ -30,7 +30,7 @@
 // proof. When in doubt, put the number in the recorded input.
 //
 //   node scripts/governance-workflow-constants.mjs verify [--root <dir>]
-import { readdir, readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import ts from "typescript";
@@ -38,6 +38,12 @@ import ts from "typescript";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SCAN_DIRECTORY = "apps";
 const WORKFLOW_FILE = /\.workflow(-knobs)?\.ts$/;
+// The worker bundle entrypoints live outside the *.workflow.ts naming rule;
+// a constant added there is just as replay-visible as one in a workflow file.
+const WORKFLOW_ENTRYPOINTS = Object.freeze([
+  "apps/api/src/temporal/workflows.ts",
+  "apps/api/src/temporal/customer-workflows.ts",
+]);
 
 /**
  * Numeric constants a workflow file or knob module may keep. Every entry
@@ -189,7 +195,18 @@ async function listWorkflowFiles(root) {
       }
     }
   }
+  // A scan root without apps/ would report zero issues and pass vacuously;
+  // fail loudly instead (also covers a mistyped --root).
+  await readdir(base);
   await walk(base);
+  for (const entrypoint of WORKFLOW_ENTRYPOINTS) {
+    try {
+      await access(join(root, entrypoint));
+      if (!files.includes(entrypoint)) files.push(entrypoint);
+    } catch {
+      /* absent in this tree (fixtures, partial checkouts) */
+    }
+  }
   return files.sort();
 }
 
@@ -200,10 +217,23 @@ async function listWorkflowFiles(root) {
  */
 export async function inspectWorkflowConstants(
   root = ROOT,
-  { allowlist = WORKFLOW_CONSTANT_ALLOWLIST } = {},
+  // The allowlist describes this repository's files; another --root has no
+  // allowlist context, so every numeric constant there is unlisted (strict).
+  { allowlist = resolve(root) === ROOT ? WORKFLOW_CONSTANT_ALLOWLIST : {} } = {},
 ) {
   const issues = [];
-  const files = await listWorkflowFiles(root);
+  let files;
+  try {
+    files = await listWorkflowFiles(root);
+  } catch {
+    return Object.freeze([
+      issue(
+        "WORKFLOW_CONSTANT_SCAN_DIRECTORY_MISSING",
+        SCAN_DIRECTORY,
+        `no ${SCAN_DIRECTORY}/ directory under ${root}; refusing to pass vacuously — check --root.`,
+      ),
+    ]);
+  }
   const seen = new Set();
   for (const file of files) {
     const source = await readFile(join(root, file), "utf8");
