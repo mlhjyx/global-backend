@@ -9,3 +9,4 @@ title: Upgrade the self-hosted Crawl4AI image from 0.9.1 to the 0.9.5 security r
   - 既有 egress 补丁（fake-IP DoH 窄回退 + 上游 global-IP 守卫/pinning proxy）、redis 持久化关闭、playwright 浏览器安装全部保留，构建期锚点检查通过。
 - 测试：镜像构建 + 容器冒烟（/health、经 pinning proxy 真实抓取、内网地址拒绝）；适配器契约单测由 CI 全量覆盖。
 - 回滚：`global-crawl4ai:rollback-0.9.1-20261108` 保留旧镜像；`docker tag … :local` + 重建容器即可回退（无迁移）。
+- 未做：不重建/不重启正在运行的 `global-crawl4ai` 容器（发车由产品负责人流程执行）；生产侧 Crawl4AI 运维姿态不并入本仓 wrapper。
