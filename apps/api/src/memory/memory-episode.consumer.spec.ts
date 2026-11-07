@@ -98,16 +98,22 @@ class FakeOwner {
     }: {
       where: { eventType: { in: string[] }; occurredAt: { gte: Date } };
     }) =>
-      this.events.filter((raw) => {
-        const row = raw as {
-          eventType: string;
-          occurredAt: Date;
-        };
-        return (
-          where.eventType.in.includes(row.eventType) &&
-          row.occurredAt >= where.occurredAt.gte
-        );
-      }),
+      this.events
+        .filter((raw) => {
+          const row = raw as {
+            eventType: string;
+            occurredAt: Date;
+          };
+          return (
+            where.eventType.in.includes(row.eventType) &&
+            row.occurredAt >= where.occurredAt.gte
+          );
+        })
+        .sort((left, right) => {
+          const a = left as { id: bigint };
+          const b = right as { id: bigint };
+          return a.id === b.id ? 0 : a.id < b.id ? 1 : -1;
+        }),
   };
   async $disconnect(): Promise<void> {}
 }
@@ -197,8 +203,10 @@ describe('MemoryEpisodeConsumer', () => {
     const first = await consumer.runOnce(new Date('2026-11-08T11:00:00Z'));
     const second = await consumer.runOnce(new Date('2026-11-08T11:01:00Z'));
 
-    expect(first.inserted).toBe(2);
-    expect(second.inserted).toBe(0);
+    // Newest first: the LeadsScored event arrives before its run's phase one is
+    // visible, so the backfill lands on the next tick.
+    expect(first.inserted).toBe(1);
+    expect(second.inserted).toBe(1);
     const phases = [...store.episodes.values()].map((row) => row.phase).sort();
     expect(phases).toEqual(['results_backfilled', 'run_completed']);
   });

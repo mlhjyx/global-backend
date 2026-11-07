@@ -107,7 +107,7 @@ function assertNoPersonalData(
     throw new MemoryPayloadError(`stats nested too deeply at ${path}`);
   }
   if (typeof value === 'string') {
-    if (value.length > 200) {
+    if (value.length > 500) {
       throw new MemoryPayloadError(`stats string too long at ${path}`);
     }
     return;
@@ -129,7 +129,7 @@ function assertNoPersonalData(
     throw new MemoryPayloadError(`unsupported stats value at ${path}`);
   }
   for (const [key, child] of Object.entries(object)) {
-    if (key.length > 100) {
+    if (key.length > 256) {
       throw new MemoryPayloadError(`stats key too long at ${path}`);
     }
     if (PII_KEY.test(key)) {

@@ -54,8 +54,8 @@ export interface MemoryConsumerTickResult {
 @Injectable()
 export class MemoryEpisodeConsumer implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger('MemoryEpisodeConsumer');
-  private readonly owner: PrismaClient;
-  private readonly ownsOwnerClient: boolean;
+  private owner?: PrismaClient;
+  private ownsOwnerClient = false;
   private readonly config: MemoryConsumerConfig;
   private timer?: NodeJS.Timeout;
   private inFlight = false;
@@ -66,11 +66,16 @@ export class MemoryEpisodeConsumer implements OnModuleInit, OnModuleDestroy {
     @Optional() ownerDb?: PrismaClient,
     @Optional() config?: MemoryConsumerConfig,
   ) {
-    this.owner =
-      ownerDb ??
-      new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
-    this.ownsOwnerClient = ownerDb === undefined;
     this.config = config ?? readMemoryConsumerConfig();
+    if (ownerDb) {
+      this.owner = ownerDb;
+    } else if (this.config.enabled && process.env.DATABASE_URL) {
+      // Construct only when enabled: AppModule tests must not need DATABASE_URL.
+      this.owner = new PrismaClient({
+        datasourceUrl: process.env.DATABASE_URL,
+      });
+      this.ownsOwnerClient = true;
+    }
   }
 
   onModuleInit(): void {
@@ -80,7 +85,7 @@ export class MemoryEpisodeConsumer implements OnModuleInit, OnModuleDestroy {
       );
       return;
     }
-    if (this.ownsOwnerClient && !process.env.DATABASE_URL) {
+    if (!this.owner) {
       this.logger.error(
         'memory episode consumer requires DATABASE_URL for the cross-tenant outbox scan; staying off',
       );
@@ -119,7 +124,9 @@ export class MemoryEpisodeConsumer implements OnModuleInit, OnModuleDestroy {
 
   /** One scan pass; public so tests can drive it deterministically. */
   async runOnce(now: Date = new Date()): Promise<MemoryConsumerTickResult> {
-    if (this.shuttingDown) return { scanned: 0, inserted: 0, failed: 0 };
+    if (this.shuttingDown || !this.owner) {
+      return { scanned: 0, inserted: 0, failed: 0 };
+    }
     const since = new Date(
       now.getTime() - this.config.lookbackDays * DAY_MS,
     );
@@ -128,7 +135,9 @@ export class MemoryEpisodeConsumer implements OnModuleInit, OnModuleDestroy {
         eventType: { in: [...MEMORY_EVENT_TYPES] },
         occurredAt: { gte: since },
       },
-      orderBy: { id: 'asc' },
+      // Newest first: v0 does not backfill history, and a fixed ascending scan
+      // without a cursor would starve on windows holding more than one batch.
+      orderBy: { id: 'desc' },
       take: this.config.batchSize,
       select: {
         id: true,

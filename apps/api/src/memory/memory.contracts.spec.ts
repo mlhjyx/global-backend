@@ -56,7 +56,7 @@ describe('parseRunCompletedPayload', () => {
     ).toEqual({ contacts: 12 });
     expect(() =>
       parseRunCompletedPayload(
-        runPayload({ stats: { note: 'x'.repeat(201) } }),
+        runPayload({ stats: { note: 'x'.repeat(501) } }),
       ),
     ).toThrow(/string too long/);
   });
