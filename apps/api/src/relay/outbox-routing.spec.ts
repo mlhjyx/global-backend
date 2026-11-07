@@ -1706,3 +1706,83 @@ describe("expireDueClaims — EXPIRED 置位与 ClaimExpired 事件原子成对�
     );
   });
 });
+
+describe("B1（L01）：discovery 启动参数携带可调常量（输入化，重放安全）", () => {
+  function discoveryEvent(): EvRow {
+    return makeEvent({
+      eventType: "DiscoveryRunRequested",
+      schemaVersion: 2,
+      aggregateType: "DiscoveryRun",
+      aggregateId: "run-knobs",
+      payload: {
+        planId: "plan-1",
+        icpId: "icp-1",
+        executionBudget: DISCOVERY_EXECUTION_BUDGET,
+      },
+    });
+  }
+
+  afterEach(() => {
+    delete process.env.DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD;
+    delete process.env.DISCOVERY_DEEP_COMPANY_CONCURRENCY;
+    delete process.env.DISCOVERY_QUERY_BATCH_SIZE;
+  });
+
+  it("缺省时把冻结默认值显式写进启动输入（20/16/2）", async () => {
+    const ev = discoveryEvent();
+    const temporal = makeTemporal();
+    const { db } = makeDb([ev]);
+
+    await makeService(db, temporal).routeEvent(ev);
+
+    const [, options] = vi.mocked(temporal.client.workflow.start).mock
+      .calls[0] as unknown as [
+      string,
+      { args: [Record<string, unknown>] },
+    ];
+    expect(options.args[0]).toMatchObject({
+      run2PoolSearchFallbackThreshold: 20,
+      deepCompanyConcurrency: 16,
+      discoveryQueryBatchSize: 2,
+    });
+    // 必须是显式字段（不是 undefined）：数值随 run 写入历史，重放不受后续代码默认值变更影响。
+    expect(
+      Object.keys(options.args[0]),
+    ).toEqual(
+      expect.arrayContaining([
+        "run2PoolSearchFallbackThreshold",
+        "deepCompanyConcurrency",
+        "discoveryQueryBatchSize",
+      ]),
+    );
+  });
+
+  it("env 覆盖进入启动参数；非法整数回落冻结默认并告警", async () => {
+    process.env.DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD = "30";
+    process.env.DISCOVERY_DEEP_COMPANY_CONCURRENCY = "8";
+    process.env.DISCOVERY_QUERY_BATCH_SIZE = "bogus";
+    const ev = discoveryEvent();
+    const temporal = makeTemporal();
+    const { db } = makeDb([ev]);
+    const svc = makeService(db, temporal);
+    const warnSpy = vi.spyOn(svc["logger"], "warn");
+
+    await svc.routeEvent(ev);
+
+    const [, options] = vi.mocked(temporal.client.workflow.start).mock
+      .calls[0] as unknown as [
+      string,
+      { args: [Record<string, unknown>] },
+    ];
+    expect(options.args[0]).toMatchObject({
+      run2PoolSearchFallbackThreshold: 30,
+      deepCompanyConcurrency: 8,
+      discoveryQueryBatchSize: 2,
+    });
+    expect(
+      warnSpy.mock.calls.some((call) =>
+        String(call[0]).includes("DISCOVERY_QUERY_BATCH_SIZE"),
+      ),
+    ).toBe(true);
+  });
+});

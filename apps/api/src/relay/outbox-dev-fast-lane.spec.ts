@@ -243,6 +243,10 @@ describe("relay routing with the development fast lane", () => {
             icpId: "icp-1",
             executionContractVersion: 2,
             executionBudget: budget(LANE_WS, "discovery.run", "discovery_run"),
+            // B1（L01）：控制流可调常量显式随启动输入记录（冻结默认值）。
+            run2PoolSearchFallbackThreshold: 20,
+            deepCompanyConcurrency: 16,
+            discoveryQueryBatchSize: 2,
           },
         ],
       },

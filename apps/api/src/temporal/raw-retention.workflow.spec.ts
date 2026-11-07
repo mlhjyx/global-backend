@@ -95,9 +95,29 @@ describe("rawRetentionSweepWorkflow deterministic orchestration", () => {
       workspaceLimit: 1,
       batchSize: 10,
       workspacePagesPerRun: 1,
+      // B1（L01）：循环上界随输入继续传递（旧历史缺字段 → 冻结默认）。
+      maxPagesPerRun: 5,
+      maxBatchesPerWorkspace: 20,
+      maxBudgetReconcileBatches: 5,
       afterWorkspaceId: "ws-1",
       accumulated: { workspaces: 1, expired: 2, deferredForConflict: 0 },
     });
+  });
+
+  it("bounds the per-workspace batches by the recorded input instead of the constant (B1/L01)", async () => {
+    acts.listRawRetentionWorkspaces.mockResolvedValue({
+      workspaceIds: ["ws-locked"],
+      nextCursor: null,
+    });
+    acts.expireRawSourceRecords.mockResolvedValue({
+      expired: 0,
+      deferredForConflict: 1,
+    });
+
+    await expect(
+      rawRetentionSweepWorkflow({ batchSize: 1, maxBatchesPerWorkspace: 2 }),
+    ).rejects.toThrow("RAW_RETENTION_WORKSPACE_FAILURE:1");
+    expect(acts.expireRawSourceRecords).toHaveBeenCalledTimes(2);
   });
 
   it("expires the personal-data access audit per workspace until no due row remains", async () => {

@@ -12,6 +12,11 @@ const PERSONAL_DATA_AUDIT_RETENTION_PATCH = "personal-data-access-audit-retentio
 /** 巡检（2026-11-04）：超时 RESERVED 的工具预算操作清收并入本 sweep。 */
 const BUDGET_OPERATION_RECONCILE_PATCH = "budget-operation-reconcile-v1";
 const BUDGET_RECONCILE_BATCH = 200;
+/**
+ * B1（L01，2026-11-08）：循环上界的冻结默认值——旧历史没有对应输入字段时重放用它们，
+ * 一经发布**永不修改**。要调大/调小走 sweep 输入（maxBudgetReconcileBatches / maxBatchesPerWorkspace /
+ * maxPagesPerRun / workspacePagesPerRun），新输入会随历史记录。
+ */
 const MAX_BUDGET_RECONCILE_BATCHES = 5;
 const MAX_BATCHES_PER_WORKSPACE = 20;
 const DEFAULT_PAGES_PER_RUN = 2;
@@ -24,7 +29,18 @@ export interface RawRetentionSweepInput {
   batchSize?: number;
   afterWorkspaceId?: string;
   workspacePagesPerRun?: number;
+  /** B1（L01）：循环上界随输入记录；缺省=冻结默认。 */
+  maxPagesPerRun?: number;
+  maxBatchesPerWorkspace?: number;
+  maxBudgetReconcileBatches?: number;
   accumulated?: RawRetentionSweepResult;
+}
+
+/** 输入旋钮收敛：非有限数回落冻结默认，越界夹到边界（纯函数，重放确定）。 */
+function clampedInput(value: unknown, fallback: number, min: number, max: number): number {
+  const candidate =
+    typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : fallback;
+  return Math.min(Math.max(candidate, min), max);
 }
 
 export interface RawRetentionSweepResult {
@@ -39,11 +55,13 @@ async function expireWorkspace(
   truthfulLocks: boolean,
   personalDataAuditRetention: boolean,
   budgetOperationReconcile: boolean,
+  maxBatchesPerWorkspace: number,
+  maxBudgetReconcileBatches: number,
 ): Promise<{ expired: number; deferredForConflict: number }> {
   let expired = 0;
   let deferredForConflict = 0;
   let complete = false;
-  for (let batch = 0; batch < MAX_BATCHES_PER_WORKSPACE; batch += 1) {
+  for (let batch = 0; batch < maxBatchesPerWorkspace; batch += 1) {
     const result = await activities.expireRawSourceRecords({
       workspaceId,
       limit: batchSize,
@@ -68,7 +86,7 @@ async function expireWorkspace(
   // Q25：个人数据访问审计的 180 天保留期清理。patch 之前记录的旧历史没有这一步，
   // 重放时命令序列保持不变。
   if (personalDataAuditRetention) {
-    for (let batch = 0; batch < MAX_BATCHES_PER_WORKSPACE; batch += 1) {
+    for (let batch = 0; batch < maxBatchesPerWorkspace; batch += 1) {
       const receipt = await activities.expirePersonalDataAccessAudit({
         workspaceId,
         limit: PERSONAL_DATA_AUDIT_BATCH,
@@ -78,7 +96,7 @@ async function expireWorkspace(
   }
   // 巡检（2026-11-04）：超时 RESERVED 工具预算操作清收（释放孤儿预留；patch 前旧历史不调度）。
   if (budgetOperationReconcile) {
-    for (let batch = 0; batch < MAX_BUDGET_RECONCILE_BATCHES; batch += 1) {
+    for (let batch = 0; batch < maxBudgetReconcileBatches; batch += 1) {
       const receipt = await activities.reconcileStaleToolBudgetOperations({
         workspaceId,
         limit: BUDGET_RECONCILE_BATCH,
@@ -96,6 +114,8 @@ async function processPage(
   truthfulLocks: boolean,
   personalDataAuditRetention: boolean,
   budgetOperationReconcile: boolean,
+  maxBatchesPerWorkspace: number,
+  maxBudgetReconcileBatches: number,
 ): Promise<{ aggregate: RawRetentionSweepResult; failures: number }> {
   let current = { ...aggregate };
   let failures = 0;
@@ -108,6 +128,8 @@ async function processPage(
         truthfulLocks,
         personalDataAuditRetention,
         budgetOperationReconcile,
+        maxBatchesPerWorkspace,
+        maxBudgetReconcileBatches,
       );
       current = {
         ...current,
@@ -137,6 +159,20 @@ export async function rawRetentionSweepWorkflow(
     PERSONAL_DATA_AUDIT_RETENTION_PATCH,
   );
   const budgetOperationReconcile = patched(BUDGET_OPERATION_RECONCILE_PATCH);
+  // B1（L01）：循环上界来自输入（旧历史缺字段 → 冻结默认），改常量不再是调参手段。
+  const maxPagesPerRun = clampedInput(input.maxPagesPerRun, MAX_PAGES_PER_RUN, 1, 20);
+  const maxBatchesPerWorkspace = clampedInput(
+    input.maxBatchesPerWorkspace,
+    MAX_BATCHES_PER_WORKSPACE,
+    1,
+    100,
+  );
+  const maxBudgetReconcileBatches = clampedInput(
+    input.maxBudgetReconcileBatches,
+    MAX_BUDGET_RECONCILE_BATCHES,
+    1,
+    50,
+  );
 
   if (!usesPagination) {
     const page = await activities.listRawRetentionWorkspaces({
@@ -153,6 +189,8 @@ export async function rawRetentionSweepWorkflow(
       truthfulLocks,
       personalDataAuditRetention,
       budgetOperationReconcile,
+      maxBatchesPerWorkspace,
+      maxBudgetReconcileBatches,
     );
     if (result.failures) {
       throw new Error(`RAW_RETENTION_WORKSPACE_FAILURE:${result.failures}`);
@@ -164,7 +202,7 @@ export async function rawRetentionSweepWorkflow(
     1,
     Math.min(
       input.workspacePagesPerRun ?? DEFAULT_PAGES_PER_RUN,
-      MAX_PAGES_PER_RUN,
+      maxPagesPerRun,
     ),
   );
   let cursor = input.afterWorkspaceId;
@@ -185,6 +223,8 @@ export async function rawRetentionSweepWorkflow(
       truthfulLocks,
       personalDataAuditRetention,
       budgetOperationReconcile,
+      maxBatchesPerWorkspace,
+      maxBudgetReconcileBatches,
     );
     aggregate = result.aggregate;
     if (result.failures) {
@@ -197,6 +237,9 @@ export async function rawRetentionSweepWorkflow(
     workspaceLimit,
     batchSize,
     workspacePagesPerRun: pagesPerRun,
+    maxPagesPerRun,
+    maxBatchesPerWorkspace,
+    maxBudgetReconcileBatches,
     afterWorkspaceId: cursor,
     accumulated: aggregate,
   });

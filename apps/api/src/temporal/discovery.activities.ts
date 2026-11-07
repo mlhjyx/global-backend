@@ -176,6 +176,16 @@ export interface DiscoveryRunInput {
   run2QuickScan?: boolean;
   /** M0⑥：影子对比（老路径主产出 + 新快扫判定对比，不物化名单）。 */
   run2Shadow?: boolean;
+  /**
+   * B1（L01，2026-11-08）：参与控制流的可调常量随启动输入记录，重放不受代码常量变更影响。
+   * 新 run 由 relay 注入显式值；旧历史没有这些字段 → 工作流按冻结默认重放
+   * （见 discovery.workflow-knobs.ts）。缺省值 20（设计 R3）。
+   */
+  run2PoolSearchFallbackThreshold?: number;
+  /** 深挖父工作流同时推进的公司数（设计 R2/Q8），缺省 16。 */
+  deepCompanyConcurrency?: number;
+  /** 每批并发执行的计划查询数，缺省 2。 */
+  discoveryQueryBatchSize?: number;
 }
 
 type DiscoveryActivityInput = Readonly<{
