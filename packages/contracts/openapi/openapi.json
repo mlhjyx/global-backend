@@ -18375,7 +18375,8 @@
         ],
         "x-required-scopes": [
           "ops:read"
-        ]
+        ],
+        "description": "列出平台技能目录：技能键、pack_type、启停状态与当前版本；仅运营身份（ops:read）可读，租户调用返回 403。"
       }
     },
     "/api/v1/skills/{skillKey}/workspaces/{workspaceId}": {
@@ -18431,7 +18432,8 @@
         ],
         "x-required-scopes": [
           "ops:read"
-        ]
+        ],
+        "description": "查看目标 workspace 的技能生效状态：平台状态、覆盖行与合成后的 enabled；需要 ops:read。"
       },
       "put": {
         "operationId": "SkillsController_setWorkspaceEnablement_v1",
@@ -18485,7 +18487,8 @@
         ],
         "x-required-scopes": [
           "ops:write"
-        ]
+        ],
+        "description": "设置 workspace 级启停覆盖（幂等 upsert）；删除覆盖行则跟随平台默认；需要 ops:write。"
       },
       "delete": {
         "operationId": "SkillsController_clearWorkspaceEnablement_v1",
@@ -18539,7 +18542,8 @@
         ],
         "x-required-scopes": [
           "ops:write"
-        ]
+        ],
+        "description": "删除 workspace 启停覆盖，回到跟随平台默认；重复删除幂等返回 removed=false；需要 ops:write。"
       }
     },
     "/api/v1/skills/{skillKey}": {
@@ -18587,7 +18591,8 @@
         ],
         "x-required-scopes": [
           "ops:read"
-        ]
+        ],
+        "description": "返回单个技能的 manifest、SKILL.md 正文与全部版本历史；未登记返回 404；需要 ops:read。"
       }
     },
     "/api/v1/skills/{skillKey}/status": {
@@ -18635,7 +18640,8 @@
         ],
         "x-required-scopes": [
           "ops:write"
-        ]
+        ],
+        "description": "平台级启停（kill switch）：DISABLED 后该技能对所有 workspace 停止执行（fail-closed），worker 最迟 30 秒生效；需要 ops:write。"
       }
     }
   },
@@ -21152,7 +21158,8 @@
       "tags": [
         "Reports",
         "Events",
-        "Compliance"
+        "Compliance",
+        "Skills"
       ]
     },
     {

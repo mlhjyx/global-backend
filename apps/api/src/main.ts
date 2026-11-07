@@ -182,7 +182,7 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
   Object.assign(document, {
     'x-tagGroups': [
       { name: '获客主链路', tags: ['Companies', 'Claims', 'ICP', 'Discovery', 'Leads'] },
-      { name: '运营与合规', tags: ['Reports', 'Events', 'Compliance'] },
+      { name: '运营与合规', tags: ['Reports', 'Events', 'Compliance', 'Skills'] },
       { name: '建站', tags: ['SiteBuilder'] },
       { name: '平台间通道', tags: ['ExecutionBudget', 'PlatformAuthority'] },
       { name: '系统', tags: ['System'] },
