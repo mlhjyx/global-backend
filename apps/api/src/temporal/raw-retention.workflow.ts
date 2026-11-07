@@ -23,6 +23,13 @@ const DEFAULT_PAGES_PER_RUN = 2;
 const MAX_PAGES_PER_RUN = 5;
 /** 每批删除的审计行数（活动上限 5000；20 批覆盖单个 workspace 一个 sweep 的 2 万行）。 */
 const PERSONAL_DATA_AUDIT_BATCH = 1000;
+/**
+ * 输入旋钮的夹取上限：也属重放契约——调度参数或 continueAsNew 历史里录过越界值时，
+ * 改这些值会改变重放调度次数（NDE）。正常历史（schedule args `[{}]` → 缺省）永远不触及它们。
+ */
+const PAGES_PER_RUN_CAP = 20;
+const BATCHES_PER_WORKSPACE_CAP = 100;
+const BUDGET_RECONCILE_BATCHES_CAP = 50;
 
 export interface RawRetentionSweepInput {
   workspaceLimit?: number;
@@ -160,18 +167,18 @@ export async function rawRetentionSweepWorkflow(
   );
   const budgetOperationReconcile = patched(BUDGET_OPERATION_RECONCILE_PATCH);
   // B1（L01）：循环上界来自输入（旧历史缺字段 → 冻结默认），改常量不再是调参手段。
-  const maxPagesPerRun = clampedInput(input.maxPagesPerRun, MAX_PAGES_PER_RUN, 1, 20);
+  const maxPagesPerRun = clampedInput(input.maxPagesPerRun, MAX_PAGES_PER_RUN, 1, PAGES_PER_RUN_CAP);
   const maxBatchesPerWorkspace = clampedInput(
     input.maxBatchesPerWorkspace,
     MAX_BATCHES_PER_WORKSPACE,
     1,
-    100,
+    BATCHES_PER_WORKSPACE_CAP,
   );
   const maxBudgetReconcileBatches = clampedInput(
     input.maxBudgetReconcileBatches,
     MAX_BUDGET_RECONCILE_BATCHES,
     1,
-    50,
+    BUDGET_RECONCILE_BATCHES_CAP,
   );
 
   if (!usesPagination) {

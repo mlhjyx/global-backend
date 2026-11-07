@@ -132,7 +132,7 @@ describe('池搜索兜底阈值来自输入（run2PoolSearchFallbackThreshold）
     expect(acts.loadPlanQueries).toHaveBeenCalledTimes(1);
   });
 
-  it('非法阈值收敛：NaN 回落默认 20，越界值夹到边界', async () => {
+  it('录制值缺失或非物理时回落冻结默认（NaN 与负数都按 20 处理）', async () => {
     mockQuickScanStage(10);
     await discoveryWorkflow(input({ run2QuickScan: true, run2PoolSearchFallbackThreshold: Number.NaN }));
     // NaN → 默认 20，10 < 20 → 搜索
@@ -141,9 +141,9 @@ describe('池搜索兜底阈值来自输入（run2PoolSearchFallbackThreshold）
     resetActivities();
     mockLegacyPipeline();
     mockQuickScanStage(10);
-    // 越下界 -5 → 夹到 0，10 < 0 为假 → 不搜索
+    // 负数不可能是 relay 产出的（注入时已夹到 ≥0）→ 按默认 20，10 < 20 → 搜索
     await discoveryWorkflow(input({ run2QuickScan: true, run2PoolSearchFallbackThreshold: -5 }));
-    expect(acts.loadPlanQueries).not.toHaveBeenCalled();
+    expect(acts.loadPlanQueries).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -180,8 +180,8 @@ describe('深挖并发来自输入（deepCompanyConcurrency）', () => {
     expect(await runWithConcurrency(undefined)).toBe(4);
   });
 
-  it('非法并发收敛到 1，不会出现零并发死循环', async () => {
-    expect(await runWithConcurrency(0)).toBe(1);
+  it('零并发（relay 不会录制）回落冻结默认 16，不会出现零并发空转', async () => {
+    expect(await runWithConcurrency(0)).toBe(4);
   });
 });
 
@@ -243,7 +243,7 @@ describe('查询批大小来自输入（discoveryQueryBatchSize）', () => {
     expect(await runWithBatch(undefined)).toBe(2);
   });
 
-  it('非法批大小收敛到 1', async () => {
-    expect(await runWithBatch(0)).toBe(1);
+  it('零批大小（relay 不会录制）回落冻结默认 2', async () => {
+    expect(await runWithBatch(0)).toBe(2);
   });
 });

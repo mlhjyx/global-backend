@@ -1757,9 +1757,9 @@ describe("B1（L01）：discovery 启动参数携带可调常量（输入化，�
     );
   });
 
-  it("env 覆盖进入启动参数；非法整数回落冻结默认并告警", async () => {
+  it("env 覆盖进入启动参数；非整数回落冻结默认并告警（12abc 不再静默读成 12）", async () => {
     process.env.DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD = "30";
-    process.env.DISCOVERY_DEEP_COMPANY_CONCURRENCY = "8";
+    process.env.DISCOVERY_DEEP_COMPANY_CONCURRENCY = "12abc";
     process.env.DISCOVERY_QUERY_BATCH_SIZE = "bogus";
     const ev = discoveryEvent();
     const temporal = makeTemporal();
@@ -1776,13 +1776,40 @@ describe("B1（L01）：discovery 启动参数携带可调常量（输入化，�
     ];
     expect(options.args[0]).toMatchObject({
       run2PoolSearchFallbackThreshold: 30,
-      deepCompanyConcurrency: 8,
+      deepCompanyConcurrency: 16,
       discoveryQueryBatchSize: 2,
     });
     expect(
-      warnSpy.mock.calls.some((call) =>
-        String(call[0]).includes("DISCOVERY_QUERY_BATCH_SIZE"),
+      warnSpy.mock.calls.filter((call) =>
+        String(call[0]).includes("is not an integer"),
       ),
-    ).toBe(true);
+    ).toHaveLength(2);
+  });
+
+  it("越界 env 在注入点夹取后才写进历史，并告警（重放不依赖可变区间）", async () => {
+    process.env.DISCOVERY_QUERY_BATCH_SIZE = "99";
+    process.env.DISCOVERY_DEEP_COMPANY_CONCURRENCY = "0";
+    const ev = discoveryEvent();
+    const temporal = makeTemporal();
+    const { db } = makeDb([ev]);
+    const svc = makeService(db, temporal);
+    const warnSpy = vi.spyOn(svc["logger"], "warn");
+
+    await svc.routeEvent(ev);
+
+    const [, options] = vi.mocked(temporal.client.workflow.start).mock
+      .calls[0] as unknown as [
+      string,
+      { args: [Record<string, unknown>] },
+    ];
+    expect(options.args[0]).toMatchObject({
+      deepCompanyConcurrency: 1,
+      discoveryQueryBatchSize: 8,
+    });
+    expect(
+      warnSpy.mock.calls.filter((call) =>
+        String(call[0]).includes("is outside"),
+      ),
+    ).toHaveLength(2);
   });
 });

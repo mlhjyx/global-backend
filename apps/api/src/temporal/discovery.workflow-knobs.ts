@@ -2,11 +2,16 @@
 //
 // 为什么放在这里：Temporal 重放要求工作流按**记录的历史命令序列**重新调度。参与分支/循环的
 // 数值常量如果留在 workflow 代码里，改一次常量就会让在飞历史重放出不同的命令序列（NDE）。
-// 所以这些值随启动输入进入历史（relay 注入，见 outbox-relay.service.ts），本模块只是三件事：
-// 缺省值、合法区间、以及给 relay 读 env 的默认值。
+// 所以这些值随启动输入进入历史：relay 在**注入时**用 BOUNDS 夹取并把夹取后的最终值写进
+// 启动输入；workflow 重放时只原样使用录制值（仅对不可能是 relay 产出的非物理值回退默认），
+// 不再引用可变的 BOUNDS——否则日后放宽/收紧 BOUNDS 仍会让在飞历史重放出不同命令数。
 //
-// 重放契约：*_DEFAULT 是「历史里没有该字段的旧 run」重放时用的冻结值——一经发布**永不修改**。
-// 要换缺省值：让 relay 注入新的显式数值（新 run 的历史会带上它），不要动这里的常量。
+// 重放契约（永远不要修改）：
+//   - *_DEFAULT：历史里没有该字段的旧 run 重放时使用的冻结值；
+//   - resolveDiscoveryWorkflowKnobs 里 `recordedInt(value, min)` 的 min 字面量。
+// 非契约（可以改，只影响新 run）：*_BOUNDS——仅 relay 注入时使用。
+// 回退约束：一旦用 env 覆盖过旋钮，回退到本改动之前的旧镜像前必须先把在飞 run 排空
+// （旧镜像不读这些字段，会用常量值重放新历史 → NDE）。
 // 文件不 import @temporalio/*，workflow 沙箱与普通 Node 进程（relay）都可安全引用。
 import type { DiscoveryRunInput } from './discovery.activities';
 
@@ -19,6 +24,7 @@ export interface WorkflowKnobBounds {
   readonly max: number;
 }
 
+/** relay 注入时的合法区间。不是重放契约：workflow 从不读它们。 */
 export const DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD_BOUNDS: WorkflowKnobBounds = Object.freeze({
   min: 0,
   max: 1000,
@@ -33,8 +39,8 @@ export const DISCOVERY_QUERY_BATCH_SIZE_BOUNDS: WorkflowKnobBounds = Object.free
 });
 
 /**
- * 把历史输入里的数值旋钮收敛到合法区间：非有限数回落冻结默认，越界夹到边界。
- * 纯函数（无时间/随机/IO），重放确定。
+ * 注入时夹取：非有限数回落冻结默认，越界夹到边界。**只允许 relay 调用**——
+ * workflow 代码引用可变 BOUNDS 会把边界本身变成重放契约。
  */
 export function boundedKnob(value: unknown, fallback: number, bounds: WorkflowKnobBounds): number {
   const candidate =
@@ -43,8 +49,19 @@ export function boundedKnob(value: unknown, fallback: number, bounds: WorkflowKn
 }
 
 /**
- * 一个 run 实际生效的旋钮值。workflow 用它把输入收敛成确定值；relay 用它生成启动输入。
- * 字段始终显式存在——新历史因此完整携带数值，重放与代码里的缺省值无关。
+ * 录制值的重放读取：relay 注入的每个值都已夹取在合法区间内，这里只做「有限数 + 非物理值」
+ * 守卫——`min` 是冻结字面量，这类越界值永远不会出现在真实历史里，改守卫不会改变任何已录制
+ * 历史的调度结果。纯函数（无时间/随机/IO），重放确定。
+ */
+function recordedInt(value: unknown, min: number): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  const truncated = Math.trunc(value);
+  return truncated >= min ? truncated : null;
+}
+
+/**
+ * 一个 run 实际生效的旋钮值：只从录制输入读取（缺省/非物理值回落冻结默认）。
+ * 新 run 的历史完整携带数值，重放与代码里的缺省值和 BOUNDS 都无关。
  */
 export interface DiscoveryWorkflowKnobs {
   run2PoolSearchFallbackThreshold: number;
@@ -59,21 +76,13 @@ export function resolveDiscoveryWorkflowKnobs(
   >,
 ): DiscoveryWorkflowKnobs {
   return {
-    run2PoolSearchFallbackThreshold: boundedKnob(
-      input.run2PoolSearchFallbackThreshold,
+    run2PoolSearchFallbackThreshold:
+      recordedInt(input.run2PoolSearchFallbackThreshold, 0) ??
       DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD_DEFAULT,
-      DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD_BOUNDS,
-    ),
-    deepCompanyConcurrency: boundedKnob(
-      input.deepCompanyConcurrency,
-      DISCOVERY_DEEP_COMPANY_CONCURRENCY_DEFAULT,
-      DISCOVERY_DEEP_COMPANY_CONCURRENCY_BOUNDS,
-    ),
-    discoveryQueryBatchSize: boundedKnob(
-      input.discoveryQueryBatchSize,
-      DISCOVERY_QUERY_BATCH_SIZE_DEFAULT,
-      DISCOVERY_QUERY_BATCH_SIZE_BOUNDS,
-    ),
+    deepCompanyConcurrency:
+      recordedInt(input.deepCompanyConcurrency, 1) ?? DISCOVERY_DEEP_COMPANY_CONCURRENCY_DEFAULT,
+    discoveryQueryBatchSize:
+      recordedInt(input.discoveryQueryBatchSize, 1) ?? DISCOVERY_QUERY_BATCH_SIZE_DEFAULT,
   };
 }
 
