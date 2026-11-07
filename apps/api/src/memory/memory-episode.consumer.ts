@@ -100,7 +100,7 @@ export class MemoryEpisodeConsumer implements OnModuleInit, OnModuleDestroy {
   async onModuleDestroy(): Promise<void> {
     this.shuttingDown = true;
     if (this.timer) clearInterval(this.timer);
-    if (this.ownsOwnerClient) {
+    if (this.ownsOwnerClient && this.owner) {
       await this.owner.$disconnect().catch(() => undefined);
     }
   }
