@@ -221,6 +221,13 @@ function rethrowCommitFailure(error: unknown): never {
   throw new ExecutionControlError('DOMAIN_ACK_DISCOVERY_QUERY_LINEAGE_UNAVAILABLE');
 }
 
+/**
+ * 查询入库事务参数（2026-11-08 实机故障）：一次 Q-TX 内做 domain-ack 回执 + 百级 raw 记录
+ * upsert + run stats 合并，默认 5s 交互事务在共享主机负载下实测被打穿（7–8s），
+ * executeQuery 因 "Transaction already closed" 连续重试失败。显式放宽到 30s。
+ */
+export const DISCOVERY_RAW_INGEST_TX_OPTIONS = { maxWait: 10_000, timeout: 30_000 } as const;
+
 export async function commitGovernedDiscoveryQueryExecution(input: Readonly<{
   prisma: PrismaService;
   workspaceId: string;
@@ -347,6 +354,7 @@ export async function commitGovernedDiscoveryQueryExecution(input: Readonly<{
         return executionValue(prior.queryReceipt as DiscoveryQueryReceipt, prior.budgetTruncated);
       },
     }),
+    DISCOVERY_RAW_INGEST_TX_OPTIONS,
   );
   return result.value;
 }
