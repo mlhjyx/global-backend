@@ -6,7 +6,7 @@ import type { RuntimeTelemetry } from '../model-runtime/types';
 import type { BudgetStore } from '../tools/budget-store';
 import { createUnderstandingActivities } from './understanding.activities';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
-import { Context } from '@temporalio/activity';
+import { ApplicationFailure, Context } from '@temporalio/activity';
 import { ToolBroker } from '../tools/tool-broker';
 import { ToolRegistry } from '../tools/tool-registry';
 import { RateLimiter } from '../tools/rate-limiter';
@@ -16,6 +16,11 @@ import { isExecutionControlError } from '../execution-budget/execution-control-e
 import type { Prisma } from '@prisma/client';
 import { ArtifactSubjectBindingContract } from '../durable-results/artifact/artifact-subject-binding.contract';
 import { GenericOperationArtifactExecution } from '../durable-results/artifact/generic-operation-artifact.execution';
+import {
+  SkillUnavailableError,
+  StaticSkillResolver,
+  type SkillResolver,
+} from '../skills/skill-runtime';
 
 const MODEL_RECEIPT: DurableExecutionReceipt = Object.freeze({
   schemaVersion: 'durable-execution-receipt/v1',
@@ -653,5 +658,48 @@ describe('understanding.activities — the seller profile is the G3 artifact sub
       }),
     ).rejects.toMatchObject({ type: 'UNDERSTANDING_FAILURE_INVALID', nonRetryable: true });
     expect(update).not.toHaveBeenCalled();
+  });
+});
+
+describe('understanding.activities — S0 skill runtime adapter', () => {
+  function extractionActs(resolve: SkillResolver['resolve']) {
+    const generateStructured = vi.fn(async (input: { task: string }) => ({
+      data: input.task.endsWith('extract_claims') ? { claims: [] } : { offerings: [] },
+      provider: 'gateway',
+      model: 'model',
+    }));
+    return createUnderstandingActivities({
+      prisma: {} as PrismaService,
+      gateway: { generateStructured } as unknown as ModelGateway,
+      budgetStore: budgetStoreSpies().store,
+      skills: { kind: 'static', resolve },
+    });
+  }
+
+  it('resolves each extraction through its registered skill key (pass-through)', async () => {
+    const staticResolver = new StaticSkillResolver();
+    const resolve = vi.fn(staticResolver.resolve.bind(staticResolver));
+    const acts = extractionActs(resolve);
+
+    await acts.extractClaims({ ...AUTHORITY_ARGS, text: 'claims' });
+    await acts.extractOfferings({ ...AUTHORITY_ARGS, text: 'offerings' });
+
+    expect(resolve.mock.calls.map((call) => call[0])).toEqual([
+      'company.understanding.extract',
+      'company.understanding.extract_offerings',
+    ]);
+  });
+
+  it('turns a disabled skill into a non-retryable activity failure', async () => {
+    const acts = extractionActs(async () => {
+      throw new SkillUnavailableError('SKILL_PLATFORM_DISABLED', 'ops kill switch');
+    });
+    const error = await acts
+      .extractClaims({ ...AUTHORITY_ARGS, text: 'claims' })
+      .then(() => null, (reason: unknown) => reason);
+
+    expect(error).toBeInstanceOf(ApplicationFailure);
+    expect((error as ApplicationFailure).type).toBe('SKILL_PLATFORM_DISABLED');
+    expect((error as ApplicationFailure).nonRetryable).toBe(true);
   });
 });

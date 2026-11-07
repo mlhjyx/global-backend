@@ -9,6 +9,12 @@ import { extractPublicContacts } from '../adapters/contact-extractor';
 import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
 import {
+  executeSkillWithRuntime,
+  SkillUnavailableError,
+  STATIC_SKILL_RESOLVER,
+  type SkillResolver,
+} from '../skills/skill-runtime';
+import {
   type BudgetStore,
   UnavailableBudgetStore,
 } from '../tools/budget-store';
@@ -129,6 +135,17 @@ function sellerSubject(companyId: string): ArtifactSubjectRef {
  * classifier sees the shape it saw before, and the attempt is not retried: a
  * policy decision does not change between attempts.
  */
+/**
+ * 技能不可用（未登记/停用/契约漂移）是运维决策，不是瞬时故障：转 nonRetryable，
+ * 避免 understanding 的 5 次模型重试把一次 kill switch 放大成重试风暴。
+ */
+function skillDenialFailure(error: unknown): never {
+  if (error instanceof SkillUnavailableError) {
+    throw ApplicationFailure.nonRetryable(error.reason, error.reason);
+  }
+  throw error;
+}
+
 function policyDenialFailure(error: unknown): ApplicationFailure | null {
   if (!(error instanceof Error) || error.name !== 'ToolPolicyDenied') return null;
   const reason = (error as { reason?: unknown }).reason;
@@ -157,6 +174,8 @@ export function createUnderstandingActivities(deps: {
   runtimeTelemetry?: RuntimeTelemetry;
   budgetStore?: BudgetStore;
   activityRunId?: () => string | undefined;
+  /** S0 技能运行时：生产由 worker 注入 DB resolver；缺省为内置目录直通（测试/未接线）。 */
+  skills?: SkillResolver;
 }) {
   const budgets =
     deps.budgetStore ??
@@ -349,8 +368,10 @@ export function createUnderstandingActivities(deps: {
     }> {
       return withRunBudget(args, async (accountKey) => {
         const contract = getTask('company_understanding.extract_claims');
-        const result = await executeStructuredTaskWithRuntime(
+        const result = await executeSkillWithRuntime(
+          deps.skills ?? STATIC_SKILL_RESOLVER,
           deps.gateway,
+          'company.understanding.extract',
           {
             task: contract?.id ?? 'company_understanding.extract_claims',
             prompt: args.text,
@@ -365,7 +386,7 @@ export function createUnderstandingActivities(deps: {
             durableResultSchema: 'understanding-claims/v1',
           },
           { telemetry: deps.runtimeTelemetry },
-        );
+        ).catch(skillDenialFailure);
         const fromModel = (result.data as { claims?: ExtractedClaim[] })?.claims;
         if (!Array.isArray(fromModel)) throw new Error('UNDERSTANDING_CLAIMS_INVALID');
         return {
@@ -435,8 +456,10 @@ export function createUnderstandingActivities(deps: {
     }> {
       return withRunBudget(args, async (accountKey) => {
         const contract = getTask('company_understanding.extract_offerings');
-        const result = await executeStructuredTaskWithRuntime(
+        const result = await executeSkillWithRuntime(
+          deps.skills ?? STATIC_SKILL_RESOLVER,
           deps.gateway,
+          'company.understanding.extract_offerings',
           {
             task: contract?.id ?? 'company_understanding.extract_offerings',
             prompt: args.text,
@@ -451,7 +474,7 @@ export function createUnderstandingActivities(deps: {
             durableResultSchema: 'understanding-offerings/v1',
           },
           { telemetry: deps.runtimeTelemetry },
-        );
+        ).catch(skillDenialFailure);
         const fromModel = (result.data as { offerings?: ExtractedOffering[] })?.offerings;
         if (!Array.isArray(fromModel)) throw new Error('UNDERSTANDING_OFFERINGS_INVALID');
         return {
