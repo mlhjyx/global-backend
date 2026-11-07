@@ -19,6 +19,11 @@ import type {
   TaskModelContract,
 } from "./types";
 import { getTask } from "../ai-tasks/task-registry";
+import {
+  activeLlmResultCache,
+  llmResultCacheKey,
+  llmResultCacheTtlHours,
+} from "./llm-result-cache";
 
 const STRUCTURED_CONTEXT_WINDOW = 128_000;
 const MAX_PROVIDER_OUTPUT_TOKENS = 16_000;
@@ -39,6 +44,8 @@ export interface StructuredTaskRuntimeMetadata {
   provider: string;
   reportedModel?: string;
   modelResolutionSource?: ModelResolutionSource;
+  /** PR-B：本次结果来自 llm_extraction_cache（未发生网关调用、未结算）。 */
+  cacheHit?: boolean;
 }
 
 export type RuntimeStructuredModelResult<Output> = ModelResult<Output> & {
@@ -69,13 +76,30 @@ function estimatedTokens(content: unknown): number {
   );
 }
 
+/** 缓存命中结果复用前重跑同一条输出门（schema + 任务级校验）；不合法按 miss 处理。 */
+function cachedResultIsValid<Output>(
+  schema: Record<string, unknown>,
+  result: unknown,
+  validateOutput?: (output: Output) => void,
+): boolean {
+  try {
+    const validation = checkAgainstSchema(schema, result);
+    if (!validation.valid) return false;
+    validateOutput?.(result as Output);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function executeStructuredTaskWithRuntime<Output>(
   gateway: ModelGateway,
   input: GenerateStructuredInput,
   context: AiContext,
   options: StructuredTaskRuntimeOptions = {},
 ): Promise<RuntimeStructuredModelResult<Output>> {
-  const registeredMaxOutputTokens = getTask(input.task)?.maxOutputTokens;
+  const registeredTask = getTask(input.task);
+  const registeredMaxOutputTokens = registeredTask?.maxOutputTokens;
   const maxOutputTokens = input.maxTokens ?? registeredMaxOutputTokens;
   if (
     registeredMaxOutputTokens === undefined ||
@@ -161,6 +185,54 @@ export async function executeStructuredTaskWithRuntime<Output>(
   });
   const taskInput = requestMaterial;
   const settlementRequired = context.paidCost !== undefined;
+  const prompt = { system: input.system ?? "", user: input.prompt };
+  const promptDigest = canonicalDigest(prompt);
+  const promptVersion = `${contractVersion}/prompt-v1`;
+  const schemaDigest = canonicalDigest(input.schema);
+  const registeredModel = registeredTask?.model ?? requestedAlias;
+  const llmCache = registeredTask?.cacheable === true ? activeLlmResultCache() : null;
+  const llmCacheKey = llmCache
+    ? llmResultCacheKey({
+        workspaceId: context.workspaceId,
+        task: input.task,
+        contractVersion,
+        promptVersion,
+        model: registeredModel,
+        requestDigest: canonicalDigest(requestMaterial),
+        schemaDigest,
+        reasoning: effort,
+      })
+    : null;
+  if (llmCache && llmCacheKey) {
+    const hit = await llmCache
+      .get(context.workspaceId, llmCacheKey)
+      .catch(() => null);
+    if (hit && cachedResultIsValid(input.schema, hit.result, input.validateOutput)) {
+      console.log(`[llm-cache] task=${input.task} hit=true`);
+      return {
+        data: hit.result as Output,
+        provider: "llm-cache",
+        model: registeredModel,
+        callCount: 0,
+        runtimeExecution: {
+          contractVersion,
+          protocol,
+          contextDigest: envelope.digest,
+          promptDigest,
+          states: [],
+          transportAttempts: 0,
+          repairAttempts: 0,
+          physicalCalls: 0,
+          gatewayRepairCalls: 0,
+          requestedAlias,
+          runtimeResolvedAlias: requestedAlias,
+          gatewayResolvedModel: registeredModel,
+          provider: "llm-cache",
+          cacheHit: true,
+        },
+      };
+    }
+  }
   let gatewayResult: ModelResult<Output> | undefined;
   const contract: TaskModelContract<typeof taskInput, Output> = {
     taskId: input.task,
@@ -225,7 +297,6 @@ export async function executeStructuredTaskWithRuntime<Output>(
     },
   });
   try {
-    const prompt = { system: input.system ?? "", user: input.prompt };
     const result = await runtime.execute({
       executionId: `structured:${context.runId ?? context.correlationId ?? context.workspaceId}:${input.task}:${canonicalDigest(requestMaterial).slice(0, 16)}`,
       fallbackIndex: 0,
@@ -236,8 +307,8 @@ export async function executeStructuredTaskWithRuntime<Output>(
       inputDigest: canonicalDigest(taskInput),
       context: envelope,
       contextDigest: envelope.digest,
-      promptVersion: `${contractVersion}/prompt-v1`,
-      schemaDigest: canonicalDigest(input.schema),
+      promptVersion,
+      schemaDigest,
       requestedAlias,
       resolvedAlias: requestedAlias,
       protocol,
@@ -248,6 +319,22 @@ export async function executeStructuredTaskWithRuntime<Output>(
     });
     if (!gatewayResult)
       throw new Error("model runtime completed without a gateway observation");
+    if (llmCache && llmCacheKey) {
+      try {
+        await llmCache.put(
+          context.workspaceId,
+          llmCacheKey,
+          input.task,
+          gatewayResult.data,
+          llmResultCacheTtlHours(),
+        );
+      } catch (error) {
+        console.warn(
+          `[llm-cache] put failed task=${input.task}: ${String(error).slice(0, 160)}`,
+        );
+      }
+      console.log(`[llm-cache] task=${input.task} hit=false`);
+    }
     return {
       ...gatewayResult,
       runtimeExecution: {

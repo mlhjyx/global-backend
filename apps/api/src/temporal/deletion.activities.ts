@@ -208,6 +208,12 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
           patentCacheErased = pc.count;
         }
 
+        // PR-B（2026-11-08）：租户缓存表按 workspace 全量擦除（隐私保守方向）。
+        //   url_content_cache 的页面正文可能含 Impressum 个人信息；llm_extraction_cache 的抽取结果
+        //   可能含决策人姓名/邮箱。缓存是派生数据，重建即可，因此不计入 ErasureCounts 的主题计数。
+        await tx.$executeRaw`DELETE FROM url_content_cache WHERE workspace_id = ${input.workspaceId}::uuid`;
+        await tx.$executeRaw`DELETE FROM llm_extraction_cache WHERE workspace_id = ${input.workspaceId}::uuid`;
+
         // company 主体：整公司标 SUPPRESSED（幂等——freeze 已置；此处兜底。保留绿区公司事实，company 非自然人不硬删）
         if (located.companyIdsToSuppress.length) {
           await tx.canonicalCompany.updateMany({

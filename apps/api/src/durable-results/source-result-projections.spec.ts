@@ -486,7 +486,7 @@ describe('closed source Tool result projections', () => {
   it('locks every OpenFDA schema bound exactly', () => {
     expect(bounds(SOURCE_RESULT_PROJECTION_DEFINITIONS[1].jsonSchema)).toEqual({
       ...COMMON_RESULT_BOUNDS,
-      '$.data.establishments.maxItems': 12,
+      '$.data.establishments.maxItems': 50,
       '$.data.establishments[].registrationNumber.maxLength': 500,
       '$.data.establishments[].feiNumber.maxLength': 500,
       '$.data.establishments[].name.maxLength': 500,
@@ -506,7 +506,7 @@ describe('closed source Tool result projections', () => {
       '$.data.establishments[].ownerOperatorNumbers.maxItems': 64,
       '$.data.establishments[].ownerOperatorNumbers[].maxLength': 500,
       '$.data.establishments[].createdDate.maxLength': 500,
-      '$.data.clearances.maxItems': 12,
+      '$.data.clearances.maxItems': 50,
       '$.data.clearances[].kNumber.maxLength': 500,
       '$.data.clearances[].applicant.maxLength': 500,
       '$.data.clearances[].country.maxLength': 500,
@@ -539,6 +539,46 @@ describe('closed source Tool result projections', () => {
     expect(entryKeyEnum('clearances')).toEqual(expected);
     expect(Object.isFrozen(entryKeyEnum('establishments'))).toBe(true);
     expect(Object.isFrozen(entryKeyEnum('clearances'))).toBe(true);
+  });
+
+  it('projects the OpenFDA discovery fetch floor of 50 rows and enforces the structural ceiling', () => {
+    const registry = registerSourceResultProjections(new TypedProjectionRegistry());
+    const establishment = (index: number) => ({
+      registrationNumber: `REG-${index}`,
+      feiNumber: `FEI-${index}`,
+      name: `Imaging Importer ${index}`,
+      country: 'US',
+      city: 'Boston',
+      stateCode: 'MA',
+      statusCode: '1',
+      establishmentTypes: ['Importer'],
+      initialImporter: true,
+      productCodes: ['LLZ', 'JAK'],
+      deviceFacts: {
+        deviceName: 'X-Ray System',
+        deviceClass: '2',
+        medicalSpecialtyDescription: 'Radiology',
+        regulationNumber: '892.1750',
+      },
+      deviceNames: ['X-Ray System'],
+      ownerOperatorNumbers: [`OO-${index}`],
+      createdDate: '2026-08-20',
+    });
+    const rawAt = (count: number): RawToolResult => ({
+      data: { establishments: Array.from({ length: count }, (_, i) => establishment(i)) },
+      costCents: 0,
+    });
+
+    // 2026-11-08 真机：provider 每次至少取 max(query.limit,50)=50 条，旧 12 条上界使真实响应必被拒。
+    const fifty = rawAt(50);
+    const envelope = registry.project('openfda-search/v1', fifty);
+    expect(Buffer.byteLength(JSON.stringify(envelope), 'utf8')).toBeLessThanOrEqual(120 * 1024);
+    expect(registry.restore(envelope)).toEqual(fifty);
+
+    // 结构性上限仍精确：51 条越界（契约上限=发现 provider 的取数下限）。
+    expect(() => registry.project('openfda-search/v1', rawAt(51))).toThrow(
+      'TYPED_PROJECTION_INVALID',
+    );
   });
 
   it('locks every SAM and SMTP schema bound exactly', () => {
@@ -584,7 +624,19 @@ describe('closed source Tool result projections', () => {
     ['TED URL maxLength + 1', 'ted.search', TED_RAW, (raw: RawToolResult) => {
       ((raw.data.awards as JsonRecord[])[0].winners as JsonRecord[])[0].internetAddress = 'u'.repeat(2049);
     }],
-    ['OpenFDA establishments maxItems + 1', 'openfda.search', OPENFDA_RAW, (raw: RawToolResult) => {
+    ['OpenFDA establishments maxItems + 1', 'openfda.search', {
+      data: {
+        establishments: Array.from({ length: 50 }, (_, index) => ({
+          name: `Importer ${index}`,
+          establishmentTypes: ['Importer'],
+          initialImporter: true,
+          productCodes: ['LLZ'],
+          deviceNames: ['X-Ray System'],
+          ownerOperatorNumbers: [`OO-${index}`],
+        })),
+      },
+      costCents: 0,
+    } as RawToolResult, (raw: RawToolResult) => {
       (raw.data.establishments as unknown[]).push(structuredClone((raw.data.establishments as unknown[])[0]));
     }],
     ['OpenFDA nested list maxItems + 1', 'openfda.search', OPENFDA_RAW, (raw: RawToolResult) => {

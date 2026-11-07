@@ -27,6 +27,11 @@ export interface AiTaskContract {
   /** Output requires human approval before outbound use? */
   humanGate: boolean;
   /**
+   * PR-B：结果可按输入全文摘要缓存 24h（llm_extraction_cache）。
+   * 仅对「同一输入 → 可复用同一产出」的抽取/判定任务开启；计划类任务不设。
+   */
+  cacheable?: boolean;
+  /**
    * Bounded tool whitelist (PRD 9.11): the ToolBroker rejects any tool call
    * whose id is not listed here. Empty/omitted = pure generation task with NO
    * tool access. This is what makes "bounded tools" enforced in code, not prose.

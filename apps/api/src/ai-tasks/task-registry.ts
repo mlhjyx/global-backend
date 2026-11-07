@@ -170,6 +170,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     acceptsModelSubstitute: true,
     risk: 'medium',
     humanGate: true, // Claims land as NEEDS_REVIEW; approval before outbound use.
+    cacheable: true, // PR-B：同页同输入 24h 复用抽取结果
   },
 
   'company_understanding.extract_profile': {
@@ -188,6 +189,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false, // 画像随 Claim 审批可被人工修正
+    cacheable: true, // PR-B
   },
 
   'company_understanding.extract_offerings': {
@@ -220,6 +222,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     acceptsModelSubstitute: true,
     risk: 'low', // 只进结构化知识库，不直接对外
     humanGate: false,
+    cacheable: true, // PR-B
   },
 
   'icp.design': {
@@ -331,6 +334,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false,
+    cacheable: true, // PR-B
   },
 
   'discovery.classify_trade_role': {
@@ -364,6 +368,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false,
+    cacheable: true, // PR-B
   },
 
   'contact.find_decision_makers': {
@@ -407,6 +412,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     acceptsModelSubstitute: true,
     risk: 'medium', // 涉及个人数据抽取，下游必须过合规门
     humanGate: false,
+    cacheable: true, // PR-B：结果含个人数据——24h TTL + DSR 按 workspace 擦除
   },
 
   'discovery.extract_list': {
@@ -440,6 +446,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false,
+    cacheable: true, // PR-B
   },
 
   'taxonomy.normalize': {
@@ -486,6 +493,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     acceptsModelSubstitute: true,
     risk: 'low',
     humanGate: false,
+    cacheable: true, // PR-B：同 ICP+同公司画像 24h 复用判定
   },
 
   'discovery.query_plan': {

@@ -4,6 +4,10 @@ import { resolve } from "node:path";
 import { NativeConnection, Worker } from "@temporalio/worker";
 import { workerIdentity } from "./worker-composition";
 import { PrismaService } from "../prisma/prisma.service";
+import {
+  configureLlmResultCache,
+  createPrismaLlmResultCache,
+} from "../model-runtime/llm-result-cache";
 import { ModelProviderRegistry } from "../model-gateway/model-provider.registry";
 import { ModelRouter } from "../model-gateway/model-router";
 import { RouterModelGateway } from "../model-gateway/router-model-gateway";
@@ -106,6 +110,8 @@ export async function runDevFastLaneWorker(
 
   const runtimeTelemetry = await startLangfuseRuntimeTelemetry();
   const prisma = new PrismaService();
+  // PR-B：与主 worker 相同的 llm_extraction_cache 端口注入。
+  configureLlmResultCache(createPrismaLlmResultCache(prisma));
   const configuredProviderWireDatabase = (() => {
     try {
       return createSiteBuildProviderWireDatabaseFromEnv(
