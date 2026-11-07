@@ -18681,6 +18681,10 @@
       "description": "渠道数据源：平台渠道注册/治理/试跑（运营身份 ops:*），租户启用与私有导入"
     },
     {
+      "name": "Skills",
+      "description": "AI 底座：技能目录、版本与运营启停（ops:read / ops:write）"
+    },
+    {
       "name": "Reports",
       "description": "周报与反馈"
     },
