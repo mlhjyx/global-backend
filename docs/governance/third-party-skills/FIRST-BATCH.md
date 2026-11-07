@@ -42,22 +42,22 @@
 
 ## 2. 选择表
 
-| 选择 | 技能 | 档 | owner（待指派） | 备注 |
-| --- | --- | --- | --- | --- |
-| ☑ | account-research | A | | 已选定首批（2026-11-08） |
-| ☑ | lead-triage | A | | 已选定首批（2026-11-08） |
-| ☑ | prospecting | B | | 已选定首批（2026-11-08）；需导出审批 + 去营销化 |
-| ☑ | cold-email | B | | 已选定首批（2026-11-08）；需发送审批 + 去营销化 |
-| ☑ | draft-outreach | B | | 已选定首批（2026-11-08）；需发送/序列审批 |
-| ☑ | stakeholder-map | B | | 已选定首批（2026-11-08）；需 CRM 写审批 |
-| ☑ | account-tiering | B | | 已选定首批（2026-11-08）；需账户数据输入 |
-| ☑ | competitive-intelligence | C | | 已选定首批（2026-11-08） |
-| ☐ | call-prep | C | | 未入选首批；依赖数据源 |
-| ☑ | customer-research | C | | 已选定首批（2026-11-08）；上游评测可复用 |
-| ☑ | pricing | C | | 已选定首批（2026-11-08）；上游评测可复用 |
-| ☐ | ideal-customer-profile | C | | 未入选首批；需去推广链接 |
-| ☐ | beachhead-segment | C | | 未入选首批；需去推广链接 |
-| ☐ | gtm-motions | C | | 未入选首批；需去推广链接 |
+| 选择 | 技能 | 档 | 备注 |
+| --- | --- | --- | --- |
+| ☑ | account-research | A | 已选定首批（2026-11-08） |
+| ☑ | lead-triage | A | 已选定首批（2026-11-08） |
+| ☑ | prospecting | B | 已选定首批（2026-11-08）；需导出审批 + 去营销化 |
+| ☑ | cold-email | B | 已选定首批（2026-11-08）；需发送审批 + 去营销化 |
+| ☑ | draft-outreach | B | 已选定首批（2026-11-08）；需发送/序列审批 |
+| ☑ | stakeholder-map | B | 已选定首批（2026-11-08）；需 CRM 写审批 |
+| ☑ | account-tiering | B | 已选定首批（2026-11-08）；需账户数据输入 |
+| ☑ | competitive-intelligence | C | 已选定首批（2026-11-08） |
+| ☐ | call-prep | C | 未入选首批；依赖数据源 |
+| ☑ | customer-research | C | 已选定首批（2026-11-08）；上游评测可复用 |
+| ☑ | pricing | C | 已选定首批（2026-11-08）；上游评测可复用 |
+| ☐ | ideal-customer-profile | C | 未入选首批；需去推广链接 |
+| ☐ | beachhead-segment | C | 未入选首批；需去推广链接 |
+| ☐ | gtm-motions | C | 未入选首批；需去推广链接 |
 
 ## 3. 首批 10 个的组合
 
