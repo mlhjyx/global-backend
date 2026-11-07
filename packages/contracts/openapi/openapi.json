@@ -18335,6 +18335,308 @@
         ],
         "description": "重试解析：仅 failed_terminal 或 queued 状态可调用，重置错误码后重新入队（202）。需要 acquisition:write。"
       }
+    },
+    "/api/v1/skills": {
+      "get": {
+        "operationId": "SkillsController_list_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "技能列表（平台目录 + 当前版本 + 启停状态）",
+        "tags": [
+          "Skills"
+        ],
+        "x-required-scopes": [
+          "ops:read"
+        ]
+      }
+    },
+    "/api/v1/skills/{skillKey}/workspaces/{workspaceId}": {
+      "get": {
+        "operationId": "SkillsController_workspaceEnablement_v1",
+        "parameters": [
+          {
+            "name": "skillKey",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "workspaceId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "目标 workspace 的技能生效状态（平台状态 + 覆盖行）",
+        "tags": [
+          "Skills"
+        ],
+        "x-required-scopes": [
+          "ops:read"
+        ]
+      },
+      "put": {
+        "operationId": "SkillsController_setWorkspaceEnablement_v1",
+        "parameters": [
+          {
+            "name": "skillKey",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "workspaceId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "设置 workspace 级启停覆盖（缺行 = 跟随平台默认）",
+        "tags": [
+          "Skills"
+        ],
+        "x-required-scopes": [
+          "ops:write"
+        ]
+      },
+      "delete": {
+        "operationId": "SkillsController_clearWorkspaceEnablement_v1",
+        "parameters": [
+          {
+            "name": "skillKey",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "workspaceId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "删除 workspace 覆盖（回到跟随平台默认）",
+        "tags": [
+          "Skills"
+        ],
+        "x-required-scopes": [
+          "ops:write"
+        ]
+      }
+    },
+    "/api/v1/skills/{skillKey}": {
+      "get": {
+        "operationId": "SkillsController_detail_v1",
+        "parameters": [
+          {
+            "name": "skillKey",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "技能详情（manifest、正文与版本历史）",
+        "tags": [
+          "Skills"
+        ],
+        "x-required-scopes": [
+          "ops:read"
+        ]
+      }
+    },
+    "/api/v1/skills/{skillKey}/status": {
+      "patch": {
+        "operationId": "SkillsController_setStatus_v1",
+        "parameters": [
+          {
+            "name": "skillKey",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "平台级启停（kill switch，所有 workspace 生效）",
+        "tags": [
+          "Skills"
+        ],
+        "x-required-scopes": [
+          "ops:write"
+        ]
+      }
     }
   },
   "info": {

@@ -17,6 +17,8 @@
 
 **2026-11-03 Phase 1 已上线并验收**（运行镜像 `36412147`，build `5a526747`，带迁移 `20261102170000_phase1_seller_sourcing_fields`；gain-saas #32/#33/#34 同批部署）：`POST /companies` 支持无官网建档与 `industry/targetMarkets/products/businessEmail`（products 落 `Offering(source=onboarding)`），无官网不发理解事件、不消费 Grant；gain-saas 注册后强制三步引导向导（中英双语）、`GET /api/workspace/context`、BFF `ONBOARDING_INCOMPLETE` 门禁、注册页「创建账号」口径与邀请码按配置显隐、头部工作空间切换器。端到端验收（有官网/无官网/门禁/重复提交）通过，记录在 `_archive/backend-runtime-switch-5a526747-xin-20261102/README.md`。
 
+**2026-11-08 AI 底座 S0（M1 并行泳道，非客户可见）**：技能运行时 v0 随本批 PR 进入 main——SKILL.md 包规范 v0 与校验器、`skill_package`/`skill_version`/`skill_enablement`/`skill_resolution_snapshot` 四表（FORCE RLS；版本与快照 append-only）、三个存量技能（`company.understanding.extract` / `company.understanding.extract_offerings` / `discovery.qualify_fit`）经直通 adapter 执行、ops 启停（引擎 API）。执行输入与预算逐字节不变；**尚未发车**（运行镜像仍以 `local-config/global/runtime.compose.env` 为准），部署后按模块技术文档 §5 验证。设计：`docs/superpowers/plans/2026-11-08-skill-runtime-s0.md`；模块文档：`docs/modules/ai-foundation/`。
+
 仍未达成：首个 `DONE` run 出现在 11-03，但**试点交付节奏**与**邮箱/电话覆盖**仍未达成（最近一次常规 run 的联系人阶段 0 邮箱/0 电话，社交源 blocked/circuit；`email_guess` 2026-11-02 已按 D3 重开，等下一轮带 match 的 run 验证）。逐项见下表。
 
 ## 1. RL1 主链：做了什么、证据、谁验收、怎么回退
