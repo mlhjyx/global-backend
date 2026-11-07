@@ -50,15 +50,42 @@ describe('parseRunCompletedPayload', () => {
     ).toThrow(/personal-data key/);
   });
 
-  it('allows contact counters but rejects long free text', () => {
+  it('allows contact counters and truncates long free text', () => {
     expect(
       parseRunCompletedPayload(runPayload({ stats: { contacts: 12 } })).stats,
     ).toEqual({ contacts: 12 });
-    expect(() =>
-      parseRunCompletedPayload(
-        runPayload({ stats: { note: 'x'.repeat(501) } }),
-      ),
-    ).toThrow(/string too long/);
+    const parsed = parseRunCompletedPayload(
+      runPayload({ stats: { note: 'x'.repeat(501) } }),
+    );
+    expect((parsed.stats as { note: string }).note).toHaveLength(200);
+    expect((parsed.stats as { note: string }).note.endsWith('…')).toBe(true);
+  });
+
+  it('summarizes the per-query receipt store into counters', () => {
+    const parsed = parseRunCompletedPayload(
+      runPayload({
+        stats: {
+          perQuery: {
+            a: { queryKey: 'a', accepted: 2, rejected: 1 },
+            b: { queryKey: 'b', accepted: 3, quarantined: 4 },
+          },
+          perSource: { searxng: { rawCount: 5 } },
+        },
+      }),
+    );
+    expect(parsed.stats).toEqual({
+      perQuery: {
+        queries: 2,
+        accepted: 5,
+        quarantined: 4,
+        rejected: 1,
+        governanceDenied: 0,
+        duplicate: 0,
+        usageQuantity: 0,
+        costCents: 0,
+      },
+      perSource: { searxng: { rawCount: 5 } },
+    });
   });
 
   it('rejects invalid plan ids, statuses and negative costs', () => {

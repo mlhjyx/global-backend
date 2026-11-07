@@ -107,7 +107,7 @@ function assertNoPersonalData(
     throw new MemoryPayloadError(`stats nested too deeply at ${path}`);
   }
   if (typeof value === 'string') {
-    if (value.length > 500) {
+    if (value.length > 200) {
       throw new MemoryPayloadError(`stats string too long at ${path}`);
     }
     return;
@@ -139,6 +139,68 @@ function assertNoPersonalData(
     }
     assertNoPersonalData(child, `${path}.${key}`, depth + 1);
   }
+}
+
+const QUERY_RECEIPT_TOTALS = [
+  'accepted',
+  'quarantined',
+  'rejected',
+  'governanceDenied',
+  'duplicate',
+  'usageQuantity',
+  'costCents',
+] as const;
+
+/** Compact one stats value so a full query-receipt store cannot blow the 16KB cap. */
+function compactStatsValue(value: unknown, depth: number): unknown {
+  if (typeof value === 'string') {
+    return value.length > 200 ? `${value.slice(0, 199)}…` : value;
+  }
+  if (finiteNumber(value) || typeof value === 'boolean' || value === null) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.slice(0, 20).map((item) => compactStatsValue(item, depth + 1));
+  }
+  const object = record(value);
+  if (!object || depth >= 5) return null;
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(object)) {
+    if (key.length > 256) {
+      throw new MemoryPayloadError(`stats key too long at ${key}`);
+    }
+    out[key] = compactStatsValue(child, depth + 1);
+  }
+  return out;
+}
+
+/**
+ * `perQuery` is a store of full receipts (one per query); keep only its size and
+ * numeric totals. Other top-level keys keep their compacted counts.
+ */
+function summarizeStats(stats: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(stats)) {
+    if (key === 'perQuery') {
+      const receipts = record(value) ?? {};
+      const totals: Record<string, number> = {
+        queries: Object.keys(receipts).length,
+      };
+      for (const field of QUERY_RECEIPT_TOTALS) totals[field] = 0;
+      for (const receipt of Object.values(receipts)) {
+        const row = record(receipt);
+        if (!row) continue;
+        for (const field of QUERY_RECEIPT_TOTALS) {
+          const count = row[field];
+          if (finiteNumber(count)) totals[field] += count;
+        }
+      }
+      out.perQuery = totals;
+    } else {
+      out[key] = compactStatsValue(value, 0);
+    }
+  }
+  return out;
 }
 
 /** Reject unknown top-level keys; a new event field must be reviewed before it is stored. */
@@ -203,14 +265,15 @@ export function parseRunCompletedPayload(
   }
   const stats = record(object.stats);
   if (!stats) throw new MemoryPayloadError('stats is not an object');
-  assertNoPersonalData(stats, 'stats');
+  const summarized = summarizeStats(stats);
+  assertNoPersonalData(summarized, 'stats');
   return {
     planId: object.planId,
     status: object.status as MemoryRunStatus,
     cost,
     costBasis,
     ...(taskRef ? { taskRef } : {}),
-    stats,
+    stats: summarized,
   };
 }
 
