@@ -7,7 +7,7 @@
 > 进展：目录与合规材料完成，等待产品负责人挑选首批名单；本目录**不含运行时集成**
 > 机器事实源：[`THIRD_PARTY_SKILLS.json`](THIRD_PARTY_SKILLS.json)
 
-本目录回答五个问题：哪些外部技能可导入、许可证是什么、正文是否符合 SKILL.md 规范、安全与合规风险在哪、导入后如何验收。Skill Runtime（S0：validator、`skill_package`/`skill_version`/`skill_enablement` 三表）由另一条泳道在 PR #831 设计，本目录不依赖、也不修改它。
+本目录回答五个问题：哪些外部技能可导入、许可证是什么、正文是否符合 SKILL.md 规范、安全与合规风险在哪、导入后如何验收。Skill Runtime（S0：validator、`skill_package`/`skill_version`/`skill_enablement` 三表）由另一条泳道负责，设计文档已随 PR #831 合入 [`2026-11-08-skill-runtime-s0.md`](../../superpowers/plans/2026-11-08-skill-runtime-s0.md)；本目录不依赖、也不修改它。
 
 ## 1. 边界
 

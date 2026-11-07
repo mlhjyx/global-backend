@@ -9,7 +9,7 @@
 
 ## 1. 校验方法与硬规则
 
-S0 尚未实现仓库内 validator（PR #831 设计中），本次用一次性静态脚本按规范逐项检查；脚本不入库，检查口径与官方 `skills-ref` 的硬规则一致。快照以 `.md.txt` 归档，内容与上游逐字节一致（SHA-256 见清单），扩展名只为避开 docs 受控文档校验与文档站渲染：
+S0 设计已随 PR #831 合入（[`2026-11-08-skill-runtime-s0.md`](../../superpowers/plans/2026-11-08-skill-runtime-s0.md)），仓库内 validator 尚未实现；本次用一次性静态脚本按规范逐项检查，脚本不入库，检查口径与官方 `skills-ref` 的硬规则一致。快照以 `.md.txt` 归档，内容与上游逐字节一致（SHA-256 见清单），扩展名只为避开 docs 受控文档校验与文档站渲染：
 
 | 检查项 | 规则 | 结果 |
 | --- | --- | --- |
@@ -75,7 +75,7 @@ marketingskills 的 4 个技能自带 `evals/evals.json`：prospecting 12 条、
 
 ## 4. S0 一致性预检
 
-| S0 要求（PR #831 设计） | 本目录的准备 |
+| S0 要求（设计文档） | 本目录的准备 |
 | --- | --- |
 | `skill_package` / `skill_version` / `skill_enablement` 三表 | 清单的 `id` 可直接作为 `skill_key`；14 个 key 与现有 3 个内置技能（`company.understanding.extract`、`company.understanding.extract_offerings`、`discovery.qualify_fit`）不冲突 |
 | 快照不可变 | 每个技能有 `snapshotSha256`；每个来源目录有逐文件 `CHECKSUMS.sha256` |
