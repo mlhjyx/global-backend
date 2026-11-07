@@ -187,13 +187,21 @@ describe("createDbSkillResolver", () => {
 });
 
 describe("StaticSkillResolver", () => {
-  it("resolves every builtin skill without touching a store", async () => {
+  it("resolves every enabled builtin skill without touching a store", async () => {
     const resolver = new StaticSkillResolver();
     for (const record of BUILTIN_SKILLS) {
+      if (record.manifest.platform.tenantDefault === "disabled") continue;
       const descriptor = await resolver.resolve(record.skillKey, WORKSPACE, { effectiveModel: "m" });
       expect(descriptor.taskContractId).toBe(record.manifest.platform.taskContractId);
       expect(descriptor.effectiveModel).toBe("m");
     }
+  });
+
+  it("refuses tenant-default disabled skills (no per-tenant enablement without a store)", async () => {
+    const resolver = new StaticSkillResolver();
+    expect(await reasonOf(() => resolver.resolve("research.account_research", WORKSPACE))).toBe(
+      "SKILL_TENANT_NOT_ENABLED",
+    );
   });
 
   it("rejects unknown skill keys", async () => {

@@ -127,6 +127,15 @@ export function loadImportedSkills(
 ): { records: readonly PlatformSkillRecord[]; issues: readonly BuiltinSkillIssue[] } {
   const records: PlatformSkillRecord[] = [];
   const issues: BuiltinSkillIssue[] = [];
+  if (!existsSync(rootDirectory)) {
+    issues.push({
+      file: rootDirectory,
+      code: "IMPORTED_ROOT_MISSING",
+      severity: "error",
+      message: "imported skills root does not exist",
+    });
+    return { records, issues };
+  }
 
   for (const sourceId of readdirSync(rootDirectory).sort()) {
     const sourcePath = join(rootDirectory, sourceId);
@@ -150,14 +159,24 @@ export function loadImportedSkills(
         issues.push({ file, ...issue });
       }
       if (!result.skill) continue;
-      for (const issue of validateImportedSkill({
+      const ruleIssues = [...validateImportedSkill({
         sourceId,
         directory,
         manifest: result.skill.manifest,
         body: result.skill.body,
-      })) {
+      })];
+      if (existsSync(join(directoryPath, "scripts"))) {
+        ruleIssues.push({
+          code: "IMPORTED_SCRIPTS_NOT_ALLOWED",
+          severity: "error",
+          message: "imported skill directories must not ship a scripts/ folder (v1 policy)",
+        });
+      }
+      for (const issue of ruleIssues) {
         issues.push({ file, ...issue });
       }
+      // 违反导入门的技能不产出记录：违规内容绝不能进入生成目录与运行时目录。
+      if (ruleIssues.some((issue) => issue.severity === "error")) continue;
       records.push({
         skillKey: result.skill.manifest.platform.skillKey,
         directory,

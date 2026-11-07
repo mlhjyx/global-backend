@@ -117,8 +117,8 @@ export const BUILTIN_SKILLS: readonly PlatformSkillRecord[] =
         "owner": "OWN-BUYER-BE"
       }
     },
-    "body": "# 制裁名单筛查（服务型技能）\n\n输入：`{ companyName, country?, threshold? }`（与国家可选；threshold 0–1 覆盖默认召回阈值）。\n\n输出：`{ status: clear|potential_match|not_screened, matches[], listVersions, algorithmVersion }`。\n每条命中含名单源、命中的名称与别名质量、名字分/展示分、实体国家与名单版本。\n\n边界：\n\n- 确定性执行（无模型、无工具）；名单索引来自平台制裁源，未启用或索引为空时如实返回\n  `not_screened`，**不得**臆造 clear。\n- 只返回名单实体（摄取层已剔除个人条目）；不输出个人联系方式。\n- 只读：不写库、不发送、不产任何对外单据或文件。\n- 命中结果需要人工复核；本技能不替代法务判断。",
-    "sourceDigest": "9f64caf080c276608a0d117da32e2ccc16e531160e8c4a12096ff7863d942948"
+    "body": "# 制裁名单筛查（服务型技能）\n\n输入：`{ companyName, country?, threshold? }`（与国家可选；threshold ∈ (0, 1] 覆盖默认召回阈值）。\n\n输出：`{ status: clear|potential_match|not_screened, matches[], listVersions, truncated, algorithmVersion }`。\n每条命中含名单源、命中的名称与别名质量、名字分/展示分、实体国家与名单版本；\n命中超过 50 条时 `matches` 只保留前 50 条并置 `truncated=true`。\n\n边界：\n\n- 确定性执行（无模型、无工具）；名单索引来自平台制裁源，未启用或索引为空时如实返回\n  `not_screened`，**不得**臆造 clear。公司名归一化后没有任何可比较 token（纯符号/空白）\n  时不进行筛查并返回 `not_screened`——查询无法与名单比对时不能算「已筛查且清白」。\n- 只返回名单实体（摄取层已剔除个人条目）；不输出个人联系方式。\n- 只读：不写库、不发送、不产任何对外单据或文件。\n- 命中结果需要人工复核；本技能不替代法务判断。",
+    "sourceDigest": "1ed5fd90f65b7dab5b3e8b2f52da1dcaebbc4fda70862660f32be6f952734af8"
   },
   {
     "skillKey": "discovery.qualify_fit",
@@ -191,8 +191,8 @@ export const BUILTIN_SKILLS: readonly PlatformSkillRecord[] =
         "owner": "OWN-BUYER-BE"
       }
     },
-    "body": "# Incoterms 报价计算（服务型技能，L1）\n\n输入：`{ incoterm, quantity, currency, costLines[], exchangeRate?, marginPct? }`。\n`costLines` 的 kind ∈ goods/packaging/inland_freight/ocean_freight/insurance/duty/other；\n金额与币种必须给出；跨币种必须显式提供汇率（1 外币 = exchangeRate 报价币）。\n\n输出：`{ incoterm, formulaVersion, currency, breakdown[], unitCost, totalUnitPrice,\ntotalAmount, assumptions[], warnings[] }`。\n\n边界（红线）：\n\n- 只产报价建议：**不生成 PI/CI/PL 或任何对外单据**，不发送。\n- 汇率只取输入值，不查询外部牌价；缺汇率且跨币种时直接拒绝。\n- duty 仅 DDP 计入；其他术语的进口端费用不由卖方承担。\n- 不做税务/法律意见；DDP 关税按输入估算。人工确认（humanGate）后才可用于对外沟通。",
-    "sourceDigest": "c66b1596bd2b90e6b9bcce75d08926dfb77babb8ca38a42f7f10f9793a31b782"
+    "body": "# Incoterms 报价计算（服务型技能，L1）\n\n输入：`{ incoterm, quantity, currency, costLines[], exchangeRate?, marginPct? }`。\n`costLines` 的 kind ∈ goods/packaging/inland_freight/ocean_freight/insurance/duty/other；\n金额与币种必须给出。`exchangeRate` 只覆盖**一种**外币（1 外币 = exchangeRate 报价币）：\n成本行含外币时必须有汇率，且所有外币行必须是同一币种，多种外币直接拒绝。\n`marginPct` 是**成本加价（markup）**，0–300。\n\n输出：`{ incoterm, formulaVersion, currency, breakdown[], unitCost, totalUnitPrice,\ntotalAmount, assumptions[], warnings[] }`。金额以分整数计算：总额取精确成本加价，\n单价四舍五入到分（单价×数量可能与总额相差 ≤1 分，以总额为准）。\n\n边界（红线）：\n\n- 只产报价建议：**不生成 PI/CI/PL 或任何对外单据**，不发送。\n- 汇率只取输入值，不查询外部牌价；缺汇率且含外币时直接拒绝。\n- duty 仅 DDP 计入；其他术语的进口端费用不由卖方承担。\n- 不做税务/法律意见；DDP 关税按输入估算。人工确认（humanGate）后才可用于对外沟通。",
+    "sourceDigest": "6517873012e50de1516090f487b94d7c91ed556ee67ab5340ecd1e7a67082d83"
   },
   {
     "skillKey": "research.account_research",

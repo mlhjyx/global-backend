@@ -10,26 +10,9 @@ export const IMPORTED_LICENSE_ALLOWLIST = ["MIT", "Apache-2.0"] as const;
 
 const SOURCE_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/u;
 const COMMIT_PATTERN = /^[0-9a-f]{40}$/u;
-const URL_PATTERN = /https?:\/\/\S+/u;
-const EXECUTABLE_LANGS = new Set([
-  "sh",
-  "bash",
-  "zsh",
-  "shell",
-  "console",
-  "python",
-  "py",
-  "node",
-  "js",
-  "javascript",
-  "ts",
-  "typescript",
-  "powershell",
-  "ps1",
-  "ruby",
-  "perl",
-  "go",
-]);
+// 含协议、协议相对与裸 www./域名样式；导入正文（NOTICE 外）一律不得出现外部链接。
+const URL_PATTERN = /(?:https?:)?\/\/\S+|www\.\S+/iu;
+const HTML_EXECUTABLE_PATTERN = /<(?:script|iframe|object|embed|form)\b|\bjavascript:/iu;
 
 export interface ImportedSkillRuleInput {
   readonly sourceId: string;
@@ -57,14 +40,9 @@ function noticeLines(body: string): { present: boolean; lines: readonly NoticeLi
   return { present: true, lines: collected };
 }
 
-function executableFenceLanguage(body: string): string | undefined {
-  for (const line of body.split("\n")) {
-    const match = /^```([A-Za-z0-9_-]*)\s*$/u.exec(line.trim());
-    if (!match) continue;
-    const language = match[1].toLowerCase();
-    if (language !== "" && EXECUTABLE_LANGS.has(language)) return language;
-  }
-  return undefined;
+/** 导入正文不允许任何代码围栏（``` 或 ~~~，带不带语言都算）——衍生版是纯文本规则。 */
+function hasCodeFence(body: string): boolean {
+  return body.split("\n").some((line) => /^(?:`{3,}|~{3,})/u.test(line.trim()));
 }
 
 /** URL 只允许出现在 NOTICE 小节（溯源链接）；正文其他位置一律视为推广/外链。 */
@@ -138,12 +116,14 @@ export function validateImportedSkill(input: ImportedSkillRuleInput): readonly S
     }
   }
 
-  const fence = executableFenceLanguage(input.body);
-  if (fence !== undefined) {
-    error("IMPORTED_SCRIPT_CONTENT", `executable code fence (\`\`\`${fence}) is not allowed in imported skills`);
+  if (hasCodeFence(input.body)) {
+    error(
+      "IMPORTED_SCRIPT_CONTENT",
+      "code fences (``` or ~~~) are not allowed in imported skill bodies",
+    );
   }
-  if (/<script\b/iu.test(input.body)) {
-    error("IMPORTED_SCRIPT_CONTENT", "<script> content is not allowed in imported skills");
+  if (HTML_EXECUTABLE_PATTERN.test(input.body)) {
+    error("IMPORTED_SCRIPT_CONTENT", "executable HTML or javascript: content is not allowed in imported skills");
   }
   for (const url of urlsOutsideNotice(input.body)) {
     error("IMPORTED_EXTERNAL_URL", `external URL outside NOTICE is not allowed: ${url}`);

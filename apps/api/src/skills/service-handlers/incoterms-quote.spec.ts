@@ -94,6 +94,36 @@ describe("computeIncotermsQuote", () => {
     ).toBe("QUOTING_EXCHANGE_RATE_REQUIRED");
   });
 
+  it("rejects cost lines in multiple foreign currencies", () => {
+    expect(
+      codeOf(() =>
+        computeIncotermsQuote({
+          incoterm: "EXW",
+          quantity: 1,
+          currency: "USD",
+          exchangeRate: 1.1,
+          costLines: [
+            { kind: "goods", amount: 10, currency: "EUR" },
+            { kind: "packaging", amount: 5, currency: "GBP" },
+          ],
+        }),
+      ),
+    ).toBe("QUOTING_MIXED_COST_CURRENCIES");
+  });
+
+  it("rejects amounts that would overflow the cent grid", () => {
+    expect(
+      codeOf(() =>
+        computeIncotermsQuote({
+          incoterm: "EXW",
+          quantity: 1,
+          currency: "USD",
+          costLines: [{ kind: "goods", amount: 1e14, currency: "USD" }],
+        }),
+      ),
+    ).toBe("QUOTING_AMOUNT_OVERFLOW");
+  });
+
   it("requires an included goods line", () => {
     expect(
       codeOf(() =>
@@ -141,11 +171,47 @@ describe("computeIncotermsQuote", () => {
       marginPct: 7.5,
       costLines: [{ kind: "goods", amount: 10, currency: "USD" }],
     });
-    // 10 / 3 = 3.3333… → *1.075 = 3.5833… → 3.58；3.58 * 3 = 10.74
+    // 1000 分 × 107.5% = 1075 分（总额取精确值）；单价 1075/3 = 358.33 → 358 分。
     expect(out.unitCost).toBeCloseTo(3.3333333333333335, 12);
     expect(out.totalUnitPrice).toBe(3.58);
-    expect(out.totalAmount).toBe(10.74);
+    expect(out.totalAmount).toBe(10.75);
     expect(out.formulaVersion).toBe(INCOTERMS_FORMULA_VERSION);
+  });
+
+  it("rounds half up in the decimal domain, not the binary one", () => {
+    const out = computeIncotermsQuote({
+      incoterm: "EXW",
+      quantity: 1,
+      currency: "USD",
+      costLines: [{ kind: "goods", amount: 0.145, currency: "USD" }],
+    });
+    // 0.145*100 在二进制里是 14.4999…，直接 Math.round 会得到 0.14。
+    expect(out.totalAmount).toBe(0.15);
+    expect(out.totalUnitPrice).toBe(0.15);
+  });
+
+  it("never lets a zero-margin total fall below the exact cost", () => {
+    const out = computeIncotermsQuote({
+      incoterm: "EXW",
+      quantity: 3,
+      currency: "USD",
+      marginPct: 0,
+      costLines: [{ kind: "goods", amount: 10, currency: "USD" }],
+    });
+    expect(out.totalAmount).toBe(10);
+    expect(out.totalUnitPrice).toBe(3.33);
+  });
+
+  it("converts on the cent grid without float drift", () => {
+    const out = computeIncotermsQuote({
+      incoterm: "EXW",
+      quantity: 1,
+      currency: "USD",
+      exchangeRate: 1.01,
+      costLines: [{ kind: "goods", amount: 0.5, currency: "EUR" }],
+    });
+    // 50 分 × 1.01 = 50.5 分 → 十进制半入 = 51 分。
+    expect(out.totalAmount).toBe(0.51);
   });
 
   it("never emits document fields (L1 red line: no PI/CI/PL)", () => {

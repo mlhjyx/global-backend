@@ -3,7 +3,12 @@
  *
  * 红线（设计 S1-D8）：汇率必须由输入提供（不查外部牌价）；不生成 PI/CI/PL 或任何
  * 对外单据；不做税务/法律意见；结果需人工确认（manifest humanGate=true）。
- * 金额以「分」为单位整数累加，最终才四舍五入到两位小数，保证跨平台确定。
+ *
+ * 金额一律先转成「分」的 BigInt（十进制四舍五入到分，容忍二进制表示误差），
+ * 换算与加价全在整数域完成，最终才转回两位小数——没有浮点误差累积。`marginPct`
+ * 是**成本加价（markup）**：报价 = 成本 ×（1 + marginPct/100）；总额取精确值，
+ * 单价四舍五入到分，二者可能相差 ≤1 分（`assumptions` 有说明）。
+ * `exchangeRate` 只覆盖一种外币；成本行同时出现多种外币时直接拒绝（防静默错算）。
  */
 
 export const INCOTERMS = ["EXW", "FOB", "CFR", "CIF", "DDP"] as const;
@@ -21,6 +26,9 @@ export const COST_LINE_KINDS = [
 export type CostLineKind = (typeof COST_LINE_KINDS)[number];
 
 export const INCOTERMS_FORMULA_VERSION = "incoterms-2020/v1";
+
+/** 分整数上限：留足安全余量，防止 Number→BigInt 之前就丢精度。 */
+const MAX_CENTS = 9_000_000_000_000_000;
 
 export interface CostLineInput {
   readonly kind: CostLineKind;
@@ -83,6 +91,28 @@ const INCLUDED_KINDS: Readonly<Record<Incoterm, readonly CostLineKind[]>> = {
     "other",
   ],
 };
+
+/** 十进制四舍五入到分（+1e-9 容忍 float 表示误差，如 0.145→14.4999…）。 */
+function toCents(amount: number, what: string): bigint {
+  const cents = Math.round(amount * 100 + 1e-9);
+  if (!Number.isSafeInteger(cents) || cents < 0 || cents > MAX_CENTS) {
+    throw new QuotingInputError("QUOTING_AMOUNT_OVERFLOW", `${what} is out of range`);
+  }
+  return BigInt(cents);
+}
+
+function toMicro(rate: number): bigint {
+  const micro = Math.round(rate * 1_000_000);
+  if (!Number.isSafeInteger(micro) || micro <= 0 || micro > MAX_CENTS) {
+    throw new QuotingInputError("QUOTING_EXCHANGE_RATE_INVALID", "exchangeRate is out of range");
+  }
+  return BigInt(micro);
+}
+
+/** 非负 BigInt 的十进制四舍五入：floor((n + d/2) / d)。 */
+function roundHalfUpDiv(numerator: bigint, denominator: bigint): bigint {
+  return (numerator * 2n + denominator) / (denominator * 2n);
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -152,45 +182,68 @@ export function parseIncotermsQuoteInput(input: unknown): IncotermsQuoteInput {
 export function computeIncotermsQuote(input: unknown): IncotermsQuoteOutput {
   const parsed = parseIncotermsQuoteInput(input);
   const included = new Set(INCLUDED_KINDS[parsed.incoterm]);
+  const foreignCurrencies = new Set(
+    parsed.costLines
+      .map((line) => line.currency)
+      .filter((currency) => currency !== parsed.currency),
+  );
+  if (foreignCurrencies.size > 1) {
+    throw new QuotingInputError(
+      "QUOTING_MIXED_COST_CURRENCIES",
+      `cost lines use multiple foreign currencies (${[...foreignCurrencies].sort().join(", ")}); a single exchangeRate cannot cover them`,
+    );
+  }
+  if (foreignCurrencies.size === 1 && parsed.exchangeRate === undefined) {
+    const [currency] = [...foreignCurrencies];
+    throw new QuotingInputError(
+      "QUOTING_EXCHANGE_RATE_REQUIRED",
+      `cost line in ${currency} needs exchangeRate to ${parsed.currency}`,
+    );
+  }
+
+  const rateMicro = parsed.exchangeRate !== undefined ? toMicro(parsed.exchangeRate) : 1n;
   const breakdown: CostBreakdownLine[] = [];
-  let totalCostCents = 0;
+  let totalCostCents = 0n;
   const assumptions: string[] = [
     "Incoterms 2020 语义；成本行由输入提供，未含进口清关/增值税等未列出项",
     "汇率为输入值，不查询外部牌价；未列汇率时要求成本币与报价币一致",
+    "marginPct 是成本加价（markup）；总额按精确成本加价计算，单价四舍五入到分",
     "本输出是 L1 报价建议，不构成正式要约或对外单据（PI/CI/PL 需人工另行处理）",
   ];
   const warnings: string[] = [];
 
   for (const line of parsed.costLines) {
-    let amount = line.amount;
-    if (line.currency !== parsed.currency) {
-      if (parsed.exchangeRate === undefined) {
-        throw new QuotingInputError(
-          "QUOTING_EXCHANGE_RATE_REQUIRED",
-          `cost line in ${line.currency} needs exchangeRate to ${parsed.currency}`,
-        );
-      }
-      amount = line.amount * parsed.exchangeRate;
-      if (!assumptions.some((entry) => entry.includes(`1 ${line.currency} =`))) {
-        assumptions.push(`1 ${line.currency} = ${parsed.exchangeRate} ${parsed.currency}（输入汇率）`);
-      }
-    }
-    const amountCents = Math.round(amount * 100);
+    const amountCents = toCents(line.amount, `cost line ${line.kind}`);
+    const convertedCents =
+      line.currency === parsed.currency
+        ? amountCents
+        : roundHalfUpDiv(amountCents * rateMicro, 1_000_000n);
     const isIncluded = included.has(line.kind);
-    if (isIncluded) totalCostCents += amountCents;
-    breakdown.push({ kind: line.kind, amount: amountCents / 100, included: isIncluded });
+    if (isIncluded) totalCostCents += convertedCents;
+    breakdown.push({ kind: line.kind, amount: Number(convertedCents) / 100, included: isIncluded });
   }
 
   if (!breakdown.some((line) => line.kind === "goods" && line.included)) {
     throw new QuotingInputError("QUOTING_GOODS_REQUIRED", "a goods cost line is required");
   }
 
-  const unitCost = totalCostCents / parsed.quantity / 100;
-  const marginPct = parsed.marginPct ?? 0;
-  const totalUnitPrice = Math.round(unitCost * (1 + marginPct / 100) * 100) / 100;
-  const totalAmount = Math.round(totalUnitPrice * parsed.quantity * 100) / 100;
+  if (foreignCurrencies.size === 1) {
+    const [currency] = [...foreignCurrencies];
+    assumptions.push(`1 ${currency} = ${parsed.exchangeRate} ${parsed.currency}（输入汇率）`);
+  }
 
-  if (unitCost === 0) warnings.push("unitCost 为 0，请核对成本行");
+  const marginBp = BigInt(Math.round((parsed.marginPct ?? 0) * 100));
+  const totalAmountCents = roundHalfUpDiv(totalCostCents * (10_000n + marginBp), 10_000n);
+  if (totalAmountCents > 10n ** 15n) {
+    throw new QuotingInputError("QUOTING_AMOUNT_OVERFLOW", "total amount is out of range");
+  }
+  const totalUnitPriceCents = roundHalfUpDiv(totalAmountCents, BigInt(parsed.quantity));
+
+  const unitCost = Number(totalCostCents) / parsed.quantity / 100;
+  const totalUnitPrice = Number(totalUnitPriceCents) / 100;
+  const totalAmount = Number(totalAmountCents) / 100;
+
+  if (totalCostCents === 0n) warnings.push("unitCost 为 0，请核对成本行");
   warnings.push(`${parsed.incoterm} 下的费用分界以 Incoterms 2020 规则为准，请人工复核`);
 
   return {

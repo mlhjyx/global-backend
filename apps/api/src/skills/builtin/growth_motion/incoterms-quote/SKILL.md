@@ -18,14 +18,17 @@ metadata:
 
 输入：`{ incoterm, quantity, currency, costLines[], exchangeRate?, marginPct? }`。
 `costLines` 的 kind ∈ goods/packaging/inland_freight/ocean_freight/insurance/duty/other；
-金额与币种必须给出；跨币种必须显式提供汇率（1 外币 = exchangeRate 报价币）。
+金额与币种必须给出。`exchangeRate` 只覆盖**一种**外币（1 外币 = exchangeRate 报价币）：
+成本行含外币时必须有汇率，且所有外币行必须是同一币种，多种外币直接拒绝。
+`marginPct` 是**成本加价（markup）**，0–300。
 
 输出：`{ incoterm, formulaVersion, currency, breakdown[], unitCost, totalUnitPrice,
-totalAmount, assumptions[], warnings[] }`。
+totalAmount, assumptions[], warnings[] }`。金额以分整数计算：总额取精确成本加价，
+单价四舍五入到分（单价×数量可能与总额相差 ≤1 分，以总额为准）。
 
 边界（红线）：
 
 - 只产报价建议：**不生成 PI/CI/PL 或任何对外单据**，不发送。
-- 汇率只取输入值，不查询外部牌价；缺汇率且跨币种时直接拒绝。
+- 汇率只取输入值，不查询外部牌价；缺汇率且含外币时直接拒绝。
 - duty 仅 DDP 计入；其他术语的进口端费用不由卖方承担。
 - 不做税务/法律意见；DDP 关税按输入估算。人工确认（humanGate）后才可用于对外沟通。

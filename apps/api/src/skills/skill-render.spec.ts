@@ -16,14 +16,14 @@ const FIXTURE_SELECTORS = {
   motions: ["distributor_discovery"],
 } as const;
 
-/** 重钉记录：2026-11-08 S1-4 首次钉住。 */
+/** 重钉记录：2026-11-08 S1-4 首次钉住；同日复审后重钉 sanctions/quoting（阈值/截断/加价语义）。 */
 const PINNED_RENDER_DIGESTS: Readonly<Record<string, string>> = {
   "company.understanding.extract": "b17b08f639ec2528610638348de170af2c4277edd66333f27a0e06a8ba4a4ed3",
   "company.understanding.extract_offerings":
     "ceada097f6f665d7af4e7016c578b82ffa50111fd3e2f735bc05c7f4359e8a5b",
-  "compliance.sanctions_screen": "6e23dbeb5ad22b97a33d32e2655b7a8aa4137df972bb46dd7a59cbd660a2dd98",
+  "compliance.sanctions_screen": "53829f13ffef437ee736ffaf84ef2f008cfefa8faa51957f76654bd637b8fc77",
   "discovery.qualify_fit": "b236a8628d650cf26175f1f58701f27e0d258b4bb7ce37ef13f7323bccfbb1ad",
-  "quoting.incoterms_quote": "263360970068bb72d9b940f6c079057134d264f06e67efeb05178f774bd01dc9",
+  "quoting.incoterms_quote": "347570a7208fda7a022f7e08e66ee3782676732cdbfa14bec87ddb93f3db0f52",
   "research.account_research": "b8e2b27e18bbf33f7dba28d37eb2602bdc83b26f5015e330029b2e90e8bb609b",
   "triage.lead_triage": "a2485db23f4d1c902487f27745a3b252042ee343616573763a198a9e5d412b83",
 };

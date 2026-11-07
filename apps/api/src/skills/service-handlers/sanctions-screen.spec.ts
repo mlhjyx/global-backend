@@ -5,6 +5,7 @@ import {
   runSanctionsScreen,
   SANCTIONS_SCREEN_ALGORITHM_VERSION,
   SanctionsScreenInputError,
+  SanctionsScreenResultError,
 } from "./sanctions-screen";
 
 const MATCH: ScreenMatch = {
@@ -44,6 +45,7 @@ describe("parseSanctionsScreenInput", () => {
       { companyName: "" },
       { companyName: "x".repeat(501) },
       { companyName: "Acme", country: 7 },
+      { companyName: "Acme", threshold: 0 },
       { companyName: "Acme", threshold: 1.5 },
       { companyName: "Acme", threshold: "0.8" },
     ]) {
@@ -76,21 +78,33 @@ describe("runSanctionsScreen", () => {
     expect(out.status).toBe("not_screened");
   });
 
-  it("caps the returned matches at 50", () => {
+  it("caps the returned matches at 50 and flags the truncation", () => {
     const matches = Array.from({ length: 80 }, (_, index) => ({ ...MATCH, nameScore: index / 100 }));
     const out = runSanctionsScreen(
       { companyName: "Acme" },
       screenReturning({ status: "potential_match", matches, listVersions: {} }),
     );
     expect(out.matches).toHaveLength(50);
+    expect(out.truncated).toBe(true);
   });
 
-  it("fails closed on an unknown index status", () => {
+  it("never screens a name with no comparable tokens", () => {
+    const screen = screenReturning({ status: "clear", matches: [], listVersions: {} });
+    for (const companyName of ["!!!", "---", "###"]) {
+      const out = runSanctionsScreen({ companyName }, screen);
+      expect(out.status, companyName).toBe("not_screened");
+      expect(out.matches, companyName).toEqual([]);
+      expect(out.truncated, companyName).toBe(false);
+    }
+    expect(screen).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on an unknown index status with a result error", () => {
     expect(() =>
       runSanctionsScreen(
         { companyName: "Acme" },
         screenReturning({ status: "ok" as ScreenResult["status"], matches: [], listVersions: {} }),
       ),
-    ).toThrow(SanctionsScreenInputError);
+    ).toThrow(SanctionsScreenResultError);
   });
 });

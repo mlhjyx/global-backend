@@ -38,5 +38,8 @@ export function executeServiceSkill(
     }
     case "quoting.incoterms.v1":
       return computeIncotermsQuote(input);
+    default:
+      // 目录新增 handler 而运行时未接线时必须显性失败，不能静默返回 undefined。
+      throw new ServiceSkillUnavailableError(`handler is not wired into the runtime: ${String(known)}`);
   }
 }

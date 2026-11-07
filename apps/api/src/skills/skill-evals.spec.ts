@@ -2,26 +2,51 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { getTask } from "../ai-tasks/task-registry";
-import type { ScreenResult } from "../sanctions/sanctions-screening.service";
+import { buildSanctionsIndex, screenName } from "../sanctions/sanctions-matcher";
 import { validateEvalManifest, type EvalManifest } from "./evals/eval-manifest";
 import { BUILTIN_SKILLS } from "./generated/builtin-skill-catalog";
 import type { PlatformSkillRecord } from "./load-builtin-skills";
+import type { SanctionsScreenFn } from "./service-handlers/sanctions-screen";
 import { runServiceSkillEvals, ServiceSkillEvalUnavailableError } from "./service-skill-evals";
 
 /**
  * Golden Set 的 CI 零模型层（S1-4）：
  * ① 每个上架技能都带结构合规、断言词汇闭集的评测清单（≥5 例）；
- * ② service 技能逐用例真实执行 handler 并精确断言（模型技能不在此层执行，
- *    其清单进发布层回执流程）；
+ * ② service 技能逐用例真实执行 handler 并精确断言——制裁筛查用**真实的匹配引擎**
+ *    （buildSanctionsIndex + screenName，纯函数）搭内存索引，不是恒 clear 的假依赖；
+ *    模型技能不在此层执行，其清单进发布层回执流程；
  * ③ 未声明的 handler 与模型技能不得混入确定性执行器。
  */
 const BUILTIN_ROOT = join(import.meta.dirname, "builtin");
 const IMPORTED_ROOT = join(import.meta.dirname, "imported");
 
-const FAKE_SCREEN_RESULT: ScreenResult = {
-  status: "clear",
-  matches: [],
-  listVersions: { "eu-consolidated": "2026-11-01" },
+const SANCTIONS_INDEX = buildSanctionsIndex([
+  {
+    externalId: "eu-1",
+    sourceKey: "eu-consolidated",
+    primaryName: "Nordwind Trading LLC",
+    country: "AE",
+    listVersion: "2026-11-01",
+    aliases: [{ name: "Nordwind Trading", quality: "strong" }],
+  },
+  {
+    externalId: "eu-2",
+    sourceKey: "eu-consolidated",
+    primaryName: "Acme Pumpen GmbH",
+    country: "DE",
+    listVersion: "2026-11-01",
+    aliases: [],
+  },
+]);
+
+/** 与 `SanctionsScreeningService.screen()` 同语义：空索引 not_screened，否则按命中分流。 */
+const REAL_SCREEN: SanctionsScreenFn = (companyName, country, opts) => {
+  const matches = screenName(companyName, country, SANCTIONS_INDEX, opts);
+  return {
+    status: matches.length > 0 ? "potential_match" : "clear",
+    matches,
+    listVersions: { "eu-consolidated": "2026-11-01" },
+  };
 };
 
 function evalFileFor(record: PlatformSkillRecord): string {
@@ -66,7 +91,7 @@ describe("deterministic eval execution", () => {
     for (const record of serviceRecords) {
       const result = await runServiceSkillEvals(
         { manifest: record.manifest, evals: readManifest(record) },
-        { sanctionsScreen: () => FAKE_SCREEN_RESULT },
+        { sanctionsScreen: REAL_SCREEN },
       );
       expect(result.cases, record.skillKey).toHaveLength(5);
       const failed = result.cases.filter((entry) => !entry.ok);

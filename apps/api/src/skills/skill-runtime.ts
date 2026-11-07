@@ -108,6 +108,8 @@ export function descriptorFromManifest(
 /**
  * 测试与未接线上下文的缺省解析器：只查编译进二进制的内置目录，不读 DB、不写快照。
  * 生产 worker 必须注入 DB resolver（`createDbSkillResolver`），ops 启停才生效。
+ * 因无 DB 可查 workspace 覆盖，`tenant-default: disabled` 的技能在此一律不可解析
+ * （导入技能默认关闭的语义不能被静态路径绕过）。
  */
 export class StaticSkillResolver implements SkillResolver {
   readonly kind = "static" as const;
@@ -122,6 +124,12 @@ export class StaticSkillResolver implements SkillResolver {
     const record = this.records.find((candidate) => candidate.skillKey === skillKey);
     if (!record) {
       throw new SkillUnavailableError("SKILL_NOT_REGISTERED", `${skillKey} is not a builtin skill`);
+    }
+    if (record.manifest.platform.tenantDefault === "disabled") {
+      throw new SkillUnavailableError(
+        "SKILL_TENANT_NOT_ENABLED",
+        `${skillKey} ships tenant-default disabled; the static resolver cannot honor per-tenant enablement`,
+      );
     }
     return descriptorFromManifest(record.manifest, hints?.effectiveModel);
   }
