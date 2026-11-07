@@ -17,6 +17,9 @@ import { RouterModelGateway } from "../model-gateway/router-model-gateway";
 import { buildGatewayProvider } from "../model-gateway/model-providers.config";
 import { AiTraceSink } from "../model-gateway/ai-trace.sink";
 import { createUnderstandingActivities } from "./understanding.activities";
+import { seedSkillCatalog } from "../skills/skill-catalog.seed";
+import { createDbSkillResolver } from "../skills/skill-resolver";
+import { PrismaSkillRegistryStore } from "../skills/skill-registry.store";
 import { createDiscoveryActivities } from "./discovery.activities";
 import { createRun2Activities } from "./discovery.run2.activities";
 import { createRun2PipelineActivities } from "./discovery.run2.pipeline.activities";
@@ -404,6 +407,17 @@ async function main(): Promise<void> {
     await holdPlatformNotReady("SANCTIONS_SEED_UNAVAILABLE");
   }
 
+  // S0 技能目录 seed（owner 写平台表；解析器 fail-closed，目录缺失即全员不可用 → 大声失败）。
+  try {
+    const skillSeed = await seedSkillCatalog(ownerDb);
+    console.log(
+      `[worker] skill catalog seed ok (${skillSeed.packages} packages, ${skillSeed.versionsInserted} new versions)`,
+    );
+  } catch (error) {
+    console.error("[worker] skill catalog seed failed:", error);
+    await holdPlatformNotReady("SKILL_CATALOG_SEED_UNAVAILABLE");
+  }
+
   // Schedule provisioning is an independently authorized operator action.
 
   const registry = new ModelProviderRegistry();
@@ -415,6 +429,10 @@ async function main(): Promise<void> {
     budgetStore,
   );
   gateway.paidLedger = costLedger;
+  // S0 技能运行时：DB 解析器（ops 启停生效；解析结果写不可变快照）。
+  const skillResolver = createDbSkillResolver(
+    new PrismaSkillRegistryStore(prisma),
+  );
   const costReconciliationCatalog =
     createSiteBuildCostReconciliationCatalogFromEnv();
   const activeSettlementRoutes = (() => {
@@ -563,6 +581,7 @@ async function main(): Promise<void> {
         broker,
         runtimeTelemetry: runtimeTelemetry.telemetry,
         budgetStore,
+        skills: skillResolver,
       }),
       ...createDiscoveryActivities({
         prisma,
@@ -573,6 +592,7 @@ async function main(): Promise<void> {
         runtimeTelemetry: runtimeTelemetry.telemetry,
         budgetStore,
         runLease: prismaDiscoveryRunLeaseReader(prisma),
+        skills: skillResolver,
       }),
       // Run 2.0（M0③）：快扫三段——规则预筛 / 批量粗判 / 临时候选物化。
       ...createRun2Activities({
@@ -580,6 +600,7 @@ async function main(): Promise<void> {
         gateway,
         runtimeTelemetry: runtimeTelemetry.telemetry,
         budgetStore,
+        skills: skillResolver,
       }),
       // Run 2.0（M0④）：深挖单公司活动（画像/精判/信号/联系人 + job 状态写回）。
       ...createRun2PipelineActivities({
@@ -589,6 +610,7 @@ async function main(): Promise<void> {
         broker,
         runtimeTelemetry: runtimeTelemetry.telemetry,
         budgetStore,
+        skills: skillResolver,
       }),
       ...createRawSourceActivities({ prisma }),
       ...createQualifyActivities({ prisma, sanctionsScreening }),

@@ -10,6 +10,8 @@ import { RouterModelGateway } from "../model-gateway/router-model-gateway";
 import { buildGatewayProvider } from "../model-gateway/model-providers.config";
 import { AiTraceSink } from "../model-gateway/ai-trace.sink";
 import { createUnderstandingActivities } from "./understanding.activities";
+import { createDbSkillResolver } from "../skills/skill-resolver";
+import { PrismaSkillRegistryStore } from "../skills/skill-registry.store";
 import { createDiscoveryActivities } from "./discovery.activities";
 import { prismaDiscoveryRunLeaseReader } from "./discovery-run-lease";
 import { createQualifyActivities } from "./qualify.activities";
@@ -195,6 +197,10 @@ export async function runDevFastLaneWorker(
     budgetStore,
   );
   gateway.paidLedger = costLedger;
+  // S0 技能运行时：与 managed worker 同款 DB 解析器（目录由 managed worker/relay 启动期 seed）。
+  const skillResolver = createDbSkillResolver(
+    new PrismaSkillRegistryStore(prisma),
+  );
   const costReconciliationCatalog =
     createSiteBuildCostReconciliationCatalogFromEnv();
   const activeSettlementRoutes = (() => {
@@ -280,6 +286,7 @@ export async function runDevFastLaneWorker(
         broker,
         runtimeTelemetry: runtimeTelemetry.telemetry,
         budgetStore,
+        skills: skillResolver,
       }),
       ...createDiscoveryActivities({
         prisma,
@@ -290,6 +297,7 @@ export async function runDevFastLaneWorker(
         runtimeTelemetry: runtimeTelemetry.telemetry,
         budgetStore,
         runLease: prismaDiscoveryRunLeaseReader(prisma),
+        skills: skillResolver,
       }),
       ...createQualifyActivities({ prisma, sanctionsScreening }),
     },

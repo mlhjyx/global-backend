@@ -485,6 +485,22 @@
       "SELECT",
       "UPDATE"
     ],
+    "skill_enablement": [
+      "DELETE",
+      "INSERT",
+      "SELECT",
+      "UPDATE"
+    ],
+    "skill_package": [
+      "SELECT"
+    ],
+    "skill_resolution_snapshot": [
+      "INSERT",
+      "SELECT"
+    ],
+    "skill_version": [
+      "SELECT"
+    ],
     "source_channel": [
       "INSERT",
       "SELECT",
@@ -562,5 +578,23 @@
       "UPDATE"
     ]
   },
-  "columns": {}
+  "columns": {
+    "skill_package": {
+      "status": [
+        "UPDATE"
+      ],
+      "status_reason": [
+        "UPDATE"
+      ],
+      "status_updated_at": [
+        "UPDATE"
+      ],
+      "status_updated_by": [
+        "UPDATE"
+      ],
+      "updated_at": [
+        "UPDATE"
+      ]
+    }
+  }
 }

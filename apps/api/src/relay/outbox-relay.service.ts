@@ -39,6 +39,7 @@ import { RuntimeAdmissionService } from "../runtime/runtime-admission";
 import { RuntimeReleaseIdentityService } from "../runtime/runtime-release-identity";
 import { completesWithin, settlesWithin } from "../runtime/bounded-settlement";
 import { seedSanctions } from "../sanctions/sanctions-seed";
+import { seedSkillCatalog } from "../skills/skill-catalog.seed";
 import {
   parseExecutionBudgetBinding,
   type ExecutionBudgetBinding,
@@ -237,6 +238,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     await new DiscoveryProviderRegistry().seed(this.db);
     // 制裁名单源 + source_policy seed（第五门，DISABLED；API-only 部署也需登记 source_policy 供 broker 门）。
     await seedSanctions(this.db);
+    // S0 技能目录 seed（owner 写平台表；版本漂移会大声抛错，不允许带病起服务）。
+    await seedSkillCatalog(this.db);
     // webhook 配置不完整要**大声**：URL 配了但缺 secret / 非 https（非 localhost）→ sink 拒绝启用，
     // 推送通道既不建交付行也不派送——只报一次，不让运维以为推送在跑。
     if (process.env.SAAS_WEBHOOK_URL && !this.webhookEnabled()) {
