@@ -1,0 +1,67 @@
+{
+  "classification": "FROZEN_AUDIT_EVIDENCE",
+  "scope": "Official npm production audit and exact-lock freshness for the 2026-11-08 expiry renewal of the production dependency audit baseline (lockfile unchanged; digest 7e0d5380… equals the 2026-11-04 baseline binding); not runtime/release/UAT evidence",
+  "records": [
+    {
+      "audit": {
+        "actions": [],
+        "advisories": {},
+        "muted": [],
+        "metadata": {
+          "vulnerabilities": {
+            "info": 0,
+            "low": 0,
+            "moderate": 0,
+            "high": 0,
+            "critical": 0
+          },
+          "dependencies": 847,
+          "devDependencies": 0,
+          "optionalDependencies": 0,
+          "totalDependencies": 847
+        }
+      },
+      "before": {
+        "schema_version": "production-dependency-baseline-freshness-result/v1",
+        "result": "FRESH",
+        "hold": false,
+        "current_advisories": 0,
+        "resolved_advisories": [],
+        "issues": [],
+        "provenance": {
+          "subject_commit": "bf0a7f8d8c782fd7290678ee589b36cb63cc497b",
+          "lockfile_digest": "sha256:7e0d53807c2b59d8339d8f0ae0f55e84b2d664c418bf091e77766f26122ddbc4",
+          "verifier_digest": "sha256:fd2975544c95dee3cfe48f47ccd8c5dbf309a02a5918108572e4fb7257c38a63",
+          "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
+          "audit_digest": "sha256:68a755e13c43605328b09fbc5af04f00e7e3324caa4728f2d2550b72d79f3531",
+          "observed_at": "2026-11-07T21:36:31.000Z",
+          "registry": "https://registry.npmjs.org/"
+        }
+      },
+      "after": {
+        "schema_version": "production-dependency-baseline-freshness-result/v1",
+        "result": "FRESH",
+        "hold": false,
+        "current_advisories": 0,
+        "resolved_advisories": [],
+        "issues": [],
+        "provenance": {
+          "subject_commit": "bf0a7f8d8c782fd7290678ee589b36cb63cc497b",
+          "lockfile_digest": "sha256:7e0d53807c2b59d8339d8f0ae0f55e84b2d664c418bf091e77766f26122ddbc4",
+          "verifier_digest": "sha256:fd2975544c95dee3cfe48f47ccd8c5dbf309a02a5918108572e4fb7257c38a63",
+          "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
+          "audit_digest": "sha256:68a755e13c43605328b09fbc5af04f00e7e3324caa4728f2d2550b72d79f3531",
+          "observed_at": "2026-11-07T21:36:42.000Z",
+          "registry": "https://registry.npmjs.org/"
+        }
+      }
+    }
+  ],
+  "binding": {
+    "base_commit": "bf0a7f8d8c782fd7290678ee589b36cb63cc497b",
+    "lockfile_digest": "sha256:7e0d53807c2b59d8339d8f0ae0f55e84b2d664c418bf091e77766f26122ddbc4",
+    "previous_valid_until": "2026-11-14T18:27:04.000Z",
+    "valid_until": "2027-01-15T00:00:00.000Z"
+  },
+  "note": "Expiry renewal per docs/backend/dependency-refresh.md §4: the lockfile did not change, so the binding moves to the current main commit and the validity window is extended. The zero-advisory production audit is unchanged; no dependency was upgraded."
+}
