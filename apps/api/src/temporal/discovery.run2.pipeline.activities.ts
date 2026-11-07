@@ -52,6 +52,7 @@ import {
   upsertLeadFit,
   type FitJudgeCompany,
 } from '../discovery/fit-judge';
+import type { SkillResolver } from '../skills/skill-runtime';
 import { discoverContactsCore } from '../discovery/contact-discovery-core';
 import { guessEmailsForRunCompany } from '../discovery/contact-stage-email-guess';
 import { stampLawfulBasis } from '../discovery/compliance/email-verification-gate';
@@ -86,6 +87,8 @@ export function createRun2PipelineActivities(deps: {
   runtimeTelemetry?: RuntimeTelemetry;
   budgetStore?: BudgetStore;
   websiteProfile?: Pick<WebsiteProfileProvider, 'profile'>;
+  /** S0 技能运行时：生产由 worker 注入 DB resolver；缺省为内置目录直通。 */
+  skills?: SkillResolver;
 }) {
   const budgets =
     deps.budgetStore ?? new UnavailableBudgetStore('run2 pipeline activities require an authoritative BudgetStore');
@@ -425,6 +428,7 @@ export function createRun2PipelineActivities(deps: {
           runId: binding.accountKey,
           runtimeTelemetry: deps.runtimeTelemetry,
           authorizeExternalAction: authorizeCompany(args.workspaceId, args.companyId),
+          skills: deps.skills,
         },
       );
       if (!judgment) return { judged: false, verdict: null };

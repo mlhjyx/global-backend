@@ -27,6 +27,7 @@ import { parseConfiguredLawfulBasis } from './backlog.activities';
 import { stampLawfulBasis } from '../discovery/compliance/email-verification-gate';
 import { artifactSubjectSkipReason } from '../tools/artifact-subject-denial';
 import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-judge';
+import type { SkillResolver } from '../skills/skill-runtime';
 import type { RuntimeTelemetry } from '../model-runtime/types';
 import {
   CompanyDiscoveryQuery,
@@ -785,6 +786,8 @@ export function createDiscoveryActivities(deps: {
   providers: DiscoveryProviderRegistry;
   gateway: ModelGateway;
   taxonomy?: TaxonomyResolver;
+  /** S0 技能运行时：生产由 worker 注入 DB resolver；缺省为内置目录直通。 */
+  skills?: SkillResolver;
   /** IntentProjectionService 的 sitemap 探测出网经此闸门（收口②）。 */
   broker?: ExecutionBroker;
   runtimeTelemetry?: RuntimeTelemetry;
@@ -1793,6 +1796,7 @@ export function createDiscoveryActivities(deps: {
             runId: binding.accountKey,
             runtimeTelemetry: deps.runtimeTelemetry,
             authorizeExternalAction,
+            skills: deps.skills,
           });
           if (!judgment) return { kind: 'unusable' };
           await deps.prisma.withWorkspace(args.workspaceId, (tx) =>

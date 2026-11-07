@@ -4,6 +4,7 @@
     "platform-channel-crawl-authority.rls.spec.mjs",
     "platform-schedule-authority.rls.spec.mjs",
     "site-build-provider-transport.rls.spec.mjs",
+    "skill-runtime.rls.spec.mjs",
     "source-channel-records.disposable.spec.mjs"
   ],
   "isolated": [

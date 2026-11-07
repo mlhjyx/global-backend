@@ -1,0 +1,202 @@
+import { describe, expect, it } from "vitest";
+import { canonicalDigest } from "../model-runtime/context-engine";
+import { BUILTIN_SKILLS } from "./generated/builtin-skill-catalog";
+import { createDbSkillResolver } from "./skill-resolver";
+import type {
+  SkillPackageRow,
+  SkillRegistryStore,
+  SkillSnapshotWrite,
+  SkillVersionRow,
+} from "./skill-registry.store";
+import { SkillUnavailableError, StaticSkillResolver } from "./skill-runtime";
+
+const RECORD = BUILTIN_SKILLS.find((record) => record.skillKey === "discovery.qualify_fit")!;
+const MANIFEST = RECORD.manifest;
+
+function packageRow(overrides: Partial<SkillPackageRow> = {}): SkillPackageRow {
+  return { id: "11111111-1111-4111-8111-111111111111", status: "ACTIVE", packType: "growth_motion", ...overrides };
+}
+
+function versionRow(overrides: Partial<SkillVersionRow> = {}): SkillVersionRow {
+  return {
+    id: "22222222-2222-4222-8222-222222222222",
+    version: MANIFEST.platform.version,
+    manifest: MANIFEST,
+    manifestDigest: canonicalDigest(MANIFEST),
+    taskContractId: MANIFEST.platform.taskContractId,
+    taskContractDigest: MANIFEST.platform.taskContractDigest,
+    ...overrides,
+  };
+}
+
+class FakeStore implements SkillRegistryStore {
+  pkg: SkillPackageRow | null = packageRow();
+  version: SkillVersionRow | null = versionRow();
+  enabled: boolean | null = null;
+  snapshots: SkillSnapshotWrite[] = [];
+  failSnapshot: Error | null = null;
+  readonly calls = { package: 0, version: 0, enablement: 0, snapshot: 0 };
+
+  async loadPlatformPackage(): Promise<SkillPackageRow | null> {
+    this.calls.package += 1;
+    return this.pkg;
+  }
+
+  async loadCurrentVersion(): Promise<SkillVersionRow | null> {
+    this.calls.version += 1;
+    return this.version;
+  }
+
+  async loadEnablement(): Promise<boolean | null> {
+    this.calls.enablement += 1;
+    return this.enabled;
+  }
+
+  async insertSnapshot(_workspaceId: string, snapshot: SkillSnapshotWrite): Promise<void> {
+    this.calls.snapshot += 1;
+    if (this.failSnapshot) throw this.failSnapshot;
+    if (!this.snapshots.some((item) => item.descriptorDigest === snapshot.descriptorDigest)) {
+      this.snapshots.push(snapshot);
+    }
+  }
+}
+
+const WORKSPACE = "33333333-3333-4333-8333-333333333333";
+
+async function reasonOf(run: () => Promise<unknown>): Promise<string> {
+  try {
+    await run();
+  } catch (error) {
+    if (error instanceof SkillUnavailableError) return error.reason;
+    throw error;
+  }
+  throw new Error("expected SkillUnavailableError");
+}
+
+describe("createDbSkillResolver", () => {
+  it("resolves the seeded skill and writes an immutable snapshot descriptor", async () => {
+    const store = new FakeStore();
+    const resolver = createDbSkillResolver(store, { ttlMs: 0 });
+    const descriptor = await resolver.resolve("discovery.qualify_fit", WORKSPACE, {
+      effectiveModel: "deepseek-v4-pro",
+    });
+
+    expect(descriptor.skillKey).toBe("discovery.qualify_fit");
+    expect(descriptor.taskContractId).toBe("discovery.qualify_fit");
+    expect(descriptor.effectiveModel).toBe("deepseek-v4-pro");
+    expect(descriptor.resolverVersion).toBe("skill-resolver/v0");
+    expect(store.snapshots).toHaveLength(1);
+    expect(store.snapshots[0].descriptorDigest).toBe(canonicalDigest(descriptor));
+  });
+
+  it("fails closed when the skill is not registered", async () => {
+    const store = new FakeStore();
+    store.pkg = null;
+    const resolver = createDbSkillResolver(store, { ttlMs: 0 });
+    expect(await reasonOf(() => resolver.resolve("discovery.qualify_fit", WORKSPACE))).toBe(
+      "SKILL_NOT_REGISTERED",
+    );
+    expect(store.calls.snapshot).toBe(0);
+  });
+
+  it("fails closed when the platform kill switch is on", async () => {
+    const store = new FakeStore();
+    store.pkg = packageRow({ status: "DISABLED" });
+    const resolver = createDbSkillResolver(store, { ttlMs: 0 });
+    expect(await reasonOf(() => resolver.resolve("discovery.qualify_fit", WORKSPACE))).toBe(
+      "SKILL_PLATFORM_DISABLED",
+    );
+  });
+
+  it("fails closed when no version is registered", async () => {
+    const store = new FakeStore();
+    store.version = null;
+    const resolver = createDbSkillResolver(store, { ttlMs: 0 });
+    expect(await reasonOf(() => resolver.resolve("discovery.qualify_fit", WORKSPACE))).toBe(
+      "SKILL_VERSION_MISSING",
+    );
+  });
+
+  it("honours workspace enablement overrides and defaults to enabled without a row", async () => {
+    const disabled = new FakeStore();
+    disabled.enabled = false;
+    const resolver = createDbSkillResolver(disabled, { ttlMs: 0 });
+    expect(await reasonOf(() => resolver.resolve("discovery.qualify_fit", WORKSPACE))).toBe(
+      "SKILL_WORKSPACE_DISABLED",
+    );
+
+    const followDefault = new FakeStore();
+    const defaultResolver = createDbSkillResolver(followDefault, { ttlMs: 0 });
+    await expect(defaultResolver.resolve("discovery.qualify_fit", WORKSPACE)).resolves.toBeTruthy();
+  });
+
+  it("fails closed when this build has no code binding for a registered skill", async () => {
+    const store = new FakeStore();
+    const resolver = createDbSkillResolver(store, { ttlMs: 0 });
+    expect(await reasonOf(() => resolver.resolve("tenant.custom_skill", WORKSPACE))).toBe(
+      "SKILL_BINDING_UNAVAILABLE",
+    );
+  });
+
+  it("fails closed when the seeded version drifts from the built catalog", async () => {
+    const store = new FakeStore();
+    store.version = versionRow({ manifestDigest: "0".repeat(64) });
+    const resolver = createDbSkillResolver(store, { ttlMs: 0 });
+    expect(await reasonOf(() => resolver.resolve("discovery.qualify_fit", WORKSPACE))).toBe(
+      "SKILL_CONTRACT_DRIFT",
+    );
+
+    const taskDrift = new FakeStore();
+    taskDrift.version = versionRow({ taskContractDigest: "f".repeat(64) });
+    const taskResolver = createDbSkillResolver(taskDrift, { ttlMs: 0 });
+    expect(await reasonOf(() => taskResolver.resolve("discovery.qualify_fit", WORKSPACE))).toBe(
+      "SKILL_CONTRACT_DRIFT",
+    );
+  });
+
+  it("caches resolutions per workspace/skill/model until the TTL expires or invalidation", async () => {
+    let clock = 1_000;
+    const store = new FakeStore();
+    const resolver = createDbSkillResolver(store, { ttlMs: 30_000, now: () => clock });
+
+    await resolver.resolve("discovery.qualify_fit", WORKSPACE, { effectiveModel: "m1" });
+    await resolver.resolve("discovery.qualify_fit", WORKSPACE, { effectiveModel: "m1" });
+    expect(store.calls.package).toBe(1);
+
+    await resolver.resolve("discovery.qualify_fit", WORKSPACE, { effectiveModel: "m2" });
+    expect(store.calls.package).toBe(2);
+
+    clock += 30_001;
+    await resolver.resolve("discovery.qualify_fit", WORKSPACE, { effectiveModel: "m1" });
+    expect(store.calls.package).toBe(3);
+
+    resolver.invalidate("discovery.qualify_fit");
+    await resolver.resolve("discovery.qualify_fit", WORKSPACE, { effectiveModel: "m1" });
+    expect(store.calls.package).toBe(4);
+  });
+
+  it("propagates snapshot write failures (audit stays fail-closed)", async () => {
+    const store = new FakeStore();
+    store.failSnapshot = new Error("snapshot write failed");
+    const resolver = createDbSkillResolver(store, { ttlMs: 0 });
+    await expect(resolver.resolve("discovery.qualify_fit", WORKSPACE)).rejects.toThrow(
+      "snapshot write failed",
+    );
+  });
+});
+
+describe("StaticSkillResolver", () => {
+  it("resolves every builtin skill without touching a store", async () => {
+    const resolver = new StaticSkillResolver();
+    for (const record of BUILTIN_SKILLS) {
+      const descriptor = await resolver.resolve(record.skillKey, WORKSPACE, { effectiveModel: "m" });
+      expect(descriptor.taskContractId).toBe(record.manifest.platform.taskContractId);
+      expect(descriptor.effectiveModel).toBe("m");
+    }
+  });
+
+  it("rejects unknown skill keys", async () => {
+    const resolver = new StaticSkillResolver();
+    expect(await reasonOf(() => resolver.resolve("nope", WORKSPACE))).toBe("SKILL_NOT_REGISTERED");
+  });
+});
