@@ -16,7 +16,14 @@ import {
 } from '../../adapters/openfda-api';
 import type { OpenFdaSearchInput, OpenFdaSearchOutput } from '../../tools/source-tools';
 import type { ExecutionBroker } from '../../tools/tool-contract';
+import { ToolDurableResultProjectionError } from '../../tools/tool-broker';
 import { companyIdentity } from '../identity';
+import {
+  DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+  buildDiscoveryCompanyResultLineage,
+  createDiscoveryCompanyReceiptCollector,
+  isDiscoveryCompanyLineageInvalid,
+} from '../company-discovery-lineage';
 
 const PARSER_VERSION = 'openfda/v1';
 const REG_QUERY_BASE = 'https://api.fda.gov/device/registrationlisting.json?search=registration.registration_number:';
@@ -39,24 +46,43 @@ const FDA_ID_SCHEME = 'fda-reg';
 export class OpenFdaDiscoveryProvider implements CompanyDiscoveryAdapter {
   readonly key = 'openfda';
   readonly classes: SourceClass[] = ['public_intelligence'];
+  readonly companyResultLineage = DISCOVERY_COMPANY_RESULT_LINEAGE_V1;
 
   constructor(private readonly deps?: { broker?: ExecutionBroker }) {}
+
+  private emptyLineage(): DiscoveryResult {
+    return {
+      records: [],
+      costCents: 0,
+      lineage: buildDiscoveryCompanyResultLineage({
+        providerKey: 'openfda',
+        recordCount: 0,
+        observations: [],
+      }),
+    };
+  }
 
   async discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, _opts?: DiscoveryOptions,
   ): Promise<DiscoveryResult> {
     const filters = query.filters ?? {};
     const productCodes = readProductCodes(filters);
-    if (!productCodes.length) return { records: [], costCents: 0 }; // 无产品码 → 不启动（绝不裸拉全库）
+    if (!productCodes.length) return this.emptyLineage(); // 无产品码 → 不启动（绝不裸拉全库）
 
     // §8.8 合规门（收口②：Broker 单点判定）：openfda.search 是 required 工具（registrationlisting
     // 可含具名 us_agent/contact）——SUSPENDED/未登记/用途不符/无 reader 一律 fail-closed。
     // 无 broker = 不允许直连（生产 registry 两处均注入）。
     if (!this.deps?.broker) {
-       
+
       console.warn('[openfda] broker unavailable, fail-closed (no raw egress)');
-      return { records: [], costCents: 0 };
+      return this.emptyLineage();
     }
 
+    const collector = createDiscoveryCompanyReceiptCollector({
+      providerKey: 'openfda',
+      producerId: 'openfda.search',
+      parentOnDurableReceipt: ctx.onDurableReceipt,
+    });
+    collector.markExpectedInvocation();
     let establishments: OpenFdaEstablishment[];
     try {
       const res = await this.deps.broker.invoke<OpenFdaSearchInput, OpenFdaSearchOutput>(
@@ -73,14 +99,28 @@ export class OpenFdaDiscoveryProvider implements CompanyDiscoveryAdapter {
           },
         },
         // purpose='discovery'：用途门按本次调用用途判（域策略去掉 discovery 即拦本路径）
-        { ...ctx, purpose: 'discovery' },
+        { ...ctx, onDurableReceipt: collector.onDurableReceipt, purpose: 'discovery' },
       );
       establishments = res.data.establishments ?? [];
     } catch (err) {
+      if (collector.isForwardingFailure(err) || isDiscoveryCompanyLineageInvalid(err)) {
+        throw err;
+      }
+      // 结算失败但无回执（投影拒绝）可证明未产生公司记录：记 failed，血缘仍有效。
+      if (err instanceof ToolDurableResultProjectionError) collector.markInvocationFailed();
       // fail-safe：单源失败/闸门拒绝不阻断其余源（AGENTS.md §5）；拒绝原因已入 Broker DENIED trace
-       
+
       console.warn(`[openfda] discover failed: ${String(err).slice(0, 150)}`);
-      return { records: [], costCents: 0 };
+      const observation = collector.finish([]);
+      return {
+        records: [],
+        costCents: 0,
+        lineage: buildDiscoveryCompanyResultLineage({
+          providerKey: 'openfda',
+          recordCount: 0,
+          observations: [observation],
+        }),
+      };
     }
 
     const now = new Date().toISOString();
@@ -94,7 +134,14 @@ export class OpenFdaDiscoveryProvider implements CompanyDiscoveryAdapter {
       }).dedupeKey;
       if (!dedup.has(key)) dedup.set(key, rec); // 先到优先
     }
-    return { records: [...dedup.values()], costCents: 0 };
+    const records = [...dedup.values()];
+    const observation = collector.finish(records.map((_, index) => index));
+    const lineage = buildDiscoveryCompanyResultLineage({
+      providerKey: 'openfda',
+      recordCount: records.length,
+      observations: [observation],
+    });
+    return { records, costCents: 0, ...(lineage ? { lineage } : {}) };
   }
 }
 

@@ -124,7 +124,7 @@ function fixture() {
     providers,
   );
   const enable = (...keys: string[]) => enabledProviders.splice(0, enabledProviders.length, ...keys);
-  /** As if `keys` declared governed company lineage, as TED and openFDA will once theirs lands. */
+  /** Treats `keys` as declaring governed company lineage (fixture override; TED/openFDA declare it natively since lineage v3). */
   const declareLineage = (...keys: string[]) => {
     const registered = providers.companyDiscoverySources.bind(providers);
     vi.spyOn(providers, "companyDiscoverySources").mockImplementation(() =>
@@ -694,7 +694,6 @@ describe("ICP generation authority and controlled enrichment", () => {
     ["no provider row", []],
     ["only a non-discovery provider", ["gleif", "decision_maker"]],
     ["only the cold-path sources", ["ted", "openfda"]],
-    ["only sources without governed lineage", ["wikidata", "openstreetmap", "ted", "openfda"]],
   ])(
     "refuses to plan with %s ENABLED, before any model call (BI-30)",
     async (_label, enabled) => {
@@ -911,7 +910,7 @@ describe("ICP generation authority and controlled enrichment", () => {
     expect((plan.queries as Array<{ filters: { source_hint: string } }>).map((q) => q.filters.source_hint))
       .toEqual(["public_web"]);
   });
-  it("neither resolves nor injects TED or openFDA queries while they lack governed lineage, even ENABLED (lineage gate)", async () => {
+  it("resolves and injects TED and openFDA cold-path queries once they carry governed lineage (lineage v3)", async () => {
     const f = generationFixture();
     f.icp.status = "ACTIVE";
     f.enable("public_web", "ted", "openfda");
@@ -924,16 +923,16 @@ describe("ICP generation authority and controlled enrichment", () => {
 
     const plan = await f.service.generateQueryPlan(ctx, f.icp.id);
 
-    expect(f.cpv).not.toHaveBeenCalled();
-    expect(f.fda).not.toHaveBeenCalled();
+    expect(f.cpv).toHaveBeenCalled();
+    expect(f.fda).toHaveBeenCalled();
     const queries = plan.queries as Array<{ filters: { source_hint: string }; rationale: string }>;
-    expect(queries.map((q) => q.filters.source_hint)).toEqual(["public_web"]);
-    // The plan review sees why the ENABLED cold-path sources added nothing.
-    expect(queries[0]!.rationale).toBe(
-      "keyword discovery\n[source_filter] 已移出 2 条规划查询：SOURCE_LINEAGE_UNAVAILABLE 2 条",
-    );
+    const hints = queries.map((q) => q.filters.source_hint);
+    expect(hints).toHaveLength(3);
+    expect(new Set(hints)).toEqual(new Set(["ted", "openfda", "public_web"]));
+    expect(queries.some((q) => q.rationale.includes("[source_filter] SOURCE_LINEAGE_UNAVAILABLE")))
+      .toBe(false);
   });
-  it("keeps an ENABLED source without governed lineage out of the prompt and the plan, with its own reason (lineage gate)", async () => {
+  it("lists ENABLED structured sources in the prompt and keeps the model's queries for them (lineage v3)", async () => {
     const f = generationFixture();
     f.icp.status = "ACTIVE";
     f.enable("public_web", "wikidata", "openstreetmap");
@@ -948,13 +947,11 @@ describe("ICP generation authority and controlled enrichment", () => {
     const plan = await f.service.generateQueryPlan(ctx, f.icp.id);
 
     const prompt = f.runtime.mock.calls[0]![1].prompt as string;
-    expect(prompt).not.toContain("wikidata");
-    expect(prompt).not.toContain("openstreetmap");
+    expect(prompt).toContain("wikidata");
+    expect(prompt).toContain("openstreetmap");
     const queries = plan.queries as Array<{ filters: Record<string, unknown>; rationale: string }>;
-    expect(queries.map((q) => q.filters.source_hint)).toEqual(["public_web"]);
-    expect(queries[0]!.rationale).toBe(
-      "keyword discovery\n[source_filter] 已移出 1 条规划查询：SOURCE_LINEAGE_UNAVAILABLE 1 条",
-    );
+    expect(queries.map((q) => q.filters.source_hint)).toEqual(["public_web", "wikidata"]);
+    expect(queries[0]!.rationale).not.toContain("SOURCE_LINEAGE_UNAVAILABLE");
   });
   it("notes the left-out planner queries on the first planner query, not on an injected one (BI-30)", async () => {
     const f = generationFixture();

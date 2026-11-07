@@ -719,7 +719,8 @@ const ENDED_AUTHORITY_CODES: ReadonlySet<string> = new Set([
 const DISCOVERY_DOMAIN_ACK_PRODUCERS = new Set([
   'companies_house.search', 'crawl4ai.fetch', 'crawl4ai.render', 'gleif.fetch',
   'http.get', 'inpi_rne.search', 'mapyourshow.fetch', 'openfda.search',
-  'osm.overpass', 'searxng.search', 'smtp.rcpt_probe', 'tradefair.algolia',
+  'osm.overpass', 'searxng.search', 'smtp.rcpt_probe', 'ted.search',
+  'tradefair.algolia',
   'wikidata.entity', 'wikidata.sparql', 'discovery.extract_company',
   'discovery.extract_list', 'contact.find_decision_makers',
 ]);

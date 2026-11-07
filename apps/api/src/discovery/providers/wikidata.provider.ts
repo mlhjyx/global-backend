@@ -9,7 +9,14 @@ import {
 } from '../provider-contract';
 import type { WikidataCompany } from '../../adapters/wikidata';
 import type { ExecutionBroker } from '../../tools/tool-contract';
+import { ToolDurableResultProjectionError } from '../../tools/tool-broker';
 import { mapIndustryToQids, mapCountryToQid } from '../vocab';
+import {
+  DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+  buildDiscoveryCompanyResultLineage,
+  createDiscoveryCompanyReceiptCollector,
+  isDiscoveryCompanyLineageInvalid,
+} from '../company-discovery-lineage';
 
 /**
  * Wikidata 结构化发现 Provider（零爬取，CC0 开放数据）。
@@ -23,24 +30,43 @@ import { mapIndustryToQids, mapCountryToQid } from '../vocab';
 export class WikidataDiscoveryProvider implements CompanyDiscoveryAdapter {
   readonly key = 'wikidata';
   readonly classes: SourceClass[] = ['company_registry', 'industry_data'];
+  readonly companyResultLineage = DISCOVERY_COMPANY_RESULT_LINEAGE_V1;
   /** mapIndustries / mapCountry read `_industryQids` / `_countryQid` before the built-in vocabulary. */
   readonly consumesResolvedTaxonomy = true;
 
   constructor(private readonly deps?: { broker?: ExecutionBroker }) {}
 
+  private emptyLineage(): DiscoveryResult {
+    return {
+      records: [],
+      costCents: 0,
+      lineage: buildDiscoveryCompanyResultLineage({
+        providerKey: 'wikidata',
+        recordCount: 0,
+        observations: [],
+      }),
+    };
+  }
+
   async discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, opts?: DiscoveryOptions,
   ): Promise<DiscoveryResult> {
     if (!this.deps?.broker) {
-       
+
       console.warn('[wikidata] broker unavailable, fail-closed (no raw egress)');
-      return { records: [], costCents: 0 };
+      return this.emptyLineage();
     }
     void opts; // 本源无域名维度，blockedDomains 不适用（签名统一保留）
 
     const industryQids = mapIndustries(query);
-    if (!industryQids.length) return { records: [], costCents: 0 }; // 无法映射行业 → 该源无产出（词表欠账时预期）
+    if (!industryQids.length) return this.emptyLineage(); // 无法映射行业 → 该源无产出（词表欠账时预期）
     const countryQid = mapCountry(query);
 
+    const collector = createDiscoveryCompanyReceiptCollector({
+      providerKey: 'wikidata',
+      producerId: 'wikidata.sparql',
+      parentOnDurableReceipt: ctx.onDurableReceipt,
+    });
+    collector.markExpectedInvocation();
     let companies: WikidataCompany[];
     try {
       const res = await this.deps.broker.invoke<
@@ -50,14 +76,29 @@ export class WikidataDiscoveryProvider implements CompanyDiscoveryAdapter {
         'wikidata.sparql',
         { industryQids, countryQid, limit: Math.min(query.limit, 60) },
         // #51：传本次调用用途，用途门按 discovery 判（否则退回"声明集任一交集"会绕过域策略仅允许 enrichment 的限制）
-        { ...ctx, purpose: 'discovery' },
+        { ...ctx, onDurableReceipt: collector.onDurableReceipt, purpose: 'discovery' },
       );
       companies = res.data.companies ?? [];
     } catch (err) {
+      if (collector.isForwardingFailure(err) || isDiscoveryCompanyLineageInvalid(err)) {
+        throw err;
+      }
+      // 结算失败但无回执（投影拒绝/闸门拒绝）可证明未产生公司记录：记 failed，血缘仍有效；
+      // 其余未知态保持「调用无回执」→ 血缘作废，让物化准入 fail-closed（与 trade_fair 同约定）。
+      if (err instanceof ToolDurableResultProjectionError) collector.markInvocationFailed();
       // fail-safe：单源失败/闸门拒绝不阻断其余源（AGENTS.md §5）；拒绝原因已入 Broker DENIED trace
-       
+
       console.warn(`[wikidata] discover failed: ${String(err).slice(0, 150)}`);
-      return { records: [], costCents: 0 };
+      const observation = collector.finish([]);
+      return {
+        records: [],
+        costCents: 0,
+        lineage: buildDiscoveryCompanyResultLineage({
+          providerKey: 'wikidata',
+          recordCount: 0,
+          observations: [observation],
+        }),
+      };
     }
 
     const now = new Date().toISOString();
@@ -68,7 +109,13 @@ export class WikidataDiscoveryProvider implements CompanyDiscoveryAdapter {
         fetchedAt: now,
       }),
     );
-    return { records, costCents: 0 };
+    const observation = collector.finish(records.map((_, index) => index));
+    const lineage = buildDiscoveryCompanyResultLineage({
+      providerKey: 'wikidata',
+      recordCount: records.length,
+      observations: [observation],
+    });
+    return { records, costCents: 0, ...(lineage ? { lineage } : {}) };
   }
 }
 
