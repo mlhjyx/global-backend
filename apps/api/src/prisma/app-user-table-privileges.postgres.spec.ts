@@ -800,9 +800,13 @@ describe.runIf(Boolean(ownerUrl && appUrl))('memory layer v0 on PostgreSQL', () 
     owner = new PrismaClient({ datasourceUrl: ownerUrl });
     app = new PrismaClient({ datasourceUrl: appUrl });
     await owner.$executeRaw`
-      INSERT INTO "discovery_run" ("id", "workspace_id", "plan_id", "icp_id", "status", "completed_at")
-      VALUES (${runA}::uuid, ${wsA}::uuid, ${randomUUID()}::uuid, ${randomUUID()}::uuid, 'DONE', now()),
-             (${runB}::uuid, ${wsB}::uuid, ${randomUUID()}::uuid, ${randomUUID()}::uuid, 'DONE', now())`;
+      INSERT INTO "discovery_run"
+        ("id", "workspace_id", "plan_id", "icp_id", "status", "completed_at",
+         "materialization_contract_version")
+      VALUES (${runA}::uuid, ${wsA}::uuid, ${randomUUID()}::uuid, ${randomUUID()}::uuid, 'DONE', now(),
+              'discovery-company-materialization/v1'),
+             (${runB}::uuid, ${wsB}::uuid, ${randomUUID()}::uuid, ${randomUUID()}::uuid, 'DONE', now(),
+              'discovery-company-materialization/v1')`;
     await owner.$executeRaw`
       INSERT INTO "mem_run_episode"
         ("id", "workspace_id", "workflow_type", "run_id", "phase", "occurred_at",
