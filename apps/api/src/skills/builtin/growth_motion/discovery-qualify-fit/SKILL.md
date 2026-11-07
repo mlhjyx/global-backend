@@ -4,7 +4,9 @@ description: 给定卖方 ICP 与一家候选公司，按材质/角色/工艺/�
 license: Proprietary
 metadata:
   platform.skill-key: discovery.qualify_fit
-  platform.version: 1.0.0
+  platform.version: 1.1.0
+  platform.skill-kind: model_task
+  platform.tenant-default: enabled
   platform.pack-type: growth_motion
   platform.task-contract: discovery.qualify_fit
   platform.task-contract-digest: 2d907019d3457d30af3158bc4ae8a8026b11c436725800fdbd676013d47158c0

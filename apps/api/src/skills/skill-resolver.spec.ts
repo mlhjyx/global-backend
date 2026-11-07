@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { canonicalDigest } from "../model-runtime/context-engine";
 import { BUILTIN_SKILLS } from "./generated/builtin-skill-catalog";
 import { createDbSkillResolver } from "./skill-resolver";
+import { canonicalDigest as digestOf } from "../model-runtime/context-engine";
 import type {
   SkillPackageRow,
   SkillRegistryStore,
@@ -198,5 +199,55 @@ describe("StaticSkillResolver", () => {
   it("rejects unknown skill keys", async () => {
     const resolver = new StaticSkillResolver();
     expect(await reasonOf(() => resolver.resolve("nope", WORKSPACE))).toBe("SKILL_NOT_REGISTERED");
+  });
+});
+
+describe("createDbSkillResolver — tenant-default disabled skills", () => {
+  const RECORD = BUILTIN_SKILLS.find((record) => record.skillKey === "discovery.qualify_fit")!;
+  const disabledManifest = {
+    ...RECORD.manifest,
+    platform: { ...RECORD.manifest.platform, tenantDefault: "disabled" as const },
+  };
+  const disabledRecord = { ...RECORD, manifest: disabledManifest };
+
+  function storeWith(): FakeStore {
+    const store = new FakeStore();
+    store.version = {
+      id: "22222222-2222-4222-8222-222222222222",
+      version: disabledManifest.platform.version,
+      manifest: disabledManifest,
+      manifestDigest: digestOf(disabledManifest),
+      taskContractId: disabledManifest.platform.taskContractId ?? null,
+      taskContractDigest: disabledManifest.platform.taskContractDigest ?? null,
+      serviceHandler: null,
+    };
+    return store;
+  }
+
+  it("requires an explicit workspace opt-in when the tenant default is disabled", async () => {
+    const store = storeWith();
+    const resolver = createDbSkillResolver(store, { ttlMs: 0, records: [disabledRecord] });
+    expect(await reasonOf(() => resolver.resolve("discovery.qualify_fit", WORKSPACE))).toBe(
+      "SKILL_TENANT_NOT_ENABLED",
+    );
+    expect(store.calls.snapshot).toBe(0);
+  });
+
+  it("lets an explicit enablement override opt the workspace in", async () => {
+    const store = storeWith();
+    store.enabled = true;
+    const resolver = createDbSkillResolver(store, { ttlMs: 0, records: [disabledRecord] });
+    const descriptor = await resolver.resolve("discovery.qualify_fit", WORKSPACE);
+    expect(descriptor.tenantDefault).toBe("disabled");
+    expect(descriptor.skillKind).toBe("model_task");
+  });
+
+  it("keeps explicit disablement authoritative", async () => {
+    const store = storeWith();
+    store.enabled = false;
+    const resolver = createDbSkillResolver(store, { ttlMs: 0, records: [disabledRecord] });
+    expect(await reasonOf(() => resolver.resolve("discovery.qualify_fit", WORKSPACE))).toBe(
+      "SKILL_WORKSPACE_DISABLED",
+    );
   });
 });

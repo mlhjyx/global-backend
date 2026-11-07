@@ -21,8 +21,9 @@ export interface SkillVersionRow {
   readonly version: string;
   readonly manifest: SkillManifest;
   readonly manifestDigest: string;
-  readonly taskContractId: string;
-  readonly taskContractDigest: string;
+  readonly taskContractId: string | null;
+  readonly taskContractDigest: string | null;
+  readonly serviceHandler: string | null;
 }
 
 export interface SkillSnapshotWrite {
@@ -76,8 +77,9 @@ export class PrismaSkillRegistryStore implements SkillRegistryStore {
           version: string;
           manifest: SkillManifest;
           manifestDigest: string;
-          taskContractId: string;
-          taskContractDigest: string;
+          taskContractId: string | null;
+          taskContractDigest: string | null;
+          serviceHandler: string | null;
         }[]
       >(Prisma.sql`
         SELECT "id"::text AS "id",
@@ -85,7 +87,8 @@ export class PrismaSkillRegistryStore implements SkillRegistryStore {
                "manifest",
                "manifest_digest" AS "manifestDigest",
                "task_contract_id" AS "taskContractId",
-               "task_contract_digest" AS "taskContractDigest"
+               "task_contract_digest" AS "taskContractDigest",
+               "service_handler" AS "serviceHandler"
         FROM "skill_version"
         WHERE "package_id" = ${packageId}::uuid
         ORDER BY "created_at" DESC, "id" DESC
@@ -100,6 +103,7 @@ export class PrismaSkillRegistryStore implements SkillRegistryStore {
         manifestDigest: row.manifestDigest,
         taskContractId: row.taskContractId,
         taskContractDigest: row.taskContractDigest,
+        serviceHandler: row.serviceHandler,
       };
     });
   }

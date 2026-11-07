@@ -63,8 +63,10 @@ describe("executeSkillWithRuntime", () => {
   it("passes the effective model to the resolver for the snapshot descriptor", async () => {
     const resolve = vi.fn().mockResolvedValue({
       skillKey: "discovery.qualify_fit",
-      version: "1.0.0",
+      version: "1.1.0",
       packType: "growth_motion",
+      skillKind: "model_task",
+      tenantDefault: "enabled",
       taskContractId: "discovery.qualify_fit",
       taskContractDigest: "a".repeat(64),
       manifestDigest: "b".repeat(64),
@@ -87,6 +89,8 @@ describe("executeSkillWithRuntime", () => {
         skillKey: "other.skill",
         version: "1.0.0",
         packType: "growth_motion",
+        skillKind: "model_task",
+        tenantDefault: "enabled",
         taskContractId: "another.task",
         taskContractDigest: "a".repeat(64),
         manifestDigest: "b".repeat(64),

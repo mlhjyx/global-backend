@@ -80,12 +80,14 @@ export async function seedSkillCatalog(db: PrismaClient): Promise<SkillCatalogSe
       const inserted = await tx.$executeRaw(Prisma.sql`
         INSERT INTO "skill_version"
           ("id", "package_id", "workspace_id", "version", "manifest", "body_markdown",
-           "manifest_digest", "body_digest", "task_contract_id", "task_contract_digest")
+           "manifest_digest", "body_digest", "task_contract_id", "task_contract_digest",
+           "service_handler")
         VALUES
           (${randomUUID()}::uuid, ${packageId}::uuid, NULL, ${version},
            ${JSON.stringify(manifest)}::jsonb, ${record.body},
            ${manifestDigest}, ${bodyDigest},
-           ${manifest.platform.taskContractId}, ${manifest.platform.taskContractDigest})
+           ${manifest.platform.taskContractId ?? null}, ${manifest.platform.taskContractDigest ?? null},
+           ${manifest.platform.serviceHandler ?? null})
         ON CONFLICT ("package_id", "version") DO NOTHING
       `);
       const versions = await tx.$queryRaw<VersionDigestRow[]>(Prisma.sql`

@@ -18,6 +18,7 @@ import { buildGatewayProvider } from "../model-gateway/model-providers.config";
 import { AiTraceSink } from "../model-gateway/ai-trace.sink";
 import { createUnderstandingActivities } from "./understanding.activities";
 import { seedSkillCatalog } from "../skills/skill-catalog.seed";
+import { seedPackCatalog } from "../skills/packs/pack-catalog.seed";
 import { createDbSkillResolver } from "../skills/skill-resolver";
 import { PrismaSkillRegistryStore } from "../skills/skill-registry.store";
 import { createDiscoveryActivities } from "./discovery.activities";
@@ -425,6 +426,17 @@ async function main(): Promise<void> {
   } catch (error) {
     console.error("[worker] skill catalog seed failed:", error);
     await holdPlatformNotReady("SKILL_CATALOG_SEED_UNAVAILABLE");
+  }
+
+  // S1 Pack v1 目录 seed（平台表；版本漂移大声失败，激活仅在缺失时补默认）。
+  try {
+    const packSeed = await seedPackCatalog(ownerDb);
+    console.log(
+      `[worker] pack catalog seed ok (${packSeed.packages} packs, ${packSeed.versionsInserted} new versions, ${packSeed.activationsInserted} activations)`,
+    );
+  } catch (error) {
+    console.error("[worker] pack catalog seed failed:", error);
+    await holdPlatformNotReady("PACK_CATALOG_SEED_UNAVAILABLE");
   }
 
   // Schedule provisioning is an independently authorized operator action.
