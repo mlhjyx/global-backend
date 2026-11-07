@@ -1,0 +1,138 @@
+{
+  "skillName": "growth_motion.customer_research",
+  "evals": [
+    {
+      "id": 1,
+      "input": {
+        "motions": [
+          "customer_research"
+        ]
+      },
+      "assertions": [
+        {
+          "kind": "json_schema",
+          "path": "descriptor",
+          "schema": {
+            "type": "object",
+            "required": [
+              "packs"
+            ],
+            "properties": {
+              "packs": {
+                "type": "array",
+                "contains": {
+                  "type": "object",
+                  "required": [
+                    "packKey"
+                  ],
+                  "properties": {
+                    "packKey": {
+                      "const": "growth_motion.customer_research"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "contains",
+          "path": "brief",
+          "value": "growth_motion.customer_research@"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "input": {
+        "motions": [
+          "customer_research"
+        ]
+      },
+      "assertions": [
+        {
+          "kind": "regex",
+          "path": "rulesDigest",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "kind": "lte",
+          "path": "briefLength",
+          "value": 2000
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "input": {
+        "motions": [
+          "customer_research"
+        ]
+      },
+      "assertions": [
+        {
+          "kind": "contains",
+          "path": "brief",
+          "value": "采购角色"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "input": {
+        "motions": [
+          "competitive_intelligence"
+        ]
+      },
+      "assertions": [
+        {
+          "kind": "json_schema",
+          "path": "descriptor",
+          "schema": {
+            "type": "object",
+            "required": [
+              "packs"
+            ],
+            "properties": {
+              "packs": {
+                "type": "array",
+                "not": {
+                  "contains": {
+                    "type": "object",
+                    "required": [
+                      "packKey"
+                    ],
+                    "properties": {
+                      "packKey": {
+                        "const": "growth_motion.customer_research"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "input": {
+        "motions": [
+          "customer_research"
+        ]
+      },
+      "assertions": [
+        {
+          "kind": "no_vendor_marketing",
+          "path": "brief"
+        },
+        {
+          "kind": "equals",
+          "path": "descriptor.skillKey",
+          "value": "pack-eval:growth_motion.customer_research"
+        }
+      ]
+    }
+  ]
+}

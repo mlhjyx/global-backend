@@ -25,6 +25,7 @@ import { SanctionsModule } from './sanctions/sanctions.module';
 import { SiteBuilderModule } from './site-builder/site-builder.module';
 import { SellerKnowledgeModule } from './seller-knowledge/seller-knowledge.module';
 import { SkillsModule } from './skills/skills.module';
+import { PacksModule } from './skills/packs/packs.module';
 import { ModelRuntimeModule } from './model-runtime';
 import { RuntimeModule } from './runtime/runtime.module';
 import { RuntimeClockModule } from './runtime/runtime-clock.module';
@@ -70,6 +71,7 @@ import { PlatformRevocationHttpModule } from './platform-authority/platform-revo
     SiteBuilderModule,
     SellerKnowledgeModule,
     SkillsModule,
+    PacksModule,
   ],
   controllers: [HealthController, WhoamiController],
   providers: [

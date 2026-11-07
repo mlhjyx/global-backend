@@ -46,7 +46,12 @@ export interface TraceEntry {
   budgetDisposition?:
     | 'RELEASED_CONTROL_DENIAL'
     | 'RELEASED_DEFINITE_FAILURE'
-    | 'SETTLED_NO_RESULT';
+    | 'SETTLED_NO_RESULT'
+    /**
+     * B2/F4：物理成功但 settle 两次都失败——行已被尽力标成 RESULT_UNKNOWN
+     * （标不上则留 RESERVED 给清收器）。结算未落地，成本按 token 上界估计入账。
+     */
+    | 'RESERVED_SETTLE_FAILED';
 }
 
 /**

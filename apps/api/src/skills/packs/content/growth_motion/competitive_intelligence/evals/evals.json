@@ -1,0 +1,138 @@
+{
+  "skillName": "growth_motion.competitive_intelligence",
+  "evals": [
+    {
+      "id": 1,
+      "input": {
+        "motions": [
+          "competitive_intelligence"
+        ]
+      },
+      "assertions": [
+        {
+          "kind": "json_schema",
+          "path": "descriptor",
+          "schema": {
+            "type": "object",
+            "required": [
+              "packs"
+            ],
+            "properties": {
+              "packs": {
+                "type": "array",
+                "contains": {
+                  "type": "object",
+                  "required": [
+                    "packKey"
+                  ],
+                  "properties": {
+                    "packKey": {
+                      "const": "growth_motion.competitive_intelligence"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "contains",
+          "path": "brief",
+          "value": "growth_motion.competitive_intelligence@"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "input": {
+        "motions": [
+          "competitive_intelligence"
+        ]
+      },
+      "assertions": [
+        {
+          "kind": "regex",
+          "path": "rulesDigest",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "kind": "lte",
+          "path": "briefLength",
+          "value": 2000
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "input": {
+        "motions": [
+          "competitive_intelligence"
+        ]
+      },
+      "assertions": [
+        {
+          "kind": "contains",
+          "path": "brief",
+          "value": "赢单/输单"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "input": {
+        "motions": [
+          "pricing"
+        ]
+      },
+      "assertions": [
+        {
+          "kind": "json_schema",
+          "path": "descriptor",
+          "schema": {
+            "type": "object",
+            "required": [
+              "packs"
+            ],
+            "properties": {
+              "packs": {
+                "type": "array",
+                "not": {
+                  "contains": {
+                    "type": "object",
+                    "required": [
+                      "packKey"
+                    ],
+                    "properties": {
+                      "packKey": {
+                        "const": "growth_motion.competitive_intelligence"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "input": {
+        "motions": [
+          "competitive_intelligence"
+        ]
+      },
+      "assertions": [
+        {
+          "kind": "no_vendor_marketing",
+          "path": "brief"
+        },
+        {
+          "kind": "equals",
+          "path": "descriptor.skillKey",
+          "value": "pack-eval:growth_motion.competitive_intelligence"
+        }
+      ]
+    }
+  ]
+}

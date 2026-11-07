@@ -1,0 +1,138 @@
+{
+  "skillName": "growth_motion.pricing",
+  "evals": [
+    {
+      "id": 1,
+      "input": {
+        "motions": [
+          "pricing"
+        ]
+      },
+      "assertions": [
+        {
+          "kind": "json_schema",
+          "path": "descriptor",
+          "schema": {
+            "type": "object",
+            "required": [
+              "packs"
+            ],
+            "properties": {
+              "packs": {
+                "type": "array",
+                "contains": {
+                  "type": "object",
+                  "required": [
+                    "packKey"
+                  ],
+                  "properties": {
+                    "packKey": {
+                      "const": "growth_motion.pricing"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "contains",
+          "path": "brief",
+          "value": "growth_motion.pricing@"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "input": {
+        "motions": [
+          "pricing"
+        ]
+      },
+      "assertions": [
+        {
+          "kind": "regex",
+          "path": "rulesDigest",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "kind": "lte",
+          "path": "briefLength",
+          "value": 2000
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "input": {
+        "motions": [
+          "pricing"
+        ]
+      },
+      "assertions": [
+        {
+          "kind": "contains",
+          "path": "brief",
+          "value": "Incoterms 边界"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "input": {
+        "motions": [
+          "customer_research"
+        ]
+      },
+      "assertions": [
+        {
+          "kind": "json_schema",
+          "path": "descriptor",
+          "schema": {
+            "type": "object",
+            "required": [
+              "packs"
+            ],
+            "properties": {
+              "packs": {
+                "type": "array",
+                "not": {
+                  "contains": {
+                    "type": "object",
+                    "required": [
+                      "packKey"
+                    ],
+                    "properties": {
+                      "packKey": {
+                        "const": "growth_motion.pricing"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "input": {
+        "motions": [
+          "pricing"
+        ]
+      },
+      "assertions": [
+        {
+          "kind": "no_vendor_marketing",
+          "path": "brief"
+        },
+        {
+          "kind": "equals",
+          "path": "descriptor.skillKey",
+          "value": "pack-eval:growth_motion.pricing"
+        }
+      ]
+    }
+  ]
+}

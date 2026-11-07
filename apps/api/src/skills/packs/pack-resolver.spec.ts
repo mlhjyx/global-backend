@@ -189,3 +189,23 @@ describe("createDbStrategyResolver", () => {
     );
   });
 });
+
+describe("createDbStrategyResolver — studio-published versions", () => {
+  it("accepts an immutable newer version over the builtin catalog version", async () => {
+    const { store, byKey } = storeWithBuiltins(["growth_motion.dach_distributor"]);
+    const packageId = byKey.get("growth_motion.dach_distributor")!;
+    const row = store.versions.get(packageId)!;
+    const bumpedManifest = { ...row.manifest, version: "1.1.0" };
+    store.versions.set(packageId, {
+      ...row,
+      version: "1.1.0",
+      manifest: bumpedManifest,
+      manifestDigest: canonicalDigest(bumpedManifest),
+    });
+    const resolver = createDbStrategyResolver(store, { ttlMs: 0 });
+    const resolved = await resolver.resolve(WORKSPACE, { skillKey: "s", markets: ["DE"] });
+    expect(resolved.descriptor.packs.map((pack) => `${pack.packKey}@${pack.version}`)).toContain(
+      "growth_motion.dach_distributor@1.1.0",
+    );
+  });
+});

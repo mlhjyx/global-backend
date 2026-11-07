@@ -6,11 +6,11 @@
     "protectedFiles": [
       {
         "path": "apps/api/src/tools/tool-broker.ts",
-        "sha256": "d5d1f4e60210c5596209f9fad41db4afed5ec5774a313367d6a46d83efb0051f"
+        "sha256": "755af07b3ce83599b401227fac7aec84f32c4715fb291f62a3c485181f7c7e9d"
       },
       {
         "path": "apps/api/src/model-gateway/router-model-gateway.ts",
-        "sha256": "14b9a82719e12a5057ee3636ae60dd4bffc91a1568eff6acd5cee6829428cb24"
+        "sha256": "a86543f52aebf0115b8836d0fcf5825607bc1e404e2b80e41642baa8caf4b9e6"
       },
       {
         "path": "apps/api/src/tools/tool-broker.factory.ts",

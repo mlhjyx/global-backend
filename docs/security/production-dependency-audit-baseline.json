@@ -1,20 +1,20 @@
 {
   "schema_version": "production-dependency-audit-baseline/v1",
   "source": {
-    "base_commit": "3734042dd3d71edd35c601ea7b8c8d0747cac094",
+    "base_commit": "23ffd896e0da5b2173c87d7cc36d562e68f9a371",
     "lockfile_digest": "sha256:7e0d53807c2b59d8339d8f0ae0f55e84b2d664c418bf091e77766f26122ddbc4",
     "registry": "https://registry.npmjs.org/",
     "package_manager": "pnpm@9.15.9",
     "command": "pnpm audit --prod --registry=https://registry.npmjs.org --json",
-    "captured_at": "2026-11-04T12:42:48Z"
+    "captured_at": "2026-11-07T21:36:31Z"
   },
   "bootstrap": {
     "mode": "INITIAL_BASELINE",
-    "base_commit": "3734042dd3d71edd35c601ea7b8c8d0747cac094"
+    "base_commit": "23ffd896e0da5b2173c87d7cc36d562e68f9a371"
   },
   "governance": {
     "owner": "OWN-SECURITY",
-    "valid_until": "2026-11-14T18:27:04.000Z",
+    "valid_until": "2027-01-15T00:00:00.000Z",
     "policy": "Exact zero-advisory snapshot of the audited corrected source. Any production advisory, severity increase, critical finding, or expired baseline fails closed."
   },
   "advisories": [],

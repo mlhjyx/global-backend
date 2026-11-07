@@ -3,6 +3,7 @@ import "dotenv/config";
 import { resolve } from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { Runtime, Worker } from "@temporalio/worker";
+import { DETERMINISTIC_LEDGER_FAILURE_INTERCEPTORS } from "./deterministic-ledger-failure.interceptor";
 import { PrismaService } from "../prisma/prisma.service";
 import { createExecutionBudgetPlatformWriterClient } from "../execution-budget/execution-budget-platform-writer.database";
 import { ExecutionBudgetAuthorityRepository } from "../execution-budget/execution-budget-authority.repository";
@@ -229,6 +230,8 @@ async function main(): Promise<void> {
   const connection = await connectNativeMachine(machine.client);
   const worker = await Worker.create({
     connection,
+    // B2（F5）：确定性账本错误在活动边界标 nonRetryable。
+    interceptors: DETERMINISTIC_LEDGER_FAILURE_INTERCEPTORS,
     namespace: composition.namespace,
     taskQueue: composition.taskQueue,
     identity: workerIdentity(

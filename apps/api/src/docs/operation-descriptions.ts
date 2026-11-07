@@ -258,4 +258,29 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '设置 workspace 级启停覆盖（幂等 upsert）；删除覆盖行则跟随平台默认；需要 ops:write。',
   'DELETE /api/v1/skills/{skillKey}/workspaces/{workspaceId}':
     '删除 workspace 启停覆盖，回到跟随平台默认；重复删除幂等返回 removed=false；需要 ops:write。',
+  // ── Packs（AI 底座 · S1 Pack Studio）───────────────────────────────────────
+  'GET /api/v1/packs':
+    '列出 Pack 目录：pack_key、类型、启停状态与当前激活版本；仅运营身份（ops:read）可读。',
+  'GET /api/v1/packs/{packKey}':
+    '返回单个 Pack 的版本历史、草稿、激活日志与最近评测回执；未登记返回 404；需要 ops:read。',
+  'POST /api/v1/packs/{packKey}/drafts':
+    '新建 Pack 草稿（可从已发布版本派生）；草稿可反复编辑，发布后才生成不可变版本；需要 ops:write。',
+  'PATCH /api/v1/packs/{packKey}/drafts/{draftId}':
+    '编辑草稿的 manifest 或内容正文；编辑会使既有校验/评测失效，需重新 validate 与 eval；需要 ops:write。',
+  'POST /api/v1/packs/{packKey}/drafts/{draftId}/validate':
+    '校验草稿：四类 Schema、平台语义与单包冲突模拟；结果写入草稿的 validation 报告；需要 ops:write。',
+  'POST /api/v1/packs/{packKey}/drafts/{draftId}/dry-run':
+    '零成本试跑：在给定行业/市场/动作选择器下解析策略，返回策略简报与相对当前版本的差异；需要 ops:write。',
+  'POST /api/v1/packs/{packKey}/drafts/{draftId}/eval':
+    '运行确定性 Golden Set 评测（零模型）并写入不可变回执；发布门只认与草稿摘要匹配的回执；需要 ops:write。',
+  'POST /api/v1/packs/{packKey}/drafts/{draftId}/publish':
+    '发布草稿为不可变版本：要求当前摘要已通过校验且存在匹配、未过期（30 天）的通过回执；需要 ops:write。',
+  'POST /api/v1/packs/{packKey}/activate':
+    '激活已发布版本：scope=platform 设为平台默认，scope=workspace 仅对白名单空间灰度；回滚=激活旧版本；需要 ops:write。',
+  'GET /api/v1/packs/{packKey}/workspaces/{workspaceId}':
+    '查看目标 workspace 的 Pack 生效状态（平台状态 + 覆盖行）；需要 ops:read。',
+  'PUT /api/v1/packs/{packKey}/workspaces/{workspaceId}':
+    '设置 workspace 级 Pack 启停覆盖（幂等 upsert）；删除覆盖则跟随平台默认；需要 ops:write。',
+  'DELETE /api/v1/packs/{packKey}/workspaces/{workspaceId}':
+    '删除 workspace 启停覆盖，回到跟随平台默认；重复删除幂等返回 removed=false；需要 ops:write。',
 });

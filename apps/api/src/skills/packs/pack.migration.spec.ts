@@ -94,7 +94,7 @@ describe("pack v1 migrations", () => {
 
   it("keeps published versions, activations, receipts and snapshots append-only", () => {
     expect(packList).toContain(
-      'REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE "pack_version" FROM app_user',
+       'REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE "pack_version" FROM app_user',
     );
     expect(packList).toContain('GRANT SELECT ON TABLE "pack_version" TO app_user');
     expect(packList).toContain(
@@ -118,7 +118,7 @@ describe("pack v1 migrations", () => {
     };
     expect(manifest.tables["pack_package"]).toEqual(["SELECT"]);
     expect(manifest.tables["pack_draft"]).toEqual(["DELETE", "INSERT", "SELECT", "UPDATE"]);
-    expect(manifest.tables["pack_version"]).toEqual(["SELECT"]);
+    expect(manifest.tables["pack_version"]).toEqual(["INSERT", "SELECT"]);
     expect(manifest.tables["pack_activation"]).toEqual(["INSERT", "SELECT"]);
     expect(manifest.tables["pack_enablement"]).toEqual(["DELETE", "INSERT", "SELECT", "UPDATE"]);
     expect(manifest.tables["eval_receipt"]).toEqual(["INSERT", "SELECT"]);
@@ -131,6 +131,16 @@ describe("pack v1 migrations", () => {
       status_updated_by: ["UPDATE"],
       updated_at: ["UPDATE"],
     });
+  });
+
+  it("lets the application role publish immutable versions (INSERT only)", () => {
+    const grantMigration = "20261108140000_pack_version_publish_grant";
+    const names = readdirSync(MIGRATIONS).filter((name) => /^\d{14}_/u.test(name)).sort();
+    expect(names).toContain(grantMigration);
+    const grants = statements(
+      readFileSync(`${MIGRATIONS}${grantMigration}/migration.sql`, "utf8"),
+    );
+    expect(grants).toContain('GRANT INSERT ON TABLE "pack_version" TO app_user');
   });
 
   it("extends skill_version with the service-kind binding and a closed one-of check", () => {
