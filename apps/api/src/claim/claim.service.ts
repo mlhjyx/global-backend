@@ -3,6 +3,10 @@ import type { ClaimStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
 import { buildClaimApprovalProof } from './claim-verification';
+import {
+  buildProfileClaimDraftSpecs,
+  synthesizeProfileClaimDrafts,
+} from './profile-claim-drafts';
 
 type ClaimTarget = 'APPROVED' | 'REVOKED';
 
@@ -207,6 +211,53 @@ export class ClaimService {
         },
       });
       return tx.claim.findUniqueOrThrow({ where: { id: claim.id }, include: { evidence: true } });
+    });
+  }
+
+  /**
+   * P5：从公司档案（注册引导字段 + 结构化产品）补齐 Claim 草稿，供存量空间/理解失败空间
+   * 自助解 `NO_APPROVED_CLAIMS`。幂等：按归一化 statement 去重，REVOKED 不复活。
+   * 端点路径先对 company 行 FOR UPDATE 串行化，双击/并发安全。
+   */
+  async synthesizeDrafts(ctx: RequestContext, companyId: string) {
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const locked = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT "id" FROM "company_profile"
+        WHERE "id" = ${companyId}::uuid
+          AND "workspace_id" = ${ctx.workspaceId}::uuid
+          AND "deleted_at" IS NULL
+        FOR UPDATE
+      `;
+      if (locked.length === 0) {
+        throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'company not found' } });
+      }
+      const company = await tx.companyProfile.findUniqueOrThrow({
+        where: { id: companyId },
+        select: { industry: true, targetMarkets: true },
+      });
+      const offerings = await tx.offering.findMany({
+        where: { companyId },
+        select: { name: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      const specs = buildProfileClaimDraftSpecs({
+        industry: company.industry,
+        targetMarkets: company.targetMarkets,
+        offeringNames: offerings.map((offering) => offering.name),
+      });
+      const result = await synthesizeProfileClaimDrafts(tx, {
+        workspaceId: ctx.workspaceId,
+        companyId,
+        specs,
+      });
+      const claims = result.createdClaimIds.length
+        ? await tx.claim.findMany({
+            where: { id: { in: result.createdClaimIds } },
+            include: { evidence: true },
+            orderBy: { createdAt: 'asc' },
+          })
+        : [];
+      return { created: result.created, skipped: result.skipped, claims };
     });
   }
 

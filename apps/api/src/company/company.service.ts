@@ -13,6 +13,10 @@ import {
 } from '../execution-budget/execution-budget-authority.service';
 import { ExecutionBudgetGrantError } from '../execution-budget/execution-budget-authority.types';
 import { workspaceExecutionBudgetRequestScope } from '../execution-budget/execution-budget-request-scope';
+import {
+  buildProfileClaimDraftSpecs,
+  synthesizeProfileClaimDrafts,
+} from '../claim/profile-claim-drafts';
 
 type CompanyRow = Prisma.CompanyProfileGetPayload<Record<string, never>>;
 
@@ -221,6 +225,22 @@ export class CompanyService {
             source: 'onboarding',
           })),
           skipDuplicates: true,
+        });
+      }
+
+      // P5（设计 2026-11-08-p5-user-loop §4）：注册引导档案事实 → 可审批的 Claim 草稿
+      // （NEEDS_REVIEW）。解决「新空间无已批准 Claim → ICP 被 NO_APPROVED_CLAIMS 卡死」；
+      // 无官网/理解失败的空间同样可用。人工审批后才进入下游，不是自动事实。
+      const draftSpecs = buildProfileClaimDraftSpecs({
+        industry: dto.industry,
+        targetMarkets: dto.targetMarkets,
+        offeringNames: dto.products ?? [],
+      });
+      if (draftSpecs.length > 0) {
+        await synthesizeProfileClaimDrafts(tx, {
+          workspaceId: ctx.workspaceId,
+          companyId: company.id,
+          specs: draftSpecs,
         });
       }
 

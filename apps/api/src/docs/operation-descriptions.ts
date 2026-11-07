@@ -79,6 +79,8 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '列出该企业的事实（Claim），可用 ?status=NEEDS_REVIEW 过滤；每条带来源与状态。',
   'POST /api/v1/companies/{companyId}/claims':
     '手工录入一条企业事实（KNW-001 手工路径）。它与自动抽取的事实走同一套审批生命周期，初始状态为待审。',
+  'POST /api/v1/companies/{companyId}/claim-drafts':
+    '从公司档案确定性生成待审事实草稿（NEEDS_REVIEW）：主营产品 → capability、行业 → company_fact、目标市场 → market，证据记为「注册引导填写」。不调用模型、不消费 Grant；按归一化语句幂等去重，REVOKED 的语句不复活。批准任意一条后 ICP 生成不再被 NO_APPROVED_CLAIMS 阻断。需要 acquisition:review。',
   'POST /api/v1/claims/{claimId}/approve':
     '审批通过一条待审事实：NEEDS_REVIEW → APPROVED，并发出 ClaimApproved 事件供下游使用。需要 acquisition:review。',
   'POST /api/v1/claims/{claimId}/reject':

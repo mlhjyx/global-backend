@@ -6192,6 +6192,79 @@
         "description": "驳回一条待审事实：NEEDS_REVIEW → REVOKED。需要 acquisition:review。"
       }
     },
+    "/api/v1/companies/{companyId}/claim-drafts": {
+      "post": {
+        "operationId": "ClaimController_synthesizeDrafts_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "把注册引导/档案里的主营产品、行业、目标市场确定性映射为待审事实草稿；批准后 ICP 生成不再被 NO_APPROVED_CLAIMS 阻断。重复调用按归一化语句去重。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "created",
+                        "skipped",
+                        "claims"
+                      ],
+                      "properties": {
+                        "created": {
+                          "type": "number",
+                          "description": "本次新建的草稿数量"
+                        },
+                        "skipped": {
+                          "type": "number",
+                          "description": "因既有同文事实或 REVOKED 去重而跳过的数量"
+                        },
+                        "claims": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          },
+                          "description": "本次新建的 Claim 草稿（NEEDS_REVIEW，带注册引导证据）"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "description": "从公司档案确定性生成的 Claim 草稿（幂等：重复调用不再新增）"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "从公司档案生成企业事实草稿（NEEDS_REVIEW，幂等，不消费 Grant）",
+        "tags": [
+          "Claims"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
+        ],
+        "description": "从公司档案确定性生成待审事实草稿（NEEDS_REVIEW）：主营产品 → capability、行业 → company_fact、目标市场 → market，证据记为「注册引导填写」。不调用模型、不消费 Grant；按归一化语句幂等去重，REVOKED 的语句不复活。批准任意一条后 ICP 生成不再被 NO_APPROVED_CLAIMS 阻断。需要 acquisition:review。"
+      }
+    },
     "/api/v1/claims/{claimId}/revoke": {
       "post": {
         "operationId": "ClaimController_revoke_v1",
