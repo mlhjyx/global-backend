@@ -26,6 +26,7 @@ export type SkillUnavailableReason =
   | "SKILL_PLATFORM_DISABLED"
   | "SKILL_WORKSPACE_DISABLED"
   | "SKILL_VERSION_MISSING"
+  | "SKILL_TENANT_NOT_ENABLED"
   | "SKILL_CONTRACT_DRIFT"
   | "SKILL_BINDING_UNAVAILABLE"
   | "SKILL_BINDING_MISMATCH";
@@ -45,8 +46,11 @@ export interface ResolvedSkillDescriptor {
   readonly skillKey: string;
   readonly version: string;
   readonly packType: string;
-  readonly taskContractId: string;
-  readonly taskContractDigest: string;
+  readonly skillKind: "model_task" | "service";
+  readonly tenantDefault: "enabled" | "disabled";
+  readonly taskContractId?: string;
+  readonly taskContractDigest?: string;
+  readonly serviceHandler?: string;
   readonly manifestDigest: string;
   readonly modelPolicy: "contract-default";
   readonly effectiveModel?: string;
@@ -79,8 +83,17 @@ export function descriptorFromManifest(
     skillKey: manifest.platform.skillKey,
     version: manifest.platform.version,
     packType: manifest.platform.packType,
-    taskContractId: manifest.platform.taskContractId,
-    taskContractDigest: manifest.platform.taskContractDigest,
+    skillKind: manifest.platform.skillKind ?? "model_task",
+    tenantDefault: manifest.platform.tenantDefault ?? "enabled",
+    ...(manifest.platform.taskContractId
+      ? {
+          taskContractId: manifest.platform.taskContractId,
+          taskContractDigest: manifest.platform.taskContractDigest,
+        }
+      : {}),
+    ...(manifest.platform.serviceHandler
+      ? { serviceHandler: manifest.platform.serviceHandler }
+      : {}),
     manifestDigest: canonicalDigest(manifest),
     modelPolicy: "contract-default",
     ...(effectiveModel ? { effectiveModel } : {}),
@@ -131,10 +144,14 @@ export async function executeSkillWithRuntime<Output>(
   const descriptor = await resolver.resolve(skillKey, context.workspaceId, {
     ...(input.model !== undefined ? { effectiveModel: input.model } : {}),
   });
-  if (descriptor.taskContractId !== input.task) {
+  if (
+    descriptor.skillKind !== "model_task" ||
+    descriptor.taskContractId === undefined ||
+    descriptor.taskContractId !== input.task
+  ) {
     throw new SkillUnavailableError(
       "SKILL_BINDING_MISMATCH",
-      `${skillKey} binds ${descriptor.taskContractId}, but the call requested ${input.task}`,
+      `${skillKey} binds ${descriptor.taskContractId ?? descriptor.serviceHandler ?? "nothing"}, but the model call requested ${input.task}`,
     );
   }
   return executeStructuredTaskWithRuntime<Output>(gateway, input, context, options);

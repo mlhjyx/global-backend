@@ -5,7 +5,9 @@ license: Proprietary
 allowed-tools: crawl4ai.fetch
 metadata:
   platform.skill-key: company.understanding.extract
-  platform.version: 1.0.0
+  platform.version: 1.1.0
+  platform.skill-kind: model_task
+  platform.tenant-default: enabled
   platform.pack-type: growth_motion
   platform.task-contract: company_understanding.extract_claims
   platform.task-contract-digest: a60b03f1ff293a4acb35daf80be7313c1fbcfd03cef069a4e7511adfd77d2e0c

@@ -45,6 +45,7 @@ import { RuntimeReleaseIdentityService } from "../runtime/runtime-release-identi
 import { completesWithin, settlesWithin } from "../runtime/bounded-settlement";
 import { seedSanctions } from "../sanctions/sanctions-seed";
 import { seedSkillCatalog } from "../skills/skill-catalog.seed";
+import { seedPackCatalog } from "../skills/packs/pack-catalog.seed";
 import {
   parseExecutionBudgetBinding,
   type ExecutionBudgetBinding,
@@ -245,6 +246,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     await seedSanctions(this.db);
     // S0 技能目录 seed（owner 写平台表；版本漂移会大声抛错，不允许带病起服务）。
     await seedSkillCatalog(this.db);
+    // S1 Pack 目录 seed（同上；仅为尚无平台激活的包补默认激活）。
+    await seedPackCatalog(this.db);
     // webhook 配置不完整要**大声**：URL 配了但缺 secret / 非 https（非 localhost）→ sink 拒绝启用，
     // 推送通道既不建交付行也不派送——只报一次，不让运维以为推送在跑。
     if (process.env.SAAS_WEBHOOK_URL && !this.webhookEnabled()) {
