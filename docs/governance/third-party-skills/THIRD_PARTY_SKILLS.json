@@ -1,0 +1,1012 @@
+{
+  "schemaVersion": "third-party-skills/v1",
+  "generatedAt": "2026-11-08",
+  "spec": "https://agentskills.io/specification",
+  "decision": {
+    "id": "D-MA-5",
+    "approvedAt": "2026-11-08",
+    "scope": "M1.5 外部技能导入试点：目录与合规准备（不含运行时集成；S0 见 PR #831）"
+  },
+  "firstBatchSelection": {
+    "decidedAt": "2026-11-08",
+    "decidedBy": "product-owner",
+    "batch": "A",
+    "skills": [
+      "kwp-sales-account-research",
+      "kwp-sales-lead-triage"
+    ],
+    "note": "产品负责人 2026-11-08 选定 A 档 2 个进入 S1；B/C 档保留在 catalog，未入选首批。"
+  },
+  "policies": {
+    "licenseTiers": {
+      "MIT/Apache-2.0": "可导入，保留许可证与来源",
+      "AGPL-3.0/GPL/BSL": "仅可借鉴模式，不得复制正文",
+      "no-license": "仅 clean-room 重写"
+    },
+    "scriptsPolicy": "scripts/ 一律不执行；v1 直接排除携带 scripts/ 的技能。",
+    "allowedToolsPolicy": "SKILL.md 的 allowed-tools 仅作提示；执行以绑定 AI Task 的 ToolBroker 白名单为准，v0 要求集合严格相等。",
+    "approvalPolicy": "发送、CRM 写、名单/数据对外导出一律走审批链：ActionProposal→Policy→审批→ExecutionAuthorization→ToolBroker。",
+    "derivativeRule": "导入产物是上游快照的去营销化衍生版：必须保留 SPDX、来源与改动说明；快照仅作溯源，不等于已导入。"
+  },
+  "sources": [
+    {
+      "id": "anthropics-knowledge-work-plugins",
+      "repo": "https://github.com/anthropics/knowledge-work-plugins",
+      "commit": "e050c2ec856373787143d7057663a6ebd1277df3",
+      "commitDate": "2026-11-06",
+      "license": {
+        "spdx": "Apache-2.0",
+        "textPath": "licenses/anthropics-knowledge-work-plugins/LICENSE",
+        "noticeTextPath": null,
+        "note": "仓库根 LICENSE 在钉住 commit 上含一段与 Apache-2.0 无关的追加文本；此处归档的是 sales 插件目录下干净的 202 行 Apache-2.0 原文（sha256 见 licenses/CHECKSUMS.sha256）。"
+      },
+      "author": "Anthropic PBC"
+    },
+    {
+      "id": "coreyhaines31-marketingskills",
+      "repo": "https://github.com/coreyhaines31/marketingskills",
+      "commit": "96798cf38736ecdba015a1d2b0521b0c8f8f41dd",
+      "commitDate": "2026-11-06",
+      "license": {
+        "spdx": "MIT",
+        "textPath": "licenses/coreyhaines31-marketingskills/LICENSE",
+        "noticeTextPath": null,
+        "note": "标准 MIT 原文，21 行。"
+      },
+      "author": "Corey Haines"
+    },
+    {
+      "id": "phuryn-pm-skills",
+      "repo": "https://github.com/phuryn/pm-skills",
+      "commit": "2a12295a7717569baa7be181b4cfebe3ca38a6bb",
+      "commitDate": "2026-10-29",
+      "license": {
+        "spdx": "MIT",
+        "textPath": "licenses/phuryn-pm-skills/LICENSE",
+        "noticeTextPath": null,
+        "note": "标准 MIT 原文，21 行。"
+      },
+      "author": "Pawel Huryn"
+    }
+  ],
+  "skills": [
+    {
+      "id": "kwp-sales-account-research",
+      "sourceId": "anthropics-knowledge-work-plugins",
+      "repo": "https://github.com/anthropics/knowledge-work-plugins",
+      "commit": "e050c2ec856373787143d7057663a6ebd1277df3",
+      "originalPath": "anthropics_knowledge-work-plugins/sales/skills/account-research/SKILL.md",
+      "snapshotPath": "snapshots/anthropics-knowledge-work-plugins/account-research/SKILL.md.txt",
+      "snapshotFiles": [
+        "account-research/SKILL.md.txt"
+      ],
+      "snapshotSha256": "1f5e40ac7cea793dff344f331be95bf2bd6fd8e03c6734aedae2d514707ec59b",
+      "name": "account-research",
+      "domain": "account-research",
+      "spdxLicense": "Apache-2.0",
+      "author": "Anthropic PBC",
+      "licenseTextPath": "licenses/anthropics-knowledge-work-plugins/LICENSE",
+      "noticeTextPath": null,
+      "hasScripts": false,
+      "upstreamEvalsPath": null,
+      "validation": {
+        "status": "pass",
+        "spec": "https://agentskills.io/specification",
+        "bodyLines": 96,
+        "descriptionLength": 449,
+        "referencedFiles": [],
+        "issues": [],
+        "warnings": [],
+        "report": "VALIDATION.md#account-research"
+      },
+      "securityReview": {
+        "promptInjectionRisk": "低：正文显式声明邮件/聊天/转录/富集/外部文档为不可信内容，只作数据不作指令；外部链接不得渲染。",
+        "externalLinks": 0,
+        "externalLinkDomains": {},
+        "marketingContent": "无外链、无厂商推广。",
+        "personalData": "公司公开信息；可选联系人姓名/职位。每个值需来源；不得据敏感属性评分。",
+        "approvalRequired": false,
+        "approvalChainActions": [],
+        "toolBrokerMapping": {
+          "suggestedAllowedTools": [
+            "searxng.search",
+            "crawl4ai.fetch"
+          ],
+          "unsupportedToolTypes": [],
+          "note": "allowed-tools 仅提示；实际执行以绑定 AI Task 的 ToolBroker 白名单为准。CRM/邮件/日历/转录/销售序列/厂商富集 API 目前无 ToolBroker 合同，新增前不得启用。"
+        },
+        "report": "SECURITY-REVIEW.md#account-research"
+      },
+      "goldenSet": {
+        "caseCount": 5,
+        "report": "GOLDEN-SET.md#account-research"
+      },
+      "importRecommendation": "A",
+      "importBlockers": [
+        "frontmatter 需补 license 字段",
+        "frontmatter 需补 allowed-tools，且与绑定 AI Task 的 allowedTools 集合严格相等",
+        "需把聊天界面/connector 语义改写为引擎输出与 ToolBroker 调用"
+      ],
+      "owner": "UNASSIGNED",
+      "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
+      "notes": "导入适配：把聊天界面的 artifact/Page/Slides/connector 规则改写为引擎输出与 ToolBroker 语义；CRM 为可选输入。"
+    },
+    {
+      "id": "kwp-sales-lead-triage",
+      "sourceId": "anthropics-knowledge-work-plugins",
+      "repo": "https://github.com/anthropics/knowledge-work-plugins",
+      "commit": "e050c2ec856373787143d7057663a6ebd1277df3",
+      "originalPath": "anthropics_knowledge-work-plugins/sales/skills/lead-triage/SKILL.md",
+      "snapshotPath": "snapshots/anthropics-knowledge-work-plugins/lead-triage/SKILL.md.txt",
+      "snapshotFiles": [
+        "lead-triage/SKILL.md.txt"
+      ],
+      "snapshotSha256": "7fa6ee9b73ffbdbe6989f3396738534d9077814054d02c1a25b3758e9b3b806c",
+      "name": "lead-triage",
+      "domain": "lead-triage",
+      "spdxLicense": "Apache-2.0",
+      "author": "Anthropic PBC",
+      "licenseTextPath": "licenses/anthropics-knowledge-work-plugins/LICENSE",
+      "noticeTextPath": null,
+      "hasScripts": false,
+      "upstreamEvalsPath": null,
+      "validation": {
+        "status": "pass",
+        "spec": "https://agentskills.io/specification",
+        "bodyLines": 104,
+        "descriptionLength": 313,
+        "referencedFiles": [],
+        "issues": [],
+        "warnings": [],
+        "report": "VALIDATION.md#lead-triage"
+      },
+      "securityReview": {
+        "promptInjectionRisk": "低：粘贴的线索/表单/入站消息按不可信内容处理；路由聊天消息仅在用户要求时发出，且频道只能来自组织上下文。",
+        "externalLinks": 0,
+        "externalLinkDomains": {},
+        "marketingContent": "无外链、无厂商推广。",
+        "personalData": "线索联系人姓名/邮箱/公司；评分不得使用敏感属性；files-only 档支持直接粘贴线索。",
+        "approvalRequired": false,
+        "approvalChainActions": [],
+        "toolBrokerMapping": {
+          "suggestedAllowedTools": [
+            "searxng.search",
+            "crawl4ai.fetch"
+          ],
+          "unsupportedToolTypes": [],
+          "note": "allowed-tools 仅提示；实际执行以绑定 AI Task 的 ToolBroker 白名单为准。CRM/邮件/日历/转录/销售序列/厂商富集 API 目前无 ToolBroker 合同，新增前不得启用。"
+        },
+        "report": "SECURITY-REVIEW.md#lead-triage"
+      },
+      "goldenSet": {
+        "caseCount": 5,
+        "report": "GOLDEN-SET.md#lead-triage"
+      },
+      "importRecommendation": "A",
+      "importBlockers": [
+        "frontmatter 需补 license 字段",
+        "frontmatter 需补 allowed-tools，且与绑定 AI Task 的 allowedTools 集合严格相等",
+        "需把聊天界面/connector 语义改写为引擎输出与 ToolBroker 调用"
+      ],
+      "owner": "UNASSIGNED",
+      "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
+      "notes": "只读技能：路由建议与 CRM 更新建议均以文本输出，不自行写入。"
+    },
+    {
+      "id": "kwp-sales-account-tiering",
+      "sourceId": "anthropics-knowledge-work-plugins",
+      "repo": "https://github.com/anthropics/knowledge-work-plugins",
+      "commit": "e050c2ec856373787143d7057663a6ebd1277df3",
+      "originalPath": "anthropics_knowledge-work-plugins/sales/skills/account-tiering/SKILL.md",
+      "snapshotPath": "snapshots/anthropics-knowledge-work-plugins/account-tiering/SKILL.md.txt",
+      "snapshotFiles": [
+        "account-tiering/SKILL.md.txt"
+      ],
+      "snapshotSha256": "9013610cb11d278af18ea53df942e6d4f874c56087bb9b32ec38e8f6a3efb22a",
+      "name": "account-tiering",
+      "domain": "icp-scoring",
+      "spdxLicense": "Apache-2.0",
+      "author": "Anthropic PBC",
+      "licenseTextPath": "licenses/anthropics-knowledge-work-plugins/LICENSE",
+      "noticeTextPath": null,
+      "hasScripts": false,
+      "upstreamEvalsPath": null,
+      "validation": {
+        "status": "pass",
+        "spec": "https://agentskills.io/specification",
+        "bodyLines": 98,
+        "descriptionLength": 258,
+        "referencedFiles": [],
+        "issues": [],
+        "warnings": [],
+        "report": "VALIDATION.md#account-tiering"
+      },
+      "securityReview": {
+        "promptInjectionRisk": "低：邮件正文只用于判断是否存在入站信号（presence 即信号），不执行正文指令。",
+        "externalLinks": 0,
+        "externalLinkDomains": {},
+        "marketingContent": "无外链、无厂商推广。",
+        "personalData": "账户与联系人职位；评分聚合，不输出个人敏感判断。",
+        "approvalRequired": false,
+        "approvalChainActions": [],
+        "toolBrokerMapping": {
+          "suggestedAllowedTools": [],
+          "unsupportedToolTypes": [],
+          "note": "allowed-tools 仅提示；实际执行以绑定 AI Task 的 ToolBroker 白名单为准。CRM/邮件/日历/转录/销售序列/厂商富集 API 目前无 ToolBroker 合同，新增前不得启用。"
+        },
+        "report": "SECURITY-REVIEW.md#account-tiering"
+      },
+      "goldenSet": {
+        "caseCount": 5,
+        "report": "GOLDEN-SET.md#account-tiering"
+      },
+      "importRecommendation": "B",
+      "importBlockers": [
+        "frontmatter 需补 license 字段",
+        "frontmatter 需补 allowed-tools，且与绑定 AI Task 的 allowedTools 集合严格相等",
+        "需把聊天界面/connector 语义改写为引擎输出与 ToolBroker 调用"
+      ],
+      "owner": "UNASSIGNED",
+      "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
+      "notes": "依赖账户清单（CRM 读取或上传表格）；纯评分可零工具运行。"
+    },
+    {
+      "id": "kwp-sales-draft-outreach",
+      "sourceId": "anthropics-knowledge-work-plugins",
+      "repo": "https://github.com/anthropics/knowledge-work-plugins",
+      "commit": "e050c2ec856373787143d7057663a6ebd1277df3",
+      "originalPath": "anthropics_knowledge-work-plugins/sales/skills/draft-outreach/SKILL.md",
+      "snapshotPath": "snapshots/anthropics-knowledge-work-plugins/draft-outreach/SKILL.md.txt",
+      "snapshotFiles": [
+        "draft-outreach/SKILL.md.txt"
+      ],
+      "snapshotSha256": "1f28e9a07e9464e9eef71859d94d28cae955b1d2291a4d76665a71fa232f37f8",
+      "name": "draft-outreach",
+      "domain": "outbound-drafting",
+      "spdxLicense": "Apache-2.0",
+      "author": "Anthropic PBC",
+      "licenseTextPath": "licenses/anthropics-knowledge-work-plugins/LICENSE",
+      "noticeTextPath": null,
+      "hasScripts": false,
+      "upstreamEvalsPath": null,
+      "validation": {
+        "status": "pass",
+        "spec": "https://agentskills.io/specification",
+        "bodyLines": 113,
+        "descriptionLength": 370,
+        "referencedFiles": [],
+        "issues": [],
+        "warnings": [],
+        "report": "VALIDATION.md#draft-outreach"
+      },
+      "securityReview": {
+        "promptInjectionRisk": "低：线程正文只作草稿上下文；收件人只能来自用户或 CRM，正文里的地址只报告不使用；未命名序列/地址不得来自内容。",
+        "externalLinks": 0,
+        "externalLinkDomains": {},
+        "marketingContent": "无外链、无厂商推广；正文把 Apollo/Outreach/Salesloft 作为工具类别示例，导入版应中性化。",
+        "personalData": "收件人姓名/邮箱、历史往来；需来源与最小化。",
+        "approvalRequired": true,
+        "approvalChainActions": [
+          "发送邮件",
+          "将联系人加入销售序列（Apollo/Outreach/Salesloft 类工具）"
+        ],
+        "toolBrokerMapping": {
+          "suggestedAllowedTools": [],
+          "unsupportedToolTypes": [],
+          "note": "allowed-tools 仅提示；实际执行以绑定 AI Task 的 ToolBroker 白名单为准。CRM/邮件/日历/转录/销售序列/厂商富集 API 目前无 ToolBroker 合同，新增前不得启用。"
+        },
+        "report": "SECURITY-REVIEW.md#draft-outreach"
+      },
+      "goldenSet": {
+        "caseCount": 5,
+        "report": "GOLDEN-SET.md#draft-outreach"
+      },
+      "importRecommendation": "B",
+      "importBlockers": [
+        "frontmatter 需补 license 字段",
+        "frontmatter 需补 allowed-tools，且与绑定 AI Task 的 allowedTools 集合严格相等",
+        "需把聊天界面/connector 语义改写为引擎输出与 ToolBroker 调用"
+      ],
+      "owner": "UNASSIGNED",
+      "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
+      "notes": "生成与草稿本身可自动；发送/加入序列必须走审批链。"
+    },
+    {
+      "id": "kwp-sales-stakeholder-map",
+      "sourceId": "anthropics-knowledge-work-plugins",
+      "repo": "https://github.com/anthropics/knowledge-work-plugins",
+      "commit": "e050c2ec856373787143d7057663a6ebd1277df3",
+      "originalPath": "anthropics_knowledge-work-plugins/sales/skills/stakeholder-map/SKILL.md",
+      "snapshotPath": "snapshots/anthropics-knowledge-work-plugins/stakeholder-map/SKILL.md.txt",
+      "snapshotFiles": [
+        "stakeholder-map/SKILL.md.txt"
+      ],
+      "snapshotSha256": "f63378b3a665193052a855bf4e314044db0e2f89e31fd4d2481c59446b24e38a",
+      "name": "stakeholder-map",
+      "domain": "stakeholder-mapping",
+      "spdxLicense": "Apache-2.0",
+      "author": "Anthropic PBC",
+      "licenseTextPath": "licenses/anthropics-knowledge-work-plugins/LICENSE",
+      "noticeTextPath": null,
+      "hasScripts": false,
+      "upstreamEvalsPath": null,
+      "validation": {
+        "status": "pass",
+        "spec": "https://agentskills.io/specification",
+        "bodyLines": 104,
+        "descriptionLength": 316,
+        "referencedFiles": [],
+        "issues": [],
+        "warnings": [],
+        "report": "VALIDATION.md#stakeholder-map"
+      },
+      "securityReview": {
+        "promptInjectionRisk": "低：邮件/转录/聊天为证据，不作指令；无人在场的定时运行不得依据内容创建记录。",
+        "externalLinks": 0,
+        "externalLinkDomains": {},
+        "marketingContent": "无外链、无厂商推广（扫描命中的「sponsor」为 exec sponsor 语境）。",
+        "personalData": "高：姓名、职位、汇报线、立场与互动证据；需最小化与访问控制。",
+        "approvalRequired": true,
+        "approvalChainActions": [
+          "创建联系人（CRM 写）"
+        ],
+        "toolBrokerMapping": {
+          "suggestedAllowedTools": [],
+          "unsupportedToolTypes": [],
+          "note": "allowed-tools 仅提示；实际执行以绑定 AI Task 的 ToolBroker 白名单为准。CRM/邮件/日历/转录/销售序列/厂商富集 API 目前无 ToolBroker 合同，新增前不得启用。"
+        },
+        "report": "SECURITY-REVIEW.md#stakeholder-map"
+      },
+      "goldenSet": {
+        "caseCount": 5,
+        "report": "GOLDEN-SET.md#stakeholder-map"
+      },
+      "importRecommendation": "B",
+      "importBlockers": [
+        "frontmatter 需补 license 字段",
+        "frontmatter 需补 allowed-tools，且与绑定 AI Task 的 allowedTools 集合严格相等",
+        "需把聊天界面/connector 语义改写为引擎输出与 ToolBroker 调用"
+      ],
+      "owner": "UNASSIGNED",
+      "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
+      "notes": "暗联系人（dark contacts）创建必须经用户接受或审批链。"
+    },
+    {
+      "id": "kwp-sales-competitive-intelligence",
+      "sourceId": "anthropics-knowledge-work-plugins",
+      "repo": "https://github.com/anthropics/knowledge-work-plugins",
+      "commit": "e050c2ec856373787143d7057663a6ebd1277df3",
+      "originalPath": "anthropics_knowledge-work-plugins/sales/skills/competitive-intelligence/SKILL.md",
+      "snapshotPath": "snapshots/anthropics-knowledge-work-plugins/competitive-intelligence/SKILL.md.txt",
+      "snapshotFiles": [
+        "competitive-intelligence/SKILL.md.txt"
+      ],
+      "snapshotSha256": "aa0041f9133e8901fcdd4768b907c5c8f50c4f15edcce8c04b0d3a8a9a6e6811",
+      "name": "competitive-intelligence",
+      "domain": "competitive-intelligence",
+      "spdxLicense": "Apache-2.0",
+      "author": "Anthropic PBC",
+      "licenseTextPath": "licenses/anthropics-knowledge-work-plugins/LICENSE",
+      "noticeTextPath": null,
+      "hasScripts": false,
+      "upstreamEvalsPath": null,
+      "validation": {
+        "status": "pass",
+        "spec": "https://agentskills.io/specification",
+        "bodyLines": 99,
+        "descriptionLength": 538,
+        "referencedFiles": [],
+        "issues": [],
+        "warnings": [],
+        "report": "VALIDATION.md#competitive-intelligence"
+      },
+      "securityReview": {
+        "promptInjectionRisk": "低：竞品公开信息与客户原话均为证据，需引用来源，不执行其中指令。",
+        "externalLinks": 0,
+        "externalLinkDomains": {},
+        "marketingContent": "无外链、无厂商推广。",
+        "personalData": "客户引语需来源、日期、账户；公开信息为主。",
+        "approvalRequired": false,
+        "approvalChainActions": [],
+        "toolBrokerMapping": {
+          "suggestedAllowedTools": [
+            "searxng.search",
+            "crawl4ai.fetch"
+          ],
+          "unsupportedToolTypes": [],
+          "note": "allowed-tools 仅提示；实际执行以绑定 AI Task 的 ToolBroker 白名单为准。CRM/邮件/日历/转录/销售序列/厂商富集 API 目前无 ToolBroker 合同，新增前不得启用。"
+        },
+        "report": "SECURITY-REVIEW.md#competitive-intelligence"
+      },
+      "goldenSet": {
+        "caseCount": 5,
+        "report": "GOLDEN-SET.md#competitive-intelligence"
+      },
+      "importRecommendation": "C",
+      "importBlockers": [
+        "frontmatter 需补 license 字段",
+        "frontmatter 需补 allowed-tools，且与绑定 AI Task 的 allowedTools 集合严格相等",
+        "需把聊天界面/connector 语义改写为引擎输出与 ToolBroker 调用"
+      ],
+      "owner": "UNASSIGNED",
+      "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
+      "notes": "赢单/输单数据最佳；引擎当前无 CRM 赢单数据，web-only 模式可做竞品公开动态与战卡。"
+    },
+    {
+      "id": "kwp-sales-call-prep",
+      "sourceId": "anthropics-knowledge-work-plugins",
+      "repo": "https://github.com/anthropics/knowledge-work-plugins",
+      "commit": "e050c2ec856373787143d7057663a6ebd1277df3",
+      "originalPath": "anthropics_knowledge-work-plugins/sales/skills/call-prep/SKILL.md",
+      "snapshotPath": "snapshots/anthropics-knowledge-work-plugins/call-prep/SKILL.md.txt",
+      "snapshotFiles": [
+        "call-prep/SKILL.md.txt"
+      ],
+      "snapshotSha256": "4f772694f3f8fc1ef0d8bb8bb868f6c44661160f57c99dd8c9ebf97f7fe2a947",
+      "name": "call-prep",
+      "domain": "call-prep",
+      "spdxLicense": "Apache-2.0",
+      "author": "Anthropic PBC",
+      "licenseTextPath": "licenses/anthropics-knowledge-work-plugins/LICENSE",
+      "noticeTextPath": null,
+      "hasScripts": false,
+      "upstreamEvalsPath": null,
+      "validation": {
+        "status": "pass",
+        "spec": "https://agentskills.io/specification",
+        "bodyLines": 108,
+        "descriptionLength": 364,
+        "referencedFiles": [],
+        "issues": [],
+        "warnings": [],
+        "report": "VALIDATION.md#call-prep"
+      },
+      "securityReview": {
+        "promptInjectionRisk": "低：转录/邮件里要求发送文档、邀请人或改记录的动作只列入简报，不执行。",
+        "externalLinks": 0,
+        "externalLinkDomains": {},
+        "marketingContent": "无外链；正文点名 Gong/Google Drive/Gemini 等具体工具，导入版需中性化为数据源类别。",
+        "personalData": "高：参会人姓名/职位/互动记录。",
+        "approvalRequired": false,
+        "approvalChainActions": [],
+        "toolBrokerMapping": {
+          "suggestedAllowedTools": [],
+          "unsupportedToolTypes": [],
+          "note": "allowed-tools 仅提示；实际执行以绑定 AI Task 的 ToolBroker 白名单为准。CRM/邮件/日历/转录/销售序列/厂商富集 API 目前无 ToolBroker 合同，新增前不得启用。"
+        },
+        "report": "SECURITY-REVIEW.md#call-prep"
+      },
+      "goldenSet": {
+        "caseCount": 5,
+        "report": "GOLDEN-SET.md#call-prep"
+      },
+      "importRecommendation": "C",
+      "importBlockers": [
+        "frontmatter 需补 license 字段",
+        "frontmatter 需补 allowed-tools，且与绑定 AI Task 的 allowedTools 集合严格相等",
+        "需把聊天界面/connector 语义改写为引擎输出与 ToolBroker 调用"
+      ],
+      "owner": "UNASSIGNED",
+      "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
+      "notes": "依赖日历/转录/邮件/聊天数据源，引擎侧暂无；可先支持上传文件输入。"
+    },
+    {
+      "id": "mks-prospecting",
+      "sourceId": "coreyhaines31-marketingskills",
+      "repo": "https://github.com/coreyhaines31/marketingskills",
+      "commit": "96798cf38736ecdba015a1d2b0521b0c8f8f41dd",
+      "originalPath": "coreyhaines31_marketingskills/skills/prospecting/SKILL.md",
+      "snapshotPath": "snapshots/coreyhaines31-marketingskills/prospecting/SKILL.md.txt",
+      "snapshotFiles": [
+        "prospecting/SKILL.md.txt",
+        "prospecting/references/account-research.md.txt",
+        "prospecting/references/b2b-prospecting.md.txt",
+        "prospecting/references/compliance.md.txt",
+        "prospecting/references/data-sources.md.txt",
+        "prospecting/references/demand-signals.md.txt",
+        "prospecting/references/enrichment-playbook.md.txt",
+        "prospecting/references/local-prospecting.md.txt",
+        "prospecting/references/saas-prospecting.md.txt",
+        "prospecting/references/signal-plays.md.txt",
+        "prospecting/references/sourcing-and-enrichment.md.txt"
+      ],
+      "snapshotSha256": "bb9ca9c00ab0dc87e1ed6bb40afd93e559eabb80139ad788d597ebfa7dd11ccf",
+      "name": "prospecting",
+      "domain": "prospecting",
+      "spdxLicense": "MIT",
+      "author": "Corey Haines",
+      "licenseTextPath": "licenses/coreyhaines31-marketingskills/LICENSE",
+      "noticeTextPath": null,
+      "hasScripts": false,
+      "upstreamEvalsPath": "coreyhaines31_marketingskills/skills/prospecting/evals/evals.json",
+      "validation": {
+        "status": "pass",
+        "spec": "https://agentskills.io/specification",
+        "bodyLines": 271,
+        "descriptionLength": 987,
+        "referencedFiles": [
+          "references/account-research.md",
+          "references/b2b-prospecting.md",
+          "references/compliance.md",
+          "references/data-sources.md",
+          "references/demand-signals.md",
+          "references/enrichment-playbook.md",
+          "references/local-prospecting.md",
+          "references/saas-prospecting.md",
+          "references/signal-plays.md",
+          "references/sourcing-and-enrichment.md"
+        ],
+        "issues": [],
+        "warnings": [],
+        "report": "VALIDATION.md#prospecting"
+      },
+      "securityReview": {
+        "promptInjectionRisk": "中：有合规护栏，但未像 Anthropic 技能那样显式声明抓取内容为不可信数据；导入版必须补该规则。",
+        "externalLinks": 21,
+        "externalLinkDomains": {
+          "github.com": 19,
+          "university.clay.com": 2
+        },
+        "marketingContent": "有：Tool Integrations 表（厂商 + 赞助商标记 ◆ + 自有仓库集成文档链接），导入前必须去营销化。",
+        "personalData": "高：联系人姓名/邮箱/职位；正文自带 GDPR/CAN-SPAM/CASL、来源留痕、禁止敏感属性与禁止批量抓取护栏。",
+        "approvalRequired": true,
+        "approvalChainActions": [
+          "名单对外导出/交付给发送系统"
+        ],
+        "toolBrokerMapping": {
+          "suggestedAllowedTools": [
+            "searxng.search",
+            "crawl4ai.fetch",
+            "http.get"
+          ],
+          "unsupportedToolTypes": [],
+          "note": "allowed-tools 仅提示；实际执行以绑定 AI Task 的 ToolBroker 白名单为准。CRM/邮件/日历/转录/销售序列/厂商富集 API 目前无 ToolBroker 合同，新增前不得启用。"
+        },
+        "report": "SECURITY-REVIEW.md#prospecting"
+      },
+      "goldenSet": {
+        "caseCount": 5,
+        "report": "GOLDEN-SET.md#prospecting"
+      },
+      "importRecommendation": "B",
+      "importBlockers": [
+        "frontmatter 需补 license 字段",
+        "frontmatter 需补 allowed-tools，且与绑定 AI Task 的 allowedTools 集合严格相等",
+        "需去营销化编辑",
+        "需补不可信内容（提示注入）规则",
+        "需适配 .agents/product-marketing.md 上下文文件约定"
+      ],
+      "owner": "UNASSIGNED",
+      "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
+      "notes": "去营销化：删除 Tool Integrations 表与赞助商行，保留合规护栏与验证/抑制名单要求。"
+    },
+    {
+      "id": "mks-cold-email",
+      "sourceId": "coreyhaines31-marketingskills",
+      "repo": "https://github.com/coreyhaines31/marketingskills",
+      "commit": "96798cf38736ecdba015a1d2b0521b0c8f8f41dd",
+      "originalPath": "coreyhaines31_marketingskills/skills/cold-email/SKILL.md",
+      "snapshotPath": "snapshots/coreyhaines31-marketingskills/cold-email/SKILL.md.txt",
+      "snapshotFiles": [
+        "cold-email/SKILL.md.txt",
+        "cold-email/references/benchmarks.md.txt",
+        "cold-email/references/deliverability.md.txt",
+        "cold-email/references/follow-up-sequences.md.txt",
+        "cold-email/references/frameworks.md.txt",
+        "cold-email/references/linkedin-outreach.md.txt",
+        "cold-email/references/multichannel-cadence.md.txt",
+        "cold-email/references/outbound-plays.md.txt",
+        "cold-email/references/personalization.md.txt",
+        "cold-email/references/reply-handling.md.txt",
+        "cold-email/references/subject-lines.md.txt"
+      ],
+      "snapshotSha256": "6cf61f55b8ee530d78d4af6cc2a42006f7d84374ed55b967d196ae9a354bbf9b",
+      "name": "cold-email",
+      "domain": "outbound-drafting",
+      "spdxLicense": "MIT",
+      "author": "Corey Haines",
+      "licenseTextPath": "licenses/coreyhaines31-marketingskills/LICENSE",
+      "noticeTextPath": null,
+      "hasScripts": false,
+      "upstreamEvalsPath": "coreyhaines31_marketingskills/skills/cold-email/evals/evals.json",
+      "validation": {
+        "status": "pass",
+        "spec": "https://agentskills.io/specification",
+        "bodyLines": 208,
+        "descriptionLength": 884,
+        "referencedFiles": [
+          "references/benchmarks.md",
+          "references/deliverability.md",
+          "references/follow-up-sequences.md",
+          "references/frameworks.md",
+          "references/linkedin-outreach.md",
+          "references/multichannel-cadence.md",
+          "references/outbound-plays.md",
+          "references/personalization.md",
+          "references/reply-handling.md",
+          "references/subject-lines.md"
+        ],
+        "issues": [],
+        "warnings": [],
+        "report": "VALIDATION.md#cold-email"
+      },
+      "securityReview": {
+        "promptInjectionRisk": "中：写作型技能，未显式声明来信/回复为不可信内容；导入版需补回复分类时的注入规则。",
+        "externalLinks": 11,
+        "externalLinkDomains": {
+          "github.com": 11
+        },
+        "marketingContent": "有：Tool Integrations 表与 Instantly 推荐语；导入前必须去营销化。",
+        "personalData": "中：收件人姓名/公司/角色与个性化信号；需来源。",
+        "approvalRequired": true,
+        "approvalChainActions": [
+          "发送邮件",
+          "多通道序列/领英动作"
+        ],
+        "toolBrokerMapping": {
+          "suggestedAllowedTools": [],
+          "unsupportedToolTypes": [],
+          "note": "allowed-tools 仅提示；实际执行以绑定 AI Task 的 ToolBroker 白名单为准。CRM/邮件/日历/转录/销售序列/厂商富集 API 目前无 ToolBroker 合同，新增前不得启用。"
+        },
+        "report": "SECURITY-REVIEW.md#cold-email"
+      },
+      "goldenSet": {
+        "caseCount": 5,
+        "report": "GOLDEN-SET.md#cold-email"
+      },
+      "importRecommendation": "B",
+      "importBlockers": [
+        "frontmatter 需补 license 字段",
+        "frontmatter 需补 allowed-tools，且与绑定 AI Task 的 allowedTools 集合严格相等",
+        "需去营销化编辑",
+        "需补不可信内容（提示注入）规则",
+        "需适配 .agents/product-marketing.md 上下文文件约定"
+      ],
+      "owner": "UNASSIGNED",
+      "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
+      "notes": "发送前验证名单、关闭打开/点击追踪、每封含退订与邮寄地址等要求保留。"
+    },
+    {
+      "id": "mks-customer-research",
+      "sourceId": "coreyhaines31-marketingskills",
+      "repo": "https://github.com/coreyhaines31/marketingskills",
+      "commit": "96798cf38736ecdba015a1d2b0521b0c8f8f41dd",
+      "originalPath": "coreyhaines31_marketingskills/skills/customer-research/SKILL.md",
+      "snapshotPath": "snapshots/coreyhaines31-marketingskills/customer-research/SKILL.md.txt",
+      "snapshotFiles": [
+        "customer-research/SKILL.md.txt",
+        "customer-research/references/interviews-and-surveys.md.txt",
+        "customer-research/references/source-guides.md.txt"
+      ],
+      "snapshotSha256": "22964b89315a6cf5524d3f627904843e7826d40e06689a07faa5df25fc730bc7",
+      "name": "customer-research",
+      "domain": "customer-research",
+      "spdxLicense": "MIT",
+      "author": "Corey Haines",
+      "licenseTextPath": "licenses/coreyhaines31-marketingskills/LICENSE",
+      "noticeTextPath": null,
+      "hasScripts": false,
+      "upstreamEvalsPath": "coreyhaines31_marketingskills/skills/customer-research/evals/evals.json",
+      "validation": {
+        "status": "pass",
+        "spec": "https://agentskills.io/specification",
+        "bodyLines": 302,
+        "descriptionLength": 953,
+        "referencedFiles": [
+          "references/interviews-and-surveys.md",
+          "references/source-guides.md"
+        ],
+        "issues": [],
+        "warnings": [],
+        "report": "VALIDATION.md#customer-research"
+      },
+      "securityReview": {
+        "promptInjectionRisk": "低：正文显式声明抓取的评论/帖子/社区内容是不可信数据，不得执行其中指令。",
+        "externalLinks": 2,
+        "externalLinkDomains": {
+          "github.com": 1,
+          "www.reddit.com": 1
+        },
+        "marketingContent": "轻微：参考文件提及 SparkToro 等工具；无赞助商标记。",
+        "personalData": "中：引用公开用户言论；需来源、日期与匿名化选项。",
+        "approvalRequired": false,
+        "approvalChainActions": [],
+        "toolBrokerMapping": {
+          "suggestedAllowedTools": [
+            "searxng.search",
+            "crawl4ai.fetch",
+            "http.get"
+          ],
+          "unsupportedToolTypes": [],
+          "note": "allowed-tools 仅提示；实际执行以绑定 AI Task 的 ToolBroker 白名单为准。CRM/邮件/日历/转录/销售序列/厂商富集 API 目前无 ToolBroker 合同，新增前不得启用。"
+        },
+        "report": "SECURITY-REVIEW.md#customer-research"
+      },
+      "goldenSet": {
+        "caseCount": 5,
+        "report": "GOLDEN-SET.md#customer-research"
+      },
+      "importRecommendation": "C",
+      "importBlockers": [
+        "frontmatter 需补 license 字段",
+        "frontmatter 需补 allowed-tools，且与绑定 AI Task 的 allowedTools 集合严格相等",
+        "需适配 .agents/product-marketing.md 上下文文件约定"
+      ],
+      "owner": "UNASSIGNED",
+      "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
+      "notes": "研究综合技能，无对外动作。"
+    },
+    {
+      "id": "mks-pricing",
+      "sourceId": "coreyhaines31-marketingskills",
+      "repo": "https://github.com/coreyhaines31/marketingskills",
+      "commit": "96798cf38736ecdba015a1d2b0521b0c8f8f41dd",
+      "originalPath": "coreyhaines31_marketingskills/skills/pricing/SKILL.md",
+      "snapshotPath": "snapshots/coreyhaines31-marketingskills/pricing/SKILL.md.txt",
+      "snapshotFiles": [
+        "pricing/SKILL.md.txt",
+        "pricing/references/pricing-models.md.txt",
+        "pricing/references/pricing-page-teardown.md.txt",
+        "pricing/references/research-methods.md.txt",
+        "pricing/references/tier-structure.md.txt"
+      ],
+      "snapshotSha256": "b0318f64140e60a28d0cf71b1a6bf2aa214b96ef2bc3253c60d16ae480367d25",
+      "name": "pricing",
+      "domain": "pricing",
+      "spdxLicense": "MIT",
+      "author": "Corey Haines",
+      "licenseTextPath": "licenses/coreyhaines31-marketingskills/LICENSE",
+      "noticeTextPath": null,
+      "hasScripts": false,
+      "upstreamEvalsPath": "coreyhaines31_marketingskills/skills/pricing/evals/evals.json",
+      "validation": {
+        "status": "pass",
+        "spec": "https://agentskills.io/specification",
+        "bodyLines": 289,
+        "descriptionLength": 868,
+        "referencedFiles": [
+          "references/pricing-models.md",
+          "references/pricing-page-teardown.md",
+          "references/research-methods.md",
+          "references/tier-structure.md"
+        ],
+        "issues": [],
+        "warnings": [],
+        "report": "VALIDATION.md#pricing"
+      },
+      "securityReview": {
+        "promptInjectionRisk": "不适用：不读取外部内容，纯策略生成。",
+        "externalLinks": 1,
+        "externalLinkDomains": {
+          "sawtoothsoftware.com": 1
+        },
+        "marketingContent": "无推广；仅一条 Sawtooth Software 方法引用外链。",
+        "personalData": "低。",
+        "approvalRequired": false,
+        "approvalChainActions": [],
+        "toolBrokerMapping": {
+          "suggestedAllowedTools": [],
+          "unsupportedToolTypes": [],
+          "note": "allowed-tools 仅提示；实际执行以绑定 AI Task 的 ToolBroker 白名单为准。CRM/邮件/日历/转录/销售序列/厂商富集 API 目前无 ToolBroker 合同，新增前不得启用。"
+        },
+        "report": "SECURITY-REVIEW.md#pricing"
+      },
+      "goldenSet": {
+        "caseCount": 5,
+        "report": "GOLDEN-SET.md#pricing"
+      },
+      "importRecommendation": "C",
+      "importBlockers": [
+        "frontmatter 需补 license 字段",
+        "frontmatter 需补 allowed-tools，且与绑定 AI Task 的 allowedTools 集合严格相等",
+        "需适配 .agents/product-marketing.md 上下文文件约定"
+      ],
+      "owner": "UNASSIGNED",
+      "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
+      "notes": "策略/内容类，零工具。"
+    },
+    {
+      "id": "pms-ideal-customer-profile",
+      "sourceId": "phuryn-pm-skills",
+      "repo": "https://github.com/phuryn/pm-skills",
+      "commit": "2a12295a7717569baa7be181b4cfebe3ca38a6bb",
+      "originalPath": "phuryn_pm-skills/pm-go-to-market/skills/ideal-customer-profile/SKILL.md",
+      "snapshotPath": "snapshots/phuryn-pm-skills/ideal-customer-profile/SKILL.md.txt",
+      "snapshotFiles": [
+        "ideal-customer-profile/SKILL.md.txt"
+      ],
+      "snapshotSha256": "8d434df786db2290efb575f1d219c7e19650e7a7e3df9a5f4b82b0bd0d2ce298",
+      "name": "ideal-customer-profile",
+      "domain": "icp",
+      "spdxLicense": "MIT",
+      "author": "Pawel Huryn",
+      "licenseTextPath": "licenses/phuryn-pm-skills/LICENSE",
+      "noticeTextPath": null,
+      "hasScripts": false,
+      "upstreamEvalsPath": null,
+      "validation": {
+        "status": "pass",
+        "spec": "https://agentskills.io/specification",
+        "bodyLines": 160,
+        "descriptionLength": 208,
+        "referencedFiles": [],
+        "issues": [],
+        "warnings": [],
+        "report": "VALIDATION.md#ideal-customer-profile"
+      },
+      "securityReview": {
+        "promptInjectionRisk": "不适用：输入为研究数据，不直接抓取外部内容。",
+        "externalLinks": 2,
+        "externalLinkDomains": {
+          "www.productcompass.pm": 2
+        },
+        "marketingContent": "有：Further Reading 指向作者付费通讯 productcompass.pm；导入前删除。",
+        "personalData": "低：聚合画像，不下探到个人敏感属性。",
+        "approvalRequired": false,
+        "approvalChainActions": [],
+        "toolBrokerMapping": {
+          "suggestedAllowedTools": [],
+          "unsupportedToolTypes": [],
+          "note": "allowed-tools 仅提示；实际执行以绑定 AI Task 的 ToolBroker 白名单为准。CRM/邮件/日历/转录/销售序列/厂商富集 API 目前无 ToolBroker 合同，新增前不得启用。"
+        },
+        "report": "SECURITY-REVIEW.md#ideal-customer-profile"
+      },
+      "goldenSet": {
+        "caseCount": 5,
+        "report": "GOLDEN-SET.md#ideal-customer-profile"
+      },
+      "importRecommendation": "C",
+      "importBlockers": [
+        "frontmatter 需补 license 字段",
+        "frontmatter 需补 allowed-tools，且与绑定 AI Task 的 allowedTools 集合严格相等",
+        "需去营销化编辑",
+        "需把 $ARGUMENTS 改为引擎输入契约"
+      ],
+      "owner": "UNASSIGNED",
+      "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
+      "notes": "使用 $ARGUMENTS 传参（Claude Code 插件惯例），导入版需改为引擎输入契约。"
+    },
+    {
+      "id": "pms-beachhead-segment",
+      "sourceId": "phuryn-pm-skills",
+      "repo": "https://github.com/phuryn/pm-skills",
+      "commit": "2a12295a7717569baa7be181b4cfebe3ca38a6bb",
+      "originalPath": "phuryn_pm-skills/pm-go-to-market/skills/beachhead-segment/SKILL.md",
+      "snapshotPath": "snapshots/phuryn-pm-skills/beachhead-segment/SKILL.md.txt",
+      "snapshotFiles": [
+        "beachhead-segment/SKILL.md.txt"
+      ],
+      "snapshotSha256": "a3f94e98c05315938ad80d5e2103eab70096abfa40881dfb2c22a731d923ea5f",
+      "name": "beachhead-segment",
+      "domain": "market-selection",
+      "spdxLicense": "MIT",
+      "author": "Pawel Huryn",
+      "licenseTextPath": "licenses/phuryn-pm-skills/LICENSE",
+      "noticeTextPath": null,
+      "hasScripts": false,
+      "upstreamEvalsPath": null,
+      "validation": {
+        "status": "pass",
+        "spec": "https://agentskills.io/specification",
+        "bodyLines": 141,
+        "descriptionLength": 281,
+        "referencedFiles": [],
+        "issues": [],
+        "warnings": [],
+        "report": "VALIDATION.md#beachhead-segment"
+      },
+      "securityReview": {
+        "promptInjectionRisk": "不适用：输入为研究数据与市场信息。",
+        "externalLinks": 4,
+        "externalLinkDomains": {
+          "www.productcompass.pm": 4
+        },
+        "marketingContent": "有：Further Reading 指向作者付费通讯 productcompass.pm；导入前删除。",
+        "personalData": "低。",
+        "approvalRequired": false,
+        "approvalChainActions": [],
+        "toolBrokerMapping": {
+          "suggestedAllowedTools": [],
+          "unsupportedToolTypes": [],
+          "note": "allowed-tools 仅提示；实际执行以绑定 AI Task 的 ToolBroker 白名单为准。CRM/邮件/日历/转录/销售序列/厂商富集 API 目前无 ToolBroker 合同，新增前不得启用。"
+        },
+        "report": "SECURITY-REVIEW.md#beachhead-segment"
+      },
+      "goldenSet": {
+        "caseCount": 5,
+        "report": "GOLDEN-SET.md#beachhead-segment"
+      },
+      "importRecommendation": "C",
+      "importBlockers": [
+        "frontmatter 需补 license 字段",
+        "frontmatter 需补 allowed-tools，且与绑定 AI Task 的 allowedTools 集合严格相等",
+        "需去营销化编辑",
+        "需把 $ARGUMENTS 改为引擎输入契约"
+      ],
+      "owner": "UNASSIGNED",
+      "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
+      "notes": "使用 $ARGUMENTS 传参，导入版需改为引擎输入契约。"
+    },
+    {
+      "id": "pms-gtm-motions",
+      "sourceId": "phuryn-pm-skills",
+      "repo": "https://github.com/phuryn/pm-skills",
+      "commit": "2a12295a7717569baa7be181b4cfebe3ca38a6bb",
+      "originalPath": "phuryn_pm-skills/pm-go-to-market/skills/gtm-motions/SKILL.md",
+      "snapshotPath": "snapshots/phuryn-pm-skills/gtm-motions/SKILL.md.txt",
+      "snapshotFiles": [
+        "gtm-motions/SKILL.md.txt"
+      ],
+      "snapshotSha256": "b26db17f9eee4f04aa3d53bf3c393da0574a3fa54d59eb7427e0cf5edf2377c3",
+      "name": "gtm-motions",
+      "domain": "gtm-motions",
+      "spdxLicense": "MIT",
+      "author": "Pawel Huryn",
+      "licenseTextPath": "licenses/phuryn-pm-skills/LICENSE",
+      "noticeTextPath": null,
+      "hasScripts": false,
+      "upstreamEvalsPath": null,
+      "validation": {
+        "status": "pass",
+        "spec": "https://agentskills.io/specification",
+        "bodyLines": 151,
+        "descriptionLength": 254,
+        "referencedFiles": [],
+        "issues": [],
+        "warnings": [],
+        "report": "VALIDATION.md#gtm-motions"
+      },
+      "securityReview": {
+        "promptInjectionRisk": "不适用：输入为产品与市场信息。",
+        "externalLinks": 4,
+        "externalLinkDomains": {
+          "www.productcompass.pm": 4
+        },
+        "marketingContent": "有：Further Reading 指向作者付费通讯 productcompass.pm；正文工具清单含大量厂商名（作为示例）；导入前删除推广链接并中性化厂商清单。",
+        "personalData": "低。",
+        "approvalRequired": false,
+        "approvalChainActions": [],
+        "toolBrokerMapping": {
+          "suggestedAllowedTools": [],
+          "unsupportedToolTypes": [],
+          "note": "allowed-tools 仅提示；实际执行以绑定 AI Task 的 ToolBroker 白名单为准。CRM/邮件/日历/转录/销售序列/厂商富集 API 目前无 ToolBroker 合同，新增前不得启用。"
+        },
+        "report": "SECURITY-REVIEW.md#gtm-motions"
+      },
+      "goldenSet": {
+        "caseCount": 5,
+        "report": "GOLDEN-SET.md#gtm-motions"
+      },
+      "importRecommendation": "C",
+      "importBlockers": [
+        "frontmatter 需补 license 字段",
+        "frontmatter 需补 allowed-tools，且与绑定 AI Task 的 allowedTools 集合严格相等",
+        "需去营销化编辑",
+        "需把 $ARGUMENTS 改为引擎输入契约"
+      ],
+      "owner": "UNASSIGNED",
+      "exitPlan": "S1 Golden Set 未通过、或自本目录登记起 180 天内未接入运行时/未被产品负责人保留，则从 catalog 移除并归档到 _archive。",
+      "notes": "使用 $ARGUMENTS 传参，导入版需改为引擎输入契约。"
+    }
+  ],
+  "excludedSources": [
+    {
+      "id": "LeadMagic-gtm-skills",
+      "repo": "https://github.com/LeadMagic/gtm-skills",
+      "commit": "2b7ec0f9e7044f46e4c77b536f486303fd863e28",
+      "commitDate": "2026-10-14",
+      "spdx": "MIT",
+      "skillCount": 211,
+      "reason": "211/211 技能均自带 scripts/check-output.py，按 v1 规则（排除 scripts/）整源不导入；正文大量绑定厂商数据源且需去营销化审校。可作为后续 borrow-only/clean-room 的参考资料。"
+    },
+    {
+      "id": "LaGrowthMachine-gtm-system",
+      "repo": "https://github.com/LaGrowthMachine/gtm-system",
+      "commit": "fb0155a78d28efa6c75be232e389817f14115210",
+      "commitDate": "2026-10-07",
+      "spdx": "MIT",
+      "skillCount": 13,
+      "reason": "技能与 La Growth Machine 数据/MCP 强绑定（读取其活动数据、经其发送），5 个技能自带 scripts/；厂商 API 绑定，整源不导入。"
+    }
+  ]
+}
