@@ -139,12 +139,16 @@ function makePrisma(state: {
   return { prisma, tx, jobUpserts, jobUpdates, events, leadUpserts, phaseUpdates, shadowUpserts };
 }
 
-function makeActivities(state: Parameters<typeof makePrisma>[0]) {
+function makeActivities(
+  state: Parameters<typeof makePrisma>[0],
+  skills?: import('../skills/skill-runtime').SkillResolver,
+) {
   const harness = makePrisma(state);
   const activities = createRun2Activities({
     prisma: harness.prisma as never,
     gateway: {} as never,
     budgetStore: { attestAuthorized: vi.fn(async () => undefined) } as never,
+    ...(skills ? { skills } : {}),
   });
   return { activities, ...harness };
 }
@@ -226,6 +230,30 @@ describe('M0③ quickJudgeBatch', () => {
     expect(mocks.judgeFitCompany).toHaveBeenCalledTimes(2);
     expect(result).toMatchObject({ judged: 2, fallbackPerCompany: 2, verdicts: { match: 2 } });
     expect(jobUpdates.every((u) => u.data.stage === 'quick_judged')).toBe(true);
+  });
+
+  it('refuses to degrade when the qualify_fit skill is disabled (kill switch)', async () => {
+    const { SkillUnavailableError } = await import('../skills/skill-runtime');
+    const disabledSkill = {
+      kind: 'db' as const,
+      resolve: vi.fn(async () => {
+        throw new SkillUnavailableError('SKILL_PLATFORM_DISABLED', 'ops kill switch');
+      }),
+    };
+    const { activities } = makeActivities(
+      {
+        jobs: [
+          { id: 'j1', canonicalCompanyId: 'c1' },
+          { id: 'j2', canonicalCompanyId: 'c2' },
+        ],
+        companies: [company('c1'), company('c2')],
+      },
+      disabledSkill,
+    );
+
+    await expect(activities.quickJudgeBatch(ARGS)).rejects.toBeInstanceOf(SkillUnavailableError);
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.judgeFitCompany).not.toHaveBeenCalled();
   });
 
   it('falls back to a weak rule verdict when the model is unavailable for a company (Q20)', async () => {
