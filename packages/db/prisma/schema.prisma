@@ -761,6 +761,7 @@ model OutboxEvent {
 
   @@index([publishedAt])
   @@index([workspaceId])
+  @@index([eventType, occurredAt], map: "outbox_event_type_occurred_idx")
   @@map("outbox_event")
 }
 
@@ -1474,11 +1475,58 @@ model DiscoveryRun {
   materializationRunReceipt DiscoveryCompanyMaterializationRunReceipt?
   companyJobs               DiscoveryCompanyJob[]
   runEvents                 RunEvent[]
+  memEpisodes               MemRunEpisode[]
 
   @@unique([workspaceId, id], map: "discovery_run_workspace_id_id_key")
   @@index([workspaceId])
   @@index([planId])
   @@map("discovery_run")
+}
+
+/// D-MA-7 记忆层 v0（episodic）：append-only 的 run 事件记忆。
+/// 同一 (workspace, workflow, run, phase) 恰一行；phase = run_completed | results_backfilled。
+/// 设计见 docs/superpowers/plans/2026-11-08-memory-layer-v0.md（APPROVED）。
+model MemRunEpisode {
+  id                    String   @id @default(uuid()) @db.Uuid
+  workspaceId           String   @map("workspace_id") @db.Uuid
+  workflowType          String   @map("workflow_type") @db.VarChar(32)
+  runId                 String   @map("run_id") @db.Uuid
+  phase                 String   @db.VarChar(32)
+  occurredAt            DateTime @map("occurred_at") @db.Timestamp(3)
+  sourceEventId         String   @map("source_event_id") @db.Uuid
+  payload               Json
+  provenance            Json
+  privacyClassification String   @map("privacy_classification") @db.VarChar(32)
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+
+  run DiscoveryRun @relation(fields: [workspaceId, runId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict, map: "mem_run_episode_run_fkey")
+
+  @@unique([workspaceId, workflowType, runId, phase], map: "mem_run_episode_key")
+  @@index([workspaceId, workflowType, runId, occurredAt], map: "mem_run_episode_lookup_idx")
+  @@index([sourceEventId], map: "mem_run_episode_event_idx")
+  @@map("mem_run_episode")
+}
+
+/// D-MA-7 记忆层 v0（semantic）：Beta-Binomial 统计，只追加版本（valid_from/valid_to）。
+/// 只有受信服务角色 memory_semantic_writer 可写；v0 无生产写入代码。
+model MemKnowledgeStat {
+  id                    String    @id @default(uuid()) @db.Uuid
+  workspaceId           String    @map("workspace_id") @db.Uuid
+  scopeType             String    @map("scope_type") @db.VarChar(32)
+  scopeKey              String    @map("scope_key") @db.VarChar(200)
+  statKey               String    @map("stat_key") @db.VarChar(64)
+  successes             Int
+  failures              Int
+  validFrom             DateTime  @map("valid_from") @db.Timestamp(3)
+  validTo               DateTime? @map("valid_to") @db.Timestamp(3)
+  supersedesId          String?   @map("supersedes_id") @db.Uuid
+  provenance            Json
+  privacyClassification String    @map("privacy_classification") @db.VarChar(32)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamp(3)
+
+  @@unique([workspaceId, scopeType, scopeKey, statKey, validFrom], map: "mem_knowledge_stat_key")
+  @@index([workspaceId, scopeType, scopeKey, statKey, validFrom], map: "mem_knowledge_stat_lookup_idx")
+  @@map("mem_knowledge_stat")
 }
 
 /// Run 2.0（M0）：公司级流水线状态（每家 × 每 run 一行）。stage 状态机见

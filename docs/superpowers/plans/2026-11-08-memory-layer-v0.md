@@ -265,7 +265,7 @@ buildMemoryBrief(input: {
 ## 6. 幂等与重试
 
 1. **写入幂等**：两表唯一键 + `INSERT … ON CONFLICT DO NOTHING`（或 Prisma `createMany({skipDuplicates:true})`）；每事件一个事务，失败整条回滚，下一轮重试。
-2. **扫描幂等**：消费者用**独立 owner 连接**（与 relay 同模式）从 `outbox_event` 按 `event_type IN (...)` 且 `occurred_at >= now() - lookback` **只读**扫描（绝不更新 `publishedAt`/`parkedAt`，不影响 relay 分流），按 `id ASC` 处理；不维护游标表。重复扫描是 no-op，重启后窗口内自动补齐。
+2. **扫描幂等**：消费者用**独立 owner 连接**（与 relay 同模式）从 `outbox_event` 按 `event_type IN (...)` 且 `occurred_at >= now() - lookback` **只读**扫描（绝不更新 `publishedAt`/`parkedAt`，不影响 relay 分流），按 **`id DESC`（新事件优先）** 处理；不维护游标表。v0 明确不回填历史；回看窗口只用于失败重试与迟到事件。若单批（默认 100/60s）被突发事件打满，较旧事件可能不被处理（可观测、可调批量）——不引入游标表是 v0 的取舍。
 3. **并发**：v0 单副本部署，依赖唯一键幂等兜底；多副本时每个事件可再加 `pg_try_advisory_xact_lock(hashtextextended('mem-episode:'||event_id,0))`（写事务内），拿不到就跳过——advisory lock 不是 v0 的前置条件，避免长事务。
 4. **事件解析失败**：记录 error 日志 + 事件 id，不写半行；该事件在窗口内会反复失败（可观测），不阻塞其他事件；提供运维手册（停用开关/修 payload/重放）。
 5. **消费者关闭**：`MEMORY_LAYER_V0_ENABLED=false` 时不启动轮询；已有数据保留。

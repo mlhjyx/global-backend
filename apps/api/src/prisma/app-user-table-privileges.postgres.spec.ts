@@ -872,3 +872,122 @@ describe.runIf(Boolean(ownerUrl && appUrl))('app_user table privileges on Postgr
     expect(outcomes).toEqual(attempts.map(([relname, privilege]) => `${relname} ${privilege} denied`));
   }, 180_000);
 });
+
+describe.runIf(Boolean(ownerUrl && appUrl))('memory layer v0 on PostgreSQL', () => {
+  let owner: PrismaClient;
+  let app: PrismaClient;
+  const wsA = randomUUID();
+  const wsB = randomUUID();
+  const runA = randomUUID();
+  const runB = randomUUID();
+
+  beforeAll(async () => {
+    owner = new PrismaClient({ datasourceUrl: ownerUrl });
+    app = new PrismaClient({ datasourceUrl: appUrl });
+    await owner.$executeRaw`
+      INSERT INTO "discovery_run"
+        ("id", "workspace_id", "plan_id", "icp_id", "status", "completed_at",
+         "materialization_contract_version")
+      VALUES (${runA}::uuid, ${wsA}::uuid, ${randomUUID()}::uuid, ${randomUUID()}::uuid, 'DONE', now(),
+              'discovery-company-materialization/v1'),
+             (${runB}::uuid, ${wsB}::uuid, ${randomUUID()}::uuid, ${randomUUID()}::uuid, 'DONE', now(),
+              'discovery-company-materialization/v1')`;
+    await owner.$executeRaw`
+      INSERT INTO "mem_run_episode"
+        ("id", "workspace_id", "workflow_type", "run_id", "phase", "occurred_at",
+         "source_event_id", "payload", "provenance", "privacy_classification")
+      VALUES (${randomUUID()}::uuid, ${wsA}::uuid, 'discovery', ${runA}::uuid, 'run_completed', now(),
+              ${randomUUID()}::uuid, '{"status":"DONE"}'::jsonb, '{"eventType":"DiscoveryRunCompleted"}'::jsonb, 'CONFIDENTIAL'),
+             (${randomUUID()}::uuid, ${wsB}::uuid, 'discovery', ${runB}::uuid, 'run_completed', now(),
+              ${randomUUID()}::uuid, '{"status":"DONE"}'::jsonb, '{"eventType":"DiscoveryRunCompleted"}'::jsonb, 'CONFIDENTIAL')`;
+    await owner.$executeRaw`
+      INSERT INTO "mem_knowledge_stat"
+        ("id", "workspace_id", "scope_type", "scope_key", "stat_key", "successes", "failures",
+         "valid_from", "provenance", "privacy_classification")
+      VALUES (${randomUUID()}::uuid, ${wsA}::uuid, 'workspace', ${wsA}, 'qualify_rate', 10, 5,
+              now(), '{"source":"lead"}'::jsonb, 'CONFIDENTIAL'),
+             (${randomUUID()}::uuid, ${wsB}::uuid, 'workspace', ${wsB}, 'qualify_rate', 10, 5,
+              now(), '{"source":"lead"}'::jsonb, 'CONFIDENTIAL')`;
+  });
+
+  afterAll(async () => {
+    await owner.$executeRaw`DELETE FROM "mem_run_episode" WHERE "workspace_id" IN (${wsA}::uuid, ${wsB}::uuid)`;
+    await owner.$executeRaw`DELETE FROM "mem_knowledge_stat" WHERE "workspace_id" IN (${wsA}::uuid, ${wsB}::uuid)`;
+    await owner.$executeRaw`DELETE FROM "discovery_run" WHERE "id" IN (${runA}::uuid, ${runB}::uuid)`;
+    await Promise.all([owner?.$disconnect(), app?.$disconnect()]);
+  });
+
+  it('hides the other workspace’s episodes and statistics under RLS', async () => {
+    await app.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${wsA}, true)`;
+      const episodes = await tx.$queryRaw<{ workspace_id: string }[]>`
+        SELECT "workspace_id"::text FROM "mem_run_episode"
+        WHERE "workspace_id" IN (${wsA}::uuid, ${wsB}::uuid)`;
+      const stats = await tx.$queryRaw<{ workspace_id: string }[]>`
+        SELECT "workspace_id"::text FROM "mem_knowledge_stat"
+        WHERE "workspace_id" IN (${wsA}::uuid, ${wsB}::uuid)`;
+      expect(episodes.map((row) => row.workspace_id)).toEqual([wsA]);
+      expect(stats.map((row) => row.workspace_id)).toEqual([wsA]);
+    });
+  });
+
+  it('denies app_user INSERT on semantic statistics (anti-poisoning)', async () => {
+    let denied: string | null = null;
+    try {
+      await app.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${wsA}, true)`;
+        await tx.$executeRaw`
+          INSERT INTO "mem_knowledge_stat"
+            ("id", "workspace_id", "scope_type", "scope_key", "stat_key", "successes", "failures",
+             "valid_from", "provenance", "privacy_classification")
+          VALUES (${randomUUID()}::uuid, ${wsA}::uuid, 'workspace', ${wsA}, 'probe', 1, 0,
+                  now(), '{}'::jsonb, 'CONFIDENTIAL')`;
+      });
+    } catch (error) {
+      denied = permissionDeniedTable(error);
+    }
+    expect(denied).toBe('mem_knowledge_stat');
+  });
+
+  it('denies app_user UPDATE and DELETE on episodes', async () => {
+    const statements = [
+      () =>
+        app.$executeRaw`UPDATE "mem_run_episode" SET "phase" = 'run_completed' WHERE "workspace_id" = ${wsA}::uuid`,
+      () =>
+        app.$executeRaw`DELETE FROM "mem_run_episode" WHERE "workspace_id" = ${wsA}::uuid`,
+    ];
+    for (const run of statements) {
+      let denied: string | null = null;
+      try {
+        await run();
+      } catch (error) {
+        denied = permissionDeniedTable(error);
+      }
+      expect(denied).toBe('mem_run_episode');
+    }
+  });
+
+  it('allows app_user INSERT inside its workspace and rejects a cross-workspace row', async () => {
+    await rolledBack(app, async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${wsA}, true)`;
+      await tx.$executeRaw`
+        INSERT INTO "mem_run_episode"
+          ("id", "workspace_id", "workflow_type", "run_id", "phase", "occurred_at",
+           "source_event_id", "payload", "provenance", "privacy_classification")
+        VALUES (${randomUUID()}::uuid, ${wsA}::uuid, 'discovery', ${runA}::uuid, 'results_backfilled', now(),
+                ${randomUUID()}::uuid, '{"scored":1}'::jsonb, '{"eventType":"LeadsScored"}'::jsonb, 'CONFIDENTIAL')`;
+    });
+
+    await expect(
+      rolledBack(app, async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${wsA}, true)`;
+        await tx.$executeRaw`
+          INSERT INTO "mem_run_episode"
+            ("id", "workspace_id", "workflow_type", "run_id", "phase", "occurred_at",
+             "source_event_id", "payload", "provenance", "privacy_classification")
+          VALUES (${randomUUID()}::uuid, ${wsB}::uuid, 'discovery', ${runB}::uuid, 'results_backfilled', now(),
+                  ${randomUUID()}::uuid, '{"scored":1}'::jsonb, '{"eventType":"LeadsScored"}'::jsonb, 'CONFIDENTIAL')`;
+      }),
+    ).rejects.toThrow(/row-level security/);
+  });
+});

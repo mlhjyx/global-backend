@@ -9,6 +9,7 @@ import { ModelGatewayModule } from './model-gateway/model-gateway.module';
 import { TemporalModule } from './temporal/temporal.module';
 import { SweepSchedulerService } from './temporal/sweep-scheduler.service';
 import { RelayModule } from './relay/relay.module';
+import { MemoryModule } from './memory/memory.module';
 import { HealthController } from './health/health.controller';
 import { WhoamiController } from './whoami/whoami.controller';
 import { CompanyModule } from './company/company.module';
@@ -55,6 +56,7 @@ import { PlatformRevocationHttpModule } from './platform-authority/platform-revo
     ModelRuntimeModule,
     TemporalModule,
     RelayModule,
+    MemoryModule,
     CompanyModule,
     ClaimModule,
     IcpModule,
