@@ -7,6 +7,16 @@
     "approvedAt": "2026-11-08",
     "scope": "M1.5 外部技能导入试点：目录与合规准备（不含运行时集成；S0 见 PR #831）"
   },
+  "firstBatchSelection": {
+    "decidedAt": "2026-11-08",
+    "decidedBy": "product-owner",
+    "batch": "A",
+    "skills": [
+      "kwp-sales-account-research",
+      "kwp-sales-lead-triage"
+    ],
+    "note": "产品负责人 2026-11-08 选定 A 档 2 个进入 S1；B/C 档保留在 catalog，未入选首批。"
+  },
   "policies": {
     "licenseTiers": {
       "MIT/Apache-2.0": "可导入，保留许可证与来源",

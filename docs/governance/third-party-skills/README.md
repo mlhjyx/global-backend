@@ -4,7 +4,7 @@
 > 状态：`CURRENT`
 > 最后核验：2026-11-08
 > 决策：D-MA-5（2026-11-08 产品负责人批准，出自 §0.7「外部技能导入从 S3 远期提升为 M1.5 试点 + S1 精选导入」）
-> 进展：目录与合规材料完成，等待产品负责人挑选首批名单；本目录**不含运行时集成**
+> 进展：首批已选定 A 档 2 个（account-research、lead-triage，2026-11-08）；本目录**不含运行时集成**
 > 机器事实源：[`THIRD_PARTY_SKILLS.json`](THIRD_PARTY_SKILLS.json)
 
 本目录回答五个问题：哪些外部技能可导入、许可证是什么、正文是否符合 SKILL.md 规范、安全与合规风险在哪、导入后如何验收。Skill Runtime（S0：validator、`skill_package`/`skill_version`/`skill_enablement` 三表）由另一条泳道负责，设计文档已随 PR #831 合入 [`2026-11-08-skill-runtime-s0.md`](../../superpowers/plans/2026-11-08-skill-runtime-s0.md)；本目录不依赖、也不修改它。
