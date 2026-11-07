@@ -6192,6 +6192,79 @@
         "description": "驳回一条待审事实：NEEDS_REVIEW → REVOKED。需要 acquisition:review。"
       }
     },
+    "/api/v1/companies/{companyId}/claim-drafts": {
+      "post": {
+        "operationId": "ClaimController_synthesizeDrafts_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "把注册引导/档案里的主营产品、行业、目标市场确定性映射为待审事实草稿；批准后 ICP 生成不再被 NO_APPROVED_CLAIMS 阻断。重复调用按归一化语句去重。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "created",
+                        "skipped",
+                        "claims"
+                      ],
+                      "properties": {
+                        "created": {
+                          "type": "number",
+                          "description": "本次新建的草稿数量"
+                        },
+                        "skipped": {
+                          "type": "number",
+                          "description": "因既有同文事实或 REVOKED 去重而跳过的数量"
+                        },
+                        "claims": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          },
+                          "description": "本次新建的 Claim 草稿（NEEDS_REVIEW，带注册引导证据）"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "description": "从公司档案确定性生成的 Claim 草稿（幂等：重复调用不再新增）"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "从公司档案生成企业事实草稿（NEEDS_REVIEW，幂等，不消费 Grant）",
+        "tags": [
+          "Claims"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
+        ],
+        "description": "从公司档案确定性生成待审事实草稿（NEEDS_REVIEW）：主营产品 → capability、行业 → company_fact、目标市场 → market，证据记为「注册引导填写」。不调用模型、不消费 Grant；按归一化语句幂等去重，REVOKED 的语句不复活。批准任意一条后 ICP 生成不再被 NO_APPROVED_CLAIMS 阻断。需要 acquisition:review。"
+      }
+    },
     "/api/v1/claims/{claimId}/revoke": {
       "post": {
         "operationId": "ClaimController_revoke_v1",
@@ -18335,6 +18408,314 @@
         ],
         "description": "重试解析：仅 failed_terminal 或 queued 状态可调用，重置错误码后重新入队（202）。需要 acquisition:write。"
       }
+    },
+    "/api/v1/skills": {
+      "get": {
+        "operationId": "SkillsController_list_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "技能列表（平台目录 + 当前版本 + 启停状态）",
+        "tags": [
+          "Skills"
+        ],
+        "x-required-scopes": [
+          "ops:read"
+        ],
+        "description": "列出平台技能目录：技能键、pack_type、启停状态与当前版本；仅运营身份（ops:read）可读，租户调用返回 403。"
+      }
+    },
+    "/api/v1/skills/{skillKey}/workspaces/{workspaceId}": {
+      "get": {
+        "operationId": "SkillsController_workspaceEnablement_v1",
+        "parameters": [
+          {
+            "name": "skillKey",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "workspaceId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "目标 workspace 的技能生效状态（平台状态 + 覆盖行）",
+        "tags": [
+          "Skills"
+        ],
+        "x-required-scopes": [
+          "ops:read"
+        ],
+        "description": "查看目标 workspace 的技能生效状态：平台状态、覆盖行与合成后的 enabled；需要 ops:read。"
+      },
+      "put": {
+        "operationId": "SkillsController_setWorkspaceEnablement_v1",
+        "parameters": [
+          {
+            "name": "skillKey",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "workspaceId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "设置 workspace 级启停覆盖（缺行 = 跟随平台默认）",
+        "tags": [
+          "Skills"
+        ],
+        "x-required-scopes": [
+          "ops:write"
+        ],
+        "description": "设置 workspace 级启停覆盖（幂等 upsert）；删除覆盖行则跟随平台默认；需要 ops:write。"
+      },
+      "delete": {
+        "operationId": "SkillsController_clearWorkspaceEnablement_v1",
+        "parameters": [
+          {
+            "name": "skillKey",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "workspaceId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "删除 workspace 覆盖（回到跟随平台默认）",
+        "tags": [
+          "Skills"
+        ],
+        "x-required-scopes": [
+          "ops:write"
+        ],
+        "description": "删除 workspace 启停覆盖，回到跟随平台默认；重复删除幂等返回 removed=false；需要 ops:write。"
+      }
+    },
+    "/api/v1/skills/{skillKey}": {
+      "get": {
+        "operationId": "SkillsController_detail_v1",
+        "parameters": [
+          {
+            "name": "skillKey",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "技能详情（manifest、正文与版本历史）",
+        "tags": [
+          "Skills"
+        ],
+        "x-required-scopes": [
+          "ops:read"
+        ],
+        "description": "返回单个技能的 manifest、SKILL.md 正文与全部版本历史；未登记返回 404；需要 ops:read。"
+      }
+    },
+    "/api/v1/skills/{skillKey}/status": {
+      "patch": {
+        "operationId": "SkillsController_setStatus_v1",
+        "parameters": [
+          {
+            "name": "skillKey",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "平台级启停（kill switch，所有 workspace 生效）",
+        "tags": [
+          "Skills"
+        ],
+        "x-required-scopes": [
+          "ops:write"
+        ],
+        "description": "平台级启停（kill switch）：DISABLED 后该技能对所有 workspace 停止执行（fail-closed），worker 最迟 30 秒生效；需要 ops:write。"
+      }
     }
   },
   "info": {
@@ -18371,6 +18752,10 @@
     {
       "name": "Channels",
       "description": "渠道数据源：平台渠道注册/治理/试跑（运营身份 ops:*），租户启用与私有导入"
+    },
+    {
+      "name": "Skills",
+      "description": "AI 底座：技能目录、版本与运营启停（ops:read / ops:write）"
     },
     {
       "name": "Reports",
@@ -20850,7 +21235,8 @@
       "tags": [
         "Reports",
         "Events",
-        "Compliance"
+        "Compliance",
+        "Skills"
       ]
     },
     {

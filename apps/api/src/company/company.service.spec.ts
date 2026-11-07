@@ -49,6 +49,12 @@ function fixture(company: Record<string, unknown> | null, options: { pendingEven
     ...data,
   }));
   const offeringCreateMany = vi.fn(async () => ({ count: 0 }));
+  const claimFindMany = vi.fn(async () => []);
+  const claimCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
+    id: `claim-${String(data.type)}`,
+    ...data,
+  }));
+  const evidenceCreate = vi.fn(async () => ({ id: 'evidence-1' }));
   const tx = {
     companyProfile: {
       findUnique: vi.fn(async () => company),
@@ -58,6 +64,12 @@ function fixture(company: Record<string, unknown> | null, options: { pendingEven
     offering: { createMany: offeringCreateMany },
     workspace: { upsert: vi.fn(async () => ({})) },
     outboxEvent: { create: outboxCreate, findFirst: outboxFindFirst },
+    claim: { findMany: claimFindMany, create: claimCreate },
+    evidence: { create: evidenceCreate },
+    knowledgeSource: {
+      findFirst: vi.fn(async () => ({ id: 'source-1' })),
+      create: vi.fn(async () => ({ id: 'source-new' })),
+    },
   };
   const prisma = {
     withWorkspace: vi.fn(async (_ws: string, fn: (t: typeof tx) => unknown) => fn(tx)),
@@ -82,6 +94,8 @@ function fixture(company: Record<string, unknown> | null, options: { pendingEven
     tx,
     companyCreate,
     offeringCreateMany,
+    claimCreate,
+    evidenceCreate,
   };
 }
 
@@ -169,6 +183,37 @@ describe('CompanyService.create（D16/D17：注册引导字段与无官网建档
       ],
       skipDuplicates: true,
     });
+  });
+
+  it('注册引导档案事实自动生成待审 Claim 草稿（P5：解 NO_APPROVED_CLAIMS 断点）', async () => {
+    const { service, claimCreate, evidenceCreate } = fixture(created);
+    await service.create(
+      CTX,
+      {
+        name: '具安科技',
+        industry: '汽车零部件',
+        targetMarkets: ['DE', 'US'],
+        products: ['精密轴承'],
+      },
+      undefined,
+      'jws',
+    );
+    expect(claimCreate).toHaveBeenCalledTimes(3);
+    expect(claimCreate.mock.calls.map((call) => call[0].data.statement)).toEqual([
+      '主营产品/服务：精密轴承',
+      '所属行业：汽车零部件',
+      '目标出口市场：DE、US',
+    ]);
+    expect(claimCreate.mock.calls.every((call) => call[0].data.status === 'NEEDS_REVIEW')).toBe(true);
+    expect(claimCreate.mock.calls.every((call) => call[0].data.originKey === undefined)).toBe(true);
+    expect(claimCreate.mock.calls.every((call) => call[0].data.factKey === undefined)).toBe(true);
+    expect(evidenceCreate).toHaveBeenCalledTimes(3);
+  });
+
+  it('档案无产品/行业/市场时不生成草稿', async () => {
+    const { service, claimCreate } = fixture(created);
+    await service.create(CTX, { name: '具安科技' }, undefined, 'jws');
+    expect(claimCreate).not.toHaveBeenCalled();
   });
 
   it('website 与 name 都缺省时 400，且不验签', async () => {

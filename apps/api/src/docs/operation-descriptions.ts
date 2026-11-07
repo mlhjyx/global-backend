@@ -79,6 +79,8 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '列出该企业的事实（Claim），可用 ?status=NEEDS_REVIEW 过滤；每条带来源与状态。',
   'POST /api/v1/companies/{companyId}/claims':
     '手工录入一条企业事实（KNW-001 手工路径）。它与自动抽取的事实走同一套审批生命周期，初始状态为待审。',
+  'POST /api/v1/companies/{companyId}/claim-drafts':
+    '从公司档案确定性生成待审事实草稿（NEEDS_REVIEW）：主营产品 → capability、行业 → company_fact、目标市场 → market，证据记为「注册引导填写」。不调用模型、不消费 Grant；按归一化语句幂等去重，REVOKED 的语句不复活。批准任意一条后 ICP 生成不再被 NO_APPROVED_CLAIMS 阻断。需要 acquisition:review。',
   'POST /api/v1/claims/{claimId}/approve':
     '审批通过一条待审事实：NEEDS_REVIEW → APPROVED，并发出 ClaimApproved 事件供下游使用。需要 acquisition:review。',
   'POST /api/v1/claims/{claimId}/reject':
@@ -243,4 +245,17 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '计算 intake 的内部技术预算包络：零模型调用、零工作流、零持久写入，纯计算。',
   'POST /api/v1/site-builder/sites/{id}/build-budget-quote':
     '计算 refurbish 的内部技术预算包络；不构成客户报价，也不限制余额。',
+  // ── Skills（AI 底座 · S0）──────────────────────────────────────────────────
+  'GET /api/v1/skills':
+    '列出平台技能目录：技能键、pack_type、启停状态与当前版本；仅运营身份（ops:read）可读，租户调用返回 403。',
+  'GET /api/v1/skills/{skillKey}':
+    '返回单个技能的 manifest、SKILL.md 正文与全部版本历史；未登记返回 404；需要 ops:read。',
+  'GET /api/v1/skills/{skillKey}/workspaces/{workspaceId}':
+    '查看目标 workspace 的技能生效状态：平台状态、覆盖行与合成后的 enabled；需要 ops:read。',
+  'PATCH /api/v1/skills/{skillKey}/status':
+    '平台级启停（kill switch）：DISABLED 后该技能对所有 workspace 停止执行（fail-closed），worker 最迟 30 秒生效；需要 ops:write。',
+  'PUT /api/v1/skills/{skillKey}/workspaces/{workspaceId}':
+    '设置 workspace 级启停覆盖（幂等 upsert）；删除覆盖行则跟随平台默认；需要 ops:write。',
+  'DELETE /api/v1/skills/{skillKey}/workspaces/{workspaceId}':
+    '删除 workspace 启停覆盖，回到跟随平台默认；重复删除幂等返回 removed=false；需要 ops:write。',
 });

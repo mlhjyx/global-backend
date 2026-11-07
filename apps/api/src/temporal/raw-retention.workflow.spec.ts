@@ -95,9 +95,93 @@ describe("rawRetentionSweepWorkflow deterministic orchestration", () => {
       workspaceLimit: 1,
       batchSize: 10,
       workspacePagesPerRun: 1,
+      // B1（L01）：循环上界随输入继续传递（旧历史缺字段 → 冻结默认）。
+      maxPagesPerRun: 5,
+      maxBatchesPerWorkspace: 20,
+      maxBudgetReconcileBatches: 5,
       afterWorkspaceId: "ws-1",
       accumulated: { workspaces: 1, expired: 2, deferredForConflict: 0 },
     });
+  });
+
+  it("bounds the per-workspace batches by the recorded input instead of the constant (B1/L01)", async () => {
+    acts.listRawRetentionWorkspaces.mockResolvedValue({
+      workspaceIds: ["ws-locked"],
+      nextCursor: null,
+    });
+    acts.expireRawSourceRecords.mockResolvedValue({
+      expired: 0,
+      deferredForConflict: 1,
+    });
+
+    await expect(
+      rawRetentionSweepWorkflow({ batchSize: 1, maxBatchesPerWorkspace: 2 }),
+    ).rejects.toThrow("RAW_RETENTION_WORKSPACE_FAILURE:1");
+    expect(acts.expireRawSourceRecords).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds the budget reconcile loop by its own recorded input (B1/L01)", async () => {
+    acts.listRawRetentionWorkspaces.mockResolvedValue({
+      workspaceIds: ["ws-1"],
+      nextCursor: null,
+    });
+    acts.expireRawSourceRecords.mockResolvedValue({ expired: 0, deferredForConflict: 0 });
+    acts.reconcileStaleToolBudgetOperations.mockResolvedValue({ released: 1, hasMore: true });
+
+    await rawRetentionSweepWorkflow({ batchSize: 10, maxBudgetReconcileBatches: 2 });
+
+    // 上限来自 maxBudgetReconcileBatches（2），不是 maxBatchesPerWorkspace 或常量 5。
+    expect(acts.reconcileStaleToolBudgetOperations).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds the pages loop by maxPagesPerRun and marks the sweep incomplete for continueAsNew (B1/L01)", async () => {
+    acts.listRawRetentionWorkspaces.mockResolvedValue({
+      workspaceIds: ["ws-1"],
+      nextCursor: "ws-1",
+    });
+    acts.expireRawSourceRecords.mockResolvedValue({ expired: 1, deferredForConflict: 0 });
+    temporal.continueAsNew.mockResolvedValue(undefined);
+
+    await rawRetentionSweepWorkflow({
+      workspaceLimit: 1,
+      batchSize: 10,
+      workspacePagesPerRun: 5,
+      maxPagesPerRun: 3,
+    });
+
+    expect(acts.listRawRetentionWorkspaces).toHaveBeenCalledTimes(3);
+    expect(temporal.continueAsNew).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspacePagesPerRun: 3,
+        maxPagesPerRun: 3,
+      }),
+    );
+  });
+
+  it("carries non-default caps into the next generation (B1/L01)", async () => {
+    acts.listRawRetentionWorkspaces.mockResolvedValue({
+      workspaceIds: ["ws-1"],
+      nextCursor: "ws-1",
+    });
+    acts.expireRawSourceRecords.mockResolvedValue({ expired: 1, deferredForConflict: 0 });
+    temporal.continueAsNew.mockResolvedValue(undefined);
+
+    await rawRetentionSweepWorkflow({
+      workspaceLimit: 1,
+      batchSize: 10,
+      workspacePagesPerRun: 1,
+      maxPagesPerRun: 4,
+      maxBatchesPerWorkspace: 7,
+      maxBudgetReconcileBatches: 3,
+    });
+
+    expect(temporal.continueAsNew).toHaveBeenCalledWith(
+      expect.objectContaining({
+        maxPagesPerRun: 4,
+        maxBatchesPerWorkspace: 7,
+        maxBudgetReconcileBatches: 3,
+      }),
+    );
   });
 
   it("expires the personal-data access audit per workspace until no due row remains", async () => {

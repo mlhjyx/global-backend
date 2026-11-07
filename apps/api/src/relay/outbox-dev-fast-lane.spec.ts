@@ -1,5 +1,5 @@
 import { Connection, WorkflowIdReusePolicy } from "@temporalio/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OutboxRelayService } from "./outbox-relay.service";
 import {
   DEV_FAST_LANE_CONNECT_TIMEOUT_MS,
@@ -210,6 +210,13 @@ function makeService(
   );
 }
 
+beforeEach(() => {
+  // 旋钮 env 的缺省注入断言不受调用者 shell 环境影响（B1/L01）。
+  delete process.env.DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD;
+  delete process.env.DISCOVERY_DEEP_COMPANY_CONCURRENCY;
+  delete process.env.DISCOVERY_QUERY_BATCH_SIZE;
+});
+
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -243,6 +250,10 @@ describe("relay routing with the development fast lane", () => {
             icpId: "icp-1",
             executionContractVersion: 2,
             executionBudget: budget(LANE_WS, "discovery.run", "discovery_run"),
+            // B1（L01）：控制流可调常量显式随启动输入记录（冻结默认值）。
+            run2PoolSearchFallbackThreshold: 20,
+            deepCompanyConcurrency: 16,
+            discoveryQueryBatchSize: 2,
           },
         ],
       },
