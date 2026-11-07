@@ -62,7 +62,7 @@ const SCHEMA = join(REPOSITORY_ROOT, 'packages/db/prisma/schema.prisma');
 const MIGRATIONS = join(REPOSITORY_ROOT, 'packages/db/prisma/migrations');
 const RELEASE_B = '20261011100000_discovery_company_materialization_activation';
 const CONTRACT_SHA256 = '558e526a674a7eac4e5e83d03fcf4f635c15b1b3081cffc7f03c2d9213c0c9fe';
-const Q_CONTRACT_SHA256 = 'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c';
+const Q_CONTRACT_SHA256 = '7b29dc8ff4fa261f3dd79dc593b0ef88b4080a62083be5867a4c221c82bf0f37';
 const A_CONTRACT_SHA256 = 'dd2f4144f58de22f7415dfc11be56c4828c137e52d34e916852e64cfde38a2e1';
 const TIMEOUT = 300_000;
 

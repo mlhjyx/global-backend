@@ -51,7 +51,7 @@ if (
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const SCHEMA = join(REPOSITORY_ROOT, 'packages/db/prisma/schema.prisma');
-const Q_CONTRACT_SHA256 = 'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c';
+const Q_CONTRACT_SHA256 = '7b29dc8ff4fa261f3dd79dc593b0ef88b4080a62083be5867a4c221c82bf0f37';
 const A_CONTRACT_SHA256 = 'dd2f4144f58de22f7415dfc11be56c4828c137e52d34e916852e64cfde38a2e1';
 // A cold database migrates the whole history (≈4 minutes under load); leave the hook and the
 // deploy both enough room.

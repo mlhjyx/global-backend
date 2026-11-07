@@ -289,12 +289,12 @@ const REGISTERED_DISCOVERY_SOURCES = Object.freeze([
   { sourceClass: "public_intelligence", providerKey: "public_web", hasCompanyLineage: true },
   { sourceClass: "industry_data", providerKey: "public_web", hasCompanyLineage: true },
   { sourceClass: "industry_data", providerKey: "directory", hasCompanyLineage: true },
-  { sourceClass: "company_registry", providerKey: "wikidata", hasCompanyLineage: false },
-  { sourceClass: "industry_data", providerKey: "wikidata", hasCompanyLineage: false },
-  { sourceClass: "industry_data", providerKey: "openstreetmap", hasCompanyLineage: false },
+  { sourceClass: "company_registry", providerKey: "wikidata", hasCompanyLineage: true },
+  { sourceClass: "industry_data", providerKey: "wikidata", hasCompanyLineage: true },
+  { sourceClass: "industry_data", providerKey: "openstreetmap", hasCompanyLineage: true },
   { sourceClass: "industry_data", providerKey: "trade_fair", hasCompanyLineage: true },
-  { sourceClass: "public_intelligence", providerKey: "ted", hasCompanyLineage: false },
-  { sourceClass: "public_intelligence", providerKey: "openfda", hasCompanyLineage: false },
+  { sourceClass: "public_intelligence", providerKey: "ted", hasCompanyLineage: true },
+  { sourceClass: "public_intelligence", providerKey: "openfda", hasCompanyLineage: true },
 ]);
 
 const QUERY = {
@@ -1357,9 +1357,9 @@ describe("executeQuery —— 数据源在规划后被停用时跳过查询（BI
   it.each([
     ["a switched-off source", DISABLED_QUERY, "SOURCE_DISABLED"],
     [
-      "a source without governed lineage",
-      { ...DISABLED_QUERY, source_class: "company_registry", filters: { source_hint: "wikidata" } },
-      "SOURCE_LINEAGE_UNAVAILABLE",
+      "an unregistered source hint",
+      { ...DISABLED_QUERY, source_class: "industry_data", filters: { source_hint: "customs" } },
+      "SOURCE_UNKNOWN",
     ],
   ])("reports the skip again when a retry replays a zero-provider lineage receipt for %s", async (
     _label,
@@ -1431,8 +1431,15 @@ describe("executeQuery —— 数据源在规划后被停用时跳过查询（BI
   });
 });
 
-describe("executeQuery —— 没有受治理血缘的数据源即使 ENABLED 也不路由（lineage gate）", () => {
+describe("executeQuery —— lineage v3：结构化源在 ENABLED 后进入受治理路由", () => {
   afterEach(() => vi.restoreAllMocks());
+
+  const EMPTY_LINEAGE = Object.freeze({
+    schemaVersion: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+    recordCount: 0,
+    attemptReceipts: Object.freeze([]),
+    receiptCoverage: Object.freeze([]),
+  });
 
   /** executeQuery on the real registry, with every company discovery source ENABLED. */
   function registryDeps() {
@@ -1455,53 +1462,55 @@ describe("executeQuery —— 没有受治理血缘的数据源即使 ENABLED �
     ["OpenStreetMap", OsmDiscoveryProvider, "industry_data", { source_hint: "openstreetmap", industry: "pumps" }],
     ["TED", TedDiscoveryProvider, "public_intelligence", { source_hint: "ted", cpv_codes: ["42122000"] }],
     ["openFDA", OpenFdaDiscoveryProvider, "public_intelligence", { source_hint: "openfda", product_codes: ["LZG"] }],
-  ] as const)("skips an ENABLED %s query with one zero receipt and SOURCE_LINEAGE_UNAVAILABLE", async (
+  ] as const)("routes an ENABLED %s query through the governed path with one zero receipt", async (
     _label,
     Provider,
     sourceClass,
     filters,
   ) => {
-    const discover = vi.spyOn(Provider.prototype, "discoverCompanies");
-    const { deps, taxonomy } = registryDeps();
+    const discover = vi.spyOn(Provider.prototype, "discoverCompanies").mockResolvedValue({
+      records: [],
+      costCents: 0,
+      lineage: EMPTY_LINEAGE,
+    });
+    const { deps } = registryDeps();
     const acts = createDiscoveryActivities(deps);
 
     const result = await acts.executeQuery(discoveryArgs("run-ok-x", {
       query: { source_class: sourceClass, filters: { ...filters }, keywords: [], priority: 1 },
     }));
 
-    expect(discover).not.toHaveBeenCalled();
-    expect(taxonomy.resolveMany).not.toHaveBeenCalled();
+    expect(discover).toHaveBeenCalledOnce();
     expect(result).toMatchObject({
       rawCount: 0,
       costCents: 0,
-      provider: null,
-      skipReason: "SOURCE_LINEAGE_UNAVAILABLE",
-      queryReceipt: { sourceClass, providers: [], accepted: 0, usageQuantity: 0, costCents: 0 },
+      queryReceipt: {
+        sourceClass,
+        providers: [filters.source_hint],
+        accepted: 0,
+        usageQuantity: 0,
+        costCents: 0,
+      },
     });
+    expect(result).not.toHaveProperty("skipReason");
   });
 
-  it("runs only the lineage source of a hint-less query whose class also has ENABLED lineage-less sources", async () => {
-    const ted = vi.spyOn(TedDiscoveryProvider.prototype, "discoverCompanies");
-    const openFda = vi.spyOn(OpenFdaDiscoveryProvider.prototype, "discoverCompanies");
+  it("routes every lineage-capable source of a hint-less query instead of a legacy path", async () => {
+    const empty = async () => ({ records: [], costCents: 0, lineage: EMPTY_LINEAGE });
     const publicWeb = vi.spyOn(PublicWebDiscoveryProvider.prototype, "discoverCompanies")
-      .mockResolvedValue({
-        records: [],
-        costCents: 0,
-        lineage: {
-          schemaVersion: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
-          recordCount: 0,
-          attemptReceipts: [],
-          receiptCoverage: [],
-        },
-      });
+      .mockImplementation(empty);
+    const ted = vi.spyOn(TedDiscoveryProvider.prototype, "discoverCompanies")
+      .mockImplementation(empty);
+    const openFda = vi.spyOn(OpenFdaDiscoveryProvider.prototype, "discoverCompanies")
+      .mockImplementation(empty);
     const acts = createDiscoveryActivities(registryDeps().deps);
 
     const result = await acts.executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
 
     expect(publicWeb).toHaveBeenCalledOnce();
-    expect(ted).not.toHaveBeenCalled();
-    expect(openFda).not.toHaveBeenCalled();
-    expect(result).toMatchObject({ provider: "public_web", queryReceipt: { providers: ["public_web"] } });
+    expect(ted).toHaveBeenCalledOnce();
+    expect(openFda).toHaveBeenCalledOnce();
+    expect(result.provider).toBe("openfda+public_web+ted");
     expect(result).not.toHaveProperty("skipReason");
   });
 });

@@ -222,7 +222,7 @@ describe('pure governed Discovery Q-TX plan builders', () => {
   it('locks canonical lineage and raw-relation descriptor digests', async () => {
     const module = await load();
     expect(module.DISCOVERY_QUERY_LINEAGE_CONTRACT_SHA256).toBe(
-      'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c',
+      '7b29dc8ff4fa261f3dd79dc593b0ef88b4080a62083be5867a4c221c82bf0f37',
     );
     expect(module.DISCOVERY_QUERY_RAW_RELATION_SHA256).toBe(
       'dd2f4144f58de22f7415dfc11be56c4828c137e52d34e916852e64cfde38a2e1',
