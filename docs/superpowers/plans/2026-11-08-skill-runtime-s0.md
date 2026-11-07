@@ -1,7 +1,7 @@
 # M1 步 7 · S0 Skill Runtime v0 落地设计文档（2026-11-08）
 
-> 生命周期：`DRAFT`
-> 生命周期依据：协调计划 `/home/xin/.claude/plans/majestic-floating-robin.md` §0.2 步 7 与 §17.8「S0」；按 §0.6 任务启动门先出设计、经产品负责人过目认可后才进入 TDD；本文件在批准前保持 `DRAFT`。
+> 生命周期：`APPROVED`
+> 生命周期依据：产品负责人 2026-11-08 批准 D-a~D-h 按推荐值（「批准，按推荐」）；依据协调计划 `/home/xin/.claude/plans/majestic-floating-robin.md` §0.2 步 7 与 §17.8「S0」、按 §0.6 任务启动门（设计文档 / 闭环设计 / 联网研究）产出。
 > 任务启动门（计划 §0.6）：① 设计文档（本文）② 闭环设计（§6）③ 联网研究（§13）→ 产品负责人过目批准 → TDD。
 
 ## 1. 背景与目标
@@ -410,6 +410,8 @@ async function executeSkillWithRuntime<Output>(
 结论（借/集/建/避）：**借**标准格式、注册与校验分离、版本摘要钉住、结构化评估结果；**集**无合适现成库（Python 生态不匹配 NestJS；`skills-ref` 仅作对照基准）；**建**仓库内 validator + 受限 frontmatter 解析 + DB 注册表 + 内容寻址快照；**避**分支漂移、运行时执行技能脚本、把 LLM 引入解析/启停决策。
 
 ## 14. 决策点（请产品负责人确认）
+
+> 批准记录：产品负责人 2026-11-08 回复「批准，按推荐」——D-a~D-h 全部按下列推荐值生效。
 
 - **D-a（范围）**：S0 按计划 §17.8 执行，三个 PR 拆分（§11）；不引入新依赖、不动锁文件。
 - **D-b（第三个技能）**：`seller_knowledge.extract_facts` 在代码中不存在（Phase 3 缺口）。**推荐**：以 `company.understanding.extract_offerings` 替代，凑齐 3 个存量技能；备选 A = 只包 2 个技能、第三项等 extract_facts 实现后再包；备选 B = 把 extract_facts 实现并入本步（不推荐，破坏零行为变化）。
