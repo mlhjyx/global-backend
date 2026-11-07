@@ -8,6 +8,10 @@
       {
         "include": "platform-authority/platform-authority-policy-*.json",
         "outDir": "dist"
+      },
+      {
+        "include": "skills/packs/schemas/*.schema.json",
+        "outDir": "dist"
       }
     ]
   }

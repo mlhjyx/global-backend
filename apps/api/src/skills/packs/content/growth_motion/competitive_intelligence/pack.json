@@ -1,0 +1,22 @@
+{
+  "packKey": "growth_motion.competitive_intelligence",
+  "packType": "growth_motion",
+  "version": "1.0.0",
+  "title": "竞争情报检查单（内容包）",
+  "description": "面向获客的竞争者与赢单/输单复盘检查单；去营销化摘要，不执行、不发送。",
+  "priorityClass": "growth_motion",
+  "tags": { "motions": ["competitive_intelligence"] },
+  "owner": "产品负责人 + 平台工程（本工作区）",
+  "license": "Apache-2.0",
+  "notice": "Derived summary of anthropics/knowledge-work-plugins skill competitive-intelligence (Apache-2.0, commit e050c2ec856373787143d7057663a6ebd1277df3). Rewritten in our own words; connector chat semantics and promotion removed; content only, never executed.",
+  "contentPath": "PACK.md",
+  "rules": [],
+  "sources": [
+    {
+      "label": "anthropics/knowledge-work-plugins competitive-intelligence (snapshot in docs/governance/third-party-skills)",
+      "url": "https://github.com/anthropics/knowledge-work-plugins",
+      "retrievedAt": "2026-11-06"
+    }
+  ],
+  "exitPlan": "Golden Set 未通过或 180 天未参与任何解析则下架归档。"
+}
