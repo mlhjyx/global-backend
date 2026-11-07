@@ -551,9 +551,13 @@ describe.runIf(Boolean(ownerUrl && appUrl))('app_user table privileges on Postgr
     const cacheKey = randomUUID().replaceAll('-', '').padEnd(64, '0');
 
     await rolledBack(app, async (tx) => {
+      // workspace 行自身受 RLS 约束（id = current_workspace_id()）：每个 workspace
+      // 必须在其自己的 GUC 下创建，创建后切回 A 继续缓存探针。
       await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceA}, true)`;
       await tx.workspace.create({ data: { id: workspaceA, name: 'cache probe A' } });
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceB}, true)`;
       await tx.workspace.create({ data: { id: workspaceB, name: 'cache probe B' } });
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceA}, true)`;
 
       const db = {
         withWorkspace: async <T>(_workspaceId: string, fn: (client: typeof tx) => Promise<T>) =>
