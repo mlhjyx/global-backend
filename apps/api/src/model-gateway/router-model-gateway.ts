@@ -14,6 +14,7 @@ import {
   BudgetOperationReplayError,
   TOOL_BUDGET_STORE,
   UnavailableBudgetStore,
+  type BudgetReservation,
   type BudgetStore,
 } from "../tools/budget-store";
 import {
@@ -709,7 +710,19 @@ export class RouterModelGateway extends ModelGateway {
                 centsFromTokens(err.usage) ?? baseCents * err.callCount,
               ))
             : centsToMicrousd(reserveCents);
-        await this.budgetStore.settle(reservation, observedMicrousd);
+        try {
+          await this.budgetStore.settle(reservation, observedMicrousd);
+        } catch {
+          // 第一次失败可能是提交后 ACK 丢失：同样的 operation/成本重放一次是安全的。
+          try {
+            await this.budgetStore.settle(reservation, observedMicrousd);
+          } catch {
+            // F4（B2）：物理调用已经发生、记账两次都失败——行不能停在裸 RESERVED。
+            // 尽力标 RESULT_UNKNOWN（结果未知、按预留额保守对待），再抛原 provider 错误
+            // 保持调用方语义不变。
+            await this.markResultUnknownAfterSettleFailure(reservation);
+          }
+        }
       }
       this.trace?.record({
         workspaceId: ctx.workspaceId,
@@ -835,7 +848,33 @@ export class RouterModelGateway extends ModelGateway {
     } catch {
       // The first failure may be an ACK loss after commit. Repeating the exact
       // same operation/cost/projection is safe; PostgreSQL rejects any drift.
-      settled = await this.budgetStore.settle(...settlement);
+      try {
+        settled = await this.budgetStore.settle(...settlement);
+      } catch {
+        // F4（B2）：物理已成功、两次记账都失败——行不能停在裸 RESERVED。先尽力标
+        // RESULT_UNKNOWN，再以确定性错误失败：活动边界把它标 nonRetryable（B2 分类器），
+        // 重试不再反复撞同一行；没有绑定 artifact 的未知结果由清收器按预留额保守结清（B4）。
+        await this.markResultUnknownAfterSettleFailure(reservation);
+        this.trace?.record({
+          workspaceId: ctx.workspaceId,
+          task: input.task,
+          op,
+          provider: result.provider,
+          model: result.model,
+          ...(substitution ? { modelSubstitution: substitution } : {}),
+          status: 'ERROR',
+          errorMessage: 'BUDGET_SETTLE_FAILED',
+          latencyMs: Date.now() - started,
+          inputTokens: result.usage?.inputTokens,
+          outputTokens: result.usage?.outputTokens,
+          correlationId: ctx.correlationId,
+          runId: ctx.runId,
+          modelPolicy: ctx.modelPolicy,
+          budgetOperationId: reservation.operationId,
+          budgetDisposition: 'RESERVED_SETTLE_FAILED',
+        });
+        throw new BudgetOperationReplayError(reservation.operationId);
+      }
     }
     const returnedResult = settled?.receipt
       ? { ...result, durableReceipt: settled.receipt }
@@ -883,6 +922,21 @@ export class RouterModelGateway extends ModelGateway {
         ? undefined
         : this.#modelIdentitySubstitutes.get(model)) ?? []
     );
+  }
+
+  /**
+   * settle 失败后的账本兜底（B2/F4）：物理结果未知的行必须离开裸 RESERVED——
+   * 尽力标 RESULT_UNKNOWN（按预留额保守对待）；兜底自身失败只留 RESERVED，
+   * 由独立清收器按阈值收（B4）。绝不掩盖调用方要抛的主错误。
+   */
+  private async markResultUnknownAfterSettleFailure(
+    reservation: BudgetReservation,
+  ): Promise<void> {
+    try {
+      await this.budgetStore.markResultUnknown(reservation);
+    } catch {
+      /* 账本此刻不可用：行留在 RESERVED，交给清收器 */
+    }
   }
 
   private pricedSettlementMicrousd(

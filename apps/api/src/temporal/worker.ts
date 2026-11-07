@@ -3,6 +3,7 @@ import { settlementReadbackConfigured } from "../runtime/settlement-readback-con
 import "dotenv/config";
 import { resolve } from "node:path";
 import { Runtime, Worker } from "@temporalio/worker";
+import { DETERMINISTIC_LEDGER_FAILURE_INTERCEPTORS } from "./deterministic-ledger-failure.interceptor";
 import { workerIdentity } from "./worker-composition";
 import { createRuntimeMachineTokenClient } from "../platform-authority/machine-token-runtime";
 import {
@@ -566,6 +567,8 @@ async function main(): Promise<void> {
     dataConverter: {
       failureConverterPath: require.resolve("./diagnostic-failure-converter"),
     },
+    // B2（F5）：确定性账本错误在活动边界标 nonRetryable，别让重试预算撞同一行。
+    interceptors: DETERMINISTIC_LEDGER_FAILURE_INTERCEPTORS,
     namespace: "default",
     identity: workerIdentity(
       machine.subject,

@@ -7,7 +7,7 @@ import {
   TestBudgetExceededError as BudgetExceededError,
 } from "@global/test-support";
 import { RateLimiter } from "./rate-limiter";
-import { BudgetStoreUnavailableError, type BudgetStore } from "./budget-store";
+import { BudgetOperationReplayError, BudgetStoreUnavailableError, type BudgetStore } from "./budget-store";
 import { projectGenericOperationResult } from "./generic-operation-projection";
 import { RateLimitStoreUnavailableError } from "./redis-rate-limit-store";
 import { Tool } from "./tool-contract";
@@ -1647,5 +1647,63 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
         errorCode: "TRANSIENT_RESULT_SCOPE_DENIED",
       }),
     );
+  });
+});
+
+describe("ToolBroker — settle 双败的账本兜底（B2/F4）", () => {
+  it("两次 settle 都失败：先标 RESULT_UNKNOWN 再抛确定性 replay 错误", async () => {
+    const tool = durableArtifactTool("t.settle-fail", 1);
+    const reservation = {
+      workspaceId: "w",
+      accountKey: "run",
+      operationId: "op",
+      estimatedMicrousd: BigInt(1) * 10_000n,
+      replay: false,
+    };
+    const settle = vi.fn(async () => {
+      throw new Error("connection reset");
+    });
+    const markResultUnknown = vi.fn(async () => ({
+      reservedMicrousd: reservation.estimatedMicrousd,
+      replay: false,
+    }));
+    const budgetStore = {
+      reserve: vi.fn(async () => reservation),
+      settle,
+      markResultUnknown,
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    await expect(
+      broker.invoke(tool.id, {}, { workspaceId: "w", runId: "run" }),
+    ).rejects.toBeInstanceOf(BudgetOperationReplayError);
+    expect(settle).toHaveBeenCalledTimes(2);
+    expect(markResultUnknown).toHaveBeenCalledTimes(1);
+    expect(markResultUnknown).toHaveBeenCalledWith(reservation);
+  });
+
+  it("markResultUnknown 自身失败不掩盖 replay 错误", async () => {
+    const tool = durableArtifactTool("t.settle-fail-2", 1);
+    const budgetStore = {
+      reserve: vi.fn(async () => ({
+        workspaceId: "w",
+        accountKey: "run",
+        operationId: "op",
+        estimatedMicrousd: BigInt(1) * 10_000n,
+        replay: false,
+      })),
+      settle: vi.fn(async () => {
+        throw new Error("connection reset");
+      }),
+      markResultUnknown: vi.fn(async () => {
+        throw new Error("ledger down too");
+      }),
+    } as unknown as BudgetStore;
+    const { broker } = makeBroker(tool, { budgetStore });
+
+    await expect(
+      broker.invoke(tool.id, {}, { workspaceId: "w", runId: "run" }),
+    ).rejects.toBeInstanceOf(BudgetOperationReplayError);
+    expect(budgetStore.markResultUnknown).toHaveBeenCalledTimes(1);
   });
 });

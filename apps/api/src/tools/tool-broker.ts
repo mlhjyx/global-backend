@@ -859,6 +859,18 @@ export class ToolBroker implements ExecutionBroker {
             // cost and projection. PostgreSQL rejects any settlement drift.
             settled = await this.budget.settle(...settlement);
           } catch {
+            // F4（B2）：物理已成功、两次记账都失败——行不能停在裸 RESERVED。
+            // 尽力标 RESULT_UNKNOWN（结果未知、按预留额保守对待），再以确定性错误
+            // 失败：活动边界把它标 nonRetryable，重试不再反复撞同一行。
+            await this.markResultUnknownAfterSettleFailure(reservation);
+            this.trace(
+              ctx,
+              tool,
+              "ERROR",
+              "settlement failed twice; result marked unknown",
+              0,
+              now() - started,
+            );
             throw new BudgetOperationReplayError(reservation.operationId);
           }
         }
@@ -888,6 +900,20 @@ export class ToolBroker implements ExecutionBroker {
   }
 
   /** Cheap, no-I/O part of the per-call artifact gate. */
+  /**
+   * settle 失败后的账本兜底（B2/F4）：尽力标 RESULT_UNKNOWN，兜底自身失败只留
+   * RESERVED（由独立清收器按阈值收，B4），绝不掩盖调用方要抛的主错误。
+   */
+  private async markResultUnknownAfterSettleFailure(
+    reservation: BudgetReservation,
+  ): Promise<void> {
+    try {
+      await this.budget.markResultUnknown(reservation);
+    } catch {
+      /* 账本此刻不可用：行留在 RESERVED，交给清收器 */
+    }
+  }
+
   private artifactPrecheck<I, O>(
     tool: Tool<I, O>,
     ctx: ToolContext,

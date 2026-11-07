@@ -20,7 +20,7 @@ import {
 } from '@global/test-support';
 import { ModelResult, type ReviewVisionInput } from './types';
 import { AiTraceSink } from './ai-trace.sink';
-import type { BudgetStore } from '../tools/budget-store';
+import { BudgetOperationReplayError, type BudgetStore } from '../tools/budget-store';
 import { projectGenericOperationResult } from '../tools/generic-operation-projection';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 import { projectModelResultForReplay } from '../durable-results/model-result-replay';
@@ -2064,5 +2064,132 @@ describe('RouterModelGateway — definite failures before any output release the
       ),
     ).rejects.toBeInstanceOf(ProviderHttpError);
     expect(budget.remainingCents('run-1')).toBe(100);
+  });
+});
+
+describe('RouterModelGateway — settle 双败的账本兜底（B2/F4）', () => {
+  const reservation = {
+    workspaceId: 'ws-1',
+    accountKey: 'run-1',
+    operationId: 'op',
+    estimatedMicrousd: BigInt(40) * 10_000n,
+    replay: false,
+  };
+
+  function storeWith(settle: () => Promise<unknown>, markResultUnknown: () => Promise<unknown>) {
+    return {
+      reserve: vi.fn(async () => reservation),
+      settle: vi.fn(settle),
+      markResultUnknown: vi.fn(markResultUnknown),
+    } as unknown as BudgetStore;
+  }
+
+  it('物理成功后两次 settle 都失败：先标 RESULT_UNKNOWN 再抛确定性 replay 错误', async () => {
+    const provider = fakeProvider();
+    vi.mocked(provider.generateStructured).mockResolvedValueOnce({
+      data: { code: 'CPV-1' },
+      provider: 'fake',
+      model: 'm',
+    });
+    const budgetStore = storeWith(
+      async () => {
+        throw new Error('connection reset');
+      },
+      async () => ({ reservedMicrousd: reservation.estimatedMicrousd, replay: false }),
+    );
+    const gateway = new RouterModelGateway(
+      { route: () => [provider] } as unknown as ModelRouter,
+      undefined,
+      budgetStore,
+    );
+
+    await expect(
+      gateway.generateStructured(
+        {
+          task: 'taxonomy.normalize',
+          prompt: 'p',
+          schema: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['code'],
+            properties: { code: { type: 'string' } },
+          },
+        },
+        { workspaceId: 'ws-1', runId: 'run-1' },
+      ),
+    ).rejects.toBeInstanceOf(BudgetOperationReplayError);
+
+    expect(budgetStore.settle).toHaveBeenCalledTimes(2);
+    expect(budgetStore.markResultUnknown).toHaveBeenCalledTimes(1);
+    expect(budgetStore.markResultUnknown).toHaveBeenCalledWith(reservation);
+  });
+
+  it('provider 失败路径 settle 失败：标 RESULT_UNKNOWN，仍抛原 provider 错误', async () => {
+    const provider = fakeProvider();
+    const providerError = new ProviderOutputError('STRUCTURED_OUTPUT_EMPTY_TRUNCATED: empty answer', {
+      outputTokens: 10,
+    });
+    vi.mocked(provider.generateStructured).mockRejectedValueOnce(providerError);
+    const budgetStore = storeWith(
+      async () => {
+        throw new Error('connection reset');
+      },
+      async () => ({ reservedMicrousd: reservation.estimatedMicrousd, replay: false }),
+    );
+    const gateway = new RouterModelGateway(
+      { route: () => [provider] } as unknown as ModelRouter,
+      undefined,
+      budgetStore,
+    );
+
+    await expect(
+      gateway.generateStructured(
+        { task: QUALIFY_TASK, prompt: 'p', schema: {} },
+        { workspaceId: 'ws-1', runId: 'run-1' },
+      ),
+    ).rejects.toBe(providerError);
+
+    expect(budgetStore.settle).toHaveBeenCalledTimes(2);
+    expect(budgetStore.markResultUnknown).toHaveBeenCalledTimes(1);
+  });
+
+  it('markResultUnknown 自身失败不掩盖主错误（行留给清收器）', async () => {
+    const provider = fakeProvider();
+    vi.mocked(provider.generateStructured).mockResolvedValueOnce({
+      data: { code: 'CPV-1' },
+      provider: 'fake',
+      model: 'm',
+    });
+    const budgetStore = storeWith(
+      async () => {
+        throw new Error('connection reset');
+      },
+      async () => {
+        throw new Error('ledger down too');
+      },
+    );
+    const gateway = new RouterModelGateway(
+      { route: () => [provider] } as unknown as ModelRouter,
+      undefined,
+      budgetStore,
+    );
+
+    await expect(
+      gateway.generateStructured(
+        {
+          task: 'taxonomy.normalize',
+          prompt: 'p',
+          schema: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['code'],
+            properties: { code: { type: 'string' } },
+          },
+        },
+        { workspaceId: 'ws-1', runId: 'run-1' },
+      ),
+    ).rejects.toBeInstanceOf(BudgetOperationReplayError);
+
+    expect(budgetStore.markResultUnknown).toHaveBeenCalledTimes(1);
   });
 });

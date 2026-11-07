@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { settlementReadbackConfigured } from "../runtime/settlement-readback-config";
 import { resolve } from "node:path";
 import { NativeConnection, Worker } from "@temporalio/worker";
+import { DETERMINISTIC_LEDGER_FAILURE_INTERCEPTORS } from "./deterministic-ledger-failure.interceptor";
 import { workerIdentity } from "./worker-composition";
 import { PrismaService } from "../prisma/prisma.service";
 import { ModelProviderRegistry } from "../model-gateway/model-provider.registry";
@@ -275,6 +276,8 @@ export async function runDevFastLaneWorker(
     dataConverter: {
       failureConverterPath: require.resolve("./diagnostic-failure-converter"),
     },
+    // B2（F5）：确定性账本错误在活动边界标 nonRetryable。
+    interceptors: DETERMINISTIC_LEDGER_FAILURE_INTERCEPTORS,
     namespace: lane.temporalNamespace,
     identity: workerIdentity("dev-fast-lane", randomUUID()),
     taskQueue: lane.taskQueue,
