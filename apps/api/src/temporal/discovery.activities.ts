@@ -153,6 +153,7 @@ import {
 import { settledModelFailureReason } from '../discovery/settled-model-failure';
 import { narrowBySourceHints, planQuerySkipReason } from '../discovery/plan-query-sources';
 import type { DiscoveryRunStage } from './discovery.run-failure';
+import { appendRunEvent } from '../discovery/run2/run-events';
 import { withUpstreamUnavailableRetryDelay } from './upstream-unavailable-retry';
 import {
   DISCOVERY_LEASE_UNIT_MS,
@@ -163,6 +164,15 @@ import {
   type DiscoveryRunLease,
   type DiscoveryRunLeaseReader,
 } from './discovery-run-lease';
+
+/** B3：stale-run 看门狗的行（list_stale_discovery_runs_v1 的映射结果）。 */
+export interface StaleDiscoveryRunRow {
+  workspaceId: string;
+  runId: string;
+  planId: string;
+  icpId: string;
+  createdAt: string;
+}
 
 export interface DiscoveryRunInput {
   workspaceId: string;
@@ -3530,6 +3540,117 @@ export function createDiscoveryActivities(deps: {
       if (endedAuthority && !alreadyRecorded) {
         throw ApplicationFailure.fromError(endedAuthority, { nonRetryable: true });
       }
+    },
+
+    /**
+     * B3（审计 F2）：跨租户枚举「RUNNING 超过租约+余量」的 run。discovery_run 强制 RLS，
+     * 枚举走 SECURITY DEFINER 函数 list_stale_discovery_runs_v1（只返回标识/时间）。
+     */
+    async listStaleDiscoveryRuns(input: {
+      staleAfterMs: number;
+      limit: number;
+    }): Promise<StaleDiscoveryRunRow[]> {
+      const rows = await deps.prisma.$queryRaw<
+        Array<{
+          workspace_id: string;
+          run_id: string;
+          plan_id: string;
+          icp_id: string;
+          created_at: Date;
+        }>
+      >(Prisma.sql`SELECT workspace_id::text, run_id::text, plan_id::text, icp_id::text, created_at
+          FROM list_stale_discovery_runs_v1(
+            ${input.staleAfterMs}::double precision, ${input.limit}::integer
+          )`);
+      return rows.map((row) => ({
+        workspaceId: row.workspace_id,
+        runId: row.run_id,
+        planId: row.plan_id,
+        icpId: row.icp_id,
+        createdAt: row.created_at.toISOString(),
+      }));
+    },
+
+    /**
+     * B3（审计 F2/F12）：看门狗收尾——写一次语义：只在行仍 RUNNING 时记 FAILED
+     * （stats.failure.stage='watchdog'），同事务写 run_event 与 DiscoveryRunCompleted
+     * （fit 已判定时连同 QualifyRequested 衔接口径，与 finalizeRun 一致）；plan 保持 READY。
+     * 并发/重复调用安全：行锁后重查状态，已终结则 no-op。
+     */
+    async finalizeStaleDiscoveryRun(row: StaleDiscoveryRunRow): Promise<void> {
+      await deps.prisma.withWorkspace(row.workspaceId, async (tx) => {
+        const locked = await lockDiscoveryRunReceiptState(tx, {
+          runId: row.runId,
+          planId: row.planId,
+        });
+        if (locked.status !== 'RUNNING') return;
+        const storedStats = isPlainRecord(locked.stats) ? locked.stats : {};
+        const finalStats: Record<string, unknown> = {
+          ...storedStats,
+          failure: {
+            stage: 'watchdog',
+            errorType: 'DISCOVERY_RUN_STALE',
+            control: false,
+          },
+        };
+        await tx.discoveryRun.update({
+          where: { id: row.runId },
+          data: {
+            status: 'FAILED',
+            stats: finalStats as Prisma.InputJsonValue,
+            completedAt: new Date(),
+          },
+        });
+        await appendRunEvent(tx as never, {
+          workspaceId: row.workspaceId,
+          runId: row.runId,
+          type: 'run_finished',
+          level: 'warn',
+          payload: { watchdog: true, stage: 'watchdog' },
+        });
+        // 僵尸 run 的预算账户键只在启动方内存里，事件成本按 runId 兜底归属（通常为 0）；
+        // 该 run 的真实花费仍在 usage_ledger 可查（B10 三账对齐统一口径）。
+        const [runCost] = await tx.$queryRaw<Array<{ cost_usd: number }>>`
+          SELECT COALESCE(SUM(cost_usd), 0)::float8 AS cost_usd
+          FROM usage_ledger
+          WHERE workspace_id = ${row.workspaceId}::uuid
+            AND ref_type = 'ai_trace'
+            AND meta->>'runId' = ${row.runId}
+        `;
+        const runCostUsd =
+          typeof runCost?.cost_usd === 'number' && Number.isFinite(runCost.cost_usd)
+            ? runCost.cost_usd
+            : 0;
+        await tx.outboxEvent.create({
+          data: {
+            workspaceId: row.workspaceId,
+            eventType: 'DiscoveryRunCompleted',
+            aggregateType: 'DiscoveryRun',
+            aggregateId: row.runId,
+            payload: {
+              planId: row.planId,
+              status: 'FAILED',
+              stats: finalStats,
+              cost: runCostUsd,
+              costBasis: 'usage_ledger-runid/v1',
+            } as Prisma.InputJsonValue,
+          },
+        });
+        if (row.icpId && (await fitStageJudged(tx, { runId: row.runId, icpId: row.icpId }, finalStats))) {
+          await tx.outboxEvent.create({
+            data: {
+              workspaceId: row.workspaceId,
+              eventType: 'QualifyRequested',
+              aggregateType: 'ICP',
+              aggregateId: row.icpId,
+              payload: {
+                reason: 'discovery_run_failed_after_fit',
+                runId: row.runId,
+              } as Prisma.InputJsonValue,
+            },
+          });
+        }
+      });
     },
   };
   const { canonicalizeLegacyDiscoveryRun, ...publicActivities } = activities;

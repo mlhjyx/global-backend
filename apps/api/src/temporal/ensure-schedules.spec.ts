@@ -150,7 +150,7 @@ describe("ensurePlatformSchedules", () => {
     await ensurePlatformSchedules();
 
     expect(connect).toHaveBeenCalledTimes(1);
-    expect(create).toHaveBeenCalledTimes(10);
+    expect(create).toHaveBeenCalledTimes(11);
     expect(getHandle).toHaveBeenCalledTimes(2);
     expect(updates[KB_RECOVERY_SWEEP_SCHEDULE_ID]).toMatchObject({
       action: {
@@ -255,6 +255,7 @@ describe("ensurePlatformSchedules", () => {
           'site-builder-kb-recovery': '5m',
           'site-builder-release-maintenance': '24h',
           'site-builder-cost-reconciliation': '1m',
+          'discovery-stale-run-sweep': '10m',
         }[scheduleId];
         expect(spec.intervals[0].every).toBe(expectedEvery);
         expect(JSON.stringify(action.args)).not.toContain('6h');

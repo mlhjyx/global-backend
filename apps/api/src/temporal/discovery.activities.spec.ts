@@ -7048,3 +7048,127 @@ describe("resolveRunStatus —— 准入租约没有余量而提前停下", () =
     expect(resolveRunStatus({ failures: 0, totalQueries: 4, budgetTruncated: false, leaseSkips: 0 })).toBe("DONE");
   });
 });
+
+// ── B3（审计 F2/F12）：stale-run 看门狗的两个活动 ─────────────────────────────
+describe("stale-run 看门狗活动（B3）", () => {
+  const ROW = {
+    workspaceId: "10000000-0000-4000-8000-00000000000a",
+    runId: "20000000-0000-4000-8000-00000000000b",
+    planId: "30000000-0000-4000-8000-00000000000c",
+    icpId: "40000000-0000-4000-8000-00000000000d",
+    createdAt: "2026-11-07T18:39:20.248Z",
+  };
+
+  it("listStaleDiscoveryRuns 走 SECURITY DEFINER 函数并映射为 camelCase", async () => {
+    const queryRaw = vi.fn(async () => [
+      {
+        workspace_id: ROW.workspaceId,
+        run_id: ROW.runId,
+        plan_id: ROW.planId,
+        icp_id: ROW.icpId,
+        created_at: new Date(ROW.createdAt),
+      },
+    ]);
+    const activities = createDiscoveryActivities({
+      prisma: { $queryRaw: queryRaw },
+    } as never);
+
+    await expect(
+      activities.listStaleDiscoveryRuns({ staleAfterMs: 12_900_000, limit: 50 }),
+    ).resolves.toEqual([ROW]);
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it("finalizeStaleDiscoveryRun 写一次：RUNNING→FAILED + run_event + 两个 outbox 事件", async () => {
+    const update = vi.fn(async () => ({}));
+    const outboxCreate = vi.fn(async () => ({}));
+    const runEventCreate = vi.fn(async () => ({}));
+    let queryCall = 0;
+    const tx = {
+      $queryRaw: vi.fn(async () => {
+        queryCall += 1;
+        if (queryCall === 1) {
+          return [
+            {
+              id: ROW.runId,
+              plan_id: ROW.planId,
+              stats: { fit: { match: 2 } },
+              status: "RUNNING",
+            },
+          ];
+        }
+        if (queryCall === 2) return [];
+        return [{ cost_usd: 1.23 }];
+      }),
+      discoveryRun: { update },
+      runEvent: {
+        aggregate: vi.fn(async () => ({ _max: { seq: 7n } })),
+        create: runEventCreate,
+      },
+      outboxEvent: { create: outboxCreate },
+    };
+    const activities = createDiscoveryActivities({
+      prisma: {
+        withWorkspace: vi.fn(async (_workspaceId: string, callback: (t: unknown) => unknown) =>
+          callback(tx),
+        ),
+      },
+    } as never);
+
+    await activities.finalizeStaleDiscoveryRun(ROW);
+
+    expect(update).toHaveBeenCalledWith({
+      where: { id: ROW.runId },
+      data: expect.objectContaining({
+        status: "FAILED",
+        stats: expect.objectContaining({
+          fit: { match: 2 },
+          failure: expect.objectContaining({
+            stage: "watchdog",
+            errorType: "DISCOVERY_RUN_STALE",
+          }),
+        }),
+      }),
+    });
+    expect(runEventCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ runId: ROW.runId, type: "run_finished" }),
+    });
+    expect(outboxCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        eventType: "DiscoveryRunCompleted",
+        aggregateId: ROW.runId,
+        payload: expect.objectContaining({ status: "FAILED", cost: 1.23 }),
+      }),
+    });
+    expect(outboxCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        eventType: "QualifyRequested",
+        aggregateId: ROW.icpId,
+      }),
+    });
+  });
+
+  it("finalizeStaleDiscoveryRun 对已终结的行是 no-op（写一次语义）", async () => {
+    const update = vi.fn();
+    const outboxCreate = vi.fn();
+    const tx = {
+      $queryRaw: vi.fn(async () => [
+        { id: ROW.runId, plan_id: ROW.planId, stats: {}, status: "FAILED" },
+      ]),
+      discoveryRun: { update },
+      runEvent: { aggregate: vi.fn(), create: vi.fn() },
+      outboxEvent: { create: outboxCreate },
+    };
+    const activities = createDiscoveryActivities({
+      prisma: {
+        withWorkspace: vi.fn(async (_workspaceId: string, callback: (t: unknown) => unknown) =>
+          callback(tx),
+        ),
+      },
+    } as never);
+
+    await activities.finalizeStaleDiscoveryRun(ROW);
+    expect(update).not.toHaveBeenCalled();
+    expect(outboxCreate).not.toHaveBeenCalled();
+  });
+});

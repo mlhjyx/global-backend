@@ -28,6 +28,8 @@ import {
   SITE_RELEASE_MAINTENANCE_SWEEP_SCHEDULE_ID,
   SITE_RELEASE_MAINTENANCE_SWEEP_WORKFLOW,
   UNDERSTANDING_TASK_QUEUE,
+  DISCOVERY_STALE_RUN_SWEEP_SCHEDULE_ID,
+  DISCOVERY_STALE_RUN_SWEEP_WORKFLOW,
 } from './understanding.constants';
 
 interface SweepDefinition {
@@ -45,6 +47,8 @@ export const CUSTOMER_SWEEPS: readonly SweepDefinition[] = Object.freeze([
   { scheduleId: RAW_RETENTION_SWEEP_SCHEDULE_ID, workflowType: RAW_RETENTION_SWEEP_WORKFLOW, everyEnv: 'RAW_RETENTION_SWEEP_EVERY', everyDefault: '24h', args: [{}] },
   { scheduleId: SITE_RELEASE_MAINTENANCE_SWEEP_SCHEDULE_ID, workflowType: SITE_RELEASE_MAINTENANCE_SWEEP_WORKFLOW, everyEnv: 'SITE_RELEASE_MAINTENANCE_SWEEP_EVERY', everyDefault: '24h', args: [{}] },
   { scheduleId: KB_RECOVERY_SWEEP_SCHEDULE_ID, workflowType: KB_RECOVERY_SWEEP_WORKFLOW, everyEnv: 'KB_RECOVERY_SWEEP_EVERY', everyDefault: '5m', args: [{ limit: 10 }], workflowExecutionTimeout: '22 minutes' },
+  // B3（审计 F2）：stale-run 看门狗——租约+余量（215m）仍 RUNNING 的 run 自动收尾 FAILED。
+  { scheduleId: DISCOVERY_STALE_RUN_SWEEP_SCHEDULE_ID, workflowType: DISCOVERY_STALE_RUN_SWEEP_WORKFLOW, everyEnv: 'DISCOVERY_STALE_RUN_SWEEP_EVERY', everyDefault: '10m', args: [{}], workflowExecutionTimeout: '5 minutes' },
   { scheduleId: SITE_BUILD_COST_RECONCILIATION_SWEEP_SCHEDULE_ID, workflowType: SITE_BUILD_COST_RECONCILIATION_SWEEP_WORKFLOW, everyEnv: 'SITE_BUILD_COST_RECONCILIATION_EVERY', everyDefault: '1m', args: [{ limit: 50 }], workflowExecutionTimeout: '3 minutes' },
 ]);
 
