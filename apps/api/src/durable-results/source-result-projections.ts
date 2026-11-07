@@ -557,9 +557,11 @@ function restoreOpenFdaClearance(raw: unknown): UnknownRecord {
 
 const openFdaDefinition: TypedProjectionDefinition<unknown, unknown> = freezeDefinition({
   schema: 'openfda-search/v1',
+  // 发现 provider 每次至少取 max(query.limit, 50) = 50 条（openfda.provider.ts）；上界与取数口径
+  // 对齐，超出 50 仍被结构性拒绝，120 KiB 应用层字节门是真正的信封上界。
   jsonSchema: toolResultSchema(objectSchema({
-    establishments: arraySchema(12, openFdaEstablishmentSchema),
-    clearances: arraySchema(12, openFdaClearanceSchema),
+    establishments: arraySchema(50, openFdaEstablishmentSchema),
+    clearances: arraySchema(50, openFdaClearanceSchema),
   }, [])),
   project(raw) {
     const { result, data } = projectToolResult(raw, ['establishments', 'clearances']);
