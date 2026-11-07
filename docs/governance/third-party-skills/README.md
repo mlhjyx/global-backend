@@ -4,7 +4,7 @@
 > 状态：`CURRENT`
 > 最后核验：2026-11-08
 > 决策：D-MA-5（2026-11-08 产品负责人批准，出自 §0.7「外部技能导入从 S3 远期提升为 M1.5 试点 + S1 精选导入」）
-> 进展：首批已选定 A 档 2 个（account-research、lead-triage，2026-11-08）；本目录**不含运行时集成**
+> 进展：首批已选定 10 个（2026-11-08）：A 档 2 个 + B 档 5 个 + C 档 3 个；本目录**不含运行时集成**
 > 机器事实源：[`THIRD_PARTY_SKILLS.json`](THIRD_PARTY_SKILLS.json)
 
 本目录回答五个问题：哪些外部技能可导入、许可证是什么、正文是否符合 SKILL.md 规范、安全与合规风险在哪、导入后如何验收。Skill Runtime（S0：validator、`skill_package`/`skill_version`/`skill_enablement` 三表）由另一条泳道负责，设计文档已随 PR #831 合入 [`2026-11-08-skill-runtime-s0.md`](../../superpowers/plans/2026-11-08-skill-runtime-s0.md)；本目录不依赖、也不修改它。
@@ -15,7 +15,7 @@
 - **不执行任何外部 `scripts/`**。v1 直接排除携带 `scripts/` 的技能；运行时不加载、不执行技能目录中的可执行文件。
 - **`allowed-tools` 仅提示**。执行边界由绑定 AI Task 的 ToolBroker 白名单强制；S0 v0 要求技能声明的 `allowed-tools` 与任务契约的 `allowedTools` 集合严格相等。
 - **发送、CRM 写、名单/数据对外导出一律走审批链**：ActionProposal → Policy → 审批 → ExecutionAuthorization → ToolBroker。
-- **厂商技能必须去营销化**，登记 owner 与退出计划。当前 owner 一律为 `UNASSIGNED`，导入前必须由产品负责人指派。
+- **厂商技能必须去营销化**，登记 owner 与退出计划。owner 已统一登记为「产品负责人 + 平台工程（本工作区）」（2026-11-08 产品负责人确认）；引入第三方 owner 时再改。
 
 ## 2. 目录
 
@@ -67,9 +67,9 @@ cd ../../licenses && sha256sum -c CHECKSUMS.sha256
 
 ## 6. 下一步
 
-1. 产品负责人按 [`FIRST-BATCH.md`](FIRST-BATCH.md) 选择首批名单（catalog 共 14 个，S1 运行时首批建议 2 个，与计划步 8「精选导入 2 个外部技能」一致）。
+1. 首批已选定 10 个（A 档 2 + B 档 5 + C 档 3，见 [`FIRST-BATCH.md`](FIRST-BATCH.md)）；S1 运行时先做 A 档 2 个，B 档随审批链/数据接入，C 档 3 个作为 Pack 内容。
 2. 选定后进入 S1：生成去营销化衍生版、补 `allowed-tools`、接入 Golden Set CI、按租户启停。
-3. 指派每项 owner；退出计划已写入清单：Golden Set 未通过，或登记起 180 天内未接入运行时/未被保留，则移出 catalog 并归档。
+3. owner 为「产品负责人 + 平台工程（本工作区）」；退出计划已写入清单：Golden Set 未通过，或登记起 180 天内未接入运行时/未被保留，则移出 catalog 并归档。
 
 ## 7. 变更规则
 

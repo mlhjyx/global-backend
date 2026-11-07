@@ -3,9 +3,9 @@
 > 文档 ID：`GOV-TPS-004`
 > 状态：`CURRENT`
 > 最后核验：2026-11-08
-> 决定：2026-11-08 产品负责人选定 **A 档 2 个**（account-research、lead-triage）进入 S1；B/C 档未入选首批，保留在目录中待后续。
-> 结论：catalog 共 14 个技能。建议分三档推进；**S1 运行时首批只做 A 档 2 个**，与计划步 8「精选导入 2 个外部技能」一致。其余随审批链与数据接入逐步放开。
-> 所有项 owner 当前为 `UNASSIGNED`；导入前必须指派 owner（D-MA-5 要求）。
+> 决定：2026-11-08 产品负责人选定首批 **10 个**：A 档 2 个（account-research、lead-triage）+ B 档 5 个（prospecting、cold-email、draft-outreach、stakeholder-map、account-tiering）+ C 档 3 个（competitive-intelligence、customer-research、pricing）；其余 4 个 C 档保留待后续。
+> 结论：catalog 共 14 个技能。首批 10 个中，**S1 运行时先做 A 档 2 个**（与计划步 8「精选导入 2 个外部技能」一致），B 档 5 个随审批链/数据接入，C 档 3 个作为 Pack 内容进入首批。
+> owner：首批 10 个与目录其余项统一登记为「产品负责人 + 平台工程（本工作区）」（2026-11-08 产品负责人确认）；引入第三方 owner 时再改。
 
 ## 1. 推荐分档
 
@@ -18,7 +18,7 @@
 
 **共同理由**：两者都不发送、不写 CRM、不导出，个人数据只读；都有显式注入防线；都不依赖厂商 API；Golden Set 容易在无外部动作下判定。先跑通这两个，能验证「validator → 许可/NOTICE → 安全 → Golden Set → 租户启停」整条管线而不触碰审批链。
 
-### B 档 · 随审批链 / 数据接入导入（5 个）
+### B 档 · 已选定首批（随审批链 / 数据接入，5 个）
 
 | 技能 | 来源 | 域 | 依赖/风险 |
 | --- | --- | --- | --- |
@@ -28,7 +28,7 @@
 | stakeholder-map | anthropics/knowledge-work-plugins（Apache-2.0） | 决策人地图 | 联系人创建（CRM 写）走审批链；个人数据密度最高 |
 | account-tiering | anthropics/knowledge-work-plugins（Apache-2.0） | 账户分层 | 依赖账户清单（CRM 或上传表格）；纯评分零工具 |
 
-### C 档 · 策略/内容参考（7 个）
+### C 档 · 策略/内容参考（首批选定 3 个，共 7 个）
 
 | 技能 | 来源 | 域 | 说明 |
 | --- | --- | --- | --- |
@@ -46,26 +46,26 @@
 | --- | --- | --- | --- | --- |
 | ☑ | account-research | A | | 已选定首批（2026-11-08） |
 | ☑ | lead-triage | A | | 已选定首批（2026-11-08） |
-| ☐ | prospecting | B | | 需导出审批 + 去营销化 |
-| ☐ | cold-email | B | | 需发送审批 + 去营销化 |
-| ☐ | draft-outreach | B | | 需发送/序列审批 |
-| ☐ | stakeholder-map | B | | 需 CRM 写审批 |
-| ☐ | account-tiering | B | | 需账户数据输入 |
-| ☐ | competitive-intelligence | C | | 可提前 |
-| ☐ | call-prep | C | | 依赖数据源 |
-| ☐ | customer-research | C | | 上游评测可复用 |
-| ☐ | pricing | C | | 上游评测可复用 |
-| ☐ | ideal-customer-profile | C | | 需去推广链接 |
-| ☐ | beachhead-segment | C | | 需去推广链接 |
-| ☐ | gtm-motions | C | | 需去推广链接 |
+| ☑ | prospecting | B | | 已选定首批（2026-11-08）；需导出审批 + 去营销化 |
+| ☑ | cold-email | B | | 已选定首批（2026-11-08）；需发送审批 + 去营销化 |
+| ☑ | draft-outreach | B | | 已选定首批（2026-11-08）；需发送/序列审批 |
+| ☑ | stakeholder-map | B | | 已选定首批（2026-11-08）；需 CRM 写审批 |
+| ☑ | account-tiering | B | | 已选定首批（2026-11-08）；需账户数据输入 |
+| ☑ | competitive-intelligence | C | | 已选定首批（2026-11-08） |
+| ☐ | call-prep | C | | 未入选首批；依赖数据源 |
+| ☑ | customer-research | C | | 已选定首批（2026-11-08）；上游评测可复用 |
+| ☑ | pricing | C | | 已选定首批（2026-11-08）；上游评测可复用 |
+| ☐ | ideal-customer-profile | C | | 未入选首批；需去推广链接 |
+| ☐ | beachhead-segment | C | | 未入选首批；需去推广链接 |
+| ☐ | gtm-motions | C | | 未入选首批；需去推广链接 |
 
-## 3. 如果只挑 10 个
+## 3. 首批 10 个的组合
 
-建议组合：**A 档 2 个 + B 档 5 个 + C 档 `competitive-intelligence`、`customer-research`、`pricing`**。这 10 个覆盖「研究 → 分层 → 名单 → 文案 → 触达前审批 → 竞争/客户/定价」的获客主链，且高风险动作全部在审批链后面。剩余 4 个（call-prep、ideal-customer-profile、beachhead-segment、gtm-motions）作为第二批或人工参考。
+本次首批即 **A 档 2 个 + B 档 5 个 + C 档 `competitive-intelligence`、`customer-research`、`pricing`**。这 10 个覆盖「研究 → 分层 → 名单 → 文案 → 触达前审批 → 竞争/客户/定价」的获客主链，且高风险动作全部在审批链后面。剩余 4 个（call-prep、ideal-customer-profile、beachhead-segment、gtm-motions）作为第二批或人工参考。
 
 ## 4. 导入前必须解决的事
 
-1. **owner 指派**：每项技能必须有真实 owner；清单中为 `UNASSIGNED` 时不具备导入资格。
+1. **owner 登记**：首批 10 个与目录其余项统一登记为「产品负责人 + 平台工程（本工作区）」；后续引入第三方 owner 时再改。
 2. **去营销化编辑**：marketingskills 的 prospecting/cold-email 与 pm-skills 的 3 个技能（见 [`SECURITY-REVIEW.md`](SECURITY-REVIEW.md) 第 5 节）。
 3. **补 `allowed-tools`**：与绑定 AI Task 的 `allowedTools` 集合严格相等（建议集合见 [`THIRD_PARTY_SKILLS.json`](THIRD_PARTY_SKILLS.json)）。
 4. **补不可信内容规则**：prospecting 与 cold-email 必须显式声明外部内容只作数据。
