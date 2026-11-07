@@ -19,6 +19,14 @@ export const DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD_DEFAULT = 20;
 export const DISCOVERY_DEEP_COMPANY_CONCURRENCY_DEFAULT = 16;
 export const DISCOVERY_QUERY_BATCH_SIZE_DEFAULT = 2;
 
+/**
+ * 重放契约（同 *_DEFAULT 一样永远不要修改）：录制值的最小物理边界。低于它的值只能是
+ * relay 之前的手工历史，改动会让这些历史重放出不同的分支/循环次数（NDE）。
+ */
+export const DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD_FLOOR = 0;
+export const DISCOVERY_DEEP_COMPANY_CONCURRENCY_FLOOR = 1;
+export const DISCOVERY_QUERY_BATCH_SIZE_FLOOR = 1;
+
 export interface WorkflowKnobBounds {
   readonly min: number;
   readonly max: number;
@@ -77,12 +85,16 @@ export function resolveDiscoveryWorkflowKnobs(
 ): DiscoveryWorkflowKnobs {
   return {
     run2PoolSearchFallbackThreshold:
-      recordedInt(input.run2PoolSearchFallbackThreshold, 0) ??
-      DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD_DEFAULT,
+      recordedInt(
+        input.run2PoolSearchFallbackThreshold,
+        DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD_FLOOR,
+      ) ?? DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD_DEFAULT,
     deepCompanyConcurrency:
-      recordedInt(input.deepCompanyConcurrency, 1) ?? DISCOVERY_DEEP_COMPANY_CONCURRENCY_DEFAULT,
+      recordedInt(input.deepCompanyConcurrency, DISCOVERY_DEEP_COMPANY_CONCURRENCY_FLOOR) ??
+      DISCOVERY_DEEP_COMPANY_CONCURRENCY_DEFAULT,
     discoveryQueryBatchSize:
-      recordedInt(input.discoveryQueryBatchSize, 1) ?? DISCOVERY_QUERY_BATCH_SIZE_DEFAULT,
+      recordedInt(input.discoveryQueryBatchSize, DISCOVERY_QUERY_BATCH_SIZE_FLOOR) ??
+      DISCOVERY_QUERY_BATCH_SIZE_DEFAULT,
   };
 }
 

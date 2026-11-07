@@ -30,6 +30,8 @@ const PERSONAL_DATA_AUDIT_BATCH = 1000;
 const PAGES_PER_RUN_CAP = 20;
 const BATCHES_PER_WORKSPACE_CAP = 100;
 const BUDGET_RECONCILE_BATCHES_CAP = 50;
+/** 输入下限：同样属重放契约（<1 的录制值只可能来自手工启动的历史）。 */
+const SWEEP_INPUT_FLOOR = 1;
 
 export interface RawRetentionSweepInput {
   workspaceLimit?: number;
@@ -167,17 +169,22 @@ export async function rawRetentionSweepWorkflow(
   );
   const budgetOperationReconcile = patched(BUDGET_OPERATION_RECONCILE_PATCH);
   // B1（L01）：循环上界来自输入（旧历史缺字段 → 冻结默认），改常量不再是调参手段。
-  const maxPagesPerRun = clampedInput(input.maxPagesPerRun, MAX_PAGES_PER_RUN, 1, PAGES_PER_RUN_CAP);
+  const maxPagesPerRun = clampedInput(
+    input.maxPagesPerRun,
+    MAX_PAGES_PER_RUN,
+    SWEEP_INPUT_FLOOR,
+    PAGES_PER_RUN_CAP,
+  );
   const maxBatchesPerWorkspace = clampedInput(
     input.maxBatchesPerWorkspace,
     MAX_BATCHES_PER_WORKSPACE,
-    1,
+    SWEEP_INPUT_FLOOR,
     BATCHES_PER_WORKSPACE_CAP,
   );
   const maxBudgetReconcileBatches = clampedInput(
     input.maxBudgetReconcileBatches,
     MAX_BUDGET_RECONCILE_BATCHES,
-    1,
+    SWEEP_INPUT_FLOOR,
     BUDGET_RECONCILE_BATCHES_CAP,
   );
 

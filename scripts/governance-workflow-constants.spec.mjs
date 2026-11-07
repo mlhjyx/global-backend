@@ -41,6 +41,8 @@ test("reads module-level numeric constants with values, including `as const`, `s
     "const NAME = 'x';",
     "const DERIVED = OTHER;",
     "const EXPRESSION = 2 * 2;",
+    "const FRACTIONAL = 15 * 60 * 1000 - 5 / 2;",
+    "const NOT_CONSTANT = Number('16');",
     "function inner() { const NESTED = 5; return NESTED; }",
   ].join("\n");
   const found = numericConstantsInSource(source);
@@ -53,6 +55,8 @@ test("reads module-level numeric constants with values, including `as const`, `s
       ["SEPARATED", 1000, 4],
       ["LIMIT", 5, 5],
       ["CHECKED", 16, 6],
+      ["EXPRESSION", 4, 9],
+      ["FRACTIONAL", 899997.5, 10],
     ],
   );
 });
@@ -170,6 +174,9 @@ test("frozen replay defaults keep their pinned values", async () => {
   assert.equal(knobs.get("DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD_DEFAULT"), 20);
   assert.equal(knobs.get("DISCOVERY_DEEP_COMPANY_CONCURRENCY_DEFAULT"), 16);
   assert.equal(knobs.get("DISCOVERY_QUERY_BATCH_SIZE_DEFAULT"), 2);
+  assert.equal(knobs.get("DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD_FLOOR"), 0);
+  assert.equal(knobs.get("DISCOVERY_DEEP_COMPANY_CONCURRENCY_FLOOR"), 1);
+  assert.equal(knobs.get("DISCOVERY_QUERY_BATCH_SIZE_FLOOR"), 1);
 
   const retention = await constantsOf("apps/api/src/temporal/raw-retention.workflow.ts");
   assert.equal(retention.get("MAX_BUDGET_RECONCILE_BATCHES"), 5);
@@ -179,6 +186,11 @@ test("frozen replay defaults keep their pinned values", async () => {
   assert.equal(retention.get("PAGES_PER_RUN_CAP"), 20);
   assert.equal(retention.get("BATCHES_PER_WORKSPACE_CAP"), 100);
   assert.equal(retention.get("BUDGET_RECONCILE_BATCHES_CAP"), 50);
+  assert.equal(retention.get("SWEEP_INPUT_FLOOR"), 1);
+
+  const assetCleanup = await constantsOf("apps/api/src/temporal/asset-cleanup.workflow.ts");
+  assert.equal(assetCleanup.get("ASSET_CLEANUP_IN_FLIGHT_GRACE_MS"), 15 * 60 * 1000);
+  assert.equal(assetCleanup.get("ASSET_CLEANUP_SETTLE_MS"), 5 * 60 * 1000);
 
   const understanding = await constantsOf("apps/api/src/temporal/understanding.workflow.ts");
   assert.equal(understanding.get("EXECUTION_CONTRACT_VERSION"), 2);

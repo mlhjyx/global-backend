@@ -23,11 +23,11 @@
 // changes, so editing one is a deliberate act that has to update the pin.
 //
 // What this cannot see: a replay hazard introduced as an inline literal in a
-// condition or loop bound (`if (x > 30)`), a constant initialized from an
-// expression (`const N = 2 * 2`, `Number('16')`), numbers inside objects,
-// enums, or non-workflow modules imported by workflow code. The rule still
-// governs those; this check is a tripwire on the most common form, not a
-// proof. When in doubt, put the number in the recorded input.
+// condition or loop bound (`if (x > 30)`), a constant initialized by a call
+// (`const N = Number('16')`), numbers inside objects, enums, or non-workflow
+// modules imported by workflow code. The rule still governs those; this check
+// is a tripwire on the module-level constant form (literals and + - * /
+// folds), not a proof. When in doubt, put the number in the recorded input.
 //
 //   node scripts/governance-workflow-constants.mjs verify [--root <dir>]
 import { access, readdir, readFile } from "node:fs/promises";
@@ -62,6 +62,12 @@ export const WORKFLOW_CONSTANT_ALLOWLIST = Object.freeze({
       "frozen replay default for histories without deepCompanyConcurrency; tune through the relay env, never by editing this value (also pinned by governance-workflow-constants.spec.mjs)",
     DISCOVERY_QUERY_BATCH_SIZE_DEFAULT:
       "frozen replay default for histories without discoveryQueryBatchSize; tune through the relay env, never by editing this value (also pinned by governance-workflow-constants.spec.mjs)",
+    DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD_FLOOR:
+      "frozen replay floor for recorded thresholds (0 means never fall back); lowering/raising it would flip the needSearch branch of an in-flight replay (also pinned)",
+    DISCOVERY_DEEP_COMPANY_CONCURRENCY_FLOOR:
+      "frozen replay floor for recorded concurrency values; changing it would re-schedule a different number of child workflows on replay (also pinned)",
+    DISCOVERY_QUERY_BATCH_SIZE_FLOOR:
+      "frozen replay floor for recorded batch sizes; changing it would re-batch the query commands on replay (also pinned)",
   }),
   "apps/api/src/temporal/understanding.workflow.ts": Object.freeze({
     EXECUTION_CONTRACT_VERSION:
@@ -84,6 +90,8 @@ export const WORKFLOW_CONSTANT_ALLOWLIST = Object.freeze({
       "frozen clamp cap: only out-of-range schedule args or recorded inputs are ever clamped by it, and changing it would re-schedule those replays differently",
     BUDGET_RECONCILE_BATCHES_CAP:
       "frozen clamp cap: only out-of-range schedule args or recorded inputs are ever clamped by it, and changing it would re-schedule those replays differently",
+    SWEEP_INPUT_FLOOR:
+      "frozen clamp floor for recorded sweep inputs; changing it would re-bound loops over a hand-started history that recorded a below-floor value",
     PERSONAL_DATA_AUDIT_BATCH:
       "activity payload batch size; changing it does not alter the scheduled command sequence (loops end on activity results, not on this value)",
   }),
@@ -111,6 +119,12 @@ export const WORKFLOW_CONSTANT_ALLOWLIST = Object.freeze({
     VERIFIER_SETTLE_MS:
       "local verification workflow (scripts/), never deployed to a production worker; a timer bound on a helper workflow — changing it re-times verification runs only",
   }),
+  "apps/api/src/temporal/asset-cleanup.workflow.ts": Object.freeze({
+    ASSET_CLEANUP_IN_FLIGHT_GRACE_MS:
+      "code-owned grace the workflow's own comments declare untunable by clients or outbox payloads (signed-PUT in-flight window); it decides whether a sleep command is scheduled, so changing it can NDE an in-flight cleanup — treat as frozen, not a knob",
+    ASSET_CLEANUP_SETTLE_MS:
+      "code-owned settle gap between the two durable cleanup checkpoints; sleeping timer commands stay replay-visible, so changing it can NDE an in-flight cleanup — treat as frozen, not a knob",
+  }),
 });
 
 function issue(code, path, message) {
@@ -130,16 +144,38 @@ function unwrapExpression(expression) {
   return current;
 }
 
-/** The literal's numeric value, or null when the initializer is not a numeric literal. */
+/**
+ * The constant's numeric value, or null when the initializer is not a numeric
+ * constant expression. Literals, unary minus and + - * / over constants are
+ * folded (workflow files express durations as `15 * 60 * 1000`); calls like
+ * Number('16'), identifiers and objects are not evaluable and stay outside.
+ */
 function numericInitializerValue(expression) {
   const unwrapped = unwrapExpression(expression);
   if (ts.isNumericLiteral(unwrapped)) return Number(unwrapped.text.replaceAll("_", ""));
-  if (
-    ts.isPrefixUnaryExpression(unwrapped) &&
-    unwrapped.operator === ts.SyntaxKind.MinusToken &&
-    ts.isNumericLiteral(unwrapped.operand)
-  ) {
-    return -Number(unwrapped.operand.text.replaceAll("_", ""));
+  if (ts.isPrefixUnaryExpression(unwrapped)) {
+    const operand = numericInitializerValue(unwrapped.operand);
+    if (operand === null) return null;
+    if (unwrapped.operator === ts.SyntaxKind.MinusToken) return -operand;
+    if (unwrapped.operator === ts.SyntaxKind.PlusToken) return operand;
+    return null;
+  }
+  if (ts.isBinaryExpression(unwrapped)) {
+    const left = numericInitializerValue(unwrapped.left);
+    const right = numericInitializerValue(unwrapped.right);
+    if (left === null || right === null) return null;
+    switch (unwrapped.operatorToken.kind) {
+      case ts.SyntaxKind.PlusToken:
+        return left + right;
+      case ts.SyntaxKind.MinusToken:
+        return left - right;
+      case ts.SyntaxKind.AsteriskToken:
+        return left * right;
+      case ts.SyntaxKind.SlashToken:
+        return left / right;
+      default:
+        return null;
+    }
   }
   return null;
 }
