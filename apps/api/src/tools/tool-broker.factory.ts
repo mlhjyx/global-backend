@@ -1,7 +1,11 @@
 import { PrismaClient } from '@prisma/client';
 import Redis from 'ioredis';
 import { ToolRegistry } from './tool-registry';
-import { registerBuiltinTools } from './builtin-tools';
+import { registerBuiltinTools, urlContentCacheEnabled } from './builtin-tools';
+import {
+  createPrismaUrlContentCache,
+  type UrlContentCacheDb,
+} from '../adapters/url-content-cache';
 import { registerSourceTools } from './source-tools';
 import { ToolBroker, ToolTrace } from './tool-broker';
 import type { SiteBuildCostLedger } from '../site-builder/site-build-cost-ledger';
@@ -87,7 +91,15 @@ export function buildToolBroker(deps?: {
   /** Test/composition override; managed composition derives it from PrismaService + storage env. */
   artifactExecution?: ArtifactExecutionPort;
 }): ToolBroker {
-  const registry = registerSourceTools(registerBuiltinTools(new ToolRegistry()));
+  // PR-B：HTTP-first 页面缓存（ETag/304）。仅当组合根有 Prisma 且 env 未关断时注入；
+  // 缺省不注入 = crawl4ai.fetch 保持无条件请求行为。
+  const urlContentCache =
+    deps?.prisma && urlContentCacheEnabled()
+      ? createPrismaUrlContentCache(deps.prisma as unknown as UrlContentCacheDb)
+      : undefined;
+  const registry = registerSourceTools(
+    registerBuiltinTools(new ToolRegistry(), { urlContentCache }),
+  );
   const traceRecorder =
     deps?.traceRecorder ??
     ((t: ToolTrace) => {

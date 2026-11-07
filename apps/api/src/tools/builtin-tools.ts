@@ -13,7 +13,10 @@ import {
   SearxCategory,
 } from "../adapters/searxng";
 import { crawlUrl } from "../adapters/web-crawler";
-import { fetchPageHttpFirst } from "../adapters/http-first-fetch";
+import {
+  fetchPageHttpFirst,
+  type HttpFirstCachePort,
+} from "../adapters/http-first-fetch";
 import { isAllowedByRobots } from "../adapters/robots";
 import {
   discoverCompaniesByIndustry,
@@ -60,6 +63,14 @@ export function readCrawl4aiFetchLimits(env: NodeJS.ProcessEnv = process.env): {
 /** HTTP-first 抓取开关：默认 on；只有显式 `off` 才回纯渲染（回落方向安全）。 */
 export function httpFirstEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return (env.HTTP_FIRST_FETCH ?? "on").trim().toLowerCase() !== "off";
+}
+
+/**
+ * 页面缓存（PR-B）开关：默认 on；env `URL_CONTENT_CACHE=off` 回到无条件请求行为。
+ * 只影响 HTTP-first 路径；缓存读写失败由抓取层自身退化为普通抓取。
+ */
+export function urlContentCacheEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.URL_CONTENT_CACHE ?? "on").trim().toLowerCase() !== "off";
 }
 
 /** 渲染 429 一次重试前的等待（env CRAWLER_429_RETRY_DELAY_MS，默认 1s）。 */
@@ -440,6 +451,8 @@ export interface Crawl4aiFetchToolDependencies {
   isAllowedByRobots: typeof isAllowedByRobots;
   /** HTTP-first 正文抓取（测试注入点）；默认走受治理的 fetchPageHttpFirst。 */
   fetchHttpFirst?: typeof fetchPageHttpFirst;
+  /** PR-B 页面缓存端口；缺省 = 不缓存（单测/未接 DB 的组合根）。 */
+  urlContentCache?: HttpFirstCachePort;
 }
 
 export function createCrawl4aiFetchTool(
@@ -519,6 +532,10 @@ export function createCrawl4aiFetchTool(
       // 薄页/失败/关闭开关时回落浏览器渲染（fail-safe 方向 = 渲染）。
       if (httpFirstEnabled()) {
         const httpFirst = dependencies.fetchHttpFirst ?? fetchPageHttpFirst;
+        const cache =
+          dependencies.urlContentCache && urlContentCacheEnabled()
+            ? { workspaceId: ctx.workspaceId, port: dependencies.urlContentCache }
+            : undefined;
         const page = await httpFirst(input.url, {
           hooks: {
             authorizeExternalAction: ctx.authorizeExternalAction,
@@ -526,6 +543,7 @@ export function createCrawl4aiFetchTool(
               await ctx.beforePhysicalWire?.();
             },
           },
+          ...(cache ? { cache } : {}),
         }).catch(() => null);
         if (page) {
           const httpText = page.markdown.slice(0, boundedCrawl4aiFetchChars(input.maxChars));
@@ -541,6 +559,7 @@ export function createCrawl4aiFetchTool(
               fetchedAt: new Date().toISOString(),
               contentHash,
               parserVersion: "http-first/1",
+              ...(cache ? { cache: page.fromCache ?? "miss" } : {}),
             },
           };
         }
@@ -794,12 +813,28 @@ export function createSmtpRcptProbeTool(
 
 export const smtpRcptProbeTool = createSmtpRcptProbeTool();
 
+export interface BuiltinToolDependencies {
+  /** PR-B 页面缓存端口（组合根从 PrismaService 注入；未注入 = 不缓存）。 */
+  urlContentCache?: HttpFirstCachePort;
+}
+
 /** 注册全部内置工具（启动期调用）。 */
-export function registerBuiltinTools(registry: ToolRegistry): ToolRegistry {
+export function registerBuiltinTools(
+  registry: ToolRegistry,
+  deps?: BuiltinToolDependencies,
+): ToolRegistry {
   registry.register(searxngSearchTool as Tool);
   registry.register(socialSearchTool as Tool);
   registry.register(socialFetchTool as Tool);
-  registry.register(crawl4aiFetchTool as Tool);
+  registry.register(
+    (deps?.urlContentCache
+      ? createCrawl4aiFetchTool({
+          crawlUrl,
+          isAllowedByRobots,
+          urlContentCache: deps.urlContentCache,
+        })
+      : crawl4aiFetchTool) as Tool,
+  );
   registry.register(wikidataTool as Tool);
   registry.register(osmOverpassTool as Tool);
   registry.register(smtpRcptProbeTool as Tool);

@@ -20,6 +20,7 @@ function makeTool(deps: {
 afterEach(() => {
   delete process.env.HTTP_FIRST_FETCH;
   delete process.env.CRAWLER_429_RETRY_DELAY_MS;
+  delete process.env.URL_CONTENT_CACHE;
 });
 
 describe('crawl4ai.fetch 的 HTTP-first 分级（PR-A）', () => {
@@ -77,6 +78,58 @@ describe('crawl4ai.fetch 的 HTTP-first 分级（PR-A）', () => {
     const tool = makeTool({ crawlUrl });
     await expect(tool.execute({ url: 'https://acme.example/' }, ctx)).rejects.toThrow('500');
     expect(crawlUrl).toHaveBeenCalledOnce();
+  });
+
+  it('wires the PR-B page cache port with the workspace and reports cache provenance', async () => {
+    const port = { get: vi.fn(async () => null), put: vi.fn(async () => undefined) };
+    const fetchHttpFirst = vi.fn(async () => ({
+      markdown: '# Acme\ncentrifugal pumps distributor',
+      title: 'Acme',
+      contentHash: 'a'.repeat(64),
+      fromCache: 'conditional-304' as const,
+    }));
+    const tool = createCrawl4aiFetchTool({
+      crawlUrl: vi.fn() as never,
+      isAllowedByRobots: async () => true,
+      fetchHttpFirst: fetchHttpFirst as never,
+      urlContentCache: port,
+    });
+    const wsCtx = {
+      workspaceId: 'workspace-cache-1',
+      authorizeExternalAction: async () => undefined,
+      beforePhysicalWire: async () => undefined,
+    } as never;
+
+    const out = await tool.execute({ url: 'https://acme.example/' }, wsCtx);
+
+    expect(fetchHttpFirst.mock.calls[0]?.[1]).toMatchObject({
+      cache: { workspaceId: 'workspace-cache-1', port },
+    });
+    expect(out.provenance?.cache).toBe('conditional-304');
+  });
+
+  it('does not consult the page cache when URL_CONTENT_CACHE=off', async () => {
+    process.env.URL_CONTENT_CACHE = 'off';
+    const port = { get: vi.fn(async () => null), put: vi.fn(async () => undefined) };
+    const fetchHttpFirst = vi.fn(async () => ({
+      markdown: '# Acme\ncentrifugal pumps distributor',
+      title: 'Acme',
+      contentHash: 'a'.repeat(64),
+    }));
+    const tool = createCrawl4aiFetchTool({
+      crawlUrl: vi.fn() as never,
+      isAllowedByRobots: async () => true,
+      fetchHttpFirst: fetchHttpFirst as never,
+      urlContentCache: port,
+    });
+
+    const out = await tool.execute(
+      { url: 'https://acme.example/' },
+      { workspaceId: 'workspace-cache-1' } as never,
+    );
+
+    expect(fetchHttpFirst.mock.calls[0]?.[1]).not.toHaveProperty('cache');
+    expect(out.provenance?.cache).toBeUndefined();
   });
 
   it('reads limiter defaults from the environment with safe fallbacks', () => {
