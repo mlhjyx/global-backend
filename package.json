@@ -64,7 +64,10 @@
     "contracts:docs": "pnpm --filter @global/contracts docs",
     "contracts:mock": "pnpm --filter @global/contracts mock",
     "contracts:gen": "pnpm --filter @global/contracts gen",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "packs:generate": "pnpm exec tsx scripts/generate-pack-catalog.mts",
+    "packs:validate": "pnpm exec tsx scripts/validate-packs.mts",
+    "skills:evals:validate": "pnpm exec tsx scripts/validate-skill-evals.mts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

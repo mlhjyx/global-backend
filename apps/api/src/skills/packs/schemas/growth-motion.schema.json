@@ -1,0 +1,102 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "growth-motion.schema.json",
+  "title": "Growth motion pack v1",
+  "allOf": [
+    {
+      "$ref": "common.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "packType": {
+          "const": "growth_motion"
+        },
+        "priorityClass": {
+          "enum": [
+            "growth_motion",
+            "channel_data_content_expert"
+          ]
+        },
+        "rules": {
+          "type": "array",
+          "minItems": 0,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "motion",
+              "stage",
+              "playbook",
+              "kpis",
+              "guardrails"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "motion": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "stage": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "playbook": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "step",
+                    "guidance"
+                  ],
+                  "properties": {
+                    "step": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "guidance": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000
+                    }
+                  }
+                }
+              },
+              "kpis": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                }
+              },
+              "guardrails": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                }
+              }
+            }
+          }
+        }
+      },
+      "required": [
+        "packType",
+        "priorityClass",
+        "rules"
+      ]
+    }
+  ]
+}

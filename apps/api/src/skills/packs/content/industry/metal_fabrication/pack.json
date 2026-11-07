@@ -1,0 +1,39 @@
+{
+  "packKey": "industry.metal_fabrication",
+  "packType": "industry",
+  "version": "1.0.0",
+  "title": "金属加工行业词表与买家角色",
+  "description": "金属加工/钣金/机加工行业的分类码、术语与买家角色，用于检索词归一与买家公司属性理解。",
+  "priorityClass": "industry",
+  "tags": { "industries": ["metal_fabrication"], "markets": ["DE", "AT", "CH", "CN"] },
+  "owner": "产品负责人 + 平台工程（本工作区）",
+  "license": "Proprietary",
+  "contentPath": "PACK.md",
+  "rules": [
+    {
+      "id": "metal-fabrication-taxonomy",
+      "taxonomy": { "scheme": "ISIC Rev.4", "codes": ["C25", "C28"] },
+      "buyerRoles": [
+        "Geschäftsführer / Managing Director",
+        "Head of Production / Fertigungsleitung",
+        "Procurement / Einkauf",
+        "Technical Director / Technische Leitung"
+      ],
+      "terminology": [
+        "Lohnfertigung",
+        "Blechbearbeitung",
+        "CNC-Fräsen",
+        "Laserschneiden",
+        "Schweißen",
+        "Metallverarbeitung"
+      ],
+      "regulations": [
+        { "jurisdiction": "DE", "note": "Impressum 法定要求（§5 DDG）——抽取决策人优先来源。" }
+      ]
+    }
+  ],
+  "sources": [
+    { "label": "UN ISIC Rev.4 classification", "url": "https://unstats.un.org/unsd/classifications/Econ/isic", "retrievedAt": "2026-11-08" }
+  ],
+  "exitPlan": "行业覆盖调整时并入新行业包；180 天未参与任何解析则归档。"
+}
