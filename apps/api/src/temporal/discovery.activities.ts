@@ -100,6 +100,7 @@ import {
 import {
   buildGovernedDiscoveryQueryExecutionPlan,
   commitGovernedDiscoveryQueryExecution,
+  DISCOVERY_RAW_INGEST_TX_OPTIONS,
 } from './discovery-query-governed-execution';
 import { partitionGovernedRawRecords } from '../discovery/raw-source-governance';
 import {
@@ -1452,7 +1453,7 @@ export function createDiscoveryActivities(deps: {
           ),
           unreplayable,
         );
-      });
+      }, DISCOVERY_RAW_INGEST_TX_OPTIONS);
       return withTaxonomyOutcome(legacy, taxonomyOutcome);
     },
 
