@@ -14,6 +14,7 @@ function makeTx(companyPoints: number) {
       order.push(strings.join('?').includes('FOR UPDATE') ? 'company-for-update' : 'policy-lock');
       return [];
     }),
+    $executeRaw: vi.fn(async () => 1),
     deletionRequest: {
       updateMany: vi.fn(async () => ({ count: 1 })),
       findUnique: vi.fn(async () => null),
@@ -72,6 +73,16 @@ describe('company-subject erasure of company contact points (BI-14)', () => {
       where: { id: DELETION_REQUEST_ID, status: 'ERASING' },
       data: { stats: expect.objectContaining({ contactPointsErased: 4 }) },
     });
+    // PR-B：DSR 按 workspace 擦除两张缓存表（页面正文/抽取结果可能含个人信息）。
+    const purgeStatements = tx.$executeRaw.mock.calls.map(([strings]) =>
+      (strings as TemplateStringsArray).join('?'),
+    );
+    expect(
+      purgeStatements.some((sql) => sql.includes('DELETE FROM url_content_cache')),
+    ).toBe(true);
+    expect(
+      purgeStatements.some((sql) => sql.includes('DELETE FROM llm_extraction_cache')),
+    ).toBe(true);
   });
 
   it('leaves company contact points alone when the subject is a contact', async () => {
@@ -94,5 +105,11 @@ describe('company-subject erasure of company contact points (BI-14)', () => {
     });
 
     expect(tx.companyContactPoint.deleteMany).not.toHaveBeenCalled();
+    // 联系人主体同样按 workspace 擦除缓存（个人数据可能经 Impressum/决策人抽取进入缓存）。
+    const purgeStatements = tx.$executeRaw.mock.calls.map(([strings]) =>
+      (strings as TemplateStringsArray).join('?'),
+    );
+    expect(purgeStatements.some((sql) => sql.includes('DELETE FROM url_content_cache'))).toBe(true);
+    expect(purgeStatements.some((sql) => sql.includes('DELETE FROM llm_extraction_cache'))).toBe(true);
   });
 });

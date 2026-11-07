@@ -9,6 +9,11 @@ import {
   readPatentCache,
 } from '../adapters/patent-inventor-cache';
 import {
+  createPrismaUrlContentCache,
+  urlContentCacheKey,
+} from '../adapters/url-content-cache';
+import { createPrismaLlmResultCache } from '../model-runtime/llm-result-cache';
+import {
   companyContactObservation,
   persistCompanyContactPoints,
 } from '../discovery/company-contact-points';
@@ -533,6 +538,82 @@ describe.runIf(Boolean(ownerUrl && appUrl))('app_user table privileges on Postgr
         });
       }
       await tx.patentInventorCache.deleteMany({ where: { inventorNameKey: { in: erasureKeys } } });
+    });
+  }, 60_000);
+
+  // PR-B（2026-11-08）：url_content_cache / llm_extraction_cache 的租户隔离 + 过期清理函数。
+  // 直连两个端口实现，验证 RLS（跨 workspace 读 0 行）、GRANT（app_user 可读写）与
+  // SECURITY DEFINER purge 函数（只删过期行、复用未过期行）。
+  it('lets app_user use the PR-B caches only inside its workspace and purge only expired rows', async () => {
+    const workspaceA = randomUUID();
+    const workspaceB = randomUUID();
+    const url = `https://cache-privileges.example/${randomUUID()}`;
+    const cacheKey = randomUUID().replaceAll('-', '').padEnd(64, '0');
+
+    await rolledBack(app, async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceA}, true)`;
+      await tx.workspace.create({ data: { id: workspaceA, name: 'cache probe A' } });
+      await tx.workspace.create({ data: { id: workspaceB, name: 'cache probe B' } });
+
+      const db = {
+        withWorkspace: async <T>(_workspaceId: string, fn: (client: typeof tx) => Promise<T>) =>
+          fn(tx),
+      };
+      const urlCache = createPrismaUrlContentCache(db as never);
+      const llmCache = createPrismaLlmResultCache(db as never);
+
+      await urlCache.put(workspaceA, url, {
+        markdown: 'probe body',
+        contentHash: 'a'.repeat(64),
+        etag: '"v1"',
+        lastModified: null,
+      });
+      expect(await urlCache.get(workspaceA, url)).toEqual({
+        markdown: 'probe body',
+        contentHash: 'a'.repeat(64),
+        etag: '"v1"',
+        lastModified: null,
+      });
+
+      await llmCache.put(workspaceA, cacheKey, 'discovery.extract_list', { is_directory: true }, 24);
+      expect(await llmCache.get(workspaceA, cacheKey)).toEqual({ result: { is_directory: true } });
+
+      // 过期行走 app_user 的 INSERT 授权直插（模拟 24h 后到期的历史行）。
+      const expiredUrlHash = urlContentCacheKey('https://cache-privileges.example/expired');
+      await tx.$executeRaw`
+        INSERT INTO url_content_cache
+          (workspace_id, url_hash, url, content_hash, markdown, fetched_at, expires_at)
+        VALUES (${workspaceA}::uuid, ${expiredUrlHash}, 'https://cache-privileges.example/expired',
+          ${'b'.repeat(64)}, 'expired body',
+          statement_timestamp() - interval '2 hours', statement_timestamp() - interval '1 hour')
+      `;
+      await tx.$executeRaw`
+        INSERT INTO llm_extraction_cache
+          (workspace_id, cache_key, task_id, result, created_at, expires_at)
+        VALUES (${workspaceA}::uuid, ${'e'.repeat(64)}, 'discovery.extract_list',
+          '{"expired":true}'::jsonb,
+          statement_timestamp() - interval '2 hours', statement_timestamp() - interval '1 hour')
+      `;
+
+      const urlPurge = await tx.$queryRaw<Array<{ deleted: number }>>`
+        SELECT purge_expired_url_content_cache_v1(100) AS deleted
+      `;
+      expect(Number(urlPurge[0]?.deleted)).toBe(1);
+
+      // 跨 workspace：B 看不到 A 的缓存行。
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceB}, true)`;
+      expect(await urlCache.get(workspaceB, url)).toBeNull();
+      expect(await llmCache.get(workspaceB, cacheKey)).toBeNull();
+
+      // 回到 A：未过期行仍在；LLM 缓存的过期行被 purge 清掉。
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceA}, true)`;
+      expect(await urlCache.get(workspaceA, url)).not.toBeNull();
+      expect(await llmCache.get(workspaceA, cacheKey)).not.toBeNull();
+      const llmPurge = await tx.$queryRaw<Array<{ deleted: number }>>`
+        SELECT purge_expired_llm_extraction_cache_v1(100) AS deleted
+      `;
+      expect(Number(llmPurge[0]?.deleted)).toBe(1);
+      expect(await llmCache.get(workspaceA, cacheKey)).not.toBeNull();
     });
   }, 60_000);
 

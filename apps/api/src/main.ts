@@ -10,6 +10,11 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { apiReference } from '@scalar/nestjs-api-reference';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { PrismaService } from './prisma/prisma.service';
+import {
+  configureLlmResultCache,
+  createPrismaLlmResultCache,
+} from './model-runtime/llm-result-cache';
 import { GlobalHttpExceptionFilter } from './common/http-exception.filter';
 import { PLATFORM_TECHNICAL_QUOTE_OPENAPI_SECURITY_SCHEME } from './platform-authority/platform-technical-quote-service-auth';
 import { PLATFORM_AUTHORITY_TARGET_READER_SECURITY_SCHEME } from './platform-authority/platform-target-lookup.openapi';
@@ -231,6 +236,9 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     rawBody: true,
   });
+  // PR-B：结构化任务结果缓存端口（llm_extraction_cache）。API 进程也执行部分 AI 任务
+  // （ICP/理解走 HTTP 入口），与 worker 用同一注入；未命中/失败一律直通。
+  configureLlmResultCache(createPrismaLlmResultCache(app.get(PrismaService)));
   app.enableShutdownHooks(['SIGTERM', 'SIGINT']);
   // Exact signed-body parser and no-store boundary precede Nest's JSON parser
   // and all guards. Never expose compact JWS through enumerable request.body.

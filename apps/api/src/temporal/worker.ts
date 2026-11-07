@@ -106,6 +106,11 @@ import {
   waitForWorkerDependencyAdmission,
 } from "../runtime/worker-dependency-admission";
 import { startWorkerDependencyHeartbeat } from "../runtime/worker-dependency-heartbeat";
+import { startHttpCacheMaintenance } from "../runtime/http-cache-maintenance";
+import {
+  configureLlmResultCache,
+  createPrismaLlmResultCache,
+} from "../model-runtime/llm-result-cache";
 import {
   WORKER_SHUTDOWN_OPTIONS,
   armWorkerExitDeadline,
@@ -188,6 +193,10 @@ async function main(): Promise<void> {
 
   const runtimeTelemetry = await startLangfuseRuntimeTelemetry();
   const prisma = new PrismaService();
+  // PR-B：llm_extraction_cache 端口注入（env ACQ_LLM_CACHE=off 时运行时自行旁路）
+  // 与页面缓存过期清理（启动即清一轮，之后每 6h）。
+  configureLlmResultCache(createPrismaLlmResultCache(prisma));
+  startHttpCacheMaintenance(prisma);
   const configuredProviderWireDatabase = (() => {
     try {
       return createSiteBuildProviderWireDatabaseFromEnv(

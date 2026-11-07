@@ -295,6 +295,12 @@
       "SELECT",
       "UPDATE"
     ],
+    "llm_extraction_cache": [
+      "DELETE",
+      "INSERT",
+      "SELECT",
+      "UPDATE"
+    ],
     "monitored_source": [
       "INSERT",
       "SELECT",
@@ -565,6 +571,12 @@
       "SELECT"
     ],
     "tool_operation_subject": [],
+    "url_content_cache": [
+      "DELETE",
+      "INSERT",
+      "SELECT",
+      "UPDATE"
+    ],
     "usage_ledger": [
       "DELETE",
       "INSERT",
