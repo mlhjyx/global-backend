@@ -1,0 +1,22 @@
+{
+  "packKey": "growth_motion.customer_research",
+  "packType": "growth_motion",
+  "version": "1.0.0",
+  "title": "客户研究检查单（内容包）",
+  "description": "买家公司研究与需求假设的检查单；去营销化摘要，要求来源与不确定性标注。",
+  "priorityClass": "growth_motion",
+  "tags": { "motions": ["customer_research"] },
+  "owner": "产品负责人 + 平台工程（本工作区）",
+  "license": "MIT",
+  "notice": "Derived summary of coreyhaines31/marketingskills skill customer-research (MIT, commit 96798cf38736ecdba015a1d2b0521b0c8f8f41dd). Rewritten in our own words; vendor integrations, sponsor marks and paid-newsletter links removed; content only, never executed.",
+  "contentPath": "PACK.md",
+  "rules": [],
+  "sources": [
+    {
+      "label": "coreyhaines31/marketingskills customer-research (snapshot in docs/governance/third-party-skills)",
+      "url": "https://github.com/coreyhaines31/marketingskills",
+      "retrievedAt": "2026-11-06"
+    }
+  ],
+  "exitPlan": "Golden Set 未通过或 180 天未参与任何解析则下架归档。"
+}

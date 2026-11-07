@@ -1,0 +1,66 @@
+{
+  "packKey": "data_source.public_web_only",
+  "packType": "data_source",
+  "version": "1.0.0",
+  "title": "公开网页与官方名录数据源边界",
+  "description": "声明 S1 技能可用的数据源与用途：自托管搜索/抓取与受 source_policy 治理的官方名录；不引入付费源。",
+  "priorityClass": "channel_data_content_expert",
+  "owner": "产品负责人 + 平台工程（本工作区）",
+  "license": "Proprietary",
+  "contentPath": "PACK.md",
+  "rules": [
+    {
+      "id": "ds-searxng",
+      "category": "search",
+      "allowedUse": [
+        "discovery",
+        "research"
+      ],
+      "license": "self-hosted",
+      "piiClass": "public_organization",
+      "rateLimit": {
+        "rps": 2
+      },
+      "approval": "none",
+      "sourceId": "searxng.search"
+    },
+    {
+      "id": "ds-crawl4ai",
+      "category": "web_fetch",
+      "allowedUse": [
+        "research",
+        "enrichment"
+      ],
+      "license": "self-hosted",
+      "piiClass": "personal_data",
+      "rateLimit": {
+        "perDomainDelayMs": 2000
+      },
+      "approval": "none",
+      "sourceId": "crawl4ai.fetch"
+    },
+    {
+      "id": "ds-governed-directories",
+      "category": "directory",
+      "allowedUse": [
+        "discovery"
+      ],
+      "license": "per-site policy",
+      "piiClass": "public_organization",
+      "approval": "ops",
+      "sourceId": "source_policy.directories"
+    }
+  ],
+  "sources": [
+    {
+      "label": "ToolBroker tool catalog (internal)",
+      "retrievedAt": "2026-11-08"
+    },
+    {
+      "label": "SearXNG documentation",
+      "url": "https://docs.searxng.org/",
+      "retrievedAt": "2026-11-08"
+    }
+  ],
+  "exitPlan": "数据源策略变更（新源引入或付费源决策）时整体复审；180 天未使用则归档。"
+}

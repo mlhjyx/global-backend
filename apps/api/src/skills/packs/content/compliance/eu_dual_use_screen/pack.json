@@ -1,0 +1,49 @@
+{
+  "packKey": "compliance.eu_dual_use_screen",
+  "packType": "compliance",
+  "version": "1.0.0",
+  "title": "欧盟双用途/出口管制复核",
+  "description": "面向欧盟市场的出口管制与个人数据最小化护栏：对外材料需人工复核，研究输出不落个人联系方式。",
+  "priorityClass": "compliance",
+  "tags": { "markets": ["EU"] },
+  "owner": "产品负责人 + 平台工程（本工作区）",
+  "license": "Proprietary",
+  "contentPath": "PACK.md",
+  "rules": [
+    {
+      "id": "dual-use-export-review",
+      "effect": "require_approval",
+      "appliesTo": { "phases": ["create"] },
+      "rationale": "涉及双用途物项（Regulation (EU) 2021/821 附件 I）的对外材料与报价建议必须人工复核后方可使用。",
+      "sources": [
+        {
+          "label": "Regulation (EU) 2021/821 (dual-use export controls)",
+          "url": "https://eur-lex.europa.eu/eli/reg/2021/821/oj"
+        }
+      ]
+    },
+    {
+      "id": "no-outreach-to-listed-parties",
+      "effect": "forbid",
+      "appliesTo": { "phases": ["create", "engage"] },
+      "condition": { "field": "sanctions.status", "op": "eq", "value": "potential_match" },
+      "rationale": "制裁名单潜在命中对象不得进入任何对外触达或材料生成动作。",
+      "sources": [{ "label": "Platform sanctions screening policy (internal)" }]
+    },
+    {
+      "id": "mask-personal-contacts",
+      "effect": "mask",
+      "appliesTo": { "phases": ["research"], "skills": ["research.account_research"] },
+      "rationale": "研究输出只保留公开职业信息；个人邮箱/电话等联系方式不得出现在研究简报中。",
+      "sources": [{ "label": "OWNER-DECISION personal data minimization (internal)" }]
+    }
+  ],
+  "sources": [
+    {
+      "label": "Regulation (EU) 2021/821",
+      "url": "https://eur-lex.europa.eu/eli/reg/2021/821/oj",
+      "retrievedAt": "2026-11-08"
+    }
+  ],
+  "exitPlan": "S1 Golden Set 未通过、规则被法务否定或 180 天未参与任何解析则下架归档。"
+}

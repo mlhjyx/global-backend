@@ -1,0 +1,108 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "data-source.schema.json",
+  "title": "Data source pack v1",
+  "allOf": [
+    {
+      "$ref": "common.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "packType": {
+          "const": "data_source"
+        },
+        "priorityClass": {
+          "enum": [
+            "channel_data_content_expert"
+          ]
+        },
+        "rules": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "sourceId",
+              "category",
+              "allowedUse",
+              "license",
+              "piiClass",
+              "approval"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "category": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "allowedUse": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "enum": [
+                    "discovery",
+                    "enrichment",
+                    "research"
+                  ]
+                }
+              },
+              "license": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "piiClass": {
+                "enum": [
+                  "public_organization",
+                  "personal_data",
+                  "confidential_tenant"
+                ]
+              },
+              "rateLimit": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "rps": {
+                    "type": "number",
+                    "exclusiveMinimum": 0,
+                    "maximum": 100
+                  },
+                  "perDomainDelayMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 600000
+                  }
+                }
+              },
+              "approval": {
+                "enum": [
+                  "none",
+                  "ops"
+                ]
+              },
+              "sourceId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              }
+            }
+          }
+        }
+      },
+      "required": [
+        "packType",
+        "priorityClass",
+        "rules"
+      ]
+    }
+  ]
+}
