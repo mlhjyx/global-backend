@@ -13,6 +13,11 @@ import {
   restoreModelResultFromReplay,
 } from '../durable-results/model-result-replay';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
+import {
+  SkillUnavailableError,
+  StaticSkillResolver,
+  type SkillResolver,
+} from '../skills/skill-runtime';
 
 const FIT_RECEIPT: DurableExecutionReceipt = Object.freeze({
   schemaVersion: 'durable-execution-receipt/v1',
@@ -364,3 +369,47 @@ describe('Fit follows the ICP trade role (design §4 step 8)', () => {
   });
 });
 
+
+describe('judgeFitCompany — S0 skill runtime adapter', () => {
+  beforeEach(() => {
+    executeTask.mockReset();
+  });
+
+  it('resolves the fit judgment through its registered skill key (pass-through)', async () => {
+    executeTask.mockResolvedValue({ data: output, provider: 'gateway', model: 'deepseek-v4-pro' } as never);
+    const staticResolver = new StaticSkillResolver();
+    const resolve = vi.fn(staticResolver.resolve.bind(staticResolver));
+    const skills: SkillResolver = { kind: 'static', resolve };
+
+    const judgment = await judgeFitCompany(
+      {} as never,
+      '10000000-0000-4000-8000-000000000001',
+      { seller: 'Seller', seller_summary: null },
+      company,
+      { runId: 'run-1', skills },
+    );
+
+    expect(judgment?.verdict).toBe('match');
+    expect(resolve.mock.calls[0][0]).toBe('discovery.qualify_fit');
+  });
+
+  it('rethrows a disabled skill instead of silently returning null judgments', async () => {
+    const skills: SkillResolver = {
+      kind: 'db',
+      resolve: vi.fn(async () => {
+        throw new SkillUnavailableError('SKILL_WORKSPACE_DISABLED', 'ops override');
+      }),
+    };
+
+    await expect(
+      judgeFitCompany(
+        {} as never,
+        '10000000-0000-4000-8000-000000000001',
+        { seller: 'Seller', seller_summary: null },
+        company,
+        { runId: 'run-1', skills },
+      ),
+    ).rejects.toBeInstanceOf(SkillUnavailableError);
+    expect(executeTask).not.toHaveBeenCalled();
+  });
+});

@@ -2,8 +2,13 @@ import { Prisma } from '@prisma/client';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { getTask } from '../ai-tasks/task-registry';
 import { BudgetExceededError, BudgetOperationReplayError } from '../tools/budget-store';
-import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../model-runtime/types';
+import {
+  executeSkillWithRuntime,
+  SkillUnavailableError,
+  STATIC_SKILL_RESOLVER,
+  type SkillResolver,
+} from '../skills/skill-runtime';
 import { isExecutionControlError } from '../execution-budget/execution-control-error';
 import { applyDomainAckConsumerTransaction } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
@@ -168,6 +173,8 @@ export async function judgeFitCompany(
   company: FitJudgeCompany,
   opts?: { runId?: string; runtimeTelemetry?: RuntimeTelemetry;
     authorizeExternalAction?: () => Promise<boolean>;
+    /** S0 技能运行时：生产由 worker 注入 DB resolver；缺省为内置目录直通。 */
+    skills?: SkillResolver;
   },
 ): Promise<FitJudgment | null> {
   const contract = getTask('discovery.qualify_fit')!;
@@ -197,8 +204,10 @@ export async function judgeFitCompany(
   let out: FitOutput;
   let durableReceipt: DurableExecutionReceipt | undefined;
   try {
-    const result = await executeStructuredTaskWithRuntime<FitOutput>(
+    const result = await executeSkillWithRuntime<FitOutput>(
+      opts?.skills ?? STATIC_SKILL_RESOLVER,
       gateway,
+      'discovery.qualify_fit',
       {
         task: contract.id,
         prompt: `卖方 ICP：\n${JSON.stringify(icpBrief, null, 2)}\n\n候选公司：\n${JSON.stringify(
@@ -227,9 +236,11 @@ export async function judgeFitCompany(
   } catch (err) {
     // 预算截断必须显性上抛（复审 HIGH）：与单家模型故障不同，预算耗尽意味着**本批余下全部**
     // 都会失败——吞掉会造成「静默漏判 + run 假 DONE」。调用方捕获后中断循环并计入 stats。
+    // 技能不可用（ops 停用/未登记/契约漂移）同理：整轮显性失败，绝不静默返回 null 判。
     if (
       err instanceof BudgetExceededError ||
       err instanceof BudgetOperationReplayError ||
+      err instanceof SkillUnavailableError ||
       isExecutionControlError(err)
     ) throw err;
     return null;

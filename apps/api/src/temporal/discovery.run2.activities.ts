@@ -9,6 +9,7 @@ import {
   loadIcpBrief,
   type FitJudgeCompany,
 } from '../discovery/fit-judge';
+import type { SkillResolver } from '../skills/skill-runtime';
 import { companyMayUseExternalProcessing } from '../discovery/company-suppression-gate';
 import {
   QUICK_JUDGE_BATCH_SIZE,
@@ -48,6 +49,8 @@ export function createRun2Activities(deps: {
   gateway: ModelGateway;
   runtimeTelemetry?: RuntimeTelemetry;
   budgetStore?: BudgetStore;
+  /** S0 技能运行时：生产由 worker 注入 DB resolver；缺省为内置目录直通。 */
+  skills?: SkillResolver;
 }) {
   const budgets =
     deps.budgetStore ?? new UnavailableBudgetStore('run2 activities require an authoritative BudgetStore');
@@ -247,6 +250,7 @@ export function createRun2Activities(deps: {
           runId: binding.accountKey,
           runtimeTelemetry: deps.runtimeTelemetry,
           authorizeExternalAction: () => mayUseExternalProcessing(args.workspaceId, company.id),
+          skills: deps.skills,
         });
         return judgment?.verdict ?? null;
       };
