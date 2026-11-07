@@ -110,6 +110,34 @@ describe('名录发现检索串构造', () => {
     expect(map('ABB（中国）有限公司').name).toBe('ABB(中国)有限公司');
   });
 
+
+  // 2026-11-08 实机（run bdb70e30 · 51 条拒绝 · 探针全落在 normalize）：
+  // 11467.com 详情链接含长数字 ID，被 CONTACT_LIKE_PHONE 判为电话样文本，
+  // 整条记录在 normalize 阶段被拒。detail_url 是可选的富化字段——
+  // 不满足稳定 URL 契约时应丢字段保记录，而不是拒绝整家公司。
+  it('detail_url 非稳定（长数字路径/查询串）时丢字段保记录，且通过完整载荷契约', async () => {
+    const { validateRawSourceProviderPayload } = await import('../raw-source-provider-schema');
+    const pageUrl = 'https://dongguan.11467.com/fenggang/s3346/';
+    const withUrl = (detail_url?: string) =>
+      mapDirectoryCompanyToRecord({
+        company: { name: '东莞市示例电子有限公司', detail_url },
+        pageUrl,
+        sourceClass: 'industry_data',
+      });
+    // 长数字 ID 路径（电话样）→ 丢弃 detail_url，记录仍合规
+    const digit = withUrl('https://dongguan.11467.com/fenggang/s3346/44190012345678.html');
+    expect((digit.attributes as Record<string, unknown>).detail_url).toBeNull();
+    expect(validateRawSourceProviderPayload('directory', digit).ok).toBe(true);
+    // 查询串/锚点被剥离后保留
+    const q = withUrl('https://dongguan.11467.com/company/abc.html?from=list#top');
+    expect((q.attributes as Record<string, unknown>).detail_url).toBe('https://dongguan.11467.com/company/abc.html');
+    expect(validateRawSourceProviderPayload('directory', q).ok).toBe(true);
+    // 干净 URL 原样保留
+    const clean = withUrl('https://dongguan.11467.com/company/dongguan-example.html');
+    expect((clean.attributes as Record<string, unknown>).detail_url).toBe('https://dongguan.11467.com/company/dongguan-example.html');
+    expect(validateRawSourceProviderPayload('directory', clean).ok).toBe(true);
+  });
+
   it('名录/黄页相貌识别覆盖中文标题与 URL', () => {
     expect(isDirectoryListingShaped('https://www.example.cn/企业名录/', '')).toBe(true);
     expect(isDirectoryListingShaped('https://www.huangye88.com/shandong/', '黄页88 - 企业黄页')).toBe(true);
