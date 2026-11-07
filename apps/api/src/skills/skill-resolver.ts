@@ -1,5 +1,6 @@
 import { canonicalDigest } from "../model-runtime/context-engine";
 import { BUILTIN_SKILLS } from "./generated/builtin-skill-catalog";
+import type { BuiltinSkillRecord } from "./load-builtin-skills";
 import type { SkillRegistryStore } from "./skill-registry.store";
 import {
   descriptorFromManifest,
@@ -30,6 +31,8 @@ export interface DbSkillResolver extends SkillResolver {
 export interface DbSkillResolverOptions {
   readonly ttlMs?: number;
   readonly now?: () => number;
+  /** 测试可注入的目录（默认编译进二进制的内置目录）。 */
+  readonly records?: readonly BuiltinSkillRecord[];
 }
 
 export function createDbSkillResolver(
@@ -38,6 +41,7 @@ export function createDbSkillResolver(
 ): DbSkillResolver {
   const ttlMs = options.ttlMs ?? 30_000;
   const now = options.now ?? Date.now;
+  const records = options.records ?? BUILTIN_SKILLS;
   const cache = new Map<string, { expiresAt: number; descriptor: ResolvedSkillDescriptor }>();
 
   const cacheKey = (workspaceId: string, skillKey: string, model: string | undefined): string =>
@@ -63,12 +67,8 @@ export function createDbSkillResolver(
     if (!version) {
       throw new SkillUnavailableError("SKILL_VERSION_MISSING", `${skillKey} has no registered version`);
     }
-    const enabled = await store.loadEnablement(workspaceId, pkg.id);
-    if (enabled === false) {
-      throw new SkillUnavailableError("SKILL_WORKSPACE_DISABLED", `${skillKey} is disabled for this workspace`);
-    }
 
-    const builtin = BUILTIN_SKILLS.find((record) => record.skillKey === skillKey);
+    const builtin = records.find((record) => record.skillKey === skillKey);
     if (!builtin) {
       throw new SkillUnavailableError(
         "SKILL_BINDING_UNAVAILABLE",
@@ -77,15 +77,30 @@ export function createDbSkillResolver(
     }
     const manifest = builtin.manifest;
     const manifestDigest = canonicalDigest(manifest);
+    const bindingDrift =
+      manifest.platform.skillKind === "service"
+        ? version.serviceHandler !== manifest.platform.serviceHandler
+        : version.taskContractId !== manifest.platform.taskContractId ||
+          version.taskContractDigest !== manifest.platform.taskContractDigest;
     if (
       version.manifestDigest !== manifestDigest ||
-      version.taskContractId !== manifest.platform.taskContractId ||
-      version.taskContractDigest !== manifest.platform.taskContractDigest ||
+      bindingDrift ||
       pkg.packType !== manifest.platform.packType
     ) {
       throw new SkillUnavailableError(
         "SKILL_CONTRACT_DRIFT",
         `${skillKey}@${version.version} does not match the contracted skill manifest of this build`,
+      );
+    }
+
+    const enabled = await store.loadEnablement(workspaceId, pkg.id);
+    if (enabled === false) {
+      throw new SkillUnavailableError("SKILL_WORKSPACE_DISABLED", `${skillKey} is disabled for this workspace`);
+    }
+    if (enabled === null && manifest.platform.tenantDefault === "disabled") {
+      throw new SkillUnavailableError(
+        "SKILL_TENANT_NOT_ENABLED",
+        `${skillKey} is not enabled for this workspace (tenant-default disabled)`,
       );
     }
 

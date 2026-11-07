@@ -173,6 +173,10 @@
       "SELECT",
       "UPDATE"
     ],
+    "eval_receipt": [
+      "INSERT",
+      "SELECT"
+    ],
     "evidence": [
       "INSERT",
       "SELECT"
@@ -330,6 +334,28 @@
       "INSERT",
       "SELECT",
       "UPDATE"
+    ],
+    "pack_activation": [
+      "INSERT",
+      "SELECT"
+    ],
+    "pack_draft": [
+      "DELETE",
+      "INSERT",
+      "SELECT",
+      "UPDATE"
+    ],
+    "pack_enablement": [
+      "DELETE",
+      "INSERT",
+      "SELECT",
+      "UPDATE"
+    ],
+    "pack_package": [
+      "SELECT"
+    ],
+    "pack_version": [
+      "SELECT"
     ],
     "patent_cache_refresh_audit": [],
     "patent_inventor_cache": [
@@ -557,6 +583,10 @@
       "SELECT",
       "UPDATE"
     ],
+    "strategy_resolution_snapshot": [
+      "INSERT",
+      "SELECT"
+    ],
     "suppression_decision": [
       "INSERT",
       "SELECT"
@@ -598,6 +628,26 @@
     ]
   },
   "columns": {
+    "pack_package": {
+      "active_version_id": [
+        "UPDATE"
+      ],
+      "status": [
+        "UPDATE"
+      ],
+      "status_reason": [
+        "UPDATE"
+      ],
+      "status_updated_at": [
+        "UPDATE"
+      ],
+      "status_updated_by": [
+        "UPDATE"
+      ],
+      "updated_at": [
+        "UPDATE"
+      ]
+    },
     "skill_package": {
       "status": [
         "UPDATE"

@@ -4,7 +4,9 @@ description: 从企业官网页面文本抽取结构化的产品/服务（Offeri
 license: Proprietary
 metadata:
   platform.skill-key: company.understanding.extract_offerings
-  platform.version: 1.0.0
+  platform.version: 1.1.0
+  platform.skill-kind: model_task
+  platform.tenant-default: enabled
   platform.pack-type: growth_motion
   platform.task-contract: company_understanding.extract_offerings
   platform.task-contract-digest: c67408bbdf2b8f8e9602a6fb13fafdbc03945a1bd93dc4282ad21c719c7c6227

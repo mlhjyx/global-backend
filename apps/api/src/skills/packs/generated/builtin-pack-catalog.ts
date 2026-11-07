@@ -16,11 +16,6 @@ export const BUILTIN_PACKS: readonly BuiltinPackRecord[] =
       "title": "欧盟双用途/出口管制复核",
       "description": "面向欧盟市场的出口管制与个人数据最小化护栏：对外材料需人工复核，研究输出不落个人联系方式。",
       "priorityClass": "compliance",
-      "tags": {
-        "markets": [
-          "EU"
-        ]
-      },
       "owner": "产品负责人 + 平台工程（本工作区）",
       "license": "Proprietary",
       "contentPath": "PACK.md",
@@ -91,9 +86,9 @@ export const BUILTIN_PACKS: readonly BuiltinPackRecord[] =
       "exitPlan": "S1 Golden Set 未通过、规则被法务否定或 180 天未参与任何解析则下架归档。"
     },
     "content": "# 欧盟双用途/出口管制复核（合规包）\n\n适用：面向欧盟市场的获客与报价建议（L1），以及研究类技能的输出。\n\n## 硬约束（按优先级）\n\n1. **双用途物项对外材料需人工复核**：凡涉及 Regulation (EU) 2021/821 附件 I 所列物项（含技术资料、参数表、报价建议）的对外使用，必须先经人工确认；系统只产草稿与证据，不产对外单据。\n2. **制裁潜在命中禁止触达**：`sanctions.status == potential_match` 的对象不得进入 create/engage 阶段动作；命中未清白前只能内部复核。\n3. **个人数据最小化**：研究简报只保留公开职业信息（姓名职务所在公司），不得输出个人邮箱/电话；需要联系时先走合规评审。\n\n## 证据要求\n\n- 每条结论附来源（URL 或内部记录 id）与检索日期。\n- 无法核验的维度写 \"未验证\"，不得推断。\n- 触达前必须过制裁筛查与禁联名单；本包不改变 ToolBroker 白名单与审批链，只提供策略约束。",
-    "manifestDigest": "3e7f487d856bc5cc041aa2a6ee585702cd83da33b8a11f7dc24675dfe89230ec",
+    "manifestDigest": "7eda03d4a7867e7b6fc28815f2cc6d1cffc1ae3f61669d9b9da627a6ddb83b43",
     "contentDigest": "e15375944cac7cecae2b55b7cc3a14271bb86baae0dcd8fd17dadd638f690a04",
-    "sourceDigest": "8f88be269f00f90782e933887c9b0957b105f63332a90b99c8ded23f4095f02a"
+    "sourceDigest": "41fe49cc17c9afc99ad65ee229e53a0463d9a0136164d4a45fc3c9c14afa1b84"
   },
   {
     "packKey": "data_source.public_web_only",

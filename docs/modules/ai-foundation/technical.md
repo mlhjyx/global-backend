@@ -10,6 +10,7 @@
 | 日期 | 变更 | 来源 |
 | --- | --- | --- |
 | 2026-11-08 | S0：SKILL.md 规范 v0 + validator、四张技能表（RLS/快照不可变）、三个存量技能包化、DB resolver、ops 启停 API | 同一任务的三个 stacked PR（首 PR #833） |
+| 2026-11-08 | S1-1：四类 Pack Schema + 7 个内容包 + 冲突裁决 + Golden Set 骨架；S1-2：Pack 七表（RLS/append-only）+ 策略解析与快照 + skill-kind（model_task/service）+ 启动期 pack seed；S0 已发车（镜像 1982a551） | PR #847 / 本 PR |
 
 ## 2. 技术概览
 
@@ -54,8 +55,15 @@ seed（owner 连接，worker + relay 启动期）：package upsert 不覆盖 ops
 - 真库：`packages/db/test/skill-runtime.rls.spec.mjs`（service 组，一次性库）——平台目录跨空间可读、enablement/快照 RLS 隔离、版本/快照 append-only、目录列级 UPDATE。
 - 治理：`app-user-table-privileges.postgres.spec.ts`（全表 ACL 对账）与 `raw-sql-parameter-types.postgres.spec.ts` 通过。
 
-## 8. 状态与缺口
+## 8. S1 Pack v1（进行中）
+
+- **Pack 目录**：`pack_package` / `pack_draft`（可变草稿）/ `pack_version`（append-only）/ `pack_activation`（激活日志，platform 默认 + workspace 白名单灰度）/ `pack_enablement` / `eval_receipt` / `strategy_resolution_snapshot`（策略快照，内容寻址）。启动期 owner seed 7 个内置内容包（版本漂移大声失败；只为缺省包补平台激活）。
+- **策略解析**：`createDbStrategyResolver` 按选择器（industries/markets/motions；合规与数据源边界为通用包）选包，复用 S1-1 的确定性冲突裁决，渲染 ≤2000 字策略简报并写策略快照；DB 版本与构建目录摘要不一致 → `PACK_VERSION_DRIFT` fail-closed；30s 缓存。
+- **skill-kind**：`platform.skill-kind`（model_task | service）与 `platform.tenant-default`；service 技能绑定闭集 handler（sanctions/quoting，实现随 S1-4），不绑定 task contract、不声明工具；`tenant-default: disabled` 的技能需显式 workspace 启用（`SKILL_TENANT_NOT_ENABLED`）。
+- **尚未接线**：策略简报的消费方是 S1-4 的新技能；S0 三个存量技能输入不变。Pack Studio ops API/评测回执写入在 S1-3。
+
+## 9. 状态与缺口
 
 - 已实现：S0 全部内容（见上）；部署尚未发车（运行镜像以 `local-config/global/runtime.compose.env` 为准）。
-- 缺口（后续）：S1 Pack v1（八类 Pack 最小 4 类、Pack Studio、Golden Set CI、`compliance.sanctions_screen` / `quoting.incoterms_quote`）；`seller_document.extract_facts` 尚不存在（Phase 3），S0 以 extract_offerings 替代（设计 D-b）；租户自定义技能/zip/Git 安装（S3）；跨 run 的 run 级快照维度（S1 接入 workflow 时扩展）。
+- 缺口（后续）：S1-3 Pack Studio/评测回执、S1-4 两个新技能与导入 A 档（Pack 表/解析器/快照与 skill-kind 已在 S1-2 落地）；`seller_document.extract_facts` 尚不存在（Phase 3），S0 以 extract_offerings 替代（设计 D-b）；租户自定义技能/zip/Git 安装（S3）；跨 run 的 run 级快照维度（S1 接入 workflow 时扩展）。
 - 回退：镜像回滚即回到无技能层（表残留无害）；ops 可将任一技能平台级 DISABLED。

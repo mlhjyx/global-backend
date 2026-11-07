@@ -1,12 +1,18 @@
 import { createHash } from "node:crypto";
-import type { AiTaskContract } from "../ai-tasks/task-contract";
 import { canonicalDigest } from "../model-runtime/context-engine";
+import {
+  SERVICE_SKILL_HANDLERS,
+  isServiceSkillHandlerId,
+} from "./service-skill-catalog";
 import { parseSkillFrontmatter, SkillFrontmatterError } from "./skill-frontmatter";
 
 /**
- * SKILL.md 包规范 v0 的校验与摘要计算（标准：AAIF / agentskills.io；平台扩展在
- * `metadata.platform.*`）。本模块是纯函数，供生成脚本、CI 单测与后续 seed 共用；
- * 运行时不做 YAML 解析（见 `skill-frontmatter.ts` 头注释）。
+ * SKILL.md 包规范（标准：AAIF / agentskills.io；平台扩展在 `metadata.platform.*`）。
+ * 本模块是纯函数，供生成脚本、CI 单测与 seed 共用；运行时不做 YAML 解析。
+ *
+ * v1.1（S1-2）：新增 `platform.skill-kind`（model_task | service）、
+ * `platform.tenant-default`（enabled | disabled）与 `platform.service-handler`
+ * （service 技能的闭集执行器 id）；service 技能不绑定 task contract、不声明工具。
  */
 
 export const SKILL_PACK_TYPES = [
@@ -22,6 +28,12 @@ export const SKILL_PACK_TYPES = [
 
 export type SkillPackType = (typeof SKILL_PACK_TYPES)[number];
 
+export const SKILL_KINDS = ["model_task", "service"] as const;
+export type SkillKind = (typeof SKILL_KINDS)[number];
+
+export const SKILL_TENANT_DEFAULTS = ["enabled", "disabled"] as const;
+export type SkillTenantDefault = (typeof SKILL_TENANT_DEFAULTS)[number];
+
 export type SkillManifestIssueSeverity = "error" | "warning";
 
 export interface SkillManifestIssue {
@@ -34,8 +46,11 @@ export interface SkillPlatformExtension {
   readonly skillKey: string;
   readonly version: string;
   readonly packType: SkillPackType;
-  readonly taskContractId: string;
-  readonly taskContractDigest: string;
+  readonly skillKind: SkillKind;
+  readonly tenantDefault: SkillTenantDefault;
+  readonly taskContractId?: string;
+  readonly taskContractDigest?: string;
+  readonly serviceHandler?: string;
   readonly risk?: "low" | "medium" | "high";
   readonly humanGate?: boolean;
   readonly budgetCents?: number;
@@ -57,10 +72,31 @@ export interface SkillArtifactInput {
   readonly raw: string;
   /** 技能目录名（标准要求等于 frontmatter `name`）。 */
   readonly directoryName: string;
-  /** `<pack_type>/` 目录名；必须等于 `metadata.platform.pack-type`。 */
+  /** `<pack_type>/` 目录名；`metadata.platform.pack-type` 必须与它一致。 */
   readonly packTypeDirectory: string;
   /** 由 task id 解析代码内 AI Task 契约（`getTask`）；未登记返回 undefined。 */
-  resolveContract: (taskId: string) => AiTaskContract | undefined;
+  resolveContract: (taskId: string) => AiTaskContractLike | undefined;
+}
+
+/**
+ * 本模块只需要契约的这些字段；用结构类型避免与 Nest 侧模块产生运行时依赖。
+ * （`AiTaskContract` 结构上可赋值给该类型。）
+ */
+export interface AiTaskContractLike {
+  readonly id: string;
+  readonly description: string;
+  readonly model: string;
+  readonly outputSchema: Record<string, unknown>;
+  readonly allowedTools?: readonly string[];
+  readonly maxCostCents?: number;
+  readonly maxOutputTokens: number;
+  readonly timeoutMs?: number;
+  readonly retry?: number;
+  readonly concurrency?: number;
+  readonly toolVersion?: string;
+  readonly risk: "low" | "medium" | "high";
+  readonly humanGate: boolean;
+  readonly acceptsModelSubstitute?: true;
 }
 
 export interface ValidatedSkill {
@@ -94,18 +130,24 @@ const PLATFORM_FIELDS = new Set([
   "platform.skill-key",
   "platform.version",
   "platform.pack-type",
+  "platform.skill-kind",
+  "platform.tenant-default",
   "platform.task-contract",
   "platform.task-contract-digest",
+  "platform.service-handler",
   "platform.risk",
   "platform.human-gate",
   "platform.budget-cents",
   "platform.owner",
 ]);
 
-const REQUIRED_PLATFORM_FIELDS = [
+const BASE_REQUIRED_PLATFORM_FIELDS = [
   "platform.skill-key",
   "platform.version",
   "platform.pack-type",
+] as const;
+
+const MODEL_TASK_REQUIRED_PLATFORM_FIELDS = [
   "platform.task-contract",
   "platform.task-contract-digest",
 ] as const;
@@ -115,7 +157,7 @@ const REQUIRED_PLATFORM_FIELDS = [
  * （`MODEL_ACQUISITION_*` env 可换），实际生效值由解析快照记录（设计决策 D-h）。
  * `description` 必须纳入——理解管线把它当 system prompt 发给模型。
  */
-export function computeTaskContractDigest(contract: AiTaskContract): string {
+export function computeTaskContractDigest(contract: AiTaskContractLike): string {
   return canonicalDigest({
     id: contract.id,
     description: contract.description,
@@ -213,7 +255,29 @@ export function validateSkillArtifact(input: SkillArtifactInput): SkillValidatio
     }
   }
 
-  const missingPlatform = REQUIRED_PLATFORM_FIELDS.filter((key) => metadata[key] === undefined);
+  const skillKindRaw = metadata["platform.skill-kind"];
+  const skillKind: SkillKind = skillKindRaw === "service" ? "service" : "model_task";
+  if (skillKindRaw !== undefined && !SKILL_KINDS.includes(skillKindRaw as SkillKind)) {
+    error("SKILL_PLATFORM_VALUE_INVALID", "platform.skill-kind must be model_task or service");
+  }
+  const tenantDefaultRaw = metadata["platform.tenant-default"];
+  const tenantDefault: SkillTenantDefault = tenantDefaultRaw === "disabled" ? "disabled" : "enabled";
+  if (
+    tenantDefaultRaw !== undefined &&
+    !SKILL_TENANT_DEFAULTS.includes(tenantDefaultRaw as SkillTenantDefault)
+  ) {
+    error("SKILL_PLATFORM_VALUE_INVALID", "platform.tenant-default must be enabled or disabled");
+  }
+
+  const missingPlatform = [
+    ...BASE_REQUIRED_PLATFORM_FIELDS.filter((key) => metadata[key] === undefined),
+    ...(skillKind === "model_task"
+      ? MODEL_TASK_REQUIRED_PLATFORM_FIELDS.filter((key) => metadata[key] === undefined)
+      : []),
+  ];
+  if (skillKind === "service" && metadata["platform.service-handler"] === undefined) {
+    error("SKILL_SERVICE_HANDLER_INVALID", "service skills must declare platform.service-handler");
+  }
   if (missingPlatform.length > 0) {
     error("SKILL_PLATFORM_FIELD_MISSING", `missing platform metadata: ${missingPlatform.join(", ")}`);
   }
@@ -223,6 +287,7 @@ export function validateSkillArtifact(input: SkillArtifactInput): SkillValidatio
   const platformPackType = metadata["platform.pack-type"];
   const platformContractId = metadata["platform.task-contract"];
   const platformDigest = metadata["platform.task-contract-digest"];
+  const serviceHandler = metadata["platform.service-handler"];
 
   let platformValuesValid = missingPlatform.length === 0;
   if (platformSkillKey !== undefined && !SKILL_KEY_PATTERN.test(platformSkillKey)) {
@@ -243,13 +308,35 @@ export function validateSkillArtifact(input: SkillArtifactInput): SkillValidatio
     );
     platformValuesValid = false;
   }
-  if (platformContractId !== undefined && platformContractId.trim() === "") {
-    error("SKILL_PLATFORM_VALUE_INVALID", "platform.task-contract must not be empty");
-    platformValuesValid = false;
-  }
-  if (platformDigest !== undefined && !SHA256_PATTERN.test(platformDigest)) {
-    error("SKILL_PLATFORM_VALUE_INVALID", "platform.task-contract-digest must be a lowercase sha256 hex digest");
-    platformValuesValid = false;
+
+  if (skillKind === "service") {
+    if (serviceHandler !== undefined && !isServiceSkillHandlerId(serviceHandler)) {
+      error("SKILL_SERVICE_HANDLER_INVALID", `unknown service handler: ${serviceHandler}`);
+      platformValuesValid = false;
+    }
+    if (platformContractId !== undefined || platformDigest !== undefined) {
+      error(
+        "SKILL_SERVICE_BINDING_INVALID",
+        "service skills must not declare task-contract or task-contract-digest",
+      );
+      platformValuesValid = false;
+    }
+  } else {
+    if (serviceHandler !== undefined) {
+      error(
+        "SKILL_PLATFORM_VALUE_INVALID",
+        "platform.service-handler is only valid for skill-kind=service",
+      );
+      platformValuesValid = false;
+    }
+    if (platformContractId !== undefined && platformContractId.trim() === "") {
+      error("SKILL_PLATFORM_VALUE_INVALID", "platform.task-contract must not be empty");
+      platformValuesValid = false;
+    }
+    if (platformDigest !== undefined && !SHA256_PATTERN.test(platformDigest)) {
+      error("SKILL_PLATFORM_VALUE_INVALID", "platform.task-contract-digest must be a lowercase sha256 hex digest");
+      platformValuesValid = false;
+    }
   }
 
   const platformRisk = metadata["platform.risk"];
@@ -284,8 +371,26 @@ export function validateSkillArtifact(input: SkillArtifactInput): SkillValidatio
     }
   }
 
-  let contract: AiTaskContract | undefined;
-  if (platformContractId !== undefined && platformContractId.trim() !== "") {
+  if (skillKind === "service" && allowedTools.length > 0) {
+    error("SKILL_SERVICE_TOOLS_INVALID", "service skills must not declare allowed-tools");
+    allowedToolsValid = false;
+  }
+
+  if (skillKind === "service" && serviceHandler !== undefined && isServiceSkillHandlerId(serviceHandler)) {
+    const handler = SERVICE_SKILL_HANDLERS[serviceHandler];
+    if (platformRisk !== undefined && platformRisk !== handler.risk) {
+      error("SKILL_SERVICE_HANDLER_MISMATCH", "platform.risk must equal the service handler risk");
+    }
+    if (
+      platformHumanGate !== undefined &&
+      (platformHumanGate === "true") !== handler.humanGate
+    ) {
+      error("SKILL_SERVICE_HANDLER_MISMATCH", "platform.human-gate must equal the service handler gate");
+    }
+  }
+
+  let contract: AiTaskContractLike | undefined;
+  if (skillKind === "model_task" && platformContractId !== undefined && platformContractId.trim() !== "") {
     contract = input.resolveContract(platformContractId);
     if (!contract) {
       error("SKILL_TASK_UNKNOWN", `unknown AI task contract: ${platformContractId}`);
@@ -347,8 +452,14 @@ export function validateSkillArtifact(input: SkillArtifactInput): SkillValidatio
       skillKey: platformSkillKey as string,
       version: platformVersion as string,
       packType: platformPackType as SkillPackType,
-      taskContractId: platformContractId as string,
-      taskContractDigest: platformDigest as string,
+      skillKind,
+      tenantDefault,
+      ...(skillKind === "model_task"
+        ? {
+            taskContractId: platformContractId as string,
+            taskContractDigest: platformDigest as string,
+          }
+        : { serviceHandler: serviceHandler as string }),
       ...(platformRisk !== undefined ? { risk: platformRisk as "low" | "medium" | "high" } : {}),
       ...(platformHumanGate !== undefined ? { humanGate: platformHumanGate === "true" } : {}),
       ...(platformBudget !== undefined ? { budgetCents: Number.parseInt(platformBudget, 10) } : {}),

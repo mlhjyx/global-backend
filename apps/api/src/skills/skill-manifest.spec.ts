@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AiTaskContract } from "../ai-tasks/task-contract";
 import {
   computeTaskContractDigest,
@@ -199,5 +199,85 @@ describe("validateSkillArtifact", () => {
     const input = artifact();
     input.raw = input.raw.slice(0, input.raw.indexOf("---\n\n# 演示技能")) + "---\n\n\n";
     expect(codes(input)).toContain("SKILL_BODY_INVALID");
+  });
+});
+
+describe("validateSkillArtifact — service skills (skill-kind)", () => {
+  function serviceArtifact(platform: Record<string, string> = {}, extra: Record<string, unknown> = {}) {
+    const metadata: Record<string, string> = {
+      "platform.skill-key": "compliance.demo_sanctions",
+      "platform.version": "1.0.0",
+      "platform.pack-type": "compliance",
+      "platform.skill-kind": "service",
+      "platform.tenant-default": "disabled",
+      "platform.service-handler": "sanctions.screen.v1",
+      "platform.risk": "low",
+      "platform.human-gate": "false",
+      ...platform,
+    };
+    const lines = [
+      "name: demo-sanctions",
+      "description: 演示服务型技能。",
+      "license: Proprietary",
+      "metadata:",
+      ...Object.entries(metadata).map(([key, value]) => `  ${key}: ${JSON.stringify(value)}`),
+    ];
+    const raw = `---\n${lines.join("\n")}\n---\n\n# 演示服务技能\n\n确定性筛查。\n`;
+    return {
+      raw,
+      directoryName: "demo-sanctions",
+      packTypeDirectory: "compliance",
+      resolveContract: vi.fn(),
+      ...extra,
+    } as SkillArtifactInput;
+  }
+
+  it("accepts a service skill bound to a known handler (no contract, no tools)", () => {
+    const resolveContract = vi.fn();
+    const result = validateSkillArtifact(serviceArtifact({}, { resolveContract }));
+    expect(result.issues).toEqual([]);
+    expect(result.skill?.manifest.platform.skillKind).toBe("service");
+    expect(result.skill?.manifest.platform.serviceHandler).toBe("sanctions.screen.v1");
+    expect(result.skill?.manifest.platform.taskContractId).toBeUndefined();
+    expect(result.skill?.manifest.platform.tenantDefault).toBe("disabled");
+    expect(resolveContract).not.toHaveBeenCalled();
+  });
+
+  it("requires a known handler for service skills", () => {
+    const missing = serviceArtifact({}, {});
+    missing.raw = missing.raw.replace(`  platform.service-handler: "sanctions.screen.v1"\n`, "");
+    expect(codes(missing)).toContain("SKILL_SERVICE_HANDLER_INVALID");
+
+    const unknown = serviceArtifact({ "platform.service-handler": "shell.exec.v1" });
+    expect(codes(unknown)).toContain("SKILL_SERVICE_HANDLER_INVALID");
+  });
+
+  it("refuses a task binding or tools on a service skill", () => {
+    const withContract = serviceArtifact({ "platform.task-contract": "demo.task" });
+    expect(codes(withContract)).toContain("SKILL_SERVICE_BINDING_INVALID");
+
+    const withTools = serviceArtifact();
+    withTools.raw = withTools.raw.replace(
+      "---\n\n# 演示服务技能",
+      "allowed-tools: crawl4ai.fetch\n---\n\n# 演示服务技能",
+    );
+    expect(codes(withTools)).toContain("SKILL_SERVICE_TOOLS_INVALID");
+  });
+
+  it("keeps risk and the human gate aligned with the handler definition", () => {
+    expect(codes(serviceArtifact({ "platform.risk": "high" }))).toContain(
+      "SKILL_SERVICE_HANDLER_MISMATCH",
+    );
+    expect(codes(serviceArtifact({ "platform.human-gate": "true" }))).toContain(
+      "SKILL_SERVICE_HANDLER_MISMATCH",
+    );
+  });
+
+  it("rejects a service handler on model-task skills and unknown tenant defaults", () => {
+    const withHandler = artifact({}, { "platform.service-handler": "sanctions.screen.v1" });
+    expect(codes(withHandler)).toContain("SKILL_PLATFORM_VALUE_INVALID");
+
+    const badTenant = artifact({}, { "platform.tenant-default": "maybe" });
+    expect(codes(badTenant)).toContain("SKILL_PLATFORM_VALUE_INVALID");
   });
 });
