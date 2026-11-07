@@ -816,19 +816,29 @@ export class ToolBroker implements ExecutionBroker {
               reservation,
               BigInt(result.costCents) * 10_000n,
             );
-          } catch (settleError) {
-            // Bounded diagnostic, no secrets: the row stays unresolved and a
-            // replay absorbs it as a remnant.
-            this.trace(
-              ctx,
-              tool,
-              "ERROR",
-              `projection-rejected settlement failed: ${
-                settleError instanceof Error ? settleError.name : "unknown"
-              }`,
-              0,
-              now() - started,
-            );
+          } catch {
+            try {
+              // ACK 丢失：同样的 operation/成本重放一次是安全的。
+              await this.budget.settle(
+                reservation,
+                BigInt(result.costCents) * 10_000n,
+              );
+            } catch (settleError) {
+              // B2/F4：双败同样要把行带离裸 RESERVED——先尽力标 RESULT_UNKNOWN，
+              // 观测按真实结果记录。
+              const markedUnknown =
+                await this.markResultUnknownAfterSettleFailure(reservation);
+              this.trace(
+                ctx,
+                tool,
+                "ERROR",
+                `projection-rejected settlement failed: ${
+                  settleError instanceof Error ? settleError.name : "unknown"
+                }${markedUnknown ? "; result marked unknown" : "; result left RESERVED"}`,
+                0,
+                now() - started,
+              );
+            }
           }
           throw new ToolDurableResultProjectionError(reservation.operationId);
         }
@@ -859,6 +869,20 @@ export class ToolBroker implements ExecutionBroker {
             // cost and projection. PostgreSQL rejects any settlement drift.
             settled = await this.budget.settle(...settlement);
           } catch {
+            // F4（B2）：物理已成功、两次记账都失败——行不能停在裸 RESERVED。
+            // 尽力标 RESULT_UNKNOWN（结果未知、按预留额保守对待），再以确定性错误
+            // 失败：活动边界把它标 nonRetryable，重试不再反复撞同一行。
+            const markedUnknown = await this.markResultUnknownAfterSettleFailure(reservation);
+            this.trace(
+              ctx,
+              tool,
+              "ERROR",
+              markedUnknown
+                ? "settlement failed twice; result marked unknown"
+                : "settlement failed twice; result left RESERVED for reconciliation",
+              0,
+              now() - started,
+            );
             throw new BudgetOperationReplayError(reservation.operationId);
           }
         }
@@ -900,6 +924,23 @@ export class ToolBroker implements ExecutionBroker {
       return { reason: "GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE" };
     }
     return { subjectRef: ctx.artifactSubject };
+  }
+
+  /**
+   * settle 失败后的账本兜底（B2/F4）：尽力标 RESULT_UNKNOWN，兜底自身失败只留
+   * RESERVED（由独立清收器按阈值收，B4），绝不掩盖调用方要抛的主错误。
+   * 返回是否真的标记成功——观测（trace）必须说真话。
+   */
+  private async markResultUnknownAfterSettleFailure(
+    reservation: BudgetReservation,
+  ): Promise<boolean> {
+    try {
+      await this.budget.markResultUnknown(reservation);
+      return true;
+    } catch {
+      /* 账本此刻不可用：行留在 RESERVED，交给清收器 */
+      return false;
+    }
   }
 
   /** RLS subject admission; on denial releases a fresh reservation and throws. */
