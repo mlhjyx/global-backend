@@ -29,12 +29,12 @@
         "resolved_advisories": [],
         "issues": [],
         "provenance": {
-          "subject_commit": "79f43056f0a42412bc88a9ee45bdcc577e464803",
+          "subject_commit": "23ffd896e0da5b2173c87d7cc36d562e68f9a371",
           "lockfile_digest": "sha256:7e0d53807c2b59d8339d8f0ae0f55e84b2d664c418bf091e77766f26122ddbc4",
           "verifier_digest": "sha256:fd2975544c95dee3cfe48f47ccd8c5dbf309a02a5918108572e4fb7257c38a63",
           "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
           "audit_digest": "sha256:68a755e13c43605328b09fbc5af04f00e7e3324caa4728f2d2550b72d79f3531",
-          "observed_at": "2026-11-07T22:02:00.000Z",
+          "observed_at": "2026-11-07T22:24:36.000Z",
           "registry": "https://registry.npmjs.org/"
         }
       },
@@ -46,19 +46,19 @@
         "resolved_advisories": [],
         "issues": [],
         "provenance": {
-          "subject_commit": "79f43056f0a42412bc88a9ee45bdcc577e464803",
+          "subject_commit": "23ffd896e0da5b2173c87d7cc36d562e68f9a371",
           "lockfile_digest": "sha256:7e0d53807c2b59d8339d8f0ae0f55e84b2d664c418bf091e77766f26122ddbc4",
           "verifier_digest": "sha256:fd2975544c95dee3cfe48f47ccd8c5dbf309a02a5918108572e4fb7257c38a63",
           "source_policy_digest": "sha256:7165e2b9352661469677e493d35078e1e4cbe7489bacbea00fcbf672ae122494",
           "audit_digest": "sha256:68a755e13c43605328b09fbc5af04f00e7e3324caa4728f2d2550b72d79f3531",
-          "observed_at": "2026-11-07T22:02:00.000Z",
+          "observed_at": "2026-11-07T22:24:36.000Z",
           "registry": "https://registry.npmjs.org/"
         }
       }
     }
   ],
   "binding": {
-    "base_commit": "79f43056f0a42412bc88a9ee45bdcc577e464803",
+    "base_commit": "23ffd896e0da5b2173c87d7cc36d562e68f9a371",
     "lockfile_digest": "sha256:7e0d53807c2b59d8339d8f0ae0f55e84b2d664c418bf091e77766f26122ddbc4",
     "previous_valid_until": "2026-11-14T18:27:04.000Z",
     "valid_until": "2027-01-15T00:00:00.000Z"
