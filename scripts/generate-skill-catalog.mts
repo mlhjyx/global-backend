@@ -1,7 +1,8 @@
 /**
  * 生成 `apps/api/src/skills/generated/builtin-skill-catalog.ts`（运行时读取的技能目录）。
  *
- * 真源：`apps/api/src/skills/builtin/<pack_type>/<skill-name>/SKILL.md`。
+ * 真源：`apps/api/src/skills/builtin/<pack_type>/<skill-name>/SKILL.md` 与
+ * `apps/api/src/skills/imported/<source-id>/<skill-name>/SKILL.md`。
  * 用法：`pnpm skills:generate`（写文件） / `pnpm skills:generate --check`（只校验新鲜度）。
  * 前置：`pnpm --filter @global/contracts build`（任务契约在本仓的类型解析需要）。
  */
@@ -9,14 +10,19 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getTask } from "../apps/api/src/ai-tasks/task-registry";
-import { loadBuiltinSkills } from "../apps/api/src/skills/load-builtin-skills";
+import { loadPlatformSkills } from "../apps/api/src/skills/load-builtin-skills";
 
 const repoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 const builtinRoot = join(repoRoot, "apps/api/src/skills/builtin");
+const importedRoot = join(repoRoot, "apps/api/src/skills/imported");
 const outputPath = join(repoRoot, "apps/api/src/skills/generated/builtin-skill-catalog.ts");
 
 function render(): string {
-  const { records, issues } = loadBuiltinSkills(builtinRoot, getTask);
+  const { records, issues } = loadPlatformSkills({
+    builtinRoot,
+    importedRoot,
+    resolveContract: getTask,
+  });
   for (const issue of issues) {
     const stream = issue.severity === "error" ? process.stderr : process.stdout;
     stream.write(`${issue.severity.toUpperCase()} ${issue.code} ${issue.file}: ${issue.message}\n`);
@@ -26,11 +32,11 @@ function render(): string {
   }
   return [
     "// GENERATED FILE — do not edit by hand.",
-    "// Source: apps/api/src/skills/builtin/**/SKILL.md",
+    "// Source: apps/api/src/skills/builtin/**/SKILL.md + apps/api/src/skills/imported/**/SKILL.md",
     "// Regenerate: pnpm skills:generate   Verify: pnpm skills:validate",
-    'import type { BuiltinSkillRecord } from "../load-builtin-skills";',
+    'import type { PlatformSkillRecord } from "../load-builtin-skills";',
     "",
-    "export const BUILTIN_SKILLS: readonly BuiltinSkillRecord[] =",
+    "export const BUILTIN_SKILLS: readonly PlatformSkillRecord[] =",
     `${JSON.stringify(records, null, 2)};`,
     "",
   ].join("\n");

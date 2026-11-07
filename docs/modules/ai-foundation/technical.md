@@ -56,16 +56,19 @@ seed（owner 连接，worker + relay 启动期）：package upsert 不覆盖 ops
 - 真库：`packages/db/test/skill-runtime.rls.spec.mjs`（service 组，一次性库）——平台目录跨空间可读、enablement/快照 RLS 隔离、版本/快照 append-only、目录列级 UPDATE。
 - 治理：`app-user-table-privileges.postgres.spec.ts`（全表 ACL 对账）与 `raw-sql-parameter-types.postgres.spec.ts` 通过。
 
-## 8. S1 Pack v1（进行中）
+## 8. S1 Pack v1
 
 - **Pack 目录**：`pack_package` / `pack_draft`（可变草稿）/ `pack_version`（append-only）/ `pack_activation`（激活日志，platform 默认 + workspace 白名单灰度）/ `pack_enablement` / `eval_receipt` / `strategy_resolution_snapshot`（策略快照，内容寻址）。启动期 owner seed 7 个内置内容包（版本漂移大声失败；只为缺省包补平台激活）。
 - **策略解析**：`createDbStrategyResolver` 按选择器（industries/markets/motions；合规与数据源边界为通用包）选包，复用 S1-1 的确定性冲突裁决，渲染 ≤2000 字策略简报并写策略快照；DB 版本与构建目录摘要不一致 → `PACK_VERSION_DRIFT` fail-closed；30s 缓存。
 - **skill-kind**：`platform.skill-kind`（model_task | service）与 `platform.tenant-default`；service 技能绑定闭集 handler（sanctions/quoting，实现随 S1-4），不绑定 task contract、不声明工具；`tenant-default: disabled` 的技能需显式 workspace 启用（`SKILL_TENANT_NOT_ENABLED`）。
 - **Pack Studio（S1-3）**：`/packs` ops API——草稿可编辑（`pack_draft`），validate（schema/语义/单包冲突模拟）→ dry-run（按选择器解析并给出与当前版本的简报差异）→ eval（运行 `evals/evals.json` 的确定性用例，写不可变 `eval_receipt`）→ publish（要求当前摘要已校验且存在匹配、30 天内、通过的回执）→ activate（platform 默认或 workspace 白名单灰度；回滚=激活旧版本）；workspace 启停覆盖与 `/skills` 同构。发布的新版本不参与内置目录摘要比对（不可变版本行 + 发布门自证），内置目录只钉住 seed 的同版本行。
-- **尚未接线**：策略简报的消费方是 S1-4 的新技能；S0 三个存量技能输入不变。
+- **两个服务技能（S1-4）**：`compliance.sanctions_screen`（handler `sanctions.screen.v1`，复用 `SanctionsScreeningService` 的内存索引；索引未启用/为空时如实 `not_screened`，不臆造 clear；命中截断 50 条）与 `quoting.incoterms_quote`（handler `quoting.incoterms.v1`，Incoterms 2020 卖方成本矩阵，分整数累加；跨币种必须输入汇率，否则 `QUOTING_EXCHANGE_RATE_REQUIRED`；无 goods 行 `QUOTING_GOODS_REQUIRED`）。服务技能不绑 task contract、不声明工具；`executeServiceSkill` 为闭集分派，缺依赖 fail-closed（`SERVICE_SKILL_HANDLER_UNAVAILABLE`）。L1 红线：输出无 PI/CI/PL 等单证字段，报价 `humanGate=true`。
+- **导入技能（S1-4）**：目录布局 `imported/<source-id>/<skill>/SKILL.md`（pack-type 取自 frontmatter）；加载器额外过许可/NOTICE/安全扫描门——许可仅 MIT/Apache-2.0、NOTICE 必须含 Upstream/Commit/License/Modified、正文禁止可执行代码围栏与非 NOTICE 外链、`tenant-default` 必须 `disabled`。首批两个上游（Anthropic knowledge-work-plugins，Apache-2.0）衍生版：`research.account_research`（新任务契约，`searxng.search`+`crawl4ai.fetch`）与 `triage.lead_triage`（无工具）。正文记为派生作品，快照仅溯源。解析侧：无 workspace 覆盖行 → `SKILL_TENANT_NOT_ENABLED`，ops PUT 覆盖后可用（单测覆盖）。
+- **Golden Set（S1-4）**：每个技能/内容包 `evals/evals.json`（≥5 例，断言闭集 11 种）。CI 零模型层：service 技能逐用例真实执行 handler 并精确断言、内容包渲染策略简报断言、模型技能渲染快照（固定选择器下的策略简报 + SKILL.md 正文摘要钉住，改正文/包内容必须显式重钉）与清单结构校验；模型实测层仍走发布回执（S2）。
+- **尚未接线**：策略简报的消费方是 S1-4 的新技能；S0 三个存量技能输入不变。导入技能与模型新技能在 S1 不接入现有 run（生产流量成本为 0，直到 M2.1 消费方接入）。
 
 ## 9. 状态与缺口
 
-- 已实现：S0 全部内容（见上）；部署尚未发车（运行镜像以 `local-config/global/runtime.compose.env` 为准）。
-- 缺口（后续）：S1-4 两个新技能与导入 A 档（Pack 表/解析器/快照/skill-kind 在 S1-2、Studio/回执/发布门在 S1-3 落地）；`seller_document.extract_facts` 尚不存在（Phase 3），S0 以 extract_offerings 替代（设计 D-b）；租户自定义技能/zip/Git 安装（S3）；跨 run 的 run 级快照维度（S1 接入 workflow 时扩展）。
-- 回退：镜像回滚即回到无技能层（表残留无害）；ops 可将任一技能平台级 DISABLED。
+- 已实现：S0 全部内容（已于 2026-11-07 发车）；S1 全部四个 PR 已入 main（Pack Schema/内容目录/冲突裁决、Pack 七表/策略解析快照/skill-kind、Pack Studio/回执/发布门、服务技能/导入 A 档/Golden Set），**S1-2 起的表与 seed 待随下一次发车部署**（运行镜像以 `local-config/global/runtime.compose.env` 为准）。
+- 缺口（后续）：策略简报、两个服务技能与导入技能接入 run（S1 只交付执行器与评测，消费方随 M2.1）；模型技能发布层评测回执执行器（S2）；`seller_document.extract_facts` 尚不存在（Phase 3），S0 以 extract_offerings 替代（设计 D-b）；租户自定义技能/zip/Git 安装（S3）；跨 run 的 run 级快照维度（接入 workflow 时扩展）。
+- 回退：镜像回滚即回到无技能层（表残留无害）；ops 可将任一技能平台级 DISABLED；导入技能与模型新技能默认对租户关闭。

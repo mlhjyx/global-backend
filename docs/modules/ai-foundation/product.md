@@ -2,7 +2,7 @@
 
 > 文档 ID：`DOC-MODULE-AI-FOUNDATION-PRODUCT-001`
 > 生命周期：`DRAFT`
-> 生命周期依据：产品定位与路线见协调计划 §17（Q35–Q40）与 `docs/superpowers/plans/2026-11-08-skill-runtime-s0.md`；S0 已落地，S1 未开始。
+> 生命周期依据：产品定位与路线见协调计划 §17（Q35–Q40）与 `docs/superpowers/plans/2026-11-08-skill-runtime-s0.md`；S0 已发车，S1 Pack v1（`docs/superpowers/plans/2026-11-08-s1-pack-v1.md`）已全部入 main、待随发车部署。
 > 模块技术方案：[technical.md](technical.md)
 
 ## 定位
@@ -15,6 +15,13 @@
 - 运行时空转：同样输入得到同样的模型行为（零行为变化）；但技能未登记/被停用时**不可执行**（fail-closed）。
 - 运营可一键停用/恢复任一技能（平台级），或对单个工作空间停用（覆盖）；解析结果留下不可变审计快照。
 - 为 S1 的 Pack v1（行业/市场/合规规则包 + Golden Set + 新技能）与后续触达/报价技能打地基。
+
+## S1 提供什么（Pack v1）
+
+- **规则包（Pack）**：合规边界、数据源边界、目标市场动作、行业经验四类规则包，带优先级与冲突裁决（高优先级 `forbid` 不可被低层放宽）；解析时生成确定性的策略简报并留不可变快照，发布必须过评测门。运营可用引擎 ops API 编辑/评测/发布/激活（UI 随 P6）。
+- **两个确定性服务技能（零模型）**：`compliance.sanctions_screen`（制裁名单筛查，只读，复用 Qualify 第五门引擎）与 `quoting.incoterms_quote`（Incoterms 2020 成本/报价建议，L1 只读：汇率只取输入、不生成 PI/CI/PL、需人工确认）。
+- **两个精选导入技能（默认关闭）**：Anthropic knowledge-work-plugins（Apache-2.0）的账户研究与线索分诊的引擎化衍生版；租户显式启用后才可用，正文保留来源与改动说明（NOTICE）。
+- **Golden Set 进 CI**：每个技能/规则包 ≥5 条评测用例；确定性技能与规则包在 CI 真实执行并精确断言，模型技能的评测清单与渲染快照在 CI 校验、发布层执行。
 
 ## 边界
 

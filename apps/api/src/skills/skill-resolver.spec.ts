@@ -251,3 +251,74 @@ describe("createDbSkillResolver — tenant-default disabled skills", () => {
     );
   });
 });
+
+describe("createDbSkillResolver — imported skills ship tenant-default disabled", () => {
+  const IMPORTED = BUILTIN_SKILLS.find(
+    (record) => record.skillKey === "research.account_research",
+  )!;
+
+  function importedStore(): FakeStore {
+    const store = new FakeStore();
+    store.pkg = packageRow({ packType: IMPORTED.manifest.platform.packType });
+    store.version = versionRow({
+      version: IMPORTED.manifest.platform.version,
+      manifest: IMPORTED.manifest,
+      manifestDigest: digestOf(IMPORTED.manifest),
+      taskContractId: IMPORTED.manifest.platform.taskContractId ?? null,
+      taskContractDigest: IMPORTED.manifest.platform.taskContractDigest ?? null,
+      serviceHandler: null,
+    });
+    return store;
+  }
+
+  it("blocks resolution until the workspace opts in, then resolves with the imported descriptor", async () => {
+    const store = importedStore();
+    const resolver = createDbSkillResolver(store, { ttlMs: 0, records: [IMPORTED] });
+    expect(await reasonOf(() => resolver.resolve("research.account_research", WORKSPACE))).toBe(
+      "SKILL_TENANT_NOT_ENABLED",
+    );
+    store.enabled = true;
+    const descriptor = await resolver.resolve("research.account_research", WORKSPACE);
+    expect(descriptor.skillKey).toBe("research.account_research");
+    expect(descriptor.taskContractId).toBe("research.account_research");
+    expect(descriptor.allowedTools).toEqual(["crawl4ai.fetch", "searxng.search"]);
+  });
+});
+
+describe("createDbSkillResolver — service skills", () => {
+  const SERVICE = BUILTIN_SKILLS.find(
+    (record) => record.skillKey === "quoting.incoterms_quote",
+  )!;
+
+  function serviceStore(handler: string | null): FakeStore {
+    const store = new FakeStore();
+    store.pkg = packageRow({ packType: SERVICE.manifest.platform.packType });
+    store.version = versionRow({
+      version: SERVICE.manifest.platform.version,
+      manifest: SERVICE.manifest,
+      manifestDigest: digestOf(SERVICE.manifest),
+      taskContractId: null,
+      taskContractDigest: null,
+      serviceHandler: handler,
+    });
+    return store;
+  }
+
+  it("resolves with the handler binding and no task contract", async () => {
+    const store = serviceStore("quoting.incoterms.v1");
+    const resolver = createDbSkillResolver(store, { ttlMs: 0, records: [SERVICE] });
+    const descriptor = await resolver.resolve("quoting.incoterms_quote", WORKSPACE);
+    expect(descriptor.skillKind).toBe("service");
+    expect(descriptor.serviceHandler).toBe("quoting.incoterms.v1");
+    expect(descriptor.taskContractId).toBeUndefined();
+    expect(descriptor.humanGate).toBe(true);
+  });
+
+  it("fails closed when the registered handler no longer matches the build", async () => {
+    const store = serviceStore("sanctions.screen.v1");
+    const resolver = createDbSkillResolver(store, { ttlMs: 0, records: [SERVICE] });
+    expect(await reasonOf(() => resolver.resolve("quoting.incoterms_quote", WORKSPACE))).toBe(
+      "SKILL_CONTRACT_DRIFT",
+    );
+  });
+});
