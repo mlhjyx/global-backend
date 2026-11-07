@@ -7083,6 +7083,7 @@ describe("stale-run 看门狗活动（B3）", () => {
     const update = vi.fn(async () => ({}));
     const outboxCreate = vi.fn(async () => ({}));
     const runEventCreate = vi.fn(async () => ({}));
+    const TASK_REF = { taskId: "90000000-0000-4000-8000-000000000009", taskRunId: "91000000-0000-4000-8000-000000000009" };
     let queryCall = 0;
     const tx = {
       $queryRaw: vi.fn(async () => {
@@ -7092,14 +7093,32 @@ describe("stale-run 看门狗活动（B3）", () => {
             {
               id: ROW.runId,
               plan_id: ROW.planId,
-              stats: { fit: { match: 2 } },
+              // 真实僵尸行只有查询收据（stats.fit 只在 finalize 终态写入），fit 判定看 leads。
+              stats: { perQuery: {} },
               status: "RUNNING",
+              task_ref: TASK_REF,
             },
           ];
         }
         if (queryCall === 2) return [];
+        if (queryCall === 3) {
+          return [
+            {
+              payload: {
+                planId: ROW.planId,
+                icpId: ROW.icpId,
+                executionBudget: {
+                  accountKey: `discovery.run:discovery_run:request:${"a".repeat(64)}:${"a".repeat(64)}`,
+                },
+              },
+            },
+          ];
+        }
         return [{ cost_usd: 1.23 }];
       }),
+      rawSourceRecord: { findMany: vi.fn(async () => [{ id: "raw-1" }]) },
+      identityLink: { findMany: vi.fn(async () => [{ canonicalId: "company-1" }]) },
+      lead: { findFirst: vi.fn(async () => ({ id: "lead-1" })) },
       discoveryRun: { update },
       runEvent: {
         aggregate: vi.fn(async () => ({ _max: { seq: 7n } })),
@@ -7122,7 +7141,6 @@ describe("stale-run 看门狗活动（B3）", () => {
       data: expect.objectContaining({
         status: "FAILED",
         stats: expect.objectContaining({
-          fit: { match: 2 },
           failure: expect.objectContaining({
             stage: "watchdog",
             errorType: "DISCOVERY_RUN_STALE",
@@ -7137,9 +7155,14 @@ describe("stale-run 看门狗活动（B3）", () => {
       data: expect.objectContaining({
         eventType: "DiscoveryRunCompleted",
         aggregateId: ROW.runId,
-        payload: expect.objectContaining({ status: "FAILED", cost: 1.23 }),
+        payload: expect.objectContaining({
+          status: "FAILED",
+          cost: 1.23,
+          taskRef: TASK_REF,
+        }),
       }),
     });
+    // fit 判定不在 stats（僵尸行从未走到 finalize）——由 leads 的 fitVerdict 决定是否衔接评分。
     expect(outboxCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
         eventType: "QualifyRequested",

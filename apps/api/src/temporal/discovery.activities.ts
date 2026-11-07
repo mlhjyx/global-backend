@@ -374,6 +374,7 @@ interface LockedDiscoveryRunReceiptState {
   plan_id: string;
   stats: unknown;
   status: string;
+  task_ref: unknown;
 }
 
 async function lockDiscoveryRunReceiptState(
@@ -381,7 +382,7 @@ async function lockDiscoveryRunReceiptState(
   args: { runId: string; planId: string },
 ): Promise<LockedDiscoveryRunReceiptState> {
   const rows = await transaction.$queryRaw<LockedDiscoveryRunReceiptState[]>(
-    Prisma.sql`SELECT id::text, plan_id::text, stats, status
+    Prisma.sql`SELECT id::text, plan_id::text, stats, status, task_ref
       FROM discovery_run
       WHERE id = ${args.runId}::uuid
       FOR UPDATE`,
@@ -737,6 +738,8 @@ const DISCOVERY_DOMAIN_ACK_PRODUCERS = new Set([
 
 /** Failure stages a run reaches only after canonicalization, with the fit stage started. */
 const FIT_REACHED_FAILURE_STAGES: ReadonlySet<string> = new Set<DiscoveryRunStage>([
+  // 看门狗收尾时无法知道 run 走到哪：交给 leads 的 fit 判定查询决定（有判定就请求评分）。
+  'watchdog',
   'fit',
   'enrich',
   'signals',
@@ -3608,14 +3611,33 @@ export function createDiscoveryActivities(deps: {
           level: 'warn',
           payload: { watchdog: true, stage: 'watchdog' },
         });
-        // 僵尸 run 的预算账户键只在启动方内存里，事件成本按 runId 兜底归属（通常为 0）；
-        // 该 run 的真实花费仍在 usage_ledger 可查（B10 三账对齐统一口径）。
+        // 僵尸 run 的预算账户键可从其 DiscoveryRunRequested outbox 载荷恢复（createRun 落盘
+        // 的 executionBudget.accountKey）；恢复不了再按 runId 兜底（通常为 0，真实花费仍在
+        // usage_ledger 可查；B10 三账对齐时统一口径）。
+        const [requestedEvent] = await tx.$queryRaw<Array<{ payload: unknown }>>`
+          SELECT payload FROM outbox_event
+          WHERE aggregate_id = ${row.runId}::uuid
+            AND event_type = 'DiscoveryRunRequested'
+          ORDER BY id DESC
+          LIMIT 1
+        `;
+        const requestedPayload = isPlainRecord(requestedEvent?.payload)
+          ? requestedEvent.payload
+          : {};
+        const requestedBudget = isPlainRecord(requestedPayload.executionBudget)
+          ? requestedPayload.executionBudget
+          : {};
+        const costAccountKey =
+          typeof requestedBudget.accountKey === 'string' &&
+          /^discovery\.run:[\x20-\x7e]{1,200}$/u.test(requestedBudget.accountKey)
+            ? requestedBudget.accountKey
+            : row.runId;
         const [runCost] = await tx.$queryRaw<Array<{ cost_usd: number }>>`
           SELECT COALESCE(SUM(cost_usd), 0)::float8 AS cost_usd
           FROM usage_ledger
           WHERE workspace_id = ${row.workspaceId}::uuid
             AND ref_type = 'ai_trace'
-            AND meta->>'runId' = ${row.runId}
+            AND meta->>'runId' = ${costAccountKey}
         `;
         const runCostUsd =
           typeof runCost?.cost_usd === 'number' && Number.isFinite(runCost.cost_usd)
@@ -3633,6 +3655,7 @@ export function createDiscoveryActivities(deps: {
               stats: finalStats,
               cost: runCostUsd,
               costBasis: 'usage_ledger-runid/v1',
+              ...(locked.task_ref ? { taskRef: locked.task_ref } : {}),
             } as Prisma.InputJsonValue,
           },
         });

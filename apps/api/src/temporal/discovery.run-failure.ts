@@ -17,7 +17,9 @@ export type DiscoveryRunStage =
   | 'contacts'
   | 'watches'
   | 'patentEnqueue'
-  | 'finalize';
+  | 'finalize'
+  /** B3：stale-run 看门狗收尾（不是 workflow 内的阶段）。 */
+  | 'watchdog';
 
 /** What a FAILED run records about the error that stopped it: no message, no details. */
 export interface DiscoveryRunFailure {

@@ -24,6 +24,7 @@ BEGIN
     OR p_stale_after_ms IS NULL
     OR p_stale_after_ms < 0
     OR p_stale_after_ms > 604800000
+    OR p_limit IS NULL
     OR p_limit NOT BETWEEN 1 AND 200
   THEN
     RAISE EXCEPTION 'DISCOVERY_STALE_RUN_LIST_DENIED' USING ERRCODE = '42501';
@@ -32,7 +33,9 @@ BEGIN
   SELECT run."workspace_id", run."id", run."plan_id", run."icp_id", run."created_at"
   FROM public."discovery_run" AS run
   WHERE run."status" = 'RUNNING'
-    AND run."created_at" < statement_timestamp() - make_interval(secs => p_stale_after_ms / 1000.0)
+    -- created_at 是 timestamp(3)（无时区，UTC 墙钟）：显式按 UTC 比较，
+    -- 不依赖会话 TimeZone 设置。
+    AND run."created_at" < (statement_timestamp() AT TIME ZONE 'UTC') - make_interval(secs => p_stale_after_ms / 1000.0)
   ORDER BY run."created_at"
   LIMIT p_limit;
 END
@@ -40,3 +43,8 @@ $$;
 
 REVOKE ALL ON FUNCTION list_stale_discovery_runs_v1(DOUBLE PRECISION, INTEGER) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION list_stale_discovery_runs_v1(DOUBLE PRECISION, INTEGER) TO app_user;
+
+-- 看门狗每 10 分钟按 status+created_at 谓词扫描；部分索引让扫描只碰 RUNNING 行。
+CREATE INDEX "discovery_run_running_created_at_idx"
+  ON "discovery_run" ("created_at")
+  WHERE "status" = 'RUNNING';

@@ -73,6 +73,18 @@ describe('staleRunSweepWorkflow（B3）', () => {
     });
   });
 
+  it('全部收尾失败以 nonRetryable 失败暴露（不静默绿）', async () => {
+    acts.listStaleDiscoveryRuns.mockResolvedValue([
+      ROW,
+      { ...ROW, runId: '88888888-8888-4888-8888-888888888888' },
+    ]);
+    acts.finalizeStaleDiscoveryRun.mockRejectedValue(new Error('ledger unavailable'));
+
+    await expect(staleRunSweepWorkflow()).rejects.toMatchObject({
+      type: 'STALE_RUN_SWEEP_ALL_FAILED',
+    });
+  });
+
   it('没有 stale run 时不调用收尾', async () => {
     acts.listStaleDiscoveryRuns.mockResolvedValue([]);
     await expect(staleRunSweepWorkflow()).resolves.toEqual({

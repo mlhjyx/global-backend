@@ -780,6 +780,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       workflowId: string;
       args: unknown[];
       workflowIdReusePolicy?: WorkflowIdReusePolicy;
+      /** B3（F2）：discovery 等长任务的总时限；超时终止后由 stale-run 看门狗收尾。 */
+      workflowExecutionTimeout?: string;
     },
     what: string,
     acquisitionCommand?: { eventType: string; workspaceId: string },

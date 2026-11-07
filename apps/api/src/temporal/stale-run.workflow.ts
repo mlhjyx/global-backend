@@ -1,4 +1,4 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { ApplicationFailure, proxyActivities } from '@temporalio/workflow';
 import type { DiscoveryActivities } from './discovery.activities';
 import {
   DISCOVERY_RUN_STALE_AFTER_MS,
@@ -49,6 +49,14 @@ export async function staleRunSweepWorkflow(
       // 单条收尾失败不阻塞其余；幂等的写一次事务会在下一轮重试。
       failed += 1;
     }
+  }
+  if (runs.length > 0 && finalized === 0 && failed > 0) {
+    // 全部收尾失败（例如账本/连接池同时不可用）不能让 sweep 静默绿：以 nonRetryable
+    // 失败暴露到 Temporal UI/调度日志，下一周期幂等重试。
+    throw ApplicationFailure.nonRetryable(
+      `STALE_RUN_SWEEP_ALL_FAILED:${failed}`,
+      'STALE_RUN_SWEEP_ALL_FAILED',
+    );
   }
   return { examined: runs.length, finalized, failed };
 }
