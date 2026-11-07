@@ -142,6 +142,7 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
     .addTag('Discovery', '查询计划执行、规范化公司、联系人补全、抑制名单')
     .addTag('Leads', '评分产出与交付：交付包、接受 / 拒绝、制裁复核')
     .addTag('Channels', '渠道数据源：平台渠道注册/治理/试跑（运营身份 ops:*），租户启用与私有导入')
+    .addTag('Skills', 'AI 底座：技能目录、版本与运营启停（ops:read / ops:write）')
     .addTag('Reports', '周报与反馈')
     .addTag('Events', '事件投递账本与确认回执')
     .addTag('Compliance', '数据主体删除请求（Art.17）')
@@ -182,7 +183,7 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
   Object.assign(document, {
     'x-tagGroups': [
       { name: '获客主链路', tags: ['Companies', 'Claims', 'ICP', 'Discovery', 'Leads'] },
-      { name: '运营与合规', tags: ['Reports', 'Events', 'Compliance'] },
+      { name: '运营与合规', tags: ['Reports', 'Events', 'Compliance', 'Skills'] },
       { name: '建站', tags: ['SiteBuilder'] },
       { name: '平台间通道', tags: ['ExecutionBudget', 'PlatformAuthority'] },
       { name: '系统', tags: ['System'] },

@@ -243,4 +243,17 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '计算 intake 的内部技术预算包络：零模型调用、零工作流、零持久写入，纯计算。',
   'POST /api/v1/site-builder/sites/{id}/build-budget-quote':
     '计算 refurbish 的内部技术预算包络；不构成客户报价，也不限制余额。',
+  // ── Skills（AI 底座 · S0）──────────────────────────────────────────────────
+  'GET /api/v1/skills':
+    '列出平台技能目录：技能键、pack_type、启停状态与当前版本；仅运营身份（ops:read）可读，租户调用返回 403。',
+  'GET /api/v1/skills/{skillKey}':
+    '返回单个技能的 manifest、SKILL.md 正文与全部版本历史；未登记返回 404；需要 ops:read。',
+  'GET /api/v1/skills/{skillKey}/workspaces/{workspaceId}':
+    '查看目标 workspace 的技能生效状态：平台状态、覆盖行与合成后的 enabled；需要 ops:read。',
+  'PATCH /api/v1/skills/{skillKey}/status':
+    '平台级启停（kill switch）：DISABLED 后该技能对所有 workspace 停止执行（fail-closed），worker 最迟 30 秒生效；需要 ops:write。',
+  'PUT /api/v1/skills/{skillKey}/workspaces/{workspaceId}':
+    '设置 workspace 级启停覆盖（幂等 upsert）；删除覆盖行则跟随平台默认；需要 ops:write。',
+  'DELETE /api/v1/skills/{skillKey}/workspaces/{workspaceId}':
+    '删除 workspace 启停覆盖，回到跟随平台默认；重复删除幂等返回 removed=false；需要 ops:write。',
 });
