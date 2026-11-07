@@ -10,6 +10,7 @@ import "./governance-main-worktree-sync.spec.mjs";
 import "./governance-main-worktree-sync-filesystem.spec.mjs";
 import "./worktree-inventory.spec.mjs";
 import "./governance-spec-reachability.spec.mjs";
+import "./governance-workflow-constants.spec.mjs";
 import "./governance-codeql-action-pin.spec.mjs";
 import "./governance-oasdiff-action-pin.spec.mjs";
 import "./copy-fixed-source-impact.spec.mjs";

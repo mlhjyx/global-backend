@@ -32,6 +32,7 @@ import {
   addQueryModelExtractions,
   type DiscoveryRunModelExtractions,
 } from '../discovery/discovery-model-extractions';
+import { resolveDiscoveryWorkflowKnobs } from './discovery.workflow-knobs';
 
 export const DISCOVERY_AUTHORITY_PATCH = 'discovery-workspace-authority-v2';
 export const DISCOVERY_RAW_GOVERNANCE_PATCH =
@@ -64,11 +65,6 @@ export const DISCOVERY_RUN2_QUICK_SCAN_PATCH = 'discovery-run2-quick-scan-v1';
 export const DISCOVERY_RUN2_SHADOW_PATCH = 'discovery-run2-shadow-v1';
 /** 巡检（2026-11-04）：深挖段失败/取消时 stats.failure.stage 记 'deep'，不再沿用 quickScan。 */
 export const DISCOVERY_DEEP_STAGE_LABEL_PATCH = 'discovery-deep-stage-label-v1';
-/** 公司池候选少于此数才触发有界搜索兜底（设计 R3）。 */
-const RUN2_POOL_SEARCH_FALLBACK_THRESHOLD = 20;
-/** 深挖父工作流同时推进的公司数（设计 R2/Q8）。 */
-const DEEP_COMPANY_CONCURRENCY = 16;
-const DISCOVERY_QUERY_BATCH = 2;
 export const DISCOVERY_QUERY_RECEIPT_MODE = QUERY_RECEIPT_MODE;
 const EXECUTION_CONTRACT_VERSION = 2 as const;
 
@@ -189,6 +185,9 @@ function addEnrichPass(total: EnrichTotals, pass: EnrichTotals): EnrichTotals {
  */
 export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void> {
   const { workspaceId, runId, planId } = input;
+  // B1（L01）：可调常量必须来自**记录在历史里的输入**。旧历史没有这些字段 → 冻结默认值，
+  // 重放保持原命令序列；新 run 由 relay 显式注入（改部署参数不再有 NDE 风险）。
+  const knobs = resolveDiscoveryWorkflowKnobs(input);
   const usesAuthority = patched(DISCOVERY_AUTHORITY_PATCH);
   const usesRawGovernance = patched(DISCOVERY_RAW_GOVERNANCE_PATCH);
   const usesQueryReceipts = usesRawGovernance && patched(DISCOVERY_QUERY_RECEIPT_PATCH);
@@ -341,7 +340,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     }
     const needSearch =
       !usesRun2QuickScan ||
-      (run2Prefilter?.candidates ?? 0) < RUN2_POOL_SEARCH_FALLBACK_THRESHOLD;
+      (run2Prefilter?.candidates ?? 0) < knobs.run2PoolSearchFallbackThreshold;
 
     let companies = 0;
     let suppressed = 0;
@@ -480,9 +479,9 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
       // Two queries at a time: each is a search fan-out plus per-domain model calls, and the
       // batch halves the stage's wall clock. Accounting stays deterministic and in plan order;
       // a failure still stops the run (under the failure-stop patch) after the batch settles.
-      for (let start = 0; start < queries.length; start += DISCOVERY_QUERY_BATCH) {
+      for (let start = 0; start < queries.length; start += knobs.discoveryQueryBatchSize) {
         const batch = queries
-          .slice(start, start + DISCOVERY_QUERY_BATCH)
+          .slice(start, start + knobs.discoveryQueryBatchSize)
           .map((query, offset) => [start + offset, query] as const);
         // Named only when set, so histories recorded before the hand-off replay unchanged.
         const handOff: { previousQueryUnreplayable?: true } = previousQueryUnreplayable
@@ -630,7 +629,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         };
         await Promise.all(
           Array.from(
-            { length: Math.min(DEEP_COMPANY_CONCURRENCY, deepTargets.companyIds.length) },
+            { length: Math.min(knobs.deepCompanyConcurrency, deepTargets.companyIds.length) },
             () => runCompany(),
           ),
         );
