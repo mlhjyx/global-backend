@@ -355,6 +355,7 @@
       "SELECT"
     ],
     "pack_version": [
+      "INSERT",
       "SELECT"
     ],
     "patent_cache_refresh_audit": [],

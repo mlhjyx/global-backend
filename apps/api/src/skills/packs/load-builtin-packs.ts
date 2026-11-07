@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { canonicalDigest } from "../../model-runtime/context-engine";
+import { validateEvalManifest, type EvalManifest } from "../evals/eval-manifest";
 import {
   PACK_TYPES,
   packManifestDigest,
@@ -26,6 +28,9 @@ export interface BuiltinPackRecord {
   readonly manifestDigest: string;
   readonly contentDigest: string;
   readonly sourceDigest: string;
+  /** `evals/evals.json`（发布门的确定性评测清单）。 */
+  readonly evals?: EvalManifest;
+  readonly evalsDigest?: string;
 }
 
 export interface BuiltinPackIssue extends PackValidationIssue {
@@ -108,6 +113,34 @@ export function loadBuiltinPacks(rootDirectory: string): BuiltinPackLoadResult {
         continue;
       }
 
+      const evalsFile = join(directoryPath, "evals", "evals.json");
+      let evals: EvalManifest | undefined;
+      if (existsSync(evalsFile)) {
+        let evalsCandidate: unknown;
+        try {
+          evalsCandidate = JSON.parse(readFileSync(evalsFile, "utf8"));
+        } catch {
+          issues.push({
+            file: evalsFile,
+            code: "PACK_EVALS_INVALID",
+            severity: "error",
+            message: "evals/evals.json is not valid JSON",
+          });
+          continue;
+        }
+        const evalIssues = validateEvalManifest(evalsCandidate);
+        for (const issue of evalIssues) issues.push({ file: evalsFile, ...issue });
+        if (evalIssues.some((issue) => issue.severity === "error")) continue;
+        evals = evalsCandidate as EvalManifest;
+      } else {
+        issues.push({
+          file: directoryPath,
+          code: "PACK_EVALS_MISSING",
+          severity: "warning",
+          message: "pack has no evals/evals.json (publish gate will refuse it)",
+        });
+      }
+
       const manifest = candidate as PackManifest;
       records.push({
         packKey: manifest.packKey,
@@ -118,6 +151,7 @@ export function loadBuiltinPacks(rootDirectory: string): BuiltinPackLoadResult {
         manifestDigest: packManifestDigest(manifest),
         contentDigest: sha256(content),
         sourceDigest: sha256(`${manifestRaw}\u0000${contentRaw}`),
+        ...(evals ? { evals, evalsDigest: canonicalDigest(evals) } : {}),
       });
     }
   }

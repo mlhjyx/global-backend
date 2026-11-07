@@ -1,0 +1,138 @@
+{
+  "skillName": "industry.metal_fabrication",
+  "evals": [
+    {
+      "id": 1,
+      "input": {
+        "industries": [
+          "metal_fabrication"
+        ]
+      },
+      "assertions": [
+        {
+          "kind": "json_schema",
+          "path": "descriptor",
+          "schema": {
+            "type": "object",
+            "required": [
+              "packs"
+            ],
+            "properties": {
+              "packs": {
+                "type": "array",
+                "contains": {
+                  "type": "object",
+                  "required": [
+                    "packKey"
+                  ],
+                  "properties": {
+                    "packKey": {
+                      "const": "industry.metal_fabrication"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "contains",
+          "path": "brief",
+          "value": "industry.metal_fabrication@"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "input": {
+        "industries": [
+          "metal_fabrication"
+        ]
+      },
+      "assertions": [
+        {
+          "kind": "regex",
+          "path": "rulesDigest",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "kind": "lte",
+          "path": "briefLength",
+          "value": 2000
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "input": {
+        "industries": [
+          "metal_fabrication"
+        ]
+      },
+      "assertions": [
+        {
+          "kind": "contains",
+          "path": "brief",
+          "value": "Lohnfertigung"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "input": {
+        "industries": [
+          "food_service"
+        ]
+      },
+      "assertions": [
+        {
+          "kind": "json_schema",
+          "path": "descriptor",
+          "schema": {
+            "type": "object",
+            "required": [
+              "packs"
+            ],
+            "properties": {
+              "packs": {
+                "type": "array",
+                "not": {
+                  "contains": {
+                    "type": "object",
+                    "required": [
+                      "packKey"
+                    ],
+                    "properties": {
+                      "packKey": {
+                        "const": "industry.metal_fabrication"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "input": {
+        "industries": [
+          "metal_fabrication"
+        ]
+      },
+      "assertions": [
+        {
+          "kind": "no_vendor_marketing",
+          "path": "brief"
+        },
+        {
+          "kind": "equals",
+          "path": "descriptor.skillKey",
+          "value": "pack-eval:industry.metal_fabrication"
+        }
+      ]
+    }
+  ]
+}
