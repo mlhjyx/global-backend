@@ -6,7 +6,7 @@
 // 未收尾的 run 交给 B3 看门狗、孤儿预留交给 B4 清收器。
 import type {
   ActivityExecuteInput,
-  ActivityInboundInterceptor,
+  ActivityInboundCallsInterceptor,
   ActivityInterceptorsFactory,
   Next,
   WorkerInterceptors,
@@ -14,10 +14,10 @@ import type {
 
 import { classifyDeterministicLedgerFailure } from './deterministic-ledger-failure';
 
-export class DeterministicLedgerFailureInterceptor implements ActivityInboundInterceptor {
+export class DeterministicLedgerFailureInterceptor implements ActivityInboundCallsInterceptor {
   async execute(
     input: ActivityExecuteInput,
-    next: Next<ActivityInboundInterceptor, 'execute'>,
+    next: Next<ActivityInboundCallsInterceptor, 'execute'>,
   ): Promise<unknown> {
     try {
       return await next(input);
@@ -29,7 +29,7 @@ export class DeterministicLedgerFailureInterceptor implements ActivityInboundInt
 }
 
 const factory: ActivityInterceptorsFactory = () => ({
-  inbound: [new DeterministicLedgerFailureInterceptor()],
+  inbound: new DeterministicLedgerFailureInterceptor(),
 });
 
 /** 挂到 `Worker.create({ interceptors })` 的 activity 拦截器链。 */
