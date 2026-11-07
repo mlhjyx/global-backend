@@ -12,7 +12,11 @@ export const DISCOVERY_COMPANY_RESULT_LINEAGE_V1 =
 export type DiscoveryCompanyLineageProviderKey =
   | 'trade_fair'
   | 'public_web'
-  | 'directory';
+  | 'directory'
+  | 'wikidata'
+  | 'openstreetmap'
+  | 'ted'
+  | 'openfda';
 
 export type DiscoveryCompanyReceiptAttemptV1 = Readonly<{
   producerId: string;
@@ -88,6 +92,24 @@ const PROVIDER_RECEIPT_CONTRACT = Object.freeze({
   directory: Object.freeze({
     producerId: 'discovery.extract_list',
     resultSchema: 'discovery-extract-list/v1',
+  }),
+  // 结构化直连源（2026-11-08 lineage v3）：回执来自 ToolBroker 结算（工具自身的
+  // durableResultStrategy 投影），producerId 即工具 id。
+  wikidata: Object.freeze({
+    producerId: 'wikidata.sparql',
+    resultSchema: 'wikidata-sparql/v1',
+  }),
+  openstreetmap: Object.freeze({
+    producerId: 'osm.overpass',
+    resultSchema: 'osm-overpass/v1',
+  }),
+  ted: Object.freeze({
+    producerId: 'ted.search',
+    resultSchema: 'ted-search/v1',
+  }),
+  openfda: Object.freeze({
+    producerId: 'openfda.search',
+    resultSchema: 'openfda-search/v1',
   }),
 } satisfies Record<
   DiscoveryCompanyLineageProviderKey,

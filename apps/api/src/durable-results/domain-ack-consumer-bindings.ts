@@ -62,6 +62,12 @@ const DISCOVERY_GOVERNED_COMPANY_ACK_BINDINGS = Object.freeze([
   { producerId: 'tradefair.algolia', consumer: 'TradeFairDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'tradefair-algolia/v1' },
   { producerId: 'discovery.extract_company', consumer: 'PublicWebDiscoveryProvider.mineDomain', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'discovery-extract-company/v1' },
   { producerId: 'discovery.extract_list', consumer: 'DirectoryDiscoveryProvider.extractList', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'discovery-extract-list/v1' },
+  // 结构化直连源（lineage v3）：consumer/resultSchema 必须与 discovery-query-governed-lineage.ts
+  // 的 PROVIDER_CONTRACT 一致；回执来自 ToolBroker 结算（typed_projection）。
+  { producerId: 'wikidata.sparql', consumer: 'WikidataDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'wikidata-sparql/v1' },
+  { producerId: 'osm.overpass', consumer: 'OsmDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'osm-overpass/v1' },
+  { producerId: 'ted.search', consumer: 'TedDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'ted-search/v1' },
+  { producerId: 'openfda.search', consumer: 'OpenFdaDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'openfda-search/v1' },
 ] as const satisfies readonly DomainAckProductConsumerBinding[]);
 
 function getDiscoveryGovernedCompanyAckBinding(

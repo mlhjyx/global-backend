@@ -132,12 +132,12 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
       { sourceClass: 'public_intelligence', providerKey: 'public_web', hasCompanyLineage: true },
       { sourceClass: 'industry_data', providerKey: 'public_web', hasCompanyLineage: true },
       { sourceClass: 'industry_data', providerKey: 'directory', hasCompanyLineage: true },
-      { sourceClass: 'company_registry', providerKey: 'wikidata', hasCompanyLineage: false },
-      { sourceClass: 'industry_data', providerKey: 'wikidata', hasCompanyLineage: false },
-      { sourceClass: 'industry_data', providerKey: 'openstreetmap', hasCompanyLineage: false },
+      { sourceClass: 'company_registry', providerKey: 'wikidata', hasCompanyLineage: true },
+      { sourceClass: 'industry_data', providerKey: 'wikidata', hasCompanyLineage: true },
+      { sourceClass: 'industry_data', providerKey: 'openstreetmap', hasCompanyLineage: true },
       { sourceClass: 'industry_data', providerKey: 'trade_fair', hasCompanyLineage: true },
-      { sourceClass: 'public_intelligence', providerKey: 'ted', hasCompanyLineage: false },
-      { sourceClass: 'public_intelligence', providerKey: 'openfda', hasCompanyLineage: false },
+      { sourceClass: 'public_intelligence', providerKey: 'ted', hasCompanyLineage: true },
+      { sourceClass: 'public_intelligence', providerKey: 'openfda', hasCompanyLineage: true },
     ]);
     // Contact, email and enrichment adapters are never plan query sources.
     expect(sources.map((source) => source.providerKey)).not.toEqual(
@@ -160,7 +160,7 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
     expect(enabled).toEqual([
       { sourceClass: 'public_intelligence', providerKey: 'public_web', hasCompanyLineage: true },
       { sourceClass: 'industry_data', providerKey: 'public_web', hasCompanyLineage: true },
-      { sourceClass: 'public_intelligence', providerKey: 'ted', hasCompanyLineage: false },
+      { sourceClass: 'public_intelligence', providerKey: 'ted', hasCompanyLineage: true },
     ]);
   });
 
@@ -172,9 +172,11 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
     const routed = async (sourceClass: 'industry_data' | 'company_registry' | 'public_intelligence') =>
       (await registry.routeCompanyDiscovery(db as never, sourceClass)).map((adapter) => adapter.key);
 
-    expect(await routed('industry_data')).toEqual(['public_web', 'directory', 'trade_fair']);
-    expect(await routed('company_registry')).toEqual([]);
-    expect(await routed('public_intelligence')).toEqual(['public_web']);
+    expect(await routed('industry_data')).toEqual([
+      'public_web', 'directory', 'wikidata', 'openstreetmap', 'trade_fair',
+    ]);
+    expect(await routed('company_registry')).toEqual(['wikidata']);
+    expect(await routed('public_intelligence')).toEqual(['public_web', 'ted', 'openfda']);
   });
 
   it('reads lineage from the adapter declaration, which matches both lineage contracts', () => {
@@ -183,7 +185,9 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
 
     expect(
       [...new Set(sources.filter((source) => source.hasCompanyLineage).map((source) => source.providerKey))],
-    ).toEqual(['public_web', 'directory', 'trade_fair']);
+    ).toEqual([
+      'public_web', 'directory', 'wikidata', 'openstreetmap', 'trade_fair', 'ted', 'openfda',
+    ]);
     // A declared source that either contract rejects would fail its governed query instead of running it.
     for (const source of sources) {
       expect(source.hasCompanyLineage, source.providerKey)

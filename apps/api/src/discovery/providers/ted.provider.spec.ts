@@ -153,7 +153,10 @@ describe('§8.8 合规门（收口②：Broker 单点 fail-closed，provider 不
 
   it('无 broker → fail-closed：空且零出网（旧「无 reader fail-open」缺陷已反转）', async () => {
     const p = new TedDiscoveryProvider();
-    expect(await p.discoverCompanies(gq, CTX)).toEqual({ records: [], costCents: 0 });
+    const res = await p.discoverCompanies(gq, CTX);
+    expect(res.records).toEqual([]);
+    expect(res.costCents).toBe(0);
+    expect(res.lineage).toMatchObject({ recordCount: 0 });
   });
 
   it('Broker 放行 → 经 ted.search 工具发请求并映射，透传真 workspace/run 归属', async () => {
@@ -183,7 +186,9 @@ describe('TedDiscoveryProvider 契约', () => {
     const broker = fakeBroker(async () => ({ awards: [] }));
     const p = new TedDiscoveryProvider({ broker });
     const res = await p.discoverCompanies(q({}), CTX);
-    expect(res).toEqual({ records: [], costCents: 0 });
+    expect(res.records).toEqual([]);
+    expect(res.costCents).toBe(0);
+    expect(res.lineage).toMatchObject({ recordCount: 0 });
     expect(broker.invokeMock).not.toHaveBeenCalled();
   });
 });

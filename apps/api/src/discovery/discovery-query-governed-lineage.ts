@@ -77,6 +77,25 @@ const PROVIDER_CONTRACT = Object.freeze({
     producerId: 'discovery.extract_list', resultSchema: 'discovery-extract-list/v1',
     consumer: 'DirectoryDiscoveryProvider.extractList', classes: Object.freeze(['industry_data']),
   }),
+  // 结构化直连源（lineage v3）：producerId 即 ToolBroker 工具 id；consumer 必须与
+  // domain-ack-consumer-bindings.ts 的 DISCOVERY_GOVERNED_COMPANY_ACK_BINDINGS 一致。
+  wikidata: Object.freeze({
+    producerId: 'wikidata.sparql', resultSchema: 'wikidata-sparql/v1',
+    consumer: 'WikidataDiscoveryProvider',
+    classes: Object.freeze(['company_registry', 'industry_data']),
+  }),
+  openstreetmap: Object.freeze({
+    producerId: 'osm.overpass', resultSchema: 'osm-overpass/v1',
+    consumer: 'OsmDiscoveryProvider', classes: Object.freeze(['industry_data']),
+  }),
+  ted: Object.freeze({
+    producerId: 'ted.search', resultSchema: 'ted-search/v1',
+    consumer: 'TedDiscoveryProvider', classes: Object.freeze(['public_intelligence']),
+  }),
+  openfda: Object.freeze({
+    producerId: 'openfda.search', resultSchema: 'openfda-search/v1',
+    consumer: 'OpenFdaDiscoveryProvider', classes: Object.freeze(['public_intelligence']),
+  }),
 } satisfies Record<DiscoveryCompanyLineageProviderKey, Readonly<{
   producerId: string; resultSchema: string; consumer: string; classes: readonly string[];
 }>>);
@@ -127,6 +146,23 @@ const LINEAGE_DESCRIPTOR = Object.freeze({
       producerId: 'discovery.extract_list',
       consumer: 'DirectoryDiscoveryProvider.extractList',
       resultSchema: 'discovery-extract-list/v1', classes: Object.freeze(['industry_data']),
+    }),
+    wikidata: Object.freeze({
+      producerId: 'wikidata.sparql', consumer: 'WikidataDiscoveryProvider',
+      resultSchema: 'wikidata-sparql/v1',
+      classes: Object.freeze(['company_registry', 'industry_data']),
+    }),
+    openstreetmap: Object.freeze({
+      producerId: 'osm.overpass', consumer: 'OsmDiscoveryProvider',
+      resultSchema: 'osm-overpass/v1', classes: Object.freeze(['industry_data']),
+    }),
+    ted: Object.freeze({
+      producerId: 'ted.search', consumer: 'TedDiscoveryProvider',
+      resultSchema: 'ted-search/v1', classes: Object.freeze(['public_intelligence']),
+    }),
+    openfda: Object.freeze({
+      producerId: 'openfda.search', consumer: 'OpenFdaDiscoveryProvider',
+      resultSchema: 'openfda-search/v1', classes: Object.freeze(['public_intelligence']),
     }),
   }),
   ackIdentity: Object.freeze({

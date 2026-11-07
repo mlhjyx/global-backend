@@ -9,7 +9,14 @@ import {
 } from '../provider-contract';
 import type { OsmPlace } from '../../adapters/openstreetmap';
 import type { ExecutionBroker } from '../../tools/tool-contract';
+import { ToolDurableResultProjectionError } from '../../tools/tool-broker';
 import { lookupIndustryOsmTags, lookupRegionOsmArea } from '../vocab';
+import {
+  DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+  buildDiscoveryCompanyResultLineage,
+  createDiscoveryCompanyReceiptCollector,
+  isDiscoveryCompanyLineageInvalid,
+} from '../company-discovery-lineage';
 
 /**
  * OpenStreetMap 地理发现 Provider（Overpass API，ODbL 开放数据，零爬取）。
@@ -23,24 +30,43 @@ import { lookupIndustryOsmTags, lookupRegionOsmArea } from '../vocab';
 export class OsmDiscoveryProvider implements CompanyDiscoveryAdapter {
   readonly key = 'openstreetmap';
   readonly classes: SourceClass[] = ['industry_data'];
+  readonly companyResultLineage = DISCOVERY_COMPANY_RESULT_LINEAGE_V1;
   /** mapTags reads `_osmTags` before the built-in vocabulary. */
   readonly consumesResolvedTaxonomy = true;
 
   constructor(private readonly deps?: { broker?: ExecutionBroker }) {}
 
+  private emptyLineage(): DiscoveryResult {
+    return {
+      records: [],
+      costCents: 0,
+      lineage: buildDiscoveryCompanyResultLineage({
+        providerKey: 'openstreetmap',
+        recordCount: 0,
+        observations: [],
+      }),
+    };
+  }
+
   async discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, opts?: DiscoveryOptions,
   ): Promise<DiscoveryResult> {
     if (!this.deps?.broker) {
-       
+
       console.warn('[openstreetmap] broker unavailable, fail-closed (no raw egress)');
-      return { records: [], costCents: 0 };
+      return this.emptyLineage();
     }
     void opts; // 本源产出多无域名，blockedDomains 不适用（签名统一保留）
 
     const tagFilters = mapTags(query);
     const areaName = mapArea(query);
-    if (!tagFilters.length || !areaName) return { records: [], costCents: 0 };
+    if (!tagFilters.length || !areaName) return this.emptyLineage();
 
+    const collector = createDiscoveryCompanyReceiptCollector({
+      providerKey: 'openstreetmap',
+      producerId: 'osm.overpass',
+      parentOnDurableReceipt: ctx.onDurableReceipt,
+    });
+    collector.markExpectedInvocation();
     let places: OsmPlace[];
     try {
       const res = await this.deps.broker.invoke<
@@ -51,14 +77,27 @@ export class OsmDiscoveryProvider implements CompanyDiscoveryAdapter {
         'osm.overpass',
         { areaName, tagFilters, limit: Math.min(query.limit, 80) },
         // #51：传本次调用用途，用途门按 discovery 判（osm.overpass allowedPurpose=['discovery']）
-        { ...ctx, purpose: 'discovery' },
+        { ...ctx, onDurableReceipt: collector.onDurableReceipt, purpose: 'discovery' },
       );
       places = res.data.places ?? [];
     } catch (err) {
+      if (collector.isForwardingFailure(err) || isDiscoveryCompanyLineageInvalid(err)) {
+        throw err;
+      }
+      if (err instanceof ToolDurableResultProjectionError) collector.markInvocationFailed();
       // fail-safe：单源失败/闸门拒绝不阻断其余源（AGENTS.md §5）；拒绝原因已入 Broker DENIED trace
-       
+
       console.warn(`[openstreetmap] discover failed: ${String(err).slice(0, 150)}`);
-      return { records: [], costCents: 0 };
+      const observation = collector.finish([]);
+      return {
+        records: [],
+        costCents: 0,
+        lineage: buildDiscoveryCompanyResultLineage({
+          providerKey: 'openstreetmap',
+          recordCount: 0,
+          observations: [observation],
+        }),
+      };
     }
 
     const now = new Date().toISOString();
@@ -69,7 +108,13 @@ export class OsmDiscoveryProvider implements CompanyDiscoveryAdapter {
         fetchedAt: now,
       }),
     );
-    return { records, costCents: 0 };
+    const observation = collector.finish(records.map((_, index) => index));
+    const lineage = buildDiscoveryCompanyResultLineage({
+      providerKey: 'openstreetmap',
+      recordCount: records.length,
+      observations: [observation],
+    });
+    return { records, costCents: 0, ...(lineage ? { lineage } : {}) };
   }
 }
 

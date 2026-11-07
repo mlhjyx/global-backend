@@ -11,8 +11,15 @@ import {
 import type { TedAwardNotice } from '../../adapters/ted-api';
 import type { TedSearchInput, TedSearchOutput } from '../../tools/source-tools';
 import type { ExecutionBroker } from '../../tools/tool-contract';
+import { ToolDurableResultProjectionError } from '../../tools/tool-broker';
 import { companyIdentity, normalizeDomain } from '../identity';
 import { BudgetOperationReplayError } from '../../tools/budget-store';
+import {
+  DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+  buildDiscoveryCompanyResultLineage,
+  createDiscoveryCompanyReceiptCollector,
+  isDiscoveryCompanyLineageInvalid,
+} from '../company-discovery-lineage';
 
 const PARSER_VERSION = 'ted/v1';
 const NOTICE_DETAIL_BASE = 'https://ted.europa.eu/en/notice/-/detail/';
@@ -36,23 +43,42 @@ const TED_ID_SCHEME = 'ted-natid'; // §8.4 国别税号/注册号命名空间�
 export class TedDiscoveryProvider implements CompanyDiscoveryAdapter {
   readonly key = 'ted';
   readonly classes: SourceClass[] = ['public_intelligence'];
+  readonly companyResultLineage = DISCOVERY_COMPANY_RESULT_LINEAGE_V1;
 
   constructor(private readonly deps?: { broker?: ExecutionBroker }) {}
+
+  private emptyLineage(): DiscoveryResult {
+    return {
+      records: [],
+      costCents: 0,
+      lineage: buildDiscoveryCompanyResultLineage({
+        providerKey: 'ted',
+        recordCount: 0,
+        observations: [],
+      }),
+    };
+  }
 
   async discoverCompanies(query: CompanyDiscoveryQuery, ctx: ExecutionContext, opts?: DiscoveryOptions,
   ): Promise<DiscoveryResult> {
     const filters = query.filters ?? {};
     const cpvCodes = readCpvCodes(filters);
-    if (!cpvCodes.length) return { records: [], costCents: 0 }; // 无 CPV → 不启动（绝不裸拉全库）
+    if (!cpvCodes.length) return this.emptyLineage(); // 无 CPV → 不启动（绝不裸拉全库）
 
     // §8.8 合规门（收口②：Broker 单点判定）：ted.search 是 required 工具——SUSPENDED/未登记/
     // 用途不符/无 reader 一律 fail-closed。无 broker = 不允许直连（生产 registry 两处均注入）。
     if (!this.deps?.broker) {
-       
+
       console.warn('[ted] broker unavailable, fail-closed (no raw egress)');
-      return { records: [], costCents: 0 };
+      return this.emptyLineage();
     }
 
+    const collector = createDiscoveryCompanyReceiptCollector({
+      providerKey: 'ted',
+      producerId: 'ted.search',
+      parentOnDurableReceipt: ctx.onDurableReceipt,
+    });
+    collector.markExpectedInvocation();
     let notices: TedAwardNotice[];
     try {
       const res = await this.deps.broker.invoke<TedSearchInput, TedSearchOutput>(
@@ -67,15 +93,29 @@ export class TedDiscoveryProvider implements CompanyDiscoveryAdapter {
           },
         },
         // purpose='discovery'：用途门按本次调用用途判（域策略去掉 discovery 即拦本路径）
-        { ...ctx, purpose: 'discovery' },
+        { ...ctx, onDurableReceipt: collector.onDurableReceipt, purpose: 'discovery' },
       );
       notices = res.data.awards ?? [];
     } catch (err) {
+      if (collector.isForwardingFailure(err) || isDiscoveryCompanyLineageInvalid(err)) {
+        throw err;
+      }
       if (err instanceof BudgetOperationReplayError) throw err;
+      // 结算失败但无回执（投影拒绝）可证明未产生公司记录：记 failed，血缘仍有效。
+      if (err instanceof ToolDurableResultProjectionError) collector.markInvocationFailed();
       // fail-safe：单源失败/闸门拒绝不阻断其余源（AGENTS.md §5）；拒绝原因已入 Broker DENIED trace
-       
+
       console.warn(`[ted] discover failed: ${String(err).slice(0, 150)}`);
-      return { records: [], costCents: 0 };
+      const observation = collector.finish([]);
+      return {
+        records: [],
+        costCents: 0,
+        lineage: buildDiscoveryCompanyResultLineage({
+          providerKey: 'ted',
+          recordCount: 0,
+          observations: [observation],
+        }),
+      };
     }
 
     const blocked = new Set((opts?.blockedDomains ?? []).map((d) => d.toLowerCase()));
@@ -93,7 +133,14 @@ export class TedDiscoveryProvider implements CompanyDiscoveryAdapter {
         if (!dedup.has(key)) dedup.set(key, rec); // 先到优先（SORT DESC → 最新在前）
       }
     }
-    return { records: [...dedup.values()], costCents: 0 };
+    const records = [...dedup.values()];
+    const observation = collector.finish(records.map((_, index) => index));
+    const lineage = buildDiscoveryCompanyResultLineage({
+      providerKey: 'ted',
+      recordCount: records.length,
+      observations: [observation],
+    });
+    return { records, costCents: 0, ...(lineage ? { lineage } : {}) };
   }
 }
 

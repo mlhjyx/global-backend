@@ -69,8 +69,11 @@ async def main() -> None:
             writer.close()
         print("  ✅ rebind/private 解析结果由 proxy 在连接前 403 拒绝")
 
-        # 真 Chromium 跟随公网 302 后必须在 metadata 连接前停下；最终页面只能是
+        # 真 Chromium 请求 metadata 地址时必须在连接前停下；最终页面只能是
         # pinning proxy 自己的固定 403 body，不能是 metadata 响应或普通网络误差。
+        # 2026-11 起 httpbin.org/httpbingo.org 已自行 403 指向私网的 302（第三方
+        # 跳板不可再依赖），故直接验证浏览器→proxy 的 metadata 请求路径；
+        # 重定向场景由 egress_broker 的逐连接 resolve_and_pin（上面的 mock 用例）覆盖。
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(
                 headless=True, proxy={"server": proxy.url}
@@ -78,7 +81,7 @@ async def main() -> None:
             try:
                 page = await browser.new_page()
                 response = await page.goto(
-                    "https://httpbin.org/redirect-to?url=http%3A%2F%2F169.254.169.254%2Flatest%2Fmeta-data%2F",
+                    "http://169.254.169.254/latest/meta-data/",
                     wait_until="domcontentloaded",
                     timeout=30_000,
                 )
@@ -87,7 +90,7 @@ async def main() -> None:
                 assert body == "URL blocked", body
             finally:
                 await browser.close()
-        print("  ✅ 真 Chromium 跟随公网 redirect 后由 pinning proxy 403 metadata")
+        print("  ✅ 真 Chromium 直连 metadata 由 pinning proxy 403（浏览器从不自行解析目标）")
     finally:
         await proxy.stop()
         upstream.close()

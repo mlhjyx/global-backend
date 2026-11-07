@@ -53,7 +53,7 @@ const COST_COLUMN = '本条成本 USD（所属发现 run 合计，后端账本�
  * value, the query receipt CHECK only a 64-hex digest (the Q-TX one is used). The report reads neither.
  */
 const MATERIALIZATION_CONTRACT_SHA256 = '558e526a674a7eac4e5e83d03fcf4f635c15b1b3081cffc7f03c2d9213c0c9fe';
-const QUERY_CONTRACT_SHA256 = 'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c';
+const QUERY_CONTRACT_SHA256 = '7b29dc8ff4fa261f3dd79dc593b0ef88b4080a62083be5867a4c221c82bf0f37';
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 

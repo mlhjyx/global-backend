@@ -95,11 +95,13 @@ function seedCompanyOperation(){
  return{domainKey,operationDigest,revision,ackId,rawHash};
 }
 describe('Discovery query lineage append and attest database contract',()=>{
- before(()=>{assert.equal(psql(`SELECT count(*) FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL;`),'122');
+ before(()=>{assert.ok(Number(psql(`SELECT count(*) FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL;`))>0);
   assert.equal(psql(`SELECT count(*) FROM information_schema.tables WHERE table_name IN('discovery_query_receipt','discovery_query_operation_attempt','discovery_query_attempt_item','discovery_query_execution_outcome');`),'4');
-  assert.equal(psql(`SELECT count(*) FROM _prisma_migrations WHERE migration_name='20260830130200_discovery_query_lineage_execution_outcome' AND finished_at IS NOT NULL AND rolled_back_at IS NULL;`),'1');});
+  for(const migration of['20260830130200_discovery_query_lineage_execution_outcome','20261108120000_discovery_query_lineage_contract_v3']){
+   assert.equal(psql(`SELECT count(*) FROM _prisma_migrations WHERE migration_name='${migration}' AND finished_at IS NOT NULL AND rolled_back_at IS NULL;`),'1');}});
  it('installs exact public signatures, security and app-only execute ACL',()=>{const rows=psql(`SELECT proname||'|'||pg_get_function_identity_arguments(oid)||'|'||provolatile::text||'|'||prosecdef::text||'|'||array_to_string(proconfig,',') FROM pg_proc WHERE proname IN('${A}','${T}') ORDER BY proname;`).split('\n');
-  assert.deepEqual(rows,[`${A}|p_append_command jsonb|v|true|search_path=pg_catalog, public`,`${T}|p_attestation_key jsonb|v|true|search_path=pg_catalog, public`]);});
+  // 加固门之后创建的例程必须以 pg_temp 收尾（security-definer-search-path 守卫）。
+  assert.deepEqual(rows,[`${A}|p_append_command jsonb|v|true|search_path=pg_catalog, public, pg_temp`,`${T}|p_attestation_key jsonb|v|true|search_path=pg_catalog, public, pg_temp`]);});
  it('rejects open, oversized and hostile JSON with stable bounded P0001 errors',()=>{for(const fn of[A,T])for(const value of[`'{}'::jsonb`,`'{"extra":true}'::jsonb`,`jsonb_build_object('attempts',to_jsonb(ARRAY(SELECT '{}'::jsonb FROM generate_series(1,129))))`]){
    const r=raw(app(`SELECT * FROM ${fn}(${value});`,fn===T));assert.notEqual(r.status,0);assert.match(r.stderr,/P0001|DISCOVERY_QUERY_LINEAGE/);assert.doesNotMatch(r.stderr,/payload|company name|secret@example/i);}});
  it('returns NOT_FOUND from identity-only attest without mutation',()=>{const before=psql(`SELECT count(*) FROM discovery_query_receipt;`);const key=JSON.stringify({schemaVersion:'discovery-query-lineage-lookup/v1',workspaceId:'10000000-0000-4000-8000-000000000001',runId:'20000000-0000-4000-8000-000000000001',planId:'30000000-0000-4000-8000-000000000001',queryKey:'a'.repeat(64),queryOrdinal:0,authorityId:'40000000-0000-4000-8000-000000000001',accountKey:`discovery.run:discovery_run:request:${'b'.repeat(64)}:${'b'.repeat(64)}`,purpose:'discovery.run',subjectType:'discovery_run',subjectId:`request:${'b'.repeat(64)}`,requestSha256:'b'.repeat(64)});
@@ -112,11 +114,11 @@ describe('Discovery query lineage append and attest database contract',()=>{
     planId:PLAN,queryKey:QUERY,queryOrdinal:0,authorityId:AUTH,
     accountKey:`discovery.run:discovery_run:request:${SHA}:${SHA}`,purpose:'discovery.run',
     subjectType:'discovery_run',subjectId:`request:${SHA}`,requestSha256:SHA};
-  const command={schemaVersion:'discovery-query-lineage-command/v2',contractSha256:'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c',
+  const command={schemaVersion:'discovery-query-lineage-command/v2',contractSha256:'7b29dc8ff4fa261f3dd79dc593b0ef88b4080a62083be5867a4c221c82bf0f37',
     lookup:{...key,sourceClass:'public_intelligence'},queryReceipt:{schemaVersion:'discovery-query-receipt/v1',
       queryKey:QUERY,queryOrdinal:0,sourceClass:'public_intelligence',providers:[],accepted:0,
       quarantined:0,rejected:0,governanceDenied:0,duplicate:0,usageQuantity:0,costCents:0},
-    queryReceiptContractSha256:'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c',rawRelationContractSha256:'dd2f4144f58de22f7415dfc11be56c4828c137e52d34e916852e64cfde38a2e1',
+    queryReceiptContractSha256:'7b29dc8ff4fa261f3dd79dc593b0ef88b4080a62083be5867a4c221c82bf0f37',rawRelationContractSha256:'dd2f4144f58de22f7415dfc11be56c4828c137e52d34e916852e64cfde38a2e1',
     budgetTruncated:true,attempts:[],items:[],authorization:{accountId:ACCOUNT,authorityId:AUTH,generation:1}};
   const missingAuthority=raw(app(`SELECT * FROM ${A}('${JSON.stringify(command)}'::jsonb);`));
   assert.notEqual(missingAuthority.status,0);assert.match(missingAuthority.stderr,/QUERY_LINEAGE_INVALID/);
@@ -162,8 +164,8 @@ describe('Discovery query lineage append and attest database contract',()=>{
   assert.equal(psql(`SELECT count(*) FROM discovery_query_execution_outcome WHERE run_id='${run}';`),'0');
   for(const sql of[`SELECT * FROM ${T}('${JSON.stringify(key)}'::jsonb);`,
     `SELECT * FROM ${A}('${JSON.stringify({...command,schemaVersion:'discovery-query-lineage-command/v2',
-      contractSha256:'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c',
-      queryReceiptContractSha256:'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c',budgetTruncated:false})}'::jsonb);`]){
+      contractSha256:'7b29dc8ff4fa261f3dd79dc593b0ef88b4080a62083be5867a4c221c82bf0f37',
+      queryReceiptContractSha256:'7b29dc8ff4fa261f3dd79dc593b0ef88b4080a62083be5867a4c221c82bf0f37',budgetTruncated:false})}'::jsonb);`]){
     const denied=raw(app(sql,sql.includes(T)));assert.notEqual(denied.status,0);assert.match(denied.stderr,/REPLAY_INTEGRITY_HOLD/);
   }
   assert.equal(psql(`SELECT count(*) FROM discovery_query_execution_outcome WHERE run_id='${run}';`),'0');
@@ -175,11 +177,11 @@ describe('Discovery query lineage append and attest database contract',()=>{
     accountKey:`discovery.run:discovery_run:request:${SHA_ITEM}:${SHA_ITEM}`,purpose:'discovery.run',
     subjectType:'discovery_run',subjectId:`request:${SHA_ITEM}`,requestSha256:SHA_ITEM};
   const command={schemaVersion:'discovery-query-lineage-command/v2',
-    contractSha256:'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c',
+    contractSha256:'7b29dc8ff4fa261f3dd79dc593b0ef88b4080a62083be5867a4c221c82bf0f37',
     lookup:{...key,sourceClass:'public_intelligence'},queryReceipt:{schemaVersion:'discovery-query-receipt/v1',
       queryKey:QUERY_ITEM,queryOrdinal:1,sourceClass:'public_intelligence',providers:['public_web'],
       accepted:1,quarantined:0,rejected:0,governanceDenied:0,duplicate:0,usageQuantity:1,costCents:0},
-    queryReceiptContractSha256:'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c',
+    queryReceiptContractSha256:'7b29dc8ff4fa261f3dd79dc593b0ef88b4080a62083be5867a4c221c82bf0f37',
     rawRelationContractSha256:'dd2f4144f58de22f7415dfc11be56c4828c137e52d34e916852e64cfde38a2e1',
     attempts:[{providerKey:'public_web',producerId:'discovery.extract_company',operationId:OP_ITEM,
       authorityId:AUTH_ITEM,accountId:ACCOUNT_ITEM,operationGeneration:1,ackId:facts.ackId,
@@ -187,7 +189,7 @@ describe('Discovery query lineage append and attest database contract',()=>{
       domainAckKey:facts.domainKey,domainRevision:facts.revision,resultDigest:facts.operationDigest,
       resultSchema:'discovery-extract-company/v1',lineageSchema:'discovery-company-result-lineage/v1',
       providerRecordCount:1,coveredItemCount:1,
-      contractSha256:'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c'}],
+      contractSha256:'7b29dc8ff4fa261f3dd79dc593b0ef88b4080a62083be5867a4c221c82bf0f37'}],
     items:[{id:'80000000-0000-4000-8000-000000000010',providerKey:'public_web',operationId:OP_ITEM,
       recordIndex:0,resolutionKind:'INSERTED',sourceRecordIndex:null,rawRecordId:RAW_ITEM,
       rawPayloadHash:facts.rawHash,rawIngestStatus:'ACCEPTED',relationKey:'discovery.raw_source_record:0',
@@ -232,11 +234,11 @@ describe('Discovery query lineage append and attest database contract',()=>{
     accountKey:`discovery.run:discovery_run:request:${SHA}:${SHA}`,purpose:'discovery.run',
     subjectType:'discovery_run',subjectId:`request:${SHA}`,requestSha256:SHA};
   const command={schemaVersion:'discovery-query-lineage-command/v2',
-    contractSha256:'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c',
+    contractSha256:'7b29dc8ff4fa261f3dd79dc593b0ef88b4080a62083be5867a4c221c82bf0f37',
     lookup:{...key,sourceClass:'public_intelligence'},queryReceipt:{schemaVersion:'discovery-query-receipt/v1',
       queryKey:query,queryOrdinal:ordinal,sourceClass:'public_intelligence',providers:[],accepted:0,
       quarantined:0,rejected:0,governanceDenied:0,duplicate:0,usageQuantity:0,costCents:0},
-    queryReceiptContractSha256:'c665fc06432925532b3caa20824f9b9a310ce0bdfc497b3c0e688527badcbe0c',
+    queryReceiptContractSha256:'7b29dc8ff4fa261f3dd79dc593b0ef88b4080a62083be5867a4c221c82bf0f37',
     rawRelationContractSha256:'dd2f4144f58de22f7415dfc11be56c4828c137e52d34e916852e64cfde38a2e1',
     budgetTruncated:false,attempts:[],items:[],authorization:{accountId:ACCOUNT,authorityId:AUTH,generation:1}};
   const sql=app(`SET LOCAL statement_timeout='8s';SELECT status FROM ${A}('${JSON.stringify(command)}'::jsonb);`);

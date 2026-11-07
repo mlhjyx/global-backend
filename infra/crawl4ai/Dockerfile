@@ -19,9 +19,12 @@
 #
 # DEV ONLY: prod runs Crawl4AI with its own persistence/ops posture — do not
 # reuse this wrapper there.
-# Security boundary is reviewed against Crawl4AI 0.9.1 at this immutable digest.
+# Security boundary is reviewed against Crawl4AI 0.9.5 at this immutable digest
+# (2026-11-08 upgrade, main plan §3.5b: fixes CVE-2026-119119 DoS, JS injection via
+# css_selector/wait_for, blind SSRF in CacheValidator, caller-chosen HF model RCE,
+# caller regex ReDoS, and TLS verification off; see docs/... changelog fragment).
 # Do not return to :latest: upstream egress_broker.py is patched and verified below.
-FROM unclecode/crawl4ai@sha256:c9e1b1217fdd04a013864482861db57fbf20d922fa55e3db3eb420ab0411a9af
+FROM unclecode/crawl4ai@sha256:0b05666882bfb67f45d559a5b827839c54127b74aedd723f8ab338a3571b5fc9
 
 # Build stage runs as root; patch the root-owned, read-only supervisord.conf.
 # The trailing grep fails the build loudly if upstream ever renames the redis
@@ -29,6 +32,14 @@ FROM unclecode/crawl4ai@sha256:c9e1b1217fdd04a013864482861db57fbf20d922fa55e3db3
 USER root
 RUN sed -i 's|command=/usr/bin/redis-server |command=/usr/bin/redis-server --save "" --appendonly no |' /app/supervisord.conf \
     && grep -q 'redis-server --save "" --appendonly no ' /app/supervisord.conf
+
+# 0.9.5's Docker server ships the two bounded-execution limits the security
+# upgrade relies on (main plan §3.5b): recycle a pooled browser context after
+# 200 pages and cap one /crawl at 300s wall clock. Assert them at build time so
+# a future base-image bump that renames or drops them fails loudly instead of
+# silently losing the bound.
+RUN grep -q 'wall_clock_s: 300' /app/config.yml \
+    && grep -q 'max_pages_before_recycle: 200' /app/config.yml
 
 # Restore the non-root runtime user the base image expects.
 USER appuser
