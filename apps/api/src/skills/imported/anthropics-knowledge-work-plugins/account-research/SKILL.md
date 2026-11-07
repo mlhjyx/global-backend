@@ -10,7 +10,7 @@ metadata:
   platform.tenant-default: disabled
   platform.pack-type: growth_motion
   platform.task-contract: research.account_research
-  platform.task-contract-digest: e22eebccc313e4df1ba7646851933928a7778340e4c7e3c0d1296c435bf110eb
+  platform.task-contract-digest: 5aba46cfd0ce8b3621964a6998659cbc82c8d3b1972c4c70939b30d8401d8d8d
   platform.risk: low
   platform.human-gate: "false"
   platform.budget-cents: "25"

@@ -9,7 +9,7 @@ metadata:
   platform.tenant-default: disabled
   platform.pack-type: growth_motion
   platform.task-contract: triage.lead_triage
-  platform.task-contract-digest: 57ec45740c336c12c3f3ed1283531f820265a474354dd853c59fa7489fcda5b4
+  platform.task-contract-digest: 5f67a501a13c6e8451d21919971c0afe9e606b921769c207327386de37881a99
   platform.risk: low
   platform.human-gate: "false"
   platform.budget-cents: "15"
