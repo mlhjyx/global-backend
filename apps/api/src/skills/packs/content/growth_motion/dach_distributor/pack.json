@@ -1,0 +1,47 @@
+{
+  "packKey": "growth_motion.dach_distributor",
+  "packType": "growth_motion",
+  "version": "1.0.0",
+  "title": "DACH 分销商获客动作包",
+  "description": "面向德国/奥地利/瑞士工业分销商的获客检查单：Impressum 分销声明、在售品牌、德语检索与决策人角色。",
+  "priorityClass": "growth_motion",
+  "tags": { "markets": ["DE", "AT", "CH"], "motions": ["distributor_discovery"] },
+  "owner": "产品负责人 + 平台工程（本工作区）",
+  "license": "Proprietary",
+  "contentPath": "PACK.md",
+  "rules": [
+    {
+      "id": "dach-distributor-playbook",
+      "motion": "distributor_discovery",
+      "stage": "qualify",
+      "playbook": [
+        {
+          "step": "核实分销身份",
+          "guidance": "读 Impressum/关于页：是否明确写着 Vertrieb/Handel/Großhandel 或列出在售第三方品牌；只有制造声明而无所售品牌时先判 weak。"
+        },
+        {
+          "step": "确认下游买家角色",
+          "guidance": "分销商采购同类产品用于转售即下游买家；撮合平台、目录站、纯服务商判 weak/mismatch。"
+        },
+        {
+          "step": "本地化检索",
+          "guidance": "关键词用德语（如 Zulieferer、Großhandel、Vertriebspartner），并限定 DE/AT/CH 区域。"
+        },
+        {
+          "step": "决策人线索",
+          "guidance": "优先 Geschäftsführer、Head of Procurement/Einkauf；只记录页面明确出现的具名人员。"
+        }
+      ],
+      "kpis": ["深判通过率（match / 判定总数）", "分销商 ICP 的首次回复率"],
+      "guardrails": [
+        "robots 不允许的页面不抓",
+        "不对名单对象触达（见合规包）",
+        "任何发送动作走人工审批（S1 不发送）"
+      ]
+    }
+  ],
+  "sources": [
+    { "label": "Platform acquisition playbook (internal)", "retrievedAt": "2026-11-08" }
+  ],
+  "exitPlan": "市场优先级调整或深判通过率连续两季下降时复审；180 天未使用则归档。"
+}

@@ -5,13 +5,17 @@ import { createRawSourceActivities } from "./raw-source.activities";
 import { createDiscoveryActivities } from "./discovery.activities";
 
 describe("Raw Source retention activities", () => {
-  it("binds G2 company identity and all three governed providers to RawSourceRecord", () => {
+  it("binds G2 company identity and every governed provider to RawSourceRecord", () => {
     const activity = readFileSync(new URL('./discovery.activities.ts', import.meta.url), 'utf8');
     const governed = readFileSync(new URL('./discovery-query-governed-execution.ts', import.meta.url), 'utf8');
     const bindings = readFileSync(new URL('../durable-results/domain-ack-consumer-bindings.ts', import.meta.url), 'utf8');
     expect(activity).toContain('commitGovernedDiscoveryQueryExecution');
     expect(governed).toContain('discoveryCompanyDomainAckIdentity');
-    for (const producer of ['tradefair.algolia', 'discovery.extract_company', 'discovery.extract_list']) {
+    for (const producer of [
+      'tradefair.algolia', 'discovery.extract_company', 'discovery.extract_list',
+      // lineage v3：结构化直连源（ToolBroker 工具 id 即 producerId）。
+      'wikidata.sparql', 'osm.overpass', 'ted.search', 'openfda.search',
+    ]) {
       const escaped = producer.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
       expect(bindings).toMatch(new RegExp(
         `producerId: '${escaped}'[\\s\\S]{0,220}domainAggregateType: 'RawSourceRecord'`, 'u',

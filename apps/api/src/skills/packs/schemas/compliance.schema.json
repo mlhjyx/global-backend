@@ -1,0 +1,180 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "compliance.schema.json",
+  "title": "Compliance pack v1",
+  "allOf": [
+    {
+      "$ref": "common.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "packType": {
+          "const": "compliance"
+        },
+        "priorityClass": {
+          "enum": [
+            "hard_rules",
+            "enterprise",
+            "compliance"
+          ]
+        },
+        "rules": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "effect",
+              "appliesTo",
+              "rationale",
+              "sources"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              "effect": {
+                "enum": [
+                  "forbid",
+                  "require_approval",
+                  "mask",
+                  "limit"
+                ]
+              },
+              "appliesTo": {
+                "type": "object",
+                "additionalProperties": false,
+                "minProperties": 1,
+                "properties": {
+                  "skills": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "minItems": 1,
+                    "uniqueItems": true
+                  },
+                  "tools": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "minItems": 1,
+                    "uniqueItems": true
+                  },
+                  "phases": {
+                    "type": "array",
+                    "items": {
+                      "enum": [
+                        "understand",
+                        "research",
+                        "qualify",
+                        "create",
+                        "engage",
+                        "convert"
+                      ]
+                    },
+                    "minItems": 1,
+                    "uniqueItems": true
+                  }
+                }
+              },
+              "condition": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "field",
+                  "op",
+                  "value"
+                ],
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "op": {
+                    "enum": [
+                      "eq",
+                      "neq",
+                      "in",
+                      "not_in",
+                      "contains",
+                      "gte",
+                      "lte"
+                    ]
+                  },
+                  "value": {
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 500
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "array",
+                        "maxItems": 64,
+                        "items": {
+                          "type": [
+                            "string",
+                            "number",
+                            "boolean"
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              "rationale": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "sources": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "label"
+                  ],
+                  "properties": {
+                    "label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 300
+                    },
+                    "url": {
+                      "type": "string",
+                      "pattern": "^https?://",
+                      "maxLength": 500
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "required": [
+        "packType",
+        "priorityClass",
+        "rules"
+      ]
+    }
+  ]
+}

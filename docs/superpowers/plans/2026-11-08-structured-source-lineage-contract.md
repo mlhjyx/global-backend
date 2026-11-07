@@ -1,11 +1,11 @@
-# 结构化数据源受治理血缘合同（lineage v3）· 落地设计（DRAFT）
+# 结构化数据源受治理血缘合同（lineage v3）· 落地设计（APPROVED）
 
-> 生命周期：`DRAFT`
+> 生命周期：`APPROVED`
 > 依据：执行计划 §0.2 步2 的第③④步被血缘闸门阻塞（证据见
 > `docs/evidence/2026-11-08-m0-step2-source-enablement.md`）；缺口是 2026-10-11 lineage gate
 > （changelog「Never plan or route a discovery source without governed lineage」）显式推迟的
 > 「给 wikidata / openstreetmap / ted / openfda 补受治理血缘（lineage 合同升级，含迁移）」。
-> 本设计待产品负责人过目；批准后改 `APPROVED`，落地后改 `CLOSED`。
+> 产品负责人 2026-11-08 批准本设计并排期施工；实现 PR 落地后改 `CLOSED`。
 
 ## 1. 背景与目标
 

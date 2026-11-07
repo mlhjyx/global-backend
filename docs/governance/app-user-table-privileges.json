@@ -295,6 +295,13 @@
       "SELECT",
       "UPDATE"
     ],
+    "mem_knowledge_stat": [
+      "SELECT"
+    ],
+    "mem_run_episode": [
+      "INSERT",
+      "SELECT"
+    ],
     "monitored_source": [
       "INSERT",
       "SELECT",
