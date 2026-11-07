@@ -960,7 +960,7 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
   );
   const validation = validateProductionAuditBaseline(repositoryBaseline, {
     now: REPOSITORY_BASELINE_NOW,
-    expectedBootstrapBase: "bf0a7f8d8c782fd7290678ee589b36cb63cc497b",
+    expectedBootstrapBase: "79f43056f0a42412bc88a9ee45bdcc577e464803",
   });
   assert.deepEqual(validation.issues, []);
   assert.equal(repositoryBaseline.summary.advisories, 0);
@@ -973,11 +973,11 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
   });
   assert.equal(
     repositoryBaseline.source.base_commit,
-    "bf0a7f8d8c782fd7290678ee589b36cb63cc497b",
+    "79f43056f0a42412bc88a9ee45bdcc577e464803",
   );
   const clear = evaluateProductionAudit(pnpmAudit([]), repositoryBaseline, {
     now: REPOSITORY_BASELINE_NOW,
-    expectedBootstrapBase: "bf0a7f8d8c782fd7290678ee589b36cb63cc497b",
+    expectedBootstrapBase: "79f43056f0a42412bc88a9ee45bdcc577e464803",
     expectedSourceLockfileDigest:
       "sha256:7e0d53807c2b59d8339d8f0ae0f55e84b2d664c418bf091e77766f26122ddbc4",
   });
@@ -993,7 +993,7 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
     repositoryBaseline,
     {
       now: REPOSITORY_BASELINE_NOW,
-      expectedBootstrapBase: "bf0a7f8d8c782fd7290678ee589b36cb63cc497b",
+      expectedBootstrapBase: "79f43056f0a42412bc88a9ee45bdcc577e464803",
     },
   );
   assert.equal(vulnerable.ok, false);
