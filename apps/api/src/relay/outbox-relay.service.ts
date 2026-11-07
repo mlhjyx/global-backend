@@ -21,6 +21,17 @@ import {
   UNDERSTANDING_WORKFLOW,
 } from "../temporal/understanding.constants";
 import {
+  DISCOVERY_WORKFLOW_KNOB_ENV,
+  DISCOVERY_DEEP_COMPANY_CONCURRENCY_BOUNDS,
+  DISCOVERY_DEEP_COMPANY_CONCURRENCY_DEFAULT,
+  DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD_BOUNDS,
+  DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD_DEFAULT,
+  DISCOVERY_QUERY_BATCH_SIZE_BOUNDS,
+  DISCOVERY_QUERY_BATCH_SIZE_DEFAULT,
+  boundedKnob,
+  type WorkflowKnobBounds,
+} from "../temporal/discovery.workflow-knobs";
+import {
   matchesAssetCleanupPayload,
   parseAssetCleanupCommand,
 } from "../temporal/asset-cleanup.contract";
@@ -712,6 +723,52 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     return /^(1|true|on|yes)$/i.test(process.env.DISCOVERY_RUN2_SHADOW ?? "");
   }
 
+  /**
+   * B1（L01）：把参与工作流控制流的可调常量**显式**写进启动输入（随 run 记录进历史，
+   * 之后改代码常量或 env 都不影响在飞 run 的重放）。env 只在启动时读一次；非整数回落
+   * 冻结默认并告警；越界值在这里（注入点）夹取——workflow 重放从不用可变区间二次夹取，
+   * 所以日后调整 BOUNDS 不会改变已录制历史的调度结果（见 discovery.workflow-knobs.ts）。
+   */
+  private discoveryWorkflowKnobs(): {
+    run2PoolSearchFallbackThreshold: number;
+    deepCompanyConcurrency: number;
+    discoveryQueryBatchSize: number;
+  } {
+    const read = (envName: string, fallback: number, bounds: WorkflowKnobBounds): number => {
+      const raw = process.env[envName];
+      if (raw === undefined || raw.trim() === "") return fallback;
+      const parsed = Number(raw);
+      if (!Number.isInteger(parsed)) {
+        this.logger.warn(`${envName}='${raw}' is not an integer — using frozen default ${fallback}`);
+        return fallback;
+      }
+      const clamped = boundedKnob(parsed, fallback, bounds);
+      if (clamped !== parsed) {
+        this.logger.warn(
+          `${envName}=${parsed} is outside [${bounds.min}, ${bounds.max}] — using ${clamped}`,
+        );
+      }
+      return clamped;
+    };
+    return {
+      run2PoolSearchFallbackThreshold: read(
+        DISCOVERY_WORKFLOW_KNOB_ENV.run2PoolSearchFallbackThreshold,
+        DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD_DEFAULT,
+        DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD_BOUNDS,
+      ),
+      deepCompanyConcurrency: read(
+        DISCOVERY_WORKFLOW_KNOB_ENV.deepCompanyConcurrency,
+        DISCOVERY_DEEP_COMPANY_CONCURRENCY_DEFAULT,
+        DISCOVERY_DEEP_COMPANY_CONCURRENCY_BOUNDS,
+      ),
+      discoveryQueryBatchSize: read(
+        DISCOVERY_WORKFLOW_KNOB_ENV.discoveryQueryBatchSize,
+        DISCOVERY_QUERY_BATCH_SIZE_DEFAULT,
+        DISCOVERY_QUERY_BATCH_SIZE_BOUNDS,
+      ),
+    };
+  }
+
   private async startWorkflowIdempotent(
     workflowType: string,
     options: {
@@ -836,6 +893,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
               icpId: payload.icpId ?? "",
               executionContractVersion: 2,
               executionBudget,
+              // B1（L01）：控制流可调常量显式随启动输入记录（默认=冻结值 20/16/2）。
+              ...this.discoveryWorkflowKnobs(),
               // M0③（Run 2.0）：部署开关决定这一轮 run 是否走快扫编排；启动参数一旦记录，
               // 重放按历史输入走同一路径。
               ...(this.run2QuickScanEnabled() ? { run2QuickScan: true } : {}),
