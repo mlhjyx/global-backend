@@ -45,6 +45,8 @@
     "governance:providers": "node scripts/governance-verify.mjs generate-provider-doc",
     "governance:release": "node scripts/governance-verify.mjs render-release",
     "docs:model-candidates": "node scripts/generate-model-candidate-baseline.mjs",
+    "skills:generate": "pnpm exec tsx scripts/generate-skill-catalog.mts",
+    "skills:validate": "pnpm exec tsx scripts/validate-skills.mts",
     "memoryctl": "node scripts/memoryctl.mjs",
     "memory:test": "node --test scripts/memoryctl.spec.mjs",
     "code-intelligence:scan": "pnpm --filter @global/code-intelligence scan",
