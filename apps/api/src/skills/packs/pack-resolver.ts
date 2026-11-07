@@ -137,7 +137,9 @@ function driftCheck(version: PackVersionRow, packKey: string): void {
     );
   }
   const builtin = BUILTIN_PACKS.find((record) => record.packKey === packKey);
-  if (!builtin) return; // Studio 发布的非内置包：摘要由不可变版本行自证
+  // 内置目录只钉住它自己的版本（seed 行必须与构建一致）；Studio 发布的新版本
+  // 由不可变版本行与发布门自证，不参与内置摘要比对。
+  if (!builtin || version.version !== builtin.manifest.version) return;
   if (
     version.manifestDigest !== builtin.manifestDigest ||
     version.contentDigest !== builtin.contentDigest ||

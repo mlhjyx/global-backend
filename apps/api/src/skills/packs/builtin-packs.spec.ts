@@ -54,6 +54,14 @@ describe("builtin pack content", () => {
     }
   });
 
+  it("ships an authored deterministic eval manifest for every pack", () => {
+    for (const record of loaded.records) {
+      expect(record.evals, record.packKey).toBeDefined();
+      expect(record.evals?.evals.length, record.packKey).toBeGreaterThanOrEqual(5);
+      expect(record.evalsDigest, record.packKey).toMatch(/^[0-9a-f]{64}$/u);
+    }
+  });
+
   it("keeps non-proprietary content packs carrying a notice", () => {
     for (const record of loaded.records) {
       if (record.manifest.license !== "Proprietary") {

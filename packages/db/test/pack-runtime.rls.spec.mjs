@@ -175,16 +175,23 @@ describe("pack v1 registry RLS and append-only grants", () => {
     await rejectsWithPermission(() =>
       withWorkspace(app, WS_A, (tx) => tx.$executeRaw`DELETE FROM "pack_version" WHERE "id" = ${VERSION_ID}::uuid`),
     );
+    // 发布路径：app_user 可 INSERT（Pack Studio 发布），插入后不可改不可删。
+    const publishedId = randomUUID();
+    await withWorkspace(
+      app,
+      WS_A,
+      (tx) => tx.$executeRaw`
+        INSERT INTO "pack_version"
+          ("id", "package_id", "version", "manifest", "content", "manifest_digest", "content_digest")
+        VALUES (${publishedId}::uuid, ${PACKAGE_ID}::uuid, '9.9.9', '{}'::jsonb, 'x',
+                ${"e".repeat(64)}, ${"e".repeat(64)})
+      `,
+    );
     await rejectsWithPermission(() =>
-      withWorkspace(
-        app,
-        WS_A,
-        (tx) => tx.$executeRaw`
-          INSERT INTO "pack_version"
-            ("id", "package_id", "version", "manifest", "content", "manifest_digest", "content_digest")
-          VALUES (gen_random_uuid(), ${PACKAGE_ID}::uuid, '9.9.9', '{}'::jsonb, 'x', ${DIGEST}, ${DIGEST})
-        `,
-      ),
+      withWorkspace(app, WS_A, (tx) => tx.$executeRaw`UPDATE "pack_version" SET "version" = '9.9.8' WHERE "id" = ${publishedId}::uuid`),
+    );
+    await rejectsWithPermission(() =>
+      withWorkspace(app, WS_A, (tx) => tx.$executeRaw`DELETE FROM "pack_version" WHERE "id" = ${publishedId}::uuid`),
     );
     await rejectsWithPermission(() =>
       withWorkspace(

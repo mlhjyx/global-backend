@@ -88,7 +88,107 @@ export const BUILTIN_PACKS: readonly BuiltinPackRecord[] =
     "content": "# 欧盟双用途/出口管制复核（合规包）\n\n适用：面向欧盟市场的获客与报价建议（L1），以及研究类技能的输出。\n\n## 硬约束（按优先级）\n\n1. **双用途物项对外材料需人工复核**：凡涉及 Regulation (EU) 2021/821 附件 I 所列物项（含技术资料、参数表、报价建议）的对外使用，必须先经人工确认；系统只产草稿与证据，不产对外单据。\n2. **制裁潜在命中禁止触达**：`sanctions.status == potential_match` 的对象不得进入 create/engage 阶段动作；命中未清白前只能内部复核。\n3. **个人数据最小化**：研究简报只保留公开职业信息（姓名职务所在公司），不得输出个人邮箱/电话；需要联系时先走合规评审。\n\n## 证据要求\n\n- 每条结论附来源（URL 或内部记录 id）与检索日期。\n- 无法核验的维度写 \"未验证\"，不得推断。\n- 触达前必须过制裁筛查与禁联名单；本包不改变 ToolBroker 白名单与审批链，只提供策略约束。",
     "manifestDigest": "7eda03d4a7867e7b6fc28815f2cc6d1cffc1ae3f61669d9b9da627a6ddb83b43",
     "contentDigest": "e15375944cac7cecae2b55b7cc3a14271bb86baae0dcd8fd17dadd638f690a04",
-    "sourceDigest": "41fe49cc17c9afc99ad65ee229e53a0463d9a0136164d4a45fc3c9c14afa1b84"
+    "sourceDigest": "41fe49cc17c9afc99ad65ee229e53a0463d9a0136164d4a45fc3c9c14afa1b84",
+    "evals": {
+      "skillName": "compliance.eu_dual_use_screen",
+      "evals": [
+        {
+          "id": 1,
+          "input": {},
+          "assertions": [
+            {
+              "kind": "json_schema",
+              "path": "descriptor",
+              "schema": {
+                "type": "object",
+                "required": [
+                  "packs"
+                ],
+                "properties": {
+                  "packs": {
+                    "type": "array",
+                    "contains": {
+                      "type": "object",
+                      "required": [
+                        "packKey"
+                      ],
+                      "properties": {
+                        "packKey": {
+                          "const": "compliance.eu_dual_use_screen"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "kind": "contains",
+              "path": "brief",
+              "value": "compliance.eu_dual_use_screen@"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "input": {},
+          "assertions": [
+            {
+              "kind": "regex",
+              "path": "rulesDigest",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "kind": "lte",
+              "path": "briefLength",
+              "value": 2000
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "input": {},
+          "assertions": [
+            {
+              "kind": "contains",
+              "path": "brief",
+              "value": " [require_approval] compliance.eu_dual_use_screen"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "input": {},
+          "assertions": [
+            {
+              "kind": "contains",
+              "path": "brief",
+              "value": "Selectors:"
+            },
+            {
+              "kind": "no_vendor_marketing",
+              "path": "brief"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "input": {},
+          "assertions": [
+            {
+              "kind": "no_vendor_marketing",
+              "path": "brief"
+            },
+            {
+              "kind": "equals",
+              "path": "descriptor.skillKey",
+              "value": "pack-eval:compliance.eu_dual_use_screen"
+            }
+          ]
+        }
+      ]
+    },
+    "evalsDigest": "2f046d9800c13803c5b773cbaafb3c0a158951698a744001d917152fb299cb52"
   },
   {
     "packKey": "data_source.public_web_only",
@@ -163,7 +263,107 @@ export const BUILTIN_PACKS: readonly BuiltinPackRecord[] =
     "content": "# 公开网页与官方名录数据源边界（数据源包）\n\n本包只**声明允许的数据源与用途**；真正执行仍由 ToolBroker、`source_policy`、预算与限流强制。\n\n## 允许的数据源\n\n| 源 | 用途 | 个人数据类 | 备注 |\n| --- | --- | --- | --- |\n| searxng.search（自托管） | discovery / research | 公开组织信息 | 走平台限流；不用付费搜索 API |\n| crawl4ai.fetch（自托管） | research / enrichment | 页面可能含个人数据 | robots 与域策略强制；同域礼貌间隔 |\n| source_policy 管理的官方名录 | discovery | 公开组织信息 | 新域名必须先在 source_policy 登记并经运营批准 |\n\n## 禁止\n\n- 不在本包内新增任何源；白名单之外的源一律拒绝。\n- 不绕过 robots、不批量抓取、不做登录态抓取。\n- 付费数据源（海关/流量/信用等）不在 S1；如引入需单独决策。\n- 抓取结果中出现的个人联系方式只用于合规复核，不得进入研究输出（见合规包）。",
     "manifestDigest": "477c511e1318441c45e66e6bc8e03804ffe321bb9d713b546a02d0f6521c0d73",
     "contentDigest": "925343ac36ae9674d1c3d7052b62a375d13c56ce35eedc4ae3cc62cd045c6ae4",
-    "sourceDigest": "99bc4c57041784b1e0ff28557f82d0ab38dccb1f5996c4474e33b8ac95f69790"
+    "sourceDigest": "99bc4c57041784b1e0ff28557f82d0ab38dccb1f5996c4474e33b8ac95f69790",
+    "evals": {
+      "skillName": "data_source.public_web_only",
+      "evals": [
+        {
+          "id": 1,
+          "input": {},
+          "assertions": [
+            {
+              "kind": "json_schema",
+              "path": "descriptor",
+              "schema": {
+                "type": "object",
+                "required": [
+                  "packs"
+                ],
+                "properties": {
+                  "packs": {
+                    "type": "array",
+                    "contains": {
+                      "type": "object",
+                      "required": [
+                        "packKey"
+                      ],
+                      "properties": {
+                        "packKey": {
+                          "const": "data_source.public_web_only"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "kind": "contains",
+              "path": "brief",
+              "value": "data_source.public_web_only@"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "input": {},
+          "assertions": [
+            {
+              "kind": "regex",
+              "path": "rulesDigest",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "kind": "lte",
+              "path": "briefLength",
+              "value": 2000
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "input": {},
+          "assertions": [
+            {
+              "kind": "contains",
+              "path": "brief",
+              "value": "searxng.search"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "input": {},
+          "assertions": [
+            {
+              "kind": "contains",
+              "path": "brief",
+              "value": "Selectors:"
+            },
+            {
+              "kind": "no_vendor_marketing",
+              "path": "brief"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "input": {},
+          "assertions": [
+            {
+              "kind": "no_vendor_marketing",
+              "path": "brief"
+            },
+            {
+              "kind": "equals",
+              "path": "descriptor.skillKey",
+              "value": "pack-eval:data_source.public_web_only"
+            }
+          ]
+        }
+      ]
+    },
+    "evalsDigest": "c4f8edec4a512885dc18f89cfe9fed8d78448fe0d624e2b664702b38c54fe658"
   },
   {
     "packKey": "growth_motion.competitive_intelligence",
@@ -198,7 +398,146 @@ export const BUILTIN_PACKS: readonly BuiltinPackRecord[] =
     "content": "# 竞争情报检查单（内容包）\n\n用途：为某条线索/某次成单机会补充竞争格局判断；只作策略提示，不执行任何动作。\n\n## 检查单\n\n1. **对手识别**：客户可能比较的替代方案（同类制造商/分销商/平台）；只写可核实公司与产品，不臆造份额。\n2. **定位差异**：从公开资料提取对方的交付周期、认证、最小起订量；与自家产品对比，未知写 \"未验证\"。\n3. **证据链**：每个判断给来源（官网/公告/公开名录）与日期；不引用付费数据库或内部名单。\n4. **赢单/输单复盘**（有历史时）：记录客户最终选择、决定因素、我方差距；只陈述事实与客户原话。\n5. **输出边界**：不生成对外比较材料或贬损竞品的内容；对外使用前人工审阅。\n\n## 禁止\n\n- 不使用爬虫绕过访问控制的竞品资料；不抓取个人社媒。\n- 不编造份额、营收、客户名；无法核实的维度明确标注。",
     "manifestDigest": "8e2024b1516ed21efcdb36e9743370f906bd9965e2d313a59a6efcf701db244c",
     "contentDigest": "0eaa26a505fbd16150348538b749cbb43e309dac2eb700adcc63e25d38200c32",
-    "sourceDigest": "465fecf022c3a1222278a4f576bb1e73a6631441c8d1ed7fa4331e725caf85c8"
+    "sourceDigest": "465fecf022c3a1222278a4f576bb1e73a6631441c8d1ed7fa4331e725caf85c8",
+    "evals": {
+      "skillName": "growth_motion.competitive_intelligence",
+      "evals": [
+        {
+          "id": 1,
+          "input": {
+            "motions": [
+              "competitive_intelligence"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "json_schema",
+              "path": "descriptor",
+              "schema": {
+                "type": "object",
+                "required": [
+                  "packs"
+                ],
+                "properties": {
+                  "packs": {
+                    "type": "array",
+                    "contains": {
+                      "type": "object",
+                      "required": [
+                        "packKey"
+                      ],
+                      "properties": {
+                        "packKey": {
+                          "const": "growth_motion.competitive_intelligence"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "kind": "contains",
+              "path": "brief",
+              "value": "growth_motion.competitive_intelligence@"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "input": {
+            "motions": [
+              "competitive_intelligence"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "regex",
+              "path": "rulesDigest",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "kind": "lte",
+              "path": "briefLength",
+              "value": 2000
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "input": {
+            "motions": [
+              "competitive_intelligence"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "contains",
+              "path": "brief",
+              "value": "赢单/输单"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "input": {
+            "motions": [
+              "pricing"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "json_schema",
+              "path": "descriptor",
+              "schema": {
+                "type": "object",
+                "required": [
+                  "packs"
+                ],
+                "properties": {
+                  "packs": {
+                    "type": "array",
+                    "not": {
+                      "contains": {
+                        "type": "object",
+                        "required": [
+                          "packKey"
+                        ],
+                        "properties": {
+                          "packKey": {
+                            "const": "growth_motion.competitive_intelligence"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "input": {
+            "motions": [
+              "competitive_intelligence"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "no_vendor_marketing",
+              "path": "brief"
+            },
+            {
+              "kind": "equals",
+              "path": "descriptor.skillKey",
+              "value": "pack-eval:growth_motion.competitive_intelligence"
+            }
+          ]
+        }
+      ]
+    },
+    "evalsDigest": "c67d9808ff2935eaa09db3aacc4afa512f2046a991c54670aca2302909c684dd"
   },
   {
     "packKey": "growth_motion.customer_research",
@@ -233,7 +572,146 @@ export const BUILTIN_PACKS: readonly BuiltinPackRecord[] =
     "content": "# 客户研究检查单（内容包）\n\n用途：在触达前形成对一个买家公司的最小可信画像；只作策略提示，不执行动作。\n\n## 检查单\n\n1. **公司与业务**：主营、产品线、站点/规模（仅公开来源）；同名公司不得混用。\n2. **需求假设**：结合卖家的产品与目标市场，列出 2–3 个\"可能的需求\"并标注依据；未验证的假设必须明示。\n3. **采购角色**：决策人/影响者/使用者；只写公开职业信息，不留个人联系方式。\n4. **触发信号**：扩张、上新线、招标、展会等公开信号，附来源与日期。\n5. **不确定性与缺口**：列 \"未查询 / 未验证 / 空白\" 三种状态，分别说明下一步怎么补齐。\n\n## 禁止\n\n- 不推断敏感属性（健康、宗教、政治等）。\n- 不编造营收、员工数、采购量；不用付费数据源结果冒充公开事实。",
     "manifestDigest": "d94f071b357eb91aa6748d5e9644df9455742dcca3a757eba178585663b6dff4",
     "contentDigest": "ad1cd1911bc41fd153d11fb52793cae63c3ab37daabcb349312bc821031d03ab",
-    "sourceDigest": "eedf2d4401c3ed4e48fd718831030aa6ccbe1f7dda7e05c71ef61818ece56735"
+    "sourceDigest": "eedf2d4401c3ed4e48fd718831030aa6ccbe1f7dda7e05c71ef61818ece56735",
+    "evals": {
+      "skillName": "growth_motion.customer_research",
+      "evals": [
+        {
+          "id": 1,
+          "input": {
+            "motions": [
+              "customer_research"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "json_schema",
+              "path": "descriptor",
+              "schema": {
+                "type": "object",
+                "required": [
+                  "packs"
+                ],
+                "properties": {
+                  "packs": {
+                    "type": "array",
+                    "contains": {
+                      "type": "object",
+                      "required": [
+                        "packKey"
+                      ],
+                      "properties": {
+                        "packKey": {
+                          "const": "growth_motion.customer_research"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "kind": "contains",
+              "path": "brief",
+              "value": "growth_motion.customer_research@"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "input": {
+            "motions": [
+              "customer_research"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "regex",
+              "path": "rulesDigest",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "kind": "lte",
+              "path": "briefLength",
+              "value": 2000
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "input": {
+            "motions": [
+              "customer_research"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "contains",
+              "path": "brief",
+              "value": "采购角色"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "input": {
+            "motions": [
+              "competitive_intelligence"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "json_schema",
+              "path": "descriptor",
+              "schema": {
+                "type": "object",
+                "required": [
+                  "packs"
+                ],
+                "properties": {
+                  "packs": {
+                    "type": "array",
+                    "not": {
+                      "contains": {
+                        "type": "object",
+                        "required": [
+                          "packKey"
+                        ],
+                        "properties": {
+                          "packKey": {
+                            "const": "growth_motion.customer_research"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "input": {
+            "motions": [
+              "customer_research"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "no_vendor_marketing",
+              "path": "brief"
+            },
+            {
+              "kind": "equals",
+              "path": "descriptor.skillKey",
+              "value": "pack-eval:growth_motion.customer_research"
+            }
+          ]
+        }
+      ]
+    },
+    "evalsDigest": "2ac64a46363eac832097ef2e9b3e9973194c79110589287ccde4f2fee5199a40"
   },
   {
     "packKey": "growth_motion.dach_distributor",
@@ -304,7 +782,146 @@ export const BUILTIN_PACKS: readonly BuiltinPackRecord[] =
     "content": "# DACH 分销商获客动作包\n\n适用：目标市场为德国/奥地利/瑞士的工业品类分销商获客（Understand → Discover → Qualify）。\n\n## 动作检查单\n\n1. **分销身份证据**（Impressum/关于页原文）：Vertrieb / Handel / Großhandel / 在售第三方品牌列表；进口商常带中国品牌。\n2. **贸易角色判定**：转售型分销/批发/进口/经销 = 下游买家；制造商 = 竞品（mismatch）；撮合平台 = weak。\n3. **德语检索**：Zulieferer、Großhandel、Vertriebspartner、Handelsvertretung；区域限定 DE/AT/CH。\n4. **决策人**：Geschäftsführer（总经理）、Einkauf（采购）、Technische Leitung（技术）；只取页面明确出现的具名人员，不猜邮箱。\n5. **触达前检查**：制裁筛查 clear、禁联名单未命中、个人数据最小化（合规包）；S1 不发送任何外部消息。\n\n## 衡量\n\n- 主指标：深判通过率（match / 判定总数），不降于基线。\n- 辅指标：分销商 ICP 的首次回复率（M3 后才有真实发送数据）。\n- 记录每步证据与来源，无法核验写 \"未验证\"。",
     "manifestDigest": "36232616961c9d2106bb4cee4722730be59f5d2e3fbe218d73f26e497966acd3",
     "contentDigest": "3ed1c1de55777674fc7677e8ca74e88812f9e44e8e22431e3801a856bb7e1c2f",
-    "sourceDigest": "8e463a158a18894b9508a807fcc6a072af53731da2efe56771994bea22b8311f"
+    "sourceDigest": "8e463a158a18894b9508a807fcc6a072af53731da2efe56771994bea22b8311f",
+    "evals": {
+      "skillName": "growth_motion.dach_distributor",
+      "evals": [
+        {
+          "id": 1,
+          "input": {
+            "markets": [
+              "DE"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "json_schema",
+              "path": "descriptor",
+              "schema": {
+                "type": "object",
+                "required": [
+                  "packs"
+                ],
+                "properties": {
+                  "packs": {
+                    "type": "array",
+                    "contains": {
+                      "type": "object",
+                      "required": [
+                        "packKey"
+                      ],
+                      "properties": {
+                        "packKey": {
+                          "const": "growth_motion.dach_distributor"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "kind": "contains",
+              "path": "brief",
+              "value": "growth_motion.dach_distributor@"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "input": {
+            "markets": [
+              "DE"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "regex",
+              "path": "rulesDigest",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "kind": "lte",
+              "path": "briefLength",
+              "value": 2000
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "input": {
+            "markets": [
+              "DE"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "contains",
+              "path": "brief",
+              "value": "Geschäftsführer"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "input": {
+            "markets": [
+              "US"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "json_schema",
+              "path": "descriptor",
+              "schema": {
+                "type": "object",
+                "required": [
+                  "packs"
+                ],
+                "properties": {
+                  "packs": {
+                    "type": "array",
+                    "not": {
+                      "contains": {
+                        "type": "object",
+                        "required": [
+                          "packKey"
+                        ],
+                        "properties": {
+                          "packKey": {
+                            "const": "growth_motion.dach_distributor"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "input": {
+            "markets": [
+              "DE"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "no_vendor_marketing",
+              "path": "brief"
+            },
+            {
+              "kind": "equals",
+              "path": "descriptor.skillKey",
+              "value": "pack-eval:growth_motion.dach_distributor"
+            }
+          ]
+        }
+      ]
+    },
+    "evalsDigest": "1521ce34e45e228999b240454d818f669c2d9a49002235117c68407321fd70a1"
   },
   {
     "packKey": "growth_motion.pricing",
@@ -339,7 +956,146 @@ export const BUILTIN_PACKS: readonly BuiltinPackRecord[] =
     "content": "# 定价与报价检查单（内容包）\n\n用途：配合 `quoting.incoterms_quote`（L1）形成报价建议；只作建议与证据，不产 PI/CI/PL 等对外单据。\n\n## 检查单\n\n1. **成本可追溯**：货值、包装、内陆运费、海运/空运、保险、关税逐项列出；每一项注明来源或假设。\n2. **Incoterms 边界**：EXW/FOB/CFR/CIF/DDP 的责任与费用分界明确；所选术语与目的国一致。\n3. **汇率显式**：报价币与成本币不同时，必须提供汇率与取数日期；不查外部牌价、不猜汇率。\n4. **毛利与底线**：给出加成与最低毛利；低于底线时明确拒绝建议而不是硬算。\n5. **合规**：出口管制/制裁复核（见合规包）；报价建议不代表正式要约，对外须人工确认与法务模板。\n\n## 禁止\n\n- 不生成对外单据、不发送、不承诺交期/库存。\n- 不做税务或法律意见；DDP 关税仅按输入估算并标注假设。",
     "manifestDigest": "6e8042b7dde98f0b3f6debc6375a2273fae428e31ca7280ae437650b8351fb9b",
     "contentDigest": "02c510c80023618230061ef3e7e3956a70787b0d2a318128ce2e96b0ec820264",
-    "sourceDigest": "4d3e6eaabe54e0f16214b163aae167601d41bb493a013b4c95e14b61c3d34365"
+    "sourceDigest": "4d3e6eaabe54e0f16214b163aae167601d41bb493a013b4c95e14b61c3d34365",
+    "evals": {
+      "skillName": "growth_motion.pricing",
+      "evals": [
+        {
+          "id": 1,
+          "input": {
+            "motions": [
+              "pricing"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "json_schema",
+              "path": "descriptor",
+              "schema": {
+                "type": "object",
+                "required": [
+                  "packs"
+                ],
+                "properties": {
+                  "packs": {
+                    "type": "array",
+                    "contains": {
+                      "type": "object",
+                      "required": [
+                        "packKey"
+                      ],
+                      "properties": {
+                        "packKey": {
+                          "const": "growth_motion.pricing"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "kind": "contains",
+              "path": "brief",
+              "value": "growth_motion.pricing@"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "input": {
+            "motions": [
+              "pricing"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "regex",
+              "path": "rulesDigest",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "kind": "lte",
+              "path": "briefLength",
+              "value": 2000
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "input": {
+            "motions": [
+              "pricing"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "contains",
+              "path": "brief",
+              "value": "Incoterms 边界"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "input": {
+            "motions": [
+              "customer_research"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "json_schema",
+              "path": "descriptor",
+              "schema": {
+                "type": "object",
+                "required": [
+                  "packs"
+                ],
+                "properties": {
+                  "packs": {
+                    "type": "array",
+                    "not": {
+                      "contains": {
+                        "type": "object",
+                        "required": [
+                          "packKey"
+                        ],
+                        "properties": {
+                          "packKey": {
+                            "const": "growth_motion.pricing"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "input": {
+            "motions": [
+              "pricing"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "no_vendor_marketing",
+              "path": "brief"
+            },
+            {
+              "kind": "equals",
+              "path": "descriptor.skillKey",
+              "value": "pack-eval:growth_motion.pricing"
+            }
+          ]
+        }
+      ]
+    },
+    "evalsDigest": "9ac66d360d1d5611763caf1ce9335ec9267c7b7aa097144df621909bb1d5b7c4"
   },
   {
     "packKey": "industry.metal_fabrication",
@@ -410,6 +1166,145 @@ export const BUILTIN_PACKS: readonly BuiltinPackRecord[] =
     "content": "# 金属加工行业词表与买家角色\n\n适用：金属加工、钣金、机加工品类的卖家获客（检索词归一、买家公司理解、买家角色匹配）。\n\n## 分类与术语\n\n- ISIC Rev.4：C25（金属制品）、C28（机械设备）。\n- 德语核心术语：Lohnfertigung（来料加工）、Blechbearbeitung（钣金加工）、CNC-Fräsen（数控铣削）、Laserschneiden（激光切割）、Schweißen（焊接）、Metallverarbeitung（金属加工）。\n\n## 买家角色\n\n1. Geschäftsführer / Managing Director（总经理，决策人）\n2. Head of Production / Fertigungsleitung（生产技术负责人）\n3. Procurement / Einkauf（采购）\n4. Technical Director / Technische Leitung（技术负责人）\n\n## 合规提示\n\n- 德国 Impressum 依法列明负责人，是决策人抽取的首选公开来源；只记录页面明确出现的信息。\n- 行业术语用于检索与判定，不臆造公司属性；无法核验写 \"未验证\"。",
     "manifestDigest": "68f1f900734efa403e1454c10c8898b418244873c840bb8ba824a8527ab90b85",
     "contentDigest": "f97d0682a52960d234a0dac60bf9c8c58aaf639fb1f3f3202dfc95b119616114",
-    "sourceDigest": "713293842b3d4feaa719dd4016e8e97b0c3e69e0a6f55068730e89609ff36e6e"
+    "sourceDigest": "713293842b3d4feaa719dd4016e8e97b0c3e69e0a6f55068730e89609ff36e6e",
+    "evals": {
+      "skillName": "industry.metal_fabrication",
+      "evals": [
+        {
+          "id": 1,
+          "input": {
+            "industries": [
+              "metal_fabrication"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "json_schema",
+              "path": "descriptor",
+              "schema": {
+                "type": "object",
+                "required": [
+                  "packs"
+                ],
+                "properties": {
+                  "packs": {
+                    "type": "array",
+                    "contains": {
+                      "type": "object",
+                      "required": [
+                        "packKey"
+                      ],
+                      "properties": {
+                        "packKey": {
+                          "const": "industry.metal_fabrication"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "kind": "contains",
+              "path": "brief",
+              "value": "industry.metal_fabrication@"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "input": {
+            "industries": [
+              "metal_fabrication"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "regex",
+              "path": "rulesDigest",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "kind": "lte",
+              "path": "briefLength",
+              "value": 2000
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "input": {
+            "industries": [
+              "metal_fabrication"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "contains",
+              "path": "brief",
+              "value": "Lohnfertigung"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "input": {
+            "industries": [
+              "food_service"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "json_schema",
+              "path": "descriptor",
+              "schema": {
+                "type": "object",
+                "required": [
+                  "packs"
+                ],
+                "properties": {
+                  "packs": {
+                    "type": "array",
+                    "not": {
+                      "contains": {
+                        "type": "object",
+                        "required": [
+                          "packKey"
+                        ],
+                        "properties": {
+                          "packKey": {
+                            "const": "industry.metal_fabrication"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "input": {
+            "industries": [
+              "metal_fabrication"
+            ]
+          },
+          "assertions": [
+            {
+              "kind": "no_vendor_marketing",
+              "path": "brief"
+            },
+            {
+              "kind": "equals",
+              "path": "descriptor.skillKey",
+              "value": "pack-eval:industry.metal_fabrication"
+            }
+          ]
+        }
+      ]
+    },
+    "evalsDigest": "fb40605b3238bc4cb971301c057ec6405dd7a17d0598e6ebfae5a6a93a53be65"
   }
 ];

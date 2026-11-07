@@ -1,0 +1,99 @@
+{
+  "skillName": "data_source.public_web_only",
+  "evals": [
+    {
+      "id": 1,
+      "input": {},
+      "assertions": [
+        {
+          "kind": "json_schema",
+          "path": "descriptor",
+          "schema": {
+            "type": "object",
+            "required": [
+              "packs"
+            ],
+            "properties": {
+              "packs": {
+                "type": "array",
+                "contains": {
+                  "type": "object",
+                  "required": [
+                    "packKey"
+                  ],
+                  "properties": {
+                    "packKey": {
+                      "const": "data_source.public_web_only"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "contains",
+          "path": "brief",
+          "value": "data_source.public_web_only@"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "input": {},
+      "assertions": [
+        {
+          "kind": "regex",
+          "path": "rulesDigest",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "kind": "lte",
+          "path": "briefLength",
+          "value": 2000
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "input": {},
+      "assertions": [
+        {
+          "kind": "contains",
+          "path": "brief",
+          "value": "searxng.search"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "input": {},
+      "assertions": [
+        {
+          "kind": "contains",
+          "path": "brief",
+          "value": "Selectors:"
+        },
+        {
+          "kind": "no_vendor_marketing",
+          "path": "brief"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "input": {},
+      "assertions": [
+        {
+          "kind": "no_vendor_marketing",
+          "path": "brief"
+        },
+        {
+          "kind": "equals",
+          "path": "descriptor.skillKey",
+          "value": "pack-eval:data_source.public_web_only"
+        }
+      ]
+    }
+  ]
+}
