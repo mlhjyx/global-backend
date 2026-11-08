@@ -6,7 +6,7 @@
     "protectedFiles": [
       {
         "path": "apps/api/src/tools/tool-broker.ts",
-        "sha256": "755af07b3ce83599b401227fac7aec84f32c4715fb291f62a3c485181f7c7e9d"
+        "sha256": "305e8c4c28a6705196c5d0f8a0dad82f0b8ba2d134e894926421d02691dfdc65"
       },
       {
         "path": "apps/api/src/model-gateway/router-model-gateway.ts",
