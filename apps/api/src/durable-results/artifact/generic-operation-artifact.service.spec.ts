@@ -305,7 +305,7 @@ describe('GenericOperationArtifactService', () => {
     },
   );
 
-  it('a post-promote contract invalid() also transitions RESULT_UNKNOWN (wire already ran)', async () => {
+  it('a promote result that fails the stored-artifact contract also transitions RESULT_UNKNOWN', async () => {
     const deps = dependencies({
       promote: async () => Object.freeze({ ...stored, sha256: '0'.repeat(64) }),
     });
@@ -317,6 +317,20 @@ describe('GenericOperationArtifactService', () => {
 
     expect(deps.budgetStore.markResultUnknown).toHaveBeenCalledOnce();
     expect(deps.budgetStore.markResultUnknown).toHaveBeenCalledWith(reservation);
+  });
+
+  it('still surfaces the artifact error when the unknown-result fallback itself fails', async () => {
+    const deps = dependencies({
+      promote: async () => {
+        throw new ArtifactStorageError('GENERIC_OPERATION_ARTIFACT_INVALID');
+      },
+    });
+    deps.budgetStore.markResultUnknown.mockRejectedValueOnce(new Error('ledger unavailable'));
+
+    await expect(deps.service.persist(persistInput())).rejects.toMatchObject({
+      code: 'GENERIC_OPERATION_ARTIFACT_INVALID',
+    });
+    expect(deps.budgetStore.markResultUnknown).toHaveBeenCalledOnce();
   });
 
   it('asks the store to keep the object until the manifest expires and records the version promote verified', async () => {

@@ -749,8 +749,18 @@ export class ToolBroker implements ExecutionBroker {
             subjectRef: artifactSubject,
           });
         } catch (error) {
-          // The wire already ran: the reservation stays unresolved (or was
-          // marked RESULT_UNKNOWN by the artifact service) and is never retried.
+          // The wire already ran: the result exists upstream but was not made
+          // durable. Whatever failed inside the artifact pipeline — service
+          // validation, store promote races, or the adapter's own payload
+          // contract checks (which run BEFORE the service; run aae4a06a: an
+          // empty crawl4ai-render body failed isHtmlBody there) — the
+          // reservation must not stay a bare RESERVED row: a released-and-
+          // re-reserved key would allow a second physical call and the row
+          // would hold the cap until reconciliation. Mark RESULT_UNKNOWN
+          // (best effort; service-side marks may already carry the snapshot).
+          const markedUnknown = await this.markResultUnknownAfterSettleFailure(
+            reservation,
+          );
           this.trace(
             ctx,
             tool,
@@ -759,6 +769,8 @@ export class ToolBroker implements ExecutionBroker {
             // GenericOperationArtifactError 名字，丢掉了 INVALID/STORAGE_UNAVAILABLE 之分）。
             `artifact settlement failed: ${
               error instanceof Error ? `${error.name}(${error.message})` : "unknown"
+            }; ${
+              markedUnknown ? "result marked unknown" : "result left RESERVED for reconciliation"
             }`,
             0,
             now() - started,

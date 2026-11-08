@@ -363,12 +363,6 @@ function isNotFound(error: unknown): boolean {
   );
 }
 
-function isPreconditionFailed(error: unknown): boolean {
-  return (
-    errorStatus(error) === 412 || errorName(error) === 'PreconditionFailed'
-  );
-}
-
 function commandOptions(
   signal?: AbortSignal,
 ): Readonly<{ abortSignal?: AbortSignal }> | undefined {
@@ -533,7 +527,7 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
       if (!verified) {
         throw storageError('GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE');
       }
-      return this.recoverPromote(staged, false);
+      return this.recoverPromote(staged);
     } catch (error) {
       if (
         error instanceof ArtifactStorageError &&
@@ -541,7 +535,9 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
       ) {
         throw error;
       }
-      return this.recoverPromote(staged, isPreconditionFailed(error));
+      // 不区分是否 412：只要 inspect 看不到对象（含并发赢家尚未可见的窗口）就是
+      // ACK 未知，让持久层按「结果未知」保守记账（契约不符在 stored 分支已单独判 INVALID）。
+      return this.recoverPromote(staged);
     }
   }
 
@@ -703,7 +699,6 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
 
   private async recoverPromote(
     input: StagedArtifact,
-    preconditionFailed: boolean,
   ): Promise<StoredArtifact> {
     try {
       const stored = await this.inspect(input.sha256, input.privacyClass);
