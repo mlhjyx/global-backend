@@ -19,6 +19,8 @@
 
 **2026-11-08 AI 底座 S0（M1 并行泳道，非客户可见）**：技能运行时 v0 随本批 PR 进入 main——SKILL.md 包规范 v0 与校验器、`skill_package`/`skill_version`/`skill_enablement`/`skill_resolution_snapshot` 四表（FORCE RLS；版本与快照 append-only）、三个存量技能（`company.understanding.extract` / `company.understanding.extract_offerings` / `discovery.qualify_fit`）经直通 adapter 执行、ops 启停（引擎 API）。执行输入与预算逐字节不变；**已于 2026-11-07 发车**（镜像 `1982a551` / 源码 `99845741`，带迁移硬窗口）：四表入库、readiness 与基线一致，E2E Part 1 全绿，Part 2/3 证据由主会话回填发车归档。S1-1/S1-2/S1-3（Pack schema/内容目录/冲突裁决/Golden Set 骨架；Pack 七表/策略解析快照/skill-kind/pack seed；Pack Studio/评测回执/发布门）与 S1-4（制裁筛查与 Incoterms 报价两个确定性服务技能、导入 A 档 2 个衍生技能、Golden Set CI 层）已全部入 main，**S1-2 起的表与 seed 待随下一次发车部署**。设计：`docs/superpowers/plans/2026-11-08-skill-runtime-s0.md`；模块文档：`docs/modules/ai-foundation/`。
 
+**2026-11-08 M2（PRD 对齐）收官**：能力 2 Campaign 控制面（M2.0 契约、M2.1 只审不执行的影子审批 UI、M2.2 有界重规划与指标闭环）、能力 4 QGO/SAO/Opportunity/Outcome、能力 3 受控邮件触达（批次/草稿/L2 审批门/逐封发送门/审计包/DNC/退订/回复即停）、能力 5 归因对账、S2 触达技能与 L2 审批门、P6 前端主链路（Playwright 11 用例 + 移动端冒烟 + 视觉基线，零术语 lint 在 CI）、双 agent 编排 v0（源侦察/资格判定在真实市场并行寻源）全部上线并有部署态验收证据：`docs/evidence/2026-11-08-m2-acceptance.md`（汇编）、`2026-11-08-m2-2-acceptance.md`、`step13-l2-closure-20261108/`（基线 #899 + 修复后复跑 #900）、`outreach-11-x-gaps-20261108/`；SaaS 侧 PR 见 gain-saas #75/#78/#79/#80/#82/#89/#94/#104/#106/#107/#108/#111/#115/#116。**触达发送在生产默认关闭**（开关 + 回环白名单 + 逐封 L2 门）；真实域名 SPF/DKIM/DMARC 实检待产品负责人提供域名（D1②）。实现矩阵同日已回写。
+
 仍未达成：首个 `DONE` run 出现在 11-03，但**试点交付节奏**与**邮箱/电话覆盖**仍未达成（最近一次常规 run 的联系人阶段 0 邮箱/0 电话，社交源 blocked/circuit；`email_guess` 2026-11-02 已按 D3 重开，等下一轮带 match 的 run 验证）。逐项见下表。
 
 ## 1. RL1 主链：做了什么、证据、谁验收、怎么回退
@@ -72,7 +74,7 @@ PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](..
 | 联系人线 D1–D8（2026-10-31 / 11-01 拍板） | M1–M4 已上线（run 内接线、社媒三层降级、邮箱补全双闸、gain-saas 决策人卡片）；M5 Golden Set 未开始；`email_guess` 2026-11-02 按 D3 重开、待验证。权威设计稿[§十一](../superpowers/plans/2026-10-31-contact-discovery.md) 是这条线唯一总文档 | 置回对应 provider DISABLED |
 | 2026-11-02 操作决定 | ① trade_fair 零结果根因=注册表只覆盖钣金展会；拍板「planner 按注册表裁剪」（PR #739，Docker 会话执行）；② `email_guess` 重开（D3 已于 11-01 批准）；③「已执行方案可重跑」立项，并入发布线的任务/重试工作流（Phase 4）；④ new-api 的 gemini 上游 5 并发是寻源慢的根因，待产品负责人提供新密钥/渠道后扩容；⑤ natfrp 穿透保持现状（产品负责人决定，不限制不关闭） | ①②置回开关；③不移交则忽略 |
 
-## 4. 在途工作（2026-11-03 GitHub 回读）
+## 4. 在途工作（2026-11-03 GitHub 回读；2026-11-08 M2 收官的 PR 清单见证据页，本节未逐条刷新）
 
 无在途 PR（2026-11-03 03:35Z 回读为 0）。近期已合并：#735（模块文档）、#736（拒答护栏）、#737（Phase 1a 热修）、#738（联系人线状态）、#739（trade_fair 裁剪）、#740（fail-closed 残留）、#743（Phase 1 卖家事实字段）、#744/#745（联系人同名排除与 attemptId 客户端透传）。
 
@@ -94,7 +96,7 @@ PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](..
 - 源码合入、单测或 CI 通过不等于运行采用；xin 的运行观察不是 RuntimeEvidence，也不产生可信 Release Bundle。
 - Billing/Credits 保持 `DEFERRED / NOT_IMPLEMENTED`；`cap_microusd` 是一次执行的技术安全上界，不是客户余额。正常产品请求的费用权威是 SaaS 签发的 Budget Grant，与开发者 ad-hoc 调用授权保持分离。
 - 当前非运行时模型候选合同仍为 `site-builder-model-candidate-baseline/2026-08-07-v3`，详见[生成页](../site-builder/model-candidate-baseline.md)；它不等于 active route、质量证明或真实 dispatch 授权。
-- 发送仍未开放：RL1 不做任何发送，触达属于 RL4。
+- 受控触达已建成（M2 步 11，2026-11-08 验收），但**发送默认关闭**：生产发送需产品负责人开启，且真实域名与 SPF/DKIM/DMARC 实检待提供（D1②）。RL1 试点本身不做任何发送。
 - `PILOT`/`GA` 晋级门目前不可达：AGENTS §7 要求可信外部 readback，而仓内原有的 approval/readback 回读器已由 #566 移除，`scripts/governance-delivery-contracts.mjs` 对任何晋级状态恒阻断。这是已知死锁，是否改为产品负责人签字待 PRD4-D12 拍板。
 
 工程门 G0–G7 的定义见[发布路线](../status/release-plan.md)。自 2026-09-20 核验以来没有任何一道门晋级，下表的裁决不变，所缺证据按当前事实改写：
