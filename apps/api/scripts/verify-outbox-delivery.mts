@@ -175,7 +175,7 @@ async function main() {
 
   const schemaPath = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
-    '../../../packages/contracts/events/payloads/lead-qualified.v1.schema.json',
+    '../../../packages/contracts/events/payloads/lead-qualified.v2.schema.json',
   );
   const ajv = new Ajv2020({ strict: false });
   addFormats(ajv as never);

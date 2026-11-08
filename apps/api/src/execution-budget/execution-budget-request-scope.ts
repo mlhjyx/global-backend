@@ -65,6 +65,12 @@ export type WorkspaceExecutionBudgetRequest =
       operation: 'POST /site-builder/intake';
       /** intake 的语义请求哈希；SaaS 用同一 DTO 计算后签发 understanding.run 授权。 */
       body: Readonly<{ requestHash: string }>;
+    }>
+  | Readonly<{
+      operation: 'POST /campaigns/:campaignId/plan-drafts';
+      campaignId: string;
+      /** 规划 job 的幂等键：一次 Grant 只能用于一个 job（重触发 = 新 jobId + 新 Grant）。 */
+      body: Readonly<{ jobId: string }>;
     }>;
 
 export interface GuessEmailsHttpRequestBody {
@@ -164,6 +170,12 @@ function requestMaterial(request: WorkspaceExecutionBudgetRequest): JsonValue {
       };
     case 'POST /site-builder/intake':
       return { operation: request.operation, body: request.body };
+    case 'POST /campaigns/:campaignId/plan-drafts':
+      return {
+        operation: request.operation,
+        campaignId: request.campaignId,
+        body: request.body as JsonValue,
+      };
   }
 }
 
@@ -237,6 +249,13 @@ export function workspaceExecutionBudgetRequestScope(
         purpose: 'outreach.draft',
         subjectType: 'lead',
         subjectId: request.leadId,
+        requestSha256,
+      });
+    case 'POST /campaigns/:campaignId/plan-drafts':
+      return Object.freeze({
+        purpose: 'campaign.plan',
+        subjectType: 'campaign',
+        subjectId: request.campaignId,
         requestSha256,
       });
   }

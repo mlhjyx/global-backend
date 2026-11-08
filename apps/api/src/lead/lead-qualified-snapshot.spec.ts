@@ -22,15 +22,19 @@ import { blindContactKey } from '../compliance/pii-crypto';
  * 对旧代码 RED：旧 decide payload = {icpId, canonicalCompanyId, totalScore}，无 snapshot_version。
  */
 
-/** 从 cwd 向上找 monorepo 内的契约 schema（vitest 从 apps/api 跑；从仓根跑也能找到）。 */
+/**
+ * 从 cwd 向上找 monorepo 内的契约 schema（vitest 从 apps/api 跑；从仓根跑也能找到）。
+ * v2（M2 步 10）：代码现产 v2 快照（新增 candidate_batch_ref/evidence_digest 两个可选字段）。
+ * v1 文件保留给历史事件，不再用于当前产出的校验。
+ */
 function contractSchemaPath(): string {
   let dir = process.cwd();
   for (let i = 0; i < 6; i++) {
-    const p = path.join(dir, 'packages/contracts/events/payloads/lead-qualified.v1.schema.json');
+    const p = path.join(dir, 'packages/contracts/events/payloads/lead-qualified.v2.schema.json');
     if (fs.existsSync(p)) return p;
     dir = path.dirname(dir);
   }
-  throw new Error('lead-qualified.v1.schema.json not found — contract file missing');
+  throw new Error('lead-qualified.v2.schema.json not found — contract file missing');
 }
 
 function loadValidator() {
@@ -105,7 +109,7 @@ describe('buildLeadQualifiedSnapshot — 快照 v1（Consumer Test：契约 sche
     expect(validate.errors ?? []).toEqual([]);
     expect(ok).toBe(true);
 
-    expect(snap.snapshot_version).toBe(1);
+    expect(snap.snapshot_version).toBe(2);
     expect(snap.lead_id).toBe(LEAD_ID);
     expect(snap.workspace_id).toBe(WS);
     expect(snap.icp_id).toBe(ICP_ID);
@@ -411,7 +415,7 @@ describe('buildLeadQualifiedSnapshot — delivery 可选字段', () => {
       },
     ]);
     expect(snap.fit_reason_codes).toEqual(['FIT_MATCH']);
-    expect(snap.snapshot_version).toBe(1);
+    expect(snap.snapshot_version).toBe(2);
   });
 
   it('keeps older payloads (no delivery keys) valid — the contract never turns optional into required', () => {
@@ -590,10 +594,11 @@ describe('LeadService.decide(accept) — 同事务取数、payload=快照（对�
     expect(outboxCreate).toHaveBeenCalledTimes(1);
     const created = outboxCreate.mock.calls[0][0].data as Record<string, unknown>;
     expect(created.eventType).toBe('LeadQualified');
-    expect(created.schemaVersion).toBe(1);
+    // M2 步 10：快照升 v2（新增 candidate_batch_ref/evidence_digest 两个可选字段）。
+    expect(created.schemaVersion).toBe(2);
     const payload = created.payload as Record<string, unknown>;
     // 旧 payload = {icpId, canonicalCompanyId, totalScore} → snapshot_version undefined → RED
-    expect(payload.snapshot_version).toBe(1);
+    expect(payload.snapshot_version).toBe(2);
     // 收口⑥：decide 经 DataRightsService 把存储权利判定接进快照（此前恒 null）
     expect(payload.storage_rights_decision).toBe('ALLOW');
     const { validate } = loadValidator();
@@ -1202,5 +1207,51 @@ describe('LeadService.decide(accept) — 第五门与 qualify、导出同一张�
       expect(outboxCreate).toHaveBeenCalledTimes(1);
     }
     expect(findFirst).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('LeadQualified v2（M2 步 10）：候选批次引用与证据摘要', () => {
+  it('score_detail.candidateBatchRef → candidate_batch_ref；digest 为 64 位 hex 且对同一 lead 稳定', () => {
+    const lead = makeLead({
+      scoreDetail: { rules: [], ruleVersion: 'additive-6dim-v3', candidateBatchRef: 'qualify:run-1:2' },
+    });
+    const snap = buildLeadQualifiedSnapshot({ lead, company: makeCompany(), icpVersion: 3 });
+    expect(snap.candidate_batch_ref).toBe('qualify:run-1:2');
+    expect(snap.evidence_digest).toMatch(/^[0-9a-f]{64}$/);
+
+    const again = buildLeadQualifiedSnapshot({
+      lead: makeLead({
+        scoreDetail: { rules: [], ruleVersion: 'additive-6dim-v3', candidateBatchRef: 'qualify:run-1:2' },
+      }),
+      company: makeCompany(),
+      icpVersion: 3,
+    });
+    expect(again.evidence_digest).toBe(snap.evidence_digest);
+
+    // 资格证据变化 → digest 变化（下游可据此识别「提升时看到的证据版本」）。
+    const changed = buildLeadQualifiedSnapshot({
+      lead: makeLead({ totalScore: 0.91 }),
+      company: makeCompany(),
+      icpVersion: 3,
+    });
+    expect(changed.evidence_digest).not.toBe(snap.evidence_digest);
+  });
+
+  it('未评分（scoreDetail null）→ candidate_batch_ref null，v2 契约校验通过', () => {
+    const snap = buildLeadQualifiedSnapshot({
+      lead: makeLead({ scoreDetail: null }),
+      company: makeCompany(),
+      icpVersion: 3,
+    });
+    expect(snap.candidate_batch_ref).toBeNull();
+    const { validate } = loadValidator();
+    expect(validate(snap)).toBe(true);
+  });
+
+  it('v1 时代的旧载荷（缺两个 v2 字段）仍通过 v2 契约 —— 可选字段不收紧', () => {
+    const { validate } = loadValidator();
+    const snap = buildLeadQualifiedSnapshot({ lead: makeLead(), company: makeCompany(), icpVersion: 3 });
+    const { candidate_batch_ref: _batch, evidence_digest: _digest, ...legacy } = snap;
+    expect(validate(legacy)).toBe(true);
   });
 });

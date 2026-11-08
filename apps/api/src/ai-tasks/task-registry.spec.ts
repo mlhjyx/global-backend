@@ -131,6 +131,7 @@ describe('AI task registry model substitution opt-in (D14, 2026-10-11)', () => {
   // Only these acquisition tasks may run on a deployment-approved substitute
   // model (MODEL_IDENTITY_SUBSTITUTES); every other task keeps exact identity.
   const ACQUISITION_TASKS = [
+    'campaign.plan',
     'company_understanding.extract_claims',
     'company_understanding.extract_profile',
     'company_understanding.extract_offerings',

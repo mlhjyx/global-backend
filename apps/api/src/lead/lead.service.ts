@@ -13,6 +13,7 @@ import {
   classifyLeadQualified,
   computeValidUntil,
   LEAD_QUALIFIED_SCHEMA_VERSION,
+  leadCandidateBatchRef,
 } from './lead-qualified-snapshot';
 import { buildLeadPackage, type LeadPackage, type LeadPackageSanctionsStatus } from './lead-package';
 import { isOutcomeReasonCode, isRejectReasonCode, REJECT_REASON_CODES } from './reason-codes';
@@ -93,6 +94,74 @@ export class LeadService {
         },
       });
       return { accepted: true, eventId: ev.eventId };
+    });
+  }
+
+  /**
+   * QGO 步 10（候选 ≠ 线索）：机器候选**只读视图**，不复制表。候选行就是 qualify 产出的 lead，
+   * 语义由 queue/fitVerdict/scoredAt 与 score_detail.candidateBatchRef 组装：
+   * - `?runId=<qualify run id>` 只看该 run 的全部批次（batchRef 前缀 `qualify:<runId>:`）；
+   * - `?icpId=`/`?queue=` 收窄；按 scoredAt 倒序、id 升序游标分页（与 GET /leads 同分页器）。
+   * 人工接受后的线索仍可在候选视图看到——「线索」语义由 lead_decision accept 与 LeadQualified 事件承担。
+   */
+  listCandidates(
+    ctx: RequestContext,
+    opts: {
+      runId?: string;
+      icpId?: string;
+      queue?: string;
+      limit: number;
+      cursor?: string;
+    },
+  ) {
+    const runPrefix = opts.runId ? `qualify:${opts.runId}:` : undefined;
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      return collectProductReadPage({
+        limit: opts.limit,
+        cursor: opts.cursor,
+        fetchBatch: (cursor, take) =>
+          tx.lead.findMany({
+            where: {
+              ...(opts.icpId ? { icpId: opts.icpId } : {}),
+              ...(opts.queue ? { queue: opts.queue } : {}),
+              ...(runPrefix
+                ? { scoreDetail: { path: ['candidateBatchRef'], string_starts_with: runPrefix } }
+                : {}),
+            },
+            take,
+            ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+            orderBy: [{ scoredAt: { sort: 'desc', nulls: 'last' } }, { id: 'asc' }],
+          }),
+        projectProductRows: async (rows) => {
+          const companies = await tx.canonicalCompany.findMany({
+            where: { id: { in: rows.map((row) => row.canonicalCompanyId) } },
+            select: {
+              id: true,
+              name: true,
+              domain: true,
+              country: true,
+              industry: true,
+              employeeCount: true,
+            },
+          });
+          const byId = new Map(companies.map((company) => [company.id, company]));
+          return rows.map((lead) => ({
+            cursor: lead.id,
+            value: {
+              lead_id: lead.id,
+              icp_id: lead.icpId,
+              canonical_company_id: lead.canonicalCompanyId,
+              company: byId.get(lead.canonicalCompanyId) ?? null,
+              queue: lead.queue,
+              fit_verdict: lead.fitVerdict,
+              total_score: lead.totalScore,
+              scored_at: lead.scoredAt ? lead.scoredAt.toISOString() : null,
+              status: lead.status,
+              candidate_batch_ref: leadCandidateBatchRef(lead.scoreDetail),
+            },
+          }));
+        },
+      });
     });
   }
 
@@ -515,7 +584,7 @@ export class LeadService {
         // ENRICHED 交棒——正是本 guard 要堵的 Art.17 漏网。锁行是关闭该窗口的唯一手段（重读只窄化不关闭）。
         // 行不存在（FK 保证不会）→ 返 0 行、无锁，下方 findUnique 得 null 走 NOT_FOUND 守卫。
         await tx.$queryRaw`SELECT id FROM canonical_company WHERE id = ${lead.canonicalCompanyId}::uuid FOR UPDATE`;
-        // 收口③：payload = LeadQualified 快照 v1（decide 事务当刻取数的不可变副本，
+        // 收口③：payload = LeadQualified 快照 v2（decide 事务当刻取数的不可变副本，
         // 之后 lead/company 变化不回写）。契约 lead-qualified.v1.schema.json。
         // 加锁后再读——company.status 此刻反映 freeze 是否已提交的最新状态，快照+权利判定同基于此读。
         const company = await tx.canonicalCompany.findUnique({

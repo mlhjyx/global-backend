@@ -61,6 +61,7 @@ const SERVICE_PROTECTED_CONTROLLERS = [
 ] as const;
 
 const SERVICE_PROTECTED_CONTROLLER_FILES = new Set([
+  'campaign-plan/campaign-plan-internal.controller.ts',
   'platform-authority/platform-execution-technical-quote.controller.ts',
   'platform-authority/platform-target-lookup.controller.ts',
   'platform-authority/platform-revocation-http.controller.ts',
@@ -129,7 +130,10 @@ describe('controller authorization guard topology', () => {
       const source = readFileSync(absolute, 'utf8');
       if (SERVICE_PROTECTED_CONTROLLER_FILES.has(path)) {
         discoveredServiceProtected.add(path);
-        const requiredTokens = path === 'platform-authority/platform-revocation-http.controller.ts' ? [
+        const requiredTokens = path === 'campaign-plan/campaign-plan-internal.controller.ts' ? [
+          '@UseGuards(CampaignPlanServiceTokenGuard)',
+          'x-service-token',
+        ] : path === 'platform-authority/platform-revocation-http.controller.ts' ? [
           '@UseGuards(PlatformRevocationHttpGuard)', '@PlatformRevocationRecovery()', '@ApiConsumes("application/jose")', 'receivePlatformAuthorityRevocation_v1',
         ] : path === 'platform-authority/platform-target-lookup.controller.ts' ? [
           '@ApiBearerAuth(PLATFORM_AUTHORITY_TARGET_READER_SECURITY_SCHEME)',

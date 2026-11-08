@@ -1,5 +1,6 @@
 import {
   Optional,
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -52,6 +53,36 @@ const LEAD_SCHEMA = {
   properties: {
     scored: { type: 'boolean', description: 'total_score 非空：队列已由评分决定；false = 仍是 fit 门预置' },
     queueBasis: LEAD_QUEUE_BASIS_SCHEMA,
+  },
+};
+
+/** QGO 步 10：机器候选只读视图行（候选 ≠ 线索；candidate_batch_ref 指向 qualify 批次）。 */
+const LEAD_CANDIDATE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: [
+    'lead_id',
+    'icp_id',
+    'canonical_company_id',
+    'company',
+    'queue',
+    'fit_verdict',
+    'total_score',
+    'scored_at',
+    'status',
+    'candidate_batch_ref',
+  ],
+  properties: {
+    lead_id: { type: 'string', format: 'uuid' },
+    icp_id: { type: 'string', format: 'uuid' },
+    canonical_company_id: { type: 'string', format: 'uuid' },
+    company: { type: 'object', nullable: true, additionalProperties: true, description: '公司摘要（name/domain/country/industry/employeeCount）' },
+    queue: { type: 'string', description: '机器判定队列（recommended|needs_review|rejected|suppressed|sanctions_hold）' },
+    fit_verdict: { type: 'string', nullable: true },
+    total_score: { type: 'number', nullable: true },
+    scored_at: { type: 'string', nullable: true, format: 'date-time' },
+    status: { type: 'string' },
+    candidate_batch_ref: { type: 'string', nullable: true, description: '如 qualify:<runRef>:<batchNo>；未评分/旧数据为 null' },
   },
 };
 
@@ -309,6 +340,41 @@ export class LeadController {
   ) {
     const n = Math.min(Math.max(Number(limit) || 20, 1), 100);
     const r = await this.leads.list(ctx, { icpId, queue, status, limit: n, cursor,
+    });
+    return pageEnvelope(r.data, r);
+  }
+
+  @Get('lead-candidates')
+  @ApiOperation({
+    summary: '机器候选只读视图（候选≠线索；?runId=<qualify run> 或 ?icpId=&queue=，游标分页）',
+  })
+  @ApiQuery({ name: 'runId', required: false, description: 'qualify 工作流 run id；按批次引用前缀过滤' })
+  @ApiQuery({ name: 'icpId', required: false })
+  @ApiQuery({ name: 'queue', required: false })
+  @ApiQuery({ name: 'limit', required: false, schema: { type: 'integer', default: 50, maximum: 200 } })
+  @ApiQuery({ name: 'cursor', required: false })
+  @ApiPageEnvelope(LEAD_CANDIDATE_SCHEMA)
+  async listCandidates(
+    @Ctx() ctx: RequestContext,
+    @Query('runId') runId?: string,
+    @Query('icpId') icpId?: string,
+    @Query('queue') queue?: string,
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+  ) {
+    // runId 会拼进 JSON 批次引用前缀——只收安全的 run id 形状（Temporal run id 为 UUID）。
+    if (runId !== undefined && !/^[A-Za-z0-9-]{1,64}$/.test(runId)) {
+      throw new BadRequestException({
+        error: { code: 'VALIDATION_ERROR', message: 'runId 格式不合法' },
+      });
+    }
+    const n = Math.min(Math.max(Number(limit) || 50, 1), 200);
+    const r = await this.leads.listCandidates(ctx, {
+      runId,
+      icpId,
+      queue,
+      limit: n,
+      cursor,
     });
     return pageEnvelope(r.data, r);
   }

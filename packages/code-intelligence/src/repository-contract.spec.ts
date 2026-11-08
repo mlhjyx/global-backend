@@ -84,6 +84,8 @@ test("current repository keeps representative business and dynamic chains comple
     [
       "INTEGRATION_EVENTS",
       [
+        // M2 步 10：qualify 每批一条候选批次事件。
+        "CandidateBatchCompleted",
         "ClaimApproved",
         "ClaimExpired",
         "ClaimRevoked",
