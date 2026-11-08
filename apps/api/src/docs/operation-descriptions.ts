@@ -179,6 +179,8 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '对一个 ACTIVE ICP 的全部候选公司做六维评分，产出 Lead 与四个队列。异步，返回 202。',
   'GET /api/v1/leads':
     'Lead 列表，可按 ?icpId= 与 ?queue=recommended|needs_review|rejected|suppressed 过滤，按分数排序。',
+  'GET /api/v1/lead-candidates':
+    '机器候选只读视图（候选 ≠ 线索，不复制表）：候选行就是 qualify 产出的 lead，语义由 queue/fit_verdict/scored_at 与 score_detail.candidateBatchRef 组装。?runId=<qualify 工作流 run id> 只看该 run 的全部批次（批次引用前缀 qualify:<runId>:）；?icpId=/?queue= 收窄；按 scored_at 倒序、id 升序游标分页（limit 默认 50、上限 200）。runId 仅接受 [A-Za-z0-9-]{1,64}，否则 400。',
   'GET /api/v1/icps/{icpId}/lead-queues':
     '五个队列的计数（推荐 / 待确认 / 拒绝 / 禁联 / 制裁隔离）与队列依据（预置 / 评分 / 人工）。',
   'GET /api/v1/leads/{leadId}':
