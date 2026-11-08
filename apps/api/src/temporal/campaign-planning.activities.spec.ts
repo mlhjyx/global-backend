@@ -79,7 +79,7 @@ function bundle(
     seller: null,
     poolStats: { totalCompanies: 0, byCountry: [], byIndustry: [] },
     memoryBrief: { text: '', truncated: false },
-    limits: {},
+    limits: { maxReplans: 0 },
     ...overrides,
   };
 }
@@ -194,6 +194,8 @@ describe('generateCampaignPlan', () => {
       executionBudget: binding,
     });
 
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok') throw new Error('unreachable');
     expect(result.plan.schemaVersion).toBe('campaign-plan/v0');
     expect(controlPlane.reportJobFailure).not.toHaveBeenCalled();
     expect(executeMock).toHaveBeenCalledTimes(1);
@@ -210,24 +212,22 @@ describe('generateCampaignPlan', () => {
     });
   });
 
-  it('maps schema-invalid output after repair to CAMPAIGN_PLAN_INVALID with issues', async () => {
+  it('returns the issues to the workflow instead of failing the job (M2.2 replan loop)', async () => {
     executeMock.mockRejectedValue(new TaskOutputValidationError('invalid output'));
     const { activities, controlPlane } = deps();
 
-    await expect(
-      activities.generateCampaignPlan({
-        workspaceId: WORKSPACE_ID,
-        jobId: JOB_ID,
-        bundle: bundle(),
-        executionBudget: binding,
-      }),
-    ).rejects.toMatchObject({ type: 'CAMPAIGN_PLAN_INVALID' });
-    expect(controlPlane.reportJobFailure).toHaveBeenCalledWith(
-      expect.objectContaining({
-        error: 'CAMPAIGN_PLAN_INVALID',
-        issues: expect.any(Array),
-      }),
-    );
+    const result = await activities.generateCampaignPlan({
+      workspaceId: WORKSPACE_ID,
+      jobId: JOB_ID,
+      bundle: bundle(),
+      executionBudget: binding,
+    });
+
+    // 校验不通过交给工作流决定重规划或 NEEDS_HUMAN；活动层不自行回写 FAILED。
+    expect(result.status).toBe('issues');
+    if (result.status !== 'issues') throw new Error('unreachable');
+    expect(result.issues.length).toBeGreaterThan(0);
+    expect(controlPlane.reportJobFailure).not.toHaveBeenCalled();
   });
 
   it('installs the semantic ICP gate as the runtime task hard gate (repairable)', async () => {
@@ -269,7 +269,7 @@ describe('campaignPlanSemanticIssues', () => {
         ],
         budget: { capMicros: 900, currency: 'USD' },
       }),
-      bundle({ limits: { audienceSizeCap: 100, budgetCapMicros: 500 } }),
+      bundle({ limits: { audienceSizeCap: 100, budgetCapMicros: 500, maxReplans: 0 } }),
     );
     expect(issues.map((issue) => issue.path)).toEqual([
       'motions.0.icpIds.0',
@@ -385,6 +385,7 @@ describe('assembleCampaignPlanInputs', () => {
       byIndustry: [{ key: 'pumps', count: 12 }],
     });
     expect(result.limits).toEqual({
+      maxReplans: 0,
       audienceSizeCap: 300,
       budgetCapMicros: 5_000_000,
     });
