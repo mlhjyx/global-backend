@@ -1,7 +1,7 @@
 # M2 步 11 · 能力 3 受控邮件触达（email first）落地设计（2026-11-08）
 
-> 生命周期：`DRAFT`
-> 生命周期依据：按 §0.6 任务启动门产出，待产品负责人过目批准（含 D1② 发送域名/DNS 输入）后转 `APPROVED`；依据协调计划 §0.2 步 11（能力 3：email first；信箱上限/发送窗口/回复即停/退订/DNC）、§18.5 顺序（能力 3 前置=发送域名 + 能力 4/QGO）、§0.7 F2（ActionProposal→Policy→审批→ExecutionAuthorization→ToolBroker）、§16.3 与 OWNER-DECISION 系列（合规口径）。主会话起草（2026-11-08）。
+> 生命周期：`APPROVED`
+> 生命周期依据：按 §0.6 任务启动门产出；产品负责人 2026-11-08 已批准 D-11-a~f 按推荐值（D1② 域名/ DNS 稍后提供，11-5 真实验收前到位）；依据协调计划 §0.2 步 11（能力 3：email first；信箱上限/发送窗口/回复即停/退订/DNC）、§18.5 顺序（能力 3 前置=发送域名 + 能力 4/QGO）、§0.7 F2（ActionProposal→Policy→审批→ExecutionAuthorization→ToolBroker）、§16.3 与 OWNER-DECISION 系列（合规口径）。主会话起草（2026-11-08）。
 > 前置依赖：步 10（QGO/SAO，p5 实施中——外联对象=SAO 接受的商机联系人）；M2.0 审批与授权机制（已上线）；A2 SMTP 探测已上线（自有域发送身份已具备）。**硬前置：D1② 发送域名 + SPF/DKIM/DMARC（产品负责人提供）**。
 
 ## 1. 背景与目标
