@@ -3616,7 +3616,8 @@ export function createDiscoveryActivities(deps: {
         // usage_ledger 可查；B10 三账对齐时统一口径）。
         const [requestedEvent] = await tx.$queryRaw<Array<{ payload: unknown }>>`
           SELECT payload FROM outbox_event
-          WHERE aggregate_id = ${row.runId}::uuid
+          WHERE aggregate_id = ${row.runId}
+            AND workspace_id = ${row.workspaceId}::uuid
             AND event_type = 'DiscoveryRunRequested'
           ORDER BY id DESC
           LIMIT 1
