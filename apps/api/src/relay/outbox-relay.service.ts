@@ -48,6 +48,7 @@ import { completesWithin, settlesWithin } from "../runtime/bounded-settlement";
 import { seedSanctions } from "../sanctions/sanctions-seed";
 import { seedSkillCatalog } from "../skills/skill-catalog.seed";
 import { seedPackCatalog } from "../skills/packs/pack-catalog.seed";
+import { seedAgentCatalog } from "../agents/agent-catalog.seed";
 import {
   parseExecutionBudgetBinding,
   type ExecutionBudgetBinding,
@@ -250,6 +251,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     await seedSkillCatalog(this.db);
     // S1 Pack 目录 seed（同上；仅为尚无平台激活的包补默认激活）。
     await seedPackCatalog(this.db);
+    // M2 步 9b agent 注册表 seed（同上；目录行缺失即补建，不覆盖 ops 启停）。
+    await seedAgentCatalog(this.db);
     // webhook 配置不完整要**大声**：URL 配了但缺 secret / 非 https（非 localhost）→ sink 拒绝启用，
     // 推送通道既不建交付行也不派送——只报一次，不让运维以为推送在跑。
     if (process.env.SAAS_WEBHOOK_URL && !this.webhookEnabled()) {

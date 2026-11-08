@@ -21,6 +21,7 @@ import { createUnderstandingActivities } from "./understanding.activities";
 import { createCampaignPlanningActivities } from "./campaign-planning.activities";
 import { seedSkillCatalog } from "../skills/skill-catalog.seed";
 import { seedPackCatalog } from "../skills/packs/pack-catalog.seed";
+import { seedAgentCatalog } from "../agents/agent-catalog.seed";
 import { createDbSkillResolver } from "../skills/skill-resolver";
 import { PrismaSkillRegistryStore } from "../skills/skill-registry.store";
 import { createDiscoveryActivities } from "./discovery.activities";
@@ -440,6 +441,17 @@ async function main(): Promise<void> {
   } catch (error) {
     console.error("[worker] pack catalog seed failed:", error);
     await holdPlatformNotReady("PACK_CATALOG_SEED_UNAVAILABLE");
+  }
+
+  // M2 步 9b agent 注册表 seed（owner 写平台表；解析器 fail-closed，目录缺失即全员不可用 → 大声失败）。
+  try {
+    const agentSeed = await seedAgentCatalog(ownerDb);
+    console.log(
+      `[worker] agent catalog seed ok (${agentSeed.profiles} agents, ${agentSeed.inserted} new)`,
+    );
+  } catch (error) {
+    console.error("[worker] agent catalog seed failed:", error);
+    await holdPlatformNotReady("AGENT_CATALOG_SEED_UNAVAILABLE");
   }
 
   // Schedule provisioning is an independently authorized operator action.
