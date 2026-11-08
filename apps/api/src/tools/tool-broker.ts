@@ -755,7 +755,11 @@ export class ToolBroker implements ExecutionBroker {
             ctx,
             tool,
             "ERROR",
-            `artifact settlement failed: ${error instanceof Error ? error.name : "unknown"}`,
+            // code/message 是根因定位的唯一线索（2026-11-08 run aae4a06a 只打了
+            // GenericOperationArtifactError 名字，丢掉了 INVALID/STORAGE_UNAVAILABLE 之分）。
+            `artifact settlement failed: ${
+              error instanceof Error ? `${error.name}(${error.message})` : "unknown"
+            }`,
             0,
             now() - started,
           );

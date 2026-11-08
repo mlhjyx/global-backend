@@ -723,11 +723,11 @@ export class S3GenericOperationArtifactStore implements GenericOperationArtifact
       }
       throw storageError('GENERIC_OPERATION_ARTIFACT_PROMOTE_ACK_UNKNOWN');
     }
-    throw storageError(
-      preconditionFailed
-        ? 'GENERIC_OPERATION_ARTIFACT_INVALID'
-        : 'GENERIC_OPERATION_ARTIFACT_PROMOTE_ACK_UNKNOWN',
-    );
+    // Inspect did not see the object even though our own IfNoneMatch PUT lost the
+    // race: that is this writer's own concurrent create, not a contract mismatch
+    // (契约不符在上面的 `stored` 分支已被判 INVALID)。报告 ACK 未知，让持久层
+    // 按「结果未知」保守记账，而不是把并发风暴升级成 INVALID。
+    throw storageError('GENERIC_OPERATION_ARTIFACT_PROMOTE_ACK_UNKNOWN');
   }
 
   private async recoverStaging(input: StagedArtifact): Promise<StagedArtifact> {

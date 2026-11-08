@@ -325,6 +325,17 @@ describe('S3GenericOperationArtifactStore promote/inspect', () => {
     ]);
   });
 
+  it('treats a precondition race whose winner is not yet visible as ACK-unknown, not INVALID', async () => {
+    const client = new MemoryS3Client();
+    const { store: target } = store(client);
+    const staged = await stage(target, [bytes(7, 8)], 2);
+    client.finalPutFailure = 'precondition_uncommitted';
+    await expectStorageCode(
+      target.promote(staged),
+      'GENERIC_OPERATION_ARTIFACT_PROMOTE_ACK_UNKNOWN',
+    );
+  });
+
   it('returns a fixed ACK-unknown error when the digest-derived target is absent', async () => {
     const client = new MemoryS3Client();
     const { store: target } = store(client);
