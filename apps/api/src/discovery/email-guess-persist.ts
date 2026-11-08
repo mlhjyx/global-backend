@@ -6,6 +6,20 @@ import { companyMatchesSuppression, canonicalizeSuppressionValue, canonicalizeSu
 } from './suppression-value';
 import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
 import { contactSuppressionKeys } from './identity';
+import {
+  catchAllClassFromEmailVerdictDetail,
+  catchAllFromVerdictDetail,
+  confidenceForState,
+  eventVerdictFromEmailVerdict,
+  legacyCatchAllFromClass,
+  nextReverifyAtForState,
+  stateFromEmailVerdict,
+  verificationMethodFromVerdictDetail,
+} from './contact-point-verification-state';
+import {
+  buildVerificationRequestHash,
+  recordContactPointVerificationEvent,
+} from './contact-point-verification-event';
 
 /**
  * 邮箱猜测结果的落库（选项 B · P0.3）——把 {@link EmailGuesser} 猜到的决策人邮箱写进
@@ -33,26 +47,6 @@ export interface GuessWritePlan {
   catchAll: 'catch_all' | 'not_catch_all' | 'inconclusive' | 'unknown';
   /** A4：RCPT/域级探测真的跑过才记 smtp_rcpt；没触网（gate 不可用/发件人被拒/不可达）如实记 pattern_guess。 */
   verificationMethod: 'smtp_rcpt' | 'pattern_guess';
-}
-
-/** verdict.detail → 验证方式：只有产生 RCPT/域级结论的 detail 才算 smtp_rcpt。 */
-export function verificationMethodFromVerdictDetail(
-  detail: string | null | undefined,
-): GuessWritePlan['verificationMethod'] {
-  if (!detail) return 'pattern_guess';
-  return /^(smtp_accepted|catch_all_domain|catch_all_unproven|inconclusive)/u.test(detail)
-    ? 'smtp_rcpt'
-    : 'pattern_guess';
-}
-
-/** verdict.detail → catch-all 归类：与 decideEmailVerdict 的 detail 文案对齐。 */
-export function catchAllFromVerdictDetail(detail: string | null | undefined): GuessWritePlan['catchAll'] {
-  if (!detail) return 'unknown';
-  if (detail === 'catch_all_domain') return 'catch_all';
-  if (detail.startsWith('smtp_accepted')) return 'not_catch_all';
-  // 真实地址被接受但 catch-all 未证伪（'catch_all_unproven'）或 RCPT 结果不决（'inconclusive:<code>'）。
-  if (detail === 'catch_all_unproven' || detail.startsWith('inconclusive')) return 'inconclusive';
-  return 'unknown';
 }
 
 /** 猜测结果 → 落库计划。只 verified/unverified-with-best 才落；其余返回 null（不落）。 */
@@ -190,7 +184,28 @@ export async function persistGuessedEmail(
     return { persisted: false, reason: 'suppressed' };
   }
 
-  await tx.contactPoint.upsert({
+  // P1 四态：VALID(已证实) / CATCH_ALL_RISKY(catch_all 域或反枚举 provider) /
+  // UNKNOWN(其余未证实猜测)。口径与 verifyContactPoint 同一映射函数（stateFromEmailVerdict）：
+  // 反枚举（M365/GWS…）与 true catch-all 是同风险层、不同子类。
+  // 注意：猜测管线每次都是**完整重验**（学格式→SMTP 探）——VALID 重验成功刷新
+  // valid_since/verifiedAt 为本次尝试（与 transition 的 VALID→VALID 保留不同：那是重试，
+  // 这是新证据）；弱证据重观测按该管线既有纪律保守降级（status/verifiedAt 同样处理，不改写）。
+  const verificationState =
+    plan.pointStatus === 'VALID'
+      ? ('VALID' as const)
+      : (stateFromEmailVerdict('RISKY', plan.verificationDetail) ?? ('UNKNOWN' as const));
+  const stateFields = {
+    verificationState,
+    catchAllClass:
+      plan.pointStatus === 'VALID'
+        ? ('not_catch_all' as const)
+        : (catchAllClassFromEmailVerdictDetail(plan.verificationDetail) ?? ('unknown' as const)),
+    verificationProvider: plan.verificationMethod === 'smtp_rcpt' ? 'smtp_self' : 'email_guess',
+    confidence: confidenceForState(verificationState),
+    validSince: verificationState === 'VALID' ? args.now : null,
+    nextReverifyAt: nextReverifyAtForState(verificationState, args.now),
+  };
+  const point = await tx.contactPoint.upsert({
     where: {
       contactId_type_value: {
         contactId: args.contactId,
@@ -207,6 +222,7 @@ export async function persistGuessedEmail(
       emailType: 'personal' as const,
       verificationMethod: plan.verificationMethod,
       catchAll: plan.catchAll,
+      ...stateFields,
       ...(args.lawfulBasis ? { legalBasis: args.lawfulBasis.basis } : {}),
     },
     create: {
@@ -220,9 +236,43 @@ export async function persistGuessedEmail(
       sourceType: 'pattern_guess' as const,
       verificationMethod: plan.verificationMethod,
       catchAll: plan.catchAll,
+      ...stateFields,
       ...(args.lawfulBasis ? { legalBasis: args.lawfulBasis.basis } : {}),
     },
+    select: { id: true },
   });
+  // P1：猜测路径同样进事件账（G9 每一次验证尝试一行）——事件账是验证事实的唯一来源，
+  // 不能在「猜测 + SMTP 复验」这条产出 VALID 的主路径上留白。
+  const eventProvider = plan.verificationMethod === 'smtp_rcpt' ? 'smtp_self' : 'email_guess';
+  const computedEventVerdict = eventVerdictFromEmailVerdict(
+    plan.pointStatus === 'VALID' ? 'VALID' : 'RISKY',
+    plan.verificationDetail,
+  );
+  const verificationEvent = await recordContactPointVerificationEvent(tx, {
+    workspaceId: args.workspaceId,
+    contactPointId: point.id,
+    providerKey: eventProvider,
+    method: plan.verificationMethod,
+    verdict: computedEventVerdict,
+    detail: plan.verificationDetail,
+    catchAll: plan.catchAll,
+    catchAllClass: stateFields.catchAllClass,
+    score: stateFields.confidence,
+    costMicrousd: 0,
+    lawfulBasis: (args.lawfulBasis ?? null) as Record<string, unknown> | null,
+    actorId: 'email-guess:pipeline',
+    requestHash: buildVerificationRequestHash(
+      point.id,
+      eventProvider,
+      `${email}|${plan.verificationDetail ?? ''}|${args.now.toISOString()}`,
+    ),
+  });
+  if (verificationEvent.id) {
+    await tx.contactPoint.update({
+      where: { id: point.id },
+      data: { lastVerificationEventId: verificationEvent.id },
+    });
+  }
 
   await tx.fieldEvidence.create({
     data: {

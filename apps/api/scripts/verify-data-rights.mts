@@ -85,7 +85,7 @@ async function main(): Promise<void> {
   const EMAIL = 'klaus.beispiel@example.de';
   const contactId = await prisma.withWorkspace(WS, async (tx) => {
     const c = await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: canonical.id, fullName: NAME, dedupeKey: `klaus-${canonical.id}` } });
-    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: EMAIL } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', sourceType: 'operator', value: EMAIL } });
     return c.id;
   });
   const back = await prisma.withWorkspace(WS, (tx) => tx.canonicalContact.findUnique({ where: { id: contactId }, include: { contactPoints: true } }));

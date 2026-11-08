@@ -10,6 +10,7 @@ import { canonicalizeSuppressionValue, canonicalizeSuppressionValues,
 } from './suppression-value';
 import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
 import { assertProductDiscoveryProvenance, resolveEvidenceLicense } from './evidence-license';
+import { sourceTypeForContactObservation } from './contact-point-verification-state';
 
 /** field_evidence 的 email 值分级：职能邮箱 amber（ePrivacy），人名邮箱 red（GDPR Art.4）。 */
 function emailDataClass(email: string): 'amber' | 'red' {
@@ -176,6 +177,12 @@ export async function persistDiscoveredContacts(
       })),
     ];
     const sourceUrl = safeSourceUrl(c.sourcePage);
+    // P1：source_type 按 adapter/来源页映射（不再一刀切 provider）；source_type 自迁移
+    // 20261109120000 起 NOT NULL，所有 point 类型都必须携带。
+    const observationSourceType = sourceTypeForContactObservation({
+      adapterKey: args.adapterKey,
+      sourcePage: c.sourcePage ?? null,
+    });
     for (const p of points) {
       if (!p.value) continue;
       await tx.contactPoint.upsert({
@@ -189,10 +196,10 @@ export async function persistDiscoveredContacts(
           contactId,
           type: p.type,
           value: p.value,
+          sourceType: observationSourceType,
           ...(p.type === 'email'
             ? {
                 emailType: classifyContactEmail(p.value).emailType,
-                sourceType: 'provider' as const,
                 verificationMethod: 'provider_reported' as const,
                 ...(args.lawfulBasis ? { legalBasis: args.lawfulBasis.basis } : {}),
                 ...(sourceUrl ? { sourceUrl } : {}),

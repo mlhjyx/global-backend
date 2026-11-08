@@ -478,6 +478,12 @@ describe('Suppression governance', () => {
       },
       fieldEvidence: { create: vi.fn(async () => ({})) },
       personalDataAccessAudit: { create: vi.fn(async () => ({})) },
+      contactPointVerificationEvent: {
+        findUnique: vi.fn(async () => null),
+        count: vi.fn(async () => 0),
+        create: vi.fn(async () => ({ id: 'event-1' })),
+      },
+      $executeRawUnsafe: vi.fn(async () => 1),
     };
     const prisma = {
       withWorkspace: async (_workspaceId: string, fn: (scoped: typeof tx) => Promise<unknown>) => fn(tx),
@@ -539,6 +545,12 @@ describe('Suppression governance', () => {
       },
       fieldEvidence: { create: vi.fn(async () => ({})) },
       personalDataAccessAudit: { create: vi.fn(async () => ({})) },
+      contactPointVerificationEvent: {
+        findUnique: vi.fn(async () => null),
+        count: vi.fn(async () => 0),
+        create: vi.fn(async () => ({ id: 'event-2' })),
+      },
+      $executeRawUnsafe: vi.fn(async () => 1),
     };
     const prisma = {
       withWorkspace: async (_workspaceId: string, fn: (scoped: typeof tx) => Promise<unknown>) => fn(tx),
