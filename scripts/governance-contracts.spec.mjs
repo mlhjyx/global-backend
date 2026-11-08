@@ -28,6 +28,8 @@ import "./verify-platform-authority-policy-import.spec.mjs";
 import "./execution-authority-policy.spec.mjs";
 import "./execution-authority-wire-dispatch.spec.mjs";
 import "./governance-changelog-fragments.spec.mjs";
+import "./metrics/capture-recapture.test.mjs";
+import "./metrics/lib/psql.test.mjs";
 
 import {
   renderProviderRegistry,
