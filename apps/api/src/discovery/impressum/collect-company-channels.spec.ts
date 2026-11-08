@@ -149,10 +149,10 @@ describe('collectCompanyChannels', () => {
   it('单段缩写邮箱（ds@/mm@）不冒认公司渠道，词形态（impressum@）保留为 other', () => {
     const channels = collectCompanyChannels({
       domain: 'acme.de',
-      pages: [{ url: 'https://acme.de/impressum', kind: 'impressum', text: 'ds@acme.de mm@acme.de impressum@acme.de' }],
+      pages: [{ url: 'https://acme.de/impressum', kind: 'impressum', text: 'ds@acme.de mm@acme.de impressum@acme.de hr@acme.de' }],
     });
     const emails = channels.filter((c) => c.channel === 'email');
-    expect(emails.map((c) => c.value)).toEqual(['impressum@acme.de']);
+    expect(emails.map((c) => c.value)).toEqual(['impressum@acme.de', 'hr@acme.de']);
     expect(emails[0]!.emailType).toBe('other');
   });
 

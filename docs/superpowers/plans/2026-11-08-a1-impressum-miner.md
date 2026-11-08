@@ -31,7 +31,7 @@
    - 文本混淆解码：`[at]/(at)/{at} [dot]/(dot)/{dot}`、`name (at) domain . de` 等常见形态；
    - 电话：`tel:` 与 +49/0xxx 语境的号码归一（去空格/括号/斜杠，保留前导 +；`(0)` 区号前缀归一——`+49 (0)89 …` → `+4989…`）——A4 评审 L7 指出的幂等归一在本层做。
 5. **分类与分级**：邮箱一律过 `classifyContactEmail`；`role/generic_sales/procurement/management/finance/support/other` 直接作公司级渠道（amber）；判为 `personal` 的**不进公司层**，交既有 person 路径（contact_point）——守住 A4 的闸门。电话号码/表单 URL green。
-   - **同组织域**：本站域（含子域）直接认可；Impressum 法定的联系邮箱常落在品牌/集团域（sanotact-group.de → info@sanotact.de、tsurumi.de → tsurumi.eu），按「非通用词根相交」认可；第三方（建站公司/gmail）词根不相交仍丢弃。该放宽只作用于公司级渠道层，contact 路径（buildPublicContacts）的「仅本站域」纪律不变。
+   - **同组织域**：本站域（含子域）直接认可；Impressum 法定的联系邮箱常落在品牌/集团域（sanotact-group.de → info@sanotact.de、tsurumi.de → tsurumi.eu），按「非通用词根**完全相等**」认可（前缀启发式与冒充域在审查中被否决，见 §7）；第三方（建站公司/gmail）仍丢弃。该放宽只作用于公司级渠道层，contact 路径（buildPublicContacts）的「仅本站域」纪律不变。
    - **HTML 实体解码**：`info&#64;acme.de` / `&#105;nfo@…` 等防爬编码在 mailto 与可见文本两处都先解码再抽取。
 6. **来源留痕**：每条渠道记 source_type（impressum/contact_page/homepage）、source_url（所在页）、robots_status=allowed、tos_status=unknown；verification_method 记 `pattern_guess`（未做 SMTP）或 `import`。
 
@@ -41,8 +41,8 @@
 
 ## 5. 测试与验收
 
-- 纯函数单测：cfemail 解码（真实样本）、JSON-LD 抽取（Person 子树跳过）、混淆解码矩阵、电话归一（国别补全/主干 0）、法律页候选发现（链接评分+固定路径），共 36 例；
-- 装配测试：装配器 8 例 + provider 接线 1 例（mock crawl4ai.render/fetch → companyChannels、personal 剔除）+ core 落库 2 例（suppression email/domain 过滤、无渠道不写表）；
+- 纯函数单测：cfemail 解码（真实样本）、JSON-LD 抽取（Person 子树跳过）、混淆解码矩阵、电话归一（国别补全/主干 0）、法律页候选发现（链接评分+固定路径），共 43 例（含审查修订后的鲁棒性用例）；
+- 装配测试：装配器 11 例 + provider 接线 1 例（mock crawl4ai.render/fetch → companyChannels、personal 剔除）+ core 落库 2 例（suppression email/domain 过滤、无渠道不写表）；
 - 真库契约：company_contact_channel 已由 A4 的 postgres spec 覆盖；
 - **DoD 证据**：`apps/api/scripts/impressum-evidence.mts`（可复现抽样：`md5(domain)` 排序；每次抓取前 robots 先检；直接复用产品抽取/装配代码），产出 `docs/evidence/acquisition/impressum-miner-<date>.json`（summary 命中率 + 逐域明细）。
 

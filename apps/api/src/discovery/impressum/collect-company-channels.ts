@@ -62,6 +62,9 @@ export function safePageUrl(raw: string): string | undefined {
   }
 }
 
+/** 判定为 other 但明确是职能词的短 local（<4 字母）。 */
+const SHORT_FUNCTION_LOCALS = new Set(['hr', 'dpo', 'it', 'pr', 'qs', 'ek', 'gf']);
+
 const MAILTO_RE = /mailto:([^"'>\s]+)/giu;
 const TEL_HREF_RE = /href=["']tel:([^"']+)["']/giu;
 const CFEMAIL_RE = /data-cfemail=["']([0-9a-f]+)["']/giu;
@@ -98,8 +101,9 @@ function domainTokens(host: string): Set<string> {
 
 /**
  * 邮箱是否属于该公司：本站域（含子域）直接认可；**同组织域**（sanotact-group.de 的 Impressum
- * 发布 info@sanotact.de）按「非通用词根相交」认可——Impressum 法定的联系邮箱常落在品牌/集团旧域。
- * 站外第三方（建站公司 webagentur.de、gmail 等）词根不相交，仍被丢弃。
+ * 发布 info@sanotact.de）按「非通用词根**完全相等**」认可——Impressum 法定的联系邮箱常落在
+ * 品牌/集团旧域。前缀启发式会误收第三方（peters-webdesign.de ↔ peter.de），已移除；冒充形态
+ *（peter.de.evil.com）一律拒绝。站外第三方（webagentur.de、gmail 等）仍被丢弃。
  */
 function isCompanyDomain(email: string, domain: string): boolean {
   const at = email.lastIndexOf('@');
@@ -132,7 +136,8 @@ export function collectCompanyChannels(args: CollectCompanyChannelsArgs): Compan
     // 词形态（impressum@/datenschutz@）保留。联系人层对同地址仍按 red 保守处理。
     if (emailType === 'other') {
       const local = value.slice(0, value.lastIndexOf('@')).split('+')[0] ?? '';
-      if (!/^[a-z]{4,}$/u.test(local)) return;
+      // 明确的短职能词（hr@/dpo@/it@/pr@…）保留；其余短 local（ds@/mm@ 缩写）不冒认。
+      if (!SHORT_FUNCTION_LOCALS.has(local) && !/^[a-z]{4,}$/u.test(local)) return;
     }
     const key = `email:${value}`;
     if (seen.has(key) || out.length >= cap) return;

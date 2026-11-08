@@ -91,7 +91,6 @@ export function legalPageCandidates(
   );
   const out: LegalPageCandidate[] = [];
   const seenKeys = new Set<string>();
-  const kindsSeen = new Set<LegalPageKind>();
   /** 首页链接已覆盖的 kind——固定路径只为缺失的 kind 追加（含全部变体，交给页数预算收敛）。 */
   const linkKinds = new Set<LegalPageKind>();
   const push = (candidate: LegalPageCandidate): boolean => {
@@ -99,7 +98,6 @@ export function legalPageCandidates(
     if (seenKeys.has(key)) return false;
     if (out.length >= maxPages) return false;
     seenKeys.add(key);
-    kindsSeen.add(candidate.kind);
     out.push(candidate);
     return true;
   };
