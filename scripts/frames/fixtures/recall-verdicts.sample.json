@@ -1,0 +1,8 @@
+{
+  "note": "miss 归因裁决样例：覆盖 2 个未命中实体；HRB 99999 不在 frame 内应被忽略",
+  "verdicts": [
+    { "scheme": "de_hrb", "regNumber": "HRB 10004", "missReason": "DOMAIN_NOT_FOUND" },
+    { "scheme": "de_hrb", "regNumber": "HRB 20002", "missReason": "PIPELINE_MISS" },
+    { "scheme": "de_hrb", "regNumber": "HRB 99999", "missReason": "NO_FRAME_COVERAGE" }
+  ]
+}

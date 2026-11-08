@@ -1,0 +1,34 @@
+{
+  "schemaVersion": "registry-frames-catalog/v1",
+  "note": "帧目录：frames/ 下每个帧配置都必须登记在此（frame-catalog.spec 强制），fixture 路径相对本目录。",
+  "frames": [
+    {
+      "frameKey": "gb_companies_house",
+      "config": "gb-companies-house.json",
+      "fixture": "../fixtures/gb-companies-house.sample.csv",
+      "expectedRows": 4,
+      "expectedSchemes": ["gb_crn"]
+    },
+    {
+      "frameKey": "gleif_leis",
+      "config": "gleif.json",
+      "fixture": "../fixtures/gleif.sample.json",
+      "expectedRows": 3,
+      "expectedSchemes": ["lei"]
+    },
+    {
+      "frameKey": "fr_sirene",
+      "config": "fr-sirene.json",
+      "fixture": "../fixtures/fr-sirene.sample.csv",
+      "expectedRows": 3,
+      "expectedSchemes": ["fr_siren"]
+    },
+    {
+      "frameKey": "us_sam",
+      "config": "us-sam.json",
+      "fixture": "../fixtures/us-sam.sample.json",
+      "expectedRows": 3,
+      "expectedSchemes": ["us_uei"]
+    }
+  ]
+}
