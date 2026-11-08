@@ -5112,6 +5112,116 @@
         "description": "服务间：只读返回 fence-ACK 的公钥族（JWKS），供对端验证确认签名；只含公钥。"
       }
     },
+    "/api/v1/internal/campaign-plans/draft": {
+      "post": {
+        "description": "供 gain-saas 控制面调用：校验并消费一次性 execution-budget Grant（purpose campaign.plan），启动 campaignPlanningWorkflow 后在回调中把原始计划 JSON 交付 gain-saas 落 DRAFT revision。本端点不执行任何外部动作，也不在本侧计算 plan_hash。",
+        "operationId": "requestCampaignPlanDraft",
+        "parameters": [
+          {
+            "name": "x-execution-budget-grant",
+            "required": true,
+            "in": "header",
+            "description": "SaaS 签发的一次性 workspace 执行预算 Grant（purpose campaign.plan）",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "description": "gain-saas 控制面服务令牌（env CAMPAIGN_PLAN_INTERNAL_SERVICE_TOKEN）",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "workspaceId",
+                  "campaignId",
+                  "jobId",
+                  "objective"
+                ],
+                "properties": {
+                  "workspaceId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "campaignId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "jobId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "objective": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "icpId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "audienceSizeCap": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000
+                  },
+                  "budgetCapMicros": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "jobId"
+                      ],
+                      "properties": {
+                        "jobId": {
+                          "type": "string",
+                          "format": "uuid"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "服务身份触发一次受限 Campaign 规划（异步 job，gain-saas 控制面专用）",
+        "tags": [
+          "Campaign"
+        ]
+      }
+    },
     "/api/v1/companies": {
       "post": {
         "description": "支持 Idempotency-Key 头：同 key 重放返回首次结果，不重复创建（PRD 11.16）。",
@@ -10582,6 +10692,168 @@
           "acquisition:read"
         ],
         "description": "Lead 列表，可按 ?icpId= 与 ?queue=recommended|needs_review|rejected|suppressed 过滤，按分数排序。"
+      }
+    },
+    "/api/v1/lead-candidates": {
+      "get": {
+        "operationId": "LeadController_listCandidates_v1",
+        "parameters": [
+          {
+            "name": "runId",
+            "required": false,
+            "in": "query",
+            "description": "qualify 工作流 run id；按批次引用前缀过滤",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "icpId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "queue",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "page"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "lead_id",
+                          "icp_id",
+                          "canonical_company_id",
+                          "company",
+                          "queue",
+                          "fit_verdict",
+                          "total_score",
+                          "scored_at",
+                          "status",
+                          "candidate_batch_ref"
+                        ],
+                        "properties": {
+                          "lead_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "icp_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "canonical_company_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "company": {
+                            "type": "object",
+                            "nullable": true,
+                            "additionalProperties": true,
+                            "description": "公司摘要（name/domain/country/industry/employeeCount）"
+                          },
+                          "queue": {
+                            "type": "string",
+                            "description": "机器判定队列（recommended|needs_review|rejected|suppressed|sanctions_hold）"
+                          },
+                          "fit_verdict": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "total_score": {
+                            "type": "number",
+                            "nullable": true
+                          },
+                          "scored_at": {
+                            "type": "string",
+                            "nullable": true,
+                            "format": "date-time"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "candidate_batch_ref": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "如 qualify:<runRef>:<batchNo>；未评分/旧数据为 null"
+                          }
+                        }
+                      }
+                    },
+                    "page": {
+                      "type": "object",
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
+                      "properties": {
+                        "next_cursor": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "下一页游标；null = 没有更多"
+                        },
+                        "has_more": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "机器候选只读视图（候选≠线索；?runId=<qualify run> 或 ?icpId=&queue=，游标分页）",
+        "tags": [
+          "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "机器候选只读视图（候选 ≠ 线索，不复制表）：候选行就是 qualify 产出的 lead，语义由 queue/fit_verdict/scored_at 与 score_detail.candidateBatchRef 组装。?runId=<qualify 工作流 run id> 只看该 run 的全部批次（批次引用前缀 qualify:<runId>:）；?icpId=/?queue= 收窄；按 scored_at 倒序、id 升序游标分页（limit 默认 50、上限 200）。runId 仅接受 [A-Za-z0-9-]{1,64}，否则 400。"
       }
     },
     "/api/v1/icps/{icpId}/lead-queues": {
@@ -19424,6 +19696,10 @@
       "description": "平台内部执行预算包络（服务间调用，普通前端不调用）"
     },
     {
+      "name": "Campaign",
+      "description": "Campaign 控制面内部入口（服务间调用，普通前端不调用）"
+    },
+    {
       "name": "PlatformAuthority",
       "description": "平台权威通道（服务间调用，普通前端不调用）"
     },
@@ -19486,7 +19762,8 @@
               "POST /contact-points/:pointId/verify",
               "POST /leads/:leadId/outreach-drafts",
               "POST /companies/:companyId/understanding/retry",
-              "POST /site-builder/intake"
+              "POST /site-builder/intake",
+              "POST /campaigns/:campaignId/plan-drafts"
             ]
           },
           "workspaceId": {
@@ -19501,7 +19778,8 @@
               "icp.query_plan",
               "discovery.run",
               "contact.verify",
-              "outreach.draft"
+              "outreach.draft",
+              "campaign.plan"
             ]
           },
           "subjectType": {
@@ -19511,7 +19789,8 @@
               "icp",
               "discovery_run",
               "contact_point",
-              "lead"
+              "lead",
+              "campaign"
             ]
           },
           "subjectId": {
@@ -21896,7 +22175,8 @@
       "name": "平台间通道",
       "tags": [
         "ExecutionBudget",
-        "PlatformAuthority"
+        "PlatformAuthority",
+        "Campaign"
       ]
     },
     {

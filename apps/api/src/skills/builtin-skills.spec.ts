@@ -18,6 +18,7 @@ const REPO_ROOT = join(import.meta.dirname, "../../../..");
 const THIRD_PARTY_CATALOG = join(REPO_ROOT, "docs/governance/third-party-skills/THIRD_PARTY_SKILLS.json");
 
 const EXPECTED_SKILL_KEYS = [
+  "campaign.plan",
   "company.understanding.extract",
   "company.understanding.extract_offerings",
   "compliance.sanctions_screen",

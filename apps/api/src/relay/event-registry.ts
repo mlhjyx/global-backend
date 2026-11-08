@@ -20,6 +20,7 @@ export const INTERNAL_COMMANDS: ReadonlySet<string> = new Set([
 export const INTEGRATION_EVENTS: ReadonlySet<string> = new Set([
   'LeadQualified',
   'LeadsScored',
+  'CandidateBatchCompleted', // M2 步 10：qualify 每批一条（候选 vs 线索分离；运营归因消费）
   'DiscoveryRunCompleted',
   'ICPActivated',
   'ClaimApproved',

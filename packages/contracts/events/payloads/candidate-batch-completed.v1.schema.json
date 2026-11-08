@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.global/events/payloads/candidate-batch-completed.v1.schema.json",
+  "title": "CandidateBatchCompletedV1",
+  "description": "CandidateBatchCompleted payload v1 (M2 step 10, 2026-11-08): one event per qualify batch (scoreCandidates page) per run. Machine candidates only — company refs and verdict distribution, no personal data. Consumers dedupe on the envelope event_id; the batch_ref is the stable business key for the batch.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_ref", "icp_id", "batch_no", "batch_ref", "scored", "queues", "candidates"],
+  "properties": {
+    "run_ref": {
+      "type": ["string", "null"],
+      "description": "Temporal run id of the qualify workflow execution that produced this batch; null when the activity was invoked outside a workflow (tests/tools)."
+    },
+    "icp_id": { "type": "string", "format": "uuid" },
+    "batch_no": { "type": "integer", "minimum": 0, "description": "Zero-based batch index within the run." },
+    "batch_ref": {
+      "type": "string",
+      "pattern": "^qualify:[A-Za-z0-9-]+:[0-9]+$",
+      "description": "Stable batch key `qualify:<run_ref|direct>:<batch_no>`; also written to each lead's score_detail.candidateBatchRef."
+    },
+    "scored": { "type": "integer", "minimum": 0, "description": "Candidates scored in this batch (companies quarantined by synthetic provenance are excluded)." },
+    "queues": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["recommended", "needs_review", "rejected", "suppressed", "sanctions_hold"],
+      "description": "Per-batch verdict distribution.",
+      "properties": {
+        "recommended": { "type": "integer", "minimum": 0 },
+        "needs_review": { "type": "integer", "minimum": 0 },
+        "rejected": { "type": "integer", "minimum": 0 },
+        "suppressed": { "type": "integer", "minimum": 0 },
+        "sanctions_hold": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "candidates": {
+      "type": "array",
+      "description": "Machine candidates in this batch (refs + machine verdict only; no PII).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["lead_id", "canonical_company_id", "queue", "fit_verdict", "total_score"],
+        "properties": {
+          "lead_id": { "type": ["string", "null"], "format": "uuid", "description": "null only when the upsert did not return an id (defensive)." },
+          "canonical_company_id": { "type": "string", "format": "uuid" },
+          "queue": { "type": "string", "enum": ["recommended", "needs_review", "rejected", "suppressed", "sanctions_hold"] },
+          "fit_verdict": { "type": ["string", "null"], "examples": ["match", "weak", "mismatch"] },
+          "total_score": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+        }
+      }
+    }
+  }
+}
