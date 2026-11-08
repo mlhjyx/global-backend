@@ -33,6 +33,12 @@ export class CampaignPlanLauncher {
       await this.temporal.client.workflow.start('campaignPlanningWorkflow', {
         taskQueue: UNDERSTANDING_TASK_QUEUE,
         workflowId: `campaign-plan-${input.jobId}`,
+        // ch08 §3.1.4：规划是「单次推理 + 至多两轮重规划」，60 分钟是宽上限。没有总时限时，
+        // worker 丢失 / workflow task 卡住会让 job 永久 PENDING/RUNNING，同 campaign 再也无法发起。
+        // 超时由 Temporal 终止执行；SaaS 侧 stale reaper（75 分钟 = 60 + 15 分钟余量）是第二道兜底。
+        workflowExecutionTimeout: '60 minutes',
+        workflowRunTimeout: '50 minutes',
+        workflowTaskTimeout: '30 seconds',
         args: [
           {
             ...input,

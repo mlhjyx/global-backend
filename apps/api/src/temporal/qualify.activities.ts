@@ -65,6 +65,15 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
       // DISABLED 时空索引→screen 恒 not_screened→no-op，不阻断）。
       await deps.sanctionsScreening?.rebuildIndex().catch(() => undefined);
 
+      // ch08 §3.1.12 制裁陈旧门：名单年龄超阈值时不得自动放行。
+      //  - stale（>SANCTIONS_LIST_MAX_AGE_DAYS 或任一源 FAILED）：不产 recommended（降 needs_review）；
+      //  - blocked（>SANCTIONS_LIST_BLOCK_AGE_DAYS 或源从未刷新）：本批全部 sanctioned_hold（禁联优先）。
+      // 无 ENABLED 源 → active=false，维持现行 fail-open 行为。
+      const freshness =
+        typeof deps.sanctionsScreening?.listFreshness === 'function'
+          ? await deps.sanctionsScreening.listFreshness()
+          : undefined;
+
       let cursor: string | undefined;
       let scored = 0;
       let batchNo = 0;
@@ -211,7 +220,14 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
               // Reachability 硬底决定（此前 match 直接盖整个队列 → 推荐里大半联系不上）。
               { authoritativeFit, sanctionsHold },
             );
-            const queue = result.queue;
+            // ch08 §3.1.12：陈旧名单不得自动放行——熔断档全进 sanctions_hold（禁联优先级更高，保留，
+            // suppressed 是更强的法律状态）；降级档不得进 recommended。
+            let queue = result.queue;
+            if (freshness?.blocked && queue !== 'suppressed') {
+              queue = 'sanctions_hold';
+            } else if (freshness?.stale && queue === 'recommended') {
+              queue = 'needs_review';
+            }
             const status =
               queue === 'suppressed' ? 'SUPPRESSED' : queue === 'rejected' ? 'REJECTED' : 'REVIEW';
             // ruleVersion：这次计分用的规则版本。LeadQualified 快照读它，而不是决策时的代码常量——
@@ -221,6 +237,13 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
               fitVerdict: authoritativeFit,
               ruleVersion: QUALIFICATION_RULE_VERSION,
               candidateBatchRef: batchRef,
+              // ch08 §3.1.12：名单新鲜度审计痕迹（仅筛查门启用时记录）。
+              ...(freshness?.active
+                ? {
+                    sanctionsListStale: freshness.stale,
+                    sanctionsListAgeDays: freshness.ageDays,
+                  }
+                : {}),
             };
             // 人工已裁决（QUALIFIED/REJECTED via decision/CONTACTED+）的 Lead 不被重评覆盖状态。
             // 评分自己也写 REJECTED，所以 REJECTED 只在有 reject 裁决时才算人工终态；评分写的 REJECTED
@@ -270,6 +293,10 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                 topScore: screenMatches[0]?.score ?? null,
                 reviewState: screenReviewState,
                 listVersions: screenListVersions as unknown as Prisma.InputJsonValue,
+                // ch08 §3.1.12：结果级新鲜度（运营台/审计可见；陈旧时的命中不得被当作已清）。
+                listStale: freshness?.stale ?? false,
+                listAgeDays: freshness?.ageDays ?? null,
+                listSnapshot: screenListVersions as unknown as Prisma.InputJsonValue,
                 screenedAt: new Date(),
               };
               // upsert（复审 M1）：唯一键 (workspace, company) 原子收敛，并发多 ICP 不产双行/不遮蔽人工清白。
@@ -315,8 +342,8 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
         });
         if (done) break;
       }
-      await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-        tx.outboxEvent.create({
+      await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        await tx.outboxEvent.create({
           data: {
             workspaceId: args.workspaceId,
             eventType: 'LeadsScored',
@@ -324,8 +351,29 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
             aggregateId: args.icpId,
             payload: { scored, queues } as Prisma.InputJsonValue,
           },
-        }),
-      );
+        });
+        // ch08 §3.1.12：名单陈旧 → 每次 qualify run 一条告警事件（SaaS 侧站内通知 + 运营台
+        // 由 sanctions_hold 队列计数兜底；本事件供 ops/审计看到「为什么全批被 hold」）。
+        if (freshness?.stale) {
+          await tx.outboxEvent.create({
+            data: {
+              workspaceId: args.workspaceId,
+              eventType: 'SanctionsListStale',
+              aggregateType: 'ICP',
+              aggregateId: args.icpId,
+              payload: {
+                icpId: args.icpId,
+                reason: freshness.reason,
+                ageDays: freshness.ageDays,
+                maxAgeDays: freshness.maxAgeDays,
+                blockAgeDays: freshness.blockAgeDays,
+                blocked: freshness.blocked,
+                sources: freshness.sources,
+              } as unknown as Prisma.InputJsonValue,
+            },
+          });
+        }
+      });
       return { scored, queues };
     },
   };

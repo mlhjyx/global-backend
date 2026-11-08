@@ -19,6 +19,7 @@ vi.mock('../discovery/fit-judge', async (importOriginal) => {
 });
 
 import { createRun2Activities } from './discovery.run2.activities';
+import { ExternalActionDeniedError } from '../model-gateway/providers/provider-output-error';
 
 const WORKSPACE_ID = '11111111-1111-4111-8111-111111111111';
 const RUN_ID = '22222222-2222-4222-8222-222222222222';
@@ -61,8 +62,9 @@ function makePrisma(state: {
   jobs?: Array<Record<string, unknown>>;
   leads?: Array<Record<string, unknown>>;
   mayUse?: (companyId: string) => boolean;
-  leads?: Array<Record<string, unknown>>;
   run?: Record<string, unknown>;
+  /** 可变禁联事实：测试可在预检之后追加，模拟 TOCTOU 窗口。 */
+  suppressions?: Array<{ type: string; value: string }>;
 }) {
   const jobUpserts: Array<{ where: unknown; create: Record<string, unknown> }> = [];
   const jobUpdates: Array<{ where: { id: string }; data: Record<string, unknown> }> = [];
@@ -130,7 +132,7 @@ function makePrisma(state: {
     },
     // companyMayUseExternalProcessing reads suppression records + company status.
     canonicalContact: { findUnique: vi.fn(async () => null) },
-    suppressionRecord: { findMany: vi.fn(async () => []) },
+    suppressionRecord: { findMany: vi.fn(async () => state.suppressions ?? []) },
     suppressionDecision: { findFirst: vi.fn(async () => null) },
   };
   const prisma = {
@@ -520,5 +522,105 @@ describe('M2 步 9b 资格判定员角色化：fit.judge 轨迹 + agent 回合�
       reasonCode: 'SKILL_PLATFORM_DISABLED',
     });
     expect(mocks.execute).not.toHaveBeenCalled();
+  });
+});
+
+describe('ch08 §3.1.5 quickJudge 批量 wire-time 出网闸门', () => {
+  it('revalidates every company at wire time; a suppression landing after prefilter downgrades to per-company and skips the denied one', async () => {
+    const state = {
+      jobs: [
+        { id: 'j1', canonicalCompanyId: 'c1' },
+        { id: 'j2', canonicalCompanyId: 'c2' },
+      ],
+      companies: [company('c1'), company('c2')],
+      suppressions: [] as Array<{ type: string; value: string }>,
+    };
+    const { activities, jobUpdates } = makeActivities(state);
+
+    mocks.execute.mockImplementation(
+      async (
+        _skills: unknown,
+        _gateway: unknown,
+        _key: unknown,
+        _input: unknown,
+        opts: { authorizeExternalAction?: () => Promise<boolean> },
+      ) => {
+        // 预检通过之后、物理 wire 之前新增一条域名禁联（TOCTOU 窗口）。
+        state.suppressions.push({ type: 'domain', value: 'c1.example' });
+        const allowed = await opts.authorizeExternalAction!();
+        if (!allowed) throw new ExternalActionDeniedError();
+        return {
+          data: {
+            judgments: [
+              { index: 0, verdict: 'match', reason: 'distributor' },
+              { index: 1, verdict: 'weak', reason: 'unclear' },
+            ],
+          },
+        };
+      },
+    );
+    mocks.judgeFitCompany.mockImplementation(
+      async (
+        _gateway: unknown,
+        _workspaceId: unknown,
+        _brief: unknown,
+        _company: unknown,
+        opts: { authorizeExternalAction?: () => Promise<boolean> },
+      ) => {
+        if (!(await opts.authorizeExternalAction!())) throw new ExternalActionDeniedError();
+        return { verdict: 'match' };
+      },
+    );
+
+    const result = await activities.quickJudgeBatch(ARGS);
+
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      judged: 1,
+      skipped: 1,
+      verdicts: { match: 1 },
+      fallbackPerCompany: 0,
+      ruleFallback: 0,
+    });
+    const byJob = new Map(jobUpdates.map((u) => [u.where.id, u.data]));
+    expect(byJob.get('j1')!.stage).toBe('skipped');
+    expect(byJob.get('j2')!.stage).toBe('quick_judged');
+    expect(byJob.get('j2')!.verdictQuick).toBe('match');
+  });
+
+  it('batch authorizeExternalAction consults the suppression gate instead of a constant true', async () => {
+    const state = {
+      jobs: [
+        { id: 'j1', canonicalCompanyId: 'c1' },
+        { id: 'j2', canonicalCompanyId: 'c2' },
+      ],
+      companies: [company('c1'), company('c2')],
+      suppressions: [] as Array<{ type: string; value: string }>,
+    };
+    const { activities } = makeActivities(state);
+
+    let first: boolean | undefined;
+    let second: boolean | undefined;
+    mocks.execute.mockImplementation(
+      async (
+        _skills: unknown,
+        _gateway: unknown,
+        _key: unknown,
+        _input: unknown,
+        opts: { authorizeExternalAction?: () => Promise<boolean> },
+      ) => {
+        first = await opts.authorizeExternalAction!();
+        // wire 之前 c2 被禁联：下一次回调必须返回 false（不是恒 true）。
+        state.suppressions.push({ type: 'domain', value: 'c2.example' });
+        second = await opts.authorizeExternalAction!();
+        throw new ExternalActionDeniedError();
+      },
+    );
+    mocks.judgeFitCompany.mockResolvedValue({ verdict: 'weak' });
+
+    await activities.quickJudgeBatch(ARGS);
+
+    expect(first).toBe(true);
+    expect(second).toBe(false);
   });
 });
