@@ -103,6 +103,12 @@
       "INSERT",
       "SELECT"
     ],
+    "company_contact_channel": [
+      "DELETE",
+      "INSERT",
+      "SELECT",
+      "UPDATE"
+    ],
     "company_contact_point": [
       "DELETE",
       "INSERT",
