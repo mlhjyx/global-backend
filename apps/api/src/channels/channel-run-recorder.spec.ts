@@ -4,10 +4,11 @@ import { recordChannelRunInTransaction } from './channel-run-recorder';
 
 function makeTx(options: {
   existing?: { id: string } | null;
-  channel?: { failureStreak: number; status: string } | null;
+  channel?: Record<string, unknown> | null;
   /** 0 simulates a concurrent finalize that won the crawl_run_id unique key. */
   createManyCount?: number;
   reReadId?: string;
+  priorWarning?: { id: string } | null;
 } = {}) {
   const create = vi.fn(async () => ({ id: 'run-created' }));
   const createMany = vi.fn(async () => ({ count: options.createManyCount ?? 1 }));
@@ -19,12 +20,25 @@ function makeTx(options: {
     return reads === 1 ? null : { id: options.reReadId ?? 'run-created' };
   });
   const channelUpdate = vi.fn(async () => ({}));
-  const channelFind = vi.fn(async () => options.channel ?? { failureStreak: 0, status: 'ENABLED' });
+  const channelFind = vi.fn(async () =>
+    options.channel === undefined
+      ? {
+          failureStreak: 0,
+          status: 'ENABLED',
+          consecutiveFailures: 0,
+          lastSuccessAt: null,
+          createdAt: new Date('2026-10-01T00:00:00Z'),
+        }
+      : options.channel,
+  );
+  const eventCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ id: 'evt', ...data }));
+  const eventFindFirst = vi.fn(async () => options.priorWarning ?? null);
   const tx = {
     sourceChannelRun: { findUnique, create, createMany, update },
     sourceChannel: { findUnique: channelFind, update: channelUpdate },
+    sourceChannelHealthEvent: { create: eventCreate, findFirst: eventFindFirst },
   };
-  return { tx, create, createMany, update, findUnique, channelUpdate, channelFind };
+  return { tx, create, createMany, update, findUnique, channelUpdate, channelFind, eventCreate, eventFindFirst };
 }
 
 const RUN = {
@@ -36,6 +50,8 @@ const RUN = {
   recordsMaterialized: 2,
   failures: 0,
 };
+
+const DAY = 86_400_000;
 
 describe('channel run recorder (finalize idempotency)', () => {
   it('writes crawl_run_id on the first record and applies the streak update', async () => {
@@ -61,10 +77,72 @@ describe('channel run recorder (finalize idempotency)', () => {
     expect(recorded).toEqual({ runId: 'run-created', autoDisabled: false, failureStreak: 0 });
   });
 
+  it('success resets consecutiveFailures and stamps lastSuccessAt', async () => {
+    const { tx, channelUpdate } = makeTx({
+      channel: {
+        failureStreak: 0,
+        status: 'ENABLED',
+        consecutiveFailures: 7,
+        lastSuccessAt: new Date('2026-11-01T00:00:00Z'),
+        createdAt: new Date('2026-10-01T00:00:00Z'),
+      },
+    });
+    await recordChannelRunInTransaction(tx as never, RUN);
+    const data = (channelUpdate.mock.calls[0]![0] as { data: Record<string, unknown> }).data;
+    expect(data.consecutiveFailures).toBe(0);
+    expect(data.lastSuccessAt).toBeInstanceOf(Date);
+  });
+
+  it('failure increments consecutiveFailures without touching lastSuccessAt', async () => {
+    const lastSuccessAt = new Date('2026-11-01T00:00:00Z');
+    const { tx, channelUpdate } = makeTx({
+      channel: { failureStreak: 0, status: 'ENABLED', consecutiveFailures: 3, lastSuccessAt, createdAt: new Date('2026-10-01T00:00:00Z') },
+    });
+    await recordChannelRunInTransaction(tx as never, { ...RUN, status: 'FAILED', failures: 3 });
+    const data = (channelUpdate.mock.calls[0]![0] as { data: Record<string, unknown> }).data;
+    expect(data.consecutiveFailures).toBe(4);
+    expect('lastSuccessAt' in data).toBe(false);
+  });
+
+  it('30 次且 7 天无成功 → 同事务 AUTO_DISABLED(AUTO_STREAK) + 事件', async () => {
+    const now = Date.now();
+    const { tx, channelUpdate, eventCreate } = makeTx({
+      channel: {
+        failureStreak: 0,
+        status: 'ENABLED',
+        consecutiveFailures: 29,
+        lastSuccessAt: new Date(now - 8 * DAY),
+        createdAt: new Date(now - 90 * DAY),
+      },
+    });
+    const recorded = await recordChannelRunInTransaction(tx as never, { ...RUN, status: 'FAILED', failures: 1 });
+    const data = (channelUpdate.mock.calls[0]![0] as { data: Record<string, unknown> }).data;
+    expect(data).toMatchObject({ status: 'AUTO_DISABLED', disabledReason: 'AUTO_STREAK', consecutiveFailures: 30 });
+    expect(recorded.autoDisabled).toBe(true);
+    expect(eventCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ event: 'AUTO_DISABLED_30_7D' }),
+    });
+  });
+
+  it('20 次且 4 天无成功 → WARNING 事件（无既有 warning 时）', async () => {
+    const now = Date.now();
+    const { tx, eventCreate } = makeTx({
+      channel: {
+        failureStreak: 0,
+        status: 'ENABLED',
+        consecutiveFailures: 19,
+        lastSuccessAt: new Date(now - 5 * DAY),
+        createdAt: new Date(now - 90 * DAY),
+      },
+    });
+    await recordChannelRunInTransaction(tx as never, { ...RUN, status: 'FAILED', failures: 1 });
+    expect(eventCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ event: 'WARNING_20_4D' }) });
+  });
+
   it('converges a retried finalize onto the same row without touching the failure streak', async () => {
-    const { tx, createMany, create, update, channelUpdate } = makeTx({
+    const { tx, createMany, create, update, channelUpdate, eventCreate } = makeTx({
       existing: { id: 'run-existing' },
-      channel: { failureStreak: 2, status: 'ENABLED' },
+      channel: { failureStreak: 2, status: 'ENABLED', consecutiveFailures: 4, lastSuccessAt: null, createdAt: new Date('2026-10-01T00:00:00Z') },
     });
     const recorded = await recordChannelRunInTransaction(tx as never, {
       ...RUN,
@@ -79,6 +157,7 @@ describe('channel run recorder (finalize idempotency)', () => {
       data: expect.objectContaining({ status: 'FAILED', pagesFetched: 1, failures: 1 }),
     });
     expect(channelUpdate).not.toHaveBeenCalled();
+    expect(eventCreate).not.toHaveBeenCalled();
     expect(recorded).toEqual({ runId: 'run-existing', autoDisabled: false, failureStreak: 2 });
   });
 
@@ -86,7 +165,7 @@ describe('channel run recorder (finalize idempotency)', () => {
     const { tx, create, createMany, update, channelUpdate } = makeTx({
       createManyCount: 0,
       reReadId: 'run-winner',
-      channel: { failureStreak: 1, status: 'ENABLED' },
+      channel: { failureStreak: 1, status: 'ENABLED', consecutiveFailures: 2, lastSuccessAt: null, createdAt: new Date('2026-10-01T00:00:00Z') },
     });
     const recorded = await recordChannelRunInTransaction(tx as never, RUN);
     // The insert was attempted with skipDuplicates; the winner's row is adopted.
@@ -112,5 +191,12 @@ describe('channel run recorder (finalize idempotency)', () => {
     expect(createMany).not.toHaveBeenCalled();
     const data = create.mock.calls[0]![0] as { data: Record<string, unknown> };
     expect('crawlRunId' in data.data).toBe(false);
+  });
+
+  it('defensive: channel rows without the new columns still record (legacy fakes/shape)', async () => {
+    const { tx, channelUpdate } = makeTx({ channel: { failureStreak: 0, status: 'ENABLED' } });
+    await recordChannelRunInTransaction(tx as never, RUN);
+    const data = (channelUpdate.mock.calls[0]![0] as { data: Record<string, unknown> }).data;
+    expect(data.consecutiveFailures).toBe(0);
   });
 });
