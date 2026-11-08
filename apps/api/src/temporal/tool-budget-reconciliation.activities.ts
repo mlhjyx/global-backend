@@ -49,13 +49,18 @@ export function createToolBudgetReconciliationActivities(
     async listWorkspacesWithUnresolvedToolBudget(args: {
       olderThanHours?: number;
       limit?: number;
+      afterWorkspaceId?: string;
     }): Promise<{ workspaceIds: string[] }> {
       const olderThanHours = boundedHours(args.olderThanHours, 2);
       const limit = boundedLimit(args.limit, 50, 200);
+      const afterWorkspaceId =
+        typeof args.afterWorkspaceId === 'string' && WORKSPACE_ID.test(args.afterWorkspaceId)
+          ? args.afterWorkspaceId
+          : null;
       const rows = await prisma.$queryRaw<Array<{ workspace_id: string }>>(
         Prisma.sql`SELECT workspace_id::text
           FROM list_workspaces_with_unresolved_tool_budget_v1(
-            ${olderThanHours}::integer, ${limit}::integer
+            ${olderThanHours}::integer, ${limit}::integer, ${afterWorkspaceId}::uuid
           )`,
       );
       return {
@@ -80,16 +85,25 @@ export function createToolBudgetReconciliationActivities(
       for (let batch = 0; batch < maxBatches; batch += 1) {
         const receipt = await prisma.withWorkspace(args.workspaceId, async (tx) => {
           const rows = await tx.$queryRaw<Array<{ released: number; has_more: boolean }>>(
+            // v2：按 unresolved_since 判超期（D13 再预留会重置计时）、只碰 microusd 行、
+            // 与在线路径同锁序（先账户 advisory 后行锁）。
             Prisma.sql`SELECT released, has_more
-              FROM reconcile_stale_tool_budget_operations_v1(
+              FROM reconcile_stale_tool_budget_operations_v2(
                 ${args.workspaceId}::uuid, ${olderThanHours}::integer, ${limit}::integer
               )`,
           );
           return rows[0];
         });
-        if (!receipt) throw new Error('TOOL_BUDGET_RECONCILE_NO_RECEIPT');
+        if (
+          !receipt ||
+          !Number.isSafeInteger(Number(receipt.released)) ||
+          Number(receipt.released) < 0 ||
+          typeof receipt.has_more !== 'boolean'
+        ) {
+          throw new Error('TOOL_BUDGET_RECONCILE_NO_RECEIPT');
+        }
         released += Number(receipt.released);
-        remaining = receipt.has_more === true;
+        remaining = receipt.has_more;
         if (!remaining) break;
       }
       return { released, remaining };
@@ -117,9 +131,16 @@ export function createToolBudgetReconciliationActivities(
           );
           return rows[0];
         });
-        if (!receipt) throw new Error('TOOL_BUDGET_UNKNOWN_SETTLE_NO_RECEIPT');
+        if (
+          !receipt ||
+          !Number.isSafeInteger(Number(receipt.settled)) ||
+          Number(receipt.settled) < 0 ||
+          typeof receipt.has_more !== 'boolean'
+        ) {
+          throw new Error('TOOL_BUDGET_UNKNOWN_SETTLE_NO_RECEIPT');
+        }
         settled += Number(receipt.settled);
-        remaining = receipt.has_more === true;
+        remaining = receipt.has_more;
         if (!remaining) break;
       }
       return { settled, remaining };

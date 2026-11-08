@@ -9,9 +9,11 @@
 - B2 起 settle 双败会把行先标 `RESULT_UNKNOWN`；现有清收函数只处理 `RESERVED`，`RESULT_UNKNOWN` 行在当前窗口内无人清收（文档已标注）。
 - 阈值 24h 过长（最长活动 30 分钟 × 2 次尝试 + 余量，2 小时已足够）。
 
-## 2. 设计
+## 2. 设计（含审查加固）
 
-1. **独立枚举（SECURITY DEFINER）** `list_workspaces_with_unresolved_tool_budget_v1(p_older_than_hours, p_limit)`：直接按 `tool_budget_operation`（status IN ('RESERVED','RESULT_UNKNOWN') AND created_at < now() - interval）枚举 scope_key（即 workspace），与 raw_source_record 无关；app_user-only 守卫、search_path `pg_catalog, public, pg_temp`、参数范围校验。
+0. **计时基准 `unresolved_since`**：D13 再预留只重置 status/attempt/金额、不刷新 `created_at`——用 created_at 做阈值会把正在重试出网的再预留行当陈年孤儿释放（真实花费变 SETTLEMENT_CONFLICT）。新列由触发器在进入 RESERVED/RESULT_UNKNOWN 时刷新（旧行回填 created_at），两个清收函数都按它判超期。
+   只处理 `amount_unit='microusd'` 行（cent 遗留行会触发形状约束使整批回滚，毒化整个 workspace）；锁序与在线路径一致（先账户 advisory、后行锁）。
+1. **独立枚举（SECURITY DEFINER）** `list_workspaces_with_unresolved_tool_budget_v1(p_older_than_hours, p_limit, p_after_workspace_id)`：按 `status IN ('RESERVED','RESULT_UNKNOWN') AND unresolved_since < now()-阈值` 枚举（**游标分页**防后段饿死；只收租户 UUID 作用域），与 raw_source_record 无关；app_user-only 守卫、search_path `pg_catalog, public, pg_temp`、参数范围校验。
 2. **RESULT_UNKNOWN 保守结清（新函数）** `settle_unknown_tool_budget_operations_v1(p_workspace_id, p_older_than_hours, p_limit)`：把超过阈值的 `RESULT_UNKNOWN` 行**按预留额保守结清**（observed=charged=reserved_microusd，status→'SETTLED'，settled_at=clock_timestamp），同步 `tool_budget_account.reserved_microusd`/`charged_microusd`；同样 workspace 守卫 + SKIP LOCKED + 逐账号 advisory lock（与 settle/release 同锁序）。
 3. **独立 sweep** `toolBudgetReconciliationWorkflow`（客户侧 sweep 调度器，默认每 1 小时、执行时限 30 分钟、批 50）：枚举 → 逐 workspace：
    - `reconcileStaleToolBudgetOperations`（既有活动，阈值改为 **2h**，继续释放「预留后未出网」）；

@@ -24,6 +24,20 @@ describe('tool-budget-reconciliation activities（B4）', () => {
     ).resolves.toEqual({ workspaceIds: [WS] });
   });
 
+  it('非法游标被丢弃（按第一页处理），不回传进 SQL', async () => {
+    const queryRaw = vi.fn(async () => []);
+    const activities = createToolBudgetReconciliationActivities({
+      prisma: { $queryRaw: queryRaw },
+    } as never);
+
+    await activities.listWorkspacesWithUnresolvedToolBudget({
+      olderThanHours: 2,
+      limit: 50,
+      afterWorkspaceId: 'not-a-uuid',
+    });
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+  });
+
   it('drainStaleToolBudgetReservations 循环到 has_more=false 并累计 released', async () => {
     const queryRaw = vi
       .fn()
@@ -73,5 +87,19 @@ describe('tool-budget-reconciliation activities（B4）', () => {
     await expect(
       activities.settleUnknownToolBudgetOperations({ workspaceId: WS }),
     ).rejects.toThrow('TOOL_BUDGET_UNKNOWN_SETTLE_NO_RECEIPT');
+  });
+
+  it('回执类型异常（null/字符串）同样报错，不被 Number() 静默吞成 0', async () => {
+    const activities = createToolBudgetReconciliationActivities({
+      prisma: {
+        withWorkspace: vi.fn(async (_workspaceId: string, callback: (tx: unknown) => unknown) =>
+          callback({ $queryRaw: vi.fn(async () => [{ released: null, has_more: 'yes' }]) }),
+        ),
+      },
+    } as never);
+
+    await expect(
+      activities.drainStaleToolBudgetReservations({ workspaceId: WS }),
+    ).rejects.toThrow('TOOL_BUDGET_RECONCILE_NO_RECEIPT');
   });
 });

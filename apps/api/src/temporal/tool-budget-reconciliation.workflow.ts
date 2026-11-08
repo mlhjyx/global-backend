@@ -25,6 +25,8 @@ const acts = proxyActivities<
 export interface ToolBudgetReconciliationInput {
   olderThanHours?: number;
   limit?: number;
+  /** 单轮最多翻的枚举页数（每页 limit 个 workspace，游标防饿死）。 */
+  maxPages?: number;
 }
 
 export interface ToolBudgetReconciliationResult {
@@ -39,29 +41,51 @@ export async function toolBudgetReconciliationWorkflow(
 ): Promise<ToolBudgetReconciliationResult> {
   const olderThanHours = input.olderThanHours ?? 2;
   const limit = input.limit ?? 50;
-  const { workspaceIds } = await acts.listWorkspacesWithUnresolvedToolBudget({
-    olderThanHours,
-    limit,
-  });
+  const maxPages = input.maxPages ?? 4;
   let released = 0;
   let settledUnknown = 0;
   let failed = 0;
-  for (const workspaceId of workspaceIds) {
-    try {
-      const drain = await acts.drainStaleToolBudgetReservations({ workspaceId, olderThanHours });
-      released += drain.released;
-      const settle = await acts.settleUnknownToolBudgetOperations({ workspaceId, olderThanHours });
-      settledUnknown += settle.settled;
-    } catch {
-      // 单个 workspace 失败不阻塞其余；幂等的清收会在下一周期重试。
-      failed += 1;
+  let examined = 0;
+  let afterWorkspaceId: string | undefined;
+  // 游标分页：超出单页上限的 workspace 不会因为 UUID 排序前缀被永久饿死。
+  for (let page = 0; page < maxPages; page += 1) {
+    const listed = await acts.listWorkspacesWithUnresolvedToolBudget({
+      olderThanHours,
+      limit,
+      ...(afterWorkspaceId ? { afterWorkspaceId } : {}),
+    });
+    const workspaceIds = listed.workspaceIds;
+    examined += workspaceIds.length;
+    for (const workspaceId of workspaceIds) {
+      // 两个 SINK 相互独立：释放失败不能连带跳过结清（反之亦然）。
+      try {
+        const drain = await acts.drainStaleToolBudgetReservations({ workspaceId, olderThanHours });
+        released += drain.released;
+      } catch {
+        failed += 1;
+        console.warn(`[tool-budget-sweep] release failed for ${workspaceId}`);
+      }
+      try {
+        const settle = await acts.settleUnknownToolBudgetOperations({ workspaceId, olderThanHours });
+        settledUnknown += settle.settled;
+      } catch {
+        failed += 1;
+        console.warn(`[tool-budget-sweep] settle-unknown failed for ${workspaceId}`);
+      }
     }
+    if (workspaceIds.length < limit) return finish();
+    afterWorkspaceId = workspaceIds[workspaceIds.length - 1];
   }
-  if (workspaceIds.length > 0 && failed === workspaceIds.length) {
-    throw ApplicationFailure.nonRetryable(
-      `TOOL_BUDGET_RECONCILIATION_ALL_FAILED:${failed}`,
-      'TOOL_BUDGET_RECONCILIATION_ALL_FAILED',
-    );
+  return finish();
+
+  function finish(): ToolBudgetReconciliationResult {
+    if (examined > 0 && released === 0 && settledUnknown === 0 && failed > 0) {
+      // 全部失败（例如账本/连接池同时不可用）不能让 sweep 静默绿。
+      throw ApplicationFailure.nonRetryable(
+        `TOOL_BUDGET_RECONCILIATION_ALL_FAILED:${failed}`,
+        'TOOL_BUDGET_RECONCILIATION_ALL_FAILED',
+      );
+    }
+    return { workspaces: examined, released, settledUnknown, failed };
   }
-  return { workspaces: workspaceIds.length, released, settledUnknown, failed };
 }
