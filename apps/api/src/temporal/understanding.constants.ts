@@ -52,5 +52,8 @@ export const RAW_RETENTION_SWEEP_SCHEDULE_ID = 'raw-source-retention';
 export const ASSET_OBJECT_CLEANUP_WORKFLOW = 'assetObjectCleanupWorkflow';
 // 收口⑥ PR-B：删除编排（on-demand，非 Schedule；DeletionService 按 deletion_request 触发）
 export const DELETION_WORKFLOW = 'deletionWorkflow';
+/** B3（审计 F2）：stale-run 看门狗——RUNNING 超过租约+余量的 discovery_run 自动收尾。 */
+export const DISCOVERY_STALE_RUN_SWEEP_WORKFLOW = 'staleRunSweepWorkflow';
+export const DISCOVERY_STALE_RUN_SWEEP_SCHEDULE_ID = 'discovery-stale-run-sweep';
 export const PERSONAL_ARTIFACT_CLEANUP_WORKFLOW =
   'personalArtifactCleanupWorkflow';

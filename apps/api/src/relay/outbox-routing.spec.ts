@@ -1820,3 +1820,27 @@ describe("B1（L01）：discovery 启动参数携带可调常量（输入化，�
     ).toHaveLength(2);
   });
 });
+
+describe("B3（审计 F2）：discovery 启动带总时限", () => {
+  it("managed 路径启动 discovery 时带 workflowExecutionTimeout=215 分钟", async () => {
+    const ev = makeEvent({
+      eventType: "DiscoveryRunRequested",
+      schemaVersion: 2,
+      aggregateType: "DiscoveryRun",
+      aggregateId: "run-timeout",
+      payload: {
+        planId: "plan-1",
+        icpId: "icp-1",
+        executionBudget: DISCOVERY_EXECUTION_BUDGET,
+      },
+    });
+    const temporal = makeTemporal();
+    const { db } = makeDb([ev]);
+
+    await makeService(db, temporal).routeEvent(ev);
+
+    const [, options] = vi.mocked(temporal.client.workflow.start).mock
+      .calls[0] as unknown as [string, Record<string, unknown>];
+    expect(options.workflowExecutionTimeout).toBe("215 minutes");
+  });
+});

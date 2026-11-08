@@ -333,10 +333,15 @@ describe("relay routing with the development fast lane", () => {
         .calls[0] as unknown as [string, Record<string, unknown>];
       expect(type, ev.eventType).toBe(workflowType);
       expect(options.taskQueue, ev.eventType).toBe("understanding");
-      expect(
-        Object.hasOwn(options, "workflowExecutionTimeout"),
-        ev.eventType,
-      ).toBe(false);
+      if (workflowType === DISCOVERY_WORKFLOW) {
+        // B3（审计 F2）：discovery 的 managed 启动带总时限（租约 180m + 余量）。
+        expect(options.workflowExecutionTimeout, ev.eventType).toBe("215 minutes");
+      } else {
+        expect(
+          Object.hasOwn(options, "workflowExecutionTimeout"),
+          ev.eventType,
+        ).toBe(false);
+      }
       expect(ev.publishedAt, ev.eventType).toBeInstanceOf(Date);
     }
   });
