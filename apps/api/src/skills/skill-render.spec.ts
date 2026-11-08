@@ -27,6 +27,8 @@ const PINNED_RENDER_DIGESTS: Readonly<Record<string, string>> = {
   "quoting.incoterms_quote": "347570a7208fda7a022f7e08e66ee3782676732cdbfa14bec87ddb93f3db0f52",
   "research.account_research": "b8e2b27e18bbf33f7dba28d37eb2602bdc83b26f5015e330029b2e90e8bb609b",
   "triage.lead_triage": "a2485db23f4d1c902487f27745a3b252042ee343616573763a198a9e5d412b83",
+  "engage.reply_classify": "df843b1058d178579a2cb9ebed318bf6cb1d0543efb28449d4f41e9529cf9d94",
+  "outreach.sequence_draft": "1dcf89fc0e64ff4c155052bc67e7e0bc508aba918ffa0a210a088276dd263a62",
 };
 
 function strategyFor(skillKey: string): ResolvedStrategy {

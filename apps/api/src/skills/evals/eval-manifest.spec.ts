@@ -40,6 +40,16 @@ describe("validateEvalManifest", () => {
     expect(codes(noInput)).toContain("EVAL_CASE_INPUT_MISSING");
   });
 
+  it("validates the case tier vocabulary so a typo cannot silently skip both layers", () => {
+    const ok = manifest();
+    (ok["evals"] as Array<Record<string, unknown>>)[0]["tier"] = "deterministic";
+    expect(validateEvalManifest(ok)).toEqual([]);
+
+    const typo = manifest();
+    (typo["evals"] as Array<Record<string, unknown>>)[0]["tier"] = "Deterministic";
+    expect(codes(typo)).toContain("EVAL_CASE_TIER_INVALID");
+  });
+
   it("rejects unknown assertion kinds and forbidden fields", () => {
     const unknownKind = manifest();
     (unknownKind["evals"] as Array<Record<string, unknown>>)[0]["assertions"] = [
