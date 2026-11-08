@@ -619,6 +619,22 @@
         "subjectRefRequired": true,
         "personalDataDsrCompatible": true
       }
+    },
+    {
+      "taskId": "campaign.plan",
+      "callsitePath": "apps/api/src/temporal/campaign-planning.activities.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "campaign-plan/v1",
+      "operationIdentity": "model:campaign.plan:<job-id>",
+      "privacyClass": "CONFIDENTIAL_TENANT",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "CampaignPlanningActivities.deliverCampaignPlanRevision",
+        "domainAggregateType": "CampaignRevision",
+        "identitySource": "job-id-and-result-digest",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
     }
   ],
   "artifactSchemas": [

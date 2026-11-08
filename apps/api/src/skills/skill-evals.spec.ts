@@ -77,12 +77,19 @@ describe("shipped skill eval manifests", () => {
     }
   });
 
-  it("ships the two service skills and five model skills", () => {
+  it("ships the two service skills and six model skills", () => {
     expect(serviceRecords.map((record) => record.skillKey).sort()).toEqual([
       "compliance.sanctions_screen",
       "quoting.incoterms_quote",
     ]);
-    expect(modelRecords).toHaveLength(5);
+    expect(modelRecords.map((record) => record.skillKey).sort()).toEqual([
+      "campaign.plan",
+      "company.understanding.extract",
+      "company.understanding.extract_offerings",
+      "discovery.qualify_fit",
+      "research.account_research",
+      "triage.lead_triage",
+    ]);
   });
 });
 

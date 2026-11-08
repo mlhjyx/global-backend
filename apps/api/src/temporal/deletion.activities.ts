@@ -187,6 +187,12 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
             where: { companyId: { in: located.companyIdsToSuppress } },
           });
           contactPointsErased += companyPoints.count;
+          // A4：公司级联系方式层（Role 邮箱/总机/表单）同样是公司主体的联系数据。公司行只标 SUPPRESSED
+          // 不硬删，复合 FK 的级联永不触发——必须在这里显式擦除；计数并入 contactPointsErased。
+          const companyChannels = await tx.companyContactChannel.deleteMany({
+            where: { companyId: { in: located.companyIdsToSuppress } },
+          });
+          contactPointsErased += companyChannels.count;
         }
 
         // 🔴 Art.17 扫描面（scale-safe #89）：平台级专利发明人缓存（patent_inventor_cache，无 RLS/无 workspace）
