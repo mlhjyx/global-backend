@@ -1,7 +1,7 @@
 # M2 步 13 · S2 触达技能 + L2 审批落地设计（2026-11-08）
 
-> 生命周期：`DRAFT`
-> 生命周期依据：按 §0.6 任务启动门产出，待产品负责人过目批准后转 `APPROVED`；依据协调计划 §0.2 步 13（S2：`outreach.sequence_draft` / `engage.reply_classify`；审批门全绿、越权拒绝）、§17.8 S2 与 §17.6（ActionProposal→Policy→Approval→执行）、步 11 已批设计（受控邮件定稿）。主会话起草（2026-11-08）。
+> 生命周期：`APPROVED`
+> 生命周期依据：按 §0.6 任务启动门产出；产品负责人 2026-11-08 已批准（经主会话打包确认，按推荐值）；依据协调计划 §0.2 步 13（S2：`outreach.sequence_draft` / `engage.reply_classify`；审批门全绿、越权拒绝）、§17.8 S2 与 §17.6（ActionProposal→Policy→Approval→执行）、步 11 已批设计（受控邮件定稿）。主会话起草（2026-11-08）。
 > 前置依赖：步 11 实施（发送通道/批次/退订/回复即停，m1-5 进行中）；S0/S1 技能运行时与 Golden Set 基建（已上线）；步 10 的 SAO/Outcome（p5 实施中）。
 
 ## 1. 背景与目标
