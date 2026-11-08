@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "campaign-golden-brief/v1",
+  "id": "03-us-electronics-ems",
+  "brief": {
+    "industry": "electronics manufacturing services",
+    "country": "US",
+    "objective": "为电子件代工产能寻找美国 EMS（电子制造服务）合作与转单线索",
+    "icpSummary": "美国 EMS 企业，20–500 人，自有 SMT 产线，服务工业或医疗 OEM，ISO 9001 及以上体系，可承接小批量多品种订单",
+    "budgetCapMicros": 300000000,
+    "language": "en"
+  },
+  "expectations": {
+    "planSchemaVersion": "campaign-plan/v0",
+    "requiredFields": [
+      "schemaVersion",
+      "goal.objective",
+      "audience.icpIds",
+      "audience.sizeCap",
+      "motions.0.type",
+      "budget.currency",
+      "approvalPolicy.required",
+      "decisionPolicy.maxReplans"
+    ],
+    "forbiddenFields": [
+      "motions.0.send",
+      "motions.0.channels",
+      "deliveries",
+      "proformaInvoice"
+    ],
+    "forbiddenContent": [
+      "proforma",
+      "\\binvoice\\b",
+      "send email",
+      "whatsapp",
+      "\\bPI number\\b"
+    ],
+    "budgetRespect": {
+      "capMicrosPath": "budget.capMicros",
+      "currency": "USD"
+    },
+    "decisionPolicy": {
+      "maxReplansMax": 2
+    },
+    "motionTypes": [
+      "discovery"
+    ]
+  },
+  "notes": "预算上限 300 USD（micros）示意；输出语言英语（目标市场 US）。"
+}

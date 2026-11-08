@@ -5,17 +5,21 @@
 > 需换时间窗重测）；openfda ❌ 真实响应被 `openfda-search/v1` 投影 `maxItems: 12` 拒绝（provider
 > 每次取 ≥50 条——既有单测夹具掩盖的真实契约缺陷）。**
 >
-> **第③步（翻 data_provider.status ENABLED）与第④步（planner 覆盖核查）对四个发现源全部被
-> 「受治理公司血缘」闸门结构性阻塞**——wikidata/openstreetmap/ted/openfda 都没有声明
-> `companyResultLineage`，即使 ENABLED 也不会被 planner 规划、执行器不路由，查询按
-> `SOURCE_LINEAGE_UNAVAILABLE` 跳过（2026-11-06 wikidata 已实测并回退 DISABLE）。解除需要一次
-> 「lineage 合同升级」（含新迁移换合同哈希），DRAFT 设计见
-> `docs/superpowers/plans/2026-11-08-structured-source-lineage-contract.md`；按 §0.6 任务启动门
-> 需产品负责人过目，且 `discovery.activities.ts`（producer 集所在文件）正由整改会话
-> acq-remediation 在飞，本步不自行改动。
+> **午间更新（2026-11-08，lineage 合同升级落地后）：**上午的结构性阻塞（见 §3）已通过 lineage v3
+> 合同升级解除并随镜像 `a2889542`（源 `e6e579d4`）发车（#846/#874/#850，#882 修复缓存收据），
+> 第③④步进入验收：
+> **wikidata ✅ 四步全完成**（run `ce35d007`：perSource `company_registry` rawCount=23、物化 21 家、
+> 深判 19 家）；**ted ✅ 计划注入 + 供给证据**（本工作区 plan `e77fd2ba` 确定性注入「ICP→CPV 冷路径
+> 解析」TED 查询；执行时因存量池优先未跑源查询，供给证据取自同镜像并行工作区 run `78dd56fe`：
+> TED accepted 5 / rejected 14，perSource `public_intelligence` providers 含 ted——见 §6.2）；
+> **directory ✅ 复核**（run `a96dfc89`：292 条 ACCEPTED/perSource 归因，见 §4.5）；
+> **openfda ②已修③已启、④缺美国医械 ICP**（crosswalk 无对象，见 §4.4）；
+> **openstreetmap 上游全日不可用**（502/超时），维持 DISABLED 待换窗口重测。
+> 另发现一个 run 级可靠性缺口（`quickJudgeBatch` 重试后 `BudgetOperationReplayError` 致命，
+> 见 §5 与 §6.3）。
 >
-> directory 已在启用状态且有血缘与真实 run 供给（run `d51431d8`：directory 361 条 ACCEPTED →
-> 366 家公司 → quickScan 378 判 → leads 172），其四步仪式证据一并归档于 §4.5。
+> directory 的四步仪式历史证据（run `d51431d8`：directory 361 条 ACCEPTED → 366 家公司 →
+> quickScan 378 判 → leads 172）保留于 §4.5。
 
 ## 1. 范围与四步仪式
 
@@ -93,10 +97,12 @@ fail-closed）——出网闸门与生产同一实现；结构化源成本为 0�
   `APPROVED` / `terms_status=REVIEWED_OK` / `personal_data=false` / `allowed_purpose=[discovery,enrichment]` /
   `retention_days=365`（registry seed 建行，本次仅 SELECT 核对）。
 - **② 真测**：见 §2，**14 家**带 QID/官网/国家/员工数；样例见附录 A。
-- **③ data_provider.status**：维持 `DISABLED`，未翻。原因：无血缘，翻 ENABLED 对发现供给为零
-  （planner 不列、执行器不路由）；2026-11-06 曾翻 ENABLED 后因同一原因回退 DISABLED。
-- **④ planner 覆盖**：不适用（未启用）；启用后也将因无血缘记 `SOURCE_LINEAGE_UNAVAILABLE`。
-- **回退**：无需（状态未变）。
+- **③ data_provider.status**：`ENABLED`（2026-11-08 午后，lineage v3 发车后翻转；真库现值核对）。
+- **④ planner 覆盖**：✅ run `ce35d007-00c5-4c2c-bc14-fc2d3156281d`（plan `fbaa08b6`）——查询 ordinal 0
+  `source_hint=wikidata`；回执 accepted 23（duplicate 1、quarantined 1、governanceDenied 1）；
+  perSource `company_registry: provider=wikidata rawCount=23`；全 run 物化 21 家、深判 19 家
+  （match 1 / weak 6 / mismatch 12）。明细见 §6.1。
+- **回退**：`UPDATE data_provider SET status='DISABLED' WHERE key='wikidata'`。
 - **备注**：`wikidata` 行同时门控富集适配器 `WikidataEnrichmentProvider`（`routeEnrichment` 无血缘闸门）；
   若要单独启用富集侧，需另行真测与决定，不属于本步「发现供给」验收。
 
@@ -104,10 +110,11 @@ fail-closed）——出网闸门与生产同一实现；结构化源成本为 0�
 
 - **① source_policy**：已满足，未改动。`overpass-api.de` `APPROVED` / `REVIEWED_OK` /
   `personal_data=false` / `allowed_purpose=[discovery,enrichment]` / 365 天。
-- **② 真测**：**未通过（上游不可用）**——`overpass-api.de` 502「at capacity」、kumi/mail.ru 镜像连接
-  超时（2026-11-08 同日多次重试与手工 curl 均失败；`example.org` 200 证明出网正常）。provider 与
-  broker 路径本身执行正常（无治理拒绝日志）。**待换时间窗重测后才可判第②步通过**。
-- **③ data_provider.status**：维持 `DISABLED`，未翻（同 4.1 原因；且第②步未过）。
+- **② 真测**：**未通过（上游不可用）**——上午 `overpass-api.de` 502「at capacity」、kumi/mail.ru 镜像
+  连接超时；下午 10:1x UTC 复测仍不可用（`overpass-api.de` 406 后 25 s 超时、`overpass.kumi.systems`
+  20 s 超时；`example.org` 200 证明出网正常）。provider 与 broker 路径本身执行正常（无治理拒绝日志）。
+  **待换时间窗重测后才可判第②步通过**。
+- **③ data_provider.status**：维持 `DISABLED`，未翻（第②步未过）。
 - **④ planner 覆盖**：不适用（未启用）。
 - **回退**：无需（状态未变）。
 
@@ -117,10 +124,18 @@ fail-closed）——出网闸门与生产同一实现；结构化源成本为 0�
   `personal_data=true`（具名联系人隔离）/ `allowed_purpose=[discovery,enrichment,intent]` / 365 天；
   CC BY 4.0 署名义务由 provider 逐条带 `license` 字段承载。
 - **② 真测**：见 §2，**22 家中标公司**（公司名/国别/税号/官网）；样例见附录 A。
-- **③ data_provider.status**：维持 `DISABLED`，未翻。TED 查询只由 ICP 冷路径确定性生成
-  （`SYSTEM_PLANNED_SOURCE_KEYS`），而冷路径注入同样要求血缘（`:359`）——无血缘时启用同样零供给。
-- **④ planner 覆盖**：不适用（未启用）。
-- **回退**：无需（状态未变）。
+- **③ data_provider.status**：`ENABLED`（2026-11-08 午后，lineage v3 发车后翻转；真库现值核对）。
+- **④ planner 覆盖**：✅ 确定性注入已验证（plan `e77fd2ba`，ICP `be525835…`「德国与法国工业机械
+  （泵阀/轴承）制造商采购ICP」，industry=机械制造 → ISIC 28 `cpv 42120000`）：计划首条即
+  `source_hint=ted`，rationale「TED 欧盟中标发现（ICP→CPV 冷路径解析）」。**覆盖门按设计 fail-closed**：
+  同一 workspace 的马来西亚市场 ICP（targetMarkets=MY）生成计划时得到显式告警「TED 仅覆盖
+  EU/EEA/UK 买方 (MY（马来西亚）)」并跳过注入——非 EU 市场 ICP 不会拿到 TED 查询。
+- **④ 供给证据（同镜像并行工作区）**：run `78dd56fe-…`（2026-11-08 10:12–10:34，workspace
+  `d46d2170…`，ICP `b01190da…`「德国与法国的精密设备及工业机械制造商」，plan `826dab16…`）：
+  TED 查询（ordinal 0）accepted 5 / rejected 14（`PROVIDER_PAYLOAD_SCHEMA_INVALID`，
+  `raw_source_record` 5 ACCEPTED / 14 REJECTED）；perSource `public_intelligence`
+  `providers=["public_web","ted"]`、rawCount=24。本工作区的执行行为见 §6.2（存量池优先未跑源查询）。
+- **回退**：`UPDATE data_provider SET status='DISABLED' WHERE key='ted'`。
 
 ### 4.4 openfda（后二之一）
 
@@ -133,10 +148,16 @@ fail-closed）——出网闸门与生产同一实现；结构化源成本为 0�
   既有单测夹具（≤12 条）未覆盖真机数据形状，需小修（抬高投影上界并论证大小，或工具按 12 截断）
   并补真实形状测试。仓内 `verify-openfda-discovery.mts` 的 Tier 2 还断言 `executeQuery` 命中
   openfda——在血缘闸门下同样已过时，见 §5。
-- **③ data_provider.status**：维持 `DISABLED`。
-- **④ planner 覆盖**：不适用（未启用）。
-- **备注**：与 ted 相同，冷路径源，无血缘即零供给；其绑定在消费侧现为 intent 域
-  `ProductRegistrationEvidence`，发现域 `CanonicalCompany` 绑定待合同升级补。启用前需先修投影上界。
+- **③ data_provider.status**：`ENABLED`（2026-11-08 午后；②的投影缺陷已由 #850 修复——`maxItems`
+  12→50，与 provider「≥50 条」取数口径一致，修复后真实取样 33 家，证据见
+  `docs/evidence/2026-11-08-openfda-projection-bound-fix.md`）。
+- **④ planner 覆盖**：**未验证（crosswalk 无对象）**。openFDA 注入需要 ICP 同时满足：行业归一到
+  医疗器械（ISIC 325，种子 `fdaPanels: ['RA']`，当前 curated 仅放射）+ 目标市场含美国。当前 dev
+  全部 ICP 都不满足——电子/包装行业 ICP 无 fdaPanels 锚，计划生成时静默跳过；机械 ICP 若目标市场
+  不含美国则得到显式告警「openFDA 仅覆盖美国市场，本 ICP 目标市场不含美国 → 跳过 openFDA 注入」。
+  补测建议：在验证 workspace 建「美国医疗器械（放射影像）采购 ICP」（industry=医疗器械、country=US），
+  生成计划确认 openFDA 注入后小样本执行一次。
+- **回退**：`UPDATE data_provider SET status='DISABLED' WHERE key='openfda'`。
 
 ### 4.5 directory（后二之一，已启用）
 
@@ -148,6 +169,13 @@ fail-closed）——出网闸门与生产同一实现；结构化源成本为 0�
 - **③ data_provider.status**：`ENABLED`（长期启用；真供给在 #826–#829 检索层与载荷契约修复后达成）。
 - **④ planner 覆盖**：`discovery_query_plan` 实际计划含 `source_hint=directory`
   （`d152a5ba…` 6 条、`d923aa8a…` 1 条、`21e2b0fa…` 1 条）；run 内 perSource 归因见上。
+- **④ 复核（lineage v3 镜像）**：run `a96dfc89-7c14-4110-ac46-f8c0980d7d00`（2026-11-08 05:24，
+  镜像 `86d623ee`；directory 路径在后续镜像未改）：perSource `industry_data` rawCount=292，
+  全部来自已验证的 `dongguan.11467.com`。
+- **供给随查询/市场变化（同镜像旁证）**：同一部署上，DE/US 电子 ICP 的德语录 directory 查询
+  （plan `fbaa08b6` ordinal 1）真实执行为 0 供给（非血缘问题，rejected=0、无治理拒绝）；另一会话
+  工作区的 directory 查询命中 `vdw.de` 78 条但按 `SOURCE_POLICY_MISSING` 全部隔离——治理闸门按设计
+  工作（该域未录入 source_policy），不是 provider 缺陷。
 - **归因漏斗（启用后，run `d51431d8`）**：directory raw 361 + public_web raw 5 → companies 366 →
   quickScan 378 判（match 112 / weak 60 / mismatch 206）→ leads 172 → deep targets 172
   （done 80 / failed 92，`failure_rate_high` 告警）→ 事件 cost=1.78。
@@ -158,20 +186,84 @@ fail-closed）——出网闸门与生产同一实现；结构化源成本为 0�
 
 ## 5. 相关缺口与后续
 
-- **openFDA 投影上界缺陷（新发现，独立于血缘）**：`openfda-search/v1` 的 `maxItems: 12` 与
-  provider 的「≥50 条」取数口径冲突，真实 API 响应必被拒；openFDA 启用前必须先修（小修 + 真实
-  形状测试）。该缺陷不影响 wikidata/osm/ted。
-- **OSM 上游可用性**：2026-11-08 三个 Overpass 端点均不可用（502/超时），第②步需换时间窗重测；
-  若长期不可用，可评估为 `osm.overpass` 增设备用端点（工具已支持 `OVERPASS_URL` 覆盖与三端点
-  回退，缺的是可用端点）。
+- **lineage 合同升级（已完成）**：设计 `docs/superpowers/plans/2026-11-08-structured-source-lineage-contract.md`
+  （APPROVED）。落地：#846（合同 v3：两份合同键 + 消费绑定 + 迁移换哈希 + 四 provider 接收据）、
+  #874（v1 append 函数 provider 允许清单：真实 run `f841d9f1` 首跑暴露的 `DOMAIN_ACK…INVALID` 根因）、
+  #850（openFDA 投影上界）、#882（缓存命中零成本收据重放，P1）。镜像 `a2889542`/源 `e6e579d4` 起生效。
+- **openFDA 投影上界缺陷（已修复）**：`maxItems` 12→50 与 provider「≥50 条」口径对齐，修复后真实
+  取样 33 家；证据 `docs/evidence/2026-11-08-openfda-projection-bound-fix.md`。
+- **OSM 上游可用性**：2026-11-08 全日三个 Overpass 端点不可用（上午 502、下午 406/超时），第②步
+  需换时间窗重测；若长期不可用，可评估为 `osm.overpass` 增设备用端点（工具已支持 `OVERPASS_URL`
+  覆盖与三端点回退，缺的是可用端点）。
+- **openFDA ④ 缺 crosswalk 对象**：见 §4.4 的补测建议（美国医疗器械/放射 ICP）。
+- **TED 拒绝面**：另会话 2026-11-08 run 中 TED 原始记录 5 ACCEPTED / 14 REJECTED
+  （`PROVIDER_PAYLOAD_SCHEMA_INVALID`，`raw_source_record.disposition_code`）；拒绝率高，后续可用
+  `RAW_SOURCE_SCHEMA_PROBE` 取样定位被拒载荷形状（取样后该探针已移除）。
+- **`BudgetOperationReplayError` 重试不可恢复（run 级缺陷，详见 §6.3）**：`quickJudgeBatch` 批量
+  协议无 durable 投影，活动重试即命中残留操作并直接终止 run；建议补投影/心跳或先降级逐家。
+- **存量池优先跳过计划查询**：当工作区存量候选已足够（如本工作区 pool 752/quick 436），run 不执行
+  计划的源查询（§6.2）；如不符合产品预期需调整 Run 2.0 语义。
 - **过时的验证脚本**：`apps/api/scripts/verify-ted-discovery.mts` 与 `verify-openfda-discovery.mts`
-  的 Tier 2（`executeQuery` 落库段）写于血缘闸门之前，今天运行会因 `SOURCE_LINEAGE_UNAVAILABLE`
-  失败；合同升级落地后应恢复可用。脚本本身未改（不在本步范围）。
-- **lineage 合同升级建议范围**（设计见 `docs/superpowers/plans/2026-11-08-structured-source-lineage-contract.md`）：
-  合同 v3（两份合同键 + 消费绑定 + 迁移换哈希）→ 四 provider 接 receipt 与记录覆盖索引 →
-  `DISCOVERY_DOMAIN_ACK_PRODUCERS` 补 `ted.search` → 负向测试（无回执的记录不得物化）→
-  再执行本记录 §4.1–4.4 的第③④步。
+  的 Tier 2（`executeQuery` 落库段）写于血缘闸门之前，血缘 v3 落地后已恢复可用，建议随下次触碰一并
+  实跑核对。脚本本身未改（不在本步范围）。
 - **samgov / google_patents**：按计划维持不批、不变。
+
+## 6. 验收 run 明细（2026-11-08 午后，镜像 `a2889542` / 源 `e6e579d4`）
+
+### 6.1 复跑（run `ce35d007`，plan `fbaa08b6`，ICP「德国与美国电子精密制造企业定制吸塑包装采购商（海外验证）」）
+
+- **环境**：`/health/build` 报 `build_sha=e6e579d4…`、`image_digest=sha256:a2889542…`、attested；
+  #882 缓存收据修复在镜像内，`ACQ_LLM_CACHE` 已由主会话移除（默认 on）。
+- **查询**：8 条（wikidata 1 + directory 1 + public_web 6）全部有回执；逐个 perQuery 见 §4.1–4.5。
+- **漏斗**：raw（wikidata 23 + public_web 21）→ 物化 21 家 → websiteProfile profiled 11 / matched 6 /
+  backfilled 1 / unclassified 0 → 深判 19（fitUnjudged 0）：match 1 / weak 6 / mismatch 12 →
+  通过率 5.3%。近期基线：a96dfc89 0/89、bdb70e30 1/145、e9c764ab 1/51（0–0.7%），**主指标无回退**。
+- **PARTIAL 原因**：4 家 `websiteProfile` 不可重放（crawl4ai 502 / 上游站点超时），run 以 PARTIAL
+  收尾（failures=0，非血缘问题）。
+- **contacts**：2 家公司、1 人、1 邮箱（emailGuess risky 1 / probes 1 / persisted 1）。
+- **#882 回归**：worker 日志出现 `[llm-cache] task=… hit=true` 且无 `RECEIPT_MISMATCH` /
+  `DOMAIN_ACK…INVALID`——缓存命中走零成本收据重放，血缘不再被缓存命中作废。
+- **并发注记**：执行窗口内另有 3 个 run 并发（另会话 2 个 + 同计划重复触发 1 个），
+  `qualifyFitForRun` 出现一次 Prisma P2028（交互事务 5000 ms 超时 7057 ms），Temporal 重试成功。
+  维持 RUNBOOK「一次只跑一个 run」。
+- **同计划重复执行（观察）**：`b82756fc`（+42 s，中途被取消，FAILED: CancelledFailure @
+  websiteProfile）与 `4a639ea4`（09:48 另行触发，PARTIAL，fit 0/15、companies 3）——重复触发来源
+  未定（同一驱动被多次调用或并发会话），不影响本次验收证据（以 `ce35d007` 为准）。
+- **档位注记**：本 run 的深判发生在 `MODEL_ACQUISITION_TASK_MODELS` 临时覆盖档期间；10:0x UTC
+  主会话恢复原档（`discovery.qualify_fit=gemini-3.8-flash`）后才起的 run（§6.2）用的是原档，
+  两组深判数字不可直接横比。
+
+### 6.2 TED 验收 run（run `aae4a06a`，plan `e77fd2ba`，ICP `be525835…`（机械制造，DE/FR））
+
+- **ICP 构造**：从卖家公司生成新 ICP 后 PATCH（industry=机械制造 → ISIC 28 `cpv 42120000`；
+  country=DE/FR；targetMarkets=德国/法国/欧洲；trade_side=manufacturer）并激活。首版 targetMarkets
+  仍是生成时的 MY（马来西亚），计划生成被 TED 覆盖门显式拒绝（「TED 仅覆盖 EU/EEA/UK 买方」）；
+  PATCH 目标市场后重新生成计划，TED 查询按冷路径注入。
+- **计划**：8 条（ted 1 + wikidata 1 + directory 1 + public_web 6），已确认。
+- **执行（两次，均未跑源查询）**：`aae4a06a`（attempt 1）在 quickScan 阶段因 `BudgetOperationReplayError`
+  失败（`nonRetryable`，见 §6.3）；`7ce7d6f9`（重试，新 attemptId）PARTIAL 完成：phase 仅 quick+deep，
+  **plan 的 8 条源查询未执行**（perQuery/perSource 为空、rawGovernance 全零）。原因：本工作区存量池
+  752 家、prefilter+quick 判 436 家（match 2 / weak 3 / mismatch 431）已够出 5 个 leads，Run 2.0
+  存量优先策略跳过了新源查询。**这是工作区状态决定的执行行为，不是 TED 注入失败**；TED 的真实供给
+  证据因此取自同镜像的并行工作区 run `78dd56fe`（见 §4.3 的 ④ 条目）。待与 M0 owner 确认该
+  「池充足即跳过计划查询」语义是否符合预期。
+
+### 6.3 新发现：`quickJudgeBatch` 的预算操作残留使重试不可恢复（run 级致命）
+
+- **现象**：run `aae4a06a`（本工作区，TED 验证）attempt 1 失败后 Temporal 重试 attempt 2，
+  `quickJudgeBatch` 抛 `BudgetOperationReplayError`（`nonRetryable`）→ 整个 run FAILED；
+  另一工作区 run `78dd56fe` 的 `signalsCompanyOnce` / `profileCompanyOnce` 也报同类残留错误
+  （该 run 容忍为 company 级失败，最终 PARTIAL）。
+- **机制**（源码核实）：模型预算操作键 = `accountKey` + task + model + prompt + system + schema
+  （`router-model-gateway.ts` 的 `paidOperationKey`）；`accountKey` = run 的请求哈希
+  （`discovery.run:discovery_run:request:<sha>`）。`quickJudgeBatch` 的**批量协议无 durable 投影**
+  （源码注释「批量协议暂无 durable 投影」），结算后不留可重放结果；活动一旦需要重试（超时/上游
+  控制错误），重放同一操作即报「already exists without a durable result」→ fail-closed 且不可恢复。
+  逐家降级路径带 `fit-judgment/v1` 回执，不受此影响。
+- **影响**：上游拥塞/超时下一次活动重试即可让整个 run 失败；当天多次 run 失败均与此同源或叠加。
+- **建议（交 M0/discovery owner）**：批量协议补 durable 投影（或对「已结算无结果」的操作按可重算
+  处理）；给 `quickJudgeBatch` 加 heartbeat/调大 start-to-close；批量失败先降级逐家（已有回执路径）
+  再考虑整批重试。属 discovery 编排/预算代码，未在本步改动。
 
 ## 附录 A：探针原始输出（2026-11-08）
 
