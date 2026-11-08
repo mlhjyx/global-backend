@@ -348,6 +348,10 @@
       "SELECT",
       "UPDATE"
     ],
+    "outreach_global_suppression": [
+      "INSERT",
+      "SELECT"
+    ],
     "pack_activation": [
       "INSERT",
       "SELECT"
