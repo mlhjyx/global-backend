@@ -534,3 +534,40 @@ describe('contact-persist · 🔴 待办2 create 层收尾：createContact 尊�
     expect(key).not.toBe(blindContactKey(declinedContactIdentity({ fullName: 'Zoe New' }, companyKey))); // 非 dx
   });
 });
+
+describe('A4：contact_point.source_url 形状防护（DB CHECK 同源）', () => {
+  const emailCreateOf = (contactPointUpsert: ReturnType<typeof vi.fn>) =>
+    (contactPointUpsert.mock.calls as [{ create?: { type?: string; sourceUrl?: string } }][])
+      .map(([arg]) => arg.create)
+      .find((create) => create?.type === 'email');
+
+  it('非 https 来源页降级为 NULL——一条坏 URL 不得打挂整家公司联系人事务', async () => {
+    const { tx, contactPointUpsert } = fakeTx([]);
+    await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'decision_maker',
+      contacts: [{
+        externalId: 'x', fullName: 'Zoe New', email: 'zoe@new.test', personalData: true,
+        sourcePage: 'http://new.test/impressum',
+      }],
+      suppressedEmails: new Set(),
+    });
+    expect(emailCreateOf(contactPointUpsert)).not.toHaveProperty('sourceUrl');
+  });
+
+  it('合规 https 来源页照常落 sourceUrl', async () => {
+    const { tx, contactPointUpsert } = fakeTx([]);
+    await persistDiscoveredContacts(tx, {
+      workspaceId: 'ws-1',
+      company,
+      adapterKey: 'decision_maker',
+      contacts: [{
+        externalId: 'x', fullName: 'Zoe New', email: 'zoe@new.test', personalData: true,
+        sourcePage: 'https://new.test/impressum',
+      }],
+      suppressedEmails: new Set(),
+    });
+    expect(emailCreateOf(contactPointUpsert)).toMatchObject({ sourceUrl: 'https://new.test/impressum' });
+  });
+});

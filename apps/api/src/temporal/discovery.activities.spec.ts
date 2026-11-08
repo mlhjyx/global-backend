@@ -10,6 +10,7 @@ import {
   PROFILE_PASS_TIME_BOX_MS,
 } from "./discovery.activities";
 import { ExecutionControlError } from "../execution-budget/execution-control-error";
+import { AgentUnavailableError } from "../agents/agent-runtime";
 import { companyIdentity } from "../discovery/identity";
 import { DISCOVERY_CANONICALIZE_TRANSACTION_OPTIONS } from "./discovery-company-materialization";
 import { ToolPolicyDenied } from "../tools/tool-broker";
@@ -7193,5 +7194,130 @@ describe("stale-run 看门狗活动（B3）", () => {
     await activities.finalizeStaleDiscoveryRun(ROW);
     expect(update).not.toHaveBeenCalled();
     expect(outboxCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("M2 步 9b 源侦察员角色化：source.route 轨迹 + agent 回合门（零行为变化）", () => {
+  type DiscoveryDeps = Parameters<typeof createDiscoveryActivities>[0];
+
+  const activeScout = () => ({
+    resolve: vi.fn(async () => ({
+      agentKey: "discovery.source_scout",
+      name: "源侦察员",
+      rolePromptVersion: "v1",
+      skillKeys: [],
+      modelPolicy: {},
+      memoryScope: "run",
+      loopPolicy: { maxRounds: 1 },
+    })),
+  });
+
+  const recordingTraces = () => ({ record: vi.fn(async () => undefined) });
+
+  function withAgentRuntime(
+    deps: DiscoveryDeps,
+    agents: { resolve: (...args: never[]) => Promise<unknown> },
+    traces: { record: (...args: never[]) => Promise<void> },
+  ): DiscoveryDeps {
+    (deps as { agentRuntime?: unknown }).agentRuntime = { agents, traces };
+    return deps;
+  }
+
+  it("records one source.route decision per query with chosen sources and rejected reasons", async () => {
+    const traces = recordingTraces();
+    const deps = withAgentRuntime(makeDeps([okAdapter("wikidata", [])]), activeScout(), traces);
+    const acts = createDiscoveryActivities(deps);
+
+    await acts.executeQuery(discoveryArgs("run-agent-trace", { query: QUERY }));
+
+    expect(traces.record).toHaveBeenCalledTimes(1);
+    const trace = traces.record.mock.calls[0]![0] as {
+      decisionType: string;
+      stepType: string;
+      agentKey: string;
+      runId: string;
+      discriminator: string;
+      chosenOption: { sources: string[] };
+      reasonCode: string | null;
+      rejectedCandidates: Array<{ candidateRef: string; rejectReason: string; revivable: boolean }>;
+    };
+    expect(trace).toMatchObject({
+      decisionType: "source.route",
+      stepType: "discovery.query",
+      agentKey: "discovery.source_scout",
+      runId: testRunId("run-agent-trace"),
+      reasonCode: null,
+    });
+    expect(trace.chosenOption.sources).toEqual(["wikidata"]);
+    expect(trace.discriminator.length).toBeGreaterThan(0);
+    // 已注册的同类源都没被路由：全部带原因入 rejected_candidates（可复活）。
+    const rejected = new Map(trace.rejectedCandidates.map((item) => [item.candidateRef, item]));
+    expect([...rejected.keys()].sort()).toEqual(["openfda", "public_web", "ted"]);
+    for (const item of rejected.values()) {
+      expect(item.rejectReason).toBe("SOURCE_DISABLED");
+      expect(item.revivable).toBe(true);
+    }
+  });
+
+  it("marks enabled sources excluded by the source hint as SOURCE_HINT_EXCLUDED", async () => {
+    const traces = recordingTraces();
+    const deps = withAgentRuntime(
+      makeDeps([okAdapter("wikidata", []), okAdapter("ted", [])]),
+      activeScout(),
+      traces,
+    );
+
+    await createDiscoveryActivities(deps).executeQuery(
+      discoveryArgs("run-agent-hint", {
+        query: { ...QUERY, filters: { source_hint: "wiki" } },
+      }),
+    );
+
+    const trace = traces.record.mock.calls[0]![0] as {
+      chosenOption: { sources: string[] };
+      rejectedCandidates: Array<{ candidateRef: string; rejectReason: string }>;
+    };
+    expect(trace.chosenOption.sources).toEqual(["wikidata"]);
+    const rejected = new Map(trace.rejectedCandidates.map((item) => [item.candidateRef, item]));
+    expect(rejected.get("ted")?.rejectReason).toBe("SOURCE_HINT_EXCLUDED");
+    expect(rejected.get("public_web")?.rejectReason).toBe("SOURCE_DISABLED");
+  });
+
+  it("records the skip reason when the query routes to no source, keeping the result shape", async () => {
+    const traces = recordingTraces();
+    const acts = createDiscoveryActivities(withAgentRuntime(makeDeps([]), activeScout(), traces));
+
+    const result = await acts.executeQuery(discoveryArgs("run-agent-skip", { query: QUERY }));
+
+    expect(result.skipReason).toBe("SOURCE_DISABLED");
+    const trace = traces.record.mock.calls[0]![0] as {
+      chosenOption: { sources: string[] };
+      reasonCode: string | null;
+    };
+    expect(trace.chosenOption.sources).toEqual([]);
+    expect(trace.reasonCode).toBe("SOURCE_DISABLED");
+  });
+
+  it.each([
+    ["AGENT_DISABLED", "AGENT_DISABLED"],
+    ["AGENT_NOT_REGISTERED", "AGENT_NOT_REGISTERED"],
+  ] as const)("fails closed with nonRetryable %s before any provider call", async (code, expected) => {
+    const discoverCompanies = vi.fn(async () => ({ records: [], costCents: 0 }));
+    const traces = recordingTraces();
+    const deps = withAgentRuntime(
+      makeDeps([{ ...okAdapter("wikidata", []), discoverCompanies }]),
+      {
+        resolve: vi.fn(async () => {
+          throw new AgentUnavailableError(code, code);
+        }),
+      },
+      traces,
+    );
+
+    await expect(
+      createDiscoveryActivities(deps).executeQuery(discoveryArgs("run-agent-off", { query: QUERY })),
+    ).rejects.toMatchObject({ type: expected, nonRetryable: true });
+    expect(discoverCompanies).not.toHaveBeenCalled();
+    expect(traces.record).not.toHaveBeenCalled();
   });
 });

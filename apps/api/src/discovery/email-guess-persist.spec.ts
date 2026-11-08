@@ -228,3 +228,69 @@ describe('email-guess-persist · authoritative replay readback', () => {
     expect(tx.contactPoint.findUnique).not.toHaveBeenCalled();
   });
 });
+
+describe('A4：分类/验证元数据落库', () => {
+  it('catchAllFromVerdictDetail：与 decideEmailVerdict 真实文案对齐（三态 + unknown）', async () => {
+    const { catchAllFromVerdictDetail } = await import('./email-guess-persist');
+    expect(catchAllFromVerdictDetail('catch_all_domain')).toBe('catch_all');
+    expect(catchAllFromVerdictDetail('smtp_accepted:250')).toBe('not_catch_all');
+    expect(catchAllFromVerdictDetail('catch_all_unproven')).toBe('inconclusive');
+    expect(catchAllFromVerdictDetail('inconclusive:250')).toBe('inconclusive');
+    expect(catchAllFromVerdictDetail('inconclusive:no_code')).toBe('inconclusive');
+    expect(catchAllFromVerdictDetail('mail_from_rejected')).toBe('unknown');
+    expect(catchAllFromVerdictDetail('mailbox_rejected:550')).toBe('unknown');
+    expect(catchAllFromVerdictDetail(null)).toBe('unknown');
+  });
+
+  it('verificationMethodFromVerdictDetail：只把真产生 RCPT 结论的 detail 记为 smtp_rcpt', async () => {
+    const { verificationMethodFromVerdictDetail } = await import('./email-guess-persist');
+    expect(verificationMethodFromVerdictDetail('smtp_accepted:250')).toBe('smtp_rcpt');
+    expect(verificationMethodFromVerdictDetail('catch_all_domain')).toBe('smtp_rcpt');
+    expect(verificationMethodFromVerdictDetail('catch_all_unproven')).toBe('smtp_rcpt');
+    expect(verificationMethodFromVerdictDetail('inconclusive:no_code')).toBe('smtp_rcpt');
+    expect(verificationMethodFromVerdictDetail('smtp_gate_unavailable')).toBe('pattern_guess');
+    expect(verificationMethodFromVerdictDetail('mail_from_rejected')).toBe('pattern_guess');
+    expect(verificationMethodFromVerdictDetail('smtp_unreachable(port25_blocked?)_mx_present')).toBe('pattern_guess');
+    expect(verificationMethodFromVerdictDetail(null)).toBe('pattern_guess');
+  });
+
+  it('未触网（gate 不可用）的落库如实记 pattern_guess', async () => {
+    const failureResult: GuessResult = {
+      status: 'unverified',
+      domainFact: 'unreachable',
+      best: { email: 'h.herold@acme.de', pattern: 'f.last', prior: 0.85, verdict: { status: 'RISKY', detail: 'smtp_gate_unavailable', costCents: 0 }, confidence: 0.34 },
+      triedCount: 0,
+      candidates: [],
+      reason: 'smtp_unreachable_unconfirmable',
+    };
+    const { tx, upsert } = fakeTx();
+    await persistGuessedEmail(tx, {
+      workspaceId: 'w',
+      contactId: 'c1',
+      result: failureResult,
+      suppressedEmails: new Set(),
+      lawfulBasis: LIA,
+      now: NOW,
+    });
+    expect(upsert.mock.calls[0][0].create).toMatchObject({ verificationMethod: 'pattern_guess' });
+  });
+
+  it('落库携带 personal/pattern_guess/smtp_rcpt/catch_all 与 lawful basis', async () => {
+    const { tx, upsert } = fakeTx();
+    await persistGuessedEmail(tx, {
+      workspaceId: 'w',
+      contactId: 'c1',
+      result: verifiedResult,
+      suppressedEmails: new Set(),
+      lawfulBasis: LIA,
+      now: NOW,
+    });
+    expect(upsert.mock.calls[0][0].create).toMatchObject({
+      emailType: 'personal',
+      sourceType: 'pattern_guess',
+      verificationMethod: 'smtp_rcpt',
+      catchAll: 'not_catch_all',
+      legalBasis: 'legitimate_interest',
+    });
+  });
+});

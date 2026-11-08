@@ -17,6 +17,9 @@ import { AiTraceSink } from "../model-gateway/ai-trace.sink";
 import { createUnderstandingActivities } from "./understanding.activities";
 import { createDbSkillResolver } from "../skills/skill-resolver";
 import { PrismaSkillRegistryStore } from "../skills/skill-registry.store";
+import { createDbAgentResolver } from "../agents/agent-resolver";
+import { PrismaAgentRegistryStore } from "../agents/agent-registry.store";
+import { PrismaAgentDecisionTraceStore } from "../agents/agent-decision-trace.store";
 import { createDiscoveryActivities } from "./discovery.activities";
 import { prismaDiscoveryRunLeaseReader } from "./discovery-run-lease";
 import { createQualifyActivities } from "./qualify.activities";
@@ -208,6 +211,9 @@ export async function runDevFastLaneWorker(
   const skillResolver = createDbSkillResolver(
     new PrismaSkillRegistryStore(prisma),
   );
+  // M2 步 9b：agent 解析器与决策轨迹（同 managed worker；目录由 managed worker/relay seed）。
+  const agentResolver = createDbAgentResolver(new PrismaAgentRegistryStore(prisma));
+  const agentTraces = new PrismaAgentDecisionTraceStore(prisma);
   const costReconciliationCatalog =
     createSiteBuildCostReconciliationCatalogFromEnv();
   const activeSettlementRoutes = (() => {
@@ -307,6 +313,7 @@ export async function runDevFastLaneWorker(
         budgetStore,
         runLease: prismaDiscoveryRunLeaseReader(prisma),
         skills: skillResolver,
+        agentRuntime: { agents: agentResolver, traces: agentTraces },
       }),
       ...createQualifyActivities({ prisma, sanctionsScreening }),
     },

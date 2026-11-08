@@ -25,6 +25,13 @@
     "_prisma_migrations": [
       "SELECT"
     ],
+    "agent_decision_trace": [
+      "INSERT",
+      "SELECT"
+    ],
+    "agent_profile": [
+      "SELECT"
+    ],
     "ai_trace": [
       "DELETE",
       "INSERT",
@@ -95,6 +102,12 @@
     "company_channel_sighting": [
       "INSERT",
       "SELECT"
+    ],
+    "company_contact_channel": [
+      "DELETE",
+      "INSERT",
+      "SELECT",
+      "UPDATE"
     ],
     "company_contact_point": [
       "DELETE",
@@ -629,6 +642,23 @@
     ]
   },
   "columns": {
+    "agent_profile": {
+      "status": [
+        "UPDATE"
+      ],
+      "status_reason": [
+        "UPDATE"
+      ],
+      "status_updated_at": [
+        "UPDATE"
+      ],
+      "status_updated_by": [
+        "UPDATE"
+      ],
+      "updated_at": [
+        "UPDATE"
+      ]
+    },
     "pack_package": {
       "active_version_id": [
         "UPDATE"
