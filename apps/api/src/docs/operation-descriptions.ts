@@ -189,6 +189,8 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '五个队列的计数（推荐 / 待确认 / 拒绝 / 禁联 / 制裁隔离）与队列依据（预置 / 评分 / 人工）。',
   'GET /api/v1/leads/{leadId}':
     'Lead 详情：六维分、规则逐条评估依据、公司与联系人、裁决历史。需要 personal-data:read。',
+  'GET /api/v1/runs/{runId}/trace':
+    'run 的决策轨迹（过程时间线）：源侦察员的选源/跳过原因与资格判定员的批量判定、被否候选，按时间升序键集分页（limit 默认 100、上限 200）；跨租户 404。需要 acquisition:read。',
   'GET /api/v1/leads/{leadId}/package':
     '交付读模型 LeadPackage：公司事实、建议联系路径、信号、证据 URL、原因码；不含具名联系人。历史证据为合成来源时返回 409（产品读一律隔离）。',
   'POST /api/v1/leads/{leadId}/outcomes':
