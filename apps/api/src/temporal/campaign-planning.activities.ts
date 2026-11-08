@@ -1,4 +1,5 @@
 import { ApplicationFailure, Context } from '@temporalio/activity';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { getTask } from '../ai-tasks/task-registry';
@@ -163,6 +164,15 @@ export interface ReportCampaignPlanJobFailureArgs {
   replanHistory?: readonly CampaignPlanReplanEntry[];
 }
 
+/** ch08 §3.1.4 双通道：控制面回写重试耗尽后的 outbox 集成事件载荷。 */
+export interface EmitCampaignPlanJobFailureEventArgs {
+  workspaceId: string;
+  campaignId: string;
+  jobId: string;
+  error: string;
+  issues?: readonly CampaignPlanIssue[];
+}
+
 export interface CampaignPlanningActivities {
   assembleCampaignPlanInputs(
     args: AssembleCampaignPlanInputsArgs,
@@ -175,6 +185,9 @@ export interface CampaignPlanningActivities {
   ): Promise<void>;
   reportCampaignPlanJobFailure(
     args: ReportCampaignPlanJobFailureArgs,
+  ): Promise<void>;
+  emitCampaignPlanJobFailureEvent(
+    args: EmitCampaignPlanJobFailureEventArgs,
   ): Promise<void>;
 }
 
@@ -639,6 +652,37 @@ export function createCampaignPlanningActivities(deps: {
       } catch (error) {
         controlPlaneFailure(error);
       }
+    },
+
+    /**
+     * 失败回写的第二通道（ch08 §3.1.4）：控制面 PATCH 重试耗尽时写 outbox 集成事件，
+     * SaaS 拉取后把仍处于 PENDING/RUNNING 的 job 置 FAILED。拉模式可能滞后，但比单次
+     * HTTP 回调可靠；payload 只有 job/campaign 引用与闭集错误码，无 PII。
+     */
+    async emitCampaignPlanJobFailureEvent(
+      args: EmitCampaignPlanJobFailureEventArgs,
+    ): Promise<void> {
+      const issues = args.issues?.slice(0, 50).map((issue) => ({
+        path: String(issue.path).slice(0, 200),
+        message: String(issue.message).slice(0, 300),
+      }));
+      await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+        tx.outboxEvent.create({
+          data: {
+            workspaceId: args.workspaceId,
+            eventType: 'CampaignPlanJobFailed',
+            aggregateType: 'CampaignPlanJob',
+            aggregateId: args.jobId,
+            payload: {
+              jobId: args.jobId,
+              campaignId: args.campaignId,
+              workspaceId: args.workspaceId,
+              error: args.error,
+              ...(issues && issues.length > 0 ? { issues } : {}),
+            } as unknown as Prisma.InputJsonValue,
+          },
+        }),
+      );
     },
   };
 }

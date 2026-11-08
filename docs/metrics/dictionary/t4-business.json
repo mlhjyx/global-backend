@@ -1,0 +1,228 @@
+{
+  "schemaVersion": "metric-dictionary/v1",
+  "tier": "T4",
+  "metrics": [
+    {
+      "schemaVersion": "metric-definition/v1",
+      "id": "T4-001",
+      "name": "meeting_held_rate",
+      "tier": "T4",
+      "unit": "ratio",
+      "owner": "gtm-ops",
+      "status": "DRAFT",
+      "version": 1,
+      "effectiveFrom": "2026-11-09",
+      "exprStatus": "PENDING",
+      "definition": "已举行会议占已预约会议的比例；取消/爽约单列。",
+      "numerator": {
+        "expr": "count(*) filter (where held)",
+        "source": "outreach_reply"
+      },
+      "denominator": {
+        "expr": "count(*) filter (where booked)",
+        "source": "outreach_reply"
+      },
+      "exclusions": [
+        "取消/爽约不进分子但单列计数"
+      ],
+      "window": {
+        "type": "cohort",
+        "days": 30
+      },
+      "strata": [
+        "country",
+        "workspace_id"
+      ],
+      "ci": {
+        "method": "wilson"
+      },
+      "changelog": [
+        {
+          "version": 1,
+          "at": "2026-11-09",
+          "breaking": false,
+          "note": "首次定义（P4 前 DRAFT）"
+        }
+      ]
+    },
+    {
+      "schemaVersion": "metric-definition/v1",
+      "id": "T4-002",
+      "name": "opportunity_rate",
+      "tier": "T4",
+      "unit": "ratio",
+      "owner": "gtm-ops",
+      "status": "DRAFT",
+      "version": 1,
+      "effectiveFrom": "2026-11-09",
+      "exprStatus": "PENDING",
+      "definition": "商机（opportunity）占已举行会议的比例；阶段定义须预先固定。",
+      "numerator": {
+        "expr": "count(*) filter (where opportunity)",
+        "source": "outreach_reply"
+      },
+      "denominator": {
+        "expr": "count(*) filter (where held)",
+        "source": "outreach_reply"
+      },
+      "exclusions": [
+        "阶段定义变更须升版本"
+      ],
+      "window": {
+        "type": "cohort",
+        "days": 90
+      },
+      "strata": [
+        "country",
+        "workspace_id"
+      ],
+      "ci": {
+        "method": "wilson"
+      },
+      "changelog": [
+        {
+          "version": 1,
+          "at": "2026-11-09",
+          "breaking": false,
+          "note": "首次定义"
+        }
+      ]
+    },
+    {
+      "schemaVersion": "metric-definition/v1",
+      "id": "T4-003",
+      "name": "pipeline_usd_per_1000_accounts",
+      "tier": "T4",
+      "unit": "usd_per_1000",
+      "owner": "gtm-ops",
+      "status": "DRAFT",
+      "version": 1,
+      "effectiveFrom": "2026-11-09",
+      "exprStatus": "PENDING",
+      "definition": "每 1,000 个 ICP 账户产生的 pipeline 金额（USD，去重）。",
+      "numerator": {
+        "expr": "sum(pipeline_usd)",
+        "source": "outreach_reply"
+      },
+      "denominator": {
+        "expr": "count(distinct canonical_company.id) / 1000.0 filter (where lead.fit_verdict='match')",
+        "source": "lead"
+      },
+      "exclusions": [
+        "同一商机多联系人只计一次"
+      ],
+      "window": {
+        "type": "cohort",
+        "days": 90
+      },
+      "strata": [
+        "country",
+        "workspace_id"
+      ],
+      "ci": {
+        "method": "bootstrap"
+      },
+      "changelog": [
+        {
+          "version": 1,
+          "at": "2026-11-09",
+          "breaking": false,
+          "note": "首次定义"
+        }
+      ]
+    },
+    {
+      "schemaVersion": "metric-definition/v1",
+      "id": "T4-004",
+      "name": "cost_per_meeting",
+      "tier": "T4",
+      "unit": "usd",
+      "owner": "gtm-ops",
+      "status": "DRAFT",
+      "version": 1,
+      "effectiveFrom": "2026-11-09",
+      "exprStatus": "PENDING",
+      "definition": "全载成本（工具+人力）除以已举行会议数；邮件渠道对照 $150–400。",
+      "numerator": {
+        "expr": "sum(cost_usd)",
+        "source": "cost_ledger"
+      },
+      "denominator": {
+        "expr": "count(*) filter (where held)",
+        "source": "outreach_reply"
+      },
+      "exclusions": [
+        "含工具订阅与验证成本",
+        "人力按内部工时另计"
+      ],
+      "window": {
+        "type": "cohort",
+        "days": 30
+      },
+      "strata": [
+        "channel",
+        "country",
+        "workspace_id"
+      ],
+      "ci": {
+        "method": "bootstrap"
+      },
+      "benchmark": {
+        "note": "邮件 $150–400 / 电话 $300–800（Bridge Group 2025）",
+        "url": "https://blog.bridgegroupinc.com/hubfs/resources/TBG%202025%20Sales%20Development%20Report.pdf"
+      },
+      "changelog": [
+        {
+          "version": 1,
+          "at": "2026-11-09",
+          "breaking": false,
+          "note": "首次定义"
+        }
+      ]
+    },
+    {
+      "schemaVersion": "metric-definition/v1",
+      "id": "T4-005",
+      "name": "cost_per_opportunity",
+      "tier": "T4",
+      "unit": "usd",
+      "owner": "gtm-ops",
+      "status": "DRAFT",
+      "version": 1,
+      "effectiveFrom": "2026-11-09",
+      "exprStatus": "PENDING",
+      "definition": "全载成本除以商机数。",
+      "numerator": {
+        "expr": "sum(cost_usd)",
+        "source": "cost_ledger"
+      },
+      "denominator": {
+        "expr": "count(*) filter (where opportunity)",
+        "source": "outreach_reply"
+      },
+      "exclusions": [
+        "商机阶段定义同 T4-002"
+      ],
+      "window": {
+        "type": "cohort",
+        "days": 90
+      },
+      "strata": [
+        "channel",
+        "country",
+        "workspace_id"
+      ],
+      "ci": {
+        "method": "bootstrap"
+      },
+      "changelog": [
+        {
+          "version": 1,
+          "at": "2026-11-09",
+          "breaking": false,
+          "note": "首次定义"
+        }
+      ]
+    }
+  ]
+}

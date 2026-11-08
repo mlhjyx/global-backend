@@ -10,6 +10,8 @@ import { WorkspaceTechnicalBudgetQuoteController } from './workspace-technical-b
 import { WorkspaceTechnicalBudgetQuoteService } from './workspace-technical-budget-quote';
 import { resolveWorkspaceTechnicalBudgetEnvelope } from './workspace-technical-budget-envelope';
 import { ExecutionBudgetPlatformWriterDatabaseModule } from './execution-budget-platform-writer.database';
+import { ExecutionBudgetWindowUsageController } from './execution-budget-window-usage.controller';
+import { ExecutionBudgetWindowUsageService } from './execution-budget-window-usage.service';
 
 @Module({
   imports: [
@@ -17,7 +19,10 @@ import { ExecutionBudgetPlatformWriterDatabaseModule } from './execution-budget-
     AuthModule,
     ExecutionBudgetPlatformWriterDatabaseModule,
   ],
-  controllers: [WorkspaceTechnicalBudgetQuoteController],
+  controllers: [
+    WorkspaceTechnicalBudgetQuoteController,
+    ExecutionBudgetWindowUsageController,
+  ],
   providers: [
     {
       provide: ExecutionBudgetGrantVerifier,
@@ -27,6 +32,7 @@ import { ExecutionBudgetPlatformWriterDatabaseModule } from './execution-budget-
     ExecutionBudgetAuthorityService,
     PlatformExecutionBudgetAuthorityIngestionService,
     ExecutionBudgetAuthorityReadinessContributors,
+    ExecutionBudgetWindowUsageService,
     {
       provide: WorkspaceTechnicalBudgetQuoteService,
       useFactory: () =>

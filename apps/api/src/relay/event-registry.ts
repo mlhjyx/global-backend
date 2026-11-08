@@ -28,6 +28,8 @@ export const INTEGRATION_EVENTS: ReadonlySet<string> = new Set([
   'ClaimExpired',
   'KnowledgeConflictDetected',
   'DeletionCompleted', // 收口⑥ PR-B：擦除完成对外交付事件（🔴 payload 只计数 + subject 引用，无 PII）
+  'CampaignPlanJobFailed', // ch08 §3.1.4：失败回写第二通道（控制面 PATCH 重试耗尽后的 outbox 兜底）
+  'SanctionsListStale', // ch08 §3.1.12：制裁名单陈旧告警（审计/运营可见；无 PII）
   'SiteBuildCostSummaryUpdated', // v1 append-only reconciliation projection for SaaS Credits/Billing
 ]);
 

@@ -44,14 +44,15 @@ const deliverActs = proxyActivities<CampaignPlanningActivities>({
   },
 });
 
-// 失败回写 job：尽力而为，重试后仍失败也不顶替原始错误。
+// 失败回写 job：① 控制面 PATCH（网络抖动重试；4xx/422 在活动内已按 nonRetryable 处理）；
+// ② 重试耗尽仍失败 → outbox 集成事件 CampaignPlanJobFailed 兜底（ch08 §3.1.4 双通道）。
 const reportActs = proxyActivities<CampaignPlanningActivities>({
   startToCloseTimeout: '1 minute',
   retry: {
-    maximumAttempts: 5,
+    maximumAttempts: 8,
     initialInterval: '2 seconds',
     backoffCoefficient: 2,
-    maximumInterval: '30 seconds',
+    maximumInterval: '2 minutes',
   },
 });
 
@@ -223,17 +224,31 @@ export async function campaignPlanningWorkflow(
       replanHistory,
     });
   } catch (error) {
+    const failureCode = campaignPlanFailureCode(error);
     // job 回写放在不可取消作用域；回写失败不顶替原始失败。
     try {
       await CancellationScope.nonCancellable(() =>
         reportActs.reportCampaignPlanJobFailure({
           workspaceId,
           jobId,
-          error: campaignPlanFailureCode(error),
+          error: failureCode,
         }),
       );
     } catch {
-      /* 原始失败才是要报告的结果 */
+      // 双通道（ch08 §3.1.4）：控制面 PATCH 重试耗尽 → 写 outbox 集成事件，SaaS 拉取后把
+      // 仍处于 PENDING/RUNNING 的 job 置 FAILED。事件是拉模式（可能滞后），但不依赖单次 HTTP。
+      try {
+        await CancellationScope.nonCancellable(() =>
+          reportActs.emitCampaignPlanJobFailureEvent({
+            workspaceId,
+            campaignId,
+            jobId,
+            error: failureCode,
+          }),
+        );
+      } catch {
+        /* 原始失败才是要报告的结果 */
+      }
     }
     throw error;
   }

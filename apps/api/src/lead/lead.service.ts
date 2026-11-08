@@ -708,6 +708,30 @@ export class LeadService {
           };
         }
 
+        // 🔴 ch08 §3.1.12 制裁陈旧门（decide 不可绕）：名单 > SANCTIONS_LIST_MAX_AGE_DAYS（默认 7 天）
+        // 或任一 ENABLED 源 FAILED 时，筛查不得自动放行——交棒直接拒绝（SANCTIONS_LIST_STALE），
+        // 处置 = 先刷新名单（RUNBOOK「制裁刷新与陈旧处置」），刷新后本门自动恢复。
+        const listFreshness =
+          typeof this.sanctions.listFreshness === 'function'
+            ? await this.sanctions.listFreshness()
+            : undefined;
+        if (listFreshness?.active && listFreshness.stale) {
+          throw new ConflictException({
+            error: {
+              code: 'SANCTIONS_LIST_STALE',
+              message:
+                'sanctions list is stale — refresh required before handoff (fifth gate)',
+              details: {
+                ageDays: listFreshness.ageDays,
+                maxAgeDays: listFreshness.maxAgeDays,
+                blockAgeDays: listFreshness.blockAgeDays,
+                blocked: listFreshness.blocked,
+                sources: listFreshness.sources,
+              },
+            },
+          });
+        }
+
         // 🔴 第五门制裁筛查硬 re-check（decide 不可绕的终极安全网）：live 重筛（catch 名单自 qualify 后的更新）
         // + reconcile 既有复核态。命中且未被人工清（open/confirmed）→ 抛 SANCTIONS_HOLD_UNRESOLVED，
         // **回滚整个 decide、绝不建/发快照**（绝不把被制裁公司交付客户）。未启用(DISABLED)→ not_screened、不拦。
