@@ -28,6 +28,14 @@ import { stampLawfulBasis } from '../discovery/compliance/email-verification-gat
 import { artifactSubjectSkipReason } from '../tools/artifact-subject-denial';
 import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-judge';
 import type { SkillResolver } from '../skills/skill-runtime';
+import { AGENT_KEYS } from '../agents/agent-catalog';
+import {
+  AGENT_DECISION_TYPES,
+  AgentUnavailableError,
+  type AgentResolver,
+  type ResolvedAgent,
+} from '../agents/agent-runtime';
+import type { AgentDecisionTraceStore } from '../agents/agent-decision-trace.store';
 import type { RuntimeTelemetry } from '../model-runtime/types';
 import {
   CompanyDiscoveryQuery,
@@ -151,7 +159,12 @@ import {
   type DiscoveryModelExtractions,
 } from '../discovery/discovery-model-extractions';
 import { settledModelFailureReason } from '../discovery/settled-model-failure';
-import { narrowBySourceHints, planQuerySkipReason } from '../discovery/plan-query-sources';
+import {
+  narrowBySourceHints,
+  planQuerySkipReason,
+  planQuerySourceHints,
+  type CompanyDiscoverySource,
+} from '../discovery/plan-query-sources';
 import type { DiscoveryRunStage } from './discovery.run-failure';
 import { appendRunEvent } from '../discovery/run2/run-events';
 import { withUpstreamUnavailableRetryDelay } from './upstream-unavailable-retry';
@@ -806,6 +819,61 @@ async function fitStageJudged(
  * 计划 → Provider 调用 → Raw Zone 原样落地 → 归一 + 身份解析 → Canonical +
  * FieldEvidence + IdentityLink → Suppression 标记 → 成本入账。
  */
+/** M2 步 9b：角色 agent 的回合依赖（注册表解析 + 决策轨迹写入）。 */
+export interface DiscoveryAgentRuntime {
+  readonly agents: AgentResolver;
+  readonly traces: AgentDecisionTraceStore;
+}
+
+/**
+ * 回合级 agent 解析（M2 步 9b）。未注册/平台停用 → nonRetryable（run 按既有失败语义走）；
+ * 其它错误原样上抛（例如连接故障走既有重试策略）。返回的回合描述用于技能子集校验。
+ */
+async function resolveRoundAgent(
+  agents: AgentResolver,
+  agentKey: string,
+  workspaceId: string,
+): Promise<ResolvedAgent> {
+  try {
+    return await agents.resolve(agentKey, workspaceId);
+  } catch (error) {
+    if (error instanceof AgentUnavailableError) {
+      throw ApplicationFailure.nonRetryable(error.code, error.code);
+    }
+    throw error;
+  }
+}
+
+/**
+ * 源侦察员回合的「未路由源及原因」：已注册（同 source_class）但本次查询没有路由到的源。
+ * 优先级：租约停止 → 无受治理血缘 → 被停用 → hint 不可用 → hint 排除。
+ */
+export function sourceRouteRejections(input: {
+  readonly registered: readonly CompanyDiscoverySource[];
+  readonly sourceClass: SourceClass;
+  readonly routedKeys: ReadonlySet<string>;
+  readonly enabledKeys: ReadonlySet<string>;
+  readonly hintsInvalid: boolean;
+  readonly leaseStop: boolean;
+}): Array<{ candidateRef: string; rejectReason: string; revivable: boolean }> {
+  return input.registered
+    .filter((source) => source.sourceClass === input.sourceClass)
+    .filter((source) => !input.routedKeys.has(source.providerKey))
+    .map((source) => ({
+      candidateRef: source.providerKey,
+      rejectReason: input.leaseStop
+        ? 'LEASE_STOP'
+        : !source.hasCompanyLineage
+          ? 'SOURCE_LINEAGE_UNAVAILABLE'
+          : !input.enabledKeys.has(source.providerKey)
+            ? 'SOURCE_DISABLED'
+            : input.hintsInvalid
+              ? 'SOURCE_HINT_INVALID'
+              : 'SOURCE_HINT_EXCLUDED',
+      revivable: true,
+    }));
+}
+
 export function createDiscoveryActivities(deps: {
   prisma: PrismaService;
   providers: DiscoveryProviderRegistry;
@@ -813,6 +881,8 @@ export function createDiscoveryActivities(deps: {
   taxonomy?: TaxonomyResolver;
   /** S0 技能运行时：生产由 worker 注入 DB resolver；缺省为内置目录直通。 */
   skills?: SkillResolver;
+  /** M2 步 9b：源侦察员角色（注册表 + 轨迹）。缺省不启用角色门与轨迹（测试/未接线保持旧行为）。 */
+  agentRuntime?: DiscoveryAgentRuntime;
   /** IntentProjectionService 的 sitemap 探测出网经此闸门（收口②）。 */
   broker?: ExecutionBroker;
   runtimeTelemetry?: RuntimeTelemetry;
@@ -942,6 +1012,10 @@ export function createDiscoveryActivities(deps: {
       ) {
         invalidContinuation();
       }
+      // M2 步 9b：源侦察员回合门——注册表缺失/平台停用即 fail-closed，未接线时保持旧行为。
+      if (deps.agentRuntime) {
+        await resolveRoundAgent(deps.agentRuntime.agents, AGENT_KEYS.sourceScout, args.workspaceId);
+      }
       let binding: ExecutionBudgetBinding;
       try {
         if (args.executionContractVersion !== 2) throw new Error('invalid version');
@@ -1041,6 +1115,45 @@ export function createDiscoveryActivities(deps: {
       }
       for (const adapter of adapters) {
         assertProductDiscoveryProvenance({ providerKey: adapter.key });
+      }
+      // M2 步 9b：源侦察员回合的选源决策（chosen=路由到的源；rejected=未路由源及原因）。
+      // 与既有回执同源 at-least-once：同一 discriminator 重放不翻行（store 侧 ON CONFLICT）。
+      if (deps.agentRuntime) {
+        const hints = planQuerySourceHints(args.query.filters);
+        const traceDiscriminator =
+          queryKey ??
+          `legacy:${createHash('sha256')
+            .update(
+              JSON.stringify({
+                sourceClass,
+                filters: args.query.filters ?? {},
+                keywords: args.query.keywords ?? [],
+                queryOrdinal: args.queryOrdinal ?? -1,
+              }),
+            )
+            .digest('hex')
+            .slice(0, 40)}`;
+        await deps.agentRuntime.traces.record({
+          workspaceId: args.workspaceId,
+          runId: args.runId,
+          stepType: 'discovery.query',
+          agentKey: AGENT_KEYS.sourceScout,
+          decisionType: AGENT_DECISION_TYPES.sourceRoute,
+          discriminator: traceDiscriminator,
+          chosenOption: {
+            sourceClass,
+            sources: adapters.map((adapter) => adapter.key),
+          },
+          reasonCode: leaseStop ? 'LEASE_STOP' : adapters.length === 0 ? skipReason() : null,
+          rejectedCandidates: sourceRouteRejections({
+            registered: deps.providers.companyDiscoverySources(),
+            sourceClass,
+            routedKeys: new Set(adapters.map((adapter) => adapter.key)),
+            enabledKeys: new Set(classAdapters.map((adapter) => adapter.key)),
+            hintsInvalid: hints === null,
+            leaseStop,
+          }),
+        });
       }
       // 词表归一（docs/backend/vocab-taxonomy.md）：把 filters 里的行业/国家自由词（中/英/德）
       // 归一到规范节点，注入 resolved 码供会读它们的源精确路由。未接 resolver 或未命中时，

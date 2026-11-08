@@ -19,6 +19,7 @@ export const MODEL_RESULT_TASK_IDS = Object.freeze([
   "contact.find_decision_makers",
   "discovery.classify_trade_role",
   "outreach.first_contact_draft",
+  "campaign.plan",
 ] as const);
 export type ModelResultTaskId = (typeof MODEL_RESULT_TASK_IDS)[number];
 export const MODEL_RESULT_PROJECTION_SCHEMAS = Object.freeze({
@@ -34,6 +35,7 @@ export const MODEL_RESULT_PROJECTION_SCHEMAS = Object.freeze({
   "contact.find_decision_makers": "contact-decision-makers/v1",
   "discovery.classify_trade_role": "discovery-classify-trade-role/v1",
   "outreach.first_contact_draft": "outreach-first-contact-draft/v1",
+  "campaign.plan": "campaign-plan/v1",
 } satisfies Readonly<Record<ModelResultTaskId, TypedProjectionSchema>>);
 const MODEL_RESULT_KEYS = [
   "data",
@@ -1477,6 +1479,180 @@ const outreachDraftDefinition: TypedProjectionDefinition<unknown, unknown> = {
     });
   },
 };
+/**
+ * M2.1 受限 Campaign 规划器：CampaignPlan v0（与 gain-saas M2.0 契约逐字段一致）。
+ * 计划只是 propose-only 数据；plan_hash 由 gain-saas 单一权威计算（D-M2.1-b），
+ * 引擎侧投影只保证结构封闭、可回放。
+ */
+const campaignPlanDefinition: TypedProjectionDefinition<unknown, unknown> = {
+  schema: "campaign-plan/v1",
+  jsonSchema: modelResultSchema(
+    objectSchema(
+      {
+        schemaVersion: stringSchema(20, { enum: ["campaign-plan/v0"] }),
+        goal: objectSchema(
+          {
+            objective: stringSchema(500),
+            successMetric: stringSchema(200),
+          },
+          ["objective"],
+        ),
+        audience: objectSchema(
+          {
+            icpIds: { ...arraySchema(20, stringSchema(36)), minItems: 1 },
+            sizeCap: numberSchema(1, 1000, true),
+          },
+          ["icpIds", "sizeCap"],
+        ),
+        motions: {
+          ...arraySchema(
+            5,
+            objectSchema(
+              {
+                type: stringSchema(20, { enum: ["discovery"] }),
+                icpIds: { ...arraySchema(20, stringSchema(36)), minItems: 1 },
+              },
+              ["type", "icpIds"],
+            ),
+          ),
+          minItems: 1,
+        },
+        budget: objectSchema(
+          {
+            capMicros: numberSchema(0, 9_000_000_000_000_000, true),
+            currency: stringSchema(3, { enum: ["USD"] }),
+          },
+          ["currency"],
+        ),
+        approvalPolicy: objectSchema(
+          { required: { type: "boolean", enum: [true] } },
+          ["required"],
+        ),
+        decisionPolicy: objectSchema(
+          { maxReplans: { ...numberSchema(0, 0, true), enum: [0] } },
+          ["maxReplans"],
+        ),
+      },
+      [
+        "schemaVersion",
+        "goal",
+        "audience",
+        "motions",
+        "budget",
+        "approvalPolicy",
+        "decisionPolicy",
+      ],
+    ),
+  ),
+  project(raw) {
+    const dataKeys = [
+      "schemaVersion",
+      "goal",
+      "audience",
+      "motions",
+      "budget",
+      "approvalPolicy",
+      "decisionPolicy",
+    ];
+    const result = readModelResult(raw, dataKeys, dataKeys);
+    const goal = ownDataRecord(
+      field(result.data, "goal"),
+      ["objective", "successMetric"],
+      ["objective"],
+    );
+    const audience = ownDataRecord(
+      field(result.data, "audience"),
+      ["icpIds", "sizeCap"],
+      ["icpIds", "sizeCap"],
+    );
+    const budget = ownDataRecord(
+      field(result.data, "budget"),
+      ["capMicros", "currency"],
+      ["currency"],
+    );
+    const approval = ownDataRecord(
+      field(result.data, "approvalPolicy"),
+      ["required"],
+      ["required"],
+    );
+    const decision = ownDataRecord(
+      field(result.data, "decisionPolicy"),
+      ["maxReplans"],
+      ["maxReplans"],
+    );
+    return projectModelResultEnvelope(result, {
+      schemaVersion: field(result.data, "schemaVersion"),
+      goal: {
+        objective: field(goal, "objective"),
+        ...(hasField(goal, "successMetric")
+          ? { successMetric: field(goal, "successMetric") }
+          : {}),
+      },
+      audience: {
+        icpIds: projectStringArray(field(audience, "icpIds")),
+        sizeCap: field(audience, "sizeCap"),
+      },
+      motions: denseArray(field(result.data, "motions")).map((motion) => {
+        const source = ownDataRecord(
+          motion,
+          ["type", "icpIds"],
+          ["type", "icpIds"],
+        );
+        return {
+          type: field(source, "type"),
+          icpIds: projectStringArray(field(source, "icpIds")),
+        };
+      }),
+      budget: {
+        ...(hasField(budget, "capMicros")
+          ? { capMicros: field(budget, "capMicros") }
+          : {}),
+        currency: field(budget, "currency"),
+      },
+      approvalPolicy: { required: field(approval, "required") },
+      decisionPolicy: { maxReplans: field(decision, "maxReplans") },
+    });
+  },
+  restore(projected) {
+    const result = projected as {
+      data: UnknownRecord & {
+        goal: UnknownRecord;
+        audience: UnknownRecord;
+        motions: readonly UnknownRecord[];
+        budget: UnknownRecord;
+        approvalPolicy: UnknownRecord;
+        decisionPolicy: UnknownRecord;
+      };
+      provider: string;
+      model: string;
+    };
+    return restoreModelResult(result, {
+      schemaVersion: result.data.schemaVersion,
+      goal: {
+        objective: result.data.goal.objective,
+        ...(hasField(result.data.goal, "successMetric")
+          ? { successMetric: result.data.goal.successMetric }
+          : {}),
+      },
+      audience: {
+        icpIds: [...(result.data.audience.icpIds as string[])],
+        sizeCap: result.data.audience.sizeCap,
+      },
+      motions: result.data.motions.map((motion) => ({
+        type: motion.type,
+        icpIds: [...(motion.icpIds as string[])],
+      })),
+      budget: {
+        ...(hasField(result.data.budget, "capMicros")
+          ? { capMicros: result.data.budget.capMicros }
+          : {}),
+        currency: result.data.budget.currency,
+      },
+      approvalPolicy: { required: result.data.approvalPolicy.required },
+      decisionPolicy: { maxReplans: result.data.decisionPolicy.maxReplans },
+    });
+  },
+};
 export const MODEL_RESULT_PROJECTION_DEFINITIONS = Object.freeze([
   claimsDefinition,
   profileDefinition,
@@ -1490,6 +1666,7 @@ export const MODEL_RESULT_PROJECTION_DEFINITIONS = Object.freeze([
   peopleDefinition,
   tradeRoleDefinition,
   outreachDraftDefinition,
+  campaignPlanDefinition,
 ] as const);
 export function getModelResultProjectionSchema(
   taskId: string,

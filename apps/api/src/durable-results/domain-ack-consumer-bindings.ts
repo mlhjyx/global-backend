@@ -56,6 +56,9 @@ export const DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS = Object.freeze([
   { producerId: 'icp.design', consumer: 'IcpService.generateFromCompany', domainAggregateType: 'IcpDefinition', identity: 'company-id-and-icp-version', resultStrategy: 'typed_projection', resultSchema: 'icp-design/v1' },
   { producerId: 'outreach.first_contact_draft', consumer: 'OutreachDraftService.generate', domainAggregateType: 'LeadOutreachDraft', identity: 'receipt-derived-draft-id-and-version', resultStrategy: 'typed_projection', resultSchema: 'outreach-first-contact-draft/v1' },
   { producerId: 'taxonomy.normalize', consumer: 'TaxonomyResolver', domainAggregateType: 'TermAlias', identity: 'taxonomy-kind-and-normalized-term', resultStrategy: 'typed_projection', resultSchema: 'taxonomy-code/v1' },
+  // M2.1：计划回执的「域」是 gain-saas 的 revision（plan 只能作为 DRAFT revision 存在）；
+  // ACK 在回调交付成功后落本侧账本，domainAckKey=jobId、revision=回执摘要。
+  { producerId: 'campaign.plan', consumer: 'CampaignPlanningActivities.deliverCampaignPlanRevision', domainAggregateType: 'CampaignRevision', identity: 'job-id-and-result-digest', resultStrategy: 'typed_projection', resultSchema: 'campaign-plan/v1' },
 ] as const satisfies readonly DomainAckProductConsumerBinding[]);
 
 const DISCOVERY_GOVERNED_COMPANY_ACK_BINDINGS = Object.freeze([

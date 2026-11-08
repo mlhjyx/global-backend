@@ -18,10 +18,15 @@ import { RouterModelGateway } from "../model-gateway/router-model-gateway";
 import { buildGatewayProvider } from "../model-gateway/model-providers.config";
 import { AiTraceSink } from "../model-gateway/ai-trace.sink";
 import { createUnderstandingActivities } from "./understanding.activities";
+import { createCampaignPlanningActivities } from "./campaign-planning.activities";
 import { seedSkillCatalog } from "../skills/skill-catalog.seed";
 import { seedPackCatalog } from "../skills/packs/pack-catalog.seed";
+import { seedAgentCatalog } from "../agents/agent-catalog.seed";
 import { createDbSkillResolver } from "../skills/skill-resolver";
 import { PrismaSkillRegistryStore } from "../skills/skill-registry.store";
+import { createDbAgentResolver } from "../agents/agent-resolver";
+import { PrismaAgentRegistryStore } from "../agents/agent-registry.store";
+import { PrismaAgentDecisionTraceStore } from "../agents/agent-decision-trace.store";
 import { createDiscoveryActivities } from "./discovery.activities";
 import { createRun2Activities } from "./discovery.run2.activities";
 import { createRun2PipelineActivities } from "./discovery.run2.pipeline.activities";
@@ -441,6 +446,17 @@ async function main(): Promise<void> {
     await holdPlatformNotReady("PACK_CATALOG_SEED_UNAVAILABLE");
   }
 
+  // M2 步 9b agent 注册表 seed（owner 写平台表；解析器 fail-closed，目录缺失即全员不可用 → 大声失败）。
+  try {
+    const agentSeed = await seedAgentCatalog(ownerDb);
+    console.log(
+      `[worker] agent catalog seed ok (${agentSeed.profiles} agents, ${agentSeed.inserted} new)`,
+    );
+  } catch (error) {
+    console.error("[worker] agent catalog seed failed:", error);
+    await holdPlatformNotReady("AGENT_CATALOG_SEED_UNAVAILABLE");
+  }
+
   // Schedule provisioning is an independently authorized operator action.
 
   const registry = new ModelProviderRegistry();
@@ -456,6 +472,9 @@ async function main(): Promise<void> {
   const skillResolver = createDbSkillResolver(
     new PrismaSkillRegistryStore(prisma),
   );
+  // M2 步 9b：agent 注册表解析器（fail-closed，30s 缓存）与决策轨迹（append-only、幂等）。
+  const agentResolver = createDbAgentResolver(new PrismaAgentRegistryStore(prisma));
+  const agentTraces = new PrismaAgentDecisionTraceStore(prisma);
   const costReconciliationCatalog =
     createSiteBuildCostReconciliationCatalogFromEnv();
   const activeSettlementRoutes = (() => {
@@ -608,6 +627,14 @@ async function main(): Promise<void> {
         budgetStore,
         skills: skillResolver,
       }),
+      // M2.1 受限 Campaign 规划器（propose-only，影子期不执行任何动作）。
+      ...createCampaignPlanningActivities({
+        prisma,
+        gateway,
+        runtimeTelemetry: runtimeTelemetry.telemetry,
+        budgetStore,
+        skills: skillResolver,
+      }),
       ...createDiscoveryActivities({
         prisma,
         providers,
@@ -618,6 +645,7 @@ async function main(): Promise<void> {
         budgetStore,
         runLease: prismaDiscoveryRunLeaseReader(prisma),
         skills: skillResolver,
+        agentRuntime: { agents: agentResolver, traces: agentTraces },
       }),
       // Run 2.0（M0③）：快扫三段——规则预筛 / 批量粗判 / 临时候选物化。
       ...createRun2Activities({
