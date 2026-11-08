@@ -185,10 +185,32 @@ people_plus as (
   select workspace_id, dedupe_key from people_email
   union
   select workspace_id, dedupe_key from people_phone
+),
+people_email_only as (
+  select pe.workspace_id, pe.dedupe_key from people_email pe
+  where not exists (
+    select 1 from people_phone pp
+    where pp.workspace_id = pe.workspace_id and pp.dedupe_key = pe.dedupe_key
+  )
+),
+people_phone_only as (
+  select pp.workspace_id, pp.dedupe_key from people_phone pp
+  where not exists (
+    select 1 from people_email pe
+    where pe.workspace_id = pp.workspace_id and pe.dedupe_key = pp.dedupe_key
+  )
+),
+people_both as (
+  select pe.workspace_id, pe.dedupe_key from people_email pe
+  join people_phone pp
+    on pp.workspace_id = pe.workspace_id and pp.dedupe_key = pe.dedupe_key
 )
 select (select count(*) from acc) accounts,
        (select count(*) from people_email) vric_strict,
-       (select count(*) from people_plus) vric_plus`;
+       (select count(*) from people_plus) vric_plus,
+       (select count(*) from people_email_only) email_only,
+       (select count(*) from people_phone_only) phone_only,
+       (select count(*) from people_both) both_channels`;
 }
 
 const ROWS_COLUMNS = [
@@ -224,8 +246,11 @@ function vricBlock(label, row) {
   const accounts = toInt(row.accounts);
   const strict = toInt(row.vric_strict);
   const plus = toInt(row.vric_plus);
+  const emailOnly = toInt(row.email_only);
+  const phoneOnly = toInt(row.phone_only);
+  const both = toInt(row.both_channels);
   const per1000 = (people) => (accounts > 0 ? ((1000 * people) / accounts).toFixed(1) : "—");
-  return `- ${label}：ICP 账户 ${accounts}；VRIC_STRICT ${strict} 人 → ${per1000(strict)}/千账户；VRIC_PLUS ${plus} 人 → ${per1000(plus)}/千账户。`;
+  return `- ${label}：ICP 账户 ${accounts}；VRIC_STRICT ${strict} 人 → ${per1000(strict)}/千账户；VRIC_PLUS ${plus} 人 → ${per1000(plus)}/千账户（通道拆分 email_only ${emailOnly} / phone_only ${phoneOnly} / both ${both}，字典 §1.3.1）。`;
 }
 
 function renderMarkdown(data) {
@@ -315,7 +340,7 @@ function renderMarkdown(data) {
   out.push("");
   out.push("## 6. VRIC（引擎侧部分）");
   out.push("");
-  out.push("口径：字典 §1.3 的 1–3、6 条（suppression / OPT_OUT / 合法依据在 SaaS 库与执行层，本库不可验）；`verification_method` 取 schema 实际值 `smtp_rcpt | provider_reported | operator`。");
+  out.push("口径：字典 §1.3（STRICT）与 §1.3.1（PLUS 通道拆分）的 1–3、6 条；suppression / OPT_OUT / 合法依据与 phone 的 `line_type`/抽呼校准在 SaaS 库与执行层，本库不可验——PLUS 是引擎侧上界。`verification_method` 取 schema 实际值 `smtp_rcpt | provider_reported | operator`。");
   out.push("");
   out.push(vricBlock("全库", data.vricAll));
   out.push(vricBlock("主租户", data.vricMain));
@@ -395,8 +420,9 @@ export function collectFunnelBaseline({ mainWorkspace = DEFAULT_MAIN_WORKSPACE, 
     return { workspace: workspaceId, total, statuses, queues };
   });
 
-  const vricAll = queryRow(vricSql(null), ["accounts", "vric_strict", "vric_plus"]);
-  const vricMain = queryRow(vricSql(mainId), ["accounts", "vric_strict", "vric_plus"]);
+  const vricColumns = ["accounts", "vric_strict", "vric_plus", "email_only", "phone_only", "both_channels"];
+  const vricAll = queryRow(vricSql(null), vricColumns);
+  const vricMain = queryRow(vricSql(mainId), vricColumns);
 
   return {
     generatedAt: utcStamp(),
@@ -420,8 +446,8 @@ export function collectFunnelBaseline({ mainWorkspace = DEFAULT_MAIN_WORKSPACE, 
     leadByWorkspace,
     contactMeta,
     companyContactChannels,
-    vricAll: { accounts: toInt(vricAll.accounts), vric_strict: toInt(vricAll.vric_strict), vric_plus: toInt(vricAll.vric_plus) },
-    vricMain: { accounts: toInt(vricMain.accounts), vric_strict: toInt(vricMain.vric_strict), vric_plus: toInt(vricMain.vric_plus) },
+    vricAll: Object.fromEntries(vricColumns.map((column) => [column, toInt(vricAll[column])])),
+    vricMain: Object.fromEntries(vricColumns.map((column) => [column, toInt(vricMain[column])])),
     showSql,
     sql: showSql
       ? {

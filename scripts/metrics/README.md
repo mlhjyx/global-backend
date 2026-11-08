@@ -1,13 +1,18 @@
-# scripts/metrics — 只读度量脚手架（P0 首波）
+# scripts/metrics — 只读度量脚手架（P0 第一、二波）
 
-配套文档：`docs/metrics/metric-dictionary.md`（指标口径唯一来源）、`docs/evidence/2026-11-09-funnel-baseline.md`、`docs/evidence/2026-11-09-risky-inventory.md`。
+配套文档：`docs/metrics/metric-dictionary.md`（指标口径唯一来源）、`docs/metrics/frame-registry.md`（19 法域 frame 矩阵）、`evals/golden-discovery/README.md`（金标抽样与登记）、`docs/evidence/2026-11-09-funnel-baseline.md` / `2026-11-09-risky-inventory.md`（时点证据）。
 
 | 脚本 | 用途 | 依赖 |
 | --- | --- | --- |
-| `funnel-baseline.mjs` | 公司池 → lead → fit=match → 域名 → 邮箱 → 电话 → VALID 漏斗；按 workspace/国家/来源拆分；Wilson 95% CI | Node 内置 + `docker exec global-postgres psql`（只读会话） |
+| `funnel-baseline.mjs` | 公司池 → lead → fit=match → 域名 → 邮箱 → 电话 → VALID 漏斗；按 workspace/国家/来源拆分；VRIC STRICT/PLUS（含 email_only/phone_only/both 通道拆分）；Wilson 95% CI | Node 内置 + `docker exec global-postgres psql`（只读会话） |
 | `risky-inventory.mjs` | 联系点元数据盘点：status × catch_all × verification_method × source_type × email_type；公司/域名级汇总；SMTP 探测聚合 | 同上 |
-| `capture-recapture.mjs` | 两 frame（CSV）确定性键匹配 + Chapman 估计量与诊断门；三源 log-linear 属 ch01 PR-13 | 纯 Node 内置（无网络/无数据库） |
+| `capture-recapture.mjs` | 两 frame：确定性键匹配 + Chapman；三 frame：键簇捕获矩阵 + 8 个 log-linear 模型（G²+AIC 选型）+ 参数化 bootstrap CI + 诊断门 | 纯 Node 内置（无网络/无数据库） |
+| `golden-sampling.mjs` | 金标集确定性分层抽样（seed 固定、按层配额、欠采样如实报告） | 纯 Node 内置 |
+| `frame-registry.mjs` | 校验 `docs/metrics/frames/frame-registry.v1.json`：唯一键、许可、枚举、ACTIVE 需 license | 纯 Node 内置 |
+| `reply-rate.mjs` | RR1/RR3 成对计算与声明校验（`unknown>0` 无 `ê` 拒绝出数；`--check` 拒绝单口径） | 纯 Node 内置 |
 | `lib/psql.mjs` | 只读 psql 执行器（`PGOPTIONS=-c default_transaction_read_only=on`）与 Wilson/比率工具 | Node 内置 |
+| `lib/prng.mjs` | 固定 seed 的 PRNG / Poisson / 分位数（抽样与 bootstrap） | Node 内置 |
+| `sql/golden-pool-*.sql` | 金标候选池只读导出模板（账户/联系人；联系人 ref 为盲化 dedupe_key） | psql 只读 |
 
 ## 用法
 
@@ -15,9 +20,14 @@
 node scripts/metrics/funnel-baseline.mjs [--json] [--show-sql] [--main-workspace <uuid>]
 node scripts/metrics/risky-inventory.mjs  [--json] [--show-sql] [--top-domains N]
 node scripts/metrics/capture-recapture.mjs --a frameA.csv --b frameB.csv [--keys domain,registry_id,name_country] [--json]
+node scripts/metrics/capture-recapture.mjs --frame A=a.csv --frame B=b.csv --frame C=c.csv [--bootstrap 1000] [--seed 20261108] [--json]
+node scripts/metrics/golden-sampling.mjs --manifest evals/golden-discovery/v1/manifest.template.json --dataset accounts --pool pool.csv --out sampled.csv [--report report.json]
+node scripts/metrics/frame-registry.mjs [--json]
+node scripts/metrics/reply-rate.mjs --input counts.json [--json]
+node scripts/metrics/reply-rate.mjs --check statement.txt
 ```
 
-`capture-recapture` 的 CSV 需表头，可用列：`name`、`country`、`domain`、`registry_id`（至少一列）。匹配是 ch01 §3.4.3 Splink 流水线的确定性第一段；`m11 < 5` 时按计划不出 N̂。
+`capture-recapture` 的 CSV 需表头，可用列：`name`、`country`、`domain`、`registry_id`（至少一列）。匹配是 ch01 §3.4.3 Splink 流水线的确定性第一段；两 frame 用 Chapman（`m11 < 5` 不出 N̂），三 frame 用 log-linear（两两交集 < 5 阻断、< 25 警告、模型跨度 > 30% 只报范围）。
 
 ## 测试
 
@@ -32,5 +42,6 @@ cd scripts/metrics && node --test
 ## 纪律
 
 - **只读**：SQL 一律经 `lib/psql.mjs`，会话级 `default_transaction_read_only=on`，写语句会被服务端拒绝。
-- **PII**：`contact_point.value` 是加密列，任何脚本不得 select 它；只用元数据列与公司级 `domain`。
+- **PII**：`contact_point.value` 是加密列，任何脚本不得 select 它；只用元数据列与公司级 `domain`；金标联系人 ref 用盲化 `dedupe_key`。
+- **固定 seed**：抽样与 bootstrap 必须可从 manifest/参数复现（ch01 §6.3）。
 - **快照会漂移**：输出是单时点读数；引用前重跑并注明日期。
