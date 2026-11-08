@@ -39,6 +39,8 @@
 
 [执行授权物理接线围栏复核](execution-authority-fence-review-20261001.md)：Router/ToolBroker 四个受保护文件自 `b8dd5eb0` 以来全部改动的逐提交静态复核（10-01），及 10-06 的复查与独立复审；Router 指纹据此更新，`execution-authority-policy` spec 回到 required 门。只是静态复核记录，不是 RuntimeEvidence，也不作为运行或发布证明。
 
+[2026-11-09 源记分卡基线（只读离线版）](2026-11-09-source-scorecard.md)：5 个 provider 的接受/拒收/原因码拆分——directory 73.8% 被拒/隔离（`PROVIDER_PAYLOAD_SCHEMA_INVALID` 70.1% / `SOURCE_POLICY_MISSING` 26.6% / `PROCESSING_KEY_DRIFT` 3.3%）；public_web 接受率 91.8% 但隔离 267 条全为 key drift；wikidata 95.7%。`scripts/metrics/source-scorecard.mjs` 只读生成（`source-scorecard-daily/v1`，含幂等 contentHash）。
+
 [2026-11-09 漏斗基线（只读快照）](2026-11-09-funnel-baseline.md)：全库 2,423 家公司 → fit=match 403（16.6%）→ match 有邮箱 73（18.1%，Wilson 95% CI [14.7%, 22.2%]）→ 有电话 4 → 邮箱 VALID 0 → VRIC_1000_STRICT=0；主租户 787/128/9/0/0。只读 SQL（`scripts/metrics/funnel-baseline.mjs`），`contact_point.value` 加密列未读取；单时点快照，引用前重跑。
 
 [2026-11-09 RISKY 联系点盘点（只读元数据快照）](2026-11-09-risky-inventory.md)：274 条邮箱 = VALID 0 / RISKY 270（246 从未验证 + 24 pattern_guess）/ UNVERIFIED 3 / INVALID 1；250 条无 `source_type`、0 条有 `source_url`；135 次 `smtp-probe-verdict/v1` 全部只到域名连通层；270 条 RISKY 分布在 86 家公司 / 73 个域名。修正首日「270=250+24」与「213 无溯源」两处口径（`scripts/metrics/risky-inventory.mjs`）。
