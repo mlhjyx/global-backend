@@ -1,7 +1,7 @@
 # M2 步 12 · 能力 5 Opportunity/Attribution 归因闭环落地设计（2026-11-08）
 
-> 生命周期：`DRAFT`
-> 生命周期依据：按 §0.6 任务启动门产出，待产品负责人过目批准后转 `APPROVED`；依据协调计划 §0.2 步 12（能力 5：Outcome→归因→单位经济；验收=归因与台账一致）、§18.4 P1-6（Golden Set 与在线指标接归因）、§0.7 F1（北极星 cost per positive outcome / pipeline per dollar）、D-MA-9（跨租户驾驶舱先行项：per-run/per-lead 成本归集）。主会话起草（2026-11-08）。
+> 生命周期：`APPROVED`
+> 生命周期依据：按 §0.6 任务启动门产出；产品负责人 2026-11-08 已批准（经主会话打包确认，按推荐值）；依据协调计划 §0.2 步 12（能力 5：Outcome→归因→单位经济；验收=归因与台账一致）、§18.4 P1-6（Golden Set 与在线指标接归因）、§0.7 F1（北极星 cost per positive outcome / pipeline per dollar）、D-MA-9（跨租户驾驶舱先行项：per-run/per-lead 成本归集）。主会话起草（2026-11-08）。
 > 前置依赖：步 10（QGO/SAO/Outcome，实施中）提供 Outcome；步 11（投放批次/回复，实施中）提供触达触点；成本侧 usage_ledger/cost_ledger 与 run 归属（1b 已上线）已具备。
 
 ## 1. 背景与目标
