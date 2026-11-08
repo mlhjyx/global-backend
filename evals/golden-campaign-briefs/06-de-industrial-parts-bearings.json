@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "campaign-golden-brief/v1",
+  "id": "06-de-industrial-parts-bearings",
+  "brief": {
+    "industry": "industrial components",
+    "country": "DE",
+    "objective": "为轴承与传动零部件寻找德国批发商与维修服务商的合作线索",
+    "icpSummary": "德国轴承/传动零部件批发商与工业维修服务商（MRO），10–200 人，服务机械制造与维护客户，库存备货型",
+    "budgetCapMicros": 220000000,
+    "language": "de"
+  },
+  "expectations": {
+    "planSchemaVersion": "campaign-plan/v0",
+    "requiredFields": [
+      "schemaVersion",
+      "goal.objective",
+      "audience.icpIds",
+      "audience.sizeCap",
+      "motions.0.type",
+      "budget.currency",
+      "approvalPolicy.required",
+      "decisionPolicy.maxReplans"
+    ],
+    "forbiddenFields": [
+      "motions.0.send",
+      "motions.0.channels",
+      "deliveries",
+      "proformaInvoice"
+    ],
+    "forbiddenContent": [
+      "proforma",
+      "\\binvoice\\b",
+      "send email",
+      "whatsapp",
+      "\\bPI number\\b"
+    ],
+    "budgetRespect": {
+      "capMicrosPath": "budget.capMicros",
+      "currency": "USD"
+    },
+    "decisionPolicy": {
+      "maxReplansMax": 2
+    },
+    "motionTypes": [
+      "discovery"
+    ]
+  },
+  "notes": "预算上限 220 USD（micros）示意；MRO 批发商的库存与备货特征是规划器选择检索维度的依据。"
+}

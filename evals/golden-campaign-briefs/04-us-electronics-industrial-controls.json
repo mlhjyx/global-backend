@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "campaign-golden-brief/v1",
+  "id": "04-us-electronics-industrial-controls",
+  "brief": {
+    "industry": "industrial electronics",
+    "country": "US",
+    "objective": "为工业控制类电子部件寻找美国中西部制造商的采购与合作线索",
+    "icpSummary": "美国工业控制/传感器制造商，50–800 人，使用工业级 PCBA 与嵌入式模块，有本地化采购与二供需求",
+    "budgetCapMicros": 200000000,
+    "language": "en"
+  },
+  "expectations": {
+    "planSchemaVersion": "campaign-plan/v0",
+    "requiredFields": [
+      "schemaVersion",
+      "goal.objective",
+      "audience.icpIds",
+      "audience.sizeCap",
+      "motions.0.type",
+      "budget.currency",
+      "approvalPolicy.required",
+      "decisionPolicy.maxReplans"
+    ],
+    "forbiddenFields": [
+      "motions.0.send",
+      "motions.0.channels",
+      "deliveries",
+      "proformaInvoice"
+    ],
+    "forbiddenContent": [
+      "proforma",
+      "\\binvoice\\b",
+      "send email",
+      "whatsapp",
+      "\\bPI number\\b"
+    ],
+    "budgetRespect": {
+      "capMicrosPath": "budget.capMicros",
+      "currency": "USD"
+    },
+    "decisionPolicy": {
+      "maxReplansMax": 2
+    },
+    "motionTypes": [
+      "discovery"
+    ]
+  },
+  "notes": "预算上限 200 USD（micros）示意；ICP 强调本地化采购动因（timing signal 由规划器在记忆/池统计里佐证）。"
+}

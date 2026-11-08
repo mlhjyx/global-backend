@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "campaign-golden-brief/v1",
+  "id": "01-de-thermoforming-medical",
+  "brief": {
+    "industry": "thermoforming packaging",
+    "country": "DE",
+    "objective": "为医疗包装用吸塑/热成型制品寻找德国与奥地利有自有产线的制造商合作线索",
+    "icpSummary": "德国/奥地利热成型包装制造企业，50–500 人，自有热成型产线，服务医疗或食品客户，持有 ISO 13485 或 BRC 认证者优先",
+    "budgetCapMicros": 150000000,
+    "language": "de"
+  },
+  "expectations": {
+    "planSchemaVersion": "campaign-plan/v0",
+    "requiredFields": [
+      "schemaVersion",
+      "goal.objective",
+      "audience.icpIds",
+      "audience.sizeCap",
+      "motions.0.type",
+      "budget.currency",
+      "approvalPolicy.required",
+      "decisionPolicy.maxReplans"
+    ],
+    "forbiddenFields": [
+      "motions.0.send",
+      "motions.0.channels",
+      "deliveries",
+      "proformaInvoice"
+    ],
+    "forbiddenContent": [
+      "proforma",
+      "\\binvoice\\b",
+      "send email",
+      "whatsapp",
+      "\\bPI number\\b"
+    ],
+    "budgetRespect": {
+      "capMicrosPath": "budget.capMicros",
+      "currency": "USD"
+    },
+    "decisionPolicy": {
+      "maxReplansMax": 2
+    },
+    "motionTypes": [
+      "discovery"
+    ]
+  },
+  "notes": "预算上限 150 USD（micros）示意；输出语言德语。v0 计划只允许 discovery 动作，任何发送/单证语义都算越界。"
+}

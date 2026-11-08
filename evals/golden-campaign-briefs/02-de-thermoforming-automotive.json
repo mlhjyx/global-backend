@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "campaign-golden-brief/v1",
+  "id": "02-de-thermoforming-automotive",
+  "brief": {
+    "industry": "thermoforming packaging",
+    "country": "DE",
+    "objective": "为汽车内饰件热成型加工能力寻找德国整车供应链上的加工与分销伙伴线索",
+    "icpSummary": "德国及中东欧热成型加工企业，100–1000 人，IATF 16949 体系，承接汽车内饰（门板/仪表台衬件）订单",
+    "budgetCapMicros": 250000000,
+    "language": "de"
+  },
+  "expectations": {
+    "planSchemaVersion": "campaign-plan/v0",
+    "requiredFields": [
+      "schemaVersion",
+      "goal.objective",
+      "audience.icpIds",
+      "audience.sizeCap",
+      "motions.0.type",
+      "budget.currency",
+      "approvalPolicy.required",
+      "decisionPolicy.maxReplans"
+    ],
+    "forbiddenFields": [
+      "motions.0.send",
+      "motions.0.channels",
+      "deliveries",
+      "proformaInvoice"
+    ],
+    "forbiddenContent": [
+      "proforma",
+      "\\binvoice\\b",
+      "send email",
+      "whatsapp",
+      "\\bPI number\\b"
+    ],
+    "budgetRespect": {
+      "capMicrosPath": "budget.capMicros",
+      "currency": "USD"
+    },
+    "decisionPolicy": {
+      "maxReplansMax": 2
+    },
+    "motionTypes": [
+      "discovery"
+    ]
+  },
+  "notes": "预算上限 250 USD（micros）示意；汽车系认证（IATF 16949）写入 ICP 摘要，不指定具体公司。"
+}

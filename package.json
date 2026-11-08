@@ -67,7 +67,8 @@
     "format": "prettier --write .",
     "packs:generate": "pnpm exec tsx scripts/generate-pack-catalog.mts",
     "packs:validate": "pnpm exec tsx scripts/validate-packs.mts",
-    "skills:evals:validate": "pnpm exec tsx scripts/validate-skill-evals.mts"
+    "skills:evals:validate": "pnpm exec tsx scripts/validate-skill-evals.mts",
+    "campaign:golden": "pnpm exec tsx scripts/campaign-golden.mts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
