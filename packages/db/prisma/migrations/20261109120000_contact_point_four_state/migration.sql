@@ -160,8 +160,9 @@ CREATE TABLE "contact_point_verification_event" (
   CONSTRAINT "cpve_catch_all_check" CHECK ("catch_all" IS NULL OR "catch_all" IN
     ('catch_all', 'not_catch_all', 'inconclusive', 'unknown')),
   CONSTRAINT "cpve_cost_check" CHECK ("cost_microusd" >= 0),
+  -- ON UPDATE CASCADE 与 Prisma relation 的默认 onUpdate 动作一致（漂移门零容忍）。
   CONSTRAINT "contact_point_verification_event_contact_point_id_fkey" FOREIGN KEY ("contact_point_id")
-    REFERENCES "contact_point"("id") ON DELETE CASCADE,
+    REFERENCES "contact_point"("id") ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT "cpve_unique_attempt" UNIQUE
     ("workspace_id", "contact_point_id", "provider_key", "request_hash")
 );
