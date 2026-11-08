@@ -5311,6 +5311,63 @@
         ]
       }
     },
+    "/api/v1/outreach/dnc/suppress": {
+      "post": {
+        "description": "规范化邮箱后只存 SHA-256；同一邮箱重复写入幂等。调用方必须已确认退订/投诉事实。",
+        "operationId": "OutreachDncController_suppress_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuppressOutreachDncDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "suppressed"
+                      ],
+                      "properties": {
+                        "suppressed": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "写入平台级外联抑制（退订/投诉/退信）",
+        "tags": [
+          "Outreach"
+        ],
+        "x-required-scopes": [
+          "compliance:manage"
+        ]
+      }
+    },
     "/api/v1/companies": {
       "post": {
         "description": "支持 Idempotency-Key 头：同 key 重放返回首次结果，不重复创建（PRD 11.16）。",
@@ -20197,6 +20254,36 @@
         },
         "required": [
           "emails"
+        ]
+      },
+      "SuppressOutreachDncDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "需要平台级抑制的收件邮箱（服务端只落 SHA-256，不存明文）",
+            "maxLength": 320
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "unsubscribe",
+              "bounce",
+              "complaint",
+              "manual",
+              "legal"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "description": "抑制来源（如 gain-saas:unsubscribe）",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "email",
+          "reason",
+          "source"
         ]
       },
       "PublicContactDto": {
