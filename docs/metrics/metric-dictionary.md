@@ -172,6 +172,8 @@ week（ISO week，UTC 周一起）
 
 ### 1.8 报告格式（强制）
 
+周报/月报一律由 `scripts/metrics/report.mjs` 从 `metric-observation` 快照渲染（模板见 `docs/metrics/reporting.md`），禁止手写数字；未接线/不可测/缺失三种状态分列。
+
 ```text
 指标：email_valid_rate v1
 口径：30 天滚动；分母=已尝试验证邮箱；排除 role 邮箱出分子

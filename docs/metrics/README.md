@@ -14,6 +14,7 @@
 | [schemas/metric-definition.v1.schema.json](schemas/metric-definition.v1.schema.json) | 单指标 JSON Schema | lint 内置等价校验 |
 | [schemas/sources.v1.json](schemas/sources.v1.json) | 公式可引用的数据源登记（existing / planned / saas） | lint 的 `SOURCE_UNKNOWN` / `ACTIVE_SOURCE_NOT_EXISTING` |
 | [frame-registry.md](frame-registry.md) + [frames/frame-registry.v1.json](frames/frame-registry.v1.json) | 19 法域 frame 矩阵（许可/获取/频率/规模/坑） | `node scripts/metrics/frame-registry.mjs`（CI 同链路） |
+| [reporting.md](reporting.md) + [report-samples/](report-samples/) | 周/月报节奏与固定模板；报告由快照+脚本生成，未接线指标显式留白 | `scripts/metrics/report.mjs`（模板测试进 CI） |
 | 证据 | 时点读数在 `docs/evidence/2026-11-09-*.md`（漏斗基线、RISKY 盘点） | 不可改写证据 |
 
 ## 常用命令
