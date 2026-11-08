@@ -1,0 +1,49 @@
+{
+  "schemaVersion": "campaign-golden-brief/v1",
+  "id": "05-de-industrial-parts-hydraulics",
+  "brief": {
+    "industry": "industrial components",
+    "country": "DE",
+    "objective": "为液压元件找到德国分销与进口渠道的合作线索",
+    "icpSummary": "德国液压/气动元件分销商、进口商与系统集成商，20–300 人，代理多个外国品牌，有仓储与技术服务能力",
+    "budgetCapMicros": 180000000,
+    "language": "de"
+  },
+  "expectations": {
+    "planSchemaVersion": "campaign-plan/v0",
+    "requiredFields": [
+      "schemaVersion",
+      "goal.objective",
+      "audience.icpIds",
+      "audience.sizeCap",
+      "motions.0.type",
+      "budget.currency",
+      "approvalPolicy.required",
+      "decisionPolicy.maxReplans"
+    ],
+    "forbiddenFields": [
+      "motions.0.send",
+      "motions.0.channels",
+      "deliveries",
+      "proformaInvoice"
+    ],
+    "forbiddenContent": [
+      "proforma",
+      "\\binvoice\\b",
+      "send email",
+      "whatsapp",
+      "\\bPI number\\b"
+    ],
+    "budgetRespect": {
+      "capMicrosPath": "budget.capMicros",
+      "currency": "USD"
+    },
+    "decisionPolicy": {
+      "maxReplansMax": 2
+    },
+    "motionTypes": [
+      "discovery"
+    ]
+  },
+  "notes": "预算上限 180 USD（micros）示意；分销商 ICP（icp_trade_role=distributor 同口径），角色门由规划器在 Why 卡解释。"
+}
