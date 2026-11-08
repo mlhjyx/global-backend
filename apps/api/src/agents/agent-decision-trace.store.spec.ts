@@ -12,11 +12,11 @@ import { PrismaAgentDecisionTraceStore } from "./agent-decision-trace.store";
 const SOURCE = readFileSync(join(import.meta.dirname, "agent-decision-trace.store.ts"), "utf8");
 
 describe("agent decision trace store", () => {
-  it("exposes exactly one write method: record (no update, no delete)", () => {
-    const methods = Object.getOwnPropertyNames(PrismaAgentDecisionTraceStore.prototype).filter(
-      (name) => name !== "constructor",
-    );
-    expect(methods).toEqual(["record"]);
+  it("exposes exactly one write method (record) plus the tenant read path (no update, no delete)", () => {
+    const methods = Object.getOwnPropertyNames(PrismaAgentDecisionTraceStore.prototype)
+      .filter((name) => name !== "constructor")
+      .sort();
+    expect(methods).toEqual(["listRunTrace", "record"]);
   });
 
   it("is append-only in source: no UPDATE or DELETE statement touches the trace table", () => {
