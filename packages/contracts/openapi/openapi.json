@@ -10584,6 +10584,168 @@
         "description": "Lead 列表，可按 ?icpId= 与 ?queue=recommended|needs_review|rejected|suppressed 过滤，按分数排序。"
       }
     },
+    "/api/v1/lead-candidates": {
+      "get": {
+        "operationId": "LeadController_listCandidates_v1",
+        "parameters": [
+          {
+            "name": "runId",
+            "required": false,
+            "in": "query",
+            "description": "qualify 工作流 run id；按批次引用前缀过滤",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "icpId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "queue",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "page"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "lead_id",
+                          "icp_id",
+                          "canonical_company_id",
+                          "company",
+                          "queue",
+                          "fit_verdict",
+                          "total_score",
+                          "scored_at",
+                          "status",
+                          "candidate_batch_ref"
+                        ],
+                        "properties": {
+                          "lead_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "icp_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "canonical_company_id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "company": {
+                            "type": "object",
+                            "nullable": true,
+                            "additionalProperties": true,
+                            "description": "公司摘要（name/domain/country/industry/employeeCount）"
+                          },
+                          "queue": {
+                            "type": "string",
+                            "description": "机器判定队列（recommended|needs_review|rejected|suppressed|sanctions_hold）"
+                          },
+                          "fit_verdict": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "total_score": {
+                            "type": "number",
+                            "nullable": true
+                          },
+                          "scored_at": {
+                            "type": "string",
+                            "nullable": true,
+                            "format": "date-time"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "candidate_batch_ref": {
+                            "type": "string",
+                            "nullable": true,
+                            "description": "如 qualify:<runRef>:<batchNo>；未评分/旧数据为 null"
+                          }
+                        }
+                      }
+                    },
+                    "page": {
+                      "type": "object",
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
+                      "properties": {
+                        "next_cursor": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "下一页游标；null = 没有更多"
+                        },
+                        "has_more": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "机器候选只读视图（候选≠线索；?runId=<qualify run> 或 ?icpId=&queue=，游标分页）",
+        "tags": [
+          "Leads"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "机器候选只读视图（候选 ≠ 线索，不复制表）：候选行就是 qualify 产出的 lead，语义由 queue/fit_verdict/scored_at 与 score_detail.candidateBatchRef 组装。?runId=<qualify 工作流 run id> 只看该 run 的全部批次（批次引用前缀 qualify:<runId>:）；?icpId=/?queue= 收窄；按 scored_at 倒序、id 升序游标分页（limit 默认 50、上限 200）。runId 仅接受 [A-Za-z0-9-]{1,64}，否则 400。"
+      }
+    },
     "/api/v1/icps/{icpId}/lead-queues": {
       "get": {
         "operationId": "LeadController_queues_v1",

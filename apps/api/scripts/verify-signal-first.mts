@@ -215,7 +215,7 @@ async function main() {
     const ajv = new Ajv2020({ allErrors: true });
     addFormats(ajv);
     const schema = JSON.parse(
-      readFileSync(new URL('../../../packages/contracts/events/payloads/lead-qualified.v1.schema.json', import.meta.url), 'utf8'),
+      readFileSync(new URL('../../../packages/contracts/events/payloads/lead-qualified.v2.schema.json', import.meta.url), 'utf8'),
     );
     const validate = ajv.compile(schema);
     const valid = validate(snap);

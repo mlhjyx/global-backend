@@ -10,7 +10,7 @@ import {
 } from "../temporal/understanding.constants";
 
 /**
- * 收口③（Outbox 真实交付）回归测试：relay 对 integration 事件（LeadQualified 等 8 种）
+ * 收口③（Outbox 真实交付）回归测试：relay 对 integration 事件（LeadQualified 等，见 INTEGRATION_EVENTS）
  * 必须**路由进 outbox_delivery 交付账本**再标 published，而不是「无 handler 也标 published」。
  *
  * 对旧代码此文件 RED：旧 relay 没有 routeEvent/pumpWebhookDeliveries（TypeError: not a function），
