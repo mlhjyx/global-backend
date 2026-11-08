@@ -16,8 +16,11 @@ import {
 } from '../execution-budget/execution-budget-binding';
 
 // Crawling can be slow (headless browser per page) — generous timeout, few retries.
+// B5：subpage 抓取是并发的多页（每页 60s 抓取上限 + 排队/渲染开销），5 分钟覆盖
+// 并发批的最坏路径；心跳让死掉的 worker 在 2 分钟内被发现并重试。
 const crawlActs = proxyActivities<UnderstandingActivities>({
-  startToCloseTimeout: '3 minutes',
+  startToCloseTimeout: '5 minutes',
+  heartbeatTimeout: '2 minutes',
   retry: { maximumAttempts: 3 },
 });
 
@@ -25,8 +28,14 @@ const crawlActs = proxyActivities<UnderstandingActivities>({
 // 429 bursts from the model gateway last tens of seconds (2026-11-01: an
 // understanding run burned its 3 quick attempts in ~3s). Back off long enough
 // that a burst can clear: 5s → 10s → 20s → 40s, ~75s of cover.
+//
+// B5（PERF-02）：活动时限必须**大于**网关自身的模型请求上限
+// （MAX_MODEL_GATEWAY_REQUEST_TIMEOUT_MS = 300s），否则活动先超时、HTTP 请求还在跑，
+// Temporal 重试会再发一次付费调用（B2 之后重试会撞 remnant 快速失败，但首次白花钱）。
+// 6 分钟 = 300s 模型上限 + 1 分钟余量；心跳让死掉的 worker 在 2 分钟内被发现。
 const modelActs = proxyActivities<UnderstandingActivities>({
-  startToCloseTimeout: '3 minutes',
+  startToCloseTimeout: '6 minutes',
+  heartbeatTimeout: '2 minutes',
   retry: {
     maximumAttempts: 5,
     initialInterval: '5 seconds',
