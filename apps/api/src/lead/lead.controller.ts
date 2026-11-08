@@ -540,6 +540,7 @@ export class LeadController {
       'SUPPRESSED_CONTACT_UNREACHABLE',
       'STORAGE_RIGHTS_NOT_GRANTED',
       'SANCTIONS_HOLD_UNRESOLVED',
+      'SANCTIONS_LIST_STALE',
       'CONFLICT',
     ]),
   })

@@ -9,6 +9,11 @@ import {
   type SanctionsEntityRow,
   type ScreenMatch,
 } from './sanctions-matcher';
+import {
+  evaluateSanctionsFreshness,
+  sanctionsFreshnessThresholds,
+  type SanctionsListFreshness,
+} from './sanctions-freshness';
 
 /**
  * 制裁筛查服务（Qualify 第五门的匹配引擎）。进程内内存索引（从 sanctions_entity 建，init + 刷新后重建），
@@ -100,6 +105,19 @@ export class SanctionsScreeningService implements OnModuleInit, OnModuleDestroy 
   /** 门是否生效（有 ENABLED 源 + 非空索引）。 */
   isActive(): boolean {
     return this.active;
+  }
+
+  /**
+   * ch08 §3.1.12 制裁陈旧门：读 ENABLED 源的最新刷新时间与抓取状态，按 env 阈值判三档。
+   * 无 ENABLED 源 → inactive（筛查门本身未启用，不改变现状）。qualify / decide 调用前各查一次。
+   */
+  async listFreshness(now: Date = new Date()): Promise<SanctionsListFreshness> {
+    const sources = await this.prisma.sanctionsSource.findMany({
+      where: { status: 'ENABLED' },
+      select: { key: true, lastRefreshedAt: true, lastFetchStatus: true },
+      orderBy: { key: 'asc' },
+    });
+    return evaluateSanctionsFreshness(sources, now, sanctionsFreshnessThresholds());
   }
 
   /** 对一个公司名筛查。未生效 → not_screened（快照如实、门不拦，fail-open）。 */

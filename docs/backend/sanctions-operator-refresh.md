@@ -90,3 +90,15 @@ UPDATE sanctions_source SET status = 'DISABLED', updated_at = now()
 
 - 命令：`apps/api/scripts/refresh-sanctions-lists.mts`；编排 `apps/api/src/sanctions/sanctions-operator-refresh.ts`；下载 `apps/api/src/sanctions/sanctions-operator-download.ts`。
 - 真库测试：`apps/api/src/sanctions/sanctions-operator-refresh.postgres.spec.ts`（CI 步骤「Sanctions operator refresh on PostgreSQL」），覆盖：拒绝 `app_user`、dry run 不写、只入实体、元数据更新且 `status` 不变、重跑不变、新版本的增改撤、写入中途失败整体回滚、SUSPENDED 拒绝下载、本节的打开语句与索引生效。
+
+## 5. 陈旚门（2026-11-09 起，ch08 §3.1.12）
+
+自查询结果记录名单新鲜度后，引擎在 **qualify 与 accept（decide）前**都会检查 `sanctions_source.last_refreshed_at`：
+
+| 名单年龄（`max(last_refreshed_at)` 起算） | 判定 | 行为 |
+|---|---|---|
+| ≤ `SANCTIONS_LIST_MAX_AGE_DAYS`（默认 7）且无 FAILED 源 | fresh | 正常筛查 |
+| > 7 天，或任一 ENABLED 源 `last_fetch_status=FAILED` | stale | 筛查照跑，但**不得自动放行**：qualify 不产 `recommended`（降 `needs_review`），accept 直接拒绝（`SANCTIONS_LIST_STALE`）；`sanctions_screening_result.list_stale=true` |
+| > `SANCTIONS_LIST_BLOCK_AGE_DAYS`（默认 14），或任一 ENABLED 源从未刷新 | blocked | qualify 整批进 `sanctions_hold`（禁联 `suppressed` 优先保留）；每次 run 发一条 `SanctionsListStale` 集成事件（ops/审计可见）+ 站内通知 |
+
+处置顺序是「**先门后刷**」：不要为了跑通 qualify/accept 去调大阈值；按 §3 刷新名单后门自动恢复（`list_stale=false`、`sanctions_age_days<=1`）。刷新失败（如 `eu_fsf`）必须在 24 小时内重试并记录原因。阈值 env 见 `sanctions-freshness.ts`（`SANCTIONS_LIST_MAX_AGE_DAYS` / `SANCTIONS_LIST_BLOCK_AGE_DAYS`）。

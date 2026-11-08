@@ -223,10 +223,32 @@ describe('campaignPlanningWorkflow', () => {
       ApplicationFailure.nonRetryable('CAMPAIGN_PLAN_NO_ICP', 'CAMPAIGN_PLAN_NO_ICP'),
     );
     acts.reportCampaignPlanJobFailure.mockRejectedValue(new Error('control plane down'));
+    acts.emitCampaignPlanJobFailureEvent.mockResolvedValue(undefined);
 
     await expect(campaignPlanningWorkflow(input())).rejects.toMatchObject({
       type: 'CAMPAIGN_PLAN_NO_ICP',
     });
+    // 双通道（ch08 §3.1.4）：PATCH 重试耗尽 → outbox 事件兜底，SaaS 拉取后置 FAILED。
+    expect(acts.emitCampaignPlanJobFailureEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: WORKSPACE_ID,
+        campaignId: CAMPAIGN_ID,
+        jobId: JOB_ID,
+        error: 'CAMPAIGN_PLAN_NO_ICP',
+      }),
+    );
+  });
+
+  it('does not emit the fallback event when the job report succeeds', async () => {
+    acts.assembleCampaignPlanInputs.mockRejectedValue(
+      ApplicationFailure.nonRetryable('CAMPAIGN_PLAN_NO_ICP', 'CAMPAIGN_PLAN_NO_ICP'),
+    );
+    acts.reportCampaignPlanJobFailure.mockResolvedValue(undefined);
+
+    await expect(campaignPlanningWorkflow(input())).rejects.toMatchObject({
+      type: 'CAMPAIGN_PLAN_NO_ICP',
+    });
+    expect(acts.emitCampaignPlanJobFailureEvent).not.toHaveBeenCalled();
   });
 
   it('rejects an invalid execution contract/binding and reports CAMPAIGN_PLAN_INPUT_INVALID', async () => {

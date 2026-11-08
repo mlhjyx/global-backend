@@ -1,0 +1,665 @@
+{
+  "$comment": "已知 datamodel ⇄ migrations 差异（ch08 §3.1.7 基线）。只许收紧：条目修复后必须删除；expiresAt 到期即红。",
+  "knownDifferences": [
+    {
+      "statement": "BEGIN;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "CREATE TYPE \"execution_budget_purpose_new\" AS ENUM ('icp.design', 'icp.query_plan', 'understanding.run', 'discovery.run', 'contact.verify', 'platform.acquisition', 'platform.intent_watch', 'platform.sanctions');",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"execution_budget_authority\" ALTER COLUMN \"purpose\" TYPE \"execution_budget_purpose_new\" USING (\"purpose\"::text::\"execution_budget_purpose_new\");",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TYPE \"execution_budget_purpose\" RENAME TO \"execution_budget_purpose_old\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TYPE \"execution_budget_purpose_new\" RENAME TO \"execution_budget_purpose\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "DROP TYPE \"public\".\"execution_budget_purpose_old\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "COMMIT;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"agent_decision_trace\" DROP CONSTRAINT \"agent_decision_trace_run_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"company_channel_sighting\" DROP CONSTRAINT \"company_channel_sighting_channel_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"discovery_company_materialization_tx_fence\" DROP CONSTRAINT \"discovery_company_materialization_tx_fence_admission_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"discovery_company_materialization_tx_fence\" DROP CONSTRAINT \"discovery_company_materialization_tx_fence_query_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"discovery_query_operation_attempt\" DROP CONSTRAINT \"discovery_query_operation_attempt_ack_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"execution_domain_ack\" DROP CONSTRAINT \"execution_domain_ack_account_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"execution_domain_ack\" DROP CONSTRAINT \"execution_domain_ack_authority_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"execution_domain_ack\" DROP CONSTRAINT \"execution_domain_ack_operation_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"field_evidence\" DROP CONSTRAINT \"field_evidence_workspace_raw_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"governed_subject_relation\" DROP CONSTRAINT \"governed_subject_relation_ack_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"identity_link\" DROP CONSTRAINT \"identity_link_workspace_raw_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"pack_activation\" DROP CONSTRAINT \"pack_activation_package_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"pack_activation\" DROP CONSTRAINT \"pack_activation_version_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"pack_draft\" DROP CONSTRAINT \"pack_draft_package_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"pack_enablement\" DROP CONSTRAINT \"pack_enablement_package_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"pack_version\" DROP CONSTRAINT \"pack_version_package_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"personal_artifact_cleanup_command\" DROP CONSTRAINT \"personal_artifact_cleanup_command_artifact_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"personal_artifact_cleanup_command\" DROP CONSTRAINT \"personal_artifact_cleanup_command_request_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"personal_artifact_cleanup_command\" DROP CONSTRAINT \"personal_artifact_cleanup_command_workspace_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"platform_channel_crawl_egress_attempt\" DROP CONSTRAINT \"platform_channel_crawl_egress_attempt_account_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"platform_channel_crawl_egress_attempt\" DROP CONSTRAINT \"platform_channel_crawl_egress_attempt_authority_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"platform_channel_crawl_egress_attempt\" DROP CONSTRAINT \"platform_channel_crawl_egress_attempt_budget_operation_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"raw_source_governance_disposition\" DROP CONSTRAINT \"raw_source_governance_disposition_raw_scope_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"raw_source_record\" DROP CONSTRAINT \"raw_source_record_workspace_run_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"run_shadow_diff\" DROP CONSTRAINT \"run_shadow_diff_run_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"seller_document\" DROP CONSTRAINT \"seller_document_company_workspace_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"seller_document_chunk\" DROP CONSTRAINT \"seller_document_chunk_document_workspace_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"skill_enablement\" DROP CONSTRAINT \"skill_enablement_package_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"skill_resolution_snapshot\" DROP CONSTRAINT \"skill_resolution_snapshot_package_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"skill_resolution_snapshot\" DROP CONSTRAINT \"skill_resolution_snapshot_version_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"skill_version\" DROP CONSTRAINT \"skill_version_package_workspace_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"source_channel_enablement\" DROP CONSTRAINT \"source_channel_enablement_channel_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"source_channel_record\" DROP CONSTRAINT \"source_channel_record_channel_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"source_channel_run\" DROP CONSTRAINT \"source_channel_run_channel_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"source_entity\" DROP CONSTRAINT \"source_entity_last_seen_fetch_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"tool_operation_subject\" DROP CONSTRAINT \"tool_operation_subject_ack_fkey\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "DROP INDEX \"company_profile_workspace_id_deleted_at_idx\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "DROP INDEX \"seller_document_chunk_text_tsv_idx\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"icp_query_performance\" ALTER COLUMN \"quality_ema\" DROP DEFAULT;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"personal_artifact_cleanup_command\" ALTER COLUMN \"command_id\" DROP DEFAULT;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"platform_egress_attempt\" ALTER COLUMN \"id\" DROP DEFAULT, ALTER COLUMN \"generation\" SET DEFAULT 0, ALTER COLUMN \"authorized_at\" SET DEFAULT CURRENT_TIMESTAMP;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"platform_egress_schedule_fence\" ALTER COLUMN \"updated_at\" SET DEFAULT CURRENT_TIMESTAMP;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"raw_source_field_evidence_cleanup_audit\" ALTER COLUMN \"id\" DROP DEFAULT;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"raw_source_governance_disposition\" ALTER COLUMN \"id\" DROP DEFAULT;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"run_shadow_diff\" ALTER COLUMN \"shadow_fallback\" DROP DEFAULT;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"runtime_process_lease\" ALTER COLUMN \"id\" DROP DEFAULT;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"seller_document\" ALTER COLUMN \"id\" DROP DEFAULT;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"seller_document_chunk\" DROP COLUMN \"text_tsv\", ALTER COLUMN \"id\" DROP DEFAULT;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"site_build_budget_grant\" ALTER COLUMN \"id\" DROP DEFAULT;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"site_build_provider_readback_probe\" ALTER COLUMN \"id\" DROP DEFAULT;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"site_build_provider_readback_probe_observation\" RENAME CONSTRAINT \"site_build_provider_probe_observation_pkey\" TO \"site_build_provider_readback_probe_observation_pkey\", ALTER COLUMN \"id\" DROP DEFAULT;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"site_build_provider_wire_attempt\" ALTER COLUMN \"id\" DROP DEFAULT;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"site_build_provider_wire_receipt\" ALTER COLUMN \"id\" DROP DEFAULT;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"site_build_spend_reconciliation\" ALTER COLUMN \"id\" DROP DEFAULT;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"source_channel_enablement\" ALTER COLUMN \"created_at\" SET DATA TYPE TIMESTAMP(3);",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"suppression_decision\" ALTER COLUMN \"id\" DROP DEFAULT;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"tool_budget_account\" ALTER COLUMN \"id\" DROP DEFAULT;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"tool_budget_operation\" DROP COLUMN \"receipt_cost_basis\", DROP COLUMN \"receipt_usage\", DROP COLUMN \"unresolved_since\", ALTER COLUMN \"id\" DROP DEFAULT;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "DROP TABLE \"agent_decision_trace\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "DROP TABLE \"agent_profile\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "DROP TABLE \"discovery_company_materialization_activation\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "DROP TABLE \"discovery_company_materialization_tx_fence\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "DROP TABLE \"eval_receipt\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "DROP TABLE \"execution_domain_ack\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "DROP TABLE \"llm_extraction_cache\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "DROP TABLE \"pack_activation\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "DROP TABLE \"pack_draft\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "DROP TABLE \"pack_enablement\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "DROP TABLE \"pack_package\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "DROP TABLE \"pack_version\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "DROP TABLE \"platform_channel_crawl_egress_attempt\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "DROP TABLE \"platform_egress_capability_fence\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "DROP TABLE \"skill_enablement\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "DROP TABLE \"skill_package\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "DROP TABLE \"skill_resolution_snapshot\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "DROP TABLE \"skill_version\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "DROP TABLE \"strategy_resolution_snapshot\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "DROP TABLE \"url_content_cache\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"seller_document\" ADD CONSTRAINT \"seller_document_company_id_fkey\" FOREIGN KEY (\"company_id\") REFERENCES \"company_profile\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"seller_document_chunk\" ADD CONSTRAINT \"seller_document_chunk_document_id_fkey\" FOREIGN KEY (\"document_id\") REFERENCES \"seller_document\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"source_channel_enablement\" ADD CONSTRAINT \"source_channel_enablement_channel_id_fkey\" FOREIGN KEY (\"channel_id\") REFERENCES \"source_channel\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"source_channel_run\" ADD CONSTRAINT \"source_channel_run_channel_id_fkey\" FOREIGN KEY (\"channel_id\") REFERENCES \"source_channel\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"source_channel_record\" ADD CONSTRAINT \"source_channel_record_channel_id_fkey\" FOREIGN KEY (\"channel_id\") REFERENCES \"source_channel\"(\"id\") ON DELETE CASCADE ON UPDATE CASCADE;",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER INDEX \"canonical_company_workspace_last_seen_idx\" RENAME TO \"canonical_company_workspace_id_last_seen_at_idx\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER INDEX \"company_channel_sighting_workspace_channel_seen_idx\" RENAME TO \"company_channel_sighting_workspace_id_channel_id_seen_at_idx\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER INDEX \"company_channel_sighting_workspace_company_seen_idx\" RENAME TO \"company_channel_sighting_workspace_id_company_id_seen_at_idx\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER INDEX \"discovery_company_job_workspace_run_stage_idx\" RENAME TO \"discovery_company_job_workspace_id_run_id_stage_idx\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER INDEX \"icp_feedback_workspace_icp_idx\" RENAME TO \"icp_feedback_workspace_id_icp_id_idx\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER INDEX \"icp_query_performance_workspace_icp_idx\" RENAME TO \"icp_query_performance_workspace_id_icp_id_idx\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER INDEX \"imported_buyer_workspace_batch_idx\" RENAME TO \"imported_buyer_workspace_id_batch_id_idx\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER INDEX \"imported_buyer_workspace_dedupe_idx\" RENAME TO \"imported_buyer_workspace_id_dedupe_key_idx\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER INDEX \"personal_data_access_audit_workspace_company_created_idx\" RENAME TO \"personal_data_access_audit_workspace_id_company_id_created__idx\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER INDEX \"personal_data_access_audit_workspace_created_idx\" RENAME TO \"personal_data_access_audit_workspace_id_created_at_idx\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER INDEX \"platform_egress_attempt_schedule_generation_state_idx\" RENAME TO \"platform_egress_attempt_schedule_generation_idx\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER INDEX \"run_event_workspace_run_seq_idx\" RENAME TO \"run_event_workspace_id_run_id_seq_idx\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER INDEX \"run_shadow_diff_workspace_created_idx\" RENAME TO \"run_shadow_diff_workspace_id_created_at_idx\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER INDEX \"source_channel_enablement_workspace_channel_key\" RENAME TO \"source_channel_enablement_workspace_id_channel_id_key\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER INDEX \"source_channel_enablement_workspace_idx\" RENAME TO \"source_channel_enablement_workspace_id_idx\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER INDEX \"source_channel_record_channel_dedupe_key\" RENAME TO \"source_channel_record_channel_id_dedupe_key_key\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER INDEX \"source_channel_record_channel_last_seen_idx\" RENAME TO \"source_channel_record_channel_id_last_seen_at_idx\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER INDEX \"source_channel_run_channel_started_idx\" RENAME TO \"source_channel_run_channel_id_started_at_idx\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER INDEX \"source_channel_run_crawl_run_key\" RENAME TO \"source_channel_run_crawl_run_id_key\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    },
+    {
+      "statement": "ALTER INDEX \"source_entity_last_seen_fetch_idx\" RENAME TO \"source_entity_last_seen_fetch_id_idx\";",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only structure pre-dating the drift gate (ch08 §3.1.7)"
+    }
+  ]
+}

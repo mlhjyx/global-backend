@@ -20,6 +20,8 @@ import { ExecutionBudgetGrantVerifier } from './execution-budget-grant.verifier'
 import { ExecutionBudgetModule } from './execution-budget.module';
 import { WorkspaceTechnicalBudgetQuoteController } from './workspace-technical-budget-quote.controller';
 import { WorkspaceTechnicalBudgetQuoteService } from './workspace-technical-budget-quote';
+import { ExecutionBudgetWindowUsageController } from './execution-budget-window-usage.controller';
+import { ExecutionBudgetWindowUsageService } from './execution-budget-window-usage.service';
 
 const WORKSPACE_ID = 'e03abddd-1307-47cb-a731-7e7a786615a0';
 const AUTHORITY_ID = '42c863b9-7c7e-4d28-8678-60ef9a20219b';
@@ -275,6 +277,8 @@ describe('ExecutionBudgetModule product composition', () => {
       ExecutionBudgetAuthorityService,
       PlatformExecutionBudgetAuthorityIngestionService,
       ExecutionBudgetAuthorityReadinessContributors,
+      // ch08 §3.1.1 C1a：窗口实扣读回。
+      ExecutionBudgetWindowUsageService,
       {
         provide: WorkspaceTechnicalBudgetQuoteService,
         useFactory: expect.any(Function),
@@ -285,7 +289,10 @@ describe('ExecutionBudgetModule product composition', () => {
       PlatformExecutionBudgetAuthorityIngestionService,
       WorkspaceTechnicalBudgetQuoteService,
     ]);
-    expect(controllers).toEqual([WorkspaceTechnicalBudgetQuoteController]);
+    expect(controllers).toEqual([
+      WorkspaceTechnicalBudgetQuoteController,
+      ExecutionBudgetWindowUsageController,
+    ]);
     expect(providers).not.toContain(TOOL_BUDGET_STORE);
     const verifierProvider = providers[0] as {
       useFactory: () => ExecutionBudgetGrantVerifier;
