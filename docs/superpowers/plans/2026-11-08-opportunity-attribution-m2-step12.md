@@ -21,7 +21,7 @@
 | --- | --- | --- |
 | A1 | v0 只做**直归因**（outcome 链上的 campaign 拿全额），不做多触点权重（线性/时间衰减）；链上无 campaign 的 outcome 记 `ORGANIC/UNKNOWN` 但不计入 campaign 北极星分母 | 多触点权重留到有足够样本后（步 12.1+），指标口径先直归因 |
 | A2 | 归因**不建新事实表**：SQL 视图现算（数据量级：万级 outcome/run）；慢则升级物化视图，不改口径 | 直接上物化视图也兼容（视图→matview 同定义） |
-| A3 | 成本归集口径：campaign 成本 = 其 authorization 放行的执行批次关联的 run 的 `cost_ledger` 合计 + `campaign.plan` job 的 usage_ledger 合计（计划成本也算 campaign 成本，单列展示） | 若产品只算执行成本，视图加列过滤即可 |
+| A3 | 成本归集口径：campaign 成本 = 其 authorization 放行的执行批次关联的 run 的 `cost_ledger` 合计 + `campaign.plan` 的 usage_ledger 合计（计划成本也算 campaign 成本，单列展示）。**引擎实测形状（2026-11-08，global_dev）**：`meta.task='campaign.plan'`，campaignId 取自 `meta.runId='campaign.plan:campaign:<campaignId>:<hash>'` 的第三段（不存在 `job`/`campaignId` 键；对账服务按此归集，旧假设会静默归零成假绿） | 若产品只算执行成本，视图加列过滤即可 |
 | A4 | positive outcome 定义：`MEETING_BOOKED | QUOTE_SENT | WON` 计入北极星；`REPLIED` 记弱信号单列；`LOST/NO_RESPONSE/DISQUALIFIED` 计入分母健全性指标 | 定义可配置（env 列表） |
 
 ## 3. 数据链（全部引用既有对象，不复制真相）
@@ -29,7 +29,7 @@
 ```
 outcome(步10) → sao → qgo → campaign_id?(步10 允许空)
 campaign → revision → authorization(ExecutionAuthorization) → 执行引用(discovery run id / outreach batch id)
-costs: cost_ledger(run) ∪ usage_ledger(campaign.plan job / outreach send 成本)
+costs: cost_ledger(run) ∪ usage_ledger(campaign.plan：meta.task='campaign.plan'，campaignId 取 meta.runId 第三段 / outreach send 成本)
 touch: outreach_send/reply(步11), run(步1–9), 审批轨迹(M2.0/轨迹表)
 ```
 
