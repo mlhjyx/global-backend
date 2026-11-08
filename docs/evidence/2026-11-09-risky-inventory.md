@@ -78,7 +78,7 @@
 | `codes` | 空数组 131 / 有值 4 |
 | `mailFromCode` | null 131 / `250` 4 |
 
-解读：探测只到「域名可达/有 MX」层；唯一出现过的 250 是 SMTP 握手问候（mailFromCode），不是逐地址 RCPT 结果。**these 135 次探测不能作为任何地址的有效性证据**，也不能把 `reachable=true` 当成 VALID。
+解读：探测只到「域名可达/有 MX」层；唯一出现过的 250 是 SMTP 握手问候（mailFromCode），不是逐地址 RCPT 结果。**这 135 次探测不能作为任何地址的有效性证据**，也不能把 `reachable=true` 当成 VALID。
 
 ### 3.6 电话与 LinkedIn
 

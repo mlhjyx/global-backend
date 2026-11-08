@@ -17,7 +17,7 @@
 
 | 角色 | 先读 |
 | --- | --- |
-| 要报数/写周报的人 | §1 通用规则 → §8 报告格式 |
+| 要报数/写周报的人 | §1 通用规则（含 §1.8 报告格式） |
 | 要实现指标查询的人 | §2 数据来源映射 → §3 指标全集 |
 | 要改口径的人 | §7 版本与变更流程 → §8 changelog |
 | 要对照行业基准的人 | 各指标行的「目标/基准」列（含 URL） |
@@ -195,7 +195,7 @@ week（ISO week，UTC 周一起）
 | T1-006 | `fit_recall_golden` | ratio | 金标中人工判 match 且模型判 match | 金标中人工判 match | 同上 | 月度 | 默认 | DRAFT | ≥85%（底线 75%） |
 | T1-007 | `source_unique_contribution` | ratio | 仅该源贡献的实体数 | 该源实体数 | 重复/非 ICP | 月度 | provider_key | DRAFT | 低于 5% 降权 |
 | T1-008 | `source_accept_rate` | ratio | ACCEPTED raw 记录（`raw_source_record.ingest_status`） | 总 raw 记录 | 按 provider 分层 | 日/周 | provider_key | ACTIVE（只读实现） | 目录 ≥90% |
-| T1-009 | `rejection_reason_distribution` | distribution | 各 `disposition_code` 计数 | 总拒绝数 | — | 周 | provider_key | ACTIVE（只读实现） | 无单一原因 >50% |
+| T1-009 | `rejection_reason_distribution` | distribution | 各 `disposition_code` 计数 | 带 `disposition_code` 的记录总数（含 REJECTED 与 QUARANTINED；2026-11-09：2,408 + 1,255 行中 3,663 行有码，含 868 SOURCE_POLICY_MISSING / 387 PROCESSING_KEY_DRIFT） | — | 周 | provider_key | ACTIVE（只读实现） | 无单一原因 >50% |
 | T1-010 | `frame_freshness_days` | days | asOf − frame 最后更新 | — | — | 日 | frame_key | DRAFT | 核心 frame ≤35 天 |
 
 ### 3.3 T2 可触达（联系人）
