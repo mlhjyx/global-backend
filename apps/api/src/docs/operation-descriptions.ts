@@ -30,6 +30,10 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
   'POST /api/v1/execution-budget/workspace-technical-quote':
     '服务间：计算某个 workspace operation 的平台内部执行预算包络。它不是客户价格、余额或额度限制，数字不能展示给终端客户。',
 
+  // ── Campaign ──────────────────────────────────────────────────────────────
+  'POST /api/v1/internal/campaign-plans/draft':
+    '服务间（gain-saas 控制面，x-service-token + 一次性 execution-budget Grant）：触发一次受限 Campaign 规划 job。异步：202 只表示工作流已启动；计划经内部回调落 gain-saas 的 DRAFT revision，本端点不执行任何外部动作。同一 jobId 重复触发按 Temporal WorkflowId 去重；Grant 一次性，重触发须新 jobId + 新 Grant。',
+
   // ── PlatformAuthority ─────────────────────────────────────────────────────
   'POST /api/v1/platform-authority/revocations':
     '服务间：应用一条已签名的撤销，或重放它已提交的 ACK。重复投递返回首次提交的 ACK（幂等），签名不合法直接拒绝。',

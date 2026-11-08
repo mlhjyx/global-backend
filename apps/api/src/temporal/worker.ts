@@ -18,6 +18,7 @@ import { RouterModelGateway } from "../model-gateway/router-model-gateway";
 import { buildGatewayProvider } from "../model-gateway/model-providers.config";
 import { AiTraceSink } from "../model-gateway/ai-trace.sink";
 import { createUnderstandingActivities } from "./understanding.activities";
+import { createCampaignPlanningActivities } from "./campaign-planning.activities";
 import { seedSkillCatalog } from "../skills/skill-catalog.seed";
 import { seedPackCatalog } from "../skills/packs/pack-catalog.seed";
 import { createDbSkillResolver } from "../skills/skill-resolver";
@@ -603,6 +604,14 @@ async function main(): Promise<void> {
         prisma,
         gateway,
         broker,
+        runtimeTelemetry: runtimeTelemetry.telemetry,
+        budgetStore,
+        skills: skillResolver,
+      }),
+      // M2.1 受限 Campaign 规划器（propose-only，影子期不执行任何动作）。
+      ...createCampaignPlanningActivities({
+        prisma,
+        gateway,
         runtimeTelemetry: runtimeTelemetry.telemetry,
         budgetStore,
         skills: skillResolver,

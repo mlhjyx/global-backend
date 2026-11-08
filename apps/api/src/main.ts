@@ -154,6 +154,7 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
     .addTag('Compliance', '数据主体删除请求（Art.17）')
     .addTag('SiteBuilder', '独立站：intake、资料、素材、构建、预览')
     .addTag('ExecutionBudget', '平台内部执行预算包络（服务间调用，普通前端不调用）')
+    .addTag('Campaign', 'Campaign 控制面内部入口（服务间调用，普通前端不调用）')
     .addTag('PlatformAuthority', '平台权威通道（服务间调用，普通前端不调用）')
     .addTag('System', '健康探针与身份')
     .addBearerAuth()
@@ -191,7 +192,7 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
       { name: '获客主链路', tags: ['Companies', 'Claims', 'ICP', 'Discovery', 'Leads'] },
       { name: '运营与合规', tags: ['Reports', 'Events', 'Compliance', 'Skills', 'Packs'] },
       { name: '建站', tags: ['SiteBuilder'] },
-      { name: '平台间通道', tags: ['ExecutionBudget', 'PlatformAuthority'] },
+      { name: '平台间通道', tags: ['ExecutionBudget', 'PlatformAuthority', 'Campaign'] },
       { name: '系统', tags: ['System'] },
     ],
   });
