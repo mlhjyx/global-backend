@@ -4,6 +4,7 @@ import { resolvePersonIdentity, PersonResolveHit } from './person-identity';
 import { LawfulBasis, ProviderContactRecord } from './provider-contract';
 import { encryptPii, blindContactKey } from '../compliance/pii-crypto';
 import { cleanEmail } from '../acquisition/clean';
+import { classifyContactEmail } from './contact-classifier';
 import { canonicalizeSuppressionValue, canonicalizeSuppressionValues,
   companyMatchesSuppression,
 } from './suppression-value';
@@ -163,12 +164,22 @@ export async function persistDiscoveredContacts(
         where: {
           contactId_type_value: { contactId, type: p.type, value: p.value },
         },
+        // A4：重复观测不覆盖既有分类（首见来源优先）；新列随创建落库。
         update: {},
         create: {
           workspaceId: args.workspaceId,
           contactId,
           type: p.type,
           value: p.value,
+          ...(p.type === 'email'
+            ? {
+                emailType: classifyContactEmail(p.value).emailType,
+                sourceType: 'provider' as const,
+                verificationMethod: 'provider_reported' as const,
+                ...(args.lawfulBasis ? { legalBasis: args.lawfulBasis.basis } : {}),
+                ...(c.sourcePage ? { sourceUrl: c.sourcePage } : {}),
+              }
+            : {}),
         },
       });
       // 收口⑥：field_evidence 是同一 PII 的第二副本——PII 值加密落库（确定性，与 contact_point 密文一致），

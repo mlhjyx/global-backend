@@ -29,6 +29,18 @@ export interface GuessWritePlan {
   confidence: number;
   reason: string;
   verificationDetail: string | null;
+  /** A4：把验证 verdict.detail 归类成 catch-all 三态（+unknown）。 */
+  catchAll: 'catch_all' | 'not_catch_all' | 'inconclusive' | 'unknown';
+}
+
+/** verdict.detail → catch-all 归类：与 decideEmailVerdict 的 detail 文案对齐。 */
+export function catchAllFromVerdictDetail(detail: string | null | undefined): GuessWritePlan['catchAll'] {
+  if (!detail) return 'unknown';
+  if (detail === 'catch_all_domain') return 'catch_all';
+  if (detail.startsWith('smtp_accepted')) return 'not_catch_all';
+  // 真实地址被接受但 catch-all 未证伪（'catch_all_unproven'）或 RCPT 结果不决（'inconclusive:<code>'）。
+  if (detail === 'catch_all_unproven' || detail.startsWith('inconclusive')) return 'inconclusive';
+  return 'unknown';
 }
 
 /** 猜测结果 → 落库计划。只 verified/unverified-with-best 才落；其余返回 null（不落）。 */
@@ -44,6 +56,7 @@ export function guessedEmailWritePlan(result: GuessResult): GuessWritePlan | nul
     confidence: result.best.confidence,
     reason: result.reason,
     verificationDetail: result.best.verdict.detail ?? null,
+    catchAll: catchAllFromVerdictDetail(result.best.verdict.detail),
   };
 }
 
@@ -177,6 +190,11 @@ export async function persistGuessedEmail(
     update: {
       status: plan.pointStatus,
       verifiedAt: plan.verified ? args.now : null,
+      // A4：重验刷新分类/验证元数据（首见来源仍以 create 为准）。
+      emailType: 'personal' as const,
+      verificationMethod: 'smtp_rcpt' as const,
+      catchAll: plan.catchAll,
+      ...(args.lawfulBasis ? { legalBasis: args.lawfulBasis.basis } : {}),
     },
     create: {
       workspaceId: args.workspaceId,
@@ -185,6 +203,11 @@ export async function persistGuessedEmail(
       value: email,
       status: plan.pointStatus,
       verifiedAt: plan.verified ? args.now : null,
+      emailType: 'personal' as const,
+      sourceType: 'pattern_guess' as const,
+      verificationMethod: 'smtp_rcpt' as const,
+      catchAll: plan.catchAll,
+      ...(args.lawfulBasis ? { legalBasis: args.lawfulBasis.basis } : {}),
     },
   });
 

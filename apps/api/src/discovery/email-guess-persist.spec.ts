@@ -228,3 +228,36 @@ describe('email-guess-persist · authoritative replay readback', () => {
     expect(tx.contactPoint.findUnique).not.toHaveBeenCalled();
   });
 });
+
+describe('A4：分类/验证元数据落库', () => {
+  it('catchAllFromVerdictDetail：与 decideEmailVerdict 真实文案对齐（三态 + unknown）', async () => {
+    const { catchAllFromVerdictDetail } = await import('./email-guess-persist');
+    expect(catchAllFromVerdictDetail('catch_all_domain')).toBe('catch_all');
+    expect(catchAllFromVerdictDetail('smtp_accepted:250')).toBe('not_catch_all');
+    expect(catchAllFromVerdictDetail('catch_all_unproven')).toBe('inconclusive');
+    expect(catchAllFromVerdictDetail('inconclusive:250')).toBe('inconclusive');
+    expect(catchAllFromVerdictDetail('inconclusive:no_code')).toBe('inconclusive');
+    expect(catchAllFromVerdictDetail('mail_from_rejected')).toBe('unknown');
+    expect(catchAllFromVerdictDetail('mailbox_rejected:550')).toBe('unknown');
+    expect(catchAllFromVerdictDetail(null)).toBe('unknown');
+  });
+
+  it('落库携带 personal/pattern_guess/smtp_rcpt/catch_all 与 lawful basis', async () => {
+    const { tx, upsert } = fakeTx();
+    await persistGuessedEmail(tx, {
+      workspaceId: 'w',
+      contactId: 'c1',
+      result: verifiedResult,
+      suppressedEmails: new Set(),
+      lawfulBasis: LIA,
+      now: NOW,
+    });
+    expect(upsert.mock.calls[0][0].create).toMatchObject({
+      emailType: 'personal',
+      sourceType: 'pattern_guess',
+      verificationMethod: 'smtp_rcpt',
+      catchAll: 'not_catch_all',
+      legalBasis: 'legitimate_interest',
+    });
+  });
+});
