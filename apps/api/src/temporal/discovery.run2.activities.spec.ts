@@ -142,6 +142,7 @@ function makePrisma(state: {
 function makeActivities(
   state: Parameters<typeof makePrisma>[0],
   skills?: import('../skills/skill-runtime').SkillResolver,
+  agentRuntime?: import('../agents/agent-round').AgentRoundRuntime,
 ) {
   const harness = makePrisma(state);
   const activities = createRun2Activities({
@@ -149,8 +150,23 @@ function makeActivities(
     gateway: {} as never,
     budgetStore: { attestAuthorized: vi.fn(async () => undefined) } as never,
     ...(skills ? { skills } : {}),
+    ...(agentRuntime ? { agentRuntime } : {}),
   });
   return { activities, ...harness };
+}
+
+function activeQualifier() {
+  return {
+    resolve: vi.fn(async () => ({
+      agentKey: 'discovery.qualifier',
+      name: '资格判定员',
+      rolePromptVersion: 'v1',
+      skillKeys: ['discovery.qualify_fit'],
+      modelPolicy: {},
+      memoryScope: 'run',
+      loopPolicy: { maxRounds: 1 },
+    })),
+  };
 }
 
 beforeEach(() => {
@@ -393,5 +409,116 @@ describe('M0⑥ finalize V2 辅助（阶段时间/告警/影子对比）', () =>
     // …but recall is judged on the same-company set: legacy 3 positive vs shadow 4
     // (aggregate 4 < 7 would have reported a false recall drop).
     expect(diff.recallNotLower).toBe(true);
+  });
+});
+
+describe('M2 步 9b 资格判定员角色化：fit.judge 轨迹 + agent 回合门（零行为变化）', () => {
+  it('records one fit.judge trace per batch with verdicts and rejected mismatch candidates', async () => {
+    const traces = { record: vi.fn(async () => undefined) };
+    const { activities } = makeActivities(
+      {
+        jobs: [
+          { id: 'j1', canonicalCompanyId: 'c1' },
+          { id: 'j2', canonicalCompanyId: 'c2' },
+          { id: 'j3', canonicalCompanyId: 'c3' },
+        ],
+        companies: [company('c1'), company('c2'), company('c3')],
+      },
+      undefined,
+      { agents: activeQualifier(), traces },
+    );
+    mocks.execute.mockResolvedValue({
+      data: {
+        judgments: [
+          { index: 0, verdict: 'match', reason: 'distributor' },
+          { index: 1, verdict: 'mismatch', reason: 'competitor' },
+          { index: 2, verdict: 'weak', reason: 'unclear' },
+        ],
+      },
+    });
+
+    await activities.quickJudgeBatch(ARGS);
+
+    expect(traces.record).toHaveBeenCalledTimes(1);
+    const trace = traces.record.mock.calls[0]![0] as {
+      decisionType: string;
+      stepType: string;
+      agentKey: string;
+      discriminator: string;
+      chosenOption: { batchSize: number; judged: number; verdicts: Record<string, number> };
+      rejectedCandidates: Array<{ candidateRef: string; rejectReason: string; revivable: boolean }>;
+    };
+    expect(trace).toMatchObject({
+      decisionType: 'fit.judge',
+      stepType: 'discovery.quick_scan',
+      agentKey: 'discovery.qualifier',
+    });
+    expect(trace.discriminator.startsWith('batch:')).toBe(true);
+    expect(trace.chosenOption).toMatchObject({
+      batchSize: 3,
+      judged: 3,
+      verdicts: { match: 1, mismatch: 1, weak: 1 },
+    });
+    expect(trace.rejectedCandidates).toEqual([
+      { candidateRef: 'c2', rejectReason: 'VERDICT_MISMATCH', revivable: true },
+    ]);
+  });
+
+  it('fails closed with nonRetryable AGENT_DISABLED before any model call', async () => {
+    const { AgentUnavailableError } = await import('../agents/agent-runtime');
+    const traces = { record: vi.fn(async () => undefined) };
+    const { activities } = makeActivities(
+      {
+        jobs: [{ id: 'j1', canonicalCompanyId: 'c1' }],
+        companies: [company('c1')],
+      },
+      undefined,
+      {
+        agents: {
+          resolve: vi.fn(async () => {
+            throw new AgentUnavailableError('AGENT_DISABLED', 'ops kill switch');
+          }),
+        },
+        traces,
+      },
+    );
+
+    await expect(activities.quickJudgeBatch(ARGS)).rejects.toMatchObject({
+      type: 'AGENT_DISABLED',
+      nonRetryable: true,
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.judgeFitCompany).not.toHaveBeenCalled();
+    expect(traces.record).not.toHaveBeenCalled();
+  });
+
+  // 设计 §8 负向 3：技能被平台停用 → 回合 fail-closed 且轨迹落 SKILL_PLATFORM_DISABLED。
+  it('records SKILL_PLATFORM_DISABLED on the trace and rethrows when the skill is disabled', async () => {
+    const { SkillUnavailableError } = await import('../skills/skill-runtime');
+    const disabledSkill = {
+      kind: 'db' as const,
+      resolve: vi.fn(async () => {
+        throw new SkillUnavailableError('SKILL_PLATFORM_DISABLED', 'ops kill switch');
+      }),
+    };
+    const traces = { record: vi.fn(async () => undefined) };
+    const { activities } = makeActivities(
+      {
+        jobs: [{ id: 'j1', canonicalCompanyId: 'c1' }],
+        companies: [company('c1')],
+      },
+      disabledSkill,
+      { agents: activeQualifier(), traces },
+    );
+
+    await expect(activities.quickJudgeBatch(ARGS)).rejects.toBeInstanceOf(SkillUnavailableError);
+    expect(traces.record).toHaveBeenCalledTimes(1);
+    expect(traces.record.mock.calls[0]![0]).toMatchObject({
+      decisionType: 'fit.judge',
+      agentKey: 'discovery.qualifier',
+      discriminator: 'skill-gate',
+      reasonCode: 'SKILL_PLATFORM_DISABLED',
+    });
+    expect(mocks.execute).not.toHaveBeenCalled();
   });
 });

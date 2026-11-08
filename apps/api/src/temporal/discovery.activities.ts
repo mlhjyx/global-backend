@@ -29,13 +29,8 @@ import { artifactSubjectSkipReason } from '../tools/artifact-subject-denial';
 import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-judge';
 import type { SkillResolver } from '../skills/skill-runtime';
 import { AGENT_KEYS } from '../agents/agent-catalog';
-import {
-  AGENT_DECISION_TYPES,
-  AgentUnavailableError,
-  type AgentResolver,
-  type ResolvedAgent,
-} from '../agents/agent-runtime';
-import type { AgentDecisionTraceStore } from '../agents/agent-decision-trace.store';
+import { AGENT_DECISION_TYPES } from '../agents/agent-runtime';
+import { resolveAgentRound, type AgentRoundRuntime } from '../agents/agent-round';
 import type { RuntimeTelemetry } from '../model-runtime/types';
 import {
   CompanyDiscoveryQuery,
@@ -819,31 +814,6 @@ async function fitStageJudged(
  * 计划 → Provider 调用 → Raw Zone 原样落地 → 归一 + 身份解析 → Canonical +
  * FieldEvidence + IdentityLink → Suppression 标记 → 成本入账。
  */
-/** M2 步 9b：角色 agent 的回合依赖（注册表解析 + 决策轨迹写入）。 */
-export interface DiscoveryAgentRuntime {
-  readonly agents: AgentResolver;
-  readonly traces: AgentDecisionTraceStore;
-}
-
-/**
- * 回合级 agent 解析（M2 步 9b）。未注册/平台停用 → nonRetryable（run 按既有失败语义走）；
- * 其它错误原样上抛（例如连接故障走既有重试策略）。返回的回合描述用于技能子集校验。
- */
-async function resolveRoundAgent(
-  agents: AgentResolver,
-  agentKey: string,
-  workspaceId: string,
-): Promise<ResolvedAgent> {
-  try {
-    return await agents.resolve(agentKey, workspaceId);
-  } catch (error) {
-    if (error instanceof AgentUnavailableError) {
-      throw ApplicationFailure.nonRetryable(error.code, error.code);
-    }
-    throw error;
-  }
-}
-
 /**
  * 源侦察员回合的「未路由源及原因」：已注册（同 source_class）但本次查询没有路由到的源。
  * 优先级：租约停止 → 无受治理血缘 → 被停用 → hint 不可用 → hint 排除。
@@ -882,7 +852,7 @@ export function createDiscoveryActivities(deps: {
   /** S0 技能运行时：生产由 worker 注入 DB resolver；缺省为内置目录直通。 */
   skills?: SkillResolver;
   /** M2 步 9b：源侦察员角色（注册表 + 轨迹）。缺省不启用角色门与轨迹（测试/未接线保持旧行为）。 */
-  agentRuntime?: DiscoveryAgentRuntime;
+  agentRuntime?: AgentRoundRuntime;
   /** IntentProjectionService 的 sitemap 探测出网经此闸门（收口②）。 */
   broker?: ExecutionBroker;
   runtimeTelemetry?: RuntimeTelemetry;
@@ -1014,7 +984,7 @@ export function createDiscoveryActivities(deps: {
       }
       // M2 步 9b：源侦察员回合门——注册表缺失/平台停用即 fail-closed，未接线时保持旧行为。
       if (deps.agentRuntime) {
-        await resolveRoundAgent(deps.agentRuntime.agents, AGENT_KEYS.sourceScout, args.workspaceId);
+        await resolveAgentRound(deps.agentRuntime.agents, AGENT_KEYS.sourceScout, args.workspaceId);
       }
       let binding: ExecutionBudgetBinding;
       try {
