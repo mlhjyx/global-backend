@@ -151,15 +151,30 @@ export class ChannelsController {
   @Get('source-channels/:channelId/records')
   @RequireScopes('ops:read')
   @ApiOperation({
-    summary: '查看渠道最近物化的抓取记录（含联系人字段；PII 按 OWNER-DECISION-2026-11-05 明文存储）',
+    summary: '查看渠道最近物化的抓取记录（含观察名单状态与计数；PII 按 OWNER-DECISION-2026-11-05 明文存储）',
   })
   @ApiEnvelope({ type: 'object', additionalProperties: true })
   async records(
     @Ctx() ctx: RequestContext,
     @Param('channelId', ParseUUIDPipe) channelId: string,
     @Query('limit') limit?: string,
+    @Query('reviewStatus') reviewStatus?: string,
   ) {
-    return envelope(await this.channels.listChannelRecords(ctx, channelId, limit));
+    return envelope(await this.channels.listChannelRecords(ctx, channelId, limit, reviewStatus));
+  }
+
+  @Post('source-channels/:channelId/records/review')
+  @RequireScopes('ops:write')
+  @ApiOperation({
+    summary: '观察名单抽检：批量置 APPROVED/REJECTED（留 reviewed_by/at）；REJECTED 率 >20%（已抽检 ≥20）时渠道回 DISABLED',
+  })
+  @ApiEnvelope({ type: 'object', additionalProperties: true })
+  async reviewRecords(
+    @Ctx() ctx: RequestContext,
+    @Param('channelId', ParseUUIDPipe) channelId: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return envelope(await this.channels.reviewChannelRecords(ctx, channelId, body));
   }
 
   @Post('imported-buyers/preview')

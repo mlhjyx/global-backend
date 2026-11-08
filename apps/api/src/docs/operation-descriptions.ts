@@ -156,7 +156,9 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
   'POST /api/v1/source-channels/{channelId}/run':
     '立即运行抓取通道（同 preview 的门槛与限额，仅运营身份 ops:write；失败率连续 3 轮 >30% 自动停用）。',
   'GET /api/v1/source-channels/{channelId}/records':
-    '渠道最近物化的抓取记录（默认最近 50 条，limit 1–100）：公司/官网/国家/行业/产品/关键词与联系人（人名/职位/邮箱/电话，均为渠道页公开信息）。仅运营身份（ops:read），用于选择器校验与获客联系；同一公司跨轮去重合并（渠道+去重键 upsert），重跑不重复。',
+    '渠道最近物化的抓取记录（默认最近 50 条，limit 1–100，可按 reviewStatus=PENDING/APPROVED/REJECTED 过滤）：公司/官网/国家/行业/产品/关键词与联系人（人名/职位/邮箱/电话，均为渠道页公开信息），附观察名单状态与三态计数。仅运营身份（ops:read），用于选择器校验、抽检与获客联系；同一公司跨轮去重合并（渠道+去重键 upsert），重跑不重复且不覆盖人工抽检结论。',
+  'POST /api/v1/source-channels/{channelId}/records/review':
+    '观察名单抽检（CH-7）：把本渠道 1–200 条记录批量置 APPROVED/REJECTED 并记录 reviewed_by/reviewed_at；已抽检 ≥20 条且 REJECTED 率 >20% 时渠道自动回 DISABLED（原因 RECORD_REJECTION_RATE，写健康事件）。仅运营身份（ops:write）。',
   'POST /api/v1/imported-buyers/preview':
     '导入预览：解析 CSV、校验列映射（至少公司名列）、给出前 10 行样例与去重/抑制命中计数，不写库。',
   'POST /api/v1/imported-buyers':
