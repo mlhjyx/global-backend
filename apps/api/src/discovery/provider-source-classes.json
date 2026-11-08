@@ -40,6 +40,9 @@
   "smtp_self": [
     "email_verification"
   ],
+  "millionverifier": [
+    "email_verification"
+  ],
   "decision_maker": [
     "contact_discovery"
   ],

@@ -394,6 +394,14 @@ export class DiscoveryProviderRegistry {
       update: {},
       create: { key: 'smtp_self', class: 'email_verification', status: 'ENABLED', costPerCallCents: 0 },
     });
+    // P1-04：第三方邮箱验证器 MillionVerifier——默认 DISABLED = kill switch（再验证 CLI 在
+    // 调用前检查本行 ENABLED + source_policy + MILLIONVERIFIER_API_KEY 三重门）。凭据到位并
+    // 通过 scorecard 后由运维逐家打开；成本按事件账 cost_microusd 记（$0.00178/条）。
+    await db.dataProvider.upsert({
+      where: { key: 'millionverifier' },
+      update: {},
+      create: { key: 'millionverifier', class: 'email_verification', status: 'DISABLED', costPerCallCents: 0 },
+    });
     // 决策人抽取（Impressum/管理层/团队页 → 具名人+职务+买家角色）——联系人发现首选 adapter。
     await db.dataProvider.upsert({
       where: { key: 'decision_maker' },
@@ -416,6 +424,24 @@ export class DiscoveryProviderRegistry {
     // 合规注册：官方 REST（非爬，平台合约轨干净）；personalData=true —— officers 是具名董事（GDPR）。
     // OGL v3.0（Crown copyright）绿事实可商用**但署名是 license 义务**；数据最小化（无 DOB/国籍/住址）在 adapter 层强制。
     if (db.sourcePolicy) {
+      // P1-04：第三方验证 API 域未登记 = 未批准（再验证编排 fail-closed 拒调）。
+      // 送出的是待验证邮箱地址本身（个人数据处理），凭据未配置前客户端诚实降级 UNKNOWN。
+      await db.sourcePolicy.upsert({
+        where: { domain: 'api.millionverifier.com' },
+        update: {},
+        create: {
+          domain: 'api.millionverifier.com',
+          sourceType: 'data_verification',
+          accessMode: 'api',
+          reviewStatus: 'APPROVED',
+          robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_OK',
+          personalData: true,
+          allowedPurpose: ['discovery', 'enrichment'],
+          retentionDays: 365,
+          notes: 'MillionVerifier 邮箱验证 API（HTTPS + API key）。data_provider.millionverifier 默认 DISABLED（kill switch）；结果四态映射与成本（$0.00178/条）由 apps/api/src/enrichment/verification 客户端记账。',
+        },
+      });
       await db.sourcePolicy.upsert({
         where: { domain: 'api.company-information.service.gov.uk' },
         update: {},
