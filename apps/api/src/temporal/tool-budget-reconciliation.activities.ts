@@ -1,4 +1,5 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
+import { ApplicationFailure } from '@temporalio/activity';
 
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -100,7 +101,11 @@ export function createToolBudgetReconciliationActivities(
           Number(receipt.released) < 0 ||
           typeof receipt.has_more !== 'boolean'
         ) {
-          throw new Error('TOOL_BUDGET_RECONCILE_NO_RECEIPT');
+          // 控制面令牌必须用控制错误构造（静态结构门禁）：函数缺回执是部署缺陷，不可重试。
+          throw ApplicationFailure.nonRetryable(
+            'TOOL_BUDGET_RECONCILE_NO_RECEIPT',
+            'TOOL_BUDGET_RECONCILE_NO_RECEIPT',
+          );
         }
         released += Number(receipt.released);
         remaining = receipt.has_more;
@@ -137,7 +142,10 @@ export function createToolBudgetReconciliationActivities(
           Number(receipt.settled) < 0 ||
           typeof receipt.has_more !== 'boolean'
         ) {
-          throw new Error('TOOL_BUDGET_UNKNOWN_SETTLE_NO_RECEIPT');
+          throw ApplicationFailure.nonRetryable(
+            'TOOL_BUDGET_UNKNOWN_SETTLE_NO_RECEIPT',
+            'TOOL_BUDGET_UNKNOWN_SETTLE_NO_RECEIPT',
+          );
         }
         settled += Number(receipt.settled);
         remaining = receipt.has_more;
