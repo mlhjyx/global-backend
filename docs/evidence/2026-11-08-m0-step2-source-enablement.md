@@ -13,7 +13,8 @@
 > 解析」TED 查询；执行时因存量池优先未跑源查询，供给证据取自同镜像并行工作区 run `78dd56fe`：
 > TED accepted 5 / rejected 14，perSource `public_intelligence` providers 含 ted——见 §6.2）；
 > **directory ✅ 复核**（run `a96dfc89`：292 条 ACCEPTED/perSource 归因，见 §4.5）；
-> **openfda ②已修③已启、④缺美国医械 ICP**（crosswalk 无对象，见 §4.4）；
+> **openfda ✅ 四步全完成**（②#850 修复后真测 33 家，③ ENABLED，④ 晚补测：美国医械 ICP 注入 +
+> run `4fef3c50` 供给 20 条，见 §4.4/§7）；
 > **openstreetmap 上游全日不可用**（502/超时），维持 DISABLED 待换窗口重测。
 > 另发现一个 run 级可靠性缺口（`quickJudgeBatch` 重试后 `BudgetOperationReplayError` 致命，
 > 见 §5 与 §6.3）。
@@ -151,12 +152,13 @@ fail-closed）——出网闸门与生产同一实现；结构化源成本为 0�
 - **③ data_provider.status**：`ENABLED`（2026-11-08 午后；②的投影缺陷已由 #850 修复——`maxItems`
   12→50，与 provider「≥50 条」取数口径一致，修复后真实取样 33 家，证据见
   `docs/evidence/2026-11-08-openfda-projection-bound-fix.md`）。
-- **④ planner 覆盖**：**未验证（crosswalk 无对象）**。openFDA 注入需要 ICP 同时满足：行业归一到
-  医疗器械（ISIC 325，种子 `fdaPanels: ['RA']`，当前 curated 仅放射）+ 目标市场含美国。当前 dev
-  全部 ICP 都不满足——电子/包装行业 ICP 无 fdaPanels 锚，计划生成时静默跳过；机械 ICP 若目标市场
-  不含美国则得到显式告警「openFDA 仅覆盖美国市场，本 ICP 目标市场不含美国 → 跳过 openFDA 注入」。
-  补测建议：在验证 workspace 建「美国医疗器械（放射影像）采购 ICP」（industry=医疗器械、country=US），
-  生成计划确认 openFDA 注入后小样本执行一次。
+- **④ planner 覆盖**：✅ 2026-11-08 晚补测完成（详见 §7）：ICP `5456ee75…`「美国医疗器械
+  （放射影像）制造商采购ICP（openFDA 覆盖验证 E2E）」（industry=医疗器械→ISIC 325 `fdaPanels:
+  ['RA']`，targetMarkets=美国）→ plan `ecae3b67…` 首条即 `source_hint=openfda`（rationale
+  「openFDA 器械注册发现（ICP→FDA 产品码冷路径解析）」）→ run `4fef3c50…` 内 perQuery
+  accepted 20 / rejected 24，perSource `public_intelligence` `provider="openfda+public_web"`。
+  此前"未验证"的原因已解除：电子/包装 ICP 无 fdaPanels 锚、机械 ICP 目标市场不含美国（显式告警），
+  crosswalk 门按设计 fail-closed。
 - **回退**：`UPDATE data_provider SET status='DISABLED' WHERE key='openfda'`。
 
 ### 4.5 directory（后二之一，已启用）
@@ -195,7 +197,8 @@ fail-closed）——出网闸门与生产同一实现；结构化源成本为 0�
 - **OSM 上游可用性**：2026-11-08 全日三个 Overpass 端点不可用（上午 502、下午 406/超时），第②步
   需换时间窗重测；若长期不可用，可评估为 `osm.overpass` 增设备用端点（工具已支持 `OVERPASS_URL`
   覆盖与三端点回退，缺的是可用端点）。
-- **openFDA ④ 缺 crosswalk 对象**：见 §4.4 的补测建议（美国医疗器械/放射 ICP）。
+- **openFDA ④ 已闭环**（2026-11-08 晚，§7）：美国医械 ICP 注入 + 真供给 20 条；此前"缺 crosswalk
+  对象"的结论已随补测解除。
 - **TED 拒绝面**：另会话 2026-11-08 run 中 TED 原始记录 5 ACCEPTED / 14 REJECTED
   （`PROVIDER_PAYLOAD_SCHEMA_INVALID`，`raw_source_record.disposition_code`）；拒绝率高，后续可用
   `RAW_SOURCE_SCHEMA_PROBE` 取样定位被拒载荷形状（取样后该探针已移除）。
@@ -264,6 +267,35 @@ fail-closed）——出网闸门与生产同一实现；结构化源成本为 0�
 - **建议（交 M0/discovery owner）**：批量协议补 durable 投影（或对「已结算无结果」的操作按可重算
   处理）；给 `quickJudgeBatch` 加 heartbeat/调大 start-to-close；批量失败先降级逐家（已有回执路径）
   再考虑整批重试。属 discovery 编排/预算代码，未在本步改动。
+
+## 7. openFDA ④ 补测（2026-11-08 晚，取证窗口）
+
+- **背景**：Run 2.0 池优先（`DISCOVERY_RUN2_QUICK_SCAN=on`，池内候选 ≥ 阈值 20 即跳过整轮搜索）
+  使常规 run 不再执行计划查询（§6.2）。经主会话批准开 ≤15 分钟取证窗口：临时设
+  `DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD=1000`（合法上限）并仅重建 api（`runtime.sh up -d
+  --no-deps --force-recreate api`，不动 worker/platform-worker），run 查询段完成后**立即删除该行并
+  再次重建 api**；容器内已核实 `threshold=unset`、`DISCOVERY_RUN2_QUICK_SCAN=on` 原样。
+  **此为取证窗口的临时阈值，非常态配置。**窗口实际占用 11:28:56–11:33:38 UTC ≈ 5 分钟。
+- **ICP**：`5456ee75-ffdb-5de7-985e-7e7da675f835`「美国医疗器械（放射影像）制造商采购ICP
+  （openFDA 覆盖验证 E2E）」：industry=医疗器械（→ISIC 325，种子 `fdaPanels: ['RA']`）、
+  targetMarkets=美国、trade_side=manufacturer。（E2E 标记测试对象，不涉真实客户数据。）
+- **计划**：`ecae3b67-cffa-55e2-b748-e8585e78d0cd`——首条 `source_hint=openfda`（rationale
+  「openFDA 器械注册发现（ICP→FDA 产品码冷路径解析）」），另有 wikidata×1、directory×1、
+  public_web×2；5 条查询全部执行（5/5 回执）。
+- **结果（run `4fef3c50-fd6d-49a9-a626-41bdeaae4f8a`，11:28:56–11:33:08 UTC，PARTIAL）**：
+  - openFDA（ordinal 0）：accepted **20** / rejected 24（`PROVIDER_PAYLOAD_SCHEMA_INVALID`；
+    `raw_source_record` 20 ACCEPTED + 24 REJECTED）；
+  - perSource `public_intelligence`：`provider="openfda+public_web"`、rawCount 30（openfda 20 +
+    public_web 10）、rejectedCount 24、governanceDenied 24；
+  - wikidata 7；directory 0（21 条 quarantined）；
+  - quickScan：pool 787、candidates 407、prefilteredOut 93、judged 442（match 1 / mismatch 441）
+    → leads 1 → deep 1/1 failed（`failure_rate_high` → PARTIAL，非源问题）。
+- **判定**：**openFDA 四步全部完成**——① `api.fda.gov` 域已在 source_policy（APPROVED）② 真测
+  （#850 修复后真实取样 33 家）③ `data_provider.status=ENABLED` ④ 本 run 的计划注入 + perSource
+  供给双证。
+- **遗留**：openFDA 本次拒绝率 24/44≈55%（`PROVIDER_PAYLOAD_SCHEMA_INVALID`，与 TED 的 14/19 同
+  代码）；两份源都在真实载荷形状上被契约拒绝，建议后续用受控探针取样定位被拒子句（`RAW_SOURCE_SCHEMA_PROBE`
+  已随取样完成移除，重启后可再按需开启）。
 
 ## 附录 A：探针原始输出（2026-11-08）
 
