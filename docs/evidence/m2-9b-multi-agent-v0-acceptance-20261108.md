@@ -80,6 +80,15 @@
 - 现场停用类取证会影响共享 worker 上的并发 run（需先与主会话协调窗口）；本次曾误伤一条并发验收 run，已复盘。
 - 上游健康时可补跑完整 DONE 轮次作为长期基线，无需代码变更。
 
+## 增补：长期基线轮（2026-11-08 晚，镜像 `beb58d59`，含 #892 投影修复）
+
+- 补跑基线 run `9f932c42`（德吸塑 ICP，plan `fbaa08b6`，full 模式，quickScan on），~30 分钟终态 **PARTIAL**：
+  - quickScan：池 674 家、候选 469、判定 469（match 1 / weak 5 / mismatch 463），规则预筛出局 31、逐家降级 16、leads 6；
+  - 深挖：目标 6 家、5 成 1 败 → PARTIAL（个别深挖失败属上游，非 9b 语义问题）；
+  - 轨迹：`fit.judge` **59 批**（54 批纯 mismatch，其余含 weak/match）；本 run 走 Run2.0 池直判路径，查询段为空故无 `source.route`；
+  - 归属：`discovery.qualify_fit`（gemini-3.8-flash）63 次 / $0.560。
+- 取证合计入账：`fit.judge` **126 批**（验收 67 + 基线 59）、`source.route` 24 条。基线可在上游健康时重复，无需代码变更。
+
 ## 引用
 
 - 设计：[2026-11-08-multi-agent-orchestration-v0.md](../superpowers/plans/2026-11-08-multi-agent-orchestration-v0.md)
