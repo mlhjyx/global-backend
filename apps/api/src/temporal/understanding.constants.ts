@@ -55,5 +55,8 @@ export const DELETION_WORKFLOW = 'deletionWorkflow';
 /** B4（审计 F1）：未结预算操作（RESERVED/RESULT_UNKNOWN）的独立清收 sweep。 */
 export const TOOL_BUDGET_RECONCILIATION_SWEEP_WORKFLOW = 'toolBudgetReconciliationWorkflow';
 export const TOOL_BUDGET_RECONCILIATION_SCHEDULE_ID = 'tool-budget-reconciliation';
+/** B3（审计 F2）：stale-run 看门狗——RUNNING 超过租约+余量的 discovery_run 自动收尾。 */
+export const DISCOVERY_STALE_RUN_SWEEP_WORKFLOW = 'staleRunSweepWorkflow';
+export const DISCOVERY_STALE_RUN_SWEEP_SCHEDULE_ID = 'discovery-stale-run-sweep';
 export const PERSONAL_ARTIFACT_CLEANUP_WORKFLOW =
   'personalArtifactCleanupWorkflow';

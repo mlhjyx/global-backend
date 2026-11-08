@@ -8,6 +8,7 @@ import {
 } from "@nestjs/common";
 import { PrismaClient } from "@prisma/client";
 import { WorkflowIdReusePolicy } from "@temporalio/client";
+import type { Duration } from "@temporalio/common";
 import { TemporalClient } from "../temporal/temporal.client";
 import { DevFastLaneTemporalClient } from "../temporal/dev-fast-lane-temporal.client";
 import { DEV_FAST_LANE_ACQUISITION_COMMANDS } from "../runtime/dev-fast-lane";
@@ -20,6 +21,7 @@ import {
   UNDERSTANDING_TASK_QUEUE,
   UNDERSTANDING_WORKFLOW,
 } from "../temporal/understanding.constants";
+import { DISCOVERY_RUN_EXECUTION_TIMEOUT } from "../temporal/discovery-run-lifecycle";
 import {
   DISCOVERY_WORKFLOW_KNOB_ENV,
   DISCOVERY_DEEP_COMPANY_CONCURRENCY_BOUNDS,
@@ -779,6 +781,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       workflowId: string;
       args: unknown[];
       workflowIdReusePolicy?: WorkflowIdReusePolicy;
+      /** B3（F2）：discovery 等长任务的总时限；超时终止后由 stale-run 看门狗收尾。 */
+      workflowExecutionTimeout?: Duration;
     },
     what: string,
     acquisitionCommand?: { eventType: string; workspaceId: string },
@@ -888,6 +892,9 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           // 准入租约（3 小时）内 binding 一直可花钱：同一事件再投递不能在 run 结束后
           // 用同一 binding 另起一次执行。已结束的同 ID 报 AlreadyStarted，按合并处理。
           workflowIdReusePolicy: WorkflowIdReusePolicy.REJECT_DUPLICATE,
+          // B3（审计 F2）：租约 180m + finalize 余量 10m + 缓冲；超时终止后 DB 行由
+          // stale-run 看门狗收尾（terminate 不执行 workflow 的 catch）。与 dev fast lane 对齐。
+          workflowExecutionTimeout: DISCOVERY_RUN_EXECUTION_TIMEOUT,
           args: [
             {
               workspaceId: ev.workspaceId,

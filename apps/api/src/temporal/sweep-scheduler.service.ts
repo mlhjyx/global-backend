@@ -30,6 +30,8 @@ import {
   UNDERSTANDING_TASK_QUEUE,
   TOOL_BUDGET_RECONCILIATION_SCHEDULE_ID,
   TOOL_BUDGET_RECONCILIATION_SWEEP_WORKFLOW,
+  DISCOVERY_STALE_RUN_SWEEP_SCHEDULE_ID,
+  DISCOVERY_STALE_RUN_SWEEP_WORKFLOW,
 } from './understanding.constants';
 
 interface SweepDefinition {
@@ -49,6 +51,8 @@ export const CUSTOMER_SWEEPS: readonly SweepDefinition[] = Object.freeze([
   { scheduleId: KB_RECOVERY_SWEEP_SCHEDULE_ID, workflowType: KB_RECOVERY_SWEEP_WORKFLOW, everyEnv: 'KB_RECOVERY_SWEEP_EVERY', everyDefault: '5m', args: [{ limit: 10 }], workflowExecutionTimeout: '22 minutes' },
   // B4（审计 F1）：未结预算操作清收——RESERVED 释放 + RESULT_UNKNOWN 保守结清（阈值 2h）。
   { scheduleId: TOOL_BUDGET_RECONCILIATION_SCHEDULE_ID, workflowType: TOOL_BUDGET_RECONCILIATION_SWEEP_WORKFLOW, everyEnv: 'TOOL_BUDGET_RECONCILIATION_EVERY', everyDefault: '1h', args: [{}], workflowExecutionTimeout: '30 minutes' },
+  // B3（审计 F2）：stale-run 看门狗——租约+余量（215m）仍 RUNNING 的 run 自动收尾 FAILED。
+  { scheduleId: DISCOVERY_STALE_RUN_SWEEP_SCHEDULE_ID, workflowType: DISCOVERY_STALE_RUN_SWEEP_WORKFLOW, everyEnv: 'DISCOVERY_STALE_RUN_SWEEP_EVERY', everyDefault: '10m', args: [{}], workflowExecutionTimeout: '30 minutes' },
   { scheduleId: SITE_BUILD_COST_RECONCILIATION_SWEEP_SCHEDULE_ID, workflowType: SITE_BUILD_COST_RECONCILIATION_SWEEP_WORKFLOW, everyEnv: 'SITE_BUILD_COST_RECONCILIATION_EVERY', everyDefault: '1m', args: [{ limit: 50 }], workflowExecutionTimeout: '3 minutes' },
 ]);
 
