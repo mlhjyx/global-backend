@@ -1,0 +1,30 @@
+{
+  "id": "case5-cross-batch-approval",
+  "title": "⑦b 用 A 批的 approvalId 裁决 B 批",
+  "request": {
+    "method": "POST",
+    "path": "/api/outreach/batches/582738a4-b10e-4d06-8ac4-0714b869a0a0/approvals/bf06c025-ce87-48b1-ba85-329cff3db27e/decide",
+    "body": {
+      "decision": "approve"
+    },
+    "foreignApproval": "bf06c025-ce87-48b1-ba85-329cff3db27e",
+    "batchA": "53706396-4cc9-47fd-a0b2-417da5eae9cd"
+  },
+  "response": {
+    "status": 404,
+    "json": {
+      "error": {
+        "code": "OUTREACH_APPROVAL_NOT_FOUND",
+        "message": "审批不存在",
+        "userCopy": {
+          "title": "操作没有成功",
+          "why": "系统返回了一个未登记的错误。",
+          "next": "请重试;若反复出现,请复制「技术详情」联系运营。"
+        }
+      }
+    }
+  },
+  "batchB": "582738a4-b10e-4d06-8ac4-0714b869a0a0",
+  "approvalB": "d1eec295-d1e0-47d1-be95-ba6c01d52773",
+  "approvalBState": "PENDING"
+}

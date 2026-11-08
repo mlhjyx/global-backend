@@ -1,0 +1,26 @@
+{
+  "id": "case3-content-changed",
+  "title": "③c 批准后草稿被改 → 逐封内容哈希失配拒绝",
+  "request": {
+    "method": "POST",
+    "path": "/api/outreach/batches/637f9d1f-80f4-4857-b0c1-ec514efab981/send"
+  },
+  "response": {
+    "status": 409,
+    "json": {
+      "error": {
+        "code": "OUTREACH_CONTENT_CHANGED",
+        "message": "批次内容与批准时不一致，拒绝发送",
+        "userCopy": {
+          "title": "操作没有成功",
+          "why": "系统返回了一个未登记的错误。",
+          "next": "请重试;若反复出现,请复制「技术详情」联系运营。"
+        }
+      }
+    }
+  },
+  "batchId": "637f9d1f-80f4-4857-b0c1-ec514efab981",
+  "approvalId": "e6588789-5611-4115-9896-fbc99593544b",
+  "draftId": "de8d3ace-676e-4ad0-9f4a-12f030fcd9e9",
+  "dbSends": "0"
+}

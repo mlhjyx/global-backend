@@ -1,0 +1,23 @@
+{
+  "id": "case9-checks",
+  "title": "⑤/G3/G4 断言",
+  "request": {},
+  "response": {
+    "status": 200,
+    "json": {
+      "sentHasApprover": true,
+      "sentRowComplete": true,
+      "draftApprovedByRecorded": true,
+      "skipRowHasReason": true,
+      "consentBasis": true,
+      "skipEvent": true,
+      "g3HashStable": true,
+      "g3PersistedAt": true,
+      "g3PersistedHashMatch": true,
+      "g4RejectedHasEvent": true,
+      "g4RejectedHasPackage": true,
+      "g4RejectedHasAuditLog": true,
+      "g4RejectedNoSendRows": true
+    }
+  }
+}

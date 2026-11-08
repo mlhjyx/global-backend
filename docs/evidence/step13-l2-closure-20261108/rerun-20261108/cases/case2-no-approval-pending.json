@@ -1,0 +1,27 @@
+{
+  "id": "case2-no-approval-pending",
+  "title": "③b 已提交待审批直发",
+  "request": {
+    "method": "POST",
+    "path": "/api/outreach/batches/a841fd04-e5ed-41ed-88dc-c11b3a79e931/send"
+  },
+  "response": {
+    "status": 409,
+    "json": {
+      "error": {
+        "code": "OUTREACH_BATCH_NOT_QUEUED",
+        "message": "只有已批准进入待发队列的批次可以发送",
+        "userCopy": {
+          "title": "操作没有成功",
+          "why": "系统返回了一个未登记的错误。",
+          "next": "请重试;若反复出现,请复制「技术详情」联系运营。"
+        }
+      }
+    }
+  },
+  "batchId": "a841fd04-e5ed-41ed-88dc-c11b3a79e931",
+  "approvalId": "466092ce-62cd-4d3a-8fc6-1a0d08c0ad87",
+  "approvalState": "PENDING",
+  "batchStatus": "PENDING_APPROVAL",
+  "dbSends": "0"
+}

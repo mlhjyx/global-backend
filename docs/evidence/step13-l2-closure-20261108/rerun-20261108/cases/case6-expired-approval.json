@@ -1,0 +1,29 @@
+{
+  "id": "case6-expired-approval",
+  "title": "⑦c 批准过期后发送",
+  "request": {
+    "method": "POST",
+    "path": "/api/outreach/batches/94b60434-f057-4f1b-89a6-b92164b64f36/send"
+  },
+  "response": {
+    "status": 409,
+    "json": {
+      "error": {
+        "code": "OUTREACH_APPROVAL_EXPIRED",
+        "message": "批准已过期，需重新提交审批后才能发送",
+        "userCopy": {
+          "title": "操作没有成功",
+          "why": "系统返回了一个未登记的错误。",
+          "next": "请重试;若反复出现,请复制「技术详情」联系运营。"
+        }
+      }
+    }
+  },
+  "batchId": "94b60434-f057-4f1b-89a6-b92164b64f36",
+  "approvalId": "d93b29f2-013c-4080-9a88-a7f8383e68cc",
+  "approval": {
+    "state": "APPROVED",
+    "expiresAt": "2026-11-08T11:49:40.034"
+  },
+  "dbSends": "0"
+}

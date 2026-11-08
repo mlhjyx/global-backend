@@ -1,0 +1,39 @@
+{
+  "batchId": "87e39c54-c4ca-40b9-b4c5-2f79488a47e6",
+  "recipientEmail": "g2-b78b0a13@example.test",
+  "send": {
+    "status": 201,
+    "data": {
+      "batchId": "87e39c54-c4ca-40b9-b4c5-2f79488a47e6",
+      "status": "SENT",
+      "sent": 1,
+      "failed": 0,
+      "skipped": 0,
+      "results": [
+        {
+          "draftId": "9c6560a1-0328-4001-88e5-3cd85c5cf6d1",
+          "status": "SENT",
+          "messageId": "418ccd69-73c7-4315-b978-e905e18ccd68"
+        }
+      ]
+    }
+  },
+  "tokenPresent": true,
+  "consume": {
+    "status": 201,
+    "json": {
+      "data": {
+        "unsubscribed": true,
+        "alreadyUsed": false
+      }
+    }
+  },
+  "engineBuildSha": "5c969c337f875b7d51baee9b4243a786384bd15b",
+  "globalSuppressionRow": [
+    {
+      "email_hash": "5e8203a7e90211e737edb4a73375a72182a755b73b6193f58863a1e3ce19c85d",
+      "reason": "unsubscribe"
+    }
+  ],
+  "emailHash": "5e8203a7e90211e737edb4a73375a72182a755b73b6193f58863a1e3ce19c85d"
+}

@@ -1,0 +1,24 @@
+{
+  "label": "missing-entry",
+  "batchId": "b22ffb1f-77cd-4f0b-b320-1e9349c2f7ee",
+  "contactRef": "aec143ca-f932-47cb-a11f-2d652e1ca0ff",
+  "recipientEmail": "dnc-missing-entry-aec143ca@example.test",
+  "send": {
+    "status": 503,
+    "json": {
+      "error": {
+        "code": "OUTREACH_DNC_UNAVAILABLE",
+        "message": "Service Unavailable Exception",
+        "userCopy": {
+          "title": "操作没有成功",
+          "why": "系统返回了一个未登记的错误。",
+          "next": "请重试;若反复出现,请复制「技术详情」联系运营。"
+        }
+      }
+    }
+  },
+  "sink": {
+    "before": 14,
+    "after": 14
+  }
+}

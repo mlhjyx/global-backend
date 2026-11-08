@@ -1,0 +1,46 @@
+{
+  "id": "case4-replay-sent-batch",
+  "title": "⑦a 已发送批次重放",
+  "request": {
+    "method": "POST",
+    "path": "/api/outreach/batches/53706396-4cc9-47fd-a0b2-417da5eae9cd/send"
+  },
+  "response": {
+    "status": 409,
+    "json": {
+      "error": {
+        "code": "OUTREACH_BATCH_ALREADY_SENT",
+        "message": "该批次已发送，不能重复发送",
+        "userCopy": {
+          "title": "操作没有成功",
+          "why": "系统返回了一个未登记的错误。",
+          "next": "请重试;若反复出现,请复制「技术详情」联系运营。"
+        }
+      }
+    }
+  },
+  "batchId": "53706396-4cc9-47fd-a0b2-417da5eae9cd",
+  "firstSend": {
+    "data": {
+      "batchId": "53706396-4cc9-47fd-a0b2-417da5eae9cd",
+      "status": "SENT",
+      "sent": 1,
+      "failed": 0,
+      "skipped": 0,
+      "results": [
+        {
+          "draftId": "e47de491-2cee-4060-808a-6688c2806763",
+          "status": "SENT",
+          "messageId": "51937f34-e22a-4574-8f36-0d23d6a88b29"
+        }
+      ]
+    }
+  },
+  "dbSends": [
+    {
+      "draft_id": "e47de491-2cee-4060-808a-6688c2806763",
+      "status": "SENT",
+      "message_id": "51937f34-e22a-4574-8f36-0d23d6a88b29"
+    }
+  ]
+}

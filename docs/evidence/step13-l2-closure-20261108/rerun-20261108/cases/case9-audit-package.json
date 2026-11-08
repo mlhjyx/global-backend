@@ -1,0 +1,694 @@
+{
+  "id": "case9-audit-package",
+  "title": "⑤ 审计包（SENT / SKIPPED）+ G3 哈希稳定 + G4 门拒绝审计",
+  "request": {
+    "batches": {
+      "draftNotSubmitted": "a45c21a6-385c-4d00-8bcf-3167b8a6a422",
+      "submittedNotApproved": "a841fd04-e5ed-41ed-88dc-c11b3a79e931",
+      "contentChanged": "637f9d1f-80f4-4857-b0c1-ec514efab981",
+      "sentReplay": "53706396-4cc9-47fd-a0b2-417da5eae9cd",
+      "crossBatch": "582738a4-b10e-4d06-8ac4-0714b869a0a0",
+      "expired": "94b60434-f057-4f1b-89a6-b92164b64f36",
+      "unsubSeed": "3baebdf4-7ceb-4f47-bd9a-6681287f19aa",
+      "unsubscribeStop": "cf639f96-f3ac-43f8-a7b3-e1d852e8137b",
+      "replyStop": "a868095e-c043-4b70-8cda-46ebf6808a04"
+    }
+  },
+  "response": {
+    "status": 200,
+    "json": {
+      "data": {
+        "sentBatch": {
+          "status": 200,
+          "schemaVersion": "outreach-audit-package/v1",
+          "packageHash": "323d0f6589399342e4080308279f9fefc1bcff3de2974ebcdb951641d7dca4ba",
+          "persistedAt": "2026-11-08T12:49:39.155Z",
+          "approval": {
+            "id": "bf06c025-ce87-48b1-ba85-329cff3db27e",
+            "state": "APPROVED",
+            "decidedBy": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+            "decidedAt": "2026-11-08T12:49:38.856Z"
+          },
+          "drafts": [
+            {
+              "draftId": "e47de491-2cee-4060-808a-6688c2806763",
+              "status": "SENT",
+              "approvedBy": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+              "approvedAt": "2026-11-08T12:49:38.856Z",
+              "subject": "TEST ⑦a 首发送",
+              "recipientEmail": "l2c4@example.test",
+              "subjectHash": "99ce1f94fa9d8a91a12dd4034272b40123516c17c04d2fc241d0a9f5bbb46fca",
+              "bodyHash": "8b583f5b35f1e427ff4fe002d5137efd1857ae7ddcb61e0c83815c355bf52bc6",
+              "complianceBasis": {
+                "consentStatus": null,
+                "consentSource": null,
+                "lawfulBasis": null,
+                "consentRecordedAt": null,
+                "approvalContentHash": "e4039ce2f2b3353f0893fa4ea5e65dcf2212571c21afa4d4bc6655556aa9152d"
+              },
+              "sends": [
+                {
+                  "attempt": 1,
+                  "status": "SENT",
+                  "messageId": "51937f34-e22a-4574-8f36-0d23d6a88b29",
+                  "error": null,
+                  "sentAt": "2026-11-08T12:49:38.995Z"
+                }
+              ]
+            }
+          ],
+          "sends": [
+            {
+              "draftId": "e47de491-2cee-4060-808a-6688c2806763",
+              "recipientEmail": "l2c4@example.test",
+              "subjectHash": "99ce1f94fa9d8a91a12dd4034272b40123516c17c04d2fc241d0a9f5bbb46fca",
+              "bodyHash": "8b583f5b35f1e427ff4fe002d5137efd1857ae7ddcb61e0c83815c355bf52bc6",
+              "attempt": 1,
+              "status": "SENT",
+              "messageId": "51937f34-e22a-4574-8f36-0d23d6a88b29",
+              "error": null,
+              "sentAt": "2026-11-08T12:49:38.995Z",
+              "createdAt": "2026-11-08T12:49:38.997Z"
+            }
+          ],
+          "consents": [
+            {
+              "draftId": "e47de491-2cee-4060-808a-6688c2806763",
+              "consentStatus": null,
+              "consentSource": null,
+              "lawfulBasis": null,
+              "consentRecordedAt": null,
+              "approvalContentHash": "e4039ce2f2b3353f0893fa4ea5e65dcf2212571c21afa4d4bc6655556aa9152d"
+            }
+          ],
+          "events": [
+            {
+              "type": "BATCH_CREATED",
+              "detail": {
+                "name": "L2-⑦a 重放已发送（TEST）"
+              }
+            },
+            {
+              "type": "DRAFT_ADDED",
+              "detail": {
+                "draftId": "e47de491-2cee-4060-808a-6688c2806763",
+                "contactRef": "afb9d197-5d96-4a52-bf61-9468c2d10334"
+              }
+            },
+            {
+              "type": "BATCH_SUBMITTED",
+              "detail": {
+                "expiresAt": "2026-11-11T12:49:38.806Z",
+                "approvalId": "bf06c025-ce87-48b1-ba85-329cff3db27e",
+                "contentHash": "e4039ce2f2b3353f0893fa4ea5e65dcf2212571c21afa4d4bc6655556aa9152d"
+              }
+            },
+            {
+              "type": "BATCH_APPROVED",
+              "detail": {
+                "approvalId": "bf06c025-ce87-48b1-ba85-329cff3db27e",
+                "selfApproval": true
+              }
+            },
+            {
+              "type": "BATCH_SENT",
+              "detail": {
+                "sent": 1,
+                "failed": 0
+              }
+            },
+            {
+              "type": "BATCH_REJECTED",
+              "detail": {
+                "code": "OUTREACH_BATCH_ALREADY_SENT",
+                "message": "该批次已发送，不能重复发送"
+              }
+            }
+          ]
+        },
+        "sentBatchSecondGet": {
+          "status": 200,
+          "schemaVersion": "outreach-audit-package/v1",
+          "packageHash": "323d0f6589399342e4080308279f9fefc1bcff3de2974ebcdb951641d7dca4ba",
+          "persistedAt": "2026-11-08T12:49:39.155Z",
+          "approval": {
+            "id": "bf06c025-ce87-48b1-ba85-329cff3db27e",
+            "state": "APPROVED",
+            "decidedBy": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+            "decidedAt": "2026-11-08T12:49:38.856Z"
+          },
+          "drafts": [
+            {
+              "draftId": "e47de491-2cee-4060-808a-6688c2806763",
+              "status": "SENT",
+              "approvedBy": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+              "approvedAt": "2026-11-08T12:49:38.856Z",
+              "subject": "TEST ⑦a 首发送",
+              "recipientEmail": "l2c4@example.test",
+              "subjectHash": "99ce1f94fa9d8a91a12dd4034272b40123516c17c04d2fc241d0a9f5bbb46fca",
+              "bodyHash": "8b583f5b35f1e427ff4fe002d5137efd1857ae7ddcb61e0c83815c355bf52bc6",
+              "complianceBasis": {
+                "consentStatus": null,
+                "consentSource": null,
+                "lawfulBasis": null,
+                "consentRecordedAt": null,
+                "approvalContentHash": "e4039ce2f2b3353f0893fa4ea5e65dcf2212571c21afa4d4bc6655556aa9152d"
+              },
+              "sends": [
+                {
+                  "attempt": 1,
+                  "status": "SENT",
+                  "messageId": "51937f34-e22a-4574-8f36-0d23d6a88b29",
+                  "error": null,
+                  "sentAt": "2026-11-08T12:49:38.995Z"
+                }
+              ]
+            }
+          ],
+          "sends": [
+            {
+              "draftId": "e47de491-2cee-4060-808a-6688c2806763",
+              "recipientEmail": "l2c4@example.test",
+              "subjectHash": "99ce1f94fa9d8a91a12dd4034272b40123516c17c04d2fc241d0a9f5bbb46fca",
+              "bodyHash": "8b583f5b35f1e427ff4fe002d5137efd1857ae7ddcb61e0c83815c355bf52bc6",
+              "attempt": 1,
+              "status": "SENT",
+              "messageId": "51937f34-e22a-4574-8f36-0d23d6a88b29",
+              "error": null,
+              "sentAt": "2026-11-08T12:49:38.995Z",
+              "createdAt": "2026-11-08T12:49:38.997Z"
+            }
+          ],
+          "consents": [
+            {
+              "draftId": "e47de491-2cee-4060-808a-6688c2806763",
+              "consentStatus": null,
+              "consentSource": null,
+              "lawfulBasis": null,
+              "consentRecordedAt": null,
+              "approvalContentHash": "e4039ce2f2b3353f0893fa4ea5e65dcf2212571c21afa4d4bc6655556aa9152d"
+            }
+          ],
+          "events": [
+            {
+              "type": "BATCH_CREATED",
+              "detail": {
+                "name": "L2-⑦a 重放已发送（TEST）"
+              }
+            },
+            {
+              "type": "DRAFT_ADDED",
+              "detail": {
+                "draftId": "e47de491-2cee-4060-808a-6688c2806763",
+                "contactRef": "afb9d197-5d96-4a52-bf61-9468c2d10334"
+              }
+            },
+            {
+              "type": "BATCH_SUBMITTED",
+              "detail": {
+                "expiresAt": "2026-11-11T12:49:38.806Z",
+                "approvalId": "bf06c025-ce87-48b1-ba85-329cff3db27e",
+                "contentHash": "e4039ce2f2b3353f0893fa4ea5e65dcf2212571c21afa4d4bc6655556aa9152d"
+              }
+            },
+            {
+              "type": "BATCH_APPROVED",
+              "detail": {
+                "approvalId": "bf06c025-ce87-48b1-ba85-329cff3db27e",
+                "selfApproval": true
+              }
+            },
+            {
+              "type": "BATCH_SENT",
+              "detail": {
+                "sent": 1,
+                "failed": 0
+              }
+            },
+            {
+              "type": "BATCH_REJECTED",
+              "detail": {
+                "code": "OUTREACH_BATCH_ALREADY_SENT",
+                "message": "该批次已发送，不能重复发送"
+              }
+            }
+          ]
+        },
+        "unsubscribeStopBatch": {
+          "status": 200,
+          "schemaVersion": "outreach-audit-package/v1",
+          "packageHash": "d4f6a88c02e3c6e5c0a0ec4942bc4f282498f56e78412e7a0a14d451bd71d6d2",
+          "persistedAt": "2026-11-08T12:49:41.415Z",
+          "approval": {
+            "id": "e003de22-ae3c-4495-a476-a2a33212ff8d",
+            "state": "APPROVED",
+            "decidedBy": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+            "decidedAt": "2026-11-08T12:49:40.998Z"
+          },
+          "drafts": [
+            {
+              "draftId": "922546b9-78f4-450a-ac03-6218a7360db7",
+              "status": "SENT",
+              "approvedBy": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+              "approvedAt": "2026-11-08T12:49:40.998Z",
+              "subject": "TEST ⑥a 先发",
+              "recipientEmail": "l2c6b@example.test",
+              "subjectHash": "d50640f9d43ee62b13b442fde22fd519911fe24453bff958b77fda4571712c9d",
+              "bodyHash": "688cf6d656bd22411c18be5d7daef7df19d7ab822dbf0dd7d94dafa53b411eb3",
+              "complianceBasis": {
+                "consentStatus": null,
+                "consentSource": null,
+                "lawfulBasis": null,
+                "consentRecordedAt": null,
+                "approvalContentHash": "72b87b18ef93e1ee311a66b2cd72353ce094882d29c299c91a1ee01c038c453e"
+              },
+              "sends": [
+                {
+                  "attempt": 1,
+                  "status": "SENT",
+                  "messageId": "c4fd0fad-4c31-4c68-96d6-24d9d661c836",
+                  "error": null,
+                  "sentAt": "2026-11-08T12:49:41.163Z"
+                }
+              ]
+            },
+            {
+              "draftId": "c79cb557-c9c9-403c-ae4f-7cade95dfc31",
+              "status": "SKIPPED",
+              "approvedBy": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+              "approvedAt": "2026-11-08T12:49:40.998Z",
+              "subject": "TEST ⑥a 后发",
+              "recipientEmail": "l2c7@example.test",
+              "subjectHash": "56560b131ecda38d512fb70b41fc352aa722e7931178486f52f9d5bf6e5041e3",
+              "bodyHash": "8e3ff13fecd8e63680b3125e7404eed2ff57b1a6dfee208116be5ec0d3467515",
+              "complianceBasis": {
+                "consentStatus": "OPT_OUT",
+                "consentSource": "unsubscribe",
+                "lawfulBasis": "consent_withdrawal",
+                "consentRecordedAt": "2026-11-08T12:49:41.231Z",
+                "approvalContentHash": "72b87b18ef93e1ee311a66b2cd72353ce094882d29c299c91a1ee01c038c453e"
+              },
+              "sends": [
+                {
+                  "attempt": 1,
+                  "status": "SKIPPED",
+                  "messageId": null,
+                  "error": "OUTREACH_OPTED_OUT",
+                  "sentAt": null
+                }
+              ]
+            }
+          ],
+          "sends": [
+            {
+              "draftId": "922546b9-78f4-450a-ac03-6218a7360db7",
+              "recipientEmail": "l2c6b@example.test",
+              "subjectHash": "d50640f9d43ee62b13b442fde22fd519911fe24453bff958b77fda4571712c9d",
+              "bodyHash": "688cf6d656bd22411c18be5d7daef7df19d7ab822dbf0dd7d94dafa53b411eb3",
+              "attempt": 1,
+              "status": "SENT",
+              "messageId": "c4fd0fad-4c31-4c68-96d6-24d9d661c836",
+              "error": null,
+              "sentAt": "2026-11-08T12:49:41.163Z",
+              "createdAt": "2026-11-08T12:49:41.165Z"
+            },
+            {
+              "draftId": "c79cb557-c9c9-403c-ae4f-7cade95dfc31",
+              "recipientEmail": "l2c7@example.test",
+              "subjectHash": "56560b131ecda38d512fb70b41fc352aa722e7931178486f52f9d5bf6e5041e3",
+              "bodyHash": "8e3ff13fecd8e63680b3125e7404eed2ff57b1a6dfee208116be5ec0d3467515",
+              "attempt": 1,
+              "status": "SKIPPED",
+              "messageId": null,
+              "error": "OUTREACH_OPTED_OUT",
+              "sentAt": null,
+              "createdAt": "2026-11-08T12:49:41.307Z"
+            }
+          ],
+          "consents": [
+            {
+              "draftId": "922546b9-78f4-450a-ac03-6218a7360db7",
+              "consentStatus": null,
+              "consentSource": null,
+              "lawfulBasis": null,
+              "consentRecordedAt": null,
+              "approvalContentHash": "72b87b18ef93e1ee311a66b2cd72353ce094882d29c299c91a1ee01c038c453e"
+            },
+            {
+              "draftId": "c79cb557-c9c9-403c-ae4f-7cade95dfc31",
+              "consentStatus": "OPT_OUT",
+              "consentSource": "unsubscribe",
+              "lawfulBasis": "consent_withdrawal",
+              "consentRecordedAt": "2026-11-08T12:49:41.231Z",
+              "approvalContentHash": "72b87b18ef93e1ee311a66b2cd72353ce094882d29c299c91a1ee01c038c453e"
+            }
+          ],
+          "events": [
+            {
+              "type": "BATCH_CREATED",
+              "detail": {
+                "name": "L2-⑥a 同批退订即停（TEST）"
+              }
+            },
+            {
+              "type": "DRAFT_ADDED",
+              "detail": {
+                "draftId": "922546b9-78f4-450a-ac03-6218a7360db7",
+                "contactRef": "079b9787-2457-43ba-aa4c-7c70fd0534ce"
+              }
+            },
+            {
+              "type": "DRAFT_ADDED",
+              "detail": {
+                "draftId": "c79cb557-c9c9-403c-ae4f-7cade95dfc31",
+                "contactRef": "762b8693-1384-48cc-96c5-4611ca1543f3"
+              }
+            },
+            {
+              "type": "BATCH_SUBMITTED",
+              "detail": {
+                "expiresAt": "2026-11-11T12:49:40.949Z",
+                "approvalId": "e003de22-ae3c-4495-a476-a2a33212ff8d",
+                "contentHash": "72b87b18ef93e1ee311a66b2cd72353ce094882d29c299c91a1ee01c038c453e"
+              }
+            },
+            {
+              "type": "BATCH_APPROVED",
+              "detail": {
+                "approvalId": "e003de22-ae3c-4495-a476-a2a33212ff8d",
+                "selfApproval": true
+              }
+            },
+            {
+              "type": "BATCH_SEND_PARTIAL",
+              "detail": {
+                "sent": 1,
+                "failed": 0,
+                "skipped": 0,
+                "remaining": 1
+              }
+            },
+            {
+              "type": "DRAFT_SKIPPED",
+              "detail": {
+                "reason": "OUTREACH_OPTED_OUT",
+                "draftId": "c79cb557-c9c9-403c-ae4f-7cade95dfc31"
+              }
+            },
+            {
+              "type": "BATCH_COMPLETED",
+              "detail": {
+                "sent": 0,
+                "failed": 0,
+                "skipped": 1
+              }
+            }
+          ]
+        },
+        "replyStopBatch": {
+          "status": 200,
+          "schemaVersion": "outreach-audit-package/v1",
+          "packageHash": "b43b2774871ad004a37073c09ffa473f1d137d584134728f4c187c16ffca6f41",
+          "persistedAt": "2026-11-08T12:49:42.348Z",
+          "approval": {
+            "id": "19180427-f3f3-4990-b383-a9bfe064f0fa",
+            "state": "APPROVED",
+            "decidedBy": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+            "decidedAt": "2026-11-08T12:49:41.940Z"
+          },
+          "drafts": [
+            {
+              "draftId": "d5da9d8e-c968-4893-b4a4-bd4269900866",
+              "status": "SENT",
+              "approvedBy": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+              "approvedAt": "2026-11-08T12:49:41.940Z",
+              "subject": "TEST ⑥b 先发",
+              "recipientEmail": "l2c8@example.test",
+              "subjectHash": "853b0de2c5cedf6a4a7ebb7e69b22939083f8766aef041ad2f1580c32d8e4aba",
+              "bodyHash": "06e679c1b6266e67efa3dcfb937c39db8b4d9cea37235704066a77a80bf6dadd",
+              "complianceBasis": {
+                "consentStatus": null,
+                "consentSource": null,
+                "lawfulBasis": null,
+                "consentRecordedAt": null,
+                "approvalContentHash": "9a974b152decbea7e1628a60d58f68b69b15f5aea2b4c99457d47200cbde63dc"
+              },
+              "sends": [
+                {
+                  "attempt": 1,
+                  "status": "SENT",
+                  "messageId": "5bbb5e70-ff96-4851-8791-5ccf411a9196",
+                  "error": null,
+                  "sentAt": "2026-11-08T12:49:42.088Z"
+                }
+              ]
+            },
+            {
+              "draftId": "5e72c863-6c89-4e36-9edb-61d6712ec698",
+              "status": "SKIPPED",
+              "approvedBy": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+              "approvedAt": "2026-11-08T12:49:41.940Z",
+              "subject": "TEST ⑥b 回复后",
+              "recipientEmail": "l2c9@example.test",
+              "subjectHash": "a39cc8bbcc176678f75102119a0b16f45e15fa634598cfee5cc80e83ab6f9abf",
+              "bodyHash": "6d813758190eac4f40b9c536dff8dfe3ffebcd49c94b33784089ce2b8131c924",
+              "complianceBasis": {
+                "consentStatus": "OPT_OUT",
+                "consentSource": "reply:reply",
+                "lawfulBasis": "consent_withdrawal",
+                "consentRecordedAt": "2026-11-08T12:49:42.235Z",
+                "approvalContentHash": "9a974b152decbea7e1628a60d58f68b69b15f5aea2b4c99457d47200cbde63dc"
+              },
+              "sends": [
+                {
+                  "attempt": 1,
+                  "status": "SKIPPED",
+                  "messageId": null,
+                  "error": "OUTREACH_OPTED_OUT",
+                  "sentAt": null
+                }
+              ]
+            }
+          ],
+          "sends": [
+            {
+              "draftId": "d5da9d8e-c968-4893-b4a4-bd4269900866",
+              "recipientEmail": "l2c8@example.test",
+              "subjectHash": "853b0de2c5cedf6a4a7ebb7e69b22939083f8766aef041ad2f1580c32d8e4aba",
+              "bodyHash": "06e679c1b6266e67efa3dcfb937c39db8b4d9cea37235704066a77a80bf6dadd",
+              "attempt": 1,
+              "status": "SENT",
+              "messageId": "5bbb5e70-ff96-4851-8791-5ccf411a9196",
+              "error": null,
+              "sentAt": "2026-11-08T12:49:42.088Z",
+              "createdAt": "2026-11-08T12:49:42.090Z"
+            },
+            {
+              "draftId": "5e72c863-6c89-4e36-9edb-61d6712ec698",
+              "recipientEmail": "l2c9@example.test",
+              "subjectHash": "a39cc8bbcc176678f75102119a0b16f45e15fa634598cfee5cc80e83ab6f9abf",
+              "bodyHash": "6d813758190eac4f40b9c536dff8dfe3ffebcd49c94b33784089ce2b8131c924",
+              "attempt": 1,
+              "status": "SKIPPED",
+              "messageId": null,
+              "error": "OUTREACH_OPTED_OUT",
+              "sentAt": null,
+              "createdAt": "2026-11-08T12:49:42.299Z"
+            }
+          ],
+          "consents": [
+            {
+              "draftId": "d5da9d8e-c968-4893-b4a4-bd4269900866",
+              "consentStatus": null,
+              "consentSource": null,
+              "lawfulBasis": null,
+              "consentRecordedAt": null,
+              "approvalContentHash": "9a974b152decbea7e1628a60d58f68b69b15f5aea2b4c99457d47200cbde63dc"
+            },
+            {
+              "draftId": "5e72c863-6c89-4e36-9edb-61d6712ec698",
+              "consentStatus": "OPT_OUT",
+              "consentSource": "reply:reply",
+              "lawfulBasis": "consent_withdrawal",
+              "consentRecordedAt": "2026-11-08T12:49:42.235Z",
+              "approvalContentHash": "9a974b152decbea7e1628a60d58f68b69b15f5aea2b4c99457d47200cbde63dc"
+            }
+          ],
+          "events": [
+            {
+              "type": "BATCH_CREATED",
+              "detail": {
+                "name": "L2-⑥b 回复即停（TEST）"
+              }
+            },
+            {
+              "type": "DRAFT_ADDED",
+              "detail": {
+                "draftId": "d5da9d8e-c968-4893-b4a4-bd4269900866",
+                "contactRef": "71c4981a-2df6-4017-a5a5-1af9cbdc3253"
+              }
+            },
+            {
+              "type": "DRAFT_ADDED",
+              "detail": {
+                "draftId": "5e72c863-6c89-4e36-9edb-61d6712ec698",
+                "contactRef": "8447162f-1295-44e3-a8c4-064c3214d434"
+              }
+            },
+            {
+              "type": "BATCH_SUBMITTED",
+              "detail": {
+                "expiresAt": "2026-11-11T12:49:41.871Z",
+                "approvalId": "19180427-f3f3-4990-b383-a9bfe064f0fa",
+                "contentHash": "9a974b152decbea7e1628a60d58f68b69b15f5aea2b4c99457d47200cbde63dc"
+              }
+            },
+            {
+              "type": "BATCH_APPROVED",
+              "detail": {
+                "approvalId": "19180427-f3f3-4990-b383-a9bfe064f0fa",
+                "selfApproval": true
+              }
+            },
+            {
+              "type": "BATCH_SEND_PARTIAL",
+              "detail": {
+                "sent": 1,
+                "failed": 0,
+                "skipped": 0,
+                "remaining": 1
+              }
+            },
+            {
+              "type": "DRAFT_SKIPPED",
+              "detail": {
+                "reason": "OUTREACH_OPTED_OUT",
+                "draftId": "5e72c863-6c89-4e36-9edb-61d6712ec698"
+              }
+            },
+            {
+              "type": "BATCH_COMPLETED",
+              "detail": {
+                "sent": 0,
+                "failed": 0,
+                "skipped": 1
+              }
+            }
+          ]
+        }
+      },
+      "g3": {
+        "hashStableAcrossGets": true,
+        "persistedAtPresent": true,
+        "persistedRowCount": "3",
+        "persistedHashMatches": true
+      },
+      "rejectedEvidence": {
+        "notQueuedDraft": {
+          "batchId": "a45c21a6-385c-4d00-8bcf-3167b8a6a422",
+          "persistedAt": "2026-11-08T12:49:37.312Z",
+          "events": [
+            {
+              "type": "BATCH_REJECTED",
+              "actor": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+              "detail": {
+                "code": "OUTREACH_BATCH_NOT_QUEUED",
+                "message": "只有已批准进入待发队列的批次可以发送"
+              }
+            }
+          ],
+          "auditLog": [
+            {
+              "action": "outreach.batch.rejected",
+              "actor_id": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+              "detail": {
+                "code": "OUTREACH_BATCH_NOT_QUEUED",
+                "message": "只有已批准进入待发队列的批次可以发送"
+              }
+            }
+          ],
+          "sendRows": "0",
+          "packageRows": "1"
+        },
+        "notQueuedPending": {
+          "batchId": "a841fd04-e5ed-41ed-88dc-c11b3a79e931",
+          "persistedAt": "2026-11-08T12:49:37.738Z",
+          "events": [
+            {
+              "type": "BATCH_REJECTED",
+              "actor": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+              "detail": {
+                "code": "OUTREACH_BATCH_NOT_QUEUED",
+                "message": "只有已批准进入待发队列的批次可以发送"
+              }
+            }
+          ],
+          "auditLog": [
+            {
+              "action": "outreach.batch.rejected",
+              "actor_id": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+              "detail": {
+                "code": "OUTREACH_BATCH_NOT_QUEUED",
+                "message": "只有已批准进入待发队列的批次可以发送"
+              }
+            }
+          ],
+          "sendRows": "0",
+          "packageRows": "1"
+        },
+        "contentChanged": {
+          "batchId": "637f9d1f-80f4-4857-b0c1-ec514efab981",
+          "persistedAt": null,
+          "events": [
+            {
+              "type": "BATCH_REJECTED",
+              "actor": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+              "detail": {
+                "code": "OUTREACH_CONTENT_CHANGED",
+                "message": "批次内容与批准时不一致，拒绝发送"
+              }
+            }
+          ],
+          "auditLog": [
+            {
+              "action": "outreach.batch.rejected",
+              "actor_id": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+              "detail": {
+                "code": "OUTREACH_CONTENT_CHANGED",
+                "message": "批次内容与批准时不一致，拒绝发送"
+              }
+            }
+          ],
+          "sendRows": "0",
+          "packageRows": "1"
+        },
+        "expired": {
+          "batchId": "94b60434-f057-4f1b-89a6-b92164b64f36",
+          "persistedAt": "2026-11-08T12:49:40.080Z",
+          "events": [
+            {
+              "type": "BATCH_REJECTED",
+              "actor": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+              "detail": {
+                "code": "OUTREACH_APPROVAL_EXPIRED",
+                "message": "批准已过期，需重新提交审批后才能发送"
+              }
+            }
+          ],
+          "auditLog": [
+            {
+              "action": "outreach.batch.rejected",
+              "actor_id": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+              "detail": {
+                "code": "OUTREACH_APPROVAL_EXPIRED",
+                "message": "批准已过期，需重新提交审批后才能发送"
+              }
+            }
+          ],
+          "sendRows": "0",
+          "packageRows": "1"
+        }
+      }
+    }
+  }
+}
