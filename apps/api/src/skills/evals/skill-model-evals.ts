@@ -22,12 +22,14 @@ import {
  * （步 13 两技能）再断言——守卫拒绝的输出不会被当作通过。
  */
 
-export interface SkillModelEvalClient {
-  generateStructured<T = unknown>(
-    input: GenerateStructuredInput,
-    ctx: AiContext,
-  ): Promise<ModelResult<T>>;
-}
+/**
+ * 物理模型调用边界由调用方注入（ops 脚本里构建 provider 并调用；本模块与产品源码
+ * 不出现 `.generateStructured(` 直呼，执行授权目录保持只有两条 sanctioned 边界）。
+ */
+export type SkillModelEvalInvoke = (
+  input: GenerateStructuredInput,
+  ctx: AiContext,
+) => Promise<ModelResult<unknown>>;
 
 export interface SkillModelEvalContract {
   readonly id: string;
@@ -44,6 +46,8 @@ export interface SkillModelEvalSubject {
 
 export interface SkillModelEvalOptions {
   readonly workspaceId: string;
+  /** 注入的模型调用（ops 脚本按部署 env 构建；测试用假实现）。 */
+  readonly callModel: SkillModelEvalInvoke;
   /** 单次评测最多跑多少条模型层用例（S1 设计：默认 20）。 */
   readonly maxCases?: number;
   readonly onCase?: (result: SkillModelEvalCaseResult) => void;
@@ -132,7 +136,6 @@ function outputForModelResult(
  */
 export async function runSkillModelEvals(
   subject: SkillModelEvalSubject,
-  client: SkillModelEvalClient,
   options: SkillModelEvalOptions,
 ): Promise<SkillModelEvalResult> {
   const skillKey = subject.manifest.platform.skillKey;
@@ -163,7 +166,7 @@ export async function runSkillModelEvals(
     let output: unknown;
     const failures: string[] = [];
     try {
-      const response = await client.generateStructured<unknown>(
+      const response = await options.callModel(
         {
           task: subject.contract.id,
           prompt: promptForCase(skillKey, evalCase),

@@ -63,6 +63,12 @@ if (errors.length > 0) {
 const provider = buildGatewayProvider(process.env);
 if (!provider) fail("MODEL_GATEWAY_URL / MODEL_GATEWAY_KEY / MODEL_TIMEOUT_MS 缺失，无法实跑模型层评测");
 
+// 物理模型调用边界留在 ops 脚本里（产品源码只经 sanctioned runtime bridge，
+// 执行授权目录保持只有两条 ModelGateway 边界）。
+type ModelGatewayTypes = typeof import("../apps/api/src/model-gateway/types");
+const callModel = (input: ModelGatewayTypes["GenerateStructuredInput"], ctx: ModelGatewayTypes["AiContext"]) =>
+  provider.generateStructured(input, ctx);
+
 const ownerUrl = process.env.DATABASE_URL;
 const appUrl = process.env.APP_DATABASE_URL ?? ownerUrl;
 const owner = flag("seed") && ownerUrl ? new PrismaClient({ datasourceUrl: ownerUrl }) : null;
@@ -108,10 +114,10 @@ for (const skillKey of skillKeys) {
   process.stdout.write(`\n=== ${skillKey}@${record.manifest.platform.version} (${evalPath}) ===\n`);
   const result = await runSkillModelEvals(
     { manifest: record.manifest, evals, contract },
-    provider,
     {
       workspaceId,
       maxCases,
+      callModel,
       onCase: (entry) => {
         const status = entry.ok ? "PASS" : "FAIL";
         process.stdout.write(

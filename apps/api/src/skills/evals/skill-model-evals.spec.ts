@@ -8,11 +8,11 @@ import {
   modelCasesOf,
   runSkillModelEvals,
   SkillModelEvalInputError,
-  type SkillModelEvalClient,
+  type SkillModelEvalInvoke,
 } from "./skill-model-evals";
 
 /**
- * 模型层执行器的零网络测试：用假 client 返回夹具输出，验证
+ * 模型层执行器的零网络测试：用假 invoke 返回夹具输出，验证
  * ① 守卫参与断言（低置信/自动回复会被升级，不会当作通过）；
  * ② schema 不合法的输出直接红；
  * ③ 确定性层用例不会被模型层执行；
@@ -20,6 +20,7 @@ import {
  */
 
 const BUILTIN_ROOT = join(import.meta.dirname, "..", "builtin");
+const WORKSPACE_ID = "00000000-0000-0000-0000-000000000000";
 
 function draftManifest(): EvalManifest {
   return JSON.parse(
@@ -51,6 +52,10 @@ function classifyRecord() {
   return record;
 }
 
+function invokeReturning(data: unknown): SkillModelEvalInvoke {
+  return async () => ({ data, provider: "fake", model: "fake-model" });
+}
+
 const GOOD_DRAFT = {
   subject: "Fiber laser cutting for Great Lakes Metal Supply",
   body: "Hello John, we build fiber laser cutting systems and would like to discuss your sourcing plans.",
@@ -69,15 +74,9 @@ describe("runSkillModelEvals", () => {
       skillName: manifest.skillName,
       evals: [manifest.evals.find((evalCase) => evalCase.id === "us-first-touch")!],
     };
-    const client: SkillModelEvalClient = {
-      async generateStructured<T>() {
-        return { data: GOOD_DRAFT as T, provider: "fake", model: "fake-model" };
-      },
-    };
     const result = await runSkillModelEvals(
       { manifest: record.manifest, evals: onlyFirst, contract },
-      client,
-      { workspaceId: "00000000-0000-0000-0000-000000000000" },
+      { workspaceId: WORKSPACE_ID, callModel: invokeReturning(GOOD_DRAFT) },
     );
     expect(result.passed).toBe(true);
     expect(result.casesTotal).toBe(1);
@@ -92,19 +91,12 @@ describe("runSkillModelEvals", () => {
       skillName: manifest.skillName,
       evals: [manifest.evals.find((evalCase) => evalCase.id === "us-first-touch")!],
     };
-    const client: SkillModelEvalClient = {
-      async generateStructured<T>() {
-        return {
-          data: { ...GOOD_DRAFT, body: "We are guaranteed to double your output." } as T,
-          provider: "fake",
-          model: "fake-model",
-        };
-      },
-    };
     const result = await runSkillModelEvals(
       { manifest: record.manifest, evals: onlyFirst, contract },
-      client,
-      { workspaceId: "00000000-0000-0000-0000-000000000000" },
+      {
+        workspaceId: WORKSPACE_ID,
+        callModel: invokeReturning({ ...GOOD_DRAFT, body: "We are guaranteed to double your output." }),
+      },
     );
     expect(result.passed).toBe(false);
     expect(result.cases[0].failures.join("\n")).toContain("validation.ok");
@@ -115,24 +107,21 @@ describe("runSkillModelEvals", () => {
     const contract = getTask("engage.reply_classify")!;
     const manifest = classifyManifest();
     const positiveCase = manifest.evals.find((evalCase) => evalCase.id === "positive-interest")!;
-    const client: SkillModelEvalClient = {
-      async generateStructured<T>() {
-        return {
-          data: {
-            intent: "POSITIVE",
-            confidence: 0.4,
-            rationale: "low confidence",
-            matchedSignals: [],
-          } as T,
-          provider: "fake",
-          model: "fake-model",
-        };
-      },
-    };
     const result = await runSkillModelEvals(
-      { manifest: record.manifest, evals: { skillName: manifest.skillName, evals: [positiveCase] }, contract },
-      client,
-      { workspaceId: "00000000-0000-0000-0000-000000000000" },
+      {
+        manifest: record.manifest,
+        evals: { skillName: manifest.skillName, evals: [positiveCase] },
+        contract,
+      },
+      {
+        workspaceId: WORKSPACE_ID,
+        callModel: invokeReturning({
+          intent: "POSITIVE",
+          confidence: 0.4,
+          rationale: "low confidence",
+          matchedSignals: [],
+        }),
+      },
     );
     expect(result.passed).toBe(false);
   });
@@ -142,15 +131,13 @@ describe("runSkillModelEvals", () => {
     const contract = getTask("engage.reply_classify")!;
     const manifest = classifyManifest();
     const positiveCase = manifest.evals.find((evalCase) => evalCase.id === "positive-interest")!;
-    const client: SkillModelEvalClient = {
-      async generateStructured<T>() {
-        return { data: { nonsense: true } as T, provider: "fake", model: "fake-model" };
-      },
-    };
     const result = await runSkillModelEvals(
-      { manifest: record.manifest, evals: { skillName: manifest.skillName, evals: [positiveCase] }, contract },
-      client,
-      { workspaceId: "00000000-0000-0000-0000-000000000000" },
+      {
+        manifest: record.manifest,
+        evals: { skillName: manifest.skillName, evals: [positiveCase] },
+        contract,
+      },
+      { workspaceId: WORKSPACE_ID, callModel: invokeReturning({ nonsense: true }) },
     );
     expect(result.passed).toBe(false);
     expect(result.cases[0].failures.join("\n")).toContain("final.intent");
@@ -168,8 +155,7 @@ describe("runSkillModelEvals", () => {
     await expect(
       runSkillModelEvals(
         { manifest: record.manifest, evals: { skillName: "x", evals: [] }, contract },
-        { generateStructured: async <T>() => ({ data: {} as T, provider: "fake", model: "fake" }) },
-        { workspaceId: "00000000-0000-0000-0000-000000000000" },
+        { workspaceId: WORKSPACE_ID, callModel: invokeReturning({}) },
       ),
     ).rejects.toBeInstanceOf(SkillModelEvalInputError);
   });
