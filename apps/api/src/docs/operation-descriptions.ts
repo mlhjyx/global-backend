@@ -283,4 +283,9 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '设置 workspace 级 Pack 启停覆盖（幂等 upsert）；删除覆盖则跟随平台默认；需要 ops:write。',
   'DELETE /api/v1/packs/{packKey}/workspaces/{workspaceId}':
     '删除 workspace 启停覆盖，回到跟随平台默认；重复删除幂等返回 removed=false；需要 ops:write。',
+  // ── Agents（AI 底座 · M2 步 9b）───────────────────────────────────────────
+  'GET /api/v1/ops-agents':
+    '列出 agent 注册表：角色名、角色提示词版本、技能子集、模型与 loop 策略、平台启停状态；仅运营身份（ops:read）可读，租户调用返回 403。',
+  'PATCH /api/v1/ops-agents/{agentKey}/status':
+    '平台级启停（kill switch）：DISABLED 后该 agent 的对应回合对所有 workspace fail-closed（AGENT_DISABLED），worker 最迟 30 秒生效；未登记返回 404；需要 ops:write。',
 });

@@ -19398,7 +19398,8 @@
         ],
         "x-required-scopes": [
           "ops:read"
-        ]
+        ],
+        "description": "列出 agent 注册表：角色名、角色提示词版本、技能子集、模型与 loop 策略、平台启停状态；仅运营身份（ops:read）可读，租户调用返回 403。"
       }
     },
     "/api/v1/ops-agents/{agentKey}/status": {
@@ -19446,7 +19447,8 @@
         ],
         "x-required-scopes": [
           "ops:write"
-        ]
+        ],
+        "description": "平台级启停（kill switch）：DISABLED 后该 agent 的对应回合对所有 workspace fail-closed（AGENT_DISABLED），worker 最迟 30 秒生效；未登记返回 404；需要 ops:write。"
       }
     }
   },
