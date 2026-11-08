@@ -102,9 +102,12 @@ CREATE TABLE "company_contact_channel" (
     END
   ),
   CONSTRAINT "company_contact_channel_status_check" CHECK ("status" IN ('UNVERIFIED', 'VALID', 'RISKY', 'INVALID')),
+  -- VALID 只能由人确认（与 company_contact_point 同纪律）：人工标记必须留下 updated_by。
+  CONSTRAINT "company_contact_channel_status_marker_check" CHECK ("status" <> 'VALID' OR "updated_by" IS NOT NULL),
   CONSTRAINT "company_contact_channel_source_check" CHECK ("source_type" IN ('impressum', 'contact_page', 'homepage', 'operator')),
   CONSTRAINT "company_contact_channel_source_url_check" CHECK (
-    "source_url" IS NULL OR (char_length("source_url") BETWEEN 8 AND 2048 AND "source_url" LIKE 'https://%')
+    "source_url" IS NULL OR (char_length("source_url") BETWEEN 8 AND 2048
+      AND "source_url" LIKE 'https://%' AND "source_url" !~ '[[:space:]]')
   ),
   CONSTRAINT "company_contact_channel_robots_check" CHECK (
     "robots_status" IS NULL OR "robots_status" IN ('allowed', 'disallowed', 'unknown')

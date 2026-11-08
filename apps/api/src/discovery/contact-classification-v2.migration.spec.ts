@@ -35,9 +35,20 @@ describe('A4 联系方式分类 v2 迁移的静态契约', () => {
     ]) {
       expect(sql).toContain(`ADD COLUMN "${column}"`);
     }
-    expect(sql).toContain('contact_point_email_type_check');
-    expect(sql).toContain('contact_point_catch_all_check');
-    expect(sql).toContain('contact_point_consent_record_check');
+    // 九列每列都有值域/形状 CHECK——逐个点名，任何一个被删都会红。
+    for (const constraint of [
+      'contact_point_email_type_check',
+      'contact_point_source_type_check',
+      'contact_point_source_url_check',
+      'contact_point_robots_status_check',
+      'contact_point_tos_status_check',
+      'contact_point_legal_basis_check',
+      'contact_point_verification_method_check',
+      'contact_point_catch_all_check',
+      'contact_point_consent_record_check',
+    ]) {
+      expect(sql).toContain(constraint);
+    }
     // personal 与 legal_basis 的纪律在应用层（allowPersonalWithoutBasis 是已批准逃生门，DB 不强制）。
     expect(sql).toContain('allowPersonalWithoutBasis');
   });
@@ -60,5 +71,14 @@ describe('A4 联系方式分类 v2 迁移的静态契约', () => {
   it('公司层唯一键与级联外键', () => {
     expect(sql).toContain('company_contact_channel_identity_key');
     expect(sql).toContain('ON DELETE CASCADE');
+    // 复合外键必须引用 canonical_company(workspace_id, id)——租户内级联，不跨租户误删。
+    expect(sql).toContain('REFERENCES "canonical_company"("workspace_id", "id")');
+  });
+
+  it('VALID 只能由人确认（updated_by 必填）与 source_url 形状 CHECK', () => {
+    expect(sql).toContain('company_contact_channel_status_marker_check');
+    expect(sql).toContain(`"status" <> 'VALID' OR "updated_by" IS NOT NULL`);
+    // 与 contact_point_source_url_check 同源：https + 无空白。
+    expect(sql).toContain(`"source_url" !~ '[[:space:]]'`);
   });
 });

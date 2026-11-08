@@ -63,6 +63,9 @@ const VOCAB_LOOKUP: ReadonlyMap<string, ContactEmailType> = new Map(
 /** 人名形态：两段以上以 . _ - 分隔，或 f.last 这类缩写+姓氏；单段短词不冒认。 */
 const PERSON_NAME_SHAPE = /^[a-z]{1,}([._-][a-z]{1,})+$/u;
 const EMAIL_SHAPE = /^([^@\s]+)@([^@\s]+\.[^@\s]+)$/u;
+/** 与 cleanEmail 同口径的尾部归一：sales2 → sales，info-eu → info。 */
+const TRAILING_DIGITS = /[._-]?\d+$/u;
+const REGION_SUFFIX = /[._-](eu|us|de|uk|global|team)$/u;
 
 export interface ContactEmailClassification {
   emailType: ContactEmailType;
@@ -73,18 +76,28 @@ function dataClassFor(type: ContactEmailType): ContactEmailDataClass {
   return type === 'personal' ? 'red' : 'amber';
 }
 
+function classification(type: ContactEmailType): ContactEmailClassification {
+  return { emailType: type, dataClass: dataClassFor(type) };
+}
+
 export function classifyContactEmail(email: string): ContactEmailClassification {
   const match = EMAIL_SHAPE.exec(email.trim().toLowerCase());
-  if (!match) return { emailType: 'other', dataClass: dataClassFor('other') };
-  // local-part 归一：去 +tag，词表按段匹配（einkauf-2 → einkauf；info.web → info? 不——多段先看词表段）。
+  if (!match) return classification('other');
+  // local-part 归一：去 +tag。
   const localPart = match[1]!.split('+')[0]!;
-  const segments = localPart.split(/[._-]+/u).filter(Boolean);
-  for (const segment of segments) {
-    const mapped = VOCAB_LOOKUP.get(segment);
-    if (mapped) return { emailType: mapped, dataClass: dataClassFor(mapped) };
+  // ① 整词词表（cleanEmail 口径）：sales2 / info-eu / einkauf-2 这类「职能词+数字/地区尾缀」。
+  const bare = localPart.replace(TRAILING_DIGITS, '').replace(REGION_SUFFIX, '');
+  const wholeWord = VOCAB_LOOKUP.get(bare);
+  if (wholeWord) return classification(wholeWord);
+  // ② 全段词表（info.kontakt / kontakt-vertrieb）：每段都是职能词才算职能邮箱。
+  const segments = localPart.split(/[._-]+/u).filter((s) => s && !/^\d+$/u.test(s));
+  const segmentTypes = segments.map((s) => VOCAB_LOOKUP.get(s));
+  if (segmentTypes.length > 0 && segmentTypes.every((t) => t !== undefined)) {
+    return classification(segmentTypes[0]!);
   }
-  if (PERSON_NAME_SHAPE.test(localPart)) {
-    return { emailType: 'personal', dataClass: dataClassFor('personal') };
-  }
-  return { emailType: 'other', dataClass: dataClassFor('other') };
+  // ③ 人名形态 → personal（red）。与 cleanEmail 的保守裁决收敛：info.schmidt / vertrieb.mueller
+  //    这类「职能词+人名」混合形态不冒认职能邮箱（下游 A6 若按 role 类放行会误触个人邮箱）。
+  if (PERSON_NAME_SHAPE.test(localPart)) return classification('personal');
+  // ④ 判不出（jdoe 这类单段词绝不冒认人名）→ other（amber）。
+  return classification('other');
 }

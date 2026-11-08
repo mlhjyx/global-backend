@@ -88,6 +88,34 @@ describe('upsertCompanyContactChannels（A4）', () => {
     ).rejects.toThrow('COMPANY_CHANNEL_FORM_URL_INVALID');
   });
 
+  it('sourceUrl 与 DB CHECK 同源校验：http/带空白/超长都拒绝', async () => {
+    const { tx } = fakeTx();
+    const base = { workspaceId: WORKSPACE, companyId: COMPANY, channels: [] as never[] };
+    for (const sourceUrl of [
+      'http://a.de/impressum',
+      'https://a.de/imp ress',
+      `https://a.de/${'x'.repeat(2050)}`,
+    ]) {
+      await expect(
+        upsertCompanyContactChannels(tx, {
+          ...base,
+          channels: [{ channel: 'email', value: 'info@a.de', emailType: 'role', sourceType: 'impressum', sourceUrl }],
+        }),
+      ).rejects.toThrow('COMPANY_CHANNEL_SOURCE_URL_INVALID');
+    }
+  });
+
+  it('value 超长（>512）在任何 channel 都拒绝', async () => {
+    const { tx } = fakeTx();
+    await expect(
+      upsertCompanyContactChannels(tx, {
+        workspaceId: WORKSPACE,
+        companyId: COMPANY,
+        channels: [{ channel: 'phone', value: `+49${'0'.repeat(520)}`, sourceType: 'impressum' }],
+      }),
+    ).rejects.toThrow('COMPANY_CHANNEL_VALUE_TOO_LONG');
+  });
+
   it('重复观测只推进 last_seen 与来源留痕，不改状态', async () => {
     const { tx, upsert } = fakeTx();
     await upsertCompanyContactChannels(tx, {

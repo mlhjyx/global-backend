@@ -29,19 +29,23 @@
 ## 3. 分类器 v2（`discovery/contact-classifier.ts`，纯函数）
 
 - `classifyContactEmail(email)` → `{ emailType, dataClass }`：
-  - local-part 归一（小写、去 `+tag`）；按 **国家语言词表** 映射到桶：
-    role（info/kontakt/contact/office/hello/anfrage/inquiry…）、generic_sales（sales/vertrieb/ventas/ventes/vendite/commercial…）、
-    procurement（einkauf/purchasing/procurement/achat/compras/acquisti…）、management（geschaeftsfuehrung/management/direction…）、
-    finance（buchhaltung/accounting/billing/rechnung…）、support（support/hilfe/service/kundendienst…）；
-  - 人名形态（`first.last`/`f-last` 等分隔）且不在词表 → personal（red）；无法判定 → other（amber）。
-  - dataClass：personal=red，其余=amber（与既有 emailDataClass 口径一致）。
+  - local-part 归一（小写、去 `+tag`；整词按 cleanEmail 口径剥尾部数字/地区后缀：`sales2`→sales、`info-eu`→info）；
+  - 整词命中 → 词表桶；全部段都是职能词（`info.kontakt`）→ 首段桶；人名形态（`first.last` 等分隔）→ personal（red）；
+    混合形态（`info.schmidt`、`vertrieb.mueller`）**判 personal**——与 cleanEmail 的保守裁决收敛，防 A6 按 role 类放行误触个人邮箱；
+  - 无法判定（`jdoe` 这类单段词，绝不冒认人名）→ other（amber）；dataClass：personal=red，其余=amber。
+  - 已知限制：人名形态与 email 形状都是 ASCII 口径（上游 cleanEmail 同样丢弃非 ASCII local-part，现网不可达）；
+    电话字符串归一是 A1 挖掘器的职责（本层只折叠空白），历史行与正式库不受影响。
 - field_evidence 的 `emailDataClass` 保持既有 `cleanEmail` 口径不变（未识别为 role 即 red，保守不放松；与分类器 `other=amber` 的差异是刻意的：证据分级宁严）。新分类器只决定 `contact_point.email_type`。
 
 ## 4. 落库接线
 
-- `contact-persist`：contact_point 写入带 `email_type/source_type='provider'/source_url=record.sourcePage/legal_basis/verification_method='provider_reported'`。
-- `email-guess-persist`：带 `email_type='personal'/source_type='pattern_guess'/verification_method='smtp_rcpt'/catch_all=由 verdict.detail 映射`。
-- 新写入器 `company-contact-channel.ts`：幂等 upsert（自动化只写 UNVERIFIED、first/last_seen 语义、suppression 前置留给 A1 调用方）。
+- `contact-persist`：contact_point 写入带 `email_type/source_type='provider'/source_url=record.sourcePage/legal_basis/verification_method='provider_reported'`；
+  `sourcePage` 不合 DB 形状（非 https/带空白/超长）时**降级为 NULL**——一条坏 URL 不得把整家公司联系人落库事务打挂。
+- `email-guess-persist`：带 `email_type='personal'/source_type='pattern_guess'/verification_method=由 verdict.detail 判定/`catch_all=由 verdict.detail 映射`；
+  只有真产生 RCPT/域级结论（smtp_accepted/catch_all_*/inconclusive）才记 `smtp_rcpt`，未触网如实记 `pattern_guess`。
+- 新写入器 `company-contact-channel.ts`：幂等 upsert（自动化只写 UNVERIFIED、first/last_seen 语义、suppression 前置留给 A1 调用方）；
+  `sourceUrl`/value 长度与形状校验与 DB CHECK 同源（尽早以 `COMPANY_CHANNEL_*` 失败）。
+- DSR：公司主体擦除显式清 `company_contact_channel`（公司行只标 SUPPRESSED，复合 FK 级联不触发），计数并入 contactPointsErased。
 
 ## 5. 非目标
 
@@ -49,7 +53,10 @@
 
 ## 6. 测试
 
-分类器多语种矩阵；写入器幂等/状态纪律；两处 persist 的新字段断言；迁移静态契约（值域 CHECK/授权/RLS）与 app-user 权限清单更新；全量零容器 + 治理门禁。
+分类器多语种矩阵（含混合形态/整词归一边界）；写入器幂等/状态纪律/与 DB CHECK 同源的校验；两处 persist 的新字段断言
+（含 source_url 防护与 verification_method 如实）；迁移静态契约（九列 CHECK/授权/RLS/复合 FK/VALID 标记）；
+真库契约 spec（`company-contact-channel.postgres.spec.ts`，CI 的 PostgreSQL 组：CHECK/唯一键/RLS 读写隔离/级联删除/写入器幂等）；
+app-user 权限清单更新；全量零容器 + 治理门禁。
 
 ## 7. 回退
 

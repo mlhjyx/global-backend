@@ -38,6 +38,8 @@ export interface UpsertCompanyChannelsArgs {
 
 const EMAIL_SHAPE = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/u;
 const PHONE_SHAPE = /^\+?[0-9()/ -]{5,32}$/u;
+/** 与 DB CHECK 同源：https、无空白、长度 8–2048。 */
+const SOURCE_URL_SHAPE = /^https:\/\/\S{5,2043}$/u;
 
 function normalizeValue(input: CompanyChannelInput): string {
   const trimmed = input.value.trim();
@@ -48,6 +50,7 @@ function normalizeValue(input: CompanyChannelInput): string {
 
 function validate(input: CompanyChannelInput): string {
   const value = normalizeValue(input);
+  if (value.length > 512) throw new Error('COMPANY_CHANNEL_VALUE_TOO_LONG');
   if (input.channel === 'email') {
     if (!EMAIL_SHAPE.test(value)) throw new Error('COMPANY_CHANNEL_EMAIL_INVALID');
     if (!input.emailType) throw new Error('COMPANY_CHANNEL_EMAIL_TYPE_REQUIRED');
@@ -59,6 +62,9 @@ function validate(input: CompanyChannelInput): string {
     if (input.channel === 'form_url' && (!value.startsWith('https://') || /[?#\s]/u.test(value))) {
       throw new Error('COMPANY_CHANNEL_FORM_URL_INVALID');
     }
+  }
+  if (input.sourceUrl !== undefined && !SOURCE_URL_SHAPE.test(input.sourceUrl.trim())) {
+    throw new Error('COMPANY_CHANNEL_SOURCE_URL_INVALID');
   }
   return value;
 }

@@ -35,8 +35,25 @@ describe('classifyContactEmail（A4 分类器 v2）', () => {
     ['Info@Example.DE', 'role'],
     ['kontakt+web@example.de', 'role'],
     ['einkauf-2@example.de', 'procurement'],
+    // cleanEmail 口径的整词归一：尾数字/地区后缀
+    ['sales2@example.de', 'generic_sales'],
+    ['info-eu@example.de', 'role'],
+    // 全段职能词
+    ['info.kontakt@example.de', 'role'],
   ])('%s → %s', (email, expected) => {
     expect(classifyContactEmail(email).emailType).toBe(expected);
+  });
+
+  it.each([
+    // 「职能词+人名」混合形态不冒认职能邮箱——与 cleanEmail 的保守裁决收敛（info.schmidt 会被
+    // cleanEmail 判 personal/red；若这里判 role/amber，A6 按 role 放行会误触个人邮箱）。
+    'info.schmidt@example.de',
+    'vertrieb.mueller@example.de',
+    'service.meier@example.de',
+  ])('%s 混合形态 → personal（red）', (email) => {
+    const result = classifyContactEmail(email);
+    expect(result.emailType).toBe('personal');
+    expect(result.dataClass).toBe('red');
   });
 
   it.each([

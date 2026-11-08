@@ -16,6 +16,18 @@ function emailDataClass(email: string): 'amber' | 'red' {
   return cleanEmail(email)?.kind === 'role' ? 'amber' : 'red';
 }
 
+/**
+ * A4：contact_point.source_url 的 DB 形状（https、无空白、8–2048 字符）。不合规的来源页
+ *（如 https 站点里绝对化的 http 链接经 provider 原样透传）降级为 NULL——一条坏 URL 若直写会
+ * 违反 CHECK，把整家公司联系人落库的 withWorkspace 事务一起回滚。
+ */
+const SOURCE_URL_SHAPE = /^https:\/\/\S{5,2043}$/u;
+function safeSourceUrl(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const value = raw.trim();
+  return SOURCE_URL_SHAPE.test(value) ? value : undefined;
+}
+
 export interface PersistDiscoveredContactsArgs {
   workspaceId: string;
   company: { id: string; dedupeKey: string };
@@ -158,6 +170,7 @@ export async function persistDiscoveredContacts(
         value: `${e.scheme}:${e.value}`,
       })),
     ];
+    const sourceUrl = safeSourceUrl(c.sourcePage);
     for (const p of points) {
       if (!p.value) continue;
       await tx.contactPoint.upsert({
@@ -177,7 +190,7 @@ export async function persistDiscoveredContacts(
                 sourceType: 'provider' as const,
                 verificationMethod: 'provider_reported' as const,
                 ...(args.lawfulBasis ? { legalBasis: args.lawfulBasis.basis } : {}),
-                ...(c.sourcePage ? { sourceUrl: c.sourcePage } : {}),
+                ...(sourceUrl ? { sourceUrl } : {}),
               }
             : {}),
         },

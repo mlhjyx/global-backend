@@ -31,6 +31,18 @@ export interface GuessWritePlan {
   verificationDetail: string | null;
   /** A4：把验证 verdict.detail 归类成 catch-all 三态（+unknown）。 */
   catchAll: 'catch_all' | 'not_catch_all' | 'inconclusive' | 'unknown';
+  /** A4：RCPT/域级探测真的跑过才记 smtp_rcpt；没触网（gate 不可用/发件人被拒/不可达）如实记 pattern_guess。 */
+  verificationMethod: 'smtp_rcpt' | 'pattern_guess';
+}
+
+/** verdict.detail → 验证方式：只有产生 RCPT/域级结论的 detail 才算 smtp_rcpt。 */
+export function verificationMethodFromVerdictDetail(
+  detail: string | null | undefined,
+): GuessWritePlan['verificationMethod'] {
+  if (!detail) return 'pattern_guess';
+  return /^(smtp_accepted|catch_all_domain|catch_all_unproven|inconclusive)/u.test(detail)
+    ? 'smtp_rcpt'
+    : 'pattern_guess';
 }
 
 /** verdict.detail → catch-all 归类：与 decideEmailVerdict 的 detail 文案对齐。 */
@@ -57,6 +69,7 @@ export function guessedEmailWritePlan(result: GuessResult): GuessWritePlan | nul
     reason: result.reason,
     verificationDetail: result.best.verdict.detail ?? null,
     catchAll: catchAllFromVerdictDetail(result.best.verdict.detail),
+    verificationMethod: verificationMethodFromVerdictDetail(result.best.verdict.detail),
   };
 }
 
@@ -192,7 +205,7 @@ export async function persistGuessedEmail(
       verifiedAt: plan.verified ? args.now : null,
       // A4：重验刷新分类/验证元数据（首见来源仍以 create 为准）。
       emailType: 'personal' as const,
-      verificationMethod: 'smtp_rcpt' as const,
+      verificationMethod: plan.verificationMethod,
       catchAll: plan.catchAll,
       ...(args.lawfulBasis ? { legalBasis: args.lawfulBasis.basis } : {}),
     },
@@ -205,7 +218,7 @@ export async function persistGuessedEmail(
       verifiedAt: plan.verified ? args.now : null,
       emailType: 'personal' as const,
       sourceType: 'pattern_guess' as const,
-      verificationMethod: 'smtp_rcpt' as const,
+      verificationMethod: plan.verificationMethod,
       catchAll: plan.catchAll,
       ...(args.lawfulBasis ? { legalBasis: args.lawfulBasis.basis } : {}),
     },
