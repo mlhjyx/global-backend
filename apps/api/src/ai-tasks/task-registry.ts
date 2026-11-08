@@ -378,7 +378,10 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     // social.search/social.fetch：社媒索引与档案/直抓层（personalData 独立工具，D1/M2b）；
     // crawl4ai.fetch：官网人物页；http.get：选页回退时抓官网首页原始 HTML
     // （crawl4ai 的 markdown 会丢导航/JS 菜单里的 Impressum 链接，M5 评估）。
-    allowedTools: ['social.search', 'social.fetch', 'crawl4ai.fetch', 'http.get'],
+    // crawl4ai.render：A1 Impressum 挖掘取渲染后原始 HTML（JSON-LD contactPoint / cfemail
+    // 只在 HTML 面可见）——不在白名单时 ToolPolicyDenied 会被当 control error 把整次
+    // 联系人发现打成失败（#748 同类事故），故显式放行。
+    allowedTools: ['social.search', 'social.fetch', 'crawl4ai.fetch', 'http.get', 'crawl4ai.render'],
     maxCostCents: 15,
     maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 120000,

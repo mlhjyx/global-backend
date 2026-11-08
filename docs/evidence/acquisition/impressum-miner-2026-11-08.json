@@ -1,0 +1,1060 @@
+{
+  "summary": {
+    "generatedAt": "2026-11-08T10:07:52.665Z",
+    "criterion": "reachable Impressum companies with >=1 role email AND >=1 phone (DoD >= 80%)",
+    "sampleSize": 20,
+    "robotsDisallowed": 0,
+    "homeFetched": 20,
+    "reachableImpressum": 19,
+    "withRoleEmail": 12,
+    "withPhone": 14,
+    "withRoleEmailAndPhone": 11,
+    "hitRate": 0.5789
+  },
+  "results": [
+    {
+      "name": "Miniatur Wunderland Hamburg",
+      "domain": "miniatur-wunderland.de",
+      "robotsAllowed": true,
+      "homeFetched": true,
+      "impressumReachable": true,
+      "roleEmails": [
+        "info@miniatur-wunderland.de"
+      ],
+      "phones": [
+        "+4940300680"
+      ],
+      "formUrls": [],
+      "pagesTried": 2,
+      "pages": [
+        {
+          "url": "https://www.miniatur-wunderland.de/service/impressum",
+          "kind": "impressum",
+          "htmlBytes": 204552,
+          "textBytes": 21082,
+          "emails": [
+            "info@miniatur-wunderland.de"
+          ],
+          "phones": [
+            "+4940300680"
+          ]
+        },
+        {
+          "url": "https://www.miniatur-wunderland.de/service/kontakt",
+          "kind": "contact",
+          "htmlBytes": 243348,
+          "textBytes": 20424,
+          "emails": [],
+          "phones": []
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "Pumpentechnik Bass",
+      "domain": "pumpentechnik-bass.de",
+      "robotsAllowed": true,
+      "homeFetched": true,
+      "impressumReachable": true,
+      "roleEmails": [
+        "info@pumpentechnik-bass.de"
+      ],
+      "phones": [
+        "+49208867554",
+        "+492088830141"
+      ],
+      "formUrls": [
+        "https://pumpentechnik-bass.de/kontakt.php"
+      ],
+      "pagesTried": 3,
+      "pages": [
+        {
+          "url": "https://pumpentechnik-bass.de/impressum.php",
+          "kind": "impressum",
+          "htmlBytes": 13587,
+          "textBytes": 2027,
+          "emails": [
+            "info@pumpentechnik-bass.de"
+          ],
+          "phones": [
+            "+49208867554",
+            "+492088830141"
+          ]
+        },
+        {
+          "url": "https://pumpentechnik-bass.de/kontakt.php",
+          "kind": "contact",
+          "htmlBytes": 13790,
+          "textBytes": 1366,
+          "emails": [
+            "info@pumpentechnik-bass.de"
+          ],
+          "phones": [
+            "+49208867554",
+            "+492088830141"
+          ]
+        },
+        {
+          "url": "https://pumpentechnik-bass.de/ueber-uns.php",
+          "kind": "about",
+          "htmlBytes": 22464,
+          "textBytes": 3371,
+          "emails": [
+            "info@pumpentechnik-bass.de"
+          ],
+          "phones": [
+            "+49208867554",
+            "+492088830141"
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "Autorisierter EHEIM-Kundendienst",
+      "domain": "eheim-service.de",
+      "robotsAllowed": true,
+      "homeFetched": true,
+      "impressumReachable": false,
+      "roleEmails": [],
+      "phones": [],
+      "formUrls": [],
+      "pagesTried": 5,
+      "pages": [],
+      "error": null
+    },
+    {
+      "name": "Tsurumi Pump Europe",
+      "domain": "tsurumi.de",
+      "robotsAllowed": true,
+      "homeFetched": true,
+      "impressumReachable": true,
+      "roleEmails": [
+        "vertrieb@tsurumi.eu",
+        "datenschutz@tsurumi.eu"
+      ],
+      "phones": [
+        "+49211417937450",
+        "+49211417937460",
+        "+35314361001",
+        "+81669117271",
+        "+81669110100"
+      ],
+      "formUrls": [
+        "https://tsurumi.de/de-DE/kontakt-newsletter-993"
+      ],
+      "pagesTried": 3,
+      "pages": [
+        {
+          "url": "https://tsurumi.de/de-DE/impressum-55",
+          "kind": "impressum",
+          "htmlBytes": 63549,
+          "textBytes": 9388,
+          "emails": [
+            "vertrieb@tsurumi.eu",
+            "datenschutz@tsurumi.eu"
+          ],
+          "phones": [
+            "+49211417937450",
+            "+49211417937460",
+            "+35314361001"
+          ]
+        },
+        {
+          "url": "https://tsurumi.de/de-DE/kontakt-newsletter-993",
+          "kind": "contact",
+          "htmlBytes": 61235,
+          "textBytes": 3111,
+          "emails": [
+            "vertrieb@tsurumi.eu",
+            "datenschutz@tsurumi.eu"
+          ],
+          "phones": [
+            "+49211417937450",
+            "+49211417937460",
+            "+81669117271",
+            "+81669110100"
+          ]
+        },
+        {
+          "url": "https://tsurumi.de/de-DE/unternehmensprofil-3",
+          "kind": "about",
+          "htmlBytes": 86697,
+          "textBytes": 6180,
+          "emails": [
+            "sales@tsurumi.co.uk",
+            "sales@tsurumi.se",
+            "vertrieb@tsurumi.eu",
+            "sales@tsurumi.eu",
+            "contact@tsurumi-france.fr",
+            "contact@tsurumi-location.fr",
+            "datenschutz@tsurumi.eu"
+          ],
+          "phones": [
+            "+49211417937450"
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "IST Pumpen und Dosiertechnik GmbH",
+      "domain": "istpumpen.com",
+      "robotsAllowed": true,
+      "homeFetched": true,
+      "impressumReachable": true,
+      "roleEmails": [
+        "info@istpumpen.com"
+      ],
+      "phones": [
+        "+492261701430",
+        "+492261701431",
+        "+4922617014311"
+      ],
+      "formUrls": [
+        "https://istpumpen.com/kontakt"
+      ],
+      "pagesTried": 2,
+      "pages": [
+        {
+          "url": "https://istpumpen.com/impressum",
+          "kind": "impressum",
+          "htmlBytes": 30947,
+          "textBytes": 4099,
+          "emails": [
+            "info@istpumpen.com"
+          ],
+          "phones": [
+            "+492261701430",
+            "+492261701431",
+            "+4922617014311"
+          ]
+        },
+        {
+          "url": "https://istpumpen.com/kontakt",
+          "kind": "contact",
+          "htmlBytes": 36582,
+          "textBytes": 1966,
+          "emails": [
+            "info@istpumpen.com"
+          ],
+          "phones": [
+            "+492261701430",
+            "+4922617014311"
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "sanotact GROUP",
+      "domain": "sanotact-group.de",
+      "robotsAllowed": true,
+      "homeFetched": true,
+      "impressumReachable": true,
+      "roleEmails": [
+        "info@sanotact.de"
+      ],
+      "phones": [
+        "+4925114210",
+        "+49251142156339"
+      ],
+      "formUrls": [
+        "https://www.sanotact-group.de/kontakt/"
+      ],
+      "pagesTried": 3,
+      "pages": [
+        {
+          "url": "https://www.sanotact-group.de/impressum/",
+          "kind": "impressum",
+          "htmlBytes": 411787,
+          "textBytes": 8014,
+          "emails": [
+            "info@sanotact.de"
+          ],
+          "phones": [
+            "+4925114210",
+            "+49251142156339"
+          ]
+        },
+        {
+          "url": "https://www.sanotact-group.de/kontakt/",
+          "kind": "contact",
+          "htmlBytes": 491603,
+          "textBytes": 7702,
+          "emails": [
+            "info@sanotact.de"
+          ],
+          "phones": [
+            "+4925114210",
+            "+49251142156339"
+          ]
+        },
+        {
+          "url": "https://www.sanotact-group.de/unternehmen/",
+          "kind": "about",
+          "htmlBytes": 627997,
+          "textBytes": 20157,
+          "emails": [
+            "info@sanotact.de"
+          ],
+          "phones": [
+            "+4925114210",
+            "+49251142156339"
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "JESSBERGER Pumpen",
+      "domain": "shop.jesspumpen.de",
+      "robotsAllowed": true,
+      "homeFetched": true,
+      "impressumReachable": true,
+      "roleEmails": [],
+      "phones": [],
+      "formUrls": [],
+      "pagesTried": 4,
+      "pages": [
+        {
+          "url": "https://shop.jesspumpen.de/kontakt",
+          "kind": "contact",
+          "htmlBytes": 671594,
+          "textBytes": 83,
+          "emails": [],
+          "phones": []
+        },
+        {
+          "url": "https://shop.jesspumpen.de/kontakt.html",
+          "kind": "contact",
+          "htmlBytes": 671594,
+          "textBytes": 83,
+          "emails": [],
+          "phones": []
+        },
+        {
+          "url": "https://shop.jesspumpen.de/contact",
+          "kind": "contact",
+          "htmlBytes": 671594,
+          "textBytes": 83,
+          "emails": [],
+          "phones": []
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "KSB",
+      "domain": "ksb.com",
+      "robotsAllowed": true,
+      "homeFetched": true,
+      "impressumReachable": true,
+      "roleEmails": [],
+      "phones": [],
+      "formUrls": [],
+      "pagesTried": 5,
+      "pages": [
+        {
+          "url": "https://ksb.com/en-global/contact",
+          "kind": "contact",
+          "htmlBytes": 665258,
+          "textBytes": 3477,
+          "emails": [],
+          "phones": []
+        },
+        {
+          "url": "https://ksb.com/impressum",
+          "kind": "impressum",
+          "htmlBytes": 368358,
+          "textBytes": 431,
+          "emails": [],
+          "phones": []
+        },
+        {
+          "url": "https://ksb.com/impressum.html/",
+          "kind": "impressum",
+          "htmlBytes": 151,
+          "textBytes": 35,
+          "emails": [],
+          "phones": []
+        },
+        {
+          "url": "https://ksb.com/imprint",
+          "kind": "impressum",
+          "htmlBytes": 369704,
+          "textBytes": 431,
+          "emails": [],
+          "phones": []
+        },
+        {
+          "url": "https://ksb.com/legal-notice",
+          "kind": "impressum",
+          "htmlBytes": 369891,
+          "textBytes": 431,
+          "emails": [],
+          "phones": []
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "Wasserpumpe.de",
+      "domain": "wasserpumpe.de",
+      "robotsAllowed": true,
+      "homeFetched": true,
+      "impressumReachable": true,
+      "roleEmails": [
+        "service@wasserpumpe.de"
+      ],
+      "phones": [
+        "+4921618397808"
+      ],
+      "formUrls": [
+        "https://wasserpumpe.de/kontakt"
+      ],
+      "pagesTried": 2,
+      "pages": [
+        {
+          "url": "https://wasserpumpe.de/impressum",
+          "kind": "impressum",
+          "htmlBytes": 407721,
+          "textBytes": 4720,
+          "emails": [
+            "service@wasserpumpe.de"
+          ],
+          "phones": [
+            "+4921618397808"
+          ]
+        },
+        {
+          "url": "https://wasserpumpe.de/kontakt",
+          "kind": "contact",
+          "htmlBytes": 428175,
+          "textBytes": 4857,
+          "emails": [
+            "service@wasserpumpe.de"
+          ],
+          "phones": [
+            "+4921618397808"
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "WaldrichSiegen",
+      "domain": "waldrichsiegen.de",
+      "robotsAllowed": true,
+      "homeFetched": true,
+      "impressumReachable": true,
+      "roleEmails": [
+        "info@waldrichsiegen.de"
+      ],
+      "phones": [
+        "+492716906600",
+        "+492716906699"
+      ],
+      "formUrls": [],
+      "pagesTried": 4,
+      "pages": [
+        {
+          "url": "https://waldrichsiegen.de/impressum/",
+          "kind": "impressum",
+          "htmlBytes": 69026,
+          "textBytes": 3263,
+          "emails": [
+            "info@waldrichsiegen.de"
+          ],
+          "phones": [
+            "+492716906600",
+            "+492716906699"
+          ]
+        },
+        {
+          "url": "https://waldrichsiegen.de/rechtliche-hinweise/",
+          "kind": "impressum",
+          "htmlBytes": 70862,
+          "textBytes": 4855,
+          "emails": [],
+          "phones": []
+        },
+        {
+          "url": "https://waldrichsiegen.de/kontakt/",
+          "kind": "contact",
+          "htmlBytes": 83228,
+          "textBytes": 2607,
+          "emails": [],
+          "phones": [
+            "+492716906600",
+            "+492716906699"
+          ]
+        },
+        {
+          "url": "https://waldrichsiegen.de/ueber-uns/",
+          "kind": "about",
+          "htmlBytes": 101077,
+          "textBytes": 8404,
+          "emails": [],
+          "phones": []
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "Schreiber Anlagenbau",
+      "domain": "schreiber-anlagenbau.de",
+      "robotsAllowed": true,
+      "homeFetched": true,
+      "impressumReachable": true,
+      "roleEmails": [
+        "info@schreiber-anlagenbau.de"
+      ],
+      "phones": [
+        "+4973059561501",
+        "+491735845766",
+        "+4973059561502",
+        "+491732123421"
+      ],
+      "formUrls": [
+        "https://www.schreiber-anlagenbau.de/kontakt"
+      ],
+      "pagesTried": 3,
+      "pages": [
+        {
+          "url": "https://www.schreiber-anlagenbau.de/impressum",
+          "kind": "impressum",
+          "htmlBytes": 118653,
+          "textBytes": 4767,
+          "emails": [
+            "info@schreiber-anlagenbau.de"
+          ],
+          "phones": []
+        },
+        {
+          "url": "https://www.schreiber-anlagenbau.de/kontakt",
+          "kind": "contact",
+          "htmlBytes": 133643,
+          "textBytes": 4776,
+          "emails": [
+            "info@schreiber-anlagenbau.de"
+          ],
+          "phones": []
+        },
+        {
+          "url": "https://www.schreiber-anlagenbau.de/unternehmen",
+          "kind": "about",
+          "htmlBytes": 175591,
+          "textBytes": 6572,
+          "emails": [],
+          "phones": [
+            "+4973059561501",
+            "+491735845766",
+            "+4973059561502",
+            "+491732123421"
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "Aquaristik Bayern",
+      "domain": "aquaristik-bayern.de",
+      "robotsAllowed": true,
+      "homeFetched": true,
+      "impressumReachable": true,
+      "roleEmails": [
+        "mail@aquaristik-bayern.de"
+      ],
+      "phones": [
+        "+4999646019360"
+      ],
+      "formUrls": [
+        "https://aquaristik-bayern.de/kontakt",
+        "https://aquaristik-bayern.de/kontakt.html"
+      ],
+      "pagesTried": 5,
+      "pages": [
+        {
+          "url": "https://aquaristik-bayern.de/impressum",
+          "kind": "impressum",
+          "htmlBytes": 232558,
+          "textBytes": 4092,
+          "emails": [
+            "mail@aquaristik-bayern.de"
+          ],
+          "phones": [
+            "+4999646019360"
+          ]
+        },
+        {
+          "url": "https://aquaristik-bayern.de/kontakt",
+          "kind": "contact",
+          "htmlBytes": 232055,
+          "textBytes": 3702,
+          "emails": [
+            "mail@aquaristik-bayern.de"
+          ],
+          "phones": [
+            "+4999646019360"
+          ]
+        },
+        {
+          "url": "https://aquaristik-bayern.de/impressum.html",
+          "kind": "impressum",
+          "htmlBytes": 273537,
+          "textBytes": 4191,
+          "emails": [
+            "mail@aquaristik-bayern.de"
+          ],
+          "phones": [
+            "+4999646019360"
+          ]
+        },
+        {
+          "url": "https://aquaristik-bayern.de/imprint",
+          "kind": "impressum",
+          "htmlBytes": 227341,
+          "textBytes": 3792,
+          "emails": [
+            "mail@aquaristik-bayern.de"
+          ],
+          "phones": [
+            "+4999646019360"
+          ]
+        },
+        {
+          "url": "https://aquaristik-bayern.de/kontakt.html",
+          "kind": "contact",
+          "htmlBytes": 273537,
+          "textBytes": 4191,
+          "emails": [
+            "mail@aquaristik-bayern.de"
+          ],
+          "phones": [
+            "+4999646019360"
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "Delock",
+      "domain": "delock.de",
+      "robotsAllowed": true,
+      "homeFetched": true,
+      "impressumReachable": true,
+      "roleEmails": [],
+      "phones": [],
+      "formUrls": [],
+      "pagesTried": 5,
+      "pages": [
+        {
+          "url": "https://delock.de/impressum/",
+          "kind": "impressum",
+          "htmlBytes": 89676,
+          "textBytes": 114,
+          "emails": [],
+          "phones": []
+        },
+        {
+          "url": "https://delock.de/kontakt/",
+          "kind": "contact",
+          "htmlBytes": 89676,
+          "textBytes": 114,
+          "emails": [],
+          "phones": []
+        },
+        {
+          "url": "https://delock.de/impressum.html",
+          "kind": "impressum",
+          "htmlBytes": 89686,
+          "textBytes": 114,
+          "emails": [],
+          "phones": []
+        },
+        {
+          "url": "https://delock.de/imprint",
+          "kind": "impressum",
+          "htmlBytes": 89686,
+          "textBytes": 114,
+          "emails": [],
+          "phones": []
+        },
+        {
+          "url": "https://delock.de/kontakt.html",
+          "kind": "contact",
+          "htmlBytes": 89686,
+          "textBytes": 114,
+          "emails": [],
+          "phones": []
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "Milwaukee Tools",
+      "domain": "de.milwaukeetool.eu",
+      "robotsAllowed": true,
+      "homeFetched": true,
+      "impressumReachable": true,
+      "roleEmails": [],
+      "phones": [
+        "+4921039600",
+        "+447725244791"
+      ],
+      "formUrls": [
+        "https://de.milwaukeetool.eu/service/contact/"
+      ],
+      "pagesTried": 3,
+      "pages": [
+        {
+          "url": "https://de.milwaukeetool.eu/footer/impressum/",
+          "kind": "impressum",
+          "htmlBytes": 963803,
+          "textBytes": 17391,
+          "emails": [],
+          "phones": [
+            "+4921039600",
+            "+447725244791"
+          ]
+        },
+        {
+          "url": "https://de.milwaukeetool.eu/service/contact/",
+          "kind": "contact",
+          "htmlBytes": 976542,
+          "textBytes": 17269,
+          "emails": [],
+          "phones": [
+            "+4921039600"
+          ]
+        },
+        {
+          "url": "https://de.milwaukeetool.eu/header/about-us/",
+          "kind": "about",
+          "htmlBytes": 974123,
+          "textBytes": 19158,
+          "emails": [],
+          "phones": []
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "Apollo Gößnitz GmbH",
+      "domain": "apollo-goessnitz.de",
+      "robotsAllowed": true,
+      "homeFetched": true,
+      "impressumReachable": true,
+      "roleEmails": [],
+      "phones": [
+        "+4934493770",
+        "+493449377210"
+      ],
+      "formUrls": [
+        "https://apollo-goessnitz.de/kontakt"
+      ],
+      "pagesTried": 3,
+      "pages": [
+        {
+          "url": "https://apollo-goessnitz.de/impressum",
+          "kind": "impressum",
+          "htmlBytes": 46166,
+          "textBytes": 4610,
+          "emails": [],
+          "phones": [
+            "+4934493770",
+            "+493449377210"
+          ]
+        },
+        {
+          "url": "https://apollo-goessnitz.de/kontakt",
+          "kind": "contact",
+          "htmlBytes": 57372,
+          "textBytes": 4350,
+          "emails": [],
+          "phones": [
+            "+4934493770"
+          ]
+        },
+        {
+          "url": "https://apollo-goessnitz.de/unternehmen",
+          "kind": "about",
+          "htmlBytes": 85884,
+          "textBytes": 6953,
+          "emails": [],
+          "phones": [
+            "+4934493770"
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "Telekom",
+      "domain": "telekom.de",
+      "robotsAllowed": true,
+      "homeFetched": true,
+      "impressumReachable": true,
+      "roleEmails": [
+        "impressum@telekom.de"
+      ],
+      "phones": [
+        "+498003303000",
+        "+498003301000",
+        "+498003302202"
+      ],
+      "formUrls": [
+        "https://telekom.de/kontakt"
+      ],
+      "pagesTried": 4,
+      "pages": [
+        {
+          "url": "https://telekom.de/impressum",
+          "kind": "impressum",
+          "htmlBytes": 66050,
+          "textBytes": 5078,
+          "emails": [
+            "impressum@telekom.de"
+          ],
+          "phones": []
+        },
+        {
+          "url": "https://www.telekom.de/impressum",
+          "kind": "impressum",
+          "htmlBytes": 65903,
+          "textBytes": 5078,
+          "emails": [
+            "impressum@telekom.de"
+          ],
+          "phones": []
+        },
+        {
+          "url": "https://telekom.de/kontakt",
+          "kind": "contact",
+          "htmlBytes": 99996,
+          "textBytes": 6048,
+          "emails": [],
+          "phones": [
+            "+498003303000",
+            "+498003301000",
+            "+498003302202"
+          ]
+        },
+        {
+          "url": "https://telekom.de/ueber-das-unternehmen",
+          "kind": "about",
+          "htmlBytes": 103824,
+          "textBytes": 8547,
+          "emails": [],
+          "phones": []
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "Algam DACH",
+      "domain": "algamdach.de",
+      "robotsAllowed": true,
+      "homeFetched": true,
+      "impressumReachable": true,
+      "roleEmails": [],
+      "phones": [
+        "+4989125039012",
+        "+498912503901"
+      ],
+      "formUrls": [
+        "https://algamdach.de/kontakt"
+      ],
+      "pagesTried": 3,
+      "pages": [
+        {
+          "url": "https://algamdach.de/impressum",
+          "kind": "impressum",
+          "htmlBytes": 597203,
+          "textBytes": 3623,
+          "emails": [],
+          "phones": [
+            "+4989125039012",
+            "+498912503901"
+          ]
+        },
+        {
+          "url": "https://algamdach.de/kontakt",
+          "kind": "contact",
+          "htmlBytes": 174333,
+          "textBytes": 1171,
+          "emails": [],
+          "phones": [
+            "+498912503901"
+          ]
+        },
+        {
+          "url": "https://algamdach.de/ueber-uns",
+          "kind": "about",
+          "htmlBytes": 758711,
+          "textBytes": 1971,
+          "emails": [],
+          "phones": [
+            "+498912503901"
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "ALLWEILER",
+      "domain": "allweiler.de",
+      "robotsAllowed": true,
+      "homeFetched": true,
+      "impressumReachable": true,
+      "roleEmails": [],
+      "phones": [],
+      "formUrls": [],
+      "pagesTried": 5,
+      "pages": [
+        {
+          "url": "https://allweiler.de/contact",
+          "kind": "contact",
+          "htmlBytes": 1213,
+          "textBytes": 195,
+          "emails": [],
+          "phones": []
+        },
+        {
+          "url": "https://allweiler.de/company/about-us",
+          "kind": "about",
+          "htmlBytes": 1213,
+          "textBytes": 195,
+          "emails": [],
+          "phones": []
+        },
+        {
+          "url": "https://allweiler.de/impressum",
+          "kind": "impressum",
+          "htmlBytes": 1213,
+          "textBytes": 195,
+          "emails": [],
+          "phones": []
+        },
+        {
+          "url": "https://allweiler.de/impressum.html",
+          "kind": "impressum",
+          "htmlBytes": 1213,
+          "textBytes": 195,
+          "emails": [],
+          "phones": []
+        },
+        {
+          "url": "https://allweiler.de/imprint",
+          "kind": "impressum",
+          "htmlBytes": 1213,
+          "textBytes": 195,
+          "emails": [],
+          "phones": []
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "Pumpen Plückhahn GmbH",
+      "domain": "pumpen-plueckhahn.de",
+      "robotsAllowed": true,
+      "homeFetched": true,
+      "impressumReachable": true,
+      "roleEmails": [
+        "info@pumpen-plueckhahn.de"
+      ],
+      "phones": [],
+      "formUrls": [],
+      "pagesTried": 5,
+      "pages": [
+        {
+          "url": "https://pumpen-plueckhahn.de/kontakt/",
+          "kind": "contact",
+          "htmlBytes": 30408,
+          "textBytes": 1160,
+          "emails": [
+            "info@pumpen-plueckhahn.de"
+          ],
+          "phones": []
+        },
+        {
+          "url": "https://pumpen-plueckhahn.de/impressum",
+          "kind": "impressum",
+          "htmlBytes": 25887,
+          "textBytes": 738,
+          "emails": [],
+          "phones": []
+        },
+        {
+          "url": "https://pumpen-plueckhahn.de/impressum.html",
+          "kind": "impressum",
+          "htmlBytes": 25887,
+          "textBytes": 738,
+          "emails": [],
+          "phones": []
+        },
+        {
+          "url": "https://pumpen-plueckhahn.de/imprint",
+          "kind": "impressum",
+          "htmlBytes": 25887,
+          "textBytes": 738,
+          "emails": [],
+          "phones": []
+        },
+        {
+          "url": "https://pumpen-plueckhahn.de/legal-notice",
+          "kind": "impressum",
+          "htmlBytes": 25887,
+          "textBytes": 738,
+          "emails": [],
+          "phones": []
+        }
+      ],
+      "error": null
+    },
+    {
+      "name": "Pumpen-Vertrieb MAVEX GmbH",
+      "domain": "mavex-pumpen.de",
+      "robotsAllowed": true,
+      "homeFetched": true,
+      "impressumReachable": true,
+      "roleEmails": [
+        "info@mavex-pumpen.de"
+      ],
+      "phones": [
+        "+49621378787"
+      ],
+      "formUrls": [],
+      "pagesTried": 2,
+      "pages": [
+        {
+          "url": "https://mavex-pumpen.de/Impressum",
+          "kind": "impressum",
+          "htmlBytes": 28433,
+          "textBytes": 4780,
+          "emails": [
+            "info@mavex-pumpen.de"
+          ],
+          "phones": [
+            "+49621378787"
+          ]
+        },
+        {
+          "url": "https://mavex-pumpen.de/Kontakt",
+          "kind": "contact",
+          "htmlBytes": 24361,
+          "textBytes": 2615,
+          "emails": [
+            "info@mavex-pumpen.de"
+          ],
+          "phones": [
+            "+49621378787"
+          ]
+        }
+      ],
+      "error": null
+    }
+  ]
+}

@@ -281,6 +281,7 @@ describe('contact-persist · 🔴 Art.17 删除禁联消费（Codex P1 on PR #63
     expect(queryRaw).toHaveBeenCalledTimes(2); // workspace suppression advisory lock + 公司 FOR SHARE 复读
     expect(res.created).toBe(0);
     expect(res.skippedSuppressed).toBe(2); // 整批跳过
+    expect(res.suppressed).toBe(true); // A1：渠道写入方据此一并放弃
     expect(canonicalUpsert).not.toHaveBeenCalled(); // 未新建任何联系人
   });
 
@@ -297,7 +298,7 @@ describe('contact-persist · 🔴 Art.17 删除禁联消费（Codex P1 on PR #63
       contacts: [{ externalId: 'late', fullName: 'Late Person', personalData: true }],
       suppressedEmails: new Set(),
     });
-    expect(res).toMatchObject({ created: 0, skippedSuppressed: 1 });
+    expect(res).toMatchObject({ created: 0, skippedSuppressed: 1, suppressed: true });
     expect(canonicalUpsert).not.toHaveBeenCalled();
   });
 

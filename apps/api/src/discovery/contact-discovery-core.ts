@@ -4,7 +4,8 @@ import { DiscoveryProviderRegistry } from './provider.registry';
 import { persistDiscoveredContacts } from './contact-persist';
 import { assertContactDiscoveryAdapterFanout, assertContactDiscoveryResultBound } from './email-guess-targets';
 import { LawfulBasis, ProviderContactRecord } from './provider-contract';
-import { canonicalizeSuppressionValues, companyMatchesSuppression } from './suppression-value';
+import { canonicalizeSuppressionValue, canonicalizeSuppressionValues, companyMatchesSuppression } from './suppression-value';
+import { upsertCompanyContactChannels, type CompanyChannelInput } from './company-contact-channel';
 import { companyMayUseExternalProcessing } from './company-suppression-gate';
 import { BudgetOperationReplayError, type BudgetStore } from '../tools/budget-store';
 import { isSyntheticDiscoveryProvenance } from './evidence-license';
@@ -22,6 +23,8 @@ import {
 
 const CONTACT_DISCOVERY_RECEIPT_PRODUCERS = Object.freeze([
   'crawl4ai.fetch',
+  // A1：Impressum 页的渲染后 HTML（JSON-LD/cfemail 取数面）同样产生持久回执。
+  'crawl4ai.render',
   'companies_house.search',
   'inpi_rne.search',
   'google_patents.search',
@@ -148,6 +151,8 @@ export async function discoverContactsCore(
         receipt: DurableExecutionReceipt;
       }>;
       diagnostics?: Record<string, number>;
+      /** A1：公司级渠道（role 邮箱/总机/表单），落 company_contact_channel。 */
+      companyChannels?: CompanyChannelInput[];
     }[] = [];
     const authorizeExternalAction = () =>
       deps.prisma.withWorkspace(input.workspaceId, (tx) =>
@@ -212,6 +217,7 @@ export async function discoverContactsCore(
             costCents: result.costCents,
             durableReceipts,
             ...(result.diagnostics ? { diagnostics: result.diagnostics } : {}),
+            ...(result.companyChannels?.length ? { companyChannels: result.companyChannels } : {}),
           });
         } catch (err) {
           // #684 残留吸收：`remnant` 表示先前的尝试留下了未结算的账本行、对上游没有断言——
@@ -269,6 +275,46 @@ export async function discoverContactsCore(
         });
         skippedSuppressed += res.skippedSuppressed;
         skippedInvalid += res.skippedInvalid;
+        // A1：公司级渠道在**同一事务**内落库；suppression 与联系人路径同纪律——按当前
+        // suppression_record 复读（email/domain 规范化后比对），命中即丢弃，不依赖抓取前快照。
+        // persist 已判定公司被抑制（SUPPRESSED / companyMatchesSuppression）时整批放弃——
+        // 联系人被拒而渠道照写的空窗不存在。
+        if (pa.companyChannels?.length && res.suppressed !== true) {
+          const suppressions = await transaction.suppressionRecord.findMany({
+            where: { type: { in: ['email', 'domain'] } },
+            select: { type: true, value: true },
+          });
+          const suppressedEmails = canonicalizeSuppressionValues(
+            'email',
+            suppressions.filter((s) => s.type === 'email').map((s) => s.value),
+          );
+          const suppressedDomains = canonicalizeSuppressionValues(
+            'domain',
+            suppressions.filter((s) => s.type === 'domain').map((s) => s.value),
+          );
+          // 防御性上限：适配器不得在单事务里无界写入（装配器自身 cap=8）。
+          const boundedChannels = pa.companyChannels.slice(0, 32);
+          if (pa.companyChannels.length > boundedChannels.length) {
+            console.warn(
+              `[discoverContacts] adapter ${pa.key} returned ${pa.companyChannels.length} company channels; writing the first ${boundedChannels.length}`,
+            );
+          }
+          const channels = boundedChannels.filter((channel) => {
+            if (channel.channel !== 'email') return true;
+            const key = canonicalizeSuppressionValue('email', channel.value);
+            if (!key || suppressedEmails.has(key)) return false;
+            const at = key.lastIndexOf('@');
+            const domain = at >= 0 ? key.slice(at + 1) : '';
+            return !suppressedDomains.has(domain);
+          });
+          if (channels.length) {
+            await upsertCompanyContactChannels(transaction, {
+              workspaceId: input.workspaceId,
+              companyId: loaded.company.id,
+              channels,
+            });
+          }
+        }
         if (pa.costCents > 0) {
           await transaction.usageLedger.create({
             data: {

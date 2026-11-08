@@ -242,4 +242,42 @@ describe('PublicWebDiscoveryProvider.discoverContacts：抽取 → 构造的接�
       ['max.mustermann@acme.de', true, 'https://acme.de/impressum'],
     ]);
   });
+
+  it('A1：Impressum 渲染页产出公司级渠道（mailto/tel），personal 不进公司层', async () => {
+    const invoke = vi.fn(async (toolId: string, input: { url: string }): Promise<ToolResult<unknown>> => {
+      if (toolId === 'crawl4ai.fetch' && input.url === 'https://acme.de/') {
+        return { data: { url: input.url, text: 'Willkommen. [Impressum](/impressum)', contentHash: 'h' }, costCents: 0 };
+      }
+      if (toolId === 'crawl4ai.render' && input.url === 'https://acme.de/impressum') {
+        return {
+          data: {
+            url: input.url,
+            html: '<a href="mailto:info@acme.de">Kontakt</a> <a href="tel:+49891234567">Anrufen</a>' +
+              ' <p>Geschäftsführer: Max Mustermann, max.mustermann@acme.de</p>',
+            robotsBlocked: false,
+          },
+          costCents: 1,
+        };
+      }
+      throw new Error(`unexpected ${toolId} ${input.url}`);
+    });
+    const provider = new PublicWebDiscoveryProvider({
+      gateway: {} as never,
+      broker: { checkSourcePolicy: async () => ({ allowed: true }), invoke } as unknown as ExecutionBroker,
+    });
+
+    const result = await provider.discoverContacts(
+      { name: 'Acme GmbH', domain: 'acme.de', country: 'DE' },
+      { workspaceId: 'ws-1', runId: 'run-1' },
+    );
+
+    expect(result.companyChannels).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        channel: 'email', value: 'info@acme.de', emailType: 'role',
+        sourceType: 'impressum', sourceUrl: 'https://acme.de/impressum',
+      }),
+      expect.objectContaining({ channel: 'phone', value: '+49891234567', sourceType: 'impressum' }),
+    ]));
+    expect(result.companyChannels?.some((c) => c.value === 'max.mustermann@acme.de')).toBe(false);
+  });
 });

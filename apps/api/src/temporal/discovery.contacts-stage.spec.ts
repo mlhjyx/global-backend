@@ -88,6 +88,8 @@ function makeDeps(opts: {
   verifiers?: EmailVerificationAdapter[];
   /** Reads the run's admission lease (milliseconds left); absent → unbounded. */
   runLease?: () => Promise<number>;
+  /** suppression_record 行（A1 公司级渠道过滤用）。 */
+  suppressions?: { type: string; value: string }[];
 }) {
   let remaining = opts.remainingMicrousd ?? 10_000_000n;
   let statusCalls = 0;
@@ -121,7 +123,8 @@ function makeDeps(opts: {
         })),
     },
     fieldEvidence: { findMany: async () => [], create: async () => ({}) },
-    suppressionRecord: { findMany: async () => [] },
+    suppressionRecord: { findMany: async () => opts.suppressions ?? [] },
+    companyContactChannel: { upsert: vi.fn(async () => ({})) },
     usageLedger: { create: async () => ({}) },
     personalDataAccessAudit: { create: async () => ({}) },
   };
@@ -178,19 +181,28 @@ function makeDeps(opts: {
     >[0],
     drain,
     remaining: () => remaining,
+    channelUpsert: tx.companyContactChannel.upsert,
   };
 }
 
 function contactAdapter(
   key: string,
-  options?: { drain?: () => void; contacts?: ProviderContactRecord[] },
+  options?: {
+    drain?: () => void;
+    contacts?: ProviderContactRecord[];
+    channels?: import('../discovery/company-contact-channel').CompanyChannelInput[];
+  },
 ): ContactDiscoveryAdapter & { discoverContacts: ReturnType<typeof vi.fn> } {
   const adapter = {
     key,
     classes: ['contact_discovery'],
     discoverContacts: vi.fn(async () => {
       options?.drain?.();
-      return { contacts: options?.contacts ?? [], costCents: 0 };
+      return {
+        contacts: options?.contacts ?? [],
+        costCents: 0,
+        ...(options?.channels?.length ? { companyChannels: options.channels } : {}),
+      };
     }),
   };
   return adapter as unknown as ContactDiscoveryAdapter & {
@@ -548,5 +560,65 @@ describe('discoverRunContacts —— email_guess M3 双闸接线', () => {
     expect(result.failed).toBeUndefined();
     expect(result.emailGuess?.failed).toBe(1);
     expect(warn).toHaveBeenCalled();
+  });
+});
+
+describe('A1 —— 公司级渠道（company_contact_channel）', () => {
+  it('经 suppression 过滤后同事务 upsert：email 禁联与 domain 禁联都丢弃', async () => {
+    const adapter = contactAdapter('public_web', {
+      channels: [
+        { channel: 'email', value: 'info@acme.de', emailType: 'role', sourceType: 'impressum', sourceUrl: 'https://acme.de/impressum' },
+        { channel: 'email', value: 'blocked@acme.de', emailType: 'role', sourceType: 'impressum' },
+        { channel: 'email', value: 'anfrage@blocked.acme.de', emailType: 'role', sourceType: 'impressum' },
+        { channel: 'phone', value: '+49891234567', sourceType: 'impressum' },
+      ],
+    });
+    const harness = makeDeps({
+      companies: [company('c1')],
+      adapters: [adapter],
+      suppressions: [
+        { type: 'email', value: 'blocked@acme.de' },
+        { type: 'domain', value: 'blocked.acme.de' },
+      ],
+    });
+
+    await createDiscoveryActivities(harness.deps).discoverRunContacts(args());
+
+    expect(harness.channelUpsert).toHaveBeenCalledTimes(2);
+    const values = harness.channelUpsert.mock.calls.map(
+      ([arg]) => (arg as { create: { value: string } }).create.value,
+    );
+    expect(values).toEqual(['info@acme.de', '+49891234567']);
+    expect(harness.channelUpsert.mock.calls[0]![0]).toMatchObject({
+      where: {
+        workspaceId_companyId_channel_value: {
+          workspaceId: WS,
+          companyId: 'c1',
+          channel: 'email',
+          value: 'info@acme.de',
+        },
+      },
+    });
+  });
+
+  it('公司被抑制（persist 返回 suppressed）时不写公司级渠道', async () => {
+    const adapter = contactAdapter('public_web', {
+      channels: [{ channel: 'email', value: 'info@acme.de', emailType: 'role', sourceType: 'impressum' }],
+    });
+    const harness = makeDeps({ companies: [company('c1')], adapters: [adapter] });
+    persistMock.mockResolvedValueOnce({ created: 0, merged: 0, skippedSuppressed: 0, skippedInvalid: 0, suppressed: true });
+
+    await createDiscoveryActivities(harness.deps).discoverRunContacts(args());
+
+    expect(harness.channelUpsert).not.toHaveBeenCalled();
+  });
+
+  it('adapter 不返回公司级渠道时不写表', async () => {
+    const adapter = contactAdapter('decision_maker', { contacts: [CONTACT_RECORD] });
+    const harness = makeDeps({ companies: [company('c1')], adapters: [adapter] });
+
+    await createDiscoveryActivities(harness.deps).discoverRunContacts(args());
+
+    expect(harness.channelUpsert).not.toHaveBeenCalled();
   });
 });

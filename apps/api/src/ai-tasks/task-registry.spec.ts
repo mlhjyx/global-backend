@@ -75,7 +75,8 @@ describe('AI task registry model execution policy invariants', () => {
       },
       'contact.find_decision_makers': {
         model: 'deepseek-flash', risk: 'medium', humanGate: false,
-        allowedTools: ['social.search', 'social.fetch', 'crawl4ai.fetch', 'http.get'],
+        // A1: Impressum pages render to raw HTML for JSON-LD/cfemail (whitelisted tool).
+        allowedTools: ['social.search', 'social.fetch', 'crawl4ai.fetch', 'http.get', 'crawl4ai.render'],
         maxCostCents: 15,
         timeoutMs: 120000,
       },
@@ -201,5 +202,13 @@ describe('acquisition per-task model overrides', () => {
 
     expect(mod.getTask('icp.design')?.model).toBe('deepseek-flash');
     expect(mod.getTask('taxonomy.normalize')?.model).toBe('deepseek-flash');
+  });
+});
+
+describe('A1：联系人发现的工具白名单', () => {
+  it('contact.find_decision_makers 放行 crawl4ai.render（Impressum HTML 取数面）', () => {
+    // 白名单缺 render 时，Broker 抛 ToolPolicyDenied 会被 isExecutionControlError 归为
+    // control error → public_web 的 catch 不再回退而是 rethrow → 整次联系人发现失败（#748 同类）。
+    expect(getTask('contact.find_decision_makers')?.allowedTools).toContain('crawl4ai.render');
   });
 });
