@@ -27,7 +27,9 @@ import {
 
 /**
  * What a registry built with a model gateway registers, in registration order.
- * Only public_web, directory and trade_fair declare governed company lineage.
+ * Only public_web, directory and trade_fair declare governed company lineage;
+ * registry_frame is registered but lineage-less by design until the local_query
+ * contract extension is approved (docs/superpowers/plans/2026-11-09-registry-frame-local-lineage.md).
  */
 const REGISTERED: readonly CompanyDiscoverySource[] = Object.freeze([
   { sourceClass: 'public_intelligence', providerKey: 'public_web', hasCompanyLineage: true },
