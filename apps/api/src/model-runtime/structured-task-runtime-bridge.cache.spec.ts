@@ -193,4 +193,150 @@ describe('executeStructuredTaskWithRuntime llm cache (PR-B)', () => {
     const result = await callProfile(gateway);
     expect(result.data).toEqual(VALID_OUTPUT);
   });
+
+  it('settles cache hits through the gateway so the result carries a durable receipt', async () => {
+    const port = memoryPort();
+    configureLlmResultCache(port);
+    await callProfile(gatewayReturning());
+
+    const receipt = {
+      schemaVersion: 'durable-execution-receipt/v1',
+      scopeKey: 'ws-cache-1',
+      authorityId: '22222222-2222-4222-8222-222222222222',
+      accountId: '33333333-3333-4333-8333-333333333333',
+      operationId: '44444444-4444-4444-8444-444444444444',
+      operationKey: 'model-cache-op',
+      resultStrategy: 'typed_projection',
+      resultSchema: 'understanding-profile/v1',
+      resultDigest: 'a'.repeat(64),
+      artifactId: null,
+      usage: {
+        currency: 'USD',
+        unit: 'microusd',
+        callCount: 0,
+        chargedMicrousd: '0',
+        upperBoundMicrousd: '0',
+      },
+      costBasis: 'not_incurred',
+      status: 'SETTLED',
+    } as const;
+    const onDurableReceipt = vi.fn();
+    const settleCachedStructured = vi.fn(
+      async (
+        _input: unknown,
+        context: { onDurableReceipt?: (producerId: string, value: unknown) => void },
+        cached: { data: unknown; model: string },
+      ) => {
+        context.onDurableReceipt?.('company_understanding.extract_profile', receipt);
+        return {
+          data: cached.data,
+          provider: 'llm-cache',
+          model: cached.model,
+          callCount: 0,
+          durableReceipt: receipt,
+        };
+      },
+    );
+    const gateway = {
+      generateStructured: vi.fn(),
+      settleCachedStructured,
+    } as unknown as ModelGateway;
+
+    const result = await executeStructuredTaskWithRuntime(
+      gateway,
+      {
+        task: 'company_understanding.extract_profile',
+        prompt: 'Company homepage text.',
+        model: 'deepseek-v4-flash',
+        schema,
+      },
+      {
+        workspaceId: 'ws-cache-1',
+        runId: 'run-cache-1',
+        durableResultSchema: 'understanding-profile/v1',
+        onDurableReceipt,
+      },
+    );
+
+    expect(settleCachedStructured).toHaveBeenCalledTimes(1);
+    expect(
+      (gateway as unknown as { generateStructured: ReturnType<typeof vi.fn> })
+        .generateStructured,
+    ).not.toHaveBeenCalled();
+    expect(result.data).toEqual(VALID_OUTPUT);
+    expect(result.durableReceipt).toBe(receipt);
+    expect(result.provider).toBe('llm-cache');
+    expect(result.callCount).toBe(0);
+    expect(result.runtimeExecution.cacheHit).toBe(true);
+  });
+
+  it('does not serve an unreceipted cache hit when the context requires durable receipts', async () => {
+    const port = memoryPort();
+    configureLlmResultCache(port);
+    await callProfile(
+      gatewayReturning({ industry: 'cached-industry', summary: 'cached summary' }),
+    );
+
+    const gateway = gatewayReturning();
+    const result = await executeStructuredTaskWithRuntime(
+      gateway,
+      {
+        task: 'company_understanding.extract_profile',
+        prompt: 'Company homepage text.',
+        model: 'deepseek-v4-flash',
+        schema,
+      },
+      {
+        workspaceId: 'ws-cache-1',
+        runId: 'run-cache-1',
+        durableResultSchema: 'understanding-profile/v1',
+      },
+    );
+
+    expect(gateway.generateStructured).toHaveBeenCalledTimes(1);
+    expect(result.data).toEqual(VALID_OUTPUT);
+    expect(result.runtimeExecution.cacheHit).toBeUndefined();
+  });
+
+  it('does not settle through the gateway when the context demands a receipt but has no durableResultSchema', async () => {
+    const port = memoryPort();
+    configureLlmResultCache(port);
+    await callProfile(gatewayReturning({ industry: 'cached-industry', summary: 'cached summary' }));
+
+    const settleCachedStructured = vi.fn();
+    const gateway = {
+      generateStructured: vi.fn(async () => ({
+        data: VALID_OUTPUT,
+        provider: 'gateway',
+        model: 'deepseek-flash',
+      })),
+      settleCachedStructured,
+    } as unknown as ModelGateway;
+
+    const onDurableReceipt = vi.fn();
+    const result = await executeStructuredTaskWithRuntime(
+      gateway,
+      {
+        task: 'company_understanding.extract_profile',
+        prompt: 'Company homepage text.',
+        model: 'deepseek-v4-flash',
+        schema,
+      },
+      {
+        workspaceId: 'ws-cache-1',
+        runId: 'run-cache-1',
+        // 没有 durableResultSchema 时 projection/receiptFacts 都造不出来，
+        // 结算路径必须整条让开——按 miss 走真实调用，绝不回落成无收据成功。
+        onDurableReceipt,
+      },
+    );
+
+    expect(settleCachedStructured).not.toHaveBeenCalled();
+    expect(
+      (gateway as unknown as { generateStructured: ReturnType<typeof vi.fn> }).generateStructured,
+    ).toHaveBeenCalledTimes(1);
+    expect(onDurableReceipt).not.toHaveBeenCalled();
+    expect(result.data).toEqual(VALID_OUTPUT);
+    expect(result.runtimeExecution.cacheHit).toBeUndefined();
+  });
 });

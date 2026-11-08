@@ -4,7 +4,7 @@
   "active_binding_artifact_id": "site-builder-copy-sonnet-recovery-runtime-binding-prep/2026-08-15-v22-v1",
   "active_binding_source_bundle_digest": "5f4c321e9d48f0208e5b293a4d40d8f648c0414b8a429a789bed63cf4f874ac0",
   "status": "STALE_HOLD",
-  "current_source_fingerprint": "6562ffa87a6ddf9d632579e96c20d91a71d06bad5c619f2a8ecaf073dc0df4be",
+  "current_source_fingerprint": "4c25869c643ed3276e1a2815ded14f4a617a53f8aa4e8ee81f818d990e183814",
   "drifted_paths": [
     "apps/api/nest-cli.json",
     "apps/api/package.json",
