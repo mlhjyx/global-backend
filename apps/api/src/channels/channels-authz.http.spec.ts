@@ -14,6 +14,7 @@ import { TokenVerifier } from "../auth/token-verifier";
 import { ROLES_TO_SCOPES_POLICY } from "../auth/scopes";
 import type { AuthorizationScope } from "../auth/scopes";
 import type { PrismaService } from "../prisma/prisma.service";
+import { ChannelProbeService } from "./channel-probe.service";
 import { ChannelsController } from "./channels.controller";
 import { ChannelService } from "./channel.service";
 
@@ -54,6 +55,7 @@ const service = {
   listAvailable: counted([{ ...channelRow(), enabled: false }]),
   createChannel: counted(channelRow()),
   patchChannel: counted(channelRow()),
+  getChannel: counted({ ...channelRow(), manifest: null, auth: null }),
   requestCrawl: counted({ requested: true }),
   listChannelRecords: counted({ channelId: CHANNEL, records: [] }),
   enableChannel: counted({ channelId: CHANNEL, enabled: true }),
@@ -62,6 +64,21 @@ const service = {
   importBuyers: counted({ batchId: CHANNEL, materialized: 0 }),
   listImportedBuyers: counted([]),
 } as unknown as ChannelService;
+
+const probes = {
+  probeChannel: counted({
+    probeId: CHANNEL,
+    status: "SUCCEEDED",
+    recordsFound: 1,
+    pagesFetched: 1,
+    fieldFillRates: {},
+    sample: [],
+    errorCode: null,
+    durationMs: 1,
+    circuit: "closed",
+    probeRequired: false,
+  }),
+} as unknown as ChannelProbeService;
 
 const verifier = {
   verify: async (token: string) => {
@@ -84,13 +101,14 @@ const policy = {
 };
 
 // Vitest transpilation omits emitted constructor types; these are the actual types.
-Reflect.defineMetadata("design:paramtypes", [ChannelService], ChannelsController);
+Reflect.defineMetadata("design:paramtypes", [ChannelService, ChannelProbeService], ChannelsController);
 Reflect.defineMetadata("design:paramtypes", [TokenVerifier, Object], AuthGuard);
 Reflect.defineMetadata("design:paramtypes", [Reflector], ScopesGuard);
 @Module({
   controllers: [ChannelsController],
   providers: [
     { provide: ChannelService, useValue: service },
+    { provide: ChannelProbeService, useValue: probes },
     { provide: TokenVerifier, useValue: verifier },
     { provide: ROLES_TO_SCOPES_POLICY, useValue: policy },
     { provide: AuthGuard, useValue: new AuthGuard(verifier, policy) },
@@ -147,6 +165,8 @@ describe("channel data-source ownership HTTP contract (P3)", () => {
     ["POST", `/source-channels/${CHANNEL}/preview` as string, undefined],
     ["POST", `/source-channels/${CHANNEL}/run`, undefined],
     ["GET", `/source-channels/${CHANNEL}/records` as string, undefined],
+    ["GET", `/source-channels/${CHANNEL}`, undefined],
+    ["POST", `/source-channels/${CHANNEL}/test`, undefined],
   ] as const;
 
   it.each(platformEndpoints)(
@@ -230,6 +250,12 @@ describe("channel data-source ownership HTTP contract (P3)", () => {
       "ops:write",
     ]);
     expect(scopes("/api/v1/source-channels/{channelId}/run", "post")).toEqual([
+      "ops:write",
+    ]);
+    expect(scopes("/api/v1/source-channels/{channelId}", "get")).toEqual([
+      "ops:read",
+    ]);
+    expect(scopes("/api/v1/source-channels/{channelId}/test", "post")).toEqual([
       "ops:write",
     ]);
     expect(scopes("/api/v1/source-channels/{channelId}/enable", "post")).toEqual([

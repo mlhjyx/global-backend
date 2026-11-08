@@ -1606,6 +1606,30 @@ model SourceChannel {
   status        String    @default("DISABLED") @db.VarChar(16)
   /// crawl：{list:{url,maxPages,itemSelector,itemUrlSelector}, detail:{enabled,fields}}；api：{adapter}; import：{columns}
   config        Json
+  // —— GainOS v3.0 第 6 章：渠道资源池（manifest 驱动 + 密钥引用 + 健康/自动停用）——
+  /// channel-manifest/v1 canonical JSON（manifest 非空时以它为准，config 仅历史兼容）。
+  manifest            Json?
+  /// sha256(canonicalJson(manifest))；运行/审计引用该哈希。
+  manifestSha256      String?   @map("manifest_sha256") @db.Char(64)
+  manifestVersion     String    @default("channel-manifest/v1") @map("manifest_version") @db.VarChar(32)
+  /// manifest | adapter（adapter 为代码适配器兜底，注册表在应用层白名单）。
+  connectorKind       String    @default("manifest") @map("connector_kind") @db.VarChar(16)
+  adapterKey          String?   @map("adapter_key") @db.VarChar(64)
+  baseUrl             String?   @map("base_url") @db.VarChar(2048)
+  /// 密钥引用（冗余记录，便于轮换与审计；执行以 manifest.auth 内引用为准）。
+  authRef             Json?     @map("auth_ref")
+  rateLimit           Json?     @map("rate_limit")
+  pagination          Json?
+  fieldMapping        Json?     @map("field_mapping")
+  /// 物化的运行态：{"circuit":"closed|open|half_open","openedUntil":...,"lastErrorCode":...}
+  healthState         Json?     @map("health_state")
+  consecutiveFailures Int       @default(0) @map("consecutive_failures")
+  lastSuccessAt       DateTime? @map("last_success_at") @db.Timestamptz(3)
+  /// OPERATOR | AUTO_STREAK | AUTO_FAILURE_RATE | GOVERNANCE
+  disabledReason      String?   @map("disabled_reason") @db.VarChar(64)
+  quotaPolicy         Json?     @map("quota_policy")
+  /// 配置变更后置 true；probe（保存即测试）通过才可对 manifest 渠道 ENABLED。
+  probeRequired       Boolean   @default(true) @map("probe_required")
   license       String?   @db.VarChar(200)
   tosUrl        String?   @map("tos_url") @db.VarChar(2048)
   /// A 公开可爬 | B 只导入或付费 | C 不做
@@ -1619,9 +1643,54 @@ model SourceChannel {
   runs       SourceChannelRun[]
   enablements SourceChannelEnablement[]
   records    SourceChannelRecord[]
+  probes     SourceChannelProbe[]
+  healthEvents SourceChannelHealthEvent[]
 
   @@index([status, category])
   @@map("source_channel")
+}
+
+/// 「保存即测试」的试跑留档（每次 probe 一行；与 run 分开，probe 不计入 failure streak）。
+model SourceChannelProbe {
+  id              String   @id @default(uuid()) @db.Uuid
+  channelId       String   @map("channel_id") @db.Uuid
+  manifestSha256  String   @map("manifest_sha256") @db.Char(64)
+  /// preview | probe
+  mode            String   @db.VarChar(8)
+  /// SUCCEEDED | FAILED
+  status          String   @db.VarChar(16)
+  pagesFetched    Int      @default(0) @map("pages_fetched")
+  recordsFound    Int      @default(0) @map("records_found")
+  /// 前 20 条脱敏样本（联系人字段只留命中与否，不落值）。
+  sample          Json?
+  fieldFillRates  Json?    @map("field_fill_rates")
+  robotsDecision  String?  @map("robots_decision") @db.VarChar(16)
+  robotsHash      String?  @map("robots_hash") @db.Char(64)
+  errorCode       String?  @map("error_code") @db.VarChar(64)
+  startedAt       DateTime @default(now()) @map("started_at") @db.Timestamptz(3)
+  finishedAt      DateTime? @map("finished_at") @db.Timestamptz(3)
+
+  channel SourceChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@index([channelId, startedAt(sort: Desc)])
+  @@map("source_channel_probe")
+}
+
+/// 健康事件流（熔断/预警/自动停用/人工操作/试跑结果）；运营台时间线与通知的单一来源。
+model SourceChannelHealthEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  channelId String   @map("channel_id") @db.Uuid
+  /// CIRCUIT_OPEN | CIRCUIT_HALF_OPEN | CIRCUIT_CLOSED | WARNING_20_4D | AUTO_DISABLED_30_7D |
+  /// AUTO_DISABLED_FAILURE_RATE | MANUAL_ENABLE | MANUAL_DISABLE | SECRET_ROTATED |
+  /// PROBE_PASSED | PROBE_FAILED
+  event     String   @db.VarChar(48)
+  detail    Json?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  channel SourceChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@index([channelId, createdAt(sort: Desc)])
+  @@map("source_channel_health_event")
 }
 
 /// 租户启用已批准渠道（租户只能启用，不能新建平台渠道）。

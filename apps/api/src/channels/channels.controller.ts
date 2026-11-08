@@ -7,6 +7,7 @@ import { RequestContext } from '../auth/request-context';
 import { ScopesGuard } from '../auth/scopes.guard';
 import { envelope } from '../common/envelope';
 import { ApiEnvelope } from '../common/api-envelope.decorator';
+import { ChannelProbeService } from './channel-probe.service';
 import { ChannelService } from './channel.service';
 import {
   IMPORT_SAMPLE_CSV,
@@ -27,7 +28,10 @@ import {
 @Controller()
 @UseGuards(AuthGuard, ScopesGuard)
 export class ChannelsController {
-  constructor(private readonly channels: ChannelService) {}
+  constructor(
+    private readonly channels: ChannelService,
+    private readonly probes: ChannelProbeService,
+  ) {}
 
   @Get('source-channels')
   @RequireScopes('ops:read')
@@ -108,6 +112,24 @@ export class ChannelsController {
   })
   async disable(@Ctx() ctx: RequestContext, @Param('channelId', ParseUUIDPipe) channelId: string) {
     return envelope(await this.channels.disableChannel(ctx, channelId));
+  }
+
+  @Get('source-channels/:channelId')
+  @RequireScopes('ops:read')
+  @ApiOperation({ summary: '渠道详情：manifest 全量 + 健康摘要 + 密钥「已配置/未配置」（值永不返回）' })
+  @ApiEnvelope({ type: 'object', additionalProperties: true })
+  async detail(@Ctx() ctx: RequestContext, @Param('channelId', ParseUUIDPipe) channelId: string) {
+    return envelope(await this.channels.getChannel(ctx, channelId));
+  }
+
+  @Post('source-channels/:channelId/test')
+  @RequireScopes('ops:write')
+  @ApiOperation({
+    summary: '保存即测试（probe）：按 manifest 试跑 1 页并落 source_channel_probe；未接平台出网绑定时 fail-closed 503',
+  })
+  @ApiEnvelope({ type: 'object', additionalProperties: true })
+  async test(@Ctx() ctx: RequestContext, @Param('channelId', ParseUUIDPipe) channelId: string) {
+    return envelope(await this.probes.probeChannel(ctx, channelId));
   }
 
   @Post('source-channels/:channelId/preview')

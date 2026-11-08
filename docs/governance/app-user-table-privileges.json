@@ -568,6 +568,15 @@
       "INSERT",
       "SELECT"
     ],
+    "source_channel_health_event": [
+      "INSERT",
+      "SELECT"
+    ],
+    "source_channel_probe": [
+      "INSERT",
+      "SELECT",
+      "UPDATE"
+    ],
     "source_channel_record": [
       "INSERT",
       "SELECT",
