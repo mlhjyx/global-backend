@@ -219,6 +219,41 @@
       ]
     },
     {
+      "key": "emailable",
+      "status": "IMPLEMENTED",
+      "source_classes": [
+        "email_verification"
+      ],
+      "purpose": "Second-vote mailbox verification through a third-party API; deliverable/undeliverable/risky map to the four-state model and feed the double-positive rule.",
+      "taxonomy": [
+        "verification result",
+        "accept_all flag",
+        "provider score"
+      ],
+      "license": {
+        "classification": "NOT_APPLICABLE",
+        "note": "Verification result, not licensed source content; the address is personal data sent to the processor under a lawful-basis gate."
+      },
+      "personal_data_class": "PERSONAL_DATA",
+      "default_enablement": "DISABLED",
+      "call_gates": [
+        "data_provider_status",
+        "source_policy",
+        "lawful_basis",
+        "api_credentials",
+        "attempt_budget"
+      ],
+      "test_paths": [
+        "apps/api/src/enrichment/verification/emailable.provider.spec.ts"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "TEST_ANCHOR",
+          "path": "apps/api/src/enrichment/verification/emailable.provider.spec.ts"
+        }
+      ]
+    },
+    {
       "key": "gleif",
       "status": "IMPLEMENTED",
       "source_classes": [
