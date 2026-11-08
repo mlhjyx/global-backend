@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
  * 真库 as_user 行为由 agent-orchestration.postgres.spec.ts（CI PostgreSQL job）覆盖。
  */
 const MIGRATIONS = fileURLToPath(new URL("../../../../packages/db/prisma/migrations/", import.meta.url));
-const MIGRATION = "20261108150000_agent_orchestration_v0";
+const MIGRATION = "20261108160000_agent_orchestration_v0";
 
 function statements(text: string): string[] {
   return text

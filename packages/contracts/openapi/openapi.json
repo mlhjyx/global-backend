@@ -19358,6 +19358,96 @@
         ],
         "description": "删除 workspace 启停覆盖，回到跟随平台默认；重复删除幂等返回 removed=false；需要 ops:write。"
       }
+    },
+    "/api/v1/ops-agents": {
+      "get": {
+        "operationId": "AgentsController_list_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "agent 注册表（角色、技能子集、模型与 loop 策略、启停状态）",
+        "tags": [
+          "Agents"
+        ],
+        "x-required-scopes": [
+          "ops:read"
+        ]
+      }
+    },
+    "/api/v1/ops-agents/{agentKey}/status": {
+      "patch": {
+        "operationId": "AgentsController_setStatus_v1",
+        "parameters": [
+          {
+            "name": "agentKey",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "平台级启停（kill switch，所有 workspace 生效）",
+        "tags": [
+          "Agents"
+        ],
+        "x-required-scopes": [
+          "ops:write"
+        ]
+      }
     }
   },
   "info": {
@@ -19402,6 +19492,10 @@
     {
       "name": "Packs",
       "description": "AI 底座：规则/内容包（Pack）草稿、校验、试跑、评测、发布、激活与灰度"
+    },
+    {
+      "name": "Agents",
+      "description": "AI 底座：agent 注册表与运营启停（ops:read / ops:write）"
     },
     {
       "name": "Reports",
@@ -21883,7 +21977,8 @@
         "Events",
         "Compliance",
         "Skills",
-        "Packs"
+        "Packs",
+        "Agents"
       ]
     },
     {
