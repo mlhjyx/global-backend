@@ -23,6 +23,8 @@ import {
   DISCOVERY_STALE_RUN_SWEEP_WORKFLOW,
   SANCTIONS_REFRESH_SCHEDULE_ID,
   SANCTIONS_REFRESH_WORKFLOW,
+  CONTACT_REVERIFY_SWEEP_SCHEDULE_ID,
+  CONTACT_REVERIFY_SWEEP_WORKFLOW,
   SITE_RELEASE_MAINTENANCE_SWEEP_SCHEDULE_ID,
   SITE_RELEASE_MAINTENANCE_SWEEP_WORKFLOW,
   SITE_BUILD_COST_RECONCILIATION_SWEEP_SCHEDULE_ID,
@@ -37,7 +39,16 @@ import { isPlatformScheduleId, platformScheduleWorkflowInput } from './platform-
  * 此前只能靠人记得手跑 ensure-*.mts 脚本，忘了 = 定时管线无声停摆。worker 是执行这些 workflow
  * 的进程，由它自愈保障最合理。已存在则不动（保留 ops 手工改频率/暂停的状态）。
  */
-const SPECS = [
+interface ScheduleSpecEntry {
+  id: string;
+  workflowType: string;
+  everyEnv: string;
+  everyDefault: string;
+  /** 创建时即暂停（ops 显式启用；已存在的 Schedule 的暂停状态永不被 reconcile 覆盖）。 */
+  paused?: boolean;
+}
+
+const SPECS: ScheduleSpecEntry[] = [
   { id: ACQ_SWEEP_SCHEDULE_ID, workflowType: ACQUISITION_SWEEP_WORKFLOW, everyEnv: 'ACQ_SWEEP_EVERY', everyDefault: '10m' },
   { id: INTENT_SWEEP_SCHEDULE_ID, workflowType: INTENT_SWEEP_WORKFLOW, everyEnv: 'INTENT_SWEEP_EVERY', everyDefault: '1h' },
   // 存量对账日级足够：新公司靠 run 内前向路径即时处理，backlog 只兜投影进来的/漏判的
@@ -49,6 +60,10 @@ const SPECS = [
   { id: PATENTS_CACHE_REFRESH_SCHEDULE_ID, workflowType: PATENTS_CACHE_REFRESH_WORKFLOW, everyEnv: 'PATENT_CACHE_REFRESH_EVERY', everyDefault: '7d' },
   // 制裁名单刷新（Qualify 第五门）：OFAC 日更 → 每日足够；DISABLED 源零动作（refreshAll 只取 ENABLED）。
   { id: SANCTIONS_REFRESH_SCHEDULE_ID, workflowType: SANCTIONS_REFRESH_WORKFLOW, everyEnv: 'SANCTIONS_REFRESH_EVERY', everyDefault: '24h' },
+  // P1-19 联系人邮箱再验证（UNKNOWN 重验队列 / VALID 90 天 TTL / catch-all 复检）。
+  // **注册即 paused**：启用是运维决定（data_provider.millionverifier=ENABLED + 凭据 + 成本 cap）；
+  // 未启用时活动自带三重门、零调用零成本。已存在时下面只 reconcile action，不动暂停状态。
+  { id: CONTACT_REVERIFY_SWEEP_SCHEDULE_ID, workflowType: CONTACT_REVERIFY_SWEEP_WORKFLOW, everyEnv: 'CONTACT_REVERIFY_SWEEP_EVERY', everyDefault: '24h', paused: true },
   // B4（审计 F1）：未结预算操作清收（客户侧 sweep 调度器为主，这里保持同一注册口径）。
   { id: TOOL_BUDGET_RECONCILIATION_SCHEDULE_ID, workflowType: TOOL_BUDGET_RECONCILIATION_SWEEP_WORKFLOW, everyEnv: 'TOOL_BUDGET_RECONCILIATION_EVERY', everyDefault: '1h' },
   // B3（审计 F2）：stale-run 看门狗（客户侧 sweep 调度器为主，这里保持同一注册口径）。
@@ -87,6 +102,14 @@ export async function ensurePlatformSchedules(): Promise<void> {
             ...(isCostReconciliation ? { workflowExecutionTimeout: '3 minutes' } : {}),
           },
           policies: { overlap: ScheduleOverlapPolicy.SKIP, catchupWindow: '1 minute' },
+          ...(s.paused
+            ? {
+                state: {
+                  paused: true,
+                  note: 'P1-19 联系人再验证：默认暂停；启用需 data_provider.millionverifier=ENABLED + MILLIONVERIFIER_API_KEY + 成本 cap（运维决定）',
+                },
+              }
+            : {}),
         });
         console.log(`[worker] schedule '${s.id}' created (every ${process.env[s.everyEnv] ?? s.everyDefault}, overlap=SKIP)`);
       } catch (e) {
