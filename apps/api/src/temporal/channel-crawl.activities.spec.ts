@@ -75,6 +75,8 @@ function makeActivities(overrides: {
     generation: 1,
     authorizedCapMicrousd: 5_000_000n,
   }));
+  const runRows: Array<Record<string, unknown>> = [];
+  const progressUpdates: number[] = [];
   const activities = createChannelCrawlActivities({
     prisma: {
       sourceChannel: {
@@ -91,7 +93,23 @@ function makeActivities(overrides: {
       },
       sourceChannelRun: {
         aggregate: vi.fn(async () => ({ _sum: { pagesFetched: overrides.used ?? 0n } })),
+        createMany: vi.fn(async ({ data }: { data: Array<Record<string, unknown>> }) => {
+          runRows.push(...data);
+          return { count: data.length };
+        }),
+        findUnique: vi.fn(async ({ where }: { where: { crawlRunId: string } }) =>
+          runRows.find((row) => row.crawlRunId === where.crawlRunId) ?? null,
+        ),
       },
+      $executeRaw: vi.fn(async (_strings: TemplateStringsArray, ...values: unknown[]) => {
+        progressUpdates.push(Number(values[0]));
+        const row = runRows.find((entry) => entry.crawlRunId === INPUT.crawlRunId);
+        if (row) {
+          row.pagesFetched = Math.max(Number(row.pagesFetched ?? 0), Number(values[0]));
+          row.requests = Math.max(Number(row.requests ?? 0), Number(values[0]));
+        }
+        return 1;
+      }),
     } as never,
     recordRun,
     grantClient: { requestChannelCrawlGrant } as never,
@@ -115,6 +133,8 @@ function makeActivities(overrides: {
     recordRun,
     materializeRecords,
     fenceBindings,
+    runRows,
+    progressUpdates,
   };
 }
 
@@ -163,9 +183,12 @@ describe('channelCrawlActivities（P4-P4c）', () => {
     const { activities, authorizeAndDispatch, fetchPage, fenceBindings } = makeActivities({ used: 498n });
     const outcome = await activities.runChannelCrawl({ input: INPUT, binding: BINDING });
     expect(outcome).toMatchObject({
-      status: 'SUCCEEDED',
+      // CH-6：日配额截断但有产出 → PARTIAL（不当坏轮），维度随结局返回。
+      status: 'PARTIAL',
       pagesFetched: 2,
       truncated: true,
+      mode: 'run',
+      requests: 2,
     });
     expect(fetchPage).toHaveBeenCalledTimes(2);
     expect(authorizeAndDispatch).toHaveBeenCalledTimes(2);
@@ -194,6 +217,8 @@ describe('channelCrawlActivities（P4-P4c）', () => {
       recordsMaterialized: 0,
       failures: 0,
       truncated: true,
+      mode: 'run',
+      requests: 0,
     });
     expect(fetchPage).not.toHaveBeenCalled();
     expect(authorizeAndDispatch).not.toHaveBeenCalled();
@@ -227,6 +252,44 @@ describe('channelCrawlActivities（P4-P4c）', () => {
     await expect(activities.runChannelCrawl({ input: INPUT, binding: BINDING })).rejects.toMatchObject({
       message: 'CHANNEL_MATERIALIZATION_FAILED',
     });
+  });
+
+  it('writes a RUNNING row up front and persists per-page progress (CP-G7 two-phase)', async () => {
+    const { activities, runRows, progressUpdates } = makeActivities({ used: 498n });
+    await activities.runChannelCrawl({ input: INPUT, binding: BINDING });
+    expect(runRows[0]).toMatchObject({
+      channelId: INPUT.channelId,
+      crawlRunId: INPUT.crawlRunId,
+      status: 'RUNNING',
+      mode: 'run',
+    });
+    expect(progressUpdates).toEqual([1, 2]);
+  });
+
+  it('failure finalize preserves the actual pages from the RUNNING row instead of writing 0', async () => {
+    const { activities, recordRun, runRows } = makeActivities();
+    runRows.push({ crawlRunId: INPUT.crawlRunId, status: 'RUNNING', pagesFetched: 10, requests: 10 });
+    await activities.finalizeChannelCrawl({
+      input: INPUT,
+      outcome: {
+        status: 'FAILED',
+        pagesFetched: 0,
+        recordsFound: 0,
+        recordsMaterialized: 0,
+        failures: 0,
+        truncated: false,
+        errorCode: 'CHANNEL_CRAWL_FAILED',
+      },
+    });
+    expect(recordRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'FAILED',
+        pagesFetched: 10,
+        requests: 10,
+        mode: 'run',
+        errorCode: 'CHANNEL_CRAWL_FAILED',
+      }),
+    );
   });
 
   it('records the run in the platform context with the truncation marker and materialized count', async () => {

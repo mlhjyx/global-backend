@@ -1,7 +1,7 @@
 # GainOS 指标字典 v1
 
 > 文档 ID：`METRICS-DICTIONARY-001`
-> 版本：`v1.2`（2026-11-09；v1.0/v1.1 同日发布，changelog 见 §8）
+> 版本：`v1.3`（2026-11-09；v1.0–v1.2 同日发布，changelog 见 §8）
 > 生命周期：`DRAFT`（人工权威版；机器可读版见 `docs/metrics/dictionary/` + `scripts/metrics/metrics-lint.mjs`）
 > 状态：`DRAFT`
 > 依据：《GainOS 深化计划 v3.0》第 1 章 §3.1（指标树、VRIC 口径、RR1/RR3、分层、窗口、置信区间）与 §3.1.5 指标主表
@@ -172,6 +172,8 @@ week（ISO week，UTC 周一起）
 
 ### 1.8 报告格式（强制）
 
+周报/月报一律由 `scripts/metrics/report.mjs` 从 `metric-observation` 快照渲染（模板见 `docs/metrics/reporting.md`），禁止手写数字；未接线/不可测/缺失三种状态分列。
+
 ```text
 指标：email_valid_rate v1
 口径：30 天滚动；分母=已尝试验证邮箱；排除 role 邮箱出分子
@@ -319,7 +321,9 @@ week（ISO week，UTC 周一起）
 - **实现（v1.1 起）**：`scripts/metrics/capture-recapture.mjs`
   - 两 frame：确定性键匹配 + Chapman（`--a/--b`）。`m11<5` 不出 N̂；`m11<25` 只报量级。
   - 三 frame：`--frame A=a.csv --frame B=b.csv --frame C=c.csv` → 键簇捕获矩阵 → 8 个候选 log-linear 模型（独立/单交互×3/双交互×3/饱和）按 G²+2p（AIC）选型，饱和模型因 df=0 不可估而单列；参数化 bootstrap（默认 1,000 次，固定 seed）给 N̂ 的 95% CI；诊断门含两两交集 <5 阻断、<25 警告、模型间跨度 >30% 只报范围。
-  - 局限：匹配仍是确定性键（无 Splink 概率匹配/人工复核）；k>3 与 LCMCR 未实现；bootstrap 未覆盖模型选择不确定性——报告必须携带这些限制。
+  - **第二段概率匹配（v1.3 起）**：`--probabilistic` 启用 Splink 式两段式的简化第二段——blocking（姓名首 token+国家 / 邮编前缀+国家）→ 固定权重 Fellegi–Sunter 形状评分（domain/registry 硬键 ±6、name Jaro–Winkler 0–5、国家/城市/邮编 ±），阈值 auto ≥8 / review 4–8 / reject <4；已由确定性硬键合并的对不重复评分；review 队列供人工复核并计 match precision（ch01 要求 ≥95%）。阈值经 `probabilisticThresholds` 可调，EM 训练属后续。
+  - **Chao 下界与留一法敏感性（v1.3 起）**：`N̂_chao = D + f1²/(2·f2)` 作异质性保守下界；三 frame 自动输出留一法表（剔除每个 frame 后的 N̂，k=2 子集用 Chapman），跨度 >40% 降置信（ch01 §3.4.7）。
+  - 局限：固定权重非 EM；k>3 与 LCMCR 未实现；bootstrap 未覆盖模型选择不确定性——报告必须携带这些限制。
 - 单测：`scripts/metrics/capture-recapture.test.mjs`（合成数据已知 N 的回收测试、AIC 选型、门限、确定性 bootstrap）。
 
 ---
@@ -341,6 +345,7 @@ week（ISO week，UTC 周一起）
 | --- | --- | --- | --- |
 | v1.1 | 2026-11-09 | false | 新增 §1.3.1 VRIC PLUS 口径细则（phone VALID 四条件、通道拆分强制报告、引擎侧上界声明）；§1.4 增加 RR1/RR3 机器实现 `reply-rate.mjs` 与成对声明校验；§6 三源 log-linear 实现落地（8 模型 AIC 选型 + 参数化 bootstrap + 诊断门）；T0-002 增通道拆分。无 breaking。 |
 | v1.2 | 2026-11-09 | false | 机器可读字典落地：`docs/metrics/dictionary/*.json`（44 指标）+ sources 登记 + `metrics-lint.mjs`（字段/来源/版本/changelog 校验）并接入 CI；§7-5 改为已落地说明（JSON 而非 YAML 的理由）。无 breaking。 |
+| v1.3 | 2026-11-09 | false | §6 增补：概率匹配第二段（blocking+固定权重评分+复核队列）、Chao 下界、留一法敏感性已实现于 `capture-recapture.mjs`；金标侧补 rubric-v1 与 golden item/label/run schema（PR-08 机器侧）。无 breaking。 |
 | v1.0 | 2026-11-09 | — | 首次成文：T0–T4 + Guardrail 44 个指标；VRIC STRICT/PLUS 分离；RR1/RR3 成对报告；窗口/分层/CI 规则；基线读数（2026-11-08 审计 + 11-09 只读复核）。来源：ch01 §3.1 全文、§1.4 边界、§2 现状证据。 |
 
 ## 9. 外部基准来源（本版引用）

@@ -804,13 +804,24 @@ export class ChannelService {
     channelId: string;
     workspaceId?: string;
     platform?: boolean;
-    status: 'SUCCEEDED' | 'FAILED';
+    status: 'SUCCEEDED' | 'PARTIAL' | 'FAILED';
     pagesFetched: number;
     recordsFound: number;
     recordsMaterialized: number;
     failures: number;
     truncated?: boolean;
     errorCode?: string;
+    mode?: 'preview' | 'run';
+    manifestSha256?: string;
+    planDigest?: string;
+    requests?: number;
+    bytesFetched?: number;
+    http4xx?: number;
+    http5xx?: number;
+    http429?: number;
+    durationMs?: number;
+    circuitState?: 'closed' | 'open' | 'half_open';
+    operatorNote?: string;
   }) {
     const body = (tx: Parameters<typeof recordChannelRunInTransaction>[0]) =>
       recordChannelRunInTransaction(tx, {
@@ -823,6 +834,17 @@ export class ChannelService {
         failures: input.failures,
         ...(input.truncated === undefined ? {} : { truncated: input.truncated }),
         ...(input.errorCode ? { errorCode: input.errorCode } : {}),
+        ...(input.mode === undefined ? {} : { mode: input.mode }),
+        ...(input.manifestSha256 === undefined ? {} : { manifestSha256: input.manifestSha256 }),
+        ...(input.planDigest === undefined ? {} : { planDigest: input.planDigest }),
+        ...(input.requests === undefined ? {} : { requests: input.requests }),
+        ...(input.bytesFetched === undefined ? {} : { bytesFetched: input.bytesFetched }),
+        ...(input.http4xx === undefined ? {} : { http4xx: input.http4xx }),
+        ...(input.http5xx === undefined ? {} : { http5xx: input.http5xx }),
+        ...(input.http429 === undefined ? {} : { http429: input.http429 }),
+        ...(input.durationMs === undefined ? {} : { durationMs: input.durationMs }),
+        ...(input.circuitState === undefined ? {} : { circuitState: input.circuitState }),
+        ...(input.operatorNote === undefined ? {} : { operatorNote: input.operatorNote }),
       });
     if (input.platform) {
       return this.prisma.$transaction(body as never) as unknown as Promise<{
