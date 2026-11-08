@@ -34,6 +34,16 @@ import {
   ChannelConfigError,
   parseChannelConfig,
 } from './channel-config';
+import { Inject, Optional as OptionalDep } from '@nestjs/common';
+import {
+  CHANNEL_MANIFEST_VERSION,
+  ChannelManifestError,
+  collectAuthRefs,
+  manifestSha256,
+  parseChannelManifest,
+} from './connector/channel-manifest';
+import { CHANNEL_SECRET_RESOLVER, type ChannelSecretResolver } from './connector/secret-resolver';
+import { describeAuthSecrets } from './channel-probe.service';
 import {
   buildImportRows,
   parseCsv,
@@ -57,6 +67,17 @@ type ChannelRow = {
   lastRunAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  // v3.0 第 6 章新增列（旧测试假对象可能缺省，视图按缺省值兜底）。
+  manifest?: unknown;
+  manifestSha256?: string | null;
+  manifestVersion?: string | null;
+  connectorKind?: string | null;
+  baseUrl?: string | null;
+  healthState?: unknown;
+  consecutiveFailures?: number | null;
+  lastSuccessAt?: Date | null;
+  disabledReason?: string | null;
+  probeRequired?: boolean | null;
 };
 
 function badConfig(error: unknown): never {
@@ -64,6 +85,16 @@ function badConfig(error: unknown): never {
     throw new BadRequestException({ error: { code: error.code, message: error.message } });
   }
   throw error;
+}
+
+function healthSummary(row: ChannelRow) {
+  const state = (row.healthState ?? null) as { circuit?: string } | null;
+  return {
+    circuit: state?.circuit ?? 'closed',
+    consecutiveFailures: row.consecutiveFailures ?? 0,
+    lastSuccessAt: row.lastSuccessAt?.toISOString() ?? null,
+    disabledReason: row.disabledReason ?? null,
+  };
 }
 
 function channelView(row: ChannelRow & { runs?: Array<Record<string, unknown>> }) {
@@ -80,6 +111,12 @@ function channelView(row: ChannelRow & { runs?: Array<Record<string, unknown>> }
     owner: row.owner,
     failureStreak: row.failureStreak,
     lastRunAt: row.lastRunAt?.toISOString() ?? null,
+    manifestSha256: row.manifestSha256 ?? null,
+    manifestVersion: row.manifestVersion ?? null,
+    connectorKind: row.connectorKind ?? null,
+    baseUrl: row.baseUrl ?? null,
+    probeRequired: row.probeRequired ?? null,
+    health: healthSummary(row),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     ...(row.runs ? { runs: row.runs } : {}),
@@ -99,6 +136,10 @@ export class ChannelService {
     /** P4-P4c：平台抓取运行的启动器（TemporalModule 全局提供；单测缺省）。 */
     @Optional()
     private readonly platformTemporal?: PlatformTemporalClient,
+    /** v3.0 渠道资源池：密钥引用解析器（只用于「已配置/未配置」状态展示）。 */
+    @OptionalDep()
+    @Inject(CHANNEL_SECRET_RESOLVER)
+    private readonly secrets?: ChannelSecretResolver,
   ) {}
 
   async listChannels(ctx: RequestContext) {
@@ -134,12 +175,17 @@ export class ChannelService {
       mode?: unknown;
       category?: unknown;
       config?: unknown;
+      manifest?: unknown;
       license?: unknown;
       tosUrl?: unknown;
       robotsPolicy?: unknown;
       owner?: unknown;
     },
   ) {
+    // —— v3.0：manifest 驱动创建（transport.responseType=json → mode=api）——
+    if (input.manifest !== undefined) {
+      return this.createChannelFromManifest(ctx, input);
+    }
     const name = typeof input.name === 'string' ? input.name.trim() : '';
     if (name.length < 1 || name.length > 200) {
       throw new BadRequestException({ error: { code: 'VALIDATION_ERROR', message: 'name must be 1–200 chars' } });
@@ -182,12 +228,106 @@ export class ChannelService {
     return channelView(row);
   }
 
+  /** manifest → 渠道列（校验→sha256→治理镜像→probe_required=true）。 */
+  private manifestColumns(rawManifest: unknown): {
+    manifest: Record<string, unknown>;
+    manifestSha256: string;
+    baseUrl: string;
+    authRef: unknown;
+    rateLimit: unknown;
+    quotaPolicy: unknown;
+    pagination: unknown;
+    fieldMapping: unknown;
+    governance: { license?: string; tosUrl?: string; robotsPolicy?: string };
+    displayName: string;
+    category: string;
+  } {
+    let manifest;
+    try {
+      manifest = parseChannelManifest(rawManifest);
+    } catch (error) {
+      if (error instanceof ChannelManifestError) {
+        throw new BadRequestException({
+          error: { code: error.code, message: error.message, issues: error.issues },
+        });
+      }
+      throw error;
+    }
+    if (manifest.transport.responseType !== 'json') {
+      throw new ConflictException({
+        error: {
+          code: 'CHANNEL_MANIFEST_HTML_UNSUPPORTED',
+          message: 'html manifests are accepted by the schema but not executable in this wave; keep using crawl configs',
+        },
+      });
+    }
+    const refs = collectAuthRefs(manifest.auth);
+    return {
+      manifest: manifest as unknown as Record<string, unknown>,
+      manifestSha256: manifestSha256(manifest),
+      baseUrl: manifest.transport.baseUrl,
+      authRef: refs.length > 0 ? { refs } : null,
+      rateLimit: manifest.rateLimit ?? null,
+      quotaPolicy:
+        manifest.rateLimit?.dailyRequests === undefined
+          ? null
+          : { dailyRequests: manifest.rateLimit.dailyRequests },
+      pagination: manifest.pagination ?? null,
+      fieldMapping: manifest.fieldMapping ?? null,
+      governance: {
+        ...(manifest.governance ? { license: manifest.governance.license, tosUrl: manifest.governance.tosUrl, robotsPolicy: manifest.governance.robotsPolicy } : {}),
+      },
+      displayName: manifest.meta.name,
+      category: manifest.meta.category,
+    };
+  }
+
+  private async createChannelFromManifest(
+    ctx: RequestContext,
+    input: { name?: unknown; manifest?: unknown; owner?: unknown },
+  ) {
+    const columns = this.manifestColumns(input.manifest);
+    const name =
+      typeof input.name === 'string' && input.name.trim()
+        ? input.name.trim().slice(0, 200)
+        : columns.displayName.slice(0, 200);
+    const row = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.sourceChannel.create({
+        data: {
+          name,
+          mode: 'api',
+          category: columns.category,
+          config: { adapter: 'channel-manifest/v1' } as never,
+          status: 'DISABLED',
+          manifest: columns.manifest as never,
+          manifestSha256: columns.manifestSha256,
+          manifestVersion: CHANNEL_MANIFEST_VERSION,
+          connectorKind: 'manifest',
+          baseUrl: columns.baseUrl,
+          authRef: columns.authRef as never,
+          rateLimit: columns.rateLimit as never,
+          quotaPolicy: columns.quotaPolicy as never,
+          pagination: columns.pagination as never,
+          fieldMapping: columns.fieldMapping as never,
+          probeRequired: true,
+          ...(columns.governance.license ? { license: columns.governance.license } : {}),
+          ...(columns.governance.tosUrl ? { tosUrl: columns.governance.tosUrl } : {}),
+          ...(columns.governance.robotsPolicy ? { robotsPolicy: columns.governance.robotsPolicy } : {}),
+          ...(typeof input.owner === 'string' && input.owner.trim() ? { owner: input.owner.trim().slice(0, 200) } : {}),
+        },
+      }),
+    );
+    return channelView(row as never);
+  }
+
   async patchChannel(ctx: RequestContext, channelId: string, patch: Record<string, unknown>) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const current = await tx.sourceChannel.findUnique({ where: { id: channelId } });
+      const current = (await tx.sourceChannel.findUnique({ where: { id: channelId } })) as ChannelRow | null;
       if (!current) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'channel not found' } });
 
-      const mode = typeof patch.mode === 'string' ? patch.mode : current.mode;
+      const manifestColumns =
+        patch.manifest !== undefined ? this.manifestColumns(patch.manifest) : null;
+      const mode = manifestColumns ? 'api' : typeof patch.mode === 'string' ? patch.mode : current.mode;
       let config: unknown = current.config;
       if (patch.config !== undefined || mode !== current.mode) {
         try {
@@ -200,14 +340,22 @@ export class ChannelService {
       if (!(CHANNEL_STATUSES as readonly string[]).includes(status)) {
         throw new BadRequestException({ error: { code: 'VALIDATION_ERROR', message: `status must be one of ${CHANNEL_STATUSES.join(', ')}` } });
       }
-      const license = patch.license !== undefined ? (patch.license === null ? null : String(patch.license).trim().slice(0, 200) || null) : current.license;
-      const tosUrl = patch.tosUrl !== undefined ? (patch.tosUrl === null ? null : String(patch.tosUrl).trim().slice(0, 2048) || null) : current.tosUrl;
-      const robotsPolicy = patch.robotsPolicy !== undefined
-        ? (patch.robotsPolicy === null ? null : String(patch.robotsPolicy))
-        : current.robotsPolicy;
+      const license = manifestColumns
+        ? (manifestColumns.governance.license ?? current.license)
+        : patch.license !== undefined ? (patch.license === null ? null : String(patch.license).trim().slice(0, 200) || null) : current.license;
+      const tosUrl = manifestColumns
+        ? (manifestColumns.governance.tosUrl ?? current.tosUrl)
+        : patch.tosUrl !== undefined ? (patch.tosUrl === null ? null : String(patch.tosUrl).trim().slice(0, 2048) || null) : current.tosUrl;
+      const robotsPolicy = manifestColumns
+        ? (manifestColumns.governance.robotsPolicy ?? current.robotsPolicy)
+        : patch.robotsPolicy !== undefined
+          ? (patch.robotsPolicy === null ? null : String(patch.robotsPolicy))
+          : current.robotsPolicy;
       if (robotsPolicy !== null && !(CHANNEL_ROBOTS_POLICIES as readonly string[]).includes(robotsPolicy)) {
         throw new BadRequestException({ error: { code: 'VALIDATION_ERROR', message: 'robotsPolicy must be A, B or C' } });
       }
+      const hasManifest = manifestColumns !== null || current.manifest !== null && current.manifest !== undefined;
+      const probeRequiredAfter = manifestColumns !== null ? true : (current.probeRequired ?? false);
       if (status === 'ENABLED') {
         // 治理硬闸门：启用前必须登记许可、条款与 robots 结论，且不是「C 不做」。
         if (!license || !tosUrl || !robotsPolicy || robotsPolicy === 'C') {
@@ -226,24 +374,95 @@ export class ChannelService {
             },
           });
         }
+        // 保存即测试闸门：manifest 渠道必须先 probe 通过（legacy crawl 沿用既有流程，不在此门内）。
+        // 同一请求里换 manifest 时不算「请求启用」——savedStatus 会把渠道落回 DISABLED 等 probe。
+        if (mode === 'api' && hasManifest && probeRequiredAfter && manifestColumns === null) {
+          throw new ConflictException({
+            error: {
+              code: 'CHANNEL_PROBE_REQUIRED',
+              message: 'manifest channel must pass POST /source-channels/:id/test before it can be enabled',
+            },
+          });
+        }
       }
 
+      // 已启用渠道换了 manifest：新配置未 probe，保存后回到 DISABLED（章节 §6.3.2：
+      // ENABLED ⇒ probe_required=false；不允许带着未测配置继续跑）。
+      const savedStatus = manifestColumns !== null && status === 'ENABLED' ? 'DISABLED' : status;
       const row = await tx.sourceChannel.update({
         where: { id: channelId },
         data: {
-          ...(typeof patch.name === 'string' && patch.name.trim() ? { name: patch.name.trim().slice(0, 200) } : {}),
+          ...(typeof patch.name === 'string' && patch.name.trim()
+            ? { name: patch.name.trim().slice(0, 200) }
+            : manifestColumns
+              ? { name: manifestColumns.displayName.slice(0, 200) }
+              : {}),
           mode,
           config: config as unknown as object,
-          status,
+          status: savedStatus,
           license,
           tosUrl,
           robotsPolicy,
+          ...(manifestColumns
+            ? {
+                manifest: manifestColumns.manifest as never,
+                manifestSha256: manifestColumns.manifestSha256,
+                manifestVersion: CHANNEL_MANIFEST_VERSION,
+                connectorKind: 'manifest',
+                baseUrl: manifestColumns.baseUrl,
+                authRef: manifestColumns.authRef as never,
+                rateLimit: manifestColumns.rateLimit as never,
+                quotaPolicy: manifestColumns.quotaPolicy as never,
+                pagination: manifestColumns.pagination as never,
+                fieldMapping: manifestColumns.fieldMapping as never,
+                probeRequired: true,
+              }
+            : {}),
+          ...(savedStatus === 'DISABLED' ? { disabledReason: 'OPERATOR' } : {}),
+          ...(savedStatus === 'ENABLED' ? { disabledReason: null } : {}),
           ...(typeof patch.owner === 'string' ? { owner: patch.owner.trim().slice(0, 200) || null } : {}),
-          ...(patch.status !== undefined && status !== current.status ? { failureStreak: 0 } : {}),
+          ...(patch.status !== undefined && savedStatus !== current.status ? { failureStreak: 0 } : {}),
         },
       });
-      return channelView(row);
+      if (patch.status !== undefined && savedStatus !== current.status) {
+        const events = (tx as { sourceChannelHealthEvent?: { create: (args: unknown) => Promise<unknown> } })
+          .sourceChannelHealthEvent;
+        if (events) {
+          await events.create({
+            data: {
+              channelId,
+              event: savedStatus === 'ENABLED' ? 'MANUAL_ENABLE' : 'MANUAL_DISABLE',
+              detail: {
+                previousStatus: current.status,
+                manifestSha256: (row as ChannelRow).manifestSha256 ?? null,
+              },
+            },
+          });
+        }
+      }
+      const view = channelView(row as ChannelRow);
+      return mode === 'api' && hasManifest
+        ? { ...view, probeUrl: `/source-channels/${channelId}/test` }
+        : view;
     });
+  }
+
+  /** 渠道详情（ops:read）：manifest 全量 + 密钥「已配置/未配置」（值永不出现）。 */
+  async getChannel(ctx: RequestContext, channelId: string) {
+    const row = (await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+      tx.sourceChannel.findUnique({ where: { id: channelId } }),
+    )) as ChannelRow | null;
+    if (!row) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'channel not found' } });
+    let auth: Awaited<ReturnType<typeof describeAuthSecrets>> = null;
+    if (row.manifest) {
+      try {
+        const manifest = parseChannelManifest(row.manifest);
+        auth = await describeAuthSecrets(manifest.auth, this.secrets);
+      } catch {
+        auth = null;
+      }
+    }
+    return { ...channelView(row), manifest: row.manifest ?? null, auth };
   }
 
   /** 租户可见的已批准渠道（含本 workspace 是否已启用）。 */

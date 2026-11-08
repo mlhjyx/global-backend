@@ -10305,7 +10305,54 @@
         "x-required-scopes": [
           "ops:write"
         ],
-        "description": "更新渠道配置/治理信息/状态。仅运营身份（ops:write）。启用硬闸门：license+tosUrl+robots 结论齐全，robots=C 永不启用，crawl 仅允许 robots=A。"
+        "description": "更新渠道配置/治理信息/状态，或整体替换 channel-manifest/v1（重存即置 probe_required=true）。仅运营身份（ops:write）。启用硬闸门：license+tosUrl+robots 结论齐全，robots=C 永不启用，crawl 仅允许 robots=A；manifest 渠道还需先通过 POST /test（否则 409 CHANNEL_PROBE_REQUIRED）。"
+      },
+      "get": {
+        "operationId": "ChannelsController_detail_v1",
+        "parameters": [
+          {
+            "name": "channelId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "渠道详情：manifest 全量 + 健康摘要 + 密钥「已配置/未配置」（值永不返回）",
+        "tags": [
+          "Channels"
+        ],
+        "x-required-scopes": [
+          "ops:read"
+        ],
+        "description": "渠道详情：manifest 全量、健康摘要（熔断/连续失败/最近成功/停用原因）与认证密钥「已配置/未配置」状态——密钥值永不返回。仅运营身份（ops:read）。"
       }
     },
     "/api/v1/source-channels/{channelId}/enable": {
@@ -10426,6 +10473,55 @@
           "acquisition:write"
         ],
         "description": "租户停用渠道（平台渠道本身不受影响）。"
+      }
+    },
+    "/api/v1/source-channels/{channelId}/test": {
+      "post": {
+        "operationId": "ChannelsController_test_v1",
+        "parameters": [
+          {
+            "name": "channelId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "保存即测试（probe）：按 manifest 试跑 1 页并落 source_channel_probe；未接平台出网绑定时 fail-closed 503",
+        "tags": [
+          "Channels"
+        ],
+        "x-required-scopes": [
+          "ops:write"
+        ],
+        "description": "保存即测试（probe）：按已保存 manifest 试跑 1 页，落 source_channel_probe 与健康事件；产出 >0 且无错误才解除 probe_required。仅运营身份（ops:write）。平台出网围栏绑定未接入本进程时 fail-closed 503 CHANNEL_TEST_EGRESS_UNAVAILABLE。"
       }
     },
     "/api/v1/source-channels/{channelId}/preview": {
