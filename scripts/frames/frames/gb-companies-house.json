@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "registry-frame/v1",
+  "frame": {
+    "frameKey": "gb_companies_house",
+    "country": "GB",
+    "scheme": "gb_crn",
+    "label": "英国 Companies House 活跃公司（BasicCompanyData bulk 子集）",
+    "providerKey": "companies_house_bulk",
+    "sourceUrl": "https://download.companieshouse.gov.uk/en_output.html",
+    "licence": "public-register",
+    "licenceUrl": null,
+    "fetchMode": "bulk_file",
+    "cadence": { "kind": "monthly", "dayOfMonth": 6, "hourUtc": 18 },
+    "config": {
+      "fileNamePattern": "BasicCompanyDataAsOneFile-*.zip",
+      "encoding": "utf-8",
+      "note": "无 website/email 字段；SIC→NACE 映射与 PreviousName 抽取留给 T3-04 接入波次"
+    }
+  },
+  "mapping": {
+    "schemaVersion": "registry-frame-mapping/v1",
+    "format": "csv",
+    "csv": { "delimiter": "," },
+    "constants": { "scheme": "gb_crn", "country": "GB" },
+    "fields": {
+      "regNumber": "CompanyNumber",
+      "name": "CompanyName",
+      "status": "CompanyStatus",
+      "legalForm": "CompanyCategory",
+      "city": "RegAddress.PostTown",
+      "region": "RegAddress.County",
+      "postalCode": "RegAddress.PostCode",
+      "addressLines": [
+        "RegAddress.CareOf",
+        "RegAddress.AddressLine1",
+        "RegAddress.AddressLine2"
+      ],
+      "nace": null,
+      "naceVersion": null,
+      "employeeBand": null,
+      "vatId": null,
+      "lei": null,
+      "website": null,
+      "identifiers": null
+    },
+    "statusMap": {
+      "active": "ACTIVE",
+      "active - proposal to strike off": "ACTIVE",
+      "dissolved": "DISSOLVED",
+      "liquidation": "INSOLVENT",
+      "receivership": "INSOLVENT",
+      "administration": "INSOLVENT",
+      "converted / closed": "UNKNOWN"
+    },
+    "legalFormMap": {
+      "private limited company": "ltd",
+      "public limited company": "plc",
+      "limited liability partnership": "llp",
+      "limited partnership": "lp",
+      "private unlimited company": "unlimited"
+    },
+    "employeeBandMap": null
+  }
+}

@@ -426,6 +426,21 @@
     "raw_source_record": [
       "SELECT"
     ],
+    "registry_entity": [
+      "SELECT"
+    ],
+    "registry_entity_change": [
+      "SELECT"
+    ],
+    "registry_entity_link": [
+      "SELECT"
+    ],
+    "registry_frame": [
+      "SELECT"
+    ],
+    "registry_snapshot": [
+      "SELECT"
+    ],
     "run_event": [
       "INSERT",
       "SELECT"

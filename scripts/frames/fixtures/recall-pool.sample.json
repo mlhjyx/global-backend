@@ -1,0 +1,11 @@
+{
+  "note": "召回审计样例：一次 discovery run 的产出池导出（注册号键 + 域名 + 联系点），其中 4 家命中 frame",
+  "records": [
+    { "name": "Muster Pumpen GmbH", "registryScheme": "de_hrb", "registryNumber": "HRB 10001", "domain": "muster-pumpen.example", "contacts": 2 },
+    { "name": "Beispiel Pumpentechnik GmbH", "registryScheme": "de_hrb", "registryNumber": "HRB 10002", "domain": "beispiel-pumpen.example", "contacts": 0 },
+    { "name": "Nord Ventile GmbH", "registryScheme": "de_hrb", "registryNumber": "HRB 10003", "domain": null, "contactFound": false },
+    { "name": "Rheinland Pumpen AG", "registryScheme": "de_hrb", "registryNumber": "HRB 20001", "domain": "rheinland-pumpen.example", "contacts": 1 },
+    { "name": "Nicht im Frame GmbH", "registryScheme": "de_hrb", "registryNumber": "HRB 99999", "domain": "ausserhalb.example", "contacts": 0 },
+    { "name": "Nur Verzeichnistreffer ohne Registerbezug", "domain": "verzeichnis.example" }
+  ]
+}
