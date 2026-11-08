@@ -1,8 +1,9 @@
-import { runDeterministicEvals, type EvalRunResult } from "./deterministic-executor";
-import type { EvalCase, EvalManifest } from "./eval-manifest";
+import { runDeterministicEvals, type EvalRunResult } from "../evals/deterministic-executor";
+import type { EvalCase, EvalManifest } from "../evals/eval-manifest";
 import {
   DRAFT_FORBIDDEN_PHRASES,
   draftViolationCodes,
+  findForbiddenPhrases,
   prepareDraftGrounding,
   validateOutreachDraft,
   type DraftGroundingContext,
@@ -101,6 +102,7 @@ export function parseDraftCaseInput(input: unknown): DraftEvalCaseInput {
     throw new Step13EvalInputError("input.guards.nonApprovedClaims must be {id,status}[]");
   }
   const draft = root["draft"];
+  const nonApprovedOfferings = idRows(guards["nonApprovedOfferings"], "input.guards.nonApprovedOfferings");
   return {
     request: {
       ...request,
@@ -118,9 +120,7 @@ export function parseDraftCaseInput(input: unknown): DraftEvalCaseInput {
       ...(Array.isArray(nonApprovedClaims)
         ? { nonApprovedClaims: nonApprovedClaims as { id: string; status: string }[] }
         : {}),
-      ...(idRows(guards["nonApprovedOfferings"], "input.guards.nonApprovedOfferings").length > 0
-        ? { nonApprovedOfferings: idRows(guards["nonApprovedOfferings"], "input.guards.nonApprovedOfferings") }
-        : {}),
+      ...(nonApprovedOfferings.length > 0 ? { nonApprovedOfferings } : {}),
       ...(guards["forbiddenPhrases"] !== undefined
         ? { forbiddenPhrases: stringArray(guards["forbiddenPhrases"], "input.guards.forbiddenPhrases") }
         : {}),
@@ -160,15 +160,18 @@ export interface DraftPipelineOutput {
 }
 
 function forbiddenHits(input: DraftEvalCaseInput, draft: OutreachDraft): string[] {
-  const phrases = input.guards.forbiddenPhrases ?? DRAFT_FORBIDDEN_PHRASES;
-  const text = `${draft.subject}\n${draft.body}\n${draft.jurisdictionFooter}`.toLocaleLowerCase();
-  return phrases.filter((phrase) => text.includes(phrase.toLocaleLowerCase()));
+  // 默认禁用短语恒定生效；用例的 forbiddenPhrases 只做追加（防某条用例缩小检查面）。
+  const phrases = [...new Set([...DRAFT_FORBIDDEN_PHRASES, ...(input.guards.forbiddenPhrases ?? [])])];
+  return findForbiddenPhrases(`${draft.subject}\n${draft.body}\n${draft.jurisdictionFooter}`, phrases);
 }
 
-/** 生成前接地检查 + 生成后硬校验的完整管线输出（模型层与确定性层共用）。 */
+/**
+ * 生成前接地检查 + 生成后硬校验的完整管线输出（模型层与确定性层共用）。
+ * 不传 draft 时只跑接地预检：不通过返回 REJECTED（模型层据此在付费调用前短路）。
+ */
 export function buildDraftPipelineOutput(
   input: DraftEvalCaseInput,
-  draft: OutreachDraft,
+  draft?: OutreachDraft,
 ): DraftPipelineOutput {
   const context = draftContextFromCase(input);
   const grounding = prepareDraftGrounding(context);
@@ -178,6 +181,9 @@ export function buildDraftPipelineOutput(
       reasonCode: grounding.issues[0]?.code,
       issues: draftViolationCodes(grounding),
     };
+  }
+  if (!draft) {
+    throw new Step13EvalInputError("grounded draft pipeline needs a draft output to validate");
   }
   const validation = validateOutreachDraft(draft, context);
   return {
@@ -259,9 +265,7 @@ export async function runStep13DeterministicEvals(
   if (!isStep13GuardSkill(skillKey)) {
     throw new Step13EvalInputError(`${skillKey} has no step-13 deterministic executor`);
   }
-  const cases = evalManifest.evals.filter(
-    (evalCase) => (evalCase as EvalCase & { tier?: string }).tier === "deterministic",
-  );
+  const cases = evalManifest.evals.filter((evalCase) => evalCase.tier === "deterministic");
   const scoped: EvalManifest = { skillName: evalManifest.skillName, evals: cases };
   const result = await runDeterministicEvals(scoped, (evalCase) => ({
     output: deterministicOutputForCase(skillKey, evalCase),

@@ -189,6 +189,26 @@ describe("validateOutreachDraft", () => {
     }
   });
 
+  it("rejects steps[] content that diverges from the top-level draft (v0 single-step)", () => {
+    const divergent = validateOutreachDraft(
+      draft({
+        steps: [{ subject: "Cutting systems", body: "Guaranteed results — ISO 9001 certified" }],
+      }),
+      context(),
+    );
+    // 夸大扫描覆盖 steps 文本，且与顶层不一致本身也拒。
+    expect(draftViolationCodes(divergent)).toEqual([
+      "EXAGGERATION_FORBIDDEN",
+      "STEPS_INCONSISTENT",
+    ]);
+
+    const mirrored = validateOutreachDraft(
+      draft({ steps: [{ subject: draft().subject, body: draft().body }] }),
+      context(),
+    );
+    expect(mirrored).toEqual({ ok: true, issues: [] });
+  });
+
   it("collects multiple independent issues deterministically", () => {
     const result = validateOutreachDraft(
       draft({

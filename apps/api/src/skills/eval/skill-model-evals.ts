@@ -1,12 +1,15 @@
 import type { AiContext, GenerateStructuredInput, ModelResult } from "../../model-gateway/types";
 import { checkAgainstSchema } from "../../model-gateway/schema-validate";
 import { centsFromTokens } from "../../model-gateway/model-token-cost";
+import { centsToMicrousd } from "../../tools/microusd";
+import { prepareDraftGrounding } from "../guardrails/draft-validation";
 import type { SkillManifest } from "../skill-manifest";
-import { runDeterministicEvals, type EvalCaseResult } from "./deterministic-executor";
-import type { EvalCase, EvalManifest } from "./eval-manifest";
+import { runDeterministicEvals, type EvalCaseResult } from "../evals/deterministic-executor";
+import type { EvalCase, EvalManifest } from "../evals/eval-manifest";
 import {
   buildDraftPipelineOutput,
   buildReplyClassifyOutput,
+  draftContextFromCase,
   isStep13GuardSkill,
   parseDraftCaseInput,
   parseReplyClassifyCaseInput,
@@ -17,9 +20,13 @@ import {
  * 模型层（发布层）Golden Set 执行器：ops 触发，经模型网关实跑模型技能用例，
  * 逐条断言后产出可供 `eval_receipt` 落库的汇总。**永不进 CI**（无密钥、有成本）。
  *
- * 口径（S1 设计 §8.2）：单技能 ≤20 条、模型技能必过集 ≥5 条；失败也照实记录
- * （passed=false），由 ops 决定是否重跑/降级。模型输出先过技能自己的确定性守卫
- * （步 13 两技能）再断言——守卫拒绝的输出不会被当作通过。
+ * 口径（S1 设计 §8.2）：单技能 ≤20 条、单次运行成本上限可配（默认 $5 上界估算）；
+ * 失败也照实记录（passed=false），由 ops 决定是否重跑/降级。模型输出先过技能自己的
+ * 确定性守卫（步 13 两技能）再断言——守卫拒绝的输出不会被当作通过；起草的接地预检
+ * 在**付费调用之前**执行，不接地不产稿也意味着不付模型钱。
+ *
+ * 本文件位于 `skills/eval/`（评测专用目录，tsconfig.build 排除，不进 OCI 制品），
+ * 只由测试入口与 ops 脚本注入使用（AGENTS.md §4）。
  */
 
 /**
@@ -36,6 +43,8 @@ export interface SkillModelEvalContract {
   readonly description: string;
   readonly model: string;
   readonly outputSchema: Record<string, unknown>;
+  /** 与任务契约一致的输出上限（付费调用的 max_tokens）。 */
+  readonly maxOutputTokens: number;
 }
 
 export interface SkillModelEvalSubject {
@@ -50,6 +59,8 @@ export interface SkillModelEvalOptions {
   readonly callModel: SkillModelEvalInvoke;
   /** 单次评测最多跑多少条模型层用例（S1 设计：默认 20）。 */
   readonly maxCases?: number;
+  /** 单次运行成本上限（µUSD，上界估算）；默认 5,000,000（$5）。 */
+  readonly maxCostMicros?: number;
   readonly onCase?: (result: SkillModelEvalCaseResult) => void;
 }
 
@@ -75,20 +86,21 @@ export class SkillModelEvalInputError extends Error {
   readonly code = "SKILL_MODEL_EVAL_UNAVAILABLE";
 }
 
+export const DEFAULT_MAX_COST_MICROS = 5_000_000;
+
 /** 模型层用例 = 显式 `tier: "model"`，或未标 tier 的旧式模型技能清单。 */
 export function modelCasesOf(evals: EvalManifest): EvalCase[] {
-  return evals.evals.filter((evalCase) => {
-    const tier = (evalCase as EvalCase & { tier?: string }).tier;
-    return tier === undefined || tier === "model";
-  });
+  return evals.evals.filter((evalCase) => evalCase.tier === undefined || evalCase.tier === "model");
 }
 
-function promptForCase(skillKey: Step13GuardSkill, evalCase: EvalCase): string {
+/**
+ * 组装一条用例发给模型的 prompt。起草用例把 `guards.sender`（身份/邮寄地址）并入
+ * 可见输入——页脚必须逐字包含它们；其余 guards（禁用短语、未批准 id）只留给确定性层。
+ */
+export function promptForCase(skillKey: Step13GuardSkill, evalCase: EvalCase): string {
   const scenario = typeof evalCase.prompt === "string" ? evalCase.prompt.trim() : "";
   const input = (evalCase.input ?? {}) as Record<string, unknown>;
   const request = input["request"] !== undefined ? input["request"] : input;
-  // 起草的页脚要素（身份/地址）来自守卫上下文；模型必须看到它们才能逐字写出页脚，
-  // 其余 guards（禁用短语、未批准 id）仍只留给确定性执行层。
   const guards = input["guards"] as Record<string, unknown> | undefined;
   const payload =
     skillKey === "outreach.sequence_draft" && guards?.["sender"] !== undefined
@@ -103,36 +115,28 @@ function promptForCase(skillKey: Step13GuardSkill, evalCase: EvalCase): string {
     .join("\n\n");
 }
 
-function schemaInvalidOutput(skillKey: Step13GuardSkill, errors: readonly string[]): unknown {
-  if (skillKey === "outreach.sequence_draft") {
-    return { status: "SCHEMA_INVALID", issues: ["MODEL_OUTPUT_SCHEMA"], schemaErrors: errors };
-  }
-  return {
-    final: { intent: "SCHEMA_INVALID", confidence: 0, rationale: "", matchedSignals: [] },
-    violations: ["MODEL_OUTPUT_SCHEMA"],
-    schemaErrors: errors,
-  };
-}
-
-function outputForModelResult(
+function assertionOutputFor(
   skillKey: Step13GuardSkill,
   evalCase: EvalCase,
   modelOutput: unknown,
-  schemaErrors: readonly string[],
 ): unknown {
-  if (schemaErrors.length > 0) {
-    return schemaInvalidOutput(skillKey, schemaErrors);
-  }
   if (skillKey === "outreach.sequence_draft") {
-    const input = parseDraftCaseInput(evalCase.input);
-    return buildDraftPipelineOutput(input, modelOutput as never);
+    return buildDraftPipelineOutput(parseDraftCaseInput(evalCase.input), modelOutput as never);
   }
-  const input = parseReplyClassifyCaseInput(evalCase.input);
-  return buildReplyClassifyOutput(input, modelOutput as never);
+  return buildReplyClassifyOutput(parseReplyClassifyCaseInput(evalCase.input), modelOutput as never);
+}
+
+function usageCostMicros(usage: ModelResult<unknown>["usage"]): number | null {
+  const usd = usage?.costUsd;
+  if (typeof usd === "number" && Number.isFinite(usd) && usd >= 0) {
+    return Math.ceil(usd * 1_000_000);
+  }
+  const cents = centsFromTokens(usage);
+  return cents === null ? null : Number(centsToMicrousd(cents));
 }
 
 /**
- * 跑一个技能的模型层用例。`client` 通常是 ops 脚本里按部署 env 构建的网关 provider。
+ * 跑一个技能的模型层用例。`callModel` 通常是 ops 脚本里按部署 env 构建的网关 provider。
  */
 export async function runSkillModelEvals(
   subject: SkillModelEvalSubject,
@@ -154,6 +158,7 @@ export async function runSkillModelEvals(
       `${skillKey} has ${allCases.length} model cases; the per-run cap is ${maxCases}`,
     );
   }
+  const maxCostMicros = options.maxCostMicros ?? DEFAULT_MAX_COST_MICROS;
 
   const results: SkillModelEvalCaseResult[] = [];
   const models = new Set<string>();
@@ -165,39 +170,51 @@ export async function runSkillModelEvals(
     let caseCost: number | null = null;
     let output: unknown;
     const failures: string[] = [];
-    try {
-      const response = await options.callModel(
-        {
-          task: subject.contract.id,
-          prompt: promptForCase(skillKey, evalCase),
-          system: subject.contract.description,
-          model: subject.contract.model,
-          schema: subject.contract.outputSchema,
-        },
-        { workspaceId: options.workspaceId },
-      );
-      model = response.model;
-      models.add(response.model);
-      if (typeof response.usage?.costUsd === "number") {
-        caseCost = Math.round(response.usage.costUsd * 1_000_000);
-        costObserved = true;
+
+    // 起草的接地预检必须发生在付费调用之前（不接地不产稿 ⇒ 不付模型钱）。
+    if (skillKey === "outreach.sequence_draft") {
+      try {
+        const input = parseDraftCaseInput(evalCase.input);
+        const grounding = prepareDraftGrounding(draftContextFromCase(input));
+        if (!grounding.ok) {
+          output = buildDraftPipelineOutput(input);
+        }
+      } catch (error) {
+        failures.push(`case input invalid: ${String((error as Error)?.message ?? error)}`);
+      }
+    }
+
+    if (failures.length === 0 && output === undefined) {
+      if (costMicros >= maxCostMicros) {
+        failures.push(`SKILL_EVAL_COST_CAP_REACHED: spent ${costMicros} ≥ ${maxCostMicros} µUSD`);
       } else {
-        const cents = centsFromTokens(response.usage);
-        if (cents !== null) {
-          caseCost = cents * 10_000;
-          costObserved = true;
+        try {
+          const response = await options.callModel(
+            {
+              task: subject.contract.id,
+              prompt: promptForCase(skillKey, evalCase),
+              system: subject.contract.description,
+              model: subject.contract.model,
+              schema: subject.contract.outputSchema,
+              maxTokens: subject.contract.maxOutputTokens,
+            },
+            { workspaceId: options.workspaceId },
+          );
+          model = response.model;
+          models.add(response.model);
+          caseCost = usageCostMicros(response.usage);
+          const schemaCheck = checkAgainstSchema(subject.contract.outputSchema, response.data);
+          if (!schemaCheck.valid) {
+            failures.push(
+              `MODEL_OUTPUT_SCHEMA: ${(schemaCheck.errors ?? ["schema invalid"]).join("; ")}`,
+            );
+          } else {
+            output = assertionOutputFor(skillKey, evalCase, response.data);
+          }
+        } catch (error) {
+          failures.push(`model call failed: ${String((error as Error)?.message ?? error)}`);
         }
       }
-      const schemaCheck = checkAgainstSchema(subject.contract.outputSchema, response.data);
-      output = outputForModelResult(
-        skillKey,
-        evalCase,
-        response.data,
-        schemaCheck.valid ? [] : (schemaCheck.errors ?? ["schema invalid"]),
-      );
-    } catch (error) {
-      failures.push(`model call failed: ${String((error as Error)?.message ?? error)}`);
-      output = undefined;
     }
 
     if (failures.length === 0) {
@@ -215,7 +232,10 @@ export async function runSkillModelEvals(
       ...(caseCost !== null ? { costMicros: caseCost } : {}),
     };
     results.push(result);
-    if (caseCost !== null) costMicros += caseCost;
+    if (caseCost !== null) {
+      costMicros += caseCost;
+      costObserved = true;
+    }
     options.onCase?.(result);
   }
 

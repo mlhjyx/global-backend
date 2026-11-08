@@ -12,7 +12,7 @@
 | 2026-11-08 | S0：SKILL.md 规范 v0 + validator、四张技能表（RLS/快照不可变）、三个存量技能包化、DB resolver、ops 启停 API | 同一任务的三个 stacked PR（首 PR #833） |
 | 2026-11-08 | S1-1：四类 Pack Schema + 7 个内容包 + 冲突裁决 + Golden Set 骨架；S1-2：Pack 七表（RLS/append-only）+ 策略解析与快照 + skill-kind（model_task/service）+ 启动期 pack seed；S0 已发车（镜像 1982a551） | PR #847 / #856 |
 | 2026-11-08 | S1-3：Pack Studio ops API（草稿/校验/试跑/评测/发布/激活/灰度/回滚）+ 确定性评测回执与发布门；`pack_version` 对 app_user 开放 INSERT（发布），UPDATE/DELETE 仍禁止 | 本 PR |
-| 2026-11-08 | S2 步 13-1：两个触达模型技能（`outreach.sequence_draft` 接地起草 / `engage.reply_classify` 回信分类）+ 确定性守卫 + 各 12 条 Golden Set（零模型层进 CI）+ 模型层评测执行器 `scripts/run-skill-model-evals.mts`（经网关实跑、写 `eval_receipt(tier=model)`） | 本 PR |
+| 2026-11-08 | S2 步 13-1：两个触达模型技能（`outreach.sequence_draft` 接地起草 / `engage.reply_classify` 回信分类）+ 确定性守卫 + 各 12 条 Golden Set（零模型层进 CI）+ 模型层评测执行器 `apps/api/src/skills/eval/`（构建排除）与 `scripts/run-skill-model-evals.mts`（经网关实跑、写 `eval_receipt(tier=model)`） | 本 PR |
 
 ## 2. 技术概览
 

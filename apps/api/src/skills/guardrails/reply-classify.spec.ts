@@ -80,7 +80,16 @@ describe("guardReplyClassification", () => {
       "Thank you for your message. I am currently out of the office. This is an automatic reply.",
     );
     expect(result.final.intent).toBe("NEEDS_HUMAN");
-    expect(replyGuardViolationCodes(result)).toEqual(["AUTO_REPLY_NOT_POSITIVE"]);
+    expect(replyGuardViolationCodes(result)).toEqual(["AUTO_REPLY_CONFLICT"]);
+  });
+
+  it("refuses UNSUBSCRIBE on auto-reply text (boilerplate STOP text must not auto-unsubscribe)", () => {
+    const result = guardReplyClassification(
+      classification({ intent: "UNSUBSCRIBE", confidence: 0.9 }),
+      "Abwesenheitsnotiz: Ich bin nicht im Büro. Um sich abzumelden, antworten Sie mit STOP.",
+    );
+    expect(result.final.intent).toBe("NEEDS_HUMAN");
+    expect(replyGuardViolationCodes(result)).toEqual(["AUTO_REPLY_CONFLICT"]);
   });
 
   it("reports both violations when auto-reply conflicts and confidence is low", () => {
@@ -90,7 +99,7 @@ describe("guardReplyClassification", () => {
     );
     expect(result.final.intent).toBe("NEEDS_HUMAN");
     expect(replyGuardViolationCodes(result)).toEqual([
-      "AUTO_REPLY_NOT_POSITIVE",
+      "AUTO_REPLY_CONFLICT",
       "LOW_CONFIDENCE_ESCALATED",
     ]);
   });

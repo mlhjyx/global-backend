@@ -27,6 +27,7 @@ export const DRAFT_VIOLATION_CODES = [
   "BODY_TOO_LONG",
   "LANGUAGE_MISMATCH",
   "EXAGGERATION_FORBIDDEN",
+  "STEPS_INCONSISTENT",
   "UNSUPPORTED_JURISDICTION",
 ] as const;
 export type DraftViolationCode = (typeof DRAFT_VIOLATION_CODES)[number];
@@ -48,6 +49,17 @@ export const DRAFT_FORBIDDEN_PHRASES = [
 
 export const DRAFT_LIMITS = Object.freeze({ subjectMaxChars: 90, bodyMaxChars: 2000 });
 
+/** 禁用短语匹配（外发文本与服务层共用同一实现，避免两套 matcher 漂移）。 */
+export function findForbiddenPhrases(
+  text: string,
+  phrases: readonly string[] = DRAFT_FORBIDDEN_PHRASES,
+): string[] {
+  // toLowerCase（而非 toLocaleLowerCase）：判定必须与宿主 locale 无关（tr_TR 等
+  // 会把 I 折成 ı，令同稿在不同机器上判不同）。
+  const haystack = text.toLowerCase();
+  return phrases.filter((phrase) => haystack.includes(phrase.toLowerCase()));
+}
+
 export interface GroundedOnRef {
   readonly claimId?: string;
   readonly offeringId?: string;
@@ -61,6 +73,8 @@ export interface OutreachDraft {
   readonly groundedOn: readonly GroundedOnRef[];
   readonly jurisdictionFooter: string;
   readonly editorNotes?: string;
+  /** v0 预留：恒为 1 步且必须与顶层 subject/body 相同（多步序列属 13.1）。 */
+  readonly steps?: readonly { readonly subject: string; readonly body: string }[];
 }
 
 export interface DraftKnowledge {
@@ -209,11 +223,11 @@ function footerIssues(
   context: DraftGroundingContext,
 ): DraftViolation[] {
   const missing: string[] = [];
-  const haystack = footer.toLocaleLowerCase();
-  if (!footer.toLocaleLowerCase().includes(context.sender.legalName.toLocaleLowerCase())) {
+  const haystack = footer.toLowerCase();
+  if (!haystack.includes(context.sender.legalName.toLowerCase())) {
     missing.push("sender legal name");
   }
-  if (!footer.toLocaleLowerCase().includes(context.sender.postalAddress.toLocaleLowerCase())) {
+  if (!haystack.includes(context.sender.postalAddress.toLowerCase())) {
     missing.push("postal address");
   }
   const exitPattern = context.jurisdiction === "DE" ? DE_EXIT_PATTERN : US_EXIT_PATTERN;
@@ -225,10 +239,28 @@ function footerIssues(
 }
 
 function exaggerationIssues(draft: OutreachDraft): DraftViolation[] {
-  const text = `${draft.subject}\n${draft.body}`.toLocaleLowerCase();
-  const hits = DRAFT_FORBIDDEN_PHRASES.filter((phrase) => text.includes(phrase.toLocaleLowerCase()));
+  const stepsText = (draft.steps ?? []).map((step) => `${step.subject}\n${step.body}`).join("\n");
+  const hits = findForbiddenPhrases(`${draft.subject}\n${draft.body}\n${stepsText}`);
   if (hits.length === 0) return [];
   return [{ code: "EXAGGERATION_FORBIDDEN", detail: `forbidden absolute/exaggerated phrases: ${hits.join(", ")}` }];
+}
+
+/** v0 的 steps[] 只是预留：一旦出现，必须恰为 1 步且与顶层稿面逐字相同。 */
+function stepsIssues(draft: OutreachDraft): DraftViolation[] {
+  if (draft.steps === undefined) return [];
+  if (
+    draft.steps.length !== 1 ||
+    draft.steps[0].subject !== draft.subject ||
+    draft.steps[0].body !== draft.body
+  ) {
+    return [
+      {
+        code: "STEPS_INCONSISTENT",
+        detail: "steps[] must be exactly one step equal to the top-level subject/body in v0",
+      },
+    ];
+  }
+  return [];
 }
 
 /**
@@ -262,6 +294,7 @@ export function validateOutreachDraft(
     });
   }
   issues.push(...groundedOnIssues(draft.groundedOn, context.knowledge));
+  issues.push(...stepsIssues(draft));
   issues.push(...footerIssues(draft.jurisdictionFooter, context));
   return { ok: issues.length === 0, issues };
 }

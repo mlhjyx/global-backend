@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { BUILTIN_SKILLS } from "../generated/builtin-skill-catalog";
 import type { PlatformSkillRecord } from "../load-builtin-skills";
-import { validateEvalManifest, type EvalManifest } from "./eval-manifest";
+import { validateEvalManifest, type EvalManifest } from "../evals/eval-manifest";
 import {
   runStep13DeterministicEvals,
   STEP13_GUARD_SKILLS,
@@ -58,13 +58,20 @@ describe("step-13 golden set shape", () => {
     }
   });
 
-  it("names the negative cases the step-13 design requires (§7 1/2/4/5)", () => {
-    const draftIds = readManifest(recordOf("outreach.sequence_draft")).evals.map((c) => String(c.id));
-    const classifyIds = readManifest(recordOf("engage.reply_classify")).evals.map((c) => String(c.id));
-    expect(draftIds).toContain("grounding-required"); // §7-1 不接地拒稿
-    expect(draftIds).toContain("footer-missing"); // §7-2 缺法域页脚拒绝
-    expect(classifyIds).toContain("ooo-classified-positive"); // §7-4 AUTO_REPLY≠POSITIVE
-    expect(classifyIds).toContain("low-confidence-escalation"); // §7-5 低置信升级
+  it("names the negative cases the step-13 design requires and keeps them in the CI layer (§7 1/2/4/5)", () => {
+    const required: Record<Step13GuardSkill, string[]> = {
+      "outreach.sequence_draft": ["grounding-required", "footer-missing"], // §7-1 不接地拒稿 / §7-2 缺页脚
+      "engage.reply_classify": ["ooo-classified-positive", "low-confidence-escalation"], // §7-4 / §7-5
+    };
+    for (const [skillKey, ids] of Object.entries(required) as [Step13GuardSkill, string[]][]) {
+      const evals = readManifest(recordOf(skillKey)).evals;
+      for (const id of ids) {
+        const evalCase = evals.find((candidate) => String(candidate.id) === id);
+        expect(evalCase, `${skillKey}:${id}`).toBeDefined();
+        // 只认 id 不够：负向用例必须留在确定性层（改 tier 会让它两层都不跑）。
+        expect(evalCase?.tier, `${skillKey}:${id}`).toBe("deterministic");
+      }
+    }
   });
 });
 

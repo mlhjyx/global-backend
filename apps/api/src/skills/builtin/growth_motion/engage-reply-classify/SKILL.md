@@ -4,12 +4,12 @@ description: 对开发信回复做闭集意图分类（7 枚举 + 置信度 + �
 license: Proprietary
 metadata:
   platform.skill-key: engage.reply_classify
-  platform.version: 1.0.0
+  platform.version: 1.0.1
   platform.skill-kind: model_task
   platform.tenant-default: enabled
   platform.pack-type: growth_motion
   platform.task-contract: engage.reply_classify
-  platform.task-contract-digest: "ddb74fe7ce24204adfe28bd291fef9f383871f707a1c1fbae878b39c5120ba86"
+  platform.task-contract-digest: "908d945ebd594755710d8cd35d3131866b9c1445c53c9c4877692fb04a13c5dd"
   platform.risk: low
   platform.human-gate: "false"
   platform.budget-cents: "10"
@@ -38,7 +38,9 @@ metadata:
 硬性规则：
 
 1. 自动回复/外出通知（out of office、automatic reply、Abwesenheit、Automatische Antwort、
-   自动回复）必须判 `OUT_OF_OFFICE`；不得把 AUTO_REPLY 当 POSITIVE（Golden Set 对抗样本）。
+   自动回复）必须判 `OUT_OF_OFFICE`；不得把 AUTO_REPLY 当 POSITIVE，也不得判 `UNSUBSCRIBE`
+   ——自动回复套话里的「回复 STOP 退订」不是本人退订意愿，自动退订会在无人复核下压制真实
+   联系人（Golden Set 对抗样本；守卫对这两种冲突一律升级 `NEEDS_HUMAN`）。
 2. `confidence`（0–1）低于 0.6 时必须输出 `NEEDS_HUMAN`，不得静默归类（决策 D-13-d）。
 3. 本技能只产生建议：除 `UNSUBSCRIBE` 走步 11 退订流程外，不得自动产生任何 Outcome；
    `BOUNCE` 只进信箱健康指标。

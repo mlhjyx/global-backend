@@ -10,20 +10,13 @@
  * 违例码是闭集，进 Golden Set 断言与事件轨迹。
  */
 
-export const REPLY_INTENTS = [
-  "POSITIVE",
-  "NEGATIVE",
-  "NEUTRAL",
-  "OUT_OF_OFFICE",
-  "UNSUBSCRIBE",
-  "BOUNCE",
-  "NEEDS_HUMAN",
-] as const;
-export type ReplyIntent = (typeof REPLY_INTENTS)[number];
+import { isReplyIntent, type ReplyIntent } from "../../ai-tasks/reply-intents";
+
+export { REPLY_INTENTS, isReplyIntent, type ReplyIntent } from "../../ai-tasks/reply-intents";
 
 export const REPLY_GUARD_VIOLATION_CODES = [
   "INVALID_INTENT",
-  "AUTO_REPLY_NOT_POSITIVE",
+  "AUTO_REPLY_CONFLICT",
   "LOW_CONFIDENCE_ESCALATED",
 ] as const;
 export type ReplyGuardViolationCode = (typeof REPLY_GUARD_VIOLATION_CODES)[number];
@@ -58,10 +51,6 @@ export interface ReplyGuardResult {
   readonly violations: readonly ReplyGuardViolation[];
 }
 
-export function isReplyIntent(value: string): value is ReplyIntent {
-  return (REPLY_INTENTS as readonly string[]).includes(value);
-}
-
 export function looksLikeAutoReply(replyText: string): boolean {
   return AUTO_REPLY_PATTERNS.some((pattern) => pattern.test(replyText));
 }
@@ -69,6 +58,10 @@ export function looksLikeAutoReply(replyText: string): boolean {
 /**
  * 对模型分类结果套用确定性守卫。`replyText` 是分类的输入原文（守卫只看它判定
  * 「自动回复」这一结构性事实，不重判意图）。
+ *
+ * 自动回复文本上的两类意图必须升级人工：POSITIVE（把 OOO 当兴趣）与 UNSUBSCRIBE
+ * （OOO 套话常带「回复 STOP 退订」，自动退订会在无人复核下压制真实联系人）
+ * ——两者都记 AUTO_REPLY_CONFLICT。
  */
 export function guardReplyClassification(
   classification: ReplyClassification,
@@ -80,10 +73,13 @@ export function guardReplyClassification(
       code: "INVALID_INTENT",
       detail: `intent ${classification.intent} is outside the closed set`,
     });
-  } else if (classification.intent === "POSITIVE" && looksLikeAutoReply(replyText)) {
+  } else if (
+    (classification.intent === "POSITIVE" || classification.intent === "UNSUBSCRIBE") &&
+    looksLikeAutoReply(replyText)
+  ) {
     violations.push({
-      code: "AUTO_REPLY_NOT_POSITIVE",
-      detail: "reply text carries auto-reply/out-of-office markers but was classified POSITIVE",
+      code: "AUTO_REPLY_CONFLICT",
+      detail: `reply text carries auto-reply/out-of-office markers but was classified ${classification.intent}`,
     });
   }
   if (

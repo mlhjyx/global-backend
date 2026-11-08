@@ -29,7 +29,7 @@ const { getTask } = await import("../apps/api/src/ai-tasks/task-registry");
 const { loadPlatformSkills } = await import("../apps/api/src/skills/load-builtin-skills");
 const { canonicalDigest } = await import("../apps/api/src/model-runtime/context-engine");
 const { buildGatewayProvider } = await import("../apps/api/src/model-gateway/model-providers.config");
-const { runSkillModelEvals } = await import("../apps/api/src/skills/evals/skill-model-evals");
+const { runSkillModelEvals } = await import("../apps/api/src/skills/eval/skill-model-evals");
 const { seedSkillCatalog } = await import("../apps/api/src/skills/skill-catalog.seed");
 
 function fail(message: string): never {
@@ -51,6 +51,12 @@ if (!skillsArg) {
 const skillKeys = skillsArg.split(",").map((key) => key.trim()).filter(Boolean);
 const maxCases = Number(argValue("max-cases") ?? 20);
 if (!Number.isInteger(maxCases) || maxCases <= 0) fail("--max-cases must be a positive integer");
+const maxCostMicros = Number(
+  argValue("max-cost-micros") ?? process.env.SKILL_EVAL_MAX_COST_MICROS ?? 5_000_000,
+);
+if (!Number.isSafeInteger(maxCostMicros) || maxCostMicros <= 0) {
+  fail("--max-cost-micros / SKILL_EVAL_MAX_COST_MICROS must be a positive integer (µUSD)");
+}
 
 const builtinRoot = join(repoRoot, "apps/api/src/skills/builtin");
 const importedRoot = join(repoRoot, "apps/api/src/skills/imported");
@@ -69,8 +75,9 @@ type ModelGatewayTypes = typeof import("../apps/api/src/model-gateway/types");
 const callModel = (input: ModelGatewayTypes["GenerateStructuredInput"], ctx: ModelGatewayTypes["AiContext"]) =>
   provider.generateStructured(input, ctx);
 
-const ownerUrl = process.env.DATABASE_URL;
-const appUrl = process.env.APP_DATABASE_URL ?? ownerUrl;
+const ownerUrl = process.env.DATABASE_URL?.trim() || undefined;
+// APP_DATABASE_URL= （空串）是仓库里「禁用 app_user 连接」的惯用写法，必须回退到 owner。
+const appUrl = process.env.APP_DATABASE_URL?.trim() || ownerUrl;
 const owner = flag("seed") && ownerUrl ? new PrismaClient({ datasourceUrl: ownerUrl }) : null;
 const receiptDb = flag("write-receipt") && appUrl ? new PrismaClient({ datasourceUrl: appUrl }) : null;
 
@@ -79,7 +86,10 @@ if (flag("write-receipt") && !receiptDb) fail("--write-receipt 需要 APP_DATABA
 
 let workspaceId = argValue("workspace");
 if (!workspaceId) {
-  const probe = new PrismaClient({ datasourceUrl: ownerUrl ?? appUrl });
+  // workspace 表是 FORCE RLS（按 current_workspace_id 过滤）：app_user 不带上下文时
+  // 恒 0 行，枚举必须用 owner 连接；只有 APP_DATABASE_URL 时要求显式 --workspace。
+  if (!ownerUrl) fail("无 DATABASE_URL 时无法枚举 workspace，请显式传 --workspace <uuid>");
+  const probe = new PrismaClient({ datasourceUrl: ownerUrl });
   try {
     const rows = await probe.$queryRaw<{ id: string }[]>(Prisma.sql`
       SELECT "id"::text AS "id" FROM "workspace" ORDER BY "created_at" LIMIT 1
@@ -117,6 +127,7 @@ for (const skillKey of skillKeys) {
     {
       workspaceId,
       maxCases,
+      maxCostMicros,
       callModel,
       onCase: (entry) => {
         const status = entry.ok ? "PASS" : "FAIL";

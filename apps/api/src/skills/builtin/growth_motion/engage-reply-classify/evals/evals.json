@@ -85,7 +85,7 @@
     {
       "id": "auto-reply-english-adversarial",
       "tier": "model",
-      "prompt": "对回复做意图分类，输出 {intent, confidence, rationale, matchedSignals}。这是一条自动回复，注意不要判成 POSITIVE。",
+      "prompt": "对回复做意图分类，输出 {intent, confidence, rationale, matchedSignals}。",
       "input": {
         "request": {
           "replyText": "Thank you for your message. I am currently out of the office and will return on Monday, December 1. This is an automatic reply.",
@@ -101,7 +101,7 @@
     {
       "id": "ambiguous-mixed-signals",
       "tier": "model",
-      "prompt": "对回复做意图分类，输出 {intent, confidence, rationale, matchedSignals}。信号含糊，低置信必须 NEEDS_HUMAN。",
+      "prompt": "对回复做意图分类，输出 {intent, confidence, rationale, matchedSignals}。",
       "input": {
         "request": {
           "replyText": "Interesting. We might be able to use this in some projects, but I am not sure; also our HQ handles procurement for Asia. Maybe send something?",
@@ -159,10 +159,10 @@
           "matchedSignals": ["Thank you for your message"]
         }
       },
-      "expectedOutput": "自动回复被判 POSITIVE → 守卫升级 NEEDS_HUMAN（AUTO_REPLY_NOT_POSITIVE，负向 4）。",
+      "expectedOutput": "自动回复被判 POSITIVE → 守卫升级 NEEDS_HUMAN（AUTO_REPLY_CONFLICT，负向 4）。",
       "assertions": [
         { "kind": "equals", "path": "final.intent", "value": "NEEDS_HUMAN" },
-        { "kind": "equals", "path": "violations", "value": ["AUTO_REPLY_NOT_POSITIVE"] }
+        { "kind": "equals", "path": "violations", "value": ["AUTO_REPLY_CONFLICT"] }
       ]
     },
     {
