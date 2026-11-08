@@ -324,6 +324,42 @@
       ]
     },
     {
+      "key": "millionverifier",
+      "status": "IMPLEMENTED",
+      "source_classes": [
+        "email_verification"
+      ],
+      "purpose": "Verify a mailbox through a third-party email verification API and map the result to the four-state contact-point model with a cost ledger entry.",
+      "taxonomy": [
+        "verification result",
+        "catch-all state",
+        "verification cost"
+      ],
+      "license": {
+        "classification": "NOT_APPLICABLE",
+        "note": "This is a verification result, not licensed source content. The email address itself is personal data sent to the processor under a lawful-basis gate."
+      },
+      "personal_data_class": "PERSONAL_DATA",
+      "default_enablement": "DISABLED",
+      "call_gates": [
+        "data_provider_status",
+        "source_policy",
+        "lawful_basis",
+        "api_credentials",
+        "attempt_budget"
+      ],
+      "test_paths": [
+        "apps/api/src/enrichment/verification/millionverifier.provider.spec.ts",
+        "apps/api/src/enrichment/verification/verification-policy.spec.ts"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "TEST_ANCHOR",
+          "path": "apps/api/src/enrichment/verification/millionverifier.provider.spec.ts"
+        }
+      ]
+    },
+    {
       "key": "openfda",
       "status": "IMPLEMENTED",
       "source_classes": [
