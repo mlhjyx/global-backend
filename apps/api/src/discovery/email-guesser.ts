@@ -90,7 +90,8 @@ function domainFactOf(v: EmailVerdict): GuessResult['domainFact'] | null {
   if (v.status === 'INVALID' && /no_mx|null_mx|dns_lookup_failed/.test(d)) return 'no_mx';
   if (/anti_enumeration/.test(d)) return 'anti_enumeration';
   if (/catch_all_domain/.test(d)) return 'catch_all';
-  // mail_from_rejected：MX 拒了我们的信封发件人 → 本次会话对**所有**候选恒成立（同发件人），
+  // mail_from_rejected：MX 拒了我们的信封发件人（A2 起含空信封回退；两种发件人都被拒才出现）
+  // → 本次会话对**所有**候选恒成立（同发件人），
   //   一次即短路，不为每个候选重复无效探测（真数据实测反抓：osna-pumpen.de 曾探 6 次全同结果）。
   if (/smtp_unreachable|smtp_gate_unavailable|smtp_probe_failed|mail_from_rejected/.test(d)) return 'unreachable';
   if (/mx_egress_blocked/.test(d)) return 'egress_blocked';
