@@ -7,7 +7,7 @@
 > 但链接规范化剥掉尾斜杠，站点对无斜杠形态返回 39 字节反爬空壳、crawl4ai 全部 500；
 > `jaeckel-ohg.de` 的 Impressum 确无具名人，但**首页团队区块**列了具名执行合伙人/销售/商务并附邮箱，
 > 而引擎从不抽取首页自身。修复见
-> [changelog 片段](../roadmap/changelog.d/2026-11-03-contact-zero-yield-root-causes.md)。
+> [changelog](../roadmap/changelog.md)（该条目已汇编）。
 >
 > 口径：数据来自本地栈镜像 `fe0c7d71`（源 `4133259f`，含 #744/#748）。方法是用镜像内**同源编译产物**
 > 重放选页/robots 纯函数 + 引擎同款 crawl4ai `/md` 抓取 + `http.get` 同 UA 抓原始 HTML，并对照

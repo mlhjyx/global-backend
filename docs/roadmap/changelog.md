@@ -5,6 +5,1507 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [../status/release-plan.md](../status/release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-11-08 · Add the SKILL.md package spec v0 with validator and builtin catalog (#833)
+
+- 起因：M1 步 7（S0 Skill Runtime v0）需要让 AI 技能有正式包规范与登记来源；设计见 `docs/superpowers/plans/2026-11-08-skill-runtime-s0.md`（已批准）。
+- 改动：
+  - 新增 SKILL.md 严格子集解析器与 manifest 校验：标准字段（AAIF / agentskills.io）+ `metadata.platform.*` 扩展；`task-contract-digest` 钉住执行语义（不含 model，模型属部署策略）。
+  - 新增三个存量技能的 SKILL.md（`company.understanding.extract` / `company.understanding.extract_offerings` / `discovery.qualify_fit`）与生成目录 `apps/api/src/skills/generated/builtin-skill-catalog.ts`。
+  - 新增 `pnpm skills:generate` / `pnpm skills:validate` 脚本（严格子集解析，无新依赖、未动锁文件）。
+- 测试：`apps/api/src/skills` 单测 30 例（解析/校验负向、生成物新鲜度、契约摘要）；全量零容器单测本地通过（两处已知负载假红单跑全绿）。
+- 未做：注册表/解析器/adapter 接线（S0-2）与 ops 启停（S0-3）。
+
+## 2026-11-08 · Add the skill registry tables, DB resolver, pass-through adapter and startup seeding (#835)
+
+- 起因：S0 Skill Runtime v0 第 2 步——让三个存量技能真正经注册表解析并写入不可变解析快照，行为保持不变（设计 `docs/superpowers/plans/2026-11-08-skill-runtime-s0.md`，已批准）。
+- 改动：
+  - 迁移 `20261108010000_skill_runtime_v0`：新增 `skill_package` / `skill_version` / `skill_enablement` / `skill_resolution_snapshot` 四表（FORCE RLS；平台目录行跨空间可读；版本与快照 append-only；目录仅状态列可被 app_user 更新），并同步 `docs/governance/app-user-table-privileges.json`。
+  - 运行时：`StaticSkillResolver`（内置目录，测试/未接线缺省）与 `createDbSkillResolver`（平台状态 + workspace 覆盖 + 契约漂移校验，fail-closed；30s 缓存；内容寻址快照 `ON CONFLICT DO NOTHING`）。
+  - 直通 adapter `executeSkillWithRuntime`：解析 + 绑定校验后把输入原样交给既有结构化任务桥；understanding 的 claims/offerings 与 discovery 的 fit 判定改经它执行，prompt/schema/模型/预算/收据逐字节不变。
+  - 启动期 seed（worker + relay，owner 连接）：同版本摘要漂移会大声失败（要求 SKILL.md 版本号 +1）。
+  - 停用/未登记/契约漂移：understanding 转 Temporal nonRetryable；fit 判定整轮显性失败，不再静默返回空判。
+- 测试：单测 55+ 例（resolver 失败码与缓存、adapter 逐字段转发、迁移静态契约、调用点与 worker 接线源级守卫）；真库 RLS service 组 5 例（一次性库实测）；`app-user-table-privileges.postgres.spec.ts` 与 `raw-sql-parameter-types.postgres.spec.ts` 在本机 `global_test` 实测通过；`gctl check --fast` 全绿。
+- 未做：ops 启停 API 与文档收尾（S0-3）；租户自定义技能（S3）。
+
+## 2026-11-08 · Add the ops surface for skill enablement and finish S0 documentation (#838)
+
+- 起因：S0 Skill Runtime v0 第 3 步——运营需要能看技能目录并一键启停；收尾模块文档与状态页回写（设计 `docs/superpowers/plans/2026-11-08-skill-runtime-s0.md`，已批准）。
+- 改动：
+  - 新增引擎 ops API：`GET /api/v1/skills`、`GET /api/v1/skills/:skillKey`、`PATCH /api/v1/skills/:skillKey/status`（平台 kill switch）、`GET|PUT|DELETE /api/v1/skills/:skillKey/workspaces/:workspaceId`（workspace 覆盖）。仅 `ops:read`/`ops:write`，租户 token 403。
+  - 重新导出 `packages/contracts/openapi/openapi.json`（新增 5 个端点）。
+  - 新增模块文档 `docs/modules/ai-foundation/{product,technical}.md`；`docs/status/current.md` 增加 S0 落地与「尚未发车」说明。
+- 测试：controller 授权拓扑（guards/每 handler 的 ops scope 元数据）与参数校验单测、service 生效语义与 404 单测（共 15 例）；`gctl check --fast` 与 `docs:verify` 全绿。
+- 未做：gain-saas 运营台页面与租户自助启停（S1+）；实际发车部署（需产品负责人单独授权）。
+
+## 2026-11-08 · Record discovery workflow tuning constants in start input for replay safety (#839)
+
+- 起因：审计 L01（P1）——discovery 工作流的池搜索兜底阈值（20）、深挖并发（16）、查询批大小（2）是模块级常量且参与分支/循环；改常量会让在飞历史重放成不同命令序列（NDE），本周只能靠关 env 开关绕行，调参手段实际被冻结。
+- 改动：
+  - 新增 `discovery.workflow-knobs.ts`：三个旋钮的冻结默认值、合法区间与输入收敛（纯函数）；`DiscoveryRunInput` 增加 `run2PoolSearchFallbackThreshold` / `deepCompanyConcurrency` / `discoveryQueryBatchSize` 可选字段。
+  - outbox relay 启动 discovery 工作流时把三个旋钮**显式**写进启动输入（env `DISCOVERY_POOL_SEARCH_FALLBACK_THRESHOLD` / `DISCOVERY_DEEP_COMPANY_CONCURRENCY` / `DISCOVERY_QUERY_BATCH_SIZE` 可覆盖，非法值回落冻结默认并告警）；旧历史没有字段时按冻结默认重放不变。
+  - `raw-retention` sweep 的三个循环上界（`maxBatchesPerWorkspace` / `maxBudgetReconcileBatches` / `maxPagesPerRun`）同样输入化，`continueAsNew` 随输入传递。
+  - 新增治理检查 `scripts/governance-workflow-constants.mjs`（并入 `pnpm governance:verify`）：workflow 文件里的模块级数值常量必须带白名单理由，白名单条目过期即失败。
+- 测试：新增 `discovery.workflow-knobs.spec.ts`（三旋钮参与控制流 + 非物理输入回落默认）；新增 `discovery-workflow-knobs.replay.spec.ts`（旧历史按冻结默认重放、三个旋钮各自的录制值被重放尊重；忽略输入时 3/4 用例转红）；扩展 relay 路由测试（默认注入、env 覆盖、非整数回落、越界在注入点夹取）；治理检查含仓库自检与**冻结值逐值 pin**（改冻结默认值会直接红）。`pnpm --filter @global/api test`、`pnpm governance:verify` 全绿。
+- 未做：deep 阶段的告警阈值（30 分钟 / 失败率 30%）仍为工作流内字面量——它们只影响 stats.alerts，不改变命令序列，未纳入本次；external-intent / kb-recovery / personal-artifact-cleanup / refurbish 的常量已进白名单并登记在 `docs/superpowers/plans/2026-11-08-workflow-constant-input-ization.md`（待输入化清单与验收口径）。治理检查覆盖模块级常量（字面量与 `+ - * /` 常量表达式，如 `15 * 60 * 1000`）；行内字面量、函数调用初始化的常量、对象/enum 内数字仍需人审，规则本身照旧适用。`asset-cleanup.workflow.ts` 的两个计时常量（决定 sleep 命令是否调度）按「代码所有、客户端不可缩短」冻结并进白名单。
+- 部署：一旦用 env 覆盖过三个旋钮，**回退到本改动之前的镜像前必须先排空在飞 run**（旧镜像不读这些字段，会用常量重放新历史 → NDE）；未设覆盖值时新旧镜像行为一致，回退安全。
+
+## 2026-11-08 · Raise interactive-transaction budget for governed discovery query commits (#840)
+
+- 起因：run `1541ffd9` 实机故障——`executeQuery` 的 Q-TX（domain-ack 回执 + 百级 raw 记录 upsert + run stats 合并）在共享主机负载下超过 Prisma 交互事务默认 5s 上限（实测 7–8s），活动连续重试失败，目录源整轮记录无法入库（run 卡在 RUNNING、查询收据全零、探针无法取样）。
+- 改动：`discovery-query-governed-execution.ts` 导出 `DISCOVERY_RAW_INGEST_TX_OPTIONS`（maxWait 10s / timeout 30s），治理路径与 legacy 路径（`discovery.activities.ts`）的查询入库事务显式使用；无行为/契约变化，只放宽事务时限。
+- 测试：`pnpm --filter @global/api build` + discovery 相关单测；样本 run 复跑在发车后验证（收据非零、探针行出现）。
+- 未做：canonicalize/materialization 等其它批量事务仍用默认超时（观察项，复现另立）；worker 并发与容量（B12）不在本 PR。
+
+## 2026-11-08 · Onboarding-derived claim drafts to unblock NO_APPROVED_CLAIMS (#843)
+
+- 起因：新用户/新空间的注册引导只落 CompanyProfile + Offering，不产生 Claim；无官网或理解失败时永远没有可审批事实，ICP 生成被 `NO_APPROVED_CLAIMS` 卡死（P5 断点）。
+- 改动：
+  - `POST /companies` 建档同事务新增档案事实草稿：主营产品 → `capability`、行业 → `company_fact`、目标市场 → `market`，状态 `NEEDS_REVIEW`，证据记「注册引导填写」；不带 `originKey/factKey`，可直接走既有审批（不需要 Site bridge）。
+  - 新端点 `POST /api/v1/companies/{companyId}/claim-drafts`（`acquisition:review`，不消费 Grant）：为存量空间/理解失败空间补齐草稿；按归一化语句幂等去重，`REVOKED` 不复活；company 行 `FOR UPDATE` 串行化。
+  - 设计文档 `docs/superpowers/plans/2026-11-08-p5-user-loop.md`（P5 三项，本 PR 只含引擎侧 Claim 草稿）。
+- 测试：新增 `profile-claim-drafts.spec.ts`（映射/去重/REVOKED/知识来源/空规格）与 `claim.synthesize-drafts.spec.ts`（404/生成/幂等）；`company.service.spec.ts` 增建档派生断言。
+- 未做：SaaS 侧通知派生与错误文案表在 gain-saas 仓单独 PR；不从卖家资料库文档抽事实（Phase 3 冻结）；不改 ICP 硬门（产品负责人 2026-11-08 按推荐批准）。
+
+## 2026-11-08 · Add the D-MA-7 memory layer v0 (episodic and semantic tables) (#844)
+
+- 起因：M2.1 规划器要求「先有记忆与归因」；D-MA-7（2026-11-08 批准）要求在 M1.5/M2 之间先落最小记忆层，设计见 `docs/superpowers/plans/2026-11-08-memory-layer-v0.md`（APPROVED）。
+- 改动：
+  - 新增 additive 迁移：`mem_run_episode`（append-only，run 完成/结果回填两时点）与 `mem_knowledge_stat`（Beta-Binomial 统计，只追加版本，写权只给 `memory_semantic_writer`），含 RLS、`app_user` 权限与 `outbox_event(event_type, occurred_at)` 索引。
+  - 新增 `MemoryModule`：outbox 消费者（默认关闭，`MEMORY_LAYER_V0_ENABLED`）把 `DiscoveryRunCompleted` / `LeadsScored` 幂等写成 episode；`MemoryQueryService` 提供 SQL 检索与 ≤2k token、带出处的 memory brief。
+  - 未改 discovery activities/workflows、ai-trace、预算账本、gain-saas 与 skill runtime 文件。
+- 测试：契约/消费者/检索单测；真库 RLS 与 `app_user` 权限负向测试（含 semantic 写入被拒）；事件重放幂等测试；`docs:verify` 与 `gctl check --fast`。
+- 未做：自动调策略、探索流量、Thompson 采样、semantic 生产写入、公共 HTTP API、历史 run 回填（均留 M2.2 或后续）。
+
+## 2026-11-08 · Add the PR-B fetch caches (ETag/304 page cache + content-hash LLM extraction cache) (#845)
+
+- 起因：主计划 §0.2 步 5 / §3.5b PR-B——重复页面重复抓、重复花 LLM 抽取钱。设计见 `docs/superpowers/plans/2026-11-04-http-cache-pr-b.md`（产品负责人 2026-11-08 批准 D-a~D-f）。
+- 改动：
+  - 新表 `url_content_cache`（FORCE RLS 租户表）：HTTP-first 路径带 `If-None-Match`/`If-Modified-Since`；304 直接复用缓存 markdown（不读 body、不重做抽取），200 写回 ETag/Last-Modified；24h TTL。
+  - 新表 `llm_extraction_cache`（FORCE RLS 租户表）：结构化任务结果缓存，键=workspace + task + 契约/prompt 版本 + 注册模型 + 输入全文 digest + schema digest + reasoning；命中跳过网关调用（不计费、不落 ai_trace）；`ACQ_LLM_CACHE=off` 全关断。
+  - 缓存只对任务契约声明 `cacheable: true` 的 8 个抽取/判定任务生效；缓存读写失败一律退化为原行为。
+  - 过期清理：写入路径按 workspace 清 + `purge_expired_*_v1`（SECURITY DEFINER，只删过期行）+ worker 启动/每 6h 调度；DSR `eraseSubject` 按 workspace 擦除两表。
+  - `crawl4ai.fetch` provenance 新增 `cache: miss | conditional-304`（未启用缓存时不出现）；`URL_CONTENT_CACHE=off` 回退无条件请求。
+- 测试：http-first 三态与降级、LLM 缓存命中/键隔离/脏数据/env 关断、维护批量与失败降级单测；app_user 权限矩阵新增两表与跨 workspace/purge 真库用例。
+- 未做：平台渠道抓取（workspaceId='platform'）不启用缓存（另立项）；PR-C trafilatura sidecar 按设计降级为观察项。
+
+## 2026-11-08 · Governed company lineage for structured discovery sources (lineage v3) (#846)
+
+- 起因：M0 步2 逐源启用（wikidata / openstreetmap / ted / openfda）被 2026-10-11 的血缘闸门结构性挡住——四个源都没有 `companyResultLineage`，`data_provider` 翻 ENABLED 也不进 planner、不路由（`SOURCE_LINEAGE_UNAVAILABLE`）。证据见 `docs/evidence/2026-11-08-m0-step2-source-enablement.md`；设计（产品负责人 2026-11-08 批准）见 `docs/superpowers/plans/2026-11-08-structured-source-lineage-contract.md`。
+- 改动：
+  - `company-discovery-lineage.ts`：`DiscoveryCompanyLineageProviderKey` 与回执合同新增四键，producerId 即 ToolBroker 工具 id（`wikidata.sparql`/`osm.overpass`/`ted.search`/`openfda.search`），resultSchema 与工具投影一致。
+  - `discovery-query-governed-lineage.ts`：运行时 `PROVIDER_CONTRACT` 与 `LINEAGE_DESCRIPTOR.providerContracts` 同步新增四键；v2 合同哈希随描述变为 `7b29dc8f…`（v1 委托哈希 `eb5f6f09…` 与 raw-relation 哈希不变）。
+  - 新迁移 `20261108120000_discovery_query_lineage_contract_v3`：`CREATE OR REPLACE` append/attest v2 与 `admit_discovery_company_materialization_v1`（新哈希）；两张表的合同 CHECK 同时接受新旧哈希（outcome/admission 行不可改写，历史行保留旧哈希）。
+  - `domain-ack-consumer-bindings.ts`：`DISCOVERY_GOVERNED_COMPANY_ACK_BINDINGS` 新增四条（`RawSourceRecord` 聚合，consumer/resultSchema 与 PROVIDER_CONTRACT 一致）。
+  - `discovery.activities.ts`：`DISCOVERY_DOMAIN_ACK_PRODUCERS` 补 `ted.search`（其余三个工具 id 原已在集合内）。
+  - 四个 provider：声明 `companyResultLineage`，接线 `createDiscoveryCompanyReceiptCollector`（回执转发给活动层回调），成功路径以「单次结算回执覆盖全部记录索引」构造血缘；投影拒绝（`ToolDurableResultProjectionError`，已结算无回执）记 `failed` 观察使空血缘仍有效，其余未知失败保持血缘作废（fail-closed）。
+- 测试：新增 `structured-lineage.provider.spec.ts`（四源回执覆盖、回执转发、投影拒绝空血缘、未知失败血缘作废）；更新 `provider.registry.spec.ts`（血缘声明与路由列表）、`discovery.activities.spec.ts`（结构化源进入受治理路由；未注册 source_hint 的 replay 跳过原因）、`discovery-query-lineage-execution-outcome.migration.spec.ts`（v3 迁移断言）与各夹具合同哈希。
+- 未做：`openfda-search/v1` 投影 `maxItems: 12` 与 provider 取数口径（≥50 条）冲突是独立缺陷，openFDA 的第③④步启用需先修投影上界；OSM 上游 Overpass 三端点 2026-11-08 不可用，第②步需换窗口重测。两者见证据文档 §5。
+- 部署：带迁移的切换走无 run 硬窗口（既有纪律）。上线后四个源仍需 ops 把 `data_provider.status` 翻 ENABLED 并做 dev mini-run 验收（本 PR 不改数据行）。
+
+## 2026-11-08 · Add pack schemas, the first content catalog and the golden-set harness (#847)
+
+- 起因：S1 Pack v1 第 1 步（设计 `docs/superpowers/plans/2026-11-08-s1-pack-v1.md`，S1-D1~D10 已批准）——先落不依赖部署的纯模块：四类 Pack Schema、内容目录、冲突裁决与评测骨架。
+- 改动：
+  - 四类 Pack JSON Schema（Compliance / Data Source / Growth Motion / Industry，共同信封 + 类型化规则）+ 平台语义校验（key/目录/许可 notice/规则 id 唯一）与确定性冲突裁决（优先级排序、forbid 吸收、同层更严格胜出，拒绝项显式记录）。
+  - 首批内容目录 7 个：合规（双用途复核）、数据源边界、DACH 分销商动作、金属加工行业，以及 C 档 3 个去营销化内容包（competitive-intelligence / customer-research / pricing，均带 SPDX 与来源 notice）。
+  - Golden Set 骨架：评测清单闭集断言词汇（11 种）与零模型执行器；`pnpm packs:generate/validate`、`pnpm skills:evals:validate` 脚本；第三方技能目录一致性 CI（schema + 快照 SHA-256 + 首批 10 个）。
+  - `nest-cli.json` 增加 Pack schema 资源复制；根 `package.json` 增 3 个 script（Copy 绑定重签，HASH_ONLY）。
+- 测试：新增 30 例（schema 正/负、冲突裁决、内容目录与生成物一致、评测清单与执行器、第三方目录一致性）；`src/skills` 合计 100 例通过；`gctl check --fast`、`docs:verify` 全绿。
+- 未做：Pack 表/解析器/策略快照（S1-2，等 S0 发车验收）、Pack Studio（S1-3）、两个新技能与导入 A 档（S1-4）。
+
+## 2026-11-08 · Upgrade the self-hosted Crawl4AI image from 0.9.1 to the 0.9.5 security release (#848)
+
+- 起因：主计划 §3.5b 安全升级（产品负责人 2026-11-08 批 D-f）。0.9.5（2026-10-14）修复 6 个协调披露通告，全部命中自托管 Docker API 的暴露面：CVE-2026-119119（渲染延迟参数无上限的 DoS）、JS 注入（css_selector/wait_for 绕过 js_code 拦截）、盲 SSRF（CacheValidator 绕过 egress proxy）、调用方指定 HuggingFace 模型（pickle RCE）、调用方正则 ReDoS、默认关闭 TLS 校验。设计见 `docs/superpowers/plans/2026-11-08-crawl4ai-095-upgrade.md`。
+- 改动：
+  - `infra/crawl4ai/Dockerfile`：基础镜像钉到 `unclecode/crawl4ai@sha256:0b056668…`（0.9.5）；构建期断言 `/app/config.yml` 仍含 `wall_clock_s: 300` 与 `max_pages_before_recycle: 200`（浏览器池每 200 页回收、单次抓取 300s 截止）。
+  - 既有 egress 补丁（fake-IP DoH 窄回退 + 上游 global-IP 守卫/pinning proxy）、redis 持久化关闭、playwright 浏览器安装全部保留，构建期锚点检查通过。
+- 测试：镜像构建 + 容器冒烟（/health、经 pinning proxy 真实抓取、内网地址拒绝）；适配器契约单测由 CI 全量覆盖。
+- 回滚：`global-crawl4ai:rollback-0.9.1-20261108` 保留旧镜像；`docker tag … :local` + 重建容器即可回退（无迁移）。
+- 未做：不重建/不重启正在运行的 `global-crawl4ai` 容器（发车由产品负责人流程执行）；生产侧 Crawl4AI 运维姿态不并入本仓 wrapper。
+
+## 2026-11-08 · Keep directory records when detail_url fails the stable-URL contract (#849)
+
+- 起因：run `bdb70e30` 的 69 条探针样本全部倒在 `normalize` 阶段——11467.com 名录详情链接含长数字 ID（≥7 位连续数字），被共享的 `CONTACT_LIKE_PHONE` 判为电话样文本，`isStableSafeHttpsUrl` 失败导致**整条公司记录**被拒（该轮 51 条拒绝属此类）。
+- 改动：`directory.provider` 新增 `sanitizeDetailUrl`——剥离查询串/锚点后按 `isStableSafeHttpsUrl` 复检，仍不合规则丢弃 `detail_url` 字段而保留记录（该字段为可选富化项）。
+- 测试：新增「映射 → 完整载荷契约校验」回流测试（长数字路径/查询串/干净 URL 三例），provider 与 schema 套件 16 例全绿。
+- 未做：未放宽共享 `CONTACT_LIKE_PHONE` 正则（保持其它字段的防 PII 严格性）；历史已拒记录不回填，下一轮 run 自然重采。
+
+## 2026-11-08 · Raise the openFDA durable projection bound to the discovery fetch floor (#850)
+
+- 起因：M0 步2 真测发现 `openfda-search/v1` 投影对 `establishments`/`clearances` 设 `maxItems: 12`，而发现 provider 每次至少取 `max(query.limit, 50) = 50` 条——真实 API 响应必被结算投影拒绝（`TOOL_DURABLE_RESULT_PROJECTION_REJECTED`），openFDA discovery 恒零产出；既有单测夹具 ≤12 条掩盖了真实形状。证据见 `docs/evidence/2026-11-08-m0-step2-source-enablement.md` §2/§4.4。
+- 改动：`durable-results/source-result-projections.ts` 的 `openfda-search/v1` 两处 `arraySchema(12, …)` 提到 50（与唯一生产调用方 discovery provider 的取数下限一致）；结构性上限仍精确（51 条被拒），120 KiB 应用层字节门不变，作为真正的信封上界。
+- 测试：边界锁定测试更新为 50；新增回归——50 条真机形状可投影并逐字节还原且 <120 KiB，51 条被结构性拒绝；真实 API 复测 openfda discovery 恢复非零供给（见新证据文档）。
+- 未做：工具侧截断（不需要——50 已覆盖唯一生产调用口径；若未来有调用方传 limit>50，需同步抬升该上界）。
+
+## 2026-11-08 · Renew the production dependency audit baseline to 2027-01-15 (#854)
+
+- 起因：生产漏洞基线 `docs/security/production-dependency-audit-baseline.json` 于 2026-11-14 到期；到期后依赖输入变更的 PR 与 main 的 freshness canary 都会失败，卡住 M0/M1/M2 在飞列车。
+- 改动：按 `docs/backend/dependency-refresh.md` §4 的到期续期路径，把 `governance.valid_until` 延到 `2027-01-15T00:00:00.000Z`，并把 `source.base_commit` / `bootstrap.base_commit` 重绑到当前 main（`bf0a7f8d`）、`captured_at` 更新为本次审计时间；锁文件未变（digest 与 2026-11-04 绑定一致）。同步更新 `scripts/supply-chain-gates.spec.mjs` 的基线提交与验证时钟，并冻结旧/新绑定的 freshness 回执到 `docs/evidence/security/20261108-baseline-renewal.json`。
+- 测试：`pnpm audit --prod --registry=https://registry.npmjs.org` 零 advisory；`node scripts/supply-chain-audit.mjs verify` = `PASS_CLEAR`；`baseline-freshness` 旧/新绑定均 `FRESH`；`pnpm governance:verify`、`node --test scripts/supply-chain-gates.spec.mjs`、`pnpm docs:verify` 通过。
+- 未做：未升级任何依赖、未改 `pnpm-lock.yaml`；下次月度依赖刷新仍会在新窗口内重新审计并续期。
+
+## 2026-11-08 · Classify deterministic ledger failures as non-retryable and mark unknown results (#855)
+
+- 起因：审计 F5/F4（P1）——同一 operation_key 二次 reserve 必撞同一行（REPLAY），但该错误在活动边界仍可重试，Temporal 反复重试把整段活动从头再跑（2026-11-07 run 7662d391 空转约 95 分钟）；同时 settle 双败后行停在裸 RESERVED，一次 DB 抖动即可永久锁死 operation key。
+- 改动：
+  - 新增 `deterministic-ledger-failure.ts`（纯分类器）与活动边界拦截器：**`BudgetOperationReplayError` 仅 remnant 来源**判确定性（`origin='live'` 保持可重试，重试吸收 remnant/读回已结清结果是 #642 的恢复路径）；BudgetExceededError / BudgetAccountUnavailableError / BudgetUnsettledOperationsError / 投影拒绝错误 / ExecutionBudgetGrantError（除 VERIFICATION_UNAVAILABLE 外整类确定性）/ ExecutionControlError 的确定性码 → nonRetryable（保留 type/code，`isExecutionControlError` 语义不变）；`ExecutionControlError` 的 `*_UNAVAILABLE` 保持可重试。拦截器挂在 customer / platform / dev fast lane 三个 worker 上，挂载由源文本断言钉住。
+  - model 网关与 tool-broker 的 settle 双败路径：先尽力 `markResultUnknown`（兜底失败不掩盖主错误），再抛确定性 replay 错误；网关失败路径的 settle 补一次 ACK 丢失重试并记 ERROR trace（`budgetDisposition=RESERVED_SETTLE_FAILED`）。
+  - 新增 `docs/backend/execution-budget-ledger-states.md`：RESERVED / RESULT_UNKNOWN / SETTLED（含无结果投影）/ RELEASED 四态的安全动作、清收者与可观测入口。
+- 测试：分类矩阵（12 类确定性错误 → nonRetryable；6 类瞬时/普通错误不变）、cause 链包装、控制错误语义保持；拦截器 6 例；网关 settle 双败 3 例；broker settle 双败 2 例。四态矩阵沿用既有 store 测试（replay 重建、RELEASED 再预留、RESULT_UNKNOWN 读回）并在文档中逐态指到用例。
+- 未做：B4 的独立清收器（孤儿 RESERVED 的阈值释放/保守结清，并把 RESULT_UNKNOWN 纳入清收）与 B3 的 stale-run 看门狗按 Phase 1 顺序另开 PR；本 PR 不含迁移与 schema 变更。已知窗口：B2 之后、B4 之前，settle 双败留下的 RESULT_UNKNOWN 行会保持占用而不被现有（只清 RESERVED 的）清收器释放，处置见 `docs/backend/execution-budget-ledger-states.md`「已知窗口」。
+
+## 2026-11-08 · Add pack registry tables, strategy resolution snapshots and service-kind skills (#856)
+
+- 起因：S1 Pack v1 第 2 步（设计 `docs/superpowers/plans/2026-11-08-s1-pack-v1.md`，S1-D1~D10 已批准；S0 已于 2026-11-07 发车）——把 S1-1 的 Pack 规范落成注册表与运行时解析，并为服务型技能扩出 skill-kind。
+- 改动：
+  - 迁移 `20261108130000_pack_v1`：七张新表（pack_package / pack_draft / pack_version / pack_activation / pack_enablement / eval_receipt / strategy_resolution_snapshot），FORCE RLS；发布版本/激活/回执/策略快照 append-only，目录仅状态与激活列可 app_user 更新；`docs/governance/app-user-table-privileges.json` 同步。
+  - 迁移 `20261108130100_skill_service_kind`：`skill_version` 的 task contract 列可空、新增 `service_handler`，CHECK 保证每行恰好一种绑定。
+  - 运行时：Pack registry store（raw SQL）+ `createDbStrategyResolver`（选择器选包、复用确定性冲突裁决、≤2000 字策略简报、内容寻址策略快照、`PACK_VERSION_DRIFT` fail-closed、30s 缓存）；worker/relay 启动期 owner seed 7 个内置内容包（幂等；版本漂移大声失败；只补缺省平台激活）。
+  - SKILL.md v1.1：`platform.skill-kind`（model_task | service）、`platform.tenant-default`、`platform.service-handler`（闭集：sanctions.screen.v1 / quoting.incoterms.v1）；service 技能不得绑定 task contract 或声明工具；`tenant-default: disabled` 需显式 workspace 启用（新错误码 `SKILL_TENANT_NOT_ENABLED`）。三个存量技能升到 1.1.0（行为不变）。
+- 测试：单测 122 例（pack 选择/冲突/漂移/快照幂等、策略简报确定性、迁移静态契约、service-kind 正负、tenant-default 语义）；真库一次性库实测：RLS service 组 5 例、双 seed 幂等、策略解析与停用过滤、技能 1.1.0 解析、ACL 19 例与 raw-SQL 2 例；`gctl check --fast` 与 `docs:verify` 全绿。
+- 未做：Pack Studio ops API 与评测回执写入（S1-3）；两个新技能与导入 A 档（S1-4）；策略简报接入现有检索链路（S1-4 新技能消费）。
+
+## 2026-11-08 · Add the Pack Studio ops API with deterministic evaluation receipts and a publish gate (#857)
+
+- 起因：S1 Pack v1 第 3 步（设计 `docs/superpowers/plans/2026-11-08-s1-pack-v1.md`，S1-D1~D10 已批准）——让 Pack 的编辑、校验、试跑、评测、发布、激活/回滚与灰度有可运营的引擎 ops 面，并且发布必须过评测门。
+- 改动：
+  - 新增 `/api/v1/packs` ops API（ops:read/ops:write）：目录/详情、草稿创建与编辑（可从已发布版本派生）、validate（四类 Schema + 语义 + 单包冲突模拟）、dry-run（按行业/市场/动作选择器解析并给与当前版本的简报差异）、eval（运行 `evals/evals.json` 的确定性用例并写不可变 `eval_receipt`）、publish（要求摘要匹配且 30 天内有效的通过回执）、activate（platform 默认或 workspace 白名单灰度；回滚=激活旧版本）、workspace 启停覆盖。
+  - 7 个内置内容包各新增 5 条确定性评测用例（选包/排除、规则摘要、简报上限、内容要点、去营销化），随生成目录进入运行时。
+  - 迁移 `20261108140000_pack_version_publish_grant`：`pack_version` 对 app_user 开放 INSERT（Studio 发布），UPDATE/DELETE/TRUNCATE 仍禁止；`app-user-table-privileges.json` 同步。
+  - 漂移判定修正：内置目录只钉住同版本的 seed 行；Studio 发布的新版本由不可变版本行与发布门自证（新增单测）。
+  - OpenAPI 重新导出（11 个新路径 + Packs tag + 门户正文说明）；ai-foundation 模块文档补 Studio 一节。
+- 测试：单测 139 例（Studio core 发布门矩阵/简报 diff、评测执行器 7 包全过与篡改用例失败、控制器授权与参数校验、迁移静态契约含新授权）；一次性真库端到端：草稿→校验→评测 5/5→发布 1.1.0→平台激活→解析器见 1.1.0→停用过滤→未评测草稿发布被拒；一次性容器（CI 口径）ACL 20 例、raw-SQL 2 例、pack RLS 5 例、skill RLS 5 例全过。
+- 未做：gain-saas 运营台页面（P6 后置）；S1-4 两个新技能与导入 A 档；模型实测层回执（S1-4 起用于模型技能）。
+
+## 2026-11-08 · Add the two deterministic service skills, imported A-tier skills and the Golden Set CI layer (#858)
+
+- 起因：S1 Pack v1 第 4 步（设计 `docs/superpowers/plans/2026-11-08-s1-pack-v1.md`，S1-D1~D10 已批准；S0 已于 2026-11-07 发车）——落两个新技能（制裁筛查 / Incoterms 报价）、导入 A 档 2 个外部技能的引擎化衍生版，并把 Golden Set 的零模型层接进 CI。
+- 改动：
+  - 服务型技能接线：`executeServiceSkill` 闭集分派两个 handler——`sanctions.screen.v1`（复用 Qualify 第五门的制裁匹配引擎，只读；索引未启用/为空或名字无可比 token 时如实 `not_screened`；`threshold ∈ (0,1]`；命中 >50 条截断并置 `truncated`）与 `quoting.incoterms.v1`（Incoterms 2020 卖方成本矩阵，BigInt 分整数 + 十进制四舍五入，换算/加价全整数域；`marginPct` 为成本加价；汇率只覆盖单一外币，缺汇率/多外币/goods 缺失/金额越界直接拒绝；L1 只读：无 PI/CI/PL 字段、`humanGate=true`）。
+  - 新增 SKILL.md 包：`compliance/sanctions-screen` 与 `growth_motion/incoterms-quote`（skill-kind=service，绑定 handler，不绑任务契约、不声明工具）。
+  - 导入管线：`imported/<source-id>/<skill>/SKILL.md` 布局；加载器新增许可（仅 MIT/Apache-2.0）、NOTICE（Upstream/Commit/License/Modified）与安全扫描（禁止任何代码围栏、可执行 HTML/`javascript:`、非 NOTICE 外链、`scripts/` 目录）门，强制 `tenant-default: disabled`，**违规技能不产出目录记录**。首批衍生版 `research.account_research`、`triage.lead_triage`（源自 Anthropic knowledge-work-plugins，Apache-2.0），配新任务契约与 5 条评测用例。
+  - Golden Set CI：所有技能（含 S0 三个存量技能新增清单）与内容包各 ≥5 条闭集断言用例；service 技能在 CI 真实执行——制裁筛查用真实匹配引擎（`buildSanctionsIndex`+`screenName`）搭内存索引做精确断言，报价断言精确金额；模型技能以固定选择器下的「策略简报 + SKILL.md 正文」渲染快照钉住摘要（改正文/包内容必须显式重钉）。
+  - 生成器/校验脚本扫描 builtin+imported 两个根；技能目录 seed 注册 7 个技能（导入技能默认关闭，`SKILL_TENANT_NOT_ENABLED`，ops 覆盖后可用；静态 resolver 对默认关闭技能一律拒绝）。
+- 测试：单测 198 例（报价十进制/整数域数学与拒绝矩阵、制裁 guard/截断/真实引擎评测、导入许可/NOTICE/扫描/scripts 负向与 loader 不产出违规记录、resolver 导入租户启用流与服务 handler 漂移、渲染快照）。脚本 `skills:validate` / `skills:evals:validate` 全绿。
+- 未做：模型技能发布层评测回执执行器（S2）；策略简报与导入技能接入现有 run（M2.1）；S1 表/seed 的部署发车需产品负责人单独授权。
+
+## 2026-11-08 · Add a stale-run watchdog and a total execution limit for discovery runs (#859)
+
+- 起因：审计 F2/F12（P1）——discovery 默认路径没有 workflow 总时限、DB 侧没有 stale-run 收尾器：finalize 失败、取消竞态或 worker 排空后，run 会永久停在 RUNNING。活体证据：run `1541ffd9`（2026-11-07 19:12 UTC）在平台鉴权事件导致 worker 排空后取消请求永不生效，发车硬窗口被迫人工改库对账（归档 `_archive/backend-runtime-switch-99845741-xin-20261107/`）。
+- 改动：
+  - **总时限**：`DiscoveryRunRequested` 的启动参数显式带 `workflowExecutionTimeout=215m`（租约 180m + finalize 余量 10m + 缓冲，与 dev fast lane 对齐）；超时终止后 DB 行由看门狗收尸。
+  - **看门狗**：新增 `staleRunSweepWorkflow`（客户侧 sweep 调度器，默认每 10 分钟）：经 SECURITY DEFINER 函数 `list_stale_discovery_runs_v1` 枚举「RUNNING 超过 215m」的 run，逐条 `finalizeStaleDiscoveryRun` 以写一次事务收尾为 FAILED（`stats.failure.stage='watchdog'`、`run_event` 留痕、`DiscoveryRunCompleted` 事件、fit 已判时照旧衔接 `QualifyRequested`）；单条失败不阻塞其余。
+  - **finalize 加固（F12）**：看门狗复用 finalizeRun 的行锁+写一次语义——只允许 RUNNING→FAILED，重复/并发调用安全；原 workflow 之后若醒来尝试写其它终态会命中「已终结」冲突而非覆盖。
+  - 迁移 `20261108130000_discovery_stale_run_watchdog`：新增 `list_stale_discovery_runs_v1`（app_user-only、参数范围校验、search_path 固定、只返回标识与时间）。
+- 测试：workflow 4 例（逐条收尾/输入阈值/单条失败隔离/空集）；活动 3 例（函数映射、写一次事务的更新+事件+run_event、已终结 no-op）；relay 1 例（总时限参数）；调度器既有 spec 覆盖新条目。构建、lint、docs:verify、governance:verify 全绿。
+- 未做：基于 Temporal describe 的提前收尸（closed execution 立即收，目前依赖 215m 阈值 + 执行时限保证）留作后续小步；僵尸 run 的 `DiscoveryRunCompleted.cost` 因预算账户键不可重建按 runId 兜底归属（通常为 0，真实花费仍在 usage_ledger），B10 三账对齐时统一。
+- 部署：含迁移，需走硬窗口（`gctl switch-backend --with-migrations`）；看门狗调度由 sweep 调度器自动注册（`DISCOVERY_STALE_RUN_SWEEP_EVERY` 可调，默认 10m）。
+
+## 2026-11-08 · Fix the SMTP probe sender identity and retry with a null envelope sender (#860)
+
+- 起因：交接总纲 WP A2——`EMAIL_VERIFY_SENDER_DOMAIN` 缺省 `example.com`（保留域名），EHLO 同域，`MAIL FROM:<verify@example.com>` 被部分 MX 直接拒绝（105 次 `mail_from_rejected`），`email-guesser` 因此把整域短路成不可达，RCPT 裁决率被压低（56% 基线）。
+- 改动：
+  - 探测发送身份缺省改为自有域名 `gainos.easyiothings.com`（`EMAIL_VERIFY_SENDER_DOMAIN` 可覆盖）；EHLO 参数用真实 FQDN `EMAIL_VERIFY_HELO_HOST`（缺省=发送域）。
+  - `smtpRcptProbe` 增加空信封退路：MAIL FROM 被 4xx/5xx 拒时重开一连接以 `MAIL FROM:<>` 重试；返回的 `mailFromCode` 语义 =「产出这些 RCPT 结果的会话」的响应码——工具输出、typed_projection（`smtp-probe-verdict/v1`）、消费者零改动。
+  - `smtpRcptProbe` 增加可选 `port`（测试用）；`email-guesser` 的 `mail_from_rejected` 短路注释更新（现在只有两种发件人都被拒才出现）。
+- 测试：新增传输层 spec 4 例（真实本地 SMTP 服务器脚本化对话：EHLO 参数与单会话码序、MAIL FROM 554→空信封回退成功、双拒保留被拒码、连接失败降级）；既有工具/provider/guesser spec 全绿（54 例）。
+- 未做：Reacher/email-verifier 对照基准与真实德国域复测（RCPT 裁决率 56%→≥90%、`mail_from_rejected` 归零的验收）需部署后用真实出网端口 25 执行；探测 IP 与群发发信域的隔离属 A8（送达性模块建独立子域/IP 池），本 PR 只固定探测身份可配置。
+
+## 2026-11-08 · Align understanding activity timeouts and propagate cancellation into model calls (#862)
+
+- 起因：审计 PERF-02（P1/P2 混合）——understanding 模型活动时限（3 分钟）短于网关模型请求上限（300s），活动先超时、HTTP 请求仍在跑，重试会再发一次付费调用；模型/抓取活动无心跳；活动取消不传播到模型请求。
+- 改动：模型活动 3m→**15m**（一次结构化回答可能串初答 + schema 修复两条 provider 调用，2×300s 上限 + 余量，与 discovery 的 15m 口径一致）、抓取活动 3m→5m，均加 `heartbeatTimeout=2m`；`crawlWebsite`/`crawlPages`/`extractClaims`/`extractOfferings`/`extractAndPersistProfile` **全部**包 30s 周期心跳（否则 heartbeatTimeout 会把无心跳活动的预算压到 2 分钟）；三处模型调用都传 `activityCancellationSignal()`（`GenerateStructuredInput.signal` 贯通到 HTTP fetch 的 AbortSignal.any）。重复付费的防线是「活动时限 ≥ 线上最坏路径 + 取消真正掐断请求」——注意重试会以 attempt 编号生成**新的**账本操作键，B2 的 remnant 快速失败只覆盖同一 attempt 内的重执行，不能当作跨 attempt 的护身符。
+- 测试：新增源文本断言（超时/心跳常量、signal 传入、心跳包装），既有 understanding workflow/activities spec 全绿；全量零容器单测与治理门禁全绿。
+- 未做：ToolBroker `ToolContext` 无 signal 字段，取消传播到**全部工具适配器**属后续小步（随 B12 PERF 群评估）；活动时限的全局审计未做（本 PR 修审计点名的 understanding 路径）。
+
+## 2026-11-07 · Make name_country identity keys ASCII-safe for the materialization contract (#829)
+
+- 起因：目录源记录首次批量入库（266 条，2026-11-06 run `8c8f6d65`）后，run 在 canonicalize 阶段以 `DOMAIN_ACK_DISCOVERY_COMPANY_MATERIALIZATION_INVALID` 失败。堆栈定位：物化快照契约的 `itemPlan` 用 `^[a-z][a-z0-9._:-]{0,255}$` 校验 `companyParse.dedupeKey`，而 `companyIdentity()` 的无域名 `name_country` 键是 `n:<normalizeCompanyName(name)>:<country>`——含空格或非 ASCII（"müller gmbh"、中文名）即整批拒绝。该生产者/校验器格式从未对齐过（存量 `canonical_company.dedupe_key` 零条 name_country 行，此前从未走到这条路径）。
+- 改动：`name_country` 键按名称分派——纯 ASCII 单词名保持可读的 `n:<name>:<country>`（既有行为与测试不变）；名称含空格/非 ASCII 时改用 `n:h<sha256>` 形式（65 字符、ASCII、确定）。键只参与相等比较（无反向解析），跨 run/跨来源等值语义不变。
+- 测试：`identity.spec` 新增中文名/含空格名 ASCII 合规、同名稳定、异名区分、纯 ASCII 保旧格式；identity + discovery-company-materialization 相关 208 用例全绿。
+- 未做：不改物化契约的模式（协议 sha 不动）；不回溯存量（存量无 name_country 行）。
+
+## 2026-11-07 · Add an opt-in probe that names the failing clause of a rejected raw payload (#830)
+
+- 起因：目录源真实 run（`d51431d8`，镜像含 #828/#829）中 361 条入库、109 条仍 `PROVIDER_PAYLOAD_SCHEMA_INVALID`；用同一批 LLM 抽取产物本地重放 646/646 全过，静态无法定位生产拒绝形状，需要受控取样。
+- 改动：`validateRawSourceProviderPayload` 在 `RAW_SOURCE_SCHEMA_PROBE=1` 时，对拒绝载荷输出一行 `[raw-source-schema-probe]` JSON——只含失败子句名（externalId/companyName/domain/country/attributes/bindings/identifier/provenance/license/…）与**无字段值**的结构摘要（字节数、词数、NFC 是否漂移、键集合、detail_url 的 scheme 类别）。探针开关默认关闭，关闭时行为与性能不变；日志写入用 try/catch 包裹，探针失败绝不改变校验结果。
+- 测试：新增 `raw-source-provider-schema-probe.spec`——失败子句名正确、日志不含任何字段值（名称原文断言不出现）、开关关闭时零输出；boundary/ingestion 既有 142 用例全绿。
+- 未做：未启用 env（随下一班车按需开启取样，取到形状后修复并关闭）；未改校验语义（纯重构为具名检查 + 探针）。
+
+## 2026-11-06 · Admit platform channel-crawl fetches transiently and record crawl_run_id (#821)
+
+- 起因：2026-11-06 发车后的 ProPak Asia preview 验收发现渠道抓取从未真正出网——ToolBroker 的 G3 主体绑定闸门拒绝 `crawl4ai.render`（渠道抓取没有也不应有公司/联系主体，此前每轮 failures=1 未被察觉）；同时 `source_channel_run.crawl_run_id` 从未写入，迁移为 finalize 准备的重试幂等唯一列一直为 NULL。
+- 改动：
+  - 新增关闭集合的瞬态结果作用域 `platform_channel_crawl`：工具声明（`crawl4ai.render`）+ 调用方声明 + ToolBroker 校验（必须 platform 工作空间、非 paid、已声明），放行时原始 HTML 解析后丢弃、不落 PERSONAL_DATA artifact，按普通成本路径结算；tenant/未声明工具/未知作用域一律 `TRANSIENT_RESULT_SCOPE_DENIED` 失败关闭，已结算的瞬态操作重放按 remnant 失败而不重发出网。
+  - `finalizeChannelCrawl` 传递 `crawlRunId`；`recordChannelRunInTransaction` 按 `crawl_run_id` 唯一键幂等收敛（重试更新同一行、不重复推进 failureStreak），无 `crawlRunId` 的旧调用方路径不变。
+  - ToolBroker 属受保护组合：已按治理要求审查 authority/budget/receipt/egress 绕过面并重钉 sha256（`docs/governance/durable-result-strategies.json`）。
+- 测试：broker 瞬态作用域矩阵（放行/tenant 拒绝/未声明工具/未知作用域/replay remnant）、渠道抓取活动 context 与 finalize payload、记录器幂等收敛；目标套件 79/79、全量零容器单测通过（仅一个已知负载假红单独复跑通过）。
+- 未做：`sanctions-download/v1` 的平台作用域 hold 维持现状（需单独立项）；无 schema 迁移；不改收据、Grant/R4 链与 egress fence。
+
+## 2026-11-06 · Decode HTML entities in channel extraction and make the crawl page timeout env-tunable (#822)
+
+- 起因：ProPak 渠道选择器调整后发现两个小缺陷——`html-select` 不解码 HTML 实体（公司名落库为 `A&amp;D`）；crawl4ai 的单页导航超时硬编码 45s，对 1MB+ 慢站（实测 25–45s）贴边，preview 的成败取决于站点时延。
+- 改动：`html-select.nodeText` 统一解码命名与数字实体（整棵子树收集后只解码一遍；未知实体原样保留、非法码点不转换）；`crawlHtml` 的 `page_timeout` 改读 `CRAWLER_PAGE_TIMEOUT_MS`（默认 45000，钳制 5s–70s——上限低于 `/crawl` 的 75s 客户端中止与 discovery 租约计量基准，超过只会先在客户端超时并把慢页计成失败）。
+- 测试：实体解码单测（命名/十进制/十六进制/未知/非法）、超时解析单测（默认/覆盖/钳制/非法）。
+- 未做：条目内字段选择器（展位/国家/website）需要爬虫 v1，另行设计；不改渠道抓取的行为契约。
+
+## 2026-11-06 · Keep a verified capability snapshot through blips and recover drained workers automatically (#823)
+
+- 起因：2026-11-05 发车 #822 时，一次约 30 秒的 gain-saas 能力快照抖动让 platform-worker 按 fail-closed 立即排空；排空后的进程没有退出，容器存活但不再轮询约 1 小时（租约表：19:20:15 排空后 63 分钟无新实例注册），平台工作流停摆直到人工重启。
+- 改动：
+  - `platform-capability-cache.ts`：刷新失败不再清空最后一份已验证快照；`check()` 仍按签发方 `validUntil`（≤30s）截止。
+  - `platform-capability-runtime.ts`：普通刷新失败不再丢弃缓存对象；失败后 2s 快速重试，成功后回到 10s 节奏（身份/pin/机器令牌失效仍立即清空）。
+  - `worker-shutdown-policy.ts`（新）：`shutdownGraceTime` 30s / `shutdownForceTime` 60s / 关停清理 15s 强制退出兜底；两个 worker 的 `Worker.create` 与 finally 接入。
+  - 客户 worker：启动门改为覆盖完整依赖检查（`requireReady:false`），与 platform-worker 一致——重启后在 STARTING 等待依赖恢复并自动重新准入，不再永久 hold。
+  - `worker-dependency-admission.ts`：迁移修订不一致改为 `drainImmediately`（读失联仍走 3 连败容忍）；两个 worker 的稳态检查接入。
+  - `worker-dependency-heartbeat.ts`：排空时输出一条结构化事件（role/taskQueue/code/连续失败数/时间）。
+  - `gctl doctor`：新增「运行租约」检查（最新非 READY 或心跳 >120s 警告；24h 内 STOPPED/DRAINING 信息行）；RUNBOOK §14。
+- 测试：capability cache/runtime、heartbeat、dependency-admission、shutdown-policy 单测；`gctl check`。
+- 未做：传输层对 gain-saas 401/403（鉴权拒绝/绑定过期）的独立危险码分级（后续项）；发车后的 90s 受控演练（需发车授权）。
+
+## 2026-11-06 · Settle discovery run cost into events and bind discovery-stage artifacts to the seller profile (#824)
+
+- 起因：`$15/30 天`花费上限因 `cost_ledger` 恒 0 实际未生效（1b 花费维度补口，设计 2026-11-06-cost-dimension-settlement）；同批真实 ICP 对比跑还暴露 discovery 阶段抓取被 G3 主体绑定闸门拒绝（directory 的 10 条查询因全部抓取被拒而零产出）。
+- 改动：
+  - `ai-trace.sink` 为 `usage_ledger` 补成本基准：provider 上报优先，否则按 `LLM_CENTS_PER_MTOK` 的 token 上界折算（`meta.costSource` 标注；`centsFromTokens` 抽到共享模块，与预算 settle 同口径）；已结算（非 `RELEASED_*`）的失败调用同样落成本行（`meta.status='ERROR'`），失败花费不再对上隐形。
+  - 网关所有 trace 记录点透传 `ctx.runId`，sink 写入 `usage_ledger.meta.runId`；discovery finalize 按 `meta.runId` 汇总本 run 成本进事件载荷（`cost` + `costBasis=usage_ledger-runid/v1`），替代初版时间窗聚合（并发 run 双计 / 事务 now() 漏计，均为自审确认缺陷）。
+  - discovery 阶段 ExecutionContext 绑定卖家 `company_profile` 作为 `artifactSubject`（`ArtifactSubjectRef` 明确允许该主体），修复 directory 等发现源抓取被主体绑定闸门拒绝、结构化源零产出的问题。
+- 测试：token 折算单测、sink 成本基准（provider 优先/折算/标注/失败调用/释放不记）、finalize 载荷按 runId 归属断言（含 SQL 过滤条件）、发现阶段主体透传断言；目标套件与全量零容器单测通过。
+- 未做：gain-saas 消费端成本落账与 `cost_ledger (workspace_id, source_event_id)` 唯一约束随另一 PR 提交（D-b/D-c/D-d 的 SaaS 半）；精确价目表列为后续项。发现阶段主体绑定的合规姿态（company_profile 非 DSR 主体）见 PR 讨论。
+
+## 2026-11-06 · Filter run-cost aggregation by the run's budget account key (#825)
+
+- 起因：真实 ICP 验证 run（86cb6ab4，镜像含 #824）事件 cost=0。discovery 链路的 `ExecutionContext.runId` 是预算账户键 `binding.accountKey`（`discovery.run:discovery_run:request:<sha>:<sha>`，每 run 唯一），sink 写入 `usage_ledger.meta.runId` 的也是它；finalize 却按 run UUID 过滤，永远匹配不到（实查该 run 77 条成本行全部挂在账户键下）。
+- 改动：finalize 从 `args.executionBudget` 解析 `accountKey` 作为过滤键（解析失败回退 run UUID，等价不计）。设计文档 D-a 记 v2.1。
+- 测试：finalize 归属用例断言过滤参数为 `DISCOVERY_BINDING.accountKey`；`discovery.activities` 全量通过。
+- 未做：不回溯已发出的 cost=0 事件（该 run 属验证跑，无需补账）；上线前的存量调用仍无归属键。
+
+## 2026-11-06 · Directory discovery searches Chinese markets in Chinese (#826)
+
+- 起因：真实 ICP（东莞盛源鑫/真空吸塑，中文市场）两轮对比 run 中 directory 结构化源 10 条查询零产出。复现确认：`buildDirectorySearches` 用无语言参数的 `searchableTerms` 把中文行业/关键词整段剥掉，检索串退化为 `manufacturing members directory 中国`；SearXNG 实测返回无关页面（含成人站点）。名录识别 `LISTING_HINT` 也不含中文名录/黄页词。
+- 改动：`buildDirectorySearches` 按 `searchLanguageFor(query)` 选词与意图词族——zh 市场保留中文主题词与中文地区词（珠三角等），意图词改用中文名录词（企业名录/会员企业名单/参展商名单/供应商目录）；其它市场维持旧行为。`searxng.search` 的 `language` 从硬编码 `en` 改为目标市场语言。名录识别抽成可测的 `isDirectoryListingShaped`，正则补中文名录词（名录/黄页/企业库/企业大全/参展商/会员企业/供应商目录）。
+- 测试：`directory.provider.spec` 新增中文市场检索串、纯中文关键词、中文名录识别三组用例；既有非中文市场的期望不变。
+- 未做：未动 NOISE_DOMAINS（无关/垃圾站点仍由列表抽取 LLM 判 `is_directory` 丢弃）；directory 产地内条目字段（展位/国家/website）仍属爬虫 v1。
+
+## 2026-11-06 · Accept directory records mined from www-hosted listing pages (#827)
+
+- 起因：中文检索修复（#826）发车后真实 run（3875b96e）directory 成功抓到名录页并抽取 41 条公司记录，但全部 `PROVIDER_PAYLOAD_SCHEMA_INVALID` 被拒、run 以 `ExecutionControlError`（stage=query）失败。复现确认：`validProviderBindings` 对 directory 要求 `provenance.sourceUrl` 的 host 与 `attributes.source_directory` 全等，而后者由 `normalizeDomain` 生成（去 `www.`）；凡名录页托管在 www 主机（本轮 cmpe360.com）记录全灭。
+- 改动：directory 绑定分支对 host 做同一规范化（小写、去 `www.`）再比较；跨站 sourceUrl 仍被拒绝（伪造来源不会放行）。
+- 测试：`provider-raw-boundary.integration.spec` 新增两条——www 名录页记录 ACCEPTED、sourceUrl 指向他站仍 REJECTED。
+- 未做：不改其它 provider 的 host 全等比较（wikidata/openstreetmap/ted/openfda 的 host 断言含 `www.` 字面量，行为不变）。
+
+## 2026-11-06 · Give directory records ASCII-safe external ids for Chinese company names (#828)
+
+- 起因：中文检索（#826）+ www 绑定（#827）发车后真实 run（bbe2d4f3）directory 抓到 1878 条记录仍全部 `PROVIDER_PAYLOAD_SCHEMA_INVALID`。定位：无 website 的记录 externalId 为 `directory:<源站>:<slug(公司名)>`，`slug` 保留汉字（`\p{L}`），而外部 ID 契约 `EXTERNAL_ID` 是纯 ASCII —— 中文名单条都无法通过载荷校验。
+- 改动：`slug` 生成 ASCII 安全且确定的 id——ASCII 前缀 + 名称 sha256 前 16 位（同前缀中文名不碰撞、同一公司跨 run/跨页稳定）；纯拉丁名保持旧 slug 行为（≤60 字符截断）。映射时公司名做 NFKC+trim 归一——载荷契约要求 NFKC 恒等，中文名常用全角括号/全角字母（「ABB（中国）有限公司」），不归一会整条被拒。
+- 测试：`directory.provider.spec` 中文名 externalId（ASCII/稳定/不碰撞/拉丁名不变）用例；`provider-raw-boundary.integration.spec` 中文名无 website 记录经 prepare 后 ACCEPTED。
+- 未做：不放宽 `EXTERNAL_ID` 共享契约（其它 provider 与去重键不受影响）；存量被拒记录不回溯（验证 run 产物）。
+
+## 2026-11-05 · Engine contract for the platform.channel_crawl execution-budget purpose (P4-P1) (#805)
+
+- 起因：产品负责人 2026-11-04 批准的「平台抓取预算 purpose」决定（实现记录 `docs/implementation-records/platform-channel-crawl-budget-authority.md`，#785）进入分段实施；本 PR 为第一段（引擎契约）。渠道抓取与 M2 watches 刷新共用 `platform.channel_crawl`，必须走既有 quote → PLATFORM_GRANT → egress fence → ACK 全链，无 Grant 一律拒绝。
+- 改动：两段式迁移——先 `ALTER TYPE execution_budget_purpose ADD VALUE 'platform.channel_crawl'`，再扩展形状：`execution_budget_authority` 新增 `crawl_run_id` 列，`kind_shape_check` 与 `platform_run_binding_check` 增加独立的 channel-crawl 分支（schedule 四行不变量逐字节保持），新建唯一索引 `platform_crawl_run_key`；新摄入函数 `ingest_and_admit_platform_channel_crawl_run_v1`（绑定 `request_sha256`（channelId+mode+pageCap 的 canonical 摘要）+ `crawl_run_id` + `technical_policy_revision`，账户键 `platform:<request>:<crawlRun>`，仅 `execution_budget_platform_writer` 可执行）。verifier/types/contracts 同步：闭合 claim 集合增 `request_sha256`/`crawl_run_id`，签名 claim schema 改为 if/then 双形状（schedule 形状必填四字段、crawl 形状禁 schedule 字段），`assertAuthorityPurposeShape` 增 crawl 分支且不放松 schedule 分支。
+- 测试：`execution-budget-authority.types.spec`（crawl 接受/13 组负向/「schedule 带 crawl 字段」拒绝）、`execution-budget-grant.verifier.spec`（真实签名 crawl token 接受、10 组形状负向、4 组期望作用域不匹配）、`platform-authority-ingestion.service.spec`（双形状契约与跨形状混合拒绝）、新迁移静态契约 6 用例；一次性库实测：整链迁移 + 以 platform writer 调新函数成功开户、JTI 重放 replay=true、schedule 形状 token 走新函数被拒。
+- 未做：策略矩阵新版工件（P4-P2，属安全方向变更，需独立 review 后另 PR）、gain-saas 签发端点（P4-P3）、抓取工作流与 409 切换（P4-P4）。`ingest_and_admit_platform_execution_budget_run_v2` 与 4 个平台 schedule 的摄入路径未改动。
+
+## 2026-11-05 · Publish the reviewed-v3 platform-authority policy with a channel-crawl capability section (P4-P2) (#806)
+
+- 起因：P4 第二段——`platform.channel_crawl` purpose 需要新版平台权威策略工件（实现记录 `docs/implementation-records/platform-channel-crawl-budget-authority.md` §3/§5-P2）。GrowthOS 已退役（2026-10-31 P8），新版工件按 backend-authored successor 发布：保留 reviewed-v2 的逐字节基线与 GrowthOS 溯源，新增独立评审记录（AGENTS §5 安全方向变更）。
+- 改动：新增 `platform-authority-policy-matrix-v3.json`（reviewed-v3）与 `platform-authority-policy-provenance-v3.json`：**四个 schedule 行与 v2 逐字节相同**（provenance 钉住行集 sha256，spec 深比较兜底），仅新增 `channel_crawl` 小节（purpose / `platform-automation` / `DENIED` / 页数上限与 `CHANNEL_RUN_MAX_PAGES`、`CHANNEL_DAILY_PAGE_CAP` 机器绑定）；资产校验切到 v3（字节/sha/artifact_id/matrix_revision/前驱/评审块/channel_crawl 小节），`rows` 仍是四行 schedule 集合——readiness、能力签名（≤4）与技术报价的四行不变量全部未动；报价夹具在 v3 身份下确定性重算（policy_revision / quote_sha256 等派生值）。
+- 测试：资产 spec（字节 15,996/sha、前驱行摘要、channel_crawl 与渠道常量绑定、四类漂移拒绝、provenance 深等、运行时不读 GrowthOS checkout）；platform-authority 全套 60 文件 / 1121 用例全绿；报价向量按 v3 重算后逐字节断言；独立 review 记录写入工件 `backend_review` 与 provenance `successor`。
+- 未做：不动四个 schedule 信封与 readiness 四行不变量；gain-saas 签发端点（P4-P3）与抓取工作流接线/409 切换（P4-P4）随后；跨仓 GrowthOS 重物化校验仍只覆盖 v2 基线（`MANUAL_SPECS`，CI 不跑）。
+
+## 2026-11-05 · Per-request egress fence for platform channel-crawl runs (P4-P4a) (#807)
+
+- 起因：P4 最后一段的第一块——`platform.channel_crawl` 的 Grant 已能签发与摄入（P1/P3），但平台出网围栏（4D authorize→claimSend→ACK/UNKNOWN）全链只认 4 个 schedule（绑定校验器、Prisma 端口、SQL 函数与围栏表主键），渠道抓取无法物理发出任何请求。
+- 改动：新增并行围栏面——能力围栏表 `platform_egress_capability_fence`（`channel-crawl` 行，默认 ACTIVE 但**未发布指纹时 fail-closed**）、专用尝试表 `platform_channel_crawl_egress_attempt`、owner-only 的 `install_platform_egress_capability_policy_v1`（发布 reviewed-v3 工件与 channel_crawl 小节指纹，代际切换会阻断旧代 AUTHORIZED 尝试）、两段 CAS `authorize/claim_platform_channel_crawl_egress_send_v1` 与 `lock_platform_channel_crawl_egress_budget_v1`（同一账户咨询锁 + 权威/撤销/过期/已预留预算复检 + 账户键 `platform:<requestSha>:<crawlRunId>`）、crawl 尝试的 ACK/UNKNOWN 函数；全部 SECURITY DEFINER、`search_path` 以 pg_temp 结尾、仅 `execution_budget_platform_writer` 可执行，schedule 围栏与函数一字节未动。TS 侧：`PlatformEgressBinding` 扩为 schedule/crawl 联合（crawl 走 `subjectKind:'source_channel'`，绑定 channelId+crawlRunId+requestSha）、`PlatformEgressFence` 按绑定分派 crawl 的 ACK 转换、`CurrentPlatformChannelCrawlPolicy` 投影（指纹=e22cfd85…，工具固定 `crawl4ai.render@1.0.0`，单次预留取该工具估价）、Prisma 端口 crawl 分支。
+- 测试：迁移静态契约 5 用例；fence 绑定/投影单测 20 用例（crawl ACK 分派、非法绑定、缺 crawl 转换 fail-closed、crawl 投影负向）；`platform-authority` + `execution-budget` + `security-definer-search-path` 96 文件 / 1616 用例全绿。一次性库实测：安装/重放、crawl 摄入开账户、零价预留、authorize→claim→ACK、策略漂移拒绝、代际切换把旧 AUTHORIZED 置 BLOCKED、撤销后 fail-closed、schedule 围栏仍 4 行零变化。
+- 未做：抓取工作流/活动与 `requestCrawl` 409 切换（P4-P4c）、API 进程的 platform-automation Temporal 客户端与 gain-saas 客户端权限（P4-P4b）；围栏指纹由运维经 gain-saas 安装流程发布（默认 DENIED/未发布即拒发）。
+
+## 2026-11-05 · Platform-automation Temporal client identity for the engine API (P4-P4b) (#808)
+
+- 起因：P4 抓取运行的编排在 platform-automation 命名空间，但 API 进程只有 default 命名空间的 Temporal 客户端；平台授权器虽已内置 schedule-writer 身份（RoleWriter + `platform-automation:write`），却没有任何签发方。
+- 改动：机器 token 增加 `temporal-platform-client` 档案（gain-saas 同批 #65，permissions 与授权器身份逐字一致）；引擎侧 `machine-token-runtime` 为该档案要求独立的证书三件套与主体（`TEMPORAL_PLATFORM_CLIENT_{CA,CERT,KEY}_FILE`/`_SUBJECT`，**绝不回退**到 API 进程的 customer-client bootstrap 材料）；新增 `PlatformTemporalClient`（namespace `platform-automation`、task queue `understanding`，只暴露受约束的 `startWorkflow`，失败一律收敛为 `PLATFORM_TEMPORAL_UNAVAILABLE` 并在下次调用重连）。授权器无需改动（既有 ScheduleWriterSubject 直接生效），Temporal 镜像不变。
+- 测试：`platform-temporal.client.spec`（工作流启动参数、非法标识、按需重连、失败收敛与连接丢弃）；`machine-token-runtime.spec`（平台客户端档案缺自有配置时 fail-closed）；机器 token 客户端/验证器列入新档案；相关面 5 文件 / 54 用例全绿。
+- 未做：抓取工作流本体与 `requestCrawl` 的 409 切换（P4-P4c）；证书签发是部署动作（r4-pki，CN=`platform-temporal-schedule-writer`），RUNBOOK 已记步骤要点；本 PR 不改变任何现有连接的身份。
+
+## 2026-11-05 · Execute platform channel crawls on the platform worker (P4-P4c) (#809)
+
+- 起因：P4 最后一段——Grant 能签发（#64）、围栏能放行（P4-P4a）、API 能以 writer 身份发起（P4-P4b），但还没有工作流把一次抓取真正跑起来；`requestCrawl` 仍是占位 409。
+- 改动：新增 `channelCrawlWorkflow`（platform-automation，`understanding` 队列）与三段活动：**admit**（平台 worker 内经 mTLS 取 Grant → 验签/`ingest_and_admit_platform_channel_crawl_run_v1` 开户 → 只读 attest）、**run**（未发布围栏指纹即拒；按 `CHANNEL_DAILY_PAGE_CAP` 减当日 `source_channel_run.pages_fetched` 的 UTC 日余量硬截断；逐页以 crawl 围栏绑定经 `crawl4ai.render` 出网）、**finalize**（`source_channel_run` 落账并推进 failure streak；取消/失败也先落账再结束，错误码有界）。`requestCrawl` 从 409 切到「启动 `channel-crawl-<crawlRunId>` 并返回已受理」，`PLATFORM_TEMPORAL_UNAVAILABLE` 时 503 fail-closed；`source_channel_run` 新增 `truncated` 列（前向迁移）并贯通视图。新增 mTLS 客户端 `PlatformCrawlGrantClient`（request 规范摘要与 gain-saas 共用向量 `87084437…`）。
+- 测试：活动层 6 用例（准入装配/权威拒绝映射/日配额截断且逐页过围栏/配额耗尽零出网/未批准渠道拒绝/平台落账带截断标记）、工作流 3 用例（成功/失败有界码/取消先落账）、客户端配置与共享向量、`channel.service` 启动路径与 503 映射、truncated 迁移静态契约；共 5 文件 25 用例绿。
+- 未做：抓取记录的物化（records 仅计数进 `source_channel_run`，物化到公司池沿用既有导入/深挖路径的后续决定）；M2 watches 刷新复用本 workfow 的接线；围栏指纹与开关仍由运营显式发布/开启（默认拒发）。
+
+## 2026-11-05 · Harden the OCI build against Debian archive outages (#810)
+
+- 起因：2026-11-04 起 snapshot.debian.org 全球故障（503/504、No healthy backends），而 OCI 构建要从固定日期的快照源下载约 206 MB 包：三个 PR 的构建作业在下载里挂死 3 小时以上，作业没有超时只能等 GitHub 默认 6 小时上限，并且每次构建都从零重下。
+- 改动：
+  - Dockerfile 的 Debian 快照源换成 Debian 官方运营的 Cloudflare 前端 `snapshot-cloudflare.debian.org`：归档字节、时间戳与 Release 签名完全相同，只是 CDN 路径不同；回退就是把主机名换回 `snapshot.debian.org`。
+  - apt 的 update 与 install 都加 30 秒连接超时（保留 Retries=3）：源变慢时快速失败，不再无限挂起。
+  - `build-test` 作业加 `timeout-minutes: 60`：外部依赖卡死时最多一小时就会被杀，不再拖到 6 小时。
+  - OCI 构建改用 `docker buildx`，层缓存写入 Actions 缓存服务（`type=gha`, `mode=max`；fork PR 只读不写）：重复构建复用 runtime-base（Debian 包、chromium）与构建层，不再每次重下归档。
+  - 治理测试 `scripts/runtime-artifact-contract.spec.mjs` 同步钉住新主机名与新的 apt 参数；其余供应链约束不变（https、固定时间戳、精确包版本、禁 trust-bypass）。
+- 测试：governance 相关 specs 58 项全过；Dockerfile 与 ci.yml 的完整验证由本 PR 的 CI 执行（ci.yml 改动会跑全部重门）。
+- 未做：不改本机网络代理或任何运行配置；新源随下一次镜像班车生效。
+
+## 2026-11-05 · Move the OCI build layer cache to a GHCR registry manifest (#811)
+
+- 起因：#810 引入的 `type=gha` 层缓存**静默失效**——2026-11-05 核实：Actions 缓存清单 121 条全部是 codeql/node/gitleaks，没有任何 buildx 条目；main 成功构建的日志里没有 cache 导入/导出段；#805 的重跑仍然完整下载了 772 秒的包。托管 runner 的 Actions 缓存服务（v2）与 runner 自带 buildx 的 gha 后端不兼容，`ignore-error=true` 把初始化失败一并吞掉了。
+- 改动：OCI 构建的层缓存改为 `type=registry`，写入 `ghcr.io/mlhjyx/global-backend-buildcache:runtime-image`（`mode=max`）：不依赖 Actions 缓存服务，也没有 gha 的分支作用域问题（任何分支可读同一 manifest，可写受 fork 保护）；`build-test` 作业级增加 `packages: write`（workflow 级 permissions 块保持原样）；非 fork 的 run 登录 ghcr 读写缓存，fork PR 跳过（只读 token 读不到私有包）；构建后校验缓存 manifest 存在，缺失时发 `::warning::` 而不是红构建。
+- 测试：governance 相关 specs 全过（含 workflow 级 `permissions: contents: read` 的钉扎断言——job 级权限不触碰它）；`ci.yml` YAML 解析验证。端到端验证由本 PR 的 CI 执行：它的构建导出第一份 registry 缓存 manifest，之后对同一分支的重跑应出现缓存命中（构建日志出现 `importing cache manifest`）。
+- 未做：不动 Dockerfile（#810 的 Cloudflare 前端切换保持有效）；不改发布镜像工作流（它不参与层缓存）。
+
+## 2026-11-05 · Fix the platform crawl client injection so requestCrawl is reachable (#812)
+
+- 起因：P4-P4c（#809）的 `ChannelService` 用 `import type` 引入 `PlatformTemporalClient`，编译产物 `design:paramtypes` 退化为 `[PrismaService, Function]`，Nest 的 `@Optional()` 因此永远注入 `undefined`——真实进程里 `requestCrawl` 恒返回 503 `PLATFORM_TEMPORAL_UNAVAILABLE`（"未接线"）。单测直接 `new ChannelService(prisma, fake)` 注入假对象，覆盖不到装饰器元数据；CI 全绿但真实链路不可达（2026-11-05 上线验收时用真实 saas-ops token 打 preview 暴露）。
+- 改动：把该导入改为值导入（其余 `import type` 用法为类型参数/字段，不参与 DI，不动）；新增回归守卫 `channel-service-di.spec.ts`——断言**编译产物**的 `design:paramtypes[1]` 等于 `PlatformTemporalClient` 而不是 `Function`（vitest 的 esbuild 不产装饰器元数据，源码级断言无意义；CI 在 vitest 之前已 `nest build`）。
+- 测试：新 spec 红→绿（红态证据：旧镜像内 dist 实测 `[PrismaService, Function]`）；channels 相关套件全过；`gctl check --fast` 通过。
+- 未做：不改运行时协议、不动 API 形状；随下一班镜像生效。
+
+## 2026-11-05 · Share the GHCR layer cache with the runtime image publication build (#813)
+
+- 起因：2026-11-05 热修发车时 `publish-runtime-image` 的构建在 apt 层被 snapshot 源的 503 卡死——发布工作流从未接过层缓存，每次发布都是冷构建，把「能否发车」继续押在 Debian 快照源的运气上（同一天 ci.yml 已由 #811 接入 registry 缓存并验证生效）。
+- 改动：发布构建改为 `docker buildx build --load`，与 ci.yml 共用同一个 GHCR 缓存 manifest（`ghcr.io/mlhjyx/global-backend-buildcache:runtime-image`，`mode=max`，`ignore-error=true`）；构建步骤先 `docker login ghcr.io`（token 仍为 `secrets.GITHUB_TOKEN`）；`--provenance=false`/`--sbom=false` 与后续 `docker save`／config 摘要校验契约全部保留。
+- 测试：`runtime-deployment-contract.spec.mjs`（GHCR 发布契约：单清单、publish-once、digest 回读、最小权限）全过；YAML 解析验证。端到端验证由下一次发布执行——缓存命中时构建日志应出现 `importing cache manifest` 且 apt 层跳过下载。
+- 未做：不改发布协议与推送路径（仍走 `docker push` + resolve 回读 digest）；不改权限块。
+
+## 2026-11-05 · Use a lazy Temporal connection so the writer identity can start workflows (#814)
+
+- 起因：P4-P4c 的 `PlatformTemporalClient.connect` 用 `Connection.connect`，SDK 会先调 `GetSystemInfo` 做连通性预检；schedule-writer 身份在平台授权器只被允许 `StartWorkflowExecution`，预检被拒（`PLATFORM_TEMPORAL_READER_AUTH_DENIED`），`requestCrawl` 在真机里恒 503。现有单测直接覆盖私有 `connect`，碰不到真实 SDK 工厂选择（与 #812 同型：假对象单测掩盖真实路径；本次由真机验收链条抓出）。
+- 改动：改用 `Connection.lazy`（无预检；失败由既有收敛与下次重连逻辑处理），并在代码旁注释钉住原因；新增 mock SDK 的回归守卫 `platform-temporal-lazy-connect.spec.ts`（断言走 `lazy`、绝不用 `connect`）。
+- 测试：新 spec 红→绿；`gctl check --fast` 通过。真机验证随下一班镜像：writer token 连上平台 → `startWorkflow` 成功 → `source_channel_run` 落库。
+- 未做：不改平台授权器（writer 的最小权限面保持 `StartWorkflowExecution`）；不升级 `@temporalio/client`。
+
+## 2026-11-05 · Verify the writer fixed-identity token shape on the engine side (#815)
+
+- 起因：平台授权器（`infra/temporal-platform/server/readerpolicy/machine_policy.go`）把 `platform-temporal-schedule-writer` 定义为「无 profile 的固定身份」：`typ` 必须恰为 `JWT` 且禁止 `profile` 声明。gain-saas（#66）已按该形状签发，但引擎侧 `machine-token-verifier` 仍要求旧的 `temporal-runtime+jwt` + `profile` 形状，把平台接受的令牌拒掉（`PLATFORM_MACHINE_TOKEN_UNAVAILABLE`），writer 身份仍不可用——引擎与签发方两侧契约必须同时对齐（真机验收发现的第三处阻塞点的引擎半边）。
+- 改动：`temporal-platform-client` 档案的验证改为固定身份形状：`typ` 必须为 `JWT`、payload 允许字段不含 `profile`（携带即拒）、`permissions` 仍须精确等于 `["platform-automation:write"]`；其余档案（capability/worker/reader）的验证逐字节不变。
+- 测试：新用例覆盖「固定身份接受 / 旧档案形状拒绝 / 带 profile 的 JWT 拒绝」三态，红→绿；`machine-token-verifier` 相关套件全过。
+- 未做：不改平台授权器；不改 gain-saas（已合并 #66）；随下一班镜像生效。
+
+## 2026-11-05 · Land the writer fixed-identity verifier change that #815 missed (#816)
+
+- 起因：#815 声称「引擎侧验证 writer 固定身份令牌」，但实际合并的只有 changelog 片段——两次源码编辑误落在根 checkout 的绝对路径上（worktree 流程失误），代码从未进入分支，镜像中的验证器仍是旧形状；平台令牌因此继续在引擎侧被拒（`PLATFORM_MACHINE_TOKEN_UNAVAILABLE`），真机验收当场发现。
+- 改动：与本应随 #815 合并的内容一致——`machine-token-verifier` 对 `temporal-platform-client` 档案接受固定身份形状（`typ` 必须 `JWT`、禁止 `profile` 声明、`permissions` 精确等于 `["platform-automation:write"]`），其余档案逐字节不变；`machine-token-verifier.spec.ts` 增加三态用例（固定身份接受 / 旧形状拒绝 / 带 profile 拒绝）。
+- 测试：新用例红→绿（旧代码下必失败）；`machine-token-verifier` 套件全过；`gctl check --fast` 通过。教训：worktree 施工时必须写 worktree 内路径，代码改动与片段必须同分支自检（`git status` 应同时出现源码与片段）。
+- 未做：#815 的片段保持原样（历史记录不改）；不改平台授权器与 gain-saas（#66 已合）。
+
+## 2026-11-05 · Materialize channel crawl records (companies + contacts) into a platform record pool (#817)
+
+- 起因：P4-P4c 交付时抓取记录只在内存里计数（`recordsFound`），活动返回即丢弃——没有物化就没有可投影/可使用的源，运营台也看不到抓到的公司。
+- 改动：新增平台级 `source_channel_record`（无 RLS）：公司级字段（name/website/country/industry/products/keywords）+ 联系人字段（contactName/contactTitle/email/phone），按 `(channel_id, dedupe_key)` 跨轮 upsert（`companyIdentity` 的 `d:`/`n:` 键）、`first_seen_at`/`last_seen_at`/`content_hash` 记录观测与变更。物化在 run 活动内部完成（记录不进 Temporal 历史），物化失败抛 nonRetryable `CHANNEL_MATERIALIZATION_FAILED`（不重试、不计入页面失败率）；`recordsMaterialized` 从恒 0 变真实计数并贯通 finalize→`source_channel_run`。`source_channel_run` 新增 `crawl_run_id` 唯一列（finalize 幂等）。爬虫字段白名单扩展联系人四字段，**仅详情页模式可配**（`detail.enabled` + `list.itemUrlSelector`，否则 400）——堵住列表页回退时字段选择器整页匹配、同一值复制给整页条目的缺陷。新增 `GET /source-channels/:id/records`（ops:read）供选择器校验与联系使用。
+- 合规：联系人字段按 **OWNER-DECISION-2026-11-05** 明文存储，列级加密、Q25 访问审计、保留期与 Art.17 擦除面延后到后续任务（防线保留：字段不进日志/事件历史、仅 ops 可见、白名单封闭）。迁移注释与 schema 均标注 `PII_PENDING_ENCRYPTION`。
+- 测试：见 PR（配置防线、爬虫详情页/列表页双守卫、记录键与折叠、活动物化成功/失败、权限契约、迁移静态契约、disposable 库 upsert 幂等）。
+- 未做：租户投影（公司池/Lead 物化与抑制/制裁门）；联系人字段的加密/审计/保留期/擦除（延后任务）；页面正文持久化（沿用 crawl4ai durable artifact 24h TTL）。
+
+## 2026-11-05 · Prefer structured sources when trimming the discovery query plan (cheap-first PR-1) (#818)
+
+- 起因：Q33② 要求数据源路由「结构化源优先、public_web 兜底」。现状 planner 由模型自由选择源，超查询帽时的裁剪按 query priority 排序，public_web 副本与结构化源同权，且规划提示里 public_web 排第一行。
+- 改动：
+  - planner 指南加路由优先级与配额说明（结构化源优先、public_web 仅作兜底；结构化源每轮各约 ≤100 家公司、公司池补到 500；新源前 10 次运行限量试跑），并把可用源列表按源优先级排序（结构化源在前）。
+  - `routePlannerQueries` 的 `PLAN_QUERY_CAP` 裁剪加入源优先级 tiebreak：超帽时先保留结构化源副本、先丢 public_web 副本；扇出语义不变。
+  - 新增 `DISCOVERY_CHEAP_FIRST` 开关（off | shadow | enforce，默认 shadow）：shadow 保持旧行为，只把「按 cheap-first 将替换多少副本」写进计划 review 注记。
+- 测试：新增单测覆盖开关解析（默认 shadow、未知值回落 shadow）、enforce 裁剪顺序、shadow 报告与 off 回退、prompt 优先级与配额文案；`gctl check` 通过。
+- 未做：不含执行层配额（每 run 每结构化源公司帽、新源试跑限额）与归因「查询数」列——随 PR-2。
+
+## 2026-11-05 · Enforce per-source query budgets for cheap-first discovery routing (cheap-first PR-2) (#819)
+
+- 起因：Q33② 的规划层（PR-1）只做了 shadow 观测；真正把「结构化源每轮各 ≤100 家、新源前 10 次试跑限额」落到执行路径还缺一步。物化发生在查询阶段之后、收据又是严格键契约，因此按设计 §4.3 的实现对齐点，以「每源每轮查询预算」等价落地：每查询每源记录上限 25 条 × 预算条数。
+- 改动：
+  - `plan-query-sources`：新增 `SOURCE_QUERY_BUDGET` 裁剪原因；`routePlannerQueries` 支持 `sourceBudgets`（结构化源默认 4 条、试跑源 1 条、public_web 豁免），enforce 时裁掉超额副本、shadow 只统计并在计划注记「将按预算移出 N 条」；新增 `sourceQueryBudgetConfig`（`DISCOVERY_STRUCTURED_SOURCE_RUN_CAP`/`DISCOVERY_TRIAL_MAX_COMPANIES`/`DISCOVERY_TRIAL_MAX_RUNS`，带默认与钳制）与 `sourceQueryBudgets`。
+  - `source-trial`：按工作空间统计 `raw_source_record` 的 distinct run 数判定试跑期；零记录的新源（SQL 不产出行）按 0 次运行进入试跑期；失败降级为空集，不阻塞规划。
+  - `icp.service`：规划时计算每源预算并传入路由；shadow/enforce 语义沿用 `DISCOVERY_CHEAP_FIRST`。
+  - 设计文档追加 §11「实现裁定」，说明等价关系与未动的契约面。
+  - 合入前自审修复：零运行新源进试跑期；结构化预算按 §11 精确公式（公司帽 <25 → 0 条，`max(1,…)` 只用于试跑源）；shadow 替换计数改在预算后副本上计算（与 enforce 同口径）；env 参数拒绝畸形数字串（`1e3`/`100abc` 不再被 parseInt 截断）。
+- 测试：新增 `sourceQueryBudgets`/预算裁剪/enforce 弃取/shadow 统计/配置解析/试跑计数映射单测；`source-trial` 增补零行源与失败降级用例；`icp.service` 补 `$queryRaw` 注入，钉住「试跑预算 → 路由 → 落库注记」的 shadow/enforce 双语义接线。
+- 未做：不改查询收据与工作流/活动接口；public_web 的 run 总池 500 硬闸门与 `data_provider.config` 试跑覆盖本轮未实现（§11 已更正，另行排期 / PR-3 候选）；gain-saas 归因「查询数」列与租户投影另行排期。
+
+## 2026-11-05 · Enforce a per-run discovery company pool cap (#820)
+
+- 起因：Q33② 的「总池 500」兜底配额（`DISCOVERY_RUN_POOL_CAP`）从未实现；既有 `QUICK_SCAN_POOL_LIMIT` 只是 quick-scan 消费侧上限，不约束发现阶段的物化（cheap-first 计划 §11 自审核正）。
+- 改动：
+  - governed 物化批内按 run 统计已入池公司（outcome 表 distinct `canonical_company_id`），达 cap 后跳过会新增公司的物化，该行落 `NOT_CANONICALIZABLE` + `RUN_POOL_CAP_REACHED`；已在池的公司与终态行（suppressed/restricted/expired/隔离）不受影响。
+  - 达界时 `canonicalizeRun` 返回 `poolCap{cap,skipped}`，run stats 记 `poolCap`，`run_event` 同事务写一条 `pool_cap_reached`（幂等）。
+  - 新迁移只放宽 outcome 的原因码 CHECK（加 `RUN_POOL_CAP_REACHED`）；`DISCOVERY_RUN_POOL_CAP` 默认 500，`off` 关闭，非法值回退 500。
+- 测试：`run-pool-cap` 纯逻辑单测、governed 物化批接线单测（达界/入池放行/终态优先/env off）、真库 postgres spec（恰好 500 边界、跨查询累计、public_web+wikidata 混合、off 回退）。
+- 未做：达界不改 run 状态（不是 PARTIAL/FAILED）；契约前历史 run（LEGACY）不设闸以保持重放确定性；gain-saas 归因无改动。
+
+## 2026-11-04 · Wire the full DB test suite into CI and enforce docs freshness (#768)
+
+- 起因：`packages/db/test` 的 28 个数据库/RLS 测试里 CI 只点名跑了 2 个，最强的租户隔离保障大部分靠手工；权威文档的「最后核验」没有机械门（治理索引停在 2026-08-07）。
+- 改动：
+  - 新增 `packages/db/test/ci-manifest.json`（service / isolated / manual / static 四组）与 `scripts/run-db-tests.mjs`（清单完整性校验、service 组每文件独立新库串行、isolated 组轮转分片）；未登记文件或失效登记直接失败。首批进 CI：3 个 service（独立新库）、5 个自起 pgvector 容器（2 分片、预拉镜像、两个显式 opt-in gate）、1 个纯静态；19 个登记为 manual 并注明原因（需要外部预置容器，或期望特定迁移子集下的函数状态；首轮验证暴露的既有测试腐化另开修复）。
+  - `ci.yml` 增加 `db-tests-service`（CI PostgreSQL service）与 `db-tests-isolated`（2 分片、自起 pgvector）两个 job，按路径 scope 触发，纯文档 PR 跳过。
+  - 新增 `scripts/docs-freshness.mjs` 并接入 `verify-docs`：权威页「最后核验」超过 90 天按 `freshness.mode` 报 `DOC_STALE` / `DOC_VERIFICATION_MISSING`（当前 `warn`，观察期后转 `error`）。
+  - 两个新 spec 由 `db-tests-service` job 以 `node --test` 直接执行；根 `governance:test` 保持不变（Copy 固定源约束）。
+- 测试：`node --test scripts/run-db-tests.spec.mjs scripts/docs-freshness.spec.mjs` 9/9；`node scripts/verify-docs.mjs` PASS（0 errors；16 条 warning 为权威页缺「最后核验」，观察期预期）。
+- 未做：不改写历史证据与 16 个缺日期权威页的正文；DB 测试所需角色与迁移沿用现有 CI service 约定，首轮 CI 若暴露既有失败，登记豁免并另开修复。
+
+## 2026-11-04 · Add append-only personal-data access audit with 180-day retention (#771)
+
+- 起因：产品负责人 2026-11-04 决定取消租户数据处理声明（完整设计 §7.4 / Q23–Q25），平台级 lawful basis 接管联系人操作；作为补偿控制，每一次个人数据访问/物化都要留访问审计（谁/何时/公司/字段类/用途），保留 180 天。
+- 改动：
+  - 新表 `personal_data_access_audit`（引擎迁移 `20261104100000`）：租户 RLS、append-only（app_user 只有 SELECT/INSERT）、内容最小化（只记字段类别与主体计数，不存字段值）。
+  - 新模块 `apps/api/src/compliance/personal-data-access-audit.ts`：统一写入口与字段类推导。
+  - 接线四处：`discover-contacts` / `guess-emails` / `contact-point/:id/verify` 三个 HTTP 路径，以及 run 内联系人物化与邮箱补全（与落库同事务，物化了却没有审计的情况不出现）。
+  - `expire_personal_data_access_audit_v1` 保留期清理函数，由 raw-retention sweep 在 `personal-data-access-audit-retention-v1` patch 下按 workspace 分批调用（旧历史重放不产生新命令）。
+- 测试：新增审计模块单测、迁移静态契约与 raw-retention 编排单测；全量 `APP_DATABASE_URL= pnpm --filter @global/api test` 通过（两次已知负载假红单跑均通过）。
+- 未做：gain-saas 侧取消声明（另 PR）；审计的运维查询界面。
+
+## 2026-11-04 · Move the default worktree convention from .codex/worktrees to .claude/worktrees (#772)
+
+- 起因：Codex 已不再作为开发代理，`worktree:new` 仍默认在 `.codex/worktrees` 建 `codex/<topic>`，命名与实际开发主体不符。
+- 改动：
+  - `pnpm worktree:new` 改为在 `.claude/worktrees/<topic>` 创建 `claude/<topic>`，脚本更名 `scripts/create-worktree.mjs`；
+  - `.gitignore` 新增 `/.claude/worktrees/`、`/.claude/audits/`，`.codex` 两项保留给迁移前现场；
+  - 策略标记 `.codex/README.md` 移至 `.claude/README.md`；
+  - AGENTS.md、README.md、CONTRIBUTING.md、导航指南、worktree runbook 与相关操作文档同步新默认；
+  - code-intelligence 扫描排除新增 `.claude`。
+- 测试：`node --test scripts/governance-main-worktree-sync*.spec.mjs`；`pnpm worktree:new <topic> --dry-run`；`gctl check`。
+- 未做：迁移前已在 `.codex/worktrees/` 的在飞 worktree 不搬动，按清理门逐个退役；`docs/CODEX-NAVIGATION-GUIDE.md` 文件名与历史计划/记录/归档中的旧路径不改写。
+
+## 2026-11-04 · Add the Run 2.0 domain model (company jobs, run events, channel sightings, pool freshness) (#773)
+
+- 起因：完整设计（2026-11-04）把寻源 run 重构为「任务 → 快扫 → 公司级深挖流水线」，需要先落 expand-only 的域模型（M0①），后续 PR 才写入。
+- 改动：
+  - 新表 `discovery_company_job`（每家 × 每 run 的状态机，stage 有 CHECK）、`run_event`（append-only 进度事件，seq 唯一）、`company_channel_sighting`（渠道来源证据；channel_id 暂不设外键，M1 接 source_channel）。
+  - `discovery_run` 增 `task_ref`/`phases`/`mode`；`canonical_company` 增 `last_seen_at`/`last_checked_at`/`profile_hash`；`lead` 增 `fit_input_hash`。全部可空或带默认，旧行与旧读取路径不受影响。
+  - 三张新表租户 RLS；`run_event` 与 `company_channel_sighting` 仅 SELECT/INSERT（append-only）。
+- 测试：新增迁移静态契约单测（表/列/CHECK/RLS/权限清单）；`prisma validate` 通过；全量单测随 CI。
+- 未做：写入路径与编排（M0②–⑥）；`run_event` 90 天保留期清理；source_channel 外键（M1）。
+
+## 2026-11-04 · Accept an optional Run 2.0 taskRef when executing a discovery query plan (#774)
+
+- 起因：Run 2.0 把「挖掘任务（AcquisitionTask/TaskRun，gain-saas）」前移为 run 的发起方，引擎需要在执行记录上携带任务归因（完整设计 §6.1/§7、M0②）。
+- 改动：`POST /query-plans/:planId/execute` 接受可选 `{taskRef: {taskId, taskRunId}}`，写入 `discovery_run.task_ref` 并随 `DiscoveryRunRequested` 命令负载传递；不传时请求/数据形状与之前完全一致；形状不合法在任何预算 Grant 消耗前返回 400 `TASK_REF_INVALID`。OpenAPI 已重新生成（纯新增 requestBody）。
+- 测试：新增 executePlan taskRef 单测（存储/省略/拒绝三条），既有 controller 与 authority 原子性套件通过；contracts spectral lint 无 error。
+- 未做：gain-saas 侧 Task/TaskRun 与 `taskRef` 发送（另一 PR）；webhook 事件中的任务归因。
+
+## 2026-11-04 · Skip code gates on docs-only pull requests (#776)
+
+- 起因：纯文档 PR 仍无条件跑 prisma generate、lint、build、零容器单测与 PostgreSQL 重门，`build · typecheck · test` 固定约 7 分钟；只有 `docs:verify` 是文档 PR 真正需要的门。
+- 改动：
+  - `renderer-visual-scope` 增加 `run_code` 输出：仅当**所有**改动都落在 `docs/*`、根 Markdown 文档（README/AGENTS/CLAUDE/CONTRIBUTING）与代理元数据目录（`.claude/.agents/.codex/.superpowers`）时为 false；`.github/`、`scripts/`、锁文件与任何代码路径一律为 true；diff 失败、定时与手动触发 fail-closed 为 true。
+  - `build · typecheck · test` 的 18 个代码步骤与 `contracts` job 以 `needs.renderer-visual-scope.outputs.run_code != 'false'` 短路——默认运行，只有分类器**显式**判定纯文档才跳过；`docs:verify`、Copy 影响评估、tree-cleanliness 始终运行。
+  - 机器合同 `governance-ci-topology.spec.mjs` 的 scope 用例表加入 run_code 期望（含 `.github/workflows/security.yml` 算代码这条自掩蔽防护），并锁定「默认运行」的 `!= 'false'` 语义。
+- 测试：`node --test scripts/governance-ci-topology.spec.mjs` 12/12；`node scripts/verify-docs.mjs` PASS；`ci.yml` YAML 解析通过。
+- 未做：不引入 affected 依赖图 / 远程缓存与 merge queue（当前规模不值）；不拆分渲染器视觉回归 job（总墙钟不变）。
+
+## 2026-11-04 · Add the Run 2.0 quick-scan stage (pool-first prefilter, batched quick judgment, provisional leads) (#777)
+
+- 起因：完整设计（2026-11-04）把寻源 run 拆成快扫/深挖两档；快扫要用公司池先出名单（≤8 分钟），只有池子不够才搜索兜底（R3/R4）。
+- 改动：
+  - 新活动 `prefilterPool`（规则预筛，写 `discovery_company_job`）、`quickJudgeBatch`（8 家/次 flash 粗判，解析失败逐家降级，模型不可用规则兜底出 weak，Q20）、`materializeProvisionalLeads`（幂等 upsert，queue=needs_review，fitReasons.source=quick_scan）；进度写 `run_event`（seq 单调、并发撞号重试）。
+  - `discoveryWorkflow` 增加 `discovery-run2-quick-scan-v1` patch + 启动参数 `run2QuickScan`：候选 ≥20 家时跳过整轮搜索，否则跑一次有界搜索再预筛；结束直接 finalize（空池 PARTIAL、全部失败 FAILED）。
+  - relay 按部署开关 `DISCOVERY_RUN2_QUICK_SCAN`（默认关）写入启动参数；旧历史无该字段 → 原编排不变。
+- 测试：预筛/批量解析/降级/兜底/幂等物化单测，seq 并发重试单测，工作流编排单测（快路径/搜索兜底/开关关闭/全失败）；全量 API 单测通过。
+- 未做：真默认开启（等 M0④ 深挖与 M0⑥ 影子两轮召回不降）；与 taskRef 的联动只在 M0② 的输入字段上。
+
+## 2026-11-04 · Restore customer-side periodic sweeps with an API-side scheduler (R7-A) (#778)
+
+- 起因：平台迁移（2026-10-31）后客户侧周期任务全部停摆——`ensurePlatformSchedules` 在 src 无调用方，机器身份也没有 ScheduleService 权限（设计 §6.4 实查）。
+- 改动：新增 `SweepSchedulerService`（API 进程内）：每 `SWEEP_SCHEDULER_TICK`（默认 1m）为 6 个客户侧 sweep（backlog / external-intent / raw 保留期清理 / site-release 维护 / KB 恢复 / 建站费用对账）按周期桶启动工作流——workflowId=`<schedule>-<period>` + REJECT_DUPLICATE 去重防叠跑，启动时先补跑一次；`SWEEP_SCHEDULER_ENABLED=off` 可关闭。只使用机器身份被允许的 StartWorkflowExecution；4 个平台 schedule 保持 paused（产品负责人单独决定）。
+- 测试：周期桶 id/跨周期换桶/已启动忽略/单条失败不影响其余/开关关闭/绝不调度平台 schedule 共 7 条单测；API build 通过。
+- 未做：R7-B（扩展平台 Temporal 机器策略并重发镜像）。
+
+## 2026-11-04 · Add the Run 2.0 deep-dive pipeline (per-company child workflows, stop-deep via RequestCancel) (#779)
+
+- 起因：快扫产出的候选要在可停止、可续的前提下逐家深挖（设计 §6.3/§12：并发 16、上限 500、停止 60 秒内生效、已完成结果保留）。
+- 改动：
+  - 新子工作流 `companyPipelineWorkflow`：每家公司 profiling → fitting（mismatch 提前收工）→ signals → contacts → done，每步写 `discovery_company_job.stage` 与 `run_event`；单家失败只标 failed，不拖垮整轮。
+  - 新单公司活动（不依赖本 run 的 raw lineage，直接以 canonical 公司为对象）：`profileCompanyOnce`（官网画像/Impressum，复用 durable receipt 与治理门）、`fitCompanyOnce`（四门精判）、`signalsCompanyOnce`（7 天 TTL、SUSPENDED 跳过）、`contactsCompanyOnce`（决策人 + 可选邮箱补全，带 Q25 访问审计）。
+  - 父工作流深挖阶段：子工作流滚动窗口并发 16、目标上限 500；`POST /discovery-runs/:id/cancel` 用 RequestCancel（机器身份许可范围内）停止深挖——未完成公司标 skipped(DEEP_STOPPED)，run 以 CANCELLED 收尾，下一次 run 重新排队（可续）。
+  - `finalizeRun`/`attestRunFinalization` 接受 CANCELLED；OpenAPI 新增 cancel 端点。
+- 测试：子工作流编排单测（阶段顺序/mismatch 提前收工/单家失败隔离/取消传播）、父工作流深挖与取消单测、cancelRun 端点单测、全量 API 单测；spectral lint 通过。
+- 未做：影子模式与默认切换（M0⑥）；深挖阶段独立子预算（沿用 run 账户）。
+
+## 2026-11-04 · Expose incremental run progress (events by seq, per-company job queue, run taskRef) (#780)
+
+- 起因：Run 2.0 的深挖是逐家推进的长过程，界面要能按 seq 增量看到进度、逐家状态与失败码（设计 §6.3/§12：3 秒轮询、事件可重放）。
+- 改动：
+  - `GET /discovery-runs/:runId/events?after=<seq>`：append-only 进度事件增量拉取（返回 nextAfter，断点续拉/重放）。
+  - `GET /discovery-runs/:runId/jobs`：公司级队列（stage/粗判/精判/失败码/耗时，含公司名与域名，游标分页）。
+  - `GET /discovery-runs/:runId` 增 `taskRef`/`phases`/`mode`；接口门户补两条操作说明。
+- 测试：事件增量/空闲轮询/未知 run/队列分页四条单测；OpenAPI 重生成（87 paths）；docs:verify、governance:verify。
+- 未做：事件 90 天保留期清理（M0⑥）；首页角度聚合事件（按 seq 全量可重放已满足）。
+
+## 2026-11-04 · Run 2.0 finalize V2, shadow comparison and run alerts (#781)
+
+- 起因：切默认前要能对比新旧两套判定的召回与一致率（影子模式，连续两轮召回不降才切），并把运行健康（预算/失败率/时长）变成可见告警。
+- 改动：
+  - 阶段时间写入 `discovery_run.phases`（quick_started/quick_done/deep_started/deep_done，活动记录、回放安全）。
+  - 新表 `run_shadow_diff`（聚合计数、租户 RLS、append-only）：影子 run 里老路径照常产出，新快扫判定不物化名单，只对比召回与逐家一致率。
+  - run 收尾统计新增 `stats.alerts`：预算耗尽、失败率 >30%、超过 30 分钟未完成；部署开关 `DISCOVERY_RUN2_SHADOW`（默认关）。
+  - 快扫/深挖的 verdict 汇总进 `stats.quickScan`/`stats.deep`。
+- 测试：阶段合并/耗时/影子对比（含占位判定剔除）三条活动单测、影子工作流单测、迁移静态契约；全量 API 单测与 docs/governance 校验。
+- 未做：自动切换默认（连续两轮影子达标后由产品负责人点头；告警的外部推送通道随 M1/运维面板）。
+
+## 2026-11-04 · Add the channel data-source platform (registry, tenant enablement, CSV import, config-driven crawler v0) (#782)
+
+- 起因：完整设计 §4/§11 M1——新增渠道不改代码：管理后台配 API/爬取/导入三形态，渠道养池、run 消费池；Q27 把展会渠道改成行业驱动的动态发现、导入验收用系统生成的 10 行示例 CSV。
+- 改动：
+  - 新表 `source_channel`（平台注册表，治理字段 + 失败率连 3 轮 >30% 自动停用）、`source_channel_enablement`（租户只能启用已批准渠道）、`source_channel_run`（每次运行的抓取量/产出/失败）、`imported_buyer`（租户私有导入原始行与去重键）；`company_channel_sighting.channel_id` 接上外键。
+  - 导入通道端到端：CSV 解析（RFC4180/分号/BOM/5000 行上限）+ 列映射 + 预览（去重/抑制命中，不写库）+ 提交（按域名/名称+国家去重、过抑制门、物化 canonical + sighting + 批次明细）；示例 CSV（10 行）。
+  - 通用爬虫 v0（配置驱动）：零依赖 HTML 选择器子集、列表/详情抽取、https-only、页数上限与单域限速；抓取执行经 ToolBroker（robots 强制）——其平台抓取预算权威获批前，preview/run 端点 fail-closed 409（不绕过闸门）。
+  - 启用硬闸门：license+tosUrl+robots 结论齐全，robots=C 永不启用、crawl 仅允许 A。
+- 测试：CSV/映射/示例、选择器、爬虫（详情/页数截断/失败计数/配置拒绝）、治理闸门、启用、导入端到端与预览、运行统计与自动停用、迁移静态契约；全量 API 单测与 docs/governance。
+- 未做：抓取通道的真实执行（等平台抓取预算权威决策）；行业驱动展会发现端点（依赖抓取出网）；管理后台页面（gain-saas 侧 PR）。
+
+## 2026-11-04 · Close the ICP feedback loop (decision aggregation, query-family EMA weights, suggestion cards) (#784)
+
+- 起因：设计 §7.1——判断结果（接受/拒绝 + mismatch 理由）目前只落库不回喂；本轮把「判断 → 聚合 → 查询权重与 ICP 建议」闭起来，且坚持建议卡人工采纳才改 ICP。
+- 改动：
+  - 新表 `icp_feedback`（来源/渠道/行业/国家的接受率与拒绝理由分布）与 `icp_query_performance`（来源类目的 EMA 质量分，Alpha=0.3）；租户 RLS。
+  - `IcpFeedbackService`：幂等重算（Lead + LeadDecision + 渠道 sighting + raw 来源血缘）、建议卡（零接受行业/渠道/国家、强势细分）、规划提示词加权备注。
+  - 接受/拒绝接口在决定成功后 best-effort 触发重算；`GET /icps/:id/feedback` 与 `POST .../feedback/recompute` 两个端点。
+- 测试：聚合/理由计数/EMA 混合/建议卡阈值/规划备注 4 条单测、迁移静态契约；全量 API 单测与 docs/governance。
+- 未做：查询族按「查询文本」精确聚合（v1 按来源类目）；回复/退订结果回流（随触达阶段）；watches 刷新 run 调度（下一 PR）。
+
+## 2026-11-04 · Stop treating generic company words as social-profile company evidence (#786)
+
+- 起因：r14 镜像验收（[r14 证据](../evidence/2026-11-04-contact-run-acceptance-r14.md) §3）发现社媒层残留类——公司名本身是业务通用词（`technical.de` 的公司名就叫「Technical」）时，headline 只要含该词就满足公司佐证，把别家公司员工（标题含「at Redline Technical…」/「at Treefrog Cinegraphix」）收进联系人。
+- 改动：社媒 L3 守卫把泛词（technical/industries/solutions/consulting/engineering/services…，含德语对应词）与有区分度的公司名 token 分开：泛词**单独命中不再构成公司佐证**；此时必须见到完整域名（边界匹配，拒绝 `technical.design` 这类同前缀 TLD）或多词公司名的完整短语才放行。丢弃计入新诊断 `social_generic_name_dropped`。
+- 测试：`social-presence.provider.spec.ts` 新增 6 例（含 global_dev 两条存量残留行的 headline 回放，姓名/档案 URL 已虚构化）；`APP_DATABASE_URL= pnpm --filter @global/api test` 与 `gctl check --fast` 全绿。
+- 未做：库中已收录的两条脏行不在本 PR 删除（存量数据，清理走 `cleanup-contact-false-positives.mts` 显式 id 流程，等产品负责人确认）。
+
+## 2026-11-04 · Serialize run-event seq allocation with a per-run advisory lock (#788)
+
+- 起因：2026-11-04 快扫+深挖真实验收（run 11923f12）在 16 并发深挖下暴露：`appendRunEvent` 在调用方事务内对唯一冲突（P2002）重试取号，但 PostgreSQL 把唯一冲突后的整个事务标为 aborted，事务内重试只会得到 25P02，且同事务里的 company job 阶段更新全部回滚——一家公司卡死在 profiling，finalize 计 `remaining=1`，run 收敛为 PARTIAL。当日 worker 日志共 49 次 25P02。
+- 改动：
+  - `appendRunEvent` 改为先取 per-run 事务级 advisory lock（`pg_advisory_xact_lock(hashtextextended('run-event:<runId>'))`）再取号，从源头消除并发冲突；删除事务内 P2002 重试（冲突无法在已中毒事务内恢复，任何数据库错误直接上抛，由外层事务重试）。
+  - 同步更新函数注释与单测：新增「锁先于取号」「唯一冲突不在事务内重试」两个用例；`discovery.run2.activities.spec` 的 fake tx 补 `$queryRaw` 桩。
+- 测试：`pnpm --filter @global/api test run-events`（4 用例）+ 相关 run2 活动/工作流单测；发布侧需在下一班镜像中复测深挖并发（本轮验收在 deepseek-flash 临时档上观测到该缺陷）。
+- 未做：不改 run_event 表结构与读路径；不引入按 run 的独立 sequence。
+
+## 2026-11-04 · Add zh search localization and fail loudly on unbuildable searches (#789)
+
+- 起因：产品负责人用中文 ICP（珠三角电子制造/吸塑包装）跑 discovery 得到 4 秒 PARTIAL、0 结果。根因：搜索本地化只支持 de/en/fr/it/es/nl/pl，中国回落 en；`searchableTerms` 剔除全部 CJK 词 → `buildSearchQueries` 返回空 → 一次检索都没发、10 条查询收据全 0、静默收场。
+- 改动：
+  - `SearchLanguage` 增加 `zh`；COUNTRIES 增加 CN（中国/china/cn/chn）；地区映射增加珠三角/长三角/京津冀/粤港澳/环渤海等中文区域；`ROLE_TERMS` 增加 zh（distributor 经销商/分销商/批发商/进口商，manufacturer 制造商/厂家/工厂）。
+  - `searchableTerms` 接受语言参数：`zh` 保留 CJK、其余语言维持剔除（既有德语/英语检索串行为不变）；`buildSearchQueries` 先定语言再取词。
+  - `discoverCompanies` 在无法构造任何检索串时抛 non-retryable `DISCOVERY_MARKET_UNSUPPORTED`（附可操作中文提示），不再静默返回 0 结果 PARTIAL。
+- 测试：`search-localization.spec`（zh 解析、角色词、CJK 保留/剔除分流与既有 DACH 用例）、`public-web-search-first.spec`（中文经销商串、珠三角区域串、空检索显式失败、既有德语回归）；全量 `@global/api` 单测。
+- 未做：马来语（ms）与「ICP 目标市场以卖方档案为权威」属独立任务；run 页「搜索企业」阶段 UI 映射与错误码前端文案在 gain-saas 侧另 PR；搜索本地化仍未覆盖韩/日。
+
+## 2026-11-04 · Bootstrap new worktrees and scope pre-push gates by change type (#790)
+
+- 起因：新 worktree 未装依赖时 pre-push 会静默跳过 `gctl check`，PR-1/2/3 的推送只跑了密钥扫描；`--fast` 又不含单测，本地验证实际覆盖率取决于人是否记得装依赖。
+- 改动：
+  - `scripts/create-worktree.mjs`：创建后自动 `gctl link-env` 并在后台执行 `pnpm install --frozen-lockfile --prefer-offline`（`WORKTREE_SKIP_INSTALL=1` 可跳过），装完前推送会被 pre-push 明确拦截。
+  - 开发过程新增 §2B-2「本地验证阶梯」：纯文档 → verify-docs；代码 → `gctl check --fast` + affected 单测；DB/迁移 → 一次性库 service 组；联调 → 源码热重载；重型制品门留给 CI/发布。
+  - 工作区 pre-push 钩子（`local-config/bin/git-hooks/pre-push`）按改动范围选门：纯文档只跑 verify-docs；代码缺依赖时 fail-closed；代码跑 `gctl check --fast` + `vitest related`（≤30 个改动源文件）；`GLOBAL_PREPUSH_FULL=1` 仍可升全量。
+- 测试：`node --check scripts/create-worktree.mjs`；`node scripts/verify-docs.mjs`；钩子 `bash -n`。
+- 未做：本地不构建运行镜像（build-once + 构建证明只在发布工作流）；affected 单测的阈值待真实 PR 观察后再调。
+
+## 2026-11-04 · Bind an optional attempt id into workspace execution-budget request scopes (#791)
+
+- 起因：一次失败的 ICP 生成/查询计划生成/执行在预算 Grant 层面会永久砖化——请求作用域只有 `operation + subject`，同一 ICP 的第二次生成、同一计划的第二次执行必然 `EXECUTION_BUDGET_GRANT_REUSED`（断点 B2/B3/B13/B14，「重试」无路可走的根）。
+- 改动：`POST /companies/:companyId/icps`、`POST /icps/:icpId/query-plans`、`POST /query-plans/:planId/execute` 三处请求作用域与 quote 请求解析接受可选 `body.attemptId`（UUID），进入 `requestSha256`；**缺省时哈希与旧版逐字节一致**（旧 Grant、in-flight run 语义不变）；同一 attempt 重放仍被拒（幂等），新 attempt 放行并各自独立预算账户。控制器新增可选 DTO（Swagger `ApiBody`），非法 attemptId 由 ValidationPipe / quote 解析拒绝。
+- 测试：`execution-budget-request-scope.spec` 表驱动新增三个带 attempt 的哈希向量（旧向量原样保留）；`workspace-technical-budget-quote.controller.spec` 新增 attempt 绑定、同 attempt 幂等、非法 attempt 拒绝用例；全量 `@global/api` 单测。
+- 未做：`POST /query-plans/:planId/rerun` 端点与前端「重试」按钮（下一 PR）；gain-saas signer/路由透传（同批另一 PR，发布需同批）；TaskRun `attempt`/`rerunOf` 列（gain-saas 域）。
+
+## 2026-11-04 · Grant app_user UPDATE on run_shadow_diff for shadow upserts (#792)
+
+- 起因：M0⑥ 影子对比由 `runShadowDiff.upsert` 写入，但 `20261104130000_run_shadow_diff` 只授了 `SELECT, INSERT`（照抄 `run_event` 的 append-only 模式）；首个真实影子 run 即以 `42501 permission denied for table run_shadow_diff` 失败（2026-11-04 影子两轮验收发现）。
+- 改动：
+  - 新迁移 `20261104190000_run_shadow_diff_app_user_grants`：`GRANT UPDATE`（无删除路径，`DELETE` 保持不授）。
+  - `docs/governance/app-user-table-privileges.json`：`run_shadow_diff` → `INSERT, SELECT, UPDATE`。
+  - 权限矩阵行为测试新增用例：以 `app_user` 在租户上下文中真实执行 create → update upsert（事务回滚）。
+- 测试：本地 `global_test` 上 RED（42501，与生产一致）→ GREEN（15/15）；CI 必需检查验证。
+- 未做：无。
+
+## 2026-11-04 · Keep a busy event loop from draining the worker on live dependencies (#794)
+
+- 起因：2026-11-04 影子验收 run `768638fc` 的抽取负载把 worker 事件循环压住，依赖心跳的模型网关探测（2 秒硬超时）连续 3 轮假阳性超时，worker 以 `MODEL_GATEWAY_UNAVAILABLE` 立即排空（lease `WORKER STOPPED`）；工作流下一个 workflow task 在 `understanding` 队列无人取，run 保持 RUNNING 无任何推进，直到人工重启容器。
+- 改动：
+  - `worker-dependency-heartbeat.ts`：探测前采样事件循环滞后，滞后 ≥1s 时跳过该轮（不计失败、不探测）；采样器可注入。
+  - `managed-dependency-readiness.ts`：模型网关探测超时 2s→10s。
+  - 测试：滞后跳轮与探测超时两个新用例；相关套件 140 passed。
+- 测试：`vitest run` 两个 spec 45/45；`vitest related` 140 passed / 8 skipped；`nest build` 通过。
+- 部署：需随下一班车发布新运行时镜像；现网已人工重启 worker 恢复。
+- 未做：依赖真失联时的自动恢复（排空仍为 fail-closed，需重启容器）不变，另开工单讨论。
+
+## 2026-11-04 · Rerun EXECUTED query plans with a fresh attemptId and carry taskRef on DiscoveryRunCompleted (#795)
+
+- 起因：一次失败的执行会永久砖化计划——plan 收尾后变 EXECUTED，再 execute 恒 409 INVALID_STATE；#791 已让请求作用域接受 attemptId，但状态门仍挡着重跑（断点 B3/B13，产品负责人亲历「4 秒 PARTIAL 后无任何重试路径」）。经 P1 设计评审裁定：不新增独立 rerun 端点，放宽既有 execute 的状态门（改写 `docs/modules/discovery-qualification/technical.md` §6）。
+- 改动：
+  - `DiscoveryService.executePlan` 状态门改为 READY | EXECUTED；EXECUTED 且未带 attemptId → 409 `RERUN_REQUIRES_ATTEMPT`（DRAFT 等其余状态维持 INVALID_STATE）。凭新 attemptId 时 scope/事务结构不变：新请求哈希 → 新 Grant → 新预算账户 → 新 run/outbox。
+  - `DiscoveryRunCompleted` payload additive 追加 `taskRef`：SaaS 在「引擎已建 run、BFF 丢响应」窗口据此回填 engineRunId（schemaVersion 2 不变，消费端容忍缺省）。
+  - 控制器/操作描述/DTO 文档与引擎工作流过期注释同步；契约快照重导出（仅描述与 409 码变化，无 schema/枚举变更）。
+- 测试：新增 `discovery.execute-rerun.spec.ts`（READY 旧行为不变；EXECUTED+attemptId 建 run 且 outbox v2；EXECUTED 缺 attemptId → 409 且不建 run/outbox；DRAFT+attemptId → INVALID_STATE）；`discovery.activities.spec` 增加 taskRef payload 用例（300/300）；request-scope 黄金向量不动；全量 `@global/api` 单测。
+- 未做：独立 rerun 端点、引擎侧 attempt/rerunOf 落库（attempt 权威在 SaaS TaskRun，见 P1-G1）、`Idempotency-Key` 头与同 plan 并发 run 的 advisory lock（后续改造）；attemptId 缺省时引擎行为逐字节不变。
+
+## 2026-11-04 · Make the seller profile's target markets and industry authoritative for ICP generation (#796)
+
+- 起因：P1 断点 B1——`icp.service.generateFromCompany` 的提示词只喂了名称/官网/已审批 Claim/产品，**没读档案的 `targetMarkets`（ISO）与 `industry`**——ICP 的目标市场由模型自行猜测。实证：workspace c3584cf9 的档案 `target_markets={MY}`，生成的 ICP 全是「珠三角电子元件/线路板制造企业」，后续查询计划的语言/国家跟着错。
+- 改动：
+  - 提示词注入卖方档案权威输入：目标市场按 `ISO（中文名）` 列出，附「档案为准、ICP 只细化；输出 target_markets 必须覆盖以上市场，可追加但不得替换」的指令；industry 一并注入。档案无市场/行业时提示词与行为与旧版一致。
+  - 确定性后校验（不靠模型自觉）：落库前用 `completeTargetMarkets` 把模型输出的自由文本市场与档案 ISO 归一比对（复用 `targetCountryCodes` 的中文/地区词解析 + 中文国名兜底），缺哪个补哪个、已覆盖的不重复追加。
+  - `vocab.ts` 新增 `COUNTRY_NAME_BY_ISO`（ISO→中文国名，未收录回退代码本身；纯新增、无既有调用方语义变化）。
+- 测试：`icp.service.spec` 新增 4 用例（提示词注入含 MY（马来西亚）/行业/权威措辞且落库为模型值；模型漏掉档案市场时补齐；模型以中文名写出的档案市场不重复追加；档案无市场/行业时提示词与落库行为不变）；`icp` 相关 14 文件 76 用例全绿。
+- 未做：ICP 详情页/run 页的「目标市场（来自档案）+ 模型补充」展示与不一致提示（前端，随 P1-G2/P6）；档案市场修改后的「重新生成」入口（依赖 P1-G1/G2 的 attempt 链路）；`COUNTRY_ISO` 词表扩展维持 P2 语言层范围。
+
+## 2026-11-04 · HTTP-first page fetching with readability extraction and env-tunable crawl settings (#797)
+
+- 起因：抓取层三处浪费（主计划 §3.5b / Q34）——每个页面无条件走 Crawl4AI 浏览器 `/md` 渲染（超时 75s）、渲染请求硬编码 `delay_before_return_html: 3.0`（每页固定等 3 秒）+ `cache_mode: BYPASS`（从不用缓存）、抓取限速与并发写死无 env；独立基准显示无浏览器抽取质量更高（F1 0.955 vs 0.790）且快 24–35 倍。
+- 改动：
+  - 新增 `adapters/http-first-fetch.ts`：受治理的普通 HTTP 抓取（复用 requestPublicHttp 逐跳 IP 钉扎与 physical-wire 观测）→ readability + linkedom 抽正文 → turndown 转 Markdown；薄页/非 HTML/失败返回 null 触发回落。
+  - `crawl4ai.fetch` 工具：先走 HTTP-first（env `HTTP_FIRST_FETCH` 默认 on，仅显式 off 才回纯渲染），40 行渲染路径保留为 fail-safe 兜底；渲染 429 单次重试（`CRAWLER_429_RETRY_DELAY_MS`）。
+  - 渲染参数 env 化：`CRAWLER_RENDER_DELAY_MS`（默认 500ms，原硬编码 3000）与 `CRAWLER_CACHE_MODE`（默认 ENABLED，原 BYPASS）。
+  - 限速/并发 env 化：`CRAWL4AI_FETCH_RPS`（默认 4）、`CRAWL4AI_FETCH_CONCURRENCY`（默认 6）、`CRAWL4AI_FETCH_DOMAIN_DELAY_MS`（默认 2000）。
+  - 新增依赖 `@mozilla/readability`、`linkedom`、`turndown`；Copy 回执重签与漏洞基线重绑随本 PR。
+- 测试：新增 http-first/工具分级/参数 env 三组用例（30 用例）；`vitest related` 491 passed；`nest build` 通过。真实效果以 golden mini-run 验收（静态页 p50 ≤0.5s、渲染占比 <30%、同集合召回不降）。
+- 未做：ETag/304 与 LLM 抽取缓存（PR-B）；trafilatura sidecar 与自适应域延迟（PR-C）；Crawl4AI 0.9.5 安全升级（独立 PR）。
+
+## 2026-11-04 · Extend search localization to ms/id/vi/th/ja/ko/pt/tr and report stripped terms (#798)
+
+- 起因：P2（方案 §2.3）——语言层此前只有 de/en/fr/it/es/nl/pl/zh。产品负责人的马来西亚档案（target_markets={MY}）即使 ICP 目标市场正确，检索仍会回落到 en 并把马来语关键词当外语处理；被剥离的关键词也无留痕，规划器语言错误无从发现。
+- 改动：
+  - `SearchLanguage` 扩为 16 种：新增 ms/id/vi/th/ja/ko/pt/tr；COUNTRIES 增 MY/ID/VN/TH/JP/KR/PT/TR（各带中文/英文/ISO 别名与本地语言名）；两类角色词补全八语言（如 ms: pemborong/peniaga/pengedar、ja: 販売代理店/卸売業者/ディーラー、tr: distribütör/toptancı/bayi）；planner 语言名表同步。
+  - 按语言的检索词脚本规则（P2 §2.3）：zh 保留含汉字的词并剥离纯拉丁词；ja 保留汉字/假名词；ko 保留谚文词；其余语言维持剔除 CJK。新增 `partitionSearchTerms` 返回「可用词 + 被剥离词」，`searchableTerms` 保持旧签名。
+  - 执行侧：`public_web` 发现时把被剥离的词记一行日志（截断 5 个），作为规划器关键词语言错误的直接证据。
+- 测试：`search-localization.spec` 新增八语言解析 / 角色词 / 脚本过滤与剥离报告用例（zh 语义按方案收紧）；`public-web-search-first.spec` 新增马来西亚马来语经销商串与日本日语串；既有德语/中文回归不变；全量 `@global/api` 单测。
+- 未做：规划器关键词语言校验与一次自动重写（P2 第二步，随后单独 PR）；马来西亚/中文市场的端到端验收由发版后按方案 §2.6-2/6 执行。
+
+## 2026-11-04 · Cast the run-event advisory lock result so Prisma can deserialize it (#799)
+
+- 起因：#788 的 run 事件 seq 分配用 `$queryRaw` 读取 `pg_advisory_xact_lock(...)`（返回 void），首次随第十八班镜像上生产即被 Prisma 拒绝（`Failed to deserialize column of type 'void'`），所有新 discovery run 在 quickScan 阶段 10 秒内 FAILED；单测用注入的 fake tx 因此未覆盖真库路径。
+- 改动：`run-events.ts` 锁查询加 `::text AS locked` 转型（与 suppression-policy-lock 既有做法一致）；新增 `run-events.postgres.spec.ts` 真库回归用例（含夹具链与清理）。
+- 测试：真库用例修复前 RED（复现生产同款错误）→ 修复后 GREEN；既有 run-events 单测保持绿。
+- 未做：CI 步骤接线（另开小 PR，避免本次热修触发 ci.yml 全量重门）；后续同类 `$queryRaw` void 语句按同一模式排查。
+
+## 2026-11-04 · Validate planner keyword language against the market and rewrite once before failing (#800)
+
+- 起因：P2 第一步把语言层扩到 16 种，但规划器（LLM）仍可能把中文关键词写进马来语/德语查询——这类计划执行时检索必然全空，用户只看到「没结果」，看不出是语言问题。
+- 改动：`generateQueryPlan` 落库前做确定性关键词语言校验：逐条查询按 `filters.country`（回落 ICP 目标市场）确定语言，关键词存在却**全部**不能用于该语言检索时触发**一次**自动重写（提示词明确要求全部 keywords 用目标市场语言书写、不得出现中文）；重写后仍不符则抛 409 `DISCOVERY_KEYWORDS_LANGUAGE_MISMATCH`，提示调整目标市场或关键词后重试。命中合规的计划只调用一次规划器（零额外成本）。
+- 测试：`icp.service.spec` 新增 3 用例——语言不符触发一次重写并以重写结果落库（重写提示词含「马来语」）、重写仍不符显性失败且不落库、关键词本已合规时只调用一次规划器；全量 `@global/api` 单测。
+- 未做：不做逐条关键词的自动翻译（重写交给规划器）；中文/马来端到端验收随发版按方案 §2.6-2/6 执行。
+
+## 2026-11-04 · Sweep stale RESERVED tool-budget operations in the raw-retention workflow (#801)
+
+- 起因：巡检（2026-11-04）发现 `tool_budget_operation` 累计 298 条 RESERVED（最早 2026-10-09），没有对账/清收任务。超时未结算的预留是孤儿（活动崩溃/重启后再无人 settle/release）：既占住账户可用额度，又让同一 operation_key 的重试活动撞 `BudgetOperationReplayError`（近 7 天 6 个 run 因此失败，见 `discovery_run.stats.failure`）。
+- 改动：
+  - 新迁移 `20261104220000_tool_budget_operation_reconcile`：SECURITY DEFINER 函数 `reconcile_stale_tool_budget_operations_v1(workspace, olderThanHours, limit)`，按工作区把超时 RESERVED 释放（observed/charged=0、settled_at=now、账户 reserved_microusd 回补），与 `release_tool_budget_microusd_v1` 对 RESERVED 的释放语义一致；安全形状沿用 retention 模式（app_user + workspace 守卫 + 账户 advisory 锁 + FOR UPDATE SKIP LOCKED + pg_temp 末位 search_path）。
+  - 该清理并入现有 raw-retention sweep（每工作区每轮最多 5 批 × 200 条），用 `budget-operation-reconcile-v1` patch 守卫——patch 前的旧历史重放不调度新活动。
+- 测试：迁移静态契约 4 用例（事务边界/守卫/释放语义/仅 app_user 可执行）；raw-retention 工作流新增 2 用例（按工作区清收到无更多、patch 前不调度）；一次性库实测（模拟 app_user 会话：释放 1 条 200µUSD、账户 500→300、fresh RESERVED 与 SETTLED 不受影响、superuser 直调被 `TOOL_BUDGET_RECONCILE_DENIED` 拒绝）；`security-definer-search-path` 通过；全量 `@global/api` 单测。
+- 未做：不处理「仍在生命周期内」的 RESERVED（阈值默认 24h，活动超时上限远小于它）；不做对账报表与告警（被清收的数量进 workflow 日志）；`BudgetOperationReplayError` 的调用侧语义维持 fail-closed 不变。
+
+## 2026-11-04 · Label deep-stage discovery failures with their own stage (#802)
+
+- 起因：巡检实测（run f8f494e8，取消落在深挖段）发现 `stats.failure.stage` 记的是 `quickScan`——工作流的 stage 变量在进入深挖后没有更新，失败/取消记录因此指向错误的阶段（前端阶段卡与排障都受影响）。
+- 改动：`DiscoveryRunStage` 增加 `'deep'`；进入深挖（`markRunPhase(deep_started)`）后把 stage 置为 `'deep'`，用 `discovery-deep-stage-label-v1` patch 守卫——patch 前的旧历史重放仍按原值记录，命令序列不变。前端（runs 页 FAILURE_STAGE/TECH_FAILURE_STAGE）在 P1-G3 已支持 `deep` 的映射，无需改动。
+- 测试：`discovery.run2.workflow.spec` 新增用例——深挖子工作流以 Temporal 失败中止时，最终 `finalizeRun(FAILED)` 的 `stats.failure.stage === 'deep'`；run2 工作流套件 8/8。
+- 未做：不改变任何取消/失败语义（仅修正记录值）；不新增事件类型。
+
+## 2026-11-04 · Judge shadow recall on the compared companies and wire the run-event lock test into CI (#803)
+
+- 起因：影子验收第二轮实况（老路径判 66 家/正面 27，快扫判 27 家/正面 6）——`recallNotLower` 按两侧总数比较，在池子天然不等时把「覆盖差异」误报成「召回下降」；另 run-events 真库用例（#799 热修附带）尚未接入 CI，同类 void 列问题可能再次裸奔上线。
+- 改动：`recordRunShadowDiff` 的召回判定改为 **compared 集内比较**（summary 聚合数保留两侧覆盖口径）；新增「不等池子」单测（聚合 4<7 但同集合 4≥3 → 不降）；CI 增加 `run-events.postgres.spec.ts` 步骤（global_test 已迁移环境下执行真实锁语句）。
+- 测试：activities spec 9/9；CI 全门（本 PR 含 ci.yml，全量重门跑一遍）。
+- 未做：无。
+
+## 2026-11-04 · Move platform channel governance to an ops-only scope (data-source ownership P3) (#804)
+
+- 起因：巡检 B7 实证：平台渠道注册/治理（`source_channel` 为全局表、无 workspace 维度）的写端点与租户共用 `acquisition:write`，任何租户管理员都能新建/改写平台级渠道；运营台 `/ops` 没有渠道页，租户设置页反而承担了平台治理职责。
+- 改动：新增引擎授权 scope `ops:write`（`AUTHORIZATION_SCOPES` 第 12 个，运营身份 `saas-ops` 专用，租户角色不得携带）；渠道端点重划权限——`GET /source-channels`→`ops:read`，`POST /source-channels`、`PATCH /source-channels/{id}`、`preview`、`run`→`ops:write`，租户保留 `available`（`acquisition:read`）、enable/disable（`acquisition:write`）与私有导入；导入契约提示：`import-template` 返回 `columns` 与建议 `mapping`，`mapping` 缺失/错配时错误信息列出可用列并给示例；OpenAPI 补 `Channels` tag 描述并重新导出（顺带修复该 tag 缺失的既有漂移）。gain-saas 同批 PR：运营台新增渠道数据源页（`saas-ops` 引擎角色 + 操作审计落 `AuditLog`），租户设置页收缩为「启用渠道 + 导入名单」。
+- 测试：`scopes.spec` 十二 scope 闭合契约；新增 `channels-authz.http.spec`（租户身份调用平台端点 403 且零服务调用、`ops` 身份调用租户端点 403、匿名 401、OpenAPI `x-required-scopes` 契约、导入模板 `mapping`）；`channel-import.spec` 增加建议映射与错误提示用例；`authz-openapi`/`controller-authz`/`operation-descriptions` 门全绿。
+- 未做：抓取执行仍 fail-closed 409（`platform.channel_crawl` purpose 按 implementation-record 分段实施）；引擎侧不新增审计表——运营动作的 actor 审计落在 gain-saas `AuditLog`（引擎记录本身即渠道表时间戳与运行记录）。
+
+## 2026-11-03 · Persist onboarding seller facts on CompanyProfile and let companies be created without a website (#743)
+
+- 起因：Phase 1（D16/D17）要求注册引导的公司/产品/目标市场/业务邮箱成为卖家事实 SoR；此前 `POST /companies` 必须带官网，products/targetMarkets/businessEmail 只留在 site-builder intake 的 JSON 里，ICP 与理解都消费不到。
+- 改动：
+  - `company_profile` 新增 `target_markets TEXT[]`、`business_email TEXT`（迁移 `20261102170000_phase1_seller_sourcing_fields`）；`offering` 新增 `source`（onboarding | understanding | manual）。
+  - `POST /companies`：`website` 变可选（`website` 与 `name` 至少一个，否则 400）；新增可选 `industry/targetMarkets/products/businessEmail`；`products` 落 `Offering(source=onboarding, skipDuplicates)`；有官网才消费 Grant 并发 `CompanyProfileCreated`，无官网返回 `understanding=not_started`（不发事件、不消费 Grant）。
+  - 技术报价 op `POST /companies` 请求变体与 request scope 同步扩展（exactKeys 白名单、ISO 码/数量上限校验）。
+  - `CompanyDto` 增补 `targetMarkets`、`businessEmail`、`understanding`（后两者可选，避免响应侧破坏性变更）。
+- 测试：company.service 新增「无官网建档不发事件不消费 Grant」「有官网照常」「产品落 Offering」「双缺 400」四例；`workspace-authority-atomicity` 回放断言同步 `understanding`；OpenAPI 已重导出。
+- 未做：理解工作流本体不改为双源（资料库 Phase 2/3 接入）；`business_email` 的 PII 分类与加密方案待法务确认（PRD SD11 备注）。
+
+## 2026-11-03 · Drop same-name namesakes and organisation-shaped person names in contact discovery (#744)
+
+- 起因：M5 Golden Set 首轮（`docs/evidence/2026-11-03-contact-golden-set-m5.md`）误报 19.6%，集中在两类可定位机制：①社媒层把「公司名恰为姓氏」的异国同名个人当成员工（3 人）；②LinkedIn 机构页整条被当成个人入库（1 条「公司当人」）。
+- 改动：
+  - **同姓守卫**（`social-presence` 的 L3 标题筛选）：解析出人名后，标题去掉人名必须仍有独立的公司佐证（公司名 token 或域名词根）；公司 token 只与人名重合时丢弃。
+  - **机构名守卫** `cleanPersonName` / `looksLikeOrganizationName`（`contact-extraction`，覆盖 `contact.find_decision_makers` 全部抽取消费方 + 社媒标题）：先剥离括号注记（模型常写 `Max Mustermann (Geschäftsführer)`，剥离后是真人名则保留），剩余部分带法律形式/机构词才丢弃；词表含 group/holding/company/sa/bv 等，`Co`（真实姓氏）与 `ag` 不误伤——只有全大写 `AG` 与带点 `Co.` 按公司形式处理。社媒丢弃原因计入 run diagnostics（`social_namesake_dropped` / `social_organisation_dropped`），不再是静默损失。
+- 测试：社媒 provider spec 新增「同姓保留/拒绝」与机构名识别用例；相关 provider、回执消费者与联系人 stage 全组通过；全量单测见 PR。
+- 部署：无迁移；随下一班车上线。
+- 未做：同名异国公司（如德国泵店与美/英同名工程公司）靠字符串佐证无法区分，本轮该类 6 个误报仍在；需公司级消歧（国家/行业/雇主字段证据），记为后续。同姓守卫的代价：以家族姓氏命名的公司（如 `Pumpen Schmid GmbH`）里，若员工 LinkedIn 标题只写人名不带公司段，该候选会在 L3 被丢弃（此前会靠姓氏子串误放行、再靠档案页确证）——属「宁缺勿错」取舍，丢弃已计入 diagnostics。已入库的机构名旧行（M5 那轮的 BTS 条目）不在本 PR 清理范围内。
+
+## 2026-11-03 · Add a client attemptId to on-demand contact discovery (#745)
+
+- 起因：`POST /canonical-companies/:id/discover-contacts` 的预算请求作用域此前只绑定 `companyId`，同一公司第二次点击「发现联系人」会命中已消费的一次性 Grant，返回 `EXECUTION_BUDGET_GRANT_REUSED`；理解重试（#730）已用客户端 `attemptId` 隔离每次尝试，联系人发现缺少同样机制。
+- 改动：
+  - `DiscoverContactsDto` 增加可选 `attemptId`（UUID，1–8 版），由客户端每次点击生成。
+  - `workspaceExecutionBudgetRequestScope` 仅在请求携带 `attemptId` 时才把它并入规范化材料；缺省时 requestSha256 与旧版完全一致，存量 Grant 不受影响。
+  - `discoverContactsExecutionBudgetRequestScope` 作为 HTTP 适配器与 Grant 签发共用的规范边界；`DiscoveryService.discoverContacts` 用它消费 workspace Grant。
+  - 技术报价控制器接受可选 `body: { attemptId }` 并校验 UUID；OpenAPI 合同（`workspace-technical-quote` oneOf 与 `DiscoverContactsDto`）同步。
+- 测试：`execution-budget-request-scope.spec.ts` 新增「带 attemptId 的新哈希」用例与「缺省保持旧哈希」断言；`workspace-technical-budget-quote.controller.spec.ts` 新增带 attemptId 的报价与非法 UUID 拒绝用例。已用现有 pnpm store 运行这两个 spec：2 个文件 / 24 个用例全过；全量单测交由 PR CI。
+- 未做：SaaS BFF 默认仍关闭该字段（`ENGINE_DISCOVER_ATTEMPT_ID_ENABLED=false`，会在旧引擎下从 quote 与转发体剥离），待本镜像发布后再开启；不改变 `lawfulBasis` 校验、发现结果语义或一次性 Grant 的其它约束；不发布镜像。
+
+## 2026-11-03 · Record the Phase 1 onboarding landing and the first DONE discovery run in current status (#746)
+
+- 起因：Phase 1（卖家事实字段、注册引导向导、BFF 门禁）已随第十二班上线并验收；状态页仍把它写成「下一步」，且「没有一次 COMPLETED run」的说法在 2026-11-03 02:07 首次 `DONE` run（`5e7401f6`）之后已过时。
+- 改动：`docs/status/current.md` 刷新到 2026-11-03 基线（36 次 run：13 PARTIAL/22 FAILED/1 DONE；lead 5 689；company_profile 6/13/28/30；gain-saas 7 users/10 workspace/5 membership；运行镜像 `36412147`（build `5a526747`））；新增 Phase 1 上线与端到端验收记录；§4 在途归零；§5 改为 Phase 2/2b 进行中；G3/G5/G6 的措辞按首个 `DONE` run 更新。`docs/status/implementation-matrix.md` 的 01/02 模块行同步。
+- 测试：`node scripts/verify-docs.mjs`（本地）。
+- 未做：不改产品代码与运行时；`DONE` run 的输入/质量评估留给 Phase 2b 的 golden set。
+
+## 2026-11-03 · Add the seller document library schema with RLS, hybrid-search indexes and least-privilege grants (#747)
+
+- 起因：模块 02 卖家资料库（Phase 2）此前只有设计与 site-builder KB 的复用面；原始资料需要空间隔离的表、活跃内容去重、检索索引与 RLS 授权。
+- 改动：
+  - 新迁移 `20261103120000_seller_documents`：`seller_document`（状态机/租约/软删/内容 hash）与 `seller_document_chunk`（BGE-M3 `vector(1024)`、生成列 `text_tsv` + GIN、halfvec HNSW、复合 FK 防跨空间挂接）；活跃内容部分唯一索引（`WHERE deleted_at IS NULL`）；两表 FORCE RLS，`app_user` 仅 SELECT/INSERT/UPDATE（物理删除只走 owner 的 DSR 路径）。
+  - Prisma 模型 `SellerDocument`/`SellerDocumentChunk` 与 `CompanyProfile.sellerDocuments` 关系；chunk 的向量列用 `Unsupported`，检索将走 raw SQL。
+  - `docs/governance/app-user-table-privileges.json` 登记两表；新增静态迁移契约测试。
+- 测试：`apps/api/src/seller-knowledge/seller-document.migration.spec.ts`（迁移顺序/事务边界/列集/部分唯一索引/生成列与索引/RLS 与授权/Prisma 同步）；真库 `app_user` 授权由 CI PostgreSQL job 的 app-user 规格覆盖。
+- 未做：本 PR 不含 API/pipeline/bucket（后续 PR）；`CompanyProfile.understandingSources/deletedAt` 与 `KnowledgeSource.sellerDocumentId` 等扩展列入后续。
+
+## 2026-11-03 · Recover people-page links from raw HTML when the crawler markdown drops them (#748)
+
+- 起因：M5 评估里 5 家零产出公司的排查——真实 Impressum 都在首页**原始 HTML 的锚点**里（导航/JS 菜单），但 crawl4ai 的 markdown 输出没有带出这些链接；固定路径只覆盖 `/impressum` 等少数标准形态，非标准路径（`/ando-technik/impressum/`、`common/info/impressum.html`）从未被选中。另有一类裸域→www 站点，固定路径落在站点的坏跳转上（`www.x.deimpressum/`）。
+- 改动：`decision-maker` 选页在 markdown 人物页链接不足 3 条时，改用 `http.get` 抓首页**原始 HTML** 补抽同站锚点（www 容忍、去 query/hash、相对链接解析、仅同站），并用响应 `finalUrl` 的主机重拼固定路径（裸域→www 场景）。
+  - 审查补强：`contact.find_decision_makers` 白名单补回 `http.get`（11-01 被 social.fetch 替换后，回退会被 ToolBroker 拒绝并当 control 抛出——比修复前更糟，已实测）；锚点解析改为线性扫描并截断 1MB（回溯正则在 3MB 恶意/未闭合页面上是 O(n²)，实测 384KB≈66s）；`finalUrl` 主机加可注册域校验（过期/停放域名的跨站跳转不跟）；跨 markdown/finalUrl 的同一页按 www 不敏感去重，不占预抓名额。
+- 测试：锚点抽取单测（相对链接、www、mailto/js、外站、去重、无引号 href、3MB 恶意串限时）与 provider 级回退用例（markdown 无链接 → `http.get` 补抽 → **非标准路径** `common/info/impressum.html` 被预抓且排在固定路径之前、固定路径使用重定向主机）；`contact.find_decision_makers` 允许工具集含 `http.get` 由 task-registry 规格锁定。
+- 部署：无迁移；随下一班车上线。
+- 未做：未接 sitemap 索引/压缩链路（本轮实测部分站点 sitemap 不含 Impressum 或为空索引，收益不足）；已入库的旧结果不回溯重算。
+
+## 2026-11-03 · Add the seller document library API with presigned upload, commit validation and quota (#749)
+
+- 起因：资料库表已就位（#747），但没有上传/管理入口；Phase 2 需要 presign/commit/列表/下载/重试/软删，并保证 bucket 先于代码上线。
+- 改动：
+  - 新增 \`SellerKnowledgeModule\`（模块 02）与 7 个端点：\`POST /companies/:id/seller-documents/presign\`、\`POST …/:documentId/commit\`、\`GET /companies/:id/seller-documents\`、\`GET /seller-documents/:id\`、\`GET /seller-documents/:id/download-url\`、\`POST /seller-documents/:id/retry\`、\`DELETE /seller-documents/:id\`。scope：写 = \`acquisition:write\`，读 = \`acquisition:read\`，删除 = \`acquisition:review\`。
+  - 独立 bucket 客户端 \`SellerDocumentsStorage\`（\`SELLER_DOCUMENTS_S3_BUCKET\`，默认 \`global-seller-documents\`）：presigned PUT 带 1 天过期的 staging 生命周期 tag；canonical 换空 tag 永不自动过期。
+  - commit：CAS 认领（attempt + 租约）→ HEAD/流式 sha256/魔数（复用 site-builder 嗅探）→ canonical 转存 → queued 并入队 ingest；同公司活跃内容重复撞部分唯一索引返回 409 并清理副本；未上传完成回到 pending_upload。
+  - 配额：每空间 500 份/2 GiB、每公司 200 份（env 可调），presign 时 409。
+  - 部署：\`docker-compose\` 与 \`infra/minio/bootstrap.sh\` 增加资料库 bucket 与生命周期断言；\`runtime-deployment-contract\` 规格同步。
+- 测试：service 规格 8 例（类型/配额/成功/魔数/重复/未完成/软删）；OpenAPI 由 code-first 导出。
+- 未做：ingest 工作流（2b，本块的 launcher 为占位，文档停在 queued）；混合检索端点（2b）；commit 暂不要求 Execution Budget Grant——docling/embeddings 为自托管零成本，Phase 3 的 \`extract_facts\` 模型调用再按其自身 op 引入 Grant。
+
+## 2026-11-03 · Ingest seller documents through Docling, chunking and BGE-M3 embeddings; add hybrid search (#751)
+
+- 起因：资料库 API（#749）提交后文档停在 queued；需要把「上传→解析→可检索」闭环，替换占位 launcher。
+- 改动：
+  - 新 Temporal 工作流 `sellerDocumentIngestWorkflow` + `createSellerDocumentActivities`：fenced 租约认领 → 有界下载 → Docling 解析（文本类直读）→ `chunkMarkdown` 结构感知分块（上限 512 块）→ BGE-M3 批量嵌入（32/批）→ 事务写 `seller_document_chunk`（含 `::vector` 字面量与生成列 tsv）→ 置 `ready`；失败按 attempt 指数退避（60s→1h，最多 8 次）回 `queued`，超过即 `failed_terminal`；finalize 以 lease 令牌围栏，不覆盖新持有者。
+  - `TemporalSellerDocumentsIngestLauncher` 替换占位实现，workflowId 绑定 documentId；worker 注册新 activities 与工作流导出（`customer-workflows.ts`）。
+  - 混合检索 `GET /companies/:companyId/seller-documents/search`：查询词本机嵌入后 `0.7×cosine + 0.3×ts_rank_cd`，限定公司/ready/未删，limit ≤50；附带接口门户说明。
+- 测试：activities 规格 6 例（成功/下载失败/空内容/嵌入失败/not_due/gone/丢租约）；workflow 编排规格 2 例；service 规格补混合检索 2 例。
+- 未做：软删对象的物理清理（canonical 对象与 chunk 行）留受控清理管线（Phase 6 DSR）；extract_facts 事实抽取（Phase 3）将按其模型 op 引入 Grant。
+
+## 2026-11-03 · Grant seller_document_chunk DELETE to app_user so ingest replay can clear prior chunks (#755)
+
+- 起因：Phase 2 资料摄入在首次线上验收即失败——活动内的幂等重放先 `deleteMany` 旧分块，而 `20261103120000_seller_documents` 只授了 SELECT/INSERT/UPDATE，触发 `42501 permission denied for table seller_document_chunk`（dev 实测，文档回落 queued）。
+- 改动：新迁移 `20261103130000_seller_document_chunk_delete_grant` 仅对 `seller_document_chunk` 追加 `GRANT DELETE ... TO app_user`（RLS 仍按 workspace 隔离）；`seller_document` 本身维持软删（UPDATE），物理删除仍归 owner/DSR。同步 `docs/governance/app-user-table-privileges.json` 与迁移规格断言。
+- 测试：迁移规格的授权断言更新；`app-user-table-privileges.postgres.spec.ts` 在 CI 的 PostgreSQL job 按治理清单核对真库授权。
+- 未做：不新增周期扫描重新拉起 `retry_at` 回退的文档（当前靠 `POST /seller-documents/:id/retry`），留 Phase 2 后续。
+
+## 2026-11-03 · Verify the Google Patents Public Data licence wording and draft the enablement LIA (#756)
+
+- 起因：`google_patents` 的注册表标注 `CC-BY-4.0_UNCONFIRMED`，要求启用前重新核实数据集条款；产品负责人 2026-11-03 决定先保持禁用，并同意先做核实与 LIA 草稿。
+- 改动：按 Google Cloud 官方公告原文核实为 CC BY 4.0（署名：`"Google Patents Public Data" by IFI CLAIMS Patent Services and Google, CC BY 4.0`），注册表分类改为 `CC-BY-4.0_CONFIRMED` 并重生成 `docs/backend/provider-registry.md`；新增 `docs/superpowers/plans/2026-11-03-google-patents-enablement-lia.md`（DRAFT）：许可核实结论、LIA 草稿与启用清单。
+- 测试：`governance:verify` 校验注册表与生成文档一致（CI 执行）。
+- 未做：未改任何运行时状态——`data_provider.google_patents` 仍 DISABLED、`PATENT_SOURCE_MODE=off`、`patents-cache-refresh` 仍暂停；LIA 待产品负责人签署，平台执行契约变更与启用另走 PR 与发布。
+
+## 2026-11-03 · Let sellers edit DRAFT company profiles, soft-delete them, and find official websites via search (#757)
+
+- 起因：卖家建档后无法补官网、无法删除测试档案，无官网的公司永远停在「待理解」；产品负责人 2026-11-03 拍板「编辑与自动找官网一起做」。
+- 改动：引擎新增 `PATCH /companies/:companyId`（DRAFT 内可改名称/官网/行业/目标市场/业务邮箱，官网仍过 SSRF 守卫）、`DELETE /companies/:companyId`（软删 `company_profile.deleted_at`，列表/详情/完整度/产品视图过滤）、`POST /companies/:companyId/website-candidates`（SearXNG 两个有界查询 + 目录/社交/搜索引擎过滤 + 标题匹配排序，最多 5 条候选，人工确认后采用）；`retryUnderstanding` 放宽为「DRAFT + 有官网」可启动首次理解，并用 10 分钟排队事件防止重复启动（失败重试语义不变）。gain-saas BFF 增加三条透传路由，公司档案页新增编辑弹窗（含「自动找官网」候选列表）、删除与会话式启动理解；vben RequestClient 补 `patch` 方法。
+- 测试：引擎 28 例新/改用例（编辑、软删、retry 放宽与排队防护、候选排序/过滤/去重/语言选择/搜索失败容错）；BFF 路由表规格覆盖三条新路由；全量 API 单测 10676 通过；gain-saas server 182 测试通过、web 构建通过（vue-tsc 仅余主干既有 2 条 vxe-pc-ui 声明缺失）。
+- 未做：products/Offering 的编辑对账不在本期；软删档案的物理清除归 owner/DSR；「自动找官网」不自动采信（避免理解到错误公司），且对无意义名称（如「111111」）返回空由用户手填。
+
+## 2026-11-03 · Record FAILED discovery runs even when the workflow stopped before folding stored query receipts (#759)
+
+- 起因：2026-11-03 的真实寻源 run（fdb7778d）在查询批量里一个查询 429 失败、另一个已成功并落收据；工作流按计划顺序先处理失败查询并停止，已成功查询的收据没被折叠进 FAILED 收尾统计，收尾的一致性核对报 `DISCOVERY_QUERY_RECEIPT_FINALIZE_DRIFT` 三次后工作流失败，run 行永远停在 RUNNING。
+- 改动：① 批量循环先折叠全部成功查询、再处理失败（失败仍停止 run，命令序列不变）；② `finalizeRun` 对 `status='FAILED'` 以库内已落盘收据为准补齐派生统计，不再因工作流侧不完整而拒绝写入——成功/部分成功路径的严格漂移校验保持不变；③ 相应收紧/更新 BI-25 的单测语义（未见的收据现在随 FAILED 记录，阶段错误照常上报）。
+- 测试：新增工作流级用例（批量中一个失败、一个成功 → FAILED 统计含已落盘收据）与收尾级回归用例（FAILED + 空 perQuery 仍记录派生收据）；`discovery.activities`（300 例）、`workspace-authority.workflow`（90 例）通过；全量单测 10672 通过，余下 browser-readiness-probe/platform-revocation-http/git-reviewed-evidence 的单文件复跑均通过（xin 负载假红，CLAUDE.md §6）。
+- 未做：不改变成功路径的收据一致性语义；未给失败的 run 增加自动重跑；`DISCOVERY_QUERY_RECEIPT_STORE_INVALID` 等存储损坏仍按原样拒绝。
+
+## 2026-11-03 · Fix three contact-discovery blind spots behind the zero-yield companies (#760)
+
+- 起因：M5 第三轮复测后仍有 4 家零产出公司。逐家重放引擎取页路径（镜像 `fe0c7d71`，含 #748）后定位到三类引擎盲区与一类输入数据问题：
+  - `avag-pumpen.de`：裸域的 `robots.txt` 被 Apache 301 到不存在的伪主机（`https://www.avag-pumpen.derobots.txt`——主机与文件名直接拼接、缺 `/`），SSRF 护栏拒绝解析后被 fail-closed 成「全站禁抓」；但首页本身 301 到 www origin，其 robots 明确放行。
+  - `ava-berlin.de`：crawl4ai 的 markdown 恰好带 3 条人物页链接（不含 Impressum），#748 的「不足 3 条才补原始 HTML」门槛没有触发；真实 Impressum（`common/info/impressum.html`）只在原始 HTML 锚点里，固定路径 `/impressum` 落在站点 404 上。
+  - `michalowski-gmbh.de`：选页本身正确（Impressum + 三个团队页），但链接规范化剥掉了尾斜杠；该站对无斜杠形态返回 39 字节反爬空壳，crawl4ai 对四个页面全部 500，带斜杠形态才是含具名 Geschäftsführer 的真页面。
+  - `jaeckel-ohg.de`：Impressum 确无具名人，但首页团队区块列了两位 geschäftsführender Gesellschafter 与销售/商务人员并附邮箱——引擎只用首页做链接发现、从不抽取首页自身；社媒层 6 条候选确为无关同名者，守卫丢弃正确。
+- 改动：
+  - `decision-maker` 选页：存储域名 robots 被拒时改判同注册域的**另一主机形态**（裸域 ⇄ www，站点常只在其一上配好 robots），以其自身 robots 为准，两个形态都拒绝才放弃，抓取起点同步改用放行的那一个；原始 HTML 锚点补抽不再以「markdown 不足 3 条」为前提（每个公司多一次轻量 `http.get`，仍受同一契约与主体绑定）；锚点与 markdown 链接保留站点给出的原始形态（尾斜杠），两种写法都出现时优先带斜杠形态，只用归一化键去重。
+  - 抽取兜底：选定的人物页一个人都没抽到时，抽取已抓到的首页文本（小站把团队/决策人直接铺在首页）。
+- 测试：锚点/链接抽取保留尾斜杠并按归一化键去重的单测（含站点两种形态内容不同的回归）；「markdown 已有 3 条人物页链接仍补抽原始 HTML」的 provider 用例；裸域 robots 被坏跳转误伤时改从 www 抓取、两个 origin 都拒才放弃的用例；首页兜底抽取（含机构名过滤）与「选定页已有人则不抽取首页」的成本闸门用例。
+- 部署：无迁移；随下一班车上线。已入库的旧结果不回溯重算。
+- 未做：不修 `jaeckel-ohg` 的公司名数据质量（DB 里是域名 slug，社媒 dork 引号搜 slug 只得到无关同名者）——属公司补全/命名归一的输入问题，另行排期。
+
+## 2026-11-03 · Strip German academic titles before contact dedupe and require role evidence on social profiles (#761)
+
+- 起因：M5 第三轮 Golden Set（`../../evidence/2026-11-03-contact-golden-set-m5.md` §9）确认三类质量问题：德语学位串 `Dipl.-Wirt.-Ing.` 让同一人两条记录各占一行；社媒索引候选只要 headline 含公司名就放行，只有公司名、没有职位词的垃圾档案漏网；第一轮遗留的 9 条存量误报只增不减。
+- 改动：
+  - `person-name`：身份归一的学位串白名单补齐德语多段学位（`Dipl.-Wirt.-Ing.`、`Dipl.-Kfm.` 等），带点的单 token `Ing.` 仅在名前位置剥离；`normalizePersonName` / `personNameKeyVariants` / `foldedPersonNameKey` 与 resolver 的 Tier 2 随之收敛，真实姓名 token（`Erik Ing`、`Anna Wirt`）不误伤。
+  - `contact-extraction.cleanPersonName`：抽取边界复用同一剥离函数，落库姓名为净化后的形（顺带消除被称号污染的邮箱猜测本地部分）。
+  - `social-presence`：`parseSocialResults` 在 #744 的公司佐证之外新增「专业佐证」门——headline 去掉人名与公司 token 后必须仍有职位/职能词，否则丢弃并记 `social_uninformative_dropped`；德语复合职位词（`Einkaufsleiterin`）按词内子串识别。
+  - `apps/api/scripts/cleanup-contact-false-positives.mts`：一次性按显式 contact id 删除存量误报/重复行，默认 dry-run，`--apply` 才执行，禁止删除带 VALID 联系方式的行（除非显式放行）。
+- 测试：`person-name` / `person-identity` / `contact-extraction` / `social-presence` 新增用例覆盖称号合并两方向与垃圾档案计数；单测与 `gctl check` 见 PR。
+- 未做：同名异公司的公司级消歧（#744 已记为后续）；存量清理的 `--apply` 属产线动作，等用户确认后执行。
+
+## 2026-11-03 · Relay seller document uploads through the engine so browsers can upload without reaching object storage (#762)
+
+- 起因：Phase 2c 前端上传时发现 presign 返回的上传地址是引擎侧 `127.0.0.1:9000`（对象存储只监听宿主回环），用户在浏览器里根本连不上；直传方案对远程用户不成立。
+- 改动：新增 `PUT /companies/:companyId/seller-documents/:documentId/content`：请求体按原始字节读取（独立的 51MB 上限，413 早退），校验 `pending_upload` 状态、Content-Type 与 presign 申报一致、字节数等于申报大小，再由引擎按同一 staging key 写入对象存储（`SellerDocumentsStorage.putObject`，签名与生命周期标签同 presign）。写入后照常 `commit` 校验并入队。接口说明已登记并重导出 openapi。
+- 测试：服务级 6 例（成功/非 pending/类型不符/大小不符/404/存储失败）；全量 API 单测通过；`operation-descriptions` 与 seller-documents 相关规格通过。
+- 未做：保留原 presign 直传路径给能访问对象存储的调用方；未加断点续传；大文件分片不在本期。
+
+## 2026-11-02 · Keep published tags single-manifest by disabling embedded build provenance (#725)
+
+- 起因：第七班连续失败在 digest 读回——`ghcr-runtime-publication.mjs resolve` 只接受单清单媒体类型（spec 刻意拒绝 OCI index，防 attest 未检验的平台），而 containerd 镜像存储下 buildx 默认给构建产物附带 provenance/SBOM attestation 清单，推送出的 SHA 标签指向 OCI index，HEAD 请求按 Accept 返回 404（标签实际存在、可拉取）。今天之前 classic 存储产物是单清单，所以一直没暴露。
+- 改动：发布 workflow 的 `docker build` 增加 `--provenance=false --sbom=false`——发布证明由 workflow 里 `actions/attest` 的独立 attestation 承担，内嵌构建证明本就冗余；resolve 契约与脚本不变。发布契约测试同步新增两条断言锁定该 flag。
+- 测试：`runtime-deployment-contract.spec.mjs` + `ghcr-runtime-publication.spec.mjs` 共 23 项全绿；下一次真实发布 run 验证。
+- 未做：不改镜像内容、不改变 attestation 语义与发布产物格式；历史已推送的 index 标签保持原样。
+
+## 2026-11-02 · Scope understanding model budget operations per workflow run and attempt (#726)
+
+- 起因：2026-11-01 live 实测「理解失败后重试」时发现，同一公司的第 2 次真实尝试必失败：模型付费操作键（paidOperationKey 含 context.correlationId）在理解活动里没有运行/尝试维度，第一次失败后预算行以 RELEASED 保留，后续 Temporal attempt（乃至新 workflow run 的重试）在 reserve 时被判为「已有操作且无 durable result」的 remnant，抛出 `BudgetOperationReplayError`（origin=remnant）。
+- 改动：`understanding.activities` 把 `workflowRunId:activityId:a<attempt>` 作为模型调用（extractClaims / extractOfferings / extractAndPersistProfile）与 crawl broker 的 correlationId；同一 attempt 内保持幂等，跨 attempt/跨重试各用独立预算操作行。
+- 测试：新增 `modelOperationCorrelationId` 单测；understanding 活动/工作流既有 29 用例全绿；`gctl check` 全绿。
+- 未做：其它域的模型活动（discovery / icp / outreach）有同类风险，需逐域评估后再改（不在本 PR 扩大范围）。
+
+## 2026-11-02 · Keep contact discovery alive across attendant replay remnants and activity retries (#728)
+
+- 起因：第七班验收 run 2dcece84 在联系人阶段以 `BudgetOperationReplayError`（origin=remnant）两连败——Temporal 重试的 attempt 2 复用了 attempt 1 留下的「已预留、未结算」账本行（模型付费操作键缺 attempt 维度），与 #726 在理解活动修掉的是同一类问题；同 attempt 内的瞬时重试撞上残影也会直接打挂活动。
+- 改动：
+  - `discoverRunContacts` 把 Temporal attempt 并入模型 correlationId（`<companyId>:aN`），重试不再继承上一次尝试的未结算操作键；
+  - `contact-discovery-core` 与联系人阶段的邮箱补全对 `BudgetOperationReplayError(origin=remnant)` 做**残留吸收**（#684 纪律）：该适配器/该公司本轮跳过并留告警，绝不让一行残影打挂整家公司或整个 run；`origin=live` 仍是活故障，照旧上抛。
+- 测试：`execution-receipt-consumers.spec.ts` 新增「remnant 吸收 + 其余适配器继续 + live 仍失败」用例；联系人相关套件 314 项全绿；全量门待 CI。
+- 部署：无迁移；随下一班车（含 #726）上线后重跑联系人验收。
+- 未做：工具类操作键（如 SMTP 探测）本身仍未带 attempt 维度——靠残留吸收兜底；若要根治需把 attempt 透传到 ToolContext 的操作键派生（另行评估）。
+- 2026-11-02 #734 更正：本条「attempt 并入模型 correlationId」的做法已撤销（重试改为重放已结算操作，避免 APPLIED/REPLAYED 混合回执）；remnant 吸收保留。
+
+## 2026-11-02 · Guard malformed tel links and name internal failures in the exception filter (#728)
+
+- 起因：M4 会话在 ftc-de.com 的按需联系人发现中发现两处问题——`public_web` 适配器抛 `URIError: URI malformed`（页面含非法百分号序列的 `tel:` 链接，`decodeURIComponent` 未防护，导致整页抽取失败），以及全局异常过滤器对 500 只输出固定诊断、无法区分错误类别。
+- 改动：`contact-extractor` 对 `tel:` 的解码加 try/catch（非法序列按原文处理，不再中断整页抽取）；全局异常过滤器在固定诊断上补充**受控的错误类名**（正则白名单，绝不输出 message/stack/凭据）。
+- 测试：新增「坏 tel 链接不中断抽取」与过滤器 errorName 断言；相关 35 项与全量单测通过（仅已知负载假红，单跑复核绿）。
+- 未做：不改变 500 响应的对外契约（仍是固定文案）；M4 报告的 500 是否同源待下次真实调用用 errorName 核实。
+
+## 2026-11-02 · Add named decision makers to the weekly report CSV (#729)
+
+- 起因：联系人挖掘 M4 的验收要求周报 CSV 含「联系人与状态」；BI-22 周报原先只导出公司级联系路径，从不读取 `canonical_contact`/`contact_point`。
+- 改动：
+  - `WEEKLY_REPORT_COLUMNS` 在「联系路径」后新增「决策人（联系人 / 联系方式 / 状态）」列；每人输出姓名（职务 · 部门）与邮箱/电话/LinkedIn 的原始验证状态（VALID/RISKY/INVALID/UNVERIFIED），每行最多 5 人、每人 3 个联系方式、整格 2000 字符封顶。
+  - 周报读取公司具名决策人（`canonical_contact` + `contact_point`）与联系方式状态；导出前按 workspace 的 email/domain 禁联过滤，且只在 DataRights EXPORT 允许的行上写入。
+  - 反馈 CSV 解析按表头取列，新列不影响回传。
+- 测试：row spec（单元格格式与状态照实）、service spec（导出决策人、过滤禁联邮箱）；全量零容器单测。
+- 未做：不在 CSV 中输出证据 URL/时间或 `allowedActions`；不改周报的 DataRights 规则与 withheld 口径；不读 `field_evidence` 的明文值（只读联系人/联系方式表）。
+
+## 2026-11-02 · Give each understanding retry its own attempt-scoped grant account (#730)
+
+- 起因：live 实测发现同一公司的第二次「理解重试」必失败：工作空间 Grant 消费会把预算账户绑定到首个 authority（`purpose:subject:requestSha`），而重试操作的请求作用域对同一公司是恒定的，于是第二次重试在账户层被判 `EXECUTION_BUDGET_GRANT_REUSED`（`consume_workspace_execution_authority` 正常、随后开账户被拒；`understanding.run` 也不在 `RETRYABLE_WORKSPACE_PURPOSES` 的安全重试账户集合里，且该集合要求旧账户从未真正派发付费调用，不适用于理解重试）。
+- 改动：重试操作的作用域加入 `body.attemptId`（客户端每次点击生成的新 UUID）——每次重试获得独立的 requestSha256、独立预算账户与独立 authority；同一 attemptId 的重复提交仍被 Grant 一次性语义挡住（幂等）。quote 端点同步校验 `attemptId`（uuid、exact keys），OpenAPI 请求体 schema 更新。
+- 测试：request-scope/quote/envelope/service 规格更新；与 gain-saas 侧（BFF 传 attemptId、前端每次点击生成）配套。
+- 未做：不把 `understanding.run` 加进 `RETRYABLE_WORKSPACE_PURPOSES`（那会放宽"旧账户未派发付费调用"的安全前提，与本修复无必要重叠）。
+
+## 2026-11-02 · Return the documented 403 when contact discovery has no lawful basis (#731)
+
+- 起因：M4 UAT 实测 `POST /canonical-companies/:id/discover-contacts` 在缺 body 或 `{}` 时返回 400 `VALIDATION_ERROR`（`lawfulBasis` 必填先触发 DTO 校验），与 OpenAPI/`@ApiExecutionBudgetGrant` 承诺的 403 `CONTACT_DISCOVERY_LAWFUL_BASIS_REQUIRED` 不一致。
+- 改动：`DiscoverContactsDto.lawfulBasis` 改为可选（保留 `LAWFUL_BASIS_KINDS` 枚举校验）；缺失时交给服务层在消耗预算前以 403 拒绝；非法值仍是 400。重导出 OpenAPI 契约（请求体 `required` 去掉该字段）。
+- 测试：新增 DTO 校验单测（空 body 通过校验、未知取值仍报错）；既有 service 403 用例继续覆盖拒绝路径。
+- 未做：不改服务层 403 的语义与预算消费顺序；不改 `guess-emails`/`verify` 的可选 body 语义。
+
+## 2026-11-02 · Cover every matched company in the contact stage within a $2 budget (#733)
+
+- 起因：D5 原口径「8 家 / $0.50」在真实运行下过紧——实测单家 ≈$0.09（官网 4 页 + 社媒 + 邮箱探测），8 家份额（$0.0625/家）在第一家后就撞 D7 子账户上限（验收 run cf3dba2d 因此 PARTIAL）。产品负责人 2026-11-02 拍板：联系人阶段覆盖**全部** fit=match 公司。
+- 改动：联系人活动默认覆盖全部匹配公司（安全上限 25 家），活动内改为**并发 2** 的工位池（串行会越过 30 分钟活动窗口），并加 **18 分钟软时限**——到点只停新公司开工、在飞的两家收尾；另加**准入租约门**（剩余租约放不下一家 10 分钟单位时计 `skippedForLease` 并停手，与其它阶段同口径）；一个工位抛出控制错误或预算截断时另一工位不再认领新公司。D7 子账户口径重校为「每家 20¢、整轮封顶 $2 = min(公司数×20¢, $2)」。
+- 窗口/失败语义：30 分钟 startToClose 超时与租约过期都会让预算 attest 失败并被判 control stop、整个 run FAILED（fail-closed），所以宁可提前软时限截断（PARTIAL）：18 分钟 + 在飞两家最坏各 10 分钟 < 30；超过 ~22 家时先撞 $2 上限截断。每次 attempt 仍各有一份 $2 基线（#734 起重试改为重放已结算操作、通常不新增花费），run 账户剩余额仍是硬上界。
+- 测试：全量 API 单测通过（2 个已知负载假红文件 `workspace-authority.replay` / `platform-revocation-http.service` 单独复跑全绿）；contacts-stage 13 例覆盖新口径（整轮封顶、差值计量、截断只停新公司、软时限、租约门、run 账户耗尽）；设计稿 D5 已记录重校。
+- 部署：无迁移；随下一班车上线后重跑联系人验收。
+- 未做：软时限 18 分钟与并发 2 是依据 30 分钟窗口的保守值（留 12 分钟给在飞公司与收尾）；若以后单家耗时变化再评估。
+
+## 2026-11-02 · Survive anti-bot statuses and retry replays in the contact stage (#734)
+
+- 起因：第九班验收 run `4fe3e874` 在联系人阶段 FAILED（stage=contacts, control），第八班上 GainOS run `3649e39a` 同源。两层缺陷叠加：
+  - ① `social.fetch` 抓 LinkedIn 时上游返回 **HTTP 999**（本机同 UA 实测稳定复现），而 `social-fetch/v1` 投影契约的 status 上界是 ≤599 → 投影拒绝 → ToolBroker 把已付费操作留在 RESERVED 并抛 `BudgetOperationReplayError(origin='live')` → 被当 control 错误，整条 `discoverRunContacts` 失败，重试后同样再犯。
+  - ② 重试 attempt 2 时，#728 的 attempt 隔离键让 model 操作产生新回执（APPLIED），而工具操作按同 key 重放旧回执（REPLAYED），同一公司持久化批次混合 → `DOMAIN_ACK_MIXED_REPLAY_STATE`（control）→ run FAILED。
+- 改动：
+  - `social-fetch/v1` 的 status 上界放宽到 999（状态码只是事实记录；LinkedIn 999 是已知的非标准反爬码）。
+  - ToolBroker 投影拒绝路径改为**按实付结算、无 durable result**，并抛非控制错误 `TOOL_DURABLE_RESULT_PROJECTION_REJECTED`（适配器按源跳过；后续同 key 重放读回已结算的无结果行，按 remnant 吸收）——任何投影契约外的上游行为不再以 fail-closed 形式打死整条活动。
+  - 撤销联系人阶段 model 操作的 attempt 隔离键（保留 #728 的 remnant 吸收）：重试一律**重放**已结算操作，不重跑、不重复计费。
+  - 联系人持久化改为**按适配器分批确认回执**（对齐 signals 阶段的 ack-split 先例）：部分重试时「已确认的适配器（REPLAYED）」与「首次成功的适配器（APPLIED）」不再进同一批次，`DOMAIN_ACK_MIXED_REPLAY_STATE` 不再由跨适配器混合触发。同一适配器在一次重试里多出全新回执的极端混合仍按失败关闭处理（与 signals 阶段现状一致，记为后续）。
+  - 查询阶段把 `TOOL_DURABLE_RESULT_PROJECTION_REJECTED` 与「不可重放操作」同等吸收：该 provider 以零回执收口（governed/legacy 两种模式都计入），不再以 lineage 回执不匹配的 control 错误打死整条 run。
+  - 防同类再犯：`social.fetch` 的页面文本按 durable 契约整形（去 NUL、孤立代理项→U+FFFD、NFC、按码点边界截断）——原始 HTML 的 NUL/NFD/代理对切口此前同样会让投影拒绝；ToolBroker 在任何出网与预留之前拒绝**未注册的 typed projection schema**（部署缺陷 fail-closed，不再「付了钱但结果永远投影不了」）。
+- 测试：`social.fetch` 999 投影、ToolBroker 结算+拒绝路径、旧「no-second-wire」用例改为新契约；联系人 stage、回执消费者与工具全组单测见 PR。
+- 部署：无迁移；随下一班车上线后重跑联系人验收。
+- 说明：撤销 attempt 隔离键后，重试改为重放已结算操作、通常不再新增花费；每次 attempt 仍各有一份基线，run 账户剩余额与两次基线的和仍构成绝对上界（#733 片段已同步更正）。工具侧投影契约外的上游结果在联系人、查询与富集阶段都以「按源跳过/零回执」收口；**model 侧**投影拒绝（router-model-gateway 的 projection catch）仍是 fail-closed，未在本次范围内（记为后续）。代价是重试可能吸收残留而少跑某个适配器的结果（best-effort，与 #728 的吸收纪律一致）。
+- 未做：没有回填第八班 GainOS run `3649e39a` 的失败统计（其 stats.failure 已由 Docker 会话取证）；撤销 attempt 隔离键后重试可能吸收残留而少跑某个适配器的结果，属已知取舍；model 侧投影拒绝（router-model-gateway）的同类 fail-closed 路径未改——且撤销 attempt 键后，重试会把该次 model 调用按 remnant 永久跳过。
+
+## 2026-11-02 · Keep model refusals in qualify-fit out of the rejected queue (#736)
+
+- 起因：run `3212f6f3`（生命科学域 ICP）的 4 次 `discovery.qualify_fit` 调用中 3 次被上游模型拒答——HTTP 200、各门填「本服务不支持……生命科学研究……」「不支持以中文提出的请求」等拒绝文案，`verdict` 却填成合法枚举 `mismatch`，schema 校验看不出问题；fit-judge 只校验枚举，3 家候选因此被自动进 `rejected`。同 ICP 上午在 `gemini-4-argon-high` 下判定正常（4 match / 10 weak / 7 mismatch）。
+- 改动：`judgeFitCompany` 增加拒答签名检测（`looksLikeModelRefusal`）。命中时按 fail-safe 归一为 `weak` 并写合成的四门说明与原文摘录（「疑似上游内容策略拒答，转人工复核，不自动拒绝」），绝不 `mismatch`；durable receipt 照常透传。不在函数内自动重试：同一请求材料的 durable 预算操作键相同，重放只会拿回同一份拒答或撞 `BudgetOperationReplayError`，真正解法是换不拒答的模型路由。
+- 测试：`fit-judge.spec.ts` 新增 3 例——事故原文（拒答）降级为 weak 且保留 receipt/摘录、真实证据型 mismatch 不受影响、合法的 unclear 门不被误判为拒答；原 15 例照旧通过。
+- 未做：不改 `discovery.qualify_fit` 的模型路由（共享 runtime，由产品负责人决定）；不改 durable 结果投影（receipt 保留原始拒答，人工可按摘录溯源）；不改 backlog 路径的判定语义（复用同一函数，行为自动一致）。
+
+## 2026-11-02 · Stop the planner from writing trade_fair queries no registered fair can serve (#739)
+
+- 起因：`trade_fair` provider 只能跑注册表（`TRADE_FAIRS`）里已登记的展会——目前只有 EuroBLECH 2026（钣金/金属加工），`selectFairs()` 用 ICP 行业词/关键词匹配模板 topics，无命中就静默返回零记录。生命科学类 ICP 的 trade_fair 查询因此必然空跑：run `3212f6f3` 的 8 条此类查询全部零结果、无报错、无成本（`3ad22469` 的方案里也有 3 条）。
+- 改动：`plan-query-sources.ts` 新增 `icpMatchesRegisteredFairs()`（与 provider 同一 `selectFairs()` 判定）与 `plannerVisibleSources()`；`generateQueryPlan` 用它们从「可用数据源」提示词中剔除无展会可跑的 trade_fair（`hasPlannableSource` 与 `plannerSourcePrompt` 改用 planner 可见列表）。路由校验仍用完整 `enabledSources`：模型若仍写 trade_fair 查询，不会按 SOURCE_DISABLED 移出（它会照常执行、只是空跑），也不改变已有计划的语义。
+- 测试：`plan-query-sources.spec.ts` 新增 4 例（命中/不命中/可见性过滤/单独 trade_fair 不可规划）；`icp.service.spec.ts` 新增 3 例（金属 ICP 提示词含 trade_fair、生命科学 ICP 不含、trade_fair 为唯一启用源且无展会时 409 不花钱）。两文件 120 例全绿。
+- 未做：不扩展会注册表（内容+ToS 工作量另议）；不改 provider 的空结果口径；不改 backlog/评分路径。
+
+## 2026-11-02 · Close the two recorded fail-closed residuals of the contact projection fix (#740)
+
+- 起因：#734 修复工具侧投影拒绝后，审查记录的两个 fail-closed 残留：①model 侧投影拒绝仍留 RESERVED + control 错误（重试后该次调用按 remnant 永久跳过）；②联系人同一适配器在同次重试里新增回执（如进程级熔断在两次 attempt 间清零后补抓）仍抛 `DOMAIN_ACK_MIXED_REPLAY_STATE`。
+- 改动：
+  - **model 侧**（`router-model-gateway`，受保护文件已重钉 sha256）：与工具侧同款——有效 provider 输出但无法表示进 durable 契约时，按 provider 上报成本结算（无 durable result），并抛类型化非控制错误 `MODEL_DURABLE_RESULT_PROJECTION_REJECTED`（自身字段只含 code/name/message，分类器可机器判定为非 control）；调用方按普通失败处理（fit 计 unjudged、抽取跳源），同 key 重放读回已结算无结果行并按 remnant 吸收。
+  - **联系人回执**：批量确认助手新增可选参数 `onMixed: 'reject' | 'apply'`（默认仍 reject，signals 等调用方行为不变）；联系人持久化传入 `'apply'`——persist 按身份 upsert/合并、可安全重放，混合态按 APPLIED 执行一次，不再把整条 run 打成失败。
+  - 审查补强：`settledModelFailureReason` / `settledModelUpstreamFailureReason` 识别该错误——发现侧 provider 以零回执跳过该域（不再以 lineage 回执不匹配的 control 错误打死查询），ICP/query-plan/draft 的 HTTP 面给出 502 `MODEL_UPSTREAM_UNUSABLE` 合约；taxonomy 归一失败仍计入 `taxonomyFallback` 统计；修正 `@Injectable()` 误挂到错误类上的修饰器位置。
+- 测试：model 网关投影拒绝的结算与非控制分类断言、两个失败分类器的新用例、domain-ack 混合 apply 用例、联系人 stage 与回执消费者全组；全量单测见 PR。
+- 部署：无迁移；随下一班车上线。
+- 未做：混合 apply 会为已持久化的联系人重复写 `field_evidence`（罕见路径，后续可加去重）；domain-ack 的分区变体未加 `onMixed`（当前无调用方需要）。
+
+## 2026-11-02 · Refresh current status to the 2026-11-02 baseline and move the release plan to docs/status (#741)
+
+- 起因：`docs/status/current.md` 停在 2026-10-30，与 10-31 之后的 R4 权威迁移、GrowthOS 退役、十班车、联系人线 M1–M4、Phase 1a 安全热修不符（run/lead/个人数据表计数、身份分工、模型路由均是旧值）；ADR registry 与冲突登记多处仍写「R4 撤销链未打通」「Grant 由 GrowthOS 签发」「L4-G23 未做」；文档规则要求的 `docs/status/release-plan.md` 承接一直没有执行。
+- 改动：
+  - `docs/status/current.md` 刷新到 2026-11-02 基线（35 次 run：13 PARTIAL/22 FAILED/0 COMPLETED；lead 5 221；个人数据三表 80/61/268；outbox 468 全 ACKED；运行镜像 `a428afab`（build `2fa46564`）；身份与 R4 权威在 gain-saas；模型路由 `qualify_fit→gemini-3.8-flash`）。
+  - `docs/roadmap/release-plan.md` 迁到 `docs/status/release-plan.md`，全部现行引用与机器规则（`docs-verification-policy.json`、三个治理脚本）同步；`docs/archive/` 历史文档不改。
+  - ADR registry `PRD4-D2` 行、冲突登记 `PRD4-D2/D6/D9/D13/D16/D18`、§1.1 核验基线、capability-register 基线：按 2026-11-01/11-02 的 live 事实与拍板结果刷新或标注历史。
+  - `docs/README.md` 增加「历史与冻结文档的定位」：research/platform-top-level-design-v1 为 SUPERSEDED、frontend/ 为目标规范非 as-built、site-builder 为冻结线。
+- 测试：`node scripts/verify-docs.mjs` PASS（0 errors / 1 既有历史告警）；`node --test scripts/model-candidate-baseline.spec.mjs` 7/7。
+- 未做：不改 `docs/archive/` 与历史研究正文；gain-saas 仓的 PRD 提评审在 gain-saas 另开 PR；文档正文不写入任何未核验的运行断言。
+
+## 2026-11-02 · Trigger company understanding from intake with an execution grant, and bound JWKS fetches
+
+- 起因：intake 创建 CompanyProfile 后从不发 `CompanyProfileCreated`，事件也不带 workspace 执行授权，经注册引导入驻的公司永远没有理解与 Claim/Offering；JWKS 验签的远端拉取无超时与大小上限。
+- 改动：intake 接受可选 `X-Execution-Budget-Grant`（新增请求作用域 `POST /site-builder/intake`）；同事务消费并写 `CompanyProfileCreated` v2；缺授权时返回 `understanding=not_started`；新增报价 envelope 与 OpenAPI；JWKS 拉取加 2 秒超时与 64 KiB 上限。
+- 测试：intake service/controller、JWKS bounded fetch、预算 envelope 共 49 个用例通过；OpenAPI 已重导出。
+- 未做：不改理解工作流主体与预算语义；不在引擎内重试模型拒答（另见 fit-refusal-guard PR #736）；onboarding 的 grant 签发在前端 Phase 1 接入。
+
+## 2026-11-01 · Enrich social profiles from Wayback archives and live public pages (#709)
+
+- 起因：M2a 的 social_presence 只读搜索索引标题；产品负责人 2026-10-31 拍板允许直爬无需登录的公开个人页（D1），并要求优先取档案副本，降低对目标站的依赖与共享出口 IP 的风险。另查明 M2a 在现网从未产出：`searxng.search` 按 personalData:false 把个人主页 URL 全部过滤，适配器拿不到任何候选。
+- 改动：
+  - 新工具 `social.search`（personalData:true、独立 `social-search/v1` typed projection、PERSONAL_DATA）：只返回公开个人主页（LinkedIn `/in|/pub`、Xing `/profile`）的 URL+标题，供联系人发现使用；`searxng.search` 的隐私契约保持不变。治理清单 18→19 个工具。
+  - social_presence 适配器增加 L1 档案副本层（Wayback availability → http.get 读 web.archive.org 快照；只认 3 年内、200 快照，http 归一 https）与 L2 公开页直抓层（http.get 读 LinkedIn 公开页，HTML 清洗后经 contact.find_decision_makers 抽取职务/部门/邮箱），抽到的人必须同时命中候选姓名与公司名；Xing 访客页是 SPA 壳，只走档案层。
+  - 每注册域 ≤1 req/3s 节拍器 + 连续 3 次目标站拒绝（403/429/999/登录墙）熔断 30 分钟；本地闸门/超时/网络错误不计熔断；熔断只门控直抓层，档案层不受影响。登录墙识别只收墙页独有短语（未登录页面的 "Join now"/"Anmelden" 导航不再误判）。计数经 stats.contacts.diagnostics 进 run 统计。
+  - 修复联系人发现的两个静默空结果缺陷：core 未传 artifactSubject，crawl4ai.fetch/http.get（subject-bound）会被 Broker 持有；回执生产者名单缺 social.search/http.get，adapter 的 onDurableReceipt 会抛 DOMAIN_ACK_CONSUMER_BINDING_MISSING 并被吞。
+  - 抽取管线（contact.find_decision_makers 的 prompt/durable schema）抽成 contact-extraction.ts，decision_maker 与 social_presence 共用；姓名/邮箱/电话在适配器内先本地校验（乱码邮箱只丢邮箱、不丢整条联系人）。
+  - source_policy 种子新增 linkedin.com / de.linkedin.com / xing.com（REVIEWED_RESTRICTED，负责人接受的 robots 例外域）与 archive.org / web.archive.org；`decision-maker-multi-source-spec.md` 合规红线按 D1 改写；设计稿 D1–D8 全部拍板并入库 `docs/superpowers/plans/2026-10-31-contact-discovery.md`（APPROVED）。
+- 测试：social-presence 18 用例（快照新鲜度/登录墙误报/HTML 实体/同名跨转写/档案与直抓流程/熔断归因/节拍/无抽取器跳过）+ 新工具 social.search 3 用例；全量 API 单测通过（1 个 revocation 时间边界用例首跑负载假红，单跑通过）；execution-authority-policy 19 工具/41 callsites PASS。
+- 部署：无迁移。上线后 worker 启动 seed 会把 social_presence 置 ENABLED（现网尚无该行）；联系人阶段需要 `decision_maker` provider config 的 lawful basis（2026-11-01 已按全局 interim 写入）。**上线前实证**：验证 run 7b887405（现网镜像，仅含 M1）联系人阶段 8/8 公司失败，worker 日志全部为 `tool crawl4ai.fetch denied: GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD`——本 PR 的 artifactSubject 修复正是为此；部署后须重跑验收。
+- 未做：L1 的 Common Crawl 索引来源；跨进程（API+worker）共享的 Redis 节流/熔断（当前为进程级，最坏 2×3s 节拍）；D5「每家 ≤6 页」的跨适配器强制（decision_maker 4+首页、社媒 4，最坏 9）；D2 的 trade_fair 开关翻转（数据库 ops，另行执行）；google_patents 启用（等 patent cache 验证与刷新计划恢复）；D7 联系人独立预算账户；D8 OSS sidecar（theHarvester/social-analyzer）。
+
+## 2026-11-01 · Add an audited, receipt-paired reopen path for the platform egress fence (#711)
+
+- 起因：签名撤销会把平台 schedule 的出网围栏置为 `DISABLED`，但产品没有设计好的重开路径——`install_platform_egress_policy_v2` 与两个发送阶段都要求 `ACTIVE`。2026-10-31 撤销 fence 实测后只能由库属主手工 `UPDATE` 恢复 dev（见 `docs/evidence/2026-11-01-platform-admission-v2-and-revocation-fence.md`）。
+- 改动：
+  - 新增迁移 `20261101010000_platform_egress_fence_reopen`：`reopen_platform_egress_fence_v1`（SECURITY DEFINER、owner-only、generation CAS、与 `platform_revocation_receipt` 的 `(schedule_id, fence_sequence, generation)` 精确配对、advisory lock + fence 行锁）与不可变审计表 `platform_egress_fence_reopen_receipt`（FORCE RLS、无任何运行角色表权限、UPDATE/DELETE/TRUNCATE 触发器拒绝）。
+  - 重开只把围栏改回 `ACTIVE` 并推进 generation，`fence_sequence` 不变；不安装策略、不撤回已 `SENDING` 的物理调用、不改变撤销/ACK 语义，也不 unpause 任何 schedule。
+  - 迁移内 DO 自检（函数 ACL/`search_path`/属主 RLS 能力、审计表 RLS 与触发器、四行围栏）与 `docs/governance/app-user-table-privileges.json` 同步。
+  - 设计 `docs/superpowers/plans/2026-11-01-egress-fence-reopen.md`，运维说明 `docs/backend/platform-egress-fence-reopen.md`。
+- 测试：`node --test scripts/platform-egress-fence-migration.spec.mjs`（9 项迁移契约）；`PLATFORM_EGRESS_FENCE_REOPEN_DISPOSABLE_TEST=1 node --test packages/db/test/platform-egress-fence-reopen.disposable.spec.mjs`（8 项，一次性 pgvector:pg16，无网络）覆盖成功重开、重放/篡改、无回执与二次关闭、策略缺失、并发、回滚、owner-only 与不可变审计。
+- 未做：四个平台 schedule 仍 paused；运行镜像的发布与切换、在 dev managed runtime 上演示 `/health/ready` 恢复需要单独部署授权。gain-saas 运营台/CLI 的调用接线未做。
+
+## 2026-11-01 · Renew the production dependency audit baseline before it expires on 2026-11-10 (#713)
+
+- 起因：生产依赖漏洞基线 2026-11-10T05:13:39Z 到期。到期后改了依赖输入的 PR 的 `production dependency delta · canary` 和 main 的 freshness canary 都会失败（依赖输入未变的 PR 不读基线，照常通过），所以要在到期前续期。
+- 改动：
+  - 锁文件自 10-28 qs 重绑（#693）以来没有变动，按 [依赖刷新 runbook](../backend/dependency-refresh.md) §4「到期续期」只换绑定、延有效期：基线改绑到当时的 main 提交 `9fa20859`，`valid_until` 由 2026-11-10T05:13:39Z 延至 2026-11-14T18:27:04Z，不升级任何依赖。
+  - `scripts/supply-chain-gates.spec.mjs` 同步钉住的基线提交与 `REPOSITORY_BASELINE_NOW`。
+  - 新增[冻结证据](../evidence/security/20261101-baseline-renewal.json)，[安全门](../security/README.md) 与证据索引各加一条记录。
+- 测试：官方 registry 生产审计零 advisory（830 个依赖），`supply-chain-audit.mjs verify` 为 `PASS_CLEAR`，新旧绑定下的 `baseline-freshness` 都是 `FRESH`；直接调用 `evaluateProductionAuditBaselineFreshness` 投影：旧基线在 2026-11-10T05:13:38.999Z 还是 `FRESH`、05:13:39.000Z 起 `BASELINE_EXPIRED`，新基线到 2026-11-14T18:27:04Z 前保持 `FRESH`。含开发依赖的全量审计有 6 条 advisory（`@vitest/mocker` 两条、`glob`、`minimatch`、`deepmerge`、faker 5.5.3），全部在生产依赖图之外，没有生产侧新增；`supply-chain-gates.spec.mjs` 28/28 通过；`gctl check`（docs · governance、prisma generate、contracts build、lint、build · typecheck、零容器单测）通过，其中全量单测首轮唯一失败为已登记的 `git-reviewed-evidence-acceptance` 负载假红，单跑 19/19 通过后全量复跑通过。
+- 未做：不升级任何依赖；含开发依赖的全量审计的 6 条 advisory 均在生产依赖图之外，留待单独的开发依赖 PR；11 月月度批量刷新另行立项，须在 2026-11-14 前合入或再续期一次。
+
+## 2026-11-01 · Give contact discovery its own budget account and enable run-time email completion (M3) (#714)
+
+- 起因：产品负责人 2026-10-31 / 2026-11-01 拍板 D7 与 D3/D5——联系人是高成本步骤，必须有自己的额度、撞顶即停，不挤占 run 的查询/画像/评分预算；`email_guess`（SMTP 只握手、绝不投递）在 M3 启用，自动路径沿用全局 interim 合法性基础。
+- 改动：
+  - 新增 `execution-budget/contact-discovery-budget.ts`：按 run 派生 `contact.discovery:<runId>` 子账户；上限 = 每家公司 $0.0625（D5：≤6 页 × $0.01/页）× 本轮目标公司数（默认 8 家 ⇒ $0.50/run），用 run 账本剩余额的**单调高水位**差值计量（阶段开始前持有、阶段中才释放的预留不会把已观察到的花费抹掉），撞顶后不再启动任何 adapter 或下一家公司。
+  - `discoverContactsCore` 接受可选子预算守卫：adapter 循环在子账户耗尽时停止并回报 `budgetTruncated`；HTTP `discover-contacts` 路径不传守卫，响应形状不变。控制错误（`ExecutionControlError`）在活动里按本仓惯例重新抛出，不再吞成 `failed` 计数。
+  - `discoverRunContacts` 派生子账户并每家公司观察账本剩余额；`contacts.budgetTruncated`（沿用原口径，run 状态照旧降为 PARTIAL）之外新增 `contacts.contactBudget{accountKey,capMicrousd,spentMicrousd,exhausted}` 写入 run stats。
+  - 新增 `discovery/contact-stage-email-guess.ts`：run 联系人阶段对缺邮箱的具名联系人做 SMTP 补全。双闸 = `data_provider.email_guess` ENABLED + `decision_maker` config 的部署级 lawful basis（全局 interim）；验证器**只认** `smtp_self`（`public_web` 只剩 MX，不能服务自动路径）；自动路径绝不传 `allowPersonalWithoutBasis`；每公司 ≤6 次探测（跨该公司全部联系人共享，`MAX_RUN_EMAIL_PROBES_PER_COMPANY`；单次调用仍受既有 `MAX_EMAIL_PROBE_CANDIDATES`=8 约束）；company/contact/email 三层禁联在每次探测前复核；结果只落 RISKY 或（SMTP RCPT 接受且 catch-all 已证伪时）VALID，未证实绝不升 VALID；SMTP 回执按既有 domain-ack 纪律入账（原始键名避开 PII 提示词，否则 `validateDomainAckRawIdentity` 直接拒绝）；单个联系人失败只计数并继续，已完成的猜测与其回执照常落库。
+  - 探测是零账本成本的（`smtp.rcpt_probe` 计价 0），因此美元子预算耗尽不阻断邮箱补全；只在 run 账户本身耗尽后停止。
+  - run stats 新增 `contacts.emailGuess{emaillessContacts,attempted,probes,persisted,verified,risky,blocked,failed}`，落库的猜测邮箱计入 `contacts.emails`。
+- 测试：新增 3 个 spec 共 29 个用例（预算纯件 8、邮箱补全 10、run 联系人阶段 11），覆盖动态上限、单调高水位、撞顶即停、run 账户耗尽沿用口径、双闸与验证器白名单、每公司 6 次探测、RISKY 不升 VALID、单联系人失败隔离、禁联与回执生产者/键名校验纪律；每条修复都用反向变异（还原成旧行为）验证过会红。`gctl check` 全绿（docs·governance、prisma generate、contracts build、lint、build·typecheck、全量零容器单测）。
+- 未做：真正的第二本账——workspace grant 的 authority 只允许开一本 `tool_budget_account`，且 `execution_budget_*` 是平台表；D7 目前是同一 run 账本内的派生记账键 + 硬性窗口计量，要账本级隔离需 gain-saas 以新 purpose（contact.discovery）签发 Grant，仓外另行推进。Temporal 重试会重新取子账户基线（每 attempt 一份上限；已结算操作经账本幂等重放不重复计费）。run 路径的补全编排与手动 `guess-emails` 路径仍有两份实现，宜抽共享例程。D5「每家 ≤6 页抓取」的跨适配器强制仍是 M2b 遗留。`email_guess` 的 `data_provider` 开关翻转、真实 SMTP 探测验证与部署不在本 PR。`contact_point` 没有 PROBABLE 状态，未证实猜测一律 RISKY。
+
+## 2026-11-01 · Fetch social-layer pages through a dedicated typed-projection tool (#717)
+
+- 起因：第六班验收 run `1c233bb6` 在联系人阶段以 `GENERIC_OPERATION_ARTIFACT_INVALID` → `BudgetOperationReplayError` 失败——社媒适配器用 `http.get` 抓 Wayback availability（带 `?url=` 查询串）与快照页（14 位时间戳、大小写混合路径），而这两类工具是 subject-bound artifact，其持久化 URL 契约（无 query、纯小写、数字 <9 位）由 `artifact-expected-facts.ts` 强制，社媒目标 URL 天生违反。单测 mock 了 broker，无法暴露。
+- 改动：
+  - 新工具 `social.fetch`（typed projection `social-fetch/v1`，PERSONAL_DATA，`{url,status,text≤36k 字符}`，目标主机白名单 = Wayback + LinkedIn/Xing 个人页）：社媒层三条抓取（availability JSON、档案快照、直抓）改走它，不经工件层；`perDomainCrawlDelayMs=3000` 由 broker 的 Redis limiter 执行，因此移除适配器内的进程级节拍器（熔断保留，仍为进程级）。
+  - 治理同步：工具清单 19→20、callsite 清单 social-presence 的 3 条 `http.get` 改为 `social.fetch`（总数 41 不变）；`contact.find_decision_makers` 的 allowedTools 以 `social.fetch` 替换 `http.get`；回执生产者、domain-ack 绑定、durable-result-strategies、catalog projection（含边界夹具与顺序锁定）、policy 常量与 spec 全部更新。
+- 测试：新工具 4 用例（主机白名单/文本界限/egress 拦截/投影往返）；social-presence 用例改 mock 为 `social.fetch`；全量 API 单测通过；execution-authority-policy 20 工具/41 callsites PASS。
+- 部署：无迁移。上线后需重跑联系人验收（上一轮 5 名具名联系人已落库——2 家公司 Geschäftsführer/技术销售带邮箱+电话——失败只发生在有社媒候选的公司）。
+- 未做：旧验收 run 中已产生的 `BudgetOperationReplayError` remnant 会按 #684 的残留吸收逻辑在后续请求中自然消化；跨进程熔断仍为进程级（记录在案）。
+
+## 2026-11-01 · Add a narrow contact-discovery read scope for named-contact surfaces (#718)
+
+- 起因：联系人挖掘 M4 需要 SaaS 工作空间管理员读取并操作具名联系人（canonical 公司详情、发现、猜测、验证）。这些端点原先要求 `personal-data:read`，而该 scope 只授予事件消费机器身份；若为了 M4 把它整体授给用户角色，会同时打开事件流、线索详情与建站档案等其它个人数据面，超出本功能所需。
+- 改动：
+  - 新增闭合 scope `contact-discovery:read`，只覆盖具名联系人数据面。
+  - `GET /api/v1/canonical-companies/{id}`、`POST /api/v1/canonical-companies/{id}/discover-contacts`、`POST /api/v1/canonical-companies/{id}/guess-emails`、`POST /api/v1/contact-points/{pointId}/verify` 从 `personal-data:read` 切换为 `contact-discovery:read`；三个写端点仍同时要求 `acquisition:write` 与 `compliance:manage`。
+  - 同步操作描述、authz OpenAPI 断言与 scope 词表测试；OpenAPI 契约按装饰器重导出。
+- 测试：`pnpm --filter @global/api test`（scopes 词表、OpenAPI `x-required-scopes` 断言）；contracts 重导出后 drift 检查。
+- 未做：不改变 `personal-data:read` 的既有语义与授予对象；不在本 PR 修改 SaaS 角色映射或部署配置（`contact-discovery:read` 需由 gain-saas 仅授予 `saas-admin`，并在引擎发布该 scope 后一起上线）；`discover-contacts` 的 workspace 报价仍 fail-closed（联系人阶段预算账户/报价是另一个缺口）。
+
+## 2026-11-01 · Make the runtime image publication checks independent of the Docker storage driver (#719)
+
+- 起因：第七班发布 run 41311045932 两次在同一步失败——镜像构建成功，但推送前本地校验静默退出 1。根因：GitHub runner 切换到了 containerd 镜像存储，`docker image inspect .Id` 从 config 摘要变为 manifest 摘要，而 workflow 的断言假设二者相等（6 小时前同流程在 classic 存储上成功）。
+- 改动：发布 workflow 改为存储驱动无关的身份校验——构建步骤额外产出 config 摘要并在 `.Id` 与 config 摘要不等时用 `docker save` 归档内 `manifest.json` 的 Config 条目自校验；发布步骤把「拉回镜像 `.Id` 等于本地 Id」替换为「拉回镜像存档的 config 字节哈希等于构建时被 attest 的 config 摘要」，其余标签/用户/entrypoint/verifier 校验不变。
+- 测试：workflow 由下一次真实发布 run 验证（本 PR 的 CI 走治理与构建门）。
+- 未做：不改变镜像内容、attestation 语义与发布产物；classic 存储路径保持向后兼容（分支式断言）。
+
+## 2026-11-01 · Quote on-demand contact discovery from per-company adapter ceilings (#720)
+
+- 起因：M4（gain-saas 决策人卡片）需要工作空间管理员按需对单家公司触发联系人发现；G2（#570）起 workspace 技术报价对该操作 fail-closed（`EXECUTION_BUDGET_QUOTE_UNAVAILABLE`），SaaS 无法铸造一次性 Grant，发现入口不可用。产品负责人 2026-11-01 决定补 workspace 报价。
+- 改动：
+  - 为 `POST /api/v1/canonical-companies/{id}/discover-contacts` 新增 per-company 报价包络：按 6 个联系人适配器（decision_maker / public_web / companies_house / inpi_rne / social_presence / bigquery_patents）各自的物理上界枚举模型与工具配额；reservation cap = 260 cents（8 次抽人模型 × 2 wire × 15 cents + 8 页 `crawl4ai.fetch` + 12 次 `social.fetch`）。
+  - 抽出共享上界常量（public_web 链接页 2、社媒 dork 4、每个候选社媒页抓取 3、Companies House 2 次调用），适配器与包络共用；非法边界仍 fail-closed。
+  - 更新包络与报价 controller 的断言；重导出 OpenAPI 契约（无 drift）。
+- 测试：包络 spec（精确模型/工具配额与 cap）、报价 controller spec（subject=company、purpose=discovery.run、cap `2600000`）；全量零容器单测。
+- 未做：不改变 D5 的实际花费口径与 run 内 `contact.discovery` 子账户；不新增账本行/迁移；联系人仍不进公司级 reachability；discover 的 lawfulBasis、禁联与预算 Grant 一次性消费等既有 Gate 不变。
+
+## 2026-11-01 · Fix the publication recovery path for the containerd image store (#721)
+
+- 起因：第七班重发 run 41315984975 构建成功、推送成功，但 GHCR 标签可见性延迟超过 30 秒等待窗，resolve 返回 NOT_FOUND；同时发现「已发布镜像的恢复路径」里还有一处与 #719 同源的 `.Id == config 摘要` 断言，在 containerd 存储下同样会失败（恢复模式一旦触发即挂）。
+- 改动：恢复路径改用与构建步骤相同的存储无关自校验（`.Id` 与 config 摘要不等时用 `docker save` 归档内 `manifest.json` 的 Config 条目比对）；发布步骤的 resolve 等待窗 30s→120s 以吸收 GHCR 标签可见性延迟。
+- 测试：发布契约测试 `runtime-deployment-contract.spec.mjs` 全绿；下一次真实发布/恢复 run 验证。
+- 未做：不改镜像内容、attestation 语义与发布产物；已推送的 ea9bbbbe…d1969948 标签保持原样，恢复模式会复用并补齐 attestation。
+
+## 2026-11-01 · Surface failed website understanding and let it be retried (#722)
+
+- 起因：2026-11-01 一个真实租户的官网理解因模型网关 429 突发失败后，档案停在 `DRAFT`，接口与 GainOS 界面都无法区分「排队中」和「已失败」，也没有重试入口；原创建工作流的 3 次快速重试在约 3 秒内耗尽。
+- 改动：
+  - `GET /companies`（列表/详情）返回 `understandingFailedAt` / `understandingLastError`，失败可见；
+  - 新增 `POST /companies/:companyId/understanding/retry`：只允许对「最近一次理解失败、仍为 DRAFT」的档案重试，必须带**新的** workspace Execution Budget Grant（quote operation `POST /companies/:companyId/understanding/retry`，purpose `understanding.run`、subject 为 company），成功后重新入队 `understandingWorkflow`；
+  - understanding 工作流的模型活动重试改为 5 次、5s 起指数退避（最长 60s），对 429 突发提供约 75 秒覆盖。
+- 测试：company 服务重试守卫与事件载荷单测；quote/scope/envelope 三处契约用例补 retry operation；`gctl check` 全绿。
+- 未做：跨模型/渠道 fallback（仍需单独立项）；GainOS 侧重试入口在 gain-saas 仓单独 PR。
+
+## 2026-11-01 · Retry the GHCR digest read-back within its bounded wait (#723)
+
+- 起因：第七班 run 41317912037 构建与推送都成功，但 `ghcr-runtime-publication.mjs resolve` 的 `--wait-ms` 有 60 秒硬上限，工作流把等待窗调到 120 秒后直接被判 `GHCR_INPUT_INVALID`；而 GHCR 标签可见性延迟实测超过 30 秒。
+- 改动：改用「脚本内 60s 等待 + 工作流层有限重试」——最多 4 轮 resolve（每轮 60s 等待 + 15s 间隔），全失败才让步骤失败；不修改脚本本身的输入契约。
+- 测试：发布契约测试 18/18 绿；下一次真实发布 run 验证。
+- 未做：不改镜像内容、attestation 语义与发布产物。
+
+## 2026-11-01 · Retry the GHCR digest read-back by status, not by exit code (#724)
+
+- 起因：`ghcr-runtime-publication.mjs resolve` 对 FOUND/NOT_FOUND 都返回退出码 0（NOT_FOUND 只打印 `{"status":"NOT_FOUND"}` 并写 `exists=false`），上一版的 `if resolve; then` 重试因此只跑一轮就放行，随后空的 `image_reference` 让断言失败。GHCR 标签可见性延迟实测可超过 60 秒。
+- 改动：重试循环改为解析 resolve 的 stdout 状态字段——最多 4 轮（每轮 60s 等待 + 15s 间隔），看到 `"status":"FOUND"` 才放行。
+- 测试：发布契约测试 18/18 绿；下一次真实发布 run 验证。
+- 未做：不改 resolve 脚本的输入/退出契约，不改镜像内容与 attestation 语义。
+
+## 2026-10-31 · Update the API portal intro to the gain-saas identity source (#702)
+
+- 起因：接口门户的接入说明写的是 GrowthOS 签发 JWT、token 声明名为 `workspace_id`，与 2026-10-29 起的 gain-saas 身份源（`https://127.0.0.1:18446`，claim 为 `workspace`）不符；配套的 `api-token` 工具仍走已退役的 GrowthOS 登录页，对接方拿不到可用于调试的 token。
+- 改动：
+  - `apps/api/src/docs/portal-intro.ts`：认证说明改为 gain-saas 签发、claim 名 `workspace`；机器通道（ExecutionBudget / PlatformAuthority）改称 gain-saas；地址表补充门户自身地址 `http://100.68.31.20:3000/api/portal`。
+  - `packages/contracts/INTEGRATION.md`：新增「模块与接口覆盖」一节（模块→分域→接口；无独立接口的模块说明数据从哪来；对接三个常见坑）。
+  - 工作区工具 `/global/local-config/bin/api-token` 改为经 gain-saas `EngineTokenSigner` 现铸 300 秒 token（不入本仓）。
+- 测试：用新 token 实测 `GET /api/v1/leads` 200；`nest build` 通过（CI `contracts · drift · lint · breaking`）。
+- 未做：门户文本随镜像构建生效，需下一次后端发版才会出现在运行中的门户。
+
+## 2026-10-31 · Discover named contacts inside a discovery run (#703)
+
+- 起因：获客主链能判站、画像、评分，但发现 run 的五个阶段从不调用联系人发现——`canonical_contact` 与 `contact_point` 一直是 0 行，客户只能看到公司级询盘表单，拿不到具体的人和联系方式（2026-10-31 设计稿 §一）。
+- 改动：
+  - `discovery.service.ts` 把「加载公司 → 多适配器 fan-out → 落库与证据」抽成共享核心 `discovery/contact-discovery-core.ts`；HTTP 端点（消费 Grant + 调用方 lawful basis）与新的 run 活动复用同一核心，落库语义与去重（`resolvePersonIdentity`）完全一致。
+  - 新活动 `discoverRunContacts`：信号阶段之后，对本 run `fit=match` 的公司按分数取 Top 8（上限 25），依次跑已启用的联系人适配器（官网 `decision_maker`、Companies House、INPI RNE 等）；**无部署级 lawful basis 时 fail-closed 返回 skipped**（读 `decision_maker` provider 的 `config.lawfulBasis`，沿用既有 interim 口径）；单家失败不阻断其余，预算耗尽即停。
+  - `discovery.workflow.ts` 新 patch `discovery-run-contacts-v1` 守卫该阶段（旧历史重放走原命令序列）；stats 新增 `contacts:{companies,people,emails,phones,skipped,reason?,failed?,budgetTruncated}`，预算截断计入 `budgetTruncated` → run 至少 PARTIAL。
+- 测试：`discovery.activities.spec.ts` 新增无 lawful basis 时 fail-closed；`workspace-authority.workflow.spec.ts` 新增「信号后调用并记录 stats」「无 patch 的旧历史不调用且不写 stats」「预算耗尽 → PARTIAL」三例；相关三套 387+ 例全绿。
+- 未做：前端入口（gain-saas 的发现/验证按钮）、社媒适配器（设计稿 M2）、邮箱猜测开关（M3，默认仍 DISABLED）；`decision_maker` 的 lawful basis 需在部署配置里写入后才生效。
+
+## 2026-10-31 · Open the workspace-scoped suppression list to tenant admins (#705)
+
+- 起因：G5（gain-saas 验收 2026-10-30 交回 backend）发现租户 admin 能 `POST /suppressions`（只要求 `compliance:manage`）却列不出名单（`GET` 额外要求 `personal-data:read`），形成「能写不能读」的盲写黑洞：加错删不掉、也看不到自己加了什么。禁联记录本身是 workspace 隔离的租户合规登记（数据主体反对/退订/投诉），不是引擎采集的招揽联系人。产品负责人 2026-10-31 拍板 D2-B，见 [G5 决策方案](../superpowers/plans/2026-10-31-g5-tenant-detail-contract.md)。
+- 改动：`GET /api/v1/suppressions` 的 scope 从 `compliance:manage` + `personal-data:read` 放宽为仅 `compliance:manage`；`personal-data:read` 仍不授予任何 SaaS 用户角色，联系人/事件流等个人数据面不受影响。同步更新操作描述、authz OpenAPI 断言与契约导出。
+- 测试：`authz-openapi.spec` 断言该端点 scope 仅 `compliance:manage`；重导出 OpenAPI 无其他漂移；零容器单测通过。
+- 未做：D1-A 的 gain-saas 侧 BFF 路由清理（移除 `GET leads/:leadId`、`GET canonical-companies/:id`）由 gain-saas 仓另行执行；未发布镜像。
+
+## 2026-10-31 · Admit platform schedule runs through signed v2 Grants issued by gain-saas (#706)
+
+- 起因：平台运行准入仍指向执行权已被收回的 `admit_platform_execution_budget_run_v1`，四个平台工作流起步即 `permission denied`；v2 链路（验签器 + ingestion 服务 + SQL）早已写齐但没有调用方，权威方也没有持久的平台 Grant 签发。
+- 改动：
+  - 平台 worker 的 `admitPlatformSchedule` 改为 quote → 经 mTLS 向 gain-saas 取平台 Grant → `ingestAndAdmit`（v2），workflowId 只从 Temporal 读取；`PLATFORM_GRANT_ENDPOINT` 进编排。
+  - 删除 `BudgetStore.admitPlatformRun`（v1）及其替身与测试。
+  - 新增迁移 `20261031140000_platform_writer_business_grants`：平台写入者补齐 10 张业务表的精确权限（先全收再授予 + 迁移内 DO 自检 fail closed），清单 `docs/governance/platform-writer-table-privileges.json` 与零容器一致性测试。
+  - 设计文档 `docs/superpowers/plans/2026-10-31-platform-run-admission-gainsaas.md` 转 `APPROVED` 并补施工注记（部署绑定 actionSha ≠ policy request sha，权威改持自己的策略副本）。
+- 测试：`APP_DATABASE_URL= vitest run` 全量 10496 passed / 199 skipped；`contracts build + nest build` 通过。
+- 未做：四个 schedule 仍 paused；启用与否由产品负责人单独决定。Cross-window 端到端（手动单次 run + 撤销 fence）在发版后验证。
+
+## 2026-10-31 · Discover decision makers from indexed social profiles (#707)
+
+- 起因：官网/注册处/展会之外还需要社媒与渠道。设计稿 §5.3b 的三层降级里，第一层是「搜索引擎已索引的公开片段」——零登录、零目标站抓取、零出口 IP 风险，先把它做成适配器（M2a）。
+- 改动：
+  - 新适配器 `social_presence`（`providers/social-presence.provider.ts`）：用 `searxng.search` 发定向 dork（`site:linkedin.com/in`、`site:xing.com/profile`，带公司名/域名与 ICP 目标角色），从结果标题解析「姓名 – 职务 – 公司 | 平台」；公司名不匹配的结果一律丢弃（防张冠李戴）；只保留个人主页路径（公司页排除）；同一 URL 去重。
+  - 联系人记录标 `personalData: true`、`license: 'public-index'`、`sourcePage` 为索引里的公开 URL；邮箱/电话留待 M2b（档案副本/公开页直抓）补。
+  - 注册表：适配器注册进 `contacts`（座席上限 5 → 6），`data_provider` seed 行 `social_presence` 默认 ENABLED（kill-switch 走本表 status）。
+- 测试：新 spec 5 例——dork 构造（角色词/域名锚定/空名）、标题解析（LinkedIn/Xing/单词名拒绝）、结果过滤（公司页/陌生人/非社媒/去重）、broker 调用与单查询失败容错、无 broker fail-closed。
+- 未做：档案副本（Wayback/Common Crawl）与公开页直抓（M2b）；theHarvester/social-analyzer/JobSpy 的 OSS 工具化；联系人阶段独立预算账户与 per-tenant LIA（设计稿 §5.3c/§5.3d，已拍板，M3）。
+
+## 2026-10-30 · Make the SSRF guard's DoH endpoints configurable with ordered fallback (#696)
+
+- 起因：出网护栏在系统 DNS 全部是 mihomo fake-IP 时走 DoH 反查真实地址，端点硬编码为 Cloudflare。2026-10-29 本机 `cloudflare-dns.com` 一度不可达（`dns.google` 与 `1.1.1.1` 同时被掐、而 `doh.pub` 正常），`POST /companies` 因此全部报 `INVALID_URL`，演示工作空间的验收入口直接停摆；一个 DoH 端点的可达性不该决定整台机器的出网解析。
+- 改动：
+  - `apps/api/src/adapters/net-guard.ts` 新增 `NET_GUARD_DOH_ENDPOINTS`（逗号分隔、仅接受 https 绝对 URL、按序去重）；缺省仍为 Cloudflare 再 Google，配置项全部非法时回落缺省，避免一处配错误伤全部解析。
+  - `dohLookup` 按配置顺序逐端点尝试（A 与 AAAA 并发），第一个给出非空答案的端点胜出；全部失败仍 fail-closed 返回 `dns_lookup_failed`，私网/fake+private 混合的拒绝逻辑不变。
+  - 导出 `parseDohEndpoints` 与 `DEFAULT_DOH_ENDPOINTS` 供测试与运维核对。
+- 测试：`net-guard.spec.ts` 15 例全绿——新增 4 例覆盖端点解析（缺省/空串/非法项/去重/全非法回落）、首个端点失败换下一个（断言两个端点都被请求）、全部失败仍 fail-closed、未配置时的缺省顺序。
+- 未做：没有改动 fake-IP 判定、私网拒绝与连接 pin 语义；也没有把 doh.pub 写进缺省列表（属部署侧决定，用 `NET_GUARD_DOH_ENDPOINTS` 配即可）。
+
+## 2026-10-30 · Let each acquisition task pick its own model (#697)
+
+- 起因：2026-10-30 产品负责人要求获客不要一个模型打天下，按各模型特点分配。#695 只给了两个档位（抽取档、推理档），像 fit 判定、开发信草稿、词表归一这类需求差异明显的任务只能挤在同一档里。
+- 改动：
+  - `apps/api/src/ai-tasks/task-registry.ts` 新增 `MODEL_ACQUISITION_TASK_MODELS`（JSON 对象，taskId → 模型名）。列出的任务用各自的模型，其余仍走 `MODEL_ACQUISITION_MODEL` / `MODEL_ACQUISITION_REASONING_MODEL` 两档默认；未知 taskId 与非字符串值忽略；整段 JSON 解析失败时整体忽略，一个笔误不会让进程起不来或静默清空未列出的任务。
+  - 导出 `parseTaskModelOverrides` 供测试与运维核对。
+- 测试：`task-registry.spec.ts` 10 例全绿——新增 3 例覆盖解析（丢非字符串、非法 JSON、空值）、覆盖只作用于列出的任务（其余保持档位默认）、非法映射整体回落档位默认。
+- 未做：默认不放任何覆盖（不配 env 时行为与 #695 完全一致）；模型清单与身份门未改，仍要求上游回显请求的模型名或已登记的 `MODEL_IDENTITY_SUBSTITUTES`。
+
+## 2026-10-30 · Read the latest outreach draft and consume a workspace grant only after the request's own checks (#699)
+
+- 起因：GainOS 验收发现两个引擎侧缺口——(1) 没有读取已有开发信草稿的接口，刷新/换设备后看不到历史草稿；(2) 受控端点先消费一次性 Grant 再做业务前置校验，同一请求被 422/404 拒绝后重新取 Grant 也会撞 `EXECUTION_BUDGET_GRANT_REUSED`，失败即无法重试。
+- 改动：
+  - 新增 `GET /leads/{leadId}/outreach-drafts`（`acquisition:read`），返回该线索最新一版草稿（无草稿时 `data=null`，契约按 nullable 标注）。
+  - 受控端点改为「先验证 Grant → 跑业务前置校验 → 才消费」：`ExecutionBudgetAuthorityService` 新增 `consumeVerifiedWorkspaceGrant`，ICP 设计、查询计划与开发信草稿三处接入；被拒绝的请求不再烧掉一次性 Grant。
+  - 开发信草稿生成默认幂等：该线索已有草稿时直接返回最新版、不再调用模型也不消耗 Grant（覆盖浏览器超时/关页后的重试）；读取已有草稿请用新增的 GET。
+- 测试：outreach 草稿服务新增「返回旧草稿不消费」「regenerate 生成新版本」「先校验后消费」用例；ICP 设计/查询计划相应断言更新；迁移无。
+- 未做：「重新生成/新版本」未提供——同一线索的预算账户键固定，第二次 Grant 在开户时必然 `409 EXECUTION_BUDGET_GRANT_REUSED`（账户与主体的绑定语义要另行设计）；G5（租户侧线索/公司详情去 `personal-data:read`）是产品口径决定，未包含。
+
+## 2026-10-29 · Stop re-acking crawl receipts in understanding offerings persistence (#694)
+
+- 起因：公司理解的模型抽取全部成功、`persistClaims` 已落库，但工作流在 `persistOfferings` 抛 `ExecutionControlError`，公司状态回到 DRAFT。根因是 `persistClaims` 已用 `crawl4ai.fetch` + domainAckKey `...:crawl` 确认每页爬取回执，`persistOfferings` 又用同一回执、同一 key 再确认一次：第二次得到 `REPLAYED`，而 offering 抽取回执是 `APPLIED`，`applyDomainAckConsumerTransactions` 检测到混合状态并抛 `DOMAIN_ACK_MIXED_REPLAY_STATE`。
+- 改动：`persistOfferings` 不再重复确认爬取回执；爬取回执只在 `persistClaims` 确认一次，offering 自己的抽取回执仍按 `...:offerings` 确认。没有改动 workflow 命令序列、预算账本或 schema。
+- 测试：本地引擎镜像构建成功，镜像 `org.opencontainers.image.revision` 与源提交一致；本地镜像部署被引擎 runtime-image verifier 和 GrowthOS platform authority 拒绝（未登记镜像），不是代码失败。正式镜像发布后需用一条全新公司档案重跑理解，确认状态到 REVIEW。
+- 未做：未在本机完成运行态验证；未迁移 GrowthOS 的平台 Grant/platform-worker trust root。
+- 部署：合并后由 `.github/workflows/publish-runtime-image.yml` 发布镜像，再用 `gctl switch-backend <digest>` 切换并完成 GrowthOS 侧登记。
+
+## 2026-10-29 · Make provider-billing settlement readback opt-in and acquisition model names configurable (#695)
+
+- 起因：获客网关换成新的 new-api 中转站后，产品负责人决定**不再读取中转站的账单结算**（原来 Site Builder 的按请求结算回读是 API/Worker 的硬就绪门，缺凭据就整体不就绪）；同时获客任务把模型名写死在代码里，换模型要改代码发镜像。
+- 改动：
+  - 结算回读改为**部署级可选能力**：`MODEL_GATEWAY_SETTLEMENT_READBACK_CREDENTIAL` 缺失即视为未启用——`runtime-admission` 的网关检查、`checkSiteBuildSettlementReadbackReadiness`、worker 与快车道 worker 的 catalog / readback 就绪保持全部跳过；凭据存在而 keyring/catalog 缺失时仍 fail-closed。未启用时付费 Site Builder 的**模型调用**在调用点拒绝（`PERSISTENT_LEDGER_UNAVAILABLE`），不会静默不结算；付费**工具调用**仍走本地 provider-wire 账本预留（建站自 9-23 冻结，这是已知限制，重新启用结算回读后恢复对账）。worker 的 provider-wire 数据库是本地账本、与账单回读无关，仍是 worker 的启动前提，就绪检查保持无条件要求。
+  - 获客模型改为环境变量：`MODEL_ACQUISITION_MODEL`（抽取/分类档，默认 `deepseek-flash`）、`MODEL_ACQUISITION_REASONING_MODEL`（ICP 设计、fit 判定、查询计划、开发信草稿，默认同样 `deepseek-flash`）；身份闸门语义不变，上游必须回报所请求的模型或命中的已批准替换。
+- 测试：`src/runtime` 与 `task-registry` 套件 308 项通过；新增「未配置即跳过」「部分配置仍失败」两类用例；`pnpm --filter @global/api build` 零类型错误。
+- 未做：未删除 Site Builder 结算模块本身（未启用的能力仍可后续重新配置启用）；本次不改迁移与数据库。
+
+## 2026-10-28 · Drain the worker only after three consecutive dependency failures (#683)
+
+- 起因：2026-10-27 17:06Z 一次结算回读探针的 2 秒超时（负载下的瞬时抖动，事后同一探针稳定返回 200/10ms）让 worker 永久停止 Temporal 轮询——`startWorkerDependencyHeartbeat` 对**任何一次**非 ok 都立即 drain。恢复只能重启容器，而重启杀掉在飞活动后，重试撞上「已预留、已消费、无持久结果」的预算操作键（`BudgetOperationReplayError`，控制错误），把验收 run `659f2320` 整条判 FAILED。
+- 改动：心跳改为**连续 3 次（约 30 秒）失败才 drain**，任一次恢复即清零；启动阶段同样最多试 3 次（间隔 1 秒），全失败才拒绝 admission，瞬时抖动不再拒绝启动。结算回读探针的 `maximumProbeDurationMs` 2 秒 → 5 秒（仍在 10 秒心跳间隔内）。未在探针内部再加一次重试：心跳本身就是带间隔的重试，内部重试只会把最坏耗时翻倍。
+- 安全不变量保留：`RuntimeComponentStatus` 的失败可带 `drainImmediately: true`，心跳见到它**当次即 drain**、不走三次容错。平台授权能力检查（`checkPlatformAuthorityReady`）标记为立即 drain——签发能力消失时不能再用旧授权多轮询 30 秒。`platform-authority-capability-regression` 的既有用例（能力消失即刻 drain）保持不变并通过。
+- 测试：`worker-dependency-heartbeat.spec.ts` 重写为 5 个用例——单次抖动不 drain、连续三次才 drain、恢复后计数清零、启动期瞬时失败仍准入、启动期连续三次失败才拒绝准入、抛异常按失败计数；`managed-dependency-readiness.spec.ts` 36 例与两个 worker 装配 spec 全绿。
+- 未做：预算操作的重放语义（D13，PR #597 挂起中）本次不涉及；drain 后自动恢复（不重启容器）不在本改动范围。
+
+## 2026-10-28 · Absorb an unreplayable operation left by an earlier attempt instead of failing the run (#684)
+
+- 起因：验收 run `659f2320`（2026-10-27）在上游连续流错误后失败——16:04–17:07 之间 19 次模型调用被上游中断、已扣费且没有 durable result（$0.42）；活动重试时相邻两家公司都撞上这些不可重放的旧操作，触发 best-effort 阶段的「连续两次不可重放即判 run 失败」规则。该规则把**更早尝试留下的残留**误读成「当前上游整体故障」：画像阶段逐家顺序执行，所谓“连续两家”必然来自两次不同时间的孤立故障（fit 阶段一直按单公司跳过）。
+- 改动：`BudgetOperationReplayError` 区分 `origin`——在预留处命中的旧操作是 `remnant`（更早尝试的残留），本次尝试自己已出网、结果没能落库/投影/结算的是 `live`（存储或账本故障的现场证据，默认值，漏标则维持旧行为）。查询、官网画像、信号富集、网站监控四个阶段：`remnant` 一律按单查询/单公司跳过计数（`unreplayableSkips`），`live` 保留原来的「同阶段连续两次即失败」。fit 维持原有语义（所有不可重放都记未判定）。线上的 `previousQueryUnreplayable` / `previousUnreplayable` 交接字段保留，旧 workflow 历史重放不受影响；workflow 代码零改动。
+- 测试：四个阶段各新增「活故障连续两次仍停」与「残留/活故障相邻时只计残留」用例；原有“连续两次即停”用例改标为残留并断言逐条吸收；rehearsal 与 workflow 场景改为 PARTIAL + 计数（查询 2/2、信号 12 家上限）。
+- 未做：不改变 D13（已扣费无结果、同一 run 内永不重放）；不处理上游 new-api 渠道的健康度（另一条线）。
+
+## 2026-10-28 · Skip a company this run already accepted before calling the model again (#686)
+
+- 起因：一次 run 的计划里有 10–21 条查询，同一批站点会在多条查询里反复出现（run 7d70d81d 的 87 条记录里有 28 条、32% 是同一 URL 的重复，其中内容漂移的部分被隔离为 `PROCESSING_KEY_DRIFT`）。重复的不只是抓取：`public_web` 的发现阶段按域名逐家调用模型判站，重复域名等于重复花模型调用，产出的记录随后还被摄取层丢弃。
+- 改动：`executeQuery` 在 fan-out 前读出本 run 已 ACCEPTED 的 `external_id`（按路由到的 provider 过滤、去重），作为 `knownExternalIds` 随 `DiscoveryOptions` 传给适配器；`public_web` 在搜索之后、调用模型之前跳过这些域名。其他适配器忽略该选项（注册类源是廉价查询，无需跳过）。`DiscoveryOptions` 新增字段是加法，适配器签名不变。
+- 测试：`public-web-search-first.spec.ts` 新增用例——已知域名不触发模型调用、结果只含新域名；`raw-source-activities.spec.ts` 的 executeQuery 持久化用例断言适配器收到 `knownExternalIds`（含 run 里已接受的域名），并确认摄取计数不受影响。
+- 未做：跨 run 的去重不做（不同 run 换了操作键、也允许重新判站）；同一 run 内「同域名不同 URL」仍按域名去重、不细分路径。
+
+## 2026-10-28 · Profile two companies at once, overlapping only the network work (#687)
+
+- 起因：官网画像是 run 里第二耗时的阶段（每家两次抓取 + 一次渲染 + 一次模型调用，全部逐家串行）。#43 的 run 判了 36 家、画像只覆盖 26 家，7 条 match 里 5 条因为没抓到联系页而卡在 0.4575 分——覆盖不足直接压低 recommended。
+- 改动：画像循环改为按批（2 家）处理——租约与时间盒检查、新鲜度/冷却/存储前检、计数器、ACK 与提交仍全部串行且按公司顺序；只有 `provider.profile` 的网络部分并发。批次内的租约检查按「已准入家数」预留时间（`allows(unit × (已入批+1))`）；上游等待放不下租约时，该家不计入并不再启动新批，同批已跑完的结果照常提交；时间盒与续做索引语义不变。
+- 测试：`discovery.activities.spec.ts` 296 例全绿——新增「两家同时在飞」用例（第一家阻塞时第二家必须已启动）；既有租约/时间盒/续做/重放用例全部原样通过；「上游故障停止本 pass」用例改为断言批内两家都被调用、之后不再启动、无提交。
+- 未做：并发度写死为 2（先观察宿主与上游承压）；enrich（GLEIF）阶段未动。
+
+## 2026-10-28 · Keep the evidence source URL and let a refetch extend a field's freshness (#688)
+
+- 起因：交付闭环设计 §8（L1 余项）——富集写入时 `provenance.sourceUrl` 已在手却被丢掉，物化证据也丢掉了 `raw_source_record` 的来源 URL；有效期按「每分级最早抓取」计算，重抓不会延长，与「证据是最新的」相矛盾。
+- 改动：迁移 `20261028120000_field_evidence_source_url` 给 `field_evidence` 加可空 `source_url`（https、≤2048 的 CHECK，不回填）；富集提交把 provenance URL 与原始抓取时间写到每条证据行；物化证据联 `raw_source_record` 补 URL 并把 `fetched_at` 改用原始记录的抓取时间；读模型（`LeadPackage`/`LeadQualified` 证据链接）优先用行上的 `source_url`，历史行回退 raw 联表；`valid_until` 改为**每个字段取最新抓取、字段之间取最早失效**（decide / package / 周报三处同口径）。
+- 测试：迁移静态契约、`fieldEvidenceProvenance` 单元（https/长度/空值）、富集提交写 URL 与拒收非 https、包读模型 URL 优先级与每字段有效期、decide 快照的「同字段重抓延长 / 不同字段取最早」、周报 `_max` 聚合；全量零容器单测与 `gctl check --fast`。
+- 未做：历史证据行不回填（设计如此，读时回退 raw 联表）；线索级成本分摊与开发信草稿（L5）另行安排。
+
+## 2026-10-28 · Restore the self-hosted Scalar portal and turn it into documentation a person can actually read (#689)
+
+- 起因：`/api/portal`（自托管 Scalar 文档门户，`321d90e5`，2026-07-06 加入）自 `a648706a`
+  （2026-08-24，CodeQL 高危修复，给所有响应加上 helmet 的 CSP）起在浏览器里白屏。页面把
+  整个 UI 内联成一段 `<script type="module">`，而全局 `script-src 'self'` 拒绝执行内联脚本；
+  Chromium 实测控制台报 `Executing inline script violates the following Content Security
+  Policy directive 'script-src 'self''`，`#app` 挂载点保持为空。同一批接口的 Swagger UI
+  （`/api/docs`）走的是同源外链脚本，不受影响，所以这个问题两个月没有被发现。
+- 改动：
+  - **CSP**：`apps/api/src/main.ts` 在挂载 `/api/portal` 之前多挂一层路径级 helmet，只把这条
+    文档路由的 `script-src` 放宽成 `'self' 'unsafe-inline' https://cdn.jsdelivr.net`，其余指令
+    沿用 helmet 默认；`/api/docs` 和 `/api/v1/*` 的 CSP 一字未改。没有用 `unsafe-eval`：Scalar
+    的打包产物里没有 `eval(` 或 `new Function(`。
+  - **页面由两段脚本组成**（实测发现，原注释只说了「自托管」）：一段是页面内联的配置（整份
+    OpenAPI 都嵌在里面，数据不出本机），另一段是浏览器从 `cdn.jsdelivr.net` 加载的 Scalar
+    运行时库。只放行 `'unsafe-inline'` 时页面依旧白屏，控制台报的是 jsdelivr 那条被拦；两处
+    都放行后才渲染出来（容器内无头 Chromium：0 条 CSP 违规、DOM 1.16 MB、左侧分组与首页
+    说明齐全）。
+  - **给人看的说明**：门户首页改为一段完整的接入说明（`apps/api/src/docs/portal-intro.ts`）——
+    认证与 token 取法、scope↔角色映射、统一信封与游标分页、错误模型、幂等与乐观锁、哪些动作
+    是异步、获客主链路的调用顺序、按域速览。文字只写代码里成立的事实，不写业务承诺。
+  - **端点正文**：`apps/api/src/docs/operation-descriptions.ts` 集中维护 74 个端点的正文
+    （其余 8 个原本就在控制器上有 `description`，保持不变），在 `buildOpenApi` 里只补空缺、
+    不覆盖控制器上的值。
+  - **分组**：12 个 tag 全部补上说明，并用 `x-tagGroups` 按接入顺序分组（获客主链路 / 运营与
+    合规 / 建站 / 平台间通道 / 系统），不再按字母序排。
+  - **契约落盘**：`packages/contracts/openapi/openapi.json` 用 `--export-openapi` 重新生成。
+- 测试：
+  - 新增 `apps/api/src/docs/operation-descriptions.spec.ts`（4 例）作为完整性闸门：每个操作必须
+    有 summary 与正文、每个声明过的 tag 必须有说明、说明不能是占位符（<12 字）、描述表不能指向
+    已不存在的操作。以后新增端点漏写说明会在 CI 里直接红，而不是等有人打开门户才发现。
+  - CSP 用打补丁的源码在本地起 API（`:3113`）逐路由抓响应头核对：`/api/portal` 为
+    `script-src 'self' 'unsafe-inline'`，`/api/docs` 与 `/api/v1/health` 仍是 `script-src 'self'`。
+  - 全量单测在本机跑有 11 例失败，全部落在 `platform-revocation-*` 与 `temporal/*replay*` 两组，
+    本机 `umask 0002`（CLAUDE.md 记录的该组 503 已知环境问题），与本改动无关；CI 为准。
+- 未做：没有给 `/api/docs` 做同样的放宽（它是同源外链脚本，本来就能跑）；没有把这两条文档路由
+  移出全局 helmet，那会连 `X-Frame-Options` 等头一起丢掉；没有给请求/响应 DTO 逐字段补
+  `description`（那是下一层，字段说明目前只有部分 DTO 有）。
+- 已知限制：门户的运行时库仍从公共 CDN 取，浏览器不能出网（纯内网/离线）时页面打不开；
+  接口定义与数据本身始终在本地。彻底自托管要把 `@scalar/api-reference` 的 bundle 内置进镜像
+  并改掉页面里的 import 地址，是另一件独立的事。
+
+## 2026-10-28 · Run a plan's queries two at a time (#690)
+
+- 起因：查询阶段是 run 里最耗时的一段（#43 的 10 条查询约 45 分钟、#41 的 21 条 55 分钟仍未跑完），workflow 里严格逐条 `await`，而每条查询是「SearXNG fan-out + 逐域名模型调用」，大部分时间在等网络。
+- 改动：`discovery.workflow.ts` 的查询循环按批 2 条并发（`Promise.allSettled`），并用新 patch `DISCOVERY_QUERY_BATCH_PATCH` 守卫——旧历史重放仍走原逐条路径。计数与顺序不变：结果按计划顺序折叠进 totals；一条查询普通错误在 `DISCOVERY_QUERY_FAILURE_STOP_PATCH` 下仍停止 run（同批另一条已在飞，可能已花掉）；不可重放的交接语义改为「上一批全部丢源」才告诉下一批。
+- 测试：`workspace-authority.workflow.spec.ts` + `discovery.rehearsal.spec.ts` 共 99 例全绿——新增「批内两条同时在飞」用例（第一条阻塞时第二条必须已发出）；四处不可重放交接用例按批语义更新（同批无交接、整批丢源才传递、批内混合不传递、控制错误时同批两家可能都已调用）。
+- 未做：并发度写死 2；`executeQuery` 内部的模型/出网并发不变（已是 5 路抽取），峰值约 10 路模型调用，先观察上游错误率再评估 3。
+
+## 2026-10-28 · Store a model-written first-contact draft on accepted leads and fill the weekly-report column (#692)
+
+- 起因：交付闭环设计（2026-10-10 已批准）L5——周报的「开发信草稿」列一直是空的，运营拿到线索后还要自己从零写首次联系邮件。
+- 改动：
+  - 新增模型任务 `outreach.first_contact_draft`：输入只用公司级事实（卖方 Claim/产品、买方贸易角色/在售品牌、Fit 结论与信号），不传任何人名或联系方式；输出目标国语言的 subject/body、中文译文与被引用的事实键。
+  - 新表 `lead_outreach_draft`（只追加、按线索版本号递增、FORCE RLS、`app_user` 只有 SELECT/INSERT），随 lead 级联删除；生成入口 `POST /leads/:leadId/outreach-drafts`（`acquisition:review`，走 Workspace Grant，新增预算 purpose `outreach.draft` 与技术报价操作）。
+  - 草稿末尾由代码（非模型）追加卖方自己的回复入口：官网、邮箱、`wa.me` 一键聊天链接（仅 E.164）。
+  - `used_facts` 校验：引用未提供的事实键或为空即丢弃草稿（422 `OUTREACH_DRAFT_UNGROUNDED`），不落库；只有最新裁决为 accept 的线索可生成（否则 422）。
+  - 周报「开发信草稿」列取每线索最新一版（主题 + 正文 + 中文译文 + 「草稿，需人工审阅；平台未发送」）。
+  - 平台不发送草稿，也不提供发送按钮。
+- 测试：零容器单测覆盖事实表/尾注/接地校验/版本追加/重放读回/并发版本重试与周报列；`scripts/execution-authority-policy.spec.mjs` 与 durable-result 投影注册表同步扩一项并全绿。
+- 未做：GrowthOS 侧尚未签发 `outreach.draft` 授权与展示草稿（前端不在本次范围）；迁移 `20261028180000_lead_outreach_draft` 仅新增文件，随下一班镜像窗口执行。
+
+## 2026-10-28 · Pin qs to the patched 6.16.1 release and rebind the production audit baseline (#693)
+
+- 起因：10-27 基线重绑之后，GitHub 又发布了 GHSA-6pq8-jhm2-2vcw（`qs.stringify` 对带不可调用 `toString` 的数组元素抛未捕获 TypeError，moderate，影响 `>=6.7.0 <=6.16.0`）。锁文件仍带着 express 与 webpack `url` 垫片引入的 `qs@6.16.0`，main 的 `production advisory baseline freshness · canary` 因此变 `BASELINE_STALE`（run 40675525935，subject `a30ac929`）。
+- 改动：
+  - 根 `pnpm.overrides` 新增 `qs@>=6.7.0 <6.16.1 → 6.16.1`，锁文件里 qs 收敛为单一版本 6.16.1（同时带入 pnpm 对平台包 `libc` 元数据的规范化）。
+  - `SECURITY_FLOORS` 的 qs 下限升到 6.16.1，`qs@6.16.0` 登记为漏洞前任。
+  - 基线重绑到修复提交 `6510fb5f`（锁文件摘要随之更新），`valid_until` 维持 2026-11-10；`scripts/supply-chain-gates.spec.mjs` 的钉值同步；新增冻结回执 `docs/evidence/security/20261028-qs-advisory-remediation.json`（修复前 CI 上的 `BASELINE_STALE`/1 条 → 修复后 `FRESH`/0 条）。
+- 测试：`node scripts/supply-chain-audit.mjs verify` 为 `PASS_CLEAR`（零 advisory）；`baseline-freshness` 在旧绑定下 `BASELINE_SOURCE_LOCK_MISMATCH`、新绑定下 `FRESH`；`scripts/supply-chain-gates.spec.mjs` 28/28、`scripts/dependency-security-remediation.spec.mjs` 9/9；`supply-chain-source-policy validate-sources` 为 `DEPENDENCY_SOURCES_TRUSTED`。
+- 未做：未升级全量依赖（月度批量刷新仍按 11 月节奏）；开发依赖侧既有的 4 条 advisory（faker、vitest mocker ×2、deepmerge）不在生产基线口径内，本次未动。
+
+## 2026-10-27 · Pin the revocation TLS fixture CA file mode (#677)
+
+- 起因：新开发机 xin 的进程 umask 为 002，测试夹具用 `openssl` 现场生成的 CA 证书因此是 0664（组可写）；平台撤销信任运行时对信任锚文件做严格的属主/权限/不可变校验（拒绝组或其他可写文件），快照构造失败后 `platform-revocation-http*` 的 7 个 real-HTTPS 用例全部以 `PLATFORM_REVOCATION_UNAVAILABLE` 失败。CI（umask 022 → 0644）与当年以 root 运行的旧会话掩盖了这个环境依赖。
+- 改动：`apps/api/src/platform-authority/platform-revocation-http.test-fixture.ts` 在生成证书后显式 `chmodSync(certificate, 0o644)`，不再继承环境 umask；产品代码与运行时的信任锚校验均不变。
+- 测试：本机（umask 002）该组 4 个文件 33 个用例全部通过（修复前 7 个失败）；CI `build · typecheck · test` 通过。
+- 未做：另两处 openssl 测试夹具（`machine-token-client`、`platform-capability-https`）在同一 umask 下本已通过，本次未改动。
+
+## 2026-10-27 · Stop the signals stage on the lease and count a lost source in stats (#678)
+
+- 起因：租约软截止（#672）只覆盖查询、画像、fit、富集与监控；信号富集是唯一未接租约的慢阶段，租约见底后仍会逐家读完，run 只能在更晚的收口里被动失败或 PARTIAL。另 #674 已把站点断连造成的单源损失计为 `transportFailed`，但编排层还没把它计入 stats 与状态。
+- 改动：
+  - `enrichSignalsRun` 在每家公司的 SUSPENDED 检查之后看租约余量，不够一个 `enrich` 单位就停下，余下仍需读取（TTL 新鲜或已完整读过的公司不计）记入 `skippedForLease`。
+  - 工作流把 `skippedForLease` 按阶段累计进 `stats.skippedForLease.signals`（run 至少 PARTIAL），并把 `transportFailed` 以 `stats.transportFailed.signals` 呈现（仅在 >0 时出现）；`resolveRunStatus` 增加 `transportFailedSkips` 输入（BI-25），断连损失不再可能读成 DONE。被拒主体与无法重放的公司不重复计入。
+- 测试：`discovery.activities.spec.ts` 新增 signals 租约 3 个用例与 `resolveRunStatus` 2 个用例；activities、signals-retry、rehearsal 三个测试文件 311 个用例全部通过。
+- 未做：`profileWebsitesForRun` 的首页+Impressum 读取与模型调用仍作为一批 ACK（MIXED 风险），留待单独 PR。
+
+## 2026-10-27 · Clear 13 newly published production advisories and rebind the audit baseline (#679)
+
+- 起因：2026-10-19 的基线捕获为零 advisory，之后 GitHub 又发布了 13 条 production advisory（body-parser、multer、fast-uri、undici 7/8、zod），而锁文件本身没动——main 的 `production advisory baseline freshness · canary` 变成 `BASELINE_STALE`，并且 11-02 到期后所有改依赖的 PR 都会被拦。
+- 改动：
+  - root overrides 钉住四条线的修复版本：multer 2.5.0、fast-uri 3.1.9、undici 7.30.1 / 8.12.2、zod 4.6.7；body-parser 2.4.0 由 express 的 `^2.2.1` 自然解析，没有 override，由 `SECURITY_FLOORS` 兜底（将来若被解析回 2.3.x，是 floor 测试报警而不是 override 拦住）。
+  - `packages/contracts` 由 zod `^3.25.76` 升到 `^4.6.6`（全仓唯一声明 zod 的包；代码零改动，10,327 个单测通过）。
+  - `SECURITY_FLOORS` 上调到修复版本，7 个被替换的版本登记进 `VULNERABLE_PREDECESSORS`。
+  - 解析时 pnpm 曾把 `@opentelemetry/propagator-jaeger@2.12.0` 的弃用说明（带 `https://` 链接）写进工作区的锁文件；供应链策略禁止锁文件出现任何 URL，已删除这行纯元数据（main 的锁文件本就没有它，所以 diff 里看不到这条删除）。下次非 frozen 的重新解析可能再带回，届时同样删掉即可。
+  - 基线重绑到 `c33861aa` 及其锁文件摘要，`valid_until` 延到 2026-11-10T05:13:39Z；`supply-chain-gates.spec.mjs` 钉值同步；新增冻结回执 `docs/evidence/security/20261027-production-advisory-remediation.json`（修复前 CI 上的 `BASELINE_STALE`/13 条 → 修复后 `FRESH`/0 条）。
+  - Copy fixed-source 回执重签（`HASH_ONLY`）。
+- 测试：`pnpm --filter @global/api build` 绿；`pnpm --filter @global/api test` 10,327 passed（本机缺 Chrome 的 2 个用例在装上 Chrome 后单独验证 52/52）；`pnpm governance:verify` 绿；`supply-chain-audit verify` 为 `PASS_CLEAR`；`validate-sources` 为 `DEPENDENCY_SOURCES_TRUSTED`。
+- 未做：本轮只升级受 advisory 影响的五条依赖线，没有做每月一次的 `pnpm update -r` 全量 minor/patch 批量升级（留给 11 月的月度刷新），也未动 NestJS、astro 等大版本。
+
+## 2026-10-27 · Judge duplicate advisories by GHSA, package and affected range (#680)
+
+- 起因：`2026-10-27` 的依赖刷新 PR #679 上，非必需的 `production dependency delta · canary` 报 `AUDIT_SNAPSHOT_INCONCLUSIVE` / `[AUDIT_COMPARISON_INVALID] trusted PR base audit is incomplete or malformed`，但候选审计为 0 条。根因是受信 base 的锁文件里 `GHSA-xjj6-f33q-929c`、`GHSA-4qv8-2p9j-2685`、`GHSA-f72v-6w45-q472` 各自同时覆盖 undici 7.x 与 8.x 两条版本线，pnpm audit 因此输出两条同 GHSA 同包的记录，而校验器的 `advisoryIdentity` 只取 `ghsa_id|package`，把这两条合法记录判成 `AUDIT_ADVISORY_DUPLICATE`，使 base 审计被判“畸形”。任何改依赖输入的 PR 在 base 带这类多版本线 advisory 时都无法通过该检查。
+- 改动：新增 `advisoryLineIdentity`（`GHSA + 包 + vulnerable_versions`），**只用于审计侧的重复判定**（`normalizePnpmAudit` 的 `AUDIT_ADVISORY_DUPLICATE`）；与 baseline 的 ratchet 匹配、finding exposure 归属、以及 baseline 自身的重复判定仍沿用不带区间的 `advisoryIdentity`，语义身份不变。`docs/security/README.md` 的 ratchet 说明补了这条口径。
+- 测试：`scripts/supply-chain-gates.spec.mjs` 新增用例覆盖三件事——同一 GHSA 覆盖 undici 7/8 两条线时不再判重复、同一 GHSA 同区间的真重复仍会报 `AUDIT_ADVISORY_DUPLICATE`、以及受信 base 带双线 advisory 时 delta 从 `AUDIT_SNAPSHOT_INCONCLUSIVE` 回到 `COMPARABLE_AUDIT_PASS`。该 spec 28/28 通过，`pnpm governance:verify` 全绿。
+- 未做：没有改动 `advisoryIdentity` 本身，baseline 匹配（`baselineByIdentity`）、delta 的 `comparisonByIdentity`、exposure 归属与 `expectedBootstrapBase` 精确集校验仍按 GHSA + 包 折叠。因此 baseline 侧继续拒绝“同一 GHSA 两条版本线”的写入（这类记录在匹配层只会保留一条，永远无法与自身审计对上），本次把这条限制写进了 README 与测试。
+
+## 2026-10-27 · Implement the lead delivery loop reason codes, outcomes and LeadPackage (#681)
+
+- 起因：交付闭环设计（2026-10-10 批准）的 L1–L6 一直未实现，周报里的原因码 / 注册地址 / 建议联系路径列全空，客户也无法回写线索结果。
+- 改动：
+  - BI-20 原因码：拒绝与正向结果枚举、Fit 原因码的确定性推导，`lead_decision.reason_code`（reject 必填，缺省返回 422）。
+  - BI-23 反馈：新表 `lead_outcome`（只追加、FORCE RLS、app_user 仅 SELECT/INSERT）与 `POST /leads/{id}/outcomes`、`POST /reports/weekly/feedback`（客户填好的周报 CSV 原样上传，逐行校验）。
+  - BI-19/21：`LeadPackage` 读模型与 `GET /leads/{id}/package`；`LeadQualified` v1 新增可选交付字段（公司画像、标识、联系路径与建议路径、信号、证据 URL、Fit 原因码），旧载荷仍通过。
+  - BI-15：建议联系路径的确定性规则与固定合规备注；周报填充「为什么现在 / 原因码 / 注册地址 / 建议联系路径」列。
+  - L6：从 Impressum 抽公司注册地址（独资商号不存），接入 `website_profile` 与属性白名单。
+  - E7：有域名的公司同时按「名称+国家」键匹配平台信号。
+  - 新增迁移 `20261027120000_lead_delivery_loop`，只加表/列/索引与权限，不回填。
+- 测试：零容器单测覆盖原因码推导、LeadPackage 组装、反馈 CSV 解析与写库、迁移静态契约、注册地址解析与属性白名单；`gctl check --fast`。
+- 未做：`field_evidence.source_url` 列与写入点补写、有效期按字段最新取值、线索级成本分摊、开发信草稿模型任务与 `lead_outreach_draft`、周报开发信列；迁移执行与镜像上线留待验收 run 结束后的窗口。
+
+## 2026-10-21 · Let an artifact bind shared object bytes under its own media type, so empty HEAD probe results settle (#673)
+
+- 起因：RL1 验收 run `c6b09756`（xin，2026-10-20）在信号阶段失败。根因复核发现：产物对象按内容寻址（主键是 sha256 + 隐私类），同样的字节共用一行；但产物表引用对象行的外键包含 `media_type`，`append_generic_operation_artifact_internal_v1` 也逐项比较对象行的 media type。线上唯一的空对象 10-12 由一个 crawl4ai-fetch/v1 结果先写成 `text/markdown`，此后每一次 http-get/v1 的 HEAD 探测（空 body，`text/plain`）都被拒为 `GENERIC_OPERATION_ARTIFACT_INVALID`，变成无法重放的操作。库里 19 份 http-get/v1 产物没有一份是空的，也就是从来没有一次 HEAD 探测落库成功。信号富集因此连续丢公司，直到阶段失败。#644 只修了存储层与服务层的相等判定，数据库这一层没动。
+- 改动：
+  - 新迁移 `20261021032000_generic_operation_artifact_object_media_type_reuse`：
+    - 对象表加唯一键 `generic_operation_artifact_object_content_key (sha256, object_key, size_bytes, privacy_class)`；
+    - 产物表的外键改为 `generic_operation_artifact_object_content_fkey`，引用这四列；
+    - 整条迁移在一个事务里，先设 `lock_timeout = '5s'`，再按追加函数的加锁顺序（产物表、对象表）一次取两张表的排他锁，避免与正在结算的事务成环，被占住时 5 秒内失败而不是无限排队；
+    - 先加新约束再删旧的 `…_metadata_fkey`、`…_metadata_key`，中间每一步都有约束兜着；
+    - 用「取函数定义、精确替换、校验恰好一处」的改写，只删掉追加函数里对象行 media type 的比较（带漂移校验）。
+  - 不变的部分：sha256、对象键、大小、隐私类仍须一致；已存在的同一产物仍须 media type 完全相同；产物行保留自己的 media type。
+  - `schema.prisma` 同步新的外键与唯一键，Copy 回执已重签。
+  - 设计文档 `execution-budget-authority-artifact-replay-design.md` §6.1 改为「media type 属于每份 manifest，不属于对象固有元数据」，并更正对象主键为 `sha256 + privacyClass`。
+- 测试：
+  - `generic-operation-artifact-object-version.postgres.spec.ts` 新增 2 例：
+    - 同一份空字节先以 `text/markdown`、再以 `text/plain` 结算，两份产物各带自己的 media type，对象行仍是 `text/markdown`（先 RED：`GENERIC_OPERATION_ARTIFACT_INVALID`，只改函数后又被外键拒，两处都改后 GREEN）；
+    - 大小不同的同一对象仍被拒绝。
+  - 新增静态迁移 spec `generic-operation-artifact-object-media-type-migration.spec.ts`，4 例：事务外壳与加锁顺序、约束先加后删、函数改写只删 media type 那一条且带漂移校验、Prisma schema 与迁移一致。
+  - 在本地一次性 pgvector（同 CI digest）上跑 CI「Raw SQL parameter types on PostgreSQL」一步的 7 个 PG spec，36 例全绿；`generic-operation-artifact-subject.rls.spec.mjs` 10 例全绿。
+  - 把 `global_dev` 的副本恢复进同一实例、只应用这条迁移：284 份产物不变，新约束全部 validated，函数里不再有对象 media type 比较。
+  - 迁移后的测试库与 `schema.prisma` 做 `prisma migrate diff`：没有任何关于产物表的差异。
+- 部署：这班车带迁移，换镜像要用 `gctl switch-backend <digest> --with-migrations <镜像源提交的 checkout>`，先 dry-run。
+- 未做：
+  - 信号阶段另外两处缺陷（单站 TLS 重置被当控制错误让整个活动失败；重试时同一家公司的确认批次混入新旧回执，`DOMAIN_ACK_MIXED_REPLAY_STATE`）另开 PR。
+  - 卖方入驻理解工作流 `persistOfferings` 的同类混合确认另开 PR。
+  - 不清理已因此留下的 RESERVED 操作。
+
+## 2026-10-21 · Let one site's dropped connection cost only that company's enricher, and acknowledge signal receipts so a retry never mixes old and new (#674)
+
+- 起因：RL1 验收 run `c6b09756`（xin，2026-10-20）在信号阶段失败，根因复核找到三个缺陷，其中媒体类型那个由 #673 修，这里修另外两个。
+  - 缺陷 A：第 1 次尝试中，price-pumpen.de 在 TLS 握手时重置连接。http.get 把 Node 的原始错误原样抛出，它带 host/port 等字段，分类器按失败关闭的规则判为控制错误。于是一家公司的一个站点让整个活动失败。
+  - 缺陷 B：第 2 次尝试中，biergans 第 1 次的 4 条回执已经确认过；这次 robots 预检通过，多读了一页，多出 1 条新回执。同一家公司的确认批次变成「4 条重放 + 1 条新增」，抛出 `DOMAIN_ACK_MIXED_REPLAY_STATE`，run 判 FAILED。同一操作在一家公司里被读到两次（careers 页就是首页、两个 sitemap 列出同一子图）时，第 1 次尝试就会撞上同样的错误。
+- 改动：
+  - `guarded-http.ts`：Node 在已 pin 的 socket、TLS 会话或 HTTP 解析器上抛出的错误，按对象身份登记进一个 WeakSet，导出 `isPublicHttpTransportFailure`。错误对象本身不变，墙钟超时、各道闸门、出网拦截、体积超限都不登记，所以没有主动询问的调用方行为完全不变（分类器也没改）。
+  - `enrichSignalsRun`：
+    - 富集源抛出被登记的传输失败时，只跳过这家公司的这一个源，其余源照常运行，并计入新的返回字段 `transportFailed`（只在大于 0 时出现）。那次读取留在 RESERVED：下一个 run 换了操作键会再试；同一 run 若第 1 次尝试另因别的原因失败，第 2 次尝试会把这家记为不可重放（见「未做」）。仿冒同形字段的错误照旧失败关闭。
+    - 回执按产生它的富集源分组，同一操作只记一次。有命中的源，用它自己的回执做一个批次，apply 只写它自己的命名空间，ACK 键带上命名空间名（`…:signal-enrichment:<源>`）；其余回执逐条单独确认，apply 为空操作，键格式不变。这样重试时，旧回执不会和新回执进同一个批次；一个源先前以未命中确认过的回执，命中后也能正常落库。
+    - 命中先问一遍治理：`company-enrichment-commit.ts` 把逐条命中的治理抽成纯函数（`enrichmentHitSurvivesGovernance`，提交函数照用它，行为不变）。字段全被治理滤掉的命中按未命中处理，否则它的回执会以命中键确认、却不写 `_ts`，重试时这个源再跑一遍、多读一页就又是混合批次（复审发现，测试先红后绿）。
+    - 公司查询加 `orderBy: { id: 'asc' }`，重试按同样顺序、同样的上限截断遇到同一批公司。
+    - 更正 enrichSignalsRun 的注释：它不发 heartbeat（此前注释写「每家 heartbeat」）。
+  - 没有改 workflow 和 run 状态判定：`transportFailed` 接进 stats 与 PARTIAL，以及信号阶段的逐家租约检查，由 #672 的作者在本 PR 合入后补上。
+- 测试：
+  - `guarded-http.spec.ts` 新增 5 例，全部在真实回环上跑：TLS 握手被重置、响应 socket 被挂断都被登记，且分类器对它的判定不变；墙钟超时不登记；四类闸门错误都不登记；仿冒的同形错误不登记。
+  - 新增 `discovery.signals-retry.spec.ts`，9 例。它用真实的 ACK 绑定辅助函数，只把 Postgres 行存储换成内存实现，事务抛错时连同 ACK 行一起回滚。三例按 run `c6b09756` 的顺序复现缺陷 B，改前都抛 `DOMAIN_ACK_MIXED_REPLAY_STATE`：
+    - 第 2 次多读一页的未命中公司；
+    - 先前以未命中确认、这次命中的源；
+    - 同一操作被读两次。
+    另一例复现复审发现的「命中但字段全被滤掉、重试多读一页」，改前同样抛 MIXED。其余几例覆盖：公司顺序；单站断连只记一个源；仿冒错误仍失败关闭；没有断连时结果里没有 `transportFailed`。
+  - `company-enrichment-commit.spec.ts` 新增 1 例：纯函数对可存、被扣下、未知字段三种命中的判断。
+  - `discovery.activities.spec.ts` 里「无命中回执走批量确认」那条只保留 `enrichRun`；信号阶段的这条行为改由新 spec 用真实绑定覆盖。
+- 未做：
+  - 卖方入驻理解工作流 `persistOfferings` 的同类混合确认（claims 与 offerings 共用同一个 crawl ACK 键）另开 PR。
+  - `profileWebsitesForRun` 把首页、Impressum 读取和模型调用放在一个批次里确认，部分重试时有同样的风险，另开 PR。
+  - 同时运行两个执行的 MIXED 仍按失败关闭处理，没有放宽。
+  - 「连续两家不可重放即停」规则在同一 run 的重试里可能误触发：被吸收的断连会把那次读取留在 RESERVED，第 2 次尝试里这家公司是不可重放的；两家这样的公司在已尝试的公司里相邻，就会让第 2 次尝试失败。前提是第 1 次尝试另因别的原因失败（改前每次断连都会让第 1 次尝试失败，所以这是收窄而不是新增）。根治要让 broker 的不可重放错误带上原因，并让规则只数本次尝试新出现的失败；fit、画像、信号共用这条规则，另开 PR。
+
+## 2026-10-21 · Judge fit three companies at a time, so a run's fit stage takes about half as long (#675)
+
+- 起因：fit 一家接一家地判，约占一次发现 run 一半的时间。f92ea357 的 78 次判定每家 p50 46 秒，fit 从 05:25 跑到 06:38，撞上了租约。产品负责人 10-19 定了「fit 并发 3」；同一网关上的公司抽取本来就是 5 路并发。
+- 改动：只改 `apps/api/src/temporal/discovery.activities.ts` 的 `qualifyFitForRun`，工作流不动，不需要 patch。
+  - 最多 `FIT_CONCURRENCY = 3` 家同时判，任何一家落定就补下一家。
+  - 每家判完立刻写入判定。所以别的公司失败也丢不了它，重试只列未判的公司，不会再判一次（满足同伴会话提的约束）。
+  - 结果按公司 id 顺序合并：前面的公司都落定后才合并后面的，计数、「连续两家截断」规则和续跑游标都与一家一家判时一致。
+  - 停下的原因按 id 顺序取第一个：确定失败、预算耗尽或租约不够。正在判的都落定后才返回或抛错，所以重试不会撞上还在跑的调用。
+  - 开始下一家前发现租约不够时，也按 id 顺序生效：先等已开始的公司都合并，其中有预算耗尽或失败的，以它为准。复审前是立即记为租约不够，那几家的预算耗尽或 401 之类的失败会被算成租约跳过。停下之后才落定的失败，一次写一条日志，列出错误类名。
+  - 一家已落定的失败排在仍在判的公司后面、还没合并时，先不再开始新的公司（它可能就是停下的原因）。否则上游快速失败时，池子会在一家慢判定期间反复补位（复审复现过一次开始 60 家）。合并后若只是第一次截断、被吸收，就照常继续。
+  - 重试遇到的无法重放的公司只记未判定，不算进「连续两次」，停下之后落定的也照样计入：一次尝试失败或 worker 丢失后，重试会一起遇到当时在途的最多 3 家这样的公司，它们说明不了上游有故障。同一次尝试里连续两家流被截断仍会让这次尝试失败。
+  - 这样做的代价（复审定为 LOW，保留）：上游持续出 504/524 超时或流截断时，重试先把前面尝试留下的公司记为未判定，只有还有没调用过的公司时才会再失败。所以活动余下约 6–9 家以内时（小 run 或最后一个续跑活动），fit 一家没判出也正常结束，run 判 `PARTIAL`（`unreplayableSkips.fit` 计这些公司），不判 `FAILED`；这种故障里一个 run 最多约 12 次调用按预留计费，一家一家判时是 2 次。两种结果都要重新生成计划才能再跑，`PARTIAL` 还让后面的阶段照常处理已判出的公司。
+  - `FIT_PASS_TIME_BOX_MS` 由 8 分钟改为 4 分钟：在途的判定最长 10 分钟（两次网关请求），4 + 10 分钟留在 fit 活动 15 分钟的超时之内。之前是 8 + 10 分钟，理论上可能超时。
+  - 预算耗尽时的日志不再写「backlog sweep 兜底」：fit 的补判任务目前停用。
+  - `packages/contracts/INTEGRATION.md` 写明 fit 对无法重放公司的口径。
+- 测试：先 RED 后 GREEN，新增 23 例，另改 4 例旧用例的并发前提、加强 1 例。在一家一家判的实现上，相关的 12 例确认为 RED；第一轮复审后补的 5 例在复审前的 head 上确认为 RED；第二轮复审后补的 10 例里，租约顺序 2 例和日志 1 例在修改前为 RED，其余用变异确认能抓到复审列出的存活变异（停下后又被后来的失败覆盖、不等在途就抛错、停下后继续开始、不计入不允许外部处理或答案不可用的公司、写入判定不等待）以及两种租约顺序变异。
+  - `discovery.activities.spec.ts` 新增 7 例：
+    - 最多 3 家在途、任何一家落定就补位；
+    - 别的公司失败前已判的公司已写入，且等在途的都落定才抛错；
+    - 按 id 顺序合并：后到的截断照样判为「连续两家」；
+    - 时间盒用完时游标取最后开始的那家；
+    - 时间盒加一次判定不超过活动超时；
+    - 无法重放的公司不进「连续两次」，2 例；
+    - 复审后补：一家慢判定后面有失败等着合并时不再补位（上游不可用、预算耗尽、流截断各 1 例）、被吸收后恢复补位、预算停下后的无法重放公司计为未判定，共 5 例。
+    - 第二轮复审后补 7 例：预算耗尽合并后不再开始；第二家截断合并后不再开始；先到的停下不被后面的失败覆盖，并记日志；预算停下前落定的各类公司都计数；判定写不进去时活动失败；租约不够时由已开始公司的预算耗尽或 401 决定停下，2 例。另在「等在途都落定才抛错」一例里加断言：停下已合并、仍有一家在判时不抛错。
+  - 改了前提的旧用例：两家截断时 3 家已同时在途；预算耗尽时其余调用同样被拒；租约中途用完时先开始的 3 家照常判完；上游等待装不下时按不变量断言。
+  - `discovery.rehearsal.spec.ts`：fit 模型改为按模拟结束时刻先后落定的事件队列（后开始、先结束的先落定），故障编号取调用开始时的序号；新增 100 家的用例：同时在途的峰值恰为 3，fit 墙钟少于一家一家判总耗时的 45%（按 xin 实测耗时回放是 0.37–0.38）。
+  - `discovery.rehearsal.spec.ts` 再补 3 例：上游对每次 fit 调用都断开时，3 家、6 家的 run 判 `PARTIAL`（一家未判、全部计入 `unreplayableSkips.fit`），9 家判 `FAILED`；每家只调用一次。
+  - temporal、discovery 下全部通过。
+- 未做：
+  - 「查询阶段给 fit 预留时间」：产品负责人 10-21 定先不加，等 fit 并发上线后用真实 run 的数据再看。
+  - 「一次 DENIED 之后核验报 EXHAUSTED，预算截断走不到 PARTIAL」另起 PR。
+  - 信号阶段的租约检查和 `transportFailed` 统计，等同伴会话的信号修复合入后一起做。
+  - fit 的操作键只由提示词派生、不含公司 id：两家提示词完全相同的公司同时在途时，后一家会遇到前一家仍在预留中的操作，记为无法重放（一家一家判时会重放前一家的结论）。xin 库里没有这样的两家，暂不改键。
+  - 3 路同时预留让预算尾部需要的余量变成 3 × 40 美分，且一次 DENIED 就把账户永久标为耗尽；当前额度等于技术信封，碰不到。
+
+## 2026-10-20 · Write a discovery run's outcome once, and record FAILED at finalize when its authority already ended (#670)
+
+- 起因：`finalizeRun` 有两处缺陷。
+  - 授权已结束（准入租约到期、被撤销或预算耗尽）时收尾 `DONE` 或 `PARTIAL`：attest 直接抛错，什么都没写入，工作流因收尾错误失败，run 一直停在 `RUNNING`。准入租约的落地设计（`docs/superpowers/plans/2026-10-09-discovery-run-admission-lease.md` §5）写的是「超出租约记 FAILED」，实际却从来没有记上。
+  - 收尾结果已提交、但回执丢失后重试：会再更新一遍、计划版本再加 1，并再发一次 `DiscoveryRunCompleted` 和 `QualifyRequested`。
+- 改动：只改 `apps/api/src/temporal/discovery.activities.ts` 里的活动，工作流不动，也不需要 patch。
+  - 终态只写一次：
+    - 库里已经是同一个终态时直接返回。这一步只读不写（短暂行锁），放在 attest 之前，所以授权到期后的重试也能成功。只对 v2 信封做，旧信封照旧由 `ensureRunBudget` 挂起。
+    - 另一次尝试在本次预读之后、写锁之前提交了同一个终态时，同样算成功，即使授权恰在其间结束。
+    - 请求 `DONE` / `PARTIAL` 而库里已是另一个终态时，抛不可重试的 `DISCOVERY_RUN_ALREADY_FINALIZED`。
+    - `FAILED` 仍然只关闭 `RUNNING` 的 run。
+  - 授权已结束时收尾 `DONE` / `PARTIAL`：
+    - 在同一个写事务里改记 `FAILED`，`stats.failure = { stage: 'finalize', errorType, control: true }`。`errorType` 记结束原因的代码（到期、撤销、耗尽三者的处置不同）。
+    - 其余 stats 保留，回执比对照旧；fit 判过公司时照常请求评分。
+    - 之后以不可重试的原错误失败：工作流照样失败，但库里与它一致。回落的 `FAILED` 写入本身被拒时（例如回执不一致），抛出的仍是授权错误，回执错误放在 `cause` 里。
+    - 只有这三种「已结束」会改记 `FAILED`；其余 attest 失败（范围不符、授权无效、核验不可用）照原样抛出，什么都不写。
+  - `DiscoveryRunStage` 新增 `'finalize'`，并加入「已到 fit」的阶段集合。
+  - `packages/contracts/INTEGRATION.md` 写明这种收尾结果。
+- 测试：`discovery.activities.spec.ts` 先 RED 后 GREEN。
+  - 授权已结束时把 `DONE` / `PARTIAL` 改记 `FAILED(stage=finalize)`：3 例，覆盖到期、撤销、耗尽。这条替换了原来锁定「什么都不写」的用例。
+  - 已提交的重试：不 attest、不再写、不发事件，2 例。
+  - 已是别的终态时拒绝：3 例。
+  - 复审后补的 7 例：与另一次尝试重叠提交，授权有效、已结束各 1 例；其余 attest 失败照原样抛出，3 例；回落写入被拒时仍抛授权错误，1 例；旧信封即使库里已是同一终态也照旧挂起，1 例。其中修正行为对应的 6 例在修正前的实现上先确认为 RED。
+  - temporal、discovery 下共 2306 例通过。
+- 未做：
+  - 没有加「卡在 `RUNNING` 的 run」的兜底清理器（通过 terminate 或执行超时停下的 run）。
+  - 也没有改「授权结束后不花钱的收尾能否仍记 `DONE` / `PARTIAL`」这条口径；需要的话由产品负责人决定。
+  - 租约感知的软截止另起 PR：让 run 在租约到期之前就以 `PARTIAL` 收尾，这样多半不会走到这里。
+
+## 2026-10-20 · Stop discovery stages before the admission lease ends, so a long run finishes PARTIAL instead of FAILED (#672)
+
+- 起因：发现 run 的准入租约是准入后 3 小时，过期后每次核验、每次预留都被拒，run 只能判 `FAILED`，计划也就白跑了。xin 上 14 条查询的计划约 139 分钟，24 条约 257 分钟；28 条查询的 run f92ea357 在 fit 阶段撞上租约，06:38 判 `FAILED`。产品负责人已定：不限计划大小、不延长租约，改为快到期时提前收工判 `PARTIAL`。
+- 改动：
+  - 新增 `apps/api/src/temporal/discovery-run-lease.ts`：
+    - 活动在核验之后读一次剩余租约，口径与 `attest_authorized_tool_budget_v1` 相同：`COALESCE(admission_lease_expires_at, expires_at)`，按数据库时钟计，不含 60 秒容差。读法是只读 SELECT，app_user 在 RLS 下只看得到本工作区的授权。
+    - 读不到恰好一行有限值时，按控制错误拒绝。
+    - 不加迁移，不改 SQL 函数、binding 信封和 `BudgetStore`。
+  - 查询、官网画像、fit、富集、监控注册五个阶段，每开始一条查询或一家公司前，先看剩余租约够不够在收尾预留（10 分钟）之前做完这一单位。单位按阶段取：查询 15 分钟、fit 10 分钟、画像 15 分钟、富集 2 分钟、监控 5 分钟。不够就停下，余下的计入结果的 `skippedForLease`（只在发生时出现），不交续跑游标。
+  - 查询因租约停下时不路由、不做词表归一、不调 provider，照常落零回执，结果带 `skippedForLease: true`，不带 `skipReason`。重放的零回执若已过查询截止点，同样按租约跳过计；这时读租约失败，这次尝试按原错误失败、活动重试，与新执行的查询一样，不去猜标签（已启用的源按 BI-30 规则会被说成 `SOURCE_DISABLED`）；三次都失败时 run 在 query 阶段记 `FAILED`。
+  - #666 的上游等待：新增 `upstreamUnavailableRetryDelayMs`（读 retryPolicy、封顶 3 次的逻辑不变）。租约装不下「等待 + 再做一个单位」时：
+    - fit 和官网画像就地按租约停下，不再抛错；
+    - 查询把下一次尝试推迟到刚过查询截止点，那次尝试以租约零回执结束。
+    - 这修的是设计复审指出的阻塞问题：原方案在这种情况下会不等就重试，几秒内用完 3 次尝试，run 判 `FAILED`。
+  - 工作流：
+    - 各阶段的 `skippedForLease` 汇总成 `stats.skippedForLease`（按阶段，只列有跳过的阶段）；
+    - `resolveRunStatus` 新增 `leaseSkips`，大于 0 时至少 `PARTIAL`，不单独判 `FAILED`；
+    - 查询阶段因租约提前停下、且一条记录都没收到时判 `FAILED`（这次 run 什么都没找到；同一计划照旧不能再执行）；
+    - 各阶段的跳过数在阶段之外累计，所以之后某个阶段失败、按 BI-25 记 `FAILED` 时，stats 仍带上失败之前各阶段的跳过数。
+    - 富集只计还有数据源没读过的公司，已全部读过的不再算作被租约跳过（否则本应 DONE 的 run 会判 `PARTIAL`）。
+    - 只读活动结果里新增的可选字段，旧历史没有这些字段，重放不变，不需要 `patched()`。
+  - `worker.ts` 和 `dev-fast-lane-worker.ts` 接入 `runLease: prismaDiscoveryRunLeaseReader(prisma)`。没接时行为与以前一样。
+  - `packages/contracts/INTEGRATION.md` 和 `docs/backend/discovery-sources.md` 写明口径。
+- 测试：先 RED 后 GREEN，共新增 57 例，另加 1 例真库用例。
+  - `web-crawler.spec.ts` 新增 2 例：两处读页请求都按 `CRAWL4AI_REQUEST_TIMEOUT_MS` 中止。
+  - `discovery-run-lease.spec.ts` 16 例：租约计算；各阶段单位（含监控注册）与代理超时、网关上限、读页超时（`CRAWL4AI_REQUEST_TIMEOUT_MS`，本 PR 从 `web-crawler.ts` 导出）、HTTP 超时上限的防漂移；收尾预留覆盖不检查租约的三个活动；读取的 SQL 形状与失败即拒；等待装不装得下；查询下一次尝试的推迟量。
+  - `upstream-unavailable-retry.spec.ts` 新增 3 例；原有用例（含防漂移）一行未改。
+  - `discovery.activities.spec.ts` 新增 27 例，覆盖五个阶段：没余量就停、中途用完、等待装不下时就地停、有余量时结果形状不变；BI-30 跳过原因与重放的区分（含恰好够一条查询的边界）；重放时读租约失败改为重试；没有回执身份的旧历史不按租约停；词表归一遇上游不可用；富集不把已读完的公司计入、但计入还有数据源没读的公司。其中 13 例先确认为 RED（11 例在 main 上，2 例在复审前的 head 上），其余是「行为不变」或杀变异的守卫。
+  - `workspace-authority.workflow.spec.ts` 新增 9 例：按阶段汇总、跨轮次累加、「没收到记录才判 `FAILED`」的边界（BI-30 跳过与有记录的丢失）、BI-25 失败收尾保留各阶段的租约计数、没跳过时保持 `DONE` 和原 stats 形状。其中 8 例先确认为 RED（5 例在 main 上，3 例在复审前的 head 上）。
+  - 三轮复审指出的非等价存活变异现在都被杀死（第一轮 5 个，第二轮 2 个，第三轮 2 个；第二轮另一个出在警告日志上，那条日志已删掉），各轮新规则的变异也都被杀死。
+  - `worker-dev-fast-lane.source.spec.ts` 断言 managed worker 接了 `runLease`（两处一致由既有断言保证）。
+  - `discovery-run-admission-lease.postgres.spec.ts` 新增 1 例真库用例：以 app_user 读剩余租约约为 3 小时、随行老化同步减少、没有租约的行回退到授权窗口、别的工作区读不到。本机没有 `*_test` 库，由 CI 跑。
+  - temporal、discovery 下全部通过。
+- 未做：
+  - 信号阶段（`enrichSignalsRun`）暂未接入：同伴会话正在修这个阶段，等它合入后再补那几行。在那之前，它开始时剩余租约通常约 20 分钟，最少只剩 10 分钟收尾预留；按 xin 实测每家约 30 秒，12 家约 6–12 分钟，所以剩余偏少时仍可能越过租约，那时 run 记 `FAILED`。
+  - 画像比 fit 先停，fit 可能判几家没有画像证据的公司；联系路径补读打开时会在 fit 之前用掉租约（开关目前停用）。两者都写进了 INTEGRATION.md。
+  - fit 并发 3 另起 PR，同时处理并发下的「已落定前缀」游标、时间盒和重放丢失的计数。
+  - 查询阶段没有给 fit 预留时间：计划很大时，查询可能用到截止点，fit 一家都判不了，run 以零判定的 `PARTIAL` 收尾。要不要给 fit 预留时间，由产品负责人定。
+  - 被跳过的公司不会补判：`qualifyFitBacklog` 目前停用（`authorityHold`），`stats.skippedForBudget` 的公司同样如此。
+  - 「一次 DENIED 之后核验报 EXHAUSTED，预算截断走不到 PARTIAL」（#669 片段里提到的问题）不在本 PR 范围内，另起 PR。
+
 ## 2026-10-19 · Renew the production dependency audit baseline before it expires on 2026-10-24 (#664)
 
 - 起因：生产依赖漏洞基线 2026-10-24T13:59:34Z 到期。到期后改了依赖输入的 PR 的 `production dependency delta · canary` 和 main 的 freshness canary 都会失败（依赖输入未变的 PR 不读基线，照常通过），所以要在到期前续期。
@@ -1479,6 +2980,13 @@
 - 图片管线版本号随之变为 `sharp-0.35.5-vips-8.18.7-m1c.1`。它是 recipe hash 的一部分，所以 0.35.4 渲染的衍生图不会被复用，下次处理时按新版本重新渲染；钉版本的用例同步改为 0.35.5。管线与 media-foundation 的 3 个用例文件共 172 项通过。
 - 修复前的暴露面：API 图片管线只把魔数为 JPEG/PNG/WebP 的字节交给 sharp，解码后再核对格式，而且只在强制 `VIPS_BLOCK_UNTRUSTED=1` 的子进程里解码，该设置下 libvips 拒绝 SVG 输入（0.35.4 与 0.35.5 均实测）；渲染器不用 `astro:assets`，Temporal 打包也不用 webpack 图片压缩。没有产品路径解码过 SVG，但有漏洞的二进制确实随运行镜像发布。
 - 安全下限新增 `sharp` ≥0.35.5、登记前任 0.35.4：对上一版锁文件失败，对当前锁文件通过。生产审计回到零 advisory（830 个依赖）。基线重新绑定到修复提交，`valid_until` 不变（2026-10-14T21:28:22Z，月度刷新与续期仍须在此之前合入）；旧绑定 `BASELINE_SOURCE_LOCK_MISMATCH`、新绑定 `FRESH`，见[回执](../evidence/security/20261007-sharp-advisory-remediation.json)。Copy fixed-source 回执只重签指纹。
+
+## 2026-10-07 · Retry an ICP request only when no earlier attempt reached a provider (#597)
+
+- 起因：一次 ICP 设计或查询计划请求开过预算账户后，同一公司/ICP 再也无法重试——账户键由请求决定，第一次请求把它永久绑在第一把 Grant 上，之后每把新 Grant 都 409 `EXECUTION_BUDGET_GRANT_REUSED`。
+- 改动：新增 `execution-budget-retry-account` 判定，只对 `icp.design` 与 `icp.query_plan` 生效：仅当之前每次尝试都在派发前释放（`RELEASED`）或从未开户、且对应 Grant 已过账本 60 秒容差时，才允许用派生键 `原键:retry:<authority id>` 开户重试；已结算或结果未知一律不换户。换户在账本锁内进行，且先强制关闭仍开着的旧账户，排队中的预留会失败而不是花钱。绑定校验只接受派生键（原键或追加自身 authority id），其余一律拒绝。CI 的 Postgres 步骤显式运行新的真库测试。无数据库迁移。
+- 测试：重试判定单测 13 项；`src/execution-budget` 412 项全过；真库测试 5 项（一次性 Postgres 容器，以 app_user 在 RLS 下执行）连续 5 次通过；五项变异检查各自变红；全量单测通过（唯一失败为已登记负载假红，单独复跑通过）。并入 main 后由 CI 复跑真库步骤。
+- 未做：未改 `changelog.md` 本体（按新规走本片段）；未部署，随下一次镜像班次生效。
 
 ## 2026-10-06 · Production advisory remediation (http-cache-semantics, smol-toml)
 
