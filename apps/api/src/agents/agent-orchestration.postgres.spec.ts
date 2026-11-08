@@ -8,6 +8,7 @@ import { PrismaAgentDecisionTraceStore } from './agent-decision-trace.store';
 import { PrismaAgentRegistryStore } from './agent-registry.store';
 import { createDbAgentResolver } from './agent-resolver';
 import { AgentsService } from './agents.service';
+import { RunTraceService } from './run-trace.service';
 
 // Explicitly opted-in, disposable and migrated PostgreSQL only（同 lead-queue-basis 模式）。
 // owner 连接（superuser，绕过 RLS）建/清夹具；执行侧一律走 app_user + withWorkspace，
@@ -144,6 +145,47 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
         tx.$queryRaw<{ id: string }[]>`SELECT "id"::text AS "id" FROM "agent_decision_trace"`,
       );
       expect(visibleToB).toHaveLength(0);
+    });
+
+    // 负向 5（设计 §8）：跨租户读轨迹 → 404；本租户键集分页读到时间线。
+    it('serves the run trace timeline to its tenant with keyset pagination and 404s another tenant', async () => {
+      await owner.$executeRaw`
+        INSERT INTO "agent_decision_trace"
+          ("workspace_id", "run_id", "step_type", "agent_key", "decision_type", "discriminator",
+           "created_at")
+        VALUES
+          (${workspaceA}::uuid, ${runId}::uuid, 'discovery.quick_scan',
+           ${AGENT_KEYS.qualifier}, 'fit.judge', 'spec-batch-2', now() + interval '1 second')
+      `;
+      const store = new PrismaAgentDecisionTraceStore(prisma);
+      const service = new RunTraceService(prisma, store);
+
+      const first = await service.listRunTrace({ workspaceId: workspaceA } as never, runId, {
+        limit: 1,
+      });
+      expect(first.data).toHaveLength(1);
+      expect(first.data[0]).toMatchObject({ decisionType: 'source.route', attempt: 1 });
+      expect(first.hasMore).toBe(true);
+      expect(first.nextCursor).toBeTruthy();
+
+      const second = await service.listRunTrace({ workspaceId: workspaceA } as never, runId, {
+        limit: 1,
+        cursor: first.nextCursor!,
+      });
+      expect(second.data).toHaveLength(1);
+      expect(second.data[0]).toMatchObject({ decisionType: 'fit.judge' });
+      expect(second.hasMore).toBe(false);
+      expect(second.nextCursor).toBeNull();
+
+      // 跨租户：run 属于 A，B 的上下文读不到 → 404（不泄露存在性）。
+      await expect(
+        service.listRunTrace({ workspaceId: workspaceB } as never, runId, { limit: 10 }),
+      ).rejects.toMatchObject({ response: { error: { code: 'NOT_FOUND' } } });
+      // B 自己的 run 没有轨迹 → 200 空页。
+      const otherPage = await service.listRunTrace({ workspaceId: workspaceB } as never, otherRunId, {
+        limit: 10,
+      });
+      expect(otherPage.data).toEqual([]);
     });
 
     it('keeps traces append-only for the application role and cascades them with the run', async () => {
