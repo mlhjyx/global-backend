@@ -92,6 +92,19 @@ describe('ExecutionBudgetWindowUsageService', () => {
 });
 
 describe('parseWindowUsageQuery', () => {
+  /** HttpException 的 payload 在 `.response` 上；同步断言用它而不是 toThrowError（后者只比对 message）。 */
+  function expectInvalid(fn: () => unknown): void {
+    let caught: unknown;
+    try {
+      fn();
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toMatchObject({
+      response: { error: { code: 'EXECUTION_BUDGET_WINDOW_USAGE_INVALID' } },
+    });
+  }
+
   it('accepts a UUID workspace and an ISO8601 past timestamp', () => {
     const parsed = parseWindowUsageQuery({
       workspaceId: WS,
@@ -102,31 +115,17 @@ describe('parseWindowUsageQuery', () => {
   });
 
   it('rejects a non-UUID workspace id', () => {
-    expect(() => parseWindowUsageQuery({ workspaceId: 'x', since: '2026-10-10' })).toThrowError(
-      expect.objectContaining({
-        response: { error: { code: 'EXECUTION_BUDGET_WINDOW_USAGE_INVALID' } },
-      }),
-    );
+    expectInvalid(() => parseWindowUsageQuery({ workspaceId: 'x', since: '2026-10-10' }));
   });
 
   it('rejects an unparseable or future since', () => {
-    expect(() =>
-      parseWindowUsageQuery({ workspaceId: WS, since: 'not-a-date' }),
-    ).toThrowError(
-      expect.objectContaining({
-        response: { error: { code: 'EXECUTION_BUDGET_WINDOW_USAGE_INVALID' } },
-      }),
-    );
+    expectInvalid(() => parseWindowUsageQuery({ workspaceId: WS, since: 'not-a-date' }));
     const future = new Date(Date.now() + 60 * 60_000).toISOString();
-    expect(() => parseWindowUsageQuery({ workspaceId: WS, since: future })).toThrowError(
-      expect.objectContaining({
-        response: { error: { code: 'EXECUTION_BUDGET_WINDOW_USAGE_INVALID' } },
-      }),
-    );
+    expectInvalid(() => parseWindowUsageQuery({ workspaceId: WS, since: future }));
   });
 
   it('rejects non-object query shapes', () => {
-    expect(() => parseWindowUsageQuery(null)).toThrow();
-    expect(() => parseWindowUsageQuery(['x'])).toThrow();
+    expectInvalid(() => parseWindowUsageQuery(null));
+    expectInvalid(() => parseWindowUsageQuery(['x']));
   });
 });

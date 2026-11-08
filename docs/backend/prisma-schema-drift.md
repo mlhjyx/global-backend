@@ -9,9 +9,11 @@
 
 `packages/db/scripts/prisma-drift-gate.mjs`：
 
-1. 用 Postgres service（CI）或本地 `DATABASE_URL` 建一个一次性影子库（默认 `prisma_drift_shadow`，用完即删）；
-2. 在影子库里重放 `packages/db/prisma/migrations` 全链，再与 `schema.prisma` 做 `prisma migrate diff --from-migrations --to-schema-datamodel --script`；
+1. 把迁移链 `prisma migrate deploy` 到一个**一次性库**（CI 即 service 的 `global_test`；本地用 `PRISMA_DRIFT_FROM_URL` 指向 `prisma_drift_scratch` 之类的库，脚本只允许库名匹配 `*_test` / `*_scratch` / `prisma_drift_*`，绝不容许落到共享 `global_dev`）；
+2. 与 `schema.prisma` 做 `prisma migrate diff --from-url <一次性库> --to-schema-datamodel --script`；
 3. 逐条比对 `packages/db/prisma/drift-baseline.json` 的已知差异清单（baseline）。
+
+不使用 `--from-migrations` 的影子重放：Prisma 的重放会重置影子库且**不创建** `_prisma_migrations`，而 `20261010090000_app_user_table_privileges` 会对该表做 REVOKE/GRANT 与全库权限对账，重放必失败（P3006/P1014，2026-11-09 实测）。`migrate deploy` 维护 `_prisma_migrations`，与真实部署路径一致。
 
 CI 位置：`build-test` job 的 `Prisma drift gate（datamodel ⇄ migrations，基线允许清单）` 步骤（`run_db_tests` 为真时运行，即改动涉及 `packages/db/*`、`apps/api/*`、`packages/contracts/*`、`scripts/*`、锁文件或 CI 自身）。
 
@@ -28,13 +30,15 @@ CI 位置：`build-test` job 的 `Prisma drift gate（datamodel ⇄ migrations�
 ## 3. 本地怎么跑
 
 ```bash
-# 在 worktree 里（需要 packages/db/.env 的 DATABASE_URL 或显式 env）
-pnpm --filter @global/db generate
-node packages/db/scripts/prisma-drift-gate.mjs
+# 在 worktree 里。先建一个一次性库（本机 global 属主）：
+docker exec global-postgres psql -U global -d postgres -c 'CREATE DATABASE prisma_drift_scratch;'
+# 用 packages/db/.env 的 DATABASE_URL 派生一次性库 URL 后运行：
+PRISMA_DRIFT_FROM_URL='postgresql://global:<pw>@localhost:5432/prisma_drift_scratch' \
+  node packages/db/scripts/prisma-drift-gate.mjs
 ```
 
-- 影子库名可用 `PRISMA_DRIFT_SHADOW_DB` 覆盖；脚本只创建/删除该一次性库，**不触碰 `global_dev` 等业务库**。
-- 本机 Postgres 需允许 `DATABASE_URL` 的角色 `CREATE DATABASE`（本地即 `global` 属主，CI 为 service 用户）。
+- 脚本会向目标库 apply 迁移链（`migrate deploy`），因此只接受一次性库名（`*_test` / `*_scratch` / `prisma_drift_*`），**不触碰 `global_dev` 等业务库**。
+- CI 直接使用 service 的 `global_test`（名字匹配 `_test`），无需额外配置。
 
 ## 4. 有意新增 SQL-only 结构时
 

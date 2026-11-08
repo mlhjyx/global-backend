@@ -25,6 +25,17 @@ function context(request: {
   } as unknown as ExecutionContext;
 }
 
+/** HttpException 的 payload 在 `.response` 上；同步断言用它而不是 toThrowError（后者只比对 message）。 */
+function expectHttpError(fn: () => unknown, code: string): void {
+  let caught: unknown;
+  try {
+    fn();
+  } catch (error) {
+    caught = error;
+  }
+  expect(caught).toMatchObject({ response: { error: { code } } });
+}
+
 const guard = new BudgetReadbackServiceTokenGuard();
 const original = process.env[BUDGET_READBACK_SERVICE_TOKEN_ENV];
 
@@ -40,40 +51,36 @@ afterEach(() => {
 describe('BudgetReadbackServiceTokenGuard', () => {
   it('fails closed with 503 when the service token env is missing', () => {
     delete process.env[BUDGET_READBACK_SERVICE_TOKEN_ENV];
-    expect(() =>
-      guard.canActivate(context({ remoteAddress: '127.0.0.1', headers: {} })),
-    ).toThrowError(
-      expect.objectContaining({
-        response: { error: { code: 'BUDGET_READBACK_NOT_CONFIGURED' } },
-      }),
+    expectHttpError(
+      () => guard.canActivate(context({ remoteAddress: '127.0.0.1', headers: {} })),
+      'BUDGET_READBACK_NOT_CONFIGURED',
     );
   });
 
   it('rejects non-loopback callers with 403', () => {
-    expect(() =>
-      guard.canActivate(
-        context({ remoteAddress: '10.1.2.3', headers: { 'x-service-token': 'budget-readback-token' } }),
-      ),
-    ).toThrowError(
-      expect.objectContaining({
-        response: { error: { code: 'BUDGET_READBACK_LOOPBACK_ONLY' } },
-      }),
+    expectHttpError(
+      () =>
+        guard.canActivate(
+          context({ remoteAddress: '10.1.2.3', headers: { 'x-service-token': 'budget-readback-token' } }),
+        ),
+      'BUDGET_READBACK_LOOPBACK_ONLY',
     );
   });
 
   it('requires the x-service-token header', () => {
-    expect(() => guard.canActivate(context({ remoteAddress: '127.0.0.1' }))).toThrowError(
-      expect.objectContaining({ response: { error: { code: 'SERVICE_TOKEN_REQUIRED' } } }),
+    expectHttpError(
+      () => guard.canActivate(context({ remoteAddress: '127.0.0.1' })),
+      'SERVICE_TOKEN_REQUIRED',
     );
   });
 
   it('rejects a mismatched token with 401', () => {
-    expect(() =>
-      guard.canActivate(
-        context({ remoteAddress: '127.0.0.1', headers: { 'x-service-token': 'wrong' } }),
-      ),
-    ).toThrowError(
-      expect.objectContaining({ response: { error: { code: 'SERVICE_TOKEN_INVALID' } } }),
+    expectHttpError(
+      () =>
+        guard.canActivate(
+          context({ remoteAddress: '127.0.0.1', headers: { 'x-service-token': 'wrong' } }),
+        ),
+      'SERVICE_TOKEN_INVALID',
     );
   });
 

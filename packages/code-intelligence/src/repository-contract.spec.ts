@@ -84,6 +84,8 @@ test("current repository keeps representative business and dynamic chains comple
     [
       "INTEGRATION_EVENTS",
       [
+        // ch08 §3.1.4：campaign 失败回写第二通道（控制面 PATCH 重试耗尽后的 outbox 兜底）。
+        "CampaignPlanJobFailed",
         // M2 步 10：qualify 每批一条候选批次事件。
         "CandidateBatchCompleted",
         "ClaimApproved",
@@ -95,6 +97,8 @@ test("current repository keeps representative business and dynamic chains comple
         "KnowledgeConflictDetected",
         "LeadQualified",
         "LeadsScored",
+        // ch08 §3.1.12：制裁名单陈旧告警。
+        "SanctionsListStale",
         "SiteBuildCostSummaryUpdated",
       ],
     ],

@@ -1,10 +1,19 @@
 #!/usr/bin/env node
 /**
- * ch08 §3.1.7 Prisma 漂移门：迁移链（--from-migrations）⇄ Prisma datamodel 的差异必须为零，
+ * ch08 §3.1.7 Prisma 漂移门：迁移链 ⇄ Prisma datamodel 的差异必须为零，
  * 已知差异按「基线允许清单」逐条登记（owner + 到期日），新增漂移即红。
  *
- * 为什么用 --from-migrations 而不是 --from-url：本门的职责是「datamodel 与迁移文件一致」，
- * 不依赖任何一套已应用的数据库；影子库只用来重放迁移链。
+ * 口径：把迁移链 `prisma migrate deploy` 到一个一次性库，再
+ * `prisma migrate diff --from-url <库> --to-schema-datamodel --script`。
+ *  - 不能用 `--from-migrations` 的 shadow 重放：Prisma 的重放会重置影子库且**不创建**
+ *    `_prisma_migrations`，而 20261010090000_app_user_table_privileges 会对该表做
+ *    REVOKE/GRANT 与全库权限对账——重放必失败（P3006/P1014，2026-11-09 实测）。
+ *  - `migrate deploy` 会维护 `_prisma_migrations`，与真实部署路径一致。
+ *
+ * 目标库选择：`PRISMA_DRIFT_FROM_URL`，未设置时用 `DATABASE_URL`。
+ * 安全护栏：只允许库名匹配「一次性」模式的库（`*_test` / `*_scratch` / `prisma_drift_*`），
+ * 否则拒绝执行（本脚本会向目标库 deploy 迁移，绝不能落到共享 global_dev/gain_saas 上）。
+ * CI 里 DATABASE_URL 即 service 的 global_test；本地先建一个 scratch 库再指过来。
  *
  * 基线（packages/db/prisma/drift-baseline.json）是 ratchet：
  *  - 出现清单外的差异语句 → 失败（新增 SQL-only 表/列/索引 → 先补 datamodel 或登记，二选一并写明 owner/到期）；
@@ -14,9 +23,6 @@
  * 用法：
  *   node packages/db/scripts/prisma-drift-gate.mjs                 # 检查（CI/本地）
  *   node packages/db/scripts/prisma-drift-gate.mjs --write-baseline  # 以当前差异重写基线（人工评审后提交）
- *
- * env：DATABASE_URL（必填，CI 指向 postgres service；本地可用 packages/db/.env）；
- *      PRISMA_DRIFT_SHADOW_DB（可选，影库名，默认 prisma_drift_shadow）。
  */
 
 import { spawnSync } from 'node:child_process';
@@ -27,7 +33,6 @@ import { fileURLToPath } from 'node:url';
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, '../../..');
 const dbPackageDir = resolve(repoRoot, 'packages/db');
-const migrationsDir = resolve(dbPackageDir, 'prisma/migrations');
 const schemaPath = resolve(dbPackageDir, 'prisma/schema.prisma');
 const baselinePath = resolve(dbPackageDir, 'prisma/drift-baseline.json');
 
@@ -37,6 +42,7 @@ function fatal(message) {
 }
 
 function loadDatabaseUrl() {
+  if (process.env.PRISMA_DRIFT_FROM_URL) return process.env.PRISMA_DRIFT_FROM_URL;
   if (process.env.DATABASE_URL) return process.env.DATABASE_URL;
   const envFile = resolve(dbPackageDir, '.env');
   if (existsSync(envFile)) {
@@ -45,52 +51,41 @@ function loadDatabaseUrl() {
       if (match) return match[1].trim().replace(/^["']|["']$/g, '');
     }
   }
-  fatal('DATABASE_URL is required (env or packages/db/.env)');
+  fatal('PRISMA_DRIFT_FROM_URL / DATABASE_URL is required (env or packages/db/.env)');
 }
 
-function withDatabase(rawUrl, databaseName) {
-  const url = new URL(rawUrl);
-  url.pathname = `/${databaseName}`;
-  return url.toString();
+const DISPOSABLE_DATABASE = /(?:^prisma_drift_|_test$|_scratch$)/;
+
+function assertDisposable(databaseUrl) {
+  let name;
+  try {
+    name = decodeURIComponent(new URL(databaseUrl).pathname.replace(/^\//, ''));
+  } catch {
+    fatal('target database URL is not a valid URL');
+  }
+  if (!DISPOSABLE_DATABASE.test(name)) {
+    fatal(
+      `refusing to deploy migrations to non-disposable database "${name}"。` +
+        ' 本门会向目标库 apply 迁移链；请把 PRISMA_DRIFT_FROM_URL 指向一次性库' +
+        '（库名以 _scratch / _test 结尾或 prisma_drift_ 前缀，例如先 CREATE DATABASE prisma_drift_scratch）。',
+    );
+  }
+  return databaseUrl;
 }
 
-function shadowDatabaseName() {
-  const name = process.env.PRISMA_DRIFT_SHADOW_DB ?? 'prisma_drift_shadow';
-  if (!/^[a-z][a-z0-9_]{0,62}$/.test(name)) fatal(`invalid shadow database name: ${name}`);
-  return name;
-}
-
-function prisma(args, { input } = {}) {
+function prisma(args, { env = process.env } = {}) {
   const result = spawnSync(
     'pnpm',
     ['--filter', '@global/db', 'exec', 'prisma', ...args],
     {
       cwd: repoRoot,
       encoding: 'utf8',
-      input,
-      env: process.env,
+      env,
       maxBuffer: 64 * 1024 * 1024,
     },
   );
   if (result.error) fatal(`failed to run prisma: ${result.error.message}`);
   return result;
-}
-
-function ensureShadowDatabase(adminUrl, name) {
-  const result = prisma(['db', 'execute', '--url', adminUrl, '--stdin'], {
-    input: `CREATE DATABASE "${name}";\n`,
-  });
-  const combined = `${result.stdout}\n${result.stderr}`;
-  if (result.status === 0) return;
-  // 并发/残留：库已存在即可继续（Prisma 会重置其中的对象）。
-  if (/already exists/i.test(combined)) return;
-  fatal(`cannot create shadow database ${name}:\n${combined.trim()}`);
-}
-
-function dropShadowDatabase(adminUrl, name) {
-  prisma(['db', 'execute', '--url', adminUrl, '--stdin'], {
-    input: `DROP DATABASE IF EXISTS "${name}" WITH (FORCE);\n`,
-  });
 }
 
 /**
@@ -176,27 +171,26 @@ export function splitSqlStatements(sql) {
     .map((s) => (s.endsWith(';') ? s : `${s};`));
 }
 
-function currentDiff(adminUrl, shadowUrl, name) {
-  ensureShadowDatabase(adminUrl, name);
-  try {
-    const result = prisma([
-      'migrate',
-      'diff',
-      '--from-migrations',
-      migrationsDir,
-      '--to-schema-datamodel',
-      schemaPath,
-      '--shadow-database-url',
-      shadowUrl,
-      '--script',
-    ]);
-    if (result.status !== 0) {
-      fatal(`prisma migrate diff failed:\n${result.stdout}\n${result.stderr}`.trim());
-    }
-    return splitSqlStatements(result.stdout);
-  } finally {
-    dropShadowDatabase(adminUrl, name);
+function currentDiff(fromUrl) {
+  const deploy = prisma(['migrate', 'deploy'], {
+    env: { ...process.env, DATABASE_URL: fromUrl },
+  });
+  if (deploy.status !== 0) {
+    fatal(`prisma migrate deploy to ${fromUrl.split('@').pop()} failed:\n${deploy.stdout}\n${deploy.stderr}`.trim());
   }
+  const result = prisma([
+    'migrate',
+    'diff',
+    '--from-url',
+    fromUrl,
+    '--to-schema-datamodel',
+    schemaPath,
+    '--script',
+  ]);
+  if (result.status !== 0) {
+    fatal(`prisma migrate diff failed:\n${result.stdout}\n${result.stderr}`.trim());
+  }
+  return splitSqlStatements(result.stdout);
 }
 
 function loadBaseline() {
@@ -280,12 +274,8 @@ function writeBaseline(produced) {
 }
 
 function main() {
-  const databaseUrl = loadDatabaseUrl();
-  const shadowName = shadowDatabaseName();
-  const adminUrl = withDatabase(databaseUrl, 'postgres');
-  const shadowUrl = withDatabase(databaseUrl, shadowName);
-
-  const produced = currentDiff(adminUrl, shadowUrl, shadowName);
+  const fromUrl = assertDisposable(loadDatabaseUrl());
+  const produced = currentDiff(fromUrl);
   if (process.argv.includes('--write-baseline')) {
     writeBaseline(produced);
     return;

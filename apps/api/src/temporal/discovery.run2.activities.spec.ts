@@ -539,15 +539,13 @@ describe('ch08 §3.1.5 quickJudge 批量 wire-time 出网闸门', () => {
 
     mocks.execute.mockImplementation(
       async (
-        _skills: unknown,
         _gateway: unknown,
-        _key: unknown,
         _input: unknown,
-        opts: { authorizeExternalAction?: () => Promise<boolean> },
+        context: { authorizeExternalAction?: () => Promise<boolean> },
       ) => {
         // 预检通过之后、物理 wire 之前新增一条域名禁联（TOCTOU 窗口）。
         state.suppressions.push({ type: 'domain', value: 'c1.example' });
-        const allowed = await opts.authorizeExternalAction!();
+        const allowed = await context.authorizeExternalAction!();
         if (!allowed) throw new ExternalActionDeniedError();
         return {
           data: {
@@ -579,7 +577,8 @@ describe('ch08 §3.1.5 quickJudge 批量 wire-time 出网闸门', () => {
       judged: 1,
       skipped: 1,
       verdicts: { match: 1 },
-      fallbackPerCompany: 0,
+      // 批量 wire 被拒后整批降级逐家：放行的 c2 走 single 路径。
+      fallbackPerCompany: 1,
       ruleFallback: 0,
     });
     const byJob = new Map(jobUpdates.map((u) => [u.where.id, u.data]));
@@ -603,16 +602,14 @@ describe('ch08 §3.1.5 quickJudge 批量 wire-time 出网闸门', () => {
     let second: boolean | undefined;
     mocks.execute.mockImplementation(
       async (
-        _skills: unknown,
         _gateway: unknown,
-        _key: unknown,
         _input: unknown,
-        opts: { authorizeExternalAction?: () => Promise<boolean> },
+        context: { authorizeExternalAction?: () => Promise<boolean> },
       ) => {
-        first = await opts.authorizeExternalAction!();
+        first = await context.authorizeExternalAction!();
         // wire 之前 c2 被禁联：下一次回调必须返回 false（不是恒 true）。
         state.suppressions.push({ type: 'domain', value: 'c2.example' });
-        second = await opts.authorizeExternalAction!();
+        second = await context.authorizeExternalAction!();
         throw new ExternalActionDeniedError();
       },
     );
