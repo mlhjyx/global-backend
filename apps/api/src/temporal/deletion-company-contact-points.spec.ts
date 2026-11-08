@@ -7,7 +7,7 @@ const COMPANY_ID = 'b8b3ee5c-fbb8-42ef-a382-9c10c16dca72';
 const CONTACT_ID = '5d0e9b8e-7f0a-4a55-9a3e-3b2f9f6b1c21';
 const DELETION_REQUEST_ID = '11d5ac4e-451e-4a89-b19f-c2f59e632dc9';
 
-function makeTx(companyPoints: number) {
+function makeTx(companyPoints: number, companyChannels = 0) {
   const order: string[] = [];
   const tx = {
     $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
@@ -29,6 +29,12 @@ function makeTx(companyPoints: number) {
       deleteMany: vi.fn(async () => {
         order.push('company-contact-points');
         return { count: companyPoints };
+      }),
+    },
+    companyContactChannel: {
+      deleteMany: vi.fn(async () => {
+        order.push('company-contact-channels');
+        return { count: companyChannels };
       }),
     },
     canonicalCompany: { updateMany: vi.fn(async () => ({ count: 1 })) },
@@ -66,7 +72,11 @@ describe('company-subject erasure of company contact points (BI-14)', () => {
     expect(tx.companyContactPoint.deleteMany).toHaveBeenCalledWith({
       where: { companyId: { in: [COMPANY_ID] } },
     });
-    expect(order).toEqual(['policy-lock', 'company-for-update', 'company-contact-points']);
+    // A4：公司级联系方式层同样显式擦除（公司行只标 SUPPRESSED，FK 级联不触发）。
+    expect(tx.companyContactChannel.deleteMany).toHaveBeenCalledWith({
+      where: { companyId: { in: [COMPANY_ID] } },
+    });
+    expect(order).toEqual(['policy-lock', 'company-for-update', 'company-contact-points', 'company-contact-channels']);
     expect(counts).toMatchObject({ contactsErased: 0, contactPointsErased: 4, companiesSuppressed: 1 });
     // The persisted stats carry the same count, so the receipt and DeletionCompleted match.
     expect(tx.deletionRequest.updateMany).toHaveBeenLastCalledWith({
@@ -83,6 +93,26 @@ describe('company-subject erasure of company contact points (BI-14)', () => {
     expect(
       purgeStatements.some((sql) => sql.includes('DELETE FROM llm_extraction_cache')),
     ).toBe(true);
+  });
+
+  it('counts erased company-level channels into contactPointsErased', async () => {
+    const { tx, activities } = makeTx(2, 3);
+
+    const counts = await activities.eraseSubject({
+      input: {
+        workspaceId: WORKSPACE_ID,
+        deletionRequestId: DELETION_REQUEST_ID,
+        subjectType: 'company',
+        subjectId: COMPANY_ID,
+      },
+      located: LOCATED,
+    });
+
+    expect(counts).toMatchObject({ contactPointsErased: 5 });
+    expect(tx.deletionRequest.updateMany).toHaveBeenLastCalledWith({
+      where: { id: DELETION_REQUEST_ID, status: 'ERASING' },
+      data: { stats: expect.objectContaining({ contactPointsErased: 5 }) },
+    });
   });
 
   it('leaves company contact points alone when the subject is a contact', async () => {
@@ -105,6 +135,7 @@ describe('company-subject erasure of company contact points (BI-14)', () => {
     });
 
     expect(tx.companyContactPoint.deleteMany).not.toHaveBeenCalled();
+    expect(tx.companyContactChannel.deleteMany).not.toHaveBeenCalled();
     // 联系人主体同样按 workspace 擦除缓存（个人数据可能经 Impressum/决策人抽取进入缓存）。
     const purgeStatements = tx.$executeRaw.mock.calls.map(([strings]) =>
       (strings as TemplateStringsArray).join('?'),

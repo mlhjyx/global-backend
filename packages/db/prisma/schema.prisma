@@ -2167,6 +2167,7 @@ model CanonicalCompany {
 
   contacts                CanonicalContact[]
   companyContactPoints    CompanyContactPoint[]
+  companyContactChannels  CompanyContactChannel[]
   channelSightings        CompanyChannelSighting[]
   leads                   Lead[]
   materializationOutcomes DiscoveryCompanyMaterializationOutcome[]
@@ -2237,6 +2238,16 @@ model ContactPoint {
   status      String    @default("UNVERIFIED") // UNVERIFIED | VALID | RISKY | INVALID
   verifiedAt  DateTime? @map("verified_at")
   createdAt   DateTime  @default(now()) @map("created_at")
+  // A4（2026-11-08）：分类/来源/合规/验证元数据（见迁移 20261108160000）。
+  emailType          String? @map("email_type") // role | generic_sales | procurement | management | finance | support | personal | other
+  sourceType         String? @map("source_type") // impressum | contact_page | homepage | directory | social | pattern_guess | operator | provider
+  sourceUrl          String? @map("source_url")
+  robotsStatus       String? @map("robots_status") // allowed | disallowed | unknown
+  tosStatus          String? @map("tos_status") // allowed | restricted | unknown
+  legalBasis         String? @map("legal_basis") // legitimate_interest | consent | contract | legal_obligation
+  verificationMethod String? @map("verification_method") // smtp_rcpt | pattern_guess | provider_reported | operator | import
+  catchAll           String? @map("catch_all") // catch_all | not_catch_all | inconclusive | unknown
+  consentRecord      Json?   @map("consent_record")
 
   contact CanonicalContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
@@ -2269,6 +2280,34 @@ model CompanyContactPoint {
 
   @@unique([workspaceId, companyId, kind, value])
   @@map("company_contact_point")
+}
+
+/// A4（2026-11-08）：公司级联系方式层——Impressum 法定公开的 role 邮箱与总机电话是公司事实。
+/// email=amber（职能邮箱，email_type 不得 personal——具名人只属于联系人层）；phone/form_url=green。
+/// 与只存 URL 的 company_contact_point 分工；自动化只写 UNVERIFIED；复合外键随公司级联删除。
+model CompanyContactChannel {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  companyId   String   @map("company_id") @db.Uuid
+  channel     String // email | phone | form_url
+  value       String
+  emailType   String?  @map("email_type") // 仅 email：role | generic_sales | procurement | management | finance | support | other
+  status      String   @default("UNVERIFIED") // UNVERIFIED | VALID | RISKY | INVALID
+  dataClass   String   @map("data_class") // email=amber；phone/form_url=green
+  sourceType  String   @map("source_type") // impressum | contact_page | homepage | operator
+  sourceUrl   String?  @map("source_url")
+  robotsStatus String? @map("robots_status")
+  tosStatus   String?  @map("tos_status")
+  legalBasis  String?  @map("legal_basis")
+  verificationMethod String? @map("verification_method")
+  firstSeenAt DateTime @default(now()) @map("first_seen_at")
+  lastSeenAt  DateTime @map("last_seen_at")
+  updatedBy   String?  @map("updated_by")
+
+  company CanonicalCompany @relation(fields: [workspaceId, companyId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict, map: "company_contact_channel_company_fkey")
+
+  @@unique([workspaceId, companyId, channel, value], map: "company_contact_channel_identity_key")
+  @@map("company_contact_channel")
 }
 
 /// 身份解析连接（PRD 8.8）：canonical 实体 ↔ raw 记录，可审计可回溯。
