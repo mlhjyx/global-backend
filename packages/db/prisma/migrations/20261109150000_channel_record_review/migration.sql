@@ -21,7 +21,8 @@ ALTER TABLE "source_channel_record"
     OR ("review_status" IN ('APPROVED', 'REJECTED') AND "reviewed_by" IS NOT NULL AND "reviewed_at" IS NOT NULL)
   );
 
-CREATE INDEX "source_channel_record_channel_review_idx"
+-- 索引名按 Prisma datamodel 默认（@@index([channelId, reviewStatus]) → _channel_id_review_status_idx）。
+CREATE INDEX "source_channel_record_channel_id_review_status_idx"
   ON "source_channel_record" ("channel_id", "review_status");
 
 COMMIT;

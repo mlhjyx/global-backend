@@ -38,7 +38,7 @@ describe('CH-7：渠道记录观察名单迁移', () => {
     }
     expect(sql).toContain("\"review_status\" IN ('PENDING', 'APPROVED', 'REJECTED')");
     expect(sql).toContain('source_channel_record_review_audit_check');
-    expect(sql).toContain('CREATE INDEX "source_channel_record_channel_review_idx"');
+    expect(sql).toContain('CREATE INDEX "source_channel_record_channel_id_review_status_idx"');
     expect(sql).toContain('ON "source_channel_record" ("channel_id", "review_status")');
   });
 
