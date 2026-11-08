@@ -195,9 +195,9 @@ export function campaignPlanEffectiveReplans(
 ): number {
   const perRoundCents = getTask('campaign.plan')?.maxCostCents ?? 60;
   const raw = Number.parseInt(env['CAMPAIGN_PLAN_JOB_COST_CAP_CENTS'] ?? '', 10);
-  const capCents = Number.isSafeInteger(raw) && raw > 0 ? raw : perRoundCents * 3;
-  const roundsByCap = Math.max(1, Math.floor(capCents / perRoundCents));
-  return Math.min(requested ?? 0, roundsByCap - 1, 2);
+  const jobCeilingCents = Number.isSafeInteger(raw) && raw > 0 ? raw : perRoundCents * 3;
+  const roundsByCeiling = Math.max(1, Math.floor(jobCeilingCents / perRoundCents));
+  return Math.min(requested ?? 0, roundsByCeiling - 1, 2);
 }
 
 @ApiTags('Campaign')
