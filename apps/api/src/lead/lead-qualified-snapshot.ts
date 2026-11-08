@@ -1,16 +1,25 @@
 /**
- * LeadQualified 快照 v1（收口③）：decide(accept) 当刻的**事实不可变副本**，
- * 之后 lead/company 变化不回写。契约：packages/contracts/events/payloads/lead-qualified.v1.schema.json。
+ * LeadQualified 快照 v2（收口③；M2 步 10 升 v2）：decide(accept) 当刻的**事实不可变副本**，
+ * 之后 lead/company 变化不回写。v2 契约：packages/contracts/events/payloads/lead-qualified.v2.schema.json
+ * （v1 文件保留给历史事件；v2 仅新增两个可选字段，旧消费方不受影响）。
  *
  * 🔴 GDPR 最小化：company_ref 只带公司事实（绿区）；contact_refs 只带 ref + 职务元数据，
  * **绝不嵌 full_name/email**——SaaS 拿 contact_id 走受控 API 取详情（契约 additionalProperties:false 兜底）。
  */
 
+import { createHash } from 'node:crypto';
 import { clamp01 } from './scoring';
 import { leadQueueBasis, type LeadQueueBasis } from './lead-queue-basis';
 import type { LeadPackage } from './lead-package';
 
-export const LEAD_QUALIFIED_SCHEMA_VERSION = 1;
+/**
+ * v2（M2 步 10，2026-11-08）：新增两个**可选**字段——`candidate_batch_ref`（该 lead 最近一次
+ * 评分所属的候选批次，来自 lead.score_detail.candidateBatchRef，格式 `qualify:<runRef>:<batchNo>`）
+ * 与 `evidence_digest`（accept 当刻本 lead 资格证据材料 {lead_id, fit_verdict, scores,
+ * score_detail, fit_reasons, scored_at} 的 SHA-256，hex）。旧消费方忽略新字段即可；
+ * 契约见 packages/contracts/events/payloads/lead-qualified.v2.schema.json。
+ */
+export const LEAD_QUALIFIED_SCHEMA_VERSION = 2;
 /**
  * v2（收口⑤）：总分构成不变（加法六维 + recommended≥0.55 且 Reachability>0），新增 **demand_proof
  * 观测维填充**（一等 Signal 事实驱动，不入总分——乘法门待 R2 backtest）。快照 v1 契约已预留
@@ -58,6 +67,10 @@ interface LeadScoresJson {
 
 export interface LeadQualifiedSnapshotV1 {
   snapshot_version: number;
+  /** v2：该 lead 最近一次评分所属候选批次（`qualify:<runRef>:<batchNo>`）；未评分/旧数据 → null。 */
+  candidate_batch_ref: string | null;
+  /** v2：accept 当刻资格证据材料的 SHA-256（hex）；同一行数据重算一致。 */
+  evidence_digest: string;
   lead_id: string;
   workspace_id: string;
   icp_id: string;
@@ -301,6 +314,41 @@ export function computeValidUntil(evidence: readonly EvidenceFreshness[], attrib
   return new Date(Math.min(...expiries)).toISOString();
 }
 
+/** v2：lead.score_detail.candidateBatchRef（`qualify:<runRef>:<batchNo>`）；缺失 → null。 */
+export function leadCandidateBatchRef(scoreDetail: unknown): string | null {
+  const value =
+    scoreDetail != null && typeof scoreDetail === 'object' && !Array.isArray(scoreDetail)
+      ? (scoreDetail as { candidateBatchRef?: unknown }).candidateBatchRef
+      : undefined;
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+/**
+ * v2：资格证据材料的 SHA-256（hex）。材料 = {lead_id, fit_verdict, total_score, scores,
+ * score_detail, fit_reasons, scored_at}，JSON 键序固定；同一 DB 行重算一致（jsonb 读出键序由
+ * Postgres 规范化），用于下游 QGO 记录「提升时看到的证据版本」。
+ */
+export function leadEvidenceDigest(lead: {
+  id: string;
+  fitVerdict: string | null;
+  totalScore: number | null;
+  scores: unknown;
+  scoreDetail: unknown;
+  fitReasons: unknown;
+  scoredAt?: Date | string | null;
+}): string {
+  const material = JSON.stringify({
+    lead_id: lead.id,
+    fit_verdict: lead.fitVerdict,
+    total_score: lead.totalScore,
+    scores: lead.scores ?? null,
+    score_detail: lead.scoreDetail ?? null,
+    fit_reasons: lead.fitReasons ?? null,
+    scored_at: isoOrNull(lead.scoredAt),
+  });
+  return createHash('sha256').update(material).digest('hex');
+}
+
 export function buildLeadQualifiedSnapshot(input: LeadQualifiedSnapshotInput): LeadQualifiedSnapshotV1 {
   const { lead, company, icpVersion } = input;
   const contactRefs = company.contacts.map((c) => ({
@@ -313,6 +361,8 @@ export function buildLeadQualifiedSnapshot(input: LeadQualifiedSnapshotInput): L
   }));
   return {
     snapshot_version: LEAD_QUALIFIED_SCHEMA_VERSION,
+    candidate_batch_ref: leadCandidateBatchRef(lead.scoreDetail),
+    evidence_digest: leadEvidenceDigest(lead),
     lead_id: lead.id,
     workspace_id: lead.workspaceId,
     icp_id: lead.icpId,

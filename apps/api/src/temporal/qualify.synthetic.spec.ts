@@ -51,7 +51,12 @@ describe('QualifyActivities synthetic provenance quarantine', () => {
     ).resolves.toMatchObject({ scored: 0 });
     expect(leadUpsert).not.toHaveBeenCalled();
     expect(sanctionsScreen).not.toHaveBeenCalled();
-    expect(outboxCreate).toHaveBeenCalledOnce();
+    // M2 步 10：批次事件照发（scored=0，候选为空——隔离也是可审计的产出），外加活动收尾的 LeadsScored。
+    expect(outboxCreate).toHaveBeenCalledTimes(2);
+    const batch = outboxCreate.mock.calls
+      .map((call) => call[0] as { data: { eventType: string; payload: { scored: number; candidates: unknown[] } } })
+      .find((call) => call.data.eventType === 'CandidateBatchCompleted');
+    expect(batch?.data.payload).toMatchObject({ scored: 0, candidates: [] });
   });
 
   it('continues to score a real company when the same evidence batch contains no synthetic marker', async () => {

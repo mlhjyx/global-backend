@@ -16,6 +16,13 @@ import { reachableCompanyContactPoints } from '../discovery/company-contact-poin
 export interface QualifyRunInput {
   workspaceId: string;
   icpId: string;
+  /**
+   * 触发本次 qualify 的工作流 run id（qualifyWorkflow 以 workflowInfo().runId 传入）。
+   * 用途：CandidateBatchCompleted 事件的 run 引用，以及 lead.score_detail.candidateBatchRef
+   * 的批次前缀（QGO 提升时把候选批次证据带进 LeadQualified 快照）。
+   * 缺省（直接调用活动的测试/工具路径）→ 批次引用记 `qualify:direct:<n>`，事件 run_ref=null。
+   */
+  runRef?: string;
 }
 
 /**
@@ -60,6 +67,7 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
 
       let cursor: string | undefined;
       let scored = 0;
+      let batchNo = 0;
       const queues: Record<string, number> = { recommended: 0, needs_review: 0, rejected: 0, suppressed: 0, sanctions_hold: 0 };
       for (;;) {
         const done = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
@@ -78,6 +86,23 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
             },
           });
           if (!companies.length) return true;
+          // QGO 步 10：本批的候选批次引用与候选清单（CandidateBatchCompleted 事件载荷 +
+          // 写进每条 lead 的 score_detail.candidateBatchRef，供提升 QGO 时回溯证据批次）。
+          const batchRef = `qualify:${args.runRef ?? 'direct'}:${batchNo}`;
+          const batchCandidates: Array<{
+            lead_id: string | null;
+            canonical_company_id: string;
+            queue: string;
+            fit_verdict: string | null;
+            total_score: number | null;
+          }> = [];
+          const batchQueues: Record<string, number> = {
+            recommended: 0,
+            needs_review: 0,
+            rejected: 0,
+            suppressed: 0,
+            sanctions_hold: 0,
+          };
           // 一批一次：公司 / 域名禁联事实，用于联系路径的读时过滤（公司被禁联 → 无点；被禁联域名覆盖的点剔除）。
           const suppressions = await tx.suppressionRecord.findMany({
             where: { type: { in: ['domain', 'company_name'] } },
@@ -191,7 +216,12 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
               queue === 'suppressed' ? 'SUPPRESSED' : queue === 'rejected' ? 'REJECTED' : 'REVIEW';
             // ruleVersion：这次计分用的规则版本。LeadQualified 快照读它，而不是决策时的代码常量——
             // 规则升级后没有重评的 lead 仍如实标注旧版本（W5-f）。
-            const scoreDetail = { ...result.detail, fitVerdict: authoritativeFit, ruleVersion: QUALIFICATION_RULE_VERSION };
+            const scoreDetail = {
+              ...result.detail,
+              fitVerdict: authoritativeFit,
+              ruleVersion: QUALIFICATION_RULE_VERSION,
+              candidateBatchRef: batchRef,
+            };
             // 人工已裁决（QUALIFIED/REJECTED via decision/CONTACTED+）的 Lead 不被重评覆盖状态。
             // 评分自己也写 REJECTED，所以 REJECTED 只在有 reject 裁决时才算人工终态；评分写的 REJECTED
             // 仍由重评分决定。
@@ -203,7 +233,7 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
             // LeadQualified 快照的 scored_at 读它。
             const scoredAt = new Date();
             // 评分只写 scores/queue/status —— **绝不覆盖 fitVerdict/fitReasons**（那是资格门① 的产物）。
-            await tx.lead.upsert({
+            const upsertedLead = await tx.lead.upsert({
               where: {
                 workspaceId_icpId_canonicalCompanyId: {
                   workspaceId: args.workspaceId,
@@ -250,8 +280,36 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
               });
             }
             queues[queue] = (queues[queue] ?? 0) + 1;
+            batchQueues[queue] = (batchQueues[queue] ?? 0) + 1;
             scored += 1;
+            batchCandidates.push({
+              lead_id: (upsertedLead as { id?: string } | null)?.id ?? null,
+              canonical_company_id: c.id,
+              queue,
+              fit_verdict: authoritativeFit,
+              total_score: result.totalScore,
+            });
           }
+          // 每 run 每批一条（设计 2026-11-08 QGO §4.2）：批次产出与判定分布进 outbox，
+          // 与 lead upsert 同事务（at-least-once 由事件幂等消费吸收）。载荷无个人数据。
+          await tx.outboxEvent.create({
+            data: {
+              workspaceId: args.workspaceId,
+              eventType: 'CandidateBatchCompleted',
+              aggregateType: 'QualifyRun',
+              aggregateId: args.icpId,
+              payload: {
+                run_ref: args.runRef ?? null,
+                icp_id: args.icpId,
+                batch_no: batchNo,
+                batch_ref: batchRef,
+                scored: batchCandidates.length,
+                queues: batchQueues,
+                candidates: batchCandidates,
+              } as unknown as Prisma.InputJsonValue,
+            },
+          });
+          batchNo += 1;
           cursor = companies[companies.length - 1].id;
           return companies.length < batchSize;
         });
