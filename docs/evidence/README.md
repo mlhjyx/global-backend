@@ -39,6 +39,10 @@
 
 [执行授权物理接线围栏复核](execution-authority-fence-review-20261001.md)：Router/ToolBroker 四个受保护文件自 `b8dd5eb0` 以来全部改动的逐提交静态复核（10-01），及 10-06 的复查与独立复审；Router 指纹据此更新，`execution-authority-policy` spec 回到 required 门。只是静态复核记录，不是 RuntimeEvidence，也不作为运行或发布证明。
 
+[2026-11-09 漏斗基线（只读快照）](2026-11-09-funnel-baseline.md)：全库 2,423 家公司 → fit=match 403（16.6%）→ match 有邮箱 73（18.1%，Wilson 95% CI [14.7%, 22.2%]）→ 有电话 4 → 邮箱 VALID 0 → VRIC_1000_STRICT=0；主租户 787/128/9/0/0。只读 SQL（`scripts/metrics/funnel-baseline.mjs`），`contact_point.value` 加密列未读取；单时点快照，引用前重跑。
+
+[2026-11-09 RISKY 联系点盘点（只读元数据快照）](2026-11-09-risky-inventory.md)：274 条邮箱 = VALID 0 / RISKY 270（246 从未验证 + 24 pattern_guess）/ UNVERIFIED 3 / INVALID 1；250 条无 `source_type`、0 条有 `source_url`；135 次 `smtp-probe-verdict/v1` 全部只到域名连通层；270 条 RISKY 分布在 86 家公司 / 73 个域名。修正首日「270=250+24」与「213 无溯源」两处口径（`scripts/metrics/risky-inventory.mjs`）。
+
 [2026-11-08 步 13-1 S2 触达技能 Golden Set 与模型层回执](2026-11-08-step13-s2-skills-golden-set.md)：`outreach.sequence_draft` 与 `engage.reply_classify` 经 S0 注册（ACTIVE@1.0.0，tenant-default enabled），Golden Set 各 12 条（8 模型层 + 4 确定性层）；确定性层在 CI 零模型执行全绿，模型层经真实网关 deepseek-flash 8/8+8/8 全过并写两份 `eval_receipt(tier=model, passed=true)`；未发车、未接消费方，不含发送。
 
 [2026-11-08 步 13 收口：L2 门与发送即停的部署态负向验收](step13-l2-closure-20261108/README.md)：在 gain-saas `ec1610d` 部署产物（dist 同源）上，以隔离 TEST 库 + 本机 Mailpit sink 实跑 ③ 无审批直发 / ⑦ 审批重放（已发送·跨批·过期）/ ⑥ 退订与回复后同批次即停，全部在 API 层拒绝或跳过并落结果码；⑤ 逐封审计行（SENT/SKIPPED）字段齐全。同时上报 4 个步 11-x 缺口：DNC 对引擎 HTTP 错误 fail-open、引擎缺 `/outreach/dnc/suppress`、审计包 `generatedAt` 导致 `persistedAt` 恒 null 与重复落行、门拒绝尝试无审计工件。未发真实邮件；生产 4020 发送开关保持关闭。缺口修复后的复跑（G1/G2/G3/G4 全部通过、核心负向无回归）见 [rerun-20261108](step13-l2-closure-20261108/rerun-20261108/README.md)。
