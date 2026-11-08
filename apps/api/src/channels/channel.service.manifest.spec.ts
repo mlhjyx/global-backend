@@ -24,6 +24,15 @@ const SAMGOV_RAW = {
 };
 const SAMGOV = parseChannelManifest(SAMGOV_RAW);
 
+/** 非官方域（.gov/.europa.eu 之外的商业 API），用于条款闸门的违规用例。 */
+const NON_OFFICIAL_HOST = 'api.acme-example.com';
+const NON_OFFICIAL_HOST_URL = `https://${NON_OFFICIAL_HOST}`;
+const COMMERCIAL = parseChannelManifest({
+  ...SAMGOV_RAW,
+  meta: { ...SAMGOV_RAW.meta, name: 'Acme commercial API' },
+  transport: { ...SAMGOV_RAW.transport, baseUrl: NON_OFFICIAL_HOST_URL, allowedHosts: [NON_OFFICIAL_HOST] },
+});
+
 const HTML_MANIFEST = {
   meta: { name: 'Hannover', version: 1, category: 'trade_fair' },
   transport: { baseUrl: 'https://www.hannovermesse.de', responseType: 'html', allowedHosts: ['www.hannovermesse.de'] },
@@ -74,8 +83,19 @@ function channelRow(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeService(state: { channel?: Record<string, unknown> | null } = {}) {
-  const writes = { creates: [] as Array<Record<string, unknown>>, updates: [] as Array<Record<string, unknown>>, events: [] as Array<Record<string, unknown>> };
+const DEFAULT_POLICIES = [
+  { domain: 'api.sam.gov', reviewStatus: 'APPROVED', termsStatus: 'REVIEWED_OK', robotsStatus: 'ALLOWS' },
+];
+
+function makeService(
+  state: { channel?: Record<string, unknown> | null; policies?: Array<Record<string, unknown>> } = {},
+) {
+  const writes = {
+    creates: [] as Array<Record<string, unknown>>,
+    updates: [] as Array<Record<string, unknown>>,
+    events: [] as Array<Record<string, unknown>>,
+    policyQueries: [] as Array<Record<string, unknown>>,
+  };
   const tx = {
     sourceChannel: {
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -95,6 +115,12 @@ function makeService(state: { channel?: Record<string, unknown> | null } = {}) {
         return data;
       }),
       findFirst: vi.fn(async () => null),
+    },
+    sourcePolicy: {
+      findMany: vi.fn(async (args: Record<string, unknown>) => {
+        writes.policyQueries.push(args);
+        return state.policies ?? DEFAULT_POLICIES;
+      }),
     },
   };
   const prisma = { withWorkspace: vi.fn(async (_ws: string, cb: (t: typeof tx) => unknown) => cb(tx)) };
@@ -123,6 +149,22 @@ describe('渠道服务：manifest 导入/编辑/启用门/详情脱敏', () => {
     expect(String(data.manifestSha256)).toMatch(/^[0-9a-f]{64}$/u);
     expect(data.config).toEqual({ adapter: 'channel-manifest/v1' });
     expect(view).toMatchObject({ mode: 'api', probeRequired: true });
+    // CH-8：派生草稿随保存返回（不落库；source_policy 由 owner 运营脚本落库）。
+    // api.sam.gov 命中 *.gov 官方白名单 → terms 直接 REVIEWED_OK 并注明 official-open-data。
+    expect((view as { sourcePolicyDrafts?: unknown[] }).sourcePolicyDrafts).toEqual([
+      expect.objectContaining({
+        domain: 'api.sam.gov',
+        sourceType: 'tender',
+        termsStatus: 'REVIEWED_OK',
+        reviewStatus: 'APPROVED',
+        notes: expect.stringMatching(/^official-open-data; derived from channel .* manifest v1$/u),
+      }),
+    ]);
+    // 商业域默认 UNREVIEWED（等人工条款复核）。
+    const commercial = await makeService().service.createChannel(CTX, { manifest: COMMERCIAL });
+    expect((commercial as { sourcePolicyDrafts?: Array<{ termsStatus: string }> }).sourcePolicyDrafts?.[0]?.termsStatus).toBe(
+      'UNREVIEWED',
+    );
   });
 
   it('manifest 非法 → 400 CHANNEL_MANIFEST_INVALID 且带 issues', async () => {
@@ -178,6 +220,83 @@ describe('渠道服务：manifest 导入/编辑/启用门/详情脱敏', () => {
     await service.patchChannel(CTX, CHANNEL_ID, { status: 'ENABLED' });
     expect(writes.updates[0]).toMatchObject({ status: 'ENABLED' });
     expect(writes.events.map((event) => event.event)).toContain('MANUAL_ENABLE');
+    // 条款闸门以归一化 domain 查询（www 去掉、通配跳过）。
+    expect(writes.policyQueries[0]).toMatchObject({ where: { domain: { in: ['api.sam.gov'] } } });
+  });
+
+  it('条款闸门：缺 source_policy 行 → 409 CHANNEL_GOVERNANCE_INCOMPLETE + policyViolations', async () => {
+    const { service } = makeService({
+      channel: channelRow({ manifest: COMMERCIAL, baseUrl: NON_OFFICIAL_HOST_URL, probeRequired: false }),
+      policies: [],
+    });
+    const error = await service.patchChannel(CTX, CHANNEL_ID, { status: 'ENABLED' }).catch((cause: unknown) => cause);
+    expect(error).toMatchObject({ status: 409, response: { error: { code: 'CHANNEL_GOVERNANCE_INCOMPLETE' } } });
+    expect(
+      (error as { response: { error: { policyViolations?: unknown[] } } }).response.error.policyViolations,
+    ).toEqual([{ host: 'api.acme-example.com', reason: 'POLICY_MISSING' }]);
+  });
+
+  it('条款闸门：条款未复核 / 被暂停 → 拒绝启用', async () => {
+    for (const [policies, reason] of [
+      [[{ domain: 'api.acme-example.com', reviewStatus: 'APPROVED', termsStatus: 'UNREVIEWED', robotsStatus: 'ALLOWS' }], 'TERMS_UNREVIEWED'],
+      [[{ domain: 'api.acme-example.com', reviewStatus: 'SUSPENDED', termsStatus: 'REVIEWED_OK', robotsStatus: 'ALLOWS' }], 'POLICY_SUSPENDED'],
+    ] as const) {
+      const { service } = makeService({
+        channel: channelRow({ manifest: COMMERCIAL, baseUrl: NON_OFFICIAL_HOST_URL, probeRequired: false }),
+        policies: [...policies],
+      });
+      const error = await service.patchChannel(CTX, CHANNEL_ID, { status: 'ENABLED' }).catch((cause: unknown) => cause);
+      expect(error, reason).toMatchObject({ status: 409, response: { error: { code: 'CHANNEL_GOVERNANCE_INCOMPLETE' } } });
+      expect(
+        (error as { response: { error: { policyViolations?: unknown[] } } }).response.error.policyViolations,
+      ).toEqual([{ host: 'api.acme-example.com', reason }]);
+    }
+  });
+
+  it('条款闸门：已复核（含 REVIEWED_RESTRICTED）的非官方域可启用', async () => {
+    const { service, writes } = makeService({
+      channel: channelRow({ manifest: COMMERCIAL, baseUrl: NON_OFFICIAL_HOST_URL, probeRequired: false }),
+      policies: [
+        { domain: 'api.acme-example.com', reviewStatus: 'APPROVED', termsStatus: 'REVIEWED_RESTRICTED', robotsStatus: 'ALLOWS' },
+      ],
+    });
+    await service.patchChannel(CTX, CHANNEL_ID, { status: 'ENABLED' });
+    expect(writes.updates[0]).toMatchObject({ status: 'ENABLED' });
+  });
+
+  it('条款闸门：官方开放数据域豁免（无 source_policy 行也可启用）', async () => {
+    const gleif = parseChannelManifest({
+      ...SAMGOV_RAW,
+      transport: { baseUrl: 'https://api.gleif.org', responseType: 'json', allowedHosts: ['api.gleif.org'] },
+    });
+    const { service, writes } = makeService({
+      channel: channelRow({ manifest: gleif, baseUrl: 'https://api.gleif.org', probeRequired: false }),
+      policies: [],
+    });
+    await service.patchChannel(CTX, CHANNEL_ID, { status: 'ENABLED' });
+    expect(writes.updates[0]).toMatchObject({ status: 'ENABLED' });
+  });
+
+  it('详情：source_policy 逐域状态、官方标记、违规与派生草稿', async () => {
+    const { service } = makeService({ policies: [] });
+    const detail = (await service.getChannel(CTX, CHANNEL_ID)) as {
+      sourcePolicy: {
+        hosts: Array<{ host: string; domain: string; official: boolean }>;
+        policies: unknown[];
+        violations: unknown[];
+        drafts: Array<{ domain: string }>;
+      };
+    };
+    expect(detail.sourcePolicy.hosts).toEqual([{ host: 'api.sam.gov', domain: 'api.sam.gov', official: true }]);
+    expect(detail.sourcePolicy.policies).toEqual([]);
+    expect(detail.sourcePolicy.violations).toEqual([]); // 官方豁免
+    expect(detail.sourcePolicy.drafts.map((draft) => draft.domain)).toEqual(['api.sam.gov']);
+
+    const reviewed = makeService({
+      policies: [{ domain: 'api.sam.gov', reviewStatus: 'APPROVED', termsStatus: 'REVIEWED_OK', robotsStatus: 'ALLOWS' }],
+    });
+    const detail2 = (await reviewed.service.getChannel(CTX, CHANNEL_ID)) as { sourcePolicy: { violations: unknown[] } };
+    expect(detail2.sourcePolicy.violations).toEqual([]);
   });
 
   it('legacy crawl 渠道（manifest=null）沿用既有治理闸门，不被 probe 门拦住', async () => {

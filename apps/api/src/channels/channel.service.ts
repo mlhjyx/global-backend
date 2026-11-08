@@ -45,6 +45,16 @@ import {
 import { CHANNEL_SECRET_RESOLVER, type ChannelSecretResolver } from './connector/secret-resolver';
 import { describeAuthSecrets } from './channel-probe.service';
 import {
+  deriveSourcePolicyDrafts,
+  evaluateChannelSourcePolicyGate,
+  isOfficialSourceHost,
+  sourcePolicyDomain,
+  sourcePolicyLookupDomains,
+  type ChannelPolicyRow,
+  type ChannelPolicyViolation,
+  type ChannelSourcePolicyDraft,
+} from './channel-source-policy';
+import {
   buildImportRows,
   parseCsv,
   validateImportMapping,
@@ -231,6 +241,7 @@ export class ChannelService {
   /** manifest → 渠道列（校验→sha256→治理镜像→probe_required=true）。 */
   private manifestColumns(rawManifest: unknown): {
     manifest: Record<string, unknown>;
+    document: import('@global/contracts').ChannelManifestDocument;
     manifestSha256: string;
     baseUrl: string;
     authRef: unknown;
@@ -264,6 +275,7 @@ export class ChannelService {
     const refs = collectAuthRefs(manifest.auth);
     return {
       manifest: manifest as unknown as Record<string, unknown>,
+      document: manifest,
       manifestSha256: manifestSha256(manifest),
       baseUrl: manifest.transport.baseUrl,
       authRef: refs.length > 0 ? { refs } : null,
@@ -317,7 +329,15 @@ export class ChannelService {
         },
       }),
     );
-    return channelView(row as never);
+    const created = channelView(row as never);
+    // CH-8：派生草稿随保存返回（source_policy 是 app_user 只读表，落库走 owner 运营脚本）。
+    return {
+      ...created,
+      sourcePolicyDrafts: deriveSourcePolicyDrafts(
+        { id: (row as { id: string }).id, mode: 'api', category: columns.category },
+        columns.document,
+      ),
+    };
   }
 
   async patchChannel(ctx: RequestContext, channelId: string, patch: Record<string, unknown>) {
@@ -384,6 +404,20 @@ export class ChannelService {
             },
           });
         }
+        // CH-8 条款闸门：allowedHosts 逐域必须有已复核的 source_policy（官方开放数据域豁免）。
+        if (manifestColumns === null && mode === 'api' && hasManifest) {
+          const violations = await this.enablePolicyViolations(tx, current);
+          if (violations.length > 0) {
+            throw new ConflictException({
+              error: {
+                code: 'CHANNEL_GOVERNANCE_INCOMPLETE',
+                message:
+                  'source_policy review is required before enabling this channel (missing/SUSPENDED/UNREVIEWED terms)',
+                policyViolations: violations,
+              },
+            });
+          }
+        }
       }
 
       // 已启用渠道换了 manifest：新配置未 probe，保存后回到 DISABLED（章节 §6.3.2：
@@ -441,28 +475,95 @@ export class ChannelService {
         }
       }
       const view = channelView(row as ChannelRow);
-      return mode === 'api' && hasManifest
-        ? { ...view, probeUrl: `/source-channels/${channelId}/test` }
-        : view;
+      const probeUrl = `/source-channels/${channelId}/test`;
+      if (manifestColumns) {
+        return {
+          ...view,
+          probeUrl,
+          sourcePolicyDrafts: deriveSourcePolicyDrafts(
+            { id: channelId, mode: 'api', category: manifestColumns.category },
+            manifestColumns.document,
+          ),
+        };
+      }
+      return mode === 'api' && hasManifest ? { ...view, probeUrl } : view;
     });
   }
 
-  /** 渠道详情（ops:read）：manifest 全量 + 密钥「已配置/未配置」（值永不出现）。 */
+  /**
+   * 启用前的逐域 source_policy 判定（只读）：source_policy 是 app_user 只读的治理表，
+   * 派生写库走 owner 运营脚本 `apply-channel-source-policies.mts`。
+   */
+  private async enablePolicyViolations(
+    tx: { sourcePolicy: { findMany: (args: never) => Promise<ChannelPolicyRow[]> } },
+    current: ChannelRow,
+  ): Promise<ChannelPolicyViolation[]> {
+    const manifest = this.tryParseStoredManifest(current.manifest);
+    if (!manifest) return [];
+    const hosts = this.manifestHosts(manifest);
+    const domains = sourcePolicyLookupDomains(hosts);
+    if (domains.length === 0) return [];
+    const policies = await tx.sourcePolicy.findMany({
+      where: { domain: { in: domains } },
+      select: { domain: true, reviewStatus: true, termsStatus: true, robotsStatus: true },
+    } as never);
+    return evaluateChannelSourcePolicyGate({ mode: current.mode, hosts, policies });
+  }
+
+  private tryParseStoredManifest(raw: unknown): import('@global/contracts').ChannelManifestDocument | null {
+    if (!raw) return null;
+    try {
+      return parseChannelManifest(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  private manifestHosts(manifest: import('@global/contracts').ChannelManifestDocument): string[] {
+    return manifest.transport.allowedHosts ?? [new URL(manifest.transport.baseUrl).hostname];
+  }
+
+  /** 渠道详情（ops:read）：manifest 全量 + 密钥「已配置/未配置」+ source_policy 逐域状态。 */
   async getChannel(ctx: RequestContext, channelId: string) {
     const row = (await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
       tx.sourceChannel.findUnique({ where: { id: channelId } }),
     )) as ChannelRow | null;
     if (!row) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'channel not found' } });
     let auth: Awaited<ReturnType<typeof describeAuthSecrets>> = null;
-    if (row.manifest) {
-      try {
-        const manifest = parseChannelManifest(row.manifest);
-        auth = await describeAuthSecrets(manifest.auth, this.secrets);
-      } catch {
-        auth = null;
-      }
+    let sourcePolicy: {
+      hosts: Array<{ host: string; domain: string; official: boolean }>;
+      policies: ChannelPolicyRow[];
+      violations: ChannelPolicyViolation[];
+      drafts: ChannelSourcePolicyDraft[];
+    } | null = null;
+    const manifest = this.tryParseStoredManifest(row.manifest);
+    if (manifest) {
+      auth = await describeAuthSecrets(manifest.auth, this.secrets).catch(() => null);
+      const hosts = this.manifestHosts(manifest);
+      const domains = sourcePolicyLookupDomains(hosts);
+      const policies: ChannelPolicyRow[] =
+        domains.length === 0
+          ? []
+          : await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
+              tx.sourcePolicy.findMany({
+                where: { domain: { in: domains } },
+                select: { domain: true, reviewStatus: true, termsStatus: true, robotsStatus: true },
+              } as never),
+            );
+      sourcePolicy = {
+        hosts: hosts.map((host) => ({
+          host,
+          domain: sourcePolicyDomain(host),
+          official: isOfficialSourceHost(sourcePolicyDomain(host)),
+        })),
+        policies,
+        violations: evaluateChannelSourcePolicyGate({ mode: row.mode, hosts, policies }),
+        drafts: deriveSourcePolicyDrafts({ id: row.id, mode: row.mode, category: row.category }, manifest),
+      };
+    } else if (row.manifest) {
+      auth = null;
     }
-    return { ...channelView(row), manifest: row.manifest ?? null, auth };
+    return { ...channelView(row), manifest: row.manifest ?? null, auth, sourcePolicy };
   }
 
   /** 租户可见的已批准渠道（含本 workspace 是否已启用）。 */
