@@ -1529,7 +1529,10 @@ const campaignPlanDefinition: TypedProjectionDefinition<unknown, unknown> = {
           ["required"],
         ),
         decisionPolicy: objectSchema(
-          { maxReplans: { ...numberSchema(0, 0, true), enum: [0] } },
+          // M2.2：CampaignPlan v0 的 maxReplans 已放宽到 {0,1,2}（gain-saas #84）。
+          // 投影门若继续钉 0，会把 maxReplans≥1 的计划整体拒绝（decline→replan 联调
+          // 的 ModelDurableResultProjectionError 根因，2026-11-08）。
+          { maxReplans: { ...numberSchema(0, 2, true), enum: [0, 1, 2] } },
           ["maxReplans"],
         ),
       },
