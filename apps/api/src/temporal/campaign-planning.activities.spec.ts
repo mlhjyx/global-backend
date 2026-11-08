@@ -467,3 +467,66 @@ describe('deliverCampaignPlanRevision', () => {
     );
   });
 });
+
+describe('emitCampaignPlanJobFailureEvent（ch08 §3.1.4 失败回写第二通道）', () => {
+  it('writes a CampaignPlanJobFailed integration event with no PII and bounded issues', async () => {
+    const outboxCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+    const prisma = {
+      withWorkspace: vi.fn(async (_ws: string, fn: (tx: unknown) => unknown) =>
+        fn({ outboxEvent: { create: outboxCreate } }),
+      ),
+    };
+    const { activities } = deps({ prisma });
+
+    const issues = Array.from({ length: 60 }, (_, i) => ({
+      path: `/motions/${i}`.padEnd(400, 'x'),
+      message: 'invalid'.padEnd(500, 'y'),
+    }));
+    await activities.emitCampaignPlanJobFailureEvent({
+      workspaceId: WORKSPACE_ID,
+      campaignId: CAMPAIGN_ID,
+      jobId: JOB_ID,
+      error: 'CAMPAIGN_PLAN_NEEDS_HUMAN',
+      issues,
+    });
+
+    expect(outboxCreate).toHaveBeenCalledTimes(1);
+    const data = outboxCreate.mock.calls[0]![0].data;
+    expect(data).toMatchObject({
+      workspaceId: WORKSPACE_ID,
+      eventType: 'CampaignPlanJobFailed',
+      aggregateType: 'CampaignPlanJob',
+      aggregateId: JOB_ID,
+      payload: {
+        jobId: JOB_ID,
+        campaignId: CAMPAIGN_ID,
+        workspaceId: WORKSPACE_ID,
+        error: 'CAMPAIGN_PLAN_NEEDS_HUMAN',
+      },
+    });
+    const payloadIssues = (data.payload as { issues?: Array<{ path: string; message: string }> }).issues;
+    expect(payloadIssues).toHaveLength(50);
+    expect(payloadIssues![0]!.path.length).toBeLessThanOrEqual(200);
+    expect(payloadIssues![0]!.message.length).toBeLessThanOrEqual(300);
+  });
+
+  it('omits the issues key when there is nothing to report', async () => {
+    const outboxCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+    const prisma = {
+      withWorkspace: vi.fn(async (_ws: string, fn: (tx: unknown) => unknown) =>
+        fn({ outboxEvent: { create: outboxCreate } }),
+      ),
+    };
+    const { activities } = deps({ prisma });
+
+    await activities.emitCampaignPlanJobFailureEvent({
+      workspaceId: WORKSPACE_ID,
+      campaignId: CAMPAIGN_ID,
+      jobId: JOB_ID,
+      error: 'CAMPAIGN_PLAN_FAILED',
+    });
+
+    const payload = outboxCreate.mock.calls[0]![0].data.payload as Record<string, unknown>;
+    expect(payload).not.toHaveProperty('issues');
+  });
+});

@@ -219,6 +219,15 @@ jobs:
         if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: pnpm --filter @global/db generate
 
+      # ch08 §3.1.7 漂移门：datamodel ⇄ 迁移链必须零差异；历史 SQL-only 结构按基线清单登记
+      # （owner + 到期日，只许收紧）。影子库只承载迁移重放，不触碰业务库。
+      - name: Prisma drift gate（datamodel ⇄ migrations，基线允许清单）
+        if: needs.renderer-visual-scope.outputs.run_db_tests == 'true'
+        shell: bash
+        env:
+          DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+        run: node packages/db/scripts/prisma-drift-gate.mjs
+
       - name: Native Temporal reader server（verified modules · offline race · build）
         if: needs.renderer-visual-scope.outputs.run_temporal_go == 'true'
         shell: bash

@@ -29,6 +29,8 @@ describe('acquisition compliance error OpenAPI', () => {
       'SUPPRESSED_CONTACT_UNREACHABLE',
       'STORAGE_RIGHTS_NOT_GRANTED',
       'SANCTIONS_HOLD_UNRESOLVED',
+      // ch08 §3.1.12：名单陈旧（>7 天或任一源 FAILED）时交棒拒绝。
+      'SANCTIONS_LIST_STALE',
       'CONFLICT',
     ]);
   });

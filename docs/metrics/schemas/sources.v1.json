@@ -1,0 +1,48 @@
+{
+  "schemaVersion": "metric-sources/v1",
+  "asOf": "2026-11-09",
+  "notes": [
+    "指标公式只能引用本文件登记的数据源（表/事件/视图）；metrics:lint 对未登记来源判 SOURCE_UNKNOWN。",
+    "existing = 引擎库现有表（global_dev，只读可查）；planned = ch01 拟定新增（PR-02/10/13 等）；saas = gain-saas 库。",
+    "ACTIVE 指标只允许引用 existing；引用 planned/saas 的指标必须是 DRAFT（P4 接线或表落地后再转 ACTIVE）。"
+  ],
+  "sources": {
+    "existing": [
+      "canonical_company",
+      "lead",
+      "canonical_contact",
+      "contact_point",
+      "company_contact_channel",
+      "company_contact_point",
+      "identity_link",
+      "raw_source_record",
+      "discovery_run",
+      "discovery_company_job",
+      "run_event",
+      "outbox_event",
+      "tool_budget_operation",
+      "icp_backtest",
+      "run_shadow_diff",
+      "lead_decision",
+      "lead_outcome",
+      "icp_feedback"
+    ],
+    "planned": [
+      "frame_registry",
+      "frame_snapshot",
+      "cr_estimate",
+      "golden_label",
+      "golden_eval_run",
+      "metric_observation",
+      "metric_rollup_daily",
+      "contact_point_verification_event"
+    ],
+    "saas": [
+      "outreach_send",
+      "outreach_reply",
+      "cost_ledger",
+      "suppression_record",
+      "outreach_global_suppression"
+    ]
+  }
+}

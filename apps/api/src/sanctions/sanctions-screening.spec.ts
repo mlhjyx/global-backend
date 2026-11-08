@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   reconcileReviewState,
   screenMatchKey,
   matchesFromJson,
   storedScreeningBlocks,
+  SanctionsScreeningService,
 } from './sanctions-screening.service';
 
 /**
@@ -73,5 +74,45 @@ describe('storedScreeningBlocks', () => {
     expect(storedScreeningBlocks(null)).toBe(false);
     expect(storedScreeningBlocks(undefined)).toBe(false);
     expect(storedScreeningBlocks({ status: 'clear', reviewState: 'open' })).toBe(false);
+  });
+});
+
+describe('SanctionsScreeningService.listFreshness（ch08 §3.1.12）', () => {
+  it('reads ENABLED sources only and evaluates freshness against env thresholds', async () => {
+    const findMany = vi.fn(async () => [
+      {
+        key: 'ofac_sdn',
+        lastRefreshedAt: new Date('2026-11-06T12:00:00.000Z'),
+        lastFetchStatus: 'DONE',
+      },
+    ]);
+    const service = new SanctionsScreeningService({
+      sanctionsSource: { findMany },
+    } as never);
+
+    const result = await service.listFreshness(new Date('2026-11-09T12:00:00.000Z'));
+
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { status: 'ENABLED' } }),
+    );
+    expect(result).toMatchObject({
+      active: true,
+      ageDays: 3,
+      stale: false,
+      blocked: false,
+      reason: 'fresh',
+    });
+  });
+
+  it('is inactive when no source is ENABLED (gate not in force)', async () => {
+    const service = new SanctionsScreeningService({
+      sanctionsSource: { findMany: vi.fn(async () => []) },
+    } as never);
+
+    await expect(service.listFreshness()).resolves.toMatchObject({
+      active: false,
+      stale: false,
+      blocked: false,
+    });
   });
 });

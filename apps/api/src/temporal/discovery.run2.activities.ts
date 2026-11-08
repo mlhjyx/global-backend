@@ -22,7 +22,11 @@ import {
   STATIC_SKILL_RESOLVER,
   type SkillResolver,
 } from '../skills/skill-runtime';
-import { companyMayUseExternalProcessing } from '../discovery/company-suppression-gate';
+import {
+  companyMayUseExternalProcessing,
+  companyMayUseExternalProcessingMany,
+} from '../discovery/company-suppression-gate';
+import { ExternalActionDeniedError } from '../model-gateway/providers/provider-output-error';
 import {
   QUICK_JUDGE_BATCH_SIZE,
   QUICK_JUDGE_OUTPUT_SCHEMA,
@@ -95,6 +99,15 @@ export function createRun2Activities(deps: {
   const mayUseExternalProcessing = (workspaceId: string, companyId: string): Promise<boolean> =>
     deps.prisma.withWorkspace(workspaceId, (tx) =>
       companyMayUseExternalProcessing(tx, workspaceId, companyId),
+    );
+
+  /** 批量 wire-time 闸门（ch08 §3.1.5）：单事务、单策略锁、单次禁联读取。 */
+  const mayUseExternalProcessingMany = (
+    workspaceId: string,
+    companyIds: readonly string[],
+  ): Promise<Set<string>> =>
+    deps.prisma.withWorkspace(workspaceId, (tx) =>
+      companyMayUseExternalProcessingMany(tx, workspaceId, companyIds),
     );
 
   return {
@@ -374,9 +387,15 @@ export function createRun2Activities(deps: {
         const batchResolved = new Set<number>();
         if (eligible.length > 0) {
           if (eligible.length === 1) {
-            // 单家批次不值得批量协议，直接走单家判定。
-            batchVerdicts = [await judgeOne(eligible[0]!.company)];
+            // 单家批次不值得批量协议，直接走单家判定（带真实 gate；wire 前被拒 → 下方逐家循环标 skipped）。
+            try {
+              batchVerdicts = [await judgeOne(eligible[0]!.company)];
+            } catch (error) {
+              if (!(error instanceof ExternalActionDeniedError)) throw error;
+              batchVerdicts = [null];
+            }
           } else {
+            const eligibleIds = eligible.map((entry) => entry.company.id);
             try {
               const result = await executeSkillWithRuntime<{ judgments?: unknown }>(
                 deps.skills ?? STATIC_SKILL_RESOLVER,
@@ -394,7 +413,15 @@ export function createRun2Activities(deps: {
                   runId: binding.accountKey,
                   // 批量协议暂无 durable 投影（逐家降级路径才带 fit-judgment/v1 回执）：
                   // 批量结果在活动内立即落库；活动崩溃重试至多重打一次这一批（≤8 家）的模型费用。
-                  authorizeExternalAction: () => Promise.resolve(true),
+                  // ch08 §3.1.5：wire-time 逐家重校验（预检与 wire 之间新增的禁联/DSR 撤权不得送模型）。
+                  // 任一家不再 allowed → 整批返回 false → 网关拒绝 → 下方 catch 整批降级逐家判。
+                  authorizeExternalAction: async () => {
+                    const allowed = await mayUseExternalProcessingMany(
+                      args.workspaceId,
+                      eligibleIds,
+                    );
+                    return eligibleIds.every((id) => allowed.has(id));
+                  },
                 },
                 { telemetry: deps.runtimeTelemetry },
               );
@@ -434,6 +461,11 @@ export function createRun2Activities(deps: {
               continue;
             }
           } catch (error) {
+            if (error instanceof ExternalActionDeniedError) {
+              // wire-time 闸门拒绝（禁联/主体失效/DSR 撤权）：标 skipped，不落任何判定。
+              outcomes.set(entry.company.id, { skip: true });
+              continue;
+            }
             if (
               error instanceof BudgetExceededError ||
               error instanceof BudgetOperationReplayError ||
