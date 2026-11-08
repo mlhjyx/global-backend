@@ -10,7 +10,8 @@ title: Stop artifact failures from leaking bare RESERVED budget operations
   - `recoverPromote`：IfNoneMatch 输竞态且赢家对象尚不可见 → `PROMOTE_ACK_UNKNOWN`（自竞态），不再误报契约类 `INVALID`；顺带删除已无意义的 `preconditionFailed` 参数。
 - 效果与边界（如实声明）：
   - 收益：预留不再以裸 RESERVED 长期占 cap、也不会在收集器释放后因 D13 再预留而**二次物理调用**；账本状态真实（RESULT_UNKNOWN 可被 B4 收集器按阈值结清）。
-  - 不变：同键重放的结局与之前一致（`reserve_tool_budget` 对任何已存在行都返回 REPLAY → broker 报 remnant/unavailable）——本 PR 不是让失败调用「自动成功」，而是消除「失败升级为 run 级故障 + 预留泄漏」的放大器。首次失败仍是 `origin='live'`（可重试，符合 #642 设计）。
-  - 未覆盖（已知）：artifact 结算事务内抛出的 `ExecutionControlError`（`DURABLE_EXECUTION_RECEIPT_FACTS_INVALID/REQUIRED`、`DOMAIN_ACK_RECEIPT_REQUIRED`）发生在 service.persist 之外层，行为不变（仍会由 broker 外层路径上抛，行最终由收集器按阈值处理）；无快照的 RESULT_UNKNOWN 不可经 recoverUnknown 恢复、按预留上限结算（B4 语义，刻意保守）。
+  - 不变：同键重放的结局与之前一致（`reserve_tool_budget` 对任何已存在行都返回 REPLAY → broker 报 remnant/unavailable）——本 PR 不是让失败调用「自动成功」；它消除的是**预留泄漏本身**（长期占 cap、收集器释放后经 D13 再预留的二次物理调用风险、账本状态失真）。首次失败仍是 `origin='live'`（可重试，符合 #642 设计）。
+  - 已覆盖：artifact 结算事务内抛出的 `ExecutionControlError`（`DURABLE_EXECUTION_RECEIPT_FACTS_INVALID/REQUIRED`、`DOMAIN_ACK_RECEIPT_REQUIRED`）从 persist 冒出后同样被 broker 兜底按**无快照**标 RESULT_UNKNOWN（行不再裸 RESERVED；但这类行不可经 recoverUnknown 恢复，收集器按预留上限结算——B4 既有保守语义）。
+  - trace 语义：双标记（service 已带快照后 broker 再标）会被 `mark_tool_budget_result_unknown_v2` 拒绝并吞掉，此时 trace 记为「fallback did not apply (already marked or ledger unavailable)」——不谎报状态。
 - 测试：service spec 更新旧契约断言（pre-ack/校验拒绝同样必须标 RESULT_UNKNOWN）+ 兜底自身失败仍抛原错误；store spec 新增 `precondition_uncommitted` 注入（412 且赢家不可见 → ACK_UNKNOWN）；broker spec 断言 artifact 失败必 markResultUnknown（含兜底自身失败的边界）。受保护文件 tool-broker.ts 已重钉 sha256 并在 PR 记录审查。
 - 未做：adapter payload 契约（如空 HTML render）本身应当更早失败/降级的问题（属 discovery 侧语义，另议）；共享对象 promote 的彻底串行化。
