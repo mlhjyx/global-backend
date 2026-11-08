@@ -5112,6 +5112,116 @@
         "description": "服务间：只读返回 fence-ACK 的公钥族（JWKS），供对端验证确认签名；只含公钥。"
       }
     },
+    "/api/v1/internal/campaign-plans/draft": {
+      "post": {
+        "description": "供 gain-saas 控制面调用：校验并消费一次性 execution-budget Grant（purpose campaign.plan），启动 campaignPlanningWorkflow 后在回调中把原始计划 JSON 交付 gain-saas 落 DRAFT revision。本端点不执行任何外部动作，也不在本侧计算 plan_hash。",
+        "operationId": "requestCampaignPlanDraft",
+        "parameters": [
+          {
+            "name": "x-execution-budget-grant",
+            "required": true,
+            "in": "header",
+            "description": "SaaS 签发的一次性 workspace 执行预算 Grant（purpose campaign.plan）",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "description": "gain-saas 控制面服务令牌（env CAMPAIGN_PLAN_INTERNAL_SERVICE_TOKEN）",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "workspaceId",
+                  "campaignId",
+                  "jobId",
+                  "objective"
+                ],
+                "properties": {
+                  "workspaceId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "campaignId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "jobId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "objective": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "icpId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "audienceSizeCap": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 1000
+                  },
+                  "budgetCapMicros": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "jobId"
+                      ],
+                      "properties": {
+                        "jobId": {
+                          "type": "string",
+                          "format": "uuid"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "服务身份触发一次受限 Campaign 规划（异步 job，gain-saas 控制面专用）",
+        "tags": [
+          "Campaign"
+        ]
+      }
+    },
     "/api/v1/companies": {
       "post": {
         "description": "支持 Idempotency-Key 头：同 key 重放返回首次结果，不重复创建（PRD 11.16）。",
@@ -19586,6 +19696,10 @@
       "description": "平台内部执行预算包络（服务间调用，普通前端不调用）"
     },
     {
+      "name": "Campaign",
+      "description": "Campaign 控制面内部入口（服务间调用，普通前端不调用）"
+    },
+    {
       "name": "PlatformAuthority",
       "description": "平台权威通道（服务间调用，普通前端不调用）"
     },
@@ -19648,7 +19762,8 @@
               "POST /contact-points/:pointId/verify",
               "POST /leads/:leadId/outreach-drafts",
               "POST /companies/:companyId/understanding/retry",
-              "POST /site-builder/intake"
+              "POST /site-builder/intake",
+              "POST /campaigns/:campaignId/plan-drafts"
             ]
           },
           "workspaceId": {
@@ -19663,7 +19778,8 @@
               "icp.query_plan",
               "discovery.run",
               "contact.verify",
-              "outreach.draft"
+              "outreach.draft",
+              "campaign.plan"
             ]
           },
           "subjectType": {
@@ -19673,7 +19789,8 @@
               "icp",
               "discovery_run",
               "contact_point",
-              "lead"
+              "lead",
+              "campaign"
             ]
           },
           "subjectId": {
@@ -22058,7 +22175,8 @@
       "name": "平台间通道",
       "tags": [
         "ExecutionBudget",
-        "PlatformAuthority"
+        "PlatformAuthority",
+        "Campaign"
       ]
     },
     {
