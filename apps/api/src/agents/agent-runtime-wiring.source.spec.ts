@@ -26,4 +26,11 @@ describe("agent runtime worker wiring", () => {
       expect(source).toContain("agentRuntime: { agents: agentResolver, traces: agentTraces }");
     }
   });
+
+  it("hands the agent runtime to the run2 activities in the managed worker", () => {
+    const block = worker.slice(worker.indexOf("createRun2Activities({"));
+    expect(block.slice(0, block.indexOf("})"))).toContain(
+      "agentRuntime: { agents: agentResolver, traces: agentTraces }",
+    );
+  });
 });

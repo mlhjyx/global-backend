@@ -1,4 +1,12 @@
+import { createHash } from 'node:crypto';
 import { ApplicationFailure } from '@temporalio/workflow';
+import { AGENT_KEYS } from '../agents/agent-catalog';
+import { AGENT_DECISION_TYPES } from '../agents/agent-runtime';
+import {
+  resolveAgentRound,
+  verifyAgentSkills,
+  type AgentRoundRuntime,
+} from '../agents/agent-round';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { ModelGateway } from '../model-gateway/model-gateway';
 import type { RuntimeTelemetry } from '../model-runtime/types';
@@ -55,6 +63,8 @@ export function createRun2Activities(deps: {
   budgetStore?: BudgetStore;
   /** S0 技能运行时：生产由 worker 注入 DB resolver；缺省为内置目录直通。 */
   skills?: SkillResolver;
+  /** M2 步 9b：资格判定员角色（注册表 + 技能子集校验 + 轨迹）。缺省保持旧行为。 */
+  agentRuntime?: AgentRoundRuntime;
 }) {
   const budgets =
     deps.budgetStore ?? new UnavailableBudgetStore('run2 activities require an authoritative BudgetStore');
@@ -247,6 +257,32 @@ export function createRun2Activities(deps: {
 
       const task = getTask('discovery.qualify_fit')!;
 
+      // M2 步 9b：资格判定员回合门。未接线 agentRuntime 时保持旧行为；技能子集经 S0 resolver
+      // 校验，任一不可用即落轨迹（reason_code=技能失败码）后原样上抛——不降级、不吞成空判。
+      if (deps.agentRuntime) {
+        const qualifier = await resolveAgentRound(
+          deps.agentRuntime.agents,
+          AGENT_KEYS.qualifier,
+          args.workspaceId,
+        );
+        try {
+          await verifyAgentSkills(deps.skills, qualifier, args.workspaceId);
+        } catch (error) {
+          if (error instanceof SkillUnavailableError) {
+            await deps.agentRuntime.traces.record({
+              workspaceId: args.workspaceId,
+              runId: args.runId,
+              stepType: 'discovery.quick_scan',
+              agentKey: AGENT_KEYS.qualifier,
+              decisionType: AGENT_DECISION_TYPES.fitJudge,
+              discriminator: 'skill-gate',
+              reasonCode: error.reason,
+            });
+          }
+          throw error;
+        }
+      }
+
       const judgeOne = async (
         company: (typeof companies)[number],
       ): Promise<QuickVerdict | null> => {
@@ -413,6 +449,63 @@ export function createRun2Activities(deps: {
         }
 
         await settle(batch, outcomes);
+
+        // M2 步 9b：资格判定员回合的批量判定轨迹（chosen=批次汇总；rejected=被否/跳过/失败候选）。
+        // 同一个批次内容重放不翻行（discriminator=批次 job id 的内容哈希）。
+        if (deps.agentRuntime) {
+          const verdictCounts: Record<string, number> = {};
+          const rejectedCandidates: Array<{
+            candidateRef: string;
+            rejectReason: string;
+            revivable: boolean;
+          }> = [];
+          let judgedInBatch = 0;
+          for (const { company } of batch) {
+            const outcome = outcomes.get(company.id);
+            if (!outcome) {
+              rejectedCandidates.push({
+                candidateRef: company.id,
+                rejectReason: 'QUICK_JUDGE_FAILED',
+                revivable: true,
+              });
+              continue;
+            }
+            if ('skip' in outcome) {
+              rejectedCandidates.push({
+                candidateRef: company.id,
+                rejectReason: 'EXTERNAL_PROCESSING_BLOCKED',
+                revivable: true,
+              });
+              continue;
+            }
+            judgedInBatch += 1;
+            verdictCounts[outcome.verdict] = (verdictCounts[outcome.verdict] ?? 0) + 1;
+            if (outcome.verdict === 'mismatch') {
+              rejectedCandidates.push({
+                candidateRef: company.id,
+                rejectReason: 'VERDICT_MISMATCH',
+                revivable: true,
+              });
+            }
+          }
+          await deps.agentRuntime.traces.record({
+            workspaceId: args.workspaceId,
+            runId: args.runId,
+            stepType: 'discovery.quick_scan',
+            agentKey: AGENT_KEYS.qualifier,
+            decisionType: AGENT_DECISION_TYPES.fitJudge,
+            discriminator: `batch:${createHash('sha256')
+              .update(batch.map((entry) => entry.job.id).sort().join(','))
+              .digest('hex')
+              .slice(0, 40)}`,
+            chosenOption: {
+              batchSize: batch.length,
+              judged: judgedInBatch,
+              verdicts: verdictCounts,
+            },
+            rejectedCandidates,
+          });
+        }
       }
 
       await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
