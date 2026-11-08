@@ -1,0 +1,48 @@
+{
+  "note": "SAM.gov Entity Management API 结构子集，实体均为虚构样例",
+  "totalRecords": 3,
+  "entityData": [
+    {
+      "entityRegistration": {
+        "ueiSAM": "UEI000000000001",
+        "legalBusinessName": "MUSTER PUMPS LLC",
+        "physicalAddress": {
+          "city": "HOUSTON",
+          "stateOrProvinceCode": "TX",
+          "zipCode": "77001",
+          "countryCode": "USA"
+        },
+        "entityStructureDesc": "LLC",
+        "registrationStatus": "Active"
+      }
+    },
+    {
+      "entityRegistration": {
+        "ueiSAM": "UEI000000000002",
+        "legalBusinessName": "BEISPIEL VALVES INC",
+        "physicalAddress": {
+          "city": "DENVER",
+          "stateOrProvinceCode": "CO",
+          "zipCode": "80202",
+          "countryCode": "USA"
+        },
+        "entityStructureDesc": "Corporation",
+        "registrationStatus": "Active"
+      }
+    },
+    {
+      "entityRegistration": {
+        "ueiSAM": "UEI000000000003",
+        "legalBusinessName": "OLD RIVER EQUIPMENT CO",
+        "physicalAddress": {
+          "city": "TULSA",
+          "stateOrProvinceCode": "OK",
+          "zipCode": "74101",
+          "countryCode": "USA"
+        },
+        "entityStructureDesc": "Partnership",
+        "registrationStatus": "Inactive"
+      }
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "registry-frame/v1",
+  "frame": {
+    "frameKey": "us_sam",
+    "country": "US",
+    "scheme": "us_uei",
+    "label": "美国 SAM.gov 实体注册（联邦供应商，样例帧）",
+    "providerKey": "sam_entity",
+    "sourceUrl": "https://sam.gov/content/entity-registration",
+    "licence": "public-register",
+    "licenceUrl": null,
+    "fetchMode": "api_paged",
+    "cadence": { "kind": "monthly", "dayOfMonth": 10, "hourUtc": 3 },
+    "config": {
+      "note": "SAM 无全国企业登记册属性（只覆盖联邦供应商）；countryCode 为三字母，国家取常量 US，州入 region"
+    }
+  },
+  "mapping": {
+    "schemaVersion": "registry-frame-mapping/v1",
+    "format": "json",
+    "recordsPath": "entityData",
+    "constants": { "scheme": "us_uei", "country": "US" },
+    "fields": {
+      "regNumber": "entityRegistration.ueiSAM",
+      "name": "entityRegistration.legalBusinessName",
+      "region": "entityRegistration.physicalAddress.stateOrProvinceCode",
+      "city": "entityRegistration.physicalAddress.city",
+      "postalCode": "entityRegistration.physicalAddress.zipCode",
+      "status": "entityRegistration.registrationStatus",
+      "legalForm": "entityRegistration.entityStructureDesc",
+      "nace": null,
+      "naceVersion": null,
+      "employeeBand": null,
+      "addressLines": null,
+      "vatId": null,
+      "lei": null,
+      "website": null,
+      "identifiers": null
+    },
+    "statusMap": {
+      "active": "ACTIVE",
+      "inactive": "UNKNOWN",
+      "submitted": "UNKNOWN",
+      "registration in progress": "UNKNOWN"
+    },
+    "legalFormMap": {
+      "llc": "llc",
+      "corporation": "inc",
+      "partnership": "partnership",
+      "sole proprietorship": "sole-prop",
+      "nonprofit": "nonprofit"
+    },
+    "employeeBandMap": null
+  }
+}

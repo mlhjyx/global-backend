@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   auditRecall,
+  compareRecallAudit,
   normalizeRegKey,
   renderRecallReportMarkdown,
   seededSample,
   stratumKey,
+  summarizeMissReasons,
   wilsonInterval,
+  type RecallAuditResult,
   type RecallFrameEntity,
   type RecallPoolRecord,
 } from './recall-audit';
@@ -109,6 +112,18 @@ describe('auditRecall', () => {
     expect(() => auditRecall({ frame, pool, sampleSize: 0 })).toThrow(/sampleSize/u);
   });
 
+  it('exposes the missed sample keys for review and attribution', () => {
+    const result = auditRecall({ frame, pool });
+    expect(result.missedKeys).toEqual([
+      normalizeRegKey('gb_crn', 'A3'),
+      normalizeRegKey('gb_crn', 'B2'),
+      normalizeRegKey('gb_crn', 'B3'),
+    ]);
+    const sampled = auditRecall({ frame, pool, sampleSize: 2, seed: 's' });
+    expect(sampled.missedKeys).toHaveLength(sampled.missed);
+    for (const key of sampled.missedKeys) expect(key).toContain('\u0001');
+  });
+
   it('renders the fixed-format markdown report with the declared methodology', () => {
     const result = auditRecall({ frame, pool, sampleSize: 2, seed: '2026-12' });
     const markdown = renderRecallReportMarkdown(result, {
@@ -123,5 +138,112 @@ describe('auditRecall', () => {
     expect(markdown).toContain('| GB:28:10-49 | 3 | 2 |');
     expect(markdown).toContain('Wilson');
     expect(markdown).toContain('反自证');
+  });
+});
+
+describe('compareRecallAudit (环比)', () => {
+  const frame: RecallFrameEntity[] = [
+    { scheme: 'gb_crn', regNumber: 'A1', country: 'GB', nace: '28.13', employeeBand: '10-49' },
+    { scheme: 'gb_crn', regNumber: 'A2', country: 'GB', nace: '28.13', employeeBand: '10-49' },
+    { scheme: 'gb_crn', regNumber: 'B1', country: 'GB', nace: '28.13', employeeBand: '50-249' },
+    { scheme: 'gb_crn', regNumber: 'B2', country: 'GB', nace: '28.13', employeeBand: '50-249' },
+  ];
+  const current = auditRecall({
+    frame,
+    pool: [
+      { registryScheme: 'gb_crn', registryNumber: 'A1', domain: 'a.example' },
+      { registryScheme: 'gb_crn', registryNumber: 'A2', domain: 'b.example' },
+      { registryScheme: 'gb_crn', registryNumber: 'B1', domain: 'c.example' },
+    ],
+  });
+  const baseline: RecallAuditResult = auditRecall({
+    frame,
+    pool: [{ registryScheme: 'gb_crn', registryNumber: 'A1', domain: 'a.example' }],
+  });
+
+  it('computes per-stratum and total deltas in percentage points', () => {
+    const comparison = compareRecallAudit(current, baseline, '2026-10');
+    expect(comparison.baselinePeriod).toBe('2026-10');
+    expect(comparison.rows).toEqual([
+      { stratumKey: 'GB:28:10-49', recallDeltaPp: 50, domainRateDeltaPp: 50, flagged: true },
+      { stratumKey: 'GB:28:50-249', recallDeltaPp: 50, domainRateDeltaPp: 50, flagged: true },
+    ]);
+    expect(comparison.totals).toEqual({ recallDeltaPp: 50, domainRateDeltaPp: 50, flagged: true });
+    expect(comparison.newStrata).toEqual([]);
+    expect(comparison.droppedStrata).toEqual([]);
+  });
+
+  it('handles strata missing on either side and a custom threshold', () => {
+    const other = auditRecall({
+      frame: [frame[0]!, { scheme: 'gb_crn', regNumber: 'C9', country: 'GB', nace: '46.90' }],
+      pool: [],
+    });
+    const comparison = compareRecallAudit(other, baseline, null, 40);
+    expect(comparison.baselinePeriod).toBeNull();
+    const row = comparison.rows.find((entry) => entry.stratumKey === 'GB:46:NA')!;
+    expect(row.recallDeltaPp).toBeNull();
+    expect(row.flagged).toBe(false);
+    expect(comparison.newStrata).toEqual(['GB:46:NA']);
+    expect(comparison.droppedStrata).toEqual(['GB:28:50-249']);
+    // GB:28:10-49 本期 0%、基线 50% → -50pp，超过自定义阈值 40pp。
+    expect(comparison.rows.find((entry) => entry.stratumKey === 'GB:28:10-49')).toEqual({
+      stratumKey: 'GB:28:10-49',
+      recallDeltaPp: -50,
+      domainRateDeltaPp: -50,
+      flagged: true,
+    });
+  });
+});
+
+describe('summarizeMissReasons (miss 归因)', () => {
+  it('counts judged reasons over missed keys and exposes unattributed misses', () => {
+    const missedKeys = [normalizeRegKey('gb_crn', 'A3'), normalizeRegKey('gb_crn', 'B2'), normalizeRegKey('gb_crn', 'B3')];
+    const summary = summarizeMissReasons(missedKeys, [
+      { scheme: 'gb_crn', regNumber: 'a3', missReason: 'DOMAIN_NOT_FOUND' },
+      { scheme: 'gb_crn', regNumber: 'B2', missReason: 'PIPELINE_MISS' },
+      { scheme: 'gb_crn', regNumber: 'A3', missReason: 'DUPLICATE' },
+      { scheme: 'gb_crn', regNumber: 'Z9', missReason: 'NO_FRAME_COVERAGE' },
+    ]);
+    expect(summary).toEqual({
+      missed: 3,
+      attributed: 2,
+      unattributed: 1,
+      reasons: [
+        { reason: 'DOMAIN_NOT_FOUND', count: 1, shareOfMissed: 1 / 3 },
+        { reason: 'PIPELINE_MISS', count: 1, shareOfMissed: 1 / 3 },
+      ],
+    });
+  });
+
+  it('orders by count then reason and reports an empty summary for zero misses', () => {
+    const missedKeys = ['gb_crn\u0001A', 'gb_crn\u0001B', 'gb_crn\u0001C'];
+    const summary = summarizeMissReasons(missedKeys, [
+      { scheme: 'gb_crn', regNumber: 'A', missReason: 'PIPELINE_MISS' },
+      { scheme: 'gb_crn', regNumber: 'B', missReason: 'DOMAIN_NOT_FOUND' },
+      { scheme: 'gb_crn', regNumber: 'C', missReason: 'DOMAIN_NOT_FOUND' },
+    ]);
+    expect(summary.reasons.map((reason) => `${reason.reason}:${reason.count}`)).toEqual([
+      'DOMAIN_NOT_FOUND:2',
+      'PIPELINE_MISS:1',
+    ]);
+    expect(summarizeMissReasons([], [])).toEqual({
+      missed: 0,
+      attributed: 0,
+      unattributed: 0,
+      reasons: [],
+    });
+  });
+
+  it('renders the comparison and miss attribution sections when provided', () => {
+    const result = auditRecall({ frame: [], pool: [] });
+    const comparison = compareRecallAudit(result, result, '2026-10');
+    const summary = summarizeMissReasons([], []);
+    const markdown = renderRecallReportMarkdown(result, { period: '2026-11' }, {
+      comparison,
+      missReasons: summary,
+    });
+    expect(markdown).toContain('## 环比（vs 2026-10');
+    expect(markdown).toContain('## miss 归因');
+    expect(markdown).toContain('无裁决数据');
   });
 });

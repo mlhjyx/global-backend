@@ -3,7 +3,7 @@
  * 召回审计脚手架 CLI（GainOS v3.0 ch03 §3.17 Tier A 子集）。
  *
  * 给定「目标市场 frame 导出」与「一次 run 的产出池导出」，计算分层覆盖率/召回估计
- * （Wilson 95% CI），输出固定模板报告（Markdown + JSON）。
+ * （Wilson 95% CI），可选给环比与 miss 归因，输出固定模板报告（Markdown + JSON）。
  *
  * 计算逻辑在 apps/api/src/registry/recall-audit.ts（vitest 覆盖），本文件只做
  * 参数解析、文件 IO 与输出。Node ≥22.18 原生 type-strip 可直接运行；
@@ -14,18 +14,23 @@
  *     --frame scripts/frames/fixtures/recall-frame.sample.json \
  *     --pool  scripts/frames/fixtures/recall-pool.sample.json \
  *     --period 2026-11 --sample 384 --seed 2026-11 \
+ *     [--baseline <上一期报告.json>] [--verdicts <裁决.json>] \
  *     --out /tmp/recall-audit
  *
  * 输入格式：
- *   frame: [{scheme, regNumber, country, name?, nace?, employeeBand?}, ...]
- *   pool:  [{registryScheme?, registryNumber?, domain?, contactFound?, contacts?, name?}, ...]
+ *   frame:   [{scheme, regNumber, country, name?, nace?, employeeBand?}, ...]
+ *   pool:    [{registryScheme?, registryNumber?, domain?, contactFound?, contacts?, name?}, ...]
+ *   baseline: 本 CLI 之前产出的报告 JSON（含 meta.period 与 result）
+ *   verdicts: [{scheme, regNumber, missReason}, ...]（或 {verdicts: [...]}）
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
   auditRecall,
+  compareRecallAudit,
   renderRecallReportMarkdown,
+  summarizeMissReasons,
 } from '../../apps/api/src/registry/recall-audit.ts';
 
 function fail(message) {
@@ -33,17 +38,21 @@ function fail(message) {
   process.exit(1);
 }
 
-function readJsonArray(path, what) {
-  let parsed;
+function readJson(path, what) {
   try {
-    parsed = JSON.parse(readFileSync(resolve(path), 'utf8'));
+    return JSON.parse(readFileSync(resolve(path), 'utf8'));
   } catch (error) {
     fail(`读取 ${what} 失败（${path}）：${error.message}`);
   }
+}
+
+function readJsonArray(path, what) {
+  const parsed = readJson(path, what);
   if (Array.isArray(parsed)) return parsed;
   if (parsed && Array.isArray(parsed.entities)) return parsed.entities;
   if (parsed && Array.isArray(parsed.records)) return parsed.records;
-  fail(`${what} 必须是数组（或 {entities: []} / {records: []}）：${path}`);
+  if (parsed && Array.isArray(parsed.verdicts)) return parsed.verdicts;
+  fail(`${what} 必须是数组（或 {entities: []} / {records: []} / {verdicts: []}）：${path}`);
 }
 
 const { values } = parseArgs({
@@ -53,6 +62,9 @@ const { values } = parseArgs({
     period: { type: 'string' },
     sample: { type: 'string' },
     seed: { type: 'string' },
+    baseline: { type: 'string' },
+    verdicts: { type: 'string' },
+    'delta-threshold': { type: 'string' },
     'frame-key': { type: 'string' },
     'snapshot-id': { type: 'string' },
     'pool-source': { type: 'string' },
@@ -65,7 +77,7 @@ const { values } = parseArgs({
 
 if (values.help) {
   process.stdout.write(
-    'usage: node scripts/frames/recall-audit.mjs --frame <frame.json> --pool <pool.json> [--period YYYY-MM] [--sample N --seed S] [--out DIR] [--json]\n',
+    'usage: node scripts/frames/recall-audit.mjs --frame <frame.json> --pool <pool.json> [--period YYYY-MM] [--sample N --seed S] [--baseline prev-report.json] [--verdicts verdicts.json] [--out DIR] [--json]\n',
   );
   process.exit(0);
 }
@@ -83,10 +95,37 @@ if (values.sample !== undefined) {
 }
 const seed = sampleSize !== null ? (values.seed ?? period) : (values.seed ?? null);
 
+let thresholdPp = 5;
+if (values['delta-threshold'] !== undefined) {
+  thresholdPp = Number(values['delta-threshold']);
+  if (!Number.isFinite(thresholdPp) || thresholdPp <= 0) {
+    fail(`--delta-threshold 必须是正数，收到 ${values['delta-threshold']}`);
+  }
+}
+
 const frame = readJsonArray(values.frame, '--frame');
 const pool = readJsonArray(values.pool, '--pool');
-
 const result = auditRecall({ frame, pool, sampleSize, seed });
+
+let comparison;
+if (values.baseline !== undefined) {
+  const baseline = readJson(values.baseline, '--baseline');
+  if (!baseline || typeof baseline !== 'object' || !baseline.result || !Array.isArray(baseline.result.strata)) {
+    fail('--baseline 不是本 CLI 产出的报告 JSON（缺 result.strata）');
+  }
+  comparison = compareRecallAudit(
+    result,
+    baseline.result,
+    typeof baseline.meta?.period === 'string' ? baseline.meta.period : null,
+    thresholdPp,
+  );
+}
+
+let missReasons;
+if (values.verdicts !== undefined) {
+  missReasons = summarizeMissReasons(result.missedKeys, readJsonArray(values.verdicts, '--verdicts'));
+}
+
 const meta = {
   period,
   frameKey: values['frame-key'] ?? null,
@@ -94,8 +133,14 @@ const meta = {
   poolSource: values['pool-source'] ?? values.pool,
   generatedAt: new Date().toISOString(),
 };
-const markdown = renderRecallReportMarkdown(result, meta);
-const payload = { meta, materializedAt: meta.generatedAt, result };
+const markdown = renderRecallReportMarkdown(result, meta, { comparison, missReasons });
+const payload = {
+  meta,
+  materializedAt: meta.generatedAt,
+  result,
+  ...(comparison !== undefined ? { comparison } : {}),
+  ...(missReasons !== undefined ? { missReasons } : {}),
+};
 
 if (values.json) {
   process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
