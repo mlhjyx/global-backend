@@ -49,7 +49,8 @@ ALTER TABLE "source_channel"
 
 CREATE INDEX "source_channel_health_idx"
   ON "source_channel" (("health_state"->>'circuit'), "status");
-CREATE INDEX "source_channel_last_success_idx"
+-- 命名按 Prisma datamodel 的默认名（#903 drift 门）：@@index([lastSuccessAt]) → _last_success_at_idx。
+CREATE INDEX "source_channel_last_success_at_idx"
   ON "source_channel" ("last_success_at");
 
 -- 已在线运行的渠道不因新闸门停摆（章节 §6.3.2 的回填要求）；其余行保持 probe_required=true。
@@ -72,8 +73,9 @@ CREATE TABLE "source_channel_probe" (
   "finished_at" TIMESTAMPTZ(3),
 
   CONSTRAINT "source_channel_probe_pkey" PRIMARY KEY ("id"),
-  CONSTRAINT "source_channel_probe_channel_fkey" FOREIGN KEY ("channel_id")
-    REFERENCES "source_channel"("id") ON DELETE CASCADE ON UPDATE RESTRICT,
+  -- 约束/索引名与 Prisma datamodel 默认命名一致（#903 drift 门）。
+  CONSTRAINT "source_channel_probe_channel_id_fkey" FOREIGN KEY ("channel_id")
+    REFERENCES "source_channel"("id") ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT "source_channel_probe_mode_check" CHECK ("mode" IN ('preview', 'probe')),
   CONSTRAINT "source_channel_probe_status_check" CHECK ("status" IN ('SUCCEEDED', 'FAILED')),
   CONSTRAINT "source_channel_probe_counts_check" CHECK (
@@ -84,7 +86,7 @@ CREATE TABLE "source_channel_probe" (
   )
 );
 
-CREATE INDEX "source_channel_probe_channel_started_idx"
+CREATE INDEX "source_channel_probe_channel_id_started_at_idx"
   ON "source_channel_probe" ("channel_id", "started_at" DESC);
 
 CREATE TABLE "source_channel_health_event" (
@@ -95,8 +97,8 @@ CREATE TABLE "source_channel_health_event" (
   "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
   CONSTRAINT "source_channel_health_event_pkey" PRIMARY KEY ("id"),
-  CONSTRAINT "source_channel_health_event_channel_fkey" FOREIGN KEY ("channel_id")
-    REFERENCES "source_channel"("id") ON DELETE CASCADE ON UPDATE RESTRICT,
+  CONSTRAINT "source_channel_health_event_channel_id_fkey" FOREIGN KEY ("channel_id")
+    REFERENCES "source_channel"("id") ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT "source_channel_health_event_event_check" CHECK ("event" IN (
     'CIRCUIT_OPEN', 'CIRCUIT_HALF_OPEN', 'CIRCUIT_CLOSED',
     'WARNING_20_4D', 'AUTO_DISABLED_30_7D', 'AUTO_DISABLED_FAILURE_RATE',
@@ -105,7 +107,7 @@ CREATE TABLE "source_channel_health_event" (
   ))
 );
 
-CREATE INDEX "source_channel_health_event_channel_created_idx"
+CREATE INDEX "source_channel_health_event_channel_id_created_at_idx"
   ON "source_channel_health_event" ("channel_id", "created_at" DESC);
 
 -- 平台表无租户列，沿用 source_channel/source_channel_run 的惯例：不启用 RLS，

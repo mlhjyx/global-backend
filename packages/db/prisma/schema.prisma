@@ -1651,6 +1651,8 @@ model SourceChannel {
   healthEvents SourceChannelHealthEvent[]
 
   @@index([status, category])
+  /// 健康扫描的静默渠道查询（consecutive_failures ≥20 且按 last_success_at 判 4/7 天）。
+  @@index([lastSuccessAt])
   @@map("source_channel")
 }
 
