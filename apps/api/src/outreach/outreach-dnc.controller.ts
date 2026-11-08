@@ -14,6 +14,7 @@ import type { RequestContext } from '../auth/request-context';
 import { ScopesGuard } from '../auth/scopes.guard';
 import { envelope } from '../common/envelope';
 import { ApiEnvelope } from '../common/api-envelope.decorator';
+import { OutreachDncServiceTokenGuard } from './outreach-dnc-service-token.guard';
 import {
   OUTREACH_DNC_MAX_EMAILS,
   OUTREACH_DNC_REASONS,
@@ -84,6 +85,7 @@ export class OutreachDncController {
 
   @Post('suppress')
   @HttpCode(200)
+  @UseGuards(OutreachDncServiceTokenGuard)
   @ApiOperation({
     summary: '写入平台级外联抑制（退订/投诉/退信）',
     description:
