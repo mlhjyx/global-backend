@@ -1,7 +1,7 @@
 # S0 Skill Runtime v0 · 发车后端到端演示脚本（2026-11-08）
 
 > 生命周期：`GUIDE`
-> 生命周期依据：S0 设计 §6 的演示口径（`docs/superpowers/plans/2026-11-08-skill-runtime-s0.md`）；S0 已合入 main（PR #831/#833/#835/#838），**尚未发车**；发车后按本脚本执行并把输出贴回验收记录。
+> 生命周期依据：S0 设计 §6 的演示口径（`docs/superpowers/plans/2026-11-08-skill-runtime-s0.md`）；S0 已合入 main（PR #831/#833/#835/#838）并于 2026-11-07 发车，E2E 三部分已完成（Part 1 发车后执行；Part 2/3 随 2026-11-08 发车完成，记录见 `_archive/backend-runtime-switch-99845741-xin-20261107/` 与 `_archive/backend-runtime-switch-123e8d67-xin-20261108/`）；本脚本保留为后续复验口径。
 > 用法：按 Part 1 → 2 → 3 顺序；Part 1/3 零成本，Part 2 需要两次真实理解 run（每 workspace 一次，成本约等于一次单公司理解）。
 
 ## 0. 前置
