@@ -3804,3 +3804,158 @@ model SiteCopyBundle {
   @@index([buildRunId], map: "site_copy_bundle_build_run_idx")
   @@map("site_copy_bundle")
 }
+
+// ---------------------------------------------------------------------------
+// Registry frames（GainOS v3.0 第 3 章 P2 · 召回与枚举地基，T3-01 平台子集）
+// 平台级参考数据（无 RLS，像 data_provider/monitored_source）：一个 frame = 一个可独立
+// 刷新、可独立许可的法人实体总体（如「英国 Companies House 活跃公司」）。全量原始快照
+// 不进 PG（MinIO 存文件），这里只存帧定义、快照元数据与归一后的实体。
+// ---------------------------------------------------------------------------
+
+/// 注册库/名录 frame 定义（平台级，无 RLS）。frameKey 全局唯一，如 gb_companies_house。
+model RegistryFrame {
+  id            String   @id @default(uuid()) @db.Uuid
+  frameKey      String   @unique @map("frame_key") @db.VarChar(80)
+  country       String   @db.Char(2)
+  /// 最稳定的国家级编号体系：gb_crn / fr_siren / de_hrb / lei ...
+  scheme        String   @db.VarChar(40)
+  label         String   @db.VarChar(200)
+  providerKey   String   @map("provider_key") @db.VarChar(40)
+  sourceUrl     String   @map("source_url") @db.VarChar(2048)
+  licence       String   @db.VarChar(120)
+  licenceUrl    String?  @map("licence_url") @db.VarChar(2048)
+  /// bulk_file | api_paged | sftp | manual_upload | athena
+  fetchMode     String   @map("fetch_mode") @db.VarChar(24)
+  cadence       Json?
+  config        Json
+  status        String   @default("ACTIVE") @db.VarChar(16)
+  expectedCount Int?     @map("expected_count")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  snapshots RegistrySnapshot[]
+  entities  RegistryEntity[]   @relation("RegistryEntitySourceFrame")
+
+  @@index([country, status])
+  @@map("registry_frame")
+}
+
+/// 一次 frame 快照（文件级）。原始文件在 MinIO，本表只存元数据与校验和；可回放。
+model RegistrySnapshot {
+  id            String    @id @default(uuid()) @db.Uuid
+  frameId       String    @map("frame_id") @db.Uuid
+  /// MinIO 对象键（bucket=registry-raw，key=<frameKey>/<publishedAt>/<filename>）
+  objectKey     String    @map("object_key") @db.VarChar(1024)
+  sha256        String    @db.Char(64)
+  bytes         BigInt
+  rowCount      BigInt    @map("row_count")
+  parserVersion String    @map("parser_version") @db.VarChar(64)
+  fetchedAt     DateTime  @map("fetched_at") @db.Timestamptz(3)
+  publishedAt   DateTime? @map("published_at") @db.Timestamptz(3)
+  /// FETCHED | PARSED | FAILED | SUPERSEDED
+  status        String    @default("FETCHED") @db.VarChar(16)
+  errorCode     String?   @map("error_code") @db.VarChar(64)
+  manifest      Json?
+  costCents     Int       @default(0) @map("cost_cents")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  frame    RegistryFrame          @relation(fields: [frameId], references: [id], onDelete: Restrict)
+  entities RegistryEntity[]
+  changes  RegistryEntityChange[]
+
+  @@unique([frameId, sha256])
+  @@index([frameId, fetchedAt(sort: Desc)])
+  @@map("registry_snapshot")
+}
+
+/// 归一后的注册实体（平台级，无 RLS）。业务主键 (scheme, regNumber)；contentHash 记录
+/// 归一字段的规范哈希，用于快照 diff 的变更判定与乐观锁。
+model RegistryEntity {
+  id             String    @id @default(uuid()) @db.Uuid
+  scheme         String    @db.VarChar(40)
+  regNumber      String    @map("reg_number") @db.VarChar(64)
+  country        String    @db.Char(2)
+  name           String    @db.VarChar(500)
+  nameNorm       String    @map("name_norm") @db.VarChar(500)
+  legalForm      String?   @map("legal_form") @db.VarChar(80)
+  /// ACTIVE | DISSOLVED | INSOLVENT | UNKNOWN
+  status         String    @default("ACTIVE") @db.VarChar(16)
+  addressJson    Json?     @map("address_json")
+  city           String?   @db.VarChar(120)
+  postalCode     String?   @map("postal_code") @db.VarChar(24)
+  region         String?   @db.VarChar(120)
+  nace           String?   @db.VarChar(16)
+  naceVersion    String?   @map("nace_version") @db.VarChar(16)
+  /// 0 | 1-9 | 10-49 | 50-249 | 250+
+  employeeBand   String?   @map("employee_band") @db.VarChar(16)
+  vatId          String?   @map("vat_id") @db.VarChar(32)
+  lei            String?   @db.Char(20)
+  /// 仅当源自带（主流注册库均无）
+  website        String?   @db.VarChar(2048)
+  /// [{scheme,value,issuer}] 额外标识（SIRET/REA/ABN/NZBN/CNPJ...）
+  identifiers    Json?
+  sourceFrameId  String    @map("source_frame_id") @db.Uuid
+  lastSnapshotId String    @map("last_snapshot_id") @db.Uuid
+  firstSeenAt    DateTime  @default(now()) @map("first_seen_at") @db.Timestamptz(3)
+  lastSeenAt     DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+  /// 连续两个快照缺席才置位（防单次缺失误杀）
+  withdrawnAt    DateTime? @map("withdrawn_at") @db.Timestamptz(3)
+  missCount      Int       @default(0) @map("miss_count")
+  contentHash    String    @map("content_hash") @db.Char(64)
+  attributes     Json?
+
+  sourceFrame  RegistryFrame    @relation("RegistryEntitySourceFrame", fields: [sourceFrameId], references: [id], onDelete: Restrict)
+  lastSnapshot RegistrySnapshot @relation(fields: [lastSnapshotId], references: [id], onDelete: Restrict)
+
+  @@unique([scheme, regNumber])
+  @@index([country, nace])
+  @@index([country, postalCode])
+  @@index([nameNorm])
+  @@index([lastSeenAt])
+  @@index([lei])
+  @@index([vatId])
+  @@map("registry_entity")
+}
+
+/// 快照 diff 产生的新增/字段变更/退出事件（append-only），供增量闭环与审计。
+model RegistryEntityChange {
+  id          String   @id @default(uuid()) @db.Uuid
+  scheme      String   @db.VarChar(40)
+  regNumber   String   @map("reg_number") @db.VarChar(64)
+  snapshotId  String   @map("snapshot_id") @db.Uuid
+  /// ADDED | UPDATED | WITHDRAWN | REAPPEARED
+  changeType  String   @map("change_type") @db.VarChar(16)
+  fieldDiffs  Json?    @map("field_diffs")
+  contentHash String   @map("content_hash") @db.Char(64)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  snapshot RegistrySnapshot @relation(fields: [snapshotId], references: [id], onDelete: Restrict)
+
+  @@unique([scheme, regNumber, snapshotId, changeType], map: "registry_entity_change_identity_key")
+  @@index([snapshotId, changeType])
+  @@map("registry_entity_change")
+}
+
+/// 跨 frame 的实体对齐（同实体/母子/分支），硬键驱动；软键（名称 trigram）只进人工复核队列。
+model RegistryEntityLink {
+  id             String    @id @default(uuid()) @db.Uuid
+  leftScheme     String    @map("left_scheme") @db.VarChar(40)
+  leftRegNumber  String    @map("left_reg_number") @db.VarChar(64)
+  rightScheme    String    @map("right_scheme") @db.VarChar(40)
+  rightRegNumber String    @map("right_reg_number") @db.VarChar(64)
+  /// SAME | PARENT | SUBSIDIARY | BRANCH | UNCERTAIN
+  linkType       String    @map("link_type") @db.VarChar(16)
+  /// lei_exact | identifier_exact | vat_exact | domain_exact | name_trigram | manual
+  rule           String    @db.VarChar(64)
+  score          Float?
+  evidence       Json?
+  /// PROPOSED | CONFIRMED | REJECTED
+  status         String    @default("PROPOSED") @db.VarChar(16)
+  decidedBy      String?   @map("decided_by")
+  decidedAt      DateTime? @map("decided_at") @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@unique([leftScheme, leftRegNumber, rightScheme, rightRegNumber, linkType], map: "registry_entity_link_identity_key")
+  @@index([status])
+  @@map("registry_entity_link")
+}

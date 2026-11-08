@@ -1,0 +1,13 @@
+{
+  "note": "召回审计样例：虚构的德国工业泵 frame 导出（2 个 stratum，共 8 家）",
+  "entities": [
+    { "scheme": "de_hrb", "regNumber": "HRB 10001", "country": "DE", "name": "Muster Pumpen GmbH", "nace": "28.13", "employeeBand": "10-49" },
+    { "scheme": "de_hrb", "regNumber": "HRB 10002", "country": "DE", "name": "Beispiel Pumpentechnik GmbH", "nace": "28.13", "employeeBand": "10-49" },
+    { "scheme": "de_hrb", "regNumber": "HRB 10003", "country": "DE", "name": "Nord Ventile GmbH", "nace": "28.13", "employeeBand": "10-49" },
+    { "scheme": "de_hrb", "regNumber": "HRB 10004", "country": "DE", "name": "Süd Pumpen Service GmbH", "nace": "28.13", "employeeBand": "10-49" },
+    { "scheme": "de_hrb", "regNumber": "HRB 20001", "country": "DE", "name": "Rheinland Pumpen AG", "nace": "28.13", "employeeBand": "50-249" },
+    { "scheme": "de_hrb", "regNumber": "HRB 20002", "country": "DE", "name": "Hanse Industriepumpen GmbH", "nace": "28.13", "employeeBand": "50-249" },
+    { "scheme": "de_hrb", "regNumber": "HRB 20003", "country": "DE", "name": "Alpen Ventile AG", "nace": "28.13", "employeeBand": "50-249" },
+    { "scheme": "de_hrb", "regNumber": "HRB 20004", "country": "DE", "name": "Weser Pumpenbau GmbH", "nace": "28.13", "employeeBand": "50-249" }
+  ]
+}
