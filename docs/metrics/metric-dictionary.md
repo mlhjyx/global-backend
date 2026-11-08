@@ -1,8 +1,8 @@
 # GainOS 指标字典 v1
 
 > 文档 ID：`METRICS-DICTIONARY-001`
-> 版本：`v1.1`（2026-11-09；v1.0 同日发布，changelog 见 §8）
-> 生命周期：`DRAFT`（v1 草案；YAML 化与 `pnpm metrics:lint` 机器门属 ch01 PR-01 后续）
+> 版本：`v1.2`（2026-11-09；v1.0/v1.1 同日发布，changelog 见 §8）
+> 生命周期：`DRAFT`（人工权威版；机器可读版见 `docs/metrics/dictionary/` + `scripts/metrics/metrics-lint.mjs`）
 > 状态：`DRAFT`
 > 依据：《GainOS 深化计划 v3.0》第 1 章 §3.1（指标树、VRIC 口径、RR1/RR3、分层、窗口、置信区间）与 §3.1.5 指标主表
 > 外部基准：逐条标注 URL；未能当日核实的数字标「待核」（沿用 ch01 §7.4）
@@ -330,7 +330,8 @@ week（ISO week，UTC 周一起）
 2. 任何口径变更（分子/分母/排除项/窗口/分层）必须升 `version` 并在 §8 changelog 记录 `breaking: true|false`；breaking 变更须附新旧口径 ≥30 天重叠对比。
 3. 变更流程：提出 → 数据工程评审 → 产品例会确认 → 合入；紧急修复可先合入，48 小时内补评审记录。
 4. 「为提升指标而放宽验证口径」一律按 breaking 变更处理并强制重跑金标；未走流程的口径修改视为缺陷。
-5. 机器化路线（ch01 PR-01）：本表迁移为 `docs/metrics/dictionary/*.yaml`（`metric-definition/v1` schema）+ `pnpm metrics:lint`（schema 校验、ID 唯一、EXPLAIN 校验、哈希防漂移）。本 markdown 是 v1 的人工权威版，机器版落地后由其接管。
+5. **机器化（v1.2 起已落地，ch01 PR-01）**：`docs/metrics/dictionary/*.json`（`metric-definition/v1`，按 tier 分文件）+ `docs/metrics/schemas/metric-definition.v1.schema.json` + `docs/metrics/schemas/sources.v1.json`；校验器 `node scripts/metrics/metrics-lint.mjs`（未知字段拒绝、ID/名称唯一、tier 与 ID 前缀一致、来源必须登记、ACTIVE 只能引用 existing 源、分子/分母/窗口/分层/CI 词表、changelog 1..version 连续且末条等于 version），并随 `scripts/governance-contracts.spec.mjs` 进 CI。选 JSON 而非 YAML 的原因：仓库无可直接引用的 YAML 依赖，引依赖会动锁文件与 Copy 绑定指纹；JSON 让 lint 保持零依赖。与只读副本对账的 `EXPLAIN` 校验需要数据库，仍属后续（CI 不连库）。
+6. 本 markdown 与机器字典必须同步修改：口径变更同时改两处并升版本；`metrics:lint` 保证机器侧自洽，人工版负责解释与上下文。
 
 ---
 
@@ -339,6 +340,7 @@ week（ISO week，UTC 周一起）
 | 版本 | 日期 | breaking | 说明 |
 | --- | --- | --- | --- |
 | v1.1 | 2026-11-09 | false | 新增 §1.3.1 VRIC PLUS 口径细则（phone VALID 四条件、通道拆分强制报告、引擎侧上界声明）；§1.4 增加 RR1/RR3 机器实现 `reply-rate.mjs` 与成对声明校验；§6 三源 log-linear 实现落地（8 模型 AIC 选型 + 参数化 bootstrap + 诊断门）；T0-002 增通道拆分。无 breaking。 |
+| v1.2 | 2026-11-09 | false | 机器可读字典落地：`docs/metrics/dictionary/*.json`（44 指标）+ sources 登记 + `metrics-lint.mjs`（字段/来源/版本/changelog 校验）并接入 CI；§7-5 改为已落地说明（JSON 而非 YAML 的理由）。无 breaking。 |
 | v1.0 | 2026-11-09 | — | 首次成文：T0–T4 + Guardrail 44 个指标；VRIC STRICT/PLUS 分离；RR1/RR3 成对报告；窗口/分层/CI 规则；基线读数（2026-11-08 审计 + 11-09 只读复核）。来源：ch01 §3.1 全文、§1.4 边界、§2 现状证据。 |
 
 ## 9. 外部基准来源（本版引用）

@@ -9,6 +9,7 @@
 | `capture-recapture.mjs` | 两 frame：确定性键匹配 + Chapman；三 frame：键簇捕获矩阵 + 8 个 log-linear 模型（G²+AIC 选型）+ 参数化 bootstrap CI + 诊断门 | 纯 Node 内置（无网络/无数据库） |
 | `golden-sampling.mjs` | 金标集确定性分层抽样（seed 固定、按层配额、欠采样如实报告） | 纯 Node 内置 |
 | `frame-registry.mjs` | 校验 `docs/metrics/frames/frame-registry.v1.json`：唯一键、许可、枚举、ACTIVE 需 license | 纯 Node 内置 |
+| `metrics-lint.mjs` | 校验 `docs/metrics/dictionary/*.json`：`metric-definition/v1` 字段/词表、ID 唯一、tier 前缀一致、来源必须登记（ACTIVE 只许 existing 源）、changelog 1..version 连续 | 纯 Node 内置 |
 | `reply-rate.mjs` | RR1/RR3 成对计算与声明校验（`unknown>0` 无 `ê` 拒绝出数；`--check` 拒绝单口径） | 纯 Node 内置 |
 | `lib/psql.mjs` | 只读 psql 执行器（`PGOPTIONS=-c default_transaction_read_only=on`）与 Wilson/比率工具 | Node 内置 |
 | `lib/prng.mjs` | 固定 seed 的 PRNG / Poisson / 分位数（抽样与 bootstrap） | Node 内置 |
@@ -23,6 +24,7 @@ node scripts/metrics/capture-recapture.mjs --a frameA.csv --b frameB.csv [--keys
 node scripts/metrics/capture-recapture.mjs --frame A=a.csv --frame B=b.csv --frame C=c.csv [--bootstrap 1000] [--seed 20261108] [--json]
 node scripts/metrics/golden-sampling.mjs --manifest evals/golden-discovery/v1/manifest.template.json --dataset accounts --pool pool.csv --out sampled.csv [--report report.json]
 node scripts/metrics/frame-registry.mjs [--json]
+node scripts/metrics/metrics-lint.mjs [--json] [--dir docs/metrics/dictionary]
 node scripts/metrics/reply-rate.mjs --input counts.json [--json]
 node scripts/metrics/reply-rate.mjs --check statement.txt
 ```

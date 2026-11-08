@@ -24,6 +24,14 @@
 - [ ] changelog 片段：`docs/roadmap/changelog.d/<YYYY-MM-DD>-<slug>.md`（改了 `apps/` `packages/` `scripts/` `infra/` 或根目录构建与运行时文件时必需，格式见该目录 README）
 - [ ] CI 绿
 
+## 指标影响（改动度量口径或数据链路时必填）
+
+<!-- 参照 docs/metrics/metric-dictionary.md 与 docs/metrics/dictionary/：涉及哪些指标 ID、口径是否变化（升版本+changelog）、是否需要重跑金标；无影响写「无」 -->
+
+- 涉及指标 ID：
+- 口径是否变化（升版本）：
+- 是否需重跑金标：
+
 ## 给产品负责人的说明
 
 <!-- 用业务语言写，不写实现细节；每项一两句。这是作者自述，不是机器检查，也不构成合并授权 -->

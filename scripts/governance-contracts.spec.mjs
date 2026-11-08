@@ -31,6 +31,7 @@ import "./governance-changelog-fragments.spec.mjs";
 import "./metrics/capture-recapture.test.mjs";
 import "./metrics/frame-registry.test.mjs";
 import "./metrics/golden-sampling.test.mjs";
+import "./metrics/metrics-lint.test.mjs";
 import "./metrics/reply-rate.test.mjs";
 import "./metrics/lib/psql.test.mjs";
 
