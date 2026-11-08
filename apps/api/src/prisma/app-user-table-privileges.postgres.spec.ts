@@ -991,3 +991,228 @@ describe.runIf(Boolean(ownerUrl && appUrl))('memory layer v0 on PostgreSQL', () 
     ).rejects.toThrow(/row-level security/);
   });
 });
+
+// P3-J04（ch04 判定质量六表）：append-only（hard_gate_result / judgment_record /
+// judgment_golden_label）、状态机（gate_enrichment_task / judgment_review_task）与全局工件
+// （conformal_threshold）三类权限语义，全部在 workspace RLS 之下。workspace 行都在回滚事务里
+// 由 app_user 自建；唯一持久的种子行是 conformal_threshold（全局表，owner 插入、app_user 只读）。
+describe.runIf(Boolean(ownerUrl && appUrl))('judgment quality tables (P3 J04) on PostgreSQL', () => {
+  let owner: PrismaClient;
+  let app: PrismaClient;
+  const thresholdVersion = `ct-privileges-${randomUUID()}`;
+
+  beforeAll(async () => {
+    owner = new PrismaClient({ datasourceUrl: ownerUrl });
+    app = new PrismaClient({ datasourceUrl: appUrl });
+    await owner.$executeRaw`
+      INSERT INTO "conformal_threshold"
+        ("version", "alpha", "delta", "scope", "threshold", "calibration_n", "accepted_n",
+         "accepted_errors", "upper_bound", "dataset_digest", "rubric_version", "prompt_hash",
+         "model_resolved")
+      VALUES (${thresholdVersion}, 0.05, 0.05, 'global', 0.75, 300, 60, 1, 0.04,
+              ${'a'.repeat(64)}, 'fit-v2', ${'b'.repeat(64)}, 'probe-model')`;
+  });
+
+  afterAll(async () => {
+    await owner.$executeRaw`DELETE FROM "conformal_threshold" WHERE "version" = ${thresholdVersion}`;
+    await Promise.all([owner?.$disconnect(), app?.$disconnect()]);
+  });
+
+  /** The seller/ICP/canonical rows a judgment row references, created under the active workspace. */
+  async function seedJudgmentScope(tx: Prisma.TransactionClient, workspaceId: string) {
+    // company_profile 对 workspace 有 FK；workspace 行自身受 RLS（id = current_workspace_id()），
+    // 必须在同一个 GUC 下创建。
+    await tx.workspace.create({ data: { id: workspaceId, name: 'judgment privileges probe' } });
+    const seller = await tx.companyProfile.create({
+      data: { workspaceId, name: 'Judgment Seller GmbH' },
+    });
+    const icp = await tx.icpDefinition.create({
+      data: { workspaceId, companyId: seller.id, name: 'judgment privileges probe' },
+    });
+    const company = await tx.canonicalCompany.create({
+      data: {
+        workspaceId,
+        name: 'Judgment Buyer GmbH',
+        dedupeKey: `domain:judgment-${randomUUID()}.example`,
+      },
+    });
+    return { icp, company };
+  }
+
+  const judgmentRecordData = (workspaceId: string, icpId: string, canonicalCompanyId: string) => ({
+    workspaceId,
+    icpId,
+    canonicalCompanyId,
+    judgeLevel: 1,
+    verdict: 'FIT',
+    criteria: [{ id: 'material', applicable: true, score: 8 }],
+    evidenceCompleteness: true,
+    rubricVersion: 'fit-v2',
+    promptHash: 'c'.repeat(64),
+    schemaVersion: 'judge-output/v2',
+    inputDigest: 'd'.repeat(64),
+    outputDigest: 'e'.repeat(64),
+    modelRequested: 'probe-model',
+  });
+
+  const hardGateData = (workspaceId: string, canonicalCompanyId: string) => ({
+    workspaceId,
+    canonicalCompanyId,
+    gateSetVersion: 'gates-v1',
+    gateId: 'G_COUNTRY',
+    gateVersion: 'gates-v1',
+    verdict: 'PASS',
+    inputDigest: 'f'.repeat(64),
+  });
+
+  it('keeps every judgment-quality row inside its workspace under RLS', async () => {
+    const wsA = randomUUID();
+    const wsB = randomUUID();
+    await rolledBack(app, async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${wsA}, true)`;
+      const { icp, company } = await seedJudgmentScope(tx, wsA);
+      const record = await tx.judgmentRecord.create({
+        data: judgmentRecordData(wsA, icp.id, company.id),
+      });
+      await tx.hardGateResult.create({ data: hardGateData(wsA, company.id) });
+      await tx.gateEnrichmentTask.create({
+        data: {
+          workspaceId: wsA,
+          canonicalCompanyId: company.id,
+          gateId: 'G_DOMAIN',
+          reasonCode: 'GATE_DOMAIN_MISSING',
+        },
+      });
+      await tx.judgmentReviewTask.create({
+        data: { workspaceId: wsA, judgmentRecordId: record.id, reason: 'UNKNOWN', priority: 2 },
+      });
+      await tx.judgmentGoldenLabel.create({
+        data: {
+          workspaceId: wsA,
+          canonicalCompanyId: company.id,
+          icpId: icp.id,
+          label: 'FIT',
+          labelSource: 'review',
+          rubricVersion: 'fit-v2',
+          inputDigest: 'a'.repeat(64),
+          split: 'candidate',
+        },
+      });
+
+      // 切到 wsB：wsA 的行对五张 workspace 表全部不可见（RLS USING）。
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${wsB}, true)`;
+      for (const table of [
+        'hard_gate_result',
+        'gate_enrichment_task',
+        'judgment_record',
+        'judgment_review_task',
+        'judgment_golden_label',
+      ]) {
+        const [{ count }] = await tx.$queryRawUnsafe<{ count: bigint }[]>(
+          `SELECT count(*) AS count FROM "${table}"`,
+        );
+        expect(Number(count), table).toBe(0);
+      }
+    });
+
+    // 往非当前 workspace 写入被 WITH CHECK 拒绝。
+    await expect(
+      rolledBack(app, async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${wsA}, true)`;
+        await tx.hardGateResult.create({ data: hardGateData(wsB, randomUUID()) });
+      }),
+    ).rejects.toThrow(/row-level security/);
+  });
+
+  it('refuses app_user UPDATE and DELETE on the append-only judgment tables', async () => {
+    const attempts: ReadonlyArray<readonly [string, string]> = [
+      ['hard_gate_result', `UPDATE "hard_gate_result" SET "verdict" = 'FAIL' WHERE false`],
+      ['hard_gate_result', 'DELETE FROM "hard_gate_result" WHERE false'],
+      ['judgment_record', `UPDATE "judgment_record" SET "verdict" = 'UNKNOWN' WHERE false`],
+      ['judgment_record', 'DELETE FROM "judgment_record" WHERE false'],
+      ['judgment_golden_label', `UPDATE "judgment_golden_label" SET "label" = 'NOT_FIT' WHERE false`],
+      ['judgment_golden_label', 'DELETE FROM "judgment_golden_label" WHERE false'],
+    ];
+    for (const [relation, statement] of attempts) {
+      let denied: string | null = null;
+      try {
+        await app.$executeRawUnsafe(statement);
+      } catch (error) {
+        denied = permissionDeniedTable(error);
+      }
+      expect(denied, statement).toBe(relation);
+    }
+  });
+
+  it('lets app_user move enrichment and review tasks through their states, never delete them', async () => {
+    const workspaceId = randomUUID();
+    await rolledBack(app, async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceId}, true)`;
+      const { icp, company } = await seedJudgmentScope(tx, workspaceId);
+      // gate_enrichment_task：queued → running（attempts+1、排下次尝试）。
+      const enrichment = await tx.gateEnrichmentTask.create({
+        data: {
+          workspaceId,
+          canonicalCompanyId: company.id,
+          gateId: 'G_DOMAIN',
+          reasonCode: 'GATE_DOMAIN_MISSING',
+        },
+      });
+      const running = await tx.gateEnrichmentTask.update({
+        where: { id: enrichment.id },
+        data: { status: 'running', attempts: { increment: 1 }, nextAttemptAt: new Date() },
+      });
+      expect(running.status).toBe('running');
+      expect(running.attempts).toBe(1);
+      // judgment_review_task：queued → resolved，写 resolved_*。
+      const record = await tx.judgmentRecord.create({
+        data: judgmentRecordData(workspaceId, icp.id, company.id),
+      });
+      const review = await tx.judgmentReviewTask.create({
+        data: { workspaceId, judgmentRecordId: record.id, reason: 'UNKNOWN', priority: 1 },
+      });
+      const resolved = await tx.judgmentReviewTask.update({
+        where: { id: review.id },
+        data: {
+          status: 'resolved',
+          resolvedVerdict: 'NOT_FIT',
+          resolvedBy: 'operator-probe',
+          resolvedAt: new Date(),
+          resolutionNote: 'probe',
+        },
+      });
+      expect(resolved.resolvedVerdict).toBe('NOT_FIT');
+    });
+
+    for (const relation of ['gate_enrichment_task', 'judgment_review_task']) {
+      let denied: string | null = null;
+      try {
+        await app.$executeRawUnsafe(`DELETE FROM "${relation}" WHERE false`);
+      } catch (error) {
+        denied = permissionDeniedTable(error);
+      }
+      expect(denied, relation).toBe(relation);
+    }
+  });
+
+  it('keeps conformal thresholds globally readable but not writable for app_user', async () => {
+    // 全局表：无 workspace_id、无 RLS，app_user 读得到 owner 写入的行。
+    const rows = await app.$queryRaw<{ version: string }[]>`
+      SELECT "version" FROM "conformal_threshold" WHERE "version" = ${thresholdVersion}`;
+    expect(rows.map(({ version }) => version)).toEqual([thresholdVersion]);
+
+    let denied: string | null = null;
+    try {
+      await app.$executeRaw`
+        INSERT INTO "conformal_threshold"
+          ("version", "alpha", "delta", "scope", "threshold", "calibration_n", "accepted_n",
+           "accepted_errors", "upper_bound", "dataset_digest", "rubric_version", "prompt_hash",
+           "model_resolved")
+        VALUES (${`ct-probe-${randomUUID()}`}, 0.05, 0.05, 'global', 0.5, 60, 60, 0, 0.05,
+                ${'a'.repeat(64)}, 'fit-v2', ${'b'.repeat(64)}, 'probe-model')`;
+    } catch (error) {
+      denied = permissionDeniedTable(error);
+    }
+    expect(denied).toBe('conformal_threshold');
+  });
+});
