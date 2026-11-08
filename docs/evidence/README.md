@@ -41,6 +41,8 @@
 
 [2026-11-08 步 13-1 S2 触达技能 Golden Set 与模型层回执](2026-11-08-step13-s2-skills-golden-set.md)：`outreach.sequence_draft` 与 `engage.reply_classify` 经 S0 注册（ACTIVE@1.0.0，tenant-default enabled），Golden Set 各 12 条（8 模型层 + 4 确定性层）；确定性层在 CI 零模型执行全绿，模型层经真实网关 deepseek-flash 8/8+8/8 全过并写两份 `eval_receipt(tier=model, passed=true)`；未发车、未接消费方，不含发送。
 
+[2026-11-08 步 13 收口：L2 门与发送即停的部署态负向验收](step13-l2-closure-20261108/README.md)：在 gain-saas `ec1610d` 部署产物（dist 同源）上，以隔离 TEST 库 + 本机 Mailpit sink 实跑 ③ 无审批直发 / ⑦ 审批重放（已发送·跨批·过期）/ ⑥ 退订与回复后同批次即停，全部在 API 层拒绝或跳过并落结果码；⑤ 逐封审计行（SENT/SKIPPED）字段齐全。同时上报 4 个步 11-x 缺口：DNC 对引擎 HTTP 错误 fail-open、引擎缺 `/outreach/dnc/suppress`、审计包 `generatedAt` 导致 `persistedAt` 恒 null 与重复落行、门拒绝尝试无审计工件。未发真实邮件；生产 4020 发送开关保持关闭。
+
 ## 1. 分类
 
 | 位置                               | 分类                                                                                    | 可证明                                                                                          | 不可证明                                                         |

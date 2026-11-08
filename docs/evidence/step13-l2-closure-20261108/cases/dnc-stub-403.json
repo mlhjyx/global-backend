@@ -1,0 +1,29 @@
+{
+  "label": "stub-403",
+  "batchId": "9a5863ba-12f2-4c66-b1bf-0576f20a611a",
+  "contactRef": "b0aa1365-4951-429d-9f9d-f89c70c4499e",
+  "recipientEmail": "dnc-stub-403-b0aa1365@example.test",
+  "send": {
+    "status": 201,
+    "json": {
+      "data": {
+        "batchId": "9a5863ba-12f2-4c66-b1bf-0576f20a611a",
+        "status": "SENT",
+        "sent": 1,
+        "failed": 0,
+        "skipped": 0,
+        "results": [
+          {
+            "draftId": "caa073d0-2825-4fa8-8525-c5c28675e20a",
+            "status": "SENT",
+            "messageId": "f25b6da3-e5ff-42dc-80e5-c164c56f92f2"
+          }
+        ]
+      }
+    }
+  },
+  "sink": {
+    "before": 11,
+    "after": 12
+  }
+}

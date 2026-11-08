@@ -1,0 +1,112 @@
+[
+  {
+    "ID": "iN3tPFv9vsxy83KiJxBGj9",
+    "Subject": "TEST DNC stub-403",
+    "Created": "2026-11-08T12:22:03.225Z",
+    "To": [
+      {
+        "Name": "",
+        "Address": "dnc-stub-403-b0aa1365@example.test"
+      }
+    ]
+  },
+  {
+    "ID": "JvN5ivmzPEUu4HN7tAJAh9",
+    "Subject": "TEST ⑥b 先发",
+    "Created": "2026-11-08T12:21:15.819Z",
+    "To": [
+      {
+        "Name": "",
+        "Address": "l2c8@example.test"
+      }
+    ]
+  },
+  {
+    "ID": "9Yy2Srq85nY3r7aJk3sZQn",
+    "Subject": "TEST ⑥a 先发",
+    "Created": "2026-11-08T12:21:14.751Z",
+    "To": [
+      {
+        "Name": "",
+        "Address": "l2c6b@example.test"
+      }
+    ]
+  },
+  {
+    "ID": "Nb9wNJ5ze9wf7ALrnCqB6B",
+    "Subject": "TEST ⑥a 种子邮件",
+    "Created": "2026-11-08T12:21:14.16Z",
+    "To": [
+      {
+        "Name": "",
+        "Address": "l2c7@example.test"
+      }
+    ]
+  },
+  {
+    "ID": "7hjjnVfNwkQKfoBBkXxRM7",
+    "Subject": "TEST ⑦a 首发送",
+    "Created": "2026-11-08T12:21:12.543Z",
+    "To": [
+      {
+        "Name": "",
+        "Address": "l2c4@example.test"
+      }
+    ]
+  },
+  {
+    "ID": "FZaMaGTDYwixpttJhkmskx",
+    "Subject": "TEST ⑥b 先发",
+    "Created": "2026-11-08T12:20:33.238Z",
+    "To": [
+      {
+        "Name": "",
+        "Address": "l2c8@example.test"
+      }
+    ]
+  },
+  {
+    "ID": "6foAAjshgbuDdAhqBsYRjJ",
+    "Subject": "TEST ⑥a 先发",
+    "Created": "2026-11-08T12:20:32.271Z",
+    "To": [
+      {
+        "Name": "",
+        "Address": "l2c6b@example.test"
+      }
+    ]
+  },
+  {
+    "ID": "LJGcFP7WuVH2DdKZyDDhvC",
+    "Subject": "TEST ⑥a 种子邮件",
+    "Created": "2026-11-08T12:20:31.838Z",
+    "To": [
+      {
+        "Name": "",
+        "Address": "l2c7@example.test"
+      }
+    ]
+  },
+  {
+    "ID": "dAz49SNFiD7oFbs2nKwvrS",
+    "Subject": "TEST ⑦c 过期",
+    "Created": "2026-11-08T12:20:31.346Z",
+    "To": [
+      {
+        "Name": "",
+        "Address": "l2c6@example.test"
+      }
+    ]
+  },
+  {
+    "ID": "RTjRVCgzsC9GWMW3sMmmFM",
+    "Subject": "TEST ⑦a 首发送",
+    "Created": "2026-11-08T12:20:30.084Z",
+    "To": [
+      {
+        "Name": "",
+        "Address": "l2c4@example.test"
+      }
+    ]
+  }
+]

@@ -1,0 +1,80 @@
+{
+  "id": "case8-reply-stops-queued",
+  "title": "⑥b 回复（NEGATIVE）后同批次后续草稿即停跳过",
+  "request": {
+    "replyRequest": {
+      "contactRef": "d91fcaa1-5f68-4b35-a261-9e20f902002c",
+      "kind": "REPLY",
+      "classification": "NEGATIVE"
+    },
+    "firstSend": {
+      "data": {
+        "batchId": "2130242a-2583-48f8-a5e4-28afe6fbe496",
+        "status": "QUEUED",
+        "sent": 1,
+        "failed": 0,
+        "skipped": 0,
+        "results": [
+          {
+            "draftId": "507d10d4-25ab-4b81-9a5c-c9af34de198c",
+            "status": "SENT",
+            "messageId": "0ec6ef29-891e-43bb-8c5d-791ead8e8bd8"
+          }
+        ]
+      }
+    }
+  },
+  "response": {
+    "status": 201,
+    "json": {
+      "data": {
+        "batchId": "2130242a-2583-48f8-a5e4-28afe6fbe496",
+        "status": "COMPLETED",
+        "sent": 0,
+        "failed": 0,
+        "skipped": 1,
+        "results": [
+          {
+            "draftId": "ac40fa26-b896-4dec-b19c-04ca9f276c87",
+            "status": "SKIPPED",
+            "error": "OUTREACH_OPTED_OUT"
+          }
+        ]
+      }
+    }
+  },
+  "batchT": "2130242a-2583-48f8-a5e4-28afe6fbe496",
+  "replyResponse": {
+    "data": {
+      "id": "059e9cf4-c428-4864-aab2-d66bae22f1b8",
+      "workspaceId": "19130c8b-65fe-4d56-9838-3b81d58be297",
+      "contactRef": "d91fcaa1-5f68-4b35-a261-9e20f902002c",
+      "recipientEmail": "l2c9@example.test",
+      "kind": "REPLY",
+      "classification": "NEGATIVE",
+      "subject": "Re: TEST ⑥b",
+      "snippet": "Kein Interesse, bitte keine weiteren Mails.",
+      "externalId": "l2-78c03a7d-4014-495c-9bf9-54844e2044ce",
+      "receivedAt": "2026-11-08T12:21:15.974Z",
+      "createdAt": "2026-11-08T12:21:15.976Z"
+    }
+  },
+  "sinkCounts": {
+    "beforeSecond": 11,
+    "afterSecond": 11
+  },
+  "consent": {
+    "status": "OPT_OUT",
+    "source": "reply:reply",
+    "lawfulBasis": "consent_withdrawal"
+  },
+  "skippedSend": [
+    {
+      "draft_id": "ac40fa26-b896-4dec-b19c-04ca9f276c87",
+      "status": "SKIPPED",
+      "error": "OUTREACH_OPTED_OUT",
+      "attempt": 1
+    }
+  ],
+  "batchStatus": "COMPLETED"
+}

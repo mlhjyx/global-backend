@@ -1,0 +1,16 @@
+Return-Path: <outreach@mail.gainos.test>
+Received: from gain-saas.local (unknown [172.17.0.1])
+        by 32d913c50c14 (Mailpit) with SMTP
+        for <dnc-stub-403-b0aa1365@example.test>; Sun, 8 Nov 2026 12:22:03 +0000 (UTC)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=mail.gainos.test; s=test20261108; t=1794140523; h=from:to:subject:date:message-id:mime-version:content-type:content-transfer-encoding:list-unsubscribe:list-unsubscribe-post; bh=R663PsltJ65152GL/lh4EZ+dGXmgpCT4d+5PdACLLKM=; b=T5I3oDEuXxsH…<truncated-in-repo>…<truncated-in-repo>: GainOS TEST <outreach@mail.gainos.test>
+To: <dnc-stub-403-b0aa1365@example.test>
+Subject: TEST DNC stub-403
+Date: Sun, 08 Nov 2026 12:22:03 GMT
+Message-ID: <f25b6da3-e5ff-42dc-80e5-c164c56f92f2@mail.gainos.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: base64
+List-Unsubscribe: <http://127.0.0.1:14031/api/public/outreach/unsubscribe?token=<redacted-in-repo>>
+List-Unsubscribe-Post: List-Unsubscribe=One-Click
+
+<body base64 elided in repo; content described in README>
