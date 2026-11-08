@@ -21,11 +21,12 @@ function emailDataClass(email: string): 'amber' | 'red' {
  *（如 https 站点里绝对化的 http 链接经 provider 原样透传）降级为 NULL——一条坏 URL 若直写会
  * 违反 CHECK，把整家公司联系人落库的 withWorkspace 事务一起回滚。
  */
-const SOURCE_URL_SHAPE = /^https:\/\/\S{5,2043}$/u;
 function safeSourceUrl(raw: string | undefined): string | undefined {
   if (!raw) return undefined;
   const value = raw.trim();
-  return SOURCE_URL_SHAPE.test(value) ? value : undefined;
+  if (value.length < 8 || value.length > 2048) return undefined;
+  if (!value.startsWith('https://') || /\s/u.test(value)) return undefined;
+  return value;
 }
 
 export interface PersistDiscoveredContactsArgs {

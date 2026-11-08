@@ -38,8 +38,14 @@ export interface UpsertCompanyChannelsArgs {
 
 const EMAIL_SHAPE = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/u;
 const PHONE_SHAPE = /^\+?[0-9()/ -]{5,32}$/u;
-/** 与 DB CHECK 同源：https、无空白、长度 8–2048。 */
-const SOURCE_URL_SHAPE = /^https:\/\/\S{5,2043}$/u;
+
+/** 与 DB CHECK 同源（先 trim 再判）：https、无空白、长度 8–2048。归一后的值同时用于校验与写入。 */
+function normalizeSourceUrl(raw: string): string | undefined {
+  const value = raw.trim();
+  if (value.length < 8 || value.length > 2048) return undefined;
+  if (!value.startsWith('https://') || /\s/u.test(value)) return undefined;
+  return value;
+}
 
 function normalizeValue(input: CompanyChannelInput): string {
   const trimmed = input.value.trim();
@@ -63,7 +69,7 @@ function validate(input: CompanyChannelInput): string {
       throw new Error('COMPANY_CHANNEL_FORM_URL_INVALID');
     }
   }
-  if (input.sourceUrl !== undefined && !SOURCE_URL_SHAPE.test(input.sourceUrl.trim())) {
+  if (input.sourceUrl !== undefined && normalizeSourceUrl(input.sourceUrl) === undefined) {
     throw new Error('COMPANY_CHANNEL_SOURCE_URL_INVALID');
   }
   return value;
@@ -95,6 +101,8 @@ export async function upsertCompanyContactChannels(
   let written = 0;
   for (const input of args.channels) {
     const value = validate(input);
+    // 校验与写入用同一个归一值（首尾空白在此裁掉），否则 DB CHECK 会拒收校验放过的值。
+    const sourceUrl = input.sourceUrl !== undefined ? normalizeSourceUrl(input.sourceUrl) : undefined;
     const dataClass = input.channel === 'email' ? 'amber' : 'green';
     await store.companyContactChannel.upsert({
       where: {
@@ -108,7 +116,7 @@ export async function upsertCompanyContactChannels(
       // 重复观测：只推进 last_seen 与来源留痕；状态不因自动化重见而改变。
       update: {
         lastSeenAt: seenAt,
-        ...(input.sourceUrl ? { sourceUrl: input.sourceUrl } : {}),
+        ...(sourceUrl ? { sourceUrl } : {}),
         ...(input.robotsStatus ? { robotsStatus: input.robotsStatus } : {}),
         ...(input.tosStatus ? { tosStatus: input.tosStatus } : {}),
       },
@@ -121,7 +129,7 @@ export async function upsertCompanyContactChannels(
         status: 'UNVERIFIED',
         sourceType: input.sourceType,
         ...(input.emailType ? { emailType: input.emailType } : {}),
-        ...(input.sourceUrl ? { sourceUrl: input.sourceUrl } : {}),
+        ...(sourceUrl ? { sourceUrl } : {}),
         ...(input.robotsStatus ? { robotsStatus: input.robotsStatus } : {}),
         ...(input.tosStatus ? { tosStatus: input.tosStatus } : {}),
         ...(input.legalBasis ? { legalBasis: input.legalBasis } : {}),

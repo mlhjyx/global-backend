@@ -88,13 +88,14 @@ describe('upsertCompanyContactChannels（A4）', () => {
     ).rejects.toThrow('COMPANY_CHANNEL_FORM_URL_INVALID');
   });
 
-  it('sourceUrl 与 DB CHECK 同源校验：http/带空白/超长都拒绝', async () => {
+  it('sourceUrl 与 DB CHECK 同源校验：http/带空白/超长都拒绝（边界按 DB 的 8–2048）', async () => {
     const { tx } = fakeTx();
     const base = { workspaceId: WORKSPACE, companyId: COMPANY, channels: [] as never[] };
     for (const sourceUrl of [
       'http://a.de/impressum',
       'https://a.de/imp ress',
       `https://a.de/${'x'.repeat(2050)}`,
+      `https://a.de/${'x'.repeat(2040)}`, // 总长 2049，恰好越过 DB 上界（旧正则的 2051 洞）
     ]) {
       await expect(
         upsertCompanyContactChannels(tx, {
@@ -103,6 +104,21 @@ describe('upsertCompanyContactChannels（A4）', () => {
         }),
       ).rejects.toThrow('COMPANY_CHANNEL_SOURCE_URL_INVALID');
     }
+  });
+
+  it('首尾空白的 sourceUrl 归一后写入（校验与写入同一个值，不给 DB CHECK 留 23514）', async () => {
+    const { tx, upsert } = fakeTx();
+    await upsertCompanyContactChannels(tx, {
+      workspaceId: WORKSPACE,
+      companyId: COMPANY,
+      channels: [{
+        channel: 'email', value: 'info@a.de', emailType: 'role', sourceType: 'impressum',
+        sourceUrl: '  https://a.de/impressum  ',
+      }],
+    });
+    const call = upsert.mock.calls[0]![0] as { create: Record<string, unknown>; update: Record<string, unknown> };
+    expect(call.create).toMatchObject({ sourceUrl: 'https://a.de/impressum' });
+    expect(call.update).toMatchObject({ sourceUrl: 'https://a.de/impressum' });
   });
 
   it('value 超长（>512）在任何 channel 都拒绝', async () => {
