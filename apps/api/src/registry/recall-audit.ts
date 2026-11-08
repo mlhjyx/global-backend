@@ -356,7 +356,16 @@ export function summarizeMissReasons(
 ): MissReasonSummary {
   const reasonByKey = new Map<string, string>();
   for (const verdict of verdicts) {
-    if (!verdict || typeof verdict.missReason !== 'string' || !verdict.missReason.trim()) continue;
+    if (
+      !verdict ||
+      typeof verdict.scheme !== 'string' ||
+      typeof verdict.regNumber !== 'string' ||
+      typeof verdict.missReason !== 'string' ||
+      !verdict.missReason.trim()
+    ) {
+      // 外部裁决文件不可信：结构不合格的条目跳过（未归因会如实出现在报告里）。
+      continue;
+    }
     const key = normalizeRegKey(verdict.scheme, verdict.regNumber);
     if (!reasonByKey.has(key)) reasonByKey.set(key, verdict.missReason.trim());
   }

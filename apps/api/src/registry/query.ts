@@ -173,20 +173,32 @@ export function parseRegistryQueryFilters(raw: unknown): RegistryQueryFilters {
   };
 }
 
+/**
+ * 数字前缀的另一种存储形态：库内 NACE 以 `28.13` / `28.13Z` 落库，计划侧常用无点号的
+ * `2813` 写法——两种都要能命中。3 位 `281` → `28.1`；4 位 `2813` → `28.13`；
+ * 2 位与点号形态原样。
+ */
+function nacePrefixVariants(prefix: string): string[] {
+  if (prefix.includes('.') || prefix.length === 2) return [prefix];
+  const dotted = `${prefix.slice(0, 2)}.${prefix.slice(2)}`;
+  return [prefix, dotted];
+}
+
 /** filters → Prisma 查询参数（全参数化；排序固定保证确定性）。 */
 export function buildRegistryEntityQuery(filters: RegistryQueryFilters): {
   where: Prisma.RegistryEntityWhereInput;
   orderBy: Prisma.RegistryEntityOrderByWithRelationInput[];
   take: number;
 } {
+  const naceVariants = [...new Set(filters.nacePrefixes.flatMap(nacePrefixVariants))];
   const where: Prisma.RegistryEntityWhereInput = {
     country: filters.country,
     status: filters.status,
     withdrawnAt: null,
     lastSnapshot: { status: 'PARSED' },
     ...(filters.scheme ? { scheme: filters.scheme } : {}),
-    ...(filters.nacePrefixes.length > 0
-      ? { OR: filters.nacePrefixes.map((prefix) => ({ nace: { startsWith: prefix } })) }
+    ...(naceVariants.length > 0
+      ? { OR: naceVariants.map((prefix) => ({ nace: { startsWith: prefix } })) }
       : {}),
     ...(filters.employeeBands.length > 0
       ? { employeeBand: { in: filters.employeeBands } }

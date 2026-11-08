@@ -215,6 +215,24 @@ describe('summarizeMissReasons (miss 归因)', () => {
     });
   });
 
+  it('skips malformed verdict entries instead of throwing on untrusted input', () => {
+    const summary = summarizeMissReasons(
+      [normalizeRegKey('gb_crn', 'A3')],
+      [
+        { scheme: 'gb_crn' } as never,
+        { regNumber: 'A3', missReason: 'PIPELINE_MISS' } as never,
+        { scheme: 'gb_crn', regNumber: 'A3', missReason: '   ' },
+        { scheme: 'gb_crn', regNumber: 'A3', missReason: 'PIPELINE_MISS' },
+      ],
+    );
+    expect(summary).toEqual({
+      missed: 1,
+      attributed: 1,
+      unattributed: 0,
+      reasons: [{ reason: 'PIPELINE_MISS', count: 1, shareOfMissed: 1 }],
+    });
+  });
+
   it('orders by count then reason and reports an empty summary for zero misses', () => {
     const missedKeys = ['gb_crn\u0001A', 'gb_crn\u0001B', 'gb_crn\u0001C'];
     const summary = summarizeMissReasons(missedKeys, [

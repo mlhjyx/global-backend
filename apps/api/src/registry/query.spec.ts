@@ -88,7 +88,8 @@ describe('buildRegistryEntityQuery', () => {
         status: 'ACTIVE',
         withdrawnAt: null,
         lastSnapshot: { status: 'PARSED' },
-        OR: [{ nace: { startsWith: '2813' } }],
+        // 数字前缀同时匹配无点号与库内点号两种形态。
+        OR: [{ nace: { startsWith: '2813' } }, { nace: { startsWith: '28.13' } }],
         employeeBand: { in: ['10-49'] },
         legalForm: { in: ['gmbh'], mode: 'insensitive' },
         postalCode: { startsWith: '8' },
@@ -96,6 +97,18 @@ describe('buildRegistryEntityQuery', () => {
       orderBy: [{ scheme: 'asc' }, { regNumber: 'asc' }],
       take: 7,
     });
+  });
+
+  it('maps 3-digit prefixes to the dotted class form and dedupes variants', () => {
+    const query = buildRegistryEntityQuery(
+      parseRegistryQueryFilters({ country: 'FR', nace_prefix: ['281', '2813', '28.13'] }),
+    );
+    expect(query.where.OR).toEqual([
+      { nace: { startsWith: '281' } },
+      { nace: { startsWith: '28.1' } },
+      { nace: { startsWith: '2813' } },
+      { nace: { startsWith: '28.13' } },
+    ]);
   });
 
   it('omits optional predicates when the filters are empty', () => {
