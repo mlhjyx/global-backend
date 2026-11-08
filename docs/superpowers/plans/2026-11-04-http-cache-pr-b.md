@@ -95,7 +95,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE TO app_user
 
 **落点**（`model-runtime/structured-task-runtime-bridge.ts`）：`executeStructuredTaskWithRuntime` 内，在构造 runtime **之前**：
 1. `cacheable = getTask(input.task)?.cacheable === true && llmCacheEnabled()`（env `ACQ_LLM_CACHE` 默认 on；`off` 全直通）。
-2. 查缓存（未过期）→ 命中：对结果重跑 `checkAgainstSchema` + `input.validateOutput`；通过则返回 `ModelResult`（`provider:'llm-cache'`，`usage` 缺省、`callCount:0`，`runtimeExecution` 标记 `cacheHit:true`/`physicalCalls:0`）；**不创建 runtime、不过网关，因此不落 ai_trace/usage_ledger、不结算**。校验不过 → 视同 miss 并覆盖。
+2. 查缓存（未过期）→ 命中：对结果重跑 `checkAgainstSchema` + `input.validateOutput`；通过则返回 `ModelResult`（`provider:'llm-cache'`，`usage` 缺省、`callCount:0`，`runtimeExecution` 标记 `cacheHit:true`/`physicalCalls:0`）。**（2026-11-08 修正）命中必须与真实调用同构地落账**：经 `RouterModelGateway.settleCachedStructured` 走 reserve(0) → projection → settle(0，`not_incurred`/callCount=0) → `onDurableReceipt`，产出零成本 durable 收据——discovery lineage 把「invoked 但无收据」判为未知结果并整条作废（二次 run 失败根因）；上下文要求收据而网关不支持时按 miss 走真实调用。校验不过 → 视同 miss 并覆盖。
 3. miss：走现有 runtime/网关；**成功后**把 `gatewayResult.data` upsert 入库（TTL 24h，env `ACQ_LLM_CACHE_TTL_HOURS` 可调，非法值回 24）。
 4. 缓存读写任何异常：`console.warn` + 直通（fail-open 只为优化；负向测试覆盖）。
 

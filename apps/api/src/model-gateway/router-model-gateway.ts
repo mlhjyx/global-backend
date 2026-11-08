@@ -66,6 +66,7 @@ import type {
   PaidModelPhysicalWireRuntime,
 } from "./paid-model-settlement";
 import { modelExecutionReceiptFacts } from "../durable-results/execution-receipt-facts";
+import { parseDurableExecutionReceiptFacts } from "../durable-results/durable-execution-receipt";
 import { centsToMicrousd, usdToMicrousdCeil } from "../tools/microusd";
 import { centsFromTokens } from "./model-token-cost";
 
@@ -247,6 +248,143 @@ export class RouterModelGateway extends ModelGateway {
     this.#modelIdentitySubstitutes = parseModelIdentitySubstitutes(
       process.env[MODEL_IDENTITY_SUBSTITUTES_ENV],
     );
+  }
+
+  /**
+   * PR-B：LLM 缓存命中的同构落账。缓存短路必须和真实调用一样在持久账本留下
+   * operation + receipt —— discovery lineage 把「invoked 但无收据」判为未知结果并
+   * 整条作废（2026-11-08 二次 run 失败根因）。本方法不发起任何外呼：
+   * reserve(0) → projection/receiptFacts(not_incurred) → settle(0) → onDurableReceipt。
+   */
+  async settleCachedStructured<T>(
+    input: GenerateStructuredInput,
+    context: AiContext,
+    cached: Readonly<{ data: T; model: string }>,
+  ): Promise<ModelResult<T>> {
+    assertNoCallerModelIdentitySubstitutes(context);
+    const accountKey = context.runId ?? context.workspaceId;
+    const operationKey = paidOperationKey([
+      accountKey,
+      "model-cache",
+      "generateStructured",
+      input.task,
+      input.model ?? "",
+      context.correlationId ?? "",
+      input.prompt ?? "",
+      input.system ?? "",
+      input.schema ? JSON.stringify(input.schema) : "",
+    ]);
+    const cachedResult: ModelResult<T> = {
+      data: cached.data,
+      provider: "llm-cache",
+      model: cached.model,
+      usage: { inputTokens: 0, outputTokens: 0 },
+      callCount: 0,
+    };
+    const reservation = await this.budgetStore.reserve({
+      workspaceId: context.workspaceId,
+      accountKey,
+      operationKey,
+      estimatedMicrousd: 0n,
+    });
+    if (reservation.replay) {
+      const replay =
+        reservation.replayResult?.resultStrategy === "typed_projection"
+          ? reservation.replayResult.projection
+          : undefined;
+      if (
+        replay &&
+        replay.kind === "model" &&
+        context.durableResultSchema &&
+        replay.schema === context.durableResultSchema
+      ) {
+        try {
+          const restored = restoreModelResultFromReplay(
+            context.durableResultSchema,
+            replay,
+          ) as ModelResult<T>;
+          const returned = reservation.receipt
+            ? { ...restored, durableReceipt: reservation.receipt }
+            : restored;
+          if (returned.durableReceipt) {
+            context.onDurableReceipt?.(input.task, returned.durableReceipt);
+          }
+          return returned;
+        } catch {
+          throw new BudgetOperationReplayError(operationKey, "remnant");
+        }
+      }
+      throw new BudgetOperationReplayError(operationKey, "remnant");
+    }
+    let projection: ReturnType<typeof projectModelResultForReplay> | undefined;
+    try {
+      projection = context.durableResultSchema
+        ? projectModelResultForReplay(
+            context.durableResultSchema,
+            cachedResult as ModelResult<unknown>,
+          )
+        : undefined;
+    } catch {
+      // 缓存内容无法满足持久投影契约：按真实调用的同一边界处理——记零成本
+      // 结算但不留结果，并让调用方看到明确的控制错误。
+      await this.budgetStore.settle(reservation, 0n).catch(() => undefined);
+      throw new ModelDurableResultProjectionError(operationKey);
+    }
+    // 零次物理调用的正确成本语义是 not_incurred（专利工具同款）：callCount=0 +
+    // charged/upper=0 即「本次由缓存供给」的机器可读标记。estimated_upper_bound
+    // 要求 callCount≥1，会把缓存命中伪装成一次真实调用。
+    const receiptFacts =
+      projection && context.durableResultSchema
+        ? parseDurableExecutionReceiptFacts(
+            {
+              usage: {
+                currency: "USD",
+                unit: "microusd",
+                callCount: 0,
+                chargedMicrousd: "0",
+                upperBoundMicrousd: "0",
+              },
+              costBasis: "not_incurred",
+            },
+            context.durableResultSchema,
+          )
+        : undefined;
+    const settlement = [reservation, 0n, projection, receiptFacts] as const;
+    let settled: Awaited<ReturnType<BudgetStore["settle"]>>;
+    try {
+      settled = await this.budgetStore.settle(...settlement);
+    } catch {
+      // 首次失败可能是提交后 ACK 丢失：同 operation/成本/投影重放一次是安全的。
+      try {
+        settled = await this.budgetStore.settle(...settlement);
+      } catch (error) {
+        // 缓存命中没有任何物理花费：释放预留，避免留下 RESERVED 残行。
+        await this.budgetStore.release(reservation).catch(() => undefined);
+        throw error;
+      }
+    }
+    const returned = settled?.receipt
+      ? { ...cachedResult, durableReceipt: settled.receipt }
+      : cachedResult;
+    this.trace?.record({
+      workspaceId: context.workspaceId,
+      task: input.task,
+      op: "generateStructured",
+      provider: "llm-cache",
+      model: cached.model,
+      status: "OK",
+      latencyMs: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+      correlationId: context.correlationId,
+      runId: context.runId,
+      modelPolicy: context.modelPolicy,
+    });
+    if (returned.durableReceipt) {
+      context.onDurableReceipt?.(input.task, returned.durableReceipt);
+    }
+    return returned;
   }
 
   generateText(

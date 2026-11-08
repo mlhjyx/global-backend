@@ -208,29 +208,79 @@ export async function executeStructuredTaskWithRuntime<Output>(
       .get(context.workspaceId, llmCacheKey)
       .catch(() => null);
     if (hit && cachedResultIsValid(input.schema, hit.result, input.validateOutput)) {
-      console.log(`[llm-cache] task=${input.task} hit=true`);
-      return {
-        data: hit.result as Output,
-        provider: "llm-cache",
-        model: registeredModel,
-        callCount: 0,
-        runtimeExecution: {
-          contractVersion,
-          protocol,
-          contextDigest: envelope.digest,
-          promptDigest,
-          states: [],
-          transportAttempts: 0,
-          repairAttempts: 0,
-          physicalCalls: 0,
-          gatewayRepairCalls: 0,
-          requestedAlias,
-          runtimeResolvedAlias: requestedAlias,
-          gatewayResolvedModel: registeredModel,
+      // 缓存短路必须留下与真实调用同构的 durable 收据：discovery lineage 把
+      // 「invoked 但无收据」视为未知结果并整条作废。优先由网关落账（0 成本）。
+      const settleCached = gateway.settleCachedStructured?.bind(gateway);
+      // durableResultSchema 是收据的同构前提：没有它 projection/receiptFacts 都为
+      // undefined，settle 会产出一条无结果的结算——那等于又一次「无收据成功」。
+      const canSettleCached =
+        settleCached !== undefined &&
+        context.durableResultSchema !== undefined &&
+        context.paidCost === undefined &&
+        context.platformEgress === undefined;
+      if (canSettleCached) {
+        const settled = await settleCached(input, context, {
+          data: hit.result as Output,
+          model: registeredModel,
+        });
+        console.log(`[llm-cache] task=${input.task} hit=true`);
+        return {
+          ...settled,
+          runtimeExecution: {
+            contractVersion,
+            protocol,
+            contextDigest: envelope.digest,
+            promptDigest,
+            states: [],
+            transportAttempts: 0,
+            repairAttempts: 0,
+            physicalCalls: 0,
+            gatewayRepairCalls: 0,
+            requestedAlias,
+            runtimeResolvedAlias: requestedAlias,
+            gatewayResolvedModel: settled.model ?? registeredModel,
+            provider: settled.provider,
+            ...(settled.reportedModel ? { reportedModel: settled.reportedModel } : {}),
+            ...(settled.modelResolutionSource
+              ? { modelResolutionSource: settled.modelResolutionSource }
+              : {}),
+            cacheHit: true,
+          },
+        };
+      }
+      const receiptRequired =
+        context.durableResultSchema !== undefined ||
+        context.onDurableReceipt !== undefined ||
+        context.paidCost !== undefined ||
+        context.platformEgress !== undefined;
+      if (!receiptRequired) {
+        console.log(`[llm-cache] task=${input.task} hit=true`);
+        return {
+          data: hit.result as Output,
           provider: "llm-cache",
-          cacheHit: true,
-        },
-      };
+          model: registeredModel,
+          callCount: 0,
+          runtimeExecution: {
+            contractVersion,
+            protocol,
+            contextDigest: envelope.digest,
+            promptDigest,
+            states: [],
+            transportAttempts: 0,
+            repairAttempts: 0,
+            physicalCalls: 0,
+            gatewayRepairCalls: 0,
+            requestedAlias,
+            runtimeResolvedAlias: requestedAlias,
+            gatewayResolvedModel: registeredModel,
+            provider: "llm-cache",
+            cacheHit: true,
+          },
+        };
+      }
+      // 需要持久收据但当前网关不支持缓存落账：按 miss 走真实调用（fail-closed 方向，
+      // 绝不返回一条无收据的成功结果）。
+      console.log(`[llm-cache] task=${input.task} hit=true unreceipted-fallthrough`);
     }
   }
   let gatewayResult: ModelResult<Output> | undefined;
