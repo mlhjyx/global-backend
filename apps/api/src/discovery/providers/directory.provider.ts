@@ -1,3 +1,4 @@
+import { isStableSafeHttpsUrl } from '../raw-source-provider-normalizer';
 import { createHash } from 'node:crypto';
 import {
   CompanyDiscoveryAdapter,
@@ -377,6 +378,24 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
   }
 }
 
+/** 若 detail_url 不满足稳定 URL 契约（含查询串/锚点/端口/电话样路径等），
+ *  丢弃该字段而不是拒绝整条记录：detail_url 是可选的富化字段，
+ *  名录列表页常给带长数字 ID 的详情链接，会被 CONTACT_LIKE_PHONE 判为电话样文本
+ *  （2026-11-07 实测：51 条记录因此整条被 normalize 拒绝）。 */
+function sanitizeDetailUrl(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== 'https:' || parsed.username !== '' || parsed.password !== '') return undefined;
+    parsed.search = '';
+    parsed.hash = '';
+    const candidate = parsed.toString();
+    return isStableSafeHttpsUrl(candidate) ? candidate : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function mapDirectoryCompanyToRecord(args: {
   company: {
     name: string;
@@ -404,7 +423,7 @@ export function mapDirectoryCompanyToRecord(args: {
       source_kind: args.listKind ?? 'directory',
       source_directory: sourceDomain,
       listing_location: args.company.location ?? null,
-      detail_url: args.company.detail_url ?? null,
+      detail_url: sanitizeDetailUrl(args.company.detail_url) ?? null,
       source_class: args.sourceClass,
     },
     provenance: {
