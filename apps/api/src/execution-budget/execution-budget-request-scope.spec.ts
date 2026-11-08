@@ -169,6 +169,20 @@ const cases = [
   },
   {
     request: {
+      operation: 'POST /campaigns/:campaignId/plan-drafts',
+      campaignId: '77777777-7777-4777-8777-777777777777',
+      body: { jobId: '88888888-8888-4888-8888-888888888888' },
+    },
+    expected: {
+      purpose: 'campaign.plan',
+      subjectType: 'campaign',
+      subjectId: '77777777-7777-4777-8777-777777777777',
+      requestSha256:
+        'fab93609345121a416482e4f85b0712cf43297f05790efee7910f81e6721ca5b',
+    },
+  },
+  {
+    request: {
       operation: 'POST /contact-points/:pointId/verify',
       pointId: POINT_ID,
       body: undefined,

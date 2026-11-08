@@ -11,7 +11,7 @@ const PLAN_ID = '50000000-0000-4000-8000-000000000005';
 const LEAD_ID = '60000000-0000-4000-8000-000000000006';
 
 describe('workspace execution technical envelope catalog', () => {
-  it('machine-enumerates all and only the ten workspace operations', () => {
+  it('machine-enumerates all and only the eleven workspace operations', () => {
     expect(WORKSPACE_EXECUTION_QUOTE_OPERATIONS).toEqual([
       'POST /companies',
       'POST /companies/:companyId/icps',
@@ -23,7 +23,31 @@ describe('workspace execution technical envelope catalog', () => {
       'POST /leads/:leadId/outreach-drafts',
       'POST /companies/:companyId/understanding/retry',
       'POST /site-builder/intake',
+      'POST /campaigns/:campaignId/plan-drafts',
     ]);
+  });
+
+  it('quotes a campaign plan draft from one bounded planning task', () => {
+    const campaignId = '70000000-0000-4000-8000-000000000007';
+    const jobId = '80000000-0000-4000-8000-000000000008';
+    const envelope = resolveWorkspaceTechnicalBudgetEnvelope({
+      operation: 'POST /campaigns/:campaignId/plan-drafts',
+      campaignId,
+      body: { jobId },
+    });
+
+    expect(envelope.policy.models).toEqual([
+      expect.objectContaining({
+        taskId: 'campaign.plan',
+        logicalInvocations: 1,
+      }),
+    ]);
+    expect(envelope.policy.tools).toEqual([]);
+    expect(envelope.policy.operation).toBe(
+      'POST /campaigns/:campaignId/plan-drafts',
+    );
+    expect(envelope.policy.executionLimits).toEqual({ modelLogicalInvocations: 1 });
+    expect(envelope.requiredCapMicrousd).toBeGreaterThan(0n);
   });
 
   it('quotes an outreach draft from one bounded structured task and its exact wire cap', () => {

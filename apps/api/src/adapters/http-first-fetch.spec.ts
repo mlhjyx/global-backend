@@ -241,4 +241,32 @@ describe('fetchPageHttpFirst cache (PR-B)', () => {
     expect(page).not.toBeNull();
     expect(page!.fromCache).toBeUndefined();
   });
+
+  it('emits the structured [http-cache] state line for misses and 304 hits', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const missPort = stubPort();
+      await fetchPageHttpFirst('https://acme.example/log-miss', {
+        fetchHtml: async () => ({
+          status: 200,
+          contentType: 'text/html; charset=utf-8',
+          body: Buffer.from(ARTICLE_HTML),
+        }),
+        cache: { workspaceId: WORKSPACE_ID, port: missPort },
+      });
+      const hitPort = stubPort({ get: vi.fn(async () => cachedPage()) });
+      await fetchPageHttpFirst('https://acme.example/log-hit', {
+        fetchHtml: async () => ({ status: 304, contentType: null, body: Buffer.alloc(0) }),
+        cache: { workspaceId: WORKSPACE_ID, port: hitPort },
+      });
+
+      const lines = logSpy.mock.calls.map((call) => String(call[0]));
+      expect(lines).toContain('[http-cache] state=miss url=https://acme.example/log-miss');
+      expect(lines).toContain(
+        '[http-cache] state=conditional-304 url=https://acme.example/log-hit',
+      );
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
 });

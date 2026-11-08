@@ -35,6 +35,7 @@ import { ExecutionBudgetModule } from './execution-budget/execution-budget.modul
 import { PlatformAuthorityModule } from './platform-authority/platform-authority.module';
 import { PlatformTargetLookupModule } from './platform-authority/platform-target-lookup.module';
 import { PlatformRevocationHttpModule } from './platform-authority/platform-revocation-http.module';
+import { CampaignPlanModule } from './campaign-plan/campaign-plan.module';
 
 /**
  * Root module. Domain modules (company-knowledge, icp, data-hub, lead) are
@@ -55,6 +56,7 @@ import { PlatformRevocationHttpModule } from './platform-authority/platform-revo
     PlatformAuthorityModule,
     PlatformTargetLookupModule,
     PlatformRevocationHttpModule,
+    CampaignPlanModule,
     ModelRuntimeModule,
     TemporalModule,
     RelayModule,

@@ -520,7 +520,7 @@ function expectRecursivelyClosedAndBounded(schema: unknown, propertyNames?: stri
 }
 
 describe('non-Site-Builder model result projection registry', () => {
-  it('locks the exact twelve task IDs and their exact schema IDs', () => {
+  it('locks the exact thirteen task IDs and their exact schema IDs', () => {
     expect(MODEL_RESULT_TASK_IDS).toEqual([
       'company_understanding.extract_claims',
       'company_understanding.extract_profile',
@@ -534,6 +534,7 @@ describe('non-Site-Builder model result projection registry', () => {
       'contact.find_decision_makers',
       'discovery.classify_trade_role',
       'outreach.first_contact_draft',
+      'campaign.plan',
     ]);
     expect(MODEL_RESULT_PROJECTION_SCHEMAS).toEqual({
       'company_understanding.extract_claims': 'understanding-claims/v1',
@@ -548,6 +549,7 @@ describe('non-Site-Builder model result projection registry', () => {
       'contact.find_decision_makers': 'contact-decision-makers/v1',
       'discovery.classify_trade_role': 'discovery-classify-trade-role/v1',
       'outreach.first_contact_draft': 'outreach-first-contact-draft/v1',
+      'campaign.plan': 'campaign-plan/v1',
     });
     expect(MODEL_RESULT_PROJECTION_DEFINITIONS.map((definition) => definition.schema)).toEqual([
       'understanding-claims/v1',
@@ -562,6 +564,7 @@ describe('non-Site-Builder model result projection registry', () => {
       'contact-decision-makers/v1',
       'discovery-classify-trade-role/v1',
       'outreach-first-contact-draft/v1',
+      'campaign-plan/v1',
     ]);
   });
 
@@ -580,7 +583,7 @@ describe('non-Site-Builder model result projection registry', () => {
   });
 
   it('registers only closed, bounded, ASCII-camelCase, non-sensitive projection schemas', () => {
-    expect(MODEL_RESULT_PROJECTION_DEFINITIONS).toHaveLength(12);
+    expect(MODEL_RESULT_PROJECTION_DEFINITIONS).toHaveLength(13);
     for (const definition of MODEL_RESULT_PROJECTION_DEFINITIONS) {
       const names: string[] = [];
       expectRecursivelyClosedAndBounded(definition.jsonSchema, names);

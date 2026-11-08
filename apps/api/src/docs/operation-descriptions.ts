@@ -30,6 +30,10 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
   'POST /api/v1/execution-budget/workspace-technical-quote':
     '服务间：计算某个 workspace operation 的平台内部执行预算包络。它不是客户价格、余额或额度限制，数字不能展示给终端客户。',
 
+  // ── Campaign ──────────────────────────────────────────────────────────────
+  'POST /api/v1/internal/campaign-plans/draft':
+    '服务间（gain-saas 控制面，x-service-token + 一次性 execution-budget Grant）：触发一次受限 Campaign 规划 job。异步：202 只表示工作流已启动；计划经内部回调落 gain-saas 的 DRAFT revision，本端点不执行任何外部动作。同一 jobId 重复触发按 Temporal WorkflowId 去重；Grant 一次性，重触发须新 jobId + 新 Grant。',
+
   // ── PlatformAuthority ─────────────────────────────────────────────────────
   'POST /api/v1/platform-authority/revocations':
     '服务间：应用一条已签名的撤销，或重放它已提交的 ACK。重复投递返回首次提交的 ACK（幂等），签名不合法直接拒绝。',
@@ -179,6 +183,8 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '对一个 ACTIVE ICP 的全部候选公司做六维评分，产出 Lead 与四个队列。异步，返回 202。',
   'GET /api/v1/leads':
     'Lead 列表，可按 ?icpId= 与 ?queue=recommended|needs_review|rejected|suppressed 过滤，按分数排序。',
+  'GET /api/v1/lead-candidates':
+    '机器候选只读视图（候选 ≠ 线索，不复制表）：候选行就是 qualify 产出的 lead，语义由 queue/fit_verdict/scored_at 与 score_detail.candidateBatchRef 组装。?runId=<qualify 工作流 run id> 只看该 run 的全部批次（批次引用前缀 qualify:<runId>:）；?icpId=/?queue= 收窄；按 scored_at 倒序、id 升序游标分页（limit 默认 50、上限 200）。runId 仅接受 [A-Za-z0-9-]{1,64}，否则 400。',
   'GET /api/v1/icps/{icpId}/lead-queues':
     '五个队列的计数（推荐 / 待确认 / 拒绝 / 禁联 / 制裁隔离）与队列依据（预置 / 评分 / 人工）。',
   'GET /api/v1/leads/{leadId}':
