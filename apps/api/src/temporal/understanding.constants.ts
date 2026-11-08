@@ -52,5 +52,8 @@ export const RAW_RETENTION_SWEEP_SCHEDULE_ID = 'raw-source-retention';
 export const ASSET_OBJECT_CLEANUP_WORKFLOW = 'assetObjectCleanupWorkflow';
 // 收口⑥ PR-B：删除编排（on-demand，非 Schedule；DeletionService 按 deletion_request 触发）
 export const DELETION_WORKFLOW = 'deletionWorkflow';
+/** B4（审计 F1）：未结预算操作（RESERVED/RESULT_UNKNOWN）的独立清收 sweep。 */
+export const TOOL_BUDGET_RECONCILIATION_SWEEP_WORKFLOW = 'toolBudgetReconciliationWorkflow';
+export const TOOL_BUDGET_RECONCILIATION_SCHEDULE_ID = 'tool-budget-reconciliation';
 export const PERSONAL_ARTIFACT_CLEANUP_WORKFLOW =
   'personalArtifactCleanupWorkflow';
