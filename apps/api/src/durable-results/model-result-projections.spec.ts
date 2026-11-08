@@ -824,3 +824,32 @@ describe('model result projection PostgreSQL JSONB byte gate', () => {
     }
   });
 });
+
+describe('campaign-plan/v1 projection carries the M2.2 replan budget', () => {
+  const campaignPlanData = (maxReplans: number): JsonRecord => ({
+    schemaVersion: 'campaign-plan/v0',
+    goal: { objective: 'g' },
+    audience: { icpIds: ['11111111-1111-4111-8111-111111111111'], sizeCap: 50 },
+    motions: [{ type: 'discovery', icpIds: ['11111111-1111-4111-8111-111111111111'] }],
+    budget: { currency: 'USD' },
+    approvalPolicy: { required: true },
+    decisionPolicy: { maxReplans },
+  });
+
+  it('projects plans with maxReplans 0, 1 and 2 unchanged', () => {
+    const registry = registerModelResultProjections(new TypedProjectionRegistry());
+    for (const value of [0, 1, 2]) {
+      const envelope = registry.project('campaign-plan/v1', rawResult(campaignPlanData(value)));
+      expect((envelope.data as { data: JsonRecord }).data['decisionPolicy']).toEqual({
+        maxReplans: value,
+      });
+    }
+  });
+
+  it('rejects out-of-bounds or non-integer replan budgets', () => {
+    const registry = registerModelResultProjections(new TypedProjectionRegistry());
+    for (const value of [3, -1, 1.5]) {
+      expect(() => registry.project('campaign-plan/v1', rawResult(campaignPlanData(value)))).toThrow();
+    }
+  });
+});
