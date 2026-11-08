@@ -1,0 +1,90 @@
+{
+  "id": "case7-unsubscribe-stops-queued",
+  "title": "⑥a 退订后同批次后续草稿即停跳过",
+  "request": {
+    "seedSend": {
+      "data": {
+        "batchId": "c18a9533-386c-4c13-9fc7-962ff28ab878",
+        "status": "SENT",
+        "sent": 1,
+        "failed": 0,
+        "skipped": 0,
+        "results": [
+          {
+            "draftId": "92e1920d-5ea0-4b76-b2e4-9614344a33fe",
+            "status": "SENT",
+            "messageId": "880e833c-1e3e-4731-b080-bb65efe52715"
+          }
+        ]
+      }
+    },
+    "unsubscribe": {
+      "tokenPresent": true,
+      "consume": {
+        "status": 201,
+        "json": {
+          "data": {
+            "unsubscribed": true,
+            "alreadyUsed": false
+          }
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 201,
+    "json": {
+      "data": {
+        "batchId": "f2447c9d-8145-415f-9a8e-3c8bf7ad7314",
+        "status": "COMPLETED",
+        "sent": 0,
+        "failed": 0,
+        "skipped": 1,
+        "results": [
+          {
+            "draftId": "3236d901-51a1-4c1f-9428-add2bbdc5847",
+            "status": "SKIPPED",
+            "error": "OUTREACH_OPTED_OUT"
+          }
+        ]
+      }
+    }
+  },
+  "seedBatch": "c18a9533-386c-4c13-9fc7-962ff28ab878",
+  "batchU": "f2447c9d-8145-415f-9a8e-3c8bf7ad7314",
+  "firstSend": {
+    "data": {
+      "batchId": "f2447c9d-8145-415f-9a8e-3c8bf7ad7314",
+      "status": "QUEUED",
+      "sent": 1,
+      "failed": 0,
+      "skipped": 0,
+      "results": [
+        {
+          "draftId": "f3452bd7-adbe-4204-8dcb-dfcc8117bb50",
+          "status": "SENT",
+          "messageId": "cc813682-6207-4a46-bbe3-2171a2ca3f2a"
+        }
+      ]
+    }
+  },
+  "sinkCounts": {
+    "before": 9,
+    "beforeSecond": 10,
+    "afterSecond": 10
+  },
+  "consent": {
+    "status": "OPT_OUT",
+    "source": "unsubscribe",
+    "lawfulBasis": "consent_withdrawal"
+  },
+  "skippedSend": [
+    {
+      "draft_id": "3236d901-51a1-4c1f-9428-add2bbdc5847",
+      "status": "SKIPPED",
+      "error": "OUTREACH_OPTED_OUT",
+      "attempt": 1
+    }
+  ],
+  "batchStatus": "COMPLETED"
+}

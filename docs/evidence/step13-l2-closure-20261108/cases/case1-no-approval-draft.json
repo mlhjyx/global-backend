@@ -1,0 +1,26 @@
+{
+  "id": "case1-no-approval-draft",
+  "title": "③a 无审批直发（批次未提交审批）",
+  "request": {
+    "method": "POST",
+    "path": "/api/outreach/batches/ee4356fe-f7dc-4c6c-8af7-8861a06314f5/send",
+    "body": null
+  },
+  "response": {
+    "status": 409,
+    "json": {
+      "error": {
+        "code": "OUTREACH_BATCH_NOT_QUEUED",
+        "message": "只有已批准进入待发队列的批次可以发送",
+        "userCopy": {
+          "title": "操作没有成功",
+          "why": "系统返回了一个未登记的错误。",
+          "next": "请重试;若反复出现,请复制「技术详情」联系运营。"
+        }
+      }
+    }
+  },
+  "batchId": "ee4356fe-f7dc-4c6c-8af7-8861a06314f5",
+  "dbSends": [],
+  "batchStatus": "DRAFT"
+}

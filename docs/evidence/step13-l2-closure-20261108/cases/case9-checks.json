@@ -1,0 +1,19 @@
+{
+  "id": "case9-checks",
+  "title": "⑤ 审计包断言",
+  "request": {},
+  "response": {
+    "status": 200,
+    "json": {
+      "sentHasApprover": true,
+      "sentRowComplete": true,
+      "draftApprovedByRecorded": true,
+      "skipRowHasReason": true,
+      "consentBasis": true,
+      "skipEvent": true,
+      "sentPackagePersisted": false,
+      "rejectedBatchNoPersistedPackage": true,
+      "rejectedBatchNoSendRows": true
+    }
+  }
+}

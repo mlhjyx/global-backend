@@ -1,0 +1,63 @@
+{
+  "workspaceId": "19130c8b-65fe-4d56-9838-3b81d58be297",
+  "batchIds": {
+    "draftNotSubmitted": "ee4356fe-f7dc-4c6c-8af7-8861a06314f5",
+    "submittedNotApproved": "891ba5ef-b0b6-4717-8a71-74e19040681c",
+    "contentChanged": "7a27e3ba-90a4-47da-988e-76df5f8f037d",
+    "sentReplay": "de2a915a-c258-4cb2-b4de-a39436b3dd45",
+    "crossBatch": "1587695b-693e-40e9-98cb-a16b04d87b79",
+    "expired": "4fa0a881-27c4-429d-9262-505e1d9894b1",
+    "unsubSeed": "c18a9533-386c-4c13-9fc7-962ff28ab878",
+    "unsubscribeStop": "f2447c9d-8145-415f-9a8e-3c8bf7ad7314",
+    "replyStop": "2130242a-2583-48f8-a5e4-28afe6fbe496"
+  },
+  "results": [
+    {
+      "id": "③a",
+      "ok": true
+    },
+    {
+      "id": "③b",
+      "ok": true
+    },
+    {
+      "id": "③c",
+      "ok": true
+    },
+    {
+      "id": "⑦a",
+      "ok": true
+    },
+    {
+      "id": "⑦b",
+      "ok": true
+    },
+    {
+      "id": "⑦c",
+      "ok": true
+    },
+    {
+      "id": "⑥a",
+      "ok": true
+    },
+    {
+      "id": "⑥b",
+      "ok": true
+    },
+    {
+      "id": "⑤",
+      "ok": false,
+      "checks": {
+        "sentHasApprover": true,
+        "sentRowComplete": true,
+        "draftApprovedByRecorded": true,
+        "skipRowHasReason": true,
+        "consentBasis": true,
+        "skipEvent": true,
+        "sentPackagePersisted": false,
+        "rejectedBatchNoPersistedPackage": true,
+        "rejectedBatchNoSendRows": true
+      }
+    }
+  ]
+}

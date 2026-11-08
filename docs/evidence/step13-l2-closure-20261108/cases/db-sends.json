@@ -1,0 +1,13 @@
+[{"name":"L2-⑥a 同批退订即停（TEST）","status":"SENT","error":null,"attempt":1,"msg":"cc1ec4c1"}, 
+ {"name":"L2-⑥a 同批退订即停（TEST）","status":"SKIPPED","error":"OUTREACH_OPTED_OUT","attempt":1,"msg":null}, 
+ {"name":"L2-⑥a 同批退订即停（TEST）","status":"SENT","error":null,"attempt":1,"msg":"cc813682"}, 
+ {"name":"L2-⑥a 同批退订即停（TEST）","status":"SKIPPED","error":"OUTREACH_OPTED_OUT","attempt":1,"msg":null}, 
+ {"name":"L2-⑥a 退订种子（TEST）","status":"SENT","error":null,"attempt":1,"msg":"1b3dc3e1"}, 
+ {"name":"L2-⑥a 退订种子（TEST）","status":"SENT","error":null,"attempt":1,"msg":"880e833c"}, 
+ {"name":"L2-⑥b 回复即停（TEST）","status":"SENT","error":null,"attempt":1,"msg":"47341ce5"}, 
+ {"name":"L2-⑥b 回复即停（TEST）","status":"SKIPPED","error":"OUTREACH_OPTED_OUT","attempt":1,"msg":null}, 
+ {"name":"L2-⑥b 回复即停（TEST）","status":"SENT","error":null,"attempt":1,"msg":"0ec6ef29"}, 
+ {"name":"L2-⑥b 回复即停（TEST）","status":"SKIPPED","error":"OUTREACH_OPTED_OUT","attempt":1,"msg":null}, 
+ {"name":"L2-⑦a 重放已发送（TEST）","status":"SENT","error":null,"attempt":1,"msg":"192eb2de"}, 
+ {"name":"L2-⑦a 重放已发送（TEST）","status":"SENT","error":null,"attempt":1,"msg":"3ef3ffba"}, 
+ {"name":"L2-⑦c 过期批准（TEST）","status":"SENT","error":null,"attempt":1,"msg":"766827d4"}]
