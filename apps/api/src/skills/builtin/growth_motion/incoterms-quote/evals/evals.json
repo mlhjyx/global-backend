@@ -1,0 +1,103 @@
+{
+  "skillName": "quoting.incoterms_quote",
+  "evals": [
+    {
+      "id": "exw",
+      "input": {
+        "incoterm": "EXW",
+        "quantity": 10,
+        "currency": "USD",
+        "marginPct": 10,
+        "costLines": [
+          { "kind": "goods", "amount": 1000, "currency": "USD" },
+          { "kind": "packaging", "amount": 100, "currency": "USD" },
+          { "kind": "ocean_freight", "amount": 300, "currency": "USD" }
+        ]
+      },
+      "assertions": [
+        { "kind": "equals", "path": "totalUnitPrice", "value": 121 },
+        { "kind": "equals", "path": "totalAmount", "value": 1210 },
+        { "kind": "equals", "path": "formulaVersion", "value": "incoterms-2020/v1" }
+      ]
+    },
+    {
+      "id": "fob",
+      "input": {
+        "incoterm": "FOB",
+        "quantity": 10,
+        "currency": "USD",
+        "marginPct": 10,
+        "costLines": [
+          { "kind": "goods", "amount": 1000, "currency": "USD" },
+          { "kind": "packaging", "amount": 100, "currency": "USD" },
+          { "kind": "inland_freight", "amount": 50, "currency": "USD" }
+        ]
+      },
+      "assertions": [
+        { "kind": "equals", "path": "totalUnitPrice", "value": 126.5 },
+        { "kind": "equals", "path": "totalAmount", "value": 1265 }
+      ]
+    },
+    {
+      "id": "cif",
+      "input": {
+        "incoterm": "CIF",
+        "quantity": 10,
+        "currency": "USD",
+        "marginPct": 10,
+        "costLines": [
+          { "kind": "goods", "amount": 1000, "currency": "USD" },
+          { "kind": "packaging", "amount": 100, "currency": "USD" },
+          { "kind": "inland_freight", "amount": 50, "currency": "USD" },
+          { "kind": "ocean_freight", "amount": 300, "currency": "USD" },
+          { "kind": "insurance", "amount": 20, "currency": "USD" }
+        ]
+      },
+      "assertions": [
+        { "kind": "equals", "path": "totalUnitPrice", "value": 161.7 },
+        { "kind": "equals", "path": "totalAmount", "value": 1617 }
+      ]
+    },
+    {
+      "id": "ddp",
+      "input": {
+        "incoterm": "DDP",
+        "quantity": 10,
+        "currency": "USD",
+        "marginPct": 10,
+        "costLines": [
+          { "kind": "goods", "amount": 1000, "currency": "USD" },
+          { "kind": "packaging", "amount": 100, "currency": "USD" },
+          { "kind": "inland_freight", "amount": 50, "currency": "USD" },
+          { "kind": "ocean_freight", "amount": 300, "currency": "USD" },
+          { "kind": "insurance", "amount": 20, "currency": "USD" },
+          { "kind": "duty", "amount": 80, "currency": "USD" }
+        ]
+      },
+      "assertions": [
+        { "kind": "equals", "path": "totalUnitPrice", "value": 170.5 },
+        { "kind": "equals", "path": "totalAmount", "value": 1705 },
+        { "kind": "contains", "path": "formulaVersion", "value": "incoterms-2020" }
+      ]
+    },
+    {
+      "id": "fx",
+      "input": {
+        "incoterm": "EXW",
+        "quantity": 10,
+        "currency": "USD",
+        "exchangeRate": 1.1,
+        "marginPct": 10,
+        "costLines": [
+          { "kind": "goods", "amount": 1000, "currency": "EUR" },
+          { "kind": "packaging", "amount": 100, "currency": "USD" }
+        ]
+      },
+      "assertions": [
+        { "kind": "equals", "path": "totalUnitPrice", "value": 132 },
+        { "kind": "equals", "path": "totalAmount", "value": 1320 },
+        { "kind": "json_schema", "path": "assumptions", "schema": { "type": "array", "minItems": 1 } }
+      ]
+    }
+  ]
+}

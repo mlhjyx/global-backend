@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { AiTaskContract } from "../ai-tasks/task-contract";
+import { validateImportedSkill } from "./imports/import-rules";
 import {
   validateSkillArtifact,
   type SkillManifest,
@@ -8,8 +9,11 @@ import {
 } from "./skill-manifest";
 
 /**
- * 读取 `skills/builtin/<pack_type>/<skill-name>/SKILL.md` 并逐一校验。生成脚本、
- * 校验脚本与 CI 单测共用同一个加载器，保证三处的判定完全一致。
+ * 读取并校验技能包：
+ * - `builtin/<pack_type>/<skill-name>/SKILL.md`（内置，pack-type 目录即真值）；
+ * - `imported/<source-id>/<skill-name>/SKILL.md`（第三方衍生版，pack-type 取自
+ *   frontmatter，来源溯源在目录上；额外过许可/NOTICE/安全扫描门）。
+ * 生成脚本、校验脚本与 CI 单测共用同一加载器，保证三处判定完全一致。
  */
 
 export interface BuiltinSkillRecord {
@@ -19,6 +23,11 @@ export interface BuiltinSkillRecord {
   readonly manifest: SkillManifest;
   readonly body: string;
   readonly sourceDigest: string;
+}
+
+/** 平台目录的统一记录：导入技能额外带 `sourceId`（内置技能没有该字段）。 */
+export interface PlatformSkillRecord extends BuiltinSkillRecord {
+  readonly sourceId?: string;
 }
 
 export interface BuiltinSkillIssue {
@@ -31,6 +40,33 @@ export interface BuiltinSkillIssue {
 export interface BuiltinSkillLoadResult {
   readonly records: readonly BuiltinSkillRecord[];
   readonly issues: readonly BuiltinSkillIssue[];
+}
+
+export interface PlatformSkillLoadResult {
+  readonly records: readonly PlatformSkillRecord[];
+  readonly issues: readonly BuiltinSkillIssue[];
+}
+
+function duplicateKeyIssues(
+  records: readonly PlatformSkillRecord[],
+  file: string,
+): readonly BuiltinSkillIssue[] {
+  const issues: BuiltinSkillIssue[] = [];
+  const seen = new Map<string, string[]>();
+  for (const record of records) {
+    seen.set(record.skillKey, [...(seen.get(record.skillKey) ?? []), record.directory]);
+  }
+  for (const [skillKey, directories] of seen) {
+    if (directories.length > 1) {
+      issues.push({
+        file,
+        code: "SKILL_KEY_DUPLICATE",
+        severity: "error",
+        message: `skill key ${skillKey} is declared by ${directories.join(", ")}`,
+      });
+    }
+  }
+  return issues;
 }
 
 export function loadBuiltinSkills(
@@ -80,20 +116,108 @@ export function loadBuiltinSkills(
   }
 
   records.sort((left, right) => (left.skillKey < right.skillKey ? -1 : 1));
-  const seen = new Map<string, string[]>();
-  for (const record of records) {
-    seen.set(record.skillKey, [...(seen.get(record.skillKey) ?? []), record.directory]);
+  issues.push(...duplicateKeyIssues(records, rootDirectory));
+
+  return { records, issues };
+}
+
+export function loadImportedSkills(
+  rootDirectory: string,
+  resolveContract: (taskId: string) => AiTaskContract | undefined,
+): { records: readonly PlatformSkillRecord[]; issues: readonly BuiltinSkillIssue[] } {
+  const records: PlatformSkillRecord[] = [];
+  const issues: BuiltinSkillIssue[] = [];
+  if (!existsSync(rootDirectory)) {
+    issues.push({
+      file: rootDirectory,
+      code: "IMPORTED_ROOT_MISSING",
+      severity: "error",
+      message: "imported skills root does not exist",
+    });
+    return { records, issues };
   }
-  for (const [skillKey, directories] of seen) {
-    if (directories.length > 1) {
-      issues.push({
-        file: rootDirectory,
-        code: "SKILL_KEY_DUPLICATE",
-        severity: "error",
-        message: `skill key ${skillKey} is declared by ${directories.join(", ")}`,
+
+  for (const sourceId of readdirSync(rootDirectory).sort()) {
+    const sourcePath = join(rootDirectory, sourceId);
+    if (!statSync(sourcePath).isDirectory()) continue;
+    for (const directory of readdirSync(sourcePath).sort()) {
+      const directoryPath = join(sourcePath, directory);
+      if (!statSync(directoryPath).isDirectory()) continue;
+      const file = join(directoryPath, "SKILL.md");
+      if (!existsSync(file)) {
+        issues.push({
+          file: directoryPath,
+          code: "SKILL_FILE_MISSING",
+          severity: "error",
+          message: "skill directory must contain SKILL.md",
+        });
+        continue;
+      }
+      const raw = readFileSync(file, "utf8");
+      const result = validateSkillArtifact({ raw, directoryName: directory, resolveContract });
+      for (const issue of result.issues) {
+        issues.push({ file, ...issue });
+      }
+      if (!result.skill) continue;
+      const ruleIssues = [...validateImportedSkill({
+        sourceId,
+        directory,
+        manifest: result.skill.manifest,
+        body: result.skill.body,
+      })];
+      if (existsSync(join(directoryPath, "scripts"))) {
+        ruleIssues.push({
+          code: "IMPORTED_SCRIPTS_NOT_ALLOWED",
+          severity: "error",
+          message: "imported skill directories must not ship a scripts/ folder (v1 policy)",
+        });
+      }
+      for (const issue of ruleIssues) {
+        issues.push({ file, ...issue });
+      }
+      // 违反导入门的技能不产出记录：违规内容绝不能进入生成目录与运行时目录。
+      if (ruleIssues.some((issue) => issue.severity === "error")) continue;
+      records.push({
+        skillKey: result.skill.manifest.platform.skillKey,
+        directory,
+        packTypeDirectory: result.skill.manifest.platform.packType,
+        manifest: result.skill.manifest,
+        body: result.skill.body,
+        sourceDigest: result.skill.sourceDigest,
+        sourceId,
       });
     }
   }
 
+  records.sort((left, right) => (left.skillKey < right.skillKey ? -1 : 1));
+  issues.push(...duplicateKeyIssues(records, rootDirectory));
+
+  return { records, issues };
+}
+
+/** 平台目录 = 内置 + 导入；跨两个根去重（同 key 不得出现两次）。 */
+export function loadPlatformSkills(options: {
+  readonly builtinRoot: string;
+  readonly importedRoot?: string;
+  readonly resolveContract: (taskId: string) => AiTaskContract | undefined;
+}): PlatformSkillLoadResult {
+  const builtin = loadBuiltinSkills(options.builtinRoot, options.resolveContract);
+  const imported = options.importedRoot
+    ? loadImportedSkills(options.importedRoot, options.resolveContract)
+    : { records: [], issues: [] };
+  const records: PlatformSkillRecord[] = [...builtin.records, ...imported.records];
+  records.sort((left, right) => (left.skillKey < right.skillKey ? -1 : 1));
+  const issues: BuiltinSkillIssue[] = [...builtin.issues, ...imported.issues];
+  const builtinKeys = new Set(builtin.records.map((record) => record.skillKey));
+  for (const record of imported.records) {
+    if (builtinKeys.has(record.skillKey)) {
+      issues.push({
+        file: options.importedRoot ?? "imported",
+        code: "SKILL_KEY_DUPLICATE",
+        severity: "error",
+        message: `skill key ${record.skillKey} is declared by both builtin and imported roots`,
+      });
+    }
+  }
   return { records, issues };
 }

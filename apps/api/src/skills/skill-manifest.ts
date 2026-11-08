@@ -72,8 +72,11 @@ export interface SkillArtifactInput {
   readonly raw: string;
   /** 技能目录名（标准要求等于 frontmatter `name`）。 */
   readonly directoryName: string;
-  /** `<pack_type>/` 目录名；`metadata.platform.pack-type` 必须与它一致。 */
-  readonly packTypeDirectory: string;
+  /**
+   * `<pack_type>/` 目录名；`metadata.platform.pack-type` 必须与它一致。
+   * 导入技能按 `<source>/<skill>/` 布局（来源溯源在目录上），不传此字段。
+   */
+  readonly packTypeDirectory?: string;
   /** 由 task id 解析代码内 AI Task 契约（`getTask`）；未登记返回 undefined。 */
   resolveContract: (taskId: string) => AiTaskContractLike | undefined;
 }
@@ -301,7 +304,11 @@ export function validateSkillArtifact(input: SkillArtifactInput): SkillValidatio
   if (platformPackType !== undefined && !SKILL_PACK_TYPES.includes(platformPackType as SkillPackType)) {
     error("SKILL_PACK_TYPE_INVALID", `unknown pack type: ${platformPackType}`);
     platformValuesValid = false;
-  } else if (platformPackType !== undefined && platformPackType !== input.packTypeDirectory) {
+  } else if (
+    platformPackType !== undefined &&
+    input.packTypeDirectory !== undefined &&
+    platformPackType !== input.packTypeDirectory
+  ) {
     error(
       "SKILL_PACK_TYPE_DIRECTORY_MISMATCH",
       `pack-type "${platformPackType}" must equal its directory "${input.packTypeDirectory}"`,

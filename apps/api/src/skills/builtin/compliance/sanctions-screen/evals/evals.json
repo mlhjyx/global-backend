@@ -1,0 +1,51 @@
+{
+  "skillName": "compliance.sanctions_screen",
+  "evals": [
+    {
+      "id": "exact-primary-match",
+      "input": { "companyName": "Nordwind Trading LLC", "country": "AE" },
+      "assertions": [
+        { "kind": "equals", "path": "status", "value": "potential_match" },
+        { "kind": "source_count_gte", "path": "matches", "value": 1 },
+        { "kind": "contains", "path": "matches.0.matchedName", "value": "Nordwind" },
+        { "kind": "equals", "path": "matches.0.aliasQuality", "value": "primary" },
+        { "kind": "equals", "path": "truncated", "value": false },
+        { "kind": "equals", "path": "algorithmVersion", "value": "sanctions-screen/v1" }
+      ]
+    },
+    {
+      "id": "unknown-company-clear",
+      "input": { "companyName": "Siemens Energy AG", "country": "DE" },
+      "assertions": [
+        { "kind": "equals", "path": "status", "value": "clear" },
+        { "kind": "source_count_gte", "path": "matches", "value": 0 },
+        { "kind": "json_schema", "path": "listVersions", "schema": { "type": "object" } }
+      ]
+    },
+    {
+      "id": "partial-name-above-threshold",
+      "input": { "companyName": "Nordwind", "country": null },
+      "assertions": [
+        { "kind": "equals", "path": "status", "value": "potential_match" },
+        { "kind": "gte", "path": "matches.0.nameScore", "value": 0.7 }
+      ]
+    },
+    {
+      "id": "high-threshold-excludes-partial",
+      "input": { "companyName": "Nordwind", "country": null, "threshold": 0.99 },
+      "assertions": [
+        { "kind": "equals", "path": "status", "value": "clear" },
+        { "kind": "source_count_gte", "path": "matches", "value": 0 }
+      ]
+    },
+    {
+      "id": "unmatchable-name-not-screened",
+      "input": { "companyName": "！！！", "country": "RU" },
+      "assertions": [
+        { "kind": "equals", "path": "status", "value": "not_screened" },
+        { "kind": "source_count_gte", "path": "matches", "value": 0 },
+        { "kind": "equals", "path": "truncated", "value": false }
+      ]
+    }
+  ]
+}
