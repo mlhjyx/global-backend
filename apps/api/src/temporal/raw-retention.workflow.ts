@@ -11,6 +11,11 @@ const TRUTHFUL_LOCK_PATCH = "raw-retention-truthful-lock-conflicts-v3";
 const PERSONAL_DATA_AUDIT_RETENTION_PATCH = "personal-data-access-audit-retention-v1";
 /** 巡检（2026-11-04）：超时 RESERVED 的工具预算操作清收并入本 sweep。 */
 const BUDGET_OPERATION_RECONCILE_PATCH = "budget-operation-reconcile-v1";
+/**
+ * B4（审计 F1）：预算清收迁到独立 sweep（tool-budget-reconciliation），本 sweep 不再调度。
+ * patch 守卫保证旧历史（无本标记）照旧重放对账命令，新历史不再调度。
+ */
+const BUDGET_RECONCILE_MOVED_PATCH = "budget-operation-reconcile-moved-v1";
 const BUDGET_RECONCILE_BATCH = 200;
 /**
  * B1（L01，2026-11-08）：循环上界的冻结默认值——旧历史没有对应输入字段时重放用它们，
@@ -167,7 +172,8 @@ export async function rawRetentionSweepWorkflow(
   const personalDataAuditRetention = patched(
     PERSONAL_DATA_AUDIT_RETENTION_PATCH,
   );
-  const budgetOperationReconcile = patched(BUDGET_OPERATION_RECONCILE_PATCH);
+  const budgetOperationReconcile =
+    patched(BUDGET_OPERATION_RECONCILE_PATCH) && !patched(BUDGET_RECONCILE_MOVED_PATCH);
   // B1（L01）：循环上界来自输入（旧历史缺字段 → 冻结默认），改常量不再是调参手段。
   const maxPagesPerRun = clampedInput(
     input.maxPagesPerRun,

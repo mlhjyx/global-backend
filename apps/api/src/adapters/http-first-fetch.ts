@@ -169,6 +169,15 @@ function defaultFetchHtml(hooks?: HttpFirstOptions["hooks"]): HttpFirstHtmlFetch
   };
 }
 
+/**
+ * PR-B 观测：页面缓存状态进结构化日志（设计 §4.5）。artifact 绑定路径只持久化
+ * artifact 引用、不保存 provenance，所以命中率只能从 worker 日志聚合
+ * `[http-cache] state=…` 行；URL 截断到 200 字符，避免日志膨胀。
+ */
+function logPageCacheState(url: string, state: "miss" | "conditional-304"): void {
+  console.log(`[http-cache] state=${state} url=${url.slice(0, 200)}`);
+}
+
 function turndown(): TurndownService {
   return new TurndownService({
     headingStyle: "atx",
@@ -228,6 +237,7 @@ export async function fetchPageHttpFirst(
   if (!fetched) return null;
   if (fetched.status === 304) {
     if (!cached) return null;
+    logPageCacheState(url, "conditional-304");
     return {
       markdown: cached.markdown,
       title: null,
@@ -259,6 +269,7 @@ export async function fetchPageHttpFirst(
       } catch {
         // 缓存写失败不影响本次抓取结果。
       }
+      logPageCacheState(url, "miss");
     }
     return page;
   } catch {

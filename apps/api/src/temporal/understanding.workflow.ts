@@ -16,8 +16,12 @@ import {
 } from '../execution-budget/execution-budget-binding';
 
 // Crawling can be slow (headless browser per page) — generous timeout, few retries.
+// B5：抓取（含首页：robots 10s + HTTP 15s + 渲染 75s + 429 重试 ≈ 176s）与并发多页
+// 都要 5 分钟覆盖；crawlActs 下的每个活动都必须上报心跳（否则 heartbeatTimeout 会把
+// 无心跳活动的预算压到 2 分钟，反而更容易超时重试）。
 const crawlActs = proxyActivities<UnderstandingActivities>({
-  startToCloseTimeout: '3 minutes',
+  startToCloseTimeout: '5 minutes',
+  heartbeatTimeout: '2 minutes',
   retry: { maximumAttempts: 3 },
 });
 
@@ -25,8 +29,15 @@ const crawlActs = proxyActivities<UnderstandingActivities>({
 // 429 bursts from the model gateway last tens of seconds (2026-11-01: an
 // understanding run burned its 3 quick attempts in ~3s). Back off long enough
 // that a burst can clear: 5s → 10s → 20s → 40s, ~75s of cover.
+//
+// B5（PERF-02）：活动时限必须覆盖网关的**最坏**线上路径，否则活动先超时、HTTP 请求还在跑，
+// Temporal 重试会再发一次付费调用。一次结构化回答可能串两条 provider 调用（初答 + 一次
+// schema 修复），每条上限 MAX_MODEL_GATEWAY_REQUEST_TIMEOUT_MS = 300s——与
+// discovery-run-lease.ts 的 2×300s 口径一致，取 15 分钟（≥600s + 余量）。
+// 心跳让死掉的 worker 在 2 分钟内被发现；modelActs 下的**每个**活动都必须上报心跳。
 const modelActs = proxyActivities<UnderstandingActivities>({
-  startToCloseTimeout: '3 minutes',
+  startToCloseTimeout: '15 minutes',
+  heartbeatTimeout: '2 minutes',
   retry: {
     maximumAttempts: 5,
     initialInterval: '5 seconds',
