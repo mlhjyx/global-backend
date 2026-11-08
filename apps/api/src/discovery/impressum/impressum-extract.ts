@@ -30,12 +30,17 @@ export function decodeHtmlEntities(text: string): string {
     .replace(/&([a-z]+);/giu, (match, name: string) => NAMED_ENTITIES[name.toLowerCase()] ?? match);
 }
 
-/** 渲染 HTML → 可见文本（确定性抽取器输入；实体解码、script/style/注释先剥掉）。 */
+/**
+ * 渲染 HTML → 可见文本（确定性抽取器输入；实体解码、script/style/注释先剥掉）。
+ * 结束标签按浏览器容错形态匹配（`</script >` / `</script foo="x">`）——这不是 HTML
+ * 消毒器（输出只喂正则抽取、绝不回渲成 HTML），但要剥干净以免脚本体混进文本抽取
+ *（CodeQL js/bad-tag-filter，alert #85）。
+ */
 export function stripHtml(html: string): string {
   return decodeHtmlEntities(html)
-    .replace(/<script[\s\S]*?<\/script>/giu, ' ')
-    .replace(/<style[\s\S]*?<\/style>/giu, ' ')
-    .replace(/<!--[\s\S]*?-->/gu, ' ')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script[^>]*>/giu, ' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style[^>]*>/giu, ' ')
+    .replace(/<!--[\s\S]*?--!?>/gu, ' ')
     .replace(/<[^>]+>/gu, ' ')
     .replace(/\s+/gu, ' ');
 }
