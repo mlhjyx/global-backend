@@ -1722,7 +1722,7 @@ model SourceChannelRun {
   crawlRunId         String?   @unique @map("crawl_run_id") @db.Uuid
   /// 发起本次运行的工作空间（可选来源标注；本表是平台级运行统计，不承载租户数据）。
   triggeredByWorkspaceId String? @map("triggered_by_workspace_id") @db.Uuid
-  /// RUNNING | SUCCEEDED | FAILED
+  /// RUNNING | SUCCEEDED | PARTIAL | FAILED（PARTIAL = 截断/部分失败但有产出，不计坏轮）
   status             String    @default("RUNNING") @db.VarChar(16)
   pagesFetched       Int       @default(0) @map("pages_fetched")
   recordsFound       Int       @default(0) @map("records_found")
@@ -1730,6 +1730,21 @@ model SourceChannelRun {
   truncated   Boolean  @default(false)
   failures           Int       @default(0)
   errorCode          String?   @map("error_code") @db.VarChar(64)
+  // —— CH-6 两段式落账与运行维度（migration 20261109140000_channel_run_dimensions）——
+  /// preview | run
+  mode               String    @default("run") @db.VarChar(8)
+  manifestSha256     String?   @map("manifest_sha256") @db.Char(64)
+  planDigest         String?   @map("plan_digest") @db.Char(64)
+  /// 物理请求数（两段式心跳写；finalize 收敛）
+  requests           Int       @default(0)
+  bytesFetched       BigInt    @default(0) @map("bytes_fetched")
+  http4xx            Int       @default(0) @map("http_4xx")
+  http5xx            Int       @default(0) @map("http_5xx")
+  http429            Int       @default(0) @map("http_429")
+  durationMs         Int?      @map("duration_ms")
+  /// closed | open | half_open（结束时）
+  circuitState       String?   @map("circuit_state") @db.VarChar(16)
+  operatorNote       String?   @map("operator_note") @db.VarChar(500)
   startedAt          DateTime  @default(now()) @map("started_at") @db.Timestamptz(3)
   finishedAt         DateTime? @map("finished_at") @db.Timestamptz(3)
 

@@ -196,7 +196,67 @@ describe('channel run recorder (finalize idempotency)', () => {
   it('defensive: channel rows without the new columns still record (legacy fakes/shape)', async () => {
     const { tx, channelUpdate } = makeTx({ channel: { failureStreak: 0, status: 'ENABLED' } });
     await recordChannelRunInTransaction(tx as never, RUN);
-    const data = (channelUpdate.mock.calls[0]![0] as { data: Record<string, unknown> }).data;
+    const data = (channelUpdate.mock.calls[0][0] as { data: Record<string, unknown> }).data;
     expect(data.consecutiveFailures).toBe(0);
+  });
+
+  it('a RUNNING two-phase row is NOT a finalize replay: streak advances and dimensions converge', async () => {
+    const { tx, update, createMany, channelUpdate } = makeTx({
+      existing: { id: 'run-running', status: 'RUNNING' },
+      channel: {
+        failureStreak: 0,
+        status: 'ENABLED',
+        consecutiveFailures: 1,
+        lastSuccessAt: null,
+        createdAt: new Date('2026-10-01T00:00:00Z'),
+      },
+    });
+    const recorded = await recordChannelRunInTransaction(tx as never, {
+      ...RUN,
+      status: 'FAILED',
+      pagesFetched: 10,
+      failures: 1,
+      requests: 12,
+      mode: 'run',
+      durationMs: 5000,
+    });
+    expect(createMany).not.toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith({
+      where: { crawlRunId: RUN.crawlRunId },
+      data: expect.objectContaining({
+        status: 'FAILED',
+        pagesFetched: 10,
+        requests: 12,
+        mode: 'run',
+        durationMs: 5000,
+      }),
+    });
+    expect(recorded.failureStreak).toBe(1);
+    expect(channelUpdate).toHaveBeenCalled();
+    expect((channelUpdate.mock.calls[0]![0] as { data: Record<string, unknown> }).data.consecutiveFailures).toBe(2);
+  });
+
+  it('PARTIAL is not a bad round even with a high failure rate, and counts as a success signal', async () => {
+    const { tx, channelUpdate, eventCreate } = makeTx({
+      channel: {
+        failureStreak: 2,
+        status: 'ENABLED',
+        consecutiveFailures: 9,
+        lastSuccessAt: new Date('2026-11-01T00:00:00Z'),
+        createdAt: new Date('2026-10-01T00:00:00Z'),
+      },
+    });
+    const recorded = await recordChannelRunInTransaction(tx as never, {
+      ...RUN,
+      status: 'PARTIAL',
+      pagesFetched: 10,
+      failures: 9, // 90% 失败率——SUCCEEDED 判定会是坏轮，PARTIAL 不是
+    });
+    const data = (channelUpdate.mock.calls[0]![0] as { data: Record<string, unknown> }).data;
+    expect(recorded.failureStreak).toBe(0);
+    expect(data.failureStreak).toBe(0);
+    expect(data.consecutiveFailures).toBe(0);
+    expect(data.lastSuccessAt).toBeInstanceOf(Date);
+    expect(eventCreate).not.toHaveBeenCalled();
   });
 });
