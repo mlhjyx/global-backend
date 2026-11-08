@@ -145,7 +145,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))('company_contact_channel on PostgreS
       await owner.$executeRaw`
         DELETE FROM canonical_company WHERE id IN (${companyA}::uuid, ${companyB}::uuid, ${cascadeCompany}::uuid)`;
     } finally {
-      await Promise.all([owner.$disconnect(), app?.disconnect()]);
+      await Promise.all([owner.$disconnect(), app?.$disconnect()]);
     }
   });
 
