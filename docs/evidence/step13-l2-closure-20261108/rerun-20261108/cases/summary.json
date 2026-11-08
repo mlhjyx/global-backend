@@ -1,0 +1,180 @@
+{
+  "label": "post-#113/#115 (gain 71afd55, engine pre-switch)",
+  "workspaceId": "19130c8b-65fe-4d56-9838-3b81d58be297",
+  "batchIds": {
+    "draftNotSubmitted": "a45c21a6-385c-4d00-8bcf-3167b8a6a422",
+    "submittedNotApproved": "a841fd04-e5ed-41ed-88dc-c11b3a79e931",
+    "contentChanged": "637f9d1f-80f4-4857-b0c1-ec514efab981",
+    "sentReplay": "53706396-4cc9-47fd-a0b2-417da5eae9cd",
+    "crossBatch": "582738a4-b10e-4d06-8ac4-0714b869a0a0",
+    "expired": "94b60434-f057-4f1b-89a6-b92164b64f36",
+    "unsubSeed": "3baebdf4-7ceb-4f47-bd9a-6681287f19aa",
+    "unsubscribeStop": "cf639f96-f3ac-43f8-a7b3-e1d852e8137b",
+    "replyStop": "a868095e-c043-4b70-8cda-46ebf6808a04"
+  },
+  "results": [
+    {
+      "id": "③a",
+      "ok": true
+    },
+    {
+      "id": "③b",
+      "ok": true
+    },
+    {
+      "id": "③c",
+      "ok": true
+    },
+    {
+      "id": "⑦a",
+      "ok": true
+    },
+    {
+      "id": "⑦b",
+      "ok": true
+    },
+    {
+      "id": "⑦c",
+      "ok": true
+    },
+    {
+      "id": "⑥a",
+      "ok": true
+    },
+    {
+      "id": "⑥b",
+      "ok": true
+    },
+    {
+      "id": "⑤/G3/G4",
+      "ok": true,
+      "checks": {
+        "sentHasApprover": true,
+        "sentRowComplete": true,
+        "draftApprovedByRecorded": true,
+        "skipRowHasReason": true,
+        "consentBasis": true,
+        "skipEvent": true,
+        "g3HashStable": true,
+        "g3PersistedAt": true,
+        "g3PersistedHashMatch": true,
+        "g4RejectedHasEvent": true,
+        "g4RejectedHasPackage": true,
+        "g4RejectedHasAuditLog": true,
+        "g4RejectedNoSendRows": true
+      },
+      "g3": {
+        "hashStableAcrossGets": true,
+        "persistedAtPresent": true,
+        "persistedRowCount": "3",
+        "persistedHashMatches": true
+      },
+      "rejectedEvidence": {
+        "notQueuedDraft": {
+          "batchId": "a45c21a6-385c-4d00-8bcf-3167b8a6a422",
+          "persistedAt": "2026-11-08T12:49:37.312Z",
+          "events": [
+            {
+              "type": "BATCH_REJECTED",
+              "actor": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+              "detail": {
+                "code": "OUTREACH_BATCH_NOT_QUEUED",
+                "message": "只有已批准进入待发队列的批次可以发送"
+              }
+            }
+          ],
+          "auditLog": [
+            {
+              "action": "outreach.batch.rejected",
+              "actor_id": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+              "detail": {
+                "code": "OUTREACH_BATCH_NOT_QUEUED",
+                "message": "只有已批准进入待发队列的批次可以发送"
+              }
+            }
+          ],
+          "sendRows": "0",
+          "packageRows": "1"
+        },
+        "notQueuedPending": {
+          "batchId": "a841fd04-e5ed-41ed-88dc-c11b3a79e931",
+          "persistedAt": "2026-11-08T12:49:37.738Z",
+          "events": [
+            {
+              "type": "BATCH_REJECTED",
+              "actor": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+              "detail": {
+                "code": "OUTREACH_BATCH_NOT_QUEUED",
+                "message": "只有已批准进入待发队列的批次可以发送"
+              }
+            }
+          ],
+          "auditLog": [
+            {
+              "action": "outreach.batch.rejected",
+              "actor_id": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+              "detail": {
+                "code": "OUTREACH_BATCH_NOT_QUEUED",
+                "message": "只有已批准进入待发队列的批次可以发送"
+              }
+            }
+          ],
+          "sendRows": "0",
+          "packageRows": "1"
+        },
+        "contentChanged": {
+          "batchId": "637f9d1f-80f4-4857-b0c1-ec514efab981",
+          "persistedAt": null,
+          "events": [
+            {
+              "type": "BATCH_REJECTED",
+              "actor": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+              "detail": {
+                "code": "OUTREACH_CONTENT_CHANGED",
+                "message": "批次内容与批准时不一致，拒绝发送"
+              }
+            }
+          ],
+          "auditLog": [
+            {
+              "action": "outreach.batch.rejected",
+              "actor_id": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+              "detail": {
+                "code": "OUTREACH_CONTENT_CHANGED",
+                "message": "批次内容与批准时不一致，拒绝发送"
+              }
+            }
+          ],
+          "sendRows": "0",
+          "packageRows": "1"
+        },
+        "expired": {
+          "batchId": "94b60434-f057-4f1b-89a6-b92164b64f36",
+          "persistedAt": "2026-11-08T12:49:40.080Z",
+          "events": [
+            {
+              "type": "BATCH_REJECTED",
+              "actor": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+              "detail": {
+                "code": "OUTREACH_APPROVAL_EXPIRED",
+                "message": "批准已过期，需重新提交审批后才能发送"
+              }
+            }
+          ],
+          "auditLog": [
+            {
+              "action": "outreach.batch.rejected",
+              "actor_id": "286bc0cd-cb84-45e1-b256-0337912c73c9",
+              "detail": {
+                "code": "OUTREACH_APPROVAL_EXPIRED",
+                "message": "批准已过期，需重新提交审批后才能发送"
+              }
+            }
+          ],
+          "sendRows": "0",
+          "packageRows": "1"
+        }
+      }
+    }
+  ]
+}
