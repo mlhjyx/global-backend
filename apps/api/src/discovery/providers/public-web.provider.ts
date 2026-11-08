@@ -25,6 +25,9 @@ import type { SearxngSearchOutput, SearxngSearchResult } from '../../tools/built
 import type { CrawlResult } from '../../adapters/web-crawler';
 import { extractSameSiteLinks } from '../../adapters/site-links';
 import { extractPublicContacts, type PublicContact } from '../../adapters/contact-extractor';
+import { legalPageCandidates } from '../impressum/find-legal-pages';
+import { collectCompanyChannels, type ImpressumPage } from '../impressum/collect-company-channels';
+import { stripHtml } from '../impressum/impressum-extract';
 import { cleanEmail } from '../../acquisition/clean';
 import { canonicalizeSuppressionValue } from '../suppression-value';
 import { isAllowedByRobots } from '../../adapters/robots';
@@ -362,7 +365,7 @@ export class PublicWebDiscoveryProvider
   // ── 联系人（公开、确定性）────────────────────────────────────────────────
 
   async discoverContacts(
-    company: { name: string; domain?: string },
+    company: { name: string; domain?: string; country?: string },
     ctx: ExecutionContext,
   ): Promise<ContactDiscoveryResult> {
     if (!company.domain) return { contacts: [], costCents: 0 };
@@ -378,20 +381,73 @@ export class PublicWebDiscoveryProvider
         purpose: ['discovery', 'enrichment'],
       },
       );
+    // A1：Impressum/联系页取**渲染后 HTML**（JSON-LD contactPoint、cfemail 只在 HTML 面；
+    // crawl4ai.render 内置 robots 强制）。渲染失败回退 markdown fetch。
+    const render = (url: string) =>
+      this.deps.broker!.invoke<{ url: string }, { url: string; html: string; robotsBlocked?: boolean }>(
+        'crawl4ai.render', { url }, {
+          ...this.toolCtx(ctx, 'contact.find_decision_makers'),
+          purpose: ['discovery', 'enrichment'],
+        },
+      );
     const pages: { url: string; text: string }[] = [];
+    const channelPages: ImpressumPage[] = [];
     try {
       const home = await crawl(base);
-      pages.push({ url: base, text: home.data.text.slice(0, 40_000) });
-      const links = extractSameSiteLinks(home.data.text, base).filter((l) =>
-        /contact|kontakt|impressum|imprint|about|legal/i.test(l),
-      );
-      for (const link of links.slice(0, MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES)) {
+      const homeText = home.data.text.slice(0, 40_000);
+      pages.push({ url: base, text: homeText });
+      const candidates = legalPageCandidates(base, extractSameSiteLinks(homeText, base), {
+        maxPages: MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES,
+      });
+      for (const candidate of candidates) {
         try {
-          const p = await crawl(link);
-          pages.push({ url: link, text: p.data.text.slice(0, 40_000) });
+          const rendered = await render(candidate.url);
+          if (rendered.data.robotsBlocked || !rendered.data.html) throw new Error('render unavailable');
+          let html = rendered.data.html.slice(0, 300_000);
+          let text = stripHtml(rendered.data.html).slice(0, 40_000);
+          let usedUrl = candidate.url;
+          // 渲染文本过小（JS/同意墙页面）→ 再试 markdown 端点取更长文本；HTML 面仍用渲染结果。
+          if (text.trim().length < 300) {
+            try {
+              const md = await crawl(candidate.url);
+              const mdText = md.data.text.slice(0, 40_000);
+              if (mdText.length > text.length) text = mdText;
+            } catch (mdError) {
+              if (isExecutionControlError(mdError)) throw mdError;
+            }
+          }
+          // 仍过小 → 试尾斜杠变体（站点对 /impressum 回空壳、/impressum/ 才是真页面的既有案例）。
+          if (text.trim().length < 300) {
+            const toggled = candidate.url.endsWith('/')
+              ? candidate.url.replace(/\/+$/u, '')
+              : `${candidate.url}/`;
+            try {
+              const alt = await render(toggled);
+              if (!alt.data.robotsBlocked && alt.data.html) {
+                const altText = stripHtml(alt.data.html).slice(0, 40_000);
+                if (altText.length > text.length) {
+                  text = altText;
+                  html = alt.data.html.slice(0, 300_000);
+                  usedUrl = toggled;
+                }
+              }
+            } catch (altError) {
+              if (isExecutionControlError(altError)) throw altError;
+            }
+          }
+          pages.push({ url: usedUrl, text });
+          channelPages.push({ url: usedUrl, kind: candidate.kind, html, text });
         } catch (error) {
           if (isExecutionControlError(error)) throw error;
-          // 单页失败可容忍
+          try {
+            const p = await crawl(candidate.url);
+            const text = p.data.text.slice(0, 40_000);
+            pages.push({ url: candidate.url, text });
+            channelPages.push({ url: candidate.url, kind: candidate.kind, text });
+          } catch (fallbackError) {
+            if (isExecutionControlError(fallbackError)) throw fallbackError;
+            // 单页失败可容忍
+          }
         }
       }
     } catch (error) {
@@ -402,7 +458,16 @@ export class PublicWebDiscoveryProvider
     const found = extractPublicContacts(pages);
     const emails = found.filter((c) => c.type === 'email');
     const phones = found.filter((c) => c.type === 'phone');
-    return { contacts: buildPublicContacts(company.domain, emails, phones[0]?.value), costCents: 0,
+    // A1：公司级渠道（role 邮箱/总机/表单）——A4 company_contact_channel 的输入；personal 已在装配层剔除。
+    const companyChannels = collectCompanyChannels({
+      domain: company.domain,
+      country: company.country,
+      pages: channelPages,
+    });
+    return {
+      contacts: buildPublicContacts(company.domain, emails, phones[0]?.value),
+      costCents: 0,
+      ...(companyChannels.length ? { companyChannels } : {}),
     };
   }
 
