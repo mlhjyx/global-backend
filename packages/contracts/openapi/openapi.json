@@ -19448,6 +19448,160 @@
           "ops:write"
         ]
       }
+    },
+    "/api/v1/runs/{runId}/trace": {
+      "get": {
+        "operationId": "RunTraceController_list_v1",
+        "parameters": [
+          {
+            "name": "runId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "maximum": 200
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "page"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "stepType",
+                          "agentKey",
+                          "decisionType",
+                          "createdAt"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "stepType": {
+                            "type": "string"
+                          },
+                          "agentKey": {
+                            "type": "string"
+                          },
+                          "actorType": {
+                            "type": "string"
+                          },
+                          "attempt": {
+                            "type": "integer"
+                          },
+                          "decisionType": {
+                            "type": "string"
+                          },
+                          "chosenOption": {
+                            "type": "object",
+                            "nullable": true,
+                            "additionalProperties": true
+                          },
+                          "score": {
+                            "type": "number",
+                            "nullable": true
+                          },
+                          "reasonCode": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "evidence": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": true
+                            }
+                          },
+                          "rejectedCandidates": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": true
+                            }
+                          },
+                          "costEstimatedMicros": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "costActualMicros": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    },
+                    "page": {
+                      "type": "object",
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
+                      "properties": {
+                        "next_cursor": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "下一页游标；null = 没有更多"
+                        },
+                        "has_more": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "run 决策轨迹（过程时间线：选源/跳过原因/批量判定与被否候选）",
+        "tags": [
+          "Discovery"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "run 的决策轨迹（过程时间线）：源侦察员的选源/跳过原因与资格判定员的批量判定、被否候选，按时间升序键集分页（limit 默认 100、上限 200）；跨租户 404。需要 acquisition:read。"
+      }
     }
   },
   "info": {
