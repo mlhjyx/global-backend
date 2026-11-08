@@ -81,6 +81,8 @@ export interface CampaignPlanInputBundle {
   readonly limits: {
     readonly audienceSizeCap?: number;
     readonly budgetCapMicros?: number;
+    /** M2.2 有界重规划预算（0–2）；规划器必须把它原样写进 decisionPolicy.maxReplans。 */
+    readonly maxReplans: number;
   };
 }
 
@@ -92,7 +94,7 @@ export interface CampaignPlanOutput {
   motions: { type: 'discovery'; icpIds: string[] }[];
   budget: { capMicros?: number; currency: 'USD' };
   approvalPolicy: { required: true };
-  decisionPolicy: { maxReplans: 0 };
+  decisionPolicy: { maxReplans: 0 | 1 | 2 };
 }
 
 export interface AssembleCampaignPlanInputsArgs {
@@ -101,6 +103,18 @@ export interface AssembleCampaignPlanInputsArgs {
   icpId?: string;
   audienceSizeCap?: number;
   budgetCapMicros?: number;
+  /** M2.2：本 job 允许的自动重规划轮数（0–2，缺省 0）。 */
+  maxReplans?: number;
+}
+
+export type CampaignPlanReplanReason = 'VALIDATOR_ISSUES' | 'HUMAN_DECLINE';
+
+/** 单轮生成的重规划上下文（round 0 可为人工拒绝重生成；后续轮为校验问题反馈）。 */
+export interface CampaignPlanReplanContext {
+  readonly reasonCode: CampaignPlanReplanReason;
+  readonly issues?: readonly CampaignPlanIssue[];
+  readonly previousPlan?: unknown;
+  readonly detail?: string;
 }
 
 export interface GenerateCampaignPlanArgs {
@@ -108,11 +122,25 @@ export interface GenerateCampaignPlanArgs {
   jobId: string;
   bundle: CampaignPlanInputBundle;
   executionBudget?: ExecutionBudgetBinding;
+  /** 轮次（0 = 首轮；1..2 = 重规划轮），用于提示与审计。 */
+  round?: number;
+  replan?: CampaignPlanReplanContext;
 }
 
 export interface GeneratedCampaignPlan {
   plan: CampaignPlanOutput;
   durableReceipt?: DurableExecutionReceipt;
+}
+
+/** 单轮生成结果：`issues` = 本轮产出未过 schema/语义硬门，由工作流决定是否重规划或转人工。 */
+export type CampaignPlanRoundResult =
+  | { status: 'ok'; plan: CampaignPlanOutput; durableReceipt?: DurableExecutionReceipt }
+  | { status: 'issues'; issues: readonly CampaignPlanIssue[] };
+
+export interface CampaignPlanReplanEntry {
+  readonly round: number;
+  readonly reasonCode: CampaignPlanReplanReason;
+  readonly issues?: readonly CampaignPlanIssue[];
 }
 
 export interface DeliverCampaignPlanRevisionArgs {
@@ -121,6 +149,8 @@ export interface DeliverCampaignPlanRevisionArgs {
   jobId: string;
   plan: CampaignPlanOutput;
   durableReceipt?: DurableExecutionReceipt;
+  /** 成功交付前的重规划历史（gain-saas 落 campaign.replan 轨迹行）。 */
+  replanHistory?: readonly CampaignPlanReplanEntry[];
 }
 
 export interface ReportCampaignPlanJobFailureArgs {
@@ -128,6 +158,9 @@ export interface ReportCampaignPlanJobFailureArgs {
   jobId: string;
   error: string;
   issues?: readonly CampaignPlanIssue[];
+  /** NEEDS_HUMAN = 重规划轮次耗尽/成本上限；FAILED = 其它终态失败（缺省）。 */
+  state?: 'FAILED' | 'NEEDS_HUMAN';
+  replanHistory?: readonly CampaignPlanReplanEntry[];
 }
 
 export interface CampaignPlanningActivities {
@@ -136,7 +169,7 @@ export interface CampaignPlanningActivities {
   ): Promise<CampaignPlanInputBundle>;
   generateCampaignPlan(
     args: GenerateCampaignPlanArgs,
-  ): Promise<GeneratedCampaignPlan>;
+  ): Promise<CampaignPlanRoundResult>;
   deliverCampaignPlanRevision(
     args: DeliverCampaignPlanRevisionArgs,
   ): Promise<void>;
@@ -225,7 +258,22 @@ export function campaignPlanSemanticIssues(
       message: `capMicros 不得超过 ${bundle.limits.budgetCapMicros}`,
     });
   }
+  if (plan.decisionPolicy.maxReplans !== bundle.limits.maxReplans) {
+    issues.push({
+      path: 'decisionPolicy.maxReplans',
+      message: `maxReplans 必须等于提示给出的重规划预算 ${bundle.limits.maxReplans}`,
+    });
+  }
   return issues;
+}
+
+/** 重规划预算：缺省 0；仅接受 0/1/2。 */
+function replanBudget(value: unknown): number {
+  if (value === undefined) return 0;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > 2) {
+    throw nonRetryable('CAMPAIGN_PLAN_INPUT_INVALID');
+  }
+  return value;
 }
 
 function positiveInteger(
@@ -407,6 +455,8 @@ export function createCampaignPlanningActivities(deps: {
         },
       );
 
+      const maxReplans = replanBudget(args.maxReplans);
+
       const brief = await memory.buildMemoryBrief(args.workspaceId, {
         workflowType: 'campaign.plan',
         scopes: [{ type: 'workspace', key: args.workspaceId }],
@@ -432,13 +482,14 @@ export function createCampaignPlanningActivities(deps: {
         limits: {
           ...(audienceSizeCap !== undefined ? { audienceSizeCap } : {}),
           ...(budgetCapMicros !== undefined ? { budgetCapMicros } : {}),
+          maxReplans,
         },
       };
     },
 
     async generateCampaignPlan(
       args: GenerateCampaignPlanArgs,
-    ): Promise<GeneratedCampaignPlan> {
+    ): Promise<CampaignPlanRoundResult> {
       const binding = requireAuthority(
         args.workspaceId,
         args.executionBudget,
@@ -450,10 +501,12 @@ export function createCampaignPlanningActivities(deps: {
       });
       const contract = getTask('campaign.plan');
       if (!contract) throw nonRetryable('CAMPAIGN_PLAN_TASK_NOT_REGISTERED');
+      const round = campaignPlanRound(args.round);
+      const replanPrompt = campaignPlanReplanPrompt(args.replan, round);
 
-      // 语义后检作为任务确定性硬门：schema 通过后执行；不合法允许路由层一次修复重试
-      // （repairTaskOutput），仍失败即 CAMPAIGN_PLAN_INVALID（设计 §5）。最近一次 issues
-      // 留在闭包里，供失败回写 job 使用。
+      // 语义后检作为任务确定性硬门：schema 通过后执行；本轮内仍有一次修复重试
+      // （repairTaskOutput）。仍不合法时**不在这里终结 job**——返回 issues 交给工作流
+      // 决定重规划（≤ maxReplans 轮）或转 NEEDS_HUMAN（M2.2，设计 §3）。
       let lastIssues: CampaignPlanIssue[] = [];
       let result;
       try {
@@ -463,7 +516,11 @@ export function createCampaignPlanningActivities(deps: {
           CAMPAIGN_PLAN_SKILL_KEY,
           {
             task: 'campaign.plan',
-            prompt: JSON.stringify(args.bundle),
+            prompt: JSON.stringify(
+              replanPrompt === undefined
+                ? { ...args.bundle, round }
+                : { ...args.bundle, round, replan: replanPrompt },
+            ),
             system: contract.description,
             model: contract.model,
             schema: contract.outputSchema,
@@ -501,11 +558,8 @@ export function createCampaignPlanningActivities(deps: {
           throw ApplicationFailure.nonRetryable(error.reason, error.reason);
         }
         if (error instanceof TaskOutputValidationError) {
-          // 活动内已有一次 schema/硬门修复重试；仍不合法 → job FAILED CAMPAIGN_PLAN_INVALID（§5）。
-          await reportFailure({
-            workspaceId: args.workspaceId,
-            jobId: args.jobId,
-            error: 'CAMPAIGN_PLAN_INVALID',
+          return {
+            status: 'issues',
             issues:
               lastIssues.length > 0
                 ? lastIssues
@@ -516,13 +570,13 @@ export function createCampaignPlanningActivities(deps: {
                         '模型输出不符合 CampaignPlan v0 schema（含一次修复重试）',
                     },
                   ],
-          }).catch(() => undefined);
-          throw nonRetryable('CAMPAIGN_PLAN_INVALID');
+          };
         }
         throw error;
       }
 
       return {
+        status: 'ok',
         plan: result.data,
         ...(result.durableReceipt
           ? { durableReceipt: result.durableReceipt }
@@ -539,6 +593,9 @@ export function createCampaignPlanningActivities(deps: {
           workspaceId: args.workspaceId,
           campaignId: args.campaignId,
           plan: args.plan,
+          ...(args.replanHistory !== undefined
+            ? { replanHistory: args.replanHistory }
+            : {}),
         });
       } catch (error) {
         if (
@@ -583,6 +640,43 @@ export function createCampaignPlanningActivities(deps: {
         controlPlaneFailure(error);
       }
     },
+  };
+}
+
+function campaignPlanRound(value: unknown): number {
+  if (value === undefined) return 0;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > 2) {
+    throw nonRetryable('CAMPAIGN_PLAN_INPUT_INVALID');
+  }
+  return value;
+}
+
+/** 重规划上下文进提示词：只作生成输入，审计以工作流的 replanHistory 为准。 */
+function campaignPlanReplanPrompt(
+  replan: CampaignPlanReplanContext | undefined,
+  round: number,
+): Record<string, unknown> | undefined {
+  if (replan === undefined) return undefined;
+  if (round === 0 && replan.reasonCode !== 'HUMAN_DECLINE') {
+    throw nonRetryable('CAMPAIGN_PLAN_INPUT_INVALID');
+  }
+  if (round > 0 && replan.reasonCode !== 'VALIDATOR_ISSUES') {
+    throw nonRetryable('CAMPAIGN_PLAN_INPUT_INVALID');
+  }
+  const detail =
+    typeof replan.detail === 'string' ? replan.detail.slice(0, 500) : undefined;
+  return {
+    reasonCode: replan.reasonCode,
+    ...(detail !== undefined ? { detail } : {}),
+    ...(replan.issues !== undefined
+      ? {
+          issues: replan.issues.slice(0, 50).map((issue) => ({
+            path: String(issue.path).slice(0, 200),
+            message: String(issue.message).slice(0, 300),
+          })),
+        }
+      : {}),
+    ...(replan.previousPlan !== undefined ? { previousPlan: replan.previousPlan } : {}),
   };
 }
 

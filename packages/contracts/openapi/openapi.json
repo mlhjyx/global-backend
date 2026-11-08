@@ -5179,6 +5179,34 @@
                   "budgetCapMicros": {
                     "type": "integer",
                     "minimum": 0
+                  },
+                  "maxReplans": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2
+                  },
+                  "previousPlan": {
+                    "type": "object"
+                  },
+                  "replanReason": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "code"
+                    ],
+                    "properties": {
+                      "code": {
+                        "type": "string",
+                        "enum": [
+                          "HUMAN_DECLINE"
+                        ]
+                      },
+                      "detail": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      }
+                    }
                   }
                 }
               }

@@ -18,7 +18,7 @@ const FIXTURE_SELECTORS = {
 
 /** 重钉记录：2026-11-08 S1-4 首次钉住；同日复审后重钉 sanctions/quoting（阈值/截断/加价语义）。 */
 const PINNED_RENDER_DIGESTS: Readonly<Record<string, string>> = {
-  "campaign.plan": "5b8c2906c996324a1e47b2f60ab5c640259d511513aac01922d410506d640b48",
+  "campaign.plan": "5bea069998912ef8b67b73ab7de88d6857f353d20195b352ea765322a5c1eb34",
   "company.understanding.extract": "b17b08f639ec2528610638348de170af2c4277edd66333f27a0e06a8ba4a4ed3",
   "company.understanding.extract_offerings":
     "ceada097f6f665d7af4e7016c578b82ffa50111fd3e2f735bc05c7f4359e8a5b",
@@ -27,6 +27,8 @@ const PINNED_RENDER_DIGESTS: Readonly<Record<string, string>> = {
   "quoting.incoterms_quote": "347570a7208fda7a022f7e08e66ee3782676732cdbfa14bec87ddb93f3db0f52",
   "research.account_research": "b8e2b27e18bbf33f7dba28d37eb2602bdc83b26f5015e330029b2e90e8bb609b",
   "triage.lead_triage": "a2485db23f4d1c902487f27745a3b252042ee343616573763a198a9e5d412b83",
+  "engage.reply_classify": "df843b1058d178579a2cb9ebed318bf6cb1d0543efb28449d4f41e9529cf9d94",
+  "outreach.sequence_draft": "1dcf89fc0e64ff4c155052bc67e7e0bc508aba918ffa0a210a088276dd263a62",
 };
 
 function strategyFor(skillKey: string): ResolvedStrategy {
