@@ -21,6 +21,7 @@ function validMetric(overrides = {}) {
     status: "ACTIVE",
     version: 1,
     effectiveFrom: "2026-11-09",
+    exprStatus: "PENDING",
     definition: "A sufficiently long test definition.",
     numerator: { expr: "count(*) filter (where x)", source: "contact_point" },
     denominator: { expr: "count(*)", source: "lead" },
@@ -44,6 +45,12 @@ test("the checked-in dictionary passes with 44 metrics", () => {
   assert.equal(summary.files, 6);
   assert.equal(summary.byTier.T0, 2);
   assert.equal(summary.byTier.GUARDRAIL, 10);
+});
+
+test("exprStatus is required and must be CHECKED or PENDING", () => {
+  assert.ok(codesFor(validMetric({ exprStatus: "DONE" })).includes("EXPR_STATUS_INVALID"));
+  assert.ok(codesFor(validMetric({ exprStatus: undefined })).includes("EXPR_STATUS_INVALID"));
+  assert.equal(codesFor(validMetric({ exprStatus: "CHECKED" })).length, 0);
 });
 
 test("unknown fields are rejected (typo guard)", () => {

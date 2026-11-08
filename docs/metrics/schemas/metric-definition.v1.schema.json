@@ -14,6 +14,7 @@
     "status",
     "version",
     "effectiveFrom",
+    "exprStatus",
     "definition",
     "numerator",
     "denominator",
@@ -35,6 +36,7 @@
     "status": { "enum": ["ACTIVE", "DRAFT", "DEPRECATED", "RETIRED"] },
     "version": { "type": "integer", "minimum": 1 },
     "effectiveFrom": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "exprStatus": { "enum": ["CHECKED", "PENDING"], "description": "CHECKED = 表达式已在只读副本 EXPLAIN 通过；PENDING = 尚未对库校验（CI 不连库）" },
     "definition": { "type": "string", "minLength": 10 },
     "numerator": {
       "type": "object",

@@ -12,14 +12,39 @@
       "status": "DRAFT",
       "version": 1,
       "effectiveFrom": "2026-11-09",
+      "exprStatus": "PENDING",
       "definition": "delivered 占 eligible_send_attempts 的比例（P4 前无数据，口径先就位）。",
-      "numerator": { "expr": "count(*) filter (where delivered)", "source": "outreach_send" },
-      "denominator": { "expr": "count(*) filter (where eligible)", "source": "outreach_send" },
-      "exclusions": ["suppression/DNC 跳过、内部/测试/种子地址、重复重试剔除"],
-      "window": { "type": "rolling", "days": 30 },
-      "strata": ["country", "provider_key", "workspace_id"],
-      "ci": { "method": "wilson" },
-      "changelog": [{ "version": 1, "at": "2026-11-09", "breaking": false, "note": "首次定义（P4 前 DRAFT）" }]
+      "numerator": {
+        "expr": "count(*) filter (where delivered)",
+        "source": "outreach_send"
+      },
+      "denominator": {
+        "expr": "count(*) filter (where eligible)",
+        "source": "outreach_send"
+      },
+      "exclusions": [
+        "suppression/DNC 跳过、内部/测试/种子地址、重复重试剔除"
+      ],
+      "window": {
+        "type": "rolling",
+        "days": 30
+      },
+      "strata": [
+        "country",
+        "provider_key",
+        "workspace_id"
+      ],
+      "ci": {
+        "method": "wilson"
+      },
+      "changelog": [
+        {
+          "version": 1,
+          "at": "2026-11-09",
+          "breaking": false,
+          "note": "首次定义（P4 前 DRAFT）"
+        }
+      ]
     },
     {
       "schemaVersion": "metric-definition/v1",
@@ -31,15 +56,44 @@
       "status": "DRAFT",
       "version": 1,
       "effectiveFrom": "2026-11-09",
+      "exprStatus": "PENDING",
       "definition": "unique human replies 占 eligible_send_attempts（按发送量，最保守口径）；必须与 RR3 成对报告。",
-      "numerator": { "expr": "count(distinct human reply thread)", "source": "outreach_reply" },
-      "denominator": { "expr": "count(*) filter (where eligible and attempt=1)", "source": "outreach_send" },
-      "exclusions": ["自动回复/OOO/退信 DSN/退订/内部测试/重复线程剔除", "只报 RR1 视为无效声明"],
-      "window": { "type": "rolling", "days": 30 },
-      "strata": ["country", "provider_key", "workspace_id"],
-      "ci": { "method": "wilson" },
-      "benchmark": { "note": "Belkins 严格口径约 0.45%", "url": "https://belkins.io/blog/cold-email-response-rates" },
-      "changelog": [{ "version": 1, "at": "2026-11-09", "breaking": false, "note": "首次定义；机器实现 scripts/metrics/reply-rate.mjs" }]
+      "numerator": {
+        "expr": "count(distinct human reply thread)",
+        "source": "outreach_reply"
+      },
+      "denominator": {
+        "expr": "count(*) filter (where eligible and attempt=1)",
+        "source": "outreach_send"
+      },
+      "exclusions": [
+        "自动回复/OOO/退信 DSN/退订/内部测试/重复线程剔除",
+        "只报 RR1 视为无效声明"
+      ],
+      "window": {
+        "type": "rolling",
+        "days": 30
+      },
+      "strata": [
+        "country",
+        "provider_key",
+        "workspace_id"
+      ],
+      "ci": {
+        "method": "wilson"
+      },
+      "benchmark": {
+        "note": "Belkins 严格口径约 0.45%",
+        "url": "https://belkins.io/blog/cold-email-response-rates"
+      },
+      "changelog": [
+        {
+          "version": 1,
+          "at": "2026-11-09",
+          "breaking": false,
+          "note": "首次定义；机器实现 scripts/metrics/reply-rate.mjs"
+        }
+      ]
     },
     {
       "schemaVersion": "metric-definition/v1",
@@ -51,15 +105,45 @@
       "status": "DRAFT",
       "version": 1,
       "effectiveFrom": "2026-11-09",
+      "exprStatus": "PENDING",
       "definition": "unique human replies 占（delivered + ê×unknown_deliverability），资格调整口径；必须与 RR1 成对报告。",
-      "numerator": { "expr": "count(distinct human reply thread)", "source": "outreach_reply" },
-      "denominator": { "expr": "delivered + sum(e_hat * unknown)", "source": "outreach_send" },
-      "exclusions": ["unknown>0 且缺 ê 时拒绝出数", "只报 RR3 视为无效声明"],
-      "window": { "type": "rolling", "days": 30 },
-      "strata": ["country", "provider_key", "verifier", "workspace_id"],
-      "ci": { "method": "wilson" },
-      "benchmark": { "note": "平台口径 2–4.5%（Smartlead 中位 0.74%/联系人）", "url": "https://www.smartlead.ai/benchmarks/average-cold-email-reply-rate" },
-      "changelog": [{ "version": 1, "at": "2026-11-09", "breaking": false, "note": "首次定义；机器实现 scripts/metrics/reply-rate.mjs" }]
+      "numerator": {
+        "expr": "count(distinct human reply thread)",
+        "source": "outreach_reply"
+      },
+      "denominator": {
+        "expr": "delivered + sum(e_hat * unknown)",
+        "source": "outreach_send"
+      },
+      "exclusions": [
+        "unknown>0 且缺 ê 时拒绝出数",
+        "只报 RR3 视为无效声明"
+      ],
+      "window": {
+        "type": "rolling",
+        "days": 30
+      },
+      "strata": [
+        "country",
+        "provider_key",
+        "verifier",
+        "workspace_id"
+      ],
+      "ci": {
+        "method": "wilson"
+      },
+      "benchmark": {
+        "note": "平台口径 2–4.5%（Smartlead 中位 0.74%/联系人）",
+        "url": "https://www.smartlead.ai/benchmarks/average-cold-email-reply-rate"
+      },
+      "changelog": [
+        {
+          "version": 1,
+          "at": "2026-11-09",
+          "breaking": false,
+          "note": "首次定义；机器实现 scripts/metrics/reply-rate.mjs"
+        }
+      ]
     },
     {
       "schemaVersion": "metric-definition/v1",
@@ -71,14 +155,39 @@
       "status": "DRAFT",
       "version": 1,
       "effectiveFrom": "2026-11-09",
+      "exprStatus": "PENDING",
       "definition": "positive 回复（明确兴趣/约时间）占 RR3 同分母；分类经金标校准。",
-      "numerator": { "expr": "count(distinct reply) filter (where classification='positive')", "source": "outreach_reply" },
-      "denominator": { "expr": "delivered + sum(e_hat * unknown)", "source": "outreach_send" },
-      "exclusions": ["OOO/自动回复不计", "分类 precision 需金标披露"],
-      "window": { "type": "rolling", "days": 30 },
-      "strata": ["country", "workspace_id"],
-      "ci": { "method": "wilson" },
-      "changelog": [{ "version": 1, "at": "2026-11-09", "breaking": false, "note": "首次定义" }]
+      "numerator": {
+        "expr": "count(distinct reply) filter (where classification='positive')",
+        "source": "outreach_reply"
+      },
+      "denominator": {
+        "expr": "delivered + sum(e_hat * unknown)",
+        "source": "outreach_send"
+      },
+      "exclusions": [
+        "OOO/自动回复不计",
+        "分类 precision 需金标披露"
+      ],
+      "window": {
+        "type": "rolling",
+        "days": 30
+      },
+      "strata": [
+        "country",
+        "workspace_id"
+      ],
+      "ci": {
+        "method": "wilson"
+      },
+      "changelog": [
+        {
+          "version": 1,
+          "at": "2026-11-09",
+          "breaking": false,
+          "note": "首次定义"
+        }
+      ]
     },
     {
       "schemaVersion": "metric-definition/v1",
@@ -90,14 +199,39 @@
       "status": "DRAFT",
       "version": 1,
       "effectiveFrom": "2026-11-09",
+      "exprStatus": "PENDING",
       "definition": "已预约会议占 RR3 同分母；按 contact+日历事件 ID 去重。",
-      "numerator": { "expr": "count(distinct meeting) filter (where booked)", "source": "outreach_reply" },
-      "denominator": { "expr": "delivered + sum(e_hat * unknown)", "source": "outreach_send" },
-      "exclusions": ["重复会议去重", "取消单列"],
-      "window": { "type": "rolling", "days": 30 },
-      "strata": ["country", "workspace_id"],
-      "ci": { "method": "wilson" },
-      "changelog": [{ "version": 1, "at": "2026-11-09", "breaking": false, "note": "首次定义" }]
+      "numerator": {
+        "expr": "count(distinct meeting) filter (where booked)",
+        "source": "outreach_reply"
+      },
+      "denominator": {
+        "expr": "delivered + sum(e_hat * unknown)",
+        "source": "outreach_send"
+      },
+      "exclusions": [
+        "重复会议去重",
+        "取消单列"
+      ],
+      "window": {
+        "type": "rolling",
+        "days": 30
+      },
+      "strata": [
+        "country",
+        "workspace_id"
+      ],
+      "ci": {
+        "method": "wilson"
+      },
+      "changelog": [
+        {
+          "version": 1,
+          "at": "2026-11-09",
+          "breaking": false,
+          "note": "首次定义"
+        }
+      ]
     },
     {
       "schemaVersion": "metric-definition/v1",
@@ -109,15 +243,42 @@
       "status": "DRAFT",
       "version": 1,
       "effectiveFrom": "2026-11-09",
+      "exprStatus": "PENDING",
       "definition": "每 1,000 封投递带来的已举行会议数；与 sends_per_meeting 互为倒数。",
-      "numerator": { "expr": "1000 * count(held meetings)", "source": "outreach_reply" },
-      "denominator": { "expr": "count(delivered)", "source": "outreach_send" },
-      "exclusions": ["取消/爽约不计 held"],
-      "window": { "type": "cohort", "days": 30 },
-      "strata": ["country", "workspace_id"],
-      "ci": { "method": "bootstrap" },
-      "benchmark": { "note": "行业 3–10 次/千封", "url": "https://www.gong.io/blog/does-cold-email-even-work-any-more-heres-what-the-data-says" },
-      "changelog": [{ "version": 1, "at": "2026-11-09", "breaking": false, "note": "首次定义" }]
+      "numerator": {
+        "expr": "1000 * count(held meetings)",
+        "source": "outreach_reply"
+      },
+      "denominator": {
+        "expr": "count(delivered)",
+        "source": "outreach_send"
+      },
+      "exclusions": [
+        "取消/爽约不计 held"
+      ],
+      "window": {
+        "type": "cohort",
+        "days": 30
+      },
+      "strata": [
+        "country",
+        "workspace_id"
+      ],
+      "ci": {
+        "method": "bootstrap"
+      },
+      "benchmark": {
+        "note": "行业 3–10 次/千封",
+        "url": "https://www.gong.io/blog/does-cold-email-even-work-any-more-heres-what-the-data-says"
+      },
+      "changelog": [
+        {
+          "version": 1,
+          "at": "2026-11-09",
+          "breaking": false,
+          "note": "首次定义"
+        }
+      ]
     },
     {
       "schemaVersion": "metric-definition/v1",
@@ -129,15 +290,42 @@
       "status": "DRAFT",
       "version": 1,
       "effectiveFrom": "2026-11-09",
+      "exprStatus": "PENDING",
       "definition": "unique human replies 占序列触达的联系人数（对标 Smartlead 中位 0.74%/联系人）。",
-      "numerator": { "expr": "count(distinct human reply thread)", "source": "outreach_reply" },
-      "denominator": { "expr": "count(distinct contacted contact)", "source": "outreach_send" },
-      "exclusions": ["同回复定义与 RR1/RR3 一致"],
-      "window": { "type": "rolling", "days": 30 },
-      "strata": ["country", "workspace_id"],
-      "ci": { "method": "wilson" },
-      "benchmark": { "note": "Smartlead 中位 0.74%/联系人", "url": "https://www.smartlead.ai/benchmarks/average-cold-email-reply-rate" },
-      "changelog": [{ "version": 1, "at": "2026-11-09", "breaking": false, "note": "首次定义" }]
+      "numerator": {
+        "expr": "count(distinct human reply thread)",
+        "source": "outreach_reply"
+      },
+      "denominator": {
+        "expr": "count(distinct contacted contact)",
+        "source": "outreach_send"
+      },
+      "exclusions": [
+        "同回复定义与 RR1/RR3 一致"
+      ],
+      "window": {
+        "type": "rolling",
+        "days": 30
+      },
+      "strata": [
+        "country",
+        "workspace_id"
+      ],
+      "ci": {
+        "method": "wilson"
+      },
+      "benchmark": {
+        "note": "Smartlead 中位 0.74%/联系人",
+        "url": "https://www.smartlead.ai/benchmarks/average-cold-email-reply-rate"
+      },
+      "changelog": [
+        {
+          "version": 1,
+          "at": "2026-11-09",
+          "breaking": false,
+          "note": "首次定义"
+        }
+      ]
     }
   ]
 }

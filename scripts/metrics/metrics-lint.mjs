@@ -69,6 +69,7 @@ const METRIC_FIELDS = new Set([
   "status",
   "version",
   "effectiveFrom",
+  "exprStatus",
   "definition",
   "numerator",
   "denominator",
@@ -183,6 +184,11 @@ export function validateMetric(metric, { fileTier, registry }) {
   }
   if (!validDate(metric?.effectiveFrom)) {
     issues.push(issue("EFFECTIVE_DATE_INVALID", `${where}.effectiveFrom`, "effectiveFrom must be a real YYYY-MM-DD"));
+  }
+  if (!new Set(["CHECKED", "PENDING"]).has(metric?.exprStatus)) {
+    issues.push(
+      issue("EXPR_STATUS_INVALID", `${where}.exprStatus`, "exprStatus must be CHECKED or PENDING (ch01 PR-01 acceptance)"),
+    );
   }
   if (typeof metric?.definition !== "string" || metric.definition.trim().length < 10) {
     issues.push(issue("DEFINITION_MISSING", `${where}.definition`, "definition must be a non-trivial string"));

@@ -330,7 +330,7 @@ week（ISO week，UTC 周一起）
 2. 任何口径变更（分子/分母/排除项/窗口/分层）必须升 `version` 并在 §8 changelog 记录 `breaking: true|false`；breaking 变更须附新旧口径 ≥30 天重叠对比。
 3. 变更流程：提出 → 数据工程评审 → 产品例会确认 → 合入；紧急修复可先合入，48 小时内补评审记录。
 4. 「为提升指标而放宽验证口径」一律按 breaking 变更处理并强制重跑金标；未走流程的口径修改视为缺陷。
-5. **机器化（v1.2 起已落地，ch01 PR-01）**：`docs/metrics/dictionary/*.json`（`metric-definition/v1`，按 tier 分文件）+ `docs/metrics/schemas/metric-definition.v1.schema.json` + `docs/metrics/schemas/sources.v1.json`；校验器 `node scripts/metrics/metrics-lint.mjs`（未知字段拒绝、ID/名称唯一、tier 与 ID 前缀一致、来源必须登记、ACTIVE 只能引用 existing 源、分子/分母/窗口/分层/CI 词表、changelog 1..version 连续且末条等于 version），并随 `scripts/governance-contracts.spec.mjs` 进 CI。选 JSON 而非 YAML 的原因：仓库无可直接引用的 YAML 依赖，引依赖会动锁文件与 Copy 绑定指纹；JSON 让 lint 保持零依赖。与只读副本对账的 `EXPLAIN` 校验需要数据库，仍属后续（CI 不连库）。
+5. **机器化（v1.2 起已落地，ch01 PR-01）**：`docs/metrics/dictionary/*.json`（`metric-definition/v1`，按 tier 分文件）+ `docs/metrics/schemas/metric-definition.v1.schema.json` + `docs/metrics/schemas/sources.v1.json`；校验器 `node scripts/metrics/metrics-lint.mjs`（未知字段拒绝、ID/名称唯一、tier 与 ID 前缀一致、来源必须登记、ACTIVE 只能引用 existing 源、分子/分母/窗口/分层/CI 词表、changelog 1..version 连续且末条等于 version、`exprStatus` 必填），并随 `scripts/governance-contracts.spec.mjs` 进 CI。选 JSON 而非 YAML 的原因：仓库无可直接引用的 YAML 依赖，引依赖会动锁文件与 Copy 绑定指纹；JSON 让 lint 保持零依赖。`exprStatus`：全部指标当前 `PENDING`（ch01 允许的显式标注）；与只读副本对账的 `EXPLAIN` 校验需要数据库（CI 不连库），通过后逐条升 `CHECKED`。
 6. 本 markdown 与机器字典必须同步修改：口径变更同时改两处并升版本；`metrics:lint` 保证机器侧自洽，人工版负责解释与上下文。
 
 ---
