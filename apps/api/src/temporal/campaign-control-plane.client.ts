@@ -7,8 +7,9 @@ import { timingSafeEqual } from 'node:crypto';
  *  - POST  `{base}/api/internal/v1/campaign-revisions`：交付原始 CampaignPlan JSON；
  *    gain-saas 用 zod(CampaignPlan v0) 校验 + canonical plan_hash + 落 DRAFT revision。
  *    幂等键 `(jobId, plan_hash)`：重复回调返回已存在 revision。
- *  - PATCH `{base}/api/internal/v1/campaign-plan-jobs/{jobId}`：失败回写
- *    `{state:'FAILED', error, issues?}`；重复回写同状态幂等。
+ *  - PATCH `{base}/api/internal/v1/campaign-plan-jobs/{jobId}`：终态回写
+ *    `{state:'FAILED'|'NEEDS_HUMAN', error, issues?, replanHistory?}`；重复回写同状态幂等。
+ *    交付回调可携带 `replanHistory`（每轮 reasonCode/issues），gain-saas 据此落 campaign.replan 轨迹。
  *
  * 失败分类（活动层据此决定可重试与否）：
  *  - `CAMPAIGN_CONTROL_PLANE_NOT_CONFIGURED`：缺 env，运维错误，nonRetryable；
@@ -51,11 +52,18 @@ export class CampaignControlPlaneError extends Error {
   }
 }
 
+export interface CampaignReplanHistoryEntryLike {
+  readonly round: number;
+  readonly reasonCode: string;
+  readonly issues?: readonly CampaignPlanIssue[];
+}
+
 export interface DeliverCampaignRevisionInput {
   readonly jobId: string;
   readonly workspaceId: string;
   readonly campaignId: string;
   readonly plan: unknown;
+  readonly replanHistory?: readonly CampaignReplanHistoryEntryLike[];
 }
 
 export interface ReportCampaignPlanJobFailureInput {
@@ -63,6 +71,8 @@ export interface ReportCampaignPlanJobFailureInput {
   readonly workspaceId: string;
   readonly error: string;
   readonly issues?: readonly CampaignPlanIssue[];
+  readonly state?: 'FAILED' | 'NEEDS_HUMAN';
+  readonly replanHistory?: readonly CampaignReplanHistoryEntryLike[];
 }
 
 export interface CampaignControlPlane {
@@ -230,6 +240,22 @@ export function createHttpCampaignControlPlane(
           workspaceId: input.workspaceId,
           campaignId: input.campaignId,
           plan: input.plan,
+          ...(input.replanHistory !== undefined
+            ? {
+                replanHistory: input.replanHistory.slice(0, 3).map((entry) => ({
+                  round: entry.round,
+                  reasonCode: entry.reasonCode.slice(0, 32),
+                  ...(entry.issues !== undefined
+                    ? {
+                        issues: entry.issues.slice(0, 50).map((issue) => ({
+                          path: String(issue.path).slice(0, 200),
+                          message: String(issue.message).slice(0, 300),
+                        })),
+                      }
+                    : {}),
+                })),
+              }
+            : {}),
         },
       );
       if (status === 200 || status === 201 || status === 204) return;
@@ -264,9 +290,25 @@ export function createHttpCampaignControlPlane(
         campaignPlanJobPath(input.jobId),
         {
           workspaceId: input.workspaceId,
-          state: 'FAILED',
+          state: input.state ?? 'FAILED',
           error: input.error.slice(0, 64),
           ...(input.issues ? { issues: input.issues.slice(0, 50) } : {}),
+          ...(input.replanHistory !== undefined
+            ? {
+                replanHistory: input.replanHistory.slice(0, 3).map((entry) => ({
+                  round: entry.round,
+                  reasonCode: entry.reasonCode.slice(0, 32),
+                  ...(entry.issues !== undefined
+                    ? {
+                        issues: entry.issues.slice(0, 50).map((issue) => ({
+                          path: String(issue.path).slice(0, 200),
+                          message: String(issue.message).slice(0, 300),
+                        })),
+                      }
+                    : {}),
+                })),
+              }
+            : {}),
         },
       );
       // 200/204：已回写；404：job 不存在（无从回写）；409：job 已终结且状态不同——都视为终态。

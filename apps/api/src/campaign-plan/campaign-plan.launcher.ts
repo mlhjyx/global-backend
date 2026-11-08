@@ -11,6 +11,10 @@ export interface CampaignPlanDraftLaunchInput {
   readonly icpId?: string;
   readonly audienceSizeCap?: number;
   readonly budgetCapMicros?: number;
+  /** M2.2：允许的自动重规划轮数（0–2）。 */
+  readonly maxReplans?: number;
+  readonly previousPlan?: unknown;
+  readonly replanReason?: { readonly code: 'HUMAN_DECLINE'; readonly detail?: string };
   readonly executionBudget: ExecutionBudgetBinding;
 }
 
@@ -32,6 +36,7 @@ export class CampaignPlanLauncher {
         args: [
           {
             ...input,
+            maxReplans: input.maxReplans ?? 0,
             executionContractVersion: 2 as const,
           },
         ],

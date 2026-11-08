@@ -16,12 +16,12 @@ export const BUILTIN_SKILLS: readonly PlatformSkillRecord[] =
       "allowedTools": [],
       "metadata": {
         "platform.skill-key": "campaign.plan",
-        "platform.version": "1.0.0",
+        "platform.version": "1.1.0",
         "platform.skill-kind": "model_task",
         "platform.tenant-default": "enabled",
         "platform.pack-type": "growth_motion",
         "platform.task-contract": "campaign.plan",
-        "platform.task-contract-digest": "17211934ed7d7d8295fe4b22a54901a21e455cce9ba8be12a29d4dc974e7afe0",
+        "platform.task-contract-digest": "1b22e82ea7d00c4792dcd3ee6203e66d02a40b35b8131ef30a3879318170e855",
         "platform.risk": "medium",
         "platform.human-gate": "true",
         "platform.budget-cents": "60",
@@ -29,20 +29,20 @@ export const BUILTIN_SKILLS: readonly PlatformSkillRecord[] =
       },
       "platform": {
         "skillKey": "campaign.plan",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "packType": "growth_motion",
         "skillKind": "model_task",
         "tenantDefault": "enabled",
         "taskContractId": "campaign.plan",
-        "taskContractDigest": "17211934ed7d7d8295fe4b22a54901a21e455cce9ba8be12a29d4dc974e7afe0",
+        "taskContractDigest": "1b22e82ea7d00c4792dcd3ee6203e66d02a40b35b8131ef30a3879318170e855",
         "risk": "medium",
         "humanGate": true,
         "budgetCents": 60,
         "owner": "OWN-BUYER-BE"
       }
     },
-    "body": "# Campaign 规划\n\n输入：只读提示（JSON），包含本次 Campaign 的目标、可用 ICP 及其 id（名称/状态/目标市场/\n已验证规则摘要）、卖家已批准事实（Offering/Claim，均来自人工审批后的事实 SoR）、公司池\n聚合统计（按国家/行业的计数，无明细 PII）、记忆简报（带出处）与预算/受众上限提示。\n\n输出：CampaignPlan v0（`campaign-plan/v0`）——目标与成功度量、受众（ICP id 列表 + 每个 ICP\n的候选规模上限）、动作序列（v0 仅 `discovery`）、预算上限（微美元，可选）、审批要求\n（恒为 true）与决策策略（`maxReplans` 恒 0）。\n\n边界：\n\n- 只做计划，不执行任何动作；不调用任何工具（`allowed-tools` 为空）。\n- `audience.icpIds` 只能从提示列出的 ICP id 中原样选取；`motions[].icpIds` 必须是\n  `audience.icpIds` 的子集。\n- 不得编造 ICP id、公司、预算或事实；不确定时缩小规模或省略可选字段。\n- 输出只是草稿（revision DRAFT）：人工批准后才签发执行授权；影子期即使批准也不执行。",
-    "sourceDigest": "291fba4ac05680844faa64316a993695e17da9c7faa9fb9b5623d2d99898459e"
+    "body": "# Campaign 规划\n\n输入：只读提示（JSON），包含本次 Campaign 的目标、可用 ICP 及其 id（名称/状态/目标市场/\n已验证规则摘要）、卖家已批准事实（Offering/Claim，均来自人工审批后的事实 SoR）、公司池\n聚合统计（按国家/行业的计数，无明细 PII）、记忆简报（带出处）与预算/受众上限提示。\n\n重规划轮：提示可携带 `round` 与 `replan` 上下文（`reasonCode`=VALIDATOR_ISSUES 附校验 issues，或 HUMAN_DECLINE 附上一版被拒计划与理由）；重生成时必须修正所列问题，且 `decisionPolicy.maxReplans` 仍原样等于提示预算。\n\n输出：CampaignPlan v0（`campaign-plan/v0`）——目标与成功度量、受众（ICP id 列表 + 每个 ICP\n的候选规模上限）、动作序列（v0 仅 `discovery`）、预算上限（微美元，可选）、审批要求\n（恒为 true）与决策策略（`maxReplans` = 提示给出的重规划预算，0–2）。\n\n边界：\n\n- 只做计划，不执行任何动作；不调用任何工具（`allowed-tools` 为空）。\n- `audience.icpIds` 只能从提示列出的 ICP id 中原样选取；`motions[].icpIds` 必须是\n  `audience.icpIds` 的子集。\n- 不得编造 ICP id、公司、预算或事实；不确定时缩小规模或省略可选字段。\n- 输出只是草稿（revision DRAFT）：人工批准后才签发执行授权；影子期即使批准也不执行。",
+    "sourceDigest": "b10a6fc1656cd3661c2249882cdc53d2b28512e9e134ef91f7f9d53d9469bedf"
   },
   {
     "skillKey": "company.understanding.extract",

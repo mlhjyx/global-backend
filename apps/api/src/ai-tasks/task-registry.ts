@@ -592,7 +592,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     maxOutputTokens: PLANNING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 180000,
     description:
-      '受限 Campaign 规划器（propose-only）：只产计划，不执行任何动作。基于提示的只读输入（目标、可用 ICP 及 id、卖家已批准事实摘要、公司池统计、记忆简报、预算与受众上限提示）生成一份 CampaignPlan v0 JSON。规则：audience.icpIds 只能从提示列出的 ICP id 中原样选取（1–20 个）；motions 的 type 只能是 discovery，其 icpIds 必须是 audience.icpIds 的子集（1–5 条）；audience.sizeCap 是每个 ICP 本轮最多处理的候选公司数（1–1000，且不超过提示的受众上限）；budget.currency 恒为 USD，capMicros 是可选的预算上限（微美元，1 USD = 1000000），给出时不得超过提示的预算上限；approvalPolicy.required 恒为 true；decisionPolicy.maxReplans 恒为 0；schemaVersion 恒为 campaign-plan/v0。只输出 JSON，不输出任何解释文字。',
+      '受限 Campaign 规划器（propose-only）：只产计划，不执行任何动作。基于提示的只读输入（目标、可用 ICP 及 id、卖家已批准事实摘要、公司池统计、记忆简报、预算与受众上限提示）生成一份 CampaignPlan v0 JSON。规则：audience.icpIds 只能从提示列出的 ICP id 中原样选取（1–20 个）；motions 的 type 只能是 discovery，其 icpIds 必须是 audience.icpIds 的子集（1–5 条）；audience.sizeCap 是每个 ICP 本轮最多处理的候选公司数（1–1000，且不超过提示的受众上限）；budget.currency 恒为 USD，capMicros 是可选的预算上限（微美元，1 USD = 1000000），给出时不得超过提示的预算上限；approvalPolicy.required 恒为 true；decisionPolicy.maxReplans 取提示中重规划预算的同值整数（0–2：0=不重规划，1–2=允许的自动重规划轮数）；schemaVersion 恒为 campaign-plan/v0。只输出 JSON，不输出任何解释文字。',
     outputSchema: closedObject({
       schemaVersion: boundedString(20, {
         enum: ['campaign-plan/v0'],
@@ -636,7 +636,11 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
         required: { type: 'boolean', enum: [true], description: '恒为 true：人工批准后才生效' },
       }, ['required']),
       decisionPolicy: closedObject({
-        maxReplans: { type: 'integer', enum: [0], description: '恒为 0（v0 不做重规划，D-MA-3）' },
+        maxReplans: {
+          type: 'integer',
+          enum: [0, 1, 2],
+          description: '自动重规划预算：必须等于提示给出的重规划预算（0–2；0=不重规划）',
+        },
       }, ['maxReplans']),
     }, [
       'schemaVersion', 'goal', 'audience', 'motions', 'budget',

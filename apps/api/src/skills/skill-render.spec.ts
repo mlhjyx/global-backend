@@ -18,7 +18,7 @@ const FIXTURE_SELECTORS = {
 
 /** 重钉记录：2026-11-08 S1-4 首次钉住；同日复审后重钉 sanctions/quoting（阈值/截断/加价语义）。 */
 const PINNED_RENDER_DIGESTS: Readonly<Record<string, string>> = {
-  "campaign.plan": "5b8c2906c996324a1e47b2f60ab5c640259d511513aac01922d410506d640b48",
+  "campaign.plan": "5bea069998912ef8b67b73ab7de88d6857f353d20195b352ea765322a5c1eb34",
   "company.understanding.extract": "b17b08f639ec2528610638348de170af2c4277edd66333f27a0e06a8ba4a4ed3",
   "company.understanding.extract_offerings":
     "ceada097f6f665d7af4e7016c578b82ffa50111fd3e2f735bc05c7f4359e8a5b",

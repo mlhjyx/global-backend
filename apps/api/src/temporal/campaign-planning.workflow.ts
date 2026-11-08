@@ -4,9 +4,12 @@ import {
   proxyActivities,
 } from '@temporalio/workflow';
 import { describeRunFailure } from './discovery.run-failure';
+import type { CampaignPlanIssue } from './campaign-control-plane.client';
 import type {
-  CampaignPlanningActivities,
   CampaignPlanInputBundle,
+  CampaignPlanReplanEntry,
+  CampaignPlanReplanReason,
+  CampaignPlanningActivities,
 } from './campaign-planning.activities';
 import {
   parseExecutionBudgetBinding,
@@ -60,6 +63,11 @@ export interface CampaignPlanningWorkflowInput {
   icpId?: string;
   audienceSizeCap?: number;
   budgetCapMicros?: number;
+  /** M2.2：本 job 允许的自动重规划轮数（0–2，缺省 0 = 单轮行为不变）。 */
+  maxReplans?: number;
+  /** M2.2：人工拒绝后的重生成——上一版被拒计划与拒绝理由（截断 500 字）。 */
+  previousPlan?: unknown;
+  replanReason?: { code: 'HUMAN_DECLINE'; detail?: string };
   executionContractVersion?: 2;
   executionBudget?: ExecutionBudgetBinding;
 }
@@ -92,6 +100,20 @@ export function campaignPlanFailureCode(error: unknown): string {
  * 回调 gain-saas 落 DRAFT revision。任何一步失败都把 `FAILED` + 闭集错误码回写 job
  * 后结束；本工作流不执行任何外部动作（影子期结构上不执行，D-M2.1-c）。
  */
+function replanBudgetOf(input: CampaignPlanningWorkflowInput): number {
+  const value = input.maxReplans;
+  if (value === undefined) return 0;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > 2) {
+    invalidInput();
+  }
+  return value;
+}
+
+/**
+ * M2.2 有界重规划：首轮（或人工拒绝后的重生成）+ 至多 maxReplans 轮校验反馈重规划。
+ * 每轮独立模型调用与 usage 记账；轮次耗尽仍不合法 → job `NEEDS_HUMAN`（人工可直接改
+ * plan JSON 另存新 revision）。任何非「校验不通过」的失败仍是既有的 FAILED 语义。
+ */
 export async function campaignPlanningWorkflow(
   input: CampaignPlanningWorkflowInput,
 ): Promise<void> {
@@ -103,6 +125,15 @@ export async function campaignPlanningWorkflow(
       typeof jobId !== 'string' ||
       typeof objective !== 'string' ||
       input.executionContractVersion !== EXECUTION_CONTRACT_VERSION
+    ) {
+      invalidInput();
+    }
+    const maxReplans = replanBudgetOf(input);
+    const humanDecline = input.replanReason;
+    if (
+      humanDecline !== undefined &&
+      (humanDecline.code !== 'HUMAN_DECLINE' ||
+        (humanDecline.detail !== undefined && typeof humanDecline.detail !== 'string'))
     ) {
       invalidInput();
     }
@@ -120,6 +151,7 @@ export async function campaignPlanningWorkflow(
       await assembleActs.assembleCampaignPlanInputs({
         workspaceId,
         objective,
+        maxReplans,
         ...(input.icpId !== undefined ? { icpId: input.icpId } : {}),
         ...(input.audienceSizeCap !== undefined
           ? { audienceSizeCap: input.audienceSizeCap }
@@ -129,21 +161,66 @@ export async function campaignPlanningWorkflow(
           : {}),
       });
 
-    const generated = await modelActs.generateCampaignPlan({
-      workspaceId,
-      jobId,
-      bundle,
-      executionBudget: input.executionBudget,
-    });
+    const maxRounds = 1 + maxReplans;
+    const replanHistory: CampaignPlanReplanEntry[] = [];
+    let lastIssues: readonly CampaignPlanIssue[] | undefined;
+    let firstRoundReplan:
+      | { reasonCode: CampaignPlanReplanReason; previousPlan?: unknown; detail?: string }
+      | undefined;
+    if (input.previousPlan !== undefined || humanDecline !== undefined) {
+      firstRoundReplan = {
+        reasonCode: 'HUMAN_DECLINE',
+        ...(input.previousPlan !== undefined ? { previousPlan: input.previousPlan } : {}),
+        ...(humanDecline?.detail !== undefined ? { detail: humanDecline.detail.slice(0, 500) } : {}),
+      };
+    }
 
-    await deliverActs.deliverCampaignPlanRevision({
+    for (let round = 0; round < maxRounds; round += 1) {
+      const replan =
+        round === 0
+          ? firstRoundReplan
+          : { reasonCode: 'VALIDATOR_ISSUES' as const, ...(lastIssues ? { issues: lastIssues } : {}) };
+      const generated = await modelActs.generateCampaignPlan({
+        workspaceId,
+        jobId,
+        bundle,
+        executionBudget: input.executionBudget,
+        round,
+        ...(replan !== undefined ? { replan } : {}),
+      });
+
+      if (generated.status === 'ok') {
+        await deliverActs.deliverCampaignPlanRevision({
+          workspaceId,
+          campaignId,
+          jobId,
+          plan: generated.plan,
+          ...(generated.durableReceipt
+            ? { durableReceipt: generated.durableReceipt }
+            : {}),
+          ...(replanHistory.length > 0 ? { replanHistory } : {}),
+        });
+        return;
+      }
+
+      lastIssues = generated.issues;
+      replanHistory.push({
+        round,
+        reasonCode:
+          round === 0 && firstRoundReplan !== undefined
+            ? 'HUMAN_DECLINE'
+            : 'VALIDATOR_ISSUES',
+        issues: generated.issues,
+      });
+    }
+
+    await reportActs.reportCampaignPlanJobFailure({
       workspaceId,
-      campaignId,
       jobId,
-      plan: generated.plan,
-      ...(generated.durableReceipt
-        ? { durableReceipt: generated.durableReceipt }
-        : {}),
+      error: 'CAMPAIGN_PLAN_NEEDS_HUMAN',
+      state: 'NEEDS_HUMAN',
+      issues: lastIssues ?? [],
+      replanHistory,
     });
   } catch (error) {
     // job 回写放在不可取消作用域；回写失败不顶替原始失败。

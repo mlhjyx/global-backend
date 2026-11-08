@@ -21,6 +21,7 @@ import {
   asExecutionBudgetHttpBoundary,
   EXECUTION_BUDGET_GRANT_HEADER,
 } from '../execution-budget/execution-budget-grant.decorator';
+import { getTask } from '../ai-tasks/task-registry';
 import { CampaignPlanServiceTokenGuard } from './campaign-plan-service-token.guard';
 import { CampaignPlanLauncher } from './campaign-plan.launcher';
 
@@ -45,7 +46,15 @@ export interface CampaignPlanDraftBody {
   readonly icpId?: string;
   readonly audienceSizeCap?: number;
   readonly budgetCapMicros?: number;
+  /** M2.2：允许的自动重规划轮数（0–2；实际值还会被 job 成本上限压低）。 */
+  readonly maxReplans?: number;
+  /** M2.2：人工拒绝后的重生成——上一版被拒计划（≤64KB）与拒绝理由（≤500 字）。 */
+  readonly previousPlan?: unknown;
+  readonly replanReason?: { readonly code: 'HUMAN_DECLINE'; readonly detail?: string };
 }
+
+const PREVIOUS_PLAN_MAX_BYTES = 65_536;
+const REPLAN_DETAIL_MAX_CHARS = 500;
 
 function requestInvalid(): never {
   throw new BadRequestException({
@@ -90,6 +99,47 @@ function optionalPositiveInteger(value: unknown, maximum: number): number | unde
   return value as number;
 }
 
+function optionalReplans(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > 2) {
+    requestInvalid();
+  }
+  return value;
+}
+
+function optionalPreviousPlan(value: unknown): unknown {
+  if (value === undefined) return undefined;
+  const plan = record(value);
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(plan);
+  } catch {
+    requestInvalid();
+  }
+  if (serialized.length > PREVIOUS_PLAN_MAX_BYTES) requestInvalid();
+  return plan;
+}
+
+function optionalReplanReason(value: unknown): { code: 'HUMAN_DECLINE'; detail?: string } | undefined {
+  if (value === undefined) return undefined;
+  const reason = record(value);
+  exactKeys(reason, ['code'], ['detail']);
+  if (reason.code !== 'HUMAN_DECLINE') requestInvalid();
+  if (
+    reason.detail !== undefined &&
+    (typeof reason.detail !== 'string' ||
+      reason.detail.length === 0 ||
+      reason.detail.length > REPLAN_DETAIL_MAX_CHARS ||
+      !NO_CONTROL_CHARS.test(reason.detail))
+  ) {
+    requestInvalid();
+  }
+  return {
+    code: 'HUMAN_DECLINE',
+    ...(reason.detail !== undefined ? { detail: reason.detail } : {}),
+  };
+}
+
 function optionalBudgetMicros(value: unknown): number | undefined {
   if (value === undefined) return undefined;
   if (!Number.isSafeInteger(value) || (value as number) < 0) requestInvalid();
@@ -101,7 +151,7 @@ export function parseCampaignPlanDraftBody(value: unknown): CampaignPlanDraftBod
   exactKeys(
     input,
     ['workspaceId', 'campaignId', 'jobId', 'objective'],
-    ['icpId', 'audienceSizeCap', 'budgetCapMicros'],
+    ['icpId', 'audienceSizeCap', 'budgetCapMicros', 'maxReplans', 'previousPlan', 'replanReason'],
   );
   const objective = input.objective;
   if (
@@ -124,7 +174,30 @@ export function parseCampaignPlanDraftBody(value: unknown): CampaignPlanDraftBod
     ...(input.budgetCapMicros === undefined
       ? {}
       : { budgetCapMicros: optionalBudgetMicros(input.budgetCapMicros) }),
+    ...(input.maxReplans === undefined ? {} : { maxReplans: optionalReplans(input.maxReplans) }),
+    ...(input.previousPlan === undefined
+      ? {}
+      : { previousPlan: optionalPreviousPlan(input.previousPlan) }),
+    ...(input.replanReason === undefined
+      ? {}
+      : { replanReason: optionalReplanReason(input.replanReason) }),
   });
+}
+
+/**
+ * M2.2 job 级成本上限：轮数 = min(1+maxReplans, floor(cap / 单轮上限))，上限默认
+ * 单轮契约上限 ×3（env `CAMPAIGN_PLAN_JOB_COST_CAP_CENTS` 可调）。每轮成本由任务契约的
+ * maxCostCents 硬约束执行，因此「轮数上限」就是「job 成本上限」的确定式表达。
+ */
+export function campaignPlanEffectiveReplans(
+  requested: number | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const perRoundCents = getTask('campaign.plan')?.maxCostCents ?? 60;
+  const raw = Number.parseInt(env['CAMPAIGN_PLAN_JOB_COST_CAP_CENTS'] ?? '', 10);
+  const jobCeilingCents = Number.isSafeInteger(raw) && raw > 0 ? raw : perRoundCents * 3;
+  const roundsByCeiling = Math.max(1, Math.floor(jobCeilingCents / perRoundCents));
+  return Math.min(requested ?? 0, roundsByCeiling - 1, 2);
 }
 
 @ApiTags('Campaign')
@@ -170,6 +243,17 @@ export class CampaignPlanInternalController {
         icpId: { type: 'string', format: 'uuid' },
         audienceSizeCap: { type: 'integer', minimum: 1, maximum: 1000 },
         budgetCapMicros: { type: 'integer', minimum: 0 },
+        maxReplans: { type: 'integer', minimum: 0, maximum: 2 },
+        previousPlan: { type: 'object' },
+        replanReason: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['code'],
+          properties: {
+            code: { type: 'string', enum: ['HUMAN_DECLINE'] },
+            detail: { type: 'string', minLength: 1, maxLength: 500 },
+          },
+        },
       },
     },
   })
@@ -207,7 +291,11 @@ export class CampaignPlanInternalController {
       });
       return this.authority.consumeVerifiedWorkspaceGrant(verified);
     });
-    await this.launcher.launch({ ...parsed, executionBudget: binding });
+    await this.launcher.launch({
+      ...parsed,
+      maxReplans: campaignPlanEffectiveReplans(parsed.maxReplans),
+      executionBudget: binding,
+    });
     return envelope({ jobId: parsed.jobId });
   }
 }
