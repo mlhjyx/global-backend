@@ -44,6 +44,24 @@ const SOURCE_OF_KIND: Record<LegalPageKind, CompanyChannelSourceType> = {
   about: 'homepage',
 };
 
+/**
+ * 页面 URL 的 DB 安全形态（与 company_contact_channel_source_url_check 同源）：https、无空白、
+ * 8–2048；剥掉 userinfo。网页可控值绝不允许把整家公司的落库事务 throw 掉（fail-safe 降级）。
+ */
+export function safePageUrl(raw: string): string | undefined {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'https:') return undefined;
+    url.username = '';
+    url.password = '';
+    const value = url.toString();
+    if (value.length < 8 || value.length > 2048 || /\s/u.test(value)) return undefined;
+    return value;
+  } catch {
+    return undefined;
+  }
+}
+
 const MAILTO_RE = /mailto:([^"'>\s]+)/giu;
 const TEL_HREF_RE = /href=["']tel:([^"']+)["']/giu;
 const CFEMAIL_RE = /data-cfemail=["']([0-9a-f]+)["']/giu;
@@ -88,21 +106,14 @@ function isCompanyDomain(email: string, domain: string): boolean {
   if (at < 0) return false;
   const host = email.slice(at + 1).toLowerCase();
   if (host === domain || host.endsWith(`.${domain}`)) return true;
+  // 他域把公司域当前缀/中间段（peter.de.evil.com、mueller-pumpen.de.evil.com）是冒充形态，
+  // 词根相交也不收（合法的子域形态 mail.peter.de 已在上面放行）。
+  if (host.startsWith(`${domain}.`) || host.includes(`.${domain}.`)) return false;
   const companyTokens = domainTokens(domain);
   if (companyTokens.size === 0) return false;
-  return sharesBrandToken(companyTokens, domainTokens(host));
-}
-
-/** 词根相等，或 ≥5 字符的前缀关系（algam.de ↔ algamdach.de 这类品牌变体）。 */
-function sharesBrandToken(a: Set<string>, b: Set<string>): boolean {
-  for (const x of a) {
-    for (const y of b) {
-      if (x === y) return true;
-      const min = Math.min(x.length, y.length);
-      if (min >= 5 && (x.startsWith(y) || y.startsWith(x))) return true;
-    }
-  }
-  return false;
+  // 只认**词根完全相等**（sanotact-group.de ↔ sanotact.de；tsurumi.de ↔ tsurumi.eu）。
+  // 前缀启发式（algamdach.de ↔ algam.de、peters-webdesign.de ↔ peter.de）会误收第三方，已移除。
+  return [...domainTokens(host)].some((token) => companyTokens.has(token));
 }
 
 export function collectCompanyChannels(args: CollectCompanyChannelsArgs): CompanyChannelInput[] {
@@ -114,17 +125,25 @@ export function collectCompanyChannels(args: CollectCompanyChannelsArgs): Compan
 
   const pushEmail = (page: ImpressumPage, raw: string): void => {
     const value = raw.trim().toLowerCase();
-    if (!value || !isCompanyDomain(value, domain)) return;
-    if (classifyContactEmail(value).emailType === 'personal') return; // 具名人只进联系人层
+    if (!value || value.length > 512 || !isCompanyDomain(value, domain)) return;
+    const { emailType } = classifyContactEmail(value);
+    if (emailType === 'personal') return; // 具名人只进联系人层
+    // 判不出的单段 local（ds@/mm@/pg@ 这类德国 Impressum 常见的缩写）不冒认公司渠道；
+    // 词形态（impressum@/datenschutz@）保留。联系人层对同地址仍按 red 保守处理。
+    if (emailType === 'other') {
+      const local = value.slice(0, value.lastIndexOf('@')).split('+')[0] ?? '';
+      if (!/^[a-z]{4,}$/u.test(local)) return;
+    }
     const key = `email:${value}`;
     if (seen.has(key) || out.length >= cap) return;
     seen.add(key);
+    const sourceUrl = safePageUrl(page.url);
     out.push({
       channel: 'email',
       value,
-      emailType: classifyContactEmail(value).emailType,
+      emailType,
       sourceType: SOURCE_OF_KIND[page.kind],
-      sourceUrl: page.url,
+      ...(sourceUrl ? { sourceUrl } : {}),
       robotsStatus: 'allowed',
       tosStatus: 'unknown',
       legalBasis: 'legitimate_interest',
@@ -134,15 +153,17 @@ export function collectCompanyChannels(args: CollectCompanyChannelsArgs): Compan
 
   const pushPhone = (page: ImpressumPage, raw: string): void => {
     const value = normalizePhone(raw, dial);
-    if (!value) return;
+    // 与写入器/DB 同源：归一后只应是「+ 数字」且 ≤32 字符。
+    if (!value || value.length > 32 || !/^\+?[0-9]+$/u.test(value)) return;
     const key = `phone:${value}`;
     if (seen.has(key) || out.length >= cap) return;
     seen.add(key);
+    const sourceUrl = safePageUrl(page.url);
     out.push({
       channel: 'phone',
       value,
       sourceType: SOURCE_OF_KIND[page.kind],
-      sourceUrl: page.url,
+      ...(sourceUrl ? { sourceUrl } : {}),
       robotsStatus: 'allowed',
       tosStatus: 'unknown',
     });
@@ -178,24 +199,22 @@ export function collectCompanyChannels(args: CollectCompanyChannelsArgs): Compan
     for (const found of textFound) {
       if (found.type === 'phone') pushPhone(page, found.value);
     }
-    // 联系表单：contact 页的干净 URL（green 公司事实）。
-    if (
-      page.kind === 'contact' &&
-      page.html &&
-      /<form[\s>]/iu.test(page.html) &&
-      !seen.has(`form_url:${page.url}`) &&
-      out.length < cap
-    ) {
-      const url = page.url.split('?')[0]!.split('#')[0]!;
-      seen.add(`form_url:${url}`);
-      out.push({
-        channel: 'form_url',
-        value: url,
-        sourceType: 'contact_page',
-        sourceUrl: page.url,
-        robotsStatus: 'allowed',
-        tosStatus: 'unknown',
-      });
+    // 联系表单：contact 页的干净 URL（green 公司事实）。与 DB CHECK 同源（https、无查询串/
+    // 锚点/空白、≤512）；不合规的页面 URL 直接放弃，绝不让网页可控值 throw 落库事务。
+    if (page.kind === 'contact' && page.html && /<form[\s>]/iu.test(page.html) && out.length < cap) {
+      const safe = safePageUrl(page.url);
+      const clean = safe ? safe.split('?')[0]!.split('#')[0]! : undefined;
+      if (clean && clean.length <= 512 && !seen.has(`form_url:${clean}`)) {
+        seen.add(`form_url:${clean}`);
+        out.push({
+          channel: 'form_url',
+          value: clean,
+          sourceType: 'contact_page',
+          sourceUrl: clean,
+          robotsStatus: 'allowed',
+          tosStatus: 'unknown',
+        });
+      }
     }
   }
   return out;

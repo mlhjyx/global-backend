@@ -601,6 +601,18 @@ describe('A1 —— 公司级渠道（company_contact_channel）', () => {
     });
   });
 
+  it('公司被抑制（persist 返回 suppressed）时不写公司级渠道', async () => {
+    const adapter = contactAdapter('public_web', {
+      channels: [{ channel: 'email', value: 'info@acme.de', emailType: 'role', sourceType: 'impressum' }],
+    });
+    const harness = makeDeps({ companies: [company('c1')], adapters: [adapter] });
+    persistMock.mockResolvedValueOnce({ created: 0, merged: 0, skippedSuppressed: 0, skippedInvalid: 0, suppressed: true });
+
+    await createDiscoveryActivities(harness.deps).discoverRunContacts(args());
+
+    expect(harness.channelUpsert).not.toHaveBeenCalled();
+  });
+
   it('adapter 不返回公司级渠道时不写表', async () => {
     const adapter = contactAdapter('decision_maker', { contacts: [CONTACT_RECORD] });
     const harness = makeDeps({ companies: [company('c1')], adapters: [adapter] });

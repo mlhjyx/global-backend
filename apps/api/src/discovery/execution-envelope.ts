@@ -76,7 +76,7 @@ export const MAX_CONTACT_DISCOVERY_ADAPTERS = 6 as const;
 export const MAX_CONTACTS_PER_DISCOVERY_ADAPTER = 25 as const;
 export const MAX_DECISION_MAKER_PAGES = 4 as const;
 /** public_web 联系人路径：首页之外最多再抓的 contact/impressum/about 页数。 */
-export const MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES = 2 as const;
+export const MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES = 4 as const; // A1：法律页固定路径变体需要多个槽位（/impressum, /kontakt, /impressum/, …）
 /** social_presence 索引层：每家最多发出的社媒 dork 数（buildSocialDorks 上限）。 */
 export const MAX_SOCIAL_DORKS = 4 as const;
 /** social_presence 档案/直抓层：每个候选页最多 3 次抓取（Wayback availability + 档案副本 + 直抓）。 */

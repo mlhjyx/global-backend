@@ -132,6 +132,44 @@ describe('collectCompanyChannels', () => {
     expect(emails).toEqual(['info@acme.de']);
   });
 
+  it('第三方词根前缀/冒充中间段域不被误收（peters-webdesign vs peter.de、peter.de.evil.com）', () => {
+    const channels = collectCompanyChannels({
+      domain: 'peter.de',
+      pages: [{
+        url: 'https://peter.de/impressum',
+        kind: 'impressum',
+        html: '<a href="mailto:kontakt@peters-webdesign.de">a</a> <a href="mailto:info@hansapark.de">b</a> ' +
+          '<a href="mailto:info@peter.de.evil.com">c</a> <a href="mailto:info@peter.de">ok</a>',
+        text: '',
+      }],
+    });
+    expect(channels.filter((c) => c.channel === 'email').map((c) => c.value)).toEqual(['info@peter.de']);
+  });
+
+  it('单段缩写邮箱（ds@/mm@）不冒认公司渠道，词形态（impressum@）保留为 other', () => {
+    const channels = collectCompanyChannels({
+      domain: 'acme.de',
+      pages: [{ url: 'https://acme.de/impressum', kind: 'impressum', text: 'ds@acme.de mm@acme.de impressum@acme.de' }],
+    });
+    const emails = channels.filter((c) => c.channel === 'email');
+    expect(emails.map((c) => c.value)).toEqual(['impressum@acme.de']);
+    expect(emails[0]!.emailType).toBe('other');
+  });
+
+  it('网页可控的 http 页面 URL 被 fail-safe 降级（sourceUrl 省略、form_url 放弃），绝不抛错', () => {
+    const channels = collectCompanyChannels({
+      domain: 'legacy.de',
+      pages: [
+        { url: 'http://legacy.de/impressum', kind: 'impressum', text: 'info@legacy.de' },
+        { url: 'http://legacy.de/kontakt', kind: 'contact', html: '<form></form>', text: '' },
+      ],
+    });
+    const email = channels.find((c) => c.channel === 'email');
+    expect(email).toBeTruthy();
+    expect(email!.sourceUrl).toBeUndefined();
+    expect(channels.some((c) => c.channel === 'form_url')).toBe(false);
+  });
+
   it('非 DE/AT/CH 国家不做电话国别猜测（只收带 + 的号码）', () => {
     const channels = collectCompanyChannels({
       domain: 'acme.fr',

@@ -24,16 +24,20 @@ const PATH_RULES: { kind: LegalPageKind; pattern: RegExp; score: number }[] = [
 /** 资产与低价值页面（隐私/条款页几乎没有联系方式，且不在 A1 口径内）。 */
 const EXCLUDE = /\.(pdf|jpe?g|png|gif|svg|webp|css|js)([?#]|$)|\/(privacy|datenschutz|cookie|terms|agb|blog|news|search|tag)\b/iu;
 
-/** 固定路径探测候选（按命中概率排序）；仅当首页链接没有对应 kind 时使用。 */
+/**
+ * 固定路径探测候选；仅当首页链接没有对应 kind 时使用。两种 kind 交替排列——
+ * 页数预算小时 impressum 与 contact 都有机会，单个变体 404 时也能在预算内试下一个变体
+ *（/impressum 空壳、/impressum.html 才是真页面的站点很常见）。
+ */
 const FIXED_PATHS: { path: string; kind: LegalPageKind }[] = [
   { path: '/impressum', kind: 'impressum' },
+  { path: '/kontakt', kind: 'contact' },
   { path: '/impressum/', kind: 'impressum' },
+  { path: '/kontakt/', kind: 'contact' },
   { path: '/impressum.html', kind: 'impressum' },
   { path: '/imprint', kind: 'impressum' },
-  { path: '/legal-notice', kind: 'impressum' },
-  { path: '/kontakt', kind: 'contact' },
-  { path: '/kontakt/', kind: 'contact' },
   { path: '/kontakt.html', kind: 'contact' },
+  { path: '/legal-notice', kind: 'impressum' },
   { path: '/contact', kind: 'contact' },
 ];
 
@@ -88,6 +92,8 @@ export function legalPageCandidates(
   const out: LegalPageCandidate[] = [];
   const seenKeys = new Set<string>();
   const kindsSeen = new Set<LegalPageKind>();
+  /** 首页链接已覆盖的 kind——固定路径只为缺失的 kind 追加（含全部变体，交给页数预算收敛）。 */
+  const linkKinds = new Set<LegalPageKind>();
   const push = (candidate: LegalPageCandidate): boolean => {
     const key = candidate.url.replace(/\/$/u, '');
     if (seenKeys.has(key)) return false;
@@ -99,13 +105,13 @@ export function legalPageCandidates(
   };
   for (const candidate of ranked) {
     if (out.length >= maxPages) break;
-    if (kindsSeen.has(candidate.kind) && candidate.kind !== 'impressum') continue; // 每类最多一条
-    push(candidate);
+    if (linkKinds.has(candidate.kind) && candidate.kind !== 'impressum') continue; // 每类最多一条
+    if (push(candidate)) linkKinds.add(candidate.kind);
   }
-  if (!kindsSeen.has('impressum') || !kindsSeen.has('contact')) {
+  if (!linkKinds.has('impressum') || !linkKinds.has('contact')) {
     for (const fixed of FIXED_PATHS) {
       if (out.length >= maxPages) break;
-      if (kindsSeen.has(fixed.kind)) continue;
+      if (linkKinds.has(fixed.kind)) continue;
       const url = new URL(fixed.path, base).toString();
       push({ url, kind: fixed.kind, score: 50 });
     }

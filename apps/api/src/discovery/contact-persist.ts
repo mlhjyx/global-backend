@@ -57,6 +57,8 @@ export async function persistDiscoveredContacts(
   args: PersistDiscoveredContactsArgs,
 ): Promise<{ created: number; merged: number; skippedSuppressed: number;
   skippedInvalid: number;
+  /** A1：公司被抑制（SUPPRESSED / suppression 命中）而整批未入库——渠道写入方必须一并放弃。 */
+  suppressed?: boolean;
 }> {
   assertProductDiscoveryProvenance({ providerKey: args.adapterKey });
   for (const contact of args.contacts) {
@@ -81,6 +83,7 @@ export async function persistDiscoveredContacts(
       merged: 0,
       skippedSuppressed: args.contacts.length,
       skippedInvalid: 0,
+      suppressed: true,
     };
   }
 
@@ -104,6 +107,7 @@ export async function persistDiscoveredContacts(
       merged: 0,
       skippedSuppressed: args.contacts.length,
       skippedInvalid: 0,
+      suppressed: true,
     };
   }
   const suppressedContactKeys = new Set(

@@ -243,7 +243,8 @@ function discoveryRunEnvelope(
  * On-demand named-contact discovery for one company (M4): the worst-case fan-out of the six
  * contact adapters at their own enforced ceilings. Adapter bounds mirrored here:
  * - decision_maker: homepage + MAX_DECISION_MAKER_PAGES pages, one extraction per page;
- * - public_web: homepage + MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES linked pages (deterministic, no model);
+ * - public_web: homepage + MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES linked pages, each page rendered
+ *   for raw HTML (JSON-LD/cfemail) with markdown/fetch fallbacks (deterministic, no model);
  * - companies_house: MAX_COMPANIES_HOUSE_CONTACT_CALLS registry calls (search + officers);
  * - inpi_rne: one registry call;
  * - social_presence: MAX_SOCIAL_DORKS index searches + MAX_SOCIAL_PROFILE_FETCHES candidates ×
@@ -257,7 +258,10 @@ function contactDiscoveryEnvelope(
   request: WorkspaceExecutionBudgetRequest,
 ): WorkspaceTechnicalBudgetEnvelope {
   const decisionMakerFetches = 1 + MAX_DECISION_MAKER_PAGES;
-  const publicWebFetches = 1 + MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES;
+  // A1（Impressum 挖掘）：public_web 每个候选页最多 2 次 crawl4ai.fetch（markdown 回退 +
+  // 渲染失败回退）+ 2 次 crawl4ai.render（渲染 + 尾斜杠变体），首页 1 次 fetch。
+  const publicWebFetches = 1 + MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES * 2;
+  const publicWebRenders = MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES * 2;
   const extractInvocations = MAX_DECISION_MAKER_PAGES + MAX_SOCIAL_PROFILE_FETCHES;
   const socialFetches = MAX_SOCIAL_PROFILE_FETCHES * MAX_SOCIAL_FETCHES_PER_CANDIDATE;
   return ready(
@@ -265,6 +269,7 @@ function contactDiscoveryEnvelope(
     [model('contact.find_decision_makers', extractInvocations)],
     [
       tool(contract(crawl4aiFetchTool), decisionMakerFetches + publicWebFetches),
+      tool(contract(crawl4aiRenderTool), publicWebRenders),
       tool(contract(socialSearchTool), MAX_SOCIAL_DORKS),
       tool(contract(socialFetchTool), socialFetches),
       tool(contract(companiesHouseSearchTool), MAX_COMPANIES_HOUSE_CONTACT_CALLS),

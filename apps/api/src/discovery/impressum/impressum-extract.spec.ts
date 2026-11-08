@@ -111,3 +111,34 @@ describe('decodeHtmlEntities / stripHtml', () => {
     expect(decodeHtmlEntities('&#0;')).toBe('&#0;');
   });
 });
+
+describe('鲁棒性（审查修复）', () => {
+  it('40k 连续 ASCII 串不触发二次回溯（有界量词）', () => {
+    const started = Date.now();
+    expect(decodeObfuscatedEmails('a'.repeat(40_000))).toEqual([]);
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it('超长 cfemail 不抛 RangeError（分块解码）', () => {
+    const hex = '2a' + '41'.repeat(80_000);
+    expect(() => decodeCfEmail(hex)).not.toThrow();
+    expect(decodeCfEmail(hex)).toBeNull();
+  });
+
+  it('电话归一幂等：+49 (0) 0493… 连续零剥净，二次归一不再变化；++49 脏值收敛', () => {
+    const once = normalizePhone('+49 (0) 0493 06100060', 'DE');
+    expect(once).toBe('+4949306100060');
+    expect(normalizePhone(once!, 'DE')).toBe(once);
+    expect(normalizePhone('++49 89 1234567', 'DE')).toBe('+49891234567');
+  });
+
+  it('schema URI 形式的 Person 也被跳过', () => {
+    const html = `
+      <script type="application/ld+json">
+      {"@type":"Organization","email":"info@acme.de",
+       "employee":{"@type":"https://schema.org/Person","email":"max@acme.de"}}
+      </script>`;
+    const out = extractJsonLdContacts(html);
+    expect(out.emails).toEqual(['info@acme.de']);
+  });
+});

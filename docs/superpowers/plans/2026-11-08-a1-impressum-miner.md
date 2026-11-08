@@ -49,3 +49,16 @@
 ## 6. 回退
 
 纯增量（可选字段 + 新纯函数模块 + provider 内部升级）；回退 = revert 代码，DB 无迁移。
+
+## 7. 独立审查后的修订（2026-11-08）
+
+- **H1（致命）**：`crawl4ai.render` 不在 `contact.find_decision_makers.allowedTools` → ToolPolicyDenied 被归为 control error，整次联系人发现失败（#748 同类）。已加入白名单 + task-registry 快照与回归用例 + 治理 callsite 清单（脚本与 JSON 目录）。
+- **H2**：网页可控值（sourceUrl/form_url/phone）在装配层 fail-safe 清洗（https/长度/空白/`+` 归一一律降级丢弃，绝不 throw）——防一条坏 URL 回滚整家公司所有 adapter 的事务。
+- **H3**：`persistDiscoveredContacts` 返回 `suppressed` 信号；公司被抑制（SUPPRESSED / suppression 命中）时渠道一并放弃（补并发窗口用例）。
+- **M1**：混淆邮箱正则全部有界（local ≤64 / label ≤63），40k 连续串从 38s 降至毫秒级（补用例）。
+- **M2**：同组织域改为**词根完全相等**并拒绝冒充形态（peter.de.evil.com）；前缀启发式移除（会误收 peters-webdesign.de ↔ peter.de）。
+- **M3**：`other` 分类的单段缩写 local（ds@/mm@）不冒认公司渠道（≥4 字母词形态保留，如 impressum@）。
+- **M4**：证据口径按实修正（脚本的首页取链/maxPages 与产品默认不同；"role 邮箱"列含 other；电话列截断说明）。
+- **M5**：技术预算信封补 `crawl4ai.render` 计数与 public_web 回退上限（fetch 14 / render 8，cap 274¢）。
+- **M6**：`MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES` 2→4；固定路径按 kind 交替给全变体（/impressum、/kontakt、/impressum/…），404 时预算内可试下一个。
+- L1/L4/L5/L6：cfemail 分块解码、脚本尾斜杠抓取补 robots 检查、schema URI Person 跳过、渠道条数防御性上限（32）。

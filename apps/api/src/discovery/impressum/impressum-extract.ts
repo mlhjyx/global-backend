@@ -47,8 +47,11 @@ export function decodeCfEmail(encoded: string): string | null {
   const bytes = (hex.match(/../g) ?? []).map((pair) => Number.parseInt(pair, 16));
   const key = bytes[0];
   if (key === undefined) return null;
-  const decoded = String.fromCharCode(...bytes.slice(1).map((byte) => byte ^ key)).toLowerCase();
-  return EMAIL_SHAPE.test(decoded) ? decoded : null;
+  // 分块解码：整段 fromCharCode(...spread) 在超长 hex（≥15 万字符）会抛 RangeError。
+  let decoded = '';
+  for (const byte of bytes.slice(1)) decoded += String.fromCharCode(byte ^ key);
+  const value = decoded.toLowerCase();
+  return EMAIL_SHAPE.test(value) ? value : null;
 }
 
 export interface JsonLdContacts {
@@ -74,7 +77,9 @@ export function extractJsonLdContacts(html: string): JsonLdContacts {
 }
 
 function isPersonType(type: unknown): boolean {
-  return type === 'Person' || (Array.isArray(type) && type.includes('Person'));
+  const isPerson = (value: unknown): boolean =>
+    value === 'Person' || (typeof value === 'string' && /(^|[:/#])Person$/u.test(value));
+  return isPerson(type) || (Array.isArray(type) && type.some(isPerson));
 }
 
 function walkJsonLd(node: unknown, emails: Set<string>, phones: Set<string>): void {
@@ -100,8 +105,10 @@ function walkJsonLd(node: unknown, emails: Set<string>, phones: Set<string>): vo
 
 const AT_TOKEN = String.raw`\[at\]|\(at\)|\{at\}|\bat\b|\(ät\)|\[ät\]|\{ät\}|\bät\b`;
 const DOT_TOKEN = String.raw`\[dot\]|\(dot\)|\{dot\}|\bdot\b|\(punkt\)|\[punkt\]|\{punkt\}|\bpunkt\b`;
+// 量词全部有界（local ≤64、label ≤63，RFC 上限）——无界 `+` 在 40k 连续 ASCII 串上是
+// 二次回溯（实测 38s/40k），crawl 文本混入 minified JS 时会白烧 CPU。
 const OBFUSCATED_EMAIL_RE = new RegExp(
-  String.raw`([a-z0-9._%+-]+)\s*(?:${AT_TOKEN})\s*([a-z0-9-]+(?:\s*(?:${DOT_TOKEN})\s*[a-z0-9-]+)+)`,
+  String.raw`(?<![a-z0-9])[a-z0-9._%+-]{1,64}\s*(?:${AT_TOKEN})\s*[a-z0-9-]{1,63}(?:\s*(?:${DOT_TOKEN})\s*[a-z0-9-]{1,63})+`,
   'giu',
 );
 const DOT_SPLIT_RE = new RegExp(String.raw`\s*(?:${DOT_TOKEN})\s*`, 'giu');
@@ -110,7 +117,11 @@ const DOT_SPLIT_RE = new RegExp(String.raw`\s*(?:${DOT_TOKEN})\s*`, 'giu');
 export function decodeObfuscatedEmails(text: string): string[] {
   const out: string[] = [];
   for (const match of text.matchAll(OBFUSCATED_EMAIL_RE)) {
-    const candidate = `${match[1]}@${(match[2] ?? '').replace(DOT_SPLIT_RE, '.')}`.toLowerCase();
+    // 把 AT 记号换成 @、DOT 记号换成 .（记号两侧的空白一并吸收）。
+    const candidate = match[0]
+      .toLowerCase()
+      .replace(new RegExp(String.raw`\s*(?:${AT_TOKEN})\s*`, 'iu'), '@')
+      .replace(DOT_SPLIT_RE, '.');
     if (EMAIL_SHAPE.test(candidate)) out.push(candidate);
   }
   return out;
@@ -126,16 +137,24 @@ const DEFAULT_DIAL: Record<'DE' | 'AT' | 'CH', string> = { DE: '49', AT: '43', C
  */
 export function normalizePhone(raw: string, country?: 'DE' | 'AT' | 'CH'): string | null {
   const trimmed = raw.trim().replace(/^tel:\s*/iu, '');
-  let value = trimmed.replace(/[^\d+]/gu, '');
-  if (value.includes('+') && !value.startsWith('+')) return null; // `+` 只允许出现在首位
-  if (value.startsWith('+')) {
-    value = value.replace(/^(\+4[391])0(?=\d)/u, '$1'); // 国别后的 (0) 主干前缀
-  } else if (country && /^0\d+$/u.test(value)) {
-    value = `+${DEFAULT_DIAL[country]}${value.slice(1)}`;
-  } else if (country && value.length >= 7) {
-    value = `+${DEFAULT_DIAL[country]}${value}`;
+  const cleaned = trimmed.replace(/[^\d+]/gu, '');
+  if (!cleaned) return null;
+  let value: string;
+  if (cleaned.startsWith('+')) {
+    // `+` 只在首位有效；`++49`/`+49+89` 这类脏值把后续 `+` 去掉。
+    value = `+${cleaned.slice(1).replace(/\+/gu, '')}`;
+    // 国别后的主干 0：`+49 (0) 0493…` 连续多个 0 也全部剥掉（幂等归一，同号只有一个唯一键）。
+    value = value.replace(/^(\+4[391])0+(?=\d)/u, '$1');
+    if (!/^\+[1-9]\d*$/u.test(value)) return null; // `+0…`/全零/空号不是国际号
   } else {
-    return null;
+    if (!/^\d+$/u.test(cleaned)) return null; // `+` 出现在中间 = 脏值
+    if (country && /^0\d+$/u.test(cleaned)) {
+      value = `+${DEFAULT_DIAL[country]}${cleaned.replace(/^0+/u, '')}`;
+    } else if (country && cleaned.length >= 7) {
+      value = `+${DEFAULT_DIAL[country]}${cleaned}`;
+    } else {
+      return null;
+    }
   }
   const digits = value.replace(/\D/gu, '');
   if (digits.length < 7 || digits.length > 15) return null;

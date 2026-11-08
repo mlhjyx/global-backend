@@ -466,6 +466,20 @@
       ]
     },
     {
+      "key": "apps/api/src/discovery/providers/public-web.provider.ts#crawl4ai.render#1",
+      "kind": "tool",
+      "producerId": "crawl4ai.render",
+      "resultStrategy": "artifact_reference",
+      "resultSchema": "crawl4ai-render/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/discovery/contact-discovery-core.ts",
+          "anchor": "captureContactReceipt"
+        }
+      ]
+    },
+    {
       "key": "apps/api/src/discovery/providers/inpi-rne.provider.ts#inpi_rne.search#1",
       "kind": "tool",
       "producerId": "inpi_rne.search",

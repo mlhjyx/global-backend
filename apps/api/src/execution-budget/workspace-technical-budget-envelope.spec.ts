@@ -250,15 +250,16 @@ describe('workspace execution technical envelope catalog', () => {
     expect(
       envelope.policy.tools.map((item) => [item.toolId, item.maxPhysicalInvocations]),
     ).toEqual([
-      ['crawl4ai.fetch', 8],
+      ['crawl4ai.fetch', 14],
+      ['crawl4ai.render', 8],
       ['social.search', 4],
       ['social.fetch', 12],
       ['companies_house.search', 2],
       ['inpi_rne.search', 1],
       ['google_patents.search', 1],
     ]);
-    // 8×2×15 (model reservation) + 8×1 (crawl4ai.fetch) + 12×1 (social.fetch) = 260 cents.
-    expect(envelope.requiredCapMicrousd).toBe(260n * 10_000n);
+    // 8×2×15 (model reservation) + 14×1 (crawl4ai.fetch) + 8×1 (crawl4ai.render) + 12×1 (social.fetch) = 274 cents.
+    expect(envelope.requiredCapMicrousd).toBe(274n * 10_000n);
   });
 
   it.each([

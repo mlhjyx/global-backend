@@ -277,7 +277,9 @@ export async function discoverContactsCore(
         skippedInvalid += res.skippedInvalid;
         // A1：公司级渠道在**同一事务**内落库；suppression 与联系人路径同纪律——按当前
         // suppression_record 复读（email/domain 规范化后比对），命中即丢弃，不依赖抓取前快照。
-        if (pa.companyChannels?.length) {
+        // persist 已判定公司被抑制（SUPPRESSED / companyMatchesSuppression）时整批放弃——
+        // 联系人被拒而渠道照写的空窗不存在。
+        if (pa.companyChannels?.length && res.suppressed !== true) {
           const suppressions = await transaction.suppressionRecord.findMany({
             where: { type: { in: ['email', 'domain'] } },
             select: { type: true, value: true },
@@ -290,7 +292,14 @@ export async function discoverContactsCore(
             'domain',
             suppressions.filter((s) => s.type === 'domain').map((s) => s.value),
           );
-          const channels = pa.companyChannels.filter((channel) => {
+          // 防御性上限：适配器不得在单事务里无界写入（装配器自身 cap=8）。
+          const boundedChannels = pa.companyChannels.slice(0, 32);
+          if (pa.companyChannels.length > boundedChannels.length) {
+            console.warn(
+              `[discoverContacts] adapter ${pa.key} returned ${pa.companyChannels.length} company channels; writing the first ${boundedChannels.length}`,
+            );
+          }
+          const channels = boundedChannels.filter((channel) => {
             if (channel.channel !== 'email') return true;
             const key = canonicalizeSuppressionValue('email', channel.value);
             if (!key || suppressedEmails.has(key)) return false;

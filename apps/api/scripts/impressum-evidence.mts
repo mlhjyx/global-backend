@@ -175,6 +175,7 @@ for (const row of rows) {
         if (text.trim().length < 300) {
           const toggled = candidate.url.endsWith('/') ? candidate.url.replace(/\/+$/u, '') : `${candidate.url}/`;
           try {
+            if (!(await isAllowedByRobots(toggled, { authorizeExternalAction: authorize }))) throw new Error('robots');
             const alt = await crawlHtml(toggled, authorize);
             const altText = stripHtml(alt.html);
             if (altText.length > text.length) {
