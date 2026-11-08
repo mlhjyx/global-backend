@@ -1,0 +1,66 @@
+{
+  "meta": {
+    "goldenCopy": "fixture",
+    "publishDate": "2026-11-08T00:00:00Z",
+    "note": "GLEIF golden copy 结构子集，实体均为虚构样例"
+  },
+  "data": [
+    {
+      "type": "lei-entity",
+      "id": "529900T8BM49AURSDO55",
+      "attributes": {
+        "lei": "529900T8BM49AURSDO55",
+        "entity": {
+          "legalName": { "name": "Muster Pumpen GmbH" },
+          "legalAddress": {
+            "addressLines": ["Hauptstraße 5", "Hinterhaus"],
+            "city": "München",
+            "postalCode": "80331",
+            "country": "DE"
+          },
+          "jurisdiction": "DE",
+          "legalForm": { "id": "GmbH" },
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "type": "lei-entity",
+      "id": "391200EXAMPLEDEMO001",
+      "attributes": {
+        "lei": "391200EXAMPLEDEMO001",
+        "entity": {
+          "legalName": { "name": "Beispiel Ventile GmbH" },
+          "legalAddress": {
+            "addressLines": ["Industrieweg 7"],
+            "city": "Stuttgart",
+            "postalCode": "70173",
+            "country": "DE"
+          },
+          "jurisdiction": "DE",
+          "legalForm": { "id": "GmbH" },
+          "status": "ACTIVE"
+        }
+      }
+    },
+    {
+      "type": "lei-entity",
+      "id": "5493001KJTIIGC8Y1R12",
+      "attributes": {
+        "lei": "5493001KJTIIGC8Y1R12",
+        "entity": {
+          "legalName": { "name": "Alte Pumpenwerke AG" },
+          "legalAddress": {
+            "addressLines": ["Am Hafen 1"],
+            "city": "Hamburg",
+            "postalCode": "20095",
+            "country": "DE"
+          },
+          "jurisdiction": "DE",
+          "legalForm": { "id": "AG" },
+          "status": "INACTIVE"
+        }
+      }
+    }
+  ]
+}

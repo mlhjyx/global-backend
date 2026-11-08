@@ -1,0 +1,51 @@
+{
+  "schemaVersion": "registry-frame/v1",
+  "frame": {
+    "frameKey": "gleif_leis",
+    "country": "DE",
+    "scheme": "lei",
+    "label": "GLEIF LEI golden copy（对齐层样例帧）",
+    "providerKey": "gleif_bulk",
+    "sourceUrl": "https://www.gleif.org/en/lei-data/gleif-golden-copy/download-the-golden-copy",
+    "licence": "CC0-1.0",
+    "licenceUrl": "https://www.gleif.org/en/about-lei/terms-of-use",
+    "fetchMode": "bulk_file",
+    "cadence": { "kind": "daily", "hourUtc": 11 },
+    "config": {
+      "format": "json",
+      "recordsPath": "data",
+      "note": "GLEIF 是对齐层不是注册库 frame（LEI 偏向大中型企业）；此帧用于硬键归并的 LEI 证据源"
+    }
+  },
+  "mapping": {
+    "schemaVersion": "registry-frame-mapping/v1",
+    "format": "json",
+    "recordsPath": "data",
+    "constants": { "scheme": "lei", "country": "DE" },
+    "fields": {
+      "regNumber": "attributes.lei",
+      "name": "attributes.entity.legalName.name",
+      "country": "attributes.entity.legalAddress.country",
+      "status": "attributes.entity.status",
+      "legalForm": "attributes.entity.legalForm.id",
+      "city": "attributes.entity.legalAddress.city",
+      "postalCode": "attributes.entity.legalAddress.postalCode",
+      "addressLines": ["attributes.entity.legalAddress.addressLines"],
+      "lei": "attributes.lei",
+      "nace": null,
+      "naceVersion": null,
+      "employeeBand": null,
+      "vatId": null,
+      "website": null,
+      "identifiers": null
+    },
+    "statusMap": {
+      "active": "ACTIVE",
+      "inactive": "UNKNOWN",
+      "merged": "UNKNOWN",
+      "retired": "UNKNOWN"
+    },
+    "legalFormMap": null,
+    "employeeBandMap": null
+  }
+}
