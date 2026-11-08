@@ -1,0 +1,58 @@
+{
+  "schemaVersion": "golden-sampling-manifest/v1",
+  "goldenSet": "golden-discovery/v1",
+  "asOf": "2026-11-09",
+  "seed": "20261108",
+  "status": "DRAFT",
+  "notes": [
+    "模板：尚未执行真实抽样。执行时用 scripts/metrics/sql/golden-pool-*.sql 只读导出候选池，再跑 scripts/metrics/golden-sampling.mjs。",
+    "ref 必须是公司 id 或联系人盲化 dedupe_key（HMAC），不得是明文邮箱/电话。",
+    "实际抽样后把每个数据集的 refsSha256 与 stratum 分布写回本文件（或用运行报告留档）。"
+  ],
+  "layers": {
+    "anchor": "固定锚点，半年复核，任何变更在这层不得下降",
+    "rolling": "滚动代表，每月替换 10–20%",
+    "challenge": "已知困难样本与历史失败复盘"
+  },
+  "exclusions": [
+    "11 个非生产 workspace（E2E/验收/夹具租户）",
+    "@example.test / @demo.cn 等测试域",
+    "被 DSR 擦除或 SUPPRESSED 的实体",
+    "同一实体的重复记录（按 ref 去重）"
+  ],
+  "datasets": [
+    {
+      "key": "accounts",
+      "purpose": "账户真值：is_company / in_icp / country / industry / employee_band / domain_correct（STRICT 口径的 fit 真值）",
+      "totalQuota": 500,
+      "quota": { "anchor": 100, "rolling": 300, "challenge": 100 },
+      "strata": ["country", "industry", "employee_band", "source_class"],
+      "stratumComposition": "country|industry|employee_band|source_class"
+    },
+    {
+      "key": "contacts_strict",
+      "purpose": "联系人 email 真值：email_status_truth / email_is_personal / source_correct（STRICT 验证器校准）",
+      "totalQuota": 500,
+      "quota": { "anchor": 100, "rolling": 300, "challenge": 100 },
+      "strata": ["country", "seniority", "source_class"],
+      "stratumComposition": "country|seniority|source_class"
+    },
+    {
+      "key": "contacts_plus",
+      "purpose": "PLUS 可达真值：phone_status_truth / line_type / connect_rate（phone 过采样；池内 phone 极稀，预期欠采样）",
+      "totalQuota": 500,
+      "quota": { "anchor": 100, "rolling": 300, "challenge": 100 },
+      "strata": ["country", "seniority", "channel"],
+      "stratumComposition": "country|seniority|channel",
+      "notes": [
+        "channel ∈ email | phone | both；phone/both 层按可获得量抽，不自动回填（欠采样写进 baseline）。",
+        "2026-11-09 全库仅 30 条 phone 联系点且 VALID 0，PLUS 层在 P1 补齐电话验证前无法达到 500。"
+      ]
+    }
+  ],
+  "refsSha256": {
+    "accounts": null,
+    "contacts_strict": null,
+    "contacts_plus": null
+  }
+}

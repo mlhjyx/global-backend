@@ -8,19 +8,25 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  buildCaptureMatrix,
+  candidateModels,
   chapman,
   dedupeFrame,
   diagnostics,
   entityKeys,
+  estimateMultiFrame,
   estimateTwoFrames,
+  fitLogLinear,
   lincolnPetersen,
   matchFrames,
   normalizeCountry,
   normalizeDomain,
   normalizeName,
+  pairRecaptures,
   parseCsv,
   readFrame,
 } from "./capture-recapture.mjs";
+import { createRng } from "./lib/prng.mjs";
 
 test("parseCsv handles BOM, CRLF, quoted commas and escaped quotes", () => {
   const text = '﻿name,country,domain\r\n"ACME, Inc.",US,acme.com\r\n"Hmm ""Quoted"" GmbH",DE,\r\n';
@@ -224,4 +230,118 @@ test("readFrame rejects CSVs without recognised columns", () => {
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+// ── multi-frame (log-linear) ────────────────────────────────────────────────
+
+function simulateFrames(probabilities, population, rng) {
+  const frames = probabilities.map((_, index) => ({ label: `F${index + 1}`, records: [] }));
+  for (let entity = 0; entity < population; entity += 1) {
+    probabilities.forEach((probability, frameIndex) => {
+      if (rng() < probability) frames[frameIndex].records.push({ domain: `sim-${entity}.de` });
+    });
+  }
+  return frames;
+}
+
+test("buildCaptureMatrix merges records by key and tracks patterns", () => {
+  const frames = [
+    { label: "A", records: [{ domain: "one.de" }, { domain: "two.de" }] },
+    { label: "B", records: [{ domain: "two.de" }, { domain: "three.de" }] },
+    { label: "C", records: [{ domain: "one.de" }, { domain: "three.de" }] },
+  ];
+  const matrix = buildCaptureMatrix(frames);
+  assert.equal(matrix.k, 3);
+  assert.equal(matrix.observed, 3);
+  assert.deepEqual(matrix.nPerFrame, [2, 2, 2]);
+  assert.equal(matrix.patterns.get(0b101), 1); // one.de in A and C
+  assert.equal(matrix.patterns.get(0b011), 1); // two.de in A and B
+  assert.equal(matrix.patterns.get(0b110), 1); // three.de in B and C
+  const pairs = pairRecaptures(matrix.patterns, 3);
+  assert.deepEqual(pairs.map((pair) => pair.count), [1, 1, 1]);
+});
+
+test("buildCaptureMatrix counts duplicates and keyless rows per frame", () => {
+  const frames = [
+    { label: "A", records: [{ domain: "dup.de" }, { domain: "dup.de" }, { name: "" }] },
+    { label: "B", records: [{ domain: "dup.de" }] },
+    { label: "C", records: [{ domain: "dup.de" }] },
+  ];
+  const matrix = buildCaptureMatrix(frames);
+  assert.equal(matrix.duplicates[0], 1);
+  assert.equal(matrix.keyless[0], 1);
+  assert.equal(matrix.observed, 1);
+});
+
+test("candidateModels lists 8 models and only the saturated one has df=0", () => {
+  const models = candidateModels(3);
+  assert.equal(models.length, 8);
+  const patterns = new Map([
+    [0b001, 10],
+    [0b010, 8],
+    [0b011, 4],
+    [0b100, 6],
+    [0b101, 3],
+    [0b110, 2],
+    [0b111, 1],
+  ]);
+  for (const model of models) {
+    const fit = fitLogLinear(patterns, 3, model.terms);
+    assert.equal(fit.df, model.name === "saturated" ? 0 : fit.df);
+    assert.ok(fit.g2 >= 0);
+    if (model.name !== "saturated") assert.ok(fit.df > 0);
+  }
+});
+
+test("log-linear recovers a known population under independence (seeded)", () => {
+  const rng = createRng("recovery-test", "simulate");
+  const frames = simulateFrames([0.5, 0.4, 0.3], 20000, rng);
+  const result = estimateMultiFrame(frames, { bootstrap: 200, seed: "recovery-test" });
+  assert.equal(result.reportable, true);
+  // AIC may pick a pairwise-interaction model on sampling noise; what must hold
+  // is that the estimate and its bootstrap interval recover the true N.
+  assert.notEqual(result.chosen.name, "saturated");
+  assert.ok(Math.abs(result.nHat - 20000) / 20000 < 0.08, `N̂=${result.nHat} too far from 20000`);
+  assert.ok(
+    result.bootstrap.ci95[0] <= 20000 && 20000 <= result.bootstrap.ci95[1],
+    `95% CI [${result.bootstrap.ci95}] misses the true population 20000`,
+  );
+  assert.ok(result.coverage > 0 && result.coverage < 1);
+  assert.ok(result.modelSpread < 0.3);
+});
+
+test("bootstrap intervals are deterministic for a fixed seed", () => {
+  const rng = createRng("determinism", "simulate");
+  const frames = simulateFrames([0.5, 0.4, 0.3], 5000, rng);
+  const first = estimateMultiFrame(frames, { bootstrap: 100, seed: "fixed" });
+  const second = estimateMultiFrame(frames, { bootstrap: 100, seed: "fixed" });
+  assert.deepEqual(first.bootstrap.ci95, second.bootstrap.ci95);
+  assert.equal(first.nHat, second.nHat);
+});
+
+test("thin pairwise overlap blocks the estimate", () => {
+  const frames = [
+    { label: "A", records: Array.from({ length: 20 }, (_, i) => ({ domain: `a-${i}.de` })) },
+    { label: "B", records: Array.from({ length: 20 }, (_, i) => ({ domain: `b-${i}.de` })) },
+    {
+      label: "C",
+      records: [
+        { domain: "a-0.de" },
+        { domain: "b-0.de" },
+        { domain: "c-0.de" },
+      ],
+    },
+  ];
+  const result = estimateMultiFrame(frames, { bootstrap: 50, seed: "thin" });
+  assert.equal(result.reportable, false);
+  assert.ok(result.diagnostics.some((gate) => gate.code === "PAIR_TOO_SMALL"));
+  assert.equal(result.nHat, null);
+});
+
+test("estimateMultiFrame requires at least three frames", () => {
+  const frames = [
+    { label: "A", records: [{ domain: "a.de" }] },
+    { label: "B", records: [{ domain: "a.de" }] },
+  ];
+  assert.throws(() => estimateMultiFrame(frames), /at least 3 frames/);
 });

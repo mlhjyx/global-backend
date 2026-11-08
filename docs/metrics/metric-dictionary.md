@@ -1,8 +1,8 @@
 # GainOS 指标字典 v1
 
 > 文档 ID：`METRICS-DICTIONARY-001`
-> 版本：`v1.0`（2026-11-09）
-> 生命周期：`DRAFT`（v1 草案；YAML 化与 `pnpm metrics:lint` 机器门属 ch01 PR-01 后续）
+> 版本：`v1.2`（2026-11-09；v1.0/v1.1 同日发布，changelog 见 §8）
+> 生命周期：`DRAFT`（人工权威版；机器可读版见 `docs/metrics/dictionary/` + `scripts/metrics/metrics-lint.mjs`）
 > 状态：`DRAFT`
 > 依据：《GainOS 深化计划 v3.0》第 1 章 §3.1（指标树、VRIC 口径、RR1/RR3、分层、窗口、置信区间）与 §3.1.5 指标主表
 > 外部基准：逐条标注 URL；未能当日核实的数字标「待核」（沿用 ch01 §7.4）
@@ -91,6 +91,30 @@ V（已验证可触达决策人集合），逐条满足：
 
 **当前基线（2026-11-09 只读复核）**：全库 match 账户 403、STRICT 分子 0 → `VRIC_1000_STRICT = 0`；主租户 match 账户 128、STRICT 分子 0。0 应读作「从未验证 + 写入缺溯源」，不是市场否定判决（ch01 §2.2）。
 
+#### 1.3.1 VRIC_1000_PLUS 口径细则（内部运营口径）
+
+`VRIC_1000_PLUS` 与 STRICT 共用账户集合 A 与人级去重（§1.3-6），差别只在「已验证通道」：
+
+```text
+人的通道判定（PLUS）：
+  email_ok = status='VALID' AND catch_all='not_catch_all'
+             AND verification_method ∈ {'smtp_rcpt','provider_reported','operator'}
+             AND verified_at ≥ asOf − 180 天；
+  phone_ok = type='phone' AND status='VALID'
+             AND line_type ∈ {'mobile','landline'}          -- Twilio Lookup；schema 待 P1 加列
+             AND verified_at ≥ asOf − 90 天
+             AND 该国家/市场的季度人工抽呼校准已完成（50–100 通，connect_rate 与 wrong_number_rate 记录在案）；
+  人计入 PLUS ⇔ (email_ok OR phone_ok)，同一人只计 1 次；同时有两条通道仍计 1 人。
+```
+
+强制规则：
+
+- **通道拆分必须同时报告**：`VRIC_PLUS = email_only + phone_only + both`，其中 `phone_only` 是电话线市场价值的直接证据；只报总数视为口径不全。
+- **PLUS 只用于内部运营与电话渠道评估**；对外承诺、合同与 SLA 只能引用 STRICT。
+- **不可用条件**：`line_type` 为 `voip/unknown`、抽呼校准缺失、或号码来源为 `pattern_guess` 的，不计入 `phone_ok`。
+- **引擎侧部分实现**：`scripts/metrics/funnel-baseline.mjs` 目前只能校验 `status/verified_at/seniority`——`line_type` 与抽呼校准在 SaaS/Twilio 侧，未接入前 PLUS 是**上界**，报告必须标「引擎侧」。
+- **当前基线（2026-11-09）**：全库 phone VALID 0 条（30 条 phone 全部 UNVERIFIED，且全在 E2E 租户），`VRIC_1000_PLUS = 0`，通道拆分 0/0/0；PLUS 在 P1 电话验证补齐前无统计意义（n<30 规则）。
+
 ### 1.4 回复口径 RR1 / RR3（强制成对报告）
 
 **术语**：`send_attempt`＝一次真实 SMTP 提交（`outreach_send` 一行；同一草稿重试 attempt+1）；`delivered`＝ESP webhook 或 SMTP 250 后无 DSN；`reply_human`＝收件人本人/同事的人工回复，排除自动回复（OOO、ticket、mailer-daemon）、退信 DSN、退订请求、内部测试、重复线程（同一 contact 同一序列只计首次）；`unknown_deliverability`＝发往 UNKNOWN/CATCH-ALL-RISKY 且未收到 DSN 的发送量。
@@ -107,6 +131,8 @@ RR3 = |unique_human_replies| / ( |delivered| + ê × |unknown_deliverability| )
 ```
 
 **成对报告规则（硬性）**：任何回复率数字必须写成 `回复率：RR1 x%（分子/发送）；RR3 y%（分子/投递 + ê×未知）`。只报一个口径视为无效声明。RR1 对标 Belkins 0.45%（unique replies ÷ emails sent），RR3 对标 2–4.5% 平台口径；两者回答的问题不同（每封的端到端效率 vs 到达收件箱后的内容效率）。
+
+**机器实现（唯一入口）**：`scripts/metrics/reply-rate.mjs`——按分层计数（sent/skipped/internal/duplicateRetries/delivered/unknown/replies + 分层 `eHat`）计算 RR1/RR3 并打印成对声明；`unknown>0` 而缺 `eHat` 时拒绝出数（RR3 不可算）。`--check <statement>` 校验任何人工写的回复率声明：缺 RR1 或 RR3、或只有裸百分比没有分数，判失败。周报/看板/导出必须调用它，禁止手写单口径。
 
 **归因窗口**：回复归因 30 天；跨序列回复归因到最近一次发送；退订/投诉单独计数，不计入回复。
 
@@ -166,7 +192,8 @@ week（ISO week，UTC 周一起）
 | 验证（T2） | `contact_point.status/verified_at/verification_method/catch_all`、`tool_budget_operation`（`result_schema='smtp-probe-verdict/v1'`） | `contact_point_verification_event` |
 | 运行与失败（G/诊断） | `discovery_run`、`discovery_company_job`、`run_event`、`tool_budget_operation`（成本） | `metric_observation` / rollup 表 |
 | 触达/回复（T3/T4） | 不在本库；SaaS `outreach_send` / `outreach_reply` / `cost_ledger`（P4 前 DRAFT） | 同上 + `metric_rollup_*` |
-| 召回（T1） | 无 | `frame_*` + `cr_estimate` |
+| 召回（T1） | `docs/metrics/frames/frame-registry.v1.json`（19 法域登记，校验器 `scripts/metrics/frame-registry.mjs`）；`scripts/metrics/capture-recapture.mjs`（两源 Chapman + 三源 log-linear） | `frame_registry`/`frame_snapshot` 表 + `cr_estimate`（PR-10/11/13 后续） |
+| 金标（T1-005/006、G-004/005） | `evals/golden-discovery/`（抽样 manifest 模板 + schema）+ `scripts/metrics/golden-sampling.mjs`（确定性分层抽样） | 真实样本、标注 rubric、`golden_*` 四表与 runner（PR-07/08） |
 
 **计数漂移**：本字典引用的库内计数是 2026-11-08 / 11-09 单时点快照，会随运行漂移；引用前先重跑 `scripts/metrics/funnel-baseline.mjs` 与 `scripts/metrics/risky-inventory.mjs`（只读）。
 
@@ -181,7 +208,7 @@ week（ISO week，UTC 周一起）
 | ID | 指标 | 单位 | 分子 | 分母 | 排除项 | 窗口 | strata | 状态 | 目标/基准 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | T0-001 | `vric_1000_strict` | count_per_1000 | 人级 VRIC（email VALID，§1.3） | ICP match 账户数 | §1.3 全部排除 | snapshot/周 | 默认 | ACTIVE（引擎侧） | ≥50（P1 首个内部目标）；当前 0 |
-| T0-002 | `vric_1000_plus` | count_per_1000 | 人级 VRIC（email 或 phone VALID，§1.3） | 同上 | 同上 | snapshot/周 | 默认 | ACTIVE（引擎侧） | ≥80（内部）；当前 0 |
+| T0-002 | `vric_1000_plus` | count_per_1000 | 人级 VRIC（email 或 phone VALID，§1.3/§1.3.1；输出 email_only/phone_only/both 通道拆分） | 同上 | 同上 | snapshot/周 | 默认+channel | ACTIVE（引擎侧；phone 的上界性质见 §1.3.1） | ≥80（内部）；当前 0（0/0/0） |
 
 ### 3.2 T1 覆盖与召回（市场分母）
 
@@ -289,7 +316,11 @@ week（ISO week，UTC 周一起）
 - 两源（Lincoln-Petersen/Chapman）仅作 sanity check，**不单独出结论**；`m11<5` 不报 N̂；`m11<25` 时 CV>20%，只报量级。
 - 三源及以上用 log-linear（两两交互起步，G²/AIC/BIC 选型）或 LCMCR；缺失格（未被任何 frame 捕获）的拟合值即 N̂₀。
 - 必须同时报告：每 frame 的 n、两两交集、模型选择、N̂、bootstrap 95% CI、CV、敏感性（去任一 frame 后 N̂ 变化）。
-- 首波脚手架：`scripts/metrics/capture-recapture.mjs`（两 frame 确定性键匹配 + Chapman；单测 `scripts/metrics/capture-recapture.test.mjs`）；三源 log-linear 与 bootstrap 属 ch01 PR-13。
+- **实现（v1.1 起）**：`scripts/metrics/capture-recapture.mjs`
+  - 两 frame：确定性键匹配 + Chapman（`--a/--b`）。`m11<5` 不出 N̂；`m11<25` 只报量级。
+  - 三 frame：`--frame A=a.csv --frame B=b.csv --frame C=c.csv` → 键簇捕获矩阵 → 8 个候选 log-linear 模型（独立/单交互×3/双交互×3/饱和）按 G²+2p（AIC）选型，饱和模型因 df=0 不可估而单列；参数化 bootstrap（默认 1,000 次，固定 seed）给 N̂ 的 95% CI；诊断门含两两交集 <5 阻断、<25 警告、模型间跨度 >30% 只报范围。
+  - 局限：匹配仍是确定性键（无 Splink 概率匹配/人工复核）；k>3 与 LCMCR 未实现；bootstrap 未覆盖模型选择不确定性——报告必须携带这些限制。
+- 单测：`scripts/metrics/capture-recapture.test.mjs`（合成数据已知 N 的回收测试、AIC 选型、门限、确定性 bootstrap）。
 
 ---
 
@@ -299,7 +330,8 @@ week（ISO week，UTC 周一起）
 2. 任何口径变更（分子/分母/排除项/窗口/分层）必须升 `version` 并在 §8 changelog 记录 `breaking: true|false`；breaking 变更须附新旧口径 ≥30 天重叠对比。
 3. 变更流程：提出 → 数据工程评审 → 产品例会确认 → 合入；紧急修复可先合入，48 小时内补评审记录。
 4. 「为提升指标而放宽验证口径」一律按 breaking 变更处理并强制重跑金标；未走流程的口径修改视为缺陷。
-5. 机器化路线（ch01 PR-01）：本表迁移为 `docs/metrics/dictionary/*.yaml`（`metric-definition/v1` schema）+ `pnpm metrics:lint`（schema 校验、ID 唯一、EXPLAIN 校验、哈希防漂移）。本 markdown 是 v1 的人工权威版，机器版落地后由其接管。
+5. **机器化（v1.2 起已落地，ch01 PR-01）**：`docs/metrics/dictionary/*.json`（`metric-definition/v1`，按 tier 分文件）+ `docs/metrics/schemas/metric-definition.v1.schema.json` + `docs/metrics/schemas/sources.v1.json`；校验器 `node scripts/metrics/metrics-lint.mjs`（未知字段拒绝、ID/名称唯一、tier 与 ID 前缀一致、来源必须登记、ACTIVE 只能引用 existing 源、分子/分母/窗口/分层/CI 词表、changelog 1..version 连续且末条等于 version、`exprStatus` 必填），并随 `scripts/governance-contracts.spec.mjs` 进 CI。选 JSON 而非 YAML 的原因：仓库无可直接引用的 YAML 依赖，引依赖会动锁文件与 Copy 绑定指纹；JSON 让 lint 保持零依赖。`exprStatus`：全部指标当前 `PENDING`（ch01 允许的显式标注）；与只读副本对账的 `EXPLAIN` 校验需要数据库（CI 不连库），通过后逐条升 `CHECKED`。
+6. 本 markdown 与机器字典必须同步修改：口径变更同时改两处并升版本；`metrics:lint` 保证机器侧自洽，人工版负责解释与上下文。
 
 ---
 
@@ -307,6 +339,8 @@ week（ISO week，UTC 周一起）
 
 | 版本 | 日期 | breaking | 说明 |
 | --- | --- | --- | --- |
+| v1.1 | 2026-11-09 | false | 新增 §1.3.1 VRIC PLUS 口径细则（phone VALID 四条件、通道拆分强制报告、引擎侧上界声明）；§1.4 增加 RR1/RR3 机器实现 `reply-rate.mjs` 与成对声明校验；§6 三源 log-linear 实现落地（8 模型 AIC 选型 + 参数化 bootstrap + 诊断门）；T0-002 增通道拆分。无 breaking。 |
+| v1.2 | 2026-11-09 | false | 机器可读字典落地：`docs/metrics/dictionary/*.json`（44 指标）+ sources 登记 + `metrics-lint.mjs`（字段/来源/版本/changelog 校验）并接入 CI；§7-5 改为已落地说明（JSON 而非 YAML 的理由）。无 breaking。 |
 | v1.0 | 2026-11-09 | — | 首次成文：T0–T4 + Guardrail 44 个指标；VRIC STRICT/PLUS 分离；RR1/RR3 成对报告；窗口/分层/CI 规则；基线读数（2026-11-08 审计 + 11-09 只读复核）。来源：ch01 §3.1 全文、§1.4 边界、§2 现状证据。 |
 
 ## 9. 外部基准来源（本版引用）
@@ -321,3 +355,4 @@ week（ISO week，UTC 周一起）
 - Wilson score interval：https://en.wikipedia.org/wiki/Wilson_score_interval
 - AAPOR response-rate overview（RR1/RR3 思想来源）：https://aapor.org/wp-content/uploads/2022/12/Response-Rates-Overview-508.pdf
 - 计划正文：《GainOS 深化计划 v3.0》第 1 章（ch01）§1–§7，本地计划目录 `gainos-plan-chapters/01-measurement-and-ground-truth.md`
+- 仓内配套：`docs/metrics/frame-registry.md`、`evals/golden-discovery/README.md`、`scripts/metrics/README.md`
