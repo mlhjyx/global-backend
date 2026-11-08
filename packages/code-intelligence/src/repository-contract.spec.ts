@@ -32,8 +32,9 @@ test("current repository keeps representative business and dynamic chains comple
       node.id.startsWith("service:temporal-schedule:") &&
       !node.id.includes("registration"),
   );
+  // B4（2026-11-08）：新增 tool-budget-reconciliation 周期清收。
   // B3（2026-11-08）：新增 discovery-stale-run-sweep 周期看门狗。
-  assert.equal(schedules.length, 11);
+  assert.equal(schedules.length, 12);
   assert.equal(
     graph.edges.some(
       (edge) =>

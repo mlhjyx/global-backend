@@ -121,6 +121,8 @@ describe("rawRetentionSweepWorkflow deterministic orchestration", () => {
   });
 
   it("bounds the budget reconcile loop by its own recorded input (B1/L01)", async () => {
+    // 旧历史（无 B4 moved 标记）仍在本 sweep 里对账——本用例验证其循环上界来自输入。
+    setPatched((patchId) => patchId !== "budget-operation-reconcile-moved-v1");
     acts.listRawRetentionWorkspaces.mockResolvedValue({
       workspaceIds: ["ws-1"],
       nextCursor: null,
@@ -207,7 +209,8 @@ describe("rawRetentionSweepWorkflow deterministic orchestration", () => {
     });
   });
 
-  it("releases stale tool-budget reservations per workspace until no stale row remains", async () => {
+  it("旧历史（无 moved 标记）照旧在本 sweep 清收预算预留——重放命令序列不变（B4 patch 守卫）", async () => {
+    setPatched((patchId) => patchId !== "budget-operation-reconcile-moved-v1");
     acts.listRawRetentionWorkspaces.mockResolvedValue({
       workspaceIds: ["ws-1"],
       nextCursor: null,
@@ -224,6 +227,18 @@ describe("rawRetentionSweepWorkflow deterministic orchestration", () => {
       workspaceId: "ws-1",
       limit: 200,
     });
+  });
+
+  it("新历史不再在本 sweep 调度预算清收（B4：迁到独立 sweep）", async () => {
+    acts.listRawRetentionWorkspaces.mockResolvedValue({
+      workspaceIds: ["ws-1"],
+      nextCursor: null,
+    });
+    acts.expireRawSourceRecords.mockResolvedValue({ expired: 1, deferredForConflict: 0 });
+
+    await rawRetentionSweepWorkflow({ batchSize: 10 });
+
+    expect(acts.reconcileStaleToolBudgetOperations).not.toHaveBeenCalled();
   });
 
   it("never schedules the budget reconcile on a history recorded before the patch", async () => {

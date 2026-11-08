@@ -27,6 +27,7 @@ import { createRun2Activities } from "./discovery.run2.activities";
 import { createRun2PipelineActivities } from "./discovery.run2.pipeline.activities";
 import { prismaDiscoveryRunLeaseReader } from "./discovery-run-lease";
 import { createRawSourceActivities } from "./raw-source.activities";
+import { createToolBudgetReconciliationActivities } from "./tool-budget-reconciliation.activities";
 import { createQualifyActivities } from "./qualify.activities";
 import { createBacklogActivities } from "./backlog.activities";
 import { createExternalIntentActivities } from "./external-intent.activities";
@@ -647,6 +648,8 @@ async function main(): Promise<void> {
         runtimeTelemetry: runtimeTelemetry.telemetry,
         budgetStore,
       }),
+      // B4（F1）：未结预算操作清收（RESERVED 释放 / RESULT_UNKNOWN 保守结清）。
+      ...createToolBudgetReconciliationActivities({ prisma }),
       // 外部源 intent sweep（TED 招标 + openFDA 510k 清关 → ACTIVE ICP 投影，externalIntentSweepWorkflow 调度）
       ...createExternalIntentActivities({
         prisma,
