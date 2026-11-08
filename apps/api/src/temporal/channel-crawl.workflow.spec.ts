@@ -59,6 +59,25 @@ describe('channelCrawlWorkflow（P4-P4c）', () => {
     });
   });
 
+  it('passes a PARTIAL run through as-is (truncated with records)', async () => {
+    acts.runChannelCrawl.mockResolvedValue({
+      status: 'PARTIAL',
+      pagesFetched: 10,
+      recordsFound: 4,
+      recordsMaterialized: 3,
+      failures: 0,
+      truncated: true,
+    });
+    await expect(channelCrawlWorkflow(INPUT)).resolves.toEqual({
+      status: 'PARTIAL',
+      pagesFetched: 10,
+    });
+    expect(acts.finalizeChannelCrawl).toHaveBeenCalledWith({
+      input: INPUT,
+      outcome: expect.objectContaining({ status: 'PARTIAL', truncated: true }),
+    });
+  });
+
   it('finalizes FAILED with the bounded failure code when the run fails', async () => {
     acts.runChannelCrawl.mockRejectedValue(
       ApplicationFailure.nonRetryable('CHANNEL_NOT_APPROVED', 'CHANNEL_NOT_APPROVED'),
