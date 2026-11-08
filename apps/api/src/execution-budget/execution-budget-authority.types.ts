@@ -7,6 +7,7 @@ export type ExecutionBudgetPurpose =
   | 'discovery.run'
   | 'contact.verify'
   | 'outreach.draft'
+  | 'campaign.plan'
   | 'platform.acquisition'
   | 'platform.intent_watch'
   | 'platform.sanctions'
@@ -204,6 +205,7 @@ const WORKSPACE_PURPOSE_SUBJECT_TYPES: Readonly<
   'discovery.run': ['discovery_run', 'company'],
   'contact.verify': ['contact_point'],
   'outreach.draft': ['lead'],
+  'campaign.plan': ['campaign'],
 };
 
 const PLATFORM_PURPOSES = new Set<ExecutionBudgetPurpose>(

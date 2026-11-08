@@ -20,7 +20,8 @@ describe('qualifyWorkflow', () => {
     await qualifyWorkflow(input as never);
 
     expect(acts.scoreCandidates).toHaveBeenCalledTimes(1);
-    expect(acts.scoreCandidates).toHaveBeenCalledWith(input);
+    // M2 步 10：runRef 由 workflowInfo().runId 注入（mock 默认 test-workflow-run），其余字段原样。
+    expect(acts.scoreCandidates).toHaveBeenCalledWith({ ...input, runRef: 'test-workflow-run' });
   });
 
   it('scoreCandidates 抛错 → 向上传播（无 fail-safe 吞）', async () => {
