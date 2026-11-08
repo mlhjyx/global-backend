@@ -316,7 +316,7 @@ export function createUnderstandingActivities(deps: {
     async crawlWebsite(
       args: UnderstandingAuthorityInput & { companyId: string; website: string },
     ): Promise<CrawledPage> {
-      return withRunBudget(args, async (accountKey) => {
+      return withActivityHeartbeat(30_000, () => withRunBudget(args, async (accountKey) => {
         const crawled = await crawlViaBroker(args.workspaceId, args.companyId, args.website, accountKey);
         return {
           url: args.website,
@@ -325,7 +325,7 @@ export function createUnderstandingActivities(deps: {
             ? { durableReceipt: crawled.durableReceipt }
             : {}),
         };
-      });
+      }));
     },
 
     /** Deterministic: pick key subpages (products/about/certifications/cases/contact…). */
@@ -339,7 +339,7 @@ export function createUnderstandingActivities(deps: {
     async crawlPages(
       args: UnderstandingAuthorityInput & { companyId: string; urls: string[] },
     ): Promise<{ pages: CrawledPage[] }> {
-      return withRunBudget(args, async (accountKey) => {
+      return withActivityHeartbeat(30_000, () => withRunBudget(args, async (accountKey) => {
         const settled = await Promise.allSettled(
           args.urls.map((u) => crawlViaBroker(args.workspaceId, args.companyId, u, accountKey)),
         );
@@ -359,14 +359,14 @@ export function createUnderstandingActivities(deps: {
           }
         });
         return { pages };
-      });
+      }));
     },
 
     async extractClaims(args: UnderstandingAuthorityInput & { text: string }): Promise<{
       claims: ExtractedClaim[];
       durableReceipt?: DurableExecutionReceipt;
     }> {
-      return withRunBudget(args, async (accountKey) => {
+      return withActivityHeartbeat(30_000, () => withRunBudget(args, async (accountKey) => {
         const contract = getTask('company_understanding.extract_claims');
         const result = await executeSkillWithRuntime(
           deps.skills ?? STATIC_SKILL_RESOLVER,
@@ -377,6 +377,8 @@ export function createUnderstandingActivities(deps: {
             prompt: args.text,
             system: contract?.description,
             model: contract?.model, // 中转站解析该 model 名（DeepSeek 等）
+            // B5：活动取消/超时传播到网关的 HTTP 请求（AbortSignal 贯通）。
+            signal: activityCancellationSignal(),
             schema: contract?.outputSchema ?? { required: ['claims'] },
           },
           {
@@ -393,12 +395,12 @@ export function createUnderstandingActivities(deps: {
           claims: fromModel,
           ...(result.durableReceipt ? { durableReceipt: result.durableReceipt } : {}),
         };
-      });
+      }));
     },
 
     /** 画像回填（KNW-002/5.2.3）：行业 + 简介，只在首页文本上跑一次。 */
     async extractAndPersistProfile(args: UnderstandingInput & { text: string }): Promise<void> {
-      return withRunBudget(args, async (accountKey) => {
+      return withActivityHeartbeat(30_000, () => withRunBudget(args, async (accountKey) => {
         const contract = getTask('company_understanding.extract_profile');
         const result = await executeStructuredTaskWithRuntime(
           deps.gateway,
@@ -407,6 +409,8 @@ export function createUnderstandingActivities(deps: {
             prompt: args.text,
             system: contract?.description,
             model: contract?.model,
+            // B5：活动取消/超时传播到网关的 HTTP 请求（AbortSignal 贯通）。
+            signal: activityCancellationSignal(),
             schema: contract?.outputSchema ?? { required: ['industry', 'summary'] },
           },
           {
@@ -442,7 +446,7 @@ export function createUnderstandingActivities(deps: {
           }),
           });
         });
-      });
+      }));
     },
 
     async extractOfferings(args: {
@@ -454,7 +458,7 @@ export function createUnderstandingActivities(deps: {
       offerings: ExtractedOffering[];
       durableReceipt?: DurableExecutionReceipt;
     }> {
-      return withRunBudget(args, async (accountKey) => {
+      return withActivityHeartbeat(30_000, () => withRunBudget(args, async (accountKey) => {
         const contract = getTask('company_understanding.extract_offerings');
         const result = await executeSkillWithRuntime(
           deps.skills ?? STATIC_SKILL_RESOLVER,
@@ -465,6 +469,8 @@ export function createUnderstandingActivities(deps: {
             prompt: args.text,
             system: contract?.description,
             model: contract?.model,
+            // B5：活动取消/超时传播到网关的 HTTP 请求（AbortSignal 贯通）。
+            signal: activityCancellationSignal(),
             schema: contract?.outputSchema ?? { required: ['offerings'] },
           },
           {
@@ -481,7 +487,7 @@ export function createUnderstandingActivities(deps: {
           offerings: fromModel,
           ...(result.durableReceipt ? { durableReceipt: result.durableReceipt } : {}),
         };
-      });
+      }));
     },
 
     /**
@@ -743,4 +749,39 @@ function jaccard(a: string, b: string): number {
   let inter = 0;
   for (const w of wa) if (wb.has(w)) inter += 1;
   return inter / (wa.size + wb.size - inter);
+}
+
+/** B5：活动取消信号（单元测试/非活动环境下返回 undefined）。 */
+function activityCancellationSignal(): AbortSignal | undefined {
+  try {
+    return Context.current().cancellationSignal;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * B5：长活动期间按 `intervalMs` 上报心跳（worker 死后 2 分钟心跳超时即可被发现，
+ * 而不是等 startToCloseTimeout 整段超时）。定时器只存在于活动进程内。
+ */
+async function withActivityHeartbeat<T>(intervalMs: number, run: () => Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    Context.current();
+    timer = setInterval(() => {
+      try {
+        Context.current().heartbeat();
+      } catch {
+        /* 活动上下文已结束 */
+      }
+    }, intervalMs);
+    timer.unref?.();
+  } catch {
+    /* 非活动环境（单元测试）：不上报 */
+  }
+  try {
+    return await run();
+  } finally {
+    if (timer) clearInterval(timer);
+  }
 }
