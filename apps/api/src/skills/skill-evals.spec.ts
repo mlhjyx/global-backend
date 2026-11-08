@@ -77,15 +77,21 @@ describe("shipped skill eval manifests", () => {
     }
   });
 
-  it("ships the two service skills and seven model skills", () => {
+  it("ships the two service skills and eight model skills", () => {
     expect(serviceRecords.map((record) => record.skillKey).sort()).toEqual([
       "compliance.sanctions_screen",
       "quoting.incoterms_quote",
     ]);
-    expect(modelRecords).toHaveLength(7);
-    expect(modelRecords.map((record) => record.skillKey)).toEqual(
-      expect.arrayContaining(["outreach.sequence_draft", "engage.reply_classify"]),
-    );
+    expect(modelRecords.map((record) => record.skillKey).sort()).toEqual([
+      "campaign.plan",
+      "company.understanding.extract",
+      "company.understanding.extract_offerings",
+      "discovery.qualify_fit",
+      "engage.reply_classify",
+      "outreach.sequence_draft",
+      "research.account_research",
+      "triage.lead_triage",
+    ]);
   });
 });
 
@@ -165,7 +171,7 @@ describe("service skill tool boundary (L1 red line)", () => {
 });
 
 describe("model skill contracts", () => {
-  it("keeps the seven model skills bound to live task contracts", () => {
+  it("keeps the eight model skills bound to live task contracts", () => {
     for (const record of modelRecords) {
       const contract = getTask(record.manifest.platform.taskContractId!);
       expect(contract, record.skillKey).toBeDefined();

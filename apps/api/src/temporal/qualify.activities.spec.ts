@@ -116,6 +116,7 @@ function fixture(options: {
     findMany,
     leadUpsert,
     suppressionFindMany,
+    outboxCreate: tx.outboxEvent.create,
     upserted,
     screening: tx.sanctionsScreeningResult,
     sanctionsScreening,
@@ -379,5 +380,57 @@ describe('scoreCandidates — 第五门与 accept、导出同一张真值表（#
     expect(f.screening.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ canonicalCompanyId: { in: [OTHER] } }) }),
     );
+  });
+});
+
+describe('scoreCandidates — CandidateBatchCompleted（M2 步 10：候选批次日志）', () => {
+  it('每批一条事件：run_ref/batch_ref/判定分布/候选 refs，且 score_detail 记 candidateBatchRef', async () => {
+    const f = fixture({
+      points: [{ kind: 'contact_page', value: 'https://pumpen-handel.example/kontakt', status: 'UNVERIFIED' }],
+    });
+
+    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP, runRef: 'run-abc-123' });
+
+    // 每批一条 CandidateBatchCompleted + 活动收尾一条 LeadsScored。
+    expect(f.outboxCreate).toHaveBeenCalledTimes(2);
+    const batchCall = f.outboxCreate.mock.calls
+      .map((call) => call[0] as { data: { eventType: string; aggregateType: string; aggregateId: string; payload: Record<string, unknown> } })
+      .find((call) => call.data.eventType === 'CandidateBatchCompleted');
+    expect(batchCall).toBeDefined();
+    const data = batchCall!.data;
+    expect(data).toMatchObject({
+      eventType: 'CandidateBatchCompleted',
+      aggregateType: 'QualifyRun',
+      aggregateId: ICP,
+    });
+    expect(data.payload).toMatchObject({
+      run_ref: 'run-abc-123',
+      icp_id: ICP,
+      batch_no: 0,
+      batch_ref: 'qualify:run-abc-123:0',
+      scored: 1,
+      queues: expect.objectContaining({ recommended: 1 }),
+      candidates: [
+        expect.objectContaining({
+          canonical_company_id: COMPANY_ID,
+          queue: 'recommended',
+          total_score: expect.any(Number),
+        }),
+      ],
+    });
+    expect(f.upserted().scoreDetail.candidateBatchRef).toBe('qualify:run-abc-123:0');
+  });
+
+  it('直接调用（无 runRef）→ run_ref=null、batch_ref=qualify:direct:<n>（测试/工具路径可追溯）', async () => {
+    const f = fixture();
+
+    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
+
+    const payload = f.outboxCreate.mock.calls
+      .map((call) => call[0] as { data: { eventType: string; payload: Record<string, unknown> } })
+      .find((call) => call.data.eventType === 'CandidateBatchCompleted')!.data.payload;
+    expect(payload.run_ref).toBeNull();
+    expect(payload.batch_ref).toBe('qualify:direct:0');
+    expect(f.upserted().scoreDetail.candidateBatchRef).toBe('qualify:direct:0');
   });
 });

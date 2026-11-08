@@ -71,11 +71,12 @@ class WorkspaceTechnicalBudgetQuoteResponseDto {
       'discovery.run',
       'contact.verify',
       'outreach.draft',
+      'campaign.plan',
     ],
   })
   purpose!: WorkspaceTechnicalBudgetQuote['purpose'];
 
-  @ApiProperty({ enum: ['company', 'icp', 'discovery_run', 'contact_point', 'lead'] })
+  @ApiProperty({ enum: ['company', 'icp', 'discovery_run', 'contact_point', 'lead', 'campaign'] })
   subjectType!: string;
 
   @ApiProperty({ minLength: 1, maxLength: 200 })
@@ -411,6 +412,16 @@ function parseRequest(value: unknown): WorkspaceExecutionBudgetRequest {
         operation: input.operation,
         leadId: uuid(input.leadId),
       });
+    case 'POST /campaigns/:campaignId/plan-drafts': {
+      exactKeys(input, ['operation', 'campaignId', 'body']);
+      const body = record(input.body);
+      exactKeys(body, ['jobId']);
+      return Object.freeze({
+        operation: input.operation,
+        campaignId: uuid(input.campaignId),
+        body: Object.freeze({ jobId: uuid(body.jobId) }),
+      });
+    }
     default:
       return invalid();
   }

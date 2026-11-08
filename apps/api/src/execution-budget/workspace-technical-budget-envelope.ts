@@ -85,6 +85,7 @@ export const WORKSPACE_EXECUTION_QUOTE_OPERATIONS = Object.freeze([
   'POST /leads/:leadId/outreach-drafts',
   'POST /companies/:companyId/understanding/retry',
   'POST /site-builder/intake',
+  'POST /campaigns/:campaignId/plan-drafts',
 ] as const satisfies readonly WorkspaceExecutionBudgetRequest['operation'][]);
 
 const MICROUSD_PER_CENT = 10_000n;
@@ -394,6 +395,11 @@ export function resolveWorkspaceTechnicalBudgetEnvelope(
     case 'POST /leads/:leadId/outreach-drafts':
       // One bounded structured call per draft; the schema repair retry is the second wire.
       return ready(request, [model('outreach.first_contact_draft', 1)], [], {
+        modelLogicalInvocations: 1,
+      });
+    case 'POST /campaigns/:campaignId/plan-drafts':
+      // 受限规划器：每次 plan job 一次有界结构化调用（schema 修复重试计入 wire 上界）。
+      return ready(request, [model('campaign.plan', 1)], [], {
         modelLogicalInvocations: 1,
       });
     case 'POST /icps/:icpId/query-plans': {

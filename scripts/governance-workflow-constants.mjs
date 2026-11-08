@@ -73,6 +73,10 @@ export const WORKFLOW_CONSTANT_ALLOWLIST = Object.freeze({
     EXECUTION_CONTRACT_VERSION:
       "execution contract version recorded in every run input; bumping it is a contract change, never a tuning knob",
   }),
+  "apps/api/src/temporal/campaign-planning.workflow.ts": Object.freeze({
+    EXECUTION_CONTRACT_VERSION:
+      "execution contract version recorded in every run input; bumping it is a contract change, never a tuning knob",
+  }),
   "apps/api/src/temporal/raw-retention.workflow.ts": Object.freeze({
     BUDGET_RECONCILE_BATCH:
       "activity payload batch size; changing it does not alter the scheduled command sequence (loops end on activity results, not on this value)",

@@ -654,6 +654,73 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     humanGate: false,
   },
 
+  // M2.1（设计 2026-11-08-campaign-planner-m2-1 §4.1，D-MA-3）：受限 Campaign 规划器。
+  // propose-only：只产 CampaignPlan v0 JSON（与 gain-saas M2.0 契约逐字段一致），
+  // 不执行、不写任何业务表、零工具；plan_hash 由 gain-saas 单一权威计算（D-M2.1-b）。
+  'campaign.plan': {
+    id: 'campaign.plan',
+    allowedTools: [],
+    maxCostCents: 60,
+    maxOutputTokens: PLANNING_TASK_MAX_OUTPUT_TOKENS,
+    timeoutMs: 180000,
+    description:
+      '受限 Campaign 规划器（propose-only）：只产计划，不执行任何动作。基于提示的只读输入（目标、可用 ICP 及 id、卖家已批准事实摘要、公司池统计、记忆简报、预算与受众上限提示）生成一份 CampaignPlan v0 JSON。规则：audience.icpIds 只能从提示列出的 ICP id 中原样选取（1–20 个）；motions 的 type 只能是 discovery，其 icpIds 必须是 audience.icpIds 的子集（1–5 条）；audience.sizeCap 是每个 ICP 本轮最多处理的候选公司数（1–1000，且不超过提示的受众上限）；budget.currency 恒为 USD，capMicros 是可选的预算上限（微美元，1 USD = 1000000），给出时不得超过提示的预算上限；approvalPolicy.required 恒为 true；decisionPolicy.maxReplans 恒为 0；schemaVersion 恒为 campaign-plan/v0。只输出 JSON，不输出任何解释文字。',
+    outputSchema: closedObject({
+      schemaVersion: boundedString(20, {
+        enum: ['campaign-plan/v0'],
+        description: '固定 campaign-plan/v0',
+      }),
+      goal: closedObject({
+        objective: boundedString(500, { description: '本次 Campaign 要达成的经营目标（一句人话）' }),
+        successMetric: boundedString(200, { description: '可选的成功度量（人话，如「获得 30 家合格线索」）' }),
+      }, ['objective']),
+      audience: closedObject({
+        icpIds: {
+          ...boundedArray(20, boundedString(36)),
+          minItems: 1,
+          description: '从提示的 ICP id 列表中原样选取，至少 1 个',
+        },
+        sizeCap: {
+          ...boundedNumber(1, 1000, true),
+          description: '每个 ICP 本轮最多处理的候选公司数',
+        },
+      }, ['icpIds', 'sizeCap']),
+      motions: {
+        ...boundedArray(5, closedObject({
+          type: boundedString(20, { enum: ['discovery'], description: "v0 仅允许 'discovery'" }),
+          icpIds: {
+            ...boundedArray(20, boundedString(36)),
+            minItems: 1,
+            description: '必须是 audience.icpIds 的子集',
+          },
+        }, ['type', 'icpIds'])),
+        minItems: 1,
+        description: '本计划的动作序列（v0 仅 discovery 检索动作）',
+      },
+      budget: closedObject({
+        capMicros: {
+          ...boundedNumber(0, 9_000_000_000_000_000, true),
+          description: '可选预算上限（微美元）；给出时不得超过提示的预算上限',
+        },
+        currency: boundedString(3, { enum: ['USD'], description: '固定 USD' }),
+      }, ['currency']),
+      approvalPolicy: closedObject({
+        required: { type: 'boolean', enum: [true], description: '恒为 true：人工批准后才生效' },
+      }, ['required']),
+      decisionPolicy: closedObject({
+        maxReplans: { type: 'integer', enum: [0], description: '恒为 0（v0 不做重规划，D-MA-3）' },
+      }, ['maxReplans']),
+    }, [
+      'schemaVersion', 'goal', 'audience', 'motions', 'budget',
+      'approvalPolicy', 'decisionPolicy',
+    ]),
+    // 规划是低频策略推理任务 → 推理档模型（MODEL_ACQUISITION_REASONING_MODEL）。
+    model: acquisitionModel('campaign.plan', ACQUISITION_REASONING_MODEL),
+    acceptsModelSubstitute: true,
+    risk: 'medium',
+    humanGate: true, // 计划只能作为草稿 revision；人工批准后才签发执行授权（影子期仍不执行）。
+  },
+
   'site_builder.brand_profile': {
     id: 'site_builder.brand_profile',
     // 品牌 web 研究的两条出网通道（Broker allowedTools 白名单据此裁决，09 §2.4 / C1-C3）。
