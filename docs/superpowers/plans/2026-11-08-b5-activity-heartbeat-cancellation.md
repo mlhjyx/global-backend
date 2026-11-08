@@ -13,16 +13,19 @@
 
 ## 2. 改动
 
-1. **超时对齐**（`understanding.workflow.ts`）：模型活动 3m→**6m**（300s 上限 + 1m 余量）；
-   抓取活动 3m→**5m**（并发多页 × 60s 抓取上限 + 渲染/排队）。
-2. **心跳**：模型/抓取活动加 `heartbeatTimeout: '2 minutes'`；`understanding.activities.ts` 的
-   长活动（crawlPages / extractClaims / extractOfferings）包 `withActivityHeartbeat(30s)`
-   周期上报。worker 死亡 → 2 分钟内被 Temporal 发现并重试，不再等满 startToClose。
+1. **超时对齐**（`understanding.workflow.ts`）：模型活动 3m→**15m**（一次结构化回答可能串初答 +
+   一次 schema 修复两条 provider 调用，2×300s 上限 + 余量，与 discovery-run-lease 的
+   2×MAX 口径一致）；抓取活动 3m→**5m**（首页最坏 ≈ 176s、并发多页 × 60s 上限 + 渲染/排队）。
+2. **心跳**：模型/抓取活动加 `heartbeatTimeout: '2 minutes'`；modelActs/crawlActs 下的**每个**
+   活动（crawlWebsite / crawlPages / extractClaims / extractOfferings / extractAndPersistProfile）
+   都包 `withActivityHeartbeat(30s)` 周期上报——漏一个就会让该活动被 2 分钟心跳超时压缩预算。
+   worker 死亡 → 2 分钟内被 Temporal 发现并重试，不再等满 startToClose。
 3. **取消传播（AbortSignal 贯通）**：`activityCancellationSignal()`（非活动环境返回 undefined，
    单测安全）取 `Context.current().cancellationSignal`，传入两个抽取活动的网关调用
    （`GenerateStructuredInput.signal` 本就支持）；网关/传输层把 signal 传进 HTTP 请求。
-4. **不重复付费**：超时重试撞上一条 RESERVED 时，B2 的 remnant 分类让它**只尝试一次**即失败终态
-   （而非再发一次付费调用）——本 PR 与 B2 组合覆盖该场景，并在设计/变更记录中明示。
+4. **不重复付费**：防线是「活动时限 ≥ 线上最坏路径（2×300s）」+「取消信号真正掐断 HTTP 请求」。
+   重试会以 attempt 编号生成**新的**账本操作键，B2 的 remnant 快速失败只覆盖同一 attempt 内的
+   重执行——不能把跨 attempt 的防重复计费寄托在它上面（审查纠正）。
 
 ## 3. 非目标 / 后续
 
