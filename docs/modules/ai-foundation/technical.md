@@ -12,6 +12,7 @@
 | 2026-11-08 | S0：SKILL.md 规范 v0 + validator、四张技能表（RLS/快照不可变）、三个存量技能包化、DB resolver、ops 启停 API | 同一任务的三个 stacked PR（首 PR #833） |
 | 2026-11-08 | S1-1：四类 Pack Schema + 7 个内容包 + 冲突裁决 + Golden Set 骨架；S1-2：Pack 七表（RLS/append-only）+ 策略解析与快照 + skill-kind（model_task/service）+ 启动期 pack seed；S0 已发车（镜像 1982a551） | PR #847 / #856 |
 | 2026-11-08 | S1-3：Pack Studio ops API（草稿/校验/试跑/评测/发布/激活/灰度/回滚）+ 确定性评测回执与发布门；`pack_version` 对 app_user 开放 INSERT（发布），UPDATE/DELETE 仍禁止 | 本 PR |
+| 2026-11-08 | S2 步 13-1：两个触达模型技能（`outreach.sequence_draft` 接地起草 / `engage.reply_classify` 回信分类）+ 确定性守卫 + 各 12 条 Golden Set（零模型层进 CI）+ 模型层评测执行器 `apps/api/src/skills/eval/`（构建排除）与 `scripts/run-skill-model-evals.mts`（经网关实跑、写 `eval_receipt(tier=model)`） | 本 PR |
 
 ## 2. 技术概览
 
@@ -65,10 +66,11 @@ seed（owner 连接，worker + relay 启动期）：package upsert 不覆盖 ops
 - **两个服务技能（S1-4）**：`compliance.sanctions_screen`（handler `sanctions.screen.v1`，复用 `SanctionsScreeningService` 的内存索引；索引未启用/为空、或名字归一化后无可比 token 时如实 `not_screened`，不臆造 clear；`threshold ∈ (0,1]`；命中 >50 条截断并置 `truncated`）与 `quoting.incoterms_quote`（handler `quoting.incoterms.v1`，Incoterms 2020 卖方成本矩阵，BigInt 分整数 + 十进制四舍五入（换算/加价全整数域）；`marginPct` 为成本加价；跨币种必须输入汇率且只覆盖单一外币（多外币 `QUOTING_MIXED_COST_CURRENCIES`），缺汇率 `QUOTING_EXCHANGE_RATE_REQUIRED`；无 goods 行 `QUOTING_GOODS_REQUIRED`；金额越界 `QUOTING_AMOUNT_OVERFLOW`）。服务技能不绑 task contract、不声明工具；`executeServiceSkill` 为闭集分派，缺依赖与未接线 handler 均 fail-closed（`SERVICE_SKILL_HANDLER_UNAVAILABLE`）。L1 红线：输出无 PI/CI/PL 等单证字段，报价 `humanGate=true`。
 - **导入技能（S1-4）**：目录布局 `imported/<source-id>/<skill>/SKILL.md`（pack-type 取自 frontmatter）；加载器额外过许可/NOTICE/安全扫描门——许可仅 MIT/Apache-2.0、NOTICE 必须含 Upstream/Commit/License/Modified、正文禁止任何代码围栏（```/~~~）与可执行 HTML/`javascript:`、禁止非 NOTICE 外链（含协议相对与裸 `www.`）、禁止 `scripts/` 目录、`tenant-default` 必须 `disabled`；**违反任一门的技能不产出目录记录**（不会进 seed/运行时）。静态 resolver 无法查租户覆盖，对 `tenant-default: disabled` 一律抛 `SKILL_TENANT_NOT_ENABLED`。首批两个上游（Anthropic knowledge-work-plugins，Apache-2.0）衍生版：`research.account_research`（新任务契约，`searxng.search`+`crawl4ai.fetch`）与 `triage.lead_triage`（无工具）。正文记为派生作品，快照仅溯源。解析侧：无 workspace 覆盖行 → `SKILL_TENANT_NOT_ENABLED`，ops PUT 覆盖后可用（单测覆盖）。
 - **Golden Set（S1-4）**：每个技能/内容包 `evals/evals.json`（≥5 例，断言闭集 11 种）。CI 零模型层：service 技能逐用例真实执行 handler 并精确断言、内容包渲染策略简报断言、模型技能渲染快照（固定选择器下的策略简报 + SKILL.md 正文摘要钉住，改正文/包内容必须显式重钉）与清单结构校验；模型实测层仍走发布回执（S2）。
-- **尚未接线**：策略简报的消费方是 S1-4 的新技能；S0 三个存量技能输入不变。导入技能与模型新技能在 S1 不接入现有 run（生产流量成本为 0，直到 M2.1 消费方接入）。
+- **S2 触达技能（步 13-1）**：`outreach.sequence_draft`（接地起草：只引用已批准 Claim/Offering/证据 URL，不接地不产稿 `GROUNDING_REQUIRED`；法域页脚 US=unsubscribe / DE=Widerruf·Abbestellen；subject ≤90、body ≤2000 字符；`humanGate=true`、`allowedTools=[]`）与 `engage.reply_classify`（闭集 7 枚举 + 置信度；低置信 <0.6 与 AUTO_REPLY 冲突一律升级 `NEEDS_HUMAN`）。确定性守卫在 `apps/api/src/skills/guardrails/`（纯函数），模型输出先过守卫再断言。两技能各 12 条 Golden Set（8 条模型层 + 4 条确定性层，含设计 §7 负向 1/2/4/5 具名用例）：确定性层每个 PR 在 CI 执行，模型层由 `scripts/run-skill-model-evals.mts` ops 触发经网关实跑并写不可变 `eval_receipt(tier=model)`；`--seed` 同时经 S0 管线注册技能目录。
+- **尚未接线**：策略简报的消费方是 S1-4 的新技能；S0 三个存量技能输入不变。导入技能、S1 服务技能与步 13 的 S2 技能都不接入现有 run（生产流量成本为 0，直到 M2.1/步 13-2 的消费方接入）。
 
 ## 9. 状态与缺口
 
 - 已实现：S0 全部内容（已于 2026-11-07 发车）；S1 全部四个 PR 已入 main（Pack Schema/内容目录/冲突裁决、Pack 七表/策略解析快照/skill-kind、Pack Studio/回执/发布门、服务技能/导入 A 档/Golden Set），**S1-2 起的表与 seed 待随下一次发车部署**（运行镜像以 `local-config/global/runtime.compose.env` 为准）。
-- 缺口（后续）：策略简报、两个服务技能与导入技能接入 run（S1 只交付执行器与评测，消费方随 M2.1）；模型技能发布层评测回执执行器（S2）；`seller_document.extract_facts` 尚不存在（Phase 3），S0 以 extract_offerings 替代（设计 D-b）；租户自定义技能/zip/Git 安装（S3）；跨 run 的 run 级快照维度（接入 workflow 时扩展）。
+- 缺口（后续）：策略简报、两个服务技能与导入技能接入 run（S1 只交付执行器与评测，消费方随 M2.1）；模型技能发布层评测执行器已随步 13-1 落地（覆盖两个 S2 技能，其余模型技能按需运行同一脚本前需先接入其守卫管线）；`seller_document.extract_facts` 尚不存在（Phase 3），S0 以 extract_offerings 替代（设计 D-b）；租户自定义技能/zip/Git 安装（S3）；跨 run 的 run 级快照维度（接入 workflow 时扩展）。
 - 回退：镜像回滚即回到无技能层（表残留无害）；ops 可将任一技能平台级 DISABLED；导入技能与模型新技能默认对租户关闭。

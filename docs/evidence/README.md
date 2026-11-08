@@ -39,6 +39,8 @@
 
 [执行授权物理接线围栏复核](execution-authority-fence-review-20261001.md)：Router/ToolBroker 四个受保护文件自 `b8dd5eb0` 以来全部改动的逐提交静态复核（10-01），及 10-06 的复查与独立复审；Router 指纹据此更新，`execution-authority-policy` spec 回到 required 门。只是静态复核记录，不是 RuntimeEvidence，也不作为运行或发布证明。
 
+[2026-11-08 步 13-1 S2 触达技能 Golden Set 与模型层回执](2026-11-08-step13-s2-skills-golden-set.md)：`outreach.sequence_draft` 与 `engage.reply_classify` 经 S0 注册（ACTIVE@1.0.0，tenant-default enabled），Golden Set 各 12 条（8 模型层 + 4 确定性层）；确定性层在 CI 零模型执行全绿，模型层经真实网关 deepseek-flash 8/8+8/8 全过并写两份 `eval_receipt(tier=model, passed=true)`；未发车、未接消费方，不含发送。
+
 ## 1. 分类
 
 | 位置                               | 分类                                                                                    | 可证明                                                                                          | 不可证明                                                         |

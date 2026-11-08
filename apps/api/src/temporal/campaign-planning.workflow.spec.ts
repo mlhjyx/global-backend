@@ -64,7 +64,7 @@ beforeEach(() => resetActivities());
 describe('campaignPlanningWorkflow', () => {
   it('assembles, generates, then delivers the raw plan; no failure report on success', async () => {
     acts.assembleCampaignPlanInputs.mockResolvedValue(bundle);
-    acts.generateCampaignPlan.mockResolvedValue({ plan });
+    acts.generateCampaignPlan.mockResolvedValue({ status: 'ok', plan });
     acts.deliverCampaignPlanRevision.mockResolvedValue(undefined);
 
     await campaignPlanningWorkflow(input());
@@ -87,6 +87,89 @@ describe('campaignPlanningWorkflow', () => {
       acts.deliverCampaignPlanRevision.mock.invocationCallOrder[0];
     expect(assembleOrder).toBeLessThan(modelOrder);
     expect(modelOrder).toBeLessThan(deliverOrder);
+  });
+
+  it('replans on validator issues within maxReplans and delivers with the replan history', async () => {
+    acts.assembleCampaignPlanInputs.mockResolvedValue(bundle);
+    acts.generateCampaignPlan
+      .mockResolvedValueOnce({ status: 'issues', issues: [{ path: 'goal.objective', message: 'x' }] })
+      .mockResolvedValueOnce({ status: 'ok', plan });
+    acts.deliverCampaignPlanRevision.mockResolvedValue(undefined);
+
+    await campaignPlanningWorkflow(input({ maxReplans: 1 }));
+
+    expect(acts.generateCampaignPlan).toHaveBeenCalledTimes(2);
+    const secondCall = acts.generateCampaignPlan.mock.calls[1]![0] as {
+      round: number;
+      replan: { reasonCode: string; issues: unknown[] };
+    };
+    expect(secondCall.round).toBe(1);
+    expect(secondCall.replan.reasonCode).toBe('VALIDATOR_ISSUES');
+    expect(secondCall.replan.issues).toHaveLength(1);
+    expect(acts.deliverCampaignPlanRevision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        plan,
+        replanHistory: [
+          { round: 0, reasonCode: 'VALIDATOR_ISSUES', issues: [{ path: 'goal.objective', message: 'x' }] },
+        ],
+      }),
+    );
+    expect(acts.reportCampaignPlanJobFailure).not.toHaveBeenCalled();
+  });
+
+  it('stops after the budget is exhausted and reports NEEDS_HUMAN with the history', async () => {
+    acts.assembleCampaignPlanInputs.mockResolvedValue(bundle);
+    acts.generateCampaignPlan.mockResolvedValue({
+      status: 'issues',
+      issues: [{ path: 'data', message: 'invalid' }],
+    });
+
+    await campaignPlanningWorkflow(input({ maxReplans: 2 }));
+
+    expect(acts.generateCampaignPlan).toHaveBeenCalledTimes(3);
+    expect(acts.deliverCampaignPlanRevision).not.toHaveBeenCalled();
+    expect(acts.reportCampaignPlanJobFailure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        state: 'NEEDS_HUMAN',
+        error: 'CAMPAIGN_PLAN_NEEDS_HUMAN',
+        replanHistory: expect.arrayContaining([
+          expect.objectContaining({ round: 0, reasonCode: 'VALIDATOR_ISSUES' }),
+          expect.objectContaining({ round: 1, reasonCode: 'VALIDATOR_ISSUES' }),
+          expect.objectContaining({ round: 2, reasonCode: 'VALIDATOR_ISSUES' }),
+        ]),
+      }),
+    );
+  });
+
+  it('treats a human-declined regeneration as round 0 with the previous plan and reason', async () => {
+    acts.assembleCampaignPlanInputs.mockResolvedValue(bundle);
+    acts.generateCampaignPlan.mockResolvedValue({ status: 'ok', plan });
+    acts.deliverCampaignPlanRevision.mockResolvedValue(undefined);
+    const previousPlan = { schemaVersion: 'campaign-plan/v0' };
+
+    await campaignPlanningWorkflow(
+      input({
+        maxReplans: 1,
+        previousPlan,
+        replanReason: { code: 'HUMAN_DECLINE', detail: '预算过高' },
+      }),
+    );
+
+    const firstCall = acts.generateCampaignPlan.mock.calls[0]![0] as {
+      round: number;
+      replan: { reasonCode: string; previousPlan: unknown; detail: string };
+    };
+    expect(firstCall.round).toBe(0);
+    expect(firstCall.replan.reasonCode).toBe('HUMAN_DECLINE');
+    expect(firstCall.replan.previousPlan).toEqual(previousPlan);
+    expect(firstCall.replan.detail).toBe('预算过高');
+  });
+
+  it('rejects maxReplans outside 0..2 before any activity runs', async () => {
+    await expect(campaignPlanningWorkflow(input({ maxReplans: 3 }))).rejects.toMatchObject({
+      type: 'CAMPAIGN_PLAN_INPUT_INVALID',
+    });
+    expect(acts.assembleCampaignPlanInputs).not.toHaveBeenCalled();
   });
 
   it('negative 4: skill platform disabled fails the job with SKILL_PLATFORM_DISABLED', async () => {

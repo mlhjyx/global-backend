@@ -131,6 +131,7 @@ describe('CampaignPlanInternalController.requestDraft', () => {
     });
     expect(launcher.launch).toHaveBeenCalledWith({
       ...body,
+      maxReplans: 0,
       executionBudget: binding,
     });
     expect(response).toEqual({ data: { jobId: JOB_ID } });

@@ -117,7 +117,12 @@ function assertionFailure(
         ? null
         : `source_count_gte failed at ${assertion.path ?? "output"}`;
     case "no_vendor_marketing": {
-      const text = JSON.stringify(value ?? "").toLowerCase();
+      // undefined 路径必须红：JSON.stringify(undefined ?? "") === '""' 会让断言
+      // 恒真——路径改名/输出返工时该检查会静默失效（其它字符串断言都 fail-closed）。
+      if (value === undefined) {
+        return `no_vendor_marketing path did not resolve at ${assertion.path ?? "output"}`;
+      }
+      const text = JSON.stringify(value).toLowerCase();
       const patterns = assertion.patterns ?? DEFAULT_VENDOR_PATTERNS;
       const hit = patterns.find((pattern) => text.includes(pattern.toLowerCase()));
       return hit === undefined ? null : `no_vendor_marketing hit "${hit}"`;

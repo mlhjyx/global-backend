@@ -80,12 +80,17 @@ export type EvalAssertion =
   | EvalToolNotCalledAssertion
   | EvalApprovalRequiredAssertion;
 
+export const EVAL_CASE_TIERS = ["model", "deterministic"] as const;
+export type EvalCaseTier = (typeof EVAL_CASE_TIERS)[number];
+
 export interface EvalCase {
   readonly id: string | number;
   readonly prompt?: string;
   readonly input?: unknown;
   readonly expectedOutput?: string;
   readonly files?: readonly string[];
+  /** 执行层标注：model=发布层经网关实跑；deterministic=CI 零模型执行。缺省按 model。 */
+  readonly tier?: EvalCaseTier;
   readonly assertions: readonly EvalAssertion[];
 }
 
@@ -174,6 +179,17 @@ export function validateEvalManifest(
       error("EVAL_CASE_ID_DUPLICATE", `duplicate case id: ${String(evalCase.id)}`, caseId);
     } else {
       ids.add(String(evalCase.id));
+    }
+    if (
+      evalCase.tier !== undefined &&
+      !EVAL_CASE_TIERS.includes(evalCase.tier as EvalCaseTier)
+    ) {
+      // 拼错 tier 会让用例两个执行层都不跑——必须在清单校验就红。
+      error(
+        "EVAL_CASE_TIER_INVALID",
+        `tier must be one of ${EVAL_CASE_TIERS.join(", ")}, got ${JSON.stringify(evalCase.tier)}`,
+        caseId,
+      );
     }
     const hasPrompt = typeof evalCase.prompt === "string" && evalCase.prompt.trim() !== "";
     const hasInput = evalCase.input !== undefined;
