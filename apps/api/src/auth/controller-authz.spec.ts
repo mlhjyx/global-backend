@@ -62,6 +62,7 @@ const SERVICE_PROTECTED_CONTROLLERS = [
 
 const SERVICE_PROTECTED_CONTROLLER_FILES = new Set([
   'campaign-plan/campaign-plan-internal.controller.ts',
+  'execution-budget/execution-budget-window-usage.controller.ts',
   'platform-authority/platform-execution-technical-quote.controller.ts',
   'platform-authority/platform-target-lookup.controller.ts',
   'platform-authority/platform-revocation-http.controller.ts',
@@ -133,6 +134,9 @@ describe('controller authorization guard topology', () => {
         const requiredTokens = path === 'campaign-plan/campaign-plan-internal.controller.ts' ? [
           '@UseGuards(CampaignPlanServiceTokenGuard)',
           'x-service-token',
+        ] : path === 'execution-budget/execution-budget-window-usage.controller.ts' ? [
+          // ch08 §3.1.1 C1a：服务身份 + 回环限制的只读实扣读回端点（x-service-token 由守卫内部校验）。
+          '@UseGuards(BudgetReadbackServiceTokenGuard)',
         ] : path === 'platform-authority/platform-revocation-http.controller.ts' ? [
           '@UseGuards(PlatformRevocationHttpGuard)', '@PlatformRevocationRecovery()', '@ApiConsumes("application/jose")', 'receivePlatformAuthorityRevocation_v1',
         ] : path === 'platform-authority/platform-target-lookup.controller.ts' ? [

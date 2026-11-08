@@ -104,6 +104,8 @@ export class ExecutionBudgetWindowUsageController {
   @ApiOperation({
     summary:
       '窗口实扣读回（服务身份）：SUM(tool_budget_operation.charged_microusd) 按 workspace/时间窗；窗口花费的唯一权威口径',
+    description:
+      '供 gain-saas 在签发执行预算 Grant 前判定窗口余额（ch08 C1a）。返回窗口内已结算实扣（SETTLED/RESULT_UNKNOWN）、仍在途的预留与按 purpose 的构成；只读、不写任何表。服务身份（x-service-token）且仅限回环调用；未配置令牌时返回 503（fail-closed）。',
   })
   @ApiQuery({ name: 'workspaceId', format: 'uuid' })
   @ApiQuery({ name: 'since', format: 'date-time', description: 'ISO8601（UTC）' })
