@@ -2310,25 +2310,73 @@ model ContactPoint {
   contactId   String    @map("contact_id") @db.Uuid
   type        String // email | phone | linkedin
   value       String
-  status      String    @default("UNVERIFIED") // UNVERIFIED | VALID | RISKY | INVALID
-  verifiedAt  DateTime? @map("verified_at")
+  /// legacy 投影（UNVERIFIED | VALID | RISKY | INVALID）：由写入器按 verificationState 同步维护，
+  /// 读侧逐步迁移；BLOCKED 是「本次尝试的合规处置」，只进事件账。
+  status      String    @default("UNVERIFIED")
+  verifiedAt  DateTime? @map("verified_at") // 最近一次验证尝试时间
   createdAt   DateTime  @default(now()) @map("created_at")
   // A4（2026-11-08）：分类/来源/合规/验证元数据（见迁移 20261108160000）。
   emailType          String? @map("email_type") // role | generic_sales | procurement | management | finance | support | personal | other
-  sourceType         String? @map("source_type") // impressum | contact_page | homepage | directory | social | pattern_guess | operator | provider
+  sourceType         String  @map("source_type") // impressum | contact_page | homepage | directory | social | pattern_guess | operator | provider | legacy_unclassified
   sourceUrl          String? @map("source_url")
   robotsStatus       String? @map("robots_status") // allowed | disallowed | unknown
   tosStatus          String? @map("tos_status") // allowed | restricted | unknown
   legalBasis         String? @map("legal_basis") // legitimate_interest | consent | contract | legal_obligation
-  verificationMethod String? @map("verification_method") // smtp_rcpt | pattern_guess | provider_reported | operator | import
+  verificationMethod String? @map("verification_method") // smtp_rcpt | pattern_guess | provider_reported | operator | import | third_party_api
   catchAll           String? @map("catch_all") // catch_all | not_catch_all | inconclusive | unknown
   consentRecord      Json?   @map("consent_record")
+  // P1（2026-11-09）：四态（迁移 20261109120000_contact_point_four_state）。
+  verificationState       String    @default("UNKNOWN") @map("verification_state") // VALID | INVALID | CATCH_ALL_RISKY | UNKNOWN
+  catchAllClass           String?   @map("catch_all_class") // true_catch_all | unprobeable_provider | inconclusive | not_catch_all | unknown
+  verificationProvider    String?   @map("verification_provider") // smtp_self | millionverifier | … | operator | legacy_unclassified
+  confidence              Int?      @db.SmallInt
+  domainBlindKey          String?   @map("domain_blind_key") // bi:v1:<hmac>；按域聚合，不落明文域
+  lastSeenAt              DateTime  @default(now()) @map("last_seen_at")
+  nextReverifyAt          DateTime? @map("next_reverify_at")
+  validSince              DateTime? @map("valid_since")
+  phoneType               String?   @map("phone_type") // mobile | landline | voip | unknown
+  lastVerificationEventId String?   @map("last_verification_event_id") @db.Uuid
 
-  contact CanonicalContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  contact          CanonicalContact               @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  verificationEvents ContactPointVerificationEvent[]
 
   @@unique([contactId, type, value])
   @@index([workspaceId])
+  @@index([workspaceId, type, verificationState], map: "contact_point_state_idx")
+  @@index([workspaceId, domainBlindKey], map: "contact_point_domain_blind_key_idx")
+  @@index([workspaceId, nextReverifyAt], map: "contact_point_reverify_idx")
   @@map("contact_point")
+}
+
+/// P1（2026-11-09）：验证事件账（append-only）。每次验证尝试一行——成功、失败、被合规门拦截
+/// 都记；唯一键 (workspace, point, provider, request_hash) 保证供应商重试不重复记费。
+/// app_user 只有 SELECT/INSERT（迁移授权），更正走 DBA/DSR 流程。
+model ContactPointVerificationEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  workspaceId    String   @map("workspace_id") @db.Uuid
+  contactPointId String   @map("contact_point_id") @db.Uuid
+  attemptNo      Int      @map("attempt_no")
+  providerKey    String   @map("provider_key")
+  method         String // third_party_api | smtp_rcpt | operator | import | pattern_guess
+  verdict        String // valid | invalid | catch_all | unknown | blocked | error
+  detail         String?
+  catchAll       String?  @map("catch_all") // catch_all | not_catch_all | inconclusive | unknown
+  catchAllClass  String?  @map("catch_all_class")
+  score          Int?     @db.SmallInt
+  costMicrousd   BigInt   @default(0) @map("cost_microusd")
+  lawfulBasis    Json?    @map("lawful_basis")
+  actorId        String   @map("actor_id")
+  requestHash    String   @map("request_hash")
+  latencyMs      Int?     @map("latency_ms")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  contactPoint ContactPoint @relation(fields: [contactPointId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, contactPointId, providerKey, requestHash], map: "cpve_unique_attempt")
+  @@index([workspaceId, contactPointId, createdAt(sort: Desc)], map: "cpve_point_time_idx")
+  @@index([workspaceId, verdict, createdAt], map: "cpve_verdict_time_idx")
+  @@index([workspaceId, providerKey, createdAt], map: "cpve_provider_time_idx")
+  @@map("contact_point_verification_event")
 }
 
 /// 公司级联系路径（BI-14）：公司官网首页上链到的联系页、Impressum 页、供应商页、公司 LinkedIn 页与 X 账号，

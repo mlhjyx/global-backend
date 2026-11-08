@@ -73,8 +73,8 @@ async function main(): Promise<void> {
     const c = await tx.canonicalContact.create({
       data: { workspaceId: WS, companyId: company.id, fullName: NAME, dedupeKey: `e:${EMAIL.toLowerCase()}` },
     });
-    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: EMAIL } });
-    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'phone', value: PHONE } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', sourceType: 'operator', value: EMAIL } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'phone', sourceType: 'operator', value: PHONE } });
     return c.id;
   });
   await owner.fieldEvidence.createMany({
@@ -95,7 +95,7 @@ async function main(): Promise<void> {
   const located = await acts.freezeSubject(input);
   check('B3 定位：1 contact / 2 contactPoints / 2 fieldEvidence / 1 ICP', located.contactIds.length === 1 && located.contactPointsCount === 2 && located.fieldEvidenceCount === 2 && located.affectedIcpIds.length === 1);
   check('B4 located PII-free（无邮箱/人名字段）', JSON.stringify(located).indexOf(EMAIL) === -1 && JSON.stringify(located).indexOf(NAME) === -1);
-  const supp = await owner.suppressionRecord.findFirst({ where: { workspaceId: WS, type: 'email', value: EMAIL.toLowerCase() } });
+  const supp = await owner.suppressionRecord.findFirst({ where: { workspaceId: WS, type: 'email', sourceType: 'operator', value: EMAIL.toLowerCase() } });
   check('B5 冻结写 suppression_record(email)', !!supp);
   const afterFreeze = await owner.deletionRequest.findUnique({ where: { id: view.id } });
   check('B6 状态 → FROZEN', afterFreeze?.status === 'FROZEN');
@@ -144,7 +144,7 @@ async function main(): Promise<void> {
   await owner.lead.create({ data: { workspaceId: WS, icpId: icp.id, canonicalCompanyId: company2.id, status: 'DISCOVERED' } });
   const contactId2 = await prisma.withWorkspace(WS, async (tx) => {
     const c = await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: company2.id, fullName: NAME2, dedupeKey: `e:${EMAIL2}` } });
-    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: EMAIL2 } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', sourceType: 'operator', value: EMAIL2 } });
     return c.id;
   });
   await owner.fieldEvidence.create({ data: { workspaceId: WS, entityType: 'contact', entityId: contactId2, field: 'person.profile', value: { personal_data: true }, providerKey: 'decision_maker', license: 'public', dataClass: 'red' } });
@@ -180,7 +180,7 @@ async function main(): Promise<void> {
   const fCompany = await owner.canonicalCompany.create({ data: { workspaceId: WS, name: 'F Race Co', domain: 'frace.example', dedupeKey: 'd:frace.example', status: 'NEW' } });
   const fContactId = await prisma.withWorkspace(WS, async (tx) => {
     const c = await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: fCompany.id, fullName: 'Race Person', dedupeKey: 'e:race@frace.example' } });
-    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: 'race@frace.example' } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', sourceType: 'operator', value: 'race@frace.example' } });
     return c.id;
   });
   const races = await Promise.allSettled([
@@ -195,7 +195,7 @@ async function main(): Promise<void> {
   const gCompany = await owner.canonicalCompany.create({ data: { workspaceId: WS, name: 'G Recover Co', domain: 'grecover.example', dedupeKey: 'd:grecover.example', status: 'NEW' } });
   const gContactId = await prisma.withWorkspace(WS, async (tx) => {
     const c = await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: gCompany.id, fullName: 'Recover Person', dedupeKey: 'e:recover@grecover.example' } });
-    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: 'recover@grecover.example' } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', sourceType: 'operator', value: 'recover@grecover.example' } });
     return c.id;
   });
   const gView = await delSvc.createRequest(WS, 'actor', { subjectType: 'contact', subjectId: gContactId });
@@ -213,7 +213,7 @@ async function main(): Promise<void> {
   // 反例：擦除从未发生（FROZEN）的 complete 应拒绝伪造回执
   const g2ContactId = await prisma.withWorkspace(WS, async (tx) => {
     const c = await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: gCompany.id, fullName: 'Never Erased', dedupeKey: 'e:never@grecover.example' } });
-    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: 'never@grecover.example' } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', sourceType: 'operator', value: 'never@grecover.example' } });
     return c.id;
   });
   const g2View = await delSvc.createRequest(WS, 'actor', { subjectType: 'contact', subjectId: g2ContactId });
@@ -227,7 +227,7 @@ async function main(): Promise<void> {
   const hCompany = await owner.canonicalCompany.create({ data: { workspaceId: WS, name: 'H Straggler Co', domain: 'hstrag.example', dedupeKey: 'd:hstrag.example', status: 'NEW' } });
   await prisma.withWorkspace(WS, async (tx) => {
     const c = await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: hCompany.id, fullName: 'Straggler One', dedupeKey: 'e:one@hstrag.example' } });
-    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: 'one@hstrag.example' } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', sourceType: 'operator', value: 'one@hstrag.example' } });
   });
   const hView = await delSvc.createRequest(WS, 'actor', { subjectType: 'company', subjectId: hCompany.id });
   const hInput: DeletionWorkflowInput = { workspaceId: WS, deletionRequestId: hView.id, subjectType: 'company', subjectId: hCompany.id };
@@ -237,7 +237,7 @@ async function main(): Promise<void> {
   // 模拟冻结后并发发现新增的漏网联系人
   await prisma.withWorkspace(WS, async (tx) => {
     const c = await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: hCompany.id, fullName: 'Straggler Two', dedupeKey: 'e:two@hstrag.example' } });
-    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: 'two@hstrag.example' } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', sourceType: 'operator', value: 'two@hstrag.example' } });
   });
   await acts.eraseSubject({ input: hInput, located: hLocated });
   const hRemaining = await owner.canonicalContact.count({ where: { companyId: hCompany.id } });

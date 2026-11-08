@@ -481,6 +481,12 @@ describe('actual discovery receipt consumers', () => {
       suppressionRecord: { findMany: vi.fn(async () => []) },
       fieldEvidence: { create: vi.fn(async () => ({})) },
       personalDataAccessAudit: { create: vi.fn(async () => ({})) },
+      contactPointVerificationEvent: {
+        findUnique: vi.fn(async () => null),
+        count: vi.fn(async () => 0),
+        create: vi.fn(async () => ({ id: 'event-3' })),
+      },
+      $executeRawUnsafe: vi.fn(async () => 1),
     };
     const prisma = {
       withWorkspace: vi.fn(async (

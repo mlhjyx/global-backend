@@ -67,7 +67,7 @@ async function main(): Promise<void> {
   });
   await prisma.withWorkspace(WS, async (tx) => {
     const c = await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: co1.id, fullName: 'Snapshot One', dedupeKey: 'e:snap1@race1.example' } });
-    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: 'snap1@race1.example' } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', sourceType: 'operator', value: 'snap1@race1.example' } });
   });
   const v1 = await delSvc.createRequest(WS, 'actor', { subjectType: 'company', subjectId: co1.id });
   const in1: DeletionWorkflowInput = { workspaceId: WS, deletionRequestId: v1.id, subjectType: 'company', subjectId: co1.id };
@@ -76,8 +76,8 @@ async function main(): Promise<void> {
   // 冻结后新增「漏网」联系人（模拟并发发现在冻结后、擦除前提交）
   await prisma.withWorkspace(WS, async (tx) => {
     const c = await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: co1.id, fullName: 'Straggler Two', dedupeKey: 'e:snap2@race1.example' } });
-    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: 'snap2@race1.example' } });
-    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'phone', value: '+49 111 222' } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', sourceType: 'operator', value: 'snap2@race1.example' } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'phone', sourceType: 'operator', value: '+49 111 222' } });
   });
   const counts1 = await acts.eraseSubject({ input: in1, located: loc1 });
   check('F1.1 擦除计数取真实擦除面：contactsErased=2（非冻结快照 1）', counts1.contactsErased === 2);
@@ -98,20 +98,20 @@ async function main(): Promise<void> {
   const EMAIL_LATE = 'late@race2.example';
   const c2Id = await prisma.withWorkspace(WS, async (tx) => {
     const c = await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: co2.id, fullName: 'Late Mailer', dedupeKey: `e:${EMAIL_EARLY}` } });
-    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: EMAIL_EARLY } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', sourceType: 'operator', value: EMAIL_EARLY } });
     return c.id;
   });
   const v2 = await delSvc.createRequest(WS, 'actor', { subjectType: 'contact', subjectId: c2Id });
   const in2: DeletionWorkflowInput = { workspaceId: WS, deletionRequestId: v2.id, subjectType: 'contact', subjectId: c2Id };
   const loc2 = await acts.freezeSubject(in2);
-  const suppEarly = await owner.suppressionRecord.count({ where: { workspaceId: WS, type: 'email', value: EMAIL_EARLY } });
+  const suppEarly = await owner.suppressionRecord.count({ where: { workspaceId: WS, type: 'email', sourceType: 'operator', value: EMAIL_EARLY } });
   check('F2.0 冻结写早邮箱 suppression', suppEarly === 1);
   // 冻结后给同一联系人挂一个**新邮箱**（快照未见）
   await prisma.withWorkspace(WS, async (tx) => {
-    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c2Id, type: 'email', value: EMAIL_LATE } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c2Id, type: 'email', sourceType: 'operator', value: EMAIL_LATE } });
   });
   await acts.eraseSubject({ input: in2, located: loc2 });
-  const suppLate = await owner.suppressionRecord.count({ where: { workspaceId: WS, type: 'email', value: EMAIL_LATE } });
+  const suppLate = await owner.suppressionRecord.count({ where: { workspaceId: WS, type: 'email', sourceType: 'operator', value: EMAIL_LATE } });
   check('F2.1 🔴 擦除时刻补写「冻结后新增邮箱」的 suppression_record', suppLate === 1);
   const c2Gone = await owner.canonicalContact.findUnique({ where: { id: c2Id } });
   check('F2.2 contact 硬删净', c2Gone === null);
@@ -123,7 +123,7 @@ async function main(): Promise<void> {
   const PERSON = 'Petra Wiedergänger';
   const c3Id = await prisma.withWorkspace(WS, async (tx) => {
     const c = await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: co3.id, fullName: PERSON, dedupeKey: 'e:petra.old@race3.example' } });
-    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: 'petra.old@race3.example' } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', sourceType: 'operator', value: 'petra.old@race3.example' } });
     return c.id;
   });
   const v3 = await delSvc.createRequest(WS, 'actor', { subjectType: 'contact', subjectId: c3Id });
@@ -221,7 +221,7 @@ async function main(): Promise<void> {
   // DSR 目标原始件
   const c6Id = await prisma.withWorkspace(WS, async (tx) => {
     const c = await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: co6.id, fullName: REBORN, dedupeKey: 'e:reborn.old@race6.example' } });
-    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: 'reborn.old@race6.example' } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', sourceType: 'operator', value: 'reborn.old@race6.example' } });
     return c.id;
   });
   const v6 = await delSvc.createRequest(WS, 'actor', { subjectType: 'contact', subjectId: c6Id });
@@ -230,7 +230,7 @@ async function main(): Promise<void> {
   // 模拟竞态 persist 的产物：受理后新建的**同人新邮箱**重物化件（真实竞态里创建闸读快照在冻结提交前 → 漏拦）
   const artifactId = await prisma.withWorkspace(WS, async (tx) => {
     const c = await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: co6.id, fullName: REBORN, dedupeKey: 'e:reborn.NEW@elsewhere.example' } });
-    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: 'reborn.NEW@elsewhere.example' } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', sourceType: 'operator', value: 'reborn.NEW@elsewhere.example' } });
     return c.id;
   });
   const counts6 = await acts.eraseSubject({ input: in6, located: loc6 });
@@ -248,7 +248,7 @@ async function main(): Promise<void> {
   const PERSON7 = 'Konkurrent Wiedergänger';
   const c7Id = await prisma.withWorkspace(WS, async (tx) => {
     const c = await tx.canonicalContact.create({ data: { workspaceId: WS, companyId: co7.id, fullName: PERSON7, dedupeKey: 'e:k.old@race7.example' } });
-    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: 'k.old@race7.example' } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', sourceType: 'operator', value: 'k.old@race7.example' } });
     return c.id;
   });
   const v7 = await delSvc.createRequest(WS, 'actor', { subjectType: 'contact', subjectId: c7Id });
@@ -291,7 +291,7 @@ async function main(): Promise<void> {
     const c = await tx.canonicalContact.create({
       data: { workspaceId: WS, companyId: co8.id, fullName: CANON, dedupeKey: 'e:petra.old@race8.example' },
     });
-    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: 'petra.old@race8.example' } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', sourceType: 'operator', value: 'petra.old@race8.example' } });
     return c.id;
   });
   const v8 = await delSvc.createRequest(WS, 'actor', { subjectType: 'contact', subjectId: c8Id });
@@ -318,7 +318,7 @@ async function main(): Promise<void> {
     const c = await tx.canonicalContact.create({
       data: { workspaceId: WS, companyId: co8.id, fullName: 'Wiedergänger, Petra', dedupeKey: 'e:petra.comma@elsewhere.example' },
     });
-    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', value: 'petra.comma@elsewhere.example' } });
+    await tx.contactPoint.create({ data: { workspaceId: WS, contactId: c.id, type: 'email', sourceType: 'operator', value: 'petra.comma@elsewhere.example' } });
     return c.id;
   });
   const counts8 = await acts.eraseSubject({ input: in8, located: loc8 });

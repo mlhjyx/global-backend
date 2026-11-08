@@ -50,7 +50,8 @@ function fakeTx(
     contact?: { id: string; fullName: string; company: { dedupeKey: string } };
   },
 ) {
-  const upsert = vi.fn(async () => ({}));
+  const upsert = vi.fn(async () => ({ id: 'point-1' }));
+  const pointUpdate = vi.fn(async () => ({}));
   const create = vi.fn(async () => ({}));
   const findMany = vi.fn(async () => [
     ...currentSuppressedEmails.map((value) => ({ type: 'email', value })),
@@ -58,9 +59,16 @@ function fakeTx(
   ]);
   const queryRaw = vi.fn(async () => [opts?.company ?? { id: 'co-1', name: 'Acme', domain: 'acme.de', status: 'NEW' }]);
   const updateMany = vi.fn(async () => ({ count: 1 }));
+  const eventCreate = vi.fn(async () => ({ id: 'event-1' }));
   return {
     tx: {
-      contactPoint: { upsert },
+      contactPoint: { upsert, update: pointUpdate },
+      contactPointVerificationEvent: {
+        findUnique: vi.fn(async () => null),
+        count: vi.fn(async () => 0),
+        create: eventCreate,
+      },
+      $executeRawUnsafe: vi.fn(async () => 1),
       fieldEvidence: { create },
       suppressionRecord: { findMany },
       canonicalCompany: { updateMany },
@@ -231,7 +239,7 @@ describe('email-guess-persist · authoritative replay readback', () => {
 
 describe('A4：分类/验证元数据落库', () => {
   it('catchAllFromVerdictDetail：与 decideEmailVerdict 真实文案对齐（三态 + unknown）', async () => {
-    const { catchAllFromVerdictDetail } = await import('./email-guess-persist');
+    const { catchAllFromVerdictDetail } = await import('./contact-point-verification-state');
     expect(catchAllFromVerdictDetail('catch_all_domain')).toBe('catch_all');
     expect(catchAllFromVerdictDetail('smtp_accepted:250')).toBe('not_catch_all');
     expect(catchAllFromVerdictDetail('catch_all_unproven')).toBe('inconclusive');
@@ -243,7 +251,7 @@ describe('A4：分类/验证元数据落库', () => {
   });
 
   it('verificationMethodFromVerdictDetail：只把真产生 RCPT 结论的 detail 记为 smtp_rcpt', async () => {
-    const { verificationMethodFromVerdictDetail } = await import('./email-guess-persist');
+    const { verificationMethodFromVerdictDetail } = await import('./contact-point-verification-state');
     expect(verificationMethodFromVerdictDetail('smtp_accepted:250')).toBe('smtp_rcpt');
     expect(verificationMethodFromVerdictDetail('catch_all_domain')).toBe('smtp_rcpt');
     expect(verificationMethodFromVerdictDetail('catch_all_unproven')).toBe('smtp_rcpt');

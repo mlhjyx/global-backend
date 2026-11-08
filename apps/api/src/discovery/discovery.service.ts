@@ -25,6 +25,19 @@ import {
   companyMatchesSuppression,
 } from './suppression-value';
 import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
+import {
+  catchAllClassFromEmailVerdictDetail,
+  eventVerdictFromEmailVerdict,
+  legacyCatchAllFromClass,
+  transitionVerificationState,
+  verificationMethodFromVerdictDetail,
+  verifiedAtStateColumns,
+  type EmailVerificationState,
+} from './contact-point-verification-state';
+import {
+  buildVerificationRequestHash,
+  recordContactPointVerificationEvent,
+} from './contact-point-verification-event';
 import { companyMayUseExternalProcessing, contactMayUseExternalProcessing } from './company-suppression-gate';
 import { recordPersonalDataAccess } from '../compliance/personal-data-access-audit';
 import { TemporalClient } from '../temporal/temporal.client';
@@ -850,6 +863,9 @@ export class DiscoveryService {
         where: { id: pointId },
         select: {
           value: true,
+          verificationState: true,
+          validSince: true,
+          nextReverifyAt: true,
           contact: {
             select: {
               company: {
@@ -901,6 +917,28 @@ export class DiscoveryService {
           }
         : verdict;
       const committedProviderKey = currentlySuppressed ? 'compliance_gate' : providerKey;
+      // P1 四态：同一事务里推进状态机 + 写验证事件账（幂等键含本次尝试时间——事件账以
+      // 「每次尝试一行」为准，预算层 replay 不会重跑本段）。BLOCKED 只记事件、不改四态。
+      const attemptedAt = new Date();
+      const eventVerdict = eventVerdictFromEmailVerdict(
+        committedVerdict.status,
+        committedVerdict.detail ?? null,
+      );
+      const catchAllClass = catchAllClassFromEmailVerdictDetail(committedVerdict.detail ?? null);
+      const transition = transitionVerificationState(
+        {
+          state: currentPoint.verificationState as EmailVerificationState,
+          validSince: currentPoint.validSince,
+          nextReverifyAt: currentPoint.nextReverifyAt,
+        },
+        { verdict: eventVerdict, catchAllClass: catchAllClass ?? undefined },
+        attemptedAt,
+      );
+      const projection = verifiedAtStateColumns(transition);
+      // legacy status：非 BLOCKED 一律用四态投影（防「valid 判决打在粘性 INVALID 点上」
+      // 把旧列翻成 VALID 而四态仍是 INVALID 的分叉）；BLOCKED 保留原产品语义——
+      // 它是本次尝试的合规处置，旧列同步置 BLOCKED 让既有读侧继续保守。
+      const effectiveStatus = eventVerdict === 'blocked' ? 'BLOCKED' : projection.status;
       await transaction.fieldEvidence.create({
         data: {
           workspaceId: ctx.workspaceId,
@@ -916,12 +954,58 @@ export class DiscoveryService {
           } as unknown as Prisma.InputJsonValue,
           providerKey: committedProviderKey,
           license: 'public',
-          allowedActions: allowedActionsFor(committedVerdict.status) as unknown as Prisma.InputJsonValue,
+          allowedActions: allowedActionsFor(effectiveStatus) as unknown as Prisma.InputJsonValue,
         },
+      });
+      // 「方法」如实记录是否真的做过 SMTP 探测：反枚举短路/不可达/MAIL FROM 被拒/source_policy
+      // 拒绝都**没有触网**，与 email-guess-persist 同口径记 pattern_guess（D3 审计诚实性）。
+      const verificationMethod = verificationMethodFromVerdictDetail(committedVerdict.detail ?? null);
+      const verificationEvent = await recordContactPointVerificationEvent(transaction, {
+        workspaceId: ctx.workspaceId,
+        contactPointId: pointId,
+        providerKey: committedProviderKey,
+        method: verificationMethod,
+        verdict: eventVerdict,
+        detail: committedVerdict.detail ?? null,
+        catchAll: legacyCatchAllFromClass(catchAllClass),
+        catchAllClass,
+        score: projection.confidence,
+        costMicrousd: Math.round((committedVerdict.costCents ?? 0) * 10_000),
+        lawfulBasis: (recordedBasis ?? null) as Record<string, unknown> | null,
+        actorId: ctx.userId,
+        requestHash: buildVerificationRequestHash(
+          pointId,
+          committedProviderKey,
+          `${binding.requestSha256}|${attemptedAt.toISOString()}`,
+        ),
       });
       const updated = await transaction.contactPoint.update({
         where: { id: pointId },
-        data: { status: committedVerdict.status, verifiedAt: new Date() },
+        data: {
+          status: effectiveStatus,
+          verifiedAt: attemptedAt,
+          ...(verificationEvent.id ? { lastVerificationEventId: verificationEvent.id } : {}),
+          ...(eventVerdict === 'blocked'
+            ? {}
+            : {
+                verificationState: projection.verificationState,
+                validSince: projection.validSince,
+                verificationProvider: committedProviderKey,
+                verificationMethod,
+                confidence: projection.confidence,
+                nextReverifyAt: projection.nextReverifyAt,
+                // INVALID 判决要清掉旧的 catch-all 分类（迁移回填对 INVALID 留 NULL 的同一不变式）；
+                // 其余非 definitive 事件（unknown/error）不动既有分类——那是上一次有效验证的知识。
+                ...(eventVerdict === 'invalid'
+                  ? { catchAll: 'unknown' as const, catchAllClass: null }
+                  : catchAllClass
+                    ? {
+                        catchAll: legacyCatchAllFromClass(catchAllClass),
+                        catchAllClass,
+                      }
+                    : {}),
+              }),
+        },
       });
       // Q25：邮箱验证访问审计（与状态回写同事务）。
       await recordPersonalDataAccess(transaction, {

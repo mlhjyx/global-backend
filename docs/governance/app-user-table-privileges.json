@@ -127,6 +127,10 @@
       "SELECT",
       "UPDATE"
     ],
+    "contact_point_verification_event": [
+      "INSERT",
+      "SELECT"
+    ],
     "data_provider": [
       "SELECT"
     ],
