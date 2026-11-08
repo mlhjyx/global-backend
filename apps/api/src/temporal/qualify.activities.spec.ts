@@ -35,6 +35,17 @@ function fixture(options: {
   screenImpl?: (name: string, country: string | null) => ScreenResult;
   /** 命中路径 reconcile 读到的库里记录（findFirst 的返回）。 */
   prior?: { status: string; reviewState: string; matches: unknown } | null;
+  /** ch08 §3.1.12 名单新鲜度；缺省 = 筛查门未启用（inactive，不改变行为）。 */
+  freshness?: Partial<{
+    active: boolean;
+    ageDays: number | null;
+    maxAgeDays: number;
+    blockAgeDays: number;
+    stale: boolean;
+    blocked: boolean;
+    reason: 'inactive' | 'fresh' | 'stale' | 'blocked';
+    sources: Array<{ key: string; lastRefreshedAt: string | null; lastFetchStatus: string | null }>;
+  }>;
 } = {}) {
   const company = {
     id: COMPANY_ID,
@@ -85,8 +96,22 @@ function fixture(options: {
     },
     outboxEvent: { create: vi.fn(async () => ({})) },
   };
+  const FRESHNESS_INACTIVE = {
+    active: false,
+    ageDays: null,
+    maxAgeDays: 7,
+    blockAgeDays: 14,
+    stale: false,
+    blocked: false,
+    reason: 'inactive' as const,
+    sources: [],
+  };
+  const listFreshness = vi.fn(async () => ({
+    ...FRESHNESS_INACTIVE,
+    ...(options.freshness ?? {}),
+  }));
   const sanctionsScreening = options.screenImpl
-    ? { rebuildIndex: vi.fn(async () => undefined), screen: vi.fn(options.screenImpl) }
+    ? { rebuildIndex: vi.fn(async () => undefined), screen: vi.fn(options.screenImpl), listFreshness }
     : options.screen
       ? {
           rebuildIndex: vi.fn(async () => undefined),
@@ -95,6 +120,7 @@ function fixture(options: {
             matches: options.screen!.matches ?? [],
             listVersions: options.screen!.status === 'not_screened' ? {} : LIST_VERSIONS,
           })),
+          listFreshness,
         }
       : undefined;
   const activities = createQualifyActivities({
@@ -432,5 +458,112 @@ describe('scoreCandidates — CandidateBatchCompleted（M2 步 10：候选批次
     expect(payload.run_ref).toBeNull();
     expect(payload.batch_ref).toBe('qualify:direct:0');
     expect(f.upserted().scoreDetail.candidateBatchRef).toBe('qualify:direct:0');
+  });
+});
+
+describe('ch08 §3.1.12 制裁陈旧门（qualify）', () => {
+  it('blocked 名单（>blockAgeDays）：整批进 sanctions_hold，即使评分可达推荐', async () => {
+    const f = fixture({
+      points: CONTACT_PAGE,
+      screen: { status: 'clear' },
+      freshness: {
+        active: true,
+        ageDays: 15,
+        stale: true,
+        blocked: true,
+        reason: 'blocked',
+        sources: [{ key: 'ofac_sdn', lastRefreshedAt: '2026-10-25T00:00:00.000Z', lastFetchStatus: 'DONE' }],
+      },
+    });
+
+    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
+
+    const lead = f.upserted();
+    expect(lead.queue).toBe('sanctions_hold');
+    expect(lead.scoreDetail.sanctionsListStale).toBe(true);
+    expect(lead.scoreDetail.sanctionsListAgeDays).toBe(15);
+  });
+
+  it('stale 名单（>maxAgeDays）：recommended 降为 needs_review（不得自动放行）', async () => {
+    const f = fixture({
+      points: CONTACT_PAGE,
+      screen: { status: 'clear' },
+      freshness: { active: true, ageDays: 8, stale: true, blocked: false, reason: 'stale' },
+    });
+
+    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
+
+    const lead = f.upserted();
+    expect(lead.queue).toBe('needs_review');
+    expect(lead.scoreDetail.sanctionsListStale).toBe(true);
+  });
+
+  it('fresh 名单：推荐行为不变', async () => {
+    const f = fixture({
+      points: CONTACT_PAGE,
+      screen: { status: 'clear' },
+      freshness: { active: true, ageDays: 2, stale: false, blocked: false, reason: 'fresh' },
+    });
+
+    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
+
+    expect(f.upserted().queue).toBe('recommended');
+  });
+
+  it('blocked 名单下 suppressed 公司保持 suppressed（禁联优先级更高）', async () => {
+    const f = fixture({
+      status: 'SUPPRESSED',
+      screen: { status: 'clear' },
+      freshness: { active: true, ageDays: 15, stale: true, blocked: true, reason: 'blocked' },
+    });
+
+    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
+
+    expect(f.upserted().queue).toBe('suppressed');
+  });
+
+  it('stale 名单每次 qualify run 写一条 SanctionsListStale 告警事件（无 PII）', async () => {
+    const f = fixture({
+      screen: { status: 'clear' },
+      freshness: {
+        active: true,
+        ageDays: 8,
+        stale: true,
+        blocked: false,
+        reason: 'stale',
+        sources: [{ key: 'eu_fsf', lastRefreshedAt: '2026-10-25T00:00:00.000Z', lastFetchStatus: 'FAILED' }],
+      },
+    });
+
+    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
+
+    const staleEvents = f.outboxCreate.mock.calls
+      .map((call) => (call[0] as { data: Record<string, unknown> }).data)
+      .filter((data) => data.eventType === 'SanctionsListStale');
+    expect(staleEvents).toHaveLength(1);
+    expect(staleEvents[0]).toMatchObject({
+      workspaceId: WS,
+      aggregateType: 'ICP',
+      aggregateId: ICP,
+      payload: expect.objectContaining({
+        reason: 'stale',
+        ageDays: 8,
+        blocked: false,
+      }),
+    });
+  });
+
+  it('fresh 名单不写 SanctionsListStale 事件', async () => {
+    const f = fixture({
+      screen: { status: 'clear' },
+      freshness: { active: true, ageDays: 2, stale: false, blocked: false, reason: 'fresh' },
+    });
+
+    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
+
+    const types = f.outboxCreate.mock.calls.map(
+      (call) => (call[0] as { data: Record<string, unknown> }).data.eventType,
+    );
+    expect(types).not.toContain('SanctionsListStale');
   });
 });

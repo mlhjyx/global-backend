@@ -123,6 +123,7 @@ import {
   WORKER_SHUTDOWN_OPTIONS,
   armWorkerExitDeadline,
 } from "../runtime/worker-shutdown-policy";
+import { workerConcurrencyOptions } from "./worker-concurrency";
 import {
   devFastLaneWorkerLane,
   resolveDevFastLane,
@@ -617,6 +618,9 @@ async function main(): Promise<void> {
     ),
     taskQueue: UNDERSTANDING_TASK_QUEUE,
     workflowsPath: require.resolve("./customer-workflows"),
+    // ch08 §3.1.6：显式并发上限（Temporal 默认 100 会在 2 vCPU 主机上打满连接池/CPU）。
+    // 默认 12/8/4，WORKER_MAX_CONCURRENT_{ACTIVITY,WORKFLOW,LOCAL} 可调；非法值启动即失败。
+    ...workerConcurrencyOptions(),
     ...WORKER_SHUTDOWN_OPTIONS,
     activities: {
       ...createUnderstandingActivities({

@@ -1344,6 +1344,10 @@ model SanctionsScreeningResult {
   reviewedBy         String?  @map("reviewed_by")
   reviewNote         String?  @map("review_note")
   listVersions       Json     @map("list_versions") // { ofac_sdn:'2026-07-13', … } 本次筛覆盖的名单版本
+  /// ch08 §3.1.12：本次筛查时名单是否陈旧（>SANCTIONS_LIST_MAX_AGE_DAYS 或任一源 FAILED）。
+  listStale          Boolean  @default(false) @map("list_stale")
+  listAgeDays        Int?     @map("list_age_days") // 名单年龄（天，max(last_refreshed_at) 起算；null=从未刷新）
+  listSnapshot       Json?    @map("list_snapshot") // { sourceKey: version, … } 本次覆盖的名单版本快照
   screenedAt         DateTime @default(now()) @map("screened_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 

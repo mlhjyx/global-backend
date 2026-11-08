@@ -4155,6 +4155,67 @@
         "description": "服务间：计算某个 workspace operation 的平台内部执行预算包络。它不是客户价格、余额或额度限制，数字不能展示给终端客户。"
       }
     },
+    "/api/v1/execution-budget/window-usage": {
+      "get": {
+        "description": "供 gain-saas 在签发执行预算 Grant 前判定窗口余额（ch08 C1a）。返回窗口内已结算实扣（SETTLED/RESULT_UNKNOWN）、仍在途的预留与按 purpose 的构成；只读、不写任何表。服务身份（x-service-token）且仅限回环调用；未配置令牌时返回 503（fail-closed）。",
+        "operationId": "ExecutionBudgetWindowUsageController_windowUsage_v1",
+        "parameters": [
+          {
+            "name": "since",
+            "required": true,
+            "in": "query",
+            "description": "ISO8601（UTC）",
+            "schema": {
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "workspaceId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ExecutionBudgetWindowUsageResponseDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "EXECUTION_BUDGET_WINDOW_USAGE_INVALID"
+          },
+          "401": {
+            "description": "SERVICE_TOKEN_REQUIRED / SERVICE_TOKEN_INVALID"
+          },
+          "403": {
+            "description": "BUDGET_READBACK_LOOPBACK_ONLY"
+          },
+          "503": {
+            "description": "BUDGET_READBACK_NOT_CONFIGURED"
+          }
+        },
+        "summary": "窗口实扣读回（服务身份）：SUM(tool_budget_operation.charged_microusd) 按 workspace/时间窗；窗口花费的唯一权威口径",
+        "tags": [
+          "ExecutionBudget"
+        ]
+      }
+    },
     "/api/v1/platform-authority/technical-quote": {
       "post": {
         "description": "Service-only, zero-side-effect technical safety envelope; not a customer price, balance or quota.",
@@ -12335,6 +12396,7 @@
                             "SUPPRESSED_CONTACT_UNREACHABLE",
                             "STORAGE_RIGHTS_NOT_GRANTED",
                             "SANCTIONS_HOLD_UNRESOLVED",
+                            "SANCTIONS_LIST_STALE",
                             "CONFLICT"
                           ]
                         },
@@ -20335,6 +20397,54 @@
           "expiresAt"
         ],
         "additionalProperties": false
+      },
+      "ExecutionBudgetWindowUsageResponseDto": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "enum": [
+              "execution-budget-window-usage/v1"
+            ]
+          },
+          "workspaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "chargedMicrousd": {
+            "type": "string",
+            "example": "2410250",
+            "description": "窗口内实扣合计（µUSD，字符串承载 bigint）"
+          },
+          "reservedMicrousd": {
+            "type": "string",
+            "example": "500000",
+            "description": "窗口内仍在途（RESERVED）的预留合计（µUSD）"
+          },
+          "byPurpose": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "example": {
+              "discovery.run": "2100000",
+              "understanding.run": "310250"
+            },
+            "description": "按 purpose 的实扣构成（µUSD 字符串）"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "workspaceId",
+          "since",
+          "chargedMicrousd",
+          "reservedMicrousd",
+          "byPurpose"
+        ]
       },
       "CheckOutreachDncDto": {
         "type": "object",

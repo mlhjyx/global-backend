@@ -1255,3 +1255,74 @@ describe('LeadQualified v2（M2 步 10）：候选批次引用与证据摘要', 
     expect(validate(legacy)).toBe(true);
   });
 });
+
+describe('LeadService.decide(accept) — ch08 §3.1.12 制裁陈旧门', () => {
+  const staleFreshness = {
+    active: true,
+    ageDays: 8,
+    maxAgeDays: 7,
+    blockAgeDays: 14,
+    stale: true,
+    blocked: false,
+    reason: 'stale' as const,
+    sources: [{ key: 'ofac_sdn', lastRefreshedAt: '2026-11-01T00:00:00.000Z', lastFetchStatus: 'DONE' }],
+  };
+
+  it('名单 stale（>maxAgeDays）→ 拒绝交棒 SANCTIONS_LIST_STALE，不写快照/裁决', async () => {
+    const outboxCreate = vi.fn();
+    const decisionCreate = vi.fn();
+    const tx = makeDecideTx(makeLead(), makeCompany(), outboxCreate, decisionCreate);
+    const svc = makeDecideService(tx, undefined, {
+      screen: vi.fn(() => liveScreen('clear')),
+      listFreshness: vi.fn(async () => staleFreshness),
+    } as never);
+
+    await expect(svc.decide(decideCtx, LEAD_ID, 'accept')).rejects.toMatchObject({
+      response: {
+        error: {
+          code: 'SANCTIONS_LIST_STALE',
+          details: expect.objectContaining({ ageDays: 8, maxAgeDays: 7 }),
+        },
+      },
+    });
+    expect(outboxCreate).not.toHaveBeenCalled();
+    expect(decisionCreate).not.toHaveBeenCalled();
+  });
+
+  it('名单 fresh → 正常交棒', async () => {
+    const outboxCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+    const tx = makeDecideTx(makeLead(), makeCompany(), outboxCreate, vi.fn());
+    const svc = makeDecideService(tx, undefined, {
+      screen: vi.fn(() => liveScreen('clear')),
+      listFreshness: vi.fn(async () => ({
+        ...staleFreshness,
+        ageDays: 2,
+        stale: false,
+        reason: 'fresh' as const,
+      })),
+    } as never);
+
+    await expect(svc.decide(decideCtx, LEAD_ID, 'accept')).resolves.toBeDefined();
+    expect(outboxCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it('筛查门未启用（inactive）→ 陈旧门不拦（与第五门 fail-open 一致）', async () => {
+    const outboxCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+    const tx = makeDecideTx(makeLead(), makeCompany(), outboxCreate, vi.fn());
+    const svc = makeDecideService(tx, undefined, {
+      screen: vi.fn(() => liveScreen('not_screened')),
+      listFreshness: vi.fn(async () => ({
+        active: false,
+        ageDays: null,
+        maxAgeDays: 7,
+        blockAgeDays: 14,
+        stale: false,
+        blocked: false,
+        reason: 'inactive' as const,
+        sources: [],
+      })),
+    } as never);
+
+    await expect(svc.decide(decideCtx, LEAD_ID, 'accept')).resolves.toBeDefined();
+  });
+});

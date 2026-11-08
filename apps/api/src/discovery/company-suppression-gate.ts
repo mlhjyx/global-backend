@@ -188,6 +188,56 @@ export async function companyMayUseExternalProcessing(
 }
 
 /**
+ * Batch variant of {@link companyMayUseExternalProcessing}: one tenant transaction, one policy
+ * lock, one suppression read for up to N companies. Returns the ids still allowed to reach the
+ * wire; the caller must treat any missing id as denied (fail-closed).
+ *
+ * ch08 §3.1.5：quickJudge 批量协议在每次物理出网前用本函数重做逐家校验——预检（TOCTOU 窗口）
+ * 与 wire 之间新增的禁联 / 主体失效 / DSR 撤权不允许送进模型。
+ */
+export async function companyMayUseExternalProcessingMany(
+  tx: Prisma.TransactionClient,
+  workspaceId: string,
+  companyIds: readonly string[],
+): Promise<Set<string>> {
+  await lockWorkspaceSuppressionPolicy(tx, workspaceId);
+  const ids = [...new Set(companyIds)];
+  if (ids.length === 0) return new Set();
+  const companies = await tx.canonicalCompany.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, name: true, domain: true, status: true, attributes: true },
+  });
+  const suppressions = await tx.suppressionRecord.findMany({
+    where: { type: { in: ['domain', 'company_name'] } },
+    select: { type: true, value: true },
+  });
+  const allowed = new Set<string>();
+  for (const company of companies) {
+    if (company.status === 'SUPPRESSED') {
+      await repairSuppressedCompany(tx, company);
+      continue;
+    }
+    if (!companyMatchesSuppression(suppressions, company)) {
+      const attributes = jsonObject(company.attributes);
+      const sanitized = sanitizeCanonicalCompanyAttributes(attributes);
+      if (JSON.stringify(sanitized) !== JSON.stringify(attributes)) {
+        await tx.canonicalCompany.updateMany({
+          where: { id: company.id, status: { not: 'SUPPRESSED' } },
+          data: {
+            attributes: sanitized as Prisma.InputJsonValue,
+            version: { increment: 1 },
+          },
+        });
+      }
+      allowed.add(company.id);
+      continue;
+    }
+    await repairSuppressedCompany(tx, company);
+  }
+  return allowed;
+}
+
+/**
  * Commit-side state for provider/model results. The caller must merge only its owned namespaces
  * into the returned current attributes and write in the same transaction. This closes the window
  * between the last physical wire and database commit without holding a transaction across I/O.
