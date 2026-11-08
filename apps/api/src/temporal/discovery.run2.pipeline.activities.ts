@@ -67,6 +67,8 @@ import {
   websiteProfileFreshAndCurrent,
 } from './discovery.activities';
 import { appendRunEvent } from '../discovery/run2/run-events';
+import type { FailureStage } from '../discovery/judgment/failure-codes';
+import { withClassifiedFailure } from './pipeline-failure-activity';
 
 export interface CompanyPipelineActivityInput {
   workspaceId: string;
@@ -124,7 +126,7 @@ export function createRun2PipelineActivities(deps: {
   const authorizeCompany = (workspaceId: string, companyId: string) => () =>
     mayUse(workspaceId, companyId);
 
-  return {
+  const activities = {
     /** 深挖目标：本 run 快扫判为 match/weak 的公司（上限 500，设计 Q8）。 */
     async listDeepTargets(args: { workspaceId: string; runId: string }): Promise<{ companyIds: string[] }> {
       const jobs = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
@@ -202,6 +204,8 @@ export function createRun2PipelineActivities(deps: {
       stage: 'profiling' | 'fitting' | 'signals' | 'contacts' | 'done' | 'failed' | 'skipped';
       verdictDeep?: 'match' | 'weak' | 'mismatch';
       errorCode?: string;
+      /** P3 J02 W1：失败分类 stage（闭集），只进 run_event payload，不落 DB 列。 */
+      failureStage?: FailureStage;
     }): Promise<void> {
       await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const job = await tx.discoveryCompanyJob.findUnique({
@@ -241,6 +245,7 @@ export function createRun2PipelineActivities(deps: {
             stage: args.stage,
             ...(args.verdictDeep ? { verdict: args.verdictDeep } : {}),
             ...(args.errorCode ? { error: args.errorCode } : {}),
+            ...(args.failureStage ? { failureStage: args.failureStage } : {}),
           },
         });
       });
@@ -649,6 +654,16 @@ export function createRun2PipelineActivities(deps: {
         ...(emailGuess ? { emailGuess } : {}),
       };
     },
+  };
+
+  // P3 J02 W2：四个阶段活动在边界把异常换成带稳定 failure code 的 ApplicationFailure
+  //（type 穿过 DiagnosticFailureConverter 的脱敏），workflow 据此写具体 last_error_code。
+  return {
+    ...activities,
+    profileCompanyOnce: withClassifiedFailure(activities.profileCompanyOnce),
+    fitCompanyOnce: withClassifiedFailure(activities.fitCompanyOnce),
+    signalsCompanyOnce: withClassifiedFailure(activities.signalsCompanyOnce),
+    contactsCompanyOnce: withClassifiedFailure(activities.contactsCompanyOnce),
   };
 }
 
