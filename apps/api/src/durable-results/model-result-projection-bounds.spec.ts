@@ -296,7 +296,7 @@ const EXPECTED_BOUNDS: Readonly<Partial<Record<TypedProjectionSchema, Readonly<R
     'data.motions[].icpIds[]': { maxLength: 36 },
     'data.budget.capMicros': { minimum: 0, maximum: 9_000_000_000_000_000 },
     'data.budget.currency': { maxLength: 3 },
-    'data.decisionPolicy.maxReplans': { minimum: 0, maximum: 0 },
+    'data.decisionPolicy.maxReplans': { minimum: 0, maximum: 2 },
     provider: { maxLength: 120 },
     model: { maxLength: 120 },
     ...COMMON_MODEL_METADATA_BOUNDS,

@@ -1529,7 +1529,8 @@ const campaignPlanDefinition: TypedProjectionDefinition<unknown, unknown> = {
           ["required"],
         ),
         decisionPolicy: objectSchema(
-          { maxReplans: { ...numberSchema(0, 0, true), enum: [0] } },
+          // M2.2：有界重规划预算 0–2（契约扩展，见 task-registry campaign.plan）。
+          { maxReplans: { ...numberSchema(0, 2, true), enum: [0, 1, 2] } },
           ["maxReplans"],
         ),
       },
