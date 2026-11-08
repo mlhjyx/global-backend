@@ -24,6 +24,9 @@ import { seedPackCatalog } from "../skills/packs/pack-catalog.seed";
 import { seedAgentCatalog } from "../agents/agent-catalog.seed";
 import { createDbSkillResolver } from "../skills/skill-resolver";
 import { PrismaSkillRegistryStore } from "../skills/skill-registry.store";
+import { createDbAgentResolver } from "../agents/agent-resolver";
+import { PrismaAgentRegistryStore } from "../agents/agent-registry.store";
+import { PrismaAgentDecisionTraceStore } from "../agents/agent-decision-trace.store";
 import { createDiscoveryActivities } from "./discovery.activities";
 import { createRun2Activities } from "./discovery.run2.activities";
 import { createRun2PipelineActivities } from "./discovery.run2.pipeline.activities";
@@ -469,6 +472,9 @@ async function main(): Promise<void> {
   const skillResolver = createDbSkillResolver(
     new PrismaSkillRegistryStore(prisma),
   );
+  // M2 步 9b：agent 注册表解析器（fail-closed，30s 缓存）与决策轨迹（append-only、幂等）。
+  const agentResolver = createDbAgentResolver(new PrismaAgentRegistryStore(prisma));
+  const agentTraces = new PrismaAgentDecisionTraceStore(prisma);
   const costReconciliationCatalog =
     createSiteBuildCostReconciliationCatalogFromEnv();
   const activeSettlementRoutes = (() => {
@@ -639,6 +645,7 @@ async function main(): Promise<void> {
         budgetStore,
         runLease: prismaDiscoveryRunLeaseReader(prisma),
         skills: skillResolver,
+        agentRuntime: { agents: agentResolver, traces: agentTraces },
       }),
       // Run 2.0（M0③）：快扫三段——规则预筛 / 批量粗判 / 临时候选物化。
       ...createRun2Activities({
