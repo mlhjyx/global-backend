@@ -1,0 +1,124 @@
+{
+  "schemaVersion": "metric-dictionary/v1",
+  "tier": "T0",
+  "metrics": [
+    {
+      "schemaVersion": "metric-definition/v1",
+      "id": "T0-001",
+      "name": "vric_1000_strict",
+      "tier": "T0",
+      "unit": "count_per_1000",
+      "owner": "data-eng",
+      "status": "ACTIVE",
+      "version": 1,
+      "effectiveFrom": "2026-11-09",
+      "exprStatus": "PENDING",
+      "definition": "每 1,000 个 ICP 匹配账户中，满足「决策人角色 + email VALID 且非 catch-all + 180 天内验证 + 未 suppression + 有合法依据」的独立人数（STRICT，对外口径）。",
+      "numerator": {
+        "expr": "count(distinct canonical_contact.dedupe_key) filter (where contact_point.type='email' and contact_point.status='VALID' and contact_point.catch_all='not_catch_all' and contact_point.verification_method in ('smtp_rcpt','provider_reported','operator') and contact_point.verified_at >= now()-interval '180 days' and coalesce(contact_point.email_type,'other') not in ('role','generic_sales','procurement','finance','support') and canonical_contact.seniority in ('c_level','vp','director','manager'))",
+        "source": "contact_point"
+      },
+      "denominator": {
+        "expr": "count(distinct canonical_company.id) / 1000.0 filter (where lead.fit_verdict='match' and lead.status <> 'REJECTED' and canonical_company.status in ('NEW','ENRICHED'))",
+        "source": "lead"
+      },
+      "exclusions": [
+        "role/generic 邮箱不计入分子",
+        "CATCH-ALL-RISKY / UNKNOWN / UNVERIFIED / INVALID 不计入",
+        "pattern_guess 未二次验证不计入",
+        "无 seniority/title 的人不计入",
+        "suppression / OPT_OUT / 制裁 hold 不计入",
+        "SaaS 侧 suppression 与合法依据条件需双库联合计算（字典 §5.1）"
+      ],
+      "window": {
+        "type": "snapshot",
+        "cadence": "weekly"
+      },
+      "strata": [
+        "country",
+        "industry",
+        "source_class",
+        "provider_key",
+        "channel",
+        "verifier",
+        "persona_role",
+        "icp_id",
+        "workspace_id",
+        "week"
+      ],
+      "ci": {
+        "method": "wilson"
+      },
+      "benchmark": {
+        "note": "行业无统一 VRIC；参照 email fill 80%+ / valid 70–85% / phone fill 40–65%",
+        "url": "https://www.clay.com/guides/waterfall-enrichment"
+      },
+      "changelog": [
+        {
+          "version": 1,
+          "at": "2026-11-09",
+          "breaking": false,
+          "note": "首次定义；STRICT/PLUS 分列（字典 v1.0）"
+        }
+      ]
+    },
+    {
+      "schemaVersion": "metric-definition/v1",
+      "id": "T0-002",
+      "name": "vric_1000_plus",
+      "tier": "T0",
+      "unit": "count_per_1000",
+      "owner": "data-eng",
+      "status": "ACTIVE",
+      "version": 1,
+      "effectiveFrom": "2026-11-09",
+      "exprStatus": "PENDING",
+      "definition": "同 T0-001 的账户集合与人级去重，通道改为 email VALID 或 phone VALID（PLUS，内部运营口径）；输出 email_only / phone_only / both 通道拆分；phone 的 line_type 与抽呼校准未接入前是引擎侧上界。",
+      "numerator": {
+        "expr": "count(distinct canonical_contact.dedupe_key) filter (where (email_ok or phone_ok) and canonical_contact.seniority in ('c_level','vp','director','manager'))",
+        "source": "contact_point"
+      },
+      "denominator": {
+        "expr": "count(distinct canonical_company.id) / 1000.0 filter (where lead.fit_verdict='match' and lead.status <> 'REJECTED' and canonical_company.status in ('NEW','ENRICHED'))",
+        "source": "lead"
+      },
+      "exclusions": [
+        "phone 的 line_type ∈ {mobile, landline} 且 90 天内验证且季度抽呼校准完成才计入 phone_ok",
+        "voip/unknown 线型、pattern_guess 号码不计入",
+        "email 的排除同 T0-001",
+        "对外承诺只能引用 T0-001（STRICT）"
+      ],
+      "window": {
+        "type": "snapshot",
+        "cadence": "weekly"
+      },
+      "strata": [
+        "country",
+        "industry",
+        "source_class",
+        "provider_key",
+        "channel",
+        "verifier",
+        "persona_role",
+        "icp_id",
+        "workspace_id",
+        "week"
+      ],
+      "ci": {
+        "method": "wilson"
+      },
+      "benchmark": {
+        "note": "无行业统一口径；PLUS 用于电话渠道市场评估",
+        "url": "https://www.explorium.ai/blog/data-for-gtm/b2b-data-api-match-rate-benchmarks/"
+      },
+      "changelog": [
+        {
+          "version": 1,
+          "at": "2026-11-09",
+          "breaking": false,
+          "note": "首次定义；通道拆分随字典 v1.1 强制"
+        }
+      ]
+    }
+  ]
+}

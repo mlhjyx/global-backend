@@ -1,0 +1,390 @@
+{
+  "schemaVersion": "frame-registry/v1",
+  "source": "GainOS 深化计划 v3.0 第 1 章 §3.3（frame 矩阵与逐国登记）",
+  "asOf": "2026-11-09",
+  "notes": [
+    "所有条目 status=DRAFT：尚无任何 frame 快照被接入（PR-11/PR-12 之前不得标 ACTIVE）。",
+    "许可与规模数字均为 ch01 检索口径（2026-11），接入与对外引用前必须重核官网与法务。",
+    "record_count_note 只作规模直觉，不是分母；真正分母由 frame_snapshot 的 content_hash 与行数确定。"
+  ],
+  "frames": [
+    {
+      "frameKey": "uk-companies-house-basic",
+      "jurisdiction": "GB",
+      "name": "UK Companies House BasicCompanyData + PSC + officers",
+      "sourceUrl": "https://download.companieshouse.gov.uk/en_output.html",
+      "accessMode": "bulk",
+      "licenseId": "OGL-3.0（表述不完全一致，法务复核）",
+      "licenseUrl": "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/",
+      "redistribution": "unknown",
+      "updateCadence": "monthly",
+      "recordCountNote": "2025-03-31：登记总 5,427,787、有效 4,872,293（gov.uk 统计）",
+      "fieldsNote": "55 列：公司名、注册号、地址、类别、状态、SIC；无网站/邮箱/电话；PSC/officers 含个人姓名",
+      "priority": 1,
+      "status": "DRAFT",
+      "pitfalls": [
+        "55 列里没有任何联系方式，域名必须另建管道",
+        "公司名重复率高，必须用 CompanyNumber/CRN 做硬键",
+        "休眠/清算状态多，ICP 默认排除",
+        "OGL 表述不一致，对外发布前让法务确认"
+      ]
+    },
+    {
+      "frameKey": "fr-sirene-inpi",
+      "jurisdiction": "FR",
+      "name": "INSEE Sirene stock + INPI RNE + annuaire-entreprises",
+      "sourceUrl": "https://www.data.gouv.fr/fr/datasets/base-sirene-des-entreprises-et-de-leurs-etablissements-siren-siret/",
+      "accessMode": "bulk",
+      "licenseId": "Licence Ouverte 2.0 + INPI 免费许可",
+      "licenseUrl": "https://www.data.gouv.fr/fr/licences",
+      "redistribution": "allowed",
+      "updateCadence": "monthly",
+      "recordCountNote": "SIREN/SIRET 硬键；establishments 月度全量（压缩约 2.9 GB）",
+      "fieldsNote": "SIREN/SIRET、名称、地址、NAF、法律形式、状态；INPI 含 dirigeants、年报、章程",
+      "priority": 1,
+      "status": "DRAFT",
+      "pitfalls": [
+        "SIREN 是公司级、SIRET 是场所级，混用会重复",
+        "diffusionCommerciale=false 是合规硬门，必须从触达名单排除",
+        "annuaire-entreprises 分页上限 10,000 会静默截断，全量走 Sirene",
+        "dirigeants 是个人数据，批量用于触达仍需 LIA"
+      ]
+    },
+    {
+      "frameKey": "de-offeneregister",
+      "jurisdiction": "DE",
+      "name": "OffeneRegister（历史快照）+ Unternehmensregister（mass download 待核）",
+      "sourceUrl": "https://offeneregister.de/daten/",
+      "accessMode": "bulk",
+      "licenseId": "CC-BY-4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "redistribution": "allowed",
+      "updateCadence": "irregular",
+      "recordCountNote": ">500 万家；主要是 2017-06 至 2019-01 快照；Unternehmensregister mass download 自 2026-10-01 开放（格式待核）",
+      "fieldsNote": "名称、注册号（HRA/HRB）、注册法院、状态、地址、officers；无网站/邮箱",
+      "priority": 1,
+      "status": "DRAFT",
+      "pitfalls": [
+        "德国是最难的 frame：无官方结构化检索 API，批量格式待核",
+        "HRA/HRB 按注册法院分配，不是全国统一 ID，跨源归并要 (注册号, 法院)",
+        "Kleingewerbe 不在 Handelsregister，覆盖率天然不足",
+        "德国 B2B 邮件需事先明示同意（UWG §7(2)），抓取邮箱不等于可营销"
+      ]
+    },
+    {
+      "frameKey": "it-registro-imprese-hvd",
+      "jurisdiction": "IT",
+      "name": "Registro Imprese / InfoCamere HVD",
+      "sourceUrl": "https://www.registroimprese.it",
+      "accessMode": "api",
+      "licenseId": "HVD 开放许可（EU 2023/138）",
+      "licenseUrl": "https://eur-lex.europa.eu/eli/reg_impl/2023/138/oj",
+      "redistribution": "restricted",
+      "updateCadence": "irregular",
+      "recordCountNote": "约 600 万经济主体；HVD 按地域分块（AgID 承认尚非真正 bulk）",
+      "fieldsNote": "REA 号、Codice Fiscale、VAT、名称、地址、法律形式、状态、NACE、部分 PEC",
+      "priority": 2,
+      "status": "DRAFT",
+      "pitfalls": [
+        "Codice Fiscale 不是公司唯一键，REA 号更合适",
+        "按省循环抓取，预算按「数百次区块操作」估",
+        "完整登记簿仍收费（InfoCamere 商业服务，价格待核）",
+        "意大利 B2B 邮件需事先同意（Art. 130 Codice Privacy）"
+      ]
+    },
+    {
+      "frameKey": "es-borme",
+      "jurisdiction": "ES",
+      "name": "BORME（BOE 开放数据 API）",
+      "sourceUrl": "https://www.boe.es/datosabiertos/",
+      "accessMode": "api",
+      "licenseId": "BOE 开放数据许可（免费）",
+      "licenseUrl": "https://www.boe.es/datosabiertos/",
+      "redistribution": "allowed",
+      "updateCadence": "daily",
+      "recordCountNote": "逐日 XML（2009 至今），无官方 bulk；需自行重建公司时间线",
+      "fieldsNote": "公司名、注册地、公告类型（设立/变更/注销）、公告号、日期、摘要级财务/董事信息",
+      "priority": 2,
+      "status": "DRAFT",
+      "pitfalls": [
+        "没有快照只有事件流，必须自己重建公司时间线",
+        "周末/节假日 404；HTTP 200 但 body 可能是错误元素",
+        "同日多次公告需去重；名称+省份组合做键，VAT/NIF 校验辅助"
+      ]
+    },
+    {
+      "frameKey": "nl-kvk",
+      "jurisdiction": "NL",
+      "name": "KVK Handelsregister API",
+      "sourceUrl": "https://developers.kvk.nl/",
+      "accessMode": "paid",
+      "licenseId": "KVK API 协议",
+      "licenseUrl": "https://developers.kvk.nl/",
+      "redistribution": "restricted",
+      "updateCadence": "realtime",
+      "recordCountNote": "€6.40/月/密钥 + €0.02/查询（2026-11 检索，采购前核官网；本波不采购）",
+      "fieldsNote": "KVK 号、名称、地址、SBI 行业、法律形式、状态、分支机构；董事信息部分可得（付费档）",
+      "priority": 2,
+      "status": "DRAFT",
+      "pitfalls": [
+        "没有真正免费的生产 API（测试环境免费但为虚构数据）",
+        "价格按 Financiële Regeling 可能调整，采购前核官网",
+        "opendata.kvk.nl 仅 BV/NV 且无名称地址，不能做名称搜索"
+      ]
+    },
+    {
+      "frameKey": "be-kbo-open-data",
+      "jurisdiction": "BE",
+      "name": "KBO/BCE Open Data",
+      "sourceUrl": "https://kbopub.economie.fgov.be/kbo-open-data",
+      "accessMode": "bulk",
+      "licenseId": "KBO Open Data 许可（商用允许，须署名）",
+      "licenseUrl": "https://economie.fgov.be/sites/default/files/Files/Entreprises/KBO/Cookbook-KBO-Open-Data.pdf",
+      "redistribution": "restricted",
+      "updateCadence": "monthly",
+      "recordCountNote": "免费注册 + 接受许可后下载 Full/Update ZIP；只保留最近 4 期",
+      "fieldsNote": "enterprise、establishment、denomination、address、contact、activity（NACE）、branch、code、meta",
+      "priority": 2,
+      "status": "DRAFT",
+      "pitfalls": [
+        "仅 active、仅当前值：无历史、无停业公司、无董事、无财务",
+        "_Update.zip 的删除/插入语义必须严格按 extract number 顺序应用，跳版会脏",
+        "个人数据不得用于直接营销"
+      ]
+    },
+    {
+      "frameKey": "ch-zefix-uid",
+      "jurisdiction": "CH",
+      "name": "Zefix REST + UID Register SOAP + opendata.swiss 日更核心数据",
+      "sourceUrl": "https://www.zefix.admin.ch/",
+      "accessMode": "api",
+      "licenseId": "开放政府数据（须署名；Zefix 不允许整库下载）",
+      "licenseUrl": "https://www.zefix.admin.ch/",
+      "redistribution": "restricted",
+      "updateCadence": "daily",
+      "recordCountNote": "opendata.swiss 日更核心数据 + UID 校验；Zefix 仅单条查询/过滤",
+      "fieldsNote": "UID（CHE 号）、名称、法律形式、座落、状态、注册日期、部分董事",
+      "priority": 2,
+      "status": "DRAFT",
+      "pitfalls": [
+        "不能用 Zefix 建全量 frame，只能用 opendata.swiss 日更核心数据 + UID 校验",
+        "认证摘录收费（CHF 30–50/份，待核）；UID 搜索每次最多 30 条",
+        "德语/法语/意大利语多语种名称，匹配要归一"
+      ]
+    },
+    {
+      "frameKey": "no-enhetsregisteret",
+      "jurisdiction": "NO",
+      "name": "Brønnøysund Enhetsregisteret",
+      "sourceUrl": "https://data.brreg.no/enhetsregisteret/api",
+      "accessMode": "bulk",
+      "licenseId": "NLOD-2.0（须署名）",
+      "licenseUrl": "https://data.norge.no/nlod/en/2.0",
+      "redistribution": "allowed",
+      "updateCadence": "daily",
+      "recordCountNote": "约 117 万主体 + 约 87 万子单位；bulk 每日约 05:00 刷新",
+      "fieldsNote": "orgnr、名称、地址、法律形式、行业、状态、注册日期、员工数（部分）、母子公司关系",
+      "priority": 1,
+      "status": "DRAFT",
+      "pitfalls": [
+        "bulk 与实时计数略有差异（约 220 条日间变动）；删除只出现在 change feed",
+        "需区分主实体/子单位；挪威语名称归一"
+      ]
+    },
+    {
+      "frameKey": "fi-prh",
+      "jurisdiction": "FI",
+      "name": "PRH Open Data / YTJ API",
+      "sourceUrl": "https://avoindata.prh.fi/en",
+      "accessMode": "api",
+      "licenseId": "CC-BY-4.0（须署名）",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "redistribution": "allowed",
+      "updateCadence": "daily",
+      "recordCountNote": "免费 JSON API 日更 + 全量压缩 JSON；不含个体户",
+      "fieldsNote": "Business ID（Y-tunnus）、名称、公司形式、地址、税局登记状态、注册通知",
+      "priority": 2,
+      "status": "DRAFT",
+      "pitfalls": [
+        "不含个体户、邮箱、电话；仅约 5% 财报以 iXBRL 开放",
+        "UBO 数据不在开放数据；付费批量与免费 API 二选一（价格待核）"
+      ]
+    },
+    {
+      "frameKey": "cz-ares-res",
+      "jurisdiction": "CZ",
+      "name": "ARES REST API + ČSÚ RES 开放数据",
+      "sourceUrl": "https://ares.gov.cz/",
+      "accessMode": "api",
+      "licenseId": "开放数据（须署名）",
+      "licenseUrl": "https://ares.gov.cz/",
+      "redistribution": "allowed",
+      "updateCadence": "daily",
+      "recordCountNote": "ARES 无 bulk（单查询上限 1,000 条、约 500 req/min）；全量走 ČSÚ RES CSV",
+      "fieldsNote": "IČO、名称、地址（RÚIAN 标准化）、法律形式、NACE、状态、statutární orgány（部分）、贸易许可",
+      "priority": 2,
+      "status": "DRAFT",
+      "pitfalls": [
+        "ARES 没有 bulk，不能拿来做全量 frame",
+        "1,000 结果上限必须按地区/法律形式/行业切片",
+        "捷克语名称变格，匹配要 normalize"
+      ]
+    },
+    {
+      "frameKey": "us-fed-sam-edgar",
+      "jurisdiction": "US-FED",
+      "name": "SAM.gov Entity + SEC EDGAR + FMCSA/NPPES",
+      "sourceUrl": "https://open.gsa.gov/api/entity-api/",
+      "accessMode": "api",
+      "licenseId": "US Government public data（CC0 类）",
+      "licenseUrl": "https://open.gsa.gov/api/entity-api/",
+      "redistribution": "allowed",
+      "updateCadence": "daily",
+      "recordCountNote": "SAM 实体约 889,932 行（第三方镜像口径）；EDGAR 仅上市公司/申报主体",
+      "fieldsNote": "SAM：UEI/CAGE、NAICS、business types、POC、注册状态、排除名单；EDGAR：CIK、公司名、州、SIC",
+      "priority": 1,
+      "status": "DRAFT",
+      "pitfalls": [
+        "SAM 覆盖的是与联邦有业务/注册的实体，不是全市场；个人 key 10 请求/天几乎不可用",
+        "EDGAR 只覆盖上市公司/申报主体；美国没有全国企业登记，州级才是主 frame",
+        "SAM 排除名单要单独接，作为合规负向源"
+      ]
+    },
+    {
+      "frameKey": "us-co-business-entities",
+      "jurisdiction": "US-CO",
+      "name": "Colorado Business Entities（Socrata 4ykn-tg5h）",
+      "sourceUrl": "https://data.colorado.gov/",
+      "accessMode": "bulk",
+      "licenseId": "CO 开放数据（公开记录）",
+      "licenseUrl": "https://data.colorado.gov/",
+      "redistribution": "allowed",
+      "updateCadence": "daily",
+      "recordCountNote": "1M+ 记录；SODA API 支持 $where/$limit/$offset；首批 4 个免费州之一（CO/CT/AK/OH）",
+      "fieldsNote": "实体名、实体 ID、状态（Good Standing/Delinquent/Dissolved）、实体类型、成立日期、地址、注册代理人",
+      "priority": 1,
+      "status": "DRAFT",
+      "pitfalls": [
+        "没有全国统一 ID，跨州去重靠「名称+州+注册号」+ 概率匹配",
+        "同名公司极多（尤其 LLC）；注册代理人地址不是经营地址",
+        "Delaware 无免费 bulk，只作注册地维度；各州字段名/状态值不统一，需州级适配器"
+      ]
+    },
+    {
+      "frameKey": "ca-federal-corporations",
+      "jurisdiction": "CA",
+      "name": "Corporations Canada Federal Corporations",
+      "sourceUrl": "https://search.open.canada.ca/data/",
+      "accessMode": "bulk",
+      "licenseId": "Open Government Licence – Canada 2.0",
+      "licenseUrl": "https://open.canada.ca/en/open-government-licence-canada",
+      "redistribution": "allowed",
+      "updateCadence": "daily",
+      "recordCountNote": "每日 CSV（active/inactive × business/other 四集，2026-04 起拆分）；新设 1–2 周后出现",
+      "fieldsNote": "Corporation number、BN、公司名、适用法律、状态、成立/年报日期、注册地址、董事人数；批量不含董事姓名",
+      "priority": 1,
+      "status": "DRAFT",
+      "pitfalls": [
+        "只覆盖联邦注册公司，不含省注册与金融机构/保险",
+        "批量无董事姓名，找人要另接省登记或 API；BN 与 corporation number 是两个键"
+      ]
+    },
+    {
+      "frameKey": "jp-houjin-bangou",
+      "jurisdiction": "JP",
+      "name": "NTA 法人番号（全件データ + 差分）",
+      "sourceUrl": "https://www.houjin-bangou.nta.go.jp/pc/download/zenken/",
+      "accessMode": "bulk",
+      "licenseId": "公共データ利用規約 1.0（CC BY 4.0 兼容）",
+      "licenseUrl": "https://www.houjin-bangou.nta.go.jp/pc/riyokiyaku/",
+      "redistribution": "allowed",
+      "updateCadence": "monthly",
+      "recordCountNote": "2025-12 末：指定 5,820,130 / 公表 5,729,508；月度全量 + 日次差分",
+      "fieldsNote": "法人番号、商号/名称、所在地、都道府県、指定/更新/取消年月日；无行业/规模/网站/邮箱",
+      "priority": 1,
+      "status": "DRAFT",
+      "pitfalls": [
+        "只有基本 3 信息（号码/名称/地址），行业/规模要另接（付费）",
+        "全国文件 200+ MB 需流式；Shift-JIS 与 Unicode 两版，统一用 Unicode",
+        "法人番号是 13 位数字必须保留前导零；日本没有英文名，跨境匹配靠地址/域名"
+      ]
+    },
+    {
+      "frameKey": "br-cnpj",
+      "jurisdiction": "BR",
+      "name": "Receita Federal CNPJ 开放数据",
+      "sourceUrl": "https://arquivos.receitafederal.gov.br/dados/cadastros/cnpj/",
+      "accessMode": "bulk",
+      "licenseId": "政府开放数据（条款须核对最新版）",
+      "licenseUrl": "https://www.gov.br/receitafederal/dados/cnpj-metadados.pdf",
+      "redistribution": "unknown",
+      "updateCadence": "monthly",
+      "recordCountNote": "约 2,420 万活跃企业（2025 Q2 官方口径）；37 个文件，约 8 GB 压缩 / 29 GB 解压（2026-09 口径，待核）",
+      "fieldsNote": "CNPJ（根+分支+校验）、公司名、商号、地址、CNAE、法律形式、状态、成立日期、注册资本、合伙人（个人数据）",
+      "priority": 1,
+      "status": "DRAFT",
+      "pitfalls": [
+        "文件巨大必须流式/Parquet 化，不能进 OLTP；latin-1、分号分隔、无表头",
+        "CNPJ 前导零必须保留为文本；「无日期」写作 0/00000000/空",
+        "合伙人信息是个人数据，触达前必须过 LIA"
+      ]
+    },
+    {
+      "frameKey": "mx-denue",
+      "jurisdiction": "MX",
+      "name": "INEGI DENUE",
+      "sourceUrl": "https://www.inegi.org.mx/app/mapa/denue/",
+      "accessMode": "bulk",
+      "licenseId": "INEGI 开放数据条款（免费，须署名）",
+      "licenseUrl": "https://www.inegi.org.mx/app/mapa/denue/",
+      "redistribution": "allowed",
+      "updateCadence": "annual",
+      "recordCountNote": "2026-05 版 6,138,075 个 establishments；94% 为微企（1–10 人）",
+      "fieldsNote": "establishment 名称、活动（SCIAN）、地址、经纬度、规模（员工带）、电话（部分）、网站（极少）；无统一公司 ID",
+      "priority": 2,
+      "status": "DRAFT",
+      "pitfalls": [
+        "94% 是微企，ICP 过滤后剩量很小；无公司级唯一 ID，连锁/多门店会重复",
+        "网站/邮箱极少，域名解析要靠名称+地址搜索；年度更新，快照日期必须进元数据"
+      ]
+    },
+    {
+      "frameKey": "au-abn-bulk",
+      "jurisdiction": "AU",
+      "name": "ABR ABN Bulk Extract + ABN Lookup Web Services",
+      "sourceUrl": "https://data.gov.au/data/en/dataset/abn-bulk-extract",
+      "accessMode": "bulk",
+      "licenseId": "CC-BY-3.0-AU（批量）",
+      "licenseUrl": "https://creativecommons.org/licenses/by/3.0/au/",
+      "redistribution": "allowed",
+      "updateCadence": "weekly",
+      "recordCountNote": "约 1,170 万 ABN（2015 口径，现量待核）；20 个 XML 文件 weekly",
+      "fieldsNote": "ABN + 状态、GST 登记、DGR、ACN、实体名、营业名、主要营业地州/邮编",
+      "priority": 1,
+      "status": "DRAFT",
+      "pitfalls": [
+        "含大量非雇主/个体；XML 解压 6 GB（2015 口径）需流式",
+        "ABN 是税务标识不等于公司注册号（ACN）；批量不含网站/邮箱，域名另建"
+      ]
+    },
+    {
+      "frameKey": "nz-nzbn",
+      "jurisdiction": "NZ",
+      "name": "NZBN API + Companies Office Bulk Data",
+      "sourceUrl": "https://www.nzbn.govt.nz/using-the-nzbn/nzbn-services/bulk-data/",
+      "accessMode": "bulk",
+      "licenseId": "定制 Bulk Data 协议（非 CC，IP 归 Crown，可被暂停/终止）",
+      "licenseUrl": "https://www.companiesoffice.govt.nz/data-services/ways-to-get-our-data/",
+      "redistribution": "restricted",
+      "updateCadence": "monthly",
+      "recordCountNote": "bulk 需在线申请 + 签署 Bulk Data Access Agreement（免费，月度）；API 需订阅 key",
+      "fieldsNote": "NZBN、实体名、实体类型、状态、地址、注册日期、行业（ANZSIC，部分）；公司注册号；董事在 Companies Register API（另接）",
+      "priority": 1,
+      "status": "DRAFT",
+      "pitfalls": [
+        "bulk 不是 CC 许可，不能默认自由再分发；申请审批有周期，不能当「今天就能用」",
+        "sole trader/partnership/trust 结构差异大；NZBN 与公司号不同，归并用 NZBN"
+      ]
+    }
+  ]
+}
