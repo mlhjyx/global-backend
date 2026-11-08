@@ -10,6 +10,7 @@ import { TemporalModule } from './temporal/temporal.module';
 import { SweepSchedulerService } from './temporal/sweep-scheduler.service';
 import { RelayModule } from './relay/relay.module';
 import { MemoryModule } from './memory/memory.module';
+import { OutreachModule } from './outreach/outreach.module';
 import { HealthController } from './health/health.controller';
 import { WhoamiController } from './whoami/whoami.controller';
 import { CompanyModule } from './company/company.module';
@@ -58,6 +59,7 @@ import { PlatformRevocationHttpModule } from './platform-authority/platform-revo
     TemporalModule,
     RelayModule,
     MemoryModule,
+    OutreachModule,
     CompanyModule,
     ClaimModule,
     IcpModule,

@@ -2361,6 +2361,18 @@ model SuppressionRecord {
   @@map("suppression_record")
 }
 
+/// 平台级外联全局抑制（M2 步 11-1）：跨租户的退订/投诉/退信抑制，只存规范化邮箱的
+/// SHA-256，绝不保存明文。发送前与租户 suppression_record 双层检查（defense-in-depth）。
+model OutreachGlobalSuppression {
+  id        String   @id @default(uuid()) @db.Uuid
+  emailHash String   @unique @map("email_hash") @db.Char(64)
+  reason    String   @db.VarChar(32) // unsubscribe | bounce | complaint | manual | legal
+  source    String   @db.VarChar(64) // outreach_unsubscribe | ops | ...
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+
+  @@map("outreach_global_suppression")
+}
+
 /// Suppression 释放/身份纠正决策：append-only。请求本身不解除 suppression；法定 suppression 的
 /// 普通释放请求只追加 RELEASE_REQUEST_DENIED。actor/request/reason/time 均为问责字段，不保存明文 PII。
 model SuppressionDecision {

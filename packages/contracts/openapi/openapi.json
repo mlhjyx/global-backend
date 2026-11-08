@@ -5112,6 +5112,67 @@
         "description": "服务间：只读返回 fence-ACK 的公钥族（JWKS），供对端验证确认签名；只含公钥。"
       }
     },
+    "/api/v1/outreach/dnc/check": {
+      "post": {
+        "description": "任一命中即 suppressed=true；调用方必须 fail closed。返回规范化邮箱的 SHA-256 与命中来源，不回传明文。",
+        "operationId": "OutreachDncController_check_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckOutreachDncDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "results"
+                      ],
+                      "properties": {
+                        "results": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "检查邮箱是否被租户禁联名单或平台全局抑制命中",
+        "tags": [
+          "Outreach"
+        ],
+        "x-required-scopes": [
+          "compliance:manage"
+        ]
+      }
+    },
     "/api/v1/companies": {
       "post": {
         "description": "支持 Idempotency-Key 头：同 key 重放返回首次结果，不重复创建（PRD 11.16）。",
@@ -19564,6 +19625,22 @@
           "expiresAt"
         ],
         "additionalProperties": false
+      },
+      "CheckOutreachDncDto": {
+        "type": "object",
+        "properties": {
+          "emails": {
+            "maxItems": 50,
+            "description": "待检查的收件邮箱（≤50，调用方必须是已审批的 outreach 批次）",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "emails"
+        ]
       },
       "PublicContactDto": {
         "type": "object",
