@@ -142,7 +142,11 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
   'POST /api/v1/source-channels':
     '新建平台渠道（默认停用 DISABLED）。仅运营身份（ops:write）；配置按形态校验：crawl 需 https 列表页与选择器；api 需适配器名；import 直接可用。启用前必须登记许可、条款与 robots 结论。',
   'PATCH /api/v1/source-channels/{channelId}':
-    '更新渠道配置/治理信息/状态。仅运营身份（ops:write）。启用硬闸门：license+tosUrl+robots 结论齐全，robots=C 永不启用，crawl 仅允许 robots=A。',
+    '更新渠道配置/治理信息/状态，或整体替换 channel-manifest/v1（重存即置 probe_required=true）。仅运营身份（ops:write）。启用硬闸门：license+tosUrl+robots 结论齐全，robots=C 永不启用，crawl 仅允许 robots=A；manifest 渠道还需先通过 POST /test（否则 409 CHANNEL_PROBE_REQUIRED）。',
+  'GET /api/v1/source-channels/{channelId}':
+    '渠道详情：manifest 全量、健康摘要（熔断/连续失败/最近成功/停用原因）与认证密钥「已配置/未配置」状态——密钥值永不返回。仅运营身份（ops:read）。',
+  'POST /api/v1/source-channels/{channelId}/test':
+    '保存即测试（probe）：按已保存 manifest 试跑 1 页，落 source_channel_probe 与健康事件；产出 >0 且无错误才解除 probe_required。仅运营身份（ops:write）。平台出网围栏绑定未接入本进程时 fail-closed 503 CHANNEL_TEST_EGRESS_UNAVAILABLE。',
   'POST /api/v1/source-channels/{channelId}/enable':
     '租户启用一个已批准（ENABLED）渠道；只能启用，不能新建平台渠道。',
   'DELETE /api/v1/source-channels/{channelId}/enable':
