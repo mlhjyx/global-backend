@@ -387,6 +387,8 @@ jobs:
           COMPANY_CONTACT_POINT_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
           COMPANY_CONTACT_CHANNEL_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
           COMPANY_CONTACT_CHANNEL_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
+          CONTACT_POINT_FOUR_STATE_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+          CONTACT_POINT_FOUR_STATE_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
           ARTIFACT_OBJECT_VERSION_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
           ARTIFACT_OBJECT_VERSION_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
           ARTIFACT_SELLER_SUBJECT_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
@@ -404,6 +406,7 @@ jobs:
             src/site-builder/site-build-budget-publication-lock.postgres.spec.ts \
             src/discovery/company-contact-point.postgres.spec.ts \
             src/discovery/company-contact-channel.postgres.spec.ts \
+            src/discovery/contact-point-four-state.postgres.spec.ts \
             src/durable-results/artifact/generic-operation-artifact-object-version.postgres.spec.ts \
             src/durable-results/artifact/generic-operation-artifact-seller-subject.postgres.spec.ts \
             src/lead/lead-queue-basis.postgres.spec.ts \

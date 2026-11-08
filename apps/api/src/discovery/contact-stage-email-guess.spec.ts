@@ -112,7 +112,7 @@ function makeDeps(opts?: {
           value: create.value,
           status: create.status,
         });
-        return {};
+        return { id: `point-${upsertedPoints.length}` };
       },
       findUnique: async ({
         where,
@@ -128,6 +128,12 @@ function makeDeps(opts?: {
           .at(-1);
         return row ? { status: row.status } : null;
       },
+      update: async () => ({}),
+    },
+    contactPointVerificationEvent: {
+      findUnique: async () => null,
+      count: async () => 0,
+      create: async () => ({ id: `event-${upsertedPoints.length}` }),
     },
     fieldEvidence: {
       create: async ({ data }: { data: { field: string; allowedActions: unknown; value?: { status?: string } } }) => {
@@ -142,6 +148,7 @@ function makeDeps(opts?: {
     $queryRaw: async () => [
       { id: 'c1', name: 'Acme', domain: 'acme.de', status: 'NEW' },
     ],
+    $executeRawUnsafe: async () => 1,
     personalDataAccessAudit: {
       create: async ({ data }: { data: Record<string, unknown> }) => {
         audits.push(data);
