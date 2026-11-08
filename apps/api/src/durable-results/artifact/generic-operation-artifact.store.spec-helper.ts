@@ -96,7 +96,13 @@ export class MemoryS3Client implements ArtifactS3Client {
   stagingPutFailure: Error | null = null;
   stagingPutAckFailure = false;
   stagingPutAckAbort: AbortController | null = null;
-  finalPutFailure: 'before_commit' | 'after_commit' | null = null;
+  /**
+   * 'precondition_uncommitted': the IfNoneMatch PUT loses a race to a concurrent
+   * writer, but that winner's object is not visible to the following inspect
+   * (2026-11-08 empty-artifact promote storm) — the store must report ACK
+   * unknown, not INVALID.
+   */
+  finalPutFailure: 'before_commit' | 'after_commit' | 'precondition_uncommitted' | null = null;
   finalReadbackChunks: readonly Uint8Array[] | null = null;
   finalReadbackContentLength: number | null = null;
   finalReadbackMetadata: Readonly<Record<string, string>> | null = null;
@@ -203,6 +209,9 @@ export class MemoryS3Client implements ArtifactS3Client {
       }
       const isFinal = input.IfNoneMatch === '*';
       if (!isFinal && this.stagingPutFailure) throw this.stagingPutFailure;
+      if (isFinal && this.finalPutFailure === 'precondition_uncommitted') {
+        throw failure('PreconditionFailed', 'concurrent writer', 412);
+      }
       if (isFinal && this.objects.has(input.Key)) {
         throw failure('PreconditionFailed', 'target exists', 412);
       }

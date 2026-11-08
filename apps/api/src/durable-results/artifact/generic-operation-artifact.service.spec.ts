@@ -285,6 +285,54 @@ describe('GenericOperationArtifactService', () => {
     );
   });
 
+  it.each([
+    'GENERIC_OPERATION_ARTIFACT_INVALID',
+    'GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE',
+  ] as const)(
+    'marks %s RESULT_UNKNOWN so the reservation never stays a bare RESERVED row (run aae4a06a)',
+    async (code) => {
+      const deps = dependencies({
+        promote: async () => {
+          throw new ArtifactStorageError(code);
+        },
+      });
+
+      await expect(deps.service.persist(persistInput())).rejects.toMatchObject({ code });
+
+      expect(deps.budgetStore.markResultUnknown).toHaveBeenCalledOnce();
+      expect(deps.budgetStore.markResultUnknown).toHaveBeenCalledWith(reservation);
+      expect(deps.budgetStore.settleArtifactManifest).not.toHaveBeenCalled();
+    },
+  );
+
+  it('a promote result that fails the stored-artifact contract also transitions RESULT_UNKNOWN', async () => {
+    const deps = dependencies({
+      promote: async () => Object.freeze({ ...stored, sha256: '0'.repeat(64) }),
+    });
+
+    await expect(deps.service.persist(persistInput())).rejects.toMatchObject({
+      name: 'GenericOperationArtifactError',
+      message: 'GENERIC_OPERATION_ARTIFACT_INVALID',
+    });
+
+    expect(deps.budgetStore.markResultUnknown).toHaveBeenCalledOnce();
+    expect(deps.budgetStore.markResultUnknown).toHaveBeenCalledWith(reservation);
+  });
+
+  it('still surfaces the artifact error when the unknown-result fallback itself fails', async () => {
+    const deps = dependencies({
+      promote: async () => {
+        throw new ArtifactStorageError('GENERIC_OPERATION_ARTIFACT_INVALID');
+      },
+    });
+    deps.budgetStore.markResultUnknown.mockRejectedValueOnce(new Error('ledger unavailable'));
+
+    await expect(deps.service.persist(persistInput())).rejects.toMatchObject({
+      code: 'GENERIC_OPERATION_ARTIFACT_INVALID',
+    });
+    expect(deps.budgetStore.markResultUnknown).toHaveBeenCalledOnce();
+  });
+
   it('asks the store to keep the object until the manifest expires and records the version promote verified', async () => {
     const deps = dependencies({
       promote: async () => {
@@ -328,7 +376,7 @@ describe('GenericOperationArtifactService', () => {
     expect(deps.budgetStore.settleArtifactManifest).not.toHaveBeenCalled();
   });
 
-  it('does not mark a pre-ack storage denial RESULT_UNKNOWN', async () => {
+  it('marks a definite storage denial RESULT_UNKNOWN too — the wire already ran, no bare RESERVED may remain', async () => {
     const failure = new ArtifactStorageError(
       'GENERIC_OPERATION_ARTIFACT_SIZE_LIMIT_EXCEEDED',
     );
@@ -339,7 +387,12 @@ describe('GenericOperationArtifactService', () => {
     });
 
     await expect(deps.service.persist(persistInput())).rejects.toBe(failure);
-    expect(deps.budgetStore.markResultUnknown).not.toHaveBeenCalled();
+    // D13: persist runs only after the physical call, so every artifact failure is a
+    // possible upstream result we could not store. The reservation transitions to
+    // RESULT_UNKNOWN (collector-recoverable) instead of leaking as bare RESERVED —
+    // a leaked row replays forever as BUDGET_OPERATION_REPLAY_UNAVAILABLE (run aae4a06a).
+    expect(deps.budgetStore.markResultUnknown).toHaveBeenCalledOnce();
+    expect(deps.budgetStore.markResultUnknown).toHaveBeenCalledWith(reservation);
     expect(deps.store.promote).not.toHaveBeenCalled();
   });
 
@@ -446,7 +499,10 @@ describe('GenericOperationArtifactService', () => {
     expect(producerReads).toBe(0);
     expect(deps.store.stage).not.toHaveBeenCalled();
     expect(deps.store.promote).not.toHaveBeenCalled();
-    expect(deps.budgetStore.markResultUnknown).not.toHaveBeenCalled();
+    // The physical call already happened: a rejected fact contract still transitions
+    // the reservation to RESULT_UNKNOWN (no bare RESERVED leak, run aae4a06a).
+    expect(deps.budgetStore.markResultUnknown).toHaveBeenCalledOnce();
+    expect(deps.budgetStore.markResultUnknown).toHaveBeenCalledWith(reservation);
     expect(deps.budgetStore.settleArtifactManifest).not.toHaveBeenCalled();
   });
 

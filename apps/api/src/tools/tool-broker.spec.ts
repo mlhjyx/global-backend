@@ -1387,10 +1387,15 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
       chargedMicrousd: 0n, observedMicrousd: 0n, capVariance: false, replay: false,
     }));
     const settle = vi.fn();
+    const markResultUnknown = vi.fn(async () => ({
+      reservedMicrousd: 10_000n,
+      replay: false,
+    }));
     const budgetStore = {
       reserve: vi.fn(async () => reservation),
       release,
       settle,
+      markResultUnknown,
     } as unknown as BudgetStore;
     const durable = {
       data: { url: "https://pumpen.example/", text: "Pumpen", contentHash: "abc" },
@@ -1409,7 +1414,17 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
       budgetStore,
       ...(options.noPort ? {} : { artifactExecution: port as unknown as ArtifactExecutionPort }),
     });
-    return { broker, tool, execute, port, release, settle, reservation, durable };
+    return {
+      broker,
+      tool,
+      execute,
+      port,
+      release,
+      settle,
+      markResultUnknown,
+      reservation,
+      durable,
+    };
   }
 
   it("keeps the hold when the caller supplies no subject, even with an artifact port", async () => {
@@ -1518,12 +1533,25 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
   });
 
   it("never releases or retries once the wire ran and persistence failed", async () => {
-    const { broker, execute, release } = harness({ persistError: new Error("object store ack lost") });
+    const { broker, execute, release, reservation, markResultUnknown } = harness({ persistError: new Error("object store ack lost") });
     await expect(
       broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, { workspaceId: WORKSPACE, runId: "run", artifactSubject: subject }),
     ).rejects.toMatchObject({ code: "BUDGET_OPERATION_REPLAY_UNAVAILABLE" });
     expect(execute).toHaveBeenCalledOnce();
     expect(release).not.toHaveBeenCalled();
+    // run aae4a06a：artifact 管线任何失败（含 adapter 在 service 之前的 payload 校验）
+    // 都不得把预留留成裸 RESERVED——统一标 RESULT_UNKNOWN（best effort）。
+    expect(markResultUnknown).toHaveBeenCalledOnce();
+    expect(markResultUnknown).toHaveBeenCalledWith(reservation);
+  });
+
+  it("still surfaces the artifact error when the unknown-result fallback itself fails", async () => {
+    const { broker, markResultUnknown } = harness({ persistError: new Error("object store ack lost") });
+    markResultUnknown.mockRejectedValueOnce(new Error("ledger unavailable"));
+    await expect(
+      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, { workspaceId: WORKSPACE, runId: "run", artifactSubject: subject }),
+    ).rejects.toMatchObject({ code: "BUDGET_OPERATION_REPLAY_UNAVAILABLE" });
+    expect(markResultUnknown).toHaveBeenCalledOnce();
   });
 
   it("executes a declared platform scope transiently and settles without an artifact", async () => {

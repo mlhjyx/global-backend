@@ -749,13 +749,35 @@ export class ToolBroker implements ExecutionBroker {
             subjectRef: artifactSubject,
           });
         } catch (error) {
-          // The wire already ran: the reservation stays unresolved (or was
-          // marked RESULT_UNKNOWN by the artifact service) and is never retried.
+          // The wire already ran: the result exists upstream but was not made
+          // durable. Whatever failed inside the artifact pipeline — service
+          // validation, store promote races, or the adapter's own payload
+          // contract checks (which run BEFORE the service; run aae4a06a: an
+          // empty crawl4ai-render body failed isHtmlBody there) — the
+          // reservation must not stay a bare RESERVED row: a released-and-
+          // re-reserved key would allow a second physical call and the row
+          // would hold the cap until reconciliation. Mark RESULT_UNKNOWN
+          // (best effort; service-side marks may already carry the snapshot).
+          const markedUnknown = await this.markResultUnknownAfterSettleFailure(
+            reservation,
+          );
           this.trace(
             ctx,
             tool,
             "ERROR",
-            `artifact settlement failed: ${error instanceof Error ? error.name : "unknown"}`,
+            // code/message 是根因定位的唯一线索（2026-11-08 run aae4a06a 只打了
+            // GenericOperationArtifactError 名字，丢掉了 INVALID/STORAGE_UNAVAILABLE 之分）。
+            `artifact settlement failed: ${
+              error instanceof Error
+                ? `${error.name}(${error.message})`.slice(0, 160)
+                : "unknown"
+            }; ${
+              markedUnknown
+                ? "result marked unknown"
+                : // false 也可能是「已带快照标过 unknown 后被 v2 拒绝」（非幂等），
+                  // 或账本此刻不可用——中性表述，别误报状态。
+                  "unknown-result fallback did not apply (already marked or ledger unavailable)"
+            }`,
             0,
             now() - started,
           );
@@ -931,6 +953,7 @@ export class ToolBroker implements ExecutionBroker {
    * RESERVED（由独立清收器按阈值收，B4），绝不掩盖调用方要抛的主错误。
    * 返回是否真的标记成功——观测（trace）必须说真话。
    */
+  /** settle/artifact 失败后的账本兜底：尽力标 RESULT_UNKNOWN；返回是否标记成功。 */
   private async markResultUnknownAfterSettleFailure(
     reservation: BudgetReservation,
   ): Promise<boolean> {

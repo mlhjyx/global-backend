@@ -398,7 +398,47 @@ export class GenericOperationArtifactService {
     };
   }
 
+  /**
+   * Persist the artifact of an operation whose wire has ALREADY run. Whatever
+   * fails here, the reservation must not be left as a bare RESERVED row: a
+   * later replay of the same operation key would read "exists without a
+   * durable result" and (same-attempt) report BUDGET_OPERATION_REPLAY_UNAVAILABLE
+   * forever, turning a transient storage race into a failed run (2026-11-08
+   * run aae4a06a: concurrent empty-artifact promotes across tools). The
+   * narrow ACK-unknown codes are transitioned inside with their exact
+   * snapshot; every other artifact failure falls through to the wrapper below
+   * and is transitioned to RESULT_UNKNOWN (conservative: spend happened,
+   * result unreadable) before the error is rethrown.
+   */
   async persist(
+    input: PersistGenericOperationArtifactInput,
+  ): Promise<GenericOperationArtifactReceiptResult> {
+    try {
+      return await this.persistOnce(input);
+    } catch (error) {
+      const innerHandled =
+        error instanceof ArtifactStorageError &&
+        (error.code === 'GENERIC_OPERATION_ARTIFACT_STAGE_ACK_UNKNOWN' ||
+          error.code === 'GENERIC_OPERATION_ARTIFACT_PROMOTE_ACK_UNKNOWN');
+      if (
+        !innerHandled &&
+        (error instanceof ArtifactStorageError ||
+          error instanceof GenericOperationArtifactError)
+      ) {
+        try {
+          // No snapshot here: the manifest facts may not have been built when the
+          // validation failed; a plain unknown row is still recollectable (B4).
+          await this.budgetStore.markResultUnknown(input.reservation);
+        } catch {
+          // Best effort: the original error must surface; a store outage keeps the
+          // row RESERVED for the reconciliation collector either way.
+        }
+      }
+      throw error;
+    }
+  }
+
+  private async persistOnce(
     input: PersistGenericOperationArtifactInput,
   ): Promise<GenericOperationArtifactReceiptResult> {
     const binding = assertReservationBinding(
