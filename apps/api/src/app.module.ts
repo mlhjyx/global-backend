@@ -26,6 +26,7 @@ import { SiteBuilderModule } from './site-builder/site-builder.module';
 import { SellerKnowledgeModule } from './seller-knowledge/seller-knowledge.module';
 import { SkillsModule } from './skills/skills.module';
 import { PacksModule } from './skills/packs/packs.module';
+import { AgentsModule } from './agents/agents.module';
 import { ModelRuntimeModule } from './model-runtime';
 import { RuntimeModule } from './runtime/runtime.module';
 import { RuntimeClockModule } from './runtime/runtime-clock.module';
@@ -72,6 +73,7 @@ import { PlatformRevocationHttpModule } from './platform-authority/platform-revo
     SellerKnowledgeModule,
     SkillsModule,
     PacksModule,
+    AgentsModule,
   ],
   controllers: [HealthController, WhoamiController],
   providers: [
