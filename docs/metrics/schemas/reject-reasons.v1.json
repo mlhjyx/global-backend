@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "reject-reasons/v1",
+  "asOf": "2026-11-09",
+  "notes": [
+    "source_scorecard 用本字典解释 raw_source_record.disposition_code；出现未登记代码时报告 UNKNOWN_DISPOSITION_CODE 漂移信号（不阻断，但必须登记）。",
+    "代码来源：apps/api/src/discovery/raw-source-ingestion.ts 与线上实际值（2026-11-09 只读核对）。"
+  ],
+  "reasons": {
+    "PROVIDER_PAYLOAD_SCHEMA_INVALID": {
+      "description": "供应商载荷未通过 schema 校验（字段缺失/类型错/枚举越界）",
+      "owner": "data-eng",
+      "action": "修适配器映射；若供应商改版，先落 fixture 再改 parser"
+    },
+    "SOURCE_POLICY_MISSING": {
+      "description": "该域名/来源没有已登记的 source_policy（白名单与条款未就绪）",
+      "owner": "gtm-ops",
+      "action": "登记 source_policy（含 ToS/robots 结论）后按治理流程重放"
+    },
+    "PROCESSING_KEY_DRIFT": {
+      "description": "处理键（ingest_key/ingest_version）漂移，历史幂等键与新版本不一致",
+      "owner": "backend",
+      "action": "核对 ingest_version 与重放策略，必要时一次性迁移键"
+    },
+    "SOURCE_POLICY_PURPOSE_NOT_ALLOWED": {
+      "description": "source_policy 存在但用途不被允许（用途门拒绝）",
+      "owner": "gtm-ops",
+      "action": "复核来源用途声明；不得为放行而放宽用途"
+    },
+    "SOURCE_POLICY_SUSPENDED": {
+      "description": "source_policy 已被暂停（合规/条款变化）",
+      "owner": "gtm-ops",
+      "action": "按暂停原因整改后再评估；暂停期间不得重放"
+    },
+    "INVALID_JSON": {
+      "description": "载荷不是合法 JSON",
+      "owner": "data-eng",
+      "action": "查抓取/解析链路的编码与截断"
+    },
+    "INVALID_PROVENANCE": {
+      "description": "provenance 字段缺失或不合法（source_url/抓取时间等）",
+      "owner": "data-eng",
+      "action": "修采集侧 provenance 注入"
+    },
+    "PAYLOAD_TOO_LARGE": {
+      "description": "载荷超过大小上限",
+      "owner": "backend",
+      "action": "评估对象存储旁路或上限调整（需评审）"
+    },
+    "BATCH_LIMIT_EXCEEDED": {
+      "description": "批次条数超过上限",
+      "owner": "backend",
+      "action": "拆分批次；检查 provider 分页逻辑"
+    }
+  }
+}
