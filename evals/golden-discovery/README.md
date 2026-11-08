@@ -15,7 +15,11 @@
 ```text
 evals/golden-discovery/
   README.md                       # 本文件：流程、口径、PII 规则
+  rubric-v1.md                    # 字段级标注手册（证据优先、保守 unknown、κ≥0.6 门槛、裁决流程）
   schema/golden-manifest.schema.json   # 抽样登记 manifest 的 JSON Schema
+  schema/golden-item.schema.json       # 金标条目（account/contact，PII-free ref）
+  schema/golden-label.schema.json      # 单标注者一轮标注（含裁决字段）
+  schema/golden-run.schema.json        # 标注批次/评测跑批记录（κ、gates、哈希）
   v1/manifest.template.json       # v1 抽样配置模板（三个数据集×500 条配额）
 ```
 
@@ -41,7 +45,7 @@ scripts/metrics/fixtures/golden-pool.*.csv   # 合成样例池（演示/测试�
 
    同一 pool + 同一 seed 必然得到同一批样本与同一 `refsSha256`；欠采样层（池不足）会写进报告，不自动回填。把样本与报告归档到受控证据位置（含 PII 的原文不进 git）。
 3. **登记**：把 `refsSha256`、stratum 分布、pool 快照哈希写回 manifest 的 `refsSha256`（实际执行时复制模板为 `manifest.json`）。
-4. **标注**：按 ch01 §3.2.3 的 rubric 双人独立标注；≥100 条双标、Cohen's κ ≥0.6 才发布该字段；分歧进裁决。标注产物只有标签与 `contactRef`，没有明文 PII。
+4. **标注**：按 [rubric-v1.md](rubric-v1.md)（ch01 §3.2.3）双人独立标注；≥100 条双标、Cohen's κ ≥0.6 才发布该字段；分歧进裁决。标注产物只有标签与 `contactRef`（`golden-item/label/run` 三份 schema 约束），没有明文 PII。
 5. **跑批与门限**：`golden_eval_run` + 门限（G1 绝对门 precision≥0.80/recall≥0.75、G2 相对门 >2pp 下降判红、G3 字段门、G5 变异门）——runner 属 PR-07 后续，本脚手架只定义数据与登记。
 
 ## 3. 分层与配额
