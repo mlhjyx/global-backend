@@ -55,6 +55,15 @@
   "truelist": [
     "email_verification"
   ],
+  "hunter": [
+    "b2b_company_person"
+  ],
+  "findymail": [
+    "b2b_company_person"
+  ],
+  "prospeo": [
+    "b2b_company_person"
+  ],
   "decision_maker": [
     "contact_discovery"
   ],
