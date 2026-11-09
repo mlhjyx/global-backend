@@ -7,6 +7,9 @@ const METRIC_ID = /^[A-Za-z0-9-]{1,32}$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
+/** /metrics/vric：VRIC STRICT(T0-001)+PLUS(T0-002) 成对序列的默认/最大桶数。 */
+const VRIC_DEFAULT_BUCKETS = 30;
+const VRIC_MAX_BUCKETS = 180;
 
 export interface MetricCatalogItem {
   metricId: string;
@@ -54,6 +57,26 @@ export interface MetricRollupItem {
 export interface PageResult<T> {
   items: T[];
   page: { nextCursor: string | null; hasMore: boolean };
+}
+
+/** 一桶一侧的口径值（STRICT 或 PLUS）。 */
+export interface VricValue {
+  metricVersion: number;
+  numerator: number;
+  denominator: number | null;
+  value: number;
+  ciLow: number | null;
+  ciHigh: number | null;
+  sampleN: number | null;
+  refreshedAt: Date;
+}
+
+/** VRIC 成对桶：同一 bucket + stratum 下 STRICT/PLUS 并排；缺哪侧哪侧为 null。 */
+export interface VricBucketItem {
+  bucket: string;
+  stratumKey: string;
+  strict: VricValue | null;
+  plus: VricValue | null;
 }
 
 /** Opaque keyset cursor (base64url JSON) — validated on decode. */
@@ -118,6 +141,39 @@ function limitOf(limit: string | undefined): number {
     });
   }
   return Math.min(parsed, MAX_LIMIT);
+}
+
+function vricBucketLimitOf(limit: string | undefined): number {
+  if (limit === undefined || limit === "") return VRIC_DEFAULT_BUCKETS;
+  const parsed = Number(limit);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new BadRequestException({
+      error: { code: "VALIDATION_ERROR", message: "limit must be a positive integer" },
+    });
+  }
+  return Math.min(parsed, VRIC_MAX_BUCKETS);
+}
+
+/** 缺省窗口：to=今日（UTC），from=按粒度回看 buckets 个桶；显式 from/to 时只校验先后。 */
+function vricRange(
+  granularity: "daily" | "weekly",
+  buckets: number,
+  from: string | undefined,
+  to: string | undefined,
+): { fromDay: string; toDay: string } {
+  const toDay = to ?? new Date().toISOString().slice(0, 10);
+  const unitDays = granularity === "weekly" ? 7 : 1;
+  const fromDay =
+    from ??
+    new Date(new Date(`${toDay}T00:00:00.000Z`).getTime() - (buckets - 1) * unitDays * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+  if (fromDay > toDay) {
+    throw new BadRequestException({
+      error: { code: "VALIDATION_ERROR", message: "from must be on or before to" },
+    });
+  }
+  return { fromDay, toDay };
 }
 
 function pageOf<T>(
@@ -384,6 +440,106 @@ export class MeasurementService {
         v: String(item.metricVersion),
         k: item.stratumKey,
       }));
+    });
+  }
+
+  /**
+   * VRIC 成对序列（T0-001 STRICT + T0-002 PLUS）。
+   *
+   * 与 rollups 的差别：桶按时间升序返回（看板直接画趋势），不分游标页而是
+   * 「最近 limit 个桶」的有界窗口；from/to 显式给出时窗口以最后 limit 个桶为准，
+   * 更早的桶不返回（has_more 标记窗口被截断）。两侧口径缺一侧时该侧为 null——
+   * 不得用 0 冒充缺失。行仍走 withWorkspace，只含本 workspace 可见行；平台级
+   * ALL 行（workspace_id=ALL / NULL）对租户不可见。
+   */
+  async vric(
+    ctx: RequestContext,
+    query: {
+      granularity?: string;
+      from?: string;
+      to?: string;
+      limit?: string;
+    },
+  ): Promise<PageResult<VricBucketItem>> {
+    const granularity = query.granularity ?? "daily";
+    if (granularity !== "daily" && granularity !== "weekly") {
+      throw new BadRequestException({
+        error: {
+          code: "VALIDATION_ERROR",
+          message: "granularity must be daily or weekly",
+        },
+      });
+    }
+    const from = assertDay(query.from, "from");
+    const to = assertDay(query.to, "to");
+    const buckets = vricBucketLimitOf(query.limit);
+    const { fromDay, toDay } = vricRange(granularity, buckets, from, to);
+    const weekly = granularity === "weekly";
+    interface VricRow {
+      bucket: string;
+      metric_id: string;
+      metric_version: number;
+      stratum_key: string;
+      numerator: number;
+      denominator: number | null;
+      value: number;
+      ci_low: number | null;
+      ci_high: number | null;
+      sample_n: number | null;
+      refreshed_at: Date;
+    }
+    const columns = Prisma.sql`metric_id, metric_version, stratum_key,
+             numerator::float8 AS numerator, denominator::float8 AS denominator,
+             value::float8 AS value, ci_low::float8 AS ci_low,
+             ci_high::float8 AS ci_high, sample_n, refreshed_at`;
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const rows: VricRow[] = weekly
+        ? await tx.$queryRaw<VricRow[]>(Prisma.sql`
+            SELECT week::text AS bucket, ${columns}
+            FROM metric_rollup_weekly
+            WHERE metric_id IN ('T0-001', 'T0-002')
+              AND week >= ${fromDay}::date AND week <= ${toDay}::date
+            ORDER BY week, metric_version, stratum_key`)
+        : await tx.$queryRaw<VricRow[]>(Prisma.sql`
+            SELECT day::text AS bucket, ${columns}
+            FROM metric_rollup_daily
+            WHERE metric_id IN ('T0-001', 'T0-002')
+              AND day >= ${fromDay}::date AND day <= ${toDay}::date
+            ORDER BY day, metric_version, stratum_key`);
+      const byKey = new Map<string, VricBucketItem>();
+      for (const row of rows) {
+        const key = `${row.bucket}\u0000${row.stratum_key}`;
+        let entry = byKey.get(key);
+        if (!entry) {
+          entry = { bucket: row.bucket, stratumKey: row.stratum_key, strict: null, plus: null };
+          byKey.set(key, entry);
+        }
+        const value: VricValue = {
+          metricVersion: row.metric_version,
+          numerator: row.numerator,
+          denominator: row.denominator,
+          value: row.value,
+          ciLow: row.ci_low,
+          ciHigh: row.ci_high,
+          sampleN: row.sample_n,
+          refreshedAt: row.refreshed_at,
+        };
+        if (row.metric_id === "T0-001") {
+          if (!entry.strict || value.metricVersion >= entry.strict.metricVersion) entry.strict = value;
+        } else if (row.metric_id === "T0-002") {
+          if (!entry.plus || value.metricVersion >= entry.plus.metricVersion) entry.plus = value;
+        }
+      }
+      const items = [...byKey.values()].sort(
+        (left, right) =>
+          left.bucket.localeCompare(right.bucket) || left.stratumKey.localeCompare(right.stratumKey),
+      );
+      const bucketList = [...new Set(items.map((item) => item.bucket))].sort();
+      const keep = new Set(bucketList.slice(-buckets));
+      return {
+        items: items.filter((item) => keep.has(item.bucket)),
+        page: { nextCursor: null, hasMore: bucketList.length > buckets },
+      };
     });
   }
 }

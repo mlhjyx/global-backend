@@ -96,6 +96,10 @@ const PROVIDER_CONTRACT = Object.freeze({
     producerId: 'openfda.search', resultSchema: 'openfda-search/v1',
     consumer: 'OpenFdaDiscoveryProvider', classes: Object.freeze(['public_intelligence']),
   }),
+  registry_frame: Object.freeze({
+    producerId: 'registry.query', resultSchema: 'registry-query/v1',
+    consumer: 'RegistryFrameDiscoveryProvider', classes: Object.freeze(['company_registry']),
+  }),
 } satisfies Record<DiscoveryCompanyLineageProviderKey, Readonly<{
   producerId: string; resultSchema: string; consumer: string; classes: readonly string[];
 }>>);

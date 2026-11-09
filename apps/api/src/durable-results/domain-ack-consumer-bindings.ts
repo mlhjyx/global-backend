@@ -71,6 +71,8 @@ const DISCOVERY_GOVERNED_COMPANY_ACK_BINDINGS = Object.freeze([
   { producerId: 'osm.overpass', consumer: 'OsmDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'osm-overpass/v1' },
   { producerId: 'ted.search', consumer: 'TedDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'ted-search/v1' },
   { producerId: 'openfda.search', consumer: 'OpenFdaDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'openfda-search/v1' },
+  // A 方案（local_query）：回执由 registry 适配器确定性构造（无物理调用，成本 0）。
+  { producerId: 'registry.query', consumer: 'RegistryFrameDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'registry-query/v1' },
 ] as const satisfies readonly DomainAckProductConsumerBinding[]);
 
 function getDiscoveryGovernedCompanyAckBinding(

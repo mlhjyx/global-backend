@@ -746,7 +746,7 @@ const DISCOVERY_DOMAIN_ACK_PRODUCERS = new Set([
   'osm.overpass', 'searxng.search', 'smtp.rcpt_probe', 'ted.search',
   'tradefair.algolia',
   'wikidata.entity', 'wikidata.sparql', 'discovery.extract_company',
-  'discovery.extract_list', 'contact.find_decision_makers',
+  'discovery.extract_list', 'contact.find_decision_makers', 'registry.query',
 ]);
 
 /** Failure stages a run reaches only after canonicalization, with the fit stage started. */
@@ -1245,6 +1245,10 @@ export function createDiscoveryActivities(deps: {
         workspaceId: args.workspaceId,
         runId: binding.accountKey,
         correlationId: binding.accountKey,
+        durableBudgetAuthority: {
+          authorityId: budgetAuthorization.authorityId,
+          accountId: budgetAuthorization.accountId,
+        },
         ...(runIcp?.companyId
           ? {
               artifactSubject: {
