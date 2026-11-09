@@ -1,4 +1,12 @@
 import { AiTaskContract } from './task-contract';
+import {
+  assertJudgeModelRouting,
+  isJudgeFinalVerdictTask,
+  isJudgeModelAllowlisted,
+  judgeAllowsFlash,
+  JUDGE_MODEL_ALLOWLIST,
+} from './judge-model-routing';
+import type { RuntimeMode } from '../runtime/runtime-environment';
 import { REPLY_INTENTS } from './reply-intents';
 import { resolveTaskRoute } from '../site-builder/agents/task-routes';
 import {
@@ -53,8 +61,42 @@ export function parseTaskModelOverrides(raw: string | undefined): Record<string,
 
 const TASK_MODEL_OVERRIDES = parseTaskModelOverrides(process.env.MODEL_ACQUISITION_TASK_MODELS);
 
-const acquisitionModel = (taskId: string, tierModel: string): string =>
-  TASK_MODEL_OVERRIDES[taskId] ?? tierModel;
+export interface JudgeOverrideRejection {
+  effectiveModel: string;
+  requestedModel: string;
+  taskId: string;
+}
+
+const JUDGE_OVERRIDE_REJECTIONS: JudgeOverrideRejection[] = [];
+
+/**
+ * 终判 judge 任务的 per-task override 只接受白名单模型：非白名单（如 flash 档）
+ * 的 override 在这里被忽略、回落 tier 默认并留痕（启动日志会打出来）。
+ * 历史事故：`{"discovery.qualify_fit":"gemini-3.8-flash"}` 把 L2 深判拖回 flash。
+ * 显式 `JUDGE_ALLOW_FLASH=true` 时才放行（有意降档，必须可审计）。
+ */
+const acquisitionModel = (taskId: string, tierModel: string): string => {
+  const override = TASK_MODEL_OVERRIDES[taskId];
+  if (override === undefined) return tierModel;
+  if (
+    isJudgeFinalVerdictTask(taskId) &&
+    !judgeAllowsFlash() &&
+    !isJudgeModelAllowlisted(override)
+  ) {
+    JUDGE_OVERRIDE_REJECTIONS.push({
+      taskId,
+      requestedModel: override,
+      effectiveModel: tierModel,
+    });
+    return tierModel;
+  }
+  return override;
+};
+
+/** 启动日志用：被忽略的终判任务 override（空数组 = 无）。 */
+export function judgeModelOverrideRejections(): readonly JudgeOverrideRejection[] {
+  return [...JUDGE_OVERRIDE_REJECTIONS];
+}
 
 /**
  * The configured acquisition models are reasoning models: their reasoning
@@ -814,4 +856,42 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
 
 export function getTask(id: string): AiTaskContract | undefined {
   return AI_TASKS[id];
+}
+
+/**
+ * API 与 worker 启动时调用（设计 §4.3.3.6 启动自检）：先打印被忽略的终判
+ * override，再断言终判任务最终解析到白名单 pro 档模型。
+ *
+ * 受控模式（pilot/production）下不满足即抛错，进程 fail-closed 不启动
+ * （除非 JUDGE_ALLOW_FLASH=true 显式放行）；development/test 只告警——
+ * 这些进程（本地开发、CI 契约导出/Nest 启动验证）不产出对外的最终 verdict，
+ * 不能让它们因为缺模型 env 而启动失败。
+ */
+export function enforceJudgeModelRouting(
+  options: { mode: RuntimeMode },
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  for (const rejection of JUDGE_OVERRIDE_REJECTIONS) {
+    console.warn(
+      `[judge-routing] ignored MODEL_ACQUISITION_TASK_MODELS["${rejection.taskId}"]="${rejection.requestedModel}" — ` +
+        `not on JUDGE_MODEL_ALLOWLIST (${JUDGE_MODEL_ALLOWLIST.join(', ')}); using tier model "${rejection.effectiveModel}". ` +
+        `Set JUDGE_ALLOW_FLASH=true only to allow a flash-tier final verdict deliberately.`,
+    );
+  }
+  // 治理门（execution-authority-policy）要求模型解析点用字面量任务键、禁止泛型
+  // getTask(variable) 查询；这里对已知终判任务逐一按字面量取，未知任务直接视为缺失。
+  try {
+    assertJudgeModelRouting(
+      (taskId) =>
+        taskId === 'discovery.qualify_fit'
+          ? AI_TASKS['discovery.qualify_fit']?.model
+          : undefined,
+      env,
+    );
+  } catch (error) {
+    if (options.mode === 'pilot' || options.mode === 'production') throw error;
+    console.warn(
+      `[judge-routing] ${error instanceof Error ? error.message : String(error)} (allowed outside controlled modes: mode=${options.mode})`,
+    );
+  }
 }
