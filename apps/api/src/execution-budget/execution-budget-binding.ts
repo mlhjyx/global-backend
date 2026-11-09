@@ -20,6 +20,7 @@ const WORKSPACE_PURPOSES = new Set<ExecutionBudgetPurpose>([
   'understanding.run',
   'discovery.run',
   'contact.verify',
+  'contact.enrich',
   'outreach.draft',
   'campaign.plan',
 ]);

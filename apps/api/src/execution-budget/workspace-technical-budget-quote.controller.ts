@@ -70,6 +70,7 @@ class WorkspaceTechnicalBudgetQuoteResponseDto {
       'icp.query_plan',
       'discovery.run',
       'contact.verify',
+      'contact.enrich',
       'outreach.draft',
       'campaign.plan',
     ],
@@ -388,6 +389,20 @@ function parseRequest(value: unknown): WorkspaceExecutionBudgetRequest {
         body: Object.freeze({ attemptId: uuid(bodyRecord.attemptId) }),
       });
     }
+    case 'POST /canonical-companies/:id/enrich-contacts': {
+      exactKeys(input, ['operation', 'companyId'], ['body']);
+      const companyId = uuid(input.companyId);
+      if (input.body === undefined) {
+        return Object.freeze({ operation: input.operation, companyId });
+      }
+      const bodyRecord = record(input.body);
+      exactKeys(bodyRecord, ['attemptId']);
+      return Object.freeze({
+        operation: input.operation,
+        companyId,
+        body: Object.freeze({ attemptId: uuid(bodyRecord.attemptId) }),
+      });
+    }
     case 'POST /canonical-companies/:id/guess-emails':
       exactKeys(input, ['operation', 'companyId'], ['body']);
       return Object.freeze({
@@ -530,6 +545,19 @@ const WORKSPACE_QUOTE_REQUEST_SCHEMAS = [
   ),
   operationVariant(
     'POST /canonical-companies/:id/discover-contacts',
+    {
+      companyId: { type: 'string', format: 'uuid' },
+      body: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['attemptId'],
+        properties: { attemptId: { type: 'string', format: 'uuid' } },
+      },
+    },
+    ['companyId'],
+  ),
+  operationVariant(
+    'POST /canonical-companies/:id/enrich-contacts',
     {
       companyId: { type: 'string', format: 'uuid' },
       body: {

@@ -155,6 +155,33 @@ const cases = [
   },
   {
     request: {
+      operation: 'POST /canonical-companies/:id/enrich-contacts',
+      companyId: CANONICAL_COMPANY_ID,
+    },
+    expected: {
+      purpose: 'contact.enrich',
+      subjectType: 'company',
+      subjectId: CANONICAL_COMPANY_ID,
+      requestSha256:
+        '69fea2c44d1655679b7d43a449ee9f69d03bb3ffae512e180252d53c289d058f',
+    },
+  },
+  {
+    request: {
+      operation: 'POST /canonical-companies/:id/enrich-contacts',
+      companyId: CANONICAL_COMPANY_ID,
+      body: { attemptId: '7e6f6f43-8f8d-4c2a-9b1e-2a3b4c5d6e7f' },
+    },
+    expected: {
+      purpose: 'contact.enrich',
+      subjectType: 'company',
+      subjectId: CANONICAL_COMPANY_ID,
+      requestSha256:
+        '9701c5bfda2fff61265a0192d4e8a3d4f618ffc0b96a8207ef3eb37df7cdaf24',
+    },
+  },
+  {
+    request: {
       operation: 'POST /canonical-companies/:id/guess-emails',
       companyId: CANONICAL_COMPANY_ID,
       body: undefined,
