@@ -22,8 +22,8 @@ import {
   projectModelResultForReplay,
   restoreModelResultFromReplay,
 } from "../durable-results/model-result-replay";
+import { assertChatWithToolsPlatformEgressAllowed } from "./chat-tools-platform-egress";
 import { definiteModelFailureCode } from "./definite-model-failure";
-import { ExecutionControlError } from "../execution-budget/execution-control-error";
 import {
   ExternalActionDeniedError,
   ProviderHttpError,
@@ -713,10 +713,9 @@ export class RouterModelGateway extends ModelGateway {
     assertNoCallerModelIdentitySubstitutes(ctx);
     assertPlatformEgressPaidContext(ctx);
     assertPlatformEgressFenceAvailable(ctx);
-    if (ctx.platformEgress && op === "generateChatWithTools") {
-      // WEB-1：平台出网围栏的 modelOp 白名单属于 R4 执行合同（platform-egress-operation），
-      // 扩列需要平台策略版本；在此之前工具环调用不得走平台出网（fail closed）。
-      throw new ExecutionControlError("CHAT_WITH_TOOLS_PLATFORM_EGRESS_UNSUPPORTED");
+    // WEB-1：平台出网围栏的 modelOp 白名单属于 R4 执行合同，工具环不在其中（fail closed）。
+    if (op === "generateChatWithTools") {
+      assertChatWithToolsPlatformEgressAllowed(ctx);
     }
     const chain = this.router.route(op, input.task);
     if (chain.length === 0)
