@@ -21,3 +21,5 @@ export { contactReverifySweepWorkflow } from "./contact-reverify.workflow";
 export { contactWeeklyReportWorkflow } from "./contact-weekly-report.workflow";
 export { assetObjectCleanupWorkflow } from "./asset-cleanup.workflow";
 export { measurementRollupWorkflow } from "./measurement.workflow";
+export { domainResolutionWorkflow } from "./domain-resolution.workflow";
+export { recallAuditWorkflow } from "./recall-audit.workflow";

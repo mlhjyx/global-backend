@@ -19,6 +19,7 @@ Temporal 重放要求工作流按记录的历史命令序列重新调度。参�
 | `apps/api/src/temporal/kb-recovery.workflow.ts` | `MAX_CANDIDATES` / `MAX_CONCURRENCY` | 10 / 5 | 恢复扫描的候选上限与并发 | 同上；两个值都要有 replay 用例 |
 | `apps/api/src/temporal/personal-artifact-cleanup.workflow.ts` | `COMMANDS_PER_HISTORY` | 50 | continueAsNew 前每段命令数 | 同上；注意 continueAsNew 需随输入传递 |
 | `apps/api/src/temporal/refurbish.workflow.ts` | `MAX_IMAGE_BATCHES_PER_BUILD` | 256 | 单次构建的图片批次上限 | 同上 |
+| `apps/api/src/temporal/domain-resolution.workflow.ts` | `DOMAIN_RESOLUTION_MAX_COMPANIES` | 50 | 启动输入的规模守卫（任何活动之前校验；调低会让已记录的大输入重放失败） | 改为可选输入字段（缺省 50，冻结）+ replay 测试 |
 
 `apps/api/scripts/workflows/asset-cleanup-verifier.workflow.ts` 的两个计时常量属于本地验证 workflow（不进生产 worker），只登记原因、不排期。
 
@@ -32,3 +33,4 @@ Temporal 重放要求工作流按记录的历史命令序列重新调度。参�
 ## 状态
 
 - 2026-11-08：B1 完成 discovery（池阈值/深挖并发/查询批）与 raw-retention（三个循环上界 + 三个夹取上限）；本清单四项待开工，不阻塞 Phase 1。
+- 2026-11-10：登记 `domain-resolution.workflow.ts` 的 `DOMAIN_RESOLUTION_MAX_COMPANIES`（ch03 执行面 3b 引入），同样不阻塞本阶段。
