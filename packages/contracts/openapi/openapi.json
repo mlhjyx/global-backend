@@ -10644,9 +10644,14 @@
           },
           {
             "name": "reviewStatus",
-            "required": true,
+            "required": false,
             "in": "query",
             "schema": {
+              "enum": [
+                "PENDING",
+                "APPROVED",
+                "REJECTED"
+              ],
               "type": "string"
             }
           }
