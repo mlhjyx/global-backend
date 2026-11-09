@@ -2,8 +2,7 @@
 --
 -- CONTACT_WEEKLY_REPORT Schedule（注册即 paused）与 scripts/contact-weekly-report.mts
 -- 每周写入一行：窗口、指标 JSON、告警评估 JSON。平台级运营表（非租户数据，无 RLS）：
--- 只有 owner/运维连接写入；app_user 按平台默认只读（继承 owner 默认 SELECT 权限，
--- 权限清单登记 ["SELECT"]），RLS 再按 workspace 限制可见性。
+-- 只有 owner/运维连接读写，app_user 零权限（权限清单显式登记为空数组）。
 -- workspace_id 为 NULL 表示全租户汇总（当前周报口径）；按租户快照留作后续扩展。
 -- 保留策略：运营表，按需归档（无自动清理——数据量每周 1 行）。
 BEGIN;
@@ -28,7 +27,7 @@ CREATE INDEX "cms_capture_idx" ON "contact_metrics_snapshot"
 
 -- 平台级运营表但仍带租户维度（workspace_id 非空的快照）：给 RLS 契约兜底。
 -- NULL 行 = 全租户汇总，只有平台上下文（current_workspace_id() IS NULL）可见；
--- owner/运维连接绕过 RLS（与既有平台表口径一致）；app_user 仅默认 SELECT。
+-- owner/运维连接绕过 RLS（与既有平台表口径一致）。app_user 零权限。
 ALTER TABLE "contact_metrics_snapshot" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "contact_metrics_snapshot" FORCE ROW LEVEL SECURITY;
 CREATE POLICY "cms_tenant_isolation" ON "contact_metrics_snapshot"
