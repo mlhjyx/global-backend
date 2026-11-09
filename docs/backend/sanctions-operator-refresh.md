@@ -102,3 +102,35 @@ UPDATE sanctions_source SET status = 'DISABLED', updated_at = now()
 | > `SANCTIONS_LIST_BLOCK_AGE_DAYS`（默认 14），或任一 ENABLED 源从未刷新 | blocked | qualify 整批进 `sanctions_hold`（禁联 `suppressed` 优先保留）；每次 run 发一条 `SanctionsListStale` 集成事件（ops/审计可见）+ 站内通知 |
 
 处置顺序是「**先门后刷**」：不要为了跑通 qualify/accept 去调大阈值；按 §3 刷新名单后门自动恢复（`list_stale=false`、`sanctions_age_days<=1`）。刷新失败（如 `eu_fsf`）必须在 24 小时内重试并记录原因。阈值 env 见 `sanctions-freshness.ts`（`SANCTIONS_LIST_MAX_AGE_DAYS` / `SANCTIONS_LIST_BLOCK_AGE_DAYS`）。
+
+## 7. L0 门链的新鲜度与告警（P3 J07/W8，2026-11-09 起）
+
+§5 的三档是 ch08 的口径（env 阈值，qualify/accept 既有行为）。P3 起判定链最前面还有一层 L0 硬门（`apps/api/src/discovery/judgment/gates.ts`，G1 制裁 → … → G5 域名），它用**同一份 `sanctions_source` 数据、不同的四态口径**（常量，不走 env）：
+
+| 状态 | 条件（`gates.ts` 常量） | L0 行为 |
+|---|---|---|
+| `fresh` | 全部 ENABLED 源刷新在 72h（`SANCTIONS_FRESH_MAX_HOURS`）内且无 FAILED | PASS |
+| `yellow` | 最低刷新时间 > 72h，或任一 ENABLED 源 `last_fetch_status=FAILED`（且 ≤ 168h） | PASS + `GATE_SANCTIONS_STALE_YELLOW` 标记 |
+| `red` | 任一 ENABLED 源从未刷新，或最低刷新时间 > 168h（`SANCTIONS_YELLOW_MAX_HOURS`） | PASS + `GATE_SANCTIONS_STALE_RED` 标记 |
+| `not_screened` | 无 ENABLED 源（门未启用） | UNKNOWN（`GATE_SANCTIONS_NOT_SCREENED`），不拦截 |
+
+- `SanctionsScreeningService.freshness()` 返回上面四态；`screen()` 的返回值带 `stale`（yellow/red 为 true）。
+- **yellow/red 不拦截判定**：快扫/深判照常调模型，stale 标记随结果落库（深判写进 `lead.fitReasons.sanctionsStale`；快扫写进 `company_done` 事件）。「禁止推荐/导出/交付」的执行在 J20 面板，不在本层。
+- 接线随 `JUDGE_CONTRACT_MODE`：深判只在 `shadow`/`enforce` 下评估 L0（`off` 保持旧行为）；快扫**总是**评估 L0（G5 域名门要写补数队列），但 G1 命中的拦截只在 `enforce` 下生效（`off`/`shadow` 只记录 `hard_gate_result`）。
+- **告警**：yellow/red 时发 `SanctionsListStale` 集成事件（payload `code=SANCTIONS_LIST_STALE`，含 `freshness`、`failedSourceKeys`、`missingRefreshSourceKeys`、阈值），与 §5 的事件类型相同，SaaS 站内通知与运营台共用。去重键 = workspace × 状态 × 失败源集合 × 缺刷新源集合，窗口 6 小时（`SANCTIONS_STALE_ALERT_DEDUPE_HOURS` 常量）：同一源同一状态不重复轰炸，状态升级（yellow→red）或源集合变化算新事实。
+- 处置与 §5 相同：「先门后刷」，按 §3 刷新名单后 yellow/red 自动回落；`eu_fsf` 等源持续 FAILED 且超 168h 就是 red。
+
+### 补数队列 `gate_enrichment_task`（P3 J08/W9）
+
+G5 域名门（以及 G3 国家 / G4 规模）判 UNKNOWN 时，`evaluateGates` 写一行 `gate_enrichment_task`（`status=queued`，唯一键 workspace × company × COALESCE(icp) × gate，重放幂等）。快扫对 G5 UNKNOWN 的公司**不进 LLM 批量**：job 停 `skipped`、`last_error_code` 记 `GATE_DOMAIN_MISSING`/`GATE_DOMAIN_DEAD`，等补数完成后重评。ICP `companyAttributes.allow_domainless=true` 时 G5 为 NOT_APPLICABLE，照常判定。
+
+运营查看积压：
+
+```sql
+SELECT gate_id, reason_code, status, count(*)
+FROM gate_enrichment_task
+GROUP BY 1, 2, 3
+ORDER BY 4 DESC;
+```
+
+消费者：**P2 域名解析流水线尚未接线**（仓库里只有候选生成器 `apps/api/src/registry/domain/domain-resolver.ts`，没有队列消费者，也没有域名存活状态的生产者）。本卡只负责生产任务与状态查询；`createRun2Activities` 的 `domainStatusFor` 是给 P2 预留的存活校验接入缝，P2 后续波次消费队列、回填域名后重评。

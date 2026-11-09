@@ -47,6 +47,7 @@ import { ExternalActionDeniedError, ProviderHttpError } from '../model-gateway/p
 import { CancelledFailure } from '@temporalio/common';
 import { getTask } from '../ai-tasks/task-registry';
 import { StaticSkillResolver } from '../skills/skill-runtime';
+import { resetSanctionsStaleAlertDedupeForTests } from '../discovery/judgment/gate-chain';
 
 const WORKSPACE_ID = '11111111-1111-4111-8111-111111111111';
 const RUN_ID = '22222222-2222-4222-8222-222222222222';
@@ -92,6 +93,10 @@ function makePrisma(state: {
   run?: Record<string, unknown>;
   /** 可变禁联事实：测试可在预检之后追加，模拟 TOCTOU 窗口。 */
   suppressions?: Array<{ type: string; value: string }>;
+  /** P3 J07/J08：L0 门链的 ICP（companyAttributes/targetMarkets）与制裁事实。 */
+  icp?: Record<string, unknown>;
+  screening?: Record<string, unknown> | null;
+  sanctionsSources?: Array<{ key: string; lastRefreshedAt: Date | null; lastFetchStatus: string | null }>;
 }) {
   const jobUpserts: Array<{ where: unknown; create: Record<string, unknown> }> = [];
   const jobUpdates: Array<{ where: { id: string }; data: Record<string, unknown> }> = [];
@@ -99,12 +104,50 @@ function makePrisma(state: {
   const leadUpserts: Array<Record<string, unknown>> = [];
   const phaseUpdates: Array<Record<string, unknown>> = [];
   const shadowUpserts: Array<Record<string, unknown>> = [];
+  const gateResults: Array<Record<string, unknown>> = [];
+  const enrichmentTasks: Array<Record<string, unknown>> = [];
+  const outboxEvents: Array<Record<string, unknown>> = [];
+  // 两套 replay 键（与迁移里的表达式唯一索引同语义）：同键第二次写入被跳过。
+  const resultKeys = new Set<string>();
+  const taskKeys = new Set<string>();
+  const insertMany = (
+    target: Array<Record<string, unknown>>,
+    keys: Set<string>,
+    makeKey: (row: Record<string, unknown>) => string,
+  ) =>
+    vi.fn(async (args: { data: Array<Record<string, unknown>> }) => {
+      let count = 0;
+      for (const row of args.data) {
+        const key = makeKey(row);
+        if (keys.has(key)) continue;
+        keys.add(key);
+        target.push(row);
+        count += 1;
+      }
+      return { count };
+    });
   let seq = 0n;
   const tx = {
     $queryRaw: vi.fn(async () => []),
     qualificationRule: { findMany: vi.fn(async () => state.rules ?? []) },
     canonicalCompany: {
       count: vi.fn(async () => (state.companies ?? []).length),
+      findFirst: vi.fn(async ({ where }: { where: { id: string } }) => {
+        const match = (state.companies ?? []).find((c) => c.id === where.id);
+        return match
+          ? {
+              id: match.id,
+              name: match.name,
+              domain: match.domain,
+              country: match.country ?? null,
+              industry: match.industry ?? null,
+              employeeCount: match.employeeCount ?? null,
+              revenueUsd: match.revenueUsd ?? null,
+              status: 'NEW',
+              attributes: match.attributes ?? {},
+            }
+          : null;
+      }),
       findUnique: vi.fn(async ({ where }: { where: { id: string } }) => {
         const match = (state.companies ?? []).find((c) => c.id === where.id);
         return match
@@ -115,6 +158,34 @@ function makePrisma(state: {
       findMany: vi.fn(async (args: { where?: { id?: { in?: string[] } } }) => {
         const ids = args?.where?.id?.in;
         return ids ? (state.companies ?? []).filter((c) => ids.includes(c.id as string)) : state.companies ?? [];
+      }),
+    },
+    icpDefinition: {
+      findFirst: vi.fn(async () => state.icp ?? { companyAttributes: {}, targetMarkets: [] }),
+    },
+    sanctionsScreeningResult: { findUnique: vi.fn(async () => state.screening ?? null) },
+    sanctionsSource: { findMany: vi.fn(async () => state.sanctionsSources ?? []) },
+    hardGateResult: {
+      createMany: insertMany(
+        gateResults,
+        resultKeys,
+        (row) =>
+          `${String(row.workspaceId)}|${String(row.canonicalCompanyId)}|${String(row.icpId ?? '')}|${String(row.gateId)}|${String(row.inputDigest)}`,
+      ),
+    },
+    gateEnrichmentTask: {
+      createMany: insertMany(
+        enrichmentTasks,
+        taskKeys,
+        (row) =>
+          `${String(row.workspaceId)}|${String(row.canonicalCompanyId)}|${String(row.icpId ?? '')}|${String(row.gateId)}`,
+      ),
+    },
+    outboxEvent: {
+      findMany: vi.fn(async () => outboxEvents.map((payload) => ({ payload }))),
+      create: vi.fn(async (args: { data: Record<string, unknown> }) => {
+        outboxEvents.push(args.data.payload as Record<string, unknown>);
+        return args.data;
       }),
     },
     discoveryCompanyJob: {
@@ -165,13 +236,26 @@ function makePrisma(state: {
   const prisma = {
     withWorkspace: vi.fn(async (_workspaceId: string, callback: (client: typeof tx) => Promise<unknown>) => callback(tx)),
   };
-  return { prisma, tx, jobUpserts, jobUpdates, events, leadUpserts, phaseUpdates, shadowUpserts };
+  return {
+    prisma,
+    tx,
+    jobUpserts,
+    jobUpdates,
+    events,
+    leadUpserts,
+    phaseUpdates,
+    shadowUpserts,
+    gateResults,
+    enrichmentTasks,
+    outboxEvents,
+  };
 }
 
 function makeActivities(
   state: Parameters<typeof makePrisma>[0],
   skills?: import('../skills/skill-runtime').SkillResolver,
   agentRuntime?: import('../agents/agent-round').AgentRoundRuntime,
+  extraDeps?: { domainStatusFor?: (companyId: string) => Promise<'ALIVE' | 'DEAD' | 'UNKNOWN' | null> },
 ) {
   const harness = makePrisma(state);
   const activities = createRun2Activities({
@@ -180,6 +264,7 @@ function makeActivities(
     budgetStore: { attestAuthorized: vi.fn(async () => undefined) } as never,
     ...(skills ? { skills } : {}),
     ...(agentRuntime ? { agentRuntime } : {}),
+    ...(extraDeps?.domainStatusFor ? { domainStatusFor: extraDeps.domainStatusFor } : {}),
   });
   return { activities, ...harness };
 }
@@ -204,6 +289,8 @@ beforeEach(() => {
   mocks.loadIcpBrief.mockResolvedValue({ icp_name: 'DE pump distributors' });
   activityRuntime.context = null;
   activityRuntime.heartbeat.mockReset();
+  vi.unstubAllEnvs();
+  resetSanctionsStaleAlertDedupeForTests();
 });
 
 describe('M0③ prefilterPool', () => {
@@ -439,6 +526,233 @@ describe('M0③ quickJudgeBatch', () => {
     await expect(activities.quickJudgeBatch(ARGS)).rejects.toBeInstanceOf(CancelledFailure);
     expect(mocks.execute).not.toHaveBeenCalled();
     expect(jobUpdates).toHaveLength(0);
+  });
+});
+
+/**
+ * P3 J08（W9 域名门 / 补数队列）与 P3 J07（W8 L0 门链接线与陈旧告警）。
+ * 零容器：假事务模拟两张门表的表达式唯一索引（同键第二次写入被跳过）。
+ */
+describe('P3 J08 快扫 G5 域名门与补数队列', () => {
+  it('无域名公司写 gate_enrichment_task(queued) 且不进模型批量', async () => {
+    const { activities, jobUpdates, enrichmentTasks, events } = makeActivities({
+      jobs: [
+        { id: 'j1', canonicalCompanyId: 'c1' },
+        { id: 'j2', canonicalCompanyId: 'c2' },
+        { id: 'j3', canonicalCompanyId: 'c3' },
+      ],
+      companies: [company('c1'), company('c2', { domain: null }), company('c3')],
+    });
+    mocks.execute.mockResolvedValue({
+      data: {
+        judgments: [
+          { index: 0, verdict: 'match', reason: 'distributor' },
+          { index: 1, verdict: 'weak', reason: 'unclear' },
+        ],
+      },
+    });
+
+    const result = await activities.quickJudgeBatch(ARGS);
+
+    expect(result).toMatchObject({ judged: 2, gated: 1 });
+    // 补数任务：G5 UNKNOWN（无域名）进队列，状态 queued。
+    expect(enrichmentTasks).toHaveLength(1);
+    expect(enrichmentTasks[0]).toMatchObject({
+      canonicalCompanyId: 'c2',
+      gateId: 'G_DOMAIN',
+      reasonCode: 'GATE_DOMAIN_MISSING',
+      status: 'queued',
+    });
+    // 不进模型批量：模型输入里没有这家公司。
+    const prompt = (mocks.execute.mock.calls[0]![1] as { prompt: string }).prompt;
+    expect(prompt).not.toContain('Company c2');
+    expect(mocks.judgeFitCompany).not.toHaveBeenCalled();
+    // job 停在 skipped 并留下拦截原因；company_done 事件标明 gate_blocked。
+    expect(jobUpdates.find((update) => update.where.id === 'j2')?.data).toMatchObject({
+      stage: 'skipped',
+      lastErrorCode: 'GATE_DOMAIN_MISSING',
+    });
+    const gateEvent = events.find(
+      (event) => (event.payload as Record<string, unknown>).stage === 'gate_blocked',
+    );
+    expect(gateEvent?.payload).toMatchObject({
+      companyId: 'c2',
+      gateId: 'G_DOMAIN',
+      reasonCode: 'GATE_DOMAIN_MISSING',
+      verdict: 'UNKNOWN',
+    });
+  });
+
+  it('DEAD 域名同样进补数队列（P2 域名存活结果的接入缝）', async () => {
+    const { activities, enrichmentTasks, jobUpdates } = makeActivities(
+      {
+        jobs: [
+          { id: 'j1', canonicalCompanyId: 'c1' },
+          { id: 'j2', canonicalCompanyId: 'c2' },
+        ],
+        companies: [company('c1'), company('c2')],
+      },
+      undefined,
+      undefined,
+      {
+        domainStatusFor: async (companyId) =>
+          companyId === 'c1' ? 'DEAD' : null,
+      },
+    );
+    mocks.judgeFitCompany.mockResolvedValue({ verdict: 'weak' });
+
+    const result = await activities.quickJudgeBatch(ARGS);
+
+    expect(result).toMatchObject({ judged: 1, gated: 1 });
+    expect(enrichmentTasks).toHaveLength(1);
+    expect(enrichmentTasks[0]).toMatchObject({
+      canonicalCompanyId: 'c1',
+      gateId: 'G_DOMAIN',
+      reasonCode: 'GATE_DOMAIN_DEAD',
+    });
+    expect(jobUpdates.find((update) => update.where.id === 'j1')?.data).toMatchObject({
+      stage: 'skipped',
+      lastErrorCode: 'GATE_DOMAIN_DEAD',
+    });
+  });
+
+  it('allow_domainless=true 的 ICP：无域名照常判（NOT_APPLICABLE）', async () => {
+    const { activities, enrichmentTasks } = makeActivities({
+      jobs: [
+        { id: 'j1', canonicalCompanyId: 'c1' },
+        { id: 'j2', canonicalCompanyId: 'c2' },
+      ],
+      companies: [company('c1'), company('c2', { domain: null })],
+      icp: { companyAttributes: { allow_domainless: true }, targetMarkets: [] },
+    });
+    mocks.execute.mockResolvedValue({
+      data: {
+        judgments: [
+          { index: 0, verdict: 'match', reason: 'distributor' },
+          { index: 1, verdict: 'weak', reason: 'unclear' },
+        ],
+      },
+    });
+
+    const result = await activities.quickJudgeBatch(ARGS);
+
+    expect(result).toMatchObject({ judged: 2, gated: 0 });
+    expect(enrichmentTasks).toHaveLength(0);
+    expect((mocks.execute.mock.calls[0]![1] as { prompt: string }).prompt).toContain('Company c2');
+  });
+
+  it('replay 幂等：同一 (company, icp, gate) 重跑不重复建补数任务', async () => {
+    const state = {
+      jobs: [{ id: 'j1', canonicalCompanyId: 'c1' }],
+      companies: [company('c1', { domain: null })],
+    };
+    const { activities, enrichmentTasks } = makeActivities(state);
+
+    await activities.quickJudgeBatch(ARGS);
+    await activities.quickJudgeBatch(ARGS);
+
+    expect(enrichmentTasks).toHaveLength(1);
+  });
+});
+
+describe('P3 J07 L0 门链与制裁陈旧告警（快扫）', () => {
+  const sanctionsSources = (lastRefreshedAt: Date, lastFetchStatus: string) => [
+    { key: 'eu_fsf', lastRefreshedAt, lastFetchStatus },
+  ];
+
+  it('shadow：G1 命中只记录不拦截（模型照常判，门结果落库）', async () => {
+    vi.stubEnv('JUDGE_CONTRACT_MODE', 'shadow');
+    const { activities, gateResults, jobUpdates } = makeActivities({
+      jobs: [
+        { id: 'j1', canonicalCompanyId: 'c1' },
+        { id: 'j2', canonicalCompanyId: 'c2' },
+      ],
+      companies: [company('c1'), company('c2')],
+      screening: { status: 'potential_match', reviewState: 'open', listVersions: {} },
+    });
+    mocks.execute.mockResolvedValue({
+      data: {
+        judgments: [
+          { index: 0, verdict: 'mismatch', reason: 'competitor' },
+          { index: 1, verdict: 'weak', reason: 'unclear' },
+        ],
+      },
+    });
+
+    const result = await activities.quickJudgeBatch(ARGS);
+
+    expect(result).toMatchObject({ judged: 2, gated: 0 });
+    // shadow 的 L0 结果只记录：G_SANCTIONS FAIL 行在 hard_gate_result 里可查。
+    expect(
+      gateResults.some(
+        (row) => row.gateId === 'G_SANCTIONS' && row.verdict === 'FAIL' && row.reasonCode === 'GATE_SANCTIONS_HIT',
+      ),
+    ).toBe(true);
+    expect(jobUpdates.every((update) => update.data.stage === 'quick_judged')).toBe(true);
+  });
+
+  it('enforce：G1 命中在模型调用前拦截（不送 LLM）', async () => {
+    vi.stubEnv('JUDGE_CONTRACT_MODE', 'enforce');
+    const { activities, jobUpdates, gateResults } = makeActivities({
+      jobs: [
+        { id: 'j1', canonicalCompanyId: 'c1' },
+        { id: 'j2', canonicalCompanyId: 'c2' },
+      ],
+      companies: [company('c1'), company('c2')],
+      screening: { status: 'potential_match', reviewState: 'open', listVersions: {} },
+    });
+
+    const result = await activities.quickJudgeBatch(ARGS);
+
+    expect(result).toMatchObject({ judged: 0, gated: 2 });
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.judgeFitCompany).not.toHaveBeenCalled();
+    expect(
+      gateResults.some(
+        (row) => row.gateId === 'G_SANCTIONS' && row.verdict === 'FAIL',
+      ),
+    ).toBe(true);
+    for (const update of jobUpdates) {
+      expect(update.data).toMatchObject({ stage: 'skipped', lastErrorCode: 'GATE_SANCTIONS_HIT' });
+    }
+  });
+
+  it('yellow/red 不拦截：结果带 stale 标记，告警同源同状态只发一次', async () => {
+    const { activities, events, outboxEvents } = makeActivities({
+      jobs: [
+        { id: 'j1', canonicalCompanyId: 'c1' },
+        { id: 'j2', canonicalCompanyId: 'c2' },
+      ],
+      companies: [company('c1'), company('c2')],
+      screening: { status: 'clear', reviewState: 'open', listVersions: {} },
+      // 24h 前刷新成功但最新一次 FAILED → yellow（>72h 或从未刷新才进 red）。
+      sanctionsSources: sanctionsSources(new Date(Date.now() - 24 * 3_600_000), 'FAILED'),
+    });
+    mocks.execute.mockResolvedValue({
+      data: {
+        judgments: [
+          { index: 0, verdict: 'match', reason: 'distributor' },
+          { index: 1, verdict: 'weak', reason: 'unclear' },
+        ],
+      },
+    });
+
+    const result = await activities.quickJudgeBatch(ARGS);
+
+    // stale 是 PASS 的降级标记：不判 NOT_FIT、不拦截。
+    expect(result).toMatchObject({ judged: 2, gated: 0, verdicts: { match: 1, weak: 1 } });
+    for (const event of events.filter((entry) => entry.type === 'company_done')) {
+      expect((event.payload as Record<string, unknown>).sanctionsStale).toBe('yellow');
+    }
+    // 两家公司共享同一（状态×源集合）去重键：只发一条 SANCTIONS_LIST_STALE 事件。
+    expect(outboxEvents).toHaveLength(1);
+    expect(outboxEvents[0]).toMatchObject({
+      code: 'SANCTIONS_LIST_STALE',
+      freshness: 'yellow',
+      reason: 'stale',
+      failedSourceKeys: ['eu_fsf'],
+      thresholds: { freshMaxHours: 72, yellowMaxHours: 168 },
+    });
   });
 });
 

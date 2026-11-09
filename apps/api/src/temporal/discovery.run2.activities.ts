@@ -21,6 +21,12 @@ import {
   persistJudgmentRecordInTransaction,
   type FitJudgeCompany,
 } from '../discovery/fit-judge';
+import { judgeContractMode } from '../discovery/fit-judge-v2';
+import {
+  evaluateL0Gates,
+  quickScanGateBlock,
+  type GateBlock,
+} from '../discovery/judgment/gate-chain';
 import {
   executeSkillWithRuntime,
   SkillUnavailableError,
@@ -85,6 +91,17 @@ function throwIfActivityCancelled(context: Context | null): void {
   }
 }
 
+/** 快扫一家公司的判定结局：模型判定 / 外部处理拦截 / L0 门拦截（进补数队列或 NOT_FIT）。 */
+type QuickOutcome =
+  | {
+      verdict: QuickVerdict;
+      via: 'batch' | 'single' | 'rule_fallback';
+      /** P3 J07：该公司评估时制裁名单 yellow/red（不拦截，只随结果标记）。 */
+      sanctionsStale?: 'yellow' | 'red';
+    }
+  | { skip: true }
+  | { gateBlock: GateBlock };
+
 /** 一次 run 的快扫三段：规则预筛 → 批量粗判（8 家/次，逐家降级）→ 临时候选落库。 */
 export function createRun2Activities(deps: {
   prisma: PrismaService;
@@ -95,6 +112,11 @@ export function createRun2Activities(deps: {
   skills?: SkillResolver;
   /** M2 步 9b：资格判定员角色（注册表 + 技能子集校验 + 轨迹）。缺省保持旧行为。 */
   agentRuntime?: AgentRoundRuntime;
+  /**
+   * P3 J08：域名存活校验结果（P2 域名解析流水线的接入缝）。未注入 = 没有存活证据，
+   * 不视为 DEAD（gates.ts 的语义）；P2 侧尚无生产者，消费者留待其后续波次接线。
+   */
+  domainStatusFor?: (companyId: string) => Promise<'ALIVE' | 'DEAD' | 'UNKNOWN' | null>;
 }) {
   const budgets =
     deps.budgetStore ?? new UnavailableBudgetStore('run2 activities require an authoritative BudgetStore');
@@ -247,6 +269,8 @@ export function createRun2Activities(deps: {
       ruleFallback: number;
       failed: number;
       skipped: number;
+      /** P3 J07/J08：被 L0 门链拦下（G5 进补数队列 / enforce 下 FAIL）未送模型的公司数。 */
+      gated: number;
     }> {
       const binding = await ensureRunBudget(args);
       // P3 J02 W4：池子最多 500 家 × 8 家/批，活动远超 15 分钟 startToClose（2026-11-08 审计
@@ -298,7 +322,10 @@ export function createRun2Activities(deps: {
       let ruleFallback = 0;
       let failed = 0;
       let skipped = 0;
+      let gated = 0;
       let batchesDone = 0;
+      // P3 J07/J03b：判定契约模式（off/shadow/enforce）与 L0 门链协同，按事实写进 run 事件。
+      const judgeMode = judgeContractMode();
       /** P3 J02 W4：批量协议失败的分类码（该批逐家降级的兜底归因）。 */
       let batchFailureCode: FailureCode | undefined;
       /** P3 J02 W4：逐家判定异常的分类码（取代 QUICK_JUDGE_FAILED 聚合码）。 */
@@ -345,6 +372,7 @@ export function createRun2Activities(deps: {
           runtimeTelemetry: deps.runtimeTelemetry,
           authorizeExternalAction: () => mayUseExternalProcessing(args.workspaceId, company.id),
           skills: deps.skills,
+          judgeContractMode: judgeMode,
         });
         // P3 J03b：L1 快扫的单家降级没有 Lead 投影，v2 记录单独落库（shadow 容忍失败）。
         if (judgment?.judgmentRecord) {
@@ -357,7 +385,7 @@ export function createRun2Activities(deps: {
 
       const settle = async (
         batch: Array<{ job: (typeof jobs)[number]; company: (typeof companies)[number] }>,
-        outcomes: Map<string, { verdict: QuickVerdict; via: 'batch' | 'single' | 'rule_fallback' } | { skip: true }>,
+        outcomes: Map<string, QuickOutcome>,
       ): Promise<void> => {
         await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
           for (const { job, company } of batch) {
@@ -392,6 +420,32 @@ export function createRun2Activities(deps: {
               });
               continue;
             }
+            if ('gateBlock' in outcome) {
+              // P3 J07/J08：门链拦截——G5 UNKNOWN 已由 evaluateGates 写 gate_enrichment_task
+              // （queued），这里只把 job 停在 skipped 并留下拦截原因；enforce 的 FAIL 同理。
+              gated += 1;
+              await tx.discoveryCompanyJob.update({
+                where: { id: job.id },
+                data: {
+                  stage: 'skipped',
+                  lastErrorCode: outcome.gateBlock.reasonCode,
+                  finishedAt: new Date(),
+                },
+              });
+              await appendRunEvent(tx as never, {
+                workspaceId: args.workspaceId,
+                runId: args.runId,
+                type: 'company_done',
+                payload: {
+                  companyId: company.id,
+                  stage: 'gate_blocked',
+                  gateId: outcome.gateBlock.gateId,
+                  reasonCode: outcome.gateBlock.reasonCode,
+                  verdict: outcome.gateBlock.verdict,
+                },
+              });
+              continue;
+            }
             judged += 1;
             verdicts[outcome.verdict] = (verdicts[outcome.verdict] ?? 0) + 1;
             if (outcome.via === 'single') fallbackPerCompany += 1;
@@ -417,6 +471,7 @@ export function createRun2Activities(deps: {
                 stage: 'quick_judged',
                 verdict: outcome.verdict,
                 via: outcome.via,
+                ...(outcome.sanctionsStale ? { sanctionsStale: outcome.sanctionsStale } : {}),
                 ...(fallbackCode
                   ? { failureCode: fallbackCode, failureStage: FAILURE_CODES[fallbackCode].stage }
                   : {}),
@@ -432,19 +487,39 @@ export function createRun2Activities(deps: {
         // 批量失败码是逐批事实，不得把上一批的分类带到下一批。
         batchFailureCode = undefined;
         const batch = targets.slice(start, start + QUICK_JUDGE_BATCH_SIZE);
-        const outcomes = new Map<
-          string,
-          { verdict: QuickVerdict; via: 'batch' | 'single' | 'rule_fallback' } | { skip: true }
-        >();
+        const outcomes = new Map<string, QuickOutcome>();
 
         // 逐家外部处理闸门（禁联/主体失效）：不放行的直接 skipped，不进模型批量。
+        // P3 J08（W9）：随后接 L0 门链（G5 域名门等）——无域名/DEAD 的公司写补数队列后
+        // 不送 LLM；P3 J07（W8）：enforce 下 G1 制裁命中等 FAIL 同样拦截（off/shadow 只记录）。
         const eligible: typeof batch = [];
+        const staleByCompany = new Map<string, 'yellow' | 'red'>();
         for (const entry of batch) {
-          if (await mayUseExternalProcessing(args.workspaceId, entry.company.id)) {
-            eligible.push(entry);
-          } else {
+          if (!(await mayUseExternalProcessing(args.workspaceId, entry.company.id))) {
             outcomes.set(entry.company.id, { skip: true });
+            continue;
           }
+          const domainStatus = deps.domainStatusFor
+            ? await deps.domainStatusFor(entry.company.id)
+            : null;
+          const gateSummary = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+            evaluateL0Gates(tx, {
+              workspaceId: args.workspaceId,
+              icpId: args.icpId,
+              companyId: entry.company.id,
+              now: new Date(),
+              domainStatus,
+            }),
+          );
+          const gateBlock = quickScanGateBlock(judgeMode, gateSummary);
+          if (gateBlock) {
+            outcomes.set(entry.company.id, { gateBlock });
+            continue;
+          }
+          if (gateSummary.sanctions.staleMarker) {
+            staleByCompany.set(entry.company.id, gateSummary.sanctions.staleMarker);
+          }
+          eligible.push(entry);
         }
 
         let batchVerdicts: Array<QuickVerdict | null> = [];
@@ -512,10 +587,12 @@ export function createRun2Activities(deps: {
 
         for (const [index, entry] of eligible.entries()) {
           const verdict = batchVerdicts[index] ?? null;
+          const staleMarker = staleByCompany.get(entry.company.id);
           if (verdict) {
             outcomes.set(entry.company.id, {
               verdict,
               via: batchResolved.has(index) ? 'batch' : 'single',
+              ...(staleMarker ? { sanctionsStale: staleMarker } : {}),
             });
             continue;
           }
@@ -523,7 +600,11 @@ export function createRun2Activities(deps: {
           try {
             const single = await judgeOne(entry.company);
             if (single) {
-              outcomes.set(entry.company.id, { verdict: single, via: 'single' });
+              outcomes.set(entry.company.id, {
+                verdict: single,
+                via: 'single',
+                ...(staleMarker ? { sanctionsStale: staleMarker } : {}),
+              });
               continue;
             }
           } catch (error) {
@@ -545,7 +626,11 @@ export function createRun2Activities(deps: {
             }
           }
           // 降级②：模型不可用 → 规则兜底出名单（weak，人工复核）。
-          outcomes.set(entry.company.id, { verdict: 'weak', via: 'rule_fallback' });
+          outcomes.set(entry.company.id, {
+            verdict: 'weak',
+            via: 'rule_fallback',
+            ...(staleMarker ? { sanctionsStale: staleMarker } : {}),
+          });
         }
 
         await settle(batch, outcomes);
@@ -588,6 +673,15 @@ export function createRun2Activities(deps: {
               });
               continue;
             }
+            if ('gateBlock' in outcome) {
+              // P3 J07/J08：门链拦截（补数后可重评）——原因码直接落轨迹。
+              rejectedCandidates.push({
+                candidateRef: company.id,
+                rejectReason: outcome.gateBlock.reasonCode,
+                revivable: true,
+              });
+              continue;
+            }
             judgedInBatch += 1;
             verdictCounts[outcome.verdict] = (verdictCounts[outcome.verdict] ?? 0) + 1;
             if (outcome.verdict === 'mismatch') {
@@ -623,11 +717,11 @@ export function createRun2Activities(deps: {
           workspaceId: args.workspaceId,
           runId: args.runId,
           type: 'phase_completed',
-          payload: { phase: 'quick', judged, verdicts, fallbackPerCompany, ruleFallback, failed, skipped },
+          payload: { phase: 'quick', judged, verdicts, fallbackPerCompany, ruleFallback, failed, skipped, gated },
         }),
       );
 
-      return { judged, verdicts, fallbackPerCompany, ruleFallback, failed, skipped };
+      return { judged, verdicts, fallbackPerCompany, ruleFallback, failed, skipped, gated };
     },
 
     /** M0⑥：记录阶段时间戳到 discovery_run.phases（DB/活动时间，回放安全）。 */

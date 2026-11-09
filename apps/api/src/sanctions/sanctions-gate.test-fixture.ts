@@ -31,13 +31,13 @@ export function liveScreen(live: LiveCase): ScreenResult {
   const listVersions = { ofac_sdn: "2026-10-19" };
   switch (live) {
     case "match_cleared_entity":
-      return { status: "potential_match", matches: [MATCH_E1], listVersions };
+      return { status: "potential_match", matches: [MATCH_E1], listVersions, stale: false };
     case "match_new_entity":
-      return { status: "potential_match", matches: [MATCH_E2], listVersions };
+      return { status: "potential_match", matches: [MATCH_E2], listVersions, stale: false };
     case "clear":
-      return { status: "clear", matches: [], listVersions };
+      return { status: "clear", matches: [], listVersions, stale: false };
     case "not_screened":
-      return { status: "not_screened", matches: [], listVersions: {} };
+      return { status: "not_screened", matches: [], listVersions: {}, stale: false };
   }
 }
 
