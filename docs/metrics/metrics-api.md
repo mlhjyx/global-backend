@@ -50,6 +50,7 @@ node --import tsx apps/api/scripts/measurement-sync-definitions.mts
 
 - `/metrics/scorecards`、`/evals/golden-*`、`/frames`、`/recapture-estimates`、`/benchmarks` 等端点属后续切片；
   其中 scorecards 读平台级行（T1-008/T1-009 的 provider 分层），需要先定 ops 读路径与 scope，不是加个查询就能开。
-- `/metrics/vric` 目前按 rollup 现有行成对呈现；字典 §1.3.1 要求的 T0-002 通道拆分
-  （email_only/phone_only/both）尚未在 PR-03 的 rollup 查询里实现，端点不加戏、不伪造通道值。
+- `/metrics/vric` 按 rollup 现有行成对呈现；T0-002 的通道拆分
+  （email_only/phone_only/both）已由 PR-03 rollup 输出为独立 stratum 行，端点上以
+  `strict=null` + `plus.value` 的同桶附加项出现（不合并、不推断）。
 - SaaS BFF 代理（gain-saas `apps/server/src/bff/`）与看板（PR-05）不在本切片。
