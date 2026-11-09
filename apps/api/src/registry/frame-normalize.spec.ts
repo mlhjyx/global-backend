@@ -259,6 +259,31 @@ describe('normalizeRecord (JSON mapping)', () => {
     });
   });
 
+  it('accepts NACE and national NACE-derived codes (NAF 28.13Z, 2813) and rejects junk', () => {
+    const mapping: FrameMapping = {
+      ...gleifMapping,
+      fields: { ...gleifMapping.fields, nace: 'attributes.entity.nace' },
+    };
+    const read = (nace: string) =>
+      normalizeRecord({
+        mapping,
+        row: 1,
+        read: jsonFieldReader({ ...record, attributes: { ...record.attributes, entity: { ...record.attributes.entity, nace } } }, readDottedPath),
+      });
+    const zForm = read('28.13Z');
+    expect(zForm.ok).toBe(true);
+    if (zForm.ok) expect(zForm.entity.nace).toBe('28.13Z');
+    const digits = read('2813');
+    expect(digits.ok).toBe(true);
+    if (digits.ok) expect(digits.entity.nace).toBe('2813');
+    const junk = read('NACE28');
+    expect(junk.ok).toBe(true);
+    if (junk.ok) {
+      expect(junk.entity.nace).toBeNull();
+      expect(junk.warnings.map((warning) => warning.code)).toContain('NACE_INVALID');
+    }
+  });
+
   it('fails when per-row country is missing and no constant exists', () => {
     const withoutCountry = { attributes: { ...record.attributes, entity: { ...record.attributes.entity, legalAddress: { city: 'X' } } } };
     const result = normalizeRecord({

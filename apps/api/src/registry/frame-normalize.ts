@@ -53,7 +53,8 @@ const CONTROL_CHARS = /\p{Cc}+/gu;
 const ISO2 = /^[A-Z]{2}$/u;
 const LEI_PATTERN = /^[A-Z0-9]{20}$/u;
 const VAT_PATTERN = /^[A-Z]{2}[A-Z0-9]{2,30}$/u;
-const NACE_PATTERN = /^\d{2}(?:\.[0-9]{1,2})?$/u;
+// NACE Rev.2 类目（28.13 / 2813）及其国家派生码（NAF rev2 的 28.13Z 等带字母后缀）。
+const NACE_PATTERN = /^\d{2}(?:(?:\.\d{1,2}|\d{2})[A-Z]?)?$/u;
 
 export function normalizeRegNumber(raw: string): string {
   return raw.normalize('NFC').replace(/\s+/gu, ' ').trim().toUpperCase();
