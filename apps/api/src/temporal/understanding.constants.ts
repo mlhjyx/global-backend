@@ -36,6 +36,10 @@ export const PATENTS_CACHE_REFRESH_SCHEDULE_ID =
 export const SANCTIONS_REFRESH_WORKFLOW = SANCTIONS_REFRESH_CONTRACT.workflowType;
 export const SANCTIONS_REFRESH_SCHEDULE_ID =
   SANCTIONS_REFRESH_CONTRACT.scheduleId as 'sanctions-refresh';
+// P1-19：联系人邮箱再验证（存量 UNKNOWN 重验队列 / VALID 90 天 TTL / catch-all 复检）。
+// 默认以 **paused** 注册：启用是运维决定（data_provider.millionverifier=ENABLED + 凭据 + 成本 cap）。
+export const CONTACT_REVERIFY_SWEEP_WORKFLOW = 'contactReverifySweepWorkflow';
+export const CONTACT_REVERIFY_SWEEP_SCHEDULE_ID = 'contact-reverify-sweep';
 // Site Builder KB：commit workflow 丢启动、retry 到期或 processing lease 过期的持久恢复面。
 export const KB_RECOVERY_SWEEP_WORKFLOW = 'kbRecoverySweepWorkflow';
 export const KB_RECOVERY_SWEEP_SCHEDULE_ID = 'site-builder-kb-recovery';
