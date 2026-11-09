@@ -10074,6 +10074,450 @@
         "description": "平台级数据源注册表（状态与成本）。DISABLED 相当于该数据源的 Kill Switch。需要 ops:read。"
       }
     },
+    "/api/v1/judgment-reviews": {
+      "get": {
+        "operationId": "JudgmentReviewController_list_v1",
+        "parameters": [
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                "queued",
+                "in_review",
+                "resolved",
+                "expired"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "priority",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "enum": [
+                0,
+                1,
+                2,
+                3
+              ],
+              "type": "number"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "items",
+                        "nextCursor"
+                      ],
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "judgmentRecordId",
+                              "reason",
+                              "priority",
+                              "status",
+                              "dueAt",
+                              "verdictAtJudge",
+                              "companyName"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string"
+                              },
+                              "judgmentRecordId": {
+                                "type": "string"
+                              },
+                              "reason": {
+                                "type": "string",
+                                "enum": [
+                                  "UNKNOWN",
+                                  "BORDERLINE",
+                                  "RANDOM_AUDIT",
+                                  "DRIFT_AUDIT",
+                                  "APPEAL",
+                                  "CONFORMAL_ABSTAIN"
+                                ]
+                              },
+                              "priority": {
+                                "type": "number",
+                                "enum": [
+                                  0,
+                                  1,
+                                  2,
+                                  3
+                                ]
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "queued",
+                                  "in_review",
+                                  "resolved",
+                                  "expired"
+                                ]
+                              },
+                              "dueAt": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "verdictAtJudge": {
+                                "type": "string",
+                                "enum": [
+                                  "FIT",
+                                  "NOT_FIT",
+                                  "UNKNOWN"
+                                ]
+                              },
+                              "companyName": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "nextCursor": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "人工复核队列（按优先级/SLA 排序，keyset 分页）",
+        "tags": [
+          "JudgmentReview"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
+        ],
+        "description": "人工复核队列：按优先级（P0 高价值 UNKNOWN 24h / P1 72h / P2 随机抽检 5 工作日 / P3 漂移与申诉 7 天）、到期时间升序返回待办任务，含公司名与当时判定；keyset 游标分页，可用 status/priority/limit 过滤。需要 acquisition:review。"
+      }
+    },
+    "/api/v1/judgment-reviews/{id}/claim": {
+      "post": {
+        "operationId": "JudgmentReviewController_claim_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "status"
+                      ],
+                      "properties": {
+                        "status": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "认领复核任务（queued → in_review，同人幂等）",
+        "tags": [
+          "JudgmentReview"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
+        ],
+        "description": "认领复核任务（queued → in_review）。同一复核人重复认领幂等；已被他人认领返回 409。需要 acquisition:review。"
+      }
+    },
+    "/api/v1/judgment-reviews/{id}/resolve": {
+      "post": {
+        "operationId": "JudgmentReviewController_resolve_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveReviewTaskDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "recordId",
+                        "goldenLabelId"
+                      ],
+                      "properties": {
+                        "recordId": {
+                          "type": "string"
+                        },
+                        "goldenLabelId": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "提交复核结论（写新 human judgment_record + golden label candidate，任务 resolved）",
+        "tags": [
+          "JudgmentReview"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
+        ],
+        "description": "提交复核裁决：在一个事务里写入新的「人工判定」记录（append-only，model_requested=human）、把结论回流为金标候选（split=candidate）并将任务置 resolved；可对个别 criterion 覆写分数/label。需要 acquisition:review。"
+      }
+    },
+    "/api/v1/judgments/stats": {
+      "get": {
+        "operationId": "JudgmentReviewController_stats_v1",
+        "parameters": [
+          {
+            "name": "window",
+            "required": false,
+            "in": "query",
+            "description": "窗口天数，默认 7",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "windowDays",
+                        "byStatus",
+                        "byReason",
+                        "byPriority",
+                        "overturn"
+                      ],
+                      "properties": {
+                        "windowDays": {
+                          "type": "number"
+                        },
+                        "byStatus": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "number"
+                          }
+                        },
+                        "byReason": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "number"
+                          }
+                        },
+                        "byPriority": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "number"
+                          }
+                        },
+                        "overturn": {
+                          "type": "object",
+                          "required": [
+                            "resolved",
+                            "overturned",
+                            "rate"
+                          ],
+                          "properties": {
+                            "resolved": {
+                              "type": "number"
+                            },
+                            "overturned": {
+                              "type": "number"
+                            },
+                            "rate": {
+                              "type": "number",
+                              "nullable": true
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "复核队列统计（分布 + overturn rate）",
+        "tags": [
+          "JudgmentReview"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
+        ],
+        "description": "复核队列统计：按状态/原因/优先级的分布与近 N 天 overturn rate（人工结论与原判定不一致的比例），用于 SLA 与质量报表。需要 acquisition:review。"
+      }
+    },
+    "/api/v1/judgments/{id}": {
+      "get": {
+        "operationId": "JudgmentReviewController_detail_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "description": "judgment_record 明细（criteria/verdict/model/failureCode）",
+                      "additionalProperties": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "单条判定明细（含 criteria 与失败码）",
+        "tags": [
+          "JudgmentReview"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "单条判定明细：verdict、逐 criterion 的分数/证据/理由、模型与失败码；跨租户不可见（RLS）。需要 acquisition:read。"
+      }
+    },
     "/api/v1/source-channels": {
       "get": {
         "operationId": "ChannelsController_list_v1",
@@ -20214,6 +20658,10 @@
       "description": "评分产出与交付：交付包、接受 / 拒绝、制裁复核"
     },
     {
+      "name": "JudgmentReview",
+      "description": "判定质量：人工复核队列（认领 / 裁决 / 结论回流）与判定明细"
+    },
+    {
       "name": "Channels",
       "description": "渠道数据源：平台渠道注册/治理/试跑（运营身份 ops:*），租户启用与私有导入"
     },
@@ -21707,6 +22155,65 @@
           "requestId",
           "decision",
           "reasonCode"
+        ]
+      },
+      "CriterionOverrideDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "C1_MATERIAL",
+              "C2_ROLE",
+              "C3_PROCESS",
+              "C4_BUSINESS_MODEL",
+              "C5_SIZE"
+            ]
+          },
+          "score": {
+            "type": "object",
+            "description": "0–10 或 null（null=仅改 label）",
+            "nullable": true
+          },
+          "label": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "weak",
+              "fail",
+              "unclear",
+              "not_applicable"
+            ]
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "ResolveReviewTaskDto": {
+        "type": "object",
+        "properties": {
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "FIT",
+              "NOT_FIT",
+              "UNKNOWN"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "criterionOverrides": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CriterionOverrideDto"
+            }
+          }
+        },
+        "required": [
+          "verdict"
         ]
       },
       "LeadOutcomeDto": {

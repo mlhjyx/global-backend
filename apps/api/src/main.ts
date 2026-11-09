@@ -147,6 +147,7 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
     .addTag('ICP', '理想客户画像：规则、回溯测试、查询计划')
     .addTag('Discovery', '查询计划执行、规范化公司、联系人补全、抑制名单')
     .addTag('Leads', '评分产出与交付：交付包、接受 / 拒绝、制裁复核')
+    .addTag('JudgmentReview', '判定质量：人工复核队列（认领 / 裁决 / 结论回流）与判定明细')
     .addTag('Channels', '渠道数据源：平台渠道注册/治理/试跑（运营身份 ops:*），租户启用与私有导入')
     .addTag('Skills', 'AI 底座：技能目录、版本与运营启停（ops:read / ops:write）')
     .addTag('Packs', 'AI 底座：规则/内容包（Pack）草稿、校验、试跑、评测、发布、激活与灰度')
