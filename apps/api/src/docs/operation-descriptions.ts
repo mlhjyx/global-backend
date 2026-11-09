@@ -34,6 +34,14 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
   'POST /api/v1/internal/campaign-plans/draft':
     '服务间（gain-saas 控制面，x-service-token + 一次性 execution-budget Grant）：触发一次受限 Campaign 规划 job。异步：202 只表示工作流已启动；计划经内部回调落 gain-saas 的 DRAFT revision，本端点不执行任何外部动作。同一 jobId 重复触发按 Temporal WorkflowId 去重；Grant 一次性，重触发须新 jobId + 新 Grant。',
 
+  // ── Metrics ───────────────────────────────────────────────────────────────
+  'GET /api/v1/metrics/catalog':
+    '指标字典目录（ch01）：读取平台工件 metric_definition（app_user 只读），返回每个指标的 ID/版本/口径/状态/负责人；字典由 docs/metrics/dictionary 经 measurement-sync-definitions 命令同步，未同步时返回空数组。需要 acquisition:read。',
+  'GET /api/v1/metrics/observations':
+    '度量观测（ch01 PR-04）：本 workspace 可见的 metric_observation 行（append-only；平台级行对租户不可见，RLS 由 PR-02 权限测试保障）。按 window_end 倒序 keyset 分页（cursor 原样回传）；数值列以 double 返回，stratum 为原样 JSON。参数不合法返回 400 VALIDATION_ERROR。需要 acquisition:read。',
+  'GET /api/v1/metrics/rollups':
+    '度量日/周聚合（ch01 PR-04）：granularity=daily|weekly 选择 metric_rollup_daily/weekly，聚合由 PR-03 的测量工作流按主键 upsert。桶倒序 + 指标/维度 keyset 分页；租户过滤走 stratum.workspace_id 的 RLS。需要 acquisition:read。',
+
   // ── PlatformAuthority ─────────────────────────────────────────────────────
   'POST /api/v1/platform-authority/revocations':
     '服务间：应用一条已签名的撤销，或重放它已提交的 ACK。重复投递返回首次提交的 ACK（幂等），签名不合法直接拒绝。',

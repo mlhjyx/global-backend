@@ -13617,6 +13617,342 @@
         "description": "上传客户填写后的周报 CSV 原文：按「线索 ID」列匹配、逐行校验，只追加写 lead_outcome，返回接受 / 拒绝 / 跳过计数与带文件行号的拒绝原因。"
       }
     },
+    "/api/v1/metrics/catalog": {
+      "get": {
+        "operationId": "MeasurementController_catalog_v1",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "{ data: [...], page } — 字典为空时返回空数组（has_more=false）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "page"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "metricId",
+                          "version",
+                          "name",
+                          "tier",
+                          "unit",
+                          "status",
+                          "owner",
+                          "effectiveFrom",
+                          "definition"
+                        ],
+                        "properties": {
+                          "metricId": {
+                            "type": "string"
+                          },
+                          "version": {
+                            "type": "integer"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "tier": {
+                            "type": "string"
+                          },
+                          "unit": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "owner": {
+                            "type": "string"
+                          },
+                          "effectiveFrom": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "definition": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "page": {
+                      "type": "object",
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
+                      "properties": {
+                        "next_cursor": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "has_more": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "指标字典目录（metric_definition 平台表只读）：ID/版本/口径/状态/负责人；字典由 docs/metrics/dictionary 同步（measurement-sync-definitions 命令）",
+        "tags": [
+          "Metrics"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "指标字典目录（ch01）：读取平台工件 metric_definition（app_user 只读），返回每个指标的 ID/版本/口径/状态/负责人；字典由 docs/metrics/dictionary 经 measurement-sync-definitions 命令同步，未同步时返回空数组。需要 acquisition:read。"
+      }
+    },
+    "/api/v1/metrics/observations": {
+      "get": {
+        "operationId": "MeasurementController_observations_v1",
+        "parameters": [
+          {
+            "name": "metricId",
+            "required": false,
+            "in": "query",
+            "description": "指标 ID，如 T2-001；缺省返回全部指标",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]{1,32}$"
+            }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "description": "起始日（含），YYYY-MM-DD（UTC）",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "description": "结束日（含），YYYY-MM-DD（UTC）",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "上一页 page.next_cursor 原样回传",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "每页条数，默认 100，最大 500",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ data: [...observations], page }"
+          },
+          "400": {
+            "description": "参数或游标不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "度量观测（append-only，本 workspace 可见行）：按 window_end 倒序 keyset 分页；数值列以 double 返回，stratum 原样返回 JSON",
+        "tags": [
+          "Metrics"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "度量观测（ch01 PR-04）：本 workspace 可见的 metric_observation 行（append-only；平台级行对租户不可见，RLS 由 PR-02 权限测试保障）。按 window_end 倒序 keyset 分页（cursor 原样回传）；数值列以 double 返回，stratum 为原样 JSON。参数不合法返回 400 VALIDATION_ERROR。需要 acquisition:read。"
+      }
+    },
+    "/api/v1/metrics/rollups": {
+      "get": {
+        "operationId": "MeasurementController_rollups_v1",
+        "parameters": [
+          {
+            "name": "granularity",
+            "required": false,
+            "in": "query",
+            "description": "daily（默认）或 weekly",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "daily",
+                "weekly"
+              ],
+              "default": "daily"
+            }
+          },
+          {
+            "name": "metricId",
+            "required": false,
+            "in": "query",
+            "description": "指标 ID，如 T2-001；缺省返回全部指标",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9-]{1,32}$"
+            }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "description": "起始日（含），YYYY-MM-DD（UTC）",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "description": "结束日（含），YYYY-MM-DD（UTC）",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "上一页 page.next_cursor 原样回传",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "每页条数，默认 100，最大 500",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ data: [...rollups], page }"
+          },
+          "400": {
+            "description": "参数或游标不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "日/周聚合（metric_rollup_daily|weekly，本 workspace 可见行）：granularity=daily|weekly；按桶倒序 + 指标/维度 keyset 分页",
+        "tags": [
+          "Metrics"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "度量日/周聚合（ch01 PR-04）：granularity=daily|weekly 选择 metric_rollup_daily/weekly，聚合由 PR-03 的测量工作流按主键 upsert。桶倒序 + 指标/维度 keyset 分页；租户过滤走 stratum.workspace_id 的 RLS。需要 acquisition:read。"
+      }
+    },
     "/api/v1/events/{eventId}/ack-status": {
       "get": {
         "operationId": "EventsController_ackStatus_v1",
@@ -20744,6 +21080,10 @@
       "description": "周报与反馈"
     },
     {
+      "name": "Metrics",
+      "description": "度量：指标字典目录、观测与日/周聚合（只读，ch01）"
+    },
+    {
       "name": "Events",
       "description": "事件投递账本与确认回执"
     },
@@ -23376,6 +23716,7 @@
       "name": "运营与合规",
       "tags": [
         "Reports",
+        "Metrics",
         "Events",
         "Compliance",
         "Skills",
