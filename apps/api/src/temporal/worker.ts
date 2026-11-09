@@ -136,7 +136,6 @@ import {
 import { runDevFastLaneWorker } from "./dev-fast-lane-worker";
 
 const WORKER_NOT_READY_LOG_INTERVAL_MS = 30_000;
-
 async function holdWorkerNotReady(
   code: string,
   leases?: RuntimeProcessLeaseService,
@@ -402,7 +401,6 @@ async function main(): Promise<void> {
     await holdPlatformNotReady("OWNER_DATABASE_UNAVAILABLE");
   }
   const budgetStore = new PostgresBudgetStore(prisma);
-
   // seed 双保险：此前只在 API relay 启动时 seed 且失败静默——环境重置后只跑 worker 时，
   // 4 个 signal provider 对路由不可见（信号/富集层运行时 no-op）。失败必须大声。
   const providerRegistrySeed = new DiscoveryProviderRegistry();
@@ -691,7 +689,6 @@ async function main(): Promise<void> {
       // P1-19：联系人邮箱再验证（contact-reverify-sweep Schedule，注册即 paused；
       // 三重门不满足时活动零调用零成本）。
       ...createContactReverifyActivities({ ownerDb }),
-      // P1-17：联系人工程周报（contact-weekly-report Schedule，注册即 paused；只读聚合）。
       ...createContactWeeklyReportActivities({ ownerDb }),
       // B4（F1）：未结预算操作清收（RESERVED 释放 / RESULT_UNKNOWN 保守结清）。
       ...createToolBudgetReconciliationActivities({ prisma }),
