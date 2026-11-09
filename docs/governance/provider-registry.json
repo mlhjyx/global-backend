@@ -362,6 +362,78 @@
       ]
     },
     {
+      "key": "apollo",
+      "status": "IMPLEMENTED",
+      "source_classes": [
+        "b2b_company_person"
+      ],
+      "purpose": "Find a named person's work email through Apollo People Match as an optional waterfall tail; only routed for A-tier companies, and every hit must pass the verification waterfall before it becomes a contact point state.",
+      "taxonomy": [
+        "person work email",
+        "email status",
+        "enrichment cost"
+      ],
+      "license": {
+        "classification": "NOT_APPLICABLE",
+        "note": "Finder result, not licensed source content; the name and company domain are personal data sent to the processor under a lawful-basis gate."
+      },
+      "personal_data_class": "PERSONAL_DATA",
+      "default_enablement": "DISABLED",
+      "call_gates": [
+        "data_provider_status",
+        "source_policy",
+        "lawful_basis",
+        "api_credentials",
+        "attempt_budget"
+      ],
+      "test_paths": [
+        "apps/api/src/enrichment/finders/apollo.provider.spec.ts",
+        "apps/api/src/enrichment/finders/finder-pool.spec.ts"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "TEST_ANCHOR",
+          "path": "apps/api/src/enrichment/finders/apollo.provider.spec.ts"
+        }
+      ]
+    },
+    {
+      "key": "pdl",
+      "status": "IMPLEMENTED",
+      "source_classes": [
+        "b2b_company_person"
+      ],
+      "purpose": "Find a named person's work email through People Data Labs Person Enrichment with required=emails billing as an optional waterfall tail; only routed for A-tier companies, and every hit must pass the verification waterfall.",
+      "taxonomy": [
+        "person work email",
+        "email type",
+        "enrichment cost"
+      ],
+      "license": {
+        "classification": "NOT_APPLICABLE",
+        "note": "Finder result, not licensed source content; the name and company domain are personal data sent to the processor under a lawful-basis gate."
+      },
+      "personal_data_class": "PERSONAL_DATA",
+      "default_enablement": "DISABLED",
+      "call_gates": [
+        "data_provider_status",
+        "source_policy",
+        "lawful_basis",
+        "api_credentials",
+        "attempt_budget"
+      ],
+      "test_paths": [
+        "apps/api/src/enrichment/finders/pdl.provider.spec.ts",
+        "apps/api/src/enrichment/finders/finder-pool.spec.ts"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "TEST_ANCHOR",
+          "path": "apps/api/src/enrichment/finders/pdl.provider.spec.ts"
+        }
+      ]
+    },
+    {
       "key": "gleif",
       "status": "IMPLEMENTED",
       "source_classes": [
