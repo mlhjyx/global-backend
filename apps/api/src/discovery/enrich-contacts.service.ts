@@ -8,6 +8,8 @@ import {
 } from '../execution-budget/execution-budget-authority.service';
 import { enrichContactsExecutionBudgetRequestScope } from '../execution-budget/execution-budget-request-scope';
 import { type BudgetStore, TOOL_BUDGET_STORE, UnavailableBudgetStore } from '../tools/budget-store';
+import { TOOL_BROKER } from '../tools/tool-broker.tokens';
+import type { ExecutionBroker } from '../tools/tool-contract';
 import {
   enrichCompanyContacts,
   type EnrichCompanyContactsResult,
@@ -35,6 +37,8 @@ export class ContactEnrichmentService {
     private readonly prisma: PrismaService,
     private readonly authority: ExecutionBudgetAuthorityService,
     @Optional() @Inject(TOOL_BUDGET_STORE) private readonly budgetStore?: BudgetStore,
+    /** SMTP 兜底票（验证瀑布第二票）的出网闸门；未装配时兜底票不参与。 */
+    @Optional() @Inject(TOOL_BROKER) private readonly toolBroker?: ExecutionBroker,
   ) {}
 
   private budgets(): BudgetStore {
@@ -91,6 +95,7 @@ export class ContactEnrichmentService {
         circuits: new PrismaCircuitBreakerStore(this.prisma),
         budget: new CapBudget(Number(authorization.authorizedCapMicrousd)),
         actorId: ctx.userId,
+        ...(this.toolBroker ? { verificationBroker: this.toolBroker } : {}),
       },
       {
         workspaceId: ctx.workspaceId,

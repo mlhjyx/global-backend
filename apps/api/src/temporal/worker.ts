@@ -689,8 +689,8 @@ async function main(): Promise<void> {
         budgetStore,
       }),
       // P1-19：联系人邮箱再验证（contact-reverify-sweep Schedule，注册即 paused；
-      // 三重门不满足时活动零调用零成本）。
-      ...createContactReverifyActivities({ ownerDb }),
+      // 三重门不满足时活动零调用零成本）。broker 供 SMTP 兜底票（第二票）出网。
+      ...createContactReverifyActivities({ ownerDb, broker }),
       ...createContactWeeklyReportActivities({ ownerDb }),
       // ch03 执行面 3b：域名解析 / 召回审计编排（env 门默认关——DOMAIN_RESOLUTION_WORKFLOW_ENABLED /
       // RECALL_AUDIT_WORKFLOW_ENABLED 未开时活动一律 fail closed，零调用零落库；不注册任何 schedule）。

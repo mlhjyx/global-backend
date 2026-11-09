@@ -90,6 +90,43 @@ describe('contactReverifySweepOnce：三重门', () => {
     expect(provider.verify).not.toHaveBeenCalled();
   });
 
+  it('无外部验证器凭据但 broker 已装配且开关显式开启 → SMTP 兜底票单独成池，活动继续（ran）', async () => {
+    process.env.EMAIL_VERIFY_SMTP_PROBE_ENABLED = 'true';
+    try {
+      const broker = {
+        checkSourcePolicy: vi.fn(async () => ({ allowed: true })),
+        invoke: vi.fn(),
+      };
+      const activities = createContactReverifyActivities({
+        ownerDb: fakeOwnerDb() as never,
+        providers: [],
+        broker: broker as never,
+        now: NOW,
+      });
+      await expect(activities.contactReverifySweepOnce()).resolves.toMatchObject({ status: 'ran' });
+    } finally {
+      delete process.env.EMAIL_VERIFY_SMTP_PROBE_ENABLED;
+    }
+  });
+
+  it('兜底票缺省关闭（25 端口实测不可用）→ 无凭据时仍 skipped(provider_unconfigured)', async () => {
+    const broker = {
+      checkSourcePolicy: vi.fn(async () => ({ allowed: true })),
+      invoke: vi.fn(),
+    };
+    const activities = createContactReverifyActivities({
+      ownerDb: fakeOwnerDb() as never,
+      providers: [],
+      broker: broker as never,
+      now: NOW,
+    });
+    await expect(activities.contactReverifySweepOnce()).resolves.toMatchObject({
+      status: 'skipped',
+      reason: 'provider_unconfigured',
+    });
+    expect(broker.invoke).not.toHaveBeenCalled();
+  });
+
   it('三道门全过 → ran（有界批次、含成本上限与统计）', async () => {
     const provider = fakeProvider(true);
     const activities = createContactReverifyActivities({
