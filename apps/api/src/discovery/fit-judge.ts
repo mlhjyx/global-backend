@@ -21,6 +21,7 @@ import {
   type JudgeContractMode,
   type JudgmentRecordDraft,
 } from './fit-judge-v2';
+import type { JudgePanelMode } from './judgment/panel';
 import { recordJudgment } from './judgment/judgment-record';
 
 /**
@@ -66,9 +67,19 @@ export interface FitJudgment {
    */
   judgmentRecord?: JudgmentRecordDraft;
   /**
+   * P3 J12：面板附加记录（judge_level=3 的逐模型槽位 1..3 + 汇总行），顺序固定。
+   * 与 judgmentRecord 一起由 `persistJudgmentRecordInTransaction` 顺序写入。
+   */
+  judgmentRecords?: JudgmentRecordDraft[];
+  /**
    * shadow 模式的记录写入是「附加观测」：写入失败不得影响 Lead 投影（enforce 下不设此标记）。
    */
   judgmentRecordTolerant?: boolean;
+  /**
+   * P3 J12：面板附加记录本身是观察（JUDGE_PANEL_MODE=shadow）时的写入容忍标记；
+   * 只作用于 judgmentRecords，不影响判定主记录。
+   */
+  judgmentRecordsTolerant?: boolean;
 }
 
 interface FitOutput {
@@ -128,23 +139,36 @@ export async function upsertLeadFit(
  * 必须与 Lead 投影（`upsertLeadFit`）在同一个 `prisma.withWorkspace` 事务里调用，
  * 顺序为先 record 后 Lead（设计 §4.3.4.4）。off 模式无草稿时是 no-op。
  * shadow 的草稿带 `judgmentRecordTolerant`：写入失败只记日志，不影响 Lead。
+ *
+ * P3 J12：面板场景一次判定有多条记录（主记录 + 逐模型 + 汇总行），按
+ * 主记录 → 面板槽位 1..3 → 汇总行的固定顺序写入。`judgmentRecordsTolerant`
+ * 表示面板记录是观察（JUDGE_PANEL_MODE=shadow），其写入失败同样只记日志，
+ * 不回滚 Lead；判定主记录的严格性不受影响。
  */
 export async function persistJudgmentRecordInTransaction(
   tx: Prisma.TransactionClient,
   icpId: string,
   judgment: FitJudgment,
 ): Promise<void> {
-  const record = judgment.judgmentRecord;
-  if (!record) return;
-  try {
-    await recordJudgment(tx, { ...record, icpId });
-  } catch (error) {
-    if (!judgment.judgmentRecordTolerant) throw error;
-    console.warn(
-      `[judge-v2] shadow record write skipped for ${record.companyId}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
+  const records: JudgmentRecordDraft[] = [
+    ...(judgment.judgmentRecord ? [judgment.judgmentRecord] : []),
+    ...(judgment.judgmentRecords ?? []),
+  ];
+  if (records.length === 0) return;
+  for (const [index, record] of records.entries()) {
+    const tolerant =
+      judgment.judgmentRecordTolerant === true ||
+      (index > 0 && judgment.judgmentRecordsTolerant === true);
+    try {
+      await recordJudgment(tx, { ...record, icpId });
+    } catch (error) {
+      if (!tolerant) throw error;
+      console.warn(
+        `[judge-v2] shadow record write skipped for ${record.companyId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 }
 
@@ -213,6 +237,8 @@ export interface JudgeFitCompanyOptions {
   skills?: SkillResolver;
   /** P3 J03b：契约开关覆盖（缺省读 JUDGE_CONTRACT_MODE；测试显式注入）。 */
   judgeContractMode?: JudgeContractMode;
+  /** P3 J12：面板开关覆盖（缺省读 JUDGE_PANEL_MODE；测试显式注入）。 */
+  judgePanelMode?: JudgePanelMode;
   /** v2 判定时钟与证据域门（测试注入）；见 fit-judge-v2.ts。 */
   now?: string;
   snapshotFetchedAt?: string;
@@ -262,6 +288,8 @@ export async function judgeFitCompany(
         const v2 = await judgeFitV2(gateway, workspaceId, icpBrief, company, opts);
         if (v2) {
           judgment.judgmentRecord = v2.judgmentRecord;
+          judgment.judgmentRecords = v2.judgmentRecords;
+          judgment.judgmentRecordsTolerant = v2.judgmentRecordsTolerant;
           judgment.judgmentRecordTolerant = true;
         }
       } catch (error) {
