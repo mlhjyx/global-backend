@@ -655,13 +655,10 @@ export async function persistCollectedSource(
   }
   report.matched = rows.filter((row) => row.companyId !== null).length;
 
-  try {
-    const persisted = await persistSignalRows(store, workspaceId, rows);
-    report.inserted = persisted.inserted;
-    report.skipped = persisted.skipped;
-  } catch (error) {
-    report.error = `写入失败：${error instanceof Error ? error.message : String(error)}`;
-    report.skipped = rows.length;
-  }
+  // 写失败必须向上抛：调用方的 scoped 事务要整体回滚（吞掉会提交已插入的分块，
+  // 报告与库内真实状态不一致）。CLI 在逐源 try/catch 里记录该源的失败。
+  const persisted = await persistSignalRows(store, workspaceId, rows);
+  report.inserted = persisted.inserted;
+  report.skipped = persisted.skipped;
   return report;
 }

@@ -396,6 +396,18 @@ describe('persistCollectedSource / summarizeSignalReports —— 归因 + 落库
     expect(report).toMatchObject({ parsed: 0, inserted: 0, error: 'HTTP 401' });
     expect(inserted).toHaveLength(0);
   });
+
+  it('写失败向上抛（调用方事务整体回滚，不吞错）', async () => {
+    const store = {
+      canonicalCompany: { async findMany() { return companies; } },
+      companySignal: {
+        async createMany() {
+          throw new Error('insert failed');
+        },
+      },
+    } as unknown as CompanySignalStore;
+    await expect(persistCollectedSource(store, 'ws-1', collected)).rejects.toThrow(/insert failed/);
+  });
 });
 
 describe('stripHtml / resolve helpers', () => {
