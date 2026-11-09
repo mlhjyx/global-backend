@@ -1,0 +1,48 @@
+{
+  "schemaVersion": "eval-receipt/v1",
+  "subject": "judge",
+  "datasetSha256": "271c4f22a6385852e2bbbdd9bd1ac4a1a209946c53185eebb7f123d5d7b8e4cf",
+  "rubricVersion": "fit-v2",
+  "promptHash": "a3b4a557717e947b838fe7e0d62e3140712a47db24b9285e77c6d4a5345ccf96",
+  "modelResolved": "dry-fixture-no-model-call",
+  "runAt": "2026-11-09T09:39:39.546Z",
+  "cases": {
+    "total": 15,
+    "passed": 15,
+    "failed": 0
+  },
+  "metrics": {
+    "kappa": {
+      "value": 1,
+      "n": 5,
+      "ci": [
+        1,
+        1
+      ]
+    },
+    "tpr": {
+      "value": 1,
+      "n": 2,
+      "ci": [
+        0.34237195288961925,
+        1
+      ]
+    },
+    "tnr": {
+      "value": 1,
+      "n": 3,
+      "ci": [
+        0.43849391955098227,
+        1
+      ]
+    }
+  },
+  "gate": {
+    "passed": true,
+    "thresholds": {
+      "kappa": 0.6,
+      "tpr": 0.75,
+      "tnr": 0.75
+    }
+  }
+}
