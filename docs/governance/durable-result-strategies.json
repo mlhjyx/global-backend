@@ -425,6 +425,38 @@
         "subjectRefRequired": true,
         "personalDataDsrCompatible": true
       }
+    },
+    {
+      "id": "deepseek.search",
+      "declarationPath": "apps/api/src/tools/deepseek-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "deepseek-search/v1",
+      "operationIdentity": "tool:deepseek.search:<version>:<idempotencyKey>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "ModelWebSearchExecutor",
+        "domainAggregateType": "SearchResultEvidence",
+        "identitySource": "query-digest-and-result-url",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
+      "id": "deepseek.fetch",
+      "declarationPath": "apps/api/src/tools/deepseek-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "deepseek-fetch/v1",
+      "operationIdentity": "tool:deepseek.fetch:<version>:<idempotencyKey>",
+      "privacyClass": "PERSONAL_DATA",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "ModelWebSearchExecutor",
+        "domainAggregateType": "ExternalPageEvidence",
+        "identitySource": "url-and-content-digest",
+        "subjectRefRequired": true,
+        "personalDataDsrCompatible": true
+      }
     }
   ],
   "modelTasks": [
@@ -616,6 +648,22 @@
         "consumer": "WebsiteProfileProvider.classify",
         "domainAggregateType": "CanonicalCompany",
         "identitySource": "company-id-and-operation",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
+      "taskId": "discovery.web_search_candidates",
+      "callsitePath": "apps/api/src/discovery/model-web-search/model-web-search.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "discovery-web-search-candidates/v1",
+      "operationIdentity": "model:discovery.web_search_candidates:<request-hash>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "ModelWebSearch.search",
+        "domainAggregateType": "CanonicalCompany",
+        "identitySource": "company-domain-and-operation",
         "subjectRefRequired": false,
         "personalDataDsrCompatible": false
       }

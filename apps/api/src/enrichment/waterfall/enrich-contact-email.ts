@@ -326,6 +326,9 @@ export async function enrichContactEmail(
       ? await runVerificationWaterfall({
           email,
           providers: deps.verifiers,
+          // 工具型验证器（SMTP 兜底票）的 broker 归账/合规上下文。
+          workspaceId: input.workspaceId,
+          runId: input.runId,
           maxCalls: Math.max(1, Math.min(6, deps.maxVerificationCalls ?? 6)),
         })
       : null;
@@ -368,12 +371,14 @@ export async function enrichContactEmail(
       const attemptedAtPersist = now();
       let lastEventId: string | null = null;
       let lastVotedProvider: string | null = null;
+      let lastVotedMethod: string = 'third_party_api';
       for (const step of steps) {
         const event = await recordContactPointVerificationEvent(tx, {
           workspaceId: input.workspaceId,
           contactPointId: point.id,
           providerKey: step.providerKey,
-          method: 'third_party_api',
+          // 工具型验证器（SMTP 兜底票）如实记 smtp_rcpt；第三方 API 缺省 third_party_api。
+          method: step.result.method ?? 'third_party_api',
           verdict: eventVerdictFromProviderResult(step.result),
           detail: `${step.result.detail}${step.result.error ? `;error=${step.result.error}` : ''}`,
           catchAll: step.result.catchAll,
@@ -393,7 +398,10 @@ export async function enrichContactEmail(
           latencyMs: step.result.latencyMs,
         });
         if (event.id) lastEventId = event.id;
-        if (step.result.error === null) lastVotedProvider = step.providerKey;
+        if (step.result.error === null) {
+          lastVotedProvider = step.providerKey;
+          lastVotedMethod = step.result.method ?? 'third_party_api';
+        }
       }
 
       if (resolved === null || steps.length === 0) {
@@ -430,7 +438,7 @@ export async function enrichContactEmail(
           nextReverifyAt: columns.nextReverifyAt,
           confidence: columns.confidence,
           verificationProvider: lastVotedProvider ?? finder.key,
-          verificationMethod: 'third_party_api',
+          verificationMethod: lastVotedMethod,
           ...(resolved.state === 'UNKNOWN'
             ? {}
             : {

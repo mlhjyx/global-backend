@@ -24,11 +24,11 @@ import {
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 
-test('inventory is locked to 20 Tools and 14 product Model tasks', () => {
-  assert.equal(EXPECTED_TOOL_IDS.length, 20);
-  assert.equal(EXPECTED_MODEL_TASKS.length, 14);
-  assert.equal(new Set(EXPECTED_TOOL_IDS).size, 20);
-  assert.equal(new Set(EXPECTED_MODEL_TASKS.map((entry) => entry.taskId)).size, 14);
+test('inventory is locked to 22 Tools and 15 product Model tasks', () => {
+  assert.equal(EXPECTED_TOOL_IDS.length, 22);
+  assert.equal(EXPECTED_MODEL_TASKS.length, 15);
+  assert.equal(new Set(EXPECTED_TOOL_IDS).size, 22);
+  assert.equal(new Set(EXPECTED_MODEL_TASKS.map((entry) => entry.taskId)).size, 15);
   assert.equal(EXPECTED_GENERIC_MODEL_TASK_LOOKUPS.length, 4);
   assert.deepEqual(EXPECTED_MODEL_GATEWAY_BOUNDARIES, [
     'apps/api/src/model-runtime/site-builder-ai-task-bridge.ts#generateStructured#1',
@@ -40,7 +40,7 @@ test('inventory is locked to 20 Tools and 14 product Model tasks', () => {
     'apps/api/src/tools/tool-broker.factory.ts',
     'apps/api/src/tools/tool-broker.ts',
   ]);
-  assert.equal(EXPECTED_TOOL_CALLSITES.length, 44);
+  assert.equal(EXPECTED_TOOL_CALLSITES.length, 45);
   assert.deepEqual(EXPECTED_NON_TOOL_INVOKE_BOUNDARIES, [
     'apps/api/src/site-builder/eval/copy-sonnet-recovery-zero-call-preflight.ts#input.pricingBroker#1',
   ]);
@@ -273,10 +273,10 @@ test('artifact bounds are read only from the durableResultStrategy object and mu
 test('pure contracts preserve typed authority wiring and the artifact pre-wire hold', async () => {
   const result = await verifyExecutionAuthorityPolicy({ repoRoot: repositoryRoot });
   assert.deepEqual(result.issues, []);
-  assert.equal(result.toolCount, 20);
-  assert.equal(result.modelTaskCount, 14);
+  assert.equal(result.toolCount, 22);
+  assert.equal(result.modelTaskCount, 15);
   assert.equal(result.physicalExecutionWiring, 'PARTIAL_HOLD');
-  assert.equal(result.physicalToolCallsiteCount, 44);
+  assert.equal(result.physicalToolCallsiteCount, 45);
   assert.equal(result.modelGatewayBoundaryCount, 2);
 });
 

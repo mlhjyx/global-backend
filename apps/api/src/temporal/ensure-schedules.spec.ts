@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ACQ_SWEEP_SCHEDULE_ID,
   CONTACT_REVERIFY_SWEEP_SCHEDULE_ID,
+  CONTACT_WEEKLY_REPORT_SCHEDULE_ID,
   INTENT_SWEEP_SCHEDULE_ID,
   KB_RECOVERY_SWEEP_SCHEDULE_ID,
   PATENTS_CACHE_REFRESH_SCHEDULE_ID,
@@ -151,7 +152,7 @@ describe("ensurePlatformSchedules", () => {
     await ensurePlatformSchedules();
 
     expect(connect).toHaveBeenCalledTimes(1);
-    expect(create).toHaveBeenCalledTimes(13);
+    expect(create).toHaveBeenCalledTimes(14);
     expect(getHandle).toHaveBeenCalledTimes(2);
     expect(updates[KB_RECOVERY_SWEEP_SCHEDULE_ID]).toMatchObject({
       action: {
@@ -179,6 +180,13 @@ describe("ensurePlatformSchedules", () => {
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         scheduleId: CONTACT_REVERIFY_SWEEP_SCHEDULE_ID,
+        state: expect.objectContaining({ paused: true }),
+      }),
+    );
+    // P1-17：联系人工程周报 Schedule 默认 paused 创建（只读聚合；启用是运维决定）。
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scheduleId: CONTACT_WEEKLY_REPORT_SCHEDULE_ID,
         state: expect.objectContaining({ paused: true }),
       }),
     );
@@ -266,6 +274,7 @@ describe("ensurePlatformSchedules", () => {
           'tool-budget-reconciliation': '1h',
           'discovery-stale-run-sweep': '10m',
           [CONTACT_REVERIFY_SWEEP_SCHEDULE_ID]: '24h',
+          [CONTACT_WEEKLY_REPORT_SCHEDULE_ID]: '168h',
         }[scheduleId];
         expect(spec.intervals[0].every).toBe(expectedEvery);
         expect(JSON.stringify(action.args)).not.toContain('6h');

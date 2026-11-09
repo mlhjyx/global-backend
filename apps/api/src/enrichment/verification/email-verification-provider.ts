@@ -2,6 +2,7 @@ import type {
   CatchAllClass,
   EmailVerificationState,
 } from '../../discovery/contact-point-verification-state';
+import type { VerificationEventMethod } from '../../discovery/contact-point-verification-event';
 
 /**
  * P1-04：第三方邮箱验证器的统一适配面（MillionVerifier / ZeroBounce / Emailable …）。
@@ -18,6 +19,13 @@ export interface EmailVerificationRequest {
   email: string;
   /** 供应商侧超时秒数提示（MillionVerifier 支持 timeout 参数）。 */
   providerTimeoutSeconds?: number;
+  /**
+   * 执行上下文（工具型验证器——SMTP 探测——用来过 broker 的归账/合规/动作门；
+   * 第三方 HTTP 验证器忽略）。缺 workspaceId 时工具型验证器诚实降级 UNKNOWN，绝不无归属出网。
+   */
+  workspaceId?: string;
+  runId?: string;
+  authorizeExternalAction?: () => Promise<boolean>;
 }
 
 export interface EmailVerificationProviderResult {
@@ -39,6 +47,8 @@ export interface EmailVerificationProviderResult {
   /** 微美元；供应商侧错误（未产生一次有效验证）记 0。 */
   costMicrousd: number;
   latencyMs: number;
+  /** 事件账 / contact_point.verification_method 的验证方式；缺省 third_party_api（工具型验证器报 smtp_rcpt）。 */
+  method?: VerificationEventMethod;
 }
 
 export interface EmailVerificationProvider {

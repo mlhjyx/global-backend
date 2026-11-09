@@ -37,6 +37,7 @@ import { createToolBudgetReconciliationActivities } from "./tool-budget-reconcil
 import { createQualifyActivities } from "./qualify.activities";
 import { createBacklogActivities } from "./backlog.activities";
 import { createContactReverifyActivities } from "./contact-reverify.activities";
+import { createContactWeeklyReportActivities } from "./contact-weekly-report.activities";
 import { createDomainResolutionActivities } from "./domain-resolution.activities";
 import { createRecallAuditActivities } from "./recall-audit.activities";
 import { createExternalIntentActivities } from "./external-intent.activities";
@@ -137,7 +138,6 @@ import {
 import { runDevFastLaneWorker } from "./dev-fast-lane-worker";
 
 const WORKER_NOT_READY_LOG_INTERVAL_MS = 30_000;
-
 async function holdWorkerNotReady(
   code: string,
   leases?: RuntimeProcessLeaseService,
@@ -403,7 +403,6 @@ async function main(): Promise<void> {
     await holdPlatformNotReady("OWNER_DATABASE_UNAVAILABLE");
   }
   const budgetStore = new PostgresBudgetStore(prisma);
-
   // seed 双保险：此前只在 API relay 启动时 seed 且失败静默——环境重置后只跑 worker 时，
   // 4 个 signal provider 对路由不可见（信号/富集层运行时 no-op）。失败必须大声。
   const providerRegistrySeed = new DiscoveryProviderRegistry();
@@ -690,8 +689,9 @@ async function main(): Promise<void> {
         budgetStore,
       }),
       // P1-19：联系人邮箱再验证（contact-reverify-sweep Schedule，注册即 paused；
-      // 三重门不满足时活动零调用零成本）。
-      ...createContactReverifyActivities({ ownerDb }),
+      // 三重门不满足时活动零调用零成本）。broker 供 SMTP 兜底票（第二票）出网。
+      ...createContactReverifyActivities({ ownerDb, broker }),
+      ...createContactWeeklyReportActivities({ ownerDb }),
       // ch03 执行面 3b：域名解析 / 召回审计编排（env 门默认关——DOMAIN_RESOLUTION_WORKFLOW_ENABLED /
       // RECALL_AUDIT_WORKFLOW_ENABLED 未开时活动一律 fail closed，零调用零落库；不注册任何 schedule）。
       ...createDomainResolutionActivities({ prisma }),

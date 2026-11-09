@@ -750,6 +750,8 @@ export function createRun2PipelineActivities(deps: {
           circuits: new PrismaCircuitBreakerStore(deps.prisma),
           budget,
           actorId: `discovery-run:${args.runId}`,
+          // SMTP 兜底票（验证瀑布第二票）的出网闸门；worker 未装配 broker 时兜底票不参与。
+          ...(deps.broker ? { verificationBroker: deps.broker } : {}),
         },
         {
           workspaceId: args.workspaceId,
