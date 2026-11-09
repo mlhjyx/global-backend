@@ -630,6 +630,8 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
                   companyId,
                   executionContractVersion: EXECUTION_CONTRACT_VERSION,
                   executionBudget: executionBudget!,
+                  // P1-10b：深挖批次序号——子工作流据此只对前 25 家触发付费富集。
+                  enrichmentSlot: index,
                 },
               ],
             });

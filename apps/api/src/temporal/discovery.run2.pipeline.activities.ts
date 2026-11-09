@@ -64,7 +64,18 @@ import { discoverContactsCore } from '../discovery/contact-discovery-core';
 import { guessEmailsForRunCompany } from '../discovery/contact-stage-email-guess';
 import { stampLawfulBasis } from '../discovery/compliance/email-verification-gate';
 import { parseConfiguredLawfulBasis } from './backlog.activities';
-import { MAX_RUN_EMAIL_PROBES_PER_COMPANY } from '../discovery/execution-envelope';
+import {
+  ENRICH_COMPANY_BUDGET_CAP_MICROUSD,
+  ENRICH_SOFT_DEADLINE_MS,
+  MAX_RUN_EMAIL_PROBES_PER_COMPANY,
+} from '../discovery/execution-envelope';
+import { enrichCompanyContacts } from '../enrichment/waterfall/enrich-company-contacts';
+import { CapBudget, CompositeBudget } from '../enrichment/waterfall/enrichment-budget';
+import { PrismaCircuitBreakerStore } from '../enrichment/waterfall/circuit-breaker';
+import {
+  resolveConfiguredFinderProviders,
+  resolveConfiguredTailFinderProviders,
+} from '../enrichment/finders/finder-pool';
 import type { ExecutionContext, EnrichmentResult } from '../discovery/provider-contract';
 import {
   commitCompanySignals,
@@ -687,6 +698,76 @@ export function createRun2PipelineActivities(deps: {
         ...(emailGuess ? { emailGuess } : {}),
       };
     },
+
+    /**
+     * P1-10b：公司级邮箱富集（付费 finder 瀑布，计划 §2.3.4.7）。由子工作流在 contacts 阶段后
+     * 仅对 fit=match 公司触发；本活动再做数据面守卫：
+     *  - 无已配置凭据或 data_provider 全 DISABLED → 直接跳过（不触碰联系人、不写 attempt 账，
+     *    避免 kill switch 期间给每个联系人刷 skipped_compliance 行）；
+     *  - 无 lawful basis 配置（decision_maker.config，与联系人发现同一配置面）→ 跳过；
+     *  - 预算 = min(run 预算剩余, $0.50/公司)，形状上限见 execution-envelope.ts。
+     */
+    async enrichContactsForCompany(args: CompanyPipelineActivityInput): Promise<{
+      skipped: boolean;
+      reason?: string;
+      tier?: 'A' | 'B';
+      attempted?: number;
+      costMicrousd?: number;
+    }> {
+      const finders = resolveConfiguredFinderProviders();
+      if (finders.length === 0) return { skipped: true, reason: 'no_configured_finder' };
+      const enabled = await deps.prisma.dataProvider.findMany({
+        where: { key: { in: finders.map((finder) => finder.key) }, status: 'ENABLED' },
+        select: { key: true },
+      });
+      if (enabled.length === 0) return { skipped: true, reason: 'no_enabled_finder' };
+      const providerRow = await deps.prisma.dataProvider.findUnique({
+        where: { key: 'decision_maker' },
+        select: { config: true },
+      });
+      const configured = parseConfiguredLawfulBasis(providerRow?.config);
+      if (!configured) return { skipped: true, reason: 'no_lawful_basis_configured' };
+      const lawfulBasis = stampLawfulBasis(
+        configured,
+        `discovery-run:${args.runId}`,
+        new Date().toISOString(),
+      );
+      const binding = await ensureRunBudget(args);
+      const runStatus = await budgets.status({
+        workspaceId: binding.scopeKey,
+        accountKey: binding.accountKey,
+      });
+      const budget = new CompositeBudget([
+        new CapBudget(ENRICH_COMPANY_BUDGET_CAP_MICROUSD),
+        new CapBudget(Number(runStatus.remainingMicrousd)),
+      ]);
+      const result = await enrichCompanyContacts(
+        {
+          prisma: deps.prisma,
+          ownerPrisma: deps.prisma,
+          finders,
+          tailFinders: resolveConfiguredTailFinderProviders(),
+          circuits: new PrismaCircuitBreakerStore(deps.prisma),
+          budget,
+          actorId: `discovery-run:${args.runId}`,
+        },
+        {
+          workspaceId: args.workspaceId,
+          companyId: args.companyId,
+          runId: args.runId,
+          accountKey: binding.accountKey,
+          lawfulBasis,
+          deadlineAtMs: Date.now() + ENRICH_SOFT_DEADLINE_MS,
+        },
+      );
+      return {
+        skipped: false,
+        tier: result.tier,
+        attempted: result.attempted,
+        costMicrousd: result.costMicrousd,
+        ...(result.skipped ? { reason: result.skipped } : {}),
+      };
+    },
   };
 
   // P3 J02 W2：四个阶段活动在边界把异常换成带稳定 failure code 的 ApplicationFailure
@@ -697,6 +778,7 @@ export function createRun2PipelineActivities(deps: {
     fitCompanyOnce: withClassifiedFailure(activities.fitCompanyOnce),
     signalsCompanyOnce: withClassifiedFailure(activities.signalsCompanyOnce),
     contactsCompanyOnce: withClassifiedFailure(activities.contactsCompanyOnce),
+    enrichContactsForCompany: withClassifiedFailure(activities.enrichContactsForCompany),
   };
 }
 
