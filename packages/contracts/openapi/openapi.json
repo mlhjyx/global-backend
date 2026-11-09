@@ -6231,6 +6231,281 @@
         "description": "软删除 DRAFT 档案：列表与详情不再可见，关联事实与审计保留；物理删除归 owner/DSR。非 DRAFT 返回 409 COMPANY_NOT_DELETABLE。"
       }
     },
+    "/api/v1/companies/{companyId}/understanding-preview": {
+      "get": {
+        "description": "复用一次真实 understanding run 的已落库结果：不新增模型调用、不出网、不消费预算。industry 候选由 profile.industry 词面归一到受控词表（canonical_taxonomy kind=industry）；markets 只收官网文本里明确提到的国家并附原句；受控行业词表随响应下发。",
+        "operationId": "CompanyController_preview_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "companyId",
+                        "state",
+                        "pagesAnalyzed",
+                        "industry",
+                        "products",
+                        "markets"
+                      ],
+                      "properties": {
+                        "companyId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "website": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "DRAFT",
+                            "ENRICHING",
+                            "REVIEW",
+                            "ACTIVE"
+                          ]
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "not_started",
+                            "queued",
+                            "running",
+                            "ready",
+                            "failed"
+                          ]
+                        },
+                        "failure": {
+                          "type": "object",
+                          "nullable": true,
+                          "properties": {
+                            "stage": {
+                              "type": "string"
+                            },
+                            "code": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "pagesAnalyzed": {
+                          "type": "integer"
+                        },
+                        "industry": {
+                          "type": "object",
+                          "properties": {
+                            "raw": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "suggested": {
+                              "type": "object",
+                              "properties": {
+                                "raw": {
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "code": {
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "labelEn": {
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "matched": {
+                                  "type": "boolean"
+                                }
+                              }
+                            },
+                            "options": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "code": {
+                                    "type": "string"
+                                  },
+                                  "labelEn": {
+                                    "type": "string"
+                                  },
+                                  "label": {
+                                    "type": "string"
+                                  },
+                                  "labels": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "parentCode": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "nace": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "products": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "source": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "sourceUrl": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "evidence": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            }
+                          }
+                        },
+                        "markets": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "code": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "evidence": {
+                                "type": "string"
+                              },
+                              "sourceUrl": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            }
+                          }
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "理解预览（注册即建档）：状态、已分析页数、行业/产品/市场候选（只读）",
+        "tags": [
+          "Companies"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ]
+      }
+    },
+    "/api/v1/companies/{companyId}/onboarding-facts": {
+      "post": {
+        "description": "只写卖家事实（名称/行业/目标市场/产品/业务邮箱），零模型调用、不出网、不消费 Grant；industryCode 以受控词表校验并回填 industry 标签；products 落 Offering(source=onboarding)。ENRICHING 期间返回 409，避免理解回填稍后覆盖客户选择。",
+        "operationId": "CompanyController_applyOnboardingFacts_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnboardingFactsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/CompanyDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "注册引导完成：把预览勾选的卖家事实写回同一档案（DRAFT/REVIEW）",
+        "tags": [
+          "Companies"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ]
+      }
+    },
     "/api/v1/companies/{companyId}/completeness": {
       "get": {
         "operationId": "CompanyController_completeness_v1",
@@ -21948,6 +22223,11 @@
             "nullable": true,
             "description": "行业（注册引导填写或理解工作流回填）"
           },
+          "industryCode": {
+            "type": "string",
+            "nullable": true,
+            "description": "受控行业码（canonical_taxonomy kind=industry 的 ISIC code；自由文本行业时为空）"
+          },
           "targetMarkets": {
             "description": "目标市场（ISO 3166-1 alpha-2；注册引导填写，卖家事实 SoR）",
             "type": "array",
@@ -22065,6 +22345,52 @@
           "attemptId"
         ]
       },
+      "OnboardingFactsDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "企业名称"
+          },
+          "industry": {
+            "type": "string",
+            "example": "isic-2813",
+            "description": "所属行业（自由文本；给出 industryCode 时可省略，由词表标签回填）"
+          },
+          "industryCode": {
+            "type": "string",
+            "example": "25",
+            "description": "受控行业码（canonical_taxonomy kind=industry 的 ISIC code）"
+          },
+          "targetMarkets": {
+            "example": [
+              "DE",
+              "US"
+            ],
+            "description": "目标市场（ISO 3166-1 alpha-2，大写；最多 20 个）",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "products": {
+            "description": "主营产品关键词 1~5 个（落 Offering，source=onboarding）",
+            "minItems": 1,
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "businessEmail": {
+            "type": "string",
+            "example": "sales@acme-tech.com",
+            "description": "业务邮箱（公司级询盘接收缺省值）"
+          }
+        }
+      },
       "UpdateCompanyDto": {
         "type": "object",
         "properties": {
@@ -22084,6 +22410,11 @@
             "type": "string",
             "maxLength": 200,
             "description": "所属行业"
+          },
+          "industryCode": {
+            "type": "string",
+            "maxLength": 32,
+            "description": "受控行业码；不随 industry 一起给出时，改为自由文本会清空受控码。"
           },
           "targetMarkets": {
             "description": "目标市场（ISO 3166-1 alpha-2），最多 30 个",

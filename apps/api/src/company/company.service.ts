@@ -17,6 +17,7 @@ import {
   buildProfileClaimDraftSpecs,
   synthesizeProfileClaimDrafts,
 } from '../claim/profile-claim-drafts';
+import { resolveIndustrySelection } from './industry-selection';
 
 type CompanyRow = Prisma.CompanyProfileGetPayload<Record<string, never>>;
 
@@ -384,7 +385,18 @@ export class CompanyService {
       const data: Prisma.CompanyProfileUpdateInput = { version: { increment: 1 } };
       if (dto.name !== undefined) data.name = dto.name.trim();
       if (dto.website !== undefined) data.website = dto.website;
-      if (dto.industry !== undefined) data.industry = dto.industry.trim();
+      if (dto.industryCode !== undefined) {
+        const industry = await resolveIndustrySelection(tx, {
+          industry: dto.industry,
+          industryCode: dto.industryCode,
+        });
+        data.industry = industry.industry;
+        data.industryCode = industry.industryCode;
+      } else if (dto.industry !== undefined) {
+        // 改成自由文本时清空旧受控码，避免行业两列不同源。
+        data.industry = dto.industry.trim();
+        data.industryCode = null;
+      }
       if (dto.targetMarkets !== undefined) data.targetMarkets = dto.targetMarkets;
       if (dto.businessEmail !== undefined) data.businessEmail = dto.businessEmail.trim();
       return tx.companyProfile.update({ where: { id }, data });

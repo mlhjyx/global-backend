@@ -61,6 +61,10 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '人工确认企业可用：REVIEW → ACTIVE，是显式的 Gate 出口。需要 acquisition:review。',
   'GET /api/v1/companies/{companyId}/offerings':
     '理解阶段抽取出的结构化产品/服务，每条带来源页 URL 与原文片段。数组响应，不分页。',
+  'GET /api/v1/companies/{companyId}/understanding-preview':
+    '理解预览（注册即建档）：返回理解状态（not_started/queued/running/ready/failed）、失败阶段标签、已分析页数，以及行业/产品/市场候选与受控行业词表。只读，复用一次真实 understanding run 的落库结果：不新增模型调用、不出网、不消费预算。行业候选由 profile.industry 词面归一到 canonical_taxonomy(kind=industry)；市场候选只含官网文本明确提到的国家并附原句。',
+  'POST /api/v1/companies/{companyId}/onboarding-facts':
+    '注册引导完成：把客户在理解预览里勾选的卖家事实（名称/行业/目标市场/产品/业务邮箱）写回同一档案，并把事实转成 NEEDS_REVIEW Claim 草稿。industryCode 必须是受控行业词表节点并回填 industry 标签；products 落 Offering(source=onboarding)。零模型调用、不出网、不消费 Grant。只允许 DRAFT/REVIEW；ENRICHING 返回 409 ONBOARDING_FACTS_NOT_ALLOWED。需要 acquisition:write。',
   'PATCH /api/v1/companies/{companyId}':
     '编辑 DRAFT 档案的卖家自查事实（名称/官网/行业/目标市场/业务邮箱）。补填官网后，调用方需另取 quote 与 Grant 调 retry 端点启动理解；本接口不消费 Grant。非 DRAFT 档案返回 409 COMPANY_NOT_EDITABLE。',
   'DELETE /api/v1/companies/{companyId}':

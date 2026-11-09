@@ -22,9 +22,12 @@ import { Enveloped, envelope, PageEnveloped, pageEnvelope } from '../common/enve
 import { ApiEnvelope, ApiListEnvelope, ApiPageEnvelope } from '../common/api-envelope.decorator';
 import { CompanyService } from './company.service';
 import { WebsiteCandidatesService } from './website-candidates';
+import { UnderstandingPreviewService } from './understanding-preview.service';
+import { OnboardingFactsService } from './onboarding-facts.service';
 import { CreateCompanyDto } from './dto/create-company.dto';
 import { UpdateCompanyDto } from './dto/update-company.dto';
 import { RetryUnderstandingDto } from './dto/retry-understanding.dto';
+import { OnboardingFactsDto } from './dto/onboarding-facts.dto';
 import { CompanyDto, OfferingDto } from './dto/company.dto';
 import {
   ApiExecutionBudgetGrant,
@@ -41,6 +44,8 @@ export class CompanyController {
   constructor(
     private readonly companies: CompanyService,
     private readonly websiteCandidates: WebsiteCandidatesService,
+    private readonly understandingPreview: UnderstandingPreviewService,
+    private readonly onboardingFacts: OnboardingFactsService,
   ) {}
 
   @Post()
@@ -117,6 +122,115 @@ export class CompanyController {
     @Param('companyId', ParseUUIDPipe) companyId: string,
   ): Promise<Enveloped<CompanyDto>> {
     return envelope(CompanyDto.from(await this.companies.get(ctx, companyId)));
+  }
+
+  @Get(':companyId/understanding-preview')
+  @ApiOperation({
+    summary: '理解预览（注册即建档）：状态、已分析页数、行业/产品/市场候选（只读）',
+    description:
+      '复用一次真实 understanding run 的已落库结果：不新增模型调用、不出网、不消费预算。' +
+      'industry 候选由 profile.industry 词面归一到受控词表（canonical_taxonomy kind=industry）；' +
+      'markets 只收官网文本里明确提到的国家并附原句；受控行业词表随响应下发。',
+  })
+  @ApiEnvelope({
+    type: 'object',
+    required: ['companyId', 'state', 'pagesAnalyzed', 'industry', 'products', 'markets'],
+    properties: {
+      companyId: { type: 'string', format: 'uuid' },
+      name: { type: 'string' },
+      website: { type: 'string', nullable: true },
+      status: { type: 'string', enum: ['DRAFT', 'ENRICHING', 'REVIEW', 'ACTIVE'] },
+      state: {
+        type: 'string',
+        enum: ['not_started', 'queued', 'running', 'ready', 'failed'],
+      },
+      failure: {
+        type: 'object',
+        nullable: true,
+        properties: { stage: { type: 'string' }, code: { type: 'string' } },
+      },
+      pagesAnalyzed: { type: 'integer' },
+      industry: {
+        type: 'object',
+        properties: {
+          raw: { type: 'string', nullable: true },
+          suggested: {
+            type: 'object',
+            properties: {
+              raw: { type: 'string', nullable: true },
+              code: { type: 'string', nullable: true },
+              label: { type: 'string', nullable: true },
+              labelEn: { type: 'string', nullable: true },
+              matched: { type: 'boolean' },
+            },
+          },
+          options: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                code: { type: 'string' },
+                labelEn: { type: 'string' },
+                label: { type: 'string' },
+                labels: { type: 'object', additionalProperties: { type: 'string' } },
+                parentCode: { type: 'string', nullable: true },
+                nace: { type: 'array', items: { type: 'string' } },
+              },
+            },
+          },
+        },
+      },
+      products: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            source: { type: 'string', nullable: true },
+            sourceUrl: { type: 'string', nullable: true },
+            evidence: { type: 'string', nullable: true },
+          },
+        },
+      },
+      markets: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            code: { type: 'string' },
+            name: { type: 'string' },
+            evidence: { type: 'string' },
+            sourceUrl: { type: 'string', nullable: true },
+          },
+        },
+      },
+      updatedAt: { type: 'string', format: 'date-time' },
+    },
+  })
+  async preview(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId', ParseUUIDPipe) companyId: string,
+  ) {
+    return envelope(await this.understandingPreview.get(ctx, companyId));
+  }
+
+  @Post(':companyId/onboarding-facts')
+  @RequireScopes('acquisition:write')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: '注册引导完成：把预览勾选的卖家事实写回同一档案（DRAFT/REVIEW）',
+    description:
+      '只写卖家事实（名称/行业/目标市场/产品/业务邮箱），零模型调用、不出网、不消费 Grant；' +
+      'industryCode 以受控词表校验并回填 industry 标签；products 落 Offering(source=onboarding)。' +
+      'ENRICHING 期间返回 409，避免理解回填稍后覆盖客户选择。',
+  })
+  @ApiEnvelope(CompanyDto)
+  async applyOnboardingFacts(
+    @Ctx() ctx: RequestContext,
+    @Param('companyId', ParseUUIDPipe) companyId: string,
+    @Body() dto: OnboardingFactsDto,
+  ): Promise<Enveloped<CompanyDto>> {
+    return envelope(CompanyDto.from(await this.onboardingFacts.apply(ctx, companyId, dto)));
   }
 
   @Get(':companyId/completeness')
