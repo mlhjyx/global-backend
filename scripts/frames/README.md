@@ -64,6 +64,16 @@ company_registry 类，data_provider 默认 DISABLED）。**注意**：现行 go
 durable 回执，本地查询无法满足，因此它目前恒被路由闸门排除（计划期 `SOURCE_LINEAGE_UNAVAILABLE`）——
 执行面等 `docs/superpowers/plans/2026-11-09-registry-frame-local-lineage.md` 的设计获批。
 
+## 域名校验（离线骨架，T3-13）
+
+`apps/api/src/registry/domain/domain-verifier.ts`：给定候选域名 + 已采集的法律页文本，
+按 ch03 §3.12.3 做确定性评分（注册号精确 +55 / VAT 精确且 VIES 通过 +35 / 邮编+城市 +20 /
+名称相似 ≥0.85 +15、≥0.70 +8 / 域名 token +5；VERIFIED ≥90、AMBIGUOUS 55–89、<55 或负证据
+REJECTED）。复用 `parseImpressum`（DE）、内置 FR SIREN 与 GB CRN 抽取；`VatValidator` 是
+VIES 的离线接口（fixture 实现），真实 REST 属执行面。多候选编排：≥2 个候选 ≥55 分 →
+全部 AMBIGUOUS（同名冲突），唯一 VERIFIED 才选中；产物可映射为
+`company_domain_resolution` 行草案（`toDomainResolutionDrafts`）。本骨架不抓取、不落库。
+
 ## 召回审计
 
 审计的第一段是「冻结 frame → 抽样输入」（T3-20 骨架）：
