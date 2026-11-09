@@ -15,7 +15,13 @@ import {
   runReverifySweep,
   type ReverifyOptions,
 } from '../src/enrichment/verification/reverify-sweep';
-import { resolveConfiguredVerificationProviders } from '../src/enrichment/verification/provider-pool';
+import {
+  resolveConfiguredVerificationProviders,
+  withSmtpProbeFallback,
+} from '../src/enrichment/verification/provider-pool';
+import { PrismaService } from '../src/prisma/prisma.service';
+import { buildToolBroker, sourcePolicyReaderFrom } from '../src/tools/tool-broker.factory';
+import type { ExecutionBroker } from '../src/tools/tool-contract';
 
 export function parseReverifyArgs(argv: string[]): ReverifyOptions {
   const valueOf = (flag: string): string | null => {
@@ -48,19 +54,32 @@ async function main(): Promise<void> {
     throw new Error('PII_ENCRYPTION_KEY 未配置——无法解密联系点值（fail-closed）');
   }
   const prisma = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
+  // SMTP 兜底票（第二票）经 ToolBroker 出网：预算账需要 app_user 连接（RLS withWorkspace）。
+  // 缺 APP_DATABASE_URL 时不装配 broker——兜底票不参与，外部验证器行为不变。
+  const appPrisma = process.env.APP_DATABASE_URL?.trim() ? new PrismaService() : null;
+  const broker: ExecutionBroker | undefined = appPrisma
+    ? buildToolBroker({ prisma: appPrisma, sourcePolicyReader: sourcePolicyReaderFrom(appPrisma) })
+    : undefined;
   try {
     // 验证器池：凭据已配置的验证器（主验在前），再逐家过 data_provider/source_policy 门。
     const configured = resolveConfiguredVerificationProviders();
-    const usable: typeof configured = [];
+    const gated: typeof configured = [];
     const gateNotes: string[] = [];
     for (const candidate of configured) {
       const gates = await checkProviderGates(prisma, candidate);
-      if (gates.ok) usable.push(candidate);
+      if (gates.ok) gated.push(candidate);
       else gateNotes.push(`${candidate.key}: ${gates.reason}`);
     }
+    // 门后可用票数 <2 → 追加 SMTP 探测兜底票（env 开关 + data_provider.smtp_self kill switch）。
+    const fallback = await withSmtpProbeFallback(gated, {
+      prisma,
+      ...(broker ? { broker } : {}),
+    });
+    const usable = fallback.providers;
     const poolNote =
       `验证器池：凭据已配置 [${configured.map((p) => p.key).join(', ') || '无'}]，` +
       `门通过 [${usable.map((p) => p.key).join(', ') || '无'}]` +
+      (fallback.note ? `；SMTP 兜底票未启用：${fallback.note}` : '') +
       (gateNotes.length > 0 ? `；未通过：${gateNotes.join('；')}` : '');
     if (options.dryRun) {
       // dry-run 离线：只报告门状态，不因 kill switch/凭据缺失而拒绝（方便部署前演练）。
@@ -106,6 +125,7 @@ async function main(): Promise<void> {
     }
   } finally {
     await prisma.$disconnect();
+    if (appPrisma) await appPrisma.$disconnect();
   }
 }
 

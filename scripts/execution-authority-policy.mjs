@@ -104,6 +104,7 @@ export const EXPECTED_TOOL_CALLSITES = Object.freeze([
   'apps/api/src/discovery/providers/wikidata-enrich.provider.ts#wikidata.entity#1',
   'apps/api/src/discovery/providers/wikidata-enrich.provider.ts#wikidata.entity#2',
   'apps/api/src/discovery/providers/wikidata.provider.ts#wikidata.sparql#1',
+  'apps/api/src/enrichment/verification/smtp-probe.provider.ts#smtp.rcpt_probe#1',
   'apps/api/src/intent/intent-projection.service.ts#http.get#1',
   'apps/api/src/intent/page-fetcher.ts#crawl4ai.render#1',
   'apps/api/src/sanctions/sanctions-refresh.service.ts#sanctions.download#1',

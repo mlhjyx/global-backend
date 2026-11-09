@@ -40,7 +40,7 @@ test('inventory is locked to 20 Tools and 15 product Model tasks', () => {
     'apps/api/src/tools/tool-broker.factory.ts',
     'apps/api/src/tools/tool-broker.ts',
   ]);
-  assert.equal(EXPECTED_TOOL_CALLSITES.length, 44);
+  assert.equal(EXPECTED_TOOL_CALLSITES.length, 45);
   assert.deepEqual(EXPECTED_NON_TOOL_INVOKE_BOUNDARIES, [
     'apps/api/src/site-builder/eval/copy-sonnet-recovery-zero-call-preflight.ts#input.pricingBroker#1',
   ]);
@@ -276,7 +276,7 @@ test('pure contracts preserve typed authority wiring and the artifact pre-wire h
   assert.equal(result.toolCount, 20);
   assert.equal(result.modelTaskCount, 15);
   assert.equal(result.physicalExecutionWiring, 'PARTIAL_HOLD');
-  assert.equal(result.physicalToolCallsiteCount, 44);
+  assert.equal(result.physicalToolCallsiteCount, 45);
   assert.equal(result.modelGatewayBoundaryCount, 2);
 });
 
