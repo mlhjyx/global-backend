@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "golden-item/v1",
+  "id": "contact-0001",
+  "dataset": "contacts_strict",
+  "layer": "anchor",
+  "stratum": {
+    "country": "DE",
+    "seniority": "manager",
+    "channel": "email"
+  },
+  "subject": {
+    "ref": "ct-demo-0001"
+  },
+  "labels": {}
+}

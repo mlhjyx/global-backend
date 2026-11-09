@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "golden-item/v1",
+  "id": "acct-0002",
+  "dataset": "accounts",
+  "layer": "anchor",
+  "stratum": {
+    "country": "DE",
+    "industry": "22",
+    "employeeBand": "11-50",
+    "sourceClass": "directory"
+  },
+  "subject": {
+    "ref": "co-demo-0002",
+    "name": "Demo Handel AG"
+  },
+  "labels": {}
+}

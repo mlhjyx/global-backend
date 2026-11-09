@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "golden-label/v1",
+  "itemId": "contact-0002",
+  "annotator": "demo-a",
+  "round": 1,
+  "labels": {
+    "person_exists": "yes",
+    "is_decision_maker": "no",
+    "email_status_truth": "catch_all"
+  },
+  "adjudicated": true,
+  "adjudicator": "demo-c",
+  "adjudicatedValue": {
+    "person_exists": "yes",
+    "is_decision_maker": "no",
+    "email_status_truth": "catch_all"
+  },
+  "reason": "demo fixture",
+  "createdAt": "2026-11-09T00:00:00Z"
+}

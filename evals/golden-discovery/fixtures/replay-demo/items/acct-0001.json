@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "golden-item/v1",
+  "id": "acct-0001",
+  "dataset": "accounts",
+  "layer": "anchor",
+  "stratum": {
+    "country": "DE",
+    "industry": "28",
+    "employeeBand": "51-200",
+    "sourceClass": "registry"
+  },
+  "subject": {
+    "ref": "co-demo-0001",
+    "name": "Demo Pumpen GmbH"
+  },
+  "labels": {}
+}
