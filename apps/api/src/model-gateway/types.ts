@@ -168,7 +168,50 @@ export interface EmbedInput {
 export type ModelOp = 'generateText'
   | 'generateStructured'
   | 'reviewVision'
-  | 'embed';
+  | 'embed'
+  | 'generateChatWithTools';
+
+/**
+ * WEB-1（v3.0 第 6 章 §6.3.9）：模型工具环的封闭消息模型。
+ * 第三方内容只能出现在 `tool` 消息里（tool_result 隔离是注入防护的第一道控制）；
+ * assistant 消息可以携带本轮的 tool_use 列表，tool 消息必须带回对应 toolUseId。
+ */
+export type ChatMessage =
+  | { role: 'system'; content: string }
+  | { role: 'user'; content: string }
+  | { role: 'assistant'; content: string; toolUses?: readonly ChatToolUse[] }
+  | { role: 'tool'; toolUseId: string; content: string };
+
+export interface ChatToolDefinition {
+  readonly name: string;
+  readonly description: string;
+  /** 给模型看的 JSON Schema（不是安全边界；ToolBroker 会二次校验）。 */
+  readonly inputSchema: Record<string, unknown>;
+}
+
+export interface ChatToolUse {
+  readonly id: string;
+  readonly name: string;
+  readonly input: unknown;
+}
+
+export interface GenerateChatWithToolsInput {
+  task: string;
+  messages: readonly ChatMessage[];
+  tools: readonly ChatToolDefinition[];
+  model?: string;
+  maxTokens?: number;
+  /** 单次模型调用的费用上限（cents）；工具环的逐 hop 预算由调用方持有。 */
+  maxCostCents?: number;
+  signal?: AbortSignal;
+}
+
+/** 一轮带工具定义的模型响应（可能 0 个或多个 tool_use）。 */
+export interface ChatResponse {
+  readonly text: string;
+  readonly toolUses: readonly ChatToolUse[];
+  readonly stopReason: 'end' | 'tool_use' | 'max_tokens';
+}
 
 export interface HealthStatus {
   healthy: boolean;
