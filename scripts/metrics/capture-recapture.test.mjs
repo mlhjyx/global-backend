@@ -8,8 +8,10 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  blockingKeys,
   buildCaptureMatrix,
   candidateModels,
+  chaoLowerBound,
   chapman,
   dedupeFrame,
   diagnostics,
@@ -17,6 +19,8 @@ import {
   estimateMultiFrame,
   estimateTwoFrames,
   fitLogLinear,
+  jaro,
+  jaroWinkler,
   lincolnPetersen,
   matchFrames,
   normalizeCountry,
@@ -24,7 +28,9 @@ import {
   normalizeName,
   pairRecaptures,
   parseCsv,
+  probabilisticMatch,
   readFrame,
+  scorePair,
 } from "./capture-recapture.mjs";
 import { createRng } from "./lib/prng.mjs";
 
@@ -344,4 +350,107 @@ test("estimateMultiFrame requires at least three frames", () => {
     { label: "B", records: [{ domain: "a.de" }] },
   ];
   assert.throws(() => estimateMultiFrame(frames), /at least 3 frames/);
+});
+
+// ── probabilistic stage, Chao lower bound, sensitivity ────────────────────
+
+test("Jaro–Winkler matches the reference values", () => {
+  assert.ok(Math.abs(jaroWinkler("MARTHA", "MARHTA") - 0.961) < 0.01);
+  assert.ok(Math.abs(jaroWinkler("DIXON", "DICKSONX") - 0.813) < 0.01);
+  assert.equal(jaro("same", "same"), 1);
+  assert.equal(jaro("", "x"), 0);
+});
+
+test("scorePair bands: shared hard key auto, conflicting domain reject", () => {
+  const auto = scorePair(
+    { name: "Alpha Pumpen GmbH", country: "DE", domain: "alpha.de" },
+    { name: "Alpha Pumpen AG", country: "DE", domain: "www.alpha.de" },
+  );
+  assert.equal(auto.band, "auto");
+  const reject = scorePair(
+    { name: "Alpha Pumpen", country: "DE", domain: "alpha.de" },
+    { name: "Alpha Pumpen", country: "DE", domain: "beta.de" },
+  );
+  assert.equal(reject.band, "reject");
+  const review = scorePair(
+    { name: "Alpha Pumpen GmbH", country: "DE" },
+    { name: "Alpha Pumpen AG", country: "DE" },
+  );
+  assert.equal(review.band, "review");
+});
+
+test("blockingKeys use the first name token and postcode prefix", () => {
+  const keys = blockingKeys({ name: "Muster Pumpen GmbH", country: "DE", postcode: "10115" });
+  assert.ok(keys.includes("name:muster|DE"));
+  assert.ok(keys.includes("postcode:10|DE"));
+});
+
+test("probabilisticMatch routes typo variants to the review queue by default", () => {
+  const frameA = {
+    label: "A",
+    records: [{ name: "Alpha Pumpen", country: "DE", city: "Berlin", postcode: "10115" }],
+  };
+  const frameB = {
+    label: "B",
+    records: [{ name: "Alfa Pumpen", country: "DE", city: "Berlin", postcode: "10115" }],
+  };
+  // Deterministic name+country misses the typo…
+  assert.equal(matchFrames(frameA.records, frameB.records).m11, 0);
+  // …and the conservative default band sends it to human review, not auto.
+  const result = probabilisticMatch(frameA, frameB);
+  assert.equal(result.auto.length, 0);
+  assert.equal(result.review.length, 1);
+  // Calibrated thresholds (the hook future EM training will own) can promote it.
+  const promoted = probabilisticMatch(frameA, frameB, { thresholds: { auto: 5, review: 3 } });
+  assert.equal(promoted.auto.length, 1);
+});
+
+test("estimateMultiFrame with probabilistic links picks up the extra capture", () => {
+  const shared = Array.from({ length: 30 }, (_, index) => `sim-${index}.de`);
+  const frames = [
+    { label: "F1", records: [...shared.map((domain) => ({ domain })), { name: "Alpha Pumpen", country: "DE", city: "Berlin", postcode: "10115" }] },
+    { label: "F2", records: [...shared.map((domain) => ({ domain })), { name: "Alfa Pumpen", country: "DE", city: "Berlin", postcode: "10115" }] },
+    { label: "F3", records: [...shared.map((domain) => ({ domain })), { name: "Alpha Pumpen", country: "DE", city: "Berlin", postcode: "10115" }] },
+  ];
+  const without = estimateMultiFrame(frames, { bootstrap: 0, sensitivity: false });
+  const withProb = estimateMultiFrame(frames, {
+    bootstrap: 0,
+    sensitivity: false,
+    probabilistic: true,
+    probabilisticThresholds: { auto: 5, review: 3 },
+  });
+  // F1-F3 share the deterministic name key and are skipped; F1-F2 and F2-F3
+  // are the two new probabilistic links.
+  assert.equal(withProb.probabilistic.auto, 2);
+  assert.equal(withProb.counts.observed, without.counts.observed - 1);
+});
+
+test("Chao lower bound follows observed + f1²/(2 f2)", () => {
+  const patterns = new Map([
+    [0b001, 10],
+    [0b010, 6],
+    [0b100, 4],
+    [0b011, 3],
+    [0b101, 2],
+    [0b110, 1],
+    [0b111, 1],
+  ]);
+  const chao = chaoLowerBound(patterns);
+  assert.equal(chao.observed, 27);
+  assert.equal(chao.f1, 20);
+  assert.equal(chao.f2, 6);
+  assert.ok(Math.abs(chao.nHat - (27 + 400 / 12)) < 1e-9);
+  assert.equal(chaoLowerBound(new Map([[0b001, 5]])), null);
+});
+
+test("leave-one-frame-out sensitivity reports each drop", () => {
+  const rng = createRng("sensitivity", "simulate");
+  const frames = simulateFrames([0.5, 0.4, 0.3], 5000, rng);
+  const result = estimateMultiFrame(frames, { bootstrap: 0, seed: "sensitivity" });
+  assert.equal(result.sensitivity.length, 3);
+  assert.deepEqual(result.sensitivity.map((row) => row.dropped), ["F1", "F2", "F3"]);
+  for (const row of result.sensitivity) {
+    assert.ok(row.nHat === null || row.nHat > result.counts.observed * 0.5);
+  }
+  assert.ok(result.sensitivitySpread === null || result.sensitivitySpread >= 0);
 });

@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "golden-label/v1",
+  "title": "Golden label (one annotator's pass over one item)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "itemId", "annotator", "round", "labels", "createdAt"],
+  "properties": {
+    "schemaVersion": { "const": "golden-label/v1" },
+    "itemId": { "type": "string", "pattern": "^(acct|contact)-[0-9]{4}$" },
+    "annotator": { "type": "string", "minLength": 1, "description": "role id, not a person's legal name" },
+    "round": { "type": "integer", "minimum": 1 },
+    "labels": { "type": "object", "minProperties": 1 },
+    "adjudicated": { "type": "boolean" },
+    "adjudicator": { "type": "string" },
+    "adjudicatedValue": { "type": "object", "description": "final labels after adjudication; required when adjudicated=true" },
+    "reason": { "type": "string" },
+    "createdAt": { "type": "string", "format": "date-time" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "adjudicated": { "const": true } }, "required": ["adjudicated"] },
+      "then": { "required": ["adjudicator", "adjudicatedValue", "reason"] }
+    }
+  ]
+}

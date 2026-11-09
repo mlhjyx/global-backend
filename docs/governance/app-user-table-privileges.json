@@ -121,6 +121,9 @@
       "SELECT",
       "UPDATE"
     ],
+    "conformal_threshold": [
+      "SELECT"
+    ],
     "contact_point": [
       "DELETE",
       "INSERT",
@@ -214,6 +217,11 @@
       "SELECT",
       "UPDATE"
     ],
+    "gate_enrichment_task": [
+      "INSERT",
+      "SELECT",
+      "UPDATE"
+    ],
     "generic_operation_artifact": [],
     "generic_operation_artifact_object": [],
     "generic_operation_artifact_object_version": [],
@@ -224,6 +232,10 @@
     "governed_subject_relation": [],
     "governed_subject_tombstone": [],
     "governed_subject_tombstone_audit": [],
+    "hard_gate_result": [
+      "INSERT",
+      "SELECT"
+    ],
     "icp_backtest": [
       "DELETE",
       "INSERT",
@@ -260,6 +272,19 @@
     ],
     "imported_buyer": [
       "DELETE",
+      "INSERT",
+      "SELECT",
+      "UPDATE"
+    ],
+    "judgment_golden_label": [
+      "INSERT",
+      "SELECT"
+    ],
+    "judgment_record": [
+      "INSERT",
+      "SELECT"
+    ],
+    "judgment_review_task": [
       "INSERT",
       "SELECT",
       "UPDATE"

@@ -1,16 +1,20 @@
-# scripts/frames — registry frame 装载与召回审计（ch03 P2 v0）
+# scripts/frames — registry frame 装载、查询与召回审计（ch03 P2）
 
 > 生命周期：`GUIDE`
-> 依据：GainOS v3.0 第 3 章（召回与枚举）第一波；实现与设计说明见
-> `apps/api/src/registry/` 与 PR 描述。真实注册库接入（T3-04 起）、MinIO/Temporal（T3-03
-> 完整版）、Splink（T3-16）、Tier A 人工裁决（T3-20）都不在本目录的 v0 范围内。
+> 依据：GainOS v3.0 第 3 章（召回与枚举）；实现与设计说明见 `apps/api/src/registry/`
+> 与各 PR 描述。真实注册库接入（T3-04 起）、MinIO/Temporal（T3-03 完整版）、Splink
+> （T3-16）、Tier A 人工裁决界面（T3-20）都不在本目录的范围内。
 
 ## 目录约定
 
-- `frames/<frameKey>.json` — 帧定义 + 列映射（`registry-frame/v1`，`parseFrameConfig` 校验）。
-- `fixtures/` — 装载与审计的样例输入（Companies House 风格 CSV、GLEIF 风格 JSON、召回审计
-  的 frame/pool 导出），全部为虚构数据。
+- `frames/<frameKey>.json` — 帧定义 + 列映射（`registry-frame/v1`，`parseFrameConfig` 校验）；
+  `frames/catalog.json` 是帧目录——`frames/` 下每个配置必须登记（`frame-catalog.spec` 强制），
+  并声明 fixture 路径与期望装载行数/编号体系。
+- `fixtures/` — 装载、查询与审计的样例输入（Companies House 风格 CSV、GLEIF 风格 JSON、
+  FR Sirene 风格 `;` 分隔 CSV、US SAM 风格嵌套 JSON、召回审计的 frame/pool/基线/裁决导出），
+  全部为虚构数据。
 - `import-frame.mts` — CSV/JSON frame 装载 CLI（tsx 运行，owner 连接写平台表）。
+- `query-preview.mts` — `registry_frame` 查询契约预览（只读，验证 ICP→过滤条件→候选记录）。
 - `recall-audit.mjs` — 召回审计 CLI（Node ≥22.18 原生 type-strip 直接运行，无需构建）。
 
 ## 装载
@@ -24,15 +28,28 @@ pnpm exec tsx scripts/frames/import-frame.mts \
 
 # 真正装载（DATABASE_URL 缺省时读 packages/db/.env 的 owner 连接；平台表 app_user 只读）
 pnpm exec tsx scripts/frames/import-frame.mts \
-  --frame scripts/frames/frames/gb-companies-house.json \
-  --file scripts/frames/fixtures/gb-companies-house.sample.csv
+  --frame scripts/frames/frames/fr-sirene.json \
+  --file scripts/frames/fixtures/fr-sirene.sample.csv
 
 # 装载后跑硬键 + 名称 trigram 链接提案（写 registry_entity_link，软键只落 PROPOSED）
 pnpm exec tsx scripts/frames/import-frame.mts ... --propose-links
 ```
 
-幂等：同一文件（sha256 相同）重导直接复用既有 PARSED 快照；实体按 `(scheme, reg_number)`
-upsert；事件按 `(scheme, reg_number, snapshot_id, change_type)` 唯一键跳过。
+幂等：同一文件（sha256 相同）且 parserVersion 相同直接复用既有 PARSED 快照；实体按
+`(scheme, reg_number)` upsert；事件按 `(scheme, reg_number, snapshot_id, change_type)` 唯一键跳过。
+PAUSED/ARCHIVED 帧拒绝装载（kill switch）。
+
+## 查询预览（registry_frame 契约）
+
+```bash
+pnpm exec tsx scripts/frames/query-preview.mts \
+  --country FR --nace 28 --band 10-49,50-249 --limit 20
+```
+
+只读；输出 `rationale`（写入计划回执的口径串）、校验后的 filters 与 `ProviderCompanyRecord[]`
+（externalId=`scheme:regNumber`、员工带中位数、`attributes.registry` provenance、licence）。
+过滤口径见 `apps/api/src/registry/query.ts`：未知 filter 拒绝、country ISO2 必填、只查
+`withdrawn_at IS NULL` 且 last_snapshot 仍为 PARSED 的实体、排序固定 `scheme, reg_number`。
 
 ## 召回审计
 
@@ -41,8 +58,12 @@ node scripts/frames/recall-audit.mjs \
   --frame scripts/frames/fixtures/recall-frame.sample.json \
   --pool  scripts/frames/fixtures/recall-pool.sample.json \
   --period 2026-11 --sample 384 --seed 2026-11 \
+  [--baseline scripts/frames/fixtures/recall-baseline.sample.json] \
+  [--verdicts scripts/frames/fixtures/recall-verdicts.sample.json] \
   --out /tmp/recall-audit
 ```
 
 输出固定模板 Markdown + JSON（Wilson 95% CI）。口径：分母来自 frame（外部注册库），
-「找到」按注册号键（scheme + regNumber）精确匹配；名称/域名模糊匹配与 miss 归因留给 T3-20。
+「找到」按注册号键（scheme + regNumber）精确匹配。`--baseline`（上一期本 CLI 报告 JSON）
+给出逐层环比，|Δ|≥5pp 标 ⚠；`--verdicts`（`[{scheme, regNumber, missReason}]`）给出
+miss 归因 Top-5 与未归因计数。名称/域名模糊匹配与裁决界面留给 T3-20。

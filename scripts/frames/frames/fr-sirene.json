@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "registry-frame/v1",
+  "frame": {
+    "frameKey": "fr_sirene",
+    "country": "FR",
+    "scheme": "fr_siren",
+    "label": "法国 INSEE Sirene stock（法人单元，样例帧）",
+    "providerKey": "sirene_bulk",
+    "sourceUrl": "https://www.data.gouv.fr/fr/datasets/base-sirene-des-entreprises-et-de-leurs-etablissements-siren-siret/",
+    "licence": "Licence-Ouverte-2.0",
+    "licenceUrl": "https://www.etalab.gouv.fr/licence-ouverte-open-licence/",
+    "fetchMode": "bulk_file",
+    "cadence": { "kind": "monthly", "dayOfMonth": 6, "hourUtc": 20 },
+    "config": {
+      "fileNamePattern": "StockUniteLegale_utf8.zip",
+      "delimiter": ";",
+      "note": "Sirene 用 SIREN 作帧主键，SIRET 属 établissement；diffusionCommerciale 过滤与 NAF→NACE 全表映射留给 T3-05 接入波次"
+    }
+  },
+  "mapping": {
+    "schemaVersion": "registry-frame-mapping/v1",
+    "format": "csv",
+    "csv": { "delimiter": ";" },
+    "constants": { "scheme": "fr_siren", "country": "FR" },
+    "fields": {
+      "regNumber": "siren",
+      "name": "denominationUniteLegale",
+      "status": "etatAdministratifUniteLegale",
+      "legalForm": "categorieJuridiqueUniteLegale",
+      "city": "libelleCommuneEtablissement",
+      "postalCode": "codePostalEtablissement",
+      "nace": "activitePrincipaleUniteLegale",
+      "naceVersion": null,
+      "employeeBand": "trancheEffectifsUniteLegale",
+      "region": null,
+      "addressLines": null,
+      "vatId": null,
+      "lei": null,
+      "website": null,
+      "identifiers": null
+    },
+    "statusMap": {
+      "a": "ACTIVE",
+      "f": "DISSOLVED"
+    },
+    "legalFormMap": {
+      "5710": "sas",
+      "5499": "sarl",
+      "5599": "sa",
+      "1000": "entrepreneur-individuel"
+    },
+    "employeeBandMap": {
+      "11": "1-9",
+      "12": "1-9",
+      "21": "1-9",
+      "22": "10-49",
+      "31": "10-49",
+      "32": "50-249",
+      "41": "50-249",
+      "42": "50-249",
+      "51": "250+",
+      "52": "250+",
+      "53": "250+"
+    }
+  }
+}

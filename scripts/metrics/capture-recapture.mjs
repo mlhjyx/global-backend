@@ -26,7 +26,7 @@ import { parseArgs } from "./lib/psql.mjs";
 
 const USAGE = `usage:
   node scripts/metrics/capture-recapture.mjs --a <frame-a.csv> --b <frame-b.csv> [--keys domain,registry_id,name_country] [--json] [--sample N]
-  node scripts/metrics/capture-recapture.mjs --frame F1=<a.csv> --frame F2=<b.csv> --frame F3=<c.csv> [--bootstrap N] [--seed <s>] [--json]
+  node scripts/metrics/capture-recapture.mjs --frame F1=<a.csv> --frame F2=<b.csv> --frame F3=<c.csv> [--bootstrap N] [--seed <s>] [--probabilistic] [--json]
 
 Two frames use the Chapman estimator (sanity check only). Three or more frames
 use a log-linear model fit (independence / pairwise interactions, G²+AIC model
@@ -157,6 +157,184 @@ export function normalizeCountry(value) {
   const text = String(value).trim();
   if (["德国", "deutschland", "germany"].includes(text.toLowerCase())) return "DE";
   return /^[a-z]{2}$/i.test(text) ? text.toUpperCase() : text.toUpperCase();
+}
+
+// ── Probabilistic second stage (Splink-style simplified) ───────────────────
+
+/** Jaro similarity over two strings (used for name/city comparison). */
+export function jaro(left, right) {
+  const a = String(left);
+  const b = String(right);
+  if (a === b) return 1;
+  if (a.length === 0 || b.length === 0) return 0;
+  const matchDistance = Math.max(0, Math.floor(Math.max(a.length, b.length) / 2) - 1);
+  const aMatched = new Array(a.length).fill(false);
+  const bMatched = new Array(b.length).fill(false);
+  let matches = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    const start = Math.max(0, i - matchDistance);
+    const end = Math.min(i + matchDistance + 1, b.length);
+    for (let j = start; j < end; j += 1) {
+      if (!bMatched[j] && a[i] === b[j]) {
+        aMatched[i] = true;
+        bMatched[j] = true;
+        matches += 1;
+        break;
+      }
+    }
+  }
+  if (matches === 0) return 0;
+  let transpositions = 0;
+  let k = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    if (!aMatched[i]) continue;
+    while (!bMatched[k]) k += 1;
+    if (a[i] !== b[k]) transpositions += 1;
+    k += 1;
+  }
+  return (matches / a.length + matches / b.length + (matches - transpositions / 2) / matches) / 3;
+}
+
+/** Jaro–Winkler similarity (prefix boost, p = 0.1, max prefix 4). */
+export function jaroWinkler(left, right) {
+  const base = jaro(left, right);
+  if (base < 0.7) return base;
+  let prefix = 0;
+  const limit = Math.min(4, String(left).length, String(right).length);
+  while (prefix < limit && String(left)[prefix] === String(right)[prefix]) prefix += 1;
+  return base + prefix * 0.1 * (1 - base);
+}
+
+/**
+ * Fixed-weight pair scoring (Fellegi–Sunter shape, weights calibrated by the
+ * tests rather than EM). Returns {score, reasons, band} where band is
+ * auto (>= 8), review (4..8) or reject (< 4). Positive weights favour a match.
+ */
+export function scorePair(left, right, { auto = 8, review = 4 } = {}) {
+  let score = 0;
+  const reasons = [];
+  const push = (weight, reason) => {
+    score += weight;
+    reasons.push(`${weight >= 0 ? "+" : ""}${weight} ${reason}`);
+  };
+  const leftDomain = normalizeDomain(left.domain);
+  const rightDomain = normalizeDomain(right.domain);
+  if (leftDomain && rightDomain) {
+    if (leftDomain === rightDomain) push(6, "domain exact");
+    else push(-6, "domain conflict");
+  }
+  const leftRegistry = String(left.registry_id ?? "").trim().toLowerCase();
+  const rightRegistry = String(right.registry_id ?? "").trim().toLowerCase();
+  if (leftRegistry && rightRegistry) {
+    if (leftRegistry === rightRegistry) push(6, "registry exact");
+    else push(-6, "registry conflict");
+  }
+  const leftCountry = normalizeCountry(left.country);
+  const rightCountry = normalizeCountry(right.country);
+  if (leftCountry && rightCountry) {
+    if (leftCountry === rightCountry) push(1, "country exact");
+    else push(-4, "country conflict");
+  }
+  const leftName = normalizeName(left.name);
+  const rightName = normalizeName(right.name);
+  if (leftName && rightName) {
+    const similarity = jaroWinkler(leftName, rightName);
+    if (similarity >= 0.92) push(5, `name JW ${similarity.toFixed(2)}`);
+    else if (similarity >= 0.85) push(2, `name JW ${similarity.toFixed(2)}`);
+    else if (similarity >= 0.75) push(0, `name JW ${similarity.toFixed(2)} (borderline)`);
+    else push(-3, `name JW ${similarity.toFixed(2)}`);
+  }
+  const leftCity = normalizeName(left.city);
+  const rightCity = normalizeName(right.city);
+  if (leftCity && rightCity) {
+    if (leftCity === rightCity) push(1, "city exact");
+    else if (jaroWinkler(leftCity, rightCity) < 0.85) push(-1, "city differs");
+  }
+  const leftPostcode = String(left.postcode ?? "").replace(/\s+/g, "").toLowerCase();
+  const rightPostcode = String(right.postcode ?? "").replace(/\s+/g, "").toLowerCase();
+  if (leftPostcode && rightPostcode) {
+    if (leftPostcode === rightPostcode) push(1, "postcode exact");
+    else if (leftPostcode.slice(0, 2) !== rightPostcode.slice(0, 2)) push(-1, "postcode differs");
+  }
+  const band = score >= auto ? "auto" : score >= review ? "review" : "reject";
+  return { score, reasons, band };
+}
+
+/**
+ * Blocking candidates for the probabilistic stage: same first normalised name
+ * token + country, or same postcode prefix + country. Blocking keeps the pair
+ * space linear for our stratum sizes (ch01 §3.4.3).
+ */
+export function blockingKeys(record) {
+  const blocks = [];
+  const country = normalizeCountry(record.country);
+  const name = normalizeName(record.name);
+  if (name && country) blocks.push(`name:${name.split(" ")[0]}|${country}`);
+  const postcode = String(record.postcode ?? "").replace(/\s+/g, "").toLowerCase();
+  if (postcode.length >= 2 && country) blocks.push(`postcode:${postcode.slice(0, 2)}|${country}`);
+  return blocks;
+}
+
+/**
+ * Score every blocked pair across two frames and split them into auto links
+ * (usable for estimation) and review pairs (human adjudication queue).
+ */
+export function probabilisticMatch(frameA, frameB, { maxPairs = 200000, thresholds = {}, keys = DEFAULT_KEYS } = {}) {
+  const index = new Map();
+  frameB.records.forEach((record, indexB) => {
+    for (const block of blockingKeys(record)) {
+      const bucket = index.get(block) ?? [];
+      bucket.push(indexB);
+      index.set(block, bucket);
+    }
+  });
+  const keySetsB = frameB.records.map((record) => new Set(entityKeys(record, keys)));
+  const auto = [];
+  const review = [];
+  let candidates = 0;
+  frameA.records.forEach((recordA, indexA) => {
+    const keysA = entityKeys(recordA, keys);
+    const seen = new Set();
+    for (const block of blockingKeys(recordA)) {
+      for (const indexB of index.get(block) ?? []) {
+        if (seen.has(indexB)) continue;
+        seen.add(indexB);
+        // Already merged by the deterministic stage — nothing new to link.
+        if (keysA.some((key) => keySetsB[indexB].has(key))) continue;
+        candidates += 1;
+        if (candidates > maxPairs) {
+          throw new Error(`probabilisticMatch exceeded ${maxPairs} candidate pairs; tighten blocking`);
+        }
+        const result = scorePair(recordA, frameB.records[indexB], thresholds);
+        const pair = {
+          frameA: frameA.label ?? "A",
+          indexA,
+          frameB: frameB.label ?? "B",
+          indexB,
+          score: result.score,
+          reasons: result.reasons,
+        };
+        if (result.band === "auto") auto.push(pair);
+        else if (result.band === "review") review.push(pair);
+      }
+    }
+  });
+  return { auto, review, candidates };
+}
+
+/** Chao (1987) lower bound from capture-pattern frequencies. */
+export function chaoLowerBound(patterns) {
+  let observed = 0;
+  let f1 = 0;
+  let f2 = 0;
+  for (const [pattern, count] of patterns) {
+    observed += count;
+    const popcount = pattern.toString(2).replace(/0/g, "").length;
+    if (popcount === 1) f1 += count;
+    if (popcount === 2) f2 += count;
+  }
+  if (f2 === 0) return null;
+  return { observed, f1, f2, nHat: observed + (f1 * f1) / (2 * f2) };
 }
 
 export const KEY_BUILDERS = Object.freeze({
@@ -465,7 +643,7 @@ function renderMarkdown(result, framePaths) {
  * share any key. Returns the number of clusters per capture pattern (a k-bit
  * integer, bit i set = captured by frame i).
  */
-export function buildCaptureMatrix(frames, { keys = DEFAULT_KEYS } = {}) {
+export function buildCaptureMatrix(frames, { keys = DEFAULT_KEYS, extraLinks = [] } = {}) {
   const parent = new Map();
   const find = (key) => {
     let root = key;
@@ -485,17 +663,19 @@ export function buildCaptureMatrix(frames, { keys = DEFAULT_KEYS } = {}) {
   const keyless = frames.map(() => 0);
   const duplicates = frames.map(() => 0);
   const processed = [];
+  const primaryByRecord = frames.map(() => new Map());
   frames.forEach((frame, frameIndex) => {
     const seenPrimary = new Set();
-    for (const record of frame.records) {
+    frame.records.forEach((record, recordIndex) => {
       const recordKeys = entityKeys(record, keys);
       if (recordKeys.length === 0) {
         keyless[frameIndex] += 1;
-        continue;
+        return;
       }
+      primaryByRecord[frameIndex].set(recordIndex, recordKeys[0]);
       if (seenPrimary.has(recordKeys[0])) {
         duplicates[frameIndex] += 1;
-        continue;
+        return;
       }
       seenPrimary.add(recordKeys[0]);
       for (const key of recordKeys) {
@@ -505,8 +685,15 @@ export function buildCaptureMatrix(frames, { keys = DEFAULT_KEYS } = {}) {
         union(recordKeys[0], recordKeys[index]);
       }
       processed.push({ frameIndex, primary: recordKeys[0] });
-    }
+    });
   });
+  // Probabilistic auto-matches arrive as record-index pairs; translate them to
+  // primary keys and union the clusters.
+  for (const link of extraLinks) {
+    const left = primaryByRecord[link.frameA]?.get(link.indexA);
+    const right = primaryByRecord[link.frameB]?.get(link.indexB);
+    if (left && right) union(left, right);
+  }
   const clusterPattern = new Map();
   for (const { frameIndex, primary } of processed) {
     const root = find(primary);
@@ -653,7 +840,39 @@ export function estimateMultiFrame(frames, options = {}) {
   const keys = options.keys ?? DEFAULT_KEYS;
   const bootstrapReps = options.bootstrap ?? 1000;
   const seed = options.seed ?? "20261108";
-  const matrix = buildCaptureMatrix(frames, { keys });
+  let probabilistic = options.probabilisticResult ?? null;
+  let extraLinks = options.extraLinks ?? null;
+  if (extraLinks === null) {
+    extraLinks = [];
+    if (options.probabilistic) {
+      const auto = [];
+      const review = [];
+      let candidates = 0;
+      for (let left = 0; left < frames.length; left += 1) {
+        for (let right = left + 1; right < frames.length; right += 1) {
+          const result = probabilisticMatch(frames[left], frames[right], {
+            thresholds: options.probabilisticThresholds ?? {},
+            keys,
+          });
+          candidates += result.candidates;
+          for (const pair of result.auto) {
+            auto.push({ frameA: left, indexA: pair.indexA, frameB: right, indexB: pair.indexB });
+          }
+          for (const pair of result.review) {
+            review.push({ ...pair, frameA: left, frameB: right });
+          }
+        }
+      }
+      extraLinks = auto;
+      probabilistic = {
+        candidates,
+        auto: auto.length,
+        review: review.length,
+        reviewSample: review.slice(0, 10),
+      };
+    }
+  }
+  const matrix = buildCaptureMatrix(frames, { keys, extraLinks });
   if (matrix.k < 3) throw new Error("estimateMultiFrame requires at least 3 frames");
   const pairs = pairRecaptures(matrix.patterns, matrix.k);
   const models = candidateModels(matrix.k).map((model) => {
@@ -740,9 +959,68 @@ export function estimateMultiFrame(frames, options = {}) {
       ci95: [quantile(estimates, 0.025), quantile(estimates, 0.975)],
     };
   }
+  // Leave-one-frame-out sensitivity (ch01 §3.4.7): refit without each frame
+  // and report how N̂ moves. Subsets reuse the same probabilistic links.
+  let sensitivity = null;
+  if (options.sensitivity !== false && matrix.k >= 3) {
+    sensitivity = [];
+    for (let drop = 0; drop < matrix.k; drop += 1) {
+      const subFrames = frames
+        .filter((_, index) => index !== drop)
+        .map((frame) => ({ label: frame.label, records: frame.records }));
+      const remap = (index) => (index < drop ? index : index - 1);
+      const subLinks = extraLinks
+        .filter((link) => link.frameA !== drop && link.frameB !== drop)
+        .map((link) => ({
+          frameA: remap(link.frameA),
+          indexA: link.indexA,
+          frameB: remap(link.frameB),
+          indexB: link.indexB,
+        }));
+      let subset;
+      if (subFrames.length === 2) {
+        // Dropping one of three frames leaves a Chapman pair.
+        const subMatrix = buildCaptureMatrix(subFrames, { keys, extraLinks: subLinks });
+        const m11 = [...subMatrix.patterns.entries()]
+          .filter(([pattern]) => (pattern & 0b11) === 0b11)
+          .reduce((sum, [, count]) => sum + count, 0);
+        const estimate = chapman(subMatrix.nPerFrame[0], subMatrix.nPerFrame[1], m11);
+        subset = {
+          nHat: m11 >= 5 && estimate ? estimate.nHat : null,
+          reportable: m11 >= 5 && estimate !== null,
+          chosen: { name: "chapman" },
+        };
+      } else {
+        subset = estimateMultiFrame(subFrames, {
+          keys,
+          bootstrap: 0,
+          seed,
+          probabilistic: false,
+          sensitivity: false,
+          extraLinks: subLinks,
+        });
+      }
+      sensitivity.push({
+        dropped: matrix.labels[drop],
+        nHat: subset.nHat,
+        reportable: subset.reportable,
+        chosen: subset.chosen?.name ?? null,
+      });
+    }
+  }
+  const sensitivityValues = (sensitivity ?? []).filter((row) => row.nHat !== null).map((row) => row.nHat);
+  const sensitivitySpread =
+    sensitivityValues.length > 1 && chosen
+      ? (Math.max(...sensitivityValues) - Math.min(...sensitivityValues)) / chosen.nHat
+      : null;
+  const chao = chaoLowerBound(matrix.patterns);
   return {
     method: "loglinear",
     labels: matrix.labels,
+    chao,
+    sensitivity,
+    sensitivitySpread,
+    probabilistic,
     counts: {
       perFrame: matrix.nPerFrame,
       observed: matrix.observed,
@@ -815,12 +1093,51 @@ function renderMultiMarkdown(result, framePaths) {
       );
     }
     out.push(`覆盖率（N_obs / N̂）= ${(result.coverage * 100).toFixed(1)}%；模型间 N̂ 相对跨度 = ${(result.modelSpread * 100).toFixed(1)}%`);
+    if (result.chao) {
+      out.push(
+        `Chao (1987) 下界：N̂_chao = ${result.chao.observed} + ${result.chao.f1}²/(2×${result.chao.f2}) = ${result.chao.nHat.toFixed(1)}（异质性下的保守下界，仅作参照）`,
+      );
+    }
     out.push("```");
   } else {
     out.push("不可报告：见诊断门（m11/两两交集不足或观测过少）。");
   }
   out.push("");
-  out.push("## 4. 诊断门");
+  let sectionNumber = 4;
+  if (result.probabilistic) {
+    out.push(`## ${sectionNumber++}. 概率匹配（第二段，异键候选）`);
+    out.push("");
+    out.push(
+      `候选对 ${result.probabilistic.candidates}；自动合并 ${result.probabilistic.auto}；进人工复核队列 ${result.probabilistic.review}。`,
+    );
+    out.push("Blocking = 姓名首 token+国家 / 邮编前缀+国家；已由确定性硬键合并的对不再重复评分。评分 = 固定权重 Fellegi–Sunter 形状（domain/registry 硬键 ±6、name Jaro–Winkler 0–5、国家/城市/邮编 ±）。阈值：auto ≥8、review 4–8、reject <4。");
+    if (result.probabilistic.reviewSample.length > 0) {
+      out.push("");
+      out.push("| A 记录 | B 记录 | 分数 | 理由 |");
+      out.push("| --- | --- | --- | --- |");
+      for (const pair of result.probabilistic.reviewSample) {
+        out.push(`| #${pair.indexA}（frame ${pair.frameA + 1}） | #${pair.indexB}（frame ${pair.frameB + 1}） | ${pair.score} | ${pair.reasons.join("；")} |`);
+      }
+    }
+    out.push("");
+  }
+  if (result.sensitivity) {
+    out.push(`## ${sectionNumber++}. 敏感性（留一法）`);
+    out.push("");
+    out.push("| 剔除 frame | 子集 N̂ | 可报告 | 选定模型 |");
+    out.push("| --- | --- | --- | --- |");
+    for (const row of result.sensitivity) {
+      out.push(`| ${row.dropped} | ${row.nHat === null ? "—" : row.nHat.toFixed(1)} | ${row.reportable ? "是" : "否"} | ${row.chosen ?? "—"} |`);
+    }
+    out.push("");
+    out.push(
+      result.sensitivitySpread === null
+        ? "留一法跨度不可计算（可报告子集不足）。"
+        : `留一法 N̂ 相对跨度 = ${(result.sensitivitySpread * 100).toFixed(1)}%（>40% 说明结果高度依赖单一源，降置信；ch01 §3.4.7）。`,
+    );
+    out.push("");
+  }
+  out.push(`## ${sectionNumber++}. 诊断门`);
   out.push("");
   out.push("| 门 | 结果 | 说明 |");
   out.push("| --- | --- | --- |");
@@ -828,12 +1145,13 @@ function renderMultiMarkdown(result, framePaths) {
     out.push(`| ${gate.code} | ${gate.ok ? "PASS" : "WARN/BLOCK"} | ${gate.detail} |`);
   }
   out.push("");
-  out.push("## 5. 假设与限制");
+  out.push(`## ${sectionNumber++}. 假设与限制`);
   out.push("");
   out.push("1. log-linear 假设各 frame 捕获概率的交互结构可被两两交互解释；强依赖（共享上游）会让 N̂ 偏低。");
-  out.push("2. 匹配仍是确定性键（domain/registry/name+country）；未做概率匹配与人工复核，match precision 未测。");
-  out.push("3. 参数化 bootstrap 以选定模型为真值重采样，未覆盖模型选择不确定性；模型间跨度单列（>30% 时只报范围）。");
-  out.push("4. k>3 的模型（含三阶交互）未实现；ch01 PR-13 的 LCMCR/敏感性扩展不在此脚手架范围。");
+  out.push("2. 概率匹配是固定权重的 Fellegi–Sunter 形状（非 EM 训练）；review 队列必须人工复核并测 match precision（ch01 §3.4.3 要求 ≥95%）。");
+  out.push("3. 参数化 bootstrap 以选定模型为真值重采样，未覆盖模型选择不确定性；模型间跨度与留一法跨度单列。");
+  out.push("4. Chao 下界假设异质性可由捕获次数分布刻画，只作保守参照，不做点估计。");
+  out.push("5. k>3 的模型（含三阶交互）与 LCMCR 未实现。");
   return out.join("\n");
 }
 
@@ -907,6 +1225,7 @@ function main() {
         keys,
         bootstrap: flags.bootstrap !== undefined ? Number(flags.bootstrap) : 1000,
         seed: flags.seed ?? "20261108",
+        probabilistic: Boolean(flags.probabilistic),
       },
     );
     if (flags.json) {
