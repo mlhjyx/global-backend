@@ -23,6 +23,13 @@ import {
 } from './fit-judge-v2';
 import type { JudgePanelMode } from './judgment/panel';
 import { recordJudgment } from './judgment/judgment-record';
+import { enforceCorroboration, judgeCorroborationMode } from './judgment/corroboration';
+import { loadCompanyForSuppressionSafeWrite } from './company-suppression-gate';
+import {
+  crossSourceEvidenceSummary,
+  currentEvidenceBundle,
+  type EvidenceBundle,
+} from './evidence-bundle';
 
 /**
  * ICP 资格门（四门判别：材质/角色/工艺/商业模式）的共享核心 ——
@@ -86,6 +93,11 @@ export interface FitJudgment {
    * 只作用于 judgmentRecords，不影响判定主记录。
    */
   judgmentRecordsTolerant?: boolean;
+  /**
+   * 判定时的跨源证据包（2026-11-10 多源证据图）：由判定链现场装配，随判定记录在同一
+   * 事务内写回 `canonical_company.attributes.evidence_bundle`（审计/离线复核面）。
+   */
+  evidenceBundle?: EvidenceBundle;
 }
 
 interface FitOutput {
@@ -166,6 +178,16 @@ export async function persistJudgmentRecordInTransaction(
     ...(judgment.judgmentRecord ? [judgment.judgmentRecord] : []),
     ...(judgment.judgmentRecords ?? []),
   ];
+  // 证据包随判定同事务写回（enforce 门的审计面）。失败照常上抛：同事务里语句级错误会
+  // 中止整个事务（catch 也无法恢复），与其半吞不如让判定失败并可重试——fail-closed。
+  if (judgment.evidenceBundle && judgment.judgmentRecord) {
+    await persistEvidenceBundle(
+      tx,
+      judgment.judgmentRecord.workspaceId,
+      judgment.judgmentRecord.companyId,
+      judgment.evidenceBundle,
+    );
+  }
   if (records.length === 0) return;
   for (const [index, record] of records.entries()) {
     const tolerant =
@@ -182,6 +204,60 @@ export async function persistJudgmentRecordInTransaction(
       );
     }
   }
+}
+
+/**
+ * 读-改-写当前 attributes，合入 evidence_bundle（其余键原样保留）。
+ * 与其它 attributes 写者同一纪律（company-enrichment-commit 先例）：先拿工作区抑制策略锁、
+ * 读到的既有属性经过 sanitizer、SUPPRESSED/被抑制的公司绝不写；updateMany 带 status 守卫 +
+ * version CAS 并 increment——和 owner 侧回填（backfill-company-normalization 的 version 乐观锁）
+ * 互相可见，不会互相覆盖。
+ */
+async function persistEvidenceBundle(
+  tx: Prisma.TransactionClient,
+  workspaceId: string,
+  companyId: string,
+  bundle: EvidenceBundle,
+): Promise<void> {
+  const current = await loadCompanyForSuppressionSafeWrite(tx, workspaceId, companyId);
+  if (!current) return;
+  const versionRow = await tx.canonicalCompany.findUnique({
+    where: { id: companyId },
+    select: { version: true, status: true },
+  });
+  if (!versionRow || versionRow.status === 'SUPPRESSED') return;
+  await tx.canonicalCompany.updateMany({
+    where: {
+      id: companyId,
+      workspaceId,
+      status: { not: 'SUPPRESSED' },
+      version: versionRow.version,
+    },
+    data: {
+      attributes: { ...current.attributes, evidence_bundle: bundle } as unknown as Prisma.InputJsonValue,
+      version: { increment: 1 },
+    },
+  });
+}
+
+/**
+ * v1 判定路径的跨源佐证门（JUDGE_CONTRACT_MODE=off 时生效；enforce 下 v2 路径自带门）。
+ * 返回降级后的 verdict 与要追加的理由行；shadow 只评估不降级（v1 无判定记录可附）。
+ */
+function applyCorroborationToV1(
+  verdict: FitJudgment['verdict'],
+  company: FitJudgeCompany,
+): { verdict: FitJudgment['verdict']; reasonLine: string | null } {
+  const mode = judgeCorroborationMode();
+  if (mode === 'off' || verdict === 'weak') return { verdict, reasonLine: null };
+  const enforcement = enforceCorroboration({
+    verdict,
+    bundle: currentEvidenceBundle(company),
+    mode,
+  });
+  return enforcement.downgraded
+    ? { verdict: 'weak', reasonLine: enforcement.reasonLine }
+    : { verdict, reasonLine: null };
 }
 
 /** 事务内加载 ICP 摘要（供判定 prompt）。ICP 不存在时返回空对象（与既有行为一致）。 */
@@ -303,6 +379,8 @@ export async function judgeFitCompany(
           judgment.judgmentRecords = v2.judgmentRecords;
           judgment.judgmentRecordsTolerant = v2.judgmentRecordsTolerant;
           judgment.judgmentRecordTolerant = true;
+          // 采样里的 corroboration 记录声称 enforced 时，证据包也要落库（否则审计面缺一半）。
+          if (v2.evidenceBundle) judgment.evidenceBundle = v2.evidenceBundle;
         }
       } catch (error) {
         // shadow 的失败不影响 Lead（含预算/控制面错误）：只记日志。
@@ -348,6 +426,7 @@ async function judgeFitCompanyV1(
   // A namespace with bookkeeping only (W5-f: a contact-path attempt on a company never profiled) is no evidence.
   const websiteProfile =
     profileFacts && Object.values(profileFacts).some((value) => value !== undefined) ? profileFacts : undefined;
+  const crossSourceEvidence = crossSourceEvidenceSummary(company.attributes);
   let out: FitOutput;
   let durableReceipt: DurableExecutionReceipt | undefined;
   try {
@@ -361,6 +440,7 @@ async function judgeFitCompanyV1(
           { name: company.name, domain: company.domain, country: company.country, industry: company.industry, products,
             keywords,
             ...(websiteProfile ? { website_profile: websiteProfile } : {}),
+            ...(crossSourceEvidence ? { cross_source_evidence: crossSourceEvidence } : {}),
           },
           null,
           2,
@@ -409,17 +489,20 @@ async function judgeFitCompanyV1(
       ...(durableReceipt ? { durableReceipt } : {}),
     };
   }
-  const verdict = (
+  const rawVerdict = (
     ['match', 'weak', 'mismatch'].includes(out.verdict) ? out.verdict : 'weak'
   ) as FitJudgment['verdict'];
+  // 跨源佐证门（2026-11-10，默认 enforce）：v1 路径的结论类判定同样需 ≥2 个来源分层，
+  // 不足则 fail-closed 降级 weak（可回滚：JUDGE_CORROBORATION_MODE=shadow/off）。
+  const gated = applyCorroborationToV1(rawVerdict, company);
   return {
-    verdict,
+    verdict: gated.verdict,
     fitReasons: {
       material: out.material_gate,
       role: out.role_gate,
       process: out.process_gate,
       business_model: out.business_model_gate,
-      reasons: out.reasons,
+      reasons: gated.reasonLine ? [gated.reasonLine, ...out.reasons].slice(0, 16) : out.reasons,
     },
     ...(durableReceipt ? { durableReceipt } : {}),
   };

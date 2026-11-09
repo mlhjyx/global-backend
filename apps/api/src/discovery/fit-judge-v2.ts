@@ -59,6 +59,13 @@ import {
 import type { RuntimeTelemetry } from '../model-runtime/types';
 import type { SkillResolver } from '../skills/skill-runtime';
 import type { FitJudgeCompany, FitJudgment, IcpBrief } from './fit-judge';
+import type { Prisma } from '@prisma/client';
+import {
+  enforceCorroboration,
+  judgeCorroborationMode,
+  type JudgeCorroborationMode,
+} from './judgment/corroboration';
+import { currentEvidenceBundle, type EvidenceBundle } from './evidence-bundle';
 
 export { buildCompanySnapshot, companyDomainEvidenceUrlPolicy };
 export type { JudgmentRecordDraft };
@@ -94,11 +101,15 @@ export interface JudgeFitV2Options extends PrepareJudgeCallOptions {
    * 仅在 v2 路径内生效；contract=off 时本模块不执行，面板自然不触发。
    */
   judgePanelMode?: JudgePanelMode;
+  /** 跨源佐证门开关覆盖（缺省读 JUDGE_CORROBORATION_MODE，默认 enforce；测试显式注入）。 */
+  judgeCorroborationMode?: JudgeCorroborationMode;
 }
 
-/** v2 判定结果：FitJudgment 形状 + 待持久化的 judgment_record 草稿。 */
+/** v2 判定结果：FitJudgment 形状 + 待持久化的 judgment_record 草稿 + 判定时证据包。 */
 export interface FitJudgmentV2 extends FitJudgment {
   judgmentRecord: JudgmentRecordDraft;
+  /** 判定时按当前属性现场装配的跨源证据包（随判定记录同事务写回 canonical attributes）。 */
+  evidenceBundle?: EvidenceBundle;
 }
 
 const VERDICT_TO_LEAD: Readonly<Record<JudgmentVerdict, FitJudgment['verdict']>> = Object.freeze({
@@ -192,6 +203,52 @@ function applyPanelVerdict(target: FitJudgment, panel: JudgePanelResult): void {
 }
 
 /**
+ * 跨源佐证门（enforce 默认）：对结论类判定（match/mismatch）按证据包分层评估；不足则原地
+ * 降级 judgment.verdict=weak、record.verdict=UNKNOWN（verdictProposed 保留原判定），并把
+ * 评估/降级记录并入 record.sampling.corroboration。返回判定时装配的证据包（off 时为 undefined）。
+ */
+function applyCrossSourceGate(args: {
+  judgment: FitJudgment;
+  record: JudgmentRecordDraft;
+  company: FitJudgeCompany;
+  mode?: JudgeCorroborationMode;
+}): { evidenceBundle?: EvidenceBundle } {
+  const mode = args.mode ?? judgeCorroborationMode();
+  if (mode === 'off') return {};
+  // 判定时现场装配（零出网）：本 run 已写回的 website_profile / 富集命名空间都在属性里。
+  const bundle = currentEvidenceBundle({
+    name: args.company.name,
+    domain: args.company.domain,
+    country: args.company.country,
+    attributes: args.company.attributes,
+  });
+  const enforcement = enforceCorroboration({ verdict: args.judgment.verdict, bundle, mode });
+  if (!enforcement.record.requires_corroboration) return { evidenceBundle: bundle };
+  const baseSampling =
+    args.record.sampling !== null && typeof args.record.sampling === 'object' && !Array.isArray(args.record.sampling)
+      ? (args.record.sampling as Record<string, unknown>)
+      : {};
+  args.record.sampling = {
+    ...baseSampling,
+    corroboration: enforcement.record,
+  } as unknown as Prisma.InputJsonValue;
+  if (enforcement.downgraded) {
+    args.judgment.verdict = 'weak';
+    args.record.verdict = 'UNKNOWN';
+    args.record.verdictProposed =
+      (args.record.verdictProposed ??
+        (enforcement.record.downgraded_from as JudgmentRecordDraft['verdictProposed'])) ?? null;
+    if (enforcement.reasonLine) {
+      args.judgment.fitReasons = {
+        ...args.judgment.fitReasons,
+        reasons: [enforcement.reasonLine, ...args.judgment.fitReasons.reasons].slice(0, 16),
+      };
+    }
+  }
+  return { evidenceBundle: bundle };
+}
+
+/**
  * 跑一次 v2 判定（网络调用，事务外执行）。
  *
  * 返回 `null` 表示本次判定不可用（模型/输出失败），与 v1 的 null 语义一致：
@@ -271,9 +328,20 @@ export async function judgeFitV2(
     }
   }
 
+  // 跨源佐证门（2026-11-10，默认 enforce）：结论类判定须 ≥2 个独立来源分层支撑；
+  // 不足则 fail-closed 降级 UNKNOWN（Lead 投影 weak/待复核）。
+  // 回滚：JUDGE_CORROBORATION_MODE=shadow（只记录）或 off（完全关闭）。
+  const gateFields = applyCrossSourceGate({
+    judgment,
+    record,
+    company,
+    mode: opts.judgeCorroborationMode,
+  });
+
   return {
     ...judgment,
     judgmentRecord: record,
+    ...gateFields,
     ...(panelRecords ? { judgmentRecords: panelRecords } : {}),
     ...(panelTolerant ? { judgmentRecordsTolerant: true } : {}),
   };

@@ -1,0 +1,174 @@
+# Golden ICP 评测集（骨架，2026-11-10）
+# 口径与标注模板见同目录 README.md。YAML 受限子集：只允许注释、标量字段、
+# 行内 [a, b] 列表与缩进 "- item" 块列表（缩进 2/4/6），字段 icp 必填、id 唯一。
+# expected_domains 为空 = 未标注（评测跳过计分，只出候选预览）。
+version: 1
+queries:
+  # ---- 已标注样例（4 条；标注依据 = dev 库真实公司 + 试点 Impressum 抓取）----
+  - id: de-industrial-pumps-distributor
+    icp: 德国工业泵分销商与批发渠道
+    target_markets: [德国]
+    industry_terms: [工业泵, pumps]
+    expected_domains: [pumpentechnik-bass.de, wasserpumpe.de, istpumpen.com]
+    excluded_domains: [amazon.de]
+    labeled_by: mlhjyx
+    labeled_at: 2026-11-10
+    notes: 试点名单（impressum-miner-2026-11-08）中可核实的泵类分销/服务公司
+  - id: de-pump-manufacturer
+    icp: 德国泵类制造商（含备件与售后）
+    target_markets: [德国]
+    industry_terms: [pumps, 泵]
+    expected_domains: [ksb.com, allweiler.de, tsurumi.de, mavex-pumpen.de]
+    excluded_domains: []
+    labeled_by: mlhjyx
+    labeled_at: 2026-11-10
+    notes: KSB/ALLWEILER 为品牌制造商；TSURUMI 德国子公司；MAVEX 为泵销售
+  - id: de-valves-components
+    icp: 德国阀门与流体部件供应商
+    target_markets: [德国]
+    industry_terms: [阀门, valves]
+    expected_domains: []
+    excluded_domains: []
+    notes: 待标注——候选从 dev 库阀门类公司人工复核
+  # ---- 以下为待标注查询（覆盖 ISIC 种子行业与目标市场；expected_domains 留空）----
+  - id: de-sheet-metal-fabrication
+    icp: 德国钣金加工与激光切割供应商
+    target_markets: [德国]
+    industry_terms: [钣金, sheet metal]
+    expected_domains: []
+    excluded_domains: []
+  - id: de-metal-fabrication
+    icp: 德国金属加工与结构件制造商
+    target_markets: [德国]
+    industry_terms: [金属加工, metal fabrication]
+    expected_domains: []
+    excluded_domains: []
+  - id: de-machinery-oem
+    icp: 德国通用机械制造商
+    target_markets: [德国]
+    industry_terms: [机械制造, machinery]
+    expected_domains: []
+    excluded_domains: []
+  - id: de-automotive-parts
+    icp: 德国汽车零部件供应商
+    target_markets: [德国]
+    industry_terms: [汽车零部件, auto parts]
+    expected_domains: []
+    excluded_domains: []
+  - id: de-electronics
+    icp: 德国电子制造服务商
+    target_markets: [德国]
+    industry_terms: [电子, electronics]
+    expected_domains: []
+    excluded_domains: []
+  - id: de-medical-devices
+    icp: 德国医疗器械制造商
+    target_markets: [德国]
+    industry_terms: [医疗器械, medical devices]
+    expected_domains: []
+    excluded_domains: []
+  - id: at-pumps
+    icp: 奥地利泵与流体设备经销
+    target_markets: [奥地利]
+    industry_terms: [pumps, 泵]
+    expected_domains: []
+    excluded_domains: []
+  - id: ch-industrial-supplies
+    icp: 瑞士工业配件与密封件供应商
+    target_markets: [瑞士]
+    industry_terms: [seals, sealing equipment]
+    expected_domains: []
+    excluded_domains: []
+  - id: fr-pumps
+    icp: 法国工业泵进口商
+    target_markets: [法国]
+    industry_terms: [pumps, pompes]
+    expected_domains: []
+    excluded_domains: []
+  - id: it-valves
+    icp: 意大利阀门制造商
+    target_markets: [意大利]
+    industry_terms: [valves, valvole]
+    expected_domains: []
+    excluded_domains: []
+  - id: nl-trading
+    icp: 荷兰工业设备贸易商
+    target_markets: [荷兰]
+    industry_terms: [industrial supplies]
+    expected_domains: []
+    excluded_domains: []
+  - id: pl-machinery
+    icp: 波兰机械制造企业
+    target_markets: [波兰]
+    industry_terms: [machinery, 机械制造]
+    expected_domains: []
+    excluded_domains: []
+  - id: cn-pump-exporters
+    icp: 中国泵类出口制造商
+    target_markets: [中国]
+    industry_terms: [泵, pumps]
+    expected_domains: []
+    excluded_domains: []
+  - id: cn-valve-exporters
+    icp: 中国阀门出口制造商
+    target_markets: [中国]
+    industry_terms: [阀门, valves]
+    expected_domains: []
+    excluded_domains: []
+  - id: us-medical-devices
+    icp: 美国医疗器械注册制造商
+    target_markets: [美国]
+    industry_terms: [medical devices]
+    expected_domains: []
+    excluded_domains: []
+  - id: us-industrial-distributors
+    icp: 美国工业品分销商
+    target_markets: [美国]
+    industry_terms: [industrial supplies]
+    expected_domains: []
+    excluded_domains: []
+  - id: dach-pumps-channel
+    icp: DACH 地区泵类渠道商
+    target_markets: [DACH]
+    industry_terms: [pumps, 泵]
+    expected_domains: []
+    excluded_domains: []
+  - id: eu-compressors
+    icp: 欧盟空压机与压缩机渠道
+    target_markets: [德国, 奥地利, 瑞士]
+    industry_terms: [compressors]
+    expected_domains: []
+    excluded_domains: []
+  - id: de-pump-repair-service
+    icp: 德国泵类维修与现场服务商
+    target_markets: [德国]
+    industry_terms: [泵, service]
+    expected_domains: [pumpentechnik-bass.de, baumueller-services.com]
+    excluded_domains: []
+    labeled_by: mlhjyx
+    labeled_at: 2026-11-10
+    notes: 两家的 website_profile.trade_role=service 且官网核实为泵类维修/服务
+  - id: de-process-technology
+    icp: 德国过程技术与流体系统工程公司
+    target_markets: [德国]
+    industry_terms: [process technology, fluid systems]
+    expected_domains: []
+    excluded_domains: []
+  - id: de-sealing-equipment
+    icp: 德国密封件与密封设备供应商
+    target_markets: [德国]
+    industry_terms: [sealing equipment, seals]
+    expected_domains: []
+    excluded_domains: []
+  - id: uk-pumps
+    icp: 英国工业泵经销商
+    target_markets: [英国]
+    industry_terms: [pumps]
+    expected_domains: []
+    excluded_domains: []
+  - id: in-pumps
+    icp: 印度泵类制造商
+    target_markets: [印度]
+    industry_terms: [pumps]
+    expected_domains: []
+    excluded_domains: []

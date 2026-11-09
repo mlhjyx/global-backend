@@ -60,6 +60,17 @@ import {
 } from "./discovery-run-lease";
 import { discoveryActivityTimeouts, timeoutMilliseconds } from "./testing/discovery-activity-timeouts";
 
+// 跨源佐证门（JUDGE_CORROBORATION_MODE，默认 enforce）在其它主题的用例里关闭：这些夹具没有
+// T1/T2 证据，默认会按 fail-closed 降级 verdict，掩盖各用例本来的主题。门本身的语义由
+// judgment/corroboration.spec.ts 与 fit-judge-v2.spec.ts 的专门用例覆盖。
+beforeEach(() => {
+  process.env.JUDGE_CORROBORATION_MODE = 'off';
+});
+afterEach(() => {
+  delete process.env.JUDGE_CORROBORATION_MODE;
+});
+
+
 const acknowledgementMocks = vi.hoisted(() => ({
   apply: vi.fn(
     async (input: {
