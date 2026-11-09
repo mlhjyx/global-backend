@@ -39,6 +39,15 @@ export class UpdateCompanyDto {
   industry?: string;
 
   @ApiPropertyOptional({
+    maxLength: 32,
+    description: '受控行业码；不随 industry 一起给出时，改为自由文本会清空受控码。',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Za-z0-9][A-Za-z0-9.-]{0,31}$/u, { message: 'industryCode 格式不合法' })
+  industryCode?: string;
+
+  @ApiPropertyOptional({
     type: [String],
     description: '目标市场（ISO 3166-1 alpha-2），最多 30 个',
   })

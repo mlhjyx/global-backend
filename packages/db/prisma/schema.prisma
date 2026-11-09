@@ -822,6 +822,9 @@ model CompanyProfile {
   website        String?
   status         CompanyStatus @default(DRAFT)
   industry       String? // 画像回填（KNW-002 / 5.2.3）
+  /// 受控行业码（2026-11-10，注册即建档第 1 步）：canonical_taxonomy(kind=industry) 的 ISIC code。
+  /// industry 继续存展示用标签（上游 NACE 词面映射也读它）；两位同源，由建档/onboarding-facts 一起写。
+  industryCode   String?       @map("industry_code")
   /// 卖家事实 SoR（D16，2026-11-02）：注册引导填写、可在档案页修改的目标市场（ISO 3166-1 alpha-2）。
   targetMarkets  String[]      @default([]) @map("target_markets")
   /// 卖家事实 SoR（D16）：注册引导填写的业务邮箱（公司级询盘接收缺省值）。PII 分类待法务确认（PRD SD11 备注）。
