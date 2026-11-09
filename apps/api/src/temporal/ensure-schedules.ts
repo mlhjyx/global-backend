@@ -25,6 +25,8 @@ import {
   SANCTIONS_REFRESH_WORKFLOW,
   CONTACT_REVERIFY_SWEEP_SCHEDULE_ID,
   CONTACT_REVERIFY_SWEEP_WORKFLOW,
+  CONTACT_WEEKLY_REPORT_SCHEDULE_ID,
+  CONTACT_WEEKLY_REPORT_WORKFLOW,
   SITE_RELEASE_MAINTENANCE_SWEEP_SCHEDULE_ID,
   SITE_RELEASE_MAINTENANCE_SWEEP_WORKFLOW,
   SITE_BUILD_COST_RECONCILIATION_SWEEP_SCHEDULE_ID,
@@ -64,6 +66,9 @@ const SPECS: ScheduleSpecEntry[] = [
   // **注册即 paused**：启用是运维决定（data_provider.millionverifier=ENABLED + 凭据 + 成本 cap）；
   // 未启用时活动自带三重门、零调用零成本。已存在时下面只 reconcile action，不动暂停状态。
   { id: CONTACT_REVERIFY_SWEEP_SCHEDULE_ID, workflowType: CONTACT_REVERIFY_SWEEP_WORKFLOW, everyEnv: 'CONTACT_REVERIFY_SWEEP_EVERY', everyDefault: '24h', paused: true },
+  // P1-17 联系人工程周报（指标 + 3 条告警，§2.3.12）。**注册即 paused**：只读聚合与
+  // 一行快照写入、无出网；启用是运维决定（先手工跑脚本核对口径）。
+  { id: CONTACT_WEEKLY_REPORT_SCHEDULE_ID, workflowType: CONTACT_WEEKLY_REPORT_WORKFLOW, everyEnv: 'CONTACT_WEEKLY_REPORT_EVERY', everyDefault: '168h', paused: true },
   // B4（审计 F1）：未结预算操作清收（客户侧 sweep 调度器为主，这里保持同一注册口径）。
   { id: TOOL_BUDGET_RECONCILIATION_SCHEDULE_ID, workflowType: TOOL_BUDGET_RECONCILIATION_SWEEP_WORKFLOW, everyEnv: 'TOOL_BUDGET_RECONCILIATION_EVERY', everyDefault: '1h' },
   // B3（审计 F2）：stale-run 看门狗（客户侧 sweep 调度器为主，这里保持同一注册口径）。
