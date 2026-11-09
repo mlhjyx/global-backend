@@ -129,6 +129,10 @@ export const WORKFLOW_CONSTANT_ALLOWLIST = Object.freeze({
     ASSET_CLEANUP_SETTLE_MS:
       "code-owned settle gap between the two durable cleanup checkpoints; sleeping timer commands stay replay-visible, so changing it can NDE an in-flight cleanup — treat as frozen, not a knob",
   }),
+  "apps/api/src/temporal/domain-resolution.workflow.ts": Object.freeze({
+    DOMAIN_RESOLUTION_MAX_COMPANIES:
+      "pending input-ization (tracked in docs/superpowers/plans/2026-11-08-workflow-constant-input-ization.md); frozen until then — it is the pre-activity input bound, and lowering it would make an already-recorded larger input fail its replay at validation",
+  }),
 });
 
 function issue(code, path, message) {

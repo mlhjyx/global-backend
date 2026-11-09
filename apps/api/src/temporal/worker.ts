@@ -37,6 +37,8 @@ import { createToolBudgetReconciliationActivities } from "./tool-budget-reconcil
 import { createQualifyActivities } from "./qualify.activities";
 import { createBacklogActivities } from "./backlog.activities";
 import { createContactReverifyActivities } from "./contact-reverify.activities";
+import { createDomainResolutionActivities } from "./domain-resolution.activities";
+import { createRecallAuditActivities } from "./recall-audit.activities";
 import { createExternalIntentActivities } from "./external-intent.activities";
 import { createDeletionActivities } from "./deletion.activities";
 import { createPersonalArtifactCleanupActivities } from "./personal-artifact-cleanup.activities";
@@ -690,6 +692,10 @@ async function main(): Promise<void> {
       // P1-19：联系人邮箱再验证（contact-reverify-sweep Schedule，注册即 paused；
       // 三重门不满足时活动零调用零成本）。
       ...createContactReverifyActivities({ ownerDb }),
+      // ch03 执行面 3b：域名解析 / 召回审计编排（env 门默认关——DOMAIN_RESOLUTION_WORKFLOW_ENABLED /
+      // RECALL_AUDIT_WORKFLOW_ENABLED 未开时活动一律 fail closed，零调用零落库；不注册任何 schedule）。
+      ...createDomainResolutionActivities({ prisma }),
+      ...createRecallAuditActivities({ prisma }),
       // B4（F1）：未结预算操作清收（RESERVED 释放 / RESULT_UNKNOWN 保守结清）。
       ...createToolBudgetReconciliationActivities({ prisma }),
       // 外部源 intent sweep（TED 招标 + openFDA 510k 清关 → ACTIVE ICP 投影，externalIntentSweepWorkflow 调度）

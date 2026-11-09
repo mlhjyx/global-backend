@@ -18,7 +18,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { createRegistryFramePrismaClient } from '../../apps/api/src/registry/frame-store.prisma';
-import { buildRecallFrameExport } from '../../apps/api/src/registry/recall-frame-export';
+import { buildRecallFrameExport, RecallFrameExportError } from '../../apps/api/src/registry/recall-frame-export';
+import { loadRecallFrameExport } from '../../apps/api/src/registry/recall-frame-export.prisma';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -68,41 +69,18 @@ if (!databaseUrl) {
 
 const prisma = createRegistryFramePrismaClient(databaseUrl);
 try {
-  const frame = await prisma.registryFrame.findUnique({ where: { frameKey: values.frame } });
-  if (!frame) die(`frame 不存在：${values.frame}`);
-
-  const snapshot = values.snapshot
-    ? await prisma.registrySnapshot.findUnique({ where: { id: values.snapshot } })
-    : await prisma.registrySnapshot.findFirst({
-        where: { frameId: frame.id, status: 'PARSED' },
-        orderBy: { fetchedAt: 'desc' },
-      });
-  if (!snapshot || snapshot.frameId !== frame.id) {
-    die(`未找到 frame ${values.frame} 的快照${values.snapshot ? `（${values.snapshot}）` : ''}`);
+  // 取数语义与 Temporal 活动共用同一实现（frame 快照解析与冻结实体口径不分叉）。
+  let exportPayload: ReturnType<typeof buildRecallFrameExport>;
+  try {
+    exportPayload = await loadRecallFrameExport(prisma, {
+      frameKey: values.frame,
+      snapshotId: values.snapshot ?? null,
+      exportedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    if (error instanceof RecallFrameExportError) die(error.message);
+    throw error;
   }
-  if (snapshot.status !== 'PARSED') {
-    die(`快照 ${snapshot.id} 状态为 ${snapshot.status}，只能导出 PARSED 快照`);
-  }
-
-  const rows = await prisma.registryEntity.findMany({
-    where: { lastSnapshotId: snapshot.id, withdrawnAt: null },
-    select: {
-      scheme: true,
-      regNumber: true,
-      country: true,
-      name: true,
-      nace: true,
-      employeeBand: true,
-    },
-    orderBy: [{ scheme: 'asc' }, { regNumber: 'asc' }],
-  });
-
-  const exportPayload = buildRecallFrameExport({
-    frameKey: frame.frameKey,
-    snapshotId: snapshot.id,
-    rows,
-    exportedAt: new Date().toISOString(),
-  });
   const json = `${JSON.stringify(exportPayload, null, 2)}\n`;
   if (values.out) {
     writeFileSync(resolve(values.out), json, 'utf8');
