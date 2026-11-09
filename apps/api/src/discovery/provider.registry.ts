@@ -415,6 +415,18 @@ export class DiscoveryProviderRegistry {
       update: {},
       create: { key: 'emailable', class: 'email_verification', status: 'DISABLED', costPerCallCents: 0 },
     });
+    // P1-05：ZeroBounce（验证瀑布的仲裁席）与 Truelist（catch-all 解析席；编排接线前不入池）。
+    // 默认 DISABLED，三重门同其他验证器；成本按事件账记账（ZB $0.0099/条、Truelist $0.0014/条）。
+    await db.dataProvider.upsert({
+      where: { key: 'zerobounce' },
+      update: {},
+      create: { key: 'zerobounce', class: 'email_verification', status: 'DISABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'truelist' },
+      update: {},
+      create: { key: 'truelist', class: 'email_verification', status: 'DISABLED', costPerCallCents: 0 },
+    });
     // 决策人抽取（Impressum/管理层/团队页 → 具名人+职务+买家角色）——联系人发现首选 adapter。
     await db.dataProvider.upsert({
       where: { key: 'decision_maker' },
@@ -470,6 +482,39 @@ export class DiscoveryProviderRegistry {
           allowedPurpose: ['discovery', 'enrichment'],
           retentionDays: 365,
           notes: 'Emailable 邮箱验证 API（HTTPS + API key）。data_provider.emailable 默认 DISABLED；双正规则第二票，结果四态映射与成本（$0.0076/条）由 apps/api/src/enrichment/verification 客户端记账。',
+        },
+      });
+      // P1-05：ZeroBounce / Truelist 验证 API 域（仲裁与 catch-all 解析）；未登记 = 未批准。
+      await db.sourcePolicy.upsert({
+        where: { domain: 'api.zerobounce.net' },
+        update: {},
+        create: {
+          domain: 'api.zerobounce.net',
+          sourceType: 'data_verification',
+          accessMode: 'api',
+          reviewStatus: 'APPROVED',
+          robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_OK',
+          personalData: true,
+          allowedPurpose: ['discovery', 'enrichment'],
+          retentionDays: 365,
+          notes: 'ZeroBounce 邮箱验证 API（HTTPS + API key）。data_provider.zerobounce 默认 DISABLED；验证瀑布仲裁席，$0.0099/条按事件账记账。',
+        },
+      });
+      await db.sourcePolicy.upsert({
+        where: { domain: 'api.truelist.io' },
+        update: {},
+        create: {
+          domain: 'api.truelist.io',
+          sourceType: 'data_verification',
+          accessMode: 'api',
+          reviewStatus: 'APPROVED',
+          robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_OK',
+          personalData: true,
+          allowedPurpose: ['discovery', 'enrichment'],
+          retentionDays: 365,
+          notes: 'Truelist 邮箱验证 API（HTTPS + Bearer key）。data_provider.truelist 默认 DISABLED；catch-all 解析席（编排接线后入池），$0.0014/条（enhanced 3 credits）按事件账记账。',
         },
       });
       await db.sourcePolicy.upsert({

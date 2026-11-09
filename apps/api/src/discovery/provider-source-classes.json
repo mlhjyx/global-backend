@@ -49,6 +49,12 @@
   "emailable": [
     "email_verification"
   ],
+  "zerobounce": [
+    "email_verification"
+  ],
+  "truelist": [
+    "email_verification"
+  ],
   "decision_maker": [
     "contact_discovery"
   ],

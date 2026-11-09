@@ -748,6 +748,40 @@
       ]
     },
     {
+      "key": "truelist",
+      "status": "IMPLEMENTED",
+      "source_classes": [
+        "email_verification"
+      ],
+      "purpose": "Resolve catch-all addresses with address-level evidence (resolver seat; wired into the waterfall after the resolver branch lands).",
+      "taxonomy": [
+        "email_state",
+        "catch-all resolution"
+      ],
+      "license": {
+        "classification": "NOT_APPLICABLE",
+        "note": "Verification result, not licensed source content; the address is personal data sent under a lawful-basis gate."
+      },
+      "personal_data_class": "PERSONAL_DATA",
+      "default_enablement": "DISABLED",
+      "call_gates": [
+        "data_provider_status",
+        "source_policy",
+        "lawful_basis",
+        "api_credentials",
+        "attempt_budget"
+      ],
+      "test_paths": [
+        "apps/api/src/enrichment/verification/truelist.provider.spec.ts"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "TEST_ANCHOR",
+          "path": "apps/api/src/enrichment/verification/truelist.provider.spec.ts"
+        }
+      ]
+    },
+    {
       "key": "web_watch",
       "status": "IMPLEMENTED",
       "source_classes": [
@@ -850,6 +884,40 @@
         {
           "kind": "TEST_ANCHOR",
           "path": "apps/api/src/discovery/providers/governed-purpose.spec.ts"
+        }
+      ]
+    },
+    {
+      "key": "zerobounce",
+      "status": "IMPLEMENTED",
+      "source_classes": [
+        "email_verification"
+      ],
+      "purpose": "Arbitrate conflicting verification votes as the waterfall third seat; statuses map to the four-state model.",
+      "taxonomy": [
+        "verification status",
+        "sub status"
+      ],
+      "license": {
+        "classification": "NOT_APPLICABLE",
+        "note": "Verification result, not licensed source content; the address is personal data sent under a lawful-basis gate."
+      },
+      "personal_data_class": "PERSONAL_DATA",
+      "default_enablement": "DISABLED",
+      "call_gates": [
+        "data_provider_status",
+        "source_policy",
+        "lawful_basis",
+        "api_credentials",
+        "attempt_budget"
+      ],
+      "test_paths": [
+        "apps/api/src/enrichment/verification/zerobounce.provider.spec.ts"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "TEST_ANCHOR",
+          "path": "apps/api/src/enrichment/verification/zerobounce.provider.spec.ts"
         }
       ]
     }
