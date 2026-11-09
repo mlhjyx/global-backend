@@ -356,6 +356,8 @@ export async function runReverifySweep(input: {
     const outcome = await runVerificationWaterfall({
       email,
       providers: pendingProviders.map(({ provider }) => provider),
+      // 工具型验证器（SMTP 兜底票）的 broker 归账/合规上下文；轮内可按点切换租户。
+      workspaceId: point.workspaceId,
       priorVotes,
       maxCalls: 6,
       maxCostMicrousd: remainingBudget,
@@ -404,7 +406,8 @@ export async function runReverifySweep(input: {
           workspaceId: point.workspaceId,
           contactPointId: point.id,
           providerKey: step.providerKey,
-          method: 'third_party_api',
+          // 工具型验证器（SMTP 兜底票）如实记 smtp_rcpt；第三方 API 缺省 third_party_api。
+          method: step.result.method ?? 'third_party_api',
           verdict: rawVerdict,
           detail:
             `${step.result.detail}${step.result.error ? `;error=${step.result.error}` : ''}` +
@@ -448,7 +451,7 @@ export async function runReverifySweep(input: {
         nextReverifyAt: columns.nextReverifyAt,
         confidence: columns.confidence,
         verificationProvider: lastStep.providerKey,
-        verificationMethod: 'third_party_api',
+        verificationMethod: lastStep.result.method ?? 'third_party_api',
         ...(resolved.state === 'INVALID'
           ? { catchAll: 'unknown' as const, catchAllClass: null }
           : resolved.state === 'UNKNOWN'

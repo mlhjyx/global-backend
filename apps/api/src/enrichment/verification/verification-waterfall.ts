@@ -40,6 +40,10 @@ export interface VerificationWaterfallInput {
   priorVotes?: VerificationVote[];
   /** 有序 provider 列表：主验在前；空列表 = 无可用验证器（调用方应先过滤未配置者）。 */
   providers: EmailVerificationProvider[];
+  /** 执行上下文：工具型验证器（SMTP 探测）用它过 broker 归账/合规/动作门；第三方 API 验证器忽略。 */
+  workspaceId?: string;
+  runId?: string;
+  authorizeExternalAction?: () => Promise<boolean>;
   /** 每个地址最多供应商调用次数（默认 6）。 */
   maxCalls?: number;
   /** 本地址成本上限（微美元，累计）；达到即停止后续调用。 */
@@ -119,7 +123,14 @@ export async function runVerificationWaterfall(
       return { resolved: resolveVerificationVotes(votesFrom(steps, input.priorVotes)), steps, providerCalls: steps.length, costMicrousd, stopReason };
     }
     await input.beforeCall?.(provider);
-    const result = await provider.verify({ email: input.email });
+    const result = await provider.verify({
+      email: input.email,
+      ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+      ...(input.runId ? { runId: input.runId } : {}),
+      ...(input.authorizeExternalAction
+        ? { authorizeExternalAction: input.authorizeExternalAction }
+        : {}),
+    });
     costMicrousd += result.costMicrousd;
     const provisional = resolveVerificationVotes([
       ...votesFrom(steps, input.priorVotes),

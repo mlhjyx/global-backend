@@ -47,8 +47,9 @@ describe('AI observability deployment contract', () => {
     expect(appModule).toContain('ModelRuntimeModule');
     expect(runtimeModule).toContain('@Global()');
     expect(runtimeModule).toContain('exports: [LangfuseRuntimeTelemetryService]');
+    // Registry 的 broker 改由 TOOL_BROKER 单实例提供（SMTP 兜底票共用），遥测注入不变。
     expect(discoveryModule).toContain(
-      'inject: [ModelGateway, PrismaService, LangfuseRuntimeTelemetryService, TOOL_BUDGET_STORE]',
+      'inject: [ModelGateway, PrismaService, LangfuseRuntimeTelemetryService, TOOL_BROKER]',
     );
     expect(discoveryModule).toContain('runtimeTelemetry,');
   });
