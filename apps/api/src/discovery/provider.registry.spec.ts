@@ -138,6 +138,10 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
       { sourceClass: 'industry_data', providerKey: 'trade_fair', hasCompanyLineage: true },
       { sourceClass: 'public_intelligence', providerKey: 'ted', hasCompanyLineage: true },
       { sourceClass: 'public_intelligence', providerKey: 'openfda', hasCompanyLineage: true },
+      // T3-09 注册面：本地 registry frame 枚举注册为 company_registry 源，但**刻意不声明**
+      // 公司血缘（零出网=无 durable 回执），执行面等 local_query 变体获批
+      // （design: docs/superpowers/plans/2026-11-09-registry-frame-local-lineage.md）。
+      { sourceClass: 'company_registry', providerKey: 'registry_frame', hasCompanyLineage: false },
     ]);
     // Contact, email and enrichment adapters are never plan query sources.
     expect(sources.map((source) => source.providerKey)).not.toEqual(
@@ -177,6 +181,46 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
     ]);
     expect(await routed('company_registry')).toEqual(['wikidata']);
     expect(await routed('public_intelligence')).toEqual(['public_web', 'ted', 'openfda']);
+  });
+
+  it('registers registry_frame as a company_registry source that the lineage gate keeps unrouted (T3-09)', async () => {
+    const registry = new DiscoveryProviderRegistry({ gateway: {} as ModelGateway });
+    const db = { dataProvider: { findMany: async () => [{ key: 'registry_frame' }, { key: 'wikidata' }] } };
+
+    const enabled = await registry.enabledCompanyDiscoverySources(db as never);
+    expect(enabled).toContainEqual({
+      sourceClass: 'company_registry',
+      providerKey: 'registry_frame',
+      hasCompanyLineage: false,
+    });
+    // 注册 ≠ 可执行：无血缘声明时路由闸门必须排除它（预期行为，不是缺陷）。
+    expect(
+      (await registry.routeCompanyDiscovery(db as never, 'company_registry')).map((adapter) => adapter.key),
+    ).toEqual(['wikidata']);
+  });
+
+  it('seeds registry_frame DISABLED as the second kill switch (T3-09)', async () => {
+    const providers: Array<{ where: unknown; update: unknown; create: Record<string, unknown> }> = [];
+    await new DiscoveryProviderRegistry().seed({
+      dataProvider: {
+        upsert: async (args: (typeof providers)[number]) => {
+          providers.push(args);
+          return args;
+        },
+      },
+    } as never);
+    expect(providers.filter((entry) => entry.create.key === 'registry_frame')).toEqual([
+      {
+        where: { key: 'registry_frame' },
+        update: {},
+        create: {
+          key: 'registry_frame',
+          class: 'company_registry',
+          status: 'DISABLED',
+          costPerCallCents: 0,
+        },
+      },
+    ]);
   });
 
   it('reads lineage from the adapter declaration, which matches both lineage contracts', () => {

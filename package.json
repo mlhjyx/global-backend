@@ -39,7 +39,7 @@
     "infra:down:legacy": "docker compose -p global-backend down",
     "worktree:new": "node scripts/create-worktree.mjs",
     "worktree:inventory": "node scripts/worktree-inventory.mjs",
-    "docs:verify": "pnpm governance:verify && node --test scripts/model-candidate-baseline.spec.mjs && pnpm --filter @global/contracts build && pnpm exec tsx --test scripts/verify-model-candidate-registry.spec.mts && node scripts/verify-docs.mjs",
+    "docs:verify": "pnpm governance:verify && node --test scripts/model-candidate-baseline.spec.mjs && pnpm --filter @global/contracts build && pnpm exec tsx --test scripts/verify-model-candidate-registry.spec.mts && node scripts/verify-docs.mjs && pnpm exec tsx scripts/validate-judgment-evals.mts",
     "governance:test": "node --test scripts/governance-contracts.spec.mjs scripts/governance-path-contracts.spec.mjs",
     "governance:verify": "pnpm governance:test && node scripts/governance-verify.mjs verify && node scripts/governance-workflow-constants.mjs verify",
     "governance:providers": "node scripts/governance-verify.mjs generate-provider-doc",

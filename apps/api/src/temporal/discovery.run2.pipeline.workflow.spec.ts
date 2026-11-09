@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ActivityFailure, ApplicationFailure } from '@temporalio/common';
 
 vi.mock('@temporalio/workflow', async () => await import('./testing/temporal-workflow.mock'));
 
@@ -69,13 +70,60 @@ describe('M0④ 公司级深挖子工作流', () => {
     );
   });
 
-  it('isolates a company failure: marks it failed and lets the run go on', async () => {
+  it('isolates a company failure: marks it failed with a classified code, not the aggregate', async () => {
     acts.contactsCompanyOnce.mockRejectedValue(new Error('adapter exploded'));
 
     await expect(companyPipelineWorkflow(INPUT)).resolves.toEqual({ stage: 'failed' });
 
     expect(acts.updateCompanyJobStage).toHaveBeenLastCalledWith(
-      expect.objectContaining({ stage: 'failed', errorCode: 'COMPANY_PIPELINE_FAILED' }),
+      expect.objectContaining({
+        stage: 'failed',
+        errorCode: 'UNKNOWN_UPSTREAM',
+        failureStage: 'provider',
+      }),
+    );
+    expect(acts.updateCompanyJobStage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ errorCode: 'COMPANY_PIPELINE_FAILED' }),
+    );
+  });
+
+  it('P3 J02 W1: a typed activity failure keeps its specific failure code and stage', async () => {
+    acts.fitCompanyOnce.mockRejectedValue(
+      new ActivityFailure(
+        'Activity task failed',
+        'fitCompanyOnce',
+        '1',
+        undefined,
+        'worker-1',
+        ApplicationFailure.create({ message: 'Temporal execution failed', type: 'PROVIDER_HTTP_429' }),
+      ),
+    );
+
+    await expect(companyPipelineWorkflow(INPUT)).resolves.toEqual({ stage: 'failed' });
+
+    expect(markedStages()).toEqual(['profiling', 'fitting', 'failed']);
+    expect(acts.updateCompanyJobStage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        stage: 'failed',
+        errorCode: 'PROVIDER_HTTP_429',
+        failureStage: 'provider',
+      }),
+    );
+  });
+
+  it('P3 J02 W1: control-plane failures are attributed outside provider', async () => {
+    acts.profileCompanyOnce.mockRejectedValue(
+      ApplicationFailure.create({ message: 'BUDGET_STORE_UNAVAILABLE', type: '' }),
+    );
+
+    await expect(companyPipelineWorkflow(INPUT)).resolves.toEqual({ stage: 'failed' });
+
+    expect(acts.updateCompanyJobStage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        stage: 'failed',
+        errorCode: 'BUDGET_AUTHORITY_NOT_READY',
+        failureStage: 'budget',
+      }),
     );
   });
 

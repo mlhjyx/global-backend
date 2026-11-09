@@ -97,6 +97,15 @@ const modelActs = proxyActivities<DiscoveryWorkflowActivities>({
   retry: { maximumAttempts: 3 },
 });
 
+// P3 J02 W4：快扫活动（quickJudgeBatch）逐批 heartbeat。500 家池 × 8 家/批远超 15 分钟
+// startToClose（2026-11-08 审计实测 27.8 分钟且无心跳）；heartbeatTimeout 让心跳续命，
+// 批间取消检查才能在 RequestCancel 后真正停下。
+const quickScanActs = proxyActivities<DiscoveryWorkflowActivities>({
+  startToCloseTimeout: '15 minutes',
+  heartbeatTimeout: '10 minutes',
+  retry: { maximumAttempts: 3 },
+});
+
 // 信号富集是**慢活动**（抓官网/sitemap，逐家数十秒）：单独长超时代理，绝不用上面的 2 分钟超时
 // （否则会超时重试整段富集）。工作量有界（SIGNAL_ENRICH_LIMIT 家 × 逐家有 AbortSignal 超时），30 分钟足够。
 const signalActs = proxyActivities<DiscoveryActivities>({
@@ -562,7 +571,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     if (usesRun2Shadow) {
       stage = 'quickScan';
       await acts.prefilterPool({ workspaceId, runId, icpId: input.icpId, ...authorityArgs });
-      shadowQuick = await modelActs.quickJudgeBatch({
+      shadowQuick = await quickScanActs.quickJudgeBatch({
         workspaceId,
         runId,
         icpId: input.icpId,
@@ -581,7 +590,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
         });
       }
       await acts.markRunPhase({ workspaceId, runId, phase: 'quick_started' });
-      const quick = await modelActs.quickJudgeBatch({
+      const quick = await quickScanActs.quickJudgeBatch({
         workspaceId,
         runId,
         icpId: input.icpId,

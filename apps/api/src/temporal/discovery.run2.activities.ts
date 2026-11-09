@@ -1,5 +1,9 @@
 import { createHash } from 'node:crypto';
+import { Context } from '@temporalio/activity';
+import { CancelledFailure } from '@temporalio/common';
 import { ApplicationFailure } from '@temporalio/workflow';
+import { FAILURE_CODES, type FailureCode } from '../discovery/judgment/failure-codes';
+import { classifyPipelineFailure } from './pipeline-failure-taxonomy';
 import { AGENT_KEYS } from '../agents/agent-catalog';
 import { AGENT_DECISION_TYPES } from '../agents/agent-runtime';
 import {
@@ -57,6 +61,27 @@ const CHUNK = 50;
 
 function isQuickVerdict(value: string | null | undefined): value is QuickVerdict {
   return value === 'match' || value === 'weak' || value === 'mismatch';
+}
+
+/**
+ * P3 J02 W4：快扫活动的心跳/取消门。
+ * 单元测试与脚本会直接调用工厂返回的活动函数（没有 Temporal 活动上下文），
+ * 此时 `Context.current()` 抛 `Activity context not initialized` —— 返回 null，
+ * 心跳与取消检查跳过，行为与旧版一致。
+ */
+function currentActivityContext(): Context | null {
+  try {
+    return Context.current();
+  } catch {
+    return null;
+  }
+}
+
+/** 取消了就抛 CancelledFailure：worker 在 cancellationSignal.aborted 时把活动记为 CANCELLED。 */
+function throwIfActivityCancelled(context: Context | null): void {
+  if (context?.cancellationSignal.aborted) {
+    throw new CancelledFailure('QUICK_JUDGE_CANCELLED');
+  }
 }
 
 /** 一次 run 的快扫三段：规则预筛 → 批量粗判（8 家/次，逐家降级）→ 临时候选落库。 */
@@ -223,6 +248,11 @@ export function createRun2Activities(deps: {
       skipped: number;
     }> {
       const binding = await ensureRunBudget(args);
+      // P3 J02 W4：池子最多 500 家 × 8 家/批，活动远超 15 分钟 startToClose（2026-11-08 审计
+      // 实测 27.8 分钟）。每批后 heartbeat()，配合 proxyActivities 的 heartbeatTimeout 续命；
+      // 每批前检查取消，父工作流 RequestCancel 时不再把整池判完。
+      const activity = currentActivityContext();
+      activity?.heartbeat({ phase: 'quick_judge', batches: 0 });
       const { jobs, companies, icpBrief } = await deps.prisma.withWorkspace(
         args.workspaceId,
         async (tx) => {
@@ -267,6 +297,13 @@ export function createRun2Activities(deps: {
       let ruleFallback = 0;
       let failed = 0;
       let skipped = 0;
+      let batchesDone = 0;
+      /** P3 J02 W4：批量协议失败的分类码（该批逐家降级的兜底归因）。 */
+      let batchFailureCode: FailureCode | undefined;
+      /** P3 J02 W4：逐家判定异常的分类码（取代 QUICK_JUDGE_FAILED 聚合码）。 */
+      const failureCodeByCompany = new Map<string, FailureCode>();
+      const capturedFailureCode = (companyId: string): FailureCode | undefined =>
+        failureCodeByCompany.get(companyId) ?? batchFailureCode;
 
       const task = getTask('discovery.qualify_fit')!;
 
@@ -317,16 +354,23 @@ export function createRun2Activities(deps: {
             const outcome = outcomes.get(company.id);
             if (!outcome) {
               failed += 1;
+              // P3 J02 W4：聚合码拆成分类后的具体 cause（批量/逐家异常 → 版本化失败码）。
+              const failureCode = capturedFailureCode(company.id) ?? 'UNKNOWN_UPSTREAM';
               await tx.discoveryCompanyJob.update({
                 where: { id: job.id },
-                data: { attempts: { increment: 1 }, lastErrorCode: 'QUICK_JUDGE_FAILED' },
+                data: { attempts: { increment: 1 }, lastErrorCode: failureCode },
               });
               await appendRunEvent(tx as never, {
                 workspaceId: args.workspaceId,
                 runId: args.runId,
                 level: 'warn',
                 type: 'company_failed',
-                payload: { companyId: company.id, stage: 'quick_judged', error: 'QUICK_JUDGE_FAILED' },
+                payload: {
+                  companyId: company.id,
+                  stage: 'quick_judged',
+                  error: failureCode,
+                  failureStage: FAILURE_CODES[failureCode].stage,
+                },
               });
               continue;
             }
@@ -342,6 +386,9 @@ export function createRun2Activities(deps: {
             verdicts[outcome.verdict] = (verdicts[outcome.verdict] ?? 0) + 1;
             if (outcome.via === 'single') fallbackPerCompany += 1;
             if (outcome.via === 'rule_fallback') ruleFallback += 1;
+            // 规则兜底的公司不是 failed，但批量/逐家判定的失败原因仍要可追溯。
+            const fallbackCode =
+              outcome.via === 'rule_fallback' ? capturedFailureCode(company.id) : undefined;
             await tx.discoveryCompanyJob.update({
               where: { id: job.id },
               data: {
@@ -360,6 +407,9 @@ export function createRun2Activities(deps: {
                 stage: 'quick_judged',
                 verdict: outcome.verdict,
                 via: outcome.via,
+                ...(fallbackCode
+                  ? { failureCode: fallbackCode, failureStage: FAILURE_CODES[fallbackCode].stage }
+                  : {}),
               },
             });
           }
@@ -367,6 +417,10 @@ export function createRun2Activities(deps: {
       };
 
       for (let start = 0; start < targets.length; start += QUICK_JUDGE_BATCH_SIZE) {
+        // P3 J02 W4：批间取消检查（取消经 heartbeat 送达；worker 会把取消记为 CANCELLED）。
+        throwIfActivityCancelled(activity);
+        // 批量失败码是逐批事实，不得把上一批的分类带到下一批。
+        batchFailureCode = undefined;
         const batch = targets.slice(start, start + QUICK_JUDGE_BATCH_SIZE);
         const outcomes = new Map<
           string,
@@ -439,6 +493,8 @@ export function createRun2Activities(deps: {
                 // 技能不可用是运维策略，不是上游抖动：不得降级成逐家/规则兜底继续跑。
                 throw error;
               }
+              // P3 J02 W4：批量协议失败也留类型化归因（逐家降级后仍失败/兜底时可回指）。
+              batchFailureCode = classifyPipelineFailure(error).code;
               batchVerdicts = eligible.map(() => null); // 整批不可用 → 全批逐家降级
             }
           }
@@ -461,6 +517,8 @@ export function createRun2Activities(deps: {
               continue;
             }
           } catch (error) {
+            // P3 J02 W4：逐家失败也记分类码（不再落到 QUICK_JUDGE_FAILED 聚合码）。
+            failureCodeByCompany.set(entry.company.id, classifyPipelineFailure(error).code);
             if (error instanceof ExternalActionDeniedError) {
               // wire-time 闸门拒绝（禁联/主体失效/DSR 撤权）：标 skipped，不落任何判定。
               outcomes.set(entry.company.id, { skip: true });
@@ -481,6 +539,15 @@ export function createRun2Activities(deps: {
         }
 
         await settle(batch, outcomes);
+        // P3 J02 W4：批后心跳（每批 ≤8 家；详情可用于重试续跑定位）。
+        batchesDone += 1;
+        activity?.heartbeat({
+          phase: 'quick_judge',
+          batches: batchesDone,
+          judged,
+          failed,
+          skipped,
+        });
 
         // M2 步 9b：资格判定员回合的批量判定轨迹（chosen=批次汇总；rejected=被否/跳过/失败候选）。
         // 同一个批次内容重放不翻行（discriminator=批次 job id 的内容哈希）。
@@ -497,7 +564,8 @@ export function createRun2Activities(deps: {
             if (!outcome) {
               rejectedCandidates.push({
                 candidateRef: company.id,
-                rejectReason: 'QUICK_JUDGE_FAILED',
+                // P3 J02 W4：轨迹里同样写具体 cause，而不是聚合码。
+                rejectReason: capturedFailureCode(company.id) ?? 'UNKNOWN_UPSTREAM',
                 revivable: true,
               });
               continue;

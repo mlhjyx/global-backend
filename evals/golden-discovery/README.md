@@ -75,6 +75,8 @@ node scripts/metrics/golden-run.mjs --set <真实金标目录> --baseline previo
 
 演示夹具 `fixtures/replay-demo/` 为合成数据（4 条，无真实 PII），同时作为变异测试基准：改坏任一门字段的预测，G1/G3 必红（单测覆盖）。**接线引擎 `apps/api/src/measurement/golden/` 与 `golden_eval_run` 落表属后续**（依赖 PR-02 表与 PR-04 API）。
 
+**CI 冒烟门（PR-09 雏形）**：`scripts/metrics/golden-ci-smoke.test.mjs` 以真实子进程跑两次 CLI——demo 集必须退出 0 且 `passed=true`；同集的变异副本必须退出 1 且 `G3_is_company` 判红。该测试随 governance-contracts 在 `docs:verify` 中执行，等于每次 PR 都对回放链路做一次端到端冒烟。路径触发的夜间跑批与真实金标回归待 PR-04 后再接。
+
 ## 6. 版本化
 
 - 数据集按 `v1/`、`v2/` 递增，不覆盖；manifest 记录 seed、pool 哈希、样本哈希与配额。
