@@ -36,6 +36,9 @@ export function createPrismaChannelRecordWriter(
           contentHash: row.contentHash,
           firstSeenAt: seenAt,
           lastSeenAt: seenAt,
+          // CH-7 观察名单：新观测一律 PENDING，人工抽检后才改 APPROVED/REJECTED；
+          // update 分支刻意不碰 review_status（重复观测不覆盖人工结论）。
+          reviewStatus: 'PENDING',
         },
         update: {
           crawlRunId: row.crawlRunId,
