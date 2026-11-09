@@ -18,7 +18,11 @@
  *  没有注册号/VAT 时最高 40 分——无硬证据一律不自动 VERIFIED。
  */
 import { normalizeCompanyName } from '../../discovery/identity';
-import { parseImpressum, type ParsedImpressum } from '../../discovery/website-profile/impressum';
+import {
+  parseImpressum,
+  scanRegisterNumbers,
+  type ParsedImpressum,
+} from '../../discovery/website-profile/impressum';
 import { trigramDice } from '../merge';
 import { brandToken } from './domain-resolver';
 
@@ -68,6 +72,8 @@ export interface DomainVerificationSignals {
   /** null = 页面/实体没有可比对的注册号（未知，不是不符）。 */
   registerNumberExact: boolean | null;
   registerMismatch: boolean;
+  /** 页面上出现多个不同注册号（集团门户/多实体共用域）→ 人工判定，不自动 VERIFIED。 */
+  multipleRegisters: boolean;
   vatExactAndViesValid: boolean | null;
   postalCodeAndCityMatch: boolean;
   nameSimilarity: number;
@@ -120,43 +126,109 @@ const FR_SIREN_RE =
   /\b(?:SIREN|SIRET|RCS)\b[^\d\n]{0,24}(\d{3})\s?(\d{3})\s?(\d{3})(?:\s?(\d{3})\s?(\d{2}))?\b/iu;
 const GB_CRN_RE =
   /(?:company\s+(?:registration\s+)?number|registered\s+in\s+(?:england(?:\s+and\s+wales)?|scotland|northern\s+ireland)(?:\s+(?:and\s+wales))?\s*(?:no\.?|number)?)[:\s]*([A-Z]{2}\d{6}|\d{8})\b/iu;
+// §3.12.9 其余国家锚点（T3-13 矩阵扩充）：IT REA+省、ES NIF/CIF、NL KVK、BE KBO、CH UID。
+const IT_REA_RE =
+  /(?:R\.?\s?E\.?\s?A\.?|Repertorio\s+Economico\s+Amministrativo)[:\s]*([A-Z]{2})[\s-]*(\d{5,9})\b/iu;
+const ES_NIF_CIF_RE =
+  /(?:N\.?\s?I\.?\s?F\.?|C\.?\s?I\.?\s?F\.?)[:\s]*([A-Z]\s?-?\s?\d{7}\s?-?\s?[A-Z0-9])\b/iu;
+const NL_KVK_RE = /(?:K\.?\s?V\.?\s?K\.?|Kamer\s+van\s+Koophandel)[^\d\n]{0,24}(\d{8})\b/iu;
+const BE_KBO_RE =
+  /(?:K\.?\s?B\.?\s?O\.?|B\.?\s?C\.?\s?E\.?|Ondernemingsnummer)[^\d\n]{0,16}([01]\d{3}[.\s]?\d{3}[.\s]?\d{3})\b/iu;
+const CH_UID_RE = /\bCHE[-\s]?(\d{3})[.\s](\d{3})[.\s](\d{3})\b/u;
 
 /**
  * 按 scheme 从法律页文本抽取注册号证据（找不到返回 null——「未知」不等于「不符」）。
- * 目前覆盖 DE（parseImpressum）、FR（SIREN/SIRET/RCS）、GB（CRN）；其余 scheme 返回 null。
+ * 目前覆盖 §3.12.9 锚点矩阵的 DE（parseImpressum HR+法院）、FR（SIREN/SIRET/RCS）、
+ * GB（CRN）、IT（REA+省）、ES（NIF/CIF）、NL（KVK）、BE（KBO）、CH（UID）；其余 scheme 返回 null。
  */
-export function extractRegisterEvidence(
+interface CollectedRegisters {
+  registers: ExtractedRegisterEvidence[];
+  parsed: ParsedImpressum | null;
+}
+
+/** 收集全部页面上的注册号证据（集团门户页可能有多个不同注册号——由调用方判 AMBIGUOUS）。 */
+export function collectRegisterEvidence(
   scheme: string,
   pages: readonly LegalPageText[],
-): { evidence: ExtractedRegisterEvidence; parsed: ParsedImpressum | null } | null {
+): CollectedRegisters {
+  const registers: ExtractedRegisterEvidence[] = [];
+  let parsed: ParsedImpressum | null = null;
   const deEntity = scheme === 'de_hrb' || scheme === 'de_hra';
   for (const page of pages) {
     if (deEntity) {
-      const parsed = parseImpressum(page.text);
-      if (parsed.register) {
-        return {
-          evidence: { type: parsed.register.type, number: digitsOnly(parsed.register.number), court: parsed.register.court },
-          parsed,
-        };
+      const pageParsed = parseImpressum(page.text);
+      const scanned = scanRegisterNumbers(page.text);
+      const own = pageParsed.register;
+      if (scanned.length > 0) {
+        for (const register of scanned) {
+          const isParsed =
+            own && own.type === register.type && digitsOnly(own.number) === digitsOnly(register.number);
+          registers.push({
+            type: register.type,
+            number: digitsOnly(register.number),
+            court: isParsed ? own!.court : null,
+          });
+        }
+        parsed ??= pageParsed;
+      } else if (own) {
+        registers.push({ type: own.type, number: digitsOnly(own.number), court: own.court });
+        parsed ??= pageParsed;
       }
       continue;
     }
     if (scheme === 'fr_siren') {
-      const match = FR_SIREN_RE.exec(page.text);
-      if (match) {
-        const number = `${match[1]}${match[2]}${match[3]}`;
-        return { evidence: { type: 'siren', number: digitsOnly(number), court: null }, parsed: null };
+      for (const match of page.text.matchAll(new RegExp(FR_SIREN_RE.source, 'giu'))) {
+        registers.push({ type: 'siren', number: digitsOnly(`${match[1]}${match[2]}${match[3]}`), court: null });
       }
       continue;
     }
     if (scheme === 'gb_crn') {
-      const match = GB_CRN_RE.exec(page.text);
-      if (match) {
-        return { evidence: { type: 'crn', number: match[1]!.toUpperCase(), court: null }, parsed: null };
+      for (const match of page.text.matchAll(new RegExp(GB_CRN_RE.source, 'giu'))) {
+        registers.push({ type: 'crn', number: match[1]!.toUpperCase(), court: null });
+      }
+      continue;
+    }
+    if (scheme === 'it_rea') {
+      for (const match of page.text.matchAll(new RegExp(IT_REA_RE.source, 'giu'))) {
+        registers.push({ type: 'rea', number: `${match[1]!.toUpperCase()}-${digitsOnly(match[2]!)}`, court: null });
+      }
+      continue;
+    }
+    if (scheme === 'es_nif') {
+      for (const match of page.text.matchAll(new RegExp(ES_NIF_CIF_RE.source, 'giu'))) {
+        registers.push({ type: 'nif', number: match[1]!.toUpperCase().replace(/[^\p{L}\p{N}]+/gu, ''), court: null });
+      }
+      continue;
+    }
+    if (scheme === 'nl_kvk') {
+      for (const match of page.text.matchAll(new RegExp(NL_KVK_RE.source, 'giu'))) {
+        registers.push({ type: 'kvk', number: digitsOnly(match[1]!), court: null });
+      }
+      continue;
+    }
+    if (scheme === 'be_kbo') {
+      for (const match of page.text.matchAll(new RegExp(BE_KBO_RE.source, 'giu'))) {
+        registers.push({ type: 'kbo', number: digitsOnly(match[1]!), court: null });
+      }
+      continue;
+    }
+    if (scheme === 'ch_uid') {
+      for (const match of page.text.matchAll(new RegExp(CH_UID_RE.source, 'gu'))) {
+        registers.push({ type: 'uid', number: digitsOnly(`${match[1]}${match[2]}${match[3]}`), court: null });
       }
     }
   }
-  return null;
+  return { registers, parsed };
+}
+
+/** 单值便捷入口（首个注册号）；需要集团门户判断时用 {@link collectRegisterEvidence}。 */
+export function extractRegisterEvidence(
+  scheme: string,
+  pages: readonly LegalPageText[],
+): { evidence: ExtractedRegisterEvidence; parsed: ParsedImpressum | null } | null {
+  const collected = collectRegisterEvidence(scheme, pages);
+  const first = collected.registers[0];
+  return first ? { evidence: first, parsed: collected.parsed } : null;
 }
 
 function registerMatches(
@@ -176,6 +248,18 @@ function registerMatches(
   }
   if (scheme === 'fr_siren') return digitsOnly(entity.regNumber) === page.number;
   if (scheme === 'gb_crn') return entity.regNumber.trim().toUpperCase() === page.number;
+  if (scheme === 'it_rea') {
+    // REA 号只在省内唯一：实体注册号形如 `REA MI-1234567` 或 `MI-1234567`。
+    const own = /^(?:REA[\s:]*)?([A-Z]{2})[-\s]?(\d{1,9})$/iu.exec(entity.regNumber.trim());
+    if (!own) return false;
+    return `${own[1]!.toUpperCase()}-${digitsOnly(own[2]!)}` === page.number;
+  }
+  if (scheme === 'es_nif') {
+    return entity.regNumber.trim().toUpperCase().replace(/[^\p{L}\p{N}]+/gu, '') === page.number;
+  }
+  if (scheme === 'nl_kvk') return digitsOnly(entity.regNumber) === page.number;
+  if (scheme === 'be_kbo') return digitsOnly(entity.regNumber) === page.number;
+  if (scheme === 'ch_uid') return digitsOnly(entity.regNumber) === page.number;
   return false;
 }
 
@@ -233,19 +317,28 @@ export async function verifyDomainCandidate(
   const evidenceUrls = pages.map((page) => page.url);
   const rejectReasons: string[] = [];
 
-  const pageRegisterResult = extractRegisterEvidence(entity.scheme, pages);
-  const pageRegister = pageRegisterResult?.evidence ?? null;
+  const collected = collectRegisterEvidence(entity.scheme, pages);
+  const pageRegister = collected.registers[0] ?? null;
+  const distinctRegisters = new Set(
+    collected.registers.map(
+      (register) => `${register.type}:${register.number}:${normalizeCourt(register.court) ?? ''}`,
+    ),
+  );
+  const multipleRegisters = distinctRegisters.size > 1;
 
   let registerNumberExact: boolean | null = null;
   let registerMismatch = false;
-  if (pageRegister) {
-    registerNumberExact = registerMatches(entity.scheme, entity, pageRegister);
+  if (collected.registers.length > 0) {
+    // 任一注册号命中即算精确匹配（多注册号仍走 AMBIGUOUS，见下方 group portal 规则）。
+    registerNumberExact = collected.registers.some((register) =>
+      registerMatches(entity.scheme, entity, register),
+    );
     registerMismatch = !registerNumberExact;
   }
 
   // VAT：页面 VAT 与实体一致，再经 VIES（接口）验证通过才算强证据。
   const pageVatId =
-    pageRegisterResult?.parsed?.vatId ??
+    collected.parsed?.vatId ??
     pages
       .flatMap((page) => [...page.text.matchAll(/\b([A-Z]{2}\s?[A-Z0-9]{8,12})\b/gu)].map((match) => match[1]!.replace(/\s+/gu, '')))
       .find((candidate) => entity.vatId && candidate === entity.vatId.replace(/\s+/gu, '')) ??
@@ -294,6 +387,10 @@ export async function verifyDomainCandidate(
   } else if (noLegalPage) {
     rejectReasons.push('NO_LEGAL_PAGE');
     verdict = 'REJECTED';
+  } else if (multipleRegisters) {
+    // §3.12.10 集团门户/多品牌共用域：注册号命中也不自动 VERIFIED，人工决定主实体。
+    rejectReasons.push('MULTIPLE_REGISTERS');
+    verdict = 'AMBIGUOUS';
   } else if (score >= VERIFIED_THRESHOLD) {
     verdict = 'VERIFIED';
   } else if (score >= AMBIGUOUS_THRESHOLD) {
@@ -320,6 +417,7 @@ export async function verifyDomainCandidate(
     signals: {
       registerNumberExact,
       registerMismatch,
+      multipleRegisters,
       vatExactAndViesValid,
       postalCodeAndCityMatch,
       nameSimilarity,

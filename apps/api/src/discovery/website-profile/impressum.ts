@@ -173,6 +173,21 @@ function parseRegisteredAddress(text: string): string | null {
   return null;
 }
 
+/**
+ * 页面上出现的**全部** HR 注册号（集团门户/多实体共用 Impressum 的检测用）。
+ * 只做号码级扫描；法院归属仍以 parseImpressum 的首个解析结果为准。
+ */
+export function scanRegisterNumbers(
+  text: string,
+): Array<{ type: 'HRA' | 'HRB'; number: string }> {
+  const scan = /\bH\s?R\s?([AB])\b\s*(?:Nr\.?|-?Nummer)?\s*[:.]?\s*(\d{1,6})\b/gu;
+  const out: Array<{ type: 'HRA' | 'HRB'; number: string }> = [];
+  for (const match of text.matchAll(scan)) {
+    out.push({ type: `HR${match[1]}` as 'HRA' | 'HRB', number: match[2]! });
+  }
+  return out;
+}
+
 export function parseImpressum(text: string): ParsedImpressum {
   const legalName = parseLegalName(text);
   return {
