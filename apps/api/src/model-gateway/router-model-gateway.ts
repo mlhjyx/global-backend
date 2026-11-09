@@ -22,6 +22,7 @@ import {
   projectModelResultForReplay,
   restoreModelResultFromReplay,
 } from "../durable-results/model-result-replay";
+import { assertChatWithToolsPlatformEgressAllowed } from "./chat-tools-platform-egress";
 import { definiteModelFailureCode } from "./definite-model-failure";
 import {
   ExternalActionDeniedError,
@@ -100,7 +101,11 @@ function mergeStructuredUsage(a?: ModelUsage, b?: ModelUsage): ModelUsage {
 }
 import {
   AiContext,
+  ChatMessage,
+  ChatResponse,
+  ChatToolDefinition,
   EmbedInput,
+  GenerateChatWithToolsInput,
   GenerateStructuredInput,
   GenerateTextInput,
   ModelOp,
@@ -173,6 +178,16 @@ function observingSubstituteAnswers(
       input: GenerateStructuredInput,
       runCtx: AiContext,
     ) => noted(() => provider.generateStructured<R>(input, runCtx)),
+    generateChatWithTools: (
+      input: GenerateChatWithToolsInput,
+      runCtx: AiContext,
+    ) =>
+      noted(async () => {
+        if (!provider.generateChatWithTools) {
+          throw new Error("CHAT_WITH_TOOLS_UNSUPPORTED");
+        }
+        return provider.generateChatWithTools(input, runCtx);
+      }),
     reviewVision: <R = unknown>(input: ReviewVisionInput, runCtx: AiContext) =>
       provider.reviewVision<R>(input, runCtx),
     embed: (input: EmbedInput, runCtx: AiContext) =>
@@ -395,6 +410,26 @@ export class RouterModelGateway extends ModelGateway {
     return this.run("generateText", input, ctx, async (p, runCtx) =>
       p.generateText(input, await this.withPhysicalWire(runCtx, 1)),
     );
+  }
+
+  /**
+   * WEB-1：一轮带工具定义的对话。工具环（hop/预算/超时）由调用方持有，本方法
+   * 只做一次物理调用并沿用网关的预算、身份门与 trace（op=generateChatWithTools）。
+   * tool_calls 的解析与计费在 provider 内完成；参数不可用按可计费失败上报。
+   */
+  generateChatWithTools(
+    input: GenerateChatWithToolsInput,
+    ctx: AiContext,
+  ): Promise<ModelResult<ChatResponse>> {
+    return this.run("generateChatWithTools", input, ctx, async (p, runCtx) => {
+      if (!p.generateChatWithTools) {
+        throw new Error("CHAT_WITH_TOOLS_UNSUPPORTED");
+      }
+      return p.generateChatWithTools(
+        input,
+        await this.withPhysicalWire(runCtx, 1),
+      );
+    });
   }
 
   generateStructured<T = unknown>(
@@ -668,6 +703,9 @@ export class RouterModelGateway extends ModelGateway {
       system?: string;
       schema?: Record<string, unknown>;
       signal?: AbortSignal;
+      /** WEB-1：工具环的对话内容与工具定义参与预算幂等键（重放不撞不同对话）。 */
+      messages?: readonly ChatMessage[];
+      tools?: readonly ChatToolDefinition[];
     },
     ctx: AiContext,
     call: (p: ModelProvider, runCtx: AiContext) => Promise<ModelResult<T>>,
@@ -675,6 +713,10 @@ export class RouterModelGateway extends ModelGateway {
     assertNoCallerModelIdentitySubstitutes(ctx);
     assertPlatformEgressPaidContext(ctx);
     assertPlatformEgressFenceAvailable(ctx);
+    // WEB-1：平台出网围栏的 modelOp 白名单属于 R4 执行合同，工具环不在其中（fail closed）。
+    if (op === "generateChatWithTools") {
+      assertChatWithToolsPlatformEgressAllowed(ctx);
+    }
     const chain = this.router.route(op, input.task);
     if (chain.length === 0)
       throw new Error(`no model provider for ${op}/${input.task}`);
@@ -728,6 +770,8 @@ export class RouterModelGateway extends ModelGateway {
       input.prompt ?? "",
       input.system ?? "",
       input.schema ? JSON.stringify(input.schema) : "",
+      input.messages ? JSON.stringify(input.messages) : "",
+      input.tools ? JSON.stringify(input.tools) : "",
     ]);
     let reservation;
     try {
@@ -810,11 +854,14 @@ export class RouterModelGateway extends ModelGateway {
         input.model ?? "",
         ctx.correlationId ?? "",
       ]);
+      // 平台出网分支在入口已排除 generateChatWithTools（见 run() 顶部守卫）；
+      // 类型收窄留在这里，保持 R4 合同文件的 modelOp 白名单不变。
+      const platformModelOp = op as Exclude<ModelOp, "generateChatWithTools">;
       result = ctx.platformEgress
         ? await ctx.platformEgress.authorizeAndDispatch(
             createPlatformEgressOperation({ operationKey: fenceOperationKey, budgetOperationKey: operationKey,
               reservation, workspaceId: ctx.workspaceId, accountKey,
-              execution: { kind: "model", modelOp: op, taskId: input.task, providerId: provider.id,
+              execution: { kind: "model", modelOp: platformModelOp, taskId: input.task, providerId: provider.id,
                 ...(input.model !== undefined ? { requestedModel: input.model } : {}) } }),
             () => call(dispatchProvider, callCtx),
           )
@@ -1336,6 +1383,8 @@ export class RouterModelGateway extends ModelGateway {
       system?: string;
       schema?: Record<string, unknown>;
       signal?: AbortSignal;
+      messages?: readonly ChatMessage[];
+      tools?: readonly ChatToolDefinition[];
     },
     ctx: AiContext,
     chain: readonly ModelProvider[],
@@ -1389,6 +1438,8 @@ export class RouterModelGateway extends ModelGateway {
       const promptUtf8Bytes = Buffer.byteLength(
         `${input.system ?? ""}\0${input.prompt ?? ""}\0${
           input.schema ? JSON.stringify(input.schema) : ""
+        }\0${input.messages ? JSON.stringify(input.messages) : ""}\0${
+          input.tools ? JSON.stringify(input.tools) : ""
         }`,
         "utf8",
       );

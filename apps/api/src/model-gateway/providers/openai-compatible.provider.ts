@@ -10,7 +10,12 @@ import {
 } from "./provider-output-error";
 import {
   AiContext,
+  ChatMessage,
+  ChatResponse,
+  ChatToolDefinition,
+  ChatToolUse,
   EmbedInput,
+  GenerateChatWithToolsInput,
   GenerateStructuredInput,
   GenerateTextInput,
   HealthStatus,
@@ -296,7 +301,11 @@ export class OpenAICompatibleProvider implements ModelProvider {
     if (op === "reviewVision") {
       return Object.keys(this.cfg.visionModelTransports ?? {}).length > 0;
     }
-    return op === "generateText" || op === "generateStructured";
+    return (
+      op === "generateText" ||
+      op === "generateStructured" ||
+      op === "generateChatWithTools"
+    );
   }
 
   async health(): Promise<HealthStatus> {
@@ -472,6 +481,183 @@ export class OpenAICompatibleProvider implements ModelProvider {
       provider: this.id,
       model: this.cfg.embedModel,
       modelResolutionSource: "requested_fallback",
+    };
+  }
+
+  /**
+   * WEB-1（v3.0 第 6 章 §6.3.9.4）：OpenAI chat-completions 的 function calling。
+   * - 仅支持 openai-chat-completions 传输（v1；Anthropic Messages 的 tool_use 留后续卡）；
+   * - 非流式：v1 解析非流式 tool_calls，流式增量拼装留后续（避免半截参数被当成计划执行）；
+   * - `finish_reason=tool_calls` 是正常结局；参数不是合法 JSON 属于**可计费失败**
+   *   （ProviderOutputError 携带 usage，由路由器按真实消耗结算），不是传输错误。
+   */
+  async generateChatWithTools(
+    input: GenerateChatWithToolsInput,
+    ctx?: AiContext,
+  ): Promise<ModelResult<ChatResponse>> {
+    const model = input.model ?? this.cfg.model;
+    const transport = this.transportFor(model);
+    if (transport !== "openai-chat-completions") {
+      throw new ProviderOutputError("CHAT_WITH_TOOLS_TRANSPORT_UNSUPPORTED", undefined, {
+        provider: this.id,
+        model,
+        reasonCode: "CHAT_WITH_TOOLS_TRANSPORT_UNSUPPORTED",
+      });
+    }
+    if (
+      input.messages.length === 0 ||
+      input.messages.length > 400 ||
+      input.tools.length > 32
+    ) {
+      throw new ProviderOutputError("CHAT_WITH_TOOLS_INPUT_INVALID", undefined, {
+        provider: this.id,
+        model,
+        reasonCode: "CHAT_WITH_TOOLS_INPUT_INVALID",
+      });
+    }
+    const {
+      content,
+      toolUses,
+      stopReason,
+      usage,
+      model: resolvedModel,
+    } = await this.chatCompletionsWithTools(input, model, ctx);
+    return {
+      data: { text: content, toolUses, stopReason },
+      provider: this.id,
+      ...resolutionProvenance(
+        model,
+        resolvedModel,
+        transport,
+        this.substitutesFor(ctx, model),
+      ),
+      usage,
+    };
+  }
+
+  private async chatCompletionsWithTools(
+    input: GenerateChatWithToolsInput,
+    model: string,
+    ctx: AiContext | undefined,
+  ): Promise<{
+    content: string;
+    toolUses: ChatToolUse[];
+    stopReason: ChatResponse["stopReason"];
+    usage?: ModelUsage;
+    model?: string;
+  }> {
+    const res = await this.paidFetch(
+      `${this.cfg.baseUrl}/chat/completions`,
+      {
+        method: "POST",
+        headers: this.headers(),
+        signal: this.requestSignal(input.signal),
+        body: JSON.stringify({
+          model,
+          messages: input.messages.map(chatMessageToWire),
+          tools: input.tools.map(toolDefinitionToWire),
+          tool_choice: "auto",
+          max_tokens: input.maxTokens,
+          temperature: 0.2,
+        }),
+      },
+      ctx,
+      model,
+    );
+    if (!res.ok) {
+      return this.throwHttpFailure(res, model, ctx);
+    }
+    const substitutes = this.substitutesFor(ctx, model);
+    const json = await this.parseResponseJson<ChatCompletionToolBody>(
+      res,
+      ctx,
+      model,
+    );
+    const bodyUsage = {
+      inputTokens: json.usage?.prompt_tokens,
+      outputTokens: json.usage?.completion_tokens,
+    };
+    const settlementUsage = await this.settledUsage(res, bodyUsage, ctx);
+    const usage = this.reconcileBodyUsage(settlementUsage, bodyUsage);
+    if (
+      json.error != null ||
+      !Array.isArray(json.choices) ||
+      json.choices.length === 0
+    ) {
+      throw new ProviderTransportError("CHAT_COMPLETIONS_BODY_INVALID", usage, {
+        provider: this.id,
+        model,
+      });
+    }
+    const reportedModel = this.answerReportedModel(
+      model,
+      this.trustedReportedModel(
+        model,
+        json.model,
+        "openai-chat-completions",
+        usage,
+        false,
+        undefined,
+        substitutes,
+      ),
+      [],
+      "openai-chat-completions",
+      usage,
+      substitutes,
+    );
+    const choice = json.choices[0];
+    const finishReason = choice?.finish_reason;
+    if (
+      finishReason !== undefined &&
+      finishReason !== "stop" &&
+      finishReason !== "length" &&
+      finishReason !== "tool_calls"
+    ) {
+      const provenance = {
+        provider: this.id,
+        ...resolutionProvenance(
+          model,
+          reportedModel,
+          "openai-chat-completions",
+          substitutes,
+        ),
+      };
+      if (finishReason === "content_filter") {
+        throw new ProviderOutputError("CHAT_COMPLETIONS_FINISH_REASON_INVALID", usage, {
+          ...provenance,
+          reasonCode: "CHAT_COMPLETIONS_CONTENT_FILTERED",
+        });
+      }
+      throw new ProviderTransportError(
+        "CHAT_COMPLETIONS_FINISH_REASON_INVALID",
+        usage,
+        provenance,
+      );
+    }
+    const toolUses = parseToolCalls(choice?.message?.tool_calls, {
+      provider: this.id,
+      model,
+      usage,
+    });
+    if (finishReason === "tool_calls" && toolUses.length === 0) {
+      throw new ProviderOutputError("CHAT_COMPLETIONS_TOOL_CALLS_INVALID", usage, {
+        provider: this.id,
+        model,
+        reasonCode: "TOOL_CALLS_MISSING",
+      });
+    }
+    const stopReason: ChatResponse["stopReason"] =
+      toolUses.length > 0
+        ? "tool_use"
+        : finishReason === "length"
+          ? "max_tokens"
+          : "end";
+    return {
+      content: choice?.message?.content ?? "",
+      toolUses,
+      stopReason,
+      usage,
+      model: reportedModel,
     };
   }
 
@@ -2027,6 +2213,122 @@ interface ChatCompletionBody {
   choices?: { message?: { content?: string }; finish_reason?: string }[];
   usage?: { prompt_tokens?: number; completion_tokens?: number };
   model?: string;
+}
+
+interface ChatCompletionToolBody {
+  choices?: {
+    message?: { content?: string | null; tool_calls?: unknown };
+    finish_reason?: string;
+  }[];
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  model?: string;
+  error?: unknown;
+}
+
+/** 封闭消息模型 → OpenAI wire 格式（assistant 的 tool_use 回放为 tool_calls）。 */
+function chatMessageToWire(message: ChatMessage): Record<string, unknown> {
+  if (message.role === "tool") {
+    return {
+      role: "tool",
+      tool_call_id: message.toolUseId,
+      content: message.content,
+    };
+  }
+  if (message.role === "assistant") {
+    return {
+      role: "assistant",
+      content: message.content,
+      ...(message.toolUses && message.toolUses.length > 0
+        ? {
+            tool_calls: message.toolUses.map((use) => ({
+              id: use.id,
+              type: "function",
+              function: {
+                name: use.name,
+                arguments: JSON.stringify(use.input ?? {}),
+              },
+            })),
+          }
+        : {}),
+    };
+  }
+  return { role: message.role, content: message.content };
+}
+
+function toolDefinitionToWire(tool: ChatToolDefinition): Record<string, unknown> {
+  return {
+    type: "function",
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.inputSchema,
+    },
+  };
+}
+
+const TOOL_NAME = /^[A-Za-z0-9_-]{1,64}$/u;
+
+/** 解析 tool_calls；参数不是合法 JSON / 名字非法都是可计费失败（不是传输错误）。 */
+function parseToolCalls(
+  raw: unknown,
+  context: { provider: string; model: string; usage: ModelUsage | undefined },
+): ChatToolUse[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) {
+    throw new ProviderOutputError("CHAT_COMPLETIONS_TOOL_CALLS_INVALID", context.usage, {
+      provider: context.provider,
+      model: context.model,
+      reasonCode: "TOOL_CALLS_NOT_ARRAY",
+    });
+  }
+  const uses: ChatToolUse[] = [];
+  for (const [index, entry] of raw.entries()) {
+    const call = entry as {
+      id?: unknown;
+      type?: unknown;
+      function?: { name?: unknown; arguments?: unknown };
+    };
+    if (call?.type !== undefined && call.type !== "function") {
+      throw new ProviderOutputError("CHAT_COMPLETIONS_TOOL_CALLS_INVALID", context.usage, {
+        provider: context.provider,
+        model: context.model,
+        reasonCode: "TOOL_CALL_TYPE_UNSUPPORTED",
+      });
+    }
+    const name = call?.function?.name;
+    if (typeof name !== "string" || !TOOL_NAME.test(name)) {
+      throw new ProviderOutputError("CHAT_COMPLETIONS_TOOL_CALLS_INVALID", context.usage, {
+        provider: context.provider,
+        model: context.model,
+        reasonCode: "TOOL_NAME_INVALID",
+      });
+    }
+    const id =
+      typeof call.id === "string" && call.id.length > 0 && call.id.length <= 128
+        ? call.id
+        : `call_${index}`;
+    const rawArguments = call?.function?.arguments;
+    let parsed: unknown;
+    if (typeof rawArguments !== "string" || rawArguments.trim().length === 0) {
+      parsed = {};
+    } else {
+      try {
+        parsed = JSON.parse(rawArguments);
+      } catch {
+        throw new ProviderOutputError(
+          "CHAT_COMPLETIONS_TOOL_CALL_ARGUMENTS_INVALID",
+          context.usage,
+          {
+            provider: context.provider,
+            model: context.model,
+            reasonCode: "TOOL_CALL_ARGUMENTS_INVALID",
+          },
+        );
+      }
+    }
+    uses.push({ id, name, input: parsed });
+  }
+  return uses;
 }
 
 interface ChatCompletionStreamEvent {
