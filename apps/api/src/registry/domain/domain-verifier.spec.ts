@@ -304,3 +304,172 @@ describe('DomainResolver → verifier contract hand-off', () => {
     expect(verified.verdict).toBe('VERIFIED');
   });
 });
+
+// ── §3.12.9 锚点矩阵扩充：IT / ES / NL / BE / CH ──────────────────────────
+
+const IT_NOTE_LEGALI = `Pompe Rossi S.r.l.
+Note legali
+REA MI-1234567
+P.IVA IT12345678901
+Via Torino 12, 20121 Milano`;
+
+const ES_AVISO = `Bombas García S.L.
+Aviso legal
+CIF: B-12345678
+Calle Mayor 3, 28001 Madrid`;
+
+const NL_PRIVACY = `Pompen Jansen B.V.
+Privacy
+KvK: 12345678
+BTW: NL123456789B01
+Damrak 1, 1012 AB Amsterdam`;
+
+const BE_MENTIONS = `Robinetterie Dubois SA
+Mentions légales
+KBO-nummer: 0123.456.789
+TVA: BE0123456789
+Rue X 1, 1000 Bruxelles`;
+
+const CH_IMPRESSUM = `Ventile Meier AG
+Impressum
+UID: CHE-123.456.789
+Bahnhofstrasse 1, 8001 Zürich`;
+
+describe('§3.12.9 country anchor matrix (IT/ES/NL/BE/CH)', () => {
+  it('extracts REA+province, NIF/CIF, KVK, KBO and UID evidence', () => {
+    const legal = (text: string, kind: LegalPageText['kind'] = 'legal'): LegalPageText => ({
+      kind,
+      url: 'https://example.test/legal',
+      text,
+    });
+    expect(extractRegisterEvidence('it_rea', [legal(IT_NOTE_LEGALI)])?.evidence).toEqual({
+      type: 'rea',
+      number: 'MI-1234567',
+      court: null,
+    });
+    expect(extractRegisterEvidence('es_nif', [legal(ES_AVISO)])?.evidence).toEqual({
+      type: 'nif',
+      number: 'B12345678',
+      court: null,
+    });
+    expect(extractRegisterEvidence('nl_kvk', [legal(NL_PRIVACY, 'privacy')])?.evidence).toEqual({
+      type: 'kvk',
+      number: '12345678',
+      court: null,
+    });
+    expect(extractRegisterEvidence('be_kbo', [legal(BE_MENTIONS, 'mentions-legales')])?.evidence).toEqual({
+      type: 'kbo',
+      number: '123456789',
+      court: null,
+    });
+    expect(extractRegisterEvidence('ch_uid', [legal(CH_IMPRESSUM, 'impressum')])?.evidence).toEqual({
+      type: 'uid',
+      number: '123456789',
+      court: null,
+    });
+  });
+
+  it.each([
+    [
+      'IT',
+      { scheme: 'it_rea', regNumber: 'REA MI-1234567', name: 'Pompe Rossi S.r.l.', country: 'IT', city: 'Milano', postalCode: '20121' },
+      IT_NOTE_LEGALI,
+      'pompe-rossi.it',
+      'legal' as const,
+    ],
+    [
+      'ES',
+      { scheme: 'es_nif', regNumber: 'B12345678', name: 'Bombas García S.L.', country: 'ES', city: 'Madrid', postalCode: '28001' },
+      ES_AVISO,
+      'bombas-garcia.es',
+      'legal' as const,
+    ],
+    [
+      'NL',
+      { scheme: 'nl_kvk', regNumber: '12345678', name: 'Pompen Jansen B.V.', country: 'NL', city: 'Amsterdam', postalCode: '1012 AB' },
+      NL_PRIVACY,
+      'pompen-jansen.nl',
+      'privacy' as const,
+    ],
+    [
+      'BE',
+      { scheme: 'be_kbo', regNumber: '0123.456.789', name: 'Robinetterie Dubois SA', country: 'BE', city: 'Bruxelles', postalCode: '1000' },
+      BE_MENTIONS,
+      'robinetterie-dubois.be',
+      'mentions-legales' as const,
+    ],
+    [
+      'CH',
+      { scheme: 'ch_uid', regNumber: 'CHE-123.456.789', name: 'Ventile Meier AG', country: 'CH', city: 'Zürich', postalCode: '8001' },
+      CH_IMPRESSUM,
+      'ventile-meier.ch',
+      'impressum' as const,
+    ],
+  ])('%s: exact register + address + name reaches VERIFIED', async (_country, entity, text, domain, kind) => {
+    const result = await verifyDomainCandidate({
+      entity: entity as VerifierEntity,
+      candidateDomain: domain,
+      pages: [{ kind, url: `https://${domain}/legal`, text }],
+    });
+    expect(result.signals.registerNumberExact).toBe(true);
+    expect(result.matchType).toBe('register_number');
+    expect(result.verdict).toBe('VERIFIED');
+    expect(result.score).toBeGreaterThanOrEqual(90);
+  });
+
+  it('IT: the same REA number under another province is a mismatch (numbers are per province)', async () => {
+    const result = await verifyDomainCandidate({
+      entity: {
+        scheme: 'it_rea',
+        regNumber: 'REA MI-1234567',
+        name: 'Pompe Rossi S.r.l.',
+        country: 'IT',
+        city: 'Milano',
+        postalCode: '20121',
+      },
+      candidateDomain: 'pompe-rossi.it',
+      pages: [{ kind: 'legal', url: 'https://pompe-rossi.it/legal', text: IT_NOTE_LEGALI.replace('MI-1234567', 'RM-1234567') }],
+    });
+    expect(result.verdict).toBe('REJECTED');
+    expect(result.rejectReasons).toContain('REGISTER_MISMATCH');
+  });
+
+  it('BE: a different KBO number is a mismatch', async () => {
+    const result = await verifyDomainCandidate({
+      entity: {
+        scheme: 'be_kbo',
+        regNumber: '0123.456.789',
+        name: 'Robinetterie Dubois SA',
+        country: 'BE',
+        city: 'Bruxelles',
+        postalCode: '1000',
+      },
+      candidateDomain: 'robinetterie-dubois.be',
+      pages: [{ kind: 'mentions-legales', url: 'https://robinetterie-dubois.be/legal', text: BE_MENTIONS.replace('0123.456.789', '0987.654.321') }],
+    });
+    expect(result.verdict).toBe('REJECTED');
+    expect(result.rejectReasons).toContain('REGISTER_MISMATCH');
+  });
+});
+
+describe('group portal rule (§3.12.10 multiple registers)', () => {
+  it('treats a page listing two HRB entries as AMBIGUOUS even when one matches the entity', async () => {
+    const groupText = `Muster Holding GmbH
+Handelsregister: Amtsgericht München, HRB 12345
+Sitz: Musterstraße 5, 80331 München
+
+Tochtergesellschaft:
+Muster Pumpen Service GmbH
+Handelsregister: Amtsgericht München, HRB 54321`;
+    const result = await verifyDomainCandidate({
+      entity: DE_ENTITY,
+      candidateDomain: 'muster-gruppe.de',
+      pages: [{ kind: 'impressum', url: 'https://muster-gruppe.de/impressum', text: groupText }],
+      vatValidator: viesValid,
+    });
+    expect(result.signals.multipleRegisters).toBe(true);
+    expect(result.signals.registerMismatch).toBe(false);
+    expect(result.verdict).toBe('AMBIGUOUS');
+    expect(result.rejectReasons).toContain('MULTIPLE_REGISTERS');
+  });
+});

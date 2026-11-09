@@ -69,7 +69,8 @@ durable 回执，本地查询无法满足，因此它目前恒被路由闸门排
 `apps/api/src/registry/domain/domain-verifier.ts`：给定候选域名 + 已采集的法律页文本，
 按 ch03 §3.12.3 做确定性评分（注册号精确 +55 / VAT 精确且 VIES 通过 +35 / 邮编+城市 +20 /
 名称相似 ≥0.85 +15、≥0.70 +8 / 域名 token +5；VERIFIED ≥90、AMBIGUOUS 55–89、<55 或负证据
-REJECTED）。复用 `parseImpressum`（DE）、内置 FR SIREN 与 GB CRN 抽取；`VatValidator` 是
+REJECTED）。复用 `parseImpressum`（DE，含法院比对）、内置 FR SIREN/RCS、GB CRN、IT REA（含省）、
+ES NIF/CIF、NL KVK、BE KBO、CH UID 抽取（§3.12.9 锚点矩阵）；`VatValidator` 是
 VIES 的离线接口（fixture 实现），真实 REST 属执行面。多候选编排：≥2 个候选 ≥55 分 →
 全部 AMBIGUOUS（同名冲突），唯一 VERIFIED 才选中；产物可映射为
 `company_domain_resolution` 行草案（`toDomainResolutionDrafts`）。本骨架不抓取、不落库。
