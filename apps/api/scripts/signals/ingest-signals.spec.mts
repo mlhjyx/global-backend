@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest';
+import { EgressBlockedError, type PublicHttpResponse } from '../../src/adapters/guarded-http';
 import {
   collectCompanySignals,
   parseIngestSignalsArgs,
+  persistSources,
   resolveRssUrl,
-  type SignalFetch,
-  type SignalResponse,
+  serviceResolver,
+  type ScopedStoreRunner,
+  type SignalHttpRequest,
 } from './ingest-signals';
 import {
-  persistCollectedSource,
-  summarizeSignalReports,
   type CompanySignalCreateInput,
   type CompanySignalStore,
   type SignalCompanyRecord,
@@ -53,44 +54,36 @@ describe('parseIngestSignalsArgs / resolveRssUrl', () => {
   });
 });
 
-// ── collectCompanySignals：net-guard / 重定向 / 字节上限 / 解析失败可见 ─────────
+// ── 出网：治理出口注入（不触网） ────────────────────────────────────────────
 
-function response(overrides: Partial<SignalResponse> & { body?: string } = {}): SignalResponse {
+function httpResponse(text: string, overrides: Partial<PublicHttpResponse> = {}): PublicHttpResponse {
   return {
-    ok: overrides.ok ?? true,
     status: overrides.status ?? 200,
-    headers: overrides.headers ?? { get: () => null },
-    text: async () => overrides.body ?? '',
-  };
-}
-
-function redirect(location: string): SignalResponse {
-  return {
-    ok: false,
-    status: 302,
-    headers: { get: (name) => (name.toLowerCase() === 'location' ? location : null) },
-    text: async () => '',
+    ok: overrides.ok ?? true,
+    headers: overrides.headers ?? {},
+    body: Buffer.from(text),
+    text,
+    finalUrl: overrides.finalUrl ?? 'https://example.test/',
   };
 }
 
 const RSS_BODY =
   '<rss><channel><item><title>Nees News</title><link>https://www.nees-pumpen.de/news</link><pubDate>Mon, 10 Nov 2026 09:30:00 GMT</pubDate></item></channel></rss>';
-const PUBLIC_DNS = async () => [{ address: '93.184.216.34', family: 4 as const }];
 
-describe('collectCompanySignals —— 拉取（不触网，fetch/DNS 注入）', () => {
-  it('本机 RSSHub 路由 + watches：解析、x-api-key 头、从未变更的 watch 不产生信号', async () => {
-    const seen: Array<{ url: string; headers?: Record<string, string> }> = [];
-    const fetchImpl: SignalFetch = async (url, init) => {
-      seen.push({ url, headers: init?.headers });
+describe('collectCompanySignals —— 经 requestPublicHttp 出口（注入 fake request）', () => {
+  it('本机 RSSHub 路由 + watches：目标 URL、x-api-key 头与重定向策略；从未变更的 watch 不是信号', async () => {
+    const calls: Array<{ url: string; headers?: Record<string, string>; maxRedirects?: number }> = [];
+    const request: SignalHttpRequest = async (url, options) => {
+      calls.push({ url, headers: options?.headers, maxRedirects: options?.maxRedirects });
       if (url.endsWith('/api/v1/watch')) {
-        return response({
-          body: JSON.stringify({
+        return httpResponse(
+          JSON.stringify({
             aaaa: { url: 'https://biergangs.de/karriere', title: 'Karriere', last_changed: 1762700000 },
             bbbb: { url: 'https://unbewegt.de/x', title: 'Nie geändert', last_changed: 0 },
           }),
-        });
+        );
       }
-      return response({ body: RSS_BODY });
+      return httpResponse(RSS_BODY);
     };
     const sources = await collectCompanySignals({
       rssRoutes: ['github/issue/a/b'],
@@ -98,13 +91,17 @@ describe('collectCompanySignals —— 拉取（不触网，fetch/DNS 注入）'
       rsshubUrl: 'http://127.0.0.1:1200',
       changeDetectionUrl: 'http://127.0.0.1:5055',
       changeDetectionApiKey: 'test-key',
-      deps: { fetchImpl },
+      deps: { request },
     });
-    expect(seen.map((call) => call.url)).toEqual([
+    expect(calls.map((call) => call.url)).toEqual([
       'http://127.0.0.1:1200/github/issue/a/b',
       'http://127.0.0.1:5055/api/v1/watch',
     ]);
-    expect(seen[1]!.headers).toMatchObject({ 'x-api-key': 'test-key' });
+    expect(calls[0]!.maxRedirects).toBe(3);
+    // x-api-key 只发给 changedetection，且禁跟随重定向（防止密钥被带往他处）。
+    expect(calls[0]!.headers).not.toHaveProperty('x-api-key');
+    expect(calls[1]!.headers).toMatchObject({ 'x-api-key': 'test-key' });
+    expect(calls[1]!.maxRedirects).toBe(0);
     expect(sources).toHaveLength(2);
     expect(sources[0]).toMatchObject({ source: 'rss:github/issue/a/b', dropped: 0, error: null });
     expect(sources[0]!.items).toHaveLength(1);
@@ -112,178 +109,172 @@ describe('collectCompanySignals —— 拉取（不触网，fetch/DNS 注入）'
     expect(sources[1]!.items).toHaveLength(1);
   });
 
-  it('公网目标经 net-guard：私网解析被拒且不发请求', async () => {
-    let called = 0;
-    const fetchImpl: SignalFetch = async () => {
-      called += 1;
-      return response({ body: RSS_BODY });
+  it('治理出口拒绝（EgressBlockedError）→ 源级错误可见', async () => {
+    const request: SignalHttpRequest = async () => {
+      throw new EgressBlockedError('non_global_address');
     };
     const sources = await collectCompanySignals({
       rssRoutes: ['https://internal.example/feed'],
       includeWatchChanges: false,
       rsshubUrl: 'http://127.0.0.1:1200',
-      deps: {
-        fetchImpl,
-        resolveHost: async () => [{ address: '10.0.0.5', family: 4 as const }],
-      },
-    });
-    expect(called).toBe(0);
-    expect(sources[0]!.error).toContain('net-guard');
-  });
-
-  it('回环目标不在本机服务白名单 → 拒绝', async () => {
-    let called = 0;
-    const fetchImpl: SignalFetch = async () => {
-      called += 1;
-      return response({ body: RSS_BODY });
-    };
-    const sources = await collectCompanySignals({
-      rssRoutes: ['http://127.0.0.1:6379/feed'],
-      includeWatchChanges: false,
-      rsshubUrl: 'http://127.0.0.1:1200',
-      deps: { fetchImpl },
-    });
-    expect(called).toBe(0);
-    expect(sources[0]!.error).toContain('回环');
-  });
-
-  it('公网地址经 DNS 放行；重定向每跳重验（跳到私网被拒）', async () => {
-    const fetchImpl: SignalFetch = async (url) => {
-      if (url === 'https://feeds.example/feed') return redirect('https://169.254.169.254/latest');
-      return response({ body: RSS_BODY });
-    };
-    const sources = await collectCompanySignals({
-      rssRoutes: ['https://feeds.example/feed'],
-      includeWatchChanges: false,
-      rsshubUrl: 'http://127.0.0.1:1200',
-      deps: { fetchImpl, resolveHost: PUBLIC_DNS },
+      deps: { request },
     });
     expect(sources[0]!.error).toContain('net-guard');
+    expect(sources[0]!.error).toContain('non_global_address');
   });
 
-  it('重定向超过 3 次 → 报错；content-length 超 5MB → 报错', async () => {
-    const loopFetch: SignalFetch = async (url) =>
-      url.includes('hop=4') ? response({ body: RSS_BODY }) : redirect(`https://feeds.example/feed?hop=${Number(new URL(url).searchParams.get('hop') ?? 0) + 1}`);
-    const looped = await collectCompanySignals({
-      rssRoutes: ['https://feeds.example/feed?hop=0'],
-      includeWatchChanges: false,
-      rsshubUrl: 'http://127.0.0.1:1200',
-      deps: { fetchImpl: loopFetch, resolveHost: PUBLIC_DNS },
-    });
-    expect(looped[0]!.error).toContain('重定向超过');
-
-    const bigFetch: SignalFetch = async () =>
-      response({
-        body: RSS_BODY,
-        headers: { get: (name) => (name.toLowerCase() === 'content-length' ? String(6 * 1024 * 1024) : null) },
-      });
-    const big = await collectCompanySignals({
+  it('HTTP 非 2xx / 非 RSS 文档 / 非 JSON 都记源级错误，不静默', async () => {
+    const failing = await collectCompanySignals({
       rssRoutes: ['https://feeds.example/feed'],
       includeWatchChanges: false,
       rsshubUrl: 'http://127.0.0.1:1200',
-      deps: { fetchImpl: bigFetch, resolveHost: PUBLIC_DNS },
+      deps: { request: async () => httpResponse('down', { status: 503, ok: false, finalUrl: 'https://feeds.example/feed' }) },
     });
-    expect(big[0]!.error).toContain('响应过大');
-  });
+    expect(failing[0]!.error).toContain('503');
 
-  it('200 但不是 RSS/Atom（错误页/JSON）→ 源级错误而非静默 0', async () => {
-    const fetchImpl: SignalFetch = async () => response({ body: '<html>maintenance</html>' });
-    const sources = await collectCompanySignals({
+    const html = await collectCompanySignals({
       rssRoutes: ['https://feeds.example/feed'],
       includeWatchChanges: false,
       rsshubUrl: 'http://127.0.0.1:1200',
-      deps: { fetchImpl, resolveHost: PUBLIC_DNS },
+      deps: { request: async () => httpResponse('<html>maintenance</html>') },
     });
-    expect(sources[0]!.error).toContain('不是 RSS/Atom');
+    expect(html[0]!.error).toContain('不是 RSS/Atom');
+
+    const notJson = await collectCompanySignals({
+      rssRoutes: [],
+      includeWatchChanges: true,
+      rsshubUrl: 'http://127.0.0.1:1200',
+      changeDetectionUrl: 'http://127.0.0.1:5055',
+      changeDetectionApiKey: 'k',
+      deps: { request: async () => httpResponse('<html>not json</html>') },
+    });
+    expect(notJson[0]!.error).toContain('不是 JSON');
   });
 
   it('changedetection 缺 API key → 该源报错，不发起请求', async () => {
     let called = 0;
-    const fetchImpl: SignalFetch = async () => {
+    const request: SignalHttpRequest = async () => {
       called += 1;
-      return response({ body: '{}' });
+      return httpResponse('{}');
     };
     const sources = await collectCompanySignals({
       rssRoutes: [],
       includeWatchChanges: true,
       rsshubUrl: 'http://127.0.0.1:1200',
       changeDetectionUrl: 'http://127.0.0.1:5055',
-      deps: { fetchImpl },
+      deps: { request },
     });
     expect(called).toBe(0);
     expect(sources[0]!.error).toContain('CHANGE_DETECTION_API_KEY');
   });
 });
 
-// ── 采集（网络）+ 落库（事务）组合：与 CLI 主流程同构 ────────────────────────
+describe('serviceResolver —— 本机服务 origin 固定回环连接（防 DNS rebinding 前置解析）', () => {
+  const resolver = serviceResolver(new Set(['http://127.0.0.1:1200', 'http://localhost:5055']));
 
-describe('collect → persist 组合 —— 逐源事务的计数与幂等', () => {
-  function fakeStore(companies: SignalCompanyRecord[]) {
-    const keys = new Set<string>();
-    const inserted: CompanySignalCreateInput[] = [];
-    const store: CompanySignalStore = {
-      canonicalCompany: { async findMany() { return companies; } },
-      companySignal: {
-        async createMany({ data, skipDuplicates }) {
-          let count = 0;
-          for (const row of data) {
-            if (skipDuplicates && keys.has(row.ingestKey)) continue;
-            keys.add(row.ingestKey);
-            inserted.push(row);
-            count += 1;
-          }
-          return { count };
-        },
-      },
-    };
-    return { store, inserted };
-  }
-
-  const fetchImpl: SignalFetch = async (url) => {
-    if (url.endsWith('/api/v1/watch')) {
-      return response({
-        body: JSON.stringify({
-          aaaa: { url: 'https://biergangs.de/karriere', title: 'Karriere', last_changed: 1762700000 },
-        }),
-      });
-    }
-    return response({
-      body: `<rss><channel>
-        <item><title>Nees News</title><link>https://www.nees-pumpen.de/news</link><pubDate>Mon, 10 Nov 2026 09:30:00 GMT</pubDate></item>
-        <item><title>Unbekannt</title><link>https://unknown.example.com/x</link></item>
-      </channel></rss>`,
+  it('白名单 origin → 固定 127.0.0.1，不查外部 DNS', async () => {
+    await expect(resolver('http://127.0.0.1:1200/rss/x')).resolves.toMatchObject({
+      ip: '127.0.0.1',
+      family: 4,
+      addresses: [{ address: '127.0.0.1', family: 4 }],
     });
+    await expect(resolver('http://localhost:5055/api/v1/watch')).resolves.toMatchObject({
+      ip: '127.0.0.1',
+    });
+  });
+
+  it('白名单 origin 指向非回环主机 / 带凭据 → 拒绝', async () => {
+    const resolver2 = serviceResolver(new Set(['http://example.com:1200']));
+    await expect(resolver2('http://example.com:1200/rss')).rejects.toMatchObject({
+      code: 'service_origin_not_loopback',
+    });
+    await expect(resolver('http://user:pass@127.0.0.1:1200/rss')).rejects.toMatchObject({
+      code: 'url_credentials_forbidden',
+    });
+  });
+});
+
+// ── 落库：逐源隔离（与 CLI main 同构：串行 + 共享缓存 + 单源 try/catch） ─────
+
+function fakeStore(
+  companies: SignalCompanyRecord[],
+  options: { failHost?: string } = {},
+) {
+  const keys = new Set<string>();
+  const inserted: CompanySignalCreateInput[] = [];
+  const store: CompanySignalStore = {
+    canonicalCompany: {
+      async findMany(args) {
+        if (options.failHost && JSON.stringify(args.where).includes(options.failHost)) {
+          throw new Error('db down');
+        }
+        return companies;
+      },
+    },
+    companySignal: {
+      async createMany({ data, skipDuplicates }) {
+        let count = 0;
+        for (const row of data) {
+          if (skipDuplicates && keys.has(row.ingestKey)) continue;
+          keys.add(row.ingestKey);
+          inserted.push(row);
+          count += 1;
+        }
+        return { count };
+      },
+    },
   };
+  return { store, inserted };
+}
 
-  it('首跑 3 条（2 归因）；重跑全跳过；单源错误不拖垮其它源', async () => {
-    const companies: SignalCompanyRecord[] = [
-      { id: 'c-nees', domain: 'nees-pumpen.de' },
-      { id: 'c-bier', domain: 'biergangs.de' },
-    ];
-    const { store } = fakeStore(companies);
-    const options = {
-      rssRoutes: ['github/issue/a/b'] as const,
-      includeWatchChanges: true,
-      rsshubUrl: 'http://127.0.0.1:1200',
-      changeDetectionUrl: 'http://127.0.0.1:5055',
-      changeDetectionApiKey: 'test-key',
-      deps: { fetchImpl },
-    };
+function collectedSource(source: string, urls: readonly string[]) {
+  return {
+    source,
+    items: urls.map((sourceUrl, index) => ({
+      providerKey: 'rss',
+      signalKind: 'rss_item' as const,
+      sourceUrl,
+      title: `T${index}`,
+      excerpt: null,
+      observedAt: new Date(0),
+    })),
+    dropped: 0,
+    error: null,
+  };
+}
 
-    const collected = await collectCompanySignals({ ...options, rssRoutes: [...options.rssRoutes] });
-    const first = summarizeSignalReports(
-      await Promise.all(collected.map((source) => persistCollectedSource(store, 'ws-1', source))),
-    );
-    expect(first).toMatchObject({ inserted: 3, skipped: 0, matched: 2 });
-    expect(first.sources.map((source) => source.source)).toEqual([
-      'rss:github/issue/a/b',
-      'changedetection',
+describe('persistSources —— 逐源 scoped 事务、单源失败隔离', () => {
+  it('一个源归因失败只回滚该源，其它源照常入库，汇总保留错误', async () => {
+    const companies: SignalCompanyRecord[] = [{ id: 'c-nees', domain: 'nees-pumpen.de' }];
+    const { store, inserted } = fakeStore(companies, { failHost: 'boom.example' });
+    const runner: ScopedStoreRunner = async (fn) => fn(store);
+    const summary = await persistSources(runner, 'ws-1', [
+      collectedSource('rss:bad', ['https://boom.example/x']),
+      collectedSource('rss:good', ['https://www.nees-pumpen.de/news']),
     ]);
+    expect(summary.sources[0]!.error).toContain('事务失败');
+    expect(summary.sources[0]!.inserted).toBe(0);
+    expect(summary.sources[1]).toMatchObject({ inserted: 1, matched: 1, error: null });
+    expect(inserted).toHaveLength(1);
+    expect(inserted[0]).toMatchObject({ companyId: 'c-nees' });
+  });
 
-    const again = await collectCompanySignals({ ...options, rssRoutes: [...options.rssRoutes] });
-    const second = summarizeSignalReports(
-      await Promise.all(again.map((source) => persistCollectedSource(store, 'ws-1', source))),
-    );
-    expect(second).toMatchObject({ inserted: 0, skipped: 3, matched: 2 });
+  it('collect → persist 组合：首跑入库、重跑全跳过（幂等）', async () => {
+    const companies: SignalCompanyRecord[] = [{ id: 'c-nees', domain: 'nees-pumpen.de' }];
+    const { store } = fakeStore(companies);
+    const runner: ScopedStoreRunner = async (fn) => fn(store);
+    const request: SignalHttpRequest = async () => httpResponse(RSS_BODY);
+    const collect = () =>
+      collectCompanySignals({
+        rssRoutes: ['github/issue/a/b'],
+        includeWatchChanges: false,
+        rsshubUrl: 'http://127.0.0.1:1200',
+        deps: { request },
+      });
+
+    const first = await persistSources(runner, 'ws-1', await collect());
+    expect(first).toMatchObject({ inserted: 1, skipped: 0, matched: 1 });
+    const second = await persistSources(runner, 'ws-1', await collect());
+    expect(second).toMatchObject({ inserted: 0, skipped: 1, matched: 1 });
   });
 });

@@ -1,13 +1,15 @@
 /**
  * P1-18：社媒信号采集 CLI —— changedetection watches + RSSHub 路由 → company_signal。
  *
- * 运营脚本（出网只在这里发生）：拉取 RSS2/Atom 与 changedetection 列表（经仓库共享
- * net-guard：只许 global unicast、每跳重验重定向、5 MB 响应上限、20s 超时；本机
- * RSSHUB_URL/CHANGE_DETECTION_URL 两个回环服务按原样放行），解析与指纹/归因/落库
- * 复用 src/signals/company-signals.ts。
+ * 运营脚本（出网只在这里）：RSS2/Atom 与 changedetection 列表的拉取复用仓库治理出口
+ * `requestPublicHttp`（net-guard：只许 global-unicast、每跳重定向重新解析并固定连接 IP
+ * 防 DNS rebinding、流式字节上限、墙钟超时、跨域剥离凭据）；本机 RSSHUB_URL /
+ * CHANGE_DETECTION_URL 两个回环服务经自定义 resolver 按配置 origin 放行。
+ * changedetection 请求**禁跟随重定向**（maxRedirects=0），避免 x-api-key 被带往他处。
  *
- * 数据面：网络在事务外完成后，逐源用 PrismaService.withWorkspace 开短事务
- * （app_user + set_config('app.current_workspace_id')，RLS 真实生效；单源失败只回滚该源）。
+ * 解析与指纹/归因/落库复用 src/signals/company-signals.ts。网络在事务外完成后，逐源用
+ * PrismaService.withWorkspace 开短事务（app_user + set_config，RLS 真实生效；单源失败
+ * 只回滚该源）。写入前先校验 workspace 存在（打错 UUID 不产生孤儿行）。
  *
  * 环境：RSSHUB_URL（默认 http://127.0.0.1:1200）、CHANGE_DETECTION_URL（默认
  * http://127.0.0.1:5055）、CHANGE_DETECTION_API_KEY（--include-watch-changes 时必填，
@@ -23,7 +25,17 @@
  */
 import 'dotenv/config';
 import { fileURLToPath } from 'node:url';
-import { resolvePublicIp, type HostResolver } from '../../src/adapters/net-guard';
+import {
+  EgressBlockedError,
+  requestPublicHttp,
+  type PublicHttpRequestOptions,
+  type PublicHttpResponse,
+} from '../../src/adapters/guarded-http';
+import {
+  resolvePublicHttpUrl,
+  type PinnedPublicUrl,
+  type PublicUrlResolver,
+} from '../../src/adapters/url-guard';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import {
   parseChangedetectionWatches,
@@ -37,23 +49,9 @@ import {
 } from '../../src/signals/company-signals';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
-const MAX_REDIRECTS = 3;
-const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 20_000;
+const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
-
-/** 与 Node 全局 fetch 兼容的最小签名（测试注入 fake，不触网）。 */
-export interface SignalResponse {
-  ok: boolean;
-  status: number;
-  headers?: { get(name: string): string | null };
-  text(): Promise<string>;
-}
-
-export type SignalFetch = (
-  input: string,
-  init?: { headers?: Record<string, string>; signal?: AbortSignal; redirect?: 'manual' },
-) => Promise<SignalResponse>;
 
 export interface IngestSignalsArgs {
   workspace: string;
@@ -100,15 +98,20 @@ export function resolveRssUrl(routeOrUrl: string, rsshubUrl: string): string {
   return `${rsshubUrl.replace(/\/+$/u, '')}/${trimmed.replace(/^\/+/u, '')}`;
 }
 
-// ── 出网护栏（net-guard + 重定向逐跳重验 + 字节上限） ───────────────────────
+// ── 采集（网络；事务外） ────────────────────────────────────────────────────
+
+export type SignalHttpRequest = (
+  raw: string,
+  options?: PublicHttpRequestOptions,
+) => Promise<PublicHttpResponse>;
 
 export interface CollectDeps {
-  fetchImpl?: SignalFetch;
-  /** 测试注入：系统 DNS（默认 net-guard 的 lookup）。 */
-  resolveHost?: HostResolver;
-  /** 测试注入：fake-IP 场景的 DoH 复查（默认 net-guard 的 DoH）。 */
-  dohLookup?: HostResolver;
+  /** 测试注入：替换整个治理出口（默认 requestPublicHttp + 本机服务 resolver）。 */
+  request?: SignalHttpRequest;
+  /** 测试注入：非本机目标的解析器（默认 url-guard 的 resolvePublicHttpUrl）。 */
+  publicResolver?: PublicUrlResolver;
   timeoutMs?: number;
+  maxBytes?: number;
 }
 
 export interface CollectOptions {
@@ -129,100 +132,64 @@ function originOf(raw: string | undefined): string | null {
   }
 }
 
-function displayUrl(url: URL): string {
-  return `${url.origin}${url.pathname}`;
-}
-
 function errorMessage(error: unknown): string {
+  if (error instanceof EgressBlockedError) {
+    return `net-guard 拒绝出网（${error.code}）`;
+  }
   return error instanceof Error ? error.message : String(error);
 }
 
-/**
- * 每个请求（含每一跳重定向）都过一遍：http(s)、无内嵌凭据；运营者配置的服务
- * origin（RSSHUB_URL / CHANGE_DETECTION_URL）按信任配置直接放行；其余目标经
- * net-guard 解析，答案必须全部 global unicast——未配置的回环/私网地址一律拒绝。
- */
-async function assertAllowedTarget(
-  target: URL,
-  allowedOrigins: ReadonlySet<string>,
-  deps: CollectDeps,
-): Promise<void> {
-  if (target.protocol !== 'http:' && target.protocol !== 'https:') {
-    throw new Error(`不支持的协议：${target.protocol}`);
-  }
-  if (target.username || target.password) {
-    throw new Error('目标 URL 不允许携带凭据');
-  }
-  if (allowedOrigins.has(target.origin)) return;
-  const host = target.hostname.replace(/\.$/u, '').toLowerCase();
-  if (LOOPBACK_HOSTS.has(host)) {
-    throw new Error('目标指向回环/本机地址，已拒绝');
-  }
-  const resolution = await resolvePublicIp(host, {
-    systemLookup: deps.resolveHost,
-    dohLookup: deps.dohLookup,
-  });
-  if (!resolution.safe) {
-    throw new Error(`net-guard 拒绝出网目标（${resolution.reason ?? 'unsafe'}）：${displayUrl(target)}`);
-  }
+/** 本机服务 resolver：配置的 source origin 只许回环地址，固定 127.0.0.1/::1 直连。 */
+export function serviceResolver(allowedOrigins: ReadonlySet<string>): PublicUrlResolver {
+  return async (raw, options) => {
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      throw new EgressBlockedError('invalid_url');
+    }
+    if (!allowedOrigins.has(url.origin)) return resolvePublicHttpUrl(raw, options);
+    if (url.username || url.password) throw new EgressBlockedError('url_credentials_forbidden');
+    const host = url.hostname.replace(/^\[|\]$/gu, '').replace(/\.$/u, '').toLowerCase();
+    if (!LOOPBACK_HOSTS.has(host)) {
+      throw new EgressBlockedError('service_origin_not_loopback');
+    }
+    const ip = host === 'localhost' ? '127.0.0.1' : host;
+    const family = ip.includes(':') ? 6 : 4;
+    const pinned: PinnedPublicUrl = { url, ip, family, addresses: [{ address: ip, family }] };
+    return pinned;
+  };
 }
-
-async function guardedFetchText(
-  target: string,
-  headers: Record<string, string>,
-  options: { allowedOrigins: ReadonlySet<string>; deps: CollectDeps },
-): Promise<string> {
-  const fetchImpl = options.deps.fetchImpl ?? (globalThis.fetch as unknown as SignalFetch);
-  const timeoutMs = options.deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  let current = new URL(target);
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
-    await assertAllowedTarget(current, options.allowedOrigins, options.deps);
-    const response = await fetchImpl(current.toString(), {
-      headers,
-      signal: AbortSignal.timeout(timeoutMs),
-      redirect: 'manual',
-    });
-    if (response.status >= 300 && response.status < 400) {
-      const location = response.headers?.get('location');
-      if (!location) throw new Error(`重定向缺少 Location（HTTP ${response.status}）`);
-      current = new URL(location, current);
-      continue;
-    }
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${displayUrl(current)}`);
-    }
-    const declared = Number(response.headers?.get('content-length') ?? Number.NaN);
-    if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) {
-      throw new Error(`响应过大（>${MAX_RESPONSE_BYTES} 字节）：${displayUrl(current)}`);
-    }
-    const text = await response.text();
-    return text.length > MAX_RESPONSE_BYTES ? text.slice(0, MAX_RESPONSE_BYTES) : text;
-  }
-  throw new Error(`重定向超过 ${MAX_REDIRECTS} 次：${displayUrl(new URL(target))}`);
-}
-
-// ── 采集（网络；事务外） ────────────────────────────────────────────────────
 
 export async function collectCompanySignals(
   options: CollectOptions,
 ): Promise<CollectedSignalSource[]> {
   const deps = options.deps ?? {};
-  const rsshubUrl = options.rsshubUrl.replace(/\/+$/u, '');
+  const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const maxBytes = deps.maxBytes ?? DEFAULT_MAX_BYTES;
   const allowedOrigins = new Set<string>();
   for (const origin of [originOf(options.rsshubUrl), originOf(options.changeDetectionUrl)]) {
     if (origin) allowedOrigins.add(origin);
   }
+  const request: SignalHttpRequest =
+    deps.request ??
+    ((raw, requestOptions) =>
+      requestPublicHttp(raw, requestOptions, {
+        resolver: serviceResolver(allowedOrigins),
+      }));
   const sources: CollectedSignalSource[] = [];
 
   for (const route of options.rssRoutes) {
     const source: CollectedSignalSource = { source: `rss:${route}`, items: [], dropped: 0, error: null };
     try {
-      const text = await guardedFetchText(
-        resolveRssUrl(route, rsshubUrl),
-        { accept: 'application/rss+xml, application/atom+xml, application/xml' },
-        { allowedOrigins, deps },
-      );
-      const feed = parseRssFeed(text);
+      const response = await request(resolveRssUrl(route, options.rsshubUrl), {
+        headers: { accept: 'application/rss+xml, application/atom+xml, application/xml' },
+        timeoutMs,
+        maxBytes,
+        maxRedirects: 3,
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.finalUrl}`);
+      const feed = parseRssFeed(response.text);
       source.items = feed.items;
       source.dropped = feed.dropped;
       if (!feed.recognized) source.error = '响应不是 RSS/Atom 文档';
@@ -241,14 +208,20 @@ export async function collectCompanySignals(
       if (!options.changeDetectionUrl) {
         throw new Error('CHANGE_DETECTION_URL 未设置');
       }
-      const text = await guardedFetchText(
+      const response = await request(
         `${options.changeDetectionUrl.replace(/\/+$/u, '')}/api/v1/watch`,
-        { 'x-api-key': options.changeDetectionApiKey },
-        { allowedOrigins, deps },
+        {
+          headers: { 'x-api-key': options.changeDetectionApiKey },
+          timeoutMs,
+          maxBytes,
+          // 禁跟随重定向：x-api-key 绝不跨跳（requestPublicHttp 只剥离 authorization/cookie）。
+          maxRedirects: 0,
+        },
       );
+      if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.finalUrl}`);
       let payload: unknown;
       try {
-        payload = JSON.parse(text);
+        payload = JSON.parse(response.text);
       } catch {
         throw new Error('changedetection 返回的不是 JSON');
       }
@@ -262,6 +235,43 @@ export async function collectCompanySignals(
   }
 
   return sources;
+}
+
+// ── 落库（事务由调用方提供；逐源隔离） ──────────────────────────────────────
+
+export type ScopedStoreRunner = <T>(fn: (store: CompanySignalStore) => Promise<T>) => Promise<T>;
+
+/**
+ * 逐源串行落库：每个源在调用方给的 scoped 事务里独立执行，单源失败只记该源错误，
+ * 不拖垮其它源；attributionCache 跨源共享（同一 host 只查一次公司）。
+ */
+export async function persistSources(
+  runScoped: ScopedStoreRunner,
+  workspaceId: string,
+  collected: readonly CollectedSignalSource[],
+): Promise<CompanySignalIngestSummary> {
+  const attributionCache = new Map<string, string | null>();
+  const reports: SignalSourceReport[] = [];
+  for (const source of collected) {
+    try {
+      reports.push(
+        await runScoped((store) =>
+          persistCollectedSource(store, workspaceId, source, attributionCache),
+        ),
+      );
+    } catch (error) {
+      reports.push({
+        source: source.source,
+        parsed: source.items.length,
+        dropped: source.dropped,
+        inserted: 0,
+        skipped: 0,
+        matched: 0,
+        error: `事务失败：${errorMessage(error)}`,
+      });
+    }
+  }
+  return summarizeSignalReports(reports);
 }
 
 // ── 输出 ────────────────────────────────────────────────────────────────────
@@ -280,6 +290,12 @@ async function main(): Promise<void> {
   const args = parseIngestSignalsArgs(process.argv.slice(2));
   const prisma = new PrismaService(); // app_user（APP_DATABASE_URL）；缺省 fail-closed
   try {
+    // 打错 workspace UUID 时不产生孤儿行（company_signal.workspace_id 无 FK）。
+    await prisma.withWorkspace(args.workspace, async (tx) => {
+      const workspace = await tx.workspace.findUnique({ where: { id: args.workspace } });
+      if (!workspace) throw new Error(`workspace ${args.workspace} 不存在`);
+    });
+
     // 网络拉取在事务外完成（tenant.ts：事务回调里只放 DB 操作）。
     const collected = await collectCompanySignals({
       rssRoutes: args.rssRoutes,
@@ -289,38 +305,17 @@ async function main(): Promise<void> {
       changeDetectionApiKey: process.env.CHANGE_DETECTION_API_KEY,
     });
 
-    // 逐源短事务：单源失败只回滚该源。
-    const attributionCache = new Map<string, string | null>();
-    const reports: SignalSourceReport[] = [];
-    for (const source of collected) {
-      try {
-        reports.push(
-          await prisma.withWorkspace(
-            args.workspace,
-            (tx) =>
-              persistCollectedSource(
-                tx as unknown as CompanySignalStore,
-                args.workspace,
-                source,
-                attributionCache,
-              ),
-            { timeout: 120_000, maxWait: 10_000 },
-          ),
-        );
-      } catch (error) {
-        reports.push({
-          source: source.source,
-          parsed: source.items.length,
-          dropped: source.dropped,
-          inserted: 0,
-          skipped: 0,
-          matched: 0,
-          error: `事务失败：${errorMessage(error)}`,
-        });
-      }
-    }
+    const summary = await persistSources(
+      (fn) =>
+        prisma.withWorkspace(
+          args.workspace,
+          (tx) => fn(tx as unknown as CompanySignalStore),
+          { timeout: 120_000, maxWait: 10_000 },
+        ),
+      args.workspace,
+      collected,
+    );
 
-    const summary = summarizeSignalReports(reports);
     if (args.json) console.log(JSON.stringify(summary, null, 2));
     else printSummary(summary);
     if (summary.sources.some((source) => source.error)) process.exitCode = 1;

@@ -108,6 +108,20 @@ describe('parseRssFeed —— Atom（link href / updated / summary）', () => {
     });
     expect(item!.observedAt.toISOString()).toBe('2026-11-10T08:00:00.000Z');
   });
+
+  it('只有 enclosure/self 链接的条目不算原文链接（计 dropped，不把媒体 URL 当 source_url）', () => {
+    const xml = `<feed xmlns="http://www.w3.org/2005/Atom">
+      <entry>
+        <title>Podcast</title>
+        <link rel="self" href="https://feeds.example/self"/>
+        <link rel="enclosure" href="https://cdn.example/ep1.mp3"/>
+        <updated>2026-11-10T08:00:00Z</updated>
+      </entry>
+    </feed>`;
+    const feed = parseRssFeed(xml);
+    expect(feed.items).toHaveLength(0);
+    expect(feed.dropped).toBe(1);
+  });
 });
 
 describe('parseChangedetectionWatches —— watch 列表映射（last_changed>0）', () => {

@@ -135,13 +135,15 @@ function textOf(node: unknown): string | null {
   return null;
 }
 
-/** Atom <link href="..."/>（优先 rel=alternate；RSS 的 <link> 是纯文本，走 textOf）。 */
+/** Atom <link href="..."/>（优先 rel=alternate/缺省；enclosure/self 等不作原文链接。RSS 的 <link> 是纯文本，走 textOf）。 */
 function atomHref(node: unknown): string | null {
   const links = asArray(node)
     .map(asRecord)
     .filter((link): link is Record<string, unknown> => link !== null);
+  const NON_ARTICLE_REL = new Set(['self', 'enclosure', 'hub', 'via', 'replies', 'edit']);
   const picked =
-    links.find((link) => link['@_rel'] === 'alternate' || link['@_rel'] == null) ?? links[0];
+    links.find((link) => link['@_rel'] === 'alternate' || link['@_rel'] == null) ??
+    links.find((link) => !NON_ARTICLE_REL.has(String(link['@_rel'] ?? '')));
   const href = picked?.['@_href'];
   return typeof href === 'string' && href.trim() ? href.trim() : null;
 }
@@ -642,12 +644,9 @@ export async function persistCollectedSource(
     let companyId: string | null = null;
     if (host) {
       if (!attributionCache.has(host)) {
-        try {
-          attributionCache.set(host, await attributeCompany(store, workspaceId, host));
-        } catch (error) {
-          report.error = `归因查询失败：${error instanceof Error ? error.message : String(error)}`;
-          attributionCache.set(host, null);
-        }
+        // 归因失败必须向上抛：否则整批行以 company_id=NULL 落库，唯一键会让重跑永远
+        // 跳过它们（永不补归因），报告还会假绿。调用方事务回滚、记该源失败。
+        attributionCache.set(host, await attributeCompany(store, workspaceId, host));
       }
       companyId = attributionCache.get(host) ?? null;
     }
