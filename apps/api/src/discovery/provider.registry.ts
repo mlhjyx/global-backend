@@ -13,6 +13,7 @@ import { DirectoryDiscoveryProvider } from './providers/directory.provider';
 import { TradeFairDiscoveryProvider } from './providers/trade-fair.provider';
 import { TedDiscoveryProvider } from './providers/ted.provider';
 import { OpenFdaDiscoveryProvider } from './providers/openfda.provider';
+import { RegistryFrameDiscoveryProvider } from './providers/registry-frame.provider';
 import { DecisionMakerContactAdapter } from './providers/decision-maker.provider';
 import { SocialPresenceContactAdapter } from './providers/social-presence.provider';
 import { CompaniesHouseContactProvider } from './providers/companies-house.provider';
@@ -116,6 +117,11 @@ export class DiscoveryProviderRegistry {
     // openFDA 器械注册发现（美国 FDA 官方 API，零鉴权、CC0，归 public_intelligence 类）——不依赖 gateway。
     // 无 product code 过滤时 fail-safe 返回空，故对普通 public_intelligence 查询零负担。
     this.discovery.push(new OpenFdaDiscoveryProvider({ broker }));
+    // registry_frame = 本地注册库 frame 枚举（零出网零成本，ch03 T3-09）。
+    // **刻意不声明公司血缘**：本地查询没有物理调用可出 durable 回执，当前治理下会被
+    // routeCompanyDiscovery 的血缘闸门排除（计划期计 SOURCE_LINEAGE_UNAVAILABLE，测试钉死）。
+    // 执行面等 local_query 血缘变体获批后接线；data_provider 默认 DISABLED 是第二道 kill switch。
+    this.discovery.push(new RegistryFrameDiscoveryProvider({ prisma }));
     // UK Companies House 董事发现（待办 3 第一个身份源；官方注册处 API，Basic auth）——contact_discovery 类。
     // 不依赖 gateway（结构化 API，无 LLM）；GB 门外/无 broker/无 API key 时 fail-safe 返空（天然 no-op）。
     // 董事经 externalIds(uk-ch-officer) 走 resolvePersonIdentity Tier 0 精确并（同一董事跨源自动并成一条）。
@@ -563,6 +569,14 @@ export class DiscoveryProviderRegistry {
       where: { key: 'email_guess' },
       update: {},
       create: { key: 'email_guess', class: 'email_verification', status: 'DISABLED', costPerCallCents: 0 },
+    });
+    // registry_frame（ch03 T3-09）：本地注册库 frame 枚举，零出网零成本。默认 DISABLED——
+    // 血缘闸门在 local_query 变体获批前会挡住执行，开关保持关闭以免误以为它在跑；
+    // 执行面获批后由 ops 手动开启（update:{} 不会把它改回来）。
+    await db.dataProvider.upsert({
+      where: { key: 'registry_frame' },
+      update: {},
+      create: { key: 'registry_frame', class: 'company_registry', status: 'DISABLED', costPerCallCents: 0 },
     });
   }
 
