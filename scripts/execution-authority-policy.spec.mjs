@@ -40,7 +40,9 @@ test('inventory is locked to 22 Tools and 15 product Model tasks', () => {
     'apps/api/src/tools/tool-broker.factory.ts',
     'apps/api/src/tools/tool-broker.ts',
   ]);
-  assert.equal(EXPECTED_TOOL_CALLSITES.length, 45);
+  // #977（SMTP 第二票）与 #976（deepseek 工具）各自把 44 改到 45，文本上不冲突，
+  // 合并后实际是 46 个物理调用点；按 policy 源里的真值锁定，不按任一分支的旧数字。
+  assert.equal(EXPECTED_TOOL_CALLSITES.length, 46);
   assert.deepEqual(EXPECTED_NON_TOOL_INVOKE_BOUNDARIES, [
     'apps/api/src/site-builder/eval/copy-sonnet-recovery-zero-call-preflight.ts#input.pricingBroker#1',
   ]);
@@ -276,7 +278,7 @@ test('pure contracts preserve typed authority wiring and the artifact pre-wire h
   assert.equal(result.toolCount, 22);
   assert.equal(result.modelTaskCount, 15);
   assert.equal(result.physicalExecutionWiring, 'PARTIAL_HOLD');
-  assert.equal(result.physicalToolCallsiteCount, 45);
+  assert.equal(result.physicalToolCallsiteCount, 46);
   assert.equal(result.modelGatewayBoundaryCount, 2);
 });
 

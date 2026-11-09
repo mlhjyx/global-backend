@@ -28,6 +28,13 @@ export class CompanyDto {
   industry!: string | null;
 
   @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description: '受控行业码（canonical_taxonomy kind=industry 的 ISIC code；自由文本行业时为空）',
+  })
+  industryCode!: string | null;
+
+  @ApiPropertyOptional({
     type: [String],
     description: '目标市场（ISO 3166-1 alpha-2；注册引导填写，卖家事实 SoR）',
   })
@@ -83,6 +90,7 @@ export class CompanyDto {
       website: string | null;
       status: string;
       industry?: string | null;
+      industryCode?: string | null;
       targetMarkets?: string[];
       businessEmail?: string | null;
       summary?: string | null;
@@ -99,6 +107,7 @@ export class CompanyDto {
       website: c.website,
       status: c.status,
       industry: c.industry ?? null,
+      industryCode: c.industryCode ?? null,
       targetMarkets: c.targetMarkets ?? [],
       businessEmail: c.businessEmail ?? null,
       summary: c.summary ?? null,
