@@ -34,6 +34,7 @@ import {
   type VerificationEventVerdict,
 } from '../../discovery/contact-point-verification-state';
 import type { LawfulBasis, LawfulBasisKind } from '../../discovery/provider-contract';
+import { setEmailPointState } from '../../discovery/contact-point-writer';
 import {
   buildVerificationRequestHash,
   recordContactPointVerificationEvent,
@@ -466,26 +467,26 @@ export async function runReverifySweep(input: {
         summary.skippedSuppressed += 1;
         return;
       }
-      await tx.contactPoint.update({
-        where: { id: point.id },
-        data: {
-          ...verifiedAtStateColumns(transition),
-          verificationProvider: lastStep.providerKey,
-          verificationMethod: 'third_party_api',
-          // 按**矩阵裁决**决定是否覆盖既有 catch-all 分类：UNKNOWN（含 error/单票未决）
-          // 一律不动（上次有效验证的知识）；INVALID 清空；VALID/CATCH_ALL_RISKY 写最终子类。
-          // 注意不能用 transition.state——unknown 事件下状态机保持原态（如 CATCH_ALL_RISKY），
-          // 用它判断会把 true_catch_all 误清成 unknown。
-          ...(resolved.state === 'INVALID'
-            ? { catchAll: 'unknown' as const, catchAllClass: null }
-            : resolved.state === 'UNKNOWN'
-              ? {}
-              : {
-                  catchAll: legacyCatchAllFromClass(resolved.catchAllClass),
-                  catchAllClass: resolved.catchAllClass,
-                }),
-          lastVerificationEventId: lastEventId,
-        },
+      const columns = verifiedAtStateColumns(transition);
+      await setEmailPointState(tx, {
+        pointId: point.id,
+        state: columns.verificationState,
+        status: columns.status,
+        validSince: columns.validSince,
+        verifiedAt: columns.verifiedAt,
+        nextReverifyAt: columns.nextReverifyAt,
+        confidence: columns.confidence,
+        verificationProvider: lastStep.providerKey,
+        verificationMethod: 'third_party_api',
+        ...(resolved.state === 'INVALID'
+          ? { catchAll: 'unknown' as const, catchAllClass: null }
+          : resolved.state === 'UNKNOWN'
+            ? {}
+            : {
+                catchAll: legacyCatchAllFromClass(resolved.catchAllClass),
+                catchAllClass: resolved.catchAllClass,
+              }),
+        lastVerificationEventId: lastEventId,
       });
     });
     if (outcome.steps.some((step) => step.result.error !== null)) summary.errors += 1;

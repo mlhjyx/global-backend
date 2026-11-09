@@ -11,6 +11,7 @@ import { canonicalizeSuppressionValue, canonicalizeSuppressionValues,
 import { lockWorkspaceSuppressionPolicy } from './suppression-policy-lock';
 import { assertProductDiscoveryProvenance, resolveEvidenceLicense } from './evidence-license';
 import { sourceTypeForContactObservation } from './contact-point-verification-state';
+import { upsertObservedContactPoint } from './contact-point-writer';
 
 /** field_evidence 的 email 值分级：职能邮箱 amber（ePrivacy），人名邮箱 red（GDPR Art.4）。 */
 function emailDataClass(email: string): 'amber' | 'red' {
@@ -185,27 +186,21 @@ export async function persistDiscoveredContacts(
     });
     for (const p of points) {
       if (!p.value) continue;
-      await tx.contactPoint.upsert({
-        where: {
-          contactId_type_value: { contactId, type: p.type, value: p.value },
-        },
-        // A4：重复观测不覆盖既有分类（首见来源优先）；新列随创建落库。
-        update: {},
-        create: {
-          workspaceId: args.workspaceId,
-          contactId,
-          type: p.type,
-          value: p.value,
-          sourceType: observationSourceType,
-          ...(p.type === 'email'
-            ? {
-                emailType: classifyContactEmail(p.value).emailType,
-                verificationMethod: 'provider_reported' as const,
-                ...(args.lawfulBasis ? { legalBasis: args.lawfulBasis.basis } : {}),
-                ...(sourceUrl ? { sourceUrl } : {}),
-              }
-            : {}),
-        },
+      // P1-02：contact_point 的唯一写入器（首见优先；重复观测不覆盖既有分类）。
+      await upsertObservedContactPoint(tx, {
+        workspaceId: args.workspaceId,
+        contactId,
+        type: p.type,
+        value: p.value,
+        sourceType: observationSourceType,
+        ...(p.type === 'email'
+          ? {
+              emailType: classifyContactEmail(p.value).emailType,
+              verificationMethod: 'provider_reported' as const,
+              ...(args.lawfulBasis ? { legalBasis: args.lawfulBasis.basis } : {}),
+              ...(sourceUrl ? { sourceUrl } : {}),
+            }
+          : {}),
       });
       // 收口⑥：field_evidence 是同一 PII 的第二副本——PII 值加密落库（确定性，与 contact_point 密文一致），
       // 并落 dataClass 分级（email 按职能/人名分 amber/red，phone/linkedin red）。

@@ -38,6 +38,7 @@ import {
   buildVerificationRequestHash,
   recordContactPointVerificationEvent,
 } from './contact-point-verification-event';
+import { setEmailPointState } from './contact-point-writer';
 import { companyMayUseExternalProcessing, contactMayUseExternalProcessing } from './company-suppression-gate';
 import { recordPersonalDataAccess } from '../compliance/personal-data-access-audit';
 import { TemporalClient } from '../temporal/temporal.client';
@@ -979,33 +980,29 @@ export class DiscoveryService {
           `${binding.requestSha256}|${attemptedAt.toISOString()}`,
         ),
       });
-      const updated = await transaction.contactPoint.update({
-        where: { id: pointId },
-        data: {
-          status: effectiveStatus,
-          verifiedAt: attemptedAt,
-          ...(verificationEvent.id ? { lastVerificationEventId: verificationEvent.id } : {}),
-          ...(eventVerdict === 'blocked'
-            ? {}
-            : {
-                verificationState: projection.verificationState,
-                validSince: projection.validSince,
-                verificationProvider: committedProviderKey,
-                verificationMethod,
-                confidence: projection.confidence,
-                nextReverifyAt: projection.nextReverifyAt,
-                // INVALID 判决要清掉旧的 catch-all 分类（迁移回填对 INVALID 留 NULL 的同一不变式）；
-                // 其余非 definitive 事件（unknown/error）不动既有分类——那是上一次有效验证的知识。
-                ...(eventVerdict === 'invalid'
-                  ? { catchAll: 'unknown' as const, catchAllClass: null }
-                  : catchAllClass
-                    ? {
-                        catchAll: legacyCatchAllFromClass(catchAllClass),
-                        catchAllClass,
-                      }
-                    : {}),
-              }),
-        },
+      const updated = await setEmailPointState(transaction, {
+        pointId,
+        state: projection.verificationState,
+        status: effectiveStatus,
+        validSince: projection.validSince,
+        verifiedAt: attemptedAt,
+        nextReverifyAt: projection.nextReverifyAt,
+        confidence: projection.confidence,
+        ...(eventVerdict === 'blocked'
+          ? { dispositionOnly: true }
+          : {
+              verificationProvider: committedProviderKey,
+              verificationMethod,
+              ...(eventVerdict === 'invalid'
+                ? { catchAll: 'unknown' as const, catchAllClass: null }
+                : catchAllClass
+                  ? {
+                      catchAll: legacyCatchAllFromClass(catchAllClass),
+                      catchAllClass,
+                    }
+                  : {}),
+            }),
+        ...(verificationEvent.id ? { lastVerificationEventId: verificationEvent.id } : {}),
       });
       // Q25：邮箱验证访问审计（与状态回写同事务）。
       await recordPersonalDataAccess(transaction, {
