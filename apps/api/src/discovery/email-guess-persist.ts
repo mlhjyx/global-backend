@@ -11,7 +11,6 @@ import {
   catchAllFromVerdictDetail,
   confidenceForState,
   eventVerdictFromEmailVerdict,
-  legacyCatchAllFromClass,
   nextReverifyAtForState,
   stateFromEmailVerdict,
   verificationMethodFromVerdictDetail,
@@ -20,6 +19,7 @@ import {
   buildVerificationRequestHash,
   recordContactPointVerificationEvent,
 } from './contact-point-verification-event';
+import { linkLastVerificationEvent, upsertGuessedEmailPoint } from './contact-point-writer';
 
 /**
  * 邮箱猜测结果的落库（选项 B · P0.3）——把 {@link EmailGuesser} 猜到的决策人邮箱写进
@@ -205,41 +205,18 @@ export async function persistGuessedEmail(
     validSince: verificationState === 'VALID' ? args.now : null,
     nextReverifyAt: nextReverifyAtForState(verificationState, args.now),
   };
-  const point = await tx.contactPoint.upsert({
-    where: {
-      contactId_type_value: {
-        contactId: args.contactId,
-        type: 'email',
-        value: email,
-      },
-    },
-    // 显式 null（非条件 spread）：既有 VALID 行被 RISKY 结果重 upsert 时清掉旧 verifiedAt，
-    // 守住「RISKY 无 verifiedAt」不变式（复审 MEDIUM：防降级留下 stale 时间戳）。
-    update: {
-      status: plan.pointStatus,
-      verifiedAt: plan.verified ? args.now : null,
-      // A4：重验刷新分类/验证元数据（首见来源仍以 create 为准）。
-      emailType: 'personal' as const,
-      verificationMethod: plan.verificationMethod,
-      catchAll: plan.catchAll,
-      ...stateFields,
-      ...(args.lawfulBasis ? { legalBasis: args.lawfulBasis.basis } : {}),
-    },
-    create: {
-      workspaceId: args.workspaceId,
-      contactId: args.contactId,
-      type: 'email',
-      value: email,
-      status: plan.pointStatus,
-      verifiedAt: plan.verified ? args.now : null,
-      emailType: 'personal' as const,
-      sourceType: 'pattern_guess' as const,
-      verificationMethod: plan.verificationMethod,
-      catchAll: plan.catchAll,
-      ...stateFields,
-      ...(args.lawfulBasis ? { legalBasis: args.lawfulBasis.basis } : {}),
-    },
-    select: { id: true },
+  const point = await upsertGuessedEmailPoint(tx, {
+    workspaceId: args.workspaceId,
+    contactId: args.contactId,
+    email,
+    status: plan.pointStatus,
+    verifiedAt: plan.verified ? args.now : null,
+    emailType: 'personal',
+    sourceType: 'pattern_guess',
+    verificationMethod: plan.verificationMethod,
+    catchAll: plan.catchAll,
+    ...(args.lawfulBasis ? { legalBasis: args.lawfulBasis.basis } : {}),
+    ...stateFields,
   });
   // P1：猜测路径同样进事件账（G9 每一次验证尝试一行）——事件账是验证事实的唯一来源，
   // 不能在「猜测 + SMTP 复验」这条产出 VALID 的主路径上留白。
@@ -268,10 +245,7 @@ export async function persistGuessedEmail(
     ),
   });
   if (verificationEvent.id) {
-    await tx.contactPoint.update({
-      where: { id: point.id },
-      data: { lastVerificationEventId: verificationEvent.id },
-    });
+    await linkLastVerificationEvent(tx, { pointId: point.id, eventId: verificationEvent.id });
   }
 
   await tx.fieldEvidence.create({
