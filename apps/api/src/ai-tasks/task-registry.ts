@@ -416,8 +416,8 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
 
   'discovery.web_search_candidates': {
     id: 'discovery.web_search_candidates',
-    // 获客通路 A：模型规划检索词并通过 web_search 工具搜索（ToolBroker searxng.search）。
-    allowedTools: ['searxng.search'],
+    // 获客通路 A：模型规划检索词并通过 web_search 工具搜索（SearXNG 或 DeepSeek tools/search）。
+    allowedTools: ['searxng.search', 'deepseek.search'],
     maxCostCents: 15,
     maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 180000,

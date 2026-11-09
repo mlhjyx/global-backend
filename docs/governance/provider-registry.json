@@ -1100,6 +1100,41 @@
           "path": "apps/api/src/enrichment/verification/zerobounce.provider.spec.ts"
         }
       ]
+    },
+    {
+      "key": "model_web_search",
+      "status": "IMPLEMENTED",
+      "source_classes": [
+        "public_intelligence"
+      ],
+      "purpose": "Model-driven web search discovery: the model plans search queries executed through governed search tools (SearXNG or DeepSeek), then a structured confirmation task returns only companies that appear in the actual search results with https evidence URLs.",
+      "taxonomy": [
+        "company name",
+        "registrable domain",
+        "country",
+        "search evidence URL"
+      ],
+      "license": {
+        "classification": "SOURCE_SPECIFIC",
+        "note": "Admits green company facts (name, domain, country) plus the search-result URLs that ground them; search snippets and page text are not persisted, and named individuals are out of scope of this provider."
+      },
+      "personal_data_class": "COMPANY_ONLY",
+      "default_enablement": "ENABLED",
+      "call_gates": [
+        "data_provider_status",
+        "source_policy",
+        "tool_broker",
+        "country_scope"
+      ],
+      "test_paths": [
+        "apps/api/src/discovery/providers/model-web-search.provider.spec.ts"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "TEST_ANCHOR",
+          "path": "apps/api/src/discovery/providers/model-web-search.provider.spec.ts"
+        }
+      ]
     }
   ]
 }

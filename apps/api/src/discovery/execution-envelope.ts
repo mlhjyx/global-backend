@@ -3,7 +3,8 @@
  * by providers, workflows and technical quotes; they are not customer usage
  * limits, balances, prices or commercial entitlements.
  */
-export const MAX_COMPANY_DISCOVERY_ADAPTERS = 8 as const;
+// 8→9（WEB-1 model_web_search 注册面，2026-11-10）：报价上界的适配器因子随之 +1。
+export const MAX_COMPANY_DISCOVERY_ADAPTERS = 9 as const;
 /** `discovery.query_plan` output schema bound. */
 export const MAX_QUERY_PLANNER_QUERIES = 64 as const;
 /** Deterministic cold-path queries added after planning: TED and openFDA, at most one each. */

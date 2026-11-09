@@ -17,7 +17,8 @@ export type DiscoveryCompanyLineageProviderKey =
   | 'openstreetmap'
   | 'ted'
   | 'openfda'
-  | 'registry_frame';
+  | 'registry_frame'
+  | 'model_web_search';
 
 export type DiscoveryCompanyReceiptAttemptV1 = Readonly<{
   producerId: string;
@@ -117,6 +118,13 @@ const PROVIDER_RECEIPT_CONTRACT = Object.freeze({
   registry_frame: Object.freeze({
     producerId: 'registry.query',
     resultSchema: 'registry-query/v1',
+  }),
+  // WEB-1 模型联网搜索：血缘回执来自结构确认模型的持久投影（任务即 producer），
+  // 探索环的搜索工具回执只是 auxiliary——搜索工具本身被 public_web/directory 共用，
+  // 不能成为本 provider 的公司回执（否则与辅助回执的分区互斥冲突）。
+  model_web_search: Object.freeze({
+    producerId: 'discovery.web_search_candidates',
+    resultSchema: 'discovery-web-search-candidates/v1',
   }),
 } satisfies Record<
   DiscoveryCompanyLineageProviderKey,

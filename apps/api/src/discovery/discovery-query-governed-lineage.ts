@@ -100,6 +100,13 @@ const PROVIDER_CONTRACT = Object.freeze({
     producerId: 'registry.query', resultSchema: 'registry-query/v1',
     consumer: 'RegistryFrameDiscoveryProvider', classes: Object.freeze(['company_registry']),
   }),
+  // WEB-1 模型联网搜索：公司回执 = 结构确认模型的持久投影（任务即 producer）。
+  model_web_search: Object.freeze({
+    producerId: 'discovery.web_search_candidates',
+    resultSchema: 'discovery-web-search-candidates/v1',
+    consumer: 'ModelWebSearchDiscoveryProvider',
+    classes: Object.freeze(['public_intelligence']),
+  }),
 } satisfies Record<DiscoveryCompanyLineageProviderKey, Readonly<{
   producerId: string; resultSchema: string; consumer: string; classes: readonly string[];
 }>>);

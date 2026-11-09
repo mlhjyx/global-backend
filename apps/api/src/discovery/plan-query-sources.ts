@@ -61,6 +61,8 @@ const SOURCE_ROUTE_PRIORITY: Readonly<Record<string, number>> = Object.freeze({
   trade_fair: 35,
   structured_harvest: 40,
   digital_footprint: 45,
+  // 模型联网搜索：几轮 flash 模型调用 + 免费搜索，贵于结构化源、廉于 public_web 抓取。
+  model_web_search: 60,
   public_web: 90,
 });
 
@@ -138,6 +140,8 @@ export const PLANNER_SOURCE_GUIDE: Readonly<Record<string, string>> = Object.fre
     'OpenStreetMap，按 filters.industry（映射成工业标签）+ country/region/area_name 枚举工厂',
   trade_fair:
     '展会参展商名录，按 filters.industry、keywords 与 region 匹配已登记的展会，取结构化参展商列表',
+  model_web_search:
+    '模型联网搜索：模型自行规划检索词经受治理搜索工具（SearXNG/DeepSeek）检索公开网页，只保留搜索结果中出现且带 https 证据 URL 的公司；按 keywords 与 country 描述目标画像',
 });
 
 function filtersRecord(filters: unknown): Readonly<Record<string, unknown>> {

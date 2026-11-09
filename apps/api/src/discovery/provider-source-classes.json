@@ -93,5 +93,8 @@
   ],
   "social_presence": [
     "contact_discovery"
+  ],
+  "model_web_search": [
+    "public_intelligence"
   ]
 }

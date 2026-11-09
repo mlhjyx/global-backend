@@ -138,6 +138,8 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
       { sourceClass: 'industry_data', providerKey: 'trade_fair', hasCompanyLineage: true },
       { sourceClass: 'public_intelligence', providerKey: 'ted', hasCompanyLineage: true },
       { sourceClass: 'public_intelligence', providerKey: 'openfda', hasCompanyLineage: true },
+      // WEB-1 模型联网搜索：env 开关默认 off 时 fail-safe 返回有效空血缘，路由身份不因开关变化。
+      { sourceClass: 'public_intelligence', providerKey: 'model_web_search', hasCompanyLineage: true },
       // T3-09 注册面：本地 registry frame 枚举注册为 company_registry 源，但**刻意不声明**
       // 公司血缘（零出网=无 durable 回执），执行面等 local_query 变体获批
       // （design: docs/superpowers/plans/2026-11-09-registry-frame-local-lineage.md）。
@@ -180,7 +182,9 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
       'public_web', 'directory', 'wikidata', 'openstreetmap', 'trade_fair',
     ]);
     expect(await routed('company_registry')).toEqual(['wikidata']);
-    expect(await routed('public_intelligence')).toEqual(['public_web', 'ted', 'openfda']);
+    expect(await routed('public_intelligence')).toEqual([
+      'public_web', 'ted', 'openfda', 'model_web_search',
+    ]);
   });
 
   it('registers registry_frame as a company_registry source that the lineage gate keeps unrouted (T3-09)', async () => {
@@ -231,6 +235,7 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
       [...new Set(sources.filter((source) => source.hasCompanyLineage).map((source) => source.providerKey))],
     ).toEqual([
       'public_web', 'directory', 'wikidata', 'openstreetmap', 'trade_fair', 'ted', 'openfda',
+      'model_web_search',
     ]);
     // A declared source that either contract rejects would fail its governed query instead of running it.
     for (const source of sources) {
