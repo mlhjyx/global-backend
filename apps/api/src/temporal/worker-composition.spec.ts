@@ -33,6 +33,11 @@ describe("closed runtime workload composition", () => {
       expect(Object.keys(customerWorkflows)).not.toContain(name);
     expect(Object.keys(customerWorkflows)).toContain("demoV0Workflow");
     expect(Object.keys(customerWorkflows)).toContain("understandingWorkflow");
+    // ch03 执行面 3b：注册即受灰度门约束（env 默认关），不注册 schedule。
+    expect(Object.keys(customerWorkflows)).toContain("domainResolutionWorkflow");
+    expect(Object.keys(customerWorkflows)).toContain("recallAuditWorkflow");
+    expect(Object.keys(platformWorkflows)).not.toContain("domainResolutionWorkflow");
+    expect(Object.keys(platformWorkflows)).not.toContain("recallAuditWorkflow");
   });
   it("binds poller identity to fixed subject and runtime UUID", () => {
     expect(

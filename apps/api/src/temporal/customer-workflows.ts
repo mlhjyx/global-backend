@@ -20,3 +20,5 @@ export { kbRecoverySweepWorkflow } from "./kb-recovery.workflow";
 export { contactReverifySweepWorkflow } from "./contact-reverify.workflow";
 export { assetObjectCleanupWorkflow } from "./asset-cleanup.workflow";
 export { measurementRollupWorkflow } from "./measurement.workflow";
+export { domainResolutionWorkflow } from "./domain-resolution.workflow";
+export { recallAuditWorkflow } from "./recall-audit.workflow";

@@ -254,10 +254,10 @@
       "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
     },
     "apps/api/src/temporal/worker.ts": {
-      "maxLines": 838,
+      "maxLines": 844,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
-      "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
+      "reason": "存量超标文件（棘轮：只许缩小）；ch03 执行面 3b（2026-11-10）在扁平注册点新增域名解析/召回审计两个活动工厂（+6 行），经 PR 评审一次性上调，随注册点拆分计划再收缩"
     },
     "apps/api/src/tools/budget-store.ts": {
       "maxLines": 1281,

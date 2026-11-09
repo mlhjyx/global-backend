@@ -16,6 +16,10 @@
 - `import-frame.mts` — CSV/JSON frame 装载 CLI（tsx 运行，owner 连接写平台表）。
 - `query-preview.mts` — `registry_frame` 查询契约预览（只读，验证 ICP→过滤条件→候选记录）。
 - `recall-audit.mjs` — 召回审计 CLI（Node ≥22.18 原生 type-strip 直接运行，无需构建）。
+- `recall-frame-export.mts` — 审计输入之一：把 frame 的 PARSED 快照冻结实体导出为
+  `recall-audit.mjs --frame` 输入（含可复算 sha256）。
+- `recall-pool-export.mts` — 审计输入之二：把一个 run 的物化产出池导出为
+  `recall-audit.mjs --pool` 输入（注册号键来自 `registry_frame` 提供者的 `scheme:number`）。
 
 ## 装载
 
