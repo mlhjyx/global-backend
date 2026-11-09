@@ -12,7 +12,7 @@ import {
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiProperty, ApiPropertyOptional, ApiQuery, ApiResponse, ApiTags,
 } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID,
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID,
   Matches,
   Max, MaxLength, Min, MinLength, ValidateNested,
 } from 'class-validator';
@@ -31,6 +31,11 @@ import {
 } from './discovery.service';
 import { LAWFUL_BASIS_KINDS } from './compliance/email-verification-gate';
 import { DEFAULT_MAX_GUESS_CONTACTS, MAX_EMAIL_PROBE_CANDIDATES } from './email-guess-targets';
+import {
+  MAX_ENRICH_CONTACTS_PER_REQUEST,
+  MAX_ENRICH_VERIFICATION_CALLS_PER_ADDRESS,
+} from './execution-envelope';
+import { MAX_FINDER_ATTEMPTS } from '../enrichment/waterfall/enrich-contact-email';
 import { LawfulBasisKind } from './provider-contract';
 import { SUPPRESSION_TYPES } from './suppression-value';
 import {
@@ -172,6 +177,85 @@ export class DiscoverContactsDto {
     description:
       '客户端每次点击生成的幂等键（UUID）。用于把同一公司的多次联系人发现隔离到各自预算账户，' +
       '避免重复点击触发 EXECUTION_BUDGET_GRANT_REUSED；缺省时保持旧请求哈希。',
+    format: 'uuid',
+  })
+  @IsOptional()
+  @IsUUID()
+  attemptId?: string;
+}
+
+/**
+ * P1-10 邮箱富集请求体（body 必填：lawfulBasis 缺失在服务层以
+ * CONTACT_ENRICH_LAWFUL_BASIS_REQUIRED 拒绝，且不消耗 Grant）。
+ */
+export class EnrichContactsDto {
+  @ApiProperty({
+    enum: LAWFUL_BASIS_KINDS,
+    description:
+      '把具名联系人 + 公司域送给付费 finder/验证器处理的合法性基础（GDPR Art.6）。' +
+      '缺失时不在这里返回 400，而是交给服务层在消耗预算前以 CONTACT_ENRICH_LAWFUL_BASIS_REQUIRED 拒绝。',
+  })
+  @IsIn(LAWFUL_BASIS_KINDS as unknown as string[])
+  lawfulBasis!: LawfulBasisKind;
+
+  @ApiPropertyOptional({
+    description: 'LIA / 工单 / 合同 / 同意记录的引用（可审计）',
+    maxLength: 512,
+    pattern: NO_CONTROL_CHARS.source,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  @Matches(NO_CONTROL_CHARS)
+  lawfulBasisRef?: string;
+
+  @ApiPropertyOptional({
+    description: '有界审计备注',
+    maxLength: 1000,
+    pattern: NO_CONTROL_CHARS.source,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  @Matches(NO_CONTROL_CHARS)
+  lawfulBasisNote?: string;
+
+  @ApiPropertyOptional({
+    description: `限定联系人 id（≤${MAX_ENRICH_CONTACTS_PER_REQUEST}）；缺省 = 该公司全部缺 email 的具名联系人`,
+    type: [String],
+    format: 'uuid',
+    maxItems: MAX_ENRICH_CONTACTS_PER_REQUEST,
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_ENRICH_CONTACTS_PER_REQUEST)
+  @IsUUID('all', { each: true })
+  contactIds?: string[];
+
+  @ApiPropertyOptional({
+    description: `每联系人最多尝试的 finder 家数（1–${MAX_FINDER_ATTEMPTS}）`,
+    minimum: 1,
+    maximum: MAX_FINDER_ATTEMPTS,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(MAX_FINDER_ATTEMPTS)
+  maxProviders?: number;
+
+  @ApiPropertyOptional({
+    description: `每地址验证瀑布调用上限（1–${MAX_ENRICH_VERIFICATION_CALLS_PER_ADDRESS}）`,
+    minimum: 1,
+    maximum: MAX_ENRICH_VERIFICATION_CALLS_PER_ADDRESS,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(MAX_ENRICH_VERIFICATION_CALLS_PER_ADDRESS)
+  maxProbe?: number;
+
+  @ApiPropertyOptional({
+    description: '客户端每次请求生成的幂等键（UUID），隔离到各自的预算账户与请求哈希',
     format: 'uuid',
   })
   @IsOptional()
@@ -532,6 +616,64 @@ export class DiscoveryController {
                   note: dto.lawfulBasisNote,
                 }
               : undefined,
+            attemptId: dto?.attemptId,
+          },
+          compactJws,
+        ),
+      ),
+    );
+  }
+
+  @Post('canonical-companies/:id/enrich-contacts')
+  @RequireScopes(
+    'acquisition:write',
+    'contact-discovery:read',
+    'compliance:manage')
+  @HttpCode(201)
+  @ApiOperation({
+    summary: '公司级邮箱富集（付费 finder 瀑布：Hunter → Findymail → Prospeo，A 档追加 Apollo/PDL）',
+    description:
+      '对该公司缺 email 的具名联系人按瀑布补全邮箱：finder 命中先过验证（双正规则），' +
+      '验证 INVALID 继续下一家；每公司 ≤10 次 finder 调用、每地址 ≤6 次验证、软截止 10 分钟；' +
+      '本地尝试账保证同一输入 90 天不重复购买。需要 purpose contact.enrich 的 ExecutionBudget Grant；' +
+      'lawfulBasis 必填（把具名联系人 + 域名送给第三方处理器）。供应商未启用（data_provider DISABLED）' +
+      '时逐家跳过并如实记账，不伪造命中。',
+  })
+  @ApiExecutionBudgetGrant({
+    additionalForbiddenCodes: ['CONTACT_ENRICH_LAWFUL_BASIS_REQUIRED'],
+  })
+  @ApiBody({
+    type: EnrichContactsDto,
+    required: true,
+    description:
+      'Body is required. An absent lawfulBasis is rejected before authority consumption with CONTACT_ENRICH_LAWFUL_BASIS_REQUIRED.',
+  })
+  @ApiEnvelope(
+    { type: 'object', additionalProperties: true, description: '富集结果（tier/逐联系人状态/成本）' },
+    { status: 201 },
+  )
+  async enrichContacts(
+    @Ctx() ctx: RequestContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: EnrichContactsDto,
+    @ExecutionBudgetGrant() compactJws?: string,
+  ) {
+    return envelope(
+      await asExecutionBudgetHttpBoundary(() =>
+        this.discovery.enrichContacts(
+          ctx,
+          id,
+          {
+            lawfulBasis: dto?.lawfulBasis
+              ? {
+                  basis: dto.lawfulBasis,
+                  ref: dto.lawfulBasisRef,
+                  note: dto.lawfulBasisNote,
+                }
+              : undefined,
+            contactIds: dto?.contactIds,
+            maxProviders: dto?.maxProviders,
+            maxProbe: dto?.maxProbe,
             attemptId: dto?.attemptId,
           },
           compactJws,

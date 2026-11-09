@@ -2271,6 +2271,7 @@ model CanonicalCompany {
   leads                   Lead[]
   materializationOutcomes DiscoveryCompanyMaterializationOutcome[]
   judgmentRecords         JudgmentRecord[]
+  domainResolutions       CompanyDomainResolution[]
 
   @@unique([workspaceId, dedupeKey])
   @@unique([workspaceId, id], map: "canonical_company_workspace_id_id_key")
@@ -3876,6 +3877,67 @@ model SiteCopyBundle {
   @@index([workspaceId, siteId, locale], map: "site_copy_bundle_workspace_site_locale_idx")
   @@index([buildRunId], map: "site_copy_bundle_build_run_idx")
   @@map("site_copy_bundle")
+}
+
+// ---------------------------------------------------------------------------
+// 域名解析证据与人工复核队列（GainOS v3.0 ch03 §3.9.4，执行面批次 3a）
+// 租户级（FORCE RLS）；写入经 PrismaService.withWorkspace（app_user + set_config）。
+// ---------------------------------------------------------------------------
+
+/// 公司域名解析的候选与证据：一行 = 一个候选域名在一个 route 上的一次判定。
+/// 同一公司可有多行；只有 status='VERIFIED' 且 selected=true 的行驱动
+/// canonical_company.domain 的写入（写入路径随后续执行面 PR 接线）。
+model CompanyDomainResolution {
+  id               String    @id @default(uuid()) @db.Uuid
+  workspaceId      String    @map("workspace_id") @db.Uuid
+  companyId        String    @map("company_id") @db.Uuid
+  candidateDomain  String    @map("candidate_domain") @db.VarChar(253)
+  // 候选生成路：source_field | search | wikidata_p856 | ct_log | cc_index | sitemap_hint | manual | none
+  route            String    @db.VarChar(24)
+  routeRank        Int       @map("route_rank")
+  // PENDING | VERIFIED | AMBIGUOUS | REJECTED | NOT_FOUND
+  status           String    @default("PENDING") @db.VarChar(16)
+  matchType        String?   @map("match_type") @db.VarChar(24)
+  confidence       Float?
+  evidenceUrl      String?   @map("evidence_url") @db.VarChar(2048)
+  evidenceHash     String?   @map("evidence_hash") @db.Char(64)
+  evidenceJson     Json?     @map("evidence_json")
+  extractorVersion String?   @map("extractor_version") @db.VarChar(64)
+  selected         Boolean   @default(false)
+  verifiedAt       DateTime? @map("verified_at") @db.Timestamptz(3)
+  expiresAt        DateTime? @map("expires_at") @db.Timestamptz(3)
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  company     CanonicalCompany   @relation(fields: [workspaceId, companyId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict, map: "company_domain_resolution_company_fkey")
+  reviewTasks DomainReviewTask[]
+
+  @@unique([workspaceId, companyId, candidateDomain, route], map: "company_domain_resolution_candidate_key")
+  @@index([workspaceId, status])
+  @@index([workspaceId, companyId, status])
+  @@map("company_domain_resolution")
+}
+
+/// 人工复核工单：AMBIGUOUS / 同名冲突 / 集团门户 / 抽样审计的域名候选。
+model DomainReviewTask {
+  id           String    @id @default(uuid()) @db.Uuid
+  workspaceId  String    @map("workspace_id") @db.Uuid
+  resolutionId String    @map("resolution_id") @db.Uuid
+  // low_confidence | name_collision | multi_candidates | audit_sample
+  reason       String    @db.VarChar(64)
+  priority     Int       @default(50)
+  // OPEN | APPROVED | REJECTED | NOT_FOUND | EXPIRED
+  status       String    @default("OPEN") @db.VarChar(16)
+  assignee     String?
+  dueAt        DateTime  @map("due_at") @db.Timestamptz(3)
+  decidedAt    DateTime? @map("decided_at") @db.Timestamptz(3)
+  decisionNote String?   @map("decision_note")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  resolution CompanyDomainResolution @relation(fields: [resolutionId], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "domain_review_task_resolution_fkey")
+
+  @@index([workspaceId, status, priority])
+  @@map("domain_review_task")
 }
 
 // ---------------------------------------------------------------------------
