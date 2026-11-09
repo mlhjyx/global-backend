@@ -8,10 +8,10 @@
   },
   "files": {
     "apps/api/src/ai-tasks/task-registry.ts": {
-      "maxLines": 931,
+      "maxLines": 974,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
-      "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
+      "reason": "存量超标文件（棘轮）；2026-11-10 新增 discovery.web_search_candidates 任务契约（获客通路 A），经 PR 评审上调 931→974，后续随任务拆分再降；site-builder 相关文件随 SUB-02/03 退役后删除条目"
     },
     "apps/api/src/channels/channel.service.ts": {
       "maxLines": 1119,
@@ -68,10 +68,10 @@
       "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
     },
     "apps/api/src/durable-results/model-result-projections.ts": {
-      "maxLines": 1744,
+      "maxLines": 1784,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
-      "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
+      "reason": "存量超标文件（棘轮）；2026-11-10 新增 discovery-web-search-candidates/v1 投影（获客通路 A），经 PR 评审上调 1744→1784；后续按投影拆分再降"
     },
     "apps/api/src/execution-budget/execution-budget-authority.repository.ts": {
       "maxLines": 876,
