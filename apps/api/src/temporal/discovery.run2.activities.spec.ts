@@ -6,6 +6,30 @@ const mocks = vi.hoisted(() => ({
   loadIcpBrief: vi.fn(async () => ({ icp_name: 'DE pump distributors' })),
 }));
 
+/**
+ * P3 J02 W4：Temporal 活动上下文。默认 null（等价于旧行为：直接调用工厂函数没有上下文），
+ * 需要验证 heartbeat/取消的用例显式设置。
+ */
+const activityRuntime = vi.hoisted(() => ({
+  context: null as null | { heartbeat: ReturnType<typeof vi.fn>; cancellationSignal: { aborted: boolean } },
+  heartbeat: vi.fn(),
+}));
+
+vi.mock('@temporalio/activity', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@temporalio/activity')>();
+  return {
+    ...actual,
+    Context: class {
+      static current(): unknown {
+        if (activityRuntime.context === null) {
+          throw new Error('Activity context not initialized');
+        }
+        return activityRuntime.context;
+      }
+    },
+  };
+});
+
 vi.mock('../model-runtime/structured-task-runtime-bridge', () => ({
   executeStructuredTaskWithRuntime: mocks.execute,
 }));
@@ -19,7 +43,8 @@ vi.mock('../discovery/fit-judge', async (importOriginal) => {
 });
 
 import { createRun2Activities } from './discovery.run2.activities';
-import { ExternalActionDeniedError } from '../model-gateway/providers/provider-output-error';
+import { ExternalActionDeniedError, ProviderHttpError } from '../model-gateway/providers/provider-output-error';
+import { CancelledFailure } from '@temporalio/common';
 
 const WORKSPACE_ID = '11111111-1111-4111-8111-111111111111';
 const RUN_ID = '22222222-2222-4222-8222-222222222222';
@@ -175,6 +200,8 @@ beforeEach(() => {
   mocks.execute.mockReset();
   mocks.judgeFitCompany.mockReset();
   mocks.loadIcpBrief.mockResolvedValue({ icp_name: 'DE pump distributors' });
+  activityRuntime.context = null;
+  activityRuntime.heartbeat.mockReset();
 });
 
 describe('M0③ prefilterPool', () => {
@@ -275,7 +302,7 @@ describe('M0③ quickJudgeBatch', () => {
   });
 
   it('falls back to a weak rule verdict when the model is unavailable for a company (Q20)', async () => {
-    const { activities, jobUpdates } = makeActivities({
+    const { activities, jobUpdates, events } = makeActivities({
       jobs: [
         { id: 'j1', canonicalCompanyId: 'c1' },
         { id: 'j2', canonicalCompanyId: 'c2' },
@@ -289,6 +316,88 @@ describe('M0③ quickJudgeBatch', () => {
 
     expect(result).toMatchObject({ judged: 2, ruleFallback: 2, verdicts: { weak: 2 } });
     expect(jobUpdates.every((u) => u.data.verdictQuick === 'weak')).toBe(true);
+    // P3 J02 W4：规则兜底不是 failed，但批量失败的分类码要随事件可追溯（不再是聚合码）。
+    const doneEvents = events.filter((event) => event.type === 'company_done');
+    expect(doneEvents).toHaveLength(2);
+    for (const event of doneEvents) {
+      expect((event.payload as Record<string, unknown>).failureCode).toBe('UNKNOWN_UPSTREAM');
+      expect((event.payload as Record<string, unknown>).failureStage).toBe('provider');
+    }
+  });
+
+  it('classifies per-company judge failures instead of the QUICK_JUDGE_FAILED aggregate (P3 J02 W4)', async () => {
+    const { activities, events } = makeActivities({
+      jobs: [
+        { id: 'j1', canonicalCompanyId: 'c1' },
+        { id: 'j2', canonicalCompanyId: 'c2' },
+      ],
+      companies: [company('c1'), company('c2')],
+    });
+    // 批量协议与逐家降级都撞 429（HTTP 错误不会被 fit-judge 吞掉）→ 逐家失败码应是 PROVIDER_HTTP_429。
+    mocks.execute.mockRejectedValue(
+      new ProviderHttpError({ status: 429, provider: 'p', model: 'm' }),
+    );
+    mocks.judgeFitCompany.mockRejectedValue(
+      new ProviderHttpError({ status: 429, provider: 'p', model: 'm' }),
+    );
+
+    const result = await activities.quickJudgeBatch(ARGS);
+
+    expect(result).toMatchObject({ judged: 2, ruleFallback: 2, verdicts: { weak: 2 } });
+    const doneEvents = events.filter((event) => event.type === 'company_done');
+    expect(doneEvents).toHaveLength(2);
+    for (const event of doneEvents) {
+      expect((event.payload as Record<string, unknown>).failureCode).toBe('PROVIDER_HTTP_429');
+      expect((event.payload as Record<string, unknown>).failureStage).toBe('provider');
+    }
+    for (const event of events) {
+      expect(JSON.stringify(event.payload ?? {})).not.toContain('QUICK_JUDGE_FAILED');
+    }
+  });
+
+  it('heartbeats after every batch (P3 J02 W4)', async () => {
+    activityRuntime.context = {
+      heartbeat: activityRuntime.heartbeat,
+      cancellationSignal: { aborted: false },
+    };
+    const { activities } = makeActivities({
+      jobs: [
+        { id: 'j1', canonicalCompanyId: 'c1' },
+        { id: 'j2', canonicalCompanyId: 'c2' },
+      ],
+      companies: [company('c1'), company('c2')],
+    });
+    mocks.execute.mockResolvedValue({
+      data: {
+        judgments: [
+          { index: 0, verdict: 'match', reason: 'distributor' },
+          { index: 1, verdict: 'weak', reason: 'unclear' },
+        ],
+      },
+    });
+
+    await activities.quickJudgeBatch(ARGS);
+
+    // 活动开始 1 次 + 每批后 1 次（2 家 = 1 批）
+    expect(activityRuntime.heartbeat).toHaveBeenCalledTimes(2);
+    expect(activityRuntime.heartbeat).toHaveBeenLastCalledWith(
+      expect.objectContaining({ phase: 'quick_judge', batches: 1, judged: 2 }),
+    );
+  });
+
+  it('stops between batches when the activity was cancelled (P3 J02 W4)', async () => {
+    activityRuntime.context = {
+      heartbeat: activityRuntime.heartbeat,
+      cancellationSignal: { aborted: true },
+    };
+    const { activities, jobUpdates } = makeActivities({
+      jobs: [{ id: 'j1', canonicalCompanyId: 'c1' }],
+      companies: [company('c1')],
+    });
+
+    await expect(activities.quickJudgeBatch(ARGS)).rejects.toBeInstanceOf(CancelledFailure);
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(jobUpdates).toHaveLength(0);
   });
 });
 

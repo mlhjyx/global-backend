@@ -11,7 +11,7 @@
  * 本文件是纯数据 + 查表函数，不做 I/O，便于在 workflow/activity/脚本三处复用。
  */
 
-export const FAILURE_CODES_VERSION = 'failure-codes/v1' as const;
+export const FAILURE_CODES_VERSION = 'failure-codes/v2' as const;
 
 export const FAILURE_STAGES = [
   'provider',
@@ -57,6 +57,18 @@ export const FAILURE_CODES = {
     retryable: false,
     outcome: 'failover',
   },
+  /** v2（P3 J02）：响应无法证明来自被请求的确切模型（ProviderIdentityError）。 */
+  PROVIDER_IDENTITY_MISMATCH: {
+    stage: 'provider',
+    retryable: false,
+    outcome: 'failover',
+  },
+  /** v2（P3 J02）：传输在完整答案到达前失败（断流/坏事件/非 JSON body，ProviderTransportError）。 */
+  PROVIDER_TRANSPORT_FAILED: {
+    stage: 'provider',
+    retryable: true,
+    outcome: 'retry',
+  },
   MODEL_REFUSAL: { stage: 'guardrail', retryable: false, outcome: 'degraded' },
   OUTPUT_NOT_JSON: { stage: 'parser', retryable: true, outcome: 'failed' },
   OUTPUT_SCHEMA_INVALID: {
@@ -92,6 +104,15 @@ export const FAILURE_CODES = {
   BUDGET_EXCEEDED: { stage: 'budget', retryable: false, outcome: 'failed' },
   BUDGET_AUTHORITY_NOT_READY: {
     stage: 'budget',
+    retryable: false,
+    outcome: 'failed',
+  },
+  /**
+   * v2（P3 J02）：控制面拒绝（域 ACK/回执/围栏等，非预算类）。
+   * 与预算类分开，避免把控制面错误记成 `PROVIDER_*`（设计 §4.3.9 W2）。
+   */
+  CONTROL_PLANE_REJECTED: {
+    stage: 'dispatch',
     retryable: false,
     outcome: 'failed',
   },
