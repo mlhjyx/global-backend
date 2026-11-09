@@ -40,6 +40,9 @@ export const SANCTIONS_REFRESH_SCHEDULE_ID =
 // 默认以 **paused** 注册：启用是运维决定（data_provider.millionverifier=ENABLED + 凭据 + 成本 cap）。
 export const CONTACT_REVERIFY_SWEEP_WORKFLOW = 'contactReverifySweepWorkflow';
 export const CONTACT_REVERIFY_SWEEP_SCHEDULE_ID = 'contact-reverify-sweep';
+// P1-17：联系人工程周报（指标 + 3 条告警；只读聚合，注册即 paused——启用是运维决定）。
+export const CONTACT_WEEKLY_REPORT_WORKFLOW = 'contactWeeklyReportWorkflow';
+export const CONTACT_WEEKLY_REPORT_SCHEDULE_ID = 'contact-weekly-report';
 // Site Builder KB：commit workflow 丢启动、retry 到期或 processing lease 过期的持久恢复面。
 export const KB_RECOVERY_SWEEP_WORKFLOW = 'kbRecoverySweepWorkflow';
 export const KB_RECOVERY_SWEEP_SCHEDULE_ID = 'site-builder-kb-recovery';

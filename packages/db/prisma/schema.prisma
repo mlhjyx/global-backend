@@ -2436,6 +2436,22 @@ model ContactEnrichmentAttempt {
   @@map("contact_enrichment_attempt")
 }
 
+/// P1-17（2026-11-09）：联系人工程周报快照（迁移 20261109200000_contact_metrics_snapshot）。
+/// 平台级运营表（非租户数据，无 RLS；app_user 零权限）：CONTACT_WEEKLY_REPORT Schedule
+/// 与 scripts/contact-weekly-report.mts 每周写一行窗口+指标+告警 JSON。
+model ContactMetricsSnapshot {
+  id          String   @id @default(uuid()) @db.Uuid
+  capturedAt  DateTime @default(now()) @map("captured_at")
+  windowSince DateTime @map("window_since")
+  windowUntil DateTime @map("window_until")
+  workspaceId String?  @map("workspace_id") @db.Uuid
+  metrics     Json
+  alerts      Json
+
+  @@index([workspaceId, capturedAt(sort: Desc)], map: "cms_capture_idx")
+  @@map("contact_metrics_snapshot")
+}
+
 /// 公司级联系路径（BI-14）：公司官网首页上链到的联系页、Impressum 页、供应商页、公司 LinkedIn 页与 X 账号，
 /// 以及联系页上是否有联系表单。只存链接（https，无 query 与 fragment），数据分级只允许 green；
 /// 表里没有邮箱、电话或人名字段，kind 与 value 形状由数据库 CHECK 约束（迁移 20261011090000）。

@@ -19,6 +19,7 @@ export const MODEL_RESULT_TASK_IDS = Object.freeze([
   "discovery.extract_list",
   "contact.find_decision_makers",
   "discovery.classify_trade_role",
+  "discovery.web_search_candidates",
   "outreach.first_contact_draft",
   "campaign.plan",
 ] as const);
@@ -36,6 +37,7 @@ export const MODEL_RESULT_PROJECTION_SCHEMAS = Object.freeze({
   "discovery.extract_list": "discovery-extract-list/v1",
   "contact.find_decision_makers": "contact-decision-makers/v1",
   "discovery.classify_trade_role": "discovery-classify-trade-role/v1",
+  "discovery.web_search_candidates": "discovery-web-search-candidates/v1",
   "outreach.first_contact_draft": "outreach-first-contact-draft/v1",
   "campaign.plan": "campaign-plan/v1",
 } satisfies Readonly<Record<ModelResultTaskId, TypedProjectionSchema>>);
@@ -1710,6 +1712,43 @@ const campaignPlanDefinition: TypedProjectionDefinition<unknown, unknown> = {
     });
   },
 };
+const webSearchCandidatesDefinition: TypedProjectionDefinition<unknown, unknown> = {
+  schema: "discovery-web-search-candidates/v1",
+  jsonSchema: modelResultSchema(
+    objectSchema(
+      {
+        candidates: arraySchema(
+          50,
+          objectSchema(
+            {
+              companyName: stringSchema(500),
+              domain: stringSchema(253),
+              countryCode: { type: ["string", "null"], maxLength: 2 },
+              evidenceUrls: arraySchema(3, stringSchema(2048)),
+              query: { type: ["string", "null"], maxLength: 300 },
+            },
+            ["companyName", "domain", "countryCode", "evidenceUrls", "query"],
+          ),
+        ),
+      },
+      ["candidates"],
+    ),
+  ),
+  project(raw) {
+    const result = readModelResult(raw, ["candidates"], ["candidates"]);
+    return projectModelResultEnvelope(result, {
+      candidates: field(result.data, "candidates"),
+    });
+  },
+  restore(projected) {
+    const result = projected as {
+      data: { candidates: unknown };
+      provider: string;
+      model: string;
+    };
+    return restoreModelResult(result, { candidates: result.data.candidates });
+  },
+};
 export const MODEL_RESULT_PROJECTION_DEFINITIONS = Object.freeze([
   claimsDefinition,
   profileDefinition,
@@ -1725,6 +1764,7 @@ export const MODEL_RESULT_PROJECTION_DEFINITIONS = Object.freeze([
   tradeRoleDefinition,
   outreachDraftDefinition,
   campaignPlanDefinition,
+  webSearchCandidatesDefinition,
 ] as const);
 export function getModelResultProjectionSchema(
   taskId: string,

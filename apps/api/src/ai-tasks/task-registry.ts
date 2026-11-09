@@ -414,6 +414,49 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     cacheable: true, // PR-B
   },
 
+  'discovery.web_search_candidates': {
+    id: 'discovery.web_search_candidates',
+    // 获客通路 A：模型规划检索词并通过 web_search 工具搜索（ToolBroker searxng.search）。
+    allowedTools: ['searxng.search'],
+    maxCostCents: 15,
+    maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
+    timeoutMs: 180000,
+    description:
+      '使用 web_search 工具为客户画像寻找真实公司候选。只允许报告搜索结果中出现过的公司，每家公司必须给出至少一个来自搜索结果的 https 证据 URL；不得臆造域名，无法确认的公司直接略过。最终只输出 JSON：{"candidates":[{"companyName","domain","countryCode","evidenceUrls","query"}]}。',
+    outputSchema: closedObject({
+      candidates: {
+        ...boundedArray(
+          50,
+          closedObject(
+            {
+              companyName: boundedString(500),
+              domain: boundedString(253, { description: '可注册域名（不含路径/协议）' }),
+              countryCode: {
+                type: ['string', 'null'],
+                maxLength: 2,
+                description: 'ISO 3166-1 alpha-2；无法确认时 null',
+              },
+              evidenceUrls: boundedArray(3, boundedString(2048)),
+              query: {
+                type: ['string', 'null'],
+                maxLength: 300,
+                description: '得到该候选使用的检索词',
+              },
+            },
+            ['companyName', 'domain', 'countryCode', 'evidenceUrls', 'query'],
+          ),
+        ),
+        description: '候选公司列表（每项必须带 https 证据 URL）',
+      },
+    }, ['candidates']),
+    // 规划+抽取是高频任务：flash 档（与 extract_company 同档）。
+    model: acquisitionModel('discovery.web_search_candidates', ACQUISITION_FLASH_TIER_MODEL),
+    acceptsModelSubstitute: true,
+    risk: 'low',
+    humanGate: false,
+    cacheable: false,
+  },
+
   'contact.find_decision_makers': {
     id: 'contact.find_decision_makers',
     // DecisionMaker/public_web 联系人路径以本契约身份经 Broker 搜索/抓取（收口②）。

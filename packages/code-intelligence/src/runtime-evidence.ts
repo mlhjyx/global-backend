@@ -13,7 +13,6 @@ import {
 } from "./schema";
 import { createEvidence, graphFreshnessDiagnostics, readGraph } from "./scan";
 import { sha256, stableJson, uniqueSorted } from "./utils";
-
 const execFile = promisify(execFileCallback);
 const OUTPUT_DIRECTORY = ".code-intelligence";
 const BUNDLE_FILE = "runtime-evidence-v1.json";
@@ -37,6 +36,7 @@ const TEMPORAL_SCHEDULE_WORKFLOW_TYPES: Readonly<Record<string, string>> = {
   "patents-cache-refresh": "patentsCacheRefreshWorkflow",
   "sanctions-refresh": "sanctionsRefreshWorkflow",
   "contact-reverify-sweep": "contactReverifySweepWorkflow",
+  "contact-weekly-report": "contactWeeklyReportWorkflow",
   "site-builder-kb-recovery": "kbRecoverySweepWorkflow",
   "site-builder-release-maintenance": "siteReleaseMaintenanceSweepWorkflow",
 };
