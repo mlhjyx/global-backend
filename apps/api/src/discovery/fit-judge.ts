@@ -24,6 +24,7 @@ import {
 import type { JudgePanelMode } from './judgment/panel';
 import { recordJudgment } from './judgment/judgment-record';
 import { enforceCorroboration, judgeCorroborationMode } from './judgment/corroboration';
+import { loadCompanyForSuppressionSafeWrite } from './company-suppression-gate';
 import {
   crossSourceEvidenceSummary,
   currentEvidenceBundle,
@@ -205,25 +206,37 @@ export async function persistJudgmentRecordInTransaction(
   }
 }
 
-/** 读-改-写当前 attributes，合入 evidence_bundle（其余键原样保留）。 */
+/**
+ * 读-改-写当前 attributes，合入 evidence_bundle（其余键原样保留）。
+ * 与其它 attributes 写者同一纪律（company-enrichment-commit 先例）：先拿工作区抑制策略锁、
+ * 读到的既有属性经过 sanitizer、SUPPRESSED/被抑制的公司绝不写；updateMany 带 status 守卫 +
+ * version CAS 并 increment——和 owner 侧回填（backfill-company-normalization 的 version 乐观锁）
+ * 互相可见，不会互相覆盖。
+ */
 async function persistEvidenceBundle(
   tx: Prisma.TransactionClient,
   workspaceId: string,
   companyId: string,
   bundle: EvidenceBundle,
 ): Promise<void> {
-  const current = await tx.canonicalCompany.findFirst({
-    where: { id: companyId, workspaceId },
-    select: { attributes: true },
-  });
+  const current = await loadCompanyForSuppressionSafeWrite(tx, workspaceId, companyId);
   if (!current) return;
-  const attributes =
-    current.attributes !== null && typeof current.attributes === 'object' && !Array.isArray(current.attributes)
-      ? (current.attributes as Record<string, unknown>)
-      : {};
+  const versionRow = await tx.canonicalCompany.findUnique({
+    where: { id: companyId },
+    select: { version: true, status: true },
+  });
+  if (!versionRow || versionRow.status === 'SUPPRESSED') return;
   await tx.canonicalCompany.updateMany({
-    where: { id: companyId, workspaceId },
-    data: { attributes: { ...attributes, evidence_bundle: bundle } as unknown as Prisma.InputJsonValue },
+    where: {
+      id: companyId,
+      workspaceId,
+      status: { not: 'SUPPRESSED' },
+      version: versionRow.version,
+    },
+    data: {
+      attributes: { ...current.attributes, evidence_bundle: bundle } as unknown as Prisma.InputJsonValue,
+      version: { increment: 1 },
+    },
   });
 }
 
@@ -366,6 +379,8 @@ export async function judgeFitCompany(
           judgment.judgmentRecords = v2.judgmentRecords;
           judgment.judgmentRecordsTolerant = v2.judgmentRecordsTolerant;
           judgment.judgmentRecordTolerant = true;
+          // 采样里的 corroboration 记录声称 enforced 时，证据包也要落库（否则审计面缺一半）。
+          if (v2.evidenceBundle) judgment.evidenceBundle = v2.evidenceBundle;
         }
       } catch (error) {
         // shadow 的失败不影响 Lead（含预算/控制面错误）：只记日志。

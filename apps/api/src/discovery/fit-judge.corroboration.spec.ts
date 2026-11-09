@@ -64,7 +64,21 @@ function judgmentWith(record: JudgmentRecordDraft, bundle?: typeof twoTierBundle
 function fakeTx(existingAttributes: Record<string, unknown> | null) {
   // recordJudgment 写入后按 replay key 回读并比对 verdict——mock 必须回显最后写入的 verdict。
   let lastVerdict = 'FIT';
+  const companyRow =
+    existingAttributes === null
+      ? null
+      : {
+          id: 'company-1',
+          name: 'Acme',
+          domain: 'acme.de',
+          status: 'NEW',
+          attributes: existingAttributes,
+          version: 7,
+        };
   return {
+    // suppression-policy 锁（pg_advisory_xact_lock）与 suppression 读取
+    $queryRaw: vi.fn(async () => []),
+    suppressionRecord: { findMany: vi.fn(async () => []) },
     judgmentRecord: {
       createMany: vi.fn(async (args: { data: Array<{ verdict: string }> }) => {
         lastVerdict = args.data[0]!.verdict;
@@ -73,9 +87,7 @@ function fakeTx(existingAttributes: Record<string, unknown> | null) {
       findUnique: vi.fn(async () => ({ id: 'rec-1', verdict: lastVerdict })),
     },
     canonicalCompany: {
-      findFirst: vi.fn(async () =>
-        existingAttributes === null ? null : { attributes: existingAttributes },
-      ),
+      findUnique: vi.fn(async () => companyRow),
       updateMany: vi.fn(async () => ({ count: 1 })),
     },
   };
@@ -86,11 +98,18 @@ describe('persistJudgmentRecordInTransaction · 证据包写回', () => {
     const tx = fakeTx({ keywords: ['pumps'], website_profile: { trade_role: 'manufacturer' } });
     await persistJudgmentRecordInTransaction(tx as never, 'icp-1', judgmentWith(draft('FIT'), twoTierBundle));
     expect(tx.canonicalCompany.updateMany).toHaveBeenCalledTimes(1);
+    const data = tx.canonicalCompany.updateMany.mock.calls[0]![0] as { data: Record<string, unknown> };
+    expect(data.data.version).toEqual({ increment: 1 });
     const update = tx.canonicalCompany.updateMany.mock.calls[0]![0] as {
       where: Record<string, unknown>;
       data: { attributes: Record<string, unknown> };
     };
-    expect(update.where).toMatchObject({ id: 'company-1', workspaceId: WS });
+    expect(update.where).toMatchObject({
+      id: 'company-1',
+      workspaceId: WS,
+      status: { not: 'SUPPRESSED' },
+      version: 7,
+    });
     // 其余属性原样保留，包写入 evidence_bundle 键
     expect(update.data.attributes.keywords).toEqual(['pumps']);
     expect(update.data.attributes.website_profile).toEqual({ trade_role: 'manufacturer' });
@@ -108,7 +127,7 @@ describe('persistJudgmentRecordInTransaction · 证据包写回', () => {
     expect(tx.judgmentRecord.createMany).not.toHaveBeenCalled();
   });
 
-  it('skips the bundle write when the company row is gone, but still writes the record', async () => {
+  it('skips the bundle write when the company row is gone/suppressed, but still writes the record', async () => {
     const tx = fakeTx(null);
     await persistJudgmentRecordInTransaction(tx as never, 'icp-1', judgmentWith(draft('NOT_FIT'), twoTierBundle));
     expect(tx.canonicalCompany.updateMany).not.toHaveBeenCalled();

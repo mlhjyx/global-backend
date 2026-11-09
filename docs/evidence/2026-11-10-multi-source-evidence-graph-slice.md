@@ -134,7 +134,7 @@ dev 库现有 bundle：12 行（含下一节 5 家 IT 公司）。
 
 评测集：`docs/eval/golden-icp/queries.yaml`（26 条查询，3 条已标注：泵类分销/泵类制造/泵类维修服务，
 label 取自 dev 库真实公司与试点名单）；口径/标注模板：同目录 README；解析与排序：
-`apps/api/src/eval/golden-icp.ts`；脚本：`apps/api/scripts/evaluate-golden-icp.mts`。
+`apps/api/src/discovery/golden-icp.ts`；脚本：`apps/api/scripts/evaluate-golden-icp.mts`。
 
 **首跑（k=10，dev 库）**：已标注 3 条，mean P@10 = **0.0333**、mean recall = **0.0833**
 （de-pump-manufacturer 命中 ksb.com）。其余 23 条未标注，仅出候选预览。

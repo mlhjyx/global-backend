@@ -206,7 +206,10 @@ export function inferIndustryFromAttributes(
     ['products', stringArray(root.products)],
     ['website_profile', stringArray(jsonObject(root.website_profile)?.evidence)],
   ];
-  const matches = new Map<string, { match: IsicNodeMatch; sources: Set<string>; weight: number }>();
+  const matches = new Map<
+    string,
+    { match: IsicNodeMatch; sources: Set<string>; weight: number; weightedSources: Set<string> }
+  >();
   // 受控词（keywords/products）命中权重 2，自由证据句（website_profile.evidence）权重 1：
   // 官网整句常顺带提到材质/配件词（如「不锈钢」），加权后不会盖过受控词的直接证据。
   // 落库口径：受控词存原词；自由证据句**只存命中的词表别名**（`alias:pump`）——证据句可能
@@ -220,6 +223,7 @@ export function inferIndustryFromAttributes(
         match: { ...nodeMatch, matchedTerms: [], matchedAliases: [] },
         sources: new Set<string>(),
         weight: 0,
+        weightedSources: new Set<string>(),
       };
       if (controlled) {
         for (const term of nodeMatch.matchedTerms) {
@@ -229,13 +233,15 @@ export function inferIndustryFromAttributes(
           }
         }
       } else {
-        // 自由文本源：仅当该节点尚未经此源计过权重时记一次（按别名去重）。
+        // 自由文本源：别名全部留痕，但**每个源对该节点最多计 1 分**——一句提到两个别名
+        // 不得盖过受控词（受控词每词 2 分）。
+        if (!current.weightedSources.has(source)) {
+          current.weight += perTermWeight;
+          current.weightedSources.add(source);
+        }
         for (const alias of nodeMatch.matchedAliases) {
           const term = `alias:${alias}`;
-          if (!current.match.matchedTerms.includes(term)) {
-            current.match.matchedTerms.push(term);
-            current.weight += perTermWeight;
-          }
+          if (!current.match.matchedTerms.includes(term)) current.match.matchedTerms.push(term);
         }
       }
       current.sources.add(source);
@@ -265,6 +271,7 @@ export function inferIndustryFromAttributes(
         },
         sources: new Set<string>(),
         weight: 0,
+        weightedSources: new Set<string>(),
       };
       // 存前缀形态（去尾零）：8 位原码会被 sanitizer 的电话形态规则丢弃。
       const term = `cpv:${cpvSubtreePrefix(hit)}`;
@@ -299,6 +306,7 @@ export function inferIndustryFromAttributes(
         },
         sources: new Set<string>(),
         weight: 0,
+        weightedSources: new Set<string>(),
       };
       const term = `fda:${code}`;
       if (!current.match.matchedTerms.includes(term)) {

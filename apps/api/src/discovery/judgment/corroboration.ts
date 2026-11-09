@@ -104,12 +104,6 @@ export function evaluateCorroboration(args: {
 export type LeadVerdict = 'match' | 'weak' | 'mismatch';
 
 const LEAD_TO_JUDGMENT = Object.freeze({ match: 'FIT', weak: 'UNKNOWN', mismatch: 'NOT_FIT' } as const);
-const JUDGMENT_TO_LEAD: Readonly<Record<string, LeadVerdict>> = Object.freeze({
-  FIT: 'match',
-  UNKNOWN: 'weak',
-  NOT_FIT: 'mismatch',
-});
-
 export interface CorroborationEnforcement {
   /** 有效 verdict（enforce 且佐证不足 → weak/UNKNOWN；否则原值）。 */
   verdict: LeadVerdict;

@@ -424,3 +424,65 @@ describe('judgeFitCompany — S0 skill runtime adapter', () => {
     expect(executeTask).not.toHaveBeenCalled();
   });
 });
+
+describe('v1 路径的跨源佐证门（enforce）', () => {
+  const baseCompany = {
+    id: 'company-gate-1',
+    name: 'Acme Pumps',
+    domain: 'acme.example',
+    country: 'DE',
+    industry: 'industrial pumps',
+  };
+
+  it('单层证据的 match 降级为 weak，理由行注明跨源佐证门', async () => {
+    process.env.JUDGE_CORROBORATION_MODE = 'enforce';
+    executeTask.mockResolvedValue({ provider: 'stub', data: output } as never);
+    const judgment = await judgeFitCompany(
+      {} as never,
+      '10000000-0000-4000-8000-000000000001',
+      { seller: 'Seller', seller_summary: null },
+      { ...baseCompany, attributes: { website_profile: { trade_role: 'distributor' } } },
+      { judgeContractMode: 'off' },
+    );
+    expect(judgment!.verdict).toBe('weak');
+    expect(judgment!.fitReasons.reasons[0]).toContain('跨源佐证门');
+    expect(judgment!.fitReasons.reasons[0]).toContain('降级');
+  });
+
+  it('T1+T3 跨源达标的 match 原样保留', async () => {
+    process.env.JUDGE_CORROBORATION_MODE = 'enforce';
+    executeTask.mockResolvedValue({ provider: 'stub', data: output } as never);
+    const judgment = await judgeFitCompany(
+      {} as never,
+      '10000000-0000-4000-8000-000000000001',
+      { seller: 'Seller', seller_summary: null },
+      {
+        ...baseCompany,
+        attributes: {
+          gleif: { lei: '529900DI47YZJ5P7QQ76', legal_name: 'Acme Pumps GmbH' },
+          website_profile: { trade_role: 'distributor' },
+        },
+      },
+      { judgeContractMode: 'off' },
+    );
+    expect(judgment!.verdict).toBe('match');
+    expect(judgment!.fitReasons.reasons[0]).not.toContain('跨源佐证门');
+  });
+
+  it('拒答路径（weak）不叠加跨源佐证门', async () => {
+    process.env.JUDGE_CORROBORATION_MODE = 'enforce';
+    executeTask.mockResolvedValue({
+      provider: 'stub',
+      data: { ...output, verdict: 'unclear', reasons: ['I cannot help with that request.'] },
+    } as never);
+    const judgment = await judgeFitCompany(
+      {} as never,
+      '10000000-0000-4000-8000-000000000001',
+      { seller: 'Seller', seller_summary: null },
+      { ...baseCompany, attributes: { website_profile: { trade_role: 'distributor' } } },
+      { judgeContractMode: 'off' },
+    );
+    expect(judgment!.verdict).toBe('weak');
+    expect(judgment!.fitReasons.reasons.join('\n')).not.toContain('跨源佐证门');
+  });
+});

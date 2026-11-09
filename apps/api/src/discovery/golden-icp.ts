@@ -13,8 +13,8 @@
  * 带行号，绝不静默吞行。
  */
 import { matchIsicNodesForTerms } from '../registry/industry-map';
-import { normalizeCountryValue } from '../discovery/company-normalization';
-import { lookupMarketRegion } from '../discovery/vocab';
+import { normalizeCountryValue } from './company-normalization';
+import { lookupMarketRegion } from './vocab';
 
 export interface GoldenIcpQuery {
   id: string;

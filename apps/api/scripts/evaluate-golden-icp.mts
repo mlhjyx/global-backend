@@ -21,7 +21,7 @@ import {
   targetMarketIsos,
   type GoldenCandidate,
   type PrecisionResult,
-} from '../src/eval/golden-icp';
+} from '../src/discovery/golden-icp';
 import { normalizeCountryValue } from '../src/discovery/company-normalization';
 
 const defaultQueriesPath = fileURLToPath(
