@@ -1,0 +1,8 @@
+{
+  "itemId": "contact-0002",
+  "labels": {
+    "person_exists": "yes",
+    "is_decision_maker": "no",
+    "email_status_truth": "catch_all"
+  }
+}

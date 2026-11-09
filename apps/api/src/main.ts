@@ -26,6 +26,7 @@ import { initializeRuntimeReleaseIdentity } from './runtime/runtime-release-iden
 import { PORTAL_INTRO_MARKDOWN } from './docs/portal-intro';
 import { OPERATION_DESCRIPTIONS } from './docs/operation-descriptions';
 import { resolveDevFastLane } from './runtime/dev-fast-lane';
+import { enforceJudgeModelRouting } from './ai-tasks/task-registry';
 import { installPlatformRevocationHttpBoundary } from './platform-authority/platform-revocation-http.middleware';
 
 /** The filled weekly CSV: UTF-8 text, one export back, bounded. */
@@ -224,6 +225,9 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
 
 async function bootstrap(): Promise<void> {
   const runtimeSettings = resolveRuntimeSettings(process.env);
+  // 终判 judge 只能解析到白名单 pro 档模型（P3 J03）：受控模式（pilot/production）
+  // 下配置漂移在这里 fail-closed，不允许带着 flash 终判上线；development/test 只告警。
+  enforceJudgeModelRouting({ mode: runtimeSettings.mode });
   // Fail closed on any lane variable outside development before Nest starts.
   // The lane only routes; it never changes this process's release identity.
   const devFastLane = resolveDevFastLane(runtimeSettings.mode, process.env);
