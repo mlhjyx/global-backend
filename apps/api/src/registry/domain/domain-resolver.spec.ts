@@ -131,3 +131,70 @@ describe('MultiRouteDomainResolver (fixtures, no network)', () => {
     expect(new Set(DEFAULT_NOISE_DOMAINS).size).toBe(DEFAULT_NOISE_DOMAINS.length);
   });
 });
+
+describe('wikidata_p856 route (ch03 §3.12.2 rank 2)', () => {
+  const wikidata = (
+    entities: Array<{ qid: string; label: string }>,
+    websites: Record<string, string | null>,
+    fail = false,
+  ) => ({
+    key: 'wikidata_fixture',
+    async searchEntity() {
+      if (fail) throw new Error('wikidata down');
+      return entities;
+    },
+    async getOfficialWebsite(qid: string) {
+      return websites[qid] ?? null;
+    },
+  });
+
+  it('offers P856 websites only for label matches and ranks them between search and CT', async () => {
+    const search = new FakeSearchProvider('brave_fixture', [
+      { url: 'https://muster-pumpen.de/suche', rank: 1 },
+    ]);
+    const resolver = new MultiRouteDomainResolver({
+      searchProviders: [search],
+      wikidataProviders: [
+        wikidata(
+          [
+            { qid: 'Q1', label: 'Muster Pumpen GmbH' },
+            { qid: 'Q2', label: 'Beispiel Ventile GmbH' },
+          ],
+          { Q1: 'https://www.muster-pumpen.de/', Q2: 'https://beispiel-ventile.de' },
+        ),
+      ],
+    });
+    const result = await resolver.resolve({ name: 'Muster Pumpen GmbH', country: 'DE' });
+    expect(result.status).toBe('CANDIDATES');
+    // 域名与 search 相同 → 合并进 rank 更小的 search 候选，P856 只作为旁证。
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0]!.route).toBe('search');
+    expect(result.candidates[0]!.evidence.alsoSeenIn).toEqual(['wikidata_fixture']);
+  });
+
+  it('drops non-matching labels and missing websites', async () => {
+    const resolver = new MultiRouteDomainResolver({
+      wikidataProviders: [
+        wikidata(
+          [
+            { qid: 'Q9', label: 'Beispiel Ventile GmbH' },
+            { qid: 'Q8', label: 'Muster Pumpen GmbH' },
+          ],
+          { Q9: 'https://beispiel-ventile.de', Q8: null },
+        ),
+      ],
+    });
+    const result = await resolver.resolve({ name: 'Muster Pumpen GmbH' });
+    expect(result).toEqual({ candidates: [], status: 'NOT_FOUND', notFoundReason: 'NO_HITS' });
+  });
+
+  it('survives a failing wikidata provider without dropping other routes', async () => {
+    const resolver = new MultiRouteDomainResolver({
+      searchProviders: [new FakeSearchProvider('serper_fixture', [{ url: 'https://muster-pumpen.de', rank: 1 }])],
+      wikidataProviders: [wikidata([], {}, true)],
+    });
+    const result = await resolver.resolve({ name: 'Muster Pumpen GmbH' });
+    expect(result.status).toBe('CANDIDATES');
+    expect(result.candidates[0]!.evidence.provider).toBe('serper_fixture');
+  });
+});

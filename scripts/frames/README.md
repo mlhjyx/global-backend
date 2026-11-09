@@ -78,6 +78,18 @@ VIES 的离线接口（fixture 实现），真实 REST 属执行面。多候选�
 全部 AMBIGUOUS（同名冲突），唯一 VERIFIED 才选中；产物可映射为
 `company_domain_resolution` 行草案（`toDomainResolutionDrafts`）。本骨架不抓取、不落库。
 
+## 搜索路由与 P856（离线契约，T3-11/T3-12）
+
+`apps/api/src/registry/domain/search-router.ts`：多搜索 provider 的两种调用形态——域名解析强制的
+`searchAll`（各 provider 独立成败、URL 去重并集、`degradedFrom` 记录失败路、延迟预算按单路失败计）
+与成本优先的 `searchPreferred`（按序回退）；成本按 provider 的 `costPerQueryUsd` 汇总为
+`UsageLedgerDraft`（purpose=`DISCOVERY_DOMAIN_RESOLVE`，写账本属执行面）；`ProviderHealthTracker`
+实现 §3.14.3 阈值（连续 20 次失败/超 4 天无成功→告警；7 天内 30 次失败→自动停用、路由跳过）。
+真实 Brave/Serper/Mojeek HTTP 与密钥属在线部分。
+
+`domain-resolver` 增 `wikidata_p856` 路（rank 2，标签相似 ≥0.85 才采用、最多查 3 个实体），
+与 search/CT/CC 并集排序，单路失败隔离。
+
 ## 人工复核队列（离线契约，T3-15）
 
 `apps/api/src/registry/domain/domain-review.ts`：AMBIGUOUS（或抽样 5% 的 VERIFIED）→ 复核任务：
