@@ -11,6 +11,8 @@
 | `frame-registry.mjs` | 校验 `docs/metrics/frames/frame-registry.v1.json`：唯一键、许可、枚举、ACTIVE 需 license | 纯 Node 内置 |
 | `metrics-lint.mjs` | 校验 `docs/metrics/dictionary/*.json`：`metric-definition/v1` 字段/词表、ID 唯一、tier 前缀一致、来源必须登记（ACTIVE 只许 existing 源）、changelog 1..version 连续 | 纯 Node 内置 |
 | `metrics-snapshot.mjs` | 从引擎库只读计算第一批指标（T0-001/002、T1-008/009、T2-001/005/007/008），输出 `metric-observation/v1` 行（含 computationHash，供 PR-03 落表）；无裁决分母的指标显式 SKIPPED | Node 内置 + psql 只读 |
+| `report.mjs` | 由快照渲染固定周报/月报模板（北极星→覆盖→可触达→质量门→源→风险）；未接线/不可测/缺失三种状态显式留白，禁止手写数字；`--kind weekly|monthly` | 纯 Node 内置 |
+| `source-scorecard.mjs` | 源记分卡离线只读版：每 provider 的 raw/接受/拒收/原因码拆分（对照 reject-reasons 字典，未登记码报漂移）/唯一贡献/新鲜度/成本；输出 `source-scorecard-daily/v1`（含幂等 contentHash） | Node 内置 + psql 只读 |
 | `reply-rate.mjs` | RR1/RR3 成对计算与声明校验（`unknown>0` 无 `ê` 拒绝出数；`--check` 拒绝单口径） | 纯 Node 内置 |
 | `lib/psql.mjs` | 只读 psql 执行器（`PGOPTIONS=-c default_transaction_read_only=on`）与 Wilson/比率工具 | Node 内置 |
 | `lib/prng.mjs` | 固定 seed 的 PRNG / Poisson / 分位数（抽样与 bootstrap） | Node 内置 |
@@ -27,6 +29,8 @@ node scripts/metrics/golden-sampling.mjs --manifest evals/golden-discovery/v1/ma
 node scripts/metrics/frame-registry.mjs [--json]
 node scripts/metrics/metrics-lint.mjs [--json] [--dir docs/metrics/dictionary]
 node scripts/metrics/metrics-snapshot.mjs [--json] [--workspace <uuid>] [--out observations.json]
+node scripts/metrics/report.mjs --kind weekly|monthly --snapshot observations.json [--period <label>] [--out report.md] [--out-json report.json]
+node scripts/metrics/source-scorecard.mjs [--days 30] [--json] [--out scorecard.json]
 node scripts/metrics/reply-rate.mjs --input counts.json [--json]
 node scripts/metrics/reply-rate.mjs --check statement.txt
 ```

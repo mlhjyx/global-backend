@@ -28,7 +28,7 @@ function failureCode(error: unknown): string {
  */
 export async function channelCrawlWorkflow(
   input: ChannelCrawlWorkflowInput,
-): Promise<{ status: "SUCCEEDED" | "FAILED" | "CANCELLED"; pagesFetched: number }> {
+): Promise<{ status: "SUCCEEDED" | "PARTIAL" | "FAILED" | "CANCELLED"; pagesFetched: number }> {
   const admitted = await acts.admitChannelCrawl(input);
   let outcome: ChannelCrawlRunOutcome;
   try {
@@ -67,5 +67,5 @@ export async function channelCrawlWorkflow(
     return { status: "FAILED", pagesFetched: 0 };
   }
   await acts.finalizeChannelCrawl({ input, outcome });
-  return { status: "SUCCEEDED", pagesFetched: outcome.pagesFetched };
+  return { status: outcome.status, pagesFetched: outcome.pagesFetched };
 }
