@@ -408,6 +408,13 @@ export class DiscoveryProviderRegistry {
       update: {},
       create: { key: 'millionverifier', class: 'email_verification', status: 'DISABLED', costPerCallCents: 0 },
     });
+    // P1-04：Emailable —— 双正规则的「第二票」验证器，默认 DISABLED（同 MillionVerifier 的三重门：
+    // data_provider + source_policy + EMAILABLE_API_KEY；成本 $0.0076/条按事件账记账）。
+    await db.dataProvider.upsert({
+      where: { key: 'emailable' },
+      update: {},
+      create: { key: 'emailable', class: 'email_verification', status: 'DISABLED', costPerCallCents: 0 },
+    });
     // 决策人抽取（Impressum/管理层/团队页 → 具名人+职务+买家角色）——联系人发现首选 adapter。
     await db.dataProvider.upsert({
       where: { key: 'decision_maker' },
@@ -446,6 +453,23 @@ export class DiscoveryProviderRegistry {
           allowedPurpose: ['discovery', 'enrichment'],
           retentionDays: 365,
           notes: 'MillionVerifier 邮箱验证 API（HTTPS + API key）。data_provider.millionverifier 默认 DISABLED（kill switch）；结果四态映射与成本（$0.00178/条）由 apps/api/src/enrichment/verification 客户端记账。',
+        },
+      });
+      // P1-04：Emailable 验证 API 域（双正第二票）；未登记 = 未批准（编排 fail-closed）。
+      await db.sourcePolicy.upsert({
+        where: { domain: 'api.emailable.com' },
+        update: {},
+        create: {
+          domain: 'api.emailable.com',
+          sourceType: 'data_verification',
+          accessMode: 'api',
+          reviewStatus: 'APPROVED',
+          robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_OK',
+          personalData: true,
+          allowedPurpose: ['discovery', 'enrichment'],
+          retentionDays: 365,
+          notes: 'Emailable 邮箱验证 API（HTTPS + API key）。data_provider.emailable 默认 DISABLED；双正规则第二票，结果四态映射与成本（$0.0076/条）由 apps/api/src/enrichment/verification 客户端记账。',
         },
       });
       await db.sourcePolicy.upsert({

@@ -46,6 +46,9 @@
   "millionverifier": [
     "email_verification"
   ],
+  "emailable": [
+    "email_verification"
+  ],
   "decision_maker": [
     "contact_discovery"
   ],
