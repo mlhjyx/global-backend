@@ -1,6 +1,7 @@
 import { encryptPii } from '../../compliance/pii-crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseReverifyArgs } from '../../../scripts/reverify-contact-points.mts';
+import { buildVerificationRequestHash } from '../../discovery/contact-point-verification-event';
 import { runReverifySweep, type ReverifyOptions } from './reverify-sweep';
 import type { EmailVerificationProvider } from './email-verification-provider';
 
@@ -53,9 +54,26 @@ function fakePoint(overrides: FakePointOverrides = {}) {
 function fakePrisma(
   points: ReturnType<typeof fakePoint>[],
   suppressions: Array<{ workspaceId?: string; type: string; value: string }> = [],
+  recordedEvents: Array<{
+    providerKey: string;
+    requestHash: string;
+    verdict?: string;
+    catchAllClass?: string | null;
+  }> = [],
 ) {
   const events: Array<Record<string, unknown>> = [];
   const updates: Array<Record<string, unknown>> = [];
+  /** 按 where.OR 的 (providerKey, requestHash) 对过滤——幂等预查的语义由夹具真实执行。 */
+  const eventFindMany = vi.fn(
+    async (args: {
+      where?: { OR?: Array<{ providerKey: string; requestHash: string }> };
+    }) => {
+      const ors = args?.where?.OR ?? [];
+      return recordedEvents.filter((row) =>
+        ors.some((pair) => pair.providerKey === row.providerKey && pair.requestHash === row.requestHash),
+      );
+    },
+  );
   const eventDelegate = {
     findUnique: vi.fn(async () => null),
     count: vi.fn(async () => 0),
@@ -73,7 +91,10 @@ function fakePrisma(
       }),
     },
     suppressionRecord: { findMany: vi.fn(async () => suppressions) },
-    contactPointVerificationEvent: { findUnique: vi.fn(async () => null) },
+    contactPointVerificationEvent: {
+      findUnique: vi.fn(async () => null),
+      findMany: eventFindMany,
+    },
     $transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
       fn({
         contactPoint: { update: prisma.contactPoint.update },
@@ -86,12 +107,15 @@ function fakePrisma(
   return { prisma, events, updates, eventDelegate };
 }
 
-function fakeProvider(result: Awaited<ReturnType<EmailVerificationProvider['verify']>>): EmailVerificationProvider & {
+function fakeProvider(
+  result: Awaited<ReturnType<EmailVerificationProvider['verify']>>,
+  key = 'millionverifier',
+): EmailVerificationProvider & {
   verify: ReturnType<typeof vi.fn>;
 } {
   return {
-    key: 'millionverifier',
-    domain: 'api.millionverifier.com',
+    key,
+    domain: `${key}.example`,
     isConfigured: () => true,
     verify: vi.fn(async () => result),
   };
@@ -146,7 +170,7 @@ describe('runReverifySweep：单验证器 positive 不判 VALID（双正规则�
     const provider = fakeProvider(validResult);
     const summary = await runReverifySweep({
       prisma: prisma as never,
-      provider,
+      providers: [provider],
       options: baseOptions(),
       now: () => NOW,
     });
@@ -158,7 +182,7 @@ describe('runReverifySweep：单验证器 positive 不判 VALID（双正规则�
       providerKey: 'millionverifier',
       method: 'third_party_api',
       costMicrousd: BigInt(1_780),
-      actorId: 'reverify-sweep:cli',
+      actorId: 'reverify-sweep',
     });
     expect(String(events[0]?.detail)).toContain('single_positive_requires_second_vote');
     expect(updates[0]).toMatchObject({
@@ -172,7 +196,7 @@ describe('runReverifySweep：单验证器 positive 不判 VALID（双正规则�
   it('供应商 invalid → INVALID（5xx 强否定，单票即可）', async () => {
     const { prisma, updates } = fakePrisma([fakePoint()]);
     const provider = fakeProvider({ ...validResult, state: 'INVALID', catchAll: 'unknown', catchAllClass: 'unknown', detail: 'invalid:invalid.mailbox' });
-    const summary = await runReverifySweep({ prisma: prisma as never, provider, options: baseOptions(), now: () => NOW });
+    const summary = await runReverifySweep({ prisma: prisma as never, providers: [provider], options: baseOptions(), now: () => NOW });
     expect(summary.byState.INVALID).toBe(1);
     expect(updates[0]).toMatchObject({ verificationState: 'INVALID', status: 'INVALID', validSince: null });
   });
@@ -180,7 +204,7 @@ describe('runReverifySweep：单验证器 positive 不判 VALID（双正规则�
   it('accept_all=true 的 ok → CATCH_ALL_RISKY·true_catch_all（不得判 VALID）', async () => {
     const { prisma, updates } = fakePrisma([fakePoint()]);
     const provider = fakeProvider({ ...validResult, state: 'CATCH_ALL_RISKY', catchAll: 'catch_all', catchAllClass: 'true_catch_all', acceptAll: true });
-    const summary = await runReverifySweep({ prisma: prisma as never, provider, options: baseOptions(), now: () => NOW });
+    const summary = await runReverifySweep({ prisma: prisma as never, providers: [provider], options: baseOptions(), now: () => NOW });
     expect(summary.byState.CATCH_ALL_RISKY).toBe(1);
     expect(updates[0]).toMatchObject({ verificationState: 'CATCH_ALL_RISKY', status: 'RISKY', catchAllClass: 'true_catch_all' });
   });
@@ -188,7 +212,7 @@ describe('runReverifySweep：单验证器 positive 不判 VALID（双正规则�
   it('供应商网络错误 → 状态不变（UNKNOWN），事件 verdict=error 且不计费', async () => {
     const { prisma, events, updates } = fakePrisma([fakePoint()]);
     const provider = fakeProvider({ ...validResult, state: 'UNKNOWN', catchAll: 'unknown', catchAllClass: 'unknown', error: 'timeout', costMicrousd: 0 });
-    const summary = await runReverifySweep({ prisma: prisma as never, provider, options: baseOptions(), now: () => NOW });
+    const summary = await runReverifySweep({ prisma: prisma as never, providers: [provider], options: baseOptions(), now: () => NOW });
     expect(summary.errors).toBe(1);
     expect(events[0]).toMatchObject({ verdict: 'error' });
     expect(updates[0]).toMatchObject({ verificationState: 'UNKNOWN' });
@@ -204,7 +228,7 @@ describe('runReverifySweep：成本上限', () => {
     const provider = fakeProvider(validResult);
     const summary = await runReverifySweep({
       prisma: prisma as never,
-      provider,
+      providers: [provider],
       options: baseOptions({ maxCostMicrousd: 1_000 }),
       now: () => NOW,
     });
@@ -218,7 +242,7 @@ describe('runReverifySweep：合规门与幂等', () => {
   it('人名邮箱无 lawful basis → 不触网，记 blocked 事件，状态不变', async () => {
     const { prisma, events, updates } = fakePrisma([fakePoint({ legalBasis: null })]);
     const provider = fakeProvider(validResult);
-    const summary = await runReverifySweep({ prisma: prisma as never, provider, options: baseOptions(), now: () => NOW });
+    const summary = await runReverifySweep({ prisma: prisma as never, providers: [provider], options: baseOptions(), now: () => NOW });
     expect(provider.verify).not.toHaveBeenCalled();
     expect(summary.skippedCompliance).toBe(1);
     expect(events[0]).toMatchObject({ verdict: 'blocked' });
@@ -228,7 +252,7 @@ describe('runReverifySweep：合规门与幂等', () => {
   it('suppression 命中（email）→ 不触网，记 blocked 事件', async () => {
     const { prisma, events } = fakePrisma([fakePoint()], [{ workspaceId: '00000000-0000-4000-8000-0000000000bb', type: 'email', value: 'MAX.MUSTERMANN@ACME.EXAMPLE' }]);
     const provider = fakeProvider(validResult);
-    const summary = await runReverifySweep({ prisma: prisma as never, provider, options: baseOptions(), now: () => NOW });
+    const summary = await runReverifySweep({ prisma: prisma as never, providers: [provider], options: baseOptions(), now: () => NOW });
     expect(provider.verify).not.toHaveBeenCalled();
     expect(summary.skippedSuppressed).toBe(1);
     expect(events[0]).toMatchObject({ verdict: 'blocked' });
@@ -237,19 +261,151 @@ describe('runReverifySweep：合规门与幂等', () => {
   it('公司被抑制（status=SUPPRESSED）→ 不触网', async () => {
     const { prisma } = fakePrisma([fakePoint({ companyStatus: 'SUPPRESSED' })]);
     const provider = fakeProvider(validResult);
-    const summary = await runReverifySweep({ prisma: prisma as never, provider, options: baseOptions(), now: () => NOW });
+    const summary = await runReverifySweep({ prisma: prisma as never, providers: [provider], options: baseOptions(), now: () => NOW });
     expect(provider.verify).not.toHaveBeenCalled();
     expect(summary.skippedSuppressed).toBe(1);
   });
 
   it('同桶已处理（事件已存在）→ 不调供应商、不重复计费', async () => {
-    const { prisma } = fakePrisma([fakePoint()]);
-    prisma.contactPointVerificationEvent.findUnique.mockResolvedValueOnce({ id: 'dup' });
+    const point = fakePoint();
+    const recorded = [
+      {
+        providerKey: 'millionverifier',
+        requestHash: buildVerificationRequestHash(
+          point.id,
+          'millionverifier',
+          `${point.value}|2026-11-09`,
+        ),
+      },
+    ];
+    const { prisma } = fakePrisma([point], [], recorded);
     const provider = fakeProvider(validResult);
-    const summary = await runReverifySweep({ prisma: prisma as never, provider, options: baseOptions(), now: () => NOW });
+    const summary = await runReverifySweep({ prisma: prisma as never, providers: [provider], options: baseOptions(), now: () => NOW });
     expect(provider.verify).not.toHaveBeenCalled();
     expect(summary.duplicates).toBe(1);
     expect(summary.costMicrousd).toBe(0);
+  });
+
+  it('部分恢复：主验已记录、只有第二票 pending → 只调第二家（不重复买主验）', async () => {
+    const point = fakePoint();
+    const recorded = [
+      {
+        providerKey: 'millionverifier',
+        requestHash: buildVerificationRequestHash(
+          point.id,
+          'millionverifier',
+          `${point.value}|2026-11-09`,
+        ),
+        verdict: 'valid',
+        catchAllClass: 'not_catch_all',
+      },
+    ];
+    const { prisma, events, updates } = fakePrisma([point], [], recorded);
+    const mv = fakeProvider({ ...validResult, providerKey: 'millionverifier' });
+    const em = fakeProvider(
+      { ...validResult, providerKey: 'emailable', costMicrousd: 7_600 },
+      'emailable',
+    );
+    const summary = await runReverifySweep({
+      prisma: prisma as never,
+      providers: [mv, em],
+      options: baseOptions(),
+      now: () => NOW,
+    });
+    expect(mv.verify).not.toHaveBeenCalled();
+    expect(em.verify).toHaveBeenCalledOnce();
+    expect(summary.duplicates).toBe(0);
+    expect(summary.providerCalls).toBe(1);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ providerKey: 'emailable' });
+    // 已记录的主验 valid 票被重建进矩阵：加上本次第二票 → 双正 VALID（而不是单票 UNKNOWN）。
+    expect(summary.byState.VALID).toBe(1);
+    expect(updates[0]).toMatchObject({ verificationState: 'VALID' });
+  });
+
+  it('双 provider 全 VALID → 点升 VALID，两家各一行事件账', async () => {
+    const { prisma, events, updates } = fakePrisma([fakePoint()]);
+    const mv = fakeProvider({ ...validResult, providerKey: 'millionverifier' });
+    const em = fakeProvider(
+      { ...validResult, providerKey: 'emailable', costMicrousd: 7_600 },
+      'emailable',
+    );
+    const summary = await runReverifySweep({
+      prisma: prisma as never,
+      providers: [mv, em],
+      options: baseOptions(),
+      now: () => NOW,
+    });
+    expect(mv.verify).toHaveBeenCalledOnce();
+    expect(em.verify).toHaveBeenCalledOnce();
+    expect(events).toHaveLength(2);
+    expect(events.map((event) => event.providerKey)).toEqual(['millionverifier', 'emailable']);
+    expect(summary.byState.VALID).toBe(1);
+    expect(summary.costMicrousd).toBe(1_780 + 7_600);
+    expect(updates[0]).toMatchObject({
+      verificationState: 'VALID',
+      status: 'VALID',
+      verificationProvider: 'emailable',
+      validSince: NOW,
+    });
+  });
+
+  it('同桶已记过 blocked（compliance_gate）→ 直接跳过（不重复解密/评估/占额度）', async () => {
+    const point = fakePoint();
+    const recorded = [
+      {
+        providerKey: 'compliance_gate',
+        requestHash: buildVerificationRequestHash(
+          point.id,
+          'compliance_gate',
+          `${point.value}|2026-11-09`,
+        ),
+        verdict: 'blocked',
+      },
+    ];
+    const { prisma, events } = fakePrisma([point], [], recorded);
+    const provider = fakeProvider({ ...validResult, providerKey: 'millionverifier' });
+    const summary = await runReverifySweep({ prisma: prisma as never, providers: [provider], options: baseOptions(), now: () => NOW });
+    expect(provider.verify).not.toHaveBeenCalled();
+    expect(summary.duplicates).toBe(1);
+    expect(events).toHaveLength(0);
+  });
+
+  it('CATCH_ALL_RISKY 点重验回 UNKNOWN → 旧 catch-all 分类不被清掉', async () => {
+    const point = { ...fakePoint(), verificationState: 'CATCH_ALL_RISKY' };
+    const { prisma, updates } = fakePrisma([point]);
+    const provider = fakeProvider({ ...validResult, state: 'UNKNOWN', catchAll: 'unknown', catchAllClass: 'unknown', costMicrousd: 1_000 });
+    await runReverifySweep({ prisma: prisma as never, providers: [provider], options: baseOptions(), now: () => NOW });
+    expect(updates[0]).toMatchObject({ verificationState: 'CATCH_ALL_RISKY' });
+    expect(updates[0]).not.toHaveProperty('catchAllClass');
+    expect(updates[0]).not.toHaveProperty('catchAll');
+  });
+
+  it('主验 VALID + 第二票供应商错误 → 归因给主验（最后有效步骤），状态 UNKNOWN', async () => {
+    const { prisma, updates } = fakePrisma([fakePoint()]);
+    const mv = fakeProvider({ ...validResult, providerKey: 'millionverifier' });
+    const em = fakeProvider(
+      { ...validResult, providerKey: 'emailable', state: 'UNKNOWN', error: 'timeout', costMicrousd: 0 },
+      'emailable',
+    );
+    const summary = await runReverifySweep({ prisma: prisma as never, providers: [mv, em], options: baseOptions(), now: () => NOW });
+    expect(summary.byState.UNKNOWN).toBe(1);
+    expect(updates[0]).toMatchObject({ verificationProvider: 'millionverifier' });
+  });
+
+  it('本轮预算只剩一点点时不再发起二次确认（剩余预算传给瀑布）', async () => {
+    const { prisma } = fakePrisma([fakePoint()]);
+    const mv = fakeProvider({ ...validResult, providerKey: 'millionverifier', costMicrousd: 1_780 });
+    const em = fakeProvider({ ...validResult, providerKey: 'emailable', costMicrousd: 7_600 }, 'emailable');
+    const summary = await runReverifySweep({
+      prisma: prisma as never,
+      providers: [mv, em],
+      options: baseOptions({ maxCostMicrousd: 1_000 }),
+      now: () => NOW,
+    });
+    expect(mv.verify).toHaveBeenCalledOnce();
+    expect(em.verify).not.toHaveBeenCalled();
+    expect(summary.costMicrousd).toBe(1_780);
   });
 
   it('dry-run：只选点，不调用供应商/不写库', async () => {
@@ -257,7 +413,7 @@ describe('runReverifySweep：合规门与幂等', () => {
     const provider = fakeProvider(validResult);
     const summary = await runReverifySweep({
       prisma: prisma as never,
-      provider,
+      providers: [provider],
       options: baseOptions({ dryRun: true }),
       now: () => NOW,
     });
