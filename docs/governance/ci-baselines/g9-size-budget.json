@@ -3041,6 +3041,15 @@
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
+    },
+    "apps/api/src/enrichment/waterfall/enrich-contact-email.ts#enrichContactEmail": {
+      "file": "apps/api/src/enrichment/waterfall/enrich-contact-email.ts",
+      "name": "enrichContactEmail",
+      "line": 139,
+      "complexity": 41,
+      "owner": "P1-lane",
+      "expiresAt": "2026-12-09",
+      "reason": "#966 合入首日被 G9 抓到（41>40）；冻结现状，P1 后续拆分该函数后删除条目"
     }
   }
 }
