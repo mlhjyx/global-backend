@@ -37,6 +37,7 @@ import "./metrics/metrics-snapshot.test.mjs";
 import "./metrics/report.test.mjs";
 import "./metrics/source-scorecard.test.mjs";
 import "./metrics/golden-run.test.mjs";
+import "./metrics/golden-ci-smoke.test.mjs";
 import "./metrics/reply-rate.test.mjs";
 import "./metrics/lib/psql.test.mjs";
 
