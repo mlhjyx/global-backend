@@ -104,3 +104,5 @@ export const ENRICH_COMPANY_CONCURRENCY = 2 as const;
 export const ENRICH_SOFT_DEADLINE_MS = 600_000 as const;
 /** run 内最多对 25 家公司触发富集（计划 §2.3.4.7）。 */
 export const MAX_RUN_ENRICH_COMPANIES = 25 as const;
+/** run 内单公司富集的预算上限（$0.50）：调用计数上限之外的第二道钱闸。 */
+export const ENRICH_COMPANY_BUDGET_CAP_MICROUSD = 500_000 as const;

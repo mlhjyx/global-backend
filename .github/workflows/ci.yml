@@ -244,6 +244,11 @@ jobs:
           PRISMA_CIGATE_FROM_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
         run: node packages/db/scripts/rls-catalog-gate.mjs
 
+      # ch08 §3.4 G9：文件体量（warn 800 / fail 1200）与函数圈复杂度（warn 20 / fail 40），棘轮基线。
+      - name: File and complexity budget gate（G9）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: node scripts/check-file-budgets.mjs
+
       - name: Native Temporal reader server（verified modules · offline race · build）
         if: needs.renderer-visual-scope.outputs.run_temporal_go == 'true'
         shell: bash

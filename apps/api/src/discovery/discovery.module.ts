@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { DiscoveryService } from './discovery.service';
+import { ContactEnrichmentService } from './enrich-contacts.service';
 import { DiscoveryController } from './discovery.controller';
 import { JudgmentReviewController } from './judgment/judgment-review.controller';
 import { DiscoveryProviderRegistry } from './provider.registry';
@@ -20,6 +21,7 @@ import { ExecutionBudgetModule } from '../execution-budget/execution-budget.modu
       inject: [PrismaService],
     },
     DiscoveryService,
+    ContactEnrichmentService,
     {
       provide: DiscoveryProviderRegistry,
       // API 侧的联系人发现/邮箱验证走真实 public_web —— 注入全局 ModelGateway。
