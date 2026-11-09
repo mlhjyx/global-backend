@@ -77,16 +77,45 @@ export const METRIC_QUERIES: readonly MetricQueryDefinition[] = [
           and cp.verified_at >= ${dayEnd}::timestamptz - interval '180 days'
           and ct.seniority in ('c_level', 'vp', 'director', 'manager')
       )
+      account_counts as (
+        select workspace_id, count(distinct cid)::int denominator from acc group by 1
+      ),
+      platform_counts as (
+        select coalesce(sum(total_n), 0)::int total_n,
+               coalesce(sum(email_only_n), 0)::int email_only_n,
+               coalesce(sum(phone_only_n), 0)::int phone_only_n,
+               coalesce(sum(both_n), 0)::int both_n
+        from people_counts
+      )
       select jsonb_build_object('workspace_id', a.workspace_id::text) stratum,
-             a.denominator::int denominator,
-             coalesce(p.numerator, 0)::int numerator
-      from (select workspace_id, count(distinct cid)::int denominator from acc group by 1) a
-      left join (select workspace_id, count(*)::int numerator from people group by 1) p
-        using (workspace_id)
+             a.denominator,
+             coalesce(c.total_n, 0)::int numerator
+      from account_counts a
+      left join people_counts c using (workspace_id)
+      union all
+      select jsonb_build_object('workspace_id', a.workspace_id::text, 'channel', v.channel),
+             a.denominator,
+             coalesce(case v.channel
+                        when 'email_only' then c.email_only_n
+                        when 'phone_only' then c.phone_only_n
+                        else c.both_n
+                      end, 0)::int
+      from account_counts a
+      cross join (values ('email_only'), ('phone_only'), ('both')) as v(channel)
+      left join people_counts c using (workspace_id)
       union all
       select jsonb_build_object('workspace_id', 'ALL'),
              (select count(distinct cid)::int from acc),
-             (select count(*)::int from people)`,
+             (select total_n from platform_counts)
+      union all
+      select jsonb_build_object('workspace_id', 'ALL', 'channel', v.channel),
+             (select count(distinct cid)::int from acc),
+             case v.channel
+               when 'email_only' then (select email_only_n from platform_counts)
+               when 'phone_only' then (select phone_only_n from platform_counts)
+               else (select both_n from platform_counts)
+             end
+      from (values ('email_only'), ('phone_only'), ('both')) as v(channel)`,
   },
   {
     metricId: "T0-002",
@@ -102,28 +131,74 @@ export const METRIC_QUERIES: readonly MetricQueryDefinition[] = [
         where l.fit_verdict = 'match' and l.status <> 'REJECTED'
           and c.status in ('NEW', 'ENRICHED')
       ),
-      people as (
-        select distinct ct.workspace_id, ct.dedupe_key
+      people_points as (
+        select ct.workspace_id, ct.dedupe_key,
+               (${EMAIL_OK} and cp.verified_at >= ${dayEnd}::timestamptz - interval '180 days')
+                 as has_email,
+               (cp.type = 'phone' and cp.status = 'VALID'
+                and cp.verified_at >= ${dayEnd}::timestamptz - interval '90 days')
+                 as has_phone
         from canonical_contact ct
         join acc a on a.cid = ct.company_id and a.workspace_id = ct.workspace_id
         join contact_point cp on cp.contact_id = ct.id and cp.workspace_id = ct.workspace_id
-        where (
-          (${EMAIL_OK} and cp.verified_at >= ${dayEnd}::timestamptz - interval '180 days')
-          or (cp.type = 'phone' and cp.status = 'VALID'
-              and cp.verified_at >= ${dayEnd}::timestamptz - interval '90 days')
-        )
-        and ct.seniority in ('c_level', 'vp', 'director', 'manager')
+        where ct.seniority in ('c_level', 'vp', 'director', 'manager')
+      ),
+      people as (
+        select workspace_id, dedupe_key,
+               bool_or(has_email) as has_email,
+               bool_or(has_phone) as has_phone
+        from people_points
+        group by 1, 2
+        having bool_or(has_email) or bool_or(has_phone)
+      ),
+      people_counts as (
+        select workspace_id,
+               count(*)::int as total_n,
+               count(*) filter (where has_email and has_phone)::int as both_n,
+               count(*) filter (where has_email and not has_phone)::int as email_only_n,
+               count(*) filter (where has_phone and not has_email)::int as phone_only_n
+        from people
+        group by 1
+      )
+      account_counts as (
+        select workspace_id, count(distinct cid)::int denominator from acc group by 1
+      ),
+      platform_counts as (
+        select coalesce(sum(total_n), 0)::int total_n,
+               coalesce(sum(email_only_n), 0)::int email_only_n,
+               coalesce(sum(phone_only_n), 0)::int phone_only_n,
+               coalesce(sum(both_n), 0)::int both_n
+        from people_counts
       )
       select jsonb_build_object('workspace_id', a.workspace_id::text) stratum,
-             a.denominator::int denominator,
-             coalesce(p.numerator, 0)::int numerator
-      from (select workspace_id, count(distinct cid)::int denominator from acc group by 1) a
-      left join (select workspace_id, count(*)::int numerator from people group by 1) p
-        using (workspace_id)
+             a.denominator,
+             coalesce(c.total_n, 0)::int numerator
+      from account_counts a
+      left join people_counts c using (workspace_id)
+      union all
+      select jsonb_build_object('workspace_id', a.workspace_id::text, 'channel', v.channel),
+             a.denominator,
+             coalesce(case v.channel
+                        when 'email_only' then c.email_only_n
+                        when 'phone_only' then c.phone_only_n
+                        else c.both_n
+                      end, 0)::int
+      from account_counts a
+      cross join (values ('email_only'), ('phone_only'), ('both')) as v(channel)
+      left join people_counts c using (workspace_id)
       union all
       select jsonb_build_object('workspace_id', 'ALL'),
              (select count(distinct cid)::int from acc),
-             (select count(*)::int from people)`,
+             (select total_n from platform_counts)
+      union all
+      select jsonb_build_object('workspace_id', 'ALL', 'channel', v.channel),
+             (select count(distinct cid)::int from acc),
+             case v.channel
+               when 'email_only' then (select email_only_n from platform_counts)
+               when 'phone_only' then (select phone_only_n from platform_counts)
+               else (select both_n from platform_counts)
+             end
+      from (values ('email_only'), ('phone_only'), ('both')) as v(channel)`,
   },
   {
     metricId: "T1-008",
