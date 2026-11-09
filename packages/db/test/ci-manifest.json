@@ -1,5 +1,6 @@
 {
   "service": [
+    "company-signal.rls.spec.mjs",
     "generic-operation-artifact-subject.rls.spec.mjs",
     "pack-runtime.rls.spec.mjs",
     "platform-channel-crawl-authority.rls.spec.mjs",

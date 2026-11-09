@@ -127,6 +127,11 @@
       "SELECT",
       "UPDATE"
     ],
+    "company_signal": [
+      "INSERT",
+      "SELECT",
+      "UPDATE"
+    ],
     "conformal_threshold": [
       "SELECT"
     ],
