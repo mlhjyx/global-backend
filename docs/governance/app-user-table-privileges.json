@@ -115,6 +115,12 @@
       "SELECT",
       "UPDATE"
     ],
+    "company_domain_resolution": [
+      "DELETE",
+      "INSERT",
+      "SELECT",
+      "UPDATE"
+    ],
     "company_profile": [
       "DELETE",
       "INSERT",
@@ -188,6 +194,12 @@
       "SELECT"
     ],
     "discovery_run": [
+      "DELETE",
+      "INSERT",
+      "SELECT",
+      "UPDATE"
+    ],
+    "domain_review_task": [
       "DELETE",
       "INSERT",
       "SELECT",
