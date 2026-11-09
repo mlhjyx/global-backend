@@ -206,7 +206,12 @@ function criterionById(
 ): JudgeCriterionOutput {
   const criterion = output.criteria.find((item) => item.id === id);
   // validateJudgeOutputV2 已保证恰好 5 项且 id 无重复；缺失属编程错误。
-  if (!criterion) throw new Error(`judge-v2: output missing criterion ${id}`);
+  // 静态消息：execution-control-error.static.spec 禁止共享边界构造动态 Error。
+  if (!criterion) {
+    throw new Error('judge-v2: judge output is missing a criterion (validation bypassed)', {
+      cause: id,
+    });
+  }
   return criterion;
 }
 
