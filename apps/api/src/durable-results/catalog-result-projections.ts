@@ -18,6 +18,7 @@ export const CATALOG_RESULT_TOOL_IDS = Object.freeze([
   'searxng.search', 'social.search', 'social.fetch', 'wikidata.sparql', 'osm.overpass',
   'wikidata.entity', 'gleif.fetch', 'companies_house.search', 'inpi_rne.search',
   'google_patents.search', 'tradefair.algolia', 'mapyourshow.fetch',
+  'deepseek.search', 'deepseek.fetch',
 ] as const);
 export type CatalogResultToolId = (typeof CATALOG_RESULT_TOOL_IDS)[number];
 export const CATALOG_RESULT_PROJECTION_SCHEMAS = Object.freeze({
@@ -33,6 +34,8 @@ export const CATALOG_RESULT_PROJECTION_SCHEMAS = Object.freeze({
   'google_patents.search': platformExecutionToolContract('google_patents.search').resultSchema,
   'tradefair.algolia': platformExecutionToolContract('tradefair.algolia').resultSchema,
   'mapyourshow.fetch': platformExecutionToolContract('mapyourshow.fetch').resultSchema,
+  'deepseek.search': 'deepseek-search/v1',
+  'deepseek.fetch': 'deepseek-fetch/v1',
 } satisfies Readonly<Record<CatalogResultToolId, TypedProjectionSchema>>);
 const TOOL_RESULT_KEYS = ['data', 'costCents', 'degraded'] as const;
 const TOOL_RESULT_WITH_PROVENANCE_KEYS = [...TOOL_RESULT_KEYS, 'provenance'] as const;
@@ -928,10 +931,29 @@ const mapYourShowDefinition = definition(
   }),
 );
 
+/** deepseek.search 的持久形态与 searxng 同形（url+title ≤20）：摘要/正文不持久化。 */
+const deepseekSearchDefinition = definition(
+  'deepseek-search/v1',
+  objectSchema({ results: arraySchema(20, searxResultSchema) }, ['results']),
+  searxData,
+);
+
+/** deepseek.fetch 的持久形态：{url, title?, content(≤32k chars)}——PERSONAL_DATA 页面正文投影。 */
+const deepseekFetchDefinition = definition(
+  'deepseek-fetch/v1',
+  objectSchema({
+    url: stringSchema(2048),
+    title: stringSchema(2000),
+    content: stringSchema(32_000),
+  }, ['url', 'content']),
+  (value) => mapClosedRecord(value, ['url', 'title', 'content'], ['url', 'content']),
+);
+
 export const CATALOG_RESULT_PROJECTION_DEFINITIONS = Object.freeze([
   searxDefinition, socialSearchDefinition, socialFetchDefinition, wikidataSparqlDefinition,
   osmDefinition, wikidataEntityDefinition, gleifDefinition, companiesHouseDefinition,
   inpiDefinition, googlePatentsDefinition, tradeFairDefinition, mapYourShowDefinition,
+  deepseekSearchDefinition, deepseekFetchDefinition,
 ] as const);
 
 export function getCatalogResultProjectionSchema(toolId: string): TypedProjectionSchema {

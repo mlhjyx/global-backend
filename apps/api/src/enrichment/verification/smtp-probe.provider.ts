@@ -37,7 +37,12 @@ import { scoreEmailPoint } from './verification-policy';
  * 用途门 + 预算 + 限流 + Trace + 工具内 SSRF 护栏）。凭证/门之外的失败一律降级不抛
  * （执行控制类错误原样上抛，fail-closed）。
  *
- * env：`EMAIL_VERIFY_SMTP_PROBE_ENABLED`（缺省 true；`0/false/no/off` 关闭兜底票）。
+ * env：`EMAIL_VERIFY_SMTP_PROBE_ENABLED`（**缺省 false**；只有显式 `1/true/yes/on` 才启用）。
+ * 默认关的实测依据（2026-11-10，本机 xin）：对 gmail-smtp-in.l.google.com / mx00.1and1.com /
+ * mx.hermes.epson.de 做 25 端口探测，TCP 层被 TUN fake-ip 直接接受但 **SMTP banner 全部超时**
+ * ——宿主的 25 端口出网不可用，探测只会得到 UNKNOWN（no response）。第二票的现实路径是
+ * 第三方验证器 key（Emailable/MillionVerifier）或具备 25 出口的探测节点；在此之前保持默认关，
+ * 开启也只产生无裁决的 UNKNOWN/error 票，不影响现有流程（不可达/超时绝不伪装成投票）。
  * 超时与限速沿用工具声明（8s 连接超时、rps=1、concurrency=2）。
  * 成本 0 微美元；detail 只含响应码/状态词，不含邮箱明文。
  */
@@ -51,10 +56,13 @@ export interface SmtpProbeConfig {
   enabled: boolean;
 }
 
-/** 缺省开启：只有显式假值（0/false/no/off）才关闭第二票兜底。 */
+/**
+ * 缺省**关闭**（2026-11-10 实测：宿主 25 端口出网不可用，探测只会得到 UNKNOWN）；
+ * 只有显式真值（1/true/yes/on）才启用第二票兜底——须先确认部署环境具备 25 端口出口。
+ */
 export function resolveSmtpProbeConfig(env: NodeJS.ProcessEnv = process.env): SmtpProbeConfig {
   const raw = (env.EMAIL_VERIFY_SMTP_PROBE_ENABLED ?? '').trim().toLowerCase();
-  return { enabled: raw === '' ? true : !/^(0|false|no|off)$/u.test(raw) };
+  return { enabled: /^(1|true|yes|on)$/u.test(raw) };
 }
 
 export interface SmtpProbeMapping {
@@ -98,6 +106,11 @@ export function mapSmtpProbeOutcome(input: {
   const probe = input.probe;
   if (probe.egressBlocked) return unknown(`mx_egress_blocked:${probe.egressBlocked}`, 'mx_egress_blocked');
   if (!probe.reachable) return unknown('smtp_unreachable_port25_blocked?', 'smtp_unreachable');
+  // 连接建立但对端从未给出任何 SMTP 响应（banner 超时——宿主 TUN fake-ip 会先接受 TCP，
+  // 2026-11-10 实测正是这种形态）→ 会话级不可用，不是 MAIL FROM/RCPT 判决。
+  if (probe.mailFromCode === null && probe.codes.length === 0) {
+    return unknown('smtp_no_response_banner_timeout', 'smtp_no_response');
+  }
   // MAIL FROM 被拒（两种发件人身份都拒）→ RCPT 结果不可信，不是邮箱判决。
   if (!isAccepted(probe.mailFromCode)) return unknown('mail_from_rejected', 'mail_from_rejected');
   const rcptCode = probe.codes[0] ?? null;

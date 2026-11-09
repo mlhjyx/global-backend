@@ -480,6 +480,28 @@ const SOCIAL_FETCH_RAW: Readonly<Record<string, unknown>> = {
   costCents: 0,
 };
 
+/** deepseek.search 的最小合法投影：{results[{url,title}]}，贴近持久上限。 */
+const DEEPSEEK_SEARCH_RAW: RawToolResult = {
+  data: {
+    results: Array.from({ length: 20 }, (_, index) => ({
+      url: index === 0 ? URL_2048 : `https://deepseek-${index}.example/produkte`,
+      title: index === 0 ? 't'.repeat(2000) : `DeepSeek result ${index}`,
+    })),
+  },
+  costCents: 1,
+  degraded: true,
+};
+
+/** deepseek.fetch 的最小合法投影：{url, title, content}。 */
+const DEEPSEEK_FETCH_RAW: RawToolResult = {
+  data: {
+    url: 'https://pumpen-schmid.example/impressum',
+    title: 't'.repeat(2000),
+    content: 'Geschaeftsfuehrer und Produkte der Pumpen Schmid GmbH. '.repeat(400),
+  },
+  costCents: 1,
+};
+
 const REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES: readonly ProjectionFixture[] = [
   { toolId: 'searxng.search', schema: 'searxng-search/v1', raw: SEARX_RAW },
   { toolId: 'social.search', schema: 'social-search/v1', raw: SEARX_RAW },
@@ -496,6 +518,8 @@ const REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES: readonly ProjectionFixture[] = [
   },
   { toolId: 'tradefair.algolia', schema: 'tradefair-algolia/v1', raw: TRADE_FAIR_RAW },
   { toolId: 'mapyourshow.fetch', schema: 'mapyourshow-fetch/v1', raw: MAPYOURSHOW_RAW },
+  { toolId: 'deepseek.search', schema: 'deepseek-search/v1', raw: DEEPSEEK_SEARCH_RAW },
+  { toolId: 'deepseek.fetch', schema: 'deepseek-fetch/v1', raw: DEEPSEEK_FETCH_RAW },
 ];
 
 function schemaTypes(node: JsonRecord): readonly string[] {
@@ -723,6 +747,18 @@ const EXPECTED_BOUNDS: Readonly<Record<string, JsonRecord>> = {
     '$.data.hits[].fields.halls.maxItems': 32,
     '$.data.hits[].fields.halls[].maxLength': 200,
   },
+  'deepseek-search/v1': {
+    ...COMMON_RESULT_BOUNDS,
+    '$.data.results.maxItems': 20,
+    '$.data.results[].url.maxLength': 2048,
+    '$.data.results[].title.maxLength': 2000,
+  },
+  'deepseek-fetch/v1': {
+    ...COMMON_RESULT_BOUNDS,
+    '$.data.url.maxLength': 2048,
+    '$.data.title.maxLength': 2000,
+    '$.data.content.maxLength': 32_000,
+  },
 };
 
 function selectedOneOfIndex(schema: JsonRecord, value: unknown): number {
@@ -829,6 +865,7 @@ describe('closed catalog Tool result projections', () => {
       'searxng.search', 'social.search', 'social.fetch', 'wikidata.sparql', 'osm.overpass',
       'wikidata.entity', 'gleif.fetch', 'companies_house.search', 'inpi_rne.search',
       'google_patents.search', 'tradefair.algolia', 'mapyourshow.fetch',
+      'deepseek.search', 'deepseek.fetch',
     ]);
     expect(CATALOG_RESULT_PROJECTION_SCHEMAS).toEqual({
       'searxng.search': 'searxng-search/v1',
@@ -843,6 +880,8 @@ describe('closed catalog Tool result projections', () => {
       'google_patents.search': 'google-patents-search/v1',
       'tradefair.algolia': 'tradefair-algolia/v1',
       'mapyourshow.fetch': 'mapyourshow-fetch/v1',
+      'deepseek.search': 'deepseek-search/v1',
+      'deepseek.fetch': 'deepseek-fetch/v1',
     });
     expect(CATALOG_RESULT_PROJECTION_DEFINITIONS.map((definition) => definition.schema))
       .toEqual(Object.values(CATALOG_RESULT_PROJECTION_SCHEMAS));
