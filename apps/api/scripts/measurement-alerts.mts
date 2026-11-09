@@ -113,8 +113,10 @@ async function main(): Promise<number> {
     .map((key) => key.slice("weekly:".length));
 
   const asOfDay = asOf.toISOString().slice(0, 10);
-  // 92 天覆盖 90 桶上限并留两天余量；桶按日/周日期过滤，不做全表扫描。
+  // 取数窗口按粒度覆盖 lookbackBuckets 上限（90）：日桶 92 天、周桶 90 周 + 2 天余量，
+  // 否则周规则的均值会被取数窗口静默截断。
   const sinceDay = new Date(asOf.getTime() - 92 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const sinceWeek = new Date(asOf.getTime() - (90 * 7 + 2) * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
   const prisma = new PrismaClient();
   try {
@@ -144,7 +146,7 @@ async function main(): Promise<number> {
                value::float8 AS value, denominator::float8 AS denominator
         FROM metric_rollup_weekly
         WHERE metric_id = ANY(${weeklyThresholdMetrics}::text[])
-          AND week >= ${sinceDay}::date AND week <= ${asOfDay}::date`;
+          AND week >= ${sinceWeek}::date AND week <= ${asOfDay}::date`;
       for (const row of rows) {
         samples.push({
           metricId: row.metric_id,
