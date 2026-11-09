@@ -136,9 +136,14 @@ function analyze(files, root = repoRoot) {
     const text = readFileSync(join(root, path), 'utf8');
     const lines = text.split('\n').length;
     if (lines > FILE_WARN_LINES) fileBudgets[path] = { lines };
+    // 键用 `file#函数名`（同名按出现顺序加序号），不含行号——行号随他人编辑漂移，
+    // 含行号的基线会在每次无关改动后误报「条目失效」。
+    const seenNames = new Map();
     for (const fn of functionComplexities(text, path)) {
+      const ordinal = (seenNames.get(fn.name) ?? 0) + 1;
+      seenNames.set(fn.name, ordinal);
       if (fn.complexity > FUNCTION_WARN_COMPLEXITY) {
-        const key = `${path}#${fn.name}@${fn.line}`;
+        const key = ordinal === 1 ? `${path}#${fn.name}` : `${path}#${fn.name}#${ordinal}`;
         functionBudgets[key] = { file: path, name: fn.name, line: fn.line, complexity: fn.complexity };
       }
     }

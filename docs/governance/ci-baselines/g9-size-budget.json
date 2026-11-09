@@ -20,7 +20,7 @@
       "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
     },
     "apps/api/src/discovery/discovery-query-governed-lineage.ts": {
-      "maxLines": 872,
+      "maxLines": 876,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
       "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
@@ -230,7 +230,7 @@
       "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
     },
     "apps/api/src/temporal/discovery.activities.ts": {
-      "maxLines": 3787,
+      "maxLines": 3791,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
       "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
@@ -333,7 +333,7 @@
     }
   },
   "functions": {
-    "apps/api/src/acquisition/monitored-source-raw-bridge.ts#prepareMonitoredSourceRawBridge@164": {
+    "apps/api/src/acquisition/monitored-source-raw-bridge.ts#prepareMonitoredSourceRawBridge": {
       "file": "apps/api/src/acquisition/monitored-source-raw-bridge.ts",
       "name": "prepareMonitoredSourceRawBridge",
       "line": 164,
@@ -342,7 +342,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/acquisition/tenant-projection.service.ts#<anonymous>@100": {
+    "apps/api/src/acquisition/tenant-projection.service.ts#<anonymous>#4": {
       "file": "apps/api/src/acquisition/tenant-projection.service.ts",
       "name": "<anonymous>",
       "line": 100,
@@ -351,7 +351,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/adapters/http-first-fetch.ts#fetchPageHttpFirst@208": {
+    "apps/api/src/adapters/http-first-fetch.ts#fetchPageHttpFirst": {
       "file": "apps/api/src/adapters/http-first-fetch.ts",
       "name": "fetchPageHttpFirst",
       "line": 208,
@@ -360,7 +360,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/adapters/net-guard.ts#resolvePublicIp@164": {
+    "apps/api/src/adapters/net-guard.ts#resolvePublicIp": {
       "file": "apps/api/src/adapters/net-guard.ts",
       "name": "resolvePublicIp",
       "line": 164,
@@ -369,7 +369,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/adapters/trade-fair-algolia.ts#queryAlgoliaExhibitors@67": {
+    "apps/api/src/adapters/trade-fair-algolia.ts#queryAlgoliaExhibitors": {
       "file": "apps/api/src/adapters/trade-fair-algolia.ts",
       "name": "queryAlgoliaExhibitors",
       "line": 67,
@@ -378,7 +378,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/campaign-golden/golden-brief.ts#parseGoldenBriefAsset@115": {
+    "apps/api/src/campaign-golden/golden-brief.ts#parseGoldenBriefAsset": {
       "file": "apps/api/src/campaign-golden/golden-brief.ts",
       "name": "parseGoldenBriefAsset",
       "line": 115,
@@ -387,7 +387,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/campaign-golden/golden-evaluate.ts#evaluateGoldenPlan@53": {
+    "apps/api/src/campaign-golden/golden-evaluate.ts#evaluateGoldenPlan": {
       "file": "apps/api/src/campaign-golden/golden-evaluate.ts",
       "name": "evaluateGoldenPlan",
       "line": 53,
@@ -396,7 +396,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/channels/channel-config.ts#parseChannelConfig@99": {
+    "apps/api/src/channels/channel-config.ts#parseChannelConfig": {
       "file": "apps/api/src/channels/channel-config.ts",
       "name": "parseChannelConfig",
       "line": 99,
@@ -405,7 +405,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/channels/channel-crawler.ts#crawlChannel@99": {
+    "apps/api/src/channels/channel-crawler.ts#crawlChannel": {
       "file": "apps/api/src/channels/channel-crawler.ts",
       "name": "crawlChannel",
       "line": 99,
@@ -414,7 +414,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/channels/channel-import.ts#parseCsv@31": {
+    "apps/api/src/channels/channel-import.ts#parseCsv": {
       "file": "apps/api/src/channels/channel-import.ts",
       "name": "parseCsv",
       "line": 31,
@@ -423,7 +423,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/channels/channel-run-recorder.ts#recordChannelRunInTransaction@73": {
+    "apps/api/src/channels/channel-run-recorder.ts#recordChannelRunInTransaction": {
       "file": "apps/api/src/channels/channel-run-recorder.ts",
       "name": "recordChannelRunInTransaction",
       "line": 73,
@@ -432,7 +432,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/channels/channel.service.ts#<anonymous>@345": {
+    "apps/api/src/channels/channel.service.ts#<anonymous>#7": {
       "file": "apps/api/src/channels/channel.service.ts",
       "name": "<anonymous>",
       "line": 345,
@@ -441,7 +441,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/channels/connector/channel-connector.ts#run@75": {
+    "apps/api/src/channels/connector/channel-connector.ts#run": {
       "file": "apps/api/src/channels/connector/channel-connector.ts",
       "name": "run",
       "line": 75,
@@ -450,7 +450,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/channels/connector/channel-manifest.ts#parseChannelManifest@90": {
+    "apps/api/src/channels/connector/channel-manifest.ts#parseChannelManifest": {
       "file": "apps/api/src/channels/connector/channel-manifest.ts",
       "name": "parseChannelManifest",
       "line": 90,
@@ -459,7 +459,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/channels/connector/channel-manifest.ts#configToManifest@275": {
+    "apps/api/src/channels/connector/channel-manifest.ts#configToManifest": {
       "file": "apps/api/src/channels/connector/channel-manifest.ts",
       "name": "configToManifest",
       "line": 275,
@@ -468,7 +468,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/channels/connector/paginator.ts#next@49": {
+    "apps/api/src/channels/connector/paginator.ts#next": {
       "file": "apps/api/src/channels/connector/paginator.ts",
       "name": "next",
       "line": 49,
@@ -477,7 +477,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/claim/claim.service.ts#<anonymous>@338": {
+    "apps/api/src/claim/claim.service.ts#<anonymous>#12": {
       "file": "apps/api/src/claim/claim.service.ts",
       "name": "<anonymous>",
       "line": 338,
@@ -486,7 +486,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/common/http-exception.filter.ts#catch@64": {
+    "apps/api/src/common/http-exception.filter.ts#catch": {
       "file": "apps/api/src/common/http-exception.filter.ts",
       "name": "catch",
       "line": 64,
@@ -495,7 +495,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/company/company.service.ts#create@86": {
+    "apps/api/src/company/company.service.ts#create": {
       "file": "apps/api/src/company/company.service.ts",
       "name": "create",
       "line": 86,
@@ -504,7 +504,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/canonical-company-attributes.ts#sanitizeValue@376": {
+    "apps/api/src/discovery/canonical-company-attributes.ts#sanitizeValue": {
       "file": "apps/api/src/discovery/canonical-company-attributes.ts",
       "name": "sanitizeValue",
       "line": 376,
@@ -513,7 +513,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/canonical-company-attributes.ts#sanitizeStoredCompanyFieldEvidence@567": {
+    "apps/api/src/discovery/canonical-company-attributes.ts#sanitizeStoredCompanyFieldEvidence": {
       "file": "apps/api/src/discovery/canonical-company-attributes.ts",
       "name": "sanitizeStoredCompanyFieldEvidence",
       "line": 567,
@@ -522,7 +522,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/contact-persist.ts#persistDiscoveredContacts@57": {
+    "apps/api/src/discovery/contact-persist.ts#persistDiscoveredContacts": {
       "file": "apps/api/src/discovery/contact-persist.ts",
       "name": "persistDiscoveredContacts",
       "line": 57,
@@ -531,7 +531,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/discovery-company-materialization-ctx.ts#snapshotPlain@144": {
+    "apps/api/src/discovery/discovery-company-materialization-ctx.ts#snapshotPlain": {
       "file": "apps/api/src/discovery/discovery-company-materialization-ctx.ts",
       "name": "snapshotPlain",
       "line": 144,
@@ -540,7 +540,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/discovery-company-materialization-ctx.ts#parseExistingOutcome@281": {
+    "apps/api/src/discovery/discovery-company-materialization-ctx.ts#parseExistingOutcome": {
       "file": "apps/api/src/discovery/discovery-company-materialization-ctx.ts",
       "name": "parseExistingOutcome",
       "line": 281,
@@ -549,25 +549,25 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/discovery-query-governed-lineage.ts#buildDiscoveryQueryProviderPlan@495": {
+    "apps/api/src/discovery/discovery-query-governed-lineage.ts#buildDiscoveryQueryProviderPlan": {
       "file": "apps/api/src/discovery/discovery-query-governed-lineage.ts",
       "name": "buildDiscoveryQueryProviderPlan",
-      "line": 495,
+      "line": 499,
       "complexity": 23,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/discovery-query-governed-lineage.ts#finalizeDiscoveryQueryLineageCommand@641": {
+    "apps/api/src/discovery/discovery-query-governed-lineage.ts#finalizeDiscoveryQueryLineageCommand": {
       "file": "apps/api/src/discovery/discovery-query-governed-lineage.ts",
       "name": "finalizeDiscoveryQueryLineageCommand",
-      "line": 641,
+      "line": 645,
       "complexity": 68,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/discovery-query-lineage.repository.ts#snapshotCommand@164": {
+    "apps/api/src/discovery/discovery-query-lineage.repository.ts#snapshotCommand": {
       "file": "apps/api/src/discovery/discovery-query-lineage.repository.ts",
       "name": "snapshotCommand",
       "line": 164,
@@ -576,7 +576,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/discovery-query-receipt.ts#parseDiscoveryQueryReceipt@192": {
+    "apps/api/src/discovery/discovery-query-receipt.ts#parseDiscoveryQueryReceipt": {
       "file": "apps/api/src/discovery/discovery-query-receipt.ts",
       "name": "parseDiscoveryQueryReceipt",
       "line": 192,
@@ -585,7 +585,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/discovery.service.ts#<anonymous>@861": {
+    "apps/api/src/discovery/discovery.service.ts#<anonymous>#41": {
       "file": "apps/api/src/discovery/discovery.service.ts",
       "name": "<anonymous>",
       "line": 861,
@@ -594,7 +594,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/email-guess-persist.ts#persistGuessedEmail@114": {
+    "apps/api/src/discovery/email-guess-persist.ts#persistGuessedEmail": {
       "file": "apps/api/src/discovery/email-guess-persist.ts",
       "name": "persistGuessedEmail",
       "line": 114,
@@ -603,7 +603,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/email-guesser.ts#guess@126": {
+    "apps/api/src/discovery/email-guesser.ts#guess": {
       "file": "apps/api/src/discovery/email-guesser.ts",
       "name": "guess",
       "line": 126,
@@ -612,7 +612,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/fit-judge-v2.ts#judgeFitV2@204": {
+    "apps/api/src/discovery/fit-judge-v2.ts#judgeFitV2": {
       "file": "apps/api/src/discovery/fit-judge-v2.ts",
       "name": "judgeFitV2",
       "line": 204,
@@ -621,7 +621,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/icp-to-fda.ts#resolveIcpToFda@51": {
+    "apps/api/src/discovery/icp-to-fda.ts#resolveIcpToFda": {
       "file": "apps/api/src/discovery/icp-to-fda.ts",
       "name": "resolveIcpToFda",
       "line": 51,
@@ -630,7 +630,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/impressum/collect-company-channels.ts#collectCompanyChannels@123": {
+    "apps/api/src/discovery/impressum/collect-company-channels.ts#collectCompanyChannels": {
       "file": "apps/api/src/discovery/impressum/collect-company-channels.ts",
       "name": "collectCompanyChannels",
       "line": 123,
@@ -639,7 +639,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/judgment/aggregate-judgment.ts#aggregateJudgment@101": {
+    "apps/api/src/discovery/judgment/aggregate-judgment.ts#aggregateJudgment": {
       "file": "apps/api/src/discovery/judgment/aggregate-judgment.ts",
       "name": "aggregateJudgment",
       "line": 101,
@@ -648,7 +648,16 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/judgment/judgment-record.ts#recordJudgment@187": {
+    "apps/api/src/discovery/judgment/eval-receipt.ts#assertEvalReceipt": {
+      "file": "apps/api/src/discovery/judgment/eval-receipt.ts",
+      "name": "assertEvalReceipt",
+      "line": 71,
+      "complexity": 23,
+      "owner": "P6-CI-10",
+      "expiresAt": "2027-01-31",
+      "reason": "存量高复杂度函数（棘轮：只许降低）"
+    },
+    "apps/api/src/discovery/judgment/judgment-record.ts#recordJudgment": {
       "file": "apps/api/src/discovery/judgment/judgment-record.ts",
       "name": "recordJudgment",
       "line": 187,
@@ -657,7 +666,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/providers/bigquery-patents.provider.ts#discoverContacts@167": {
+    "apps/api/src/discovery/providers/bigquery-patents.provider.ts#discoverContacts": {
       "file": "apps/api/src/discovery/providers/bigquery-patents.provider.ts",
       "name": "discoverContacts",
       "line": 167,
@@ -666,7 +675,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/providers/decision-maker.provider.ts#extractAnchorsFromHtml@56": {
+    "apps/api/src/discovery/providers/decision-maker.provider.ts#extractAnchorsFromHtml": {
       "file": "apps/api/src/discovery/providers/decision-maker.provider.ts",
       "name": "extractAnchorsFromHtml",
       "line": 56,
@@ -675,7 +684,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/providers/directory.provider.ts#discoverCompanies@118": {
+    "apps/api/src/discovery/providers/directory.provider.ts#discoverCompanies": {
       "file": "apps/api/src/discovery/providers/directory.provider.ts",
       "name": "discoverCompanies",
       "line": 118,
@@ -684,7 +693,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/providers/email-verify.provider.ts#verifyEmail@54": {
+    "apps/api/src/discovery/providers/email-verify.provider.ts#verifyEmail": {
       "file": "apps/api/src/discovery/providers/email-verify.provider.ts",
       "name": "verifyEmail",
       "line": 54,
@@ -693,7 +702,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/providers/public-web.provider.ts#discoverCompanies@145": {
+    "apps/api/src/discovery/providers/public-web.provider.ts#discoverCompanies": {
       "file": "apps/api/src/discovery/providers/public-web.provider.ts",
       "name": "discoverCompanies",
       "line": 145,
@@ -702,7 +711,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/providers/public-web.provider.ts#discoverContacts@367": {
+    "apps/api/src/discovery/providers/public-web.provider.ts#discoverContacts": {
       "file": "apps/api/src/discovery/providers/public-web.provider.ts",
       "name": "discoverContacts",
       "line": 367,
@@ -711,7 +720,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/providers/social-presence.provider.ts#pickWaybackSnapshot@393": {
+    "apps/api/src/discovery/providers/social-presence.provider.ts#pickWaybackSnapshot": {
       "file": "apps/api/src/discovery/providers/social-presence.provider.ts",
       "name": "pickWaybackSnapshot",
       "line": 393,
@@ -720,7 +729,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/providers/social-presence.provider.ts#discoverContacts@669": {
+    "apps/api/src/discovery/providers/social-presence.provider.ts#discoverContacts": {
       "file": "apps/api/src/discovery/providers/social-presence.provider.ts",
       "name": "discoverContacts",
       "line": 669,
@@ -729,7 +738,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/providers/website-profile.provider.ts#profile@150": {
+    "apps/api/src/discovery/providers/website-profile.provider.ts#profile": {
       "file": "apps/api/src/discovery/providers/website-profile.provider.ts",
       "name": "profile",
       "line": 150,
@@ -738,7 +747,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/raw-source-provider-normalizer.ts#normalizeProvenance@275": {
+    "apps/api/src/discovery/raw-source-provider-normalizer.ts#normalizeProvenance": {
       "file": "apps/api/src/discovery/raw-source-provider-normalizer.ts",
       "name": "normalizeProvenance",
       "line": 275,
@@ -747,7 +756,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/raw-source-provider-normalizer.ts#normalizeAttributes@378": {
+    "apps/api/src/discovery/raw-source-provider-normalizer.ts#normalizeAttributes": {
       "file": "apps/api/src/discovery/raw-source-provider-normalizer.ts",
       "name": "normalizeAttributes",
       "line": 378,
@@ -756,7 +765,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/raw-source-provider-schema.ts#validOpenFdaAttributes@503": {
+    "apps/api/src/discovery/raw-source-provider-schema.ts#validOpenFdaAttributes": {
       "file": "apps/api/src/discovery/raw-source-provider-schema.ts",
       "name": "validOpenFdaAttributes",
       "line": 503,
@@ -765,7 +774,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/raw-source-provider-schema.ts#validProviderBindings@601": {
+    "apps/api/src/discovery/raw-source-provider-schema.ts#validProviderBindings": {
       "file": "apps/api/src/discovery/raw-source-provider-schema.ts",
       "name": "validProviderBindings",
       "line": 601,
@@ -774,7 +783,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/raw-source-provider-schema.ts#validateRawSourceProviderPayload@763": {
+    "apps/api/src/discovery/raw-source-provider-schema.ts#validateRawSourceProviderPayload": {
       "file": "apps/api/src/discovery/raw-source-provider-schema.ts",
       "name": "validateRawSourceProviderPayload",
       "line": 763,
@@ -783,7 +792,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/discovery/sec-edgar-submission-observation.ts#validateSecEdgarSubmissionObservation@66": {
+    "apps/api/src/discovery/sec-edgar-submission-observation.ts#validateSecEdgarSubmissionObservation": {
       "file": "apps/api/src/discovery/sec-edgar-submission-observation.ts",
       "name": "validateSecEdgarSubmissionObservation",
       "line": 66,
@@ -792,7 +801,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/durable-results/artifact/generic-operation-artifact.object-contract.ts#parseStoredArtifactContract@60": {
+    "apps/api/src/durable-results/artifact/generic-operation-artifact.object-contract.ts#parseStoredArtifactContract": {
       "file": "apps/api/src/durable-results/artifact/generic-operation-artifact.object-contract.ts",
       "name": "parseStoredArtifactContract",
       "line": 60,
@@ -801,7 +810,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/durable-results/artifact/generic-operation-artifact.service.ts#snapshotExpectedManifest@277": {
+    "apps/api/src/durable-results/artifact/generic-operation-artifact.service.ts#snapshotExpectedManifest": {
       "file": "apps/api/src/durable-results/artifact/generic-operation-artifact.service.ts",
       "name": "snapshotExpectedManifest",
       "line": 277,
@@ -810,7 +819,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/durable-results/artifact/generic-operation-artifact.store.spec-helper.ts#send@138": {
+    "apps/api/src/durable-results/artifact/generic-operation-artifact.store.spec-helper.ts#send": {
       "file": "apps/api/src/durable-results/artifact/generic-operation-artifact.store.spec-helper.ts",
       "name": "send",
       "line": 138,
@@ -819,7 +828,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/durable-results/domain-ack-contract.ts#parseExecutionResultDisposition@222": {
+    "apps/api/src/durable-results/domain-ack-contract.ts#parseExecutionResultDisposition": {
       "file": "apps/api/src/durable-results/domain-ack-contract.ts",
       "name": "parseExecutionResultDisposition",
       "line": 222,
@@ -828,7 +837,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/durable-results/durable-execution-receipt.ts#validateUsageSemantics@307": {
+    "apps/api/src/durable-results/durable-execution-receipt.ts#validateUsageSemantics": {
       "file": "apps/api/src/durable-results/durable-execution-receipt.ts",
       "name": "validateUsageSemantics",
       "line": 307,
@@ -837,7 +846,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/durable-results/durable-result-strategy.ts#isDenseMediaTypeArray@98": {
+    "apps/api/src/durable-results/durable-result-strategy.ts#isDenseMediaTypeArray": {
       "file": "apps/api/src/durable-results/durable-result-strategy.ts",
       "name": "isDenseMediaTypeArray",
       "line": 98,
@@ -846,7 +855,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/durable-results/execution-receipt-facts.ts#patentCostFacts@60": {
+    "apps/api/src/durable-results/execution-receipt-facts.ts#patentCostFacts": {
       "file": "apps/api/src/durable-results/execution-receipt-facts.ts",
       "name": "patentCostFacts",
       "line": 60,
@@ -855,7 +864,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/durable-results/typed-projection.registry.ts#strictJson@98": {
+    "apps/api/src/durable-results/typed-projection.registry.ts#strictJson": {
       "file": "apps/api/src/durable-results/typed-projection.registry.ts",
       "name": "strictJson",
       "line": 98,
@@ -864,7 +873,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/durable-results/typed-projection.registry.ts#assertSchema@258": {
+    "apps/api/src/durable-results/typed-projection.registry.ts#assertSchema": {
       "file": "apps/api/src/durable-results/typed-projection.registry.ts",
       "name": "assertSchema",
       "line": 258,
@@ -873,7 +882,16 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/enrichment/verification/emailable.provider.ts#mapEmailableResponse@61": {
+    "apps/api/src/enrichment/finders/hunter.provider.ts#parseHunterDomainSearch": {
+      "file": "apps/api/src/enrichment/finders/hunter.provider.ts",
+      "name": "parseHunterDomainSearch",
+      "line": 70,
+      "complexity": 23,
+      "owner": "P6-CI-10",
+      "expiresAt": "2027-01-31",
+      "reason": "存量高复杂度函数（棘轮：只许降低）"
+    },
+    "apps/api/src/enrichment/verification/emailable.provider.ts#mapEmailableResponse": {
       "file": "apps/api/src/enrichment/verification/emailable.provider.ts",
       "name": "mapEmailableResponse",
       "line": 61,
@@ -882,7 +900,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/enrichment/verification/millionverifier.provider.ts#mapMillionVerifierResponse@59": {
+    "apps/api/src/enrichment/verification/millionverifier.provider.ts#mapMillionVerifierResponse": {
       "file": "apps/api/src/enrichment/verification/millionverifier.provider.ts",
       "name": "mapMillionVerifierResponse",
       "line": 59,
@@ -891,7 +909,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/enrichment/verification/reverify-sweep.ts#runReverifySweep@172": {
+    "apps/api/src/enrichment/verification/reverify-sweep.ts#runReverifySweep": {
       "file": "apps/api/src/enrichment/verification/reverify-sweep.ts",
       "name": "runReverifySweep",
       "line": 172,
@@ -900,7 +918,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/enrichment/verification/truelist.provider.ts#mapTruelistResponse@61": {
+    "apps/api/src/enrichment/verification/truelist.provider.ts#mapTruelistResponse": {
       "file": "apps/api/src/enrichment/verification/truelist.provider.ts",
       "name": "mapTruelistResponse",
       "line": 61,
@@ -909,7 +927,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/execution-budget/execution-budget-authority.types.ts#assertAuthorityPurposeShape@240": {
+    "apps/api/src/execution-budget/execution-budget-authority.types.ts#assertAuthorityPurposeShape": {
       "file": "apps/api/src/execution-budget/execution-budget-authority.types.ts",
       "name": "assertAuthorityPurposeShape",
       "line": 240,
@@ -918,7 +936,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/execution-budget/execution-budget-binding.ts#parseExecutionBudgetBinding@104": {
+    "apps/api/src/execution-budget/execution-budget-binding.ts#parseExecutionBudgetBinding": {
       "file": "apps/api/src/execution-budget/execution-budget-binding.ts",
       "name": "parseExecutionBudgetBinding",
       "line": 104,
@@ -927,7 +945,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/execution-budget/execution-budget-grant.verifier.ts#validateExecutionBudgetJwksDocument@290": {
+    "apps/api/src/execution-budget/execution-budget-grant.verifier.ts#validateExecutionBudgetJwksDocument": {
       "file": "apps/api/src/execution-budget/execution-budget-grant.verifier.ts",
       "name": "validateExecutionBudgetJwksDocument",
       "line": 290,
@@ -936,7 +954,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/execution-budget/execution-budget-grant.verifier.ts#verifyAuthority@556": {
+    "apps/api/src/execution-budget/execution-budget-grant.verifier.ts#verifyAuthority": {
       "file": "apps/api/src/execution-budget/execution-budget-grant.verifier.ts",
       "name": "verifyAuthority",
       "line": 556,
@@ -945,7 +963,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/execution-budget/execution-control-error.ts#controlToken@37": {
+    "apps/api/src/execution-budget/execution-control-error.ts#controlToken": {
       "file": "apps/api/src/execution-budget/execution-control-error.ts",
       "name": "controlToken",
       "line": 37,
@@ -954,7 +972,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/execution-budget/governed-subject-relation.repository.ts#snapshotInput@143": {
+    "apps/api/src/execution-budget/governed-subject-relation.repository.ts#snapshotInput": {
       "file": "apps/api/src/execution-budget/governed-subject-relation.repository.ts",
       "name": "snapshotInput",
       "line": 143,
@@ -963,7 +981,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/execution-budget/workspace-technical-budget-quote.controller.ts#parseRequest@237": {
+    "apps/api/src/execution-budget/workspace-technical-budget-quote.controller.ts#parseRequest": {
       "file": "apps/api/src/execution-budget/workspace-technical-budget-quote.controller.ts",
       "name": "parseRequest",
       "line": 237,
@@ -972,7 +990,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/execution-budget/workspace-technical-budget-quote.ts#expectedCapMicrousd@151": {
+    "apps/api/src/execution-budget/workspace-technical-budget-quote.ts#expectedCapMicrousd": {
       "file": "apps/api/src/execution-budget/workspace-technical-budget-quote.ts",
       "name": "expectedCapMicrousd",
       "line": 151,
@@ -981,7 +999,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/icp/rule-engine.ts#evaluateRule@108": {
+    "apps/api/src/icp/rule-engine.ts#evaluateRule": {
       "file": "apps/api/src/icp/rule-engine.ts",
       "name": "evaluateRule",
       "line": 108,
@@ -990,7 +1008,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/intent/page-signals.ts#diffPageSignals@265": {
+    "apps/api/src/intent/page-signals.ts#diffPageSignals": {
       "file": "apps/api/src/intent/page-signals.ts",
       "name": "diffPageSignals",
       "line": 265,
@@ -999,7 +1017,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/intent/sam-intent-projection.service.ts#projectSourcesSought@53": {
+    "apps/api/src/intent/sam-intent-projection.service.ts#projectSourcesSought": {
       "file": "apps/api/src/intent/sam-intent-projection.service.ts",
       "name": "projectSourcesSought",
       "line": 53,
@@ -1008,7 +1026,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/intent/ted-intent-projection.service.ts#projectTenders@49": {
+    "apps/api/src/intent/ted-intent-projection.service.ts#projectTenders": {
       "file": "apps/api/src/intent/ted-intent-projection.service.ts",
       "name": "projectTenders",
       "line": 49,
@@ -1017,7 +1035,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/intent/website-watch.service.ts#watch@89": {
+    "apps/api/src/intent/website-watch.service.ts#watch": {
       "file": "apps/api/src/intent/website-watch.service.ts",
       "name": "watch",
       "line": 89,
@@ -1026,7 +1044,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/lead/lead.service.ts#recordOutcome@410": {
+    "apps/api/src/lead/lead.service.ts#recordOutcome": {
       "file": "apps/api/src/lead/lead.service.ts",
       "name": "recordOutcome",
       "line": 410,
@@ -1035,7 +1053,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/lead/lead.service.ts#<anonymous>@511": {
+    "apps/api/src/lead/lead.service.ts#<anonymous>#31": {
       "file": "apps/api/src/lead/lead.service.ts",
       "name": "<anonymous>",
       "line": 511,
@@ -1044,7 +1062,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/lead/outreach-draft.service.ts#generate@88": {
+    "apps/api/src/lead/outreach-draft.service.ts#generate": {
       "file": "apps/api/src/lead/outreach-draft.service.ts",
       "name": "generate",
       "line": 88,
@@ -1053,7 +1071,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/lead/scoring.ts#scoreLead@148": {
+    "apps/api/src/lead/scoring.ts#scoreLead": {
       "file": "apps/api/src/lead/scoring.ts",
       "name": "scoreLead",
       "line": 148,
@@ -1062,7 +1080,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/measurement/alerts.ts#<anonymous>@120": {
+    "apps/api/src/measurement/alerts.ts#<anonymous>#2": {
       "file": "apps/api/src/measurement/alerts.ts",
       "name": "<anonymous>",
       "line": 120,
@@ -1071,7 +1089,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/measurement/alerts.ts#evaluateThresholdRule@198": {
+    "apps/api/src/measurement/alerts.ts#evaluateThresholdRule": {
       "file": "apps/api/src/measurement/alerts.ts",
       "name": "evaluateThresholdRule",
       "line": 198,
@@ -1080,7 +1098,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/model-gateway/new-api-request-bound-settlement.ts#validateReceipt@454": {
+    "apps/api/src/model-gateway/new-api-request-bound-settlement.ts#validateReceipt": {
       "file": "apps/api/src/model-gateway/new-api-request-bound-settlement.ts",
       "name": "validateReceipt",
       "line": 454,
@@ -1089,7 +1107,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/model-gateway/new-api-request-bound-settlement.ts#resolve@686": {
+    "apps/api/src/model-gateway/new-api-request-bound-settlement.ts#resolve": {
       "file": "apps/api/src/model-gateway/new-api-request-bound-settlement.ts",
       "name": "resolve",
       "line": 686,
@@ -1098,7 +1116,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/model-gateway/providers/openai-compatible.provider.ts#assertVisionReviewInput@143": {
+    "apps/api/src/model-gateway/providers/openai-compatible.provider.ts#assertVisionReviewInput": {
       "file": "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
       "name": "assertVisionReviewInput",
       "line": 143,
@@ -1107,7 +1125,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/model-gateway/providers/openai-compatible.provider.ts#parseChatCompletionStream@1027": {
+    "apps/api/src/model-gateway/providers/openai-compatible.provider.ts#parseChatCompletionStream": {
       "file": "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
       "name": "parseChatCompletionStream",
       "line": 1027,
@@ -1116,7 +1134,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/model-gateway/providers/openai-compatible.provider.ts#chatCompletions@1213": {
+    "apps/api/src/model-gateway/providers/openai-compatible.provider.ts#chatCompletions": {
       "file": "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
       "name": "chatCompletions",
       "line": 1213,
@@ -1125,7 +1143,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/model-gateway/router-model-gateway.ts#settleCachedStructured@275": {
+    "apps/api/src/model-gateway/router-model-gateway.ts#settleCachedStructured": {
       "file": "apps/api/src/model-gateway/router-model-gateway.ts",
       "name": "settleCachedStructured",
       "line": 275,
@@ -1134,7 +1152,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/model-gateway/router-model-gateway.ts#<anonymous>@439": {
+    "apps/api/src/model-gateway/router-model-gateway.ts#<anonymous>#19": {
       "file": "apps/api/src/model-gateway/router-model-gateway.ts",
       "name": "<anonymous>",
       "line": 439,
@@ -1143,7 +1161,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/model-gateway/router-model-gateway.ts#run@695": {
+    "apps/api/src/model-gateway/router-model-gateway.ts#run": {
       "file": "apps/api/src/model-gateway/router-model-gateway.ts",
       "name": "run",
       "line": 695,
@@ -1152,7 +1170,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/model-gateway/router-model-gateway.ts#runPersistent@1375": {
+    "apps/api/src/model-gateway/router-model-gateway.ts#runPersistent": {
       "file": "apps/api/src/model-gateway/router-model-gateway.ts",
       "name": "runPersistent",
       "line": 1375,
@@ -1161,7 +1179,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/model-gateway/settlement-wire-identity.ts#loadSettlementDerivationKeyring@150": {
+    "apps/api/src/model-gateway/settlement-wire-identity.ts#loadSettlementDerivationKeyring": {
       "file": "apps/api/src/model-gateway/settlement-wire-identity.ts",
       "name": "loadSettlementDerivationKeyring",
       "line": 150,
@@ -1170,7 +1188,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/model-gateway/vision-review-input.ts#captureVisionReviewInput@95": {
+    "apps/api/src/model-gateway/vision-review-input.ts#captureVisionReviewInput": {
       "file": "apps/api/src/model-gateway/vision-review-input.ts",
       "name": "captureVisionReviewInput",
       "line": 95,
@@ -1179,7 +1197,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/model-gateway/vision-review-input.ts#assertBoundedJsonSchema@282": {
+    "apps/api/src/model-gateway/vision-review-input.ts#assertBoundedJsonSchema": {
       "file": "apps/api/src/model-gateway/vision-review-input.ts",
       "name": "assertBoundedJsonSchema",
       "line": 282,
@@ -1188,7 +1206,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/model-gateway/vision-review-input.ts#assertVisionReviewInput@415": {
+    "apps/api/src/model-gateway/vision-review-input.ts#assertVisionReviewInput": {
       "file": "apps/api/src/model-gateway/vision-review-input.ts",
       "name": "assertVisionReviewInput",
       "line": 415,
@@ -1197,7 +1215,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/model-runtime/capability-registry.ts#negotiate@28": {
+    "apps/api/src/model-runtime/capability-registry.ts#negotiate": {
       "file": "apps/api/src/model-runtime/capability-registry.ts",
       "name": "negotiate",
       "line": 28,
@@ -1206,7 +1224,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/model-runtime/compiled-runtime-guard.ts#validateCompiledRuntimeExpectation@81": {
+    "apps/api/src/model-runtime/compiled-runtime-guard.ts#validateCompiledRuntimeExpectation": {
       "file": "apps/api/src/model-runtime/compiled-runtime-guard.ts",
       "name": "validateCompiledRuntimeExpectation",
       "line": 81,
@@ -1215,7 +1233,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/model-runtime/model-execution-runtime.ts#validateRepairPlan@203": {
+    "apps/api/src/model-runtime/model-execution-runtime.ts#validateRepairPlan": {
       "file": "apps/api/src/model-runtime/model-execution-runtime.ts",
       "name": "validateRepairPlan",
       "line": 203,
@@ -1224,7 +1242,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/model-runtime/model-execution-runtime.ts#execute@318": {
+    "apps/api/src/model-runtime/model-execution-runtime.ts#execute": {
       "file": "apps/api/src/model-runtime/model-execution-runtime.ts",
       "name": "execute",
       "line": 318,
@@ -1233,7 +1251,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/model-runtime/real-model-execution-ledger-storage.ts#validateAuthorization@298": {
+    "apps/api/src/model-runtime/real-model-execution-ledger-storage.ts#validateAuthorization": {
       "file": "apps/api/src/model-runtime/real-model-execution-ledger-storage.ts",
       "name": "validateAuthorization",
       "line": 298,
@@ -1242,7 +1260,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/model-runtime/real-model-execution-ledger.ts#openWithMode@110": {
+    "apps/api/src/model-runtime/real-model-execution-ledger.ts#openWithMode": {
       "file": "apps/api/src/model-runtime/real-model-execution-ledger.ts",
       "name": "openWithMode",
       "line": 110,
@@ -1251,7 +1269,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/model-runtime/real-model-execution-ledger.ts#<anonymous>@1159": {
+    "apps/api/src/model-runtime/real-model-execution-ledger.ts#<anonymous>#49": {
       "file": "apps/api/src/model-runtime/real-model-execution-ledger.ts",
       "name": "<anonymous>",
       "line": 1159,
@@ -1260,7 +1278,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/model-runtime/structured-task-runtime-bridge.ts#executeStructuredTaskWithRuntime@95": {
+    "apps/api/src/model-runtime/structured-task-runtime-bridge.ts#executeStructuredTaskWithRuntime": {
       "file": "apps/api/src/model-runtime/structured-task-runtime-bridge.ts",
       "name": "executeStructuredTaskWithRuntime",
       "line": 95,
@@ -1269,7 +1287,16 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/platform-authority/machine-token-verifier.ts#verifyMachineTokenResponse@32": {
+    "apps/api/src/outreach/contact-bounce.service.ts#<anonymous>#3": {
+      "file": "apps/api/src/outreach/contact-bounce.service.ts",
+      "name": "<anonymous>",
+      "line": 92,
+      "complexity": 21,
+      "owner": "P6-CI-10",
+      "expiresAt": "2027-01-31",
+      "reason": "存量高复杂度函数（棘轮：只许降低）"
+    },
+    "apps/api/src/platform-authority/machine-token-verifier.ts#verifyMachineTokenResponse": {
       "file": "apps/api/src/platform-authority/machine-token-verifier.ts",
       "name": "verifyMachineTokenResponse",
       "line": 32,
@@ -1278,7 +1305,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/platform-authority/platform-authority-policy-asset.ts#canonicalJson@141": {
+    "apps/api/src/platform-authority/platform-authority-policy-asset.ts#canonicalJson": {
       "file": "apps/api/src/platform-authority/platform-authority-policy-asset.ts",
       "name": "canonicalJson",
       "line": 141,
@@ -1287,7 +1314,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/platform-authority/platform-capability-runtime.ts#<anonymous>@176": {
+    "apps/api/src/platform-authority/platform-capability-runtime.ts#<anonymous>#11": {
       "file": "apps/api/src/platform-authority/platform-capability-runtime.ts",
       "name": "<anonymous>",
       "line": 176,
@@ -1296,7 +1323,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/platform-authority/platform-capability-signature.ts#verifyCapabilityEnvelope@55": {
+    "apps/api/src/platform-authority/platform-capability-signature.ts#verifyCapabilityEnvelope": {
       "file": "apps/api/src/platform-authority/platform-capability-signature.ts",
       "name": "verifyCapabilityEnvelope",
       "line": 55,
@@ -1305,7 +1332,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/platform-authority/platform-capability-transport.ts#<anonymous>@85": {
+    "apps/api/src/platform-authority/platform-capability-transport.ts#<anonymous>#10": {
       "file": "apps/api/src/platform-authority/platform-capability-transport.ts",
       "name": "<anonymous>",
       "line": 85,
@@ -1314,7 +1341,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/platform-authority/platform-egress-fence.v1.ts#validateBinding@92": {
+    "apps/api/src/platform-authority/platform-egress-fence.v1.ts#validateBinding": {
       "file": "apps/api/src/platform-authority/platform-egress-fence.v1.ts",
       "name": "validateBinding",
       "line": 92,
@@ -1323,7 +1350,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/platform-authority/platform-execution-technical-quote.ts#canonicalJson@184": {
+    "apps/api/src/platform-authority/platform-execution-technical-quote.ts#canonicalJson": {
       "file": "apps/api/src/platform-authority/platform-execution-technical-quote.ts",
       "name": "canonicalJson",
       "line": 184,
@@ -1332,7 +1359,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/platform-authority/platform-execution-technical-quote.ts#quote@441": {
+    "apps/api/src/platform-authority/platform-execution-technical-quote.ts#quote": {
       "file": "apps/api/src/platform-authority/platform-execution-technical-quote.ts",
       "name": "quote",
       "line": 441,
@@ -1341,7 +1368,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/platform-authority/platform-fence-ack-keyring.ts#readSecret@9": {
+    "apps/api/src/platform-authority/platform-fence-ack-keyring.ts#readSecret": {
       "file": "apps/api/src/platform-authority/platform-fence-ack-keyring.ts",
       "name": "readSecret",
       "line": 9,
@@ -1350,7 +1377,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/platform-authority/platform-fence-ack-keyring.ts#loadPlatformFenceAckMaterial@59": {
+    "apps/api/src/platform-authority/platform-fence-ack-keyring.ts#loadPlatformFenceAckMaterial": {
       "file": "apps/api/src/platform-authority/platform-fence-ack-keyring.ts",
       "name": "loadPlatformFenceAckMaterial",
       "line": 59,
@@ -1359,7 +1386,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/platform-authority/platform-revocation-receiver.ts#receive@19": {
+    "apps/api/src/platform-authority/platform-revocation-receiver.ts#receive": {
       "file": "apps/api/src/platform-authority/platform-revocation-receiver.ts",
       "name": "receive",
       "line": 19,
@@ -1368,7 +1395,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/platform-authority/platform-revocation-trust.runtime.ts#trustedFile@49": {
+    "apps/api/src/platform-authority/platform-revocation-trust.runtime.ts#trustedFile": {
       "file": "apps/api/src/platform-authority/platform-revocation-trust.runtime.ts",
       "name": "trustedFile",
       "line": 49,
@@ -1377,7 +1404,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/platform-authority/platform-revocation-verifier.ts#inspect@75": {
+    "apps/api/src/platform-authority/platform-revocation-verifier.ts#inspect": {
       "file": "apps/api/src/platform-authority/platform-revocation-verifier.ts",
       "name": "inspect",
       "line": 75,
@@ -1386,7 +1413,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/platform-authority/platform-target-lookup.service.ts#parse@74": {
+    "apps/api/src/platform-authority/platform-target-lookup.service.ts#parse": {
       "file": "apps/api/src/platform-authority/platform-target-lookup.service.ts",
       "name": "parse",
       "line": 74,
@@ -1395,7 +1422,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/platform-authority/platform-technical-quote-jwks-verifier.ts#parseServiceToken@161": {
+    "apps/api/src/platform-authority/platform-technical-quote-jwks-verifier.ts#parseServiceToken": {
       "file": "apps/api/src/platform-authority/platform-technical-quote-jwks-verifier.ts",
       "name": "parseServiceToken",
       "line": 161,
@@ -1404,7 +1431,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/platform-authority/platform-technical-quote-service-auth.ts#verifierReadiness@230": {
+    "apps/api/src/platform-authority/platform-technical-quote-service-auth.ts#verifierReadiness": {
       "file": "apps/api/src/platform-authority/platform-technical-quote-service-auth.ts",
       "name": "verifierReadiness",
       "line": 230,
@@ -1413,7 +1440,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/platform-authority/strict-jwt-primitives.ts#validJwksDocument@313": {
+    "apps/api/src/platform-authority/strict-jwt-primitives.ts#validJwksDocument": {
       "file": "apps/api/src/platform-authority/strict-jwt-primitives.ts",
       "name": "validJwksDocument",
       "line": 313,
@@ -1422,7 +1449,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/registry/domain/domain-verifier.ts#collectRegisterEvidence@150": {
+    "apps/api/src/registry/domain/domain-verifier.ts#collectRegisterEvidence": {
       "file": "apps/api/src/registry/domain/domain-verifier.ts",
       "name": "collectRegisterEvidence",
       "line": 150,
@@ -1431,7 +1458,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/registry/domain/domain-verifier.ts#verifyDomainCandidate@313": {
+    "apps/api/src/registry/domain/domain-verifier.ts#verifyDomainCandidate": {
       "file": "apps/api/src/registry/domain/domain-verifier.ts",
       "name": "verifyDomainCandidate",
       "line": 313,
@@ -1440,7 +1467,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/registry/frame-importer.ts#importFrame@163": {
+    "apps/api/src/registry/frame-importer.ts#importFrame": {
       "file": "apps/api/src/registry/frame-importer.ts",
       "name": "importFrame",
       "line": 163,
@@ -1449,7 +1476,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/registry/frame-normalize.ts#normalizeRecord@138": {
+    "apps/api/src/registry/frame-normalize.ts#normalizeRecord": {
       "file": "apps/api/src/registry/frame-normalize.ts",
       "name": "normalizeRecord",
       "line": 138,
@@ -1458,7 +1485,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/registry/frame-parse.ts#parseCsv@35": {
+    "apps/api/src/registry/frame-parse.ts#parseCsv": {
       "file": "apps/api/src/registry/frame-parse.ts",
       "name": "parseCsv",
       "line": 35,
@@ -1467,7 +1494,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/registry/frame-types.ts#parseFrameConfig@193": {
+    "apps/api/src/registry/frame-types.ts#parseFrameConfig": {
       "file": "apps/api/src/registry/frame-types.ts",
       "name": "parseFrameConfig",
       "line": 193,
@@ -1476,7 +1503,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/registry/merge.ts#proposeEntityLinks@126": {
+    "apps/api/src/registry/merge.ts#proposeEntityLinks": {
       "file": "apps/api/src/registry/merge.ts",
       "name": "proposeEntityLinks",
       "line": 126,
@@ -1485,7 +1512,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/registry/query.ts#parseRegistryQueryFilters@77": {
+    "apps/api/src/registry/query.ts#parseRegistryQueryFilters": {
       "file": "apps/api/src/registry/query.ts",
       "name": "parseRegistryQueryFilters",
       "line": 77,
@@ -1494,7 +1521,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/registry/recall-audit.ts#auditRecall@159": {
+    "apps/api/src/registry/recall-audit.ts#auditRecall": {
       "file": "apps/api/src/registry/recall-audit.ts",
       "name": "auditRecall",
       "line": 159,
@@ -1503,7 +1530,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/relay/event-registry.ts#matchesSiteBuildCostSummaryUpdatedV1@79": {
+    "apps/api/src/relay/event-registry.ts#matchesSiteBuildCostSummaryUpdatedV1": {
       "file": "apps/api/src/relay/event-registry.ts",
       "name": "matchesSiteBuildCostSummaryUpdatedV1",
       "line": 79,
@@ -1512,7 +1539,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/relay/outbox-relay.service.ts#dispatch@826": {
+    "apps/api/src/relay/outbox-relay.service.ts#dispatch": {
       "file": "apps/api/src/relay/outbox-relay.service.ts",
       "name": "dispatch",
       "line": 826,
@@ -1521,7 +1548,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/runtime/runtime-admission.ts#inspectAuth@92": {
+    "apps/api/src/runtime/runtime-admission.ts#inspectAuth": {
       "file": "apps/api/src/runtime/runtime-admission.ts",
       "name": "inspectAuth",
       "line": 92,
@@ -1530,7 +1557,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/runtime/runtime-admission.ts#inspectGateway@159": {
+    "apps/api/src/runtime/runtime-admission.ts#inspectGateway": {
       "file": "apps/api/src/runtime/runtime-admission.ts",
       "name": "inspectGateway",
       "line": 159,
@@ -1539,7 +1566,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/sanctions/sanctions-matcher.ts#screenName@153": {
+    "apps/api/src/sanctions/sanctions-matcher.ts#screenName": {
       "file": "apps/api/src/sanctions/sanctions-matcher.ts",
       "name": "screenName",
       "line": 153,
@@ -1548,7 +1575,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/signals/intent-recompute.service.ts#recomputeCompany@70": {
+    "apps/api/src/signals/intent-recompute.service.ts#recomputeCompany": {
       "file": "apps/api/src/signals/intent-recompute.service.ts",
       "name": "recomputeCompany",
       "line": 70,
@@ -1557,7 +1584,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/agents/task-routes.ts#resolveTaskExecutionTarget@154": {
+    "apps/api/src/site-builder/agents/task-routes.ts#resolveTaskExecutionTarget": {
       "file": "apps/api/src/site-builder/agents/task-routes.ts",
       "name": "resolveTaskExecutionTarget",
       "line": 154,
@@ -1566,7 +1593,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/assembly/component-assembly-adapters.ts#controlledClone@213": {
+    "apps/api/src/site-builder/assembly/component-assembly-adapters.ts#controlledClone": {
       "file": "apps/api/src/site-builder/assembly/component-assembly-adapters.ts",
       "name": "controlledClone",
       "line": 213,
@@ -1575,7 +1602,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/assembly/controlled-assembly-validator.ts#validateControlledAssembly@209": {
+    "apps/api/src/site-builder/assembly/controlled-assembly-validator.ts#validateControlledAssembly": {
       "file": "apps/api/src/site-builder/assembly/controlled-assembly-validator.ts",
       "name": "validateControlledAssembly",
       "line": 209,
@@ -1584,7 +1611,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/asset-reference.ts#parseSiteSpecReferenceSurface@92": {
+    "apps/api/src/site-builder/asset-reference.ts#parseSiteSpecReferenceSurface": {
       "file": "apps/api/src/site-builder/asset-reference.ts",
       "name": "parseSiteSpecReferenceSurface",
       "line": 92,
@@ -1593,7 +1620,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/build-progress.ts#<anonymous>@147": {
+    "apps/api/src/site-builder/build-progress.ts#<anonymous>#16": {
       "file": "apps/api/src/site-builder/build-progress.ts",
       "name": "<anonymous>",
       "line": 147,
@@ -1602,7 +1629,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/build-request-contract.ts#normalizeBuildRequest@75": {
+    "apps/api/src/site-builder/build-request-contract.ts#normalizeBuildRequest": {
       "file": "apps/api/src/site-builder/build-request-contract.ts",
       "name": "normalizeBuildRequest",
       "line": 75,
@@ -1611,7 +1638,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/builds.service.ts#create@147": {
+    "apps/api/src/site-builder/builds.service.ts#create": {
       "file": "apps/api/src/site-builder/builds.service.ts",
       "name": "create",
       "line": 147,
@@ -1620,7 +1647,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/builds.service.ts#<anonymous>@184": {
+    "apps/api/src/site-builder/builds.service.ts#<anonymous>#4": {
       "file": "apps/api/src/site-builder/builds.service.ts",
       "name": "<anonymous>",
       "line": 184,
@@ -1629,7 +1656,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/copy-bundle.service.ts#neutralCopySlotContent@408": {
+    "apps/api/src/site-builder/copy-bundle.service.ts#neutralCopySlotContent": {
       "file": "apps/api/src/site-builder/copy-bundle.service.ts",
       "name": "neutralCopySlotContent",
       "line": 408,
@@ -1638,7 +1665,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/current-route-recovery.ts#assertSnapshot@280": {
+    "apps/api/src/site-builder/current-route-recovery.ts#assertSnapshot": {
       "file": "apps/api/src/site-builder/current-route-recovery.ts",
       "name": "assertSnapshot",
       "line": 280,
@@ -1647,7 +1674,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/current-route-recovery.ts#assertOpenOxSourceBundle@456": {
+    "apps/api/src/site-builder/current-route-recovery.ts#assertOpenOxSourceBundle": {
       "file": "apps/api/src/site-builder/current-route-recovery.ts",
       "name": "assertOpenOxSourceBundle",
       "line": 456,
@@ -1656,7 +1683,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/embeddings.client.ts#embed@81": {
+    "apps/api/src/site-builder/embeddings.client.ts#embed": {
       "file": "apps/api/src/site-builder/embeddings.client.ts",
       "name": "embed",
       "line": 81,
@@ -1665,7 +1692,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/aesthetic-review-eval.ts#assertAestheticReviewOutput@477": {
+    "apps/api/src/site-builder/eval/aesthetic-review-eval.ts#assertAestheticReviewOutput": {
       "file": "apps/api/src/site-builder/eval/aesthetic-review-eval.ts",
       "name": "assertAestheticReviewOutput",
       "line": 477,
@@ -1674,7 +1701,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/blind-visual-calibration.ts#assertProviderResult@978": {
+    "apps/api/src/site-builder/eval/blind-visual-calibration.ts#assertProviderResult": {
       "file": "apps/api/src/site-builder/eval/blind-visual-calibration.ts",
       "name": "assertProviderResult",
       "line": 978,
@@ -1683,7 +1710,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/blind-visual-calibration.ts#assertProbeRecord@1170": {
+    "apps/api/src/site-builder/eval/blind-visual-calibration.ts#assertProbeRecord": {
       "file": "apps/api/src/site-builder/eval/blind-visual-calibration.ts",
       "name": "assertProbeRecord",
       "line": 1170,
@@ -1692,7 +1719,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/blind-visual-calibration.ts#summarizeBlindVisualCandidate@1215": {
+    "apps/api/src/site-builder/eval/blind-visual-calibration.ts#summarizeBlindVisualCandidate": {
       "file": "apps/api/src/site-builder/eval/blind-visual-calibration.ts",
       "name": "summarizeBlindVisualCandidate",
       "line": 1215,
@@ -1701,7 +1728,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/blind-visual-calibration.ts#failureRecord@1717": {
+    "apps/api/src/site-builder/eval/blind-visual-calibration.ts#failureRecord": {
       "file": "apps/api/src/site-builder/eval/blind-visual-calibration.ts",
       "name": "failureRecord",
       "line": 1717,
@@ -1710,7 +1737,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/copy-pilot-ledger-identity.ts#readMarker@124": {
+    "apps/api/src/site-builder/eval/copy-pilot-ledger-identity.ts#readMarker": {
       "file": "apps/api/src/site-builder/eval/copy-pilot-ledger-identity.ts",
       "name": "readMarker",
       "line": 124,
@@ -1719,7 +1746,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/copy-pilot-source-verifier.ts#parseArtifact@274": {
+    "apps/api/src/site-builder/eval/copy-pilot-source-verifier.ts#parseArtifact": {
       "file": "apps/api/src/site-builder/eval/copy-pilot-source-verifier.ts",
       "name": "parseArtifact",
       "line": 274,
@@ -1728,7 +1755,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/copy-pilot-source-verifier.ts#createCopyPilotVerifiedSource@371": {
+    "apps/api/src/site-builder/eval/copy-pilot-source-verifier.ts#createCopyPilotVerifiedSource": {
       "file": "apps/api/src/site-builder/eval/copy-pilot-source-verifier.ts",
       "name": "createCopyPilotVerifiedSource",
       "line": 371,
@@ -1737,7 +1764,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/copy-quality-candidate-receipt.ts#validateCopyQualityCandidateReceipt@467": {
+    "apps/api/src/site-builder/eval/copy-quality-candidate-receipt.ts#validateCopyQualityCandidateReceipt": {
       "file": "apps/api/src/site-builder/eval/copy-quality-candidate-receipt.ts",
       "name": "validateCopyQualityCandidateReceipt",
       "line": 467,
@@ -1746,7 +1773,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/copy-quality-candidate-receipt.ts#createCopyQualityCandidateReceipt@605": {
+    "apps/api/src/site-builder/eval/copy-quality-candidate-receipt.ts#createCopyQualityCandidateReceipt": {
       "file": "apps/api/src/site-builder/eval/copy-quality-candidate-receipt.ts",
       "name": "createCopyQualityCandidateReceipt",
       "line": 605,
@@ -1755,7 +1782,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/copy-quality-evaluator.ts#parseReview@343": {
+    "apps/api/src/site-builder/eval/copy-quality-evaluator.ts#parseReview": {
       "file": "apps/api/src/site-builder/eval/copy-quality-evaluator.ts",
       "name": "parseReview",
       "line": 343,
@@ -1764,7 +1791,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/copy-quality-evaluator.ts#aggregateCopyCandidateQuality@616": {
+    "apps/api/src/site-builder/eval/copy-quality-evaluator.ts#aggregateCopyCandidateQuality": {
       "file": "apps/api/src/site-builder/eval/copy-quality-evaluator.ts",
       "name": "aggregateCopyCandidateQuality",
       "line": 616,
@@ -1773,7 +1800,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/copy-quality-matrix-admission.ts#validateManifest@352": {
+    "apps/api/src/site-builder/eval/copy-quality-matrix-admission.ts#validateManifest": {
       "file": "apps/api/src/site-builder/eval/copy-quality-matrix-admission.ts",
       "name": "validateManifest",
       "line": 352,
@@ -1782,7 +1809,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/copy-quality-matrix-admission.ts#validateCredential@415": {
+    "apps/api/src/site-builder/eval/copy-quality-matrix-admission.ts#validateCredential": {
       "file": "apps/api/src/site-builder/eval/copy-quality-matrix-admission.ts",
       "name": "validateCredential",
       "line": 415,
@@ -1791,7 +1818,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/copy-quality-matrix-admission.ts#validateAuthorization@578": {
+    "apps/api/src/site-builder/eval/copy-quality-matrix-admission.ts#validateAuthorization": {
       "file": "apps/api/src/site-builder/eval/copy-quality-matrix-admission.ts",
       "name": "validateAuthorization",
       "line": 578,
@@ -1800,7 +1827,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/copy-real-capability-admission.ts#validateCredential@328": {
+    "apps/api/src/site-builder/eval/copy-real-capability-admission.ts#validateCredential": {
       "file": "apps/api/src/site-builder/eval/copy-real-capability-admission.ts",
       "name": "validateCredential",
       "line": 328,
@@ -1809,7 +1836,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/copy-real-capability-admission.ts#validateAuthorization@464": {
+    "apps/api/src/site-builder/eval/copy-real-capability-admission.ts#validateAuthorization": {
       "file": "apps/api/src/site-builder/eval/copy-real-capability-admission.ts",
       "name": "validateAuthorization",
       "line": 464,
@@ -1818,7 +1845,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/copy-real-capability-admission.ts#validateChildAuthorization@548": {
+    "apps/api/src/site-builder/eval/copy-real-capability-admission.ts#validateChildAuthorization": {
       "file": "apps/api/src/site-builder/eval/copy-real-capability-admission.ts",
       "name": "validateChildAuthorization",
       "line": 548,
@@ -1827,7 +1854,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/copy-real-capability-runner.ts#historicalReceiptBindingIsExact@1012": {
+    "apps/api/src/site-builder/eval/copy-real-capability-runner.ts#historicalReceiptBindingIsExact": {
       "file": "apps/api/src/site-builder/eval/copy-real-capability-runner.ts",
       "name": "historicalReceiptBindingIsExact",
       "line": 1012,
@@ -1836,7 +1863,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/copy-real-capability-runner.ts#acceptCopyGitReviewedEvidence@1179": {
+    "apps/api/src/site-builder/eval/copy-real-capability-runner.ts#acceptCopyGitReviewedEvidence": {
       "file": "apps/api/src/site-builder/eval/copy-real-capability-runner.ts",
       "name": "acceptCopyGitReviewedEvidence",
       "line": 1179,
@@ -1845,7 +1872,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/copy-real-capability-runner.ts#createCopyCapabilityChildRunner@1457": {
+    "apps/api/src/site-builder/eval/copy-real-capability-runner.ts#createCopyCapabilityChildRunner": {
       "file": "apps/api/src/site-builder/eval/copy-real-capability-runner.ts",
       "name": "createCopyCapabilityChildRunner",
       "line": 1457,
@@ -1854,7 +1881,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/copy-real-capability-runner.ts#<anonymous>@1616": {
+    "apps/api/src/site-builder/eval/copy-real-capability-runner.ts#<anonymous>#10": {
       "file": "apps/api/src/site-builder/eval/copy-real-capability-runner.ts",
       "name": "<anonymous>",
       "line": 1616,
@@ -1863,7 +1890,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/copy-sonnet-recovery-admission.ts#validateManifest@297": {
+    "apps/api/src/site-builder/eval/copy-sonnet-recovery-admission.ts#validateManifest": {
       "file": "apps/api/src/site-builder/eval/copy-sonnet-recovery-admission.ts",
       "name": "validateManifest",
       "line": 297,
@@ -1872,7 +1899,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/copy-sonnet-recovery-admission.ts#validateCredential@354": {
+    "apps/api/src/site-builder/eval/copy-sonnet-recovery-admission.ts#validateCredential": {
       "file": "apps/api/src/site-builder/eval/copy-sonnet-recovery-admission.ts",
       "name": "validateCredential",
       "line": 354,
@@ -1881,7 +1908,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/copy-sonnet-recovery-admission.ts#validateChildAuthorization@571": {
+    "apps/api/src/site-builder/eval/copy-sonnet-recovery-admission.ts#validateChildAuthorization": {
       "file": "apps/api/src/site-builder/eval/copy-sonnet-recovery-admission.ts",
       "name": "validateChildAuthorization",
       "line": 571,
@@ -1890,7 +1917,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/copy-sonnet-recovery-manifest-prep.ts#readCopySonnetRecoveryFixedTrackedFile@436": {
+    "apps/api/src/site-builder/eval/copy-sonnet-recovery-manifest-prep.ts#readCopySonnetRecoveryFixedTrackedFile": {
       "file": "apps/api/src/site-builder/eval/copy-sonnet-recovery-manifest-prep.ts",
       "name": "readCopySonnetRecoveryFixedTrackedFile",
       "line": 436,
@@ -1899,7 +1926,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/copy-sonnet-recovery-zero-call-preflight-artifact.ts#validateCopySonnetRecoveryZeroCallPreflightArtifact@287": {
+    "apps/api/src/site-builder/eval/copy-sonnet-recovery-zero-call-preflight-artifact.ts#validateCopySonnetRecoveryZeroCallPreflightArtifact": {
       "file": "apps/api/src/site-builder/eval/copy-sonnet-recovery-zero-call-preflight-artifact.ts",
       "name": "validateCopySonnetRecoveryZeroCallPreflightArtifact",
       "line": 287,
@@ -1908,7 +1935,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/copy-sonnet-recovery-zero-call-preflight.ts#provisionAndAttestCopySonnetRecoveryZeroCallUnlocked@744": {
+    "apps/api/src/site-builder/eval/copy-sonnet-recovery-zero-call-preflight.ts#provisionAndAttestCopySonnetRecoveryZeroCallUnlocked": {
       "file": "apps/api/src/site-builder/eval/copy-sonnet-recovery-zero-call-preflight.ts",
       "name": "provisionAndAttestCopySonnetRecoveryZeroCallUnlocked",
       "line": 744,
@@ -1917,7 +1944,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/eval-provenance.ts#classifyEvaluationOutcome@233": {
+    "apps/api/src/site-builder/eval/eval-provenance.ts#classifyEvaluationOutcome": {
       "file": "apps/api/src/site-builder/eval/eval-provenance.ts",
       "name": "classifyEvaluationOutcome",
       "line": 233,
@@ -1926,7 +1953,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/eval/m1-stage-closeout.ts#factLiteralFindings@39": {
+    "apps/api/src/site-builder/eval/m1-stage-closeout.ts#factLiteralFindings": {
       "file": "apps/api/src/site-builder/eval/m1-stage-closeout.ts",
       "name": "factLiteralFindings",
       "line": 39,
@@ -1935,7 +1962,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/image-pipeline-runner.ts#validateInspection@142": {
+    "apps/api/src/site-builder/image-pipeline-runner.ts#validateInspection": {
       "file": "apps/api/src/site-builder/image-pipeline-runner.ts",
       "name": "validateInspection",
       "line": 142,
@@ -1944,7 +1971,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/image-pipeline-runner.ts#<anonymous>@410": {
+    "apps/api/src/site-builder/image-pipeline-runner.ts#<anonymous>#18": {
       "file": "apps/api/src/site-builder/image-pipeline-runner.ts",
       "name": "<anonymous>",
       "line": 410,
@@ -1953,7 +1980,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/image-pipeline.service.ts#processSiteImages@152": {
+    "apps/api/src/site-builder/image-pipeline.service.ts#processSiteImages": {
       "file": "apps/api/src/site-builder/image-pipeline.service.ts",
       "name": "processSiteImages",
       "line": 152,
@@ -1962,7 +1989,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/image-pipeline.service.ts#processAsset@241": {
+    "apps/api/src/site-builder/image-pipeline.service.ts#processAsset": {
       "file": "apps/api/src/site-builder/image-pipeline.service.ts",
       "name": "processAsset",
       "line": 241,
@@ -1971,7 +1998,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/image-pipeline.service.ts#<anonymous>@721": {
+    "apps/api/src/site-builder/image-pipeline.service.ts#<anonymous>#30": {
       "file": "apps/api/src/site-builder/image-pipeline.service.ts",
       "name": "<anonymous>",
       "line": 721,
@@ -1980,7 +2007,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/intake.service.ts#storedIntakeMatches@99": {
+    "apps/api/src/site-builder/intake.service.ts#storedIntakeMatches": {
       "file": "apps/api/src/site-builder/intake.service.ts",
       "name": "storedIntakeMatches",
       "line": 99,
@@ -1989,7 +2016,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/intake.service.ts#<anonymous>@299": {
+    "apps/api/src/site-builder/intake.service.ts#<anonymous>#7": {
       "file": "apps/api/src/site-builder/intake.service.ts",
       "name": "<anonymous>",
       "line": 299,
@@ -1998,7 +2025,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/media-foundation.ts#assertRecipe@62": {
+    "apps/api/src/site-builder/media-foundation.ts#assertRecipe": {
       "file": "apps/api/src/site-builder/media-foundation.ts",
       "name": "assertRecipe",
       "line": 62,
@@ -2007,7 +2034,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/media-foundation.ts#readPublishedVariantKeys@271": {
+    "apps/api/src/site-builder/media-foundation.ts#readPublishedVariantKeys": {
       "file": "apps/api/src/site-builder/media-foundation.ts",
       "name": "readPublishedVariantKeys",
       "line": 271,
@@ -2016,7 +2043,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/openox-pricing-authority.ts#settlementOpenOxPrice@87": {
+    "apps/api/src/site-builder/openox-pricing-authority.ts#settlementOpenOxPrice": {
       "file": "apps/api/src/site-builder/openox-pricing-authority.ts",
       "name": "settlementOpenOxPrice",
       "line": 87,
@@ -2025,7 +2052,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/partial-build-base.ts#loadPartialBuildBase@61": {
+    "apps/api/src/site-builder/partial-build-base.ts#loadPartialBuildBase": {
       "file": "apps/api/src/site-builder/partial-build-base.ts",
       "name": "loadPartialBuildBase",
       "line": 61,
@@ -2034,7 +2061,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/profile-contract.ts#normalizePatch@306": {
+    "apps/api/src/site-builder/profile-contract.ts#normalizePatch": {
       "file": "apps/api/src/site-builder/profile-contract.ts",
       "name": "normalizePatch",
       "line": 306,
@@ -2043,7 +2070,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/quality/browser-quality-runner.ts#<anonymous>@367": {
+    "apps/api/src/site-builder/quality/browser-quality-runner.ts#<anonymous>#18": {
       "file": "apps/api/src/site-builder/quality/browser-quality-runner.ts",
       "name": "<anonymous>",
       "line": 367,
@@ -2052,7 +2079,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/quality/browser-quality-runner.ts#collectBrowserQualityFacts@836": {
+    "apps/api/src/site-builder/quality/browser-quality-runner.ts#collectBrowserQualityFacts": {
       "file": "apps/api/src/site-builder/quality/browser-quality-runner.ts",
       "name": "collectBrowserQualityFacts",
       "line": 836,
@@ -2061,7 +2088,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/quality/closed-repair.service.ts#generateCatalog@265": {
+    "apps/api/src/site-builder/quality/closed-repair.service.ts#generateCatalog": {
       "file": "apps/api/src/site-builder/quality/closed-repair.service.ts",
       "name": "generateCatalog",
       "line": 265,
@@ -2070,7 +2097,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/quality/deterministic-quality.ts#assertFactCoverage@326": {
+    "apps/api/src/site-builder/quality/deterministic-quality.ts#assertFactCoverage": {
       "file": "apps/api/src/site-builder/quality/deterministic-quality.ts",
       "name": "assertFactCoverage",
       "line": 326,
@@ -2079,7 +2106,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/quality/deterministic-quality.ts#evaluateDeterministicQuality@557": {
+    "apps/api/src/site-builder/quality/deterministic-quality.ts#evaluateDeterministicQuality": {
       "file": "apps/api/src/site-builder/quality/deterministic-quality.ts",
       "name": "evaluateDeterministicQuality",
       "line": 557,
@@ -2088,7 +2115,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/quality/quality-candidate-artifact.ts#materializeQualityCandidateArtifact@265": {
+    "apps/api/src/site-builder/quality/quality-candidate-artifact.ts#materializeQualityCandidateArtifact": {
       "file": "apps/api/src/site-builder/quality/quality-candidate-artifact.ts",
       "name": "materializeQualityCandidateArtifact",
       "line": 265,
@@ -2097,7 +2124,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/quality/quality-narrative.service.ts#validateStoredSet@221": {
+    "apps/api/src/site-builder/quality/quality-narrative.service.ts#validateStoredSet": {
       "file": "apps/api/src/site-builder/quality/quality-narrative.service.ts",
       "name": "validateStoredSet",
       "line": 221,
@@ -2106,7 +2133,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/quality/quality-narrative.ts#groupForRule@235": {
+    "apps/api/src/site-builder/quality/quality-narrative.ts#groupForRule": {
       "file": "apps/api/src/site-builder/quality/quality-narrative.ts",
       "name": "groupForRule",
       "line": 235,
@@ -2115,7 +2142,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/quality/quality-narrative.ts#validateQualityNarrativeTaskOutput@368": {
+    "apps/api/src/site-builder/quality/quality-narrative.ts#validateQualityNarrativeTaskOutput": {
       "file": "apps/api/src/site-builder/quality/quality-narrative.ts",
       "name": "validateQualityNarrativeTaskOutput",
       "line": 368,
@@ -2124,7 +2151,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/release-artifact.ts#assertReleaseContract@220": {
+    "apps/api/src/site-builder/release-artifact.ts#assertReleaseContract": {
       "file": "apps/api/src/site-builder/release-artifact.ts",
       "name": "assertReleaseContract",
       "line": 220,
@@ -2133,7 +2160,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/release-artifact.ts#validateReleaseManifestQuality@597": {
+    "apps/api/src/site-builder/release-artifact.ts#validateReleaseManifestQuality": {
       "file": "apps/api/src/site-builder/release-artifact.ts",
       "name": "validateReleaseManifestQuality",
       "line": 597,
@@ -2142,7 +2169,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/release-artifact.ts#releaseManifestCommonValid@811": {
+    "apps/api/src/site-builder/release-artifact.ts#releaseManifestCommonValid": {
       "file": "apps/api/src/site-builder/release-artifact.ts",
       "name": "releaseManifestCommonValid",
       "line": 811,
@@ -2151,7 +2178,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/release-artifact.ts#validateReleaseManifest@896": {
+    "apps/api/src/site-builder/release-artifact.ts#validateReleaseManifest": {
       "file": "apps/api/src/site-builder/release-artifact.ts",
       "name": "validateReleaseManifest",
       "line": 896,
@@ -2160,7 +2187,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/release-artifact.ts#buildReleaseArtifact@1116": {
+    "apps/api/src/site-builder/release-artifact.ts#buildReleaseArtifact": {
       "file": "apps/api/src/site-builder/release-artifact.ts",
       "name": "buildReleaseArtifact",
       "line": 1116,
@@ -2169,7 +2196,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/site-build-budget-grant.ts#verify@273": {
+    "apps/api/src/site-builder/site-build-budget-grant.ts#verify": {
       "file": "apps/api/src/site-builder/site-build-budget-grant.ts",
       "name": "verify",
       "line": 273,
@@ -2178,7 +2205,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/site-build-cost-ledger.ts#modelCostMeasurement@79": {
+    "apps/api/src/site-builder/site-build-cost-ledger.ts#modelCostMeasurement": {
       "file": "apps/api/src/site-builder/site-build-cost-ledger.ts",
       "name": "modelCostMeasurement",
       "line": 79,
@@ -2187,7 +2214,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/site-build-cost-ledger.ts#reserveModelOperation@909": {
+    "apps/api/src/site-builder/site-build-cost-ledger.ts#reserveModelOperation": {
       "file": "apps/api/src/site-builder/site-build-cost-ledger.ts",
       "name": "reserveModelOperation",
       "line": 909,
@@ -2196,7 +2223,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/site-build-cost-ledger.ts#<anonymous>@1641": {
+    "apps/api/src/site-builder/site-build-cost-ledger.ts#<anonymous>#75": {
       "file": "apps/api/src/site-builder/site-build-cost-ledger.ts",
       "name": "<anonymous>",
       "line": 1641,
@@ -2205,7 +2232,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/site-build-cost-ledger.ts#<anonymous>@2215": {
+    "apps/api/src/site-builder/site-build-cost-ledger.ts#<anonymous>#90": {
       "file": "apps/api/src/site-builder/site-build-cost-ledger.ts",
       "name": "<anonymous>",
       "line": 2215,
@@ -2214,7 +2241,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/site-build-cost-reconciliation-resolver.ts#parseCatalog@202": {
+    "apps/api/src/site-builder/site-build-cost-reconciliation-resolver.ts#parseCatalog": {
       "file": "apps/api/src/site-builder/site-build-cost-reconciliation-resolver.ts",
       "name": "parseCatalog",
       "line": 202,
@@ -2223,7 +2250,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/site-build-cost-reconciliation-resolver.ts#resolve@331": {
+    "apps/api/src/site-builder/site-build-cost-reconciliation-resolver.ts#resolve": {
       "file": "apps/api/src/site-builder/site-build-cost-reconciliation-resolver.ts",
       "name": "resolve",
       "line": 331,
@@ -2232,7 +2259,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/site-builder-model-settlement.ts#_assertAttestation@294": {
+    "apps/api/src/site-builder/site-builder-model-settlement.ts#_assertAttestation": {
       "file": "apps/api/src/site-builder/site-builder-model-settlement.ts",
       "name": "_assertAttestation",
       "line": 294,
@@ -2241,7 +2268,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/site-builder-model-settlement.ts#deriveOpenOxPrice@532": {
+    "apps/api/src/site-builder/site-builder-model-settlement.ts#deriveOpenOxPrice": {
       "file": "apps/api/src/site-builder/site-builder-model-settlement.ts",
       "name": "deriveOpenOxPrice",
       "line": 532,
@@ -2250,7 +2277,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/site-builder-model-settlement.ts#preflight@729": {
+    "apps/api/src/site-builder/site-builder-model-settlement.ts#preflight": {
       "file": "apps/api/src/site-builder/site-builder-model-settlement.ts",
       "name": "preflight",
       "line": 729,
@@ -2259,7 +2286,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/site-builder-model-settlement.ts#resolve@882": {
+    "apps/api/src/site-builder/site-builder-model-settlement.ts#resolve": {
       "file": "apps/api/src/site-builder/site-builder-model-settlement.ts",
       "name": "resolve",
       "line": 882,
@@ -2268,7 +2295,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/site-builder/site-release.service.ts#materialize@310": {
+    "apps/api/src/site-builder/site-release.service.ts#materialize": {
       "file": "apps/api/src/site-builder/site-release.service.ts",
       "name": "materialize",
       "line": 310,
@@ -2277,7 +2304,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/skills/eval/skill-model-evals.ts#runSkillModelEvals@141": {
+    "apps/api/src/skills/eval/skill-model-evals.ts#runSkillModelEvals": {
       "file": "apps/api/src/skills/eval/skill-model-evals.ts",
       "name": "runSkillModelEvals",
       "line": 141,
@@ -2286,7 +2313,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/skills/evals/deterministic-executor.ts#assertionFailure@80": {
+    "apps/api/src/skills/evals/deterministic-executor.ts#assertionFailure": {
       "file": "apps/api/src/skills/evals/deterministic-executor.ts",
       "name": "assertionFailure",
       "line": 80,
@@ -2295,7 +2322,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/skills/evals/eval-manifest.ts#<anonymous>@158": {
+    "apps/api/src/skills/evals/eval-manifest.ts#<anonymous>#2": {
       "file": "apps/api/src/skills/evals/eval-manifest.ts",
       "name": "<anonymous>",
       "line": 158,
@@ -2304,7 +2331,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/skills/evals/eval-manifest.ts#validateAssertion@211": {
+    "apps/api/src/skills/evals/eval-manifest.ts#validateAssertion": {
       "file": "apps/api/src/skills/evals/eval-manifest.ts",
       "name": "validateAssertion",
       "line": 211,
@@ -2313,7 +2340,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/skills/packs/load-builtin-packs.ts#loadBuiltinPacks@49": {
+    "apps/api/src/skills/packs/load-builtin-packs.ts#loadBuiltinPacks": {
       "file": "apps/api/src/skills/packs/load-builtin-packs.ts",
       "name": "loadBuiltinPacks",
       "line": 49,
@@ -2322,7 +2349,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/skills/packs/pack-manifest.ts#validatePackManifest@141": {
+    "apps/api/src/skills/packs/pack-manifest.ts#validatePackManifest": {
       "file": "apps/api/src/skills/packs/pack-manifest.ts",
       "name": "validatePackManifest",
       "line": 141,
@@ -2331,7 +2358,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/skills/service-handlers/incoterms-quote.ts#parseIncotermsQuoteInput@121": {
+    "apps/api/src/skills/service-handlers/incoterms-quote.ts#parseIncotermsQuoteInput": {
       "file": "apps/api/src/skills/service-handlers/incoterms-quote.ts",
       "name": "parseIncotermsQuoteInput",
       "line": 121,
@@ -2340,7 +2367,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/skills/skill-frontmatter.ts#parseSkillFrontmatter@90": {
+    "apps/api/src/skills/skill-frontmatter.ts#parseSkillFrontmatter": {
       "file": "apps/api/src/skills/skill-frontmatter.ts",
       "name": "parseSkillFrontmatter",
       "line": 90,
@@ -2349,7 +2376,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/skills/skill-manifest.ts#validateSkillArtifact@187": {
+    "apps/api/src/skills/skill-manifest.ts#validateSkillArtifact": {
       "file": "apps/api/src/skills/skill-manifest.ts",
       "name": "validateSkillArtifact",
       "line": 187,
@@ -2358,7 +2385,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/asset-cleanup.contract.ts#<anonymous>@158": {
+    "apps/api/src/temporal/asset-cleanup.contract.ts#<anonymous>#4": {
       "file": "apps/api/src/temporal/asset-cleanup.contract.ts",
       "name": "<anonymous>",
       "line": 158,
@@ -2367,7 +2394,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/asset-cleanup.reconcile.ts#<anonymous>@135": {
+    "apps/api/src/temporal/asset-cleanup.reconcile.ts#<anonymous>#2": {
       "file": "apps/api/src/temporal/asset-cleanup.reconcile.ts",
       "name": "<anonymous>",
       "line": 135,
@@ -2376,7 +2403,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/backlog.workflow.ts#backlogSweepWorkflow@87": {
+    "apps/api/src/temporal/backlog.workflow.ts#backlogSweepWorkflow": {
       "file": "apps/api/src/temporal/backlog.workflow.ts",
       "name": "backlogSweepWorkflow",
       "line": 87,
@@ -2385,7 +2412,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/campaign-planning.workflow.ts#campaignPlanningWorkflow@118": {
+    "apps/api/src/temporal/campaign-planning.workflow.ts#campaignPlanningWorkflow": {
       "file": "apps/api/src/temporal/campaign-planning.workflow.ts",
       "name": "campaignPlanningWorkflow",
       "line": 118,
@@ -2394,7 +2421,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/diagnostic-failure-converter.ts#cleanError@286": {
+    "apps/api/src/temporal/diagnostic-failure-converter.ts#cleanError": {
       "file": "apps/api/src/temporal/diagnostic-failure-converter.ts",
       "name": "cleanError",
       "line": 286,
@@ -2403,7 +2430,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/discovery-company-materialization-canonical.ts#materializeDiscoveryCompanyCanonicalCandidate@107": {
+    "apps/api/src/temporal/discovery-company-materialization-canonical.ts#materializeDiscoveryCompanyCanonicalCandidate": {
       "file": "apps/api/src/temporal/discovery-company-materialization-canonical.ts",
       "name": "materializeDiscoveryCompanyCanonicalCandidate",
       "line": 107,
@@ -2412,7 +2439,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/discovery-company-materialization.ts#materializeLockedDiscoveryCompanyBatch@392": {
+    "apps/api/src/temporal/discovery-company-materialization.ts#materializeLockedDiscoveryCompanyBatch": {
       "file": "apps/api/src/temporal/discovery-company-materialization.ts",
       "name": "materializeLockedDiscoveryCompanyBatch",
       "line": 392,
@@ -2421,7 +2448,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/discovery.activities.ts#executeQuery@975": {
+    "apps/api/src/temporal/discovery.activities.ts#executeQuery": {
       "file": "apps/api/src/temporal/discovery.activities.ts",
       "name": "executeQuery",
       "line": 975,
@@ -2430,70 +2457,70 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/discovery.activities.ts#<anonymous>@1581": {
+    "apps/api/src/temporal/discovery.activities.ts#<anonymous>#60": {
       "file": "apps/api/src/temporal/discovery.activities.ts",
       "name": "<anonymous>",
-      "line": 1581,
+      "line": 1585,
       "complexity": 31,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/discovery.activities.ts#qualifyFitForRun@1783": {
+    "apps/api/src/temporal/discovery.activities.ts#qualifyFitForRun": {
       "file": "apps/api/src/temporal/discovery.activities.ts",
       "name": "qualifyFitForRun",
-      "line": 1783,
+      "line": 1787,
       "complexity": 30,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/discovery.activities.ts#enrichRun@2087": {
+    "apps/api/src/temporal/discovery.activities.ts#enrichRun": {
       "file": "apps/api/src/temporal/discovery.activities.ts",
       "name": "enrichRun",
-      "line": 2087,
+      "line": 2091,
       "complexity": 24,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/discovery.activities.ts#profileWebsitesForRun@2294": {
+    "apps/api/src/temporal/discovery.activities.ts#profileWebsitesForRun": {
       "file": "apps/api/src/temporal/discovery.activities.ts",
       "name": "profileWebsitesForRun",
-      "line": 2294,
+      "line": 2298,
       "complexity": 58,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/discovery.activities.ts#enrichSignalsRun@2672": {
+    "apps/api/src/temporal/discovery.activities.ts#enrichSignalsRun": {
       "file": "apps/api/src/temporal/discovery.activities.ts",
       "name": "enrichSignalsRun",
-      "line": 2672,
+      "line": 2676,
       "complexity": 36,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/discovery.activities.ts#<anonymous>@3068": {
+    "apps/api/src/temporal/discovery.activities.ts#<anonymous>#129": {
       "file": "apps/api/src/temporal/discovery.activities.ts",
       "name": "<anonymous>",
-      "line": 3068,
+      "line": 3072,
       "complexity": 26,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/discovery.activities.ts#<anonymous>@3477": {
+    "apps/api/src/temporal/discovery.activities.ts#<anonymous>#142": {
       "file": "apps/api/src/temporal/discovery.activities.ts",
       "name": "<anonymous>",
-      "line": 3477,
+      "line": 3481,
       "complexity": 23,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/discovery.run2.activities.ts#quickJudgeBatch@265": {
+    "apps/api/src/temporal/discovery.run2.activities.ts#quickJudgeBatch": {
       "file": "apps/api/src/temporal/discovery.run2.activities.ts",
       "name": "quickJudgeBatch",
       "line": 265,
@@ -2502,7 +2529,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/discovery.run2.pipeline.activities.ts#signalsCompanyOnce@480": {
+    "apps/api/src/temporal/discovery.run2.pipeline.activities.ts#signalsCompanyOnce": {
       "file": "apps/api/src/temporal/discovery.run2.pipeline.activities.ts",
       "name": "signalsCompanyOnce",
       "line": 480,
@@ -2511,7 +2538,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/discovery.workflow.ts#discoveryWorkflow@195": {
+    "apps/api/src/temporal/discovery.workflow.ts#discoveryWorkflow": {
       "file": "apps/api/src/temporal/discovery.workflow.ts",
       "name": "discoveryWorkflow",
       "line": 195,
@@ -2520,7 +2547,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/ensure-schedules.ts#ensurePlatformSchedules@80": {
+    "apps/api/src/temporal/ensure-schedules.ts#ensurePlatformSchedules": {
       "file": "apps/api/src/temporal/ensure-schedules.ts",
       "name": "ensurePlatformSchedules",
       "line": 80,
@@ -2529,7 +2556,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/external-intent.activities.ts#ingestExternalSignals@222": {
+    "apps/api/src/temporal/external-intent.activities.ts#ingestExternalSignals": {
       "file": "apps/api/src/temporal/external-intent.activities.ts",
       "name": "ingestExternalSignals",
       "line": 222,
@@ -2538,7 +2565,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/external-intent.workflow.ts#externalIntentSweepWorkflow@48": {
+    "apps/api/src/temporal/external-intent.workflow.ts#externalIntentSweepWorkflow": {
       "file": "apps/api/src/temporal/external-intent.workflow.ts",
       "name": "externalIntentSweepWorkflow",
       "line": 48,
@@ -2547,7 +2574,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/patent-cache-broker-scanner.ts#searchInventorsForAnchorsWithStats@68": {
+    "apps/api/src/temporal/patent-cache-broker-scanner.ts#searchInventorsForAnchorsWithStats": {
       "file": "apps/api/src/temporal/patent-cache-broker-scanner.ts",
       "name": "searchInventorsForAnchorsWithStats",
       "line": 68,
@@ -2556,7 +2583,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/pipeline-failure-taxonomy.ts#controlPlaneToken@83": {
+    "apps/api/src/temporal/pipeline-failure-taxonomy.ts#controlPlaneToken": {
       "file": "apps/api/src/temporal/pipeline-failure-taxonomy.ts",
       "name": "controlPlaneToken",
       "line": 83,
@@ -2565,7 +2592,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/pipeline-failure-taxonomy.ts#failureCodeForNode@178": {
+    "apps/api/src/temporal/pipeline-failure-taxonomy.ts#failureCodeForNode": {
       "file": "apps/api/src/temporal/pipeline-failure-taxonomy.ts",
       "name": "failureCodeForNode",
       "line": 178,
@@ -2574,7 +2601,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/platform-channel-crawl.ts#assertChannelCrawlWorkflowInput@40": {
+    "apps/api/src/temporal/platform-channel-crawl.ts#assertChannelCrawlWorkflowInput": {
       "file": "apps/api/src/temporal/platform-channel-crawl.ts",
       "name": "assertChannelCrawlWorkflowInput",
       "line": 40,
@@ -2583,7 +2610,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/platform-schedule-authority.ts#parsePlatformExecutionBudgetBinding@200": {
+    "apps/api/src/temporal/platform-schedule-authority.ts#parsePlatformExecutionBudgetBinding": {
       "file": "apps/api/src/temporal/platform-schedule-authority.ts",
       "name": "parsePlatformExecutionBudgetBinding",
       "line": 200,
@@ -2592,7 +2619,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/qualify.activities.ts#<anonymous>@82": {
+    "apps/api/src/temporal/qualify.activities.ts#<anonymous>#5": {
       "file": "apps/api/src/temporal/qualify.activities.ts",
       "name": "<anonymous>",
       "line": 82,
@@ -2601,7 +2628,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/refurbish.workflow.ts#refurbishWorkflow@42": {
+    "apps/api/src/temporal/refurbish.workflow.ts#refurbishWorkflow": {
       "file": "apps/api/src/temporal/refurbish.workflow.ts",
       "name": "refurbishWorkflow",
       "line": 42,
@@ -2610,7 +2637,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/site-builder.activities.ts#assembleControlledCandidate@953": {
+    "apps/api/src/temporal/site-builder.activities.ts#assembleControlledCandidate": {
       "file": "apps/api/src/temporal/site-builder.activities.ts",
       "name": "assembleControlledCandidate",
       "line": 953,
@@ -2619,7 +2646,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/site-builder.activities.ts#<anonymous>@1622": {
+    "apps/api/src/temporal/site-builder.activities.ts#<anonymous>#30": {
       "file": "apps/api/src/temporal/site-builder.activities.ts",
       "name": "<anonymous>",
       "line": 1622,
@@ -2628,7 +2655,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/site-builder.activities.ts#sweepSiteBuildCostReconciliation@2180": {
+    "apps/api/src/temporal/site-builder.activities.ts#sweepSiteBuildCostReconciliation": {
       "file": "apps/api/src/temporal/site-builder.activities.ts",
       "name": "sweepSiteBuildCostReconciliation",
       "line": 2180,
@@ -2637,7 +2664,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/site-builder.activities.ts#buildBrandProfile@2351": {
+    "apps/api/src/temporal/site-builder.activities.ts#buildBrandProfile": {
       "file": "apps/api/src/temporal/site-builder.activities.ts",
       "name": "buildBrandProfile",
       "line": 2351,
@@ -2646,7 +2673,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/site-builder.activities.ts#assembleAndBuild@3561": {
+    "apps/api/src/temporal/site-builder.activities.ts#assembleAndBuild": {
       "file": "apps/api/src/temporal/site-builder.activities.ts",
       "name": "assembleAndBuild",
       "line": 3561,
@@ -2655,7 +2682,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/site-builder.activities.ts#<anonymous>@3823": {
+    "apps/api/src/temporal/site-builder.activities.ts#<anonymous>#93": {
       "file": "apps/api/src/temporal/site-builder.activities.ts",
       "name": "<anonymous>",
       "line": 3823,
@@ -2664,7 +2691,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/testing/discovery-activity-timeouts.ts#<anonymous>@22": {
+    "apps/api/src/temporal/testing/discovery-activity-timeouts.ts#<anonymous>": {
       "file": "apps/api/src/temporal/testing/discovery-activity-timeouts.ts",
       "name": "<anonymous>",
       "line": 22,
@@ -2673,7 +2700,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/temporal/worker.ts#main@160": {
+    "apps/api/src/temporal/worker.ts#main": {
       "file": "apps/api/src/temporal/worker.ts",
       "name": "main",
       "line": 160,
@@ -2682,7 +2709,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/tools/generic-operation-projection.ts#normalize@44": {
+    "apps/api/src/tools/generic-operation-projection.ts#normalize": {
       "file": "apps/api/src/tools/generic-operation-projection.ts",
       "name": "normalize",
       "line": 44,
@@ -2691,7 +2718,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/tools/tool-broker.ts#invoke@245": {
+    "apps/api/src/tools/tool-broker.ts#invoke": {
       "file": "apps/api/src/tools/tool-broker.ts",
       "name": "invoke",
       "line": 245,
@@ -2700,7 +2727,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/code-intelligence/src/cli.ts#main@144": {
+    "packages/code-intelligence/src/cli.ts#main": {
       "file": "packages/code-intelligence/src/cli.ts",
       "name": "main",
       "line": 144,
@@ -2709,7 +2736,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/code-intelligence/src/codegraph-pilot.ts#evaluateCodeGraphStatus@778": {
+    "packages/code-intelligence/src/codegraph-pilot.ts#evaluateCodeGraphStatus": {
       "file": "packages/code-intelligence/src/codegraph-pilot.ts",
       "name": "evaluateCodeGraphStatus",
       "line": 778,
@@ -2718,7 +2745,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/code-intelligence/src/codegraph-pilot.ts#evaluateCodeGraphPilot@1528": {
+    "packages/code-intelligence/src/codegraph-pilot.ts#evaluateCodeGraphPilot": {
       "file": "packages/code-intelligence/src/codegraph-pilot.ts",
       "name": "evaluateCodeGraphPilot",
       "line": 1528,
@@ -2727,7 +2754,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/code-intelligence/src/dynamic-mechanisms.ts#evaluateDynamicMechanisms@84": {
+    "packages/code-intelligence/src/dynamic-mechanisms.ts#evaluateDynamicMechanisms": {
       "file": "packages/code-intelligence/src/dynamic-mechanisms.ts",
       "name": "evaluateDynamicMechanisms",
       "line": 84,
@@ -2736,7 +2763,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/code-intelligence/src/extractors/ai-tools.ts#extractAiAndTools@185": {
+    "packages/code-intelligence/src/extractors/ai-tools.ts#extractAiAndTools": {
       "file": "packages/code-intelligence/src/extractors/ai-tools.ts",
       "name": "extractAiAndTools",
       "line": 185,
@@ -2745,7 +2772,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/code-intelligence/src/extractors/governance.ts#assignedAuthorityRole@253": {
+    "packages/code-intelligence/src/extractors/governance.ts#assignedAuthorityRole": {
       "file": "packages/code-intelligence/src/extractors/governance.ts",
       "name": "assignedAuthorityRole",
       "line": 253,
@@ -2754,7 +2781,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/code-intelligence/src/extractors/governance.ts#validatedAuthorityRoles@329": {
+    "packages/code-intelligence/src/extractors/governance.ts#validatedAuthorityRoles": {
       "file": "packages/code-intelligence/src/extractors/governance.ts",
       "name": "validatedAuthorityRoles",
       "line": 329,
@@ -2763,7 +2790,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/code-intelligence/src/extractors/governance.ts#extractTrustedApprovalContracts@500": {
+    "packages/code-intelligence/src/extractors/governance.ts#extractTrustedApprovalContracts": {
       "file": "packages/code-intelligence/src/extractors/governance.ts",
       "name": "extractTrustedApprovalContracts",
       "line": 500,
@@ -2772,7 +2799,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/code-intelligence/src/extractors/governance.ts#extractGovernance@751": {
+    "packages/code-intelligence/src/extractors/governance.ts#extractGovernance": {
       "file": "packages/code-intelligence/src/extractors/governance.ts",
       "name": "extractGovernance",
       "line": 751,
@@ -2781,7 +2808,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/code-intelligence/src/extractors/infrastructure.ts#extractInfrastructure@9": {
+    "packages/code-intelligence/src/extractors/infrastructure.ts#extractInfrastructure": {
       "file": "packages/code-intelligence/src/extractors/infrastructure.ts",
       "name": "extractInfrastructure",
       "line": 9,
@@ -2790,7 +2817,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/code-intelligence/src/extractors/typescript.ts#extractTypeScript@223": {
+    "packages/code-intelligence/src/extractors/typescript.ts#extractTypeScript": {
       "file": "packages/code-intelligence/src/extractors/typescript.ts",
       "name": "extractTypeScript",
       "line": 223,
@@ -2799,7 +2826,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/code-intelligence/src/extractors/typescript.ts#<anonymous>@801": {
+    "packages/code-intelligence/src/extractors/typescript.ts#<anonymous>#17": {
       "file": "packages/code-intelligence/src/extractors/typescript.ts",
       "name": "<anonymous>",
       "line": 801,
@@ -2808,7 +2835,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/code-intelligence/src/impact.ts#createImpactReport@95": {
+    "packages/code-intelligence/src/impact.ts#createImpactReport": {
       "file": "packages/code-intelligence/src/impact.ts",
       "name": "createImpactReport",
       "line": 95,
@@ -2817,7 +2844,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/code-intelligence/src/runtime-evidence.ts#assertSafeMetadata@465": {
+    "packages/code-intelligence/src/runtime-evidence.ts#assertSafeMetadata": {
       "file": "packages/code-intelligence/src/runtime-evidence.ts",
       "name": "assertSafeMetadata",
       "line": 465,
@@ -2826,7 +2853,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/code-intelligence/src/runtime-evidence.ts#assertRuntimeSemantics@774": {
+    "packages/code-intelligence/src/runtime-evidence.ts#assertRuntimeSemantics": {
       "file": "packages/code-intelligence/src/runtime-evidence.ts",
       "name": "assertRuntimeSemantics",
       "line": 774,
@@ -2835,7 +2862,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/code-intelligence/src/runtime-evidence.ts#assertRuntimeRecordFields@966": {
+    "packages/code-intelligence/src/runtime-evidence.ts#assertRuntimeRecordFields": {
       "file": "packages/code-intelligence/src/runtime-evidence.ts",
       "name": "assertRuntimeRecordFields",
       "line": 966,
@@ -2844,7 +2871,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/contracts/src/site-builder/design-brief.ts#validateDesignBrief@48": {
+    "packages/contracts/src/site-builder/design-brief.ts#validateDesignBrief": {
       "file": "packages/contracts/src/site-builder/design-brief.ts",
       "name": "validateDesignBrief",
       "line": 48,
@@ -2853,7 +2880,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/contracts/src/site-builder/design-catalog-v2.ts#validateDemoVisualPack@384": {
+    "packages/contracts/src/site-builder/design-catalog-v2.ts#validateDemoVisualPack": {
       "file": "packages/contracts/src/site-builder/design-catalog-v2.ts",
       "name": "validateDemoVisualPack",
       "line": 384,
@@ -2862,7 +2889,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/contracts/src/site-builder/design-catalog-v2.ts#validateBlueprint@490": {
+    "packages/contracts/src/site-builder/design-catalog-v2.ts#validateBlueprint": {
       "file": "packages/contracts/src/site-builder/design-catalog-v2.ts",
       "name": "validateBlueprint",
       "line": 490,
@@ -2871,7 +2898,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/contracts/src/site-builder/design-catalog-v2.ts#validateTemplateFamilyV2@554": {
+    "packages/contracts/src/site-builder/design-catalog-v2.ts#validateTemplateFamilyV2": {
       "file": "packages/contracts/src/site-builder/design-catalog-v2.ts",
       "name": "validateTemplateFamilyV2",
       "line": 554,
@@ -2880,7 +2907,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/contracts/src/site-builder/design-catalog-v2.ts#validateCatalogV2Draft@750": {
+    "packages/contracts/src/site-builder/design-catalog-v2.ts#validateCatalogV2Draft": {
       "file": "packages/contracts/src/site-builder/design-catalog-v2.ts",
       "name": "validateCatalogV2Draft",
       "line": 750,
@@ -2889,7 +2916,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/contracts/src/site-builder/design-catalog-v2.ts#validateBriefV2Draft@926": {
+    "packages/contracts/src/site-builder/design-catalog-v2.ts#validateBriefV2Draft": {
       "file": "packages/contracts/src/site-builder/design-catalog-v2.ts",
       "name": "validateBriefV2Draft",
       "line": 926,
@@ -2898,7 +2925,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/contracts/src/site-builder/design-catalog-v2.ts#validateDesignBriefV2AgainstCatalog@1078": {
+    "packages/contracts/src/site-builder/design-catalog-v2.ts#validateDesignBriefV2AgainstCatalog": {
       "file": "packages/contracts/src/site-builder/design-catalog-v2.ts",
       "name": "validateDesignBriefV2AgainstCatalog",
       "line": 1078,
@@ -2907,7 +2934,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/contracts/src/site-builder/design-dna.ts#validateDesignDna@62": {
+    "packages/contracts/src/site-builder/design-dna.ts#validateDesignDna": {
       "file": "packages/contracts/src/site-builder/design-dna.ts",
       "name": "validateDesignDna",
       "line": 62,
@@ -2916,7 +2943,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/contracts/src/site-builder/design-evaluation.ts#validateDesignEvaluationV2@481": {
+    "packages/contracts/src/site-builder/design-evaluation.ts#validateDesignEvaluationV2": {
       "file": "packages/contracts/src/site-builder/design-evaluation.ts",
       "name": "validateDesignEvaluationV2",
       "line": 481,
@@ -2925,7 +2952,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/contracts/src/site-builder/design-evaluation.ts#validateQualityArtifactSet@776": {
+    "packages/contracts/src/site-builder/design-evaluation.ts#validateQualityArtifactSet": {
       "file": "packages/contracts/src/site-builder/design-evaluation.ts",
       "name": "validateQualityArtifactSet",
       "line": 776,
@@ -2934,7 +2961,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/contracts/src/site-builder/design-evaluation.ts#isRepairChange@884": {
+    "packages/contracts/src/site-builder/design-evaluation.ts#isRepairChange": {
       "file": "packages/contracts/src/site-builder/design-evaluation.ts",
       "name": "isRepairChange",
       "line": 884,
@@ -2943,7 +2970,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/contracts/src/site-builder/design-evaluation.ts#validateRepairOptionCatalog@973": {
+    "packages/contracts/src/site-builder/design-evaluation.ts#validateRepairOptionCatalog": {
       "file": "packages/contracts/src/site-builder/design-evaluation.ts",
       "name": "validateRepairOptionCatalog",
       "line": 973,
@@ -2952,7 +2979,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/contracts/src/site-builder/design-observation.ts#validateDesignObservation@121": {
+    "packages/contracts/src/site-builder/design-observation.ts#validateDesignObservation": {
       "file": "packages/contracts/src/site-builder/design-observation.ts",
       "name": "validateDesignObservation",
       "line": 121,
@@ -2961,7 +2988,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/contracts/src/site-builder/design-observation.ts#validateDesignRule@216": {
+    "packages/contracts/src/site-builder/design-observation.ts#validateDesignRule": {
       "file": "packages/contracts/src/site-builder/design-observation.ts",
       "name": "validateDesignRule",
       "line": 216,
@@ -2970,7 +2997,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/contracts/src/site-builder/design-source.ts#assertOwnedAuthorization@182": {
+    "packages/contracts/src/site-builder/design-source.ts#assertOwnedAuthorization": {
       "file": "packages/contracts/src/site-builder/design-source.ts",
       "name": "assertOwnedAuthorization",
       "line": 182,
@@ -2979,7 +3006,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/contracts/src/site-builder/design-source.ts#validateDesignSourceManifest@295": {
+    "packages/contracts/src/site-builder/design-source.ts#validateDesignSourceManifest": {
       "file": "packages/contracts/src/site-builder/design-source.ts",
       "name": "validateDesignSourceManifest",
       "line": 295,
@@ -2988,7 +3015,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/contracts/src/site-builder/site-spec-validation.ts#assertCommon@61": {
+    "packages/contracts/src/site-builder/site-spec-validation.ts#assertCommon": {
       "file": "packages/contracts/src/site-builder/site-spec-validation.ts",
       "name": "assertCommon",
       "line": 61,
@@ -2997,7 +3024,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/contracts/src/site-builder/template-family.ts#validateTemplateFamily@78": {
+    "packages/contracts/src/site-builder/template-family.ts#validateTemplateFamily": {
       "file": "packages/contracts/src/site-builder/template-family.ts",
       "name": "validateTemplateFamily",
       "line": 78,
@@ -3006,7 +3033,7 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "packages/test-support/src/model/stub-model.provider.ts#schemaFixture@106": {
+    "packages/test-support/src/model/stub-model.provider.ts#schemaFixture": {
       "file": "packages/test-support/src/model/stub-model.provider.ts",
       "name": "schemaFixture",
       "line": 106,
