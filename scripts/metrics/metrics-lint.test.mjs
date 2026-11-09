@@ -2,7 +2,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { lintDictionary, loadDictionaryDirectory, validateMetric } from "./metrics-lint.mjs";
+import {
+  lintAlerts,
+  lintDictionary,
+  loadAlertRulesFile,
+  loadDictionaryDirectory,
+  validateMetric,
+} from "./metrics-lint.mjs";
 
 const { sources, files } = loadDictionaryDirectory();
 const registry = {
@@ -135,4 +141,77 @@ test("a mutated checked-in file fails the lint (gate must bite)", () => {
   const { issues } = lintDictionary(mutated, { sources });
   assert.ok(issues.length > 0);
   assert.ok(issues.some((item) => item.code === "CHANGELOG_LATEST_MISMATCH"));
+});
+
+// ── ch01 PR-05：告警规则 ───────────────────────────────────────────────
+
+const metricIds = new Set(files.flatMap((file) => file.document.metrics.map((metric) => metric.id)));
+
+function validAlert(overrides = {}) {
+  return {
+    id: "AL-001",
+    metricId: "T2-001",
+    severity: "WARNING",
+    kind: "threshold",
+    owner: "data-eng",
+    description: "a sufficiently long alert description",
+    comparison: "below",
+    bound: 0.2,
+    granularity: "daily",
+    aggregation: "mean",
+    lookbackBuckets: 7,
+    minSample: 50,
+    stratumEquals: { workspace_id: "ALL" },
+    ...overrides,
+  };
+}
+
+function alertCodes(rule) {
+  return lintAlerts(
+    { schemaVersion: "measurement-alerts/v1", rules: [rule] },
+    { metricIds },
+  ).issues.map((item) => item.code);
+}
+
+test("the checked-in alert rules pass with both rule kinds", () => {
+  const { issues, summary } = lintAlerts(loadAlertRulesFile(), { metricIds });
+  assert.deepEqual(issues, []);
+  assert.ok(summary.rules >= 4);
+  assert.ok(summary.byKind.threshold >= 1);
+  assert.ok(summary.byKind.freshness >= 1);
+});
+
+test("alert rules reject unknown metrics, duplicate ids and unknown fields", () => {
+  assert.ok(alertCodes(validAlert({ metricId: "T9-999" })).includes("ALERT_METRIC_UNKNOWN"));
+  assert.ok(alertCodes(validAlert({ metricName: "typo" })).includes("ALERT_UNKNOWN_FIELD"));
+  const duplicate = lintAlerts(
+    { schemaVersion: "measurement-alerts/v1", rules: [validAlert(), validAlert()] },
+    { metricIds },
+  );
+  assert.ok(duplicate.issues.some((item) => item.code === "ALERT_ID_DUPLICATE"));
+});
+
+test("threshold rules require a stratum and mean aggregation needs lookback", () => {
+  assert.ok(alertCodes(validAlert({ stratumEquals: {} })).includes("ALERT_STRATUM_INVALID"));
+  assert.ok(alertCodes(validAlert({ stratumEquals: undefined })).includes("ALERT_STRATUM_INVALID"));
+  assert.ok(alertCodes(validAlert({ lookbackBuckets: undefined })).includes("ALERT_LOOKBACK_INVALID"));
+  assert.ok(alertCodes(validAlert({ bound: "0.2" })).includes("ALERT_BOUND_INVALID"));
+});
+
+test("freshness rules need a source and granularity only for rollups", () => {
+  const base = {
+    id: "AL-010",
+    metricId: "T0-001",
+    severity: "WARNING",
+    kind: "freshness",
+    owner: "data-eng",
+    description: "a sufficiently long alert description",
+    source: "observation",
+    maxAgeHours: 36,
+  };
+  assert.deepEqual(alertCodes(base), []);
+  assert.ok(alertCodes({ ...base, source: "rollup" }).includes("ALERT_GRANULARITY_INVALID"));
+  assert.ok(alertCodes({ ...base, source: "stream" }).includes("ALERT_SOURCE_INVALID"));
+  assert.ok(alertCodes({ ...base, maxAgeHours: 0 }).includes("ALERT_MAXAGE_INVALID"));
+  assert.ok(alertCodes({ ...base, granularity: "daily" }).includes("ALERT_UNKNOWN_FIELD"));
 });
