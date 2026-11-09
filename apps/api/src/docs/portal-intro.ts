@@ -79,9 +79,9 @@ ssh xin@100.68.31.20 /global/local-config/bin/api-token
 5. \`POST /companies/{id}/icps\` 建 ICP → \`POST /icps/{id}/activate\`
 6. \`POST /icps/{id}/query-plans\` 生成查询计划 → \`POST /query-plans/{id}/confirm\` → \`POST /query-plans/{id}/execute\`
 7. \`GET /discovery-runs/{id}\` 轮询发现进度；\`GET /canonical-companies\` 看规范化后的公司
-8. \`POST /canonical-companies/{id}/discover-contacts\`、\`POST /canonical-companies/{id}/guess-emails\`、\`POST /contact-points/{id}/verify\` 补决策人
-9. \`POST /icps/{id}/qualify\` 评分 → \`GET /leads\` / \`GET /leads/{id}/package\` 取交付包
-10. \`POST /leads/{id}/accept\` 或 \`/reject\` 回执；\`GET /reports/weekly\` 周报
+8. \`POST /canonical-companies/{id}/discover-contacts\`、\`POST /canonical-companies/{id}/guess-emails\`、\`POST /contact-points/{id}/verify\` 补决策人；需要时 \`POST /canonical-companies/{id}/enrich-contacts\` 走富集瀑布（尝试账/熔断/预算），\`GET /outreach/contact-eligibility\` 查某个联系点是否可触达（发送门前置事实）
+9. \`POST /icps/{id}/qualify\` 评分 → 人工复核队列：\`GET /judgment-reviews\`、\`POST /judgment-reviews/{id}/claim\`、\`POST /judgment-reviews/{id}/resolve\`；单条与统计：\`GET /judgments/{id}\`、\`GET /judgments/stats\` → \`GET /leads\` / \`GET /leads/{id}/package\` 取交付包
+10. \`POST /leads/{id}/accept\` 或 \`/reject\` 回执；\`GET /reports/weekly\` 周报；度量看 \`GET /metrics/vric\`、\`GET /metrics/observations\`、\`GET /metrics/rollups\`、\`GET /metrics/catalog\`
 
 ## 分域
 
@@ -92,6 +92,13 @@ ssh xin@100.68.31.20 /global/local-config/bin/api-token
 | ICP | 理想客户画像：规则、回溯测试、查询计划 |
 | Discovery | 查询计划执行、规范化公司、联系人补全、抑制名单、数据源 |
 | Leads | 评分产出与交付：交付包、接受/拒绝、制裁复核 |
+| JudgmentReview | 判定记录与人工复核队列：优先级/SLA、认领、结论回流 |
+| Metrics | 度量字典、观测与日/周汇总、VRIC 成对序列 |
+| Outreach | 联系点可触达性、退信/投诉回写、DNC 抑制（发送门事实源；真实发送在 gain-saas） |
+| Channels | 来源渠道注册与启停、导入模板、抓取运行与记录抽检复核 |
+| Seller Documents | 卖家资料：上传/检索/下载与重试 |
+| Packs / Skills / Agents | 能力包、技能与运营智能体的注册、激活与按租户授权 |
+| Campaign | 内部 campaign 计划草稿（服务间） |
 | Reports | 周报与反馈 |
 | Events | 事件投递账本与确认回执 |
 | Compliance | 数据主体删除请求（Art.17） |

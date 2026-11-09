@@ -44,6 +44,7 @@ export const EXPECTED_MODEL_TASKS = Object.freeze([
   Object.freeze({ path: 'apps/api/src/discovery/providers/directory.provider.ts', taskId: 'discovery.extract_list', schema: 'discovery-extract-list/v1' }),
   Object.freeze({ path: 'apps/api/src/discovery/providers/decision-maker.provider.ts', taskId: 'contact.find_decision_makers', schema: 'contact-decision-makers/v1' }),
   Object.freeze({ path: 'apps/api/src/discovery/providers/website-profile.provider.ts', taskId: 'discovery.classify_trade_role', schema: 'discovery-classify-trade-role/v1' }),
+  Object.freeze({ path: 'apps/api/src/discovery/model-web-search/model-web-search.ts', taskId: 'discovery.web_search_candidates', schema: 'discovery-web-search-candidates/v1' }),
   Object.freeze({ path: 'apps/api/src/temporal/campaign-planning.activities.ts', taskId: 'campaign.plan', schema: 'campaign-plan/v1' }),
 ]);
 

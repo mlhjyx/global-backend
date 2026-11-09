@@ -321,6 +321,18 @@ const EXPECTED_BOUNDS: Readonly<Partial<Record<TypedProjectionSchema, Readonly<R
     model: { maxLength: 120 },
     ...COMMON_MODEL_METADATA_BOUNDS,
   },
+  'discovery-web-search-candidates/v1': {
+    'data.candidates': { maxItems: 50 },
+    'data.candidates[].companyName': { maxLength: 500 },
+    'data.candidates[].domain': { maxLength: 253 },
+    'data.candidates[].countryCode': { maxLength: 2 },
+    'data.candidates[].evidenceUrls': { maxItems: 3 },
+    'data.candidates[].evidenceUrls[]': { maxLength: 2048 },
+    'data.candidates[].query': { maxLength: 300 },
+    provider: { maxLength: 120 },
+    model: { maxLength: 120 },
+    ...COMMON_MODEL_METADATA_BOUNDS,
+  },
   'discovery-extract-list/v1': {
     'data.listKind': { maxLength: 80 },
     'data.companies': { maxItems: 128 },
