@@ -15,46 +15,53 @@
  *    网页证据 30 天新鲜度、页面内嵌指令按注入处理；
  *  - 网络调用在事务外完成；`judgment_record` 与 Lead 投影由调用方在同一个
  *    `prisma.withWorkspace` 事务内写入（recordJudgment + upsertLeadFit）。
+ *
+ * P3 J12：单模型执行器已抽到 `judgment/judge-run.ts`（面板共用）。本模块在 v2 聚合
+ * 结果为 borderline UNKNOWN 时按 `JUDGE_PANEL_MODE` 触发三模型面板：
+ *  - shadow：跑面板、附逐模型 + 汇总记录（观察，不改 verdict/Lead）；
+ *  - enforce：用面板多数票替代该情形的 verdict；
+ *  - off（缺省）：不触发，行为与 J03b 完全一致。面板只在 v2 路径生效
+ *    （JUDGE_CONTRACT_MODE=off 时本模块不执行，任何面板取值都不生效）。
  */
-
-import type { Prisma } from '@prisma/client';
 
 import type { ModelGateway } from '../model-gateway/model-gateway';
 import { getTask } from '../ai-tasks/task-registry';
-import { BudgetExceededError, BudgetOperationReplayError } from '../tools/budget-store';
-import type { RuntimeTelemetry } from '../model-runtime/types';
 import {
-  executeSkillWithRuntime,
-  SkillUnavailableError,
-  STATIC_SKILL_RESOLVER,
-  type SkillResolver,
-} from '../skills/skill-runtime';
-import type { RuntimeStructuredModelResult } from '../model-runtime/structured-task-runtime-bridge';
-import { isExecutionControlError } from '../execution-budget/execution-control-error';
-import {
-  aggregateJudgment,
   type AggregationResult,
   type JudgmentVerdict,
 } from './judgment/aggregate-judgment';
-import {
-  validateEvidence,
-  type EvidenceUrlPolicy,
-} from './judgment/evidence-validate';
 import { RUBRIC_SAMPLING } from './judgment/fit-rubric';
 import {
-  JUDGE_OUTPUT_JSON_SCHEMA,
-  validateJudgeOutputV2,
   type JudgeCriterionOutput,
   type JudgeOutputV2,
 } from './judgment/judge-output-v2';
-import { buildJudgePrompt } from './judgment/judge-prompt';
+import {
+  buildJudgeRecordDraft,
+  buildCompanySnapshot,
+  companyDomainEvidenceUrlPolicy,
+  costMicrosOf,
+  prepareJudgeCall,
+  runJudgeModel,
+  type PrepareJudgeCallOptions,
+} from './judgment/judge-run';
+import {
+  isBorderlinePanelTrigger,
+  judgeFitPanel,
+  judgePanelMode,
+  PANEL_VERSION,
+  type JudgePanelMode,
+  type JudgePanelResult,
+} from './judgment/panel';
 import {
   buildRecordedCriteria,
-  judgmentInputDigest,
-  judgmentOutputDigest,
-  type RecordJudgmentInput,
+  type JudgmentRecordDraft,
 } from './judgment/judgment-record';
+import type { RuntimeTelemetry } from '../model-runtime/types';
+import type { SkillResolver } from '../skills/skill-runtime';
 import type { FitJudgeCompany, FitJudgment, IcpBrief } from './fit-judge';
+
+export { buildCompanySnapshot, companyDomainEvidenceUrlPolicy };
+export type { JudgmentRecordDraft };
 
 export const JUDGE_CONTRACT_MODES = ['off', 'shadow', 'enforce'] as const;
 export type JudgeContractMode = (typeof JUDGE_CONTRACT_MODES)[number];
@@ -77,20 +84,16 @@ export function judgeContractMode(
     : 'off';
 }
 
-/** `judgment_record` 草稿：icpId（与真实 run id）由调用方在同一事务里补齐。 */
-export type JudgmentRecordDraft = Omit<RecordJudgmentInput, 'icpId'>;
-
-export interface JudgeFitV2Options {
+export interface JudgeFitV2Options extends PrepareJudgeCallOptions {
   runId?: string;
   runtimeTelemetry?: RuntimeTelemetry;
   authorizeExternalAction?: () => Promise<boolean>;
   skills?: SkillResolver;
-  /** 判定时刻（ISO 8601）；测试注入固定时钟，缺省取当前时间。 */
-  now?: string;
-  /** 快照抓取时间（ISO 8601）；缺省取 website_profile 的抓取时间，再缺省 now。 */
-  snapshotFetchedAt?: string;
-  /** 证据域门；缺省用「公司自有域」白名单（见 companyDomainEvidenceUrlPolicy）。 */
-  urlPolicy?: EvidenceUrlPolicy;
+  /**
+   * P3 J12：面板开关覆盖（缺省读 JUDGE_PANEL_MODE；测试显式注入）。
+   * 仅在 v2 路径内生效；contract=off 时本模块不执行，面板自然不触发。
+   */
+  judgePanelMode?: JudgePanelMode;
 }
 
 /** v2 判定结果：FitJudgment 形状 + 待持久化的 judgment_record 草稿。 */
@@ -103,102 +106,6 @@ const VERDICT_TO_LEAD: Readonly<Record<JudgmentVerdict, FitJudgment['verdict']>>
   UNKNOWN: 'weak',
   NOT_FIT: 'mismatch',
 });
-
-/**
- * 证据域门（当前实现选择，见 PR 说明）：只放行公司自有域（含子域）的 URL。
- * 判定快照只有该公司官网/Impressum 的内容，其他域的 URL 一律视为不可验证证据
- * （fail-closed；不把异步 source_policy reader 塞进纯校验器）。
- */
-export function companyDomainEvidenceUrlPolicy(
-  domain: string | null | undefined,
-): EvidenceUrlPolicy {
-  const normalized = (domain ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/^www\./u, '')
-    .replace(/\.$/u, '');
-  if (!normalized) {
-    return () => ({ allowed: false, reason: 'company has no domain' });
-  }
-  return (url: string) => {
-    let host: string;
-    try {
-      host = new URL(url).hostname.trim().toLowerCase().replace(/\.$/u, '');
-    } catch {
-      return { allowed: false, reason: 'invalid evidence url' };
-    }
-    if (host === normalized || host.endsWith(`.${normalized}`)) {
-      return { allowed: true };
-    }
-    return { allowed: false, reason: `outside company domain ${normalized}` };
-  };
-}
-
-export interface CompanySnapshotFacts {
-  country: string | null;
-  domain: string | null;
-  industry: string | null;
-  keywords?: string[];
-  name: string;
-  products?: string[];
-  website_profile?: Record<string, unknown>;
-}
-
-/** 与 v1 判定同一口径的公司快照（其 JSON 文本即 validateEvidence 的 snapshotText）。 */
-export function buildCompanySnapshot(company: FitJudgeCompany): {
-  facts: CompanySnapshotFacts;
-  snapshotText: string;
-} {
-  const attributes = company.attributes as {
-    products?: string[];
-    keywords?: string[];
-    website_profile?: Record<string, unknown>;
-  } | null;
-  const products = attributes?.products ?? [];
-  const keywords = attributes?.keywords ?? [];
-  const profile = attributes?.website_profile;
-  const profileFacts = profile
-    ? {
-        trade_role: profile.trade_role,
-        own_manufacturing: profile.own_manufacturing,
-        carried_brands: profile.carried_brands,
-        carries_chinese_brand: profile.carries_chinese_brand,
-        carries_foreign_brand: profile.carries_foreign_brand,
-        evidence: profile.evidence,
-      }
-    : undefined;
-  const websiteProfile =
-    profileFacts && Object.values(profileFacts).some((value) => value !== undefined)
-      ? profileFacts
-      : undefined;
-  const facts: CompanySnapshotFacts = {
-    name: company.name,
-    domain: company.domain,
-    country: company.country,
-    industry: company.industry,
-    products,
-    keywords,
-    ...(websiteProfile ? { website_profile: websiteProfile } : {}),
-  };
-  return { facts, snapshotText: JSON.stringify(facts, null, 2) };
-}
-
-function snapshotFetchedAtFromCompany(
-  company: FitJudgeCompany,
-  fallback: string,
-): string {
-  const attributes = company.attributes as
-    | { website_profile?: Record<string, unknown> }
-    | null
-    | undefined;
-  const profile = attributes?.website_profile;
-  const candidate = profile?.fetched_at ?? profile?.fetchedAt;
-  if (typeof candidate === 'string') {
-    const parsed = Date.parse(candidate);
-    if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
-  }
-  return fallback;
-}
 
 function criterionById(
   output: JudgeOutputV2,
@@ -253,27 +160,35 @@ export function toFitJudgment(
   };
 }
 
-/** 控制面/预算错误必须显性上抛（与 v1 语义一致）；其余模型故障返回 null。 */
-function isFatalJudgeError(error: unknown): boolean {
-  return (
-    error instanceof BudgetExceededError ||
-    error instanceof BudgetOperationReplayError ||
-    error instanceof SkillUnavailableError ||
-    isExecutionControlError(error)
+function votesLine(
+  votes: ReadonlyArray<{ failureCode?: string; model: string; verdict: JudgmentVerdict }>,
+): string {
+  const parts = votes.map(
+    (vote) =>
+      `${vote.model}=${vote.verdict}${vote.failureCode ? `(${vote.failureCode})` : ''}`,
   );
+  return `面板 ${PANEL_VERSION} 多数票：${parts.join('，')}`;
 }
 
-function failureCodeOf(error: unknown): 'OUTPUT_SCHEMA_INVALID' | 'UNKNOWN_UPSTREAM' {
-  const message = error instanceof Error ? error.message : String(error);
-  return /output invalid|schema/i.test(message) ? 'OUTPUT_SCHEMA_INVALID' : 'UNKNOWN_UPSTREAM';
-}
-
-function costMicrosOf(
-  usage: RuntimeStructuredModelResult<JudgeOutputV2>['usage'],
-): bigint | null {
-  const cost = usage?.costUsd;
-  if (typeof cost !== 'number' || !Number.isFinite(cost) || cost < 0) return null;
-  return BigInt(Math.round(cost * 1_000_000));
+/** enforce 面板：用多数票替代 borderline UNKNOWN 的 verdict 与理由（记录不变）。 */
+function applyPanelVerdict(target: FitJudgment, panel: JudgePanelResult): void {
+  const line = votesLine(panel.votes);
+  if (panel.verdict !== 'UNKNOWN' && panel.representative) {
+    const rep = panel.representative;
+    const repJudgment = toFitJudgment(rep.output, rep.aggregation);
+    target.verdict = repJudgment.verdict;
+    target.fitReasons = {
+      ...repJudgment.fitReasons,
+      reasons: [...repJudgment.fitReasons.reasons, line].slice(0, 16),
+    };
+    return;
+  }
+  // 无多数（含 1/1/1、UNKNOWN 混杂）：保持 UNKNOWN→weak，只补充面板票型说明。
+  target.verdict = VERDICT_TO_LEAD[panel.verdict];
+  target.fitReasons = {
+    ...target.fitReasons,
+    reasons: [...target.fitReasons.reasons, line].slice(0, 16),
+  };
 }
 
 /**
@@ -282,6 +197,9 @@ function costMicrosOf(
  * 返回 `null` 表示本次判定不可用（模型/输出失败），与 v1 的 null 语义一致：
  * 调用方把公司计为未判定，绝不静默产出 verdict。控制面/预算错误照旧上抛。
  * 模型拒答按 fail-safe 归一为 UNKNOWN（Lead 投影 weak），并记录 MODEL_REFUSAL。
+ *
+ * P3 J12：borderline UNKNOWN（且非拒答/证据门/注入）时按 `judgePanelMode` 跑面板；
+ * 面板记录附在 `judgmentRecords`（逐模型槽位 1..3 + 汇总行），enforce 下替代 verdict。
  */
 export async function judgeFitV2(
   gateway: ModelGateway,
@@ -291,73 +209,19 @@ export async function judgeFitV2(
   opts: JudgeFitV2Options = {},
 ): Promise<FitJudgmentV2 | null> {
   const contract = getTask('discovery.qualify_fit')!;
-  const now = opts.now ?? new Date().toISOString();
-  const { facts, snapshotText } = buildCompanySnapshot(company);
-  const prompt = buildJudgePrompt({
-    icpBrief: JSON.stringify(icpBrief, null, 2),
-    companySnapshot: snapshotText,
-  });
-  const inputDigest = judgmentInputDigest({ icpBrief, companySnapshot: facts });
+  const prepared = prepareJudgeCall(icpBrief, company, opts);
+  const run = await runJudgeModel(gateway, workspaceId, contract.model, prepared, opts);
+  if (!run.ok) return null;
+  const { output, aggregation, refusal, raw } = run;
 
-  let rawResult: RuntimeStructuredModelResult<JudgeOutputV2>;
-  try {
-    rawResult = await executeSkillWithRuntime<JudgeOutputV2>(
-      opts.skills ?? STATIC_SKILL_RESOLVER,
-      gateway,
-      'discovery.qualify_fit',
-      {
-        task: contract.id,
-        prompt: prompt.user,
-        system: prompt.system,
-        model: contract.model,
-        schema: JUDGE_OUTPUT_JSON_SCHEMA as unknown as Record<string, unknown>,
-      },
-      // 非 durable：judge-output/v2 尚无注册的 durable 投影（fit-judgment/v1 只覆盖
-      // v1 四门输出）。v2 的可审计载体是 judgment_record 本身（设计 §4.3.4）。
-      {
-        workspaceId,
-        runId: opts.runId,
-        authorizeExternalAction: opts.authorizeExternalAction,
-      },
-      { telemetry: opts.runtimeTelemetry },
-    );
-  } catch (error) {
-    if (isFatalJudgeError(error)) throw error;
-    console.warn(
-      `[judge-v2] model call failed for ${company.id}: ${failureCodeOf(error)}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-    return null;
-  }
-
-  const validation = validateJudgeOutputV2(rawResult.data);
-  if (!validation.ok) {
-    // schema 校验失败按失败码 OUTPUT_SCHEMA_INVALID 处理（retryable，交由上游重试）。
-    console.warn(
-      `[judge-v2] OUTPUT_SCHEMA_INVALID for ${company.id}: ${validation.errors.slice(0, 5).join('; ')}`,
-    );
-    return null;
-  }
-  const output = validation.value;
-
-  const evidence = validateEvidence(output.criteria, {
-    now,
-    snapshotFetchedAt: opts.snapshotFetchedAt ?? snapshotFetchedAtFromCompany(company, now),
-    snapshotText,
-    urlPolicy: opts.urlPolicy ?? companyDomainEvidenceUrlPolicy(company.domain),
-  });
-  const aggregation = aggregateJudgment({ output, evidence });
-
-  const refusal = output.refusal.is_refusal;
   const judgment = toFitJudgment(output, aggregation, {
     refusalReason: refusal ? output.refusal.reason ?? '未给出原因' : null,
   });
   // 拒答不是证据不足，也不能被当成 NOT_FIT 自动拒绝（v1 同款 fail-safe）：一律 weak。
   if (refusal) judgment.verdict = 'weak';
 
-  const micros = costMicrosOf(rawResult.usage);
-  const record: JudgmentRecordDraft = {
+  const micros = costMicrosOf(raw.usage);
+  const record: JudgmentRecordDraft = buildJudgeRecordDraft({
     workspaceId,
     companyId: company.id,
     judgeLevel: 2,
@@ -365,30 +229,52 @@ export async function judgeFitV2(
     verdictProposed: output.verdict_proposed,
     criteria: buildRecordedCriteria(output),
     evidenceCompleteness: output.evidence_completeness,
-    rubricVersion: prompt.rubricVersion,
-    promptHash: prompt.promptHash,
-    schemaVersion: prompt.schemaVersion,
-    inputDigest,
-    outputDigest: judgmentOutputDigest(output.criteria),
+    prompt: prepared.prompt,
+    inputDigest: prepared.inputDigest,
     model: {
       requested: contract.model,
-      resolved: rawResult.runtimeExecution?.gatewayResolvedModel ?? rawResult.model ?? null,
-      reported: rawResult.reportedModel ?? null,
+      resolved: raw.runtimeExecution?.gatewayResolvedModel ?? raw.model ?? null,
+      reported: raw.reportedModel ?? null,
     },
-    // 本次实际执行是单次采样；k=3 面板属于 L3（未接线），k 必须按事实记 1。
+    // 本次实际执行是单次采样；面板多票属于 L3（judge_level=3 的独立记录），k 按事实记 1。
     sampling: {
       temperature: RUBRIC_SAMPLING.temperature,
       k: 1,
-    } as Prisma.InputJsonValue,
+    },
     ...(refusal ? { failure: { code: 'MODEL_REFUSAL' as const } } : {}),
-    ...(rawResult.usage?.inputTokens !== undefined
-      ? { inputTokens: rawResult.usage.inputTokens }
+    ...(raw.usage?.inputTokens !== undefined
+      ? { inputTokens: raw.usage.inputTokens }
       : {}),
-    ...(rawResult.usage?.outputTokens !== undefined
-      ? { outputTokens: rawResult.usage.outputTokens }
+    ...(raw.usage?.outputTokens !== undefined
+      ? { outputTokens: raw.usage.outputTokens }
       : {}),
     ...(micros !== null ? { costMicros: micros } : {}),
-  };
+  });
 
-  return { ...judgment, judgmentRecord: record };
+  // P3 J12：borderline 面板（仅 v2 路径；拒答不叠面板——拒答不是「模型不确定」）。
+  const panelMode = opts.judgePanelMode ?? judgePanelMode();
+  let panelRecords: JudgmentRecordDraft[] | undefined;
+  let panelTolerant: boolean | undefined;
+  if (panelMode !== 'off' && !refusal && isBorderlinePanelTrigger(aggregation)) {
+    const panel = await judgeFitPanel(gateway, workspaceId, prepared, {
+      companyId: company.id,
+      runId: opts.runId,
+      runtimeTelemetry: opts.runtimeTelemetry,
+      authorizeExternalAction: opts.authorizeExternalAction,
+      skills: opts.skills,
+    });
+    if (panel) {
+      panelRecords = panel.records;
+      // shadow 面板是观察：记录写入失败不得回滚 Lead（enforce 面板记录为判定依据，严格落库）。
+      panelTolerant = panelMode === 'shadow';
+      if (panelMode === 'enforce') applyPanelVerdict(judgment, panel);
+    }
+  }
+
+  return {
+    ...judgment,
+    judgmentRecord: record,
+    ...(panelRecords ? { judgmentRecords: panelRecords } : {}),
+    ...(panelTolerant ? { judgmentRecordsTolerant: true } : {}),
+  };
 }

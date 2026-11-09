@@ -84,6 +84,26 @@ const ID_PATTERN = /^(T[0-4]|G)-[0-9]{3}$/;
 const NAME_PATTERN = /^[a-z][a-z0-9_]*$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
+// ch01 PR-05：告警规则（docs/metrics/alerts/rules.v1.json）与字典同门禁。
+const DEFAULT_ALERTS = fileURLToPath(new URL("../../docs/metrics/alerts/rules.v1.json", import.meta.url));
+const ALERT_SCHEMA = "measurement-alerts/v1";
+const ALERT_ID_PATTERN = /^AL-[0-9]{3}$/;
+const ALERT_SEVERITIES = new Set(["WARNING", "CRITICAL"]);
+const ALERT_GRANULARITIES = new Set(["daily", "weekly"]);
+const ALERT_AGGREGATIONS = new Set(["latest", "mean"]);
+const ALERT_BASE_FIELDS = ["id", "metricId", "severity", "owner", "description", "kind"];
+const ALERT_THRESHOLD_FIELDS = new Set([
+  ...ALERT_BASE_FIELDS,
+  "comparison",
+  "bound",
+  "granularity",
+  "aggregation",
+  "lookbackBuckets",
+  "minSample",
+  "stratumEquals",
+]);
+const ALERT_FRESHNESS_FIELDS = new Set([...ALERT_BASE_FIELDS, "source", "granularity", "maxAgeHours"]);
+
 function issue(code, path, message) {
   return { code, path, message };
 }
@@ -300,6 +320,122 @@ export function lintDictionary(files, { sources }) {
   return { issues, summary };
 }
 
+/**
+ * Validate the alert rules document (ch01 PR-05). `metricIds` is the set of
+ * ids defined by the dictionary — a rule pointing at an undefined metric is
+ * dead weight that would silently never fire.
+ */
+export function lintAlerts(document, { metricIds }) {
+  const issues = [];
+  if (document?.schemaVersion !== ALERT_SCHEMA) {
+    issues.push(issue("ALERT_SCHEMA_VERSION", "alerts.schemaVersion", `must be ${ALERT_SCHEMA}`));
+  }
+  const rules = document?.rules;
+  if (!Array.isArray(rules) || rules.length === 0) {
+    issues.push(issue("ALERT_RULES_MISSING", "alerts.rules", "rules must be a non-empty array"));
+    return { issues, summary: { rules: 0, byKind: {}, bySeverity: {} } };
+  }
+  const seen = new Map();
+  const summary = { rules: rules.length, byKind: {}, bySeverity: {} };
+  rules.forEach((rule, index) => {
+    const where = `alert:${rule?.id ?? `#${index}`}`;
+    const kind = rule?.kind;
+    if (!ALERT_ID_PATTERN.test(rule?.id ?? "")) {
+      issues.push(issue("ALERT_ID_INVALID", `${where}.id`, `invalid id: ${rule?.id}`));
+    } else if (seen.has(rule.id)) {
+      issues.push(issue("ALERT_ID_DUPLICATE", where, `duplicate rule id ${rule.id}`));
+    } else {
+      seen.set(rule.id, index);
+    }
+    if (!metricIds.has(rule?.metricId)) {
+      issues.push(issue("ALERT_METRIC_UNKNOWN", `${where}.metricId`, `metric "${rule?.metricId}" is not defined in the dictionary`));
+    }
+    if (!ALERT_SEVERITIES.has(rule?.severity)) {
+      issues.push(issue("ALERT_SEVERITY_INVALID", `${where}.severity`, `unknown severity: ${rule?.severity}`));
+    } else {
+      summary.bySeverity[rule.severity] = (summary.bySeverity[rule.severity] ?? 0) + 1;
+    }
+    if (!OWNERS.has(rule?.owner)) {
+      issues.push(issue("ALERT_OWNER_INVALID", `${where}.owner`, `unknown owner: ${rule?.owner}`));
+    }
+    if (typeof rule?.description !== "string" || rule.description.trim().length < 10) {
+      issues.push(issue("ALERT_DESCRIPTION_MISSING", `${where}.description`, "description must be a non-trivial string"));
+    }
+    let allowed;
+    if (kind === "threshold") {
+      allowed = ALERT_THRESHOLD_FIELDS;
+    } else if (kind === "freshness") {
+      allowed = ALERT_FRESHNESS_FIELDS;
+    } else {
+      issues.push(issue("ALERT_KIND_INVALID", `${where}.kind`, `kind must be threshold or freshness: ${kind}`));
+      allowed = new Set([...ALERT_THRESHOLD_FIELDS, ...ALERT_FRESHNESS_FIELDS]);
+    }
+    summary.byKind[kind] = (summary.byKind[kind] ?? 0) + 1;
+    for (const field of Object.keys(rule ?? {})) {
+      if (!allowed.has(field)) {
+        issues.push(issue("ALERT_UNKNOWN_FIELD", `${where}.${field}`, `field "${field}" is not allowed for kind ${kind}`));
+      }
+    }
+    if (kind === "threshold") {
+      if (rule.comparison !== "below" && rule.comparison !== "above") {
+        issues.push(issue("ALERT_COMPARISON_INVALID", `${where}.comparison`, "comparison must be below or above"));
+      }
+      if (typeof rule.bound !== "number" || !Number.isFinite(rule.bound)) {
+        issues.push(issue("ALERT_BOUND_INVALID", `${where}.bound`, "bound must be a finite number"));
+      }
+      if (!ALERT_GRANULARITIES.has(rule.granularity)) {
+        issues.push(issue("ALERT_GRANULARITY_INVALID", `${where}.granularity`, "granularity must be daily or weekly"));
+      }
+      if (rule.aggregation !== undefined && !ALERT_AGGREGATIONS.has(rule.aggregation)) {
+        issues.push(issue("ALERT_AGGREGATION_INVALID", `${where}.aggregation`, "aggregation must be latest or mean"));
+      }
+      if (rule.aggregation === "mean" && rule.lookbackBuckets === undefined) {
+        issues.push(issue("ALERT_LOOKBACK_INVALID", `${where}.lookbackBuckets`, "mean aggregation requires lookbackBuckets"));
+      }
+      if (
+        rule.lookbackBuckets !== undefined &&
+        (!Number.isInteger(rule.lookbackBuckets) || rule.lookbackBuckets < 1 || rule.lookbackBuckets > 90)
+      ) {
+        issues.push(issue("ALERT_LOOKBACK_INVALID", `${where}.lookbackBuckets`, "lookbackBuckets must be an integer in [1, 90]"));
+      }
+      if (rule.minSample !== undefined && (!Number.isInteger(rule.minSample) || rule.minSample < 1)) {
+        issues.push(issue("ALERT_MINSAMPLE_INVALID", `${where}.minSample`, "minSample must be a positive integer"));
+      }
+      if (
+        !rule.stratumEquals ||
+        typeof rule.stratumEquals !== "object" ||
+        Array.isArray(rule.stratumEquals) ||
+        Object.keys(rule.stratumEquals).length === 0 ||
+        Object.values(rule.stratumEquals).some((value) => typeof value !== "string")
+      ) {
+        issues.push(
+          issue("ALERT_STRATUM_INVALID", `${where}.stratumEquals`, "threshold rules need a non-empty stratumEquals object of strings"),
+        );
+      }
+    } else if (kind === "freshness") {
+      if (rule.source !== "observation" && rule.source !== "rollup") {
+        issues.push(issue("ALERT_SOURCE_INVALID", `${where}.source`, "source must be observation or rollup"));
+      }
+      if (rule.source === "rollup" && !ALERT_GRANULARITIES.has(rule.granularity)) {
+        issues.push(issue("ALERT_GRANULARITY_INVALID", `${where}.granularity`, "rollup freshness rules require granularity daily or weekly"));
+      }
+      if (rule.source === "observation" && rule.granularity !== undefined) {
+        issues.push(issue("ALERT_UNKNOWN_FIELD", `${where}.granularity`, "granularity is only meaningful for rollup freshness rules"));
+      }
+      if (!Number.isInteger(rule.maxAgeHours) || rule.maxAgeHours < 1 || rule.maxAgeHours > 8760) {
+        issues.push(issue("ALERT_MAXAGE_INVALID", `${where}.maxAgeHours`, "maxAgeHours must be an integer in [1, 8760]"));
+      }
+    } else if (rule.granularity !== undefined && !ALERT_GRANULARITIES.has(rule.granularity)) {
+      issues.push(issue("ALERT_GRANULARITY_INVALID", `${where}.granularity`, "granularity must be daily or weekly"));
+    }
+  });
+  return { issues, summary };
+}
+
+export function loadAlertRulesFile(path = DEFAULT_ALERTS) {
+  return JSON.parse(readFileSync(path, "utf8"));
+}
+
 export function loadDictionaryDirectory(dir = DEFAULT_DIR, sourcesPath = DEFAULT_SOURCES) {
   const sources = JSON.parse(readFileSync(sourcesPath, "utf8"));
   const files = readdirSync(dir)
@@ -330,6 +466,9 @@ function renderMarkdown({ issues, summary }) {
   out.push(
     `| 分子来源级别 | existing ${summary.bySourceLevel.existing} / planned ${summary.bySourceLevel.planned} / saas ${summary.bySourceLevel.saas} |`,
   );
+  if (summary.alerts) {
+    out.push(`| 告警规则 | ${summary.alerts.rules}（${Object.entries(summary.alerts.bySeverity ?? {}).map(([severity, count]) => `${severity} ${count}`).join(" / ") || "—"}） |`);
+  }
   out.push("");
   if (issues.length === 0) {
     out.push("校验通过：0 个问题。");
@@ -346,11 +485,22 @@ function renderMarkdown({ issues, summary }) {
 function main() {
   const flags = parseArgs(process.argv.slice(2));
   if (flags.help) {
-    console.log("usage: node scripts/metrics/metrics-lint.mjs [--json] [--dir <dictionary-dir>]");
+    console.log("usage: node scripts/metrics/metrics-lint.mjs [--json] [--dir <dictionary-dir>] [--alerts <rules-file>]");
     return;
   }
   const { sources, files } = loadDictionaryDirectory(flags.dir ?? DEFAULT_DIR, flags.sources ?? DEFAULT_SOURCES);
   const result = lintDictionary(files, { sources });
+  const metricIds = new Set(files.flatMap((file) => (file.document.metrics ?? []).map((metric) => metric.id)));
+  try {
+    const alertResult = lintAlerts(loadAlertRulesFile(flags.alerts ?? DEFAULT_ALERTS), { metricIds });
+    result.issues.push(...alertResult.issues);
+    result.summary.alerts = alertResult.summary;
+  } catch (error) {
+    result.issues.push(
+      issue("ALERTS_UNREADABLE", "alerts", `cannot load rules file: ${error instanceof Error ? error.message : error}`),
+    );
+    result.summary.alerts = { rules: 0, byKind: {}, bySeverity: {} };
+  }
   if (flags.json) {
     console.log(JSON.stringify(result, null, 2));
   } else {

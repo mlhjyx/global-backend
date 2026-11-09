@@ -64,6 +64,12 @@ export interface JudgmentConformal {
   thresholdVersion: string;
 }
 
+/**
+ * 待写草稿：`icpId`（与真实 run id）由调用方在同一事务里补齐。
+ * P3 J12：面板一次判定会产出多条草稿（逐模型 + 汇总），全部经同一唯一写入口落库。
+ */
+export type JudgmentRecordDraft = Omit<RecordJudgmentInput, 'icpId'>;
+
 export interface RecordJudgmentInput {
   attempt?: number;
   companyId: string;
