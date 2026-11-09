@@ -465,6 +465,10 @@ export class CompanyService {
    * 已消费，重试不能复用）；事件与创建路径同形（CompanyProfileCreated v2），
    * outbox relay 以同一个 workflowId 重启工作流——Temporal 默认只允许复用已失败
    * 的 workflowId，而这里恰好只在失败后开放重试。
+   *
+   * 接受重试即清空 understandingFailedAt/LastError：预览从 failed 变为 queued，
+   * 且 10 分钟内重复点击会命中「已排队」守卫（失败标记存在时该守卫被跳过），
+   * 避免连点重复消费 Grant 与重复写事件。
    */
   async retryUnderstanding(
     ctx: RequestContext,
@@ -540,7 +544,17 @@ export class CompanyService {
           },
         },
       });
-      return { company };
+      // 重试已被接受：立刻清掉失败标记，让预览从 failed 变成 queued/then running。
+      // 同时恢复 10 分钟重复启动守卫——失败标记在时该守卫本来被跳过，连点会重复消费 Grant。
+      const retried = await tx.companyProfile.update({
+        where: { id: company.id },
+        data: {
+          understandingFailedAt: null,
+          understandingLastError: null,
+          version: { increment: 1 },
+        },
+      });
+      return { company: retried };
     });
   }
 

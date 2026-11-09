@@ -74,12 +74,19 @@ const DRAFT = {
   targetMarkets: [],
   businessEmail: null,
   summary: null,
+  understandingFailedAt: null,
   deletedAt: null,
 };
 
+/** 预览已就绪（理解完成）的档案：完成路径的主用例。 */
+const READY = { ...DRAFT, status: 'REVIEW' };
+
+/** 最近一次理解失败、留在 DRAFT 的档案：手动填写出口。 */
+const FAILED = { ...DRAFT, understandingFailedAt: new Date('2026-11-10T07:00:00Z') };
+
 describe('OnboardingFactsService', () => {
   it('受控行业码校验后回填标签，产品 upsert 并清理旧的手填产品', async () => {
-    const { service, update, offeringUpsert, offeringDeleteMany, claimCreate } = fixture(DRAFT);
+    const { service, update, offeringUpsert, offeringDeleteMany, claimCreate } = fixture(READY);
     const company = await service.apply(CTX, COMPANY_ID, {
       name: '具安科技',
       industryCode: '25',
@@ -107,7 +114,7 @@ describe('OnboardingFactsService', () => {
   });
 
   it('只给自由文本行业时清空旧受控码', async () => {
-    const { service, update } = fixture({ ...DRAFT, industryCode: '25', industry: '金属制品制造', status: 'REVIEW' });
+    const { service, update } = fixture({ ...READY, industryCode: '25', industry: '金属制品制造' });
     await service.apply(CTX, COMPANY_ID, { industry: '精密机械' });
     const data = update.mock.calls[0]![0].data as Record<string, unknown>;
     expect(data.industry).toBe('精密机械');
@@ -121,8 +128,28 @@ describe('OnboardingFactsService', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
+  it('DRAFT + 官网 + 无失败标记（排队中）拒绝写入，避免 extract_profile 稍后覆盖行业', async () => {
+    const { service } = fixture(DRAFT);
+    await expect(
+      service.apply(CTX, COMPANY_ID, { products: ['A'] }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('失败过的 DRAFT 允许手动写回（重试前的兜底出口）', async () => {
+    const { service, update } = fixture(FAILED);
+    await service.apply(CTX, COMPANY_ID, { products: ['A'], targetMarkets: ['DE'] });
+    expect(update).toHaveBeenCalledOnce();
+  });
+
+  it('JSON null 字段返回 400（@IsOptional 会放行 null）', async () => {
+    const { service } = fixture(READY);
+    await expect(
+      service.apply(CTX, COMPANY_ID, { products: null } as never),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('词表之外的行业码 400', async () => {
-    const { service, tx } = fixture(DRAFT);
+    const { service, tx } = fixture(READY);
     tx.canonicalTaxonomy.findUnique.mockResolvedValueOnce(null);
     await expect(
       service.apply(CTX, COMPANY_ID, { industryCode: 'does-not-exist' }),

@@ -33,6 +33,14 @@ export class OnboardingFactsService {
     companyId: string,
     dto: OnboardingFactsDto,
   ): Promise<CompanyRow> {
+    // class-validator 的 @IsOptional 放行 JSON null；null 落到 map/findUnique 会变成 500。
+    for (const [key, value] of Object.entries(dto)) {
+      if (value === null) {
+        throw new BadRequestException({
+          error: { code: 'VALIDATION_ERROR', message: `${key} 不能为 null` },
+        });
+      }
+    }
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const company = await tx.companyProfile.findUnique({ where: { id: companyId } });
       if (!company || company.deletedAt) {
@@ -45,6 +53,16 @@ export class OnboardingFactsService {
           error: {
             code: 'ONBOARDING_FACTS_NOT_ALLOWED',
             message: `company is ${company.status}; onboarding facts 只写 DRAFT/REVIEW`,
+          },
+        });
+      }
+      // DRAFT + 官网 + 无失败标记 = 理解已排队/刚被接受还没置 ENRICHING：
+      // extract_profile 稍后可能改写 industry，与客户选的 industryCode 不同源，拒绝。
+      if (company.status === 'DRAFT' && company.website && company.understandingFailedAt === null) {
+        throw new ConflictException({
+          error: {
+            code: 'ONBOARDING_FACTS_NOT_ALLOWED',
+            message: 'understanding is queued or running; confirm after the preview is ready',
           },
         });
       }

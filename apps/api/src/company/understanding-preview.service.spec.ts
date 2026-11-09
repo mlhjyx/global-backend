@@ -29,7 +29,34 @@ const INDUSTRY_NODES = [
   },
 ];
 
-function fixture(company: Record<string, unknown> | null) {
+const COUNTRY_NODES = [
+  { code: 'DE', labelEn: 'Germany', labels: { zh: '德国' } },
+  { code: 'FR', labelEn: 'France', labels: { zh: '法国' } },
+  { code: 'RO', labelEn: 'Romania', labels: { zh: '罗马尼亚' } },
+  { code: 'NG', labelEn: 'Nigeria', labels: { zh: '尼日利亚' } },
+  { code: 'OM', labelEn: 'Oman', labels: { zh: '阿曼' } },
+  { code: 'NE', labelEn: 'Niger', labels: { zh: '尼日尔' } },
+];
+
+const COUNTRY_ALIASES = [
+  { term: 'germany', code: 'DE' },
+  { term: 'deutschland', code: 'DE' },
+  { term: 'france', code: 'FR' },
+  { term: 'frankreich', code: 'FR' },
+  { term: 'romania', code: 'RO' },
+  { term: 'nigeria', code: 'NG' },
+  { term: 'oman', code: 'OM' },
+  { term: 'niger', code: 'NE' },
+  { term: 'us', code: 'US' },
+];
+
+function fixture(
+  company: Record<string, unknown> | null,
+  options: {
+    offerings?: unknown[];
+    claims?: unknown[];
+  } = {},
+) {
   const tx = {
     companyProfile: { findUnique: vi.fn(async () => company) },
     knowledgeSource: {
@@ -41,12 +68,7 @@ function fixture(company: Record<string, unknown> | null) {
     },
     canonicalTaxonomy: {
       findMany: vi.fn(async (args: { where: { kind: string } }) =>
-        args.where.kind === 'industry'
-          ? INDUSTRY_NODES
-          : [
-              { code: 'DE', labelEn: 'Germany', labels: { zh: '德国' } },
-              { code: 'FR', labelEn: 'France', labels: { zh: '法国' } },
-            ],
+        args.where.kind === 'industry' ? INDUSTRY_NODES : COUNTRY_NODES,
       ),
     },
     termAlias: {
@@ -56,36 +78,36 @@ function fixture(company: Record<string, unknown> | null) {
               { term: '机械制造', code: '28' },
               { term: 'metal fabrication', code: '25' },
             ]
-          : [
-              { term: 'deutschland', code: 'DE' },
-              { term: 'frankreich', code: 'FR' },
-              { term: 'us', code: 'US' },
-            ],
+          : COUNTRY_ALIASES,
       ),
     },
     offering: {
-      findMany: vi.fn(async () => [
-        {
-          name: 'CNC 精密加工件',
-          source: 'understanding',
-          sourceUrl: 'https://acme.test/products',
-          evidence: 'CNC precision parts',
-        },
-      ]),
+      findMany: vi.fn(async () =>
+        options.offerings ?? [
+          {
+            name: 'CNC 精密加工件',
+            source: 'understanding',
+            sourceUrl: 'https://acme.test/products',
+            evidence: 'CNC precision parts',
+          },
+        ],
+      ),
     },
     claim: {
-      findMany: vi.fn(async () => [
-        {
-          type: 'market',
-          statement: 'Wir exportieren nach Deutschland und Frankreich.',
-          evidence: [{ sourceUrl: 'https://acme.test/about' }],
-        },
-        {
-          type: 'value_prop',
-          statement: 'Contact us for a quote.',
-          evidence: [{ sourceUrl: 'https://acme.test/contact' }],
-        },
-      ]),
+      findMany: vi.fn(async () =>
+        options.claims ?? [
+          {
+            type: 'market',
+            statement: 'Wir exportieren nach Deutschland und Frankreich.',
+            evidence: [{ sourceUrl: 'https://acme.test/about' }],
+          },
+          {
+            type: 'value_prop',
+            statement: 'Contact us for a quote.',
+            evidence: [{ sourceUrl: 'https://acme.test/contact' }],
+          },
+        ],
+      ),
     },
   };
   const prisma = {
@@ -129,6 +151,89 @@ describe('UnderstandingPreviewService', () => {
     expect(preview.markets[0]!.evidence.length).toBeGreaterThan(0);
     // 2 字母 "us" 不产生美国候选（contact us 这类误报必须被挡住）。
     expect(preview.markets.some((row) => row.code === 'US')).toBe(false);
+  });
+
+  it('国家只认词边界：Romania/Nigeria 不顺带命中 Oman/Niger，并带本地化标签', async () => {
+    const { service } = fixture(
+      {
+        id: COMPANY_ID,
+        workspaceId: CTX.workspaceId,
+        name: '具安科技',
+        website: 'https://acme.test',
+        status: 'REVIEW',
+        industry: null,
+        industryCode: null,
+        summary: null,
+        understandingFailedAt: null,
+        understandingLastError: null,
+        updatedAt: new Date('2026-11-10T08:00:00Z'),
+      },
+      {
+        claims: [
+          {
+            type: 'market',
+            statement: 'We export to Romania and Nigeria.',
+            evidence: [{ sourceUrl: 'https://acme.test/about' }],
+          },
+        ],
+      },
+    );
+    const preview = await service.get(CTX, COMPANY_ID);
+    const codes = preview.markets.map((row) => row.code).sort();
+    expect(codes).toEqual(['NG', 'RO']);
+    const romania = preview.markets.find((row) => row.code === 'RO');
+    expect(romania).toMatchObject({ labelEn: 'Romania', labels: { zh: '罗马尼亚' } });
+  });
+
+  it('换官网后只收当前站点溯源的产品/市场/页数，旧站数据不混入', async () => {
+    const { service } = fixture(
+      {
+        id: COMPANY_ID,
+        workspaceId: CTX.workspaceId,
+        name: '具安科技',
+        website: 'https://new.test',
+        status: 'REVIEW',
+        industry: null,
+        industryCode: null,
+        summary: null,
+        understandingFailedAt: null,
+        understandingLastError: null,
+        updatedAt: new Date('2026-11-10T08:00:00Z'),
+      },
+      {
+        offerings: [
+          {
+            name: '旧站产品',
+            source: 'understanding',
+            sourceUrl: 'https://old.test/products',
+            evidence: 'old',
+          },
+          {
+            name: '新站产品',
+            source: 'understanding',
+            sourceUrl: 'https://new.test/products',
+            evidence: 'new',
+          },
+        ],
+        claims: [
+          {
+            type: 'market',
+            statement: 'We export to Germany.',
+            evidence: [{ sourceUrl: 'https://old.test/about' }],
+          },
+          {
+            type: 'market',
+            statement: 'We export to France.',
+            evidence: [{ sourceUrl: 'https://new.test/about' }],
+          },
+        ],
+      },
+    );
+    const preview = await service.get(CTX, COMPANY_ID);
+    expect(preview.products.map((row) => row.name)).toEqual(['新站产品']);
+    expect(preview.markets.map((row) => row.code)).toEqual(['FR']);
+    // 测试 fixture 的 knowledge_source 全部来自 acme.test，与 new.test 不同站。
+    expect(preview.pagesAnalyzed).toBe(0);
   });
 
   it('failed：解析 stage:code 失败标签', async () => {

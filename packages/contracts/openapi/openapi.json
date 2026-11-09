@@ -6412,6 +6412,15 @@
                               "name": {
                                 "type": "string"
                               },
+                              "labelEn": {
+                                "type": "string"
+                              },
+                              "labels": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
+                              },
                               "evidence": {
                                 "type": "string"
                               },

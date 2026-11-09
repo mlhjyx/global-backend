@@ -199,6 +199,8 @@ export class CompanyController {
           properties: {
             code: { type: 'string' },
             name: { type: 'string' },
+            labelEn: { type: 'string' },
+            labels: { type: 'object', additionalProperties: { type: 'string' } },
             evidence: { type: 'string' },
             sourceUrl: { type: 'string', nullable: true },
           },

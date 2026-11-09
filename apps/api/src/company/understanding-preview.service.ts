@@ -45,7 +45,14 @@ export interface UnderstandingPreview {
   pagesAnalyzed: number;
   industry: { raw: string | null; suggested: IndustrySuggestion; options: IndustryOption[] };
   products: { name: string; source: string | null; sourceUrl: string | null; evidence: string | null }[];
-  markets: { code: string; name: string; evidence: string; sourceUrl: string | null }[];
+  markets: {
+    code: string;
+    name: string;
+    labelEn: string;
+    labels: Record<string, string>;
+    evidence: string;
+    sourceUrl: string | null;
+  }[];
   updatedAt: string;
 }
 
@@ -60,11 +67,17 @@ function escapeRegExp(value: string): string {
 }
 
 /**
- * 别名命中（与 registry/industry-map 的词面匹配同口径）：CJK 用子串；拉丁文要求
- * 词边界，且 ≥4 字符才接受子串（德语复合词）。国家别名额外要求拉丁文 ≥4 字符，
- * 避免 "contact us"/"can"/"are" 这类 2–3 字母码误报——宁可少建议，不可假建议。
+ * 别名命中：CJK 用子串；拉丁文要求词边界。industry 额外允许 ≥4 字符的子串
+ * （德语复合词 Kreiselpumpen 要命中 pump）；**国家不允许子串**——Romania 里的
+ * "oman"、Nigeria 里的 "niger"、Somalia 里的 "mali" 都是系统性误报。
+ * 拉丁别名一律要求 ≥4 字符，避免 "contact us"/"can"/"are" 这类 2–3 字母码误报。
  */
-function aliasMention(text: string, alias: string, minLatinLength: number): boolean {
+function aliasMention(
+  text: string,
+  alias: string,
+  minLatinLength: number,
+  allowSubstring = false,
+): boolean {
   if (!alias) return false;
   if (CJK.test(alias)) return alias.length >= 2 && text.includes(alias);
   if (alias.length < minLatinLength) return false;
@@ -73,7 +86,24 @@ function aliasMention(text: string, alias: string, minLatinLength: number): bool
     'u',
   );
   if (bounded.test(text)) return true;
-  return alias.length >= 4 && text.includes(alias);
+  return allowSubstring && alias.length >= 4 && text.includes(alias);
+}
+
+/** 官网 host（去 www）；无法解析返回 null。 */
+function siteHost(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  try {
+    return new URL(raw).hostname.replace(/^www\./i, '').toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/** 溯源 URL 与当前官网同站才收；没有溯源（注册引导事实）保留。 */
+function belongsToSite(sourceUrl: string | null | undefined, host: string | null): boolean {
+  if (!host) return true;
+  if (!sourceUrl) return true;
+  return siteHost(sourceUrl) === host;
 }
 
 function stateOf(company: {
@@ -181,9 +211,14 @@ export class UnderstandingPreviewService {
         }),
       ]);
       const { industryNodes, industryAliases } = taxonomy;
+      // 换官网重试时旧站点的理解结果仍在库里（run 的落库数据不按站点清理）：
+      // 只保留与当前官网同站的溯源，避免把 A 站的产品/市场混进 B 站的预览。
+      const host = siteHost(company.website);
 
       // 重试会让同一页在不同 run 下各留一行（ingestKey=runId:url），按 URI 去重才是"已分析页数"。
-      const pagesAnalyzed = pageRows.filter((row) => Boolean(row.uri)).length;
+      const pagesAnalyzed = pageRows.filter(
+        (row) => Boolean(row.uri) && belongsToSite(row.uri, host),
+      ).length;
       const options = industryNodes.map(toOption);
       const suggested = this.suggestIndustry(
         company.industry,
@@ -191,17 +226,19 @@ export class UnderstandingPreviewService {
         options,
         industryAliases,
       );
-      const products = offerings.map((row) => ({
-        name: row.name,
-        source: row.source,
-        sourceUrl: row.sourceUrl,
-        evidence: row.evidence,
-      }));
+      const products = offerings
+        .filter((row) => belongsToSite(row.sourceUrl, host))
+        .map((row) => ({
+          name: row.name,
+          source: row.source,
+          sourceUrl: row.sourceUrl,
+          evidence: row.evidence,
+        }));
       const markets = this.suggestMarkets(
         taxonomy.countryAliases,
         taxonomy.countryNodes,
         company.summary,
-        claims,
+        claims.filter((claim) => belongsToSite(claim.evidence[0]?.sourceUrl, host)),
       );
 
       return {
@@ -275,7 +312,8 @@ export class UnderstandingPreviewService {
     let best: { code: string; length: number } | null = null;
     for (const alias of aliases) {
       const aliasTerm = normalizeTerm(alias.term);
-      if (!aliasMention(term, aliasTerm, 4)) continue;
+      // 行业允许子串（德语复合词/口语），仍要求拉丁 ≥4 字符。
+      if (!aliasMention(term, aliasTerm, 4, true)) continue;
       if (!best || aliasTerm.length > best.length) {
         best = { code: alias.code, length: aliasTerm.length };
       }
@@ -303,6 +341,7 @@ export class UnderstandingPreviewService {
       const normalized = normalizeTerm(text);
       for (const alias of aliases) {
         const aliasTerm = normalizeTerm(alias.term);
+        // 国家只认词边界：Romania/Nigeria/Somalia 不能顺带命中 Oman/Niger/Mali。
         if (!aliasMention(normalized, aliasTerm, 4)) continue;
         const prior = hits.get(alias.code);
         if (!prior || aliasTerm.length > prior.length) {
@@ -315,19 +354,21 @@ export class UnderstandingPreviewService {
       }
     }
     if (hits.size === 0) return [];
-    const nameOf = (code: string): string => {
-      const node = nodes.find((row) => row.code === code);
-      const labels = (node?.labels as Record<string, string> | null) ?? {};
-      return labels.zh ?? node?.labelEn ?? code;
-    };
     return [...hits.entries()]
       .slice(0, 6)
-      .map(([code, hit]) => ({
-        code,
-        name: nameOf(code),
-        evidence: hit.evidence,
-        sourceUrl: hit.sourceUrl,
-      }));
+      .map(([code, hit]) => {
+        const node = nodes.find((row) => row.code === code);
+        const labels = (node?.labels as Record<string, string> | null) ?? {};
+        const labelEn = node?.labelEn ?? code;
+        return {
+          code,
+          name: labels.zh ?? labelEn,
+          labelEn,
+          labels,
+          evidence: hit.evidence,
+          sourceUrl: hit.sourceUrl,
+        };
+      });
   }
 
   /** 受控词表（行业节点/别名 + 国家节点/别名）的短 TTL 缓存。 */
