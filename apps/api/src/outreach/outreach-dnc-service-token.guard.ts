@@ -24,14 +24,17 @@ function sameToken(left: string, right: string): boolean {
  */
 @Injectable()
 export class OutreachDncServiceTokenGuard implements CanActivate {
+  // 子类（contact-eligibility 等）通过覆盖这四个字段复用同一令牌机制与错误语义。
+  protected readonly unavailableCode: string = 'OUTREACH_SUPPRESS_NOT_CONFIGURED';
+  protected readonly unavailableMessage: string = '平台级抑制未配置服务令牌，拒绝写入';
+  protected readonly forbiddenCode: string = 'OUTREACH_SUPPRESS_FORBIDDEN';
+  protected readonly forbiddenMessage: string = '平台级抑制只接受控制面服务令牌';
+
   canActivate(context: ExecutionContext): boolean {
     const expected = (process.env[OUTREACH_INTERNAL_SERVICE_TOKEN_ENV] ?? '').trim();
     if (!expected) {
       throw new ServiceUnavailableException({
-        error: {
-          code: 'OUTREACH_SUPPRESS_NOT_CONFIGURED',
-          message: '平台级抑制未配置服务令牌，拒绝写入',
-        },
+        error: { code: this.unavailableCode, message: this.unavailableMessage },
       });
     }
     const request = context.switchToHttp().getRequest<Request>();
@@ -40,10 +43,7 @@ export class OutreachDncServiceTokenGuard implements CanActivate {
     ).trim();
     if (!provided || !sameToken(provided, expected)) {
       throw new ForbiddenException({
-        error: {
-          code: 'OUTREACH_SUPPRESS_FORBIDDEN',
-          message: '平台级抑制只接受控制面服务令牌',
-        },
+        error: { code: this.forbiddenCode, message: this.forbiddenMessage },
       });
     }
     return true;

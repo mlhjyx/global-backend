@@ -5429,6 +5429,69 @@
         ]
       }
     },
+    "/api/v1/outreach/contact-eligibility": {
+      "post": {
+        "description": "服务间端点（gain-saas 控制面，x-service-token）：按规范化邮箱的确定性密文匹配 contact_point，返回 emailHash（sha256，与 DNC 端点同口径）、found、四态（VALID/INVALID/CATCH_ALL_RISKY/UNKNOWN）、confidence 与 allowedActions；未找到按 UNKNOWN 处理（found=false，调用方必须 fail closed）。CATCH_ALL_RISKY 的 catchAllPolicy 当前恒为 mode=OFF/allowed=false（灰度策略表属 P1-13，策略不存在=一律拒发）。批量 ≤50；非法邮箱/超限返回 400，令牌未配置 503，令牌不符 403。多租户不跨域匹配（RLS 强制）。",
+        "operationId": "ContactEligibilityController_check_v1",
+        "parameters": [
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "description": "gain-saas 控制面服务令牌（env OUTREACH_INTERNAL_SERVICE_TOKEN；与 DNC 抑制同源）",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckContactEligibilityDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "results"
+                      ],
+                      "properties": {
+                        "results": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "批量查询邮箱的四态与可触达动作（服务令牌）",
+        "tags": [
+          "Outreach"
+        ]
+      }
+    },
     "/api/v1/companies": {
       "post": {
         "description": "支持 Idempotency-Key 头：同 key 重放返回首次结果，不重复创建（PRD 11.16）。",
@@ -21084,6 +21147,10 @@
       "description": "度量：指标字典目录、观测与日/周聚合（只读，ch01）"
     },
     {
+      "name": "Outreach",
+      "description": "受控邮件触达：DNC 预检、平台级抑制与联系人可触达性查询（含服务令牌端点）"
+    },
+    {
       "name": "Events",
       "description": "事件投递账本与确认回执"
     },
@@ -21340,6 +21407,28 @@
           "email",
           "reason",
           "source"
+        ]
+      },
+      "CheckContactEligibilityDto": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "该批发送所属的 workspace（服务令牌端点：租户由控制面显式给出）"
+          },
+          "emails": {
+            "maxItems": 50,
+            "description": "待检查的收件邮箱（≤50；引擎按规范化后的确定性密文等值匹配）",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "workspaceId",
+          "emails"
         ]
       },
       "PublicContactDto": {
