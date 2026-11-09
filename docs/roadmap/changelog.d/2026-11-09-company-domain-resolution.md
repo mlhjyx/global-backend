@@ -5,7 +5,7 @@ title: 域名解析候选与人工复核队列两表（ch03 执行面 3a）
 
 - 起因：ch03 §3.9.4 的域名解析证据表与复核工单表是执行面（解析 workflow / 池导出）的落库基座；此前只有内存契约（T3-13/T3-15），没有租户级表、权限清单与 RLS 行为证据。
 - 改动：
-  - 迁移 `20261109180000_company_domain_resolution`：`company_domain_resolution`（业务唯一键 workspace+company+候选域名+route；`selected=true` 仅允许 `status='VERIFIED'`；复合外键随公司级联删除）与 `domain_review_task`（非 OPEN 必须有 decided_at；reason/status 封闭词表），两表 ENABLE+FORCE RLS + `current_workspace_id()` 租户策略，app_user 授予 SELECT/INSERT/UPDATE/DELETE 并同步 `docs/governance/app-user-table-privileges.json`；同公司至多一行 selected 由写入路径的 company 级 advisory lock 保证（部分唯一索引无法进 Prisma datamodel，会在漂移门报红）。迁移只入代码，未部署。
+  - 迁移 `20261109190000_company_domain_resolution`：`company_domain_resolution`（业务唯一键 workspace+company+候选域名+route；`selected=true` 仅允许 `status='VERIFIED'`；复合外键随公司级联删除）与 `domain_review_task`（非 OPEN 必须有 decided_at；reason/status 封闭词表），两表 ENABLE+FORCE RLS + `current_workspace_id()` 租户策略，app_user 授予 SELECT/INSERT/UPDATE/DELETE 并同步 `docs/governance/app-user-table-privileges.json`；同公司至多一行 selected 由部分唯一索引兜底（datamodel 不可表达、漂移 diff 忽略部分索引），写入路径另用 company 级 advisory lock 串行化「先清旧选中再选新行」。迁移只入代码，未部署。
   - `apps/api/src/registry/domain/domain-resolution-store.ts` / `domain-review-store.ts`：存储契约（幂等 upsert、仅 VERIFIED 可选中、`clearSelected` 清选中后才可改判终态、工单 OPEN 幂等入队、裁决终态守卫、SLA 超期转 EXPIRED）。
   - `domain-stores.prisma.ts`：Prisma 实现——upsert 用单条 `INSERT … ON CONFLICT DO UPDATE … RETURNING (xmax = 0)`（捕获 P2002 会中止所在事务，不能用）；`selectVerified` 事务内先 `pg_advisory_xact_lock` 再清旧选新。
   - CI「Raw SQL parameter types on PostgreSQL」步骤接入新 postgres 规格（迁移后 `prisma migrate deploy` 真库）。
