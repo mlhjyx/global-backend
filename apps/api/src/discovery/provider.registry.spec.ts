@@ -234,11 +234,15 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
     ]);
     // A declared source that either contract rejects would fail its governed query instead of running it.
     for (const source of sources) {
-      expect(source.hasCompanyLineage, source.providerKey)
-        .toBe(isDiscoveryCompanyLineageProviderKey(source.providerKey));
-      expect(source.hasCompanyLineage, source.providerKey)
-        .toBe(isDiscoveryQueryLineageProviderKey(source.providerKey));
+      if (source.hasCompanyLineage) {
+        expect(isDiscoveryCompanyLineageProviderKey(source.providerKey), source.providerKey).toBe(true);
+        expect(isDiscoveryQueryLineageProviderKey(source.providerKey), source.providerKey).toBe(true);
+      }
     }
+    // A 方案（local_query）：registry_frame 已在两份封闭契约白名单内；默认 off 不声明血缘，
+    // REGISTRY_FRAME_PROVIDER=on 才声明（就地回滚开关）。
+    expect(isDiscoveryCompanyLineageProviderKey('registry_frame')).toBe(true);
+    expect(isDiscoveryQueryLineageProviderKey('registry_frame')).toBe(true);
   });
 
   it('writes the company-site seed as one brace-free create body, as the provider registry parse expects', () => {

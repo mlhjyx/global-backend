@@ -117,11 +117,16 @@ export class DiscoveryProviderRegistry {
     // openFDA 器械注册发现（美国 FDA 官方 API，零鉴权、CC0，归 public_intelligence 类）——不依赖 gateway。
     // 无 product code 过滤时 fail-safe 返回空，故对普通 public_intelligence 查询零负担。
     this.discovery.push(new OpenFdaDiscoveryProvider({ broker }));
-    // registry_frame = 本地注册库 frame 枚举（零出网零成本，ch03 T3-09）。
-    // **刻意不声明公司血缘**：本地查询没有物理调用可出 durable 回执，当前治理下会被
-    // routeCompanyDiscovery 的血缘闸门排除（计划期计 SOURCE_LINEAGE_UNAVAILABLE，测试钉死）。
-    // 执行面等 local_query 血缘变体获批后接线；data_provider 默认 DISABLED 是第二道 kill switch。
-    this.discovery.push(new RegistryFrameDiscoveryProvider({ prisma }));
+    // registry_frame = 本地注册库 frame 枚举（零出网零成本，ch03 T3-09；A 方案已获批）。
+    // REGISTRY_FRAME_PROVIDER=on 时声明 local_query 血缘并报送确定性回执（registry.query）；
+    // 默认 off = 不声明血缘、被路由闸门排除（SOURCE_LINEAGE_UNAVAILABLE，测试钉死），关闭即回滚。
+    // data_provider 默认 DISABLED 是第二道 kill switch。
+    this.discovery.push(
+      new RegistryFrameDiscoveryProvider({
+        prisma,
+        lineageEnabled: process.env.REGISTRY_FRAME_PROVIDER === 'on',
+      }),
+    );
     // UK Companies House 董事发现（待办 3 第一个身份源；官方注册处 API，Basic auth）——contact_discovery 类。
     // 不依赖 gateway（结构化 API，无 LLM）；GB 门外/无 broker/无 API key 时 fail-safe 返空（天然 no-op）。
     // 董事经 externalIds(uk-ch-officer) 走 resolvePersonIdentity Tier 0 精确并（同一董事跨源自动并成一条）。
@@ -427,6 +432,24 @@ export class DiscoveryProviderRegistry {
       update: {},
       create: { key: 'truelist', class: 'email_verification', status: 'DISABLED', costPerCallCents: 0 },
     });
+    // P1-07：付费邮箱富集 finder（Hunter → Findymail → Prospeo = 瀑布顺序）。默认 DISABLED =
+    // kill switch（富集瀑布调用前检查 data_provider ENABLED + source_policy 已登记 + 凭据三重门）。
+    // 凭据到位并通过 scorecard（§2.3.3.1）后由运维逐家打开；成本按 attempt 账记账。
+    await db.dataProvider.upsert({
+      where: { key: 'hunter' },
+      update: {},
+      create: { key: 'hunter', class: 'b2b_company_person', status: 'DISABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'findymail' },
+      update: {},
+      create: { key: 'findymail', class: 'b2b_company_person', status: 'DISABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'prospeo' },
+      update: {},
+      create: { key: 'prospeo', class: 'b2b_company_person', status: 'DISABLED', costPerCallCents: 0 },
+    });
     // 决策人抽取（Impressum/管理层/团队页 → 具名人+职务+买家角色）——联系人发现首选 adapter。
     await db.dataProvider.upsert({
       where: { key: 'decision_maker' },
@@ -515,6 +538,56 @@ export class DiscoveryProviderRegistry {
           allowedPurpose: ['discovery', 'enrichment'],
           retentionDays: 365,
           notes: 'Truelist 邮箱验证 API（HTTPS + Bearer key）。data_provider.truelist 默认 DISABLED；catch-all 解析席（编排接线后入池），$0.0014/条（enhanced 3 credits）按事件账记账。',
+        },
+      });
+      // P1-07：付费邮箱富集 finder API 域（Hunter / Findymail / Prospeo）；未登记 = 未批准
+      // （富集瀑布 fail-closed 拒调）。送出的是具名联系人 + 公司域（个人数据处理）。
+      await db.sourcePolicy.upsert({
+        where: { domain: 'api.hunter.io' },
+        update: {},
+        create: {
+          domain: 'api.hunter.io',
+          sourceType: 'data_enrichment',
+          accessMode: 'api',
+          reviewStatus: 'APPROVED',
+          robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_OK',
+          personalData: true,
+          allowedPurpose: ['discovery', 'enrichment'],
+          retentionDays: 365,
+          notes: 'Hunter 邮箱富集 Domain Search API（HTTPS + API key）。data_provider.hunter 默认 DISABLED（kill switch）；返回 pattern/accept_all 结构化信号，$0.0170/命中按 attempt 账记账。',
+        },
+      });
+      await db.sourcePolicy.upsert({
+        where: { domain: 'api.findymail.com' },
+        update: {},
+        create: {
+          domain: 'api.findymail.com',
+          sourceType: 'data_enrichment',
+          accessMode: 'api',
+          reviewStatus: 'APPROVED',
+          robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_OK',
+          personalData: true,
+          allowedPurpose: ['discovery', 'enrichment'],
+          retentionDays: 365,
+          notes: 'Findymail 邮箱富集 API（HTTPS + Bearer key）。data_provider.findymail 默认 DISABLED；pay-on-valid，无结果不计费，$0.0198/命中按 attempt 账记账。',
+        },
+      });
+      await db.sourcePolicy.upsert({
+        where: { domain: 'api.prospeo.io' },
+        update: {},
+        create: {
+          domain: 'api.prospeo.io',
+          sourceType: 'data_enrichment',
+          accessMode: 'api',
+          reviewStatus: 'APPROVED',
+          robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_OK',
+          personalData: true,
+          allowedPurpose: ['discovery', 'enrichment'],
+          retentionDays: 365,
+          notes: 'Prospeo 邮箱富集 Email Finder API（HTTPS + X-KEY）。data_provider.prospeo 默认 DISABLED；pay-on-valid + 90 天免费重取，$0.0198/命中按 attempt 账记账。',
         },
       });
       await db.sourcePolicy.upsert({

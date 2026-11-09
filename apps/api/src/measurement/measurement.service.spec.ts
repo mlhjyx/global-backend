@@ -173,3 +173,67 @@ describe("MeasurementService.rollups", () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 });
+
+function vricRow(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    bucket: "2026-11-08",
+    metric_id: "T0-001",
+    metric_version: 1,
+    stratum_key: `{"workspace_id":"${ctx.workspaceId}"}`,
+    numerator: 0,
+    denominator: 128,
+    value: 0,
+    ci_low: 0,
+    ci_high: 0.014,
+    sample_n: 128,
+    refreshed_at: new Date("2026-11-09T01:00:00.000Z"),
+    ...overrides,
+  };
+}
+
+describe("MeasurementService.vric", () => {
+  it("pairs STRICT and PLUS per bucket, keeps the highest version and the latest limit buckets", async () => {
+    const { service, captured } = serviceWith([
+      vricRow({ bucket: "2026-11-06", value: 0.1 }),
+      vricRow({ bucket: "2026-11-06", metric_id: "T0-002", value: 0.2 }),
+      vricRow({ bucket: "2026-11-07", value: 0.3 }),
+      vricRow({ bucket: "2026-11-08", value: 0.35 }),
+      vricRow({ bucket: "2026-11-08", metric_version: 2, value: 0.4 }),
+      vricRow({ bucket: "2026-11-08", metric_id: "T0-002", value: 0.5 }),
+    ]);
+    const page = await service.vric(ctx, { limit: "2" });
+    expect(page.items).toHaveLength(2);
+    expect(page.items[0]?.bucket).toBe("2026-11-07");
+    expect(page.items[0]?.strict?.value).toBe(0.3);
+    expect(page.items[0]?.plus).toBeNull();
+    expect(page.items[1]?.bucket).toBe("2026-11-08");
+    expect(page.items[1]?.strict?.metricVersion).toBe(2);
+    expect(page.items[1]?.strict?.value).toBe(0.4);
+    expect(page.items[1]?.plus?.value).toBe(0.5);
+    expect(page.page.hasMore).toBe(true);
+    expect(page.page.nextCursor).toBeNull();
+    expect((captured[0] ?? "").toLocaleLowerCase()).toContain("from metric_rollup_daily");
+    expect(captured[0] ?? "").toContain("IN ('T0-001', 'T0-002')");
+  });
+
+  it("selects the weekly table and validates inputs", async () => {
+    const { service, captured } = serviceWith([vricRow({ bucket: "2026-11-03" })]);
+    const page = await service.vric(ctx, { granularity: "weekly", limit: "10" });
+    expect(page.items[0]?.bucket).toBe("2026-11-03");
+    expect(captured[0]).toContain("FROM metric_rollup_weekly");
+    expect(captured[0]).toContain("week >=");
+
+    await expect(
+      service.vric(ctx, { granularity: "monthly" }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.vric(ctx, { from: "2026-11-09", to: "2026-11-01" }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.vric(ctx, { limit: "0" }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.vric(ctx, { from: "11/01/2026" }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});

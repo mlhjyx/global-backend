@@ -1,5 +1,8 @@
 import type { PrismaClient } from '@prisma/client';
 import { describe, expect, it } from 'vitest';
+import { parseDiscoveryCompanyResultLineage } from '../company-discovery-lineage';
+import { parseDurableExecutionReceipt } from '../../durable-results/durable-execution-receipt';
+import { buildGovernedDiscoveryQueryExecutionPlan } from '../../temporal/discovery-query-governed-execution';
 import type { RegistryQueryRow } from '../../registry/query';
 import type { CompanyDiscoveryQuery, ExecutionContext } from '../provider-contract';
 import { RegistryFrameDiscoveryProvider } from './registry-frame.provider';
@@ -145,6 +148,125 @@ describe('RegistryFrameDiscoveryProvider (T3-09 registration surface)', () => {
     await expect(provider.discoverCompanies(query({ country: 'Germany' }), ctx)).resolves.toEqual({
       records: [],
       costCents: 0,
+    });
+  });
+});
+
+describe('local_query lineage mode (A 方案)', () => {
+  const AUTHORITY = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const ACCOUNT = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const RUN = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+
+  const prismaReturning = (rows: RegistryQueryRow[]) =>
+    ({
+      registryEntity: { findMany: async () => rows },
+    }) as unknown as PrismaClient;
+
+  const lineageCtx = () => {
+    const receipts: Array<{ producerId: string; receipt: unknown }> = [];
+    return {
+      receipts,
+      ctx: {
+        workspaceId: AUTHORITY,
+        runId: RUN,
+        durableBudgetAuthority: { authorityId: AUTHORITY, accountId: ACCOUNT },
+        onDurableReceipt: (producerId: string, receipt: unknown) => {
+          receipts.push({ producerId, receipt });
+        },
+      } as ExecutionContext,
+    };
+  };
+
+  it('declares company lineage only when the flag is on', () => {
+    expect(new RegistryFrameDiscoveryProvider().companyResultLineage).toBeUndefined();
+    expect(
+      new RegistryFrameDiscoveryProvider({ lineageEnabled: true }).companyResultLineage,
+    ).toBe('discovery-company-result-lineage/v1');
+  });
+
+  it('emits a deterministic local receipt + lineage and reports it through the callback', async () => {
+    const provider = new RegistryFrameDiscoveryProvider({
+      prisma: prismaReturning([row]),
+      lineageEnabled: true,
+    });
+    const first = lineageCtx();
+    const resultOnce = await provider.discoverCompanies(query({ country: 'FR' }), first.ctx);
+    const second = lineageCtx();
+    const resultTwice = await provider.discoverCompanies(query({ country: 'FR' }), second.ctx);
+
+    expect(resultOnce.records).toHaveLength(1);
+    expect(resultOnce.costCents).toBe(0);
+    expect(first.receipts).toHaveLength(1);
+    expect(first.receipts[0]!.producerId).toBe('registry.query');
+
+    const parsedLineage = parseDiscoveryCompanyResultLineage(resultOnce.lineage, 'registry_frame');
+    expect(parsedLineage.recordCount).toBe(1);
+    expect(parsedLineage.receiptCoverage[0]!.recordIndexes).toEqual([0]);
+    const receipt = parseDurableExecutionReceipt(first.receipts[0]!.receipt);
+    expect(receipt.operationId).toBe(parsedLineage.receiptCoverage[0]!.receipt.operationId);
+
+    // 同一 query + 同一数据 → 同一回执身份与 digest（可回放/可复算）。
+    const parsedTwice = parseDiscoveryCompanyResultLineage(resultTwice.lineage, 'registry_frame');
+    expect(parsedTwice.receiptCoverage[0]!.receipt.operationId).toBe(receipt.operationId);
+    expect(parsedTwice.receiptCoverage[0]!.receipt.resultDigest).toBe(receipt.resultDigest);
+  });
+
+  it('fails closed without the run budget authority (no forged receipts)', async () => {
+    const provider = new RegistryFrameDiscoveryProvider({
+      prisma: prismaReturning([row]),
+      lineageEnabled: true,
+    });
+    const result = await provider.discoverCompanies(query({ country: 'FR' }), {
+      workspaceId: AUTHORITY,
+      runId: RUN,
+    } as ExecutionContext);
+    expect(result.records).toEqual([]);
+    expect(result.costCents).toBe(0);
+    expect(parseDiscoveryCompanyResultLineage(result.lineage, 'registry_frame').recordCount).toBe(0);
+  });
+
+  it('keeps a valid empty lineage when filters cannot satisfy the contract', async () => {
+    const provider = new RegistryFrameDiscoveryProvider({
+      prisma: prismaReturning([row]),
+      lineageEnabled: true,
+    });
+    const { ctx, receipts } = lineageCtx();
+    const result = await provider.discoverCompanies(query({ country: 'Germany' }), ctx);
+    expect(result.records).toEqual([]);
+    expect(receipts).toEqual([]);
+    expect(parseDiscoveryCompanyResultLineage(result.lineage, 'registry_frame').recordCount).toBe(0);
+  });
+
+  it('is accepted by the governed execution plan end to end (in-memory)', async () => {
+    const provider = new RegistryFrameDiscoveryProvider({
+      prisma: prismaReturning([row]),
+      lineageEnabled: true,
+    });
+    const { ctx, receipts } = lineageCtx();
+    const result = await provider.discoverCompanies(query({ country: 'FR' }), ctx);
+    const plan = buildGovernedDiscoveryQueryExecutionPlan({
+      lineageEnabled: true,
+      adapters: [provider],
+      settled: [
+        {
+          status: 'fulfilled',
+          value: {
+            key: 'registry_frame',
+            r: result,
+            durableReceipts: receipts as never,
+          },
+        },
+      ],
+    });
+    expect(plan.mode).toBe('governed');
+    if (plan.mode !== 'governed') return;
+    expect(plan.providerPlan.providers).toEqual(['registry_frame']);
+    expect(plan.providerPlan.attempts).toHaveLength(1);
+    expect(plan.providerPlan.attempts[0]).toMatchObject({
+      providerKey: 'registry_frame',
+      producerId: 'registry.query',
+      recordIndexes: [0],
+      providerRecordCount: 1,
     });
   });
 });

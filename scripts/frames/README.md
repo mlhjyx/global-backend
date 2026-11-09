@@ -60,9 +60,12 @@ NACE 类目形态 `28.13`，码体系写 `naceVersion`（如 `NAF-rev2`）；查
 由下游触达过滤（P4 抑制联动）消费——查询层不做隐式过滤。
 
 `registry_frame` 同时注册为 discovery provider（`apps/api/src/discovery/providers/registry-frame.provider.ts`，
-company_registry 类，data_provider 默认 DISABLED）。**注意**：现行 governed-lineage 契约要求逐记录
-durable 回执，本地查询无法满足，因此它目前恒被路由闸门排除（计划期 `SOURCE_LINEAGE_UNAVAILABLE`）——
-执行面等 `docs/superpowers/plans/2026-11-09-registry-frame-local-lineage.md` 的设计获批。
+company_registry 类，data_provider 默认 DISABLED）。A 方案（local_query 血缘变体）已获批并实现：
+`REGISTRY_FRAME_PROVIDER=on` 时适配器声明受治理血缘，并按 §3.12.3 之外的 local_query 约定构造
+**确定性回执**（producer `registry.query`，operationId 由 runId+queryDigest 派生，resultDigest 为归一
+候选集的规范哈希、可从 `registry_entity` 重算；usage 恒 0 / `not_incurred`）。默认 off = 不声明血缘、
+计划期计 `SOURCE_LINEAGE_UNAVAILABLE`（测试钉死）；关掉开关即回滚。data_provider 是第二道开关。
+实现说明见 `docs/superpowers/plans/2026-11-09-registry-frame-local-lineage.md`。
 
 ## 域名校验（离线骨架，T3-13）
 
@@ -74,6 +77,18 @@ ES NIF/CIF、NL KVK、BE KBO、CH UID 抽取（§3.12.9 锚点矩阵）；`VatVa
 VIES 的离线接口（fixture 实现），真实 REST 属执行面。多候选编排：≥2 个候选 ≥55 分 →
 全部 AMBIGUOUS（同名冲突），唯一 VERIFIED 才选中；产物可映射为
 `company_domain_resolution` 行草案（`toDomainResolutionDrafts`）。本骨架不抓取、不落库。
+
+## 搜索路由与 P856（离线契约，T3-11/T3-12）
+
+`apps/api/src/registry/domain/search-router.ts`：多搜索 provider 的两种调用形态——域名解析强制的
+`searchAll`（各 provider 独立成败、URL 去重并集、`degradedFrom` 记录失败路、延迟预算按单路失败计）
+与成本优先的 `searchPreferred`（按序回退）；成本按 provider 的 `costPerQueryUsd` 汇总为
+`UsageLedgerDraft`（purpose=`DISCOVERY_DOMAIN_RESOLVE`，写账本属执行面）；`ProviderHealthTracker`
+实现 §3.14.3 阈值（连续 20 次失败/超 4 天无成功→告警；7 天内 30 次失败→自动停用、路由跳过）。
+真实 Brave/Serper/Mojeek HTTP 与密钥属在线部分。
+
+`domain-resolver` 增 `wikidata_p856` 路（rank 2，标签相似 ≥0.85 才采用、最多查 3 个实体），
+与 search/CT/CC 并集排序，单路失败隔离。
 
 ## 人工复核队列（离线契约，T3-15）
 

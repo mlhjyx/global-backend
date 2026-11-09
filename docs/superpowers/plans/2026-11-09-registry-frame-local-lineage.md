@@ -1,7 +1,7 @@
 # registry_frame 的 local_query 血缘变体（ch03 T3-09 执行面设计）
 
-> 生命周期：`DRAFT`
-> 依据：GainOS v3.0 第 3 章（召回与枚举）T3-09 执行面被 2026-11-08 收紧的 governed-lineage 契约挡住（见 §1 证据）；本文件提请产品负责人拍板后才进入施工。C 面（注册与路由，PR #918 后继）不含执行。
+> 生命周期：`APPROVED`
+> 依据：2026-11-09 用户经 P2 看板采纳 A（决策简报 `2026-11-09-registry-frame-local-lineage-decision-brief.md`）；本波 PR 按本文件 §2 落地契约本体（无迁移、开关默认关、关闭即回滚）。
 
 ## 1. 问题与证据（为什么 T3-09 执行面需要先改契约）
 

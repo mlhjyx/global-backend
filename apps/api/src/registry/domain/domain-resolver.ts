@@ -13,13 +13,21 @@
  *    拒绝 IP 与无点主机，过滤目录站/社交站噪声域（NOISE）。
  */
 import { normalizeCompanyName, normalizeDomain } from '../../discovery/identity';
+import { trigramDice } from '../merge';
 
-export type DomainRoute = 'source_field' | 'search' | 'ct_log' | 'cc_index' | 'manual';
+export type DomainRoute =
+  | 'source_field'
+  | 'search'
+  | 'wikidata_p856'
+  | 'ct_log'
+  | 'cc_index'
+  | 'manual';
 
 export const DOMAIN_ROUTE_RANK: Record<DomainRoute, number> = {
   source_field: 0,
   manual: 0,
   search: 1,
+  wikidata_p856: 2,
   ct_log: 3,
   cc_index: 4,
 };
@@ -52,6 +60,17 @@ export interface CertificateTransparencyProvider {
 export interface CommonCrawlIndexProvider {
   readonly key: string;
   lookupHosts(input: { token: string; country?: string }): Promise<string[]>;
+}
+
+/**
+ * Wikidata P856（official website）候选路契约（ch03 §3.12.2 rank 2）：
+ * 按名称找实体 → 取 P856。只有标签与实体名足够相似（≥0.85）才采用，防同名实体抓错官网。
+ * 真实 SPARQL/API 调用属在线部分；本契约用 fixture 实现测试。
+ */
+export interface WikidataP856Provider {
+  readonly key: string;
+  searchEntity(input: { name: string; country?: string }): Promise<Array<{ qid: string; label: string }>>;
+  getOfficialWebsite(qid: string): Promise<string | null>;
 }
 
 export interface DomainResolutionInput {
@@ -147,6 +166,7 @@ export function brandToken(name: string): string | null {
 
 export interface MultiRouteDomainResolverOptions {
   searchProviders?: DomainSearchProvider[];
+  wikidataProviders?: WikidataP856Provider[];
   ctProviders?: CertificateTransparencyProvider[];
   ccProviders?: CommonCrawlIndexProvider[];
   noiseDomains?: readonly string[];
@@ -160,6 +180,7 @@ const DEFAULT_SEARCH_COUNT = 10;
 
 export class MultiRouteDomainResolver implements DomainResolver {
   private readonly searchProviders: DomainSearchProvider[];
+  private readonly wikidataProviders: WikidataP856Provider[];
   private readonly ctProviders: CertificateTransparencyProvider[];
   private readonly ccProviders: CommonCrawlIndexProvider[];
   private readonly noise: ReadonlySet<string>;
@@ -168,6 +189,7 @@ export class MultiRouteDomainResolver implements DomainResolver {
 
   constructor(options: MultiRouteDomainResolverOptions = {}) {
     this.searchProviders = options.searchProviders ?? [];
+    this.wikidataProviders = options.wikidataProviders ?? [];
     this.ctProviders = options.ctProviders ?? [];
     this.ccProviders = options.ccProviders ?? [];
     this.noise = new Set(options.noiseDomains ?? DEFAULT_NOISE_DOMAINS);
@@ -220,6 +242,29 @@ export class MultiRouteDomainResolver implements DomainResolver {
           offer(hit.url, 'search', provider.key);
         }
       }),
+      ...this.wikidataProviders.map(async (provider) => {
+        let entities: Array<{ qid: string; label: string }> = [];
+        try {
+          entities = await provider.searchEntity({ name: input.name, country: input.country ?? undefined });
+        } catch {
+          return;
+        }
+        const target = normalizeCompanyName(input.name);
+        let checked = 0;
+        for (const candidate of entities) {
+          if (checked >= 3) break;
+          const similarity = trigramDice(target, normalizeCompanyName(candidate.label));
+          if (similarity < 0.85) continue;
+          checked += 1;
+          let website: string | null = null;
+          try {
+            website = await provider.getOfficialWebsite(candidate.qid);
+          } catch {
+            continue;
+          }
+          if (website) offer(website, 'wikidata_p856', provider.key);
+        }
+      }),
       ...(token
         ? this.ctProviders.map(async (provider) => {
             let domains: string[];
@@ -253,7 +298,11 @@ export class MultiRouteDomainResolver implements DomainResolver {
 
     if (candidates.length === 0) {
       const anyProvider =
-        this.searchProviders.length + this.ctProviders.length + this.ccProviders.length > 0;
+        this.searchProviders.length +
+          this.wikidataProviders.length +
+          this.ctProviders.length +
+          this.ccProviders.length >
+        0;
       return {
         candidates,
         status: 'NOT_FOUND',

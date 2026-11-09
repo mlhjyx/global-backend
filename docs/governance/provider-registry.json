@@ -254,6 +254,114 @@
       ]
     },
     {
+      "key": "findymail",
+      "status": "IMPLEMENTED",
+      "source_classes": [
+        "b2b_company_person"
+      ],
+      "purpose": "Find a named person's work email from their name and company domain through the Findymail API; hits are priced pay-on-valid, misses are free, and every hit must pass the verification waterfall before it becomes a contact point state.",
+      "taxonomy": [
+        "person work email",
+        "finder hit/miss",
+        "enrichment cost"
+      ],
+      "license": {
+        "classification": "NOT_APPLICABLE",
+        "note": "Finder result, not licensed source content; the name and company domain are personal data sent to the processor under a lawful-basis gate."
+      },
+      "personal_data_class": "PERSONAL_DATA",
+      "default_enablement": "DISABLED",
+      "call_gates": [
+        "data_provider_status",
+        "source_policy",
+        "lawful_basis",
+        "api_credentials",
+        "attempt_budget"
+      ],
+      "test_paths": [
+        "apps/api/src/enrichment/finders/findymail.provider.spec.ts",
+        "apps/api/src/enrichment/finders/finder-pool.spec.ts"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "TEST_ANCHOR",
+          "path": "apps/api/src/enrichment/finders/findymail.provider.spec.ts"
+        }
+      ]
+    },
+    {
+      "key": "hunter",
+      "status": "IMPLEMENTED",
+      "source_classes": [
+        "b2b_company_person"
+      ],
+      "purpose": "Find a named person's work email from the company domain through Hunter Domain Search, carrying the domain-level naming pattern and accept_all flag forward as structured signals; accept-all addresses must enter the catch-all layer and never count as VALID on their own.",
+      "taxonomy": [
+        "person work email",
+        "email naming pattern",
+        "accept_all flag"
+      ],
+      "license": {
+        "classification": "NOT_APPLICABLE",
+        "note": "Finder result, not licensed source content; the name and company domain are personal data sent to the processor under a lawful-basis gate."
+      },
+      "personal_data_class": "PERSONAL_DATA",
+      "default_enablement": "DISABLED",
+      "call_gates": [
+        "data_provider_status",
+        "source_policy",
+        "lawful_basis",
+        "api_credentials",
+        "attempt_budget"
+      ],
+      "test_paths": [
+        "apps/api/src/enrichment/finders/hunter.provider.spec.ts",
+        "apps/api/src/enrichment/finders/finder-pool.spec.ts"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "TEST_ANCHOR",
+          "path": "apps/api/src/enrichment/finders/hunter.provider.spec.ts"
+        }
+      ]
+    },
+    {
+      "key": "prospeo",
+      "status": "IMPLEMENTED",
+      "source_classes": [
+        "b2b_company_person"
+      ],
+      "purpose": "Find a named person's work email from their name and company domain through the Prospeo Email Finder API; pay-on-valid with a 90-day free re-fetch, and every hit must pass the verification waterfall before it becomes a contact point state.",
+      "taxonomy": [
+        "person work email",
+        "finder hit/miss",
+        "enrichment cost"
+      ],
+      "license": {
+        "classification": "NOT_APPLICABLE",
+        "note": "Finder result, not licensed source content; the name and company domain are personal data sent to the processor under a lawful-basis gate."
+      },
+      "personal_data_class": "PERSONAL_DATA",
+      "default_enablement": "DISABLED",
+      "call_gates": [
+        "data_provider_status",
+        "source_policy",
+        "lawful_basis",
+        "api_credentials",
+        "attempt_budget"
+      ],
+      "test_paths": [
+        "apps/api/src/enrichment/finders/prospeo.provider.spec.ts",
+        "apps/api/src/enrichment/finders/finder-pool.spec.ts"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "TEST_ANCHOR",
+          "path": "apps/api/src/enrichment/finders/prospeo.provider.spec.ts"
+        }
+      ]
+    },
+    {
       "key": "gleif",
       "status": "IMPLEMENTED",
       "source_classes": [
