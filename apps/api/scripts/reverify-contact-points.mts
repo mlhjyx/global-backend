@@ -15,10 +15,7 @@ import {
   runReverifySweep,
   type ReverifyOptions,
 } from '../src/enrichment/verification/reverify-sweep';
-import {
-  MillionVerifierProvider,
-  resolveMillionVerifierConfig,
-} from '../src/enrichment/verification/millionverifier.provider';
+import { resolveConfiguredVerificationProviders } from '../src/enrichment/verification/provider-pool';
 
 export function parseReverifyArgs(argv: string[]): ReverifyOptions {
   const valueOf = (flag: string): string | null => {
@@ -52,47 +49,54 @@ async function main(): Promise<void> {
   }
   const prisma = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL });
   try {
-    const config = resolveMillionVerifierConfig();
-    const provider = new MillionVerifierProvider(config);
-    const gates = await checkProviderGates(prisma, provider);
+    // 验证器池：凭据已配置的验证器（主验在前），再逐家过 data_provider/source_policy 门。
+    const configured = resolveConfiguredVerificationProviders();
+    const usable: typeof configured = [];
+    const gateNotes: string[] = [];
+    for (const candidate of configured) {
+      const gates = await checkProviderGates(prisma, candidate);
+      if (gates.ok) usable.push(candidate);
+      else gateNotes.push(`${candidate.key}: ${gates.reason}`);
+    }
+    const poolNote =
+      `验证器池：凭据已配置 [${configured.map((p) => p.key).join(', ') || '无'}]，` +
+      `门通过 [${usable.map((p) => p.key).join(', ') || '无'}]` +
+      (gateNotes.length > 0 ? `；未通过：${gateNotes.join('；')}` : '');
     if (options.dryRun) {
       // dry-run 离线：只报告门状态，不因 kill switch/凭据缺失而拒绝（方便部署前演练）。
-      console.log(
-        `[dry-run] 门状态：data_provider/source_policy ${gates.ok ? '通过' : `未通过（${gates.reason}）`}；` +
-          `凭据 ${provider.isConfigured() ? '已配置' : '未配置'}`,
-      );
+      console.log(`[dry-run] ${poolNote}`);
     } else {
-      if (!gates.ok) {
-        console.error(`拒绝执行：${gates.reason}`);
-        process.exitCode = 2;
-        return;
-      }
-      if (!provider.isConfigured()) {
-        console.error('拒绝执行：MILLIONVERIFIER_API_KEY 未配置（live 模式需要凭据；可先 --dry-run）');
+      if (usable.length === 0) {
+        console.error(`拒绝执行：没有可用验证器（${poolNote}）`);
         process.exitCode = 2;
         return;
       }
     }
     if (!options.dryRun) {
-      // 单飞锁：同 provider + 同周期桶只允许一个 sweep 在跑（并发双跑会对同一批点各付一次
+      // 单飞锁：同 provider 池 + 同周期桶只允许一个 sweep 在跑（并发双跑会对同一批点各付一次
       // 供应商费用——事件账只去重记录，不退费）。会话级 advisory lock，进程退出自动释放。
       const [lock] = await prisma.$queryRaw<{ locked: boolean }[]>`
         SELECT pg_try_advisory_lock(hashtextextended(${
-          `reverify-sweep:${provider.key}:${options.requestBucket}`
+          `reverify-sweep:${usable.map((p) => p.key).sort().join('+')}:${options.requestBucket}`
         }, 0))::boolean AS locked`;
       if (!lock?.locked) {
-        console.error('拒绝执行：已有同 provider/同周期桶的再验证在运行（并发双跑会重复计费）');
+        console.error('拒绝执行：已有同验证器池/同周期桶的再验证在运行（并发双跑会重复计费）');
         process.exitCode = 2;
         return;
       }
     }
-    const summary = await runReverifySweep({ prisma, provider, options });
+    const summary = await runReverifySweep({
+      prisma,
+      providers: usable,
+      options,
+      actorId: 'reverify-sweep:cli',
+    });
     const header = options.dryRun ? '[dry-run] ' : '';
     console.log(
       `${header}再验证完成：选中 ${summary.selected}，供应商调用 ${summary.providerCalls}，` +
         `幂等跳过 ${summary.duplicates}，合规拦截 ${summary.skippedCompliance}，` +
-        `suppression ${summary.skippedSuppressed}，错误 ${summary.errors}，` +
-        `成本 ${summary.costMicrousd} 微美元`,
+        `suppression ${summary.skippedSuppressed}，预算跳过 ${summary.skippedBudget}，` +
+        `错误 ${summary.errors}，成本 ${summary.costMicrousd} 微美元`,
     );
     if (!options.dryRun) {
       console.log(

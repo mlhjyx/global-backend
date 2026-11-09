@@ -46,7 +46,7 @@ describe('contactReverifySweepOnce：三重门', () => {
     const provider = fakeProvider(true);
     const activities = createContactReverifyActivities({
       ownerDb: fakeOwnerDb({ dataProviderStatus: 'DISABLED' }) as never,
-      provider,
+      providers: [provider],
       now: NOW,
     });
     await expect(activities.contactReverifySweepOnce()).resolves.toMatchObject({
@@ -60,14 +60,14 @@ describe('contactReverifySweepOnce：三重门', () => {
     const provider = fakeProvider(true);
     const missingRow = createContactReverifyActivities({
       ownerDb: fakeOwnerDb({ dataProviderStatus: null }) as never,
-      provider,
+      providers: [provider],
       now: NOW,
     });
     await expect(missingRow.contactReverifySweepOnce()).resolves.toMatchObject({ status: 'skipped' });
 
     const unregistered = createContactReverifyActivities({
       ownerDb: fakeOwnerDb({ policy: null }) as never,
-      provider,
+      providers: [provider],
       now: NOW,
     });
     await expect(unregistered.contactReverifySweepOnce()).resolves.toMatchObject({
@@ -80,7 +80,7 @@ describe('contactReverifySweepOnce：三重门', () => {
     const provider = fakeProvider(false);
     const activities = createContactReverifyActivities({
       ownerDb: fakeOwnerDb() as never,
-      provider,
+      providers: [provider],
       now: NOW,
     });
     await expect(activities.contactReverifySweepOnce()).resolves.toMatchObject({
@@ -94,7 +94,7 @@ describe('contactReverifySweepOnce：三重门', () => {
     const provider = fakeProvider(true);
     const activities = createContactReverifyActivities({
       ownerDb: fakeOwnerDb() as never,
-      provider,
+      providers: [provider],
       now: NOW,
     });
     const result = await activities.contactReverifySweepOnce({ limit: 50 });

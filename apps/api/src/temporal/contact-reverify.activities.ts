@@ -4,8 +4,8 @@ import {
   runReverifySweep,
   type ReverifySummary,
 } from '../enrichment/verification/reverify-sweep';
-import { MillionVerifierProvider } from '../enrichment/verification/millionverifier.provider';
 import type { EmailVerificationProvider } from '../enrichment/verification/email-verification-provider';
+import { resolveConfiguredVerificationProviders } from '../enrichment/verification/provider-pool';
 
 /**
  * P1-19：CONTACT_REVERIFY_SWEEP 的活动（每日 Schedule；Schedule 注册即 paused）。
@@ -25,22 +25,32 @@ function envPositiveInt(name: string, fallback: number, min: number, max: number
 
 export function createContactReverifyActivities(deps: {
   ownerDb: PrismaClient;
-  /** 测试注入点；生产从 env 构造 MillionVerifierProvider。 */
-  provider?: EmailVerificationProvider;
+  /** 测试注入点；生产从 env 构造验证器池（主验在前）。 */
+  providers?: EmailVerificationProvider[];
   now?: () => Date;
 }) {
   return {
     async contactReverifySweepOnce(args: { limit?: number } = {}): Promise<ContactReverifySweepResult> {
       const now = deps.now ?? (() => new Date());
-      const provider = deps.provider ?? new MillionVerifierProvider();
-      const gates = await checkProviderGates(deps.ownerDb, provider);
-      if (!gates.ok) {
-        console.log(`[contact-reverify] skipped: ${gates.reason}`);
-        return { status: 'skipped', reason: gates.reason ?? 'provider_gate_closed', summary: null };
-      }
-      if (!provider.isConfigured()) {
+      const configured = (deps.providers ?? resolveConfiguredVerificationProviders()).filter(
+        (provider) => provider.isConfigured(),
+      );
+      if (configured.length === 0) {
         console.log('[contact-reverify] skipped: provider_unconfigured（凭据未配置）');
         return { status: 'skipped', reason: 'provider_unconfigured', summary: null };
+      }
+      // 逐家过 data_provider（kill switch）+ source_policy 门；全被关掉则零调用。
+      const usable: EmailVerificationProvider[] = [];
+      const closed: string[] = [];
+      for (const candidate of configured) {
+        const gates = await checkProviderGates(deps.ownerDb, candidate);
+        if (gates.ok) usable.push(candidate);
+        else closed.push(`${candidate.key}: ${gates.reason}`);
+      }
+      if (usable.length === 0) {
+        const reason = `provider_gate_closed(${closed.join(';')})`;
+        console.log(`[contact-reverify] skipped: ${reason}`);
+        return { status: 'skipped', reason, summary: null };
       }
       const limit = Math.min(
         Math.max(args.limit ?? envPositiveInt('CONTACT_REVERIFY_MAX_PER_ROUND', 500, 1, 1000), 1),
@@ -48,7 +58,8 @@ export function createContactReverifyActivities(deps: {
       );
       const summary = await runReverifySweep({
         prisma: deps.ownerDb,
-        provider,
+        providers: usable,
+        actorId: 'contact-reverify-sweep',
         options: {
           dryRun: false,
           limit,

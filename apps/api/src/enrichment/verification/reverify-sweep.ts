@@ -27,6 +27,7 @@ import { blindContactKey, decryptPii } from '../../compliance/pii-crypto';
 import { cleanEmail } from '../../acquisition/clean';
 import {
   emailDomainOfAddress,
+  legacyCatchAllFromClass,
   transitionVerificationState,
   verifiedAtStateColumns,
   type EmailVerificationState,
@@ -48,8 +49,12 @@ import {
 } from '../../discovery/suppression-value';
 import { contactSuppressionKeys } from '../../discovery/identity';
 import { lockWorkspaceSuppressionPolicy } from '../../discovery/suppression-policy-lock';
-import { resolveVerificationVotes, scoreEmailPoint } from './verification-policy';
+import { scoreEmailPoint } from './verification-policy';
 import type { EmailVerificationProvider } from './email-verification-provider';
+import {
+  eventVerdictFromProviderResult,
+  runVerificationWaterfall,
+} from './verification-waterfall';
 
 export interface ReverifyOptions {
   dryRun: boolean;
@@ -165,12 +170,16 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  */
 export async function runReverifySweep(input: {
   prisma: PrismaClient;
-  provider: EmailVerificationProvider;
+  /** 可用验证器（有序：主验在前）。调用方负责过滤未配置者并逐家过 data_provider/source_policy 门。 */
+  providers: EmailVerificationProvider[];
   options: ReverifyOptions;
   states?: EmailVerificationState[];
   now?: () => Date;
+  /** 事件账 actor（CLI / Schedule 各用自己的标识；缺省 'reverify-sweep'）。 */
+  actorId?: string;
 }): Promise<ReverifySummary> {
-  const { prisma, provider, options } = input;
+  const { prisma, options } = input;
+  const actorId = input.actorId ?? 'reverify-sweep';
   const now = input.now ?? (() => new Date());
   const states = input.states ?? ['UNKNOWN', 'CATCH_ALL_RISKY'];
   const summary: ReverifySummary = {
@@ -184,13 +193,12 @@ export async function runReverifySweep(input: {
     costMicrousd: 0,
     skippedBudget: 0,
   };
+  if (input.providers.length === 0) return summary;
   const candidates = await selectCandidates(prisma, options, states);
   summary.selected = candidates.length;
   if (options.dryRun) return summary;
 
   // suppression 快照（每轮一次，按候选涉及的租户过滤；批内新增由提交侧复核兜底）。
-  // 与 email-guess-persist 同口径：email/domain/company_name/contact_key 四类都查，
-  // 公司被抑制 / 公司名命中 / person-key（盲值）命中都视为抑制——任何一类命中都不触网。
   // 🔴 按租户分组匹配：owner 连接跨租户读，合并成一个池会把 A 租户的抑制应用到 B 的点上。
   type SuppressionRow = { workspaceId: string; type: string; value: string };
   const suppressionRows = await prisma.suppressionRecord.findMany({
@@ -232,28 +240,63 @@ export async function runReverifySweep(input: {
   const gatePolicy = resolveEmailVerificationPolicy();
   let lastCallAt = 0;
 
+  /** 幂等键（每 provider 一个）：sha256(pointId | providerKey | 输入版本)。 */
+  const requestHashFor = (pointId: string, providerKey: string, value: string) =>
+    buildVerificationRequestHash(pointId, providerKey, `${value}|${options.requestBucket}`);
+
   for (const point of candidates) {
-    const requestHash = buildVerificationRequestHash(
-      point.id,
-      provider.key,
-      `${point.value}|${options.requestBucket}`,
-    );
-    // 幂等预查：同桶已处理 → 不重复调用供应商、不重复计费。
-    const existing = await prisma.contactPointVerificationEvent.findUnique({
+    const candidateHashes = input.providers.map((provider) => ({
+      provider,
+      requestHash: requestHashFor(point.id, provider.key, point.value),
+    }));
+    // 幂等预查（逐 provider）：同桶已处理过的验证器不再调用/不再计费；
+    // 崩溃恢复时只补跑缺失的那几家（部分完成后重跑不会重复买主验）。
+    const existingRows = await prisma.contactPointVerificationEvent.findMany({
       where: {
-        workspaceId_contactPointId_providerKey_requestHash: {
-          workspaceId: point.workspaceId,
-          contactPointId: point.id,
-          providerKey: provider.key,
-          requestHash,
-        },
+        workspaceId: point.workspaceId,
+        contactPointId: point.id,
+        OR: [
+          ...candidateHashes.map(({ provider, requestHash }) => ({
+            providerKey: provider.key,
+            requestHash,
+          })),
+          {
+            providerKey: 'compliance_gate',
+            requestHash: requestHashFor(point.id, 'compliance_gate', point.value),
+          },
+        ],
       },
-      select: { id: true },
+      select: { providerKey: true, requestHash: true, verdict: true, catchAllClass: true },
     });
-    if (existing) {
+    const doneKeys = new Set(existingRows.map((row) => row.providerKey));
+    // 合规门拦截也按桶幂等：同桶已记过 blocked（provider=compliance_gate）的点不再重复处理，
+    // 避免永久被拦的点每轮吃掉 limit、挤占真正可验证的候选。
+    if (doneKeys.has('compliance_gate')) {
       summary.duplicates += 1;
       continue;
     }
+    const pendingProviders = candidateHashes.filter(({ provider }) => !doneKeys.has(provider.key));
+    if (pendingProviders.length === 0) {
+      summary.duplicates += 1;
+      continue;
+    }
+    // 部分恢复：把本轮之外**已记录**的 provider 票重建回投票矩阵（否则只有第二票 pending 时
+    // 会被当成主验、单票永远凑不齐双正）。blocked/error 行不构成投票。
+    const priorVotes = existingRows
+      .filter((row) => row.providerKey !== 'compliance_gate' && row.verdict !== 'blocked')
+      .map((row) => ({
+        providerKey: row.providerKey,
+        state:
+          row.verdict === 'valid'
+            ? ('VALID' as const)
+            : row.verdict === 'invalid'
+              ? ('INVALID' as const)
+              : row.verdict === 'catch_all'
+                ? ('CATCH_ALL_RISKY' as const)
+                : ('UNKNOWN' as const),
+        catchAllClass: (row.catchAllClass ?? 'unknown') as never,
+        acceptAll: null,
+      }));
 
     let email: string;
     try {
@@ -306,20 +349,20 @@ export async function runReverifySweep(input: {
 
     const attemptedAt = now();
     if (!gate.allowed) {
-      // 合规门拦截：只记事件（verdict=blocked），状态不变——与 verifyContactPoint 同一纪律。
+      // 合规门拦截：只记事件（verdict=blocked，provider=compliance_gate），状态不变。
       summary.skippedSuppressed += suppressed ? 1 : 0;
       summary.skippedCompliance += suppressed ? 0 : 1;
       await prisma.$transaction(async (tx) => {
         await recordContactPointVerificationEvent(tx, {
           workspaceId: point.workspaceId,
           contactPointId: point.id,
-          providerKey: provider.key,
+          providerKey: 'compliance_gate',
           method: 'third_party_api',
           verdict: 'blocked',
           detail: `lawful_basis_gate:${gate.reason}`,
           lawfulBasis: (lawfulBasis ?? null) as Record<string, unknown> | null,
-          actorId: 'reverify-sweep:cli',
-          requestHash,
+          actorId,
+          requestHash: requestHashFor(point.id, 'compliance_gate', point.value),
         });
       });
       continue;
@@ -330,45 +373,42 @@ export async function runReverifySweep(input: {
       summary.skippedBudget += 1;
       break;
     }
-    // 限流（只统计真实供应商调用）。
-    const minInterval = Math.ceil(1000 / options.ratePerSecond);
-    const wait = lastCallAt + minInterval - Date.now();
-    if (wait > 0) await sleep(wait);
-    lastCallAt = Date.now();
-    summary.providerCalls += 1;
-    const result = await provider.verify({ email });
-    summary.costMicrousd += result.costMicrousd;
 
-    // 事件账记录**供应商原始**裁决（验证事实）；状态机施加**投票裁决后**的四态
-    // （单验证器 positive 只记 UNKNOWN，等第二票——双正规则）。
-    const resolved = resolveVerificationVotes([
-      {
-        providerKey: result.providerKey,
-        state: result.state,
-        catchAllClass: result.catchAllClass,
-        acceptAll: result.acceptAll,
+    // 验证瀑布：主验 → （主验 VALID 时）二次确认 → （未收敛时）仲裁。
+    // 限流在 beforeCall 里做（只统计真实供应商调用）。
+    const minInterval = Math.ceil(1000 / options.ratePerSecond);
+    const remainingBudget =
+      options.maxCostMicrousd === undefined
+        ? undefined
+        : Math.max(0, options.maxCostMicrousd - summary.costMicrousd);
+    const outcome = await runVerificationWaterfall({
+      email,
+      providers: pendingProviders.map(({ provider }) => provider),
+      priorVotes,
+      maxCalls: 6,
+      maxCostMicrousd: remainingBudget,
+      beforeCall: async () => {
+        const wait = lastCallAt + minInterval - Date.now();
+        if (wait > 0) await sleep(wait);
+        lastCallAt = Date.now();
       },
-    ]);
-    const eventVerdict: VerificationEventVerdict =
-      result.error !== null
-        ? 'error'
-        : result.state === 'VALID'
-          ? 'valid'
-          : result.state === 'INVALID'
-            ? 'invalid'
-            : result.state === 'CATCH_ALL_RISKY'
-              ? 'catch_all'
-              : 'unknown';
+    });
+    if (outcome.steps.length === 0) {
+      summary.skippedBudget += 1;
+      continue;
+    }
+    summary.providerCalls += outcome.providerCalls;
+    summary.costMicrousd += outcome.costMicrousd;
+
+    const resolved = outcome.resolved;
     const transitionVerdict: VerificationEventVerdict =
-      result.error !== null
-        ? 'error'
-        : resolved.state === 'VALID'
-          ? 'valid'
-          : resolved.state === 'INVALID'
-            ? 'invalid'
-            : resolved.state === 'CATCH_ALL_RISKY'
-              ? 'catch_all'
-              : 'unknown';
+      resolved.state === 'VALID'
+        ? 'valid'
+        : resolved.state === 'INVALID'
+          ? 'invalid'
+          : resolved.state === 'CATCH_ALL_RISKY'
+            ? 'catch_all'
+            : 'unknown';
     const transition = transitionVerificationState(
       {
         state: point.verificationState as EmailVerificationState,
@@ -378,32 +418,40 @@ export async function runReverifySweep(input: {
       { verdict: transitionVerdict, catchAllClass: resolved.catchAllClass },
       attemptedAt,
     );
-    const score = scoreEmailPoint({
-      state: transition.state,
-      catchAllClass: resolved.catchAllClass,
-      positiveVotes: result.state === 'VALID' ? 1 : 0,
-      verifiedAt: attemptedAt,
-      now: attemptedAt,
-    });
+    // 归因：最后一个有效步骤（供应商错误的那步不配署名——它没产出裁决）。
+    const lastStep =
+      [...outcome.steps].reverse().find((step) => step.result.error === null) ??
+      outcome.steps[outcome.steps.length - 1];
 
     await prisma.$transaction(async (tx) => {
-      const event = await recordContactPointVerificationEvent(tx, {
-        workspaceId: point.workspaceId,
-        contactPointId: point.id,
-        providerKey: provider.key,
-        method: 'third_party_api',
-        verdict: eventVerdict,
-        detail: `${result.detail}${result.error ? `;error=${result.error}` : ''};resolved=${resolved.reason}`,
-        catchAll: result.catchAll,
-        catchAllClass: result.catchAllClass,
-        score,
-        costMicrousd: result.costMicrousd,
-        lawfulBasis: (lawfulBasis ?? null) as Record<string, unknown> | null,
-        actorId: 'reverify-sweep:cli',
-        requestHash,
-        latencyMs: result.latencyMs,
-      });
-      if (event.duplicate) return;
+      let lastEventId: string | null = null;
+      for (const [index, step] of outcome.steps.entries()) {
+        const isLast = index === outcome.steps.length - 1;
+        const rawVerdict = eventVerdictFromProviderResult(step.result);
+        const event = await recordContactPointVerificationEvent(tx, {
+          workspaceId: point.workspaceId,
+          contactPointId: point.id,
+          providerKey: step.providerKey,
+          method: 'third_party_api',
+          verdict: rawVerdict,
+          detail:
+            `${step.result.detail}${step.result.error ? `;error=${step.result.error}` : ''}` +
+            (isLast ? `;resolved=${resolved.state}/${resolved.reason}` : ''),
+          catchAll: step.result.catchAll,
+          catchAllClass: step.result.catchAllClass,
+          score: scoreEmailPoint({
+            state: step.result.state,
+            catchAllClass: step.result.catchAllClass,
+          }),
+          costMicrousd: step.result.costMicrousd,
+          lawfulBasis: (lawfulBasis ?? null) as Record<string, unknown> | null,
+          actorId,
+          requestHash: requestHashFor(point.id, step.providerKey, point.value),
+          latencyMs: step.result.latencyMs,
+        });
+        if (event.id) lastEventId = event.id;
+      }
+      if (!lastEventId) return;
       // 提交侧复核（与 email-guess-persist 同纪律：供应商调用可耗时数秒，载入快照不权威）：
       // 锁租户抑制策略 → 重读四类抑制 → 已在本轮调用期间被抑制则只留事件、不写状态。
       await lockWorkspaceSuppressionPolicy(tx, point.workspaceId);
@@ -422,17 +470,25 @@ export async function runReverifySweep(input: {
         where: { id: point.id },
         data: {
           ...verifiedAtStateColumns(transition),
-          verificationProvider: provider.key,
+          verificationProvider: lastStep.providerKey,
           verificationMethod: 'third_party_api',
-          // 供应商错误/unknown 不覆盖既有的 catch-all 分类（那是上一次有效验证的知识）。
-          ...(eventVerdict === 'error' || eventVerdict === 'unknown'
-            ? {}
-            : { catchAll: result.catchAll, catchAllClass: result.catchAllClass }),
-          lastVerificationEventId: event.id,
+          // 按**矩阵裁决**决定是否覆盖既有 catch-all 分类：UNKNOWN（含 error/单票未决）
+          // 一律不动（上次有效验证的知识）；INVALID 清空；VALID/CATCH_ALL_RISKY 写最终子类。
+          // 注意不能用 transition.state——unknown 事件下状态机保持原态（如 CATCH_ALL_RISKY），
+          // 用它判断会把 true_catch_all 误清成 unknown。
+          ...(resolved.state === 'INVALID'
+            ? { catchAll: 'unknown' as const, catchAllClass: null }
+            : resolved.state === 'UNKNOWN'
+              ? {}
+              : {
+                  catchAll: legacyCatchAllFromClass(resolved.catchAllClass),
+                  catchAllClass: resolved.catchAllClass,
+                }),
+          lastVerificationEventId: lastEventId,
         },
       });
     });
-    if (result.error !== null) summary.errors += 1;
+    if (outcome.steps.some((step) => step.result.error !== null)) summary.errors += 1;
     summary.byState[transition.state] += 1;
   }
   return summary;
