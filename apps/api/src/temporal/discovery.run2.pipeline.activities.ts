@@ -53,6 +53,12 @@ import {
   upsertLeadFit,
   type FitJudgeCompany,
 } from '../discovery/fit-judge';
+import { judgeContractMode } from '../discovery/fit-judge-v2';
+import {
+  deepJudgeGateBlock,
+  deepJudgeRunsL0,
+  evaluateL0Gates,
+} from '../discovery/judgment/gate-chain';
 import type { SkillResolver } from '../skills/skill-runtime';
 import { discoverContactsCore } from '../discovery/contact-discovery-core';
 import { guessEmailsForRunCompany } from '../discovery/contact-stage-email-guess';
@@ -406,6 +412,9 @@ export function createRun2PipelineActivities(deps: {
       skipped?: boolean;
     }> {
       const binding = await ensureRunBudget(args);
+      // P3 J07（W8）：L0 门链与 J03b 的契约模式协同——off 保持旧行为（不评估 L0）；
+      // shadow 评估但只记录（v1 产出照旧）；enforce 下 FAIL 在模型调用前拦截（NOT_FIT）。
+      const mode = judgeContractMode();
       const loaded = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const icpBrief = await loadIcpBrief(tx, args.icpId);
         const company = await tx.canonicalCompany.findUnique({
@@ -425,6 +434,22 @@ export function createRun2PipelineActivities(deps: {
       if (!(await mayUse(args.workspaceId, args.companyId))) {
         return { judged: false, verdict: null, skipped: true };
       }
+      const gate = deepJudgeRunsL0(mode)
+        ? await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+            evaluateL0Gates(tx, {
+              workspaceId: args.workspaceId,
+              icpId: args.icpId,
+              companyId: args.companyId,
+              now: new Date(),
+            }),
+          )
+        : null;
+      const blocked = gate ? deepJudgeGateBlock(mode, gate) : null;
+      if (blocked) {
+        // L0 FAIL（enforce）：不调用模型、不写 Lead。job 以 NOT_FIT 收尾（工作流见
+        // mismatch 即结束本条流水线）；门结果（hard_gate_result）已由 evaluateGates 落库。
+        return { judged: false, verdict: 'mismatch', skipped: true };
+      }
       const judgment = await judgeFitCompany(
         deps.gateway,
         args.workspaceId,
@@ -435,9 +460,14 @@ export function createRun2PipelineActivities(deps: {
           runtimeTelemetry: deps.runtimeTelemetry,
           authorizeExternalAction: authorizeCompany(args.workspaceId, args.companyId),
           skills: deps.skills,
+          judgeContractMode: mode,
         },
       );
       if (!judgment) return { judged: false, verdict: null };
+      // P3 J07：yellow/red 不拦截，只把 stale 标记注入判定结果（随 fitReasons 落 Lead）。
+      if (gate?.sanctions.staleMarker) {
+        judgment.sanctionsStale = gate.sanctions.staleMarker;
+      }
       // P3 J03b：judgment_record（v2, shadow/enforce）与 Lead 投影同一事务。
       await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         await persistJudgmentRecordInTransaction(tx, args.icpId, judgment);

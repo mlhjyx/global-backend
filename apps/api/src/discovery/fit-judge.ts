@@ -60,6 +60,12 @@ export interface FitJudgment {
   };
   durableReceipt?: DurableExecutionReceipt;
   /**
+   * P3 J07：L0 制裁门判定该公司时名单陈旧（yellow/red）。不改变 verdict（stale 是
+   * PASS 的降级标记），由 upsertLeadFit 写进 lead.fitReasons JSON；「禁止推荐/导出」
+   * 的执行归 J20 面板。G1 命中（FAIL）不会带此标记——命中的公司在门链就拦截了。
+   */
+  sanctionsStale?: 'yellow' | 'red';
+  /**
    * P3 J03b：v2 判定（JUDGE_CONTRACT_MODE=shadow/enforce）产生的 judgment_record 草稿。
    * 调用方必须在写入 Lead 投影的同一个 `prisma.withWorkspace` 事务里先
    * `persistJudgmentRecordInTransaction`（= recordJudgment 唯一写入口）。
@@ -96,6 +102,12 @@ export async function upsertLeadFit(
   canonicalCompanyId: string,
   judgment: FitJudgment,
 ): Promise<void> {
+  // P3 J07：stale 标记随 fitReasons 落库（lead.fitReasons JSON），供 J20 面板禁止推荐/导出。
+  const fitReasons = (
+    judgment.sanctionsStale
+      ? { ...judgment.fitReasons, sanctionsStale: judgment.sanctionsStale }
+      : judgment.fitReasons
+  ) as unknown as Prisma.InputJsonValue;
   await applyDomainAckConsumerTransaction({
     transaction: tx,
     producerId: 'discovery.qualify_fit',
@@ -108,7 +120,7 @@ export async function upsertLeadFit(
     },
     update: {
       fitVerdict: judgment.verdict,
-      fitReasons: judgment.fitReasons as unknown as Prisma.InputJsonValue,
+      fitReasons,
       version: { increment: 1 },
     },
     create: {
@@ -116,7 +128,7 @@ export async function upsertLeadFit(
       icpId,
       canonicalCompanyId,
       fitVerdict: judgment.verdict,
-      fitReasons: judgment.fitReasons as unknown as Prisma.InputJsonValue,
+      fitReasons,
       queue: judgment.verdict === 'mismatch' ? 'rejected' : 'needs_review',
     },
   }),

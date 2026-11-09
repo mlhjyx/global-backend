@@ -14,6 +14,15 @@ import {
   sanctionsFreshnessThresholds,
   type SanctionsListFreshness,
 } from './sanctions-freshness';
+import {
+  buildSanctionsFacts,
+  sanctionsFreshnessState,
+  type SanctionsSourceRow,
+} from '../discovery/judgment/gates';
+import {
+  toSanctionsGateFreshness,
+  type SanctionsGateFreshness,
+} from '../discovery/judgment/gate-chain';
 
 /**
  * 制裁筛查服务（Qualify 第五门的匹配引擎）。进程内内存索引（从 sanctions_entity 建，init + 刷新后重建），
@@ -24,10 +33,21 @@ import {
  *    例外：库里已有、未被人工清白的命中照拦（`storedScreeningBlocks`，accept、导出与 qualify 队列共用）。
  */
 
+/**
+ * P3 J07：筛查新鲜度四态（与 L0 门引擎同一套阈值：72h/168h 常量，见 gates.ts）。
+ * `not_screened` = 无 ENABLED 源（门未启用），不是「筛过且清白」。
+ */
+export type SanctionsScreeningFreshness = SanctionsGateFreshness;
+
 export interface ScreenResult {
   status: 'clear' | 'potential_match' | 'not_screened';
   matches: ScreenMatch[];
   listVersions: Record<string, string>; // sourceKey → 名单版本（ISO 日期）
+  /**
+   * P3 J07：本次筛查时名单处于 yellow/red（陈旧）。筛查仍跑、命中仍按原语义处理，
+   * 但结果不得自动清白（不得进 recommended/导出/交付——执行归下游 J20 面板）。
+   */
+  readonly stale: boolean;
 }
 
 @Injectable()
@@ -37,6 +57,11 @@ export class SanctionsScreeningService implements OnModuleInit, OnModuleDestroy 
   private listVersions: Record<string, string> = {};
   private active = false;
   private timer?: ReturnType<typeof setInterval>;
+  /**
+   * P3 J07：重建索引时缓存的 ENABLED 源行（screen() 是同步热路径，鲜度阈值随时钟变化，
+   * 用缓存行 + 当前时钟现算四态，不额外查库）。每小时重建顺带刷新。
+   */
+  private freshnessSources: readonly SanctionsSourceRow[] = [];
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -63,6 +88,11 @@ export class SanctionsScreeningService implements OnModuleInit, OnModuleDestroy 
   /** 从 ENABLED 源 + 未撤下实体重建进程内索引（刷新后调）。 */
   async rebuildIndex(): Promise<void> {
     const sources = await this.prisma.sanctionsSource.findMany({ where: { status: 'ENABLED' } });
+    this.freshnessSources = sources.map((source) => ({
+      key: source.key,
+      lastRefreshedAt: source.lastRefreshedAt,
+      lastFetchStatus: source.lastFetchStatus,
+    }));
     if (!sources.length) {
       this.index = [];
       this.listVersions = {};
@@ -120,14 +150,43 @@ export class SanctionsScreeningService implements OnModuleInit, OnModuleDestroy 
     return evaluateSanctionsFreshness(sources, now, sanctionsFreshnessThresholds());
   }
 
+  /**
+   * P3 J07：筛查门新鲜度四态 fresh/yellow/red/not_screened（阈值与 L0 门引擎同一套
+   * 常量：72h fresh 上限、168h yellow 上限；任一 ENABLED 源从未刷新按 red 兜底）。
+   * 与 listFreshness 的区别：listFreshness 是 ch08 的三档 env 阈值口径（accept/qualify
+   * 既有行为），本方法是 gates.ts 决策表的口径（L0 门链与告警读这份）。
+   */
+  async freshness(now: Date = new Date()): Promise<SanctionsScreeningFreshness> {
+    const sources = await this.prisma.sanctionsSource.findMany({
+      where: { status: 'ENABLED' },
+      select: { key: true, lastRefreshedAt: true, lastFetchStatus: true },
+      orderBy: { key: 'asc' },
+    });
+    return toSanctionsGateFreshness(
+      sanctionsFreshnessState(buildSanctionsFacts({ screening: null, sources, now })),
+    );
+  }
+
+  /** 用重建时缓存的源行 + 当前时钟现算四态（同步热路径，不查库）。 */
+  private cachedFreshness(now: Date): SanctionsScreeningFreshness {
+    return toSanctionsGateFreshness(
+      sanctionsFreshnessState(
+        buildSanctionsFacts({ screening: null, sources: this.freshnessSources, now }),
+      ),
+    );
+  }
+
   /** 对一个公司名筛查。未生效 → not_screened（快照如实、门不拦，fail-open）。 */
   screen(companyName: string, country: string | null, opts?: MatcherOpts): ScreenResult {
-    if (!this.active) return { status: 'not_screened', matches: [], listVersions: {} };
+    const freshness = this.cachedFreshness(new Date());
+    const stale = freshness === 'yellow' || freshness === 'red';
+    if (!this.active) return { status: 'not_screened', matches: [], listVersions: {}, stale };
     const matches = screenName(companyName, country, this.index, { threshold: envThreshold(), ...opts });
     return {
       status: matches.length ? 'potential_match' : 'clear',
       matches,
       listVersions: this.listVersions,
+      stale,
     };
   }
 }

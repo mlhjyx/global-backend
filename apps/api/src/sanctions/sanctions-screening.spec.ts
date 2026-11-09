@@ -77,6 +77,95 @@ describe('storedScreeningBlocks', () => {
   });
 });
 
+describe('SanctionsScreeningService.freshness（P3 J07 四态，gates.ts 阈值）', () => {
+  const NOW = new Date('2026-11-09T12:00:00.000Z');
+  const HOUR = 3_600_000;
+
+  const serviceWith = (sources: Array<Record<string, unknown>>) =>
+    new SanctionsScreeningService({
+      sanctionsSource: { findMany: vi.fn(async () => sources) },
+    } as never);
+
+  it('eu_fsf FAILED 且超过 yellow 上限（当前真实数据口径）→ red', async () => {
+    const service = serviceWith([
+      {
+        key: 'eu_fsf',
+        lastRefreshedAt: new Date(NOW.getTime() - 200 * HOUR),
+        lastFetchStatus: 'FAILED',
+      },
+    ]);
+
+    await expect(service.freshness(NOW)).resolves.toBe('red');
+  });
+
+  it('任一源 FAILED 且未超上限 → yellow', async () => {
+    const service = serviceWith([
+      {
+        key: 'eu_fsf',
+        lastRefreshedAt: new Date(NOW.getTime() - 24 * HOUR),
+        lastFetchStatus: 'FAILED',
+      },
+    ]);
+
+    await expect(service.freshness(NOW)).resolves.toBe('yellow');
+  });
+
+  it('全部源刷新在 72h 内且无失败 → fresh', async () => {
+    const service = serviceWith([
+      {
+        key: 'ofac_sdn',
+        lastRefreshedAt: new Date(NOW.getTime() - 10 * HOUR),
+        lastFetchStatus: 'DONE',
+      },
+    ]);
+
+    await expect(service.freshness(NOW)).resolves.toBe('fresh');
+  });
+
+  it('无 ENABLED 源 → not_screened（不是 fresh）', async () => {
+    await expect(serviceWith([]).freshness(NOW)).resolves.toBe('not_screened');
+  });
+
+  it('screen() 附 stale 标记：yellow/red 时 true，fresh 时 false', async () => {
+    const staleService = new SanctionsScreeningService({
+      sanctionsSource: {
+        findMany: vi.fn(async () => [
+          {
+            id: 's1',
+            key: 'eu_fsf',
+            lastRefreshedAt: new Date(Date.now() - 24 * HOUR),
+            lastFetchStatus: 'FAILED',
+            publishDate: null,
+          },
+        ]),
+      },
+      sanctionsEntity: { findMany: vi.fn(async () => []) },
+    } as never);
+    await staleService.rebuildIndex();
+    expect(staleService.screen('Muster Pumpen GmbH', 'DE')).toMatchObject({
+      status: 'not_screened',
+      stale: true,
+    });
+
+    const freshService = new SanctionsScreeningService({
+      sanctionsSource: {
+        findMany: vi.fn(async () => [
+          {
+            id: 's1',
+            key: 'ofac_sdn',
+            lastRefreshedAt: new Date(),
+            lastFetchStatus: 'DONE',
+            publishDate: null,
+          },
+        ]),
+      },
+      sanctionsEntity: { findMany: vi.fn(async () => []) },
+    } as never);
+    await freshService.rebuildIndex();
+    expect(freshService.screen('Muster Pumpen GmbH', 'DE')).toMatchObject({ stale: false });
+  });
+});
+
 describe('SanctionsScreeningService.listFreshness（ch08 §3.1.12）', () => {
   it('reads ENABLED sources only and evaluates freshness against env thresholds', async () => {
     const findMany = vi.fn(async () => [
