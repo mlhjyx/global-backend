@@ -16,6 +16,7 @@
 | [frame-registry.md](frame-registry.md) + [frames/frame-registry.v1.json](frames/frame-registry.v1.json) | 19 法域 frame 矩阵（许可/获取/频率/规模/坑） | `node scripts/metrics/frame-registry.mjs`（CI 同链路） |
 | [reporting.md](reporting.md) + [report-samples/](report-samples/) | 周/月报节奏与固定模板；报告由快照+脚本生成，未接线指标显式留白 | `scripts/metrics/report.mjs`（模板测试进 CI） |
 | [source-scorecard.md](source-scorecard.md) + [schemas/reject-reasons.v1.json](schemas/reject-reasons.v1.json) | 源记分卡离线只读版：接受/拒收/原因码拆分/唯一贡献/新鲜度；拒收原因码字典 | `scripts/metrics/source-scorecard.mjs`（单测进 CI） |
+| [金标集（evals/golden-discovery）](../../evals/golden-discovery/README.md) | 金标抽样/rubric/schema + replay 跑批（G1/G2/G3 门、κ、diff、变异测试） | `scripts/metrics/golden-run.mjs`（单测进 CI） |
 | 证据 | 时点读数在 `docs/evidence/2026-11-09-*.md`（漏斗基线、RISKY 盘点） | 不可改写证据 |
 
 ## 常用命令

@@ -13,6 +13,7 @@
 | `metrics-snapshot.mjs` | 从引擎库只读计算第一批指标（T0-001/002、T1-008/009、T2-001/005/007/008），输出 `metric-observation/v1` 行（含 computationHash，供 PR-03 落表）；无裁决分母的指标显式 SKIPPED | Node 内置 + psql 只读 |
 | `report.mjs` | 由快照渲染固定周报/月报模板（北极星→覆盖→可触达→质量门→源→风险）；未接线/不可测/缺失三种状态显式留白，禁止手写数字；`--kind weekly|monthly` | 纯 Node 内置 |
 | `source-scorecard.mjs` | 源记分卡离线只读版：每 provider 的 raw/接受/拒收/原因码拆分（对照 reject-reasons 字典，未登记码报漂移）/唯一贡献/新鲜度/成本；输出 `source-scorecard-daily/v1`（含幂等 contentHash） | Node 内置 + psql 只读 |
+| `golden-run.mjs` | 金标 replay 跑批（零模型）：冻结预测 vs 已裁决标签，字段 metrics/κ/混淆矩阵、G1/G2/G3 门、baseline diff、`golden-run/v1` 输出；未登记标签字段与未裁决标签直接拒绝 | 纯 Node 内置 |
 | `reply-rate.mjs` | RR1/RR3 成对计算与声明校验（`unknown>0` 无 `ê` 拒绝出数；`--check` 拒绝单口径） | 纯 Node 内置 |
 | `lib/psql.mjs` | 只读 psql 执行器（`PGOPTIONS=-c default_transaction_read_only=on`）与 Wilson/比率工具 | Node 内置 |
 | `lib/prng.mjs` | 固定 seed 的 PRNG / Poisson / 分位数（抽样与 bootstrap） | Node 内置 |
@@ -31,6 +32,7 @@ node scripts/metrics/metrics-lint.mjs [--json] [--dir docs/metrics/dictionary]
 node scripts/metrics/metrics-snapshot.mjs [--json] [--workspace <uuid>] [--out observations.json]
 node scripts/metrics/report.mjs --kind weekly|monthly --snapshot observations.json [--period <label>] [--out report.md] [--out-json report.json]
 node scripts/metrics/source-scorecard.mjs [--days 30] [--json] [--out scorecard.json]
+node scripts/metrics/golden-run.mjs --set evals/golden-discovery/fixtures/replay-demo [--baseline run.json] [--json]
 node scripts/metrics/reply-rate.mjs --input counts.json [--json]
 node scripts/metrics/reply-rate.mjs --check statement.txt
 ```

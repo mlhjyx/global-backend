@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "golden-label/v1",
+  "itemId": "acct-0002",
+  "annotator": "demo-a",
+  "round": 1,
+  "labels": {
+    "is_company": "yes",
+    "in_icp": "mismatch",
+    "domain_correct": "yes"
+  },
+  "adjudicated": true,
+  "adjudicator": "demo-c",
+  "adjudicatedValue": {
+    "is_company": "yes",
+    "in_icp": "mismatch",
+    "domain_correct": "yes"
+  },
+  "reason": "demo fixture",
+  "createdAt": "2026-11-09T00:00:00Z"
+}
