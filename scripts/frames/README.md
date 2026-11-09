@@ -66,6 +66,17 @@ durable 回执，本地查询无法满足，因此它目前恒被路由闸门排
 
 ## 召回审计
 
+审计的第一段是「冻结 frame → 抽样输入」（T3-20 骨架）：
+
+```bash
+# 从库里导出某 frame 最近一次 PARSED 快照的冻结实体集（内容哈希 + snapshotId 可复算）
+pnpm exec tsx scripts/frames/recall-frame-export.mts --frame fr_sirene --out /tmp/fr-frame.json
+```
+
+导出形状 `recall-frame-export/v1`（`{manifest, entities}`，`entities` 即 `--frame` 输入）。
+产物池（run 侧）导出等 `registry_frame` 执行面（local_query 血缘获批）后接线；当前可用
+手工/导出文件作为 `--pool`。
+
 ```bash
 node scripts/frames/recall-audit.mjs \
   --frame scripts/frames/fixtures/recall-frame.sample.json \

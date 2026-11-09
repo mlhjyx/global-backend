@@ -19,3 +19,4 @@ export { sellerDocumentIngestWorkflow } from "../seller-knowledge/seller-documen
 export { kbRecoverySweepWorkflow } from "./kb-recovery.workflow";
 export { contactReverifySweepWorkflow } from "./contact-reverify.workflow";
 export { assetObjectCleanupWorkflow } from "./asset-cleanup.workflow";
+export { measurementRollupWorkflow } from "./measurement.workflow";
