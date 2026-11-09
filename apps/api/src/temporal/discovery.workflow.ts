@@ -33,7 +33,6 @@ import {
   type DiscoveryRunModelExtractions,
 } from '../discovery/discovery-model-extractions';
 import { resolveDiscoveryWorkflowKnobs } from './discovery.workflow-knobs';
-
 export const DISCOVERY_AUTHORITY_PATCH = 'discovery-workspace-authority-v2';
 export const DISCOVERY_RAW_GOVERNANCE_PATCH =
   'discovery-raw-governance-dispositions-v1';
@@ -630,7 +629,6 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
                   companyId,
                   executionContractVersion: EXECUTION_CONTRACT_VERSION,
                   executionBudget: executionBudget!,
-                  // P1-10b：深挖批次序号——子工作流据此只对前 25 家触发付费富集。
                   enrichmentSlot: index,
                 },
               ],
