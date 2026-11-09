@@ -47,6 +47,12 @@ export type WorkspaceExecutionBudgetRequest =
       body?: unknown;
     }>
   | Readonly<{
+      operation: 'POST /canonical-companies/:id/enrich-contacts';
+      companyId: string;
+      /** 每次富集请求的幂等键（同 discover-contacts 口径：只有 attemptId 进请求哈希）。 */
+      body?: Readonly<{ attemptId?: string }>;
+    }>
+  | Readonly<{
       operation: 'POST /contact-points/:pointId/verify';
       pointId: string;
       body?: unknown;
@@ -154,6 +160,15 @@ function requestMaterial(request: WorkspaceExecutionBudgetRequest): JsonValue {
         companyId: request.companyId,
         body: (request.body ?? null) as JsonValue,
       };
+    case 'POST /canonical-companies/:id/enrich-contacts':
+      return {
+        operation: request.operation,
+        companyId: request.companyId,
+        // 仅当客户端带 attemptId 时才进入哈希（与 discover-contacts 同口径）。
+        ...(request.body?.attemptId === undefined
+          ? {}
+          : { body: { attemptId: request.body.attemptId } }),
+      };
     case 'POST /contact-points/:pointId/verify':
       return {
         operation: request.operation,
@@ -237,6 +252,13 @@ export function workspaceExecutionBudgetRequestScope(
         subjectId: request.companyId,
         requestSha256,
       });
+    case 'POST /canonical-companies/:id/enrich-contacts':
+      return Object.freeze({
+        purpose: 'contact.enrich',
+        subjectType: 'company',
+        subjectId: request.companyId,
+        requestSha256,
+      });
     case 'POST /contact-points/:pointId/verify':
       return Object.freeze({
         purpose: 'contact.verify',
@@ -290,6 +312,19 @@ export function discoverContactsExecutionBudgetRequestScope(
   const attemptId = body?.attemptId;
   return workspaceExecutionBudgetRequestScope({
     operation: 'POST /canonical-companies/:id/discover-contacts',
+    companyId,
+    ...(attemptId === undefined ? {} : { body: { attemptId } }),
+  });
+}
+
+/** Canonical public DTO boundary used by both the HTTP adapter and grant issuer. */
+export function enrichContactsExecutionBudgetRequestScope(
+  companyId: string,
+  body?: { readonly attemptId?: string },
+): Readonly<WorkspaceExecutionBudgetScope> {
+  const attemptId = body?.attemptId;
+  return workspaceExecutionBudgetRequestScope({
+    operation: 'POST /canonical-companies/:id/enrich-contacts',
     companyId,
     ...(attemptId === undefined ? {} : { body: { attemptId } }),
   });

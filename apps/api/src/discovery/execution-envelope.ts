@@ -90,3 +90,17 @@ export const MAX_EMAIL_PROBE_CANDIDATES = 8 as const;
 /** 发现 run 的邮箱补全：每公司 ≤6 次 SMTP 探测（D5 §六），跨该公司全部联系人共享。 */
 export const MAX_RUN_EMAIL_PROBES_PER_COMPANY = 6 as const;
 export const MAX_EMAIL_VERIFY_PHYSICAL_CALLS_PER_TARGET = 1 as const;
+
+// P1-10 联系人富集（付费 finder / 验证 API）的执行形状上限——不是客户配额。
+/** 每公司每轮富集最多 finder 调用（计划 §2.3.4.7；跨该公司的全部联系人共享）。 */
+export const MAX_ENRICH_FINDER_CALLS_PER_COMPANY = 10 as const;
+/** 单个地址的验证瀑布调用上限（计划 §2.3.5.3：≤6，含解析与仲裁）。 */
+export const MAX_ENRICH_VERIFICATION_CALLS_PER_ADDRESS = 6 as const;
+/** HTTP 端点单次请求最多处理的联系人（与 guess-emails 的 25 同量级、更保守）。 */
+export const MAX_ENRICH_CONTACTS_PER_REQUEST = 10 as const;
+/** 富集批内并发公司数（与联系人发现阶段一致：2）。 */
+export const ENRICH_COMPANY_CONCURRENCY = 2 as const;
+/** 每公司软截止 10 分钟（计划 §2.3.4.7）：到期不再开新联系人，在飞的可收尾。 */
+export const ENRICH_SOFT_DEADLINE_MS = 600_000 as const;
+/** run 内最多对 25 家公司触发富集（计划 §2.3.4.7）。 */
+export const MAX_RUN_ENRICH_COMPANIES = 25 as const;

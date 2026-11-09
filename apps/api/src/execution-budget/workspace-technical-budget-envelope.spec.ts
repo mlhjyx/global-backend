@@ -11,13 +11,14 @@ const PLAN_ID = '50000000-0000-4000-8000-000000000005';
 const LEAD_ID = '60000000-0000-4000-8000-000000000006';
 
 describe('workspace execution technical envelope catalog', () => {
-  it('machine-enumerates all and only the eleven workspace operations', () => {
+  it('machine-enumerates all and only the twelve workspace operations', () => {
     expect(WORKSPACE_EXECUTION_QUOTE_OPERATIONS).toEqual([
       'POST /companies',
       'POST /companies/:companyId/icps',
       'POST /icps/:icpId/query-plans',
       'POST /query-plans/:planId/execute',
       'POST /canonical-companies/:id/discover-contacts',
+      'POST /canonical-companies/:id/enrich-contacts',
       'POST /canonical-companies/:id/guess-emails',
       'POST /contact-points/:pointId/verify',
       'POST /leads/:leadId/outreach-drafts',
@@ -25,6 +26,24 @@ describe('workspace execution technical envelope catalog', () => {
       'POST /site-builder/intake',
       'POST /campaigns/:campaignId/plan-drafts',
     ]);
+  });
+
+  it('quotes the enrich-contacts execution shape without pricing provider calls yet', () => {
+    const envelope = resolveWorkspaceTechnicalBudgetEnvelope({
+      operation: 'POST /canonical-companies/:id/enrich-contacts',
+      companyId: COMPANY_ID,
+    });
+    // 付费 finder/验证 API 尚未经 ToolBroker 计价：envelope 只给执行形状，cap 为表示最小值。
+    expect(envelope.requiredCapMicrousd).toBe(1n);
+    expect(envelope.policy.models).toEqual([]);
+    expect(envelope.policy.tools).toEqual([]);
+    expect(envelope.policy.executionLimits).toEqual({
+      finderCallsPerCompany: 10,
+      verificationCallsPerAddress: 6,
+      contactsPerRequest: 10,
+      providerConcurrency: 2,
+      softDeadlineMs: 600_000,
+    });
   });
 
   it('quotes a campaign plan draft from one bounded planning task', () => {

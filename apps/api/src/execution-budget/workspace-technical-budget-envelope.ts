@@ -21,6 +21,11 @@ import {
   MAX_EMAIL_GUESS_CONTACTS,
   MAX_EMAIL_PROBE_CANDIDATES,
   MAX_EMAIL_VERIFY_PHYSICAL_CALLS_PER_TARGET,
+  MAX_ENRICH_CONTACTS_PER_REQUEST,
+  MAX_ENRICH_FINDER_CALLS_PER_COMPANY,
+  MAX_ENRICH_VERIFICATION_CALLS_PER_ADDRESS,
+  ENRICH_COMPANY_CONCURRENCY,
+  ENRICH_SOFT_DEADLINE_MS,
   MAX_GLEIF_FETCHES_PER_COMPANY,
   MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES,
   MAX_PUBLIC_WEB_DOMAINS_PER_QUERY,
@@ -84,6 +89,7 @@ export const WORKSPACE_EXECUTION_QUOTE_OPERATIONS = Object.freeze([
   'POST /icps/:icpId/query-plans',
   'POST /query-plans/:planId/execute',
   'POST /canonical-companies/:id/discover-contacts',
+  'POST /canonical-companies/:id/enrich-contacts',
   'POST /canonical-companies/:id/guess-emails',
   'POST /contact-points/:pointId/verify',
   'POST /leads/:leadId/outreach-drafts',
@@ -480,5 +486,18 @@ export function resolveWorkspaceTechnicalBudgetEnvelope(
       // M4: on-demand contact discovery gets its own bounded per-company envelope (D5 bounds)
       // instead of fail-closed; actual spend still settles per call against the workspace ledger.
       return contactDiscoveryEnvelope(request);
+    case 'POST /canonical-companies/:id/enrich-contacts':
+      // P1-10：付费 finder/验证 API 的花费尚未经 ToolBroker 计价（适配器直连供应商，
+      // 与第三方验证器同现状），本 envelope 只给出执行形状（调用上限/并发/软截止），
+      // 不计价 → requiredCapMicrousd 为表示最小值。Grant 的 capMicrousd 是端点侧的
+      // 硬上限（编排层 CapBudget 忠实执行）；把供应商单价纳入报价策略表需要与 gain-saas
+      // lane 协调后扩展 envelope 策略语言（后续卡）。
+      return ready(request, [], [], {
+        finderCallsPerCompany: MAX_ENRICH_FINDER_CALLS_PER_COMPANY,
+        verificationCallsPerAddress: MAX_ENRICH_VERIFICATION_CALLS_PER_ADDRESS,
+        contactsPerRequest: MAX_ENRICH_CONTACTS_PER_REQUEST,
+        providerConcurrency: ENRICH_COMPANY_CONCURRENCY,
+        softDeadlineMs: ENRICH_SOFT_DEADLINE_MS,
+      });
   }
 }
