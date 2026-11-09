@@ -13,6 +13,9 @@
   "gleif": [
     "company_registry"
   ],
+  "registry_frame": [
+    "company_registry"
+  ],
   "directory": [
     "industry_data"
   ],
@@ -41,6 +44,9 @@
     "email_verification"
   ],
   "millionverifier": [
+    "email_verification"
+  ],
+  "emailable": [
     "email_verification"
   ],
   "decision_maker": [

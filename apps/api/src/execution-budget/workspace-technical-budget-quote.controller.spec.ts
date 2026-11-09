@@ -116,7 +116,8 @@ describe('WorkspaceTechnicalBudgetQuoteController', () => {
       data: expect.objectContaining({
         purpose: 'discovery.run',
         subjectType: 'discovery_run',
-        requiredCapMicrousd: '5597980000',
+        // MAX_COMPANY_DISCOVERY_ADAPTERS 7→8（registry_frame 注册面，T3-09）后的报价上界。
+        requiredCapMicrousd: '6257980000',
       }),
     });
   });

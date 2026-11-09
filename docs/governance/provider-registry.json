@@ -219,6 +219,41 @@
       ]
     },
     {
+      "key": "emailable",
+      "status": "IMPLEMENTED",
+      "source_classes": [
+        "email_verification"
+      ],
+      "purpose": "Second-vote mailbox verification through a third-party API; deliverable/undeliverable/risky map to the four-state model and feed the double-positive rule.",
+      "taxonomy": [
+        "verification result",
+        "accept_all flag",
+        "provider score"
+      ],
+      "license": {
+        "classification": "NOT_APPLICABLE",
+        "note": "Verification result, not licensed source content; the address is personal data sent to the processor under a lawful-basis gate."
+      },
+      "personal_data_class": "PERSONAL_DATA",
+      "default_enablement": "DISABLED",
+      "call_gates": [
+        "data_provider_status",
+        "source_policy",
+        "lawful_basis",
+        "api_credentials",
+        "attempt_budget"
+      ],
+      "test_paths": [
+        "apps/api/src/enrichment/verification/emailable.provider.spec.ts"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "TEST_ANCHOR",
+          "path": "apps/api/src/enrichment/verification/emailable.provider.spec.ts"
+        }
+      ]
+    },
+    {
       "key": "gleif",
       "status": "IMPLEMENTED",
       "source_classes": [
@@ -466,6 +501,40 @@
         {
           "kind": "TEST_ANCHOR",
           "path": "apps/api/src/discovery/raw-source-company-site-policy.postgres.spec.ts"
+        }
+      ]
+    },
+    {
+      "key": "registry_frame",
+      "status": "PARTIAL",
+      "source_classes": [
+        "company_registry"
+      ],
+      "purpose": "Enumerate locally loaded official registry entities (registry_frame) as discovery candidates: zero egress, zero cost, per-frame licence carried as record provenance. Registration only for now; query execution waits for the local_query lineage contract extension (docs/superpowers/plans/2026-11-09-registry-frame-local-lineage.md).",
+      "taxonomy": [
+        "national registry number",
+        "NACE code",
+        "employee band",
+        "legal form"
+      ],
+      "license": {
+        "classification": "MIXED-PER-FRAME",
+        "note": "Each registry frame declares its own licence (public-register / OGL-3.0 / Licence-Ouverte-2.0 / CC0-1.0 / CC-BY-4.0); candidates inherit the frame licence and are never redistributed blindly."
+      },
+      "personal_data_class": "COMPANY_ONLY",
+      "default_enablement": "DISABLED",
+      "call_gates": [
+        "data_provider_status",
+        "governed_lineage_pending_local_query"
+      ],
+      "test_paths": [
+        "apps/api/src/discovery/providers/registry-frame.provider.spec.ts",
+        "apps/api/src/discovery/provider.registry.spec.ts"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "TEST_ANCHOR",
+          "path": "apps/api/src/discovery/providers/registry-frame.provider.spec.ts"
         }
       ]
     },

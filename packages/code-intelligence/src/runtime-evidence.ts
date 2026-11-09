@@ -36,6 +36,7 @@ const TEMPORAL_SCHEDULE_WORKFLOW_TYPES: Readonly<Record<string, string>> = {
   "intent-sweep": "intentSweepWorkflow",
   "patents-cache-refresh": "patentsCacheRefreshWorkflow",
   "sanctions-refresh": "sanctionsRefreshWorkflow",
+  "contact-reverify-sweep": "contactReverifySweepWorkflow",
   "site-builder-kb-recovery": "kbRecoverySweepWorkflow",
   "site-builder-release-maintenance": "siteReleaseMaintenanceSweepWorkflow",
 };

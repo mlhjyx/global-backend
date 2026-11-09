@@ -157,7 +157,7 @@ describe('workspace execution technical envelope catalog', () => {
       expect.objectContaining({ taskId: 'discovery.extract_list', logicalInvocations: 66 * 8 * 3 }),
       // website profile (G3 5.4b): at most one classify call per profiled company
       expect.objectContaining({ taskId: 'discovery.classify_trade_role', logicalInvocations: 50 }),
-      expect.objectContaining({ taskId: 'discovery.qualify_fit', logicalInvocations: 66 * 7 * 25 }),
+      expect.objectContaining({ taskId: 'discovery.qualify_fit', logicalInvocations: 66 * 8 * 25 }),
     ]);
     expect(
       envelope.policy.tools.map((item) => [item.toolId, item.maxPhysicalInvocations]),
@@ -180,19 +180,19 @@ describe('workspace execution technical envelope catalog', () => {
     ]);
     expect(envelope.policy.executionLimits).toMatchObject({
       planQueries: 66,
-      companyDiscoveryAdapters: 7,
+      companyDiscoveryAdapters: 8,
       providerRecords: 25,
       taxonomyIndustryTermsPerQuery: 4,
       taxonomyCountryTermsPerQuery: 2,
-      fitCompanies: 11_550,
+      fitCompanies: 13_200,
       profileCompanies: 50,
       enrichCompanies: 50,
       signalCompanies: 12,
       watchCompanies: 12,
     });
-    // models: 396×2×5 + 924×2×15 + 1584×2×20 + 50×2×10 + 11550×2×20 = 558_040 cents;
+    // models: 396×2×5 + 924×2×15 + 1584×2×20 + 50×2×10 + 13200×2×20 = 624_040 cents;
     // tools: crawl4ai.fetch 1684×1 + crawl4ai.render 74×1 = 1_758 cents.
-    expect(envelope.requiredCapMicrousd).toBe(559_798n * 10_000n);
+    expect(envelope.requiredCapMicrousd).toBe(625_798n * 10_000n);
   });
 
   it('quotes company creation from the bounded understanding crawl and per-page extraction', () => {

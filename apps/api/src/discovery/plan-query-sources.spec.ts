@@ -27,7 +27,9 @@ import {
 
 /**
  * What a registry built with a model gateway registers, in registration order.
- * Only public_web, directory and trade_fair declare governed company lineage.
+ * Only public_web, directory and trade_fair declare governed company lineage;
+ * registry_frame is registered but lineage-less by design until the local_query
+ * contract extension is approved (docs/superpowers/plans/2026-11-09-registry-frame-local-lineage.md).
  */
 const REGISTERED: readonly CompanyDiscoverySource[] = Object.freeze([
   { sourceClass: 'public_intelligence', providerKey: 'public_web', hasCompanyLineage: true },
@@ -39,6 +41,8 @@ const REGISTERED: readonly CompanyDiscoverySource[] = Object.freeze([
   { sourceClass: 'industry_data', providerKey: 'trade_fair', hasCompanyLineage: true },
   { sourceClass: 'public_intelligence', providerKey: 'ted', hasCompanyLineage: false },
   { sourceClass: 'public_intelligence', providerKey: 'openfda', hasCompanyLineage: false },
+  // T3-09：本地 frame 枚举注册为 company_registry 源；血缘声明获批前恒被闸门排除。
+  { sourceClass: 'company_registry', providerKey: 'registry_frame', hasCompanyLineage: false },
 ]);
 const only = (...keys: string[]) =>
   REGISTERED.filter((source) => keys.includes(source.providerKey));
@@ -100,6 +104,17 @@ describe('plan query routing (the executor rule)', () => {
       .toEqual([{ sourceClass: 'company_registry', providerKey: 'wikidata', hasCompanyLineage: false }]);
     expect(planQueryRoutes(query('industry_data', { source_hint: 'wiki' }), REGISTERED))
       .toEqual([{ sourceClass: 'industry_data', providerKey: 'wikidata', hasCompanyLineage: false }]);
+  });
+
+  it('routes a company_registry query to both registered sources and pins registry_frame as lineage-gated (T3-09)', () => {
+    expect(planQueryRoutes(query('company_registry'), REGISTERED).map((s) => s.providerKey)).toEqual([
+      'wikidata', 'registry_frame',
+    ]);
+    expect(planQueryRoutes(query('company_registry', { source_hint: 'registry_frame' }), REGISTERED))
+      .toEqual([{ sourceClass: 'company_registry', providerKey: 'registry_frame', hasCompanyLineage: false }]);
+    // 当前治理下这是**预期**行为（零出网无 durable 回执）；执行面等 local_query 变体获批。
+    expect(planQuerySkipReason(query('company_registry', { source_hint: 'registry_frame' }), REGISTERED))
+      .toBe('SOURCE_LINEAGE_UNAVAILABLE');
   });
 
   it('never routes across source classes or for an unusable hint', () => {
@@ -303,6 +318,21 @@ describe('cheap-first source priority (Q33②, PR-1)', () => {
     expect(routed.queries).toHaveLength(MAX_QUERY_PLANNER_QUERIES);
     expect(new Set(routed.queries.map((q) => q.filters.source_hint))).toEqual(new Set(['directory']));
     expect(routed.dropped).toEqual({ PLAN_QUERY_CAP: MAX_QUERY_PLANNER_QUERIES });
+    vi.unstubAllEnvs();
+  });
+
+  it('prefers the local registry_frame copy over wikidata when trimming (priority 5 < 10) (T3-09)', () => {
+    vi.stubEnv('DISCOVERY_CHEAP_FIRST', 'enforce');
+    // 血缘获批后的形态：两个 company_registry 源都可路由，查询帽只容一条副本。
+    const enabled = withLineage('wikidata', 'registry_frame').filter(
+      (source) => source.sourceClass === 'company_registry',
+    );
+    const routed = routePlannerQueries(
+      [query('company_registry', {}, 5)],
+      { enabled, registered: REGISTERED },
+      1,
+    );
+    expect(routed.queries.map((q) => q.filters.source_hint)).toEqual(['registry_frame']);
     vi.unstubAllEnvs();
   });
 

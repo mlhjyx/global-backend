@@ -18,6 +18,7 @@ export { deletionWorkflow } from './deletion.workflow';
 export { personalArtifactCleanupWorkflow } from './personal-artifact-cleanup.workflow';
 export { patentsCacheRefreshWorkflow } from './patents-cache.workflow';
 export { sanctionsRefreshWorkflow } from './sanctions-refresh.workflow';
+export { contactReverifySweepWorkflow } from './contact-reverify.workflow';
 export { demoV0Workflow } from './site-builder.workflow';
 export { siteReleaseMaintenanceSweepWorkflow } from './site-release-maintenance.workflow';
 export { siteBuildCostReconciliationSweepWorkflow } from './site-build-cost-reconciliation.workflow';
