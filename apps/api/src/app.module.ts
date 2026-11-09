@@ -19,6 +19,7 @@ import { IcpModule } from './icp/icp.module';
 import { DiscoveryModule } from './discovery/discovery.module';
 import { ChannelsModule } from './channels/channels.module';
 import { LeadModule } from './lead/lead.module';
+import { MeasurementModule } from './measurement/measurement.module';
 import { ReportModule } from './report/report.module';
 import { EventsModule } from './events/events.module';
 import { ComplianceModule } from './compliance/compliance.module';
@@ -70,6 +71,7 @@ import { CampaignPlanModule } from './campaign-plan/campaign-plan.module';
     ChannelsModule,
     LeadModule,
     ReportModule,
+    MeasurementModule,
     EventsModule,
     ComplianceModule,
     SanctionsModule,

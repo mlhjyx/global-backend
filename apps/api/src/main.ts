@@ -153,6 +153,7 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
     .addTag('Packs', 'AI 底座：规则/内容包（Pack）草稿、校验、试跑、评测、发布、激活与灰度')
     .addTag('Agents', 'AI 底座：agent 注册表与运营启停（ops:read / ops:write）')
     .addTag('Reports', '周报与反馈')
+    .addTag('Metrics', '度量：指标字典目录、观测与日/周聚合（只读，ch01）')
     .addTag('Events', '事件投递账本与确认回执')
     .addTag('Compliance', '数据主体删除请求（Art.17）')
     .addTag('SiteBuilder', '独立站：intake、资料、素材、构建、预览')
@@ -193,7 +194,7 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
   Object.assign(document, {
     'x-tagGroups': [
       { name: '获客主链路', tags: ['Companies', 'Claims', 'ICP', 'Discovery', 'Leads'] },
-      { name: '运营与合规', tags: ['Reports', 'Events', 'Compliance', 'Skills', 'Packs', 'Agents'] },
+      { name: '运营与合规', tags: ['Reports', 'Metrics', 'Events', 'Compliance', 'Skills', 'Packs', 'Agents'] },
       { name: '建站', tags: ['SiteBuilder'] },
       { name: '平台间通道', tags: ['ExecutionBudget', 'PlatformAuthority', 'Campaign'] },
       { name: '系统', tags: ['System'] },

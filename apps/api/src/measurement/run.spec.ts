@@ -1,4 +1,4 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "@prisma/client";
 import { describe, expect, it, vi } from "vitest";
 import type { MetricQueryRow } from "./metric-queries";
 import {
