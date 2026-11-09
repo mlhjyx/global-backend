@@ -23,6 +23,8 @@ import {
 } from './fit-judge-v2';
 import type { JudgePanelMode } from './judgment/panel';
 import { recordJudgment } from './judgment/judgment-record';
+import { evaluateCorroboration, judgeCorroborationMode, type JudgeCorroborationMode } from './judgment/corroboration';
+import { readEvidenceBundle } from './evidence-bundle';
 
 /**
  * ICP 资格门（四门判别：材质/角色/工艺/商业模式）的共享核心 ——
@@ -167,12 +169,19 @@ export async function persistJudgmentRecordInTransaction(
     ...(judgment.judgmentRecords ?? []),
   ];
   if (records.length === 0) return;
+  const corroborationMode = judgeCorroborationMode();
   for (const [index, record] of records.entries()) {
     const tolerant =
       judgment.judgmentRecordTolerant === true ||
       (index > 0 && judgment.judgmentRecordsTolerant === true);
+    // 跨源佐证（2026-11-10，shadow）：只给判定主记录附 sampling.corroboration。
+    // 评估/读取的任何失败都只记日志——shadow 语义绝不改变判定写入与 Lead 投影。
+    const withCorroboration =
+      index === 0 && corroborationMode !== 'off' && CORROBORATION_VERDICTS.has(record.verdict)
+        ? { ...record, sampling: await attachCorroboration(tx, record, corroborationMode) }
+        : record;
     try {
-      await recordJudgment(tx, { ...record, icpId });
+      await recordJudgment(tx, { ...withCorroboration, icpId });
     } catch (error) {
       if (!tolerant) throw error;
       console.warn(
@@ -181,6 +190,43 @@ export async function persistJudgmentRecordInTransaction(
         }`,
       );
     }
+  }
+}
+
+/** 需要跨源佐证的结论类 verdict（与 judgment/corroboration.ts 同口径）。 */
+const CORROBORATION_VERDICTS: ReadonlySet<string> = new Set(['FIT', 'NOT_FIT']);
+
+/**
+ * 读公司 attributes.evidence_bundle → 评估跨源佐证 → 合入 sampling JSON。
+ * shadow：任何异常（公司行缺失、包损坏）都降级为原 sampling，不让判定写入失败。
+ */
+async function attachCorroboration(
+  tx: Prisma.TransactionClient,
+  record: JudgmentRecordDraft,
+  mode: JudgeCorroborationMode,
+): Promise<Prisma.InputJsonValue> {
+  const baseSampling =
+    record.sampling !== null && typeof record.sampling === 'object' && !Array.isArray(record.sampling)
+      ? (record.sampling as Record<string, unknown>)
+      : {};
+  try {
+    const company = await tx.canonicalCompany.findUnique({
+      where: { id: record.companyId },
+      select: { attributes: true },
+    });
+    const corroboration = evaluateCorroboration({
+      verdict: record.verdict,
+      bundle: readEvidenceBundle(company?.attributes ?? null),
+      mode,
+    });
+    return { ...baseSampling, corroboration } as unknown as Prisma.InputJsonValue;
+  } catch (error) {
+    console.warn(
+      `[judge-v2] corroboration skipped for ${record.companyId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return baseSampling as Prisma.InputJsonValue;
   }
 }
 
