@@ -450,6 +450,18 @@ export class DiscoveryProviderRegistry {
       update: {},
       create: { key: 'prospeo', class: 'b2b_company_person', status: 'DISABLED', costPerCallCents: 0 },
     });
+    // P1-09：瀑布可选尾（Apollo → PDL）——单价最高，**只对 A 档公司路由**（评分 ≥80；
+    // 由调用方把尾池拼到主池之后）。默认 DISABLED，同三重门；PDL 按 required=emails 计费。
+    await db.dataProvider.upsert({
+      where: { key: 'apollo' },
+      update: {},
+      create: { key: 'apollo', class: 'b2b_company_person', status: 'DISABLED', costPerCallCents: 0 },
+    });
+    await db.dataProvider.upsert({
+      where: { key: 'pdl' },
+      update: {},
+      create: { key: 'pdl', class: 'b2b_company_person', status: 'DISABLED', costPerCallCents: 0 },
+    });
     // 决策人抽取（Impressum/管理层/团队页 → 具名人+职务+买家角色）——联系人发现首选 adapter。
     await db.dataProvider.upsert({
       where: { key: 'decision_maker' },
@@ -588,6 +600,39 @@ export class DiscoveryProviderRegistry {
           allowedPurpose: ['discovery', 'enrichment'],
           retentionDays: 365,
           notes: 'Prospeo 邮箱富集 Email Finder API（HTTPS + X-KEY）。data_provider.prospeo 默认 DISABLED；pay-on-valid + 90 天免费重取，$0.0198/命中按 attempt 账记账。',
+        },
+      });
+      // P1-09：瀑布可选尾 API 域（Apollo / PDL，仅 A 档公司路由）；未登记 = 未批准。
+      await db.sourcePolicy.upsert({
+        where: { domain: 'api.apollo.io' },
+        update: {},
+        create: {
+          domain: 'api.apollo.io',
+          sourceType: 'data_enrichment',
+          accessMode: 'api',
+          reviewStatus: 'APPROVED',
+          robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_OK',
+          personalData: true,
+          allowedPurpose: ['discovery', 'enrichment'],
+          retentionDays: 365,
+          notes: 'Apollo People Match API（HTTPS + x-api-key）。data_provider.apollo 默认 DISABLED；仅 A 档公司路由，≈$0.025/命中（credit 单价未公开，内部规划值待核）按 attempt 账记账。',
+        },
+      });
+      await db.sourcePolicy.upsert({
+        where: { domain: 'api.peopledatalabs.com' },
+        update: {},
+        create: {
+          domain: 'api.peopledatalabs.com',
+          sourceType: 'data_enrichment',
+          accessMode: 'api',
+          reviewStatus: 'APPROVED',
+          robotsStatus: 'ALLOWS',
+          termsStatus: 'REVIEWED_OK',
+          personalData: true,
+          allowedPurpose: ['discovery', 'enrichment'],
+          retentionDays: 365,
+          notes: 'People Data Labs Person Enrichment API（HTTPS + X-Api-Key；官方域 peopledatalabs，计划里 peerdatalab 为笔误）。data_provider.pdl 默认 DISABLED；required=emails 下无邮箱不计费，≈$0.28/record 只作 A 档尾部署。',
         },
       });
       await db.sourcePolicy.upsert({

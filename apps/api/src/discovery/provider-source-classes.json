@@ -64,6 +64,12 @@
   "prospeo": [
     "b2b_company_person"
   ],
+  "apollo": [
+    "b2b_company_person"
+  ],
+  "pdl": [
+    "b2b_company_person"
+  ],
   "decision_maker": [
     "contact_discovery"
   ],

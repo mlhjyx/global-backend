@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { resolveConfiguredFinderProviders } from './finder-pool';
+import {
+  resolveConfiguredFinderProviders,
+  resolveConfiguredTailFinderProviders,
+} from './finder-pool';
 
 /**
  * P1-07：finder 池——顺序即瀑布顺序（Hunter → Findymail → Prospeo），
@@ -35,5 +38,32 @@ describe('resolveConfiguredFinderProviders', () => {
       'api.prospeo.io',
     ]);
     expect(pool.every((provider) => provider.class === 'b2b_company_person')).toBe(true);
+  });
+});
+
+describe('resolveConfiguredTailFinderProviders（P1-09 可选尾）', () => {
+  it('主池与尾部独立：尾部按 Apollo → PDL 顺序，只收已配置凭据者', () => {
+    expect(
+      resolveConfiguredTailFinderProviders({ APOLLO_API_KEY: 'a', PDL_API_KEY: 'p' }).map(
+        (provider) => provider.key,
+      ),
+    ).toEqual(['apollo', 'pdl']);
+    expect(resolveConfiguredTailFinderProviders({ PDL_API_KEY: 'p' }).map((provider) => provider.key)).toEqual([
+      'pdl',
+    ]);
+    expect(resolveConfiguredTailFinderProviders({})).toEqual([]);
+    // 尾部不进主池（仅 A 档追加，不对全量开启）。
+    expect(
+      resolveConfiguredFinderProviders({ APOLLO_API_KEY: 'a', PDL_API_KEY: 'p' }),
+    ).toEqual([]);
+  });
+
+  it('尾部域名与 class 契约（api.peopledatalabs.com 为官方域，计划笔误 peerdatalab）', () => {
+    const tail = resolveConfiguredTailFinderProviders({ APOLLO_API_KEY: 'a', PDL_API_KEY: 'p' });
+    expect(tail.map((provider) => provider.domain)).toEqual([
+      'api.apollo.io',
+      'api.peopledatalabs.com',
+    ]);
+    expect(tail.every((provider) => provider.class === 'b2b_company_person')).toBe(true);
   });
 });
