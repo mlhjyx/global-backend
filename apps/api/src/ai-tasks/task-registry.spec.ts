@@ -140,6 +140,7 @@ describe('AI task registry model substitution opt-in (D14, 2026-10-11)', () => {
     'discovery.query_plan',
     'taxonomy.normalize',
     'discovery.qualify_fit',
+    'discovery.quick_judge',
     'discovery.extract_company',
     'discovery.extract_list',
     'discovery.classify_trade_role',

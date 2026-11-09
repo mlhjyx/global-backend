@@ -158,6 +158,8 @@ describe('workspace execution technical envelope catalog', () => {
       // website profile (G3 5.4b): at most one classify call per profiled company
       expect.objectContaining({ taskId: 'discovery.classify_trade_role', logicalInvocations: 50 }),
       expect.objectContaining({ taskId: 'discovery.qualify_fit', logicalInvocations: 66 * 8 * 25 }),
+      // L1 快扫（P3 W5）：500 家池 / 8 家每批 = 63 次批量粗判上限。
+      expect.objectContaining({ taskId: 'discovery.quick_judge', logicalInvocations: 63 }),
     ]);
     expect(
       envelope.policy.tools.map((item) => [item.toolId, item.maxPhysicalInvocations]),
@@ -190,9 +192,9 @@ describe('workspace execution technical envelope catalog', () => {
       signalCompanies: 12,
       watchCompanies: 12,
     });
-    // models: 396×2×5 + 924×2×15 + 1584×2×20 + 50×2×10 + 13200×2×20 = 624_040 cents;
+    // models: 396×2×5 + 924×2×15 + 1584×2×20 + 50×2×10 + 13200×2×20 + 63×2×20 = 626_560 cents;
     // tools: crawl4ai.fetch 1684×1 + crawl4ai.render 74×1 = 1_758 cents.
-    expect(envelope.requiredCapMicrousd).toBe(625_798n * 10_000n);
+    expect(envelope.requiredCapMicrousd).toBe(628_318n * 10_000n);
   });
 
   it('quotes company creation from the bounded understanding crawl and per-page extraction', () => {

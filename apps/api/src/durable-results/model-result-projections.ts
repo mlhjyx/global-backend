@@ -14,6 +14,7 @@ export const MODEL_RESULT_TASK_IDS = Object.freeze([
   "discovery.query_plan",
   "taxonomy.normalize",
   "discovery.qualify_fit",
+  "discovery.quick_judge",
   "discovery.extract_company",
   "discovery.extract_list",
   "contact.find_decision_makers",
@@ -30,6 +31,7 @@ export const MODEL_RESULT_PROJECTION_SCHEMAS = Object.freeze({
   "discovery.query_plan": "icp-query-plan/v1",
   "taxonomy.normalize": "taxonomy-code/v1",
   "discovery.qualify_fit": "fit-judgment/v1",
+  "discovery.quick_judge": "quick-judgment/v1",
   "discovery.extract_company": "discovery-extract-company/v1",
   "discovery.extract_list": "discovery-extract-list/v1",
   "contact.find_decision_makers": "contact-decision-makers/v1",
@@ -1074,6 +1076,58 @@ const fitDefinition: TypedProjectionDefinition<unknown, unknown> = {
     });
   },
 };
+const quickJudgeDefinition: TypedProjectionDefinition<unknown, unknown> = {
+  schema: "quick-judgment/v1",
+  jsonSchema: modelResultSchema(
+    objectSchema(
+      {
+        judgments: arraySchema(
+          8,
+          objectSchema(
+            {
+              index: numberSchema(0, 7, true),
+              verdict: stringSchema(8, { enum: ["match", "weak", "mismatch"] }),
+              reason: stringSchema(1000),
+            },
+            ["index", "verdict", "reason"],
+          ),
+        ),
+      },
+      ["judgments"],
+    ),
+  ),
+  project(raw) {
+    const result = readModelResult(raw, ["judgments"], ["judgments"]);
+    return projectModelResultEnvelope(result, {
+      judgments: denseArray(field(result.data, "judgments")).map((item) => {
+        const source = ownDataRecord(
+          item,
+          ["index", "verdict", "reason"],
+          ["index", "verdict", "reason"],
+        );
+        return {
+          index: field(source, "index"),
+          verdict: field(source, "verdict"),
+          reason: field(source, "reason"),
+        };
+      }),
+    });
+  },
+  restore(projected) {
+    const result = projected as {
+      data: { judgments: readonly UnknownRecord[] };
+      provider: string;
+      model: string;
+    };
+    return restoreModelResult(result, {
+      judgments: result.data.judgments.map((judgment) => ({
+        index: judgment.index,
+        verdict: judgment.verdict,
+        reason: judgment.reason,
+      })),
+    });
+  },
+};
 const companyDataProperties: Readonly<Record<string, JsonSchema>> = {
   isCompanySite: { type: "boolean" },
   name: stringSchema(500),
@@ -1664,6 +1718,7 @@ export const MODEL_RESULT_PROJECTION_DEFINITIONS = Object.freeze([
   queryPlanDefinition,
   taxonomyDefinition,
   fitDefinition,
+  quickJudgeDefinition,
   companyDefinition,
   listDefinition,
   peopleDefinition,

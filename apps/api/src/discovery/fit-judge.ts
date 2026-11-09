@@ -13,7 +13,15 @@ import { isExecutionControlError } from '../execution-budget/execution-control-e
 import { applyDomainAckConsumerTransaction } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 import { icpTradeRole } from './icp-trade-role';
+import type { EvidenceUrlPolicy } from './judgment/evidence-validate';
 import type { TradeRole } from './search-localization';
+import {
+  judgeContractMode,
+  judgeFitV2,
+  type JudgeContractMode,
+  type JudgmentRecordDraft,
+} from './fit-judge-v2';
+import { recordJudgment } from './judgment/judgment-record';
 
 /**
  * ICP 资格门（四门判别：材质/角色/工艺/商业模式）的共享核心 ——
@@ -51,6 +59,16 @@ export interface FitJudgment {
     reasons: string[];
   };
   durableReceipt?: DurableExecutionReceipt;
+  /**
+   * P3 J03b：v2 判定（JUDGE_CONTRACT_MODE=shadow/enforce）产生的 judgment_record 草稿。
+   * 调用方必须在写入 Lead 投影的同一个 `prisma.withWorkspace` 事务里先
+   * `persistJudgmentRecordInTransaction`（= recordJudgment 唯一写入口）。
+   */
+  judgmentRecord?: JudgmentRecordDraft;
+  /**
+   * shadow 模式的记录写入是「附加观测」：写入失败不得影响 Lead 投影（enforce 下不设此标记）。
+   */
+  judgmentRecordTolerant?: boolean;
 }
 
 interface FitOutput {
@@ -103,6 +121,31 @@ export async function upsertLeadFit(
     },
   }),
   });
+}
+
+/**
+ * P3 J03b：把 v2 判定草稿写入 `judgment_record`（recordJudgment 唯一写入口）。
+ * 必须与 Lead 投影（`upsertLeadFit`）在同一个 `prisma.withWorkspace` 事务里调用，
+ * 顺序为先 record 后 Lead（设计 §4.3.4.4）。off 模式无草稿时是 no-op。
+ * shadow 的草稿带 `judgmentRecordTolerant`：写入失败只记日志，不影响 Lead。
+ */
+export async function persistJudgmentRecordInTransaction(
+  tx: Prisma.TransactionClient,
+  icpId: string,
+  judgment: FitJudgment,
+): Promise<void> {
+  const record = judgment.judgmentRecord;
+  if (!record) return;
+  try {
+    await recordJudgment(tx, { ...record, icpId });
+  } catch (error) {
+    if (!judgment.judgmentRecordTolerant) throw error;
+    console.warn(
+      `[judge-v2] shadow record write skipped for ${record.companyId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 }
 
 /** 事务内加载 ICP 摘要（供判定 prompt）。ICP 不存在时返回空对象（与既有行为一致）。 */
@@ -162,20 +205,84 @@ export function looksLikeModelRefusal(out: FitOutput): boolean {
   return refusalExcerpt(out) !== null;
 }
 
+export interface JudgeFitCompanyOptions {
+  runId?: string;
+  runtimeTelemetry?: RuntimeTelemetry;
+  authorizeExternalAction?: () => Promise<boolean>;
+  /** S0 技能运行时：生产由 worker 注入 DB resolver；缺省为内置目录直通。 */
+  skills?: SkillResolver;
+  /** P3 J03b：契约开关覆盖（缺省读 JUDGE_CONTRACT_MODE；测试显式注入）。 */
+  judgeContractMode?: JudgeContractMode;
+  /** v2 判定时钟与证据域门（测试注入）；见 fit-judge-v2.ts。 */
+  now?: string;
+  snapshotFetchedAt?: string;
+  urlPolicy?: EvidenceUrlPolicy;
+}
+
 /**
- * 对一家公司跑四门判别（网络调用，事务外执行）。失败返回 null（单家失败不影响其余，§5 fail-safe）。
+ * shadow 模式的成本护栏（P3 J03b）：同一 run 内每家最多跑一次 v2。
+ * 活动重试/同 run 重复判定不再重复付费；失败也不回退重试。
+ * 进程内 Set（worker 单进程执行本 run 的判定）；容量上限防无限增长。
+ */
+const SHADOW_V2_SEEN = new Set<string>();
+const SHADOW_V2_SEEN_LIMIT = 4096;
+
+function shadowV2AlreadyRan(key: string): boolean {
+  if (SHADOW_V2_SEEN.has(key)) return true;
+  if (SHADOW_V2_SEEN.size >= SHADOW_V2_SEEN_LIMIT) SHADOW_V2_SEEN.clear();
+  SHADOW_V2_SEEN.add(key);
+  return false;
+}
+
+/**
+ * 对一家公司跑资格判定（网络调用，事务外执行）。失败返回 null（单家失败不影响其余，§5 fail-safe）。
  * 非法 verdict 归一为 weak（与既有行为一致——宁进人工复核，不误杀/误放）。
+ *
+ * P3 J03b：按 `JUDGE_CONTRACT_MODE` 分派——
+ *  - off（默认）：v1 四门判定，行为与旧路径完全一致；
+ *  - shadow：v1 产 Lead，额外跑一次 v2 并附 `judgmentRecord` 草稿（失败只记日志）；
+ *  - enforce：只用 v2 的聚合 verdict（FIT→match / UNKNOWN→weak / NOT_FIT→mismatch）。
  */
 export async function judgeFitCompany(
   gateway: ModelGateway,
   workspaceId: string,
   icpBrief: IcpBrief | Record<string, never>,
   company: FitJudgeCompany,
-  opts?: { runId?: string; runtimeTelemetry?: RuntimeTelemetry;
-    authorizeExternalAction?: () => Promise<boolean>;
-    /** S0 技能运行时：生产由 worker 注入 DB resolver；缺省为内置目录直通。 */
-    skills?: SkillResolver;
-  },
+  opts?: JudgeFitCompanyOptions,
+): Promise<FitJudgment | null> {
+  const mode = opts?.judgeContractMode ?? judgeContractMode();
+  if (mode === 'enforce') {
+    return judgeFitV2(gateway, workspaceId, icpBrief, company, opts);
+  }
+  const judgment = await judgeFitCompanyV1(gateway, workspaceId, icpBrief, company, opts);
+  if (judgment && mode === 'shadow') {
+    const key = `${opts?.runId ?? workspaceId}:${company.id}`;
+    if (!shadowV2AlreadyRan(key)) {
+      try {
+        const v2 = await judgeFitV2(gateway, workspaceId, icpBrief, company, opts);
+        if (v2) {
+          judgment.judgmentRecord = v2.judgmentRecord;
+          judgment.judgmentRecordTolerant = true;
+        }
+      } catch (error) {
+        // shadow 的失败不影响 Lead（含预算/控制面错误）：只记日志。
+        console.warn(
+          `[judge-v2] shadow failed for ${company.id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+  }
+  return judgment;
+}
+
+async function judgeFitCompanyV1(
+  gateway: ModelGateway,
+  workspaceId: string,
+  icpBrief: IcpBrief | Record<string, never>,
+  company: FitJudgeCompany,
+  opts?: JudgeFitCompanyOptions,
 ): Promise<FitJudgment | null> {
   const contract = getTask('discovery.qualify_fit')!;
   const attributes = company.attributes as {

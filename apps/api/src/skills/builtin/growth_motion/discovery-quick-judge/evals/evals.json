@@ -1,0 +1,50 @@
+{
+  "skillName": "discovery.quick_judge",
+  "evals": [
+    {
+      "id": "batch-distributor-match",
+      "prompt": "ICP：金属加工设备，贸易角色 distributor，市场 DE。批次候选：index 0 是一家德国金属加工设备进口分销商，官网在售 3 个外国品牌、无自有产线。",
+      "expectedOutput": "judgments[0].verdict=match；理由引用在售品牌与无自有产线。",
+      "assertions": [
+        { "kind": "enum", "path": "judgments.0.verdict", "values": ["match", "weak", "mismatch"] },
+        { "kind": "json_schema", "path": "judgments.0", "schema": { "type": "object", "required": ["index", "verdict", "reason"] } }
+      ]
+    },
+    {
+      "id": "batch-competitor-mismatch",
+      "prompt": "ICP：金属加工设备，贸易角色 distributor。批次候选：index 0 与卖方同类产品的制造商，自有产线并自销。",
+      "expectedOutput": "judgments[0].verdict=mismatch（角色门 fail：竞品）。",
+      "assertions": [
+        { "kind": "equals", "path": "judgments.0.index", "value": 0 },
+        { "kind": "enum", "path": "judgments.0.verdict", "values": ["match", "weak", "mismatch"] }
+      ]
+    },
+    {
+      "id": "batch-adjacent-process-weak",
+      "prompt": "ICP：激光切割与钣金加工。批次候选：index 0 只做机加与磨削、无激光/钣金工艺。",
+      "expectedOutput": "judgments[0].verdict=weak（工艺子集门 weak：相邻工艺）。",
+      "assertions": [
+        { "kind": "enum", "path": "judgments.0.verdict", "values": ["match", "weak", "mismatch"] },
+        { "kind": "json_schema", "path": "judgments.0", "schema": { "type": "object", "required": ["index", "verdict", "reason"] } }
+      ]
+    },
+    {
+      "id": "batch-material-gate",
+      "prompt": "ICP：金属工件加工。批次候选：index 0 只做 RF welding 塑料热合。",
+      "expectedOutput": "judgments[0].verdict=mismatch（材质门 fail：塑料≠金属）。",
+      "assertions": [
+        { "kind": "enum", "path": "judgments.0.verdict", "values": ["match", "weak", "mismatch"] },
+        { "kind": "json_schema", "path": "judgments.0", "schema": { "type": "object", "required": ["index", "verdict", "reason"] } }
+      ]
+    },
+    {
+      "id": "batch-uncertain-weak",
+      "prompt": "ICP：工业泵经销。批次候选：index 0 只有名称与域名、无产品与画像证据。",
+      "expectedOutput": "judgments[0].verdict=weak（粗筛不下强结论，交深判复核）。",
+      "assertions": [
+        { "kind": "enum", "path": "judgments.0.verdict", "values": ["match", "weak", "mismatch"] },
+        { "kind": "lte", "path": "judgments.0.index", "value": 7 }
+      ]
+    }
+  ]
+}

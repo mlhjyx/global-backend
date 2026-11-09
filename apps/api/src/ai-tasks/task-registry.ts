@@ -512,6 +512,39 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     humanGate: false,
   },
 
+  /**
+   * L1 快扫契约（P3 W5；设计 §4.3.3.6「任务契约拆分」）。
+   *
+   * 与 L2 终判 `discovery.qualify_fit` 分家：批量粗筛是 provisional，仅用于把公司池
+   * 分流给深判/跳过，**不产出最终 verdict**，因此允许 flash 档（见 ACQUISITION_FLASH_TIER_MODEL）。
+   * 历史事故：两者共用同一 task id 时，一条 per-task override 会把 L2 深判也拖回 flash 档。
+   * 输出沿用现有批量协议（judgments 数组），逐家 verdict 仍映射 match | weak | mismatch。
+   */
+  'discovery.quick_judge': {
+    id: 'discovery.quick_judge',
+    allowedTools: [],
+    maxCostCents: 20,
+    maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
+    timeoutMs: 180000,
+    description:
+      '批量粗筛：给定卖方 ICP 与一批候选公司（每家含名称、域名、国家、行业、产品/关键词），逐家判断是否为该卖方的真实目标客户。按四门粗判（与单家深判同一口径）：\n1) 材质门：候选的加工材质是否与 ICP 目标一致（如金属 vs 塑料/织物/粉体），ICP 未要求材质时视为通过。\n2) 角色门：候选是卖方产品的下游买家，还是同类产品制造商（竞品判 mismatch）；icp_trade_role 为 distributor 时，采购并转售的分销/批发/进口/经销商是下游买家。\n3) 工艺子集门：候选是否从事 ICP 核心工艺；仅相邻工艺判 weak。\n4) 商业模式门：分销商 ICP 下，转售型分销判通过，信息撮合平台判 weak。\n这是粗筛（provisional）：证据不足/边缘情况一律判 weak 交深判复核，绝不猜测。对每个 index 输出 verdict（match | weak | mismatch）与一句中文理由。',
+    outputSchema: closedObject({
+      judgments: boundedArray(8, closedObject({
+        index: boundedNumber(0, 7, true),
+        verdict: boundedString(8, {
+          enum: ['match', 'weak', 'mismatch'], description: 'match | weak | mismatch',
+        }),
+        reason: boundedString(1000, { description: '一句中文理由' }),
+      }, ['index', 'verdict', 'reason'])),
+    }, ['judgments']),
+    // 粗筛高频且可容忍噪声 → flash 档（8 家/次批量协议，设计 R4）。
+    model: acquisitionModel('discovery.quick_judge', ACQUISITION_FLASH_TIER_MODEL),
+    acceptsModelSubstitute: true,
+    risk: 'low',
+    humanGate: false,
+    cacheable: true,
+  },
+
   'discovery.qualify_fit': {
     id: 'discovery.qualify_fit',
     allowedTools: [],

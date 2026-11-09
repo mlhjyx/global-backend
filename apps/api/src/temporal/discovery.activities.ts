@@ -26,7 +26,12 @@ import { createContactDiscoverySubBudget } from '../execution-budget/contact-dis
 import { parseConfiguredLawfulBasis } from './backlog.activities';
 import { stampLawfulBasis } from '../discovery/compliance/email-verification-gate';
 import { artifactSubjectSkipReason } from '../tools/artifact-subject-denial';
-import { judgeFitCompany, loadIcpBrief, upsertLeadFit } from '../discovery/fit-judge';
+import {
+  judgeFitCompany,
+  loadIcpBrief,
+  persistJudgmentRecordInTransaction,
+  upsertLeadFit,
+} from '../discovery/fit-judge';
 import type { SkillResolver } from '../skills/skill-runtime';
 import { AGENT_KEYS } from '../agents/agent-catalog';
 import { AGENT_DECISION_TYPES } from '../agents/agent-runtime';
@@ -1907,9 +1912,11 @@ export function createDiscoveryActivities(deps: {
             skills: deps.skills,
           });
           if (!judgment) return { kind: 'unusable' };
-          await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-            upsertLeadFit(tx, args.workspaceId, args.icpId, c.id, judgment),
-          );
+          // P3 J03b：judgment_record（v2, shadow/enforce）与 Lead 投影同一事务。
+          await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+            await persistJudgmentRecordInTransaction(tx, args.icpId, judgment);
+            await upsertLeadFit(tx, args.workspaceId, args.icpId, c.id, judgment);
+          });
           return { kind: 'judged', verdict: judgment.verdict };
         } catch (error) {
           return { kind: 'failed', error };

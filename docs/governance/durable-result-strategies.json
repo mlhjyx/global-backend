@@ -557,6 +557,22 @@
       }
     },
     {
+      "taskId": "discovery.quick_judge",
+      "callsitePath": "apps/api/src/temporal/discovery.run2.activities.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "quick-judgment/v1",
+      "operationIdentity": "model:discovery.quick_judge:<request-hash>",
+      "privacyClass": "CONFIDENTIAL_TENANT",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "Run2QuickJudgeBatch.verdictQuick",
+        "domainAggregateType": "DiscoveryCompanyJob",
+        "identitySource": "workspace-run-company-batch-index",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
       "taskId": "discovery.extract_company",
       "callsitePath": "apps/api/src/discovery/providers/public-web.provider.ts",
       "resultStrategy": "typed_projection",

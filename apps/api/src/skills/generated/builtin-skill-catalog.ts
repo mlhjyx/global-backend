@@ -199,6 +199,45 @@ export const BUILTIN_SKILLS: readonly PlatformSkillRecord[] =
     "sourceDigest": "ff79972c6220c9e07aa55bce614ed645f4aa23d5706cef9343e348637c14dbae"
   },
   {
+    "skillKey": "discovery.quick_judge",
+    "directory": "discovery-quick-judge",
+    "packTypeDirectory": "growth_motion",
+    "manifest": {
+      "name": "discovery-quick-judge",
+      "description": "批量粗筛（L1 快扫）：给定卖方 ICP 与一批候选公司（最多 8 家/次），逐家按材质/角色/工艺/商业模式四门粗判是否为真实目标客户，输出 provisional verdict（match / weak / mismatch）与一句理由；边缘情况一律 weak 交深判复核。",
+      "license": "Proprietary",
+      "allowedTools": [],
+      "metadata": {
+        "platform.skill-key": "discovery.quick_judge",
+        "platform.version": "1.0.0",
+        "platform.skill-kind": "model_task",
+        "platform.tenant-default": "enabled",
+        "platform.pack-type": "growth_motion",
+        "platform.task-contract": "discovery.quick_judge",
+        "platform.task-contract-digest": "b1198ea1842add48f380617cca483695d9e3bb8127373afb8bb6d6175ee3e2f3",
+        "platform.risk": "low",
+        "platform.human-gate": "false",
+        "platform.budget-cents": "20",
+        "platform.owner": "OWN-BUYER-BE"
+      },
+      "platform": {
+        "skillKey": "discovery.quick_judge",
+        "version": "1.0.0",
+        "packType": "growth_motion",
+        "skillKind": "model_task",
+        "tenantDefault": "enabled",
+        "taskContractId": "discovery.quick_judge",
+        "taskContractDigest": "b1198ea1842add48f380617cca483695d9e3bb8127373afb8bb6d6175ee3e2f3",
+        "risk": "low",
+        "humanGate": false,
+        "budgetCents": 20,
+        "owner": "OWN-BUYER-BE"
+      }
+    },
+    "body": "# 批量候选粗筛（L1 快扫）\n\n输入：卖方 ICP 摘要（含目标贸易角色 `icp_trade_role`）与一批候选公司（每家含名称、域名、\n国家、行业、产品/关键词；batch 协议中每家有 `index`）。\n\n输出：`judgments` 数组——对每个 `index` 给出 verdict（match / weak / mismatch）与一句中文理由。\n\n判定顺序（与单家深判同一口径，但属粗筛）：\n\n1. 材质门——候选的加工材质是否与 ICP 目标一致；ICP 未要求材质时视为通过。\n2. 角色门——候选是下游买家还是同类产品制造商（竞品判 mismatch）；分销商 ICP 下，\n   采购并转售的分销/批发/进口/经销判通过。\n3. 工艺子集门——候选是否真正从事 ICP 核心工艺，仅相邻工艺判 weak。\n4. 商业模式门——转售型分销判通过，信息撮合平台判 weak。\n\n这是 provisional 粗筛：证据不足或边缘情况一律判 weak 交 L2 深判复核，绝不猜测；\n本技能不产出最终 verdict，最终判定由 `discovery.qualify_fit` 深判与确定性聚合器决定。",
+    "sourceDigest": "fb679bc7c593ffdc298c68c9cfcd1113fe75c118833f101229acd5b0b162dce4"
+  },
+  {
     "skillKey": "engage.reply_classify",
     "directory": "engage-reply-classify",
     "packTypeDirectory": "growth_motion",

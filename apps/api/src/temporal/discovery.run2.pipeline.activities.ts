@@ -49,6 +49,7 @@ import type { DurableExecutionReceipt } from '../durable-results/durable-executi
 import {
   judgeFitCompany,
   loadIcpBrief,
+  persistJudgmentRecordInTransaction,
   upsertLeadFit,
   type FitJudgeCompany,
 } from '../discovery/fit-judge';
@@ -437,9 +438,11 @@ export function createRun2PipelineActivities(deps: {
         },
       );
       if (!judgment) return { judged: false, verdict: null };
-      await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-        upsertLeadFit(tx, args.workspaceId, args.icpId, args.companyId, judgment),
-      );
+      // P3 J03b：judgment_record（v2, shadow/enforce）与 Lead 投影同一事务。
+      await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        await persistJudgmentRecordInTransaction(tx, args.icpId, judgment);
+        await upsertLeadFit(tx, args.workspaceId, args.icpId, args.companyId, judgment);
+      });
       return { judged: true, verdict: judgment.verdict };
     },
 

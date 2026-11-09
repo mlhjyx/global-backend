@@ -24,6 +24,7 @@ const PINNED_RENDER_DIGESTS: Readonly<Record<string, string>> = {
     "ceada097f6f665d7af4e7016c578b82ffa50111fd3e2f735bc05c7f4359e8a5b",
   "compliance.sanctions_screen": "53829f13ffef437ee736ffaf84ef2f008cfefa8faa51957f76654bd637b8fc77",
   "discovery.qualify_fit": "b236a8628d650cf26175f1f58701f27e0d258b4bb7ce37ef13f7323bccfbb1ad",
+  "discovery.quick_judge": "901cb12cf5ccf6626c83454c8d9146015b4e89cecd5508ab492cbf46c4717014",
   "quoting.incoterms_quote": "347570a7208fda7a022f7e08e66ee3782676732cdbfa14bec87ddb93f3db0f52",
   "research.account_research": "b8e2b27e18bbf33f7dba28d37eb2602bdc83b26f5015e330029b2e90e8bb609b",
   "triage.lead_triage": "a2485db23f4d1c902487f27745a3b252042ee343616573763a198a9e5d412b83",

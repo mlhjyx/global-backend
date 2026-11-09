@@ -520,7 +520,7 @@ function expectRecursivelyClosedAndBounded(schema: unknown, propertyNames?: stri
 }
 
 describe('non-Site-Builder model result projection registry', () => {
-  it('locks the exact thirteen task IDs and their exact schema IDs', () => {
+  it('locks the exact fourteen task IDs and their exact schema IDs', () => {
     expect(MODEL_RESULT_TASK_IDS).toEqual([
       'company_understanding.extract_claims',
       'company_understanding.extract_profile',
@@ -529,6 +529,7 @@ describe('non-Site-Builder model result projection registry', () => {
       'discovery.query_plan',
       'taxonomy.normalize',
       'discovery.qualify_fit',
+      'discovery.quick_judge',
       'discovery.extract_company',
       'discovery.extract_list',
       'contact.find_decision_makers',
@@ -544,6 +545,7 @@ describe('non-Site-Builder model result projection registry', () => {
       'discovery.query_plan': 'icp-query-plan/v1',
       'taxonomy.normalize': 'taxonomy-code/v1',
       'discovery.qualify_fit': 'fit-judgment/v1',
+      'discovery.quick_judge': 'quick-judgment/v1',
       'discovery.extract_company': 'discovery-extract-company/v1',
       'discovery.extract_list': 'discovery-extract-list/v1',
       'contact.find_decision_makers': 'contact-decision-makers/v1',
@@ -559,6 +561,7 @@ describe('non-Site-Builder model result projection registry', () => {
       'icp-query-plan/v1',
       'taxonomy-code/v1',
       'fit-judgment/v1',
+      'quick-judgment/v1',
       'discovery-extract-company/v1',
       'discovery-extract-list/v1',
       'contact-decision-makers/v1',
@@ -583,7 +586,7 @@ describe('non-Site-Builder model result projection registry', () => {
   });
 
   it('registers only closed, bounded, ASCII-camelCase, non-sensitive projection schemas', () => {
-    expect(MODEL_RESULT_PROJECTION_DEFINITIONS).toHaveLength(13);
+    expect(MODEL_RESULT_PROJECTION_DEFINITIONS).toHaveLength(14);
     for (const definition of MODEL_RESULT_PROJECTION_DEFINITIONS) {
       const names: string[] = [];
       expectRecursivelyClosedAndBounded(definition.jsonSchema, names);

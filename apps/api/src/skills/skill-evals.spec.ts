@@ -87,6 +87,7 @@ describe("shipped skill eval manifests", () => {
       "company.understanding.extract",
       "company.understanding.extract_offerings",
       "discovery.qualify_fit",
+      "discovery.quick_judge",
       "engage.reply_classify",
       "outreach.sequence_draft",
       "research.account_research",

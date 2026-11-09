@@ -39,6 +39,7 @@ export const EXPECTED_MODEL_TASKS = Object.freeze([
   Object.freeze({ path: 'apps/api/src/lead/outreach-draft.service.ts', taskId: 'outreach.first_contact_draft', schema: 'outreach-first-contact-draft/v1' }),
   Object.freeze({ path: 'apps/api/src/discovery/taxonomy-resolver.ts', taskId: 'taxonomy.normalize', schema: 'taxonomy-code/v1' }),
   Object.freeze({ path: 'apps/api/src/discovery/fit-judge.ts', taskId: 'discovery.qualify_fit', schema: 'fit-judgment/v1' }),
+  Object.freeze({ path: 'apps/api/src/temporal/discovery.run2.activities.ts', taskId: 'discovery.quick_judge', schema: 'quick-judgment/v1' }),
   Object.freeze({ path: 'apps/api/src/discovery/providers/public-web.provider.ts', taskId: 'discovery.extract_company', schema: 'discovery-extract-company/v1' }),
   Object.freeze({ path: 'apps/api/src/discovery/providers/directory.provider.ts', taskId: 'discovery.extract_list', schema: 'discovery-extract-list/v1' }),
   Object.freeze({ path: 'apps/api/src/discovery/providers/decision-maker.provider.ts', taskId: 'contact.find_decision_makers', schema: 'contact-decision-makers/v1' }),
