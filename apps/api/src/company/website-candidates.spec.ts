@@ -3,6 +3,7 @@ import type { SearxResult } from '../adapters/searxng';
 import type { RequestContext } from '../auth/request-context';
 import type { PrismaService } from '../prisma/prisma.service';
 import {
+  brokerBackedSearxSearch,
   rankWebsiteCandidates,
   WebsiteCandidatesService,
   type SearxngSearchFn,
@@ -131,5 +132,59 @@ describe('WebsiteCandidatesService.find', () => {
     await expect(
       fixture({ id: COMPANY_ID, name: NAME, deletedAt: new Date() }).service.find(CTX, COMPANY_ID),
     ).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe('WEB-10：元搜索出网经 ToolBroker（不再直连 searxng）', () => {
+  it('没有 ToolBroker 执行器时 fail-closed：503 WEBSITE_CANDIDATE_SEARCH_UNAVAILABLE', async () => {
+    const prisma = { withWorkspace: vi.fn() };
+    const service = new WebsiteCandidatesService(
+      prisma as unknown as PrismaService,
+      undefined,
+    );
+    await expect(service.find(CTX, COMPANY_ID)).rejects.toMatchObject({
+      status: 503,
+      response: { error: { code: 'WEBSITE_CANDIDATE_SEARCH_UNAVAILABLE' } },
+    });
+    expect(prisma.withWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('brokerBackedSearxSearch：调用 searxng.search 工具并映射投影结果，透传 workspace 上下文', async () => {
+    const invoke = vi.fn(async () => ({
+      data: {
+        results: [
+          { url: 'https://sccshx.example', title: `${NAME} - 官方网站` },
+          { url: '', title: 'invalid' },
+        ],
+      },
+      costCents: 0,
+    }));
+    const search = brokerBackedSearxSearch({ invoke } as never);
+    const response = await search(
+      { q: `${NAME} 官网`, categories: ['general'], language: 'zh' },
+      { workspaceId: CTX.workspaceId, correlationId: `website-candidates:${COMPANY_ID}` },
+    );
+    expect(invoke).toHaveBeenCalledWith(
+      'searxng.search',
+      { q: `${NAME} 官网`, categories: ['general'], language: 'zh' },
+      { workspaceId: CTX.workspaceId, correlationId: `website-candidates:${COMPANY_ID}` },
+    );
+    expect(response.results).toEqual([{ url: 'https://sccshx.example', title: `${NAME} - 官方网站` }]);
+    expect(response.numberOfResults).toBe(2);
+  });
+
+  it('ToolBroker 拒绝（策略/预算）→ 服务返回空列表（既有容错语义不变）', async () => {
+    const search = brokerBackedSearxSearch({
+      invoke: vi.fn(async () => {
+        throw new Error('ToolPolicyDenied: searxng.search');
+      }),
+    } as never);
+    const prisma = {
+      withWorkspace: vi.fn(async (_ws: string, fn: (tx: unknown) => unknown) =>
+        fn({ companyProfile: { findUnique: vi.fn(async () => ({ id: COMPANY_ID, name: NAME, deletedAt: null })) } }),
+      ),
+    };
+    const service = new WebsiteCandidatesService(prisma as unknown as PrismaService, search);
+    await expect(service.find(CTX, COMPANY_ID)).resolves.toEqual([]);
   });
 });
