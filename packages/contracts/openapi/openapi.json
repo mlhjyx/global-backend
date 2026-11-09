@@ -5492,6 +5492,81 @@
         ]
       }
     },
+    "/api/v1/contact-points/{pointId}/bounce-events": {
+      "post": {
+        "description": "服务间端点（gain-saas SMTP transport，x-service-token）：hard_bounce → 点置 INVALID 并写 suppression(email, bounce, PREFERENCE)；soft_bounce 同一地址累计第 3 次 → UNKNOWN 且 24h 后重验；complaint → 状态不变、confidence 归 0、证据 allowedActions 去 outreach、写 suppression(email, complaint, LEGAL)。每次回写落一行验证事件账（provider=smtp_transport）与 email.delivery 证据（无 PII）。messageId 复用返回 duplicate 且无副作用。非 email 点 409，点不存在/跨租户 404。",
+        "operationId": "ContactBounceController_record_v1",
+        "parameters": [
+          {
+            "name": "pointId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-service-token",
+            "in": "header",
+            "description": "gain-saas 控制面服务令牌（env OUTREACH_INTERNAL_SERVICE_TOKEN；与 DNC 抑制同源）",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordContactBounceDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "status",
+                        "action",
+                        "duplicate"
+                      ],
+                      "properties": {
+                        "status": {
+                          "type": "string"
+                        },
+                        "action": {
+                          "type": "string"
+                        },
+                        "duplicate": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "回写一条投递结果（hard/soft bounce、complaint；messageId 幂等）",
+        "tags": [
+          "Outreach"
+        ]
+      }
+    },
     "/api/v1/companies": {
       "post": {
         "description": "支持 Idempotency-Key 头：同 key 重放返回首次结果，不重复创建（PRD 11.16）。",
@@ -21429,6 +21504,44 @@
         "required": [
           "workspaceId",
           "emails"
+        ]
+      },
+      "RecordContactBounceDto": {
+        "type": "object",
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "该投递所属的 workspace（服务令牌端点：租户由控制面显式给出）"
+          },
+          "event": {
+            "type": "string",
+            "enum": [
+              "hard_bounce",
+              "soft_bounce",
+              "complaint"
+            ],
+            "description": "SMTP transport 回调的投递事件"
+          },
+          "messageId": {
+            "type": "string",
+            "description": "SMTP 消息 ID（幂等键）",
+            "maxLength": 256
+          },
+          "smtpCode": {
+            "type": "string",
+            "description": "SMTP 响应码（如 550）",
+            "maxLength": 64
+          },
+          "receivedAt": {
+            "type": "string",
+            "description": "事件发生时间（ISO 8601）"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "event",
+          "messageId"
         ]
       },
       "PublicContactDto": {
