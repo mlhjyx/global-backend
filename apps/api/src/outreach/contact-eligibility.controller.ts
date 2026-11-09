@@ -1,5 +1,5 @@
 import { Body, Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
+import { ApiHeader, ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { ArrayMaxSize, IsArray, IsString, IsUUID } from 'class-validator';
 import { ApiEnvelope } from '../common/api-envelope.decorator';
 import { envelope } from '../common/envelope';
@@ -34,7 +34,6 @@ class CheckContactEligibilityDto {
  * SaaS 侧接线（DNC 之前插入检查、引擎不可达 fail closed）由 gain-saas 实现，本端点只提供事实。
  */
 @ApiTags('Outreach')
-@ApiBearerAuth()
 @Controller('outreach/contact-eligibility')
 export class ContactEligibilityController {
   constructor(private readonly eligibility: ContactEligibilityService) {}
@@ -42,6 +41,11 @@ export class ContactEligibilityController {
   @Post()
   @HttpCode(200)
   @UseGuards(ContactEligibilityServiceTokenGuard)
+  @ApiHeader({
+    name: 'x-service-token',
+    required: true,
+    description: 'gain-saas 控制面服务令牌（env OUTREACH_INTERNAL_SERVICE_TOKEN；与 DNC 抑制同源）',
+  })
   @ApiOperation({
     summary: '批量查询邮箱的四态与可触达动作（服务令牌）',
     description:
