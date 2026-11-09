@@ -1,4 +1,4 @@
-# 多源证据图核心切片：数据归一 / 证据包 shadow / 佐证门 / 接触点补全 / golden 评测（2026-11-10）
+# 多源证据图核心切片：数据归一 / 证据包（enforce）/ 佐证门 / 接触点补全 / golden 评测（2026-11-10）
 
 > 生命周期：`APPROVED`（产品负责人 2026-11-10 批准「注册号锚定的多源证据图」核心切片，当晚交付）
 > 结论：五项交付全部落地——dev 库归一回填与试点接触点补全真跑；证据包接进判定链现场装配，
@@ -103,7 +103,7 @@ tier 分布：none 5、T3 3、T2+T3 2。GLEIF/Wikidata 实时探测对该批 SME
 | axflow.com | T3 | 实时探测 miss（wikidata/gleif） |
 | kramp.com | 无 | 实时探测 miss |
 
-写库：7/7 `attributes.evidence_bundle`（kramp.com 写入空包 = 「已查无证据」的影子记录）。
+写库：7/7 `attributes.evidence_bundle`（kramp.com 写入空包 = 审计上的「已查无证据」记录）。
 dev 库现有 bundle：12 行（含下一节 5 家 IT 公司）。
 
 ## 4. 跨源佐证门（enforce，fail-closed）
