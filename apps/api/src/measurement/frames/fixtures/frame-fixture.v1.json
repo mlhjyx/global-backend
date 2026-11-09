@@ -1,0 +1,35 @@
+{
+  "frameKey": "de-offeneregister",
+  "sourceUrl": "fixture://de-offeneregister/frame-fixture.v1.json",
+  "parserVersion": "fixture-frame-parser/v1",
+  "records": [
+    {
+      "entityKey": "FIX-HRB-000001",
+      "name": "Nordwind Pumpen GmbH",
+      "country": "DE",
+      "status": "active",
+      "attributes": { "register": "HRB 000001", "city": "Hamburg" }
+    },
+    {
+      "entityKey": "FIX-HRB-000002",
+      "name": "Rheinland Ventile GmbH",
+      "country": "DE",
+      "status": "active",
+      "attributes": { "register": "HRB 000002", "city": "Köln" }
+    },
+    {
+      "entityKey": "FIX-FN-000003",
+      "name": "Alpenwasser Handels GmbH",
+      "country": "AT",
+      "status": "active",
+      "attributes": { "register": "FN 000003", "city": "Innsbruck" }
+    },
+    {
+      "entityKey": "FIX-HRB-000004",
+      "name": "Nordwind Beteiligungen GmbH",
+      "country": "DE",
+      "status": "dissolved",
+      "attributes": { "register": "HRB 000004", "city": "Hamburg" }
+    }
+  ]
+}
