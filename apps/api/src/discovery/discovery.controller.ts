@@ -29,6 +29,7 @@ import {
   SUPPRESSION_DECISION_REASONS,
   SuppressionDecisionRequest,
 } from './discovery.service';
+import { ContactEnrichmentService } from './enrich-contacts.service';
 import { LAWFUL_BASIS_KINDS } from './compliance/email-verification-gate';
 import { DEFAULT_MAX_GUESS_CONTACTS, MAX_EMAIL_PROBE_CANDIDATES } from './email-guess-targets';
 import {
@@ -401,7 +402,10 @@ class ExecuteQueryPlanDto {
 @UseGuards(AuthGuard, ScopesGuard)
 @RequireScopes('acquisition:read')
 export class DiscoveryController {
-  constructor(private readonly discovery: DiscoveryService) {}
+  constructor(
+    private readonly discovery: DiscoveryService,
+    private readonly contactEnrichment: ContactEnrichmentService,
+  ) {}
 
   @Post('query-plans/:planId/execute')
   @RequireScopes('acquisition:write')
@@ -660,7 +664,7 @@ export class DiscoveryController {
   ) {
     return envelope(
       await asExecutionBudgetHttpBoundary(() =>
-        this.discovery.enrichContacts(
+        this.contactEnrichment.enrichContacts(
           ctx,
           id,
           {

@@ -49,23 +49,12 @@ import {
 } from './evidence-license';
 import { collectProductReadPage } from './product-read-pagination';
 import {
-  enrichCompanyContacts,
-  type EnrichCompanyContactsResult,
-} from '../enrichment/waterfall/enrich-company-contacts';
-import { CapBudget } from '../enrichment/waterfall/enrichment-budget';
-import { PrismaCircuitBreakerStore } from '../enrichment/waterfall/circuit-breaker';
-import {
-  resolveConfiguredFinderProviders,
-  resolveConfiguredTailFinderProviders,
-} from '../enrichment/finders/finder-pool';
-import {
   ExecutionBudgetAuthorityService,
   assertFreshExecutionBudgetBinding,
   type ExecutionBudgetBinding,
 } from '../execution-budget/execution-budget-authority.service';
 import {
   discoverContactsExecutionBudgetRequestScope,
-  enrichContactsExecutionBudgetRequestScope,
   guessEmailsExecutionBudgetRequestScope,
   verifyContactPointExecutionBudgetRequestScope,
   workspaceExecutionBudgetRequestScope,
@@ -439,87 +428,6 @@ export class DiscoveryService {
         },
       },
     );
-  }
-
-  /**
-   * P1-10：公司级邮箱富集（付费 finder 瀑布：Hunter → Findymail → Prospeo，A 档追加 Apollo/PDL）。
-   * Grant（purpose contact.enrich，subject=company）一次性消费；预算以授权 cap 为硬上限
-   * （CapBudget 忠实执行——cap 不足如实 skipped_budget，绝不超支）；lawfulBasis 必填
-   * （把具名联系人 + 公司域送给第三方处理器是个人数据处理）。PII 访问审计与请求同留痕。
-   */
-  async enrichContacts(
-    ctx: RequestContext,
-    companyId: string,
-    opts: {
-      lawfulBasis?: LawfulBasis;
-      contactIds?: string[];
-      maxProviders?: number;
-      maxProbe?: number;
-      attemptId?: string;
-    },
-    compactJws?: string,
-  ): Promise<EnrichCompanyContactsResult> {
-    if (!isValidLawfulBasis(opts?.lawfulBasis)) {
-      throw new ForbiddenException({
-        error: {
-          code: 'CONTACT_ENRICH_LAWFUL_BASIS_REQUIRED',
-          message: 'an explicit lawful basis is required for external contact enrichment',
-        },
-      });
-    }
-    const recordedBasis = stampLawfulBasis(
-      opts.lawfulBasis,
-      ctx.userId,
-      new Date().toISOString(),
-    );
-    const binding = await this.authority.consumeWorkspaceGrant({
-      compactJws,
-      identity: ctx,
-      scope: enrichContactsExecutionBudgetRequestScope(companyId, {
-        attemptId: opts.attemptId,
-      }),
-    });
-    assertFreshExecutionBudgetBinding(binding);
-    const authorization = await this.budgets().attestAuthorized({
-      authorityId: binding.authorityId,
-      scopeKey: binding.scopeKey,
-      accountKey: binding.accountKey,
-    });
-    const result = await enrichCompanyContacts(
-      {
-        prisma: this.prisma,
-        ownerPrisma: this.prisma,
-        finders: resolveConfiguredFinderProviders(),
-        tailFinders: resolveConfiguredTailFinderProviders(),
-        circuits: new PrismaCircuitBreakerStore(this.prisma),
-        budget: new CapBudget(Number(authorization.authorizedCapMicrousd)),
-        actorId: ctx.userId,
-      },
-      {
-        workspaceId: ctx.workspaceId,
-        companyId,
-        accountKey: binding.accountKey,
-        lawfulBasis: recordedBasis,
-        ...(opts.contactIds ? { contactIds: opts.contactIds } : {}),
-        ...(opts.maxProviders !== undefined
-          ? { maxProvidersPerContact: opts.maxProviders }
-          : {}),
-        ...(opts.maxProbe !== undefined ? { maxVerificationCalls: opts.maxProbe } : {}),
-      },
-    );
-    await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-      recordPersonalDataAccess(tx, {
-        workspaceId: ctx.workspaceId,
-        actorId: ctx.userId,
-        actorKind: 'user',
-        purpose: 'contact_discovery',
-        companyId,
-        fieldClasses: ['person_name', 'email'],
-        subjectCount: result.attempted,
-        lawfulBasisRef: opts.lawfulBasis?.ref ?? null,
-      }),
-    );
-    return result;
   }
 
   /**

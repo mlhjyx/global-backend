@@ -235,6 +235,25 @@ function attemptBody(
   return { body: Object.freeze({ attemptId: uuid(body.attemptId) }) };
 }
 
+/** site-builder intake 的请求形状（从 parseRequest 提取：G9 圈复杂度预算）。 */
+function siteBuilderIntakeRequest(
+  input: Record<string, unknown>,
+): WorkspaceExecutionBudgetRequest {
+  exactKeys(input, ['operation', 'body']);
+  const body = record(input.body);
+  exactKeys(body, ['requestHash']);
+  if (
+    typeof body.requestHash !== 'string' ||
+    !/^[0-9a-f]{64}$/.test(body.requestHash)
+  ) {
+    invalid();
+  }
+  return Object.freeze({
+    operation: 'POST /site-builder/intake',
+    body: Object.freeze({ requestHash: body.requestHash }),
+  });
+}
+
 function parseRequest(value: unknown): WorkspaceExecutionBudgetRequest {
   const input = record(value);
   if (
@@ -246,21 +265,8 @@ function parseRequest(value: unknown): WorkspaceExecutionBudgetRequest {
     invalid();
   }
   switch (input.operation) {
-    case 'POST /site-builder/intake': {
-      exactKeys(input, ['operation', 'body']);
-      const body = record(input.body);
-      exactKeys(body, ['requestHash']);
-      if (
-        typeof body.requestHash !== 'string' ||
-        !/^[0-9a-f]{64}$/.test(body.requestHash)
-      ) {
-        invalid();
-      }
-      return Object.freeze({
-        operation: input.operation,
-        body: Object.freeze({ requestHash: body.requestHash }),
-      });
-    }
+    case 'POST /site-builder/intake':
+      return siteBuilderIntakeRequest(input);
     case 'POST /companies': {
       exactKeys(input, ['operation', 'body']);
       const body = record(input.body);
@@ -389,20 +395,13 @@ function parseRequest(value: unknown): WorkspaceExecutionBudgetRequest {
         body: Object.freeze({ attemptId: uuid(bodyRecord.attemptId) }),
       });
     }
-    case 'POST /canonical-companies/:id/enrich-contacts': {
+    case 'POST /canonical-companies/:id/enrich-contacts':
       exactKeys(input, ['operation', 'companyId'], ['body']);
-      const companyId = uuid(input.companyId);
-      if (input.body === undefined) {
-        return Object.freeze({ operation: input.operation, companyId });
-      }
-      const bodyRecord = record(input.body);
-      exactKeys(bodyRecord, ['attemptId']);
       return Object.freeze({
         operation: input.operation,
-        companyId,
-        body: Object.freeze({ attemptId: uuid(bodyRecord.attemptId) }),
+        companyId: uuid(input.companyId),
+        ...attemptBody(input.body),
       });
-    }
     case 'POST /canonical-companies/:id/guess-emails':
       exactKeys(input, ['operation', 'companyId'], ['body']);
       return Object.freeze({
