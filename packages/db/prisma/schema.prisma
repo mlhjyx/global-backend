@@ -4180,3 +4180,111 @@ model JudgmentGoldenLabel {
   @@index([workspaceId, canonicalCompanyId, icpId, labeledAt(sort: Desc)], map: "judgment_golden_label_lookup_idx")
   @@map("judgment_golden_label")
 }
+
+// ---------------------------------------------------------------------------
+// ch01（测量与真值）PR-02：度量四表。设计依据《GainOS 深化计划 v3.0》第 1 章
+// §3.6.3；迁移 20261109160000_measurement_core_v1。
+//
+// 与设计稿的有意差异（详见迁移头注释）：
+//  * Prisma 不支持 Json 进入主键/唯一约束——rollup 两表的主键与
+//    metric_observation 的唯一键改用并列的 stratum_key（排序键规范化 JSON
+//    文本，应用层写入）；stratum 保留为查询载荷。
+//  * 数值列 NUMERIC(20,6) ↔ Decimal(20,6)；时间戳 TIMESTAMPTZ(3)。
+//  * metric_rollup_*_workspace_idx 是作用于 stratum->>'workspace_id' 的
+//    表达式索引，Prisma 不可建模；migrate diff 对表达式索引整体忽略，
+//    故不进 datamodel，也不登记 drift-baseline。
+// ---------------------------------------------------------------------------
+
+/// 指标字典（平台工件，带版本）：app_user 只读；删除指标用 RETIRED 不删行。
+model MetricDefinition {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  metricId        String   @map("metric_id") @db.VarChar(32)
+  version         Int
+  name            String   @db.VarChar(120)
+  tier            String   @db.VarChar(16)
+  unit            String   @db.VarChar(16)
+  definition      String
+  numeratorExpr   String   @map("numerator_expr")
+  denominatorExpr String?  @map("denominator_expr")
+  exclusions      Json     @default("[]")
+  windowSpec      Json     @map("window_spec")
+  strata          Json     @default("[]")
+  owner           String   @db.VarChar(64)
+  status          String   @default("DRAFT") @db.VarChar(16)
+  effectiveFrom   DateTime @map("effective_from") @db.Timestamptz(3)
+  changelog       Json     @default("[]")
+  contentHash     String   @map("content_hash") @db.Char(64)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([metricId, version], map: "metric_definition_metric_id_version_key")
+  @@index([status], map: "metric_definition_status_idx")
+  @@map("metric_definition")
+}
+
+/// 指标观测（append-only）：workspace_id IS NULL = 平台级；租户只见本 workspace 行。
+model MetricObservation {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId     String?  @map("workspace_id") @db.Uuid
+  metricId        String   @map("metric_id") @db.VarChar(32)
+  metricVersion   Int      @map("metric_version")
+  stratum         Json     @default("{}")
+  /// 排序键规范化的 stratum JSON 文本（应用层写入；唯一键组成部分）。
+  stratumKey      String   @map("stratum_key")
+  windowStart     DateTime @map("window_start") @db.Timestamptz(3)
+  windowEnd       DateTime @map("window_end") @db.Timestamptz(3)
+  numerator       Decimal  @db.Decimal(20, 6)
+  denominator     Decimal? @db.Decimal(20, 6)
+  value           Decimal  @db.Decimal(20, 6)
+  ciLow           Decimal? @map("ci_low") @db.Decimal(20, 6)
+  ciHigh          Decimal? @map("ci_high") @db.Decimal(20, 6)
+  sampleN         Int?     @map("sample_n")
+  sourceEventIds  Json     @default("[]") @map("source_event_ids")
+  computationHash String   @map("computation_hash") @db.Char(64)
+  supersedesId    String?  @map("supersedes_id") @db.Uuid
+  computedAt      DateTime @default(now()) @map("computed_at") @db.Timestamptz(3)
+
+  @@unique([metricId, metricVersion, stratumKey, windowStart, windowEnd, computationHash], map: "metric_observation_identity_key")
+  @@index([metricId, windowEnd(sort: Desc)], map: "metric_observation_lookup_idx")
+  @@index([workspaceId, windowEnd(sort: Desc)], map: "metric_observation_workspace_idx")
+  @@map("metric_observation")
+}
+
+/// 日聚合（可由 observation 重算；物化表可 upsert）。租户过滤用 stratum->>'workspace_id'。
+model MetricRollupDaily {
+  day           DateTime @db.Date
+  metricId      String   @map("metric_id") @db.VarChar(32)
+  metricVersion Int      @map("metric_version")
+  stratum       Json     @default("{}")
+  stratumKey    String   @map("stratum_key")
+  numerator     Decimal  @db.Decimal(20, 6)
+  denominator   Decimal? @db.Decimal(20, 6)
+  value         Decimal  @db.Decimal(20, 6)
+  ciLow         Decimal? @map("ci_low") @db.Decimal(20, 6)
+  ciHigh        Decimal? @map("ci_high") @db.Decimal(20, 6)
+  sampleN       Int?     @map("sample_n")
+  refreshedAt   DateTime @default(now()) @map("refreshed_at") @db.Timestamptz(3)
+
+  @@id([day, metricId, metricVersion, stratumKey])
+  @@index([metricId, day(sort: Desc)], map: "metric_rollup_daily_metric_idx")
+  @@map("metric_rollup_daily")
+}
+
+/// 周聚合（ISO 周，周一为 week 值）。
+model MetricRollupWeekly {
+  week          DateTime @db.Date
+  metricId      String   @map("metric_id") @db.VarChar(32)
+  metricVersion Int      @map("metric_version")
+  stratum       Json     @default("{}")
+  stratumKey    String   @map("stratum_key")
+  numerator     Decimal  @db.Decimal(20, 6)
+  denominator   Decimal? @db.Decimal(20, 6)
+  value         Decimal  @db.Decimal(20, 6)
+  ciLow         Decimal? @map("ci_low") @db.Decimal(20, 6)
+  ciHigh        Decimal? @map("ci_high") @db.Decimal(20, 6)
+  sampleN       Int?     @map("sample_n")
+  refreshedAt   DateTime @default(now()) @map("refreshed_at") @db.Timestamptz(3)
+
+  @@id([week, metricId, metricVersion, stratumKey])
+  @@index([metricId, week(sort: Desc)], map: "metric_rollup_weekly_metric_idx")
+  @@map("metric_rollup_weekly")
+}

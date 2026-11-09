@@ -1216,3 +1216,152 @@ describe.runIf(Boolean(ownerUrl && appUrl))('judgment quality tables (P3 J04) on
     expect(denied).toBe('conformal_threshold');
   });
 });
+
+// ch01-PR-02（度量四表）：metric_definition 是平台工件（app_user 只读）；
+// metric_observation append-only（SELECT/INSERT），平台行 workspace_id IS NULL
+// 对租户不可见、app_user 也不可写（WITH CHECK）；rollup 两表是物化聚合，
+// app_user 可 SELECT/INSERT/UPDATE（upsert），DELETE 拒绝；两表没有 workspace
+// 列，租户过滤走 stratum->>'workspace_id' 的 RLS 表达式。
+describe.runIf(Boolean(ownerUrl && appUrl))('measurement core tables (ch01 PR-02) on PostgreSQL', () => {
+  let owner: PrismaClient;
+  let app: PrismaClient;
+
+  beforeAll(async () => {
+    owner = new PrismaClient({ datasourceUrl: ownerUrl });
+    app = new PrismaClient({ datasourceUrl: appUrl });
+  });
+
+  afterAll(async () => {
+    await Promise.all([owner?.$disconnect(), app?.$disconnect()]);
+  });
+
+  type Tx = Prisma.TransactionClient;
+
+  const setWorkspace = (tx: Tx, workspaceId: string) =>
+    tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceId}, true)`;
+
+  const insertObservation = (tx: Tx, workspaceId: string | null, hash: string) =>
+    tx.$executeRaw`
+      INSERT INTO "metric_observation"
+        ("workspace_id", "metric_id", "metric_version", "stratum", "stratum_key",
+         "window_start", "window_end", "numerator", "value", "computation_hash")
+      VALUES (${workspaceId}::uuid, 'T2-001', 1, '{"country":"DE"}'::jsonb, '{"country":"DE"}',
+              now() - interval '1 day', now(), 1, 0.5, ${hash})`;
+
+  const upsertDaily = (tx: Tx, workspaceId: string, key: string, value: number) =>
+    tx.$executeRaw`
+      INSERT INTO "metric_rollup_daily"
+        ("day", "metric_id", "metric_version", "stratum", "stratum_key", "numerator", "value")
+      VALUES (current_date, 'T2-001', 1, jsonb_build_object('workspace_id', ${workspaceId}::text),
+              ${key}, 1, ${value})
+      ON CONFLICT ("day", "metric_id", "metric_version", "stratum_key")
+      DO UPDATE SET "value" = EXCLUDED."value"`;
+
+  const upsertWeekly = (tx: Tx, workspaceId: string, key: string, value: number) =>
+    tx.$executeRaw`
+      INSERT INTO "metric_rollup_weekly"
+        ("week", "metric_id", "metric_version", "stratum", "stratum_key", "numerator", "value")
+      VALUES (date_trunc('week', current_date)::date, 'T2-001', 1,
+              jsonb_build_object('workspace_id', ${workspaceId}::text), ${key}, 1, ${value})
+      ON CONFLICT ("week", "metric_id", "metric_version", "stratum_key")
+      DO UPDATE SET "value" = EXCLUDED."value"`;
+
+  it('keeps observations and rollups inside their workspace under RLS', async () => {
+    const wsA = randomUUID();
+    const wsB = randomUUID();
+    await rolledBack(app, async (tx) => {
+      await setWorkspace(tx, wsA);
+      await insertObservation(tx, wsA, 'a'.repeat(64));
+      await upsertDaily(tx, wsA, 'k1', 0.5);
+      await upsertWeekly(tx, wsA, 'w1', 0.5);
+
+      await setWorkspace(tx, wsB);
+      for (const table of ['metric_observation', 'metric_rollup_daily', 'metric_rollup_weekly']) {
+        const [{ count }] = await tx.$queryRawUnsafe<{ count: bigint }[]>(
+          `SELECT count(*) AS count FROM "${table}"`,
+        );
+        expect(Number(count), table).toBe(0);
+      }
+    });
+
+    // 写入非当前 workspace 的行被 WITH CHECK 拒绝（observation 列与 rollup 表达式两种口径）。
+    await expect(
+      rolledBack(app, async (tx) => {
+        await setWorkspace(tx, wsA);
+        await insertObservation(tx, wsB, 'b'.repeat(64));
+      }),
+    ).rejects.toThrow(/row-level security/);
+    await expect(
+      rolledBack(app, async (tx) => {
+        await setWorkspace(tx, wsA);
+        await upsertDaily(tx, wsB, 'k2', 0.5);
+      }),
+    ).rejects.toThrow(/row-level security/);
+    // 平台级观测（workspace_id IS NULL）只能由 owner 写。
+    await expect(
+      rolledBack(app, async (tx) => {
+        await setWorkspace(tx, wsA);
+        await insertObservation(tx, null, 'c'.repeat(64));
+      }),
+    ).rejects.toThrow(/row-level security/);
+  });
+
+  it('keeps observations append-only and lets rollups upsert but never delete', async () => {
+    const attempts: ReadonlyArray<readonly [string, string]> = [
+      ['metric_observation', `UPDATE "metric_observation" SET "value" = 0 WHERE false`],
+      ['metric_observation', `DELETE FROM "metric_observation" WHERE false`],
+      ['metric_rollup_daily', `DELETE FROM "metric_rollup_daily" WHERE false`],
+      ['metric_rollup_weekly', `DELETE FROM "metric_rollup_weekly" WHERE false`],
+    ];
+    for (const [relation, statement] of attempts) {
+      let denied: string | null = null;
+      try {
+        await app.$executeRawUnsafe(statement);
+      } catch (error) {
+        denied = permissionDeniedTable(error);
+      }
+      expect(denied, statement).toBe(relation);
+    }
+
+    const workspaceId = randomUUID();
+    await rolledBack(app, async (tx) => {
+      await setWorkspace(tx, workspaceId);
+      await upsertDaily(tx, workspaceId, 'k-upsert', 0.5);
+      await upsertDaily(tx, workspaceId, 'k-upsert', 0.9);
+      await upsertWeekly(tx, workspaceId, 'w-upsert', 0.5);
+      const daily = await tx.$queryRawUnsafe<{ value: Prisma.Decimal }[]>(
+        `SELECT "value" FROM "metric_rollup_daily" WHERE "stratum_key" = 'k-upsert'`,
+      );
+      expect(Number(daily[0]?.value)).toBeCloseTo(0.9, 6);
+    });
+  });
+
+  it('keeps metric_definition read-only for app_user', async () => {
+    let denied: string | null = null;
+    try {
+      await app.$executeRawUnsafe(
+        `INSERT INTO "metric_definition"
+           ("metric_id","version","name","tier","unit","definition","numerator_expr",
+            "window_spec","owner","effective_from","content_hash")
+         VALUES ('PRIV-PROBE',1,'probe','T0','ratio','probe','x','{}'::jsonb,'data-eng',now(),'${'d'.repeat(64)}')`,
+      );
+    } catch (error) {
+      denied = permissionDeniedTable(error);
+    }
+    expect(denied).toBe('metric_definition');
+
+    await owner.$executeRaw`
+      INSERT INTO "metric_definition"
+        ("metric_id","version","name","tier","unit","definition","numerator_expr",
+         "window_spec","owner","effective_from","content_hash")
+      VALUES ('PRIV-PROBE',1,'probe','T0','ratio','probe','x','{}'::jsonb,'data-eng',now(),${'e'.repeat(64)})`;
+    try {
+      const [{ count }] = await app.$queryRawUnsafe<{ count: bigint }[]>(
+        `SELECT count(*) AS count FROM "metric_definition" WHERE "metric_id" = 'PRIV-PROBE'`,
+      );
+      expect(Number(count)).toBe(1);
+    } finally {
+      await owner.$executeRaw`DELETE FROM "metric_definition" WHERE "metric_id" = 'PRIV-PROBE'`;
+    }
+  });
+});
