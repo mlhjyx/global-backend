@@ -354,6 +354,23 @@
       "INSERT",
       "SELECT"
     ],
+    "metric_definition": [
+      "SELECT"
+    ],
+    "metric_observation": [
+      "INSERT",
+      "SELECT"
+    ],
+    "metric_rollup_daily": [
+      "INSERT",
+      "SELECT",
+      "UPDATE"
+    ],
+    "metric_rollup_weekly": [
+      "INSERT",
+      "SELECT",
+      "UPDATE"
+    ],
     "monitored_source": [
       "INSERT",
       "SELECT",
