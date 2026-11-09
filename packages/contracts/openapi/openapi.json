@@ -14016,6 +14016,112 @@
         "description": "度量日/周聚合（ch01 PR-04）：granularity=daily|weekly 选择 metric_rollup_daily/weekly，聚合由 PR-03 的测量工作流按主键 upsert。桶倒序 + 指标/维度 keyset 分页；租户过滤走 stratum.workspace_id 的 RLS。需要 acquisition:read。"
       }
     },
+    "/api/v1/metrics/vric": {
+      "get": {
+        "operationId": "MeasurementController_vric_v1",
+        "parameters": [
+          {
+            "name": "granularity",
+            "required": false,
+            "in": "query",
+            "description": "daily（默认）或 weekly",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "daily",
+                "weekly"
+              ],
+              "default": "daily"
+            }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "description": "起始日（含），YYYY-MM-DD（UTC）",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "description": "结束日（含），YYYY-MM-DD（UTC）",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "返回的桶数，默认 30，最大 180；显式 from/to 时以最后 limit 个桶为准",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 180,
+              "default": 30
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ data: [...vric buckets], page } — page.has_more 表示窗口被截断"
+          },
+          "400": {
+            "description": "参数不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "VRIC 成对序列（T0-001 STRICT + T0-002 PLUS，本 workspace 可见行）：按桶升序返回最近 limit 个桶；某侧缺数据时为 null，不得以 0 冒充缺失",
+        "tags": [
+          "Metrics"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "VRIC 成对序列（ch01 PR-04 后续切片）：同一 bucket + stratum 下 T0-001 STRICT 与 T0-002 PLUS 并排返回，桶按时间升序、默认最近 30 个（limit 上限 180）；某侧无数据为 null，不以 0 冒充。只含本 workspace 可见行（平台级 ALL 行不可见）。需要 acquisition:read。"
+      }
+    },
     "/api/v1/events/{eventId}/ack-status": {
       "get": {
         "operationId": "EventsController_ackStatus_v1",

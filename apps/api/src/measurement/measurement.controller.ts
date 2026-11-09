@@ -175,4 +175,40 @@ export class MeasurementController {
     });
     return pageEnvelope(result.items, result.page);
   }
+
+  @Get("vric")
+  @ApiOperation({
+    summary:
+      "VRIC 成对序列（T0-001 STRICT + T0-002 PLUS，本 workspace 可见行）：按桶升序返回最近 limit 个桶；某侧缺数据时为 null，不得以 0 冒充缺失",
+  })
+  @ApiQuery({
+    name: "granularity",
+    required: false,
+    description: "daily（默认）或 weekly",
+    schema: { type: "string", enum: ["daily", "weekly"], default: "daily" },
+  })
+  @ApiQuery(pageQuery[1])
+  @ApiQuery(pageQuery[2])
+  @ApiQuery({
+    name: "limit",
+    required: false,
+    description: "返回的桶数，默认 30，最大 180；显式 from/to 时以最后 limit 个桶为准",
+    schema: { type: "integer", minimum: 1, maximum: 180, default: 30 },
+  })
+  @ApiResponse({ status: 200, description: "{ data: [...vric buckets], page } — page.has_more 表示窗口被截断" })
+  @ApiResponse({
+    status: 400,
+    description: "参数不合法",
+    schema: errorSchema(["VALIDATION_ERROR"]),
+  })
+  async vric(
+    @Ctx() ctx: RequestContext,
+    @Query("granularity") granularity?: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+    @Query("limit") limit?: string,
+  ) {
+    const result = await this.measurements.vric(ctx, { granularity, from, to, limit });
+    return pageEnvelope(result.items, result.page);
+  }
 }

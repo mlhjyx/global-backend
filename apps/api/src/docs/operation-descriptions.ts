@@ -41,6 +41,8 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '度量观测（ch01 PR-04）：本 workspace 可见的 metric_observation 行（append-only；平台级行对租户不可见，RLS 由 PR-02 权限测试保障）。按 window_end 倒序 keyset 分页（cursor 原样回传）；数值列以 double 返回，stratum 为原样 JSON。参数不合法返回 400 VALIDATION_ERROR。需要 acquisition:read。',
   'GET /api/v1/metrics/rollups':
     '度量日/周聚合（ch01 PR-04）：granularity=daily|weekly 选择 metric_rollup_daily/weekly，聚合由 PR-03 的测量工作流按主键 upsert。桶倒序 + 指标/维度 keyset 分页；租户过滤走 stratum.workspace_id 的 RLS。需要 acquisition:read。',
+  'GET /api/v1/metrics/vric':
+    'VRIC 成对序列（ch01 PR-04 后续切片）：同一 bucket + stratum 下 T0-001 STRICT 与 T0-002 PLUS 并排返回，桶按时间升序、默认最近 30 个（limit 上限 180）；某侧无数据为 null，不以 0 冒充。只含本 workspace 可见行（平台级 ALL 行不可见）。需要 acquisition:read。',
 
   // ── PlatformAuthority ─────────────────────────────────────────────────────
   'POST /api/v1/platform-authority/revocations':
