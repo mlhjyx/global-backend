@@ -9,18 +9,28 @@ import {
 
 const WS = "11111111-1111-4111-8111-111111111111";
 
+/** Prisma passes either a Sql object ($queryRaw(sql)) or a tagged template (strings + values). */
+function sqlText(query: unknown): string {
+  if (typeof query === "string") return query;
+  if (Array.isArray(query)) return (query as string[]).join("?");
+  const sql = (query as { sql?: unknown }).sql;
+  if (typeof sql === "string") return sql;
+  if (Array.isArray(sql)) return (sql as string[]).join("?");
+  return "";
+}
+
 function fakeDb(rowsByMarker: Record<string, MetricQueryRow[]>) {
   const queriedMarkers: string[] = [];
   const executedSql: string[] = [];
   const db = {
-    $queryRaw: vi.fn(async (sql: Prisma.Sql) => {
-      const text = sql.sql;
+    $queryRaw: vi.fn(async (query: unknown) => {
+      const text = sqlText(query);
       const marker = /metric:(T\d-\d{3})/.exec(text)?.[1];
       if (marker) queriedMarkers.push(marker);
       return marker ? (rowsByMarker[marker] ?? []) : [];
     }),
-    $executeRaw: vi.fn(async (sql: Prisma.Sql) => {
-      executedSql.push(sql.sql);
+    $executeRaw: vi.fn(async (query: unknown) => {
+      executedSql.push(sqlText(query));
       return 1;
     }),
   };
