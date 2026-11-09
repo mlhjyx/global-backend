@@ -7,7 +7,8 @@
     "site-build-provider-transport.rls.spec.mjs",
     "skill-runtime.rls.spec.mjs",
     "source-channel-records.disposable.spec.mjs",
-    "judgment-review-queue.rls.spec.mjs"
+    "judgment-review-queue.rls.spec.mjs",
+    "judgment-record.rls.spec.mjs"
   ],
   "isolated": [
     "discovery-company-materialization-functions.disposable.spec.mjs",
