@@ -1,0 +1,99 @@
+{
+  "id": "weight-renormalized-c5-na",
+  "ensure": "renormalized-weights",
+  "input": {
+    "icpBrief": "德国金属加工与钣金加工行业的分销/批发商：采购并转售第三方生产的激光切割件与不锈钢板材，目标客户画像不限定员工规模。",
+    "snapshot": {
+      "text": "Muster Metallbau GmbH (Beispiel).\nProdukte: Edelstahlbleche und Laserzuschnitte.\nGroßhandel mit Markenwerkzeugen.\nFertigung: Laserschneiden und Kanten.\nHandelsunternehmen mit eigenem Lager.",
+      "fetchedAt": "2026-11-01T00:00:00.000Z"
+    }
+  },
+  "judge": {
+    "now": "2026-11-09T00:00:00.000Z",
+    "output": {
+      "criteria": [
+        {
+          "id": "C1_MATERIAL",
+          "applicable": true,
+          "score": 9,
+          "label": "pass",
+          "evidence": [
+            {
+              "kind": "website",
+              "url": "https://example.com/profil",
+              "span": "Edelstahlbleche und Laserzuschnitte",
+              "fetched_at": "2026-11-01T00:00:00.000Z"
+            }
+          ],
+          "rationale": "证据充分，判定与锚点一致。"
+        },
+        {
+          "id": "C2_ROLE",
+          "applicable": true,
+          "score": 9,
+          "label": "pass",
+          "evidence": [
+            {
+              "kind": "website",
+              "url": "https://example.com/profil",
+              "span": "Großhandel mit Markenwerkzeugen",
+              "fetched_at": "2026-11-01T00:00:00.000Z"
+            }
+          ],
+          "rationale": "证据充分，判定与锚点一致。"
+        },
+        {
+          "id": "C3_PROCESS",
+          "applicable": true,
+          "score": 9,
+          "label": "pass",
+          "evidence": [
+            {
+              "kind": "website",
+              "url": "https://example.com/profil",
+              "span": "Laserschneiden und Kanten",
+              "fetched_at": "2026-11-01T00:00:00.000Z"
+            }
+          ],
+          "rationale": "证据充分，判定与锚点一致。"
+        },
+        {
+          "id": "C4_BUSINESS_MODEL",
+          "applicable": true,
+          "score": 9,
+          "label": "pass",
+          "evidence": [
+            {
+              "kind": "website",
+              "url": "https://example.com/profil",
+              "span": "Handelsunternehmen mit eigenem Lager",
+              "fetched_at": "2026-11-01T00:00:00.000Z"
+            }
+          ],
+          "rationale": "证据充分，判定与锚点一致。"
+        },
+        {
+          "id": "C5_SIZE",
+          "applicable": false,
+          "score": null,
+          "label": "not_applicable",
+          "evidence": [],
+          "rationale": "ICP 未声明该维度，不适用。"
+        }
+      ],
+      "evidence_completeness": true,
+      "verdict_proposed": "FIT",
+      "refusal": {
+        "is_refusal": false,
+        "reason": null
+      }
+    }
+  },
+  "expected": {
+    "label": "FIT",
+    "reasonCodes": [
+      "FIT_ACCEPTED"
+    ],
+    "note": "C5 不适用时其余四项权重归一到 1，加权 9 → FIT。"
+  }
+}

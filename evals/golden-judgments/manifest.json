@@ -1,0 +1,190 @@
+{
+  "schemaVersion": "golden-judgments/v1",
+  "rubricVersion": "fit-v2",
+  "rubricSha256": "4abc5652e8eead2641ff5a2d73fde06e9d2faf8ac4514dd6c0e82c50745f0f53",
+  "promptHash": "a3b4a557717e947b838fe7e0d62e3140712a47db24b9285e77c6d4a5345ccf96",
+  "schemaVersionJudge": "judge-output/v2",
+  "cases": [
+    {
+      "id": "fit-golden",
+      "file": "cases/fit-golden.json",
+      "ensure": "fit",
+      "split": "calib",
+      "fileSha256": "sha256:b87d15838793cc03f70520ecb3ff88237168244f7d9cd6d57125ef2098e1a138",
+      "inputDigest": "sha256:a8509eb311f5cb44dbd99fa023e00a73de394991c0c52a7a4c5f52a3274a3bc4",
+      "expectedLabel": "FIT",
+      "expectedReasonCodes": [
+        "FIT_ACCEPTED"
+      ]
+    },
+    {
+      "id": "competitor-c2-zero",
+      "file": "cases/competitor-c2-zero.json",
+      "ensure": "competitor",
+      "split": "calib",
+      "fileSha256": "sha256:e833c1790b22110e302f90a2019c45b8d41b35a06b90ca355f0bc53fc9ba96a5",
+      "inputDigest": "sha256:f83bb03345eadd0837253870eee071f80163eaa05978f3d7beb17df0597c34fa",
+      "expectedLabel": "NOT_FIT",
+      "expectedReasonCodes": [
+        "HARD_FAIL"
+      ]
+    },
+    {
+      "id": "competitor-c1-zero",
+      "file": "cases/competitor-c1-zero.json",
+      "ensure": "competitor",
+      "split": "test",
+      "fileSha256": "sha256:674bfe0efe0d447a086ce557d5743bb84489ed5f0fae86de225fbca25c49eed0",
+      "inputDigest": "sha256:7e792ddf2405eab9061774e34a03586bce92a5f5896a3734a4e2ead818abb4cc",
+      "expectedLabel": "NOT_FIT",
+      "expectedReasonCodes": [
+        "HARD_FAIL"
+      ]
+    },
+    {
+      "id": "evidence-missing-c1",
+      "file": "cases/evidence-missing-c1.json",
+      "ensure": "evidence-missing",
+      "split": "test",
+      "fileSha256": "sha256:3ab2fc25d8700d785f1e21fb1eece495d8eae5a9ded8fae54ee92adaad8f77ec",
+      "inputDigest": "sha256:a8509eb311f5cb44dbd99fa023e00a73de394991c0c52a7a4c5f52a3274a3bc4",
+      "expectedLabel": "UNKNOWN",
+      "expectedReasonCodes": [
+        "EVIDENCE_GATE_UNKNOWN"
+      ]
+    },
+    {
+      "id": "evidence-span-missing",
+      "file": "cases/evidence-span-missing.json",
+      "ensure": "evidence-missing",
+      "split": "test",
+      "fileSha256": "sha256:5790781fa9546caec3fdfefcd15dc7607db3e372e7ca646bac06d6fa8c56e580",
+      "inputDigest": "sha256:a8509eb311f5cb44dbd99fa023e00a73de394991c0c52a7a4c5f52a3274a3bc4",
+      "expectedLabel": "UNKNOWN",
+      "expectedReasonCodes": [
+        "EVIDENCE_GATE_UNKNOWN"
+      ]
+    },
+    {
+      "id": "evidence-stale",
+      "file": "cases/evidence-stale.json",
+      "ensure": "evidence-missing",
+      "split": "test",
+      "fileSha256": "sha256:6785f6f77b8b3ef209bbec591a972a31e12353ab5766cc21a96d04e3cd082b75",
+      "inputDigest": "sha256:a8509eb311f5cb44dbd99fa023e00a73de394991c0c52a7a4c5f52a3274a3bc4",
+      "expectedLabel": "UNKNOWN",
+      "expectedReasonCodes": [
+        "EVIDENCE_GATE_UNKNOWN"
+      ]
+    },
+    {
+      "id": "evidence-url-denied",
+      "file": "cases/evidence-url-denied.json",
+      "ensure": "evidence-missing",
+      "split": "test",
+      "fileSha256": "sha256:18e853063d577e8592a71c51f4d20ee86d0cd148aaf4d0ef37c6bf7062a35683",
+      "inputDigest": "sha256:a8509eb311f5cb44dbd99fa023e00a73de394991c0c52a7a4c5f52a3274a3bc4",
+      "expectedLabel": "UNKNOWN",
+      "expectedReasonCodes": [
+        "EVIDENCE_GATE_UNKNOWN"
+      ]
+    },
+    {
+      "id": "injection-in-profile",
+      "file": "cases/injection-in-profile.json",
+      "ensure": "injection",
+      "split": "calib",
+      "fileSha256": "sha256:52371b15fdee03a5bd666cdbda4492a9b4999b0b2f76615dfe5a687532f1c985",
+      "inputDigest": "sha256:e0ef28344ab1b3e3b0f059b18308e45857fe93eebfa5e73ed3aa53c9fab1398e",
+      "expectedLabel": "UNKNOWN",
+      "expectedReasonCodes": [
+        "PROMPT_INJECTION_DETECTED",
+        "EVIDENCE_GATE_UNKNOWN"
+      ]
+    },
+    {
+      "id": "borderline-all-6-7",
+      "file": "cases/borderline-all-6-7.json",
+      "ensure": "borderline",
+      "split": "test",
+      "fileSha256": "sha256:744f8ff8f8b19fe935200dba403486bb839fcfd121df7fdb650d43e890e19f63",
+      "inputDigest": "sha256:a8509eb311f5cb44dbd99fa023e00a73de394991c0c52a7a4c5f52a3274a3bc4",
+      "expectedLabel": "UNKNOWN",
+      "expectedReasonCodes": [
+        "BORDERLINE_UNKNOWN"
+      ]
+    },
+    {
+      "id": "low-score-not-fit",
+      "file": "cases/low-score-not-fit.json",
+      "ensure": "low-score",
+      "split": "test",
+      "fileSha256": "sha256:31515df5f957ad0e47090def55b6121ca8fb2a4ffcf93a87255258e16f916185",
+      "inputDigest": "sha256:a8509eb311f5cb44dbd99fa023e00a73de394991c0c52a7a4c5f52a3274a3bc4",
+      "expectedLabel": "NOT_FIT",
+      "expectedReasonCodes": [
+        "WEIGHTED_NOT_FIT"
+      ]
+    },
+    {
+      "id": "size-out-of-band",
+      "file": "cases/size-out-of-band.json",
+      "ensure": "size",
+      "split": "test",
+      "fileSha256": "sha256:e29c3d798e6a6a1da90e5289396b9420b3cf77d6feaf7bde052909b9350af0e1",
+      "inputDigest": "sha256:87c51973c7dca2245c7fc8796ea046dec982a6307537ea03cf58bf2fbabf403d",
+      "expectedLabel": "UNKNOWN",
+      "expectedReasonCodes": [
+        "BORDERLINE_UNKNOWN"
+      ]
+    },
+    {
+      "id": "refusal-model",
+      "file": "cases/refusal-model.json",
+      "ensure": "refusal",
+      "split": "test",
+      "fileSha256": "sha256:596fe1189d7f7eef8cde6e5a14be1b95a6080756a5c8d04d3af39477895430f3",
+      "inputDigest": "sha256:a8509eb311f5cb44dbd99fa023e00a73de394991c0c52a7a4c5f52a3274a3bc4",
+      "expectedLabel": "UNKNOWN",
+      "expectedReasonCodes": [
+        "EVIDENCE_GATE_UNKNOWN"
+      ]
+    },
+    {
+      "id": "all-not-applicable",
+      "file": "cases/all-not-applicable.json",
+      "ensure": "not-applicable",
+      "split": "test",
+      "fileSha256": "sha256:92dc7a68bdce22e5ec070272e413e76867da5820e00e8491d0b4daafef54d9ef",
+      "inputDigest": "sha256:a8509eb311f5cb44dbd99fa023e00a73de394991c0c52a7a4c5f52a3274a3bc4",
+      "expectedLabel": "UNKNOWN",
+      "expectedReasonCodes": [
+        "NO_APPLICABLE_CRITERIA"
+      ]
+    },
+    {
+      "id": "score-missing",
+      "file": "cases/score-missing.json",
+      "ensure": "score-missing",
+      "split": "test",
+      "fileSha256": "sha256:02ed061c9927551c7a3c0adb33feac4b63c59f5059b4c37feb4bd7f7baacdad4",
+      "inputDigest": "sha256:a8509eb311f5cb44dbd99fa023e00a73de394991c0c52a7a4c5f52a3274a3bc4",
+      "expectedLabel": "UNKNOWN",
+      "expectedReasonCodes": [
+        "SCORE_MISSING"
+      ]
+    },
+    {
+      "id": "weight-renormalized-c5-na",
+      "file": "cases/weight-renormalized-c5-na.json",
+      "ensure": "renormalized-weights",
+      "split": "test",
+      "fileSha256": "sha256:339d32882029d3f4ee9eb0d534c694d2b1297c76b43ecfb6973933653cccc276",
+      "inputDigest": "sha256:a8509eb311f5cb44dbd99fa023e00a73de394991c0c52a7a4c5f52a3274a3bc4",
+      "expectedLabel": "FIT",
+      "expectedReasonCodes": [
+        "FIT_ACCEPTED"
+      ]
+    }
+  ]
+}
