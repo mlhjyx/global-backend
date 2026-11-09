@@ -51,6 +51,15 @@ export interface ExecutionContext {
     receipt: DurableExecutionReceipt,
   ) => void;
   /**
+   * A 方案（local_query）：run 的执行预算绑定身份。零出网 provider 用它构造确定性
+   * durable 回执（authorityId/accountId 必须与执行器最终校验的绑定一致）；
+   * 有物理调用的 provider 忽略此字段（回执来自 ToolBroker/网关）。
+   */
+  durableBudgetAuthority?: {
+    authorityId: string;
+    accountId: string;
+  };
+  /**
    * G3 5.5: the canonical company a per-company stage works on. Providers
    * spread the context into their ToolContext, so subject-bound artifact tools
    * (crawl4ai.fetch/render, http.get) are admitted for this company only.

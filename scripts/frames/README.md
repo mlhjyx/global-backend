@@ -60,9 +60,12 @@ NACE 类目形态 `28.13`，码体系写 `naceVersion`（如 `NAF-rev2`）；查
 由下游触达过滤（P4 抑制联动）消费——查询层不做隐式过滤。
 
 `registry_frame` 同时注册为 discovery provider（`apps/api/src/discovery/providers/registry-frame.provider.ts`，
-company_registry 类，data_provider 默认 DISABLED）。**注意**：现行 governed-lineage 契约要求逐记录
-durable 回执，本地查询无法满足，因此它目前恒被路由闸门排除（计划期 `SOURCE_LINEAGE_UNAVAILABLE`）——
-执行面等 `docs/superpowers/plans/2026-11-09-registry-frame-local-lineage.md` 的设计获批。
+company_registry 类，data_provider 默认 DISABLED）。A 方案（local_query 血缘变体）已获批并实现：
+`REGISTRY_FRAME_PROVIDER=on` 时适配器声明受治理血缘，并按 §3.12.3 之外的 local_query 约定构造
+**确定性回执**（producer `registry.query`，operationId 由 runId+queryDigest 派生，resultDigest 为归一
+候选集的规范哈希、可从 `registry_entity` 重算；usage 恒 0 / `not_incurred`）。默认 off = 不声明血缘、
+计划期计 `SOURCE_LINEAGE_UNAVAILABLE`（测试钉死）；关掉开关即回滚。data_provider 是第二道开关。
+实现说明见 `docs/superpowers/plans/2026-11-09-registry-frame-local-lineage.md`。
 
 ## 域名校验（离线骨架，T3-13）
 
