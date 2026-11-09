@@ -194,22 +194,26 @@ export class MeasurementService {
     const to = assertDay(query.to, "to");
     const cursor = decodeCursor(query.cursor);
     const limit = limitOf(query.limit);
-    const filters: Prisma.Sql[] = [];
-    if (metricId) filters.push(Prisma.sql`AND metric_id = ${metricId}`);
-    if (from) filters.push(Prisma.sql`AND window_end >= ${from}::date`);
-    if (to) filters.push(Prisma.sql`AND window_end < (${to}::date + interval '1 day')`);
-    if (cursor) {
-      if (!cursor.w || !cursor.id) {
-        throw new BadRequestException({
-          error: { code: "VALIDATION_ERROR", message: "cursor is not valid" },
-        });
-      }
-      filters.push(
-        Prisma.sql`AND (window_end, id) < (${cursor.w}::timestamptz, ${cursor.id}::uuid)`,
-      );
+    if (cursor && (!cursor.w || !cursor.id)) {
+      throw new BadRequestException({
+        error: { code: "VALIDATION_ERROR", message: "cursor is not valid" },
+      });
     }
-    const where =
-      filters.length > 0 ? Prisma.sql`WHERE true ${Prisma.join(filters, " ")}` : Prisma.empty;
+    // Each fragment is a const so the raw-SQL parameter-type gate can resolve
+    // every statement statically (no Prisma.join over runtime arrays).
+    const metricFilter = metricId
+      ? Prisma.sql`AND metric_id = ${metricId}`
+      : Prisma.empty;
+    const fromFilter = from
+      ? Prisma.sql`AND window_end >= ${from}::date`
+      : Prisma.empty;
+    const toFilter = to
+      ? Prisma.sql`AND window_end < (${to}::date + interval '1 day')`
+      : Prisma.empty;
+    const cursorFilter = cursor
+      ? Prisma.sql`AND (window_end, id) < (${cursor.w}::timestamptz, ${cursor.id}::uuid)`
+      : Prisma.empty;
+    const where = Prisma.sql`WHERE true ${metricFilter} ${fromFilter} ${toFilter} ${cursorFilter}`;
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const rows = await tx.$queryRaw<
         {
@@ -284,31 +288,47 @@ export class MeasurementService {
     const to = assertDay(query.to, "to");
     const cursor = decodeCursor(query.cursor);
     const limit = limitOf(query.limit);
-    const bucketColumn = granularity === "weekly" ? "week" : "day";
-    const table =
-      granularity === "weekly" ? "metric_rollup_weekly" : "metric_rollup_daily";
-    const filters: Prisma.Sql[] = [];
-    if (metricId) filters.push(Prisma.sql`AND metric_id = ${metricId}`);
-    if (from) filters.push(Prisma.sql`AND ${Prisma.raw(bucketColumn)} >= ${from}::date`);
-    if (to) filters.push(Prisma.sql`AND ${Prisma.raw(bucketColumn)} <= ${to}::date`);
-    if (cursor) {
-      if (!cursor.b || !cursor.m || !cursor.v || cursor.k === undefined) {
-        throw new BadRequestException({
-          error: { code: "VALIDATION_ERROR", message: "cursor is not valid" },
-        });
-      }
-      filters.push(Prisma.sql`AND (
-        ${Prisma.raw(bucketColumn)} < ${cursor.b}::date
-        OR (${Prisma.raw(bucketColumn)} = ${cursor.b}::date AND metric_id > ${cursor.m})
-        OR (${Prisma.raw(bucketColumn)} = ${cursor.b}::date AND metric_id = ${cursor.m}
-            AND metric_version > ${cursor.v}::int)
-        OR (${Prisma.raw(bucketColumn)} = ${cursor.b}::date AND metric_id = ${cursor.m}
-            AND metric_version = ${cursor.v}::int AND stratum_key > ${cursor.k})
-      )`);
+    if (cursor && (!cursor.b || !cursor.m || !cursor.v || cursor.k === undefined)) {
+      throw new BadRequestException({
+        error: { code: "VALIDATION_ERROR", message: "cursor is not valid" },
+      });
     }
-    const where =
-      filters.length > 0 ? Prisma.sql`WHERE true ${Prisma.join(filters, " ")}` : Prisma.empty;
-    const bucket = Prisma.raw(bucketColumn);
+    const weekly = granularity === "weekly";
+    // Column names are written out per granularity (identifiers are not
+    // parameterizable). Each granularity keeps its own fragments and its own
+    // WHERE: the raw-SQL gate expands conditional fragments independently, so
+    // a shared WHERE would pair daily tables with weekly column names.
+    const metricFilter = metricId
+      ? Prisma.sql`AND metric_id = ${metricId}`
+      : Prisma.empty;
+    const fromFilterDaily = from
+      ? Prisma.sql`AND day >= ${from}::date`
+      : Prisma.empty;
+    const toFilterDaily = to
+      ? Prisma.sql`AND day <= ${to}::date`
+      : Prisma.empty;
+    const cursorFilterDaily = cursor
+      ? Prisma.sql`AND (
+          day < ${cursor.b}::date
+          OR (day = ${cursor.b}::date AND metric_id > ${cursor.m})
+          OR (day = ${cursor.b}::date AND metric_id = ${cursor.m} AND metric_version > ${cursor.v}::int)
+          OR (day = ${cursor.b}::date AND metric_id = ${cursor.m} AND metric_version = ${cursor.v}::int AND stratum_key > ${cursor.k}))`
+      : Prisma.empty;
+    const fromFilterWeekly = from
+      ? Prisma.sql`AND week >= ${from}::date`
+      : Prisma.empty;
+    const toFilterWeekly = to
+      ? Prisma.sql`AND week <= ${to}::date`
+      : Prisma.empty;
+    const cursorFilterWeekly = cursor
+      ? Prisma.sql`AND (
+          week < ${cursor.b}::date
+          OR (week = ${cursor.b}::date AND metric_id > ${cursor.m})
+          OR (week = ${cursor.b}::date AND metric_id = ${cursor.m} AND metric_version > ${cursor.v}::int)
+          OR (week = ${cursor.b}::date AND metric_id = ${cursor.m} AND metric_version = ${cursor.v}::int AND stratum_key > ${cursor.k}))`
+      : Prisma.empty;
+    const whereDaily = Prisma.sql`WHERE true ${metricFilter} ${fromFilterDaily} ${toFilterDaily} ${cursorFilterDaily}`;
+    const whereWeekly = Prisma.sql`WHERE true ${metricFilter} ${fromFilterWeekly} ${toFilterWeekly} ${cursorFilterWeekly}`;
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
       const rows = await tx.$queryRaw<
         {
@@ -325,15 +345,25 @@ export class MeasurementService {
           sample_n: number | null;
           refreshed_at: Date;
         }[]
-      >(Prisma.sql`
-        SELECT ${bucket} AS bucket, metric_id, metric_version, stratum, stratum_key,
-               numerator::float8 AS numerator, denominator::float8 AS denominator,
-               value::float8 AS value, ci_low::float8 AS ci_low,
-               ci_high::float8 AS ci_high, sample_n, refreshed_at
-        FROM ${Prisma.raw(table)}
-        ${where}
-        ORDER BY ${bucket} DESC, metric_id, metric_version, stratum_key
-        LIMIT ${limit + 1}`);
+      >(weekly
+        ? Prisma.sql`
+            SELECT week AS bucket, metric_id, metric_version, stratum, stratum_key,
+                   numerator::float8 AS numerator, denominator::float8 AS denominator,
+                   value::float8 AS value, ci_low::float8 AS ci_low,
+                   ci_high::float8 AS ci_high, sample_n, refreshed_at
+            FROM metric_rollup_weekly
+            ${whereWeekly}
+            ORDER BY week DESC, metric_id, metric_version, stratum_key
+            LIMIT ${limit + 1}`
+        : Prisma.sql`
+            SELECT day AS bucket, metric_id, metric_version, stratum, stratum_key,
+                   numerator::float8 AS numerator, denominator::float8 AS denominator,
+                   value::float8 AS value, ci_low::float8 AS ci_low,
+                   ci_high::float8 AS ci_high, sample_n, refreshed_at
+            FROM metric_rollup_daily
+            ${whereDaily}
+            ORDER BY day DESC, metric_id, metric_version, stratum_key
+            LIMIT ${limit + 1}`);
       const items = rows.map((row) => ({
         bucket: row.bucket,
         metricId: row.metric_id,
