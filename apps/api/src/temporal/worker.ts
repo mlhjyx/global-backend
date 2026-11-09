@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { Runtime, Worker } from "@temporalio/worker";
 import { DETERMINISTIC_LEDGER_FAILURE_INTERCEPTORS } from "./deterministic-ledger-failure.interceptor";
 import { workerIdentity } from "./worker-composition";
+import { enforceJudgeModelRouting } from "../ai-tasks/task-registry";
 import { createRuntimeMachineTokenClient } from "../platform-authority/machine-token-runtime";
 import {
   bindNativeMachineCredential,
@@ -157,6 +158,9 @@ async function holdWorkerNotReady(
 async function main(): Promise<void> {
   Runtime.install({ shutdownSignals: [] });
   const runtimeSettings = resolveRuntimeSettings(process.env);
+  // 终判 judge 模型路由自检（P3 J03）：worker 是判定活动真正的执行者，
+  // 受控模式下与 API 同样 fail-closed，不允许 flash 终判上线。
+  enforceJudgeModelRouting({ mode: runtimeSettings.mode });
   let devFastLane: DevFastLane;
   try {
     devFastLane = resolveDevFastLane(runtimeSettings.mode, process.env);

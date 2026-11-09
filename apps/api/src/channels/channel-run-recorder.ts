@@ -10,7 +10,8 @@ export interface RecordChannelRunInput {
    * 重试不再推进 failureStreak（设计 2026-11-06 §4.2）。
    */
   readonly crawlRunId?: string;
-  readonly status: 'SUCCEEDED' | 'FAILED';
+  /** PARTIAL = 截断/部分页失败但有产出；不参与失败率坏轮，按成功信号清零失败连击。 */
+  readonly status: 'SUCCEEDED' | 'PARTIAL' | 'FAILED';
   readonly pagesFetched: number;
   readonly recordsFound: number;
   readonly recordsMaterialized: number;
@@ -19,6 +20,18 @@ export interface RecordChannelRunInput {
   readonly errorCode?: string;
   /** 平台发起的运行没有租户工作空间：triggered_by_workspace_id 记 NULL。 */
   readonly triggeredByWorkspaceId?: string;
+  // —— CH-6 运行维度（两段式落账时由活动传入；缺省不写，保持历史调用方行为）——
+  readonly mode?: 'preview' | 'run';
+  readonly manifestSha256?: string;
+  readonly planDigest?: string;
+  readonly requests?: number;
+  readonly bytesFetched?: number;
+  readonly http4xx?: number;
+  readonly http5xx?: number;
+  readonly http429?: number;
+  readonly durationMs?: number;
+  readonly circuitState?: 'closed' | 'open' | 'half_open';
+  readonly operatorNote?: string;
 }
 
 export interface RecordedChannelRun {
@@ -29,7 +42,7 @@ export interface RecordedChannelRun {
 
 type RecorderTx = {
   sourceChannelRun: {
-    findUnique: (args: never) => Promise<{ id: string } | null>;
+    findUnique: (args: never) => Promise<{ id: string; status?: string | null } | null>;
     create: (args: never) => Promise<{ id: string }>;
     createMany: (args: never) => Promise<{ count: number }>;
     update: (args: never) => Promise<{ id: string }>;
@@ -69,6 +82,17 @@ export async function recordChannelRunInTransaction(
     failures: input.failures,
     truncated: input.truncated ?? false,
     ...(input.errorCode ? { errorCode: input.errorCode } : {}),
+    ...(input.mode !== undefined ? { mode: input.mode } : {}),
+    ...(input.manifestSha256 !== undefined ? { manifestSha256: input.manifestSha256 } : {}),
+    ...(input.planDigest !== undefined ? { planDigest: input.planDigest } : {}),
+    ...(input.requests !== undefined ? { requests: input.requests } : {}),
+    ...(input.bytesFetched !== undefined ? { bytesFetched: BigInt(input.bytesFetched) } : {}),
+    ...(input.http4xx !== undefined ? { http4xx: input.http4xx } : {}),
+    ...(input.http5xx !== undefined ? { http5xx: input.http5xx } : {}),
+    ...(input.http429 !== undefined ? { http429: input.http429 } : {}),
+    ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+    ...(input.circuitState !== undefined ? { circuitState: input.circuitState } : {}),
+    ...(input.operatorNote !== undefined ? { operatorNote: input.operatorNote } : {}),
     finishedAt: new Date(),
   };
   // A finalize retry carries the same crawlRunId and the same outcome (Temporal
@@ -80,14 +104,16 @@ export async function recordChannelRunInTransaction(
   if (input.crawlRunId) {
     const existing = await tx.sourceChannelRun.findUnique({
       where: { crawlRunId: input.crawlRunId },
-      select: { id: true },
+      select: { id: true, status: true },
     } as never);
     if (existing) {
       run = await tx.sourceChannelRun.update({
         where: { crawlRunId: input.crawlRunId },
         data: outcome,
       } as never);
-      replayed = true;
+      // CH-6 两段式落账：runChannelCrawl 先写 RUNNING 行并逐页更新计数；finalize 首次
+      // 收敛时必须照常推进 streak（只有已处于终态的既有行才是 finalize 重放）。
+      replayed = existing.status !== 'RUNNING';
     } else {
       // ON CONFLICT DO NOTHING keeps a concurrent duplicate from aborting this
       // transaction (a caught unique violation would take the streak update down
@@ -144,10 +170,12 @@ export async function recordChannelRunInTransaction(
       : input.failures > 0
         ? 1
         : 0;
-  const badRound = input.status === 'FAILED' || failureRate > 0.3;
+  // PARTIAL（截断/部分失败但有产出）不计坏轮、按成功信号清零失败连击（章节 §6.3.5.2）。
+  const successSignal = input.status === 'SUCCEEDED' || input.status === 'PARTIAL';
+  const badRound =
+    input.status === 'FAILED' || (input.status === 'SUCCEEDED' && failureRate > 0.3);
   const streak = badRound ? channel.failureStreak + 1 : 0;
-  const consecutiveFailures =
-    input.status === 'SUCCEEDED' ? 0 : (channel.consecutiveFailures ?? 0) + 1;
+  const consecutiveFailures = successSignal ? 0 : (channel.consecutiveFailures ?? 0) + 1;
   const health = evaluateChannelHealth({
     consecutiveFailures,
     lastSuccessAt: channel.lastSuccessAt ?? null,
@@ -170,7 +198,7 @@ export async function recordChannelRunInTransaction(
       lastRunAt: now,
       failureStreak: streak,
       consecutiveFailures,
-      ...(input.status === 'SUCCEEDED' ? { lastSuccessAt: now } : {}),
+      ...(successSignal ? { lastSuccessAt: now } : {}),
       ...(autoDisabled ? { status: 'AUTO_DISABLED', disabledReason } : {}),
     },
   } as never);

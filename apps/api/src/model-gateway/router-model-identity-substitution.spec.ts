@@ -20,7 +20,10 @@ import { restoreModelResultFromReplay } from '../durable-results/model-result-re
  * that opt in; the result, trace and spend then name Flash, never pro.
  */
 
-const SUBSTITUTABLE_TASK = 'discovery.qualify_fit';
+// A non-judge acquisition task that opts in: the D14 semantics under test are
+// gateway-level, and the final-verdict judge is deliberately excluded from the
+// pro→flash substitute (P3 J03; see the judge-routing case below).
+const SUBSTITUTABLE_TASK = 'discovery.extract_list';
 const PRO = 'deepseek-v4-pro';
 const FLASH = 'deepseek-v4-flash';
 const FLASH_BUILD = 'deepseek-ai/DeepSeek-V4-Flash-0731';
@@ -502,6 +505,35 @@ describe('RouterModelGateway — identity stays exact outside the approved subst
     ).rejects.toThrow('MODEL_IDENTITY_SUBSTITUTES_CALLER_SUPPLIED');
     expect(budgetStore.reserve).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects the reviewed Flash substitute for the final-verdict judge (P3 J03)', async () => {
+    // 终判 judge 的替换目标收紧到 JUDGE_MODEL_ALLOWLIST：pro→flash 只对普通获客任务成立，
+    // 不允许把最终 verdict 悄悄降档成 flash。
+    stubUpstream(flashStream());
+    const { gateway } = gatewayWith(
+      streamingProvider(),
+      'deepseek-v4-pro>deepseek-v4-flash',
+    );
+
+    await expectMismatch(
+      gateway.generateStructured(structured('discovery.qualify_fit'), ctx()),
+    );
+  });
+
+  it('admits the Flash substitute for the judge only with JUDGE_ALLOW_FLASH=true', async () => {
+    stubUpstream(flashStream());
+    vi.stubEnv('JUDGE_ALLOW_FLASH', 'true');
+    const { gateway } = gatewayWith(
+      streamingProvider(),
+      'deepseek-v4-pro>deepseek-v4-flash',
+    );
+
+    const out = await gateway.generateStructured(
+      structured('discovery.qualify_fit'),
+      ctx(),
+    );
+    expect(out).toMatchObject({ model: FLASH, reportedModel: FLASH_BUILD });
   });
 
   it('rejects another model family even with the setting on', async () => {

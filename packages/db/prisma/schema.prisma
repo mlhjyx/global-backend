@@ -1480,6 +1480,7 @@ model DiscoveryRun {
   companyJobs               DiscoveryCompanyJob[]
   runEvents                 RunEvent[]
   memEpisodes               MemRunEpisode[]
+  judgmentRecords           JudgmentRecord[]
 
   @@unique([workspaceId, id], map: "discovery_run_workspace_id_id_key")
   @@index([workspaceId])
@@ -1722,7 +1723,7 @@ model SourceChannelRun {
   crawlRunId         String?   @unique @map("crawl_run_id") @db.Uuid
   /// 发起本次运行的工作空间（可选来源标注；本表是平台级运行统计，不承载租户数据）。
   triggeredByWorkspaceId String? @map("triggered_by_workspace_id") @db.Uuid
-  /// RUNNING | SUCCEEDED | FAILED
+  /// RUNNING | SUCCEEDED | PARTIAL | FAILED（PARTIAL = 截断/部分失败但有产出，不计坏轮）
   status             String    @default("RUNNING") @db.VarChar(16)
   pagesFetched       Int       @default(0) @map("pages_fetched")
   recordsFound       Int       @default(0) @map("records_found")
@@ -1730,6 +1731,21 @@ model SourceChannelRun {
   truncated   Boolean  @default(false)
   failures           Int       @default(0)
   errorCode          String?   @map("error_code") @db.VarChar(64)
+  // —— CH-6 两段式落账与运行维度（migration 20261109140000_channel_run_dimensions）——
+  /// preview | run
+  mode               String    @default("run") @db.VarChar(8)
+  manifestSha256     String?   @map("manifest_sha256") @db.Char(64)
+  planDigest         String?   @map("plan_digest") @db.Char(64)
+  /// 物理请求数（两段式心跳写；finalize 收敛）
+  requests           Int       @default(0)
+  bytesFetched       BigInt    @default(0) @map("bytes_fetched")
+  http4xx            Int       @default(0) @map("http_4xx")
+  http5xx            Int       @default(0) @map("http_5xx")
+  http429            Int       @default(0) @map("http_429")
+  durationMs         Int?      @map("duration_ms")
+  /// closed | open | half_open（结束时）
+  circuitState       String?   @map("circuit_state") @db.VarChar(16)
+  operatorNote       String?   @map("operator_note") @db.VarChar(500)
   startedAt          DateTime  @default(now()) @map("started_at") @db.Timestamptz(3)
   finishedAt         DateTime? @map("finished_at") @db.Timestamptz(3)
 
@@ -2246,6 +2262,7 @@ model CanonicalCompany {
   channelSightings        CompanyChannelSighting[]
   leads                   Lead[]
   materializationOutcomes DiscoveryCompanyMaterializationOutcome[]
+  judgmentRecords         JudgmentRecord[]
 
   @@unique([workspaceId, dedupeKey])
   @@unique([workspaceId, id], map: "canonical_company_workspace_id_id_key")
@@ -2908,6 +2925,7 @@ model IcpDefinition {
   rules      QualificationRule[]
   backtests  IcpBacktest[]
   queryPlans DiscoveryQueryPlan[]
+  judgmentRecords JudgmentRecord[]
 
   @@index([workspaceId])
   @@index([companyId])
@@ -3958,4 +3976,199 @@ model RegistryEntityLink {
   @@unique([leftScheme, leftRegNumber, rightScheme, rightRegNumber, linkType], map: "registry_entity_link_identity_key")
   @@index([status])
   @@map("registry_entity_link")
+}
+
+// ---------------------------------------------------------------------------
+// P3（ch04 判定质量）J04：判定质量六表。设计依据《GainOS 深化计划 v3.0》第 4 章：
+// hard_gate_result / gate_enrichment_task（§4.3.2.8）、judgment_record（§4.3.4.2）、
+// conformal_threshold（§4.3.7.3）、judgment_review_task（§4.3.8.1）、
+// judgment_golden_label（§4.3.8.3）。迁移 20261109130000_judgment_quality_v1。
+// Prisma 不可建模的表达式/部分索引（hard_gate_result_replay_key、gate_enrichment_task_key、
+// conformal_threshold_active_key、judgment_record_failure_idx）由迁移 SQL 实现；Prisma 6.1
+// 的 migrate diff 忽略这两类索引，故不进 datamodel 也不登记 drift-baseline（见迁移头注释）。
+// ---------------------------------------------------------------------------
+
+/// 硬门判定结果（append-only）：一次评估一行，replay 唯一键幂等（含 COALESCE(icp_id)）。
+model HardGateResult {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId        String   @map("workspace_id") @db.Uuid
+  canonicalCompanyId String   @map("canonical_company_id") @db.Uuid
+  /// NULL = 与 ICP 无关的合规门（制裁/禁联/自指）。
+  icpId              String?  @map("icp_id") @db.Uuid
+  gateSetVersion     String   @map("gate_set_version")
+  /// G_SANCTIONS | G_SUPPRESSION | G_COUNTRY | G_SIZE | G_DOMAIN | G_SELF | G_ALIVE | G_ICP_EXCLUSION
+  gateId             String   @map("gate_id")
+  gateVersion        String   @map("gate_version")
+  /// PASS | FAIL | UNKNOWN | NOT_APPLICABLE
+  verdict            String
+  reasonCode         String?  @map("reason_code")
+  applicable         Boolean  @default(true)
+  facts              Json     @default("{}")
+  /// sha256(canonical facts + gate config)
+  inputDigest        String   @map("input_digest") @db.Char(64)
+  evaluatedAt        DateTime @default(now()) @map("evaluated_at") @db.Timestamptz(3)
+
+  @@index([workspaceId, canonicalCompanyId, evaluatedAt(sort: Desc)], map: "hard_gate_result_lookup_idx")
+  @@index([workspaceId, gateId, verdict, evaluatedAt(sort: Desc)], map: "hard_gate_result_gate_stats_idx")
+  @@map("hard_gate_result")
+}
+
+/// 门补数队列（有状态机）：UNKNOWN 硬门进这里排期补数，状态 queued|running|filled|abandoned。
+model GateEnrichmentTask {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId        String    @map("workspace_id") @db.Uuid
+  canonicalCompanyId String    @map("canonical_company_id") @db.Uuid
+  icpId              String?   @map("icp_id") @db.Uuid
+  gateId             String    @map("gate_id")
+  reasonCode         String    @map("reason_code")
+  status             String    @default("queued")
+  attempts           Int       @default(0)
+  nextAttemptAt      DateTime? @map("next_attempt_at") @db.Timestamptz(3)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime  @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  @@map("gate_enrichment_task")
+}
+
+/// 不可变判定记录（append-only）：一次 judge 尝试一行，永不更新、永不删除。
+/// app_user 仅 SELECT/INSERT（迁移内 REVOKE UPDATE/DELETE，参照 agent_decision_trace）。
+model JudgmentRecord {
+  id                        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId               String   @map("workspace_id") @db.Uuid
+  /// NULL = backlog/人工触发。单列 FK ON DELETE SET NULL：设计稿的 (workspace_id, run_id)
+  /// 复合 FK 与 SET NULL 语义不可实现（workspace_id NOT NULL），见迁移注释。
+  runId                     String?  @map("run_id") @db.Uuid
+  icpId                     String   @map("icp_id") @db.Uuid
+  canonicalCompanyId        String   @map("canonical_company_id") @db.Uuid
+  /// 1=quick, 2=deep, 3=panel
+  judgeLevel                Int      @map("judge_level") @db.SmallInt
+  /// FIT | NOT_FIT | UNKNOWN
+  verdict                   String
+  /// 模型自报，仅诊断
+  verdictProposed           String?  @map("verdict_proposed")
+  /// [{id,applicable,score,label,evidence[],rationale,flags[]}]
+  criteria                  Json
+  /// 汇总的去重证据引用
+  evidenceRefs              Json     @default("[]") @map("evidence_refs")
+  evidenceCompleteness      Boolean  @map("evidence_completeness")
+  /// 'fit-v2'
+  rubricVersion             String   @map("rubric_version")
+  /// sha256(system+user 模板+rubric+schema+采样参数+few-shot)
+  promptHash                String   @map("prompt_hash") @db.Char(64)
+  /// 'judge-output/v2'
+  schemaVersion             String   @map("schema_version")
+  /// sha256(company profile + icp brief + gate facts)
+  inputDigest               String   @map("input_digest") @db.Char(64)
+  /// sha256(canonical JSON of criteria)
+  outputDigest              String   @map("output_digest") @db.Char(64)
+  modelRequested            String   @map("model_requested")
+  /// 网关实际解析
+  modelResolved             String?  @map("model_resolved")
+  /// 上游上报（经可信别名校验）
+  modelReported             String?  @map("model_reported")
+  /// {temperature, k, votes:[...], seed?}
+  sampling                  Json     @default("{}")
+  /// provider | parser | retriever | guardrail | tool | budget | dispatch | storage
+  stage                     String?
+  /// failure-codes.ts 枚举
+  cause                     String?
+  /// retry | failover | degraded | failed | skipped
+  outcome                   String?
+  retryable                 Boolean?
+  failureCode               String?  @map("failure_code")
+  latencyMs                 Int?     @map("latency_ms")
+  inputTokens               Int?     @map("input_tokens")
+  outputTokens              Int?     @map("output_tokens")
+  costMicros                BigInt?  @map("cost_micros")
+  attempt                   Int      @default(1) @db.SmallInt
+  durableReceipt            Json?    @map("durable_receipt")
+  /// L4 计算的非 conformity 分数（见 §4.3.7）
+  conformalScore            Float?   @map("conformal_score")
+  conformalThresholdVersion String?  @map("conformal_threshold_version")
+  createdAt                 DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  run              DiscoveryRun?     @relation(fields: [runId], references: [id], onDelete: SetNull, onUpdate: Restrict, map: "judgment_record_run_fkey")
+  canonicalCompany CanonicalCompany @relation(fields: [canonicalCompanyId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "judgment_record_company_fkey")
+  icp              IcpDefinition    @relation(fields: [icpId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "judgment_record_icp_fkey")
+
+  @@unique([workspaceId, canonicalCompanyId, icpId, inputDigest, rubricVersion, promptHash, judgeLevel, attempt], map: "judgment_record_replay_key")
+  @@index([workspaceId, canonicalCompanyId, createdAt(sort: Desc)], map: "judgment_record_company_idx")
+  @@index([workspaceId, icpId, verdict, createdAt(sort: Desc)], map: "judgment_record_icp_verdict_idx")
+  @@index([promptHash], map: "judgment_record_prompt_idx")
+  @@map("judgment_record")
+}
+
+/// conformal 阈值工件（全局表，无 workspace_id，不开 RLS；app_user 仅 SELECT）。
+/// 同一 scope 同时只有一个 active（部分唯一索引，SQL-only，登记 drift 基线）。
+model ConformalThreshold {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// 'ct-2026-11-15.1'
+  version        String   @unique(map: "conformal_threshold_version_key")
+  alpha          Float
+  delta          Float
+  /// 'global' | 'icp:<uuid>' | 'source:<key>'
+  scope          String
+  threshold      Float
+  calibrationN   Int      @map("calibration_n")
+  acceptedN      Int      @map("accepted_n")
+  acceptedErrors Int      @map("accepted_errors")
+  upperBound     Float    @map("upper_bound")
+  datasetDigest  String   @map("dataset_digest") @db.Char(64)
+  rubricVersion  String   @map("rubric_version")
+  promptHash     String   @map("prompt_hash") @db.Char(64)
+  modelResolved  String   @map("model_resolved")
+  fittedAt       DateTime @default(now()) @map("fitted_at") @db.Timestamptz(3)
+  active         Boolean  @default(false)
+
+  @@map("conformal_threshold")
+}
+
+/// 人工复核队列（有状态机）：queued → in_review → resolved；超时 → expired。
+model JudgmentReviewTask {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId      String    @map("workspace_id") @db.Uuid
+  judgmentRecordId String    @map("judgment_record_id") @db.Uuid
+  /// UNKNOWN | BORDERLINE | RANDOM_AUDIT | DRIFT_AUDIT | APPEAL | CONFORMAL_ABSTAIN
+  reason           String
+  /// 0=P0 1=P1 2=P2 3=P3
+  priority         Int       @db.SmallInt
+  /// queued | in_review | resolved | expired
+  status           String    @default("queued")
+  assignee         String?
+  dueAt            DateTime? @map("due_at") @db.Timestamptz(3)
+  /// FIT | NOT_FIT | UNKNOWN
+  resolvedVerdict  String?   @map("resolved_verdict")
+  resolvedBy       String?   @map("resolved_by")
+  resolvedAt       DateTime? @map("resolved_at") @db.Timestamptz(3)
+  resolutionNote   String?   @map("resolution_note")
+  /// 回流到 judgment_golden_label 的行
+  reflowedLabelId  String?   @map("reflowed_label_id") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([judgmentRecordId, reason], map: "judgment_review_task_record_key")
+  @@index([workspaceId, status, priority, dueAt], map: "judgment_review_task_queue_idx")
+  @@map("judgment_review_task")
+}
+
+/// 金标回流（append-only）：复核结论进入校准/测试集，供 conformal 拟合与回测。
+model JudgmentGoldenLabel {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId        String   @map("workspace_id") @db.Uuid
+  canonicalCompanyId String   @map("canonical_company_id") @db.Uuid
+  icpId              String   @map("icp_id") @db.Uuid
+  /// FIT | NOT_FIT | UNKNOWN
+  label              String
+  /// double_annotated | adjudicated | review | external
+  labelSource        String   @map("label_source")
+  reviewTaskId       String?  @map("review_task_id") @db.Uuid
+  /// 标注者稳定哈希（不存姓名）
+  annotatorHash      String?  @map("annotator_hash")
+  rubricVersion      String   @map("rubric_version")
+  inputDigest        String   @map("input_digest") @db.Char(64)
+  /// calib | test | candidate | retired
+  split              String
+  labeledAt          DateTime @default(now()) @map("labeled_at") @db.Timestamptz(3)
+
+  @@index([workspaceId, canonicalCompanyId, icpId, labeledAt(sort: Desc)], map: "judgment_golden_label_lookup_idx")
+  @@map("judgment_golden_label")
 }

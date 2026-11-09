@@ -28,13 +28,19 @@ import {
 } from "./platform-channel-crawl";
 
 export interface ChannelCrawlRunOutcome {
-  readonly status: "SUCCEEDED" | "FAILED";
+  /** PARTIAL = 截断/部分失败但有产出（不参与失败率坏轮，见 channel-run-recorder）。 */
+  readonly status: "SUCCEEDED" | "PARTIAL" | "FAILED";
   readonly pagesFetched: number;
   readonly recordsFound: number;
   readonly recordsMaterialized: number;
   readonly failures: number;
   readonly truncated: boolean;
   readonly errorCode?: string;
+  // —— CH-6 运行维度 ——
+  readonly mode?: "preview" | "run";
+  readonly manifestSha256?: string;
+  readonly requests?: number;
+  readonly durationMs?: number;
 }
 
 function nonRetryable(code: string): ApplicationFailure {
@@ -181,25 +187,65 @@ export function createChannelCrawlActivities(deps: {
           recordsMaterialized: 0,
           failures: 0,
           truncated: true,
+          mode: args.input.mode,
+          requests: 0,
         };
       }
       if (!deps.fence || !deps.fetchPage) {
         throw nonRetryable("PLATFORM_EGRESS_FENCE_UNAVAILABLE");
       }
+      // CH-6 两段式落账（CP-G7）：运行开始即写 RUNNING 行，逐页更新实际计数——
+      // workflow 在失败/取消分支拿不到中间结果，finalize 以本行为准而不是落 0。
+      try {
+        await deps.prisma.sourceChannelRun.createMany({
+          data: [
+            {
+              channelId: args.input.channelId,
+              crawlRunId: args.input.crawlRunId,
+              status: "RUNNING",
+              mode: args.input.mode,
+              startedAt: new Date(now()),
+            },
+          ],
+          skipDuplicates: true,
+        });
+      } catch {
+        throw nonRetryable("CHANNEL_RUN_PROGRESS_UNAVAILABLE");
+      }
+      const startedAtMs = now();
+      let progressRequests = 0;
+      const persistProgress = async (): Promise<void> => {
+        // 尽力而为：进度写失败不阻断抓取，finalize 仍以最后已知值收敛；GREATEST 保证
+        // 活动重试不会把已记录的页数写小。
+        try {
+          await deps.prisma.$executeRaw`UPDATE "source_channel_run"
+              SET "pages_fetched" = GREATEST("pages_fetched", ${progressRequests}),
+                  "requests" = GREATEST("requests", ${progressRequests})
+            WHERE "crawl_run_id" = ${args.input.crawlRunId}::uuid`;
+        } catch {
+          // noop
+        }
+      };
       const platformEgress = channelCrawlEgressDispatcher({
         fence: deps.fence,
         binding,
       });
-      const fetchPage: CrawlPageFetcher = (url) =>
-        deps.fetchPage!(url, {
-          workspaceId: "platform",
-          runId: binding.accountKey,
-          correlationId: binding.accountKey,
-          platformEgress,
-          // Declared platform scope: the page HTML is parsed transiently and not
-          // persisted as a subjectless PERSONAL_DATA artifact (design 2026-11-06 §4.1).
-          transientResultScope: "platform_channel_crawl",
-        });
+      const fetchPage: CrawlPageFetcher = async (url) => {
+        progressRequests += 1;
+        try {
+          return await deps.fetchPage!(url, {
+            workspaceId: "platform",
+            runId: binding.accountKey,
+            correlationId: binding.accountKey,
+            platformEgress,
+            // Declared platform scope: the page HTML is parsed transiently and not
+            // persisted as a subjectless PERSONAL_DATA artifact (design 2026-11-06 §4.1).
+            transientResultScope: "platform_channel_crawl",
+          });
+        } finally {
+          await persistProgress();
+        }
+      };
       const result = await crawlChannel(config, fetchPage, { pageCap });
       // 记录物化在活动内完成（记录不进 Temporal 历史）。物化失败按不可重试失败：
       // 活动重试会因围栏拒绝重发已 ACK 的 URL 而拿到空页，重试只会把「已抓未写」伪装成「无记录」。
@@ -218,13 +264,19 @@ export function createChannelCrawlActivities(deps: {
           throw nonRetryable("CHANNEL_MATERIALIZATION_FAILED");
         }
       }
+      const truncated = result.truncatedByCap || pageCap < args.input.pageCap;
       return {
-        status: "SUCCEEDED",
+        // PARTIAL：被页帽/日配额截断但已有产出——运行成功但有边界，不当坏轮。
+        status: truncated && result.records.length > 0 ? "PARTIAL" : "SUCCEEDED",
         pagesFetched: result.pagesFetched,
         recordsFound: result.records.length,
         recordsMaterialized,
         failures: result.pageFailures,
-        truncated: result.truncatedByCap || pageCap < args.input.pageCap,
+        truncated,
+        mode: args.input.mode,
+        ...(channel.manifestSha256 ? { manifestSha256: channel.manifestSha256 } : {}),
+        requests: Math.max(progressRequests, result.pagesFetched),
+        durationMs: Math.max(0, now() - startedAtMs),
       };
     },
 
@@ -233,7 +285,27 @@ export function createChannelCrawlActivities(deps: {
       readonly outcome: ChannelCrawlRunOutcome;
     }): Promise<{ runId: string; autoDisabled: boolean }> {
       assertChannelCrawlWorkflowInput(args.input);
-      const outcome = args.outcome;
+      let outcome = args.outcome;
+      if (outcome.status === "FAILED") {
+        // CH-6/CP-G7：失败或取消时 workflow 侧没有中间结果——以 RUNNING 两段式行里
+        // 已记录的实际页数为准（绝不把「抓了 10 页后失败」落成 0 页、绕过日页帽）。
+        try {
+          const existing = await deps.prisma.sourceChannelRun.findUnique({
+            where: { crawlRunId: args.input.crawlRunId },
+            select: { status: true, pagesFetched: true, requests: true },
+          });
+          if (existing && existing.status === "RUNNING") {
+            outcome = {
+              ...outcome,
+              pagesFetched: Math.max(outcome.pagesFetched, existing.pagesFetched),
+              requests: Math.max(outcome.requests ?? 0, existing.requests),
+              mode: outcome.mode ?? args.input.mode,
+            };
+          }
+        } catch {
+          // 读取失败时保留调用方传入值；finalize 的记账重试会再次收敛。
+        }
+      }
       const recorded = await deps.recordRun({
         channelId: args.input.channelId,
         crawlRunId: args.input.crawlRunId,
@@ -244,6 +316,10 @@ export function createChannelCrawlActivities(deps: {
         failures: outcome.failures,
         truncated: outcome.truncated,
         ...(outcome.errorCode ? { errorCode: outcome.errorCode } : {}),
+        ...(outcome.mode ? { mode: outcome.mode } : {}),
+        ...(outcome.manifestSha256 ? { manifestSha256: outcome.manifestSha256 } : {}),
+        ...(outcome.requests === undefined ? {} : { requests: outcome.requests }),
+        ...(outcome.durationMs === undefined ? {} : { durationMs: outcome.durationMs }),
       });
       return { runId: recorded.runId, autoDisabled: recorded.autoDisabled };
     },
