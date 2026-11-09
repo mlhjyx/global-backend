@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "measurement-alerts/v1",
+  "rules": [
+    {
+      "id": "AL-001",
+      "metricId": "T1-008",
+      "severity": "CRITICAL",
+      "kind": "threshold",
+      "owner": "data-eng",
+      "description": "public_web 源接受率 7 日均低于 50%：源侧数据质量或引擎幂等键回归，停止扩量并人工核查（基线 91.8%，见 docs/evidence/2026-11-09-source-scorecard.md）。",
+      "comparison": "below",
+      "bound": 0.5,
+      "granularity": "daily",
+      "aggregation": "mean",
+      "lookbackBuckets": 7,
+      "minSample": 100,
+      "stratumEquals": { "provider_key": "public_web" }
+    },
+    {
+      "id": "AL-002",
+      "metricId": "T2-001",
+      "severity": "WARNING",
+      "kind": "threshold",
+      "owner": "gtm-ops",
+      "description": "全员邮箱覆盖率 7 日均跌破 10%：联系点补全或公司匹配主链路疑似中断（基线见 docs/evidence/2026-11-09-funnel-baseline.md）。",
+      "comparison": "below",
+      "bound": 0.1,
+      "granularity": "daily",
+      "aggregation": "mean",
+      "lookbackBuckets": 7,
+      "minSample": 50,
+      "stratumEquals": { "workspace_id": "ALL", "country": "ALL" }
+    },
+    {
+      "id": "AL-003",
+      "metricId": "T0-001",
+      "severity": "WARNING",
+      "kind": "freshness",
+      "owner": "data-eng",
+      "description": "T0-001（VRIC STRICT）观测超过 36 小时未更新：measurement-rollup 日运行疑似连续错过，先查 schedule 与 worker 再信任何看板数字。",
+      "source": "observation",
+      "maxAgeHours": 36
+    },
+    {
+      "id": "AL-004",
+      "metricId": "T2-001",
+      "severity": "CRITICAL",
+      "kind": "freshness",
+      "owner": "data-eng",
+      "description": "T2-001 周聚合桶超过 8 天未更新：rollup 周表刷新停摆，周度对账与 RR1/RR3 报表不可信。",
+      "source": "rollup",
+      "granularity": "weekly",
+      "maxAgeHours": 192
+    }
+  ]
+}
