@@ -268,9 +268,22 @@ describe('CompanyService.retryUnderstanding', () => {
   });
 
   it('consumes the grant and re-emits the CompanyProfileCreated event for the same company', async () => {
-    const { service, outboxCreate, consume } = fixture(FAILED_COMPANY);
+    const { service, outboxCreate, consume, companyUpdate } = fixture(FAILED_COMPANY);
     const result = await service.retryUnderstanding(CTX, COMPANY_ID, ATTEMPT_ID, 'jws');
-    expect(result.company).toBe(FAILED_COMPANY);
+    // 接受重试即清失败标记：预览回到 queued，重复点击命中「已排队」守卫。
+    expect(companyUpdate).toHaveBeenCalledWith({
+      where: { id: COMPANY_ID },
+      data: {
+        understandingFailedAt: null,
+        understandingLastError: null,
+        version: { increment: 1 },
+      },
+    });
+    expect(result.company).toMatchObject({
+      id: COMPANY_ID,
+      understandingFailedAt: null,
+      understandingLastError: null,
+    });
     expect(consume).toHaveBeenCalledTimes(1);
     expect(outboxCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
@@ -373,7 +386,7 @@ describe('CompanyService.retryUnderstanding（补官网后首次启动）', () =
   it('DRAFT + 有官网 + 从未失败且无排队事件：允许启动理解并消费 Grant', async () => {
     const { service, consume, outboxCreate } = fixture(NEVER_STARTED);
     const result = await service.retryUnderstanding(CTX, COMPANY_ID, ATTEMPT_ID, 'jws');
-    expect(result.company).toBe(NEVER_STARTED);
+    expect(result.company).toMatchObject({ id: COMPANY_ID, understandingFailedAt: null });
     expect(consume).toHaveBeenCalledTimes(1);
     expect(outboxCreate).toHaveBeenCalledTimes(1);
   });
