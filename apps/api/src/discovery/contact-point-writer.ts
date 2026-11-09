@@ -129,6 +129,57 @@ export async function upsertGuessedEmailPoint(
   });
 }
 
+export interface ProviderEmailPointInput {
+  workspaceId: string;
+  contactId: string;
+  /** 明文（Prisma 扩展透明加密）；只在进程内流转。 */
+  email: string;
+  emailType: string;
+  legalBasis?: string;
+}
+
+export interface ProviderEmailPointSnapshot {
+  id: string;
+  /** 既有行的当前四态（新行 = UNKNOWN）——验证回写要从**实际**状态推进，不假设新建。 */
+  verificationState: EmailVerificationState;
+  validSince: Date | null;
+  nextReverifyAt: Date | null;
+}
+
+/**
+ * 富集命中写入（P1-08）：按 (contactId, 'email', value) 幂等 upsert。
+ * 来源固定 `provider`（付费 finder 上报）；重复命中不覆盖既有分类与四态（`update: {}`，
+ * 首见优先）；四态列走 DB 默认（UNKNOWN / 无 validSince / 无排期），由随后的验证回写推进。
+ */
+export async function upsertProviderEmailPoint(
+  tx: Prisma.TransactionClient,
+  input: ProviderEmailPointInput,
+): Promise<ProviderEmailPointSnapshot> {
+  const row = await tx.contactPoint.upsert({
+    where: {
+      contactId_type_value: { contactId: input.contactId, type: 'email', value: input.email },
+    },
+    update: {},
+    create: {
+      workspaceId: input.workspaceId,
+      contactId: input.contactId,
+      type: 'email',
+      value: input.email,
+      status: 'UNVERIFIED',
+      sourceType: 'provider',
+      emailType: input.emailType,
+      ...(input.legalBasis ? { legalBasis: input.legalBasis } : {}),
+    },
+    select: { id: true, verificationState: true, validSince: true, nextReverifyAt: true },
+  });
+  return {
+    id: row.id,
+    verificationState: row.verificationState as EmailVerificationState,
+    validSince: row.validSince,
+    nextReverifyAt: row.nextReverifyAt,
+  };
+}
+
 export interface EmailPointStateInput {
   pointId: string;
   /** 四态转换结果（状态机产出；BLOCKED 不推进状态列，调用方只传 status/verifiedAt 等）。 */
