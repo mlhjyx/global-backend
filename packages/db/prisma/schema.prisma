@@ -2272,6 +2272,7 @@ model CanonicalCompany {
   materializationOutcomes DiscoveryCompanyMaterializationOutcome[]
   judgmentRecords         JudgmentRecord[]
   domainResolutions       CompanyDomainResolution[]
+  signals                 CompanySignal[]
 
   @@unique([workspaceId, dedupeKey])
   @@unique([workspaceId, id], map: "canonical_company_workspace_id_id_key")
@@ -4396,4 +4397,30 @@ model MetricRollupWeekly {
   @@id([week, metricId, metricVersion, stratumKey])
   @@index([metricId, week(sort: Desc)], map: "metric_rollup_weekly_metric_idx")
   @@map("metric_rollup_weekly")
+}
+
+/// P1-18（2026-11-10）：社媒信号——changedetection 页面变更 + RSSHub 条目，归因到公司
+/// （迁移 20261110020000_company_signal）。
+/// 幂等键 (workspace_id, ingest_key)：ingest_key = '<provider>:<sha256(provider|url|title|observed_at 秒)>'。
+/// company_id 可空（未归因仍落库）；公司删除 SET NULL，信号作为历史事实保留。
+/// 租户隔离：ENABLE + FORCE RLS + current_workspace_id()；app_user SELECT/INSERT/UPDATE。
+model CompanySignal {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  companyId   String?  @map("company_id") @db.Uuid
+  providerKey String   @map("provider_key")
+  signalKind  String   @map("signal_kind") // rss_item | page_change
+  sourceUrl   String   @map("source_url")
+  title       String
+  excerpt     String?
+  observedAt  DateTime @map("observed_at") @db.Timestamptz(3)
+  fingerprint String   @db.Char(64)
+  ingestKey   String   @map("ingest_key")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  company CanonicalCompany? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, ingestKey])
+  @@index([workspaceId, companyId, observedAt(sort: Desc)])
+  @@map("company_signal")
 }
