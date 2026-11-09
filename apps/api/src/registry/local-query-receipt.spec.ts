@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { parseDiscoveryCompanyResultLineage } from '../discovery/company-discovery-lineage';
 import type { ProviderCompanyRecord } from '../discovery/provider-contract';
@@ -122,6 +123,28 @@ describe('buildRegistryQueryLineage', () => {
       recordIndexes: [0, 1],
     });
     expect(parsed.receiptCoverage[0]!.receipt.operationId).toBe(receipt.operationId);
+  });
+
+  it('resultDigest equals an independently computed canonical-records hash (audit recompute)', () => {
+    const records = [
+      record(),
+      record({ externalId: 'fr_siren:529990002', attributes: { registry: { nace: '28.14', scheme: 'fr_siren' } } }),
+    ];
+    const receipt = receiptFor(records);
+    const manual = createHash('sha256').update(canonicalJson(records)).digest('hex');
+    expect(receipt.resultDigest).toBe(manual);
+  });
+
+  it('producer/schema lockdown: a local receipt cannot be presented under another provider', () => {
+    // ① 本地回执挂到别的 provider（producer 不匹配其契约）→ 拒绝。
+    const lineage = buildRegistryQueryLineage(receiptFor([record()]), 1);
+    expect(() => parseDiscoveryCompanyResultLineage(lineage, 'wikidata')).toThrow();
+    expect(() => parseDiscoveryCompanyResultLineage(lineage, 'public_web')).toThrow();
+    // ② 伪装 resultSchema 的回执在 registry_frame 下同样被拒（契约逐字节比对）。
+    const forged = { ...receiptFor([record()]), resultSchema: 'wikidata-sparql/v1' };
+    expect(() =>
+      parseDiscoveryCompanyResultLineage(buildRegistryQueryLineage(forged as never, 1), 'registry_frame'),
+    ).toThrow();
   });
 
   it('represents empty results as a valid empty lineage', () => {
