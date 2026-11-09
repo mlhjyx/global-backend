@@ -202,6 +202,14 @@
       "match_sha256": "sha256:17ae5a08b2407833b7387deb92700a62ade0133a538999c0e6570a86a679496c",
       "category": "trust",
       "reason": "Development alone may honour RUNTIME_DEV_FAST_LANE_WORKSPACE_ID: the attested API routes the three acquisition commands of exactly one workspace to a tenant-scoped task queue on a loopback development Temporal, and one source-built customer worker that passes every managed admission check except the build receipt, and whose source schema matches the managed image, may serve only that queue; every other mode refuses any lane variable at process start, no lease is written, readiness reports the lane as not_proven, and the business rules, admission checks and failure semantics remain identical."
+    },
+    {
+      "id": "judge-routing-controlled-mode-startup-check",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/ai-tasks/task-registry.ts",
+      "match_sha256": "sha256:949651a2f81bbf159576c2e739af0200e04dbe239859d9b9e610ed0d18c063a0",
+      "category": "deployment",
+      "reason": "The final-verdict judge model allowlist self-check fails closed only in controlled modes (pilot/production); development/test only warn so local development and the CI boot/contract verification are not blocked by missing model environment. Verdict semantics are unchanged and production behavior is strictly stricter."
     }
   ],
   "migration_allowlist": [

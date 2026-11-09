@@ -9,6 +9,7 @@ import {
   checkAgainstSchema,
 } from "./schema-validate";
 import { DEFAULT_LLM_EST_CENTS } from "../tools/budget";
+import { filterJudgeSubstitutes } from "../ai-tasks/judge-model-routing";
 import {
   BudgetExceededError,
   BudgetOperationReplayError,
@@ -707,7 +708,10 @@ export class RouterModelGateway extends ModelGateway {
     }
     const substitutes =
       registeredTask?.acceptsModelSubstitute === true
-        ? deploymentSubstitutes
+        ? // 终判 judge 的替换目标收紧到 JUDGE_MODEL_ALLOWLIST（P3 J03，设计 §4.3.3.6）：
+          // 允许的上游降档（如 pro→flash）不得把最终 verdict 悄悄降档；过滤后为空
+          // 即只接受精确身份，上游换模型由身份门拒绝（fail closed）。
+          filterJudgeSubstitutes(input.task, deploymentSubstitutes)
         : [];
     const callCtx: AiContext =
       substitutes.length > 0
