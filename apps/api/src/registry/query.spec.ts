@@ -147,6 +147,7 @@ describe('toProviderCompanyRecord', () => {
     status: 'ACTIVE',
     website: null,
     identifiers: [{ scheme: 'de_ust', value: 'DE291499156' }],
+    attributes: { diffusionCommerciale: 'false' },
     lastSnapshotId: 'snap-1',
     sourceFrame: { frameKey: 'de_offeneregister', licence: 'CC-BY-4.0' },
   };
@@ -171,6 +172,7 @@ describe('toProviderCompanyRecord', () => {
           naceVersion: 'NACE-2.1',
           employeeBand: '10-49',
           identifiers: [{ scheme: 'de_ust', value: 'DE291499156' }],
+          sourceAttributes: { diffusionCommerciale: 'false' },
           frameKey: 'de_offeneregister',
           snapshotId: 'snap-1',
         },

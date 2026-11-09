@@ -8,7 +8,7 @@ import {
   normalizeVatId,
 } from './frame-normalize';
 import { readDottedPath } from './frame-parse';
-import type { FrameMapping } from './frame-types';
+import { FrameConfigError, parseFrameConfig, type FrameMapping } from './frame-types';
 
 const gbMapping: FrameMapping = {
   schemaVersion: 'registry-frame-mapping/v1',
@@ -270,18 +270,59 @@ describe('normalizeRecord (JSON mapping)', () => {
         row: 1,
         read: jsonFieldReader({ ...record, attributes: { ...record.attributes, entity: { ...record.attributes.entity, nace } } }, readDottedPath),
       });
+    // 国家派生码装载时统一归一到 NACE 类目形态（原始码保留在源快照里，可回放）。
     const zForm = read('28.13Z');
     expect(zForm.ok).toBe(true);
-    if (zForm.ok) expect(zForm.entity.nace).toBe('28.13Z');
+    if (zForm.ok) expect(zForm.entity.nace).toBe('28.13');
     const digits = read('2813');
     expect(digits.ok).toBe(true);
-    if (digits.ok) expect(digits.entity.nace).toBe('2813');
+    if (digits.ok) expect(digits.entity.nace).toBe('28.13');
     const junk = read('NACE28');
     expect(junk.ok).toBe(true);
     if (junk.ok) {
       expect(junk.entity.nace).toBeNull();
       expect(junk.warnings.map((warning) => warning.code)).toContain('NACE_INVALID');
     }
+  });
+
+  it('captures source-specific attributes and folds them into the content hash', () => {
+    const mapping: FrameMapping = {
+      ...gleifMapping,
+      fields: {
+        ...gleifMapping.fields,
+        attributes: { diffusionCommerciale: 'attributes.entity.diffusion', zExtra: 'attributes.entity.extra' },
+      },
+    };
+    const withFlag = (diffusion: string, extra: string) =>
+      normalizeRecord({
+        mapping,
+        row: 1,
+        read: jsonFieldReader(
+          { ...record, attributes: { ...record.attributes, entity: { ...record.attributes.entity, diffusion, extra } } },
+          readDottedPath,
+        ),
+      });
+    const optOut = withFlag('false', 'a');
+    expect(optOut.ok).toBe(true);
+    if (!optOut.ok) return;
+    // 属性名排序存储，diff/哈希与输入顺序无关。
+    expect(optOut.entity.attributes).toEqual({ diffusionCommerciale: 'false', zExtra: 'a' });
+    const optedIn = withFlag('true', 'a');
+    expect(optedIn.ok).toBe(true);
+    if (optedIn.ok) expect(optedIn.entity.contentHash).not.toBe(optOut.entity.contentHash);
+    const missing = withFlag('', ' ');
+    expect(missing.ok).toBe(true);
+    if (missing.ok) expect(missing.entity.attributes).toBeNull();
+  });
+
+  it('falls back to the frame-level naceVersion constant', () => {
+    const mapping: FrameMapping = {
+      ...gleifMapping,
+      constants: { ...gleifMapping.constants, naceVersion: 'NAF-rev2' },
+    };
+    const result = normalizeRecord({ mapping, row: 1, read: jsonFieldReader(record, readDottedPath) });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.entity.naceVersion).toBe('NAF-rev2');
   });
 
   it('fails when per-row country is missing and no constant exists', () => {
@@ -326,8 +367,47 @@ describe('normalizers', () => {
       lei: null,
       website: null,
       identifiers: [{ scheme: 'siret', value: '1' }],
+      attributes: null,
     };
     expect(contentHashFor(base)).toBe(contentHashFor({ ...base }));
     expect(contentHashFor(base)).not.toBe(contentHashFor({ ...base, name: 'B' }));
+  });
+});
+
+describe('parseFrameConfig attributes mapping', () => {
+  const base = () => ({
+    schemaVersion: 'registry-frame/v1',
+    frame: {
+      frameKey: 'x_frame',
+      country: 'DE',
+      scheme: 'de_hrb',
+      label: 'x',
+      providerKey: 'p',
+      sourceUrl: 'https://example.org/frame',
+      licence: 'public-register',
+      fetchMode: 'bulk_file',
+    },
+    mapping: {
+      schemaVersion: 'registry-frame-mapping/v1',
+      format: 'csv',
+      constants: { scheme: 'de_hrb', country: 'DE' },
+      fields: { regNumber: 'n', name: 'm' },
+    },
+  });
+
+  it('accepts a bounded attribute map and rejects invalid names or more than ten entries', () => {
+    const ok = base() as Record<string, any>;
+    ok.mapping.fields.attributes = { diffusionCommerciale: 'dc' };
+    expect(parseFrameConfig(ok).mapping.fields.attributes).toEqual({ diffusionCommerciale: 'dc' });
+
+    const badName = base() as Record<string, any>;
+    badName.mapping.fields.attributes = { 'Bad-Name': 'dc' };
+    expect(() => parseFrameConfig(badName)).toThrow(FrameConfigError);
+
+    const tooMany = base() as Record<string, any>;
+    tooMany.mapping.fields.attributes = Object.fromEntries(
+      Array.from({ length: 11 }, (_, index) => [`a${index}`, `p${index}`]),
+    );
+    expect(() => parseFrameConfig(tooMany)).toThrow(FrameConfigError);
   });
 });

@@ -39,7 +39,7 @@ export const ISIC_SEED: IsicNode[] = [
   // Division 28 — Machinery & equipment（机床/机械制造）
   { code: '28', parent: 'C', en: 'Manufacture of machinery and equipment n.e.c.', zh: '通用及专用设备制造', de: 'Maschinenbau',
     crosswalks: { cpv: ['42120000'], nace: ['28'], naics: ['333'], gb4754: ['34', '35'] }, wikidataQid: 'Q1857831',
-    aliases: ['机械制造', 'mechanical engineering', 'machinery', 'maschinenbau', '机床', 'machine tool', 'machine tools', '装备制造', '设备制造', 'pump', 'pumps', '泵', 'compressor', 'compressors', 'pumps and compressors'] },
+    aliases: ['机械制造', 'mechanical engineering', 'machinery', 'maschinenbau', '机床', 'machine tool', 'machine tools', '装备制造', '设备制造', 'pump', 'pumps', '泵', 'compressor', 'compressors', 'pumps and compressors', 'valve', 'valves', '阀门', '工业阀门', 'ventil', 'ventile'] },
 
   // Division 29 — Motor vehicles
   { code: '29', parent: 'C', en: 'Manufacture of motor vehicles, trailers and semi-trailers', zh: '汽车制造', de: 'Fahrzeugbau',

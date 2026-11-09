@@ -63,6 +63,11 @@ export interface FrameFieldMapping {
   lei?: string | null;
   website?: string | null;
   identifiers?: Array<{ scheme: string; value: string }> | null;
+  /**
+   * 源特有属性（name → 指针，≤10 个）：如 FR 的 `diffusionCommerciale`（false=当事人反对
+   * 商业推介，必须由下游触达过滤消费）。值按字符串归一，空值不落库。
+   */
+  attributes?: Record<string, string> | null;
 }
 
 export interface FrameMapping {
@@ -70,8 +75,8 @@ export interface FrameMapping {
   format: FrameFormat;
   csv?: { delimiter?: string } | null;
   recordsPath?: string | null;
-  /** 源级常量：scheme 必填；country 可在 fields.country 缺省时兜底。 */
-  constants: { scheme: string; country?: string | null };
+  /** 源级常量：scheme 必填；country 可在 fields.country 缺省时兜底；naceVersion 标注行业码体系。 */
+  constants: { scheme: string; country?: string | null; naceVersion?: string | null };
   fields: FrameFieldMapping;
   /** 源状态词 → ACTIVE/DISSOLVED/INSOLVENT/UNKNOWN（键大小写不敏感）。 */
   statusMap?: Record<string, RegistryEntityStatus> | null;
@@ -272,6 +277,12 @@ export function parseFrameConfig(input: unknown): FrameConfig {
             pattern: ISO2,
             patternHint: 'ISO 3166-1 alpha-2 大写',
           }),
+    naceVersion:
+      rawConstants.naceVersion == null
+        ? null
+        : requireString(issues, rawConstants.naceVersion, 'mapping.constants.naceVersion', {
+            max: 16,
+          }),
   };
   if (constants.scheme && frame.scheme && constants.scheme !== frame.scheme) {
     issues.push('mapping.constants.scheme 必须与 frame.scheme 一致');
@@ -315,6 +326,30 @@ export function parseFrameConfig(input: unknown): FrameConfig {
     }
   }
 
+  // 源特有属性映射（name → 指针）：名称若同时出现在归一字段白名单里会覆盖同名语义，拒绝。
+  let attributes: Record<string, string> | null = null;
+  const rawAttributes = rawFields?.attributes;
+  if (rawAttributes != null) {
+    if (!isRecord(rawAttributes)) {
+      issues.push('mapping.fields.attributes 必须是对象（name → 指针）');
+    } else {
+      const entries = Object.entries(rawAttributes);
+      if (entries.length > 10) {
+        issues.push('mapping.fields.attributes 最多 10 项');
+      }
+      attributes = {};
+      for (const [name, pointer] of entries) {
+        if (!/^[a-z][a-zA-Z0-9]{0,63}$/u.test(name)) {
+          issues.push(`mapping.fields.attributes 名称非法：${name}`);
+          continue;
+        }
+        const resolved = optionalPointer(issues, pointer, `mapping.fields.attributes.${name}`);
+        if (resolved) attributes[name] = resolved;
+      }
+      if (Object.keys(attributes).length === 0) attributes = null;
+    }
+  }
+
   const fields: FrameFieldMapping = {
     regNumber: requireString(issues, rawFields?.regNumber, 'mapping.fields.regNumber'),
     name: requireString(issues, rawFields?.name, 'mapping.fields.name'),
@@ -332,6 +367,7 @@ export function parseFrameConfig(input: unknown): FrameConfig {
     lei: optionalPointer(issues, rawFields?.lei, 'mapping.fields.lei'),
     website: optionalPointer(issues, rawFields?.website, 'mapping.fields.website'),
     identifiers,
+    attributes,
   };
   if (fields.country == null && constants.country == null) {
     issues.push('country 缺失：mapping.fields.country 与 mapping.constants.country 至少给一个');

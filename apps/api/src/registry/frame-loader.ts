@@ -94,6 +94,9 @@ function comparable(field: keyof NormalizedRegistryEntity, entity: NormalizedReg
   if (field === 'identifiers') {
     return entity.identifiers ? JSON.stringify(entity.identifiers) : null;
   }
+  if (field === 'attributes') {
+    return entity.attributes ? JSON.stringify(entity.attributes) : null;
+  }
   const value = entity[field];
   return value == null ? null : String(value);
 }
@@ -107,6 +110,7 @@ export function diffEntities(
     ...DIFF_FIELDS,
     'addressJson',
     'identifiers',
+    'attributes',
   ];
   for (const field of fields) {
     const previous = comparable(field, before);
