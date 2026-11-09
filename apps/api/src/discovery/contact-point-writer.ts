@@ -187,6 +187,25 @@ export async function setEmailPointState(
   });
 }
 
+/**
+ * 只写置信分（发送侧投诉回写：状态不变、confidence 归 0、可触达动作由新证据行收敛）。
+ * 与 setEmailPointState 一样是唯一写入器的受控出口。
+ */
+export async function setEmailPointConfidence(
+  tx: Prisma.TransactionClient,
+  input: { pointId: string; confidence: number; lastVerificationEventId?: string | null },
+): Promise<void> {
+  await tx.contactPoint.update({
+    where: { id: input.pointId },
+    data: {
+      confidence: input.confidence,
+      ...(input.lastVerificationEventId !== undefined
+        ? { lastVerificationEventId: input.lastVerificationEventId }
+        : {}),
+    },
+  });
+}
+
 /** 事件账 → 点的最后事件指针（猜测路径写完事件后用）。 */
 export async function linkLastVerificationEvent(
   tx: Prisma.TransactionClient,
