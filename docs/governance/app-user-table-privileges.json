@@ -129,6 +129,7 @@
       "SELECT",
       "UPDATE"
     ],
+    "contact_metrics_snapshot": [],
     "contact_point": [
       "DELETE",
       "INSERT",
