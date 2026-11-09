@@ -1,23 +1,30 @@
 import { createHash } from 'node:crypto';
+import { domainToUnicode } from 'node:url';
 import { XMLParser } from 'fast-xml-parser';
 import { normalizeDomain } from '../discovery/identity';
+import { stripHtml as stripHtmlToText } from '../discovery/impressum/impressum-extract';
+import { canonicalDomain } from '../registry/domain/domain-resolver';
 
 /**
  * P1-18（2026-11-10）：社媒信号采集 —— changedetection 页面变更 + RSSHub 条目 → company_signal。
  *
  * 免费社媒信号栈（RUNBOOK §16）：changedetection.io 盯公开页面变更、RSSHub 聚合公开信息源；
- * 本模块**只读**这两类信号（http 拉取 → 解析 → 指纹去重 → 域名归因 → 入库），不做任何
- * 平台写操作自动化。纯元数据（标题/URL/摘要），不落页面正文、不含个人数据。
+ * 本模块**只做**解析 → 指纹去重 → 域名归因 → 入库的纯逻辑，**不做任何网络 I/O**——
+ * 拉取在运营 CLI（apps/api/scripts/signals/ingest-signals.mts）里完成并经 net-guard 校验，
+ * 因此编译进镜像的源码不引入未受治理的出网路径。不做任何平台写操作自动化；
+ * 纯元数据（标题/URL/摘要），不落页面正文、不含个人数据。
  *
- * 归因：条目/被监视 URL 的 hostname（去 www、小写）与 canonical_company.domain 做
- * 精确/子域/同注册域匹配；未匹配 company_id = null 照样落库（不丢信号）。
+ * 两段式：拉取+解析在 CLI（事务外，遵循 packages/db/src/tenant.ts「网络调用必须在事务外」）；
+ * `persistCollectedSource` 只做归因+落库（调用方用 withWorkspace/app_user + set_config 提供 scoped 事务）。
+ *
+ * 归因：条目/被监视 URL 的 hostname（canonicalDomain 归一：去 www/端口/尾点）与
+ * canonical_company.domain 做精确/子域/同注册域匹配；未匹配 company_id = null 照样落库。
  * 幂等：fingerprint = sha256(provider|source_url|title|observed_at 秒)，
  * ingest_key = '<provider>:<fingerprint>'，唯一 (workspace_id, ingest_key) 上
  * createMany(skipDuplicates) 静默跳过重跑。
  *
- * RLS：本模块只接受调用方已按租户 scoped 的 Prisma 客户端（CLI 在 set_config
- * ('app.current_workspace_id') 事务里调用）；归因查询**同时**显式带 workspaceId，
- * 使超管连接（绕过 RLS）下也不会跨租户归因。
+ * RLS：落库只接受调用方已按租户 scoped 的客户端（app_user + set_config 事务；CLI 用
+ * PrismaService.withWorkspace 逐源开短事务）；归因查询**同时**显式带 workspaceId 作纵深防御。
  */
 
 export const PROVIDER_RSS = 'rss';
@@ -44,6 +51,8 @@ export interface ParsedFeed {
   items: ParsedSignalItem[];
   /** 缺 title/link 等必填字段而丢弃的条目数（宽容解析：不让一条坏条目毁整批）。 */
   dropped: number;
+  /** 根元素是 RSS/Atom（false = 响应其实是错误页/JSON 等，调用方应记为源级错误）。 */
+  recognized: boolean;
 }
 
 export interface SignalCompanyRecord {
@@ -88,12 +97,6 @@ export interface CompanySignalStore {
     }): Promise<{ count: number }>;
   };
 }
-
-/** 与 Node 全局 fetch 兼容的最小签名（测试注入 fake，不触网）。 */
-export type SignalFetch = (
-  input: string,
-  init?: { headers?: Record<string, string>; signal?: AbortSignal },
-) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
 
 // ── XML 解析（RSS2 / Atom） ────────────────────────────────────────────────
 // ignoreAttributes=true 的默认配置会丢掉 Atom <link href> —— 显式关掉属性忽略。
@@ -152,21 +155,13 @@ function parseDateValue(raw: string | null): Date | null {
 /** 无日期条目的稳定兜底：epoch 0（去重稳定、查询排序沉底，绝不随时间漂移）。 */
 const UNDATED = new Date(0);
 
-const HTML_TAG = /<[^>]*>/gu;
-const WHITESPACE = /\s+/gu;
-
-/** 描述/摘要去 HTML、解常见实体、截断（纯元数据；不落正文）。 */
+/**
+ * 描述/摘要去 HTML、解实体、截断（纯元数据；不落正文）。
+ * 复用 Impressum 抽取的 stripHtml（script/style/注释先剥、数字实体解码，CodeQL 加固），
+ * 这里只加截断口径。
+ */
 export function stripHtml(raw: string, max = 500): string {
-  const text = raw
-    .replace(HTML_TAG, ' ')
-    .replace(/&nbsp;|&#160;/giu, ' ')
-    .replace(/&lt;/giu, '<')
-    .replace(/&gt;/giu, '>')
-    .replace(/&quot;/giu, '"')
-    .replace(/&#0*39;/gu, "'")
-    .replace(/&amp;/giu, '&')
-    .replace(WHITESPACE, ' ')
-    .trim();
+  const text = stripHtmlToText(raw).trim();
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
@@ -186,8 +181,8 @@ export function parseRssFeed(xml: string): ParsedFeed {
   try {
     parsed = parser.parse(xml);
   } catch {
-    // 非/坏 XML（错误页等）：不产生信号，由调用方按 parsed=0 观察，不炸整批。
-    return { items: [], dropped: 0 };
+    // 非/坏 XML（错误页等）：不产生信号，由调用方记为源级错误（不炸整批）。
+    return { items: [], dropped: 0, recognized: false };
   }
   const doc = asRecord(parsed);
   const rss = asRecord(doc?.rss);
@@ -216,7 +211,7 @@ export function parseRssFeed(xml: string): ParsedFeed {
           UNDATED,
       });
     }
-    return { items, dropped };
+    return { items, dropped, recognized: true };
   }
 
   if (atom) {
@@ -238,20 +233,25 @@ export function parseRssFeed(xml: string): ParsedFeed {
           parseDateValue(textOf(entry.updated) ?? textOf(entry.published)) ?? UNDATED,
       });
     }
-    return { items, dropped };
+    return { items, dropped, recognized: true };
   }
 
-  // 非 RSS/Atom 文档（错误页、JSON…）：不产生信号，也不算坏条目——由调用方看 parsed=0。
-  return { items: [], dropped: 0 };
+  // 非 RSS/Atom 文档（错误页、JSON…）：不产生信号；recognized=false 让调用方记源级错误。
+  return { items: [], dropped: 0, recognized: false };
 }
 
 function parseEpoch(value: unknown): Date | null {
-  if (typeof value === 'number') {
-    return Number.isFinite(value) && value > 0 ? new Date(value * 1000) : null;
-  }
+  const fromSeconds = (seconds: number): Date | null => {
+    if (!Number.isFinite(seconds) || seconds <= 0) return null;
+    const date = new Date(seconds * 1000);
+    // 超出 Date 范围（如 last_changed: 1e20）得到 Invalid Date——必须显式拦截，
+    // 否则指纹会退化成 "...|NaN" 并在 createMany 时报 Invalid time value。
+    return Number.isNaN(date.getTime()) ? null : date;
+  };
+  if (typeof value === 'number') return fromSeconds(value);
   if (typeof value === 'string' && value.trim()) {
     const numeric = Number(value);
-    if (Number.isFinite(numeric)) return numeric > 0 ? new Date(numeric * 1000) : null;
+    if (Number.isFinite(numeric)) return fromSeconds(numeric);
     return parseDateValue(value);
   }
   return null;
@@ -279,9 +279,10 @@ export function parseChangedetectionWatches(payload: unknown): ParsedFeed {
   let dropped = 0;
   for (const record of records) {
     const watch = asRecord(record);
-    const url = watch && typeof watch.url === 'string' ? watch.url.trim() : '';
+    if (!watch) continue;
+    const url = typeof watch.url === 'string' ? watch.url.trim() : '';
     if (!url) {
-      if (watch) dropped += 1;
+      dropped += 1;
       continue;
     }
     const observedAt = parseEpoch(watch.last_changed);
@@ -296,7 +297,7 @@ export function parseChangedetectionWatches(payload: unknown): ParsedFeed {
       observedAt,
     });
   }
-  return { items, dropped };
+  return { items, dropped, recognized: true };
 }
 
 // ── 指纹 / 归因 ─────────────────────────────────────────────────────────────
@@ -347,16 +348,39 @@ const TWO_LEVEL_SUFFIXES = new Set([
   'co.at', 'or.at', 'gv.at', 'ac.at',
 ]);
 
+/**
+ * 通用二级标签（co.id / com.vn / com.es / com.pe… 这些未收录的两段后缀的第二段）。
+ * 未收录后缀时按「两段后缀 + 1」取三段：宁可少匹配（rank 2 退化为 null），
+ * 绝不把整片 ccTLD 坍缩成同一个「注册域」而错归因。
+ */
+const GENERIC_SECOND_LEVEL = new Set([
+  'com', 'net', 'org', 'co', 'gov', 'edu', 'ac', 'or', 'ne', 'go', 'gob',
+  'mil', 'sch', 'ltd', 'plc', 'me', 'firm', 'asn', 'gen', 'web', 'biz',
+  'info', 'nom', 'grp', 'gv', 'nic',
+]);
+
+/**
+ * 多租户托管后缀：同一个「注册域」下面是互不相关的组织（acme.wordpress.com 与
+ * evil.wordpress.com 毫无关系），这类 host 禁用 rank 2（同注册域兄弟子域）与 rank 3
+ * （公司域比 host 更具体）匹配，只保留精确/子域（谁控制父域谁控制子域）。
+ */
+const MULTI_TENANT_HOSTING = new Set([
+  'github.io', 'githubusercontent.com', 'gitlab.io', 'wordpress.com', 'wpcomstaging.com',
+  'blogspot.com', 'substack.com', 'medium.com', 'wixsite.com', 'webflow.io',
+  'netlify.app', 'vercel.app', 'pages.dev', 'workers.dev', 'herokuapp.com',
+  'azurewebsites.net', 'appspot.com', 'cloudfront.net', 'myshopify.com', 'bigcartel.com',
+  'tilda.ws', 'jimdo.com', 'webnode.page', 'notion.site', 'gitbook.io', 'readthedocs.io',
+  'carrd.co', 'godaddysites.com', 'business.site', 'squarespace.com', 'weebly.com',
+  'wordpress.org', 'web.app', 'firebaseapp.com',
+]);
+
 const IPV4 = /^\d{1,3}(?:\.\d{1,3}){3}$/u;
 
 export function hostnameOfUrl(raw: string): string | null {
-  try {
-    const url = new URL(raw.trim());
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
-    return normalizeDomain(url.hostname);
-  } catch {
-    return null;
-  }
+  const trimmed = raw.trim();
+  if (!/^https?:\/\//iu.test(trimmed)) return null;
+  // 复用域名解析器的归一（小写、去端口/尾点/www，拒绝 IP 与无点主机）。
+  return canonicalDomain(trimmed);
 }
 
 /** hostname → eTLD+1 近似（'shop.example.co.uk' → 'example.co.uk'）。 */
@@ -366,7 +390,13 @@ export function registrableDomain(hostname: string): string | null {
   const labels = host.split('.').filter(Boolean);
   if (labels.length <= 2) return labels.join('.');
   const lastTwo = labels.slice(-2).join('.');
-  return TWO_LEVEL_SUFFIXES.has(lastTwo) ? labels.slice(-3).join('.') : lastTwo;
+  if (TWO_LEVEL_SUFFIXES.has(lastTwo)) return labels.slice(-3).join('.');
+  // 未收录的两段后缀（co.id / com.vn / com.es…）：第二段是通用 SLD 词元时按三段取，
+  // 避免把公共后缀本身当归一域（那会让同 ccTLD 的不同公司互相错归因）。
+  if (GENERIC_SECOND_LEVEL.has(labels[labels.length - 2]!)) {
+    return labels.slice(-3).join('.');
+  }
+  return lastTwo;
 }
 
 /**
@@ -381,17 +411,29 @@ export function chooseCompanyMatch(
 ): string | null {
   const host = normalizeDomain(hostname);
   if (!host) return null;
-  const hostRegistrable = registrableDomain(host);
+  // host 的形态变体（punycode 与 Unicode；空白差异在域比较里视为同一主机）。
+  const hostVariants = [host];
+  const unicodeHost = unicodeVariant(host);
+  if (unicodeHost) hostVariants.push(unicodeHost);
   const ranked: Array<{ id: string; rank: number; labels: number }> = [];
 
   for (const company of companies) {
     const domain = normalizeDomain(company.domain);
     if (!domain) continue;
     let rank: number | null = null;
-    if (domain === host) rank = 0;
-    else if (host.endsWith(`.${domain}`)) rank = 1;
-    else if (hostRegistrable && registrableDomain(domain) === hostRegistrable) rank = 2;
-    else if (domain.endsWith(`.${host}`)) rank = 3;
+    for (const variant of hostVariants) {
+      const variantRegistrable = registrableDomain(variant);
+      // 多租户托管（wordpress.com/github.io…）：同注册域下的兄弟子域属于不同组织，不许做
+      // rank 2/3 近似；只保留精确（rank 0）与父子域（rank 1）。
+      const sharedApexUnsafe =
+        variantRegistrable !== null && MULTI_TENANT_HOSTING.has(variantRegistrable);
+      let candidate: number | null = null;
+      if (domain === variant) candidate = 0;
+      else if (variant.endsWith(`.${domain}`)) candidate = 1;
+      else if (!sharedApexUnsafe && variantRegistrable && registrableDomain(domain) === variantRegistrable) candidate = 2;
+      else if (!sharedApexUnsafe && domain.endsWith(`.${variant}`)) candidate = 3;
+      if (candidate !== null && (rank === null || candidate < rank)) rank = candidate;
+    }
     if (rank === null) continue;
     ranked.push({ id: company.id, rank, labels: domain.split('.').length });
   }
@@ -400,20 +442,41 @@ export function chooseCompanyMatch(
   return ranked[0]?.id ?? null;
 }
 
-/** 候选域名（host、注册域、及 www. 变体）→ SQL 预过滤条件；精确比较在 chooseCompanyMatch 收口。 */
+/**
+ * IDN 存储兼容：`new URL().hostname` 返回 punycode，而 canonical_company.domain 可能以
+ * Unicode 原样存储（normalizeDomain 只做小写/去 www）。比较时两端都试。
+ */
+function unicodeVariant(value: string): string | null {
+  try {
+    const unicode = domainToUnicode(value);
+    return unicode && unicode !== value ? unicode : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 候选域名（host、注册域、IDN Unicode 变体、www. 变体）→ SQL 预过滤；精确比较在 chooseCompanyMatch 收口。 */
 function domainCandidates(hostname: string): string[] {
   const host = normalizeDomain(hostname);
   if (!host) return [];
   const candidates = new Set<string>([host]);
   const registrable = registrableDomain(host);
   if (registrable) candidates.add(registrable);
+  for (const candidate of [...candidates]) {
+    const unicode = unicodeVariant(candidate);
+    if (unicode) candidates.add(unicode);
+  }
   for (const candidate of [...candidates]) candidates.add(`www.${candidate}`);
   return [...candidates];
 }
 
 /**
  * 查公司并归因（RLS：调用方已 set_config；这里**同时**显式按 workspaceId 过滤，
- * 超管连接也不跨租户）。候选预过滤放宽（equals / endsWith），最终由 chooseCompanyMatch 收口。
+ * 超管连接也不跨租户）。
+ *
+ * 两段查询：先按候选域精确查（rank 0/1 的来源，结果不可能被后缀命中的截断挤掉），
+ * 无果再走 endsWith 后缀兜底（rank 1/2/3）。单条 OR + LIMIT 会按 id 截断，
+ * 候选多时可能把精确匹配挤出窗口。
  */
 export async function attributeCompany(
   store: CompanySignalStore,
@@ -422,20 +485,35 @@ export async function attributeCompany(
 ): Promise<string | null> {
   const candidates = domainCandidates(hostname);
   if (candidates.length === 0) return null;
-  const rows = await store.canonicalCompany.findMany({
+
+  const exactRows = await store.canonicalCompany.findMany({
     where: {
       workspaceId,
       domain: { not: null },
-      OR: candidates.flatMap((candidate) => [
-        { domain: { equals: candidate, mode: 'insensitive' as const } },
-        { domain: { endsWith: `.${candidate}`, mode: 'insensitive' as const } },
-      ]),
+      OR: candidates.map((candidate) => ({
+        domain: { equals: candidate, mode: 'insensitive' as const },
+      })),
     },
     select: { id: true, domain: true },
     take: 100,
     orderBy: { id: 'asc' },
   });
-  return chooseCompanyMatch(hostname, rows);
+  const exact = chooseCompanyMatch(hostname, exactRows);
+  if (exact) return exact;
+
+  const suffixRows = await store.canonicalCompany.findMany({
+    where: {
+      workspaceId,
+      domain: { not: null },
+      OR: candidates.map((candidate) => ({
+        domain: { endsWith: `.${candidate}`, mode: 'insensitive' as const },
+      })),
+    },
+    select: { id: true, domain: true },
+    take: 100,
+    orderBy: { id: 'asc' },
+  });
+  return chooseCompanyMatch(hostname, suffixRows);
 }
 
 // ── 落库 ────────────────────────────────────────────────────────────────────
@@ -489,20 +567,19 @@ export async function persistSignalRows(
   return { inserted, skipped: rows.length - inserted };
 }
 
-// ── 编排（一次拉取 → 解析 → 归因 → 落库） ─────────────────────────────────
+// ── 归因 + 落库（本文件不做任何网络 I/O；scoped 事务由调用方提供） ──────────
 
-export interface IngestCompanySignalsOptions {
-  store: CompanySignalStore;
-  workspaceId: string;
-  /** RSSHub 路由（'github/issue/x/y'）或完整 URL；空数组 = 不拉 RSS。 */
-  rssRoutes?: readonly string[];
-  /** 是否拉 changedetection watches（需要 changeDetectionApiKey）。 */
-  includeWatchChanges?: boolean;
-  rsshubUrl?: string;
-  changeDetectionUrl?: string;
-  changeDetectionApiKey?: string;
-  fetchImpl?: SignalFetch;
-  timeoutMs?: number;
+/**
+ * 一个已采集源（拉取/解析在 src 之外完成——运营 CLI 负责出网；本模块保持纯函数边界，
+ * 因此可以被 API/Worker 编译进镜像而不引入未受治理的出网路径）。
+ */
+export interface CollectedSignalSource {
+  /** 源标签（'rss:<route>' / 'changedetection'）。 */
+  source: string;
+  items: ParsedSignalItem[];
+  dropped: number;
+  /** 拉取/解析失败（无条目可落）。 */
+  error: string | null;
 }
 
 export interface SignalSourceReport {
@@ -510,8 +587,9 @@ export interface SignalSourceReport {
   parsed: number;
   dropped: number;
   inserted: number;
+  /** 唯一约束跳过（重复信号）。 */
   skipped: number;
-  /** 本批归因成功（companyId 非空）的条目数（含被唯一约束跳过的重复）。 */
+  /** 本批条目归因成功（companyId 非空）的条数——含被唯一约束跳过的重复，不是新增行数。 */
   matched: number;
   error: string | null;
 }
@@ -523,113 +601,67 @@ export interface CompanySignalIngestSummary {
   sources: SignalSourceReport[];
 }
 
-export function resolveRssUrl(routeOrUrl: string, rsshubUrl: string): string {
-  const trimmed = routeOrUrl.trim();
-  if (/^https?:\/\//iu.test(trimmed)) return trimmed;
-  return `${rsshubUrl.replace(/\/+$/u, '')}/${trimmed.replace(/^\/+/u, '')}`;
-}
-
-export async function ingestCompanySignals(
-  options: IngestCompanySignalsOptions,
-): Promise<CompanySignalIngestSummary> {
-  const fetchImpl = options.fetchImpl ?? (globalThis.fetch as unknown as SignalFetch);
-  const rsshubUrl = options.rsshubUrl ?? 'http://127.0.0.1:1200';
-  const changeDetectionUrl = options.changeDetectionUrl ?? 'http://127.0.0.1:5055';
-  const timeoutMs = options.timeoutMs ?? 20_000;
-  const attributionCache = new Map<string, string | null>();
-
-  const reportFor = async (
-    source: string,
-    load: () => Promise<ParsedFeed>,
-  ): Promise<SignalSourceReport> => {
-    const report: SignalSourceReport = {
-      source,
-      parsed: 0,
-      dropped: 0,
-      inserted: 0,
-      skipped: 0,
-      matched: 0,
-      error: null,
-    };
-    let feed: ParsedFeed;
-    try {
-      feed = await load();
-    } catch (error) {
-      report.error = error instanceof Error ? error.message : String(error);
-      return report;
-    }
-    report.parsed = feed.items.length;
-    report.dropped = feed.dropped;
-
-    const rows: CompanySignalRow[] = [];
-    for (const item of feed.items) {
-      const host = hostnameOfUrl(item.sourceUrl);
-      let companyId: string | null = null;
-      if (host) {
-        if (!attributionCache.has(host)) {
-          try {
-            attributionCache.set(
-              host,
-              await attributeCompany(options.store, options.workspaceId, host),
-            );
-          } catch (error) {
-            report.error = `归因查询失败：${error instanceof Error ? error.message : String(error)}`;
-            attributionCache.set(host, null);
-          }
-        }
-        companyId = attributionCache.get(host) ?? null;
-      }
-      rows.push(buildSignalRow(item, companyId));
-    }
-    report.matched = rows.filter((row) => row.companyId !== null).length;
-
-    try {
-      const persisted = await persistSignalRows(options.store, options.workspaceId, rows);
-      report.inserted = persisted.inserted;
-      report.skipped = feed.dropped + persisted.skipped;
-    } catch (error) {
-      report.error = `写入失败：${error instanceof Error ? error.message : String(error)}`;
-      report.skipped = feed.dropped + rows.length;
-    }
-    return report;
-  };
-
-  const sources: SignalSourceReport[] = [];
-  for (const route of options.rssRoutes ?? []) {
-    const url = resolveRssUrl(route, rsshubUrl);
-    sources.push(
-      await reportFor(`rss:${route}`, async () => {
-        const response = await fetchImpl(url, {
-          headers: { accept: 'application/rss+xml, application/atom+xml, application/xml' },
-          signal: AbortSignal.timeout(timeoutMs),
-        });
-        if (!response.ok) throw new Error(`RSS 拉取失败 HTTP ${response.status}: ${url}`);
-        return parseRssFeed(await response.text());
-      }),
-    );
-  }
-
-  if (options.includeWatchChanges) {
-    sources.push(
-      await reportFor('changedetection', async () => {
-        if (!options.changeDetectionApiKey) {
-          throw new Error('CHANGE_DETECTION_API_KEY 未设置（changedetection 需要 x-api-key）');
-        }
-        const url = `${changeDetectionUrl.replace(/\/+$/u, '')}/api/v1/watch`;
-        const response = await fetchImpl(url, {
-          headers: { 'x-api-key': options.changeDetectionApiKey },
-          signal: AbortSignal.timeout(timeoutMs),
-        });
-        if (!response.ok) throw new Error(`changedetection /api/v1/watch 返回 HTTP ${response.status}`);
-        return parseChangedetectionWatches(JSON.parse(await response.text()));
-      }),
-    );
-  }
-
+/** 汇总逐源报告（CLI 逐源短事务后聚合用）。 */
+export function summarizeSignalReports(
+  sources: readonly SignalSourceReport[],
+): CompanySignalIngestSummary {
   return {
     inserted: sources.reduce((sum, source) => sum + source.inserted, 0),
     skipped: sources.reduce((sum, source) => sum + source.skipped, 0),
     matched: sources.reduce((sum, source) => sum + source.matched, 0),
-    sources,
+    sources: [...sources],
   };
+}
+
+/**
+ * 归因 + 落库一个已采集源。调用方必须提供按租户 scoped 的事务客户端
+ * （app_user + set_config；CLI 用 PrismaService.withWorkspace 逐源开短事务），
+ * 且网络拉取必须已在事务外完成（packages/db/src/tenant.ts：回调里只放 DB 操作）。
+ * attributionCache 可跨源共享（同一个 host 只查一次公司）。
+ */
+export async function persistCollectedSource(
+  store: CompanySignalStore,
+  workspaceId: string,
+  collected: CollectedSignalSource,
+  attributionCache: Map<string, string | null> = new Map(),
+): Promise<SignalSourceReport> {
+  const report: SignalSourceReport = {
+    source: collected.source,
+    parsed: collected.items.length,
+    dropped: collected.dropped,
+    inserted: 0,
+    skipped: 0,
+    matched: 0,
+    error: collected.error,
+  };
+  if (collected.error) return report;
+
+  const rows: CompanySignalRow[] = [];
+  for (const item of collected.items) {
+    const host = hostnameOfUrl(item.sourceUrl);
+    let companyId: string | null = null;
+    if (host) {
+      if (!attributionCache.has(host)) {
+        try {
+          attributionCache.set(host, await attributeCompany(store, workspaceId, host));
+        } catch (error) {
+          report.error = `归因查询失败：${error instanceof Error ? error.message : String(error)}`;
+          attributionCache.set(host, null);
+        }
+      }
+      companyId = attributionCache.get(host) ?? null;
+    }
+    rows.push(buildSignalRow(item, companyId));
+  }
+  report.matched = rows.filter((row) => row.companyId !== null).length;
+
+  try {
+    const persisted = await persistSignalRows(store, workspaceId, rows);
+    report.inserted = persisted.inserted;
+    report.skipped = persisted.skipped;
+  } catch (error) {
+    report.error = `写入失败：${error instanceof Error ? error.message : String(error)}`;
+    report.skipped = rows.length;
+  }
+  return report;
 }

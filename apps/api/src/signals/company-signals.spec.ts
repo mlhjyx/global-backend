@@ -6,19 +6,19 @@ import {
   buildSignalRow,
   chooseCompanyMatch,
   hostnameOfUrl,
-  ingestCompanySignals,
   ingestKeyFor,
   parseChangedetectionWatches,
   parseRssFeed,
+  persistCollectedSource,
   persistSignalRows,
   registrableDomain,
-  resolveRssUrl,
   signalFingerprint,
   stripHtml,
+  summarizeSignalReports,
+  type CollectedSignalSource,
   type CompanySignalCreateInput,
   type CompanySignalStore,
   type SignalCompanyRecord,
-  type SignalFetch,
 } from './company-signals';
 
 const RSS_XML = `<?xml version="1.0" encoding="utf-8"?>
@@ -59,9 +59,10 @@ const ATOM_XML = `<?xml version="1.0" encoding="utf-8"?>
   </entry>
 </feed>`;
 
-describe('parseRssFeed —— RSS2（CDATA / 缺失字段宽容）', () => {
+describe('parseRssFeed —— RSS2（CDATA / 缺失字段宽容 / recognized）', () => {
   it('解析标题（CDATA）、链接、描述（去 HTML）、pubDate；缺 title/link 的条目计入 dropped', () => {
     const feed = parseRssFeed(RSS_XML);
+    expect(feed.recognized).toBe(true);
     expect(feed.dropped).toBe(1);
     expect(feed.items).toHaveLength(2);
     const [first, second] = feed.items;
@@ -78,9 +79,12 @@ describe('parseRssFeed —— RSS2（CDATA / 缺失字段宽容）', () => {
     expect(second!.excerpt).toBeNull();
   });
 
-  it('非 RSS/Atom 文档返回空集而不抛错（错误页/JSON 由调用方按 parsed=0 观察）', () => {
-    expect(parseRssFeed('<html><body>error</body></html>').items).toEqual([]);
-    expect(parseRssFeed('not xml at all').items).toEqual([]);
+  it('非 RSS/Atom 文档返回空集且 recognized=false（调用方记源级错误，不静默吞）', () => {
+    for (const body of ['<html><body>error</body></html>', 'not xml at all', '{"json":true}']) {
+      const feed = parseRssFeed(body);
+      expect(feed.items).toEqual([]);
+      expect(feed.recognized).toBe(false);
+    }
   });
 
   it('单条 item（非数组）也能解析', () => {
@@ -147,6 +151,15 @@ describe('parseChangedetectionWatches —— watch 列表映射（last_changed>0
     expect(feed.items).toHaveLength(1);
     expect(feed.dropped).toBe(1);
   });
+
+  it('越界 last_changed 不产生 Invalid Date（跳过该 watch）', () => {
+    const feed = parseChangedetectionWatches([
+      { url: 'https://a.example/x', title: 'A', last_changed: 1e20 },
+      { url: 'https://b.example/x', title: 'B', last_changed: 1700000000 },
+    ]);
+    expect(feed.items).toHaveLength(1);
+    expect(feed.items[0]!.observedAt.toString()).not.toContain('Invalid');
+  });
 });
 
 describe('signalFingerprint / ingestKeyFor —— 指纹稳定与去重键', () => {
@@ -177,17 +190,21 @@ describe('signalFingerprint / ingestKeyFor —— 指纹稳定与去重键', () 
 });
 
 describe('域名归因 —— 精确 / 子域 / 同注册域 / 无匹配', () => {
-  it('hostnameOfUrl：去 www、小写；非 http(s)/非法 URL → null', () => {
+  it('hostnameOfUrl：canonicalDomain 归一（去 www/尾点、小写）；非 http(s)/非法 URL → null', () => {
     expect(hostnameOfUrl('https://www.Nees-Pumpen.de/news')).toBe('nees-pumpen.de');
+    expect(hostnameOfUrl('https://example.de./news')).toBe('example.de');
     expect(hostnameOfUrl('not a url')).toBeNull();
     expect(hostnameOfUrl('ftp://example.com/x')).toBeNull();
   });
 
-  it('registrableDomain：两级公开后缀取三段', () => {
+  it('registrableDomain：两级公开后缀取三段；未收录后缀按「通用 SLD + 1」取三段', () => {
     expect(registrableDomain('shop.example.co.uk')).toBe('example.co.uk');
     expect(registrableDomain('a.b.example.de')).toBe('example.de');
     expect(registrableDomain('example.de')).toBe('example.de');
     expect(registrableDomain('192.168.1.1')).toBeNull();
+    // 未收录的两段后缀（com.co / co.id）：绝不坍缩成公共后缀本身。
+    expect(registrableDomain('shop.example.com.co')).toBe('example.com.co');
+    expect(registrableDomain('example.co.id')).toBe('example.co.id');
   });
 
   it('chooseCompanyMatch：精确 > 子域 > 同注册域；无匹配 → null', () => {
@@ -209,32 +226,56 @@ describe('域名归因 —— 精确 / 子域 / 同注册域 / 无匹配', () =>
     expect(chooseCompanyMatch('shop.example.de', [{ id: 'x', domain: null }])).toBeNull();
   });
 
-  it('attributeCompany：显式 workspaceId + 候选（host/注册域/www 变体）预过滤，结果再收口', async () => {
-    const captured: Array<Record<string, unknown>> = [];
-    const rows: SignalCompanyRecord[] = [
-      { id: 'parent', domain: 'example.de' },
-      { id: 'exact', domain: 'shop.example.de' },
-    ];
+  it('多租户托管后缀：同注册域的兄弟子域绝不互认（wordpress.com/github.io…）', () => {
+    expect(
+      chooseCompanyMatch('evil.wordpress.com', [{ id: 'acme', domain: 'acme.wordpress.com' }]),
+    ).toBeNull();
+    expect(
+      chooseCompanyMatch('evil.github.io', [{ id: 'acme', domain: 'acme.github.io' }]),
+    ).toBeNull();
+    // 父子域仍然可信（谁控制父域谁控制子域）。
+    expect(
+      chooseCompanyMatch('news.acme.wordpress.com', [{ id: 'acme', domain: 'acme.wordpress.com' }]),
+    ).toBe('acme');
+  });
+
+  it('attributeCompany：先精确后后缀两段查询；显式 workspaceId', async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const exactRow: SignalCompanyRecord = { id: 'exact', domain: 'shop.example.de' };
     const store = {
       canonicalCompany: {
         async findMany(args: Record<string, unknown>) {
-          captured.push(args);
-          return rows;
+          calls.push(args);
+          return [exactRow];
         },
       },
     } as unknown as CompanySignalStore;
-    await expect(
-      attributeCompany(store, 'ws-1', 'shop.example.de'),
-    ).resolves.toBe('exact');
-    const where = captured[0]!.where as {
-      workspaceId: string;
-      OR: Array<Record<string, unknown>>;
-    };
+
+    await expect(attributeCompany(store, 'ws-1', 'shop.example.de')).resolves.toBe('exact');
+    expect(calls).toHaveLength(1);
+    const where = calls[0]!.where as { workspaceId: string; OR: Array<Record<string, unknown>> };
     expect(where.workspaceId).toBe('ws-1');
-    const serialized = JSON.stringify(where.OR);
-    expect(serialized).toContain('shop.example.de');
-    expect(serialized).toContain('.shop.example.de');
-    expect(serialized).toContain('www.shop.example.de');
+    expect(JSON.stringify(where.OR)).toContain('"equals"');
+    expect(JSON.stringify(where.OR)).not.toContain('"endsWith"');
+  });
+
+  it('attributeCompany：精确段无果才走 endsWith 兜底（第二段查询）', async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const store = {
+      canonicalCompany: {
+        async findMany(args: Record<string, unknown>) {
+          calls.push(args);
+          const where = args.where as { OR: Array<Record<string, unknown>> };
+          return JSON.stringify(where.OR).includes('"endsWith"')
+            ? [{ id: 'parent', domain: 'example.de' }]
+            : [];
+        },
+      },
+    } as unknown as CompanySignalStore;
+
+    await expect(attributeCompany(store, 'ws-1', 'news.example.de')).resolves.toBe('parent');
+    expect(calls).toHaveLength(2);
+    expect(JSON.stringify(calls[1]!.where)).toContain('"endsWith"');
   });
 });
 
@@ -281,7 +322,7 @@ describe('persistSignalRows —— 幂等写入（批内去重 + skipDuplicates 
   });
 });
 
-describe('ingestCompanySignals —— 编排（fetch 注入，不触网）', () => {
+describe('persistCollectedSource / summarizeSignalReports —— 归因 + 落库（事务内），计数口径', () => {
   function fakeCompanyStore(companies: SignalCompanyRecord[]) {
     const keys = new Set<string>();
     const inserted: CompanySignalCreateInput[] = [];
@@ -303,123 +344,65 @@ describe('ingestCompanySignals —— 编排（fetch 注入，不触网）', () 
     return { store, inserted };
   }
 
-  const WATCHES = {
-    'aaaa': { url: 'https://biergangs.de/karriere', title: 'Karriere', last_changed: 1762700000 },
-    'bbbb': { url: 'https://unbewegt.de/x', title: 'Nie geändert', last_changed: 0 },
+  const companies: SignalCompanyRecord[] = [
+    { id: 'c-nees', domain: 'nees-pumpen.de' },
+    { id: 'c-bier', domain: 'biergangs.de' },
+  ];
+
+  const collected: CollectedSignalSource = {
+    source: 'rss:github/issue/a/b',
+    items: [
+      {
+        providerKey: PROVIDER_RSS,
+        signalKind: 'rss_item',
+        sourceUrl: 'https://www.nees-pumpen.de/news',
+        title: 'Nees News',
+        excerpt: null,
+        observedAt: new Date('2026-11-10T09:30:00.000Z'),
+      },
+      {
+        providerKey: PROVIDER_RSS,
+        signalKind: 'rss_item',
+        sourceUrl: 'https://unknown.example.com/x',
+        title: 'Unbekannt',
+        excerpt: null,
+        observedAt: new Date(0),
+      },
+    ],
+    dropped: 1,
+    error: null,
   };
 
-  function fakeFetch(): { impl: SignalFetch; calls: string[] } {
-    const calls: string[] = [];
-    const impl: SignalFetch = async (input) => {
-      calls.push(input);
-      if (input.endsWith('/api/v1/watch')) {
-        return { ok: true, status: 200, text: async () => JSON.stringify(WATCHES) };
-      }
-      if (input === 'http://127.0.0.1:1200/github/issue/a/b') {
-        return {
-          ok: true,
-          status: 200,
-          text: async () =>
-            `<rss><channel>
-              <item><title>Nees News</title><link>https://www.nees-pumpen.de/news</link><pubDate>Mon, 10 Nov 2026 09:30:00 GMT</pubDate></item>
-              <item><title>Unbekannt</title><link>https://unknown.example.com/x</link></item>
-            </channel></rss>`,
-        };
-      }
-      return { ok: false, status: 404, text: async () => '' };
-    };
-    return { impl, calls };
-  }
-
-  it('RSS 路由 + watches：解析/归因/入库计数，重跑全跳过', async () => {
-    const companies: SignalCompanyRecord[] = [
-      { id: 'c-nees', domain: 'nees-pumpen.de' },
-      { id: 'c-bier', domain: 'biergangs.de' },
-    ];
+  it('归因 + 入库计数；重跑全跳过；skipped 只计唯一约束跳过（dropped 单列）', async () => {
     const { store } = fakeCompanyStore(companies);
-    const fetchState = fakeFetch();
-    const options = {
-      store,
-      workspaceId: 'ws-1',
-      rssRoutes: ['github/issue/a/b'],
-      includeWatchChanges: true,
-      changeDetectionApiKey: 'test-key',
-      fetchImpl: fetchState.impl,
-    };
-
-    const first = await ingestCompanySignals(options);
-    expect(fetchState.calls).toContain('http://127.0.0.1:1200/github/issue/a/b');
-    expect(fetchState.calls).toContain('http://127.0.0.1:5055/api/v1/watch');
-    // 3 条信号：RSS 2（1 条归因）+ watch 1（1 条归因）；从未变更的 watch 不是信号。
-    expect(first).toMatchObject({ inserted: 3, skipped: 0, matched: 2 });
-    expect(first.sources.map((source) => source.source)).toEqual([
-      'rss:github/issue/a/b',
-      'changedetection',
-    ]);
-    expect(first.sources.every((source) => source.error === null)).toBe(true);
-
-    const second = await ingestCompanySignals(options);
-    expect(second).toMatchObject({ inserted: 0, skipped: 3, matched: 2 });
+    const first = await persistCollectedSource(store, 'ws-1', collected);
+    expect(first).toMatchObject({ source: 'rss:github/issue/a/b', parsed: 2, dropped: 1, inserted: 2, skipped: 0, matched: 1, error: null });
+    const cache = new Map<string, string | null>();
+    const second = await persistCollectedSource(store, 'ws-1', collected, cache);
+    expect(second).toMatchObject({ inserted: 0, skipped: 2, matched: 1 });
+    const summary = summarizeSignalReports([first, second]);
+    expect(summary).toMatchObject({ inserted: 2, skipped: 2, matched: 2 });
+    expect(summary.sources).toHaveLength(2);
   });
 
-  it('源级失败报错但不吞其它源（error 写进 source 报告）', async () => {
-    const { store } = fakeCompanyStore([]);
-    const impl: SignalFetch = async (input) => {
-      if (input.endsWith('/api/v1/watch')) {
-        return { ok: false, status: 401, text: async () => '' };
-      }
-      return {
-        ok: true,
-        status: 200,
-        text: async () =>
-          '<rss><channel><item><title>T</title><link>https://a.example/x</link><pubDate>Mon, 10 Nov 2026 09:30:00 GMT</pubDate></item></channel></rss>',
-      };
-    };
-    const summary = await ingestCompanySignals({
-      store,
-      workspaceId: 'ws-1',
-      rssRoutes: ['r'],
-      includeWatchChanges: true,
-      changeDetectionApiKey: 'k',
-      fetchImpl: impl,
+  it('采集期错误原样进报告，不写库', async () => {
+    const { store, inserted } = fakeCompanyStore(companies);
+    const report = await persistCollectedSource(store, 'ws-1', {
+      source: 'changedetection',
+      items: [],
+      dropped: 0,
+      error: 'HTTP 401',
     });
-    expect(summary.inserted).toBe(1);
-    const watch = summary.sources.find((source) => source.source === 'changedetection')!;
-    expect(watch.error).toContain('401');
-    expect(watch.inserted).toBe(0);
-  });
-
-  it('--include-watch-changes 缺 API key → 该源报错，不发起请求', async () => {
-    const { store } = fakeCompanyStore([]);
-    let called = 0;
-    const impl: SignalFetch = async () => {
-      called += 1;
-      return { ok: true, status: 200, text: async () => '{}' };
-    };
-    const summary = await ingestCompanySignals({
-      store,
-      workspaceId: 'ws-1',
-      includeWatchChanges: true,
-      fetchImpl: impl,
-    });
-    expect(called).toBe(0);
-    expect(summary.sources[0]!.error).toContain('CHANGE_DETECTION_API_KEY');
+    expect(report).toMatchObject({ parsed: 0, inserted: 0, error: 'HTTP 401' });
+    expect(inserted).toHaveLength(0);
   });
 });
 
-describe('resolveRssUrl / stripHtml', () => {
-  it('route 拼 RSSHub 基址；完整 URL 原样', () => {
-    expect(resolveRssUrl('github/issue/a/b', 'http://127.0.0.1:1200')).toBe(
-      'http://127.0.0.1:1200/github/issue/a/b',
-    );
-    expect(resolveRssUrl('/rss/x', 'http://127.0.0.1:1200/')).toBe('http://127.0.0.1:1200/rss/x');
-    expect(resolveRssUrl('https://example.com/feed.xml', 'http://127.0.0.1:1200')).toBe(
-      'https://example.com/feed.xml',
-    );
-  });
-
-  it('stripHtml：去标签、解实体、截断', () => {
+describe('stripHtml / resolve helpers', () => {
+  it('stripHtml：去标签、解实体（含数字实体）、截断', () => {
     expect(stripHtml('<p>A &amp; B</p>')).toBe('A & B');
+    expect(stripHtml('<p>&#8220;Hallo&#8221;</p>')).toBe('“Hallo”');
+    expect(stripHtml('<script>alert(1)</script>Text')).toBe('Text');
     expect(stripHtml('x'.repeat(600), 500)).toHaveLength(500);
     expect(stripHtml('<b></b>')).toBe('');
   });
