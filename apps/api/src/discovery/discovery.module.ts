@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { DiscoveryService } from './discovery.service';
 import { DiscoveryController } from './discovery.controller';
+import { JudgmentReviewController } from './judgment/judgment-review.controller';
 import { DiscoveryProviderRegistry } from './provider.registry';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { PrismaService } from '../prisma/prisma.service';
@@ -11,7 +12,7 @@ import { ExecutionBudgetModule } from '../execution-budget/execution-budget.modu
 
 @Module({
   imports: [ExecutionBudgetModule],
-  controllers: [DiscoveryController],
+  controllers: [DiscoveryController, JudgmentReviewController],
   providers: [
     {
       provide: TOOL_BUDGET_STORE,

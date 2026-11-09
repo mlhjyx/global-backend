@@ -107,6 +107,7 @@ function assertColumnsPresent(
   }
   for (const pointer of fields.addressLines ?? []) pointers.add(pointer);
   for (const entry of fields.identifiers ?? []) pointers.add(entry.value);
+  for (const pointer of Object.values(fields.attributes ?? {})) pointers.add(pointer);
   const missing = [...pointers].filter((pointer) => !available.has(pointer));
   if (missing.length > 0) {
     throw new FrameImportError(

@@ -173,6 +173,20 @@ describe('importFrame — Companies House style CSV fixture', () => {
     expect(store.entities.size).toBe(0);
   });
 
+  it('rejects a CSV missing an attributes-mapped column', async () => {
+    const store = new InMemoryRegistryFrameStore();
+    const config = gbConfig() as Record<string, any>;
+    config.mapping.fields.attributes = { diffusionCommerciale: 'NoSuchColumn' };
+    await expect(
+      importFrame({
+        store,
+        config,
+        file: { name: 'ch.csv', bytes: gbCsv() },
+        now: NOW,
+      }),
+    ).rejects.toMatchObject({ code: 'FRAME_MISSING_COLUMNS' });
+  });
+
   it('keeps the previous snapshot as the active one when a new import fails', async () => {
     const store = new InMemoryRegistryFrameStore();
     await importFrame({ store, config: gbConfig(), file: { name: 'ch.csv', bytes: gbCsv() }, now: NOW });

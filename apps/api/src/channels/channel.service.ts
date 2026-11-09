@@ -29,6 +29,7 @@ import { companyMatchesSuppression } from '../discovery/suppression-value';
 import {
   CHANNEL_CATEGORIES,
   CHANNEL_MODES,
+  CHANNEL_RECORD_REVIEW_STATUSES,
   CHANNEL_ROBOTS_POLICIES,
   CHANNEL_STATUSES,
   ChannelConfigError,
@@ -874,41 +875,155 @@ export class ChannelService {
    * 引擎缺平台客户端或端点不可用时 fail-closed（503），不再返回占位 409。
    */
   /** 渠道最近物化的抓取记录（ops:read）：选择器校验与联系使用；PII 按 OWNER-DECISION-2026-11-05 明文存储。 */
-  async listChannelRecords(ctx: RequestContext, channelId: string, limitRaw?: string) {
+  async listChannelRecords(
+    ctx: RequestContext,
+    channelId: string,
+    limitRaw?: string,
+    reviewStatusRaw?: string,
+  ) {
     const parsed = limitRaw === undefined ? 50 : Number(limitRaw);
     const limit = Number.isInteger(parsed) && parsed >= 1 && parsed <= 100 ? parsed : 50;
-    const channel = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-      tx.sourceChannel.findUnique({ where: { id: channelId }, select: { id: true } }),
-    );
-    if (!channel) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'channel not found' } });
-    const rows = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-      tx.sourceChannelRecord.findMany({
-        where: { channelId },
+    let reviewStatus: string | undefined;
+    if (reviewStatusRaw !== undefined && reviewStatusRaw !== '') {
+      if (!(CHANNEL_RECORD_REVIEW_STATUSES as readonly string[]).includes(reviewStatusRaw)) {
+        throw new BadRequestException({
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: `reviewStatus must be one of ${CHANNEL_RECORD_REVIEW_STATUSES.join(', ')}`,
+          },
+        });
+      }
+      reviewStatus = reviewStatusRaw;
+    }
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const channel = await tx.sourceChannel.findUnique({ where: { id: channelId }, select: { id: true } });
+      if (!channel) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'channel not found' } });
+      const rows = await tx.sourceChannelRecord.findMany({
+        where: { channelId, ...(reviewStatus ? { reviewStatus } : {}) },
         orderBy: { lastSeenAt: 'desc' },
         take: limit,
-      }),
-    );
-    return {
-      channelId,
-      records: rows.map((row) => ({
-        id: row.id,
-        crawlRunId: row.crawlRunId,
-        name: row.name,
-        website: row.website,
-        country: row.country,
-        industry: row.industry,
-        products: row.products,
-        keywords: row.keywords,
-        contactName: row.contactName,
-        contactTitle: row.contactTitle,
-        email: row.email,
-        phone: row.phone,
-        sourceUrl: row.sourceUrl,
-        firstSeenAt: row.firstSeenAt.toISOString(),
-        lastSeenAt: row.lastSeenAt.toISOString(),
-        contentHash: row.contentHash,
-      })),
-    };
+      });
+      const counts = await this.channelRecordReviewCounts(tx, channelId);
+      return {
+        channelId,
+        counts,
+        records: rows.map((row) => ({
+          id: row.id,
+          crawlRunId: row.crawlRunId,
+          name: row.name,
+          website: row.website,
+          country: row.country,
+          industry: row.industry,
+          products: row.products,
+          keywords: row.keywords,
+          contactName: row.contactName,
+          contactTitle: row.contactTitle,
+          email: row.email,
+          phone: row.phone,
+          sourceUrl: row.sourceUrl,
+          firstSeenAt: row.firstSeenAt.toISOString(),
+          lastSeenAt: row.lastSeenAt.toISOString(),
+          contentHash: row.contentHash,
+          reviewStatus: row.reviewStatus,
+          reviewedBy: row.reviewedBy,
+          reviewedAt: row.reviewedAt?.toISOString() ?? null,
+          materializedCompanyId: row.materializedCompanyId,
+        })),
+      };
+    });
+  }
+
+  /**
+   * CH-7 观察名单抽检（ops:write）：把记录批量标 APPROVED/REJECTED 并留审计足迹。
+   * 章节 §6.3.3：REJECTED 率 >20%（已抽检 ≥20 条）时渠道回 DISABLED，提示修 manifest。
+   */
+  async reviewChannelRecords(
+    ctx: RequestContext,
+    channelId: string,
+    input: { recordIds?: unknown; verdict?: unknown },
+  ) {
+    const ids = Array.isArray(input.recordIds) ? input.recordIds : null;
+    if (
+      !ids ||
+      ids.length < 1 ||
+      ids.length > 200 ||
+      ids.some((id) => typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(id))
+    ) {
+      throw new BadRequestException({
+        error: { code: 'VALIDATION_ERROR', message: 'recordIds must be 1–200 record UUIDs' },
+      });
+    }
+    if (input.verdict !== 'APPROVED' && input.verdict !== 'REJECTED') {
+      throw new BadRequestException({
+        error: { code: 'VALIDATION_ERROR', message: 'verdict must be APPROVED or REJECTED' },
+      });
+    }
+    const verdict = input.verdict;
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const channel = await tx.sourceChannel.findUnique({
+        where: { id: channelId },
+        select: { id: true, status: true },
+      });
+      if (!channel) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'channel not found' } });
+      const reviewedAt = new Date();
+      const updated = await tx.sourceChannelRecord.updateMany({
+        where: { channelId, id: { in: ids as string[] } },
+        data: { reviewStatus: verdict, reviewedBy: ctx.userId, reviewedAt },
+      });
+      if (updated.count !== ids.length) {
+        throw new BadRequestException({
+          error: {
+            code: 'CHANNEL_RECORD_IDS_INVALID',
+            message: `reviewed ${updated.count} of ${ids.length} recordIds (all must belong to this channel)`,
+          },
+        });
+      }
+      const counts = await this.channelRecordReviewCounts(tx, channelId);
+      const totalReviewed = counts.APPROVED + counts.REJECTED;
+      const autoDisabled =
+        channel.status === 'ENABLED' && totalReviewed >= 20 && counts.REJECTED / totalReviewed > 0.2;
+      if (autoDisabled) {
+        await tx.sourceChannel.update({
+          where: { id: channelId },
+          data: { status: 'DISABLED', disabledReason: 'GOVERNANCE' },
+        });
+        const events = (tx as { sourceChannelHealthEvent?: { create: (args: unknown) => Promise<unknown> } })
+          .sourceChannelHealthEvent;
+        if (events) {
+          await events.create({
+            data: {
+              channelId,
+              event: 'MANUAL_DISABLE',
+              detail: {
+                reason: 'RECORD_REJECTION_RATE',
+                reviewed: totalReviewed,
+                rejected: counts.REJECTED,
+                reviewedBy: ctx.userId,
+              },
+            },
+          });
+        }
+      }
+      return { channelId, reviewed: updated.count, verdict, counts, autoDisabled };
+    });
+  }
+
+  private async channelRecordReviewCounts(
+    tx: { sourceChannelRecord: { groupBy: (args: never) => Promise<Array<{ reviewStatus: string; _count: { _all: number } }>> } },
+    channelId: string,
+  ): Promise<{ PENDING: number; APPROVED: number; REJECTED: number }> {
+    const groups = await tx.sourceChannelRecord.groupBy({
+      by: ['reviewStatus'],
+      where: { channelId },
+      _count: { _all: true },
+    } as never);
+    const counts = { PENDING: 0, APPROVED: 0, REJECTED: 0 };
+    for (const group of groups) {
+      if (group.reviewStatus in counts) {
+        counts[group.reviewStatus as keyof typeof counts] = group._count._all;
+      }
+    }
+    return counts;
   }
 
   async requestCrawl(ctx: RequestContext, channelId: string, kind: 'preview' | 'run') {

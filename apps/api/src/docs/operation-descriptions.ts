@@ -156,7 +156,9 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
   'POST /api/v1/source-channels/{channelId}/run':
     '立即运行抓取通道（同 preview 的门槛与限额，仅运营身份 ops:write；失败率连续 3 轮 >30% 自动停用）。',
   'GET /api/v1/source-channels/{channelId}/records':
-    '渠道最近物化的抓取记录（默认最近 50 条，limit 1–100）：公司/官网/国家/行业/产品/关键词与联系人（人名/职位/邮箱/电话，均为渠道页公开信息）。仅运营身份（ops:read），用于选择器校验与获客联系；同一公司跨轮去重合并（渠道+去重键 upsert），重跑不重复。',
+    '渠道最近物化的抓取记录（默认最近 50 条，limit 1–100，可按 reviewStatus=PENDING/APPROVED/REJECTED 过滤）：公司/官网/国家/行业/产品/关键词与联系人（人名/职位/邮箱/电话，均为渠道页公开信息），附观察名单状态与三态计数。仅运营身份（ops:read），用于选择器校验、抽检与获客联系；同一公司跨轮去重合并（渠道+去重键 upsert），重跑不重复且不覆盖人工抽检结论。',
+  'POST /api/v1/source-channels/{channelId}/records/review':
+    '观察名单抽检（CH-7）：把本渠道 1–200 条记录批量置 APPROVED/REJECTED 并记录 reviewed_by/reviewed_at；已抽检 ≥20 条且 REJECTED 率 >20% 时渠道自动回 DISABLED（原因 RECORD_REJECTION_RATE，写健康事件）。仅运营身份（ops:write）。',
   'POST /api/v1/imported-buyers/preview':
     '导入预览：解析 CSV、校验列映射（至少公司名列）、给出前 10 行样例与去重/抑制命中计数，不写库。',
   'POST /api/v1/imported-buyers':
@@ -295,6 +297,17 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '设置 workspace 级 Pack 启停覆盖（幂等 upsert）；删除覆盖则跟随平台默认；需要 ops:write。',
   'DELETE /api/v1/packs/{packKey}/workspaces/{workspaceId}':
     '删除 workspace 启停覆盖，回到跟随平台默认；重复删除幂等返回 removed=false；需要 ops:write。',
+  // ── JudgmentReview（判定质量 · P3 J17）──────────────────────────────────────
+  'GET /api/v1/judgment-reviews':
+    '人工复核队列：按优先级（P0 高价值 UNKNOWN 24h / P1 72h / P2 随机抽检 5 工作日 / P3 漂移与申诉 7 天）、到期时间升序返回待办任务，含公司名与当时判定；keyset 游标分页，可用 status/priority/limit 过滤。需要 acquisition:review。',
+  'POST /api/v1/judgment-reviews/{id}/claim':
+    '认领复核任务（queued → in_review）。同一复核人重复认领幂等；已被他人认领返回 409。需要 acquisition:review。',
+  'POST /api/v1/judgment-reviews/{id}/resolve':
+    '提交复核裁决：在一个事务里写入新的「人工判定」记录（append-only，model_requested=human）、把结论回流为金标候选（split=candidate）并将任务置 resolved；可对个别 criterion 覆写分数/label。需要 acquisition:review。',
+  'GET /api/v1/judgments/stats':
+    '复核队列统计：按状态/原因/优先级的分布与近 N 天 overturn rate（人工结论与原判定不一致的比例），用于 SLA 与质量报表。需要 acquisition:review。',
+  'GET /api/v1/judgments/{id}':
+    '单条判定明细：verdict、逐 criterion 的分数/证据/理由、模型与失败码；跨租户不可见（RLS）。需要 acquisition:read。',
   // ── Agents（AI 底座 · M2 步 9b）───────────────────────────────────────────
   'GET /api/v1/ops-agents':
     '列出 agent 注册表：角色名、角色提示词版本、技能子集、模型与 loop 策略、平台启停状态；仅运营身份（ops:read）可读，租户调用返回 403。',

@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
 import { RequireScopes } from '../auth/require-scopes.decorator';
@@ -151,15 +151,32 @@ export class ChannelsController {
   @Get('source-channels/:channelId/records')
   @RequireScopes('ops:read')
   @ApiOperation({
-    summary: '查看渠道最近物化的抓取记录（含联系人字段；PII 按 OWNER-DECISION-2026-11-05 明文存储）',
+    summary: '查看渠道最近物化的抓取记录（含观察名单状态与计数；PII 按 OWNER-DECISION-2026-11-05 明文存储）',
   })
+  // 可选过滤参数必须显式 required:false：@Query 推断默认 required，会把已有端点判成破坏性变更。
+  @ApiQuery({ name: 'reviewStatus', required: false, enum: ['PENDING', 'APPROVED', 'REJECTED'] })
   @ApiEnvelope({ type: 'object', additionalProperties: true })
   async records(
     @Ctx() ctx: RequestContext,
     @Param('channelId', ParseUUIDPipe) channelId: string,
     @Query('limit') limit?: string,
+    @Query('reviewStatus') reviewStatus?: string,
   ) {
-    return envelope(await this.channels.listChannelRecords(ctx, channelId, limit));
+    return envelope(await this.channels.listChannelRecords(ctx, channelId, limit, reviewStatus));
+  }
+
+  @Post('source-channels/:channelId/records/review')
+  @RequireScopes('ops:write')
+  @ApiOperation({
+    summary: '观察名单抽检：批量置 APPROVED/REJECTED（留 reviewed_by/at）；REJECTED 率 >20%（已抽检 ≥20）时渠道回 DISABLED',
+  })
+  @ApiEnvelope({ type: 'object', additionalProperties: true })
+  async reviewRecords(
+    @Ctx() ctx: RequestContext,
+    @Param('channelId', ParseUUIDPipe) channelId: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return envelope(await this.channels.reviewChannelRecords(ctx, channelId, body));
   }
 
   @Post('imported-buyers/preview')

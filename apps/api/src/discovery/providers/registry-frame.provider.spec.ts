@@ -12,13 +12,14 @@ const row: RegistryQueryRow = {
   country: 'FR',
   name: 'POMPES MARTIN SAS',
   region: null,
-  nace: '28.13Z',
-  naceVersion: null,
+  nace: '28.13',
+  naceVersion: 'NAF-rev2',
   employeeBand: '10-49',
   legalForm: 'sas',
   status: 'ACTIVE',
   website: null,
   identifiers: null,
+  attributes: { diffusionCommerciale: 'true' },
   lastSnapshotId: 'snap-1',
   sourceFrame: { frameKey: 'fr_sirene', licence: 'Licence-Ouverte-2.0' },
 };
@@ -79,6 +80,11 @@ describe('RegistryFrameDiscoveryProvider (T3-09 registration surface)', () => {
       employeeCount: 25,
       license: 'Licence-Ouverte-2.0',
       identifier: { scheme: 'fr_siren', value: '529990001' },
+      attributes: {
+        registry: expect.objectContaining({
+          sourceAttributes: { diffusionCommerciale: 'true' },
+        }),
+      },
     });
     expect(calls).toHaveLength(1);
     const args = calls[0] as {
@@ -95,6 +101,36 @@ describe('RegistryFrameDiscoveryProvider (T3-09 registration surface)', () => {
     });
     expect(args.orderBy).toEqual([{ scheme: 'asc' }, { regNumber: 'asc' }]);
     expect(args.take).toBe(25);
+  });
+
+  it('derives NACE prefixes from ICP industry terms / taxonomy codes when no explicit prefix is given', async () => {
+    const calls: Array<{ where: Record<string, unknown> }> = [];
+    const prisma = {
+      registryEntity: {
+        findMany: async (args: { where: Record<string, unknown> }) => {
+          calls.push(args);
+          return [];
+        },
+      },
+    } as unknown as PrismaClient;
+    const provider = new RegistryFrameDiscoveryProvider({ prisma });
+
+    await provider.discoverCompanies(query({ country: 'DE', industry: 'Kreiselpumpen' }), ctx);
+    // ISIC C28（机械制造/泵/阀）→ NACE 前缀 28（含无点号与点号两种形态由 query 层展开）。
+    expect(calls[0]!.where.OR).toEqual([
+      { nace: { startsWith: '28' } },
+    ]);
+
+    await provider.discoverCompanies(query({ country: 'DE', _industryCodes: ['28'] }), ctx);
+    expect(calls[1]!.where.OR).toEqual([{ nace: { startsWith: '28' } }]);
+
+    // 显式 nace_prefix 优先，不再看行业词。
+    await provider.discoverCompanies(
+      query({ country: 'DE', industry: 'Kreiselpumpen', nace_prefix: ['2813'] }),
+      ctx,
+    );
+    // 显式 4 位码先归一到 NACE 类目形态，与库内点号存储精确对齐。
+    expect(calls[2]!.where.OR).toEqual([{ nace: { startsWith: '28.13' } }]);
   });
 
   it('fails safe to an empty result when the filters cannot satisfy the contract', async () => {

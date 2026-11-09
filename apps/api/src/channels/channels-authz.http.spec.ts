@@ -57,7 +57,14 @@ const service = {
   patchChannel: counted(channelRow()),
   getChannel: counted({ ...channelRow(), manifest: null, auth: null }),
   requestCrawl: counted({ requested: true }),
-  listChannelRecords: counted({ channelId: CHANNEL, records: [] }),
+  listChannelRecords: counted({ channelId: CHANNEL, counts: { PENDING: 0, APPROVED: 0, REJECTED: 0 }, records: [] }),
+  reviewChannelRecords: counted({
+    channelId: CHANNEL,
+    reviewed: 1,
+    verdict: "APPROVED",
+    counts: { PENDING: 0, APPROVED: 1, REJECTED: 0 },
+    autoDisabled: false,
+  }),
   enableChannel: counted({ channelId: CHANNEL, enabled: true }),
   disableChannel: counted({ channelId: CHANNEL, enabled: false }),
   previewImport: counted({ totalRows: 0 }),
@@ -167,6 +174,7 @@ describe("channel data-source ownership HTTP contract (P3)", () => {
     ["GET", `/source-channels/${CHANNEL}/records` as string, undefined],
     ["GET", `/source-channels/${CHANNEL}`, undefined],
     ["POST", `/source-channels/${CHANNEL}/test`, undefined],
+    ["POST", `/source-channels/${CHANNEL}/records/review`, { recordIds: [CHANNEL], verdict: "APPROVED" }],
   ] as const;
 
   it.each(platformEndpoints)(
@@ -256,6 +264,9 @@ describe("channel data-source ownership HTTP contract (P3)", () => {
       "ops:read",
     ]);
     expect(scopes("/api/v1/source-channels/{channelId}/test", "post")).toEqual([
+      "ops:write",
+    ]);
+    expect(scopes("/api/v1/source-channels/{channelId}/records/review", "post")).toEqual([
       "ops:write",
     ]);
     expect(scopes("/api/v1/source-channels/{channelId}/enable", "post")).toEqual([

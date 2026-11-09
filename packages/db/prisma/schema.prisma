@@ -1781,11 +1781,19 @@ model SourceChannelRecord {
   firstSeenAt  DateTime  @default(now()) @map("first_seen_at") @db.Timestamptz(3)
   lastSeenAt   DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(3)
   contentHash  String?   @map("content_hash") @db.VarChar(64)
+  // —— CH-7 观察名单（migration 20261109150000_channel_record_review）——
+  /// PENDING（观察名单）| APPROVED | REJECTED；人工抽检置后两者并写审计足迹。
+  reviewStatus String    @default("PENDING") @map("review_status") @db.VarChar(16)
+  reviewedBy   String?   @map("reviewed_by") @db.VarChar(200)
+  reviewedAt   DateTime? @map("reviewed_at") @db.Timestamptz(3)
+  /// 「并入正式池」后的公司引用位（跨租户口径未定：只留列，不建外键）。
+  materializedCompanyId String? @map("materialized_company_id") @db.Uuid
 
   channel SourceChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
 
   @@unique([channelId, dedupeKey])
   @@index([channelId, lastSeenAt(sort: Desc)])
+  @@index([channelId, reviewStatus])
   @@map("source_channel_record")
 }
 

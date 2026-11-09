@@ -52,6 +52,8 @@ export const CHANNEL_MODES = ['api', 'crawl', 'import'] as const;
 export const CHANNEL_CATEGORIES = ['trade_fair', 'customs', 'association', 'directory', 'tender', 'other'] as const;
 export const CHANNEL_STATUSES = ['DISABLED', 'ENABLED', 'AUTO_DISABLED'] as const;
 export const CHANNEL_ROBOTS_POLICIES = ['A', 'B', 'C'] as const;
+/** CH-7 观察名单：新观测 PENDING，人工抽检置 APPROVED/REJECTED。 */
+export const CHANNEL_RECORD_REVIEW_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const;
 
 /** 单次运行页数上限（试跑取 1 页）与每渠道每日页数上限（设计默认 500 页/天）。 */
 export const CHANNEL_RUN_MAX_PAGES = 50;

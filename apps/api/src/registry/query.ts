@@ -252,6 +252,7 @@ export interface RegistryQueryRow {
   status: string;
   website: string | null;
   identifiers: unknown;
+  attributes: unknown;
   lastSnapshotId: string;
   sourceFrame: { frameKey: string; licence: string } | null;
 }
@@ -270,9 +271,19 @@ export const REGISTRY_QUERY_SELECT = {
   status: true,
   website: true,
   identifiers: true,
+  attributes: true,
   lastSnapshotId: true,
   sourceFrame: { select: { frameKey: true, licence: true } },
 } as const;
+
+function sourceAttributesOf(value: unknown): Record<string, string> | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const out: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof entry === 'string') out[key] = entry;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
 
 function identifiersOf(value: unknown): Array<{ scheme: string; value: string }> | null {
   if (!Array.isArray(value)) return null;
@@ -311,6 +322,9 @@ export function toProviderCompanyRecord(row: RegistryQueryRow): ProviderCompanyR
         naceVersion: row.naceVersion,
         employeeBand: row.employeeBand,
         identifiers: identifiersOf(row.identifiers),
+        // 源特有属性（如 FR diffusionCommerciale=false=当事人反对商业推介）：下游触达
+        // 过滤（P4 抑制联动）据此消费；查询层不做隐式过滤，语义不在本层猜。
+        sourceAttributes: sourceAttributesOf(row.attributes),
         frameKey: row.sourceFrame?.frameKey ?? null,
         snapshotId: row.lastSnapshotId,
       },

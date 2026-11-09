@@ -27,6 +27,7 @@ function entity(overrides: Partial<NormalizedRegistryEntity> = {}): NormalizedRe
     lei: null,
     website: null,
     identifiers: null,
+    attributes: null,
   };
   const merged = { ...base, ...overrides };
   return {

@@ -71,9 +71,17 @@ describe('registry frames catalog', () => {
       status: 'ACTIVE',
       legalForm: 'sas',
       employeeBand: '10-49',
-      nace: '28.13Z',
+      // NAF rev2 28.13Z 装载时归一到 NACE 类目形态；码体系记在 naceVersion。
+      nace: '28.13',
+      naceVersion: 'NAF-rev2',
       city: 'LYON',
       postalCode: '69003',
+      attributes: { categorieJuridique: '5710', diffusionCommerciale: 'true' },
+    });
+    // diffusionCommerciale=false：当事人反对商业推介，必须原样带到下游触达过滤。
+    expect(fr.find((entity) => entity.regNumber === '529990002')!.attributes).toEqual({
+      categorieJuridique: '5499',
+      diffusionCommerciale: 'false',
     });
     expect(fr.find((entity) => entity.regNumber === '529990003')!.status).toBe('DISSOLVED');
 
