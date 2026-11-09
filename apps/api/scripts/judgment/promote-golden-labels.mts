@@ -18,7 +18,7 @@ import {
   promoteGoldenLabels,
   retireGoldenLabels,
   type GoldenLabelSplit,
-} from '../../apps/api/src/discovery/judgment/golden-label';
+} from '../../src/discovery/judgment/golden-label';
 
 const { values } = parseArgs({
   options: {
