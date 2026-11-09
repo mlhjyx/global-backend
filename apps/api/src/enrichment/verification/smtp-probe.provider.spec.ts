@@ -82,20 +82,27 @@ async function verify(
   return providerWith(broker, options).verify({ email: EMAIL, workspaceId: WS, ...request });
 }
 
-describe('resolveSmtpProbeConfig：EMAIL_VERIFY_SMTP_PROBE_ENABLED 缺省开', () => {
-  it('未设置 / 真值 → 开；0/false/no/off → 关', () => {
-    expect(resolveSmtpProbeConfig({})).toEqual({ enabled: true });
-    expect(resolveSmtpProbeConfig({ EMAIL_VERIFY_SMTP_PROBE_ENABLED: 'true' })).toEqual({ enabled: true });
-    expect(resolveSmtpProbeConfig({ EMAIL_VERIFY_SMTP_PROBE_ENABLED: '1' })).toEqual({ enabled: true });
-    for (const raw of ['0', 'false', 'FALSE', 'no', 'off']) {
+describe('resolveSmtpProbeConfig：EMAIL_VERIFY_SMTP_PROBE_ENABLED 缺省关（25 端口实测不可用）', () => {
+  it('未设置 / 假值 → 关；只有显式真值才开', () => {
+    expect(resolveSmtpProbeConfig({})).toEqual({ enabled: false });
+    for (const raw of ['0', 'false', 'FALSE', 'no', 'off', 'banana']) {
       expect(resolveSmtpProbeConfig({ EMAIL_VERIFY_SMTP_PROBE_ENABLED: raw })).toEqual({ enabled: false });
+    }
+    for (const raw of ['1', 'true', 'TRUE', 'yes', 'on']) {
+      expect(resolveSmtpProbeConfig({ EMAIL_VERIFY_SMTP_PROBE_ENABLED: raw })).toEqual({ enabled: true });
     }
   });
 });
 
 describe('mapSmtpProbeOutcome：探测信号 → 四态', () => {
-  it('不可达 / MAIL FROM 拒 / egress 拦截 → error 非空（无裁决，不凑票）', () => {
+  it('不可达 / 无响应 / MAIL FROM 拒 / egress 拦截 → error 非空（无裁决，不凑票）', () => {
     expect(mapSmtpProbeOutcome({ probe: reachableProbe({ reachable: false }) }).error).toBe('smtp_unreachable');
+    // 2026-11-10 实测形态：TUN fake-ip 接受 TCP 但 SMTP banner 超时 → mailFromCode/codes 均空。
+    const noResponse = mapSmtpProbeOutcome({
+      probe: { reachable: true, mailFromCode: null, codes: [] },
+    });
+    expect(noResponse.state).toBe('UNKNOWN');
+    expect(noResponse.error).toBe('smtp_no_response');
     expect(mapSmtpProbeOutcome({ probe: reachableProbe({ mailFromCode: 550, codes: [] }) }).error).toBe(
       'mail_from_rejected',
     );
