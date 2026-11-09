@@ -130,6 +130,11 @@
     "conformal_threshold": [
       "SELECT"
     ],
+    "contact_enrichment_attempt": [
+      "INSERT",
+      "SELECT",
+      "UPDATE"
+    ],
     "contact_point": [
       "DELETE",
       "INSERT",

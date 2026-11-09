@@ -2319,8 +2319,9 @@ model CanonicalContact {
   dedupeKey   String   @map("dedupe_key")
   createdAt   DateTime @default(now()) @map("created_at")
 
-  company       CanonicalCompany @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  contactPoints ContactPoint[]
+  company             CanonicalCompany          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contactPoints       ContactPoint[]
+  enrichmentAttempts  ContactEnrichmentAttempt[]
 
   @@unique([workspaceId, dedupeKey])
   @@unique([workspaceId, id], map: "canonical_contact_workspace_id_id_key")
@@ -2403,6 +2404,36 @@ model ContactPointVerificationEvent {
   @@index([workspaceId, verdict, createdAt], map: "cpve_verdict_time_idx")
   @@index([workspaceId, providerKey, createdAt], map: "cpve_provider_time_idx")
   @@map("contact_point_verification_event")
+}
+
+/// P1-08（2026-11-09）：富集尝试账（operational ledger，迁移 20261109180000_contact_enrichment_attempt）。
+/// 每次 finder 调用一行——hit/miss/error/skipped_* 都记、成本照记；唯一键
+/// (workspace, provider, request_hash) 是幂等键（输入版本内重跑不重扣）。
+/// 90 天命中缓存与 24h 失败缓存由读取侧按 attemptedAt 判断；emailState 在验证瀑布后回填。
+model ContactEnrichmentAttempt {
+  id           String   @id @default(uuid()) @db.Uuid
+  workspaceId  String   @map("workspace_id") @db.Uuid
+  contactId    String   @map("contact_id") @db.Uuid
+  providerKey  String   @map("provider_key")
+  requestHash  String   @map("request_hash")
+  outcome      String // hit | miss | error | skipped_budget | skipped_compliance
+  errorCode    String?  @map("error_code")
+  retryable    Boolean?
+  costMicrousd BigInt   @default(0) @map("cost_microusd")
+  latencyMs    Int      @default(0) @map("latency_ms")
+  emailState   String?  @map("email_state") // VALID | INVALID | CATCH_ALL_RISKY | UNKNOWN
+  evidence     Json?
+  runId        String?  @map("run_id")
+  accountKey   String   @map("account_key")
+  attemptedAt  DateTime @default(now()) @map("attempted_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  contact CanonicalContact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, providerKey, requestHash], map: "cea_unique_request")
+  @@index([workspaceId, contactId, attemptedAt(sort: Desc)], map: "cea_contact_time_idx")
+  @@index([workspaceId, providerKey, attemptedAt], map: "cea_provider_time_idx")
+  @@map("contact_enrichment_attempt")
 }
 
 /// 公司级联系路径（BI-14）：公司官网首页上链到的联系页、Impressum 页、供应商页、公司 LinkedIn 页与 X 账号，

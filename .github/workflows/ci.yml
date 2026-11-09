@@ -228,6 +228,22 @@ jobs:
           DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
         run: node packages/db/scripts/prisma-drift-gate.mjs
 
+      # ch08 §3.4 G2：迁移命名/时间戳撞车基线/checksum 完整性（历史文件禁改）。
+      - name: Migration integrity gate（G2）
+        if: needs.renderer-visual-scope.outputs.run_db_tests == 'true'
+        shell: bash
+        env:
+          PRISMA_CIGATE_FROM_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+        run: node packages/db/scripts/migration-integrity-gate.mjs
+
+      # ch08 §3.4 G5：workspace 表强制 RLS + 平台表目录 + app_user 默认只读。
+      - name: RLS catalog gate（G5）
+        if: needs.renderer-visual-scope.outputs.run_db_tests == 'true'
+        shell: bash
+        env:
+          PRISMA_CIGATE_FROM_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+        run: node packages/db/scripts/rls-catalog-gate.mjs
+
       - name: Native Temporal reader server（verified modules · offline race · build）
         if: needs.renderer-visual-scope.outputs.run_temporal_go == 'true'
         shell: bash
