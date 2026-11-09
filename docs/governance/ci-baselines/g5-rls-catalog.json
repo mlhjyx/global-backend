@@ -1,0 +1,329 @@
+{
+  "$comment": "G5 RLS/租户目录基线（ch08 §3.4）：带 workspace_id 的表必须 RLS+FORCE+策略；其余表必须在此明确分类。只许收紧。",
+  "tables": {
+    "agent_profile": {
+      "class": "rls_enforced",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id、RLS 开且有策略（非 workspace 键的租户表）"
+    },
+    "canonical_taxonomy": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "conformal_threshold": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "data_provider": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "discovery_company_materialization_activation": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "discovery_company_materialization_tx_fence": {
+      "class": "workspace_rls_missing",
+      "owner": "P5c-BE-30",
+      "expiresAt": "2027-01-31",
+      "reason": "workspace_rls_missing"
+    },
+    "eval_receipt": {
+      "class": "rls_enforced",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id、RLS 开且有策略（非 workspace 键的租户表）"
+    },
+    "execution_budget_authority_revocation": {
+      "class": "rls_enforced",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id、RLS 开且有策略（非 workspace 键的租户表）"
+    },
+    "execution_domain_ack": {
+      "class": "rls_enforced",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id、RLS 开且有策略（非 workspace 键的租户表）"
+    },
+    "generic_operation_artifact_object": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "generic_operation_artifact_object_version": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "jurisdiction_policy": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "metric_definition": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "metric_rollup_daily": {
+      "class": "rls_enforced",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id、RLS 开且有策略（非 workspace 键的租户表）"
+    },
+    "metric_rollup_weekly": {
+      "class": "rls_enforced",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id、RLS 开且有策略（非 workspace 键的租户表）"
+    },
+    "monitored_source": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "outreach_global_suppression": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "pack_draft": {
+      "class": "rls_enforced",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id、RLS 开且有策略（非 workspace 键的租户表）"
+    },
+    "pack_package": {
+      "class": "rls_enforced",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id、RLS 开且有策略（非 workspace 键的租户表）"
+    },
+    "pack_version": {
+      "class": "rls_enforced",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id、RLS 开且有策略（非 workspace 键的租户表）"
+    },
+    "patent_cache_refresh_audit": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "patent_inventor_cache": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "patent_inventor_tombstone": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "patent_lookup_request": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "platform_channel_crawl_egress_attempt": {
+      "class": "owner_only",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id、RLS 开但零策略（仅属主/SECURITY DEFINER 访问）"
+    },
+    "platform_egress_attempt": {
+      "class": "owner_only",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id、RLS 开但零策略（仅属主/SECURITY DEFINER 访问）"
+    },
+    "platform_egress_capability_fence": {
+      "class": "owner_only",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id、RLS 开但零策略（仅属主/SECURITY DEFINER 访问）"
+    },
+    "platform_egress_fence_reopen_receipt": {
+      "class": "owner_only",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id、RLS 开但零策略（仅属主/SECURITY DEFINER 访问）"
+    },
+    "platform_egress_schedule_fence": {
+      "class": "owner_only",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id、RLS 开但零策略（仅属主/SECURITY DEFINER 访问）"
+    },
+    "platform_fence_ack_delivery": {
+      "class": "owner_only",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id、RLS 开但零策略（仅属主/SECURITY DEFINER 访问）"
+    },
+    "platform_revocation_receipt": {
+      "class": "owner_only",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id、RLS 开但零策略（仅属主/SECURITY DEFINER 访问）"
+    },
+    "registry_entity": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "registry_entity_change": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "registry_entity_link": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "registry_frame": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "registry_snapshot": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "runtime_process_lease": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "sanctions_entity": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "sanctions_source": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "signal_ingest": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "source_channel": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "source_channel_health_event": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "source_channel_probe": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "source_channel_record": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "source_channel_run": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "source_entity": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "source_entity_change": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "source_fetch": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "source_policy": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "source_signal": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "term_alias": {
+      "class": "platform_table",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id 且无 RLS 的平台参考/账本表"
+    },
+    "tool_budget_account": {
+      "class": "rls_enforced",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id、RLS 开且有策略（非 workspace 键的租户表）"
+    },
+    "tool_budget_operation": {
+      "class": "rls_enforced",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id、RLS 开且有策略（非 workspace 键的租户表）"
+    },
+    "workspace": {
+      "class": "rls_enforced",
+      "owner": "backend-platform",
+      "expiresAt": "2027-01-31",
+      "reason": "无 workspace_id、RLS 开且有策略（非 workspace 键的租户表）"
+    }
+  }
+}
