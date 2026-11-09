@@ -295,6 +295,17 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '设置 workspace 级 Pack 启停覆盖（幂等 upsert）；删除覆盖则跟随平台默认；需要 ops:write。',
   'DELETE /api/v1/packs/{packKey}/workspaces/{workspaceId}':
     '删除 workspace 启停覆盖，回到跟随平台默认；重复删除幂等返回 removed=false；需要 ops:write。',
+  // ── JudgmentReview（判定质量 · P3 J17）──────────────────────────────────────
+  'GET /api/v1/judgment-reviews':
+    '人工复核队列：按优先级（P0 高价值 UNKNOWN 24h / P1 72h / P2 随机抽检 5 工作日 / P3 漂移与申诉 7 天）、到期时间升序返回待办任务，含公司名与当时判定；keyset 游标分页，可用 status/priority/limit 过滤。需要 acquisition:review。',
+  'POST /api/v1/judgment-reviews/{id}/claim':
+    '认领复核任务（queued → in_review）。同一复核人重复认领幂等；已被他人认领返回 409。需要 acquisition:review。',
+  'POST /api/v1/judgment-reviews/{id}/resolve':
+    '提交复核裁决：在一个事务里写入新的「人工判定」记录（append-only，model_requested=human）、把结论回流为金标候选（split=candidate）并将任务置 resolved；可对个别 criterion 覆写分数/label。需要 acquisition:review。',
+  'GET /api/v1/judgments/stats':
+    '复核队列统计：按状态/原因/优先级的分布与近 N 天 overturn rate（人工结论与原判定不一致的比例），用于 SLA 与质量报表。需要 acquisition:review。',
+  'GET /api/v1/judgments/{id}':
+    '单条判定明细：verdict、逐 criterion 的分数/证据/理由、模型与失败码；跨租户不可见（RLS）。需要 acquisition:read。',
   // ── Agents（AI 底座 · M2 步 9b）───────────────────────────────────────────
   'GET /api/v1/ops-agents':
     '列出 agent 注册表：角色名、角色提示词版本、技能子集、模型与 loop 策略、平台启停状态；仅运营身份（ops:read）可读，租户调用返回 403。',
