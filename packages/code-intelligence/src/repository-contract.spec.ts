@@ -34,7 +34,18 @@ test("current repository keeps representative business and dynamic chains comple
   );
   // B4（2026-11-08）：新增 tool-budget-reconciliation 周期清收。
   // B3（2026-11-08）：新增 discovery-stale-run-sweep 周期看门狗。
-  assert.equal(schedules.length, 12);
+  // P1-19（2026-11-09）：新增 contact-reverify-sweep（联系人再验证，注册即 paused）。
+  assert.equal(schedules.length, 13);
+  assert.equal(
+    graph.edges.some(
+      (edge) =>
+        edge.from === "service:temporal-schedule:contact-reverify-sweep" &&
+        edge.kind === "calls" &&
+        edge.to === "workflow:temporal:contactReverifySweepWorkflow",
+    ),
+    true,
+    "contact-reverify-sweep must point to contactReverifySweepWorkflow",
+  );
   assert.equal(
     graph.edges.some(
       (edge) =>

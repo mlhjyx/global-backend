@@ -1,0 +1,71 @@
+{
+  "id": "refusal-model",
+  "ensure": "refusal",
+  "input": {
+    "icpBrief": "德国金属加工与钣金加工行业的分销/批发商：采购并转售第三方生产的激光切割件与不锈钢板材，目标客户画像不限定员工规模。",
+    "snapshot": {
+      "text": "Muster Metallbau GmbH (Beispiel).\nProdukte: Edelstahlbleche und Laserzuschnitte.\nGroßhandel mit Markenwerkzeugen.\nFertigung: Laserschneiden und Kanten.\nHandelsunternehmen mit eigenem Lager.",
+      "fetchedAt": "2026-11-01T00:00:00.000Z"
+    }
+  },
+  "judge": {
+    "now": "2026-11-09T00:00:00.000Z",
+    "output": {
+      "criteria": [
+        {
+          "id": "C1_MATERIAL",
+          "applicable": true,
+          "score": null,
+          "label": "unclear",
+          "evidence": [],
+          "rationale": "模型拒绝判定。"
+        },
+        {
+          "id": "C2_ROLE",
+          "applicable": true,
+          "score": null,
+          "label": "unclear",
+          "evidence": [],
+          "rationale": "模型拒绝判定。"
+        },
+        {
+          "id": "C3_PROCESS",
+          "applicable": true,
+          "score": null,
+          "label": "unclear",
+          "evidence": [],
+          "rationale": "模型拒绝判定。"
+        },
+        {
+          "id": "C4_BUSINESS_MODEL",
+          "applicable": true,
+          "score": null,
+          "label": "unclear",
+          "evidence": [],
+          "rationale": "模型拒绝判定。"
+        },
+        {
+          "id": "C5_SIZE",
+          "applicable": true,
+          "score": null,
+          "label": "unclear",
+          "evidence": [],
+          "rationale": "模型拒绝判定。"
+        }
+      ],
+      "evidence_completeness": true,
+      "verdict_proposed": "UNKNOWN",
+      "refusal": {
+        "is_refusal": true,
+        "reason": "请求涉及受限内容"
+      }
+    }
+  },
+  "expected": {
+    "label": "UNKNOWN",
+    "reasonCodes": [
+      "EVIDENCE_GATE_UNKNOWN"
+    ],
+    "note": "拒答由调用方记 MODEL_REFUSAL；聚合器视角所有 criterion unclear → UNKNOWN。"
+  }
+}

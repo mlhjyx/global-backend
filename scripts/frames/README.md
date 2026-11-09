@@ -51,6 +51,11 @@ pnpm exec tsx scripts/frames/query-preview.mts \
 过滤口径见 `apps/api/src/registry/query.ts`：未知 filter 拒绝、country ISO2 必填、只查
 `withdrawn_at IS NULL` 且 last_snapshot 仍为 PARSED 的实体、排序固定 `scheme, reg_number`。
 
+`registry_frame` 同时注册为 discovery provider（`apps/api/src/discovery/providers/registry-frame.provider.ts`，
+company_registry 类，data_provider 默认 DISABLED）。**注意**：现行 governed-lineage 契约要求逐记录
+durable 回执，本地查询无法满足，因此它目前恒被路由闸门排除（计划期 `SOURCE_LINEAGE_UNAVAILABLE`）——
+执行面等 `docs/superpowers/plans/2026-11-09-registry-frame-local-lineage.md` 的设计获批。
+
 ## 召回审计
 
 ```bash

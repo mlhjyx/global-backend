@@ -1,0 +1,71 @@
+{
+  "id": "all-not-applicable",
+  "ensure": "not-applicable",
+  "input": {
+    "icpBrief": "德国金属加工与钣金加工行业的分销/批发商：采购并转售第三方生产的激光切割件与不锈钢板材，目标客户画像不限定员工规模。",
+    "snapshot": {
+      "text": "Muster Metallbau GmbH (Beispiel).\nProdukte: Edelstahlbleche und Laserzuschnitte.\nGroßhandel mit Markenwerkzeugen.\nFertigung: Laserschneiden und Kanten.\nHandelsunternehmen mit eigenem Lager.",
+      "fetchedAt": "2026-11-01T00:00:00.000Z"
+    }
+  },
+  "judge": {
+    "now": "2026-11-09T00:00:00.000Z",
+    "output": {
+      "criteria": [
+        {
+          "id": "C1_MATERIAL",
+          "applicable": false,
+          "score": null,
+          "label": "not_applicable",
+          "evidence": [],
+          "rationale": "ICP 未声明该维度，不适用。"
+        },
+        {
+          "id": "C2_ROLE",
+          "applicable": false,
+          "score": null,
+          "label": "not_applicable",
+          "evidence": [],
+          "rationale": "ICP 未声明该维度，不适用。"
+        },
+        {
+          "id": "C3_PROCESS",
+          "applicable": false,
+          "score": null,
+          "label": "not_applicable",
+          "evidence": [],
+          "rationale": "ICP 未声明该维度，不适用。"
+        },
+        {
+          "id": "C4_BUSINESS_MODEL",
+          "applicable": false,
+          "score": null,
+          "label": "not_applicable",
+          "evidence": [],
+          "rationale": "ICP 未声明该维度，不适用。"
+        },
+        {
+          "id": "C5_SIZE",
+          "applicable": false,
+          "score": null,
+          "label": "not_applicable",
+          "evidence": [],
+          "rationale": "ICP 未声明该维度，不适用。"
+        }
+      ],
+      "evidence_completeness": true,
+      "verdict_proposed": "UNKNOWN",
+      "refusal": {
+        "is_refusal": false,
+        "reason": null
+      }
+    }
+  },
+  "expected": {
+    "label": "UNKNOWN",
+    "reasonCodes": [
+      "NO_APPLICABLE_CRITERIA"
+    ],
+    "note": "没有任何适用 criterion 时不允许猜 verdict。"
+  }
+}

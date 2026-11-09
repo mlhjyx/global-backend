@@ -1,0 +1,7 @@
+{
+  "goldenSet": "golden-discovery/replay-demo",
+  "version": 1,
+  "notes": [
+    "合成演示夹具：无真实数据；用于 golden-run replay 与变异测试"
+  ]
+}

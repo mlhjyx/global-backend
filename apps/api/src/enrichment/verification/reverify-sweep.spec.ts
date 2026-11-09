@@ -1,10 +1,7 @@
 import { encryptPii } from '../../compliance/pii-crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  parseReverifyArgs,
-  runReverifySweep,
-  type ReverifyOptions,
-} from '../../../scripts/reverify-contact-points.mts';
+import { parseReverifyArgs } from '../../../scripts/reverify-contact-points.mts';
+import { runReverifySweep, type ReverifyOptions } from './reverify-sweep';
 import type { EmailVerificationProvider } from './email-verification-provider';
 
 /**
@@ -196,6 +193,24 @@ describe('runReverifySweep：单验证器 positive 不判 VALID（双正规则�
     expect(events[0]).toMatchObject({ verdict: 'error' });
     expect(updates[0]).toMatchObject({ verificationState: 'UNKNOWN' });
     expect(updates[0]).not.toHaveProperty('catchAllClass');
+  });
+});
+
+describe('runReverifySweep：成本上限', () => {
+  it('达到 maxCostMicrousd 即停本轮（第二个点不再调用供应商，skippedBudget>0）', async () => {
+    const p1 = fakePoint();
+    const p2 = { ...fakePoint(), id: '00000000-0000-4000-8000-0000000000cc' };
+    const { prisma } = fakePrisma([p1, p2]);
+    const provider = fakeProvider(validResult);
+    const summary = await runReverifySweep({
+      prisma: prisma as never,
+      provider,
+      options: baseOptions({ maxCostMicrousd: 1_000 }),
+      now: () => NOW,
+    });
+    expect(summary.providerCalls).toBe(1);
+    expect(summary.costMicrousd).toBe(1_780);
+    expect(summary.skippedBudget).toBeGreaterThan(0);
   });
 });
 

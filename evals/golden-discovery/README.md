@@ -62,7 +62,22 @@ scripts/metrics/fixtures/golden-pool.*.csv   # 合成样例池（演示/测试�
 - 目录内所有样例（`scripts/metrics/fixtures/`）都是合成数据（`co-0001` / `ct-0001`）。
 - `contact_point.value` 是加密列：任何导出 SQL 都不得 select 它。
 
-## 5. 版本化
+## 5. replay 跑批（PR-07 脚本侧，未接引擎）
+
+`scripts/metrics/golden-run.mjs` 以 **replay 模式（零模型调用）** 评测冻结预测快照：
+
+```bash
+node scripts/metrics/golden-run.mjs --set evals/golden-discovery/fixtures/replay-demo
+node scripts/metrics/golden-run.mjs --set <真实金标目录> --baseline previous-run.json --out run.json --json
+```
+
+目录契约：`items/<id>.json`（golden-item/v1）、`labels/<id>.labels.json`（golden-label/v1，**必须 adjudicated=true**）、`predictions/<id>.json`（流水线冻结预测）、可选 `manifest.json`。门限：G1 绝对门（fit precision ≥0.80 / recall ≥0.75）、G3 字段门（domain_correct / is_company ≥0.95、email valid precision ≥0.95）、G2 相对门（较 baseline 任一指标跌 >2pp 判红）；未出现的字段记 SKIP 而非失败。输出 `golden-run/v1`（含 metrics/confusion/κ/gates/diff/sampleSha256）+ markdown；断言失败退出码非零。
+
+演示夹具 `fixtures/replay-demo/` 为合成数据（4 条，无真实 PII），同时作为变异测试基准：改坏任一门字段的预测，G1/G3 必红（单测覆盖）。**接线引擎 `apps/api/src/measurement/golden/` 与 `golden_eval_run` 落表属后续**（依赖 PR-02 表与 PR-04 API）。
+
+**CI 冒烟门（PR-09 雏形）**：`scripts/metrics/golden-ci-smoke.test.mjs` 以真实子进程跑两次 CLI——demo 集必须退出 0 且 `passed=true`；同集的变异副本必须退出 1 且 `G3_is_company` 判红。该测试随 governance-contracts 在 `docs:verify` 中执行，等于每次 PR 都对回放链路做一次端到端冒烟。路径触发的夜间跑批与真实金标回归待 PR-04 后再接。
+
+## 6. 版本化
 
 - 数据集按 `v1/`、`v2/` 递增，不覆盖；manifest 记录 seed、pool 哈希、样本哈希与配额。
 - 内容寻址：manifest 记录每个文件 SHA-256；同一数据集可在不同 baseline（prompt/model/verifier 版本）下重复跑批。

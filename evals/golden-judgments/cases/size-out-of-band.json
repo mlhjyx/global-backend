@@ -1,0 +1,106 @@
+{
+  "id": "size-out-of-band",
+  "ensure": "size",
+  "input": {
+    "icpBrief": "德国金属加工与钣金加工行业的分销/批发商：采购并转售第三方生产的激光切割件与不锈钢板材，员工规模 50–200 人。",
+    "snapshot": {
+      "text": "Muster Metallbau GmbH (Beispiel).\nProdukte: Edelstahlbleche und Laserzuschnitte.\nGroßhandel mit Markenwerkzeugen.\nFertigung: Laserschneiden und Kanten.\nHandelsunternehmen mit eigenem Lager.\n85 Mitarbeiter am Standort.",
+      "fetchedAt": "2026-11-01T00:00:00.000Z"
+    }
+  },
+  "judge": {
+    "now": "2026-11-09T00:00:00.000Z",
+    "output": {
+      "criteria": [
+        {
+          "id": "C1_MATERIAL",
+          "applicable": true,
+          "score": 9,
+          "label": "pass",
+          "evidence": [
+            {
+              "kind": "website",
+              "url": "https://example.com/profil",
+              "span": "Edelstahlbleche und Laserzuschnitte",
+              "fetched_at": "2026-11-01T00:00:00.000Z"
+            }
+          ],
+          "rationale": "证据充分，判定与锚点一致。"
+        },
+        {
+          "id": "C2_ROLE",
+          "applicable": true,
+          "score": 9,
+          "label": "pass",
+          "evidence": [
+            {
+              "kind": "website",
+              "url": "https://example.com/profil",
+              "span": "Großhandel mit Markenwerkzeugen",
+              "fetched_at": "2026-11-01T00:00:00.000Z"
+            }
+          ],
+          "rationale": "证据充分，判定与锚点一致。"
+        },
+        {
+          "id": "C3_PROCESS",
+          "applicable": true,
+          "score": 9,
+          "label": "pass",
+          "evidence": [
+            {
+              "kind": "website",
+              "url": "https://example.com/profil",
+              "span": "Laserschneiden und Kanten",
+              "fetched_at": "2026-11-01T00:00:00.000Z"
+            }
+          ],
+          "rationale": "证据充分，判定与锚点一致。"
+        },
+        {
+          "id": "C4_BUSINESS_MODEL",
+          "applicable": true,
+          "score": 9,
+          "label": "pass",
+          "evidence": [
+            {
+              "kind": "website",
+              "url": "https://example.com/profil",
+              "span": "Handelsunternehmen mit eigenem Lager",
+              "fetched_at": "2026-11-01T00:00:00.000Z"
+            }
+          ],
+          "rationale": "证据充分，判定与锚点一致。"
+        },
+        {
+          "id": "C5_SIZE",
+          "applicable": true,
+          "score": 2,
+          "label": "weak",
+          "evidence": [
+            {
+              "kind": "website",
+              "url": "https://example.com/profil",
+              "span": "85 Mitarbeiter am Standort",
+              "fetched_at": "2026-11-01T00:00:00.000Z"
+            }
+          ],
+          "rationale": "证据充分，判定与锚点一致。"
+        }
+      ],
+      "evidence_completeness": true,
+      "verdict_proposed": "UNKNOWN",
+      "refusal": {
+        "is_refusal": false,
+        "reason": null
+      }
+    }
+  },
+  "expected": {
+    "label": "UNKNOWN",
+    "reasonCodes": [
+      "BORDERLINE_UNKNOWN"
+    ],
+    "note": "规模 85 人在 50–200 带内本应高分；fixture 故意给 2 分验证「有 applicable 项 <5 不得 FIT」。"
+  }
+}

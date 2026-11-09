@@ -1,6 +1,8 @@
 import { CancellationScope, isCancellation, proxyActivities } from '@temporalio/workflow';
 import type { Run2PipelineActivities } from './discovery.run2.pipeline.activities';
 import type { ExecutionBudgetBinding } from '../execution-budget/execution-budget-binding';
+import type { FailureCode, FailureStage } from '../discovery/judgment/failure-codes';
+import { classifyPipelineFailure } from './pipeline-failure-taxonomy';
 
 /**
  * M0④ 公司级深挖流水线（每家一个子工作流）：
@@ -9,6 +11,11 @@ import type { ExecutionBudgetBinding } from '../execution-budget/execution-budge
  * 失败隔离：单家失败只把自己标 failed / skipped，父工作流照常收尾（PARTIAL），绝不拖垮整轮。
  * 取消传播：父工作流被 RequestCancel 时取消子工作流；这里在不可取消作用域里把未完成状态
  * 标成 skipped(DEEP_STOPPED)——下一次 run 会把这家公司重新排队（可续）。
+ *
+ * P3 J02 W1：失败不再塌缩成 `COMPANY_PIPELINE_FAILED`——catch 里用
+ * `classifyPipelineFailure` 把异常（含 Temporal 的 ActivityFailure 链）归一到
+ * `failure-codes.ts` 的版本化 cause，`last_error_code` 写具体码，`run_event`
+ * payload 同时带 `failureStage`（E4-2 失败可归因率 100%）。
  */
 const modelActs = proxyActivities<Run2PipelineActivities>({
   startToCloseTimeout: '15 minutes',
@@ -37,7 +44,11 @@ export async function companyPipelineWorkflow(
 ): Promise<{ stage: 'done' | 'failed' | 'stopped' }> {
   const mark = (
     stage: 'profiling' | 'fitting' | 'signals' | 'contacts' | 'done' | 'failed' | 'skipped',
-    extra: { verdictDeep?: 'match' | 'weak' | 'mismatch'; errorCode?: string } = {},
+    extra: {
+      verdictDeep?: 'match' | 'weak' | 'mismatch';
+      errorCode?: FailureCode | 'DEEP_STOPPED';
+      failureStage?: FailureStage;
+    } = {},
   ) =>
     bookkeeping.updateCompanyJobStage({
       workspaceId: input.workspaceId,
@@ -69,8 +80,12 @@ export async function companyPipelineWorkflow(
       });
       throw error;
     }
+    const failure = classifyPipelineFailure(error);
     await CancellationScope.nonCancellable(async () => {
-      await mark('failed', { errorCode: 'COMPANY_PIPELINE_FAILED' }).catch(() => undefined);
+      await mark('failed', {
+        errorCode: failure.code,
+        failureStage: failure.failureStage,
+      }).catch(() => undefined);
     });
     return { stage: 'failed' };
   }

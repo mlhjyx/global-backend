@@ -14,7 +14,9 @@ import {
 
 describe('failure-codes（P3 J01 失败分类学 v1）', () => {
   it('版本常量固定；改表必须升版本', () => {
-    expect(FAILURE_CODES_VERSION).toBe('failure-codes/v1');
+    // v2（P3 J02）：新增 PROVIDER_IDENTITY_MISMATCH / PROVIDER_TRANSPORT_FAILED /
+    // CONTROL_PLANE_REJECTED 三个码，分类器映射真实错误类需要。
+    expect(FAILURE_CODES_VERSION).toBe('failure-codes/v2');
   });
 
   it('映射表 100% 合法：stage/outcome 在闭集内、retryable 为布尔', () => {
@@ -30,6 +32,7 @@ describe('failure-codes（P3 J01 失败分类学 v1）', () => {
       [
         'BUDGET_AUTHORITY_NOT_READY',
         'BUDGET_EXCEEDED',
+        'CONTROL_PLANE_REJECTED',
         'DB_TX_CONFLICT',
         'ENUM_DRIFT',
         'EVIDENCE_MISSING',
@@ -48,7 +51,9 @@ describe('failure-codes（P3 J01 失败分类学 v1）', () => {
         'PROVIDER_HTTP_402',
         'PROVIDER_HTTP_429',
         'PROVIDER_HTTP_5XX',
+        'PROVIDER_IDENTITY_MISMATCH',
         'PROVIDER_TIMEOUT',
+        'PROVIDER_TRANSPORT_FAILED',
         'RETRIEVER_ANTIBOT',
         'RETRIEVER_FETCH_FAILED',
         'RETRIEVER_ROBOTS_DENIED',
@@ -63,6 +68,7 @@ describe('failure-codes（P3 J01 失败分类学 v1）', () => {
       'PROVIDER_HTTP_429',
       'PROVIDER_HTTP_5XX',
       'PROVIDER_TIMEOUT',
+      'PROVIDER_TRANSPORT_FAILED',
       'LEASE_LOST',
       'DB_TX_CONFLICT',
       'RETRIEVER_FETCH_FAILED',
@@ -72,8 +78,10 @@ describe('failure-codes（P3 J01 失败分类学 v1）', () => {
     for (const code of [
       'BUDGET_EXCEEDED',
       'BUDGET_AUTHORITY_NOT_READY',
+      'CONTROL_PLANE_REJECTED',
       'PROVIDER_HTTP_401_403',
       'PROVIDER_HTTP_402',
+      'PROVIDER_IDENTITY_MISMATCH',
       'EVIDENCE_MISSING',
       'MODEL_REFUSAL',
     ]) {
