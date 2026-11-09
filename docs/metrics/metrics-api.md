@@ -1,12 +1,12 @@
 # 度量只读 API（PR-04）
 
 > 文档 ID：`METRICS-API-001`
-> 版本：`v1.0`（2026-11-09）
+> 版本：`v1.1`（2026-11-09）
 > 生命周期：`GUIDE`
-> 生命周期依据：ch01 §3.6.5 的引擎只读端点切片（catalog / observations / rollups）。
+> 生命周期依据：ch01 §3.6.5 的引擎只读端点切片（catalog / observations / rollups / vric）。
 > 状态：`GUIDE`
 
-引擎新增只读模块 `apps/api/src/measurement/`（controller + service + module），三端点均要求
+引擎新增只读模块 `apps/api/src/measurement/`（controller + service + module），四端点均要求
 `acquisition:read`，列表统一 page envelope（`data` + `page.next_cursor` / `page.has_more`），
 参数错误返回 `400 VALIDATION_ERROR`。
 
@@ -15,6 +15,7 @@
 | `GET /api/v1/metrics/catalog` | `metric_definition`（平台工件，app_user 只读） | 指标 ID/版本/口径/状态/负责人；字典同步前为空数组 |
 | `GET /api/v1/metrics/observations` | `metric_observation`（RLS：本 workspace） | `metricId`/`from`/`to`/`cursor`/`limit`（默认 100，最大 500）；按 `window_end` 倒序 keyset 分页；数值列 double，stratum 原样 JSON |
 | `GET /api/v1/metrics/rollups` | `metric_rollup_daily` / `metric_rollup_weekly`（RLS：`stratum->>'workspace_id'`） | 另有 `granularity=daily|weekly`（默认 daily）；按桶倒序 + 指标/维度 keyset 分页 |
+| `GET /api/v1/metrics/vric` | 同上两张 rollup 表（RLS 同 rollups） | VRIC 成对序列：同一 bucket + stratum 下 T0-001 STRICT 与 T0-002 PLUS 并排；桶**升序**、返回最近 `limit` 个桶（默认 30，最大 180）；某侧无数据为 `null`，不以 0 冒充；`page.has_more=true` 表示窗口被截断（如需更早数据显式给 from/to） |
 
 ## 1. 数据可见性
 
@@ -47,5 +48,8 @@ node --import tsx apps/api/scripts/measurement-sync-definitions.mts
 
 ## 5. 未做（PR-04 余量）
 
-`/metrics/vric`、`/metrics/scorecards`、`/evals/golden-*`、`/frames`、`/recapture-estimates`、
-`/benchmarks` 等平台端点属后续切片；SaaS BFF 代理（gain-saas `apps/server/src/bff/`）与看板（PR-05）不在本 PR。
+- `/metrics/scorecards`、`/evals/golden-*`、`/frames`、`/recapture-estimates`、`/benchmarks` 等端点属后续切片；
+  其中 scorecards 读平台级行（T1-008/T1-009 的 provider 分层），需要先定 ops 读路径与 scope，不是加个查询就能开。
+- `/metrics/vric` 目前按 rollup 现有行成对呈现；字典 §1.3.1 要求的 T0-002 通道拆分
+  （email_only/phone_only/both）尚未在 PR-03 的 rollup 查询里实现，端点不加戏、不伪造通道值。
+- SaaS BFF 代理（gain-saas `apps/server/src/bff/`）与看板（PR-05）不在本切片。
