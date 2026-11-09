@@ -8,7 +8,8 @@
     "skill-runtime.rls.spec.mjs",
     "source-channel-records.disposable.spec.mjs",
     "judgment-review-queue.rls.spec.mjs",
-    "judgment-record.rls.spec.mjs"
+    "judgment-record.rls.spec.mjs",
+    "golden-label.rls.spec.mjs"
   ],
   "isolated": [
     "discovery-company-materialization-functions.disposable.spec.mjs",
