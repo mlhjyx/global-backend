@@ -63,6 +63,7 @@ const SERVICE_PROTECTED_CONTROLLERS = [
 const SERVICE_PROTECTED_CONTROLLER_FILES = new Set([
   'campaign-plan/campaign-plan-internal.controller.ts',
   'outreach/contact-eligibility.controller.ts',
+  'outreach/contact-bounce.controller.ts',
   'execution-budget/execution-budget-window-usage.controller.ts',
   'platform-authority/platform-execution-technical-quote.controller.ts',
   'platform-authority/platform-target-lookup.controller.ts',
@@ -138,6 +139,10 @@ describe('controller authorization guard topology', () => {
         ] : path === 'outreach/contact-eligibility.controller.ts' ? [
           // P1-16：SaaS 发送门事实源，服务令牌 only（与 DNC 抑制同一令牌机制）。
           '@UseGuards(ContactEligibilityServiceTokenGuard)',
+          'x-service-token',
+        ] : path === 'outreach/contact-bounce.controller.ts' ? [
+          // P1-13 引擎侧：SMTP transport 投递回写，服务令牌 only。
+          '@UseGuards(ContactBounceServiceTokenGuard)',
           'x-service-token',
         ] : path === 'execution-budget/execution-budget-window-usage.controller.ts' ? [
           // ch08 §3.1.1 C1a：服务身份 + 回环限制的只读实扣读回端点（x-service-token 由守卫内部校验）。
