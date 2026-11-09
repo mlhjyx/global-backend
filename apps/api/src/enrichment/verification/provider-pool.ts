@@ -54,9 +54,10 @@ export interface SmtpProbeFallbackOutcome {
  * 而 data_provider 关闭的验证器占不了票位），且需要 broker（组合根对象）。两个以上外部
  * 验证器可用时本函数不追加——SMTP 不得占据瀑布的仲裁席。
  *
- * 追加前的三道检查：env 开关（`EMAIL_VERIFY_SMTP_PROBE_ENABLED`，缺省开）→ 票数 <2 →
- * broker 装上 + `data_provider.smtp_self=ENABLED`（运维 kill switch）。source_policy 门
- * 不在此处：SMTP 探测的治理域是逐个收件域名，由 broker 在 invoke 时权威执行。
+ * 追加前的三道检查：env 开关（`EMAIL_VERIFY_SMTP_PROBE_ENABLED`，**缺省关**——2026-11-10
+ * 实测宿主 25 端口出网不可用，探测只会得到 UNKNOWN；仅具备 25 出口的部署显式开启）→
+ * 票数 <2 → broker 装上 + `data_provider.smtp_self=ENABLED`（运维 kill switch）。
+ * source_policy 门不在此处：SMTP 探测的治理域是逐个收件域名，由 broker 在 invoke 时权威执行。
  */
 export async function withSmtpProbeFallback(
   providers: EmailVerificationProvider[],

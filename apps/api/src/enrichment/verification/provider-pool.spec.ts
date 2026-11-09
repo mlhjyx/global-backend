@@ -76,7 +76,11 @@ describe('withSmtpProbeFallback：第二票兜底', () => {
 
   it('外部验证器 1 家 + 开关开 + kill switch ENABLED → 追加 smtp_self 到末席', async () => {
     const db = fakeDb('ENABLED');
-    const outcome = await withSmtpProbeFallback(pool('zerobounce'), { prisma: db.prisma as never, broker, env: {} });
+    const outcome = await withSmtpProbeFallback(pool('zerobounce'), {
+      prisma: db.prisma as never,
+      broker,
+      env: { EMAIL_VERIFY_SMTP_PROBE_ENABLED: 'true' },
+    });
     expect(outcome.providers.map((p) => p.key)).toEqual(['zerobounce', 'smtp_self']);
     expect(outcome.note).toBeNull();
     expect(db.lookups).toEqual(['smtp_self']);
@@ -84,7 +88,11 @@ describe('withSmtpProbeFallback：第二票兜底', () => {
 
   it('外部验证器 0 家 → 兜底票单独成池（单票仍只能 UNKNOWN）', async () => {
     const db = fakeDb('ENABLED');
-    const outcome = await withSmtpProbeFallback([], { prisma: db.prisma as never, broker, env: {} });
+    const outcome = await withSmtpProbeFallback([], {
+      prisma: db.prisma as never,
+      broker,
+      env: { EMAIL_VERIFY_SMTP_PROBE_ENABLED: 'true' },
+    });
     expect(outcome.providers.map((p) => p.key)).toEqual(['smtp_self']);
   });
 
@@ -93,14 +101,22 @@ describe('withSmtpProbeFallback：第二票兜底', () => {
     const outcome = await withSmtpProbeFallback(pool('millionverifier', 'emailable'), {
       prisma: db.prisma as never,
       broker,
-      env: {},
+      env: { EMAIL_VERIFY_SMTP_PROBE_ENABLED: 'true' },
     });
     expect(outcome.providers.map((p) => p.key)).toEqual(['millionverifier', 'emailable']);
     expect(outcome.note).toBeNull();
     expect(db.lookups).toEqual([]);
   });
 
-  it('env 开关关闭 → 不追加并给出原因', async () => {
+  it('缺省（未设置 env）→ 不追加（2026-11-10 实测 25 端口不可用，默认关）', async () => {
+    const db = fakeDb('ENABLED');
+    const outcome = await withSmtpProbeFallback(pool('zerobounce'), { prisma: db.prisma as never, broker, env: {} });
+    expect(outcome.providers.map((p) => p.key)).toEqual(['zerobounce']);
+    expect(outcome.note).toBe('smtp_probe_disabled_by_env');
+    expect(db.lookups).toEqual([]);
+  });
+
+  it('env 开关显式关闭 → 不追加并给出原因', async () => {
     const db = fakeDb('ENABLED');
     const outcome = await withSmtpProbeFallback(pool('zerobounce'), {
       prisma: db.prisma as never,
@@ -115,7 +131,11 @@ describe('withSmtpProbeFallback：第二票兜底', () => {
   it('data_provider.smtp_self 未启用/缺失 → 不追加（运维 kill switch）', async () => {
     for (const status of ['DISABLED', null]) {
       const db = fakeDb(status);
-      const outcome = await withSmtpProbeFallback(pool('zerobounce'), { prisma: db.prisma as never, broker, env: {} });
+      const outcome = await withSmtpProbeFallback(pool('zerobounce'), {
+        prisma: db.prisma as never,
+        broker,
+        env: { EMAIL_VERIFY_SMTP_PROBE_ENABLED: 'true' },
+      });
       expect(outcome.providers.map((p) => p.key)).toEqual(['zerobounce']);
       expect(outcome.note).toBe('smtp_probe_kill_switch_off');
     }
@@ -123,7 +143,10 @@ describe('withSmtpProbeFallback：第二票兜底', () => {
 
   it('未装配 broker → 不追加（绝不裸出网）', async () => {
     const db = fakeDb('ENABLED');
-    const outcome = await withSmtpProbeFallback(pool('zerobounce'), { prisma: db.prisma as never, env: {} });
+    const outcome = await withSmtpProbeFallback(pool('zerobounce'), {
+      prisma: db.prisma as never,
+      env: { EMAIL_VERIFY_SMTP_PROBE_ENABLED: 'true' },
+    });
     expect(outcome.providers.map((p) => p.key)).toEqual(['zerobounce']);
     expect(outcome.note).toBe('smtp_probe_broker_unavailable');
   });
