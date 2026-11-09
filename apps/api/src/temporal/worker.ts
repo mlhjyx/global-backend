@@ -59,6 +59,7 @@ import {
   SITE_BUILDER_GENERATIVE_TASK_IDS,
 } from "../site-builder/agents/task-routes";
 import { createAssetCleanupActivities } from "./asset-cleanup.activities";
+import { createMeasurementActivities } from "./measurement.activities";
 import { seedSanctions } from "../sanctions/sanctions-seed";
 import { SanctionsScreeningService } from "../sanctions/sanctions-screening.service";
 import { KbService } from "../site-builder/kb.service";
@@ -737,6 +738,7 @@ async function main(): Promise<void> {
         prisma,
         storage: siteBuilderStorage,
       }),
+      ...createMeasurementActivities({ ownerDb }),
       ...createSiteReleaseMaintenanceActivities({
         ownerDb,
         storage: siteBuilderStorage,
