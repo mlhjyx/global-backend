@@ -90,6 +90,20 @@ describe('contactReverifySweepOnce：三重门', () => {
     expect(provider.verify).not.toHaveBeenCalled();
   });
 
+  it('无外部验证器凭据但 broker 已装配 → SMTP 兜底票单独成池，活动继续（ran）', async () => {
+    const broker = {
+      checkSourcePolicy: vi.fn(async () => ({ allowed: true })),
+      invoke: vi.fn(),
+    };
+    const activities = createContactReverifyActivities({
+      ownerDb: fakeOwnerDb() as never,
+      providers: [],
+      broker: broker as never,
+      now: NOW,
+    });
+    await expect(activities.contactReverifySweepOnce()).resolves.toMatchObject({ status: 'ran' });
+  });
+
   it('三道门全过 → ran（有界批次、含成本上限与统计）', async () => {
     const provider = fakeProvider(true);
     const activities = createContactReverifyActivities({

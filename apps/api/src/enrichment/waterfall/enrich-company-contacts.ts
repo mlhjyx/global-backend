@@ -9,8 +9,12 @@ import {
 } from '../../discovery/execution-envelope';
 import { checkProviderGates } from '../provider-gates';
 import type { EmailEnrichmentAdapter } from '../finders/email-enrichment-provider';
-import { resolveConfiguredVerificationProviders } from '../verification/provider-pool';
+import {
+  resolveConfiguredVerificationProviders,
+  withSmtpProbeFallback,
+} from '../verification/provider-pool';
 import type { EmailVerificationProvider } from '../verification/email-verification-provider';
+import type { ExecutionBroker } from '../../tools/tool-contract';
 import { CapBudget, CompositeBudget, DEFAULT_PER_CONTACT_CAP_MICROUSD, type EnrichmentBudget } from './enrichment-budget';
 import { enrichContactEmail, type EnrichContactResult } from './enrich-contact-email';
 import type { CircuitBreakerStore } from './circuit-breaker';
@@ -66,6 +70,8 @@ export interface EnrichCompanyContactsDeps {
   tailFinders?: EmailEnrichmentAdapter[];
   /** 验证器（调用方已按凭据 + data_provider/source_policy 门过滤；缺省自动解析并逐家过门）。 */
   verifiers?: EmailVerificationProvider[];
+  /** 工具型验证器（SMTP 兜底票）的出网闸门；缺省时兜底票不参与（第三方验证器不受影响）。 */
+  verificationBroker?: ExecutionBroker;
   circuits?: CircuitBreakerStore;
   /** 本请求/本轮预算端口；缺省 = CapBudget(maxContacts × $0.15)。 */
   budget?: EnrichmentBudget;
@@ -89,10 +95,14 @@ export interface EnrichCompanyContactsResult {
   results: Array<{ contactId: string; status: EnrichCompanyContactsStatus }>;
 }
 
-/** 逐家解析已配置的验证器并过 data_provider + source_policy 门（未过门的不进瀑布）。 */
+/**
+ * 逐家解析已配置的验证器并过 data_provider + source_policy 门（未过门的不进瀑布）。
+ * 门后可用票数 <2 且有 broker 时追加 SMTP 探测兜底票（第二票，零成本）。
+ */
 export async function gateConfiguredVerificationProviders(
   ownerPrisma: PrismaClient,
   env: NodeJS.ProcessEnv = process.env,
+  broker?: ExecutionBroker,
 ): Promise<EmailVerificationProvider[]> {
   const configured = resolveConfiguredVerificationProviders(env);
   const gated: EmailVerificationProvider[] = [];
@@ -100,7 +110,12 @@ export async function gateConfiguredVerificationProviders(
     const gate = await checkProviderGates(ownerPrisma, provider);
     if (gate.ok) gated.push(provider);
   }
-  return gated;
+  const { providers } = await withSmtpProbeFallback(gated, {
+    prisma: ownerPrisma,
+    ...(broker ? { broker } : {}),
+    env,
+  });
+  return providers;
 }
 
 async function companyTier(
@@ -136,7 +151,9 @@ export async function enrichCompanyContacts(
   const deadlineAtMs = input.deadlineAtMs ?? now().getTime() + ENRICH_SOFT_DEADLINE_MS;
   const tier = deps.tailFinders && deps.tailFinders.length > 0 ? await companyTier(deps, input) : 'B';
   const finders = tier === 'A' ? [...deps.finders, ...(deps.tailFinders ?? [])] : deps.finders;
-  const verifiers = deps.verifiers ?? (await gateConfiguredVerificationProviders(deps.ownerPrisma));
+  const verifiers =
+    deps.verifiers ??
+    (await gateConfiguredVerificationProviders(deps.ownerPrisma, process.env, deps.verificationBroker));
   const budget =
     deps.budget ?? new CapBudget(maxContacts * DEFAULT_PER_CONTACT_CAP_MICROUSD);
 

@@ -350,6 +350,38 @@ describe('runReverifySweep：合规门与幂等', () => {
     });
   });
 
+  it('SMTP 兜底票（method=smtp_rcpt）作第二票 → VALID；事件账与点 verification_method 如实记 smtp_rcpt', async () => {
+    const { prisma, events, updates } = fakePrisma([fakePoint()]);
+    const zb = fakeProvider({ ...validResult, providerKey: 'zerobounce' }, 'zerobounce');
+    const smtp = fakeProvider(
+      {
+        ...validResult,
+        providerKey: 'smtp_self',
+        method: 'smtp_rcpt' as const,
+        costMicrousd: 0,
+        detail: 'smtp_accepted:250',
+      },
+      'smtp_self',
+    );
+    const summary = await runReverifySweep({
+      prisma: prisma as never,
+      providers: [zb, smtp],
+      options: baseOptions(),
+      now: () => NOW,
+    });
+    expect(summary.byState.VALID).toBe(1);
+    expect(events.map((event) => event.method)).toEqual(['third_party_api', 'smtp_rcpt']);
+    expect(updates[0]).toMatchObject({
+      verificationState: 'VALID',
+      verificationProvider: 'smtp_self',
+      verificationMethod: 'smtp_rcpt',
+    });
+    // 工具型验证器需要的租户上下文由瀑布透传。
+    expect(smtp.verify).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: '00000000-0000-4000-8000-0000000000bb' }),
+    );
+  });
+
   it('同桶已记过 blocked（compliance_gate）→ 直接跳过（不重复解密/评估/占额度）', async () => {
     const point = fakePoint();
     const recorded = [
