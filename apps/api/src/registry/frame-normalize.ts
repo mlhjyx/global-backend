@@ -17,6 +17,7 @@ import type {
   RegistryEntityStatus,
 } from './frame-types';
 import { EMPLOYEE_BANDS, REGISTRY_ENTITY_STATUSES } from './frame-types';
+import { canonicalNace } from './industry-map';
 
 export interface NormalizedRegistryEntity {
   scheme: string;
@@ -37,6 +38,8 @@ export interface NormalizedRegistryEntity {
   lei: string | null;
   website: string | null;
   identifiers: Array<{ scheme: string; value: string }> | null;
+  /** 源特有属性（如 FR diffusionCommerciale=false 表示当事人反对商业推介）。 */
+  attributes: Record<string, string> | null;
   contentHash: string;
 }
 
@@ -111,6 +114,13 @@ export function contentHashFor(entity: Omit<NormalizedRegistryEntity, 'contentHa
     entity.lei ?? '',
     entity.website ?? '',
     entity.identifiers ? JSON.stringify(entity.identifiers) : '',
+    entity.attributes
+      ? JSON.stringify(
+          Object.keys(entity.attributes)
+            .sort()
+            .map((key) => [key, entity.attributes![key]]),
+        )
+      : '',
   ];
   return createHash('sha256').update(parts.join('\u0001'), 'utf8').digest('hex');
 }
@@ -241,14 +251,18 @@ export function normalizeRecord(input: NormalizeRecordInput): NormalizeRecordRes
   if (naceRaw.trim()) {
     const candidate = naceRaw.trim();
     if (NACE_PATTERN.test(candidate)) {
-      nace = candidate;
+      // 国家派生码（NAF 28.13Z、无点号 2813）归一到 NACE 类目形态；原始码保留在源快照里。
+      nace = canonicalNace(candidate) ?? candidate;
     } else {
       warnings.push({ row, field: 'nace', code: 'NACE_INVALID', detail: candidate });
     }
   }
-  const naceVersion = mapping.fields.naceVersion
-    ? cleanText(read(mapping.fields.naceVersion).text, 16)
-    : null;
+  const naceVersion =
+    (mapping.fields.naceVersion
+      ? cleanText(read(mapping.fields.naceVersion).text, 16)
+      : null) ??
+    mapping.constants.naceVersion ??
+    null;
 
   let addressJson: { lines: string[] } | null = null;
   if (mapping.fields.addressLines?.length) {
@@ -262,6 +276,22 @@ export function normalizeRecord(input: NormalizeRecordInput): NormalizeRecordRes
       }
     }
     if (lines.length > 0) addressJson = { lines };
+  }
+
+  let attributes: Record<string, string> | null = null;
+  if (mapping.fields.attributes) {
+    const collected: Record<string, string> = {};
+    for (const [name, pointer] of Object.entries(mapping.fields.attributes)) {
+      const value = cleanText(read(pointer).text, 120);
+      if (value) collected[name] = value;
+    }
+    if (Object.keys(collected).length > 0) {
+      attributes = Object.fromEntries(
+        Object.keys(collected)
+          .sort()
+          .map((key) => [key, collected[key]!]),
+      );
+    }
   }
 
   let identifiers: Array<{ scheme: string; value: string }> | null = null;
@@ -305,6 +335,7 @@ export function normalizeRecord(input: NormalizeRecordInput): NormalizeRecordRes
     lei,
     website,
     identifiers,
+    attributes,
   };
   return {
     ok: true,

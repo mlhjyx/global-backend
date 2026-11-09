@@ -65,8 +65,18 @@ function entityData(entity: NormalizedRegistryEntity) {
     lei: entity.lei,
     website: entity.website,
     identifiers: jsonOrNull(entity.identifiers),
+    attributes: jsonOrNull(entity.attributes),
     contentHash: entity.contentHash,
   };
+}
+
+function stringMapOf(value: Prisma.JsonValue | null): Record<string, string> | null {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const out: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === 'string') out[key] = entry;
+  }
+  return Object.keys(out).length > 0 ? out : null;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -91,6 +101,7 @@ function toExisting(row: any): ExistingRegistryEntity {
     lei: (row.lei as string | null) ?? null,
     website: (row.website as string | null) ?? null,
     identifiers: identifiersOf(row.identifiers as Prisma.JsonValue | null),
+    attributes: stringMapOf(row.attributes as Prisma.JsonValue | null),
     contentHash: row.contentHash as string,
     missCount: row.missCount as number,
     withdrawnAt: (row.withdrawnAt as Date | null) ?? null,

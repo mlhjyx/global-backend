@@ -1,4 +1,4 @@
-siren;denominationUniteLegale;activitePrincipaleUniteLegale;trancheEffectifsUniteLegale;etatAdministratifUniteLegale;categorieJuridiqueUniteLegale;libelleCommuneEtablissement;codePostalEtablissement
-529990001;POMPES MARTIN SAS;28.13Z;22;A;5710;LYON;69003
-529990002;VENTILES DUPONT SARL;28.14Z;12;A;5499;GRENOBLE;38000
-529990003;ANCIENS ETABLISSEMENTS ROUX SA;28.12Z;53;F;5599;PARIS;75011
+siren;denominationUniteLegale;activitePrincipaleUniteLegale;trancheEffectifsUniteLegale;etatAdministratifUniteLegale;categorieJuridiqueUniteLegale;libelleCommuneEtablissement;codePostalEtablissement;diffusionCommerciale
+529990001;POMPES MARTIN SAS;28.13Z;22;A;5710;LYON;69003;true
+529990002;VENTILES DUPONT SARL;28.14Z;12;A;5499;GRENOBLE;38000;false
+529990003;ANCIENS ETABLISSEMENTS ROUX SA;28.12Z;53;F;5599;PARIS;75011;true

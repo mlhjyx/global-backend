@@ -21,7 +21,7 @@
     "schemaVersion": "registry-frame-mapping/v1",
     "format": "csv",
     "csv": { "delimiter": ";" },
-    "constants": { "scheme": "fr_siren", "country": "FR" },
+    "constants": { "scheme": "fr_siren", "country": "FR", "naceVersion": "NAF-rev2" },
     "fields": {
       "regNumber": "siren",
       "name": "denominationUniteLegale",
@@ -37,7 +37,11 @@
       "vatId": null,
       "lei": null,
       "website": null,
-      "identifiers": null
+      "identifiers": null,
+      "attributes": {
+        "diffusionCommerciale": "diffusionCommerciale",
+        "categorieJuridique": "categorieJuridiqueUniteLegale"
+      }
     },
     "statusMap": {
       "a": "ACTIVE",

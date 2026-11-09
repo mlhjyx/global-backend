@@ -51,6 +51,14 @@ pnpm exec tsx scripts/frames/query-preview.mts \
 过滤口径见 `apps/api/src/registry/query.ts`：未知 filter 拒绝、country ISO2 必填、只查
 `withdrawn_at IS NULL` 且 last_snapshot 仍为 PARSED 的实体、排序固定 `scheme, reg_number`。
 
+行业口径（T3-05 子集）：装载时国家派生行业码（NAF rev2 `28.13Z`、无点号 `2813`）统一归一到
+NACE 类目形态 `28.13`，码体系写 `naceVersion`（如 `NAF-rev2`）；查询侧 `--nace 2813` 与
+`--nace 28.13` 等价，`industry` 自由词（中/英/德）与 taxonomy 的 ISIC 码经
+`apps/api/src/registry/industry-map.ts` 的交叉表确定性映射到 NACE 前缀。
+源特有属性经 `mapping.fields.attributes` 采集（≤10 项），例如 FR 的 `diffusionCommerciale`
+（`false` = 当事人反对商业推介）会随候选记录流到 `attributes.registry.sourceAttributes`，
+由下游触达过滤（P4 抑制联动）消费——查询层不做隐式过滤。
+
 `registry_frame` 同时注册为 discovery provider（`apps/api/src/discovery/providers/registry-frame.provider.ts`，
 company_registry 类，data_provider 默认 DISABLED）。**注意**：现行 governed-lineage 契约要求逐记录
 durable 回执，本地查询无法满足，因此它目前恒被路由闸门排除（计划期 `SOURCE_LINEAGE_UNAVAILABLE`）——

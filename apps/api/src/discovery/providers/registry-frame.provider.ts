@@ -14,6 +14,7 @@
  * `data_provider.status`（seed 默认 DISABLED）是第二道 kill switch。
  */
 import type { PrismaClient } from '@prisma/client';
+import { resolveNacePrefixes } from '../../registry/industry-map';
 import { RegistryQueryError, parseRegistryQueryFilters, queryRegistryEntities } from '../../registry/query';
 import type {
   CompanyDiscoveryAdapter,
@@ -42,13 +43,18 @@ export class RegistryFrameDiscoveryProvider implements CompanyDiscoveryAdapter {
       query.filters !== null && typeof query.filters === 'object' && !Array.isArray(query.filters)
         ? (query.filters as Record<string, unknown>)
         : {};
-    // 计划 filters 里还有行业/国家自由词与 _industryCodes 等词表注入字段；这里只取 registry
-    // 契约认识的键，其余忽略。ICP 行业词 → NACE 前缀的映射表是 T3-05 的独立卡片，尚未接线，
-    // 因此不把 _industryCodes 当作 NACE（口径不同，误当过滤条件会静默清空结果）。
+    // 行业 → NACE：显式 nace_prefix 优先；否则用 ISIC 交叉表的确定性命中
+    // （industry 自由词 / taxonomy 注入的 _industryCodes，见 registry/industry-map.ts）。
+    const nacePrefixes = resolveNacePrefixes({
+      nacePrefix: raw.nace_prefix,
+      industry: raw.industry,
+      industryCodes: raw._industryCodes,
+    });
+    // 计划 filters 里还有行业/国家自由词等字段；这里只取 registry 契约认识的键，其余忽略。
     const candidate: Record<string, unknown> = {
       country: raw.country ?? raw._countryCode,
       ...(raw.scheme !== undefined ? { scheme: raw.scheme } : {}),
-      ...(raw.nace_prefix !== undefined ? { nace_prefix: raw.nace_prefix } : {}),
+      ...(nacePrefixes.length > 0 ? { nace_prefix: nacePrefixes } : {}),
       ...(raw.employee_band !== undefined ? { employee_band: raw.employee_band } : {}),
       ...(raw.legal_form !== undefined ? { legal_form: raw.legal_form } : {}),
       ...(raw.status !== undefined ? { status: raw.status } : {}),
