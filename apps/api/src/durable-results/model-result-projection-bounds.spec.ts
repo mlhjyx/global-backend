@@ -258,6 +258,15 @@ const EXPECTED_BOUNDS: Readonly<Partial<Record<TypedProjectionSchema, Readonly<R
     model: { maxLength: 120 },
     ...COMMON_MODEL_METADATA_BOUNDS,
   },
+  'quick-judgment/v1': {
+    'data.judgments': { maxItems: 8 },
+    'data.judgments[].index': { minimum: 0, maximum: 7 },
+    'data.judgments[].verdict': { maxLength: 8 },
+    'data.judgments[].reason': { maxLength: 1000 },
+    provider: { maxLength: 120 },
+    model: { maxLength: 120 },
+    ...COMMON_MODEL_METADATA_BOUNDS,
+  },
   'discovery-extract-company/v1': {
     'data.name': { maxLength: 500 },
     'data.country': { maxLength: 300 },

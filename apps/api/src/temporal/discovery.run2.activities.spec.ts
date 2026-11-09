@@ -45,6 +45,8 @@ vi.mock('../discovery/fit-judge', async (importOriginal) => {
 import { createRun2Activities } from './discovery.run2.activities';
 import { ExternalActionDeniedError, ProviderHttpError } from '../model-gateway/providers/provider-output-error';
 import { CancelledFailure } from '@temporalio/common';
+import { getTask } from '../ai-tasks/task-registry';
+import { StaticSkillResolver } from '../skills/skill-runtime';
 
 const WORKSPACE_ID = '11111111-1111-4111-8111-111111111111';
 const RUN_ID = '22222222-2222-4222-8222-222222222222';
@@ -250,6 +252,11 @@ describe('M0③ quickJudgeBatch', () => {
     const result = await activities.quickJudgeBatch(ARGS);
 
     expect(mocks.execute).toHaveBeenCalledTimes(1);
+    // P3 W5：批量路径使用独立的 L1 契约 discovery.quick_judge（flash 档），不再借用
+    // L2 深判 discovery.qualify_fit。
+    const batchInput = mocks.execute.mock.calls[0]![1] as { task: string; model: string };
+    expect(batchInput.task).toBe('discovery.quick_judge');
+    expect(batchInput.model).toBe(getTask('discovery.quick_judge')!.model);
     expect(mocks.judgeFitCompany).not.toHaveBeenCalled();
     expect(result).toMatchObject({ judged: 3, verdicts: { match: 1, mismatch: 1, weak: 1 }, fallbackPerCompany: 0, ruleFallback: 0 });
     const verdictByJob = new Map(jobUpdates.map((u) => [u.where.id, u.data.verdictQuick]));
@@ -257,6 +264,40 @@ describe('M0③ quickJudgeBatch', () => {
     expect(verdictByJob.get('j2')).toBe('mismatch');
     expect(verdictByJob.get('j3')).toBe('weak');
     expect(events.filter((e) => e.type === 'company_done')).toHaveLength(3);
+  });
+
+  it('resolves the batch call through the discovery.quick_judge skill key', async () => {
+    const inner = new StaticSkillResolver();
+    const resolver = {
+      kind: 'static' as const,
+      resolve: vi.fn(inner.resolve.bind(inner)),
+    };
+    const { activities } = makeActivities(
+      {
+        jobs: [
+          { id: 'j1', canonicalCompanyId: 'c1' },
+          { id: 'j2', canonicalCompanyId: 'c2' },
+        ],
+        companies: [company('c1'), company('c2')],
+      },
+      resolver,
+    );
+    mocks.execute.mockResolvedValue({
+      data: {
+        judgments: [
+          { index: 0, verdict: 'match', reason: 'distributor' },
+          { index: 1, verdict: 'weak', reason: 'unclear' },
+        ],
+      },
+    });
+
+    await activities.quickJudgeBatch(ARGS);
+
+    expect(resolver.resolve).toHaveBeenCalledWith(
+      'discovery.quick_judge',
+      WORKSPACE_ID,
+      expect.objectContaining({ effectiveModel: getTask('discovery.quick_judge')!.model }),
+    );
   });
 
   it('degrades to per-company judgment when the batch output cannot be parsed', async () => {

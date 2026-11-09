@@ -18,6 +18,7 @@ import { getTask } from '../ai-tasks/task-registry';
 import {
   judgeFitCompany,
   loadIcpBrief,
+  persistJudgmentRecordInTransaction,
   type FitJudgeCompany,
 } from '../discovery/fit-judge';
 import {
@@ -305,7 +306,10 @@ export function createRun2Activities(deps: {
       const capturedFailureCode = (companyId: string): FailureCode | undefined =>
         failureCodeByCompany.get(companyId) ?? batchFailureCode;
 
-      const task = getTask('discovery.qualify_fit')!;
+      // P3 W5：批量粗筛用独立的 L1 契约（flash 档、provisional），不再借用 L2 终判
+      // `discovery.qualify_fit`——否则一条 task 级 override 会同时改写深判的模型。
+      // 单家降级路径（judgeOne → judgeFitCompany）仍走 L2 qualify_fit，不动。
+      const task = getTask('discovery.quick_judge')!;
 
       // M2 步 9b：资格判定员回合门。未接线 agentRuntime 时保持旧行为；技能子集经 S0 resolver
       // 校验，任一不可用即落轨迹（reason_code=技能失败码）后原样上抛——不降级、不吞成空判。
@@ -342,6 +346,12 @@ export function createRun2Activities(deps: {
           authorizeExternalAction: () => mayUseExternalProcessing(args.workspaceId, company.id),
           skills: deps.skills,
         });
+        // P3 J03b：L1 快扫的单家降级没有 Lead 投影，v2 记录单独落库（shadow 容忍失败）。
+        if (judgment?.judgmentRecord) {
+          await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+            persistJudgmentRecordInTransaction(tx, args.icpId, judgment),
+          );
+        }
         return judgment?.verdict ?? null;
       };
 
@@ -454,7 +464,7 @@ export function createRun2Activities(deps: {
               const result = await executeSkillWithRuntime<{ judgments?: unknown }>(
                 deps.skills ?? STATIC_SKILL_RESOLVER,
                 deps.gateway,
-                'discovery.qualify_fit',
+                'discovery.quick_judge',
                 {
                   task: task.id,
                   prompt: buildQuickJudgePrompt(icpBrief, eligible.map((entry) => entry.company as PrefilterCompany)),

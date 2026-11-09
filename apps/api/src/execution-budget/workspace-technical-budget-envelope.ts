@@ -39,6 +39,10 @@ import {
 } from '../discovery/execution-envelope';
 import { TRADE_FAIRS } from '../discovery/trade-fairs';
 import {
+  QUICK_JUDGE_BATCH_SIZE,
+  QUICK_SCAN_POOL_LIMIT,
+} from '../discovery/run2/quick-scan';
+import {
   MAX_QUERY_PLAN_INDUSTRY_TERMS,
   MAX_QUERY_PLAN_TARGET_COUNTRIES,
 } from '../discovery/icp-to-cpv';
@@ -183,6 +187,11 @@ function discoveryRunEnvelope(
       model('discovery.classify_trade_role', MAX_DISCOVERY_PROFILE_COMPANIES),
       // qualifyFitForRun: one judgment per canonical company of the run.
       model('discovery.qualify_fit', MAX_DISCOVERY_FIT_COMPANIES),
+      // quickJudgeBatch（L1 快扫，P3 W5）：run 内最多 500 家、8 家/次批量粗判。
+      model(
+        'discovery.quick_judge',
+        Math.ceil(QUICK_SCAN_POOL_LIMIT / QUICK_JUDGE_BATCH_SIZE),
+      ),
     ],
     [
       tool(

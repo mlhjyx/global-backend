@@ -23,6 +23,7 @@ const EXPECTED_SKILL_KEYS = [
   "company.understanding.extract_offerings",
   "compliance.sanctions_screen",
   "discovery.qualify_fit",
+  "discovery.quick_judge",
   "engage.reply_classify",
   "outreach.sequence_draft",
   "quoting.incoterms_quote",
