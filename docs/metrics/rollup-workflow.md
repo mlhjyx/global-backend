@@ -16,7 +16,7 @@
 | 指标 | 窗口 | CI | 备注 |
 | --- | --- | --- | --- |
 | T0-001 vric_1000_strict | snapshot | Wilson | 按 workspace + 平台 ALL 行 |
-| T0-002 vric_1000_plus | snapshot | Wilson | email/phone 任一 VALID |
+| T0-002 vric_1000_plus | snapshot | Wilson | email/phone 任一 VALID；另出 email_only / phone_only / both 通道拆分行（字典 §1.3.1 要求） |
 | T1-008 source_accept_rate | rolling 7d | Wilson | 按 provider + ALL |
 | T1-009 rejection_reason_distribution | rolling 7d | Wilson | 按 disposition_code（分母=窗口内有码记录） |
 | T2-001 email_coverage_rate | snapshot | Wilson | workspace × country + 平台 ALL |

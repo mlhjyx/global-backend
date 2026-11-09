@@ -1,0 +1,160 @@
+{
+  "$comment": "G2 基线：时间戳撞车（历史已应用、改名会破坏 checksum）与 gate 上线前被修改过的迁移文件（内容冻结）。只许收紧：修复/退役后必须删除条目。",
+  "duplicateTimestamps": [
+    {
+      "timestamp": "20260714070000",
+      "migrations": [
+        "20260714070000_patent_inventor_tombstone",
+        "20260714070000_site_builder_brand_profile"
+      ],
+      "owner": "P6-CI-01",
+      "expiresAt": "2027-01-31",
+      "reason": "历史迁移已应用，改名会破坏 _prisma_migrations.checksum；新迁移必须使用唯一时间戳"
+    },
+    {
+      "timestamp": "20261108120000",
+      "migrations": [
+        "20261108120000_discovery_query_lineage_contract_v3",
+        "20261108120000_http_llm_cache",
+        "20261108120000_memory_layer_v0"
+      ],
+      "owner": "P6-CI-01",
+      "expiresAt": "2027-01-31",
+      "reason": "历史迁移已应用，改名会破坏 _prisma_migrations.checksum；新迁移必须使用唯一时间戳"
+    },
+    {
+      "timestamp": "20261108130000",
+      "migrations": [
+        "20261108130000_discovery_stale_run_watchdog",
+        "20261108130000_pack_v1"
+      ],
+      "owner": "P6-CI-01",
+      "expiresAt": "2027-01-31",
+      "reason": "历史迁移已应用，改名会破坏 _prisma_migrations.checksum；新迁移必须使用唯一时间戳"
+    },
+    {
+      "timestamp": "20261108160000",
+      "migrations": [
+        "20261108160000_agent_orchestration_v0",
+        "20261108160000_contact_classification_v2",
+        "20261108160000_discovery_query_lineage_provider_allowlist"
+      ],
+      "owner": "P6-CI-01",
+      "expiresAt": "2027-01-31",
+      "reason": "历史迁移已应用，改名会破坏 _prisma_migrations.checksum；新迁移必须使用唯一时间戳"
+    },
+    {
+      "timestamp": "20261109100000",
+      "migrations": [
+        "20261109100000_channel_manifest_v1",
+        "20261109100000_registry_frames"
+      ],
+      "owner": "P6-CI-01",
+      "expiresAt": "2027-01-31",
+      "reason": "历史迁移已应用，改名会破坏 _prisma_migrations.checksum；新迁移必须使用唯一时间戳"
+    },
+    {
+      "timestamp": "20261109120000",
+      "migrations": [
+        "20261109120000_contact_point_four_state",
+        "20261109120000_sanctions_screening_list_freshness"
+      ],
+      "owner": "P6-CI-01",
+      "expiresAt": "2027-01-31",
+      "reason": "历史迁移已应用，改名会破坏 _prisma_migrations.checksum；新迁移必须使用唯一时间戳"
+    }
+  ],
+  "modifiedHistory": [
+    {
+      "path": "packages/db/prisma/migrations/20260716191000_idempotency_request_hash/migration.sql",
+      "sha256": "c934c5699988f08f0571edd212657f6705eb08bab699784e6344e3c8217bf64d",
+      "owner": "P6-CI-01",
+      "expiresAt": "2027-01-31",
+      "reason": "gate 上线前的存量修改（旧实践）；自本基线起内容冻结，任何再次修改（含恢复旧内容）都红"
+    },
+    {
+      "path": "packages/db/prisma/migrations/20260810010000_suppression_decision_governance/migration.sql",
+      "sha256": "7bf14daacff3695c521cacf6be407d55720df5068c119f674a0149c66ab0ba7c",
+      "owner": "P6-CI-01",
+      "expiresAt": "2027-01-31",
+      "reason": "gate 上线前的存量修改（旧实践）；自本基线起内容冻结，任何再次修改（含恢复旧内容）都红"
+    },
+    {
+      "path": "packages/db/prisma/migrations/20260816220000_production_parity_budget_runtime/migration.sql",
+      "sha256": "bddbc192e173b6409ab75500489f938cf31bda5056a56f18ebc1821c04ca387f",
+      "owner": "P6-CI-01",
+      "expiresAt": "2027-01-31",
+      "reason": "gate 上线前的存量修改（旧实践）；自本基线起内容冻结，任何再次修改（含恢复旧内容）都红"
+    },
+    {
+      "path": "packages/db/prisma/migrations/20260821090000_execution_budget_authority/migration.sql",
+      "sha256": "34cd53faeb3cc1a9ce3ef9fc118afbce792a3343d05c3e2ecc6ace7f705cd35f",
+      "owner": "P6-CI-01",
+      "expiresAt": "2027-01-31",
+      "reason": "gate 上线前的存量修改（旧实践）；自本基线起内容冻结，任何再次修改（含恢复旧内容）都红"
+    },
+    {
+      "path": "packages/db/prisma/migrations/20260823000000_execution_domain_ack/migration.sql",
+      "sha256": "1c79ee8a6ce8376a43fc0da8f54e4ee0b4dbb902f080b91ada1344ed909939aa",
+      "owner": "P6-CI-01",
+      "expiresAt": "2027-01-31",
+      "reason": "gate 上线前的存量修改（旧实践）；自本基线起内容冻结，任何再次修改（含恢复旧内容）都红"
+    },
+    {
+      "path": "packages/db/prisma/migrations/20260824130000_personal_artifact_cleanup/migration.sql",
+      "sha256": "d564373e571c5ceb8e5c72c6e16c0df1dd78ac592c1ca9e582c11184ae3bf60b",
+      "owner": "P6-CI-01",
+      "expiresAt": "2027-01-31",
+      "reason": "gate 上线前的存量修改（旧实践）；自本基线起内容冻结，任何再次修改（含恢复旧内容）都红"
+    },
+    {
+      "path": "packages/db/prisma/migrations/20260826150000_raw_source_governance_status_hardening/migration.sql",
+      "sha256": "61788ae2e4c914119b4408f1566634a1fbb5b035b987b9d958a7bb94e2dd49d8",
+      "owner": "P6-CI-01",
+      "expiresAt": "2027-01-31",
+      "reason": "gate 上线前的存量修改（旧实践）；自本基线起内容冻结，任何再次修改（含恢复旧内容）都红"
+    },
+    {
+      "path": "packages/db/prisma/migrations/20260826160000_raw_source_governance_final_correction/migration.sql",
+      "sha256": "f8909dda8108b75416a050ea8cf29a57e7f2e1387a31f7ac7a9d09211ca42f77",
+      "owner": "P6-CI-01",
+      "expiresAt": "2027-01-31",
+      "reason": "gate 上线前的存量修改（旧实践）；自本基线起内容冻结，任何再次修改（含恢复旧内容）都红"
+    },
+    {
+      "path": "packages/db/prisma/migrations/20260826180000_raw_source_evidence_chain_correction/migration.sql",
+      "sha256": "ec18e777ef578d46a90f9158da5cf1942008da36402550877469113b4f80b1b0",
+      "owner": "P6-CI-01",
+      "expiresAt": "2027-01-31",
+      "reason": "gate 上线前的存量修改（旧实践）；自本基线起内容冻结，任何再次修改（含恢复旧内容）都红"
+    },
+    {
+      "path": "packages/db/prisma/migrations/20260826220000_raw_source_stored_field_cleanup/migration.sql",
+      "sha256": "aea5db4bdfc240c3767657410be47b5c3d138ac9725726f30c7cf4830668472b",
+      "owner": "P6-CI-01",
+      "expiresAt": "2027-01-31",
+      "reason": "gate 上线前的存量修改（旧实践）；自本基线起内容冻结，任何再次修改（含恢复旧内容）都红"
+    },
+    {
+      "path": "packages/db/prisma/migrations/20260830121000_governed_subject_relation_append_attest/migration.sql",
+      "sha256": "429023f99cdad37d5f479f4fcbc90630680a655fe71863c1449946e1d50850f9",
+      "owner": "P6-CI-01",
+      "expiresAt": "2027-01-31",
+      "reason": "gate 上线前的存量修改（旧实践）；自本基线起内容冻结，任何再次修改（含恢复旧内容）都红"
+    },
+    {
+      "path": "packages/db/prisma/migrations/20260905193000_platform_execution_run_binding/migration.sql",
+      "sha256": "2385d55d60fb4014521f580986e83136c0e193f283f022499c3e1f426f77a8e8",
+      "owner": "P6-CI-01",
+      "expiresAt": "2027-01-31",
+      "reason": "gate 上线前的存量修改（旧实践）；自本基线起内容冻结，任何再次修改（含恢复旧内容）都红"
+    },
+    {
+      "path": "packages/db/prisma/migrations/20260907100000_platform_egress_fence/migration.sql",
+      "sha256": "fa74cd66d8b25b83bdd3febcc2f1f521c7d410ec06c80b15765e49af1e3591ed",
+      "owner": "P6-CI-01",
+      "expiresAt": "2027-01-31",
+      "reason": "gate 上线前的存量修改（旧实践）；自本基线起内容冻结，任何再次修改（含恢复旧内容）都红"
+    }
+  ]
+}

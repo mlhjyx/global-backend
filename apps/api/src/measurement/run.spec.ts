@@ -78,6 +78,34 @@ describe("buildMetricObservations", () => {
     );
   });
 
+  it("keeps T0-002 channel strata as distinct observation rows", () => {
+    const rows: MetricQueryRow[] = [
+      { stratum: { workspace_id: "ALL" }, numerator: 9, denominator: 300 },
+      { stratum: { workspace_id: "ALL", channel: "email_only" }, numerator: 4, denominator: 300 },
+      { stratum: { workspace_id: "ALL", channel: "phone_only" }, numerator: 3, denominator: 300 },
+      { stratum: { workspace_id: "ALL", channel: "both" }, numerator: 2, denominator: 300 },
+    ];
+    const observations = buildMetricObservations(
+      { metricId: "T0-002", metricVersion: 1, ciMethod: "wilson" },
+      rows,
+      window,
+      "seed",
+    );
+    expect(observations).toHaveLength(4);
+    expect(observations.map((observation) => observation.stratumKey)).toEqual(
+      expect.arrayContaining([
+        '{"channel":"both","workspace_id":"ALL"}',
+        '{"channel":"email_only","workspace_id":"ALL"}',
+        '{"channel":"phone_only","workspace_id":"ALL"}',
+      ]),
+    );
+    const emailOnly = observations.find((observation) =>
+      observation.stratumKey.includes("email_only"),
+    );
+    expect(emailOnly?.numerator).toBe(4);
+    expect(emailOnly?.workspaceId).toBeNull();
+  });
+
   it("uses the bootstrap interval for ratio-of-counts metrics", () => {
     const rows: MetricQueryRow[] = [
       { stratum: { workspace_id: WS, country: "DE" }, numerator: 200, denominator: 173 },
