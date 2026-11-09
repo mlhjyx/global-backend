@@ -10,6 +10,7 @@
 | G1 Prisma schema⇄migrations 漂移 | `build-test` · `Prisma drift gate` | datamodel 与迁移链有任何未登记差异 | `packages/db/prisma/drift-baseline.json`（110 条，见 [prisma-schema-drift.md](prisma-schema-drift.md)） | P5c-BE-30/31 |
 | G2 迁移命名与 checksum | `build-test` · `Migration integrity gate` | 目录名不合规 / 新增时间戳撞车 / `_prisma_migrations.checksum` ≠ 文件 sha256 / 存在失败或回滚行 | `docs/governance/ci-baselines/g2-migration-integrity.json`（历史撞车组） | P6-CI-01 |
 | G5 RLS/租户目录 | `build-test` · `RLS catalog gate` | 带 `workspace_id` 的表缺 ENABLE+FORCE RLS 或策略；无 `workspace_id` 的表未在目录登记；`app_user` 默认表权限不是只读 | `docs/governance/ci-baselines/g5-rls-catalog.json`（platform_table / owner_only / rls_enforced 三类目录） | P6-CI-07 |
+| G9 文件体量与复杂度 | `build-test` · `File and complexity budget gate` | >1200 行未登记文件；已登记文件超过棘轮上限；圈复杂度 >40 未登记函数或超过基线 | `docs/governance/ci-baselines/g9-size-budget.json`（>800 行文件、>20 复杂度函数） | P6-CI-10 |
 
 ## 本地复现
 
@@ -23,11 +24,16 @@ PRISMA_CIGATE_FROM_URL='postgresql://global:<pw>@localhost:5432/prisma_drift_scr
   node packages/db/scripts/migration-integrity-gate.mjs
 PRISMA_CIGATE_FROM_URL='postgresql://global:<pw>@localhost:5432/prisma_drift_scratch' \
   node packages/db/scripts/rls-catalog-gate.mjs
+
+# G9（纯静态，无需数据库）
+node scripts/check-file-budgets.mjs
 ```
 
 G2/G5 都会向目标库 `migrate deploy`，脚本只接受一次性库名（`*_test` / `*_scratch` / `prisma_drift_*`），拒绝落到共享 `global_dev`。
 
 ## 基线怎么改
+
+> G9 的函数基线键是「文件#函数名（同名按出现顺序加序号）」，**不含行号**：行号会随他人无关编辑漂移，把行号钉进键会让每次同步 main 都误报「条目失效」（2026-11-09 实测 6 例）。
 
 - **新增例外**：先评估能否直接修（拆分文件、补 RLS、换迁移时间戳）。确实不能，才在 PR 里向对应基线 JSON 加条目，写明 `owner` 与 `expiresAt`，并在 PR 描述说明原因。
 - **条目不再适用**（文件已拆分/表已删/撞车已修/函数已降复杂度）：必须删除条目，否则门红（ratchet）。

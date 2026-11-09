@@ -12,7 +12,7 @@ import { DOMAIN_REVIEW_TASK_REASONS, DOMAIN_REVIEW_TASK_STATUSES } from './domai
  * FORCE RLS 正/负向、业务唯一键、CHECK）由 domain-stores.postgres.spec.ts 在真库验证。
  */
 const MIGRATIONS = fileURLToPath(new URL('../../../../packages/db/prisma/migrations/', import.meta.url));
-const MIGRATION = '20261109190000_company_domain_resolution';
+const MIGRATION = '20261109185000_company_domain_resolution';
 const PRIVILEGES = fileURLToPath(
   new URL('../../../../docs/governance/app-user-table-privileges.json', import.meta.url),
 );
