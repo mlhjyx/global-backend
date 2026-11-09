@@ -62,10 +62,10 @@
       "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
     },
     "apps/api/src/durable-results/catalog-result-projections.ts": {
-      "maxLines": 950,
+      "maxLines": 972,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
-      "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
+      "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目；2026-11-10 deepseek.search/fetch 两条 typed projection 定义（+22 行）经 PR 评审上调"
     },
     "apps/api/src/durable-results/model-result-projections.ts": {
       "maxLines": 1744,
@@ -261,12 +261,6 @@
     },
     "apps/api/src/tools/budget-store.ts": {
       "maxLines": 1281,
-      "owner": "P6-CI-10",
-      "expiresAt": "2027-01-31",
-      "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
-    },
-    "apps/api/src/tools/builtin-tools.ts": {
-      "maxLines": 843,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
       "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"

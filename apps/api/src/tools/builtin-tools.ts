@@ -7,6 +7,13 @@ import {
   ToolContext,
 } from "./tool-contract";
 import { ToolRegistry } from "./tool-registry";
+import { registerDeepSeekTools } from "./deepseek-tools";
+import {
+  durablePageText,
+  durableTitle,
+  isDurableText,
+  isPersonProfileUrl,
+} from "./durable-text";
 import {
   searxSearchPaged,
   SearxResult,
@@ -239,7 +246,7 @@ export const socialFetchTool: Tool<
     data: {
       url: result.data.url,
       status: result.data.status,
-      text: durableSocialPageText(result.data.text, MAX_SOCIAL_FETCH_TEXT_CHARS),
+      text: durablePageText(result.data.text, MAX_SOCIAL_FETCH_TEXT_CHARS),
     },
     costCents: result.costCents,
     ...(result.degraded === undefined ? {} : { degraded: result.degraded }),
@@ -274,7 +281,7 @@ export const socialFetchTool: Tool<
           beforePhysicalWire: ctx.beforePhysicalWire,
         },
       );
-      const text = durableSocialPageText(response.body.toString("utf8"), maxChars);
+      const text = durablePageText(response.body.toString("utf8"), maxChars);
       return { data: { url: input.url, status: response.status, text }, costCents: 0 };
     } catch (error) {
       if (error instanceof EgressBlockedError) {
@@ -349,13 +356,6 @@ export const socialSearchTool: Tool<
   },
 };
 const SEARX_DURABLE_URL_CHARS = 2048;
-const SEARX_DURABLE_TITLE_CHARS = 2000;
-
-/** Profile pages of individual people: their URL and title name the person. */
-const PERSON_PROFILE_PAGES: readonly (readonly [domain: string, path: RegExp])[] = [
-  ["linkedin.com", /^\/(?:in|pub)\//iu],
-  ["xing.com", /^\/profile\//iu],
-];
 
 /**
  * Only what the durable contract keeps leaves this tool: url and title, as text the
@@ -381,39 +381,6 @@ function durableSearxResults(results: readonly SearxResult[]): SearxngSearchResu
     .slice(0, SEARX_DURABLE_RESULT_LIMIT);
 }
 
-/** With the u flag a surrogate pair reads as one astral code point, so this matches lone surrogates only. */
-const LONE_SURROGATE = /[\uD800-\uDFFF]/u;
-/**
- * social.fetch 的页面文本按 durable 契约整形：去 NUL、孤立代理项替换为 U+FFFD、NFC，
- * 并在上限处按码点边界切（劈开代理对同样是投影拒绝）。原始 HTML 里 NUL/孤立代理项/NFD
- * 文本都真实存在；不整形会让 registry.project 拒绝一个合法的上游结果（2026-11-02
- * acceptance run：这类拒绝曾把已付费操作留在 RESERVED 并打死整条活动）。
- */
-function durableSocialPageText(raw: string, maxChars: number): string {
-  let text = raw.replaceAll("\0", "").replace(/[\uD800-\uDFFF]/gu, "�").normalize("NFC");
-  if (text.length > maxChars) {
-    text = text.slice(0, maxChars);
-    if (/[\uD800-\uDBFF]$/u.test(text)) text = text.slice(0, -1);
-  }
-  return text;
-}
-
-
-/** Text the typed projection accepts: NFC, without NUL and without lone surrogates. */
-function isDurableText(value: string): boolean {
-  return !value.includes("\0") && !LONE_SURROGATE.test(value) && value === value.normalize("NFC");
-}
-
-/** A provider title as durable text, cut to the contract without splitting a surrogate pair. */
-function durableTitle(raw: string): string | null {
-  let title = raw.replaceAll("\0", "").replace(/[\uD800-\uDFFF]/gu, "�").normalize("NFC");
-  if (title.length > SEARX_DURABLE_TITLE_CHARS) {
-    title = title.slice(0, SEARX_DURABLE_TITLE_CHARS);
-    if (/[\uD800-\uDBFF]$/u.test(title)) title = title.slice(0, -1);
-  }
-  return isDurableText(title) ? title : null;
-}
-
 /** social.search 的持久形态：只保留个人主页 URL（含完整路径——路径即被检索人）+ 标题。 */
 function personProfileSearxResults(results: readonly SearxResult[]): SearxngSearchResult[] {
   return results
@@ -429,19 +396,6 @@ function personProfileSearxResults(results: readonly SearxResult[]): SearxngSear
       return [title === null ? { url } : { url, title }];
     })
     .slice(0, SEARX_DURABLE_RESULT_LIMIT);
-}
-
-function isPersonProfileUrl(url: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
-  const host = parsed.hostname.replace(/\.$/u, "");
-  return PERSON_PROFILE_PAGES.some(
-    ([domain, path]) => (host === domain || host.endsWith(`.${domain}`)) && path.test(parsed.pathname),
-  );
 }
 
 /** crawl4ai.fetch —— 抓单页（需 source_policy + robots）。maxChars 由调用方按任务上下文需求指定
@@ -838,5 +792,5 @@ export function registerBuiltinTools(
   registry.register(wikidataTool as Tool);
   registry.register(osmOverpassTool as Tool);
   registry.register(smtpRcptProbeTool as Tool);
-  return registry;
+  return registerDeepSeekTools(registry);
 }

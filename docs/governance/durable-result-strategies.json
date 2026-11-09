@@ -425,6 +425,38 @@
         "subjectRefRequired": true,
         "personalDataDsrCompatible": true
       }
+    },
+    {
+      "id": "deepseek.search",
+      "declarationPath": "apps/api/src/tools/deepseek-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "deepseek-search/v1",
+      "operationIdentity": "tool:deepseek.search:<version>:<idempotencyKey>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "ModelWebSearchExecutor",
+        "domainAggregateType": "SearchResultEvidence",
+        "identitySource": "query-digest-and-result-url",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
+      "id": "deepseek.fetch",
+      "declarationPath": "apps/api/src/tools/deepseek-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "deepseek-fetch/v1",
+      "operationIdentity": "tool:deepseek.fetch:<version>:<idempotencyKey>",
+      "privacyClass": "PERSONAL_DATA",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "ModelWebSearchExecutor",
+        "domainAggregateType": "ExternalPageEvidence",
+        "identitySource": "url-and-content-digest",
+        "subjectRefRequired": true,
+        "personalDataDsrCompatible": true
+      }
     }
   ],
   "modelTasks": [

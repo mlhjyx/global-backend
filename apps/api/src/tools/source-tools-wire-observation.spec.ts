@@ -36,10 +36,13 @@ vi.mock("../adapters/guarded-http", async (importOriginal) => ({
  * is only sound if every adapter the Tool calls receives exactly the Broker's
  * ctx.beforePhysicalWire; the adapters' own specs (guarded-http per hop,
  * web-crawler before fetch, external-wire-authorization per Algolia page)
- * prove they call it immediately before each wire.
+ * prove they call it immediately before each wire. deepseek.search/fetch do not
+ * touch guarded-http; deepseek-tools.spec.ts proves their wires instead.
  */
 const DECLARED = [
   "crawl4ai.render",
+  "deepseek.fetch",
+  "deepseek.search",
   "http.get",
   "mapyourshow.fetch",
   "sanctions.download",
