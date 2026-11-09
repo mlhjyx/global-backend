@@ -18,6 +18,7 @@ import 'dotenv/config';
 process.umask(0o077);
 import { writeFileSync } from 'node:fs';
 import { PrismaClient } from '@prisma/client';
+import { PrismaService } from '../src/prisma/prisma.service';
 import { crawlHtml, crawlUrl } from '../src/adapters/web-crawler';
 import { extractSameSiteLinks } from '../src/adapters/site-links';
 import { isAllowedByRobots } from '../src/adapters/robots';
@@ -57,7 +58,8 @@ function parseArgs(argv: string[]): Args {
   if (!Number.isInteger(delayMs) || delayMs < 0) throw new Error('--delay-ms 必须是非负整数');
   return {
     apply: argv.includes('--apply'),
-    country: one('country') ?? (domains ? null : 'DE'),
+    // 默认 DE（今晚德国优先）；显式给了 domains/ids 时不再叠加国家过滤。
+    country: one('country') ?? (domains || ids ? null : 'DE'),
     limit,
     domains,
     ids,
@@ -154,7 +156,12 @@ interface CompanyResult {
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  // 双连接：owner 跨租户扫描/选择（预期绕过 RLS）；PrismaService(app_user) 跑**写入**——
+  // persistCompanyContactPoints 的 suppression 读取依赖 RLS 的租户隔离，owner 连接会把
+  // 所有工作区的 suppression 都读进来（2026-11-10 独立审查发现），写入必须走 withWorkspace。
   const prisma = new PrismaClient();
+  const appPrisma = new PrismaService();
+  await appPrisma.$connect();
   const where = {
     status: { not: 'SUPPRESSED' },
     domain: args.domains ? { in: args.domains } : { not: null },
@@ -222,42 +229,42 @@ async function main(): Promise<void> {
       rec.linkedin = plan.linkedinCompanyPage;
 
       if (args.apply) {
-        const suppressions = await prisma.suppressionRecord.findMany({
-          where: { workspaceId: company.workspaceId, type: { in: ['domain', 'company_name'] } },
-          select: { type: true, value: true },
-        });
-        if (companyMatchesSuppression(suppressions, company)) {
-          rec.skippedSuppressed = true;
-        } else {
-          const observation: CompanyContactObservation = {
-            points: plan.linkedinCompanyPage
-              ? [{ kind: 'linkedin_company_page', value: plan.linkedinCompanyPage, sourceKind: 'homepage' }]
-              : [],
-            // 移除语义属于 website-profile provider 的全量观察；本管线只补不删。
-            checkedKinds: [],
-          };
-          const seenAt = new Date();
-          await prisma.$transaction(async (tx) => {
-            if (plan.channels.length > 0) {
-              const written = await upsertCompanyContactChannels(tx, {
-                workspaceId: company.workspaceId,
-                companyId: company.id,
-                channels: plan.channels,
-                seenAt,
-              });
-              rec.writtenChannels = written.written;
-            }
-            if (observation.points.length > 0) {
-              const persisted = await persistCompanyContactPoints(tx, {
-                workspaceId: company.workspaceId,
-                companyId: company.id,
-                observation,
-                seenAt,
-              });
-              rec.writtenPoints = persisted?.written ?? 0;
-            }
+        const observation: CompanyContactObservation = {
+          points: plan.linkedinCompanyPage
+            ? [{ kind: 'linkedin_company_page', value: plan.linkedinCompanyPage, sourceKind: 'homepage' }]
+            : [],
+          // 移除语义属于 website-profile provider 的全量观察；本管线只补不删。
+          checkedKinds: [],
+        };
+        const seenAt = new Date();
+        await appPrisma.withWorkspace(company.workspaceId, async (tx) => {
+          const suppressions = await tx.suppressionRecord.findMany({
+            where: { type: { in: ['domain', 'company_name'] } },
+            select: { type: true, value: true },
           });
-        }
+          if (companyMatchesSuppression(suppressions, company)) {
+            rec.skippedSuppressed = true;
+            return;
+          }
+          if (plan.channels.length > 0) {
+            const written = await upsertCompanyContactChannels(tx, {
+              workspaceId: company.workspaceId,
+              companyId: company.id,
+              channels: plan.channels,
+              seenAt,
+            });
+            rec.writtenChannels = written.written;
+          }
+          if (observation.points.length > 0) {
+            const persisted = await persistCompanyContactPoints(tx, {
+              workspaceId: company.workspaceId,
+              companyId: company.id,
+              observation,
+              seenAt,
+            });
+            rec.writtenPoints = persisted?.written ?? 0;
+          }
+        });
       }
     } catch (error) {
       rec.error = (error instanceof Error ? error.message : String(error)).slice(0, 160);
@@ -296,6 +303,7 @@ async function main(): Promise<void> {
     console.log(`报告已写入 ${args.reportPath}`);
   }
   await prisma.$disconnect();
+  await appPrisma.$disconnect();
 }
 
 main().catch((error) => {

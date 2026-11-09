@@ -102,12 +102,14 @@ export interface IsicNodeMatch {
   code: string;
   en: string;
   nacePrefixes: string[];
-  /** 命中的词（原样，去重后保持首个出现顺序）。 */
+  /** 命中的输入词（原样，去重后保持首个出现顺序）。 */
   matchedTerms: string[];
+  /** 命中的词表别名（内部受控词，单独暴露：自由文本证据只能存别名，不能存原句）。 */
+  matchedAliases: string[];
 }
 
 /**
- * 行业自由词 → 命中的 ISIC 节点（含 matchedTerms），供存量归一推断使用。
+ * 行业自由词 → 命中的 ISIC 节点（含 matchedTerms/matchedAliases），供存量归一推断使用。
  * 同一节点的多个别名命中合并；返回按 matchedTerms 数量与码具体度排序的稳定列表。
  */
 export function matchIsicNodesForTerms(terms: readonly string[]): IsicNodeMatch[] {
@@ -122,9 +124,11 @@ export function matchIsicNodesForTerms(terms: readonly string[]): IsicNodeMatch[
         en: entry.node.en,
         nacePrefixes: [...entry.nacePrefixes],
         matchedTerms: [],
+        matchedAliases: [],
       };
       const value = raw.trim();
       if (!current.matchedTerms.includes(value)) current.matchedTerms.push(value);
+      if (!current.matchedAliases.includes(entry.alias)) current.matchedAliases.push(entry.alias);
       matches.set(entry.node.code, current);
     }
   }

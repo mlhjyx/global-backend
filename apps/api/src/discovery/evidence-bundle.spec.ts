@@ -51,7 +51,7 @@ describe('entriesFromStoredAttributes', () => {
     expect(bySource.wikidata?.tier).toBe('T2');
     expect(bySource.wikidata?.facts.entity_qid).toBe('Q81230');
     expect(bySource.website_profile?.tier).toBe('T3');
-    expect(bySource.website_profile?.source_url).toBe('https://albinpump.com/');
+    expect(bySource.website_profile?.source_page).toBe('https://albinpump.com/');
     expect(bySource.digital_footprint?.tier).toBe('T3');
   });
 
@@ -83,7 +83,6 @@ describe('assembleEvidenceBundle', () => {
       new Date('2026-11-10T00:00:00.000Z'),
     );
     expect(bundle.version).toBe(1);
-    expect(bundle.shadow).toBe(true);
     expect(bundle.built_at).toBe('2026-11-10T00:00:00.000Z');
     expect(bundle.coverage.tiers).toEqual({ T1: 3, T2: 1, T3: 2 });
     expect(bundle.coverage.tier_list).toEqual(['T1', 'T2', 'T3']);
@@ -145,7 +144,7 @@ describe('buildEvidenceBundle', () => {
     expect(sources).toContain('gleif');
     expect(sources).toContain('wikidata');
     const wikidata = bundle.entries.find((entry) => entry.source_key === 'wikidata')!;
-    expect(wikidata.source_url).toBe('https://www.wikidata.org/wiki/Q42');
+    expect(wikidata.source_page).toBe('https://www.wikidata.org/wiki/Q42');
     expect(wikidata.captured_at).toBe('2026-11-10T00:00:00.000Z');
   });
 
@@ -175,5 +174,16 @@ describe('readEvidenceBundle', () => {
     expect(readEvidenceBundle({ evidence_bundle: { version: 2, entries: [], coverage: {} } })).toBeNull();
     expect(readEvidenceBundle({ evidence_bundle: { version: 1 } })).toBeNull();
     expect(readEvidenceBundle({})).toBeNull();
+  });
+});
+
+describe('sanitizer round-trip（证据包必须在公司合并清洗后原样存活）', () => {
+  it('keeps every bundle field the audit and the gate rely on', async () => {
+    const { sanitizeCanonicalCompanyAttributes } = await import('./canonical-company-attributes');
+    const bundle = assembleEvidenceBundle({ name: 'Acme', domain: 'acme.de', country: 'DE' }, entriesFromStoredAttributes(ATTRIBUTES));
+    const stored = sanitizeCanonicalCompanyAttributes({ evidence_bundle: bundle });
+    // 严格相等：source_page/facts 键名均避开 sanitizer 的保留键黑名单（'source_url'/'fei_number'
+    // 这类键会在清洗时被静默丢弃——2026-11-10 独立审查发现，已改名）。
+    expect(stored.evidence_bundle).toEqual(bundle);
   });
 });

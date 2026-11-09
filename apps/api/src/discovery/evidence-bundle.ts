@@ -1,18 +1,18 @@
 /**
- * 证据包 v1（2026-11-10，多源证据图核心切片 ②，shadow）。
+ * 证据包 v1（2026-11-10，多源证据图核心切片 ②；当晚口径：直接 enforce，无影子期）。
  *
  * 背景：官网理解单源（website_profile）+ 富集结果各源各写 attributes.<provider>，
- * 没有任何「跨源分层视图」：判定链看不到某公司有哪些独立来源、几层。本模块把
- * 已存属性里的证据（零出网）与按需实时探测的富集 provider（经 ToolBroker，按
- * data_provider ENABLED 可用性）装配成一份分层证据包：
+ * 没有任何「跨源分层视图」。本模块把已存属性里的证据（零出网）与按需实时探测的
+ * 富集 provider（经 ToolBroker，按 data_provider ENABLED 可用性）装配成一份分层证据包：
  *
  *   T1 = 官方注册/招投标/专利（gleif / ted / fda / companies_house / inpi_rne / google_patents / samgov）
  *   T2 = 聚合与二手（wikidata）
  *   T3 = 官网/技术足迹/结构化收割（website_profile / digital_footprint / structured_harvest）
  *
- * **shadow 语义**：证据包只写 `canonical_company.attributes.evidence_bundle`，不改变
- * 任何判定/档案展示结论；判定链经 corroboration 评估（judgment/corroboration.ts）
- * 只记录、不拦截。装配是纯函数 + 一个注入 enrichers 的 IO 驱动，可离线重放。
+ * **enforce 语义**：判定链在 FIT/NOT_FIT 落地前现场装配/读取本包并交给跨源佐证门
+ * （judgment/corroboration.ts）：低于 2 个独立分层的结论按 fail-closed 降级 UNKNOWN
+ * （可回滚：JUDGE_CORROBORATION_MODE=shadow/off）。判定事务内把包写回
+ * `canonical_company.attributes.evidence_bundle` 供审计与离线复核。
  *
  * 落库形状对 sanitizeCanonicalCompanyAttributes 友好（该 sanitizer 会在下次公司合并时
  * 清洗 attributes）：facts 的键避开 SEMANTIC_IDENTIFIER/CONTACT 键名黑名单，字符串值
@@ -66,7 +66,7 @@ export interface EvidenceBundleEntry {
   tier: EvidenceTier;
   source_key: string;
   evidence_kind: string;
-  source_url?: string;
+  source_page?: string;
   captured_at?: string;
   confidence?: number;
   facts: Record<string, EvidenceFactValue>;
@@ -82,7 +82,6 @@ export interface EvidenceCoverage {
 
 export interface EvidenceBundle {
   version: 1;
-  shadow: true;
   built_at: string;
   subject: { name: string; domain: string | null; country: string | null };
   entries: EvidenceBundleEntry[];
@@ -165,13 +164,13 @@ function compact(facts: Record<string, EvidenceFactValue | undefined>): Record<s
 function finish(sourceKey: string, entry: Omit<EvidenceBundleEntry, 'tier' | 'source_key' | 'evidence_kind'>): EvidenceBundleEntry | null {
   const tier = SOURCE_TIERS[sourceKey];
   if (!tier) return null;
-  if (Object.keys(entry.facts).length === 0 && entry.source_url === undefined) return null;
+  if (Object.keys(entry.facts).length === 0 && entry.source_page === undefined) return null;
   return { tier, source_key: sourceKey, evidence_kind: SOURCE_KINDS[sourceKey]!, ...entry };
 }
 
 /** 单源抽取器：把 attributes.<source> 命名空间映射为键白名单内的事实（键避开 sanitizer 黑名单）。 */
 interface ExtractedEntry {
-  source_url?: string;
+  source_page?: string;
   captured_at?: string;
   confidence?: number;
   facts: Record<string, EvidenceFactValue | undefined>;
@@ -180,7 +179,7 @@ interface ExtractedEntry {
 const SOURCE_EXTRACTORS: Readonly<Record<string, (source: Record<string, unknown>) => ExtractedEntry>> =
   Object.freeze({
     gleif: (source) => ({
-      source_url:
+      source_page:
         typeof source.lei === 'string' && source.lei.length > 0
           ? safeUrl(`https://search.gleif.org/#/record/${source.lei}`)
           : undefined,
@@ -209,8 +208,8 @@ const SOURCE_EXTRACTORS: Readonly<Record<string, (source: Record<string, unknown
     }),
     fda: (source) => ({
       facts: {
-        fei_number: numericString(source.fei_number),
-        registration_number: numericString(source.registration_number),
+        fei_no: numericString(source.fei_number),
+        registration_no: numericString(source.registration_number),
         state_code: safeString(source.state_code),
         status_code: safeString(source.status_code),
         product_codes: stringList(source.product_codes),
@@ -219,7 +218,7 @@ const SOURCE_EXTRACTORS: Readonly<Record<string, (source: Record<string, unknown
     wikidata: (source) => {
       const qid = safeString(source.qid);
       return {
-        source_url: qid ? safeUrl(`https://www.wikidata.org/wiki/${qid}`) : undefined,
+        source_page: qid ? safeUrl(`https://www.wikidata.org/wiki/${qid}`) : undefined,
         confidence: safeNumber(source.match_confidence),
         facts: {
           entity_qid: qid,
@@ -236,7 +235,7 @@ const SOURCE_EXTRACTORS: Readonly<Record<string, (source: Record<string, unknown
       };
     },
     website_profile: (source) => ({
-      source_url: safeUrl(source.source_url),
+      source_page: safeUrl(source.source_url),
       captured_at: safeString(source._ts),
       confidence: safeNumber(source.trade_role_confidence),
       facts: {
@@ -257,7 +256,7 @@ const SOURCE_EXTRACTORS: Readonly<Record<string, (source: Record<string, unknown
       },
     }),
     structured_harvest: (source) => ({
-      source_url: safeUrl(source.careers_url),
+      source_page: safeUrl(source.careers_url),
       facts: {
         sitemap_url_count: safeNumber(source.sitemap_url_count),
       },
@@ -295,7 +294,7 @@ export function entriesFromStoredAttributes(attributes: unknown): EvidenceBundle
       tier: 'T2',
       source_key: 'wikidata',
       evidence_kind: 'industry_graph',
-      source_url: `https://www.wikidata.org/wiki/${bareQid}`,
+      source_page: `https://www.wikidata.org/wiki/${bareQid}`,
       facts: { entity_qid: bareQid },
     });
   }
@@ -309,7 +308,7 @@ export function entryFromEnrichment(sourceKey: string, result: EnrichmentResult)
   if (!base) return null;
   return {
     ...base,
-    source_url: safeUrl(result.provenance?.sourceUrl) ?? base.source_url,
+    source_page: safeUrl(result.provenance?.sourceUrl) ?? base.source_page,
     captured_at: safeString(result.provenance?.fetchedAt) ?? base.captured_at,
     confidence: Number.isFinite(result.confidence) ? result.confidence : base.confidence,
   };
@@ -327,7 +326,6 @@ export function assembleEvidenceBundle(
   const sources = new Set(entries.map((entry) => entry.source_key));
   return {
     version: 1,
-    shadow: true,
     built_at: builtAt.toISOString(),
     subject: {
       name: subject.name,
@@ -372,6 +370,47 @@ export async function buildEvidenceBundle(args: {
     }
   }
   return { bundle: assembleEvidenceBundle(args.subject, entries, args.now ?? new Date()), probed, errors };
+}
+
+/** 判定快照用的跨源证据摘要（紧凑、有界；让模型看到 T1/T2/T3 证据而非仅官网文本）。 */
+export interface CrossSourceEvidenceSummary {
+  tier_list: EvidenceTier[];
+  corroborated: boolean;
+  sources: Array<{ tier: EvidenceTier; source_key: string; facts: string[] }>;
+}
+
+const MAX_SUMMARY_ENTRIES = 6;
+const MAX_SUMMARY_FACTS = 3;
+
+/** 从 canonical attributes 现场装配摘要（零出网）；无证据条目返回 null。 */
+export function crossSourceEvidenceSummary(attributes: unknown): CrossSourceEvidenceSummary | null {
+  const entries = entriesFromStoredAttributes(attributes);
+  if (entries.length === 0) return null;
+  const tiers = new Set(entries.map((entry) => entry.tier));
+  return {
+    tier_list: EVIDENCE_TIERS.filter((tier) => tiers.has(tier)),
+    corroborated: tiers.size >= 2,
+    sources: entries.slice(0, MAX_SUMMARY_ENTRIES).map((entry) => ({
+      tier: entry.tier,
+      source_key: entry.source_key,
+      facts: Object.entries(entry.facts)
+        .slice(0, MAX_SUMMARY_FACTS)
+        .map(([key, value]) => `${key}=${Array.isArray(value) ? value.join('|') : String(value)}`),
+    })),
+  };
+}
+
+/** 判定用证据包：现场按当前属性装配（含本 run 刚写回的 website_profile / 富集结果）。 */
+export function currentEvidenceBundle(company: {
+  name: string;
+  domain: string | null;
+  country: string | null;
+  attributes: unknown;
+}): EvidenceBundle {
+  return assembleEvidenceBundle(
+    { name: company.name, domain: company.domain, country: company.country },
+    entriesFromStoredAttributes(company.attributes),
+  );
 }
 
 /** attributes.evidence_bundle 的读侧校验（宽容：非法/缺字段按 null 处理，绝不 throw）。 */

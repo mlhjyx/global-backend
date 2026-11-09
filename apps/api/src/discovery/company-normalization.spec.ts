@@ -82,6 +82,7 @@ describe('inferIndustryFromAttributes', () => {
     });
     expect(result?.isicCode).toBe('28');
     // 落库的是命中的别名（pump 子树），不是整句证据文本
+    expect(result!.matchedTerms).toContain("alias:pump");
     expect(result!.matchedTerms.every((term) => term.length <= 80)).toBe(true);
   });
 

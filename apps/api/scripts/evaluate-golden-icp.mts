@@ -71,7 +71,8 @@ async function main(): Promise<void> {
           ? {
               OR: [
                 { country: { in: isos } },
-                // 存量未归一：德/中/英名变体按归一函数匹配（DB 侧先粗取，再在内存复核）
+                // 未归一的自由文本变体（如「德国」）：按目标市场原词粗取；拉丁语系变体
+                // （Deutschland/germany）依赖既有回填归一后才进入池子——本评测以归一后的数据为准。
                 { country: { in: query.targetMarkets } },
               ],
             }

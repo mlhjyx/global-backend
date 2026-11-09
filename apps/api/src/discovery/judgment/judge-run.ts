@@ -37,6 +37,7 @@ import {
   type EvidenceUrlPolicy,
 } from './evidence-validate';
 import { RUBRIC_SAMPLING } from './fit-rubric';
+import { crossSourceEvidenceSummary } from '../evidence-bundle';
 import type { FailureCode } from './failure-codes';
 import {
   JUDGE_OUTPUT_JSON_SCHEMA,
@@ -65,6 +66,12 @@ export interface CompanySnapshotFacts {
   name: string;
   products?: string[];
   website_profile?: Record<string, unknown>;
+  /** 跨源证据分层摘要（T1/T2/T3，2026-11-10 多源证据图）：判定输入的一部分。 */
+  cross_source_evidence?: {
+    tier_list: string[];
+    corroborated: boolean;
+    sources: Array<{ tier: string; source_key: string; facts: string[] }>;
+  };
 }
 
 /** 与 v1 判定同一口径的公司快照（其 JSON 文本即 validateEvidence 的 snapshotText）。 */
@@ -94,6 +101,7 @@ export function buildCompanySnapshot(company: FitJudgeCompany): {
     profileFacts && Object.values(profileFacts).some((value) => value !== undefined)
       ? profileFacts
       : undefined;
+  const crossSource = crossSourceEvidenceSummary(company.attributes);
   const facts: CompanySnapshotFacts = {
     name: company.name,
     domain: company.domain,
@@ -102,6 +110,7 @@ export function buildCompanySnapshot(company: FitJudgeCompany): {
     products,
     keywords,
     ...(websiteProfile ? { website_profile: websiteProfile } : {}),
+    ...(crossSource ? { cross_source_evidence: crossSource } : {}),
   };
   return { facts, snapshotText: JSON.stringify(facts, null, 2) };
 }

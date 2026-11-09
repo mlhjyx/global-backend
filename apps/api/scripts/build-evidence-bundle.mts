@@ -1,14 +1,14 @@
 /**
- * 证据包 v1 shadow 构建 CLI（2026-11-10，多源证据图核心切片 ②）。
+ * 证据包 v1 构建 CLI（2026-11-10，多源证据图核心切片 ②，enforce 口径：判定链默认用它）。
  *
  * 对公司集合（默认 DE、有域名）：
  *  1. 从已存 attributes 装配分层证据条目（零出网）；
  *  2. 缺失域经 ENABLED 富集 provider 实时探测（gleif / wikidata；内部经 ToolBroker：
  *     source_policy/预算/限流/Trace 单点强制）；单源失败只记错过；
- *  3. 写 `canonical_company.attributes.evidence_bundle`（shadow：不改判定/展示结论；
+ *  3. 写 `canonical_company.attributes.evidence_bundle`（审计面/离线复核；
  *     版本号护栏防并发覆盖）；
  *  4. 对公司**最近一条判定记录**跑 corroboration 评估（judgment/corroboration.ts 同一
- *     口径）——这就是判定链 shadow 记录在真实 verdict 上的离线样例。
+ *     口径）——判定链在真实 verdict 上按同一评估器执行（不足即 fail-closed 降级）。
  *
  * 运行（apps/api 下，.env 已链接；owner 连接跨租户，预期）：
  *   node --import tsx scripts/build-evidence-bundle.mts --country=DE --limit=10          # dry-run
@@ -148,7 +148,7 @@ async function main(): Promise<void> {
       latestVerdict: null,
       corroboration: null,
     };
-    // 判定链 shadow 样例：最近一条判定记录的 verdict 跑同一评估器。
+    // 判定链同口径样例：最近一条判定记录的 verdict 跑同一评估器（enforce）。
     const latestJudgment = await prisma.judgmentRecord.findFirst({
       where: { workspaceId: company.workspaceId, canonicalCompanyId: company.id },
       orderBy: { createdAt: 'desc' },
@@ -156,7 +156,7 @@ async function main(): Promise<void> {
     });
     if (latestJudgment) {
       report.latestVerdict = latestJudgment.verdict;
-      report.corroboration = evaluateCorroboration({ verdict: latestJudgment.verdict, bundle, mode: 'shadow' });
+      report.corroboration = evaluateCorroboration({ verdict: latestJudgment.verdict, bundle, mode: 'enforce' });
     }
     if (args.apply) {
       const attributes = (company.attributes ?? {}) as Record<string, unknown>;

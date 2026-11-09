@@ -39,6 +39,13 @@ const company = {
   attributes: {
     products: ['industrial pumps'],
     keywords: ['distributor'],
+    // 共享夹具带 T1（GLEIF 法人身份）+ T3（官网画像）：跨源佐证门（默认 enforce）下达标，
+    // 使本文件其余用例继续测它们各自的主题；单层/无包的降级行为见专门的 describe。
+    gleif: {
+      lei: '529900DI47YZJ5P7QQ76',
+      legal_name: 'Acme Pumps GmbH',
+      registered_country: 'DE',
+    },
     website_profile: {
       trade_role: 'distributor',
       carried_brands: ['Brand X'],
@@ -202,7 +209,12 @@ describe('judgeFitV2 —— judge-output/v2 → 确定性聚合 → FitJudgment 
       WS,
       { seller: 'Seller', seller_summary: golden.input.icpBrief },
       goldenCompany,
-      { now: golden.judge.now, snapshotFetchedAt: golden.input.snapshot.fetchedAt },
+      {
+        now: golden.judge.now,
+        snapshotFetchedAt: golden.input.snapshot.fetchedAt,
+        // golden 用例测聚合映射；跨源佐证门单测另见 corroboration 相关 describe。
+        judgeCorroborationMode: 'off',
+      },
     );
 
     expect(result!.judgmentRecord.verdict).toBe(golden.expected.label);
@@ -231,7 +243,12 @@ describe('judgeFitV2 —— judge-output/v2 → 确定性聚合 → FitJudgment 
     expect(record.inputDigest).toMatch(/^[0-9a-f]{64}$/u);
     expect(record.outputDigest).toMatch(/^[0-9a-f]{64}$/u);
     expect(record.model.requested).toBe(getTask('discovery.qualify_fit')!.model);
-    expect(record.sampling).toEqual({ temperature: 0.7, k: 1 });
+    expect(record.sampling).toMatchObject({
+      temperature: 0.7,
+      k: 1,
+      // 默认 enforce：共享夹具（T1+T3）达标，采样里带佐证记录。
+      corroboration: { reason: 'CORROBORATED', enforced: true },
+    });
     expect(record.costMicros).toBe(2000n);
     expect(record.inputTokens).toBe(120);
     expect(record.outputTokens).toBe(80);
@@ -493,5 +510,95 @@ describe('persistJudgmentRecordInTransaction —— recordJudgment 唯一写入�
         judgmentWithRecord(judged!.judgmentRecord, false),
       ),
     ).rejects.toThrow('db down');
+  });
+});
+
+describe('跨源佐证门（JUDGE_CORROBORATION_MODE，默认 enforce）', () => {
+  it('降级单层证据的 FIT 为 weak，并把 enforce 记录写进采样 JSON', async () => {
+    mockV2(v2Output());
+    const singleTier = {
+      ...company,
+      attributes: {
+        products: ['industrial pumps'],
+        website_profile: { trade_role: 'distributor', evidence: ['Acme distributes pumps'] },
+      },
+    };
+    const result = await judgeFitV2({} as never, WS, ICP_BRIEF, singleTier, {
+      now: NOW,
+      judgeCorroborationMode: 'enforce',
+    });
+    expect(result!.verdict).toBe('weak');
+    expect(result!.judgmentRecord.verdict).toBe('UNKNOWN');
+    expect(result!.fitReasons.reasons[0]).toContain('跨源佐证门');
+    const sampling = result!.judgmentRecord.sampling as {
+      corroboration: { reason: string; enforced: boolean; downgraded_from: string; tiers_present: string[] };
+    };
+    expect(sampling.corroboration).toMatchObject({
+      reason: 'INSUFFICIENT_TIERS',
+      enforced: true,
+      downgraded_from: 'FIT',
+      tiers_present: ['T3'],
+    });
+    expect(result!.evidenceBundle?.coverage.tier_list).toEqual(['T3']);
+  });
+
+  it('降级 NOT_FIT 为 weak（绝不因证据不足自动拒绝）', async () => {
+    mockV2(v2Output(SCORES_NOT_FIT));
+    const noEvidence = { ...company, attributes: {} };
+    const result = await judgeFitV2({} as never, WS, ICP_BRIEF, noEvidence, {
+      now: NOW,
+      judgeCorroborationMode: 'enforce',
+    });
+    expect(result!.verdict).toBe('weak');
+    expect(result!.judgmentRecord.verdict).toBe('UNKNOWN');
+    const sampling = result!.judgmentRecord.sampling as {
+      corroboration: { reason: string; downgraded_from: string };
+    };
+    expect(sampling.corroboration).toMatchObject({ reason: 'NO_BUNDLE', downgraded_from: 'NOT_FIT' });
+  });
+
+  it('跨源达标（T1+T3）的 FIT 原样保留，采样里记 CORROBORATED', async () => {
+    mockV2(v2Output());
+    const result = await judgeFitV2({} as never, WS, ICP_BRIEF, company, {
+      now: NOW,
+      judgeCorroborationMode: 'enforce',
+    });
+    expect(result!.verdict).toBe('match');
+    expect(result!.judgmentRecord.verdict).toBe('FIT');
+    const sampling = result!.judgmentRecord.sampling as {
+      corroboration: { reason: string; enforced: boolean; corroborated: boolean };
+    };
+    expect(sampling.corroboration).toMatchObject({
+      reason: 'CORROBORATED',
+      enforced: true,
+      corroborated: true,
+    });
+  });
+
+  it('回滚开关：shadow 只记录不降级；off 完全不评估', async () => {
+    mockV2(v2Output());
+    const singleTier = {
+      ...company,
+      attributes: { website_profile: { trade_role: 'distributor' } },
+    };
+    const shadowed = await judgeFitV2({} as never, WS, ICP_BRIEF, singleTier, {
+      now: NOW,
+      judgeCorroborationMode: 'shadow',
+    });
+    expect(shadowed!.verdict).toBe('match');
+    const shadowSampling = shadowed!.judgmentRecord.sampling as {
+      corroboration: { reason: string; enforced: boolean };
+    };
+    expect(shadowSampling.corroboration).toMatchObject({ reason: 'INSUFFICIENT_TIERS', enforced: false });
+
+    mockV2(v2Output());
+    const off = await judgeFitV2({} as never, WS, ICP_BRIEF, singleTier, {
+      now: NOW,
+      judgeCorroborationMode: 'off',
+    });
+    expect(off!.verdict).toBe('match');
+    const offSampling = off!.judgmentRecord.sampling as { corroboration?: unknown };
+    expect(offSampling.corroboration).toBeUndefined();
+    expect(off!.evidenceBundle).toBeUndefined();
   });
 });

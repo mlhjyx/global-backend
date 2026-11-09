@@ -209,19 +209,33 @@ export function inferIndustryFromAttributes(
   const matches = new Map<string, { match: IsicNodeMatch; sources: Set<string>; weight: number }>();
   // 受控词（keywords/products）命中权重 2，自由证据句（website_profile.evidence）权重 1：
   // 官网整句常顺带提到材质/配件词（如「不锈钢」），加权后不会盖过受控词的直接证据。
+  // 落库口径：受控词存原词；自由证据句**只存命中的词表别名**（`alias:pump`）——证据句可能
+  // 含人名/联系方式（PII），整句绝不进入 attributes 与报告。
   const absorb = (nodeMatches: IsicNodeMatch[], source: string): void => {
     if (nodeMatches.length === 0) return;
-    const perTermWeight = source === 'keywords' || source === 'products' ? 2 : 1;
+    const controlled = source === 'keywords' || source === 'products';
+    const perTermWeight = controlled ? 2 : 1;
     for (const nodeMatch of nodeMatches) {
       const current = matches.get(nodeMatch.code) ?? {
-        match: { ...nodeMatch, matchedTerms: [] },
+        match: { ...nodeMatch, matchedTerms: [], matchedAliases: [] },
         sources: new Set<string>(),
         weight: 0,
       };
-      for (const term of nodeMatch.matchedTerms) {
-        if (!current.match.matchedTerms.includes(term)) {
-          current.match.matchedTerms.push(term);
-          current.weight += perTermWeight;
+      if (controlled) {
+        for (const term of nodeMatch.matchedTerms) {
+          if (!current.match.matchedTerms.includes(term)) {
+            current.match.matchedTerms.push(term);
+            current.weight += perTermWeight;
+          }
+        }
+      } else {
+        // 自由文本源：仅当该节点尚未经此源计过权重时记一次（按别名去重）。
+        for (const alias of nodeMatch.matchedAliases) {
+          const term = `alias:${alias}`;
+          if (!current.match.matchedTerms.includes(term)) {
+            current.match.matchedTerms.push(term);
+            current.weight += perTermWeight;
+          }
         }
       }
       current.sources.add(source);
@@ -247,6 +261,7 @@ export function inferIndustryFromAttributes(
           en: node.en,
           nacePrefixes: [...(node.crosswalks?.nace ?? [])],
           matchedTerms: [],
+          matchedAliases: [],
         },
         sources: new Set<string>(),
         weight: 0,
@@ -280,6 +295,7 @@ export function inferIndustryFromAttributes(
           en: node.en,
           nacePrefixes: [...(node.crosswalks?.nace ?? [])],
           matchedTerms: [],
+          matchedAliases: [],
         },
         sources: new Set<string>(),
         weight: 0,

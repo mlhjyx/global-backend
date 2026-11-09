@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * Rehearsal of a full-size discovery run, without Temporal, a database or the network.
@@ -65,6 +65,17 @@ import { createDiscoveryActivities, FIT_CONCURRENCY } from './discovery.activiti
 import { discoveryWorkflow } from './discovery.workflow';
 import { ProviderHttpError, ProviderTransportError } from '../model-gateway/providers/provider-output-error';
 import { BudgetOperationReplayError } from '../tools/budget-store';
+
+// 跨源佐证门（JUDGE_CORROBORATION_MODE，默认 enforce）在其它主题的用例里关闭：这些夹具没有
+// T1/T2 证据，默认会按 fail-closed 降级 verdict，掩盖各用例本来的主题。门本身的语义由
+// judgment/corroboration.spec.ts 与 fit-judge-v2.spec.ts 的专门用例覆盖。
+beforeEach(() => {
+  process.env.JUDGE_CORROBORATION_MODE = 'off';
+});
+afterEach(() => {
+  delete process.env.JUDGE_CORROBORATION_MODE;
+});
+
 
 const WS = '10000000-0000-4000-8000-000000000001';
 const SHA = 'a'.repeat(64);

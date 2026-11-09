@@ -62,6 +62,7 @@ type CompanyRow = {
   country: string | null;
   industry: string | null;
   attributes: Prisma.JsonValue | null;
+  version: number;
 };
 
 interface CountryChange {
@@ -168,6 +169,7 @@ async function main(): Promise<void> {
         country: true,
         industry: true,
         attributes: true,
+        version: true,
       },
       orderBy: { id: 'asc' },
       take: batchSize,
@@ -225,9 +227,11 @@ async function main(): Promise<void> {
             },
           } as Prisma.InputJsonValue;
         }
-        // 条件更新：只按扫描时看到的原值更新（并发写者优先，不覆盖别人的新值）
+        // 条件更新：只按扫描时看到的原值 + version 更新（公司合并/富集提交都会 increment
+        // version；版本不符即放弃本行——attributes 是整体重写，绝不能覆盖并发写者的新命名空间）。
+        data.version = { increment: 1 };
         const result = await prisma.canonicalCompany.updateMany({
-          where: { id: row.id, country: row.country, industry: row.industry },
+          where: { id: row.id, country: row.country, industry: row.industry, version: row.version },
           data,
         });
         if (result.count === 1) {

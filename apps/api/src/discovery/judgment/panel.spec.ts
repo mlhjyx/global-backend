@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../../model-runtime/structured-task-runtime-bridge', () => ({
   executeStructuredTaskWithRuntime: vi.fn(),
@@ -24,6 +24,7 @@ import {
 } from './judge-run';
 import type { JudgeCriterionOutput, JudgeOutputV2 } from './judge-output-v2';
 import {
+
   assertJudgePanelModels,
   isBorderlinePanelTrigger,
   judgePanelMode,
@@ -160,6 +161,16 @@ function calledModels(): Array<string | undefined> {
 
 beforeEach(() => {
   executeTask.mockReset();
+});
+
+// 跨源佐证门（JUDGE_CORROBORATION_MODE，默认 enforce）在其它主题的用例里关闭：这些夹具没有
+// T1/T2 证据，默认会按 fail-closed 降级 verdict，掩盖各用例本来的主题。门本身的语义由
+// judgment/corroboration.spec.ts 与 fit-judge-v2.spec.ts 的专门用例覆盖。
+beforeEach(() => {
+  process.env.JUDGE_CORROBORATION_MODE = 'off';
+});
+afterEach(() => {
+  delete process.env.JUDGE_CORROBORATION_MODE;
 });
 
 describe('JUDGE_PANEL_MODE parsing 与模型清单', () => {
@@ -724,6 +735,7 @@ describe('judgeFitCompany × 面板：开关矩阵', () => {
 describe('persistJudgmentRecordInTransaction —— 面板多条记录', () => {
   function fakeTx() {
     let lastVerdict = '';
+
     return {
       judgmentRecord: {
         createMany: vi.fn(async (args: { data: Array<{ verdict: string }> }) => {

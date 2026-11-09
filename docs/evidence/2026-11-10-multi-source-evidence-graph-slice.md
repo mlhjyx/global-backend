@@ -1,10 +1,11 @@
 # 多源证据图核心切片：数据归一 / 证据包 shadow / 佐证门 / 接触点补全 / golden 评测（2026-11-10）
 
 > 生命周期：`APPROVED`（产品负责人 2026-11-10 批准「注册号锚定的多源证据图」核心切片，当晚交付）
-> 结论：五项交付中三项真跑（dev 库归一回填、试点名单接触点补全、证据包+佐证记录 shadow 构建），
-> 两项为可运行骨架（佐证门接线单测覆盖 + golden ICP 评测集）。**不部署、不发车**——代码改动
-> 在 PR 内待合；dev 库写入均为幂等回填与影子属性（`attributes.evidence_bundle` /
-> `industry_normalization`），不改变判定与档案展示结论。
+> 结论：五项交付全部落地——dev 库归一回填与试点接触点补全真跑；证据包接进判定链现场装配，
+> 跨源佐证门按 **enforce** 生效（FIT/NOT_FIT 不足 2 个独立分层即 fail-closed 降级 UNKNOWN，
+> 开关 `JUDGE_CORROBORATION_MODE` 可回滚到 shadow/off）；golden ICP 评测集可运行。**不部署、
+> 不发车**——代码改动在 PR 内待合；dev 库写入为幂等回填与 `attributes.evidence_bundle` /
+> `industry_normalization`（审计面）。产品负责人当晚口径：取消影子期，直接 enforce。
 
 ## 1. 数据归一 backfill（真跑）
 
@@ -78,11 +79,13 @@ keywords/products（权重 2）、官网证据句（权重 1）、TED CPV / FDA 
   form_url 17 条（跑前分别为 1 条与 1 条）；company_contact_point 无新增（0 LinkedIn）。
   全部 UNVERIFIED、幂等（重复跑只推进 last_seen）。
 
-## 3. 证据包 v1（shadow，DE 少量样本，真跑）
+## 3. 证据包 v1（enforce 接线，DE 少量样本，真跑）
 
 脚本：`apps/api/scripts/build-evidence-bundle.mts`；装配器 `apps/api/src/discovery/evidence-bundle.ts`
-（T1 官方注册/招投标/专利、T2 Wikidata、T3 官网/技术足迹/结构化收割）。已存属性零出网装配 +
-缺失域经 ENABLED 富集 provider 实时探测（ToolBroker 闸门；内存预算账本，不写预算表）。
+（T1 官方注册/招投标/专利、T2 Wikidata、T3 官网/技术足迹/结构化收割）。判定链在 FIT/NOT_FIT
+落地前按当前属性**现场装配**（零出网，含本 run 刚写回的 website_profile/富集结果），并把包写回
+`attributes.evidence_bundle`（判定记录同事务；写失败按 fail-closed 让判定失败可重试）。CLI 的
+实时探测部分（富集 provider 经 ToolBroker；内存预算账本）用于回填/离线复核。
 
 **随机 DE 样本（10 家，dry-run）**：withBundle 5/10，corroborated（≥2 层）2/10；
 tier 分布：none 5、T3 3、T2+T3 2。GLEIF/Wikidata 实时探测对该批 SME 命中很低
@@ -103,11 +106,14 @@ tier 分布：none 5、T3 3、T2+T3 2。GLEIF/Wikidata 实时探测对该批 SME
 写库：7/7 `attributes.evidence_bundle`（kramp.com 写入空包 = 「已查无证据」的影子记录）。
 dev 库现有 bundle：12 行（含下一节 5 家 IT 公司）。
 
-## 4. 跨源佐证门（shadow 记录）
+## 4. 跨源佐证门（enforce，fail-closed）
 
-评估器：`apps/api/src/discovery/judgment/corroboration.ts`（FIT/NOT_FIT 需 ≥2 个独立分层）；
-判定链接线：`fit-judge.ts` 的 `persistJudgmentRecordInTransaction` → `judgment_record.sampling.corroboration`，
-`JUDGE_CORROBORATION_MODE` 默认 `shadow`（只记录不拦截；任何评估失败降级不影响判定写入）。
+评估器：`apps/api/src/discovery/judgment/corroboration.ts`（FIT/NOT_FIT 需 ≥2 个独立分层）。
+判定链接线：`fit-judge-v2.ts`（v2 判定链 + Lead 投影：跨源不足即把 match/mismatch 降级 weak、
+主记录 verdict 记 UNKNOWN、`verdictProposed` 保留原判定）与 `fit-judge.ts` v1 路径同口径；
+`judgment_record.sampling.corroboration` 记录评估与降级原因。`JUDGE_CORROBORATION_MODE` 默认
+`enforce`（非法值 fail-closed 到 enforce）；`shadow`/`off` 为回滚开关。判定快照（judge prompt）
+新增 `cross_source_evidence` 摘要——证据分层真实参与理解输入，而非只做事后门。
 
 **离线样例（dev 库真实 NOT_FIT 判定 × 证据包，CLI 生成）**：
 
@@ -119,9 +125,10 @@ dev 库现有 bundle：12 行（含下一节 5 家 IT 公司）。
 | cloanto.com | NOT_FIT | T2+T3 | CORROBORATED |
 | valbruna-stainless-steel.com | NOT_FIT | T2+T3 | CORROBORATED |
 
-5/5 已判定公司有 ≥2 层证据（Wikidata QID + 官网画像）。**注**：dev 运行时仍是旧镜像，
-库内 `judgment_record.sampling` 暂无 corroboration——接线由单测覆盖，随下一班镜像生效后
-新判定会自动带记录。`enforce` 拦截语义未实现（开关预留，需单独评审）。
+5/5 已判定公司在离线评估下 CORROBORATED（Wikidata QID + 官网画像）——enforce 下这 5 条维持原判，
+不会降级。反例：单层/无包公司在单测与 v2 判定用例中按 fail-closed 降级 UNKNOWN（Lead=weak/
+待复核，绝不自动推荐或自动拒绝），见 `fit-judge-v2.spec.ts` 的跨源佐证门 describe。
+**注**：dev 运行时仍是旧镜像——接线由单测覆盖，随下一班镜像生效后新判定自动带降级与记录。
 
 ## 5. Golden ICP 评测集（骨架，可运行）
 
@@ -137,6 +144,8 @@ label 取自 dev 库真实公司与试点名单）；口径/标注模板：同�
 
 ## 6. 发布与残余
 
-- 不部署、不发车：全部改动经 PR 合入 main；下一班镜像生效后佐证记录才会出现在新判定行。
-- 残余：① 证据包未接 run 热路径（CLI 先跑）；② corroboration enforce 未实现；
-③ golden 集 23 条待标注；④ industry 推断粗粒度（ISIC 部门），需人工/规则复核噪声。
+- 不部署、不发车：全部改动经 PR 合入 main；下一班镜像生效后 enforce 门与证据包写回才在 run 内生效。
+- 残余：① 富集阶段的证据探测历史上按「已有命名空间跳过」，T1 命中率受 provider 覆盖限制；
+② golden 集 23 条待标注；③ industry 推断粗粒度（ISIC 部门），需人工/规则复核噪声；
+④ companies_house/inpi_rne/google_patents/samgov 暂无 canonical 属性命名空间，暂不计入 T1
+（留了抽取位，provider 一旦落命名空间即生效）。

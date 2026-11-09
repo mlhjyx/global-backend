@@ -1,12 +1,12 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { persistJudgmentRecordInTransaction, type FitJudgment } from './fit-judge';
 import { assembleEvidenceBundle } from './evidence-bundle';
 import type { JudgmentRecordDraft } from './judgment/judgment-record';
 import { CRITERION_IDS } from './judgment/fit-rubric';
 
 /**
- * 跨源佐证 shadow 接线（2026-11-10）：persistJudgmentRecordInTransaction 给判定主记录
- * 附 sampling.corroboration；任何异常都不影响判定写入（shadow 语义）。
+ * 跨源佐证 enforce 接线（2026-11-10）：判定链现场装配证据包并在同事务写回
+ * canonical_company.attributes.evidence_bundle；写失败只告警不回滚判定。
  */
 const WS = '10000000-0000-4000-8000-000000000001';
 
@@ -37,38 +37,6 @@ function draft(verdict: 'FIT' | 'NOT_FIT' | 'UNKNOWN'): JudgmentRecordDraft {
   };
 }
 
-function judgmentWith(record: JudgmentRecordDraft): FitJudgment {
-  return {
-    verdict: 'match',
-    fitReasons: { material: 'm', role: 'r', process: 'p', business_model: 'b', reasons: [] },
-    judgmentRecord: record,
-  };
-}
-
-function fakeTx(attributes: unknown | undefined) {
-  // recordJudgment 写入后按 replay key 回读并比对 verdict——mock 必须回显最后写入的 verdict。
-  let lastVerdict = 'FIT';
-  return {
-    judgmentRecord: {
-      createMany: vi.fn(async (args: { data: Array<{ verdict: string }> }) => {
-        lastVerdict = args.data[0]!.verdict;
-        return { count: 1 };
-      }),
-      findUnique: vi.fn(async () => ({ id: 'rec-1', verdict: lastVerdict })),
-    },
-    canonicalCompany: {
-      findUnique: vi.fn(async () => (attributes === undefined ? null : { attributes })),
-    },
-  };
-}
-
-function writtenSampling(tx: ReturnType<typeof fakeTx>): Record<string, unknown> {
-  const data = tx.judgmentRecord.createMany.mock.calls[0]![0] as {
-    data: Array<Record<string, unknown>>;
-  };
-  return data.data[0]!.sampling as Record<string, unknown>;
-}
-
 const twoTierBundle = assembleEvidenceBundle({ name: 'Acme' }, [
   {
     tier: 'T1',
@@ -84,53 +52,73 @@ const twoTierBundle = assembleEvidenceBundle({ name: 'Acme' }, [
   },
 ]);
 
-afterEach(() => {
-  delete process.env.JUDGE_CORROBORATION_MODE;
-});
+function judgmentWith(record: JudgmentRecordDraft, bundle?: typeof twoTierBundle): FitJudgment {
+  return {
+    verdict: 'match',
+    fitReasons: { material: 'm', role: 'r', process: 'p', business_model: 'b', reasons: [] },
+    judgmentRecord: record,
+    ...(bundle ? { evidenceBundle: bundle } : {}),
+  };
+}
 
-describe('persistJudgmentRecordInTransaction · corroboration shadow', () => {
-  it('attaches a CORROBORATED record to the primary FIT record when the bundle spans two tiers', async () => {
-    const tx = fakeTx({ evidence_bundle: twoTierBundle });
-    await persistJudgmentRecordInTransaction(tx as never, 'icp-1', judgmentWith(draft('FIT')));
-    const sampling = writtenSampling(tx);
-    expect(sampling.temperature).toBe(0.7);
-    expect(sampling.corroboration).toMatchObject({
-      shadow: true,
-      mode: 'shadow',
-      verdict: 'FIT',
-      reason: 'CORROBORATED',
-      corroborated: true,
-      tiers_present: ['T1', 'T3'],
-    });
-  });
+function fakeTx(existingAttributes: Record<string, unknown> | null) {
+  // recordJudgment 写入后按 replay key 回读并比对 verdict——mock 必须回显最后写入的 verdict。
+  let lastVerdict = 'FIT';
+  return {
+    judgmentRecord: {
+      createMany: vi.fn(async (args: { data: Array<{ verdict: string }> }) => {
+        lastVerdict = args.data[0]!.verdict;
+        return { count: 1 };
+      }),
+      findUnique: vi.fn(async () => ({ id: 'rec-1', verdict: lastVerdict })),
+    },
+    canonicalCompany: {
+      findFirst: vi.fn(async () =>
+        existingAttributes === null ? null : { attributes: existingAttributes },
+      ),
+      updateMany: vi.fn(async () => ({ count: 1 })),
+    },
+  };
+}
 
-  it('records NO_BUNDLE for a company without an evidence bundle (no block)', async () => {
-    const tx = fakeTx({});
-    await persistJudgmentRecordInTransaction(tx as never, 'icp-1', judgmentWith(draft('NOT_FIT')));
-    expect(writtenSampling(tx).corroboration).toMatchObject({ reason: 'NO_BUNDLE', shadow: true });
-  });
-
-  it('keeps the judgment write intact when the company read throws', async () => {
-    const tx = fakeTx(undefined);
-    tx.canonicalCompany.findUnique.mockRejectedValueOnce(new Error('boom'));
-    await persistJudgmentRecordInTransaction(tx as never, 'icp-1', judgmentWith(draft('FIT')));
+describe('persistJudgmentRecordInTransaction · 证据包写回', () => {
+  it('merges evidence_bundle into attributes in the same transaction and still writes the record', async () => {
+    const tx = fakeTx({ keywords: ['pumps'], website_profile: { trade_role: 'manufacturer' } });
+    await persistJudgmentRecordInTransaction(tx as never, 'icp-1', judgmentWith(draft('FIT'), twoTierBundle));
+    expect(tx.canonicalCompany.updateMany).toHaveBeenCalledTimes(1);
+    const update = tx.canonicalCompany.updateMany.mock.calls[0]![0] as {
+      where: Record<string, unknown>;
+      data: { attributes: Record<string, unknown> };
+    };
+    expect(update.where).toMatchObject({ id: 'company-1', workspaceId: WS });
+    // 其余属性原样保留，包写入 evidence_bundle 键
+    expect(update.data.attributes.keywords).toEqual(['pumps']);
+    expect(update.data.attributes.website_profile).toEqual({ trade_role: 'manufacturer' });
+    expect((update.data.attributes.evidence_bundle as { coverage: { corroborated: boolean } }).coverage.corroborated).toBe(true);
     expect(tx.judgmentRecord.createMany).toHaveBeenCalledTimes(1);
-    const sampling = writtenSampling(tx);
-    expect(sampling.corroboration).toBeUndefined();
-    expect(sampling).toEqual({ temperature: 0.7, k: 1 });
   });
 
-  it('does not evaluate UNKNOWN verdicts', async () => {
-    const tx = fakeTx({ evidence_bundle: twoTierBundle });
-    await persistJudgmentRecordInTransaction(tx as never, 'icp-1', judgmentWith(draft('UNKNOWN')));
-    expect(writtenSampling(tx).corroboration).toBeUndefined();
+  it('fails the transaction when the bundle write throws (fail-closed, retryable)', async () => {
+    // 同事务内语句级错误会中止 Postgres 事务，吞掉只会制造半截状态；判定按失败上抛、可重试。
+    const tx = fakeTx({ keywords: ['pumps'] });
+    tx.canonicalCompany.updateMany.mockRejectedValueOnce(new Error('lock timeout'));
+    await expect(
+      persistJudgmentRecordInTransaction(tx as never, 'icp-1', judgmentWith(draft('FIT'), twoTierBundle)),
+    ).rejects.toThrow('lock timeout');
+    expect(tx.judgmentRecord.createMany).not.toHaveBeenCalled();
   });
 
-  it('stays inert when JUDGE_CORROBORATION_MODE=off', async () => {
-    process.env.JUDGE_CORROBORATION_MODE = 'off';
-    const tx = fakeTx({ evidence_bundle: twoTierBundle });
+  it('skips the bundle write when the company row is gone, but still writes the record', async () => {
+    const tx = fakeTx(null);
+    await persistJudgmentRecordInTransaction(tx as never, 'icp-1', judgmentWith(draft('NOT_FIT'), twoTierBundle));
+    expect(tx.canonicalCompany.updateMany).not.toHaveBeenCalled();
+    expect(tx.judgmentRecord.createMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not touch attributes when no bundle was produced (mode off)', async () => {
+    const tx = fakeTx({ keywords: ['pumps'] });
     await persistJudgmentRecordInTransaction(tx as never, 'icp-1', judgmentWith(draft('FIT')));
-    expect(tx.canonicalCompany.findUnique).not.toHaveBeenCalled();
-    expect(writtenSampling(tx).corroboration).toBeUndefined();
+    expect(tx.canonicalCompany.updateMany).not.toHaveBeenCalled();
+    expect(tx.judgmentRecord.createMany).toHaveBeenCalledTimes(1);
   });
 });
