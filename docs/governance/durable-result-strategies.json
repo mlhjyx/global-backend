@@ -653,6 +653,22 @@
       }
     },
     {
+      "taskId": "discovery.web_search_candidates",
+      "callsitePath": "apps/api/src/discovery/model-web-search/model-web-search.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "discovery-web-search-candidates/v1",
+      "operationIdentity": "model:discovery.web_search_candidates:<request-hash>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "ModelWebSearch.search",
+        "domainAggregateType": "CanonicalCompany",
+        "identitySource": "company-domain-and-operation",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
       "taskId": "contact.find_decision_makers",
       "callsitePath": "apps/api/src/discovery/providers/decision-maker.provider.ts",
       "resultStrategy": "typed_projection",

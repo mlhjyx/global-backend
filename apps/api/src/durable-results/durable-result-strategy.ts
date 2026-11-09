@@ -18,6 +18,7 @@ const typedProjectionSchemaValues = [
   'fit-judgment/v1', 'quick-judgment/v1',
   'discovery-extract-company/v1', 'discovery-extract-list/v1',
   'discovery-classify-trade-role/v1',
+  'discovery-web-search-candidates/v1',
   'contact-decision-makers/v1', 'ted-search/v1', 'openfda-search/v1',
   'samgov-search/v1', 'smtp-probe-verdict/v1', 'searxng-search/v1', 'social-search/v1',
   'social-fetch/v1',
