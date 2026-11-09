@@ -138,12 +138,13 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * 每个请求（含每一跳重定向）都过一遍：http(s)、无内嵌凭据；本机服务白名单里的
- * origin 只许回环地址；其余目标经 net-guard 解析，答案必须全部 global unicast。
+ * 每个请求（含每一跳重定向）都过一遍：http(s)、无内嵌凭据；运营者配置的服务
+ * origin（RSSHUB_URL / CHANGE_DETECTION_URL）按信任配置直接放行；其余目标经
+ * net-guard 解析，答案必须全部 global unicast——未配置的回环/私网地址一律拒绝。
  */
 async function assertAllowedTarget(
   target: URL,
-  allowedLoopbackOrigins: ReadonlySet<string>,
+  allowedOrigins: ReadonlySet<string>,
   deps: CollectDeps,
 ): Promise<void> {
   if (target.protocol !== 'http:' && target.protocol !== 'https:') {
@@ -152,13 +153,8 @@ async function assertAllowedTarget(
   if (target.username || target.password) {
     throw new Error('目标 URL 不允许携带凭据');
   }
+  if (allowedOrigins.has(target.origin)) return;
   const host = target.hostname.replace(/\.$/u, '').toLowerCase();
-  if (allowedLoopbackOrigins.has(target.origin)) {
-    if (!LOOPBACK_HOSTS.has(host)) {
-      throw new Error('本机服务白名单只允许回环地址');
-    }
-    return;
-  }
   if (LOOPBACK_HOSTS.has(host)) {
     throw new Error('目标指向回环/本机地址，已拒绝');
   }
@@ -174,13 +170,13 @@ async function assertAllowedTarget(
 async function guardedFetchText(
   target: string,
   headers: Record<string, string>,
-  options: { allowedLoopbackOrigins: ReadonlySet<string>; deps: CollectDeps },
+  options: { allowedOrigins: ReadonlySet<string>; deps: CollectDeps },
 ): Promise<string> {
   const fetchImpl = options.deps.fetchImpl ?? (globalThis.fetch as unknown as SignalFetch);
   const timeoutMs = options.deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   let current = new URL(target);
   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
-    await assertAllowedTarget(current, options.allowedLoopbackOrigins, options.deps);
+    await assertAllowedTarget(current, options.allowedOrigins, options.deps);
     const response = await fetchImpl(current.toString(), {
       headers,
       signal: AbortSignal.timeout(timeoutMs),
@@ -212,9 +208,9 @@ export async function collectCompanySignals(
 ): Promise<CollectedSignalSource[]> {
   const deps = options.deps ?? {};
   const rsshubUrl = options.rsshubUrl.replace(/\/+$/u, '');
-  const allowedLoopbackOrigins = new Set<string>();
+  const allowedOrigins = new Set<string>();
   for (const origin of [originOf(options.rsshubUrl), originOf(options.changeDetectionUrl)]) {
-    if (origin) allowedLoopbackOrigins.add(origin);
+    if (origin) allowedOrigins.add(origin);
   }
   const sources: CollectedSignalSource[] = [];
 
@@ -224,7 +220,7 @@ export async function collectCompanySignals(
       const text = await guardedFetchText(
         resolveRssUrl(route, rsshubUrl),
         { accept: 'application/rss+xml, application/atom+xml, application/xml' },
-        { allowedLoopbackOrigins, deps },
+        { allowedOrigins, deps },
       );
       const feed = parseRssFeed(text);
       source.items = feed.items;
@@ -248,7 +244,7 @@ export async function collectCompanySignals(
       const text = await guardedFetchText(
         `${options.changeDetectionUrl.replace(/\/+$/u, '')}/api/v1/watch`,
         { 'x-api-key': options.changeDetectionApiKey },
-        { allowedLoopbackOrigins, deps },
+        { allowedOrigins, deps },
       );
       let payload: unknown;
       try {
