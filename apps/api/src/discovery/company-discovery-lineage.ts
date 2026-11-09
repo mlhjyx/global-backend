@@ -16,7 +16,8 @@ export type DiscoveryCompanyLineageProviderKey =
   | 'wikidata'
   | 'openstreetmap'
   | 'ted'
-  | 'openfda';
+  | 'openfda'
+  | 'registry_frame';
 
 export type DiscoveryCompanyReceiptAttemptV1 = Readonly<{
   producerId: string;
@@ -110,6 +111,12 @@ const PROVIDER_RECEIPT_CONTRACT = Object.freeze({
   openfda: Object.freeze({
     producerId: 'openfda.search',
     resultSchema: 'openfda-search/v1',
+  }),
+  // A 方案（local_query 变体）：零出网本地注册库枚举，回执由 registry/local-query-receipt.ts
+  // 确定性构造（producer 闭锁，仅此 provider 允许）。
+  registry_frame: Object.freeze({
+    producerId: 'registry.query',
+    resultSchema: 'registry-query/v1',
   }),
 } satisfies Record<
   DiscoveryCompanyLineageProviderKey,
