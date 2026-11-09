@@ -33,6 +33,7 @@ describe('pipeline failure attribution wiring (P3 J02)', () => {
       'fitCompanyOnce',
       'signalsCompanyOnce',
       'contactsCompanyOnce',
+      'enrichContactsForCompany',
     ]) {
       expect(pipeline).toContain(`${activity}: withClassifiedFailure(activities.${activity})`);
     }

@@ -1,8 +1,12 @@
-import { CancellationScope, isCancellation, proxyActivities } from '@temporalio/workflow';
+import { CancellationScope, isCancellation, patched, proxyActivities } from '@temporalio/workflow';
 import type { Run2PipelineActivities } from './discovery.run2.pipeline.activities';
 import type { ExecutionBudgetBinding } from '../execution-budget/execution-budget-binding';
 import type { FailureCode, FailureStage } from '../discovery/judgment/failure-codes';
+import { MAX_RUN_ENRICH_COMPANIES } from '../discovery/execution-envelope';
 import { classifyPipelineFailure } from './pipeline-failure-taxonomy';
+
+/** P1-10b：contacts 阶段后的付费富集步骤（版本化闸：旧历史 replay 不新增命令）。 */
+export const COMPANY_CONTACT_ENRICHMENT_PATCH = 'company-contact-enrichment-v1';
 
 /**
  * M0④ 公司级深挖流水线（每家一个子工作流）：
@@ -37,6 +41,12 @@ export interface CompanyPipelineWorkflowInput {
   companyId: string;
   executionContractVersion?: 2;
   executionBudget?: ExecutionBudgetBinding;
+  /**
+   * P1-10b：本公司在 run 深挖批次里的序号（父工作流按 cursor 传入）。
+   * 只有前 MAX_RUN_ENRICH_COMPANIES 家（0..24）触发付费富集；缺省按 0 处理
+   * （新历史总带此字段；旧历史由 patched() 闸挡住）。
+   */
+  enrichmentSlot?: number;
 }
 
 export async function companyPipelineWorkflow(
@@ -71,6 +81,15 @@ export async function companyPipelineWorkflow(
     await signalActs.signalsCompanyOnce(input);
     await mark('contacts');
     await signalActs.contactsCompanyOnce(input);
+    // P1-10b：contacts 之后对 match 公司补邮箱（付费 finder 瀑布；run 内限额由父工作流序号控制）。
+    // 富集是可选增强：失败只留在该活动历史里，不把已完成的联系人发现打成 failed。
+    if (
+      patched(COMPANY_CONTACT_ENRICHMENT_PATCH) &&
+      fit.verdict === 'match' &&
+      (input.enrichmentSlot ?? 0) < MAX_RUN_ENRICH_COMPANIES
+    ) {
+      await signalActs.enrichContactsForCompany(input).catch(() => undefined);
+    }
     await mark('done', fit.verdict ? { verdictDeep: fit.verdict } : {});
     return { stage: 'done' };
   } catch (error) {

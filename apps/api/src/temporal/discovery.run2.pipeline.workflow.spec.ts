@@ -3,7 +3,7 @@ import { ActivityFailure, ApplicationFailure } from '@temporalio/common';
 
 vi.mock('@temporalio/workflow', async () => await import('./testing/temporal-workflow.mock'));
 
-import { acts, resetActivities } from './testing/temporal-workflow.mock';
+import { acts, resetActivities, setPatched } from './testing/temporal-workflow.mock';
 import { companyPipelineWorkflow } from './discovery.run2.pipeline.workflow';
 
 const WORKSPACE_ID = '11111111-1111-4111-8111-111111111111';
@@ -42,6 +42,7 @@ beforeEach(() => {
   acts.fitCompanyOnce.mockResolvedValue({ judged: true, verdict: 'match' });
   acts.signalsCompanyOnce.mockResolvedValue({ matched: 1, provider: 'digital_footprint' });
   acts.contactsCompanyOnce.mockResolvedValue({ skipped: false, people: 2, emails: 1, phones: 0 });
+  acts.enrichContactsForCompany.mockResolvedValue({ skipped: true, reason: 'no_enabled_finder' });
 });
 
 describe('M0④ 公司级深挖子工作流', () => {
@@ -67,6 +68,42 @@ describe('M0④ 公司级深挖子工作流', () => {
     expect(acts.contactsCompanyOnce).not.toHaveBeenCalled();
     expect(acts.updateCompanyJobStage).toHaveBeenLastCalledWith(
       expect.objectContaining({ stage: 'done', verdictDeep: 'mismatch' }),
+    );
+  });
+
+  it('P1-10b: match 公司在 contacts 之后触发富集（默认 slot 0）', async () => {
+    await expect(companyPipelineWorkflow(INPUT)).resolves.toEqual({ stage: 'done' });
+
+    expect(acts.enrichContactsForCompany).toHaveBeenCalledTimes(1);
+    expect(acts.enrichContactsForCompany).toHaveBeenCalledWith(
+      expect.objectContaining({ companyId: COMPANY_ID }),
+    );
+  });
+
+  it('P1-10b: mismatch 不触发富集', async () => {
+    acts.fitCompanyOnce.mockResolvedValue({ judged: true, verdict: 'mismatch' });
+
+    await expect(companyPipelineWorkflow(INPUT)).resolves.toEqual({ stage: 'done' });
+
+    expect(acts.enrichContactsForCompany).not.toHaveBeenCalled();
+  });
+
+  it('P1-10b: 序号 ≥25 的公司不触发富集；旧历史（patched=false）也不触发', async () => {
+    await companyPipelineWorkflow({ ...INPUT, enrichmentSlot: 25 });
+    expect(acts.enrichContactsForCompany).not.toHaveBeenCalled();
+
+    setPatched(() => false);
+    await companyPipelineWorkflow(INPUT);
+    expect(acts.enrichContactsForCompany).not.toHaveBeenCalled();
+  });
+
+  it('P1-10b: 富集失败不把已完成联系人发现的公司打成 failed', async () => {
+    acts.enrichContactsForCompany.mockRejectedValue(new Error('finder exploded'));
+
+    await expect(companyPipelineWorkflow(INPUT)).resolves.toEqual({ stage: 'done' });
+
+    expect(acts.updateCompanyJobStage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ stage: 'done' }),
     );
   });
 
