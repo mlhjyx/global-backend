@@ -13,6 +13,8 @@ const RETAINED_TOP_LEVEL_KEYS = new Set([
   "digital_footprint",
   "employee_band",
   "employees",
+  // 证据包 v1（2026-11-10，shadow）：T1/T2/T3 分层证据视图（discovery/evidence-bundle.ts）。
+  "evidence_bundle",
   "extraction_confidence",
   "extraction_evidence_digest",
   "fda",
@@ -21,6 +23,8 @@ const RETAINED_TOP_LEVEL_KEYS = new Set([
   "government_buyer",
   "hall",
   "hiring_signal",
+  // 存量归一留痕（2026-11-10）：industry 回填的 ISIC 码/匹配词/来源域（backfill-company-normalization）。
+  "industry_normalization",
   "intent",
   "keywords",
   "latitude",

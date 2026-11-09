@@ -54,6 +54,31 @@ describe("CanonicalCompany derived-attribute sanitizer parity", () => {
     ).toEqual({ products: ["pump", "LLZ"] });
   });
 
+  it("keeps the industry-normalization trail and drops contact-shaped keys inside it", () => {
+    expect(
+      sanitizeCanonicalCompanyAttributes({
+        industry_normalization: {
+          method: "isic_alias_inference",
+          isic_code: "28",
+          nace_prefixes: ["28"],
+          matched_terms: ["pump technology", "Pumpen"],
+          sources: ["keywords", "website_profile"],
+          normalized_at: "2026-11-10T00:00:00.000Z",
+          phone: "+49 30 1234567",
+        },
+      }),
+    ).toEqual({
+      industry_normalization: {
+        method: "isic_alias_inference",
+        isic_code: "28",
+        nace_prefixes: ["28"],
+        matched_terms: ["pump technology", "Pumpen"],
+        sources: ["keywords", "website_profile"],
+        normalized_at: "2026-11-10T00:00:00.000Z",
+      },
+    });
+  });
+
   it("preserves a legitimate numeric TED notice at its exact Canonical evidence path", () => {
     expect(
       sanitizeCanonicalCompanyAttributes({

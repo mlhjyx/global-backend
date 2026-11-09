@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   canonicalNace,
+  matchIsicNodesForTerms,
   nacePrefixesForIndustryTerms,
   nacePrefixesForIsicCodes,
   resolveNacePrefixes,
@@ -50,6 +51,22 @@ describe('nacePrefixesForIsicCodes', () => {
     expect(nacePrefixesForIsicCodes(['28', '325'])).toEqual(['28', '32.5']);
     expect(nacePrefixesForIsicCodes(['C'])).toEqual([]);
     expect(nacePrefixesForIsicCodes(['unknown'])).toEqual([]);
+  });
+});
+
+describe('matchIsicNodesForTerms', () => {
+  it('returns nodes with their matched terms, merging aliases of the same node', () => {
+    const matches = matchIsicNodesForTerms(['pump technology', 'pumps']);
+    expect(matches[0]?.code).toBe('28');
+    expect(matches[0]?.en).toBe('Manufacture of machinery and equipment n.e.c.');
+    expect(matches[0]?.matchedTerms).toEqual(['pump technology', 'pumps']);
+    expect(matches[0]?.nacePrefixes).toContain('28');
+  });
+
+  it('drops a node when its terms do not match, and orders by matched-term count', () => {
+    const matches = matchIsicNodesForTerms(['pump', 'valve', 'unknown quantum thing']);
+    expect(matches[0]?.code).toBe('28'); // pump 与 valve 同属 28，两个命中词
+    expect(matches.flatMap((match) => match.matchedTerms)).not.toContain('unknown quantum thing');
   });
 });
 

@@ -32,6 +32,7 @@ function normalizeAlias(value: string): string {
 
 interface AliasEntry {
   alias: string;
+  node: IsicNode;
   nacePrefixes: string[];
 }
 
@@ -45,7 +46,7 @@ const ALIAS_INDEX: readonly AliasEntry[] = (() => {
         .filter((term) => term.trim().length > 0)
         .map(normalizeAlias),
     );
-    for (const alias of terms) entries.push({ alias, nacePrefixes: [...prefixes] });
+    for (const alias of terms) entries.push({ alias, node, nacePrefixes: [...prefixes] });
   }
   return entries;
 })();
@@ -95,6 +96,44 @@ export function nacePrefixesForIndustryTerms(terms: readonly string[]): Industry
     matchedTerms,
     unmatchedTerms,
   };
+}
+
+export interface IsicNodeMatch {
+  code: string;
+  en: string;
+  nacePrefixes: string[];
+  /** 命中的词（原样，去重后保持首个出现顺序）。 */
+  matchedTerms: string[];
+}
+
+/**
+ * 行业自由词 → 命中的 ISIC 节点（含 matchedTerms），供存量归一推断使用。
+ * 同一节点的多个别名命中合并；返回按 matchedTerms 数量与码具体度排序的稳定列表。
+ */
+export function matchIsicNodesForTerms(terms: readonly string[]): IsicNodeMatch[] {
+  const matches = new Map<string, IsicNodeMatch>();
+  for (const raw of terms) {
+    const term = normalizeAlias(raw);
+    if (!term) continue;
+    for (const entry of ALIAS_INDEX) {
+      if (!aliasMatches(term, entry.alias)) continue;
+      const current = matches.get(entry.node.code) ?? {
+        code: entry.node.code,
+        en: entry.node.en,
+        nacePrefixes: [...entry.nacePrefixes],
+        matchedTerms: [],
+      };
+      const value = raw.trim();
+      if (!current.matchedTerms.includes(value)) current.matchedTerms.push(value);
+      matches.set(entry.node.code, current);
+    }
+  }
+  return [...matches.values()].sort(
+    (a, b) =>
+      b.matchedTerms.length - a.matchedTerms.length ||
+      b.code.length - a.code.length ||
+      a.code.localeCompare(b.code),
+  );
 }
 
 /** taxonomy 归一注入的 ISIC 码 → NACE 前缀（精确节点匹配）。 */
