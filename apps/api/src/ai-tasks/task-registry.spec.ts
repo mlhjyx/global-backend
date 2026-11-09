@@ -194,6 +194,74 @@ describe('acquisition per-task model overrides', () => {
     expect(mod.getTask('company_understanding.extract_claims')?.model).toBe('gemini-3.8-flash');
   });
 
+  it('ignores a non-allowlisted override for the final-verdict judge (P3 J03)', async () => {
+    vi.resetModules();
+    vi.stubEnv('MODEL_ACQUISITION_REASONING_MODEL', 'gpt-5.6-sol');
+    vi.stubEnv(
+      'MODEL_ACQUISITION_TASK_MODELS',
+      '{"discovery.qualify_fit":"gemini-3.8-flash"}',
+    );
+
+    const mod = await import('./task-registry');
+
+    expect(mod.getTask('discovery.qualify_fit')?.model).toBe('gpt-5.6-sol');
+    expect(mod.judgeModelOverrideRejections()).toEqual([
+      {
+        taskId: 'discovery.qualify_fit',
+        requestedModel: 'gemini-3.8-flash',
+        effectiveModel: 'gpt-5.6-sol',
+      },
+    ]);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(() =>
+      mod.enforceJudgeModelRouting({ mode: 'production' }),
+    ).not.toThrow();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('ignored MODEL_ACQUISITION_TASK_MODELS'),
+    );
+    warn.mockRestore();
+  });
+
+  it('honours the flash override for the judge only with JUDGE_ALLOW_FLASH=true', async () => {
+    vi.resetModules();
+    vi.stubEnv(
+      'MODEL_ACQUISITION_TASK_MODELS',
+      '{"discovery.qualify_fit":"gemini-3.8-flash"}',
+    );
+    vi.stubEnv('JUDGE_ALLOW_FLASH', 'true');
+
+    const mod = await import('./task-registry');
+
+    expect(mod.getTask('discovery.qualify_fit')?.model).toBe('gemini-3.8-flash');
+    expect(mod.judgeModelOverrideRejections()).toEqual([]);
+    expect(() =>
+      mod.enforceJudgeModelRouting({ mode: 'production' }),
+    ).not.toThrow();
+  });
+
+  it('startup self-check fails closed in controlled modes but only warns in dev/test', async () => {
+    vi.resetModules();
+    vi.stubEnv('MODEL_ACQUISITION_REASONING_MODEL', 'deepseek-flash');
+
+    const mod = await import('./task-registry');
+
+    expect(() =>
+      mod.enforceJudgeModelRouting({ mode: 'production' }),
+    ).toThrow(/JUDGE_MODEL_ALLOWLIST/);
+    expect(() => mod.enforceJudgeModelRouting({ mode: 'pilot' })).toThrow(
+      /JUDGE_MODEL_ALLOWLIST/,
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(() =>
+      mod.enforceJudgeModelRouting({ mode: 'development' }),
+    ).not.toThrow();
+    expect(() => mod.enforceJudgeModelRouting({ mode: 'test' })).not.toThrow();
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('allowed outside controlled modes'),
+    );
+    warn.mockRestore();
+  });
+
   it('an invalid map leaves every task on its tier default', async () => {
     vi.resetModules();
     vi.stubEnv('MODEL_ACQUISITION_TASK_MODELS', '{oops');
