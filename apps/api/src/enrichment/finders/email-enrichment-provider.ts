@@ -59,6 +59,8 @@ export interface EmailEnrichmentAdapter {
   /** source_policy 门用的 API 域名（无协议头）。 */
   readonly domain: string;
   readonly class: 'b2b_company_person';
+  /** 单次命中成本（微美元）；miss/error 不收费。编排层用它对预算做 reserve 预估。 */
+  readonly costMicrousd: number;
   /** 凭据是否完整；false 时 findEmail 返回 provider_unconfigured（cost 0）。 */
   isConfigured(): boolean;
   /** 幂等键 = sha256(contactId | providerKey | inputVersion)。 */

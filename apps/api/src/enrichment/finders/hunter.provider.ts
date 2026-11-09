@@ -124,11 +124,14 @@ export class HunterProvider implements EmailEnrichmentAdapter {
   readonly key = 'hunter' as const;
   readonly domain = 'api.hunter.io';
   readonly class = 'b2b_company_person' as const;
+  readonly costMicrousd: number;
 
   constructor(
     private readonly config: HunterConfig = resolveHunterConfig(),
     private readonly fetchImpl: typeof fetch = fetch,
-  ) {}
+  ) {
+    this.costMicrousd = config.costMicrousd;
+  }
 
   isConfigured(): boolean {
     return this.config.apiKey !== null;

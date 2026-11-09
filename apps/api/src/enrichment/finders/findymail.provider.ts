@@ -91,11 +91,14 @@ export class FindymailProvider implements EmailEnrichmentAdapter {
   readonly key = 'findymail' as const;
   readonly domain = 'api.findymail.com';
   readonly class = 'b2b_company_person' as const;
+  readonly costMicrousd: number;
 
   constructor(
     private readonly config: FindymailConfig = resolveFindymailConfig(),
     private readonly fetchImpl: typeof fetch = fetch,
-  ) {}
+  ) {
+    this.costMicrousd = config.costMicrousd;
+  }
 
   isConfigured(): boolean {
     return this.config.apiKey !== null;

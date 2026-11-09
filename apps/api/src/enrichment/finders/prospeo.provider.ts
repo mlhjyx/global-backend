@@ -88,11 +88,14 @@ export class ProspeoProvider implements EmailEnrichmentAdapter {
   readonly key = 'prospeo' as const;
   readonly domain = 'api.prospeo.io';
   readonly class = 'b2b_company_person' as const;
+  readonly costMicrousd: number;
 
   constructor(
     private readonly config: ProspeoConfig = resolveProspeoConfig(),
     private readonly fetchImpl: typeof fetch = fetch,
-  ) {}
+  ) {
+    this.costMicrousd = config.costMicrousd;
+  }
 
   isConfigured(): boolean {
     return this.config.apiKey !== null;
