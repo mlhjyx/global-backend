@@ -75,6 +75,16 @@ VIES 的离线接口（fixture 实现），真实 REST 属执行面。多候选�
 全部 AMBIGUOUS（同名冲突），唯一 VERIFIED 才选中；产物可映射为
 `company_domain_resolution` 行草案（`toDomainResolutionDrafts`）。本骨架不抓取、不落库。
 
+## 人工复核队列（离线契约，T3-15）
+
+`apps/api/src/registry/domain/domain-review.ts`：AMBIGUOUS（或抽样 5% 的 VERIFIED）→ 复核任务：
+reason 按信号分 `multi_candidates`（集团门户多注册号）/ `name_collision`（同名冲突）/
+`low_confidence` / `audit_sample`；SLA 3 个工作日（只跳周末，v0 无节假日日历）；状态机
+OPEN → APPROVED / REJECTED / NOT_FOUND（证据不足）/ EXPIRED（超期只告警**不自动改判**），
+终态不可重复裁决；`summarizeReviewSla` 给出积压/SLA 达成率/平均裁决耗时/按原因分布；
+`decisionToResolutionUpdate` 映射回 `company_domain_resolution` 行草案。抽样器可注入，结果可复算。
+落库、运营台 API 与 BFF 联调属执行面/在线部分。
+
 ## 召回审计
 
 审计的第一段是「冻结 frame → 抽样输入」（T3-20 骨架）：
