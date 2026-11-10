@@ -184,20 +184,17 @@
 ## 8. 未完成与下一阶段 Backlog
 
 **P0**
-1. 依赖漏洞基线在 2026-11-14 前续期（backend；否则 main canary 变红）。
-2. PRD4-D12 拍板：Release 外部 provenance 死锁的替代机制（产品负责人；三个候选：可信 readback verifier / 产品负责人签字 / 保留死锁）。
+1. 依赖漏洞基线在 2026-11-14 前续期（backend；否则 main canary 变红）——#1009。
+2. PRD4-D12 拍板：Release 外部 provenance 死锁的替代机制（产品负责人；三个候选：可信 readback verifier / 产品负责人签字 / 保留死锁）——#1010。
 
 **P1**
-3. SaaS `main` 分支保护（需产品负责人授权 ruleset；建议等价于后端五项语义）。
-4. 引擎 outbox 事件 schema 兼容门（SaaS CI 对固定事件 schema 做生产者/消费者兼容检查）。
-5. `docs/frontend/` 19 份目标规范的处置决定（产品负责人）。
-6. `product-scope.md` 七轴状态表按 M2 交付逐轴回写（工程 + 证据）。
+3. SaaS `main` 分支保护（需产品负责人授权 ruleset；建议等价于后端五项语义）——gain-saas #160。
+4. 引擎 outbox 事件 schema 兼容门（SaaS CI 对固定事件 schema 做生产者/消费者兼容检查）——#1011。
+5. `docs/frontend/` 19 份目标规范的处置决定 + `product-scope.md` 七轴状态表按 M2 交付逐轴回写 + SaaS 技术方案 §6.1 回写——#1012。
 
 **P2**
-7. `docs:verify` 与 `governance:verify` 的重复运行去重（需重签 Copy 指纹）。
-8. 35 组已合并 worktree 与 2 个未推送分支的归属清理（各会话 owner）。
-9. SaaS Actions 存量 moving tag 全部 pin SHA。
-10. `/global` 顶层 `.pnpm-store`/`.zcode` 的归置。
+6. `docs:verify` 与 `governance:verify` 的重复运行去重（需重签 Copy 指纹）；35 组已合并 worktree、2 个未推送分支与 `/global` 顶层条目的归属清理——#1013。
+7. SaaS Actions 存量 moving tag 全部 pin SHA（不在本轮 Issue 内，随下次 CI 变更处理）。
 
 ## 9. 持续治理（复用现有机制，不新增 bot）
 
