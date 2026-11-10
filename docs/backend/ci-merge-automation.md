@@ -169,9 +169,19 @@ build job 固定以 policy 批准的 `${{ !cancelled() }}` 启动（不用 `alwa
 2026-09-21 回读确认它已被强制，消除这部分重复的前置条件已满足；但 `docs:verify`
 是 Copy fixed-source 绑定的根 package 命令，拆分须另开 PR 并同步指纹，不在本次范围。
 
-## Release Bundle 的外部 provenance
+## Release Bundle 的晋级 provenance（PRD4-D12）
 
-Release Bundle 中的 `CHECK_RUN`、`GITHUB_REVIEW`、`SIGNED_AUTHORIZATION`、merge SHA/parent 和 `evidence_ref` 是待验证声明，不是自证。当前仓内尚无可信外部 readback verifier，所以 `external_provenance.status` 只能有效地表达 `EXTERNAL_UNVERIFIED`；对 `PILOT/GA`，验证器始终返回 `RELEASE_EXTERNAL_PROVENANCE_UNVERIFIED`。仅把字段改为 `VERIFIED`或填入 URL 会追加 `RELEASE_EXTERNAL_PROVENANCE_UNSUPPORTED`，不能解锁 promotion。未来实现必须独立回读外部对象、绑定当次仓库/PR/head/actor/result 和 receipt，并另行审查；不开放由 bundle 调用者注入“已信任”的旁路。
+Release Bundle 中的 `CHECK_RUN`、`GITHUB_REVIEW`、`SIGNED_AUTHORIZATION`、merge SHA/parent 和 `evidence_ref` 是待验证声明，不是自证。2026-11-11 的 PRD4-D12 决定：`PILOT`/`GA` 的晋级 provenance 由**产品负责人 SSH 签名回执**承载——`external_provenance.status=OWNER_SIGNED`、verifier=`PRODUCT_OWNER_SSH_SIGNATURE`，`verification_ref` 指向 `docs/releases/authorizations/<release_id>.authorization.json`（同目录 `<release_id>.authorization.json.sig` 为分离签名）。验证器（`scripts/release-authorization.mjs`）离线重算并拒绝：bundle 摘要（`external_provenance` 字段除外）与回执不符、commit/证据集/环境/仓库不符、签名时从 GitHub 回读的任一必需 check 非 success、独立审查记录哈希不符、回执过期或有效期超过 30 天、钥匙未 pin 或已吊销、签名无效。`EXTERNAL_UNVERIFIED` 仍阻断 `PILOT`/`GA`；仅把字段改为 `VERIFIED` 或填入 URL 会追加 `RELEASE_EXTERNAL_PROVENANCE_UNSUPPORTED`。未来的独立外部 readback verifier 另立状态接入，不开放由 bundle 调用者注入"已信任"的旁路。
+
+### 发布授权签名（Owner 操作）
+
+1. 把独立审查记录写到 `docs/releases/authorizations/<release_id>.review.md`（PR 线程摘要、审查范围与结论）。
+2. 首次使用时定一把专用的 OpenSSH 发布钥匙（如 `ssh-keygen -t ed25519 -f ~/.ssh/gain-release-authorization`），把公钥登记到 [`release-authority-keys.json`](../governance/release-authority-keys.json)（`key_id`、`principal`、`public_key`、`added_at`、`revoked_at`），随 PR 合入；私钥不出本机。
+3. 在 release commit 的 check-run 全部 success 后运行：
+   `node scripts/sign-release-authorization.mjs --bundle docs/releases/<release_id>.release.json --key ~/.ssh/gain-release-authorization --review-artifact docs/releases/authorizations/<release_id>.review.md --valid-until <ISO> --authorized-by <owner>`
+   工具会通过 `gh` 回读必需 check-run 结论、计算 bundle/证据集/审查回执哈希并打印摘要；确认后写出回执并签名，随后自检。
+4. 在 bundle 里写 `external_provenance = {status: OWNER_SIGNED, verifier: PRODUCT_OWNER_SSH_SIGNATURE, verification_ref: "docs/releases/authorizations/<release_id>.authorization.json"}`，`node scripts/governance-verify.mjs render-release --input <bundle>` 重新生成伴随 markdown，然后与回执、`.sig`、审查记录一起提交 PR。
+5. CI（`pnpm governance:verify`）离线验签；任一绑定不符、回执过期或钥匙吊销都会失败。换钥匙时新增 `key_id` 并把旧钥匙标 `revoked_at`，不要删除历史条目。
 
 ## 开发代理收口步骤
 

@@ -50,7 +50,7 @@ const APPROVAL_SCHEMA_CANONICAL_SHA256 = Object.freeze({
   attestation:
     "70e64fc4c2b766124d5a29cecb1997ac5c26aad4e75061afb0918b6d76715b1e",
   verifier: "64aef09506fef75aa33f1cb038fd8607f383df468a4bf680773434433b8ac271",
-  release: "3406f720c2dbac3b072f71a5805629f63dc6924072b0643cf573d235e716e3f1",
+  release: "cb229849a46ac0ba5aa8c56ae27e7e6d23e5ec0c448c95eee58bc4f50d828be0",
 });
 const AUTHORITY_RELATIONSHIPS: readonly StaticApprovalRelationship[] =
   Object.freeze([

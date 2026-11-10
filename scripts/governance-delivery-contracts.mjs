@@ -21,6 +21,7 @@ import {
   uniqueStrings,
   validateRuntimeEvidence,
 } from "./governance-evidence-provider-contracts.mjs";
+import { validateReleaseAuthorization } from "./release-authorization.mjs";
 
 function validateTraceIdentifierList(
   issues,
@@ -380,12 +381,19 @@ export function validateMergeEvidence(mergeEvidence) {
   return result(issues);
 }
 
-function validateExternalProvenance(bundle, issues) {
+function validateExternalProvenance(bundle, issues, context) {
   const provenance = bundle?.external_provenance;
+  const ownerSigned = provenance?.status === "OWNER_SIGNED";
   const shapeIsValid =
     isObject(provenance) &&
-    ["EXTERNAL_UNVERIFIED", "VERIFIED"].includes(provenance.status) &&
-    ["NONE", "INDEPENDENT_EXTERNAL_READBACK"].includes(provenance.verifier) &&
+    ["EXTERNAL_UNVERIFIED", "VERIFIED", "OWNER_SIGNED"].includes(
+      provenance.status,
+    ) &&
+    [
+      "NONE",
+      "INDEPENDENT_EXTERNAL_READBACK",
+      "PRODUCT_OWNER_SSH_SIGNATURE",
+    ].includes(provenance.verifier) &&
     isNonEmptyString(provenance.verification_ref);
 
   if (!shapeIsValid) {
@@ -397,28 +405,45 @@ function validateExternalProvenance(bundle, issues) {
     );
   }
 
-  const claimsUnsupportedVerification =
-    provenance?.status === "VERIFIED" ||
-    provenance?.verifier === "INDEPENDENT_EXTERNAL_READBACK" ||
-    (isNonEmptyString(provenance?.verification_ref) &&
-      provenance.verification_ref !== "NONE");
-  if (claimsUnsupportedVerification) {
-    issues.push(
-      issue(
-        "RELEASE_EXTERNAL_PROVENANCE_UNSUPPORTED",
-        "this verifier has no trusted external readback implementation; strings and URLs cannot self-attest verification",
-      ),
-    );
+  if (ownerSigned) {
+    if (provenance.verifier !== "PRODUCT_OWNER_SSH_SIGNATURE") {
+      issues.push(
+        issue(
+          "RELEASE_EXTERNAL_PROVENANCE_UNSUPPORTED",
+          "OWNER_SIGNED requires the PRODUCT_OWNER_SSH_SIGNATURE verifier",
+        ),
+      );
+    } else {
+      const authorization = validateReleaseAuthorization(bundle, {
+        repoRoot: context.repo_root ?? process.cwd(),
+        now: context.now instanceof Date ? context.now : new Date(),
+      });
+      issues.push(...authorization.issues);
+    }
+  } else {
+    const claimsUnsupportedVerification =
+      provenance?.status === "VERIFIED" ||
+      provenance?.verifier === "INDEPENDENT_EXTERNAL_READBACK" ||
+      (isNonEmptyString(provenance?.verification_ref) &&
+        provenance.verification_ref !== "NONE");
+    if (claimsUnsupportedVerification) {
+      issues.push(
+        issue(
+          "RELEASE_EXTERNAL_PROVENANCE_UNSUPPORTED",
+          "this verifier has no trusted external readback implementation; strings and URLs cannot self-attest verification",
+        ),
+      );
+    }
   }
 
-  if (PROMOTION_STATES.has(bundle?.release_status)) {
-    // Intentionally fail closed. There is no caller-provided trust seam: a future
-    // external verifier must verify the check run, review, authorization, and
-    // merge result independently before this issue can be removed.
+  if (PROMOTION_STATES.has(bundle?.release_status) && !ownerSigned) {
+    // Fail closed unless the owner-signed authorization gate above passed.
+    // A future external readback verifier may add another accepted status, but
+    // bundle callers can never inject one.
     issues.push(
       issue(
         "RELEASE_EXTERNAL_PROVENANCE_UNVERIFIED",
-        `${bundle.release_status} is blocked until an independently verified external readback receipt is supported`,
+        `${bundle.release_status} is blocked until an independently verified external readback receipt or a valid product-owner signed authorization is present`,
       ),
     );
   }
@@ -460,7 +485,7 @@ export function validateReleaseBundle(bundle, context = {}) {
   if (!isIsoInstant(bundle?.released_at)) {
     issues.push(issue("RELEASE_TIME_INVALID", "released_at is invalid"));
   }
-  validateExternalProvenance(bundle, issues);
+  validateExternalProvenance(bundle, issues, context);
   if (!Array.isArray(bundle?.capability_ids) || bundle.capability_ids.length === 0) {
     issues.push(
       issue("RELEASE_CAPABILITIES_EMPTY", "capability_ids must not be empty"),

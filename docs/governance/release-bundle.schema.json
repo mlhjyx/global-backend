@@ -42,13 +42,13 @@
       "items": { "type": "string", "pattern": "^CAP-" }
     },
     "external_provenance": {
-      "description": "Documentary declaration only. Until a trusted independent readback verifier exists, status strings and references cannot authorize PILOT or GA promotion.",
+      "description": "PILOT/GA requires either OWNER_SIGNED with verifier PRODUCT_OWNER_SSH_SIGNATURE pointing at a docs/releases/authorizations/*.authorization.json receipt signed by the pinned product-owner SSH key (PRD4-D12, 2026-11-11), or a future VERIFIED/INDEPENDENT_EXTERNAL_READBACK readback. The receipt binds this bundle digest (external_provenance excluded), commit, evidence set, machine check conclusions and review artifact; declared strings alone never authorize promotion.",
       "type": "object",
       "additionalProperties": false,
       "required": ["status", "verifier", "verification_ref"],
       "properties": {
-        "status": { "enum": ["EXTERNAL_UNVERIFIED", "VERIFIED"] },
-        "verifier": { "enum": ["NONE", "INDEPENDENT_EXTERNAL_READBACK"] },
+        "status": { "enum": ["EXTERNAL_UNVERIFIED", "VERIFIED", "OWNER_SIGNED"] },
+        "verifier": { "enum": ["NONE", "INDEPENDENT_EXTERNAL_READBACK", "PRODUCT_OWNER_SSH_SIGNATURE"] },
         "verification_ref": {
           "description": "A reference is not proof by itself and must be read back and identity-bound by a trusted verifier.",
           "type": "string",
@@ -92,7 +92,7 @@
       "items": { "type": "string", "minLength": 1 }
     },
     "approval": {
-      "description": "Documentary declarations. CHECK_RUN, GITHUB_REVIEW, and SIGNED_AUTHORIZATION values remain externally unverified until independent readback binds their identity and content.",
+      "description": "Documentary declarations. Under PRD4-D12 a PILOT/GA bundle must carry an OWNER_SIGNED authorization receipt whose signed bundle digest covers these gates and the merge evidence; declared strings alone never authorize promotion.",
       "type": "object",
       "additionalProperties": false,
       "required": ["machine", "reviewer", "user_authorization"],
@@ -151,10 +151,20 @@
           "evidence_ids": { "minItems": 1 },
           "traceability_bindings": { "minItems": 1 },
           "external_provenance": {
-            "properties": {
-              "status": { "const": "VERIFIED" },
-              "verifier": { "const": "INDEPENDENT_EXTERNAL_READBACK" }
-            }
+            "oneOf": [
+              {
+                "properties": {
+                  "status": { "const": "VERIFIED" },
+                  "verifier": { "const": "INDEPENDENT_EXTERNAL_READBACK" }
+                }
+              },
+              {
+                "properties": {
+                  "status": { "const": "OWNER_SIGNED" },
+                  "verifier": { "const": "PRODUCT_OWNER_SSH_SIGNATURE" }
+                }
+              }
+            ]
           },
           "approval": {
             "properties": {

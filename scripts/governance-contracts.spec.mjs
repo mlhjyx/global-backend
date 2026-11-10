@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import "./governance-ci-topology.spec.mjs";
+import "./release-authorization.spec.mjs";
 import "./governance-document-drift.spec.mjs";
 import "./environment-parity-policy.spec.mjs";
 import "./governance-main-worktree-sync.spec.mjs";

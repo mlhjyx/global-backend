@@ -4,7 +4,7 @@
 > 生命周期：`CURRENT`
 > 状态：`CURRENT`
 > 当前事实来源：[产品范围](../product-scope.md)、[当前架构](../architecture/current.md)、[ADR registry](../adr/registry.md)、[发布路线](../status/release-plan.md)、[冲突与开放决策登记](../governance/conflict-register.md)，以及本页逐项注明的 Git/GitHub 回读与 xin `global_dev` 只读查询
-> 最后核验：2026-11-04T01:40Z（`origin/main@8b142f53`、运行镜像以 `local-config/global/runtime.compose.env` 的 `GLOBAL_BACKEND_IMAGE` 为准（核验时 `sha256:e2cfa8cc…`）、`global_dev` 只读计数；本页是人工核验的读数，不是 RuntimeEvidence；计数快照会漂移，引用前先重跑只读查询）
+> 最后核验：2026-11-04T01:40Z（`origin/main@8b142f53`、运行镜像以 `local-config/global/runtime.compose.env` 的 `GLOBAL_BACKEND_IMAGE` 为准（核验时 `sha256:e2cfa8cc…`）、`global_dev` 只读计数；本页是人工核验的读数，不是 RuntimeEvidence；计数快照会漂移，引用前先重跑只读查询）。2026-11-11 更新 PRD4-D12 晋级 provenance 与 G7 裁决（计数快照不变）。
 > 写法：按 PRD 4.0 L2 §5 的四问填写——做了什么（四态：未做 / 可运行 / 已验证 / 已验收）、证据、谁验收、怎么回退。四态口径（PRD 4.0 L0 §9.3「4.0 新锁定」的 `D-029`，与待拍板项 `PRD4-D<n>` 不是同一编号序列）尚未逐条拍板，本页先按它组织。2026-09-20 核验的旧版正文见文末[历史](#历史2026-09-20-核验)。
 
 ## 一页结论
@@ -89,7 +89,7 @@ PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](..
 3. **Phase 2 进行中**：卖家资料库 MVP（seller_document/seller_document_chunk、独立 bucket、presign/commit、Docling→分块→BGE-M3→pgvector 检索、前端资料库 tab）；**Phase 2b** 寻源性能改造与 Phase 2 并行（首批线索 ≤10 分钟、25 家 ≤30 分钟）。
 4. Phase 4「任务对象 + 重试」已立项（含 retry-account 放宽设计评估），排在 Phase 2 之后。
 
-需要产品负责人拍板的：M5 Golden Set 取样口径（20 家名单）；D6 per-tenant LIA 采集页排期；D8 开源融合顺序（theHarvester/social-analyzer、JobSpy、Trafilatura、Common Crawl、跨进程熔断）；`google_patents` 启用条件（等 patent cache 刷新恢复 + BQ 实测）；平台 4 个 schedule 是否恢复运行；`secrets-backup` 交互执行与异地副本；new-api gemini 渠道扩容（换密钥/加渠道）；PRD4-D1（Site Builder 正式冻结）、PRD4-D4/D19（文档各有两案）、PRD4-D12（流程瘦身，晋级门死锁）、PRD4-D8（design partner 人选）等既有待拍板项不变。
+需要产品负责人拍板的：M5 Golden Set 取样口径（20 家名单）；D6 per-tenant LIA 采集页排期；D8 开源融合顺序（theHarvester/social-analyzer、JobSpy、Trafilatura、Common Crawl、跨进程熔断）；`google_patents` 启用条件（等 patent cache 刷新恢复 + BQ 实测）；平台 4 个 schedule 是否恢复运行；`secrets-backup` 交互执行与异地副本；new-api gemini 渠道扩容（换密钥/加渠道）；PRD4-D1（Site Builder 正式冻结）、PRD4-D4/D19（文档各有两案）、PRD4-D8（design partner 人选）等既有待拍板项不变。（PRD4-D12 已于 2026-11-11 拍板，见下。）
 
 ## 6. 不变的边界与工程门
 
@@ -97,7 +97,7 @@ PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](..
 - Billing/Credits 保持 `DEFERRED / NOT_IMPLEMENTED`；`cap_microusd` 是一次执行的技术安全上界，不是客户余额。正常产品请求的费用权威是 SaaS 签发的 Budget Grant，与开发者 ad-hoc 调用授权保持分离。
 - 当前非运行时模型候选合同仍为 `site-builder-model-candidate-baseline/2026-08-07-v3`，详见[生成页](../site-builder/model-candidate-baseline.md)；它不等于 active route、质量证明或真实 dispatch 授权。
 - 受控触达已建成（M2 步 11，2026-11-08 验收），但**发送默认关闭**：生产发送需产品负责人开启，且真实域名与 SPF/DKIM/DMARC 实检待提供（D1②）。RL1 试点本身不做任何发送。
-- `PILOT`/`GA` 晋级门目前不可达：AGENTS §7 要求可信外部 readback，而仓内原有的 approval/readback 回读器已由 #566 移除，`scripts/governance-delivery-contracts.mjs` 对任何晋级状态恒阻断。这是已知死锁，是否改为产品负责人签字待 PRD4-D12 拍板。
+- `PILOT`/`GA` 晋级门：PRD4-D12 于 2026-11-11 拍板为**产品负责人 SSH 签名回执**（`external_provenance.status=OWNER_SIGNED`，verifier=`PRODUCT_OWNER_SSH_SIGNATURE`），回执绑定 bundle 摘要/commit/证据集/机器 check 结论/审查记录，验证器离线验签；`EXTERNAL_UNVERIFIED` 仍阻断、自证 `VERIFIED` 仍拒绝，RuntimeEvidence 与 Release Bundle 仍是晋级条件。首个真实 `PILOT` 仍需相应 PASS RuntimeEvidence 与产品负责人的签名授权。
 
 工程门 G0–G7 的定义见[发布路线](../status/release-plan.md)。自 2026-09-20 核验以来没有任何一道门晋级，下表的裁决不变，所缺证据按当前事实改写：
 
@@ -111,7 +111,7 @@ PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](..
 | G5-Site — Runtime Observed | HISTORICAL_ONLY | Site 线未推进（PRD4-D1 未拍板）；历史观察不可晋级 |
 | G5-Acquisition — Runtime Observed | NOT_VERIFIED | 有首次 `DONE` run，但没有当前 RuntimeEvidence（普通 run 观察不构成 RuntimeEvidence PASS） |
 | G6 — UAT Accepted | NOT_RUN | RL1 退出指标：推荐队列计数见「一页结论」（目标 ≥15 已达），`DONE` run 与 design partner 回填仍未达成 |
-| G7 — Pilot/GA Authorized | NOT_AUTHORIZED | 晋级门当前不可达（见上一条死锁）；也没有产品授权 |
+| G7 — Pilot/GA Authorized | NOT_AUTHORIZED | 晋级门可达（PRD4-D12：Owner 签名回执）；尚未取得 PASS RuntimeEvidence、Release Bundle 与产品负责人签名授权 |
 
 相同动作、目标和范围的有效授权继续沿用。源码 / PR 合入不自动授权生产部署、保留数据库迁移、凭据与端口修改、付费调用或 Pilot/GA。
 
