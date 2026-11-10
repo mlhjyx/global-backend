@@ -2,7 +2,36 @@
  * Product execution-shape ceilings. These are platform safety contracts used
  * by providers, workflows and technical quotes; they are not customer usage
  * limits, balances, prices or commercial entitlements.
+ *
+ * 获客挖掘 vNext（2026-11-10 计划 §3 W1）：`DISCOVERY_UNCAPPED` 打开时，本文件里
+ * 标为「产品帽」的常量改为**防爆安全界**——env 可调、默认远高于客户余额可支付量级。
+ * 真正的收紧条件落在执行预算：quote 只给估算包络上界，签发侧以
+ * Grant cap = min(估算包络, 客户可用余额) 钳制，账本逐次 reserve/settle，
+ * 余额耗尽（EXECUTION_BUDGET_AUTHORITY_EXHAUSTED）是唯一停止条件。
+ * 限流与出口治理（ToolBroker source_policy、rate limit）不属于产品帽，不随开关变化。
+ * 开关默认 off（行为与 2026-11-10 前逐字节一致），畸形值一律回退 off。
  */
+export function discoveryUncappedEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const value = (env.DISCOVERY_UNCAPPED ?? '').trim().toLowerCase();
+  return value === 'on' || value === 'true' || value === '1';
+}
+
+/** 防爆安全界：纯十进制正整数；畸形或超过 `maximum` 回退默认（不静默放大）。 */
+function safetyBound(
+  raw: string | undefined,
+  fallback: number,
+  maximum: number,
+): number {
+  const text = (raw ?? '').trim();
+  if (!/^\d+$/u.test(text)) return fallback;
+  const parsed = Number.parseInt(text, 10);
+  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= maximum
+    ? parsed
+    : fallback;
+}
+
 // 8→9（WEB-1 model_web_search 注册面，2026-11-10）：报价上界的适配器因子随之 +1。
 export const MAX_COMPANY_DISCOVERY_ADAPTERS = 9 as const;
 /** `discovery.query_plan` output schema bound. */
@@ -11,7 +40,24 @@ export const MAX_QUERY_PLANNER_QUERIES = 64 as const;
 export const MAX_INJECTED_PLAN_QUERIES = 2 as const;
 export const MAX_DISCOVERY_PLAN_QUERIES =
   MAX_QUERY_PLANNER_QUERIES + MAX_INJECTED_PLAN_QUERIES;
-export const MAX_DISCOVERY_PROVIDER_RECORDS = 25 as const;
+/** 去帽模式的记录安全界默认：25 的产品帽 × 40，余额先于它耗尽。 */
+export const UNCAPPED_DISCOVERY_PROVIDER_RECORDS = 1_000 as const;
+/** env `DISCOVERY_MAX_PROVIDER_RECORDS` 的可配置上界（防畸形配置把执行形状吹爆）。 */
+export const DISCOVERY_PROVIDER_RECORDS_MAX = 100_000 as const;
+/** 每查询每适配器的提供方记录上限：产品帽 25；去帽模式升为防爆界（env 可调）。 */
+export function resolveMaxDiscoveryProviderRecords(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  return discoveryUncappedEnabled(env)
+    ? safetyBound(
+        env.DISCOVERY_MAX_PROVIDER_RECORDS,
+        UNCAPPED_DISCOVERY_PROVIDER_RECORDS,
+        DISCOVERY_PROVIDER_RECORDS_MAX,
+      )
+    : 25;
+}
+export const MAX_DISCOVERY_PROVIDER_RECORDS: number =
+  resolveMaxDiscoveryProviderRecords();
 export const MAX_DISCOVERY_FIT_COMPANIES =
   MAX_DISCOVERY_PLAN_QUERIES *
   MAX_COMPANY_DISCOVERY_ADAPTERS *
