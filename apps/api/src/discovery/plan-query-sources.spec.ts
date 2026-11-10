@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelGateway } from '../model-gateway/model-gateway';
-import { MAX_QUERY_PLANNER_QUERIES } from './execution-envelope';
+import {
+  MAX_DISCOVERY_PLAN_QUERIES,
+  MAX_DISCOVERY_PROVIDER_RECORDS,
+  MAX_QUERY_PLANNER_QUERIES,
+} from './execution-envelope';
 import { DiscoveryProviderRegistry } from './provider.registry';
 import {
   PLANNER_SOURCE_GUIDE,
@@ -488,6 +492,39 @@ describe('cheap-first source priority (Q33②, PR-1)', () => {
     expect(budgets.directory).toBe(0);
   });
 
+  it('去帽模式（DISCOVERY_UNCAPPED=on）：默认预算换算回每源 66 条查询，永不先于余额收紧', () => {
+    const on = { DISCOVERY_UNCAPPED: 'on' } as NodeJS.ProcessEnv;
+    const config = sourceQueryBudgetConfig(on);
+
+    expect(config).toEqual({
+      structuredRunCap: MAX_DISCOVERY_PLAN_QUERIES * MAX_DISCOVERY_PROVIDER_RECORDS,
+      trialMaxCompanies: MAX_DISCOVERY_PLAN_QUERIES * MAX_DISCOVERY_PROVIDER_RECORDS,
+      trialMaxRuns: 1_000_000,
+    });
+    const budgets = sourceQueryBudgets(
+      new Set(['directory']),
+      config,
+      ['directory', 'wikidata', 'public_web'],
+    );
+    // floor(66×records / records) = 66 = 单源最大副本数：预算不裁剪任何计划副本。
+    expect(budgets.directory).toBe(MAX_DISCOVERY_PLAN_QUERIES);
+    expect(budgets.wikidata).toBe(MAX_DISCOVERY_PLAN_QUERIES);
+    expect(budgets.public_web).toBeUndefined();
+  });
+
+  it('去帽模式仍尊重显式 env 预算（运营者自选的更紧预算）', () => {
+    const config = sourceQueryBudgetConfig({
+      DISCOVERY_UNCAPPED: 'on',
+      DISCOVERY_STRUCTURED_SOURCE_RUN_CAP: '50',
+    } as NodeJS.ProcessEnv);
+
+    expect(config.structuredRunCap).toBe(50);
+    // 其余键独立解析：trial 缺省仍是去帽默认。
+    expect(config.trialMaxCompanies).toBe(
+      MAX_DISCOVERY_PLAN_QUERIES * MAX_DISCOVERY_PROVIDER_RECORDS,
+    );
+  });
+
   it('writes the shadow replacement count onto the plan review note', () => {
     const queries = [query('industry_data', { source_hint: 'directory' })];
     const noted = withCheapFirstShadowNote(queries, { replacedCopies: 3, budgetDropped: 2 });
@@ -520,6 +557,20 @@ describe('planner source prompt (BI-30)', () => {
     expect(prompt.indexOf('source_hint=directory')).toBeLessThan(
       prompt.indexOf('source_hint=public_web'),
     );
+  });
+
+  it('去帽模式：配额话术改为余额准入语义，不再声称产品配额', () => {
+    const prompt = plannerSourcePrompt(only('public_web', 'directory'), {
+      DISCOVERY_UNCAPPED: 'on',
+    } as NodeJS.ProcessEnv);
+
+    expect(prompt).toContain('余额');
+    expect(prompt).toContain('min(估算包络, 余额)');
+    expect(prompt).not.toContain('≤100');
+    expect(prompt).not.toContain('500');
+    // 路由优先级（质量/成本效率提示，不是配额）保持不变。
+    expect(prompt).toContain('结构化源优先');
+    expect(prompt).toContain('source_hint=directory');
   });
 
   it('tells the planner the system writes TED and openFDA queries only when they can run', () => {
