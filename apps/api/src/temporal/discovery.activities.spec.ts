@@ -49,6 +49,7 @@ import type { DurableExecutionReceipt } from "../durable-results/durable-executi
 import { DISCOVERY_COMPANY_RESULT_LINEAGE_V1 } from "../discovery/company-discovery-lineage";
 import { DiscoveryProviderRegistry } from "../discovery/provider.registry";
 import { OpenFdaDiscoveryProvider } from "../discovery/providers/openfda.provider";
+import { ModelWebSearchDiscoveryProvider } from "../discovery/providers/model-web-search.provider";
 import { OsmDiscoveryProvider } from "../discovery/providers/osm.provider";
 import { PublicWebDiscoveryProvider } from "../discovery/providers/public-web.provider";
 import { TedDiscoveryProvider } from "../discovery/providers/ted.provider";
@@ -1515,6 +1516,8 @@ describe("executeQuery —— lineage v3：结构化源在 ENABLED 后进入受�
       .mockImplementation(empty);
     const openFda = vi.spyOn(OpenFdaDiscoveryProvider.prototype, "discoverCompanies")
       .mockImplementation(empty);
+    const modelWebSearch = vi.spyOn(ModelWebSearchDiscoveryProvider.prototype, "discoverCompanies")
+      .mockImplementation(empty);
     const acts = createDiscoveryActivities(registryDeps().deps);
 
     const result = await acts.executeQuery(discoveryArgs("run-ok-x", { query: QUERY }));
@@ -1522,7 +1525,8 @@ describe("executeQuery —— lineage v3：结构化源在 ENABLED 后进入受�
     expect(publicWeb).toHaveBeenCalledOnce();
     expect(ted).toHaveBeenCalledOnce();
     expect(openFda).toHaveBeenCalledOnce();
-    expect(result.provider).toBe("openfda+public_web+ted");
+    expect(modelWebSearch).toHaveBeenCalledOnce();
+    expect(result.provider).toBe("model_web_search+openfda+public_web+ted");
     expect(result).not.toHaveProperty("skipReason");
   });
 });

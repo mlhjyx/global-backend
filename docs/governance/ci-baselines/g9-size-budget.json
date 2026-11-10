@@ -20,10 +20,10 @@
       "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
     },
     "apps/api/src/discovery/discovery-query-governed-lineage.ts": {
-      "maxLines": 876,
+      "maxLines": 883,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
-      "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
+      "reason": "存量超标文件（棘轮：只许缩小）；WEB-1 model_web_search 血缘契约条目 +7 行（PR 评审上调）；site-builder 相关条目随 SUB-02/03 退役后删除"
     },
     "apps/api/src/discovery/discovery.service.ts": {
       "maxLines": 1410,
@@ -230,10 +230,10 @@
       "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
     },
     "apps/api/src/temporal/discovery.activities.ts": {
-      "maxLines": 3791,
+      "maxLines": 3792,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
-      "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
+      "reason": "存量超标文件（棘轮：只许缩小）；WEB-1 producer 白名单 +1 行（PR 评审上调）；site-builder 相关条目随 SUB-02/03 退役后删除"
     },
     "apps/api/src/temporal/discovery.run2.activities.ts": {
       "maxLines": 879,

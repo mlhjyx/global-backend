@@ -13,6 +13,7 @@ import { DirectoryDiscoveryProvider } from './providers/directory.provider';
 import { TradeFairDiscoveryProvider } from './providers/trade-fair.provider';
 import { TedDiscoveryProvider } from './providers/ted.provider';
 import { OpenFdaDiscoveryProvider } from './providers/openfda.provider';
+import { ModelWebSearchDiscoveryProvider } from './providers/model-web-search.provider';
 import { RegistryFrameDiscoveryProvider } from './providers/registry-frame.provider';
 import { DecisionMakerContactAdapter } from './providers/decision-maker.provider';
 import { SocialPresenceContactAdapter } from './providers/social-presence.provider';
@@ -117,6 +118,16 @@ export class DiscoveryProviderRegistry {
     // openFDA 器械注册发现（美国 FDA 官方 API，零鉴权、CC0，归 public_intelligence 类）——不依赖 gateway。
     // 无 product code 过滤时 fail-safe 返回空，故对普通 public_intelligence 查询零负担。
     this.discovery.push(new OpenFdaDiscoveryProvider({ broker }));
+    // WEB-1 模型联网搜索（获客通路 A）：模型规划检索词→受治理搜索→结构确认；
+    // MODEL_WEB_SEARCH_PROVIDER=on 才生效（默认 off 时 fail-safe 返回有效空血缘），
+    // data_provider 状态是第二道 kill switch。需要 gateway+broker，缺一时同样诚实降级。
+    this.discovery.push(
+      new ModelWebSearchDiscoveryProvider({
+        gateway: deps?.gateway,
+        broker,
+        runtimeTelemetry: deps?.runtimeTelemetry,
+      }),
+    );
     // registry_frame = 本地注册库 frame 枚举（零出网零成本，ch03 T3-09；A 方案已获批）。
     // REGISTRY_FRAME_PROVIDER=on 时声明 local_query 血缘并报送确定性回执（registry.query）；
     // 默认 off = 不声明血缘、被路由闸门排除（SOURCE_LINEAGE_UNAVAILABLE，测试钉死），关闭即回滚。
@@ -274,6 +285,13 @@ export class DiscoveryProviderRegistry {
       where: { key: 'openfda' },
       update: {},
       create: { key: 'openfda', class: 'public_intelligence', status: 'ENABLED', costPerCallCents: 0 },
+    });
+    // WEB-1 模型联网搜索（获客通路 A）。ENABLED 只是登记面：MODEL_WEB_SEARCH_PROVIDER=on
+    // 才是第一道开关（默认 off 时 fail-safe 返回有效空血缘），本行是第二道 kill switch。
+    await db.dataProvider.upsert({
+      where: { key: 'model_web_search' },
+      update: {},
+      create: { key: 'model_web_search', class: 'public_intelligence', status: 'ENABLED', costPerCallCents: 0 },
     });
     // 合规注册（spec §3.3.7）：官方 REST（非爬）；**CC0 公共领域**（署名非义务，与 TED CC BY 不同）；
     // personalData=true —— registrationlisting 记录可能含具名 us_agent/contact（即便走 API），绿事实入库、具名个人 🔴 隔离。

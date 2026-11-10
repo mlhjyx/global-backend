@@ -53,6 +53,11 @@ import {
 } from '../discovery/icp-to-cpv';
 import { MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND } from '../model-gateway/model-execution-envelope';
 import {
+  MODEL_WEB_SEARCH_MAX_ROUNDS,
+  MODEL_WEB_SEARCH_MAX_TOOL_CALLS,
+} from '../discovery/model-web-search/model-web-search';
+import { deepseekSearchTool } from '../tools/deepseek-tools';
+import {
   crawl4aiFetchTool,
   osmOverpassTool,
   searxngSearchTool,
@@ -189,6 +194,11 @@ function discoveryRunEnvelope(
       ),
       model('discovery.extract_company', queries * MAX_PUBLIC_WEB_DOMAINS_PER_QUERY),
       model('discovery.extract_list', queries * directoryPages),
+      // WEB-1 模型联网搜索：每查询至多 N 轮探索 + 1 次结构确认。
+      model(
+        'discovery.web_search_candidates',
+        queries * (MODEL_WEB_SEARCH_MAX_ROUNDS + 1),
+      ),
       // profileWebsitesForRun: at most one trade-role classification per profiled company.
       model('discovery.classify_trade_role', MAX_DISCOVERY_PROFILE_COMPANIES),
       // qualifyFitForRun: one judgment per canonical company of the run.
@@ -202,8 +212,11 @@ function discoveryRunEnvelope(
     [
       tool(
         contract(searxngSearchTool),
-        queries * (MAX_PUBLIC_WEB_SEARCHES_PER_QUERY + MAX_DIRECTORY_SEARCHES_PER_QUERY),
+        queries * (MAX_PUBLIC_WEB_SEARCHES_PER_QUERY + MAX_DIRECTORY_SEARCHES_PER_QUERY) +
+          queries * MODEL_WEB_SEARCH_MAX_TOOL_CALLS,
       ),
+      // 模型联网搜索的 DeepSeek 执行器（可选；两种执行器都按上界预留，实际按调用结算）。
+      tool(contract(deepseekSearchTool), queries * MODEL_WEB_SEARCH_MAX_TOOL_CALLS),
       tool(
         contract(crawl4aiFetchTool),
         queries * directoryPages +

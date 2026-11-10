@@ -88,6 +88,8 @@ export const EXPECTED_TOOL_CALLSITES = Object.freeze([
   'apps/api/src/discovery/providers/gleif.provider.ts#gleif.fetch#1',
   'apps/api/src/discovery/providers/gleif.provider.ts#gleif.fetch#2',
   'apps/api/src/discovery/providers/inpi-rne.provider.ts#inpi_rne.search#1',
+  'apps/api/src/discovery/providers/model-web-search.provider.ts#deepseek.search#1',
+  'apps/api/src/discovery/providers/model-web-search.provider.ts#searxng.search#1',
   'apps/api/src/discovery/providers/openfda.provider.ts#openfda.search#1',
   'apps/api/src/discovery/providers/osm.provider.ts#osm.overpass#1',
   'apps/api/src/discovery/providers/public-web.provider.ts#crawl4ai.fetch#1',

@@ -37,6 +37,8 @@ export const DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS = Object.freeze([
   { producerId: 'samgov.search', consumer: 'SamGovDiscoveryProvider', domainAggregateType: 'FederalContractEvidence', identity: 'uei-or-award-id', resultStrategy: 'typed_projection', resultSchema: 'samgov-search/v1' },
   { producerId: 'sanctions.download', consumer: 'SanctionsScreeningCache', domainAggregateType: 'SanctionsDataset', identity: 'dataset-source-and-published-date', resultStrategy: 'artifact_reference', resultSchema: 'sanctions-download/v1' },
   { producerId: 'searxng.search', consumer: 'SearchDiscoveryProvider', domainAggregateType: 'SearchResultEvidence', identity: 'result-url-and-query-digest', resultStrategy: 'typed_projection', resultSchema: 'searxng-search/v1' },
+  // WEB-1：deepseek.search 是模型联网搜索的可选执行器（与 searxng 同形投影：url+title）。
+  { producerId: 'deepseek.search', consumer: 'SearchDiscoveryProvider', domainAggregateType: 'SearchResultEvidence', identity: 'result-url-and-query-digest', resultStrategy: 'typed_projection', resultSchema: 'deepseek-search/v1' },
   { producerId: 'social.search', consumer: 'SocialPresenceContactAdapter', domainAggregateType: 'SearchResultEvidence', identity: 'result-url-and-query-digest', resultStrategy: 'typed_projection', resultSchema: 'social-search/v1' },
   { producerId: 'social.fetch', consumer: 'SocialPresenceContactAdapter', domainAggregateType: 'ExternalPageEvidence', identity: 'url-and-content-digest', resultStrategy: 'typed_projection', resultSchema: 'social-fetch/v1' },
   { producerId: 'smtp.rcpt_probe', consumer: 'EmailVerificationProvider', domainAggregateType: 'EmailVerification', identity: 'normalized-email-hash', resultStrategy: 'typed_projection', resultSchema: 'smtp-probe-verdict/v1' },
@@ -73,6 +75,9 @@ const DISCOVERY_GOVERNED_COMPANY_ACK_BINDINGS = Object.freeze([
   { producerId: 'openfda.search', consumer: 'OpenFdaDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'openfda-search/v1' },
   // A 方案（local_query）：回执由 registry 适配器确定性构造（无物理调用，成本 0）。
   { producerId: 'registry.query', consumer: 'RegistryFrameDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'registry-query/v1' },
+  // WEB-1：模型联网搜索的公司回执来自结构确认任务的持久投影（任务 id 即 producer）。
+  // consumer 必须与 discovery-query-governed-lineage.ts 的 PROVIDER_CONTRACT 一致。
+  { producerId: 'discovery.web_search_candidates', consumer: 'ModelWebSearchDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'discovery-web-search-candidates/v1' },
 ] as const satisfies readonly DomainAckProductConsumerBinding[]);
 
 function getDiscoveryGovernedCompanyAckBinding(

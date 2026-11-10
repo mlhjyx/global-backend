@@ -21,6 +21,10 @@ import type {
 
 export const MODEL_WEB_SEARCH_TASK_ID = 'discovery.web_search_candidates';
 
+/** 工具环默认上限（执行形状契约；报价信封按同一常量计算上界）。 */
+export const MODEL_WEB_SEARCH_MAX_ROUNDS = 4;
+export const MODEL_WEB_SEARCH_MAX_TOOL_CALLS = 8;
+
 export interface WebSearchToolHit {
   url: string;
   title?: string;
@@ -245,8 +249,8 @@ export async function runModelWebSearch(
   deps: ModelWebSearchDeps,
   input: ModelWebSearchInput,
 ): Promise<{ candidates: ModelWebSearchCandidate[]; rounds: number; toolCalls: number }> {
-  const maxRounds = Math.max(1, deps.maxRounds ?? 4);
-  const maxToolCalls = Math.max(1, deps.maxToolCalls ?? 8);
+  const maxRounds = Math.max(1, deps.maxRounds ?? MODEL_WEB_SEARCH_MAX_ROUNDS);
+  const maxToolCalls = Math.max(1, deps.maxToolCalls ?? MODEL_WEB_SEARCH_MAX_TOOL_CALLS);
   const task = getTask('discovery.web_search_candidates');
   if (!task) {
     throw new ModelWebSearchError(
