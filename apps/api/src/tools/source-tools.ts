@@ -60,6 +60,10 @@ import {
   FrCompanyHit,
 } from "../adapters/inpi-rne";
 import {
+  searchOpenCorporatesCompanies,
+  OpenCorporatesCompanyHit,
+} from "../adapters/opencorporates-api";
+import {
   GOOGLE_PATENTS_MAX_ROWS,
   bigqueryPatents,
   PatentRecord,
@@ -1079,6 +1083,99 @@ export const samgovSearchTool: Tool<SamSearchInput, SamSearchOutput> = {
   }),
 };
 
+export interface OpenCorporatesSearchInput {
+  /** 检索词（公司名/关键词）；必填。 */
+  query: string;
+  /** ISO-3166 alpha-2（'de'/'fr'…）→ jurisdiction_code；或直接给 jurisdictionCode。 */
+  countryCode?: string;
+  /** 显式辖区代码（如美国州级 'us_de'）。 */
+  jurisdictionCode?: string;
+  limit?: number;
+}
+export interface OpenCorporatesSearchOutput {
+  companies: OpenCorporatesCompanyHit[];
+}
+
+/**
+ * opencorporates.search —— OpenCorporates v0.4 公司注册库聚合 API（获客 vNext W4 · P0 第一源）。
+ * required 治理：治理域固定 api.opencorporates.com（source_policy 未登记/SUSPENDED/用途不符即拒）。
+ * **源合规矩阵键 sourceKey='opencorporates'**：SOURCE_COMPLIANCE_GATE=enforce 时还要求
+ * source_compliance_matrix 有已批准行（未登记/未批准=fail-closed；开关默认 off 行为不变）。
+ * authRequired=true（OPENCORPORATES_API_TOKEN 走 env）；缺 token=fail-safe 有效空（degraded），不抛错。
+ * personalData=false：adapter 只映射公司字段（名称/注册号/状态/地址），绝不读高管个人字段。
+ * cost 按 API 配额策略登记：商用为年度订阅（边际成本 0），限流 rps=1/concurrency=1；真实 key 与
+ * 限流按部署后实测验收。
+ */
+export const openCorporatesSearchTool: Tool<
+  OpenCorporatesSearchInput,
+  OpenCorporatesSearchOutput
+> = {
+  id: "opencorporates.search",
+  version: "1.0.0",
+  category: "structured_source",
+  sourceClass: "company_registry",
+  cost: { unit: "call", estimatedCents: 0, external: true },
+  rateLimit: { rps: 1, concurrency: 1 },
+  compliance: {
+    sourcePolicy: "required",
+    policyDomain: "api.opencorporates.com",
+    respectsRobots: false,
+    personalData: false,
+    allowedPurpose: ["discovery"],
+    reversible: true,
+    authRequired: true,
+    risk: "low",
+    sourceKey: "opencorporates",
+  },
+  capabilities: { produces: ["company"], accepts: ["keywords"] },
+  idempotencyKey: (i) => `opencorporates.search:${stableKey(i)}`,
+  durableResultStrategy: {
+    kind: "typed_projection",
+    schema: SOURCE_RESULT_PROJECTION_SCHEMAS["opencorporates.search"],
+  },
+  durableReplayResult: (result) => ({
+    data: {
+      companies: result.data.companies.slice(0, 30).map((company) => ({
+        name: company.name,
+        companyNumber: company.companyNumber,
+        jurisdictionCode: company.jurisdictionCode,
+        status: company.status,
+        companyType: company.companyType,
+        incorporationDate: company.incorporationDate,
+        dissolutionDate: company.dissolutionDate,
+        registeredAddress: company.registeredAddress,
+        opencorporatesUrl: company.opencorporatesUrl,
+      })),
+    },
+    costCents: result.costCents,
+    degraded: result.degraded,
+  }),
+  healthCheck: async () => ({ healthy: true, detail: "opencorporates" }),
+  execute: async (input, ctx) => {
+    const apiToken = process.env.OPENCORPORATES_API_TOKEN?.trim();
+    if (!apiToken) {
+      // 缺 key = fail-safe 有效空（degraded），不阻断其余源；真实 key 由部署配置。
+      return { data: { companies: [] }, costCents: 0, degraded: true };
+    }
+    const beforeRequest = beforeExternalRequest(ctx);
+    return {
+      data: {
+        companies: await searchOpenCorporatesCompanies(
+          {
+            query: input.query,
+            countryCode: input.countryCode,
+            jurisdictionCode: input.jurisdictionCode,
+            limit: input.limit,
+          },
+          apiToken,
+          beforeRequest,
+        ),
+      },
+      costCents: 0,
+    };
+  },
+};
+
 /**
  * sanctions.download —— 官方制裁名单原始文件下载（OFAC SDN/Consolidated XML、EU FSF XML）。
  * required 治理：**无固定 policyDomain**（多域）→ Broker 按 `input.url` 主机名查 source_policy（OFAC/EU 各登记，
@@ -1199,6 +1296,7 @@ export function registerSourceTools(registry: ToolRegistry): ToolRegistry {
   registry.register(inpiRneSearchTool as Tool);
   registry.register(googlePatentsSearchTool as Tool);
   registry.register(samgovSearchTool as Tool);
+  registry.register(openCorporatesSearchTool as Tool);
   registry.register(sanctionsDownloadTool as Tool);
   return registry;
 }

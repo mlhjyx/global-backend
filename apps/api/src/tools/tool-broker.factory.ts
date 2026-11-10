@@ -30,6 +30,23 @@ type SourcePolicyDb = { sourcePolicy: PrismaClient['sourcePolicy'] };
 /** Broker 用的 source_policy 读取器：按域名查（SUSPENDED + 用途）。未登记 → null（无策略）。 */
 export type SourcePolicyReader = (domain: string) => Promise<{ suspended: boolean; allowedPurpose?: string[] } | null>;
 
+/** 源合规矩阵（source_compliance_matrix，平台表无 RLS）的最小读取面。 */
+type SourceComplianceDb = { sourceComplianceMatrix: PrismaClient['sourceComplianceMatrix'] };
+
+/** Broker 用的源合规矩阵读取器：按 sourceKey 查。未登记 → null；approved = approved_at 非空。 */
+export type SourceComplianceReader = (sourceKey: string) => Promise<{ approved: boolean } | null>;
+
+export function sourceComplianceReaderFrom(db: SourceComplianceDb): SourceComplianceReader {
+  return async (sourceKey: string) => {
+    const row = await db.sourceComplianceMatrix.findUnique({
+      where: { sourceKey },
+      select: { approvedAt: true },
+    });
+    if (!row) return null;
+    return { approved: row.approvedAt !== null };
+  };
+}
+
 let processRedis: Redis | undefined;
 let processRateLimitStore: RateLimitStore | undefined;
 
@@ -86,6 +103,8 @@ export function buildToolBroker(deps?: {
   budgetStore?: BudgetStore;
   limiter?: RateLimitStore;
   sourcePolicyReader?: SourcePolicyReader;
+  /** 缺省从 PrismaService 派生（source_compliance_matrix 平台表，app_user 只读）。 */
+  sourceComplianceReader?: SourceComplianceReader;
   traceRecorder?: (t: ToolTrace) => void;
   paidLedger?: SiteBuildCostLedger;
   /** Test/composition override; managed composition derives it from PrismaService + storage env. */
@@ -117,11 +136,15 @@ export function buildToolBroker(deps?: {
     (deps?.prisma
       ? createGenericOperationArtifactExecutionFromEnv(deps.prisma, budgetStore)
       : undefined);
+  const sourceComplianceReader =
+    deps?.sourceComplianceReader ??
+    (deps?.prisma ? sourceComplianceReaderFrom(deps.prisma as unknown as SourceComplianceDb) : undefined);
   return new ToolBroker({
     registry,
     budgetStore,
     limiter: deps?.limiter ?? rateLimitStoreFromEnvironment(),
     sourcePolicyReader: deps?.sourcePolicyReader,
+    sourceComplianceReader,
     traceRecorder,
     paidLedger: deps?.paidLedger,
     artifactExecution,

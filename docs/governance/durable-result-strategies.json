@@ -6,7 +6,7 @@
     "protectedFiles": [
       {
         "path": "apps/api/src/tools/tool-broker.ts",
-        "sha256": "02894b80d8af154f027b2baf52eff90e4da619d22ba306b35a787087de0e56f5"
+        "sha256": "eb2a4ff7b8b69d31891efd63cee98299f790338ce398dc4e4e1fd9ac654cc873"
       },
       {
         "path": "apps/api/src/model-gateway/router-model-gateway.ts",
@@ -14,7 +14,7 @@
       },
       {
         "path": "apps/api/src/tools/tool-broker.factory.ts",
-        "sha256": "4c191a7fffb84ebadd745c3231f4e5d9a3cf74c80d74f60e87157b1db8f681cf"
+        "sha256": "6253a2b3bbafdc4b44bc8825ca0d8112f0d0ad32eac489faa0361610ad35ab55"
       },
       {
         "path": "apps/api/src/model-gateway/model-gateway.module.ts",
@@ -408,6 +408,22 @@
         "identitySource": "notice-id",
         "subjectRefRequired": true,
         "personalDataDsrCompatible": true
+      }
+    },
+    {
+      "id": "opencorporates.search",
+      "declarationPath": "apps/api/src/tools/source-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "opencorporates-search/v1",
+      "operationIdentity": "tool:opencorporates.search:<version>:<idempotencyKey>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "CompanyRegistryDiscoveryProvider",
+        "domainAggregateType": "CanonicalCompany",
+        "identitySource": "company-registry-number",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
       }
     },
     {

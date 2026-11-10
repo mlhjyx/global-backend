@@ -18,6 +18,7 @@ export const RECEIPT_FACT_TOOL_IDS = Object.freeze([
   'gleif.fetch',
   'ted.search',
   'openfda.search',
+  'opencorporates.search',
   'companies_house.search',
   'inpi_rne.search',
   'google_patents.search',

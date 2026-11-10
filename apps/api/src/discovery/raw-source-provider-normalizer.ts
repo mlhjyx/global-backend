@@ -85,6 +85,15 @@ const PROVIDER_KEYS: Readonly<Record<string, readonly string[]>> =
       "name",
       "provenance",
     ],
+    opencorporates: [
+      "attributes",
+      "country",
+      "externalId",
+      "identifier",
+      "license",
+      "name",
+      "provenance",
+    ],
   });
 const SHA256 = /^[0-9a-f]{64}$/u;
 const DOMAIN =
@@ -326,6 +335,25 @@ function normalizeProvenance(
     } catch {
       return null;
     }
+  } else if (providerKey === "opencorporates") {
+    // 获客 vNext W4：来源页可为 opencorporates.com 公司页或 API 检索 URL；归一为 API 检索端点
+    // （与 TED/openFDA 的「记录来源锚定到受治理 API 域」同一手法）。
+    try {
+      const parsed = new URL(sourceUrl);
+      if (
+        parsed.protocol !== "https:" ||
+        ![
+          "api.opencorporates.com",
+          "opencorporates.com",
+          "www.opencorporates.com",
+        ].includes(parsed.hostname)
+      ) {
+        return null;
+      }
+      sourceUrl = "https://api.opencorporates.com/v0.4/companies/search";
+    } catch {
+      return null;
+    }
   } else if (providerKey === "openfda") {
     try {
       const parsed = new URL(sourceUrl);
@@ -558,6 +586,41 @@ function normalizeAttributes(
       ...(Array.isArray(fda.product_codes)
         ? { products: [...fda.product_codes] }
         : {}),
+    };
+  }
+  if (providerKey === "opencorporates") {
+    // 只落公司字段（形状与 provider 的 attributes.opencorporates 一致）：署名/license 与
+    // 公司页 URL 留在 provider 载荷，不入库（许可事实由 field_evidence.license 承载）。
+    if (!exactKeys(input, ["opencorporates"])) return null;
+    const oc = record(input.opencorporates);
+    if (
+      !oc ||
+      !keysWithin(oc, [
+        "attribution",
+        "company_number",
+        "company_type",
+        "dissolution_date",
+        "incorporation_date",
+        "jurisdiction_code",
+        "license",
+        "opencorporates_url",
+        "registered_address",
+        "status",
+      ])
+    )
+      return null;
+    return {
+      opencorporates: Object.fromEntries(
+        [
+          ["company_number", oc.company_number],
+          ["company_type", oc.company_type],
+          ["dissolution_date", oc.dissolution_date],
+          ["incorporation_date", oc.incorporation_date],
+          ["jurisdiction_code", oc.jurisdiction_code],
+          ["registered_address", oc.registered_address],
+          ["status", oc.status],
+        ].flatMap(([key, item]) => (item == null ? [] : [[key, item]])),
+      ),
     };
   }
   if (providerKey === "public_web") {

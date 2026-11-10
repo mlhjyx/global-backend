@@ -44,6 +44,18 @@ describe('contact.discovery 预算账户派生（D7）', () => {
     expect(() => contactDiscoveryCapMicrousd(Number.NaN)).toThrow(TypeError);
   });
 
+  it('去帽模式（DISCOVERY_UNCAPPED=on）：整轮 $2 产品帽退场，只保留每家 $0.20 安全界', () => {
+    const on = { DISCOVERY_UNCAPPED: 'on' } as NodeJS.ProcessEnv;
+    // 16 家 × 20¢ = $3.20：off 口径封顶 $2.00，去帽模式不再封顶（余额是唯一收紧条件）。
+    expect(contactDiscoveryCapMicrousd(16, on)).toBe(3_200_000n);
+    expect(contactDiscoveryCapMicrousd(8, on)).toBe(1_600_000n);
+    expect(contactDiscoveryCapMicrousd(0, on)).toBe(0n);
+    expect(() => contactDiscoveryCapMicrousd(-1, on)).toThrow(TypeError);
+    // off 显式传入时保持旧口径。
+    expect(contactDiscoveryCapMicrousd(16, {} as NodeJS.ProcessEnv)).toBe(
+      CONTACT_DISCOVERY_RUN_CAP_MICROUSD,
+    );
+  });
 });
 
 describe('联系人子账户的窗口计量', () => {

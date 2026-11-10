@@ -31,6 +31,10 @@ interface SparqlBinding {
  * 按行业 QID + 国家 QID 发现公司。industryQids/countryQid 由查询计划映射提供
  * （词表归一层的产物：ICP 行业词 → Wikidata QID）。
  * 例：金属加工机械制造 industry，德国 country。
+ *
+ * vNext W4 两段式：公司登记的 P452 行业常是目标行业的**子类**，精确匹配漏掉大量公司。
+ * 先跑精确匹配（快路径，P452 直连索引）；零命中时回退 `?industry wdt:P279* ?root`
+ * 子类闭包再查一次（P279* 零长路径覆盖自身，WDQS 上属性路径较贵，只做回退）。
  */
 export async function discoverCompaniesByIndustry(params: {
   industryQids: string[];
@@ -43,25 +47,52 @@ export async function discoverCompaniesByIndustry(params: {
   const { industryQids, countryQid, requireWebsite = true, limit = 50 } = params;
   if (!industryQids.length) return [];
 
-  const values = industryQids.map((q) => `wd:${q}`).join(' ');
-  const websiteClause = requireWebsite ? '?company wdt:P856 ?website .' : 'OPTIONAL { ?company wdt:P856 ?website }';
-  const countryClause = countryQid
-    ? `?company wdt:P17 ?country . FILTER(?country = wd:${countryQid})`
+  const exact = await queryCompaniesByIndustry(
+    { industryQids, countryQid, requireWebsite, limit, subclassClosure: false },
+    beforeRequest,
+  );
+  if (exact.length > 0) return exact;
+  return queryCompaniesByIndustry(
+    { industryQids, countryQid, requireWebsite, limit, subclassClosure: true },
+    beforeRequest,
+  );
+}
+
+async function queryCompaniesByIndustry(
+  args: {
+    industryQids: string[];
+    countryQid?: string;
+    requireWebsite: boolean;
+    limit: number;
+    /** true = 沿 P279* 子类闭包匹配；false = P452 精确匹配（快路径）。 */
+    subclassClosure: boolean;
+  },
+  beforeRequest?: () => Promise<void>,
+): Promise<WikidataCompany[]> {
+  const values = args.industryQids.map((q) => `wd:${q}`).join(' ');
+  const websiteClause = args.requireWebsite ? '?company wdt:P856 ?website .' : 'OPTIONAL { ?company wdt:P856 ?website }';
+  const countryClause = args.countryQid
+    ? `?company wdt:P17 ?country . FILTER(?country = wd:${args.countryQid})`
     : '';
-  const countryCodeClause = countryQid
+  const countryCodeClause = args.countryQid
     ? 'OPTIONAL { ?country wdt:P297 ?countryCode }'
     : 'OPTIONAL { ?company wdt:P17 ?country . ?country wdt:P297 ?countryCode }';
+  const industryClause = args.subclassClosure
+    ? `VALUES ?root { ${values} }
+  ?industry wdt:P279* ?root .
+  ?company wdt:P452 ?industry .`
+    : `VALUES ?industry { ${values} }
+  ?company wdt:P452 ?industry .`;
   const query = `
 SELECT ?company ?companyLabel ?website ?employees ?coord ?countryCode WHERE {
-  VALUES ?industry { ${values} }
-  ?company wdt:P452 ?industry .
+  ${industryClause}
   ${countryClause}
   ${websiteClause}
   OPTIONAL { ?company wdt:P1128 ?employees }
   OPTIONAL { ?company wdt:P625 ?coord }
   ${countryCodeClause}
   SERVICE wikibase:label { bd:serviceParam wikibase:language "en,de,zh" }
-} LIMIT ${Math.min(limit, 200)}`;
+} LIMIT ${Math.min(args.limit, 200)}`;
 
   const rows = await runSparql(query, 40_000, beforeRequest);
   return rows.map(bindingToCompany).filter((c): c is WikidataCompany => c !== null);

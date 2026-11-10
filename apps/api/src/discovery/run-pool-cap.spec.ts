@@ -1,12 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createRunPoolGate,
   DEFAULT_RUN_POOL_CAP,
+  defaultRunPoolCap,
   parseRunPoolCap,
   poolCapBlocks,
   RUN_POOL_CAP_MAX,
   RUN_POOL_CAP_REACHED_REASON,
+  UNCAPPED_RUN_POOL_CAP,
 } from './run-pool-cap';
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe('parseRunPoolCap —— DISCOVERY_RUN_POOL_CAP 解析', () => {
   it('未设置时默认 500（enforce）', () => {
@@ -38,6 +44,40 @@ describe('parseRunPoolCap —— DISCOVERY_RUN_POOL_CAP 解析', () => {
 
   it('上限本身合法', () => {
     expect(parseRunPoolCap(`${RUN_POOL_CAP_MAX}`)).toEqual({ mode: 'enforce', cap: RUN_POOL_CAP_MAX });
+  });
+});
+
+describe('DISCOVERY_UNCAPPED=on —— 池帽退为防爆安全界', () => {
+  const on = { DISCOVERY_UNCAPPED: 'on' } as NodeJS.ProcessEnv;
+
+  it('未配置时默认取解析上界（10 万），不再是产品帽 500', () => {
+    expect(defaultRunPoolCap(on)).toBe(UNCAPPED_RUN_POOL_CAP);
+    expect(UNCAPPED_RUN_POOL_CAP).toBe(RUN_POOL_CAP_MAX);
+    expect(parseRunPoolCap(undefined, on)).toEqual({
+      mode: 'enforce',
+      cap: UNCAPPED_RUN_POOL_CAP,
+    });
+  });
+
+  it('显式 env 与 off 语义不变；畸形值回退防爆界（失败方向仍取「设闸」）', () => {
+    expect(parseRunPoolCap('300', on)).toEqual({ mode: 'enforce', cap: 300 });
+    expect(parseRunPoolCap('off', on)).toEqual({ mode: 'off' });
+    expect(parseRunPoolCap('banana', on)).toEqual({
+      mode: 'enforce',
+      cap: UNCAPPED_RUN_POOL_CAP,
+    });
+    expect(parseRunPoolCap(undefined, { DISCOVERY_UNCAPPED: 'off' } as NodeJS.ProcessEnv)).toEqual({
+      mode: 'enforce',
+      cap: DEFAULT_RUN_POOL_CAP,
+    });
+  });
+
+  it('开关默认 off 时行为与旧口径逐字节一致', () => {
+    expect(defaultRunPoolCap({} as NodeJS.ProcessEnv)).toBe(DEFAULT_RUN_POOL_CAP);
+    expect(parseRunPoolCap(undefined, {} as NodeJS.ProcessEnv)).toEqual({
+      mode: 'enforce',
+      cap: DEFAULT_RUN_POOL_CAP,
+    });
   });
 });
 

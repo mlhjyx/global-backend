@@ -19,6 +19,10 @@
  * 重试对已结算操作走账本重放（不重复计费），残留行按 remnant 吸收（#728 纪律）——单 run 的
  * 实际联系人花费通常仍是单份上限，并始终受 run 账户剩余额约束。
  */
+import {
+  ambientProcessEnv,
+  discoveryUncappedEnabled,
+} from '../discovery/execution-envelope';
 import { assertMicrousd } from '../tools/microusd';
 
 export const CONTACT_DISCOVERY_BUDGET_SCOPE = 'contact.discovery' as const;
@@ -27,6 +31,10 @@ export const CONTACT_DISCOVERY_BUDGET_SCOPE = 'contact.discovery' as const;
  * D5 于 2026-11-02 重校（产品负责人拍板「覆盖全部 fit=match 公司」）：
  * 实测单家 ≈$0.09（官网 4 页 + 社媒 + 邮箱探测），单家上限 20¢、整轮上限 $2；
  * 整轮上限 = min(公司数 × 20¢, $2)，覆盖典型 8–16 家。旧的「8 家 $0.50」口径废止。
+ *
+ * 获客挖掘 vNext（2026-11-10 计划 §3 W1）：`DISCOVERY_UNCAPPED=on` 时整轮产品帽
+ * （$2）退场——子账户只保留每家安全界（公司数 × 20¢），run 账户剩余额（余额）
+ * 是唯一收紧条件；off 时行为与今天逐字节一致。
  */
 export const CONTACT_DISCOVERY_RUN_CAP_MICROUSD = 2_000_000n;
 export const CONTACT_DISCOVERY_PER_COMPANY_CAP_MICROUSD = 200_000n;
@@ -53,12 +61,19 @@ export function deriveContactDiscoveryAccountKey(runId: string): string {
   return accountKey;
 }
 
-/** 上限动态计算：min(公司数 × 每家上限, 整轮上限)。 */
-export function contactDiscoveryCapMicrousd(companyCount: number): bigint {
+/**
+ * 上限动态计算：min(公司数 × 每家上限, 整轮上限)。
+ * `DISCOVERY_UNCAPPED=on` 时整轮产品帽退场，只保留公司数 × 每家上限。
+ */
+export function contactDiscoveryCapMicrousd(
+  companyCount: number,
+  env: NodeJS.ProcessEnv = ambientProcessEnv(),
+): bigint {
   if (!Number.isSafeInteger(companyCount) || companyCount < 0) {
     throw new TypeError('companyCount must be a non-negative safe integer');
   }
   const scaled = BigInt(companyCount) * CONTACT_DISCOVERY_PER_COMPANY_CAP_MICROUSD;
+  if (discoveryUncappedEnabled(env)) return scaled;
   return scaled < CONTACT_DISCOVERY_RUN_CAP_MICROUSD ? scaled : CONTACT_DISCOVERY_RUN_CAP_MICROUSD;
 }
 
