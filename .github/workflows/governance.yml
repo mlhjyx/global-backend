@@ -9,8 +9,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: governance-${{ github.ref }}
-  cancel-in-progress: true
+  # 同一 PR 的新推送取消旧 run；main 的每个 push 各自一组，连续合并时中间提交的
+  # governance 验证不再被下一笔 push 顶掉（2026-11-11 在 #1004/#1005 上实测发生）。
+  group: governance-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   governance:
