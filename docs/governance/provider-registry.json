@@ -610,6 +610,49 @@
       ]
     },
     {
+      "key": "opencorporates",
+      "status": "IMPLEMENTED",
+      "source_classes": [
+        "company_registry"
+      ],
+      "purpose": "Discover companies from the OpenCorporates aggregated official company registers by country/jurisdiction and query, returning name, company number, jurisdiction, status and registered address. Company fields only: officers and every other personal-data field are never read.",
+      "taxonomy": [
+        "jurisdiction code",
+        "company number",
+        "company name",
+        "current status",
+        "company type"
+      ],
+      "license": {
+        "classification": "ODbL-1.0+COMMERCIAL_API",
+        "note": "Open data under ODbL 1.0 (attribution and share-alike obligations); commercial API use has no free path and requires a paid subscription (docs/research/buyer-intelligence-v3.md). The source_compliance_matrix row keeps approved_at NULL until the subscription and compliance review are signed: under SOURCE_COMPLIANCE_GATE=enforce the tool stays denied, which is the intended fail-closed behavior."
+      },
+      "personal_data_class": "COMPANY_ONLY",
+      "default_enablement": "DISABLED",
+      "call_gates": [
+        "data_provider_status",
+        "source_policy",
+        "source_compliance_matrix",
+        "tool_broker",
+        "provider_env_switch",
+        "api_subscription"
+      ],
+      "test_paths": [
+        "apps/api/src/discovery/providers/opencorporates.provider.spec.ts",
+        "apps/api/src/adapters/opencorporates-api.spec.ts"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "TEST_ANCHOR",
+          "path": "apps/api/src/discovery/providers/opencorporates.provider.spec.ts"
+        },
+        {
+          "kind": "TEST_ANCHOR",
+          "path": "apps/api/src/adapters/opencorporates-api.spec.ts"
+        }
+      ]
+    },
+    {
       "key": "openstreetmap",
       "status": "IMPLEMENTED",
       "source_classes": [

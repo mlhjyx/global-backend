@@ -685,6 +685,9 @@
       "SELECT",
       "UPDATE"
     ],
+    "source_compliance_matrix": [
+      "SELECT"
+    ],
     "source_entity": [
       "INSERT",
       "SELECT",

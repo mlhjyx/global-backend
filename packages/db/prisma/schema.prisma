@@ -1134,6 +1134,28 @@ model SourcePolicy {
   @@map("source_policy")
 }
 
+/// 源合规矩阵（获客挖掘 vNext W4；平台级治理表，非租户数据，无 RLS）：每个数据源上线前
+/// 登记许可分类/robots/ToS/个人数据分级/保留期/责任人。工具 broker 只读引用——声明了
+/// sourceKey 的新源工具在 SOURCE_COMPLIANCE_GATE=enforce 时要求本表有已批准行
+/// （未登记或 approved_at 为空 = 拒绝，fail-closed）；开关默认 off 时行为不变；
+/// 未声明 sourceKey 的旧源继续只走既有 source_policy 治理。app_user 只读，写由 owner 通道执行。
+model SourceComplianceMatrix {
+  id                    String    @id @default(uuid()) @db.Uuid
+  sourceKey             String    @unique @map("source_key")
+  licenseClassification String    @map("license_classification")
+  robotsStatus          String    @map("robots_status") // ALLOWS | RESTRICTS | UNREVIEWED
+  termsStatus           String    @map("terms_status") // REVIEWED_OK | REVIEWED_RESTRICTED | UNREVIEWED
+  personalDataClass     String    @map("personal_data_class") // NONE | COMPANY_ONLY | RESTRICTED_POSSIBLE | PERSONAL_DATA
+  retentionDays         Int       @map("retention_days")
+  owner                 String
+  approvedAt            DateTime? @map("approved_at")
+  notes                 String?
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@map("source_compliance_matrix")
+}
+
 /// 采集与监控层（Acquisition & Monitoring，源无关）。展会/名录/官网/注册处等**任一数据源**
 /// 都注册为一个 monitored_source，统一走「抓取 → 清洗 → 快照落库 → diff 增量更新」。
 /// 平台级共享参考数据（无 RLS，像 data_provider/canonical_taxonomy）：一个源抓一次服务所有租户。

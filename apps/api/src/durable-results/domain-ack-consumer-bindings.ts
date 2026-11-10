@@ -33,6 +33,9 @@ export const DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS = Object.freeze([
   { producerId: 'inpi_rne.search', consumer: 'CompanyRegistryDiscoveryProvider', domainAggregateType: 'CanonicalCompany', identity: 'siren-or-siret', resultStrategy: 'typed_projection', resultSchema: 'inpi-rne-search/v1' },
   { producerId: 'mapyourshow.fetch', consumer: 'TradeFairDiscoveryProvider', domainAggregateType: 'CanonicalCompany', identity: 'show-exhibitor-id', resultStrategy: 'typed_projection', resultSchema: 'mapyourshow-fetch/v1' },
   { producerId: 'openfda.search', consumer: 'OpenFdaDiscoveryProvider', domainAggregateType: 'ProductRegistrationEvidence', identity: 'registration-or-k-number', resultStrategy: 'typed_projection', resultSchema: 'openfda-search/v1' },
+  // 获客 vNext W4：OpenCorporates 注册库（公司注册号 → CanonicalCompany 的产品侧绑定；
+  // 发现 run 内的公司回执走 DISCOVERY_GOVERNED_COMPANY_ACK_BINDINGS 的 RawSourceRecord 分区）。
+  { producerId: 'opencorporates.search', consumer: 'CompanyRegistryDiscoveryProvider', domainAggregateType: 'CanonicalCompany', identity: 'company-registry-number', resultStrategy: 'typed_projection', resultSchema: 'opencorporates-search/v1' },
   { producerId: 'osm.overpass', consumer: 'GeoDiscoveryProvider', domainAggregateType: 'LocationEvidence', identity: 'osm-element-id', resultStrategy: 'typed_projection', resultSchema: 'osm-overpass/v1' },
   { producerId: 'samgov.search', consumer: 'SamGovDiscoveryProvider', domainAggregateType: 'FederalContractEvidence', identity: 'uei-or-award-id', resultStrategy: 'typed_projection', resultSchema: 'samgov-search/v1' },
   { producerId: 'sanctions.download', consumer: 'SanctionsScreeningCache', domainAggregateType: 'SanctionsDataset', identity: 'dataset-source-and-published-date', resultStrategy: 'artifact_reference', resultSchema: 'sanctions-download/v1' },
@@ -73,6 +76,9 @@ const DISCOVERY_GOVERNED_COMPANY_ACK_BINDINGS = Object.freeze([
   { producerId: 'osm.overpass', consumer: 'OsmDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'osm-overpass/v1' },
   { producerId: 'ted.search', consumer: 'TedDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'ted-search/v1' },
   { producerId: 'openfda.search', consumer: 'OpenFdaDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'openfda-search/v1' },
+  // 获客 vNext W4：consumer/resultSchema 必须与 discovery-query-governed-lineage.ts 的
+  // PROVIDER_CONTRACT 一致；回执来自 ToolBroker 结算（typed_projection）。
+  { producerId: 'opencorporates.search', consumer: 'OpenCorporatesDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'opencorporates-search/v1' },
   // A 方案（local_query）：回执由 registry 适配器确定性构造（无物理调用，成本 0）。
   { producerId: 'registry.query', consumer: 'RegistryFrameDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'registry-query/v1' },
   // WEB-1：模型联网搜索的公司回执来自结构确认任务的持久投影（任务 id 即 producer）。

@@ -13,6 +13,7 @@ import { DirectoryDiscoveryProvider } from './providers/directory.provider';
 import { TradeFairDiscoveryProvider } from './providers/trade-fair.provider';
 import { TedDiscoveryProvider } from './providers/ted.provider';
 import { OpenFdaDiscoveryProvider } from './providers/openfda.provider';
+import { OpenCorporatesDiscoveryProvider } from './providers/opencorporates.provider';
 import { ModelWebSearchDiscoveryProvider } from './providers/model-web-search.provider';
 import { RegistryFrameDiscoveryProvider } from './providers/registry-frame.provider';
 import { DecisionMakerContactAdapter } from './providers/decision-maker.provider';
@@ -118,6 +119,11 @@ export class DiscoveryProviderRegistry {
     // openFDA 器械注册发现（美国 FDA 官方 API，零鉴权、CC0，归 public_intelligence 类）——不依赖 gateway。
     // 无 product code 过滤时 fail-safe 返回空，故对普通 public_intelligence 查询零负担。
     this.discovery.push(new OpenFdaDiscoveryProvider({ broker }));
+    // OpenCorporates 公司注册库发现（获客 vNext W4 · P0 第一源；聚合各国官方注册库，需 API 订阅）。
+    // OPENCORPORATES_PROVIDER=on 才生效（默认 off 时 fail-safe 返回有效空血缘）；
+    // data_provider 默认 DISABLED 是第二道 kill switch；源合规矩阵 sourceKey='opencorporates'
+    // 在 SOURCE_COMPLIANCE_GATE=enforce 时另行把关（未批准即拒）。
+    this.discovery.push(new OpenCorporatesDiscoveryProvider({ broker }));
     // WEB-1 模型联网搜索（获客通路 A）：模型规划检索词→受治理搜索→结构确认；
     // MODEL_WEB_SEARCH_PROVIDER=on 才生效（默认 off 时 fail-safe 返回有效空血缘），
     // data_provider 状态是第二道 kill switch。需要 gateway+broker，缺一时同样诚实降级。
@@ -321,6 +327,10 @@ export class DiscoveryProviderRegistry {
         { domain: 'www.wikidata.org', sourceType: 'gov_registry', termsStatus: 'REVIEWED_OK', personalData: false, notes: 'Wikidata REST API（CC0）。wikidata.entity 工具治理域（富集）。' },
         { domain: 'overpass-api.de', sourceType: 'gov_registry', termsStatus: 'REVIEWED_OK', personalData: false, notes: 'OSM Overpass API（ODbL，需署名+同源共享）。osm.overpass 工具治理域（kumi 镜像同策略）。' },
         { domain: 'api.gleif.org', sourceType: 'gov_registry', termsStatus: 'REVIEWED_OK', personalData: false, notes: 'GLEIF LEI API（CC0）。gleif.fetch 工具治理域。' },
+        // 获客 vNext W4：OpenCorporates 聚合注册库。ODbL 1.0 开放数据＋商用 API 付费订阅（ToS 受限）；
+        // 三重关闭保持默认不跑：OPENCORPORATES_PROVIDER=off、data_provider DISABLED、合规矩阵未批准
+        // （SOURCE_COMPLIANCE_GATE=enforce 时 fail-closed）。adapter 只映射公司字段，不读高管个人数据。
+        { domain: 'api.opencorporates.com', sourceType: 'company_registry', termsStatus: 'REVIEWED_RESTRICTED', personalData: false, notes: 'OpenCorporates v0.4 API（聚合各国官方注册库；ODbL 1.0 开放数据，商用 API 无免费路径、须付费订阅——调研见 docs/research/buyer-intelligence-v3.md）。opencorporates.search 工具治理域；映射层只取公司字段（名称/注册号/状态/地址），绝不取高管。' },
         // ⚠️ ToS 灰偏红（trade-fair-intelligence.md §0：public key 打 Algolia 撞 RX ToS §4.5(h)）。
         // 本行把既有实践变成显性登记点：termsStatus 如实标 REVIEWED_RESTRICTED，治理裁决=SUSPENDED 即全链停抓。
         { domain: 'algolia.net', sourceType: 'trade_fair', termsStatus: 'REVIEWED_RESTRICTED', personalData: true, notes: 'RX 展会参展商（Algolia 托管搜索，public search-only key）。ToS 灰偏红——风险评估见 trade-fair-intelligence.md §0；参展商记录可内联联系人（🔴 具名隔离）。' },
@@ -774,6 +784,14 @@ export class DiscoveryProviderRegistry {
       where: { key: 'email_guess' },
       update: {},
       create: { key: 'email_guess', class: 'email_verification', status: 'DISABLED', costPerCallCents: 0 },
+    });
+    // OpenCorporates（获客 vNext W4 · P0）：聚合注册库，商用需付费订阅且尚未采购/签署。
+    // **默认 DISABLED**：OPENCORPORATES_PROVIDER=on 是第一道开关，本行是第二道 kill switch；
+    // 真实 API key（OPENCORPORATES_API_TOKEN）与限流实测按部署后验收。
+    await db.dataProvider.upsert({
+      where: { key: 'opencorporates' },
+      update: {},
+      create: { key: 'opencorporates', class: 'company_registry', status: 'DISABLED', costPerCallCents: 0 },
     });
     // registry_frame（ch03 T3-09）：本地注册库 frame 枚举，零出网零成本。默认 DISABLED——
     // 血缘闸门在 local_query 变体获批前会挡住执行，开关保持关闭以免误以为它在跑；
