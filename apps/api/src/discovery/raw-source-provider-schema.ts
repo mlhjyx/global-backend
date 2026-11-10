@@ -52,6 +52,7 @@ const GOVERNED_PROVIDERS = new Set([
   "openfda",
   "public_web",
   "opencorporates",
+  "companies_house_registry",
 ]);
 const LICENSES_BY_PROVIDER: Readonly<Record<string, ReadonlySet<string>>> =
   Object.freeze({
@@ -64,6 +65,7 @@ const LICENSES_BY_PROVIDER: Readonly<Record<string, ReadonlySet<string>>> =
     openfda: new Set(["CC0-1.0"]),
     public_web: new Set(["public", "licensed", "byo"]),
     opencorporates: new Set(["ODbL-1.0"]),
+    companies_house_registry: new Set(["OGL-UK-3.0"]),
   });
 const SHA256 = /^[0-9a-f]{64}$/u;
 const UUID =
@@ -190,6 +192,21 @@ function codeToken(value: unknown, maximumBytes = 80): value is string {
   );
 }
 
+/**
+ * 注册号专用 token：纯字母数字注册号（如 Companies House 的 8 位数字、OpenCorporates 的
+ * 各国编号）不能被「电话形态」防线（CONTACT_LIKE_PHONE：≥7 位连续数字）误杀——
+ * 注册号本身就是/常含长数字串。仍然拒绝 PII/密钥形态，并限形状与长度。
+ */
+function companyRegistryNumberToken(value: unknown, maximumBytes = 80): value is string {
+  return (
+    typeof value === "string" &&
+    value.normalize("NFKC") === value &&
+    Buffer.byteLength(value, "utf8") <= maximumBytes &&
+    /^[\p{L}\p{N}][\p{L}\p{N} ._:/-]*$/u.test(value) &&
+    isSecretFreeText(value)
+  );
+}
+
 function providerIdentifierToken(
   value: unknown,
   maximumBytes = 80,
@@ -265,6 +282,9 @@ function validExternalId(providerKey: string, value: unknown): value is string {
     case "opencorporates":
       // 注册号可能含空格/斜杠 → externalId 用包含辖区的确定性摘要（同 openfda 的哈希形态）。
       return /^opencorporates:[0-9a-f]{64}$/u.test(value);
+    case "companies_house_registry":
+      // UK 注册号：8 位数字或 2 字母前缀 + 6 位（SC/NI/OC/FC…），大写字母数字。
+      return /^companies_house_registry:[A-Z0-9]{1,12}$/u.test(value);
     default:
       return validGenericExternalId(value);
   }
@@ -345,8 +365,12 @@ function validIdentifier(providerKey: string, value: unknown): boolean {
     // 注册号只在辖内唯一 → scheme 必须带辖区（'oc-company-number:de' / ':us_de'）。
     return (
       /^oc-company-number:[a-z]{2}(?:_[a-z0-9]{1,3})?$/u.test(scheme) &&
-      providerIdentifierToken(identifier)
+      companyRegistryNumberToken(identifier)
     );
+  }
+  if (providerKey === "companies_house_registry") {
+    // CH 注册号在 GB 内唯一：scheme 固定 ch-company-number（纯数字 8 位是常态，不走电话形态门）。
+    return scheme === "ch-company-number" && companyRegistryNumberToken(identifier);
   }
   return false;
 }
@@ -613,9 +637,26 @@ function validAttributes(providerKey: string, value: unknown): boolean {
       return validPublicWebAttributes(input);
     case "opencorporates":
       return validOpenCorporatesAttributes(input);
+    case "companies_house_registry":
+      return validCompaniesHouseRegistryAttributes(input);
     default:
       return false;
   }
+}
+
+/** 获客 vNext W4 第二源：Companies House 归一后的公司属性（关闭形状，无 officers/个人字段）。 */
+function validCompaniesHouseRegistryAttributes(value: JsonRecord): boolean {
+  if (!exactKeys(value, ["ch_registry"])) return false;
+  const ch = record(value.ch_registry);
+  if (!ch || !keysWithin(ch, ["company_number", "company_status"])) return false;
+  return (
+    typeof ch.company_number === "string" &&
+    /^[A-Z0-9]{1,12}$/u.test(ch.company_number) &&
+    (ch.company_status === undefined ||
+      (typeof ch.company_status === "string" &&
+        ch.company_status.length <= 64 &&
+        isSecretFreeText(ch.company_status)))
+  );
 }
 
 /** 获客 vNext W4：OpenCorporates 归一后的公司属性（关闭形状，只含公司字段）。 */
@@ -638,7 +679,7 @@ function validOpenCorporatesAttributes(value: JsonRecord): boolean {
   }
   return (
     typeof oc.company_number === "string" &&
-    providerIdentifierToken(oc.company_number) &&
+    companyRegistryNumberToken(oc.company_number) &&
     typeof oc.jurisdiction_code === "string" &&
     /^[a-z]{2}(?:_[a-z0-9]{1,3})?$/u.test(oc.jurisdiction_code) &&
     (oc.status === undefined ||
@@ -751,6 +792,20 @@ function validProviderBindings(
             ? true
             : identifier.value === oc.company_number &&
               /^oc-company-number:[a-z]{2}(?:_[a-z0-9]{1,3})?$/u.test(String(identifier.scheme))),
+      );
+    }
+    case "companies_house_registry": {
+      const ch = record(attributes.ch_registry);
+      const identifier = record(payload.identifier);
+      return Boolean(
+        ch &&
+          host === "api.company-information.service.gov.uk" &&
+          path === "/search/companies" &&
+          payload.externalId === `companies_house_registry:${String(ch.company_number)}` &&
+          (identifier === null
+            ? true
+            : identifier.value === ch.company_number &&
+              identifier.scheme === "ch-company-number"),
       );
     }
     default:

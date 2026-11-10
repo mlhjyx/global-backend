@@ -424,6 +424,20 @@
       ]
     },
     {
+      "key": "apps/api/src/discovery/providers/companies-house-registry.provider.ts#companies_house.search#1",
+      "kind": "tool",
+      "producerId": "companies_house.search",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "companies-house-search/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/temporal/discovery.activities.ts",
+          "anchor": "onDurableReceipt"
+        }
+      ]
+    },
+    {
       "key": "apps/api/src/discovery/providers/opencorporates.provider.ts#opencorporates.search#1",
       "kind": "tool",
       "producerId": "opencorporates.search",

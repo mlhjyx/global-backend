@@ -31,6 +31,8 @@ const RETAINED_TOP_LEVEL_KEYS = new Set([
   "longitude",
   // 获客 vNext W4：OpenCorporates 公司注册事实（名称/注册号/状态/地址，只含公司字段）。
   "opencorporates",
+  // 获客 vNext W4 第二源：Companies House 公司注册事实（注册号/状态，只含公司字段）。
+  "ch_registry",
   "osm_id",
   "products",
   "sam_disclaimer",
@@ -70,6 +72,7 @@ const CONTACT_ATTRIBUTE_KEYS = new Set([
 ]);
 
 const SEMANTIC_IDENTIFIER_KEYS = new Set([
+  "company_number",
   "cpv",
   "fei_number",
   "isin",
@@ -163,6 +166,21 @@ const semanticIdentifierContracts = new Map<
       validate: (value) =>
         Buffer.byteLength(value, "utf8") <= 2_000 && isContactFreeText(value),
     },
+  ],
+  // 注册号是公司标识而非联系方式：纯数字注册号（CH 8 位、各国 registry id）不得被
+  // 电话形态门误杀；只保留形状/长度约束与密钥形态拒绝。
+  [
+    "opencorporates.company_number",
+    {
+      validate: (value) =>
+        Buffer.byteLength(value, "utf8") <= 80 &&
+        /^[\p{L}\p{N}][\p{L}\p{N} ._:/-]*$/u.test(value) &&
+        isSecretFreeText(value),
+    },
+  ],
+  [
+    "ch_registry.company_number",
+    { validate: (value) => /^[A-Z0-9]{1,12}$/u.test(value) },
   ],
   [
     "fda.registration_number",

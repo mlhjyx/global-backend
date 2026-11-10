@@ -94,6 +94,15 @@ const PROVIDER_KEYS: Readonly<Record<string, readonly string[]>> =
       "name",
       "provenance",
     ],
+    companies_house_registry: [
+      "attributes",
+      "country",
+      "externalId",
+      "identifier",
+      "license",
+      "name",
+      "provenance",
+    ],
   });
 const SHA256 = /^[0-9a-f]{64}$/u;
 const DOMAIN =
@@ -619,6 +628,24 @@ function normalizeAttributes(
           ["jurisdiction_code", oc.jurisdiction_code],
           ["registered_address", oc.registered_address],
           ["status", oc.status],
+        ].flatMap(([key, item]) => (item == null ? [] : [[key, item]])),
+      ),
+    };
+  }
+  if (providerKey === "companies_house_registry") {
+    // 只落公司字段（注册号/状态）；OGL 署名与许可留在 provider 载荷（field_evidence.license 承载许可）。
+    if (!exactKeys(input, ["ch_registry"])) return null;
+    const ch = record(input.ch_registry);
+    if (
+      !ch ||
+      !keysWithin(ch, ["attribution", "company_number", "company_status"])
+    )
+      return null;
+    return {
+      ch_registry: Object.fromEntries(
+        [
+          ["company_number", ch.company_number],
+          ["company_status", ch.company_status],
         ].flatMap(([key, item]) => (item == null ? [] : [[key, item]])),
       ),
     };

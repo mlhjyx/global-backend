@@ -42,8 +42,8 @@ test('inventory is locked to 23 Tools and 15 product Model tasks', () => {
   ]);
   // #977（SMTP 第二票）与 #976（deepseek 工具）各自把 44 改到 45，文本上不冲突，
   // 合并后实际是 46 个物理调用点；按 policy 源里的真值锁定，不按任一分支的旧数字。
-  // 获客 vNext W4（opencorporates 工具）再 +1 → 49。
-  assert.equal(EXPECTED_TOOL_CALLSITES.length, 49);
+  // 获客 vNext W4（opencorporates 工具）再 +1 → 49；W4 第二源 companies_house_registry → 50。
+  assert.equal(EXPECTED_TOOL_CALLSITES.length, 50);
   assert.deepEqual(EXPECTED_NON_TOOL_INVOKE_BOUNDARIES, [
     'apps/api/src/site-builder/eval/copy-sonnet-recovery-zero-call-preflight.ts#input.pricingBroker#1',
   ]);
@@ -276,11 +276,11 @@ test('artifact bounds are read only from the durableResultStrategy object and mu
 test('pure contracts preserve typed authority wiring and the artifact pre-wire hold', async () => {
   const result = await verifyExecutionAuthorityPolicy({ repoRoot: repositoryRoot });
   assert.deepEqual(result.issues, []);
-  // 获客 vNext W4：opencorporates.search（23 tools / 49 callsites），按 policy 源真值锁定。
+  // 获客 vNext W4：两源（opencorporates + companies_house_registry）= 23 tools / 50 callsites，按 policy 源真值锁定。
   assert.equal(result.toolCount, 23);
   assert.equal(result.modelTaskCount, 15);
   assert.equal(result.physicalExecutionWiring, 'PARTIAL_HOLD');
-  assert.equal(result.physicalToolCallsiteCount, 49);
+  assert.equal(result.physicalToolCallsiteCount, 50);
   assert.equal(result.modelGatewayBoundaryCount, 2);
 });
 

@@ -79,6 +79,9 @@ const DISCOVERY_GOVERNED_COMPANY_ACK_BINDINGS = Object.freeze([
   // 获客 vNext W4：consumer/resultSchema 必须与 discovery-query-governed-lineage.ts 的
   // PROVIDER_CONTRACT 一致；回执来自 ToolBroker 结算（typed_projection）。
   { producerId: 'opencorporates.search', consumer: 'OpenCorporatesDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'opencorporates-search/v1' },
+  // 获客 vNext W4 第二源：Companies House 公司注册发现（与联系人向 companies_house.search 的
+  // 产品侧绑定（CanonicalCompany）并存：发现 run 内的公司回执走本 RawSourceRecord 分区）。
+  { producerId: 'companies_house.search', consumer: 'CompaniesHouseRegistryDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'companies-house-search/v1' },
   // A 方案（local_query）：回执由 registry 适配器确定性构造（无物理调用，成本 0）。
   { producerId: 'registry.query', consumer: 'RegistryFrameDiscoveryProvider', domainAggregateType: 'RawSourceRecord', identity: 'run-provider-operation-result-digest', resultStrategy: 'typed_projection', resultSchema: 'registry-query/v1' },
   // WEB-1：模型联网搜索的公司回执来自结构确认任务的持久投影（任务 id 即 producer）。

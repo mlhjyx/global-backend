@@ -69,6 +69,8 @@ const SOURCE_ROUTE_PRIORITY: Readonly<Record<string, number>> = Object.freeze({
   wikidata: 10,
   // OpenCorporates 注册库聚合（获客 vNext W4）：结构化源，与 wikidata 同档。
   opencorporates: 10,
+  // Companies House 官方注册处（GB；获客 vNext W4 第二源）：结构化源，与 wikidata 同档。
+  companies_house_registry: 10,
   openstreetmap: 15,
   ted: 20,
   openfda: 20,
@@ -179,6 +181,8 @@ export const PLANNER_SOURCE_GUIDE: Readonly<Record<string, string>> = Object.fre
   wikidata: 'Wikidata 公司库，按 filters.industry + country 零爬取查公司、官网与员工数',
   opencorporates:
     'OpenCorporates 公司注册库聚合（各国官方注册处）：按 country（或 filters.jurisdiction_code，美国须给州级如 us_de）与 keywords 检索注册实体，返回公司名/注册号/状态/注册地址',
+  companies_house_registry:
+    'Companies House 官方注册处（仅英国 GB）：按 keywords 检索 GB 注册实体，返回公司名/注册号/状态；country 必须含英国才路由',
   registry_frame:
     '本地注册库 frame 枚举（零出网零成本）：按 country/scheme/nace_prefix/employee_band/legal_form/status/postal_prefix 过滤已装载的官方注册实体',
   openstreetmap:
