@@ -140,6 +140,8 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
       { sourceClass: 'public_intelligence', providerKey: 'openfda', hasCompanyLineage: true },
       // 获客 vNext W4：OpenCorporates（env 开关默认 off、data_provider 默认 DISABLED，路由身份不因开关变化）。
       { sourceClass: 'company_registry', providerKey: 'opencorporates', hasCompanyLineage: true },
+      // 获客 vNext W4 第二源：Companies House 注册发现（env 默认 off → 不声明血缘；data_provider 默认 DISABLED）。
+      { sourceClass: 'company_registry', providerKey: 'companies_house_registry', hasCompanyLineage: false },
       // WEB-1 模型联网搜索：env 开关默认 off 时 fail-safe 返回有效空血缘，路由身份不因开关变化。
       { sourceClass: 'public_intelligence', providerKey: 'model_web_search', hasCompanyLineage: true },
       // T3-09 注册面：本地 registry frame 枚举注册为 company_registry 源，但**刻意不声明**
@@ -221,6 +223,30 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
         update: {},
         create: {
           key: 'registry_frame',
+          class: 'company_registry',
+          status: 'DISABLED',
+          costPerCallCents: 0,
+        },
+      },
+    ]);
+  });
+
+  it('seeds companies_house_registry DISABLED as the second kill switch (vNext W4)', async () => {
+    const providers: Array<{ where: unknown; update: unknown; create: Record<string, unknown> }> = [];
+    await new DiscoveryProviderRegistry().seed({
+      dataProvider: {
+        upsert: async (args: (typeof providers)[number]) => {
+          providers.push(args);
+          return args;
+        },
+      },
+    } as never);
+    expect(providers.filter((entry) => entry.create.key === 'companies_house_registry')).toEqual([
+      {
+        where: { key: 'companies_house_registry' },
+        update: {},
+        create: {
+          key: 'companies_house_registry',
           class: 'company_registry',
           status: 'DISABLED',
           costPerCallCents: 0,

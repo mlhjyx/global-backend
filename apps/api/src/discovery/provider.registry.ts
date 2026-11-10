@@ -14,6 +14,7 @@ import { TradeFairDiscoveryProvider } from './providers/trade-fair.provider';
 import { TedDiscoveryProvider } from './providers/ted.provider';
 import { OpenFdaDiscoveryProvider } from './providers/openfda.provider';
 import { OpenCorporatesDiscoveryProvider } from './providers/opencorporates.provider';
+import { CompaniesHouseRegistryDiscoveryProvider } from './providers/companies-house-registry.provider';
 import { ModelWebSearchDiscoveryProvider } from './providers/model-web-search.provider';
 import { RegistryFrameDiscoveryProvider } from './providers/registry-frame.provider';
 import { DecisionMakerContactAdapter } from './providers/decision-maker.provider';
@@ -124,6 +125,16 @@ export class DiscoveryProviderRegistry {
     // data_provider 默认 DISABLED 是第二道 kill switch；源合规矩阵 sourceKey='opencorporates'
     // 在 SOURCE_COMPLIANCE_GATE=enforce 时另行把关（未批准即拒）。
     this.discovery.push(new OpenCorporatesDiscoveryProvider({ broker }));
+    // Companies House 公司注册发现（获客 vNext W4 · P0 第二源；复用既有 companies_house.search 工具）。
+    // COMPANIES_HOUSE_REGISTRY_PROVIDER=on 才声明公司血缘（默认 off 时被血缘闸门排除，零路由）；
+    // data_provider.companies_house_registry 默认 DISABLED 是第二道 kill switch；
+    // 缺 COMPANIES_HOUSE_API_KEY 时工具抛错 → fail-safe 有效空。
+    this.discovery.push(
+      new CompaniesHouseRegistryDiscoveryProvider({
+        broker,
+        lineageEnabled: process.env.COMPANIES_HOUSE_REGISTRY_PROVIDER === 'on',
+      }),
+    );
     // WEB-1 模型联网搜索（获客通路 A）：模型规划检索词→受治理搜索→结构确认；
     // MODEL_WEB_SEARCH_PROVIDER=on 才生效（默认 off 时 fail-safe 返回有效空血缘），
     // data_provider 状态是第二道 kill switch。需要 gateway+broker，缺一时同样诚实降级。
@@ -792,6 +803,14 @@ export class DiscoveryProviderRegistry {
       where: { key: 'opencorporates' },
       update: {},
       create: { key: 'opencorporates', class: 'company_registry', status: 'DISABLED', costPerCallCents: 0 },
+    });
+    // Companies House 公司注册发现（获客 vNext W4 · P0 第二源）：**默认 DISABLED**。
+    // 复用既有工具 companies_house.search（联系人向 companies_house 行不受影响）；
+    // COMPANIES_HOUSE_REGISTRY_PROVIDER=on 是第一道开关，本行是第二道 kill switch。
+    await db.dataProvider.upsert({
+      where: { key: 'companies_house_registry' },
+      update: {},
+      create: { key: 'companies_house_registry', class: 'company_registry', status: 'DISABLED', costPerCallCents: 0 },
     });
     // registry_frame（ch03 T3-09）：本地注册库 frame 枚举，零出网零成本。默认 DISABLED——
     // 血缘闸门在 local_query 变体获批前会挡住执行，开关保持关闭以免误以为它在跑；

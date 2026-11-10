@@ -101,6 +101,12 @@ const PROVIDER_CONTRACT = Object.freeze({
     producerId: 'opencorporates.search', resultSchema: 'opencorporates-search/v1',
     consumer: 'OpenCorporatesDiscoveryProvider', classes: Object.freeze(['company_registry']),
   }),
+  // 获客 vNext W4 第二源：Companies House 公司注册发现（复用既有工具 companies_house.search）。
+  companies_house_registry: Object.freeze({
+    producerId: 'companies_house.search', resultSchema: 'companies-house-search/v1',
+    consumer: 'CompaniesHouseRegistryDiscoveryProvider',
+    classes: Object.freeze(['company_registry']),
+  }),
   registry_frame: Object.freeze({
     producerId: 'registry.query', resultSchema: 'registry-query/v1',
     consumer: 'RegistryFrameDiscoveryProvider', classes: Object.freeze(['company_registry']),

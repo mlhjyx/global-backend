@@ -42,8 +42,8 @@ function safetyBound(
     : fallback;
 }
 
-// 9→10（获客 vNext W4 opencorporates 注册面，2026-11-10）：报价上界的适配器因子随之 +1。
-export const MAX_COMPANY_DISCOVERY_ADAPTERS = 10 as const;
+// 10→11（获客 vNext W4 companies_house_registry 注册面，2026-11-10）：报价上界的适配器因子随之 +1。
+export const MAX_COMPANY_DISCOVERY_ADAPTERS = 11 as const;
 /** `discovery.query_plan` output schema bound. */
 export const MAX_QUERY_PLANNER_QUERIES = 64 as const;
 /** Deterministic cold-path queries added after planning: TED and openFDA, at most one each. */

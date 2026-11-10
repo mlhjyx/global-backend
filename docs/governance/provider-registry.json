@@ -653,6 +653,42 @@
       ]
     },
     {
+      "key": "companies_house_registry",
+      "status": "IMPLEMENTED",
+      "source_classes": [
+        "company_registry"
+      ],
+      "purpose": "Discover GB companies from the official Companies House search API by name (company number, title and status only). Reuses the governed companies_house.search tool; the officers operation and every personal-data field stay untouched on this discovery path.",
+      "taxonomy": [
+        "company number",
+        "company name",
+        "company status",
+        "GB jurisdiction"
+      ],
+      "license": {
+        "classification": "OGL-UK-3.0",
+        "note": "Contains public sector information licensed under the Open Government Licence v3.0 (© Crown copyright, Companies House). Attribution is a licence obligation on every derived fact. Discovery maps company fields only; officer records are never read on this path."
+      },
+      "personal_data_class": "COMPANY_ONLY",
+      "default_enablement": "DISABLED",
+      "call_gates": [
+        "data_provider_status",
+        "source_policy",
+        "tool_broker",
+        "provider_env_switch",
+        "api_key"
+      ],
+      "test_paths": [
+        "apps/api/src/discovery/providers/companies-house-registry.provider.spec.ts"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "TEST_ANCHOR",
+          "path": "apps/api/src/discovery/providers/companies-house-registry.provider.spec.ts"
+        }
+      ]
+    },
+    {
       "key": "openstreetmap",
       "status": "IMPLEMENTED",
       "source_classes": [

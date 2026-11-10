@@ -238,6 +238,8 @@ function discoveryRunEnvelope(
       tool(contract(openFdaSearchTool), singleSearches),
       // 获客 vNext W4：OpenCorporates 注册库（每查询对多一次搜索出网；estimatedCents=0）。
       tool(contract(openCorporatesSearchTool), singleSearches),
+      // 获客 vNext W4 第二源：Companies House 注册发现（复用既有工具；每查询一次搜索）。
+      tool(contract(companiesHouseSearchTool), singleSearches),
       tool(contract(tradeFairAlgoliaTool), queries * TRADE_FAIRS.length),
       // enrichRun: GLEIF and Wikidata facts for fit=match companies.
       tool(contract(gleifFetchTool), MAX_DISCOVERY_ENRICH_COMPANIES * MAX_GLEIF_FETCHES_PER_COMPANY),

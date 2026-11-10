@@ -116,10 +116,10 @@ describe('WorkspaceTechnicalBudgetQuoteController', () => {
       data: expect.objectContaining({
         purpose: 'discovery.run',
         subjectType: 'discovery_run',
-        // MAX_COMPANY_DISCOVERY_ADAPTERS 9→10（获客 vNext W4 opencorporates 注册面）后的报价上界；
+        // MAX_COMPANY_DISCOVERY_ADAPTERS 10→11（获客 vNext W4 companies_house_registry 注册面）后的报价上界；
         // 另含 WEB-1 联网搜索模型（每查询 7 次）与 SearXNG/DeepSeek 搜索工具上界（10 次）。
         // P3 J03b 起含 L1 快扫 discovery.quick_judge（63 次批量粗判 × 2 × 20¢）。
-        requiredCapMicrousd: '7748380000',
+        requiredCapMicrousd: '8408380000',
       }),
     });
   });

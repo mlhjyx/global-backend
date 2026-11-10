@@ -18,6 +18,7 @@ export type DiscoveryCompanyLineageProviderKey =
   | 'ted'
   | 'openfda'
   | 'opencorporates'
+  | 'companies_house_registry'
   | 'registry_frame'
   | 'model_web_search';
 
@@ -118,6 +119,12 @@ const PROVIDER_RECEIPT_CONTRACT = Object.freeze({
   opencorporates: Object.freeze({
     producerId: 'opencorporates.search',
     resultSchema: 'opencorporates-search/v1',
+  }),
+  // 获客 vNext W4 第二源：Companies House 公司注册发现（复用既有工具 companies_house.search，
+  // 其 durable 投影为 catalog 侧 companies-house-search/v1）。
+  companies_house_registry: Object.freeze({
+    producerId: 'companies_house.search',
+    resultSchema: 'companies-house-search/v1',
   }),
   // A 方案（local_query 变体）：零出网本地注册库枚举，回执由 registry/local-query-receipt.ts
   // 确定性构造（producer 闭锁，仅此 provider 允许）。

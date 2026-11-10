@@ -183,7 +183,7 @@ describe('workspace execution technical envelope catalog', () => {
       expect.objectContaining({ taskId: 'discovery.web_search_candidates', logicalInvocations: 66 * 7 }),
       // website profile (G3 5.4b): at most one classify call per profiled company
       expect.objectContaining({ taskId: 'discovery.classify_trade_role', logicalInvocations: 50 }),
-      expect.objectContaining({ taskId: 'discovery.qualify_fit', logicalInvocations: 66 * 10 * 25 }),
+      expect.objectContaining({ taskId: 'discovery.qualify_fit', logicalInvocations: 66 * 11 * 25 }),
       // L1 快扫（P3 W5）：500 家池 / 8 家每批 = 63 次批量粗判上限。
       expect.objectContaining({ taskId: 'discovery.quick_judge', logicalInvocations: 63 }),
     ]);
@@ -199,6 +199,7 @@ describe('workspace execution technical envelope catalog', () => {
       ['ted.search', 66],
       ['openfda.search', 66],
       ['opencorporates.search', 66],
+      ['companies_house.search', 66],
       ['tradefair.algolia', 66],
       ['gleif.fetch', 50 * 4],
       ['wikidata.entity', 50 * 3],
@@ -210,20 +211,20 @@ describe('workspace execution technical envelope catalog', () => {
     ]);
     expect(envelope.policy.executionLimits).toMatchObject({
       planQueries: 66,
-      companyDiscoveryAdapters: 10,
+      companyDiscoveryAdapters: 11,
       providerRecords: 25,
       taxonomyIndustryTermsPerQuery: 4,
       taxonomyCountryTermsPerQuery: 2,
-      fitCompanies: 16_500,
+      fitCompanies: 18_150,
       profileCompanies: 50,
       enrichCompanies: 50,
       signalCompanies: 12,
       watchCompanies: 12,
     });
-    // models: 396×2×5 + 924×2×15 + 1584×2×20 + 462×2×15 + 50×2×10 + 16500×2×20 + 63×2×20 = 772_420 cents
-    // （获客 vNext W4：适配器 9→10 使 qualify_fit 上界 14850→16500）；
-    // tools: crawl4ai.fetch 1684×1 + crawl4ai.render 74×1 + deepseek.search 660×1 + opencorporates.search 66×0 = 2_418 cents。
-    expect(envelope.requiredCapMicrousd).toBe(774_838n * 10_000n);
+    // models: 396×2×5 + 924×2×15 + 1584×2×20 + 462×2×15 + 50×2×10 + 18150×2×20 + 63×2×20 = 838_420 cents
+    // （获客 vNext W4 两源：适配器 9→11 使 qualify_fit 上界 14850→18150）；
+    // tools: crawl4ai.fetch 1684×1 + crawl4ai.render 74×1 + deepseek.search 660×1 + opencorporates/companies_house 各 66×0 = 2_418 cents。
+    expect(envelope.requiredCapMicrousd).toBe(840_838n * 10_000n);
   });
 
   it('quotes company creation from the bounded understanding crawl and per-page extraction', () => {
@@ -327,8 +328,8 @@ describe('DISCOVERY_UNCAPPED=on —— 报价按防爆安全界（余额是唯�
       // 去帽模式工具环 24 轮探索 + 1 次结构确认
       expect.objectContaining({ taskId: 'discovery.web_search_candidates', logicalInvocations: 66 * 25 }),
       expect.objectContaining({ taskId: 'discovery.classify_trade_role', logicalInvocations: 50 }),
-      // 66 查询 × 10 适配器 × 1000 条记录安全界
-      expect.objectContaining({ taskId: 'discovery.qualify_fit', logicalInvocations: 660_000 }),
+      // 66 查询 × 11 适配器 × 1000 条记录安全界
+      expect.objectContaining({ taskId: 'discovery.qualify_fit', logicalInvocations: 726_000 }),
       // 快扫池 5 万 / 8 家每批 = 6250 次批量粗判上限
       expect.objectContaining({ taskId: 'discovery.quick_judge', logicalInvocations: 6_250 }),
     ]);
@@ -343,6 +344,7 @@ describe('DISCOVERY_UNCAPPED=on —— 报价按防爆安全界（余额是唯�
       ['ted.search', 66],
       ['openfda.search', 66],
       ['opencorporates.search', 66],
+      ['companies_house.search', 66],
       ['tradefair.algolia', 66],
       ['gleif.fetch', 50 * 4],
       ['wikidata.entity', 50 * 3],
@@ -352,14 +354,14 @@ describe('DISCOVERY_UNCAPPED=on —— 报价按防爆安全界（余额是唯�
     expect(envelope.policy.executionLimits).toMatchObject({
       planQueries: 66,
       providerRecords: 1_000,
-      fitCompanies: 660_000,
+      fitCompanies: 726_000,
       // policyRevision 可审计标记：去帽模式的包络与产品帽模式可区分。
       discoveryUncapped: 1,
     });
-    // models: 396×2×5 + 924×2×15 + 1584×2×20 + 1650×2×15 + 50×2×10 + 660000×2×20 + 6250×2×20
-    //       = 26_795_540 cents；tools: crawl4ai.fetch 1684×1 + crawl4ai.render 74×1 +
-    // deepseek.search 6600×1 + opencorporates.search 66×0 = 8_358 cents；合计 26_803_898 cents。
-    expect(envelope.requiredCapMicrousd).toBe(26_803_898n * 10_000n);
+    // models: 396×2×5 + 924×2×15 + 1584×2×20 + 1650×2×15 + 50×2×10 + 726000×2×20 + 6250×2×20
+    //       = 29_435_540 cents；tools: crawl4ai.fetch 1684×1 + crawl4ai.render 74×1 +
+    // deepseek.search 6600×1 + opencorporates/companies_house 各 66×0 = 8_358 cents；合计 29_443_898 cents。
+    expect(envelope.requiredCapMicrousd).toBe(29_443_898n * 10_000n);
   });
 
   it('产品帽模式的报价逐字节不变（开关 off 时与既有断言一致）', () => {
@@ -368,6 +370,6 @@ describe('DISCOVERY_UNCAPPED=on —— 报价按防爆安全界（余额是唯�
       planId: PLAN_ID,
     });
     expect(envelope.policy.executionLimits).not.toHaveProperty('discoveryUncapped');
-    expect(envelope.requiredCapMicrousd).toBe(774_838n * 10_000n);
+    expect(envelope.requiredCapMicrousd).toBe(840_838n * 10_000n);
   });
 });

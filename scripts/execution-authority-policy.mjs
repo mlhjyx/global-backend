@@ -76,6 +76,7 @@ export const EXPECTED_TOOL_CALLSITES = Object.freeze([
   'apps/api/src/acquisition/adapters/trade-fair.source.ts#tradefair.algolia#1',
   'apps/api/src/company/website-candidates.ts#searxng.search#1',
   'apps/api/src/discovery/providers/bigquery-patents.provider.ts#google_patents.search#1',
+  'apps/api/src/discovery/providers/companies-house-registry.provider.ts#companies_house.search#1',
   'apps/api/src/discovery/providers/companies-house.provider.ts#companies_house.search#1',
   'apps/api/src/discovery/providers/companies-house.provider.ts#companies_house.search#2',
   'apps/api/src/discovery/providers/decision-maker.provider.ts#crawl4ai.fetch#1',
