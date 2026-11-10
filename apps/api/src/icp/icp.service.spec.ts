@@ -105,6 +105,10 @@ function fixture() {
   const enabledProviders = ["public_web"];
   const prisma = {
     withWorkspace: vi.fn(async (_workspace, operation) => operation(tx)),
+    // 覆盖补齐用的 registry_frame 装载快照（平台表，无 RLS；经 this.prisma 直读）：默认无装载。
+    registryFrame: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
   };
   const authority = {
     verifyWorkspaceGrant: vi.fn().mockResolvedValue({}),
@@ -950,8 +954,36 @@ describe("ICP generation authority and controlled enrichment", () => {
     expect(prompt).toContain("wikidata");
     expect(prompt).toContain("openstreetmap");
     const queries = plan.queries as Array<{ filters: Record<string, unknown>; rationale: string }>;
-    expect(queries.map((q) => q.filters.source_hint)).toEqual(["public_web", "wikidata"]);
+    // 模型漏排的已启用结构化源 openstreetmap 由覆盖补齐垫底（vNext W4）。
+    expect(queries.map((q) => q.filters.source_hint)).toEqual(["public_web", "wikidata", "openstreetmap"]);
     expect(queries[0]!.rationale).not.toContain("SOURCE_LINEAGE_UNAVAILABLE");
+    expect(queries[2]!.rationale).toContain("覆盖补齐");
+  });
+  it("fills a registry_frame query only when the target country already has a loaded frame (vNext W4)", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.enable("public_web", "registry_frame");
+    f.declareLineage("registry_frame");
+    Object.assign(f.icp, { targetMarkets: ["DE"] });
+    f.result.data = { queries: [PUBLIC_WEB_QUERY], estimated_volume: 10 };
+
+    // 平台表里德国有 PARSED 快照 → 补一条 registry_frame 兜底查询（国家用 ISO2）。
+    f.prisma.registryFrame.findMany.mockResolvedValue([{ country: "DE" }]);
+    const loadedPlan = await f.service.generateQueryPlan(ctx, f.icp.id);
+    const loaded = loadedPlan.queries as Array<{ source_class: string; filters: Record<string, unknown>; keywords: unknown[] }>;
+    expect(loaded.map((q) => q.filters.source_hint)).toEqual(["public_web", "registry_frame"]);
+    expect(loaded[1]).toMatchObject({
+      source_class: "company_registry",
+      filters: { source_hint: "registry_frame", country: "DE" },
+      keywords: [],
+    });
+
+    // 没有装载 → 不补（补了只会空跑）。
+    f.prisma.registryFrame.findMany.mockResolvedValue([{ country: "FR" }]);
+    const emptyPlan = await f.service.generateQueryPlan(ctx, f.icp.id);
+    expect(
+      (emptyPlan.queries as Array<{ filters: { source_hint: string } }>).map((q) => q.filters.source_hint),
+    ).toEqual(["public_web"]);
   });
   it("notes the left-out planner queries on the first planner query, not on an injected one (BI-30)", async () => {
     const f = generationFixture();
@@ -990,9 +1022,12 @@ describe("ICP generation authority and controlled enrichment", () => {
     const plan = await f.service.generateQueryPlan(ctx, f.icp.id);
 
     const queries = plan.queries as Array<{ filters: Record<string, unknown>; rationale: string }>;
-    expect(queries).toHaveLength(1);
+    // TED 注入在前；已启用却一条查询都没有的 public_web 由覆盖补齐垫底（vNext W4）。
+    expect(queries).toHaveLength(2);
     expect(queries[0]!.filters).toMatchObject({ source_hint: "ted", cpv: "42120000" });
     expect(queries[0]!.rationale).toContain("[source_filter] 已移出 1 条规划查询：SOURCE_UNKNOWN 1 条");
+    expect(queries[1]!.filters).toMatchObject({ source_hint: "public_web" });
+    expect(queries[1]!.rationale).toContain("覆盖补齐");
     // The model's estimate covered only queries that will not run: the scale is unknown.
     expect(plan).toMatchObject({ estimatedVolume: null });
   });
@@ -1082,7 +1117,11 @@ describe("ICP generation authority and controlled enrichment", () => {
       warnings: [],
     });
     const plan = await f.service.generateQueryPlan(ctx, f.icp.id);
-    expect(plan.queries).toHaveLength(2);
+    // 两条冷路径注入 + 覆盖补齐给已启用却无查询的 public_web 垫底一条（vNext W4）。
+    const hints = (plan.queries as Array<{ filters: { source_hint: string } }>)
+      .map((q) => q.filters.source_hint);
+    expect(hints).toHaveLength(3);
+    expect(new Set(hints)).toEqual(new Set(["openfda", "ted", "public_web"]));
     expect(f.cpv.mock.calls[0][1]).toMatchObject({ product: "pump" });
     expect(f.fda.mock.calls[0][1]).toMatchObject({ tradeSide: "importer" });
   });

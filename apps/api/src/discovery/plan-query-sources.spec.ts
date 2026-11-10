@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelGateway } from '../model-gateway/model-gateway';
-import { MAX_QUERY_PLANNER_QUERIES } from './execution-envelope';
+import {
+  MAX_DISCOVERY_PLAN_QUERIES,
+  MAX_DISCOVERY_PROVIDER_RECORDS,
+  MAX_QUERY_PLANNER_QUERIES,
+} from './execution-envelope';
 import { DiscoveryProviderRegistry } from './provider.registry';
 import {
   PLANNER_SOURCE_GUIDE,
@@ -16,12 +20,14 @@ import {
   planQuerySourceHints,
   plannerSourcePrompt,
   plannerVisibleSources,
+  loadRegistryFrameCountries,
   routePlannerQueries,
   scaleEstimatedVolume,
   sourceQueryBudgetConfig,
   sourceQueryBudgets,
   withCheapFirstShadowNote,
   withDroppedQueryNote,
+  withSourceCoverage,
   type CompanyDiscoverySource,
 } from './plan-query-sources';
 
@@ -488,6 +494,39 @@ describe('cheap-first source priority (Q33②, PR-1)', () => {
     expect(budgets.directory).toBe(0);
   });
 
+  it('去帽模式（DISCOVERY_UNCAPPED=on）：默认预算换算回每源 66 条查询，永不先于余额收紧', () => {
+    const on = { DISCOVERY_UNCAPPED: 'on' } as NodeJS.ProcessEnv;
+    const config = sourceQueryBudgetConfig(on);
+
+    expect(config).toEqual({
+      structuredRunCap: MAX_DISCOVERY_PLAN_QUERIES * MAX_DISCOVERY_PROVIDER_RECORDS,
+      trialMaxCompanies: MAX_DISCOVERY_PLAN_QUERIES * MAX_DISCOVERY_PROVIDER_RECORDS,
+      trialMaxRuns: 1_000_000,
+    });
+    const budgets = sourceQueryBudgets(
+      new Set(['directory']),
+      config,
+      ['directory', 'wikidata', 'public_web'],
+    );
+    // floor(66×records / records) = 66 = 单源最大副本数：预算不裁剪任何计划副本。
+    expect(budgets.directory).toBe(MAX_DISCOVERY_PLAN_QUERIES);
+    expect(budgets.wikidata).toBe(MAX_DISCOVERY_PLAN_QUERIES);
+    expect(budgets.public_web).toBeUndefined();
+  });
+
+  it('去帽模式仍尊重显式 env 预算（运营者自选的更紧预算）', () => {
+    const config = sourceQueryBudgetConfig({
+      DISCOVERY_UNCAPPED: 'on',
+      DISCOVERY_STRUCTURED_SOURCE_RUN_CAP: '50',
+    } as NodeJS.ProcessEnv);
+
+    expect(config.structuredRunCap).toBe(50);
+    // 其余键独立解析：trial 缺省仍是去帽默认。
+    expect(config.trialMaxCompanies).toBe(
+      MAX_DISCOVERY_PLAN_QUERIES * MAX_DISCOVERY_PROVIDER_RECORDS,
+    );
+  });
+
   it('writes the shadow replacement count onto the plan review note', () => {
     const queries = [query('industry_data', { source_hint: 'directory' })];
     const noted = withCheapFirstShadowNote(queries, { replacedCopies: 3, budgetDropped: 2 });
@@ -520,6 +559,20 @@ describe('planner source prompt (BI-30)', () => {
     expect(prompt.indexOf('source_hint=directory')).toBeLessThan(
       prompt.indexOf('source_hint=public_web'),
     );
+  });
+
+  it('去帽模式：配额话术改为余额准入语义，不再声称产品配额', () => {
+    const prompt = plannerSourcePrompt(only('public_web', 'directory'), {
+      DISCOVERY_UNCAPPED: 'on',
+    } as NodeJS.ProcessEnv);
+
+    expect(prompt).toContain('余额');
+    expect(prompt).toContain('min(估算包络, 余额)');
+    expect(prompt).not.toContain('≤100');
+    expect(prompt).not.toContain('500');
+    // 路由优先级（质量/成本效率提示，不是配额）保持不变。
+    expect(prompt).toContain('结构化源优先');
+    expect(prompt).toContain('source_hint=directory');
   });
 
   it('tells the planner the system writes TED and openFDA queries only when they can run', () => {
@@ -644,5 +697,225 @@ describe('plan scale shown before confirmation (BI-30)', () => {
     expect(noted[0]!.rationale).toBe(
       'synthetic\n[source_filter] 已移出 3 条规划查询：SOURCE_DISABLED 1 条、SOURCE_LINEAGE_UNAVAILABLE 2 条',
     );
+  });
+});
+
+describe('source coverage fill (vNext W4)', () => {
+  /** 全部可规划源都启用且声明血缘——覆盖补齐只面对这类源。 */
+  const COVERAGE_ENABLED: readonly CompanyDiscoverySource[] = Object.freeze([
+    { sourceClass: 'public_intelligence', providerKey: 'public_web', hasCompanyLineage: true },
+    { sourceClass: 'industry_data', providerKey: 'public_web', hasCompanyLineage: true },
+    { sourceClass: 'industry_data', providerKey: 'directory', hasCompanyLineage: true },
+    { sourceClass: 'company_registry', providerKey: 'wikidata', hasCompanyLineage: true },
+    { sourceClass: 'industry_data', providerKey: 'wikidata', hasCompanyLineage: true },
+    { sourceClass: 'industry_data', providerKey: 'openstreetmap', hasCompanyLineage: true },
+    { sourceClass: 'industry_data', providerKey: 'trade_fair', hasCompanyLineage: true },
+    { sourceClass: 'public_intelligence', providerKey: 'ted', hasCompanyLineage: true },
+    { sourceClass: 'public_intelligence', providerKey: 'openfda', hasCompanyLineage: true },
+    { sourceClass: 'company_registry', providerKey: 'registry_frame', hasCompanyLineage: true },
+    { sourceClass: 'public_intelligence', providerKey: 'model_web_search', hasCompanyLineage: true },
+  ]);
+  const ICP = Object.freeze({
+    targetMarkets: ['德国'],
+    companyAttributes: { industry: '泵及泵设备' } as unknown,
+  });
+  const enabledOnly = (...keys: string[]) =>
+    COVERAGE_ENABLED.filter((source) => keys.includes(source.providerKey));
+  const hintsOf = (queries: readonly { filters?: Record<string, unknown> }[]) =>
+    queries.map((q) => q.filters?.source_hint);
+
+  it('adds a deterministic fallback query for every plannable ENABLED source the plan missed', () => {
+    const queries = [
+      query('public_intelligence', { source_hint: 'public_web' }),
+      query('industry_data', { source_hint: 'directory' }),
+    ];
+
+    const filled = withSourceCoverage(queries, ICP, COVERAGE_ENABLED, {
+      registryFrameCountries: new Set(['DE']),
+    });
+
+    // 原查询原样保留在前，补查询按源路由优先级（结构化源优先）追加在后。
+    expect(filled.slice(0, 2)).toEqual(queries);
+    expect(filled.slice(2)).toEqual([
+      {
+        source_class: 'company_registry',
+        filters: { source_hint: 'registry_frame', country: 'DE', industry: '泵及泵设备' },
+        keywords: [],
+        rationale: '覆盖补齐：该源本轮无模型查询，按 ICP 主画像确定性补充',
+        priority: 3,
+      },
+      {
+        source_class: 'company_registry',
+        filters: { source_hint: 'wikidata', country: '德国', industry: '泵及泵设备' },
+        keywords: [],
+        rationale: '覆盖补齐：该源本轮无模型查询，按 ICP 主画像确定性补充',
+        priority: 3,
+      },
+      {
+        source_class: 'industry_data',
+        filters: { source_hint: 'openstreetmap', country: '德国', industry: '泵及泵设备' },
+        keywords: [],
+        rationale: '覆盖补齐：该源本轮无模型查询，按 ICP 主画像确定性补充',
+        priority: 3,
+      },
+      {
+        source_class: 'public_intelligence',
+        filters: { source_hint: 'model_web_search', country: '德国', industry: '泵及泵设备' },
+        keywords: [],
+        rationale: '覆盖补齐：该源本轮无模型查询，按 ICP 主画像确定性补充',
+        priority: 3,
+      },
+    ]);
+  });
+
+  it('leaves a plan alone when every plannable ENABLED source already has a query', () => {
+    const queries = [
+      query('public_intelligence', { source_hint: 'public_web' }),
+      query('industry_data', { source_hint: 'directory' }),
+      query('company_registry', { source_hint: 'wikidata' }),
+      query('company_registry', { source_hint: 'registry_frame' }),
+      query('industry_data', { source_hint: 'openstreetmap' }),
+      query('public_intelligence', { source_hint: 'model_web_search' }),
+    ];
+
+    expect(
+      withSourceCoverage(queries, ICP, COVERAGE_ENABLED, { registryFrameCountries: new Set(['DE']) }),
+    ).toBe(queries);
+  });
+
+  it('counts a class-wide query (no source_hint) as covering every ENABLED source of its class', () => {
+    const queries = [
+      query('company_registry'),
+      query('industry_data'),
+      query('public_intelligence', { source_hint: 'model_web_search' }),
+    ];
+
+    expect(
+      withSourceCoverage(queries, ICP, COVERAGE_ENABLED, { registryFrameCountries: new Set(['DE']) }),
+    ).toBe(queries);
+  });
+
+  it('never blind-fills trade_fair, TED or openFDA (2026-11-02 空跑教训；冷路径由注入负责)', () => {
+    const queries = [query('public_intelligence', { source_hint: 'public_web' })];
+
+    expect(
+      withSourceCoverage(queries, ICP, enabledOnly('public_web', 'trade_fair', 'ted', 'openfda'), {
+        registryFrameCountries: new Set(['DE']),
+      }),
+    ).toBe(queries);
+  });
+
+  it('fills registry_frame only when the first target country already has a loaded frame', () => {
+    const queries = [query('company_registry', { source_hint: 'wikidata' })];
+    const enabled = enabledOnly('wikidata', 'registry_frame');
+    const parts = { ...ICP, targetMarkets: ['DE'] };
+
+    // 目标国 DE 已有装载 → 补一条国家=ISO2 的 registry_frame 查询。
+    const loaded = withSourceCoverage(queries, parts, enabled, {
+      registryFrameCountries: new Set(['DE']),
+    });
+    expect(hintsOf(loaded)).toEqual(['wikidata', 'registry_frame']);
+    expect(loaded[1]!.filters).toMatchObject({ country: 'DE' });
+
+    // 目标国没有装载 → 不补（补了也只会空跑）。
+    expect(
+      withSourceCoverage(queries, parts, enabled, { registryFrameCountries: new Set(['FR']) }),
+    ).toBe(queries);
+
+    // 装载状态未知（未传）→ 仍补，但在 rationale 里标注「注册库未装载」warning 供计划 review。
+    const unknown = withSourceCoverage(queries, parts, enabled, {});
+    expect(hintsOf(unknown)).toEqual(['wikidata', 'registry_frame']);
+    expect(unknown[1]!.rationale).toContain('注册库未装载');
+
+    // 目标国解析不出 ISO2 → registry_frame 查询必然空跑，不补。
+    expect(
+      withSourceCoverage(queries, { ...ICP, targetMarkets: ['火星'] }, enabled, {}),
+    ).toBe(queries);
+  });
+
+  it('omits country and industry filters when the ICP has none', () => {
+    const filled = withSourceCoverage(
+      [query('public_intelligence', { source_hint: 'public_web' })],
+      { targetMarkets: [], companyAttributes: {} },
+      enabledOnly('public_web', 'model_web_search'),
+      { registryFrameCountries: new Set() },
+    );
+
+    expect(filled[1]).toEqual({
+      source_class: 'public_intelligence',
+      filters: { source_hint: 'model_web_search' },
+      keywords: [],
+      rationale: '覆盖补齐：该源本轮无模型查询，按 ICP 主画像确定性补充',
+      priority: 3,
+    });
+  });
+
+  it('names the first target country, not every market, in the fallback query', () => {
+    const filled = withSourceCoverage(
+      [query('public_intelligence', { source_hint: 'public_web' })],
+      { targetMarkets: ['法国', '德国'], companyAttributes: {} },
+      enabledOnly('public_web', 'model_web_search'),
+      { registryFrameCountries: new Set() },
+    );
+
+    expect(filled[1]!.filters).toMatchObject({ source_hint: 'model_web_search', country: '法国' });
+    expect(filled[1]!.filters).not.toHaveProperty('industry');
+  });
+
+  it('never grows the stored plan past its execution cap', () => {
+    const queries = [query('public_intelligence', { source_hint: 'public_web' })];
+
+    const filled = withSourceCoverage(
+      queries,
+      ICP,
+      COVERAGE_ENABLED,
+      { registryFrameCountries: new Set(['DE']) },
+      3,
+    );
+
+    // 补查询按路由优先级补到封口为止：registry_frame、wikidata 留下，其余没有位置。
+    expect(filled).toHaveLength(3);
+    expect(hintsOf(filled)).toEqual(['public_web', 'registry_frame', 'wikidata']);
+  });
+
+  it('does not touch a plan that already fills its cap', () => {
+    const queries = [
+      query('public_intelligence', { source_hint: 'public_web' }),
+      query('industry_data', { source_hint: 'directory' }),
+    ];
+
+    expect(
+      withSourceCoverage(queries, ICP, COVERAGE_ENABLED, { registryFrameCountries: new Set(['DE']) }, 2),
+    ).toBe(queries);
+  });
+});
+
+describe('registry_frame loaded-country lookup (vNext W4)', () => {
+  const db = (findMany: () => Promise<Array<{ country: string }>>) =>
+    ({ registryFrame: { findMany: vi.fn(findMany) } });
+
+  it('reads the countries with an ACTIVE frame carrying a PARSED snapshot, uppercased', async () => {
+    const findMany = vi.fn(async () => [{ country: 'de' }, { country: 'FR' }]);
+
+    await expect(loadRegistryFrameCountries({ registryFrame: { findMany } } as never))
+      .resolves.toEqual(new Set(['DE', 'FR']));
+    expect(findMany).toHaveBeenCalledWith({
+      where: { status: 'ACTIVE', snapshots: { some: { status: 'PARSED' } } },
+      select: { country: true },
+      distinct: ['country'],
+    });
+  });
+
+  it('reads an empty platform table as an empty set, not as unknown', async () => {
+    await expect(loadRegistryFrameCountries(db(async () => []) as never))
+      .resolves.toEqual(new Set());
+  });
+
+  it('reports a failed lookup as unknown (null) instead of empty, so coverage keeps the warning', async () => {
+    await expect(
+      loadRegistryFrameCountries(db(async () => {
+        throw new Error('synthetic unavailable');
+      }) as never),
+    ).resolves.toBeNull();
   });
 });

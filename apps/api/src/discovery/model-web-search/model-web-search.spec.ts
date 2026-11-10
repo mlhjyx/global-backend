@@ -1,14 +1,28 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ChatMessage } from '../../model-gateway/types';
 import {
+  MODEL_WEB_SEARCH_MAX_ROUNDS,
+  MODEL_WEB_SEARCH_MAX_ROUNDS_CAPPED,
+  MODEL_WEB_SEARCH_MAX_ROUNDS_MAX,
+  MODEL_WEB_SEARCH_MAX_TOOL_CALLS,
+  MODEL_WEB_SEARCH_MAX_TOOL_CALLS_CAPPED,
+  MODEL_WEB_SEARCH_MAX_TOOL_CALLS_MAX,
   MODEL_WEB_SEARCH_TASK_ID,
   ModelWebSearchError,
+  UNCAPPED_MODEL_WEB_SEARCH_MAX_ROUNDS,
+  UNCAPPED_MODEL_WEB_SEARCH_MAX_TOOL_CALLS,
   buildModelWebSearchMessages,
   parseModelWebSearchAnswer,
+  resolveModelWebSearchLoopLimits,
   runModelWebSearch,
   type ModelWebSearchTurn,
 } from './model-web-search';
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.resetModules();
+});
 
 const ANSWER = JSON.stringify({
   candidates: [
@@ -176,7 +190,8 @@ describe('model-web-search（获客通路 A 骨架）', () => {
         },
         { icp: 'x' },
       ),
-    ).rejects.toMatchObject({ code: 'MODEL_WEB_SEARCH_TOOL_BUDGET_EXCEEDED' });
+      // 越限调用不再抛错（改为回填结算消息），但模型始终不给出最终答案时仍由轮数硬限兜底。
+    ).rejects.toMatchObject({ code: 'MODEL_WEB_SEARCH_ROUND_BUDGET_EXCEEDED' });
 
     await expect(
       runModelWebSearch(
@@ -198,5 +213,110 @@ describe('model-web-search（获客通路 A 骨架）', () => {
         { icp: 'x' },
       ),
     ).rejects.toMatchObject({ code: 'MODEL_WEB_SEARCH_TOOL_INPUT_INVALID' });
+  });
+
+  it('将超出搜索预算的调用改为结算消息，模型随后作答即可正常返回', async () => {
+    const searches: string[] = [];
+    const seenToolMessages: string[] = [];
+    let round = 0;
+    const answer = JSON.stringify({
+      candidates: [
+        {
+          companyName: 'Acme',
+          domain: 'acme.test',
+          countryCode: 'DE',
+          evidenceUrls: ['https://acme.test/a'],
+          query: 'one',
+        },
+      ],
+    });
+    const result = await runModelWebSearch(
+      {
+        search: async (query) => {
+          searches.push(query);
+          return [{ url: 'https://acme.test/a', title: 'Acme' }];
+        },
+        maxRounds: 3,
+        maxToolCalls: 1,
+        generateChat: async (input) => {
+          round += 1;
+          if (round === 1) {
+            return turn({
+              stopReason: 'tool_use',
+              toolUses: [
+                { id: 'a', name: 'web_search', input: { query: 'one' } },
+                { id: 'b', name: 'web_search', input: { query: 'two' } },
+              ],
+            });
+          }
+          seenToolMessages.push(JSON.stringify(input.messages.at(-1)?.content ?? ''));
+          if (round === 2) {
+            return turn({
+              stopReason: 'tool_use',
+              toolUses: [{ id: 'c', name: 'web_search', input: { query: 'three' } }],
+            });
+          }
+          return turn({ stopReason: 'end', text: answer });
+        },
+      },
+      { icp: 'x' },
+    );
+
+    // 只真正执行了预算内的 1 次搜索；越限的 'two' 与下一轮的 'three' 都没有发出去。
+    expect(searches).toEqual(['one']);
+    expect(seenToolMessages.some((m) => m.includes('MODEL_WEB_SEARCH_TOOL_BUDGET_EXCEEDED'))).toBe(true);
+    expect(result.candidates).toHaveLength(1);
+  });
+});
+
+describe('工具环上限 —— 产品帽 vs 防爆安全界', () => {
+  it('off：产品帽 6 轮 / 10 次调用，忽略 env 覆盖（行为与今天一致）', () => {
+    expect(MODEL_WEB_SEARCH_MAX_ROUNDS).toBe(MODEL_WEB_SEARCH_MAX_ROUNDS_CAPPED);
+    expect(MODEL_WEB_SEARCH_MAX_TOOL_CALLS).toBe(MODEL_WEB_SEARCH_MAX_TOOL_CALLS_CAPPED);
+    expect(
+      resolveModelWebSearchLoopLimits({
+        DISCOVERY_MODEL_WEB_SEARCH_MAX_ROUNDS: '50',
+        DISCOVERY_MODEL_WEB_SEARCH_MAX_TOOL_CALLS: '500',
+      } as NodeJS.ProcessEnv),
+    ).toEqual({ rounds: 6, toolCalls: 10 });
+  });
+
+  it('on：默认防爆界 24 轮 / 100 次；env 可调，畸形/越界回退默认', () => {
+    const limits = (overrides: Record<string, string> = {}) =>
+      resolveModelWebSearchLoopLimits({
+        DISCOVERY_UNCAPPED: 'on',
+        ...overrides,
+      } as NodeJS.ProcessEnv);
+
+    expect(limits()).toEqual({
+      rounds: UNCAPPED_MODEL_WEB_SEARCH_MAX_ROUNDS,
+      toolCalls: UNCAPPED_MODEL_WEB_SEARCH_MAX_TOOL_CALLS,
+    });
+    expect(
+      limits({
+        DISCOVERY_MODEL_WEB_SEARCH_MAX_ROUNDS: '12',
+        DISCOVERY_MODEL_WEB_SEARCH_MAX_TOOL_CALLS: '40',
+      }),
+    ).toEqual({ rounds: 12, toolCalls: 40 });
+    expect(
+      limits({ DISCOVERY_MODEL_WEB_SEARCH_MAX_ROUNDS: `${MODEL_WEB_SEARCH_MAX_ROUNDS_MAX}` }),
+    ).toMatchObject({ rounds: MODEL_WEB_SEARCH_MAX_ROUNDS_MAX });
+    for (const raw of ['0', '-1', '1e3', 'x', '', `${MODEL_WEB_SEARCH_MAX_ROUNDS_MAX + 1}`]) {
+      expect(limits({ DISCOVERY_MODEL_WEB_SEARCH_MAX_ROUNDS: raw }).rounds).toBe(
+        UNCAPPED_MODEL_WEB_SEARCH_MAX_ROUNDS,
+      );
+    }
+    expect(
+      limits({ DISCOVERY_MODEL_WEB_SEARCH_MAX_TOOL_CALLS: `${MODEL_WEB_SEARCH_MAX_TOOL_CALLS_MAX + 1}` })
+        .toolCalls,
+    ).toBe(UNCAPPED_MODEL_WEB_SEARCH_MAX_TOOL_CALLS);
+  });
+
+  it('进程 env DISCOVERY_UNCAPPED=on：模块常量切到防爆界', async () => {
+    vi.resetModules();
+    vi.stubEnv('DISCOVERY_UNCAPPED', 'on');
+    const mod = await import('./model-web-search');
+    expect(mod.MODEL_WEB_SEARCH_MAX_ROUNDS).toBe(UNCAPPED_MODEL_WEB_SEARCH_MAX_ROUNDS);
+    expect(mod.MODEL_WEB_SEARCH_MAX_TOOL_CALLS).toBe(UNCAPPED_MODEL_WEB_SEARCH_MAX_TOOL_CALLS);
   });
 });
