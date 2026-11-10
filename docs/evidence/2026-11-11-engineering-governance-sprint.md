@@ -121,7 +121,7 @@
 | #155 | saas | CI 分流 + gitleaks + 合同 pin | 4 job 绿 | MERGED `f0f65359` |
 | #156 | saas | 状态页记录（快通道实测） | classify+secret 绿、e2e skipped | MERGED `59a61f8` |
 | #157 | saas | main push 并发组修复 | 4 job 绿 | MERGED `450576c2` |
-| #1014 | backend | main push 的 governance/security 并发组 | 见 §7 | 见 §7 |
+| #1014 | backend | main push 的 governance/security 并发组 | 5 项必需检查全绿 | MERGED `af26b006` |
 | #159 | saas | 修复门户悬空链接与不实描述 | 快通道：classify 5s / secret 10s / fast-path 11s / e2e skipped | MERGED `066ca207` |
 | #1008 | backend | 本治理报告 | 见 §7（docs-only 快通道实测） | 见 §7 |
 
