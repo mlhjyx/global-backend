@@ -176,7 +176,8 @@ describe('model-web-search（获客通路 A 骨架）', () => {
         },
         { icp: 'x' },
       ),
-    ).rejects.toMatchObject({ code: 'MODEL_WEB_SEARCH_TOOL_BUDGET_EXCEEDED' });
+      // 越限调用不再抛错（改为回填结算消息），但模型始终不给出最终答案时仍由轮数硬限兜底。
+    ).rejects.toMatchObject({ code: 'MODEL_WEB_SEARCH_ROUND_BUDGET_EXCEEDED' });
 
     await expect(
       runModelWebSearch(
@@ -198,5 +199,58 @@ describe('model-web-search（获客通路 A 骨架）', () => {
         { icp: 'x' },
       ),
     ).rejects.toMatchObject({ code: 'MODEL_WEB_SEARCH_TOOL_INPUT_INVALID' });
+  });
+
+  it('将超出搜索预算的调用改为结算消息，模型随后作答即可正常返回', async () => {
+    const searches: string[] = [];
+    const seenToolMessages: string[] = [];
+    let round = 0;
+    const answer = JSON.stringify({
+      candidates: [
+        {
+          companyName: 'Acme',
+          domain: 'acme.test',
+          countryCode: 'DE',
+          evidenceUrls: ['https://acme.test/a'],
+          query: 'one',
+        },
+      ],
+    });
+    const result = await runModelWebSearch(
+      {
+        search: async (query) => {
+          searches.push(query);
+          return [{ url: 'https://acme.test/a', title: 'Acme' }];
+        },
+        maxRounds: 3,
+        maxToolCalls: 1,
+        generateChat: async (input) => {
+          round += 1;
+          if (round === 1) {
+            return turn({
+              stopReason: 'tool_use',
+              toolUses: [
+                { id: 'a', name: 'web_search', input: { query: 'one' } },
+                { id: 'b', name: 'web_search', input: { query: 'two' } },
+              ],
+            });
+          }
+          seenToolMessages.push(JSON.stringify(input.messages.at(-1)?.content ?? ''));
+          if (round === 2) {
+            return turn({
+              stopReason: 'tool_use',
+              toolUses: [{ id: 'c', name: 'web_search', input: { query: 'three' } }],
+            });
+          }
+          return turn({ stopReason: 'end', text: answer });
+        },
+      },
+      { icp: 'x' },
+    );
+
+    // 只真正执行了预算内的 1 次搜索；越限的 'two' 与下一轮的 'three' 都没有发出去。
+    expect(searches).toEqual(['one']);
+    expect(seenToolMessages.some((m) => m.includes('MODEL_WEB_SEARCH_TOOL_BUDGET_EXCEEDED'))).toBe(true);
+    expect(result.candidates).toHaveLength(1);
   });
 });

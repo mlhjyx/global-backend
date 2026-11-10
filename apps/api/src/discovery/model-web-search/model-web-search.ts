@@ -235,6 +235,24 @@ export function parseModelWebSearchAnswer(text: string): ModelWebSearchCandidate
   return out;
 }
 
+/**
+ * 超出搜索预算的调用：不执行搜索，回填一条明确的结算消息（含错误码），
+ * 让模型立即用已有结果作答；轮数上限仍是硬失败（ROUND_BUDGET_EXCEEDED）。
+ */
+function budgetExhaustedToolResultMessage(
+  use: ModelWebSearchToolUse,
+  maxToolCalls: number,
+): ChatMessage {
+  return {
+    role: 'tool',
+    toolUseId: use.id,
+    content: JSON.stringify({
+      error: 'MODEL_WEB_SEARCH_TOOL_BUDGET_EXCEEDED',
+      message: `web_search 累计调用已达上限 ${maxToolCalls}，不会再有新搜索结果。请立即基于已有结果输出最终 JSON。`,
+    }),
+  };
+}
+
 /** 把工具结果序列化为回填消息；保持精简（URL+标题），避免把整页塞进上下文。 */
 function toolResultMessage(use: ModelWebSearchToolUse, hits: readonly WebSearchToolHit[]): ChatMessage {
   return {
@@ -277,17 +295,17 @@ export async function runModelWebSearch(
       messages.push({ role: 'assistant', content: turn.text, toolUses: turn.toolUses });
       for (const use of turn.toolUses) {
         toolCalls += 1;
-        if (toolCalls > maxToolCalls) {
-          throw new ModelWebSearchError(
-            'MODEL_WEB_SEARCH_TOOL_BUDGET_EXCEEDED',
-            `web_search 调用超过上限 ${maxToolCalls}`,
-          );
-        }
         if (use.name !== 'web_search') {
           throw new ModelWebSearchError(
             'MODEL_WEB_SEARCH_UNKNOWN_TOOL',
             `模型调用了未授权工具 ${use.name}`,
           );
+        }
+        // 超预算的调用不再执行，回填一条结算消息让模型立即基于已有结果作答——
+        // 硬上限不变（成本与搜索次数仍被钳制），但一次越限不再让整次检索作废。
+        if (toolCalls > maxToolCalls) {
+          messages.push(budgetExhaustedToolResultMessage(use, maxToolCalls));
+          continue;
         }
         const query = parseToolQuery(use.input);
         const hits = await deps.search(query);
