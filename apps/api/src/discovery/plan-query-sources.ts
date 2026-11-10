@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import {
   MAX_QUERY_PLANNER_QUERIES,
   MAX_DISCOVERY_PROVIDER_RECORDS,
@@ -6,8 +7,9 @@ import {
   discoveryUncappedEnabled,
 } from './execution-envelope';
 import type { DiscoveryQuerySkipReason } from './discovery-query-skip';
-import type { PlanQueryShape } from './icp-to-cpv';
+import { boundedTargetCountries, splitTerms, type PlanQueryShape } from './icp-to-cpv';
 import type { SourceClass } from './provider-contract';
+import { targetCountryCodes } from './search-localization';
 import { selectFairs } from './trade-fairs';
 
 /**
@@ -619,4 +621,194 @@ export function withCheapFirstShadowNote<Q extends PlanQueryShape>(
   if (budgetDropped > 0) parts.push(`按每源查询预算将移出 ${budgetDropped} 条查询`);
   const note = `[cheap-first shadow] ${parts.join('；')}（当前 DISCOVERY_CHEAP_FIRST=shadow，未实际启用）`;
   return [{ ...first, rationale: `${first.rationale ?? ''}\n${note}` }, ...rest];
+}
+
+/** 覆盖补齐不参与盲补的源：trade_fair 无匹配展会时注定空跑（2026-11-02 run 3212f6f3 八条全空）。 */
+const COVERAGE_EXCLUDED_SOURCE_KEYS: ReadonlySet<string> = new Set(['trade_fair']);
+
+/** 覆盖补齐依赖（可测试的注入参数）。 */
+export interface SourceCoverageDeps {
+  /**
+   * 已有可枚举注册实体的国家（registry_frame 平台表里有 PARSED 快照），大写 ISO 3166-1 alpha-2。
+   * 提供集合 → 仅当首个目标国的 ISO2 在集合内才补 registry_frame 查询；
+   * 缺省或 null（装载状态未知/查询失败）→ 仍补查询，但在 rationale 标注「注册库未装载」warning，
+   * 让计划 review 看见这次补齐可能空跑。
+   */
+  readonly registryFrameCountries?: ReadonlySet<string> | null;
+}
+
+/** 覆盖补齐只读取 ICP 的这两个字段。 */
+export interface SourceCoverageIcp {
+  readonly targetMarkets: unknown;
+  readonly companyAttributes: unknown;
+}
+
+/** 补查询的固定 rationale（计划 review 据此识别确定性补齐，而非模型规划）。 */
+export const SOURCE_COVERAGE_RATIONALE = '覆盖补齐：该源本轮无模型查询，按 ICP 主画像确定性补充';
+
+/** 装载状态未知时附在 rationale 里的 warning。 */
+const REGISTRY_FRAME_UNKNOWN_NOTE =
+  '（注册库未装载：无法确认目标国有 registry frame 装载，该查询可能空跑）';
+
+function firstTermText(value: unknown): string | undefined {
+  return splitTerms(value)[0];
+}
+
+/** 应覆盖源：可规划集合内、按注册顺序去重（一个 provider 多个 source_class 取首个）。 */
+function coverageEligibleSources(
+  lineage: readonly CompanyDiscoverySource[],
+): CompanyDiscoverySource[] {
+  const eligible: CompanyDiscoverySource[] = [];
+  const seen = new Set<string>();
+  for (const source of lineage) {
+    const key = source.providerKey;
+    if (seen.has(key) || !Object.hasOwn(PLANNER_SOURCE_GUIDE, key)) continue;
+    if (SYSTEM_PLANNED_SOURCE_KEYS.has(key) || COVERAGE_EXCLUDED_SOURCE_KEYS.has(key)) continue;
+    seen.add(key);
+    eligible.push(source);
+  }
+  return eligible;
+}
+
+/** 已覆盖的源键：任一条查询的 source_hint 命中即算；无 hint 的查询按其 source_class 整类扇出。 */
+function coveredSourceKeys(
+  queries: readonly PlanQueryShape[],
+  lineage: readonly CompanyDiscoverySource[],
+): Set<string> {
+  const covered = new Set<string>();
+  for (const query of queries) {
+    const hints = planQuerySourceHints(query.filters);
+    if (hints === null) continue;
+    if (hints.length === 0) {
+      for (const source of lineage) {
+        if (source.sourceClass === query.source_class) covered.add(source.providerKey);
+      }
+      continue;
+    }
+    for (const hint of hints) {
+      for (const source of lineage) {
+        if (sourceHintMatches(source.providerKey, hint)) covered.add(source.providerKey);
+      }
+    }
+  }
+  return covered;
+}
+
+/** 覆盖补齐的 ICP 主画像：首个目标国（原词与其 ISO2）、行业词、末位 priority。 */
+interface CoverageFillContext {
+  readonly firstTarget: string | undefined;
+  readonly firstTargetIso2: string | undefined;
+  readonly industry: string | undefined;
+  readonly priority: number;
+  readonly registryFrameCountries: ReadonlySet<string> | null | undefined;
+}
+
+/**
+ * 一条源的确定性兜底查询；返回 null 表示不该补：registry_frame 的 filters 契约只接受
+ * ISO2，解析不出目标国 ISO2、或目标国没有装载时补了也只会空跑。
+ */
+function coverageFillQuery(
+  source: CompanyDiscoverySource,
+  context: CoverageFillContext,
+): PlanQueryShape | null {
+  const filters: Record<string, unknown> = { source_hint: source.providerKey };
+  if (context.firstTarget) filters.country = context.firstTarget;
+  if (context.industry) filters.industry = context.industry;
+  let rationale = SOURCE_COVERAGE_RATIONALE;
+  if (source.providerKey === 'registry_frame') {
+    if (!context.firstTargetIso2) return null;
+    if (
+      context.registryFrameCountries &&
+      !context.registryFrameCountries.has(context.firstTargetIso2)
+    ) {
+      return null;
+    }
+    filters.country = context.firstTargetIso2;
+    // 装载状态未知：仍补，但在 rationale 留 warning 让计划 review 看见可能空跑。
+    if (!context.registryFrameCountries) rationale += REGISTRY_FRAME_UNKNOWN_NOTE;
+  }
+  return {
+    source_class: source.sourceClass,
+    filters,
+    keywords: [],
+    rationale,
+    priority: context.priority,
+  };
+}
+
+/**
+ * vNext W4 覆盖补齐：提示词引导不是保证。2026-11-10 的真实 run 里 14 条查询只覆盖 5 个源，
+ * model_web_search（已启用、有血缘、可规划）一条查询都没排到。这里在路由与冷路径注入之后
+ * 逐源核对覆盖面，对任何未出现在任何查询 filters.source_hint 的「应覆盖源」合成一条确定性
+ * 兜底查询：首个目标国 + ICP 行业词、keywords 留空、priority 末位。
+ *
+ * 应覆盖源 = 已启用 + 声明公司血缘 + 在 PLANNER_SOURCE_GUIDE（可规划集合）内，排除：
+ *  - SYSTEM_PLANNED_SOURCE_KEYS（ted/openfda）：冷路径注入负责，不在可规划集合内；
+ *  - trade_fair：无匹配展会时盲补只会空跑（COVERAGE_EXCLUDED_SOURCE_KEYS）；
+ *  - registry_frame：仅当首个目标国已有装载的注册库时补，判定见 SourceCoverageDeps。
+ *
+ * 约束：
+ *  - keywords 为空数组——关键词语言校验在补齐之前完成，空 keywords 不会触发重写/失败；
+ *  - country/industry 只用 ICP 原词，不臆造词表代码（registry_frame 例外，见 coverageFillQuery）；
+ *  - 补入条数受计划执行上限（MAX_DISCOVERY_PLAN_QUERIES）约束，按源路由优先级依次补；
+ *  - 无 source_hint 的查询按 source_class 整类扇出，视为已覆盖该类全部已启用源（与执行器一致）。
+ */
+export function withSourceCoverage(
+  queries: readonly PlanQueryShape[],
+  icp: SourceCoverageIcp,
+  enabledSources: readonly CompanyDiscoverySource[],
+  deps: SourceCoverageDeps = {},
+  cap: number = MAX_DISCOVERY_PLAN_QUERIES,
+): PlanQueryShape[] {
+  if (queries.length >= cap) return queries as PlanQueryShape[];
+  const lineage = withCompanyLineage(enabledSources);
+  const eligible = coverageEligibleSources(lineage);
+  if (!eligible.length) return queries as PlanQueryShape[];
+  const covered = coveredSourceKeys(queries, lineage);
+  const firstTarget = boundedTargetCountries(icp.targetMarkets)[0];
+  const attributes = (icp.companyAttributes ?? {}) as Record<string, unknown>;
+  const context: CoverageFillContext = {
+    firstTarget,
+    firstTargetIso2: firstTarget
+      ? targetCountryCodes({ filters: { country: [firstTarget] } })[0]?.toUpperCase()
+      : undefined,
+    industry: firstTermText(attributes.industry) ?? firstTermText(attributes.sub_industry),
+    priority: queries.reduce((max, query) => Math.max(max, planPriority(query.priority)), 0) + 1,
+    registryFrameCountries: deps.registryFrameCountries,
+  };
+  const additions: PlanQueryShape[] = [];
+  // 按源路由优先级（结构化源优先、public_web 最后）补，封口时留下的正是更便宜的结构化源。
+  const byPriority = [...eligible].sort(
+    (left, right) => sourceRoutePriority(left.providerKey) - sourceRoutePriority(right.providerKey),
+  );
+  for (const source of byPriority) {
+    if (covered.has(source.providerKey)) continue;
+    if (queries.length + additions.length >= cap) break;
+    const fill = coverageFillQuery(source, context);
+    if (fill) additions.push(fill);
+  }
+  return additions.length ? [...queries, ...additions] : (queries as PlanQueryShape[]);
+}
+
+/** registry_frame 平台表（无 RLS，app_user 只读）的最小读取面：事务客户端与连接客户端都满足。 */
+type RegistryFrameDb = Pick<Prisma.TransactionClient, 'registryFrame'>;
+
+/**
+ * 覆盖补齐的装载判定输入：当前有 ACTIVE 帧且至少一个 PARSED 快照的国家（大写 ISO 3166-1
+ * alpha-2，即 registry_frame.country 的存储形态）。读失败返回 null = 装载状态未知：
+ * 覆盖补齐据此在 rationale 留 warning，而不是阻断一次查询计划生成。
+ */
+export async function loadRegistryFrameCountries(
+  db: RegistryFrameDb,
+): Promise<ReadonlySet<string> | null> {
+  try {
+    const rows = await db.registryFrame.findMany({
+      where: { status: 'ACTIVE', snapshots: { some: { status: 'PARSED' } } },
+      select: { country: true },
+      distinct: ['country'],
+    });
+    return new Set(rows.map((row) => row.country.toUpperCase()));
+  } catch {
+    return null;
+  }
 }

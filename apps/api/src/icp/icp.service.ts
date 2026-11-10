@@ -28,6 +28,7 @@ import {
   hasPlannableSource,
   icpMatchesRegisteredFairs,
   isSourceRunnable,
+  loadRegistryFrameCountries,
   plannerSourcePrompt,
   plannerVisibleSources,
   routePlannerQueries,
@@ -36,6 +37,7 @@ import {
   sourceQueryBudgets,
   withCheapFirstShadowNote,
   withDroppedQueryNote,
+  withSourceCoverage,
 } from '../discovery/plan-query-sources';
 import { trialSourceProviders } from '../discovery/source-trial';
 import { searchLanguagesForMarkets, type SearchLanguage } from '../discovery/search-localization';
@@ -766,6 +768,10 @@ export class IcpService {
     }
     // 规划查询一条不剩、只有冷路径注入的查询时，移出说明记在计划的首条查询上。
     if (planned.length === 0) queries = withDroppedQueryNote(queries, dropped);
+    // vNext W4 覆盖补齐：已启用、有血缘、可规划却无查询的源按 ICP 主画像补确定性兜底查询。
+    queries = withSourceCoverage(queries, icp, enabledSources, {
+      registryFrameCountries: await loadRegistryFrameCountries(this.prisma),
+    });
 
     const queryPlanId = result.durableReceipt
       ? domainAggregateIdForReceipt(result.durableReceipt, 'discovery.query_plan')
