@@ -5,7 +5,7 @@ title: Acquisition vNext W3 evaluation sets, precision@k, Chapman coverage and s
 
 - 起因：获客挖掘 vNext 要求「覆盖率是可测的量」（golden set precision@k、双源捕获-再捕获 recall 估计、每源边际产出会计、账单三方对账），计划 docs/superpowers/plans/2026-11-10-deep-acquisition-vnext.md §3 W3。
 - 改动：
-  - 迁移 20261110060000_acquisition_evaluation 追加四张租户表（均 ENABLE+FORCE RLS）：evaluation_set、evaluation_label、source_yield_ledger、coverage_estimate；app_user 权限同步登记到 docs/governance/app-user-table-privileges.json。
+  - 迁移 20261110130000_acquisition_evaluation 追加四张租户表（均 ENABLE+FORCE RLS）：evaluation_set、evaluation_label、source_yield_ledger、coverage_estimate；app_user 权限同步登记到 docs/governance/app-user-table-privileges.json。
   - 新模块 apps/api/src/evaluation：POST /evaluation/sets、POST /evaluation/sets/:id/labels、GET /evaluation/sets/:id/report（precision@k）、GET /evaluation/coverage（Chapman 估计 + 95% CI，自动存证）。
   - source_yield_ledger 生产写入接入 discovery finalizeRun 同事务（幂等），并提供 backfill-source-yield-ledger 回填脚本与 evaluation-import-golden-set 导入脚本。
   - /metrics 新增 GET /metrics/source-yield（按日/周×源聚合）与 GET /metrics/billing-reconciliation（usage_ledger ↔ tool_budget_operation ↔ tool_budget_account 三方视图，标注余额来源表）。

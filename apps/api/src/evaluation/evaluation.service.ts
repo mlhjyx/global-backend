@@ -2,7 +2,7 @@
  * 评估学（获客 vNext W3）：golden set 标注、precision@k 报告、双源覆盖估计。
  *
  * 数据模型：evaluation_set / evaluation_label / coverage_estimate（迁移
- * 20261110060000_acquisition_evaluation，四表均带 workspace RLS）。所有 DB 访问
+ * 20261110130000_acquisition_evaluation，四表均带 workspace RLS）。所有 DB 访问
  * 经 withWorkspace（app_user + RLS），不出现裸 workspace 过滤。
  *
  * 报告口径：

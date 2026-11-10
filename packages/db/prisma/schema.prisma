@@ -4510,7 +4510,7 @@ model CompanyLegalLink {
 // 获客挖掘 vNext W3（评估学与产出会计，2026-11-10）：evaluation_set /
 // evaluation_label / source_yield_ledger / coverage_estimate 四表。
 // 设计依据：docs/superpowers/plans/2026-11-10-deep-acquisition-vnext.md §3 W3；
-// 迁移 20261110060000_acquisition_evaluation。全部租户表（ENABLE + FORCE RLS）。
+// 迁移 20261110130000_acquisition_evaluation。全部租户表（ENABLE + FORCE RLS）。
 //
 // evaluation_set：一次人工标注的评估集版本（附录 A 的 golden set）。
 // evaluation_label：集内一条人工判定（POSITIVE|NEGATIVE）。候选引用三选一：

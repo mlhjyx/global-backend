@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const MIGRATIONS = fileURLToPath(new URL("../../../../packages/db/prisma/migrations/", import.meta.url));
-const MIGRATION = "20261110060000_acquisition_evaluation";
+const MIGRATION = "20261110130000_acquisition_evaluation";
 const PRIVILEGES = fileURLToPath(
   new URL("../../../../docs/governance/app-user-table-privileges.json", import.meta.url),
 );
