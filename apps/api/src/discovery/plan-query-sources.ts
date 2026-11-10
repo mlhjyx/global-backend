@@ -1,4 +1,10 @@
-import { MAX_QUERY_PLANNER_QUERIES, MAX_DISCOVERY_PROVIDER_RECORDS } from './execution-envelope';
+import {
+  MAX_QUERY_PLANNER_QUERIES,
+  MAX_DISCOVERY_PROVIDER_RECORDS,
+  MAX_DISCOVERY_PLAN_QUERIES,
+  ambientProcessEnv,
+  discoveryUncappedEnabled,
+} from './execution-envelope';
 import type { DiscoveryQuerySkipReason } from './discovery-query-skip';
 import type { PlanQueryShape } from './icp-to-cpv';
 import type { SourceClass } from './provider-contract';
@@ -88,9 +94,25 @@ export interface SourceQueryBudgetConfig {
   readonly trialMaxRuns: number;
 }
 
+/**
+ * 去帽模式（DISCOVERY_UNCAPPED=on）下试跑计数上限：试跑期不再作为产品配额，
+ * 留作防爆界的独大值（计数来自 raw_source_record，纯观察，无额外成本）。
+ */
+const UNCAPPED_TRIAL_MAX_RUNS = 1_000_000;
+
+/**
+ * 去帽模式下每源每轮公司帽的默认值 = 全部计划查询（含冷路径注入）× 每查询每源
+ * 记录安全界，换算回查询预算恰好 `MAX_DISCOVERY_PLAN_QUERIES` 条——等于单源最大
+ * 副本数，预算永不先于余额收紧。显式 env 仍然生效（运营者自选的更紧预算）。
+ */
+function uncappedCompaniesPerSource(): number {
+  return MAX_DISCOVERY_PLAN_QUERIES * MAX_DISCOVERY_PROVIDER_RECORDS;
+}
+
 export function sourceQueryBudgetConfig(
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = ambientProcessEnv(),
 ): SourceQueryBudgetConfig {
+  const uncapped = discoveryUncappedEnabled(env);
   const positive = (raw: string | undefined, fallback: number): number => {
     const text = (raw ?? '').trim();
     // 只接受纯十进制数字串：parseInt 会把 '1e3'/'100abc' 截成前缀，畸形值必须回退默认而不是静默缩水。
@@ -98,17 +120,29 @@ export function sourceQueryBudgetConfig(
     const parsed = Number.parseInt(text, 10);
     return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
   };
+  const companies = uncappedCompaniesPerSource();
   return {
-    structuredRunCap: positive(env.DISCOVERY_STRUCTURED_SOURCE_RUN_CAP, 100),
-    trialMaxCompanies: positive(env.DISCOVERY_TRIAL_MAX_COMPANIES, 20),
-    trialMaxRuns: positive(env.DISCOVERY_TRIAL_MAX_RUNS, 10),
+    structuredRunCap: positive(
+      env.DISCOVERY_STRUCTURED_SOURCE_RUN_CAP,
+      uncapped ? companies : 100,
+    ),
+    trialMaxCompanies: positive(
+      env.DISCOVERY_TRIAL_MAX_COMPANIES,
+      uncapped ? companies : 20,
+    ),
+    trialMaxRuns: positive(
+      env.DISCOVERY_TRIAL_MAX_RUNS,
+      uncapped ? UNCAPPED_TRIAL_MAX_RUNS : 10,
+    ),
   };
 }
 
 /**
- * 每个源的每轮查询预算：结构化源 = floor(公司帽 / 每查询每源记录上限)（默认 100/25 = 4 条，
+ * 每个源的每轮查询预算：结构化源 = floor(公司帽 / 每查询每源记录上限)（off 默认 100/25 = 4 条，
  * 等价于每轮每源 ≤100 条原始公司记录；公司帽 <25 时为 0 条，即一轮不跑该源）；
  * 试跑源按 §11 收紧为 max(1, floor(20/25)) = 1 条（≤25 条）。
+ * 去帽模式（DISCOVERY_UNCAPPED=on）下默认换算回 66 条 = 全部计划查询数，
+ * 预算不先于余额裁剪任何查询副本。
  * public_web 是兜底源，不设查询预算（其总量由下游公司池约束，见设计 §11 更正）。
  */
 export function sourceQueryBudgets(
@@ -258,7 +292,10 @@ export function hasPlannableSource(enabled: readonly CompanyDiscoverySource[]): 
  * The planner prompt's list of sources: only runnable ones (ENABLED, with
  * governed lineage), so the model does not spend output on queries that cannot run.
  */
-export function plannerSourcePrompt(enabled: readonly CompanyDiscoverySource[]): string {
+export function plannerSourcePrompt(
+  enabled: readonly CompanyDiscoverySource[],
+  env: NodeJS.ProcessEnv = ambientProcessEnv(),
+): string {
   const runnable = withCompanyLineage(enabled);
   const classesByKey = new Map<string, string[]>();
   for (const source of plannable(runnable)) {
@@ -280,10 +317,13 @@ export function plannerSourcePrompt(enabled: readonly CompanyDiscoverySource[]):
         .filter((key) => SYSTEM_PLANNED_SOURCE_KEYS.has(key)),
     ),
   ];
+  const quota = discoveryUncappedEnabled(env)
+    ? '配额：执行预算按客户可用余额准入（min(估算包络, 余额)），每次调用按实际花费结算、余额耗尽即停——平台不设产品查询配额；请把查询花在覆盖面上，不要重复检索同一目标。'
+    : '配额：结构化源每轮各约 ≤100 家公司；public_web 把公司池补到 500；新源前 10 次运行限量试跑。';
   return [
     '可用数据源（当前已启用）。每条查询的 source_class 与 filters.source_hint 必须取下表同一行，不要为表外的数据源出查询，系统会丢弃：',
     '路由优先级：结构化源优先（公司库 → 名录/展会 → 官方采购/认证源），public_web 仅作兜底——只用于结构化源覆盖不到的行业、地区或角色。',
-    '配额：结构化源每轮各约 ≤100 家公司；public_web 把公司池补到 500；新源前 10 次运行限量试跑。',
+    quota,
     ...rows,
     ...(systemPlanned.length
       ? [`${systemPlanned.join('、')} 的查询由系统按 ICP 确定性生成，不要自己写。`]

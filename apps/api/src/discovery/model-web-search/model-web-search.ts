@@ -1,4 +1,5 @@
 import { getTask } from '../../ai-tasks/task-registry';
+import { ambientProcessEnv, discoveryUncappedEnabled } from '../execution-envelope';
 import type {
   ChatMessage,
   ChatToolDefinition,
@@ -21,9 +22,64 @@ import type {
 
 export const MODEL_WEB_SEARCH_TASK_ID = 'discovery.web_search_candidates';
 
-/** 工具环默认上限（执行形状契约；报价信封按同一常量计算上界）。 */
-export const MODEL_WEB_SEARCH_MAX_ROUNDS = 6;
-export const MODEL_WEB_SEARCH_MAX_TOOL_CALLS = 10;
+/**
+ * 工具环默认上限（执行形状契约；报价信封按同一常量计算上界）。
+ *
+ * 产品帽（off）：6 轮 / 10 次调用。`DISCOVERY_UNCAPPED=on` 时升为防爆安全界
+ * （默认 24 轮 / 100 次，env `DISCOVERY_MODEL_WEB_SEARCH_MAX_ROUNDS/TOOL_CALLS` 可调）；
+ * 真正的收紧条件是执行预算账户逐轮结算、余额耗尽即停。
+ */
+export interface ModelWebSearchLoopLimits {
+  readonly rounds: number;
+  readonly toolCalls: number;
+}
+
+export const MODEL_WEB_SEARCH_MAX_ROUNDS_CAPPED = 6;
+export const MODEL_WEB_SEARCH_MAX_TOOL_CALLS_CAPPED = 10;
+export const UNCAPPED_MODEL_WEB_SEARCH_MAX_ROUNDS = 24;
+export const UNCAPPED_MODEL_WEB_SEARCH_MAX_TOOL_CALLS = 100;
+export const MODEL_WEB_SEARCH_MAX_ROUNDS_MAX = 100;
+export const MODEL_WEB_SEARCH_MAX_TOOL_CALLS_MAX = 1_000;
+
+function loopBound(
+  raw: string | undefined,
+  fallback: number,
+  maximum: number,
+): number {
+  const text = (raw ?? '').trim();
+  if (!/^\d+$/u.test(text)) return fallback;
+  const parsed = Number.parseInt(text, 10);
+  return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= maximum
+    ? parsed
+    : fallback;
+}
+
+export function resolveModelWebSearchLoopLimits(
+  env: NodeJS.ProcessEnv = ambientProcessEnv(),
+): ModelWebSearchLoopLimits {
+  if (!discoveryUncappedEnabled(env)) {
+    return Object.freeze({
+      rounds: MODEL_WEB_SEARCH_MAX_ROUNDS_CAPPED,
+      toolCalls: MODEL_WEB_SEARCH_MAX_TOOL_CALLS_CAPPED,
+    });
+  }
+  return Object.freeze({
+    rounds: loopBound(
+      env.DISCOVERY_MODEL_WEB_SEARCH_MAX_ROUNDS,
+      UNCAPPED_MODEL_WEB_SEARCH_MAX_ROUNDS,
+      MODEL_WEB_SEARCH_MAX_ROUNDS_MAX,
+    ),
+    toolCalls: loopBound(
+      env.DISCOVERY_MODEL_WEB_SEARCH_MAX_TOOL_CALLS,
+      UNCAPPED_MODEL_WEB_SEARCH_MAX_TOOL_CALLS,
+      MODEL_WEB_SEARCH_MAX_TOOL_CALLS_MAX,
+    ),
+  });
+}
+
+const LOOP_LIMITS = resolveModelWebSearchLoopLimits();
+export const MODEL_WEB_SEARCH_MAX_ROUNDS: number = LOOP_LIMITS.rounds;
+export const MODEL_WEB_SEARCH_MAX_TOOL_CALLS: number = LOOP_LIMITS.toolCalls;
 
 export interface WebSearchToolHit {
   url: string;
@@ -51,9 +107,9 @@ export interface ModelWebSearchDeps {
   }): Promise<ModelWebSearchTurn>;
   /** web_search 工具的执行端（生产绑定 ToolBroker searxng.search）。 */
   search(query: string): Promise<readonly WebSearchToolHit[]>;
-  /** 工具环上限（模型往返次数），默认 4。 */
+  /** 工具环上限（模型往返次数），缺省取 MODEL_WEB_SEARCH_MAX_ROUNDS（off 6 / 去帽 24）。 */
   maxRounds?: number;
-  /** web_search 总调用上限，默认 8。 */
+  /** web_search 总调用上限，缺省取 MODEL_WEB_SEARCH_MAX_TOOL_CALLS（off 10 / 去帽 100）。 */
   maxToolCalls?: number;
 }
 

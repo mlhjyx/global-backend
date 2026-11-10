@@ -7,11 +7,37 @@
  * 设计：docs/superpowers/plans/2026-11-04-acquisition-system-complete-design.md §6.2（R3/R4）。
  */
 import { qualify, type QualifyResult, type RuleLike } from '../../icp/rule-engine';
+import { ambientProcessEnv, discoveryUncappedEnabled } from '../execution-envelope';
 
 /** 一次批量粗判的公司数（设计 R4：8 家/次，失败降级逐家）。 */
 export const QUICK_JUDGE_BATCH_SIZE = 8;
-/** 单个 run 消费公司池的上限（设计 Q8：500 家/run）。 */
-export const QUICK_SCAN_POOL_LIMIT = 500;
+/** 产品帽：单个 run 消费公司池的上限（设计 Q8：500 家/run）。 */
+export const QUICK_SCAN_POOL_LIMIT_CAPPED = 500;
+/** 去帽模式的防爆界默认（env `DISCOVERY_QUICK_SCAN_POOL_LIMIT`，1–1_000_000）。 */
+export const UNCAPPED_QUICK_SCAN_POOL_LIMIT = 50_000;
+export const QUICK_SCAN_POOL_LIMIT_MAX = 1_000_000;
+
+/**
+ * 单个 run 消费公司池的上限。off：产品帽 500（行为与今天一致）；
+ * DISCOVERY_UNCAPPED=on：升为防爆安全界（默认 5 万，env 可调），
+ * 真正的收紧条件是执行预算账户（余额耗尽即停），不是这里的产品帽。
+ */
+export function resolveQuickScanPoolLimit(
+  env: NodeJS.ProcessEnv = ambientProcessEnv(),
+): number {
+  if (!discoveryUncappedEnabled(env)) return QUICK_SCAN_POOL_LIMIT_CAPPED;
+  const text = (env.DISCOVERY_QUICK_SCAN_POOL_LIMIT ?? '').trim();
+  if (!/^\d+$/u.test(text)) return UNCAPPED_QUICK_SCAN_POOL_LIMIT;
+  const parsed = Number.parseInt(text, 10);
+  return Number.isSafeInteger(parsed) &&
+    parsed >= 1 &&
+    parsed <= QUICK_SCAN_POOL_LIMIT_MAX
+    ? parsed
+    : UNCAPPED_QUICK_SCAN_POOL_LIMIT;
+}
+
+/** 模块级值：进程启动时的 env 解析结果（off 默认 500）。 */
+export const QUICK_SCAN_POOL_LIMIT: number = resolveQuickScanPoolLimit();
 
 export type QuickVerdict = 'match' | 'weak' | 'mismatch';
 

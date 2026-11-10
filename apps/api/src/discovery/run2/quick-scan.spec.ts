@@ -1,11 +1,21 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   QUICK_JUDGE_BATCH_SIZE,
+  QUICK_SCAN_POOL_LIMIT,
+  QUICK_SCAN_POOL_LIMIT_CAPPED,
+  QUICK_SCAN_POOL_LIMIT_MAX,
+  UNCAPPED_QUICK_SCAN_POOL_LIMIT,
   buildQuickJudgePrompt,
   parseQuickJudgeBatch,
   prefilterAttributes,
   prefilterCompany,
+  resolveQuickScanPoolLimit,
 } from './quick-scan';
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.resetModules();
+});
 
 const company = {
   id: 'c1',
@@ -125,5 +135,41 @@ describe('M0③ 快扫：批量粗判解析', () => {
     expect(prompt).toContain('0');
     expect(prompt).toContain('Beta');
     expect(prompt).toContain('DE pump distributors');
+  });
+});
+
+describe('QUICK_SCAN_POOL_LIMIT —— 产品帽 vs 防爆安全界', () => {
+  it('off：产品帽 500，忽略 env 覆盖（行为与今天一致）', () => {
+    expect(resolveQuickScanPoolLimit({} as NodeJS.ProcessEnv)).toBe(
+      QUICK_SCAN_POOL_LIMIT_CAPPED,
+    );
+    expect(
+      resolveQuickScanPoolLimit({
+        DISCOVERY_QUICK_SCAN_POOL_LIMIT: '9000',
+      } as NodeJS.ProcessEnv),
+    ).toBe(QUICK_SCAN_POOL_LIMIT_CAPPED);
+    expect(QUICK_SCAN_POOL_LIMIT).toBe(500);
+  });
+
+  it('on：默认防爆界 5 万；env 可调，畸形/越界回退默认', () => {
+    const on = (raw?: string): number =>
+      resolveQuickScanPoolLimit({
+        DISCOVERY_UNCAPPED: 'on',
+        ...(raw === undefined ? {} : { DISCOVERY_QUICK_SCAN_POOL_LIMIT: raw }),
+      } as NodeJS.ProcessEnv);
+
+    expect(on()).toBe(UNCAPPED_QUICK_SCAN_POOL_LIMIT);
+    expect(on('9000')).toBe(9_000);
+    expect(on(`${QUICK_SCAN_POOL_LIMIT_MAX}`)).toBe(QUICK_SCAN_POOL_LIMIT_MAX);
+    for (const raw of ['0', '-1', '1e3', '100abc', '10.5', '', `${QUICK_SCAN_POOL_LIMIT_MAX + 1}`]) {
+      expect(on(raw)).toBe(UNCAPPED_QUICK_SCAN_POOL_LIMIT);
+    }
+  });
+
+  it('进程 env DISCOVERY_UNCAPPED=on：模块常量切到防爆界', async () => {
+    vi.resetModules();
+    vi.stubEnv('DISCOVERY_UNCAPPED', 'on');
+    const mod = await import('./quick-scan');
+    expect(mod.QUICK_SCAN_POOL_LIMIT).toBe(UNCAPPED_QUICK_SCAN_POOL_LIMIT);
   });
 });

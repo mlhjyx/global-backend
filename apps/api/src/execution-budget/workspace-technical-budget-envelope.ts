@@ -41,6 +41,7 @@ import {
   MAX_STRUCTURED_HARVEST_RENDERS,
   MAX_UNDERSTANDING_SUBPAGES,
   MAX_WIKIDATA_ENTITY_READS_PER_COMPANY,
+  discoveryUncappedEnabled,
 } from '../discovery/execution-envelope';
 import { TRADE_FAIRS } from '../discovery/trade-fairs';
 import {
@@ -177,6 +178,14 @@ function contract<I, O>(value: Tool<I, O>): Tool<unknown, unknown> {
  * One discovery run (POST /query-plans/:planId/execute): every model task and
  * tool wire the run can reserve, stage by stage, from the ceilings the
  * workflow and providers enforce. See discovery.workflow.ts for the stages.
+ *
+ * 授权语义（获客挖掘 vNext，2026-11-10 计划 §3 W1）：本 envelope 给出的是**估算包络
+ * 上界**（`requiredCapMicrousd`），不是客户价格、余额或额度（quote 合同刻意不含商业
+ * 字段，见 OpenAPI 守护）。签发侧以 Grant cap = min(估算包络, 客户可用余额) 钳制；
+ * 引擎账本对该 cap 逐次 reserve/settle，余额耗尽（EXECUTION_BUDGET_AUTHORITY_EXHAUSTED）
+ * 是唯一执行停止条件。`DISCOVERY_UNCAPPED=on` 时包络里的产品帽换成防爆安全界
+ * （`MAX_DISCOVERY_PROVIDER_RECORDS` 等常量随开关解析），因此估算上界随之放大，
+ * 真正收紧完全落到余额；off 时数字与今天逐字节一致。
  */
 function discoveryRunEnvelope(
   request: WorkspaceExecutionBudgetRequest,
@@ -263,6 +272,8 @@ function discoveryRunEnvelope(
       enrichCompanies: MAX_DISCOVERY_ENRICH_COMPANIES,
       signalCompanies: MAX_DISCOVERY_SIGNAL_COMPANIES,
       watchCompanies: MAX_DISCOVERY_WATCH_COMPANIES,
+      // 去帽模式在 policyRevision 里留下可审计标记（off 时字段缺席，报价逐字节不变）。
+      ...(discoveryUncappedEnabled() ? { discoveryUncapped: 1 } : {}),
     },
   );
 }
