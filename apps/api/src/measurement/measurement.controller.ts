@@ -17,7 +17,11 @@ import {
   BillingReconciliationInputError,
   BillingReconciliationService,
 } from "./billing-reconciliation";
-import { SourceYieldInputError, SourceYieldService } from "./source-yield";
+import {
+  SOURCE_YIELD_DEFAULT_LIMIT,
+  SourceYieldInputError,
+  SourceYieldService,
+} from "./source-yield";
 
 const errorSchema = (codes: readonly string[]) => ({
   type: "object",
@@ -271,9 +275,13 @@ export class MeasurementController {
         providerKey,
         limit: parsedLimit,
       });
+      // 聚合视图没有可跟随的游标：has_more=true 表示「还有更多桶，请调大 limit
+      // （上限 500）或收窄 from/to」，而不是给 next_cursor。省略 limit 时同样按
+      // 默认 100 截断，所以这里必须对默认值也判定。
+      const effectiveLimit = parsedLimit ?? SOURCE_YIELD_DEFAULT_LIMIT;
       return pageEnvelope(items, {
         nextCursor: null,
-        hasMore: parsedLimit !== undefined && items.length === parsedLimit,
+        hasMore: items.length === effectiveLimit,
       });
     } catch (error) {
       if (error instanceof SourceYieldInputError) {

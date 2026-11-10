@@ -26,7 +26,7 @@ import "dotenv/config";
 process.umask(0o077);
 import { readFileSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
-import { candidateKey } from "../src/evaluation/evaluation.service";
+import { candidateKey } from "../src/evaluation/keys";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -126,7 +126,7 @@ async function main(): Promise<void> {
       const data = {
         canonicalCompanyId: label.canonicalCompanyId ?? null,
         domain: label.domain?.trim().toLowerCase() ?? null,
-        name: label.name?.trim() ?? null,
+        name: label.name?.trim().replace(/\s+/gu, " ") ?? null,
         country: label.country?.trim().toUpperCase() ?? null,
         label: label.label,
         labeledBy: "cli:evaluation-import-golden-set",

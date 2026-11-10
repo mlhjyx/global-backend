@@ -185,7 +185,8 @@ export class EvaluationService {
         const data = {
           canonicalCompanyId: entry.canonicalCompanyId ?? null,
           domain: entry.domain?.trim().toLowerCase() ?? null,
-          name: entry.name?.trim() ?? null,
+          // 与 candidateKey 的归一一致（压缩内部空白），否则键归一而列不归一会让报告匹配漂移。
+          name: entry.name?.trim().replace(/\s+/gu, " ") ?? null,
           country: entry.country?.trim().toUpperCase() ?? null,
           label: entry.label,
           labeledBy,
@@ -306,7 +307,8 @@ export class EvaluationService {
               )
               OR (
                 el.name IS NOT NULL AND r.name IS NOT NULL
-                AND lower(btrim(el.name)) = lower(btrim(r.name))
+                AND lower(regexp_replace(btrim(el.name), '[[:space:]]+', ' ', 'g'))
+                  = lower(regexp_replace(btrim(r.name), '[[:space:]]+', ' ', 'g'))
                 AND (el.country IS NULL OR r.country IS NULL
                      OR lower(el.country) = lower(r.country))
               )

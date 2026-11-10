@@ -18,7 +18,8 @@ import { PrismaService } from "../prisma/prisma.service";
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const PROVIDER_KEY = /^[A-Za-z0-9_.:-]{1,128}$/;
 const GRANULARITIES = ["day", "week"] as const;
-const DEFAULT_LIMIT = 100;
+/** 与 controller 的 page.has_more 判定共用：省略 limit 时同样按 100 截断。 */
+export const SOURCE_YIELD_DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
 
 export type SourceYieldGranularity = (typeof GRANULARITIES)[number];
@@ -76,7 +77,7 @@ export class SourceYieldService {
     if (input.providerKey !== undefined && !PROVIDER_KEY.test(input.providerKey)) {
       throw new SourceYieldInputError("providerKey 格式不合法");
     }
-    const limit = input.limit ?? DEFAULT_LIMIT;
+    const limit = input.limit ?? SOURCE_YIELD_DEFAULT_LIMIT;
     if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
       throw new SourceYieldInputError(`limit 必须是 1..${MAX_LIMIT} 的整数`);
     }

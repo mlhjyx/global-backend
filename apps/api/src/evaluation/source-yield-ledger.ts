@@ -10,9 +10,9 @@
  *   - record_count：discovery_query_operation_attempt.provider_record_count 之和
  *     （provider 自报产出的记录数，含重试；与成本同口径——花了多少就得算多少记录）；
  *   - cost_microusd：关联 ToolBudgetOperation 的实扣。SETTLED/RESULT_UNKNOWN 取
- *     charged（缺失回退 observed/reserved；cent 计价的旧行 ×10000），仍 RESERVED
- *     的取 reserved（finalize 时理论上查询已全部结束，这只是兜底），RELEASED 记 0。
- *     与 execution-budget-window-usage 的 charged 口径一致；
+ *     charged（缺失回退 reserved；cent 计价的旧行 ×10000），仍 RESERVED 的取
+ *     reserved（finalize 时理论上查询已全部结束，这只是兜底），RELEASED 记 0。
+ *     与 execution-budget-window-usage 的 charged 口径逐字一致（改口径须两边同改）；
  *   - new_qualified_count：「本 run 新发现且判定合格」的公司数。新发现 =
  *     materialization outcome 为 CANONICALIZED 且 mutation_class=CREATED（公司在本
  *     run 首次进入本 workspace）；合格 = 本 run 的 judgment_record 对该 (workspace,
@@ -54,8 +54,8 @@ export async function writeSourceYieldLedger(
             WHEN o.status IN ('SETTLED', 'RESULT_UNKNOWN') THEN
               CASE
                 WHEN o.amount_unit = 'microusd'
-                  THEN COALESCE(o.charged_microusd, o.observed_microusd, o.reserved_microusd, 0)
-                ELSE COALESCE(o.charged_cents, o.observed_cents, o.reserved_cents, 0) * 10000
+                  THEN COALESCE(o.charged_microusd, o.reserved_microusd, 0)
+                ELSE COALESCE(o.charged_cents, o.reserved_cents, 0) * 10000
               END
             WHEN o.status = 'RESERVED' THEN
               CASE
