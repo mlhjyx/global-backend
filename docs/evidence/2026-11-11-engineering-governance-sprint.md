@@ -155,6 +155,7 @@
 | environment-parity-policy | RETAIN | 单一产品运行路径的机器执行；当前 24 条登记差异 |
 | Copy fixed-source 指纹 + 变异测试 | RETAIN / COMBINE 候选 | 保护受控文件，但重签窗口与 docs:verify 组合命令耦合，拆分需单独立项 |
 | RuntimeEvidence / Release Bundle | HOLD | 机制本身必要，但外部 provenance 死锁使晋级不可达；等 PRD4-D12 |
+| Skill Runtime（`skill_package`/`skill_version`/`skill_enablement`/解析快照、SKILL.md 校验器、Golden Set CI 层） | RETAIN | 对应 G6.4「AI 产品能力治理」：版本、启停、解析快照与评测门已是机器机制，不需要新制度 |
 | 决策卡 / merge-judge | 已退役（2026-09-21） | 无新增 |
 | 人工审批步骤 | RETAIN（最小化） | 仅剩 release/部署与 ruleset 变更需用户授权 |
 
@@ -163,7 +164,7 @@
 - gain-saas 四个 systemd 单元（db/web/worker/jwks-tls）实测 `enabled + active`；4020 监听者属 systemd 进程。文档中的 nohup 指令已移除（PR #154）。
 - R4 部署绑定：`gain-saas/deploy/r4/deployment-binding.json` 的 `validUntil` = **2026-11-17T17:04:52Z**（7 天窗口），到期前需随下一次换镜像续期（`gctl switch-backend` 自动）。
 - 数据库备份 / 异地副本：**NOT_VERIFIED**（备份目录 root-only，xin 身份无法核验；doctor 未报异常）。用户既有的「等有真实客户数据再做异地副本」决定不变。
-- 数据质量计数：沿用 `status/current.md` 的 2026-11-04 快照；本轮**未重跑**只读查询（NOT_RUN），不把旧计数当当前成果。
+- 数据质量：仓库已有 2026-11-09 的三份只读基线——漏斗（2,423 家公司 → fit=match 403 → match 有邮箱 73 / 有电话 4 → 邮箱 VALID 0）、[源记分卡](2026-11-09-source-scorecard.md)（directory 73.8% 被拒/隔离等）与 [RISKY 联系点盘点](2026-11-09-risky-inventory.md)（274 条 RISKY、VALID 0）。本轮**未重跑**这些查询（NOT_RUN），引用前必须重跑；旧快照不代表当前成果。
 - 依赖：生产审计零 advisory 的基线有效期至 2026-11-14；含开发依赖的 6 条 advisory 在生产图之外。
 
 ## 7. 验证状态
