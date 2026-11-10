@@ -41,6 +41,8 @@
 
 [2026-11-09 源记分卡基线（只读离线版）](2026-11-09-source-scorecard.md)：5 个 provider 的接受/拒收/原因码拆分——directory 73.8% 被拒/隔离（`PROVIDER_PAYLOAD_SCHEMA_INVALID` 70.1% / `SOURCE_POLICY_MISSING` 26.6% / `PROCESSING_KEY_DRIFT` 3.3%）；public_web 接受率 91.8% 但隔离 267 条全为 key drift；wikidata 95.7%。`scripts/metrics/source-scorecard.mjs` 只读生成（`source-scorecard-daily/v1`，含幂等 contentHash）。
 
+[2026-11-11 双仓工程治理冲刺](2026-11-11-engineering-governance-sprint.md)：G0–G9 治理的实际改动、文档处置（119 片段汇编 + 15 份零引用计划/记录删除，411→280）、PR/CI 效率改造（后端 contracts docs-only 快通道、SaaS CI 分流 + gitleaks + 引擎合同离线 pin）、风险台账与未完成项。记录性质，不是 RuntimeEvidence。
+
 [2026-11-09 漏斗基线（只读快照）](2026-11-09-funnel-baseline.md)：全库 2,423 家公司 → fit=match 403（16.6%）→ match 有邮箱 73（18.1%，Wilson 95% CI [14.7%, 22.2%]）→ 有电话 4 → 邮箱 VALID 0 → VRIC_1000_STRICT=0；主租户 787/128/9/0/0。只读 SQL（`scripts/metrics/funnel-baseline.mjs`），`contact_point.value` 加密列未读取；单时点快照，引用前重跑。
 
 [2026-11-09 RISKY 联系点盘点（只读元数据快照）](2026-11-09-risky-inventory.md)：274 条邮箱 = VALID 0 / RISKY 270（246 从未验证 + 24 pattern_guess）/ UNVERIFIED 3 / INVALID 1；250 条无 `source_type`、0 条有 `source_url`；135 次 `smtp-probe-verdict/v1` 全部只到域名连通层；270 条 RISKY 分布在 86 家公司 / 73 个域名。修正首日「270=250+24」与「213 无溯源」两处口径（`scripts/metrics/risky-inventory.mjs`）。
