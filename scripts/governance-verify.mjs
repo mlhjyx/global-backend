@@ -199,6 +199,7 @@ async function loadReleaseBundles(evidenceById, traceabilityById, now, issues) {
       evidence_by_id: evidenceById,
       traceability_by_id: traceabilityById,
       now,
+      repo_root: process.cwd(),
     });
     for (const item of validation.issues) {
       issues.push({ ...item, message: `${repoPath}: ${item.message}` });
