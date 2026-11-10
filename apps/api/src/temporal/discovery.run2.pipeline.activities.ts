@@ -99,6 +99,30 @@ export interface CompanyPipelineActivityInput {
 
 const DEEP_JOB_CAP = 500;
 
+/**
+ * 单公司活动（profile/signals）的失败边界：账本/预算/回执类失败必须上抛——同一 operation
+ * 重放必撞同一行，或整个 run 的账目状态未知；其余失败（单站抓取被反爬/502/超时、模型
+ * 上游不可用、单条记录持久化受挫）只是**这一家**的事实缺口，软失败继续跑其余公司。
+ * 2026-11-10 run 7a616c8a：crawl4ai 对个别站点反爬的抓取失败被放大成活动失败，
+ * deep 阶段 11 个目标 7 个连带失败（PARTIAL failure_rate_high）。
+ */
+const RUN_LEVEL_FAILURE_TOKENS =
+  /EXECUTION_BUDGET_|BUDGET_|BUDGETEXCEEDED|PAIDOPERATIONUNKNOWN|DOMAIN_ACK|DOMAINACK|DURABLE_EXECUTION|DURABLEEXECUTION|ARTIFACT|REPLAY|EXECUTIONCONTROLERROR|SETTLEMENT|LEASE/iu;
+
+function isRunLevelPipelineFailure(error: unknown): boolean {
+  if (!isExecutionControlError(error)) return false;
+  const record = error as { name?: unknown; code?: unknown; message?: unknown; type?: unknown };
+  const evidence = [record?.name, record?.code, record?.message, record?.type]
+    .filter((value): value is string => typeof value === 'string')
+    .join('|');
+  return RUN_LEVEL_FAILURE_TOKENS.test(evidence);
+}
+
+function describeSoftFailure(error: unknown): string {
+  if (error instanceof Error) return `${error.name}: ${error.message.slice(0, 200)}`;
+  return String(error).slice(0, 200);
+}
+
 export function createRun2PipelineActivities(deps: {
   prisma: PrismaService;
   providers: DiscoveryProviderRegistry;
@@ -342,7 +366,12 @@ export function createRun2PipelineActivities(deps: {
         if (artifactSubjectSkipReason(error)) {
           return { profiled: false, matched: false, unclassified: false, reason: 'suppressed' };
         }
-        if (isExecutionControlError(error)) throw error;
+        // 账本/预算类失败上抛；单家公司的站点抓取/模型上游失败软失败并留日志
+        // （见文件头 RUN_LEVEL_FAILURE_TOKENS 注释）。
+        if (isRunLevelPipelineFailure(error)) throw error;
+        console.warn(
+          `[profileCompanyOnce] soft-failed ${args.companyId} at profile: ${describeSoftFailure(error)}`,
+        );
         profile = null;
       }
 
@@ -353,7 +382,9 @@ export function createRun2PipelineActivities(deps: {
       const profileReceipts = durableReceipts.filter(({ producerId }) => producerId !== 'crawl4ai.render');
       const contactReceipts = durableReceipts.filter(({ producerId }) => producerId === 'crawl4ai.render');
 
-      const committed = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+      let committed: boolean;
+      try {
+        committed = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const result = await applyDomainAckConsumerTransactions({
           transaction: tx,
           acknowledgements: profileReceipts.map(({ producerId, receipt }) => ({
@@ -407,7 +438,15 @@ export function createRun2PipelineActivities(deps: {
           });
         }
         return result.value;
-      });
+        });
+      } catch (error) {
+        // 单家公司档案/联系人持久化受挫不连坐其余公司；账本类失败仍上抛。
+        if (isRunLevelPipelineFailure(error)) throw error;
+        console.warn(
+          `[profileCompanyOnce] soft-failed ${args.companyId} at commit: ${describeSoftFailure(error)}`,
+        );
+        return { profiled: false, matched: false, unclassified: false, reason: 'persist_failed' };
+      }
 
       return {
         profiled: true,
