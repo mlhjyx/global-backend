@@ -5,7 +5,7 @@
 ## 0. 结论摘要
 
 - 后端 `docs/` 从会话开始的 411 份 Markdown 降到 **280 份**（净 -131）：并行会话先新增 1 份（#1002），本冲刺消费 119 份 changelog 片段、直接删除 15 份零引用且已交付/被取代的计划与 TDD 记录、新增 1 个片段与 1 份本报告；证据、Release、ADR、机器合同零删除。
-- 交付 5 个后端 PR 与 2 个 SaaS PR：入口纠偏、文档删除、changelog 汇编、PR 规则统一、后端 contracts 文档快通道；SaaS 文档入口重建、CI 路径分流 + 密钥扫描 + 引擎合同确定性固定。
+- 交付 6 个后端 PR（#1003–#1007、#1014）+ 本报告 PR，5 个 SaaS PR（#154/#155/#156/#157/#159）：入口纠偏、文档删除、changelog 汇编、PR 规则统一、contracts 文档快通道、main push 并发组修复；SaaS 文档入口重建、CI 路径分流 + 密钥扫描 + 引擎合同确定性固定、门户链接修复。
 - 修复的真实缺陷：#776 声称已实现但从未落地的 contracts 短路、SaaS 合同漂移检查 `continue-on-error` 长期失效、SaaS 无密钥扫描、`outreach-experiments` 约 1.2% 随机盐假红、SaaS status 页的 nohup 指令与 systemd 现实冲突、后端入口残留 GrowthOS 恢复步骤。
 - 未解决的高优先级项：PILOT/GA 外部 provenance 死锁（等 PRD4-D12）、PRD 4.0 权威不在仓内（PRD4-D10）、SaaS `main` 无 GitHub 分支保护、引擎 outbox 事件 payload 无机器兼容校验、依赖漏洞基线 2026-11-14 到期。
 
@@ -121,6 +121,7 @@
 | #155 | saas | CI 分流 + gitleaks + 合同 pin | 4 job 绿 | MERGED `f0f65359` |
 | #156 | saas | 状态页记录（快通道实测） | classify+secret 绿、e2e skipped | MERGED `59a61f8` |
 | #157 | saas | main push 并发组修复 | 4 job 绿 | MERGED `450576c2` |
+| #1014 | backend | main push 的 governance/security 并发组 | 见 §7 | 见 §7 |
 | #159 | saas | 修复门户悬空链接与不实描述 | 快通道：classify 5s / secret 10s / fast-path 11s / e2e skipped | MERGED `066ca207` |
 | #1008 | backend | 本治理报告 | 见 §7（docs-only 快通道实测） | 见 §7 |
 
