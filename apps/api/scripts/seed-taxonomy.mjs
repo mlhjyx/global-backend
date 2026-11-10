@@ -1,15 +1,18 @@
 /**
  * 一次性种子：CanonicalTaxonomy + TermAlias。
  * 国家：world-countries 全量 ISO 3166-1（250 国）+ 中/英/德多语言别名（确定性、零 LLM）。
- * 行业：ISIC Rev.4 制造相关种子（isic-seed）+ 别名迁移。
- * 用 owner 连接（DATABASE_URL）写平台级参考数据。可重复运行（upsert）。
+ * 行业：ISIC Rev.4 出口/获客高频行业种子（isic-seed，含 zh/de/it/fr/es 标签与 CPV 交叉）
+ *      + 渠道角色词（industry_role）+ 别名迁移。
+ * CPV：cpv-seed 子树（09/24/31/32/34/42/43/44/45/71/72，官方码核验过）。
+ * 用 owner 连接（DATABASE_URL）写平台级参考数据。可重复运行（upsert，幂等）。
  *
  * 运行：node --import tsx scripts/seed-taxonomy.mjs   或先 build 后 node scripts/seed-taxonomy.mjs
  */
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import countries from 'world-countries';
-import { ISIC_SEED } from '../dist/discovery/isic-seed.js';
+import { INDUSTRY_ROLE_KIND, INDUSTRY_ROLE_SEED, ISIC_SEED } from '../dist/discovery/isic-seed.js';
+import { CPV_SEED } from '../dist/discovery/cpv-seed.js';
 
 // alpha-2 → Wikidata country QID（供 wikidata provider 的国家过滤）。主要国家覆盖；
 // 长尾可后续用 Wikidata SPARQL(P297) 批量补全。
@@ -61,22 +64,20 @@ async function seedCountries() {
   return { nodes: n, aliases: a };
 }
 
-// CPV 子树种子（§2.3 有界·手工核验·frozen source='seed'，非全 9450 码树）。
-// 8 位码 + parentCode 自引用（前缀嵌套）；供 ISIC.crosswalks.cpv 锚定 + 产品精修枚举 + node('cpv',code) 校验。
-const CPV_SEED = [
-  { code: '42000000', parent: null, en: 'Industrial machinery', zh: '工业机械', de: 'Industrielle Maschinen' },
-  { code: '42120000', parent: '42000000', en: 'Pumps and compressors', zh: '泵与压缩机', de: 'Pumpen und Kompressoren' },
-  { code: '42122000', parent: '42120000', en: 'Pumps', zh: '泵', de: 'Pumpen' },
-  { code: '42122130', parent: '42122000', en: 'Water pumps', zh: '水泵', de: 'Wasserpumpen' },
-  { code: '42123000', parent: '42120000', en: 'Compressors', zh: '压缩机', de: 'Kompressoren' },
-];
+// CPV 子树种子在 src/discovery/cpv-seed.ts（经 dist 导入）：8 位码 + parentCode 自引用（前缀嵌套）；
+// 供 ISIC.crosswalks.cpv 锚定 + 产品精修枚举 + node('cpv',code) 校验。码值以 CPV 官方清单核验过。
 
 async function seedCpv() {
   let n = 0, a = 0;
   for (const c of CPV_SEED) {
-    await upsertNode('cpv', 'CPV', c.code, { parentCode: c.parent, labelEn: c.en, labels: { zh: c.zh, de: c.de } });
+    const labels = Object.fromEntries(
+      Object.entries({ zh: c.zh, de: c.de, it: c.it, fr: c.fr, es: c.es }).filter(([, v]) => !!v),
+    );
+    await upsertNode('cpv', 'CPV', c.code, { parentCode: c.parent ?? null, labelEn: c.en, labels });
     n++;
-    for (const al of [c.en, c.zh, c.de]) { if (al) { await upsertAlias('cpv', al, c.code, 'seed'); a++; } }
+    for (const al of new Set([c.en, c.zh, c.de, c.it, c.fr, c.es].filter(Boolean))) {
+      await upsertAlias('cpv', al, c.code, 'seed'); a++;
+    }
   }
   return { nodes: n, aliases: a };
 }
@@ -155,28 +156,55 @@ async function seedNaics() {
 async function seedIndustries() {
   let n = 0, a = 0;
   for (const node of ISIC_SEED) {
+    const labels = Object.fromEntries(
+      Object.entries({ zh: node.zh, de: node.de, it: node.it, fr: node.fr, es: node.es }).filter(([, v]) => !!v),
+    );
     await upsertNode('industry', 'ISIC', node.code, {
       parentCode: node.parent ?? null,
       labelEn: node.en,
-      labels: { zh: node.zh, de: node.de },
+      labels,
       crosswalks: node.crosswalks ?? null,
       wikidataQid: node.wikidataQid ?? null,
       osmTags: node.osmTags ?? null,
     });
     n++;
-    const aliases = new Set([node.en, node.zh, node.de, ...(node.aliases ?? [])]);
-    for (const al of aliases) { if (al) { await upsertAlias('industry', al, node.code, 'seed'); a++; } }
+    const aliases = new Set([node.en, node.zh, node.de, node.it, node.fr, node.es, ...(node.aliases ?? [])].filter(Boolean));
+    for (const al of aliases) { await upsertAlias('industry', al, node.code, 'seed'); a++; }
+  }
+  return { nodes: n, aliases: a };
+}
+
+// 渠道角色词（industry_role）：与 industry 分 kind 存放；供检索词构造（本地语言后缀）读取。
+async function seedIndustryRoles() {
+  let n = 0, a = 0;
+  for (const role of INDUSTRY_ROLE_SEED) {
+    const labels = Object.fromEntries(
+      Object.entries({ zh: role.zh, de: role.de, it: role.it, fr: role.fr, es: role.es }).filter(([, v]) => !!v),
+    );
+    await upsertNode(INDUSTRY_ROLE_KIND, 'ACQ_ROLE', role.code, {
+      parentCode: null,
+      labelEn: role.en,
+      labels,
+      crosswalks: null,
+      wikidataQid: null,
+      osmTags: null,
+    });
+    n++;
+    const aliases = new Set([role.en, role.zh, role.de, role.it, role.fr, role.es, ...(role.aliases ?? [])].filter(Boolean));
+    for (const al of aliases) { await upsertAlias(INDUSTRY_ROLE_KIND, al, role.code, 'seed'); a++; }
   }
   return { nodes: n, aliases: a };
 }
 
 const cty = await seedCountries();
 const ind = await seedIndustries();
+const role = await seedIndustryRoles();
 const cpv = await seedCpv();
 const fda = await seedFda();
 const naics = await seedNaics();
 console.log(`countries: ${cty.nodes} nodes, ${cty.aliases} aliases`);
 console.log(`industries: ${ind.nodes} nodes, ${ind.aliases} aliases`);
+console.log(`industry_roles: ${role.nodes} nodes, ${role.aliases} aliases`);
 console.log(`cpv: ${cpv.nodes} nodes, ${cpv.aliases} aliases`);
 console.log(`fda: ${fda.nodes} nodes, ${fda.aliases} aliases`);
 console.log(`naics: ${naics.nodes} nodes, ${naics.aliases} aliases`);
