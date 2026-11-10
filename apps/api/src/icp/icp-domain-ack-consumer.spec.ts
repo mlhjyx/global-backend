@@ -125,8 +125,6 @@ describe('IcpService receipt-aware domain consumer', () => {
       canonicalTaxonomy: { findMany: vi.fn(async () => []) },
       termAlias: { findUnique: vi.fn(async () => null) },
       dataProvider: { findMany: vi.fn(async () => [{ key: 'public_web' }]) },
-      // 覆盖补齐用的 registry_frame 装载快照：没有国家装载。
-      registryFrame: { findMany: vi.fn(async () => []) },
     };
     const prisma = {
       withWorkspace: vi.fn(async (_workspaceId: string, callback: (value: typeof tx) => unknown) =>

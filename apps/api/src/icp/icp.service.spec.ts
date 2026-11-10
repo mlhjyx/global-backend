@@ -99,16 +99,16 @@ function fixture() {
     dataProvider: {
       findMany: vi.fn(async () => enabledProviders.map((key) => ({ key }))),
     },
-    // 覆盖补齐用的 registry_frame 装载快照（平台表，无 RLS）：默认没有任何国家装载。
-    registryFrame: {
-      findMany: vi.fn().mockResolvedValue([]),
-    },
     // trial source counting (raw_source_record distinct runs); no recorded runs by default.
     $queryRaw: vi.fn().mockResolvedValue([]),
   };
   const enabledProviders = ["public_web"];
   const prisma = {
     withWorkspace: vi.fn(async (_workspace, operation) => operation(tx)),
+    // 覆盖补齐用的 registry_frame 装载快照（平台表，无 RLS；经 this.prisma 直读）：默认无装载。
+    registryFrame: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
   };
   const authority = {
     verifyWorkspaceGrant: vi.fn().mockResolvedValue({}),
@@ -968,7 +968,7 @@ describe("ICP generation authority and controlled enrichment", () => {
     f.result.data = { queries: [PUBLIC_WEB_QUERY], estimated_volume: 10 };
 
     // 平台表里德国有 PARSED 快照 → 补一条 registry_frame 兜底查询（国家用 ISO2）。
-    f.tx.registryFrame.findMany.mockResolvedValue([{ country: "DE" }]);
+    f.prisma.registryFrame.findMany.mockResolvedValue([{ country: "DE" }]);
     const loadedPlan = await f.service.generateQueryPlan(ctx, f.icp.id);
     const loaded = loadedPlan.queries as Array<{ source_class: string; filters: Record<string, unknown>; keywords: unknown[] }>;
     expect(loaded.map((q) => q.filters.source_hint)).toEqual(["public_web", "registry_frame"]);
@@ -979,7 +979,7 @@ describe("ICP generation authority and controlled enrichment", () => {
     });
 
     // 没有装载 → 不补（补了只会空跑）。
-    f.tx.registryFrame.findMany.mockResolvedValue([{ country: "FR" }]);
+    f.prisma.registryFrame.findMany.mockResolvedValue([{ country: "FR" }]);
     const emptyPlan = await f.service.generateQueryPlan(ctx, f.icp.id);
     expect(
       (emptyPlan.queries as Array<{ filters: { source_hint: string } }>).map((q) => q.filters.source_hint),

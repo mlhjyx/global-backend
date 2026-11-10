@@ -28,6 +28,7 @@ import {
   hasPlannableSource,
   icpMatchesRegisteredFairs,
   isSourceRunnable,
+  loadRegistryFrameCountries,
   plannerSourcePrompt,
   plannerVisibleSources,
   routePlannerQueries,
@@ -613,7 +614,7 @@ export class IcpService {
       }),
     });
     // BI-30：规划时刻的数据源开关（data_provider.status）快照：提示词、查询过滤与冷路径注入都按它。
-    const { icp, enabledSources, trialProviders, registryFrameCountries } = await this.prisma.withWorkspace(
+    const { icp, enabledSources, trialProviders } = await this.prisma.withWorkspace(
       ctx.workspaceId,
       async (tx) => {
         const icp = await tx.icpDefinition.findUnique({ where: { id: icpId }, include: { rules: true } });
@@ -624,17 +625,7 @@ export class IcpService {
           ctx.workspaceId,
           enabledSources.map((source) => source.providerKey),
         );
-        // vNext W4 覆盖补齐：registry_frame 只对已有装载的注册库国家补查询。装载信息读平台表
-        // （registry_frame/snapshot 无 RLS）；读失败按「未知」处理（补齐时在 rationale 留 warning）。
-        const registryFrameCountries = await tx.registryFrame
-          .findMany({
-            where: { status: 'ACTIVE', snapshots: { some: { status: 'PARSED' } } },
-            select: { country: true },
-            distinct: ['country'],
-          })
-          .then((rows) => new Set(rows.map((row) => row.country.toUpperCase())))
-          .catch(() => null);
-        return { icp, enabledSources, trialProviders, registryFrameCountries };
+        return { icp, enabledSources, trialProviders };
       },
     );
     // Q33② cheap-first：每源每轮查询预算（结构化源默认 4 条 ≈ ≤100 家；试跑源 1 条 ≈ ≤25 家；
@@ -777,10 +768,10 @@ export class IcpService {
     }
     // 规划查询一条不剩、只有冷路径注入的查询时，移出说明记在计划的首条查询上。
     if (planned.length === 0) queries = withDroppedQueryNote(queries, dropped);
-    // vNext W4 覆盖补齐：模型与冷路径之后逐源核对覆盖率——已启用、有血缘、可规划却一条查询
-    // 都没有的源（2026-11-10 真实 run 里 model_web_search 即如此），按 ICP 主画像确定性补一条。
-    // keywords 为空数组：关键词语言校验在这之前已跑完，空 keywords 不会触发重写。
-    queries = withSourceCoverage(queries, icp, enabledSources, { registryFrameCountries });
+    // vNext W4 覆盖补齐：已启用、有血缘、可规划却无查询的源按 ICP 主画像补确定性兜底查询。
+    queries = withSourceCoverage(queries, icp, enabledSources, {
+      registryFrameCountries: await loadRegistryFrameCountries(this.prisma),
+    });
 
     const queryPlanId = result.durableReceipt
       ? domainAggregateIdForReceipt(result.durableReceipt, 'discovery.query_plan')

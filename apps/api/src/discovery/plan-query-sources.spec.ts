@@ -20,6 +20,7 @@ import {
   planQuerySourceHints,
   plannerSourcePrompt,
   plannerVisibleSources,
+  loadRegistryFrameCountries,
   routePlannerQueries,
   scaleEstimatedVolume,
   sourceQueryBudgetConfig,
@@ -886,5 +887,35 @@ describe('source coverage fill (vNext W4)', () => {
     expect(
       withSourceCoverage(queries, ICP, COVERAGE_ENABLED, { registryFrameCountries: new Set(['DE']) }, 2),
     ).toBe(queries);
+  });
+});
+
+describe('registry_frame loaded-country lookup (vNext W4)', () => {
+  const db = (findMany: () => Promise<Array<{ country: string }>>) =>
+    ({ registryFrame: { findMany: vi.fn(findMany) } });
+
+  it('reads the countries with an ACTIVE frame carrying a PARSED snapshot, uppercased', async () => {
+    const findMany = vi.fn(async () => [{ country: 'de' }, { country: 'FR' }]);
+
+    await expect(loadRegistryFrameCountries({ registryFrame: { findMany } } as never))
+      .resolves.toEqual(new Set(['DE', 'FR']));
+    expect(findMany).toHaveBeenCalledWith({
+      where: { status: 'ACTIVE', snapshots: { some: { status: 'PARSED' } } },
+      select: { country: true },
+      distinct: ['country'],
+    });
+  });
+
+  it('reads an empty platform table as an empty set, not as unknown', async () => {
+    await expect(loadRegistryFrameCountries(db(async () => []) as never))
+      .resolves.toEqual(new Set());
+  });
+
+  it('reports a failed lookup as unknown (null) instead of empty, so coverage keeps the warning', async () => {
+    await expect(
+      loadRegistryFrameCountries(db(async () => {
+        throw new Error('synthetic unavailable');
+      }) as never),
+    ).resolves.toBeNull();
   });
 });
