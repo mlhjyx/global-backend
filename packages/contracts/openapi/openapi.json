@@ -14888,6 +14888,482 @@
         "description": "公司触发信号（P1-18 读侧）：只读 company_signal 中已归因到该公司的社媒/网页变更信号（changedetection 页面变更、RSSHub 条目；纯元数据，标题/URL/摘要，不含页面正文与个人数据），按 observed_at 倒序 keyset 分页（limit 默认 20、最大 100；cursor 原样回传 page.next_cursor）。未归因（company_id 为空）的信号不在此端点出现；该公司暂无信号返回空数组。参数不合法返回 400 VALIDATION_ERROR。需要 acquisition:read。"
       }
     },
+    "/api/v1/companies/{companyId}/legal-links/resolve": {
+      "post": {
+        "operationId": "CompanyLegalLinksController_resolve_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "candidates": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "description": "可选：先登记进本 workspace 的 legal_entity 再参与消歧的候选法人实体（≤20 条）",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "scheme",
+                        "value",
+                        "country",
+                        "name"
+                      ],
+                      "properties": {
+                        "scheme": {
+                          "type": "string",
+                          "enum": [
+                            "lei",
+                            "vat",
+                            "hrb",
+                            "siren",
+                            "ch",
+                            "kvk",
+                            "cvr",
+                            "bolagsverket",
+                            "other"
+                          ]
+                        },
+                        "value": {
+                          "type": "string",
+                          "description": "规范式由服务端归一（大写、去空格/分隔符）"
+                        },
+                        "country": {
+                          "type": "string",
+                          "minLength": 2,
+                          "maxLength": 2
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "address": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "active",
+                            "inactive",
+                            "dissolved",
+                            "unknown"
+                          ]
+                        },
+                        "sourceProvider": {
+                          "type": "string"
+                        },
+                        "evidenceUrl": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "evidenceHash": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "evidenceJson": {
+                          "type": "object",
+                          "nullable": true,
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "公司当前全部链接（含本次新增），按置信度倒序",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "companyId",
+                          "legalEntityId",
+                          "confidence",
+                          "matchMethod",
+                          "matchRule",
+                          "status",
+                          "evidence",
+                          "createdAt",
+                          "updatedAt",
+                          "legalEntity"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "companyId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "legalEntityId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "confidence": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "matchMethod": {
+                            "type": "string",
+                            "enum": [
+                              "deterministic",
+                              "probabilistic"
+                            ]
+                          },
+                          "matchRule": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "auto",
+                              "review",
+                              "rejected"
+                            ]
+                          },
+                          "evidence": {
+                            "type": "object",
+                            "nullable": true,
+                            "additionalProperties": true
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "legalEntity": {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "scheme",
+                              "value",
+                              "country",
+                              "name",
+                              "address",
+                              "status",
+                              "sourceProvider"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "scheme": {
+                                "type": "string",
+                                "enum": [
+                                  "lei",
+                                  "vat",
+                                  "hrb",
+                                  "siren",
+                                  "ch",
+                                  "kvk",
+                                  "cvr",
+                                  "bolagsverket",
+                                  "other"
+                                ]
+                              },
+                              "value": {
+                                "type": "string"
+                              },
+                              "country": {
+                                "type": "string",
+                                "minLength": 2,
+                                "maxLength": 2
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "address": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "active",
+                                  "inactive",
+                                  "dissolved",
+                                  "unknown"
+                                ]
+                              },
+                              "sourceProvider": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR — 请求体或候选实体形态非法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "公司不存在或属于其他 workspace"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "触发一次法人实体消歧（确定性键优先 + 概率匹配双阈值），返回公司当前全部链接候选",
+        "tags": [
+          "Companies"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ],
+        "description": "法人实体消歧（获客 vNext W2）：把公司自带确定性标识（GLEIF/Wikidata LEI、官网 VAT）与请求体可选 candidates（≤20 条，先登记进本 workspace 的 legal_entity）参与匹配——确定性键优先（LEI/SIREN/CH/KVK/CVR/bolagsverket 命中即 auto；VAT 经 VIES 校验通过才 auto，HRB 因按法院分配同号落 review），无键时按 Fellegi–Sunter 概率匹配双阈值产出 auto/review；同 scheme 键冲突的候选落 rejected 留档（同名异法人不连）。重复调用幂等（同公司×实体只升不降）。返回公司当前全部链接（含本次新增），按置信度倒序。绝不自动合并两个已存在的 canonical 公司，合并只进人工复核。需要 acquisition:write；公司不存在或属其他 workspace 返回 404，请求体非法返回 400 VALIDATION_ERROR。"
+      }
+    },
+    "/api/v1/companies/{companyId}/legal-links": {
+      "get": {
+        "operationId": "CompanyLegalLinksController_list_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "公司当前全部链接；无链接返回空数组",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "companyId",
+                          "legalEntityId",
+                          "confidence",
+                          "matchMethod",
+                          "matchRule",
+                          "status",
+                          "evidence",
+                          "createdAt",
+                          "updatedAt",
+                          "legalEntity"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "companyId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "legalEntityId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "confidence": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "matchMethod": {
+                            "type": "string",
+                            "enum": [
+                              "deterministic",
+                              "probabilistic"
+                            ]
+                          },
+                          "matchRule": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "auto",
+                              "review",
+                              "rejected"
+                            ]
+                          },
+                          "evidence": {
+                            "type": "object",
+                            "nullable": true,
+                            "additionalProperties": true
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "legalEntity": {
+                            "type": "object",
+                            "required": [
+                              "id",
+                              "scheme",
+                              "value",
+                              "country",
+                              "name",
+                              "address",
+                              "status",
+                              "sourceProvider"
+                            ],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "scheme": {
+                                "type": "string",
+                                "enum": [
+                                  "lei",
+                                  "vat",
+                                  "hrb",
+                                  "siren",
+                                  "ch",
+                                  "kvk",
+                                  "cvr",
+                                  "bolagsverket",
+                                  "other"
+                                ]
+                              },
+                              "value": {
+                                "type": "string"
+                              },
+                              "country": {
+                                "type": "string",
+                                "minLength": 2,
+                                "maxLength": 2
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "address": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "active",
+                                  "inactive",
+                                  "dissolved",
+                                  "unknown"
+                                ]
+                              },
+                              "sourceProvider": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "公司不存在或属于其他 workspace"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "公司 ↔ 法人实体链接列表（含实体摘要，按置信度倒序）",
+        "tags": [
+          "Companies"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "公司 ↔ 法人实体链接列表（获客 vNext W2）：每条含 confidence、match_method（deterministic/probabilistic）、match_rule、status（auto/review/rejected）与判定证据 JSON，并内联实体摘要（scheme/value/country/name/address/status/来源）。按置信度倒序；无链接返回空数组。公司不存在或属其他 workspace 返回 404。需要 acquisition:read。"
+      }
+    },
     "/api/v1/events/{eventId}/ack-status": {
       "get": {
         "operationId": "EventsController_ackStatus_v1",
