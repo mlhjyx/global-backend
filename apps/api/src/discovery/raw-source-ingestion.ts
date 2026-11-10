@@ -402,8 +402,8 @@ function bySpecificity(
  *
  * 1. The most specific site policy whose key equals the source host (without "www.") or is a
  *    parent domain of it, whatever its review status or purpose.
- * 2. Otherwise, for a public_web record whose source host is the record's own domain, the
- *    company-site policy.
+ * 2. Otherwise, for a public_web / model_web_search record whose source host is the
+ *    record's own domain, the company-site policy.
  * 3. Otherwise none.
  */
 function governingPolicy(
@@ -422,7 +422,11 @@ function governingPolicy(
     .filter(({ key }) => key === hostname || hostname.endsWith(`.${key}`))
     .sort(bySpecificity)[0]?.policy;
   if (site) return site;
-  return providerKey === "public_web" && host !== null && host === recordDomain
+  const ownDomain = typeof recordDomain === "string" ? recordDomain : null;
+  return (providerKey === "public_web" || providerKey === "model_web_search") &&
+    host !== null &&
+    ownDomain !== null &&
+    (host === ownDomain || host.endsWith(`.${ownDomain}`))
     ? policies.find(
         (candidate) =>
           candidate.domain === PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN,

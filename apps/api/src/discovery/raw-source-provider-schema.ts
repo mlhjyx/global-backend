@@ -53,6 +53,7 @@ const GOVERNED_PROVIDERS = new Set([
   "public_web",
   "opencorporates",
   "companies_house_registry",
+  "model_web_search",
 ]);
 const LICENSES_BY_PROVIDER: Readonly<Record<string, ReadonlySet<string>>> =
   Object.freeze({
@@ -615,6 +616,27 @@ function validPublicWebAttributes(value: JsonRecord): boolean {
   );
 }
 
+/**
+ * model_web_search（获客通路 A）：记录只有「检索结果里按主机名落地过的证据」。
+ * evidenceUrls 必须是 1–3 条稳定 https URL（无 query/fragment），searchQuery 可空。
+ */
+function validModelWebSearchAttributes(value: JsonRecord): boolean {
+  return (
+    keysWithin(value, ["discoveredBy", "evidenceUrls", "searchExecutor", "searchQuery"]) &&
+    value.discoveredBy === "model_web_search" &&
+    Array.isArray(value.evidenceUrls) &&
+    value.evidenceUrls.length >= 1 &&
+    value.evidenceUrls.length <= 3 &&
+    value.evidenceUrls.every((url) => isStableSafeHttpsUrl(url)) &&
+    ["deepseek", "searxng"].includes(String(value.searchExecutor)) &&
+    (value.searchQuery === undefined ||
+      value.searchQuery === null ||
+      (typeof value.searchQuery === "string" &&
+        value.searchQuery.length <= 300 &&
+        isContactFreeText(value.searchQuery)))
+  );
+}
+
 function validAttributes(providerKey: string, value: unknown): boolean {
   const input = record(value);
   if (!input) return false;
@@ -639,6 +661,8 @@ function validAttributes(providerKey: string, value: unknown): boolean {
       return validOpenCorporatesAttributes(input);
     case "companies_house_registry":
       return validCompaniesHouseRegistryAttributes(input);
+    case "model_web_search":
+      return validModelWebSearchAttributes(input);
     default:
       return false;
   }
@@ -939,7 +963,7 @@ export function validateRawSourceProviderPayload(
     ["provenance", validProvenance(governed.provenance)],
     ["license", governed.license === undefined ||
       (typeof governed.license === "string" && LICENSES_BY_PROVIDER[providerKey]?.has(governed.license) === true) ||
-      (["wikidata", "openstreetmap", "ted", "openfda"].includes(providerKey) && governed.license === undefined)],
+      (["wikidata", "openstreetmap", "ted", "openfda", "model_web_search"].includes(providerKey) && governed.license === undefined)],
     ["monitoredSource", providerKey === "trade_fair"
       ? validMonitoredSource(governed.monitoredSource)
       : governed.monitoredSource === undefined],

@@ -13,6 +13,7 @@ import {
   type WebSearchToolHit,
 } from '../model-web-search/model-web-search';
 import { normalizeDomain } from '../identity';
+import { isStableSafeHttpsUrl } from '../raw-source-provider-normalizer';
 import { settledModelFailureReason } from '../settled-model-failure';
 import {
   DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
@@ -252,6 +253,9 @@ export class ModelWebSearchDiscoveryProvider implements CompanyDiscoveryAdapter 
         },
       );
       explored = loop.candidates;
+      console.log(
+        `[model_web_search] explore: hits=${hits.length} candidates=${explored.length}`,
+      );
     } catch (error) {
       if (isExecutionControlError(error)) throw error;
       // 探索失败、尚未发生血缘调用：诚实空结果 + 有效空血缘（单源失败不阻断其余源）。
@@ -327,12 +331,16 @@ export class ModelWebSearchDiscoveryProvider implements CompanyDiscoveryAdapter 
     const groundEvidence = (domain: string): string[] => {
       const urls: string[] = [];
       for (const [host, hostUrls] of hitUrlsByHost) {
+        // raw-source 契约要求稳定 https URL（无 query/fragment/凭据）：带跟踪参数的
+        // 搜索命中不能作为证据入库，先过滤再按主机名归属。
+        const stable = hostUrls.filter(isStableSafeHttpsUrl);
+        if (stable.length === 0) continue;
         if (host === domain || host.endsWith(`.${domain}`)) {
-          urls.push(...hostUrls);
+          urls.push(...stable);
         } else if (host.includes('.') && domain.endsWith(`.${host}`)) {
           // 反向包含只在一级/二级域名成立时允许：裸 TLD 主机（如 https://de/...）
           // 不能成为任意 .de 域名的证据。
-          urls.push(...hostUrls);
+          urls.push(...stable);
         }
       }
       return [...new Set(urls)].slice(0, 3);
@@ -341,15 +349,17 @@ export class ModelWebSearchDiscoveryProvider implements CompanyDiscoveryAdapter 
     const now = new Date().toISOString();
     const records: ProviderCompanyRecord[] = [];
     const seen = new Set<string>();
+    // 逐阶段丢弃计数（2026-11-11 run 7968cccd：confirm 有候选而入库 0，缺观测无法定位环节）。
+    const dropped = { domain: 0, blockedOrSeen: 0, name: 0, noEvidence: 0 };
     for (const candidate of confirmed) {
       const domain = normalizeDomain(candidate?.domain);
       // 结构输出只受长度约束，域名形态在这里再做一次落地校验（法域名 + 非空公司名）。
-      if (!domain || !DOMAIN_RE.test(domain)) continue;
-      if (seen.has(domain) || blocked.has(domain)) continue;
+      if (!domain || !DOMAIN_RE.test(domain)) { dropped.domain += 1; continue; }
+      if (seen.has(domain) || blocked.has(domain)) { dropped.blockedOrSeen += 1; continue; }
       const name = typeof candidate.companyName === 'string' ? candidate.companyName.trim() : '';
-      if (!name) continue;
+      if (!name) { dropped.name += 1; continue; }
       const evidenceUrls = groundEvidence(domain);
-      if (evidenceUrls.length === 0) continue; // 未在检索结果出现 → 不臆造
+      if (evidenceUrls.length === 0) { dropped.noEvidence += 1; continue; } // 未在检索结果出现 → 不臆造
       seen.add(domain);
       const country =
         typeof candidate.countryCode === 'string' && /^[A-Z]{2}$/u.test(candidate.countryCode)
@@ -377,6 +387,9 @@ export class ModelWebSearchDiscoveryProvider implements CompanyDiscoveryAdapter 
       });
     }
 
+    console.log(
+      `[model_web_search] landing: confirmed=${confirmed.length} kept=${records.length} dropped=${JSON.stringify(dropped)}`,
+    );
     const observation = collector.finish(records.map((_, index) => index));
     const lineage = buildDiscoveryCompanyResultLineage({
       providerKey: PROVIDER_KEY,
