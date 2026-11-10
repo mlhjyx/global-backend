@@ -22,8 +22,8 @@ import type {
 export const MODEL_WEB_SEARCH_TASK_ID = 'discovery.web_search_candidates';
 
 /** 工具环默认上限（执行形状契约；报价信封按同一常量计算上界）。 */
-export const MODEL_WEB_SEARCH_MAX_ROUNDS = 4;
-export const MODEL_WEB_SEARCH_MAX_TOOL_CALLS = 8;
+export const MODEL_WEB_SEARCH_MAX_ROUNDS = 6;
+export const MODEL_WEB_SEARCH_MAX_TOOL_CALLS = 10;
 
 export interface WebSearchToolHit {
   url: string;
@@ -121,6 +121,7 @@ export function buildModelWebSearchMessages(
         '只允许报告搜索结果中出现过的公司；每家公司必须给出至少 1 个来自搜索结果的证据 URL。',
         '不要臆造域名；无法从结果确认的公司直接略过。',
         `最多输出 ${maxCandidates} 家公司。`,
+        '检索 2–3 轮、证据足够时就立即给出最终 JSON；不要为追求完美无限检索（工具环有硬上限，超限整次检索作废）。',
         '最终答案只输出 JSON：{"candidates":[{"companyName":"","domain":"","countryCode":"DE"|null,"evidenceUrls":["https://…"],"query":"使用的检索词"}]}',
       ].join('\n'),
     },
