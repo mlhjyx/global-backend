@@ -379,6 +379,70 @@ test("the topology cleanup does not rename or expand required contexts", async (
   ]);
 });
 
+test("the contracts gate follows the docs-only classifier and stays fail-closed", async () => {
+  const ciWorkflow = await readRepositoryFile(".github/workflows/ci.yml");
+  const contractsJob = jobBlock(ciWorkflow, "contracts");
+  assert.match(contractsJob, /\n {4}needs: renderer-visual-scope/);
+  assert.match(contractsJob, /\n {4}if: \$\{\{ !cancelled\(\) \}\}/);
+  const firstStep = contractsJob
+    .split(/\r?\n/)
+    .find((line) => line.startsWith("      - "));
+  assert.equal(
+    firstStep,
+    "      - name: Fail closed when renderer scope evaluation did not succeed",
+  );
+  const scopeGuard = namedStepBlock(
+    contractsJob,
+    "Fail closed when renderer scope evaluation did not succeed",
+  );
+  assert.match(
+    scopeGuard,
+    /SCOPE_RESULT: \$\{\{ needs\.renderer-visual-scope\.result \}\}/,
+  );
+  assert.match(scopeGuard, /if \[\[ "\$SCOPE_RESULT" != "success" \]\]; then/);
+  const docsOnlyStep = namedStepBlock(
+    contractsJob,
+    "Docs-only fast path（契约面未变化）",
+  );
+  assert.deepEqual(docsOnlyStep.match(/^        if:.*$/gm), [
+    "        if: needs.renderer-visual-scope.outputs.run_code == 'false'",
+  ]);
+  for (const stepName of [
+    "Install (frozen lockfile)",
+    "Prisma generate",
+    "Build 契约包（@global/api 依赖其 dist d.ts，DQ-1）",
+    "Build API",
+    "Export OpenAPI（code-first 单一真值）",
+    "Drift check（提交的 openapi.json 必须与代码一致且被跟踪）",
+    "Spectral lint（error 级即失败）",
+  ]) {
+    assert.ok(
+      namedStepBlock(contractsJob, stepName).includes(
+        "needs.renderer-visual-scope.outputs.run_code != 'false'",
+      ),
+      `${stepName} must default to running unless the classifier says docs-only`,
+    );
+  }
+  assert.match(
+    namedStepBlock(contractsJob, "Fetch base contract（仅 PR）"),
+    /github\.event_name == 'pull_request' && needs\.renderer-visual-scope\.outputs\.run_code != 'false'/,
+  );
+  assert.match(
+    namedStepBlock(
+      contractsJob,
+      "oasdiff breaking（PR 且未标 breaking-change-approved）",
+    ),
+    /needs\.renderer-visual-scope\.outputs\.run_code != 'false'/,
+  );
+  const policy = JSON.parse(
+    await readRepositoryFile(".github/required-contexts.json"),
+  );
+  const contractsPolicy = policy.context_implementations.find(
+    (item) => item.name === "contracts · drift · lint · breaking",
+  );
+  assert.equal(contractsPolicy.allowed_job_if, "${{ !cancelled() }}");
+});
+
 test("the topology suite uses the established governance entry without changing the root command", async () => {
   const [packageText, governanceContractsTest] = await Promise.all([
     readRepositoryFile("package.json"),

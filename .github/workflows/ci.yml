@@ -821,8 +821,29 @@ jobs:
 
   contracts:
     name: contracts · drift · lint · breaking
+    needs: renderer-visual-scope
+    # 与 build-test 相同：scope 失败时也启动并在第一步显式失败，不让必需检查以 skipped 冒充通过。
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
+      - name: Fail closed when renderer scope evaluation did not succeed
+        shell: bash
+        env:
+          SCOPE_RESULT: ${{ needs.renderer-visual-scope.result }}
+        run: |
+          set -euo pipefail
+          if [[ "$SCOPE_RESULT" != "success" ]]; then
+            echo "::error::renderer visual scope did not succeed: $SCOPE_RESULT"
+            exit 1
+          fi
+
+      # 纯文档 PR：代码与已提交的 OpenAPI 契约文件均未变化（由同一 run_code 分类器证明），
+      # 契约构建、导出、drift、spectral 与 breaking 均不适用；代码 PR 默认全跑（!= 'false'）。
+      - name: Docs-only fast path（契约面未变化）
+        if: needs.renderer-visual-scope.outputs.run_code == 'false'
+        run: |
+          echo "run_code=false: code and packages/contracts/openapi/openapi.json are unchanged; contract gates are not applicable."
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
@@ -835,19 +856,24 @@ jobs:
           cache: pnpm
 
       - name: Install (frozen lockfile)
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: pnpm install --frozen-lockfile
 
       - name: Prisma generate
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: pnpm --filter @global/db generate
 
       - name: Build 契约包（@global/api 依赖其 dist d.ts，DQ-1）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: pnpm --filter @global/contracts build
 
       - name: Build API
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: pnpm --filter @global/api build
 
       # 导出不连任何服务：test-process只生成code-first schema；没有开发token或产品依赖旁路。
       - name: Export OpenAPI（code-first 单一真值）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: node apps/api/dist/main.js --export-openapi
         env:
           NODE_ENV: test
@@ -857,6 +883,7 @@ jobs:
 
       # git status --porcelain 同时抓「有 diff」与「文件未被跟踪/被删除」（git diff 对 untracked 视而不见）
       - name: Drift check（提交的 openapi.json 必须与代码一致且被跟踪）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: |
           if [ -n "$(git status --porcelain -- packages/contracts/openapi/openapi.json)" ]; then
             git status --porcelain -- packages/contracts/openapi/openapi.json
@@ -866,12 +893,13 @@ jobs:
           fi
 
       - name: Spectral lint（error 级即失败）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: pnpm --filter @global/contracts lint
 
       # 破坏性变更拦截：对比 PR base 分支契约。确需破坏 → PR 打 `breaking-change-approved`
       # label 放行（升主版本 + 迁移说明，见 packages/contracts/README.md）。
       - name: Fetch base contract（仅 PR）
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && needs.renderer-visual-scope.outputs.run_code != 'false'
         run: |
           git fetch --depth=1 origin "$GITHUB_BASE_REF"
           if git show "origin/$GITHUB_BASE_REF:packages/contracts/openapi/openapi.json" > base-openapi.json 2>/dev/null; then
@@ -883,6 +911,7 @@ jobs:
       - name: oasdiff breaking（PR 且未标 breaking-change-approved）
         if: >-
           github.event_name == 'pull_request' &&
+          needs.renderer-visual-scope.outputs.run_code != 'false' &&
           env.HAS_BASE == '1' &&
           !contains(github.event.pull_request.labels.*.name, 'breaking-change-approved')
         uses: oasdiff/oasdiff-action/breaking@5e81b5c380accc6b523f9d32a637ca630e33620b # v0.1.17
