@@ -147,20 +147,28 @@ describe('search language and trade role (G3 5.3)', () => {
     expect(queries.some((q) => /販売代理店|卸売業者|ディーラー/.test(q))).toBe(true);
   });
 
-  it('fails loudly instead of silently returning nothing when no search string can be built', async () => {
+  it('settles an empty result with valid lineage instead of failing the governed query', async () => {
+    // 2026-11-10 run 97a4fa1b：抛 ApplicationFailure 让治理血缘的整轮 run
+    // 以 DOMAIN_ACK_..._MISMATCH 失败。单源失败不得阻断其余源（AGENTS.md §5）：
+    // 没有可构造的检索串时返回 0 记录 + 有效空血缘，错误码留在日志。
     const provider = new PublicWebDiscoveryProvider({
       gateway: {} as never,
       broker: broker(async () => ({}) as never),
     });
-    await expect(
-      provider.discoverCompanies(
-        distributorQuery({
-          filters: { country: '德国', industry: '工业泵', trade_side: '分销商' },
-          keywords: ['离心泵', '流体技术'],
-        }),
-        CTX,
-      ),
-    ).rejects.toMatchObject({ type: 'DISCOVERY_MARKET_UNSUPPORTED' });
+    const result = await provider.discoverCompanies(
+      distributorQuery({
+        filters: { country: '德国', industry: '工业泵', trade_side: '分销商' },
+        keywords: ['离心泵', '流体技术'],
+      }),
+      CTX,
+    );
+    expect(result.records).toEqual([]);
+    expect(result.costCents).toBe(0);
+    expect(result.lineage).toMatchObject({
+      recordCount: 0,
+      attemptReceipts: [],
+      receiptCoverage: [],
+    });
   });
 
   it('builds no search at all when every planner word is Chinese', () => {

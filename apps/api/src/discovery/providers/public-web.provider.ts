@@ -17,7 +17,6 @@ import {
   ProviderContactRecord,
   SourceClass,
 } from '../provider-contract';
-import { ApplicationFailure } from '@temporalio/activity';
 import { ModelGateway } from '../../model-gateway/model-gateway';
 import { getTask } from '../../ai-tasks/task-registry';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
@@ -178,13 +177,24 @@ export class PublicWebDiscoveryProvider
         this.log(`dropped terms that do not fit the search language: ${stripped.slice(0, 5).join(' | ')}`);
       }
     }
-    // 空检索串不发起任何搜索、静默产出 0 结果曾让「目标市场语言不受支持」以 4 秒 PARTIAL 收场
-    // （2026-11-04 产品反馈：中国/中文关键词的 ICP）。这里显式失败，给出可操作的错误码。
+    // 空检索串不发起任何搜索曾让「目标市场语言不受支持」以 4 秒 PARTIAL 收场（2026-11-04 产品反馈：
+    // 中国/中文关键词的 ICP）。但显式抛 ApplicationFailure 在治理血缘的查询里会被当成 provider
+    // reject → 整轮 run 以 DOMAIN_ACK_DISCOVERY_QUERY_LINEAGE_RECEIPT_MISMATCH 失败（2026-11-10
+    // run 97a4fa1b：覆盖补齐查询只有中文行业词）。改为 fail-safe 空结果 + 有效空血缘，与 ted /
+    // model_web_search 同约定（AGENTS.md §5 单源失败不阻断其余源）；可操作错误码留在日志。
     if (searches.length === 0) {
-      throw ApplicationFailure.nonRetryable(
-        'DISCOVERY_MARKET_UNSUPPORTED: 无法为目标市场/语言构造检索串（该市场语言暂无本地化支持，或关键词全为不可检索字符）；请调整目标市场或关键词',
-        'DISCOVERY_MARKET_UNSUPPORTED',
+      console.warn(
+        '[public_web] discover failed: DISCOVERY_MARKET_UNSUPPORTED: 无法为目标市场/语言构造检索串（该市场语言暂无本地化支持，或关键词全为不可检索字符）；请调整目标市场或关键词',
       );
+      return {
+        records: [],
+        costCents: 0,
+        lineage: buildDiscoveryCompanyResultLineage({
+          providerKey: 'public_web',
+          recordCount: 0,
+          observations: [],
+        }),
+      };
     }
     const language = searchLanguageFor(query);
     const targetTlds = targetCountryTlds(query);

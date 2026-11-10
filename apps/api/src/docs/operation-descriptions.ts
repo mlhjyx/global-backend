@@ -89,6 +89,10 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '软删除 DRAFT 档案：列表与详情不再可见，关联事实与审计保留；物理删除归 owner/DSR。非 DRAFT 返回 409 COMPANY_NOT_DELETABLE。',
   'POST /api/v1/companies/{companyId}/website-candidates':
     '按公司名用自托管 SearXNG 搜索官网候选（两个有界查询），过滤企业信息聚合站/社交/搜索引擎并按标题与公司名的匹配度排序，最多 5 条；只返回 {url,title,score}，不抓页面，需人工确认后通过 PATCH 采用。',
+  'POST /api/v1/companies/{companyId}/legal-links/resolve':
+    '法人实体消歧（获客 vNext W2）：把公司自带确定性标识（GLEIF/Wikidata LEI、官网 VAT）与请求体可选 candidates（≤20 条，先登记进本 workspace 的 legal_entity）参与匹配——确定性键优先（LEI/SIREN/CH/KVK/CVR/bolagsverket 命中即 auto；VAT 经 VIES 校验通过才 auto，HRB 因按法院分配同号落 review），无键时按 Fellegi–Sunter 概率匹配双阈值产出 auto/review；同 scheme 键冲突的候选落 rejected 留档（同名异法人不连）。重复调用幂等（同公司×实体只升不降）。返回公司当前全部链接（含本次新增），按置信度倒序。绝不自动合并两个已存在的 canonical 公司，合并只进人工复核。需要 acquisition:write；公司不存在或属其他 workspace 返回 404，请求体非法返回 400 VALIDATION_ERROR。',
+  'GET /api/v1/companies/{companyId}/legal-links':
+    '公司 ↔ 法人实体链接列表（获客 vNext W2）：每条含 confidence、match_method（deterministic/probabilistic）、match_rule、status（auto/review/rejected）与判定证据 JSON，并内联实体摘要（scheme/value/country/name/address/status/来源）。按置信度倒序；无链接返回空数组。公司不存在或属其他 workspace 返回 404。需要 acquisition:read。',
 
   // ── SellerDocuments（模块 02 · Phase 2）──────────────────────────────────────
   'POST /api/v1/companies/{companyId}/seller-documents/presign':

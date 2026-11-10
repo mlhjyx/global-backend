@@ -59,8 +59,16 @@ describe('DACH target countries', () => {
     [{ region: 'Bayern' }, ['de']],
     [{ country: 'Nowhere' }, []],
     [{ country: 'constructor', region: 'toString' }, []],
+    // 覆盖补齐把 ICP 原词抄进 filters.country：尾注「（IT）」必须剥掉，否则国家识别落空、
+    // 语言回退 en（2026-11-10 run 97a4fa1b）。
+    [{ country: '意大利（IT）' }, ['it']],
+    [{ country: 'Germany (Bavaria)' }, ['de']],
   ])('resolves %o to %o', (filters, codes) => {
     expect(targetCountryCodes({ filters })).toEqual(codes);
+  });
+
+  it('reads the search language from a qualified Chinese market name', () => {
+    expect(searchLanguageFor({ filters: { country: '意大利（IT）' } })).toBe('it');
   });
 
   it('accepts all three ccTLDs and names Germany first for a DACH query', () => {

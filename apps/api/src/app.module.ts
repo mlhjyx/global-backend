@@ -22,6 +22,7 @@ import { LeadModule } from './lead/lead.module';
 import { MeasurementModule } from './measurement/measurement.module';
 import { EvaluationModule } from './evaluation/evaluation.module';
 import { SignalsModule } from './signals/signals.module';
+import { EntityModule } from './discovery/entity/entity.module';
 import { ReportModule } from './report/report.module';
 import { EventsModule } from './events/events.module';
 import { ComplianceModule } from './compliance/compliance.module';
@@ -76,6 +77,7 @@ import { CampaignPlanModule } from './campaign-plan/campaign-plan.module';
     MeasurementModule,
     EvaluationModule,
     SignalsModule,
+    EntityModule,
     EventsModule,
     ComplianceModule,
     SanctionsModule,

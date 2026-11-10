@@ -121,6 +121,12 @@
       "SELECT",
       "UPDATE"
     ],
+    "company_legal_link": [
+      "DELETE",
+      "INSERT",
+      "SELECT",
+      "UPDATE"
+    ],
     "company_profile": [
       "DELETE",
       "INSERT",
@@ -373,6 +379,12 @@
     "lead_outreach_draft": [
       "INSERT",
       "SELECT"
+    ],
+    "legal_entity": [
+      "DELETE",
+      "INSERT",
+      "SELECT",
+      "UPDATE"
     ],
     "lia_record": [
       "INSERT",

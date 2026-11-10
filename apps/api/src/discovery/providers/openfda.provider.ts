@@ -27,7 +27,8 @@ import {
 
 const PARSER_VERSION = 'openfda/v1';
 const REG_QUERY_BASE = 'https://api.fda.gov/device/registrationlisting.json?search=registration.registration_number:';
-const RECORD_CAP = 250; // 有界样本上限（绝不 grind 32 万——全量是 Schedule 增量的活）
+/** 持久投影 openfda-search/v1 的 establishments 数上限（超出即整包被投影拒绝）。 */
+const OPENFDA_DURABLE_ESTABLISHMENTS_MAX = 50;
 const DEFAULT_LIMIT = 100;
 // FDA registration_number 由 FDA 全局分配（**非**国别税号）→ scheme 不按国别限定（与 TED §8.4 国别税号不同）。
 const FDA_ID_SCHEME = 'fda-reg';
@@ -95,7 +96,12 @@ export class OpenFdaDiscoveryProvider implements CompanyDiscoveryAdapter {
             importerOnly: readImporterOnly(filters),
             establishmentTypes: readEstablishmentTypes(filters),
             limit: DEFAULT_LIMIT,
-            maxRecords: Math.min(Math.max(query.limit ?? 50, 50), RECORD_CAP),
+            // 持久投影 openfda-search/v1 的 establishments 上限 50（另过 120 KiB 聚合门）：
+            // 去帽后 query.limit=1000 若照抄，请求会被打到 250 条、整包被投影拒绝。
+            maxRecords: Math.min(
+              query.limit ?? OPENFDA_DURABLE_ESTABLISHMENTS_MAX,
+              OPENFDA_DURABLE_ESTABLISHMENTS_MAX,
+            ),
           },
         },
         // purpose='discovery'：用途门按本次调用用途判（域策略去掉 discovery 即拦本路径）
