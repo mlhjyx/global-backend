@@ -70,15 +70,11 @@ cd /global/backend/apps/api && node --import tsx scripts/verify-*.mts
 
 ## PR 粒度与风险分级
 
-一个**逻辑改动 = 一个 PR**，不碎片化；琐碎改动搭车不单开。合并授权统一按 `DEC-AIDEV-004`（产品负责人 2026-09-21 的常设授权，见 [conflict register §11](docs/governance/conflict-register.md#11-aidev-gate-1-已批准决策)），不再逐 PR 请用户确认；风险级别只决定验证与复核深度：
+一个**逻辑改动 = 一个 PR**，不碎片化；同主题 micro 改动攒批、不单开。合并授权统一按 `DEC-AIDEV-004`（产品负责人 2026-09-21 的常设授权，见 [conflict register §11](docs/governance/conflict-register.md#11-aidev-gate-1-已批准决策)），不再逐 PR 请用户确认。
 
-| 级别 | 例子                                        | 处理                                                                                    |
-| ---- | ------------------------------------------- | --------------------------------------------------------------------------------------- |
-| 琐碎 | 错别字、注释、单行配置、文档措辞            | **不单独发 PR**——搭下一个功能 PR，或攒成一个滚动 `chore:` PR；仍须 CI/审查绿 + `DEC-AIDEV-004` 合并门 |
-| 小改 | 一个 bug 修复、小功能、一份文档             | 独立 PR（一个逻辑单元一起，别拆）；CI/审查绿 + `DEC-AIDEV-004` 合并门                                 |
-| 实质 | schema/RLS/鉴权/迁移/对外抓取/大量删除/合规 | 独立 PR + **开发代理专项复核**，合并授权按 `DEC-AIDEV-004`                                 |
+变更分类只有一个口径：[development-process.md](docs/shared/development-process.md) §2B 的 **T0–T3**（T0 普通文档快通道 / T1 产品与规范 / T2 常规代码 / T3 高风险）。分类只决定验证与复核深度，不改变「必须走 PR」；风险级别的复核集合见 [ci-merge-automation.md](docs/backend/ci-merge-automation.md) §风险分级。
 
-三条硬规矩：① 一逻辑改动一 PR（不碎）；② 琐碎搭车不单开；③ 合并遵循 `DEC-AIDEV-004`：开发代理独立审查通过、必需检查全绿并满足该决定其余门后可 squash 合并；不含 ruleset/仓库设置/权限变更、部署发布与付费调用，风险类另加专项复核。协同热点文件与合并顺序见 [docs/site-builder/00-decisions-and-coordination.md](docs/site-builder/00-decisions-and-coordination.md)。
+三条硬规矩：① 一逻辑改动一 PR（不碎）；② T0 文档改动攒批、搭车不单开；③ 合并遵循 `DEC-AIDEV-004`：开发代理独立审查通过、必需检查全绿并满足该决定其余门后可 squash 合并；不含 ruleset/仓库设置/权限变更、部署发布与付费调用，T3 另加专项复核。协同热点文件与合并顺序见 [docs/site-builder/00-decisions-and-coordination.md](docs/site-builder/00-decisions-and-coordination.md)。
 
 ## 合规红线（涉数据源/联系人）
 
