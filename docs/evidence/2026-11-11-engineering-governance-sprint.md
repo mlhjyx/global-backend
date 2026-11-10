@@ -91,7 +91,7 @@
 - **SaaS CI 分流 + 密钥扫描 + 合同固定（PR #155）**：`classify` job（docs-only 判定，fail-safe）+ 门控 build/e2e + 新增 gitleaks job + 引擎合同离线 pin（`engine-contract.lock.json` + `verify-pin.mjs` + `gen:types` diff + oasdiff breaking）。
   - **真实前后对比**（同一个纯文档 PR 类别）：治理前文档 PR 跑 build-test 1m30s + e2e 2m23s（#154 实测）；治理后文档 PR（#156）`classify` 5s + `secret scan` 12s + build-test 快通道 11s，`e2e` 显式 skipped。
 - **SaaS 状态页记录（PR #156）**：记录本次 CI/文档治理并作为快通道的真实旁证。
-- **自查发现并修复的并发缺陷（PR #157）**：新 CI 的并发组最初对 main push 共用 `ref`，连续合并时 GitHub 顶掉排队 run——实测 #154 的合并 run 被 cancelled。改为 push 用 commit SHA 分组（与 backend 既有教训一致），保证每笔 main 提交都有独立完整验证。
+- **自查发现并修复的并发缺陷（PR #157）**：新 CI 的并发组最初对 main push 共用 `ref`，连续合并时 GitHub 顶掉排队 run——实测 #154 的合并 run 被 cancelled。改为 push 用 commit SHA 分组（与 backend 既有教训一致）。修复后实测：18:15、18:16、18:17 三笔连续 main push 各自生成独立 run 并完成，无一被替换（此前 #154 的合并 run 被 cancelled）。
 - **规则统一（PR #1006）**：`development-process.md` §2B 改为 T0–T3 四类变更分类（T0 不由目录决定）；worktree 生命周期冲突（「合入即删」vs「默认保留需逐次授权」）统一为「满足清理门 1–5 即删，只删本任务自己的」。
 - **测试可靠性（含于 PR #155）**：`outreach-experiments.service.spec.ts` 的账户级 holdout 断言改为本次分配的 `otherRef`，消除约 1.2% 随机盐假红（本 PR 首轮 CI 实测复现）。
 
@@ -176,6 +176,7 @@
 | SaaS CI（#154/#155/#156） | VERIFIED：#154 build-test+e2e 绿；#155 四个 job 绿；#156 为 docs-only 快通道实测（classify 5s、secret scan 12s、fast-path 11s、e2e skipped） |
 | 文档快通道时长（后端 contracts） | 本报告 PR 实测：contracts job 只跑 scope 校验 + docs-only 证明步（见合并时 checks） |
 | SaaS docs-only 快通道 | VERIFIED（#156 实测：classify 5s、secret scan 12s、fast-path 11s、e2e skipped） |
+| main push 并发组修复效果 | VERIFIED（#157 合并后连续三笔 main push 各有独立 run，无一被取消） |
 | 运行验证 / 部署 | NOT_RUN（本轮不做部署） |
 | 真实数据质量指标 | NOT_RUN（无新 run；不重写旧快照） |
 | 数据库备份可读性 | NOT_VERIFIED（需 root） |
