@@ -31,7 +31,7 @@
 - 唯一施工仓库是 `/global/backend`。开发宿主为 **xin，原生 Ubuntu 26.04**；WSL 已于 2026-09-23 停用，xin 是唯一开发与运行机器。仓库以 `origin` 为准，不存在 `server` remote。
 - global 容器位于原生 dockerd 的 `default` context；root 的 currentContext 指向空的 Docker Desktop，工作区工具固定使用 `DOCKER_CONTEXT=default`。Compose 一律使用 `docker compose -p global ...`，且必须经 launcher 注入 `--env-file`：日常用工作区工具 `gctl up <core|ai|growthos|runtime|all>`（`/global/local-config/bin/gctl`，封装 `/global/local-config/global/infra.sh` 等 launcher，见 `/global/CLAUDE.md`）；**直接裸跑 `docker compose` 会因缺少必需变量失败**。不得未经迁移审计执行 `down -v`、删除固定 `global-*` 容器或卷；先读 [`docs/backend/compose-project-migration.md`](docs/backend/compose-project-migration.md)。
 - Temporal 由容器 `global-temporal-dev` 提供，定义在仓外 `/global/local-config/global/infra.local.yaml`，不在仓库 `docker-compose.yml` 中；旧 `temporal-dev.service` 已 disable 并停止。不另起手工开发服务。
-- 基础设施容器的 `restart` 策略为 `no`，而 managed runtime 编排（`infra/backend-runtime.compose.yml`）里 API/Worker 为 `unless-stopped`：宿主重启后 API/Worker 会先于数据库和 Temporal 自行启动并报未就绪。恢复顺序是 `gctl up core` → `gctl up growthos` → `gctl up platform`，然后重启 API/Worker（或直接 `gctl up all`）。
+- 基础设施容器的 `restart` 策略为 `no`，而 managed runtime 编排（`infra/backend-runtime.compose.yml`）里 API/Worker 为 `unless-stopped`：宿主重启后 API/Worker 会先于数据库和 Temporal 自行启动并报未就绪。恢复顺序是 `gctl up core` → `gctl up platform`（GrowthOS 已于 2026-10-31 P8 退役，不再属于恢复顺序），然后重启 API/Worker（或直接 `gctl up all`）。
 - 开发端口只绑定 `127.0.0.1`；跨主机访问使用 SSH 转发，不向 Tailscale 或公网直接暴露。
 - 密钥只进入环境变量或 secret store；不得读取、打印、提交或在文档中保存 token、密码、凭据指纹之外的秘密。
 

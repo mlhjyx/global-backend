@@ -4,9 +4,9 @@
 > 层级：`L1 / Navigation`
 > 状态：`CURRENT`
 > 维护 Owner：`OWN-DOC-GOV`
-> 最后核验：2026-11-02；当前主线提交只见 [`status/current.md`](status/current.md)，本页不复制 SHA
+> 最后核验：2026-11-11（修正 SaaS 前端归属与当前进度描述）；当前主线提交只见 [`status/current.md`](status/current.md)，本页不复制 SHA
 
-这是 `/global/backend` 的唯一人类文档入口。项目是统一的出海企业 AI 全球客户开发与增长执行 SaaS；Site Builder M1 收口已经进入历史，当前在为获客侧恢复施工补齐治理、授权、运行身份、可观测性与首个受控 pilot 门。独立站管理仍属于 SaaS 的一级产品区域，Astro 公开站是它管理的版本化输出，不是另一套 SaaS 前端。
+这是 `/global/backend` 的唯一人类文档入口。项目是统一的出海企业 AI 全球客户开发与增长执行 SaaS；Site Builder M1 收口已经进入历史，获客主链的 Campaign / QGO / 受控触达 / 前端主链路（M2）已于 2026-11-08 上线并验收，但 pilot/GA 晋级门仍未达成，治理、运行身份与可观测性继续补齐。独立站管理仍属于 SaaS 的一级产品区域，Astro 公开站是它管理的版本化输出，不是另一套 SaaS 前端。
 
 ## 1. 先读五份当前真值
 
@@ -49,12 +49,13 @@
 | 设计/开发独立站管理 | [Capability Pack](frontend/modules/independent-site-management/README.md) | 当前唯一达到详细规格深度的 SaaS 产品域 |
 | 实现 Site Builder 后端 | [Site Builder 决策入口](site-builder/00-decisions-and-coordination.md) | PRD、架构、SiteSpec、API、测试与施工顺序 |
 | 查询稳定 ID、状态与责任 | [治理入口](governance/README.md) | Capability、Object、Scenario、Conflict 与追踪关系 |
+| 查代码位置 | [代码地图](governance/code-map.md) | 能力 → API 入口 → 关键代码 → 测试锚点 |
 | 查询 Provider 当前合同 | [生成 Provider Registry](backend/provider-registry.md) | key、SourceClass、许可、个人数据、默认 enablement、调用门与测试；不代表 runtime 健康 |
 | 查询 OSS/外部能力决定 | [OSS / 外部能力注册表](backend/oss-registry.md) | 32 项采用决定、许可边界、Adapter/SoR、Owner 与退出门 |
 | 运行和维护开发环境 | [后端运行文档](backend/compose-project-migration.md) | Compose 迁移、Worktree、CI 及现役后端专题 |
-| 用自然语言需求与 Codex 协作开发 | [AI 辅助开发协作入口](ai-development/README.md) | 运行模式、需求验收、升级规则与记忆/检索边界 |
+| 用自然语言需求与 AI 代理协作开发 | [AI 辅助开发协作入口](ai-development/README.md) | 运行模式、需求验收、升级规则与记忆/检索边界（开发主体为 Claude Code，Codex 仅受派） |
 | 核验文档一致性 | [文档自动校验](governance/docs-verification.md) | 运行 `pnpm docs:verify` |
-| 改获客主链（发现 / 评分 / 联系人） | [AGENTS.md](../AGENTS.md) → [当前状态](status/current.md) → [模块技术方案](modules/discovery-qualification/technical.md) | 先读 no-go 与不变量；代码地图随治理计划补齐 |
+| 改获客主链（发现 / 评分 / 联系人） | [AGENTS.md](../AGENTS.md) → [当前状态](status/current.md) → [模块技术方案](modules/discovery-qualification/technical.md) | 先读 no-go 与不变量；入口、文件与测试锚点见[代码地图](governance/code-map.md) |
 | 做验收、交付或回填 | [当前状态](status/current.md) → [证据索引](evidence/README.md) | 四态与 RuntimeEvidence 口径，不把「跑通」当「验收」 |
 | 查「为什么这样决定」 | [ADR registry](adr/registry.md) → [冲突与开放决策登记](governance/conflict-register.md) | 决策与冲突分开，不按更新时间判断 |
 | 日常运维与排障 | 工作区 `local-config/RUNBOOK.md` → [后端专题](backend/) | 按 RUNBOOK 顺序，不裸跑 `docker compose` |
@@ -72,7 +73,7 @@
 7. [独立站管理线框](design/independent-site-management-wireframes.md)
 8. [独立站管理实施蓝图](frontend/implementation/independent-site-management-blueprint.md)
 
-正式 SaaS 前端仓库、设计事实源、设计 Token、运行环境和实际 Owner 仍未确定；本地 Mock、截图和导出代码不能证明正式前端已实现。
+正式 SaaS 前端位于 **gain-saas 仓库**（`apps/web`，vben SPA；2026-10-31 P8 起与 SaaS 身份/平台权威同仓），其运行状态与设计事实以该仓文档为准。本目录的 `docs/frontend/` 仍是目标规范与设计基线，不是 as-built；本地 Mock、截图和导出代码不能证明正式前端已实现。
 
 ### Site Builder 后端与契约
 
@@ -99,7 +100,7 @@
 | 区域 | 当前深度 | 不应误读为 |
 |---|---|---|
 | 今日与公共 Shell | 目标产品地图 | 正式 SaaS 前端已存在 |
-| 客户开发 | 冻结已解除；恢复治理与首个 pilot 门在途，当前机器链仍为 `INTERNAL_ONLY` | 本仓负责 Campaign、触达或商机，或历史真测等于当前 pilot |
+| 客户开发 | 主链已上线并验收（M2，2026-11-08）；pilot/GA 门未晋级，当前机器链仍为 `INTERNAL_ONLY` | 本仓负责 Campaign、触达或商机，或历史真测等于当前 pilot |
 | 独立站管理 | M1 收口历史；详细规格和后端纵切最深 | 公网发布、域名、回滚或生产就绪 |
 | 增长执行 | 地图级目标 | 已有 SoR、合同或页面 |
 | 互动与商机 | 地图级目标 | 本仓负责 Conversation/Opportunity |
