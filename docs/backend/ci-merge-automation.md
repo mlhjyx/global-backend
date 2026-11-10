@@ -170,7 +170,7 @@ Release Bundle 中的 `CHECK_RUN`、`GITHUB_REVIEW`、`SIGNED_AUTHORIZATION`、m
 2. 按 [CONTRIBUTING.md](../../CONTRIBUTING.md) 跑 lint/build/test；provider/采集/富集另附真源验证。
 3. 开 PR 后等待 required-context 清单中的 CI、Security 与 Governance 门，触发独立 review，逐条处置 inline comment 并 resolve。
 4. 向用户报告改动、风险、验证和未完成项；按用户对当次 PR 的明确授权合并，或在 `DEC-AIDEV-004` 常设授权下于独立审查通过、必需检查在当前 head 全绿、审查线程清零，且 PR 与最新 main 的组合已在本地复核（ruleset 不再强制 strict）后合并。
-5. 合并后在 `/global/backend` 运行 `node scripts/governance-main-worktree-sync.mjs apply`，以 fetch 后解析出的 `origin/main` 精确 commit 做纯 fast-forward；若远端 PR/分支由另一会话处理，它只交接已合入的精确 SHA，本地会话仍独立 fetch 和验证，不从通知推导 merge 授权。同步脚本遇到 HOLD 时保留现场并单独审计，不 stash/reset/clean。功能分支与本地 worktree 默认保留用于复查。删除仅是可选空间清理，须满足 `CONTRIBUTING.md` 的提交已入主线、工作区干净且未跟踪文件归属已核清条件，并取得用户明确授权。
+5. 合并后在 `/global/backend` 运行 `node scripts/governance-main-worktree-sync.mjs apply`，以 fetch 后解析出的 `origin/main` 精确 commit 做纯 fast-forward；若远端 PR/分支由另一会话处理，它只交接已合入的精确 SHA，本地会话仍独立 fetch 和验证，不从通知推导 merge 授权。同步脚本遇到 HOLD 时保留现场并单独审计，不 stash/reset/clean。**worktree 与本地分支按「PR 合入即删」处理**（`CONTRIBUTING.md` 与工作区 `/global/CLAUDE.md`）：满足 worktree runbook §4 清理门 1–5 后即 `git worktree remove` 并删除本地分支，不需要逐次用户授权；只允许删除本任务自己的 worktree，其他会话的 worktree 由其 owner 处置。需要保留现场用于跨会话审计时，按 [worktree 管理 runbook](worktree-management.md) 登记理由，复查完成后删除。
 
 ## Changelog 片段的汇编
 
@@ -198,6 +198,8 @@ Release Bundle 中的 `CHECK_RUN`、`GITHUB_REVIEW`、`SIGNED_AUTHORIZATION`、m
 - **回退**：恢复「每个 PR 直接改 `changelog.md`」要改回 `AGENTS.md` §9、`CONTRIBUTING.md`、PR 模板与片段 README 的写法，并删掉 `governance.yml` 里运行 `require` 的那一步：片段规则合入后切出的分支直接改 `changelog.md` 不再被这一步接受。目录里剩下的片段运行一次汇编即可全部收进 `changelog.md`。
 
 ## 风险分级（决定验证深度，不授予自动合并）
+
+下表即 [development-process.md](../shared/development-process.md) §2B 中 **T3 高风险修改** 的最小复核集合；命中任一项即按 T3 处理。
 
 | 触发                                                  | 必要复核                                                                 |
 | ----------------------------------------------------- | ------------------------------------------------------------------------ |
