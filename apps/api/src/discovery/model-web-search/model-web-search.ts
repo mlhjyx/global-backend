@@ -233,12 +233,14 @@ export function parseModelWebSearchAnswer(text: string): ModelWebSearchCandidate
   }
   const out: ModelWebSearchCandidate[] = [];
   const seen = new Set<string>();
-  for (const [index, row] of rows.entries()) {
+  let dropped = 0;
+  for (const row of rows) {
+    // 单条候选形态不合规只丢这一条，不作废整批：模型一次给出数十条时，一条非法域名
+    // （2026-11-10 run 7a616c8a: candidates[11]）曾让整次探索白跑。每条候选在
+    // provider 层还要再经域名校验与「证据必须出现在真实检索结果」的落地校验。
     if (typeof row !== 'object' || row === null) {
-      throw new ModelWebSearchError(
-        'MODEL_WEB_SEARCH_ANSWER_INVALID',
-        `candidates[${index}] 必须是对象`,
-      );
+      dropped += 1;
+      continue;
     }
     const record = row as Record<string, unknown>;
     const companyName =
@@ -247,16 +249,12 @@ export function parseModelWebSearchAnswer(text: string): ModelWebSearchCandidate
       typeof record.domain === 'string' ? record.domain.trim().toLowerCase() : '';
     const domain = rawDomain.replace(/^https?:\/\//u, '').replace(/\/.*$/u, '');
     if (!companyName || companyName.length > 500) {
-      throw new ModelWebSearchError(
-        'MODEL_WEB_SEARCH_ANSWER_INVALID',
-        `candidates[${index}].companyName 缺失或超长`,
-      );
+      dropped += 1;
+      continue;
     }
     if (!DOMAIN_RE.test(domain)) {
-      throw new ModelWebSearchError(
-        'MODEL_WEB_SEARCH_ANSWER_INVALID',
-        `candidates[${index}].domain 不是合法域名`,
-      );
+      dropped += 1;
+      continue;
     }
     if (seen.has(domain)) continue;
     const countryCode =
@@ -270,10 +268,8 @@ export function parseModelWebSearchAnswer(text: string): ModelWebSearchCandidate
       .filter((url) => /^https:\/\//u.test(url))
       .slice(0, 3);
     if (evidenceUrls.length === 0) {
-      throw new ModelWebSearchError(
-        'MODEL_WEB_SEARCH_EVIDENCE_MISSING',
-        `candidates[${index}]（${domain}）缺少 https 证据 URL`,
-      );
+      dropped += 1;
+      continue;
     }
     const query =
       typeof record.query === 'string' && record.query.trim().length > 0
@@ -285,7 +281,7 @@ export function parseModelWebSearchAnswer(text: string): ModelWebSearchCandidate
   if (out.length === 0) {
     throw new ModelWebSearchError(
       'MODEL_WEB_SEARCH_ANSWER_INVALID',
-      '去重后没有候选',
+      dropped > 0 ? `候选全部不可用（丢弃 ${dropped} 条）` : '去重后没有候选',
     );
   }
   return out;

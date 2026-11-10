@@ -108,6 +108,21 @@ describe('model-web-search（获客通路 A 骨架）', () => {
     expect(parseModelWebSearchAnswer('```json\n' + ANSWER + '\n```')).toHaveLength(2);
   });
 
+  it('单条候选非法（域名/证据/名称）只丢该条，其余照常返回', () => {
+    const mixed = JSON.stringify({
+      candidates: [
+        { companyName: 'Good One', domain: 'one.example', evidenceUrls: ['https://one.example/a'] },
+        { companyName: 'Bad Domain', domain: 'not a domain', evidenceUrls: ['https://x.example'] },
+        { companyName: 'No Evidence', domain: 'two.example', evidenceUrls: [] },
+        { companyName: '', domain: 'three.example', evidenceUrls: ['https://three.example/a'] },
+        'not-an-object',
+        { companyName: 'Good Two', domain: 'https://4.example/about', evidenceUrls: ['https://4.example/a'] },
+      ],
+    });
+    const parsed = parseModelWebSearchAnswer(mixed);
+    expect(parsed.map((c) => c.domain)).toEqual(['one.example', '4.example']);
+  });
+
   it('fail-closed：非 JSON、空候选、缺证据、非法域名、越权工具、轮数/调用超限、max_tokens', async () => {
     const base = {
       search: async () => [{ url: 'https://a.example/' }],
@@ -129,17 +144,19 @@ describe('model-web-search（获客通路 A 骨架）', () => {
       ),
     ).rejects.toBeInstanceOf(ModelWebSearchError);
 
+    // 单条形态不合规只丢这一条（2026-11-10 run 7a616c8a：一条非法域名曾让整批候选作废）；
+    // 全部丢光才报错。
     expect(() =>
       parseModelWebSearchAnswer(
         '{"candidates":[{"companyName":"A","domain":"a.example","evidenceUrls":[]}]}',
       ),
-    ).toThrow(/证据/);
+    ).toThrow(/候选全部不可用/);
 
     expect(() =>
       parseModelWebSearchAnswer(
         '{"candidates":[{"companyName":"A","domain":"not a domain","evidenceUrls":["https://a.example"]}]}',
       ),
-    ).toThrow(/域名/);
+    ).toThrow(/候选全部不可用/);
 
     await expect(
       runModelWebSearch(

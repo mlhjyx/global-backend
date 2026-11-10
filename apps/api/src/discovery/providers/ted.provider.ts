@@ -149,11 +149,55 @@ export class TedDiscoveryProvider implements CompanyDiscoveryAdapter {
   }
 }
 
+/** raw-source 契约的数组上限（tokenArray/容器守卫均 20）：去重后截断，超限整条会被拒收。 */
+const TED_ARRAY_CAP = 20;
+/** TED 名称里的排版标点换成 ASCII 等价（STRUCTURED_TOKEN 不收 ’ – —）。 */
+const TED_NAME_PUNCTUATION: ReadonlyArray<readonly [RegExp, string]> = [
+  [/[’‘“”"]/gu, "'"],
+  [/[–—]/gu, '-'],
+  [/\p{Cc}/gu, ' '],
+];
+
+export function normalizeTedCompanyName(raw: string): string {
+  let name = raw.trim();
+  for (const [pattern, replacement] of TED_NAME_PUNCTUATION) name = name.replace(pattern, replacement);
+  name = name.replace(/\s+/gu, ' ').trim();
+  // raw schema 的公司名上限 16 词：超长联合体名（多个中标成员拼接）按词截断，保留领衔方。
+  const words = name.split(' ');
+  return words.length > 16 ? words.slice(0, 16).join(' ') : name;
+}
+
+/**
+ * 只有形如标识符的值才进 identifier / attributes.ted.winner_identifier：TED 的
+ * winner-identifier 有时是整句联合体描述（「ATI Geko S.p.A. (mandataria), …」），
+ * 那既不是标识符也会被 raw schema 拒收。纯数字国家税号原样保留（schema 对 ted 放行）。
+ */
+function tedIdentifier(raw?: string): string | undefined {
+  const value = raw?.trim();
+  if (!value) return undefined;
+  return /^[\p{L}\p{N}][\p{L}\p{N} ._:/-]{0,79}$/u.test(value) ? value : undefined;
+}
+
+function dedupeCapped(values: readonly string[]): string[] | undefined {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+    if (out.length >= TED_ARRAY_CAP) break;
+  }
+  return out.length ? out : undefined;
+}
+
 /**
  * 一条中标公告 → 每个中标方一条 ProviderCompanyRecord（🟢 公司/组织事实）。
  * 绝不写入 winner-email 等 🔴 具名联系点（个人数据隔离）。
  */
 export function mapNoticeToRecords(notice: TedAwardNotice, now: string): ProviderCompanyRecord[] {
+  const cpv = dedupeCapped(notice.cpvCodes);
+  const buyerCountries = dedupeCapped(notice.buyerCountries);
   return notice.winners
     .filter((w) => w.name.trim())
     .map((w, i) => {
@@ -162,19 +206,19 @@ export function mapNoticeToRecords(notice: TedAwardNotice, now: string): Provide
         publication_number: notice.publicationNumber,
         publication_date: notice.publicationDate,
         notice_type: notice.noticeType,
-        cpv: notice.cpvCodes.length ? notice.cpvCodes : undefined,
+        cpv,
         buyer_names: notice.buyerNames.length ? notice.buyerNames : undefined,
-        buyer_countries: notice.buyerCountries.length ? notice.buyerCountries : undefined,
-        winner_identifier: w.identifier,
+        buyer_countries: buyerCountries,
+        winner_identifier: tedIdentifier(w.identifier),
         winner_city: w.city,
         license: 'CC-BY-4.0',
         attribution: TED_ATTRIBUTION,
       });
-      const idValue = w.identifier?.trim();
+      const idValue = tedIdentifier(w.identifier);
       const country = toAlpha2(w.country); // §8.3：ISO-3(DEU)→alpha-2(DE)，复用于国别字段 + §8.4 id scheme 国别限定
       return {
         externalId: `ted:${notice.publicationNumber ?? 'na'}:${i}`,
-        name: w.name.trim(),
+        name: normalizeTedCompanyName(w.name),
         domain,
         country,
         // §8.4：winner-identifier 是**国别**税号/注册号（仅国内唯一）→ scheme 按国别限定，防不同国

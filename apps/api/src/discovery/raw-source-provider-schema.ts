@@ -332,7 +332,10 @@ function validIdentifier(providerKey: string, value: unknown): boolean {
     return (
       /^ted-natid(?::[a-z]{2})?$/u.test(scheme) &&
       /^[\p{L}\p{N}][\p{L}\p{N} ._:/-]{0,79}$/u.test(identifier) &&
-      isContactFreeText(identifier)
+      // TED winner-identifier 常是纯数字国家税号（如意大利 partita IVA 11 位）。它与
+      // 电话号码同样过不了防 PII 守卫，但登记号是公司事实（🟢）、scheme 已限定国别；
+      // 仅对 ted 放行纯数字形态（2026-11-10 run 7a616c8a：85/88 条因此整条拒收）。
+      (/^\d{6,20}$/u.test(identifier) || isContactFreeText(identifier))
     );
   }
   if (providerKey === "openfda") {
@@ -508,7 +511,10 @@ function validTedAttributes(value: JsonRecord): boolean {
         (item) => typeof item === "string" && /^[A-Z]{2,3}$/u.test(item),
       )) &&
     (ted.winner_identifier === undefined ||
-      providerIdentifierToken(ted.winner_identifier, 80))
+      providerIdentifierToken(ted.winner_identifier, 80) ||
+      // 纯数字国家税号是公司事实（同上，仅限 ted 的 winner_identifier）。
+      (typeof ted.winner_identifier === "string" &&
+        /^\d{6,20}$/u.test(ted.winner_identifier)))
   );
 }
 
