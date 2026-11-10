@@ -14721,6 +14721,173 @@
         "description": "VRIC 成对序列（ch01 PR-04 后续切片）：同一 bucket + stratum 下 T0-001 STRICT 与 T0-002 PLUS 并排返回，桶按时间升序、默认最近 30 个（limit 上限 180）；某侧无数据为 null，不以 0 冒充。只含本 workspace 可见行（平台级 ALL 行不可见）。需要 acquisition:read。"
       }
     },
+    "/api/v1/companies/{companyId}/signals": {
+      "get": {
+        "operationId": "CompanySignalsController_list_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "每页条数，默认 20，最大 100",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "description": "上一页 page.next_cursor 原样回传",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ data: [...], page } — 该公司暂无信号时返回空数组（has_more=false）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "page"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "providerKey",
+                          "signalKind",
+                          "sourceUrl",
+                          "title",
+                          "excerpt",
+                          "observedAt"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "providerKey": {
+                            "type": "string",
+                            "enum": [
+                              "rss",
+                              "changedetection"
+                            ]
+                          },
+                          "signalKind": {
+                            "type": "string",
+                            "enum": [
+                              "rss_item",
+                              "page_change"
+                            ]
+                          },
+                          "sourceUrl": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "excerpt": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "observedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        }
+                      }
+                    },
+                    "page": {
+                      "type": "object",
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
+                      "properties": {
+                        "next_cursor": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "has_more": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR — limit/cursor 形态非法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "公司触发信号（社媒/网页变更信号，observed_at 倒序）：只读 company_signal 中已归因到该公司的行，keyset 分页",
+        "tags": [
+          "Signals"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "公司触发信号（P1-18 读侧）：只读 company_signal 中已归因到该公司的社媒/网页变更信号（changedetection 页面变更、RSSHub 条目；纯元数据，标题/URL/摘要，不含页面正文与个人数据），按 observed_at 倒序 keyset 分页（limit 默认 20、最大 100；cursor 原样回传 page.next_cursor）。未归因（company_id 为空）的信号不在此端点出现；该公司暂无信号返回空数组。参数不合法返回 400 VALIDATION_ERROR。需要 acquisition:read。"
+      }
+    },
     "/api/v1/events/{eventId}/ack-status": {
       "get": {
         "operationId": "EventsController_ackStatus_v1",

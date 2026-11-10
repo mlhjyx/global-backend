@@ -34,6 +34,10 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
   'POST /api/v1/internal/campaign-plans/draft':
     '服务间（gain-saas 控制面，x-service-token + 一次性 execution-budget Grant）：触发一次受限 Campaign 规划 job。异步：202 只表示工作流已启动；计划经内部回调落 gain-saas 的 DRAFT revision，本端点不执行任何外部动作。同一 jobId 重复触发按 Temporal WorkflowId 去重；Grant 一次性，重触发须新 jobId + 新 Grant。',
 
+  // ── Signals ───────────────────────────────────────────────────────────────
+  'GET /api/v1/companies/{companyId}/signals':
+    '公司触发信号（P1-18 读侧）：只读 company_signal 中已归因到该公司的社媒/网页变更信号（changedetection 页面变更、RSSHub 条目；纯元数据，标题/URL/摘要，不含页面正文与个人数据），按 observed_at 倒序 keyset 分页（limit 默认 20、最大 100；cursor 原样回传 page.next_cursor）。未归因（company_id 为空）的信号不在此端点出现；该公司暂无信号返回空数组。参数不合法返回 400 VALIDATION_ERROR。需要 acquisition:read。',
+
   // ── Metrics ───────────────────────────────────────────────────────────────
   'GET /api/v1/metrics/catalog':
     '指标字典目录（ch01）：读取平台工件 metric_definition（app_user 只读），返回每个指标的 ID/版本/口径/状态/负责人；字典由 docs/metrics/dictionary 经 measurement-sync-definitions 命令同步，未同步时返回空数组。需要 acquisition:read。',

@@ -20,6 +20,7 @@ import { DiscoveryModule } from './discovery/discovery.module';
 import { ChannelsModule } from './channels/channels.module';
 import { LeadModule } from './lead/lead.module';
 import { MeasurementModule } from './measurement/measurement.module';
+import { SignalsModule } from './signals/signals.module';
 import { ReportModule } from './report/report.module';
 import { EventsModule } from './events/events.module';
 import { ComplianceModule } from './compliance/compliance.module';
@@ -72,6 +73,7 @@ import { CampaignPlanModule } from './campaign-plan/campaign-plan.module';
     LeadModule,
     ReportModule,
     MeasurementModule,
+    SignalsModule,
     EventsModule,
     ComplianceModule,
     SanctionsModule,
