@@ -90,7 +90,7 @@ node scripts/governance-main-worktree-sync.mjs apply   # fetch origin --prune，
 | 状态                                     | 动作                                                  |
 | ---------------------------------------- | ----------------------------------------------------- |
 | 干净、未锁定、确认仍需继续开发           | 记录清单后使用 `git worktree move` 迁入新目录         |
-| 已合并且无独有内容                       | 不迁移；满足清理门并取得用户授权后再删除              |
+| 已合并且无独有内容                       | 不迁移；满足清理门后删除                              |
 | tracked 或 untracked 非空                | 原地冻结；先做精确 manifest、diff、hash 与归属审计    |
 | detached、锁定、路径失联或工具任务仍活跃 | 不迁移；先核对任务、分支、reflog 与 worktree metadata |
 | 含 submodule                             | `git worktree move` 不支持；停止并单独规划            |
@@ -114,7 +114,7 @@ git worktree move \
 3. untracked 文件逐项确认已提交、迁移、归档或可丢弃；
 4. 没有独有 commit、reflog、stash、Codex/Claude 任务补丁或附件证据待核；
 5. 没有活跃工具任务持有该路径；
-6. 用户对本次精确目标明确授权。
+6. 该 worktree 属于本任务（本会话/本 writer）。「PR 合入即删」是工作区与 `CONTRIBUTING.md` 的常设规则，满足条件 1–5 即可删除，不需要逐次用户授权；其他会话或他人的 worktree 只由其 owner 处置，或由用户明确点名后清理。
 
 未同时满足时只能保留或继续审计。禁止使用 `rm -rf`、`git worktree remove --force`、`git branch -D` 或把 `git worktree prune` 当作绕过审计的清理工具。
 
