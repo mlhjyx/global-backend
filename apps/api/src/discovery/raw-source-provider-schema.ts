@@ -51,6 +51,7 @@ const GOVERNED_PROVIDERS = new Set([
   "ted",
   "openfda",
   "public_web",
+  "opencorporates",
 ]);
 const LICENSES_BY_PROVIDER: Readonly<Record<string, ReadonlySet<string>>> =
   Object.freeze({
@@ -62,6 +63,7 @@ const LICENSES_BY_PROVIDER: Readonly<Record<string, ReadonlySet<string>>> =
     ted: new Set(["CC BY 4.0"]),
     openfda: new Set(["CC0-1.0"]),
     public_web: new Set(["public", "licensed", "byo"]),
+    opencorporates: new Set(["ODbL-1.0"]),
   });
 const SHA256 = /^[0-9a-f]{64}$/u;
 const UUID =
@@ -260,6 +262,9 @@ function validExternalId(providerKey: string, value: unknown): value is string {
       return /^ted:\d{1,9}(?:-\d{4})?:\d{1,6}$/u.test(value);
     case "openfda":
       return /^openfda:(?:\d{1,32}|[0-9a-f]{64})$/u.test(value);
+    case "opencorporates":
+      // 注册号可能含空格/斜杠 → externalId 用包含辖区的确定性摘要（同 openfda 的哈希形态）。
+      return /^opencorporates:[0-9a-f]{64}$/u.test(value);
     default:
       return validGenericExternalId(value);
   }
@@ -332,6 +337,13 @@ function validIdentifier(providerKey: string, value: unknown): boolean {
   }
   if (providerKey === "openfda") {
     return scheme === "fda-reg" && /^\d{1,32}$/u.test(identifier);
+  }
+  if (providerKey === "opencorporates") {
+    // 注册号只在辖内唯一 → scheme 必须带辖区（'oc-company-number:de' / ':us_de'）。
+    return (
+      /^oc-company-number:[a-z]{2}(?:_[a-z0-9]{1,3})?$/u.test(scheme) &&
+      providerIdentifierToken(identifier)
+    );
   }
   return false;
 }
@@ -593,9 +605,51 @@ function validAttributes(providerKey: string, value: unknown): boolean {
       return validOpenFdaAttributes(input);
     case "public_web":
       return validPublicWebAttributes(input);
+    case "opencorporates":
+      return validOpenCorporatesAttributes(input);
     default:
       return false;
   }
+}
+
+/** 获客 vNext W4：OpenCorporates 归一后的公司属性（关闭形状，只含公司字段）。 */
+function validOpenCorporatesAttributes(value: JsonRecord): boolean {
+  if (!exactKeys(value, ["opencorporates"])) return false;
+  const oc = record(value.opencorporates);
+  if (
+    !oc ||
+    !keysWithin(oc, [
+      "company_number",
+      "company_type",
+      "dissolution_date",
+      "incorporation_date",
+      "jurisdiction_code",
+      "registered_address",
+      "status",
+    ])
+  ) {
+    return false;
+  }
+  return (
+    typeof oc.company_number === "string" &&
+    providerIdentifierToken(oc.company_number) &&
+    typeof oc.jurisdiction_code === "string" &&
+    /^[a-z]{2}(?:_[a-z0-9]{1,3})?$/u.test(oc.jurisdiction_code) &&
+    (oc.status === undefined ||
+      (typeof oc.status === "string" &&
+        oc.status.length <= 200 &&
+        isSecretFreeText(oc.status))) &&
+    (oc.company_type === undefined ||
+      (typeof oc.company_type === "string" &&
+        oc.company_type.length <= 200 &&
+        isSecretFreeText(oc.company_type))) &&
+    (oc.incorporation_date === undefined || validIsoDate(oc.incorporation_date)) &&
+    (oc.dissolution_date === undefined || validIsoDate(oc.dissolution_date)) &&
+    (oc.registered_address === undefined ||
+      (typeof oc.registered_address === "string" &&
+        Buffer.byteLength(oc.registered_address, "utf8") <= 2000 &&
+        isContactFreeText(oc.registered_address)))
+  );
 }
 
 function validProviderBindings(
@@ -679,6 +733,20 @@ function validProviderBindings(
     }
     case "public_web":
       return payload.externalId === payload.domain && host === payload.domain;
+    case "opencorporates": {
+      const oc = record(attributes.opencorporates);
+      const identifier = record(payload.identifier);
+      return Boolean(
+        oc &&
+          host === "api.opencorporates.com" &&
+          path === "/v0.4/companies/search" &&
+          /^opencorporates:[0-9a-f]{64}$/u.test(String(payload.externalId)) &&
+          (identifier === null
+            ? true
+            : identifier.value === oc.company_number &&
+              /^oc-company-number:[a-z]{2}(?:_[a-z0-9]{1,3})?$/u.test(String(identifier.scheme))),
+      );
+    }
     default:
       return true;
   }

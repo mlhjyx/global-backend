@@ -138,6 +138,8 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
       { sourceClass: 'industry_data', providerKey: 'trade_fair', hasCompanyLineage: true },
       { sourceClass: 'public_intelligence', providerKey: 'ted', hasCompanyLineage: true },
       { sourceClass: 'public_intelligence', providerKey: 'openfda', hasCompanyLineage: true },
+      // 获客 vNext W4：OpenCorporates（env 开关默认 off、data_provider 默认 DISABLED，路由身份不因开关变化）。
+      { sourceClass: 'company_registry', providerKey: 'opencorporates', hasCompanyLineage: true },
       // WEB-1 模型联网搜索：env 开关默认 off 时 fail-safe 返回有效空血缘，路由身份不因开关变化。
       { sourceClass: 'public_intelligence', providerKey: 'model_web_search', hasCompanyLineage: true },
       // T3-09 注册面：本地 registry frame 枚举注册为 company_registry 源，但**刻意不声明**
@@ -181,7 +183,7 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
     expect(await routed('industry_data')).toEqual([
       'public_web', 'directory', 'wikidata', 'openstreetmap', 'trade_fair',
     ]);
-    expect(await routed('company_registry')).toEqual(['wikidata']);
+    expect(await routed('company_registry')).toEqual(['wikidata', 'opencorporates']);
     expect(await routed('public_intelligence')).toEqual([
       'public_web', 'ted', 'openfda', 'model_web_search',
     ]);
@@ -227,6 +229,30 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
     ]);
   });
 
+  it('seeds opencorporates DISABLED as the second kill switch (vNext W4)', async () => {
+    const providers: Array<{ where: unknown; update: unknown; create: Record<string, unknown> }> = [];
+    await new DiscoveryProviderRegistry().seed({
+      dataProvider: {
+        upsert: async (args: (typeof providers)[number]) => {
+          providers.push(args);
+          return args;
+        },
+      },
+    } as never);
+    expect(providers.filter((entry) => entry.create.key === 'opencorporates')).toEqual([
+      {
+        where: { key: 'opencorporates' },
+        update: {},
+        create: {
+          key: 'opencorporates',
+          class: 'company_registry',
+          status: 'DISABLED',
+          costPerCallCents: 0,
+        },
+      },
+    ]);
+  });
+
   it('reads lineage from the adapter declaration, which matches both lineage contracts', () => {
     const sources = new DiscoveryProviderRegistry({ gateway: {} as ModelGateway })
       .companyDiscoverySources();
@@ -235,7 +261,7 @@ describe('DiscoveryProviderRegistry SourceClass governance', () => {
       [...new Set(sources.filter((source) => source.hasCompanyLineage).map((source) => source.providerKey))],
     ).toEqual([
       'public_web', 'directory', 'wikidata', 'openstreetmap', 'trade_fair', 'ted', 'openfda',
-      'model_web_search',
+      'opencorporates', 'model_web_search',
     ]);
     // A declared source that either contract rejects would fail its governed query instead of running it.
     for (const source of sources) {

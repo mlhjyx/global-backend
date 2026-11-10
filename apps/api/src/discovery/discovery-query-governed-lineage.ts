@@ -96,6 +96,11 @@ const PROVIDER_CONTRACT = Object.freeze({
     producerId: 'openfda.search', resultSchema: 'openfda-search/v1',
     consumer: 'OpenFdaDiscoveryProvider', classes: Object.freeze(['public_intelligence']),
   }),
+  // 获客 vNext W4：OpenCorporates 注册库（producer 即 ToolBroker 工具 id）。
+  opencorporates: Object.freeze({
+    producerId: 'opencorporates.search', resultSchema: 'opencorporates-search/v1',
+    consumer: 'OpenCorporatesDiscoveryProvider', classes: Object.freeze(['company_registry']),
+  }),
   registry_frame: Object.freeze({
     producerId: 'registry.query', resultSchema: 'registry-query/v1',
     consumer: 'RegistryFrameDiscoveryProvider', classes: Object.freeze(['company_registry']),

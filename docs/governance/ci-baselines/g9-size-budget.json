@@ -20,10 +20,10 @@
       "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
     },
     "apps/api/src/discovery/discovery-query-governed-lineage.ts": {
-      "maxLines": 883,
+      "maxLines": 888,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
-      "reason": "存量超标文件（棘轮：只许缩小）；WEB-1 model_web_search 血缘契约条目 +7 行（PR 评审上调）；site-builder 相关条目随 SUB-02/03 退役后删除"
+      "reason": "存量超标文件（棘轮：只许缩小）；WEB-1 model_web_search 血缘契约条目 +7 行（PR 评审上调）；site-builder 相关条目随 SUB-02/03 退役后删除；+5 行：获客 vNext W4 opencorporates 进 PROVIDER_CONTRACT（PR 评审上调）"
     },
     "apps/api/src/discovery/discovery.service.ts": {
       "maxLines": 1410,
@@ -50,10 +50,10 @@
       "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
     },
     "apps/api/src/discovery/raw-source-provider-schema.ts": {
-      "maxLines": 829,
+      "maxLines": 897,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
-      "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
+      "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目；+68 行：获客 vNext W4 opencorporates 的载荷校验/绑定/外部 ID 分支（PR 评审上调）"
     },
     "apps/api/src/durable-results/artifact/generic-operation-artifact.store.ts": {
       "maxLines": 891,
@@ -230,10 +230,10 @@
       "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
     },
     "apps/api/src/temporal/discovery.activities.ts": {
-      "maxLines": 3792,
+      "maxLines": 3793,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
-      "reason": "存量超标文件（棘轮：只许缩小）；WEB-1 producer 白名单 +1 行（PR 评审上调）；site-builder 相关条目随 SUB-02/03 退役后删除"
+      "reason": "存量超标文件（棘轮：只许缩小）；WEB-1 producer 白名单 +1 行（PR 评审上调）；site-builder 相关条目随 SUB-02/03 退役后删除；+1 行：获客 vNext W4 producer 白名单 opencorporates.search（PR 评审上调）"
     },
     "apps/api/src/temporal/discovery.run2.activities.ts": {
       "maxLines": 879,
@@ -266,16 +266,16 @@
       "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
     },
     "apps/api/src/tools/source-tools.ts": {
-      "maxLines": 1205,
+      "maxLines": 1303,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
-      "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
+      "reason": "存量超标文件（棘轮：只许缩小）；获客 vNext W4（2026-11-10）新增受治理工具 opencorporates.search（含 durableReplayResult 与注册），经 PR 评审上调 1205→1302；后续随工具拆分再降；获客 vNext W4 opencorporates.search 工具后再次实测 1303（PR 评审上调）"
     },
     "apps/api/src/tools/tool-broker.ts": {
-      "maxLines": 1127,
+      "maxLines": 1175,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
-      "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
+      "reason": "存量超标文件（棘轮：只许缩小）；获客 vNext W4（2026-11-10）新增源合规矩阵闸门（sourceComplianceMode + assertSourceCompliance + deps），经 PR 评审上调 1127→1174；获客 vNext W4 源合规闸门后再次实测 1175（PR 评审上调）"
     },
     "packages/code-intelligence/src/codegraph-pilot.ts": {
       "maxLines": 1965,
@@ -745,19 +745,19 @@
       "file": "apps/api/src/discovery/raw-source-provider-normalizer.ts",
       "name": "normalizeProvenance",
       "line": 275,
-      "complexity": 42,
+      "complexity": 46,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
-      "reason": "存量高复杂度函数（棘轮：只许降低）"
+      "reason": "存量高复杂度函数（棘轮：只许降低）；获客 vNext W4 opencorporates 来源域归一（PR 评审上调）"
     },
     "apps/api/src/discovery/raw-source-provider-normalizer.ts#normalizeAttributes": {
       "file": "apps/api/src/discovery/raw-source-provider-normalizer.ts",
       "name": "normalizeAttributes",
       "line": 378,
-      "complexity": 51,
+      "complexity": 55,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
-      "reason": "存量高复杂度函数（棘轮：只许降低）"
+      "reason": "存量高复杂度函数（棘轮：只许降低）；获客 vNext W4 opencorporates 属性归一分支（PR 评审上调）"
     },
     "apps/api/src/discovery/raw-source-provider-schema.ts#validOpenFdaAttributes": {
       "file": "apps/api/src/discovery/raw-source-provider-schema.ts",
@@ -772,10 +772,10 @@
       "file": "apps/api/src/discovery/raw-source-provider-schema.ts",
       "name": "validProviderBindings",
       "line": 601,
-      "complexity": 33,
+      "complexity": 40,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
-      "reason": "存量高复杂度函数（棘轮：只许降低）"
+      "reason": "存量高复杂度函数（棘轮：只许降低）；获客 vNext W4 opencorporates 绑定校验分支（PR 评审上调）"
     },
     "apps/api/src/discovery/raw-source-provider-schema.ts#validateRawSourceProviderPayload": {
       "file": "apps/api/src/discovery/raw-source-provider-schema.ts",

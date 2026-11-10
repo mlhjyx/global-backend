@@ -63,6 +63,13 @@ export interface ComplianceMeta {
   reversible: boolean; // 只读采集 = true；对外动作 = false（走 ActionProposal→OPA→approval）
   authRequired: boolean; // 需外部密钥（密钥管理，业务码不见 SDK）
   risk: "low" | "medium" | "high";
+  /**
+   * 源合规矩阵（source_compliance_matrix）键——**新源**工具声明后，在
+   * SOURCE_COMPLIANCE_GATE=enforce 时 Broker 执行前要求该表有已批准行
+   * （未登记/approved_at 为空=fail-closed）。未声明 = 旧源，行为不变（只走 source_policy）。
+   * 开关默认 off 时本字段不生效。
+   */
+  sourceKey?: string;
 }
 
 /** 执行上下文——由 Broker 注入，工具只读取，不自造。 */

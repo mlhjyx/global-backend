@@ -71,12 +71,12 @@ describe('resolveMaxDiscoveryProviderRecords —— 产品帽 vs 防爆安全界
 });
 
 describe('模块级常量按进程 env 解析', () => {
-  it('默认进程（flag off）：provider 记录 25、fit 上界 = 66×9×25', () => {
+  it('默认进程（flag off）：provider 记录 25、fit 上界 = 66×10×25', () => {
     expect(MAX_DISCOVERY_PROVIDER_RECORDS).toBe(25);
     expect(MAX_DISCOVERY_FIT_COMPANIES).toBe(
       MAX_DISCOVERY_PLAN_QUERIES * MAX_COMPANY_DISCOVERY_ADAPTERS * 25,
     );
-    expect(MAX_DISCOVERY_FIT_COMPANIES).toBe(14_850);
+    expect(MAX_DISCOVERY_FIT_COMPANIES).toBe(16_500);
   });
 
   it('进程 env DISCOVERY_UNCAPPED=on：常量整体切到防爆界（含派生的 fit 上界）', async () => {
@@ -88,6 +88,6 @@ describe('模块级常量按进程 env 解析', () => {
     expect(mod.MAX_DISCOVERY_FIT_COMPANIES).toBe(
       mod.MAX_DISCOVERY_PLAN_QUERIES * mod.MAX_COMPANY_DISCOVERY_ADAPTERS * 1_000,
     );
-    expect(mod.MAX_DISCOVERY_FIT_COMPANIES).toBe(594_000);
+    expect(mod.MAX_DISCOVERY_FIT_COMPANIES).toBe(660_000);
   });
 });

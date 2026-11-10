@@ -87,7 +87,11 @@ interface RunFixture {
 }
 
 describe.runIf(enabled)('Discovery run pool cap on PostgreSQL', () => {
-  const suffix = randomUUID().slice(0, 8);
+  // 纯字母后缀（2026-11-10 CI 实测的既有 flake）：域名/URL 里「下标数字 + hex 后缀数字」
+  // 带 "-" 分隔凑够 7 位以上时，raw-source 的电话形态防线（CONTACT_LIKE_PHONE /
+  // isContactFreeText）会把 provenance URL 误判为电话号码 → PROVIDER_PAYLOAD_SCHEMA_INVALID，
+  // 套件偶发「raw record was REJECTED」。随机输入复现率约 0.3%，与本次改动无关。
+  const suffix = randomUUID().replace(/[0-9]/gu, 'x').slice(0, 8);
   const workspaceId = randomUUID();
   let owner: PrismaClient;
   let app: PrismaService;

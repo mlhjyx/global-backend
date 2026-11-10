@@ -182,3 +182,26 @@ describe('P2 八语言扩展（ms/id/vi/th/ja/ko/pt/tr）', () => {
     expect(partitionSearchTerms(['Pumpen', '工业泵'])).toEqual({ usable: ['Pumpen'], stripped: ['工业泵'] });
   });
 });
+
+describe('获客 vNext W4：de/fr/it/es 行业角色词扩展', () => {
+  it('keeps the existing first three role words in place and appends industry terms after them', () => {
+    // 既有行为不变：buildSearchQueries 取前三项（MAX_SEARCHES_PER_QUERY），前三项原样。
+    expect(tradeRoleTerms('distributor', 'de').slice(0, 3)).toEqual(['Großhandel', 'Händler', 'Vertrieb']);
+    expect(tradeRoleTerms('distributor', 'fr').slice(0, 3)).toEqual(['distributeur', 'grossiste', 'revendeur']);
+    expect(tradeRoleTerms('distributor', 'it').slice(0, 3)).toEqual(['distributore', 'grossista', 'rivenditore']);
+    expect(tradeRoleTerms('distributor', 'es').slice(0, 3)).toEqual(['distribuidor', 'mayorista', 'proveedor']);
+  });
+
+  it.each([
+    ['de', ['Fachhandel', 'Importeur', 'Handelsvertretung']],
+    ['fr', ['importateur', 'négociant', 'fournisseur']],
+    ['it', ['importatore', 'commerciante', 'fornitore']],
+    ['es', ['importador', 'comerciante', 'suministrador']],
+  ] as const)('adds the industry role words for %s', (language, industryTerms) => {
+    const terms = tradeRoleTerms('distributor', language);
+    expect(terms).toEqual(expect.arrayContaining([...industryTerms]));
+    expect(new Set(terms).size).toBe(terms.length);
+    // 全部词都能用于该语言的检索串（无 CJK 混入）。
+    expect(partitionSearchTerms(terms, language).stripped).toEqual([]);
+  });
+});

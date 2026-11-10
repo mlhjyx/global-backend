@@ -10,6 +10,7 @@ export const SOURCE_RESULT_TOOL_IDS = Object.freeze([
   'ted.search',
   'openfda.search',
   'samgov.search',
+  'opencorporates.search',
   'smtp.rcpt_probe',
 ] as const);
 
@@ -19,6 +20,7 @@ export const SOURCE_RESULT_PROJECTION_SCHEMAS = Object.freeze({
   'ted.search': 'ted-search/v1',
   'openfda.search': 'openfda-search/v1',
   'samgov.search': 'samgov-search/v1',
+  'opencorporates.search': 'opencorporates-search/v1',
   'smtp.rcpt_probe': 'smtp-probe-verdict/v1',
 } satisfies Readonly<Record<SourceResultToolId, TypedProjectionSchema>>);
 
@@ -46,6 +48,11 @@ const OPENFDA_CLEARANCE_KEYS = [
 const SAM_NOTICE_KEYS = [
   'noticeId', 'title', 'department', 'subTier', 'office', 'postedDateIso',
   'naicsCode', 'responseDeadlineIso', 'popCountry', 'link',
+] as const;
+// 获客 vNext W4：OpenCorporates 公司注册库命中（只含公司字段，绝不含高管个人数据）。
+const OPEN_CORPORATES_COMPANY_KEYS = [
+  'name', 'companyNumber', 'jurisdictionCode', 'status', 'companyType',
+  'incorporationDate', 'dissolutionDate', 'registeredAddress', 'opencorporatesUrl',
 ] as const;
 const OPENFDA_DEVICE_FACT_KEYS = Object.freeze([
   'deviceName',
@@ -665,6 +672,79 @@ const samDefinition: TypedProjectionDefinition<unknown, unknown> = freezeDefinit
   },
 });
 
+const openCorporatesCompanySchema = objectSchema({
+  name: stringSchema(500),
+  companyNumber: stringSchema(200),
+  jurisdictionCode: stringSchema(20),
+  status: stringSchema(200),
+  companyType: stringSchema(200),
+  incorporationDate: stringSchema(50),
+  dissolutionDate: stringSchema(50),
+  registeredAddress: stringSchema(2000),
+  opencorporatesUrl: stringSchema(2048),
+}, ['name', 'companyNumber', 'jurisdictionCode']);
+
+function projectOpenCorporatesCompany(raw: unknown): UnknownRecord {
+  const company = ownDataRecord(raw, OPEN_CORPORATES_COMPANY_KEYS, [
+    'name', 'companyNumber', 'jurisdictionCode',
+  ]);
+  return {
+    name: field(company, 'name'),
+    companyNumber: field(company, 'companyNumber'),
+    jurisdictionCode: field(company, 'jurisdictionCode'),
+    ...optionalField(company, 'status'),
+    ...optionalField(company, 'companyType'),
+    ...optionalField(company, 'incorporationDate'),
+    ...optionalField(company, 'dissolutionDate'),
+    ...optionalField(company, 'registeredAddress'),
+    ...optionalField(company, 'opencorporatesUrl'),
+  };
+}
+
+function restoreOpenCorporatesCompany(raw: unknown): UnknownRecord {
+  const company = ownDataRecord(raw, OPEN_CORPORATES_COMPANY_KEYS, [
+    'name', 'companyNumber', 'jurisdictionCode',
+  ]);
+  return {
+    name: field(company, 'name'),
+    companyNumber: field(company, 'companyNumber'),
+    jurisdictionCode: field(company, 'jurisdictionCode'),
+    ...optionalField(company, 'status'),
+    ...optionalField(company, 'companyType'),
+    ...optionalField(company, 'incorporationDate'),
+    ...optionalField(company, 'dissolutionDate'),
+    ...optionalField(company, 'registeredAddress'),
+    ...optionalField(company, 'opencorporatesUrl'),
+  };
+}
+
+const openCorporatesDefinition: TypedProjectionDefinition<unknown, unknown> = freezeDefinition({
+  schema: 'opencorporates-search/v1',
+  jsonSchema: toolResultSchema(objectSchema({
+    companies: arraySchema(50, openCorporatesCompanySchema),
+  }, [])),
+  project(raw) {
+    const { result, data } = projectToolResult(raw, ['companies']);
+    return {
+      data: {
+        ...(hasDefinedField(data, 'companies')
+          ? { companies: denseArray(field(data, 'companies')).map(projectOpenCorporatesCompany) }
+          : {}),
+      },
+      ...projectResultMetadata(result),
+    };
+  },
+  restore(projected) {
+    const result = ownDataRecord(projected, TOOL_RESULT_KEYS, ['data', 'costCents']);
+    const data = ownDataRecord(field(result, 'data'), ['companies'], []);
+    return restoreToolResult(result, {
+      ...(hasDefinedField(data, 'companies')
+        ? { companies: denseArray(field(data, 'companies')).map(restoreOpenCorporatesCompany) }
+        : {}),
+    });
+  },
+});
+
 function assertSmtpReason(value: unknown): void {
   if (typeof value !== 'string' || !SMTP_REASON_CODES.includes(
     value as (typeof SMTP_REASON_CODES)[number],
@@ -720,6 +800,7 @@ export const SOURCE_RESULT_PROJECTION_DEFINITIONS = Object.freeze([
   tedDefinition,
   openFdaDefinition,
   samDefinition,
+  openCorporatesDefinition,
   smtpDefinition,
 ] as const);
 
