@@ -419,7 +419,10 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     // 获客通路 A：模型规划检索词并通过 web_search 工具搜索（SearXNG 或 DeepSeek tools/search）。
     allowedTools: ['searxng.search', 'deepseek.search'],
     maxCostCents: 15,
-    maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
+    // 结构确认要逐个核对探索候选与证据：输出预算被推理吃满时 deepseek-flash 会
+    // finish=length 且 content 为空（STRUCTURED_OUTPUT_EMPTY_TRUNCATED，2026-11-10 run
+    // 97a4fa1b），8k 不够；planner 档（16k）实测可用，与 discovery.query_plan 同档。
+    maxOutputTokens: PLANNING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 180000,
     description:
       '使用 web_search 工具为客户画像寻找真实公司候选。只允许报告搜索结果中出现过的公司，每家公司必须给出至少一个来自搜索结果的 https 证据 URL；不得臆造域名，无法确认的公司直接略过。最终只输出 JSON：{"candidates":[{"companyName","domain","countryCode","evidenceUrls","query"}]}。',

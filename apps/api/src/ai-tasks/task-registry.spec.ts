@@ -119,9 +119,11 @@ describe('AI task registry model execution policy invariants', () => {
     }
   });
 
-  it('gives the two planning tasks the provider ceiling of 16,000 output tokens', () => {
+  it('gives the planning and web-search confirmation tasks the provider ceiling of 16,000 output tokens', () => {
     // 2026-10-08: one query plan used 10,568 output tokens, the next was cut off at 8,192.
-    for (const taskId of ['icp.design', 'discovery.query_plan']) {
+    // 2026-11-10 run 97a4fa1b: web_search_candidates 的结构确认在 8k 下 finish=length
+    // 且 content 为空（STRUCTURED_OUTPUT_EMPTY_TRUNCATED），确认环节整段作废。
+    for (const taskId of ['icp.design', 'discovery.query_plan', 'discovery.web_search_candidates']) {
       expect(getTask(taskId)?.model, taskId).toBe('deepseek-flash');
       expect(getTask(taskId)?.maxOutputTokens, taskId).toBe(16_000);
     }

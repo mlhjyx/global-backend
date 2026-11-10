@@ -740,28 +740,28 @@ describe('source coverage fill (vNext W4)', () => {
       {
         source_class: 'company_registry',
         filters: { source_hint: 'registry_frame', country: 'DE', industry: '泵及泵设备' },
-        keywords: [],
+        keywords: ['Kreiselpumpen'],
         rationale: '覆盖补齐：该源本轮无模型查询，按 ICP 主画像确定性补充',
         priority: 3,
       },
       {
         source_class: 'company_registry',
         filters: { source_hint: 'wikidata', country: '德国', industry: '泵及泵设备' },
-        keywords: [],
+        keywords: ['Kreiselpumpen'],
         rationale: '覆盖补齐：该源本轮无模型查询，按 ICP 主画像确定性补充',
         priority: 3,
       },
       {
         source_class: 'industry_data',
         filters: { source_hint: 'openstreetmap', country: '德国', industry: '泵及泵设备' },
-        keywords: [],
+        keywords: ['Kreiselpumpen'],
         rationale: '覆盖补齐：该源本轮无模型查询，按 ICP 主画像确定性补充',
         priority: 3,
       },
       {
         source_class: 'public_intelligence',
         filters: { source_hint: 'model_web_search', country: '德国', industry: '泵及泵设备' },
-        keywords: [],
+        keywords: ['Kreiselpumpen'],
         rationale: '覆盖补齐：该源本轮无模型查询，按 ICP 主画像确定性补充',
         priority: 3,
       },
@@ -844,7 +844,7 @@ describe('source coverage fill (vNext W4)', () => {
     expect(filled[1]).toEqual({
       source_class: 'public_intelligence',
       filters: { source_hint: 'model_web_search' },
-      keywords: [],
+      keywords: ['Kreiselpumpen'],
       rationale: '覆盖补齐：该源本轮无模型查询，按 ICP 主画像确定性补充',
       priority: 3,
     });
@@ -860,6 +860,44 @@ describe('source coverage fill (vNext W4)', () => {
 
     expect(filled[1]!.filters).toMatchObject({ source_hint: 'model_web_search', country: '法国' });
     expect(filled[1]!.filters).not.toHaveProperty('industry');
+  });
+
+  it('strips the market qualifier before naming the first target country', () => {
+    // 2026-11-10 run 97a4fa1b：ICP targetMarkets 是「意大利（IT）」，尾注让国家识别与
+    // ISO2 解析全部落空（registry_frame 补不出来，public_web 语言回退 en → 空检索串）。
+    const queries = [query('company_registry', { source_hint: 'wikidata' })];
+    const filled = withSourceCoverage(
+      queries,
+      { targetMarkets: ['意大利（IT）'], companyAttributes: { industry: '太阳能光伏' } },
+      enabledOnly('wikidata', 'registry_frame'),
+      { registryFrameCountries: new Set(['IT']) },
+    );
+
+    expect(hintsOf(filled)).toEqual(['wikidata', 'registry_frame']);
+    expect(filled[1]!.filters).toMatchObject({ country: 'IT' });
+  });
+
+  it('borrows market-language keywords from the planned queries, never the ICP raw terms', () => {
+    // 规划器已把 ICP 词翻译成市场语言；补齐查询借用它，否则只认市场语言的源（public_web）
+    // 会因中文行业词被整体剥离而没有检索串。借用最多 3 个、去重、跳过不可用语言。
+    const planned = {
+      ...query('company_registry', { source_hint: 'wikidata' }),
+      keywords: ['produttori di moduli fotovoltaici', '太阳能光伏', 'sviluppatori di parchi fotovoltaici', 'imprese EPC fotovoltaico', 'produttori di moduli fotovoltaici'],
+    };
+    const filled = withSourceCoverage(
+      [planned],
+      { targetMarkets: ['意大利（IT）'], companyAttributes: { industry: '太阳能光伏' } },
+      enabledOnly('wikidata', 'model_web_search'),
+      { registryFrameCountries: new Set() },
+    );
+
+    expect(filled[1]).toMatchObject({
+      keywords: [
+        'produttori di moduli fotovoltaici',
+        'sviluppatori di parchi fotovoltaici',
+        'imprese EPC fotovoltaico',
+      ],
+    });
   });
 
   it('never grows the stored plan past its execution cap', () => {

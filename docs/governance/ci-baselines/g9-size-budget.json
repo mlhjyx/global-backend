@@ -8,10 +8,10 @@
   },
   "files": {
     "apps/api/src/ai-tasks/task-registry.ts": {
-      "maxLines": 974,
+      "maxLines": 977,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
-      "reason": "存量超标文件（棘轮）；2026-11-10 新增 discovery.web_search_candidates 任务契约（获客通路 A），经 PR 评审上调 931→974，后续随任务拆分再降；site-builder 相关文件随 SUB-02/03 退役后删除条目"
+      "reason": "存量超标文件（棘轮）；2026-11-10 新增 discovery.web_search_candidates 任务契约（获客通路 A），经 PR 评审上调 931→974，后续随任务拆分再降；site-builder 相关文件随 SUB-02/03 退役后删除条目；2026-11-10 #998：discovery.web_search_candidates 输出预算 8192→16000（deepseek-flash 空输出修复），新增 3 行注释，按门禁规则上调基线。"
     },
     "apps/api/src/channels/channel.service.ts": {
       "maxLines": 1119,

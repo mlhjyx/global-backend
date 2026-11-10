@@ -25,7 +25,8 @@ const PARSER_VERSION = 'ted/v1';
 const NOTICE_DETAIL_BASE = 'https://ted.europa.eu/en/notice/-/detail/';
 // CC BY 4.0 / 2011/833/EU：绿事实可商用但**署名是 license 义务，不可省**（spec §3.1）。
 const TED_ATTRIBUTION = 'Source: TED — © European Union; reused under CC BY 4.0';
-const NOTICE_CAP = 250; // 有界样本上限（绝不 grind 全量；全量是 Schedule 增量蚕食的活）
+/** 持久投影 ted-search/v1 的 awards 数上限（超出即整包 TOOL_DURABLE_RESULT_PROJECTION_REJECTED）。 */
+const TED_DURABLE_AWARDS_MAX = 32;
 const DEFAULT_SINCE_DAYS = 30;
 const TED_LICENSE = 'CC BY 4.0'; // §8.5 写入 field_evidence.license（展示/法务 token；SPDX slug 'CC-BY-4.0' 见 attributes.ted.license）
 const TED_ID_SCHEME = 'ted-natid'; // §8.4 国别税号/注册号命名空间（绝不与 lei 等其它 id 体系串号）
@@ -89,7 +90,11 @@ export class TedDiscoveryProvider implements CompanyDiscoveryAdapter {
             cpvCodes,
             buyerCountries: readBuyerCountries(filters),
             sinceDays: readSinceDays(filters),
-            maxRecords: Math.min(Math.max(query.limit ?? 25, 50), NOTICE_CAP),
+            // 持久投影 ted-search/v1 的 awards 上限 32，且整包还要过 120 KiB 聚合门——
+            // 请求 50/250 条只会让整包被投影拒绝（2026-11-10 run 97a4fa1b：
+            // TOOL_DURABLE_RESULT_PROJECTION_REJECTED，ted 恒 0 条）。请求量必须落在
+            // 持久契约内；把契约上调（更多 awards/查询）是平台级改动，另行评审。
+            maxRecords: Math.min(query.limit ?? 25, TED_DURABLE_AWARDS_MAX),
           },
         },
         // purpose='discovery'：用途门按本次调用用途判（域策略去掉 discovery 即拦本路径）
