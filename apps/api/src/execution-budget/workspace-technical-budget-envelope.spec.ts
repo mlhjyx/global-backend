@@ -327,8 +327,8 @@ describe('DISCOVERY_UNCAPPED=on —— 报价按防爆安全界（余额是唯�
       // 去帽模式工具环 24 轮探索 + 1 次结构确认
       expect.objectContaining({ taskId: 'discovery.web_search_candidates', logicalInvocations: 66 * 25 }),
       expect.objectContaining({ taskId: 'discovery.classify_trade_role', logicalInvocations: 50 }),
-      // 66 查询 × 9 适配器 × 1000 条记录安全界
-      expect.objectContaining({ taskId: 'discovery.qualify_fit', logicalInvocations: 594_000 }),
+      // 66 查询 × 10 适配器 × 1000 条记录安全界
+      expect.objectContaining({ taskId: 'discovery.qualify_fit', logicalInvocations: 660_000 }),
       // 快扫池 5 万 / 8 家每批 = 6250 次批量粗判上限
       expect.objectContaining({ taskId: 'discovery.quick_judge', logicalInvocations: 6_250 }),
     ]);
@@ -342,6 +342,7 @@ describe('DISCOVERY_UNCAPPED=on —— 报价按防爆安全界（余额是唯�
       ['osm.overpass', 66],
       ['ted.search', 66],
       ['openfda.search', 66],
+      ['opencorporates.search', 66],
       ['tradefair.algolia', 66],
       ['gleif.fetch', 50 * 4],
       ['wikidata.entity', 50 * 3],
@@ -351,14 +352,14 @@ describe('DISCOVERY_UNCAPPED=on —— 报价按防爆安全界（余额是唯�
     expect(envelope.policy.executionLimits).toMatchObject({
       planQueries: 66,
       providerRecords: 1_000,
-      fitCompanies: 594_000,
+      fitCompanies: 660_000,
       // policyRevision 可审计标记：去帽模式的包络与产品帽模式可区分。
       discoveryUncapped: 1,
     });
-    // models: 396×2×5 + 924×2×15 + 1584×2×20 + 1650×2×15 + 50×2×10 + 594000×2×20 + 6250×2×20
-    //       = 24_155_540 cents；tools: crawl4ai.fetch 1684×1 + crawl4ai.render 74×1 +
-    // deepseek.search 6600×1 = 8_358 cents；合计 24_163_898 cents。
-    expect(envelope.requiredCapMicrousd).toBe(24_163_898n * 10_000n);
+    // models: 396×2×5 + 924×2×15 + 1584×2×20 + 1650×2×15 + 50×2×10 + 660000×2×20 + 6250×2×20
+    //       = 26_795_540 cents；tools: crawl4ai.fetch 1684×1 + crawl4ai.render 74×1 +
+    // deepseek.search 6600×1 + opencorporates.search 66×0 = 8_358 cents；合计 26_803_898 cents。
+    expect(envelope.requiredCapMicrousd).toBe(26_803_898n * 10_000n);
   });
 
   it('产品帽模式的报价逐字节不变（开关 off 时与既有断言一致）', () => {
@@ -367,6 +368,6 @@ describe('DISCOVERY_UNCAPPED=on —— 报价按防爆安全界（余额是唯�
       planId: PLAN_ID,
     });
     expect(envelope.policy.executionLimits).not.toHaveProperty('discoveryUncapped');
-    expect(envelope.requiredCapMicrousd).toBe(708_838n * 10_000n);
+    expect(envelope.requiredCapMicrousd).toBe(774_838n * 10_000n);
   });
 });
