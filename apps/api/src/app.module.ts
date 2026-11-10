@@ -20,6 +20,7 @@ import { DiscoveryModule } from './discovery/discovery.module';
 import { ChannelsModule } from './channels/channels.module';
 import { LeadModule } from './lead/lead.module';
 import { MeasurementModule } from './measurement/measurement.module';
+import { EvaluationModule } from './evaluation/evaluation.module';
 import { SignalsModule } from './signals/signals.module';
 import { EntityModule } from './discovery/entity/entity.module';
 import { ReportModule } from './report/report.module';
@@ -74,6 +75,7 @@ import { CampaignPlanModule } from './campaign-plan/campaign-plan.module';
     LeadModule,
     ReportModule,
     MeasurementModule,
+    EvaluationModule,
     SignalsModule,
     EntityModule,
     EventsModule,

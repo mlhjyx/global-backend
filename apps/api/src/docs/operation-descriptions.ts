@@ -47,6 +47,20 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '度量日/周聚合（ch01 PR-04）：granularity=daily|weekly 选择 metric_rollup_daily/weekly，聚合由 PR-03 的测量工作流按主键 upsert。桶倒序 + 指标/维度 keyset 分页；租户过滤走 stratum.workspace_id 的 RLS。需要 acquisition:read。',
   'GET /api/v1/metrics/vric':
     'VRIC 成对序列（ch01 PR-04 后续切片）：同一 bucket + stratum 下 T0-001 STRICT 与 T0-002 PLUS 并排返回，桶按时间升序、默认最近 30 个（limit 上限 180）；某侧无数据为 null，不以 0 冒充。只含本 workspace 可见行（平台级 ALL 行不可见）。需要 acquisition:read。',
+  'GET /api/v1/metrics/source-yield':
+    '源边际产出账本（获客 vNext W3）：按日/周（granularity=day|week，默认 week，周桶=ISO 周一）× 发现源聚合 source_yield_ledger——记录数、新增合格公司数、实扣成本 microusd、每新增合格公司的美元成本（新增为 0 时为 null，不以 0 冒充）。账本行由 run 终结时写入、历史 run 可回填；可按 providerKey 过滤，limit 默认 100、最大 500。只含本 workspace 行（RLS）。需要 acquisition:read。',
+  'GET /api/v1/metrics/billing-reconciliation':
+    '三方对账视图（获客 vNext W3）：同一窗口内 usage_ledger 用量（cost_usd 记账）↔ tool_budget_operation 结算（SETTLED/RESULT_UNKNOWN 取实扣 microusd，在途 RESERVED 单列；口径与 execution-budget 窗口实扣一致）↔ tool_budget_account 执行包络（授权上限/已扣/预留；余额来源表，累计快照，不与窗口用量直接相减）。deltaUsageMinusSettledMicrousd = 用量 − 结算，是诊断指针不是错误断言；客户钱包余额真值在 gain-saas 计费侧，不在本引擎。可按 from/to（YYYY-MM-DD，UTC）限定窗口。需要 acquisition:read。',
+
+  // ── Evaluation ────────────────────────────────────────────────────────────
+  'POST /api/v1/evaluation/sets':
+    '新建评估集（获客 vNext W3，golden set 的版本化容器）：name+version 在 workspace 内唯一（重复返回 409 EVALUATION_SET_EXISTS）；icpId 可空（ICP 删除时置空保留历史），description 记录口径（地区×品类、抽样与标注约定）。评估集只插不改，换口径用新 version。需要 acquisition:label:write。',
+  'POST /api/v1/evaluation/sets/{id}/labels':
+    '批量人工标注（获客 vNext W3）：1..500 条，label=POSITIVE|NEGATIVE；候选引用三选一（canonicalCompanyId / domain / name[+country]）。同一集内同候选键覆盖（重标注即更新 label/note/labeled_by/labeled_at），批内同键后写覆盖先写。评估集不存在返回 404 EVALUATION_SET_NOT_FOUND，候选引用缺失返回 400。需要 acquisition:label:write。',
+  'GET /api/v1/evaluation/sets/{id}/report':
+    'precision@k 报告（获客 vNext W3）：取某次 run（runId 必填，可加 providerKey 只看单源）产出的去重候选，按判定分数降序（该 run 最权威 judgment_record 的 1−conformal_score；无 conformal 时 FIT=0.5、其余=0）截前 k（默认 10、最大 50），对照评估集标注计算 precision。标注匹配优先级：canonical id 精确 > 域名（小写）> 名称+国家。分母为实际评估深度 min(k, 候选数)；未标注候选计入分母记为非命中，另单列 precisionAtLabeledK。需要 acquisition:read。',
+  'GET /api/v1/evaluation/coverage':
+    '双源捕获-再捕获覆盖估计（获客 vNext W3）：给定两条发现源（sourceA/sourceB，provider_key，须不同）与地区×品类口径（匹配 canonical_company.country / industry，大小写不敏感，排除 SUPPRESSED），按已物化公司计算各自命中数 n1/n2 与重叠 m，返回 Chapman 点估计 N̂=((n1+1)(n2+1)/(m+1))−1 与 95% CI（下界不低于已观测并集）。任一边为空不可估计（estimable=false, reason=EMPTY_SOURCE，估计值为 null）；零重叠照常给出估计但标记 warning=ZERO_OVERLAP（独立性假设可疑）。结果按口径+计数存证到 coverage_estimate（append-only）。估计的是两源可发现的公司总数，不是地区工商登记全量；承重假设见端点文档。需要 acquisition:read。',
 
   // ── PlatformAuthority ─────────────────────────────────────────────────────
   'POST /api/v1/platform-authority/revocations':

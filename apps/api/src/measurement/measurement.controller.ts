@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from "@nestjs/common";
+import { BadRequestException, Controller, Get, Query, UseGuards } from "@nestjs/common";
 import {
   ApiBearerAuth,
   ApiOperation,
@@ -11,8 +11,17 @@ import { Ctx } from "../auth/ctx.decorator";
 import { RequireScopes } from "../auth/require-scopes.decorator";
 import { RequestContext } from "../auth/request-context";
 import { ScopesGuard } from "../auth/scopes.guard";
-import { pageEnvelope } from "../common/envelope";
+import { envelope, pageEnvelope } from "../common/envelope";
 import { MeasurementService } from "./measurement.service";
+import {
+  BillingReconciliationInputError,
+  BillingReconciliationService,
+} from "./billing-reconciliation";
+import {
+  SOURCE_YIELD_DEFAULT_LIMIT,
+  SourceYieldInputError,
+  SourceYieldService,
+} from "./source-yield";
 
 const errorSchema = (codes: readonly string[]) => ({
   type: "object",
@@ -52,7 +61,11 @@ const pageQuery = [
 @UseGuards(AuthGuard, ScopesGuard)
 @RequireScopes("acquisition:read")
 export class MeasurementController {
-  constructor(private readonly measurements: MeasurementService) {}
+  constructor(
+    private readonly measurements: MeasurementService,
+    private readonly sourceYield: SourceYieldService,
+    private readonly billing: BillingReconciliationService,
+  ) {}
 
   @Get("catalog")
   @ApiOperation({
@@ -210,5 +223,101 @@ export class MeasurementController {
   ) {
     const result = await this.measurements.vric(ctx, { granularity, from, to, limit });
     return pageEnvelope(result.items, result.page);
+  }
+
+  @Get("source-yield")
+  @ApiOperation({
+    summary:
+      "源边际产出账本（source_yield_ledger，本 workspace）：按日/周×发现源聚合记录数、新增合格数、实扣成本 microusd 与每新增合格公司的美元成本；季度砍源报表消费它",
+  })
+  @ApiQuery({
+    name: "granularity",
+    required: false,
+    description: "day（自然日）或 week（ISO 周，周一为桶值）；默认 week",
+    schema: { type: "string", enum: ["day", "week"], default: "week" },
+  })
+  @ApiQuery(pageQuery[1])
+  @ApiQuery(pageQuery[2])
+  @ApiQuery({
+    name: "providerKey",
+    required: false,
+    description: "只看向某一发现源（provider_key）",
+    schema: { type: "string" },
+  })
+  @ApiQuery(pageQuery[4])
+  @ApiResponse({ status: 200, description: "{ data: [...buckets], page }" })
+  @ApiResponse({
+    status: 400,
+    description: "参数不合法",
+    schema: errorSchema(["VALIDATION_ERROR"]),
+  })
+  async sourceYieldByPeriod(
+    @Ctx() ctx: RequestContext,
+    @Query("granularity") granularity?: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+    @Query("providerKey") providerKey?: string,
+    @Query("limit") limit?: string,
+  ) {
+    let parsedLimit: number | undefined;
+    if (limit !== undefined) {
+      parsedLimit = Number(limit);
+      if (!Number.isInteger(parsedLimit) || parsedLimit < 1) {
+        throw new BadRequestException("limit 必须是正整数");
+      }
+    }
+    try {
+      const items = await this.sourceYield.byPeriod({
+        workspaceId: ctx.workspaceId,
+        from,
+        to,
+        granularity,
+        providerKey,
+        limit: parsedLimit,
+      });
+      // 聚合视图没有可跟随的游标：has_more=true 表示「还有更多桶，请调大 limit
+      // （上限 500）或收窄 from/to」，而不是给 next_cursor。省略 limit 时同样按
+      // 默认 100 截断，所以这里必须对默认值也判定。
+      const effectiveLimit = parsedLimit ?? SOURCE_YIELD_DEFAULT_LIMIT;
+      return pageEnvelope(items, {
+        nextCursor: null,
+        hasMore: items.length === effectiveLimit,
+      });
+    } catch (error) {
+      if (error instanceof SourceYieldInputError) {
+        throw new BadRequestException(error.message);
+      }
+      throw error;
+    }
+  }
+
+  @Get("billing-reconciliation")
+  @ApiOperation({
+    summary:
+      "三方对账视图：usage_ledger 用量 ↔ tool_budget_operation 结算（窗口实扣，ch08 §3.1.1 C1a 口径）↔ tool_budget_account 执行包络（余额来源表；累计快照）。客户钱包余额真值在 gain-saas，不在本引擎",
+  })
+  @ApiQuery(pageQuery[1])
+  @ApiQuery(pageQuery[2])
+  @ApiResponse({ status: 200, description: "{ data: {...} }" })
+  @ApiResponse({
+    status: 400,
+    description: "参数不合法",
+    schema: errorSchema(["VALIDATION_ERROR"]),
+  })
+  async billingReconciliation(
+    @Ctx() ctx: RequestContext,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ) {
+    try {
+      return envelope(
+        await this.billing.view({ workspaceId: ctx.workspaceId, from, to }),
+      );
+    } catch (error) {
+      if (error instanceof BillingReconciliationInputError) {
+        throw new BadRequestException(error.message);
+      }
+      throw error;
+    }
   }
 }

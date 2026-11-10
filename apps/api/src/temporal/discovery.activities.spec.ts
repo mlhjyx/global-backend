@@ -3124,6 +3124,8 @@ describe("finalizeRun durable query receipt readback", () => {
     });
     const tx = {
       $queryRaw: queryRaw,
+      // 获客 vNext W3：finalizeRun 同事务写 source_yield_ledger（幂等，行数不回读）。
+      $executeRaw: vi.fn(async () => 1),
       discoveryRun: { update },
       discoveryQueryPlan: { update: planUpdate },
       lead: { findFirst: leadFindFirst },
@@ -7102,6 +7104,8 @@ describe("stale-run 看门狗活动（B3）", () => {
     const TASK_REF = { taskId: "90000000-0000-4000-8000-000000000009", taskRunId: "91000000-0000-4000-8000-000000000009" };
     let queryCall = 0;
     const tx = {
+      // 获客 vNext W3：看门狗收尾同事务写 source_yield_ledger（幂等）。
+      $executeRaw: vi.fn(async () => 1),
       $queryRaw: vi.fn(async () => {
         queryCall += 1;
         if (queryCall === 1) {
