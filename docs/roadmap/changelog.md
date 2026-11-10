@@ -5,6 +5,1054 @@
 > 【定位变更 2026-07-10】本文件已降级为**追加式实施日志（changelog）**，不再代表当前状态。当前状态见 [../status/current.md](../status/current.md)，路线见 [../status/release-plan.md](../status/release-plan.md)，顶层设计见 [../product-scope.md](../product-scope.md)。
 > 【环境勘误 2026-07-16】历史条目中的 Mac/WSL 路径、手动 Temporal、旧模型与“Crawl4AI 已有 SSRF 防护”等只记录当时验证；当前 Ubuntu `/global/backend` 环境与安全边界以 AGENTS、architecture/current 与 release-plan 为准。
 
+## 2026-11-11 · DB 侧 Raw writer 闸门对齐 TED 纯数字国家税号——修复 run 4121e533 的 RAW_SOURCE_WRITER_PAYLOAD_SCHEMA_INVALID (#1001)
+
+- 起因：#1000 在应用层对 TED 的 `identifier` / `attributes.ted.winner_identifier` 放行了纯数字国家税号（意大利 partita IVA 等，公司登记事实），但 Raw writer 的 **DB 侧**独立复核函数 `raw_source_ted_national_identifier_contact_valid_v1` 仍用「防电话 PII」守卫拒绝纯数字串。真实数据提交触发 `RAW_SOURCE_WRITER_PAYLOAD_SCHEMA_INVALID`，executeQuery 事务失败、整轮 run FAILED（run 4121e533）。
+- 改动：迁移 `20261110140000_ted_numeric_national_identifier` — `CREATE OR REPLACE` 该函数，放行 6–20 位纯数字（scheme 已带国别 `ted-natid:<iso2>`，不会跨法人串号）；其余文本仍必须通过 `raw_source_text_contact_safe_v2`（电话/邮箱/人名守卫对联系人字段不变）。函数 ACL 随 `CREATE OR REPLACE` 保留。
+- 测试：真库事务内（BEGIN→替换→验证→ROLLBACK）——5 条真实 TED 记录（含纯数字税号）经应用层归一后全部通过 `raw_source_provider_payload_valid_v2('ted', …)`；电话形态（`+49 30 …`、含字母/非 ASCII 数字的伪标识）仍被拒；disposable 治理套件的既有负向用例不受影响。
+- 未做：不动应用层规则（#1000 已合入）；不改其他 provider 的标识闸门。
+
+## 2026-11-10 · 域名解析与召回审计两条 Temporal workflow + run 产出池导出（ch03 执行面 3b） (#974)
+
+- 起因：ch03 §3.12/§3.17 的执行面需要把已合入的解析/复核契约（T3-13/T3-15）与两表存储（PR-3a）接成可编排的流水；召回审计此前只有 CLI 文件通道，缺 run 产出池导出与 workflow 编排。
+- 改动：
+  - `apps/api/src/registry/recall-pool-export.ts` + `.prisma.ts`：run 产出池导出——按 `discovery_company_materialization_outcome` 去重到公司，注册身份只从 `registry_frame` 类提供者的 `scheme:number` externalId 解析，联系人数取 `canonical_contact` 计数；规范排序 + sha256 指纹，输出即 `recall-audit.mjs --pool` 输入。配套 `scripts/frames/recall-pool-export.mts` CLI（owner 只读 + 显式 workspace 过滤）。
+  - `apps/api/src/registry/recall-frame-export.prisma.ts`：frame 导出的共享取数层（CLI 与 Temporal 活动同口径，`recall-frame-export.mts` 改为复用它）。
+  - `apps/api/src/temporal/domain-resolution.{activities,workflow}.ts`：逐公司 resolve → verify → persist 的有界编排（≤50 公司、按 companyId 排序确定性重放）；落库走 PR-3a 存储契约（upsert / 唯一 VERIFIED 选中 / 复核工单幂等入队），VERIFIED 行可按 `auditSampleRate` 确定性抽样进复核。
+  - `apps/api/src/temporal/recall-audit.{activities,workflow}.ts`：frame 导出 → 池导出 → `auditRecall`（Wilson 95% CI）的编排；载荷护栏（frame ≤5000 行、池 ≤20000 行，超限点名 CLI 文件通道）。
+  - worker 注册面：`customer-workflows.ts` 导出两条 workflow，`worker.ts` 注册两个活动工厂（`createDomainResolutionActivities` / `createRecallAuditActivities`），不注册任何 schedule。
+  - 灰度门默认关：`DOMAIN_RESOLUTION_WORKFLOW_ENABLED` / `RECALL_AUDIT_WORKFLOW_ENABLED` 未开时活动一律抛 `DOMAIN_RESOLUTION_DISABLED` / `RECALL_AUDIT_DISABLED`，零调用零落库；本 PR 未在任何 env/compose/夹具里开启。
+- 测试：池导出单测 7 例（解析/去重合并/哈希可复算/与 auditRecall 直连）；两条 workflow 编排单测 8 例 + 活动单测 19 例（灰度门、零页面确定性 NO_LEGAL_PAGE、注入页面证据走通 VERIFIED、落库幂等/选中/复核入队、改判前清选中、frame/池护栏）；`pnpm --filter @global/api build` 全量类型检查绿。
+- 未做：真实页面抓取与 search/ct/cc/wikidata 适配器接线（ports 已留位，接线后即为生产路径）；selected 行回写 `canonical_company.domain`；审计报告落盘持久化（仍走 CLI 文件通道）；灰度开启与 schedule 注册属后续授权动作。
+
+## 2026-11-10 · 模型驱动联网搜索的工具环与任务登记（获客通路 A 第一步） (#975)
+
+- 起因：获客需要一个受治理的「模型自己规划检索、按证据产出候选」通路（用户 2026-11-09/10 决策：路线 A=模型工具环+栈内搜索，不采用模型厂商原生 grounding）。本批只做工具环与任务契约本体，执行器（SearXNG/DeepSeek）与 provider 接线在后续 PR。
+- 改动：
+  - `apps/api/src/discovery/model-web-search/model-web-search.ts`：工具环——模型经 `web_search` 调用执行器（依赖注入），轮数与调用数上限、工具输入二次校验、最终答案严格 JSON（域名字法、https 证据必填、去重、countryCode 白名单），fail-closed 错误码（NOT_JSON/ANSWER_INVALID/EVIDENCE_MISSING/UNKNOWN_TOOL/ROUND_BUDGET/TOOL_BUDGET/MAX_TOKENS/TOOL_INPUT_INVALID）。
+  - 新 AI Task `discovery.web_search_candidates`（flash 档、allowedTools=searxng.search）与六处登记面：`ai-tasks/task-registry.ts`、`durable-results/model-result-projections.ts`（MODEL_RESULT_TASK_IDS、schema `discovery-web-search-candidates/v1`、投影定义与注册）、`durable-results/durable-result-strategy.ts`（typedProjectionSchemaValues）、`durable-results/model-result-projection-bounds.spec.ts`（EXPECTED_BOUNDS）、`docs/governance/durable-result-strategies.json`（modelTasks 条目）、`scripts/execution-authority-policy.mjs` 与 spec（任务 14→15，含计数断言）。
+  - G9 基线微调（经本 PR 评审）：`apps/api/src/ai-tasks/task-registry.ts` 931→974、`apps/api/src/durable-results/model-result-projections.ts` 1744→1784，均因新增任务/投影，理由见基线 reason 字段。
+  - 门户介绍（`apps/api/src/docs/portal-intro.ts`）：分域表补齐 JudgmentReview/Metrics/Outreach/Channels/Seller Documents/Packs-Skills-Agents/Campaign；主链路补 enrich-contacts、contact-eligibility、判定复核（claim/resolve、judgments 查询与统计）与四个 metrics 端点；重导出 `packages/contracts/openapi/openapi.json`（137 路径不变，仅 info.description 变化）。
+- 测试：`model-web-search.spec.ts` 4 例（工具环、围栏 JSON、非法域/缺证据/越权工具/预算/截断）；`model-result-projection-bounds.spec.ts` 81 项；`node --test scripts/execution-authority-policy.spec.mjs` 17/17；`node scripts/check-file-budgets.mjs` OK（warn 4）。
+- 未做：执行器接线（SearXNG 免费执行器、DeepSeek `deepseek.search/fetch` 工具）与 `model_web_search` discovery provider 注册、run 预算帽、20–30 条 golden ICP 评估集——均在后续 PR。
+
+## 2026-11-10 · Add DeepSeek search and fetch tools to the governed tool broker (#976)
+
+- 起因：获客通路 A（模型驱动联网搜索）已定「模型工具环 + ToolBroker」，需要付费搜索执行后端；DeepSeek 提供独立 Search/Fetch JSON API（5 元/1000 次成功请求，按成功计费）。
+- 改动：
+  - 新增 `deepseek.search` / `deepseek.fetch` 两个 Tool（`apps/api/src/tools/deepseek-tools.ts`，经 `registerBuiltinTools` 注册）：sourcePolicy=none、sourceClass=public_intelligence、rateLimit 5 rps、estimatedCents 按整数美分上限取整（1 美分/次计费请求）；缺 key 返回 degraded 空结果而非抛错。
+  - `deepseek.search` 只输出 url+title 并丢弃个人主页 URL（与 searxng.search 同口径，personalData:false）；`deepseek.fetch` 返回 ≤32k 字符正文并先查目标站 robots.txt（personalData:true，与 social.fetch 同类）。
+  - 新增适配器 `apps/api/src/adapters/deepseek-tools.ts`（固定主机、拒绝重定向、30s 超时、响应体硬上限、429/5xx/网络错误有界重试、每次物理发信前过授权与 beforePhysicalWire）。
+  - 新增 `deepseek-search/v1`、`deepseek-fetch/v1` typed projection；模型联网搜索执行器绑定 `brokerBackedDeepSeekWebSearch`（broker.invoke('deepseek.search', …)）。
+  - 抽共享文本整形 `apps/api/src/tools/durable-text.ts`（searxng/social/deepseek 共用），`builtin-tools.ts` 降到 800 行以下并按 G9 规则删除其基线条目。
+  - 治理清单：EXPECTED_TOOL_IDS 20→22、tool callsites 44→45、`durable-result-strategies.json` tools +2；`catalog-result-projections.ts` 基线按评审上调（G9 记录于 PR）。
+- 测试：适配器/工具/执行器单测（fetch mock，无真实出网），覆盖成功、限速、402、无 key 降级、投影与 replay；`gctl check --fast`。
+- 未做：不部署、不发车；`discovery.web_search_candidates` 任务的 allowedTools 尚未加入 deepseek.search（由模型工具环接线 PR 决定）；deepseek.fetch 暂无调用方。
+
+## 2026-11-10 · SMTP RCPT probe as the verification waterfall's fallback second vote (#977)
+
+- 起因：P1-06 的验证瀑布依赖第三方验证器凑「双正投票」，但缺 key 的环境里可用票数只有 1 家 → 单票 positive 永远停在 UNKNOWN、VALID 恒为 0。栈内已有免费的 `smtp.rcpt_probe` 工具（端口 25 RCPT 探测，无 key、零成本），却只被 email-guess 的自建验证器使用，没接到瀑布。
+- **实测更正（2026-11-10 晚，本机 xin）**：对 gmail-smtp-in.l.google.com / mx00.1and1.com / mx.hermes.epson.de 做 25 端口探测，TCP 层被 TUN fake-ip 直接接受但 **SMTP banner 全部超时**——宿主 25 端口出网不可用。探测在现网只会得到 UNKNOWN（`smtp_no_response`），**不能**作为有效的第二票；因此接线默认**关闭**（`EMAIL_VERIFY_SMTP_PROBE_ENABLED` 缺省 false，仅显式 1/true/yes/on 启用）。第二票的现实路径是第三方验证器 key（Emailable/MillionVerifier，待提供）或具备 25 出口的探测节点。
+  - 超时/无响应一律映射 UNKNOWN + error（无裁决）：既有流程不受影响（单票仍 UNKNOWN，不伪造 VALID/INVALID）；`smtp_no_response` 与 `smtp_unreachable` 分开命名，便于日后出网可用时观测。
+- 改动：
+  - 新增 `apps/api/src/enrichment/verification/smtp-probe.provider.ts`：`EmailVerificationProvider` 适配器，经 `broker.invoke('smtp.rcpt_probe', …)` 执行（source_policy advisory + 用途门 + 预算 + 限流 + Trace + 工具内 SSRF 护栏全部沿用工具）；映射 RCPT 2xx + 随机地址 5xx（catch-all 证伪）→ VALID、5xx/无 MX/Null MX/NXDOMAIN → INVALID、随机地址也 2xx → CATCH_ALL_RISKY·true_catch_all（acceptAll=true）、反枚举 provider（Gmail/M365…）→ UNKNOWN·unprobeable_provider（不触网）、catch-all 未证伪 → UNKNOWN·inconclusive、SMTP 不可达/MAIL FROM 拒/超时/broker 拒绝 → error 非空（无裁决，绝不凑票）。成本 0；`verification_method`/事件账如实记 `smtp_rcpt`。
+  - `provider-pool.ts`：`withSmtpProbeFallback` —— 外部验证器**门后可用数 < 2** 时自动追加兜底票到瀑布末席；>=2 家可用时不追加（SMTP 不得占仲裁席）。开关 `EMAIL_VERIFY_SMTP_PROBE_ENABLED`（**缺省关**，见上；具备 25 出口的部署可显式开启）+ `data_provider.smtp_self` kill switch + broker 装配三道检查。
+  - 三处瀑布消费方接线：再验证 sweep（CLI 自建 broker——APP_DATABASE_URL 缺省时优雅跳过；Schedule activity 由 worker 注入 broker）、run 内富集 activity（`deps.broker`）、HTTP 富集端点（`TOOL_BROKER` DI token，discovery.module 单实例与 provider registry 共用）。
+  - `EmailVerificationProviderResult.method`：每步声明验证方式；sweep / 富集写事件账与 `contact_point.verification_method` 时按步取值（第三方 API 缺省 `third_party_api`）。
+- 治理：新增 `smtp.rcpt_probe` 物理调用点，`scripts/execution-authority-policy.mjs` 的 `EXPECTED_TOOL_CALLSITES` +1（44→45，spec 同步）。
+- 测试：适配器 19 条（假 broker + 假 MX：deliverable/undeliverable/catch-all/未证伪/反枚举/不可达/MAIL FROM 拒/超时/ToolPolicyDenied/egressBlocked/无 MX/Null MX/NXDOMAIN/瞬时 DNS 失败/缺 workspace/合规预检/预算账降级/幂等随机地址，零真实出网）+ 瀑布集成 5 条（两票一致→VALID、冲突→UNKNOWN、仅兜底一票→UNKNOWN、兜底票超时→provider_error、accept_all 优先压 CATCH_ALL_RISKY）；池兜底语义 7 条（默认关/显式开关/kill switch/broker/票数）与 activity 路径（含默认关时仍 skipped(provider_unconfigured) 的用例）；sweep 事件账/点 verification_method 记 smtp_rcpt。
+- 未做：Truelist catch-all 解析分支（仍待编排改造）；第二票在现网仍缺（等第三方 key 或 25 出口探测节点）；兜底票经 broker 预算账——workspace 无预算账户/BudgetStore 不可用/超限时降级为无裁决的 error 票（不崩溃批量、不绕闸门），其余执行控制错误（平台出口围栏、域名 ACK、账本重放）仍原样上抛。
+
+## 2026-11-10 · Backfill country/industry normalization and phone/LinkedIn contact completion (#978)
+
+- 起因：dev 库 canonical_company 的 country 里 `DE` 与 `德国` 并存（846/72 行），判定链按 ISO 读 country 导致国家门静默失效；industry 2303 行为空、非空行是自由文本；公司级电话仅 1 条（邮箱 280），LinkedIn 公司页只有 11 条——数据脏且稀。
+- 改动：
+  - 新增 `discovery/company-normalization.ts`：country 变体（中/英/德名、alpha-2/alpha-3）→ ISO alpha-2；NULL country 仅用登记级证据补（GLEIF 注册国、VAT 前缀）；空 industry 用 ISIC 词表（industry-map 同一匹配器）+ TED CPV/FDA 交叉表确定性推断，非空值永不覆盖。
+  - `registry/industry-map.ts` 导出 `matchIsicNodesForTerms`（节点级匹配，含命中词），原 `nacePrefixesForIndustryTerms` 行为不变。
+  - 新增 `scripts/backfill-company-normalization.mts`（默认 dry-run，`--apply` 落库，幂等，版本/原值条件更新；owner 跨租户连接为预期）。
+  - 新增 `discovery/contact-completion.ts` + `scripts/complete-contact-channels.mts`：复用 A1/A4 Impressum 装配器与 BI-14 首页链接解析，抓取（robots 先检）→ phone/form_url 写 company_contact_channel、LinkedIn 公司页写 company_contact_point（只补不删）；邮箱不进本管线。
+  - `attributes.industry_normalization` / `attributes.evidence_bundle` 加入 canonical 属性白名单（后者供后续 shadow 证据包使用）。
+- 测试：单测覆盖归一函数（变体/未知值不猜/幂等）、industry 推断（词表/CPV/FDA 端口）、联系点装配（电话/LinkedIn/表单/无邮箱）与 sanitizer 白名单；dev 库真跑计数见 `docs/evidence/2026-11-10-multi-source-evidence-graph-slice.md`。
+- 未做：不从域名 TLD 猜国家；未接 pipeline 热路径（CLI 回填）；LinkedIn 补全只写公司页 URL，不解析个人主页。
+
+## 2026-11-10 · Enforced cross-source evidence gate and tiered evidence bundle in the judgment chain (#978)
+
+- 起因：公司理解仍是官网单源；富集结果各写各的 attributes，判定链无法表达「FIT/NOT_FIT 需跨源佐证」。产品负责人 2026-11-10 决定取消影子期：证据包与佐证门直接按 enforce 生效（fail-closed、可回滚开关）。
+- 改动：
+  - 新增 `discovery/evidence-bundle.ts`：T1（官方注册/招投标/专利）/T2（Wikidata）/T3（官网/技术足迹）分层证据包；判定链在 FIT/NOT_FIT 落地前按当前属性现场装配（零出网），并把包随判定记录同事务写回 `attributes.evidence_bundle`（审计面；落库键名避开属性 sanitizer 黑名单，长数字标识拆分/前缀化）。
+  - 判定快照（judge prompt）新增 `cross_source_evidence` 摘要——证据分层真实参与理解输入。
+  - 新增 `discovery/judgment/corroboration.ts`：FIT/NOT_FIT 需 ≥2 个独立分层，否则 fail-closed 降级 UNKNOWN（Lead=weak/待复核，绝不自动推荐或自动拒绝）；v2 判定链与 v1 路径同口径；降级与评估记入 `judgment_record.sampling.corroboration`。`JUDGE_CORROBORATION_MODE` 默认 `enforce`（非法值 fail-closed 到 enforce），`shadow`/`off` 为回滚开关。
+  - 新增 `scripts/build-evidence-bundle.mts`（DE 样本构建 + 对最近判定的同口径离线佐证样例）。
+  - 新增 `docs/eval/golden-icp/`（26 条 ICP 查询 YAML，3 条已标注；口径/标注模板见 README）与 `scripts/evaluate-golden-icp.mts`、`src/discovery/golden-icp.ts`（受限 YAML 解析、确定性排序、precision@K/recall）。
+- 测试：单测覆盖证据包装配与属性 sanitizer 回环、佐证评估/降级矩阵（enforce/shadow/off、单层/无包）、判定链降级与证据包写回、golden ICP 解析与 precision@K；dev 库真跑样例见 `docs/evidence/2026-11-10-multi-source-evidence-graph-slice.md`。
+- 未做：golden 集 26 条查询中 23 条待标注；companies_house/inpi_rne/google_patents/samgov 暂无 canonical 属性命名空间，暂不计入 T1（留了抽取位）。
+
+## 2026-11-10 · 注册即建档第 1 步——理解预览与 onboarding facts 端点（ONBOARDING-PREVIEW-1） (#979)
+
+- 起因：产品负责人 2026-11-10 批准「注册即建档」客户旅程重构（先官网 → 理解预览 → 勾选完成注册）。当前 onboarding 让客户手填六项事实，理解结果在注册完成后才出现；行业是自由文本，无法受控。第 1 步把顺序反过来：官网先提交，理解结果变成客户可勾选的候选，行业改受控词表。
+- 改动：
+  - **档案保存受控行业码**：`company_profile.industry_code TEXT NULL`（迁移 `20261110100000_company_industry_code`，可空无回填）；`industry` 继续存展示标签，供旧界面与上游 NACE 词面映射读取。`CompanyDto` 增加 `industryCode`。
+  - **`GET /api/v1/companies/:companyId/understanding-preview`**（acquisition:read）：只读聚合一次真实 understanding run 的落库结果——状态（not_started/queued/running/ready/failed）、`stage:code` 失败标签、已分析页数（knowledge_source type=website 按 URI 去重）、行业候选（profile.industry 经 term_alias 精确/子串归一到 canonical_taxonomy(kind=industry)，归不上只给原文）+ 受控词表、产品候选（offering 带来源页/原文）、市场候选（summary/claim 陈述里确定性识别的国家名，拉丁别名 ≥4 字符避免 "contact us" 类误报，命中才建议并附原句）。
+  - **`POST /api/v1/companies/:companyId/onboarding-facts`**（acquisition:write，无 Grant）：客户勾选结果写回同一档案；industryCode 以词表校验并回填标签；products upsert 为 Offering(source=onboarding) 并清理本路径管理的旧行；同事务复用 `synthesizeProfileClaimDrafts` 生成 NEEDS_REVIEW Claim 草稿。只允许 DRAFT/REVIEW，ENRICHING 返回 409 ONBOARDING_FACTS_NOT_ALLOWED，避免 understanding 的 extract_profile 稍后覆盖客户选择。
+  - **PATCH /companies/:id** 接受 `industryCode`；改成自由文本行业时清空旧受控码，保持两列同源。
+  - **审查修复**：接受重试即清 `understandingFailedAt/LastError`（预览从 failed 回 queued，并恢复 10 分钟重复启动守卫）；onboarding-facts 拒绝「DRAFT + 官网 + 无失败标记」（已排队）的写入并拒绝 JSON null；市场国家只认词边界（Romania 不再命中 Oman/Niger/Mali），产品/市场/页数只收与当前官网同站的溯源；市场候选补 `labelEn/labels`。
+  - 两个新操作的 `operation-descriptions` 与 OpenAPI 契约重导出。
+  - **随并 main 的治理修复**：#977（SMTP 第二票）与 #976（deepseek 工具）各自把物理工具调用点从 44 改到 45，文本不冲突但合并后实际 46，main 的 Governance 因此红；按 `scripts/execution-authority-policy.mjs` 的真值把 spec 的两处数字断言改为 46。
+- 设计约束：不新增 AI Task、不新增工具调用点、不新增预算 purpose/quote operation——预览复用 `POST /companies`（既有 understanding.run 预算），完成路径零模型调用。因此未改 `scripts/execution-authority-policy.*`、`builtin-tools.ts` 与 quote envelope。
+- 测试：`src/company` 47 例（新增市场词边界、同站过滤、排队态守卫、JSON null 等 5 例）、operation-descriptions/authz-openapi/controller-authz 合计 75 例全绿；`nest build`、spectral、G9 体量门、`governance:verify`、`execution-authority-policy.spec`（合并最新 main 后 17 例）全绿；OpenAPI 重导出 139 paths（+2）；Copy 固定源回执重签（合并最新 main 后 UNCHANGED）。
+- 未做：SaaS 侧 onboarding 反向流程（gain-saas 仓单独 PR）；逐页抓取失败/预计时间的 run 事件投影（第 2 步）；NAF→NACE 全表映射（T3-05）与词表扩容仍按原路线。
+
+## 2026-11-10 · 社媒信号采集——changedetection/RSSHub 归因落库 company_signal (#981)
+
+- 起因：免费社媒信号栈（changedetection.io @ 127.0.0.1:5055、RSSHub @ 127.0.0.1:1200，RUNBOOK §16）已上线，但信号仍停在两个服务里，引擎无法查询、也无法用于触发式外联。本批把两类信号归因到 canonical_company 并落库为可查询的公司信号（只读公开页面/公开信息源，不含任何平台写操作自动化）。
+- 改动：
+  - 迁移 `20261110020000_company_signal`：新表 `company_signal`（`workspace_id` 必填、`company_id` 可空 FK `canonical_company` ON DELETE SET NULL、`provider_key`、`signal_kind`（rss_item|page_change）、`source_url`、`title`、`excerpt`、`observed_at` timestamptz、`fingerprint` char(64)、`ingest_key`；唯一 `(workspace_id, ingest_key)`；索引 `(workspace_id, company_id, observed_at DESC)`）；ENABLE+FORCE RLS + `current_workspace_id()` 租户策略；app_user 授予 SELECT/INSERT/UPDATE，并同步 `docs/governance/app-user-table-privileges.json`。Prisma model `CompanySignal` 同步。
+  - `apps/api/src/signals/company-signals.ts`（纯逻辑，无网络 I/O）：RSS2/Atom 解析（fast-xml-parser；CDATA 与缺失字段宽容、缺 title/link 计 dropped、非 RSS/Atom 响应标 `recognized=false` 不静默吞）、changedetection watches 映射（`last_changed > 0` 才算信号，越界时间戳显式跳过）、指纹 `sha256(provider|source_url|title|observed_at 秒)`、域名归因（精确 > 子域 > 同注册域；多租户托管后缀如 wordpress.com/github.io 禁用同注册域近似；未匹配 `company_id = null` 仍落库）、`createMany(skipDuplicates)` 幂等写入；返回 `{inserted, skipped, matched}`。
+  - CLI `apps/api/scripts/signals/ingest-signals.mts`（出网只在这里）：`--workspace` 必填、`--rss <route|url>` 可重复（缺省读 `SIGNAL_RSS_ROUTES`，逗号分隔）、`--include-watch-changes`；拉取复用仓库治理出口 `requestPublicHttp`（net-guard：global-unicast、每跳重定向重新解析并**固定连接 IP** 防 DNS rebinding、流式 5 MB 上限、20s 墙钟超时、跨域剥离凭据；本机 RSSHub/changedetection 回环 origin 按配置放行，changedetection 请求禁跟随重定向避免 x-api-key 外泄）；网络完成后先校验 workspace 存在（打错 UUID 不产生孤儿行），再逐源用 `PrismaService.withWorkspace`（app_user + `set_config`）开短事务落库，归因查询失败与写入失败都会回滚该源；源级失败退出码 1、参数错误退出码 2。
+- 测试：新增 `company-signals.spec.ts`（解析/指纹/归因/落库口径，含多租户托管后缀与 IDN 用例）与 `ingest-signals.spec.mts`（argv 解析、治理出口拒绝可见、非 RSS/JSON 错误、本机 resolver 固定回环、逐源失败隔离、collect→persist 幂等），共 33 例，fetch/DNS 注入不触网；新增 `packages/db/test/company-signal.rls.spec.mjs`（service 组真库，app_user：上下文内写入/跨租户不可见/WITH CHECK 拒写/无 DELETE，4/4）。`pnpm --filter @global/api test` 全量 13198 例（12954 通过、244 跳过、0 失败；重构前一轮曾有 4 个负载超时文件，单跑 50/50 通过，非本次改动）；`pnpm --filter @global/api build` 绿；`node scripts/check-file-budgets.mjs` OK（parseRssFeed 复杂度 21 为 warn）。迁移在本机一次性库过 Prisma 漂移门 / G5 RLS 目录门（175 张表、121 张 workspace RLS）/ app_user 权限清单门（27 例）。真实数据演示（dev 库，app_user + set_config 事务）：Nees Pumpen 官网 RSS 10 条全归因、RSSHub 路由 12 条未归因（github.com），插入 22、归因 10；重跑插入 0、跳过 22（幂等）。页面变更入库路径以临时演示 watch 实测过 1 条（`last_changed>0` 后入库；演示后 watch 与行已清理；三个真实 watch 当前从未变更，故不产生信号）。
+- 未做：changedetection `/diff/{uuid}` 正文未落 `excerpt`（列表元数据已足够触发，正文拉取留待后续）；调度接线（Schedule / run 内 activity）未做，本批只有 CLI 手动执行；未归因信号的规则回填与人工归因界面未做；ToolBroker/source_policy 化未做——出网暂留运营 CLI（经 net-guard，类比制裁名单运营刷新路径），RUNBOOK §16 的「引擎侧 provider/tool」是后续工程，是否登记 §6 例外待产品负责人拍板。
+
+## 2026-11-10 · model_web_search discovery provider 接线（获客通路 A 闭环） (#985)
+
+- 起因：工具环（#975）与执行器工具（#976）已在 main，但没有任何 discovery provider 调用 `discovery.web_search_candidates`，run 永远不会走到模型联网搜索。本批把 provider 接进注册面与执行面，闭合「生成查询→检索→候选→入库」这一边（用户 2026-11-10 闭环要求）。
+- 改动：
+  - 新 provider `apps/api/src/discovery/providers/model-web-search.provider.ts`（key `model_web_search`，public_intelligence）：两段式——探索环 `runModelWebSearch`（模型规划检索词，经 ToolBroker 走 SearXNG 或 DeepSeek，搜索回执为 auxiliary）+ 结构确认 `discovery.web_search_candidates`（generateStructured 持久投影，**该回执即公司血缘**，producerId=任务 id）。最终候选必须能在实际检索结果里按主机名找到出处，否则丢弃（防模型臆造域名）；blockedDomains 生效；env `MODEL_WEB_SEARCH_PROVIDER=on` 为第一开关（默认 off 时返回有效空血缘），`MODEL_WEB_SEARCH_EXECUTOR=searxng|deepseek` 选执行器。
+  - 血缘契约扩一个 provider key：`company-discovery-lineage.ts`（union + `PROVIDER_RECEIPT_CONTRACT`）、`discovery-query-governed-lineage.ts`（`PROVIDER_CONTRACT`）、`durable-results/domain-ack-consumer-bindings.ts`（governed 回执绑定；另补 `deepseek.search` 的 product consumer 绑定与 `discovery.activities.ts` 的 producer 白名单）。
+  - 注册与路由面：`provider.registry.ts`（构造 push + data_provider seed ENABLED，第二道 kill switch）、`provider-source-classes.json`、`plan-query-sources.ts`（planner 指南 + cheap-first 优先级 60）、`execution-envelope.ts` `MAX_COMPANY_DISCOVERY_ADAPTERS` 8→9。
+  - 报价信封（`workspace-technical-budget-envelope.ts`）：补 `discovery.web_search_candidates` 模型上界（每查询 ≤ `MODEL_WEB_SEARCH_MAX_ROUNDS`+1 次）与两种搜索执行器工具上界；新常量 `MODEL_WEB_SEARCH_MAX_ROUNDS/MAX_TOOL_CALLS`（工具环默认值改用同一常量）。
+  - 治理：`docs/governance/provider-registry.json` 新增 `model_web_search`（IMPLEMENTED，ENABLED），`docs/backend/provider-registry.md` 重新生成。
+- 测试：新增 `model-web-search.provider.spec.ts`（默认关零调用、缺 gateway 诚实降级、证据落地只保留检索结果中的公司、blockedDomains、已结算失败→零记录有效血缘、执行控制错误穿透、探索失败→有效空血缘）；`provider.registry.spec.ts` 精确清单同步；`workspace-technical-budget-quote.controller.spec.ts` 报价上界随适配器 9 更新。
+- 未做：DeepSeek 执行器真实联网的端到端费用验证（需真实 key 往返，费用授权后单独发车验证）；golden ICP 评估集（下一步）；发现 run 的 20–30 条真实样本验收（发车后做）。
+
+## 2026-11-10 · 公司触发信号只读端点（P1-18 闭环读侧） (#986)
+
+- 起因：P1-18（#981）已把 changedetection/RSSHub 信号归因落库到 `company_signal`，但没有任何读接口，SaaS 公司/线索详情无法展示「触发信号」——闭环接线清单第 2 项的缺口。
+- 改动：
+  - 新 `GET /api/v1/companies/{companyId}/signals`（`signals/company-signals.controller.ts` + `company-signals.service.ts`，`SignalsModule` 注册进 app.module）：只读 `company_signal` 中已归因到该公司的行（company_id 非空且等于路径公司），按 `observed_at` 倒序 keyset 分页（base64url cursor，limit 默认 20/最大 100）；RLS 走 `withWorkspace`，查询同时显式带 workspaceId/companyId 纵深防御；只返回元数据（providerKey/signalKind/sourceUrl/title/excerpt/observedAt）。
+  - 接口门户说明（`docs/operation-descriptions.ts`）与 OpenAPI 契约重导出。
+- 测试：`company-signals.service.spec.ts`（分页映射/游标往返/非法 limit/cursor、RLS 事务参数）；OpenAPI 重导出后 contracts drift 门校验。
+- 未做：SaaS 公司详情「触发信号」块（gain-saas 侧 PR 跟随）；signal 消费的 ops-check 告警（接线清单第 7 项）。
+
+## 2026-11-10 · 查询血缘 SQL 白名单再扩——registry_frame 与 model_web_search (#987)
+
+- 起因：`append_discovery_query_lineage_v1` 的 providers 白名单与 attempt 三元组仍是硬编码（上次扩于 20261108160000）。2026-11-10 真实 run 实测：registry_frame（A 方案，数据源 ENABLED + `REGISTRY_FRAME_PROVIDER=on`）在 append 阶段被 `DOMAIN_ACK_DISCOVERY_QUERY_LINEAGE_INVALID` 拒绝，整个 run FAILED；WEB-1 的 model_web_search 同样不在白名单内。
+- 改动：新迁移 `20261110050000_discovery_query_lineage_provider_allowlist_widen`（纯 `CREATE OR REPLACE FUNCTION append_discovery_query_lineage_v1`，无表结构变更）：
+  - providers 白名单增 `model_web_search`（限 public_intelligence）与 `registry_frame`（限 company_registry）；
+  - attempt 三元组增 `discovery.web_search_candidates / ModelWebSearchDiscoveryProvider / discovery-web-search-candidates/v1` 与 `registry.query / RegistryFrameDiscoveryProvider / registry-query/v1`，与 code 侧 `PROVIDER_CONTRACT`/`DISCOVERY_GOVERNED_COMPANY_ACK_BINDINGS` 一致。
+  - v1 合同哈希、命令/回执字段与其余校验不变（纯 widen；历史回执不含新源，重放语义不变）。
+- 测试：迁移在本机库事务内解析/创建后 ROLLBACK（语法与依赖通过）；发车后真实 run 复验。
+- 未做：raw source writer 的 provider CASE 白名单（`write_raw_source_record_v2_legacy`）未扩——治理管线走 Prisma DML 不经过该函数，registry_frame 实测止于血缘 append 而非 raw 写入；如未来有路径使用该 SQL writer 需同步扩。
+
+## 2026-11-10 · 模型联网搜索工具环轮数上调（4→6 轮 / 8→10 次搜索）并提示尽早作答 (#988)
+
+- 起因：真实 run（2026-11-10，9d0e3065）中 deepseek-flash 在 4 轮往返后仍在检索，工具环报 `MODEL_WEB_SEARCH_ROUND_BUDGET_EXCEEDED`，`model_web_search` 查询以空结果收尾（回执合法、provider 在场、record_count=0）。4 轮对 3 轮检索 + 最终作答的节奏过紧。
+- 改动：`MODEL_WEB_SEARCH_MAX_ROUNDS` 4→6、`MODEL_WEB_SEARCH_MAX_TOOL_CALLS` 8→10（报价信封与工具环默认值共用同一常量，自动跟随）；系统提示补一句「检索 2–3 轮、证据足够就立即给出最终 JSON，不要无限检索」。
+- 报价：`discovery.web_search_candidates` 每查询模型上界 5→7 次、SearXNG/DeepSeek 搜索工具上界 8→10 次，discovery.run 技术报价上界随之更新（spec 同步按真值）。
+- 测试：预算信封 spec 与 quote 控制器 spec 更新；工具环单测沿用显式上限不受影响。
+- 未做：DeepSeek 执行器真实付费往返（仍在 searxng 执行器上验证链路）。
+
+## 2026-11-10 · 理解流程准入租期 30 分钟——修复 onboarding 理解预览在慢抓取时卡死 (#990)
+
+- 起因：2026-11-10 前端实测 onboarding 理解预览无限转圈；根因是 understanding.run 没有 admission lease——crawl4ai 上游 502 重试把流程拖过 Grant 5 分钟窗口后，`crawlPages`/`extractAndPersistProfile` 全部报 `EXECUTION_BUDGET_GRANT_EXPIRED`，工作流卡死到超时。
+- 改动：沿用 20261009170000（discovery.run 3h）/20261010110000（ICP 30min）的既有机制，新迁移 `20261110090000_understanding_admission_lease` 把 `understanding.run + company` 加入租期（consumed_at + 30 分钟）：CHECK 约束放行该配对，`consume_workspace_execution_authority` 逐字复制上一版仅新增一个 CASE 分支；attest 的 COALESCE 判期逻辑不变，Grant 本身仍在自己的窗口内被呈现与准入，撤销/scope/cap/耗尽检查不变，无回填。
+- 测试：`understanding-admission-lease.migration.spec.ts`（单一事务、无回填、约束精确、consume 与上一版仅差一个分支）；迁移在本机库事务内创建后 ROLLBACK 验证。
+- 部署：需与镜像同窗口（运行时取最后完成的迁移）。
+- 未做：前端失败态已由 #149 自带的 failed 视图覆盖（本轮未改动）；Grant 本身窗口（quote 5 分钟）不变——admission lease 只延长「准入后」的有效期。
+
+## 2026-11-10 · 模型联网搜索：超出搜索预算的调用改为结算消息，不再让整次检索作废 (#991)
+
+- 起因：真实 run（28b50fe2，镜像 1afd8b79）中 deepseek-flash 单轮并行发起多条 web_search，累计越过 10 次上限后工具环抛 `MODEL_WEB_SEARCH_TOOL_BUDGET_EXCEEDED`，该查询以合法空回执收尾（provider 在场、record_count=0）。
+- 改动：`runModelWebSearch` 对超预算的调用不再抛错，改为回填一条含错误码的结算消息（「不会再有新搜索结果，请立即输出最终 JSON」）继续工具环；搜索执行次数与成本仍被原上限钳制，轮数上限仍是硬失败（`ROUND_BUDGET_EXCEEDED`）。未授权工具仍立即拒绝。
+- 测试：原「越限即失败」用例改为「越限+始终不作答 → 轮数硬限」；新增「越限后模型作答 → 正常返回且越限查询未发出」用例。
+- 未做：不改变报价信封常量（上限不变，仅越限时行为更健壮）。
+
+## 2026-11-10 · Add DISCOVERY_UNCAPPED to replace product caps with safety bounds (#992)
+
+- 起因：2026-11-10 产品负责人拍板「预算不由平台决定」——挖掘的产出被平台产品帽（每查询每源 25 条记录、run 总池 500、每源每轮 ≤100 家公司、快扫池 500、模型联网搜索工具环 6 轮/10 次、联系人阶段整轮 $2）钳制，与客户充值余额无关；计划 `docs/superpowers/plans/2026-11-10-deep-acquisition-vnext.md` §3 W1。
+- 改动：
+  - 新增开关 `DISCOVERY_UNCAPPED`（默认 off，畸形值回退 off）：off 时行为逐字节不变；on 时上列产品帽改为**防爆安全界**，各由 env 可调（`DISCOVERY_MAX_PROVIDER_RECORDS` 默认 1000、`DISCOVERY_RUN_POOL_CAP` 默认 10 万、`DISCOVERY_STRUCTURED_SOURCE_RUN_CAP`/`DISCOVERY_TRIAL_*` 默认不再裁剪、`DISCOVERY_QUICK_SCAN_POOL_LIMIT` 默认 5 万、`DISCOVERY_MODEL_WEB_SEARCH_MAX_ROUNDS/TOOL_CALLS` 默认 24/100），默认值远高于客户余额可支付量级。
+  - 真正的收紧条件落到执行预算：quote 只给估算包络上界，签发侧按 Grant cap = min(估算包络, 客户可用余额) 钳制（引擎 quote 合同刻意不含商业字段），引擎账本逐次 reserve/settle，余额耗尽是唯一停止条件；联系人阶段整轮 $2 产品帽在去帽模式下退场，仅保留每家 $0.20 安全界。
+  - 去帽模式下计划提示的配额话术改为余额准入语义；每源查询预算默认换算回 66 条（= 全部计划查询数），不再先于余额裁剪查询副本；executionLimits 增加 `discoveryUncapped: 1` 审计标记（off 时字段缺席）。
+  - 限流与出口治理（ToolBroker source_policy、rate limit）不随开关变化。
+- 测试：新增/扩展 execution-envelope、run-pool-cap、plan-query-sources、quick-scan、model-web-search、contact-discovery-budget、workspace-technical-budget-envelope 各 spec 的 off/on 双态断言（off 断言与既有精确数字一致；on 报价数字按真实运行填写）。
+- 未做：存量计划 `2026-11-05-cheap-first-provider-routing.md` 中的产品帽口径未回改（由 vNext 计划 §5 裁决取代）；开关默认 off，部署后由验收会话确认余额闸链路再开启；gain-saas 侧余额钳制（min 的余额一半）不在本仓库。
+
+## 2026-11-10 · Acquisition vNext W3 evaluation sets, precision@k, Chapman coverage and source-yield accounting (#993)
+
+- 起因：获客挖掘 vNext 要求「覆盖率是可测的量」（golden set precision@k、双源捕获-再捕获 recall 估计、每源边际产出会计、账单三方对账），计划 docs/superpowers/plans/2026-11-10-deep-acquisition-vnext.md §3 W3。
+- 改动：
+  - 迁移 20261110130000_acquisition_evaluation 追加四张租户表（均 ENABLE+FORCE RLS）：evaluation_set、evaluation_label、source_yield_ledger、coverage_estimate；app_user 权限同步登记到 docs/governance/app-user-table-privileges.json。
+  - 新模块 apps/api/src/evaluation：POST /evaluation/sets、POST /evaluation/sets/:id/labels、GET /evaluation/sets/:id/report（precision@k）、GET /evaluation/coverage（Chapman 估计 + 95% CI，自动存证）。
+  - source_yield_ledger 生产写入接入 discovery finalizeRun 同事务（幂等），并提供 backfill-source-yield-ledger 回填脚本与 evaluation-import-golden-set 导入脚本。
+  - /metrics 新增 GET /metrics/source-yield（按日/周×源聚合）与 GET /metrics/billing-reconciliation（usage_ledger ↔ tool_budget_operation ↔ tool_budget_account 三方视图，标注余额来源表）。
+- 测试：Chapman 数值/零重叠/一边为空边界、precision@k 口径、对账差额、候选/覆盖身份键、迁移结构单测；OpenAPI 重导出，operation-descriptions 全覆盖。
+- 未做：真实 golden set 标注样例由产品负责人提供后导入（≥100 家）；覆盖估计的真实双源数据要等 W4 原始源装载器上线后在真实 run 上取数；客户钱包余额真值仍在 gain-saas，对账的余额侧只到执行包络。
+
+## 2026-11-10 · Deterministic source coverage fill for query plans and Wikidata subclass closure (#994)
+
+- 起因：2026-11-10 真实 run 实测两个缺陷——①查询规划器漏排可用源：14 条查询只覆盖 5 个源，`model_web_search`（模型联网搜索）一条查询都没排到；提示词只有「结构化源优先、public_web 兜底」的口头引导，没有任何强制覆盖校验。②Wikidata 发现源只按 `P452` 精确行业标签匹配，公司行业常登记为目标行业的子类，命中很稀。
+- 改动：
+  - `icp.service.generateQueryPlan` 在 TED/FDA 冷路径注入之后、存库之前新增确定性后处理 `withSourceCoverage`（`apps/api/src/discovery/plan-query-sources.ts`）：对「已启用 + 声明公司血缘 + 在 `PLANNER_SOURCE_GUIDE` 可规划集合内」却未出现在任何查询 `filters.source_hint` 的源，按 ICP 主画像（首个目标国 + 行业词）合成一条兜底查询（`keywords: []`、`priority` 末位、rationale「覆盖补齐」），并遵守 `MAX_DISCOVERY_PLAN_QUERIES` 封口。
+  - 排除项：TED/openFDA（冷路径注入负责）、`trade_fair`（无匹配展会时勿盲补，2026-11-02 全空查询教训）、`registry_frame`（仅当首个目标国已有 PARSED 快照的注册库装载时补，装载状态未知时补并在 rationale 标注「注册库未装载」warning）。
+  - `adapters/wikidata.ts` 行业匹配改为两段式：先跑现有 `P452` 精确匹配（快路径），零命中时回退 `?industry wdt:P279* ?root` 子类闭包查询一次，提升 Wikidata 命中率。
+- 测试：`plan-query-sources.spec.ts` 新增 9 个覆盖补齐用例（缺源补查询、已覆盖不重复、trade_fair/ted/openfda 不盲补、registry_frame 装载/未装载/未知/无 ISO2 四分支、无国家行业时省略过滤、首目标国取值、封口与满额不动）；`adapters/wikidata.spec.ts` 新增 2 个 SPARQL 形态断言（精确快路径命中时零闭包调用；零命中时闭包查询含 `P279*` 且保留国家/官网约束）；`icp.service.spec.ts` 更新两处受影响断言并新增装载态接线用例。
+- 未做：Wikidata 闭包扩展（P279）结果未加去重排序之外的处理；registry_frame 的覆盖面仍按首个目标国判定，多市场 ICP 不逐国补；查询计划 UI 无「覆盖补齐」专属呈现（依赖既有 rationale 展示）。
+
+## 2026-11-10 · Expand ISIC industry vocabulary with multilingual labels, CPV crosswalks and industry-role terms (#995)
+
+- 起因：产品负责人反馈行业词表过稀——真实 ICP（意大利/美国/英国的「光伏产业链/零碳建筑」采购企业）在 ICP→CPV 冷路径一个 CPV 码都没解析出来，TED 采购源零查询；行业目录检索也因词表稀疏命中极低。
+- 改动：
+  - `apps/api/src/discovery/isic-seed.ts`：行业节点 11 → 37（新增 26 个出口/获客高频节点：电气 27/271/273/274/279、风电 2811、暖通与热泵 2819、汽车零部件 2930、设备安装/Anlagenbau 33/3320、施工 41/42/43/4321/4322、电力供应 35、化工 20、橡塑包装 22/2220、电子元器件 261、通信设备 2630、批发与进出口 46/4659/4663、软件 62、工程服务 71），每个节点给 zh/de/it/fr/es 标签（能确定的才给）；`crosswalks.cpv` 只锚定官方核验过的 CPV 族；光伏/风电/储能/热泵/EPC/零碳建筑/楼宇自控/泵阀贸易等产品词与中英德意法西别名写入 `term_alias(kind=industry)`（去重后 898 条行业词条）。
+  - `apps/api/src/discovery/cpv-seed.ts`（新）：CPV 子树从脚本挪出为可测试模块，5 → 71 个码（09/24/31/32/34/42/43/44/45/71/72；对照 cpvcodes.eu 官方浏览器、EUR-Lex Reg. 213/2008 清单与 TED 公告用法核验，宁可少而准），parentCode 前缀嵌套。
+  - `apps/api/scripts/seed-taxonomy.mjs`：改为从 dist 导入两份种子；industry 标签写 zh/de/it/fr/es；新增 `industry_role` 渠道角色词种子（分销商/批发商/进口商/贸易商/零售商，含 Fachhandel/Großhandel/rivenditore/distributore/distributeur/mayorista 等本地语言词）；保持幂等 upsert 并打印各 kind 计数。
+  - `apps/api/src/discovery/taxonomy-vocab.spec.ts`（新）：用内存 taxonomy 桩断言「光伏/太阳能/零碳建筑/建筑电气/泵阀贸易/EPC/热泵」解析出非空 cpvCodes；种子完备性（别名不跨节点重复、ISIC↔CPV crosswalk 双向可解析、CPV 父码前缀嵌套）。
+- 测试：taxonomy-vocab / icp-to-cpv / industry-map / company-normalization / icp-to-naics 五个 spec 文件 69 项全绿；`@global/api` build 通过。
+- 未做：不改查询构造代码（search-localization 由并行会话维护，本 PR 只提供数据面）；不部署、不把种子写入运行库（发车后按运维窗口执行）；46 批发族与 4659 不挂 CPV 锚（避免污染 TED 中标反查，ICP 只给「批发」时走诚实的 icp_seed_gap warning）。
+
+## 2026-11-10 · Source compliance matrix, governed OpenCorporates source and de/fr/it/es industry role terms (acquisition vNext W4) (#996)
+
+- 起因：获客挖掘 vNext（`docs/superpowers/plans/2026-11-10-deep-acquisition-vnext.md` §3 W4）要求原始源下沉前先过合规矩阵，并把 OpenCorporates 作为 P0 第一源接入受治理发现管线；查询计划的本地语言词表同时补齐德/法/意/西的行业角色词。
+- 改动：
+  - 新平台表 `source_compliance_matrix`（迁移 `20261110080000_source_compliance_matrix`）：许可分类/robots/ToS/个人数据分级/保留期/责任人；初始行覆盖 openstreetmap、wikidata、ted、openfda、companies_house、inpi_rne、gleif、google_patents 与新源 opencorporates（approved_at 留空＝商用订阅签署前不得上线）。app_user 只读。
+  - 工具 broker 源合规闸门：声明 `compliance.sourceKey` 的新源工具在 `SOURCE_COMPLIANCE_GATE=enforce` 时要求矩阵已批准行（未登记/未批准=fail-closed）；默认 off 行为不变，未声明 sourceKey 的旧源只走既有 source_policy。
+  - 新受治理工具 `opencorporates.search`（`opencorporates-search/v1` typed projection，provider `opencorporates`，company_registry 类，完整血缘回执 producer=opencorporates.search）；`OPENCORPORATES_PROVIDER` 默认 off、`data_provider.opencorporates` 默认 DISABLED、缺 `OPENCORPORATES_API_TOKEN` 时 fail-safe 有效空。
+  - 发现治理 SQL（`append_discovery_query_lineage_v1`）白名单与 attempt 三元组扩入 opencorporates（纯 widen，合同哈希不变）。
+  - `search-localization` 的 de/fr/it/es 分销商角色词各加一组行业词（Fachhandel/Importeur、importateur/négociant、importatore/commerciante、importador/comerciante 等），既有前三项顺序不变。
+  - 注册面同步：task/execution-authority 计数（23 tools / 49 callsites）、durable-result-strategies、domain-ack 两处绑定、receipt facts、provider registry/source classes/plan-query-sources、技术报价包络（适配器 9→10 并登记 opencorporates 搜索出网上界）。
+- 测试：新增适配器/工具/provider/迁移/合规闸门单测与投影边界样例；`execution-authority-policy.spec`、provider registry、plan-query、durable-results 计数按真值更新；`gctl check` 全绿（CI 为准）。
+- 未做：OpenCorporates 商用订阅与真实 key 未配置，真实限流/配额实测留待部署后验收；Companies House / INSEE SIRENE / 展会原始目录等其余 P0 源与本地语言真实 run 留待后续切片。
+
+## 2026-11-10 · Deep-acquisition W2 legal entity graph and company-to-entity disambiguation (#997)
+
+- 起因：获客挖掘 vNext 计划（`docs/superpowers/plans/2026-11-10-deep-acquisition-vnext.md`，经计划 PR 单独合入）§3 W2——深度优先要求公司记录可落到法人实体，同名异地与集团/子公司分开；现有 canonical_company 只有域名/名称级去重，没有实体图谱。
+- 改动：
+  - 迁移 `20261110070000_legal_entity_graph`：新表 `legal_entity`（租户级，身份键 workspace+scheme+country+value，scheme ∈ lei/vat/hrb/siren/ch/kvk/cvr/bolagsverket/other）与 `company_legal_link`（confidence、match_method、match_rule、status auto/review/rejected、证据 JSON），双表 ENABLE+FORCE RLS；设计取舍（为何租户级、为何 country 入键、HRB/VAT 的 caveat）写在迁移头注释。
+  - 匹配引擎 `apps/api/src/discovery/entity/`：确定性键优先（复用 registry 的 LEI/VAT 归一；HRB/SIREN/CH/KVK/CVR/bolagsverket 规范式），VIES 校验留 `VatValidator` 注入点（默认不出网，VAT 命中落 review）；无键时 Fellegi–Sunter 概率匹配骨架（blocking=国家+归一化名字前 4 字符，名称/国家/地址字段权重表可配，双阈值 auto/review）；同 scheme 键冲突 → rejected 留档（同名异法人硬门）。
+  - 端点：`POST /companies/{companyId}/legal-links/resolve`（登记自实体/候选 → 消歧 → 落库 → 返回链接；acquisition:write）与 `GET /companies/{companyId}/legal-links`（acquisition:read），operation-descriptions 与 OpenAPI 同步。不自动合并两个已存在的 canonical 公司。
+- 测试：新增单测覆盖标识规范式、确定性键命中/VIES 三态、同名异法人反例、概率匹配双阈值分档与 blocking 拒配；迁移静态契约 spec（词表闭合/唯一键/复合外键/RLS/授权与 docs/governance/app-user-table-privileges.json 清单一致）。真库面由 CI 的 prisma-drift、rls-catalog、app-user-table-privileges 三道门复核。
+- 未做：概率权重表未用标注数据拟合（起始值 + 版本号 fellegi_sunter_v1，W5 主动学习重校准）；父子/集团边（parent_lei 已在证据中，边表留给图谱后续波次）；人工复核端点与「合并两个 canonical 公司」流程；W4 源装载器（legal_entity 目前由 GLEIF/官网 VAT 与 resolve 请求体 candidates 填充）。
+
+## 2026-11-10 · 修复验证 run 的三处源失败：public_web 空检索串、web_search 确认截断、TED/openFDA 投影拒绝 (#998)
+
+- 起因：2026-11-10 的验证 run 97a4fa1b 以 `DOMAIN_ACK_DISCOVERY_QUERY_LINEAGE_RECEIPT_MISMATCH` 整体失败，TED / model_web_search / public_web 三源零产出。逐层定位：
+  - 覆盖补齐把 ICP 原始主画像（市场词「意大利（IT）」、中文行业词「太阳能光伏」）抄进 public_web 查询：`targetCountries` 不剥「（IT）」尾注 → 国家识别落空、语言回退 en → 中文词被检索语言过滤整体剥离 → `searches.length===0` → provider 抛 `ApplicationFailure.nonRetryable(DISCOVERY_MARKET_UNSUPPORTED)` → 治理血缘计划构建器把「provider reject」判成血缘失配，整轮 run 失败；
+  - `discovery.web_search_candidates` 结构确认在 8_192 输出预算下被 deepseek-flash 推理吃满（finish=length、content 为空）→ `STRUCTURED_OUTPUT_EMPTY_TRUNCATED` → 确认环节整段作废、0 条记录；
+  - ted.provider 请求 `maxRecords=max(limit,50)`（去帽后 250），超过持久投影 `ted-search/v1` 的 awards 上限 32（另受 120 KiB 聚合门约束）→ `TOOL_DURABLE_RESULT_PROJECTION_REJECTED`，TED 恒 0 条；openFDA 同型（请求 250 vs establishments 上限 50，本 ICP 未触发）。
+- 改动：
+  - `apps/api/src/discovery/search-localization.ts`：新增 `stripMarketQualifier`，`targetCountries` 逐词剥掉「（IT）」类尾注后再匹配国家与语言；`searchLanguagesForMarkets` 复用同一剥离。
+  - `apps/api/src/discovery/plan-query-sources.ts`：覆盖补齐的 firstTarget 先剥尾注（registry_frame ISO2 解析随之恢复）；补齐查询借用本轮已规划查询里市场语言可用的关键词（≤3、去重），不再只带 ICP 原词——中文行业词交给只认市场语言的源（public_web）只会得到空检索串。
+  - `apps/api/src/discovery/providers/public-web.provider.ts`：空检索串改为 fail-safe 空结果 + 有效空血缘（与 ted / model_web_search 同约定，AGENTS.md §5 单源失败不阻断其余源），`DISCOVERY_MARKET_UNSUPPORTED` 错误码留在日志。
+  - `apps/api/src/discovery/providers/ted.provider.ts`、`openfda.provider.ts`：请求量钳进持久投影契约（TED awards ≤32、openFDA establishments ≤50）。
+  - `apps/api/src/ai-tasks/task-registry.ts`：`discovery.web_search_candidates` 输出预算 8_192 → 16_000（与 icp.design / discovery.query_plan 同档）。
+- 测试：plan-query-sources / search-localization / public-web-search-first / task-registry / ted / openfda / source-result-projections 7 个 spec 264 项通过；gctl check 全绿（含零容器单测）。
+- 未做：上调持久投影契约（TED/openFDA 每查询更多记录）属平台级改动（120 KiB 聚合门与 schema 上限要一起动），另行评审；signal-query 的 TED/openFDA 默认 maxRecords（100/200）超出同一契约，signal 恢复启用前需先对齐。
+
+## 2026-11-10 · 未应用迁移改名到已应用迁移之后——修复合并顺序导致的 MIGRATION_REVISION_MISMATCH (#999)
+
+- 起因：`20261110090000_understanding_admission_lease` 已在本机库应用；随后合并的 #996（080000_source_compliance_matrix）与 #997（070000_legal_entity_graph）名字排在 090000 之前且未应用。prisma 按名字顺序应用后，库「最新完成迁移（finished_at）」会小于镜像的 migration_revision（按名字取最大），运行时报 `MIGRATION_REVISION_MISMATCH` 拒绝启动（2026-11-10 发车 dry-run 实测拦截，未切换）。
+- 改动：把两个**未应用**迁移目录改名到 090000 之后——`20261110080000_source_compliance_matrix` → `20261110110000_source_compliance_matrix`、`20261110070000_legal_entity_graph` → `20261110120000_legal_entity_graph`。仅目录改名，SQL 内容不变；已应用迁移不改名（迁移只前进）。后续在飞迁移按「合并时大于当前已应用最大名」重新取号（W3 060000 → 20261110130000 由其 PR 自行改名）。
+- 测试：prisma 漂移门在一次性库全链重放通过；gctl switch-backend dry-run 的迁移顺序检查通过后发车。
+- 未做：不改变任何表结构；不动运行现场。
+
+## 2026-11-10 · 修复验证 run 遗留的三处采集缺陷：web_search 单条非法域作废整批、单公司抓取失败连坐、TED 数字税号与超长数组拒收 (#1000)
+
+- 起因：run 7a616c8a（fded81d1）的漏斗分析暴露三处非阻塞缺陷：① model_web_search 探索环里一条非法域名（`candidates[11]`）让整批候选作废；② profileCompanyOnce 把单家公司的站点抓取失败（crawl4ai 反爬/502/超时）放大成活动失败，deep 阶段 11 个目标 7 个连带失败（PARTIAL failure_rate_high）；③ TED 真实中标数据 85/88 条被 raw schema 拒收——纯数字国家税号（意大利 partita IVA 11 位）撞上防电话 PII 守卫、CPV 数组超 20 项触发容器守卫、名称含 ’/–/" 或超 16 词。
+- 改动：
+  - `apps/api/src/discovery/model-web-search/model-web-search.ts`：`parseModelWebSearchAnswer` 改为**按条过滤**——单条候选域名/证据/名称不合规只丢该条，全部丢光才报错；每条候选仍在 provider 层做域名与「证据必须出现在真实检索结果」的落地校验。
+  - `apps/api/src/temporal/discovery.run2.pipeline.activities.ts`：`profileCompanyOnce` 的失败边界改为「账本/预算/回执类失败上抛，其余软失败 + 日志」——覆盖档案抓取与持久化两段；`RUN_LEVEL_FAILURE_TOKENS` 定义在文件头。
+  - `apps/api/src/discovery/providers/ted.provider.ts`：CPV/买方国别去重并截断到 20；联合体整句 winner-identifier 不再当标识符；名称排版标点（’ – "）换 ASCII、超 16 词按词截断。
+  - `apps/api/src/discovery/raw-source-provider-schema.ts`：仅对 ted 的 identifier / attributes.ted.winner_identifier 放行纯数字国家税号（6–20 位；登记号是公司事实、scheme 已带国别，防电话守卫的意图不受影响）。
+- 测试：真实 TED 数据探针（257 条中标→公司记录）通过率 19/257 → **257/257**；ted/model-web-search/schema-probe/public-web-raw-governance/directory/openfda/run2 活动与失败接线共 11 个 spec 全绿；gctl check 全量通过。
+- 未做：taxonomy「太阳能光伏→ISIC 2610（半导体）」导致的 wikidata 精度问题（40 家 mismatch 的主因）未在本 PR 处理，按 vNext 词表路线另行评估；signals 阶段 BUDGET_AUTHORITY_NOT_READY 属既有平台预算权威缺口。
+
+## 2026-11-10 · Governed Companies House company-registry discovery source (acquisition vNext W4 P0, second source) (#1002)
+
+- 起因：获客挖掘 vNext W4 P0 第二源——Companies House 公司注册发现（复用既有受治理工具 `companies_house.search` 的 op=search），按名称从官方注册处拉 GB 注册实体，走 discovery→fit→enrich 全管线。
+- 改动：
+  - 新 provider `companies_house_registry`（company_registry 类；与联系人向 `companies_house` 分开注册，因 source-class 清单按 key 精确比对）：`COMPANIES_HOUSE_REGISTRY_PROVIDER=on` 才声明公司血缘（默认 off 零路由）+ data_provider 新行默认 DISABLED + 缺 `COMPANIES_HOUSE_API_KEY` fail-safe 有效空，三重关闭。
+  - 只映射公司字段（注册号/名称/状态），OGL v3.0 署名义务入 license；op=search 输出本身不含 officers/个人字段。
+  - 注册面：血缘契约两处、domain-ack governed 绑定、data_provider seed、provider source-class 清单、plan-query guide/priority、技术报价包络（适配器 10→11 并登记 companies_house.search 出网上界）、execution-authority callsites 49→50、provider-registry 文档重渲染。
+  - 迁移 `20261110150000_companies_house_registry_provider`：发现血缘 SQL v1 白名单+attempt 三元组纯扩（合同哈希不变）。
+  - raw-source 校验/归一与 canonical attributes 增加 `ch_registry`（关闭形状，只含公司字段）。
+- 测试：新增 provider spec（映射/绑定/三重闸门/Broker 失败语义）；provider registry、报价包络、domain-ack、execution-authority spec 计数按真值更新。
+- 未做：真实 `COMPANIES_HOUSE_API_KEY` 与真机检索留待部署后验收（默认三关关闭）；INSEE SIRENE / GLEIF 增量 / VIES / 展会原始目录属后续切片。
+
+## 2026-11-09 · Add the P0 measurement wave 1 — metric dictionary, read-only funnel and RISKY baselines, capture-recapture scaffold (#902)
+
+- 起因：GainOS 深化计划 v3.0 第 1 章（测量与真值，P0）要求先有分母与真值再谈优化；当前「召回率」「precision」「可触达率」从未被测量，库内「有邮箱」存在三种口径，RISKY 270 条邮件从未做过邮箱级验证。
+- 改动：
+  - 新增 `docs/metrics/metric-dictionary.md`：v1.0 指标字典，T0–T4 + Guardrail 共 44 个指标（VRIC_1000_STRICT/PLUS 分离、RR1/RR3 强制成对报告、分子/分母/排除项/窗口/分层/CI 规则、口径与现有表的映射、版本与变更流程）。
+  - 新增 `scripts/metrics/funnel-baseline.mjs`：只读漏斗基线脚本（`PGOPTIONS=-c default_transaction_read_only=on`；公司池→lead→fit=match→域名→邮箱→电话→VALID，按 workspace/国家/来源拆分，Wilson 95% CI，不解密 PII）。
+  - 新增 `scripts/metrics/risky-inventory.mjs`：只读 RISKY 盘点脚本（status×catch_all×verification_method×source_type×email_type 交叉表、公司/域名级汇总、SMTP 探测聚合，不读取 `contact_point.value`）。
+  - 新增 `scripts/metrics/capture-recapture.mjs` + `scripts/metrics/lib/psql.mjs`：两 frame 确定性键匹配（domain/registry_id/归一 name+country）+ Chapman 估计量与诊断门（m11<5 不出 N̂），为 ch01 PR-13 留接口。
+  - 新增 `scripts/metrics/capture-recapture.test.mjs` 与 `scripts/metrics/lib/psql.test.mjs`（node:test，26 例）并从 `scripts/governance-contracts.spec.mjs` 导入，使 `docs:verify` 的可达性检查成立。
+  - 新增两份时点证据：`docs/evidence/2026-11-09-funnel-baseline.md`（全库 2,423 公司/403 match/73 有邮箱 18.1%/4 电话/0 VALID；主租户 787/128/9/0）与 `docs/evidence/2026-11-09-risky-inventory.md`（274 邮箱=270 RISKY（246 从未验证+24 pattern_guess）+3 UNVERIFIED+1 INVALID；250 条无 source_type；135 次 SMTP 探测均为域名级）。
+- 测试：`node --test 'scripts/metrics/**/*.test.mjs'` 26/26 通过（等价于 `cd scripts/metrics && node --test`；本机 Node v22.23.1 的测试运行器不接受目录参数）；两个数据库脚本已在 `global_dev` 只读实跑，写语句实测被只读事务拒绝；`pnpm docs:verify` 的 verify-docs 子项本地已通过（0 errors）。
+- 未做：不部署、不发车；不改任何主链代码与数据库 schema；金标集（E3）、frame 抽样召回、竞品对照（E5）与三源 log-linear CR 不在本波。
+
+## 2026-11-09 · Wave 0 backend hardening — campaign job reaping, budget readback, quickJudge gate, sanctions freshness, Prisma drift gate (#903)
+
+- 起因：2026-11-08 六套全局审查确认的五条高优缺陷（ch08 §2.2/§2.3）：campaign 规划 job 可永久 RUNNING 且阻塞后续规划；$15/30 天花费窗口只统计 discovery 模型成本；quickJudge 批量路径绕过逐家出网闸门；制裁名单陈旧 28 天而筛查照跑；Prisma datamodel 与真库分叉 20 表且 CI 无漂移门。
+- 改动：
+  - campaign：launcher 显式 `workflowExecutionTimeout=60m / workflowRunTimeout=50m / workflowTaskTimeout=30s`；失败回写重试提到 8 次，重试耗尽改由 outbox 集成事件 `CampaignPlanJobFailed` 兜底（SaaS 拉取后置 FAILED）。
+  - 成本护栏 C1：新增服务身份只读端点 `GET /api/v1/execution-budget/window-usage`（`tool_budget_operation.charged_microusd` 实扣为窗口口径，含在途预留与 byPurpose 聚合；`BUDGET_READBACK_SERVICE_TOKEN` + 仅回环）。
+  - quickJudge：批量协议 `authorizeExternalAction` 不再恒 true，wire 前用 `companyMayUseExternalProcessingMany` 单事务逐家重校验；被拒整批降级逐家、被禁联公司 skipped。
+  - 制裁陈旧门：qualify/decide 前检查 `sanctions_source.last_refreshed_at`（7/14 天三档，`SANCTIONS_LIST_MAX_AGE_DAYS`/`SANCTIONS_LIST_BLOCK_AGE_DAYS` 可配）；blocked 整批 `sanctions_hold`、stale 不产 `recommended` 且 accept 拒绝；`sanctions_screening_result` 增 `list_stale/list_age_days/list_snapshot`；新增 `SanctionsListStale` 集成事件与 `docs/backend/sanctions-operator-refresh.md` §5。
+  - worker：显式并发上限 `WORKER_MAX_CONCURRENT_{ACTIVITY,WORKFLOW,LOCAL}`（默认 12/8/4，非法值启动即失败）。
+  - 数据门：CI 新增 Prisma 漂移门（`packages/db/scripts/prisma-drift-gate.mjs`：一次性库 `migrate deploy` 后 `prisma migrate diff --from-url --to-schema-datamodel`），基线允许清单 ratchet（当前 110 条已知差异 = 20 张 SQL-only 表 + 列级分叉 + enum 值缺口，均带 owner/到期日），见 `docs/backend/prisma-schema-drift.md`。
+- 测试：新增/扩展 `campaign-plan.launcher.spec.ts`、`campaign-planning.workflow.spec.ts`、`campaign-planning.activities.spec.ts`、`execution-budget-window-usage.service.spec.ts`、`budget-readback-service-token.guard.spec.ts`、`discovery.run2.activities.spec.ts`（TOCTOU 负向）、`sanctions-freshness.spec.ts`、`sanctions-screening.spec.ts`、`qualify.activities.spec.ts`（三档）、`lead-qualified-snapshot.spec.ts`（decide stale）、`worker-concurrency.spec.ts`；`gctl check` 全绿。
+- 未做：SaaS 侧窗口判定切 max(ledger, engine)+fail-closed 缓存、`CampaignPlanJobReaperService`（75 分钟）、`CampaignPlanJobFailed`/`SanctionsListStale` 的 SaaS 消费端均在 gain-saas，另行排期；worker 并发值的压测校准与部署待发车；20 张 SQL-only 表补齐 datamodel（P5c-BE-30）后基线逐条删除。
+
+## 2026-11-09 · Add ch01 wave 2 — golden sampling scaffold, frame registry matrix, paired RR1/RR3, multi-frame log-linear CR, VRIC PLUS caliber (#904)
+
+- 起因：ch01（测量与真值）第二波要求把「金标集、frame 分母、回复口径、三源捕获回捞、VRIC PLUS」从计划文本落成可校验的脚手架与口径；不采购任何付费数据、不发车、不部署。
+- 改动：
+  - 指标字典升 v1.1：新增 §1.3.1 VRIC PLUS 口径细则（phone VALID 四条件、email_only/phone_only/both 强制通道拆分、引擎侧上界声明）；§1.4 增加 RR1/RR3 机器实现与成对声明校验；§6 三源 log-linear 落地说明；§2 映射补 frame/golden。
+  - 新增 `docs/metrics/frame-registry.md` + `docs/metrics/frames/frame-registry.v1.json`（19 法域矩阵：许可、获取方式、频率、规模、坑；全部 DRAFT，未接入）+ `scripts/metrics/frame-registry.mjs` 校验器（唯一键、枚举、ACTIVE 需 license）与测试。
+  - 新增金标抽样脚手架：`evals/golden-discovery/`（README、`schema/golden-manifest.schema.json`、`v1/manifest.template.json`：accounts 500 / contacts_strict 500 / contacts_plus 500，三层配额与固定 seed）+ `scripts/metrics/golden-sampling.mjs`（确定性分层抽样、最大余数配额、欠采样如实报告、refs SHA-256）+ `scripts/metrics/sql/golden-pool-{accounts,contacts}.sql`（只读导出模板，联系人 ref 用盲化 dedupe_key）+ 合成样例池与测试。
+  - 新增 `scripts/metrics/reply-rate.mjs`：RR1/RR3 成对计算（`unknown>0` 无 `ê` 拒绝出数）、Wilson CI、`--check` 拒绝单口径声明；测试含章节示例复算（0.42%/0.58%）。
+  - 扩展 `scripts/metrics/capture-recapture.mjs`：`--frame` 重复传参；三源键簇捕获矩阵、8 个分层 log-linear 模型（G²+AIC 选型，饱和模型 df=0 单列）、参数化 bootstrap 95% CI（固定 seed）、两两交集/模型跨度诊断门；修复 IPF 缺失格边际处理（只在可观测格上匹配边际，缺失格按乘性结构外推）；测试含已知 N 的回收（20,000 → CI 覆盖真值）。
+  - `funnel-baseline.mjs` 的 VRIC 输出增加 PLUS 通道拆分（email_only/phone_only/both）。
+  - 新增 `scripts/metrics/lib/prng.mjs`（播种 PRNG/Poisson/分位数）与 `scripts/metrics/lib/psql.test.mjs` 等单测；`scripts/governance-contracts.spec.mjs` 导入全部 metrics 测试进入 CI 可达链。
+- 测试：`node --test 'scripts/metrics/**/*.test.mjs'` 全绿（新增 golden-sampling/frame-registry/reply-rate/多源 CR 用例）；`node scripts/verify-docs.mjs` PASS（0 errors）；`node --test scripts/governance-contracts.spec.mjs` 393+ 全绿（本地，含可达性检查）；未跑全量 build（无 TS/依赖变更，CI 承担）。
+- 未做：不采购付费 frame/竞品数据；不做真实金标标注（PR-08 属产品负责人）；frame 适配器与 `frame_registry` 表（PR-11/12）、CR 的 Splink/LCMCR（PR-13 余量）、度量台与看板不在本波。
+
+## 2026-11-09 · Machine-read the metric dictionary and enforce it in CI (metrics:lint), plus the PR metric-impact block (#904)
+
+- 起因：ch01 PR-01 要求指标字典落到机器可读、可 lint 的一等公民（字段齐全、公式来源存在、版本递增）；PR-16 要求补文档入口与 PR 模板的「指标影响」栏。
+- 改动：
+  - 新增 `docs/metrics/dictionary/` 六份 `metric-definition/v1` JSON（t0-vric / t1-coverage / t2-reachability / t3-engagement / t4-business / guardrails），共 44 个指标；每指标含 id/name/tier/unit/owner/status/version/effectiveFrom/exprStatus（全部 PENDING，ch01 允许的显式标注，EXPLAIN 需只读副本）/definition/分子/分母/排除项/窗口/分层/CI 方法/benchmark/changelog。
+  - 新增 `docs/metrics/schemas/metric-definition.v1.schema.json`（单指标 JSON Schema）与 `docs/metrics/schemas/sources.v1.json`（数据源登记：existing 18 / planned 8 / saas 5；ACTIVE 指标只许引用 existing）。
+  - 新增 `scripts/metrics/metrics-lint.mjs`：零依赖校验器——未知字段拒绝（typo 防线）、ID/名称唯一、tier 与 ID 前缀及文件一致、来源必须登记、ratio 类必须有分母、窗口/分层/CI 词表闭合（GUARDRAIL 允许 ci=none）、changelog 版本 1..N 连续且末条等于 version；`--json` 供机器读；非零退出供 CI。
+  - 新增 `docs/metrics/README.md` 门户（PR-16）；`.github/pull_request_template.md` 增加「指标影响」栏（指标 ID/口径是否升版本/是否重跑金标）。
+  - 指标字典升 v1.2：§7-5 改为机器化已落地（JSON 而非 YAML 的理由：仓库无可直接引用的 YAML 依赖，引入会动锁文件与 Copy 绑定）；§8 增 v1.2 条目。
+  - `scripts/governance-contracts.spec.mjs` 导入 `metrics-lint.test.mjs`，使字典 lint（44 指标、0 问题）与 frame registry 校验（19 法域、0 问题）随 `docs:verify` 在 CI 强制执行。
+- 测试：`node --test 'scripts/metrics/**/*.test.mjs'` 全绿（新增 lint 9 例：checked-in 字典全过、未知字段、来源未登记、ACTIVE 用 planned 源、版本缺口、跨文件重复、故意改坏判红）；`node scripts/metrics/metrics-lint.mjs` 0 问题；`node scripts/verify-docs.mjs` PASS；`node --test scripts/governance-contracts.spec.mjs` 全绿（含 spec 可达性）。
+- 未做：未做 `EXPLAIN` 级公式校验（需数据库，CI 不连库）；未动 frame 适配器/DB 迁移（P2 会话在改引擎 registry/snapshot）；未采购任何数据；未做真实金标标注。
+
+## 2026-11-09 · Channel pool wave 1 — channel-manifest/v1, secret refs, HTTP connector runtime, probe and health thresholds (#905)
+
+- 起因：GainOS 深化计划 v3.0 第 6 章（渠道资源池）——现有 `source_channel` 只有 crawl 形态可执行，api 形态是空契约（`config.adapter` 无执行路径），无密钥引用、无健康画像、无自动停用长尾规则（CH-1/CH-2/CH-3/CH-4/CH-7/CH-10 的数据层与运行时首波）。
+- 改动：
+  - 迁移 `20261109100000_channel_manifest_v1`：`source_channel` 增量列（manifest/manifest_sha256/manifest_version/connector_kind/adapter_key/base_url/auth_ref/rate_limit/pagination/field_mapping/health_state/consecutive_failures/last_success_at/disabled_reason/quota_policy/probe_required）+ 新表 `source_channel_probe`、`source_channel_health_event`；17 行历史数据 config 原值保留，ENABLED 行回填 `probe_required=false`，其余保持 true。
+  - `@global/contracts` 新增 `channel-manifest/v1` JSON Schema（draft 2020-12，章节 §6.3.3 全文）与字段白名单；引擎侧 `parseChannelManifest` 做 Ajv + 语义校验（危险静态头、联系人字段仅详情模式、allowedHosts 覆盖 baseUrl、robotsPolicy=C 拒绝、JSONPath/regex 可编译）并计算 `manifest_sha256`；`configToManifest` 保持历史 crawl config 语义不变。
+  - 连接器运行时 `apps/api/src/channels/connector/`：密钥引用解析（file/env，TTL 60s，错误不区分原因、绝不含值）、认证注入（none/apiKey/bearer/header/basic；oauth2 v1 明确不支持）、分页（none/page/offset/cursor/link）、令牌桶 + 每域延迟、指数退避 + Retry-After（3 次/60s）、三态熔断（5 分钟开、半开单探测、10 分钟起指数重开）、JSONPath 抽取 + transforms。物理请求只走既有 `requestPublicHttp`（https/公网 IP/逐跳重验/字节上限），且缺平台围栏绑定时一律拒绝——不存在未治理出网路径。
+  - 健康与自动停用：`evaluateChannelHealth` 纯函数实现 20 次/4 天 WARNING、30 次/7 天 AUTO_DISABLED(AUTO_STREAK)；finalize 同事务维护 `consecutive_failures`/`last_success_at` 并写健康事件；API 进程内小时级扫描钩子（沿用 sweep-scheduler 周期桶模式，不新增平台 schedule）。
+  - 运营台 API：`GET /source-channels/:id`（manifest + 健康摘要 + 密钥「已配置/未配置」，值永不返回）、`POST /source-channels/:id/test`（保存即测试，probe 落库、成功才解除 `probe_required`、样本联系人字段只留命中布尔）、`POST/PATCH` 支持 manifest 导入与重存（重存即置 `probe_required=true`）、manifest 渠道启用前 409 `CHANNEL_PROBE_REQUIRED`；人工启停写 MANUAL_ENABLE/MANUAL_DISABLE 事件。
+- 测试：新增 manifest 校验 15 例、密钥解析 6 例、认证注入 8 例、分页 8 例、退避 5 例、熔断 6 例、连接器运行时 12 例、字段抽取 4 例、健康阈值 5 例、probe 8 例、扫描 4 例、迁移契约 5 例、服务层 manifest 9 例；更新 run recorder（阈值/事件）与既有 authz/DI 用例（新端点入矩阵）。
+- 未做：api 渠道的 Temporal 执行链与平台 Grant/fence 绑定（CH-5，probe 在本波内 fail-closed 503）；source_policy 派生与官方白名单（CH-8）；crawl 形态 manifest 执行、详情页逐条抓取、oauth2、link 之外的多段/签名协议；gain-saas 运营台 UI 由主会话前端线另行施工。
+
+## 2026-11-09 · Four-state contact point verification with an append-only verification ledger (#906)
+
+- 起因：效果审计（2026-11-08）显示 274 条邮箱里 250 条从未验证、24 条仅 pattern 猜测，`contact_point` 没有四态、缺 `source_type`/`verification_method`，验证事实散落在自建 SMTP 的单一返回码里，全库 VALID=0 无法区分「未验证」与「劣质」。
+- 改动：
+  - 迁移 `20261109120000_contact_point_four_state`：`contact_point` 增 `verification_state`（VALID/INVALID/CATCH_ALL_RISKY/UNKNOWN）等十列与形状/等价约束；`source_type` 回填 `legacy_unclassified` 后收紧 NOT NULL；`verification_method` 增 `third_party_api`；存量按 RISKY→UNKNOWN（仅 catch_all 域进 CATCH_ALL_RISKY）回填并排入重验队列。
+  - 新表 `contact_point_verification_event`（append-only 事件账）：唯一幂等键 (workspace, point, provider, request_hash)，RLS 强制，`app_user` 仅 SELECT/INSERT。
+  - 纯函数状态机 `contact-point-verification-state`（四态↔legacy status 投影、verdict 映射、转换表、来源分类）与事件写入器 `contact-point-verification-event`。
+  - 三处写入路径改造：联系人发现按 adapter/来源页映射 `source_type`；邮箱猜测同步写四态；`verifyContactPoint` 同事务推进状态机并写事件账（BLOCKED 只记账不改状态）。
+  - 回填脚本 `apps/api/scripts/backfill-contact-domain-blind-key.mts`（解密→域 HMAC 盲索引，幂等分批、dry-run、不落明文）。
+- 测试：状态机/映射纯函数单测（转换表全分支）；迁移静态契约 spec + 迁移后 PostgreSQL 行为 spec（CHECK/valid_since 等价/source_type NOT NULL/事件账幂等与 RLS append-only，接入 CI Raw SQL 步骤）。
+- 未做：单一写入器架构守卫（P1-02 后续）；富集尝试账与 catch-all 策略表（P1-08/P1-13 各自迁移）；读侧迁移到 `verification_state`。
+
+## 2026-11-09 · Add the registry frame foundation (data model, loader v0, deterministic merge v0, recall audit scaffold) (#907)
+
+- 起因：GainOS v3.0 第 3 章（召回与枚举，P2）第一波——召回率从未测量、注册库源缺失的原因是「分母不存在」。本步先做与外部网络无关的地基：frame 数据模型、CSV/JSON 装载器 v0、确定性硬键归并 v0、召回审计脚手架与域名解析接口占位（ch03 T3-01/T3-03/T3-16/T3-20/T3-12 的子集）。
+- 改动：
+  - 迁移 `20261109100000_registry_frames`：新增 5 张平台表（无 RLS，app_user 只读，写入只经平台 ops/owner 连接）——`registry_frame`（帧定义）、`registry_snapshot`（文件级快照元数据 + sha256 可回放）、`registry_entity`（归一实体，业务键 `(scheme, reg_number)` + contentHash）、`registry_entity_change`（append-only ADDED/UPDATED/WITHDRAWN/REAPPEARED 事件，唯一键幂等）、`registry_entity_link`（硬键 CONFIRMED / 软键 PROPOSED 的跨帧链接与人工复核队列）；同步 `docs/governance/app-user-table-privileges.json`。
+  - `apps/api/src/registry/`：帧配置校验（`frame-types.ts`）、RFC 4180 CSV 与点分路径 JSON 解析（`frame-parse.ts`）、单行归一与 contentHash（`frame-normalize.ts`）、装载计划纯函数（`frame-loader.ts`，连续两个快照缺席才 WITHDRAWN、重放幂等）、装载编排（`frame-importer.ts`，同 sha256 快照幂等、行级校验 fail-closed、`--allow-partial`）、确定性归并 v0（`merge.ts`：LEI/注册号交叉引用 CONFIRMED，VAT/域名 PROPOSED，名称 trigram 只生成候选对）、域名解析接口占位（`domain/domain-resolver.ts`：search/ct/cc 三路 provider 契约 + fixture 实现）、召回审计计算（`recall-audit.ts`：Wilson 95% CI、分层确定性抽样、固定模板报告）、Prisma store（`frame-store.prisma.ts`，owner 连接）。
+  - `scripts/frames/`：`import-frame.mts`（装载 CLI，支持 `--dry-run`/`--allow-partial`/`--propose-links`）、`recall-audit.mjs`（审计 CLI，Node 原生 type-strip 直接运行）、2 个 frame 配置 + 2 个 fixture（Companies House 风格 CSV、GLEIF 风格 JSON）+ 召回审计样例输入。
+- 测试：vitest 覆盖 CSV/JSON 解析边界（引号/换行/BOM/缺列）、行级归一（状态/法律形式映射、LEI/VAT/域名非法即拒）、装载幂等（同文件重导零写入、变更检测、单次缺席不退出/两次才 WITHDRAWN、重现 REAPPEARED）、硬键归并（LEI CONFIRMED、namespace 隔离、identifiers 交叉引用、VAT/域名 PROPOSED、trigram 候选不自动合并、输入顺序无关）与 Wilson/抽样/报告；`scripts/frames/recall-audit.spec.mjs`（node --test）覆盖审计 CLI 的 census/抽样/落盘/参数失败；两个 fixture 通过 `import-frame` 端到端装载（内存 store）。
+- 未做：真实注册库接入（T3-04 起）、MinIO 快照对象存储与 Temporal 工作流（T3-03 完整版）、Splink 概率归并（T3-16 后续）、Tier A 人工裁决与 run2 状态机接线（T3-20 后续）、域名候选的真实搜索/CT/CC 网络适配器（T3-11/T3-12 后续，本波只有接口 + fixture）。
+
+## 2026-11-09 · Third-party email verification adapter, vote policy and catch-all send tiers (#908)
+
+- 起因：自建 SMTP 探查在反枚举（M365/GWS）、catch-all 与 25 端口限流下结构性拿不到 VALID，市场成熟的第三方验证 API 一个都没接入；catch-all 地址也没有分数分层与发送国家白名单。
+- 改动：
+  - `apps/api/src/enrichment/verification/`：`EmailVerificationProvider` 接口 + `MillionVerifierProvider`（fetch、env 凭据、8s 超时、429/5xx/超时/畸形体统一降级 UNKNOWN 且不抛）；结果映射四态与 0–100 基础分，`accept_all=true` 一律降为 CATCH_ALL_RISKY。
+  - 验证投票策略 `resolveVerificationVotes`（双正规则：单验证器 positive 永不判 VALID；正负冲突判 UNKNOWN；accept_all 优先）与评分 `scoreEmailPoint`（基础分/一致性/pattern/供应商信心/90 天衰减/软退信/投诉）。
+  - catch-all 发送分层 `catch-all-policy`：≥70 正常、40–69 灰度、<40 抑制；灰度白名单仅 US/FR（DE 永不进入），配置可从 env 覆盖。
+  - `data_provider.millionverifier` seed（默认 DISABLED）+ `source_policy.api.millionverifier.com` 登记（未登记即 fail-closed）。
+- 测试：假 HTTP fixture 契约测试（200/429/5xx/超时/畸形体/缺凭据）、投票矩阵 12 组组合、评分分量与分层边界值；治理 provider registry 条目同步。
+- 未做：Emailable/Truelist/ZeroBounce 适配器与真实验证瀑布编排（P1-04/05/06 后续）；真实 key 到位后的 scorecard 验收。
+
+## 2026-11-09 · Batch re-verification CLI for existing contact point emails (#909)
+
+- 起因：迁移把 274 条存量邮箱排进 UNKNOWN 重验队列，但没有任何批处理入口能消费该队列；人工逐点调用 HTTP 验证既慢又缺幂等与成本记账。
+- 改动：
+  - `apps/api/scripts/reverify-contact-points.mts`：按 `next_reverify_at`（或 `--ignore-schedule` 按状态）取有界批次，逐点过 suppression（email/domain/company_name/contact_key 四类）与人名邮箱合规门，再调第三方验证器（限流 `--rate`）；供应商原始裁决与投票裁决后的四态分别落事件账与点状态（同事务）。
+  - 幂等：`request_hash = sha256(pointId|providerKey|密文值|周期桶)`，同桶重跑不重复计费（调用前预查事件账）；`--dry-run` 离线只报选点与门状态。
+  - 门：`PII_ENCRYPTION_KEY` 必需；live 模式要求 `data_provider.millionverifier` ENABLED + `source_policy` 已登记未 SUSPENDED + `MILLIONVERIFIER_API_KEY`。
+- 测试：内存 fake 覆盖单验证器 positive 不判 VALID、invalid→INVALID、accept_all→CATCH_ALL_RISKY、网络错误不改状态、合规门/suppression 不触网、幂等预查与 dry-run。
+- 未做：Temporal 每日 Schedule `CONTACT_REVERIFY_SWEEP` 接线（P1-19 后续，activity 复用 `runReverifySweep`）；真实 key 到位后的小批实测。
+
+## 2026-11-09 · P3 J01 — judgment failure taxonomy v1 (failure-codes) (#910)
+
+- 起因：ch04 §4.3.5 失败分类学（D4-6）。「45% 失败」无法按 stage×cause 归因，`COMPANY_PIPELINE_FAILED` 聚合码不可拆分，重试策略只能按消息猜。
+- 改动：新增 `apps/api/src/discovery/judgment/failure-codes.ts`——8 个 stage、26 个版本化 cause、5 种 outcome 的闭集，每个 cause 带 `retryable` 与默认处置（retry/failover/degraded/failed/skipped）；14 个 `GATE_*` reason 闭集；未知 cause 查表 fail-closed（抛 `UNKNOWN_FAILURE_CODE`），只有显式 `normalizeFailureCode` 才落到 `UNKNOWN_UPSTREAM`；版本常量 `failure-codes/v1`，改表须升版本并同步 J02/J22 清单。
+- 测试：`failure-codes.spec.ts` 6 例——映射 100% 合法、码集合快照、重试语义（429/5xx/超时/租约/事务可重试；预算/鉴权/证据类不可重试）、未知码 fail-closed、gate 码闭集唯一且与失败码不重叠。
+- 未做：J02 管线失败归因接线、Temporal `nonRetryableErrorTypes` 清单、J22 值班 runbook（下一批）。
+
+## 2026-11-09 · Derive source_policy drafts from channel manifests and gate channel enablement on reviewed terms (#911)
+
+- 起因：v3.0 第 6 章 CH-8——渠道 ENABLED 前必须对 `allowedHosts` 逐域有已复核的 `source_policy`（reviewStatus=APPROVED、termsStatus∈{REVIEWED_OK, REVIEWED_RESTRICTED}），官方开放数据域豁免；现状注册与治理是两套手写数据、无派生、无一致性校验。
+- 改动：
+  - 新模块 `apps/api/src/channels/channel-source-policy.ts`：manifest → source_policy 草稿纯函数（domain 去 www、按类别映射 source_type、api 默认 robots ALLOWS、官方白名单 `*.gov`/`*.europa.eu`/GLEIF/Wikidata/Overpass 直接 REVIEWED_OK 并注明 official-open-data）、启用闸门评估（缺失/暂停/条款未复核/crawl robots 受限四类违规）与 owner 脚本的 upsert 输入（更新不覆盖人工 terms/review/robots 结论）。
+  - `ChannelService`：manifest 创建/重存的响应返回 `sourcePolicyDrafts`；详情返回逐域 source_policy 状态与违规清单；manifest 渠道启用前新增条款闸门（409 `CHANNEL_GOVERNANCE_INCOMPLETE` + `policyViolations`），官方域豁免。
+  - 新 owner 运营脚本 `apps/api/scripts/apply-channel-source-policies.mts`：`--channel <uuid> [--dry-run]`，用 owner 连接幂等落库派生行——`source_policy` 保持 app_user 只读（2026-10-09 加固与 CI 权限门不变），不做运行时写权限放宽。
+- 测试：派生矩阵（类别映射/www 归一/通配跳过/官方白名单/crawl robots 保持 UNREVIEWED）、闸门矩阵（缺行/暂停/未复核/受限条款/crawl robots/官方豁免多域）、服务层启用门与详情、upsert 输入不覆盖人工结论。
+- 未做：渠道不再被启用后的自动停用不接线（政策 SUSPENDED 只在物理出网前由 ToolBroker 阻断，章节 §6.3.6.5 的约定）；未部署。
+
+## 2026-11-09 · P3 J09 — fit-v2 rubric 工件、judge-output/v2 严格 schema 与提示词 hash 冻结 (#912)
+
+- 起因：ch04 §4.3.3 的深判契约（D4-4）：模型只产出 criterion 级判断，最终 verdict 由确定性代码聚合；提示词与 rubric 必须同源、可冻结、可回归。
+- 改动：
+  - `apps/api/src/discovery/judgment/fit-rubric.ts`：fit-v2 五 criterion（材质/角色/工艺/商业模式/规模）+ 权重（0.25/0.30/0.20/0.15/0.10）+ 逐档 0–10 锚点（按设计原文的两种档位形状）+ 必填证据 + C2 硬失败阈值；canonical JSON 的 sha256 作为 `RUBRIC_SHA256`。
+  - `judge-output-v2.ts`：judge-output/v2 严格 JSON Schema（additionalProperties=false、全 required、枚举闭集、证据 6 条上限、rationale/span/url 长度）与无依赖结构校验器 `validateJudgeOutputV2`。
+  - `judge-prompt.ts`：system/user 模板从 rubric 常量插值生成（禁止手抄锚点），`PROMPT_HASH` 冻结系统提示词+模板+rubric+schema+采样；`buildJudgePrompt` 返回 hash 与版本。
+- 测试：`fit-rubric.spec.ts` 9 例——权重和=1、锚点完整性（10/0/unclear+中间档、闭集键）、rubric hash 冻结、prompt hash 冻结、锚点逐字出现在 prompt、构造器占位符替换、金样例通过校验、多余/缺失/枚举漂移/重复 criterion/证据超限/越界分数全拒绝。
+- 未做：任务注册表与技能包接线（J03 拆分 quick_judge/qualify_fit 时一并）、确定性聚合器与证据校验（J10）、金标（J13）。
+
+## 2026-11-09 · Finish PR-13 matching and diagnostics, add the golden rubric/schemas, and ship the first metric-observation snapshot runner (#913)
+
+- 起因：ch01 剩余卡要求补齐 PR-13（概率匹配、敏感性、下界）、PR-08 的机器侧（rubric 与金标 schema）以及「下一组指标实现」；不部署、不采购、不触碰 frame 适配器/DB 迁移。
+- 改动：
+  - `scripts/metrics/capture-recapture.mjs` 扩展（PR-13 余量）：Jaro–Winkler 相似度；Splink 式第二段概率匹配——blocking（姓名首 token+国家 / 邮编前缀+国家）、固定权重 Fellegi–Sunter 形状评分（domain/registry 硬键 ±6、name 0–5、国家/城市/邮编 ±）、阈值 auto≥8 / review 4–8 / reject<4、已由确定性硬键合并的对不重复评分；`--probabilistic` 输出复核队列；Chao (1987) 下界 `D + f1²/(2·f2)`；三 frame 自动留一法敏感性（k=2 子集回退 Chapman，跨度 >40% 降置信）。
+  - 新增 `evals/golden-discovery/rubric-v1.md`（字段级标注手册：证据优先、保守 unknown、κ≥0.6 门槛、双标与裁决流程、PII 规则）与 `schema/golden-item.schema.json`、`golden-label.schema.json`、`golden-run.schema.json`（PR-08 机器侧；标注本体仍待产品负责人安排）。
+  - 新增 `scripts/metrics/metrics-snapshot.mjs`（下一组指标实现）：只读计算 T0-001/T0-002（按 workspace）、T1-008（按 provider）、T1-009（按 disposition）、T2-001/T2-005/T2-007/T2-008（按国家，T2-008 用 Poisson bootstrap），输出 `metric-observation/v1` 行（metricId/version/stratum/window/counts/value/Wilson 或 bootstrap CI/computationHash），供 PR-03 直接落表；无裁决分母的 T2-002/003/004/009 显式 SKIPPED 而不是把 0 当测得率。
+  - `docs/metrics/metric-dictionary.md` 升 v1.3（§6 增补概率匹配/Chao/敏感性、§8 changelog）；`scripts/metrics/README.md` 增补新脚本；`scripts/governance-contracts.spec.mjs` 导入 `metrics-snapshot.test.mjs`（字典版本与运行器一致性、来源约束、SKIPPED 结构）。
+- 测试：`node --test 'scripts/metrics/**/*.test.mjs'` 全绿（CR 33 例含概率匹配阈值/复核队列/Chao/留一法；snapshot 4 例结构测试）；`scripts/metrics/metrics-snapshot.mjs` 在 `global_dev` 只读实跑（T1-008 55.0%、T1-009 65.7% SCHEMA_INVALID、T2-001 18.1%、T2-008 0.93/账户）；`node scripts/verify-docs.mjs` PASS；governance 全绿（含可达性）。
+- 未做：固定权重非 EM（Splink 训练/latent class 属后续）；k>3 与 LCMCR 未实现；真实金标标注（PR-08 人工部分）未做；未动 frame 适配器/DB 迁移；未采购数据。
+
+## 2026-11-09 · Two-phase channel run accounting preserves fetched pages on failure and adds PARTIAL status (#914)
+
+- 起因：v3.0 第 6 章 CH-6 / CP-G7——渠道运行失败或取消时 workflow 拿不到 activity 的中间结果，`source_channel_run.pages_fetched` 一律落 0：日页帽被失败 run 系统性低估，首页失败之外的坏轮无法如实归因。
+- 改动：
+  - 迁移 `20261109140000_channel_run_dimensions`：`source_channel_run` 增加两段式落账与运行维度列（mode/manifest_sha256/plan_digest/requests/bytes_fetched/http_4xx/http_5xx/http_429/duration_ms/circuit_state/operator_note），status 词表加入 `PARTIAL`；历史 10 行 1 页试跑回填 `mode='preview'`。
+  - `runChannelCrawl` 开始即写 RUNNING 行（crawl_run_id 幂等），逐页用 `GREATEST` 单调更新 `pages_fetched`/`requests`（进度写失败不阻断抓取）。
+  - `finalizeChannelCrawl` 的 FAILED/取消分支以 RUNNING 行已记录的实际页数为准（不再写 0）；成功分支回填 mode/requests/duration 维度。
+  - `PARTIAL` 语义：被页帽/日配额截断但已有产出时落 PARTIAL——不计失败率坏轮、按成功信号清零失败连击并刷新 last_success_at；recorder 的 finalize 重放判定改为「既有行非 RUNNING 才算重放」，两段式行首次收敛仍正常推进 streak。
+- 测试：活动级（RUNNING 行、逐页进度、失败保留页数、PARTIAL 结局）、workflow（PARTIAL 透传）、recorder（RUNNING 非重放、PARTIAL 非坏轮+成功信号）、迁移静态契约与 schema 同步；一次性库重放 + Prisma drift 门见 PR。
+- 未做：`bytes_fetched`/`http_4xx/5xx/429`/`circuit_state` 列已建但本波 crawl 路径无数据源（留给 api 渠道执行链 CH-5 回填）；未部署。
+
+## 2026-11-09 · P3 J03 — 终判 judge 模型路由护栏（JUDGE_MODEL_ALLOWLIST、override 拒绝、启动自检、替换收紧） (#915)
+
+- 起因：ch04 §4.3.3.6（D4-10）。线上实测 `MODEL_ACQUISITION_TASK_MODELS={"discovery.qualify_fit":"gemini-3.8-flash"}` 把 L2 深判钉在 flash 档，是「判定 45% 失败」的直接工程根因之一；judge 的模型身份必须有代码级护栏，而不是靠运维记得别写错 env。
+- 改动：
+  - 新增 `apps/api/src/ai-tasks/judge-model-routing.ts`（零依赖）：终判任务集合 `JUDGE_FINAL_VERDICT_TASK_IDS`（当前仅 `discovery.qualify_fit`）、pro 档白名单 `JUDGE_MODEL_ALLOWLIST`（deepseek-v4-pro / gemini-4-argon-high / gpt-5.6-sol）、`JUDGE_ALLOW_FLASH=true` 显式降档逃生口、`filterJudgeSubstitutes`（终判的模型身份替换只接受白名单目标，过滤为空即只收精确身份，fail closed）、`assertJudgeModelRouting`（启动自检）。
+  - `task-registry.ts`：终判任务的非白名单 per-task override 被忽略、回落 tier 默认并留痕（`judgeModelOverrideRejections`，启动日志打印）；新增 `enforceJudgeModelRouting({mode})`。API（`main.ts`）与 worker（`temporal/worker.ts`）启动时调用：受控模式（pilot/production）下终判解析到白名单外模型即抛错不启动（fail-closed）；development/test 只告警（本地开发与 CI 契约导出/Nest 启动验证不因缺模型 env 而失败）。
+  - `router-model-gateway.ts`：`acceptsModelSubstitute` 的部署级替换对终判任务先过 `filterJudgeSubstitutes`——`deepseek-v4-pro>deepseek-v4-flash` 这类同代理降档不再作用于最终 verdict；普通获客任务语义不变（D14 不变）。
+- 测试：`judge-model-routing.spec.ts` 新增 12 例（集合/白名单快照、override 解析、替换过滤、自检四条路径）；`task-registry.spec.ts` 新增 3 例（flash override 被忽略并留痕、`JUDGE_ALLOW_FLASH=true` 放行、tier 本身是 flash 时自检失败）；`router-model-identity-substitution.spec.ts` 的替换主体改用非 judge 任务，并新增「judge 拒绝 flash 替换」与「仅 JUDGE_ALLOW_FLASH=true 放行」两例。
+- 上线注意：发车后线上那条 `discovery.qualify_fit: gemini-3.8-flash` override 会被代码忽略并打 warn（深判回落到 reasoning tier）；运维应同步从运行 env 删除该键。若 reasoning tier 本身被配成 flash，进程会启动失败（刻意 fail-closed）。
+- 未做：`discovery.quick_judge` / `discovery.qualify_fit` 双契约拆分与 `judge-output/v2` schema 换代（依赖技能目录与金标，和 J06 写入改造一起做）；`judgment_record.model_*` 三列落库（依赖 J04 建表 + J06 写入）。
+
+## 2026-11-09 · Add the weekly and monthly report generator on top of metric observations (PR-15 template side) (#916)
+
+- 起因：ch01 PR-15 要求周/月报按固定模板从指标实现生成；度量 API（PR-03/04）与源记分卡（PR-06）尚未接线，本波先交付只读模板侧，避免手写数字。
+- 改动：
+  - 新增 `scripts/metrics/report.mjs`：读取 `metrics-snapshot.mjs` 产出的 `metric-observation/v1`（支持多个 `--snapshot` 合并），按 ch01 §3.6.7 固定模板渲染周报/月报（北极星 → 覆盖 → 可触达 → 质量门 → 源 → 风险），月报额外含召回/金标与成本对账章节；未接线（recall/golden/PSI/cost）、不可测（T2-002/003/004/009 的 SKIPPED 原因）与缺失观测三种状态显式分列，n<30 自动加「样本不足」标记；输出 markdown + JSON（`--out` / `--out-json`）。
+  - 新增 `docs/metrics/reporting.md`（节奏、命令、模板、写作纪律、与 PR-03/04/06 的接线关系）与真实快照生成的样例 `docs/metrics/report-samples/2026-11-09-weekly-sample.md`（VRIC=0、email 覆盖 18.1%、phone 1.0%、contacts/account 0.93；VALID 率与 catch-all 按设计显示不可测）。
+  - `scripts/governance-contracts.spec.mjs` 导入 `report.test.mjs`（7 例：ISO 周标签、ALL 行选择、模板渲染、小样本标记、月报独有章节、缺失即缺失、确定性输出），使模板随 `docs:verify` 进 CI。
+  - `docs/metrics/README.md` 门户与 `scripts/metrics/README.md` 增补入口。
+- 测试：`node --test 'scripts/metrics/**/*.test.mjs'` 全绿（新增 report 7 例）；真实快照+渲染端到端实跑；`node scripts/verify-docs.mjs` PASS；governance 全绿。
+- 未做：未改引擎 `report/weekly-report.service.ts`（依赖度量 API PR-03/04，且 CSV 外部形态保持不变的要求待接线时验证）；未做连续两周与一期月报的运营节奏（快照可用了，节奏由产品负责人启动）；未接 PSI/金标/成本。
+
+## 2026-11-09 · P3 J04 — judgment quality tables v1 (migration + Prisma datamodel + RLS) (#917)
+
+- 起因：ch04 判定质量（§4.3.2.8 / §4.3.4.2 / §4.3.7.3 / §4.3.8.1 / §4.3.8.3）的六张表只存在于设计稿，硬门结果、判定记录、conformal 阈值与人工复核队列都没有落库结构；判定质量工作流（J05+）无法接线。
+- 改动：
+  - 迁移 `20261109130000_judgment_quality_v1`：新建 `hard_gate_result`、`gate_enrichment_task`、`judgment_record`、`conformal_threshold`、`judgment_review_task`、`judgment_golden_label` 六表，含设计稿的 CHECK 约束、replay/查询索引与 workspace RLS。
+  - `packages/db/prisma/schema.prisma`：新增六个 model（`@@map` 到表名）；`judgment_record` 对 `discovery_run`/`canonical_company`/`icp_definition` 建关系（run 为单列 FK `ON DELETE SET NULL`，修正设计稿复合 FK 与 SET NULL 的不可实现组合；company/icp 单列 FK `ON DELETE CASCADE`），三个既有 model 补反向关系数组。
+  - 权限按状态机语义：`judgment_record`/`hard_gate_result`/`judgment_golden_label` append-only（app_user 仅 SELECT,INSERT）；`gate_enrichment_task`/`judgment_review_task` 可状态转移（SELECT,INSERT,UPDATE）；`conformal_threshold` 全局表不开 RLS、app_user 仅 SELECT。`docs/governance/app-user-table-privileges.json` 同步。
+  - 4 条 Prisma 不可建模索引（2 个 COALESCE 表达式唯一索引、2 个部分索引）由迁移 SQL 实现；实测 Prisma 6.1 的 migrate diff 忽略这两类索引，故不登记 drift-baseline（否则触发 ratchet 的 STALE 判定），行为记入迁移头注释。
+- 测试：`app-user-table-privileges.postgres.spec.ts` 新增六表负向用例——append-only 表 UPDATE/DELETE 42501、状态机表 DELETE 42501、跨 workspace SELECT 0 行、允许的写入通过且回滚、`conformal_threshold` INSERT 42501；漂移门与迁移 repeat-deploy 幂等验证通过。
+- 未做：判定工作流写入路径（gates.ts / judgment-record.ts）与复核 API（J05/J06 批次）。
+
+## 2026-11-09 · Extend the registry frame foundation — query contract, multi-source frame catalog, recall report v2 (#918)
+
+- 起因：ch03 P2 第二波（#907 地基合入后的下一批卡片）——给「frame → 候选枚举」补上可执行的查询契约，把 frame 从 2 个样例扩到 4 个源形态（含 FR Sirene 的 `;` 分隔与 NAF 编码、US SAM 的嵌套 JSON），并让召回审计报告支持环比与 miss 归因（ch03 §3.9.12 / §3.17.4）。
+- 改动：
+  - `apps/api/src/registry/query.ts`：`registry_frame` filters 白名单校验（未知键拒绝、country ISO2、nace 前缀 2–4 位数字或 `28.13` 形式、规模带枚举、法定形式大小写不敏感、limit 默认 500 上限 2000）→ 参数化 Prisma 查询（固定 `ORDER BY scheme, reg_number`，只查 `withdrawn_at IS NULL` 且 last_snapshot 仍为 PARSED）→ `ProviderCompanyRecord` 映射（externalId `scheme:regNumber`、identifier、员工带中位数、licence/attributes.registry provenance）。
+  - `scripts/frames/query-preview.mts`：查询契约的可运行入口（只读，`--database-url`/env），输出 rationale + filters + records。
+  - 多 source 帧：新增 `fr_sirene`（INSEE stock 风格 CSV，`;` 分隔、NAF 28.13Z、trancheEffectifs 映射）与 `us_sam`（SAM.gov entityData 嵌套 JSON、UEI 主键、州入 region）两个帧配置与 fixture；`scripts/frames/frames/catalog.json` 登记全部 4 帧（frame-catalog.spec 强制覆盖与装载断言）。`frame-normalize` 的 NACE 校验扩展到国家派生码（`28.13Z`/`2813`）。
+  - 召回审计 v2（`recall-audit.ts` + `recall-audit.mjs`）：结果新增 `missedKeys`；`--baseline` 环比（逐层 recall/domain_rate Δpp，|Δ|≥5pp 标 ⚠，缺层提示）；`--verdicts` miss 归因（Top-5 原因 + 未归因计数，防止 Top 原因掩盖裁决缺口）。
+- 测试：vitest 100 项（query 契约 16 项 + catalog 装载 6 项 + 既有 78 项全部保持绿）；`node --test scripts/frames/recall-audit.spec.mjs` 7 项（含环比、归因、非法 baseline）；一次性库端到端：4 帧装载 13 实体后，FR/DE/US 的 filters 查询命中与排除行为符合口径，scratch 库已删。
+- 未做：`registry_frame` 尚未注册为 discovery provider（T3-09：计划路由 + receipt + materialization 接线）；FR `diffusionCommerciale` 过滤与 NAF→NACE 全表映射（T3-05）；真实注册库接入与发车（不在本波）。
+
+## 2026-11-09 · P3 J10 — 确定性聚合器 R0–R4 与证据校验（judge-aggregate/v1、evidence-validate/v1） (#919)
+
+- 起因：ch04 §4.3.3.4（D4-4）——模型自报总分不可复现；最终 verdict 必须由确定性代码聚合，模型输出只保留 `verdict_proposed` 作诊断。
+- 改动：
+  - `apps/api/src/discovery/judgment/aggregate-judgment.ts`：纯函数 `aggregateJudgment`，按设计顺序执行 R0 反注入（证据命中页面内嵌指令 → 该 criterion 强制 unclear）、R1 硬失败（C1/C2 ≤2 且证据有效 → NOT_FIT，不被加权分救回）、R2 证据门（任何 applicable criterion unclear/无有效证据 → UNKNOWN）、R3 加权分（仅 applicable 项按权重重新归一）、R4 判定（≥7.0 且每项 ≥5 → FIT；≤3.5 → NOT_FIT；其余 UNKNOWN）。阈值来自 rubric 常量（`aggregationRulesSnapshot` 供单测对账），reason 为闭集 `JUDGMENT_REASON_CODES`。结构错误（重复/缺失 criterion、缺证据报告）直接抛错。
+  - `evidence-validate.ts`：证据校验 `validateEvidence`（设计 §4.3.3.5）——URL 必须通过注入的域白名单/source_policy 门；span 必须去空白后逐字出现在本次输入快照；website/impressum 证据超过 30 天记 `EVIDENCE_STALE`；抓取时间非法 fail-closed；命中注入模式记 `PROMPT_INJECTION_DETECTED`。注册库/目录证据不参与新鲜度判定。
+- 测试：`aggregate-judgment.spec.ts` 15 例 + `evidence-validate.spec.ts` 10 例——设计原文三个边界（C2=0 竞品 vs 其余 9 分、C1 unclear vs 其余 9 分、全 6–7 borderline）逐条落测；另覆盖硬失败需证据、注入、权重归一、score 缺失、全不适用、确定性、结构错误 fail-closed。
+- 未做：conformal（R5，L4 工件）、门引擎（J05）与 `judgment_record` 写入（J06）、任务注册表接线（J03）。
+
+## 2026-11-09 · Daily contact re-verification schedule reusing the sweep core (#920)
+
+- 起因：P1-19 需要把存量邮箱重验队列（迁移回填的 UNKNOWN、VALID 90 天 TTL、catch-all 复检）从「人工 CLI」升级为周期任务；CLI 的取数/落库逻辑原先只在脚本里，Schedule 无法复用。
+- 改动：
+  - 再验证核心从 `apps/api/scripts/reverify-contact-points.mts` 提到 `apps/api/src/enrichment/verification/reverify-sweep.ts`（取点/suppression/合规门/限流/幂等/事件账/状态机全部同源），CLI 只留参数解析与单次执行；新增每轮成本上限 `maxCostMicrousd`（达到即停、候选保持 due）。
+  - 新 Schedule `contact-reverify-sweep`（默认 24h，`CONTACT_REVERIFY_SWEEP_EVERY` 可调）+ `contactReverifySweepWorkflow` + `createContactReverifyActivities`（owner 连接，复用 sweep 核心；每轮 ≤500、供应商限流默认 2/s、成本上限默认 $5/轮）。
+  - **注册即 paused**：启用是运维决定（`data_provider.millionverifier=ENABLED` + `MILLIONVERIFIER_API_KEY` + 成本 cap）；未启用时活动三重门任一不满足即返回 `skipped`、零调用零成本。已存在的 Schedule 只 reconcile action，不动暂停状态。
+- 测试：活动边界 spec（kill switch / source_policy 未登记 / 凭据缺失 → skipped 零调用；门全过 → ran 且有界）；sweep 成本上限用例；ensure-schedules spec 更新为 13 个 Schedule 并断言新条目 24h + 默认 paused。
+- 未做：翻转率周报指标（P1-17）；把本 Schedule 纳入平台预算 authority（启用时若需平台自动化预算，再按 P1-11 的 Grant 方案迁移）。
+
+## 2026-11-09 · Add the offline read-only source scorecard with a reject-reason dictionary (PR-06 script side) (#921)
+
+- 起因：ch01 PR-06 要求源记分卡能回答「每个源产出多少、拒了多少、为什么拒、值不值得留」；`source_scorecard_daily` 表与日任务依赖 PR-02/03，本波先交付只读离线版并把「目录 74% 拒收」拆成原因码。
+- 改动：
+  - 新增 `scripts/metrics/source-scorecard.mjs`：按 provider 聚合窗口内 raw/接受/拒收/隔离、`disposition_code` 原因拆分（对照字典，未登记码报 `UNKNOWN_DISPOSITION_CODE` 漂移信号）、全量公司归因（公司数/唯一贡献/有域名）、成本与新鲜度，输出 `source-scorecard-daily/v1` 行（含幂等 `contentHash`，供 PR-03 的 `(day, provider_key)` 主键落表）；混合 source_class 显式标记。
+  - 新增 `docs/metrics/schemas/reject-reasons.v1.json`：9 个原因码的含义/owner/处置动作（来源 `raw-source-ingestion.ts` 与线上实际值）。
+  - 新增 `docs/metrics/source-scorecard.md`（字段口径、用法、PR-06 验收对照）与真实基线证据 `docs/evidence/2026-11-09-source-scorecard.md`：directory 73.8% 被拒/隔离拆为 SCHEMA_INVALID 70.1% / POLICY_MISSING 26.6% / KEY_DRIFT 3.3%；public_web 接受率 91.8% 但隔离 267 条全为 key drift；5 个 provider 全部有读数；cost_per_valid_contact 因 VALID=0 显式不可算。
+  - `source-scorecard.test.mjs`（6 例：聚合、原因拆分与 74% 断言、未知码漂移、混合 class、幂等哈希、空 provider）导入 governance-contracts，随 `docs:verify` 进 CI；门户与 metrics README 增补入口。
+- 测试：`node --test 'scripts/metrics/**/*.test.mjs'` 全绿；`source-scorecard.mjs --days 30` 只读实跑；`verify-docs` PASS；governance 全绿。
+- 未做：`source_scorecard_daily` 写入、看板/告警（PR-02/03）；成本与 provider 的映射（tool_budget_operation）；`precision_sample`（金标）；未触碰 `evals/golden-judgments/`（另一会话在建）。
+
+## 2026-11-09 · P3 J11 — judge 金标清单 v1（15 例）与确定性 CI 校验 (#922)
+
+- 起因：ch04 §4.3.10.1 层 D —— rubric/schema/聚合器已经冻结（J09/J10），但没有金标用例把「什么输入必须得到什么 verdict」钉死；没有它，任何 prompt/rubric 漂移都只能靠人眼发现。
+- 改动：
+  - `evals/golden-judgments/`：`manifest.json`（`golden-judgments/v1`，含 rubric/prompt/schema 身份与每例 fileSha256、inputDigest、split、expectedLabel、expectedReasonCodes）+ 15 个手写用例，覆盖 FIT 金样例、C1/C2 双硬门竞品、证据缺失/span 不匹配/过期/URL 拒绝、页面注入、borderline、低分 NOT_FIT、规模越界、模型拒答、全不适用、score 缺失、权重归一。
+  - `scripts/validate-judgment-evals.mts`：零模型、零数据库的确定性校验——manifest 身份与代码常量（RUBRIC_VERSION/RUBRIC_SHA256/PROMPT_HASH/judge-output 版本）一致；fixture sha256 与 inputDigest 与 manifest 逐字一致；输出过 judge-output/v2 结构校验；证据校验 + 确定性聚合后的 verdict 与 reason 码与期望完全一致；锚点完整性与 required ensure 场景覆盖；PII（邮箱/电话）扫描。
+  - `package.json`：`docs:verify` 追加该脚本（Copy 绑定文件已按流程重签），CI 的治理 job 每 PR 自动执行。
+- 测试：本地 `pnpm exec tsx scripts/validate-judgment-evals.mts` 15/15 用例通过；故意改一个 case 的 expectedLabel 或 fixture sha256 会红（负向验证在实现时手工跑过）。
+- 未做：金标真实标注集（J13，需双人标注与 kappa）、模型层跑分与 eval_receipt（J19）、conformal 数学单测（J15）。
+
+## 2026-11-09 · Emailable as the second verification vote (#923)
+
+- 起因：双正规则（单验证器永不判 VALID）需要第二家独立验证器；P1-04 的验证瀑布里 Emailable 是官方指定的「二次确认」票。
+- 改动：
+  - `apps/api/src/enrichment/verification/emailable.provider.ts`：`EmailableProvider`（GET `/v1/verify`，env 凭据，8s 超时，429/5xx/超时/畸形体统一降级 UNKNOWN 且不抛，$0.0076/条按事件账计费）。
+  - 映射：`deliverable→VALID`（只有 `accept_all=false` 才判 VALID，缺字段保守进 catch-all 层）、`undeliverable/disposable→INVALID`、`risky→CATCH_ALL_RISKY·true_catch_all`（accept_all=true）或 `UNKNOWN`（否则，risky 不是地址级证据）、`unknown→UNKNOWN`（有效裁决、error=null、按次计费）；供应商自带 score 留痕到 detail，基础分用 scoreEmailPoint 统一口径。
+  - `data_provider.emailable` seed（默认 DISABLED）+ `source_policy.api.emailable.com` 登记 + 治理 registry 条目与生成文档。
+- 测试：假 HTTP 契约测试（缺凭据/200 deliverable/unknown/429/5xx/超时/畸形体、accept_all 三态、risky 分流、env 非法回退），零真实出网。
+- 未做：Truelist enhanced catch-all 解析与 ZeroBounce 仲裁（P1-05）；把两家验证器编排成验证瀑布并接入再验证/发现路径（P1-06，当前 sweep 仍只走 MillionVerifier）。
+
+## 2026-11-09 · Channel record watchlist — review status, sampling endpoint and rejection-rate disable (#924)
+
+- 起因：v3.0 第 6 章 CH-7 / CP-G8——渠道产出直接进共享池，没有观察名单、没有人工抽检；手册要求「新渠道首 3 轮产出 PENDING、抽检 ≥20 条后才可批量并入正式池」，REJECTED 率 >20% 时渠道回 DISABLED。
+- 改动：
+  - 迁移 `20261109150000_channel_record_review`：`source_channel_record` 增 `review_status`（PENDING|APPROVED|REJECTED，默认 PENDING）、`reviewed_by`/`reviewed_at` 审计足迹与 `materialized_company_id` 引用位（跨租户口径未定，只留列不建外键）；三态审计一致性 CHECK；`(channel_id, review_status)` 索引。存量 48 行保持 PENDING（从未抽检，不伪造 APPROVED）。
+  - 物化写入器：新观测 create 显式 `review_status=PENDING`；重复观测的 update 不改抽检结论（人工决定不被覆盖）。
+  - `GET /source-channels/:id/records`：支持 `reviewStatus` 过滤并返回三态计数与审计字段。
+  - `POST /source-channels/:id/records/review`（ops:write）：批量置 APPROVED/REJECTED；跨渠道/非法 id 拒绝；已抽检 ≥20 条且 REJECTED 率 >20% 时渠道回 `DISABLED(reason=GOVERNANCE)` 并写健康事件（detail.reason=RECORD_REJECTION_RATE）。
+- 测试：物化写入器（PENDING/不覆盖）、抽检服务（审计字段、过滤与计数、20 条与 20% 双阈值、非法输入）、迁移静态契约、authz 矩阵与 operation 描述。
+- 未做：「并入正式池」（写 materialized_company_id + companyChannelSighting）因平台渠道记录到租户公司的跨租户口径未定，留待产品拍板后单独卡片；未部署。
+
+## 2026-11-09 · P3 J02 pipeline failure attribution — typed codes replace the aggregate, quickScan heartbeat/cancel (#925)
+
+- 起因：公司级深挖管线的 351 条 failed 全部写同一个 `COMPANY_PIPELINE_FAILED`（2026-11-08 只读审计：`last_error_code` 100% 聚合码），抓取失败、模型 429、预算截断、Temporal 超时无法区分；快扫活动 `quickJudgeBatch` 无心跳、无取消检查（实测 27.8 分钟超出 15 分钟 startToClose），批量/逐家失败也只写 `QUICK_JUDGE_FAILED`（设计 §4.3.5.1 / §4.3.9 W1/W2/W4，P3 J02）。
+- 改动：
+  - 新增 workflow 安全的纯函数分类器 `apps/api/src/temporal/pipeline-failure-taxonomy.ts`：沿 `ActivityFailure → ApplicationFailure/TimeoutFailure → cause` 链按 name/type/code/reasonCode/message-token 解析（不做自由文本 regex），映射 ProviderHttpError（429/402/401·403/5xx）、ProviderOutputError（NOT_JSON/TRUNCATED/SCHEMA_INVALID/ENUM_DRIFT/MODEL_REFUSAL）、ProviderIdentityError、ProviderTransportError、预算/控制面（`isExecutionControlError` 同款 control token：预算 → BUDGET_*、域 ACK/回执/围栏 → CONTROL_PLANE_REJECTED、租约 → LEASE_LOST）、SkillUnavailableError、Prisma P2034/P2028、Temporal 超时、EgressBlockedError；未知一律 `UNKNOWN_UPSTREAM`。
+  - 新增活动边界包装 `apps/api/src/temporal/pipeline-failure-activity.ts`：worker 的 `DiagnosticFailureConverter` 会把普通 Error 的类名/消息全部脱敏（只剩 `applicationFailureInfo.type` 能过 Temporal 边界），故 `profileCompanyOnce`/`fitCompanyOnce`/`signalsCompanyOnce`/`contactsCompanyOnce` 统一把异常换成 `ApplicationFailure(type=<failure code>)`（保持 retryable，不改变现有重试次数；nonRetryable 矩阵留给 J22）。
+  - 失败码表升 `failure-codes/v2`，新增 `PROVIDER_IDENTITY_MISMATCH`、`PROVIDER_TRANSPORT_FAILED`、`CONTROL_PLANE_REJECTED`（同步 `failure-codes.spec.ts` 快照与重试语义）。
+  - workflow catch 用分类结果写 `mark('failed', { errorCode, failureStage })`；`updateCompanyJobStage` 扩展 `failureStage` 并写进 `run_event.payload`（不新增 DB 列/迁移），`last_error_code` 保持写具体码；`DEEP_STOPPED` 取消路径不变。
+  - W4：`quickJudgeBatch` 活动开始与每批后 `heartbeat()`（池 500 家 × 8 家/批），批间检查 `cancellationSignal.aborted` 并抛 `CancelledFailure`；批量协议与逐家判定失败按分类码写 `last_error_code`/事件/轨迹，规则兜底的 `company_done` 事件附 `failureCode/failureStage`；`discovery.workflow.ts` 为快扫单独配置 `quickScanActs`（heartbeatTimeout 10 分钟，修 27.8 分钟 > 15 分钟 startToClose 的既有缺陷）。
+- 测试：新增 `pipeline-failure-taxonomy.spec.ts`（映射表 100% 可达 + ActivityFailure/TimeoutFailure/普通 Error/控制面/未知/循环 cause 共 12 例）、`pipeline-failure-activity.spec.ts`（包装、取消透传、ApplicationFailure 保留）、`pipeline-failure-wiring.source.spec.ts`（聚合码字面量不得回归）；扩展 `discovery.run2.pipeline.workflow.spec.ts`（具体码 + stage、控制面不落 provider）、`discovery.run2.activities.spec.ts`（心跳次数、批间取消、逐家/批量失败码）；`discovery-workflow-knobs.replay.spec.ts` 5 例 replay 通过（heartbeatTimeout 不影响历史重放）；零容器全量单测与 `gctl check --fast` 全绿。
+- 未做：按码收紧的 Temporal `nonRetryableErrorTypes` 重试矩阵与 failover 策略（J22）；`ProviderSettlementError`（MODEL_SETTLEMENT_*）暂按 `UNKNOWN_UPSTREAM` 显性上报、无专属码；`fit-judge.ts` 内部吞掉的模型错误（返回 null → 规则兜底）仍无法带出原始 cause，只能按批量失败码归因。
+
+## 2026-11-09 · Add the zero-model golden replay runner with G1/G2/G3 gates and a mutation-tested demo set (PR-07 script side) (#926)
+
+- 起因：ch01 PR-07 要求金标 runner 能装载/求值/做 diff/被变异测试打红；引擎侧 `apps/api/src/measurement/golden/` 与 `golden_eval_run` 落表依赖 PR-02/04，本波先交付零模型的 replay 脚本实现。
+- 改动：
+  - 新增 `scripts/metrics/golden-run.mjs`：读取 `evals/golden-discovery/` 目录契约（items=golden-item/v1、labels=golden-label/v1 且必须 adjudicated=true、predictions=冻结快照），计算逐字段 accuracy/precision/recall/Cohen's κ/混淆矩阵；执行 G1 绝对门（fit precision ≥0.80 / recall ≥0.75）、G3 字段门（domain_correct、is_company ≥0.95；email valid precision ≥0.95）与 G2 相对门（较 `--baseline` 任一指标跌 >2pp 判红）；缺字段记 SKIP；输出 `golden-run/v1`（metrics/gates/diff/sampleSha256/items）+ markdown，失败退出码非零；未裁决标签与未登记标签字段直接拒绝。
+  - 新增合成演示夹具 `evals/golden-discovery/fixtures/replay-demo/`（4 条，无真实 PII），同时作为变异测试基准。
+  - 新增 `scripts/metrics/golden-run.test.mjs`（8 例：demo 全过、κ 教科书算例、两处变异必红、未裁决/未知字段拒绝、G2 相对门、diff、确定性），导入 governance-contracts 随 `docs:verify` 进 CI；`evals/golden-discovery/README.md` 增 replay 用法与契约；门户与 metrics README 增补入口。
+- 测试：`node --test 'scripts/metrics/**/*.test.mjs'` 全绿（新增 8 例）；demo replay 实跑 PASS；`verify-docs` PASS；governance 全绿。
+- 未做：引擎 `apps/api/src/measurement/golden/` 模块与 `golden_eval_run` 落表（依赖 PR-02/04）；`--live` 模式（需规划/判定流水线）；真实金标标注（PR-08 人工）；未触碰 `evals/golden-judgments/`（J11 在建）。
+
+## 2026-11-09 · Register registry_frame as a discovery provider (routing surface only; execution awaits the local_query lineage design) (#927)
+
+- 起因：ch03 T3-09——把本地注册库 frame 枚举（`registry_entity` 平台表 + `registry/query.ts` 契约）注册进 discovery 的 provider/路由面。执行面撞上 2026-11-08 收紧的 governed-lineage 契约：零出网本地查询无物理调用可出 durable 回执，按现行契约无法通过物化准入，需要单独的架构批准。
+- 改动：
+  - `apps/api/src/discovery/providers/registry-frame.provider.ts`：`registry_frame` 适配器（`company_registry` 类），把计划 filters 白名单映射到本地查询并返回 `ProviderCompanyRecord`（成本恒 0）；**刻意不声明 `companyResultLineage`**，因此被路由闸门恒排除（计划期计 `SOURCE_LINEAGE_UNAVAILABLE`）——这是预期行为，由单测钉死。
+  - 注册与路由面：`provider-source-classes.json` 增 `registry_frame → company_registry`；`provider.registry.ts` 注册适配器 + seed `data_provider`（`registry_frame`，DISABLED，成本 0，第二道 kill switch）；`plan-query-sources.ts` 路由优先级 5（零出网第一优先）与 planner guide 条目；`MAX_COMPANY_DISCOVERY_ADAPTERS` 7→8（技术报价上界随注册面同步，既有 envelope 断言更新）。
+  - 治理登记：`docs/governance/provider-registry.json` 新增条目（PARTIAL、default DISABLED、`governed_lineage_pending_local_query` gate）并重生成 `docs/backend/provider-registry.md`。
+  - 书面设计（待产品负责人拍板，未施工）：`docs/superpowers/plans/2026-11-09-registry-frame-local-lineage.md`——local_query 血缘变体（`registry.query` producer、resultDigest 定义、回放/审计语义、增量改动清单、风险与回退）。
+- 测试：新增适配器 spec（无库诚实空、filters 映射、成本 0、非法 filters fail-safe）与注册/路由断言（注册但不可路由、seed DISABLED、计划期 `SOURCE_LINEAGE_UNAVAILABLE` 钉死、cheap-first 裁剪时 registry_frame 副本优先于 wikidata）；技术报价 envelope spec 按适配器 8 更新（fit 判定上界 11,550→13,200 家/run、requiredCap 559,798→625,798 cents）。`pnpm governance:verify` 通过（23 providers）。
+- 未做：执行面接线（等 local_query 设计获批）；ICP 行业词→NACE 前缀映射（T3-05）；本波不碰 Copy 绑定文件、无迁移、未发车。
+
+## 2026-11-09 · Run the golden replay CLI as a CI smoke gate on every docs:verify pass (PR-09 precursor) (#928)
+
+- 起因：ch01 PR-09 要求金标回归能在 CI 判红；真正的路径触发与夜间跑批依赖度量 API（PR-04）与真实金标（PR-08），本波先把「零模型 replay 链路」做成每次 CI 必跑的冒烟门。
+- 改动：
+  - 新增 `scripts/metrics/golden-ci-smoke.test.mjs`：以真实子进程执行 `golden-run.mjs`——demo 集必须退出 0 且 `passed=true`；同集的变异副本（改坏 `is_company`）必须退出 1 且 `G3_is_company` 判红；`--out` 落盘产物必须是合法 `golden-run/v1`。
+  - 该测试导入 `scripts/governance-contracts.spec.mjs`，随 `docs:verify` 在每次 PR 的 governance 检查中运行（3 例，约 1 秒）；`evals/golden-discovery/README.md` 增补说明。
+- 测试：`node --test scripts/metrics/golden-ci-smoke.test.mjs` 3/3；governance 472/472；`verify-docs` PASS；本地 pre-push 门按既定处理跳过（`GLOBAL_SKIP_PREPUSH=1`，gitleaks 照常）。
+- 未做：路径触发（改 prompt/skill/判定代码才跑真实金标）、夜间 live 跑批、真实金标目录接入（待 PR-08 标注与 PR-04 API）；未触碰 `evals/golden-judgments/`。
+
+## 2026-11-09 · P3 J17 — 人工复核队列 API、优先级/SLA 与结论回流 (#929)
+
+- 起因：ch04 §4.3.8 —— UNKNOWN/borderline 只能靠人判，但没有队列就没有 SLO、没有回流、没有 overturn 度量；J04 已建好 `judgment_review_task`/`judgment_golden_label` 两张表，本卡把队列跑起来。
+- 改动：
+  - `apps/api/src/discovery/judgment/review-queue.ts`：优先级公式（UNKNOWN/CONFORMAL_ABSTAIN 高价值=P0，其余 UNKNOWN/BORDERLINE=P1，RANDOM_AUDIT=P2，DRIFT_AUDIT/APPEAL=P3）与 SLA（24h/72h/120h/168h）；`enqueueReviewTask`（同 record+reason 幂等）；`listReviewTasks`（priority/dueAt/id 升序、keyset 游标、含公司名与判定）；`claimReviewTask`（queued→in_review，同人幂等）；`resolveReviewTask`（单事务：状态校验 → 写新 `judgment_record`（`model_requested='human'`、`prompt_hash=sha256('human-judgment/v1')`、attempt+1、criteria 支持人工覆写）→ 回流 `judgment_golden_label`（split=candidate、 annotatorHash 只存稳定哈希）→ 任务 resolved）；`judgmentReviewStats`（状态/原因/优先级分布 + overturn rate）。
+  - `judgment-review.controller.ts`：`GET /api/v1/judgment-reviews`、`POST :id/claim`、`POST :id/resolve`（acquisition:review）、`GET /api/v1/judgments/:id`（acquisition:read）、`GET /api/v1/judgments/stats`；typed 错误映射 404/409/400。
+  - `packages/db/test/judgment-review-queue.rls.spec.mjs` + ci-manifest service 组：真库生命周期（enqueue→list→claim→resolve→stats、同人认领幂等、重复 resolve 拒绝、跨租户不可见）。
+- 测试：`review-queue.spec.ts` 6 例纯函数单测；库上 spec 由 service 组在 CI 执行；OpenAPI 已重导出。
+- 未做：`upsertLeadFit` Lead 投影（留给 J06 与 record 写入一起接，避免两处映射）、P0 24h SLA 报表（ops 报表，J16/J20 一并做）、BFF/gain-saas 运营台页面。
+
+## 2026-11-09 · Add the measurement core tables — metric definition, observation and daily/weekly rollups (ch01 PR-02, held for a schema window) (#930)
+
+- 起因：ch01 PR-02 要求把指标字典、观测与日/周聚合落成数据库表，作为度量工作流（PR-03）与 API（PR-04）的地基；本次只做四表迁移与权限，不接线任何运行时。
+- 改动：
+  - 迁移 `20261109160000_measurement_core_v1`：`metric_definition`（平台工件，唯一 `(metric_id, version)`，状态/层级/版本 CHECK）、`metric_observation`（append-only，`workspace_id IS NULL` = 平台级，身份唯一键含 computation_hash）、`metric_rollup_daily` / `metric_rollup_weekly`（物化聚合，主键含 stratum_key）。RLS：observation 按 `workspace_id`；rollup 两表按 `stratum->>'workspace_id'` 表达式 + 表达式索引；平台行对租户不可见。权限：字典只读；observation 仅 SELECT/INSERT；rollup 可 SELECT/INSERT/UPDATE（upsert），DELETE 一律拒绝。
+  - Prisma datamodel 四模型同步（`packages/db/prisma/schema.prisma`），与迁移逐列对齐；有意差异：Prisma 不支持 Json 进主键/唯一键，改用并列的 `stratum_key`（排序键规范化 JSON 文本，应用层写入）；数值列 NUMERIC(20,6) ↔ Decimal(20,6)。
+  - 权限清单 `docs/governance/app-user-table-privileges.json` 增四表；`app-user-table-privileges.postgres.spec.ts` 增「measurement core tables」负向块（RLS 隔离、跨 workspace 与平台行拒绝、append-only、rollup upsert/拒删、字典只读）。
+  - Copy 固定源回执重签（schema.prisma 属 Copy 绑定文件；仅哈希位移，资格状态保持 main 既有的 STALE_HOLD）。
+- 测试：一次性 pgvector Postgres 容器全量回放 200+ 迁移通过（含本迁移）；RLS/权限探针实测（自己的 workspace 可见、他人 0 行；平台行与跨租户写入被 RLS 拒；observation UPDATE/DELETE 与 rollup DELETE 被 42501 拒；rollup upsert 生效；字典 INSERT 拒、SELECT 允许）。
+- 未做：不接线工作流/API/事件（PR-03/04）；不部署不发车；**本 PR 按协调要求在「schema 窗口」通知前不合并**（届时按当时 main 重签 Copy 回执再合）。
+
+## 2026-11-09 · Add the L0 hard-gate engine with idempotent gate-result writes (#931)
+
+- 起因：P3 判定质量 J05——把「没资格被判定」与「判定为不是目标」分开记账；池噪声 34.8% 与「77% match 无域名」的结构性来源是缺失数据被当成中性分。
+- 改动：
+  - 新增 `apps/api/src/discovery/judgment/gates.ts`：门引擎与决策表纯函数——G1 制裁（新鲜度四态 fresh/yellow/red/not_screened，72h/7d 阈值）、G2 禁联 + ICP 排除（镜像 EXCLUSION 只记录不排除）、G3 国家（ISO 归一 + DACH 地区词展开）、G4 规模（点值 / band 区间）、G5 域名/可验证性（无域名或 DEAD → UNKNOWN 进补数队列，不进 LLM judge）；门集与每门均带版本（`gates-v1`）。
+  - `evaluateGates(tx, ctx)` 是写入门结果的唯一入口：G1→G5 短路语义（FAIL 短路、UNKNOWN 继续）、逐门写 `hard_gate_result`（表达式唯一索引 replay 键 + `skipDuplicates` 幂等）、UNKNOWN 的 G3/G4/G5 写 `gate_enrichment_task(queued)`；reason_code 走 `GATE_REASON_CODES` 闭集校验（未登记即抛错 fail-closed）。
+  - 新增 `apps/api/src/discovery/judgment/gates.spec.ts`：每门 × PASS/FAIL/UNKNOWN/NOT_APPLICABLE 决策表、G1 四态与阈值边界、短路顺序、replay 幂等、闭集校验、同输入同 digest 确定性。
+- 测试：`APP_DATABASE_URL= pnpm --filter @global/api test`（零容器）；`gctl check --fast`。
+- 未做：G6 自指 / G7 存活 / G8 行业排除（设计 §4.3.2.7 第二批）；W8 的 `sanctions-gate.ts` 接线与 `freshness()` 改造留给 J07；快扫 G5 前置（W9）与 judge 路径接线留给 J07；连续 >14 天的 `SANCTIONS_HARD_STOP` env 熔断按本卡「不用 env」暂未实现。
+
+## 2026-11-09 · Verification waterfall — primary, second vote, arbitration with per-address budgets (#932)
+
+- 起因：P1-06——即便两家验证器 key 都到位，再验证链路也只用一家，双正规则永远凑不齐、VALID 永远是 0。验证瀑布（主验→二次确认→仲裁）是 ch02 的出口判据（G2 ≥35%）的直接前置。
+- 改动：
+  - `apps/api/src/enrichment/verification/verification-waterfall.ts`：provider 无关的编排——主验 invalid 立即停（强否定）；主验 catch_all/unknown 停（解析器未接入前不烧第二票）；主验 VALID 才调二次确认（双正）；前两票未收敛（1:1 冲突 / valid+risky）且存在仲裁者时调第三家。每地址 ≤6 次调用、成本上限、`beforeCall` 限流挂点，返回逐步结果供事件账逐行落账。
+  - `provider-pool.ts`：按固定顺序返回凭据已配置的验证器（MillionVerifier → Emailable），kill switch 仍由调用方逐家过 `checkProviderGates`。
+  - 再验证核心 `runReverifySweep` 改为接收 provider 列表并走瀑布：逐 provider 幂等预查（崩溃恢复只补跑缺失的那家）、每步一行事件账（原始裁决/成本/延迟）、点状态用投票矩阵的最终结果推进（INVALID 清空 catch-all、UNKNOWN 不动既有分类）。
+  - CLI 与 Schedule activity 均构建验证器池并逐家过门；无可用验证器时 CLI 拒绝、activity 返回 skipped（零调用）。
+- 测试：瀑布 14 条（双正 VALID、单票 UNKNOWN、invalid 即停、catch_all/unknown 即停、provider_error 不换家、accept_all 优先、仲裁 2:1 与冲突、maxCalls/成本上限、beforeCall 次数、原始裁决→事件词表）；池 4 条；sweep/activity 单测全部迁移到 provider 列表语义（83 用例全绿）。
+- 未做：Truelist enhanced（catch-all 解析器）与 ZeroBounce 适配器（瀑布的第三位已留好，接入后无需改编排）；`contact-eligibility` 发送门（P1-16）。
+
+## 2026-11-09 · Add the deterministic ICP-industry to NACE mapping and per-frame source attributes (ch03 T3-05 subset) (#933)
+
+- 起因：ch03 T3-05——registry 查询要按 ICP 行业真正过滤，需要把行业自由词与 taxonomy 的 ISIC 码确定性映射到 NACE 前缀；FR Sirene 的 `diffusionCommerciale=false`（当事人反对商业推介）必须在装载时采集并随候选记录流到下游触达过滤。
+- 改动：
+  - `apps/api/src/registry/industry-map.ts`：`canonicalNace`（NAF `28.13Z`/无点号 `2813` → NACE 类目 `28.13`）、`nacePrefixesForIndustryTerms`（复用 `ISIC_SEED` 别名+`crosswalks.nace` 做中/英/德词面匹配，CJK 子串与 ≥4 字符拉丁子串覆盖德语复合词）、`nacePrefixesForIsicCodes`（taxonomy 注入的 ISIC 码直查交叉表）、`resolveNacePrefixes`（显式 nace_prefix > 行业词 > ISIC 码）。ISIC seed 的 C28 节点补 `valve/valves/阀门/工业阀门/ventil(e)` 别名。
+  - 装载器：`mapping.fields.attributes`（name → 指针，≤10 项校验）把源特有属性写入 `registry_entity.attributes`（排序存储、纳入 contentHash 与 diff）；`mapping.constants.naceVersion` 常量兜底；NACE 装载时归一（FR fixture 的 `28.13Z` → `28.13`，原始码可从源快照回放）。
+  - `registry/query.ts`：候选记录带 `attributes.registry.sourceAttributes`（如 `diffusionCommerciale: 'false'`），查询层不做隐式过滤，语义留给下游触达过滤消费。
+  - `registry-frame` provider 适配器：无显式 nace_prefix 时用 industry 自由词 / `_industryCodes` 做确定性映射（此前刻意透传为空）。
+  - FR 帧 fixture/config：新增 `diffusionCommerciale` 列与 attributes 映射、`naceVersion: NAF-rev2`。
+- 测试：`industry-map.spec`（归一变体/中英德词面/ISIC 交叉/优先级/不可用输入）；装载器 spec（属性采集与 contentHash 敏感性、naceVersion 常量、NACE 归一、attributes 配置校验负向）；catalog 与适配器 spec 更新（FR 行断言 `28.13`/`NAF-rev2`/`diffusionCommerciale` 透传；industry 词映射 OR 谓词、显式前缀优先）。registry + 适配器 12 文件 118 项全绿；build 通过。
+- 未做：查询/物化层的 diffusion 硬过滤（列级谓词与 P4 抑制联动，留在执行面/投影卡片）；`full NAF→NACE` 官方对照表（当前确定性口径：剥国家后缀 + 2 位部门近似）；不碰 Copy 绑定文件、无迁移、未发车。
+
+## 2026-11-09 · P3 J06（第一批）— 判定记录唯一写入入口与 replay 幂等 (#934)
+
+- 起因：ch04 §4.3.4.4 —— 判定记录必须一次尝试一行、append-only、可复算；写入语义（replay key、同输入重试不翻行、冲突显式报错）必须有唯一实现，否则每个调用点都会各写一份。
+- 改动：
+  - `apps/api/src/discovery/judgment/judgment-record.ts`：`recordJudgment(tx, input)` 唯一写入入口——闭集校验（verdict/judgeLevel/label/数域/64 位 hex 摘要）、失败码经 `failure-codes.ts` 派生 `stage/cause/outcome/retryable`、`createMany(skipDuplicates)` 依赖迁移中的 replay 唯一键实现 INSERT…ON CONFLICT DO NOTHING；同输入不同 verdict → `JUDGMENT_RECORD_REPLAY_CONFLICT`（绝不静默覆盖）。配套纯函数：`judgmentInputDigest`/`judgmentOutputDigest`/`collectEvidenceRefs`/`buildRecordedCriteria`。
+  - `packages/db/test/judgment-record.rls.spec.mjs`（db-tests service 组）：真库验证「新写入→同 attempt 重试不翻行→冲突 verdict 抛错→新 attempt 追加」与失败码派生列。
+- 测试：`judgment-record.spec.ts` 8 例纯函数/校验/replay 单测；库上 spec 2 例；`gctl check --fast` 全绿。
+- 未做：`fit-judge.ts` 的 shadow 接线（等 J03b 双契约拆分后，把 judge-output/v2 + 聚合器 + 本写入器 + `upsertLeadFit` 串成一个事务）；模型层金标跑分（J13/J19）。
+
+## 2026-11-09 · Add the measurement rollup workflow — first ten metrics into metric_observation plus daily and weekly rollups (ch01 PR-03) (#935)
+
+- 起因：ch01 PR-03 要在 PR-02 的四表上跑通「采集 → 观测 → 日/周聚合」，让指标第一次以带窗口与哈希的 append-only 观测入库；本切片不接调度（平台 Schedule 属运维窗口），提供工作流 + 活动 + 本地运行/回填命令。
+- 改动：
+  - `apps/api/src/measurement/metric-queries.ts`：首批 10 个指标的只读 SQL（T0-001/002、T1-008/009、T2-001/005/007/008 实现；T2-002/009 登记并显式 skipReason）；窗口语义 snapshot=目标日、rolling 7d=[dayStart-6d, dayEnd]，SQL 只出计数，CI 在 TS 计算。
+  - `apps/api/src/measurement/rollup.ts`（纯函数）：stratum_key 规范 JSON、computation_hash、Wilson 区间、参数化 bootstrap（比率型计数，固定 seed）、最近观测挑选、日/周 rollup 行构建；`rollup.spec.ts` 11 例。
+  - `apps/api/src/measurement/run.ts`：按日运行——逐指标查询→构建观测→`INSERT … ON CONFLICT ON CONSTRAINT metric_observation_identity_key DO NOTHING`→日/周 rollup upsert（DISTINCT ON 取每 stratum 最新观测）；owner 连接作为平台级服务写者；`run.spec.ts` 5 例（含跳过语义与调用计数）。
+  - `apps/api/src/temporal/measurement.workflow.ts` + `measurement.activities.ts`：`measurementRollupWorkflow({day})`，15 分钟活动超时、3 次重试；worker 注册（`createMeasurementActivities({ ownerDb })`）并由 `customer-workflows` 导出；`measurement.workflow.spec.ts` 2 例（含非法日期非重试失败）。
+  - `apps/api/scripts/measurement-rollup.mts`：默认 UTC 昨天，`--day` 单日，`--backfill-days N` 逐日回填（与实时同实现，幂等）。
+  - `docs/metrics/rollup-workflow.md` 说明指标表、幂等/迟到口径、运行命令、调度待运维窗口与 PR-04 衔接。
+- 测试：SQL 形状在 `global_dev` 只读复核（T0-001 403/0、T2-001 403/73、T1-009 三原因与分母一致）；本地无完整 node_modules，vitest 由 CI 执行；`verify-docs` 本地 PASS。
+- 未做：每日 Temporal Schedule 注册（平台执行合同/运维窗口）；PR-04 API 与看板；T2-002/009 的自动纳管（等分母）；未触碰 Copy 绑定文件与 `evals/golden-judgments/`。
+
+## 2026-11-09 · Add the frozen-frame export for recall audits; record the T3-19 vs PR-06 scorecard overlap assessment (#936)
+
+- 起因：P2 看板先做 T3-19 对比评估——P0 的 PR-06 源记分卡（`scripts/metrics/source-scorecard.mjs`，raw_source_record 数据面、日粒度、8 指标中 5 项已实现）与本卡的 registry 记分卡在**能力形态上重叠 ≈60–70%（>50% 阈值）、可复用代码≈0、registry 侧当前可计算的差异化指标为 0**（域名解析/金标精度/多帧边际增益均未落地）。按规则转 T3-20 Tier A 审计导出骨架；评估记录见 `docs/superpowers/plans/2026-11-09-t3-19-scorecard-overlap-assessment.md`（T3-19 后续建议：扩展 ch01 记分卡家族而非另立并行子系统）。
+- 改动：
+  - `apps/api/src/registry/recall-frame-export.ts`：`buildRecallFrameExport`——把某 frame 快照的冻结实体集（`last_snapshot_id = snapshot.id` 且未退出）规范排序 + 行级校验 + 逐行 JSON 的 sha256，产出 `recall-frame-export/v1`（manifest：frameKey/snapshotId/sha256/rowCount/exportedAt）。输入乱序不影响哈希；重复业务键/空必填字段 fail-closed。
+  - `scripts/frames/recall-frame-export.mts`：只读导出 CLI（默认取最近 PARSED 快照，可指定 snapshot；DATABASE_URL 缺省读 packages/db/.env），产物直接作为 `recall-audit.mjs --frame` 输入；报告记录 snapshotId+sha256+seed 即可完整复算。
+  - README 审计流程补「冻结 frame → 抽样输入」一段；产物池导出明确挂起等执行面（local_query 血缘获批）。
+- 测试：`recall-frame-export.spec`（确定性哈希/空白归一/变更敏感/重复键与空字段负向/导出→auditRecall 直连可复算）；registry 全组 12 文件 119 项全绿；真库端到端：一次性库迁移 → 装载 FR 帧（3 实体）→ 导出冻结集（manifest sha256 + snapshotId）→ 跑审计 CLI 得到分层报告（FR:28:1-9/10-49/250+，found 2/3），库已删。
+- 未做：产物池（run 侧）导出与 Temporal 审计工作流（等执行面）；运营台下钻页（P5）；不碰 Copy 绑定文件、无迁移、未发车。
+
+## 2026-11-09 · Single contact_point writer enforced by an architecture guard (#937)
+
+- 起因：P1-02 收尾——四态落地后仍有三处（联系人发现 / 邮箱猜测 / 验证回写）各自直写 `contact_point`；四态列、legacy status 投影、`valid_since` 等价约束、catch-all 子类与验证事件账是一个不变量集合，三路各写各的必然分叉（历史上已出现 RISKY 清 verifiedAt、状态与事件账不一致）。
+- 改动：
+  - 新增 `apps/api/src/discovery/contact-point-writer.ts` 作为唯一写入器：`upsertObservedContactPoint`（发现，首见优先）、`upsertGuessedEmailPoint`（猜测，含四态列与保守降级）、`setEmailPointState`（HTTP verify 与再验证 sweep 共用的状态机回写，含 `dispositionOnly` 的 BLOCKED 处置）、`linkLastVerificationEvent`。
+  - 三处调用点与管理服务、再验证 sweep 全部改走写入器；行为与载荷逐字段保持原样（现有 215 个相关用例不改断言即全绿）。
+  - 新增架构守卫 `contact-point-writer.guard.spec.ts`：扫描 `apps/api/src/**`（排除测试与写入器自身），任何 `contactPoint.create/upsert/update/updateMany/createMany/delete/deleteMany(` 或原生 SQL 写入 `contact_point` 都会失败并打印迁移指引；守卫自身带正/负例，防止空转。
+- 测试：写入器守卫 3 条（无直写、匹配器正负例、写入器原语存在）；受影响 19 个 spec 文件 215 用例全绿；build/lint 通过。
+- 未做：读侧迁到 `verification_state`（读投影仍用 `status`）；`phone_type` 写入方（P1-14）。
+
+## 2026-11-09 · Gateway tool-call transport — generateChatWithTools over OpenAI chat completions (#938)
+
+- 起因：v3.0 第 6 章 WEB-1——模型联网工具环的传输层缺失：`ModelGateway` 只有单发方法，chat-completions 传输把 `finish_reason=tool_calls` 当错误（`CHAT_COMPLETIONS_TOOL_CALL_UNEXPECTED`），模型无法请求平台执行工具。
+- 改动：
+  - `types.ts`：封闭消息模型（system/user/assistant(toolUses)/tool 四角色，第三方内容只能进 tool 消息）、`ChatToolDefinition`/`ChatToolUse`/`GenerateChatWithToolsInput`/`ChatResponse`；`ModelOp` 增加 `generateChatWithTools`。
+  - `ModelGateway`：默认**实例方法** fail-closed（`CHAT_WITH_TOOLS_UNSUPPORTED`；不是类属性，避免 useDefineForClassFields 遮蔽子类实现）。
+  - `RouterModelGateway`：新 `generateChatWithTools` 走既有 run()（预算 reserve-then-settle、身份门、风控订阅）；`messages`/`tools` 参与预算幂等键与持久路径的 prompt 字节估算；provider 包装器透传并按 `noted` 记录模型替换。**平台出网上下文（platformEgress）下该 op 一律 fail-closed**（`CHAT_WITH_TOOLS_PLATFORM_EGRESS_UNSUPPORTED`）——R4 围栏的 modelOp 白名单属于平台执行合同，扩列需平台策略版本，工具环任务按设计走客户侧运行。
+  - `OpenAICompatibleProvider`：对 openai-chat-completions 传输实现 `generateChatWithTools`（`tools`/`tool_choice:auto`、assistant tool_use 回放为 tool_calls、tool 结果按 `tool_call_id` 回传）；`finish_reason=tool_calls` 正常解析，参数非 JSON / 名字非法 / 缺失 tool_calls 均按**可计费失败**（ProviderOutputError 带 usage）上报；非该传输明确 `CHAT_WITH_TOOLS_TRANSPORT_UNSUPPORTED`；v1 非流式。
+- 测试：provider 7 例（解析/回放/stop/length/坏参数/缺 tool_calls/content_filter/传输拒绝）、路由器与默认网关 6 例（fail-closed、透传、无实现不兜底、路由链为空、预算键随对话变化、平台出网拒绝）；model-gateway 全目录 509 例保持全绿。
+- 未做：真实 wire 一次 tool_calls 往返（属付费调用，等产品负责人费用授权）；Anthropic Messages 传输的 tool_use；流式 tool_calls 增量拼装；工具环本体（hop/预算/超时/注入防护）为 WEB-2+。未部署。
+
+## 2026-11-09 · P3 J03b — judge 双契约拆分（discovery.quick_judge）与 judge-output/v2 生产接线（JUDGE_CONTRACT_MODE，默认 off） (#939)
+
+- 起因：ch04 §4.3.3.6（W5）与 §4.3.9 W3。L1 快扫与 L2 深判共用 `discovery.qualify_fit`，一条 task 级 override 会同时改写深判模型；L2 深判仍直接取模型自报 verdict，未经 criterion 级证据校验与确定性聚合。
+- 改动：
+  - 契约拆分（Part A，行为保持）：新增 `discovery.quick_judge`（flash 档、批量 judgments 协议、provisional 粗筛），`quickJudgeBatch` 的批量路径改用该契约与同名技能键；单家降级路径仍在 `discovery.qualify_fit`。新增内置技能 `growth_motion/discovery-quick-judge`（SKILL.md + 5 例 evals）并重新生成技能目录。
+  - v2 判定路径（Part B，默认关）：新增 `apps/api/src/discovery/fit-judge-v2.ts`——`buildJudgePrompt`（fit-v2 rubric/冻结 prompt hash）→ 网关结构化调用（task 仍为 `discovery.qualify_fit`，schema 换 judge-output/v2，非 durable）→ `validateJudgeOutputV2` → `validateEvidence`（域门/快照子串/30 天新鲜度/注入防护）→ `aggregateJudgment`（R0–R4）→ FitJudgment（FIT→match / UNKNOWN→weak / NOT_FIT→mismatch）。
+  - `JUDGE_CONTRACT_MODE=off|shadow|enforce`（默认 off，非法值回落 off）：off 走旧路径完全不变；shadow 仍用 v1 产 Lead、额外跑一次 v2 并生成 `judgment_record` 草稿（同 run 每家最多一次、失败只记日志）；enforce 只用 v2 聚合 verdict。`judgment_record` 与 Lead 投影在同一个 `prisma.withWorkspace` 事务内写入（`recordJudgment` + `upsertLeadFit`，设计 §4.3.4.4）。
+  - 治理同步：`EXPECTED_MODEL_TASKS` 13→14（quick_judge，schema `quick-judgment/v1`）、`MODEL_RESULT_TASK_IDS`/投影注册、`durable-result-strategies.json` modelTasks、run 级预算包络新增 `discovery.quick_judge`（500 家池 / 8 家每批 = 63 次上限）、技能目录与 evals 清单。
+- 测试：`fit-judge-v2.spec.ts`（聚合 verdict→Lead 映射、证据域门/子串/拒答、记录字段与 digest、三模式分派、shadow 成本护栏与失败不影响 Lead、enforce 路径）、`quickJudgeBatch` 契约断言（task/model/skillKey）、记录写入同事务顺序断言；`pnpm skills:validate`、execution-authority policy spec、environment-parity spec、`tsx scripts/validate-judgment-evals.mts` 全绿。
+- 上线注意：`JUDGE_CONTRACT_MODE` 默认 off，本 PR 不改变生产判定。worker 重启会 seed 新技能目录。v2 调用暂为非 durable（judge-output/v2 尚无注册的 durable 投影），影子期记录无 durable_receipt。
+- 未做：`JUDGE_CONTRACT_MODE=shadow/enforce` 的线上开启与金标回归（J13 模型层评测）、L3 面板与 conformal 弃权（k=1 单采样，sampling 如实记录）、`judgment_record.run_id` 回填真实 run id（当前留空，FK 只接受真实 discovery_run 行）、v2 的 durable 结果投影与 replay 保护。
+
+## 2026-11-09 · P3 J18 — 金标晋升/季度退役 CLI 与分布报表 (#940)
+
+- 起因：ch04 §4.3.8.3 —— 复核结论先入 `candidate`，需人工批量评审后晋升 `calib`/`test` 才进校准与回归；没有晋升/退役工具，金标池只会越积越乱且无法轮换。表为 append-only（J04 授权 SELECT/INSERT），故晋升与退役都必须**追加新 split 的行**。
+- 改动：
+  - `apps/api/src/discovery/judgment/golden-label.ts`：纯函数 `planPromotion`（按 labeledAt 升序、limit、`--ids` 白名单、已晋升幂等跳过）与 `planRetirement`（保留最新 N 行、其余退役）；`promoteGoldenLabels` / `retireGoldenLabels` / `goldenLabelSummary` 三个 withWorkspace 事务封装；dedupe key = 七维内容键。
+  - `scripts/judgment/promote-golden-labels.mts`：ops CLI（`--to calib|test|retired`、`--limit`、`--ids`、`--dry-run`、`--retire-keep/--from-split`、`--summary`），输出 JSON 摘要，非零退出表示失败；连接优先 app_user（RLS 生效）。
+  - `packages/db/test/golden-label.rls.spec.mjs`（db-tests service 组）：晋升追加/原行不变/重跑只晋升剩余/退役幂等/跨租户不可见。
+- 测试：`golden-label.spec.ts` 5 例纯函数；库上 spec 2 例；`nest build` 通过。
+- 未做：晋升审批流（本周由质量负责人跑 CLI 评审）、overturn 周报（J16 与度量报表一并做）、真实标注集（J13，需人力）。
+
+## 2026-11-09 · Add the read-only metrics API — catalog, observations and rollups with keyset pagination (ch01 PR-04) (#941)
+
+- 起因：ch01 PR-04 要求把度量工作流（PR-03）写入的观测与聚合以只读 API 暴露给运营与后续看板；本切片实现 catalog/observations/rollups 三端点。
+- 改动：
+  - 新增 `apps/api/src/measurement/measurement.controller.ts` + `measurement.service.ts` + `measurement.module.ts`（AppModule 挂载）：`GET /metrics/catalog`（metric_definition 平台只读）、`GET /metrics/observations`（metric_observation，本 workspace RLS，window_end 倒序 keyset 分页）、`GET /metrics/rollups`（daily|weekly 两表，桶倒序 + 指标/维度 keyset）；统一 `acquisition:read` scope 与 page envelope；参数/游标不合法 400 VALIDATION_ERROR；数值列 double、stratum 原样 JSON。
+  - 新增 `apps/api/scripts/measurement-sync-definitions.mts`：把 `docs/metrics/dictionary/*.json`（44 指标）幂等 upsert 到 `metric_definition`（owner 连接，按 (metric_id, version)，content_hash 记录内容指纹），使 catalog 开箱有 30+ 指标。
+  - `apps/api/src/docs/operation-descriptions.ts` 增加三条操作描述（operation-descriptions.spec 机械校验）；重导出 `packages/contracts/openapi/openapi.json`（新增纯加法，oasdiff 不判 breaking）。
+  - 新增 `measurement.service.spec.ts`（游标往返/非法输入/分页/表选择/映射，5 例）与 `docs/metrics/metrics-api.md`（端点、可见性、游标、同步命令、余量）。
+- 测试：service 单测随 vitest 执行；本地重导出 openapi 后 `git status` 干净（由 CI 的 drift/spectral/oasdiff 复核）；`verify-docs` PASS。
+- 未做：/metrics/vric、scorecards、evals、frames、recapture、benchmarks 端点为后续切片；SaaS BFF 代理与看板（PR-05）不在本 PR；未部署不发车。
+
+## 2026-11-09 · Add the offline domain verifier skeleton — Impressum/SIREN/CRN extraction, VIES interface and deterministic scoring (ch03 T3-13 subset) (#942)
+
+- 起因：ch03 §3.12.3 的域名校验器（P2 最高优先级链路）需要一个可离线测试的确定性核心：证据抽取（注册号/VAT/地址/名称）→ 评分 → VERIFIED/AMBIGUOUS/REJECTED，且与既有 DomainResolver 候选契约衔接；抓取、VIES 真实 REST 与落库属执行面，本波只做接口与 fixture。
+- 改动：
+  - `apps/api/src/registry/domain/domain-verifier.ts`：`extractRegisterEvidence`（DE 复用 `parseImpressum` 取 HRB/HRA+法院；FR 抽 SIREN/SIRET/RCS 九位；GB 抽 Registered in England… 的 8 位 CRN；未抽到 = 未知而非不符）；`verifyDomainCandidate` 按 §3.12.3 公式评分（55/35/20/15|8/5，上限 100；VERIFIED ≥90、AMBIGUOUS 55–89、无硬证据最高 40）与负证据（页面注册号不符含法院不一致→REGISTER_MISMATCH；停放页→PARKED_DOMAIN；零页面→NO_LEGAL_PAGE）；`VatValidator` / `LegalPageText` 契约为离线接口（VIES fixture），VIES 故障按未知处理不影响已有硬证据。`verifyDomainCandidates` 实现同名冲突规则（≥2 个 ≥55 分→全部 AMBIGUOUS、不自动选中）与唯一 VERIFIED 选中；`toDomainResolutionDrafts` 映射 `company_domain_resolution` 行草案（状态/matchType/confidence/evidenceJson/selected）。
+  - 与候选生成契约衔接：spec 用 `MultiRouteDomainResolver`（fixture 搜索 provider）产出候选直接喂校验器（域名 token、噪声过滤全链路离线）。
+- 测试：`domain-verifier.spec` 覆盖评分表（100/95/75/≤40 各组合）、法院不一致与号码不符负证据、VIES 故障降级、停放/零页面、同名冲突与唯一选中、行草案映射、resolver→verifier 交接；registry 全组 13 文件 133 项全绿；build/lint 通过。
+- 未做：法律页抓取与播放（执行面 T3-10/T3-12）、VIES 真实 REST、robots/停放页结构判定增强、人工复核队列（T3-15）、500 条人工标注 precision 验收；不碰 Copy 文件、无迁移、未发车。
+
+## 2026-11-09 · Website candidate search goes through ToolBroker instead of direct SearXNG egress (#943)
+
+- 起因：v3.0 第 6 章 WEB-10 / 审计「未登记出网路径」——`company/website-candidates.ts` 直接 import `searxSearch` 并发调用自托管 SearXNG，绕过了 ToolBroker 的 source_policy、预算、限流、幂等与 Trace 账本。
+- 改动：
+  - `website-candidates.ts`：删除直连 `searxSearch` 依赖；搜索执行器改为注入 `SEARXNG_SEARCH`（签名带 `{workspaceId, correlationId}` 上下文），缺失时 **fail-closed 503 `WEBSITE_CANDIDATE_SEARCH_UNAVAILABLE`**（且不触达数据库）。
+  - 新增 `brokerBackedSearxSearch(broker)`：经 `ToolBroker.invoke('searxng.search', …)` 执行，映射 durable 投影（url/title）回 `SearxResponse`；策略拒绝/预算不足按既有「搜索失败返回空列表」语义容错，拒绝事件由 Broker traceRecorder 落 warn。
+  - `company.module.ts`：`SEARXNG_SEARCH` 改为 `buildToolBroker({sourcePolicyReader, prisma, budgetStore})` 工厂（`TOOL_BUDGET_STORE` 由全局 ModelGatewayModule 提供），不再有未登记出网路径。
+- 测试：无执行器 → 503 且不读库；Broker 适配器（工具 id/入参/上下文透传、投影映射、空 url 过滤）；Broker 拒绝 → 空列表容错；既有排序/查询用例保持全绿。
+- 未做：端到端真搜验证（需 dev 栈真跑，发车后由发车验收覆盖）；未部署。
+
+## 2026-11-09 · ZeroBounce arbiter and Truelist catch-all resolver adapters (#944)
+
+- 起因：P1-05——验证瀑布的仲裁席（ZeroBounce）与 catch-all 解析席（Truelist）是计划 §2.3.5.1 的既定组成；#932 的瀑布第三个位置已留好但无适配器。
+- 改动：
+  - `zerobounce.provider.ts`：`/v2/validate` 客户端（env 凭据、8s abort、429/5xx/超时/畸形体统一 UNKNOWN 不抛、$0.0099/条按事件账计费）；`valid→VALID`、`invalid/spamtrap/abuse/do_not_mail→INVALID`、`catch-all→CATCH_ALL_RISKY·true_catch_all`、`unknown→UNKNOWN`（有效裁决 error=null 计费）、响应内 `error` 字段→UNKNOWN 不计费。入 provider 池作为**仲裁席**（第三次调用，仅在前两票未收敛时发生）。
+  - `truelist.provider.ts`：`/api/v1/verify_inline` 客户端（Bearer 鉴权、$0.0014/条、enhanced 3 credits 以账单为准）；`ok→VALID`（enhanced 解析成功的地址级证据）、`email_invalid/disposable→INVALID`、`accept_all→CATCH_ALL_RISKY·true_catch_all`、`unknown→UNKNOWN`。**暂不入池**——瀑布的「主验 unknown/catch_all → 解析器 → 地址级 valid 需第二票」分支属于后续编排改造，按位置取席会把它误当仲裁席。
+  - `data_provider.zerobounce` / `data_provider.truelist` seed（DISABLED）+ `source_policy.api.zerobounce.net` / `api.truelist.io` 登记 + 治理 registry 条目与生成文档（providers=26）。
+- 测试：两套假 HTTP 契约测试（缺凭据/各映射态/未知态计费/429/5xx/超时/畸形体/Bearer 与 query 断言），零真实出网；池顺序断言含 ZeroBounce 仲裁席与 Truelist 不入池。
+- 未做：Truelist 解析分支的瀑布编排接线（主验 unknown/catch_all → 解析器 → 第二票）；真实 key 到位后按供应商实际响应校准映射并跑 scorecard。
+
+## 2026-11-09 · P3 J21 — 存量重判批次规划器（只读）与操作手册 (#945)
+
+- 起因：ch04 §4.3.9 J21 —— 5,013 家存量需要在 v2 判定上线后分批重判；没有规划器，「给谁判、多少钱、会不会超帽」只能拍脑袋，超帽后还会把「完成率」做成假指标。
+- 改动：
+  - `apps/api/src/discovery/judgment/rejudge-plan.ts`：确定性规划——有域名优先排序、定长批次切分、成本估算（9900 micros/家，设计实测均值），**超帽拒绝规划而不是静默截断**；非法参数 fail-closed。
+  - `scripts/judgment/rejudge-batch.mts`：只读 CLI——从 ACTIVE ICP × 未用当前 `prompt_hash`/`rubric_version` 判过的 canonical_company 生成候选，输出批次/成本/超帽检查；`--execute` 显式拒绝（发车后才允许真实执行）。
+  - `docs/backend/judgment-rejudge-batch.md`：规划/执行/异常停手/回滚（env 置回 off + worker 重启 <5 分钟）/验收口径。
+- 测试：`rejudge-plan.spec.ts` 5 例（排序、切批与估算、超帽拒绝与显式限额、非法参数、确定性）。
+- 顺带修正：J18 的金标 CLI 与本次 CLI 统一放在 `apps/api/scripts/judgment/`（root `scripts/` 在 pnpm 严格布局下解析不到 `@prisma/client`，且需在 app 包上下文运行）；CLI 读查询包在 `set_config` 事务里以满足 RLS（owner 连接同样受 `current_workspace_id()` 约束）。
+- 未做：真实重判执行与每批完成率/失败率/成本证据（需发车后由 worker 执行，本手册已写执行步骤与停手条件）。
+
+## 2026-11-09 · Extend the domain verifier to the remaining §3.12.9 anchors — IT/ES/NL/BE/CH extractors with fixtures (#946)
+
+- 起因：T3-13 校验器首波只覆盖 DE/FR/GB；ch03 §3.12.9 锚点矩阵要求逐国注册号锚点（IT REA+省、ES NIF/CIF、NL KVK、BE KBO、CH UID）与单测样例，新增国家先补矩阵再写代码。
+- 改动：`apps/api/src/registry/domain/domain-verifier.ts` 的 `extractRegisterEvidence`/`registerMatches` 增加五个国家抽取器与比对规则——IT `REA MI-1234567`（省+号，省不同=不符，与 DE 法院同语义）、ES `NIF/CIF`（格式归一后全串比对）、NL `KVK`（8 位）、BE `KBO`（10 位，`0123.456.789` 与无点号等价）、CH `UID CHE-123.456.789`；全部按标签锚定（REA/NIF/CIF/KvK/KBO/CHE 字面），未打标签的数字不猜。模块头注释同步矩阵覆盖清单。另补 §3.12.10 集团门户规则：页面出现多个不同注册号时一律 AMBIGUOUS（`MULTIPLE_REGISTERS`，人工决定主实体），不因任一命中而自动 VERIFIED；为此在 `website-profile/impressum.ts` 增加只读的 `scanRegisterNumbers`（全部 HR 号码扫描，法院归属仍按 parseImpressum 首个解析），DE 单页多实体可检出。
+- 测试：`domain-verifier.spec` 新增矩阵用例——五国抽取断言、五国「注册号+地址+名称 → VERIFIED（≥90）」参数化用例、IT 同号异省与 BE 异号两个 mismatch 负向、集团门户单页双 HRB → AMBIGUOUS；domain 组 29/29，registry 全组 141 项全绿；build/lint 通过。
+- 未做：IT `P.IVA`/ES `Registro Mercantil 城市`/NL `BTW`/BE `TVA` 与注册号的联合强校验（VAT 路走 `VatValidator`，真实 VIES 属执行面；CH 不在 VIES，需 CH register API）；robots/停放页结构增强；不碰 Copy 文件、无迁移、未发车。
+
+## 2026-11-09 · Wire the L0 sanctions gate into quick scan and deep judge with a deduped stale alert (#947)
+
+- 起因：P3 J07（设计 §4.3.2.2 W8）——J05 的门引擎已在库里，但判定链从未调用它；制裁名单陈旧（当前真实数据 `eu_fsf` 最近一次刷新 FAILED）既不会标记结果，也不会告警。
+- 改动：
+  - `apps/api/src/discovery/judgment/gate-chain.ts`：L0 门链接线层——`evaluateL0Gates` 归一化门链结论（G1 四态 fresh/yellow/red/not_screened、G5 UNKNOWN、补数门集合），`quickScanGateBlock`/`deepJudgeGateBlock` 执行模式矩阵（与 `JUDGE_CONTRACT_MODE` 协同：深判 off 不评估 L0、shadow 记录不拦截、enforce FAIL 拦截；快扫总是评估、但 G1 拦截仅 enforce）。`SANCTIONS_LIST_STALE` 告警复用已注册的 `SanctionsListStale` outbox 集成事件，按「workspace × 状态 × 失败/缺刷新源集合」去重（6 小时常量窗口 + 进程内缓存 + 库内回看）。
+  - `SanctionsScreeningService.freshness()`：四态口径与门引擎同源（72h/168h 常量）；`screen()` 结果带 `stale` 标记（yellow/red）。`eu_fsf` FAILED 且超 168h 推导 red。
+  - 深判接线：`fitCompanyOnce`（run2 流水线）在模型调用前评估 L0——enforce 下 FAIL 不调模型、job 记 NOT_FIT；yellow/red 不拦截，`sanctionsStale` 随 `lead.fitReasons` 落库。快扫 `quickJudgeBatch` 把 stale 标记写进 `company_done` 事件。
+  - `docs/backend/sanctions-operator-refresh.md` §7：四态口径、告警载荷与去重、处置顺序。
+- 测试：`gate-chain.spec.ts`（四态 × 红线：eu_fsf FAILED→red、yellow/red 不判 NOT_FIT、模式矩阵、告警去重 6h、replay 幂等、补数任务写入）；`sanctions-screening.spec.ts` 四态与 `screen().stale`；`discovery.run2.activities.spec.ts` shadow/enforce 快扫行为；`discovery.run2.pipeline.activities.gate.spec.ts` 深判三种模式。
+- 未做：影子期金标对比（L0 记录 vs 旧路径产出的一致性报表）；legacy `discovery.activities.ts` 的 `qualifyFitForRun` 未接线（当前生产走 run2 快扫 + companyPipeline；该路径等 run2 开关全量后随旧链路退役）；`>14 天硬停` 的 env 熔断仍按「不用 env」保持未实现（red 只标记 + 告警，不拦截判定，执行在 J20）。
+
+## 2026-11-09 · Quick scan runs the G5 domain gate first and queues domainless companies for enrichment (#947)
+
+- 起因：P3 J08（设计 §4.3.2.6 W9）——「77% match 无域名」的池噪声来自把无官网/死域公司直接送 LLM 判定；G5 门要前置到批量粗判之前，UNKNOWN 的进补数队列而不是烧模型费用。
+- 改动：
+  - `quickJudgeBatch`（`apps/api/src/temporal/discovery.run2.activities.ts`）在批量判前逐家评估 L0 门链：无域名（`GATE_DOMAIN_MISSING`）或 DEAD 域（`GATE_DOMAIN_DEAD`）→ G5 UNKNOWN，`evaluateGates` 写 `gate_enrichment_task(queued)`，该公司不进 LLM 批量、job 停 `skipped` 并记 `last_error_code`，`company_done` 事件标 `stage=gate_blocked`；`result.gated` 与 `phase_completed` 载荷计数。
+  - ICP `companyAttributes.allow_domainless=true` → G5 NOT_APPLICABLE，无域名公司照常判定。
+  - `createRun2Activities` 新增可选 `domainStatusFor` 依赖：P2 域名解析流水线的存活校验接入缝（未注入 = 无存活证据、不视为 DEAD）。
+  - `docs/backend/sanctions-operator-refresh.md` §7 增补补数队列的运营查询与消费者现状。
+- 测试：`discovery.run2.activities.spec.ts` 新增四例——无域名 100% 进补数队列且模型批量输入不含该公司（mock 断言）、DEAD 域同理（注入 `domainStatusFor`）、allow_domainless 放行照判、同一 (company, icp, gate) 重跑不重复建任务；`gate-chain.spec.ts` 覆盖 G5 决策表与 allow_domainless。
+- 未做：`gate_enrichment_task` 的消费者——P2 域名解析流水线尚未接线（仓库只有候选生成器 `registry/domain/domain-resolver.ts`，无队列消费者、无域名存活状态生产者）；本卡只负责生产任务 + 状态查询，消费者与补数后重评留待 P2 后续波次。深判路径的 G5 UNKNOWN 不拦截（设计 UNKNOWN 不短路），只在快扫前置。
+
+## 2026-11-09 · P3 J12 — borderline 三模型判定面板（JUDGE_PANEL_MODE，默认 off） (#948)
+
+- 起因：ch04 §4.3.3.6 L3 与 §4.3.9 J12。L2 深判在 borderline 带（加权分 3.5–7.0）只能给 UNKNOWN；设计要求对这批「模型不确定」的候选跑 3 个不同家族模型的面板，多数票（2/3）定音、不一致回 UNKNOWN，且逐模型写 `judgment_record`、逐模型记账。
+- 改动：
+  - 新增 `apps/api/src/discovery/judgment/panel.ts`：`JUDGE_PANEL_MODELS`（deepseek-v4-pro / gemini-4-argon-high / gpt-5.6-sol，全部经 `JUDGE_MODEL_ALLOWLIST` 校验，fail-closed）；`judgeFitPanel` 对同一输入依次调用三家（复用抽出的 `judgment/judge-run.ts` 单模型执行器：同一 prompt / judge-output/v2 / 证据校验 / 确定性聚合）；多数票 ≥2/3 定 verdict，无多数（含 1/1/1、UNKNOWN 混杂）→ UNKNOWN；拒答票记 UNKNOWN 且计入；非控制面调用失败记 UNKNOWN 票并继续，预算/控制面错误显性上抛。
+  - 记录：每模型一行 `judgment_record`（judge_level=3、model_requested 为该模型、`model_resolved/model_reported` 如实、sampling.k=1、成本逐模型记 `cost_micros`），面板结论再写一行汇总（judge_level=3、`model_requested='panel'`、verdict=多数票、sampling.votes 记录票型、成本不重复记账）。replay key 不含 model 列，`attempt` 承载面板槽位语义：1..3 = 三模型槽位、4 = 汇总行，同一输入重放幂等命中同一槽位。
+  - 接线：`judgeFitV2` 在聚合为 borderline UNKNOWN（scoreWeighted ∈ (3.5, 7.0) 且非证据门/注入/拒答）时按 `JUDGE_PANEL_MODE=off|shadow|enforce`（默认 off，非法值回落 off）触发——shadow 只写记录、不改 verdict/Lead；enforce 用面板多数票替代该情形的 v2 verdict。面板仅在 v2 路径（`JUDGE_CONTRACT_MODE=shadow/enforce`）内生效，contract=off 时任何面板取值都不触发；同 run+company 进程内单次护栏与 shadow v2 同款。`persistJudgmentRecordInTransaction` 扩展为按「主记录 → 逐模型槽位 → 汇总行」顺序写入，panel=shadow 的记录写入失败只记日志、不回滚 Lead。
+  - 治理：`JUDGE_PANEL_MODE` 是运行期灰度、不分支 app environment，不产生 ENVIRONMENT_BRANCH finding，也不登记 configuration_allowlist；`judgment/judge-run.ts` 复用既有 `getTask('discovery.qualify_fit')` 契约锚点，无新增模型任务、无迁移。
+- 测试：`panel.spec.ts`——多数票（2/3、3/3、1/1/1→UNKNOWN、拒答计票、双拒答→UNKNOWN）、逐模型记录行（level=3、model 列、cost_micros、占位 criteria 不伪造判定）、预算分账（基础判定 + 三个面板模型各一次、模型序列断言）、开关矩阵（off/off 与旧路径逐字一致；contract shadow 下面板不改 Lead；enforce+shadow 不改 Lead；borderline 之外/证据门/拒答不触发）、控制面错误上抛与 shadow 吞错语义、进程内护栏幂等、多条记录写入顺序与 tolerant 语义；`fit-judge-v2.spec.ts` 既有断言不回归。
+- 未做：`JUDGE_PANEL_MODE=shadow/enforce` 的线上开启（默认 off，本 PR 不改变生产判定）；面板模型的金标校准与模型层评测（J13/J19）——当前白名单沿用 JUDGE_MODEL_ALLOWLIST；面板记录的 `run_id` 回填（与 v2 主记录一致当前留空）；面板并发化（当前依次调用，预算错误可尽早停止）。
+
+## 2026-11-09 · Add threshold and freshness alert evaluation for gain metrics (ch01 PR-05) (#949)
+
+- 起因：ch01 PR-05（看板告警）要求对度量结果做阈值与新鲜度告警；看板/渠道接线是后续切片，本 PR 交付纯引擎评估与规则文件。
+- 改动：
+  - 新增 `docs/metrics/alerts/rules.v1.json`（`measurement-alerts/v1`，4 条首发规则：T1-008 public_web 7 日均接受率 <50% 为 CRITICAL、T2-001 全员邮箱覆盖率 7 日均 <10% 为 WARNING、T0-001 观测新鲜度 36h、T2-001 周桶新鲜度 192h）与 `docs/metrics/alerts.md`（字段、评估语义、CLI、退出码、首发阈值依据）。
+  - 新增纯评估器 `apps/api/src/measurement/alerts.ts`：阈值规则（below/above 严格比较、latest/mean 聚合、lookback 按已观测桶、minSample、stratumEquals、每桶取最高 metric_version）与新鲜度规则（observation window_end / rollup 桶结束时刻），输出 OK/FIRING/NO_DATA/INSUFFICIENT_DATA 与退出码汇总；缺失数据不会被折叠成绿色。
+  - 新增 `apps/api/scripts/measurement-alerts.mts`：owner 连接只读 SELECT，`--json/--as-of/--rules`，退出码 0/10/20/1，不发通知不落库。
+  - `scripts/metrics/metrics-lint.mjs` 接入规则校验（schema、id 唯一、指标存在性、kind 专属字段词表），规则文件与字典同门禁；`alerts.spec.ts` 覆盖评估语义并断言 checked-in 规则引用的指标都在字典。
+- 测试：`node --test scripts/metrics/metrics-lint.test.mjs`（14 例）、`vitest run src/measurement`（34 例）本地全过；`measurement-alerts.mts --json` 对 dev 库只读试跑输出 NO_DATA（尚无 rollup 数据）。
+- 未做：告警持久化、通知渠道（邮件/IM/站内信）、看板 UI 与 SaaS BFF 代理（后续切片/运维接线）；未发车、未部署。
+
+## 2026-11-09 · Add the offline domain review queue contract — task classification, business-day SLA, state machine and SLA metrics (ch03 T3-15 subset) (#950)
+
+- 起因：ch03 §3.12.5 要求域名判定的人工复核队列（入队条件、3 工作日 SLA、吞吐与推翻率等质量指标），而 `company_domain_resolution`/`domain_review_task` 落库与运营台属执行面；本波先交付可离线测试的纯契约，供执行面/在线 PR 直接接线。
+- 改动：`apps/api/src/registry/domain/domain-review.ts`：
+  - `buildReviewTasksFromVerification`：AMBIGUOUS 按信号分类（多注册号→`multi_candidates`(70)、同名冲突→`name_collision`(80)、其余→`low_confidence`(50)），VERIFIED 按可注入抽样率（默认 5%）进 `audit_sample`(30)；REJECTED 不入队；SLA `dueAt` = 3 个工作日（`addBusinessDays` 只跳周末，报告需注明口径）。
+  - 状态机：OPEN → APPROVED / REJECTED / NOT_FOUND（证据不足）/ EXPIRED；终态重复裁决抛 `REVIEW_TASK_NOT_OPEN`；`expireOverdueTasks` 超期只置 EXPIRED 并留 `SLA_TIMEOUT`，**不自动改判**（§3.8.2）。
+  - `summarizeReviewSla`：积压、SLA 达成率（EXPIRED 视为未达成）、平均裁决耗时、按 reason 的开/决分布、最久等待；`decisionToResolutionUpdate` 映射 `company_domain_resolution` 行草案（批准即 VERIFIED+selected）。
+- 测试：`domain-review.spec` 覆盖工作日算术（周五+3→周三、周六+1→周一）、信号分类与优先级、可注入抽样（确定性）、非法抽样率、状态机守卫、SLA 超期不改判、SLA 统计（1/3 达成、平均 72h、最久积压 24h）、裁决→行草案映射；domain 组 41/41、registry 全组 154 项全绿；build/lint 通过。
+- 未做：`domain_review_task`/`company_domain_resolution` 表与落库、运营台页面与 BFF 联调（执行面/在线 T3-15 完整版）、节假日日历与 assignee 负载均衡；不碰 Copy 文件、无迁移、未发车。
+
+## 2026-11-09 · Contact eligibility endpoint for the SaaS sending gate (engine side) (#951)
+
+- 起因：P1-16——gain-saas 发送门只查同意/法域/DNC，不知道引擎侧 `contact_point` 是 VALID 还是 RISKY；人工把 RISKY 邮箱填进草稿即可绕过。发送开关关闭期间风险为零，开启前必须修掉。SaaS 侧接线（DNC 之前插入检查、引擎不可达 fail closed）由 gain-saas 实现，本 PR 只交付引擎侧事实源。
+- 改动：
+  - `POST /api/v1/outreach/contact-eligibility`（服务令牌，x-service-token，复用 DNC 的令牌机制与恒定时间比较；错误码换成 eligibility 语境）：`{workspaceId, emails≤50}` → `{results:[{emailHash, found, state, score, allowedActions, catchAllPolicy}]}`。
+  - 匹配口径与写入器一致：规范化 → 确定性 `encryptPii` → 密文等值（原始 SELECT，PII 扩展的 `where.value` 加密只覆盖字符串标量、不覆盖 `in` 数组；RLS 强制租户隔离）；同一邮箱多条点取最强状态（VALID > CATCH_ALL_RISKY > UNKNOWN > INVALID）；未找到 `found=false, state=UNKNOWN`（调用方 fail closed）。
+  - `catchAllPolicy`：灰度策略表（P1-13）未落地 → 恒 `mode=OFF, allowed=false`（策略不存在 = 一律拒发），随附 score 档位。
+  - 令牌守卫重构：`OutreachDncServiceTokenGuard` 的四个错误码/文案字段改为可覆盖，新增 `ContactEligibilityServiceTokenGuard` 子类；OpenAPI 契约重导出（新增 operation，summary/description 齐备）并加契约钉测试。
+- 测试：服务口径 7 条（VALID/最强状态/CATCH_ALL_RISKY 策略/未找到/规范化去重/400 词表）；守卫 3 条（503/403/放行）；OpenAPI 契约钉 3 条；DNC 既有守卫用例保持全绿。
+- 未做：SaaS 侧 `eligibility()` 接线与 G8 六条负向/正向集成测试（gain-saas lane）；`catch_all_send_policy` 表与 SHADOW/LIMITED 模式（P1-13）；发送批次记录 `contactStateAtSend`（SaaS 侧）。
+
+## 2026-11-09 · P3 J22 — 判定灰度矩阵、回滚计划与演练脚本 (#952)
+
+- 起因：ch04 §4.3.9 J22 —— 两个运行开关（contract/panel）组合起来有 9 种状态，值班时「Lead 现在由谁决定」必须一眼可答；回滚要求 <5 分钟，需要预演而不是临场拼。
+- 改动：
+  - `apps/api/src/discovery/judgment/grayscale.ts`：纯函数 `describeJudgmentModes(env)`（9 组合的 Lead 路径/记录行为矩阵 + 非法值与「panel 在 contract=off 下不生效」告警）与 `rollbackPlan()`（env 复位→重启 api+worker→确认→留证，合计 <5 分钟）；四阶段灰度清单常量。
+  - `apps/api/scripts/judgment/mode-drill.mts`：只读演练 CLI（打印矩阵/警告/回滚计划；非法 env 退出 1）。
+  - `docs/backend/judgment-grayscale-runbook.md`：阶段门槛（含 J13 kappa 未达标前 enforce 仅限 dev）、每阶段值班指标、演练命令、回滚步骤与已知边界（shadow 不一致是观察信号、v2 非 durable、run_id 暂空）。
+- 测试：`grayscale.spec.ts` 6 例（基线/shadow/enforce 矩阵、非法值告警、回滚计划 <5 分钟与步骤覆盖、阶段清单）。
+- 未做：线上首轮真实灰度与演练记录（待发车后按手册执行并把 drill 输出归档）。
+
+## 2026-11-09 · P3 J15（第一批）— conformal 弃权数学模块与已知分布单测 (#953)
+
+- 起因：ch04 §4.3.7 —— 「自动 FIT 错误率 ≤5%」必须是统计承诺而不是口号：阈值 τ 由 calib 金标拟合，使接受集 {s ≤ τ} 的 NOT_FIT 比例在 95% 单侧置信下的 Clopper–Pearson 上界 ≤ α=0.05，取满足条件的最大 τ。
+- 改动：新增 `apps/api/src/discovery/judgment/conformal.ts`（纯函数、零依赖）——`conformalScore`（k 次自洽采样 FIT 票占比 → s=1−p̄）、`clopperPearsonUpper`（正则不完全 Beta 反演，Lanczos lgamma + Lentz 连分式；E=0 走闭式 1−δ^{1/n}）、`fitConformalThreshold`（从小到大取安全最大 τ，无安全阈值 → null=全弃权）、`conformalAbstain`（无阈值恒弃权 fail-safe）。
+- 测试：`conformal.spec.ts` 8 例——分数枚举、n=59 首次 ≤5% 的设计论断、E=1/n=100≈0.0466 的已知值、单调性、300 全 FIT → τ=0（上界约 1%）、1 错+99 对 → τ=1/3、小样本全弃权、弃权判定。
+- 未做：阈值工件落库（`conformal_threshold` 表已建，拟合 CLI 与 L4 运行时接线属 J15 后续批次，依赖 J13 真实标注集与 J14 校准报告）。
+
+## 2026-11-09 · P3 J14（第一批）— 校准数学、报告 CLI 与可复算 fixture 证据 (#954)
+
+- 起因：ch04 §4.3.6 —— 判定质量必须用带 CI 的数字说话：混淆矩阵、TPR/TNR/PPV/NPV/FNR（Wilson 95%）、Cohen's κ（bootstrap CI）与 Rogan–Gladen 校正（观测 pass rate → 真实匹配率），且报告必须可复算。
+- 改动：
+  - `apps/api/src/discovery/judgment/calibration.ts`（纯函数）：混淆矩阵（UNKNOWN 计未自动通过）、Wilson 区间、κ、确定性 bootstrap（mulberry32 固定种子）、Rogan–Gladen（TPR+TNR≤1 或概率越界 → null，作为「校准集与生产分布不一致」的信号）、`evaluateCalibration` 汇总。
+  - `apps/api/scripts/judgment/judge-calibration.mts`：报告 CLI（`--fixture` 合成样例 / `--input` 真实标签对 / `--out` Markdown），输出混淆矩阵 + 全指标 CI + κ bootstrap CI + Rogan–Gladen；同输入同报告。
+  - `docs/evidence/2026-11-09-judge-calibration-fixture.md`：合成 fixture 的可复算样例（显著标注 SYNTHETIC，不作真实结论）。
+- 测试：`calibration.spec.ts` 7 例——含设计 §4.3.6.3 两个演算例子（0.375/0.844 与 0.286/0.643 逐位对上）、Wilson 73/100、κ 经典 0.4、bootstrap 同种子复算。
+- 未做：真实标注集上的校准结论（J13 标注与双标 kappa 达标后运行同一 CLI）；`eval_receipt.metrics` 落库与发布门读取（J19/J20）。
+
+## 2026-11-09 · Add offline annotation worksheet and import pre-check tooling for the golden set (ch01 PR-08 tooling) (#955)
+
+- 起因：ch01 PR-08 的人工标注（J13）需要一个不依赖引擎的前置工具：从金标候选生成双人工作表，导入时做结构与 Cohen's κ 预检。
+- 改动：
+  - 新增 `scripts/metrics/annotation-worksheet.mjs`：读 `golden-sampling.mjs` 的样本 CSV（`ref,layer,stratum`，ref 为盲化键，无 PII），按 `seed+dataset+annotator` 确定性打乱，为 A/B 各生成一份 CSV/JSON 工作表（字段与词表来自 `rubric-v1.md`），并写 worksheet manifest（样本哈希 + 各自行序哈希）；已存在文件默认拒绝覆盖。
+  - 新增 `scripts/metrics/annotation-import.mjs`：导入两份已填工作表，校验列结构/未知列/重复或不成对 ref/词表外取值，逐字段计算 raw agreement 与 Cohen's κ（复用 `golden-run.mjs` 实现），输出分歧裁决队列 CSV；退出码 0 通过 / 1 结构错误 / 2 κ<0.6 或双标不足 100。
+  - 新增 `evals/golden-discovery/annotation-workflow.md`（工作流、词表、退出码、与 golden-label/v1 的关系）并更新 README §2 第 4 步；`scripts/metrics/annotation-tools.test.mjs`（9 例，含两个 CLI 真实子进程冒烟）接入 governance-contracts。
+- 测试：`node --test scripts/metrics/annotation-tools.test.mjs` 全过；generator 重跑拒绝覆盖已填表。
+- 未做：工具不产出 `golden-label/v1`（裁决是人的决定，落盘与评测由 J11/golden-run 线负责）；不接数据库、不调用模型；未发车、未部署。
+
+## 2026-11-09 · P3 J19（第一批）— 模型评测回执契约与 dry 跑批脚本 (#956)
+
+- 起因：ch04 §4.3.10.2 —— 发布门要读的不是「跑了一下觉得还行」，而是一份带身份与门限判定的回执：哪个模型、哪份金标、什么 rubric/prompt、指标（带 n 与 CI）、过没过。
+- 改动：
+  - `apps/api/src/discovery/judgment/eval-receipt.ts`：eval-receipt/v1 结构与 fail-closed 校验（五身份字段、指标 [0,1]+n+CI、cases 一致、gate.passed 布尔）；`buildEvalReceipt` 内置保守门限（κ≥0.6、TPR/TNR≥0.75、零失败用例），可覆盖。
+  - `apps/api/scripts/judgment/run-judgment-model-evals.mts`：dry 跑批——不调用模型，跑完金标清单的确定性链路（schema→证据→聚合），用 J14 的校准数学算 κ/TPR/TNR（bootstrap 固定种子）并产出回执；`GAINOS_JUDGE_EVAL_LIVE=1` 显式拒绝（真实模型跑批需预算授权，属用户决策项）。
+  - `docs/evidence/2026-11-09-judge-eval-receipt-dry.json`：dry 回执样例（gate.passed=true，model_resolved=dry-fixture-no-model-call）。
+- 测试：`eval-receipt.spec.ts` 4 例（门限/阻断/覆盖/校验矩阵）；与 J14 校准单测合计 11/11。
+- 未做：真实模型跑批与 `eval_receipt` 落表（schema 迁移 + 预算授权）；发布流程读取回执（J20）。
+
+## 2026-11-09 · Add the offline search router contract and the wikidata_p856 candidate route; A decision brief (#957)
+
+- 起因：ch03 §3.14.3 的搜索 provider 抽象（T3-11）与 §3.12.2 的 wikidata_p856 候选路（T3-12 余）是域名解析链路的离线可推进部分；同时把 A（local_query 血缘）收紧成一页决策简报供用户拍板（并入本 PR，不单开 docs PR）。
+- 改动：
+  - `apps/api/src/registry/domain/search-router.ts`：`SearchRouter.searchAll`（多路并行、单路失败隔离、URL 去重并集、`degradedFrom`、每路延迟预算）与 `searchPreferred`（成本顺序回退、全不可用显式 `allUnavailable`）；`UsageLedgerDraft`（purpose=DISCOVERY_DOMAIN_RESOLVE）成本账本草案；`ProviderHealthTracker` 按 §3.14.3 阈值（连续 20 失败/超 4 天无成功 → warn；7 天 30 失败 → disabled 自动跳过）。真实 HTTP/密钥属在线部分。
+  - `domain-resolver.ts`：新增 `wikidata_p856` 路（rank 2）与 `WikidataP856Provider` 契约——按名称找实体、标签相似 ≥0.85 才取 P856（最多查 3 个），与其他路并集排序、失败隔离；`NOT_FOUND` 的 `NO_PROVIDERS` 判定包含 wikidata。
+  - 文档：`docs/superpowers/plans/2026-11-09-registry-frame-local-lineage-decision-brief.md`（一页简报：A vs 现状 vs B、影响面/工作量/回滚/风险、推荐与不做的后果）。
+- 测试：`search-router.spec`（并行失败隔离与去重并集、延迟预算、串行回退链、全不可用、健康阈值 warn/disabled/healthy、构造校验）；`domain-resolver.spec` 增 wikidata 用例（同域合并进 search 旁证、标签不符/无官网丢弃、provider 失败隔离、`NO_HITS` 口径）；domain 组 4 文件 51 项全绿；build/lint 通过。
+- 未做：Brave/Serper/Mojeek 真实适配器与 ToolBroker 注册（在线，需密钥）；搜索重叠估计进记分卡（依赖真实 receipt）；不碰 Copy 文件、无迁移、未发车。
+
+## 2026-11-09 · SMTP transport bounce and complaint writeback (engine side of the catch-all loop) (#958)
+
+- 起因：P1-13 的数据回路——发送侧的硬退/软退/投诉必须回写引擎四态与抑制，否则灰度与发送门拿不到真实投递结果；策略表与发送门在 gain-saas lane 协调，本 PR 只交付引擎侧回写端点。
+- 改动：
+  - `POST /api/v1/contact-points/:pointId/bounce-events`（x-service-token，服务令牌守卫沿用 DNC 机制、错误码 bounce 语境）：`{workspaceId, event: hard_bounce|soft_bounce|complaint, messageId, smtpCode?, receivedAt?}`。
+  - 语义（§2.3.6.6）：`hard_bounce` → INVALID（清 catch-all）+ suppression(email, bounce, PREFERENCE)；`soft_bounce` 同一地址累计第 3 次 → UNKNOWN + `next_reverify_at=+24h`（按计划显式降级，覆盖状态机的 VALID 保留语义，confidence −10）；`complaint` → 状态不变、confidence 归 0、证据 allowedActions 去 outreach、suppression(email, complaint, LEGAL)。
+  - 每次回写落一行验证事件账（provider=smtp_transport、method=import、verdict invalid/unknown/blocked）与 `email.delivery` 证据（只有事件/响应码/messageId/时间，无 PII、dataClass=green）；`messageId` 幂等（唯一键命中返回 duplicate 且无副作用）。
+  - 写入全部经唯一写入器（新增 `setEmailPointConfidence` 受控出口）；非 email 点 409；点不存在/跨租户 404（RLS）。
+- 测试：服务口径 6 条（hard 的 INVALID+抑制+无 PII 证据、soft 未达阈值只记账、soft×3 降级+24h、complaint 的 confidence/LEGAL/动作收敛、duplicate 无副作用、404/409/400 词表）；守卫 3 条；OpenAPI 重导出（135 paths）；controller 拓扑已登记。
+- 未做：SaaS SMTP transport 的调用接线与 S0–S4 灰度统计（gain-saas lane）；`suppression` 的派生投影对账（reconcileCanonicalSuppression）未在本事务触发，如需行/公司级联动由后续卡补。
+
+## 2026-11-09 · Add the offline frame snapshot adapter port, fixture adapter and reusable contract suite (ch01 PR-11 offline part) (#959)
+
+- 起因：ch01 PR-11（frame 适配器）依赖 registry A 方案定形，先交付离线部分：端口、fixture 实现与可复用契约测试套件，不接注册表数据、不落表。
+- 改动：
+  - 新增 `apps/api/src/measurement/frames/frame-adapter.ts`：`FrameAdapter` 端口（fetchSnapshot/parse/validate）、快照元数据类型（sourceUrl/fetchedAt/rawObjectUri/rowCount/contentHash/parserVersion）、实体与排除口径（entities + exclusions.total = rowCount）、血缘类型，以及状态机驱动 `runFrameAdapter`（FETCHING→PARSING→VALIDATING→READY|QUARANTINED|FAILED；结构校验与 FETCH_FAILED/PARSE_FAILED/PARSE_ROW_COUNT_MISMATCH/VALIDATION_ERROR 封装）。
+  - 新增 `apps/api/src/measurement/frames/fixture-frame-adapter.ts` 与合成 fixture：内存记录、稳定序列化哈希、状态排除（status_not_active）、行数对账与校验清单，作为后继真实适配器的参考实现。
+  - 新增 `apps/api/src/measurement/frames/frame-adapter.contract.ts`：`defineFrameAdapterContract(...)` 可复用套件，覆盖状态机全序、同 asOf 可复现、实体+排除=行数、实体键唯一、ISO-2 国家、frame.adapter 血缘、FETCH_FAILED 与 QUARANTINED 语义；`frame-adapter.spec.ts` 14 例含驱动失败路径。
+  - A 方案预留位：`LocalQueryFrameLineageReceipt`（producer=registry.query）仅类型占位，`receipt` 保持不透明，不实现、不 import `apps/api/src/discovery/` 的血缘文件（P2 在飞面）。
+  - `apps/api/src/measurement/frames/README.md` 说明端口语义、契约套件用法与未实现范围。
+- 测试：`vitest run src/measurement/frames` 14 例全过；`pnpm --filter @global/api build` 通过。
+- 未做：真实数据源适配器、`frame_registry`/`frame_snapshot` 落表（PR-12，需 schema 窗口）、local_query 接线（等 P2 血缘契约）、抽样核验；未发车、未部署。
+
+## 2026-11-09 · Hunter, Findymail and Prospeo finder adapters with registry gates (#960)
+
+- 起因：P1-07——富集瀑布（P1-08）要先有付费 finder 适配器；计划 §2.3.3 定序 Hunter（pattern/accept_all 结构化信号）→ Findymail（pay-on-valid 主力）→ Prospeo（90 天免费重取）。
+- 改动：
+  - `enrichment/finders/email-enrichment-provider.ts`：统一接口（`findEmail → hit/miss/error`、`requestHash = sha256(contactId|provider|inputVersion)`、注入 fetch）与共享纯函数（输入版本哈希、返回值边界校验 `normalizeEnrichedEmail`——语法 + 域名一致，防供应商串号；人名归一 `personNameParts/namesMatch` 大小写/变音符/标点无关）。
+  - `hunter.provider.ts`：`/v2/domain-search` 客户端，按 first/last name 归一匹配取 confidence 最高；`data.pattern`/`data.accept_all` 作为结构化信号透传（accept-all 地址由验证层裁决，不当 VALID）；miss 不计费（$0.0170/命中）。
+  - `findymail.provider.ts`：`POST /api/search`（Bearer），容忍顶层/嵌套 `contact.email` 两种形状；显式无结果 0 成本（pay-on-valid，$0.0198/命中）。
+  - `prospeo.provider.ts`：`POST /email-finder`（X-KEY），`NO_MATCH`/`INVALID_DATAPOINTS`=合法 miss（0 成本），`RATE_LIMITED`/`INTERNAL_ERROR` 可重试、`INSUFFICIENT_CREDITS`/坏 key 不可重试（供编排层熔断）；$0.0198/命中。
+  - `finder-pool.ts`：只收凭据已配置的 finder，顺序即瀑布顺序；Apollo/PDL 属 P1-09 可选尾，未入池。
+  - 登记面：`data_provider.hunter/findymail/prospeo` seed（**一律 DISABLED** = kill switch）+ `source_policy.api.hunter.io/api.findymail.com/api.prospeo.io`（APPROVED、personalData、purpose=discovery/enrichment）+ SourceClass 清单与治理 registry 条目（providers=29）与生成文档。
+- 测试：4 套假 HTTP 契约测试（命中/无结果不计费/429 可重试/401 不可重试/域不一致 invalid_payload/畸形体/缺凭据不发请求/pool 顺序与域名），零真实出网；governance-verify providers=29 通过；api build 通过。
+- 未做：富集瀑布编排与 attempt 账（P1-08）、Apollo/PDL 适配器（P1-09）、HTTP 端点与 run 接线（P1-10）；真实 key 到位后按供应商实际响应校准映射并跑 scorecard（§2.3.3.1）后才允许翻 ENABLED。
+
+## 2026-11-09 · Implement the approved local_query lineage variant — registry_frame receipts, governed registration and the registry.query domain-ack binding (#961)
+
+- 起因：2026-11-09 用户经 P2 看板采纳 A 方案（决策简报 `docs/superpowers/plans/2026-11-09-registry-frame-local-lineage-decision-brief.md`）：`registry_frame` 是零出网本地枚举，没有物理调用可出 durable 回执，此前恒被 governed-lineage 闸门排除。获批后按设计 `2026-11-09-registry-frame-local-lineage.md` §2 落地契约本体。
+- 改动：普通 7 个 provider 校验路径零放宽。
+  - `company-discovery-lineage.ts`：`DiscoveryCompanyLineageProviderKey` ∪ `registry_frame`；`PROVIDER_RECEIPT_CONTRACT` 增 `registry_frame → {provider:'registry.query', resultSchema:'registry-query/v1'}`。
+  - `registry/local-query-receipt.ts`（新）：确定性 local 回执构造——`operationKey=registry.query:<runId>:<queryDigest>`、operationId 由 (runId,queryDigest) 派生 UUID、resultDigest=归一候选集规范 JSON 的 sha256（**可从 registry_entity 重算**）、usage 恒 0/`not_incurred`；`buildRegistryQueryLineage` 单回执覆盖全部记录（空结果给合法空血缘）。
+  - `discovery-query-governed-lineage.ts`：`PROVIDER_CONTRACT` 增 registry_frame（consumer `RegistryFrameDiscoveryProvider`，classes `company_registry`）；`durable-results/domain-ack-consumer-bindings.ts` 的 `DISCOVERY_GOVERNED_COMPANY_ACK_BINDINGS` 增 `registry.query` 绑定；`discovery.activities.ts` 的 `DISCOVERY_DOMAIN_ACK_PRODUCERS` 增 `registry.query`，并在执行上下文注入 `durableBudgetAuthority`（authorityId/accountId 来自 run 预算绑定）。
+  - `provider-contract.ts`：`ExecutionContext` 增可选 `durableBudgetAuthority`（有物理调用的 provider 忽略）。
+  - `registry-frame.provider.ts`：`REGISTRY_FRAME_PROVIDER=on` 才声明血缘并报送本地回执；缺预算绑定/非法 filters 均 fail-closed 为空集+空血缘；`provider.registry.ts` 读取该开关（默认 off = 原行为，关闭即回滚；data_provider 默认 DISABLED 为第二道开关）。
+- 测试：新增 `local-query-receipt.spec`（规范 JSON/摘要敏感性与稳定性、确定性 UUID、回执过 `parseDurableExecutionReceipt` 严格校验、血缘过 `parseDiscoveryCompanyResultLineage`、空结果合法）；适配器 spec 增 lineage 模式五项（开关声明、确定性回执+回调一致、缺预算 fail-closed、非法 filters 空血缘、**governed plan 端到端接受**）；provider.registry spec 更新血缘不变量（registry_frame 在白名单但默认 off 不声明）。相关套件 18 文件 219 项 + activities/durable-results 37 文件 1106 项全绿；build/lint 通过。真库证据：一次性库导 FR 帧（3 实体）→ 适配器两次执行得到同一 operationId（baf33523…）与同一 resultDigest（9bd75428…），且 digest 由独立 DB 查询重算一致；库已删。
+- 未做：`company_domain_resolution`/`domain_review_task` 两表落库、产物池导出、Temporal 工作流与 shadow→on 灰度（执行面后续 PR）；不碰 Copy 文件、无迁移、未发车。
+
+## 2026-11-09 · WEB-1 tool_calls wire verification — offline dry-run harness and minimal paid-round-trip authorization (#962)
+
+- 起因：`generateChatWithTools`（WEB-1）已合入，但「真实上游在一轮里发起 tool_calls、第二轮接受 tool 消息回放」只有付费往返能证明；先把离线半边与授权口径做成可执行材料，授权后一条命令即可验证。
+- 改动：
+  - `apps/api/src/model-gateway/chat-tools-dryrun.ts`：web_search/web_fetch 的 tool_calls 请求/响应夹具与用量声明、输入校验（名字/上限/id 唯一与有主/`inputSchema` 可编译）、脚本化 wire（记录请求体、零网络）、按目录价与 reserve 口径的费用估算、三方编排（tool_calls 解析、回放与最终回答、身份门负例）。
+  - `apps/api/scripts/web-tool-calls-dryrun.mts`：一键入口。默认离线 dry-run；`--live` 直连网关发起 2 次付费 chat-completions（需 `WEB_TOOL_CALLS_LIVE_ACK=YES` 与 `WEB_TOOL_CALLS_{BASE_URL,API_KEY,MODEL}`），打印真实 usage 与结论。
+  - `docs/backend/web-tool-calls-wire-verification.md`：最小授权请求（2 次调用、预留上限 40¢、token 估算与验证项清单）与执行/回填步骤。
+- 测试：`chat-tools-dryrun.spec.ts` 以真实 provider + 脚本化 wire 跑通两轮与身份负例，并覆盖输入校验与费用估算的边界值。
+- 未做：真实付费往返（等产品负责人费用授权）；不部署。
+
+## 2026-11-09 · Add the paired VRIC series endpoint (T0-001 STRICT + T0-002 PLUS) to the metrics API (PR-04 follow-up) (#963)
+
+- 起因：PR-04 只读度量 API 只做了 catalog/observations/rollups；看板需要 VRIC 北极星趋势，且字典要求 STRICT/PLUS 并列展示、缺数据不得以 0 冒充。
+- 改动：
+  - `GET /api/v1/metrics/vric`（`MeasurementService.vric`）：读 `metric_rollup_daily|weekly` 中 T0-001/T0-002 的本 workspace 行（RLS 与 rollups 相同），按 bucket + stratum_key 成对成行，每侧取最高 metric_version；桶升序、返回最近 `limit` 个桶（默认 30，最大 180），显式 from/to 时以最后 limit 个桶为准并用 `page.has_more` 标记截断；某侧缺行为 `null`。
+  - 控制器/操作描述/openapi 同步：新增 `GET /api/v1/metrics/vric` 到 `operation-descriptions.ts` 并重导出 `packages/contracts/openapi/openapi.json`（+106 行纯加法）。
+  - `docs/metrics/metrics-api.md` v1.1：端点表补 vric、明确升序/有界窗口/缺侧 null 语义与 PR-04 余量（scorecards 需先定 ops 读路径；T0-002 通道拆分属 PR-03 rollup 余量，端点不伪造通道值）。
+- 测试：`vitest run src/measurement src/docs/operation-descriptions.spec.ts` 54 例全过（vric 成对/最高版本/最近 limit 桶/周表选择/非法参数）。
+- 未做：scorecards/evals/frames/recapture/benchmarks 端点、T0-002 通道拆分、BFF/看板；未发车、未部署。
+
+## 2026-11-09 · P6 CI gates — migration integrity (G2) and RLS catalog (G5) (#964)
+
+- 起因：ch08 §3.4 的防欠债门（G1–G14）。G1 已随 #903 落地；本 PR 补齐纯 CI/脚本可交付的 G2 迁移完整性与 G5 RLS/租户目录（G9 体量/复杂度预算另开 PR）。
+- 改动：
+  - G2（`packages/db/scripts/migration-integrity-gate.mjs`）：迁移目录命名、14 位时间戳撞车（历史 6 组进基线，新增即红；只增基线、不改任何既有迁移文件）、历史文件不可变性（文件必须与「加入仓库的提交」逐字节一致；13 个 gate 上线前被修改过的存量文件冻结当前 sha256 进基线）、对一次性库 `migrate deploy` 后逐行校验 `_prisma_migrations.checksum` = 文件 sha256，失败/回滚行即红。
+  - G5（`packages/db/scripts/rls-catalog-gate.mjs`）：带 `workspace_id` 的表必须 ENABLE+FORCE RLS 且有策略；其余表现状登记进目录基线（platform_table / owner_only / rls_enforced，棘轮豁免使门先可过）；`app_user` 默认表权限必须恰好只读。
+  - 门登记簿 [docs/backend/ci-gates.md](../backend/ci-gates.md)：门名、owner、本地复现、基线更新与例外流程。共享运行时 `packages/db/scripts/lib/gate-runtime.mjs`。
+- 测试：G2 反向演示（篡改历史迁移/再改冻结文件 → 红）、G5 反向演示（scratch 库新建未登记表 → 红）均已本地执行并还原；`gctl check` 全绿。
+- 未做：G3/G4/G6/G7/G8/G9/G10–G14 在后续 Wave；G5 的「manual RLS 套件迁入 nightly」经实测暂不可自动化（7 个候选套件分别依赖集群级角色预置或存在夹具腐化，详见 ci-gates.md），需先修夹具与补 provisioning 再接入。
+
+## 2026-11-09 · Emit the VRIC PLUS channel split (email_only/phone_only/both) from the T0-002 rollup query (PR-03 remainder) (#965)
+
+- 起因：指标字典 §1.3.1 要求 VRIC_PLUS 必须同时报告 email_only / phone_only / both 通道拆分，而 PR-03 的 T0-002 查询只出总数行——口径已登记、实现未跟上。
+- 改动：`metric-queries.ts` 的 T0-002 查询按人（dedupe_key）聚合 has_email/has_phone 标记，除原有总数行外，再为每个 workspace 与平台 ALL 各输出三行 `channel` 分层（email_only / phone_only / both，分母仍为 match 账户数）；总数口径与人级去重逻辑保持不变。
+- 文档：`docs/metrics/rollup-workflow.md` 指标表注明通道拆分；`docs/metrics/metrics-api.md` §5 更新（/metrics/vric 会以 strict=null + plus.value 的同桶附加项呈现通道行，不合并不推断）。
+- 测试：`run.spec.ts` 新增 T0-002 通道 stratum 映射用例（4 行 → 4 个观测、stratumKey 含 channel）；`vitest run src/measurement` 全过。
+- 未做：STRICT（T0-001）无通道概念、不改；历史观测不重写（append-only，重跑该日即得新行）；未发车、未部署。
+
+## 2026-11-09 · Enrichment waterfall with attempt ledger, circuit breaker and budget port (#966)
+
+- 起因：P1-08——finder 适配器（P1-07）只解决「怎么调一家」，富集瀑布要解决「按什么顺序买、什么时候停、不重复买、怎么熔断与计费」。
+- 改动：
+  - 迁移 `20261109180000_contact_enrichment_attempt` + `ContactEnrichmentAttempt` 模型：每次 finder 调用一行（hit/miss/error/skipped_* 都记、成本 micro-USD 照记）；唯一键 `(workspace, provider, request_hash)` 是幂等键；RLS 租户隔离（app_user SELECT/INSERT/UPDATE，email_state 回填用）。
+  - `waterfall/enrichment-attempt.ts`：幂等写入（P2002 → SAVEPOINT 回滚 + 回读）与三层复用口径——同输入版本 hit 90 天 / miss-error 24h；同联系人同 provider 的最近 hit 90 天（「90 天内不重复购买」）。
+  - `waterfall/circuit-breaker.ts`：15 分钟窗口错误率 >20%（≥5 样本）或连续 5 次失败 → OPEN 15 分钟；到期放 1 个探针（成功 CLOSED、失败重开）；状态存 `data_provider.config.circuit`，存储故障不阻断主链。
+  - `waterfall/enrichment-budget.ts`：reserve/settle 端口 + CapBudget（默认 $0.15/联系人）+ CompositeBudget（run 与单联系人取最紧）；P1-10 以 ExecutionBudget Grant 注入同一端口。
+  - `waterfall/enrich-contact-email.ts`：编排器——合规前置（contactMayUseExternalProcessing）→ 逐家 finder（data_provider/source_policy 门 + 熔断 + 本地复用 + 预算）→ 命中先验证（双正瀑布；抑制与 lawful-basis 验证门）→ 同事务写入（`upsertProviderEmailPoint` 新写入器 + 每步事件账 + 状态机回写 + attempt.emailState）。停止规则：每联系人 finder ≤3 家、验证 INVALID 继续下一家、UNKNOWN 落库即停并进 24h 重验队列；全部 miss → not_found。
+  - `enrichment/provider-gates.ts`：data_provider + source_policy 前置门从再验证 sweep 抽出共用（finder 与验证器同口径）。
+- 测试：39 条新单测（attempt 账 TTL/幂等、熔断开合与探针、预算 reserve/settle、编排器 13 个场景：命中双正、INVALID 续买、UNKNOWN 即停、≤3 家上限、预算/熔断/门禁/复用/抑制/无验证器）；enrichment 全套 180 用例绿；漂移门（一次性库重放）零未登记差异；build/docs:verify/governance-verify 通过。
+- 未做：HTTP 端点与 run activity 接线（P1-10，含 execution-budget purpose `contact.enrich`）；Apollo/PDL（P1-09）；真实 key 与 scorecard 后翻 ENABLED 是用户决策。
+
+## 2026-11-09 · 域名解析候选与人工复核队列两表（ch03 执行面 3a） (#967)
+
+- 起因：ch03 §3.9.4 的域名解析证据表与复核工单表是执行面（解析 workflow / 池导出）的落库基座；此前只有内存契约（T3-13/T3-15），没有租户级表、权限清单与 RLS 行为证据。
+- 改动：
+  - 迁移 `20261109185000_company_domain_resolution`：`company_domain_resolution`（业务唯一键 workspace+company+候选域名+route；`selected=true` 仅允许 `status='VERIFIED'`；复合外键随公司级联删除）与 `domain_review_task`（非 OPEN 必须有 decided_at；reason/status 封闭词表），两表 ENABLE+FORCE RLS + `current_workspace_id()` 租户策略，app_user 授予 SELECT/INSERT/UPDATE/DELETE 并同步 `docs/governance/app-user-table-privileges.json`；同公司至多一行 selected 由部分唯一索引兜底（datamodel 不可表达、漂移 diff 忽略部分索引），写入路径另用 company 级 advisory lock 串行化「先清旧选中再选新行」。迁移只入代码，未部署。
+  - `apps/api/src/registry/domain/domain-resolution-store.ts` / `domain-review-store.ts`：存储契约（幂等 upsert、仅 VERIFIED 可选中、`clearSelected` 清选中后才可改判终态、工单 OPEN 幂等入队、裁决终态守卫、SLA 超期转 EXPIRED）。
+  - `domain-stores.prisma.ts`：Prisma 实现——upsert 用单条 `INSERT … ON CONFLICT DO UPDATE … RETURNING (xmax = 0)`（捕获 P2002 会中止所在事务，不能用）；`selectVerified` 事务内先 `pg_advisory_xact_lock` 再清旧选新。
+  - CI「Raw SQL parameter types on PostgreSQL」步骤接入新 postgres 规格（迁移后 `prisma migrate deploy` 真库）。
+- 测试：内存契约单测 11 例（校验/幂等/单选中/清选中/终态/超期排序）；迁移静态契约 6 例（词表与 TS 常量对账、FORCE RLS 语句、GRANT 与清单一致、datamodel 关系映射）；真库规格 5 例（app_user+set_config 正向读写、不设 workspace 静默空集、无上下文写入 42501、跨 workspace 不可见/不可写、复合外键 23503、CHECK 23514、部分唯一索引 23505、公司删除级联）；漂移门在一次性库上零未登记差异。
+- 未做：解析/复核 Temporal workflow 与池导出（批次 3b）；selected 行回写 `canonical_company.domain`；迁移落库与发车（按授权另行执行）。
+
+## 2026-11-09 · Apollo and PDL finder adapters as an A-tier-only waterfall tail (#968)
+
+- 起因：P1-09——计划 §2.3.3 的瀑布可选尾：Apollo（兜底 + 搜索面）与 PDL（高价值账户身份/字段补充）单价最高，只对 A 档公司（评分 ≥80）开启，不对全量路由。
+- 改动：
+  - `apollo.provider.ts`：`POST /api/v1/people/match`（x-api-key）；`email_status`（verified/guessed/unavailable/bounced）折算 providerConfidence 透传；`person` 缺失 = 合法 miss（不扣配额）；单名输入不花配额（本地直接 miss）；≈$0.025/命中（25000 微美元，credit 单价未公开待核）。
+  - `pdl.provider.ts`：`GET /v5/person/enrich`（X-Api-Key），`required=emails` 计费口径——404 无记录与「有记录但无邮箱」都不扣；邮箱优先 `current_professional`；≈$0.28/record（280000 微美元）。官方域 `api.peopledatalabs.com`（计划里 `api.peerdatalab.com` 为笔误）。
+  - `finder-pool.ts`：新增 `resolveConfiguredTailFinderProviders`（Apollo → PDL，只收已配置凭据者）；**尾部不进主池**——调用方只对 A 档公司把尾池拼到主池之后（P1-10 接线）。
+  - 登记面：`data_provider.apollo/pdl` seed（DISABLED）+ `source_policy.api.apollo.io / api.peopledatalabs.com`（APPROVED、personalData、purpose=discovery/enrichment）+ SourceClass 清单与治理 registry 条目（providers=31）与生成文档。
+- 测试：两套假 HTTP 契约测试（email_status 折算、无记录/无邮箱不计费、单名不花配额、required=emails 查询参数、429/401/域不一致/缺凭据）+ 尾池顺序与「尾部不进主池」断言；finder 全套 45 用例绿；governance-verify providers=31 通过。
+- 未做：A 档路由的调用方接线（P1-10）。真实 key 与 scorecard 后翻 ENABLED 是用户决策。
+
+## 2026-11-09 · Enrich-contacts HTTP endpoint with contact.enrich budget purpose (P1-10a) (#969)
+
+- 起因：P1-10（拆 a/b）——富集瀑布（P1-08）与 A 档尾池（P1-09）已就位，需要一个受 ExecutionBudget Grant 管控的 HTTP 入口，把「公司 → 缺邮箱联系人 → 付费 finder 瀑布 → 验证 → 落库」串起来。
+- 改动：
+  - **执行预算 purpose `contact.enrich`**（subject=company）：TS 面（purpose 联合、binding/verifier 白名单、request scope 新 operation `POST /canonical-companies/:id/enrich-contacts` 与 canonical 请求哈希、quote 的 purpose 枚举/参数变体）+ DB 面两个迁移（enum 加值 `20261109190000`；authority CHECK 与 `consume_workspace_execution_authority` 逐字复制自 `20261108163100` 并追加 contact.enrich 分支，`20261109190100`）。
+  - **报价 envelope**：新 operation 进 `WORKSPACE_EXECUTION_QUOTE_OPERATIONS`（12 项）；envelope 只给执行形状（finderCallsPerCompany=10、verificationCallsPerAddress=6、contactsPerRequest=10、providerConcurrency=2、softDeadlineMs=10min）、cap 为表示最小值——付费 finder/验证 API 尚未经 ToolBroker 计价（与第三方验证器同现状），Grant 的 capMicrousd 由端点侧 CapBudget 忠实执行，把供应商单价纳入报价策略表需 gain-saas lane 协调（后续卡）。
+  - **端点** `POST /api/v1/canonical-companies/:id/enrich-contacts`（scopes acquisition:write + contact-discovery:read + compliance:manage；Grant 一次性消费；lawfulBasis 必填——缺失在消耗 Grant 前以 `CONTACT_ENRICH_LAWFUL_BASIS_REQUIRED` 拒绝）：body `{lawfulBasis, lawfulBasisRef?, lawfulBasisNote?, contactIds?≤10, maxProviders?≤3, maxProbe?≤6, attemptId?}`。
+  - **共享核心** `enrichment/waterfall/enrich-company-contacts.ts`（HTTP 与 run activity 共用）：只取「完全缺 email 点」的具名联系人；每公司 finder 调用 ≤10（跨联系人共享）、软截止 10 分钟、A 档（任一 lead.totalScore ≥80）才追加 Apollo/PDL 尾池；预算 = Grant 授权 cap 与单联系人 $0.15 取最紧；逐联系人调用 P1-08 编排器；PII 访问审计（purpose=contact_discovery）与请求同留痕。
+  - `discovery/execution-envelope.ts` 新增 P1-10 执行形状常量（MAX_ENRICH_*、ENRICH_COMPANY_CONCURRENCY、ENRICH_SOFT_DEADLINE_MS、MAX_RUN_ENRICH_COMPANIES，run 接线在 P1-10b 使用）。
+- 测试：公司级核心 8 场景（无域/无联系人跳过、B 档不路由尾池、A 档路由尾池、每公司调用上限、软截止、预算为 0 的 skipped_budget）；request scope 两个新哈希钉；envelope 目录 12 项 + enrich 形状断言；quote OpenAPI 变体数 11；execution-budget 全套 531 通过；authz-openapi/operation-descriptions 通过；OpenAPI 重导出（137 paths）；漂移门（一次性库全链重放 + 两个新迁移）零未登记差异。
+- 未做：run 内 activity 与 workflow 接线（P1-10b）；供应商真实调用与报价计价（用户/gain-saas lane 决策）。
+
+## 2026-11-09 · P6 CI gate G9 — file size and function complexity budgets (ratchet) (#970)
+
+- 起因：ch08 §3.4 G9：单文件体量与函数复杂度不设预算，长文件持续膨胀（现最大 4,413 行）；需要一道只对新增长生效的棘轮门。
+- 改动：`scripts/check-file-budgets.mjs` + CI `build-test` 步骤 + 基线 `docs/governance/ci-baselines/g9-size-budget.json`。规则：>800 行 warn、>1200 行且未登记阻断；函数圈复杂度 >20 warn、>40 且未登记阻断；已登记条目棘轮只降不升，文件/函数降到线下后基线条目必须删除（否则红）。现有超标文件与高复杂度函数全部按现状登记豁免（门先可过，随后逐步收紧）；site-builder 相关条目随 SUB-02/03 退役后删除。
+- 测试：本地正反向演示（新建 1,300 行文件 → 红；删除后 → 绿；对基线内文件增量增长 → 红）；`docs/backend/ci-gates.md` 增加 G9 行。
+- 未做：复杂度仅解析级近似（不做类型流分析）；前端（gain-saas web）预算在 G10–G12 另行接入。
+
+## 2026-11-09 · Run-pipeline enrichment activity with versioned workflow gate (P1-10b) (#971)
+
+- 起因：P1-10（拆 a/b）——b 把富集接进 run2 深挖流水线：contacts 阶段之后，仅对 fit=match 公司补邮箱（计划 §2.3.4.7）。
+- 改动：
+  - `discovery.run2.pipeline.activities.ts` 新 activity `enrichContactsForCompany`（withClassifiedFailure 包装）：数据面守卫——无已配置凭据 / data_provider 全 DISABLED / 无 lawful basis 配置（decision_maker.config，与联系人发现同一配置面）时直接跳过，kill switch 期间**不触碰联系人、不写 attempt 账**；通过守卫后预算 = min(run 预算剩余, $0.50/公司)，软截止 10 分钟，runId/run 账户透传公司级核心（P1-10a）。
+  - `discovery.run2.pipeline.workflow.ts`：contacts 之后新增版本化步骤 `patched('company-contact-enrichment-v1')` + `fit.verdict === 'match'` + `enrichmentSlot < MAX_RUN_ENRICH_COMPANIES(25)`；富集失败 `.catch` 吞掉——可选增强不把已完成的联系人发现打成 failed（失败仍留在活动历史与 Temporal UI）。
+  - `discovery.workflow.ts`：父工作流把深挖批次序号（cursor index）作为 `enrichmentSlot` 传给子工作流（旧历史无此字段，patched() 闸挡住）。
+  - `discovery/execution-envelope.ts`：新增 `ENRICH_COMPANY_BUDGET_CAP_MICROUSD=500_000`（调用计数上限之外的第二道钱闸）。
+- 测试：activity 4 场景（无凭据/全 DISABLED/无 lawful basis 三跳过 + 通过守卫时 run 账户/basis/软截止/预算 min(剩余,$0.50) 断言，核心以 mock 切面）；子工作流 4 场景（match 触发、mismatch 不触发、slot≥25 与 patched=false 不触发、富集吞错仍 done）；temporal 全套 1440 通过（含 workflow replay 套件）。
+- 未做：供应商真实 key / scorecard（用户决策）；报价策略表计价（gain-saas lane 协调）。
+
+## 2026-11-09 · Contact weekly report script, snapshot table and paused Schedule (P1-17) (#972)
+
+- 起因：P1-17（G10 观测）——§2.3.12 的周报 + 三条告警需要可复算的口径与每周落库的快照；「连续 2 周下降」只有留痕才能判定。
+- 改动：
+  - `enrichment/metrics/contact-metrics.ts`：周报计算层（只读 SQL，可注入 runner）——email_state_coverage、valid_email_company_coverage、enrichment_hit_rate（按 provider）、verification_valid_rate（按 provider）、verification_disagreement_rate、verification_error_rate、catch_all_share、cost_per_valid_email、reverify_flip_rate；发送侧三条（hard_bounce/complaint/send_gate_block_rate）分母在 gain-saas，如实输出绝对计数并标记 unavailable，绝不臆造发送量。分母为 0 一律 `null`（「没有样本」≠「0%」）。
+  - 三条告警（`evaluateContactWeeklyAlerts`，纯函数）：VALID 公司覆盖率连续 2 周下降 >3pp（需 3 周序列，缺则 INSUFFICIENT_DATA）、验证错误率 >20%、每 VALID 成本 >$0.09（1.5×$0.06）；Markdown 周报渲染同文件。
+  - 迁移 `20261109200000_contact_metrics_snapshot` + `ContactMetricsSnapshot` 模型：平台级运营表（RLS 按 workspace_id 兜底、app_user 按平台默认只读、权限清单登记 ["SELECT"]），每周一行窗口+指标+告警 JSON。
+  - `scripts/contact-weekly-report.mts`：CLI（`--since/--until/--workspace/--out/--json/--no-persist`，有 FIRING 退出码 10），与 Schedule 共用计算层。
+  - `CONTACT_WEEKLY_REPORT` Schedule 骨架：workflow/activity + ensure-schedules 注册（**paused**，默认 168h）+ worker/两个 workflow barrel/code-intelligence runtime-evidence 与契约图（schedules=14）。
+- 测试：指标映射（BigInt→number、分母 0→null、租户参数进 SQL）、三条告警的 OK/FIRING/INSUFFICIENT_DATA、Markdown 渲染、CLI 参数与执行接线（默认窗口/--no-persist/非法窗口）、ensure-schedules（14 个 schedule、新条目 paused、168h 间隔）；temporal+enrichment 全套 1639 通过；code-intelligence 59 通过；漂移门全链重放零未登记差异；G5 RLS 目录门通过（172 表）。
+- 未做：告警通知渠道接线（当前进周报正文与快照；看板/渠道由后续切片接）；发送侧三条指标的 SaaS 报告接口；真实数据上的周报需要运营连接跑一轮核对口径后再启用 Schedule（用户决定）。
+
 ## 2026-11-08 · Add the SKILL.md package spec v0 with validator and builtin catalog (#833)
 
 - 起因：M1 步 7（S0 Skill Runtime v0）需要让 AI 技能有正式包规范与登记来源；设计见 `docs/superpowers/plans/2026-11-08-skill-runtime-s0.md`（已批准）。
@@ -217,6 +1265,218 @@
 - 改动：模型活动 3m→**15m**（一次结构化回答可能串初答 + schema 修复两条 provider 调用，2×300s 上限 + 余量，与 discovery 的 15m 口径一致）、抓取活动 3m→5m，均加 `heartbeatTimeout=2m`；`crawlWebsite`/`crawlPages`/`extractClaims`/`extractOfferings`/`extractAndPersistProfile` **全部**包 30s 周期心跳（否则 heartbeatTimeout 会把无心跳活动的预算压到 2 分钟）；三处模型调用都传 `activityCancellationSignal()`（`GenerateStructuredInput.signal` 贯通到 HTTP fetch 的 AbortSignal.any）。重复付费的防线是「活动时限 ≥ 线上最坏路径 + 取消真正掐断请求」——注意重试会以 attempt 编号生成**新的**账本操作键，B2 的 remnant 快速失败只覆盖同一 attempt 内的重执行，不能当作跨 attempt 的护身符。
 - 测试：新增源文本断言（超时/心跳常量、signal 传入、心跳包装），既有 understanding workflow/activities spec 全绿；全量零容器单测与治理门禁全绿。
 - 未做：ToolBroker `ToolContext` 无 signal 字段，取消传播到**全部工具适配器**属后续小步（随 B12 PERF 群评估）；活动时限的全局审计未做（本 PR 修审计点名的 understanding 路径）。
+
+## 2026-11-08 · Collect unresolved tool-budget operations in an independent sweep (#861)
+
+- 起因：审计 F1——超时 RESERVED 清收挂在 raw-retention sweep 上，workspace 枚举只看 raw 记录是否到期，真实孤儿全部漏收；B2 起 settle 双败留下 RESULT_UNKNOWN，无人清收。
+- 改动：
+  - 新迁移 `20261108150000_tool_budget_unresolved_collector`：`tool_budget_operation` 增 `unresolved_since`（触发器在进入 RESERVED/RESULT_UNKNOWN 时刷新，D13 再预留因此重新计时）+ 部分索引；`list_workspaces_with_unresolved_tool_budget_v1`（游标分页、只收租户 UUID 作用域、app_user 守卫）；`reconcile_stale_tool_budget_operations_v2`（释放 RESERVED，按 unresolved_since、只碰 microusd 行、先账户 advisory 后行锁）；`settle_unknown_tool_budget_operations_v1`（RESULT_UNKNOWN 按预留额保守结清，账户 reserved→charged 同步）。
+  - 新 sweep `toolBudgetReconciliationWorkflow`（每小时、30 分钟时限、游标翻页 ≤4 页）：两个 SINK 独立 try（释放失败不连带跳过结清）、回执严格校验、部分失败 console 告警、全部失败 nonRetryable。
+  - raw-retention 用新 patch `budget-operation-reconcile-moved-v1` 停止调度预算清收（旧历史重放不变）；其 `maxBudgetReconcileBatches` 输入保留（旧历史重放需要）。
+- 测试：一次性 PostgreSQL 实测（unresolved_since 触发、游标、microusd 过滤、SETTLED 金额、账户余额、守卫）；workflow 6 例 + 活动 5 例 + 迁移静态契约 6 例；既有 raw-retention 重放用例更新。
+- 未做：cent 单位的遗留未结行与平台作用域（非租户 UUID）孤儿不在本清收路径内（迁移注释已登记，随 B10 三账对齐处理）。
+
+## 2026-11-08 · Add the agent registry, decision trace table and ops kill switch (M2 step 9b-1) (#870)
+
+- 起因：M2 步 9b 多 agent 编排 v0 第 1 步——先落注册表与决策轨迹地基，行为保持不变（设计 `docs/superpowers/plans/2026-11-08-multi-agent-orchestration-v0.md`，已批准）。
+- 改动：
+  - 迁移 `20261108160000_agent_orchestration_v0`：新增 `agent_profile`（平台级 agent 注册表：角色提示词版本 + 技能子集 + 模型策略 + 记忆作用域 + loop 策略，FORCE RLS，app_user 仅列级 UPDATE 状态列）与 `agent_decision_trace`（append-only 决策轨迹，F2 字段组子集、无 PII，按 workspace FORCE RLS 隔离，app_user 仅 SELECT/INSERT，`(workspace, run, step_type, discriminator)` 唯一键幂等，随 run 级联删除）；同步 `docs/governance/app-user-table-privileges.json`。
+  - `apps/api/src/agents/`：agent 目录（两角色 `discovery.source_scout` / `discovery.qualifier`，loop 恒单回合）、owner 幂等 seed（不覆盖 ops 启停）、DB 解析器（`AGENT_NOT_REGISTERED` / `AGENT_DISABLED` fail-closed，30s 缓存）、决策轨迹 append-only store（唯一写入口 `record`，ON CONFLICT DO NOTHING）。
+  - ops 面：`GET /ops-agents`、`PATCH /ops-agents/:agentKey/status`（复用 S0 ops 鉴权 `ops:read` / `ops:write`，租户 token 403）。
+  - 启动期 seed：worker（失败大声 `AGENT_CATALOG_SEED_UNAVAILABLE`）与 relay 同步执行。
+- 零行为变化：本步不接线任何执行路径（角色化在 9b-2/9b-3），既有召回/评分/预算/重试语义不动。
+- 测试：单测覆盖负向 1（未注册拒绝）/2（停用 fail-closed）/4（无 UPDATE/DELETE 路径，源码断言 + 方法面）/6（幂等键契约）；真库 postgres 套件（CI 多 spec job）实测 seed 幂等与不覆盖 kill switch、跨租户不可见、重放不翻行、append-only、随 run 级联删除。
+- 未做：源侦察员/资格判定员角色化（9b-2/9b-3）、`GET /runs/:runId/trace` 与前端时间线（9b-4）。
+
+## 2026-11-08 · Candidate batch events and read-only candidate view (QGO step 10-1) (#871)
+
+- 起因：M2 步 10（QGO/SAO/Opportunity 与 Candidate≠Lead）需要引擎侧把「机器候选」从线索语义里剥离出来：候选批次要可追溯（哪个 qualify run、哪一批、判定分布），LeadQualified 要带候选批次引用与证据摘要供下游 QGO 记录「提升时看到的证据版本」。
+- 改动：
+  - `qualify.activities.ts`：每批（scoreCandidates 分页事务）发一条 `CandidateBatchCompleted`（run_ref/icp_id/batch_no/batch_ref/判定分布/候选 refs，无个人数据），并给每条 lead 的 `score_detail` 写入 `candidateBatchRef = qualify:<runRef>:<batchNo>`；`qualifyWorkflow` 以 `workflowInfo().runId` 注入 runRef（replay 安全；直接调用记为 `qualify:direct:<n>`）。
+  - `LeadQualified` 快照升 v2：新增可选 `candidate_batch_ref` 与 `evidence_digest`（资格证据材料 SHA-256），v1 契约文件保留给历史事件；新增 `packages/contracts/events/payloads/lead-qualified.v2.schema.json` 与 `candidate-batch-completed.v1.schema.json`；`CandidateBatchCompleted` 登记进 `INTEGRATION_EVENTS`。
+  - 新只读端点 `GET /api/v1/lead-candidates`（`?runId=` 按批次引用前缀 / `?icpId=`/`?queue=` 收窄，游标分页）——不复制表，候选行仍是 lead。
+- 测试：`qualify.activities.spec`（每批事件载荷/批次引用写入）、`qualify.workflow.spec`（runRef 注入）、`lead-qualified-snapshot.spec`（v2 契约校验/摘要稳定性/旧载荷兼容）、新增 `lead-candidates.spec`（runId 过滤/投影/空引用/游标分页）。
+- 未做：gain-saas 三表迁移与 QGO/SAO/Outcome 端点（10-2）、web 提升入口与 QGO 页（10-3）、E2E-M2.10 联调（10-4）。
+
+## 2026-11-08 · Log PR-B page-cache state so hit rate is observable on real runs (#873)
+
+- 起因：PR-B 设计 §4.5 承诺 `[http-cache] url=… state=…` 结构化日志；实现只带 provenance，而 artifact 绑定路径只持久化 artifact 引用、不保存 provenance，导致 304 命中率在真机 run 上不可聚合。主计划 §3.5b 的「归因看板抓取层页签：304 命中率」指标依赖此日志。
+- 改动：`fetchPageHttpFirst` 在缓存 miss（写入路径）与 conditional-304（复用路径）各打一行 `[http-cache] state=<miss|conditional-304> url=<前 200 字符>`；未启用缓存时不打。
+- 测试：`http-first-fetch.spec.ts` 断言两条日志行的确切内容。
+- 未做：归因看板「抓取层」页签本身（Q33 PR-1 排期）；日志聚合器不在本 PR。
+
+## 2026-11-08 · Widen the frozen v1 lineage provider allowlist for the lineage v3 sources (#874)
+
+- 起因：lineage v3（#846）上线后首个真机 run（`f841d9f1`）在 append 阶段失败——`DOMAIN_ACK_DISCOVERY_QUERY_LINEAGE_INVALID`。v2 合同换哈希后仍把内容校验委托给 `append_discovery_query_lineage_v1`，而 v1 的**回执 providers 白名单**与**每条 attempt 的 producerId/consumer/resultSchema 三元组**硬编码了 public_web/directory/trade_fair 三个旧源；wikidata 等新源的回执一进 append 就被拒。
+- 改动：新迁移 `20261108160000_discovery_query_lineage_provider_allowlist` 用 `CREATE OR REPLACE` 替换 `append_discovery_query_lineage_v1`，只扩两处白名单（四个新源及各自 source_class；producerId/consumer/resultSchema 与 `PROVIDER_CONTRACT`、`DISCOVERY_GOVERNED_COMPANY_ACK_BINDINGS` 一致），并按其创建时机要求以 `pg_temp` 收尾 search_path。v1 合同哈希（`eb5f6f09…`）、命令/回执字段与全部既有校验不变——历史 v1 回执里从不含新源，重放语义不变（纯 widen）。
+- 测试：迁移内容断言进 `discovery-query-lineage.functions.migration.spec.ts`（CI 单元门）；一次性库全量迁移 + `app_user` 会话直接 append 一个 `providers=['wikidata']` 的零记录回执——修复前 `DOMAIN_ACK_DISCOVERY_QUERY_LINEAGE_INVALID`，修复后 `APPLIED`；同库 RLS 血缘规格 11/11 通过（public_web 不受影响）。
+- 部署：本迁移需随下一次发车进入（当前运行镜像 `123e8d67` 的 readiness 要求库最新迁移 = 镜像 `migration_revision`，不能单独热更库）。发车前四源 `data_provider` 已回退 DISABLED，避免计划包含新源的 run 再撞同一失败；修复车后重做步2 的③④。
+- 未做：不改引擎代码与合同（本缺陷纯在冻结 v1 的 SQL 白名单）；未新增跨源组合的 DB 级用例到 CI 的常驻 DB 规格（一次性库验证记录了 RED→GREEN，常驻 Guard 由迁移内容单测承担）。
+
+## 2026-11-08 · Classify contact emails and add the company-level contact channel layer (#875)
+
+- 起因：A4（Phase 2 首项）——核心交付是「可转化的分类联系方式」：contact_point 只有 type/value/status，没有邮箱类型（role/personal/sales/procurement…）、来源页、robots/ToS/legal_basis/验证方式/catch-all 记录；公司级只有 URL 层，Impressum 法定公开的 role 邮箱与总机电话没有落点。
+- 改动：
+  - 迁移 `20261108160000_contact_classification_v2`：contact_point 增 9 列（值域 CHECK、consent_record ≤8KB；personal 与 legal_basis 的组合纪律留在应用层——`allowPersonalWithoutBasis` 是已批准逃生门，DB 不强制）；新表 `company_contact_channel`（公司级联系方式层：email=amber 且 email_type 不得 personal，phone/form_url=green；来源/合规/验证列、幂等唯一键、RLS FORCE、app_user 最小授权并登记权限清单）。
+  - 分类器 `discovery/contact-classifier.ts`：多语种（德/英/法/西/意）role/sales/procurement/management/finance/support/personal/other 映射；人名形态才判 personal（red），判不出不冒认。
+  - 落库接线：contact-persist（email_type/source_type=provider/source_url/legal_basis/verification_method=provider_reported；sourcePage 不合 DB 形状时降级 NULL，坏 URL 不打挂整家公司事务）、email-guess-persist（personal/pattern_guess/catch_all 与 verification_method 由 verdict.detail 归类——未触网如实记 pattern_guess）；新写入器 `company-contact-channel.ts`（自动化只写 UNVERIFIED、重复观测只推进 last_seen、sourceUrl/长度校验与 DB CHECK 同源）。
+  - 合规面：分类器与 cleanEmail 的 red/amber 裁决收敛（info.schmidt 等混合形态判 personal，防按 role 放行误触个人邮箱）；公司主体 DSR 擦除显式清 `company_contact_channel`；`status='VALID'` 强制 updated_by（人工确认留痕）。
+- 测试：分类器多语种矩阵+人名/混合形态/判不出边界；写入器分级/拒绝具名人邮箱/幂等/与 DB CHECK 同源的校验；迁移静态契约（九列 CHECK/RLS/权限清单/复合 FK/VALID 标记）；真库契约 spec（`company-contact-channel.postgres.spec.ts`，进 CI PostgreSQL 组：CHECK/唯一键/RLS 读写隔离/级联删除/写入器幂等）；既有 contact/guess 落库与 contacts-stage spec 全绿；全量零容器与治理门禁全绿。
+- 未做：A1 Impressum 挖掘器（下一 PR，消费本 schema 与写入器）；历史行回填（nullable 增量生效）；A6 发送合规门（消费 legal_basis/consent_record）。
+
+## 2026-11-08 · Add the restricted campaign planner skill, workflow and campaign.plan budget purpose (#876)
+
+- 起因：M2.1（计划 v1.5 步 9，设计 `docs/superpowers/plans/2026-11-08-campaign-planner-m2-1.md`，D-MA-3/D-M2.1-a~e 已获批）需要引擎侧的受限 Campaign 规划器：只读输入、只产计划、不执行任何动作（影子期结构上不执行），计划经回调交给 gain-saas 做唯一权威的 plan_hash 与审批。
+- 改动：
+  - 新增 AI Task `campaign.plan`（零工具、humanGate、推理档模型，输出 CampaignPlan v0 JSON，与 gain-saas M2.0 契约逐字段一致）与技能包 `apps/api/src/skills/builtin/growth_motion/campaign-plan/SKILL.md`（model_task，绑定契约摘要）。
+  - 新增 `createCampaignPlanningActivities`（只读装配 ICP / 卖家已批准事实 / 公司池聚合计数 / 记忆 brief；经 S0 技能运行时调用；语义硬门 + 一次修复；回调 gain-saas 或失败回写 job）与 `campaignPlanningWorkflow`（装配 → 规划 → 交付，失败回写 `FAILED` + 闭集错误码；负向 4：技能停用 → `SKILL_PLATFORM_DISABLED` 且零模型调用）。
+  - 新增引擎内部端点 `POST /api/v1/internal/campaign-plans/draft`（`x-service-token` fail-closed 服务身份 + 一次性 execution-budget Grant），独立 `CampaignPlanModule` 注册。
+  - execution-budget 新增 purpose `campaign.plan` / subject `campaign` 与 quote 变体 `POST /campaigns/:campaignId/plan-drafts`（请求哈希绑定 jobId）；`durable-result-strategies.json` 与 `scripts/execution-authority-policy.mjs`、domain-ack 绑定同步登记 `campaign.plan`（`campaign-plan/v1` typed projection；载荷内 `schemaVersion` 仍是 gain-saas 契约的 `campaign-plan/v0`）。
+- 测试：新增 workflow 编排单测（顺序、失败回写、非法输入）、活动单测（负向 4 零模型调用、语义越界 → `CAMPAIGN_PLAN_INVALID` + issues、回调 422/网络失败分类）、内部端点/守卫单测（503/401/请求闭合/Grant 失败不启动）、预算 purpose/subject 用例；投影注册表与 domain-ack 计数用例扩展。
+- 未做：gain-saas 侧 job 表/三端点/回调幂等与审批 UI（M2.1-2/3）、端到端联调（M2.1-4）；部署需在 worker/API env 配置 `CAMPAIGN_CONTROL_PLANE_URL`、`CAMPAIGN_INTERNAL_SERVICE_TOKEN`、`CAMPAIGN_PLAN_INTERNAL_SERVICE_TOKEN`（与 gain-saas 对侧一致），并在 gain-saas 签发 `campaign.plan` Grant 后才可触发。
+- 部署：新增 purpose 属加法；未配置新 env 时内部端点 fail-closed 503、回调活动 nonRetryable `CAMPAIGN_CONTROL_PLANE_NOT_CONFIGURED`，不影响既有链路。回滚：不触发即无行为；表/数据无引擎侧迁移。
+
+## 2026-11-08 · Add the M2.2 golden campaign briefs and the campaign:golden batch runner (#877)
+
+- 起因：M2.2 第 2 步（设计 `docs/superpowers/plans/2026-11-08-campaign-replan-m2-2.md`，D-M2.2-a~f 已批准）——规划器质量从「人工感觉」变成可回归的基线：golden brief 资产 + 一键跑批（通过率 + 逐条检查 + 叶子字段 diff）。
+- 改动：
+  - 新增 `evals/golden-campaign-briefs/`：6 条首样板（德吸塑包装 / 美国电子件 / 德国工业零部件各 2，D-M2.2-d），schema `campaign-golden-brief/v1`（brief + 结构化期望：必含/禁含字段、禁含语义、预算上限、决策策略、动作类型白名单）；只含行业/国家级描述，无租户 PII。
+  - 新增断言层与跑批器：`apps/api/src/campaign-golden/{golden-brief,golden-evaluate,golden-diff}.ts` 与 `scripts/campaign-golden.mts`（`pnpm campaign:golden`）；支持零模型 replay（CI/变异测试）、live（POST 规划器端点，M2.1 接口就绪后接金丝雀租户）、`--baseline` 叶子 diff、`--out` 结果快照与 markdown 证据模板。
+  - 变异测试：改坏产出（预算越界/缺必含字段/出现发送或单证语义/maxReplans 越界）与改坏期望都必须判红（设计 §7-3）。
+- 测试：单测 26 例（资产 schema 负向、6 条资产装载、断言层全矩阵、叶子 diff、真实 CLI：replay 6/6 绿、预算变异判红退出码 1、baseline diff 生效、缺参数稳定报错）。
+- 未做：live 实跑依赖 M2.1 的规划接口（未接线，届时用金丝雀租户跑首条基线并回填 `docs/evidence/`）；重规划循环与指标页签分别在 M2.2-1/M2.2-3。
+
+## 2026-11-08 · Role-ify the source scout at the discovery fan-out with source.route traces (M2 step 9b-2) (#878)
+
+- 起因：M2 步 9b 第 2 步——把 discovery `executeQuery` 的多源 fan-out 包成「源侦察员」agent 回合：选源决策落 `source.route` 轨迹（设计 `docs/superpowers/plans/2026-11-08-multi-agent-orchestration-v0.md`，已批准）。
+- 改动：
+  - `executeQuery` 回合门：经 agent 注册表解析 `discovery.source_scout`，未注册/平台停用即 `AGENT_NOT_REGISTERED` / `AGENT_DISABLED` nonRetryable（fail-closed，run 按既有失败语义走）；未接线 `agentRuntime` 的环境保持旧行为。
+  - 路由点写一条 `source.route` 轨迹：`chosen_option`=本次路由到的源（含 source_class）；`rejected_candidates`=已注册但未路由的同类源及原因（LEASE_STOP / SOURCE_LINEAGE_UNAVAILABLE / SOURCE_DISABLED / SOURCE_HINT_INVALID / SOURCE_HINT_EXCLUDED，可复活）；discriminator=既有 queryKey（旧回执形状用查询内容哈希兜底），重试不翻行。
+  - worker 与 dev fast lane 注入 DB agent 解析器与决策轨迹 store（目录由 managed worker/relay 启动期 seed）。
+- 零行为变化：轨迹写入发生在既有路由决策之后、fan-out 之前，召回/评分/预算/重试语义不动；轨迹写失败与既有回执同源的 at-least-once 语义一致。
+- 测试：discovery activities 套件新增 5 例（chosen/rejected 内容、hint 排除、零路由 skip reason、AGENT_DISABLED/AGENT_NOT_REGISTERED fail-closed 且 provider 零调用）；worker 接线源级守卫；既有 314 例不回退。
+- 未做：golden mini-run 与 E2E-9b 随 9b-2/3/4 全部合入并发车后按设计 §9 执行（需要产品负责人的发车指令）；资格判定员角色化在 9b-3。
+
+## 2026-11-08 · Role-ify the qualifier at quickScan with fit.judge traces (M2 step 9b-3) (#879)
+
+- 起因：M2 步 9b 第 3 步——把 Run 2.0 quickScan 的批量粗判包成「资格判定员」agent 回合：每批判定落 `fit.judge` 轨迹（含被否候选与理由码），技能子集经 S0 resolver 校验（设计 `docs/superpowers/plans/2026-11-08-multi-agent-orchestration-v0.md`，已批准）。
+- 改动：
+  - `quickJudgeBatch` 回合门：经 agent 注册表解析 `discovery.qualifier`（未注册/停用 → nonRetryable `AGENT_NOT_REGISTERED` / `AGENT_DISABLED`），并按 agent 的技能子集逐个经 S0 resolver 校验；技能不可用（如平台停用）→ 轨迹落 `reason_code` 后原样上抛（fail-closed，不降级不吞判）。
+  - 每个批次落一条 `fit.judge` 轨迹：`chosen_option`=批次规模/判定数/verdict 分布；`rejected_candidates`=被否（`VERDICT_MISMATCH`）、被外部处理闸门跳过（`EXTERNAL_PROCESSING_BLOCKED`）、判定失败（`QUICK_JUDGE_FAILED`）的公司引用 id；discriminator=批次 job id 的内容哈希（重放不翻行）。
+  - 两个角色共用回合辅助 `agent-round.ts`（解析 + 技能子集校验）；源侦察员侧同步改用它，行为不变。
+  - managed worker 把 agent runtime 注入 run2 activities（fast lane 不跑 run2）。
+- 零行为变化：轨迹是批次判定后的旁路记录；召回、判定语义、降级路径（逐家/规则兜底）、预算与重试不动；未接线环境保持旧行为。
+- 测试：run2 activities 套件新增 3 例（fit.judge 轨迹内容、AGENT_DISABLED fail-closed 零模型调用、技能停用落 SKILL_PLATFORM_DISABLED 后上抛——设计 §8 负向 3）；worker 接线源级守卫；既有用例不回退。
+- 未做：golden mini-run 与 E2E-9b 随发车后在部署镜像上执行（需产品负责人的发车指令）；租户 trace 端点与前端时间线在 9b-4。
+
+## 2026-11-08 · Serve the run decision trace to tenants and render the process timeline (M2 step 9b-4) (#880)
+
+- 起因：M2 步 9b 第 4 步——把决策轨迹接到租户与前端：引擎新增 run 轨迹只读端点，gain-saas run 详情内嵌「过程」只读时间线（设计 `docs/superpowers/plans/2026-11-08-multi-agent-orchestration-v0.md`，已批准）。
+- 改动：
+  - 引擎：`GET /api/v1/runs/:runId/trace`（`acquisition:read`；键集分页 limit 默认 100/上限 200；跨租户 404；返回 step/agent/decision/chosen/rejected/evidence/cost/createdAt）；轨迹 store 增加租户只读列表路径（仍无 UPDATE/DELETE）；接口门户说明表同步。
+  - gain-saas：run 详情新增「过程」只读时间线（选源/跳过原因、批量判定与被否候选），经独立租户模块调用引擎（不新增 BFF 注册表条目）。
+- 零行为变化：只读端点与前端展示；不改任何执行路径。
+- 测试：控制器鉴权拓扑 + cursor 编解码单测；真库（CI PostgreSQL job）跨租户 404 与分页；门户完整性 spec 通过；engine OpenAPI 重新导出。
+- 未做：E2E-9b 全链（真实 mini-run → trace 可读 → ops 停用资格判定员 → run 以 AGENT_DISABLED 失败且无模型调用 → 恢复）在发车后的部署镜像上执行，需产品负责人的发车指令。
+
+## 2026-11-08 · Add the S2 outreach skill packs (grounded sequence draft + reply classification) (#881)
+
+- 起因：M2 步 13（设计 `docs/superpowers/plans/2026-11-08-outreach-skills-l2-m2-step13.md`，APPROVED）要求交付「写好这封信 + 看懂回信」的两个 S2 技能；本 PR 为 13-1（技能包与评测），不触碰发送通道/审批实现（步 11 在飞）。
+- 改动：
+  - 两个 AI task 契约：`outreach.sequence_draft`（subject/body/language/groundedOn/jurisdictionFooter，files-only，humanGate）与 `engage.reply_classify`（7 枚举意图 + 置信度，flash 档）。
+  - 两个确定性守卫（`apps/api/src/skills/guardrails/`）：起草的接地/页脚/长度/语言/夸大与引用审批校验（`GROUNDING_REQUIRED` 短路，不接地不产稿；`steps[]` 预留字段必须与顶层稿面一致）；分类的闭集校验、自动回复文本上的 POSITIVE/UNSUBSCRIBE 冲突升级（`AUTO_REPLY_CONFLICT`，防止 OOO 套话触发自动退订）与低置信（<0.6）升级 NEEDS_HUMAN。
+  - 两个 SKILL.md 技能包（tenant-default enabled）+ 生成目录；各 12 条 Golden Set（8 条模型层 + 4 条确定性层，含设计 §7 负向 1/2/4/5 具名用例；负向用例的 tier 被测试钉死）；零模型层进 CI，模型层由 `scripts/run-skill-model-evals.mts` ops 实跑并写 `eval_receipt`（成本上限 + 契约 maxTokens + 接地预检先于付费调用）。评测执行器位于 `apps/api/src/skills/eval/`（构建排除，不进 OCI 制品）；`tier` 进入评测清单词汇校验。
+- 测试：守卫单测（正向 + 负向码表，含自动回复×UNSUBSCRIBE 对抗）；两技能确定性层逐条执行断言；模型层执行器零网络测试（假 callModel 验证守卫参与断言、接地预检不调用模型、成本上限、prompt 不泄露 guards 数据）；`skills:validate` / `skills:evals:validate` / 生成目录同步门。
+- 未做：草稿存储/审批界面（13-2，gain-saas）、逐封发送 L2 门与审计包（13-3）、端到端联调（13-4）。技能未接入任何在飞 workflow。
+
+## 2026-11-08 · Settle LLM cache hits as zero-cost durable receipts so discovery lineage stays valid (#882)
+
+- 起因：P1（2026-11-08 二次 run 失败根因）。LLM 缓存命中在 structured-task-runtime-bridge 内短路返回、不产生 durable 收据；discovery lineage 的不变量把「invoked=true 且未失败且无收据」视为未知结果 → 整条 lineage 作废 → `DOMAIN_ACK_DISCOVERY_QUERY_LINEAGE_RECEIPT_MISMATCH`。首轮全 miss 全绿、次轮命中即挂。
+- 改动：
+  - `RouterModelGateway.settleCachedStructured`（新增，`ModelGateway` 可选方法）：缓存命中按真实调用同构落账——reserve(0) → projection/receiptFacts → settle(0) → onDurableReceipt。回执事实用 `not_incurred`（callCount=0、charged/upper=0），即「本次由缓存供给、未发生物理调用」的机器可读标记；金额零重复结算；Temporal 重试经 reservation replay 幂等返回同一收据。
+  - bridge：命中且有可落账网关时走该路径并携带 `durableReceipt`；上下文要求持久收据但网关不支持时按 miss 走真实调用（绝不返回无收据的成功结果）。
+  - 回归测试：网关零成本结算/重试幂等、bridge 命中携带收据、lineage 对零调用收据成立（无收据对照仍作废）。
+- 测试：网关零成本结算与回执形状（not_incurred/callCount=0/charged=0）、Temporal 重试经 replay 幂等不双结；bridge 命中携带 durableReceipt 且两条 fail-closed（要收据但网关不支持 / 无 durableResultSchema）回落真实调用；lineage 对零调用收据成立、无收据对照仍作废。本地 `nest build` 绿、model-gateway+model-runtime 全套 676 passed/1 skipped。
+- 未做：lineage 契约不改（其对「无收据的 invoked 调用不可审计」的判断是正确的）；`ai_trace` 现在会为缓存命中记录一条 provider=llm-cache、cost=0 的 OK 行（此前完全不落）。
+
+## 2026-11-08 · Add the outreach DNC compliance base (11-1) (#883)
+
+- 起因：M2 步 11 受控邮件触达的合规底座（设计 `docs/superpowers/plans/2026-11-08-controlled-email-outreach-m2-step11.md`，APPROVED）：发送前必须同时检查租户禁联名单与跨租户全局抑制，任一命中 fail closed。
+- 改动：
+  - 新增平台级 `outreach_global_suppression`（只存规范化邮箱 SHA-256，无明文；`app_user` 仅 `SELECT/INSERT`，append-only）。
+  - 新增 `OutreachModule`：`POST /api/v1/outreach/dnc/check`（≤50 个邮箱，`compliance:manage`）同时查询租户 `suppression_record`（RLS）与全局哈希表，返回命中来源，不回传明文；服务层提供 `suppressGlobal`（幂等）供 11-4 退订接线。
+- 测试：`outreach-dnc.service.spec.ts` 覆盖规范化/哈希、租户与全局命中、幂等、去重、非法邮箱/超批；`app-user-table-privileges` 真库清单随表更新。
+- 未做：11-2 邮箱/发送工具、11-3 审批流、11-4 回复/退订端点；本步不发送任何邮件。
+
+## 2026-11-08 · Bound campaign-planning replans to two rounds with a cost cap and NEEDS_HUMAN (#884)
+
+- 起因：M2.2 第 1 步（设计 `docs/superpowers/plans/2026-11-08-campaign-replan-m2-2.md`，D-M2.2-a/b 已批准）——规划器在受控边界内迭代：校验不通过时最多自动重规划 2 轮，人工拒绝后可带理由重生成；超界转人工而不是无限烧钱。
+- 改动：
+  - `campaign.plan` 契约（向后兼容扩展）：`decisionPolicy.maxReplans` 由恒 0 放宽为 `{0,1,2}`，语义为「提示给出的重规划预算原样回声」；SKILL.md 升 1.1.0 并重钉契约摘要与渲染快照；技能评测新增「重规划预算回声」用例。
+  - `campaignPlanningWorkflow` 改为**有界循环**：首轮（或人工拒绝后的重生成，携带 `previousPlan` + 500 字内理由）+ 至多 `maxReplans` 轮校验反馈重规划；每轮独立模型调用与 usage 记账；轮次耗尽仍不合法 → job `NEEDS_HUMAN`（附 `issues` 与逐轮 `replanHistory`），交付成功时把 `replanHistory` 一并交给 gain-saas 落轨迹。
+  - 内部端点 `POST /api/internal/campaign-plans/draft` 接受 `maxReplans`/`previousPlan`/`replanReason`（严格校验、64KB 上限）；job 级成本上限 = 轮数 × 单轮契约上限，轮数由 env `CAMPAIGN_PLAN_JOB_COST_CAP_CENTS`（默认单轮 ×3）压低下界。
+  - 活动层校验失败不再自行终结 job（返回 issues 由工作流裁决）；控制面回调新增 `state: NEEDS_HUMAN` 与 `replanHistory` 字段（gain-saas 侧接受同名字段后生效）。
+- 测试：单测 234 例相关全绿（循环：issues→重规划→交付带历史；轮次耗尽 NEEDS_HUMAN；人工拒绝 round 0 上下文；maxReplans 越界在活动前拒绝；语义硬门要求 maxReplans 等于提示预算）；投影界/执行权威清单复验通过。
+- 未做：gain-saas 侧 `NEEDS_HUMAN` 状态、回调字段接受与拒绝触发的自动重生成（下一 PR）；真模型回归（golden `campaign:golden --live`，等 M2.1 金丝雀接线）。
+
+## 2026-11-08 · Add the campaign.plan execution-budget purpose to the engine database contract (#885)
+
+- 起因：M2.1-1 只扩展了 TypeScript 的 `ExecutionBudgetPurpose`；引擎库的 `execution_budget_purpose` 仍是 Postgres ENUM，且 `execution_budget_authority_kind_shape_check` 与 `consume_workspace_execution_authority` 各自维护 purpose/`subject_type` 白名单。发车后的 --live 联调在消费 Grant 时以 `EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE` 失败（DB 侧拒收新 purpose），设计 §10「引擎无迁移」的判断与 as-built 不符。
+- 改动：按 outreach.draft / platform.channel_crawl 的两段式先例补两条 forward-only 迁移：
+  - `20261108163000_campaign_plan_purpose_enum`：`ALTER TYPE ... ADD VALUE IF NOT EXISTS 'campaign.plan' AFTER 'outreach.draft'`（单独事务，PostgreSQL 限制）；
+  - `20261108163100_campaign_plan_purpose_use`：重建 kind-shape CHECK（逐字复制自 20261105001000，仅追加 `'campaign.plan'` 值与 `("purpose"='campaign.plan' AND "subject_type"='campaign')` 对）与 `consume_workspace_execution_authority`（逐字复制自 20261028183000，仅追加同一对）；无回填、不删表/列。
+  另加文本级迁移 spec `campaign-plan-purpose.migration.spec.ts` 钉住两段式结构与关键不变式。
+- 测试：在 5432 的临时库上按序重放全部 183 条基线迁移 + 本两条迁移，实调 `consume_workspace_execution_authority`：campaign.plan/campaign 成功入账；outreach.draft/lead 回归成功；campaign.plan/lead 被 `EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH` 拒绝。临时库已删除。
+- 未做：不改 Prisma schema 的 `ExecutionBudgetPurpose` 枚举（先例：outreach.draft / platform.channel_crawl 也只在 DB 侧扩展，该表走原始 SQL 函数，不经 Prisma 枚举写入）。部署须随携带本迁移的镜像 `migrate deploy`（`MIGRATION_REVISION_MISMATCH` 门要求 DB 迁移集与镜像 revision 一致），单独手工灌迁移会让在跑镜像不就绪。
+
+## 2026-11-08 · Mine Impressum and legal pages for classified company-level contacts (#888)
+
+- 起因：A1（Phase 2 第二项，产品负责人最关心的「德国邮箱覆盖率 70–90%」核心）——现有 public_web 只按首页链接正则抓 contact/impressum 页、从 markdown 抽邮箱电话，JSON-LD/cfemail 等 HTML 面形态与固定路径探测都拿不到；抽出的联系方式只进联系人层，没有公司级 role 邮箱/总机落点。
+- 改动：
+  - 新模块 `discovery/impressum/`：cfemail XOR 解码、schema.org JSON-LD contactPoint 抽取（Person 子树整体跳过）、文本混淆解码（[at]/[dot] 等）、HTML 实体解码（`info&#64;…` 防爬形态）、电话归一（`+49 (0)89` → `+4989`；非 DE/AT/CH 不猜国别）、法律页发现（链接评分 + DE/AT/CH 固定路径探测）、公司级渠道装配器（本站域/同组织域邮箱；personal 不进公司层；每条带来源页/来源类型/robots 留痕）。
+  - `public_web` provider：Impressum/联系页改用 `crawl4ai.render` 取渲染后 HTML（JSON-LD/cfemail 取数面；内置 robots 强制），失败回退 markdown；产出 `companyChannels`。
+  - `contact-discovery-core`：adapter 契约扩展可选 `companyChannels`，在**同一事务**内经 suppression 复读过滤（email/domain 规范化比对）后调 A4 写入器落 `company_contact_channel`；`crawl4ai.render` 加入联系人发现的持久回执生产者名单。
+- 测试：抽取原语 25 例（cfemail/JSON-LD/混淆/ät/实体/电话矩阵/回溯与越界鲁棒性）、法律页发现 7 例、装配器 11 例（同组织域/冒充域/实体/缩写/失败安全）、provider 接线 1 例（渲染页 → mailto/tel → 公司级渠道、personal 剔除）、core 落库 3 例（suppression 过滤、公司被抑制不写、无渠道不写表）；既有 public-web/contacts-stage 全绿。
+- 未做：A6 发送合规门；SMTP 验证（A2 范围）；JSON-LD 的 Person 型条目（个人数据只走联系人层）；展会/协会源（A10）。
+- 审查修订（独立审查，2026-11-08）：`crawl4ai.render` 加入 contact.find_decision_makers 白名单（缺它时 ToolPolicyDenied 会把整次联系人发现打成失败）；渠道值 fail-safe 清洗（网页可控值不 throw）；公司被抑制时不写渠道；混淆正则改有界量词（40k 串 38s→毫秒）；同组织域改词根完全相等并拒冒充域；单段缩写（ds@/mm@）不冒认公司渠道；技术预算信封补 render 计数（fetch 14/render 8）；页数预算 2→4 且固定路径给全变体。
+
+- 证据：`docs/evidence/acquisition/impressum-miner-2026-11-08.{json,md}`（dev 库 20 家 DE 真实样本：可达 Impressum 19 家，邮箱+电话双命中 11/19 = 57.9%——**DoD ≥80% 未达**；差距归因、脚本参数与产品默认的差异、后续项见 md）。
+
+## 2026-11-08 · Rename the outreach compliance migration after the already-applied campaign purpose migrations (#890)
+
+- 起因：`20261108160000_outreach_compliance`（#883）合入晚于 `20261108163000/163100` 的两笔 campaign purpose 迁移，名字时间戳却更早；它在目标库尚未应用，一旦按顺序补上，运行时「按 finished_at 取最新已应用迁移」将与镜像「按名字取最新迁移」不一致，触发 `MIGRATION_REVISION_MISMATCH`（switch-backend 前提门实测拦截）。
+- 改动：目录改名为 `20261108180000_outreach_compliance`（内容不变；该迁移从未在任何环境应用过，改名对已有回执零影响；代码/脚本无对该目录名的引用）。
+- 测试：CI 迁移治理门与 db tests 覆盖；部署随下一班镜像以 `--with-migrations` 正常补上。
+- 未做：不触碰任何已应用迁移的历史。
+
+## 2026-11-08 · Stop artifact failures from leaking bare RESERVED budget operations (#891)
+
+- 起因：run aae4a06a（400 家规模）以 `BudgetOperationReplayError / BUDGET_OPERATION_REPLAY_UNAVAILABLE` 终止。现场取证：`tool_budget_operation` 留三行 `RESERVED attempt=1`、无 artifact 行；worker 日志同秒三次 `[tool-broker] ERROR crawl4ai.render artifact settlement failed: GenericOperationArtifactError`，且**没有** `[artifact] … persist failed` 行——异常发生在 adapter 的 payload 契约校验（`crawl4ai-render/v1` 对空/非 HTML 渲染体 `invalid()`，run 当时多站反爬失败返回空 HTML），**先于** GenericOperationArtifactService.persist；broker 的 artifact catch 只抛 `BudgetOperationReplayError(origin='live')`，预留留成裸 RESERVED → 同 attempt-correlation 重放永远读到「已存在但无持久结果」→ Temporal 重试撞同一行 → 控制类错误把 run 打成 FAILED。（并发共享空对象 promote 竞态是同时期暴露的次要触发面，一并硬化。）
+- 改动：
+  - `ToolBroker` artifact catch：无论失败发生在管线哪一层（adapter payload 校验 / service 校验 / store 竞态），都先尽力 `markResultUnknownAfterSettleFailure(reservation)`（已有 SERVICE 快照标记时由其幂等吸收），日志补错误码/消息与标记结果。**artifact 管线失败不再产生裸 RESERVED。**
+  - `GenericOperationArtifactService.persist`：`*_ACK_UNKNOWN` 仍由阶段内带快照标记；其余 `ArtifactStorageError`/`GenericOperationArtifactError` 兜底标 RESULT_UNKNOWN 后再抛原错误（broker 层为最终保证，service 层保留以尽量带上快照）。
+  - `recoverPromote`：IfNoneMatch 输竞态且赢家对象尚不可见 → `PROMOTE_ACK_UNKNOWN`（自竞态），不再误报契约类 `INVALID`；顺带删除已无意义的 `preconditionFailed` 参数。
+- 效果与边界（如实声明）：
+  - 收益：预留不再以裸 RESERVED 长期占 cap、也不会在收集器释放后因 D13 再预留而**二次物理调用**；账本状态真实（RESULT_UNKNOWN 可被 B4 收集器按阈值结清）。
+  - 不变：同键重放的结局与之前一致（`reserve_tool_budget` 对任何已存在行都返回 REPLAY → broker 报 remnant/unavailable）——本 PR 不是让失败调用「自动成功」；它消除的是**预留泄漏本身**（长期占 cap、收集器释放后经 D13 再预留的二次物理调用风险、账本状态失真）。首次失败仍是 `origin='live'`（可重试，符合 #642 设计）。
+  - 已覆盖：artifact 结算事务内抛出的 `ExecutionControlError`（`DURABLE_EXECUTION_RECEIPT_FACTS_INVALID/REQUIRED`、`DOMAIN_ACK_RECEIPT_REQUIRED`）从 persist 冒出后同样被 broker 兜底按**无快照**标 RESULT_UNKNOWN（行不再裸 RESERVED；但这类行不可经 recoverUnknown 恢复，收集器按预留上限结算——B4 既有保守语义）。
+  - trace 语义：双标记（service 已带快照后 broker 再标）会被 `mark_tool_budget_result_unknown_v2` 拒绝并吞掉，此时 trace 记为「fallback did not apply (already marked or ledger unavailable)」——不谎报状态。
+- 测试：service spec 更新旧契约断言（pre-ack/校验拒绝同样必须标 RESULT_UNKNOWN）+ 兜底自身失败仍抛原错误；store spec 新增 `precondition_uncommitted` 注入（412 且赢家不可见 → ACK_UNKNOWN）；broker spec 断言 artifact 失败必 markResultUnknown（含兜底自身失败的边界）。受保护文件 tool-broker.ts 已重钉 sha256 并在 PR 记录审查。
+- 未做：adapter payload 契约（如空 HTML render）本身应当更早失败/降级的问题（属 discovery 侧语义，另议）；共享对象 promote 的彻底串行化。
+
+## 2026-11-08 · Widen the campaign-plan durable projection bound to maxReplans {0,1,2} (#892)
+
+- 起因：M2.2 把 CampaignPlan v0 的 decisionPolicy.maxReplans 放宽到 {0,1,2}（gain-saas #84），但引擎 durable 投影（campaign-plan/v1）仍钉 min=max=0、enum [0]——maxReplans≥1 的计划被投影门整体拒绝为 ModelDurableResultProjectionError，decline→replan→NEEDS_HUMAN 联调因此 FAILED（2026-11-08 金丝雀实证：同分钟 maxReplans=0 的 6 条 golden 调用全 OK）。
+- 改动：model-result-projections.ts 的 maxReplans 约束放宽为 numberSchema(0,2) + enum [0,1,2]；bounds spec 同步 maximum:2。
+- 测试：durable-results 投影两套件 138 过（15 跳过）；真机验证随下一班镜像的 decline 联调重跑。
+- 未做：不改投影其余字段与投影门语义；旧计划（maxReplans=0）向后兼容不受影响。
+
+## 2026-11-08 · Expose platform-wide DNC suppression endpoint (#896)
+
+- 起因：M2 步 11-4 需要把退订/投诉/退信事实写进平台级抑制表，跨租户阻止后续发送。
+- 改动：新增 `POST /outreach/dnc/suppress`（`compliance:manage` + 控制面服务令牌 `OUTREACH_INTERNAL_SERVICE_TOKEN`），复用 `suppressGlobal`，只落邮箱 SHA-256、幂等；OpenAPI 重新导出。
+- 测试：`src/outreach` 单测 9/9（含服务令牌 503/403/放行）；构建与 OpenAPI 导出通过。
+- 未做：gain-saas 侧的调用接线在 gain-saas 11-4 PR；真实域名验收属 11-5。
 
 ## 2026-11-07 · Make name_country identity keys ASCII-safe for the materialization contract (#829)
 
