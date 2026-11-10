@@ -116,14 +116,14 @@
 | #1004 | backend | 删除 15 份零引用文件 + 文档删除规则 | 5 项全绿 | MERGED `17d26882` |
 | #1005 | backend | 入口纠偏（GrowthOS、SaaS 前端归属、代码地图） | 5 项全绿 | MERGED `c7bd3b53` |
 | #1006 | backend | T0–T3 分类 + worktree 生命周期统一 | 5 项全绿 | MERGED `acb47861` |
-| #1007 | backend | contracts 检查接入 docs-only 快通道 | 5 项全绿（含 Go/DB 全量） | 见 §7 |
+| #1007 | backend | contracts 检查接入 docs-only 快通道 | 6 项全绿（build 46m38s，含 Go race/DB/视觉/OCI） | MERGED `90c22e81` |
 | #154 | saas | 文档入口重建 + 状态页纠偏 | build-test + e2e 绿 | MERGED `8f4cb54` |
 | #155 | saas | CI 分流 + gitleaks + 合同 pin | 4 job 绿 | MERGED `f0f65359` |
 | #156 | saas | 状态页记录（快通道实测） | classify+secret 绿、e2e skipped | MERGED `59a61f8` |
 | #157 | saas | main push 并发组修复 | 4 job 绿 | MERGED `450576c2` |
 | #1014 | backend | main push 的 governance/security 并发组 | 5 项必需检查全绿 | MERGED `af26b006` |
 | #159 | saas | 修复门户悬空链接与不实描述 | 快通道：classify 5s / secret 10s / fast-path 11s / e2e skipped | MERGED `066ca207` |
-| #1008 | backend | 本治理报告 | 见 §7（docs-only 快通道实测） | 见 §7 |
+| #1015 | backend | 本治理报告 + 2 处规则残留修复 | 见本 PR checks（docs-only 快通道） | 本 PR |
 
 ## 4. 风险台账（S0–S3）
 
