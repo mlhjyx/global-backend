@@ -42,7 +42,8 @@ if (
 
 /*
  * The admission lease on every workspace authority that has one: discovery runs, 3 hours
- * (20261009170000), and ICP design and ICP query planning, 30 minutes (20261010110000).
+ * (20261009170000); ICP design, ICP query planning and company understanding, 30 minutes
+ * (20261010110000 / 20261110090000).
  * Every other admission keeps the bare Grant window.
  */
 const liveDatabaseIt = REQUESTED ? it : it.skip;
@@ -77,15 +78,15 @@ const discoverContacts = (): WorkspaceExecutionBudgetRequest => ({
   companyId: randomUUID(),
 });
 
-/** ICP design and ICP query planning get a 30-minute lease (product owner, 2026-10-10). */
+/** ICP design + query planning (2026-10-10) and company understanding (2026-11-10) get a 30-minute lease. */
 const ICP_OPERATIONS: ReadonlyArray<readonly [string, () => WorkspaceExecutionBudgetRequest]> = [
   ['icp.design', () => ({ operation: 'POST /companies/:companyId/icps', companyId: randomUUID() })],
   ['icp.query_plan', () => ({ operation: 'POST /icps/:icpId/query-plans', icpId: randomUUID() })],
+  ['understanding.run', understandingRun],
 ];
 
 /** Every other workspace operation keeps the bare Grant window. */
 const OTHER_OPERATIONS: ReadonlyArray<readonly [string, () => WorkspaceExecutionBudgetRequest]> = [
-  ['understanding.run', understandingRun],
   ['discovery.run + company (discover-contacts)', discoverContacts],
   [
     'discovery.run + company (guess-emails)',
@@ -376,7 +377,10 @@ describe('workspace admission lease on PostgreSQL as the RLS-bound app principal
       expect(aged).toBeGreaterThan(remaining - PAST_GRANT_WINDOW * 1000 - 30_000);
 
       // A row without a lease answers with its Grant window, as attest does (expires in 240 s).
-      const unleased = await admit(workspaceId, understandingRun());
+      const unleased = await admit(workspaceId, {
+        operation: 'POST /contact-points/:pointId/verify',
+        pointId: randomUUID(),
+      });
       const window = await read(unleased);
       expect(window).toBeGreaterThan(0);
       expect(window).toBeLessThanOrEqual(240_000);
