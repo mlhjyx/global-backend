@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 const MIGRATIONS = fileURLToPath(
   new URL('../../../../packages/db/prisma/migrations/', import.meta.url),
 );
-const MIGRATION = '20261110080000_source_compliance_matrix';
+const MIGRATION = '20261110110000_source_compliance_matrix';
 const PRIVILEGES = fileURLToPath(
   new URL('../../../../docs/governance/app-user-table-privileges.json', import.meta.url),
 );
