@@ -28,7 +28,7 @@ export const EXPECTED_TOOL_IDS = Object.freeze([
   'smtp.rcpt_probe', 'crawl4ai.render', 'http.get', 'wikidata.entity',
   'gleif.fetch', 'ted.search', 'openfda.search', 'companies_house.search',
   'inpi_rne.search', 'google_patents.search', 'tradefair.algolia',
-  'mapyourshow.fetch', 'samgov.search', 'sanctions.download',
+  'mapyourshow.fetch', 'samgov.search', 'opencorporates.search', 'sanctions.download',
   'deepseek.search', 'deepseek.fetch',
 ]);
 
@@ -91,6 +91,7 @@ export const EXPECTED_TOOL_CALLSITES = Object.freeze([
   'apps/api/src/discovery/providers/model-web-search.provider.ts#deepseek.search#1',
   'apps/api/src/discovery/providers/model-web-search.provider.ts#searxng.search#1',
   'apps/api/src/discovery/providers/openfda.provider.ts#openfda.search#1',
+  'apps/api/src/discovery/providers/opencorporates.provider.ts#opencorporates.search#1',
   'apps/api/src/discovery/providers/osm.provider.ts#osm.overpass#1',
   'apps/api/src/discovery/providers/public-web.provider.ts#crawl4ai.fetch#1',
   'apps/api/src/discovery/providers/public-web.provider.ts#crawl4ai.render#1',
@@ -438,7 +439,7 @@ function validateTools(manifest, path, issues) {
   if (!Array.isArray(manifest.tools)) return;
   const ids = manifest.tools.map((entry) => entry?.id).filter(Boolean);
   if (!sameSet(ids, EXPECTED_TOOL_IDS) || new Set(ids).size !== EXPECTED_TOOL_IDS.length) {
-    issues.push(issue('EXECUTION_AUTHORITY_TOOL_INVENTORY_MISMATCH', path, 'manifest must declare exactly 22 registered Tools'));
+    issues.push(issue('EXECUTION_AUTHORITY_TOOL_INVENTORY_MISMATCH', path, 'manifest must declare exactly 23 registered Tools'));
   }
   const allowed = [
     'id', 'declarationPath', 'resultStrategy', 'resultSchema',
@@ -833,8 +834,8 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
   const constantSource = `${source}\n${platformContract}`;
   const sourceIds = [...source.matchAll(/\bid:\s*["']([a-z0-9_.]+)["']/g)].map((match) => match[1]);
   const registrationCount = [...source.matchAll(/\bregistry\.register\s*\(/g)].length;
-  if (!sameSet(sourceIds, EXPECTED_TOOL_IDS) || new Set(sourceIds).size !== 22 || registrationCount !== 22) {
-    issues.push(issue('EXECUTION_AUTHORITY_TOOL_SOURCE_INVENTORY_MISMATCH', 'apps/api/src/tools', 'source declarations/registrations must be exactly 22'));
+  if (!sameSet(sourceIds, EXPECTED_TOOL_IDS) || new Set(sourceIds).size !== 23 || registrationCount !== 23) {
+    issues.push(issue('EXECUTION_AUTHORITY_TOOL_SOURCE_INVENTORY_MISMATCH', 'apps/api/src/tools', 'source declarations/registrations must be exactly 23'));
   }
   const projectionSources = [
     await readResolved('apps/api/src/durable-results/catalog-result-projections.ts'),

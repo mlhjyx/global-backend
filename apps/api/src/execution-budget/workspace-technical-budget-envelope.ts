@@ -73,6 +73,7 @@ import {
   googlePatentsSearchTool,
   httpGetTool,
   inpiRneSearchTool,
+  openCorporatesSearchTool,
   openFdaSearchTool,
   tedSearchTool,
   tradeFairAlgoliaTool,
@@ -226,6 +227,8 @@ function discoveryRunEnvelope(
       tool(contract(osmOverpassTool), singleSearches),
       tool(contract(tedSearchTool), singleSearches),
       tool(contract(openFdaSearchTool), singleSearches),
+      // 获客 vNext W4：OpenCorporates 注册库（每查询对多一次搜索出网；estimatedCents=0）。
+      tool(contract(openCorporatesSearchTool), singleSearches),
       tool(contract(tradeFairAlgoliaTool), queries * TRADE_FAIRS.length),
       // enrichRun: GLEIF and Wikidata facts for fit=match companies.
       tool(contract(gleifFetchTool), MAX_DISCOVERY_ENRICH_COMPANIES * MAX_GLEIF_FETCHES_PER_COMPANY),

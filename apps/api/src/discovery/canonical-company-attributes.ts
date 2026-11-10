@@ -29,6 +29,8 @@ const RETAINED_TOP_LEVEL_KEYS = new Set([
   "keywords",
   "latitude",
   "longitude",
+  // 获客 vNext W4：OpenCorporates 公司注册事实（名称/注册号/状态/地址，只含公司字段）。
+  "opencorporates",
   "osm_id",
   "products",
   "sam_disclaimer",
@@ -155,6 +157,13 @@ const semanticIdentifierContracts = new Map<
     { allowArray: true, validate: (value) => /^\d{8}$/u.test(value) },
   ],
   ["ted.winner_identifier", { validate: safeProviderIdentifier }],
+  [
+    "opencorporates.registered_address",
+    {
+      validate: (value) =>
+        Buffer.byteLength(value, "utf8") <= 2_000 && isContactFreeText(value),
+    },
+  ],
   [
     "fda.registration_number",
     { validate: (value) => /^\d{1,32}$/u.test(value) },

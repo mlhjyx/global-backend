@@ -121,6 +121,15 @@ export interface BrokerDeps {
   sourcePolicyReader?: (
     domain: string,
   ) => Promise<{ suspended: boolean; allowedPurpose?: string[] } | null>;
+  /** 查源合规矩阵（source_compliance_matrix，按 sourceKey；返回 null=未登记）。 */
+  sourceComplianceReader?: (
+    sourceKey: string,
+  ) => Promise<{ approved: boolean } | null>;
+  /**
+   * 源合规矩阵闸门模式；缺省读 env SOURCE_COMPLIANCE_GATE（off|enforce，默认 off）。
+   * enforce 时声明了 compliance.sourceKey 的工具要求矩阵已批准行（fail-closed）。
+   */
+  sourceComplianceMode?: "off" | "enforce";
   /** 记一条工具调用 Trace（成本/延迟/合规决策）。fire-and-forget。 */
   traceRecorder?: (t: ToolTrace) => void;
   /** now() 注入，便于测试。 */
@@ -241,6 +250,42 @@ export class ToolBroker implements ExecutionBroker {
     return { allowed: true };
   }
 
+  /** 源合规矩阵闸门模式：deps 显式值优先，否则读 env（off|enforce，默认 off）。 */
+  private sourceComplianceMode(): "off" | "enforce" {
+    if (this.deps.sourceComplianceMode) return this.deps.sourceComplianceMode;
+    return (process.env.SOURCE_COMPLIANCE_GATE ?? "").trim().toLowerCase() === "enforce"
+      ? "enforce"
+      : "off";
+  }
+
+  /**
+   * 源合规矩阵准入（获客 vNext W4）：仅对**声明了 compliance.sourceKey 的新源工具**生效，
+   * 且只在 SOURCE_COMPLIANCE_GATE=enforce 时判定（默认 off 行为不变）——未声明 sourceKey 的
+   * 旧源继续只走 source_policy。enforce 下无 reader / 未登记 / approved_at 为空一律拒
+   * （fail-closed，未登记不许上线）。
+   */
+  private async assertSourceCompliance(
+    tool: Tool,
+    ctx: ToolContext,
+    now: () => number,
+    started: number,
+  ): Promise<void> {
+    const sourceKey = tool.compliance.sourceKey;
+    if (!sourceKey || this.sourceComplianceMode() !== "enforce") return;
+    const reader = this.deps.sourceComplianceReader;
+    const entry = reader ? await reader(sourceKey) : null;
+    const reason = !reader
+      ? `source compliance reader unavailable: ${sourceKey}`
+      : !entry
+        ? `source compliance unregistered: ${sourceKey}`
+        : !entry.approved
+          ? `source compliance not approved: ${sourceKey}`
+          : null;
+    if (reason === null) return;
+    this.trace(ctx, tool, "DENIED", reason, 0, now() - started);
+    throw new ToolPolicyDenied(tool.id, reason);
+  }
+
   /** 唯一执行入口。所有闸门在此强制。 */
   async invoke<I, O>(
     toolId: string,
@@ -328,6 +373,9 @@ export class ToolBroker implements ExecutionBroker {
       }
     }
     // 注：robots 由抓取类工具内部 isAllowedByRobots 强制（已实现），此处不重复。
+
+    // 2b) 源合规矩阵闸门（新源工具声明 sourceKey 时；SOURCE_COMPLIANCE_GATE=enforce 才生效）
+    await this.assertSourceCompliance(tool, ctx, now, started);
 
     // 3) 预算 reserve（reserve-then-settle）。R4-B paidCost uses the Site Builder
     // ledger; every other product caller uses the injected durable BudgetStore.

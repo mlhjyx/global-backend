@@ -90,11 +90,14 @@ const MANUFACTURER_PATTERN =
 
 const ROLE_TERMS: Readonly<Record<TradeRole, Readonly<Record<SearchLanguage, readonly string[]>>>> = Object.freeze({
   distributor: {
-    de: ['Großhandel', 'Händler', 'Vertrieb'],
+    // 前三项是既有检索词序（buildSearchQueries 取前 MAX_SEARCHES_PER_QUERY 项，行为不变）；
+    // 获客 vNext W4 起在 de/fr/it/es 各补一组行业角色词（专业渠道/进口/批发的本地说法），
+    // 供结构化源与名录检索扩展使用——纯加词表，不改既有行为。
+    de: ['Großhandel', 'Händler', 'Vertrieb', 'Fachhandel', 'Importeur', 'Handelsvertretung'],
     en: ['distributor', 'wholesaler', 'dealer'],
-    fr: ['distributeur', 'grossiste', 'revendeur'],
-    it: ['distributore', 'grossista', 'rivenditore'],
-    es: ['distribuidor', 'mayorista', 'proveedor'],
+    fr: ['distributeur', 'grossiste', 'revendeur', 'importateur', 'négociant', 'fournisseur'],
+    it: ['distributore', 'grossista', 'rivenditore', 'importatore', 'commerciante', 'fornitore'],
+    es: ['distribuidor', 'mayorista', 'proveedor', 'importador', 'comerciante', 'suministrador'],
     nl: ['groothandel', 'distributeur', 'dealer'],
     pl: ['hurtownia', 'dystrybutor', 'sprzedaż'],
     zh: ['经销商', '分销商', '批发商', '进口商'],

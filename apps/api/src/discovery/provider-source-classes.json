@@ -28,6 +28,9 @@
   "openfda": [
     "public_intelligence"
   ],
+  "opencorporates": [
+    "company_registry"
+  ],
   "digital_footprint": [
     "public_intelligence"
   ],
