@@ -139,10 +139,20 @@ function marketRegionCodes(term: string): string[] | undefined {
   return lookupMarketRegion(term)?.map((code) => code.toLowerCase());
 }
 
+/**
+ * 「意大利（IT）」「瑞士（德语区优先）」这类带尾注的市场名 → 去掉尾注的主体词。
+ * ICP 的 targetMarkets 常带括号尾注，覆盖补齐会把它原样抄进 filters.country；
+ * 不剥掉尾注，下面的别名/区域匹配全部落空、语言回退 en（2026-11-10 run 97a4fa1b：
+ * 「意大利（IT）」→ 语言误判 en → 中文行业词被整体剥离 → public_web 空检索串）。
+ */
+export function stripMarketQualifier(term: string): string {
+  return term.replace(MARKET_QUALIFIER, '').trim();
+}
+
 function targetCountries(filters: Record<string, unknown>): CountryEntry[] {
   const values = [...strings(filters.country), ...strings(filters.iso_country), ...strings(filters.buyer_country)]
     .flatMap((v) => v.split(/[,/;、，；]/u))
-    .map((v) => v.trim().toLowerCase())
+    .map((v) => stripMarketQualifier(v.trim()).toLowerCase())
     .filter(Boolean);
   const found: CountryEntry[] = [];
   const add = (entry: CountryEntry | undefined): void => {
@@ -201,7 +211,7 @@ export function searchCountryName(query: { filters?: Record<string, unknown> }):
 
 /** Search languages of ICP target markets such as 「德国」 or "Germany (Bavaria)", in first-seen order. */
 export function searchLanguagesForMarkets(markets: unknown): SearchLanguage[] {
-  const country = strings(markets).map((market) => market.replace(MARKET_QUALIFIER, ''));
+  const country = strings(markets).map((market) => stripMarketQualifier(market));
   return [...new Set(targetCountries({ country }).map((entry) => entry.language))];
 }
 

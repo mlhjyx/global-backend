@@ -975,7 +975,8 @@ describe("ICP generation authority and controlled enrichment", () => {
     expect(loaded[1]).toMatchObject({
       source_class: "company_registry",
       filters: { source_hint: "registry_frame", country: "DE" },
-      keywords: [],
+      // 补齐查询借用规划查询里市场语言可用的关键词（规划器已完成翻译）。
+      keywords: ["Kreiselpumpen"],
     });
 
     // 没有装载 → 不补（补了只会空跑）。

@@ -9,7 +9,12 @@ import {
 import type { DiscoveryQuerySkipReason } from './discovery-query-skip';
 import { boundedTargetCountries, splitTerms, type PlanQueryShape } from './icp-to-cpv';
 import type { SourceClass } from './provider-contract';
-import { targetCountryCodes } from './search-localization';
+import {
+  searchLanguageFor,
+  searchableTerms,
+  stripMarketQualifier,
+  targetCountryCodes,
+} from './search-localization';
 import { selectFairs } from './trade-fairs';
 
 /**
@@ -694,13 +699,42 @@ function coveredSourceKeys(
   return covered;
 }
 
-/** 覆盖补齐的 ICP 主画像：首个目标国（原词与其 ISO2）、行业词、末位 priority。 */
+/** 覆盖补齐的 ICP 主画像：首个目标国（原词与其 ISO2）、行业词、借用关键词、末位 priority。 */
 interface CoverageFillContext {
   readonly firstTarget: string | undefined;
   readonly firstTargetIso2: string | undefined;
   readonly industry: string | undefined;
+  readonly keywords: readonly string[];
   readonly priority: number;
   readonly registryFrameCountries: ReadonlySet<string> | null | undefined;
+}
+
+const MAX_COVERAGE_BORROWED_KEYWORDS = 3;
+
+/**
+ * 补齐查询借用的关键词：规划器负责把 ICP 词翻译成目标市场语言（它写的查询里有意大利语/
+ * 英语检索词），而 ICP 原词（如中文行业词）交给只认市场语言的源（public_web）会被检索
+ * 语言过滤整体剥离 → 空检索串。这里从本轮已规划查询里借用语言可用的词，不臆造新词。
+ */
+function borrowedMarketKeywords(
+  queries: readonly PlanQueryShape[],
+  firstTarget: string | undefined,
+): string[] {
+  const language = searchLanguageFor({ filters: firstTarget ? { country: firstTarget } : {} });
+  const seen = new Set<string>();
+  const borrowed: string[] = [];
+  for (const query of queries) {
+    for (const raw of query.keywords ?? []) {
+      if (typeof raw !== 'string') continue;
+      const term = raw.trim();
+      if (!term || seen.has(term)) continue;
+      if (searchableTerms([term], language).length === 0) continue;
+      seen.add(term);
+      borrowed.push(term);
+      if (borrowed.length >= MAX_COVERAGE_BORROWED_KEYWORDS) return borrowed;
+    }
+  }
+  return borrowed;
 }
 
 /**
@@ -730,7 +764,7 @@ function coverageFillQuery(
   return {
     source_class: source.sourceClass,
     filters,
-    keywords: [],
+    keywords: [...context.keywords],
     rationale,
     priority: context.priority,
   };
@@ -748,8 +782,10 @@ function coverageFillQuery(
  *  - registry_frame：仅当首个目标国已有装载的注册库时补，判定见 SourceCoverageDeps。
  *
  * 约束：
- *  - keywords 为空数组——关键词语言校验在补齐之前完成，空 keywords 不会触发重写/失败；
+ *  - keywords 借用本轮已规划查询里市场语言可用的词（至多 3 个），借用不到才留空；
+ *    ICP 原词（如中文行业词）不能直接当检索词：public_web 的语言过滤会把它们整体剥离；
  *  - country/industry 只用 ICP 原词，不臆造词表代码（registry_frame 例外，见 coverageFillQuery）；
+ *    country 先剥掉「（IT）」这类尾注，否则市场语言/ISO2 全部解析失败；
  *  - 补入条数受计划执行上限（MAX_DISCOVERY_PLAN_QUERIES）约束，按源路由优先级依次补；
  *  - 无 source_hint 的查询按 source_class 整类扇出，视为已覆盖该类全部已启用源（与执行器一致）。
  */
@@ -765,7 +801,8 @@ export function withSourceCoverage(
   const eligible = coverageEligibleSources(lineage);
   if (!eligible.length) return queries as PlanQueryShape[];
   const covered = coveredSourceKeys(queries, lineage);
-  const firstTarget = boundedTargetCountries(icp.targetMarkets)[0];
+  const rawFirstTarget = boundedTargetCountries(icp.targetMarkets)[0];
+  const firstTarget = rawFirstTarget ? stripMarketQualifier(rawFirstTarget) : undefined;
   const attributes = (icp.companyAttributes ?? {}) as Record<string, unknown>;
   const context: CoverageFillContext = {
     firstTarget,
@@ -773,6 +810,7 @@ export function withSourceCoverage(
       ? targetCountryCodes({ filters: { country: [firstTarget] } })[0]?.toUpperCase()
       : undefined,
     industry: firstTermText(attributes.industry) ?? firstTermText(attributes.sub_industry),
+    keywords: borrowedMarketKeywords(queries, firstTarget),
     priority: queries.reduce((max, query) => Math.max(max, planPriority(query.priority)), 0) + 1,
     registryFrameCountries: deps.registryFrameCountries,
   };
