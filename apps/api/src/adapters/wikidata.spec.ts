@@ -62,3 +62,41 @@ it.each([
 it('accepts the canonical entity URI with HTTPS as well as HTTP',async()=>{
  expect((await parse(binding({company:{type:'uri',value:'https://www.wikidata.org/entity/Q123'}})))[0].qid).toBe('Q123');
 });
+
+describe('Wikidata industry subclass closure fallback (vNext W4)', () => {
+  it('runs the exact P452 match first and skips the closure query when it hits', async () => {
+    const fetchMock = vi.fn(async (_url: string | URL) =>
+      new Response(JSON.stringify({ results: { bindings: [binding()] } }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const rows = await discoverCompaniesByIndustry({ industryQids: ['Q1'] });
+
+    expect(rows).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const query = new URL(String(fetchMock.mock.calls[0][0])).searchParams.get('query') ?? '';
+    expect(query).toMatch(/\?company\s+wdt:P452\s+\?industry/s);
+    expect(query).toMatch(/VALUES\s+\?industry\s*\{\s*wd:Q1\s*\}/s);
+    expect(query).not.toContain('P279*');
+  });
+
+  it('falls back to the P279* subclass closure only when the exact match finds nothing', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: { bindings: [] } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ results: { bindings: [binding()] } }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const rows = await discoverCompaniesByIndustry({ industryQids: ['Q8011'], countryQid: 'Q183' });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const closure = new URL(String(fetchMock.mock.calls[1][0])).searchParams.get('query') ?? '';
+    // 公司行业是目标行业的子类时（P452 精确匹配漏掉），沿 P279* 闭包再查一次——
+    // 闭包查询保留同样的国家过滤与官网约束。
+    expect(closure).toMatch(/\?industry\s+wdt:P279\*\s+\?root/s);
+    expect(closure).toMatch(/VALUES\s+\?root\s*\{\s*wd:Q8011\s*\}/s);
+    expect(closure).toMatch(/\?company\s+wdt:P452\s+\?industry/s);
+    expect(closure).toMatch(/\?company\s+wdt:P17\s+\?country\s*\.\s*FILTER\s*\(\s*\?country\s*=\s*wd:Q183\s*\)/s);
+    expect(closure).toMatch(/\?company\s+wdt:P856\s+\?website/s);
+    expect(rows).toHaveLength(1);
+  });
+});
