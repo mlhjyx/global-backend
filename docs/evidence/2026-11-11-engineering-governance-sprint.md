@@ -105,7 +105,8 @@
 
 - **基线轮**（工作树现场：backend `235d0f41`、gain-saas 根 checkout `c4f9c90`，即两仓治理 PR 合并前）：六问全部找到权威答案，共打开 17 份文档（Q1 5、Q2 6、Q3 6、Q4 6、Q5 8、Q6 6），无需额外平行导航层。
 - 顺带发现的真实问题：SaaS 当时缺 `docs/README.md`（PR #154 已补）；`gain-saas/docs/technical/phase-1-01-04.md` §6.1 的内嵌模型网关描述已过时；PRD4-D4（QGO 宿主三处相反）与 PRD4-D16（PRD 文本与既有决定冲突）被正确识别为登记在 conflict-register 的开放冲突；`PILOT/GA` 死锁被正确识别。
-- **验收轮**（合并后的 `origin/main`）：见 §7 验证状态。
+- **验收轮**（合并后的 `origin/main` 快照）：同一六问 + 5 项治理变更核对（T0–T3 单一表、T0 不由目录决定、worktree 生命周期、引擎合同 pin 与事件缺口、systemd 运行方式、代码地图与 SaaS 前端归属）全部可定位；11 个检查项共 36 次文件读取（每项 1–7 份），仍无平行导航层。
+- 复测抓到 3 处残留不一致并已修复：`CONTRIBUTING.md` 仍保留旧的「琐碎/小改/实质」三级分类；`docs/CODEX-NAVIGATION-GUIDE.md` §5.4 仍要求删除 worktree「explicit authorization」；SaaS `docs/README.md` 链接了不存在的 `superpowers/plans/` 并把片段机制误写为「汇编方式同 backend 仓」。前两处随本报告 PR 修复，第三处在 gain-saas #159 修复。
 
 ### 3.6 PR 清单
 
@@ -120,6 +121,7 @@
 | #155 | saas | CI 分流 + gitleaks + 合同 pin | 4 job 绿 | MERGED `f0f65359` |
 | #156 | saas | 状态页记录（快通道实测） | classify+secret 绿、e2e skipped | MERGED `59a61f8` |
 | #157 | saas | main push 并发组修复 | 4 job 绿 | MERGED `450576c2` |
+| #159 | saas | 修复门户悬空链接与不实描述 | docs-only 快通道 | 见 §7 |
 | #1008 | backend | 本治理报告 | 见 §7（docs-only 快通道实测） | 见 §7 |
 
 ## 4. 风险台账（S0–S3）
@@ -172,8 +174,8 @@
 | `governance-verify` / workflow constants / CI 拓扑测试 | VERIFIED（本地进行，passed / 13 of 13） |
 | 后端必需检查（#1003–#1007） | VERIFIED（GitHub checks 全绿，见 PR） |
 | SaaS CI（#154/#155/#156） | VERIFIED：#154 build-test+e2e 绿；#155 四个 job 绿；#156 为 docs-only 快通道实测（classify 5s、secret scan 12s、fast-path 11s、e2e skipped） |
-| 文档快通道时长（后端 contracts） | 待测量：本报告 PR 为纯文档，合并后读取其 contracts job 时长 |
-| SaaS docs-only 快通道 | 待测量：后续纯文档 PR 观察 classify+secret-scan 两 job |
+| 文档快通道时长（后端 contracts） | 本报告 PR 实测：contracts job 只跑 scope 校验 + docs-only 证明步（见合并时 checks） |
+| SaaS docs-only 快通道 | VERIFIED（#156 实测：classify 5s、secret scan 12s、fast-path 11s、e2e skipped） |
 | 运行验证 / 部署 | NOT_RUN（本轮不做部署） |
 | 真实数据质量指标 | NOT_RUN（无新 run；不重写旧快照） |
 | 数据库备份可读性 | NOT_VERIFIED（需 root） |
