@@ -22,7 +22,8 @@
     {
       "name": "contracts · drift · lint · breaking",
       "workflow": ".github/workflows/ci.yml",
-      "event": "pull_request"
+      "event": "pull_request",
+      "allowed_job_if": "${{ !cancelled() }}"
     },
     {
       "name": "gitleaks 密钥扫描",

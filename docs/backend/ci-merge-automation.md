@@ -147,6 +147,15 @@ fail-safe 全部执行；变更路径使用 NUL 分隔并禁用 rename folding�
 该拓扑由 `scripts/governance-ci-topology.spec.mjs` 进行确定性结构合同校验；其中
 范围判定另有行为测试，在临时 git 仓库里真实执行 scope 脚本并逐项核对三个输出。
 
+`run_code` 是文档快通道分类器：只有当全部改动都落在 `docs/`、根 Markdown 说明文档与
+代理元数据目录时才为 `false`；`.github/`、`scripts/` 与任何代码路径一律为 `true`，
+diff 失败、定时与手动触发时 fail-closed 为 `true`。`build · typecheck · test` 的代码步骤
+与 `contracts` job 都以 `run_code != 'false'` 短路——默认运行，只有分类器显式判定纯文档
+才跳过。`contracts` 与 build job 一样以 `needs` + 固定的 `${{ !cancelled() }}` 启动，并在
+任何 checkout 或仓库代码执行前验证 scope 成功；纯文档时执行「契约面未变化」证明步
+（代码与已提交的 OpenAPI 契约文件均未变化），不以 skipped 或空跑冒充完整契约门。
+`docs:verify`、Copy 影响评估与 tree-cleanliness 始终运行。
+
 `build · typecheck · test` 与它依赖的 `renderer visual scope` 均已被 live ruleset
 强制（2026-09-21 回读）。为防 upstream failure 让 build job 被 GitHub 标为 skipped，
 build job 固定以 policy 批准的 `${{ !cancelled() }}` 启动（不用 `always()`：两者在依赖
