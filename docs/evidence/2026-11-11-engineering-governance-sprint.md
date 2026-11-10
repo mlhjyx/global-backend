@@ -87,7 +87,7 @@
 
 ### 3.3 实际改动
 
-- **后端 contracts 快通道（PR #1007）**：#776 的 changelog 声称 contracts job 已按 `run_code` 短路，实测从未落地。现按 build-test 同一模式接入：默认运行、仅显式 docs-only 跳过、fail-closed 首步、结构测试锁定。纯文档 PR 的 contracts job 从 **63–88 秒**（#1003–#1006 实测）降到 checkout 级（本报告 PR 实测：见 §7）。
+- **后端 contracts 快通道（PR #1007）**：#776 的 changelog 声称 contracts job 已按 `run_code` 短路，实测从未落地。现按 build-test 同一模式接入：默认运行、仅显式 docs-only 跳过、fail-closed 首步、结构测试锁定。纯文档 PR 的 contracts job 从 **63–88 秒**（#1003–#1006 实测）降到 **21 秒**（本报告 PR 实测）。
 - **SaaS CI 分流 + 密钥扫描 + 合同固定（PR #155）**：`classify` job（docs-only 判定，fail-safe）+ 门控 build/e2e + 新增 gitleaks job + 引擎合同离线 pin（`engine-contract.lock.json` + `verify-pin.mjs` + `gen:types` diff + oasdiff breaking）。
   - **真实前后对比**（同一个纯文档 PR 类别）：治理前文档 PR 跑 build-test 1m30s + e2e 2m23s（#154 实测）；治理后文档 PR（#156）`classify` 5s + `secret scan` 12s + build-test 快通道 11s，`e2e` 显式 skipped。
 - **SaaS 状态页记录（PR #156）**：记录本次 CI/文档治理并作为快通道的真实旁证。
@@ -176,7 +176,7 @@
 | `governance-verify` / workflow constants / CI 拓扑测试 | VERIFIED（本地进行，passed / 13 of 13） |
 | 后端必需检查（#1003–#1007） | VERIFIED（GitHub checks 全绿，见 PR） |
 | SaaS CI（#154/#155/#156） | VERIFIED：#154 build-test+e2e 绿；#155 四个 job 绿；#156 为 docs-only 快通道实测（classify 5s、secret scan 12s、fast-path 11s、e2e skipped） |
-| 文档快通道时长（后端 contracts） | 本报告 PR 实测：contracts job 只跑 scope 校验 + docs-only 证明步（见合并时 checks） |
+| 文档快通道时长（后端 contracts） | VERIFIED：本报告 PR 为纯文档，contracts job **21 秒**通过（旧行为 63–88 秒：完整 install + Prisma generate + contracts/API build + OpenAPI 导出 + drift/spectral） |
 | SaaS docs-only 快通道 | VERIFIED（#156 实测：classify 5s、secret scan 12s、fast-path 11s、e2e skipped） |
 | main push 并发组修复效果 | VERIFIED（#157 合并后连续三笔 main push 各有独立 run，无一被取消） |
 | 运行验证 / 部署 | NOT_RUN（本轮不做部署） |
