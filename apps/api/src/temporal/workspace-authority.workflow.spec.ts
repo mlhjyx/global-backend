@@ -1931,6 +1931,8 @@ describe('discoveryWorkflow failure finalization (BI-25)', () => {
           status: 'RUNNING',
         },
       ]),
+      // 获客 vNext W3：finalizeRun 同事务写 source_yield_ledger（幂等，行数不回读）。
+      $executeRaw: vi.fn(async () => 1),
       discoveryRun: { update },
       discoveryQueryPlan: { update: vi.fn(async () => ({})) },
       outboxEvent: { create: outboxCreate },

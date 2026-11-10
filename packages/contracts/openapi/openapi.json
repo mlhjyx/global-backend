@@ -14721,6 +14721,740 @@
         "description": "VRIC 成对序列（ch01 PR-04 后续切片）：同一 bucket + stratum 下 T0-001 STRICT 与 T0-002 PLUS 并排返回，桶按时间升序、默认最近 30 个（limit 上限 180）；某侧无数据为 null，不以 0 冒充。只含本 workspace 可见行（平台级 ALL 行不可见）。需要 acquisition:read。"
       }
     },
+    "/api/v1/metrics/source-yield": {
+      "get": {
+        "operationId": "MeasurementController_sourceYieldByPeriod_v1",
+        "parameters": [
+          {
+            "name": "granularity",
+            "required": false,
+            "in": "query",
+            "description": "day（自然日）或 week（ISO 周，周一为桶值）；默认 week",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "day",
+                "week"
+              ],
+              "default": "week"
+            }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "description": "起始日（含），YYYY-MM-DD（UTC）",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "description": "结束日（含），YYYY-MM-DD（UTC）",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          },
+          {
+            "name": "providerKey",
+            "required": false,
+            "in": "query",
+            "description": "只看向某一发现源（provider_key）",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "每页条数，默认 100，最大 500",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ data: [...buckets], page }"
+          },
+          "400": {
+            "description": "参数不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "源边际产出账本（source_yield_ledger，本 workspace）：按日/周×发现源聚合记录数、新增合格数、实扣成本 microusd 与每新增合格公司的美元成本；季度砍源报表消费它",
+        "tags": [
+          "Metrics"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "源边际产出账本（获客 vNext W3）：按日/周（granularity=day|week，默认 week，周桶=ISO 周一）× 发现源聚合 source_yield_ledger——记录数、新增合格公司数、实扣成本 microusd、每新增合格公司的美元成本（新增为 0 时为 null，不以 0 冒充）。账本行由 run 终结时写入、历史 run 可回填；可按 providerKey 过滤，limit 默认 100、最大 500。只含本 workspace 行（RLS）。需要 acquisition:read。"
+      }
+    },
+    "/api/v1/metrics/billing-reconciliation": {
+      "get": {
+        "operationId": "MeasurementController_billingReconciliation_v1",
+        "parameters": [
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "description": "起始日（含），YYYY-MM-DD（UTC）",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "description": "结束日（含），YYYY-MM-DD（UTC）",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "{ data: {...} }"
+          },
+          "400": {
+            "description": "参数不合法",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "VALIDATION_ERROR"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "三方对账视图：usage_ledger 用量 ↔ tool_budget_operation 结算（窗口实扣，ch08 §3.1.1 C1a 口径）↔ tool_budget_account 执行包络（余额来源表；累计快照）。客户钱包余额真值在 gain-saas，不在本引擎",
+        "tags": [
+          "Metrics"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "三方对账视图（获客 vNext W3）：同一窗口内 usage_ledger 用量（cost_usd 记账）↔ tool_budget_operation 结算（SETTLED/RESULT_UNKNOWN 取实扣 microusd，在途 RESERVED 单列；口径与 execution-budget 窗口实扣一致）↔ tool_budget_account 执行包络（授权上限/已扣/预留；余额来源表，累计快照，不与窗口用量直接相减）。deltaUsageMinusSettledMicrousd = 用量 − 结算，是诊断指针不是错误断言；客户钱包余额真值在 gain-saas 计费侧，不在本引擎。可按 from/to（YYYY-MM-DD，UTC）限定窗口。需要 acquisition:read。"
+      }
+    },
+    "/api/v1/evaluation/sets": {
+      "post": {
+        "operationId": "EvaluationController_createSet_v1",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEvaluationSetDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "name",
+                        "version",
+                        "icpId",
+                        "description",
+                        "createdBy",
+                        "createdAt"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "integer"
+                        },
+                        "icpId": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "description": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "createdBy": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "新建评估集（golden set 的版本化容器）",
+        "tags": [
+          "Metrics"
+        ],
+        "x-required-scopes": [
+          "acquisition:label:write"
+        ],
+        "description": "新建评估集（获客 vNext W3，golden set 的版本化容器）：name+version 在 workspace 内唯一（重复返回 409 EVALUATION_SET_EXISTS）；icpId 可空（ICP 删除时置空保留历史），description 记录口径（地区×品类、抽样与标注约定）。评估集只插不改，换口径用新 version。需要 acquisition:label:write。"
+      }
+    },
+    "/api/v1/evaluation/sets/{id}/labels": {
+      "post": {
+        "operationId": "EvaluationController_addLabels_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddEvaluationLabelsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "setId",
+                        "upserted"
+                      ],
+                      "properties": {
+                        "setId": {
+                          "type": "string"
+                        },
+                        "upserted": {
+                          "type": "integer"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "批量标注（同集同候选键覆盖，重标注即更新）",
+        "tags": [
+          "Metrics"
+        ],
+        "x-required-scopes": [
+          "acquisition:label:write"
+        ],
+        "description": "批量人工标注（获客 vNext W3）：1..500 条，label=POSITIVE|NEGATIVE；候选引用三选一（canonicalCompanyId / domain / name[+country]）。同一集内同候选键覆盖（重标注即更新 label/note/labeled_by/labeled_at），批内同键后写覆盖先写。评估集不存在返回 404 EVALUATION_SET_NOT_FOUND，候选引用缺失返回 400。需要 acquisition:label:write。"
+      }
+    },
+    "/api/v1/evaluation/sets/{id}/report": {
+      "get": {
+        "operationId": "EvaluationController_report_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "runId",
+            "required": true,
+            "in": "query",
+            "description": "discovery run id（uuid）",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "providerKey",
+            "required": false,
+            "in": "query",
+            "description": "只看某一发现源（provider_key）产出的候选；缺省用该 run 全部去重候选",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+            }
+          },
+          {
+            "name": "k",
+            "required": false,
+            "in": "query",
+            "description": "截断深度，默认 10，最大 50",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "set",
+                        "runId",
+                        "providerKey",
+                        "k",
+                        "candidateCount",
+                        "evaluated",
+                        "hits",
+                        "negatives",
+                        "unlabeled",
+                        "precisionAtK",
+                        "precisionAtLabeledK",
+                        "top"
+                      ],
+                      "properties": {
+                        "set": {
+                          "type": "object",
+                          "required": [
+                            "id",
+                            "name",
+                            "version",
+                            "icpId",
+                            "description",
+                            "createdBy",
+                            "createdAt"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "version": {
+                              "type": "integer"
+                            },
+                            "icpId": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "description": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "createdBy": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "runId": {
+                          "type": "string"
+                        },
+                        "providerKey": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "k": {
+                          "type": "integer"
+                        },
+                        "candidateCount": {
+                          "type": "integer"
+                        },
+                        "evaluated": {
+                          "type": "integer"
+                        },
+                        "hits": {
+                          "type": "integer"
+                        },
+                        "negatives": {
+                          "type": "integer"
+                        },
+                        "unlabeled": {
+                          "type": "integer"
+                        },
+                        "precisionAtK": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "precisionAtLabeledK": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "top": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "canonicalCompanyId",
+                              "name",
+                              "domain",
+                              "country",
+                              "verdict",
+                              "score",
+                              "label"
+                            ],
+                            "properties": {
+                              "canonicalCompanyId": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "domain": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "country": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "verdict": {
+                                "type": "string"
+                              },
+                              "score": {
+                                "type": "number"
+                              },
+                              "label": {
+                                "type": "string",
+                                "enum": [
+                                  "POSITIVE",
+                                  "NEGATIVE"
+                                ],
+                                "nullable": true
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "precision@k 报告：某次 run（可限单源）的候选排名 vs 评估集标注",
+        "tags": [
+          "Metrics"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "precision@k 报告（获客 vNext W3）：取某次 run（runId 必填，可加 providerKey 只看单源）产出的去重候选，按判定分数降序（该 run 最权威 judgment_record 的 1−conformal_score；无 conformal 时 FIT=0.5、其余=0）截前 k（默认 10、最大 50），对照评估集标注计算 precision。标注匹配优先级：canonical id 精确 > 域名（小写）> 名称+国家。分母为实际评估深度 min(k, 候选数)；未标注候选计入分母记为非命中，另单列 precisionAtLabeledK。需要 acquisition:read。"
+      }
+    },
+    "/api/v1/evaluation/coverage": {
+      "get": {
+        "operationId": "EvaluationController_coverage_v1",
+        "parameters": [
+          {
+            "name": "sourceA",
+            "required": true,
+            "in": "query",
+            "description": "发现源 A 的 provider_key",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+            }
+          },
+          {
+            "name": "sourceB",
+            "required": true,
+            "in": "query",
+            "description": "发现源 B 的 provider_key（须与 A 不同）",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.:-]{1,128}$"
+            }
+          },
+          {
+            "name": "region",
+            "required": true,
+            "in": "query",
+            "description": "地区（匹配 canonical_company.country，大小写不敏感）",
+            "schema": {
+              "type": "string",
+              "maxLength": 80
+            }
+          },
+          {
+            "name": "category",
+            "required": true,
+            "in": "query",
+            "description": "品类（匹配 canonical_company.industry，大小写不敏感）",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "region",
+                        "category",
+                        "sourceA",
+                        "sourceB",
+                        "countA",
+                        "countB",
+                        "overlap",
+                        "estimator",
+                        "estimable",
+                        "reason",
+                        "observedUnion",
+                        "estimate",
+                        "ciLow",
+                        "ciHigh",
+                        "recallEstimate",
+                        "warning",
+                        "computedAt"
+                      ],
+                      "properties": {
+                        "region": {
+                          "type": "string"
+                        },
+                        "category": {
+                          "type": "string"
+                        },
+                        "sourceA": {
+                          "type": "string"
+                        },
+                        "sourceB": {
+                          "type": "string"
+                        },
+                        "countA": {
+                          "type": "integer"
+                        },
+                        "countB": {
+                          "type": "integer"
+                        },
+                        "overlap": {
+                          "type": "integer"
+                        },
+                        "estimator": {
+                          "type": "string"
+                        },
+                        "estimable": {
+                          "type": "boolean"
+                        },
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "EMPTY_SOURCE"
+                          ],
+                          "nullable": true
+                        },
+                        "observedUnion": {
+                          "type": "integer"
+                        },
+                        "estimate": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "ciLow": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "ciHigh": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "recallEstimate": {
+                          "type": "number",
+                          "nullable": true
+                        },
+                        "warning": {
+                          "type": "string",
+                          "enum": [
+                            "ZERO_OVERLAP"
+                          ],
+                          "nullable": true
+                        },
+                        "computedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "双源 Chapman 覆盖估计（95% CI），结果按口径+计数存证到 coverage_estimate",
+        "tags": [
+          "Metrics"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "双源捕获-再捕获覆盖估计（获客 vNext W3）：给定两条发现源（sourceA/sourceB，provider_key，须不同）与地区×品类口径（匹配 canonical_company.country / industry，大小写不敏感，排除 SUPPRESSED），按已物化公司计算各自命中数 n1/n2 与重叠 m，返回 Chapman 点估计 N̂=((n1+1)(n2+1)/(m+1))−1 与 95% CI（下界不低于已观测并集）。任一边为空不可估计（estimable=false, reason=EMPTY_SOURCE，估计值为 null）；零重叠照常给出估计但标记 warning=ZERO_OVERLAP（独立性假设可疑）。结果按口径+计数存证到 coverage_estimate（append-only）。估计的是两源可发现的公司总数，不是地区工商登记全量；承重假设见端点文档。需要 acquisition:read。"
+      }
+    },
     "/api/v1/companies/{companyId}/signals": {
       "get": {
         "operationId": "CompanySignalsController_list_v1",
@@ -23850,6 +24584,101 @@
         },
         "required": [
           "decision"
+        ]
+      },
+      "CreateEvaluationSetDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "评估集名称；与 version 组成唯一键"
+          },
+          "version": {
+            "type": "number",
+            "minimum": 1,
+            "default": 1,
+            "description": "版本号（同集改名/换口径时递增）"
+          },
+          "icpId": {
+            "type": "object",
+            "description": "ICP 口径引用（可空）；ICP 删除时置空保留历史",
+            "nullable": true
+          },
+          "description": {
+            "type": "object",
+            "maxLength": 4000,
+            "description": "口径说明：地区×品类、抽样规则、标注约定"
+          },
+          "createdBy": {
+            "type": "object",
+            "maxLength": 200,
+            "description": "创建者标识；缺省取 token 的 userId"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "EvaluationLabelDto": {
+        "type": "object",
+        "properties": {
+          "canonicalCompanyId": {
+            "type": "object",
+            "description": "候选公司（本 workspace canonical id）",
+            "nullable": true
+          },
+          "domain": {
+            "type": "object",
+            "maxLength": 253,
+            "description": "候选域名（无 canonical id 时的引用）"
+          },
+          "name": {
+            "type": "object",
+            "maxLength": 400,
+            "description": "候选公司名（与 country 搭配的引用）"
+          },
+          "country": {
+            "type": "object",
+            "maxLength": 64,
+            "description": "国家（name 引用时建议带上）"
+          },
+          "label": {
+            "type": "string",
+            "enum": [
+              "POSITIVE",
+              "NEGATIVE"
+            ],
+            "description": "人工判定：是否命中 ICP"
+          },
+          "note": {
+            "type": "object",
+            "maxLength": 2000,
+            "description": "备注（判定依据）"
+          },
+          "labeledBy": {
+            "type": "object",
+            "maxLength": 200,
+            "description": "标注者标识；缺省取 token 的 userId"
+          }
+        },
+        "required": [
+          "label"
+        ]
+      },
+      "AddEvaluationLabelsDto": {
+        "type": "object",
+        "properties": {
+          "labels": {
+            "description": "1..500 条；同集同候选键后写覆盖先写",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EvaluationLabelDto"
+            }
+          }
+        },
+        "required": [
+          "labels"
         ]
       },
       "AckEventsDto": {

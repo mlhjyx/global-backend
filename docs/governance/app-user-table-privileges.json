@@ -153,6 +153,10 @@
       "INSERT",
       "SELECT"
     ],
+    "coverage_estimate": [
+      "INSERT",
+      "SELECT"
+    ],
     "data_provider": [
       "SELECT"
     ],
@@ -219,6 +223,15 @@
       "UPDATE"
     ],
     "eval_receipt": [
+      "INSERT",
+      "SELECT"
+    ],
+    "evaluation_label": [
+      "INSERT",
+      "SELECT",
+      "UPDATE"
+    ],
+    "evaluation_set": [
       "INSERT",
       "SELECT"
     ],
@@ -695,6 +708,10 @@
       "INSERT",
       "SELECT",
       "UPDATE"
+    ],
+    "source_yield_ledger": [
+      "INSERT",
+      "SELECT"
     ],
     "strategy_resolution_snapshot": [
       "INSERT",

@@ -111,6 +111,7 @@ import {
   DISCOVERY_RAW_INGEST_TX_OPTIONS,
 } from './discovery-query-governed-execution';
 import { partitionGovernedRawRecords } from '../discovery/raw-source-governance';
+import { writeSourceYieldLedger } from '../evaluation/source-yield-ledger';
 import {
   discoveryQueryKey,
   mergeDiscoveryQueryReceipt,
@@ -3548,6 +3549,13 @@ export function createDiscoveryActivities(deps: {
             completedAt: new Date(),
           },
         });
+        // 获客 vNext W3：run 终结即写边际产出账本（逐 run×源×查询：记录数/新增合格/
+        // 实扣 microusd）。失败/部分完成的 run 也写——花掉的钱与产出的记录不随
+        // 状态消失；唯一键 + ON CONFLICT DO NOTHING 让 finalize 重试不重写。
+        await writeSourceYieldLedger(tx, {
+          workspaceId: args.workspaceId,
+          runId: args.runId,
+        });
         if (args.status !== 'FAILED') {
           await tx.discoveryQueryPlan.update({
             where: { id: args.planId },
@@ -3698,6 +3706,12 @@ export function createDiscoveryActivities(deps: {
             stats: finalStats as Prisma.InputJsonValue,
             completedAt: new Date(),
           },
+        });
+        // 获客 vNext W3：看门狗终结的 run 同样落边际产出账本（与 finalizeRun 同口径，
+        // 幂等；僵尸 run 常常没有 attempt 行，写 0 行是合法结果）。
+        await writeSourceYieldLedger(tx, {
+          workspaceId: row.workspaceId,
+          runId: row.runId,
         });
         await appendRunEvent(tx as never, {
           workspaceId: row.workspaceId,

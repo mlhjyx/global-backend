@@ -1484,6 +1484,7 @@ model DiscoveryRun {
   runEvents                 RunEvent[]
   memEpisodes               MemRunEpisode[]
   judgmentRecords           JudgmentRecord[]
+  sourceYieldLedger         SourceYieldLedger[]
 
   @@unique([workspaceId, id], map: "discovery_run_workspace_id_id_key")
   @@index([workspaceId])
@@ -2986,6 +2987,7 @@ model IcpDefinition {
   backtests  IcpBacktest[]
   queryPlans DiscoveryQueryPlan[]
   judgmentRecords JudgmentRecord[]
+  evaluationSets EvaluationSet[]
 
   @@index([workspaceId])
   @@index([companyId])
@@ -4426,4 +4428,104 @@ model CompanySignal {
   @@unique([workspaceId, ingestKey])
   @@index([workspaceId, companyId, observedAt(sort: Desc)])
   @@map("company_signal")
+}
+
+// ---------------------------------------------------------------------------
+// 获客挖掘 vNext W3（评估学与产出会计，2026-11-10）：evaluation_set /
+// evaluation_label / source_yield_ledger / coverage_estimate 四表。
+// 设计依据：docs/superpowers/plans/2026-11-10-deep-acquisition-vnext.md §3 W3；
+// 迁移 20261110060000_acquisition_evaluation。全部租户表（ENABLE + FORCE RLS）。
+//
+// evaluation_set：一次人工标注的评估集版本（附录 A 的 golden set）。
+// evaluation_label：集内一条人工判定（POSITIVE|NEGATIVE）。候选引用三选一：
+//   canonical_company_id / domain / name+country；candidate_key 为规范化身份键，
+//   同一集内同键唯一（重标注 upsert 覆盖 label/note/labeled_by/labeled_at）。
+model EvaluationSet {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  name        String   @db.VarChar(200)
+  version     Int      @default(1)
+  icpId       String?  @map("icp_id") @db.Uuid
+  description String?
+  createdBy   String?  @map("created_by") @db.VarChar(200)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  labels EvaluationLabel[]
+  icp    IcpDefinition?   @relation(fields: [icpId], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "evaluation_set_icp_id_fkey")
+
+  @@unique([workspaceId, id], map: "evaluation_set_workspace_id_id_key")
+  @@unique([workspaceId, name, version], map: "evaluation_set_workspace_id_name_version_key")
+  @@index([workspaceId], map: "evaluation_set_workspace_idx")
+  @@map("evaluation_set")
+}
+
+model EvaluationLabel {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId        String   @map("workspace_id") @db.Uuid
+  setId              String   @map("set_id") @db.Uuid
+  canonicalCompanyId String?  @map("canonical_company_id") @db.Uuid
+  domain             String?  @db.VarChar(253)
+  name               String?  @db.VarChar(400)
+  country            String?  @db.VarChar(64)
+  /// POSITIVE | NEGATIVE（CHECK 约束在迁移里）
+  label              String   @db.VarChar(8)
+  /// 规范化候选身份键：`canonical:<uuid>` | `domain:<小写域名>` | `name:<归一名称>|<国家>`；
+  /// 同一集内唯一，重标注 = 覆盖。
+  candidateKey       String   @map("candidate_key") @db.VarChar(400)
+  labeledBy          String   @map("labeled_by") @db.VarChar(200)
+  labeledAt          DateTime @default(now()) @map("labeled_at") @db.Timestamptz(3)
+  note               String?
+
+  set EvaluationSet @relation(fields: [workspaceId, setId], references: [workspaceId, id], onDelete: Restrict, onUpdate: NoAction, map: "evaluation_label_set_fkey")
+
+  @@unique([setId, candidateKey], map: "evaluation_label_set_id_candidate_key_key")
+  @@index([workspaceId, setId], map: "evaluation_label_workspace_set_idx")
+  @@index([workspaceId, canonicalCompanyId], map: "evaluation_label_company_idx")
+  @@map("evaluation_label")
+}
+
+/// 逐 (run, provider, query) 的边际产出账本（append-only）：记录数、新增合格数、
+/// 实扣成本（microusd）。finalizeRun 在同一事务内写入；历史 run 用
+/// backfill-source-yield-ledger 脚本回填。唯一键保证 finalize 重试幂等。
+model SourceYieldLedger {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId       String   @map("workspace_id") @db.Uuid
+  runId             String   @map("run_id") @db.Uuid
+  providerKey       String   @map("provider_key") @db.VarChar(128)
+  queryKey          String   @map("query_key") @db.Char(64)
+  recordCount       BigInt   @map("record_count")
+  newQualifiedCount BigInt   @map("new_qualified_count")
+  costMicrousd      BigInt   @map("cost_microusd")
+  computedAt        DateTime @default(now()) @map("computed_at") @db.Timestamptz(3)
+
+  run DiscoveryRun @relation(fields: [workspaceId, runId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict, map: "source_yield_ledger_run_fkey")
+
+  @@unique([workspaceId, runId, providerKey, queryKey], map: "source_yield_ledger_run_provider_query_key")
+  @@index([workspaceId, computedAt], map: "source_yield_ledger_workspace_computed_idx")
+  @@map("source_yield_ledger")
+}
+
+/// 双源捕获-再捕获覆盖估计（append-only）：地区×品类、两源名、各自计数与重叠、
+/// Chapman 点估计与 95% 置信区间。identity_key = sha256(口径+计数)，同一口径下
+/// 计数变化才追一行（历史可追溯）。estimate 为 NULL = 不可估计（一边为空）。
+model CoverageEstimate {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId  String    @map("workspace_id") @db.Uuid
+  region       String    @db.VarChar(80)
+  category     String    @db.VarChar(200)
+  sourceA      String    @map("source_a") @db.VarChar(128)
+  sourceB      String    @map("source_b") @db.VarChar(128)
+  countA       Int       @map("count_a")
+  countB       Int       @map("count_b")
+  overlapCount Int       @map("overlap_count")
+  estimate     Decimal?  @db.Decimal(20, 6)
+  ciLow        Decimal?  @map("ci_low") @db.Decimal(20, 6)
+  ciHigh       Decimal?  @map("ci_high") @db.Decimal(20, 6)
+  estimator    String    @default("chapman/v1") @db.VarChar(32)
+  identityKey  String    @map("identity_key") @db.Char(64)
+  computedAt   DateTime  @default(now()) @map("computed_at") @db.Timestamptz(3)
+
+  @@unique([workspaceId, identityKey], map: "coverage_estimate_workspace_identity_key")
+  @@index([workspaceId, computedAt], map: "coverage_estimate_workspace_computed_idx")
+  @@map("coverage_estimate")
 }
