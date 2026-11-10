@@ -276,6 +276,64 @@ describe("Raw Source v2 ingestion boundary", () => {
     });
   });
 
+  it("governs model_web_search payloads: evidence-only attributes, no identifier, executor allowlisted", () => {
+    const record = {
+      externalId: "model_web_search:3sun.com",
+      name: "3SUN S.r.l. (Enel Green Power)",
+      domain: "3sun.com",
+      country: "IT",
+      attributes: {
+        evidenceUrls: ["https://www.3sun.com/"],
+        searchQuery: "3SUN HJT gigafactory Italia",
+        discoveredBy: "model_web_search",
+        searchExecutor: "deepseek",
+      },
+      provenance: {
+        sourceUrl: "https://www.3sun.com/",
+        fetchedAt: "2026-11-10T17:10:00.000Z",
+        contentHash: "b".repeat(64),
+        parserVersion: "model-web-search/v1",
+      },
+    };
+    const companySite = {
+      id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      domain: "public_web:company_site",
+      retentionDays: 365,
+      reviewStatus: "APPROVED" as const,
+      allowedPurpose: ["discovery"],
+      updatedAt: new Date("2026-10-09T00:00:00.000Z"),
+    };
+    const mwsPolicies = [...POLICIES, companySite];
+    const accepted = prepareRawSourceBatch({
+      providerKey: "model_web_search",
+      records: [record],
+      policies: mwsPolicies,
+      limits: LIMITS,
+      now: NOW,
+    }).rows[0]!;
+    expect(accepted.ingestStatus).toBe("ACCEPTED");
+
+    // 非白名单 executor / 携带 identifier / 带 query 的证据 URL 都必须拒收（与 DB 闸门同口径）。
+    for (const bad of [
+      { ...record, attributes: { ...record.attributes, searchExecutor: "bing" } },
+      { ...record, identifier: { scheme: "x", value: "y" } },
+      {
+        ...record,
+        attributes: { ...record.attributes, evidenceUrls: ["https://www.3sun.com/?utm=1"] },
+      },
+    ]) {
+      const row = prepareRawSourceBatch({
+        providerKey: "model_web_search",
+        records: [bad],
+        policies: mwsPolicies,
+        limits: LIMITS,
+        now: NOW,
+      }).rows[0]!;
+      expect(row.ingestStatus).toBe("REJECTED");
+      expect(row.dispositionCode).toBe("PROVIDER_PAYLOAD_SCHEMA_INVALID");
+    }
+  });
+
   it.each([
     [
       "directory",

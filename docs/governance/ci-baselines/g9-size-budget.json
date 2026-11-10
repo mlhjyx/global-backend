@@ -44,16 +44,16 @@
       "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
     },
     "apps/api/src/discovery/raw-source-ingestion.ts": {
-      "maxLines": 808,
+      "maxLines": 812,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
-      "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目"
+      "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目；2026-11-11 #1009：governingPolicy 公司站点兜底扩展到 model_web_search（子域匹配与注释 +4 行）。"
     },
     "apps/api/src/discovery/raw-source-provider-schema.ts": {
-      "maxLines": 958,
+      "maxLines": 982,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
-      "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目；+68 行：获客 vNext W4 opencorporates 的载荷校验/绑定/外部 ID 分支（PR 评审上调）；2026-11-10 #1000：TED 纯数字国家税号对 identifier/winner_identifier 的定向放行 + 注释（+6 行）按门禁规则上调；+55 行：获客 vNext W4 第二源 companies_house_registry 的载荷校验/绑定/外部 ID 分支 + 注册号专用 token（PR 评审上调）"
+      "reason": "存量超标文件（棘轮：只许缩小）；site-builder 相关文件随 SUB-02/03 退役后删除条目；+68 行：获客 vNext W4 opencorporates 的载荷校验/绑定/外部 ID 分支（PR 评审上调）；2026-11-10 #1000：TED 纯数字国家税号对 identifier/winner_identifier 的定向放行 + 注释（+6 行）按门禁规则上调；+55 行：获客 vNext W4 第二源 companies_house_registry 的载荷校验/绑定/外部 ID 分支 + 注册号专用 token（PR 评审上调）；2026-11-11 #1009：model_web_search 治理（GOVERNED/属性校验器/dispatch 与注释 +24 行），按门禁规则上调。"
     },
     "apps/api/src/durable-results/artifact/generic-operation-artifact.store.ts": {
       "maxLines": 891,
@@ -754,10 +754,11 @@
       "file": "apps/api/src/discovery/raw-source-provider-normalizer.ts",
       "name": "normalizeAttributes",
       "line": 378,
-      "complexity": 59,
+      "complexity": 60,
       "owner": "P6-CI-10",
       "expiresAt": "2027-01-31",
-      "reason": "存量高复杂度函数（棘轮：只许降低）；获客 vNext W4 opencorporates 属性归一分支（PR 评审上调）；获客 vNext W4 第二源 companies_house_registry 属性归一分支（PR 评审上调）"
+      "reason": "存量高复杂度函数（棘轮：只许降低）；获客 vNext W4 opencorporates 属性归一分支（PR 评审上调）；获客 vNext W4 第二源 companies_house_registry 属性归一分支（PR 评审上调）；2026-11-11 #1009：normalizeAttributes 增加 model_web_search 分发（属性投影已抽独立函数，分发分支 +1 复杂度），按门禁规则上调；2026-11-11 #1009：model_web_search 属性归一分支（投影逻辑已抽独立函数，分发 +1），按门禁规则上调。",
+      "maxComplexity": 60
     },
     "apps/api/src/discovery/raw-source-provider-schema.ts#validOpenFdaAttributes": {
       "file": "apps/api/src/discovery/raw-source-provider-schema.ts",

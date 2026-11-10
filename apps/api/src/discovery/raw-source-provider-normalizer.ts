@@ -85,6 +85,14 @@ const PROVIDER_KEYS: Readonly<Record<string, readonly string[]>> =
       "name",
       "provenance",
     ],
+    model_web_search: [
+      "attributes",
+      "country",
+      "domain",
+      "externalId",
+      "name",
+      "provenance",
+    ],
     opencorporates: [
       "attributes",
       "country",
@@ -412,6 +420,29 @@ function normalizeProvenance(
   };
 }
 
+/** model_web_search 属性投影（仅证据/执行器/查询词；searchQuery 为空时省略）。 */
+function normalizeModelWebSearchAttributes(
+  input: RawJsonRecord,
+): RawJsonRecord | null {
+  if (
+    !keysWithin(input, [
+      "discoveredBy",
+      "evidenceUrls",
+      "searchExecutor",
+      "searchQuery",
+    ])
+  )
+    return null;
+  return {
+    discoveredBy: input.discoveredBy,
+    evidenceUrls: input.evidenceUrls,
+    searchExecutor: input.searchExecutor,
+    ...(input.searchQuery === null || input.searchQuery === undefined
+      ? {}
+      : { searchQuery: input.searchQuery }),
+  };
+}
+
 function normalizeAttributes(
   providerKey: string,
   value: unknown,
@@ -518,6 +549,8 @@ function normalizeAttributes(
       ].flatMap(([key, item]) => (item == null ? [] : [[key, item]])),
     );
   }
+  if (providerKey === "model_web_search")
+    return normalizeModelWebSearchAttributes(input);
   if (providerKey === "ted") {
     if (!exactKeys(input, ["ted"])) return null;
     const ted = record(input.ted);
