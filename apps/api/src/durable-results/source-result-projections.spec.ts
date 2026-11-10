@@ -187,10 +187,29 @@ const SMTP_RAW: RawToolResult = {
   degraded: true,
 };
 
+const OPEN_CORPORATES_RAW: RawToolResult = {
+  data: {
+    companies: Array.from({ length: 30 }, (_, index) => ({
+      name: index === 0 ? 'n'.repeat(500) : `Müller Pumpen GmbH ${index}`,
+      companyNumber: index === 0 ? 'c'.repeat(200) : `HRB ${index}`,
+      jurisdictionCode: index === 0 ? 'j'.repeat(20) : 'de',
+      status: index === 0 ? 's'.repeat(200) : 'Active',
+      companyType: index === 0 ? 't'.repeat(200) : 'Private Limited Company',
+      incorporationDate: index === 0 ? 'i'.repeat(50) : '2001-04-12',
+      ...(index === 0 ? { dissolutionDate: 'd'.repeat(50) } : {}),
+      registeredAddress: index === 0 ? 'a'.repeat(2000) : 'Musterstraße 1, 80331 München',
+      opencorporatesUrl: index === 0 ? URL_2048 : `https://opencorporates.com/companies/de/HRB${index}`,
+    })),
+  },
+  costCents: 0,
+  degraded: true,
+};
+
 const REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES: readonly ProjectionFixture[] = [
   { toolId: 'ted.search', schema: 'ted-search/v1', raw: TED_RAW },
   { toolId: 'openfda.search', schema: 'openfda-search/v1', raw: OPENFDA_RAW },
   { toolId: 'samgov.search', schema: 'samgov-search/v1', raw: SAM_RAW },
+  { toolId: 'opencorporates.search', schema: 'opencorporates-search/v1', raw: OPEN_CORPORATES_RAW },
   { toolId: 'smtp.rcpt_probe', schema: 'smtp-probe-verdict/v1', raw: SMTP_RAW },
 ];
 
@@ -262,16 +281,17 @@ const COMMON_RESULT_BOUNDS = {
 describe('closed source Tool result projections', () => {
   it('locks the exact toolId-to-schema machine map and definition order', () => {
     expect(SOURCE_RESULT_TOOL_IDS).toEqual([
-      'ted.search', 'openfda.search', 'samgov.search', 'smtp.rcpt_probe',
+      'ted.search', 'openfda.search', 'samgov.search', 'opencorporates.search', 'smtp.rcpt_probe',
     ]);
     expect(SOURCE_RESULT_PROJECTION_SCHEMAS).toEqual({
       'ted.search': 'ted-search/v1',
       'openfda.search': 'openfda-search/v1',
       'samgov.search': 'samgov-search/v1',
+      'opencorporates.search': 'opencorporates-search/v1',
       'smtp.rcpt_probe': 'smtp-probe-verdict/v1',
     });
     expect(SOURCE_RESULT_PROJECTION_DEFINITIONS.map((definition) => definition.schema)).toEqual([
-      'ted-search/v1', 'openfda-search/v1', 'samgov-search/v1',
+      'ted-search/v1', 'openfda-search/v1', 'samgov-search/v1', 'opencorporates-search/v1',
       'smtp-probe-verdict/v1',
     ]);
     expect(Object.isFrozen(SOURCE_RESULT_TOOL_IDS)).toBe(true);
@@ -581,7 +601,7 @@ describe('closed source Tool result projections', () => {
     );
   });
 
-  it('locks every SAM and SMTP schema bound exactly', () => {
+  it('locks every SAM, OpenCorporates and SMTP schema bound exactly', () => {
     expect(bounds(SOURCE_RESULT_PROJECTION_DEFINITIONS[2].jsonSchema)).toEqual({
       ...COMMON_RESULT_BOUNDS,
       '$.data.notices.maxItems': 32,
@@ -597,6 +617,19 @@ describe('closed source Tool result projections', () => {
       '$.data.notices[].link.maxLength': 2048,
     });
     expect(bounds(SOURCE_RESULT_PROJECTION_DEFINITIONS[3].jsonSchema)).toEqual({
+      ...COMMON_RESULT_BOUNDS,
+      '$.data.companies.maxItems': 50,
+      '$.data.companies[].name.maxLength': 500,
+      '$.data.companies[].companyNumber.maxLength': 200,
+      '$.data.companies[].jurisdictionCode.maxLength': 20,
+      '$.data.companies[].status.maxLength': 200,
+      '$.data.companies[].companyType.maxLength': 200,
+      '$.data.companies[].incorporationDate.maxLength': 50,
+      '$.data.companies[].dissolutionDate.maxLength': 50,
+      '$.data.companies[].registeredAddress.maxLength': 2000,
+      '$.data.companies[].opencorporatesUrl.maxLength': 2048,
+    });
+    expect(bounds(SOURCE_RESULT_PROJECTION_DEFINITIONS[4].jsonSchema)).toEqual({
       ...COMMON_RESULT_BOUNDS,
       '$.data.mailFromCode.minimum': 200,
       '$.data.mailFromCode.maximum': 599,

@@ -17,6 +17,7 @@ export type DiscoveryCompanyLineageProviderKey =
   | 'openstreetmap'
   | 'ted'
   | 'openfda'
+  | 'opencorporates'
   | 'registry_frame'
   | 'model_web_search';
 
@@ -112,6 +113,11 @@ const PROVIDER_RECEIPT_CONTRACT = Object.freeze({
   openfda: Object.freeze({
     producerId: 'openfda.search',
     resultSchema: 'openfda-search/v1',
+  }),
+  // 获客 vNext W4：OpenCorporates 注册库（工具 opencorporates.search 的 Broker 结算回执）。
+  opencorporates: Object.freeze({
+    producerId: 'opencorporates.search',
+    resultSchema: 'opencorporates-search/v1',
   }),
   // A 方案（local_query 变体）：零出网本地注册库枚举，回执由 registry/local-query-receipt.ts
   // 确定性构造（producer 闭锁，仅此 provider 允许）。
