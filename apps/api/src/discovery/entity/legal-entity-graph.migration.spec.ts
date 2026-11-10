@@ -9,12 +9,12 @@ import {
 } from './entity-keys';
 
 /**
- * 获客挖掘 vNext W2（2026-11-10）迁移 20261110070000_legal_entity_graph 的静态契约（零容器）。
+ * 获客挖掘 vNext W2（2026-11-10）迁移 20261110120000_legal_entity_graph 的静态契约（零容器）。
  * 行为面（FORCE RLS 正/负向、唯一键、CHECK）由 CI 的 prisma-drift / rls-catalog /
  * app-user-table-privileges 三道门在真库复核。
  */
 const MIGRATIONS = fileURLToPath(new URL('../../../../../packages/db/prisma/migrations/', import.meta.url));
-const MIGRATION = '20261110070000_legal_entity_graph';
+const MIGRATION = '20261110120000_legal_entity_graph';
 const PRIVILEGES = fileURLToPath(
   new URL('../../../../../docs/governance/app-user-table-privileges.json', import.meta.url),
 );
