@@ -19,7 +19,10 @@
  * 重试对已结算操作走账本重放（不重复计费），残留行按 remnant 吸收（#728 纪律）——单 run 的
  * 实际联系人花费通常仍是单份上限，并始终受 run 账户剩余额约束。
  */
-import { discoveryUncappedEnabled } from '../discovery/execution-envelope';
+import {
+  ambientProcessEnv,
+  discoveryUncappedEnabled,
+} from '../discovery/execution-envelope';
 import { assertMicrousd } from '../tools/microusd';
 
 export const CONTACT_DISCOVERY_BUDGET_SCOPE = 'contact.discovery' as const;
@@ -64,7 +67,7 @@ export function deriveContactDiscoveryAccountKey(runId: string): string {
  */
 export function contactDiscoveryCapMicrousd(
   companyCount: number,
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = ambientProcessEnv(),
 ): bigint {
   if (!Number.isSafeInteger(companyCount) || companyCount < 0) {
     throw new TypeError('companyCount must be a non-negative safe integer');

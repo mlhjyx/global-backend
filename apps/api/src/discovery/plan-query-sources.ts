@@ -2,6 +2,7 @@ import {
   MAX_QUERY_PLANNER_QUERIES,
   MAX_DISCOVERY_PROVIDER_RECORDS,
   MAX_DISCOVERY_PLAN_QUERIES,
+  ambientProcessEnv,
   discoveryUncappedEnabled,
 } from './execution-envelope';
 import type { DiscoveryQuerySkipReason } from './discovery-query-skip';
@@ -109,7 +110,7 @@ function uncappedCompaniesPerSource(): number {
 }
 
 export function sourceQueryBudgetConfig(
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = ambientProcessEnv(),
 ): SourceQueryBudgetConfig {
   const uncapped = discoveryUncappedEnabled(env);
   const positive = (raw: string | undefined, fallback: number): number => {
@@ -293,7 +294,7 @@ export function hasPlannableSource(enabled: readonly CompanyDiscoverySource[]): 
  */
 export function plannerSourcePrompt(
   enabled: readonly CompanyDiscoverySource[],
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = ambientProcessEnv(),
 ): string {
   const runnable = withCompanyLineage(enabled);
   const classesByKey = new Map<string, string[]>();

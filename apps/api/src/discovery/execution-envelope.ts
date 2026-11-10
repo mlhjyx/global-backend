@@ -12,10 +12,20 @@
  * 开关默认 off（行为与 2026-11-10 前逐字节一致），畸形值一律回退 off。
  */
 export function discoveryUncappedEnabled(
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = ambientProcessEnv(),
 ): boolean {
   const value = (env.DISCOVERY_UNCAPPED ?? '').trim().toLowerCase();
   return value === 'on' || value === 'true' || value === '1';
+}
+
+/**
+ * 沙箱安全的进程 env 读取：Temporal workflow bundle 里没有 `process` 全局
+ * （本模块被 discovery.run2.pipeline.workflow.ts 导入，顶层读 process.env 会让
+ * workflow 任务以 ReferenceError 失败）。workflow 侧拿到空 env → 常量保持产品帽，
+ * 而 workflow 逻辑本身不使用这些随开关变化的常量。
+ */
+export function ambientProcessEnv(): NodeJS.ProcessEnv {
+  return typeof process === 'undefined' || !process.env ? {} : process.env;
 }
 
 /** 防爆安全界：纯十进制正整数；畸形或超过 `maximum` 回退默认（不静默放大）。 */
@@ -46,7 +56,7 @@ export const UNCAPPED_DISCOVERY_PROVIDER_RECORDS = 1_000 as const;
 export const DISCOVERY_PROVIDER_RECORDS_MAX = 100_000 as const;
 /** 每查询每适配器的提供方记录上限：产品帽 25；去帽模式升为防爆界（env 可调）。 */
 export function resolveMaxDiscoveryProviderRecords(
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = ambientProcessEnv(),
 ): number {
   return discoveryUncappedEnabled(env)
     ? safetyBound(

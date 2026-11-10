@@ -12,7 +12,10 @@
  *
  * 设计：docs/superpowers/plans/2026-11-05-run-pool-cap.md。
  */
-import { discoveryUncappedEnabled } from './execution-envelope';
+import {
+  ambientProcessEnv,
+  discoveryUncappedEnabled,
+} from './execution-envelope';
 
 export const DEFAULT_RUN_POOL_CAP = 500;
 /** 上限本身只做防御性封顶；正常配置远小于此值。 */
@@ -28,7 +31,7 @@ export type RunPoolCapSetting =
 
 /** 未配置/畸形值时的回退值：off 模式 500；去帽模式取防爆界（失败方向仍取「设闸」）。 */
 export function defaultRunPoolCap(
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = ambientProcessEnv(),
 ): number {
   return discoveryUncappedEnabled(env)
     ? UNCAPPED_RUN_POOL_CAP
@@ -40,8 +43,8 @@ export function defaultRunPoolCap(
  * （off 模式 500 / 去帽模式 10 万）——失败方向取「仍然设闸」，畸形配置不会静默放开配额。
  */
 export function parseRunPoolCap(
-  raw: string | undefined = process.env.DISCOVERY_RUN_POOL_CAP,
-  env: NodeJS.ProcessEnv = process.env,
+  raw: string | undefined = ambientProcessEnv().DISCOVERY_RUN_POOL_CAP,
+  env: NodeJS.ProcessEnv = ambientProcessEnv(),
 ): RunPoolCapSetting {
   const value = (raw ?? '').trim().toLowerCase();
   if (value === 'off') return Object.freeze({ mode: 'off' });

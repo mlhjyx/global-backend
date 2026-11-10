@@ -7,7 +7,7 @@
  * 设计：docs/superpowers/plans/2026-11-04-acquisition-system-complete-design.md §6.2（R3/R4）。
  */
 import { qualify, type QualifyResult, type RuleLike } from '../../icp/rule-engine';
-import { discoveryUncappedEnabled } from '../execution-envelope';
+import { ambientProcessEnv, discoveryUncappedEnabled } from '../execution-envelope';
 
 /** 一次批量粗判的公司数（设计 R4：8 家/次，失败降级逐家）。 */
 export const QUICK_JUDGE_BATCH_SIZE = 8;
@@ -23,7 +23,7 @@ export const QUICK_SCAN_POOL_LIMIT_MAX = 1_000_000;
  * 真正的收紧条件是执行预算账户（余额耗尽即停），不是这里的产品帽。
  */
 export function resolveQuickScanPoolLimit(
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = ambientProcessEnv(),
 ): number {
   if (!discoveryUncappedEnabled(env)) return QUICK_SCAN_POOL_LIMIT_CAPPED;
   const text = (env.DISCOVERY_QUICK_SCAN_POOL_LIMIT ?? '').trim();

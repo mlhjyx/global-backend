@@ -1,5 +1,5 @@
 import { getTask } from '../../ai-tasks/task-registry';
-import { discoveryUncappedEnabled } from '../execution-envelope';
+import { ambientProcessEnv, discoveryUncappedEnabled } from '../execution-envelope';
 import type {
   ChatMessage,
   ChatToolDefinition,
@@ -55,7 +55,7 @@ function loopBound(
 }
 
 export function resolveModelWebSearchLoopLimits(
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = ambientProcessEnv(),
 ): ModelWebSearchLoopLimits {
   if (!discoveryUncappedEnabled(env)) {
     return Object.freeze({
