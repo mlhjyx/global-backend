@@ -249,6 +249,12 @@ jobs:
         if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: node scripts/check-file-budgets.mjs
 
+      # K-2（2026-11-12）：每个 API Postgres 套件必须显式接入本工作流，或在
+      # docs/governance/ci-baselines/g10-api-postgres-suites.json 登记带到期日的豁免。
+      - name: API Postgres suite coverage gate（G10）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: node scripts/governance-api-postgres-coverage.mjs verify
+
       - name: Native Temporal reader server（verified modules · offline race · build）
         if: needs.renderer-visual-scope.outputs.run_temporal_go == 'true'
         shell: bash
@@ -404,6 +410,8 @@ jobs:
       # temporary tables cannot stand in for the tables those routines read.
       # The seller company_profile artifact subject kind binds, holds, tombstones and
       # guards its profile's deletion as app_user on the same schema.
+      # K-2（2026-11-12）：contact-path backfill 与 weekly report 两条此前只在本地手工运行的
+      # 真实数据库套件也并入同一个已迁移 schema；两者都以 app_user 执行，owner 只建/清 fixture。
       - name: Raw SQL parameter types on PostgreSQL
         if: needs.renderer-visual-scope.outputs.run_code != 'false'
         env:
@@ -429,6 +437,10 @@ jobs:
           AGENT_ORCHESTRATION_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
           DOMAIN_RESOLUTION_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
           DOMAIN_RESOLUTION_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
+          CONTACT_PATH_BACKFILL_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+          CONTACT_PATH_BACKFILL_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
+          WEEKLY_REPORT_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+          WEEKLY_REPORT_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
         run: |
           set -euo pipefail
           pnpm --filter @global/db exec prisma migrate deploy
@@ -443,7 +455,9 @@ jobs:
             src/durable-results/artifact/generic-operation-artifact-seller-subject.postgres.spec.ts \
             src/lead/lead-queue-basis.postgres.spec.ts \
             src/agents/agent-orchestration.postgres.spec.ts \
-            src/registry/domain/domain-stores.postgres.spec.ts
+            src/registry/domain/domain-stores.postgres.spec.ts \
+            src/discovery/contact-path-backfill.postgres.spec.ts \
+            src/report/weekly-report.postgres.spec.ts
 
       - name: Site Builder isolated zero-dispatch evaluation boundary
         if: needs.renderer-visual-scope.outputs.run_code != 'false'
