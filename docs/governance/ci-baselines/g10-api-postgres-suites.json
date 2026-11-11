@@ -1,5 +1,0 @@
-{
-  "$comment": "G10：apps/api 的 *.postgres.spec.ts 必须接入 .github/workflows/ci.yml，或在此登记带 owner/expiresAt 的豁免。豁免只许收紧；到期或文件消失即失败。",
-  "schemaVersion": "g10-api-postgres-suites/v1",
-  "exemptions": []
-}

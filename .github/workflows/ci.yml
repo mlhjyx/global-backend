@@ -250,8 +250,8 @@ jobs:
         run: node scripts/check-file-budgets.mjs
 
       # K-2（2026-11-12）：每个 API Postgres 套件必须显式接入本工作流，或在
-      # docs/governance/ci-baselines/g10-api-postgres-suites.json 登记带到期日的豁免。
-      - name: API Postgres suite coverage gate（G10）
+      # docs/governance/ci-baselines/g15-api-postgres-suites.json 登记带到期日的豁免。
+      - name: API Postgres suite coverage gate（G15）
         if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: node scripts/governance-api-postgres-coverage.mjs verify
 

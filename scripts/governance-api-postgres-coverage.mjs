@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * G10：API Postgres 套件覆盖门（2026-11-12，K-2）。
+ * G15：API Postgres 套件覆盖门（2026-11-12，K-2）。
  *
  * 每个 `apps/api/src/**\/*.postgres.spec.ts` 必须满足其一：
  *   1. 在 `.github/workflows/ci.yml` 中以 `src/...postgres.spec.ts` 形式被显式调用；
- *   2. 登记在 `docs/governance/ci-baselines/g10-api-postgres-suites.json` 的 exemptions 中，
+ *   2. 登记在 `docs/governance/ci-baselines/g15-api-postgres-suites.json` 的 exemptions 中，
  *      且必须带 reason / owner / expiresAt。
  *
  * 失败条件：套件既不在 CI 也未登记；豁免缺字段或重复；豁免已过期；豁免指向的文件已消失。
@@ -17,12 +17,12 @@ import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const GATE = 'g10-api-postgres';
+const GATE = 'g15-api-postgres';
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CI_PATH = '.github/workflows/ci.yml';
 const BASELINE_PATH =
-  'docs/governance/ci-baselines/g10-api-postgres-suites.json';
-const SCHEMA = 'g10-api-postgres-suites/v1';
+  'docs/governance/ci-baselines/g15-api-postgres-suites.json';
+const SCHEMA = 'g15-api-postgres-suites/v1';
 
 function fail(message) {
   console.error(`[${GATE}] ${message}`);

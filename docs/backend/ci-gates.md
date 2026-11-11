@@ -1,7 +1,7 @@
-# CI 门登记簿（G1–G14 已落地部分）
+# CI 门登记簿（G1–G14 + G15 覆盖门）
 
 > 生命周期：`GUIDE`
-> 生命周期依据：ch08 §3.4（《GainOS 深化计划 v3.0》第 8 章「CI 门 G1–G14」）；每道门上线同一天更新本页
+> 生命周期依据：ch08 §3.4（《GainOS 深化计划 v3.0》第 8 章「CI 门 G1–G14」）；每道门上线同一天更新本页。G15 是 2026-11-12 审计新增的 API Postgres 套件覆盖门，编号取 G14 之后的空位，避免占用已预留给前端预算的 G10–G12。
 
 原则：每道门先基线化（`docs/governance/ci-baselines/<gate>.json`），门只对**新增**问题失败；基线只许缩小（条目不再适用即红，必须先删）。门的失败信息带修复指引；例外必须写 owner 与到期日。
 
@@ -11,6 +11,7 @@
 | G2 迁移命名与 checksum | `build-test` · `Migration integrity gate` | 目录名不合规 / 新增时间戳撞车 / `_prisma_migrations.checksum` ≠ 文件 sha256 / 存在失败或回滚行 | `docs/governance/ci-baselines/g2-migration-integrity.json`（历史撞车组） | P6-CI-01 |
 | G5 RLS/租户目录 | `build-test` · `RLS catalog gate` | 带 `workspace_id` 的表缺 ENABLE+FORCE RLS 或策略；无 `workspace_id` 的表未在目录登记；`app_user` 默认表权限不是只读 | `docs/governance/ci-baselines/g5-rls-catalog.json`（platform_table / owner_only / rls_enforced 三类目录） | P6-CI-07 |
 | G9 文件体量与复杂度 | `build-test` · `File and complexity budget gate` | >1200 行未登记文件；已登记文件超过棘轮上限；圈复杂度 >40 未登记函数或超过基线 | `docs/governance/ci-baselines/g9-size-budget.json`（>800 行文件、>20 复杂度函数） | P6-CI-10 |
+| G15 API Postgres 套件覆盖 | `build-test` · `API Postgres suite coverage gate（G15）` | `apps/api/src/**/*.postgres.spec.ts` 既未在 `ci.yml` 显式引用，也未登记带 owner/expiresAt 的豁免；豁免过期或文件消失 | `docs/governance/ci-baselines/g15-api-postgres-suites.json`（初始为空） | P6-CI-01 |
 
 ## 本地复现
 
@@ -48,7 +49,7 @@ G2/G5 都会向目标库 `migrate deploy`，脚本只接受一次性库名（`*_
 - `generic-operation-artifact*.spec.mjs` 存在**测试腐化**：夹具 `TRUNCATE generic_operation_artifact` 被新外键 `personal_artifact_cleanup_command` 挡住（0A000），需先修夹具；
 - 其余套件需要外部预置容器（`DISCOVERY_QUERY_LINEAGE_PG_CONTAINER`、`GOVERNED_RELATION_PG_CONTAINER` 等）。
 
-因此 19 个套件保持 `manual` 现状（按文件头注释手工执行）；把它们接入 nightly 需要先修复夹具并在工作流里补齐角色 provisioning，作为 G5 的后续项单列。
+因此 19 个套件保持 `manual` 现状（按文件头注释手工执行）；把它们接入 nightly 需要先修复夹具并在工作流里补齐角色 provisioning，作为 G5 的后续项单列。G15 只锁定「API Postgres 套件必须在 CI 或被登记豁免」这一分类事实，**不执行** `packages/db` 的 manual 组，也不改变上述 19 个套件的现状。
 
 ## 尚未落地的门
 
