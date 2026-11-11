@@ -1,4 +1,12 @@
 {
   "schema_version": "release-authority-keys/v1",
-  "keys": []
+  "keys": [
+    {
+      "key_id": "owner-release-2026-11",
+      "principal": "mlhjyx-release-authority",
+      "public_key": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFlLkvynJp5mdn9/6e1EkTBM1LTumBqHQ9e2PVA+Pad3 gain-release-authority-2026-11-11",
+      "added_at": "2026-11-11T06:55:12.000Z",
+      "revoked_at": null
+    }
+  ]
 }
