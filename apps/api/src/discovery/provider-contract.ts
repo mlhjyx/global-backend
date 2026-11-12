@@ -148,6 +148,20 @@ export interface ProviderContactRecord {
   license?: string;
 }
 
+/**
+ * Structured, non-PII outcome for company discovery. Lets callers distinguish
+ * "the query was invalid" from "the query was valid but the source had no rows"
+ * without changing the strict discovery-query-receipt/v1 payload.
+ */
+export type DiscoveryOutcomeErrorClass = 'PARAM_INVALID' | 'EMPTY_RESULT';
+
+export interface DiscoveryOutcome {
+  errorClass: DiscoveryOutcomeErrorClass;
+  reasonCode: string;
+  /** Bounded, non-PII validation issues (parameter names only). */
+  issues?: string[];
+}
+
 export interface DiscoveryResult {
   records: ProviderCompanyRecord[];
   costCents: number;
@@ -155,6 +169,8 @@ export interface DiscoveryResult {
   lineage?: DiscoveryCompanyResultLineageV1;
   /** Model extractions behind the result, and the ones skipped after a failed call. */
   modelExtractions?: DiscoveryModelExtractions;
+  /** Optional structured outcome (additive; ignored by callers that don't read it). */
+  outcome?: DiscoveryOutcome;
 }
 
 export interface ContactDiscoveryResult {

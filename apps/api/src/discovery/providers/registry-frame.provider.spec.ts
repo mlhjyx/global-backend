@@ -136,7 +136,26 @@ describe('RegistryFrameDiscoveryProvider (T3-09 registration surface)', () => {
     expect(calls[2]!.where.OR).toEqual([{ nace: { startsWith: '28.13' } }]);
   });
 
-  it('fails safe to an empty result when the filters cannot satisfy the contract', async () => {
+  it('normalizes a display country to ISO2 before querying', async () => {
+    const calls: Array<{ where: Record<string, unknown> }> = [];
+    const prisma = {
+      registryEntity: {
+        findMany: async (args: { where: Record<string, unknown> }) => {
+          calls.push(args);
+          return [row];
+        },
+      },
+    } as unknown as PrismaClient;
+    const provider = new RegistryFrameDiscoveryProvider({ prisma });
+
+    const result = await provider.discoverCompanies(query({ country: 'Germany' }), ctx);
+    expect(result.records).toHaveLength(1);
+    expect(result.outcome).toBeUndefined();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.where).toMatchObject({ country: 'DE' });
+  });
+
+  it('returns PARAM_INVALID rather than EMPTY_RESULT for an unresolvable country', async () => {
     const prisma = {
       registryEntity: {
         findMany: async () => {
@@ -145,10 +164,22 @@ describe('RegistryFrameDiscoveryProvider (T3-09 registration surface)', () => {
       },
     } as unknown as PrismaClient;
     const provider = new RegistryFrameDiscoveryProvider({ prisma });
-    await expect(provider.discoverCompanies(query({ country: 'Germany' }), ctx)).resolves.toEqual({
-      records: [],
-      costCents: 0,
+    const result = await provider.discoverCompanies(query({ country: 'XX' }), ctx);
+    expect(result.records).toEqual([]);
+    expect(result.outcome).toMatchObject({
+      errorClass: 'PARAM_INVALID',
+      reasonCode: 'COUNTRY_UNRESOLVED',
     });
+  });
+
+  it('distinguishes a valid query with zero rows as EMPTY_RESULT', async () => {
+    const prisma = {
+      registryEntity: { findMany: async () => [] },
+    } as unknown as PrismaClient;
+    const provider = new RegistryFrameDiscoveryProvider({ prisma });
+    const result = await provider.discoverCompanies(query({ country: 'DE' }), ctx);
+    expect(result.records).toEqual([]);
+    expect(result.outcome).toEqual({ errorClass: 'EMPTY_RESULT', reasonCode: 'NO_ROWS' });
   });
 });
 
@@ -231,8 +262,9 @@ describe('local_query lineage mode (A 方案)', () => {
       lineageEnabled: true,
     });
     const { ctx, receipts } = lineageCtx();
-    const result = await provider.discoverCompanies(query({ country: 'Germany' }), ctx);
+    const result = await provider.discoverCompanies(query({ country: 'XX' }), ctx);
     expect(result.records).toEqual([]);
+    expect(result.outcome).toMatchObject({ errorClass: 'PARAM_INVALID' });
     expect(receipts).toEqual([]);
     expect(parseDiscoveryCompanyResultLineage(result.lineage, 'registry_frame').recordCount).toBe(0);
   });
