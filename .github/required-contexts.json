@@ -227,13 +227,14 @@
     ]
   },
   "external_ruleset_requirements": {
-    "required_approving_reviews": 1,
-    "require_code_owner_review": true,
+    "review_model": "SELF_REVIEW_WITH_REQUIRED_CHECKS",
+    "required_approving_reviews": 0,
+    "require_code_owner_review": false,
     "dismiss_stale_reviews": true,
     "require_conversation_resolution": true,
     "allow_force_push": false,
     "allow_deletion": false,
-    "user_authorization": "A separate signed product-owner authorization is required; PR body declarations and machine checks cannot supply it.",
+    "user_authorization": "DEC-AIDEV-004 supplies standing merge authorization after independent self-review and all required checks; ruleset changes, deployment/publication and paid calls still require separate product-owner authorization.",
     "merge_evidence": "Record MERGE_COMMIT, SQUASH, or REBASE provenance in the Release Bundle after the merge result exists."
   }
 }

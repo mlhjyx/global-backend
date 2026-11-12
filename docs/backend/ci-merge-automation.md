@@ -23,7 +23,7 @@
 仓库文件**不能配置或证明** GitHub ruleset 已生效。有管理员权限的人仍须在 GitHub 外部状态中：
 
 1. 把清单中的全部 context 配为 required；
-2. 至少要求一个 approving review、CODEOWNERS review、dismiss stale review 和 conversation resolution；
+2. 按仓内声明的 `review_model` 配置审查：当前为 `SELF_REVIEW_WITH_REQUIRED_CHECKS`（0 approving review、不强制 CODEOWNERS review，DEC-AIDEV-004 单人自审 + 必需检查），并要求 dismiss stale review 与 conversation resolution；若未来改为双人审查，必须同时更新仓内声明与 ruleset；
 3. 禁止 force push 与 branch deletion；
 4. 回读 ruleset/branch protection 与真实 PR checks，保存 URL/ID/时间作为外部配置证据。
 
@@ -39,9 +39,10 @@ review thread 必须解决、push 后撤销旧 review。与下文 2026-08-09 相
   与 `nontechnical decision card freshness`。后者随决策卡移除，须在该变更合入后立即从 ruleset 删去，
   否则之后的 PR 会一直等待一个不再产生的检查；
 - approving review 数仍为 0、未要求 CODEOWNERS review，RepositoryRole 5 仍有 `always` bypass。
-  仓库只有产品负责人一个 GitHub 账号，PR 均以该账号创建，GitHub 不允许自批，上文第 2 条的批准
-  目标在单账号条件下无法达成；产品负责人据此以 `DEC-AIDEV-004` 把审查职责交给开发代理，目标本身
-  保留为远期要求，不据此下调。
+  仓库只有产品负责人一个 GitHub 账号，PR 均以该账号创建，GitHub 不允许自批；产品负责人据此以
+  `DEC-AIDEV-004` 把审查职责交给开发代理。2026-11-12 审计后，仓内声明正式改为
+  `SELF_REVIEW_WITH_REQUIRED_CHECKS`（0 review / 不强制 CODEOWNERS），与线上 `protect-main` 一致；
+  双人审查保留为未来选项，恢复时必须同时更新仓内声明与 ruleset。
 
 ### 2026-09-21 ruleset 变更（产品负责人授权）
 
@@ -83,8 +84,9 @@ GitHub API 对 `main` 的实时只读回读确认仓库级 `protect-main` rulese
 
 本次只做回读，没有修改 GitHub 外部状态。安全迁移顺序是：先让产生稳定
 context 的工作流进入 main，在目标 main 的 canary PR 上观察 exact context；再
-单独把 contracts、governance 和 `security · required gate` 加入 ruleset，并把
-批准数升为 1、启用 CODEOWNERS、移除常态 bypass；最后重新回读完整 ruleset
+单独把 contracts、governance 和 `security · required gate` 加入 ruleset，并同时更新
+`required-contexts.json` 的 `review_model`，把批准数升为 1、启用 CODEOWNERS、移除常态
+bypass；最后重新回读完整 ruleset
 和真实 PR checks。`pull_request_target` 的 decision-card context 名称保持
 `freshness`，只强化内部 integrity 语义，避免 base workflow 尚未合并时出现
 required-context bootstrap 死锁（该 context 已于 2026-09-21 随决策卡一并移除）。

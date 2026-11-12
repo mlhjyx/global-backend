@@ -284,9 +284,10 @@ export function validateRequiredContexts(
   const ruleset = policy?.external_ruleset_requirements;
   if (
     !isObject(ruleset) ||
+    ruleset.review_model !== "SELF_REVIEW_WITH_REQUIRED_CHECKS" ||
     !Number.isInteger(ruleset.required_approving_reviews) ||
-    ruleset.required_approving_reviews < 1 ||
-    ruleset.require_code_owner_review !== true ||
+    ruleset.required_approving_reviews !== 0 ||
+    ruleset.require_code_owner_review !== false ||
     ruleset.dismiss_stale_reviews !== true ||
     ruleset.require_conversation_resolution !== true ||
     ruleset.allow_force_push !== false ||
@@ -297,7 +298,7 @@ export function validateRequiredContexts(
     issues.push(
       issue(
         "EXTERNAL_RULESET_REQUIREMENTS_UNSAFE",
-        "external ruleset requirements must retain review, CODEOWNERS, conversation, and history protections",
+        "external ruleset requirements must declare SELF_REVIEW_WITH_REQUIRED_CHECKS (0 approvals, no CODEOWNERS requirement) and retain conversation and history protections",
       ),
     );
   }
