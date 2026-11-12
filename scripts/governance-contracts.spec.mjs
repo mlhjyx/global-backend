@@ -1184,8 +1184,9 @@ test("required-context policy fails when a repository workflow drops a named con
       ],
     },
     external_ruleset_requirements: {
-      required_approving_reviews: 1,
-      require_code_owner_review: true,
+      review_model: "SELF_REVIEW_WITH_REQUIRED_CHECKS",
+      required_approving_reviews: 0,
+      require_code_owner_review: false,
       dismiss_stale_reviews: true,
       require_conversation_resolution: true,
       allow_force_push: false,
@@ -1350,6 +1351,24 @@ test("required-context policy fails when a repository workflow drops a named con
   assert.ok(
     issueCodes(
       validateRequiredContexts(unsafeRuleset, noPullRequest, repositoryContext),
+    ).includes("EXTERNAL_RULESET_REQUIREMENTS_UNSAFE"),
+  );
+
+  const nonSelfReviewRuleset = {
+    ...policy,
+    external_ruleset_requirements: {
+      ...policy.external_ruleset_requirements,
+      required_approving_reviews: 1,
+      require_code_owner_review: true,
+    },
+  };
+  assert.ok(
+    issueCodes(
+      validateRequiredContexts(
+        nonSelfReviewRuleset,
+        noPullRequest,
+        repositoryContext,
+      ),
     ).includes("EXTERNAL_RULESET_REQUIREMENTS_UNSAFE"),
   );
 
