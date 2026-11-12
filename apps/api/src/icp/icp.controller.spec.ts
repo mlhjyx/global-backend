@@ -61,6 +61,17 @@ async function rejectionOf(operation: Promise<unknown>): Promise<unknown> {
   );
 }
 
+describe('POST /companies/:companyId/icps confirmed markets', () => {
+  it('forwards explicitly confirmed markets to the service', async () => {
+    const generate = vi.fn().mockResolvedValue(ICP_ROW);
+    const controller = controllerWith({ generateFromCompany: generate });
+
+    await controller.generate(CTX, COMPANY_ID, { confirmedTargetMarkets: ['DE'] }, GRANT);
+
+    expect(generate).toHaveBeenCalledWith(CTX, COMPANY_ID, GRANT, undefined, ['DE']);
+  });
+});
+
 describe.each([
   {
     endpoint: 'POST /icps/:icpId/query-plans',
@@ -74,7 +85,7 @@ describe.each([
     endpoint: 'POST /companies/:companyId/icps',
     method: 'generateFromCompany' as const,
     call: (controller: IcpController) => controller.generate(CTX, COMPANY_ID, undefined, GRANT),
-    expectedArgs: [CTX, COMPANY_ID, GRANT, undefined],
+    expectedArgs: [CTX, COMPANY_ID, GRANT, undefined, undefined],
     row: ICP_ROW,
     data: { id: ICP_ID, companyId: COMPANY_ID, status: 'HYPOTHESIS' },
   },

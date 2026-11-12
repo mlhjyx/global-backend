@@ -13,6 +13,7 @@ import {
 } from '../claim/profile-claim-drafts';
 import { OnboardingFactsDto } from './dto/onboarding-facts.dto';
 import { resolveIndustrySelection } from './industry-selection';
+import { withSelectionMarker } from './offering-selection';
 
 type CompanyRow = Prisma.CompanyProfileGetPayload<Record<string, never>>;
 
@@ -92,28 +93,54 @@ export class OnboardingFactsService {
         offeringNames = [
           ...new Set(dto.products.map((name) => name.trim()).filter(Boolean)),
         ];
-        if (offeringNames.length === 0) {
-          // 空白名称会被清洗成空列表；此时执行 notIn:[] 会把本路径管理的旧产品全删掉。
+        // 空白项≠「取消全部」：显式 [] 才是取消全部，空白名称是客户端输入错误。
+        if (dto.products.length > 0 && offeringNames.length === 0) {
           throw new BadRequestException({
             error: { code: 'VALIDATION_ERROR', message: 'products 不能只有空白名称' },
           });
         }
+        // 选择标记写在 Offering.attributes（现有 JSON 列，无迁移）：
+        // - 勾选=selectedByUser:true；未勾选=selectedByUser:false；
+        // - 显式空数组=取消全部；与「本次未提交 products（缺省）」区分；
+        // - 不改 source、不删除抽取行：理解抽取仍可审计，但不再进入 ICP。
+        const at = new Date().toISOString();
+        const existing = await tx.offering.findMany({
+          where: { companyId },
+          select: { id: true, name: true, attributes: true },
+        });
+        const selected = new Set(offeringNames);
         for (const name of offeringNames) {
+          const previous = existing.find((row) => row.name === name);
+          const attributes = withSelectionMarker(
+            previous?.attributes,
+            true,
+            at,
+          ) as Prisma.InputJsonValue;
           await tx.offering.upsert({
             where: { companyId_name: { companyId, name } },
-            update: {},
+            update: { attributes },
             create: {
               workspaceId: ctx.workspaceId,
               companyId,
               name,
               source: 'onboarding',
+              attributes,
             },
           });
         }
-        // 只清理由本路径管理的行；理解抽取（source=understanding）与人工补录不受影响。
-        await tx.offering.deleteMany({
-          where: { companyId, source: 'onboarding', name: { notIn: offeringNames } },
-        });
+        for (const offering of existing) {
+          if (selected.has(offering.name)) continue;
+          await tx.offering.update({
+            where: { id: offering.id },
+            data: {
+              attributes: withSelectionMarker(
+                offering.attributes,
+                false,
+                at,
+              ) as Prisma.InputJsonValue,
+            },
+          });
+        }
       } else {
         const existing = await tx.offering.findMany({
           where: { companyId },
