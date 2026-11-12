@@ -1,7 +1,7 @@
-# CI 门登记簿（G1–G14 + G15 覆盖门）
+# CI 门登记簿（G1–G18）
 
 > 生命周期：`GUIDE`
-> 生命周期依据：ch08 §3.4（《GainOS 深化计划 v3.0》第 8 章「CI 门 G1–G14」）；每道门上线同一天更新本页。G15 是 2026-11-12 审计新增的 API Postgres 套件覆盖门，编号取 G14 之后的空位，避免占用已预留给前端预算的 G10–G12。
+> 生命周期依据：ch08 §3.4（《GainOS 深化计划 v3.0》第 8 章「CI 门 G1–G14」）；每道门上线同一天更新本页。G15–G18 是 2026-11-12 审计新增的门，编号取 G14 之后的空位，避免占用已预留给前端预算的 G10–G12。
 
 原则：每道门先基线化（`docs/governance/ci-baselines/<gate>.json`），门只对**新增**问题失败；基线只许缩小（条目不再适用即红，必须先删）。门的失败信息带修复指引；例外必须写 owner 与到期日。
 
@@ -12,6 +12,9 @@
 | G5 RLS/租户目录 | `build-test` · `RLS catalog gate` | 带 `workspace_id` 的表缺 ENABLE+FORCE RLS 或策略；无 `workspace_id` 的表未在目录登记；`app_user` 默认表权限不是只读 | `docs/governance/ci-baselines/g5-rls-catalog.json`（platform_table / owner_only / rls_enforced 三类目录） | P6-CI-07 |
 | G9 文件体量与复杂度 | `build-test` · `File and complexity budget gate` | >1200 行未登记文件；已登记文件超过棘轮上限；圈复杂度 >40 未登记函数或超过基线 | `docs/governance/ci-baselines/g9-size-budget.json`（>800 行文件、>20 复杂度函数） | P6-CI-10 |
 | G15 API Postgres 套件覆盖 | `build-test` · `API Postgres suite coverage gate（G15）` | `apps/api/src/**/*.postgres.spec.ts` 既未在 `ci.yml` 显式引用，也未登记带 owner/expiresAt 的豁免；豁免过期或文件消失 | `docs/governance/ci-baselines/g15-api-postgres-suites.json`（初始为空） | P6-CI-01 |
+| G16 模块依赖边界 | `build-test` · `Module dependency boundary gate（G16）` | `apps/api` 出现基线外的运行时跨模块 import 对 | `docs/governance/ci-baselines/g16-module-boundaries.json`（286 对） | P6-CI-01 |
+| G17 Raw SQL 安全约束 | `build-test` · `Unsafe raw SQL gate（G17）` | 生产代码 `$queryRawUnsafe`/`$executeRawUnsafe` 超过每文件基线且无 `unsafe-reason:` 注释；基线文件消失未清条目 | `docs/governance/ci-baselines/g17-unsafe-raw-sql.json`（34 处 / 13 文件） | P6-CI-01 |
+| G18 覆盖率棘轮（每周） | `governance.yml` · `coverage ratchet · weekly` | `apps/api` 覆盖率低于阈值（lines 88 / statements 86 / functions 87 / branches 80；排除 `src/temporal/**`、`src/site-builder/eval/**` 与 `execution-control-error.static.spec.ts`） | `apps/api/vitest.config.ts` 的 `coverage.thresholds` | P6-CI-01 |
 
 ## 本地复现
 

@@ -1,0 +1,1151 @@
+{
+  "$comment": "G16：apps/api 运行时跨模块依赖对基线（按 from -> to 去重）。新增对必须显式更新本文件；消失的对不阻断。",
+  "schemaVersion": "g16-module-boundaries/v1",
+  "generatedFrom": "c4370296b3e588d0c2871ab4b66e127aadfd7894",
+  "pairs": [
+    {
+      "from": "(root)",
+      "to": "agents"
+    },
+    {
+      "from": "(root)",
+      "to": "ai-tasks"
+    },
+    {
+      "from": "(root)",
+      "to": "auth"
+    },
+    {
+      "from": "(root)",
+      "to": "campaign-plan"
+    },
+    {
+      "from": "(root)",
+      "to": "channels"
+    },
+    {
+      "from": "(root)",
+      "to": "claim"
+    },
+    {
+      "from": "(root)",
+      "to": "common"
+    },
+    {
+      "from": "(root)",
+      "to": "company"
+    },
+    {
+      "from": "(root)",
+      "to": "compliance"
+    },
+    {
+      "from": "(root)",
+      "to": "discovery"
+    },
+    {
+      "from": "(root)",
+      "to": "docs"
+    },
+    {
+      "from": "(root)",
+      "to": "evaluation"
+    },
+    {
+      "from": "(root)",
+      "to": "events"
+    },
+    {
+      "from": "(root)",
+      "to": "execution-budget"
+    },
+    {
+      "from": "(root)",
+      "to": "health"
+    },
+    {
+      "from": "(root)",
+      "to": "icp"
+    },
+    {
+      "from": "(root)",
+      "to": "lead"
+    },
+    {
+      "from": "(root)",
+      "to": "measurement"
+    },
+    {
+      "from": "(root)",
+      "to": "memory"
+    },
+    {
+      "from": "(root)",
+      "to": "model-gateway"
+    },
+    {
+      "from": "(root)",
+      "to": "model-runtime"
+    },
+    {
+      "from": "(root)",
+      "to": "outreach"
+    },
+    {
+      "from": "(root)",
+      "to": "platform-authority"
+    },
+    {
+      "from": "(root)",
+      "to": "prisma"
+    },
+    {
+      "from": "(root)",
+      "to": "relay"
+    },
+    {
+      "from": "(root)",
+      "to": "report"
+    },
+    {
+      "from": "(root)",
+      "to": "runtime"
+    },
+    {
+      "from": "(root)",
+      "to": "sanctions"
+    },
+    {
+      "from": "(root)",
+      "to": "seller-knowledge"
+    },
+    {
+      "from": "(root)",
+      "to": "signals"
+    },
+    {
+      "from": "(root)",
+      "to": "site-builder"
+    },
+    {
+      "from": "(root)",
+      "to": "skills"
+    },
+    {
+      "from": "(root)",
+      "to": "temporal"
+    },
+    {
+      "from": "(root)",
+      "to": "whoami"
+    },
+    {
+      "from": "acquisition",
+      "to": "discovery"
+    },
+    {
+      "from": "acquisition",
+      "to": "durable-results"
+    },
+    {
+      "from": "acquisition",
+      "to": "execution-budget"
+    },
+    {
+      "from": "acquisition",
+      "to": "platform-authority"
+    },
+    {
+      "from": "acquisition",
+      "to": "prisma"
+    },
+    {
+      "from": "acquisition",
+      "to": "tools"
+    },
+    {
+      "from": "adapters",
+      "to": "compliance"
+    },
+    {
+      "from": "adapters",
+      "to": "discovery"
+    },
+    {
+      "from": "adapters",
+      "to": "execution-budget"
+    },
+    {
+      "from": "adapters",
+      "to": "platform-authority"
+    },
+    {
+      "from": "agents",
+      "to": "auth"
+    },
+    {
+      "from": "agents",
+      "to": "common"
+    },
+    {
+      "from": "agents",
+      "to": "prisma"
+    },
+    {
+      "from": "ai-tasks",
+      "to": "discovery"
+    },
+    {
+      "from": "ai-tasks",
+      "to": "site-builder"
+    },
+    {
+      "from": "auth",
+      "to": "runtime"
+    },
+    {
+      "from": "campaign-plan",
+      "to": "ai-tasks"
+    },
+    {
+      "from": "campaign-plan",
+      "to": "common"
+    },
+    {
+      "from": "campaign-plan",
+      "to": "execution-budget"
+    },
+    {
+      "from": "campaign-plan",
+      "to": "temporal"
+    },
+    {
+      "from": "channels",
+      "to": "adapters"
+    },
+    {
+      "from": "channels",
+      "to": "auth"
+    },
+    {
+      "from": "channels",
+      "to": "common"
+    },
+    {
+      "from": "channels",
+      "to": "discovery"
+    },
+    {
+      "from": "channels",
+      "to": "execution-budget"
+    },
+    {
+      "from": "channels",
+      "to": "platform-authority"
+    },
+    {
+      "from": "channels",
+      "to": "prisma"
+    },
+    {
+      "from": "channels",
+      "to": "temporal"
+    },
+    {
+      "from": "claim",
+      "to": "auth"
+    },
+    {
+      "from": "claim",
+      "to": "common"
+    },
+    {
+      "from": "claim",
+      "to": "prisma"
+    },
+    {
+      "from": "common",
+      "to": "platform-authority"
+    },
+    {
+      "from": "company",
+      "to": "adapters"
+    },
+    {
+      "from": "company",
+      "to": "auth"
+    },
+    {
+      "from": "company",
+      "to": "claim"
+    },
+    {
+      "from": "company",
+      "to": "common"
+    },
+    {
+      "from": "company",
+      "to": "execution-budget"
+    },
+    {
+      "from": "company",
+      "to": "prisma"
+    },
+    {
+      "from": "company",
+      "to": "tools"
+    },
+    {
+      "from": "compliance",
+      "to": "auth"
+    },
+    {
+      "from": "compliance",
+      "to": "common"
+    },
+    {
+      "from": "compliance",
+      "to": "discovery"
+    },
+    {
+      "from": "compliance",
+      "to": "prisma"
+    },
+    {
+      "from": "discovery",
+      "to": "acquisition"
+    },
+    {
+      "from": "discovery",
+      "to": "adapters"
+    },
+    {
+      "from": "discovery",
+      "to": "ai-tasks"
+    },
+    {
+      "from": "discovery",
+      "to": "auth"
+    },
+    {
+      "from": "discovery",
+      "to": "common"
+    },
+    {
+      "from": "discovery",
+      "to": "compliance"
+    },
+    {
+      "from": "discovery",
+      "to": "durable-results"
+    },
+    {
+      "from": "discovery",
+      "to": "enrichment"
+    },
+    {
+      "from": "discovery",
+      "to": "execution-budget"
+    },
+    {
+      "from": "discovery",
+      "to": "icp"
+    },
+    {
+      "from": "discovery",
+      "to": "model-gateway"
+    },
+    {
+      "from": "discovery",
+      "to": "model-runtime"
+    },
+    {
+      "from": "discovery",
+      "to": "prisma"
+    },
+    {
+      "from": "discovery",
+      "to": "registry"
+    },
+    {
+      "from": "discovery",
+      "to": "site-builder"
+    },
+    {
+      "from": "discovery",
+      "to": "skills"
+    },
+    {
+      "from": "discovery",
+      "to": "temporal"
+    },
+    {
+      "from": "discovery",
+      "to": "tools"
+    },
+    {
+      "from": "durable-results",
+      "to": "adapters"
+    },
+    {
+      "from": "durable-results",
+      "to": "compliance"
+    },
+    {
+      "from": "durable-results",
+      "to": "discovery"
+    },
+    {
+      "from": "durable-results",
+      "to": "execution-budget"
+    },
+    {
+      "from": "durable-results",
+      "to": "platform-authority"
+    },
+    {
+      "from": "durable-results",
+      "to": "prisma"
+    },
+    {
+      "from": "durable-results",
+      "to": "site-builder"
+    },
+    {
+      "from": "durable-results",
+      "to": "tools"
+    },
+    {
+      "from": "enrichment",
+      "to": "acquisition"
+    },
+    {
+      "from": "enrichment",
+      "to": "compliance"
+    },
+    {
+      "from": "enrichment",
+      "to": "discovery"
+    },
+    {
+      "from": "enrichment",
+      "to": "execution-budget"
+    },
+    {
+      "from": "enrichment",
+      "to": "tools"
+    },
+    {
+      "from": "evaluation",
+      "to": "auth"
+    },
+    {
+      "from": "evaluation",
+      "to": "common"
+    },
+    {
+      "from": "evaluation",
+      "to": "prisma"
+    },
+    {
+      "from": "events",
+      "to": "auth"
+    },
+    {
+      "from": "events",
+      "to": "common"
+    },
+    {
+      "from": "events",
+      "to": "prisma"
+    },
+    {
+      "from": "events",
+      "to": "relay"
+    },
+    {
+      "from": "execution-budget",
+      "to": "ai-tasks"
+    },
+    {
+      "from": "execution-budget",
+      "to": "auth"
+    },
+    {
+      "from": "execution-budget",
+      "to": "common"
+    },
+    {
+      "from": "execution-budget",
+      "to": "discovery"
+    },
+    {
+      "from": "execution-budget",
+      "to": "model-gateway"
+    },
+    {
+      "from": "execution-budget",
+      "to": "prisma"
+    },
+    {
+      "from": "execution-budget",
+      "to": "runtime"
+    },
+    {
+      "from": "execution-budget",
+      "to": "tools"
+    },
+    {
+      "from": "health",
+      "to": "platform-authority"
+    },
+    {
+      "from": "health",
+      "to": "prisma"
+    },
+    {
+      "from": "health",
+      "to": "runtime"
+    },
+    {
+      "from": "health",
+      "to": "temporal"
+    },
+    {
+      "from": "icp",
+      "to": "ai-tasks"
+    },
+    {
+      "from": "icp",
+      "to": "auth"
+    },
+    {
+      "from": "icp",
+      "to": "common"
+    },
+    {
+      "from": "icp",
+      "to": "discovery"
+    },
+    {
+      "from": "icp",
+      "to": "durable-results"
+    },
+    {
+      "from": "icp",
+      "to": "execution-budget"
+    },
+    {
+      "from": "icp",
+      "to": "model-gateway"
+    },
+    {
+      "from": "icp",
+      "to": "model-runtime"
+    },
+    {
+      "from": "icp",
+      "to": "prisma"
+    },
+    {
+      "from": "icp",
+      "to": "tools"
+    },
+    {
+      "from": "intent",
+      "to": "acquisition"
+    },
+    {
+      "from": "intent",
+      "to": "adapters"
+    },
+    {
+      "from": "intent",
+      "to": "discovery"
+    },
+    {
+      "from": "intent",
+      "to": "durable-results"
+    },
+    {
+      "from": "intent",
+      "to": "execution-budget"
+    },
+    {
+      "from": "intent",
+      "to": "platform-authority"
+    },
+    {
+      "from": "intent",
+      "to": "prisma"
+    },
+    {
+      "from": "intent",
+      "to": "signals"
+    },
+    {
+      "from": "intent",
+      "to": "tools"
+    },
+    {
+      "from": "lead",
+      "to": "ai-tasks"
+    },
+    {
+      "from": "lead",
+      "to": "auth"
+    },
+    {
+      "from": "lead",
+      "to": "common"
+    },
+    {
+      "from": "lead",
+      "to": "compliance"
+    },
+    {
+      "from": "lead",
+      "to": "discovery"
+    },
+    {
+      "from": "lead",
+      "to": "durable-results"
+    },
+    {
+      "from": "lead",
+      "to": "execution-budget"
+    },
+    {
+      "from": "lead",
+      "to": "icp"
+    },
+    {
+      "from": "lead",
+      "to": "model-gateway"
+    },
+    {
+      "from": "lead",
+      "to": "model-runtime"
+    },
+    {
+      "from": "lead",
+      "to": "prisma"
+    },
+    {
+      "from": "lead",
+      "to": "sanctions"
+    },
+    {
+      "from": "lead",
+      "to": "signals"
+    },
+    {
+      "from": "lead",
+      "to": "tools"
+    },
+    {
+      "from": "measurement",
+      "to": "auth"
+    },
+    {
+      "from": "measurement",
+      "to": "common"
+    },
+    {
+      "from": "measurement",
+      "to": "prisma"
+    },
+    {
+      "from": "memory",
+      "to": "prisma"
+    },
+    {
+      "from": "model-gateway",
+      "to": "ai-tasks"
+    },
+    {
+      "from": "model-gateway",
+      "to": "durable-results"
+    },
+    {
+      "from": "model-gateway",
+      "to": "execution-budget"
+    },
+    {
+      "from": "model-gateway",
+      "to": "platform-authority"
+    },
+    {
+      "from": "model-gateway",
+      "to": "prisma"
+    },
+    {
+      "from": "model-gateway",
+      "to": "site-builder"
+    },
+    {
+      "from": "model-gateway",
+      "to": "tools"
+    },
+    {
+      "from": "model-runtime",
+      "to": "ai-tasks"
+    },
+    {
+      "from": "model-runtime",
+      "to": "model-gateway"
+    },
+    {
+      "from": "model-runtime",
+      "to": "site-builder"
+    },
+    {
+      "from": "outreach",
+      "to": "auth"
+    },
+    {
+      "from": "outreach",
+      "to": "common"
+    },
+    {
+      "from": "outreach",
+      "to": "compliance"
+    },
+    {
+      "from": "outreach",
+      "to": "discovery"
+    },
+    {
+      "from": "outreach",
+      "to": "enrichment"
+    },
+    {
+      "from": "outreach",
+      "to": "prisma"
+    },
+    {
+      "from": "platform-authority",
+      "to": "common"
+    },
+    {
+      "from": "platform-authority",
+      "to": "execution-budget"
+    },
+    {
+      "from": "platform-authority",
+      "to": "runtime"
+    },
+    {
+      "from": "platform-authority",
+      "to": "site-builder"
+    },
+    {
+      "from": "platform-authority",
+      "to": "tools"
+    },
+    {
+      "from": "prisma",
+      "to": "compliance"
+    },
+    {
+      "from": "registry",
+      "to": "discovery"
+    },
+    {
+      "from": "relay",
+      "to": "agents"
+    },
+    {
+      "from": "relay",
+      "to": "discovery"
+    },
+    {
+      "from": "relay",
+      "to": "execution-budget"
+    },
+    {
+      "from": "relay",
+      "to": "runtime"
+    },
+    {
+      "from": "relay",
+      "to": "sanctions"
+    },
+    {
+      "from": "relay",
+      "to": "skills"
+    },
+    {
+      "from": "relay",
+      "to": "temporal"
+    },
+    {
+      "from": "report",
+      "to": "auth"
+    },
+    {
+      "from": "report",
+      "to": "common"
+    },
+    {
+      "from": "report",
+      "to": "compliance"
+    },
+    {
+      "from": "report",
+      "to": "discovery"
+    },
+    {
+      "from": "report",
+      "to": "lead"
+    },
+    {
+      "from": "report",
+      "to": "prisma"
+    },
+    {
+      "from": "report",
+      "to": "sanctions"
+    },
+    {
+      "from": "runtime",
+      "to": "auth"
+    },
+    {
+      "from": "runtime",
+      "to": "compliance"
+    },
+    {
+      "from": "runtime",
+      "to": "durable-results"
+    },
+    {
+      "from": "runtime",
+      "to": "execution-budget"
+    },
+    {
+      "from": "runtime",
+      "to": "health"
+    },
+    {
+      "from": "runtime",
+      "to": "model-gateway"
+    },
+    {
+      "from": "runtime",
+      "to": "platform-authority"
+    },
+    {
+      "from": "runtime",
+      "to": "prisma"
+    },
+    {
+      "from": "runtime",
+      "to": "site-builder"
+    },
+    {
+      "from": "runtime",
+      "to": "tools"
+    },
+    {
+      "from": "sanctions",
+      "to": "adapters"
+    },
+    {
+      "from": "sanctions",
+      "to": "discovery"
+    },
+    {
+      "from": "sanctions",
+      "to": "durable-results"
+    },
+    {
+      "from": "sanctions",
+      "to": "execution-budget"
+    },
+    {
+      "from": "sanctions",
+      "to": "platform-authority"
+    },
+    {
+      "from": "sanctions",
+      "to": "prisma"
+    },
+    {
+      "from": "sanctions",
+      "to": "tools"
+    },
+    {
+      "from": "seller-knowledge",
+      "to": "auth"
+    },
+    {
+      "from": "seller-knowledge",
+      "to": "common"
+    },
+    {
+      "from": "seller-knowledge",
+      "to": "prisma"
+    },
+    {
+      "from": "seller-knowledge",
+      "to": "site-builder"
+    },
+    {
+      "from": "seller-knowledge",
+      "to": "temporal"
+    },
+    {
+      "from": "signals",
+      "to": "adapters"
+    },
+    {
+      "from": "signals",
+      "to": "auth"
+    },
+    {
+      "from": "signals",
+      "to": "common"
+    },
+    {
+      "from": "signals",
+      "to": "discovery"
+    },
+    {
+      "from": "signals",
+      "to": "durable-results"
+    },
+    {
+      "from": "signals",
+      "to": "execution-budget"
+    },
+    {
+      "from": "signals",
+      "to": "intent"
+    },
+    {
+      "from": "signals",
+      "to": "prisma"
+    },
+    {
+      "from": "signals",
+      "to": "registry"
+    },
+    {
+      "from": "site-builder",
+      "to": "auth"
+    },
+    {
+      "from": "site-builder",
+      "to": "claim"
+    },
+    {
+      "from": "site-builder",
+      "to": "common"
+    },
+    {
+      "from": "site-builder",
+      "to": "execution-budget"
+    },
+    {
+      "from": "site-builder",
+      "to": "model-gateway"
+    },
+    {
+      "from": "site-builder",
+      "to": "model-runtime"
+    },
+    {
+      "from": "site-builder",
+      "to": "prisma"
+    },
+    {
+      "from": "site-builder",
+      "to": "runtime"
+    },
+    {
+      "from": "site-builder",
+      "to": "temporal"
+    },
+    {
+      "from": "site-builder",
+      "to": "tools"
+    },
+    {
+      "from": "skills",
+      "to": "ai-tasks"
+    },
+    {
+      "from": "skills",
+      "to": "auth"
+    },
+    {
+      "from": "skills",
+      "to": "common"
+    },
+    {
+      "from": "skills",
+      "to": "discovery"
+    },
+    {
+      "from": "skills",
+      "to": "model-gateway"
+    },
+    {
+      "from": "skills",
+      "to": "model-runtime"
+    },
+    {
+      "from": "skills",
+      "to": "prisma"
+    },
+    {
+      "from": "skills",
+      "to": "tools"
+    },
+    {
+      "from": "temporal",
+      "to": "acquisition"
+    },
+    {
+      "from": "temporal",
+      "to": "adapters"
+    },
+    {
+      "from": "temporal",
+      "to": "agents"
+    },
+    {
+      "from": "temporal",
+      "to": "ai-tasks"
+    },
+    {
+      "from": "temporal",
+      "to": "channels"
+    },
+    {
+      "from": "temporal",
+      "to": "compliance"
+    },
+    {
+      "from": "temporal",
+      "to": "discovery"
+    },
+    {
+      "from": "temporal",
+      "to": "durable-results"
+    },
+    {
+      "from": "temporal",
+      "to": "enrichment"
+    },
+    {
+      "from": "temporal",
+      "to": "evaluation"
+    },
+    {
+      "from": "temporal",
+      "to": "execution-budget"
+    },
+    {
+      "from": "temporal",
+      "to": "icp"
+    },
+    {
+      "from": "temporal",
+      "to": "intent"
+    },
+    {
+      "from": "temporal",
+      "to": "lead"
+    },
+    {
+      "from": "temporal",
+      "to": "measurement"
+    },
+    {
+      "from": "temporal",
+      "to": "memory"
+    },
+    {
+      "from": "temporal",
+      "to": "model-gateway"
+    },
+    {
+      "from": "temporal",
+      "to": "model-runtime"
+    },
+    {
+      "from": "temporal",
+      "to": "platform-authority"
+    },
+    {
+      "from": "temporal",
+      "to": "prisma"
+    },
+    {
+      "from": "temporal",
+      "to": "registry"
+    },
+    {
+      "from": "temporal",
+      "to": "runtime"
+    },
+    {
+      "from": "temporal",
+      "to": "sanctions"
+    },
+    {
+      "from": "temporal",
+      "to": "seller-knowledge"
+    },
+    {
+      "from": "temporal",
+      "to": "signals"
+    },
+    {
+      "from": "temporal",
+      "to": "site-builder"
+    },
+    {
+      "from": "temporal",
+      "to": "skills"
+    },
+    {
+      "from": "temporal",
+      "to": "tools"
+    },
+    {
+      "from": "tools",
+      "to": "adapters"
+    },
+    {
+      "from": "tools",
+      "to": "ai-tasks"
+    },
+    {
+      "from": "tools",
+      "to": "durable-results"
+    },
+    {
+      "from": "tools",
+      "to": "execution-budget"
+    },
+    {
+      "from": "tools",
+      "to": "platform-authority"
+    },
+    {
+      "from": "tools",
+      "to": "site-builder"
+    },
+    {
+      "from": "whoami",
+      "to": "auth"
+    },
+    {
+      "from": "whoami",
+      "to": "common"
+    }
+  ]
+}
