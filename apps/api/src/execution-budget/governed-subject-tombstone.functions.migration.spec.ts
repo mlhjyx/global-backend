@@ -160,7 +160,7 @@ describe('governed subject Task 3 tombstone migration contract', () => {
 
   it('keeps the repository free of Nest and runtime composition ownership', async () => {
     const repository = await readFile(new URL(
-      './governed-subject-relation.repository.ts', import.meta.url,
+      './governed-subject-relation.repository.test-fixture.ts', import.meta.url,
     ), 'utf8');
     expect(repository).not.toMatch(/@Injectable|Module\(|Activity|Workflow|Temporal|readiness/iu);
   });

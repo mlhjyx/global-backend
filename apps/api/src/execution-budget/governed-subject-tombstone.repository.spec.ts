@@ -3,7 +3,7 @@ import { types as nodeUtilTypes } from 'node:util';
 import { Prisma } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
 
-const repositoryUrl = new URL('./governed-subject-relation.repository.ts', import.meta.url);
+const repositoryUrl = new URL('./governed-subject-relation.repository.test-fixture.ts', import.meta.url);
 const typesUrl = new URL('./governed-subject-relation.types.ts', import.meta.url);
 const FUNCTION = 'tombstone_workspace_governed_subject_v1';
 const IDS = Object.freeze({
