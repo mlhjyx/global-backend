@@ -60,6 +60,17 @@ review thread 必须解决、push 后撤销旧 review。与下文 2026-08-09 相
 
 删除、non-fast-forward、review thread 解决与 push 后撤销旧 review 等其余规则不变。
 
+
+### 2026-11-12 ruleset 变更：CI 拆分后的必需检查（P2-2，产品负责人授权）
+
+审计 P2-2：`build · typecheck · test` 单 job 串行执行 install → 构建 → 单测 → PostgreSQL 语义套件 → OCI 镜像 → 渲染视觉/Go race，任一失败整 job 重跑，p50 10.1 / p90 26.9 分钟。按产品负责人授权，把三个最重且按路径触发的门拆成独立 job，各自成为独立的必需检查。四个 job 都在每个 PR 上运行，只有步骤级 `if` 按 scope 输出跳过，因此必需检查不会停留在 skipped：
+
+- `OCI runtime image · smokes`（`build-test-oci`）：运行镜像构建与三项镜像冒烟；
+- `renderer visual · qualified`（`build-test-renderer`）：55 型三断点视觉回归、fixture 矩阵与多语冒烟；
+- `temporal reader · Go race`（`build-test-temporal-go`）：原生 Temporal reader 的 Go race 构建。
+
+`build · typecheck · test`（`build-test`）保留文档门、契约/构建/单测、PostgreSQL 语义套件、attestation 与 tree-clean。四个 job 均以 `{{ !cancelled() }}` 启动，并在任何 checkout 或仓库代码执行前验证 `needs.renderer-visual-scope.result` 为 `success`。`required-contexts.json` 的 `required_contexts` 与 `context_implementations` 同步登记三个新 context；live ruleset 加入三个新必需检查并回读确认。
+
 ### 2026-08-09 只读 ruleset 回读
 
 GitHub API 对 `main` 的实时只读回读确认仓库级 `protect-main` ruleset 为
@@ -159,7 +170,8 @@ diff 失败、定时与手动触发时 fail-closed 为 `true`。`build · typech
 `docs:verify`、Copy 影响评估与 tree-cleanliness 始终运行。
 
 `build · typecheck · test` 与它依赖的 `renderer visual scope` 均已被 live ruleset
-强制（2026-09-21 回读）。为防 upstream failure 让 build job 被 GitHub 标为 skipped，
+强制（2026-09-21 回读；2026-11-12 起还包括拆分出的 `OCI runtime image · smokes`、
+`renderer visual · qualified`、`temporal reader · Go race` 三个独立必需检查）。为防 upstream failure 让 build job 被 GitHub 标为 skipped，
 build job 固定以 policy 批准的 `${{ !cancelled() }}` 启动（不用 `always()`：两者在依赖
 失败时都照跑，但 `always()` 的 job 无视工作流取消），并在
 任何 checkout 或仓库代码执行前验证 `needs.renderer-visual-scope.result` 必须为
