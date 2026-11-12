@@ -151,7 +151,7 @@ export class ModelWebSearchDiscoveryProvider implements CompanyDiscoveryAdapter 
 
   private icpText(query: CompanyDiscoveryQuery): string {
     const parts: string[] = [...query.keywords];
-    for (const key of ['industry', 'product', 'role', 'region', 'country']) {
+    for (const key of ['industry', 'product', 'role', 'trade_side', 'region', 'country']) {
       const value = query.filters?.[key];
       if (typeof value === 'string' && value.trim()) parts.push(`${key}: ${value.trim()}`);
     }

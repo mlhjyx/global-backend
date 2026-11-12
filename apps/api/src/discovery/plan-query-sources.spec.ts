@@ -768,6 +768,23 @@ describe('source coverage fill (vNext W4)', () => {
     ]);
   });
 
+  it('carries the ICP trade role into every coverage-fill query', () => {
+    const queries = [query('public_intelligence', { source_hint: 'public_web' })];
+    const filled = withSourceCoverage(
+      queries,
+      {
+        ...ICP,
+        companyAttributes: { industry: '泵及泵设备', trade_side: 'distributor' },
+      },
+      COVERAGE_ENABLED,
+      { registryFrameCountries: new Set(['DE']) },
+    );
+
+    const additions = filled.slice(1);
+    expect(additions.length).toBeGreaterThan(0);
+    expect(additions.every((item) => item.filters?.trade_side === 'distributor')).toBe(true);
+  });
+
   it('leaves a plan alone when every plannable ENABLED source already has a query', () => {
     const queries = [
       query('public_intelligence', { source_hint: 'public_web' }),
