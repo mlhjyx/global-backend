@@ -7,6 +7,7 @@ title: Remove a zero-reference data file and move a test seam out of the product
 - 改动：
   - 删除零引用的 `acquisition/fair-source-catalog.ts`。
   - 把 `governed-subject-relation.repository.ts` 重命名为 `*.test-fixture.ts`（`tsconfig.build.json` 已排除该模式），三个 spec 的 URL 引用同步更新；测试语义与覆盖不变。
+  - 删除 G9 基线的旧路径函数条目（改名后不再适用，棘轮只许收紧）。
   - `temporal/workflows.ts` 保留，本次不删。
 - 测试：`node --test scripts/governance-workflow-constants.spec.mjs`；全量零容器单测；`pnpm --filter @global/api build`。
 - 未做：不删除 governed-subject relation 的测试；不重构 33 模块环；`workflows.ts` 作为路径入口保留。
