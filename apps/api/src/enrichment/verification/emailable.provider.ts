@@ -1,11 +1,15 @@
 import type { CatchAllClass, EmailVerificationState } from '../../discovery/contact-point-verification-state';
-import { scoreEmailPoint } from './verification-policy';
 import {
-  unavailableProviderResult,
   type EmailVerificationProvider,
   type EmailVerificationProviderResult,
   type EmailVerificationRequest,
 } from './email-verification-provider';
+import {
+  assembleProviderResult,
+  fetchProviderJson,
+  resolveProviderHttpConfig,
+  type ProviderHttpConfig,
+} from './provider-http';
 
 /**
  * Emailable（api.emailable.com/v1/verify）验证器客户端 —— 双正规则里的「第二票」。
@@ -23,25 +27,19 @@ import {
  * HTTP 走注入的 fetch（单测 fixture，零真实出网）；429/5xx/超时/畸形体一律 UNKNOWN + error。
  */
 
-export interface EmailableConfig {
-  apiKey: string | null;
-  baseUrl: string;
-  timeoutMs: number;
-  costMicrousd: number;
-}
+export type EmailableConfig = ProviderHttpConfig;
 
 export function resolveEmailableConfig(env: NodeJS.ProcessEnv = process.env): EmailableConfig {
-  const positiveInt = (raw: string | undefined, fallback: number): number => {
-    const parsed = Number.parseInt(raw ?? '', 10);
-    return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
-  };
-  return {
-    apiKey: (env.EMAILABLE_API_KEY ?? '').trim() || null,
-    baseUrl: (env.EMAILABLE_BASE_URL ?? 'https://api.emailable.com').replace(/\/+$/u, ''),
-    timeoutMs: positiveInt(env.EMAILABLE_TIMEOUT_MS, 8_000),
+  return resolveProviderHttpConfig(env, {
+    keyEnv: 'EMAILABLE_API_KEY',
+    baseUrlEnv: 'EMAILABLE_BASE_URL',
+    timeoutEnv: 'EMAILABLE_TIMEOUT_MS',
+    costEnv: 'EMAILABLE_COST_MICROUSD',
+    defaultBaseUrl: 'https://api.emailable.com',
+    defaultTimeoutMs: 8_000,
     // $0.0076/条（5K credits $38，2026-11-08 快照）→ 7600 微美元。
-    costMicrousd: positiveInt(env.EMAILABLE_COST_MICROUSD, 7_600),
-  };
+    defaultCostMicrousd: 7_600,
+  });
 }
 
 export interface EmailableMapping {
@@ -168,72 +166,28 @@ export class EmailableProvider implements EmailVerificationProvider {
 
   async verify(request: EmailVerificationRequest): Promise<EmailVerificationProviderResult> {
     const startedAt = Date.now();
-    if (!this.config.apiKey) {
-      return unavailableProviderResult({
-        providerKey: this.key,
-        error: 'provider_unconfigured',
-        detail: 'EMAILABLE_API_KEY 未配置，降级 UNKNOWN',
-        latencyMs: Date.now() - startedAt,
-      });
-    }
     const url = new URL(`${this.config.baseUrl}/v1/verify`);
     url.searchParams.set('email', request.email);
-    url.searchParams.set('api_key', this.config.apiKey);
-
-    let response: Response;
-    try {
-      response = await this.fetchImpl(url, {
-        method: 'GET',
-        signal: AbortSignal.timeout(this.config.timeoutMs),
-      });
-    } catch (error) {
-      const timedOut =
-        error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
-      return unavailableProviderResult({
-        providerKey: this.key,
-        error: timedOut ? 'timeout' : 'network_error',
-        detail: timedOut ? 'provider_timeout' : 'provider_network_error',
-        latencyMs: Date.now() - startedAt,
-      });
-    }
-    if (response.status === 429) {
-      return unavailableProviderResult({
-        providerKey: this.key,
-        error: 'rate_limited',
-        detail: 'provider_http_429',
-        latencyMs: Date.now() - startedAt,
-      });
-    }
-    if (!response.ok) {
-      return unavailableProviderResult({
-        providerKey: this.key,
-        error: `http_${response.status}`,
-        detail: `provider_http_${response.status}`,
-        latencyMs: Date.now() - startedAt,
-      });
-    }
-    let body: unknown;
-    try {
-      body = await response.json();
-    } catch {
-      body = null;
-    }
-    const mapping = mapEmailableResponse(body);
-    return {
+    url.searchParams.set('api_key', this.config.apiKey ?? '');
+    const outcome = await fetchProviderJson({
       providerKey: this.key,
-      state: mapping.state,
-      catchAll: mapping.catchAll,
-      catchAllClass: mapping.catchAllClass,
-      score: scoreEmailPoint({ state: mapping.state, catchAllClass: mapping.catchAllClass }),
-      acceptAll: mapping.acceptAll,
-      disposable: mapping.disposable,
-      role: mapping.role,
+      apiKey: this.config.apiKey,
+      unconfiguredDetail: 'EMAILABLE_API_KEY 未配置，降级 UNKNOWN',
+      url,
+      fetchImpl: this.fetchImpl,
+      timeoutMs: this.config.timeoutMs,
+      startedAt,
+    });
+    if ('unavailable' in outcome) return outcome.unavailable;
+    const mapping = mapEmailableResponse(outcome.body);
+    return assembleProviderResult({
+      providerKey: this.key,
+      mapping,
       // 供应商自带 score 留痕在 detail（基础分口径由 scoreEmailPoint 统一）。
-      detail: mapping.providerScore === null ? mapping.detail : `${mapping.detail};score=${mapping.providerScore}`,
-      error: mapping.error,
-      // 供应商侧错误（无有效裁决）不计费；解析出的裁决按次计费。
-      costMicrousd: mapping.error === null ? this.config.costMicrousd : 0,
-      latencyMs: Date.now() - startedAt,
-    };
+      detail:
+        mapping.providerScore === null ? mapping.detail : `${mapping.detail};score=${mapping.providerScore}`,
+      costMicrousd: this.config.costMicrousd,
+      startedAt,
+    });
   }
 }
