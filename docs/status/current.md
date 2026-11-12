@@ -71,6 +71,7 @@ PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](..
 | PRD4-D9 制裁名单与职能邮箱（2026-10-10，部分拍板） | 制裁名单走运营刷新（#629，不经平台 schedule），三个源 ENABLED（OFAC SDN、OFAC Consolidated、EU FSF，约 1.2 万条实体）；职能邮箱按 BI-14 做公司级（#630；`company_contact` 现已 ENABLED 并在 run 内产出公司级路径）。LIA 时机未定（D6 页面待排期） | `sanctions_source` 置 DISABLED |
 | PRD4-D14 模型供应（2026-10-11） | #633：11 个获客任务照旧请求 pro 档，上游换成 Flash 档时也接受，trace 与账本如实记为 Flash；建站等其他任务仍只认 pro。xin 已打开 `MODEL_IDENTITY_SUBSTITUTES`。官方备用上游未接 | 关掉 `MODEL_IDENTITY_SUBSTITUTES` |
 | PRD4-D16 个人数据路径保持现状（2026-10-11） | `decision_maker`、`companies_house`、`inpi_rne`、`smtp_self` 保持 ENABLED，展会 Algolia 来源保留，产品负责人风险自担；验收 run 存下个人数据不再停止，改为如实计数并注明来源。个人数据三张表已有真实行：`canonical_contact` 80、`contact_point` 61、`company_contact_point` 268 | 把相应 `data_provider` 置 DISABLED |
+| OWNER-DECISION-2026-11-05 渠道记录 PII 明文延后（2026-11-05） | 渠道抓取记录 `source_channel_record` 的联系人字段明文存储（列注释 `PII_PENDING_ENCRYPTION`）；列级加密、Q25 访问审计、保留期与 Art.17 擦除按该决定延后。**复评日期 2027-01-31**，owner 产品负责人；到期未启动四件套须在冲突登记重新拍板 | 无需回退（列不变）；启动加密时按迁移改造并补 DSR 覆盖 |
 | 联系人线 D1–D8（2026-10-31 / 11-01 拍板） | M1–M4 已上线（run 内接线、社媒三层降级、邮箱补全双闸、gain-saas 决策人卡片）；M5 Golden Set 未开始；`email_guess` 2026-11-02 按 D3 重开、待验证。权威设计稿[§十一](../superpowers/plans/2026-10-31-contact-discovery.md) 是这条线唯一总文档 | 置回对应 provider DISABLED |
 | 2026-11-02 操作决定 | ① trade_fair 零结果根因=注册表只覆盖钣金展会；拍板「planner 按注册表裁剪」（PR #739，Docker 会话执行）；② `email_guess` 重开（D3 已于 11-01 批准）；③「已执行方案可重跑」立项，并入发布线的任务/重试工作流（Phase 4）；④ new-api 的 gemini 上游 5 并发是寻源慢的根因，待产品负责人提供新密钥/渠道后扩容；⑤ natfrp 穿透保持现状（产品负责人决定，不限制不关闭） | ①②置回开关；③不移交则忽略 |
 

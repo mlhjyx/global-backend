@@ -7,6 +7,19 @@
 
 状态统计：APPROVED 25, CLOSED 13, DRAFT 7, SUPERSEDED 4, REFERENCE_ONLY 1, GUIDE 1
 
+## 待裁决（2026-11-12 审计）
+
+以下 6 份计划零入站、零代码引用，但可能仍有设计/验收价值；删除前需产品负责人逐份确认：
+
+- `2026-10-26-global-review-remediation.md`（DRAFT，全局梳理整改方案，建议保留）
+- `2026-11-04-acquisition-system-master-plan.md`（DRAFT，获客总规划，建议保留）
+- `2026-11-06-channel-crawl-fetch-artifact-scope.md`（APPROVED，渠道抓取落地设计）
+- `2026-11-06-cost-dimension-settlement.md`（APPROVED，成本维度结算）
+- `2026-11-06-platform-worker-drain-gate.md`（APPROVED，worker 排空门）
+- `2026-11-08-skill-runtime-s0-e2e.md`（S0 端到端演示脚本）
+
+裁决标准：已被后续实现/文档取代且零引用的按 `documentation-rules.md` §5 删除；仍描述现行机制或验收证据的保留，并在正文加 successor/状态说明。
+
 | 日期 | 状态 | 计划 | 文件 |
 | --- | --- | --- | --- |
 | 2026-08-29 | CLOSED | Discovery Query Lineage Successor Admission Plan | `2026-08-29-discovery-query-lineage-foundation.md` |

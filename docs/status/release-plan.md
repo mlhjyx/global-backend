@@ -73,6 +73,12 @@ The G0–G7 meanings below are stable. Their current verdicts are intentionally 
 - Model-candidate visibility is governed by the generated [candidate baseline](../site-builder/model-candidate-baseline.md), machine ID `site-builder-model-candidate-baseline/2026-08-07-v3`; it does not authorize route adoption, dispatch or deployment.
 - A passing local or hosted test is not runtime evidence; RuntimeEvidence is not a Release Bundle; neither implies UAT, Pilot or GA authorization.
 
+### Site Builder 冻结期间的工程约束（2026-11-12 审计）
+
+- 不新增 Site Builder 生产代码、不扩大其测试/CI 预算；G9 文件与复杂度基线只降不升。
+- `docs/site-builder/` 与 `docs/design/` 仅作冻结线文档；eval 子系统不扩日常 CI，保留按需运行。
+- 解除冻结、恢复 Publish/Domain 或重新投入模型评测，均须 PRD4-D1 单独拍板；本约束不改变现有 Site Builder 运行路径或历史证据。
+
 ### Final service acceptance
 
 The original Buyer Intelligence final-service “封版” acceptance remains a capability target, not a current PASS: (1) Company/Offering/ICP produces a controlled Candidate Batch; (2) company/contact facts carry Canonical IDs, source, Evidence, rights, freshness, verification, cost and unknowns; (3) candidates expose decomposed scores and reason codes; (4) accept/reject/correct feedback reaches evaluation without cross-tenant leakage; (5) cancellation/retry/Partial/budget stop/provider degradation/fair scanning are supported; (6) OpenAPI/events/progress, RLS, deletion, audit, tests and SLO are verified; (7) real-company examples pass E2E/UAT; (8) the output contract is genuinely consumed downstream, not merely persisted. Docling/Langfuse are not mandatory gates. Phasing follows the current roadmap: Buyer R2 fair-cursor/Golden Set expansion stays later and is not made a new prerequisite for the bounded Pilot. The former schedule and dated completion annotations remain recoverable from Git commit `8eefba1cff15f2bbe4154451cac958a072803ab5`.
