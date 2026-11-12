@@ -182,6 +182,197 @@ export function matchesSiteBuildCostSummaryUpdatedV1(
   );
 }
 
+type PayloadEvent = Pick<
+  OutboxEventRow,
+  | "eventType"
+  | "schemaVersion"
+  | "workspaceId"
+  | "aggregateType"
+  | "aggregateId"
+  | "payload"
+>;
+
+const LEAD_QUALIFIED_REQUIRED = [
+  "snapshot_version",
+  "lead_id",
+  "workspace_id",
+  "icp_id",
+  "icp_version",
+  "company_ref",
+  "contact_refs",
+  "scores",
+  "fit_verdict",
+  "evidence_refs",
+  "qualification_rule_version",
+  "storage_rights_decision",
+  "personal_data_class",
+  "suppression_state",
+  "recommended_action",
+  "valid_until",
+  "sanctions_screening",
+] as const;
+
+const CANDIDATE_BATCH_REQUIRED = [
+  "run_ref",
+  "icp_id",
+  "batch_no",
+  "batch_ref",
+  "scored",
+  "queues",
+  "candidates",
+] as const;
+
+const DELETION_COMPLETED_REQUIRED = [
+  "snapshot_version",
+  "deletion_request_id",
+  "subject_type",
+  "subject_ref",
+  "contacts_erased",
+  "contact_points_erased",
+  "field_evidence_erased",
+  "signals_revoked",
+  "companies_suppressed",
+  "leads_rescore_requested",
+  "rule_version",
+  "erased_at",
+] as const;
+
+const ENVELOPE_ONLY_INTEGRATION_EVENTS: ReadonlySet<string> = new Set([
+  "LeadsScored",
+  "DiscoveryRunCompleted",
+  "ICPActivated",
+  "ClaimApproved",
+  "ClaimRevoked",
+  "ClaimExpired",
+  "KnowledgeConflictDetected",
+  "CampaignPlanJobFailed",
+  "SanctionsListStale",
+]);
+
+function payloadRecord(ev: PayloadEvent): Record<string, unknown> | null {
+  return record(ev.payload);
+}
+
+function hasRequiredKeys(
+  payload: Record<string, unknown>,
+  keys: readonly string[],
+): boolean {
+  return keys.every((key) => Object.prototype.hasOwnProperty.call(payload, key));
+}
+
+/** LeadQualified v1/v2 的最小 fail-closed 结构门（完整 schema 见 contracts/events/payloads）。 */
+export function matchesLeadQualifiedPayload(ev: PayloadEvent): boolean {
+  if (ev.eventType !== "LeadQualified") return true;
+  const payload = payloadRecord(ev);
+  const companyRef = record(payload?.company_ref);
+  return Boolean(
+    payload &&
+      (ev.schemaVersion === 1 || ev.schemaVersion === 2) &&
+      hasRequiredKeys(payload, LEAD_QUALIFIED_REQUIRED) &&
+      payload.snapshot_version === ev.schemaVersion &&
+      payload.workspace_id === ev.workspaceId &&
+      typeof payload.lead_id === "string" &&
+      UUID.test(payload.lead_id) &&
+      typeof payload.icp_id === "string" &&
+      UUID.test(payload.icp_id) &&
+      companyRef &&
+      typeof companyRef.canonical_company_id === "string" &&
+      UUID.test(companyRef.canonical_company_id) &&
+      Array.isArray(payload.contact_refs) &&
+      record(payload.scores) &&
+      record(payload.evidence_refs) &&
+      (payload.valid_until === null || typeof payload.valid_until === "string"),
+  );
+}
+
+/** CandidateBatchCompleted/v1 的最小结构门。 */
+export function matchesCandidateBatchCompletedPayload(
+  ev: PayloadEvent,
+): boolean {
+  if (ev.eventType !== "CandidateBatchCompleted") return true;
+  const payload = payloadRecord(ev);
+  return Boolean(
+    payload &&
+      ev.schemaVersion === 1 &&
+      hasRequiredKeys(payload, CANDIDATE_BATCH_REQUIRED) &&
+      (payload.run_ref === null || typeof payload.run_ref === "string") &&
+      typeof payload.icp_id === "string" &&
+      UUID.test(payload.icp_id) &&
+      typeof payload.batch_no === "number" &&
+      Number.isSafeInteger(payload.batch_no) &&
+      typeof payload.batch_ref === "string" &&
+      typeof payload.scored === "number" &&
+      Number.isFinite(payload.scored) &&
+      record(payload.queues) &&
+      Array.isArray(payload.candidates),
+  );
+}
+
+/** DeletionCompleted/v1 的最小结构门（payload 无 PII，只有计数与引用）。 */
+export function matchesDeletionCompletedPayload(ev: PayloadEvent): boolean {
+  if (ev.eventType !== "DeletionCompleted") return true;
+  const payload = payloadRecord(ev);
+  const counts = [
+    "contacts_erased",
+    "contact_points_erased",
+    "field_evidence_erased",
+    "signals_revoked",
+    "companies_suppressed",
+    "leads_rescore_requested",
+  ] as const;
+  return Boolean(
+    payload &&
+      ev.schemaVersion === 1 &&
+      hasRequiredKeys(payload, DELETION_COMPLETED_REQUIRED) &&
+      payload.snapshot_version === 1 &&
+      typeof payload.deletion_request_id === "string" &&
+      UUID.test(payload.deletion_request_id) &&
+      (payload.subject_type === "contact" || payload.subject_type === "company") &&
+      typeof payload.subject_ref === "string" &&
+      UUID.test(payload.subject_ref) &&
+      counts.every(
+        (key) =>
+          typeof payload[key] === "number" &&
+          Number.isSafeInteger(payload[key]) &&
+          Number(payload[key]) >= 0,
+      ) &&
+      typeof payload.rule_version === "string" &&
+      typeof payload.erased_at === "string",
+  );
+}
+
+const INTEGRATION_PAYLOAD_VALIDATORS: Readonly<
+  Record<string, (ev: PayloadEvent) => boolean>
+> = {
+  LeadQualified: matchesLeadQualifiedPayload,
+  CandidateBatchCompleted: matchesCandidateBatchCompletedPayload,
+  DeletionCompleted: matchesDeletionCompletedPayload,
+  SiteBuildCostSummaryUpdated: matchesSiteBuildCostSummaryUpdatedV1,
+};
+
+/**
+ * 分类一个集成事件的 payload 门：validator（有最小结构门）、envelope-only（显式豁免，
+ * 仍要求 payload 是对象）、unclassified（注册了但忘了分类，relay 会 park）。
+ */
+export function integrationEventValidationClass(
+  eventType: string,
+): "validator" | "envelope-only" | "unclassified" | "unregistered" {
+  if (INTEGRATION_PAYLOAD_VALIDATORS[eventType]) return "validator";
+  if (ENVELOPE_ONLY_INTEGRATION_EVENTS.has(eventType)) return "envelope-only";
+  if (INTEGRATION_EVENTS.has(eventType)) return "unclassified";
+  return "unregistered";
+}
+
+/** relay 的集成事件 payload 门：validator 或 envelope-only 对象；未分类 fail closed。 */
+export function validateIntegrationEvent(ev: PayloadEvent): boolean {
+  const validator = INTEGRATION_PAYLOAD_VALIDATORS[ev.eventType];
+  if (validator) return validator(ev);
+  if (ENVELOPE_ONLY_INTEGRATION_EVENTS.has(ev.eventType)) {
+    return payloadRecord(ev) !== null;
+  }
+  return false;
+}
+
 /** 对外事件信封（packages/contracts/events/envelope.schema.json 的 snake_case 形状）。 */
 export interface DomainEventEnvelope {
   event_id: string;
