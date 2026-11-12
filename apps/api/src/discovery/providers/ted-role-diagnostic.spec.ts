@@ -13,6 +13,10 @@ import { mapNoticeToRecords } from './ted.provider';
  * the code actually does. The `it.fails` cases encode the desired contract; they will
  * start failing (and must then be converted) only when the defect is fixed. No
  * production code is changed by this PR.
+ *
+ * Scope note: "downstream ignores buyer facts" holds for ICPs without trigger signals.
+ * With triggerSignals set, buyer_names feed the Intent keyword proxy (T2b), so a fix
+ * must decide whether the TED namespace belongs in that proxy.
  */
 
 const NOW = '2026-11-12T00:00:00.000Z';
@@ -36,6 +40,24 @@ const notice: TedAwardNotice = {
 };
 
 describe('PR-03 TED buyer/winner diagnostic', () => {
+  const base: Omit<CompanyForScoring, 'attributes'> = {
+    name: 'Pompes Martin SAS',
+    domain: 'pompes-martin.example',
+    country: 'FR',
+    industry: 'manufacturing',
+    employeeCount: 80,
+    revenueUsd: null,
+    status: 'NEW',
+    contacts: [
+      {
+        title: 'CEO',
+        seniority: 'c_level',
+        contactPoints: [{ type: 'email', status: 'VALID' }],
+      },
+    ],
+    companyContactPoints: [],
+  };
+
   it('T1 (characterization): winner record carries winner country and buyer facts separately', () => {
     const record = mapNoticeToRecords(notice, NOW)[0]!;
     const ted = record.attributes?.ted as Record<string, unknown>;
@@ -61,23 +83,6 @@ describe('PR-03 TED buyer/winner diagnostic', () => {
   );
 
   it('T2 (characterization): downstream scoring ignores TED buyer facts', () => {
-    const base: Omit<CompanyForScoring, 'attributes'> = {
-      name: 'Pompes Martin SAS',
-      domain: 'pompes-martin.example',
-      country: 'FR',
-      industry: 'manufacturing',
-      employeeCount: 80,
-      revenueUsd: null,
-      status: 'NEW',
-      contacts: [
-        {
-          title: 'CEO',
-          seniority: 'c_level',
-          contactPoints: [{ type: 'email', status: 'VALID' }],
-        },
-      ],
-      companyContactPoints: [],
-    };
     const icp: IcpForScoring = {
       rules: [{ kind: 'MUST_HAVE', field: 'industry', operator: 'eq', value: 'manufacturing' }],
       triggerSignals: [],
@@ -88,16 +93,55 @@ describe('PR-03 TED buyer/winner diagnostic', () => {
       {
         ...base,
         attributes: {
-          ted: { buyer_countries: ['DE'], buyer_names: ['Stadtwerke München'] },
+          ted: { buyer_countries: ['DEU'], buyer_names: ['Stadtwerke München'] },
         },
       },
       icp,
     );
     const withoutBuyerFacts = scoreLead({ ...base, attributes: null }, icp);
 
-    // Buyer facts do not change the score/queue at all: the downstream does not read them.
+    // 该 ICP 没有 triggerSignals：买方事实不改变任何维度与队列（T2b 覆盖有触发词的情形）。
     expect(withBuyerFacts.scores).toEqual(withoutBuyerFacts.scores);
     expect(withBuyerFacts.queue).toBe(withoutBuyerFacts.queue);
+  });
+
+  it('T2b (characterization): with trigger signals, TED buyer names feed the intent keyword proxy', () => {
+    const icp: IcpForScoring = {
+      rules: [{ kind: 'MUST_HAVE', field: 'industry', operator: 'eq', value: 'manufacturing' }],
+      triggerSignals: ['stadtwerke'],
+      committeeRoles: [],
+    };
+    const withBuyerFacts = scoreLead(
+      {
+        ...base,
+        attributes: {
+          ted: { buyer_countries: ['DEU'], buyer_names: ['Stadtwerke München'] },
+        },
+      },
+      icp,
+    );
+    const withoutBuyerFacts = scoreLead({ ...base, attributes: null }, icp);
+
+    // 关键词代理扫全部非下划线属性值，buyer_names 也参与 → intent 不同。
+    expect(withBuyerFacts.scores.intent).toBeGreaterThan(withoutBuyerFacts.scores.intent);
+  });
+
+  it('T2 (characterization): a same-country winner is accepted today (the fix must preserve it)', () => {
+    const icp: IcpForScoring = {
+      rules: [{ kind: 'MUST_HAVE', field: 'industry', operator: 'eq', value: 'manufacturing' }],
+      triggerSignals: [],
+      committeeRoles: [],
+    };
+    const result = scoreLead(
+      {
+        ...base,
+        attributes: {
+          ted: { buyer_countries: ['FRA'], buyer_names: ['Ville de Paris'] },
+        },
+      },
+      icp,
+    );
+    expect(result.queue).not.toBe('rejected');
   });
 
   it.fails(
@@ -118,7 +162,7 @@ describe('PR-03 TED buyer/winner diagnostic', () => {
           revenueUsd: null,
           status: 'NEW',
           attributes: {
-            ted: { buyer_countries: ['DE'], buyer_names: ['Stadtwerke München'] },
+            ted: { buyer_countries: ['DEU'], buyer_names: ['Stadtwerke München'] },
           },
           contacts: [
             {
