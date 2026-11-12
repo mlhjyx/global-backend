@@ -15,6 +15,7 @@ import {
   stripMarketQualifier,
   targetCountryCodes,
 } from './search-localization';
+import { icpTradeRole } from './icp-trade-role';
 import { selectFairs } from './trade-fairs';
 
 /**
@@ -712,6 +713,8 @@ interface CoverageFillContext {
   readonly firstTarget: string | undefined;
   readonly firstTargetIso2: string | undefined;
   readonly industry: string | undefined;
+  /** ICP 的结构化贸易角色：兜底查询不得丢失它（否则 `trade_side` 只在模型查询里存在）。 */
+  readonly tradeSide: string | null;
   readonly keywords: readonly string[];
   readonly priority: number;
   readonly registryFrameCountries: ReadonlySet<string> | null | undefined;
@@ -756,6 +759,7 @@ function coverageFillQuery(
   const filters: Record<string, unknown> = { source_hint: source.providerKey };
   if (context.firstTarget) filters.country = context.firstTarget;
   if (context.industry) filters.industry = context.industry;
+  if (context.tradeSide) filters.trade_side = context.tradeSide;
   let rationale = SOURCE_COVERAGE_RATIONALE;
   if (source.providerKey === 'registry_frame') {
     if (!context.firstTargetIso2) return null;
@@ -818,6 +822,7 @@ export function withSourceCoverage(
       ? targetCountryCodes({ filters: { country: [firstTarget] } })[0]?.toUpperCase()
       : undefined,
     industry: firstTermText(attributes.industry) ?? firstTermText(attributes.sub_industry),
+    tradeSide: icpTradeRole(attributes),
     keywords: borrowedMarketKeywords(queries, firstTarget),
     priority: queries.reduce((max, query) => Math.max(max, planPriority(query.priority)), 0) + 1,
     registryFrameCountries: deps.registryFrameCountries,

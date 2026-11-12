@@ -358,4 +358,27 @@ describe('ModelWebSearchDiscoveryProvider', () => {
     expect(result.lineage?.recordCount).toBe(0);
     expect(mocks.executeStructuredTaskWithRuntime).not.toHaveBeenCalled();
   });
+
+  it('renders the structured trade role into the exploration prompt', async () => {
+    const executionBroker = broker(async () => hits);
+    const prompts: string[] = [];
+    mocks.executeStructuredTaskWithRuntime.mockImplementation(
+      async (_gateway: unknown, input: { prompt: string }) => {
+        prompts.push(input.prompt);
+        return { data: answer, provider: 'stub', model: 'stub' };
+      },
+    );
+    const provider = new ModelWebSearchDiscoveryProvider({
+      gateway: chatGateway(answer),
+      broker: executionBroker,
+      env: { MODEL_WEB_SEARCH_PROVIDER: 'on' },
+    });
+
+    await provider.discoverCompanies(
+      { ...query, filters: { ...query.filters, trade_side: 'distributor' } },
+      context(),
+    );
+
+    expect(prompts.some((prompt) => prompt.includes('trade_side: distributor'))).toBe(true);
+  });
 });
