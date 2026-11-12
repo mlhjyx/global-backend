@@ -7236,7 +7236,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/GenerateWithAttemptDto"
+                "$ref": "#/components/schemas/GenerateIcpDto"
               }
             }
           }
@@ -23762,8 +23762,8 @@
             }
           },
           "products": {
-            "description": "主营产品关键词 1~5 个（落 Offering，source=onboarding）",
-            "minItems": 1,
+            "description": "主营产品关键词 0~5 个（落 Offering，source=onboarding）。空数组=明确取消全部勾选；缺省=本次不改动选择。",
+            "minItems": 0,
             "maxItems": 5,
             "type": "array",
             "items": {
@@ -24222,13 +24222,20 @@
           "createdAt"
         ]
       },
-      "GenerateWithAttemptDto": {
+      "GenerateIcpDto": {
         "type": "object",
         "properties": {
           "attemptId": {
             "type": "string",
             "format": "uuid",
             "description": "「重新生成」的幂等键（BFF 或客户端生成）。"
+          },
+          "confirmedTargetMarkets": {
+            "description": "本次生成中由用户明确确认的目标市场（ISO 3166-1 alpha-2）。AI 预填与历史档案不算确认；缺省时按未确认处理。",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -24619,6 +24626,16 @@
           "version",
           "createdAt"
         ]
+      },
+      "GenerateWithAttemptDto": {
+        "type": "object",
+        "properties": {
+          "attemptId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "「重新生成」的幂等键（BFF 或客户端生成）。"
+          }
+        }
       },
       "ExecuteTaskRefDto": {
         "type": "object",

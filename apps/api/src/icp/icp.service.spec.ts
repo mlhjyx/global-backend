@@ -146,7 +146,10 @@ const PUBLIC_WEB_QUERY = Object.freeze({
   rationale: "keyword discovery",
   priority: 2,
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
 
 describe("ICP human state and workspace boundaries", () => {
   it("reads ICPs and their child records inside the selected workspace", async () => {
@@ -485,7 +488,12 @@ describe("ICP generation authority and controlled enrichment", () => {
     expect(f.tx.icpDefinition.create.mock.calls[0][0].data).toMatchObject({
       name: "未命名 ICP",
       status: "HYPOTHESIS",
-      companyAttributes: [],
+      // 输入血缘始终落库：模型没给 company_attributes 时也要能看出输入基准。
+      companyAttributes: {
+        inputBasis: "legacy_all_offerings",
+        marketBasis: "legacy_profile_floor",
+        inputProducts: [],
+      },
       painPoints: [],
     });
     expect(f.tx.persona.create).not.toHaveBeenCalled();
@@ -1218,6 +1226,182 @@ describe("ICP generation authority and controlled enrichment", () => {
       });
     },
   );
+});
+
+describe("ICP input guardrails (PR-09)", () => {
+  const modelOutput = (markets: string[]) => ({
+    name: "Generated",
+    company_attributes: {},
+    pain_points: [],
+    trigger_signals: [],
+    exclusions: [],
+    value_props: [],
+    target_markets: markets,
+    personas: [],
+    buying_committee: [],
+    qualification_rules: [],
+  });
+
+  it("rejects an explicit empty confirmedTargetMarkets before touching the grant", async () => {
+    const f = generationFixture();
+    await expect(
+      f.service.generateFromCompany(ctx, "company", undefined, undefined, []),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(f.authority.verifyWorkspaceGrant).not.toHaveBeenCalled();
+    expect(f.authority.consumeVerifiedWorkspaceGrant).not.toHaveBeenCalled();
+    expect(f.runtime).not.toHaveBeenCalled();
+  });
+
+  it("rejects a confirmed market that is not ISO 3166-1 alpha-2 before touching the grant", async () => {
+    const f = generationFixture();
+    await expect(
+      f.service.generateFromCompany(ctx, "company", undefined, undefined, ["ZZZ"]),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(f.authority.verifyWorkspaceGrant).not.toHaveBeenCalled();
+    expect(f.runtime).not.toHaveBeenCalled();
+  });
+
+  it("stays off by default: profile markets remain the floor and offering markers are ignored", async () => {
+    const f = generationFixture();
+    f.tx.companyProfile.findUnique.mockResolvedValue({
+      id: "company",
+      name: "Synthetic Seller",
+      website: null,
+      targetMarkets: ["MY"],
+    });
+    f.tx.offering.findMany.mockResolvedValue([
+      { name: "A", description: null, attributes: { selectedByUser: false } },
+    ]);
+    f.result.data = modelOutput(["德国"]);
+
+    await f.service.generateFromCompany(ctx, "company");
+    const create = f.tx.icpDefinition.create.mock.calls[0][0].data;
+    expect(create.targetMarkets).toEqual(["德国", "马来西亚"]);
+    expect(create.companyAttributes).toMatchObject({
+      inputBasis: "legacy_all_offerings",
+      marketBasis: "legacy_profile_floor",
+      inputProducts: ["A"],
+    });
+    const prompt = f.runtime.mock.calls[0][1].prompt as string;
+    // 关闭时不做选择语义：带 selectedByUser:false 的旧数据仍按档案产品送进提示，
+    // 且不谎称是用户勾选。
+    expect(prompt).toContain("- A");
+    expect(prompt).toContain("来自档案/抽取，未经用户确认选择");
+    expect(prompt).not.toContain("用户本次勾选");
+  });
+
+  it("uses user-confirmed markets as the only hard target and keeps AI suggestions separate", async () => {
+    vi.stubEnv("ICP_INPUT_GUARDRAILS", "on");
+    const f = generationFixture();
+    f.tx.companyProfile.findUnique.mockResolvedValue({
+      id: "company",
+      name: "Synthetic Seller",
+      website: null,
+      targetMarkets: ["MY"],
+    });
+    f.result.data = modelOutput(["德国", "法国"]);
+
+    await f.service.generateFromCompany(ctx, "company", undefined, undefined, ["de", "FR"]);
+    const create = f.tx.icpDefinition.create.mock.calls[0][0].data;
+    expect(create.targetMarkets).toEqual(["DE", "FR"]);
+    expect(create.companyAttributes).toMatchObject({
+      marketBasis: "user_confirmed",
+      modelSuggestedMarkets: ["德国", "法国"],
+    });
+    const prompt = f.runtime.mock.calls[0][1].prompt as string;
+    expect(prompt).toContain("目标市场（ISO 3166-1，用户确认）：DE（德国）、FR（法国）");
+    expect(prompt).toContain("档案记录的市场（未确认，仅供建议）：MY（马来西亚）");
+    expect(prompt).toContain("目标市场以用户确认为权威");
+  });
+
+  it("never promotes AI-prefilled or legacy profile markets to confirmation", async () => {
+    vi.stubEnv("ICP_INPUT_GUARDRAILS", "on");
+    const f = generationFixture();
+    f.tx.companyProfile.findUnique.mockResolvedValue({
+      id: "company",
+      name: "Synthetic Seller",
+      website: null,
+      targetMarkets: ["MY"],
+    });
+    f.result.data = modelOutput(["德国"]);
+
+    await f.service.generateFromCompany(ctx, "company");
+    const create = f.tx.icpDefinition.create.mock.calls[0][0].data;
+    expect(create.targetMarkets).toEqual(["德国"]);
+    expect(create.targetMarkets).not.toContain("马来西亚");
+    expect(create.companyAttributes).toMatchObject({ marketBasis: "model_unconfirmed" });
+    const prompt = f.runtime.mock.calls[0][1].prompt as string;
+    expect(prompt).toContain("档案记录的市场（未确认，仅供建议）：MY（马来西亚）");
+    expect(prompt).not.toContain("目标市场以用户确认为权威");
+    // 新守护不回头改写已存在的 ICP。
+    expect(f.tx.icpDefinition.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("feeds only explicitly selected products into a guarded generation", async () => {
+    vi.stubEnv("ICP_INPUT_GUARDRAILS", "on");
+    const f = generationFixture();
+    f.tx.offering.findMany.mockResolvedValue([
+      { name: "A", description: null, attributes: { selectedByUser: true } },
+      { name: "B", description: null, attributes: { selectedByUser: false } },
+      { name: "C", description: null, attributes: null },
+      { name: "D", description: null, attributes: {} },
+    ]);
+    f.result.data = modelOutput(["德国"]);
+
+    await f.service.generateFromCompany(ctx, "company");
+    const create = f.tx.icpDefinition.create.mock.calls[0][0].data;
+    expect(create.companyAttributes).toMatchObject({
+      inputBasis: "selected_products",
+      inputProducts: ["A"],
+    });
+    const prompt = f.runtime.mock.calls[0][1].prompt as string;
+    expect(prompt).toContain("产品/服务（用户本次勾选）：\n- A");
+    expect(prompt).not.toContain("- B");
+    // 跨租户：产品读取按 companyId 且发生在调用者 workspace 事务内。
+    expect(f.tx.offering.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { companyId: "company" } }),
+    );
+    expect(
+      f.prisma.withWorkspace.mock.calls.every(([workspace]) => workspace === ctx.workspaceId),
+    ).toBe(true);
+  });
+
+  it("refuses to generate after the user canceled every product selection", async () => {
+    vi.stubEnv("ICP_INPUT_GUARDRAILS", "on");
+    const f = generationFixture();
+    f.tx.offering.findMany.mockResolvedValue([
+      { name: "A", description: null, attributes: { selectedByUser: false } },
+      { name: "B", description: null, attributes: { selectedByUser: false } },
+    ]);
+    await expect(
+      f.service.generateFromCompany(ctx, "company"),
+    ).rejects.toMatchObject({
+      response: { error: { code: "NO_SELECTED_PRODUCTS" } },
+    });
+    expect(f.authority.consumeVerifiedWorkspaceGrant).not.toHaveBeenCalled();
+    expect(f.runtime).not.toHaveBeenCalled();
+  });
+
+  it("labels marker-less legacy offerings as unconfirmed instead of treating them as selection", async () => {
+    vi.stubEnv("ICP_INPUT_GUARDRAILS", "on");
+    const f = generationFixture();
+    f.tx.offering.findMany.mockResolvedValue([
+      { name: "A", description: null, attributes: null },
+      { name: "B", description: null, attributes: {} },
+    ]);
+    f.result.data = modelOutput(["德国"]);
+
+    await f.service.generateFromCompany(ctx, "company");
+    const create = f.tx.icpDefinition.create.mock.calls[0][0].data;
+    expect(create.companyAttributes).toMatchObject({
+      inputBasis: "legacy_all_offerings",
+      inputProducts: ["A", "B"],
+    });
+    const prompt = f.runtime.mock.calls[0][1].prompt as string;
+    expect(prompt).toContain("来自档案/抽取，未经用户确认选择");
+    expect(prompt).toContain("- A");
+    expect(prompt).toContain("- B");
+  });
 });
 
 /**

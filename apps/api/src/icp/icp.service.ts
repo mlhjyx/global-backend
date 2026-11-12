@@ -140,6 +140,61 @@ export function completeTargetMarkets(modelMarkets: unknown, sellerMarkets: read
   return [...model, ...missing.map(marketDisplayName)];
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Confirm-by-request markets: only an explicit API argument counts as user confirmation.
+ * AI prefills / legacy profile.targetMarkets are *not* promoted to confirmed markets.
+ */
+function confirmedMarketCodes(input: readonly string[] | undefined): string[] | null {
+  if (input === undefined) return null;
+  const normalizedInput = [...new Set(input.map((value) => value.trim().toUpperCase()).filter(Boolean))];
+  if (normalizedInput.length === 0) {
+    throw new BadRequestException({
+      error: { code: 'VALIDATION_ERROR', message: 'confirmedTargetMarkets 不能为空数组' },
+    });
+  }
+  const codes = targetCountryCodes({ filters: { country: normalizedInput } }).map((code) =>
+    code.toUpperCase(),
+  );
+  if (codes.length !== normalizedInput.length) {
+    throw new BadRequestException({
+      error: { code: 'VALIDATION_ERROR', message: 'confirmedTargetMarkets 必须是可归一的 ISO 3166-1 alpha-2' },
+    });
+  }
+  return [...new Set(codes)];
+}
+
+type OfferingForSelection = {
+  name: string;
+  description: string | null;
+  attributes: unknown;
+};
+
+/**
+ * Product selection guardrail: only explicit user markers feed a new ICP.
+ * - any true marker -> only those offerings;
+ * - markers exist but all false -> explicit "cancel all" (caller rejects);
+ * - no markers at all -> legacy fallback, labelled, never treated as confirmation.
+ */
+function selectOfferingsForIcp(offerings: readonly OfferingForSelection[]):
+  | { chosen: OfferingForSelection[]; basis: 'selected_products' | 'selection_canceled_all' }
+  | { chosen: OfferingForSelection[]; basis: 'legacy_all_offerings' } {
+  const marked = offerings.filter(
+    (offering) =>
+      isPlainRecord(offering.attributes) &&
+      typeof offering.attributes.selectedByUser === 'boolean',
+  );
+  const selected = marked.filter(
+    (offering) => (offering.attributes as Record<string, unknown>).selectedByUser === true,
+  );
+  if (selected.length > 0) return { chosen: selected, basis: 'selected_products' };
+  if (marked.length > 0) return { chosen: [], basis: 'selection_canceled_all' };
+  return { chosen: offerings.slice(0, 30), basis: 'legacy_all_offerings' };
+}
+
 const PLANNER_LANGUAGE_NAMES: Readonly<Record<SearchLanguage, string>> = Object.freeze({
   de: '德语', en: '英语', fr: '法语', it: '意大利语', es: '西班牙语', nl: '荷兰语', pl: '波兰语', zh: '中文',
   ms: '马来语', id: '印度尼西亚语', vi: '越南语', th: '泰语', ja: '日语', ko: '韩语', pt: '葡萄牙语', tr: '土耳其语',
@@ -196,7 +251,11 @@ export class IcpService {
     companyId: string,
     compactJws?: string,
     attemptId?: string,
+    confirmedTargetMarkets?: string[],
   ) {
+    const guardrailsEnabled = process.env.ICP_INPUT_GUARDRAILS === 'on';
+    // Validate explicit confirmation before consuming the one-shot Grant.
+    const confirmedMarkets = confirmedMarketCodes(confirmedTargetMarkets);
     const verifiedGrant = await this.authority.verifyWorkspaceGrant({
       compactJws,
       identity: ctx,
@@ -206,19 +265,37 @@ export class IcpService {
         ...(attemptId === undefined ? {} : { body: { attemptId } }),
       }),
     });
-    const { company, claims, offerings } = await this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const company = await tx.companyProfile.findUnique({ where: { id: companyId } });
-      if (!company) {
-        throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'company not found' } });
-      }
-      const claims = await tx.claim.findMany({ where: { companyId, status: 'APPROVED' } });
-      const offerings = await tx.offering.findMany({
-        where: { companyId },
-        orderBy: { confidence: 'desc' },
-        take: 30,
-      });
-      return { company, claims, offerings };
-    });
+    const { company, claims, offerings, offeringBasis } = await this.prisma.withWorkspace(
+      ctx.workspaceId,
+      async (tx) => {
+        const company = await tx.companyProfile.findUnique({ where: { id: companyId } });
+        if (!company) {
+          throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'company not found' } });
+        }
+        const claims = await tx.claim.findMany({ where: { companyId, status: 'APPROVED' } });
+        // Fetch enough rows to see selection markers beyond the legacy top-30 window.
+        const allOfferings = await tx.offering.findMany({
+          where: { companyId },
+          orderBy: { confidence: 'desc' },
+          take: 200,
+        });
+        const selection = guardrailsEnabled
+          ? selectOfferingsForIcp(allOfferings)
+          : {
+              chosen: allOfferings.slice(0, 30),
+              basis: 'legacy_all_offerings' as const,
+            };
+        if (guardrailsEnabled && selection.basis === 'selection_canceled_all') {
+          throw new BadRequestException({
+            error: {
+              code: 'NO_SELECTED_PRODUCTS',
+              message: '用户已取消全部产品选择；请至少勾选一个产品后再生成 ICP',
+            },
+          });
+        }
+        return { company, claims, offerings: selection.chosen, offeringBasis: selection.basis };
+      },
+    );
 
     if (claims.length === 0) {
       throw new BadRequestException({
@@ -233,20 +310,41 @@ export class IcpService {
 
     const contract = getTask('icp.design')!;
     const facts = claims.map((c) => `- [${c.type}] ${c.statement}`).join('\n');
+    const productsLabel =
+      offeringBasis === 'selected_products'
+        ? '产品/服务（用户本次勾选）'
+        : '产品/服务（来自档案/抽取，未经用户确认选择）';
     const products = offerings.length
-      ? `\n产品/服务（官网抽取）：\n${offerings.map((o) => `- ${o.name}${o.description ? `：${o.description}` : ''}`).join('\n')}`
+      ? `\n${productsLabel}：\n${offerings.map((o) => `- ${o.name}${o.description ? `：${o.description}` : ''}`).join('\n')}`
       : '';
-    // P1-B2（方案 §2.2）：档案的 targetMarkets/industry 是权威输入，必须进提示词；输出后还要确定性补齐。
-    const sellerMarkets = sellerIsoMarkets(company);
+    // P1-B2（方案 §2.2）：确认的市场/行业是权威输入；但 AI 预填与历史档案不等于确认。
+    const profileMarkets = sellerIsoMarkets(company);
+    const authorityMarkets = confirmedMarkets ?? (guardrailsEnabled ? [] : profileMarkets);
+    // 档案里有、但本次没有被用户确认的市场：显式标成建议，绝不静默丢掉、也不冒充确认。
+    const unconfirmedMarkets = guardrailsEnabled
+      ? profileMarkets.filter((iso) => !(confirmedMarkets ?? []).includes(iso))
+      : [];
+    const unconfirmedProfileMarkets = unconfirmedMarkets.length
+      ? `档案记录的市场（未确认，仅供建议）：${unconfirmedMarkets
+          .map((iso) => `${iso}（${marketDisplayName(iso)}）`)
+          .join('、')}`
+      : '';
     const sellerProfile = [
-      sellerMarkets.length
-        ? `目标市场（ISO 3166-1）：${sellerMarkets.map((iso) => `${iso}（${marketDisplayName(iso)}）`).join('、')}`
+      authorityMarkets.length
+        ? `目标市场（ISO 3166-1，${confirmedMarkets ? '用户确认' : '卖方档案'}）：${authorityMarkets
+            .map((iso) => `${iso}（${marketDisplayName(iso)}）`)
+            .join('、')}`
         : '',
       company.industry ? `行业：${company.industry}` : '',
+      unconfirmedProfileMarkets,
     ].filter(Boolean);
-    const sellerAuthority = sellerProfile.length
-      ? `\n卖方档案（权威输入）：\n${sellerProfile.join('\n')}\n目标市场以卖方档案为权威：输出的 target_markets 必须覆盖以上市场（可追加其他市场，但不得替换；追加请在 value_props 或说明中给出理由）。`
-      : '';
+    const sellerAuthority = authorityMarkets.length
+      ? guardrailsEnabled
+        ? `\n卖方档案（权威输入）：\n${sellerProfile.join('\n')}\n目标市场以用户确认为权威：硬目标只包含以上市场；其他市场只能作为建议，不得替换。`
+        : `\n卖方档案（权威输入）：\n${sellerProfile.join('\n')}\n目标市场以卖方档案为权威：输出的 target_markets 必须覆盖以上市场（可追加其他市场，但不得替换；追加请在 value_props 或说明中给出理由）。`
+      : sellerProfile.length
+        ? `\n卖方档案（参考）：\n${sellerProfile.join('\n')}`
+        : '';
     const prompt = `卖方企业：${company.name}${company.website ? ` (${company.website})` : ''}\n已确认的企业事实：\n${facts}${products}${sellerAuthority}\n\n请据此设计其理想客户画像(ICP)、买家委员会与机器可评估的验证规则，输出中文。`;
 
     const result = await executeIcpBudgetedTask<IcpModelOutput>({
@@ -267,6 +365,25 @@ export class IcpService {
       ),
     });
     const out = result.data;
+    const modelMarkets = Array.isArray(out.target_markets)
+      ? out.target_markets.filter((value): value is string => typeof value === 'string')
+      : [];
+    const targetMarketsForIcp = confirmedMarkets
+      ? confirmedMarkets
+      : guardrailsEnabled
+        ? modelMarkets
+        : completeTargetMarkets(out.target_markets, profileMarkets);
+    const companyAttributesForIcp = {
+      ...(isPlainRecord(out.company_attributes) ? out.company_attributes : {}),
+      inputBasis: offeringBasis,
+      marketBasis: confirmedMarkets
+        ? 'user_confirmed'
+        : guardrailsEnabled
+          ? 'model_unconfirmed'
+          : 'legacy_profile_floor',
+      inputProducts: offerings.map((offering) => offering.name),
+      ...(confirmedMarkets ? { modelSuggestedMarkets: modelMarkets } : {}),
+    };
 
     const icpId = result.durableReceipt
       ? domainAggregateIdForReceipt(result.durableReceipt, 'icp.design')
@@ -286,12 +403,12 @@ export class IcpService {
           companyId,
           name: out.name ?? '未命名 ICP',
           status: 'HYPOTHESIS', // AI-generated, not yet backtested
-          companyAttributes: json(out.company_attributes),
+          companyAttributes: json(companyAttributesForIcp),
           painPoints: json(out.pain_points),
           triggerSignals: json(out.trigger_signals),
           exclusions: json(out.exclusions),
           valueProps: json(out.value_props),
-          targetMarkets: json(completeTargetMarkets(out.target_markets, sellerMarkets)),
+          targetMarkets: json(targetMarketsForIcp),
         },
       });
       for (const p of out.personas ?? []) {

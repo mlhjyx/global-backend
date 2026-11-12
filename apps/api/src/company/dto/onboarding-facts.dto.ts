@@ -1,7 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ArrayMaxSize,
-  ArrayMinSize,
   IsArray,
   IsEmail,
   IsOptional,
@@ -56,13 +55,13 @@ export class OnboardingFactsDto {
 
   @ApiPropertyOptional({
     type: [String],
-    description: '主营产品关键词 1~5 个（落 Offering，source=onboarding）',
-    minItems: 1,
+    description:
+      '主营产品关键词 0~5 个（落 Offering，source=onboarding）。空数组=明确取消全部勾选；缺省=本次不改动选择。',
+    minItems: 0,
     maxItems: 5,
   })
   @IsOptional()
   @IsArray()
-  @ArrayMinSize(1)
   @ArrayMaxSize(5)
   @IsString({ each: true })
   @Length(1, 120, { each: true })

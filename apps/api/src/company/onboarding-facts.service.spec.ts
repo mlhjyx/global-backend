@@ -18,8 +18,10 @@ function fixture(company: Record<string, unknown> | null, options: { industryNod
     ...data,
   }));
   const offeringUpsert = vi.fn(async () => ({}));
-  const offeringDeleteMany = vi.fn(async () => ({ count: 0 }));
-  const offeringFindMany = vi.fn(async () => [{ name: '既有产品' }]);
+  const offeringUpdate = vi.fn(async () => ({}));
+  const offeringFindMany = vi.fn(async () => [
+    { id: 'offering-1', name: '既有产品', attributes: {} },
+  ]);
   const claimFindMany = vi.fn(async () => []);
   const claimCreate = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({
     id: `claim-${String(data.type)}`,
@@ -39,7 +41,7 @@ function fixture(company: Record<string, unknown> | null, options: { industryNod
     },
     offering: {
       upsert: offeringUpsert,
-      deleteMany: offeringDeleteMany,
+      update: offeringUpdate,
       findMany: offeringFindMany,
     },
     claim: { findMany: claimFindMany, create: claimCreate },
@@ -55,10 +57,12 @@ function fixture(company: Record<string, unknown> | null, options: { industryNod
   const service = new OnboardingFactsService(prisma as unknown as PrismaService);
   return {
     service,
+    prisma,
     tx,
     update,
     offeringUpsert,
-    offeringDeleteMany,
+    offeringUpdate,
+    offeringFindMany,
     claimCreate,
   };
 }
@@ -85,8 +89,8 @@ const READY = { ...DRAFT, status: 'REVIEW' };
 const FAILED = { ...DRAFT, understandingFailedAt: new Date('2026-11-10T07:00:00Z') };
 
 describe('OnboardingFactsService', () => {
-  it('受控行业码校验后回填标签，产品 upsert 并清理旧的手填产品', async () => {
-    const { service, update, offeringUpsert, offeringDeleteMany, claimCreate } = fixture(READY);
+  it('受控行业码校验后回填标签，产品 upsert 并把未勾选的旧产品标记为未选中', async () => {
+    const { service, update, offeringUpsert, offeringUpdate, claimCreate } = fixture(READY);
     const company = await service.apply(CTX, COMPANY_ID, {
       name: '具安科技',
       industryCode: '25',
@@ -105,12 +109,79 @@ describe('OnboardingFactsService', () => {
       businessEmail: 'sales@acme.test',
     });
     expect(offeringUpsert).toHaveBeenCalledTimes(2);
-    expect(offeringDeleteMany).toHaveBeenCalledWith({
-      where: { companyId: COMPANY_ID, source: 'onboarding', name: { notIn: ['钣金件', '激光切割件'] } },
+    // 勾选的产品带 selectedByUser:true 落库（create 分支带 workspaceId，不跨租户）。
+    expect(offeringUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          workspaceId: CTX.workspaceId,
+          companyId: COMPANY_ID,
+          source: 'onboarding',
+          attributes: expect.objectContaining({ selectedByUser: true }),
+        }),
+      }),
+    );
+    // 未勾选的既有产品不删除，改为撤销选择标记（理解抽取仍可审计）。
+    expect(offeringUpdate).toHaveBeenCalledWith({
+      where: { id: 'offering-1' },
+      data: { attributes: expect.objectContaining({ selectedByUser: false }) },
     });
     // 事实 → Claim 草稿（产品×2 + 行业 + 市场 = 4 条）。
     expect(claimCreate).toHaveBeenCalledTimes(4);
     expect(company).toMatchObject({ industryCode: '25' });
+  });
+
+  it('取消勾选的产品被标记 false；重新勾选后恢复 true 且不再打 false', async () => {
+    const { service, offeringUpsert, offeringUpdate, offeringFindMany } = fixture(READY);
+    offeringFindMany.mockResolvedValue([
+      { id: 'offering-a', name: 'A', attributes: { selectedByUser: true } },
+      { id: 'offering-b', name: 'B', attributes: { selectedByUser: true } },
+    ]);
+    await service.apply(CTX, COMPANY_ID, { products: ['A'] });
+    expect(offeringUpsert).toHaveBeenCalledTimes(1);
+    expect(offeringUpdate).toHaveBeenCalledWith({
+      where: { id: 'offering-b' },
+      data: { attributes: expect.objectContaining({ selectedByUser: false }) },
+    });
+
+    // 重新勾选 B：upsert 写回 true，B 不再被标记 false。
+    offeringUpsert.mockClear();
+    offeringUpdate.mockClear();
+    offeringFindMany.mockResolvedValue([
+      { id: 'offering-a', name: 'A', attributes: { selectedByUser: true } },
+      { id: 'offering-b', name: 'B', attributes: { selectedByUser: false } },
+    ]);
+    await service.apply(CTX, COMPANY_ID, { products: ['A', 'B'] });
+    expect(offeringUpsert).toHaveBeenCalledTimes(2);
+    expect(offeringUpdate).not.toHaveBeenCalled();
+    const reselected = offeringUpsert.mock.calls.find(
+      ([call]) => (call as { where: { companyId_name: { name: string } } }).where.companyId_name.name === 'B',
+    );
+    expect(reselected?.[0]).toMatchObject({
+      update: { attributes: expect.objectContaining({ selectedByUser: true }) },
+    });
+  });
+
+  it('显式空数组=取消全部选择；缺省 products=本次不改动选择', async () => {
+    const { service, prisma, offeringUpsert, offeringUpdate, offeringFindMany } = fixture(READY);
+    offeringFindMany.mockResolvedValue([
+      { id: 'offering-a', name: 'A', attributes: { selectedByUser: true } },
+    ]);
+    await service.apply(CTX, COMPANY_ID, { products: [] });
+    expect(offeringUpsert).not.toHaveBeenCalled();
+    expect(offeringUpdate).toHaveBeenCalledWith({
+      where: { id: 'offering-a' },
+      data: { attributes: expect.objectContaining({ selectedByUser: false }) },
+    });
+
+    // 缺省（undefined）不是「取消全部」：一个 Offering 行都不动。
+    offeringUpdate.mockClear();
+    await service.apply(CTX, COMPANY_ID, { name: '新名字' });
+    expect(offeringUpsert).not.toHaveBeenCalled();
+    expect(offeringUpdate).not.toHaveBeenCalled();
+    // 跨租户：所有读写都被包在调用者的 workspace 事务里。
+    expect(
+      prisma.withWorkspace.mock.calls.every(([workspace]) => workspace === CTX.workspaceId),
+    ).toBe(true);
   });
 
   it('只给自由文本行业时清空旧受控码', async () => {
