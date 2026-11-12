@@ -3,7 +3,7 @@ import { types as nodeUtilTypes } from 'node:util';
 import { Prisma } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
 
-const repositoryUrl = new URL('./governed-subject-relation.repository.ts', import.meta.url);
+const repositoryUrl = new URL('./governed-subject-relation.repository.test-fixture.ts', import.meta.url);
 const typesUrl = new URL('./governed-subject-relation.types.ts', import.meta.url);
 const APPEND = 'append_workspace_governed_child_relation_v1';
 const ATTEST = 'attest_workspace_governed_child_relation_v1';
