@@ -311,6 +311,66 @@ describe("routeEvent — 三分支路由（收口③核心）", () => {
     expect(harness.tx.outboxDelivery.createMany).not.toHaveBeenCalled();
   });
 
+  it("warn-only compatibility: historical run/scored payloads log a warning but still deliver", async () => {
+    const runEv = makeEvent({
+      eventId: "aaaaaaaa-0000-0000-0000-0000000000a1",
+      eventType: "DiscoveryRunCompleted",
+      aggregateType: "DiscoveryRun",
+      aggregateId: "44444444-4444-4444-8444-444444444444",
+      payload: { planId: "plan-1" }, // 历史形状：没有 status
+    });
+    const scoredEv = makeEvent({
+      id: 2n,
+      eventId: "aaaaaaaa-0000-0000-0000-0000000000a2",
+      eventType: "LeadsScored",
+      aggregateType: "DiscoveryRun",
+      aggregateId: "44444444-4444-4444-8444-444444444444",
+      payload: { queues: {} }, // 历史形状：没有 scored
+    });
+    const harness = makeDb([runEv, scoredEv]);
+    const svc = makeService(harness.db, makeTemporal());
+    const warn = vi.spyOn(svc["logger"], "warn");
+
+    await svc.routeEvent(runEv);
+    await svc.routeEvent(scoredEv);
+
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(String(warn.mock.calls[0]![0])).toContain("payload warning");
+    expect(runEv.parkedAt).toBeNull();
+    expect(scoredEv.parkedAt).toBeNull();
+    expect(runEv.publishedAt).toBeInstanceOf(Date);
+    expect(scoredEv.publishedAt).toBeInstanceOf(Date);
+    expect(harness.tx.outboxDelivery.createMany).toHaveBeenCalledTimes(2);
+  });
+
+  it("warn-only compatibility: the minimal v1 shapes stay silent", async () => {
+    const runEv = makeEvent({
+      eventId: "aaaaaaaa-0000-0000-0000-0000000000a3",
+      eventType: "DiscoveryRunCompleted",
+      aggregateType: "DiscoveryRun",
+      aggregateId: "44444444-4444-4444-8444-444444444444",
+      payload: { status: "DONE" },
+    });
+    const scoredEv = makeEvent({
+      id: 2n,
+      eventId: "aaaaaaaa-0000-0000-0000-0000000000a4",
+      eventType: "LeadsScored",
+      aggregateType: "DiscoveryRun",
+      aggregateId: "44444444-4444-4444-8444-444444444444",
+      payload: { scored: 0, queues: {} },
+    });
+    const harness = makeDb([runEv, scoredEv]);
+    const svc = makeService(harness.db, makeTemporal());
+    const warn = vi.spyOn(svc["logger"], "warn");
+
+    await svc.routeEvent(runEv);
+    await svc.routeEvent(scoredEv);
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(runEv.parkedAt).toBeNull();
+    expect(scoredEv.parkedAt).toBeNull();
+  });
+
   it("URL + secret 都配置（https）→ saas + webhook 两个 sink", async () => {
     process.env.SAAS_WEBHOOK_URL = "https://saas.example.com/hooks/events";
     process.env.SAAS_WEBHOOK_SECRET = "test-secret";

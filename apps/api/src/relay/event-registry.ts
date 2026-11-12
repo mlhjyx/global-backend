@@ -182,8 +182,9 @@ export function matchesSiteBuildCostSummaryUpdatedV1(
   );
 }
 
-type PayloadEvent = Pick<
+export type PayloadEvent = Pick<
   OutboxEventRow,
+  | "eventId"
   | "eventType"
   | "schemaVersion"
   | "workspaceId"
@@ -308,6 +309,44 @@ export function matchesCandidateBatchCompletedPayload(
   );
 }
 
+/**
+ * DiscoveryRunCompleted/v1 compatibility validator (WARN-ONLY for now).
+ * Historical payloads may omit taskRef/stats/cost/costBasis; status is always written
+ * by the producer. Do not require any post-hoc field before the rollout is observed.
+ */
+export function matchesDiscoveryRunCompletedPayload(ev: PayloadEvent): boolean {
+  if (ev.eventType !== "DiscoveryRunCompleted") return true;
+  const payload = payloadRecord(ev);
+  return Boolean(
+    payload &&
+      ev.schemaVersion === 1 &&
+      typeof payload.status === "string" &&
+      payload.status.length > 0 &&
+      (payload.planId === undefined || typeof payload.planId === "string") &&
+      (payload.stats === undefined || record(payload.stats) !== null) &&
+      (payload.cost === undefined || (typeof payload.cost === "number" && Number.isFinite(payload.cost))) &&
+      (payload.costBasis === undefined || typeof payload.costBasis === "string") &&
+      (payload.taskRef === undefined || record(payload.taskRef) !== null),
+  );
+}
+
+/**
+ * LeadsScored/v1 compatibility validator (WARN-ONLY for now).
+ * The historical payload is `{scored, queues}`; it never had a `status` field.
+ */
+export function matchesLeadsScoredPayload(ev: PayloadEvent): boolean {
+  if (ev.eventType !== "LeadsScored") return true;
+  const payload = payloadRecord(ev);
+  return Boolean(
+    payload &&
+      ev.schemaVersion === 1 &&
+      typeof payload.scored === "number" &&
+      Number.isSafeInteger(payload.scored) &&
+      payload.scored >= 0 &&
+      record(payload.queues) !== null,
+  );
+}
+
 /** DeletionCompleted/v1 的最小结构门（payload 无 PII，只有计数与引用）。 */
 export function matchesDeletionCompletedPayload(ev: PayloadEvent): boolean {
   if (ev.eventType !== "DeletionCompleted") return true;
@@ -371,6 +410,33 @@ export function validateIntegrationEvent(ev: PayloadEvent): boolean {
     return payloadRecord(ev) !== null;
   }
   return false;
+}
+
+/**
+ * Compatibility validators that are deliberately WARN-ONLY during rollout.
+ * They must never park an event or change the consumer; the relay logs a warning.
+ */
+const WARN_ONLY_INTEGRATION_PAYLOAD_VALIDATORS: Readonly<
+  Record<string, (ev: PayloadEvent) => boolean>
+> = {
+  DiscoveryRunCompleted: matchesDiscoveryRunCompletedPayload,
+  LeadsScored: matchesLeadsScoredPayload,
+};
+
+export interface IntegrationEventWarning {
+  ok: boolean;
+  reason?: string;
+}
+
+/** Returns null when the event type has no warn-only validator (including envelope-only). */
+export function validateIntegrationEventWarnOnly(
+  ev: PayloadEvent,
+): IntegrationEventWarning | null {
+  const validator = WARN_ONLY_INTEGRATION_PAYLOAD_VALIDATORS[ev.eventType];
+  if (!validator) return null;
+  return validator(ev)
+    ? { ok: true }
+    : { ok: false, reason: "payload_contract_mismatch" };
 }
 
 /** 对外事件信封（packages/contracts/events/envelope.schema.json 的 snake_case 形状）。 */

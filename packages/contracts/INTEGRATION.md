@@ -140,7 +140,7 @@
 
 领域事件经 Transactional Outbox 发布，信封结构见 `events/envelope.schema.json`；哪些事件对外交付以 `apps/api/src/relay/event-registry.ts` 为准。对外交付的集成事件（`GET /events` 拉取 + `POST /events/ack`，配置 webhook 时另行推送）：
 `LeadQualified`、`LeadsScored`、`DiscoveryRunCompleted`、`ICPActivated`、`ClaimApproved`、`ClaimRevoked`、`ClaimExpired`、
-`KnowledgeConflictDetected`、`DeletionCompleted`、`SiteBuildCostSummaryUpdated`。其中 `LeadQualified`、`DeletionCompleted`、`SiteBuildCostSummaryUpdated` 有专用 payload schema（`events/payloads/`），其余走信封通用契约。
+`KnowledgeConflictDetected`、`DeletionCompleted`、`SiteBuildCostSummaryUpdated`。其中 `LeadQualified`、`LeadsScored`、`DiscoveryRunCompleted`、`CandidateBatchCompleted`、`DeletionCompleted`、`SiteBuildCostSummaryUpdated` 有专用 payload schema（`events/payloads/`）；`LeadsScored` / `DiscoveryRunCompleted` 的 schema 目前用于 relay 的兼容性 warning 校验（不阻断交付），其余走信封通用契约。
 `CompanyProfileCreated`、`DiscoveryRunRequested`、`QualifyRequested`、`DeletionRequested` 等是内部命令，只用来拉起后台工作流，不对外交付。
 
 ## 5. 数据真实性说明（前端展示建议）

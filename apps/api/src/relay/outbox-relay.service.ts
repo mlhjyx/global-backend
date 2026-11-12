@@ -61,6 +61,7 @@ import {
   toEnvelope,
   validateIntegrationEvent,
 } from "./event-registry";
+import { logIntegrationPayloadWarning } from "./integration-payload-warning";
 
 /**
  * Transactional Outbox relay (ADR-009). A trusted system scanner: connects as the
@@ -501,10 +502,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         );
         return;
       }
-      const sinks = [
-        PULL_SINK,
-        ...(this.webhookEnabled() ? [WEBHOOK_SINK] : []),
-      ];
+      logIntegrationPayloadWarning(this.logger, ev);
+      const sinks = [PULL_SINK, ...(this.webhookEnabled() ? [WEBHOOK_SINK] : [])];
       try {
         await this.db.$transaction(async (tx) => {
           await tx.outboxDelivery.createMany({
