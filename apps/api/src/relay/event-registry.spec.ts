@@ -13,6 +13,7 @@ const deletionRequestId = '40000000-0000-4000-8000-000000000001';
 
 function event(eventType: string, payload: unknown, schemaVersion = 1) {
   return {
+    eventId: uuid,
     eventType,
     schemaVersion,
     workspaceId,
