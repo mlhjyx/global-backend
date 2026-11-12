@@ -28,9 +28,12 @@ import {
   registryQueryDigest,
 } from '../../registry/local-query-receipt';
 import { RegistryQueryError, parseRegistryQueryFilters, queryRegistryEntities } from '../../registry/query';
+import { isIso3166Alpha2 } from '../iso3166';
+import { targetCountryCodes } from '../search-localization';
 import type {
   CompanyDiscoveryAdapter,
   CompanyDiscoveryQuery,
+  DiscoveryOutcome,
   DiscoveryResult,
   ExecutionContext,
   SourceClass,
@@ -46,11 +49,12 @@ export class RegistryFrameDiscoveryProvider implements CompanyDiscoveryAdapter {
     if (deps.lineageEnabled) this.companyResultLineage = DISCOVERY_COMPANY_RESULT_LINEAGE_V1;
   }
 
-  private emptyResult(ctx: ExecutionContext): DiscoveryResult {
-    if (!this.companyResultLineage) return { records: [], costCents: 0 };
+  private emptyResult(ctx: ExecutionContext, outcome?: DiscoveryOutcome): DiscoveryResult {
+    const base: DiscoveryResult = { records: [], costCents: 0 };
+    if (outcome) base.outcome = outcome;
+    if (!this.companyResultLineage) return base;
     return {
-      records: [],
-      costCents: 0,
+      ...base,
       lineage: emptyLineage(),
     };
   }
@@ -75,9 +79,44 @@ export class RegistryFrameDiscoveryProvider implements CompanyDiscoveryAdapter {
       industry: raw.industry,
       industryCodes: raw._industryCodes,
     });
-    // 计划 filters 里还有行业/国家自由词等字段；这里只取 registry 契约认识的键，其余忽略。
+    // 计划里的 country 可能是展示词（Germany / 德国 / DE）；registry 契约只接受
+    // ISO 3166-1 alpha-2。先在边界归一，无法归一即 PARAM_INVALID，不把参数错误
+    // 伪装成「源里没有数据」。只取 registry 契约认识的键，其余忽略。
+    const countryInput = raw.country ?? raw._countryCode;
+    const countryValues = Array.isArray(countryInput)
+      ? countryInput.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      : typeof countryInput === 'string' && countryInput.trim().length > 0
+        ? [countryInput]
+        : [];
+    if (countryValues.length !== 1) {
+      return this.emptyResult(ctx, {
+        errorClass: 'PARAM_INVALID',
+        reasonCode: 'COUNTRY_INVALID',
+        issues: ['country 必填且必须是单个 ISO 3166-1 alpha-2 或可归一的国家词'],
+      });
+    }
+    // 搜索本地化词表只覆盖重点市场；registry 契约允许任意真实 ISO2（BE/SE/KZ…），
+    // 引擎注入的 _countryCode 也来自全量 taxonomy。归一顺序：词表 → 原值即真实 ISO2
+    // → 引擎注入的 _countryCode；都不是才判 COUNTRY_UNRESOLVED。
+    const countryValue = countryValues[0]!;
+    const vocabularyCodes = targetCountryCodes({ filters: { country: [countryValue] } });
+    const countryCode =
+      vocabularyCodes.length === 1
+        ? vocabularyCodes[0]!.toUpperCase()
+        : isIso3166Alpha2(countryValue)
+          ? countryValue.trim().toUpperCase()
+          : typeof raw._countryCode === 'string' && isIso3166Alpha2(raw._countryCode)
+            ? raw._countryCode.trim().toUpperCase()
+            : null;
+    if (!countryCode) {
+      return this.emptyResult(ctx, {
+        errorClass: 'PARAM_INVALID',
+        reasonCode: 'COUNTRY_UNRESOLVED',
+        issues: ['country 无法归一为单一 ISO2'],
+      });
+    }
     const candidate: Record<string, unknown> = {
-      country: raw.country ?? raw._countryCode,
+      country: countryCode,
       ...(raw.scheme !== undefined ? { scheme: raw.scheme } : {}),
       ...(nacePrefixes.length > 0 ? { nace_prefix: nacePrefixes } : {}),
       ...(raw.employee_band !== undefined ? { employee_band: raw.employee_band } : {}),
@@ -90,13 +129,29 @@ export class RegistryFrameDiscoveryProvider implements CompanyDiscoveryAdapter {
     try {
       filters = parseRegistryQueryFilters(candidate);
     } catch (error) {
-      // fail-safe：filters 不合格返回空（与结构化源的「无过滤条件即空」约定一致），不炸整条查询。
-      if (error instanceof RegistryQueryError) return this.emptyResult(ctx);
+      // fail-safe：filters 不合格返回空（与结构化源的「无过滤条件即空」约定一致），
+      // 但带 PARAM_INVALID，调用方可与「有效查询但 0 行」区分。
+      if (error instanceof RegistryQueryError) {
+        return this.emptyResult(ctx, {
+          errorClass: 'PARAM_INVALID',
+          reasonCode: 'FILTERS_INVALID',
+          // 有界、非 PII：参数名 + 至多截断后的回显值。
+          issues: error.issues.slice(0, 5).map((issue) => issue.slice(0, 120)),
+        });
+      }
       throw error;
     }
     const records = await queryRegistryEntities(prisma, filters);
+    const emptyOutcome: DiscoveryOutcome | undefined =
+      records.length === 0
+        ? { errorClass: 'EMPTY_RESULT', reasonCode: 'NO_ROWS' }
+        : undefined;
     if (!this.companyResultLineage) {
-      return { records, costCents: 0 };
+      return {
+        records,
+        costCents: 0,
+        ...(emptyOutcome ? { outcome: emptyOutcome } : {}),
+      };
     }
     // local_query 血缘：回执身份来自 run 执行预算绑定；缺失即 fail-closed（空集 + 空血缘），
     // 绝不产出无法与执行器校验对上的回执。
@@ -122,6 +177,7 @@ export class RegistryFrameDiscoveryProvider implements CompanyDiscoveryAdapter {
       records,
       costCents: 0,
       lineage: buildRegistryQueryLineage(receipt, records.length),
+      ...(emptyOutcome ? { outcome: emptyOutcome } : {}),
     };
   }
 }
