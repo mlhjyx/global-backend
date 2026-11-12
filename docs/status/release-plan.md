@@ -2,6 +2,7 @@
 
 > 文档 ID：`DOC-ROADMAP-001`
 > 生命周期：`CURRENT`
+> 最后核验：2026-11-12（工程审计元数据核对；正文未逐条复验）
 > 当前事实来源：[当前状态](current.md) · [as-built 架构](../architecture/current.md)。
 > 2026-07-10 v2（获客合流定稿）；2026-07-27 模型候选重基线更新；2026-09-04 产品顺序与 currentness 分离更新；2026-11-02 按 [文档目录与维护规则](../documentation-rules.md) 从 `docs/roadmap/` 迁至 `docs/status/`。历史实施日志见 [changelog.md](../roadmap/changelog.md)。
 >

@@ -2,7 +2,7 @@
 
 > 文档 ID：`FE-GLOBAL-011`
 > 层级：`L2 / Normative target`
-> 生命周期：`CURRENT`
+> 生命周期：`ACTIVE_INPUT`
 > 评审状态：`APPROVED_AT_GATE_4`
 > 内容 Owner：`OWN-DESIGN`
 > 技术/证据 Owner：`OWN-SAAS-FE`、`OWN-QA-EVIDENCE`（当前未指派）

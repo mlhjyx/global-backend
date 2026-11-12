@@ -2,7 +2,7 @@
 
 > 文档 ID：`FE-GLOBAL-010`
 > 层级：`L2 / Normative target`
-> 生命周期：`CURRENT`
+> 生命周期：`ACTIVE_INPUT`
 > 评审状态：`APPROVED_AT_GATE_4`
 > 内容 Owner：`OWN-DESIGN`
 > 设计交付状态：正式设计事实源和资产 Registry 尚未建立；当前仅有[微文案目录](../design/content-and-microcopy-catalog.md)与[独立站线框](../design/independent-site-management-wireframes.md)

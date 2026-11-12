@@ -2,7 +2,7 @@
 
 > 文档 ID：`FE-GLOBAL-006`
 > 层级：`L2 / Normative target`
-> 生命周期：`CURRENT`
+> 生命周期：`ACTIVE_INPUT`
 > 评审状态：`APPROVED_AT_GATE_4`
 > 内容 Owner：`OWN-DESIGN`
 > 关联：`CAP-SHELL-001`、`CAP-TODAY-001`、`SCN-FE-SHELL-001..004`

@@ -4,7 +4,7 @@
 > 层级：`L1 / Navigation`
 > 状态：`CURRENT`
 > 维护 Owner：`OWN-DOC-GOV`
-> 最后核验：2026-11-11（修正 SaaS 前端归属与当前进度描述）；当前主线提交只见 [`status/current.md`](status/current.md)，本页不复制 SHA
+> 最后核验：2026-11-12（工程审计文档权威回写：事件计数、M2 七轴、周报取消、frontend 生命周期）；当前主线提交只见 [`status/current.md`](status/current.md)，本页不复制 SHA
 
 这是 `/global/backend` 的唯一人类文档入口。项目是统一的出海企业 AI 全球客户开发与增长执行 SaaS；Site Builder M1 收口已经进入历史，获客主链的 Campaign / QGO / 受控触达 / 前端主链路（M2）已于 2026-11-08 上线并验收，但 pilot/GA 晋级门仍未达成，治理、运行身份与可观测性继续补齐。独立站管理仍属于 SaaS 的一级产品区域，Astro 公开站是它管理的版本化输出，不是另一套 SaaS 前端。
 
