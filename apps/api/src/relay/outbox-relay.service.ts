@@ -58,8 +58,8 @@ import {
   INTERNAL_COMMANDS,
   PULL_SINK,
   WEBHOOK_SINK,
-  matchesSiteBuildCostSummaryUpdatedV1,
   toEnvelope,
+  validateIntegrationEvent,
 } from "./event-registry";
 
 /**
@@ -491,7 +491,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     if (INTEGRATION_EVENTS.has(ev.eventType)) {
-      if (!matchesSiteBuildCostSummaryUpdatedV1(ev)) {
+      if (!validateIntegrationEvent(ev)) {
         await this.db.outboxEvent.update({
           where: { id: ev.id },
           data: { parkedAt: new Date() },
