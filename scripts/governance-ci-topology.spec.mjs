@@ -38,7 +38,7 @@ test("renderer fast and scoped suites stay explicit and fail-closed", async () =
     readRepositoryFile("apps/site-renderer/package.json"),
   ]);
   const rendererPackage = JSON.parse(rendererPackageText);
-  const buildJob = jobBlock(ciWorkflow, "build-test");
+  const buildJob = jobBlock(ciWorkflow, "build-test-renderer");
 
   assert.equal(
     rendererPackage.scripts.test,
@@ -134,45 +134,52 @@ test("renderer scope changes and periodic runs execute every heavy renderer gate
   assert.match(scopeJob, /while IFS= read -r -d '' path; do/);
 });
 
-test("the live required build fails when its scope dependency is not successful", async () => {
+test("every live required build job fails when its scope dependency is not successful", async () => {
   const [ciWorkflow, policyText] = await Promise.all([
     readRepositoryFile(".github/workflows/ci.yml"),
     readRepositoryFile(".github/required-contexts.json"),
   ]);
-  const buildJob = jobBlock(ciWorkflow, "build-test");
-  const firstStep = buildJob
-    .split(/\r?\n/)
-    .find((line) => /^      - (?:name:|uses:)/.test(line));
-  const scopeGuardStep = namedStepBlock(
-    buildJob,
-    "Fail closed when renderer scope evaluation did not succeed",
-  );
   const policy = JSON.parse(policyText);
-  const buildPolicy = policy.context_implementations.find(
-    (item) => item.name === "build · typecheck · test",
-  );
+  for (const [jobId, contextName] of [
+    ["build-test", "build · typecheck · test"],
+    ["build-test-oci", "OCI runtime image · smokes"],
+    ["build-test-renderer", "renderer visual · qualified"],
+    ["build-test-temporal-go", "temporal reader · Go race"],
+  ]) {
+    const buildJob = jobBlock(ciWorkflow, jobId);
+    const firstStep = buildJob
+      .split(/\r?\n/)
+      .find((line) => /^      - (?:name:|uses:)/.test(line));
+    const scopeGuardStep = namedStepBlock(
+      buildJob,
+      "Fail closed when renderer scope evaluation did not succeed",
+    );
+    const buildPolicy = policy.context_implementations.find(
+      (item) => item.name === contextName,
+    );
 
-  assert.match(buildJob, /\n {4}if: \$\{\{ !cancelled\(\) \}\}/);
-  assert.doesNotMatch(
-    buildJob,
-    /\n {4}if: always\(\)/,
-    "always() jobs ignore cancellation, so a superseded PR run would block the next one",
-  );
-  assert.match(buildJob, /\n {4}needs: renderer-visual-scope/);
-  assert.equal(
-    firstStep,
-    "      - name: Fail closed when renderer scope evaluation did not succeed",
-  );
-  assert.match(
-    scopeGuardStep,
-    /SCOPE_RESULT: \$\{\{ needs\.renderer-visual-scope\.result \}\}/,
-  );
-  assert.match(
-    scopeGuardStep,
-    /if \[\[ "\$SCOPE_RESULT" != "success" \]\]; then/,
-  );
-  assert.match(scopeGuardStep, /^            exit 1$/m);
-  assert.equal(buildPolicy.allowed_job_if, "${{ !cancelled() }}");
+    assert.match(buildJob, /\n {4}if: \$\{\{ !cancelled\(\) \}\}/);
+    assert.doesNotMatch(
+      buildJob,
+      /\n {4}if: always\(\)/,
+      "always() jobs ignore cancellation, so a superseded PR run would block the next one",
+    );
+    assert.match(buildJob, /\n {4}needs: renderer-visual-scope/);
+    assert.equal(
+      firstStep,
+      "      - name: Fail closed when renderer scope evaluation did not succeed",
+    );
+    assert.match(
+      scopeGuardStep,
+      /SCOPE_RESULT: \$\{\{ needs\.renderer-visual-scope\.result \}\}/,
+    );
+    assert.match(
+      scopeGuardStep,
+      /if \[\[ "\$SCOPE_RESULT" != "success" \]\]; then/,
+    );
+    assert.match(scopeGuardStep, /^            exit 1$/m);
+    assert.equal(buildPolicy?.allowed_job_if, "${{ !cancelled() }}");
+  }
 });
 
 function scopeScript(workflow) {
@@ -240,6 +247,8 @@ test("heavy Temporal and OCI gates are path-scoped and fail closed", async () =>
   const ciWorkflow = await readRepositoryFile(".github/workflows/ci.yml");
   const scopeJob = jobBlock(ciWorkflow, "renderer-visual-scope");
   const buildJob = jobBlock(ciWorkflow, "build-test");
+  const ociJob = jobBlock(ciWorkflow, "build-test-oci");
+  const goJob = jobBlock(ciWorkflow, "build-test-temporal-go");
   for (const output of ["run_temporal_go", "run_oci", "run_db_tests", "run_code"]) {
     assert.match(
       scopeJob,
@@ -252,19 +261,26 @@ test("heavy Temporal and OCI gates are path-scoped and fail closed", async () =>
     );
   }
   const conditions = [
-    [
-      "Native Temporal reader server（verified modules · offline race · build）",
-      "run_temporal_go",
-    ],
-    ["Build and inspect immutable OCI runtime", "run_oci"],
-    ["Worker fail-closed runtime smoke", "run_oci"],
-    ["Renderer read-only OCI smoke", "run_oci"],
+    [goJob, "Native Temporal reader server（verified modules · offline race · build）", "run_temporal_go"],
+    [ociJob, "Build and inspect immutable OCI runtime", "run_oci"],
+    [ociJob, "Worker fail-closed runtime smoke", "run_oci"],
+    [ociJob, "Renderer read-only OCI smoke", "run_oci"],
   ];
-  for (const [stepName, output] of conditions) {
+  for (const [job, stepName, output] of conditions) {
     assert.deepEqual(
-      namedStepBlock(buildJob, stepName).match(/^        if:.*$/gm),
+      namedStepBlock(job, stepName).match(/^        if:.*$/gm),
       [`        if: needs.renderer-visual-scope.outputs.${output} == 'true'`],
       `${stepName} must have exactly one ${output} scope condition`,
+    );
+  }
+  for (const heavyStep of [
+    "Native Temporal reader server（verified modules · offline race · build）",
+    "Build and inspect immutable OCI runtime",
+    "Renderer qualified component visual regression（375 · 768 · 1440）",
+  ]) {
+    assert.ok(
+      !buildJob.includes(`      - name: ${heavyStep}`),
+      `${heavyStep} must run in its parallel job, not inside build-test`,
     );
   }
 
@@ -366,12 +382,15 @@ test("the Copy recovery rebuild gate rederives both fixed-source artifacts", asy
   );
 });
 
-test("the topology cleanup does not rename or expand required contexts", async () => {
+test("required contexts stay the exact declared set", async () => {
   const policy = JSON.parse(
     await readRepositoryFile(".github/required-contexts.json"),
   );
   assert.deepEqual(policy.required_contexts, [
     "renderer visual scope",
+    "OCI runtime image · smokes",
+    "renderer visual · qualified",
+    "temporal reader · Go race",
     "build · typecheck · test",
     "contracts · drift · lint · breaking",
     "gitleaks 密钥扫描",
@@ -549,19 +568,22 @@ test("the required build runs only the isolated zero-dispatch evaluation runner 
   assert.doesNotMatch(evalStep, /^\s+(?:env|with):/m);
 });
 
-test("the required build executes and inspects the exact-SHA immutable OCI contract", async () => {
+test("the required OCI job executes and inspects the exact-SHA immutable OCI contract", async () => {
   const ciWorkflow = await readRepositoryFile(".github/workflows/ci.yml");
-  const buildJob = jobBlock(ciWorkflow, "build-test");
-  const attestationStep = namedStepBlock(
-    buildJob,
-    "Generate and verify API build attestation",
+  const ciBuildJob = jobBlock(ciWorkflow, "build-test");
+  const buildJob = jobBlock(ciWorkflow, "build-test-oci");
+  assert.ok(
+    ciBuildJob.includes("Generate and verify API build attestation"),
+    "the attestation stays in the main build job",
+  );
+  assert.ok(
+    !ciBuildJob.includes("      - name: Build and inspect immutable OCI runtime"),
+    "the OCI image build must not also run inside the main build job",
   );
   const ociStep = namedStepBlock(
     buildJob,
     "Build and inspect immutable OCI runtime",
   );
-
-  assert.ok(buildJob.indexOf(ociStep) > buildJob.indexOf(attestationStep));
   assert.match(ociStep, /BUILD_SHA: \$\{\{ github\.sha \}\}/);
   assert.match(ociStep, /git diff --exit-code/);
   assert.match(ociStep, /git ls-files --others --exclude-standard/);

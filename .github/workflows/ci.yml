@@ -1,13 +1,16 @@
 name: CI
 
 # 每个 PR 与 main 推送自动跑：install → prisma generate → build(=tsc 类型检查) → test(vitest)。
-# 四类重门按改动路径触发（同一个 scope job 计算，拿不到可用 diff 时一律全跑）：
-#   · packages/db 数据库测试（service PostgreSQL 组 + 自起 pgvector 组）：代码改动时运行，纯文档跳过
-#   · 55 型三断点视觉回归：渲染输出、其消费的契约或本工作流变更时
-#   · 原生 Temporal reader 服务（Go race，约 14 分钟）：infra/temporal-platform/server 或本工作流变更时
-#   · OCI 运行镜像构建与三项镜像冒烟：除纯文档与代理元数据外的任何改动
+# 四类重门按改动路径触发（同一个 scope job 计算，拿不到可用 diff 时一律全跑）。
+# 2026-11-12（P2-2）起，三个最重的门拆成并行 job，各自是独立的必需检查；每个 job 都在
+# 每个 PR 上运行，只有步骤级 `if` 按 scope 输出跳过，因此必需检查不会停留在 skipped：
+#   · build-test-oci（OCI runtime image · smokes）：运行镜像构建与三项镜像冒烟
+#   · build-test-renderer（renderer visual · qualified）：55 型三断点视觉回归与渲染矩阵
+#   · build-test-temporal-go（temporal reader · Go race，约 14 分钟）
+# build-test（build · typecheck · test）保留文档门、构建、单测、PostgreSQL 语义套件、
+# packages/db 数据库测试（service PostgreSQL 组 + 自起 pgvector 组）与 attestation。
 # 每日 03:17 UTC（11:17 中国标准时间）定时与手动触发始终全跑，避免路径过滤遗漏或运行器漂移长期未被发现。
-# build-test 用 `!cancelled()` 而非 `always()`：两者都在依赖失败时照跑以 fail-closed，但 `always()` 的 job
+# 四个 job 都用 `!cancelled()` 而非 `always()`：两者都在依赖失败时照跑以 fail-closed，但 `always()` 的 job
 # 无视取消 —— 同一 PR 的新推送无法取消旧 run，新 run 要排在完整的旧 run（27–40 分钟）之后。
 # 绿了才合。普通API测试仍是纯单测；运行身份权限另使用一次性 PostgreSQL 验证真实数据库授权。
 # 真源/provider调用仍走受控验证（见 AGENTS.md §5），不进入CI。
@@ -151,6 +154,294 @@ jobs:
           echo "run_db_tests=${run_db_tests}" >> "$GITHUB_OUTPUT"
           echo "run_code=${run_code}" >> "$GITHUB_OUTPUT"
 
+  build-test-oci:
+    name: OCI runtime image · smokes
+    needs: renderer-visual-scope
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+
+      - name: Fail closed when renderer scope evaluation did not succeed
+        shell: bash
+        env:
+          SCOPE_RESULT: ${{ needs.renderer-visual-scope.result }}
+        run: |
+          set -euo pipefail
+          if [[ "$SCOPE_RESULT" != "success" ]]; then
+            echo "::error::renderer visual scope did not succeed: $SCOPE_RESULT"
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22 # engines: node>=20
+
+
+      - name: Build and inspect immutable OCI runtime
+        if: needs.renderer-visual-scope.outputs.run_oci == 'true'
+        shell: bash
+        env:
+          BUILD_SHA: ${{ github.sha }}
+          OCI_IMAGE: global-backend-ci:${{ github.sha }}
+          PR_IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git ls-files --others --exclude-standard)"
+          BUILT_AT="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
+          export BUILT_AT
+          # Layer cache lives as a manifest in GHCR (type=registry), not the
+          # Actions cache service: type=gha degraded silently to no-op on the
+          # hosted runners (2026-11-05: zero buildx cache entries and no
+          # import/export in the build log), while a registry manifest needs no
+          # service token and has no branch scoping. Repeat builds reuse the
+          # runtime-base (Debian packages, chromium) and build layers without
+          # touching the Debian archive. Fork PRs receive read-only tokens, so
+          # they skip the cache entirely.
+          CACHE_REF="ghcr.io/${GITHUB_REPOSITORY}-buildcache:runtime-image"
+          docker buildx create --name ci-oci --driver docker-container --use >/dev/null
+          cache_args=()
+          use_cache=false
+          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" || "${PR_IS_FORK}" == "false" ]]; then
+            use_cache=true
+            echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin >/dev/null
+            cache_args+=(--cache-from "type=registry,ref=${CACHE_REF}")
+            cache_args+=(--cache-to "type=registry,ref=${CACHE_REF},mode=max,ignore-error=true")
+          fi
+          docker buildx build \
+            --build-arg "BUILD_SHA=${BUILD_SHA}" \
+            --build-arg "BUILT_AT=${BUILT_AT}" \
+            --tag "${OCI_IMAGE}" \
+            --load \
+            "${cache_args[@]}" \
+            .
+          if [[ "${use_cache}" == "true" ]] && ! docker buildx imagetools inspect "${CACHE_REF}" >/dev/null 2>&1; then
+            echo "::warning::registry build cache manifest missing after export (${CACHE_REF}); the next run will rebuild cold"
+          fi
+          test "$(docker image inspect --format '{{.Config.User}}' "${OCI_IMAGE}")" = global
+          test "$(docker image inspect --format '{{json .Config.Entrypoint}}' "${OCI_IMAGE}")" = '["node","/app/runtime-entrypoint.mjs"]'
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "${OCI_IMAGE}")" = "${BUILD_SHA}"
+          ARTIFACT_DIR="$(mktemp -d)"
+          CONTAINER_ID="$(docker create "${OCI_IMAGE}" api)"
+          cleanup() {
+            docker rm -f "${CONTAINER_ID}-browser-probe" >/dev/null 2>&1 || true
+            docker rm -f "${CONTAINER_ID}" >/dev/null 2>&1 || true
+            rm -rf "${ARTIFACT_DIR}"
+          }
+          trap cleanup EXIT
+          mkdir "${ARTIFACT_DIR}/api-dist"
+          docker cp "${CONTAINER_ID}:/app/apps/api/dist/." "${ARTIFACT_DIR}/api-dist"
+          node scripts/verify-runtime-artifact.mjs "${ARTIFACT_DIR}/api-dist"
+          docker run --rm --network none --entrypoint node "${OCI_IMAGE}" \
+            /app/runtime-image-verifier.mjs /app
+          docker run --rm --network none --entrypoint openssl "${OCI_IMAGE}" version
+          timeout --signal=TERM --kill-after=10s 5m \
+            docker run --rm --init --network none --read-only --cap-drop ALL \
+              --name "${CONTAINER_ID}-browser-probe" \
+              --memory 1g --cpus 2 \
+              --tmpfs /tmp:rw,noexec,nosuid,nodev,size=512m,uid=10001,gid=10001 \
+              --mount type=bind,src="${GITHUB_WORKSPACE}/scripts/test-support/browser-probe-oci-smoke.cjs",dst=/run/browser-probe-oci-smoke.cjs,readonly \
+              --entrypoint node "${OCI_IMAGE}" /run/browser-probe-oci-smoke.cjs
+              docker run --rm --network none \
+                --env "EXPECTED_BUILD_SHA=${BUILD_SHA}" \
+                --entrypoint node "${OCI_IMAGE}" -e \
+                'const fs=require("node:fs");const a=JSON.parse(fs.readFileSync("/app/apps/api/dist/build-attestation.json","utf8"));if(a.build_sha!==process.env.EXPECTED_BUILD_SHA)process.exit(1)'
+
+      - name: Worker fail-closed runtime smoke
+        if: needs.renderer-visual-scope.outputs.run_oci == 'true'
+        shell: bash
+        env:
+          OCI_IMAGE: global-backend-ci:${{ github.sha }}
+        run: |
+          set -euo pipefail
+          WORKER_LOG="$(mktemp)"
+          cleanup_worker_smoke() {
+            rm -f "${WORKER_LOG}"
+          }
+          trap cleanup_worker_smoke EXIT
+          LOCAL_IMAGE_DIGEST="$(docker image inspect --format '{{.Id}}' "${OCI_IMAGE}")"
+          RUNTIME_IMAGE_REFERENCE="global-backend-ci@${LOCAL_IMAGE_DIGEST}"
+          set +e
+          timeout --signal=TERM --kill-after=5s 10s \
+            docker run --rm --network none --read-only \
+              --tmpfs /tmp:rw,noexec,nosuid,nodev,size=128m,uid=10001,gid=10001 \
+              --tmpfs /home/global/.cache:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001 \
+              --env NODE_ENV=production \
+              --env APP_ENVIRONMENT=development \
+              --env "RUNTIME_IMAGE_REFERENCE=${RUNTIME_IMAGE_REFERENCE}" \
+              "${OCI_IMAGE}" customer-worker >"${WORKER_LOG}" 2>&1
+          WORKER_STATUS=$?
+          set -e
+          if [[ "${WORKER_STATUS}" -eq 0 ]]; then
+            cat "${WORKER_LOG}"
+            echo "::error::worker diagnostic smoke exited instead of holding fail-closed"
+            exit 1
+          fi
+          grep -F 'Temporal polling remains disabled' "${WORKER_LOG}"
+          if grep -Fq 'understanding worker up' "${WORKER_LOG}"; then
+            cat "${WORKER_LOG}"
+            echo "::error::unready Worker began Temporal polling"
+            exit 1
+          fi
+
+      - name: Renderer read-only OCI smoke
+        if: needs.renderer-visual-scope.outputs.run_oci == 'true'
+        shell: bash
+        env:
+          OCI_IMAGE: global-backend-ci:${{ github.sha }}
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=256m,uid=10001,gid=10001 \
+            --tmpfs /home/global/.cache:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001 \
+            --mount type=bind,src="${GITHUB_WORKSPACE}/apps/site-renderer/fixtures/demo-spec.json",dst=/run/renderer-demo-spec.json,readonly \
+            --entrypoint node "${OCI_IMAGE}" -e '
+              const fs=require("node:fs");
+              const renderer=require("/app/apps/api/dist/site-builder/renderer-build.js");
+              const spec=JSON.parse(fs.readFileSync("/run/renderer-demo-spec.json","utf8"));
+              (async()=>{
+                await renderer.buildSiteSpecWithTemporaryFile(spec,{outDir:"/tmp/rendered",basePath:"/",siteOrigin:"http://127.0.0.1"});
+                const leaked=fs.readdirSync("/tmp").filter((name)=>name.startsWith("global-site-renderer-"));
+                if(leaked.length)throw new Error("renderer build workspace leaked");
+                for(const target of ["/app/apps/site-renderer/node_modules/.vite","/app/apps/site-renderer/.astro"]){
+                  if(fs.existsSync(target))throw new Error(`read-only renderer mutated ${target}`);
+                }
+              })().catch((error)=>{console.error(error);process.exit(1)});'
+
+
+  build-test-renderer:
+    name: renderer visual · qualified
+    needs: renderer-visual-scope
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Fail closed when renderer scope evaluation did not succeed
+        shell: bash
+        env:
+          SCOPE_RESULT: ${{ needs.renderer-visual-scope.result }}
+        run: |
+          set -euo pipefail
+          if [[ "$SCOPE_RESULT" != "success" ]]; then
+            echo "::error::renderer visual scope did not succeed: $SCOPE_RESULT"
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # pnpm 版本读 package.json 的 packageManager 字段（pnpm@9.15.9）
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22 # engines: node>=20
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Build 契约包（@global/api 依赖其 dist d.ts，DQ-1）
+        run: pnpm --filter @global/contracts build
+
+      - name: Prisma generate（multilingual smoke 依赖 apps/api/dist 类型）
+        if: needs.renderer-visual-scope.outputs.run_visual != 'false'
+        run: pnpm --filter @global/db generate
+
+      - name: Build（nest build = tsc 全量类型检查）
+        if: needs.renderer-visual-scope.outputs.run_visual != 'false'
+        run: pnpm --filter @global/api build
+
+      - name: Renderer contract tests
+        run: pnpm --filter @global/site-renderer test:contracts
+
+      - name: Renderer fixture Astro build matrix
+        if: needs.renderer-visual-scope.outputs.run_visual == 'true'
+        run: pnpm --filter @global/site-renderer test:fixtures
+
+      - name: Renderer qualified component visual regression（375 · 768 · 1440）
+        if: needs.renderer-visual-scope.outputs.run_visual == 'true'
+        run: pnpm --filter @global/site-renderer test:visual
+
+      - name: Renderer multilingual smoke build
+        if: needs.renderer-visual-scope.outputs.run_visual == 'true'
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const renderer = require('./apps/api/dist/site-builder/renderer-build.js');
+          const spec = JSON.parse(fs.readFileSync('./apps/site-renderer/fixtures/multilingual-spec.json', 'utf8'));
+          const outDir = process.env.RUNNER_TEMP + '/site-renderer-multilingual';
+          fs.mkdirSync(outDir, { recursive: true });
+          renderer.buildSiteSpecWithTemporaryFile(spec, {
+            outDir,
+            basePath: '/',
+            siteOrigin: 'https://preview.example.test',
+          }).catch((error) => {
+            console.error(error);
+            process.exit(1);
+          });
+          NODE
+
+
+  build-test-temporal-go:
+    name: temporal reader · Go race
+    needs: renderer-visual-scope
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Fail closed when renderer scope evaluation did not succeed
+        shell: bash
+        env:
+          SCOPE_RESULT: ${{ needs.renderer-visual-scope.result }}
+        run: |
+          set -euo pipefail
+          if [[ "$SCOPE_RESULT" != "success" ]]; then
+            echo "::error::renderer visual scope did not succeed: $SCOPE_RESULT"
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Native Temporal reader server（verified modules · offline race · build）
+        if: needs.renderer-visual-scope.outputs.run_temporal_go == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          temporal_cache=$(mktemp -d "${RUNNER_TEMP}/temporal-server-go.XXXXXX")
+          temporal_go_image=docker.io/library/golang@sha256:ab3d6955bbc813a0f3fdf220c1d817dd89c0b3f283777db8ece4a32fe7858edd
+          temporal_go=(--rm --cpus=2 --memory=4g
+            --mount "type=bind,src=${PWD}/infra/temporal-platform/server,dst=/src,readonly"
+            --mount "type=bind,src=${temporal_cache},dst=/cache"
+            -w /src -e GOPATH=/cache -e GOCACHE=/cache/build
+            -e GOTOOLCHAIN=go1.26.4 -e GOMAXPROCS=2)
+          timeout 30m docker run "${temporal_go[@]}" -e GODEBUG=http2client=0 -e GOPROXY=https://proxy.golang.org -e GOSUMDB=sum.golang.org "$temporal_go_image" go mod download
+          timeout 30m docker run "${temporal_go[@]}" --network=none -e GOPROXY=off "$temporal_go_image" sh -euc '
+            go mod verify
+            grep -F "google.golang.org/grpc v1.83.2" go.mod
+            grep -F "github.com/aws/aws-sdk-go-v2/service/lambda v1.88.5" go.mod
+            go test -mod=readonly -p 2 -count=1 -race -coverprofile=/cache/server.cover ./...
+            go vet -mod=readonly -p 2 ./...
+            CGO_ENABLED=0 go build -mod=readonly -p 2 -trimpath -buildvcs=false -o /cache/temporal-server ./cmd/server
+            go tool cover -func=/cache/server.cover > /cache/coverage.txt
+          '
+          awk '$1 == "total:" { seen=1; if ($3+0 < 80) exit 1 } END { if (!seen) exit 1 }' "$temporal_cache/coverage.txt"
+
+
   build-test:
     name: build · typecheck · test
     needs: renderer-visual-scope
@@ -159,7 +450,6 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: read
-      packages: write
     services:
       postgres:
         image: pgvector/pgvector@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
@@ -263,30 +553,6 @@ jobs:
       - name: Unsafe raw SQL gate（G17）
         if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: node scripts/governance-unsafe-raw-sql.mjs verify
-
-      - name: Native Temporal reader server（verified modules · offline race · build）
-        if: needs.renderer-visual-scope.outputs.run_temporal_go == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          temporal_cache=$(mktemp -d "${RUNNER_TEMP}/temporal-server-go.XXXXXX")
-          temporal_go_image=docker.io/library/golang@sha256:ab3d6955bbc813a0f3fdf220c1d817dd89c0b3f283777db8ece4a32fe7858edd
-          temporal_go=(--rm --cpus=2 --memory=4g
-            --mount "type=bind,src=${PWD}/infra/temporal-platform/server,dst=/src,readonly"
-            --mount "type=bind,src=${temporal_cache},dst=/cache"
-            -w /src -e GOPATH=/cache -e GOCACHE=/cache/build
-            -e GOTOOLCHAIN=go1.26.4 -e GOMAXPROCS=2)
-          timeout 30m docker run "${temporal_go[@]}" -e GODEBUG=http2client=0 -e GOPROXY=https://proxy.golang.org -e GOSUMDB=sum.golang.org "$temporal_go_image" go mod download
-          timeout 30m docker run "${temporal_go[@]}" --network=none -e GOPROXY=off "$temporal_go_image" sh -euc '
-            go mod verify
-            grep -F "google.golang.org/grpc v1.83.2" go.mod
-            grep -F "github.com/aws/aws-sdk-go-v2/service/lambda v1.88.5" go.mod
-            go test -mod=readonly -p 2 -count=1 -race -coverprofile=/cache/server.cover ./...
-            go vet -mod=readonly -p 2 ./...
-            CGO_ENABLED=0 go build -mod=readonly -p 2 -trimpath -buildvcs=false -o /cache/temporal-server ./cmd/server
-            go tool cover -func=/cache/server.cover > /cache/coverage.txt
-          '
-          awk '$1 == "total:" { seen=1; if ($3+0 < 80) exit 1 } END { if (!seen) exit 1 }' "$temporal_cache/coverage.txt"
 
       - name: Runtime lease principal PostgreSQL permissions
         if: needs.renderer-visual-scope.outputs.run_code != 'false'
@@ -680,168 +946,6 @@ jobs:
           git diff --exit-code
           test -z "$(git ls-files --others --exclude-standard)"
 
-      - name: Build and inspect immutable OCI runtime
-        if: needs.renderer-visual-scope.outputs.run_oci == 'true'
-        shell: bash
-        env:
-          BUILD_SHA: ${{ github.sha }}
-          OCI_IMAGE: global-backend-ci:${{ github.sha }}
-          PR_IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          git diff --exit-code
-          test -z "$(git ls-files --others --exclude-standard)"
-          BUILT_AT="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
-          export BUILT_AT
-          # Layer cache lives as a manifest in GHCR (type=registry), not the
-          # Actions cache service: type=gha degraded silently to no-op on the
-          # hosted runners (2026-11-05: zero buildx cache entries and no
-          # import/export in the build log), while a registry manifest needs no
-          # service token and has no branch scoping. Repeat builds reuse the
-          # runtime-base (Debian packages, chromium) and build layers without
-          # touching the Debian archive. Fork PRs receive read-only tokens, so
-          # they skip the cache entirely.
-          CACHE_REF="ghcr.io/${GITHUB_REPOSITORY}-buildcache:runtime-image"
-          docker buildx create --name ci-oci --driver docker-container --use >/dev/null
-          cache_args=()
-          use_cache=false
-          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" || "${PR_IS_FORK}" == "false" ]]; then
-            use_cache=true
-            echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin >/dev/null
-            cache_args+=(--cache-from "type=registry,ref=${CACHE_REF}")
-            cache_args+=(--cache-to "type=registry,ref=${CACHE_REF},mode=max,ignore-error=true")
-          fi
-          docker buildx build \
-            --build-arg "BUILD_SHA=${BUILD_SHA}" \
-            --build-arg "BUILT_AT=${BUILT_AT}" \
-            --tag "${OCI_IMAGE}" \
-            --load \
-            "${cache_args[@]}" \
-            .
-          if [[ "${use_cache}" == "true" ]] && ! docker buildx imagetools inspect "${CACHE_REF}" >/dev/null 2>&1; then
-            echo "::warning::registry build cache manifest missing after export (${CACHE_REF}); the next run will rebuild cold"
-          fi
-          test "$(docker image inspect --format '{{.Config.User}}' "${OCI_IMAGE}")" = global
-          test "$(docker image inspect --format '{{json .Config.Entrypoint}}' "${OCI_IMAGE}")" = '["node","/app/runtime-entrypoint.mjs"]'
-          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "${OCI_IMAGE}")" = "${BUILD_SHA}"
-          ARTIFACT_DIR="$(mktemp -d)"
-          CONTAINER_ID="$(docker create "${OCI_IMAGE}" api)"
-          cleanup() {
-            docker rm -f "${CONTAINER_ID}-browser-probe" >/dev/null 2>&1 || true
-            docker rm -f "${CONTAINER_ID}" >/dev/null 2>&1 || true
-            rm -rf "${ARTIFACT_DIR}"
-          }
-          trap cleanup EXIT
-          mkdir "${ARTIFACT_DIR}/api-dist"
-          docker cp "${CONTAINER_ID}:/app/apps/api/dist/." "${ARTIFACT_DIR}/api-dist"
-          node scripts/verify-runtime-artifact.mjs "${ARTIFACT_DIR}/api-dist"
-          docker run --rm --network none --entrypoint node "${OCI_IMAGE}" \
-            /app/runtime-image-verifier.mjs /app
-          docker run --rm --network none --entrypoint openssl "${OCI_IMAGE}" version
-          timeout --signal=TERM --kill-after=10s 5m \
-            docker run --rm --init --network none --read-only --cap-drop ALL \
-              --name "${CONTAINER_ID}-browser-probe" \
-              --memory 1g --cpus 2 \
-              --tmpfs /tmp:rw,noexec,nosuid,nodev,size=512m,uid=10001,gid=10001 \
-              --mount type=bind,src="${GITHUB_WORKSPACE}/scripts/test-support/browser-probe-oci-smoke.cjs",dst=/run/browser-probe-oci-smoke.cjs,readonly \
-              --entrypoint node "${OCI_IMAGE}" /run/browser-probe-oci-smoke.cjs
-              docker run --rm --network none \
-                --env "EXPECTED_BUILD_SHA=${BUILD_SHA}" \
-                --entrypoint node "${OCI_IMAGE}" -e \
-                'const fs=require("node:fs");const a=JSON.parse(fs.readFileSync("/app/apps/api/dist/build-attestation.json","utf8"));if(a.build_sha!==process.env.EXPECTED_BUILD_SHA)process.exit(1)'
-
-      - name: Worker fail-closed runtime smoke
-        if: needs.renderer-visual-scope.outputs.run_oci == 'true'
-        shell: bash
-        env:
-          OCI_IMAGE: global-backend-ci:${{ github.sha }}
-        run: |
-          set -euo pipefail
-          WORKER_LOG="$(mktemp)"
-          cleanup_worker_smoke() {
-            rm -f "${WORKER_LOG}"
-          }
-          trap cleanup_worker_smoke EXIT
-          LOCAL_IMAGE_DIGEST="$(docker image inspect --format '{{.Id}}' "${OCI_IMAGE}")"
-          RUNTIME_IMAGE_REFERENCE="global-backend-ci@${LOCAL_IMAGE_DIGEST}"
-          set +e
-          timeout --signal=TERM --kill-after=5s 10s \
-            docker run --rm --network none --read-only \
-              --tmpfs /tmp:rw,noexec,nosuid,nodev,size=128m,uid=10001,gid=10001 \
-              --tmpfs /home/global/.cache:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001 \
-              --env NODE_ENV=production \
-              --env APP_ENVIRONMENT=development \
-              --env "RUNTIME_IMAGE_REFERENCE=${RUNTIME_IMAGE_REFERENCE}" \
-              "${OCI_IMAGE}" customer-worker >"${WORKER_LOG}" 2>&1
-          WORKER_STATUS=$?
-          set -e
-          if [[ "${WORKER_STATUS}" -eq 0 ]]; then
-            cat "${WORKER_LOG}"
-            echo "::error::worker diagnostic smoke exited instead of holding fail-closed"
-            exit 1
-          fi
-          grep -F 'Temporal polling remains disabled' "${WORKER_LOG}"
-          if grep -Fq 'understanding worker up' "${WORKER_LOG}"; then
-            cat "${WORKER_LOG}"
-            echo "::error::unready Worker began Temporal polling"
-            exit 1
-          fi
-
-      - name: Renderer read-only OCI smoke
-        if: needs.renderer-visual-scope.outputs.run_oci == 'true'
-        shell: bash
-        env:
-          OCI_IMAGE: global-backend-ci:${{ github.sha }}
-        run: |
-          set -euo pipefail
-          docker run --rm --network none --read-only \
-            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=256m,uid=10001,gid=10001 \
-            --tmpfs /home/global/.cache:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001 \
-            --mount type=bind,src="${GITHUB_WORKSPACE}/apps/site-renderer/fixtures/demo-spec.json",dst=/run/renderer-demo-spec.json,readonly \
-            --entrypoint node "${OCI_IMAGE}" -e '
-              const fs=require("node:fs");
-              const renderer=require("/app/apps/api/dist/site-builder/renderer-build.js");
-              const spec=JSON.parse(fs.readFileSync("/run/renderer-demo-spec.json","utf8"));
-              (async()=>{
-                await renderer.buildSiteSpecWithTemporaryFile(spec,{outDir:"/tmp/rendered",basePath:"/",siteOrigin:"http://127.0.0.1"});
-                const leaked=fs.readdirSync("/tmp").filter((name)=>name.startsWith("global-site-renderer-"));
-                if(leaked.length)throw new Error("renderer build workspace leaked");
-                for(const target of ["/app/apps/site-renderer/node_modules/.vite","/app/apps/site-renderer/.astro"]){
-                  if(fs.existsSync(target))throw new Error(`read-only renderer mutated ${target}`);
-                }
-              })().catch((error)=>{console.error(error);process.exit(1)});'
-
-      - name: Renderer contract tests
-        run: pnpm --filter @global/site-renderer test:contracts
-
-      - name: Renderer fixture Astro build matrix
-        if: needs.renderer-visual-scope.outputs.run_visual == 'true'
-        run: pnpm --filter @global/site-renderer test:fixtures
-
-      - name: Renderer qualified component visual regression（375 · 768 · 1440）
-        if: needs.renderer-visual-scope.outputs.run_visual == 'true'
-        run: pnpm --filter @global/site-renderer test:visual
-
-      - name: Renderer multilingual smoke build
-        if: needs.renderer-visual-scope.outputs.run_visual == 'true'
-        run: |
-          node - <<'NODE'
-          const fs = require('node:fs');
-          const renderer = require('./apps/api/dist/site-builder/renderer-build.js');
-          const spec = JSON.parse(fs.readFileSync('./apps/site-renderer/fixtures/multilingual-spec.json', 'utf8'));
-          const outDir = process.env.RUNNER_TEMP + '/site-renderer-multilingual';
-          fs.mkdirSync(outDir, { recursive: true });
-          renderer.buildSiteSpecWithTemporaryFile(spec, {
-            outDir,
-            basePath: '/',
-            siteOrigin: 'https://preview.example.test',
-          }).catch((error) => {
-            console.error(error);
-            process.exit(1);
-          });
-          NODE
-
   contracts:
     name: contracts · drift · lint · breaking
     needs: renderer-visual-scope
@@ -974,21 +1078,29 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
+
       - name: Install (frozen lockfile)
         run: pnpm install --frozen-lockfile
+
       - name: Prisma generate
         run: pnpm --filter @global/db generate
+
       - name: Migrate service database
         run: pnpm --filter @global/db exec prisma migrate deploy
+
       - name: DB test manifest spec
         run: node --test scripts/run-db-tests.spec.mjs
+
       - name: Docs freshness spec
         run: node --test scripts/docs-freshness.spec.mjs
+
       - name: Service-backed DB tests
         run: node scripts/run-db-tests.mjs --group service
 
@@ -1009,16 +1121,22 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: pnpm
+
       - name: Install (frozen lockfile)
         run: pnpm install --frozen-lockfile
+
       - name: Prisma generate
         run: pnpm --filter @global/db generate
+
       - name: Pre-pull pgvector image（platform-signed-revocation 使用 --pull=never）
         run: docker pull pgvector/pgvector@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+
       - name: Isolated DB tests（self-provisioned pgvector）
         run: node scripts/run-db-tests.mjs --group isolated --shard ${{ matrix.shard }}/2
