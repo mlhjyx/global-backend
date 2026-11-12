@@ -255,6 +255,15 @@ jobs:
         if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: node scripts/governance-api-postgres-coverage.mjs verify
 
+      # G16/G17（2026-11-12，审计 A/C/L）：模块依赖只许收紧；RawUnsafe 新增调用必须带理由。
+      - name: Module dependency boundary gate（G16）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: node scripts/governance-module-boundaries.mjs verify
+
+      - name: Unsafe raw SQL gate（G17）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: node scripts/governance-unsafe-raw-sql.mjs verify
+
       - name: Native Temporal reader server（verified modules · offline race · build）
         if: needs.renderer-visual-scope.outputs.run_temporal_go == 'true'
         shell: bash

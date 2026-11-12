@@ -1,0 +1,21 @@
+{
+  "$comment": "G17：apps/api 生产代码 $queryRawUnsafe/$executeRawUnsafe 每文件基线；新增调用须带 unsafe-reason 注释。",
+  "schemaVersion": "g17-unsafe-raw-sql/v1",
+  "generatedFrom": "c4370296b3e588d0c2871ab4b66e127aadfd7894",
+  "total": 34,
+  "files": {
+    "apps/api/src/compliance/pii-crypto.extension.ts": 3,
+    "apps/api/src/discovery/contact-point-verification-event.ts": 2,
+    "apps/api/src/durable-results/artifact/generic-operation-artifact.repository.ts": 1,
+    "apps/api/src/enrichment/metrics/contact-metrics.ts": 1,
+    "apps/api/src/enrichment/waterfall/enrichment-attempt.ts": 2,
+    "apps/api/src/execution-budget/execution-budget-authority.repository.ts": 6,
+    "apps/api/src/health/runtime-readiness.service.ts": 3,
+    "apps/api/src/platform-authority/platform-fence-ack-delivery.repository.ts": 1,
+    "apps/api/src/platform-authority/platform-revocation.repository.ts": 1,
+    "apps/api/src/platform-authority/platform-target-lookup.repository.ts": 1,
+    "apps/api/src/runtime/runtime-process-lease.ts": 9,
+    "apps/api/src/site-builder/site-build-provider-wire.database.ts": 3,
+    "apps/api/src/tools/budget-store.ts": 1
+  }
+}

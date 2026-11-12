@@ -26,4 +26,25 @@ export default defineConfig({
       SWEEP_BUDGET_CENTS: "5000",
     },
   },
+  // G18（2026-11-12）：每周覆盖率棘轮。Temporal 工作流与 site-builder eval 不参与
+  // （replay/评测对插桩敏感）；基线为 2026-11-12 实测值向下取整。
+  coverage: {
+    provider: "v8",
+    include: ["src/**/*.ts"],
+    exclude: [
+      "src/temporal/**",
+      "src/site-builder/eval/**",
+      "src/**/*.spec.ts",
+      "src/**/*.test.ts",
+      "src/**/*.d.ts",
+    ],
+    reporter: ["text-summary", "json-summary"],
+    reportsDirectory: "../../coverage/api",
+    thresholds: {
+      lines: 88,
+      statements: 86,
+      functions: 87,
+      branches: 80,
+    },
+  },
 });
