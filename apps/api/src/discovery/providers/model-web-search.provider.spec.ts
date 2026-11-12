@@ -360,16 +360,41 @@ describe('ModelWebSearchDiscoveryProvider', () => {
   });
 
   it('renders the structured trade role into the exploration prompt', async () => {
+    mocks.executeStructuredTaskWithRuntime.mockResolvedValue({
+      data: answer,
+      provider: 'stub',
+      model: 'stub',
+    });
     const executionBroker = broker(async () => hits);
-    const prompts: string[] = [];
-    mocks.executeStructuredTaskWithRuntime.mockImplementation(
-      async (_gateway: unknown, input: { prompt: string }) => {
-        prompts.push(input.prompt);
-        return { data: answer, provider: 'stub', model: 'stub' };
-      },
-    );
+    // The ICP text feeds two prompts: evidence confirmation (structured task) and the
+    // exploration loop that actually plans web searches. Only the latter determines
+    // whether searches carry the role, so pin the gateway call, not the confirmation.
+    const explorationCalls: unknown[][] = [];
+    let round = 0;
+    const gateway = {
+      generateChatWithTools: vi.fn(async (...args: unknown[]) => {
+        explorationCalls.push(args);
+        round += 1;
+        if (round === 1) {
+          return {
+            data: {
+              text: '',
+              toolUses: [{ id: 'use-1', name: 'web_search', input: { query: 'laser cutting DE' } }],
+              stopReason: 'tool_use' as const,
+            },
+            provider: 'stub',
+            model: 'stub',
+          };
+        }
+        return {
+          data: { text: JSON.stringify(answer), toolUses: [], stopReason: 'end' as const },
+          provider: 'stub',
+          model: 'stub',
+        };
+      }),
+    } as unknown as ModelGateway;
     const provider = new ModelWebSearchDiscoveryProvider({
-      gateway: chatGateway(answer),
+      gateway,
       broker: executionBroker,
       env: { MODEL_WEB_SEARCH_PROVIDER: 'on' },
     });
@@ -379,6 +404,7 @@ describe('ModelWebSearchDiscoveryProvider', () => {
       context(),
     );
 
-    expect(prompts.some((prompt) => prompt.includes('trade_side: distributor'))).toBe(true);
+    expect(explorationCalls.length).toBeGreaterThan(0);
+    expect(JSON.stringify(explorationCalls)).toContain('trade_side: distributor');
   });
 });
