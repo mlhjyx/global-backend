@@ -1,11 +1,15 @@
 import type { CatchAllClass, EmailVerificationState } from '../../discovery/contact-point-verification-state';
-import { scoreEmailPoint } from './verification-policy';
 import {
-  unavailableProviderResult,
   type EmailVerificationProvider,
   type EmailVerificationProviderResult,
   type EmailVerificationRequest,
 } from './email-verification-provider';
+import {
+  assembleProviderResult,
+  fetchProviderJson,
+  resolveProviderHttpConfig,
+  type ProviderHttpConfig,
+} from './provider-http';
 
 /**
  * Truelist（api.truelist.io `/api/v1/verify_inline`）验证器客户端 —— 验证瀑布的
@@ -27,24 +31,18 @@ import {
  * 鉴权 `Authorization: Bearer <key>`；HTTP 走注入 fetch（fixture 测试，零真实出网）。
  */
 
-export interface TruelistConfig {
-  apiKey: string | null;
-  baseUrl: string;
-  timeoutMs: number;
-  costMicrousd: number;
-}
+export type TruelistConfig = ProviderHttpConfig;
 
 export function resolveTruelistConfig(env: NodeJS.ProcessEnv = process.env): TruelistConfig {
-  const positiveInt = (raw: string | undefined, fallback: number): number => {
-    const parsed = Number.parseInt(raw ?? '', 10);
-    return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
-  };
-  return {
-    apiKey: (env.TRUELIST_API_KEY ?? '').trim() || null,
-    baseUrl: (env.TRUELIST_BASE_URL ?? 'https://api.truelist.io').replace(/\/+$/u, ''),
-    timeoutMs: positiveInt(env.TRUELIST_TIMEOUT_MS, 8_000),
-    costMicrousd: positiveInt(env.TRUELIST_COST_MICROUSD, 1_400),
-  };
+  return resolveProviderHttpConfig(env, {
+    keyEnv: 'TRUELIST_API_KEY',
+    baseUrlEnv: 'TRUELIST_BASE_URL',
+    timeoutEnv: 'TRUELIST_TIMEOUT_MS',
+    costEnv: 'TRUELIST_COST_MICROUSD',
+    defaultBaseUrl: 'https://api.truelist.io',
+    defaultTimeoutMs: 8_000,
+    defaultCostMicrousd: 1_400,
+  });
 }
 
 export interface TruelistMapping {
@@ -155,70 +153,24 @@ export class TruelistProvider implements EmailVerificationProvider {
 
   async verify(request: EmailVerificationRequest): Promise<EmailVerificationProviderResult> {
     const startedAt = Date.now();
-    if (!this.config.apiKey) {
-      return unavailableProviderResult({
-        providerKey: this.key,
-        error: 'provider_unconfigured',
-        detail: 'TRUELIST_API_KEY 未配置，降级 UNKNOWN',
-        latencyMs: Date.now() - startedAt,
-      });
-    }
     const url = new URL(`${this.config.baseUrl}/api/v1/verify_inline`);
     url.searchParams.set('email', request.email);
-
-    let response: Response;
-    try {
-      response = await this.fetchImpl(url, {
-        method: 'GET',
-        headers: { authorization: `Bearer ${this.config.apiKey}` },
-        signal: AbortSignal.timeout(this.config.timeoutMs),
-      });
-    } catch (error) {
-      const timedOut =
-        error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
-      return unavailableProviderResult({
-        providerKey: this.key,
-        error: timedOut ? 'timeout' : 'network_error',
-        detail: timedOut ? 'provider_timeout' : 'provider_network_error',
-        latencyMs: Date.now() - startedAt,
-      });
-    }
-    if (response.status === 429) {
-      return unavailableProviderResult({
-        providerKey: this.key,
-        error: 'rate_limited',
-        detail: 'provider_http_429',
-        latencyMs: Date.now() - startedAt,
-      });
-    }
-    if (!response.ok) {
-      return unavailableProviderResult({
-        providerKey: this.key,
-        error: `http_${response.status}`,
-        detail: `provider_http_${response.status}`,
-        latencyMs: Date.now() - startedAt,
-      });
-    }
-    let body: unknown;
-    try {
-      body = await response.json();
-    } catch {
-      body = null;
-    }
-    const mapping = mapTruelistResponse(body);
-    return {
+    const outcome = await fetchProviderJson({
       providerKey: this.key,
-      state: mapping.state,
-      catchAll: mapping.catchAll,
-      catchAllClass: mapping.catchAllClass,
-      score: scoreEmailPoint({ state: mapping.state, catchAllClass: mapping.catchAllClass }),
-      acceptAll: mapping.acceptAll,
-      disposable: mapping.disposable,
-      role: mapping.role,
-      detail: mapping.detail,
-      error: mapping.error,
-      costMicrousd: mapping.error === null ? this.config.costMicrousd : 0,
-      latencyMs: Date.now() - startedAt,
-    };
+      apiKey: this.config.apiKey,
+      unconfiguredDetail: 'TRUELIST_API_KEY 未配置，降级 UNKNOWN',
+      url,
+      headers: { authorization: `Bearer ${this.config.apiKey ?? ''}` },
+      fetchImpl: this.fetchImpl,
+      timeoutMs: this.config.timeoutMs,
+      startedAt,
+    });
+    if ('unavailable' in outcome) return outcome.unavailable;
+    return assembleProviderResult({
+      providerKey: this.key,
+      mapping: mapTruelistResponse(outcome.body),
+      costMicrousd: this.config.costMicrousd,
+      startedAt,
+    });
   }
 }
