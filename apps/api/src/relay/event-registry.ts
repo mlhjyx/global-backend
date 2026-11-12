@@ -182,8 +182,9 @@ export function matchesSiteBuildCostSummaryUpdatedV1(
   );
 }
 
-type PayloadEvent = Pick<
+export type PayloadEvent = Pick<
   OutboxEventRow,
+  | "eventId"
   | "eventType"
   | "schemaVersion"
   | "workspaceId"

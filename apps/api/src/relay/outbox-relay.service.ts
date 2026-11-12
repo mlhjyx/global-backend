@@ -60,8 +60,8 @@ import {
   WEBHOOK_SINK,
   toEnvelope,
   validateIntegrationEvent,
-  validateIntegrationEventWarnOnly,
 } from "./event-registry";
+import { logIntegrationPayloadWarning } from "./integration-payload-warning";
 
 /**
  * Transactional Outbox relay (ADR-009). A trusted system scanner: connects as the
@@ -502,19 +502,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         );
         return;
       }
-      // Compatibility rollout: historical payloads are accepted by the envelope gate;
-      // the stricter v1 shape is observed as a warning only (never parks, never changes
-      // the consumer). Promotion to fail-closed is a separate decision after replay.
-      const payloadWarning = validateIntegrationEventWarnOnly(ev);
-      if (payloadWarning && !payloadWarning.ok) {
-        this.logger.warn(
-          `integration event ${ev.eventId} (${ev.eventType}) payload warning: ${payloadWarning.reason}`,
-        );
-      }
-      const sinks = [
-        PULL_SINK,
-        ...(this.webhookEnabled() ? [WEBHOOK_SINK] : []),
-      ];
+      logIntegrationPayloadWarning(this.logger, ev);
+      const sinks = [PULL_SINK, ...(this.webhookEnabled() ? [WEBHOOK_SINK] : [])];
       try {
         await this.db.$transaction(async (tx) => {
           await tx.outboxDelivery.createMany({
