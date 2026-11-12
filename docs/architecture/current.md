@@ -132,9 +132,9 @@ API 与 Worker 使用同一 OCI image digest、同一 `global-runtime-build-atte
 
 ## 6. 事件目录与 LeadQualifiedPackage
 
-**事件以注册表为准**：哪些事件存在、走哪条分支，唯一真值是 `apps/api/src/relay/event-registry.ts`（当前 6 个内部命令、10 个集成事件）；本节不手抄之外的事件名。
+**事件以注册表为准**：哪些事件存在、走哪条分支，唯一真值是 `apps/api/src/relay/event-registry.ts`（当前 6 个内部命令、13 个集成事件）；本节不手抄之外的事件名。
 
-**本仓发布（集成事件，进 `outbox_delivery`）**：**LeadQualified** · LeadsScored · DiscoveryRunCompleted · ICPActivated · ClaimApproved · ClaimRevoked · ClaimExpired · KnowledgeConflictDetected · DeletionCompleted · SiteBuildCostSummaryUpdated。其中 LeadQualified、DeletionCompleted、SiteBuildCostSummaryUpdated 有专用 payload schema（`packages/contracts/events/payloads/`），其余 7 个走信封通用契约。
+**本仓发布（集成事件，进 `outbox_delivery`）**：**LeadQualified** · LeadsScored · CandidateBatchCompleted · DiscoveryRunCompleted · ICPActivated · ClaimApproved · ClaimRevoked · ClaimExpired · KnowledgeConflictDetected · DeletionCompleted · CampaignPlanJobFailed · SanctionsListStale · SiteBuildCostSummaryUpdated。其中 LeadQualified、CandidateBatchCompleted、DeletionCompleted、SiteBuildCostSummaryUpdated 有专用 payload schema（`packages/contracts/events/payloads/`）；截至 2026-11-12，运行期只有 SiteBuildCostSummaryUpdated 在注册表内有校验器，LeadQualified/DeletionCompleted 有 ajv consumer test，CandidateBatchCompleted schema 尚无消费者，其余 9 个走信封通用契约。
 
 **内部命令（relay 拉起 Temporal 工作流，不对外交付）**：CompanyProfileCreated · DiscoveryRunRequested · QualifyRequested · DeletionRequested · PersonalArtifactCleanupRequested · AssetObjectCleanupRequested。
 

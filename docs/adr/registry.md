@@ -2,6 +2,7 @@
 
 > 文档 ID：`DOC-ADR-001`
 > 生命周期：`CURRENT`
+> 最后核验：2026-11-12（工程审计元数据核对；正文未逐条复验）
 > 当前事实来源：[当前状态](../status/current.md) · [as-built 架构](../architecture/current.md) · [路线](../status/release-plan.md)
 > 2026-07-10 v2（合流定稿）。PRD v3.0 内两套同号 ADR（§11.6 的 001-018 与 §11.20 的 001-012 含义冲突）**整体作废**；交付包附录 D 清单已并入（其 ADR-002→本 ADR-011、ADR-012→本 ADR-012、ADR-005 水位公平性→并入本 ADR-008、ADR-011 AiToEarn/Chatwoot ACL→SaaS 侧随 product-scope 附录 A，其余主题一一对应）。ADR 增多后再拆单文件。
 > 状态词表（与需求/实现状态分开，避免词汇污染）：PROPOSED / ACCEPTED / SUPERSEDED。**ACCEPTED 只表示决策生效，不表示代码已落地**。每条决策以本表行内状态为准；标注 ⚠ 者待 A/B 会签，SUPERSEDED 条目只保留历史 provenance。

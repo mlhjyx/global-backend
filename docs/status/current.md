@@ -4,7 +4,7 @@
 > 生命周期：`CURRENT`
 > 状态：`CURRENT`
 > 当前事实来源：[产品范围](../product-scope.md)、[当前架构](../architecture/current.md)、[ADR registry](../adr/registry.md)、[发布路线](../status/release-plan.md)、[冲突与开放决策登记](../governance/conflict-register.md)，以及本页逐项注明的 Git/GitHub 回读与 xin `global_dev` 只读查询
-> 最后核验：2026-11-04T01:40Z（`origin/main@8b142f53`、运行镜像以 `local-config/global/runtime.compose.env` 的 `GLOBAL_BACKEND_IMAGE` 为准（核验时 `sha256:e2cfa8cc…`）、`global_dev` 只读计数；本页是人工核验的读数，不是 RuntimeEvidence；计数快照会漂移，引用前先重跑只读查询）。2026-11-11 更新 PRD4-D12 晋级 provenance 与 G7 裁决（计数快照不变）。
+> 最后核验：2026-11-04T01:40Z（`origin/main@8b142f53`、运行镜像以 `local-config/global/runtime.compose.env` 的 `GLOBAL_BACKEND_IMAGE` 为准（核验时 `sha256:e2cfa8cc…`）、`global_dev` 只读计数；本页是人工核验的读数，不是 RuntimeEvidence；计数快照会漂移，引用前先重跑只读查询）。2026-11-11 更新 PRD4-D12 晋级 provenance 与 G7 裁决（计数快照不变）；2026-11-12 更新周报取消与 G1 证据表述（引擎保留、SaaS 已取消）。
 > 写法：按 PRD 4.0 L2 §5 的四问填写——做了什么（四态：未做 / 可运行 / 已验证 / 已验收）、证据、谁验收、怎么回退。四态口径（PRD 4.0 L0 §9.3「4.0 新锁定」的 `D-029`，与待拍板项 `PRD4-D<n>` 不是同一编号序列）尚未逐条拍板，本页先按它组织。2026-09-20 核验的旧版正文见文末[历史](#历史2026-09-20-核验)。
 
 ## 一页结论
@@ -32,7 +32,7 @@
 | 可达性与联系人（BI-14 / 联系人线 M1–M4） | **已验证（链路）；质量待验证**：`company_contact` ENABLED，`company_contact_point` 268 行公司级路径；联系人线 M1–M4 已上线（#703/#707/#709/#717/#728/#733/#734 + gain-saas #26/#27/#28），run 内联系人阶段覆盖全部 match 公司、$2 子预算封顶；当前 4 家 match 产出 38 个决策人、0 邮箱/0 电话（社交源 blocked 3 / circuit open 9）。`canonical_contact` 80、`contact_point` 61；`email_guess` 2026-11-02 按 D3 重开（双闸：lawfulBasis interim LIA + smtp_self），待验证 | `data_provider`、`canonical_contact`、`contact_point`、`company_contact_point` 只读查询；run `3ad22469` stats | 产品负责人 | `company_contact` / `email_guess` 置回 DISABLED |
 | 交付最后一跳（`LeadQualified` → 事件 ACK） | **已验证**：`outbox_delivery` 468 行 `ACKED`（sink=saas），无 PENDING；事件由 gain-saas 消费者按 2 分钟一轮消费；GrowthOS 不再是消费方 | `outbox_delivery` 按 sink/status 计数 | 产品负责人 | 不涉及数据回退（事件只读交付） |
 | 卖方自助入驻（understanding + 注册引导） | **可运行，部分验证**：`company_profile` 6 ACTIVE、13 REVIEW、28 ENRICHING、30 DRAFT；#722/#730 之后失败可见、可按 attempt 换新 Grant 重试，live 实测闭环（[证据](../evidence/README.md)）；#737 修复 intake 创建档案后不发 `CompanyProfileCreated` 的断链；**Phase 1（#743 + gain-saas #32）**：`POST /companies` 支持无官网建档与六项引导事实（`targetMarkets`/`businessEmail` 落库、products→`Offering(source=onboarding)`），gain-saas 注册后强制三步向导、BFF 门禁 409 `ONBOARDING_INCOMPLETE`，端到端验收通过 | `company_profile`/`offering` 只读查询；`_archive/backend-runtime-switch-5a526747-xin-20261102/README.md` | 产品负责人 | 修复随镜像回退（列保留无害） |
-| 交付包 v1.1、周报 CSV、反馈端点、Golden Set（BI-19–BI-24） | **部分完成**：周报 CSV（#650，BI-22；#729 增加决策人列）与反馈端点（BI-23）已上线并在真实数据上导出；LeadPackage v1.1（#681）已上线；Golden Set 仍未做 | 仓内 `/reports/weekly` 与 `/reports/weekly/feedback` 已注册；Golden Set 不在仓内 | 产品负责人；design partner（商机，PRD4-D8 未定人选） | — |
+| 交付包 v1.1、周报 CSV、反馈端点、Golden Set（BI-19–BI-24） | **部分完成（引擎保留，SaaS 已取消）**：周报 CSV（#650，BI-22；#729 增加决策人列）与反馈端点（BI-23）曾在真实数据上导出；LeadPackage v1.1（#681）已上线；**SaaS 侧周报功能已于 2026-11-11 取消**（gain-saas `44a10a6`），引擎 `/reports/weekly` 与反馈端点保留但当前无消费者；Golden Set 仍未做 | 引擎端点仍注册；SaaS 路由已移除；Golden Set 不在仓内 | 产品负责人；design partner（商机，PRD4-D8 未定人选） | — |
 
 运行时：xin 的 API / Worker / platform Worker 的运行镜像以 `local-config/global/runtime.compose.env` 的 `GLOBAL_BACKEND_IMAGE` 为准（2026-11-04 核验：`sha256:e2cfa8cc…`），本页不复写 digest；历史切换归档见 `_archive/backend-runtime-switch-*`。`origin/main` 已到 `8b142f53`（#762，seller-documents 上传中继）。获客模型：抽取档 `gemini-3.8-flash`、推理档 `gpt-5.6-sol`，任务级覆盖 `taxonomy.normalize→deepseek-flash`、`discovery.qualify_fit→gemini-3.8-flash`（2026-11-02 因 `gpt-5.6-sol` 内容拒答切换，护栏 #736 已同版上线）。
 
@@ -104,7 +104,7 @@ PRD 4.0 待拍板项 D1–D19 的全量状态见[冲突与开放决策登记](..
 | Gate | 当前裁决 | 所缺证据 |
 | --- | --- | --- |
 | G0 — Truth & Ownership | PARTIAL | 权威文档已回写到 2026-11 决定；PRD 4.0 仍只在私有目录（PRD4-D10 未拍板），不是仓内权威 |
-| G1 — Product/UX/Contract | PARTIAL | 周报 CSV 与反馈端点已有机器合同（#650/#729）；交付包 v1.1 合同、可达性口径写入产品范围仍待补 |
+| G1 — Product/UX/Contract | PARTIAL | 引擎周报 CSV 与反馈端点已有机器合同（#650/#729；SaaS 侧周报功能已于 2026-11-11 取消）；交付包 v1.1 合同、可达性口径写入产品范围仍待补 |
 | G2 — Source/TDD/Security | PARTIAL / MERGED_FIXES_VERIFIED | 每个修复 PR 自带 TDD 与必需检查；不推广到未改动的模块 |
 | G3 — Integration/Data | PARTIAL / PRODUCT_E2E_PARTIAL | 13 次 PARTIAL + 首次 `DONE` run（11-03）；真实评分与 ACK 计数见「一页结论」；`DONE` 之外的 run 仍以 PARTIAL/FAILED 收尾 |
 | G4 — Release Candidate | DEVELOPMENT_CANDIDATE_ONLY | xin 运行的是按 digest 钉住、带构建证明的开发镜像；没有可信外部 provenance readback |

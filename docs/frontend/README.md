@@ -2,13 +2,15 @@
 
 > 文档 ID：`FE-GLOBAL-000`
 > 层级：`L2 / Navigation`
-> 生命周期：`CURRENT`
+> 生命周期：`ACTIVE_INPUT`
 > 评审状态：`APPROVED_AT_GATE_4`
 > 内容 Owner：`OWN-DESIGN`
 > 工程基线：`origin/main@23d111f7b400403deb7466abf34ab709685b8376`
 > 最后核验：2026-08-29
 
 > **2026-10-30 现状注记**：产品前端已迁到 [gain-saas](https://github.com/mlhjyx/gain-saas)（本机 `127.0.0.1:4020`，PRD 见该仓 `docs/prd/phase-1-01-04.md`）。本目录描述的 GrowthOS 页面/契约是 2026-08 的基线，只保留作历史对照；GrowthOS 目前仅承担 R4 平台权威，P8 退役。新前端工作以 gain-saas 仓为准。
+>
+> **2026-11-12 生命周期修订**：本目录（含 `modules/`）是目标规范/设计基线，不是 as-built；生命周期由 `CURRENT` 改为 `ACTIVE_INPUT`，避免与 gain-saas 的实际实现混读。
 
 本目录定义整个 SaaS 共用的目标前端规则，回答“不同产品域如何保持一致”。它是交给独立前端团队的产品与工程约束，不是本仓已实现的前端，也不替代产品边界、as-built 架构、ADR、状态或机器合同。
 
