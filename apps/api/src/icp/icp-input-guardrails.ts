@@ -68,8 +68,11 @@ export function completeTargetMarkets(
  * Confirm-by-request markets: only an explicit API argument counts as user confirmation.
  * AI prefills / legacy profile.targetMarkets are *not* promoted to confirmed markets.
  */
-export function confirmedMarketCodes(input: readonly string[] | undefined): string[] | null {
-  if (input === undefined) return null;
+export function confirmedMarketCodes(
+  input: readonly string[] | null | undefined,
+): string[] | null {
+  // @IsOptional 放行 JSON null；按「未提供」处理，不能让它落进 input.map 变成 500。
+  if (input === undefined || input === null) return null;
   const normalizedInput = [
     ...new Set(input.map((value) => value.trim().toUpperCase()).filter(Boolean)),
   ];
@@ -151,8 +154,31 @@ export type IcpGenerationPromptInput = {
 };
 
 /** P1-B2（方案 §2.2）：确认的市场/行业是权威输入；但 AI 预填与历史档案不等于确认。 */
+/** guardrails 关闭（线上默认）时与旧实现逐字节一致：模型输入不得因本 PR 改变。 */
+function buildLegacyIcpPrompt(
+  company: IcpGenerationPromptInput['company'],
+  facts: string,
+  offerings: readonly OfferingForSelection[],
+): string {
+  const products = offerings.length
+    ? `\n产品/服务（官网抽取）：\n${offerings.map((o) => `- ${o.name}${o.description ? `：${o.description}` : ''}`).join('\n')}`
+    : '';
+  const sellerMarkets = sellerIsoMarkets(company);
+  const sellerProfile = [
+    sellerMarkets.length
+      ? `目标市场（ISO 3166-1）：${sellerMarkets.map((iso) => `${iso}（${marketDisplayName(iso)}）`).join('、')}`
+      : '',
+    company.industry ? `行业：${company.industry}` : '',
+  ].filter(Boolean);
+  const sellerAuthority = sellerProfile.length
+    ? `\n卖方档案（权威输入）：\n${sellerProfile.join('\n')}\n目标市场以卖方档案为权威：输出的 target_markets 必须覆盖以上市场（可追加其他市场，但不得替换；追加请在 value_props 或说明中给出理由）。`
+    : '';
+  return `卖方企业：${company.name}${company.website ? ` (${company.website})` : ''}\n已确认的企业事实：\n${facts}${products}${sellerAuthority}\n\n请据此设计其理想客户画像(ICP)、买家委员会与机器可评估的验证规则，输出中文。`;
+}
+
 export function buildIcpGenerationPrompt(input: IcpGenerationPromptInput): string {
   const { company, facts, offerings, offeringBasis, confirmedMarkets, guardrailsEnabled } = input;
+  if (!guardrailsEnabled) return buildLegacyIcpPrompt(company, facts, offerings);
   const productsLabel =
     offeringBasis === 'selected_products'
       ? '产品/服务（用户本次勾选）'
@@ -211,6 +237,7 @@ export function icpInputLineage(input: IcpInputLineageInput): Record<string, unk
         ? 'model_unconfirmed'
         : 'legacy_profile_floor',
     inputProducts: offerings.map((offering) => offering.name),
-    ...(confirmedMarkets ? { modelSuggestedMarkets: modelMarkets } : {}),
+    // 三种 marketBasis 都记录模型建议，审计时才能对照「确认 vs 建议」。
+    modelSuggestedMarkets: modelMarkets,
   };
 }

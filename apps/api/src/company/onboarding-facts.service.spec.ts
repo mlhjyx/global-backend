@@ -161,6 +161,14 @@ describe('OnboardingFactsService', () => {
     });
   });
 
+  it('products 只有空白项返回 400，不被当成「取消全部」', async () => {
+    const { service, offeringUpdate } = fixture(READY);
+    await expect(
+      service.apply(CTX, COMPANY_ID, { products: ['   '] }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(offeringUpdate).not.toHaveBeenCalled();
+  });
+
   it('显式空数组=取消全部选择；缺省 products=本次不改动选择', async () => {
     const { service, prisma, offeringUpsert, offeringUpdate, offeringFindMany } = fixture(READY);
     offeringFindMany.mockResolvedValue([

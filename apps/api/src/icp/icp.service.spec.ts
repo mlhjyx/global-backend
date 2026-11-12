@@ -1252,6 +1252,15 @@ describe("ICP input guardrails (PR-09)", () => {
     expect(f.runtime).not.toHaveBeenCalled();
   });
 
+  it("treats JSON null confirmedTargetMarkets as not provided instead of crashing", async () => {
+    const f = generationFixture();
+    f.result.data = modelOutput(["德国"]);
+    await expect(
+      f.service.generateFromCompany(ctx, "company", undefined, undefined, null as never),
+    ).resolves.toBeDefined();
+    expect(f.tx.icpDefinition.create).toHaveBeenCalled();
+  });
+
   it("rejects a confirmed market that is not ISO 3166-1 alpha-2 before touching the grant", async () => {
     const f = generationFixture();
     await expect(
@@ -1284,10 +1293,11 @@ describe("ICP input guardrails (PR-09)", () => {
     });
     const prompt = f.runtime.mock.calls[0][1].prompt as string;
     // 关闭时不做选择语义：带 selectedByUser:false 的旧数据仍按档案产品送进提示，
-    // 且不谎称是用户勾选。
+    // 且提示词与旧实现逐字节一致（不出现新标签）。
     expect(prompt).toContain("- A");
-    expect(prompt).toContain("来自档案/抽取，未经用户确认选择");
+    expect(prompt).toContain("产品/服务（官网抽取）");
     expect(prompt).not.toContain("用户本次勾选");
+    expect(prompt).not.toContain("未经用户确认选择");
   });
 
   it("uses user-confirmed markets as the only hard target and keeps AI suggestions separate", async () => {
@@ -1329,7 +1339,10 @@ describe("ICP input guardrails (PR-09)", () => {
     const create = f.tx.icpDefinition.create.mock.calls[0][0].data;
     expect(create.targetMarkets).toEqual(["德国"]);
     expect(create.targetMarkets).not.toContain("马来西亚");
-    expect(create.companyAttributes).toMatchObject({ marketBasis: "model_unconfirmed" });
+    expect(create.companyAttributes).toMatchObject({
+      marketBasis: "model_unconfirmed",
+      modelSuggestedMarkets: ["德国"],
+    });
     const prompt = f.runtime.mock.calls[0][1].prompt as string;
     expect(prompt).toContain("档案记录的市场（未确认，仅供建议）：MY（马来西亚）");
     expect(prompt).not.toContain("目标市场以用户确认为权威");

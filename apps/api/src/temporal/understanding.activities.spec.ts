@@ -169,7 +169,7 @@ describe('understanding.activities — durable workflow budget lifecycle', () =>
       knowledgeConflict: { create: vi.fn(async () => ({})) },
       outboxEvent: { create: vi.fn(async () => ({})) },
       evidence: { create: evidenceCreate },
-      offering: { upsert: offeringUpsert },
+      offering: { findMany: vi.fn(async () => []), upsert: offeringUpsert },
     };
     const prisma = {
       withWorkspace: vi.fn(async (_workspaceId: string, callback: (value: typeof tx) => unknown) =>
@@ -202,6 +202,76 @@ describe('understanding.activities — durable workflow budget lifecycle', () =>
     expect(claimCreate).toHaveBeenCalledOnce();
     expect(evidenceCreate).toHaveBeenCalledOnce();
     expect(offeringUpsert).toHaveBeenCalledOnce();
+    current.mockRestore();
+  });
+
+  it('preserves user product-selection markers when understanding re-extracts an offering', async () => {
+    const current = vi.spyOn(Context, 'current').mockReturnValue({
+      info: {
+        workflowExecution: { runId: 'workflow-run-1' },
+        activityId: 'activity-1',
+      },
+    } as never);
+    const offeringUpsert = vi.fn(async () => ({}));
+    const tx = {
+      claim: { findMany: vi.fn(async () => []), create: vi.fn(async () => ({})) },
+      knowledgeSource: {
+        findFirst: vi.fn(async () => null),
+        create: vi.fn(async () => ({ id: 'source-1' })),
+      },
+      knowledgeConflict: { create: vi.fn(async () => ({})) },
+      outboxEvent: { create: vi.fn(async () => ({})) },
+      evidence: { create: vi.fn(async () => ({})) },
+      offering: {
+        findMany: vi.fn(async () => [
+          {
+            name: 'Pump',
+            attributes: { selectedByUser: true, selectedAt: '2026-11-12T00:00:00.000Z' },
+          },
+          {
+            name: 'Valve',
+            attributes: { selectedByUser: false, selectedAt: '2026-11-12T00:00:00.000Z' },
+          },
+        ]),
+        upsert: offeringUpsert,
+      },
+    };
+    const prisma = {
+      withWorkspace: vi.fn(async (_workspaceId: string, callback: (value: typeof tx) => unknown) =>
+        callback(tx)),
+    } as unknown as PrismaService;
+    const acts = createUnderstandingActivities({
+      prisma,
+      gateway: {} as ModelGateway,
+      budgetStore: budgetStoreSpies().store,
+    });
+
+    await acts.persistOfferings({
+      ...AUTHORITY_ARGS,
+      companyId: 'company-1',
+      website: 'https://acme.example',
+      pages: [{
+        url: 'https://acme.example/products',
+        offerings: [
+          { name: 'Pump', confidence: 0.9, attributes: { materials: ['steel'] } },
+          { name: 'Valve', confidence: 0.9, attributes: {} },
+        ],
+      }],
+    });
+
+    const updates = offeringUpsert.mock.calls.map(
+      ([call]) => (call as { update: { attributes: Record<string, unknown> } }).update.attributes,
+    );
+    // 抽取属性照常落库，但用户标记（true 与 false）必须原样保留。
+    expect(updates).toContainEqual({
+      materials: ['steel'],
+      selectedByUser: true,
+      selectedAt: '2026-11-12T00:00:00.000Z',
+    });
+    expect(updates).toContainEqual({
+      selectedByUser: false,
+      selectedAt: '2026-11-12T00:00:00.000Z',
+    });
     current.mockRestore();
   });
 

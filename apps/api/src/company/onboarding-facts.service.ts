@@ -13,21 +13,9 @@ import {
 } from '../claim/profile-claim-drafts';
 import { OnboardingFactsDto } from './dto/onboarding-facts.dto';
 import { resolveIndustrySelection } from './industry-selection';
+import { withSelectionMarker } from './offering-selection';
 
 type CompanyRow = Prisma.CompanyProfileGetPayload<Record<string, never>>;
-
-/** Merge a selection marker into an existing Offering.attributes JSON value. */
-function withSelection(
-  attributes: unknown,
-  selectedByUser: boolean,
-  selectedAt: string,
-): Prisma.InputJsonValue {
-  const base =
-    attributes !== null && typeof attributes === 'object' && !Array.isArray(attributes)
-      ? (attributes as Record<string, unknown>)
-      : {};
-  return { ...base, selectedByUser, selectedAt } as Prisma.InputJsonValue;
-}
 
 /**
  * 注册引导完成（注册即建档第 1 步，2026-11-10）：把理解预览里勾选的事实写回
@@ -105,6 +93,12 @@ export class OnboardingFactsService {
         offeringNames = [
           ...new Set(dto.products.map((name) => name.trim()).filter(Boolean)),
         ];
+        // 空白项≠「取消全部」：显式 [] 才是取消全部，空白名称是客户端输入错误。
+        if (dto.products.length > 0 && offeringNames.length === 0) {
+          throw new BadRequestException({
+            error: { code: 'VALIDATION_ERROR', message: 'products 不能只有空白名称' },
+          });
+        }
         // 选择标记写在 Offering.attributes（现有 JSON 列，无迁移）：
         // - 勾选=selectedByUser:true；未勾选=selectedByUser:false；
         // - 显式空数组=取消全部；与「本次未提交 products（缺省）」区分；
@@ -117,7 +111,11 @@ export class OnboardingFactsService {
         const selected = new Set(offeringNames);
         for (const name of offeringNames) {
           const previous = existing.find((row) => row.name === name);
-          const attributes = withSelection(previous?.attributes, true, at);
+          const attributes = withSelectionMarker(
+            previous?.attributes,
+            true,
+            at,
+          ) as Prisma.InputJsonValue;
           await tx.offering.upsert({
             where: { companyId_name: { companyId, name } },
             update: { attributes },
@@ -134,7 +132,13 @@ export class OnboardingFactsService {
           if (selected.has(offering.name)) continue;
           await tx.offering.update({
             where: { id: offering.id },
-            data: { attributes: withSelection(offering.attributes, false, at) },
+            data: {
+              attributes: withSelectionMarker(
+                offering.attributes,
+                false,
+                at,
+              ) as Prisma.InputJsonValue,
+            },
           });
         }
       } else {

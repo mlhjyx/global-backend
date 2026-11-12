@@ -24,6 +24,11 @@ import {
 } from '../execution-budget/execution-budget-binding';
 import { isExecutionControlError } from '../execution-budget/execution-control-error';
 import {
+  mergeSelectionMarker,
+  readSelectionMarker,
+  type OfferingSelectionMarker,
+} from '../company/offering-selection';
+import {
   applyDomainAckConsumerTransaction,
   applyDomainAckConsumerTransactions,
 } from '../durable-results/domain-ack-consumer-bindings';
@@ -655,12 +660,24 @@ export function createUnderstandingActivities(deps: {
             // applyDomainAckConsumerTransactions 会抛 DOMAIN_ACK_MIXED_REPLAY_STATE。
           ]),
           apply: async (transaction) => {
+          // 重抽取会整体替换 attributes：先读出用户选择标记，合并回去再写。
+          const names = [...merged.values()].map((o) => o.name);
+          const existing = await transaction.offering.findMany({
+            where: { companyId: args.companyId, name: { in: names } },
+            select: { name: true, attributes: true },
+          });
+          const markers = new Map<string, OfferingSelectionMarker>();
+          for (const row of existing) {
+            const marker = readSelectionMarker(row.attributes);
+            if (marker) markers.set(row.name, marker);
+          }
           for (const o of merged.values()) {
+          const attributes = mergeSelectionMarker(o.attributes, markers.get(o.name));
           await transaction.offering.upsert({
             where: { companyId_name: { companyId: args.companyId, name: o.name } },
             update: {
               description: o.description ?? null,
-              attributes: (o.attributes ?? undefined) as never,
+              attributes: attributes as never,
               sourceUrl: o.sourceUrl,
               evidence: o.evidence ?? null,
               confidence: o.confidence,
@@ -670,7 +687,7 @@ export function createUnderstandingActivities(deps: {
               companyId: args.companyId,
               name: o.name,
               description: o.description ?? null,
-              attributes: (o.attributes ?? undefined) as never,
+              attributes: attributes as never,
               sourceUrl: o.sourceUrl,
               evidence: o.evidence ?? null,
               confidence: o.confidence,
