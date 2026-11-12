@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.global/events/payloads/discovery-run-completed.v1.schema.json",
+  "title": "DiscoveryRunCompletedV1",
+  "description": "DiscoveryRunCompleted payload v1 compatibility schema (2026-11-12). Historical events predate taskRef; stats/cost/costBasis are optional. The relay currently validates this shape in WARN-ONLY mode; it must not block old events.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["status"],
+  "properties": {
+    "planId": { "type": "string" },
+    "status": { "type": "string", "enum": ["DONE", "PARTIAL", "FAILED", "CANCELLED"] },
+    "stats": { "type": "object", "additionalProperties": true },
+    "cost": { "type": "number" },
+    "costBasis": { "type": "string" },
+    "taskRef": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "taskId": { "type": "string", "format": "uuid" },
+        "taskRunId": { "type": "string", "format": "uuid" }
+      }
+    }
+  }
+}

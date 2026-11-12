@@ -3,6 +3,7 @@ import {
   INTEGRATION_EVENTS,
   integrationEventValidationClass,
   validateIntegrationEvent,
+  validateIntegrationEventWarnOnly,
 } from './event-registry';
 
 const workspaceId = '10000000-0000-4000-8000-000000000001';
@@ -49,6 +50,21 @@ const candidateBatchPayload = {
   scored: 3,
   queues: {},
   candidates: [],
+};
+
+/** Historical shape: DiscoveryRunCompleted v1 before taskRef was added. */
+const discoveryRunCompletedPayload = {
+  planId: uuid,
+  status: 'DONE',
+  stats: { discovered: 3 },
+  cost: 1.2,
+  costBasis: 'usage_ledger-runid/v1',
+};
+
+/** Historical shape: LeadsScored v1 never had a status field. */
+const leadsScoredPayload = {
+  scored: 3,
+  queues: { recommended: 1, needs_review: 2, rejected: 0, suppressed: 0, sanctions_hold: 0 },
 };
 
 const deletionPayload = {
@@ -104,5 +120,33 @@ describe('integration event payload gate', () => {
   it('rejects non-object payloads even for envelope-only events', () => {
     expect(validateIntegrationEvent(event('LeadsScored', null))).toBe(false);
     expect(validateIntegrationEvent(event('LeadsScored', []))).toBe(false);
+  });
+
+  it('accepts historical run/scored payloads and only warns on the stricter v1 shape', () => {
+    const run = event('DiscoveryRunCompleted', discoveryRunCompletedPayload);
+    const scored = event('LeadsScored', leadsScoredPayload);
+
+    // The existing envelope gate is unchanged: both remain envelope-only and accepted.
+    expect(validateIntegrationEvent(run)).toBe(true);
+    expect(validateIntegrationEvent(scored)).toBe(true);
+    // The compatibility validator accepts the historical shapes (no taskRef, no status).
+    expect(validateIntegrationEventWarnOnly(run)).toEqual({ ok: true });
+    expect(validateIntegrationEventWarnOnly(scored)).toEqual({ ok: true });
+  });
+
+  it('warn-only validators flag malformed payloads without parking or blocking', () => {
+    const badRun = event('DiscoveryRunCompleted', { planId: uuid });
+    const badScored = event('LeadsScored', { queues: {} });
+
+    expect(validateIntegrationEvent(badRun)).toBe(true);
+    expect(validateIntegrationEvent(badScored)).toBe(true);
+    expect(validateIntegrationEventWarnOnly(badRun)).toEqual({
+      ok: false,
+      reason: 'payload_contract_mismatch',
+    });
+    expect(validateIntegrationEventWarnOnly(badScored)).toEqual({
+      ok: false,
+      reason: 'payload_contract_mismatch',
+    });
   });
 });

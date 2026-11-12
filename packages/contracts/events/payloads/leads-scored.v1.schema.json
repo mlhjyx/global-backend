@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.global/events/payloads/leads-scored.v1.schema.json",
+  "title": "LeadsScoredV1",
+  "description": "LeadsScored payload v1 compatibility schema (2026-11-12). The historical payload is {scored, queues}; it never had a status field. The relay validates this shape in WARN-ONLY mode.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["scored", "queues"],
+  "properties": {
+    "scored": { "type": "integer", "minimum": 0 },
+    "queues": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+    "icp_id": { "type": "string", "format": "uuid" }
+  }
+}

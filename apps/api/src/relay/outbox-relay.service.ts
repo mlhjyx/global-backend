@@ -60,6 +60,7 @@ import {
   WEBHOOK_SINK,
   toEnvelope,
   validateIntegrationEvent,
+  validateIntegrationEventWarnOnly,
 } from "./event-registry";
 
 /**
@@ -500,6 +501,15 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           `invalid integration event ${ev.eventId} parked: payload contract mismatch`,
         );
         return;
+      }
+      // Compatibility rollout: historical payloads are accepted by the envelope gate;
+      // the stricter v1 shape is observed as a warning only (never parks, never changes
+      // the consumer). Promotion to fail-closed is a separate decision after replay.
+      const payloadWarning = validateIntegrationEventWarnOnly(ev);
+      if (payloadWarning && !payloadWarning.ok) {
+        this.logger.warn(
+          `integration event ${ev.eventId} (${ev.eventType}) payload warning: ${payloadWarning.reason}`,
+        );
       }
       const sinks = [
         PULL_SINK,
