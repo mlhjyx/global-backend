@@ -163,6 +163,7 @@ scores 与 as-built 六维映射注记：现行六维=fit/role/intent/dataQualit
 - 保留：`/companies` `/icps` `/query-plans` `/discovery-runs` `/canonical-companies` `/leads` `/suppressions`（+补 `/events` 拉取、`/evidence` 查询、`/deletion-requests`）。
 - `/campaigns` `/outreach` `/qgos` `/opportunities` **不属于本仓，任何时候不在本仓新增**；改边界唯一途径=修订 ADR-001+三方书面确认。
 - Site Builder 当前端点位于 `/site-builder/intake`、`/site-builder/sites*`、`/site-builder/assets*`、`/site-builder/builds*`；正式形状只认 code-first OpenAPI。目标契约草案 [07-api-contract-draft.md](../site-builder/07-api-contract-draft.md) 与 as-built 不同的部分必须显式标注，不能冒充已实现。
+- 服务间端点（`x-service-token`、mTLS/JWS、平台 JWKS）不进入用户 OpenAPI 的 `securitySchemes`；它们按控制面/平台接口管理，守卫与清单见 controller 注释与对应 guard。
 - 统一返回信封 **✅ 收口④已定稿（PR #48）**：2xx 一律 `{data}`；分页 `{data, page:{next_cursor, has_more}}`；错误 `{error:{code,message,details?}}`；`/health*` 探针例外。协议键 snake_case、资源字段 camelCase；运行时与 swagger 声明同源（`common/envelope.ts` + `common/api-envelope.decorator.ts`）。契约唯一真值=code-first 导出的 `packages/contracts/openapi/openapi.json`；端点与 operationId 数量只从机器合同即时计算，不在权威文档手抄。CI contracts job 三道门（drift/spectral/oasdiff breaking + `breaking-change-approved` label 放行）。Evidence/Quality/Rights/Freshness/Cost/Partial 等信封扩展字段待收口⑤⑥随一等 Signal/权利词表补充。
 
 ## 8. as-built 缺口登记（已核验，8 项）

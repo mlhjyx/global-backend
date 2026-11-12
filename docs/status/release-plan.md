@@ -72,6 +72,8 @@ The G0–G7 meanings below are stable. Their current verdicts are intentionally 
 - Push, PR mutation, merge, deployment/restart, retained migration, provider/model/paid call, OAuth/email send and credential changes each require separate exact authorization.
 - Model-candidate visibility is governed by the generated [candidate baseline](../site-builder/model-candidate-baseline.md), machine ID `site-builder-model-candidate-baseline/2026-08-07-v3`; it does not authorize route adoption, dispatch or deployment.
 - A passing local or hosted test is not runtime evidence; RuntimeEvidence is not a Release Bundle; neither implies UAT, Pilot or GA authorization.
+- **引擎合同 pin 节拍（2026-11-12 审计）**：每次引擎发车若 OpenAPI 或集成事件集变化，gain-saas 的 `packages/engine-client` pin 必须作为独立合同 PR 更新（重跑 `pnpm gen:engine`、审阅 OpenAPI diff、记录引擎 commit/image）；不得把 pin 更新藏进普通功能 PR。
+- **迁移只前进（2026-11-12 审计）**：Prisma 无 down migration；回退 = 备份恢复 + 前向修复。破坏性变更按 expand → contract 两步，不写不可逆的一次性迁移。
 - **Site Builder 冻结期间的工程约束（2026-11-12 审计）**：不新增 Site Builder 生产代码、不扩大其测试/CI 预算，G9 文件与复杂度基线只降不升；`docs/site-builder/` 与 `docs/design/` 仅作冻结线文档，eval 子系统不扩日常 CI；解除冻结、恢复 Publish/Domain 或重新投入模型评测须 PRD4-D1 单独拍板。本约束不改变现有 Site Builder 运行路径或历史证据。
 
 ### Final service acceptance

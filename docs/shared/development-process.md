@@ -61,6 +61,8 @@ ADR 的 `ACCEPTED` 只表示决定生效，不等于实现或验收；`docs/evid
 | T3 高风险修改 | 数据库迁移、多租户 RLS 与权限、身份与鉴权、费用/模型调用/外部执行、联系人数据与真实触达、CI/发布/治理机器政策（required-contexts、verifier、schema、ruleset 要求）、大批量文件删除 | T2 全部 + 计划或 ADR（适用时）+ 专项审查、负向测试、回退方案与证据 | — |
 | 紧急热修（通道，不是类别） | 线上或运行故障 | 先修复、标注 hotfix、事后 24 小时内补记录与证据 | 事前计划 |
 
+**T3 独立审查**：T3 类 PR 在自审之外至少做一次独立审查（另一个 AI 会话或人工），审查记录贴 PR；DEC-AIDEV-004 的常设合并授权不豁免这一步。
+
 **T0 不由目录决定**：`docs/governance/`（机器政策与 registry/schema）、`docs/adr/`、`docs/evidence/`、`docs/releases/`、`docs/security/` 以及任何被 CI、脚本或机器合同引用的文件属于 T1 或 T3；`.github/`、`scripts/` 永不属 T0。CI 的 `run_code` 快通道只决定跳过哪些构建步骤，不改变变更类别与审查要求。
 
 **触发条件**：任何会进入 main 的改动都必须开 PR——包括一行修复、文档、依赖补丁。不需要开 PR 的只有：本地临时文件（不入库）、记忆文件、工作区运维文件（`/global/CLAUDE.md`、RUNBOOK、`_archive`；改了要留痕）。**永远不做**：直接 push main、在根 checkout 做功能修改、`--no-verify` 绕过门禁、把多个不相干任务塞进一个 PR。
