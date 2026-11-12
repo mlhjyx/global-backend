@@ -158,7 +158,7 @@ export type DiscoveryOutcomeErrorClass = 'PARAM_INVALID' | 'EMPTY_RESULT';
 export interface DiscoveryOutcome {
   errorClass: DiscoveryOutcomeErrorClass;
   reasonCode: string;
-  /** Bounded, non-PII validation issues (parameter names only). */
+  /** Bounded, non-PII validation issues: parameter names plus at most truncated echoed values. */
   issues?: string[];
 }
 

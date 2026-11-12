@@ -172,6 +172,91 @@ describe('RegistryFrameDiscoveryProvider (T3-09 registration surface)', () => {
     });
   });
 
+  it('accepts a real ISO2 outside the 19-country search vocabulary (BE)', async () => {
+    const calls: Array<{ where: Record<string, unknown> }> = [];
+    const prisma = {
+      registryEntity: {
+        findMany: async (args: { where: Record<string, unknown> }) => {
+          calls.push(args);
+          return [row];
+        },
+      },
+    } as unknown as PrismaClient;
+    const provider = new RegistryFrameDiscoveryProvider({ prisma });
+
+    const result = await provider.discoverCompanies(query({ country: 'be' }), ctx);
+    expect(result.outcome).toBeUndefined();
+    expect(result.records).toHaveLength(1);
+    expect(calls[0]!.where).toMatchObject({ country: 'BE' });
+  });
+
+  it('falls back to the engine-injected _countryCode when the country word is unresolvable', async () => {
+    const calls: Array<{ where: Record<string, unknown> }> = [];
+    const prisma = {
+      registryEntity: {
+        findMany: async (args: { where: Record<string, unknown> }) => {
+          calls.push(args);
+          return [row];
+        },
+      },
+    } as unknown as PrismaClient;
+    const provider = new RegistryFrameDiscoveryProvider({ prisma });
+
+    // taxonomy 把「比利时」解析成 BE 并注入 _countryCode；词表本身没有这个别名。
+    const result = await provider.discoverCompanies(
+      query({ country: '比利时', _countryCode: 'BE' }),
+      ctx,
+    );
+    expect(result.outcome).toBeUndefined();
+    expect(calls[0]!.where).toMatchObject({ country: 'BE' });
+
+    // 只有 _countryCode、没有 country 时同样可用。
+    await provider.discoverCompanies(query({ _countryCode: 'FR' }), ctx);
+    expect(calls[1]!.where).toMatchObject({ country: 'FR' });
+  });
+
+  it.each([
+    ['missing', {}],
+    ['multiple', { country: ['DE', 'FR'] }],
+    ['blank', { country: '   ' }],
+  ])('classifies a %s country as COUNTRY_INVALID without touching the database', async (_case, filters) => {
+    const prisma = {
+      registryEntity: {
+        findMany: async () => {
+          throw new Error('must not query without a single country');
+        },
+      },
+    } as unknown as PrismaClient;
+    const provider = new RegistryFrameDiscoveryProvider({ prisma });
+
+    const result = await provider.discoverCompanies(query(filters), ctx);
+    expect(result.records).toEqual([]);
+    expect(result.outcome).toMatchObject({
+      errorClass: 'PARAM_INVALID',
+      reasonCode: 'COUNTRY_INVALID',
+    });
+  });
+
+  it('classifies registry filter violations as FILTERS_INVALID with bounded issues', async () => {
+    const prisma = {
+      registryEntity: {
+        findMany: async () => {
+          throw new Error('must not query with invalid filters');
+        },
+      },
+    } as unknown as PrismaClient;
+    const provider = new RegistryFrameDiscoveryProvider({ prisma });
+
+    const result = await provider.discoverCompanies(query({ country: 'DE', scheme: 'X' }), ctx);
+    expect(result.records).toEqual([]);
+    expect(result.outcome).toMatchObject({
+      errorClass: 'PARAM_INVALID',
+      reasonCode: 'FILTERS_INVALID',
+    });
+    expect(result.outcome?.issues?.length).toBeGreaterThan(0);
+    expect(result.outcome?.issues?.every((issue) => issue.length <= 120)).toBe(true);
+  });
+
   it('distinguishes a valid query with zero rows as EMPTY_RESULT', async () => {
     const prisma = {
       registryEntity: { findMany: async () => [] },

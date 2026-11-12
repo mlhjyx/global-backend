@@ -28,6 +28,7 @@ import {
   registryQueryDigest,
 } from '../../registry/local-query-receipt';
 import { RegistryQueryError, parseRegistryQueryFilters, queryRegistryEntities } from '../../registry/query';
+import { isIso3166Alpha2 } from '../iso3166';
 import { targetCountryCodes } from '../search-localization';
 import type {
   CompanyDiscoveryAdapter,
@@ -94,16 +95,28 @@ export class RegistryFrameDiscoveryProvider implements CompanyDiscoveryAdapter {
         issues: ['country 必填且必须是单个 ISO 3166-1 alpha-2 或可归一的国家词'],
       });
     }
-    const countryCodes = targetCountryCodes({ filters: { country: countryValues } });
-    if (countryCodes.length !== 1) {
+    // 搜索本地化词表只覆盖重点市场；registry 契约允许任意真实 ISO2（BE/SE/KZ…），
+    // 引擎注入的 _countryCode 也来自全量 taxonomy。归一顺序：词表 → 原值即真实 ISO2
+    // → 引擎注入的 _countryCode；都不是才判 COUNTRY_UNRESOLVED。
+    const countryValue = countryValues[0]!;
+    const vocabularyCodes = targetCountryCodes({ filters: { country: [countryValue] } });
+    const countryCode =
+      vocabularyCodes.length === 1
+        ? vocabularyCodes[0]!.toUpperCase()
+        : isIso3166Alpha2(countryValue)
+          ? countryValue.trim().toUpperCase()
+          : typeof raw._countryCode === 'string' && isIso3166Alpha2(raw._countryCode)
+            ? raw._countryCode.trim().toUpperCase()
+            : null;
+    if (!countryCode) {
       return this.emptyResult(ctx, {
         errorClass: 'PARAM_INVALID',
         reasonCode: 'COUNTRY_UNRESOLVED',
-        issues: [`country 无法归一为单一 ISO2：${countryValues[0]}`],
+        issues: ['country 无法归一为单一 ISO2'],
       });
     }
     const candidate: Record<string, unknown> = {
-      country: countryCodes[0]!.toUpperCase(),
+      country: countryCode,
       ...(raw.scheme !== undefined ? { scheme: raw.scheme } : {}),
       ...(nacePrefixes.length > 0 ? { nace_prefix: nacePrefixes } : {}),
       ...(raw.employee_band !== undefined ? { employee_band: raw.employee_band } : {}),
@@ -122,7 +135,8 @@ export class RegistryFrameDiscoveryProvider implements CompanyDiscoveryAdapter {
         return this.emptyResult(ctx, {
           errorClass: 'PARAM_INVALID',
           reasonCode: 'FILTERS_INVALID',
-          issues: error.issues,
+          // 有界、非 PII：参数名 + 至多截断后的回显值。
+          issues: error.issues.slice(0, 5).map((issue) => issue.slice(0, 120)),
         });
       }
       throw error;
