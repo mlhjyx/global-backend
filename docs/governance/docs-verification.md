@@ -6,7 +6,7 @@
 > 评审状态：`APPROVED_AT_GATE_8`
 > 事实 Owner：`OWN-DOC-GOV`
 > 机器政策：[`docs-verification-policy/v1`](docs-verification-policy.json)
-> 最后核验：2026-10-15
+> 最后核验：2026-11-12
 > 批准边界：产品负责人条件批准机器门与例外治理；独立人工、真实 Release 和全部 blocker 仍保留
 
 本文定义文档如何进入持续集成、什么必须失败、什么只能告警，以及历史证据为什么不能为了“全绿”被无声重写。机器规则由 JSON 政策和 `scripts/verify-docs.mjs` 承重；本文解释其人类语义。
@@ -17,7 +17,7 @@
 pnpm docs:verify
 ```
 
-该命令不访问网络、不连接数据库、不生成产品代码，也不写入仓库。它先运行 `governance:verify` 的 mutation tests 与机器 Registry/Schema/生成物检查，再运行既有模型候选、contracts build 和 Markdown 校验（含 changelog 片段格式）。普通 CI 的安装步骤后运行同一命令；独立 `governance · traceability · release` required context 运行 `pnpm governance:verify`，并且只在 `pull_request` 上再运行一步 `node scripts/governance-changelog-fragments.mjs require --base <base.sha> --head <head.sha>`（push 到 main 时跳过；前一步失败也照跑，同一轮报全）。
+该命令不访问网络、不连接数据库、不生成产品代码，也不写入仓库。它运行模型候选基线、contracts build、Model Candidate Registry 与 Markdown 校验（含 changelog 片段格式）。`governance:verify` 的 mutation tests 与机器 Registry/Schema/生成物检查**不再包含在内**（2026-11-12 起去重）：普通 CI 的 `build · typecheck · test` 安装后运行 `docs:verify`，独立 `governance · traceability · release` required context 运行 `pnpm governance:verify`（每个 PR 各一次，不再重复），后者只在 `pull_request` 上再运行一步 `node scripts/governance-changelog-fragments.mjs require --base <base.sha> --head <head.sha>`（push 到 main 时跳过；前一步失败也照跑，同一轮报全）。本地推送前快检 `gctl check` 依次运行 `governance:verify` 与 `docs:verify`。
 
 ## 2. 检查面与失败语义
 
