@@ -12,6 +12,10 @@ import {
 import type { ScreenMatch } from '../sanctions/sanctions-matcher';
 import { syntheticDiscoveryEntityIds } from '../discovery/evidence-license';
 import { reachableCompanyContactPoints } from '../discovery/company-contact-points';
+import {
+  appendRunEvent,
+  QUALIFICATION_BATCH_SCORED_EVENT,
+} from '../discovery/run2/run-events';
 
 export interface QualifyRunInput {
   workspaceId: string;
@@ -23,6 +27,63 @@ export interface QualifyRunInput {
    * 缺省（直接调用活动的测试/工具路径）→ 批次引用记 `qualify:direct:<n>`，事件 run_ref=null。
    */
   runRef?: string;
+  /**
+   * 触发本次评分的 DiscoveryRun id（relay 从 QualifyRequested.payload.runId 透传）。
+   * 仅当它确实是本 workspace 的 run 时，才按批追加 `qualification_batch_scored` run_event；
+   * 手工/删除触发的重评分没有它，绝不伪造 run 级历史归属。
+   */
+  discoveryRunId?: string;
+}
+
+/** 只有本 workspace 可见的 DiscoveryRun 才接受 run 级评分留痕（外键不能拖垮整批评分）。 */
+async function visibleDiscoveryRunId(
+  tx: Prisma.TransactionClient,
+  candidate: string | undefined,
+): Promise<string | null> {
+  if (!candidate) return null;
+  const run = await tx.discoveryRun.findUnique({
+    where: { id: candidate },
+    select: { id: true },
+  });
+  return run?.id ?? null;
+}
+
+/** PR-06b：每批一条不可变评分快照；无 DiscoveryRun 时 no-op，按 batchRef 去重。 */
+async function recordScoredBatch(
+  tx: Prisma.TransactionClient,
+  input: {
+    workspaceId: string;
+    icpId: string;
+    discoveryRunId: string | null;
+    batchNo: number;
+    batchRef: string;
+    items: Array<Record<string, unknown>>;
+  },
+): Promise<void> {
+  if (!input.discoveryRunId) return;
+  const alreadyRecorded = await tx.runEvent.findFirst({
+    where: {
+      runId: input.discoveryRunId,
+      type: QUALIFICATION_BATCH_SCORED_EVENT,
+      payload: { path: ['batchRef'], equals: input.batchRef },
+    },
+    select: { id: true },
+  });
+  if (alreadyRecorded) return;
+  await appendRunEvent(tx as never, {
+    workspaceId: input.workspaceId,
+    runId: input.discoveryRunId,
+    type: QUALIFICATION_BATCH_SCORED_EVENT,
+    payload: {
+      runRef: input.discoveryRunId,
+      icpId: input.icpId,
+      batchNo: input.batchNo,
+      ruleVersion: QUALIFICATION_RULE_VERSION,
+      scoredAt: new Date().toISOString(),
+      batchRef: input.batchRef,
+      items: input.items,
+    },
+  });
 }
 
 /**
@@ -38,28 +99,35 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
       const batchSize = args.batchSize ?? 100;
       // ICP 载入单独短事务；批循环**每批一个事务**——全量千余家塞单个交互事务会撞
       // Prisma 默认 5s 事务超时（P2028），且长事务持连接。批间用 id>cursor 续扫。
-      const icpForScoring = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-        const icp = await tx.icpDefinition.findUnique({
-          where: { id: args.icpId },
-          include: { rules: true, roles: true },
-        });
-        if (!icp) throw new Error(`icp ${args.icpId} not found`);
-        if (icp.status !== 'ACTIVE') throw new Error(`icp is ${icp.status}; qualify requires ACTIVE`);
-        return {
-          rules: icp.rules.map(
-            (r): RuleLike => ({
-              id: r.id,
-              kind: r.kind as RuleLike['kind'],
-              field: r.field,
-              operator: r.operator,
-              value: r.value,
-              weight: r.weight,
-            }),
-          ),
-          triggerSignals: Array.isArray(icp.triggerSignals) ? (icp.triggerSignals as string[]) : [],
-          committeeRoles: icp.roles.map((r) => ({ role: r.role, title: r.title })),
-        };
-      });
+      const { icpForScoring, discoveryRunId } = await deps.prisma.withWorkspace(
+        args.workspaceId,
+        async (tx) => {
+          const icp = await tx.icpDefinition.findUnique({
+            where: { id: args.icpId },
+            include: { rules: true, roles: true },
+          });
+          if (!icp) throw new Error(`icp ${args.icpId} not found`);
+          if (icp.status !== 'ACTIVE') throw new Error(`icp is ${icp.status}; qualify requires ACTIVE`);
+          // 虚假/跨租户 id 视为未提供：不能让 run_event 的外键把整批评分拖垮。
+          return {
+            icpForScoring: {
+              rules: icp.rules.map(
+                (r): RuleLike => ({
+                  id: r.id,
+                  kind: r.kind as RuleLike['kind'],
+                  field: r.field,
+                  operator: r.operator,
+                  value: r.value,
+                  weight: r.weight,
+                }),
+              ),
+              triggerSignals: Array.isArray(icp.triggerSignals) ? (icp.triggerSignals as string[]) : [],
+              committeeRoles: icp.roles.map((r) => ({ role: r.role, title: r.title })),
+            },
+            discoveryRunId: await visibleDiscoveryRunId(tx, args.discoveryRunId),
+          };
+        },
+      );
 
       // 第五门：每 qualify run 重建一次制裁索引（worker 长驻进程与每日名单刷新间保持新鲜；
       // DISABLED 时空索引→screen 恒 not_screened→no-op，不阻断）。
@@ -112,6 +180,8 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
             suppressed: 0,
             sanctions_hold: 0,
           };
+          // PR-06b：本批的不可变评分快照（只有 run 触发的评分才写入 run_event）。
+          const batchScoredItems: Array<Record<string, unknown>> = [];
           // 一批一次：公司 / 域名禁联事实，用于联系路径的读时过滤（公司被禁联 → 无点；被禁联域名覆盖的点剔除）。
           const suppressions = await tx.suppressionRecord.findMany({
             where: { type: { in: ['domain', 'company_name'] } },
@@ -316,6 +386,17 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
               fit_verdict: authoritativeFit,
               total_score: result.totalScore,
             });
+            batchScoredItems.push({
+              companyId: c.id,
+              leadId: batchCandidates[batchCandidates.length - 1]!.lead_id,
+              totalScore: result.totalScore,
+              scores: result.scores,
+              queue,
+              fitVerdict: authoritativeFit,
+              ruleVersion: QUALIFICATION_RULE_VERSION,
+              candidateBatchRef: batchRef,
+              scoredAt: scoredAt.toISOString(),
+            });
           }
           // 每 run 每批一条（设计 2026-11-08 QGO §4.2）：批次产出与判定分布进 outbox，
           // 与 lead upsert 同事务（at-least-once 由事件幂等消费吸收）。载荷无个人数据。
@@ -335,6 +416,15 @@ export function createQualifyActivities(deps: { prisma: PrismaService; sanctions
                 candidates: batchCandidates,
               } as unknown as Prisma.InputJsonValue,
             },
+          });
+          // PR-06b：run 触发的评分每批写一条不可变快照（无 run / 重试重复时 no-op）。
+          await recordScoredBatch(tx, {
+            workspaceId: args.workspaceId,
+            icpId: args.icpId,
+            discoveryRunId,
+            batchNo,
+            batchRef,
+            items: batchScoredItems,
           });
           batchNo += 1;
           cursor = companies[companies.length - 1].id;

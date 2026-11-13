@@ -11,6 +11,9 @@
  * 即从源头避免冲突；任何仍出现的数据库错误（含唯一冲突）直接上抛，由调用方的外层事务重试。
  */
 
+/** PR-06b：本 run 触发的评分批次留痕（append-only；payload 无个人数据）。 */
+export const QUALIFICATION_BATCH_SCORED_EVENT = 'qualification_batch_scored';
+
 export type RunEventType =
   | 'phase_started'
   | 'phase_completed'
@@ -20,7 +23,8 @@ export type RunEventType =
   | 'budget_exhausted'
   | 'lease_skipped'
   | 'pool_cap_reached'
-  | 'run_finished';
+  | 'run_finished'
+  | typeof QUALIFICATION_BATCH_SCORED_EVENT;
 
 export interface RunEventInput {
   workspaceId: string;
