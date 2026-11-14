@@ -1,4 +1,7 @@
 import type { Prisma } from '@prisma/client';
+import { QUALIFICATION_BATCH_SCORED_EVENT } from './run2/run-events';
+
+export { QUALIFICATION_BATCH_SCORED_EVENT } from './run2/run-events';
 
 /**
  * Run 级结果视图（MP-0.3 / PR-06a，只读，无迁移）。
@@ -12,7 +15,6 @@ import type { Prisma } from '@prisma/client';
  * 边界：候选与评分明细各自封顶 CANDIDATE_LIMIT 条并回报 truncated；计数永远按全量算。
  */
 
-export const QUALIFICATION_BATCH_SCORED_EVENT = 'qualification_batch_scored';
 export const RUN_RESULT_VIEW_LIMIT = 500;
 
 export interface RunResultViewCandidate {

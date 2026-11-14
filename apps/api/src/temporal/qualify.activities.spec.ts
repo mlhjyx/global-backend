@@ -17,7 +17,11 @@ const WS = '10000000-0000-4000-8000-000000000001';
 const ICP = '20000000-0000-4000-8000-000000000002';
 const COMPANY_ID = '30000000-0000-4000-8000-000000000003';
 
-type FindManyArgs = { include?: Record<string, unknown>; where?: unknown };
+type FindManyArgs = {
+  include?: Record<string, unknown>;
+  take?: number;
+  where?: { id?: { gt?: string } };
+};
 
 function fixture(options: {
   points?: Array<{ kind: string; value: string; status: string }>;
@@ -35,6 +39,10 @@ function fixture(options: {
   screenImpl?: (name: string, country: string | null) => ScreenResult;
   /** 命中路径 reconcile 读到的库里记录（findFirst 的返回）。 */
   prior?: { status: string; reviewState: string; matches: unknown } | null;
+  /** PR-06b：DiscoveryRun 是否可见（默认可见）；false 模拟虚假/跨租户 id。 */
+  discoveryRunExists?: boolean;
+  /** PR-06b：已存在的评分批次引用（模拟活动重试/replay）。 */
+  existingBatchRef?: string;
   /** ch08 §3.1.12 名单新鲜度；缺省 = 筛查门未启用（inactive，不改变行为）。 */
   freshness?: Partial<{
     active: boolean;
@@ -61,10 +69,14 @@ function fixture(options: {
     contacts: options.contacts ?? [],
     companyContactPoints: options.points ?? [],
   };
-  const findMany = vi.fn(async (_args: FindManyArgs) => [
-    company,
-    ...(options.extraCompanies ?? []).map((extra) => ({ ...company, ...extra })),
-  ]);
+  const findMany = vi.fn(async (args: FindManyArgs) => {
+    const all = [company, ...(options.extraCompanies ?? []).map((extra) => ({ ...company, ...extra }))].sort(
+      (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+    );
+    const cursor = args.where?.id?.gt;
+    const after = cursor ? all.filter((row) => row.id > cursor) : all;
+    return args.take === undefined ? after : after.slice(0, args.take);
+  });
   const leadUpsert = vi.fn(async () => ({}));
   const suppressionFindMany = vi.fn(async () => options.suppressions ?? []);
   const tx = {
@@ -95,6 +107,22 @@ function fixture(options: {
       updateMany: vi.fn(async (_args: unknown) => ({ count: 1 })),
     },
     outboxEvent: { create: vi.fn(async () => ({})) },
+    discoveryRun: {
+      findUnique: vi.fn(async ({ where }: { where: { id: string } }) =>
+        options.discoveryRunExists === false ? null : { id: where.id },
+      ),
+    },
+    runEvent: {
+      findFirst: vi.fn(async (args: { where: { payload: { equals: string } } }) =>
+        options.existingBatchRef === undefined ||
+        args.where.payload.equals !== options.existingBatchRef
+          ? null
+          : { id: 'run-event-1' },
+      ),
+      aggregate: vi.fn(async () => ({ _max: { seq: 4n } })),
+      create: vi.fn(async () => ({})),
+    },
+    $queryRaw: vi.fn(async () => [{ locked: '' }]),
   };
   const FRESHNESS_INACTIVE = {
     active: false,
@@ -143,6 +171,8 @@ function fixture(options: {
     leadUpsert,
     suppressionFindMany,
     outboxCreate: tx.outboxEvent.create,
+    discoveryRun: tx.discoveryRun,
+    runEvent: tx.runEvent,
     upserted,
     screening: tx.sanctionsScreeningResult,
     sanctionsScreening,
@@ -565,5 +595,106 @@ describe('ch08 §3.1.12 制裁陈旧门（qualify）', () => {
       (call) => (call[0] as { data: Record<string, unknown> }).data.eventType,
     );
     expect(types).not.toContain('SanctionsListStale');
+  });
+});
+
+describe('scoreCandidates — 本轮评分留痕（PR-06b）', () => {
+  const RUN_ID = '40000000-0000-4000-8000-000000000004';
+  const batches = (f: ReturnType<typeof fixture>) =>
+    f.runEvent.create.mock.calls.map(
+      (call) => (call[0] as { data: Record<string, unknown> }).data,
+    );
+
+  it('writes one qualification_batch_scored run_event per batch for run-triggered scoring', async () => {
+    const f = fixture({
+      discoveryRunExists: true,
+      extraCompanies: [{ id: '30000000-0000-4000-8000-000000000099' }],
+    });
+
+    await f.activities.scoreCandidates({
+      workspaceId: WS,
+      icpId: ICP,
+      runRef: RUN_ID,
+      discoveryRunId: RUN_ID,
+      batchSize: 1,
+    });
+
+    expect(f.discoveryRun.findUnique).toHaveBeenCalledWith({
+      where: { id: RUN_ID },
+      select: { id: true },
+    });
+    const events = batches(f);
+    expect(events).toHaveLength(2); // batchSize=1 × 2 家公司 → 两批各一条
+    expect(events[0]).toMatchObject({
+      workspaceId: WS,
+      runId: RUN_ID,
+      seq: 5n, // aggregate max=4n → +1
+      type: 'qualification_batch_scored',
+      payload: {
+        runRef: RUN_ID,
+        icpId: ICP,
+        batchNo: 0,
+        ruleVersion: expect.any(String),
+        scoredAt: expect.any(String),
+        batchRef: `qualify:${RUN_ID}:0`,
+        items: [
+          expect.objectContaining({
+            companyId: COMPANY_ID,
+            queue: expect.any(String),
+            totalScore: expect.any(Number),
+            scores: expect.objectContaining({ fit: expect.any(Number) }),
+            fitVerdict: 'match',
+            ruleVersion: expect.any(String),
+            candidateBatchRef: `qualify:${RUN_ID}:0`,
+            scoredAt: expect.any(String),
+          }),
+        ],
+      },
+    });
+    expect(events.map((event) => (event.payload as { batchRef: string }).batchRef)).toEqual([
+      `qualify:${RUN_ID}:0`,
+      `qualify:${RUN_ID}:1`,
+    ]);
+  });
+
+  it('does not write run events for manual/direct scoring without a discovery run id', async () => {
+    const f = fixture();
+
+    await f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP });
+
+    expect(f.runEvent.create).not.toHaveBeenCalled();
+    expect(f.discoveryRun.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('skips the batch event when the referenced discovery run is not visible', async () => {
+    const f = fixture({ discoveryRunExists: false });
+
+    await expect(
+      f.activities.scoreCandidates({ workspaceId: WS, icpId: ICP, discoveryRunId: RUN_ID }),
+    ).resolves.toMatchObject({ scored: expect.any(Number) });
+
+    expect(f.runEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('is idempotent per batchRef when the same scoring is replayed', async () => {
+    const f = fixture({ existingBatchRef: `qualify:${RUN_ID}:0` });
+
+    await f.activities.scoreCandidates({
+      workspaceId: WS,
+      icpId: ICP,
+      runRef: RUN_ID,
+      discoveryRunId: RUN_ID,
+    });
+
+    expect(f.runEvent.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          runId: RUN_ID,
+          type: 'qualification_batch_scored',
+          payload: { path: ['batchRef'], equals: `qualify:${RUN_ID}:0` },
+        }),
+      }),
+    );
+    expect(f.runEvent.create).not.toHaveBeenCalled();
   });
 });

@@ -531,6 +531,45 @@ describe("routeEvent — 三分支路由（收口③核心）", () => {
     expect(tx.outboxDelivery.createMany).not.toHaveBeenCalled();
   });
 
+  it("QualifyRequested forwards the discovery run id as runRef and discoveryRunId (PR-06b)", async () => {
+    const runId = "44444444-4444-4444-8444-444444444444";
+    const ev = makeEvent({
+      eventType: "QualifyRequested",
+      aggregateType: "ICP",
+      aggregateId: "icp-1",
+      payload: { reason: "discovery_run_completed", runId },
+    });
+    const temporal = makeTemporal();
+    const { db } = makeDb([ev]);
+
+    await makeService(db, temporal).routeEvent(ev);
+
+    expect(temporal.client.workflow.start).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        args: [{ workspaceId: WS, icpId: "icp-1", runRef: runId, discoveryRunId: runId }],
+      }),
+    );
+  });
+
+  it("QualifyRequested without a run id keeps the legacy workflow args", async () => {
+    const ev = makeEvent({
+      eventType: "QualifyRequested",
+      aggregateType: "ICP",
+      aggregateId: "icp-1",
+      payload: { reason: "manual" },
+    });
+    const temporal = makeTemporal();
+    const { db } = makeDb([ev]);
+
+    await makeService(db, temporal).routeEvent(ev);
+
+    expect(temporal.client.workflow.start).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ args: [{ workspaceId: WS, icpId: "icp-1" }] }),
+    );
+  });
+
   it("CompanyProfileCreated preserves the immutable authority binding in workflow args", async () => {
     const ev = makeEvent({
       eventType: "CompanyProfileCreated",

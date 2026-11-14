@@ -61,7 +61,7 @@ import {
   toEnvelope,
   validateIntegrationEvent,
 } from "./event-registry";
-import { logIntegrationPayloadWarning } from "./integration-payload-warning";
+import { logIntegrationPayloadWarning, qualifyWorkflowArgs } from "./event-payload-helpers";
 
 /**
  * Transactional Outbox relay (ADR-009). A trusted system scanner: connects as the
@@ -926,7 +926,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           taskQueue: UNDERSTANDING_TASK_QUEUE,
           // 同一 ICP 重复请求合并到一个在跑实例；跑完可再触发
           workflowId: `qualify-${ev.aggregateId}`,
-          args: [{ workspaceId: ev.workspaceId, icpId: ev.aggregateId }],
+          args: [qualifyWorkflowArgs(ev)],
         },
         `qualify workflow for icp ${ev.aggregateId}`,
         ev,
