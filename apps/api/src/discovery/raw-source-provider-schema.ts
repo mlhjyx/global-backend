@@ -503,6 +503,25 @@ function validTradeFairAttributes(value: JsonRecord): boolean {
   );
 }
 
+function validTedRelationships(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 50) return false;
+  return value.every((item) => {
+    const relation = record(item);
+    return (
+      relation !== null &&
+      keysWithin(relation, ["country", "identifier", "name", "role"]) &&
+      (relation.role === "buyer" || relation.role === "winner") &&
+      (relation.name === undefined ||
+        (typeof relation.name === "string" &&
+          relation.name.trim().length > 0 &&
+          relation.name.length <= 200)) &&
+      (relation.country === undefined ||
+        (typeof relation.country === "string" && /^[A-Z]{2}$/u.test(relation.country))) &&
+      (relation.identifier === undefined || providerIdentifierToken(relation.identifier, 80))
+    );
+  });
+}
+
 function validTedAttributes(value: JsonRecord): boolean {
   if (!exactKeys(value, ["ted"])) return false;
   const ted = record(value.ted);
@@ -514,6 +533,8 @@ function validTedAttributes(value: JsonRecord): boolean {
       "notice_type",
       "publication_date",
       "publication_number",
+      "relationships",
+      "self_role",
       "winner_identifier",
     ])
   ) {
@@ -535,6 +556,8 @@ function validTedAttributes(value: JsonRecord): boolean {
         ted.buyer_countries,
         (item) => typeof item === "string" && /^[A-Z]{2,3}$/u.test(item),
       )) &&
+    (ted.self_role === undefined || ted.self_role === "winner" || ted.self_role === "buyer") &&
+    (ted.relationships === undefined || validTedRelationships(ted.relationships)) &&
     (ted.winner_identifier === undefined ||
       providerIdentifierToken(ted.winner_identifier, 80) ||
       // 纯数字国家税号是公司事实（同上，仅限 ted 的 winner_identifier）。

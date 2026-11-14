@@ -149,6 +149,10 @@ export function scoreLead(company: CompanyForScoring, icp: IcpForScoring, opts?:
   const notes: string[] = [];
   const reasonCodes: string[] = [];
   const attrs = companyAttributes(company);
+  // PR-03b：TED 记录主体是中标方（供给侧）。开关打开时，winner-only 记录不进买家队列；
+  // 无 self_role 的旧数据不受影响。默认关——行为变化需产品确认后再开。
+  const tedRoleGate = process.env.TED_BUYER_ROLE_GATE === 'on';
+  if (tedSupplySideBlocked(attrs, tedRoleGate)) return tedSupplySideResult();
   const authoritative = opts?.authoritativeFit ?? null;
   // v3：资格门已判 Fit 时，MUST_HAVE 的镜像 EXCLUSION 只记录不排除；其余 EXCLUSION（正向、非镜像否定型）照旧最高优先。
   const fitResult = qualify(icp.rules, attrs, { mirrorExclusionsAdvisory: authoritative !== null });
@@ -187,7 +191,7 @@ export function scoreLead(company: CompanyForScoring, icp: IcpForScoring, opts?:
       : 0;
 
   // Intent：真实网站变更 intent 事件（#4，attributes.intent.*，按新近度衰减）为主 + ICP 关键词代理兜底
-  const intentDim = intentDimension(attrs, icp.triggerSignals, opts?.nowMs ?? Date.now());
+  const intentDim = intentDimension(attrs, icp.triggerSignals, opts?.nowMs ?? Date.now(), tedRoleGate);
   const intent = intentDim.intent;
   const matchedSignals = intentDim.matchedSignals;
   notes.push(intentDim.note);
@@ -306,6 +310,7 @@ function intentDimension(
   attrs: Record<string, unknown>,
   triggerSignals: string[],
   nowMs: number,
+  excludeTedFromKeywordProxy: boolean,
 ): { intent: number; demandProof: number; matchedSignals: string[]; intentSignals: string[]; note: string } {
   // ① 真实 intent：attributes.intent.events 逐条 strength × 新近度衰减，取最强
   const intentAttr = attrs.intent as IntentAttrLike | undefined;
@@ -337,7 +342,7 @@ function intentDimension(
   //    记账键（_ts / _contact_parser / _contact_attempt_at …）；排除 intent 命名空间（否则触发词会命中 intent 事件
   //    自身的元数据，对同一信号在 realIntent 之外再计一次未衰减的分）、extraction_*（抽取账本 / 摘要，非公司事实）
   //    与 website_profile.evidence（模型判定的证据片段）。Latin token 按词边界匹配（「new」不命中「news」），CJK 按子串。
-  const attrText = keywordProxyText(attrs);
+  const attrText = keywordProxyText(attrs, excludeTedFromKeywordProxy);
   const matchedSignals = triggerSignals.filter((s) => keywordTokens(s).some((w) => keywordTokenMatches(attrText, w)));
   const keywordIntent = triggerSignals.length
     ? Math.min(1, matchedSignals.length / Math.min(triggerSignals.length, 3))
@@ -372,8 +377,47 @@ function keywordTokenMatches(text: string, token: string): boolean {
   return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'u').test(text);
 }
 
-/** 公司属性里参与关键词代理的**字符串值**（小写、换行拼接）；键名、数字、布尔、`_` 前缀的记账键不参与。 */
-function keywordProxyText(attrs: Record<string, unknown>): string {
+/**
+ * PR-03b：TED 记录的公司角色（self_role）。旧数据没有该字段 → null（不改变既有行为）。
+ */
+function tedSelfRole(attrs: Record<string, unknown>): string | null {
+  const ted = attrs.ted;
+  if (ted === null || typeof ted !== 'object' || Array.isArray(ted)) return null;
+  const role = (ted as Record<string, unknown>).self_role;
+  return typeof role === 'string' ? role : null;
+}
+
+/** 开关打开且记录只以中标方（供给侧）身份出现 → 不进买家队列。 */
+function tedSupplySideBlocked(attrs: Record<string, unknown>, gateOn: boolean): boolean {
+  return gateOn && tedSelfRole(attrs) === 'winner';
+}
+
+/** 供给侧证据（TED 中标方）不进入买家队列：显式 rejected，不参与任何维度计分。 */
+function tedSupplySideResult(): LeadScoreResult {
+  return {
+    queue: 'rejected',
+    totalScore: 0,
+    scores: { fit: 0, role: 0, intent: 0, demandProof: 0, dataQuality: 0, reachability: 0, engagement: 0 },
+    detail: {
+      fitVerdict: 'no_match',
+      ruleEvaluations: [],
+      matchedSignals: [],
+      intentSignals: [],
+      missingFields: [],
+      reasonCodes: ['TED_WINNER_SUPPLY_SIDE'],
+      notes: [
+        'TED 中标方记录属于供给侧证据，无买方角色证据前不进入买家队列（TED_BUYER_ROLE_GATE=on）',
+      ],
+    },
+  };
+}
+
+/**
+ * 公司属性里参与关键词代理的**字符串值**（小写、换行拼接）；键名、数字、布尔、`_` 前缀的记账键不参与。
+ * excludeTed=true 时整个 `ted` 命名空间不参与：TED 的 buyer_names/countries 描述的是**交易对手**，
+ * 不是这家公司的需求意图，否则会把招标方的需求词错记到中标方头上（PR-03b）。
+ */
+function keywordProxyText(attrs: Record<string, unknown>, excludeTed: boolean): string {
   const parts: string[] = [];
   const visit = (value: unknown, path: readonly string[]): void => {
     if (typeof value === 'string') {
@@ -388,7 +432,11 @@ function keywordProxyText(attrs: Record<string, unknown>): string {
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
       // `_` 前缀 = 记账值（_ts、_contact_parser、_contact_attempt_at …），不是公司事实。
       if (key.startsWith('_')) continue;
-      if (path.length === 0 && (key === 'intent' || key.startsWith('extraction_'))) continue;
+      if (
+        path.length === 0 &&
+        (key === 'intent' || key.startsWith('extraction_') || (excludeTed && key === 'ted'))
+      )
+        continue;
       if (path.length === 1 && path[0] === 'website_profile' && key === 'evidence') continue;
       visit(item, [...path, key]);
     }

@@ -170,6 +170,24 @@ function keysWithin(value: RawJsonRecord, allowed: readonly string[]): boolean {
   const set = new Set(allowed);
   return Object.keys(value).every((key) => set.has(key));
 }
+/**
+ * TED 关系结构在 Raw 层只保留 role / country / identifier：
+ * buyer_names 与 winner_city 一直按最小化策略落库前剥离，关系结构不得把它们带回来。
+ */
+function minimizedTedRelationships(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.flatMap((item) => {
+    const relation = record(item);
+    if (!relation) return [];
+    return [
+      {
+        role: relation.role,
+        ...(relation.country === undefined ? {} : { country: relation.country }),
+        ...(relation.identifier === undefined ? {} : { identifier: relation.identifier }),
+      },
+    ];
+  });
+}
 function exactKeys(value: RawJsonRecord, expected: readonly string[]): boolean {
   const actual = Object.keys(value).sort();
   const sorted = [...expected].sort();
@@ -565,6 +583,8 @@ function normalizeAttributes(
         "notice_type",
         "publication_date",
         "publication_number",
+        "relationships",
+        "self_role",
         "winner_city",
         "winner_identifier",
       ])
@@ -583,6 +603,8 @@ function normalizeAttributes(
           ["notice_type", ted.notice_type],
           ["cpv", ted.cpv],
           ["buyer_countries", ted.buyer_countries],
+          ["self_role", ted.self_role],
+          ["relationships", minimizedTedRelationships(ted.relationships)],
           ["winner_identifier", ted.winner_identifier],
         ].flatMap(([key, item]) => (item == null ? [] : [[key, item]])),
       ),

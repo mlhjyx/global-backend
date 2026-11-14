@@ -1,25 +1,23 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { TedAwardNotice } from '../../adapters/ted-api';
 import { scoreLead, type CompanyForScoring, type IcpForScoring } from '../../lead/scoring';
 import { mapNoticeToRecords } from './ted.provider';
 
 /**
- * PR-03 diagnostic (test-only): before changing production code, prove whether the
- * residual TED risk is in the provider output (no explicit buyer/winner relationship)
- * or in downstream qualification (winner country is not checked against the target
- * market / buyer relation).
+ * PR-03 diagnostic + PR-03b fix contract.
  *
- * These are characterization tests: they pass on the current HEAD and document what
- * the code actually does. The `it.fails` cases encode the desired contract; they will
- * start failing (and must then be converted) only when the defect is fixed. No
- * production code is changed by this PR.
- *
- * Scope note: "downstream ignores buyer facts" holds for ICPs without trigger signals.
- * With triggerSignals set, buyer_names feed the Intent keyword proxy (T2b), so a fix
- * must decide whether the TED namespace belongs in that proxy.
+ * PR-03 proved the residual TED risk on both sides: the provider emitted no explicit
+ * buyer/winner relationship, and downstream treated a winner record as a potential
+ * buyer. PR-03b makes the relationship explicit (`self_role` + `relationships`) and
+ * adds a flag-gated downstream gate (`TED_BUYER_ROLE_GATE`, default off):
+ *  - winner-only records are rejected from buyer queues when the gate is on;
+ *  - TED's counterparty facts no longer feed the Intent keyword proxy when the gate is on.
+ * Records without `self_role` (legacy data) are unaffected either way.
  */
 
 const NOW = '2026-11-12T00:00:00.000Z';
+
+afterEach(() => vi.unstubAllEnvs());
 
 const notice: TedAwardNotice = {
   publicationNumber: '123456-2026',
@@ -39,7 +37,7 @@ const notice: TedAwardNotice = {
   ],
 };
 
-describe('PR-03 TED buyer/winner diagnostic', () => {
+describe('PR-03/PR-03b TED buyer/winner contract', () => {
   const base: Omit<CompanyForScoring, 'attributes'> = {
     name: 'Pompes Martin SAS',
     domain: 'pompes-martin.example',
@@ -57,125 +55,101 @@ describe('PR-03 TED buyer/winner diagnostic', () => {
     ],
     companyContactPoints: [],
   };
+  const icp: IcpForScoring = {
+    rules: [{ kind: 'MUST_HAVE', field: 'industry', operator: 'eq', value: 'manufacturing' }],
+    triggerSignals: [],
+    committeeRoles: [],
+  };
 
-  it('T1 (characterization): winner record carries winner country and buyer facts separately', () => {
+  it('T1: provider output carries the winner role and explicit buyer/winner relationships', () => {
     const record = mapNoticeToRecords(notice, NOW)[0]!;
     const ted = record.attributes?.ted as Record<string, unknown>;
 
-    // Current HEAD: the record is the winner (FR), while buyer facts stay in attributes (DE).
-    // 买方国家原样保留 TED 的 alpha-3 码：下游若按 ISO2 比对国家永远对不上。
+    // 记录主体仍是中标方（FR）；买方国家在 buyer_countries 保留源始 alpha-3。
     expect(record.country).toBe('FR');
     expect(ted.buyer_countries).toEqual(['DEU']);
-    expect(ted.buyer_names).toEqual(['Stadtwerke München']);
-
-    // There is no explicit relationship structure the downstream can key on.
-    expect('relationships' in ted).toBe(false);
-    expect('relationship' in record).toBe(false);
+    expect(ted.self_role).toBe('winner');
+    expect(ted.relationships).toEqual([
+      { role: 'buyer', name: 'Stadtwerke München', country: 'DE' },
+      {
+        role: 'winner',
+        name: 'Pompes Martin SAS',
+        country: 'FR',
+        identifier: 'FR12345678901',
+      },
+    ]);
   });
 
-  it.fails(
-    'T1 (desired): provider output exposes explicit buyer/winner relationships',
-    () => {
-      const record = mapNoticeToRecords(notice, NOW)[0]!;
-      const ted = record.attributes?.ted as Record<string, unknown>;
-      expect(ted).toHaveProperty('relationships');
-    },
-  );
-
-  it('T2 (characterization): downstream scoring ignores TED buyer facts', () => {
-    const icp: IcpForScoring = {
-      rules: [{ kind: 'MUST_HAVE', field: 'industry', operator: 'eq', value: 'manufacturing' }],
-      triggerSignals: [],
-      committeeRoles: [],
-    };
-
-    const withBuyerFacts = scoreLead(
+  it('T2: with the gate off (default), legacy behavior is unchanged', () => {
+    const withFacts = scoreLead(
       {
         ...base,
         attributes: {
-          ted: { buyer_countries: ['DEU'], buyer_names: ['Stadtwerke München'] },
+          ted: { buyer_countries: ['DEU'], buyer_names: ['Stadtwerke München'], self_role: 'winner' },
         },
       },
       icp,
     );
-    const withoutBuyerFacts = scoreLead({ ...base, attributes: null }, icp);
+    const withoutFacts = scoreLead({ ...base, attributes: null }, icp);
 
-    // 该 ICP 没有 triggerSignals：买方事实不改变任何维度与队列（T2b 覆盖有触发词的情形）。
-    expect(withBuyerFacts.scores).toEqual(withoutBuyerFacts.scores);
-    expect(withBuyerFacts.queue).toBe(withoutBuyerFacts.queue);
+    expect(withFacts.scores).toEqual(withoutFacts.scores);
+    expect(withFacts.queue).toBe(withoutFacts.queue);
   });
 
-  it('T2b (characterization): with trigger signals, TED buyer names feed the intent keyword proxy', () => {
-    const icp: IcpForScoring = {
-      rules: [{ kind: 'MUST_HAVE', field: 'industry', operator: 'eq', value: 'manufacturing' }],
-      triggerSignals: ['stadtwerke'],
-      committeeRoles: [],
-    };
-    const withBuyerFacts = scoreLead(
-      {
-        ...base,
-        attributes: {
-          ted: { buyer_countries: ['DEU'], buyer_names: ['Stadtwerke München'] },
-        },
-      },
-      icp,
-    );
-    const withoutBuyerFacts = scoreLead({ ...base, attributes: null }, icp);
-
-    // 关键词代理扫全部非下划线属性值，buyer_names 也参与 → intent 不同。
-    expect(withBuyerFacts.scores.intent).toBeGreaterThan(withoutBuyerFacts.scores.intent);
-  });
-
-  it('T2 (characterization): a same-country winner is accepted today (the fix must preserve it)', () => {
-    const icp: IcpForScoring = {
-      rules: [{ kind: 'MUST_HAVE', field: 'industry', operator: 'eq', value: 'manufacturing' }],
-      triggerSignals: [],
-      committeeRoles: [],
-    };
+  it('T2: with the gate on, a winner-only record never enters a buyer queue', () => {
+    vi.stubEnv('TED_BUYER_ROLE_GATE', 'on');
     const result = scoreLead(
       {
         ...base,
         attributes: {
-          ted: { buyer_countries: ['FRA'], buyer_names: ['Ville de Paris'] },
+          ted: { buyer_countries: ['DEU'], buyer_names: ['Stadtwerke München'], self_role: 'winner' },
+        },
+      },
+      icp,
+    );
+    expect(result.queue).toBe('rejected');
+    expect(result.detail.reasonCodes).toContain('TED_WINNER_SUPPLY_SIDE');
+  });
+
+  it('T2: with the gate on, buyer-role evidence is not rejected by the TED gate', () => {
+    vi.stubEnv('TED_BUYER_ROLE_GATE', 'on');
+    const result = scoreLead(
+      {
+        ...base,
+        attributes: { ted: { buyer_countries: ['DEU'], self_role: 'buyer' } },
+      },
+      icp,
+    );
+    expect(result.detail.reasonCodes ?? []).not.toContain('TED_WINNER_SUPPLY_SIDE');
+  });
+
+  it('T2b: with the gate on, TED counterparty facts do not feed the Intent keyword proxy', () => {
+    vi.stubEnv('TED_BUYER_ROLE_GATE', 'on');
+    const triggered: IcpForScoring = { ...icp, triggerSignals: ['stadtwerke'] };
+    const withFacts = scoreLead(
+      {
+        ...base,
+        attributes: {
+          ted: { buyer_countries: ['DEU'], buyer_names: ['Stadtwerke München'], self_role: 'buyer' },
+        },
+      },
+      triggered,
+    );
+    const withoutFacts = scoreLead({ ...base, attributes: null }, triggered);
+
+    expect(withFacts.scores.intent).toBe(withoutFacts.scores.intent);
+  });
+
+  it('T2: with the gate off, a same-country winner is still accepted (rollout safety)', () => {
+    const result = scoreLead(
+      {
+        ...base,
+        attributes: {
+          ted: { buyer_countries: ['FRA'], buyer_names: ['Ville de Paris'], self_role: 'winner' },
         },
       },
       icp,
     );
     expect(result.queue).not.toBe('rejected');
   });
-
-  it.fails(
-    'T2 (desired): a DE-only target does not accept a FR winner without buyer-role evidence',
-    () => {
-      const icp: IcpForScoring = {
-        rules: [{ kind: 'MUST_HAVE', field: 'industry', operator: 'eq', value: 'manufacturing' }],
-        triggerSignals: [],
-        committeeRoles: [],
-      };
-      const result = scoreLead(
-        {
-          name: 'Pompes Martin SAS',
-          domain: 'pompes-martin.example',
-          country: 'FR',
-          industry: 'manufacturing',
-          employeeCount: 80,
-          revenueUsd: null,
-          status: 'NEW',
-          attributes: {
-            ted: { buyer_countries: ['DEU'], buyer_names: ['Stadtwerke München'] },
-          },
-          contacts: [
-            {
-              title: 'CEO',
-              seniority: 'c_level',
-              contactPoints: [{ type: 'email', status: 'VALID' }],
-            },
-          ],
-          companyContactPoints: [],
-        },
-        icp,
-      );
-      expect(result.queue).toBe('rejected');
-    },
-  );
 });
