@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { DiscoveryService } from './discovery.service';
 import { ContactEnrichmentService } from './enrich-contacts.service';
 import { DiscoveryController } from './discovery.controller';
+import { RunResultViewController } from './run-result-view.controller';
 import { JudgmentReviewController } from './judgment/judgment-review.controller';
 import { DiscoveryProviderRegistry } from './provider.registry';
 import { ModelGateway } from '../model-gateway/model-gateway';
@@ -15,7 +16,7 @@ import { ExecutionBudgetModule } from '../execution-budget/execution-budget.modu
 
 @Module({
   imports: [ExecutionBudgetModule],
-  controllers: [DiscoveryController, JudgmentReviewController],
+  controllers: [DiscoveryController, JudgmentReviewController, RunResultViewController],
   providers: [
     {
       provide: TOOL_BUDGET_STORE,

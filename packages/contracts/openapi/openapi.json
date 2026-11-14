@@ -11180,6 +11180,175 @@
         "description": "单条判定明细：verdict、逐 criterion 的分数/证据/理由、模型与失败码；跨租户不可见（RLS）。需要 acquisition:read。"
       }
     },
+    "/api/v1/discovery-runs/{runId}/result-view": {
+      "get": {
+        "description": "候选集来自本 run 物化的公司（discovery_company_job）；本轮评分来自 run_event 的 qualification_batch_scored 批次留痕（没有留痕时标 not_scored_in_run，绝不回填）；最新评分来自 lead 的 ICP 级投影，单独一列并标注不一定是本 run。两种评分口径不可互相替代。",
+        "operationId": "RunResultViewController_getRunResultView_v1",
+        "parameters": [
+          {
+            "name": "runId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "runId",
+                        "icpId",
+                        "status",
+                        "candidates",
+                        "scoring"
+                      ],
+                      "properties": {
+                        "runId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "icpId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "nullable": true
+                        },
+                        "candidates": {
+                          "type": "object",
+                          "required": [
+                            "total",
+                            "truncated",
+                            "items"
+                          ],
+                          "properties": {
+                            "total": {
+                              "type": "integer"
+                            },
+                            "truncated": {
+                              "type": "boolean"
+                            },
+                            "items": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": true
+                              }
+                            }
+                          }
+                        },
+                        "scoring": {
+                          "type": "object",
+                          "required": [
+                            "thisRun",
+                            "latest"
+                          ],
+                          "properties": {
+                            "thisRun": {
+                              "type": "object",
+                              "required": [
+                                "available",
+                                "label",
+                                "batches",
+                                "items"
+                              ],
+                              "properties": {
+                                "available": {
+                                  "type": "boolean"
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "enum": [
+                                    "this_run",
+                                    "not_scored_in_run"
+                                  ]
+                                },
+                                "batches": {
+                                  "type": "integer"
+                                },
+                                "scoredCompanies": {
+                                  "type": "integer"
+                                },
+                                "truncated": {
+                                  "type": "boolean"
+                                },
+                                "scoredAt": {
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "nullable": true
+                                },
+                                "items": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                  }
+                                }
+                              }
+                            },
+                            "latest": {
+                              "type": "object",
+                              "required": [
+                                "label",
+                                "items"
+                              ],
+                              "properties": {
+                                "label": {
+                                  "type": "string",
+                                  "enum": [
+                                    "latest_not_necessarily_this_run"
+                                  ]
+                                },
+                                "items": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "run 级结果视图：本 run 候选、本轮评分留痕与最新评分分列（只读；最新分不一定是本 run）",
+        "tags": [
+          "Discovery"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ]
+      }
+    },
     "/api/v1/source-channels": {
       "get": {
         "operationId": "ChannelsController_list_v1",
