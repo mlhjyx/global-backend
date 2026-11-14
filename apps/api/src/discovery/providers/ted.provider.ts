@@ -198,6 +198,23 @@ function dedupeCapped(values: readonly string[]): string[] | undefined {
 export function mapNoticeToRecords(notice: TedAwardNotice, now: string): ProviderCompanyRecord[] {
   const cpv = dedupeCapped(notice.cpvCodes);
   const buyerCountries = dedupeCapped(notice.buyerCountries);
+  // §8.3 关系结构（PR-03b）：TED 记录主体是**中标方**，买方只以事实字段存在。
+  // 显式写出 buyer/winner 关系与 self_role，下游才能判断「这家公司是买方还是供方」，
+  // 不再把中标方默认当买家。buyer_countries 保留源始 alpha-3；关系里给 alpha-2。
+  const buyerRelationships = notice.buyerNames.map((name, idx) => {
+    const iso2 = toAlpha2(notice.buyerCountries[idx]);
+    return prune({ role: 'buyer', name: name.trim(), country: iso2 });
+  });
+  const winnerRelationships = notice.winners
+    .filter((w) => w.name.trim())
+    .map((w) =>
+      prune({
+        role: 'winner',
+        name: normalizeTedCompanyName(w.name),
+        country: toAlpha2(w.country),
+        identifier: tedIdentifier(w.identifier),
+      }),
+    );
   return notice.winners
     .filter((w) => w.name.trim())
     .map((w, i) => {
@@ -211,6 +228,8 @@ export function mapNoticeToRecords(notice: TedAwardNotice, now: string): Provide
         buyer_countries: buyerCountries,
         winner_identifier: tedIdentifier(w.identifier),
         winner_city: w.city,
+        self_role: 'winner',
+        relationships: [...buyerRelationships, ...winnerRelationships],
         license: 'CC-BY-4.0',
         attribution: TED_ATTRIBUTION,
       });

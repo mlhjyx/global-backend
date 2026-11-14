@@ -400,6 +400,12 @@ describe("actual provider mapper output → governed Raw boundary", () => {
         ted: expect.objectContaining({
           publication_number: "123456-2026",
           cpv: ["42122000"],
+          // PR-03b：关系结构在 Raw 层保留 role/country（名称仍按最小化策略剥离）。
+          self_role: "winner",
+          relationships: [
+            { role: "buyer", country: "DE" },
+            { role: "winner", country: "DE", identifier: "DE111" },
+          ],
         }),
       },
       provenance: {

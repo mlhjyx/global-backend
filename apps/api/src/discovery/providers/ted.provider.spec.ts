@@ -51,6 +51,26 @@ describe('TED durable replay failure semantics', () => {
 });
 
 describe('TED 中标方 → ProviderCompanyRecord（mapNoticeToRecords）', () => {
+  it('PR-03b：显式 buyer/winner 关系与 self_role（关系里买方国家归一为 alpha-2）', () => {
+    const recs = mapNoticeToRecords(
+      notice({
+        buyerNames: ['City of Munich', 'Stadtwerke München'],
+        buyerCountries: ['DEU', 'DEU'],
+        winners: [{ name: 'Pompes Martin SAS', country: 'FRA', identifier: 'FR123' }],
+      }),
+      NOW,
+    );
+    const ted = recs[0]!.attributes?.ted as Record<string, unknown>;
+    // 源始 alpha-3 原样保留且去重（证据保真）；关系结构里给下游可比的 alpha-2。
+    expect(ted.buyer_countries).toEqual(['DEU']);
+    expect(ted.self_role).toBe('winner');
+    expect(ted.relationships).toEqual([
+      { role: 'buyer', name: 'City of Munich', country: 'DE' },
+      { role: 'buyer', name: 'Stadtwerke München', country: 'DE' },
+      { role: 'winner', name: 'Pompes Martin SAS', country: 'FR', identifier: 'FR123' },
+    ]);
+  });
+
   it('单中标方带官网 → 域名可解析 + ted 命名空间事实 + 署名', () => {
     const recs = mapNoticeToRecords(
       notice({ winners: [{ name: 'Acme Pumps Ltd', country: 'DEU', identifier: 'DE111', internetAddress: 'https://acme-pumps.example' }] }),
