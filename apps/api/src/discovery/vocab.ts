@@ -41,6 +41,27 @@ export const INDUSTRY_QIDS: Record<string, string> = {
   钢铁: 'Q206894',
   steel: 'Q206894',
   'steel industry': 'Q206894',
+  // 光伏（Q192127 photovoltaics）与工业分销/批发（Q220695 wholesale）：
+  // 这两个窄编号替代此前 LLM 把"太阳能光伏"归到半导体制造（Q11661）、
+  // 把泵类渠道归到机械制造（Q1857831）的宽口径映射。
+  光伏: 'Q192127',
+  太阳能: 'Q192127',
+  太阳能光伏: 'Q192127',
+  光伏组件: 'Q192127',
+  光伏设备: 'Q192127',
+  photovoltaic: 'Q192127',
+  photovoltaics: 'Q192127',
+  solar: 'Q192127',
+  'solar energy': 'Q192127',
+  'solar power': 'Q192127',
+  工业品分销: 'Q220695',
+  工业分销商: 'Q220695',
+  机械设备批发: 'Q220695',
+  wholesale: 'Q220695',
+  'industrial distributor': 'Q220695',
+  'industrial distributors': 'Q220695',
+  'machinery distributor': 'Q220695',
+  'machinery wholesale': 'Q220695',
 };
 
 /** 国家/地区词（归一为小写）→ Wikidata country QID。 */

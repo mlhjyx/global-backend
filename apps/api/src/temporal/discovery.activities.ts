@@ -19,7 +19,7 @@ import {
   MAX_DISCOVERY_WATCH_COMPANIES,
   MAX_RUN_EMAIL_PROBES_PER_COMPANY,
 } from '../discovery/execution-envelope';
-import { queryTaxonomyTerms } from '../discovery/query-taxonomy-terms';
+import { queryTaxonomyTerms, queryableIndustryNodes } from '../discovery/query-taxonomy-terms';
 import { discoverContactsCore } from '../discovery/contact-discovery-core';
 import { guessEmailsForRunCompany } from '../discovery/contact-stage-email-guess';
 import { createContactDiscoverySubBudget } from '../execution-budget/contact-discovery-budget';
@@ -1182,7 +1182,7 @@ export function createDiscoveryActivities(deps: {
         try {
           const inds = await taxonomy.resolveMany('industry', industryTerms, resolveOptions);
           if (inds.length) {
-            enriched._industryQids = inds.map((n) => n.wikidataQid).filter(Boolean);
+            enriched._industryQids = queryableIndustryNodes(inds).map((n) => n.wikidataQid).filter(Boolean);
             enriched._osmTags = inds.flatMap((n) => n.osmTags ?? []);
             enriched._industryCodes = inds.map((n) => n.code);
           }
