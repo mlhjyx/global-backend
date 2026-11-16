@@ -117,9 +117,13 @@ import {
   mergeDiscoveryQueryReceipt,
   parseDiscoveryQueryReceipt,
   readDiscoveryQueryReceipt,
-  summarizeDiscoveryQueryReceipts,
   type DiscoveryQueryReceipt,
 } from '../discovery/discovery-query-receipt';
+import { mergeDiscoveryQueryDiagnostics } from '../discovery/discovery-query-diagnostics';
+import {
+  finalizeDiscoveryRunStats,
+  projectDiscoveryCompletedStats,
+} from './discovery-run-final-stats';
 import {
   DISCOVERY_QUERY_RECEIPT_MAX_ORDINAL,
   DISCOVERY_QUERY_RECEIPT_MODE,
@@ -1500,7 +1504,11 @@ export function createDiscoveryActivities(deps: {
               usageQuantity: acceptedCount,
               costCents: totalCost,
             });
-            const stats = mergeDiscoveryQueryReceipt(lockedRun.stats, receipt);
+            const stats = mergeDiscoveryQueryDiagnostics(
+              mergeDiscoveryQueryReceipt(lockedRun.stats, receipt),
+              receipt,
+              settled,
+            );
             await transaction.discoveryRun.update({
               where: { id: args.runId },
               data: { stats: stats as Prisma.InputJsonValue },
@@ -3501,47 +3509,11 @@ export function createDiscoveryActivities(deps: {
             'DISCOVERY_RUN_ALREADY_FINALIZED',
           );
         }
-        if (
-          lockedRun.stats !== null &&
-          (typeof lockedRun.stats !== 'object' || Array.isArray(lockedRun.stats))
-        ) {
-          throw new Error('DISCOVERY_QUERY_RECEIPT_STORE_INVALID');
-        }
-        const storedStats = (lockedRun.stats ?? {}) as Record<string, unknown>;
-        const storedDerived = summarizeDiscoveryQueryReceipts(storedStats);
-        let finalStats: Record<string, unknown> = args.stats;
-        if (args.status === 'FAILED') {
-          // 失败的 run 以库内已落盘的收据为准：查询活动可能在落收据之后才失败（429/超时后
-          // 重试耗尽），工作流侧的 perQuery 因此必然可能不完整甚至为空；此时核对必「漂移」，
-          // 而拒绝写入会让 run 永远停在 RUNNING（2026-11-03 实踩）。用派生值补齐并记录。
-          if (Object.keys(storedDerived.perQuery).length) {
-            finalStats = {
-              ...storedStats,
-              ...args.stats,
-              ...storedDerived,
-            };
-          }
-        } else if (Object.prototype.hasOwnProperty.call(args.stats, 'perQuery')) {
-          if (
-            !canonicalCompanyAttributesEqual(
-              {
-                perQuery: args.stats.perQuery,
-                perSource: args.stats.perSource,
-                rawGovernance: args.stats.rawGovernance,
-              },
-              storedDerived,
-            )
-          ) {
-            throw new Error('DISCOVERY_QUERY_RECEIPT_FINALIZE_DRIFT');
-          }
-          finalStats = {
-            ...storedStats,
-            ...args.stats,
-            ...storedDerived,
-          };
-        } else if (Object.keys(storedDerived.perQuery).length) {
-          throw new Error('DISCOVERY_QUERY_RECEIPT_FINALIZE_MISSING');
-        }
+        const finalStats = finalizeDiscoveryRunStats(
+          lockedRun.stats,
+          args.stats,
+          args.status,
+        );
         const completedRun = await tx.discoveryRun.update({
           where: { id: args.runId },
           data: {
@@ -3600,7 +3572,7 @@ export function createDiscoveryActivities(deps: {
             payload: {
               planId: args.planId,
               status: args.status,
-              stats: finalStats,
+              stats: projectDiscoveryCompletedStats(finalStats),
               cost: runCostUsd,
               costBasis: 'usage_ledger-runid/v1',
               // P1：SaaS 在同一次尝试的『引擎已建 run、BFF 丢响应』窗口里靠它回填 engineRunId。
@@ -3763,7 +3735,7 @@ export function createDiscoveryActivities(deps: {
             payload: {
               planId: row.planId,
               status: 'FAILED',
-              stats: finalStats,
+              stats: projectDiscoveryCompletedStats(finalStats),
               cost: runCostUsd,
               costBasis: 'usage_ledger-runid/v1',
               ...(locked.task_ref ? { taskRef: locked.task_ref } : {}),

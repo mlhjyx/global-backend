@@ -132,3 +132,28 @@ describe('DiscoverContactsDto 合规校验（M4 契约）', () => {
     expect(errors.map((error) => error.property)).toContain('lawfulBasis');
   });
 });
+
+describe('DiscoveryController.getRun — 持久 stats 读回', () => {
+  it('returns the persisted queryDiagnostics namespace unchanged', async () => {
+    const stats = {
+      perQuery: {},
+      queryDiagnostics: { version: 1, entries: [] },
+    };
+    const getRun = vi.fn(async () => ({
+      id: '00000000-0000-4000-8000-000000000001',
+      planId: '50000000-0000-4000-8000-000000000001',
+      icpId: null,
+      status: 'DONE',
+      stats,
+      taskRef: null,
+      phases: null,
+      mode: 'workflow',
+      createdAt: new Date('2026-11-17T00:00:00.000Z'),
+      completedAt: new Date('2026-11-17T00:01:00.000Z'),
+    }));
+    const controller = new DiscoveryController({ getRun } as unknown as DiscoveryService);
+    const response = await controller.getRun(CTX, '00000000-0000-4000-8000-000000000001');
+    expect(getRun).toHaveBeenCalledWith(CTX, '00000000-0000-4000-8000-000000000001');
+    expect(response.data.stats).toBe(stats);
+  });
+});
