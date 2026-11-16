@@ -547,4 +547,160 @@ describe('governed Discovery execution commit', () => {
       budgetTruncated: false,
     })).rejects.toThrow(row.expected);
   });
+
+  it("persists explicit provider outcomes with the compatibility stats in one update", async () => {
+    const fixture = zeroCommitFixture();
+    const settledValue = settled({
+      key: "public_web",
+      r: {
+        records: [],
+        costCents: 0,
+        outcome: {
+          errorClass: "PARAM_INVALID",
+          reasonCode: "COUNTRY_INVALID",
+          issues: ["SENTINEL-ISSUES"],
+        },
+        lineage: {
+          schemaVersion: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+          recordCount: 0,
+          attemptReceipts: [],
+          receiptCoverage: [],
+        },
+      },
+      durableReceipts: [],
+    });
+    const plan = buildGovernedDiscoveryQueryExecutionPlan({
+      lineageEnabled: true,
+      adapters: [adapter("public_web", true)],
+      settled: [settledValue] as never,
+    });
+    if (plan.mode !== "governed") throw new Error("expected governed plan");
+    const update = vi.fn(async () => ({}));
+    const usage = vi.fn(async () => ({}));
+    const queryRaw = vi.fn(async (statement: { strings: readonly string[] }) => {
+      const sql = statement.strings.join("?");
+      if (sql.includes("append_discovery_query_lineage_v2")) return [{
+        status: "APPLIED", attempt_count: 0, item_count: 0, query_key: fixture.queryKey,
+      }];
+      if (sql.includes("FROM discovery_run")) return [{
+        id: fixture.runId, plan_id: fixture.planId, stats: {},
+      }];
+      throw new Error(`unexpected SQL: ${sql}`);
+    });
+    const tx = {
+      $queryRaw: queryRaw,
+      $executeRaw: vi.fn(),
+      rawSourceRecord: { findMany: vi.fn(async () => []) },
+      discoveryRun: { update },
+      usageLedger: { create: usage },
+    };
+    partitionMock.mockImplementationOnce(async (input) => ({
+      status: "APPLIED", companyFacts: [], auxiliaryFacts: [],
+      value: await input.apply(input.transaction, [], []),
+    }));
+    await expect(commitGovernedDiscoveryQueryExecution({
+      prisma: { withWorkspace: async (_workspaceId, callback) => callback(tx) } as never,
+      workspaceId: IDS.workspace, runId: fixture.runId, planId: fixture.planId,
+      queryKey: fixture.queryKey, sourceClass: "public_intelligence",
+      settled: [settledValue] as never,
+      sourcePolicies: [], lookup: fixture.lookup, plan,
+      budgetAuthorization: { accountId: IDS.account, authorityId: IDS.authority,
+        authorizedCapMicrousd: 0n, generation: 1 },
+      budgetTruncated: false,
+    })).resolves.toMatchObject({ queryReceipt: { providers: ["public_web"] } });
+    expect(update).toHaveBeenCalledOnce();
+    const persisted = update.mock.calls[0]![0] as { data: { stats: Record<string, unknown> } };
+    expect(persisted.data.stats.queryDiagnostics).toEqual({
+      version: 1,
+      entries: [{
+        queryKey: fixture.queryKey,
+        queryOrdinal: 0,
+        sourceClass: "public_intelligence",
+        providers: [{
+          providerKey: "public_web",
+          errorClass: "PARAM_INVALID",
+          reasonCode: "COUNTRY_INVALID",
+        }],
+      }],
+    });
+    expect(persisted.data.stats.perQuery).toBeDefined();
+    expect(JSON.stringify(persisted.data.stats)).not.toContain("SENTINEL-ISSUES");
+    expect(usage).not.toHaveBeenCalled();
+  });
+
+  it("maps a diagnostics conflict to the governed integrity hold without later writes", async () => {
+    const fixture = zeroCommitFixture();
+    const settledValue = settled({
+      key: "public_web",
+      r: {
+        records: [],
+        costCents: 0,
+        outcome: { errorClass: "PARAM_INVALID", reasonCode: "COUNTRY_INVALID" },
+        lineage: {
+          schemaVersion: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+          recordCount: 0,
+          attemptReceipts: [],
+          receiptCoverage: [],
+        },
+      },
+      durableReceipts: [],
+    });
+    const plan = buildGovernedDiscoveryQueryExecutionPlan({
+      lineageEnabled: true,
+      adapters: [adapter("public_web", true)],
+      settled: [settledValue] as never,
+    });
+    if (plan.mode !== "governed") throw new Error("expected governed plan");
+    const update = vi.fn(async () => ({}));
+    const usage = vi.fn(async () => ({}));
+    const queryRaw = vi.fn(async (statement: { strings: readonly string[] }) => {
+      const sql = statement.strings.join("?");
+      if (sql.includes("append_discovery_query_lineage_v2")) return [{
+        status: "APPLIED", attempt_count: 0, item_count: 0, query_key: fixture.queryKey,
+      }];
+      if (sql.includes("FROM discovery_run")) return [{
+        id: fixture.runId,
+        plan_id: fixture.planId,
+        stats: {
+          queryDiagnostics: {
+            version: 1,
+            entries: [{
+              queryKey: fixture.queryKey,
+              queryOrdinal: 0,
+              sourceClass: "public_intelligence",
+              providers: [{
+                providerKey: "public_web",
+                errorClass: "EMPTY_RESULT",
+                reasonCode: "NO_ROWS",
+              }],
+            }],
+          },
+        },
+      }];
+      throw new Error(`unexpected SQL: ${sql}`);
+    });
+    const tx = {
+      $queryRaw: queryRaw,
+      $executeRaw: vi.fn(),
+      rawSourceRecord: { findMany: vi.fn(async () => []) },
+      discoveryRun: { update },
+      usageLedger: { create: usage },
+    };
+    partitionMock.mockImplementationOnce(async (input) => ({
+      status: "APPLIED", companyFacts: [], auxiliaryFacts: [],
+      value: await input.apply(input.transaction, [], []),
+    }));
+    await expect(commitGovernedDiscoveryQueryExecution({
+      prisma: { withWorkspace: async (_workspaceId, callback) => callback(tx) } as never,
+      workspaceId: IDS.workspace, runId: fixture.runId, planId: fixture.planId,
+      queryKey: fixture.queryKey, sourceClass: "public_intelligence",
+      settled: [settledValue] as never,
+      sourcePolicies: [], lookup: fixture.lookup, plan,
+      budgetAuthorization: { accountId: IDS.account, authorityId: IDS.authority,
+        authorizedCapMicrousd: 0n, generation: 1 },
+      budgetTruncated: false,
+    })).rejects.toThrow("DOMAIN_ACK_DISCOVERY_GOVERNED_LINEAGE_REPLAY_INTEGRITY_HOLD");
+    expect(update).not.toHaveBeenCalled();
+    expect(usage).not.toHaveBeenCalled();
+  });
 });

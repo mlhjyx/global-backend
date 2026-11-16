@@ -54,7 +54,11 @@ import { OsmDiscoveryProvider } from "../discovery/providers/osm.provider";
 import { PublicWebDiscoveryProvider } from "../discovery/providers/public-web.provider";
 import { TedDiscoveryProvider } from "../discovery/providers/ted.provider";
 import { WikidataDiscoveryProvider } from "../discovery/providers/wikidata.provider";
-import { discoveryQueryKey } from "../discovery/discovery-query-receipt";
+import {
+  discoveryQueryKey,
+  parseDiscoveryQueryReceipt,
+  summarizeDiscoveryQueryReceipts,
+} from "../discovery/discovery-query-receipt";
 import {
   DISCOVERY_LEASE_FINALIZATION_RESERVE_MS,
   DISCOVERY_LEASE_UNIT_MS,
@@ -171,9 +175,15 @@ function okAdapter(
   } as unknown as CompanyDiscoveryAdapter;
 }
 
-function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
+function makeDeps(
+  adapters: CompanyDiscoveryAdapter[],
+  options: {
+    onStatsUpdate?: (stats: Record<string, unknown>) => void;
+    initialStats?: Record<string, unknown>;
+  } = {},
+) {
   const rows: Array<Record<string, unknown>> = [];
-  let runStats: Record<string, unknown> = {};
+  let runStats: Record<string, unknown> = options.initialStats ?? {};
   const tx = {
     $executeRaw: async () => 1,
     $queryRaw: async (statement: {
@@ -248,6 +258,7 @@ function makeDeps(adapters: CompanyDiscoveryAdapter[]) {
         data: { stats: Record<string, unknown> };
       }) => {
         runStats = data.stats;
+        options.onStatsUpdate?.(runStats);
         return {};
       },
       // 发现阶段的 artifact 主体解析（G3 5.5）：run → ICP → 卖家 company_profile。
@@ -587,6 +598,369 @@ describe("loadPlanQueries receipt identity inputs", () => {
 });
 
 describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 ledger 而非源抛错", () => {
+  it("persists explicit provider outcomes with the query receipt in one run update", async () => {
+    const updates: Array<Record<string, unknown>> = [];
+    const deps = makeDeps(
+      [{
+        ...okAdapter("wikidata", []),
+        discoverCompanies: vi.fn(async () => ({
+          records: [],
+          costCents: 0,
+          outcome: {
+            errorClass: "PARAM_INVALID",
+            reasonCode: "COUNTRY_UNRESOLVED",
+            issues: ["SENTINEL-ISSUES"],
+          },
+        })),
+      }],
+      { onStatsUpdate: (stats) => updates.push(stats) },
+    );
+    const acts = createDiscoveryActivities(deps);
+    const result = await acts.executeQuery(
+      discoveryArgs("run-outcome-x", { query: QUERY }),
+    );
+    expect(result.queryReceipt).toMatchObject({ providers: ["wikidata"] });
+    expect(updates).toHaveLength(1);
+    expect(updates[0]!.queryDiagnostics).toEqual({
+      version: 1,
+      entries: [{
+        queryKey: expect.any(String),
+        queryOrdinal: 0,
+        sourceClass: "public_intelligence",
+        providers: [{
+          providerKey: "wikidata",
+          errorClass: "PARAM_INVALID",
+          reasonCode: "COUNTRY_UNRESOLVED",
+        }],
+      }],
+    });
+    expect(JSON.stringify(updates[0])).not.toContain("SENTINEL-ISSUES");
+    // The compatibility receipt keeps its original shape.
+    expect(updates[0]!.perQuery).toBeDefined();
+  });
+
+  it("keeps both diagnostics entries across interleaved queries on one run", async () => {
+    const updates: Array<Record<string, unknown>> = [];
+    const deps = makeDeps(
+      [{
+        ...okAdapter("wikidata", []),
+        discoverCompanies: vi.fn(async () => ({
+          records: [],
+          costCents: 0,
+          outcome: { errorClass: "EMPTY_RESULT", reasonCode: "NO_ROWS" },
+        })),
+      }],
+      { onStatsUpdate: (stats) => updates.push(stats) },
+    );
+    const acts = createDiscoveryActivities(deps);
+    await acts.executeQuery(discoveryArgs("run-interleave", { queryOrdinal: 0, query: QUERY }));
+    await acts.executeQuery(discoveryArgs("run-interleave", { queryOrdinal: 1, query: QUERY }));
+    expect(updates).toHaveLength(2);
+    const diagnostics = updates[1]!.queryDiagnostics as {
+      entries: Array<{ queryOrdinal: number }>;
+    };
+    expect(diagnostics.entries.map((entry) => entry.queryOrdinal)).toEqual([0, 1]);
+    expect(Object.keys(updates[1]!.perQuery as Record<string, unknown>)).toHaveLength(2);
+  });
+
+  it("interleaves two queries across the row lock without losing either receipt", async () => {
+    let releaseA!: () => void;
+    const gateA = new Promise<void>((resolve) => { releaseA = resolve; });
+    let signalA!: () => void;
+    const startedA = new Promise<void>((resolve) => { signalA = resolve; });
+    let calls = 0;
+    const discover = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) {
+        signalA();
+        await gateA;
+        return {
+          records: [],
+          costCents: 0,
+          outcome: { errorClass: "EMPTY_RESULT", reasonCode: "NO_ROWS" },
+        };
+      }
+      return {
+        records: [],
+        costCents: 0,
+        outcome: { errorClass: "PARAM_INVALID", reasonCode: "COUNTRY_INVALID" },
+      };
+    });
+    const updates: Array<Record<string, unknown>> = [];
+    const deps = makeDeps(
+      [{ ...okAdapter("wikidata", []), discoverCompanies: discover }],
+      { onStatsUpdate: (stats) => updates.push(stats) },
+    );
+    const acts = createDiscoveryActivities(deps);
+    const pendingA = acts.executeQuery(
+      discoveryArgs("run-lock-interleave", { queryOrdinal: 0, query: QUERY }),
+    );
+    // Query A is parked inside its provider fan-out; B runs to its committed update.
+    await startedA;
+    const resultB = await acts.executeQuery(
+      discoveryArgs("run-lock-interleave", { queryOrdinal: 1, query: QUERY }),
+    );
+    expect(resultB.queryReceipt).toMatchObject({ queryOrdinal: 1 });
+    releaseA();
+    const resultA = await pendingA;
+    expect(resultA.queryReceipt).toMatchObject({ queryOrdinal: 0 });
+
+    // A's apply ran after B committed, so its locked read sees B and both survive.
+    expect(updates).toHaveLength(2);
+    expect(Object.keys(updates[1]!.perQuery as Record<string, unknown>)).toHaveLength(2);
+    const entries = (updates[1]!.queryDiagnostics as {
+      entries: Array<{ queryOrdinal: number; providers: Array<{ providerKey: string }> }>;
+    }).entries;
+    expect(entries.map((entry) => entry.queryOrdinal)).toEqual([0, 1]);
+    expect(entries[0]!.providers).toEqual([
+      { providerKey: "wikidata", errorClass: "EMPTY_RESULT", reasonCode: "NO_ROWS" },
+    ]);
+    expect(entries[1]!.providers).toEqual([
+      { providerKey: "wikidata", errorClass: "PARAM_INVALID", reasonCode: "COUNTRY_INVALID" },
+    ]);
+  });
+
+  it("keeps committed diagnostics through DomainAck readback and never backfills history", async () => {
+    const updates: Array<Record<string, unknown>> = [];
+    const deps = makeDeps(
+      [{
+        ...okAdapter("wikidata", []),
+        discoverCompanies: vi.fn(async () => ({
+          records: [],
+          costCents: 0,
+          outcome: { errorClass: "EMPTY_RESULT", reasonCode: "NO_ROWS" },
+        })),
+      }],
+      { onStatsUpdate: (stats) => updates.push(stats) },
+    );
+    const acts = createDiscoveryActivities(deps);
+    const args = discoveryArgs("run-ack-diagnostics", { query: QUERY });
+    const first = await acts.executeQuery(args);
+    expect(updates).toHaveLength(1);
+    const committed = updates[0]!.queryDiagnostics;
+    expect(committed).toBeDefined();
+
+    acknowledgementMocks.apply.mockImplementationOnce(
+      async (input: {
+        transaction: unknown;
+        acknowledgements: Array<{ producerId: string }>;
+        readback: (transaction: unknown) => Promise<unknown>;
+      }) => ({
+        status: "REPLAYED",
+        acknowledgements: input.acknowledgements.map(({ producerId }) => ({
+          producerId,
+          status: "REPLAYED",
+        })),
+        value: await input.readback(input.transaction),
+      }),
+    );
+    const replayed = await acts.executeQuery(args);
+    expect(replayed).toEqual(first);
+    // The readback path neither rewrites nor drops the committed diagnostics.
+    expect(updates).toHaveLength(1);
+    expect(updates[0]!.queryDiagnostics).toBe(committed);
+
+    // A historical receipt that predates diagnostics replays as unknown without backfill.
+    const historicalKey = discoveryQueryKey({
+      runId: testRunId("run-history"),
+      planId: "50000000-0000-4000-8000-000000000001",
+      queryOrdinal: 0,
+      query: {
+        source_class: "public_intelligence",
+        filters: {},
+        keywords: [],
+        priority: 1,
+      },
+    });
+    const historicalReceipt = parseDiscoveryQueryReceipt({
+      schemaVersion: "discovery-query-receipt/v1",
+      queryKey: historicalKey,
+      queryOrdinal: 0,
+      sourceClass: "public_intelligence",
+      providers: ["wikidata"],
+      accepted: 0,
+      quarantined: 0,
+      rejected: 0,
+      governanceDenied: 0,
+      duplicate: 0,
+      usageQuantity: 0,
+      costCents: 0,
+    });
+    const historicalUpdates: Array<Record<string, unknown>> = [];
+    const historicalActs = createDiscoveryActivities(makeDeps(
+      [{
+        ...okAdapter("wikidata", []),
+        discoverCompanies: vi.fn(async () => ({
+          records: [],
+          costCents: 0,
+          outcome: { errorClass: "EMPTY_RESULT", reasonCode: "NO_ROWS" },
+        })),
+      }],
+      {
+        initialStats: { perQuery: { [historicalKey]: historicalReceipt } },
+        onStatsUpdate: (stats) => historicalUpdates.push(stats),
+      },
+    ));
+    const historical = await historicalActs.executeQuery(
+      discoveryArgs("run-history", { query: QUERY }),
+    );
+    expect(historical.queryReceipt).toMatchObject({ queryKey: historicalKey });
+    expect(historicalUpdates).toHaveLength(0);
+  });
+
+  it("returns the committed receipt on governed early-attest replay without calling providers", async () => {
+    const qk = discoveryQueryKey({
+      runId: testRunId("run-governed-attest"),
+      planId: "50000000-0000-4000-8000-000000000001",
+      queryOrdinal: 0,
+      query: {
+        source_class: "public_intelligence",
+        filters: {},
+        keywords: [],
+        priority: 1,
+      },
+    });
+    const priorReceipt = parseDiscoveryQueryReceipt({
+      schemaVersion: "discovery-query-receipt/v1",
+      queryKey: qk,
+      queryOrdinal: 0,
+      sourceClass: "public_intelligence",
+      providers: ["public_web"],
+      accepted: 0,
+      quarantined: 0,
+      rejected: 0,
+      governanceDenied: 0,
+      duplicate: 0,
+      usageQuantity: 0,
+      costCents: 0,
+    });
+    const discover = vi.fn(async () => ({ records: [], costCents: 0 }));
+    const provider = {
+      key: "public_web",
+      classes: ["public_intelligence"],
+      companyResultLineage: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
+      discoverCompanies: discover,
+    } as unknown as CompanyDiscoveryAdapter;
+    let attestBudget: boolean | null = false;
+    const writes = { updates: 0, usage: 0, executeRaw: 0 };
+    const tx = {
+      $queryRaw: vi.fn(async (statement: { strings?: readonly string[] }) => {
+        const sql = statement.strings?.join("?") ?? "";
+        if (sql.includes("attest_discovery_query_lineage_v2")) {
+          return [{
+            status: "REPLAYED",
+            query_receipt: priorReceipt,
+            budget_truncated: attestBudget,
+            attempt_count: 0,
+            item_count: 0,
+            replay: true,
+          }];
+        }
+        throw new Error(`unexpected SQL: ${sql}`);
+      }),
+      $executeRaw: vi.fn(async () => { writes.executeRaw += 1; return 1; }),
+      discoveryRun: {
+        update: vi.fn(async () => { writes.updates += 1; return {}; }),
+      },
+      usageLedger: {
+        create: vi.fn(async () => { writes.usage += 1; return {}; }),
+      },
+    };
+    const deps = {
+      prisma: {
+        sourcePolicy: { findMany: vi.fn(async () => []) },
+        withWorkspace: vi.fn(async (_ws: string, callback: (t: unknown) => unknown) =>
+          callback(tx),
+        ),
+      },
+      providers: {
+        routeCompanyDiscovery: vi.fn(async () => [provider]),
+        companyDiscoverySources: () => REGISTERED_DISCOVERY_SOURCES,
+      },
+      gateway: {},
+      budgetStore: authorityBudgetStore(),
+    };
+    const acts = createDiscoveryActivities(deps as never);
+
+    const replayed = await acts.executeQuery(
+      discoveryArgs("run-governed-attest", { query: QUERY }),
+    );
+    expect(replayed.queryReceipt).toMatchObject({ queryKey: qk });
+    expect(discover).not.toHaveBeenCalled();
+    expect(writes).toEqual({ updates: 0, usage: 0, executeRaw: 0 });
+
+    // The repository contract rejects a REPLAYED row without a boolean budget fact
+    // before the activity can branch on it; the replay path above is the one pinned.
+    attestBudget = null;
+    await expect(
+      acts.executeQuery(discoveryArgs("run-governed-attest", { query: QUERY })),
+    ).rejects.toThrow("DOMAIN_ACK_DISCOVERY_QUERY_LINEAGE_UNAVAILABLE");
+    expect(discover).not.toHaveBeenCalled();
+    expect(writes).toEqual({ updates: 0, usage: 0, executeRaw: 0 });
+  });
+
+  it("keeps terminal stats when a late query merges after finalize", async () => {
+    const updates: Array<Record<string, unknown>> = [];
+    const deps = makeDeps(
+      [{
+        ...okAdapter("wikidata", []),
+        discoverCompanies: vi.fn(async () => ({
+          records: [],
+          costCents: 0,
+          outcome: { errorClass: "EMPTY_RESULT", reasonCode: "NO_ROWS" },
+        })),
+      }],
+      {
+        initialStats: { perQuery: {}, fit: { match: 2 }, terminalMark: true },
+        onStatsUpdate: (stats) => updates.push(stats),
+      },
+    );
+    const acts = createDiscoveryActivities(deps);
+    await acts.executeQuery(discoveryArgs("run-late", { query: QUERY }));
+    expect(updates).toHaveLength(1);
+    expect(updates[0]!.fit).toEqual({ match: 2 });
+    expect(updates[0]!.terminalMark).toBe(true);
+    expect(updates[0]!.queryDiagnostics).toBeDefined();
+  });
+
+  it("keeps unknown outcomes out of the persisted stats", async () => {
+    const updates: Array<Record<string, unknown>> = [];
+    const deps = makeDeps(
+      [okAdapter("wikidata", [])],
+      { onStatsUpdate: (stats) => updates.push(stats) },
+    );
+    const acts = createDiscoveryActivities(deps);
+    await acts.executeQuery(discoveryArgs("run-outcome-y", { query: QUERY }));
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).not.toHaveProperty("queryDiagnostics");
+  });
+
+  it("reads back the first committed diagnostics after a response-loss replay", async () => {
+    const updates: Array<Record<string, unknown>> = [];
+    const deps = makeDeps(
+      [{
+        ...okAdapter("wikidata", []),
+        discoverCompanies: vi.fn(async () => ({
+          records: [],
+          costCents: 0,
+          outcome: { errorClass: "EMPTY_RESULT", reasonCode: "NO_ROWS" },
+        })),
+      }],
+      { onStatsUpdate: (stats) => updates.push(stats) },
+    );
+    const acts = createDiscoveryActivities(deps);
+    const first = await acts.executeQuery(
+      discoveryArgs("run-outcome-replay", { query: QUERY }),
+    );
+    const second = await acts.executeQuery(
+      discoveryArgs("run-outcome-replay", { query: QUERY }),
+    );
+    // Response-loss replay answers from the row: no second stats write, Raw or usage.
+    expect(updates).toHaveLength(1);
+    expect((updates[0]!.queryDiagnostics as { entries: unknown[] }).entries).toHaveLength(1);
+    expect(second).toEqual(first);
+  });
+
   it("accepts the exact authority-era legacy shape without entering query-receipt persistence", async () => {
     const acts = createDiscoveryActivities(makeDeps([]));
     await expect(
@@ -3535,6 +3909,182 @@ describe("finalizeRun durable query receipt readback", () => {
     expect(outboxCreate.mock.calls[1]![0]).toMatchObject({
       data: { eventType: "QualifyRequested", payload: { reason: "discovery_run_completed" } },
     });
+  });
+
+  it.each(["DONE", "PARTIAL", "FAILED", "CANCELLED"] as const)(
+    "keeps locked query diagnostics through a %s finalize and excludes them from the completion event",
+    async (status) => {
+      const DIAGNOSTICS = { version: 1, entries: [] };
+      const { activities, outboxCreate, update } = finalizeHarness({
+        perQuery: {},
+        queryDiagnostics: DIAGNOSTICS,
+      });
+
+      await activities.finalizeRun(
+        discoveryArgs("40000000-0000-4000-8000-000000000001", {
+          planId: "50000000-0000-4000-8000-000000000001",
+          status,
+          stats: { failures: 0 },
+        }),
+      );
+
+    expect(update).toHaveBeenCalledTimes(1);
+    const persisted = update.mock.calls[0]![0] as { data: { stats: Record<string, unknown> } };
+    expect(persisted.data.stats.queryDiagnostics).toBe(DIAGNOSTICS);
+    const completed = outboxCreate.mock.calls[0]![0] as {
+      data: { eventType: string; payload: { stats: Record<string, unknown> } };
+    };
+    expect(completed.data.eventType).toBe("DiscoveryRunCompleted");
+      expect(completed.data.payload.stats).not.toHaveProperty("queryDiagnostics");
+      expect(completed.data.payload.stats.failures).toBe(0);
+    },
+  );
+
+  it("finalizes after a committed query and keeps the row state for a late query", async () => {
+    const row: { status: string; stats: Record<string, unknown> } = { status: "RUNNING", stats: {} };
+    const statsUpdates: Array<Record<string, unknown>> = [];
+    const outbox: Array<Record<string, unknown>> = [];
+    const sqlOf = (statement: unknown): string =>
+      Array.isArray(statement)
+        ? (statement as readonly string[]).join("?")
+        : ((statement as { strings?: readonly string[] } | null)?.strings ?? []).join("?");
+    const queryRaw = vi.fn(async (statement: unknown) => {
+      const sql = sqlOf(statement);
+      if (sql.includes("attest_discovery_query_lineage_v2")) {
+        return [{
+          status: "NOT_FOUND", query_receipt: null, budget_truncated: null,
+          attempt_count: 0, item_count: 0, replay: false,
+        }];
+      }
+      if (sql.includes("append_discovery_query_lineage_v2")) {
+        return [{ status: "APPLIED", attempt_count: 0, item_count: 0, query_key: "x".repeat(64) }];
+      }
+      if (sql.includes("FROM discovery_run")) {
+        return [{
+          id: "40000000-0000-4000-8000-000000000001",
+          plan_id: "50000000-0000-4000-8000-000000000001",
+          stats: row.stats,
+          status: row.status,
+        }];
+      }
+      if (sql.includes("FROM usage_ledger")) return [{ cost_usd: 0 }];
+      throw new Error(`unexpected SQL: ${sql}`);
+    });
+    const tx = {
+      $executeRaw: vi.fn(async () => 1),
+      $queryRaw: queryRaw,
+      rawSourceRecord: {
+        findUnique: vi.fn(async () => null),
+        findMany: vi.fn(async () => []),
+        count: vi.fn(async () => 0),
+      },
+      identityLink: { findMany: vi.fn(async () => []) },
+      lead: { findFirst: vi.fn(async () => null) },
+      discoveryRun: {
+        update: vi.fn(async ({ data }: { data: { status?: string; stats?: Record<string, unknown> } }) => {
+          if (data.status) row.status = data.status;
+          if (data.stats) {
+            row.stats = data.stats;
+            statsUpdates.push(data.stats);
+          }
+          return {};
+        }),
+        findUnique: vi.fn(async () => null),
+      },
+      discoveryQueryPlan: { update: vi.fn(async () => ({})) },
+      outboxEvent: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          outbox.push(data);
+          return {};
+        }),
+      },
+      usageLedger: { create: vi.fn(async () => ({})) },
+      runEvent: {
+        aggregate: vi.fn(async () => ({ _max: { seq: 0n } })),
+        create: vi.fn(async () => ({})),
+      },
+    };
+    const provider = {
+      ...okAdapter("wikidata", []),
+      discoverCompanies: vi.fn(async () => ({
+        records: [],
+        costCents: 0,
+        outcome: { errorClass: "EMPTY_RESULT", reasonCode: "NO_ROWS" },
+      })),
+    };
+    const deps = {
+      prisma: {
+        sourcePolicy: { findMany: vi.fn(async () => []) },
+        withWorkspace: vi.fn(async (_ws: string, callback: (t: unknown) => unknown) =>
+          callback(tx),
+        ),
+      },
+      providers: {
+        routeCompanyDiscovery: vi.fn(async () => [provider]),
+        companyDiscoverySources: () => REGISTERED_DISCOVERY_SOURCES,
+      },
+      gateway: {},
+      budgetStore: authorityBudgetStore(),
+    };
+    const activities = createDiscoveryActivities(deps as never);
+    const queryArgs = discoveryArgs("40000000-0000-4000-8000-000000000001", {
+      planId: "50000000-0000-4000-8000-000000000001",
+      queryOrdinal: 0,
+      query: QUERY,
+    });
+
+    await activities.executeQuery(queryArgs);
+    expect(row.stats.queryDiagnostics).toBeDefined();
+
+    const derived = summarizeDiscoveryQueryReceipts(row.stats);
+    await activities.finalizeRun({
+      ...queryArgs,
+      status: "DONE",
+      stats: { ...derived, failures: 0 },
+    });
+    expect(row.status).toBe("DONE");
+    expect(row.stats.queryDiagnostics).toBeDefined();
+    expect(row.stats.failures).toBe(0);
+    const completions = outbox.filter((event) => event.eventType === "DiscoveryRunCompleted");
+    expect(completions).toHaveLength(1);
+    expect((completions[0]!.payload as { stats: Record<string, unknown> }).stats)
+      .not.toHaveProperty("queryDiagnostics");
+
+    // The existing policy allows a late query after a terminal write: it merges
+    // into the stats without reopening the terminal state or emitting events.
+    await activities.executeQuery({ ...queryArgs, queryOrdinal: 1 });
+    expect(row.status).toBe("DONE");
+    expect(Object.keys(row.stats.perQuery as Record<string, unknown>)).toHaveLength(2);
+    expect((row.stats.queryDiagnostics as { entries: unknown[] }).entries).toHaveLength(2);
+    expect(row.stats.failures).toBe(0);
+    expect(outbox.filter((event) => event.eventType === "DiscoveryRunCompleted")).toHaveLength(1);
+    expect(statsUpdates.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("keeps locked query diagnostics when the authority ends during finalize", async () => {
+    const DIAGNOSTICS = { version: 1, entries: [] };
+    const { activities, outboxCreate, update } = finalizeHarness(
+      { perQuery: {}, queryDiagnostics: DIAGNOSTICS },
+      endedAuthorityStore("EXECUTION_BUDGET_GRANT_EXPIRED"),
+    );
+
+    await expect(
+      activities.finalizeRun(
+        discoveryArgs("40000000-0000-4000-8000-000000000001", {
+          planId: "50000000-0000-4000-8000-000000000001",
+          status: "DONE" as const,
+          stats: { failures: 0 },
+        }),
+      ),
+    ).rejects.toMatchObject({ type: "ExecutionBudgetGrantError", nonRetryable: true });
+
+    expect(update).toHaveBeenCalledTimes(1);
+    const persisted = update.mock.calls[0]![0] as { data: { stats: Record<string, unknown> } };
+    expect(persisted.data.stats.queryDiagnostics).toBe(DIAGNOSTICS);
+    const completed = outboxCreate.mock.calls[0]![0] as {
+      data: { payload: { stats: Record<string, unknown> } };
+    };
+    expect(completed.data.payload.stats).not.toHaveProperty("queryDiagnostics");
   });
 
   // A DONE or PARTIAL write after the authority ended used to throw before writing anything, so the
@@ -7189,6 +7739,59 @@ describe("stale-run 看门狗活动（B3）", () => {
         aggregateId: ROW.icpId,
       }),
     });
+  });
+
+  it("finalizeStaleDiscoveryRun keeps locked query diagnostics in the row and out of its completion event", async () => {
+    const DIAGNOSTICS = { version: 1, entries: [] };
+    const update = vi.fn(async () => ({}));
+    const outboxCreate = vi.fn(async () => ({}));
+    let queryCall = 0;
+    const tx = {
+      $executeRaw: vi.fn(async () => 1),
+      $queryRaw: vi.fn(async () => {
+        queryCall += 1;
+        if (queryCall === 1) {
+          return [{
+            id: ROW.runId,
+            plan_id: ROW.planId,
+            stats: { perQuery: {}, queryDiagnostics: DIAGNOSTICS },
+            status: "RUNNING",
+          }];
+        }
+        if (queryCall === 2) return [];
+        if (queryCall === 3) {
+          return [{ payload: { planId: ROW.planId, icpId: ROW.icpId, executionBudget: {} } }];
+        }
+        return [{ cost_usd: 0 }];
+      }),
+      rawSourceRecord: { findMany: vi.fn(async () => []) },
+      identityLink: { findMany: vi.fn(async () => []) },
+      lead: { findFirst: vi.fn(async () => null) },
+      discoveryRun: { update },
+      runEvent: {
+        aggregate: vi.fn(async () => ({ _max: { seq: 1n } })),
+        create: vi.fn(async () => ({})),
+      },
+      outboxEvent: { create: outboxCreate },
+    };
+    const activities = createDiscoveryActivities({
+      prisma: {
+        withWorkspace: vi.fn(async (_workspaceId: string, callback: (t: unknown) => unknown) =>
+          callback(tx),
+        ),
+      },
+    } as never);
+
+    await activities.finalizeStaleDiscoveryRun(ROW);
+
+    expect(update).toHaveBeenCalledTimes(1);
+    const persisted = update.mock.calls[0]![0] as { data: { stats: Record<string, unknown> } };
+    expect(persisted.data.stats.queryDiagnostics).toBe(DIAGNOSTICS);
+    const completed = outboxCreate.mock.calls
+      .map(([call]) => call as { data: { eventType: string; payload: { stats: Record<string, unknown> } } })
+      .find((call) => call.data.eventType === "DiscoveryRunCompleted");
+    expect(completed).toBeDefined();
+    expect(completed!.data.payload.stats).not.toHaveProperty("queryDiagnostics");
   });
 
   it("finalizeStaleDiscoveryRun 对已终结的行是 no-op（写一次语义）", async () => {

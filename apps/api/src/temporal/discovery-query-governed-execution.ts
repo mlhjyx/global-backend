@@ -33,6 +33,7 @@ import {
   type RawSourceIngestLimits,
 } from '../discovery/raw-source-ingestion';
 import { persistPreparedRawSourceRecord } from '../discovery/raw-source-writer';
+import { mergeDiscoveryQueryDiagnostics } from '../discovery/discovery-query-diagnostics';
 import {
   mergeDiscoveryQueryReceipt,
   parseDiscoveryQueryReceipt,
@@ -329,7 +330,11 @@ export async function commitGovernedDiscoveryQueryExecution(input: Readonly<{
             throw new Error('DISCOVERY_QUERY_RECEIPT_RUN_BINDING_INVALID');
           }
           await tx.discoveryRun.update({ where: { id: input.runId }, data: {
-            stats: mergeDiscoveryQueryReceipt(run.stats, queryReceipt) as Prisma.InputJsonValue,
+            stats: mergeDiscoveryQueryDiagnostics(
+              mergeDiscoveryQueryReceipt(run.stats, queryReceipt),
+              queryReceipt,
+              input.settled,
+            ) as Prisma.InputJsonValue,
           } });
           if (queryReceipt.costCents > 0) await tx.usageLedger.create({ data: {
             workspaceId: input.workspaceId, resourceType: 'provider_call',
