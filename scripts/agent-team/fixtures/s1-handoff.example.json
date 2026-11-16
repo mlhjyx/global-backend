@@ -14,7 +14,10 @@
     "applicability": {
       "product": "REQUIRED"
     },
-    "depends_on": []
+    "depends_on": [],
+    "required_checks": [
+      "build"
+    ]
   },
   "events": [
     {
@@ -98,7 +101,7 @@
             "conclusion": "SUCCESS"
           }
         ],
-        "observed_at": "2026-11-17T00:00:00Z"
+        "observed_at": "2026-11-17T00:04:00Z"
       }
     }
   ],

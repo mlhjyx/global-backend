@@ -14,8 +14,14 @@ relay into a recoverable, auditable state machine:
 - a supervisor-only Stop guard that blocks ending a turn while a ready action, an
   unfinished claim or uncoordinated input exists;
 - strict gates: engineering delivery, same-head `FINAL_COMMIT` independent technical
-  PASS (reviewer ≠ writer), frozen product applicability, fresh required-CI evidence,
-  then exactly one supervisor `MERGE_PR` action (readback-first on uncertainty);
+  PASS (reviewer ≠ writer, empty blockers), frozen product applicability, and CI that
+  mirrors the registration-frozen required-check list (fresh by the observed time, all
+  SUCCESS, same head), then exactly one supervisor `MERGE_PR` action that must still
+  be the reducer's current action at claim time (readback-first on uncertainty);
+- a claim re-computes the unique ready action under the lock: stale CI, new heads,
+  changed gates or expired leases can never execute an old permission; unknown side
+  effects resolve through bounded readback (`resolution: DELIVERED|NOT_DELIVERED`)
+  instead of blind resends;
 - new-head events invalidate stale passes; duplicate events are idempotent;
 - approved next tasks are dispatched without asking the user again; no next task
   means a real stop.

@@ -68,6 +68,7 @@ def task_spec(**overrides) -> dict:
         "writer_role": "engineering",
         "applicability": {"product": "REQUIRED"},
         "depends_on": [],
+        "required_checks": ["build"],
     }
     spec.update(overrides)
     return spec
@@ -355,7 +356,7 @@ class EventIngestTests(StateDirMixin):
 
 class MergeGateTests(StateDirMixin):
     def to_merge_ready(self, product=True) -> dict:
-        state = self.register(pr=7)
+        state = self.register(pr=7, required_checks=["build", "smoke"])
         state = self.ingest(state, event("ENGINEERING_DELIVERED", role="engineering", receipt="e", payload={
             "scope_digest": SCOPE, "artifact_sha256": "d" * 64,
             "artifact_relpath": "docs/evidence/x.md", "limitations": [],
@@ -374,7 +375,10 @@ class MergeGateTests(StateDirMixin):
                                          payload={"pr": 7, "state": "OPEN", "head": HEAD}))
         state = self.ingest(state, event("CI_OBSERVED", role="supervisor", receipt="ci-1", payload={
             "conclusion": "SUCCESS", "pr": 7,
-            "required_checks": [{"name": "build", "conclusion": "SUCCESS"}],
+            "required_checks": [
+                {"name": "build", "conclusion": "SUCCESS"},
+                {"name": "smoke", "conclusion": "SUCCESS"},
+            ],
             "observed_at": RUN,
         }))
         return state
@@ -454,6 +458,24 @@ class MergeGateTests(StateDirMixin):
         task = state["tasks"]["T1"]
         self.assertEqual(task["merge"]["state"], "MERGED_OUTSIDE_RECORDED_GATES")
         self.assertIsNone(state["ready_action"])
+        # No auto-close and no next dispatch: the task stays active for supervisor adoption.
+        self.assertEqual(state["active_task_id"], "T1")
+        self.assertEqual(state["tasks"]["T1"]["phase"], "BLOCKED")
+
+    def test_supervisor_adoption_is_the_only_path_past_outside_gates(self):
+        state = self.register(pr=7)
+        state = sm.register_task(state, task_spec(
+            task_id="T2", branch="claude/t2", depends_on=["T1"]), now=RUN)
+        state = self.ingest(state, event("PR_OBSERVED", role="supervisor", receipt="pr-x",
+                                         payload={"pr": 7, "state": "MERGED", "head": HEAD,
+                                                  "merge_commit": "9" * 40}))
+        # Dependencies never treat an outside-gates merge as completed.
+        self.assertEqual(state["active_task_id"], "T1")
+        state = sm.observe_input(state, {"coordinated": True, "adopt_external_merge": "T1"},
+                                 by="supervisor", now=RUN)
+        self.assertEqual(state["tasks"]["T1"]["merge"]["state"], "MERGED")
+        self.assertEqual(state["active_task_id"], "T2")
+        self.assertEqual(state["ready_action"]["action_kind"], "DISPATCH_TASK")
 
 
 class PauseAndInputTests(StateDirMixin):
@@ -662,6 +684,287 @@ class RejectionAndReplayTests(StateDirMixin):
         self.assertEqual(kinds, ["MERGE_PR"])
 
 
+def delivered_event(head=HEAD, receipt="e"):
+    return event("ENGINEERING_DELIVERED", role="engineering", head=head, receipt=receipt, payload={
+        "scope_digest": SCOPE, "artifact_sha256": "d" * 64,
+        "artifact_relpath": "docs/evidence/x.md", "limitations": [],
+    })
+
+
+def tech_event(conclusion="PASS", receipt="t", head=HEAD, blockers=None):
+    payload = {
+        "conclusion": conclusion, "review_mode": "FINAL_COMMIT",
+        "artifact_sha256": "d" * 64, "artifact_relpath": "docs/evidence/r.md",
+        "accepted_limitations": [],
+    }
+    if blockers is not None:
+        payload["blockers"] = blockers
+    return event("TECH_RESULT", head=head, receipt=receipt, payload=payload)
+
+
+def ci_event(names=("build",), observed=RUN, receipt="ci"):
+    return event("CI_OBSERVED", role="supervisor", receipt=receipt, payload={
+        "conclusion": "SUCCESS", "pr": 7,
+        "required_checks": [{"name": name, "conclusion": "SUCCESS"} for name in names],
+        "observed_at": observed,
+    })
+
+
+def delivered_and_open(state_dir, checks=("build",), pr=7):
+    """Register + deliver + technical PASS through pure functions."""
+    state = sm.init_state(state_dir, team_id=TEAM, workspace_root=ROOT, roles=roles(), now=RUN)
+    state = sm.register_task(state, task_spec(pr=pr, required_checks=list(checks)), now=RUN)
+    state = sm.reduce_event(state, delivered_event(), now=RUN)
+    state = sm.reduce_event(state, tech_event(), now=RUN)
+    return state
+
+
+class FrozenChecksAndGateTests(StateDirMixin):
+    def test_registration_rejects_empty_duplicate_or_oversized_checks(self):
+        for checks in ([], ["dup", "dup"], ["x" * 200]):
+            with self.subTest(checks=checks), tempfile.TemporaryDirectory() as tmp:
+                directory = Path(tmp) / "state"
+                directory.mkdir(mode=0o700)
+                state = sm.init_state(directory, team_id=TEAM, workspace_root=ROOT,
+                                      roles=roles(), now=RUN)
+                with self.assertRaises(sm.ControllerError) as ctx:
+                    sm.register_task(state, task_spec(required_checks=checks), now=RUN)
+                self.assertEqual(ctx.exception.code, "TASK_INVALID")
+
+    def test_ci_observation_must_mirror_the_frozen_checks(self):
+        state = self.register(pr=7, required_checks=["build", "smoke"])
+        state = self.ingest(state, delivered_event())
+        state = self.ingest(state, tech_event())
+        for checks in (
+            [{"name": "build", "conclusion": "SUCCESS"}],
+            [{"name": "build", "conclusion": "SUCCESS"},
+             {"name": "smoke", "conclusion": "SUCCESS"},
+             {"name": "extra", "conclusion": "SUCCESS"}],
+            [{"name": "build", "conclusion": "SUCCESS"},
+             {"name": "build", "conclusion": "SUCCESS"}],
+            [],
+        ):
+            with self.subTest(checks=checks):
+                payload = {"conclusion": "SUCCESS", "pr": 7, "required_checks": checks,
+                           "observed_at": RUN}
+                with self.assertRaises(sm.ControllerError) as ctx:
+                    self.ingest(state, event("CI_OBSERVED", role="supervisor",
+                                             receipt=f"ci-{len(checks)}", payload=payload))
+                self.assertEqual(ctx.exception.code, "EVENT_INVALID")
+
+    def test_ci_observed_at_cannot_be_washed_by_receipt_time(self):
+        state = self.register(pr=7)
+        state = self.ingest(state, delivered_event())
+        state = self.ingest(state, tech_event())
+        state = self.ingest(state, event("PRODUCT_RESULT", role="product", receipt="p", payload={
+            "conclusion": "PASS", "artifact_sha256": "d" * 64,
+            "artifact_relpath": "docs/evidence/p.md"}))
+        late = "2026-11-17T00:05:00Z"
+        state = sm.reduce_event(state, event("PR_OBSERVED", role="supervisor", receipt="pr",
+                                             payload={"pr": 7, "state": "OPEN", "head": HEAD}),
+                                now=late)
+        state = sm.reduce_event(state, ci_event(observed=RUN, receipt="ci-old"), now=late)
+        stored = state["tasks"]["T1"]["gates"]["ci"]
+        self.assertEqual(stored["observed_at"], RUN)
+        self.assertEqual(state["ready_action"]["action_kind"], "OBSERVE_PR")
+
+    def test_result_events_require_a_concrete_head(self):
+        state = self.register()
+        for kind, role in (("ENGINEERING_DELIVERED", "engineering"),
+                           ("TECH_RESULT", "technical"),
+                           ("PRODUCT_RESULT", "product")):
+            with self.subTest(kind=kind):
+                payload = {
+                    "ENGINEERING_DELIVERED": {
+                        "scope_digest": SCOPE, "artifact_sha256": "d" * 64,
+                        "artifact_relpath": "docs/evidence/x.md", "limitations": []},
+                    "TECH_RESULT": {
+                        "conclusion": "PASS", "review_mode": "FINAL_COMMIT",
+                        "artifact_sha256": "d" * 64, "artifact_relpath": "docs/evidence/r.md",
+                        "accepted_limitations": []},
+                    "PRODUCT_RESULT": {
+                        "conclusion": "PASS", "artifact_sha256": "d" * 64,
+                        "artifact_relpath": "docs/evidence/p.md"},
+                }[kind]
+                with self.assertRaises(sm.ControllerError) as ctx:
+                    self.ingest(state, event(kind, role=role, head=None, receipt="n", payload=payload))
+                self.assertEqual(ctx.exception.code, "EVENT_INVALID")
+
+    def test_pass_cannot_carry_blockers_and_fail_must_name_one(self):
+        state = self.register()
+        state = self.ingest(state, delivered_event())
+        with self.assertRaises(sm.ControllerError) as ctx:
+            self.ingest(state, tech_event(conclusion="PASS", blockers=["B1"]))
+        self.assertEqual(ctx.exception.code, "EVENT_INVALID")
+        with self.assertRaises(sm.ControllerError) as ctx:
+            self.ingest(state, tech_event(conclusion="FAIL", blockers=[]))
+        self.assertEqual(ctx.exception.code, "EVENT_INVALID")
+
+
+class MergeFreshnessTests(StateDirMixin):
+    def test_claim_after_the_freshness_window_is_refused(self):
+        self.init()
+        sm.locked_update(self.dir, expected_revision=0,
+                         operation=lambda state: sm.register_task(
+                             state, task_spec(pr=7, required_checks=["build"]), now=RUN), now=RUN)
+        state = sm.load_state(self.dir)
+        for item in (
+            delivered_event(),
+            tech_event(),
+            event("PRODUCT_RESULT", role="product", receipt="p", payload={
+                "conclusion": "PASS", "artifact_sha256": "d" * 64,
+                "artifact_relpath": "docs/evidence/p.md"}),
+            event("PR_OBSERVED", role="supervisor", receipt="pr",
+                  payload={"pr": 7, "state": "OPEN", "head": HEAD}),
+            ci_event(),
+        ):
+            state = sm.locked_update(self.dir, expected_revision=state["revision"],
+                                     operation=lambda current, item=item: sm.reduce_event(
+                                         current, item, now=RUN), now=RUN)
+        action_id = state["ready_action"]["action_id"]
+        later = "2026-11-17T00:02:00Z"
+        with self.assertRaises(sm.ControllerError) as ctx:
+            sm.claim_action(state, action_id, actor=SUP,
+                            expected_revision=state["revision"], now=later)
+        self.assertEqual(ctx.exception.code, "GATE_UNSATISFIED")
+        self.assertEqual(sm.compute_ready_action(state, later)["action_kind"], "OBSERVE_PR")
+
+
+class ReworkIdentityTests(StateDirMixin):
+    def test_fail_then_claim_rework_uses_one_identity(self):
+        state = self.register()
+        state = self.ingest(state, delivered_event())
+        state = self.ingest(state, tech_event(conclusion="FAIL", blockers=["B1"]))
+        self.assertEqual(state["tasks"]["T1"]["rework_rounds"], 1)
+        self.assertEqual(state["ready_action"]["action_kind"], "HANDOFF")
+        self.assertEqual(state["ready_action"]["target_stage"], "rework")
+        state, claim = sm.claim_action(state, state["ready_action"]["action_id"], actor=WRITER,
+                                       expected_revision=state["revision"], now=RUN)
+        self.assertTrue(claim.get("lease_id"))
+        state = sm.finish_action(state, claim["action_id"], claim["lease_id"],
+                                 {"result": "DONE", "checkpoint": "SENT"}, now=RUN)
+        self.assertEqual(state["actions"][claim["action_id"]]["state"], "APPLIED")
+
+
+class HandoffHeadScopingTests(StateDirMixin):
+    def test_new_head_requires_a_fresh_technical_handoff(self):
+        state = self.register()
+        state = self.ingest(state, delivered_event())
+        old_action = state["ready_action"]["action_id"]
+        state, claim = sm.claim_action(state, old_action, actor=WRITER,
+                                       expected_revision=state["revision"], now=RUN)
+        state = sm.finish_action(state, old_action, claim["lease_id"],
+                                 {"result": "DONE", "checkpoint": "SENT"}, now=RUN)
+        state = self.ingest(state, event("HEAD_OBSERVED", role="supervisor", receipt="h",
+                                         payload={"head": HEAD2}))
+        state = self.ingest(state, delivered_event(head=HEAD2, receipt="e2"))
+        ready = state["ready_action"]
+        self.assertEqual(ready["action_kind"], "HANDOFF")
+        self.assertEqual(ready["target_stage"], "technical")
+        self.assertNotEqual(ready["action_id"], old_action)
+
+
+class UnknownRecoveryTests(StateDirMixin):
+    def unknown_handoff(self):
+        state = self.register()
+        state = self.ingest(state, delivered_event())
+        action_id = state["ready_action"]["action_id"]
+        state, claim = sm.claim_action(state, action_id, actor=WRITER,
+                                       expected_revision=state["revision"], now=RUN)
+        state = sm.finish_action(state, action_id, claim["lease_id"],
+                                 {"result": "UNKNOWN", "checkpoint": "EOF"}, now=RUN)
+        return state, action_id
+
+    def test_unknown_handoff_exposes_a_readback_action(self):
+        state, source = self.unknown_handoff()
+        ready = state["ready_action"]
+        self.assertEqual(ready["action_kind"], "RECONCILE_STAGE")
+        self.assertEqual(ready["target_stage"], "readback")
+        self.assertEqual(ready["source_action_id"], source)
+
+    def test_readback_resolutions_recover_the_source_boundedly(self):
+        state, source = self.unknown_handoff()
+        ready = state["ready_action"]
+        state, claim = sm.claim_action(state, ready["action_id"], actor=SUP,
+                                       expected_revision=state["revision"], now=RUN)
+        state = sm.finish_action(state, ready["action_id"], claim["lease_id"],
+                                 {"result": "DONE", "checkpoint": "READBACK",
+                                  "resolution": "NOT_DELIVERED"}, now=RUN)
+        self.assertEqual(state["actions"][source]["state"], "READY")
+        self.assertEqual(state["ready_action"]["action_id"], source)
+        state, claim2 = sm.claim_action(state, source, actor=WRITER,
+                                        expected_revision=state["revision"], now=RUN)
+        self.assertEqual(state["actions"][source]["attempts"], 2)
+
+    def test_expired_lease_is_normalized_on_the_next_operation(self):
+        state = self.register()
+        state = self.ingest(state, delivered_event())
+        action_id = state["ready_action"]["action_id"]
+        state, claim = sm.claim_action(state, action_id, actor=WRITER,
+                                       expected_revision=state["revision"], now=RUN)
+        later = "2026-11-17T00:05:00Z"
+        with self.assertRaises(sm.ControllerError) as ctx:
+            sm.finish_action(state, action_id, claim["lease_id"],
+                             {"result": "DONE"}, now=later)
+        self.assertEqual(ctx.exception.code, "LEASE_EXPIRED")
+        state = sm.reduce_event(state, event("WAIT_OBSERVED", role="supervisor", receipt="w-late",
+                                             payload={"reason": "LEASE_CHECK", "owner_role": "technical",
+                                                      "evidence": "OP_CHECK"}),
+                                now="2026-11-17T00:04:00Z")
+        self.assertEqual(state["actions"][action_id]["state"], "UNKNOWN")
+        self.assertEqual(state["actions"][action_id]["checkpoint"], "LEASE_EXPIRED")
+
+    def test_merge_unknown_open_readback_then_retry(self):
+        state = self.register(pr=7)
+        state = self.ingest(state, delivered_event())
+        state = self.ingest(state, tech_event())
+        state = self.ingest(state, event("PRODUCT_RESULT", role="product", receipt="p", payload={
+            "conclusion": "PASS", "artifact_sha256": "d" * 64,
+            "artifact_relpath": "docs/evidence/p.md"}))
+        state = self.ingest(state, event("PR_OBSERVED", role="supervisor", receipt="pr",
+                                         payload={"pr": 7, "state": "OPEN", "head": HEAD}))
+        state = self.ingest(state, ci_event())
+        merge_id = state["ready_action"]["action_id"]
+        state, claim = sm.claim_action(state, merge_id, actor=SUP,
+                                       expected_revision=state["revision"], now=RUN)
+        state = sm.finish_action(state, merge_id, claim["lease_id"],
+                                 {"result": "UNKNOWN", "checkpoint": "MERGE_EOF"}, now=RUN)
+        state = self.ingest(state, event("PR_OBSERVED", role="supervisor", receipt="pr-open-2",
+                                         payload={"pr": 7, "state": "OPEN", "head": HEAD}))
+        ready = state["ready_action"]
+        self.assertEqual(ready["action_kind"], "RECONCILE_MERGE")
+        self.assertEqual(ready["source_action_id"], merge_id)
+        state, claim2 = sm.claim_action(state, ready["action_id"], actor=SUP,
+                                        expected_revision=state["revision"], now=RUN)
+        state = sm.finish_action(state, ready["action_id"], claim2["lease_id"],
+                                 {"result": "DONE", "checkpoint": "READBACK",
+                                  "resolution": "NOT_DELIVERED"}, now=RUN)
+        self.assertEqual(state["tasks"]["T1"]["merge"]["state"], "NONE")
+        self.assertEqual(state["actions"][merge_id]["state"], "READY")
+        # Fresh gates still hold, so the same logical merge action is re-armed once.
+        self.assertEqual(state["ready_action"]["action_kind"], "MERGE_PR")
+        self.assertEqual(state["ready_action"]["action_id"], merge_id)
+
+
+class WaitActionTests(StateDirMixin):
+    def test_wait_observed_exposes_a_claimable_reconcile_action(self):
+        state = self.register()
+        state = self.ingest(state, delivered_event())
+        state = self.ingest(state, event("WAIT_OBSERVED", role="supervisor", receipt="w",
+                                         payload={"reason": "CI_PENDING", "owner_role": "supervisor",
+                                                  "evidence": "CI_EVENT"}))
+        ready = state["ready_action"]
+        self.assertEqual(ready["action_kind"], "RECONCILE_STAGE")
+        self.assertEqual(ready["target_stage"], "reconcile")
+        state, claim = sm.claim_action(state, ready["action_id"], actor=SUP,
+                                       expected_revision=state["revision"], now=RUN)
+        state = sm.finish_action(state, ready["action_id"], claim["lease_id"],
+                                 {"result": "DONE", "checkpoint": "RECONCILED",
+                                  "resolution": "RECONCILED"}, now=RUN)
+        self.assertIsNone(state["tasks"]["T1"]["wait"])
+        self.assertEqual(state["ready_action"]["action_kind"], "HANDOFF")
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -804,6 +1107,7 @@ class FaultInjectionTests(StateDirMixin):
                 "head": HEAD, "state": "APPLIED", "actor": SUP,
                 "lease_id": None, "lease_until": None, "attempts": 1,
                 "checkpoint": "DONE", "blocked_reason": None, "round": 0,
+                "source_action_id": None,
             }
         with self.assertRaises(sm.ControllerError) as ctx:
             self.ingest(state, event("ENGINEERING_DELIVERED", role="engineering", receipt="e", payload={

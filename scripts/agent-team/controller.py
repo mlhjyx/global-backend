@@ -107,6 +107,14 @@ def _read_settings(path: Path) -> tuple[dict, str, bytes]:
     return data, _sha(raw), raw
 
 
+def _save_settings_checked(path: Path, data: dict, expected_digest: str) -> str:
+    """Re-read the settings file right before saving; any concurrent writer wins."""
+    _, current_digest, _ = _read_settings(path)
+    if current_digest != expected_digest:
+        raise sm.ControllerError("SETTINGS_CONFLICT")
+    return _write_settings(path, data)
+
+
 def _write_settings(path: Path, data: dict) -> str:
     raw = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8") + b"\n"
     mode = 0o600
@@ -220,7 +228,7 @@ def cmd_install_hooks(args, now: str):
     entry = _owned_stop_entry(install_dir / "controller.py", str(state_dir), native_id,
                               state["binding"]["supervisor_ccd_session_id"])
     _append_hook(settings, "Stop", entry)
-    postimage_digest = _write_settings(settings_path, settings)
+    postimage_digest = _save_settings_checked(settings_path, settings, preimage_digest)
     owned = set()
     if receipt:
         owned.update(receipt.get("entry_fingerprints", []))
@@ -245,10 +253,9 @@ def cmd_uninstall_hooks(args, now: str):
     receipt = _read_json_file(receipt_path)
     settings, preimage_digest, _ = _read_settings(settings_path)
     fingerprints = set(receipt.get("entry_fingerprints", []))
-    # Only remove entries this controller installed; if the file changed underneath,
-    # still remove exact-fingerprint matches and keep everything else.
+    # Only remove entries this controller installed, never a whole-file restore.
     _remove_hooks(settings, fingerprints)
-    _write_settings(settings_path, settings)
+    _save_settings_checked(settings_path, settings, preimage_digest)
     receipt_path.unlink()
     return 0, json.dumps({"removed": len(fingerprints)}), ""
 
@@ -280,10 +287,10 @@ def cmd_prepare_bind(args, now: str):
     }
     if args.settings:
         settings_path = Path(args.settings)
-        settings, _, _ = _read_settings(settings_path)
+        settings, preimage_digest, _ = _read_settings(settings_path)
         entry = _probe_entry(HERE / "controller.py", str(state_dir))
         _append_hook(settings, "PostToolUse", entry)
-        _write_settings(settings_path, settings)
+        _save_settings_checked(settings_path, settings, preimage_digest)
         pending["probe_entry_fingerprint"] = _entry_fingerprint(entry)
     _secure_write(_probe_pending_path(state_dir), _canonical(pending))
     return 0, json.dumps({"nonce": nonce, "command": command}), ""
@@ -308,6 +315,7 @@ def cmd_bind_commit(args, now: str):
     def op(current):
         current["binding"]["supervisor_hook_session_id"] = args.confirm_session_id
         current["binding"]["capability"]["probe_verified"] = True
+        current["binding"]["enabled"] = True
         if args.supervisor_ccd_session_id:
             current["binding"]["supervisor_ccd_session_id"] = args.supervisor_ccd_session_id
         current["revision"] += 1
@@ -316,9 +324,9 @@ def cmd_bind_commit(args, now: str):
     state = sm.locked_update(state_dir, expected_revision=state["revision"], operation=op, now=now)
     if args.settings and pending.get("probe_entry_fingerprint"):
         settings_path = Path(args.settings)
-        settings, _, _ = _read_settings(settings_path)
+        settings, preimage_digest, _ = _read_settings(settings_path)
         _remove_hooks(settings, {pending["probe_entry_fingerprint"]})
-        _write_settings(settings_path, settings)
+        _save_settings_checked(settings_path, settings, preimage_digest)
     pending["consumed"] = True
     _secure_write(pending_path, _canonical(pending))
     return 0, json.dumps({"bound_session_id": args.confirm_session_id}), ""
@@ -416,7 +424,10 @@ def _hook_probe(args, now, data, session, cwd):
     if _sha(command.encode()) != pending.get("command_sha256"):
         return 0, "", ""
     state = sm.load_state(state_dir)
-    if session != state["binding"]["supervisor_hook_session_id"] or cwd != state["workspace_root"]:
+    bound = state["binding"]["supervisor_hook_session_id"]
+    if cwd != state["workspace_root"]:
+        return 0, "", ""
+    if bound is not None and session != bound:
         return 0, "", ""
     proof = {"session_id": session, "cwd": cwd, "matched_at": now}
     _secure_write(_probe_proof_path(state_dir), _canonical(proof))
@@ -455,35 +466,20 @@ def _hook_stop(args, now, state_dir, state, data):
     ready = state["ready_action"]
     claimed = next((action for action in state["actions"].values()
                     if action["task_id"] == task["task_id"] and action["state"] == "CLAIMED"), None)
-    awaiting_result = next((action for action in state["actions"].values()
-                            if action["task_id"] == task["task_id"]
-                            and action["action_kind"] == "HANDOFF"
-                            and action["state"] == "APPLIED"), None)
-    wait = task["wait"]
     if ready is not None:
         key = ready["action_id"]
         kind = "ACTION_REQUIRED"
-        summary = f"task={task['task_id']} action={key} kind={ready['action_kind']} owner={ready['target_role']} head={task['head'] or 'NONE'}"
+        summary = (f"task={task['task_id']} action={key} kind={ready['action_kind']} "
+                   f"owner={ready['target_role']} head={task['head'] or 'NONE'}")
     elif claimed is not None:
         key = claimed["action_id"]
         kind = "ACTION_REQUIRED"
-        summary = f"task={task['task_id']} action={key} kind={claimed['action_kind']} owner={claimed['target_role']} head={task['head'] or 'NONE'}"
+        summary = (f"task={task['task_id']} action={key} kind={claimed['action_kind']} "
+                   f"owner={claimed['target_role']} head={claimed['head'] or 'NONE'}")
     elif state["input_pending"]["active"]:
         key = f"INPUT:{task['task_id']}:{state['input_pending']['marked_at']}"
         kind = "RECONCILE_INPUT"
         summary = f"task={task['task_id']} pending input requires coordination"
-    elif wait is not None and not wait.get("stale"):
-        key = f"RECONCILE:{task['task_id']}:WAIT:{wait['reason']}:{wait['since']}"
-        if state["guard"]["stop_counts"].get(key):
-            return 0, "", ""
-        kind = "RECONCILE_STAGE"
-        summary = f"task={task['task_id']} wait={wait['reason']} owner={wait['owner_role']} evidence={wait['evidence']}"
-    elif awaiting_result is not None:
-        key = f"RECONCILE:{task['task_id']}:HANDOFF:{awaiting_result['action_id']}"
-        if state["guard"]["stop_counts"].get(key):
-            return 0, "", ""
-        kind = "RECONCILE_STAGE"
-        summary = f"task={task['task_id']} handoff delivered action={awaiting_result['action_id']} awaiting result"
     else:
         return 0, "", ""
 
@@ -494,10 +490,6 @@ def _hook_stop(args, now, state_dir, state, data):
         counts = guard["stop_counts"]
         count = counts.get(key, 0) + 1
         counts[key] = count
-        if kind == "RECONCILE_STAGE":
-            active = current["tasks"].get(current["active_task_id"] or "")
-            if active is not None and active["wait"] is not None:
-                active["wait"]["stale"] = True
         if count > sm.STOP_MAX_ROUNDS:
             guard["blocked"] = True
             outcome["reason"] = ("GLOBAL_TEAM_ACTION_BLOCKED repeated no-progress Stop rounds; "
@@ -511,7 +503,7 @@ def _hook_stop(args, now, state_dir, state, data):
         sm.locked_update(state_dir, expected_revision=state["revision"], operation=op, now=now)
     except sm.ControllerError as error:
         if error.code == "REVISION_CONFLICT":
-            return 0, "", "GLOBAL_TEAM_RETRY"
+            return 0, "", ""
         return 0, "", error.code
     return _block(outcome["reason"])
 
@@ -572,6 +564,7 @@ def _build_parser() -> argparse.ArgumentParser:
     finish.add_argument("--action-id", required=True)
     finish.add_argument("--lease-id", required=True)
     finish.add_argument("--result-file", required=True)
+    finish.add_argument("--expected-revision", type=int, required=True)
 
     for name in ("pause", "resume"):
         cmd = add(name)
@@ -655,6 +648,12 @@ def run(argv, stdin_text: str | None = None, now: str | None = None):
                 payload = state["ready_action"] or {"stop": True}
             return 0, json.dumps(payload), ""
         if args.command == "claim":
+            preloaded = sm.load_state(Path(args.state_dir))
+            if sm._expire_leases(preloaded, now):
+                sm.locked_update(Path(args.state_dir),
+                                 expected_revision=preloaded["revision"],
+                                 operation=lambda current: current, now=now)
+                raise sm.ControllerError("LEASE_EXPIRED")
             claim_out = {}
 
             def claim_op(current):
@@ -702,6 +701,8 @@ def run(argv, stdin_text: str | None = None, now: str | None = None):
         parser.error("unknown command")
     except sm.ControllerError as error:
         return 3, "", error.code
+    except AttributeError:
+        return 3, "", "CLI_PROTOCOL_ERROR"
     except (ValueError, OSError):
         return 3, "", "CONTROLLER_ERROR"
 
