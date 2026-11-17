@@ -13,6 +13,7 @@ import type {
 } from '@temporalio/worker';
 
 import { classifyDeterministicLedgerFailure } from './deterministic-ledger-failure';
+import { runCandidateOperation } from '../runtime/development-candidate';
 
 export class DeterministicLedgerFailureInterceptor implements ActivityInboundCallsInterceptor {
   async execute(
@@ -20,7 +21,8 @@ export class DeterministicLedgerFailureInterceptor implements ActivityInboundCal
     next: Next<ActivityInboundCallsInterceptor, 'execute'>,
   ): Promise<unknown> {
     try {
-      return await next(input);
+      const first = input.args?.[0] as { workspaceId?: unknown } | undefined;
+      return await runCandidateOperation(() => next(input), typeof first?.workspaceId === 'string' ? first.workspaceId : undefined);
     } catch (error) {
       const failure = classifyDeterministicLedgerFailure(error);
       throw failure ?? error;

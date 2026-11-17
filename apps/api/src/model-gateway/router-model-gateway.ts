@@ -71,6 +71,7 @@ import { modelExecutionReceiptFacts } from "../durable-results/execution-receipt
 import { parseDurableExecutionReceiptFacts } from "../durable-results/durable-execution-receipt";
 import { centsToMicrousd, usdToMicrousdCeil } from "../tools/microusd";
 import { centsFromTokens } from "./model-token-cost";
+import { assertCandidatePhysicalExecutionAllowed } from "../runtime/development-candidate";
 
 function providerReportedMicrousd(usage?: ModelUsage): bigint | null {
   const costUsd = usage?.costUsd;
@@ -710,6 +711,7 @@ export class RouterModelGateway extends ModelGateway {
     ctx: AiContext,
     call: (p: ModelProvider, runCtx: AiContext) => Promise<ModelResult<T>>,
   ): Promise<ModelResult<T>> {
+    assertCandidatePhysicalExecutionAllowed();
     assertNoCallerModelIdentitySubstitutes(ctx);
     assertPlatformEgressPaidContext(ctx);
     assertPlatformEgressFenceAvailable(ctx);

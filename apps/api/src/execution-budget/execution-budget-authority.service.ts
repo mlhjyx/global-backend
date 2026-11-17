@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { assertCandidateGrantAllocated } from '../runtime/development-candidate-budget';
 import type { Prisma } from '@prisma/client';
 import type { RequestContext } from '../auth/request-context';
 import { ExecutionBudgetAuthorityRepository } from './execution-budget-authority.repository';
@@ -162,6 +163,7 @@ export class ExecutionBudgetAuthorityService {
     authority: VerifiedExecutionBudgetAuthority,
   ): Promise<ExecutionBudgetBinding> {
     const exact = exactVerifiedAuthority(authority);
+    await assertCandidateGrantAllocated(exact);
     const { accountKey } = workspaceBindingIdentity(exact);
     const consumed = await this.repository.consumeWorkspaceAndOpen(
       exact,
@@ -180,6 +182,7 @@ export class ExecutionBudgetAuthorityService {
     transaction: Prisma.TransactionClient,
   ): Promise<ExecutionBudgetBinding> {
     const exact = exactVerifiedAuthority(authority);
+    await assertCandidateGrantAllocated(exact);
     const { accountKey } = workspaceBindingIdentity(exact);
     const consumed =
       await this.repository.consumeWorkspaceAndOpenInTransaction(

@@ -1,3 +1,4 @@
+import { assertCandidatePhysicalExecutionAllowed } from "../runtime/development-candidate";
 import { assertPlatformEgressPaidContext, assertPlatformEgressReservation, createPlatformEgressOperation } from "../platform-authority/platform-egress-operation";
 import { createPlatformToolWireDispatcher } from "../platform-authority/platform-tool-wire-dispatcher";
 import { ExecutionControlError } from "../execution-budget/execution-control-error";
@@ -298,6 +299,12 @@ export class ToolBroker implements ExecutionBroker {
     const started = now();
     const tool = this.registry.get(toolId) as Tool<I, O> | undefined;
     if (!tool) throw new ToolPolicyDenied(toolId, "not registered");
+    // Candidate resources remain held until real physical-wire prices/bounds
+    // are enforced. Zero estimated cents does not establish a free external call.
+    if (tool.cost.external || tool.cost.estimatedCents > 0 ||
+      tool.durableResultStrategy.kind !== "no_physical_call") {
+      assertCandidatePhysicalExecutionAllowed();
+    }
 
     if (
       tool.durableResultStrategy.kind === "typed_projection" &&

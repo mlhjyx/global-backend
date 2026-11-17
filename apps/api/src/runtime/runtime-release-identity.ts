@@ -6,6 +6,7 @@ import {
 } from './build-attestation';
 import type { DevFastLane } from './dev-fast-lane';
 import type { RuntimeMode } from './runtime-environment';
+import { prepareRuntimeCandidate, admitRuntimeCandidate, denyRuntimeCandidate } from './development-candidate';
 
 export const RUNTIME_RELEASE_IDENTITY_SCHEMA =
   'global-runtime-release-identity/v1' as const;
@@ -21,7 +22,8 @@ export type RuntimeReleaseIdentityFailureCode =
   | 'SOURCE_WATCH_NOT_MANAGED'
   | 'TEST_RUNTIME_UNATTESTED'
   // Development only: the fast-lane switch is on and the build has no receipt.
-  | 'DEV_FAST_LANE_UNATTESTED';
+  | 'DEV_FAST_LANE_UNATTESTED'
+  | 'DEVELOPMENT_CANDIDATE_ADMISSION_INVALID';
 
 export type RuntimeReleaseIdentity =
   | ({
@@ -86,6 +88,7 @@ export async function loadRuntimeReleaseIdentity(input: {
   devFastLane?: DevFastLane;
 }): Promise<RuntimeReleaseIdentity> {
   const env = input.env ?? process.env;
+  await prepareRuntimeCandidate(input.artifactRoot, env);
   if (input.mode === 'test') return unavailable('TEST_RUNTIME_UNATTESTED');
   if (env.RUNTIME_EXECUTION_PROFILE === 'source-watch') {
     return unavailable('SOURCE_WATCH_NOT_MANAGED');
@@ -118,6 +121,13 @@ export async function loadRuntimeReleaseIdentity(input: {
     return unavailable('IMAGE_REFERENCE_INVALID');
   }
   const imageDigest = imageReference.slice(imageReference.lastIndexOf('@') + 1);
+  try {
+    await admitRuntimeCandidate(input.artifactRoot, build, env, input.mode);
+  } catch {
+    denyRuntimeCandidate();
+    return unavailable('DEVELOPMENT_CANDIDATE_ADMISSION_INVALID');
+  }
+
 
   return Object.freeze({
     attested: true,

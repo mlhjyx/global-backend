@@ -1,3 +1,4 @@
+import { assertCandidateWorkspaceAllowed, assertRuntimeCandidateOperational, runtimeCandidateContext } from '../runtime/development-candidate';
 import { createHmac } from "node:crypto";
 import {
   Injectable,
@@ -243,6 +244,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   }
 
   async initializePlatformState(): Promise<void> {
+    assertRuntimeCandidateOperational();
     // 平台配置播种（data_provider 无 RLS，owner 连接写入）。失败要**大声**：seed 静默失败意味着
     // 全部 provider 对 registry 路由不可见（信号/富集层运行时 no-op），且环境重置后会无声复发。
     await new DiscoveryProviderRegistry().seed(this.db);
@@ -381,6 +383,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   }
 
   async tick(): Promise<void> {
+    assertRuntimeCandidateOperational();
     if (this.running) return; // avoid overlapping ticks
     this.running = true;
     try {
@@ -388,13 +391,15 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       if (this.shuttingDown) return;
       // parked 事件排除在轮询外：未注册类型只报一次错并停靠，不每 2s 重试刷日志。
       const laneCommands = this.devFastLaneCommands();
+      const candidate = runtimeCandidateContext();
       const events = (await this.db.outboxEvent.findMany({
         // Lane commands are polled in their own pass (scheduleLanePass), so
         // commands that wait for an unavailable development Temporal never
         // fill this batch.
-        where: laneCommands
-          ? { publishedAt: null, parkedAt: null, NOT: laneCommands }
-          : { publishedAt: null, parkedAt: null },
+        where: {
+          ...(laneCommands ? { publishedAt: null, parkedAt: null, NOT: laneCommands } : { publishedAt: null, parkedAt: null }),
+          ...(candidate ? { workspaceId: { in: [...candidate.workspaceIds] } } : {}),
+        },
         orderBy: { id: "asc" },
         take: BATCH_SIZE,
       })) as OutboxEventRecord[];
@@ -444,6 +449,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async lanePass(laneCommands: LaneCommandFilter): Promise<void> {
+    assertCandidateWorkspaceAllowed(laneCommands.workspaceId);
     const devFastLane = this.devFastLane;
     if (!devFastLane || devFastLane.coolingDown()) return;
     const events = (await this.db.outboxEvent.findMany({
@@ -467,6 +473,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
    * 3. 未注册类型 → parkedAt 停靠 + error 大声（新增事件类型忘记注册是 bug）。
    */
   async routeEvent(ev: OutboxEventRecord): Promise<void> {
+    assertCandidateWorkspaceAllowed(ev.workspaceId);
     if (INTERNAL_COMMANDS.has(ev.eventType)) {
       try {
         await this.dispatch(ev);
@@ -569,6 +576,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
    * 每请求带 HMAC 签名头（x-timestamp + x-signature，验签方式见 packages/contracts/events/WEBHOOK.md）。
    */
   async pumpWebhookDeliveries(now: Date): Promise<void> {
+    assertRuntimeCandidateOperational();
+    const candidate = runtimeCandidateContext();
     if (this.shuttingDown || !this.webhookEnabled()) return;
     const url = process.env.SAAS_WEBHOOK_URL as string;
     const secret = process.env.SAAS_WEBHOOK_SECRET as string;
@@ -576,6 +585,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       where: {
         sink: WEBHOOK_SINK,
         status: "PENDING",
+        ...(candidate ? { workspaceId: { in: [...candidate.workspaceIds] } } : {}),
         OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
       },
       orderBy: { id: "asc" },
@@ -583,6 +593,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       include: { event: true },
     });
     for (const d of due) {
+      assertCandidateWorkspaceAllowed(d.workspaceId);
       if (this.shuttingDown) break;
       try {
         const body = JSON.stringify(toEnvelope(d.event));
@@ -654,11 +665,13 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
 
   /** KNW-003/KNW-009：validUntil 到期的已批准事实 → EXPIRED（约每 60s 扫一次）。 */
   private async expireDueClaims(): Promise<void> {
+    assertRuntimeCandidateOperational();
+    const candidate = runtimeCandidateContext();
     this.expireCounter = (this.expireCounter + 1) % 30;
     if (this.expireCounter !== 0) return;
     const now = new Date();
     const expired = await this.db.claim.findMany({
-      where: { status: "APPROVED", validUntil: { lt: now } },
+      where: { status: "APPROVED", validUntil: { lt: now }, ...(candidate ? { workspaceId: { in: [...candidate.workspaceIds] } } : {}) },
       select: {
         id: true,
         workspaceId: true,
@@ -671,6 +684,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     });
     let expiredCount = 0;
     for (const c of expired) {
+      assertCandidateWorkspaceAllowed(c.workspaceId);
       try {
         // 原子成对（E）：CAS 状态翻转与 ClaimExpired 同事务。读后若人工 revoke/
         // re-approve 已推进 status/version，CAS 失手且不伪造过期事件。

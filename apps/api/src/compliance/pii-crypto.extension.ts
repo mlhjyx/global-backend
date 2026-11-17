@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { assertCandidateTenantAccess } from '../runtime/development-candidate';
 import {
   isAuthorizedAppDatabasePrincipal,
   type DatabasePrincipalEvidence,
@@ -244,6 +245,7 @@ export const piiExtension = Prisma.defineExtension({
       fn: (tx: Prisma.TransactionClient) => Promise<T>,
       options?: { maxWait?: number; timeout?: number },
     ): Promise<T> {
+      assertCandidateTenantAccess(workspaceId);
       const ctx = Prisma.getExtensionContext(this) as unknown as {
         $transaction: (
           cb: (tx: Prisma.TransactionClient) => Promise<T>,

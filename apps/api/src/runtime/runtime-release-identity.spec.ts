@@ -46,6 +46,15 @@ async function writeAttestation(directory: string): Promise<void> {
 }
 
 describe('loadRuntimeReleaseIdentity', () => {
+  it('never attests a candidate namespace that lacks its external admission and immutable marker', async () => {
+    const directory = await fixtureRoot();
+    await writeAttestation(directory);
+    await expect(loadRuntimeReleaseIdentity({
+      mode: 'development', artifactRoot: directory,
+      env: { RUNTIME_IMAGE_REFERENCE: `ghcr.io/mlhjyx/global-backend-development-candidate@sha256:${'c'.repeat(64)}` },
+    })).resolves.toMatchObject({ attested: false, code: 'DEVELOPMENT_CANDIDATE_ADMISSION_INVALID' });
+  });
+
   it('requires an attestation and canonical image digest in managed development', async () => {
     const directory = await fixtureRoot();
 

@@ -210,6 +210,30 @@
       "match_sha256": "sha256:949651a2f81bbf159576c2e739af0200e04dbe239859d9b9e610ed0d18c063a0",
       "category": "deployment",
       "reason": "The final-verdict judge model allowlist self-check fails closed only in controlled modes (pilot/production); development/test only warn so local development and the CI boot/contract verification are not blocked by missing model environment. Verdict semantics are unchanged and production behavior is strictly stricter."
+    },
+    {
+      "id": "development-candidate-exact-environment",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/runtime/development-candidate.ts",
+      "match_sha256": "sha256:8f89f5109655db6ac1796e2a66165a1c03b683a1aa45f77a7a784a08658d70f5",
+      "category": "trust",
+      "reason": "User-confirmed development candidate trust direction, 2026-11-15: an externally verified, root-mounted candidate approval may narrow only development environment, instance, workspace and immutable build identities; ordinary release business algorithms, JWKS, RLS, ToolBroker and settlement are unchanged."
+    },
+    {
+      "id": "development-candidate-declared-mode",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/runtime/development-candidate.ts",
+      "match_sha256": "sha256:daa98429a81ab124d48875784ee9c3449121b1c66592a6d138f4bfa8a88a2dbf",
+      "category": "trust",
+      "reason": "The candidate admission helper receives the same runtime mode as ordinary startup; its default reads configuration, never a test provider or alternate algorithm."
+    },
+    {
+      "id": "development-candidate-deny-promotion",
+      "rule": "ENVIRONMENT_BRANCH",
+      "path": "apps/api/src/runtime/development-candidate.ts",
+      "match_sha256": "sha256:13e8473f3e9ef29a43432f8a893e6b5f456133b5ec49fb9aaf63751774756db5",
+      "category": "trust",
+      "reason": "Even if environment fields disagree, development candidate images are refused outside the development runtime mode before readiness, tenant access or worker activities. This is a trust-boundary restriction approved in the candidate specification, not a bypass of managed admission."
     }
   ],
   "migration_allowlist": [
