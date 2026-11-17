@@ -1237,6 +1237,108 @@ class ReviewRoundTwoTests(StateDirMixin):
         self.assertEqual(state["tasks"]["T1"]["merge"]["state"], "NONE")
 
 
+class UnifiedTransitionTests(StateDirMixin):
+    def unknown_handoff(self, name="flow"):
+        directory = Path(self._tmp.name) / name
+        directory.mkdir(mode=0o700)
+        state = sm.init_state(directory, team_id=TEAM, workspace_root=ROOT,
+                              roles=roles(), now=RUN)
+        state = sm.register_task(state, task_spec(), now=RUN)
+        state = sm.reduce_event(state, delivered_event(), now=RUN)
+        source = state["ready_action"]["action_id"]
+        state, claim = sm.claim_action(state, source, actor=WRITER,
+                                       expected_revision=state["revision"], now=RUN)
+        state = sm.finish_action(state, source, claim["lease_id"],
+                                 {"result": "UNKNOWN", "checkpoint": "EOF"}, now=RUN)
+        return directory, state, source
+
+    def test_readback_unknown_retries_same_action(self):
+        _, state, source = self.unknown_handoff()
+        readback = state["ready_action"]["action_id"]
+        for attempt in (1, 2):
+            state, claim = sm.claim_action(state, readback, actor=SUP,
+                                           expected_revision=state["revision"], now=RUN)
+            self.assertEqual(state["actions"][readback]["attempts"], attempt)
+            state = sm.finish_action(state, readback, claim["lease_id"],
+                                     {"result": "UNKNOWN", "checkpoint": "READBACK_UNKNOWN"},
+                                     now=RUN)
+            self.assertEqual(state["actions"][readback]["state"], "READY")
+            self.assertEqual(state["ready_action"]["action_id"], readback)
+        state, claim = sm.claim_action(state, readback, actor=SUP,
+                                       expected_revision=state["revision"], now=RUN)
+        state = sm.finish_action(state, readback, claim["lease_id"],
+                                 {"result": "UNKNOWN", "checkpoint": "READBACK_UNKNOWN"},
+                                 now=RUN)
+        self.assertEqual(state["actions"][readback]["state"], "BLOCKED")
+        self.assertEqual(state["actions"][readback]["blocked_reason"], "BLOCKED_RECOVERY")
+        derived = [action for action in state["actions"].values()
+                   if action.get("source_action_id") == readback]
+        self.assertEqual(derived, [])
+        self.assertIsNone(sm.compute_ready_action(state, RUN))
+
+    def test_source_expiry_offers_readback_and_marks_merge_unknown(self):
+        # HANDOFF lease expiry: UNKNOWN + readback, MERGE_PR not involved.
+        directory, state, source = self.unknown_handoff("source-expiry")
+        directory2 = Path(self._tmp.name) / "merge-expiry"
+        directory2.mkdir(mode=0o700)
+        merge_state = sm.init_state(directory2, team_id=TEAM, workspace_root=ROOT,
+                                    roles=roles(), now=RUN)
+        merge_state = sm.register_task(merge_state, task_spec(pr=7), now=RUN)
+        merge_state = sm.reduce_event(merge_state, delivered_event(), now=RUN)
+        merge_state = sm.reduce_event(merge_state, tech_event(), now=RUN)
+        merge_state = sm.reduce_event(merge_state, product_pass(), now=RUN)
+        merge_state = sm.reduce_event(merge_state, pr_open(), now=RUN)
+        merge_state = sm.reduce_event(merge_state, ci_event(), now=RUN)
+        merge_id = merge_state["ready_action"]["action_id"]
+        merge_state, claim = sm.claim_action(merge_state, merge_id, actor=SUP,
+                                             expected_revision=merge_state["revision"],
+                                             now=RUN)
+        late = "2026-11-17T00:05:00Z"
+        self.assertTrue(sm._expire_leases(merge_state, late))
+        sm._recompute_pending(merge_state, late)
+        self.assertEqual(merge_state["tasks"]["T1"]["merge"]["state"], "UNKNOWN")
+        ready = merge_state["ready_action"]
+        self.assertEqual(ready["action_kind"], "RECONCILE_MERGE")
+        self.assertEqual(ready["source_action_id"], merge_id)
+        self.assertEqual(merge_state["actions"][merge_id]["state"], "UNKNOWN")
+        self.assertEqual(merge_state["actions"][merge_id]["checkpoint"], "LEASE_EXPIRED")
+
+    def test_merge_reconcile_bounded(self):
+        _, state, source = self.unknown_handoff("merge-reconcile")
+        # Build a merge-ready task instead: reuse helper pieces inline.
+        directory = Path(self._tmp.name) / "merge-flow"
+        directory.mkdir(mode=0o700)
+        state = sm.init_state(directory, team_id=TEAM, workspace_root=ROOT,
+                              roles=roles(), now=RUN)
+        state = sm.register_task(state, task_spec(pr=7), now=RUN)
+        state = sm.reduce_event(state, delivered_event(), now=RUN)
+        state = sm.reduce_event(state, tech_event(), now=RUN)
+        state = sm.reduce_event(state, product_pass(), now=RUN)
+        state = sm.reduce_event(state, pr_open(), now=RUN)
+        state = sm.reduce_event(state, ci_event(), now=RUN)
+        merge_id = state["ready_action"]["action_id"]
+        state, claim = sm.claim_action(state, merge_id, actor=SUP,
+                                       expected_revision=state["revision"], now=RUN)
+        state = sm.finish_action(state, merge_id, claim["lease_id"],
+                                 {"result": "UNKNOWN", "checkpoint": "MERGE_EOF"}, now=RUN)
+        readback = state["ready_action"]["action_id"]
+        self.assertEqual(state["ready_action"]["action_kind"], "RECONCILE_MERGE")
+        for attempt in (1, 2):
+            state, rclaim = sm.claim_action(state, readback, actor=SUP,
+                                            expected_revision=state["revision"], now=RUN)
+            state = sm.finish_action(state, readback, rclaim["lease_id"],
+                                     {"result": "UNKNOWN", "checkpoint": "RB_UNKNOWN"},
+                                     now=RUN)
+            self.assertEqual(state["actions"][readback]["state"], "READY")
+            self.assertEqual(state["ready_action"]["action_id"], readback)
+        state, rclaim = sm.claim_action(state, readback, actor=SUP,
+                                        expected_revision=state["revision"], now=RUN)
+        state = sm.finish_action(state, readback, rclaim["lease_id"],
+                                 {"result": "UNKNOWN", "checkpoint": "RB_UNKNOWN"}, now=RUN)
+        self.assertEqual(state["actions"][readback]["state"], "BLOCKED")
+        self.assertEqual(state["actions"][readback]["blocked_reason"], "BLOCKED_RECOVERY")
+
+
 if __name__ == "__main__":
     unittest.main()
 

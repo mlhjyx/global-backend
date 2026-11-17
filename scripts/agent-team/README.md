@@ -28,10 +28,16 @@ relay into a recoverable, auditable state machine:
   source attempt (`resolution: DELIVERED|NOT_DELIVERED`), so every real attempt gets
   its own recoverable cycle while source retries stop at 3 and a failing readback
   stops at `BLOCKED_RECOVERY` without readback-of-readback recursion;
-- WAITs carry a bounded `wait_generation`: each accepted WAIT event (and each fresh
-  Stop after an acknowledged wait) opens exactly one new claimable reconcile action;
-  duplicate events stay idempotent before the revision CAS, and reentry Stops reuse
-  the recorded action;
+- WAITs have one lifecycle writer (`next_wait_cycle`): each accepted WAIT event and
+  each fresh Stop after an acknowledged wait advances the same `task.wait_generation`
+  and its mirrored `wait.generation`; duplicate events stay idempotent before the
+  revision CAS, reentry Stops reuse the recorded action, and there is no lifetime
+  generation cap — progress is bounded per action by attempts (3) and by the
+  consecutive no-progress Stop budget (3), both cleared by real claim/finish results;
+- transition handling dispatches by action kind: source actions retry within 3 claims
+  or block as `BLOCKED_TRANSPORT`; recovery actions (readback/merge reconciliation)
+  retry the same action id on FAILED/UNKNOWN/lease-expiry and block as
+  `BLOCKED_RECOVERY` at the cap, never spawning new actions;
 - new-head events invalidate stale passes; duplicate events are idempotent;
 - approved next tasks are dispatched without asking the user again; no next task
   means a real stop.

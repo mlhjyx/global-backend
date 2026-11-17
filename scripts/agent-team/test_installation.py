@@ -451,5 +451,116 @@ class SupplementCliCycleTests(unittest.TestCase):
         self.assertIn("STATE_SCHEMA_INCOMPLETE", err)
 
 
+class ReadbackExpiryCliTests(unittest.TestCase):
+    def test_readback_lease_expiry_retries_same_action_through_cli(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state = root / "state"
+            state.mkdir(mode=0o700)
+            roles_file = _write_roles(root, {"supervisor": "sup", "engineering": "eng",
+                                             "technical": "tech", "product": "prod"})
+            code, out, err = controller.run([
+                "init", "--state-dir", str(state), "--team-id", "t",
+                "--workspace-root", ROOT, "--roles-file", str(roles_file),
+            ], stdin_text="", now=RUN)
+            self.assertEqual(code, 0, err)
+            spec = root / "spec.json"
+            spec.write_text(json.dumps({
+                "schema_version": "global-team-task/v1", "task_id": "T1",
+                "approval_source": "readback expiry", "scope_digest": "c" * 64,
+                "repo": "mlhjyx/global-backend", "branch": "claude/rb",
+                "pr": None, "head": "a" * 40, "owner_role": "engineering",
+                "writer_role": "engineering", "applicability": {"product": "REQUIRED"},
+                "depends_on": [], "required_checks": ["build"],
+            }), encoding="utf-8")
+            code, out, err = controller.run(["register-task", "--state-dir", str(state),
+                                             "--input", str(spec), "--expected-revision", "0"],
+                                            stdin_text="", now=RUN)
+            self.assertEqual(code, 0, err)
+            delivered = _write_event(root, "delivered.json", {
+                "schema_version": "global-team-event/v1",
+                "event_kind": "ENGINEERING_DELIVERED", "task_id": "T1",
+                "task_revision": 1, "head": "a" * 40, "issuer_role": "engineering",
+                "issuer_session_id": "eng", "receipt_id": "e1",
+                "payload": {"scope_digest": "c" * 64, "artifact_sha256": "d" * 64,
+                            "artifact_relpath": "docs/evidence/x.md", "limitations": []},
+            })
+            code, out, err = controller.run(["ingest", "--state-dir", str(state),
+                                             "--input", str(delivered),
+                                             "--expected-revision", "1"],
+                                            stdin_text="", now=RUN)
+            self.assertEqual(code, 0, err)
+            code, out, err = controller.run(["next", "--state-dir", str(state)],
+                                            stdin_text="", now=RUN)
+            source = json.loads(out)["action_id"]
+            code, out, err = controller.run([
+                "claim", "--state-dir", str(state), "--action-id", source,
+                "--actor", "eng", "--expected-revision", "2",
+            ], stdin_text="", now=RUN)
+            self.assertEqual(code, 0, err)
+            lease = json.loads(out)["lease_id"]
+            eof = root / "eof.json"
+            eof.write_text(json.dumps({"result": "UNKNOWN", "checkpoint": "EOF"}),
+                           encoding="utf-8")
+            code, out, err = controller.run([
+                "finish", "--state-dir", str(state), "--action-id", source,
+                "--lease-id", lease, "--result-file", str(eof),
+                "--expected-revision", "3",
+            ], stdin_text="", now=RUN)
+            self.assertEqual(code, 0, err)
+            code, out, err = controller.run(["next", "--state-dir", str(state)],
+                                            stdin_text="", now=RUN)
+            readback = json.loads(out)["action_id"]
+            code, out, err = controller.run([
+                "claim", "--state-dir", str(state), "--action-id", readback,
+                "--actor", "sup", "--expected-revision", "4",
+            ], stdin_text="", now=RUN)
+            self.assertEqual(code, 0, err)
+
+            script = Path(controller.__file__).resolve()
+            wrapper = ("import json,sys;sys.path.insert(0,sys.argv[1]);import controller;"
+                       "code,out,err=controller.run(json.loads(sys.argv[2]),stdin_text=sys.argv[3],"
+                       "now=sys.argv[4]);print(json.dumps([code,out,err]))")
+
+            def cli(now, *args):
+                proc = subprocess.run(
+                    [sys.executable, "-I", "-B", "-c", wrapper, str(script.parent),
+                     json.dumps(list(args)), "", now],
+                    capture_output=True, text=True, timeout=120,
+                )
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                return json.loads(proc.stdout)
+
+            late = "2026-11-17T00:03:00Z"
+            code, out, err = cli(late, "claim", "--state-dir", str(state),
+                                 "--action-id", readback, "--actor", "sup",
+                                 "--expected-revision", "5")
+            self.assertEqual(code, 0, err)
+            recovered = json.loads(out)
+            self.assertEqual(recovered.get("recovery"), "LEASE_EXPIRED")
+            self.assertIsNone(recovered.get("lease_id"))
+            snapshot = json.loads((state / "snapshot.json").read_text(encoding="utf-8"))
+            self.assertEqual(snapshot["revision"], 6)
+            self.assertEqual(snapshot["actions"][readback]["state"], "READY")
+            self.assertEqual(snapshot["actions"][readback]["checkpoint"], "LEASE_EXPIRED")
+            self.assertEqual(snapshot["actions"][readback]["attempts"], 1)
+            # Restart-readable and claimable again on the same action id.
+            code, out, err = cli(late, "next", "--state-dir", str(state))
+            self.assertEqual(json.loads(out)["action_id"], readback)
+            code, out, err = cli(late, "claim", "--state-dir", str(state),
+                                 "--action-id", readback, "--actor", "sup",
+                                 "--expected-revision", "6")
+            self.assertEqual(code, 0, err)
+            self.assertTrue(json.loads(out)["lease_id"])
+            # A repeated normalization never adds revisions.
+            snapshot_before = (state / "snapshot.json").read_bytes()
+            code, out, err = cli(late, "claim", "--state-dir", str(state),
+                                 "--action-id", readback, "--actor", "sup",
+                                 "--expected-revision", "7")
+            self.assertEqual(code, 3)
+            self.assertEqual((state / "snapshot.json").read_bytes(), snapshot_before)
+
+
 if __name__ == "__main__":
     unittest.main()

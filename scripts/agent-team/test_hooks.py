@@ -551,5 +551,122 @@ class FreshStopCycleTests(Harness):
         self.assertTrue(sm.load_state(self.dir)["guard"].get("blocked"))
 
 
+class UnifiedCycleTests(Harness):
+    def ingest_wait(self, receipt: str):
+        state = sm.load_state(self.dir)
+        path = Path(self._tmp.name) / f"{receipt}.json"
+        path.write_text(json.dumps({
+            "schema_version": "global-team-event/v1", "event_kind": "WAIT_OBSERVED",
+            "task_id": "T1", "task_revision": 1, "head": HEAD,
+            "issuer_role": "supervisor", "issuer_session_id": SUP_NATIVE,
+            "receipt_id": receipt,
+            "payload": {"reason": "WAIT_OWNER", "owner_role": "technical",
+                        "evidence": "REVIEW_ACTIVE"},
+        }), encoding="utf-8")
+        code, out, err = controller.run([
+            "ingest", "--state-dir", str(self.dir), "--input", str(path),
+            "--expected-revision", str(state["revision"]),
+        ], stdin_text="", now=RUN)
+        self.assertEqual(code, 0, err)
+
+    def next_action(self):
+        code, out, err = controller.run(["next", "--state-dir", str(self.dir)],
+                                        stdin_text="", now=RUN)
+        self.assertEqual(code, 0, err)
+        return json.loads(out)
+
+    def claim_and_finish(self, action_id, actor, result, revision=None):
+        revision = revision if revision is not None else sm.load_state(self.dir)["revision"]
+        code, out, err = controller.run([
+            "claim", "--state-dir", str(self.dir), "--action-id", action_id,
+            "--actor", actor, "--expected-revision", str(revision),
+        ], stdin_text="", now=RUN)
+        self.assertEqual(code, 0, err)
+        lease = json.loads(out)["lease_id"]
+        result_file = Path(self._tmp.name) / f"result-{action_id[:8]}.json"
+        result_file.write_text(json.dumps(result), encoding="utf-8")
+        code, out, err = controller.run([
+            "finish", "--state-dir", str(self.dir), "--action-id", action_id,
+            "--lease-id", lease, "--result-file", str(result_file),
+            "--expected-revision", str(sm.load_state(self.dir)["revision"]),
+        ], stdin_text="", now=RUN)
+        self.assertEqual(code, 0, err)
+
+    def acknowledge_wait(self):
+        ready = self.next_action()
+        self.assertEqual(ready["action_kind"], "RECONCILE_STAGE")
+        self.claim_and_finish(ready["action_id"], SUP_NATIVE,
+                              {"result": "DONE", "checkpoint": "RECONCILED",
+                               "resolution": "RECONCILED"})
+        return ready["action_id"]
+
+    def send_handoff(self):
+        ready = self.next_action()
+        if ready.get("action_kind") == "HANDOFF":
+            self.claim_and_finish(ready["action_id"], WRITER,
+                                  {"result": "DONE", "checkpoint": "SENT"})
+
+    def test_wait_entrypoints_share_one_cycle_counter(self):
+        state = self.persist()
+        self.deliver(state)
+        self.ingest_wait("wait_c1")
+        self.acknowledge_wait()
+        self.send_handoff()
+        # A fresh Stop after the ACK opens cycle 2.
+        code, out, _ = self.hook(stop_input(active=False))
+        self.assertEqual(json.loads(out)["decision"], "block")
+        second = self.next_action()
+        self.claim_and_finish(second["action_id"], SUP_NATIVE,
+                              {"result": "DONE", "checkpoint": "RECONCILED",
+                               "resolution": "RECONCILED"})
+        # A new WAIT event afterwards must not collide with an APPLIED action id.
+        self.ingest_wait("wait_c2")
+        ready = self.next_action()
+        self.assertEqual(ready["action_kind"], "RECONCILE_STAGE")
+        snapshot = json.loads((self.dir / "snapshot.json").read_text(encoding="utf-8"))
+        task = snapshot["tasks"]["T1"]
+        self.assertEqual(snapshot["actions"][ready["action_id"]]["round"],
+                         task["wait_generation"])
+        self.claim_and_finish(ready["action_id"], SUP_NATIVE,
+                              {"result": "DONE", "checkpoint": "RECONCILED",
+                               "resolution": "RECONCILED"})
+
+    def test_multiple_acks_keep_cycles_available(self):
+        state = self.persist()
+        self.deliver(state)
+        for cycle in range(3):
+            self.ingest_wait(f"wait_m{cycle}")
+            self.acknowledge_wait()
+            if cycle == 0:
+                self.send_handoff()
+            self.assertFalse(sm.load_state(self.dir)["guard"].get("blocked"))
+            code, out, _ = self.hook(stop_input(active=False))
+            self.assertEqual(json.loads(out)["decision"], "block")
+            ready = self.next_action()
+            self.claim_and_finish(ready["action_id"], SUP_NATIVE,
+                                  {"result": "DONE", "checkpoint": "RECONCILED",
+                                   "resolution": "RECONCILED"})
+            self.assertFalse(sm.load_state(self.dir)["guard"].get("blocked"))
+        self.ingest_wait("wait_m_final")
+        final = self.next_action()
+        self.assertEqual(final["action_kind"], "RECONCILE_STAGE")
+
+    def test_no_progress_progress_separation(self):
+        state = self.persist()
+        state = self.deliver(state)
+        action_id = state["ready_action"]["action_id"]
+        for _ in range(3):
+            code, out, _ = self.hook(stop_input(active=False))
+            self.assertEqual(json.loads(out)["decision"], "block")
+        code, out, _ = self.hook(stop_input(active=False))
+        self.assertIn("GLOBAL_TEAM_ACTION_BLOCKED", json.loads(out)["reason"])
+        self.assertTrue(sm.load_state(self.dir)["guard"].get("blocked"))
+        # A real claim/finish is progress: counts clear and blocking lifts.
+        self.claim_and_finish(action_id, WRITER, {"result": "DONE", "checkpoint": "SENT"})
+        snapshot = sm.load_state(self.dir)
+        self.assertFalse(snapshot["guard"].get("blocked"))
+        self.assertNotIn(action_id, snapshot["guard"]["stop_counts"])
+
+
 if __name__ == "__main__":
     unittest.main()

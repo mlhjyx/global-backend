@@ -490,16 +490,10 @@ def _hook_stop(args, now, state_dir, state, data):
             key = f"INPUT:{task['task_id']}:{current['input_pending']['marked_at']}"
             summary = f"task={task['task_id']} pending input requires coordination"
         elif task["wait"] is not None and task["wait"]["reconciled"] and not reentry:
-            # A fresh Stop after a real ACK opens exactly one new bounded reconcile cycle.
-            wait = task["wait"]
-            if wait["generation"] >= sm.STOP_MAX_ROUNDS:
-                current["guard"]["blocked"] = True
-                outcome["reason"] = ("GLOBAL_TEAM_ACTION_BLOCKED auto re-check cycles exhausted; "
-                                     "supervisor must reconcile the recorded wait before automation continues")
-                current["revision"] += 1
-                return current
-            wait["generation"] += 1
-            wait["reconciled"] = False
+            # A fresh Stop after a real ACK opens exactly one new reconcile cycle through
+            # the single wait-generation entry point; progress stays bounded by attempts
+            # and the per-action Stop budget, never by a lifetime generation cap.
+            sm.next_wait_cycle(task)
             current["revision"] += 1
             sm._recompute_pending(current, now)
             ready = current["ready_action"]

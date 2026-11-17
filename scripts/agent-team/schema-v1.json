@@ -161,10 +161,16 @@
       "$comment": "All result-bearing events must carry a concrete 40-hex head equal to the task head; mismatches are recorded stale without touching gates."
     },
     "recovery": {
-      "wait_cycles": "generation-bound reconcile action per WAIT; duplicate event keys are idempotent before the revision CAS",
+      "wait_cycles": "single mutation point next_wait_cycle: wait.generation mirrors task.wait_generation; WAIT_OBSERVED and the fresh-Stop re-check both call it; no lifetime generation cap",
       "expired_lease": "CLI claim performs the CLAIMED->UNKNOWN(LEASE_EXPIRED) normalization inside the locked transaction, commits it, and returns a recovery code without a lease",
       "readback": "reconcile actions include the full source_action_id and source_attempt; their own failures retry the same action up to 3 claims then BLOCKED_RECOVERY, never spawning a readback of a readback",
-      "schema_incomplete": "legacy snapshots missing wait_generation/source_attempt fail closed with STATE_SCHEMA_INCOMPLETE and refuse claims"
+      "schema_incomplete": "legacy snapshots missing wait_generation/source_attempt fail closed with STATE_SCHEMA_INCOMPLETE and refuse claims",
+      "progress_budget": "guard.stop_counts[action_id] counts only consecutive unhandled Stops (>3 -> BLOCKED_GUARD); any recorded finish clears that count and (for the active task) the guard block; successful claims and resume clear the block",
+      "transition_table": {
+        "source_actions": "DONE->APPLIED (MERGE_PR validates head+merge_commit); FAILED->READY (<3 claims) or BLOCKED_TRANSPORT (>=3); UNKNOWN/expired->UNKNOWN+readback; MERGE expiry also sets merge.state=UNKNOWN",
+        "recovery_actions": "DONE requires resolution; FAILED/UNKNOWN/expired->same action READY (<3 claims) or BLOCKED_RECOVERY (>=3); never derives a new action",
+        "invariants": "reconcile actions are never persisted as UNKNOWN; wait.generation must equal task.wait_generation"
+      }
     }
   },
   "limits": {
