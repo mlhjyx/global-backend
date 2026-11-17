@@ -203,6 +203,11 @@ function extractPage(html: string, minChars: number): HttpFirstPage | null {
   };
 }
 
+function acceptsHtml(contentType: string | null | undefined, exactUrl?: boolean): boolean {
+  const type = contentType?.toLowerCase() ?? "";
+  return (!exactUrl && !type) || type.includes("text/html") || type.includes("application/xhtml");
+}
+
 /**
  * 抓一页并抽成 Markdown。返回 null 表示「应回落浏览器渲染」：
  * 非 HTML、非 2xx、抓取失败、或可读正文低于阈值。任何异常都不向上抛（fail-safe）。
@@ -247,10 +252,7 @@ export async function fetchPageHttpFirst(
       fromCache: "conditional-304",
     };
   }
-  const contentType = fetched.contentType?.toLowerCase() ?? "";
-  if ((options.exactUrl || contentType) && !contentType.includes("text/html") && !contentType.includes("application/xhtml")) {
-    return null;
-  }
+  if (!acceptsHtml(fetched.contentType, options.exactUrl)) return null;
   try {
     const html = decodeHtml(fetched.body, fetched.contentType);
     const page = extractPage(html, minChars);
