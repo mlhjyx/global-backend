@@ -362,7 +362,9 @@ class StopGuardTests(Harness):
         code, out, err = controller.run(["next", "--state-dir", str(self.dir)],
                                         stdin_text="", now=RUN)
         self.assertEqual(json.loads(out), {"stop": True})
-        code, out, _ = self.hook(stop_input())
+        # A continued (reentry) Stop after the recorded progress may end; a fresh Stop
+        # deliberately opens the next bounded re-check cycle instead.
+        code, out, _ = self.hook(stop_input(active=True))
         self.assertEqual((code, out), (0, ""))
 
 
@@ -436,6 +438,117 @@ class ProbeTests(Harness):
         probe_entries = [entry for entry in settings_data.get("hooks", {}).get("PostToolUse", [])
                          if any("--probe" in hook.get("args", []) for hook in entry.get("hooks", []))]
         self.assertEqual(probe_entries, [])
+
+
+class FreshStopCycleTests(Harness):
+    def ingest_wait(self, receipt: str):
+        state = sm.load_state(self.dir)
+        path = Path(self._tmp.name) / f"{receipt}.json"
+        path.write_text(json.dumps({
+            "schema_version": "global-team-event/v1", "event_kind": "WAIT_OBSERVED",
+            "task_id": "T1", "task_revision": 1, "head": HEAD,
+            "issuer_role": "supervisor", "issuer_session_id": SUP_NATIVE,
+            "receipt_id": receipt,
+            "payload": {"reason": "WAIT_OWNER", "owner_role": "technical",
+                        "evidence": "REVIEW_ACTIVE"},
+        }), encoding="utf-8")
+        code, out, err = controller.run([
+            "ingest", "--state-dir", str(self.dir), "--input", str(path),
+            "--expected-revision", str(state["revision"]),
+        ], stdin_text="", now=RUN)
+        self.assertEqual(code, 0, err)
+
+    def acknowledge(self):
+        code, out, err = controller.run(["next", "--state-dir", str(self.dir)],
+                                        stdin_text="", now=RUN)
+        ready = json.loads(out)
+        self.assertEqual(ready["action_kind"], "RECONCILE_STAGE")
+        revision = sm.load_state(self.dir)["revision"]
+        code, out, err = controller.run([
+            "claim", "--state-dir", str(self.dir), "--action-id", ready["action_id"],
+            "--actor", SUP_NATIVE, "--expected-revision", str(revision),
+        ], stdin_text="", now=RUN)
+        self.assertEqual(code, 0, err)
+        lease = json.loads(out)["lease_id"]
+        result = Path(self._tmp.name) / "reconciled.json"
+        result.write_text(json.dumps({"result": "DONE", "checkpoint": "RECONCILED",
+                                      "resolution": "RECONCILED"}), encoding="utf-8")
+        code, out, err = controller.run([
+            "finish", "--state-dir", str(self.dir), "--action-id", ready["action_id"],
+            "--lease-id", lease, "--result-file", str(result),
+            "--expected-revision", str(sm.load_state(self.dir)["revision"]),
+        ], stdin_text="", now=RUN)
+        self.assertEqual(code, 0, err)
+        return ready["action_id"]
+
+    def test_fresh_stop_and_reentry_use_one_cycle(self):
+        state = self.persist()
+        self.deliver(state)
+        self.ingest_wait("wait_1")
+        code, out, _ = self.hook(stop_input(active=False))
+        first = json.loads(out)
+        self.assertEqual(first["decision"], "block")
+        code, out, _ = self.hook(stop_input(active=True))
+        reentry = json.loads(out)
+        self.assertEqual(reentry["reason"].split()[1], first["reason"].split()[1])
+        first_id = self.acknowledge()
+        # Reconciling surfaces the technical handoff; send it so the owner wait is real.
+        code, out, err = controller.run(["next", "--state-dir", str(self.dir)],
+                                        stdin_text="", now=RUN)
+        handoff = json.loads(out)
+        self.assertEqual(handoff["action_kind"], "HANDOFF")
+        code, out, err = controller.run([
+            "claim", "--state-dir", str(self.dir), "--action-id", handoff["action_id"],
+            "--actor", WRITER, "--expected-revision", str(sm.load_state(self.dir)["revision"]),
+        ], stdin_text="", now=RUN)
+        self.assertEqual(code, 0, err)
+        lease = json.loads(out)["lease_id"]
+        sent = Path(self._tmp.name) / "sent.json"
+        sent.write_text(json.dumps({"result": "DONE", "checkpoint": "SENT"}), encoding="utf-8")
+        code, out, err = controller.run([
+            "finish", "--state-dir", str(self.dir), "--action-id", handoff["action_id"],
+            "--lease-id", lease, "--result-file", str(sent),
+            "--expected-revision", str(sm.load_state(self.dir)["revision"]),
+        ], stdin_text="", now=RUN)
+        self.assertEqual(code, 0, err)
+        # The continued Stop after the real ACK may end.
+        code, out, _ = self.hook(stop_input(active=True))
+        self.assertEqual((code, out), (0, ""))
+        # The next fresh Stop opens exactly one new cycle with a new action id.
+        code, out, _ = self.hook(stop_input(active=False))
+        second = json.loads(out)
+        self.assertEqual(second["decision"], "block")
+        self.assertNotEqual(second["reason"].split()[1], first_id)
+        # Claiming that new cycle action succeeds (it is a real ledger entry).
+        code, out, err = controller.run(["next", "--state-dir", str(self.dir)],
+                                        stdin_text="", now=RUN)
+        ready = json.loads(out)
+        self.assertEqual(ready["action_kind"], "RECONCILE_STAGE")
+        revision = sm.load_state(self.dir)["revision"]
+        code, out, err = controller.run([
+            "claim", "--state-dir", str(self.dir), "--action-id", ready["action_id"],
+            "--actor", SUP_NATIVE, "--expected-revision", str(revision),
+        ], stdin_text="", now=RUN)
+        self.assertEqual(code, 0, err)
+        lease = json.loads(out)["lease_id"]
+        result = Path(self._tmp.name) / "reconciled2.json"
+        result.write_text(json.dumps({"result": "DONE", "checkpoint": "RECONCILED",
+                                      "resolution": "RECONCILED"}), encoding="utf-8")
+        code, out, err = controller.run([
+            "finish", "--state-dir", str(self.dir), "--action-id", ready["action_id"],
+            "--lease-id", lease, "--result-file", str(result),
+            "--expected-revision", str(sm.load_state(self.dir)["revision"]),
+        ], stdin_text="", now=RUN)
+        self.assertEqual(code, 0, err)
+        # Unhandled repeats of the same cycle are bounded by the original Stop cap.
+        code, out, _ = self.hook(stop_input(active=False))
+        self.assertEqual(json.loads(out)["decision"], "block")
+        for _ in range(2):
+            code, out, _ = self.hook(stop_input(active=False))
+            self.assertEqual(json.loads(out)["decision"], "block")
+        code, out, _ = self.hook(stop_input(active=False))
+        self.assertIn("GLOBAL_TEAM_ACTION_BLOCKED", json.loads(out)["reason"])
+        self.assertTrue(sm.load_state(self.dir)["guard"].get("blocked"))
 
 
 if __name__ == "__main__":

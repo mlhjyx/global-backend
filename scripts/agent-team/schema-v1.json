@@ -105,12 +105,13 @@
         "pr_state": "OPEN|CLOSED|MERGED|null"
       },
       "handoffs": "map action_id -> {delivered, accepted, acked}",
-      "wait": "{reason, owner_role, evidence, since, stale}|null",
+      "wait": "{reason, owner_role, evidence, since, generation, reconciled}|null",
       "rework_rounds": "integer",
-      "required_checks": "frozen list of 1..64 unique check names (registration-time)"
+      "required_checks": "frozen list of 1..64 unique check names (registration-time)",
+      "wait_generation": "integer >= 0 (increments once per accepted WAIT_OBSERVED event and per fresh-stop re-check cycle)"
     },
     "action": {
-      "action_id": "sha256 hex of normalized identity",
+      "action_id": "sha256 hex of normalized identity (team/task/task_revision/head/kind/stage/round/source_action_id/source_attempt)",
       "task_id": "task id",
       "action_kind": "RECONCILE_INPUT|RECONCILE_STAGE|RECONCILE_MERGE|REQUEST_CHECKPOINT|HANDOFF|OBSERVE_PR|MERGE_PR|DISPATCH_TASK",
       "target_stage": "technical|product|rework|reconcile|readback|null",
@@ -124,7 +125,8 @@
       "checkpoint": "token|null",
       "blocked_reason": "token|null",
       "round": "integer",
-      "source_action_id": "sha256 hex|null (readback/reconcile actions point at the unresolved action)"
+      "source_action_id": "sha256 hex|null (readback/reconcile actions point at the unresolved action)",
+      "source_attempt": "integer 0..3|null (source action attempts at readback creation; part of the action identity)"
     },
     "ready_action": "{action_id, task_id, action_kind, target_stage, target_role, head}",
     "event": {
@@ -157,6 +159,12 @@
       "TRANSPORT_FAILURE": "{action_id}",
       "ACTION_RESULT": "{action_id, result, checkpoint}",
       "$comment": "All result-bearing events must carry a concrete 40-hex head equal to the task head; mismatches are recorded stale without touching gates."
+    },
+    "recovery": {
+      "wait_cycles": "generation-bound reconcile action per WAIT; duplicate event keys are idempotent before the revision CAS",
+      "expired_lease": "CLI claim performs the CLAIMED->UNKNOWN(LEASE_EXPIRED) normalization inside the locked transaction, commits it, and returns a recovery code without a lease",
+      "readback": "reconcile actions include the full source_action_id and source_attempt; their own failures retry the same action up to 3 claims then BLOCKED_RECOVERY, never spawning a readback of a readback",
+      "schema_incomplete": "legacy snapshots missing wait_generation/source_attempt fail closed with STATE_SCHEMA_INCOMPLETE and refuse claims"
     }
   },
   "limits": {

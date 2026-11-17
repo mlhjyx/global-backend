@@ -272,6 +272,32 @@ def init_state(state_dir, team_id: str, workspace_root: str, roles: dict, now: s
         _unlock(fd)
 
 
+def locked_ingest(state_dir, event: dict, expected_revision: int, now: str) -> dict:
+    """Ingest under one lock: dedupe known events before the CAS revision check."""
+    state_dir = Path(state_dir)
+    _ensure_dir(state_dir)
+    fd = _lock(state_dir)
+    try:
+        state = _read_snapshot(state_dir)
+        validate_state(state)
+        validate_event(event, state)
+        key = event_key(state, event)
+        digest = event_digest(event)
+        known = state["events"].get(key)
+        if known is not None:
+            if known["payload_digest"] != digest:
+                raise _fail("EVENT_CONFLICT")
+            return state
+        if not _is_int(expected_revision) or state["revision"] != expected_revision:
+            raise _fail("REVISION_CONFLICT")
+        updated = reduce_event(state, event, now)
+        validate_state(updated)
+        _write_atomic(state_dir, updated)
+        return updated
+    finally:
+        _unlock(fd)
+
+
 def locked_update(state_dir, expected_revision: int, operation, now: str) -> dict:
     state_dir = Path(state_dir)
     _ensure_dir(state_dir)
@@ -330,11 +356,13 @@ def validate_state(state: dict) -> None:
 
 
 def _validate_task(task: dict) -> None:
+    if "wait_generation" not in task:
+        raise _fail("STATE_SCHEMA_INCOMPLETE")
     _require_keys(task, (
         "task_id", "approval_source", "scope_digest", "task_revision", "repo", "branch",
         "pr", "head", "owner_role", "writer_role", "applicability", "depends_on",
         "required_checks", "seq", "dispatched", "awaiting_checkpoint", "gates",
-        "merge", "handoffs", "wait", "rework_rounds", "phase",
+        "merge", "handoffs", "wait", "rework_rounds", "phase", "wait_generation",
     ))
     if not TASK_ID_RE.match(task["task_id"]):
         raise _fail("STATE_CORRUPT")
@@ -348,13 +376,27 @@ def _validate_task(task: dict) -> None:
     _require_keys(gates, ("engineering", "technical", "product", "ci"))
     if not isinstance(task["merge"], dict) or task["merge"].get("state") not in MERGE_STATES:
         raise _fail("STATE_CORRUPT")
+    if not _is_int(task["wait_generation"], 0):
+        raise _fail("STATE_CORRUPT")
+    wait = task["wait"]
+    if wait is not None:
+        if not isinstance(wait, dict) or "generation" not in wait or "reconciled" not in wait:
+            raise _fail("STATE_SCHEMA_INCOMPLETE")
+        _require_keys(wait, ("reason", "owner_role", "evidence", "since",
+                             "generation", "reconciled"))
+        if not _is_safe_code(wait["reason"]) or wait["owner_role"] not in ROLES \
+                or not _is_safe_code(wait["evidence"]) or not _is_int(wait["generation"], 0) \
+                or not isinstance(wait["reconciled"], bool):
+            raise _fail("STATE_CORRUPT")
 
 
 def _validate_action(action: dict) -> None:
+    if "source_attempt" not in action:
+        raise _fail("STATE_SCHEMA_INCOMPLETE")
     _require_keys(action, (
         "action_id", "task_id", "action_kind", "target_stage", "target_role", "head",
         "state", "actor", "lease_id", "lease_until", "attempts", "checkpoint",
-        "blocked_reason", "round", "source_action_id",
+        "blocked_reason", "round", "source_action_id", "source_attempt",
     ))
     if not _is_hex(action["action_id"], SHA256_RE) or action["action_kind"] not in ACTION_KINDS \
             or action["state"] not in ACTION_STATES or action["target_role"] not in ROLES:
@@ -365,6 +407,8 @@ def _validate_action(action: dict) -> None:
         raise _fail("STATE_CORRUPT")
     source = action["source_action_id"]
     if source is not None and not _is_hex(source, SHA256_RE):
+        raise _fail("STATE_CORRUPT")
+    if action["source_attempt"] is not None and not _is_int(action["source_attempt"], 0, 3):
         raise _fail("STATE_CORRUPT")
     if action["action_kind"] == "RECONCILE_STAGE" \
             and action["target_stage"] not in RECONCILE_STAGES:
@@ -529,6 +573,7 @@ def register_task(state: dict, spec: dict, now: str, expected_revision: int | No
         "wait": None,
         "rework_rounds": 0,
         "phase": "IMPLEMENTING",
+        "wait_generation": 0,
     }
     if state["active_task_id"] is None:
         state["active_task_id"] = task_id
@@ -561,9 +606,12 @@ def _gates_satisfied(task: dict) -> bool:
     if head is None:
         return False
     gates = task["gates"]
-    if gates["engineering"]["status"] != "DELIVERED" or gates["engineering"]["head"] != head:
-        return False
+    engineering = gates["engineering"]
     technical = gates["technical"]
+    if engineering["status"] != "DELIVERED" or engineering["head"] != head:
+        return False
+    if not set(engineering["limitations"]) <= set(technical["accepted_limitations"]):
+        return False
     if technical["status"] != "PASS" or technical["head"] != head \
             or technical["review_mode"] != "FINAL_COMMIT" or technical["blockers"]:
         return False
@@ -592,17 +640,20 @@ def _open_handoff(state: dict, task: dict, target: str) -> dict | None:
 
 
 def _action_id(state: dict, task: dict, kind: str, stage: str | None, round_no: int = 0,
-               source_action_id: str | None = None) -> str:
+               source_action_id: str | None = None, source_attempt: int | None = None) -> str:
     identity = [state["team_id"], task["task_id"], str(task["task_revision"]),
-                task["head"] or "", kind, stage or "", str(round_no), source_action_id or ""]
+                task["head"] or "", kind, stage or "", str(round_no), source_action_id or "",
+                str(source_attempt if source_attempt is not None else "")]
     return sha256_hex(canonical_json(identity))
 
 
 def _make_action(state: dict, task: dict, kind: str, target_role: str,
                  stage: str | None = None, round_no: int = 0,
-                 source_action_id: str | None = None) -> dict:
+                 source_action_id: str | None = None,
+                 source_attempt: int | None = None) -> dict:
     return {
-        "action_id": _action_id(state, task, kind, stage, round_no),
+        "action_id": _action_id(state, task, kind, stage, round_no, source_action_id,
+                                source_attempt),
         "task_id": task["task_id"],
         "action_kind": kind,
         "target_stage": stage,
@@ -617,6 +668,7 @@ def _make_action(state: dict, task: dict, kind: str, target_role: str,
         "blocked_reason": None,
         "round": round_no,
         "source_action_id": source_action_id,
+        "source_attempt": source_attempt,
     }
 
 
@@ -671,23 +723,31 @@ def compute_ready_action(state: dict, now: str) -> dict | None:
         return _view(state, _make_action(state, task or _placeholder_task(state),
                                          "RECONCILE_INPUT", "supervisor"))
     for action in sorted(state["actions"].values(), key=lambda item: item["action_id"]):
-        if action["state"] != "UNKNOWN":
+        if action["state"] != "UNKNOWN" or action["action_kind"] in (
+                "RECONCILE_STAGE", "RECONCILE_MERGE"):
             continue
         task = state["tasks"].get(action["task_id"])
         if task is None:
             continue
+        blocked_recovery = any(
+            other["state"] == "BLOCKED" and other["blocked_reason"] == "BLOCKED_RECOVERY"
+            and other["source_action_id"] == action["action_id"]
+            for other in state["actions"].values())
+        if blocked_recovery:
+            continue
         if action["action_kind"] == "MERGE_PR":
             return _view(state, _make_action(state, task, "RECONCILE_MERGE", "supervisor", None, 0,
-                                             action["action_id"]))
+                                             action["action_id"], action["attempts"]))
         return _view(state, _make_action(state, task, "RECONCILE_STAGE", "supervisor", "readback",
-                                         0, action["action_id"]))
+                                         0, action["action_id"], action["attempts"]))
     task = state["tasks"].get(state["active_task_id"] or "")
     if task is None:
         return None
     if task["merge"]["state"] in ("MERGED", "MERGED_OUTSIDE_RECORDED_GATES"):
         return None
     if task["wait"] is not None and not _stale_wait(task):
-        return _view(state, _make_action(state, task, "RECONCILE_STAGE", "supervisor", "reconcile"))
+        return _view(state, _make_action(state, task, "RECONCILE_STAGE", "supervisor", "reconcile",
+                                         task["wait"]["generation"]))
     gates = task["gates"]
     engineering = gates["engineering"]["status"]
     if engineering != "DELIVERED":
@@ -748,7 +808,7 @@ def _placeholder_task(state: dict) -> dict:
 
 
 def _stale_wait(task: dict) -> bool:
-    return task["wait"] is not None and task["wait"].get("stale") is True
+    return task["wait"] is not None and task["wait"].get("reconciled") is True
 
 
 def _view(state: dict, action: dict) -> dict:
@@ -762,6 +822,8 @@ def _view(state: dict, action: dict) -> dict:
     }
     if action.get("source_action_id"):
         view["source_action_id"] = action["source_action_id"]
+    if action.get("source_attempt") is not None:
+        view["source_attempt"] = action["source_attempt"]
     return view
 
 
@@ -780,6 +842,7 @@ def _recompute(state: dict) -> None:
                 state["tasks"].get(ready["task_id"]) or _placeholder_task(state),
                 ready["action_kind"], ready["target_role"], ready["target_stage"],
                 _round_for(state, ready), ready.get("source_action_id"),
+                ready.get("source_attempt"),
             )
             state["actions"][action["action_id"]] = action
         elif existing["state"] == "STALE":
@@ -791,8 +854,13 @@ def _recompute(state: dict) -> None:
 
 def _round_for(state: dict, ready: dict) -> int:
     task = state["tasks"].get(ready["task_id"])
-    if task is not None and ready["action_kind"] == "HANDOFF" and ready["target_stage"] == "rework":
+    if task is None:
+        return 0
+    if ready["action_kind"] == "HANDOFF" and ready["target_stage"] == "rework":
         return task["rework_rounds"]
+    if ready["action_kind"] == "RECONCILE_STAGE" and ready["target_stage"] == "reconcile" \
+            and task["wait"] is not None:
+        return task["wait"]["generation"]
     return 0
 
 
@@ -1024,8 +1092,10 @@ def reduce_event(state: dict, event: dict, now: str, expected_revision: int | No
             raise _fail("EVENT_INVALID")
         if not verified or event["issuer_role"] != "supervisor":
             raise _fail("EVENT_INVALID")
+        task["wait_generation"] += 1
         task["wait"] = {"reason": payload["reason"], "owner_role": payload["owner_role"],
-                        "evidence": payload["evidence"], "since": now, "stale": False}
+                        "evidence": payload["evidence"], "since": now,
+                        "generation": task["wait_generation"], "reconciled": False}
     elif kind == "TRANSPORT_FAILURE":
         _require_keys(payload, ("action_id",), code="EVENT_INVALID")
         action = state["actions"].get(payload["action_id"])
@@ -1062,6 +1132,7 @@ def _recompute_pending(state: dict, now: str) -> None:
                 state["tasks"].get(ready["task_id"]) or _placeholder_task(state),
                 ready["action_kind"], ready["target_role"], ready["target_stage"],
                 _round_for(state, ready), ready.get("source_action_id"),
+                ready.get("source_attempt"),
             )
             state["actions"][action["action_id"]] = action
         elif existing["state"] == "STALE":
@@ -1196,7 +1267,8 @@ def _apply_result(state: dict, action: dict, result: dict, now: str) -> dict:
             if source is None:
                 if resolution != "RECONCILED":
                     raise _fail("ACTION_RESULT_INVALID")
-                task["wait"] = None
+                if task["wait"] is not None:
+                    task["wait"]["reconciled"] = True
             elif resolution == "DELIVERED":
                 source["state"] = "APPLIED"
                 source["checkpoint"] = "READBACK_DELIVERED"
@@ -1204,10 +1276,14 @@ def _apply_result(state: dict, action: dict, result: dict, now: str) -> dict:
                 source["lease_until"] = None
                 source["actor"] = None
             elif resolution == "NOT_DELIVERED":
-                source["state"] = "READY"
                 source["lease_id"] = None
                 source["lease_until"] = None
                 source["actor"] = None
+                if source["attempts"] >= 3:
+                    source["state"] = "BLOCKED"
+                    source["blocked_reason"] = "BLOCKED_TRANSPORT"
+                else:
+                    source["state"] = "READY"
             else:
                 raise _fail("ACTION_RESULT_INVALID")
         elif action["action_kind"] == "RECONCILE_MERGE":
@@ -1229,11 +1305,15 @@ def _apply_result(state: dict, action: dict, result: dict, now: str) -> dict:
                                  "head": task["head"], "pr_state": "MERGED"}
                 _close_task(state, task)
             elif resolution == "NOT_DELIVERED":
-                source["state"] = "READY"
                 source["checkpoint"] = "READBACK_NOT_MERGED"
                 source["lease_id"] = None
                 source["lease_until"] = None
                 source["actor"] = None
+                if source["attempts"] >= 3:
+                    source["state"] = "BLOCKED"
+                    source["blocked_reason"] = "BLOCKED_TRANSPORT"
+                else:
+                    source["state"] = "READY"
                 if task["merge"]["state"] == "UNKNOWN":
                     task["merge"]["state"] = "NONE"
             else:
@@ -1252,12 +1332,24 @@ def _apply_result(state: dict, action: dict, result: dict, now: str) -> dict:
         action["lease_until"] = None
         if action["action_kind"] == "MERGE_PR":
             task["merge"]["state"] = "UNKNOWN"
+    elif verdict == "UNKNOWN" and action["action_kind"] in ("RECONCILE_STAGE", "RECONCILE_MERGE"):
+        # A readback can never spawn a readback of itself: retry the same action,
+        # bounded, then stop with an explicit recovery block.
+        action["lease_id"] = None
+        action["lease_until"] = None
+        if action["attempts"] >= 3:
+            action["state"] = "BLOCKED"
+            action["blocked_reason"] = "BLOCKED_RECOVERY"
+        else:
+            action["state"] = "READY"
     else:  # FAILED
         action["lease_id"] = None
         action["lease_until"] = None
         if action["attempts"] >= 3:
             action["state"] = "BLOCKED"
-            action["blocked_reason"] = "BLOCKED_TRANSPORT"
+            action["blocked_reason"] = "BLOCKED_RECOVERY" \
+                if action["action_kind"] in ("RECONCILE_STAGE", "RECONCILE_MERGE") \
+                else "BLOCKED_TRANSPORT"
         else:
             action["state"] = "READY"
     return state

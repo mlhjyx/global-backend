@@ -961,8 +961,280 @@ class WaitActionTests(StateDirMixin):
         state = sm.finish_action(state, ready["action_id"], claim["lease_id"],
                                  {"result": "DONE", "checkpoint": "RECONCILED",
                                   "resolution": "RECONCILED"}, now=RUN)
-        self.assertIsNone(state["tasks"]["T1"]["wait"])
+        self.assertTrue(state["tasks"]["T1"]["wait"]["reconciled"])
         self.assertEqual(state["ready_action"]["action_kind"], "HANDOFF")
+
+
+def delivered_limited(limitations, head=HEAD, receipt="e"):
+    return event("ENGINEERING_DELIVERED", role="engineering", head=head, receipt=receipt, payload={
+        "scope_digest": SCOPE, "artifact_sha256": "d" * 64,
+        "artifact_relpath": "docs/evidence/x.md", "limitations": list(limitations),
+    })
+
+
+def tech_accepting(accepted, conclusion="PASS", receipt="t", head=HEAD, blockers=None):
+    payload = {
+        "conclusion": conclusion, "review_mode": "FINAL_COMMIT",
+        "artifact_sha256": "d" * 64, "artifact_relpath": "docs/evidence/r.md",
+        "accepted_limitations": list(accepted),
+    }
+    if blockers is not None:
+        payload["blockers"] = blockers
+    return event("TECH_RESULT", head=head, receipt=receipt, payload=payload)
+
+
+def product_pass(receipt="p"):
+    return event("PRODUCT_RESULT", role="product", receipt=receipt, payload={
+        "conclusion": "PASS", "artifact_sha256": "d" * 64,
+        "artifact_relpath": "docs/evidence/p.md"})
+
+
+def pr_open(receipt="pr"):
+    return event("PR_OBSERVED", role="supervisor", receipt=receipt,
+                 payload={"pr": 7, "state": "OPEN", "head": HEAD})
+
+
+class ReviewRoundTwoTests(StateDirMixin):
+    def fresh(self, name):
+        directory = Path(self._tmp.name) / name
+        directory.mkdir(mode=0o700)
+        state = sm.init_state(directory, team_id=TEAM, workspace_root=ROOT,
+                              roles=roles(), now=RUN)
+        return directory, state
+
+    def to_everything_except_merge(self, limitations=(), accepted=(), head=HEAD,
+                                   ci_observed=RUN, now=RUN, name="flow"):
+        _, state = self.fresh(name)
+        state = sm.register_task(state, task_spec(pr=7, required_checks=["build"],
+                                                  head=head), now=RUN)
+        state = self.ingest(state, delivered_limited(limitations, head=head))
+        state = self.ingest(state, tech_accepting(accepted, head=head))
+        state = self.ingest(state, product_pass())
+        state = sm.reduce_event(state, pr_open(), now=now)
+        state = sm.reduce_event(state, ci_event(observed=ci_observed), now=now)
+        return state
+
+    def test_limitations_require_explicit_same_head_acceptance(self):
+        # Unaccepted engineering limitation: no merge action at all.
+        state = self.to_everything_except_merge(limitations=["UNVERIFIED_REQUIRED_TEST"],
+                                                name="unaccepted")
+        ready = sm.compute_ready_action(state, RUN)
+        self.assertNotEqual((ready or {}).get("action_kind"), "MERGE_PR")
+        # Partial acceptance keeps the gate closed.
+        partial = self.to_everything_except_merge(
+            limitations=["UNVERIFIED_REQUIRED_TEST", "SECOND_LIMIT"],
+            accepted=["UNVERIFIED_REQUIRED_TEST"], name="partial")
+        self.assertNotEqual((sm.compute_ready_action(partial, RUN) or {}).get("action_kind"),
+                            "MERGE_PR")
+        # Full same-head acceptance opens exactly the merge action.
+        full = self.to_everything_except_merge(
+            limitations=["UNVERIFIED_REQUIRED_TEST"],
+            accepted=["UNVERIFIED_REQUIRED_TEST"], name="full")
+        self.assertEqual(sm.compute_ready_action(full, RUN)["action_kind"], "MERGE_PR")
+        # A new head with an unaccepted limitation never inherits the old acceptance.
+        state = self.to_everything_except_merge(
+            limitations=["UNVERIFIED_REQUIRED_TEST"],
+            accepted=["UNVERIFIED_REQUIRED_TEST"], name="newhead",
+        )
+        state = self.ingest(state, event("HEAD_OBSERVED", role="supervisor", receipt="h2",
+                                         payload={"head": HEAD2}))
+        state = self.ingest(state, delivered_limited(["NEW_LIMIT"], head=HEAD2, receipt="e2"))
+        state = self.ingest(state, tech_accepting(["UNVERIFIED_REQUIRED_TEST"], head=HEAD2,
+                                                  receipt="t2"))
+        self.assertNotEqual((sm.compute_ready_action(state, RUN) or {}).get("action_kind"),
+                            "MERGE_PR")
+
+    def test_acceptance_never_waives_hard_gates(self):
+        base = dict(limitations=["UNVERIFIED_REQUIRED_TEST"],
+                    accepted=["UNVERIFIED_REQUIRED_TEST"])
+        # Pending/skipped/failing/missing CI still blocks even with full acceptance.
+        for observed_status in ("PENDING", "SKIPPED_OR_FAIL", "MISSING"):
+            with self.subTest(observed_status=observed_status), \
+                    tempfile.TemporaryDirectory() as tmp:
+                directory = Path(tmp) / "state"
+                directory.mkdir(mode=0o700)
+                state = sm.init_state(directory, team_id=TEAM, workspace_root=ROOT,
+                                      roles=roles(), now=RUN)
+                state = sm.register_task(state, task_spec(pr=7, required_checks=["build"]), now=RUN)
+                if observed_status == "MISSING":
+                    pass
+                    state = self.ingest(state, delivered_limited(base["limitations"]))
+                    state = self.ingest(state, tech_accepting(base["accepted"]))
+                    state = self.ingest(state, product_pass())
+                    state = self.ingest(state, pr_open())
+                else:
+                    conclusion = "FAILURE" if observed_status == "SKIPPED_OR_FAIL" else "PENDING"
+                    state = sm.reduce_event(state, delivered_limited(base["limitations"]), now=RUN)
+                    state = sm.reduce_event(state, tech_accepting(base["accepted"]), now=RUN)
+                    state = sm.reduce_event(state, product_pass(), now=RUN)
+                    state = sm.reduce_event(state, pr_open(), now=RUN)
+                    payload = {"conclusion": "SUCCESS" if observed_status == "SKIPPED_OR_FAIL"
+                               else "PENDING", "pr": 7,
+                               "required_checks": [{"name": "build", "conclusion": conclusion}],
+                               "observed_at": RUN}
+                    state = sm.reduce_event(state, event("CI_OBSERVED", role="supervisor",
+                                                         receipt=f"ci-{observed_status}",
+                                                         payload=payload), now=RUN)
+                if observed_status == "MISSING":
+                    state = sm.reduce_event(state, delivered_limited(base["limitations"]), now=RUN)
+                    state = sm.reduce_event(state, tech_accepting(base["accepted"]), now=RUN)
+                    state = sm.reduce_event(state, product_pass(), now=RUN)
+                    state = sm.reduce_event(state, pr_open(), now=RUN)
+                self.assertNotEqual(
+                    (sm.compute_ready_action(state, RUN) or {}).get("action_kind"), "MERGE_PR")
+        # Technical blockers keep a FAIL from being waived by acceptance.
+        state = self.register(pr=7, required_checks=["build"])
+        state = self.ingest(state, delivered_limited(base["limitations"]))
+        state = self.ingest(state, tech_accepting(base["accepted"], conclusion="FAIL",
+                                                  blockers=["BLOCK_1"]))
+        state = self.ingest(state, product_pass())
+        state = self.ingest(state, pr_open())
+        state = self.ingest(state, ci_event())
+        self.assertNotEqual((sm.compute_ready_action(state, RUN) or {}).get("action_kind"),
+                            "MERGE_PR")
+
+    def test_unknown_identity_across_sources_and_attempts(self):
+        _, state = self.fresh("identity")
+        state = sm.register_task(state, task_spec(), now=RUN)
+        task = state["tasks"]["T1"]
+        first = sm._make_action(state, task, "RECONCILE_STAGE", "supervisor", "readback", 0, "a" * 64)
+        second = sm._make_action(state, task, "RECONCILE_STAGE", "supervisor", "readback", 0, "b" * 64)
+        self.assertNotEqual(first["action_id"], second["action_id"])
+
+        state = self.ingest(state, delivered_event())
+        source = state["ready_action"]["action_id"]
+        state, claim = sm.claim_action(state, source, actor=WRITER,
+                                       expected_revision=state["revision"], now=RUN)
+        state = sm.finish_action(state, source, claim["lease_id"],
+                                 {"result": "UNKNOWN", "checkpoint": "EOF_1"}, now=RUN)
+        first_ready = state["ready_action"]
+        self.assertEqual(first_ready["source_action_id"], source)
+        state, rclaim = sm.claim_action(state, first_ready["action_id"], actor=SUP,
+                                        expected_revision=state["revision"], now=RUN)
+        state = sm.finish_action(state, first_ready["action_id"], rclaim["lease_id"],
+                                 {"result": "DONE", "checkpoint": "CHECKED_1",
+                                  "resolution": "NOT_DELIVERED"}, now=RUN)
+        state, claim2 = sm.claim_action(state, source, actor=WRITER,
+                                        expected_revision=state["revision"], now=RUN)
+        self.assertEqual(state["actions"][source]["attempts"], 2)
+        state = sm.finish_action(state, source, claim2["lease_id"],
+                                 {"result": "UNKNOWN", "checkpoint": "EOF_2"}, now=RUN)
+        second_ready = state["ready_action"]
+        self.assertEqual(second_ready["action_kind"], "RECONCILE_STAGE")
+        self.assertEqual(second_ready["source_action_id"], source)
+        self.assertNotEqual(second_ready["action_id"], first_ready["action_id"])
+        state, rclaim2 = sm.claim_action(state, second_ready["action_id"], actor=SUP,
+                                         expected_revision=state["revision"], now=RUN)
+        self.assertTrue(rclaim2.get("lease_id"))
+        # Repeating the same resolution report never creates another cycle.
+        same = sm.reduce_event(state, event("WAIT_OBSERVED", role="supervisor",
+                                            receipt="w-duplicate",
+                                            payload={"reason": "WAIT_OWNER",
+                                                     "owner_role": "technical",
+                                                     "evidence": "REVIEW_ACTIVE"}), now=RUN)
+        again = sm.reduce_event(same, event("WAIT_OBSERVED", role="supervisor",
+                                            receipt="w-duplicate",
+                                            payload={"reason": "WAIT_OWNER",
+                                                     "owner_role": "technical",
+                                                     "evidence": "REVIEW_ACTIVE"}), now=RUN)
+        self.assertEqual(again["revision"], same["revision"])
+
+    def test_recovery_attempt_bounds_and_readback_failure(self):
+        _, state = self.fresh("cap")
+        state = sm.register_task(state, task_spec(), now=RUN)
+        state = self.ingest(state, delivered_event())
+        source = state["ready_action"]["action_id"]
+        for attempt in (1, 2):
+            state, claim = sm.claim_action(state, source, actor=WRITER,
+                                           expected_revision=state["revision"], now=RUN)
+            self.assertEqual(state["actions"][source]["attempts"], attempt)
+            state = sm.finish_action(state, source, claim["lease_id"],
+                                     {"result": "UNKNOWN", "checkpoint": "EOF"}, now=RUN)
+            ready = state["ready_action"]
+            self.assertEqual(state["actions"][ready["action_id"]]["state"], "READY")
+            state, rclaim = sm.claim_action(state, ready["action_id"], actor=SUP,
+                                            expected_revision=state["revision"], now=RUN)
+            state = sm.finish_action(state, ready["action_id"], rclaim["lease_id"],
+                                     {"result": "DONE", "checkpoint": "CHECKED",
+                                      "resolution": "NOT_DELIVERED"}, now=RUN)
+        state, claim = sm.claim_action(state, source, actor=WRITER,
+                                       expected_revision=state["revision"], now=RUN)
+        self.assertEqual(state["actions"][source]["attempts"], 3)
+        state = sm.finish_action(state, source, claim["lease_id"],
+                                 {"result": "UNKNOWN", "checkpoint": "EOF"}, now=RUN)
+        ready = state["ready_action"]
+        state, rclaim = sm.claim_action(state, ready["action_id"], actor=SUP,
+                                        expected_revision=state["revision"], now=RUN)
+        state = sm.finish_action(state, ready["action_id"], rclaim["lease_id"],
+                                 {"result": "DONE", "checkpoint": "CHECKED",
+                                  "resolution": "NOT_DELIVERED"}, now=RUN)
+        self.assertEqual(state["actions"][source]["state"], "BLOCKED")
+        self.assertEqual(state["actions"][source]["blocked_reason"], "BLOCKED_TRANSPORT")
+        self.assertIsNone(sm.compute_ready_action(state, RUN))
+
+        # A readback that itself keeps failing is bounded on the same action; it never
+        # spawns a readback of the readback.
+        _, state = self.fresh("readback-fail")
+        state = sm.register_task(state, task_spec(), now=RUN)
+        state = self.ingest(state, delivered_event())
+        source = state["ready_action"]["action_id"]
+        state, claim = sm.claim_action(state, source, actor=WRITER,
+                                       expected_revision=state["revision"], now=RUN)
+        state = sm.finish_action(state, source, claim["lease_id"],
+                                 {"result": "UNKNOWN", "checkpoint": "EOF"}, now=RUN)
+        readback_id = state["ready_action"]["action_id"]
+        for attempt in (1, 2):
+            self.assertEqual((state["ready_action"] or {}).get("action_id"), readback_id)
+            self.assertEqual(state["actions"][readback_id]["state"], "READY")
+            state, rclaim = sm.claim_action(state, readback_id, actor=SUP,
+                                            expected_revision=state["revision"], now=RUN)
+            self.assertEqual(state["actions"][readback_id]["attempts"], attempt)
+            state = sm.finish_action(state, readback_id, rclaim["lease_id"],
+                                     {"result": "FAILED", "checkpoint": "READBACK_EOF"}, now=RUN)
+            self.assertEqual(state["ready_action"]["action_id"], readback_id)
+        state, rclaim = sm.claim_action(state, readback_id, actor=SUP,
+                                        expected_revision=state["revision"], now=RUN)
+        state = sm.finish_action(state, readback_id, rclaim["lease_id"],
+                                 {"result": "FAILED", "checkpoint": "READBACK_EOF"}, now=RUN)
+        self.assertEqual(state["actions"][readback_id]["state"], "BLOCKED")
+        self.assertEqual(state["actions"][readback_id]["blocked_reason"], "BLOCKED_RECOVERY")
+        self.assertIsNone(sm.compute_ready_action(state, RUN))
+        spawned = [action for action in state["actions"].values()
+                   if action["action_kind"] == "RECONCILE_STAGE"
+                   and action.get("source_action_id") == readback_id]
+        self.assertEqual(spawned, [])
+
+    def test_merge_unknown_requires_readback_then_fresh_gates(self):
+        state = self.register(pr=7)
+        state = self.ingest(state, delivered_event())
+        state = self.ingest(state, tech_event())
+        state = self.ingest(state, product_pass())
+        state = self.ingest(state, pr_open())
+        state = self.ingest(state, ci_event())
+        merge_id = state["ready_action"]["action_id"]
+        state, claim = sm.claim_action(state, merge_id, actor=SUP,
+                                       expected_revision=state["revision"], now=RUN)
+        state = sm.finish_action(state, merge_id, claim["lease_id"],
+                                 {"result": "UNKNOWN", "checkpoint": "MERGE_EOF"}, now=RUN)
+        state = self.ingest(state, pr_open(receipt="pr-readback"))
+        ready = state["ready_action"]
+        self.assertEqual(ready["action_kind"], "RECONCILE_MERGE")
+        self.assertEqual(ready["source_action_id"], merge_id)
+        state, rclaim = sm.claim_action(state, ready["action_id"], actor=SUP,
+                                        expected_revision=state["revision"], now=RUN)
+        state = sm.finish_action(state, ready["action_id"], rclaim["lease_id"],
+                                 {"result": "DONE", "checkpoint": "READBACK",
+                                  "resolution": "NOT_DELIVERED"}, now=RUN)
+        # The same logical merge source is re-armed, but only while its gates are fresh.
+        self.assertEqual(state["ready_action"]["action_id"], merge_id)
+        later = "2026-11-17T00:02:00Z"
+        self.assertEqual(sm.compute_ready_action(state, later)["action_kind"], "OBSERVE_PR")
+        with self.assertRaises(sm.ControllerError) as ctx:
+            sm.claim_action(state, merge_id, actor=SUP,
+                            expected_revision=state["revision"], now=later)
+        self.assertEqual(ctx.exception.code, "GATE_UNSATISFIED")
+        # A resolution string alone never records a merge.
+        self.assertEqual(state["tasks"]["T1"]["merge"]["state"], "NONE")
 
 
 if __name__ == "__main__":

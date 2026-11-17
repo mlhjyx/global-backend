@@ -14,14 +14,24 @@ relay into a recoverable, auditable state machine:
 - a supervisor-only Stop guard that blocks ending a turn while a ready action, an
   unfinished claim or uncoordinated input exists;
 - strict gates: engineering delivery, same-head `FINAL_COMMIT` independent technical
-  PASS (reviewer ≠ writer, empty blockers), frozen product applicability, and CI that
+  PASS (reviewer ≠ writer, empty blockers) that explicitly accepts every engineering
+  limitation (`engineering.limitations ⊆ technical.accepted_limitations`), frozen
+  product applicability, and CI that
   mirrors the registration-frozen required-check list (fresh by the observed time, all
   SUCCESS, same head), then exactly one supervisor `MERGE_PR` action that must still
   be the reducer's current action at claim time (readback-first on uncertainty);
 - a claim re-computes the unique ready action under the lock: stale CI, new heads,
-  changed gates or expired leases can never execute an old permission; unknown side
-  effects resolve through bounded readback (`resolution: DELIVERED|NOT_DELIVERED`)
-  instead of blind resends;
+  changed gates or expired leases can never execute an old permission; expired claims
+  are normalized to UNKNOWN inside the same locked transaction (committed, then a
+  recovery code without a lease is returned); unknown side effects resolve through
+  bounded readback actions whose identity includes the full source action id and the
+  source attempt (`resolution: DELIVERED|NOT_DELIVERED`), so every real attempt gets
+  its own recoverable cycle while source retries stop at 3 and a failing readback
+  stops at `BLOCKED_RECOVERY` without readback-of-readback recursion;
+- WAITs carry a bounded `wait_generation`: each accepted WAIT event (and each fresh
+  Stop after an acknowledged wait) opens exactly one new claimable reconcile action;
+  duplicate events stay idempotent before the revision CAS, and reentry Stops reuse
+  the recorded action;
 - new-head events invalidate stale passes; duplicate events are idempotent;
 - approved next tasks are dispatched without asking the user again; no next task
   means a real stop.

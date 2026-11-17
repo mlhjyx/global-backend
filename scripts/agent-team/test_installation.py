@@ -247,5 +247,209 @@ class CliProcessTests(unittest.TestCase):
             self.assertEqual(json.loads(status.stdout)["revision"], 4)
 
 
+def _cli_state(tmp, name="state"):
+    directory = Path(tmp) / name
+    directory.mkdir(mode=0o700)
+    return directory
+
+
+def _write_roles(root, roles):
+    path = root / "roles.json"
+    path.write_text(json.dumps(roles), encoding="utf-8")
+    path.chmod(0o600)
+    return path
+
+
+def _write_event(root, name, event):
+    path = root / name
+    path.write_text(json.dumps(event), encoding="utf-8")
+    return path
+
+
+class SupplementCliCycleTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = Path(self._tmp.name)
+        self.state = _cli_state(self.root)
+        self.roles = {"supervisor": "sup", "engineering": "eng",
+                      "technical": "tech", "product": "prod"}
+        roles_file = _write_roles(self.root, self.roles)
+        code, out, err = controller.run([
+            "init", "--state-dir", str(self.state), "--team-id", "t",
+            "--workspace-root", ROOT, "--roles-file", str(roles_file),
+        ], stdin_text="", now=RUN)
+        self.assertEqual(code, 0, err)
+        spec = self.root / "spec.json"
+        spec.write_text(json.dumps({
+            "schema_version": "global-team-task/v1", "task_id": "T1",
+            "approval_source": "cli cycle", "scope_digest": "c" * 64,
+            "repo": "mlhjyx/global-backend", "branch": "claude/cli-cycle",
+            "pr": None, "head": "a" * 40, "owner_role": "engineering",
+            "writer_role": "engineering", "applicability": {"product": "REQUIRED"},
+            "depends_on": [], "required_checks": ["build"],
+        }), encoding="utf-8")
+        code, out, err = controller.run(["register-task", "--state-dir", str(self.state),
+                                         "--input", str(spec), "--expected-revision", "0"],
+                                        stdin_text="", now=RUN)
+        self.assertEqual(code, 0, err)
+        delivered = _write_event(self.root, "delivered.json", {
+            "schema_version": "global-team-event/v1", "event_kind": "ENGINEERING_DELIVERED",
+            "task_id": "T1", "task_revision": 1, "head": "a" * 40,
+            "issuer_role": "engineering", "issuer_session_id": "eng", "receipt_id": "e1",
+            "payload": {"scope_digest": "c" * 64, "artifact_sha256": "d" * 64,
+                        "artifact_relpath": "docs/evidence/x.md", "limitations": []},
+        })
+        code, out, err = controller.run(["ingest", "--state-dir", str(self.state),
+                                         "--input", str(delivered), "--expected-revision", "1"],
+                                        stdin_text="", now=RUN)
+        self.assertEqual(code, 0, err)
+
+    def state_revision(self) -> int:
+        return json.loads((self.state / "snapshot.json").read_text(encoding="utf-8"))["revision"]
+
+    def ingest_wait(self, receipt: str, revision: int):
+        path = _write_event(self.root, f"{receipt}.json", {
+            "schema_version": "global-team-event/v1", "event_kind": "WAIT_OBSERVED",
+            "task_id": "T1", "task_revision": 1, "head": "a" * 40,
+            "issuer_role": "supervisor", "issuer_session_id": "sup",
+            "receipt_id": receipt,
+            "payload": {"reason": "WAIT_OWNER", "owner_role": "technical",
+                        "evidence": "REVIEW_ACTIVE"},
+        })
+        return controller.run(["ingest", "--state-dir", str(self.state), "--input", str(path),
+                               "--expected-revision", str(revision)], stdin_text="", now=RUN)
+
+    def acknowledge(self):
+        code, out, err = controller.run(["next", "--state-dir", str(self.state)],
+                                        stdin_text="", now=RUN)
+        ready = json.loads(out)
+        self.assertEqual(ready["action_kind"], "RECONCILE_STAGE")
+        revision = self.state_revision()
+        code, out, err = controller.run([
+            "claim", "--state-dir", str(self.state), "--action-id", ready["action_id"],
+            "--actor", "sup", "--expected-revision", str(revision),
+        ], stdin_text="", now=RUN)
+        self.assertEqual(code, 0, err)
+        lease = json.loads(out)["lease_id"]
+        result = self.root / "reconciled.json"
+        result.write_text(json.dumps({"result": "DONE", "checkpoint": "RECONCILED",
+                                      "resolution": "RECONCILED"}), encoding="utf-8")
+        code, out, err = controller.run([
+            "finish", "--state-dir", str(self.state), "--action-id", ready["action_id"],
+            "--lease-id", lease, "--result-file", str(result),
+            "--expected-revision", str(self.state_revision()),
+        ], stdin_text="", now=RUN)
+        self.assertEqual(code, 0, err)
+        return ready["action_id"]
+
+    def test_wait_cycles_and_duplicate_events_through_cli(self):
+        code, out, err = self.ingest_wait("wait_1", self.state_revision())
+        self.assertEqual(code, 0, err)
+        first_id = self.acknowledge()
+        revision_after_first = self.state_revision()
+        code, out, err = self.ingest_wait("wait_2", revision_after_first)
+        self.assertEqual(code, 0, err)
+        code, out, err = controller.run(["next", "--state-dir", str(self.state)],
+                                        stdin_text="", now=RUN)
+        second = json.loads(out)
+        self.assertEqual(second["action_kind"], "RECONCILE_STAGE")
+        self.assertNotEqual(second["action_id"], first_id)
+        code, out, err = controller.run([
+            "claim", "--state-dir", str(self.state), "--action-id", second["action_id"],
+            "--actor", "sup", "--expected-revision", str(self.state_revision()),
+        ], stdin_text="", now=RUN)
+        self.assertEqual(code, 0, err)
+        generation = json.loads(
+            (self.state / "snapshot.json").read_text(encoding="utf-8")
+        )["tasks"]["T1"].get("wait_generation")
+        self.assertEqual(generation, 2)
+        # Replaying WAIT1/WAIT2 with their old revisions stays an idempotent no-op.
+        revision_before = self.state_revision()
+        code, out, err = self.ingest_wait("wait_1", revision_before - 5)
+        self.assertEqual(code, 0, err)
+        code, out, err = self.ingest_wait("wait_2", revision_before - 6)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.state_revision(), revision_before)
+        # Same event key with a different payload conflicts.
+        path = _write_event(self.root, "wait_conflict.json", {
+            "schema_version": "global-team-event/v1", "event_kind": "WAIT_OBSERVED",
+            "task_id": "T1", "task_revision": 1, "head": "a" * 40,
+            "issuer_role": "supervisor", "issuer_session_id": "sup",
+            "receipt_id": "wait_2",
+            "payload": {"reason": "CI_PENDING", "owner_role": "supervisor",
+                        "evidence": "CI_EVENT"},
+        })
+        code, out, err = controller.run(["ingest", "--state-dir", str(self.state),
+                                         "--input", str(path),
+                                         "--expected-revision", str(self.state_revision())],
+                                        stdin_text="", now=RUN)
+        self.assertEqual(code, 3)
+        self.assertIn("EVENT_CONFLICT", err)
+
+    def test_expired_claim_cli_persists_and_survives_restart(self):
+        import subprocess
+        script = Path(controller.__file__).resolve()
+        wrapper = ("import json,sys;sys.path.insert(0,sys.argv[1]);import controller;"
+                   "code,out,err=controller.run(json.loads(sys.argv[2]),stdin_text=sys.argv[3],"
+                   "now=sys.argv[4]);print(json.dumps([code,out,err]))")
+
+        def cli(now, *args, stdin=""):
+            proc = subprocess.run(
+                [sys.executable, "-I", "-B", "-c", wrapper, str(script.parent),
+                 json.dumps(list(args)), stdin, now],
+                capture_output=True, text=True, timeout=120,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            code, out, err = json.loads(proc.stdout)
+            return code, out, err
+
+        code, out, err = cli(RUN, "next", "--state-dir", str(self.state))
+        self.assertEqual(code, 0, err)
+        handoff = json.loads(out)
+        revision = self.state_revision()
+        code, out, err = cli(RUN, "claim", "--state-dir", str(self.state),
+                             "--action-id", handoff["action_id"], "--actor", "eng",
+                             "--expected-revision", str(revision))
+        self.assertEqual(code, 0, err)
+        self.assertTrue(json.loads(out)["lease_id"])
+
+        late = "2026-11-17T00:03:00Z"
+        current_revision = self.state_revision()
+        code, out, err = cli(late, "claim", "--state-dir", str(self.state),
+                             "--action-id", handoff["action_id"], "--actor", "eng",
+                             "--expected-revision", str(current_revision))
+        self.assertEqual(code, 0, err)
+        recovered = json.loads(out)
+        self.assertEqual(recovered.get("recovery"), "LEASE_EXPIRED")
+        self.assertIsNone(recovered.get("lease_id"))
+        self.assertEqual(recovered.get("revision"), current_revision + 1)
+        self.assertEqual(recovered.get("ready_action", {}).get("action_kind"),
+                         "RECONCILE_STAGE")
+
+        # A brand-new process reads the committed normalization (no extra event).
+        code, out, err = cli(late, "next", "--state-dir", str(self.state))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(out)["action_kind"], "RECONCILE_STAGE")
+        snapshot = json.loads((self.state / "snapshot.json").read_text(encoding="utf-8"))
+        self.assertEqual(snapshot["revision"], current_revision + 1)
+        self.assertEqual(snapshot["actions"][handoff["action_id"]]["state"], "UNKNOWN")
+        # Repeating the recovery attempt changes nothing further.
+        code, out, err = cli(late, "claim", "--state-dir", str(self.state),
+                             "--action-id", handoff["action_id"], "--actor", "eng",
+                             "--expected-revision", str(current_revision + 1))
+        self.assertEqual(code, 3)
+        self.assertIn(err.strip(), {"GATE_UNSATISFIED", "ACTION_UNKNOWN"})
+        self.assertEqual(self.state_revision(), current_revision + 1)
+
+        # An old snapshot without the new persistent fields fails closed with a stable code.
+        snapshot["tasks"]["T1"].pop("wait_generation", None)
+        (self.state / "snapshot.json").write_text(json.dumps(snapshot), encoding="utf-8")
+        (self.state / "snapshot.json").chmod(0o600)
+        code, out, err = cli(late, "status", "--state-dir", str(self.state))
+        self.assertEqual(code, 3)
+        self.assertIn("STATE_SCHEMA_INCOMPLETE", err)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -460,36 +460,61 @@ def _hook_stop(args, now, state_dir, state, data):
         return 0, "", ""
     if state["guard"].get("blocked"):
         return 0, "", ""
-    task = state["tasks"].get(state["active_task_id"] or "")
-    if task is None:
+    if state["tasks"].get(state["active_task_id"] or "") is None:
         return 0, "", ""
-    ready = state["ready_action"]
-    claimed = next((action for action in state["actions"].values()
-                    if action["task_id"] == task["task_id"] and action["state"] == "CLAIMED"), None)
-    if ready is not None:
-        key = ready["action_id"]
-        kind = "ACTION_REQUIRED"
-        summary = (f"task={task['task_id']} action={key} kind={ready['action_kind']} "
-                   f"owner={ready['target_role']} head={task['head'] or 'NONE'}")
-    elif claimed is not None:
-        key = claimed["action_id"]
-        kind = "ACTION_REQUIRED"
-        summary = (f"task={task['task_id']} action={key} kind={claimed['action_kind']} "
-                   f"owner={claimed['target_role']} head={claimed['head'] or 'NONE'}")
-    elif state["input_pending"]["active"]:
-        key = f"INPUT:{task['task_id']}:{state['input_pending']['marked_at']}"
-        kind = "RECONCILE_INPUT"
-        summary = f"task={task['task_id']} pending input requires coordination"
-    else:
-        return 0, "", ""
-
-    outcome = {"reason": None}
+    reentry = bool(data.get("stop_hook_active"))
+    outcome = {"reason": None, "allow": False}
 
     def op(current):
+        if sm._expire_leases(current, now):
+            current["revision"] += 1
+            sm._recompute_pending(current, now)
+        task = current["tasks"].get(current["active_task_id"] or "")
+        if task is None:
+            outcome["allow"] = True
+            return current
+        ready = current["ready_action"]
+        claimed = next((action for action in current["actions"].values()
+                        if action["task_id"] == task["task_id"]
+                        and action["state"] == "CLAIMED"), None)
+        if ready is not None:
+            kind, key = "ACTION_REQUIRED", ready["action_id"]
+            summary = (f"task={task['task_id']} action={key} kind={ready['action_kind']} "
+                       f"owner={ready['target_role']} head={task['head'] or 'NONE'}")
+        elif claimed is not None:
+            kind, key = "ACTION_REQUIRED", claimed["action_id"]
+            summary = (f"task={task['task_id']} action={key} kind={claimed['action_kind']} "
+                       f"owner={claimed['target_role']} head={claimed['head'] or 'NONE'}")
+        elif current["input_pending"]["active"]:
+            kind = "RECONCILE_INPUT"
+            key = f"INPUT:{task['task_id']}:{current['input_pending']['marked_at']}"
+            summary = f"task={task['task_id']} pending input requires coordination"
+        elif task["wait"] is not None and task["wait"]["reconciled"] and not reentry:
+            # A fresh Stop after a real ACK opens exactly one new bounded reconcile cycle.
+            wait = task["wait"]
+            if wait["generation"] >= sm.STOP_MAX_ROUNDS:
+                current["guard"]["blocked"] = True
+                outcome["reason"] = ("GLOBAL_TEAM_ACTION_BLOCKED auto re-check cycles exhausted; "
+                                     "supervisor must reconcile the recorded wait before automation continues")
+                current["revision"] += 1
+                return current
+            wait["generation"] += 1
+            wait["reconciled"] = False
+            current["revision"] += 1
+            sm._recompute_pending(current, now)
+            ready = current["ready_action"]
+            if ready is None:
+                outcome["allow"] = True
+                return current
+            kind, key = "ACTION_REQUIRED", ready["action_id"]
+            summary = (f"task={task['task_id']} action={key} kind={ready['action_kind']} "
+                       f"owner={ready['target_role']} head={task['head'] or 'NONE'}")
+        else:
+            outcome["allow"] = True
+            return current
         guard = current["guard"]
-        counts = guard["stop_counts"]
-        count = counts.get(key, 0) + 1
-        counts[key] = count
+        count = guard["stop_counts"].get(key, 0) + 1
+        guard["stop_counts"][key] = count
         if count > sm.STOP_MAX_ROUNDS:
             guard["blocked"] = True
             outcome["reason"] = ("GLOBAL_TEAM_ACTION_BLOCKED repeated no-progress Stop rounds; "
@@ -505,6 +530,8 @@ def _hook_stop(args, now, state_dir, state, data):
         if error.code == "REVISION_CONFLICT":
             return 0, "", ""
         return 0, "", error.code
+    if outcome["allow"]:
+        return 0, "", ""
     return _block(outcome["reason"])
 
 
@@ -629,7 +656,8 @@ def run(argv, stdin_text: str | None = None, now: str | None = None):
                                   "ready_action": state["ready_action"]}), ""
         if args.command == "ingest":
             event = _read_input_file(args.input)
-            state = _locked(args, lambda current: sm.reduce_event(current, event, now=now), now)
+            state = sm.locked_ingest(Path(args.state_dir), event,
+                                     expected_revision=args.expected_revision, now=now)
             return 0, json.dumps({"revision": state["revision"],
                                   "ready_action": state["ready_action"]}), ""
         if args.command in ("status", "next"):
@@ -648,23 +676,31 @@ def run(argv, stdin_text: str | None = None, now: str | None = None):
                 payload = state["ready_action"] or {"stop": True}
             return 0, json.dumps(payload), ""
         if args.command == "claim":
-            preloaded = sm.load_state(Path(args.state_dir))
-            if sm._expire_leases(preloaded, now):
-                sm.locked_update(Path(args.state_dir),
-                                 expected_revision=preloaded["revision"],
-                                 operation=lambda current: current, now=now)
-                raise sm.ControllerError("LEASE_EXPIRED")
             claim_out = {}
+            recovery = {}
 
             def claim_op(current):
+                if sm._expire_leases(current, now):
+                    current["revision"] += 1
+                    sm._recompute_pending(current, now)
+                    recovery["recovered"] = True
+                    return current
                 new_state, claim = sm.claim_action(
                     current, args.action_id, actor=args.actor,
                     expected_revision=current["revision"], now=now)
                 claim_out.update(claim)
                 return new_state
 
-            sm.locked_update(Path(args.state_dir), expected_revision=args.expected_revision,
-                             operation=claim_op, now=now)
+            state = sm.locked_update(Path(args.state_dir),
+                                     expected_revision=args.expected_revision,
+                                     operation=claim_op, now=now)
+            if recovery.get("recovered"):
+                return 0, json.dumps({
+                    "recovery": "LEASE_EXPIRED",
+                    "lease_id": None,
+                    "revision": state["revision"],
+                    "ready_action": state["ready_action"],
+                }), ""
             return 0, json.dumps({"lease_id": claim_out.get("lease_id"),
                                   "action_id": claim_out.get("action_id")}), ""
         if args.command == "finish":
