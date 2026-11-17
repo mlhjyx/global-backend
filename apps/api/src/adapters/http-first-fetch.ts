@@ -88,6 +88,8 @@ export interface HttpFirstCacheOptions {
 }
 
 export interface HttpFirstOptions {
+  /** Evidence mode: no redirects or cached text from the normal fetch path. */
+  exactUrl?: boolean;
   fetchHtml?: HttpFirstHtmlFetcher;
   minChars?: number;
   cache?: HttpFirstCacheOptions;
@@ -122,7 +124,7 @@ function decodeHtml(body: Buffer, contentType: string | null): string {
   return body.toString("utf8");
 }
 
-function defaultFetchHtml(hooks?: HttpFirstOptions["hooks"]): HttpFirstHtmlFetcher {
+function defaultFetchHtml(hooks?: HttpFirstOptions["hooks"], exactUrl = false): HttpFirstHtmlFetcher {
   return async (url, validators) => {
     const headers: Record<string, string> = {
       "User-Agent": HTTP_FIRST_UA,
@@ -137,7 +139,7 @@ function defaultFetchHtml(hooks?: HttpFirstOptions["hooks"]): HttpFirstHtmlFetch
         headers,
         timeoutMs: HTTP_FIRST_TIMEOUT_MS,
         maxBytes: HTTP_FIRST_MAX_BYTES,
-        maxRedirects: HTTP_FIRST_MAX_REDIRECTS,
+        maxRedirects: exactUrl ? 0 : HTTP_FIRST_MAX_REDIRECTS,
       },
       hooks
         ? {
@@ -210,7 +212,7 @@ export async function fetchPageHttpFirst(
   options: HttpFirstOptions = {},
 ): Promise<HttpFirstPage | null> {
   const minChars = options.minChars ?? defaultMinChars();
-  const cache = options.cache;
+  const cache = options.exactUrl ? undefined : options.cache;
   let cached: HttpFirstCachedPage | null = null;
   if (cache) {
     try {
@@ -229,12 +231,12 @@ export async function fetchPageHttpFirst(
 
   let fetched: HttpFirstHtmlResponse | null = null;
   try {
-    const fetcher = options.fetchHtml ?? defaultFetchHtml(options.hooks);
+    const fetcher = options.fetchHtml ?? defaultFetchHtml(options.hooks, options.exactUrl);
     fetched = await fetcher(url, sendValidators);
   } catch {
     return null;
   }
-  if (!fetched) return null;
+  if (!fetched || (options.exactUrl && fetched.status !== 200)) return null;
   if (fetched.status === 304) {
     if (!cached) return null;
     logPageCacheState(url, "conditional-304");
@@ -246,7 +248,7 @@ export async function fetchPageHttpFirst(
     };
   }
   const contentType = fetched.contentType?.toLowerCase() ?? "";
-  if (contentType && !contentType.includes("text/html") && !contentType.includes("application/xhtml")) {
+  if ((options.exactUrl || contentType) && !contentType.includes("text/html") && !contentType.includes("application/xhtml")) {
     return null;
   }
   try {

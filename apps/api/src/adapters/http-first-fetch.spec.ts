@@ -11,6 +11,25 @@ const ARTICLE_HTML = `<!doctype html><html><head><title>Acme Pumps GmbH</title><
 <footer>footer junk</footer></body></html>`;
 
 describe('fetchPageHttpFirst', () => {
+  it('extracts a 200 HTML response in exact mode without using the ordinary cache', async () => {
+    const port = { get: vi.fn(), put: vi.fn() };
+    const response = { status: 200, contentType: 'text/html', body: Buffer.from(ARTICLE_HTML) };
+    const page = await fetchPageHttpFirst('https://acme.example/project', {
+      exactUrl: true, fetchHtml: async () => response, cache: { workspaceId: 'ws', port },
+    });
+    expect(page?.markdown).toContain('centrifugal pumps');
+    expect(port.get).not.toHaveBeenCalled();
+    expect(port.put).not.toHaveBeenCalled();
+  });
+
+  it.each([{ status: 302, contentType: 'text/html' }, { status: 200, contentType: 'application/pdf' },
+    { status: 200, contentType: null }])('does not admit non-exact HTML responses in evidence mode (%j)', async ({ status, contentType }) => {
+    const page = await fetchPageHttpFirst('https://acme.example/project', {
+      exactUrl: true, fetchHtml: async () => ({ status, contentType, body: Buffer.from(ARTICLE_HTML) }),
+    });
+    expect(page).toBeNull();
+  });
+
   it('extracts readable markdown from a server-rendered page without any browser fetch', async () => {
     const fetchHtml = vi.fn(async () => ({
       contentType: 'text/html; charset=utf-8',
