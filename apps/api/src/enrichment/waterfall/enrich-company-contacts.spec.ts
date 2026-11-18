@@ -602,13 +602,16 @@ describe('enrichCompanyContacts：公司帽向单人 core 透传（S2-S0）', ()
       'skipped_company_cap',
     ]);
 
-    // 旧编排等价 oracle：逐联系人直接跑真实单人 core，每人不透传剩余余额（旧行为）。
+    // 旧编排等价 oracle：逐联系人直接跑真实单人 core，复刻 BASE 外层帽/减记/skip，
+    // 但每人不透传剩余余额（旧行为）。
     const oldFinderTrace: string[] = [];
     const oldVerifierTrace: string[] = [];
     const legacy = makeScenario(oldFinderTrace, oldVerifierTrace);
     const shared = new CapBudget(1_000_000);
+    let legacyRemaining = 5;
     for (const contact of FOUR_CONTACTS) {
-      await enrichContactEmail(
+      if (legacyRemaining <= 0) continue;
+      const legacyResult = await enrichContactEmail(
         {
           prisma: legacy.world.prisma as never,
           finders: legacy.finders.map((handle) => handle.adapter),
@@ -628,12 +631,21 @@ describe('enrichCompanyContacts：公司帽向单人 core 透传（S2-S0）', ()
           lawfulBasis: 'legitimate_interest',
         },
       );
+      if (legacyResult.status !== 'skipped_compliance' && legacyResult.status !== 'no_finders') {
+        legacyRemaining -= 'finderAttempts' in legacyResult ? legacyResult.finderAttempts : 0;
+      }
     }
 
     expect(newFinderTrace.length).toBeLessThanOrEqual(oldFinderTrace.length);
     expect(newVerifierTrace.length).toBeLessThanOrEqual(oldVerifierTrace.length);
     expect(isOrderedSubsequence(newFinderTrace, oldFinderTrace)).toBe(true);
     expect(isOrderedSubsequence(newVerifierTrace, oldVerifierTrace)).toBe(true);
+    // 钉住 BASE 外层口径：帽 5、前三人各 2 finder + 1 verifier，末人 skip → 6/3；
+    // 修后末人只用剩余 1 次 → 5/2。oracle 若漏掉外层减记/skip 会得 8/4，这里必须失败。
+    expect(oldFinderTrace).toHaveLength(6);
+    expect(oldVerifierTrace).toHaveLength(3);
+    expect(newFinderTrace).toHaveLength(5);
+    expect(newVerifierTrace).toHaveLength(2);
   });
 
   it('真实 core + 真实 Hunter/Findymail/MillionVerifier adapter：计数 fake fetch 分别核对 finder/verifier', async () => {
