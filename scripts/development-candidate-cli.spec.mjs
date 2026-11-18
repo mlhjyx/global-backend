@@ -28,6 +28,7 @@ function fixture() {
   for (const file of [
     "development-candidate.mjs",
     "development-candidate-contract.mjs",
+    "development-candidate-input.mjs",
     "development-candidate-budget.mjs",
     "release-authorization.mjs",
   ])
@@ -207,6 +208,31 @@ function fixture() {
     git,
   };
 }
+
+test("approval digest binds the same bytes that the owner signed", () => {
+  const f = fixture();
+  const approved = join(f.dir, "approved.json");
+  const original = readFileSync(f.auth);
+  const bin = join(f.dir, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "ssh-keygen"), `#!${process.execPath}
+const { spawnSync } = require("node:child_process");
+const { readFileSync, appendFileSync } = require("node:fs");
+const check = spawnSync("ssh-keygen", process.argv.slice(2), {
+  input: readFileSync(0), env: { ...process.env, PATH: process.env.FIXTURE_ORIGINAL_PATH },
+});
+if (check.status === 0) appendFileSync(process.env.FIXTURE_AUTH, " ");
+process.exit(check.status ?? 1);
+`, { mode: 0o700 });
+  const result = f.run("validate-inputs", ["--output", approved], {
+    PATH: `${bin}:${process.env.PATH}`,
+    FIXTURE_ORIGINAL_PATH: process.env.PATH,
+    FIXTURE_AUTH: f.auth,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(readFileSync(f.auth).length, original.length + 1);
+  assert.equal(JSON.parse(readFileSync(approved)).authorizationSha256, sha256Hex(original));
+});
 
 test("real CLI verifies an owner signature and exports only committed candidate material", () => {
   const f = fixture();

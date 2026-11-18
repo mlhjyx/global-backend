@@ -91,6 +91,49 @@ function databaseMatches(
   }
 }
 
+function assertMarkerMatchesReceipt(
+  marker: Marker, receipt: Admission, build: CandidateBuild, env: NodeJS.ProcessEnv, now: number,
+): void {
+  if (
+    marker.schemaVersion !== "development-candidate-marker/v1" ||
+    receipt.schemaVersion !== "development-candidate-admission/v1" ||
+    env.APP_ENVIRONMENT !== "development" ||
+    env.NODE_ENV !== "production" ||
+    !IMAGE.test(env.RUNTIME_IMAGE_REFERENCE ?? "") ||
+    env.RUNTIME_IMAGE_REFERENCE !== receipt.imageReference ||
+    !SHA.test(marker.candidateCommit) ||
+    !SHA.test(marker.trustedWorkflowCommit) ||
+    !HASH.test(marker.authorizationSha256) ||
+    !HASH.test(marker.instanceManifestSha256) ||
+    marker.candidateCommit !== build.build_sha ||
+    receipt.artifactDigest !== build.artifact_digest ||
+    receipt.sourceTreeDigest !== build.source_tree_digest ||
+    receipt.verificationKind !== "github-attestation-and-owner-ssh" ||
+    typeof marker.instanceId !== "string" ||
+    !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$/u.test(marker.instanceId) ||
+    marker.instanceId !== env.RUNTIME_CANDIDATE_INSTANCE_ID ||
+    !Array.isArray(marker.workspaceIds) ||
+    marker.workspaceIds.length !== 2 ||
+    marker.workspaceIds.some((id) => !UUID.test(id)) ||
+    new Set(marker.workspaceIds).size !== 2 ||
+    !Number.isFinite(Date.parse(marker.validUntil)) ||
+    Date.parse(marker.validUntil) <= now
+  )
+    invalid();
+  for (const key of [
+    "candidateCommit",
+    "trustedWorkflowCommit",
+    "authorizationSha256",
+    "instanceManifestSha256",
+    "instanceId",
+    "workspaceIds",
+    "validUntil",
+  ] as const) {
+    if (JSON.stringify(marker[key]) !== JSON.stringify(receipt[key]))
+      invalid();
+  }
+}
+
 /** Validates the cache of an external verification, never a substitute for it.
  * readRuntimeCandidate also requires a root-owned, non-writable mount. The host
  * CLI first verifies the owner SSH signature and exact GitHub CI attestation.
@@ -105,44 +148,7 @@ export function validateRuntimeCandidate(
   try {
     const marker = markerInput as Marker,
       receipt = receiptInput as Admission;
-    if (
-      marker.schemaVersion !== "development-candidate-marker/v1" ||
-      receipt.schemaVersion !== "development-candidate-admission/v1" ||
-      env.APP_ENVIRONMENT !== "development" ||
-      env.NODE_ENV !== "production" ||
-      !IMAGE.test(env.RUNTIME_IMAGE_REFERENCE ?? "") ||
-      env.RUNTIME_IMAGE_REFERENCE !== receipt.imageReference ||
-      !SHA.test(marker.candidateCommit) ||
-      !SHA.test(marker.trustedWorkflowCommit) ||
-      !HASH.test(marker.authorizationSha256) ||
-      !HASH.test(marker.instanceManifestSha256) ||
-      marker.candidateCommit !== build.build_sha ||
-      receipt.artifactDigest !== build.artifact_digest ||
-      receipt.sourceTreeDigest !== build.source_tree_digest ||
-      receipt.verificationKind !== "github-attestation-and-owner-ssh" ||
-      typeof marker.instanceId !== "string" ||
-      !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$/u.test(marker.instanceId) ||
-      marker.instanceId !== env.RUNTIME_CANDIDATE_INSTANCE_ID ||
-      !Array.isArray(marker.workspaceIds) ||
-      marker.workspaceIds.length !== 2 ||
-      marker.workspaceIds.some((id) => !UUID.test(id)) ||
-      new Set(marker.workspaceIds).size !== 2 ||
-      !Number.isFinite(Date.parse(marker.validUntil)) ||
-      Date.parse(marker.validUntil) <= now
-    )
-      invalid();
-    for (const key of [
-      "candidateCommit",
-      "trustedWorkflowCommit",
-      "authorizationSha256",
-      "instanceManifestSha256",
-      "instanceId",
-      "workspaceIds",
-      "validUntil",
-    ] as const) {
-      if (JSON.stringify(marker[key]) !== JSON.stringify(receipt[key]))
-        invalid();
-    }
+    assertMarkerMatchesReceipt(marker, receipt, build, env, now);
     const instance = receipt.instance;
     if (
       createHash("sha256").update(canonical(instance)).digest("hex") !==
@@ -266,6 +272,11 @@ function activateRuntimeCandidate(context: RuntimeCandidateContext): void {
   );
   expiryTimer.unref();
 }
+export function candidateWorkspaceWhere(): { workspaceId?: { in: string[] } } {
+  const candidate = runtimeCandidateContext();
+  return candidate ? { workspaceId: { in: [...candidate.workspaceIds] } } : {};
+}
+
 export function runtimeCandidateContext(): RuntimeCandidateContext | undefined {
   return active;
 }
@@ -328,6 +339,17 @@ export function candidateWorkspaceAllowed(
 export function assertCandidateWorkspaceAllowed(workspaceId: string): void {
   if (!candidateWorkspaceAllowed(workspaceId)) {
     scopeDenied();
+  }
+}
+
+/** Zero estimated cents does not establish that a tool makes no external call. */
+export function assertCandidateToolExecutionAllowed(tool: {
+  cost: { external: boolean; estimatedCents: number };
+  durableResultStrategy: { kind: string };
+}): void {
+  if (tool.cost.external || tool.cost.estimatedCents > 0 ||
+    tool.durableResultStrategy.kind !== "no_physical_call") {
+    assertCandidatePhysicalExecutionAllowed();
   }
 }
 

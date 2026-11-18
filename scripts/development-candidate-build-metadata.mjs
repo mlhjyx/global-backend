@@ -1,9 +1,10 @@
 // Build-time metadata only. Owner approval is checked by the protected CI
 // driver before this file is supplied; the signed external OCI statement is
 // checked again by deployment admission. This file alone grants no trust.
-import { lstatSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { writeFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { readCandidateInput } from "./development-candidate-input.mjs";
 
 export function installCandidateBuildMetadata({
   source,
@@ -19,9 +20,7 @@ export function installCandidateBuildMetadata({
     if (existsSync(source)) fail();
     return;
   }
-  const stat = lstatSync(source);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 16_384) fail();
-  const marker = JSON.parse(readFileSync(source, "utf8"));
+  const marker = JSON.parse(readCandidateInput(source, 16_384, "CANDIDATE_BUILD_METADATA_INVALID").toString("utf8"));
   const fields = [
     "schemaVersion",
     "candidateCommit",

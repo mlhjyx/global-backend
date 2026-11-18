@@ -1,7 +1,8 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readCandidateInput } from "./development-candidate-input.mjs";
 
 export const CANDIDATE_PREDICATE_TYPE =
   "https://global-backend.dev/attestations/development-candidate/v1";
@@ -100,7 +101,7 @@ export function validateCandidateAuthorization(
 }
 
 export function verifyCandidateOwnerSignature(
-  path,
+  bytes,
   signaturePath,
   keyRegistry,
   keyId,
@@ -121,9 +122,11 @@ export function verifyCandidateOwnerSignature(
     writeFileSync(allowed, `${found[0].principal} ${found[0].public_key}\n`, {
       mode: 0o600,
     });
-    const bytes = readFileSync(path);
-    if (bytes.length > 65_536 || readFileSync(signaturePath).length > 8_192)
-      fail();
+    if (!Buffer.isBuffer(bytes) || bytes.length > 65_536) fail();
+    const signature = join(directory, "signature");
+    writeFileSync(signature, readCandidateInput(signaturePath, 8_192, "CANDIDATE_OWNER_SIGNATURE_INVALID"), {
+      flag: "wx", mode: 0o600,
+    });
     execFileSync(
       "ssh-keygen",
       [
@@ -136,7 +139,7 @@ export function verifyCandidateOwnerSignature(
         "-n",
         "development-candidate-authorization",
         "-s",
-        signaturePath,
+        signature,
       ],
       {
         input: bytes,

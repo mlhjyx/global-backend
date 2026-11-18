@@ -72,7 +72,6 @@ import { parseDurableExecutionReceiptFacts } from "../durable-results/durable-ex
 import { centsToMicrousd, usdToMicrousdCeil } from "../tools/microusd";
 import { centsFromTokens } from "./model-token-cost";
 import { assertCandidatePhysicalExecutionAllowed } from "../runtime/development-candidate";
-
 function providerReportedMicrousd(usage?: ModelUsage): bigint | null {
   const costUsd = usage?.costUsd;
   if (!Number.isFinite(costUsd) || (costUsd as number) < 0) return null;
@@ -720,8 +719,7 @@ export class RouterModelGateway extends ModelGateway {
       assertChatWithToolsPlatformEgressAllowed(ctx);
     }
     const chain = this.router.route(op, input.task);
-    if (chain.length === 0)
-      throw new Error(`no model provider for ${op}/${input.task}`);
+    if (chain.length === 0) throw new Error(`no model provider for ${op}/${input.task}`);
 
     // 预算门（收口② D）：task.maxCostCents 从纯声明变真闸——reserve-then-settle，
     // 账户（runId ?? workspaceId）超限即抛 BudgetExceededError（调用不发生=真拦截）。

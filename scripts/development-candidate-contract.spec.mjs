@@ -115,7 +115,7 @@ test("verifies real detached owner SSH signatures in a distinct namespace, not a
     ],
   };
   assert.equal(
-    verifyCandidateOwnerSignature(path, `${path}.sig`, keys, AUTH.keyId),
+    verifyCandidateOwnerSignature(readFileSync(path), `${path}.sig`, keys, AUTH.keyId),
     true,
   );
   writeFileSync(
@@ -123,12 +123,12 @@ test("verifies real detached owner SSH signatures in a distinct namespace, not a
     JSON.stringify({ ...AUTH, campaignCapMicrousd: 50_000_000 }),
   );
   assert.throws(
-    () => verifyCandidateOwnerSignature(path, `${path}.sig`, keys, AUTH.keyId),
+    () => verifyCandidateOwnerSignature(readFileSync(path), `${path}.sig`, keys, AUTH.keyId),
     /CANDIDATE_OWNER_SIGNATURE_INVALID/u,
   );
   assert.throws(() =>
     verifyCandidateOwnerSignature(
-      path,
+      readFileSync(path),
       `${path}.sig`,
       { keys: [{ ...keys.keys[0], revoked_at: NOW }] },
       AUTH.keyId,

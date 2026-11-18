@@ -3,6 +3,7 @@ import { mkdtempSync, chmodSync, existsSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { CandidateBudgetLedger } from "./development-candidate-budget.mjs";
 
@@ -50,22 +51,16 @@ const binding = (index, overrides = {}) => ({
   ...overrides,
 });
 function child(path, index, arm) {
-  const module = new URL("./development-candidate-budget.mjs", import.meta.url)
-    .href;
+  const worker = fileURLToPath(new URL("./fixtures/development-candidate-budget-worker.mjs", import.meta.url));
   const input = request(index, {
     arm,
     workspaceId: CONFIG.arms[arm].workspaceId,
     capMicrousd: 750_000,
   });
-  const code = `import { CandidateBudgetLedger } from ${JSON.stringify(module)};
-    const ledger=new CandidateBudgetLedger(${JSON.stringify(path)},${JSON.stringify(CONFIG)},{now:()=>${NOW}});
-    try { ledger.allocate(${JSON.stringify(input)}); process.stdout.write('allocated'); }
-    catch(error) { if(error.code!=='CANDIDATE_BUDGET_EXCEEDED')throw error; process.stdout.write('denied'); }
-    finally { ledger.close(); }`;
   return new Promise((resolve, reject) => {
     const process = spawn(
       globalThis.process.execPath,
-      ["--input-type=module", "-e", code],
+      [worker, path, JSON.stringify(CONFIG), String(NOW), JSON.stringify(input)],
       { stdio: ["ignore", "pipe", "pipe"] },
     );
     let out = "",

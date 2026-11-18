@@ -1,11 +1,7 @@
-import { assertCandidateWorkspaceAllowed } from '../runtime/development-candidate';
 import { assertCandidateAccountAllocated } from '../runtime/development-candidate-budget';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
-import {
-  ExecutionBudgetGrantError,
-  type ExecutionBudgetPurpose,
-} from '../execution-budget/execution-budget-authority.types';
+import { ExecutionBudgetGrantError, type ExecutionBudgetPurpose } from '../execution-budget/execution-budget-authority.types';
 import {
   attestExecutionBudgetPlatformWriterTransaction,
   assertExecutionBudgetAuthorityId,
@@ -786,7 +782,6 @@ export class PostgresBudgetStore implements BudgetStore {
   }
 
   async reserve(input: BudgetReservationRequest): Promise<BudgetReservation> {
-    assertCandidateWorkspaceAllowed(input.workspaceId);
     await assertCandidateAccountAllocated(input.workspaceId, input.accountKey);
     assertKey('accountKey', input.accountKey);
     assertKey('operationKey', input.operationKey);

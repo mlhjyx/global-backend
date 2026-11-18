@@ -312,6 +312,10 @@
       "to": "prisma"
     },
     {
+      "from": "compliance",
+      "to": "runtime"
+    },
+    {
       "from": "discovery",
       "to": "acquisition"
     },
@@ -681,6 +685,10 @@
     },
     {
       "from": "model-gateway",
+      "to": "runtime"
+    },
+    {
+      "from": "model-gateway",
       "to": "site-builder"
     },
     {
@@ -746,6 +754,10 @@
     {
       "from": "prisma",
       "to": "compliance"
+    },
+    {
+      "from": "prisma",
+      "to": "runtime"
     },
     {
       "from": "registry",
@@ -1138,6 +1150,10 @@
     {
       "from": "tools",
       "to": "platform-authority"
+    },
+    {
+      "from": "tools",
+      "to": "runtime"
     },
     {
       "from": "tools",

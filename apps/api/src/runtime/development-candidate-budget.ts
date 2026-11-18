@@ -47,6 +47,29 @@ function cap(value: unknown, maximum: number): value is number {
   );
 }
 
+function assertSnapshotScope(snapshot: Snapshot, context: RuntimeCandidateContext, now: number): void {
+  if (
+    snapshot.schemaVersion !==
+      "development-candidate-budget-allocations/v1" ||
+    snapshot.authorizationSha256 !== context.authorizationSha256 ||
+    snapshot.campaignId !== context.instanceId ||
+    !Number.isFinite(Date.parse(snapshot.expiresAt)) ||
+    Date.parse(snapshot.expiresAt) <= now ||
+    Date.parse(snapshot.expiresAt) > Date.parse(context.validUntil) ||
+    now >= Date.parse(context.validUntil) ||
+    !cap(snapshot.capMicrousd, 5_000_000) ||
+    !Array.isArray(snapshot.allocations) ||
+    snapshot.allocations.length > 128 ||
+    !cap(snapshot.arms.A.capMicrousd, 2_500_000) ||
+    !cap(snapshot.arms.B.capMicrousd, 2_500_000) ||
+    snapshot.arms.A.workspaceId !== context.workspaceIds[0] ||
+    snapshot.arms.B.workspaceId !== context.workspaceIds[1] ||
+    snapshot.arms.A.capMicrousd + snapshot.arms.B.capMicrousd >
+      snapshot.capMicrousd
+  )
+    invalid();
+}
+
 /** The cache is an export of the host's atomic, private ledger, installed by
  * the trusted operator as root in a read-only directory mount. It contains no
  * tokens. Every allocation, including pending/UNKNOWN, counts at full cap.
@@ -59,26 +82,7 @@ export function validateCandidateBudgetAllocation(
 ): void {
   try {
     const snapshot = input as Snapshot;
-    if (
-      snapshot.schemaVersion !==
-        "development-candidate-budget-allocations/v1" ||
-      snapshot.authorizationSha256 !== context.authorizationSha256 ||
-      snapshot.campaignId !== context.instanceId ||
-      !Number.isFinite(Date.parse(snapshot.expiresAt)) ||
-      Date.parse(snapshot.expiresAt) <= now ||
-      Date.parse(snapshot.expiresAt) > Date.parse(context.validUntil) ||
-      now >= Date.parse(context.validUntil) ||
-      !cap(snapshot.capMicrousd, 5_000_000) ||
-      !Array.isArray(snapshot.allocations) ||
-      snapshot.allocations.length > 128 ||
-      !cap(snapshot.arms.A.capMicrousd, 2_500_000) ||
-      !cap(snapshot.arms.B.capMicrousd, 2_500_000) ||
-      snapshot.arms.A.workspaceId !== context.workspaceIds[0] ||
-      snapshot.arms.B.workspaceId !== context.workspaceIds[1] ||
-      snapshot.arms.A.capMicrousd + snapshot.arms.B.capMicrousd >
-        snapshot.capMicrousd
-    )
-      invalid();
+    assertSnapshotScope(snapshot, context, now);
     const seen = {
       id: new Set<string>(),
       request: new Set<string>(),

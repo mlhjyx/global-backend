@@ -1,4 +1,4 @@
-import { assertCandidateWorkspaceAllowed, assertRuntimeCandidateOperational, runtimeCandidateContext } from '../runtime/development-candidate';
+import { assertCandidateWorkspaceAllowed, assertRuntimeCandidateOperational, candidateWorkspaceWhere } from '../runtime/development-candidate';
 import { createHmac } from "node:crypto";
 import {
   Injectable,
@@ -64,19 +64,12 @@ import {
 } from "./event-registry";
 import { logIntegrationPayloadWarning, qualifyWorkflowArgs } from "./event-payload-helpers";
 
-/**
- * Transactional Outbox relay (ADR-009). A trusted system scanner: connects as the
- * owner (DATABASE_URL) to read unpublished events ACROSS all tenants — RLS would
- * hide them from app_user. Dispatched work (workflow activities) is tenant-scoped
- * again via withWorkspace. Dev uses simple polling; prod can move to LISTEN/NOTIFY.
- *
- * 收口③：事件按注册表三分支——internal command 拉 Temporal；integration 事件原子路由进
- * outbox_delivery 交付账本（publishedAt 语义 = 「已路由进交付层」，消费真值在账本）；
- * 未注册类型 park（不假发布、不毒化轮询）。webhook sink 在同 tick 内派送（退避 + DLQ + HMAC 签名）。
- *
- * ⚠️ 部署约束（GET /events 游标正确性依赖）：交付账本行必须由**单写者**串行创建——
- * 当前单进程部署 + tick 的 running 互斥满足；若上多 API 副本，各自跑 relay 会重引入
- * 「低事件 id 晚建交付行」的乱序，tick 需先加 pg advisory lock 保证单写者再扩副本。
+/** Transactional Outbox relay (ADR-009): DATABASE_URL owner scans across tenants;
+ * dispatched workflow activities reapply tenant scope through withWorkspace.
+ * Internal commands dispatch to Temporal; integration events atomically enter outbox_delivery;
+ * unknown types park. The webhook sink retries with backoff, DLQ and HMAC signatures.
+ * GET /events cursor ordering requires one writer for delivery rows. A multi-replica
+ * relay needs a PostgreSQL advisory lock before dispatch to maintain that ordering.
  */
 
 /** webhook 死信阈值：连续失败达此次数 → DEAD（人工介入）。 */
@@ -391,15 +384,11 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       if (this.shuttingDown) return;
       // parked 事件排除在轮询外：未注册类型只报一次错并停靠，不每 2s 重试刷日志。
       const laneCommands = this.devFastLaneCommands();
-      const candidate = runtimeCandidateContext();
       const events = (await this.db.outboxEvent.findMany({
         // Lane commands are polled in their own pass (scheduleLanePass), so
         // commands that wait for an unavailable development Temporal never
         // fill this batch.
-        where: {
-          ...(laneCommands ? { publishedAt: null, parkedAt: null, NOT: laneCommands } : { publishedAt: null, parkedAt: null }),
-          ...(candidate ? { workspaceId: { in: [...candidate.workspaceIds] } } : {}),
-        },
+        where: { publishedAt: null, parkedAt: null, ...(laneCommands ? { NOT: laneCommands } : {}), ...candidateWorkspaceWhere() },
         orderBy: { id: "asc" },
         take: BATCH_SIZE,
       })) as OutboxEventRecord[];
@@ -577,7 +566,6 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
    */
   async pumpWebhookDeliveries(now: Date): Promise<void> {
     assertRuntimeCandidateOperational();
-    const candidate = runtimeCandidateContext();
     if (this.shuttingDown || !this.webhookEnabled()) return;
     const url = process.env.SAAS_WEBHOOK_URL as string;
     const secret = process.env.SAAS_WEBHOOK_SECRET as string;
@@ -585,7 +573,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       where: {
         sink: WEBHOOK_SINK,
         status: "PENDING",
-        ...(candidate ? { workspaceId: { in: [...candidate.workspaceIds] } } : {}),
+        ...candidateWorkspaceWhere(),
         OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
       },
       orderBy: { id: "asc" },
@@ -666,12 +654,11 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   /** KNW-003/KNW-009：validUntil 到期的已批准事实 → EXPIRED（约每 60s 扫一次）。 */
   private async expireDueClaims(): Promise<void> {
     assertRuntimeCandidateOperational();
-    const candidate = runtimeCandidateContext();
     this.expireCounter = (this.expireCounter + 1) % 30;
     if (this.expireCounter !== 0) return;
     const now = new Date();
     const expired = await this.db.claim.findMany({
-      where: { status: "APPROVED", validUntil: { lt: now }, ...(candidate ? { workspaceId: { in: [...candidate.workspaceIds] } } : {}) },
+      where: { status: "APPROVED", validUntil: { lt: now }, ...candidateWorkspaceWhere() },
       select: {
         id: true,
         workspaceId: true,

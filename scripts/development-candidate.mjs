@@ -2,9 +2,10 @@
 // is data in a separate checkout; no candidate script is executed here.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { readCandidateInput } from "./development-candidate-input.mjs";
 import { canonicalJson } from "./release-authorization.mjs";
 import { CandidateBudgetLedger } from "./development-candidate-budget.mjs";
 import {
@@ -89,10 +90,7 @@ function git(root, ...args) {
   ).trim();
 }
 export function readCandidateJson(path) {
-  const stat = lstatSync(path);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 65_536)
-    fail("CANDIDATE_INPUT_FILE_INVALID");
-  return JSON.parse(readFileSync(path, "utf8"));
+  return JSON.parse(readCandidateInput(path, 65_536, "CANDIDATE_INPUT_FILE_INVALID").toString("utf8"));
 }
 export function assertTrustedCandidateCheckout(trustedCommit) {
   if (
@@ -129,8 +127,9 @@ export function readApprovedCandidate({
     repository: "mlhjyx/global-backend",
     trustedWorkflowCommit: trustedCommit,
   };
+  const authorizationBytes = readCandidateInput(authorizationPath, 65_536, "CANDIDATE_INPUT_FILE_INVALID");
   const authorization = validateCandidateAuthorization(
-    readCandidateJson(authorizationPath),
+    JSON.parse(authorizationBytes.toString("utf8")),
     policy,
     now,
   );
@@ -138,7 +137,7 @@ export function readApprovedCandidate({
     join(ROOT, "docs/governance/release-authority-keys.json"),
   );
   verifyCandidateOwnerSignature(
-    authorizationPath,
+    authorizationBytes,
     signaturePath,
     keys,
     authorization.keyId,
@@ -159,7 +158,7 @@ export function readApprovedCandidate({
     instance,
     policy,
     authorizationSha256: createHash("sha256")
-      .update(readFileSync(authorizationPath))
+      .update(authorizationBytes)
       .digest("hex"),
   };
 }

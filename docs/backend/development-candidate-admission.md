@@ -15,6 +15,10 @@ Owner approval is a real detached SSH signature in the distinct `development-can
 
 The integration units are operator tools, runtime enforcement and publication. The complete bootstrap must first exist on protected main. Locally prepared code, tested contracts, CI-signed OCI bytes, runtime readiness and business acceptance remain separate evidence.
 
+## Guard dependencies
+
+The compliance extension, Prisma tenant transaction, model gateway and ToolBroker/budget store call the candidate guards directly. G16 explicitly records `compliance -> runtime`, `prisma -> runtime`, `model-gateway -> runtime` and `tools -> runtime`. The guard files import only Node builtins, the dependency-free execution-budget error/types module and each other; they do not import the callers or a composition root. The module-level edges enforce the tenant and physical-execution restrictions below and do not establish a file-level import cycle.
+
 ## Isolated normal runtime
 
 Prefer an independent approved development DB and native Temporal instance, retaining `default/understanding` inside that instance. Normal machine-token bootstrap, TLS authorizer, target/configuration binding, JWKS, app_user FORCE RLS, restricted lease writers, ToolBroker, artifact storage, Redis and other hard readiness checks remain mandatory. `configurationRevision` is the real machine client's **64-lowercase-hex digest**, not a version label.
