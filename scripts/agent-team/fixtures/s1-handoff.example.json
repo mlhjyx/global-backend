@@ -1,0 +1,109 @@
+{
+  "$comment": "Synthetic replay of the S1 handoff (desensitized). Session ids, repo numbers and digests are fictional; no real member, chat, secret or path is included.",
+  "task": {
+    "schema_version": "global-team-task/v1",
+    "task_id": "S1-EXAMPLE",
+    "approval_source": "supervisor-approved synthetic example",
+    "scope_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+    "repo": "mlhjyx/global-backend",
+    "branch": "claude/s1-example",
+    "pr": 1000,
+    "head": "2222222222222222222222222222222222222222",
+    "owner_role": "engineering",
+    "writer_role": "engineering",
+    "applicability": {
+      "product": "REQUIRED"
+    },
+    "depends_on": [],
+    "required_checks": [
+      "build"
+    ]
+  },
+  "events": [
+    {
+      "schema_version": "global-team-event/v1",
+      "event_kind": "ENGINEERING_DELIVERED",
+      "task_id": "S1-EXAMPLE",
+      "task_revision": 1,
+      "head": "2222222222222222222222222222222222222222",
+      "issuer_role": "engineering",
+      "issuer_session_id": "local_writer_example",
+      "receipt_id": "eng-example",
+      "payload": {
+        "scope_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+        "artifact_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+        "artifact_relpath": "docs/evidence/example.md",
+        "limitations": []
+      }
+    },
+    {
+      "schema_version": "global-team-event/v1",
+      "event_kind": "TECH_RESULT",
+      "task_id": "S1-EXAMPLE",
+      "task_revision": 1,
+      "head": "2222222222222222222222222222222222222222",
+      "issuer_role": "technical",
+      "issuer_session_id": "local_tech_example",
+      "receipt_id": "tech-example",
+      "payload": {
+        "conclusion": "PASS",
+        "review_mode": "FINAL_COMMIT",
+        "artifact_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+        "artifact_relpath": "docs/evidence/tech-review-example.md",
+        "accepted_limitations": []
+      }
+    },
+    {
+      "schema_version": "global-team-event/v1",
+      "event_kind": "PRODUCT_RESULT",
+      "task_id": "S1-EXAMPLE",
+      "task_revision": 1,
+      "head": "2222222222222222222222222222222222222222",
+      "issuer_role": "product",
+      "issuer_session_id": "local_product_example",
+      "receipt_id": "product-example",
+      "payload": {
+        "conclusion": "PASS",
+        "artifact_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+        "artifact_relpath": "docs/evidence/product-acceptance-example.md"
+      }
+    },
+    {
+      "schema_version": "global-team-event/v1",
+      "event_kind": "PR_OBSERVED",
+      "task_id": "S1-EXAMPLE",
+      "task_revision": 1,
+      "head": "2222222222222222222222222222222222222222",
+      "issuer_role": "supervisor",
+      "issuer_session_id": "local_supervisor_example",
+      "receipt_id": "pr-example",
+      "payload": {
+        "pr": 1000,
+        "state": "OPEN",
+        "head": "2222222222222222222222222222222222222222"
+      }
+    },
+    {
+      "schema_version": "global-team-event/v1",
+      "event_kind": "CI_OBSERVED",
+      "task_id": "S1-EXAMPLE",
+      "task_revision": 1,
+      "head": "2222222222222222222222222222222222222222",
+      "issuer_role": "supervisor",
+      "issuer_session_id": "local_supervisor_example",
+      "receipt_id": "ci-example",
+      "payload": {
+        "conclusion": "SUCCESS",
+        "pr": 1000,
+        "required_checks": [
+          {
+            "name": "build",
+            "conclusion": "SUCCESS"
+          }
+        ],
+        "observed_at": "2026-11-17T00:04:00Z"
+      }
+    }
+  ],
+  "expected": "After this replay the reducer yields exactly one MERGE_PR ready action for the supervisor; the merge itself is never executed by the controller."
+}
