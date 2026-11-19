@@ -412,7 +412,7 @@ export interface Crawl4aiFetchToolDependencies {
 export function createCrawl4aiFetchTool(
   dependencies: Crawl4aiFetchToolDependencies = { crawlUrl, isAllowedByRobots },
 ): Tool<
-  { url: string; maxChars?: number },
+  { url: string; maxChars?: number; exactHtml?: true },
   { url: string; text: string; contentHash: string }
 > {
   return {
@@ -438,7 +438,7 @@ export function createCrawl4aiFetchTool(
       accepts: ["domain"],
     },
     idempotencyKey: (i) =>
-      `crawl4ai.fetch:${hash(i.url)}:${Math.min(i.maxChars ?? 40_000, 100_000)}`,
+      `crawl4ai.fetch:${hash(i.url)}:${Math.min(i.maxChars ?? 40_000, 100_000)}${i.exactHtml === true ? ":exact-html" : ""}`,
     durableResultStrategy: {
       kind: "artifact_reference",
       schema: "crawl4ai-fetch/v1",
@@ -484,21 +484,36 @@ export function createCrawl4aiFetchTool(
       }
       // HTTP-first（主计划 §3.5b PR-A）：先走受治理的普通 HTTP + readability 抽取；
       // 薄页/失败/关闭开关时回落浏览器渲染（fail-safe 方向 = 渲染）。
+      const exact = input.exactHtml === true;
       if (httpFirstEnabled()) {
         const httpFirst = dependencies.fetchHttpFirst ?? fetchPageHttpFirst;
         const cache =
-          dependencies.urlContentCache && urlContentCacheEnabled()
+          !exact && dependencies.urlContentCache && urlContentCacheEnabled()
             ? { workspaceId: ctx.workspaceId, port: dependencies.urlContentCache }
             : undefined;
+        let gateFailure: { error: unknown } | undefined;
+        const observeGate = async <T,>(gate: (() => Promise<T>) | undefined): Promise<T | undefined> => {
+          try {
+            return await gate?.();
+          } catch (error) {
+            gateFailure = { error };
+            throw error;
+          }
+        };
         const page = await httpFirst(input.url, {
+          ...(exact ? { exactUrl: true } : {}),
           hooks: {
-            authorizeExternalAction: ctx.authorizeExternalAction,
+            authorizeExternalAction: exact
+              ? async () => (await observeGate(ctx.authorizeExternalAction)) ?? true
+              : ctx.authorizeExternalAction,
             beforePhysicalWire: async () => {
-              await ctx.beforePhysicalWire?.();
+              if (exact) await observeGate(ctx.beforePhysicalWire);
+              else await ctx.beforePhysicalWire?.();
             },
           },
           ...(cache ? { cache } : {}),
         }).catch(() => null);
+        if (gateFailure) throw gateFailure.error;
         if (page) {
           const httpText = page.markdown.slice(0, boundedCrawl4aiFetchChars(input.maxChars));
           if (Buffer.byteLength(httpText, "utf8") > MAX_CRAWL4AI_FETCH_ARTIFACT_BYTES) {
@@ -518,6 +533,8 @@ export function createCrawl4aiFetchTool(
           };
         }
       }
+      // Exact provenance must never fall back to the renderer (or a cached redirect).
+      if (exact) return { data: { url: input.url, text: "", contentHash: "" }, costCents: 0 };
       const invokeRender = () =>
         dependencies.crawlUrl(input.url, () =>
           assertToolExternalActionAuthorized(ctx),
