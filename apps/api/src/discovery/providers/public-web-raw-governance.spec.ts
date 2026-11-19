@@ -103,7 +103,7 @@ const CASES: readonly Case[] = [
     products: ['centrifugal pumps', 'Industrial Pumps'],
     keywords: ['industrial', 'hydraulic systems'],
     country: 'DE',
-    sourceUrl: 'https://pumpen-mueller.de/',
+    sourceUrl: 'https://www.pumpen-mueller.de/produkte/kreiselpumpen',
   },
   {
     title: 'only German terms, "Deutschland", hit on the exact host, no confidence',
@@ -186,7 +186,7 @@ const CASES: readonly Case[] = [
     domain: 'müller-pumpen.de',
     hitUrls: ['https://www.müller-pumpen.de/'],
     country: 'DE',
-    sourceUrl: 'https://xn--mller-pumpen-dlb.de/',
+    sourceUrl: 'https://www.xn--mller-pumpen-dlb.de/',
   },
   {
     title: 'the same controlled term with other separators, case or a trailing hyphen (first spelling wins)',
@@ -238,7 +238,7 @@ describe('public_web records pass the Raw governance (discovery run 733fbf03)', 
     });
     expect(payload.country).toBe(c.country);
     expect(payload.externalId).toBe(payload.domain);
-    expect(new URL(String(provenance.sourceUrl)).hostname).toBe(payload.domain);
+    expect(new URL(String(provenance.sourceUrl)).hostname.replace(/^www\./u, '')).toBe(payload.domain);
     expect(provenance).toEqual({
       sourceUrl: c.sourceUrl,
       fetchedAt: FETCHED_AT,
@@ -272,7 +272,7 @@ describe('public_web records pass the Raw governance (discovery run 733fbf03)', 
       ingestStatus: 'ACCEPTED',
       dispositionCode: null,
       externalId: DOMAIN,
-      sourceUrl: 'https://pumpen-mueller.de/',
+      sourceUrl: 'https://www.pumpen-mueller.de/produkte',
       retentionDays: 365,
     });
     expect(row!.sourcePolicySnapshot).toMatchObject({
@@ -312,8 +312,9 @@ describe('public_web records pass the Raw governance (discovery run 733fbf03)', 
       return sourceUrl;
     });
     expect(chosen[0]).toBe('https://pumpen-mueller.de/produkte/kreiselpumpen');
-    expect(chosen.slice(1).every((url) => url === 'https://pumpen-mueller.de/')).toBe(true);
-    // Why "_" is refused: TypeScript reads no key token here, the database does.
+    expect(chosen.slice(1, -1).every((url) => url === 'https://pumpen-mueller.de/')).toBe(true);
+    expect(chosen.at(-1)).toBe('https://pumpen-mueller.de/a_b/c-d.html');
+    // Reject a key token in its original spelling before underscores split its body.
     const keyTokenPath = 'https://pumpen-mueller.de/Kreiselpumpe_SK-40_160';
     expect(isStableSafeHttpsUrl(keyTokenPath)).toBe(true);
     expect(databaseStoresSourceUrl(keyTokenPath)).toBe(false);

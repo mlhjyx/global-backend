@@ -31,7 +31,8 @@ function broker(pages: Record<string, string | Error>) {
     if (page === undefined) throw new Error('404');
     expect(ctx.artifactSubject).toEqual(CTX.artifactSubject);
     expect(ctx.taskContractId).toBe('discovery.classify_trade_role');
-    return { data: { url, text: page, contentHash: 'x' }, costCents: 1 };
+    return { data: { url, text: page, contentHash: 'x' }, costCents: 1,
+      provenance: { sourceUrl: url, fetchedAt: '2026-11-16T06:00:00.000Z', contentHash: 'x', parserVersion: 'test' } };
   });
   return { checkSourcePolicy: vi.fn(), invoke } as unknown as ExecutionBroker & { invoke: typeof invoke };
 }
@@ -39,6 +40,83 @@ function broker(pages: Record<string, string | Error>) {
 beforeEach(() => mocks.executeStructuredTaskWithRuntime.mockReset());
 
 describe('WebsiteProfileProvider (G3 5.4)', () => {
+
+  it('does not attach a project or the first legal identity from a shared multi-company site', async () => {
+    const projectUrl = 'https://pumpen-handel.example/project/works';
+    const executionBroker = broker({
+      'https://pumpen-handel.example/': 'Autorisierter Händler und Vertriebspartner, Lagerprogramm ab Lager.',
+      'https://pumpen-handel.example/impressum': [
+        'Pumpen Handel GmbH',
+        'Registergericht: Amtsgericht Bayreuth',
+        'Pumpen Handel GmbH: HRB 3667',
+        'Pumpen Anlagen GmbH: HRB 5006',
+      ].join('\n'),
+      [projectUrl]: 'Die Pumpen Anlagen GmbH lieferte die Tauchmotorpumpen und baute sie ein.',
+    });
+    const profile = await new WebsiteProfileProvider({ gateway: {} as never, broker: executionBroker })
+      .profile({ ...INPUT, projectUrl }, CTX);
+    expect(profile).toBeNull();
+    expect(executionBroker.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.executeStructuredTaskWithRuntime).not.toHaveBeenCalled();
+  });
+
+  it('preserves a company profile when the same registration is printed repeatedly', async () => {
+    const executionBroker = broker({
+      'https://pumpen-handel.example/': 'Autorisierter Händler und Vertriebspartner, Lagerprogramm ab Lager.',
+      'https://pumpen-handel.example/impressum': IMPRESSUM + '\nRegisternummer: HRB 98765',
+    });
+    const profile = await new WebsiteProfileProvider({ gateway: {} as never, broker: executionBroker })
+      .profile(INPUT, CTX);
+    expect(profile?.register?.key).toBe('de-hrb:muenchen:98765');
+    expect(profile?.tradeRole).toBe('distributor');
+  });
+
+  it('preserves a limited partnership registration when its general partner is also listed', async () => {
+    const executionBroker = broker({
+      'https://pumpen-handel.example/': 'Autorisierter Händler und Vertriebspartner, Lagerprogramm ab Lager.',
+      'https://pumpen-handel.example/impressum': [
+        'Pumpen Handel GmbH & Co. KG',
+        'Amtsgericht München HRA 12345',
+        'Persönlich haftende Gesellschafterin: Pumpen Verwaltungs GmbH, Amtsgericht München HRB 98765',
+      ].join('\n'),
+    });
+    const profile = await new WebsiteProfileProvider({ gateway: {} as never, broker: executionBroker })
+      .profile(INPUT, CTX);
+    expect(profile?.register?.key).toBe('de-hra:muenchen:12345');
+    expect(profile?.tradeRole).toBe('distributor');
+  });
+
+  const projectUrl = 'https://www.pumpen-handel.example/referenzen/werk/';
+  const projectSpan = 'Für das Werk haben wir die Kreiselpumpen ausgelegt und beschafft.';
+  it('retains verbatim project evidence with the exact separately fetched company URL', async () => {
+    const executionBroker = broker({
+      'https://pumpen-handel.example/': 'Autorisierter Händler und Vertriebspartner. Pumpen-Großhandel und Lagerprogramm ab Lager.',
+      'https://pumpen-handel.example/impressum': IMPRESSUM,
+      [projectUrl]: [projectSpan, 'Geschäftsführer: Max Mustermann', 'info@werk.example'].join('\n'),
+    });
+    const profile = await new WebsiteProfileProvider({ gateway: {} as never, broker: executionBroker })
+      .profile({ ...INPUT, projectUrl }, CTX);
+    expect(executionBroker.invoke).toHaveBeenCalledTimes(3);
+    expect(executionBroker.invoke).toHaveBeenLastCalledWith('crawl4ai.fetch',
+      expect.objectContaining({ url: projectUrl, exactHtml: true }), expect.objectContaining({ purpose: ['enrichment'] }));
+    expect(profile?.projectEvidence).toMatchObject({ source_url: projectUrl, spans: [projectSpan] });
+    expect(profile?.evidence).not.toContain(projectSpan);
+  });
+
+  it.each(['https://other.example/referenzen/werk/', 'https://pumpen-handel.example/download.pdf',
+    'https://pumpen-handel.example/referenzen?token=secret', 'https://pumpen-handel.example/'])(
+    'never fetches an unsupported project URL: %s', async (url) => {
+      const executionBroker = broker({
+        'https://pumpen-handel.example/': 'Autorisierter Händler und Vertriebspartner, Lagerprogramm ab Lager.',
+        'https://pumpen-handel.example/impressum': IMPRESSUM,
+      });
+      const profile = await new WebsiteProfileProvider({ gateway: {} as never, broker: executionBroker })
+        .profile({ ...INPUT, projectUrl: url }, CTX);
+      expect(executionBroker.invoke).toHaveBeenCalledTimes(2);
+      expect(profile?.projectEvidence).toBeUndefined();
+    },
+  );
+
   it('decides a clear wholesaler by rules without a model call and binds every fetch to the company', async () => {
     const executionBroker = broker({
       'https://pumpen-handel.example/': 'Ihr Pumpen-Großhandel. Autorisierter Händler und Vertriebspartner für Grundfos, Wilo und Leo Pumpen. Lagerprogramm ab Lager. [Impressum](https://pumpen-handel.example/impressum.html)',
@@ -60,6 +138,35 @@ describe('WebsiteProfileProvider (G3 5.4)', () => {
       carriesForeignBrand: true,
     });
     expect(profile?.carriedBrands.map((b) => b.name)).toEqual(['Grundfos', 'Wilo', 'Leo']);
+  });
+
+  it('retains bounded fetched homepage evidence when factory role rules skip the model', async () => {
+    const use = 'Unser Produktionswerk nutzt Kreiselpumpen zur Förderung von Prozesswasser.';
+    const home = [
+      'Eigene Produktion und Fertigung als Hersteller am Produktionsstandort Deutschland.',
+      use,
+      'Geschäftsführer: Max Mustermann',
+      'Vertreten durch:',
+      'Erika Musterfrau',
+      'CEO: Person Example',
+      'Kontakt: info@werk.example Telefon +49 30 1234567',
+      'A'.repeat(5_000),
+    ].join('\n');
+    const profile = await new WebsiteProfileProvider({
+      gateway: {} as never,
+      broker: broker({
+        'https://pumpen-handel.example/': home,
+        'https://pumpen-handel.example/impressum': IMPRESSUM,
+      }),
+    }).profile(INPUT, CTX);
+    expect(mocks.executeStructuredTaskWithRuntime).not.toHaveBeenCalled();
+    expect(profile?.tradeRoleSource).toBe('rules');
+    expect(profile?.evidence).toContain(use);
+    expect(profile!.evidence.length).toBeLessThanOrEqual(3);
+    expect(profile!.evidence.every((span) => span.length <= 800)).toBe(true);
+    for (const personal of ['Max Mustermann', 'Erika Musterfrau', 'Person Example', 'info@werk.example', '+49 30 1234567']) {
+      expect(profile!.evidence.join(' ')).not.toContain(personal);
+    }
   });
 
   it('asks the model only when rules are not decisive, and merges its brands', async () => {
@@ -187,6 +294,7 @@ describe('WebsiteProfileProvider (G3 5.4)', () => {
           'Geschäftsführer: Max Mustermann',
           'Vertreten durch:',
           'Erika Musterfrau',
+      'CEO: Person Example',
           'Vertretungsberechtigte Personen:',
           'Geschäftsführer:',
           'Hans Beispiel',

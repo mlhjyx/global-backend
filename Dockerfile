@@ -82,7 +82,11 @@ RUN set -eu; \
 
 ARG BUILD_SHA
 ARG BUILT_AT
+ARG DEVELOPMENT_CANDIDATE_BUILD=""
 RUN test -n "$BUILD_SHA" && test -n "$BUILT_AT" && \
+    node scripts/development-candidate-build-metadata.mjs \
+      .candidate-build/runtime-candidate.json apps/api/dist/runtime-candidate.json \
+      "$BUILD_SHA" "$DEVELOPMENT_CANDIDATE_BUILD" && \
     dpkg-query -W -f='${binary:Package}\t${Version}\t${Architecture}\n' \
       > /tmp/runtime-os-packages.tsv && \
     pnpm --filter @global/api --filter @global/site-renderer list --prod --depth Infinity --json \

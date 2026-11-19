@@ -3,6 +3,7 @@ import { targetCountryCodes } from '../discovery/search-localization';
 import { COUNTRY_NAME_BY_ISO } from '../discovery/vocab';
 
 export type OfferingForSelection = {
+  id?: string;
   name: string;
   description: string | null;
   attributes: unknown;

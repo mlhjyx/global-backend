@@ -7,6 +7,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import type { BuyerProcurementScenario } from '../buyer-procurement-scenarios';
 
 import {
   RUBRIC_CRITERIA,
@@ -14,6 +15,7 @@ import {
   RUBRIC_VERSION,
   type CriterionDefinition,
   rubricCanonicalJson,
+  procurementRubric,
 } from './fit-rubric';
 import {
   JUDGE_OUTPUT_JSON_SCHEMA,
@@ -36,6 +38,8 @@ function renderCriterion(criterion: CriterionDefinition): string {
   ].join('\n') + hardFail;
 }
 
+const BASE_CRITERION_TEXT = RUBRIC_CRITERIA.map(renderCriterion).join('\n\n');
+
 export const JUDGE_SYSTEM_PROMPT = `你是 GainOS 的买家资格判定器。只针对「一家公司 × 一个目标客户画像（ICP）」按 ${RUBRIC_VERSION} rubric 对 5 个 criterion 逐项评分。
 
 铁律：
@@ -45,7 +49,7 @@ export const JUDGE_SYSTEM_PROMPT = `你是 GainOS 的买家资格判定器。只
 4. 只输出一个 JSON 对象，严格符合下面的 schema；不要输出解释性文字或 Markdown。
 
 Rubric ${RUBRIC_VERSION}（锚点与权重如下，必须逐字遵循）：
-${RUBRIC_CRITERIA.map(renderCriterion).join('\n\n')}
+${BASE_CRITERION_TEXT}
 
 输出 schema（${JUDGE_OUTPUT_SCHEMA_VERSION}）：
 ${JSON.stringify(JUDGE_OUTPUT_JSON_SCHEMA, null, 2)}`;
@@ -61,6 +65,7 @@ export const JUDGE_USER_TEMPLATE = `## 目标客户画像（ICP）
 export interface JudgePromptInput {
   companySnapshot: string;
   icpBrief: string;
+  procurementScenario?: BuyerProcurementScenario;
 }
 
 export function buildJudgeUserPrompt(input: JudgePromptInput): string {
@@ -96,6 +101,20 @@ export const PROMPT_HASH = sha256(
 );
 
 export function buildJudgePrompt(input: JudgePromptInput): JudgePromptBundle {
+  const scenario = input.procurementScenario;
+  if (scenario && scenario !== 'distribution') {
+    const rubricVersion = `fit-v2-procurement-${scenario}-v1`;
+    const system = JUDGE_SYSTEM_PROMPT
+      .replace(BASE_CRITERION_TEXT, procurementRubric(scenario).map(renderCriterion).join('\n\n'))
+      .replaceAll(RUBRIC_VERSION, rubricVersion);
+    return {
+      system,
+      user: buildJudgeUserPrompt(input).replace(`请按 ${RUBRIC_VERSION} 逐项输出`, `请按 ${rubricVersion} 逐项输出`),
+      promptHash: sha256(JSON.stringify({ base: PROMPT_HASH, system, rubricVersion })),
+      rubricVersion,
+      schemaVersion: JUDGE_OUTPUT_SCHEMA_VERSION,
+    };
+  }
   return {
     system: JUDGE_SYSTEM_PROMPT,
     user: buildJudgeUserPrompt(input),

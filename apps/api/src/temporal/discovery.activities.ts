@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { scopeRunProjectEvidence } from '../discovery/website-profile/run-project-page';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { ApplicationFailure } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
@@ -716,6 +717,7 @@ export function websiteProfileEnrichment(profile: WebsiteProfile, fetchedAt: Dat
       vat_id: profile.vatId,
       registered_address: profile.registeredAddress,
       evidence: profile.evidence.length ? profile.evidence : null,
+      project_evidence: profile.projectEvidence,
       source_url: sourceUrl,
     }).filter(([, value]) => value !== null && value !== undefined),
   );
@@ -1829,7 +1831,7 @@ export function createDiscoveryActivities(deps: {
       const binding = await ensureRunBudget(args); // fit 判定（LLM）消耗计入同一 authority 账户
       // ICP 摘要 + 本 run 待判公司（事务内只读，快）
       const { icpBrief, companies } = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-        const icpBrief = await loadIcpBrief(tx, args.icpId);
+        const icpBrief = await loadIcpBrief(tx, args.icpId, args.runId);
         const rawIds = (
           await tx.rawSourceRecord.findMany({
             where: {
@@ -1874,7 +1876,8 @@ export function createDiscoveryActivities(deps: {
           })
         ).map((company) => ({
           ...company,
-          attributes: sanitizeCanonicalCompanyAttributes(company.attributes),
+          // This path has no current-run project-page admission or fetch slot.
+          attributes: scopeRunProjectEvidence(sanitizeCanonicalCompanyAttributes(company.attributes), undefined),
         }));
         return { icpBrief, companies };
       });

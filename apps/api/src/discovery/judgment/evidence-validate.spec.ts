@@ -53,6 +53,19 @@ function context(
 }
 
 describe('evidence-validate（P3 J10）', () => {
+  it('binds a project quote to the exact page, with freshness from the crawl receipt', () => {
+    const span = 'Wir beschafften die Kreiselpumpen für die Abwasseranlage.';
+    const source_url = 'https://example.com/referenzen/';
+    const id = CRITERION_IDS[0]!;
+    const check = (url: string, fetched_at: string, quote = span) => validateEvidence(allCriteria({
+      [id]: { evidence: [{ kind: 'website', url, span: quote, fetched_at: FRESH }] },
+    }), context({ projectEvidence: { source_url, spans: [span], fetched_at } })).byCriterion[id];
+    expect(check(source_url, FRESH).hasValidEvidence).toBe(true);
+    expect(check('https://example.com/', FRESH).flags).toContain('EVIDENCE_URL_DENIED');
+    expect(check(source_url, '2026-08-01T00:00:00Z').flags).toContain('EVIDENCE_STALE');
+    expect(check(source_url, FRESH, 'Laserzuschnitte').flags).toContain('EVIDENCE_SPAN_NOT_FOUND');
+  });
+
   it('版本与全 criterion 覆盖：五条 criterion 都有报告', () => {
     const report = validateEvidence(allCriteria(), context());
     expect(report.version).toBe(EVIDENCE_VALIDATION_VERSION);

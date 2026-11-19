@@ -7,6 +7,7 @@ import {
   isStableSafeHttpsUrl,
 } from "./raw-source-provider-normalizer";
 import { sanitizeStructuredHarvestSiteSections } from "./structured-harvest-site-sections";
+import { readProjectPageEvidence } from "./website-profile/project-page-evidence";
 import { isValidGermanVat, isRegisteredAddressText } from "./website-profile/impressum";
 
 const RETAINED_TOP_LEVEL_KEYS = new Set([
@@ -288,6 +289,7 @@ const storedCompanyFieldAttributePaths = new Map<
   ["website_profile.carries_chinese_brand", ["website_profile", "carries_chinese_brand"]],
   ["website_profile.carries_foreign_brand", ["website_profile", "carries_foreign_brand"]],
   ["website_profile.evidence", ["website_profile", "evidence"]],
+  ["website_profile.project_evidence", ["website_profile", "project_evidence"]],
   ["website_profile.legal_name", ["website_profile", "legal_name"]],
   ["website_profile.own_manufacturing", ["website_profile", "own_manufacturing"]],
   ["website_profile.register_key", ["website_profile", "register_key"]],
@@ -360,6 +362,7 @@ export const STORED_COMPANY_FIELD_EVIDENCE_FIELDS = Object.freeze([
   "website_profile.carries_chinese_brand",
   "website_profile.carries_foreign_brand",
   "website_profile.evidence",
+  "website_profile.project_evidence",
   "website_profile.legal_name",
   "website_profile.own_manufacturing",
   "website_profile.register_key",
@@ -404,6 +407,10 @@ function safeProduct(value: unknown): value is string {
   );
 }
 
+function matchesPropertyPath(path: readonly string[], parent: string, property: string): boolean {
+  return path.length === 2 && path[0] === parent && path[1] === property;
+}
+
 function sanitizeValue(
   key: string,
   value: unknown,
@@ -420,13 +427,14 @@ function sanitizeValue(
     return undefined;
   }
   if (
-    path.length === 2 &&
-    path[0] === "structured_harvest" &&
-    path[1] === "site_sections"
+    matchesPropertyPath(path, "structured_harvest", "site_sections")
   ) {
     const sections = sanitizeStructuredHarvestSiteSections(value);
     state.remaining -= sections ? Object.keys(sections).length : 0;
     return state.remaining < 0 ? undefined : sections;
+  }
+  if (matchesPropertyPath(path, "website_profile", "project_evidence")) {
+    return readProjectPageEvidence(value);
   }
   if (key === "products" || key === "keywords") {
     if (!Array.isArray(value)) return undefined;

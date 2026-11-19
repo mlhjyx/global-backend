@@ -161,6 +161,7 @@ describe("CanonicalCompany derived-attribute sanitizer parity", () => {
       "website_profile.carries_chinese_brand",
       "website_profile.carries_foreign_brand",
       "website_profile.evidence",
+      "website_profile.project_evidence",
       "website_profile.legal_name",
       "website_profile.own_manufacturing",
       "website_profile.register_key",

@@ -215,6 +215,10 @@ function workspace(count: number) {
     icpDefinition: {
       findUnique: async () => ({ companyAttributes: { industry: 'Pumpen' }, targetMarkets: ['德国'] }),
     },
+    // Fit reads the confirmed plan for this run. This rehearsal exercises the
+    // legacy, unselected-scenario path rather than inventing an ICP selection.
+    discoveryRun: { findFirst: async () => ({ planId: 'rehearsal-plan' }) },
+    discoveryQueryPlan: { findFirst: async () => ({ queries: [{ filters: { country: 'DE' } }] }) },
     dataProvider: {
       findUnique: async ({ where }: { where: { key: string } }) => ({
         status: where.key === 'company_contact' ? 'DISABLED' : 'ENABLED',

@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
+import * as fitJudge from "../discovery/fit-judge";
+import { prepareJudgeCall } from "../discovery/judgment/judge-run";
+import { buyerProcurementCriteria } from "../discovery/buyer-procurement-scenarios";
 import { Prisma } from "@prisma/client";
 import { ApplicationFailure } from "@temporalio/activity";
 import {
@@ -6279,6 +6282,39 @@ describe("qualifyFitForRun —— 按时限把余下公司交给下一次活动"
 
   beforeEach(() => {
     fitRuntimeMocks.execute.mockReset();
+  });
+
+  it("does not reuse a previous run's project evidence in the legacy fit path", async () => {
+    const judge = vi.spyOn(fitJudge, "judgeFitCompany").mockResolvedValue({
+      verdict: "weak", fitReasons: { material: "unknown", role: "unknown", process: "unknown", business_model: "unknown", reasons: [] },
+    });
+    const { acts, findMany } = passActivities([id(1)], () => 0);
+    findMany.mockResolvedValueOnce([{
+      id: id(1), name: "01 GmbH", domain: "c01.example", country: "DE", industry: null,
+      status: "NEW", attributes: {
+        website_profile: {
+          trade_role: "other",
+          evidence: ["Wir betreiben eine eigene Anlage zur Wasseraufbereitung."],
+          project_evidence: {
+            source_url: "https://c01.example/referenzen/previous-run",
+            fetched_at: "2026-11-16T10:00:00.000Z",
+            spans: ["Wir haben Pumpen fuer dieses fruehere Abwasserprojekt ausgewaehlt und beschafft."],
+          },
+        },
+      },
+    }]);
+    try {
+      await expect(
+        acts.qualifyFitForRun(discoveryArgs("run-new", { icpId: "icp-1" })),
+      ).resolves.toMatchObject({ judged: 1 });
+      const candidate = judge.mock.calls[0]![3];
+      const prepared = prepareJudgeCall({ procurement_scenario: buyerProcurementCriteria("factory_direct") }, candidate);
+      expect(prepared.snapshotText).toContain("Wir betreiben eine eigene Anlage zur Wasseraufbereitung.");
+      expect(prepared.projectEvidence).toBeUndefined();
+      expect(prepared.snapshotText).not.toContain("previous-run");
+    } finally {
+      judge.mockRestore();
+    }
   });
 
   it("hands the companies left to the next activity once its time box is spent", async () => {

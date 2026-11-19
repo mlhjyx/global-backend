@@ -193,7 +193,7 @@ describe('workspace execution technical envelope catalog', () => {
       ['searxng.search', 66 * (3 + 4) + 66 * 10],
       ['deepseek.search', 66 * 10],
       // directory pages + homepage and Impressum of each profiled company
-      ['crawl4ai.fetch', 66 * 8 * 3 + 50 * 2],
+      ['crawl4ai.fetch', 66 * 8 * 3 + 50 * 3],
       ['wikidata.sparql', 66],
       ['osm.overpass', 66],
       ['ted.search', 66],
@@ -223,8 +223,8 @@ describe('workspace execution technical envelope catalog', () => {
     });
     // models: 396×2×5 + 924×2×15 + 1584×2×20 + 462×2×15 + 50×2×10 + 18150×2×20 + 63×2×20 = 838_420 cents
     // （获客 vNext W4 两源：适配器 9→11 使 qualify_fit 上界 14850→18150）；
-    // tools: crawl4ai.fetch 1684×1 + crawl4ai.render 74×1 + deepseek.search 660×1 + opencorporates/companies_house 各 66×0 = 2_418 cents。
-    expect(envelope.requiredCapMicrousd).toBe(840_838n * 10_000n);
+    // tools: crawl4ai.fetch 1734×1 + crawl4ai.render 74×1 + deepseek.search 660×1 + opencorporates/companies_house 各 66×0 = 2_468 cents。
+    expect(envelope.requiredCapMicrousd).toBe(840_888n * 10_000n);
   });
 
   it('quotes company creation from the bounded understanding crawl and per-page extraction', () => {
@@ -338,7 +338,7 @@ describe('DISCOVERY_UNCAPPED=on —— 报价按防爆安全界（余额是唯�
     ).toEqual([
       ['searxng.search', 66 * (3 + 4) + 66 * 100],
       ['deepseek.search', 66 * 100],
-      ['crawl4ai.fetch', 66 * 8 * 3 + 50 * 2],
+      ['crawl4ai.fetch', 66 * 8 * 3 + 50 * 3],
       ['wikidata.sparql', 66],
       ['osm.overpass', 66],
       ['ted.search', 66],
@@ -359,9 +359,9 @@ describe('DISCOVERY_UNCAPPED=on —— 报价按防爆安全界（余额是唯�
       discoveryUncapped: 1,
     });
     // models: 396×2×5 + 924×2×15 + 1584×2×20 + 1650×2×15 + 50×2×10 + 726000×2×20 + 6250×2×20
-    //       = 29_435_540 cents；tools: crawl4ai.fetch 1684×1 + crawl4ai.render 74×1 +
-    // deepseek.search 6600×1 + opencorporates/companies_house 各 66×0 = 8_358 cents；合计 29_443_898 cents。
-    expect(envelope.requiredCapMicrousd).toBe(29_443_898n * 10_000n);
+    //       = 29_435_540 cents；tools: crawl4ai.fetch 1734×1 + crawl4ai.render 74×1 +
+    // deepseek.search 6600×1 + opencorporates/companies_house 各 66×0 = 8_408 cents；合计 29_443_948 cents。
+    expect(envelope.requiredCapMicrousd).toBe(29_443_948n * 10_000n);
   });
 
   it('产品帽模式的报价逐字节不变（开关 off 时与既有断言一致）', () => {
@@ -370,6 +370,6 @@ describe('DISCOVERY_UNCAPPED=on —— 报价按防爆安全界（余额是唯�
       planId: PLAN_ID,
     });
     expect(envelope.policy.executionLimits).not.toHaveProperty('discoveryUncapped');
-    expect(envelope.requiredCapMicrousd).toBe(840_838n * 10_000n);
+    expect(envelope.requiredCapMicrousd).toBe(840_888n * 10_000n);
   });
 });

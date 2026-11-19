@@ -1,0 +1,245 @@
+name: Publish approved development candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      authorization_json:
+        description: Exact owner-signed development candidate authorization JSON
+        required: true
+        type: string
+      authorization_signature:
+        description: Detached SSH signature in development-candidate-authorization namespace
+        required: true
+        type: string
+      instance_json:
+        description: Public isolated instance manifest; no credentials
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: development-candidate-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'mlhjyx/global-backend' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout trusted workflow subject separately
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Materialize bounded public inputs outside both checkouts
+        env:
+          AUTHORIZATION_JSON: ${{ inputs.authorization_json }}
+          AUTHORIZATION_SIGNATURE: ${{ inputs.authorization_signature }}
+          INSTANCE_JSON: ${{ inputs.instance_json }}
+        run: |
+          node --input-type=module <<'JS'
+          import { writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          for (const [key, name, max] of [['AUTHORIZATION_JSON','authorization.json',65536],['AUTHORIZATION_SIGNATURE','authorization.sig',8192],['INSTANCE_JSON','instance.json',65536]]) {
+            const value = process.env[key];
+            if (!value || Buffer.byteLength(value) > max) throw new Error('CANDIDATE_INPUT_INVALID');
+            writeFileSync(join(process.env.RUNNER_TEMP,name),value,{flag:'wx',mode:0o600});
+          }
+          JS
+      - name: Verify owner scope against exact trusted main code
+        run: |
+          node trusted/scripts/development-candidate.mjs validate-inputs \
+            --authorization "$RUNNER_TEMP/authorization.json" --signature "$RUNNER_TEMP/authorization.sig" \
+            --instance "$RUNNER_TEMP/instance.json" --trusted-commit "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/approved-inputs.json"
+      - id: approved
+        name: Export validated source identity only
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync, appendFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          const input = JSON.parse(readFileSync(join(process.env.RUNNER_TEMP,'approved-inputs.json'),'utf8'));
+          if (!/^[0-9a-f]{40}$/.test(input.candidateCommit)) throw new Error('CANDIDATE_SOURCE_INVALID');
+          appendFileSync(process.env.GITHUB_OUTPUT,'candidate_sha='+input.candidateCommit+'\n');
+          JS
+      - name: Checkout candidate as unprivileged build material
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ steps.approved.outputs.candidate_sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify protected baseline and export exact committed context
+        run: |
+          node trusted/scripts/development-candidate.mjs prepare-build \
+            --authorization "$RUNNER_TEMP/authorization.json" --signature "$RUNNER_TEMP/authorization.sig" \
+            --instance "$RUNNER_TEMP/instance.json" --trusted-commit "$GITHUB_SHA" \
+            --candidate-root "$GITHUB_WORKSPACE/candidate" --output "$RUNNER_TEMP/candidate-build"
+      - name: Build without signing or registry privileges
+        env:
+          CANDIDATE_SHA: ${{ steps.approved.outputs.candidate_sha }}
+        run: |
+          set -euo pipefail
+          BUILT_AT="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
+          docker buildx create --name candidate-build --driver docker-container --use
+          docker buildx build --provenance=false --sbom=false --load \
+            --build-arg "BUILD_SHA=$CANDIDATE_SHA" --build-arg "BUILT_AT=$BUILT_AT" \
+            --build-arg DEVELOPMENT_CANDIDATE_BUILD=1 \
+            --tag "candidate-build:$CANDIDATE_SHA" "$RUNNER_TEMP/candidate-build/context"
+          docker save --output "$RUNNER_TEMP/candidate-image.tar" "candidate-build:$CANDIDATE_SHA"
+      - name: Transfer this run's image to the trusted publisher
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: development-candidate-image
+          path: ${{ runner.temp }}/candidate-image.tar
+          retention-days: 1
+          compression-level: 0
+
+  publish:
+    if: github.repository == 'mlhjyx/global-backend' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: development-candidate-publication
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      attestations: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          path: trusted
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Receive only the image artifact from this run
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: development-candidate-image
+          path: ${{ runner.temp }}/candidate-transfer
+      - name: Reverify public approval at the publication boundary
+        env:
+          AUTHORIZATION_JSON: ${{ inputs.authorization_json }}
+          AUTHORIZATION_SIGNATURE: ${{ inputs.authorization_signature }}
+          INSTANCE_JSON: ${{ inputs.instance_json }}
+        run: |
+          node --input-type=module <<'JS'
+          import { writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          for (const [key, name, max] of [['AUTHORIZATION_JSON','authorization.json',65536],['AUTHORIZATION_SIGNATURE','authorization.sig',8192],['INSTANCE_JSON','instance.json',65536]]) {
+            const value = process.env[key];
+            if (!value || Buffer.byteLength(value) > max) throw new Error('CANDIDATE_INPUT_INVALID');
+            writeFileSync(join(process.env.RUNNER_TEMP,name),value,{flag:'wx',mode:0o600});
+          }
+          JS
+          node trusted/scripts/development-candidate.mjs validate-inputs \
+            --authorization "$RUNNER_TEMP/authorization.json" --signature "$RUNNER_TEMP/authorization.sig" \
+            --instance "$RUNNER_TEMP/instance.json" --trusted-commit "$GITHUB_SHA" \
+            --output "$RUNNER_TEMP/approved-inputs.json"
+      - name: Inspect and verify image before any registry credential is available
+        run: |
+          set -euo pipefail
+          CANDIDATE_SHA="$(node -p 'JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP+"/approved-inputs.json")).candidateCommit')"
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          docker load --input "$RUNNER_TEMP/candidate-transfer/candidate-image.tar"
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "candidate-build:$CANDIDATE_SHA")" = "$CANDIDATE_SHA"
+          test "$(docker image inspect --format '{{.Config.User}}' "candidate-build:$CANDIDATE_SHA")" = global
+          test "$(docker image inspect --format '{{json .Config.Entrypoint}}' "candidate-build:$CANDIDATE_SHA")" = '["node","/app/runtime-entrypoint.mjs"]'
+          LOCAL_CONFIG="$(tar -xOf "$RUNNER_TEMP/candidate-transfer/candidate-image.tar" manifest.json | node trusted/scripts/docker-image-config-path.mjs)"
+          tar -xOf "$RUNNER_TEMP/candidate-transfer/candidate-image.tar" "$LOCAL_CONFIG" | sha256sum | cut -d ' ' -f 1 > "$RUNNER_TEMP/local-config.sha256"
+          CONTAINER_ID="$(docker create "candidate-build:$CANDIDATE_SHA")"
+          mkdir -m 700 "$RUNNER_TEMP/candidate-files"
+          docker cp "$CONTAINER_ID:/app/." "$RUNNER_TEMP/candidate-files"
+          # Validate untrusted filesystem bytes with protected main code.
+          node trusted/scripts/verify-runtime-image.mjs "$RUNNER_TEMP/candidate-files"
+          docker cp "$CONTAINER_ID:/app/apps/api/dist/build-attestation.json" "$RUNNER_TEMP/build-receipt.json"
+          docker cp "$CONTAINER_ID:/app/apps/api/dist/runtime-candidate.json" "$RUNNER_TEMP/runtime-candidate.json"
+          docker rm "$CONTAINER_ID"
+          node trusted/scripts/development-candidate.mjs make-predicate \
+            --authorization "$RUNNER_TEMP/authorization.json" --signature "$RUNNER_TEMP/authorization.sig" \
+            --instance "$RUNNER_TEMP/instance.json" --trusted-commit "$GITHUB_SHA" \
+            --build-receipt "$RUNNER_TEMP/build-receipt.json" --marker "$RUNNER_TEMP/runtime-candidate.json" \
+            --output "$RUNNER_TEMP/candidate-predicate.json"
+      - id: publish
+        name: Push only the isolated candidate package and resolve its immutable digest
+        env:
+          CANDIDATE_REGISTRY_TOKEN: ${{ secrets.DEVELOPMENT_CANDIDATE_REGISTRY_TOKEN }}
+          GHCR_TOKEN: ${{ secrets.DEVELOPMENT_CANDIDATE_REGISTRY_TOKEN }}
+          GHCR_USERNAME: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          test -n "$CANDIDATE_REGISTRY_TOKEN"
+          CANDIDATE_SHA="$(node -p 'JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP+"/approved-inputs.json")).candidateCommit')"
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GITHUB_RUN_ID" =~ ^[0-9]+$ ]] && [[ "$GITHUB_RUN_ATTEMPT" =~ ^[0-9]+$ ]]
+          # Separate candidate namespace; the tag is a run identity, not a source SHA.
+          # Keep the existing strict 40-hex registry resolver unchanged.
+          TAG="$(printf '%s' "$CANDIDATE_SHA:$GITHUB_RUN_ID:$GITHUB_RUN_ATTEMPT" | sha256sum | cut -c1-40)"
+          IMAGE="ghcr.io/mlhjyx/global-backend-development-candidate:$TAG"
+          printf '%s' "$CANDIDATE_REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          node trusted/scripts/ghcr-runtime-publication.mjs resolve \
+            --image mlhjyx/global-backend-development-candidate --tag "$TAG" --github-output "$RUNNER_TEMP/existing.txt"
+          test "$(cat "$RUNNER_TEMP/existing.txt")" = 'exists=false'
+          docker tag "candidate-build:$CANDIDATE_SHA" "$IMAGE"
+          timeout 15m docker push "$IMAGE"
+          for attempt in 1 2 3 4; do
+            node trusted/scripts/ghcr-runtime-publication.mjs resolve \
+              --image mlhjyx/global-backend-development-candidate --tag "$TAG" \
+              --github-output "$RUNNER_TEMP/resolved.txt" --wait-ms 60000
+            if grep -q '^exists=true$' "$RUNNER_TEMP/resolved.txt"; then break; fi
+            sleep 15
+          done
+          grep -q '^exists=true$' "$RUNNER_TEMP/resolved.txt"
+          IMAGE_REFERENCE="$(sed -n 's/^image_reference=//p' "$RUNNER_TEMP/resolved.txt" | tail -n 1)"
+          [[ "$IMAGE_REFERENCE" =~ ^ghcr\.io/mlhjyx/global-backend-development-candidate@sha256:[0-9a-f]{64}$ ]]
+          timeout 10m docker pull "$IMAGE_REFERENCE"
+          docker save --output "$RUNNER_TEMP/pulled-candidate.tar" "$IMAGE_REFERENCE"
+          PULLED_CONFIG="$(tar -xOf "$RUNNER_TEMP/pulled-candidate.tar" manifest.json | node trusted/scripts/docker-image-config-path.mjs)"
+          PULLED_SHA="$(tar -xOf "$RUNNER_TEMP/pulled-candidate.tar" "$PULLED_CONFIG" | sha256sum | cut -d ' ' -f 1)"
+          test "$PULLED_SHA" = "$(cat "$RUNNER_TEMP/local-config.sha256")"
+          cat "$RUNNER_TEMP/resolved.txt" >> "$GITHUB_OUTPUT"
+      - name: Attest candidate source material using the trusted main workflow identity
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/mlhjyx/global-backend-development-candidate
+          subject-digest: ${{ steps.publish.outputs.image_digest }}
+          predicate-type: https://global-backend.dev/attestations/development-candidate/v1
+          predicate-path: ${{ runner.temp }}/candidate-predicate.json
+          push-to-registry: false
+          create-storage-record: true
+      - name: Verify the external chain and prepare the scoped admission receipt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CANDIDATE_IMAGE: ${{ steps.publish.outputs.image_reference }}
+        run: |
+          node trusted/scripts/development-candidate.mjs verify-image \
+            --authorization "$RUNNER_TEMP/authorization.json" --signature "$RUNNER_TEMP/authorization.sig" \
+            --instance "$RUNNER_TEMP/instance.json" --trusted-commit "$GITHUB_SHA" \
+            --image "$CANDIDATE_IMAGE" --output "$RUNNER_TEMP/candidate-admission.json"
+          printf 'Development candidate published and externally verified: `%s`\n' "$CANDIDATE_IMAGE" >> "$GITHUB_STEP_SUMMARY"
+      - name: Keep public verification material for the separately authorized deployment
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: development-candidate-admission
+          path: |
+            ${{ runner.temp }}/candidate-admission.json
+            ${{ runner.temp }}/candidate-predicate.json
+            ${{ runner.temp }}/authorization.json
+            ${{ runner.temp }}/authorization.sig
+            ${{ runner.temp }}/instance.json
+          retention-days: 1
+      - name: Remove scoped registry credentials
+        if: always()
+        run: docker logout ghcr.io

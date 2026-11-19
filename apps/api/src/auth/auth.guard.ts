@@ -1,9 +1,11 @@
+import { candidateWorkspaceAllowed } from '../runtime/development-candidate';
 import {
   CanActivate,
   ExecutionContext,
   Inject,
   Injectable,
   UnauthorizedException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { TokenVerifier } from './token-verifier';
 import {
@@ -40,6 +42,9 @@ export class AuthGuard implements CanActivate {
       });
     }
     const verified = await this.verifier.verify(token);
+    if (!candidateWorkspaceAllowed(verified.workspaceId)) {
+      throw new ForbiddenException({ error: { code: 'WORKSPACE_NOT_ADMITTED', message: 'workspace is not admitted by this runtime' } });
+    }
     const roles = Object.freeze([...verified.roles]);
     req.requestContext = Object.freeze({
       userId: verified.userId,

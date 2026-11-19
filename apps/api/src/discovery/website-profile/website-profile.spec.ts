@@ -145,6 +145,23 @@ describe('parseImpressum legal-name boundaries', () => {
   it('keeps company names that merely contain excluded fragments', () => {
     expect(parseImpressum('Muster Steuerungstechnik GmbH\nHRB 1').legalName).toBe('Muster Steuerungstechnik GmbH');
   });
+
+  it('keeps the declared Pumpen-Wolf legal name rather than the site introduction', () => {
+    const text = [
+      'Diese Webseite ist ein Angebot der Pumpen-Wolf Ostthüringen GmbH.',
+      '## Dienstanbieter',
+      'Pumpen-Wolf Ostthüringen Gesellschaft mit beschränkter Haftung',
+      'Handelsregister: Amtsgericht Jena HRB 209272',
+    ].join('\n');
+    expect(parseImpressum(text)).toMatchObject({
+      legalName: 'Pumpen-Wolf Ostthüringen Gesellschaft mit beschränkter Haftung',
+      register: { key: 'de-hrb:jena:209272' },
+    });
+  });
+
+  it('does not take a site-introduction sentence as a standalone company name', () => {
+    expect(parseImpressum('Diese Website wird betrieben von Muster Industrie GmbH.').legalName).toBeNull();
+  });
 });
 
 describe('parseImpressum court boundaries', () => {

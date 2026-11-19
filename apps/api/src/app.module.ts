@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { CandidateOperationInterceptor } from './runtime/development-candidate-operation.interceptor';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { httpThrottlerOptions } from './common/redis-http-throttler.storage';
 import { PrismaModule } from './prisma/prisma.module';
@@ -91,6 +92,7 @@ import { CampaignPlanModule } from './campaign-plan/campaign-plan.module';
   providers: [
     { provide: APP_GUARD, useClass: WsThrottlerGuard },
     { provide: APP_GUARD, useClass: RuntimeWorkAdmissionGuard },
+    { provide: APP_INTERCEPTOR, useClass: CandidateOperationInterceptor },
     // R7-A：客户侧周期 sweep 的 API 内调度器（StartWorkflowExecution + workflowId 周期桶去重）。
     SweepSchedulerService,
   ],

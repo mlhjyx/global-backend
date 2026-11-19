@@ -1,3 +1,5 @@
+import { addFitPass, addWebsiteProfilePass, addEnrichPass, type FitTotals, type WebsiteProfileTotals, type EnrichTotals } from './discovery-workflow-totals';
+import { prefilterProcurementPool, needsDiscoverySearch } from './discovery-run2-search';
 import {
   ApplicationFailure,
   CancellationScope,
@@ -60,6 +62,7 @@ export const DISCOVERY_RUN_CONTACTS_PATCH = 'discovery-run-contacts-v1';
  * 影子验收后再切默认（M0⑥）。
  */
 export const DISCOVERY_RUN2_QUICK_SCAN_PATCH = 'discovery-run2-quick-scan-v1';
+export const DISCOVERY_PROCUREMENT_SEARCH_PATCH = 'discovery-procurement-search-v1';
 /** M0⑥：影子对比——老路径照跑，同时用新快扫判定做对比（不产出名单），连续两轮召回不降才切默认。 */
 export const DISCOVERY_RUN2_SHADOW_PATCH = 'discovery-run2-shadow-v1';
 /** 巡检（2026-11-04）：深挖段失败/取消时 stats.failure.stage 记 'deep'，不再沿用 quickScan。 */
@@ -111,74 +114,6 @@ const signalActs = proxyActivities<DiscoveryActivities>({
   startToCloseTimeout: '30 minutes',
   retry: { maximumAttempts: 2 },
 });
-
-interface FitTotals {
-  judged?: number;
-  verdicts: Record<string, number>;
-  skippedForBudget?: number;
-  unjudged?: number;
-  unreplayable?: number;
-}
-
-interface WebsiteProfileTotals {
-  /** The run's own companies profiled (W5-f: backfill companies are counted in `backfilled`). */
-  profiled: number;
-  matched: number;
-  skippedSubjects?: number;
-  budgetTruncated?: boolean;
-  unclassified?: number;
-  unreplayable?: number;
-  /** Workspace companies outside the run whose contact paths were read with the leftover quota; absent in older results. */
-  backfilled?: number;
-}
-
-interface EnrichTotals {
-  enriched: number;
-  matched: number;
-  provider: string | null;
-  budgetTruncated: boolean;
-}
-
-function addFitPass(total: FitTotals, pass: FitTotals): FitTotals {
-  const verdicts = { ...total.verdicts };
-  for (const [verdict, count] of Object.entries(pass.verdicts ?? {})) {
-    verdicts[verdict] = (verdicts[verdict] ?? 0) + count;
-  }
-  return {
-    judged: (total.judged ?? 0) + (pass.judged ?? 0),
-    verdicts,
-    skippedForBudget: (total.skippedForBudget ?? 0) + (pass.skippedForBudget ?? 0),
-    unjudged: (total.unjudged ?? 0) + (pass.unjudged ?? 0),
-    unreplayable: (total.unreplayable ?? 0) + (pass.unreplayable ?? 0),
-  };
-}
-
-function addWebsiteProfilePass(total: WebsiteProfileTotals, pass: WebsiteProfileTotals): WebsiteProfileTotals {
-  return {
-    profiled: total.profiled + pass.profiled,
-    matched: total.matched + pass.matched,
-    skippedSubjects: (total.skippedSubjects ?? 0) + (pass.skippedSubjects ?? 0),
-    budgetTruncated: (total.budgetTruncated ?? false) || (pass.budgetTruncated ?? false),
-    unclassified: (total.unclassified ?? 0) + (pass.unclassified ?? 0),
-    unreplayable: (total.unreplayable ?? 0) + (pass.unreplayable ?? 0),
-    backfilled: (total.backfilled ?? 0) + (pass.backfilled ?? 0),
-  };
-}
-
-/** Joins the `+`-separated provider keys of two enrich activities without repeating one. */
-function mergeProviders(left: string | null, right: string | null): string | null {
-  const keys = [...new Set([left, right].flatMap((value) => (value ? value.split('+') : [])))];
-  return keys.length ? keys.join('+') : null;
-}
-
-function addEnrichPass(total: EnrichTotals, pass: EnrichTotals): EnrichTotals {
-  return {
-    enriched: total.enriched + pass.enriched,
-    matched: total.matched + pass.matched,
-    provider: mergeProviders(total.provider, pass.provider),
-    budgetTruncated: total.budgetTruncated || pass.budgetTruncated,
-  };
-}
 
 /**
  * Discover 编排（PRD 5.5 / 7.4.8 Waterfall 的发现段）：
@@ -337,18 +272,17 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
     let run2Prefilter:
       | { poolSize: number; candidates: number; prefilteredOut: number }
       | undefined;
+    let requiresProcurementSearch = false;
     if (usesRun2QuickScan) {
       stage = 'quickScan';
-      run2Prefilter = await acts.prefilterPool({
-        workspaceId,
-        runId,
-        icpId: input.icpId,
-        ...authorityArgs,
-      });
+      const prefilter = await prefilterProcurementPool(acts.prefilterPool, {
+        workspaceId, runId, icpId: input.icpId, ...authorityArgs,
+      }, planId, patched(DISCOVERY_PROCUREMENT_SEARCH_PATCH));
+      run2Prefilter = prefilter.pool;
+      requiresProcurementSearch = prefilter.requiresProcurementSearch;
     }
-    const needSearch =
-      !usesRun2QuickScan ||
-      (run2Prefilter?.candidates ?? 0) < knobs.run2PoolSearchFallbackThreshold;
+    const needSearch = needsDiscoverySearch(usesRun2QuickScan, requiresProcurementSearch,
+      run2Prefilter?.candidates, knobs.run2PoolSearchFallbackThreshold);
 
     let companies = 0;
     let suppressed = 0;
@@ -585,6 +519,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
           workspaceId,
           runId,
           icpId: input.icpId,
+          ...(requiresProcurementSearch ? { planId, afterProcurementSearch: true } : {}),
           ...authorityArgs,
         });
       }

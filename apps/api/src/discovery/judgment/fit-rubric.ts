@@ -12,6 +12,10 @@
  */
 
 import { createHash } from 'node:crypto';
+import {
+  buyerProcurementCriteria,
+  type BuyerProcurementScenario,
+} from '../buyer-procurement-scenarios';
 
 export const RUBRIC_VERSION = 'fit-v2' as const;
 
@@ -153,6 +157,49 @@ export const RUBRIC_CRITERIA = Object.freeze([
     evidenceRequired: ['employee_count 或 employee_band（注册库/Wikidata/公开页）'],
   },
 ] satisfies CriterionDefinition[]);
+
+export const REQUIRED_PROCUREMENT_CRITERIA = [
+  'C1_MATERIAL', 'C2_ROLE', 'C3_PROCESS', 'C4_BUSINESS_MODEL',
+] as const satisfies readonly CriterionId[];
+
+export function procurementRubric(
+  scenario: Exclude<BuyerProcurementScenario, 'distribution'>,
+): readonly CriterionDefinition[] {
+  const criteria = buyerProcurementCriteria(scenario);
+  const titles = {
+    C1_MATERIAL: '采购场景的泵种与适用性',
+    C2_ROLE: '采购场景角色',
+    C3_PROCESS: '泵的实际用途',
+    C4_BUSINESS_MODEL: '采购或配套责任',
+  } as const;
+  const proof = {
+    C1_MATERIAL: '指出使用或选型的泵种与卖方产品的具体交集。相邻设备不算证据。',
+    C2_ROLE: scenario === 'factory_direct'
+      ? '指出该企业是自用工厂或实际运营方。泵制造或销售本身不算。'
+      : '指出该企业承担设备工程或系统集成。单纯转发产品资料不算。',
+    C3_PROCESS: '指出泵在该工艺、产线、设备或项目中的具体用途。只写经营行业不算。',
+    C4_BUSINESS_MODEL: scenario === 'factory_direct'
+      ? '指出工厂对该用途有使用、采购或项目实施责任。仅同属一个集团不算。'
+      : '指出企业对相关泵承担工程选型、集成或采购责任。无需证明转售。',
+  } as const;
+  return RUBRIC_CRITERIA.map((criterion) => {
+    if (criterion.id === 'C5_SIZE') return criterion;
+    return {
+      ...criterion,
+      name: titles[criterion.id],
+      anchors: {
+        '10': `直接证据明确支持本项。场景为${criteria.label}。${proof[criterion.id]}`,
+        '8-9': '直接证据支持本项，只有次要细节待核实。',
+        '6-7': '证据与该场景相符，但产品用途或采购责任仍有一项需核实。',
+        '4-5': '只证明相邻业务，尚未支持本项。',
+        '2-3': '明确证据表明本项与该场景不符。',
+        '0': '直接证据明确反证本项，例如已证实企业在该项目没有采购、选型或使用责任。',
+        unclear: '没有可核实的证据或证据冲突。',
+      },
+      evidenceRequired: [`本项必须判定；缺证据填 unclear。引用快照逐字证据：${proof[criterion.id]}`],
+    };
+  });
+}
 
 export const RUBRIC_AGGREGATION = {
   hardFail: ['C2<=2 with evidence', 'C1<=2 with evidence'],

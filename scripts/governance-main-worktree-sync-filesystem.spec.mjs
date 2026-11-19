@@ -26,6 +26,9 @@ async function fixture() {
   await writeFile(path.join(root, ".gitignore"), ".superpowers/\n");
   await mkdir(path.join(root, ".superpowers"));
   await writeFile(path.join(root, ".superpowers", "local.json"), "original");
+  // The mode-change test must start from a known mode: a private operator
+  // umask (077) otherwise creates 0600 already and chmod(0600) is a no-op.
+  await chmod(path.join(root, ".superpowers", "local.json"), 0o644);
   const ignored = execFileSync(
     "git",
     ["ls-files", "--others", "--ignored", "--exclude-standard", "-z"],

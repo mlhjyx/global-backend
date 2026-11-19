@@ -1,9 +1,7 @@
+import { assertCandidateAccountAllocated } from '../runtime/development-candidate-budget';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
-import {
-  ExecutionBudgetGrantError,
-  type ExecutionBudgetPurpose,
-} from '../execution-budget/execution-budget-authority.types';
+import { ExecutionBudgetGrantError, type ExecutionBudgetPurpose } from '../execution-budget/execution-budget-authority.types';
 import {
   attestExecutionBudgetPlatformWriterTransaction,
   assertExecutionBudgetAuthorityId,
@@ -733,6 +731,7 @@ export class PostgresBudgetStore implements BudgetStore {
     accountKey: string;
     replayScope?: boolean;
   }): Promise<BudgetAccountAuthorization> {
+    await assertCandidateAccountAllocated(input.scopeKey, input.accountKey);
     assertExecutionBudgetScopeKey(input.scopeKey, { allowPlatform: true });
     assertExecutionBudgetAuthorityId(input.authorityId);
     assertKey('accountKey', input.accountKey);
@@ -783,6 +782,7 @@ export class PostgresBudgetStore implements BudgetStore {
   }
 
   async reserve(input: BudgetReservationRequest): Promise<BudgetReservation> {
+    await assertCandidateAccountAllocated(input.workspaceId, input.accountKey);
     assertKey('accountKey', input.accountKey);
     assertKey('operationKey', input.operationKey);
     // Zero-priced tools still reserve an operation row so distributed idempotency

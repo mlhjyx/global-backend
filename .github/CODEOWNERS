@@ -27,6 +27,9 @@
 
 # Terminal governance ownership block. Keep this last so broader later rules
 # cannot override the verifier, policy, schema, or required-context surfaces.
+/scripts/development-candidate*.mjs @mlhjyx
+/runtime-entrypoint.mjs @mlhjyx
+/Dockerfile @mlhjyx
 /.github/ @mlhjyx
 /.gitleaks.toml @mlhjyx
 /.gitleaksignore @mlhjyx

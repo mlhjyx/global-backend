@@ -1,3 +1,4 @@
+import { assertCandidateToolExecutionAllowed } from "../runtime/development-candidate";
 import { assertPlatformEgressPaidContext, assertPlatformEgressReservation, createPlatformEgressOperation } from "../platform-authority/platform-egress-operation";
 import { createPlatformToolWireDispatcher } from "../platform-authority/platform-tool-wire-dispatcher";
 import { ExecutionControlError } from "../execution-budget/execution-control-error";
@@ -298,7 +299,7 @@ export class ToolBroker implements ExecutionBroker {
     const started = now();
     const tool = this.registry.get(toolId) as Tool<I, O> | undefined;
     if (!tool) throw new ToolPolicyDenied(toolId, "not registered");
-
+    assertCandidateToolExecutionAllowed(tool);
     if (
       tool.durableResultStrategy.kind === "typed_projection" &&
       !this.projectionRegistry.has(tool.durableResultStrategy.schema)
@@ -311,7 +312,6 @@ export class ToolBroker implements ExecutionBroker {
       );
     }
 
-    // 1) allowedTools 白名单（有界工具的代码强制，PRD 9.11）
     if (ctx.taskContractId) {
       const task = getTask(ctx.taskContractId);
       const allowed = task?.allowedTools ?? [];

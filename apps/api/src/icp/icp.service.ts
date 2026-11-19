@@ -1,3 +1,4 @@
+import { PLANNER_LANGUAGE_NAMES, plannerKeywordLanguage, plannerKeywordsMismatch } from './icp-planner-language';
 import {
   BadRequestException,
   ConflictException,
@@ -22,6 +23,14 @@ import {
 } from '../discovery/icp-to-cpv';
 import { resolveIcpToFda, buildFdaQuery, FDA_QUERY_SOURCE } from '../discovery/icp-to-fda';
 import { withIcpTradeRole } from '../discovery/icp-trade-role';
+import {
+  addConfirmedBuyerScenarioDrafts,
+  assertSupportedBuyerScenario,
+  buyerScenarioPlannerNote,
+  buyerScenarioSupportsSource,
+  prepareBuyerScenarioQueries,
+  readBuyerProcurementScenario,
+} from '../discovery/buyer-procurement-scenarios';
 import { DiscoveryProviderRegistry } from '../discovery/provider.registry';
 import {
   countLineageGatedColdPaths,
@@ -51,7 +60,6 @@ import {
   type ExecutionBudgetBinding,
 } from '../execution-budget/execution-budget-authority.service';
 import { workspaceExecutionBudgetRequestScope } from '../execution-budget/execution-budget-request-scope';
-import { partitionSearchTerms } from '../discovery/search-localization';
 import {
   buildIcpGenerationPrompt,
   completeTargetMarkets,
@@ -109,43 +117,6 @@ const RULE_OPERATORS = ['eq', 'neq', 'in', 'not_in', 'contains', 'not_contains',
 
 const json = (v: unknown): Prisma.InputJsonValue => (v ?? []) as Prisma.InputJsonValue;
 
-const PLANNER_LANGUAGE_NAMES: Readonly<Record<SearchLanguage, string>> = Object.freeze({
-  de: '德语', en: '英语', fr: '法语', it: '意大利语', es: '西班牙语', nl: '荷兰语', pl: '波兰语', zh: '中文',
-  ms: '马来语', id: '印度尼西亚语', vi: '越南语', th: '泰语', ja: '日语', ko: '韩语', pt: '葡萄牙语', tr: '土耳其语',
-});
-
-/**
- * Planner keywords go straight into the target market's search engine, so a
- * Chinese keyword wastes the search and every extraction behind it.
- */
-function plannerKeywordLanguage(targetMarkets: unknown, companyAttributes: unknown): string {
-  const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : value == null ? [] : [value]);
-  const country = (companyAttributes as { country?: unknown } | null)?.country;
-  const names = searchLanguagesForMarkets([...list(targetMarkets), ...list(country)])
-    .map((code) => PLANNER_LANGUAGE_NAMES[code]);
-  const rule = names.length > 1
-    ? `每条查询的 keywords 必须用该查询 filters.country 所在国家的语言书写（本 ICP 涉及${names.join('、')}）`
-    : `keywords 必须全部用${names[0] ?? '目标市场的当地语言'}书写`;
-  const fallback = names.length ? '' : '无法确定时用英语。';
-  return `keywords 会直接交给目标市场的搜索引擎。${rule}，使用当地行业的常用说法与同义词，不得出现中文。${fallback}filters 里的 industry、country 仍可用中文，供规范词表映射。`;
-}
-
-/** P2 §2.3：关键词存在却全部不能用于目标语言的检索 → 规划器语言不符（触发一次重写）。 */
-function plannerKeywordsMismatch(
-  queries: readonly { keywords?: readonly string[]; filters?: Record<string, unknown> }[],
-  fallbackLanguage: SearchLanguage | undefined,
-): boolean {
-  return queries.some((query) => {
-    const keywords = (query.keywords ?? []).filter(
-      (keyword): keyword is string => typeof keyword === 'string' && keyword.trim().length > 0,
-    );
-    if (keywords.length === 0) return false;
-    const byCountry = searchLanguagesForMarkets((query.filters ?? {}).country)[0];
-    const language = (byCountry ?? fallbackLanguage) as SearchLanguage | undefined;
-    if (!language) return false;
-    return partitionSearchTerms(keywords, language).usable.length === 0;
-  });
-}
 
 @Injectable()
 export class IcpService {
@@ -255,6 +226,8 @@ export class IcpService {
       offerings,
       modelMarkets,
     });
+
+    addConfirmedBuyerScenarioDrafts(companyAttributesForIcp, offeringBasis, offerings, confirmedMarkets);
 
     const icpId = result.durableReceipt
       ? domainAggregateIdForReceipt(result.durableReceipt, 'icp.design')
@@ -602,18 +575,20 @@ export class IcpService {
       }),
     });
     // BI-30：规划时刻的数据源开关（data_provider.status）快照：提示词、查询过滤与冷路径注入都按它。
-    const { icp, enabledSources, trialProviders } = await this.prisma.withWorkspace(
+    const { icp, scenario, enabledSources, trialProviders } = await this.prisma.withWorkspace(
       ctx.workspaceId,
       async (tx) => {
         const icp = await tx.icpDefinition.findUnique({ where: { id: icpId }, include: { rules: true } });
-        const enabledSources = await this.providers.enabledCompanyDiscoverySources(tx);
+        const scenario = readBuyerProcurementScenario(icp?.companyAttributes);
+        const enabledSources = (await this.providers.enabledCompanyDiscoverySources(tx))
+          .filter((source) => buyerScenarioSupportsSource(scenario, source.providerKey));
         // 零记录源不出现在计数行里，按 0 次运行处理（真正的「新源」正是试跑窗口的对象）。
         const trialProviders = await trialSourceProviders(
           tx,
           ctx.workspaceId,
           enabledSources.map((source) => source.providerKey),
         );
-        return { icp, enabledSources, trialProviders };
+        return { icp, scenario, enabledSources, trialProviders };
       },
     );
     // Q33② cheap-first：每源每轮查询预算（结构化源默认 4 条 ≈ ≤100 家；试跑源 1 条 ≈ ≤25 家；
@@ -629,6 +604,7 @@ export class IcpService {
         error: { code: 'INVALID_STATE', message: `icp is ${icp.status}; query plans require an ACTIVE icp` },
       });
     }
+    assertSupportedBuyerScenario(icp.companyAttributes, icp.targetMarkets, scenario);
     // 展会源只能跑注册表里已登记的展会（selectFairs 用 ICP 行业词/关键词匹配模板 topics）：
     // 无命中时 provider 静默返回零记录（2026-11-02 run 3212f6f3 的 8 条 trade_fair 查询全空），
     // 规划时不向模型列出这个注定空跑的源；路由校验仍用完整 enabledSources。
@@ -664,7 +640,8 @@ export class IcpService {
     const feedbackNote = this.feedback
       ? await this.feedback.plannerNote(ctx, icpId).catch(() => null)
       : null;
-    const queryPlanPrompt = `ICP 定义：\n${JSON.stringify(icpBrief, null, 2)}\n\n请生成多源查询计划，输出中文 rationale。\n${plannerSourcePrompt(plannerSources)}\n${plannerKeywordLanguage(icp.targetMarkets, icp.companyAttributes)}${feedbackNote ? `\n\n${feedbackNote}` : ''}`;
+    const scenarioNote = buyerScenarioPlannerNote(scenario);
+    const queryPlanPrompt = `ICP 定义：\n${JSON.stringify(icpBrief, null, 2)}\n\n请生成多源查询计划，输出中文 rationale。\n${plannerSourcePrompt(plannerSources)}\n${plannerKeywordLanguage(icp.targetMarkets, icp.companyAttributes)}${feedbackNote ? `\n\n${feedbackNote}` : ''}${scenarioNote}`;
     const runPlanner = (prompt: string) => executeIcpBudgetedTask<QueryPlanModelOutput>({
       budgetStore: this.budgetStore ?? new UnavailableBudgetStore('ICP query-plan generation requires an authoritative BudgetStore'),
       binding,
@@ -760,6 +737,8 @@ export class IcpService {
     queries = withSourceCoverage(queries, icp, enabledSources, {
       registryFrameCountries: await loadRegistryFrameCountries(this.prisma),
     });
+
+    queries = prepareBuyerScenarioQueries(queries, scenario);
 
     const queryPlanId = result.durableReceipt
       ? domainAggregateIdForReceipt(result.durableReceipt, 'discovery.query_plan')

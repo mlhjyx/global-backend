@@ -499,6 +499,10 @@ jobs:
         if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: pnpm memory:test
 
+      - name: Development candidate trust and conservative budget contracts
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: node --test scripts/development-candidate-budget.spec.mjs scripts/development-candidate-contract.spec.mjs scripts/development-candidate-cli.spec.mjs scripts/development-candidate-build-metadata.spec.mjs scripts/development-candidate-publication.spec.mjs
+
       - name: ContractGraph extractor tests and deterministic full-repository gate
         if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: |

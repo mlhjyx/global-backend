@@ -86,6 +86,8 @@ function company(id: string, overrides: Record<string, unknown> = {}) {
 
 function makePrisma(state: {
   rules?: Array<Record<string, unknown>>;
+  planQueries?: unknown[];
+  freshCompanyIds?: string[];
   companies?: Array<Record<string, unknown>>;
   jobs?: Array<Record<string, unknown>>;
   leads?: Array<Record<string, unknown>>;
@@ -126,12 +128,21 @@ function makePrisma(state: {
       }
       return { count };
     });
+  const pool = (where?: { materializationOutcomes?: { some: { runId: string; outcome: string } } }) => {
+    const lineage = where?.materializationOutcomes?.some;
+    return lineage
+      ? (state.companies ?? []).filter((c) =>
+          lineage.runId === RUN_ID && lineage.outcome === 'CANONICALIZED' &&
+          (state.freshCompanyIds ?? []).includes(c.id as string))
+      : state.companies ?? [];
+  };
   let seq = 0n;
   const tx = {
     $queryRaw: vi.fn(async () => []),
+    discoveryQueryPlan: { findFirst: vi.fn(async () => ({ queries: state.planQueries ?? [] })) },
     qualificationRule: { findMany: vi.fn(async () => state.rules ?? []) },
     canonicalCompany: {
-      count: vi.fn(async () => (state.companies ?? []).length),
+      count: vi.fn(async ({ where }: { where?: Parameters<typeof pool>[0] }) => pool(where).length),
       findFirst: vi.fn(async ({ where }: { where: { id: string } }) => {
         const match = (state.companies ?? []).find((c) => c.id === where.id);
         return match
@@ -155,9 +166,11 @@ function makePrisma(state: {
           : null;
       }),
       updateMany: vi.fn(async () => ({ count: 0 })),
-      findMany: vi.fn(async (args: { where?: { id?: { in?: string[] } } }) => {
+      findMany: vi.fn(async (args: { where?: { id?: { in?: string[] } } & NonNullable<Parameters<typeof pool>[0]>; take?: number }) => {
         const ids = args?.where?.id?.in;
-        return ids ? (state.companies ?? []).filter((c) => ids.includes(c.id as string)) : state.companies ?? [];
+        const candidates = pool(args.where);
+        const scoped = ids ? candidates.filter((c) => ids.includes(c.id as string)) : candidates;
+        return scoped.slice(0, args.take ?? scoped.length);
       }),
     },
     icpDefinition: {
@@ -294,6 +307,21 @@ beforeEach(() => {
 });
 
 describe('M0③ prefilterPool', () => {
+  it('leaves room for fresh scenario results even when the general pool fills the cap', async () => {
+    const { activities, jobUpserts } = makeActivities({
+      planQueries: [{ filters: { procurement_scenario: 'factory_direct' } }],
+      freshCompanyIds: ['fresh'],
+      companies: [...Array.from({ length: 500 }, (_, i) => company(`old-${i}`)), company('fresh')],
+    });
+    expect(await activities.prefilterPool({ ...ARGS, planId: 'plan-1' })).toMatchObject({
+      candidates: 0, requiresProcurementSearch: true,
+    });
+    expect(jobUpserts).toHaveLength(0);
+    expect(await activities.prefilterPool({ ...ARGS, planId: 'plan-1', afterProcurementSearch: true }))
+      .toMatchObject({ poolSize: 1, candidates: 1 });
+    expect(jobUpserts.map((job) => job.create.canonicalCompanyId)).toEqual(['fresh']);
+  });
+
   it('writes queued jobs for candidates and prefiltered_out jobs for rule rejects', async () => {
     const { activities, jobUpserts, events } = makeActivities({
       rules: [{ id: 'r1', kind: 'EXCLUSION', field: 'country', operator: 'in', value: ['CN'], weight: 1 }],

@@ -328,7 +328,7 @@ describe("actual provider mapper output → governed Raw boundary", () => {
         ingestStatus: "ACCEPTED",
         dispositionCode: null,
         externalId: "pumpen-mueller.de",
-        sourceUrl: "https://pumpen-mueller.de/",
+        sourceUrl: "https://www.pumpen-mueller.de/produkte/kreiselpumpen",
       });
       expect(row.payload).toMatchObject({
         name: "Pumpen Müller GmbH & Co. KG",
@@ -339,7 +339,7 @@ describe("actual provider mapper output → governed Raw boundary", () => {
           keywords: ["industrial"],
           extraction_confidence: 0.8,
         },
-        provenance: { sourceUrl: "https://pumpen-mueller.de/" },
+        provenance: { sourceUrl: "https://www.pumpen-mueller.de/produkte/kreiselpumpen" },
       });
       expect(JSON.stringify(row.payload)).not.toMatch(
         /Kreiselpumpen|Tauchpumpen|submersible|Pumpengroßhandel/u,
@@ -349,14 +349,13 @@ describe("actual provider mapper output → governed Raw boundary", () => {
     it("waits for a source policy instead, with a source URL the database writer stores", () => {
       // No source_policy row covers an arbitrary company domain yet: the record now reaches the
       // policy gate. A quarantined row still carries its source URL, and the writer raises on any
-      // URL it would not store, which would abort the query's transaction. The first hit is on
-      // www.<domain>; the second is on the exact host but its umlaut path is percent-escaped
-      // (/%C3%BCber-uns), which the writer refuses: so the home page is recorded.
+      // URL it would not store, which would abort the query's transaction. The approved
+      // same-company www alias retains the original product page even in quarantine.
       const row = prepare("public_web", mapped(), "directory.example");
       expect(row).toMatchObject({
         ingestStatus: "QUARANTINED",
         dispositionCode: "SOURCE_POLICY_MISSING",
-        sourceUrl: "https://pumpen-mueller.de/",
+        sourceUrl: "https://www.pumpen-mueller.de/produkte/kreiselpumpen",
       });
     });
   });
