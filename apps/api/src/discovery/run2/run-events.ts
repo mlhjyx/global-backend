@@ -14,18 +14,12 @@
 /** PR-06b：本 run 触发的评分批次留痕（append-only；payload 无个人数据）。 */
 export const QUALIFICATION_BATCH_SCORED_EVENT = 'qualification_batch_scored';
 
-export type RunEventType =
-  | 'phase_started'
-  | 'phase_completed'
-  | 'company_entered_stage'
-  | 'company_done'
-  | 'company_failed'
-  | 'company_enrichment_observed'
-  | 'budget_exhausted'
-  | 'lease_skipped'
-  | 'pool_cap_reached'
-  | 'run_finished'
-  | typeof QUALIFICATION_BATCH_SCORED_EVENT;
+export const RUN_EVENT_TYPES = Object.freeze([
+  'phase_started', 'phase_completed', 'company_entered_stage', 'company_done',
+  'company_failed', 'company_enrichment_observed', 'budget_exhausted',
+  'lease_skipped', 'pool_cap_reached', 'run_finished', QUALIFICATION_BATCH_SCORED_EVENT,
+] as const);
+export type RunEventType = typeof RUN_EVENT_TYPES[number];
 
 export interface RunEventInput {
   workspaceId: string;

@@ -1,6 +1,14 @@
 import type { Prisma } from '@prisma/client';
 import { readBuyerScenarioFromPlan } from '../buyer-procurement-scenarios';
 
+/** Only unjudged or explicitly provisional rows may be changed by a quick pass. */
+export function revisableProvisionalLeadWhere(): Prisma.LeadWhereInput {
+  return { status: 'DISCOVERED', OR: [
+    { fitVerdict: null },
+    { fitReasons: { path: ['source'], equals: 'quick_scan' } },
+  ] };
+}
+
 /** Reads the current scenario and candidate pool inside the caller's workspace transaction. */
 export async function loadQuickScanPool(
   tx: Prisma.TransactionClient,
@@ -22,9 +30,14 @@ export async function loadQuickScanPool(
     where: { icpId: args.icpId },
     select: { id: true, kind: true, field: true, operator: true, value: true, weight: true },
   });
-  const where = {
+  const where: Prisma.CanonicalCompanyWhereInput = {
     status: { not: 'SUPPRESSED' as const },
-    NOT: { leads: { some: { icpId: args.icpId, fitVerdict: { not: null } } } },
+    OR: [
+      { NOT: { leads: { some: { icpId: args.icpId, OR: [
+        { fitVerdict: { not: null } }, { status: { not: 'DISCOVERED' } },
+      ] } } } },
+      { leads: { some: { icpId: args.icpId, ...revisableProvisionalLeadWhere() } } },
+    ],
     // For the pilot, judge the current run's admitted search results rather than seed from the generic pool.
     ...(requiresProcurementSearch ? {
       materializationOutcomes: { some: { runId: args.runId, outcome: 'CANONICALIZED' } },

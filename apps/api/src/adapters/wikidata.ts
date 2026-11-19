@@ -11,7 +11,24 @@ import { decodeJsonBytes, readFetchResponseBodyBounded } from './bounded-fetch-r
 
 const ENDPOINT = process.env.WIKIDATA_SPARQL_URL ?? 'https://query.wikidata.org/sparql';
 const WD_API = process.env.WIKIDATA_API_URL ?? 'https://www.wikidata.org/w/api.php';
-const USER_AGENT = process.env.WIKIDATA_UA ?? 'GlobalDiscoveryBot/1.0 (b2b discovery; contact ops)';
+const USER_AGENT = process.env.WIKIDATA_UA ?? 'GlobalDiscoveryBot/1.0 (+https://github.com/mlhjyx/global-backend)';
+let apiRetryAt = 0;
+
+function assertApiNotCoolingDown(): void {
+  if (Date.now() < apiRetryAt) throw new Error('WIKIDATA_RATE_LIMITED_COOLDOWN');
+}
+
+/** Do not retry a failed operation. Other new API requests respect the server's pause. */
+function observeApiRateLimit(response: Response): void {
+  if (response.status !== 429) return;
+  const header = response.headers.get('retry-after');
+  const seconds = header && /^\d+$/u.test(header) ? Number(header) : undefined;
+  const dated = header && seconds === undefined ? Date.parse(header) : Number.NaN;
+  const until = seconds !== undefined ? Date.now() + seconds * 1_000 : dated;
+  apiRetryAt = Math.max(apiRetryAt, Date.now() + 5_000, Number.isSafeInteger(until) && Math.abs(until) <= 8.64e15 ? until : 0);
+  void response.body?.cancel().catch(() => undefined);
+  throw new Error('WIKIDATA_RATE_LIMITED');
+}
 
 export interface WikidataCompany {
   qid: string;
@@ -150,15 +167,20 @@ export async function wikidataSearchEntity(
   name: string,
   limit = 7,
   beforeRequest?: () => Promise<void>,
+  beforePhysicalWire?: () => Promise<void>,
 ): Promise<WikidataEntitySummary[]> {
+  assertApiNotCoolingDown();
   const url =
     `${WD_API}?action=wbsearchentities&search=${encodeURIComponent(name)}` +
     `&language=en&uselang=en&type=item&format=json&origin=*&limit=${Math.min(limit, 20)}`;
   await beforeRequest?.();
+  assertApiNotCoolingDown();
+  await beforePhysicalWire?.();
   const res = await fetch(url, {
     headers: { 'User-Agent': USER_AGENT },
     signal: AbortSignal.timeout(20_000),
   });
+  observeApiRateLimit(res);
   if (!res.ok) throw new Error(`wikidata search ${res.status}: ${(await res.text()).slice(0, 160)}`);
   const json = (await res.json()) as {
     search?: { id: string; label?: string; description?: string }[];
@@ -184,16 +206,21 @@ export async function wikidataGetEntities(
   qids: string[],
   props = 'claims|labels',
   beforeRequest?: () => Promise<void>,
+  beforePhysicalWire?: () => Promise<void>,
 ): Promise<Record<string, RawEntity>> {
   if (!qids.length) return {};
+  assertApiNotCoolingDown();
   const url =
     `${WD_API}?action=wbgetentities&ids=${qids.slice(0, 50).join('|')}` +
     `&props=${encodeURIComponent(props)}&languages=en&format=json&origin=*`;
   await beforeRequest?.();
+  assertApiNotCoolingDown();
+  await beforePhysicalWire?.();
   const res = await fetch(url, {
     headers: { 'User-Agent': USER_AGENT },
     signal: AbortSignal.timeout(25_000),
   });
+  observeApiRateLimit(res);
   if (!res.ok) throw new Error(`wikidata getentities ${res.status}: ${(await res.text()).slice(0, 160)}`);
   const json = (await res.json()) as { entities?: Record<string, RawEntity> };
   return json.entities ?? {};

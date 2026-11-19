@@ -222,6 +222,11 @@ function makePrisma(state: {
       }),
     },
     lead: {
+      createMany: vi.fn(async ({ data }: { data: Array<Record<string, unknown>> }) => {
+        for (const create of data) leadUpserts.push({ create });
+        return { count: data.length };
+      }),
+      updateMany: vi.fn(async () => ({ count: 0 })),
       upsert: vi.fn(async (args: Record<string, unknown>) => {
         leadUpserts.push(args);
         return {};

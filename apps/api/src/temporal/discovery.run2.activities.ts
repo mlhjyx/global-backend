@@ -1,4 +1,4 @@
-import { loadQuickScanPool } from '../discovery/run2/pool';
+import { loadQuickScanPool, revisableProvisionalLeadWhere } from '../discovery/run2/pool';
 import { createHash } from 'node:crypto';
 import { Context } from '@temporalio/activity';
 import { CancelledFailure } from '@temporalio/common';
@@ -831,29 +831,19 @@ export function createRun2Activities(deps: {
         for (const job of jobs) {
           if (!isQuickVerdict(job.verdictQuick) || job.verdictQuick === 'mismatch') continue;
           const verdict = job.verdictQuick;
-          await tx.lead.upsert({
-            where: {
-              workspaceId_icpId_canonicalCompanyId: {
-                workspaceId: args.workspaceId,
-                icpId: args.icpId,
-                canonicalCompanyId: job.canonicalCompanyId,
-              },
-            },
-            update: {
-              fitVerdict: verdict,
-              fitReasons: { source: 'quick_scan', tier: 'quick' } as never,
-              version: { increment: 1 },
-            },
-            create: {
-              workspaceId: args.workspaceId,
-              icpId: args.icpId,
-              canonicalCompanyId: job.canonicalCompanyId,
-              fitVerdict: verdict,
-              fitReasons: { source: 'quick_scan', tier: 'quick' } as never,
-              queue: 'needs_review',
-            },
-          });
-          leads += 1;
+          const identity = { workspaceId: args.workspaceId, icpId: args.icpId,
+            canonicalCompanyId: job.canonicalCompanyId };
+          const provisional = { fitVerdict: verdict, fitReasons: { source: 'quick_scan', tier: 'quick' },
+            queue: 'needs_review' };
+          const created = await tx.lead.createMany({ data: [{ ...identity, ...provisional }], skipDuplicates: true });
+          if (created.count) leads += created.count;
+          else {
+            const updated = await tx.lead.updateMany({
+              where: { ...identity, ...revisableProvisionalLeadWhere() },
+              data: { ...provisional, version: { increment: 1 } },
+            });
+            leads += updated.count;
+          }
         }
         return { leads };
       });

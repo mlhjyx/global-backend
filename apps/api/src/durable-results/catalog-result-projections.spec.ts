@@ -1329,6 +1329,36 @@ describe('closed catalog Tool result projections', () => {
     );
   });
 
+  it('validates and drops canonical mainsnak hashes without changing consumed company facts', () => {
+    const entity = structuredClone(CANONICAL_WIKIDATA_ENTITY);
+    (((entity.claims as JsonRecord).P31 as JsonRecord[])[0].mainsnak as JsonRecord).hash = 'a'.repeat(40);
+    const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
+    const envelope = registry.project('wikidata-entity/v1', { data: { entities: { Q999: entity } }, costCents: 0 });
+    const restored = registry.restore(envelope) as RawToolResult;
+    expect(parseCompanyFacts('Q999', (restored.data.entities as JsonRecord).Q999, {}))
+      .toEqual(parseCompanyFacts('Q999', CANONICAL_WIKIDATA_ENTITY, {}));
+    expect(JSON.stringify(envelope)).not.toContain('"hash"');
+  });
+
+  it.each(['', 'not-a-hash', 'a'.repeat(41), 'person@example.test'])(
+    'does not accept arbitrary mainsnak metadata values: %s', (hash) => {
+      const entity = structuredClone(CANONICAL_WIKIDATA_ENTITY);
+      (((entity.claims as JsonRecord).P31 as JsonRecord[])[0].mainsnak as JsonRecord).hash = hash;
+      const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
+      expect(() => registry.project('wikidata-entity/v1', { data: { entities: { Q999: entity } }, costCents: 0 }))
+        .toThrow('TYPED_PROJECTION_INVALID');
+    },
+  );
+
+  it('keeps a known missing entity as a miss without rejecting valid entities in the same response', () => {
+    const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
+    const restored = registry.restore(registry.project('wikidata-entity/v1', {
+      data: { entities: { Q999: CANONICAL_WIKIDATA_ENTITY, Q123: { id: 'Q123', missing: '' } } }, costCents: 0,
+    })) as RawToolResult;
+    expect(parseCompanyFacts('Q999', (restored.data.entities as JsonRecord).Q999, {}).isCompany).toBe(true);
+    expect(parseCompanyFacts('Q123', (restored.data.entities as JsonRecord).Q123, {}).isCompany).toBe(false);
+  });
+
   it('rejects unsupported or personal Wikidata datavalue shapes', () => {
     const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
     const personal = cloneRaw({
