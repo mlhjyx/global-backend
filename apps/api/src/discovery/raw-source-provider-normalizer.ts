@@ -316,6 +316,44 @@ export function isStableSafeHttpsUrl(value: unknown): value is string {
   }
 }
 
+/** Source IDs may look numeric, so check URL components before replacing the source anchor. */
+function safeProviderSourceComponents(sourceUrl: string, parsed: URL): boolean {
+  return parsed.protocol === "https:" &&
+    parsed.username === "" && parsed.password === "" &&
+    parsed.search === "" && parsed.hash === "" &&
+    !/[?#]/u.test(sourceUrl) && !/^https:\/\/[^/]*@/iu.test(sourceUrl) &&
+    (parsed.port === "" || parsed.port === "443");
+}
+
+function normalizedOsmSourceUrl(sourceUrl: string, payload: RawJsonRecord): string | null {
+  try {
+    const parsed = new URL(sourceUrl);
+    const osmId = String(record(payload.attributes)?.osm_id ?? "");
+    if (!safeProviderSourceComponents(sourceUrl, parsed) ||
+      !/^(?:node|way|relation)\/\d{1,20}$/u.test(osmId) ||
+      !(sourceUrl === "https://overpass-api.de/api/interpreter" ||
+        (parsed.hostname === "www.openstreetmap.org" && parsed.pathname === `/${osmId}`))) {
+      return null;
+    }
+    return "https://overpass-api.de/api/interpreter";
+  } catch { return null; }
+}
+
+function normalizedTedSourceUrl(sourceUrl: string, payload: RawJsonRecord): string | null {
+  try {
+    const parsed = new URL(sourceUrl);
+    const publication = String(record(record(payload.attributes)?.ted)?.publication_number ?? "");
+    const detail = /^\/[a-z]{2}\/notice\/-\/detail\/(\d{1,9}(?:-\d{4})?)$/u.exec(parsed.pathname);
+    if (!safeProviderSourceComponents(sourceUrl, parsed) ||
+      !/^\d{1,9}(?:-\d{4})?$/u.test(publication) ||
+      !(sourceUrl === "https://api.ted.europa.eu/v3/notices/search" ||
+        (parsed.hostname === "ted.europa.eu" && detail?.[1] === publication))) {
+      return null;
+    }
+    return "https://api.ted.europa.eu/v3/notices/search";
+  } catch { return null; }
+}
+
 function normalizeProvenance(
   providerKey: string,
   value: unknown,
@@ -337,48 +375,13 @@ function normalizeProvenance(
     return null;
   let sourceUrl = input.sourceUrl;
   if (providerKey === "openstreetmap") {
-    try {
-      const parsed = new URL(sourceUrl);
-      const osmId = String(record(payload.attributes)?.osm_id ?? "");
-      if (
-        parsed.protocol !== "https:" ||
-        parsed.username !== "" || parsed.password !== "" ||
-        parsed.search !== "" || parsed.hash !== "" ||
-        /[?#]/u.test(sourceUrl) || /^https:\/\/[^/]*@/iu.test(sourceUrl) ||
-        (parsed.port !== "" && parsed.port !== "443") ||
-        !(sourceUrl === "https://overpass-api.de/api/interpreter" ||
-          (parsed.hostname === "www.openstreetmap.org" && parsed.pathname === `/${osmId}`)) ||
-        !/^(?:node|way|relation)\/\d{1,20}$/u.test(osmId)
-      ) {
-        return null;
-      }
-      sourceUrl = "https://overpass-api.de/api/interpreter";
-    } catch {
-      return null;
-    }
+    const normalized = normalizedOsmSourceUrl(sourceUrl, payload);
+    if (!normalized) return null;
+    sourceUrl = normalized;
   } else if (providerKey === "ted") {
-    try {
-      const parsed = new URL(sourceUrl);
-      const publication = String(
-        record(record(payload.attributes)?.ted)?.publication_number ?? "",
-      );
-      const detail = /^\/[a-z]{2}\/notice\/-\/detail\/(\d{1,9}(?:-\d{4})?)$/u.exec(parsed.pathname);
-      if (
-        parsed.protocol !== "https:" ||
-        parsed.username !== "" || parsed.password !== "" ||
-        parsed.search !== "" || parsed.hash !== "" ||
-        /[?#]/u.test(sourceUrl) || /^https:\/\/[^/]*@/iu.test(sourceUrl) ||
-        (parsed.port !== "" && parsed.port !== "443") ||
-        !(sourceUrl === "https://api.ted.europa.eu/v3/notices/search" ||
-          (parsed.hostname === "ted.europa.eu" && detail?.[1] === publication)) ||
-        !/^\d{1,9}(?:-\d{4})?$/u.test(publication)
-      ) {
-        return null;
-      }
-      sourceUrl = "https://api.ted.europa.eu/v3/notices/search";
-    } catch {
-      return null;
-    }
+    const normalized = normalizedTedSourceUrl(sourceUrl, payload);
+    if (!normalized) return null;
+    sourceUrl = normalized;
   } else if (providerKey === "opencorporates") {
     // 获客 vNext W4：来源页可为 opencorporates.com 公司页或 API 检索 URL；归一为 API 检索端点
     // （与 TED/openFDA 的「记录来源锚定到受治理 API 域」同一手法）。
