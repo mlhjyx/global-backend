@@ -92,7 +92,10 @@ async function probe(
     }
     if (isExecutionControlError(error)) throw error;
     assertReceipts(args, binding, key, receipts);
-    await commit(deps, args, { key, receipts, status: 'provider_failed' });
+    const status = key === 'wikidata' && error instanceof Error && error.message === 'WIKIDATA_RATE_LIMITED_COOLDOWN'
+      ? 'not_executed_rate_limited' : key === 'wikidata' && error instanceof Error && error.message === 'WIKIDATA_RATE_LIMITED'
+        ? 'rate_limited' : 'provider_failed';
+    await commit(deps, args, { key, receipts, status });
     return;
   }
   assertReceipts(args, binding, key, receipts);

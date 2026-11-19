@@ -385,15 +385,14 @@ export const wikidataEntityTool: Tool<
     schema: CATALOG_RESULT_PROJECTION_SCHEMAS["wikidata.entity"],
   },
   healthCheck: async () => ({ healthy: true, detail: "wikidata-api" }),
+  physicalWireObservation: "before_each_wire",
   execute: async (input, ctx) => {
     const beforeRequest = beforeExternalRequest(ctx);
     if (input.op === "search") {
       return {
         data: {
           search: await wikidataSearchEntity(
-            input.name,
-            input.limit,
-            beforeRequest,
+            input.name, input.limit, beforeRequest, ctx.beforePhysicalWire,
           ),
         },
         costCents: 0,
@@ -405,6 +404,7 @@ export const wikidataEntityTool: Tool<
           input.qids,
           input.props,
           beforeRequest,
+          ctx.beforePhysicalWire,
         ),
       },
       costCents: 0,

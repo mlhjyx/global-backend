@@ -48,6 +48,7 @@ const DECLARED = [
   "sanctions.download",
   "social.fetch",
   "tradefair.algolia",
+  "wikidata.entity",
 ];
 
 function response(input: Partial<PublicHttpResponse>): PublicHttpResponse {
