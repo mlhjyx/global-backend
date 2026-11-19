@@ -20,6 +20,7 @@ export type RunEventType =
   | 'company_entered_stage'
   | 'company_done'
   | 'company_failed'
+  | 'company_enrichment_observed'
   | 'budget_exhausted'
   | 'lease_skipped'
   | 'pool_cap_reached'

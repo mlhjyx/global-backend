@@ -172,6 +172,7 @@ describe("CanonicalCompany derived-attribute sanitizer parity", () => {
       "website_profile.trade_role_source",
       "website_profile.vat_id",
       "wikidata.country",
+      "wikidata.country_qid",
       "wikidata.employees",
       "wikidata.headquarters",
       "wikidata.inception_year",
@@ -349,6 +350,7 @@ describe("CanonicalCompany derived-attribute sanitizer parity", () => {
       ],
       ["gleif.ultimate_parent_name", "Acme Group SE", "Acme Group SE"],
       ["wikidata.qid", "Q123", "Q123"],
+      ["wikidata.country_qid", "Q183", "Q183"],
       ["wikidata.label", "Acme Pump", "Acme Pump"],
       ["wikidata.website", "acme.example", "acme.example"],
       [
@@ -713,4 +715,18 @@ describe("CanonicalCompany derived-attribute sanitizer parity", () => {
       },
     });
   });
+});
+
+describe('stored raw Wikidata country identity', () => {
+  it('keeps a valid QID only at its declared provider field', () => {
+    expect(sanitizeStored('wikidata.country_qid', 'Q12345678')).toBe('Q12345678');
+    expect(sanitizeStored('gleif.country_qid', 'Q183')).toBeUndefined();
+    expect(sanitizeStored('website_profile.country_qid', 'Q183')).toBeUndefined();
+  });
+  it.each(['Q0', 'Q0123', 'Q12345678901234567', 'France', 'person@example.test', '+49 30 1234567'])(
+    'rejects an invalid country identity field: %s', (value) => {
+      expect(sanitizeStored('wikidata.country_qid', value)).toBeUndefined();
+      expect(sanitizeCanonicalCompanyAttributes({ wikidata: { country_qid: value } })).not.toHaveProperty('wikidata.country_qid');
+    },
+  );
 });

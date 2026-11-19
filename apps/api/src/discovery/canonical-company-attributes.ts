@@ -73,6 +73,7 @@ const CONTACT_ATTRIBUTE_KEYS = new Set([
 ]);
 
 const SEMANTIC_IDENTIFIER_KEYS = new Set([
+  "country_qid",
   "company_number",
   "cpv",
   "fei_number",
@@ -203,6 +204,7 @@ const semanticIdentifierContracts = new Map<
   ],
   ["gleif.legal_form_code", { validate: safeCode }],
   ["wikidata.qid", { validate: (value) => /^Q[1-9]\d{0,15}$/u.test(value) }],
+  ["wikidata.country_qid", { validate: (value) => /^Q[1-9]\d{0,15}$/u.test(value) }],
   [
     "wikidata.parent_qid",
     { validate: (value) => /^Q[1-9]\d{0,15}$/u.test(value) },
@@ -300,6 +302,7 @@ const storedCompanyFieldAttributePaths = new Map<
   ["website_profile.trade_role_source", ["website_profile", "trade_role_source"]],
   ["website_profile.vat_id", ["website_profile", "vat_id"]],
   ["wikidata.country", ["wikidata", "country"]],
+  ["wikidata.country_qid", ["wikidata", "country_qid"]],
   ["wikidata.employees", ["wikidata", "employees"]],
   ["wikidata.headquarters", ["wikidata", "headquarters"]],
   ["wikidata.inception_year", ["wikidata", "inception_year"]],
@@ -373,6 +376,7 @@ export const STORED_COMPANY_FIELD_EVIDENCE_FIELDS = Object.freeze([
   "website_profile.trade_role_source",
   "website_profile.vat_id",
   "wikidata.country",
+  "wikidata.country_qid",
   "wikidata.employees",
   "wikidata.headquarters",
   "wikidata.inception_year",

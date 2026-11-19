@@ -88,6 +88,8 @@ import {
   websiteProfileFreshAndCurrent,
 } from './discovery.activities';
 import { appendRunEvent } from '../discovery/run2/run-events';
+import { corroborateCompanyBeforeFit } from '../discovery/run2/corroboration-enrichment';
+import { scopeIndependentEnrichment } from '../discovery/enrichment-identity';
 import type { FailureStage } from '../discovery/judgment/failure-codes';
 import { withClassifiedFailure } from './pipeline-failure-activity';
 
@@ -309,6 +311,7 @@ export function createRun2PipelineActivities(deps: {
       reason?: string;
     }> {
       const binding = await ensureRunBudget(args);
+      await corroborateCompanyBeforeFit(deps, args, binding);
       const setup = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         const source = await tx.dataProvider.findUnique({
           where: { key: WEBSITE_PROFILE_PROVIDER_KEY },
@@ -497,7 +500,7 @@ export function createRun2PipelineActivities(deps: {
         const projectUrl = company?.domain && projectPageWithinQuotedSlots(args.enrichmentSlot) && mode === 'enforce' && (scene === 'factory_direct' || scene === 'equipment_integration')
           ? await loadRunProjectPage(tx, { ...args, domain: company.domain, now: new Date() })
           : undefined;
-        const attributes = scopeRunProjectEvidence(company?.attributes, projectUrl);
+        const attributes = scopeRunProjectEvidence(company ? scopeIndependentEnrichment(company) : undefined, projectUrl);
         return { icpBrief, company: company ? { ...company, attributes } : null };
       });
       if (!loaded.company) return { judged: false, verdict: null, skipped: true };
