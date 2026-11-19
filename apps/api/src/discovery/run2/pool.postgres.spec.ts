@@ -3,6 +3,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { loadQuickScanPool } from './pool';
 import { createRun2Activities } from '../../temporal/discovery.run2.activities';
+import { createRun2PipelineActivities } from '../../temporal/discovery.run2.pipeline.activities';
 
 const url = process.env.RUN_EVENTS_TEST_DATABASE_URL;
 if (url) {
@@ -121,4 +122,56 @@ describe.runIf(Boolean(url))('provisional recovery on PostgreSQL', () => {
       expect(result.companies.every((company) => company.name.startsWith('owned pool fixture'))).toBe(true);
     } finally { await clean(f.workspaceId);await clean(foreign.workspaceId); }
   }, 60_000);
+  it('gives later quick matches the first quoted evidence slots while retaining RLS and deterministic ties', async () => {
+    const f = await fixture(); const foreign = await fixture();
+    try {
+      const matches = Array.from({ length: 4 }, () => randomUUID());
+      const weak = Array.from({ length: 60 }, () => randomUUID());
+      const excluded = [randomUUID(), randomUUID()];
+      await owner.canonicalCompany.createMany({ data: [...weak, ...matches, ...excluded].map(id =>
+        ({ id, workspaceId: f.workspaceId, name: `priority fixture ${id}`, dedupeKey: id })) });
+      await owner.discoveryCompanyJob.createMany({ data: [
+        ...weak.map(id => ({ workspaceId: f.workspaceId, runId: f.runId, canonicalCompanyId: id,
+          stage: 'quick_judged', verdictQuick: 'weak', createdAt: new Date('2026-01-01T00:00:00Z') })),
+        ...matches.map(id => ({ workspaceId: f.workspaceId, runId: f.runId, canonicalCompanyId: id,
+          stage: 'quick_judged', verdictQuick: 'match', createdAt: new Date('2026-02-01T00:00:00Z') })),
+        { workspaceId: f.workspaceId, runId: f.runId, canonicalCompanyId: excluded[0]!, verdictQuick: 'mismatch' },
+        { workspaceId: f.workspaceId, runId: f.runId, canonicalCompanyId: excluded[1]!, verdictQuick: null },
+      ] });
+      const other = await foreign.canonical('foreign match');
+      await owner.discoveryCompanyJob.create({ data: { workspaceId: foreign.workspaceId, runId: foreign.runId,
+        canonicalCompanyId: other.id, verdictQuick: 'match' } });
+      const acts = createRun2PipelineActivities({ prisma: { withWorkspace: f.withWorkspace } as never,
+        gateway: {} as never, providers: {} as never });
+      const first = await acts.listDeepTargets({ workspaceId: f.workspaceId, runId: f.runId });
+      const second = await acts.listDeepTargets({ workspaceId: f.workspaceId, runId: f.runId });
+      expect(first.companyIds).toHaveLength(64);
+      expect(first.companyIds.slice(0, 4)).toEqual([...matches].sort());
+      expect(first.companyIds.slice(4)).toEqual([...weak].sort());
+      expect(first.companyIds.slice(0, 50)).toEqual(expect.arrayContaining(matches));
+      for (const id of excluded) expect(first.companyIds).not.toContain(id);
+      expect(first.companyIds).not.toContain(other.id);
+      expect(second.companyIds).toEqual(first.companyIds);
+    } finally { await clean(f.workspaceId); await clean(foreign.workspaceId); }
+  }, 60_000);
+
+  it('keeps the 500-target cap without letting earlier weak jobs displace matches', async () => {
+    const f = await fixture();
+    try {
+      const matches = Array.from({ length: 501 }, () => randomUUID());
+      const weak = Array.from({ length: 10 }, () => randomUUID());
+      await owner.canonicalCompany.createMany({ data: [...weak, ...matches].map(id =>
+        ({ id, workspaceId: f.workspaceId, name: `cap fixture ${id}`, dedupeKey: id })) });
+      await owner.discoveryCompanyJob.createMany({ data: [...weak.map(id => ({ workspaceId: f.workspaceId,
+        runId: f.runId, canonicalCompanyId: id, verdictQuick: 'weak', createdAt: new Date('2026-01-01T00:00:00Z') })),
+        ...matches.map(id => ({ workspaceId: f.workspaceId, runId: f.runId, canonicalCompanyId: id,
+          verdictQuick: 'match', createdAt: new Date('2026-02-01T00:00:00Z') }))] });
+      const acts = createRun2PipelineActivities({ prisma: { withWorkspace: f.withWorkspace } as never,
+        gateway: {} as never, providers: {} as never });
+      const result = await acts.listDeepTargets({ workspaceId: f.workspaceId, runId: f.runId });
+      expect(result.companyIds).toHaveLength(500);
+      expect(result.companyIds).toEqual([...matches].sort().slice(0, 500));
+    } finally { await clean(f.workspaceId); }
+  }, 60_000);
+
 });
