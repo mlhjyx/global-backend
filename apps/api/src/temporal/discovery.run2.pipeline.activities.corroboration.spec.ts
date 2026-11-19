@@ -164,9 +164,12 @@ describe('Run2 independent corroboration before fit', () => {
 
   it.each([
     [new Error('upstream unavailable'), 'provider_failed'],
+    [new Error('WIKIDATA_RATE_LIMITED'), 'rate_limited'],
+    [new Error('WIKIDATA_RATE_LIMITED_COOLDOWN'), 'not_executed_rate_limited'],
     [new ToolPolicyDenied('gleif.fetch', 'source_policy'), 'policy_blocked'],
   ])('distinguishes source failures from a normal miss: %s', async (error, status) => {
     const h = harness(); h.enrichCompany.mockRejectedValue(error);
+    if (status.includes('rate_limited')) h.routeEnrichment.mockResolvedValue([{ key: 'wikidata', enrichCompany: h.enrichCompany }]);
     await h.acts.profileCompanyOnce(ARGS);
     expect(h.tx.runEvent.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
       payload: expect.objectContaining({ status }),

@@ -808,7 +808,7 @@ jobs:
         run: |
           set -euo pipefail
           pnpm --filter @global/db exec prisma migrate deploy
-          pnpm --filter @global/api exec vitest run src/discovery/run2/run-events.postgres.spec.ts
+          pnpm --filter @global/api exec vitest run src/discovery/run2/run-events.postgres.spec.ts src/discovery/run2/pool.postgres.spec.ts
 
       # The operator sanctions refresh writes the official lists through the refresh service's
       # owner transaction: entities only, refresh metadata updated, status untouched, a repeat

@@ -1,4 +1,5 @@
 import { types } from 'node:util';
+import { ALL_CLAIM_PROPERTIES, ENTITY_PROPERTIES, STRING_PROPERTIES, WIKIDATA_COMPANY_KEYS } from './wikidata-entity-properties';
 import { normForMatch } from '../discovery/name-match';
 import { normalizePersonName } from '../discovery/person-name';
 import type { TypedProjectionSchema } from './durable-result-strategy';
@@ -41,19 +42,9 @@ const TOOL_RESULT_KEYS = ['data', 'costCents', 'degraded'] as const;
 const TOOL_RESULT_WITH_PROVENANCE_KEYS = [...TOOL_RESULT_KEYS, 'provenance'] as const;
 const PROVENANCE_KEYS = ['sourceUrl', 'fetchedAt', 'contentHash', 'parserVersion'] as const;
 const SEARX_RESULT_KEYS = ['url', 'title'] as const;
-const WIKIDATA_COMPANY_KEYS = [
-  'qid', 'name', 'website', 'employees', 'countryCode', 'latitude', 'longitude',
-] as const;
 const OSM_PLACE_KEYS = [
   'osmId', 'name', 'website', 'city', 'countryCode', 'latitude', 'longitude', 'tags',
 ] as const;
-const ENTITY_PROPERTIES = Object.freeze([
-  'P1056', 'P159', 'P17', 'P31', 'P355', 'P414', 'P452', 'P749',
-] as const);
-const STRING_PROPERTIES = Object.freeze(['P1278', 'P856', 'P946'] as const);
-const ALL_CLAIM_PROPERTIES = Object.freeze([
-  ...ENTITY_PROPERTIES, 'P1128', ...STRING_PROPERTIES, 'P571',
-] as const);
 const GLEIF_RECORD_KEYS = [
   'lei', 'legalName', 'legalFormId', 'entityStatus', 'registrationStatus',
   'country', 'city', 'hasDirectParent', 'hasUltimateParent',
@@ -416,8 +407,12 @@ function statementValue(value: unknown): {
     'mainsnak', 'qualifiers', 'qualifiers-order', 'id', 'type', 'rank', 'references',
   ], ['mainsnak']);
   const mainsnak = ownDataRecord(field(statement, 'mainsnak'), [
-    'datavalue', 'snaktype', 'property', 'datatype',
+    'datavalue', 'snaktype', 'property', 'datatype', 'hash',
   ], []);
+  if (hasDefinedField(mainsnak, 'hash')) {
+    const hash = field(mainsnak, 'hash');
+    if (typeof hash !== 'string' || !/^[a-f0-9]{40}$/u.test(hash)) projectionInvalid();
+  }
   if (!hasDefinedField(mainsnak, 'datavalue')) return null;
   const datavalue = ownDataRecord(field(mainsnak, 'datavalue'), ['value', 'type'], ['value']);
   return {
@@ -564,9 +559,14 @@ function projectEntity(entityId: string, value: unknown): UnknownRecord {
   if (!/^Q[1-9][0-9]*$/.test(entityId)) projectionInvalid();
   const entity = ownDataRecord(value, [
     'claims', 'labels', 'id', 'type', 'pageid', 'ns', 'title',
-    'lastrevid', 'modified', 'sitelinks',
+    'lastrevid', 'modified', 'sitelinks', 'missing',
   ], []);
   assertCanonicalEntityMetadata(entity);
+  if (hasDefinedField(entity, 'missing')) {
+    const missing = field(entity, 'missing');
+    if ((missing !== '' && missing !== true) || hasDefinedField(entity, 'labels') || hasDefinedField(entity, 'claims')) projectionInvalid();
+    return { entityId };
+  }
   let label: unknown;
   if (hasDefinedField(entity, 'labels')) {
     const labels = ownOpenDataRecord(field(entity, 'labels'));
