@@ -61,6 +61,8 @@ export function validateCandidateAuthorization(
   now = new Date().toISOString(),
 ) {
   policyValid(policy);
+  const productGrants =
+    value?.schemaVersion === "development-candidate-authorization/v2";
   keys(value, [
     "schemaVersion",
     "environment",
@@ -73,11 +75,13 @@ export function validateCandidateAuthorization(
     "authorizedAt",
     "validUntil",
     "keyId",
-    "campaignCapMicrousd",
-    "armCapMicrousd",
+    ...(productGrants
+      ? ["budgetPolicy"]
+      : ["campaignCapMicrousd", "armCapMicrousd"]),
   ]);
   if (
-    value.schemaVersion !== "development-candidate-authorization/v1" ||
+    (!productGrants &&
+      value.schemaVersion !== "development-candidate-authorization/v1") ||
     value.environment !== "development" ||
     value.trustedWorkflowCommit !== policy.trustedWorkflowCommit ||
     !SHA.test(value.candidateCommit) ||
@@ -93,8 +97,10 @@ export function validateCandidateAuthorization(
     Date.parse(value.authorizedAt) > Date.parse(now) ||
     Date.parse(value.validUntil) <= Date.parse(now) ||
     Date.parse(value.validUntil) - Date.parse(value.authorizedAt) > DAY ||
-    value.campaignCapMicrousd !== 5_000_000 ||
-    value.armCapMicrousd !== 2_500_000
+    (productGrants
+      ? value.budgetPolicy !== "product_grants"
+      : value.campaignCapMicrousd !== 5_000_000 ||
+        value.armCapMicrousd !== 2_500_000)
   )
     fail("CANDIDATE_AUTHORIZATION_INVALID");
   return value;
@@ -124,9 +130,18 @@ export function verifyCandidateOwnerSignature(
     });
     if (!Buffer.isBuffer(bytes) || bytes.length > 65_536) fail();
     const signature = join(directory, "signature");
-    writeFileSync(signature, readCandidateInput(signaturePath, 8_192, "CANDIDATE_OWNER_SIGNATURE_INVALID"), {
-      flag: "wx", mode: 0o600,
-    });
+    writeFileSync(
+      signature,
+      readCandidateInput(
+        signaturePath,
+        8_192,
+        "CANDIDATE_OWNER_SIGNATURE_INVALID",
+      ),
+      {
+        flag: "wx",
+        mode: 0o600,
+      },
+    );
     execFileSync(
       "ssh-keygen",
       [
@@ -366,7 +381,13 @@ export function validateCandidateInstance(value) {
 
 export function candidateMarker(authorization, authorizationSha256) {
   return {
-    schemaVersion: "development-candidate-marker/v1",
+    schemaVersion:
+      authorization.schemaVersion === "development-candidate-authorization/v2"
+        ? "development-candidate-marker/v2"
+        : "development-candidate-marker/v1",
+    ...(authorization.schemaVersion === "development-candidate-authorization/v2"
+      ? { budgetPolicy: authorization.budgetPolicy }
+      : {}),
     candidateCommit: authorization.candidateCommit,
     trustedWorkflowCommit: authorization.trustedWorkflowCommit,
     authorizationSha256,
@@ -385,7 +406,10 @@ export function candidateAdmissionReceipt(
 ) {
   return {
     ...candidateMarker(authorization, authorizationSha256),
-    schemaVersion: "development-candidate-admission/v1",
+    schemaVersion:
+      authorization.schemaVersion === "development-candidate-authorization/v2"
+        ? "development-candidate-admission/v2"
+        : "development-candidate-admission/v1",
     imageReference,
     artifactDigest: predicate.artifactDigest,
     sourceTreeDigest: predicate.sourceTreeDigest,

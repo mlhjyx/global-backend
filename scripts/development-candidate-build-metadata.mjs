@@ -20,7 +20,15 @@ export function installCandidateBuildMetadata({
     if (existsSync(source)) fail();
     return;
   }
-  const marker = JSON.parse(readCandidateInput(source, 16_384, "CANDIDATE_BUILD_METADATA_INVALID").toString("utf8"));
+  const marker = JSON.parse(
+    readCandidateInput(
+      source,
+      16_384,
+      "CANDIDATE_BUILD_METADATA_INVALID",
+    ).toString("utf8"),
+  );
+  const productGrants =
+    marker?.schemaVersion === "development-candidate-marker/v2";
   const fields = [
     "schemaVersion",
     "candidateCommit",
@@ -30,11 +38,14 @@ export function installCandidateBuildMetadata({
     "instanceId",
     "workspaceIds",
     "validUntil",
+    ...(productGrants ? ["budgetPolicy"] : []),
   ];
   if (
     !marker ||
     Object.keys(marker).sort().join(",") !== fields.sort().join(",") ||
-    marker.schemaVersion !== "development-candidate-marker/v1" ||
+    (productGrants
+      ? marker.budgetPolicy !== "product_grants"
+      : marker.schemaVersion !== "development-candidate-marker/v1") ||
     marker.candidateCommit !== buildSha ||
     !/^[0-9a-f]{40}$/u.test(buildSha) ||
     !/^[0-9a-f]{40}$/u.test(marker.trustedWorkflowCommit) ||

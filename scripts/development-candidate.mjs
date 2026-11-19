@@ -90,7 +90,11 @@ function git(root, ...args) {
   ).trim();
 }
 export function readCandidateJson(path) {
-  return JSON.parse(readCandidateInput(path, 65_536, "CANDIDATE_INPUT_FILE_INVALID").toString("utf8"));
+  return JSON.parse(
+    readCandidateInput(path, 65_536, "CANDIDATE_INPUT_FILE_INVALID").toString(
+      "utf8",
+    ),
+  );
 }
 export function assertTrustedCandidateCheckout(trustedCommit) {
   if (
@@ -127,7 +131,11 @@ export function readApprovedCandidate({
     repository: "mlhjyx/global-backend",
     trustedWorkflowCommit: trustedCommit,
   };
-  const authorizationBytes = readCandidateInput(authorizationPath, 65_536, "CANDIDATE_INPUT_FILE_INVALID");
+  const authorizationBytes = readCandidateInput(
+    authorizationPath,
+    65_536,
+    "CANDIDATE_INPUT_FILE_INVALID",
+  );
   const authorization = validateCandidateAuthorization(
     JSON.parse(authorizationBytes.toString("utf8")),
     policy,
@@ -371,6 +379,8 @@ export function candidateMain(argv = process.argv.slice(2)) {
     return;
   }
   if (command === "export-budget") {
+    if (approval.authorization.budgetPolicy === "product_grants")
+      fail("CANDIDATE_EXPERIMENT_ALLOCATION_NOT_APPLICABLE");
     if (
       !values.ledger ||
       !values.configuration ||
@@ -431,8 +441,12 @@ if (
 ) {
   try {
     candidateMain();
-  } catch {
-    process.stderr.write("DEVELOPMENT_CANDIDATE_ADMISSION_FAILED\n");
+  } catch (error) {
+    const code = error instanceof Error &&
+      error.message === "CANDIDATE_EXPERIMENT_ALLOCATION_NOT_APPLICABLE"
+      ? "CANDIDATE_EXPERIMENT_ALLOCATION_NOT_APPLICABLE"
+      : "DEVELOPMENT_CANDIDATE_ADMISSION_FAILED";
+    process.stderr.write(`${code}\n`);
     process.exitCode = 1;
   }
 }

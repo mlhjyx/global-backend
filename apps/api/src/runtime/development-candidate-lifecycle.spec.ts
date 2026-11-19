@@ -130,6 +130,196 @@ afterEach(() => {
 });
 
 describe("candidate lifecycle with simulated root-owned verification mounts (no live services)", () => {
+  function installProductGrantAuthorization() {
+    const productMarker = {
+      ...marker,
+      schemaVersion: "development-candidate-marker/v2",
+      budgetPolicy: "product_grants",
+    };
+    const productReceipt = {
+      ...receipt,
+      schemaVersion: "development-candidate-admission/v2",
+      budgetPolicy: "product_grants",
+    };
+    files.set(
+      "/artifact/runtime-candidate.json",
+      JSON.stringify(productMarker),
+    );
+    files.set(
+      "/run/secrets/development-candidate/admission.json",
+      JSON.stringify(productReceipt),
+    );
+  }
+
+  it("v2 reaches the ordinary model and tool budget paths without an experimental allocation", async () => {
+    installProductGrantAuthorization();
+    const candidate = await import("./development-candidate");
+    await candidate.prepareRuntimeCandidate("/artifact", process.env);
+    expect(() => candidate.assertCandidatePhysicalExecutionAllowed()).toThrow();
+    await candidate.admitRuntimeCandidate("/artifact", build, process.env);
+    expect(candidate.runtimeCandidateContext()?.budgetPolicy).toBe(
+      "product_grants",
+    );
+    expect(() =>
+      candidate.assertCandidatePhysicalExecutionAllowed(),
+    ).not.toThrow();
+    const budget = await import("./development-candidate-budget");
+    await expect(
+      budget.assertCandidateAccountAllocated(WS[0]!, "normal-account"),
+    ).resolves.toBeUndefined();
+    await expect(
+      budget.assertCandidateAccountAllocated(
+        "other-workspace",
+        "normal-account",
+      ),
+    ).rejects.toThrow();
+    const { RouterModelGateway } =
+      await import("../model-gateway/router-model-gateway");
+    const generateText = vi.fn();
+    const route = vi.fn(() => [
+      {
+        name: "fixture",
+        model: "fixture",
+        protocol: "openai-chat",
+        modelId: "fixture",
+        protocolId: "openai-chat",
+        generateText,
+      },
+    ]);
+    const modelReserve = vi.fn(async () => {
+      throw new Error("normal-model-budget-refused");
+    });
+    const gateway = new RouterModelGateway({ route } as never, undefined, {
+      reserve: modelReserve,
+    } as never);
+    await expect(
+      gateway.generateText(
+        { task: "icp.design", prompt: "fixture", maxCostCents: 5 },
+        { workspaceId: WS[0]! },
+      ),
+    ).rejects.toThrow("normal-model-budget-refused");
+    expect(route).toHaveBeenCalledOnce();
+    expect(modelReserve).toHaveBeenCalledOnce();
+    expect(generateText).not.toHaveBeenCalled();
+    const { ToolBroker } = await import("../tools/tool-broker");
+    const { ToolRegistry } = await import("../tools/tool-registry");
+    const registry = new ToolRegistry();
+    const execute = vi.fn();
+    const reserve = vi.fn(async () => {
+      throw new Error("normal-product-budget-refused");
+    });
+    registry.register({
+      id: "fixture.external",
+      version: "1",
+      category: "search",
+      cost: { external: true, estimatedCents: 0, unit: "call" },
+      rateLimit: { rps: 1, concurrency: 1 },
+      compliance: { sourcePolicy: "none" },
+      capabilities: { produces: [], accepts: [] },
+      idempotencyKey: () => "fixture",
+      durableResultStrategy: {
+        kind: "typed_projection",
+        schema: "searxng-search/v1",
+      },
+      execute,
+    } as never);
+    const broker = new ToolBroker({
+      registry,
+      budgetStore: { reserve },
+      limiter: { configure: vi.fn() },
+    } as never);
+    await expect(
+      broker.invoke("fixture.external", {}, { workspaceId: WS[0]! }),
+    ).rejects.toThrow("normal-product-budget-refused");
+    expect(reserve).toHaveBeenCalledOnce();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("v2 still consumes its normal verified Grant through the SQL authority", async () => {
+    installProductGrantAuthorization();
+    const candidate = await import("./development-candidate");
+    await candidate.prepareRuntimeCandidate("/artifact", process.env);
+    await candidate.admitRuntimeCandidate("/artifact", build, process.env);
+    const { ExecutionBudgetAuthorityService } =
+      await import("../execution-budget/execution-budget-authority.service");
+    const consumeWorkspaceAndOpen = vi.fn(async () => {
+      throw new Error("normal-sql-budget-denied");
+    });
+    const service = new ExecutionBudgetAuthorityService(
+      {} as never,
+      { consumeWorkspaceAndOpen } as never,
+    );
+    const grant = {
+      authorityKind: "WORKSPACE_GRANT",
+      workspaceId: WS[0],
+      purpose: "icp.design",
+      subjectType: "company",
+      subjectId: "20000000-0000-4000-8000-000000000001",
+      requestSha256: "f".repeat(64),
+      tokenSha256: "e".repeat(64),
+      capMicrousd: 1_000_000n,
+    };
+    await expect(
+      service.consumeVerifiedWorkspaceGrant(grant as never),
+    ).rejects.toThrow("normal-sql-budget-denied");
+    expect(consumeWorkspaceAndOpen).toHaveBeenCalledOnce();
+  });
+
+  it.each(["expired", "denied"])(
+    "v2 %s contexts cannot dispatch after admission",
+    async (state) => {
+      installProductGrantAuthorization();
+      const candidate = await import("./development-candidate");
+      await candidate.prepareRuntimeCandidate("/artifact", process.env);
+      await candidate.admitRuntimeCandidate("/artifact", build, process.env);
+      if (state === "expired") vi.setSystemTime(EXPIRY + 1);
+      else candidate.denyRuntimeCandidate();
+      expect(() => candidate.assertCandidatePhysicalExecutionAllowed()).toThrow(
+        "EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE",
+      );
+      expect(() =>
+        candidate.assertCandidateToolExecutionAllowed({
+          cost: { external: true, estimatedCents: 0 },
+          durableResultStrategy: { kind: "typed_projection" },
+        }),
+      ).toThrow();
+    },
+  );
+
+  it.each([
+    { markerVersion: "v1", receiptVersion: "v1", mode: "product_grants" },
+    { markerVersion: "v2", receiptVersion: "v1", mode: "product_grants" },
+    { markerVersion: "v1", receiptVersion: "v2", mode: "product_grants" },
+    { markerVersion: "v2", receiptVersion: "v2", mode: "unlimited" },
+    { markerVersion: "v2", receiptVersion: "v2", mode: undefined },
+  ])(
+    "rejects mismatched version and cost mode %j",
+    async ({ markerVersion, receiptVersion, mode }) => {
+      files.set(
+        "/artifact/runtime-candidate.json",
+        JSON.stringify({
+          ...marker,
+          schemaVersion: `development-candidate-marker/${markerVersion}`,
+          budgetPolicy: mode,
+        }),
+      );
+      files.set(
+        "/run/secrets/development-candidate/admission.json",
+        JSON.stringify({
+          ...receipt,
+          schemaVersion: `development-candidate-admission/${receiptVersion}`,
+          budgetPolicy: mode,
+        }),
+      );
+      const candidate = await import("./development-candidate");
+      await candidate.prepareRuntimeCandidate("/artifact", process.env);
+      await expect(
+        candidate.admitRuntimeCandidate("/artifact", build, process.env),
+      ).rejects.toThrow();
+      expect(candidate.candidateWorkspaceAllowed(WS[0]!)).toBe(false);
+    },
+  );
+
   it("holds model and external-tool dispatch even with an admitted workspace and a zero estimate", async () => {
     const candidate = await import("./development-candidate");
     await candidate.prepareRuntimeCandidate("/artifact", process.env);

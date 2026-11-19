@@ -17,6 +17,7 @@ export interface RuntimeCandidateContext {
   readonly workspaceIds: readonly string[];
   readonly validUntil: string;
   readonly authorizationSha256: string;
+  readonly budgetPolicy?: "product_grants";
 }
 interface CandidateBuild {
   build_sha: string;
@@ -40,6 +41,7 @@ interface CandidateInstance {
 }
 interface Marker {
   schemaVersion: string;
+  budgetPolicy?: "product_grants";
   candidateCommit: string;
   trustedWorkflowCommit: string;
   authorizationSha256: string;
@@ -92,11 +94,23 @@ function databaseMatches(
 }
 
 function assertMarkerMatchesReceipt(
-  marker: Marker, receipt: Admission, build: CandidateBuild, env: NodeJS.ProcessEnv, now: number,
+  marker: Marker,
+  receipt: Admission,
+  build: CandidateBuild,
+  env: NodeJS.ProcessEnv,
+  now: number,
 ): void {
+  const productGrants =
+    marker.schemaVersion === "development-candidate-marker/v2";
   if (
-    marker.schemaVersion !== "development-candidate-marker/v1" ||
-    receipt.schemaVersion !== "development-candidate-admission/v1" ||
+    (productGrants
+      ? receipt.schemaVersion !== "development-candidate-admission/v2" ||
+        marker.budgetPolicy !== "product_grants" ||
+        receipt.budgetPolicy !== marker.budgetPolicy
+      : marker.schemaVersion !== "development-candidate-marker/v1" ||
+        receipt.schemaVersion !== "development-candidate-admission/v1" ||
+        Object.hasOwn(marker, "budgetPolicy") ||
+        Object.hasOwn(receipt, "budgetPolicy")) ||
     env.APP_ENVIRONMENT !== "development" ||
     env.NODE_ENV !== "production" ||
     !IMAGE.test(env.RUNTIME_IMAGE_REFERENCE ?? "") ||
@@ -129,8 +143,7 @@ function assertMarkerMatchesReceipt(
     "workspaceIds",
     "validUntil",
   ] as const) {
-    if (JSON.stringify(marker[key]) !== JSON.stringify(receipt[key]))
-      invalid();
+    if (JSON.stringify(marker[key]) !== JSON.stringify(receipt[key])) invalid();
   }
 }
 
@@ -194,6 +207,7 @@ export function validateRuntimeCandidate(
       workspaceIds: Object.freeze([...marker.workspaceIds]),
       validUntil: marker.validUntil,
       authorizationSha256: marker.authorizationSha256,
+      ...(marker.budgetPolicy ? { budgetPolicy: marker.budgetPolicy } : {}),
     });
   } catch {
     return invalid();
@@ -347,19 +361,24 @@ export function assertCandidateToolExecutionAllowed(tool: {
   cost: { external: boolean; estimatedCents: number };
   durableResultStrategy: { kind: string };
 }): void {
-  if (tool.cost.external || tool.cost.estimatedCents > 0 ||
-    tool.durableResultStrategy.kind !== "no_physical_call") {
+  if (
+    tool.cost.external ||
+    tool.cost.estimatedCents > 0 ||
+    tool.durableResultStrategy.kind !== "no_physical_call"
+  ) {
     assertCandidatePhysicalExecutionAllowed();
   }
 }
 
-/** Resource quota is held at zero until physical supplier exposure is proven.
- * Grant allocation bounds internal accounts; it cannot certify the ordinary
- * acquisition gateway's generic token estimates as real supplier prices.
- * There is deliberately no environment flag or self-asserted receipt to open
- * this hold. A reviewed physical-wire budget implementation is required.
+/** A verified v2 authorization uses normal product Grant accounting.
+ * The legacy experimental cap retains its physical-execution hold.
  */
 export function assertCandidatePhysicalExecutionAllowed(): void {
+  if (
+    active?.budgetPolicy === "product_grants" &&
+    candidateWorkspaceAllowed(active.workspaceIds[0] ?? "")
+  )
+    return;
   if (active || !candidateWorkspaceAllowed("")) {
     throw new ExecutionBudgetGrantError(
       "EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE",

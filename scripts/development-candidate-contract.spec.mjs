@@ -115,7 +115,12 @@ test("verifies real detached owner SSH signatures in a distinct namespace, not a
     ],
   };
   assert.equal(
-    verifyCandidateOwnerSignature(readFileSync(path), `${path}.sig`, keys, AUTH.keyId),
+    verifyCandidateOwnerSignature(
+      readFileSync(path),
+      `${path}.sig`,
+      keys,
+      AUTH.keyId,
+    ),
     true,
   );
   writeFileSync(
@@ -123,7 +128,13 @@ test("verifies real detached owner SSH signatures in a distinct namespace, not a
     JSON.stringify({ ...AUTH, campaignCapMicrousd: 50_000_000 }),
   );
   assert.throws(
-    () => verifyCandidateOwnerSignature(readFileSync(path), `${path}.sig`, keys, AUTH.keyId),
+    () =>
+      verifyCandidateOwnerSignature(
+        readFileSync(path),
+        `${path}.sig`,
+        keys,
+        AUTH.keyId,
+      ),
     /CANDIDATE_OWNER_SIGNATURE_INVALID/u,
   );
   assert.throws(() =>
@@ -328,4 +339,46 @@ test("derives marker and root-owned runtime receipt from already verified approv
   assert.equal(receipt.imageReference, IMAGE);
   assert.equal(receipt.artifactDigest, `sha256:${HASH2}`);
   assert.equal(receipt.verificationKind, "github-attestation-and-owner-ssh");
+});
+
+test("explicit v2 product-Grant policy removes only the experiment-wide cap", () => {
+  const { campaignCapMicrousd, armCapMicrousd, ...identity } = AUTH;
+  const authorization = {
+    ...identity,
+    schemaVersion: "development-candidate-authorization/v2",
+    budgetPolicy: "product_grants",
+  };
+  assert.deepEqual(
+    validateCandidateAuthorization(authorization, POLICY, NOW),
+    authorization,
+  );
+  const marker = candidateMarker(authorization, HASH2);
+  assert.equal(marker.schemaVersion, "development-candidate-marker/v2");
+  assert.equal(marker.budgetPolicy, "product_grants");
+  const admission = candidateAdmissionReceipt(
+    IMAGE,
+    authorization,
+    HASH2,
+    statement().predicate,
+    {},
+  );
+  assert.equal(admission.schemaVersion, "development-candidate-admission/v2");
+  assert.equal(admission.budgetPolicy, "product_grants");
+  for (const patch of [
+    { budgetPolicy: "unlimited" },
+    { budgetPolicy: undefined },
+    { campaignCapMicrousd: 5_000_000 },
+    { schemaVersion: "development-candidate-authorization/v1" },
+    { schemaVersion: "development-candidate-authorization/v3" },
+    { environment: "production" },
+    { validUntil: NOW },
+  ]) {
+    assert.throws(() =>
+      validateCandidateAuthorization(
+        { ...authorization, ...patch },
+        POLICY,
+        NOW,
+      ),
+    );
+  }
 });

@@ -66,3 +66,29 @@ test("missing, unknown, mismatched or oversized candidate build input is refused
     installCandidateBuildMetadata({ ...f, candidateMode: "yes" }),
   );
 });
+
+test("installs exact v2 product-Grant metadata and rejects policy/version substitution", () => {
+  const f = fixture();
+  const value = {
+    ...f.value,
+    schemaVersion: "development-candidate-marker/v2",
+    budgetPolicy: "product_grants",
+  };
+  writeFileSync(f.source, JSON.stringify(value));
+  installCandidateBuildMetadata({ ...f, candidateMode: "1" });
+  assert.deepEqual(JSON.parse(readFileSync(f.output)), value);
+  for (const patch of [
+    { schemaVersion: "development-candidate-marker/v1" },
+    { budgetPolicy: "unlimited" },
+    { budgetPolicy: undefined },
+    { validUntil: "2000-01-01T00:00:00.000Z" },
+    { candidateCommit: "f".repeat(40) },
+  ]) {
+    const invalid = fixture();
+    writeFileSync(invalid.source, JSON.stringify({ ...value, ...patch }));
+    assert.throws(() =>
+      installCandidateBuildMetadata({ ...invalid, candidateMode: "1" }),
+    );
+    assert.equal(existsSync(invalid.output), false);
+  }
+});

@@ -215,7 +215,7 @@
       "id": "development-candidate-exact-environment",
       "rule": "ENVIRONMENT_BRANCH",
       "path": "apps/api/src/runtime/development-candidate.ts",
-      "match_sha256": "sha256:8f89f5109655db6ac1796e2a66165a1c03b683a1aa45f77a7a784a08658d70f5",
+      "match_sha256": "sha256:572ebcab79e312e960687126f368a5d8a066a76af5e07517599f6ea50fef4aa5",
       "category": "trust",
       "reason": "User-confirmed development candidate trust direction, 2026-11-15: an externally verified, root-mounted candidate approval may narrow only development environment, instance, workspace and immutable build identities; ordinary release business algorithms, JWKS, RLS, ToolBroker and settlement are unchanged."
     },

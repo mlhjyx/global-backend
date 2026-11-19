@@ -11,7 +11,7 @@ The candidate must contain the approved trusted bootstrap baseline and cannot mo
 
 The workflow separates a build job without signing/registry privileges from its trusted publisher. Before registry credentials are present, that publisher checks revision/user/entrypoint, validates extracted filesystem bytes with protected main code, and compares the actual marker to the owner-approved marker. It publishes only to `ghcr.io/mlhjyx/global-backend-development-candidate`, reads back the exact config digest, and stores a custom attestation in GitHub's attestation storage. The deployment CLI runs `gh attestation verify` itself, fixing repo, workflow, trusted commit, main source-ref and predicate. A JSON string saying VERIFIED is not proof.
 
-Owner approval is a real detached SSH signature in the distinct `development-candidate-authorization` namespace, verified against the protected owner-key registry. It binds source/tree, trusted builder, instance manifest digest, two workspaces, development, validity of at most 24 hours and USD 5/2.50 caps. Direction approval does not replace an exact-source receipt. Agents do not inspect private keys or sign with substitute owner identities.
+Owner approval is a real detached SSH signature in the distinct `development-candidate-authorization` namespace, verified against the protected owner-key registry. It binds source/tree, trusted builder, instance manifest digest, two workspaces, development, validity of at most 24 hours and its explicit budget policy. Version 1 retains USD 5/2.50 caps. Version 2 declares `budgetPolicy=product_grants`, following the owner's 2026-11-18 withdrawal of the experiment-wide cap. Direction approval does not replace an exact-source receipt. Agents do not inspect private keys or sign with substitute owner identities.
 
 The integration units are operator tools, runtime enforcement and publication. The complete bootstrap must first exist on protected main. Locally prepared code, tested contracts, CI-signed OCI bytes, runtime readiness and business acceptance remain separate evidence.
 
@@ -31,9 +31,9 @@ Startup begins pending-denied and checks immutable marker/build/image/source ide
 
 Scope checks run in the actual PII-extended `PrismaService.withWorkspace`, the identity guard, owner relay queries/events, HTTP/activity entry and budget reservation. Set `SWEEP_SCHEDULER_ENABLED=off` for the bounded experiment. Expiry rejects new work and requests graceful shutdown. Already admitted operations may persist results/settlement during a bounded 15-minute drain; that permission closes on completion/cancellation and cannot leak to asynchronous descendants. It never permits a new external reservation after expiry.
 
-## Conservative USD 5 allocation
+## Legacy experiment allocation and product Grant accounting
 
-Each arm has USD 2.50; A+B combined has USD 5, including profile/understanding, planning, sources/extraction, website enrichment, judging/panels, verification and retries. Existing product SQL remains account-scoped; platform campaign authority is not reused.
+The following allocation rules apply to version 1. Each arm has USD 2.50; A+B combined has USD 5, including profile/understanding, planning, sources/extraction, website enrichment, judging/panels, verification and retries. Existing product SQL remains account-scoped; platform campaign authority is not reused.
 
 `CandidateBudgetLedger` is an operator-only private SQLite ledger. `BEGIN IMMEDIATE` transactions allocate the entire upper bound of each normal SaaS Grant **before** requesting it. Slices are non-reclaimable in this campaign, including unused, failed, expired or UNKNOWN issuance. Duplicate identities are idempotent; conflicting reuse fails. A crash after issuance intent does not authorize another issuer request. Never reset the ledger or open another campaign to make occupied capacity disappear.
 
@@ -43,7 +43,15 @@ Both normal Grant consumption methods require the exact verified token's allocat
 
 These are upper-bound accounting controls, not vendor invoices. Before real dispatch, freeze actual aliases/protocol/credential scope and prices, and independently establish physical-call input/output/repair upper bounds. Do not trust an understated estimate, reclaim UNKNOWN exposure or claim that a local ledger alone proves the actual USD 5 fee limit. If quote/provable exposure does not fit, shrink the bounded sample or mark that scene 未测.
 
-**Current hard hold:** the ordinary acquisition gateway uses task estimates and a generic token conversion when the supplier does not return cost. Source tools also have estimated prices. Those values have not been established as supplier upper bounds. The candidate's physical-execution resource quota is therefore zero: ModelGateway rejects before routing/reserving, and ToolBroker rejects external, estimated-paid or physical-result tools before reserving/executing, including zero-price estimates. The stable error is `EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE`. There is no environment flag or self-issued proof that opens this hold. Ordinary releases retain their existing behavior; this work does not claim to repair their pricing debt. A reviewed actual physical-wire price/reservation implementation and its negative/concurrency/retry evidence are still required before this candidate can conduct A/B. Grant allocation or successful startup alone cannot open it.
+**Version 1 physical-execution hold:** the ordinary acquisition gateway uses task estimates and a generic token conversion when the supplier does not return cost. Source tools also have estimated prices. Those values have not been established as supplier upper bounds. A version 1 candidate's physical-execution resource quota is therefore zero: ModelGateway rejects before routing/reserving, and ToolBroker rejects external, estimated-paid or physical-result tools before reserving/executing, including zero-price estimates. The stable error is `EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE`. There is no environment flag or self-issued proof that opens this hold. Ordinary releases retain their existing behavior; this work does not claim to repair their pricing debt. A reviewed actual physical-wire price/reservation implementation and its negative/concurrency/retry evidence are still required before this candidate can conduct A/B. Grant allocation or successful startup alone cannot open it.
+
+### Version 2 product accounting
+
+A separately signed v2 authorization declares `budgetPolicy=product_grants`. The build marker and verified admission receipt carry v2 versions and the same policy, which the runtime validates before establishing its context. V1 records retain their original interpretation. Policy injection into v1, mismatched versions and unknown policies fail admission.
+
+An admitted and currently valid v2 context uses normal SaaS Grant verification, SQL authority consumption and the ordinary model/tool budget reservation and settlement paths. Experimental SQLite allocation and its export are inapplicable to v2. The CLI rejects `export-budget` for that policy. Per-request Grants remain finite and request-bound, actual usage stays recorded, and existing UNKNOWN handling remains in force. The experiment has no additional total monetary ceiling.
+
+Prepared-but-unadmitted, expired or explicitly denied contexts remain closed. The existing exact-source owner signature, CI artifact verification, tenant restrictions and isolated runtime checks determine admission.
 
 ## Operator boundary
 

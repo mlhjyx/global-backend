@@ -47,10 +47,13 @@ function cap(value: unknown, maximum: number): value is number {
   );
 }
 
-function assertSnapshotScope(snapshot: Snapshot, context: RuntimeCandidateContext, now: number): void {
+function assertSnapshotScope(
+  snapshot: Snapshot,
+  context: RuntimeCandidateContext,
+  now: number,
+): void {
   if (
-    snapshot.schemaVersion !==
-      "development-candidate-budget-allocations/v1" ||
+    snapshot.schemaVersion !== "development-candidate-budget-allocations/v1" ||
     snapshot.authorizationSha256 !== context.authorizationSha256 ||
     snapshot.campaignId !== context.instanceId ||
     !Number.isFinite(Date.parse(snapshot.expiresAt)) ||
@@ -159,7 +162,7 @@ export async function assertCandidateGrantAllocated(
 ): Promise<void> {
   assertCandidateWorkspaceAllowed(authority.workspaceId ?? "");
   const context = runtimeCandidateContext();
-  if (!context) return;
+  if (!context || context.budgetPolicy === "product_grants") return;
   try {
     validateCandidateBudgetAllocation(
       await readCandidateBudgetCache(),
@@ -176,7 +179,7 @@ export async function assertCandidateAccountAllocated(
 ): Promise<void> {
   assertCandidateWorkspaceAllowed(workspaceId);
   const context = runtimeCandidateContext();
-  if (!context) return;
+  if (!context || context.budgetPolicy === "product_grants") return;
   try {
     validateCandidateBudgetAllocation(
       await readCandidateBudgetCache(),

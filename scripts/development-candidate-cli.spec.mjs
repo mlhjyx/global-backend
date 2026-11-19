@@ -7,6 +7,7 @@ import {
   readFileSync,
   writeFileSync,
   chmodSync,
+  existsSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,7 +19,7 @@ import {
   candidateMarker,
 } from "./development-candidate-contract.mjs";
 
-function fixture() {
+function fixture(productGrants = false) {
   const dir = mkdtempSync(join(tmpdir(), "candidate-cli-"));
   const trusted = join(dir, "trusted"),
     candidate = join(dir, "candidate");
@@ -140,7 +141,9 @@ function fixture() {
     readOnlyRoot: true,
   };
   const authorization = {
-    schemaVersion: "development-candidate-authorization/v1",
+    schemaVersion: productGrants
+      ? "development-candidate-authorization/v2"
+      : "development-candidate-authorization/v1",
     environment: "development",
     trustedWorkflowCommit: trustedCommit,
     candidateCommit: git(candidate, "rev-parse", "HEAD"),
@@ -151,8 +154,9 @@ function fixture() {
     authorizedAt: new Date(Date.now() - 1000).toISOString(),
     validUntil: new Date(Date.now() + 3600_000).toISOString(),
     keyId: "fixture-owner",
-    campaignCapMicrousd: 5_000_000,
-    armCapMicrousd: 2_500_000,
+    ...(productGrants
+      ? { budgetPolicy: "product_grants" }
+      : { campaignCapMicrousd: 5_000_000, armCapMicrousd: 2_500_000 }),
   };
   const auth = join(dir, "authorization.json"),
     manifest = join(dir, "instance.json");
@@ -215,7 +219,9 @@ test("approval digest binds the same bytes that the owner signed", () => {
   const original = readFileSync(f.auth);
   const bin = join(f.dir, "bin");
   mkdirSync(bin);
-  writeFileSync(join(bin, "ssh-keygen"), `#!${process.execPath}
+  writeFileSync(
+    join(bin, "ssh-keygen"),
+    `#!${process.execPath}
 const { spawnSync } = require("node:child_process");
 const { readFileSync, appendFileSync } = require("node:fs");
 const check = spawnSync("ssh-keygen", process.argv.slice(2), {
@@ -223,7 +229,9 @@ const check = spawnSync("ssh-keygen", process.argv.slice(2), {
 });
 if (check.status === 0) appendFileSync(process.env.FIXTURE_AUTH, " ");
 process.exit(check.status ?? 1);
-`, { mode: 0o700 });
+`,
+    { mode: 0o700 },
+  );
   const result = f.run("validate-inputs", ["--output", approved], {
     PATH: `${bin}:${process.env.PATH}`,
     FIXTURE_ORIGINAL_PATH: process.env.PATH,
@@ -231,7 +239,10 @@ process.exit(check.status ?? 1);
   });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(readFileSync(f.auth).length, original.length + 1);
-  assert.equal(JSON.parse(readFileSync(approved)).authorizationSha256, sha256Hex(original));
+  assert.equal(
+    JSON.parse(readFileSync(approved)).authorizationSha256,
+    sha256Hex(original),
+  );
 });
 
 test("real CLI verifies an owner signature and exports only committed candidate material", () => {
@@ -455,4 +466,49 @@ test("budget export stays linked to owner-approved instance and complete non-rec
     ]).status,
     0,
   );
+});
+
+test("signed v2 CLI prepares its exact marker and rejects experimental budget export", () => {
+  const f = fixture(true);
+  const approved = join(f.dir, "approved-v2.json");
+  const check = f.run("validate-inputs", ["--output", approved]);
+  assert.equal(check.status, 0, check.stderr);
+  const output = join(f.dir, "build-v2");
+  const result = f.run("prepare-build", [
+    "--candidate-root",
+    f.candidate,
+    "--output",
+    output,
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const marker = JSON.parse(
+    readFileSync(join(output, "runtime-candidate.json")),
+  );
+  assert.equal(marker.schemaVersion, "development-candidate-marker/v2");
+  assert.equal(marker.budgetPolicy, "product_grants");
+  const budgetOutput = join(f.dir, "not-created.json");
+  const budget = f.run("export-budget", [
+    "--ledger",
+    join(f.dir, "missing.sqlite"),
+    "--configuration",
+    join(f.dir, "missing.json"),
+    "--output",
+    budgetOutput,
+  ]);
+  assert.notEqual(budget.status, 0);
+  assert.match(
+    budget.stderr,
+    /CANDIDATE_EXPERIMENT_ALLOCATION_NOT_APPLICABLE/u,
+  );
+  assert.equal(existsSync(budgetOutput), false);
+  writeFileSync(
+    f.auth,
+    JSON.stringify({ ...f.authorization, budgetPolicy: "unlimited" }),
+  );
+  const changed = f.run("validate-inputs", [
+    "--output",
+    join(f.dir, "tampered.json"),
+  ]);
+  assert.notEqual(changed.status, 0);
+  assert.equal(existsSync(join(f.dir, "tampered.json")), false);
 });
