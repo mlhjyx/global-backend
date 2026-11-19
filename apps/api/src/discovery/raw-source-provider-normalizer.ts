@@ -342,8 +342,12 @@ function normalizeProvenance(
       const osmId = String(record(payload.attributes)?.osm_id ?? "");
       if (
         parsed.protocol !== "https:" ||
-        parsed.hostname !== "www.openstreetmap.org" ||
-        parsed.pathname !== `/${osmId}` ||
+        parsed.username !== "" || parsed.password !== "" ||
+        parsed.search !== "" || parsed.hash !== "" ||
+        /[?#]/u.test(sourceUrl) || /^https:\/\/[^/]*@/iu.test(sourceUrl) ||
+        (parsed.port !== "" && parsed.port !== "443") ||
+        !(sourceUrl === "https://overpass-api.de/api/interpreter" ||
+          (parsed.hostname === "www.openstreetmap.org" && parsed.pathname === `/${osmId}`)) ||
         !/^(?:node|way|relation)\/\d{1,20}$/u.test(osmId)
       ) {
         return null;
@@ -358,10 +362,15 @@ function normalizeProvenance(
       const publication = String(
         record(record(payload.attributes)?.ted)?.publication_number ?? "",
       );
+      const detail = /^\/[a-z]{2}\/notice\/-\/detail\/(\d{1,9}(?:-\d{4})?)$/u.exec(parsed.pathname);
       if (
         parsed.protocol !== "https:" ||
-        parsed.hostname !== "ted.europa.eu" ||
-        !parsed.pathname.endsWith(`/${publication}`) ||
+        parsed.username !== "" || parsed.password !== "" ||
+        parsed.search !== "" || parsed.hash !== "" ||
+        /[?#]/u.test(sourceUrl) || /^https:\/\/[^/]*@/iu.test(sourceUrl) ||
+        (parsed.port !== "" && parsed.port !== "443") ||
+        !(sourceUrl === "https://api.ted.europa.eu/v3/notices/search" ||
+          (parsed.hostname === "ted.europa.eu" && detail?.[1] === publication)) ||
         !/^\d{1,9}(?:-\d{4})?$/u.test(publication)
       ) {
         return null;
