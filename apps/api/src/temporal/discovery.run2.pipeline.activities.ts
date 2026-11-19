@@ -179,7 +179,7 @@ export function createRun2PipelineActivities(deps: {
     mayUse(workspaceId, companyId);
 
   const activities = {
-    /** 深挖目标：本 run 快扫判为 match/weak 的公司（上限 500，设计 Q8）。 */
+    /** 深挖目标：match 先于 weak 分配已有补证名额，同级稳定排序；上限仍为 500（Q8）。 */
     async listDeepTargets(args: { workspaceId: string; runId: string }): Promise<{ companyIds: string[] }> {
       const jobs = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
         tx.discoveryCompanyJob.findMany({
@@ -187,7 +187,7 @@ export function createRun2PipelineActivities(deps: {
             runId: args.runId,
             verdictQuick: { in: ['match', 'weak'] },
           },
-          orderBy: { createdAt: 'asc' },
+          orderBy: [{ verdictQuick: 'asc' }, { createdAt: 'asc' }, { canonicalCompanyId: 'asc' }],
           take: DEEP_JOB_CAP,
           select: { canonicalCompanyId: true },
         }),
