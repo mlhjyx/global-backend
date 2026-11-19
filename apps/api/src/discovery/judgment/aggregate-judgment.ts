@@ -51,6 +51,8 @@ const HARD_FAIL_CRITERIA: readonly CriterionId[] = ['C1_MATERIAL', 'C2_ROLE'];
 export interface AggregateJudgmentInput {
   evidence: EvidenceValidationReport;
   output: JudgeOutputV2;
+  /** Criteria a scenario must substantiate even when the model reports them as not applicable. */
+  requiredCriteria?: readonly CriterionId[];
 }
 
 export interface CriterionAggregation {
@@ -93,16 +95,7 @@ function pushReason(
   if (!reasons.includes(code)) reasons.push(code);
 }
 
-/**
- * R0–R4 聚合。调用方必须先用 `validateJudgeOutputV2` 校验结构、用
- * `validateEvidence` 校验证据；本函数对缺失/重复 criterion 直接抛错（编程错误，
- * 不允许静默降级）。
- */
-export function aggregateJudgment(
-  input: AggregateJudgmentInput,
-): AggregationResult {
-  const { output, evidence } = input;
-
+function indexedCriteria(output: JudgeOutputV2): Map<CriterionId, JudgeOutputV2['criteria'][number]> {
   if (output.criteria.length !== CRITERION_IDS.length) {
     throw new Error(
       `judge-aggregate: expected ${CRITERION_IDS.length} criteria, got ${output.criteria.length}`,
@@ -121,6 +114,21 @@ export function aggregateJudgment(
     }
   }
 
+  return byId;
+}
+
+/**
+ * R0–R4 聚合。调用方必须先用 `validateJudgeOutputV2` 校验结构、用
+ * `validateEvidence` 校验证据；本函数对缺失/重复 criterion 直接抛错（编程错误，
+ * 不允许静默降级）。
+ */
+export function aggregateJudgment(
+  input: AggregateJudgmentInput,
+): AggregationResult {
+  const { output, evidence } = input;
+
+  const byId = indexedCriteria(output);
+
   const reasons: JudgmentReasonCode[] = [];
   const injection: CriterionId[] = [];
   const criteria: CriterionAggregation[] = [];
@@ -134,10 +142,13 @@ export function aggregateJudgment(
     if (!validation) {
       throw new Error(`judge-aggregate: evidence report missing ${id}`);
     }
-    const applicable = criterion.applicable;
+    const required = input.requiredCriteria?.includes(id) === true;
+    const applicable = criterion.applicable || required;
     let effectiveLabel = criterion.label;
 
-    if (!applicable) {
+    if (required && !criterion.applicable) {
+      effectiveLabel = 'unclear';
+    } else if (!applicable) {
       effectiveLabel = 'not_applicable';
     } else if (validation.injectionDetected) {
       // R0：证据命中了页面内嵌指令 → 该 criterion 不可信。

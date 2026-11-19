@@ -97,6 +97,38 @@ describe('aggregate-judgment R0–R4（P3 J10）', () => {
     expect(result.gates.hardFail).toBe(false);
   });
 
+  it('does not accept a procurement match when the model marks a required use criterion inapplicable', () => {
+    const judgeOutput = output({
+      C3_PROCESS: { applicable: false, score: null, label: 'not_applicable', evidence: [] },
+    });
+    const evidence = validateEvidence(judgeOutput.criteria, {
+      now: NOW, snapshotFetchedAt: FRESH, snapshotText: SNAPSHOT, urlPolicy: () => ({ allowed: true }),
+    });
+    expect(aggregateJudgment({ output: judgeOutput, evidence }).verdict).toBe('FIT');
+    const prospective = aggregateJudgment({
+      output: judgeOutput, evidence, requiredCriteria: ['C1_MATERIAL', 'C2_ROLE', 'C3_PROCESS', 'C4_BUSINESS_MODEL'],
+    });
+    expect(prospective.verdict).toBe('UNKNOWN');
+    expect(prospective.gates.evidenceGate).toBe(true);
+  });
+
+  it.each(['', '  \n\t '])('rejects blank procurement evidence %j even when every criterion scores eight', (span) => {
+    const judgeOutput = output();
+    for (const item of judgeOutput.criteria) {
+      if (item.applicable) item.evidence = [{ kind: 'website', url: 'https://example.com/', span, fetched_at: FRESH }];
+    }
+    const evidence = validateEvidence(judgeOutput.criteria, {
+      now: NOW, snapshotFetchedAt: FRESH, snapshotText: '{}', urlPolicy: () => ({ allowed: true }),
+    });
+    const result = aggregateJudgment({
+      output: judgeOutput, evidence,
+      requiredCriteria: ['C1_MATERIAL', 'C2_ROLE', 'C3_PROCESS', 'C4_BUSINESS_MODEL'],
+    });
+    expect(result.verdict).toBe('UNKNOWN');
+    expect(result.gates.evidenceGate).toBe(true);
+    expect(evidence.byCriterion.C3_PROCESS.flags).toContain('EVIDENCE_SPAN_NOT_FOUND');
+  });
+
   it('权重按适用集重新归一：C5 不适用时其余四项权重和为 1', () => {
     const result = run(output());
     const weighted = result.criteria.filter((item) => item.weight !== null);

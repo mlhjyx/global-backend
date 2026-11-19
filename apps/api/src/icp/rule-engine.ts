@@ -1,3 +1,5 @@
+import { lookupCountryIso } from '../discovery/vocab';
+
 /**
  * Deterministic qualification-rule engine (LED-003/004, PRD 7.5).
  * AI proposes rules; THIS code decides — evaluation must be reproducible and
@@ -91,9 +93,9 @@ function asArray(v: unknown): unknown[] {
 }
 
 /** any element of a equals (ci) any element of b */
-function anyEqual(a: unknown[], b: unknown[]): boolean {
-  const bn = b.map(norm);
-  return a.some((x) => bn.includes(norm(x)));
+function anyEqual(a: unknown[], b: unknown[], normalize = norm): boolean {
+  const bn = b.map(normalize);
+  return a.some((x) => bn.includes(normalize(x)));
 }
 
 /** any element of haystack contains (substring, ci) any element of needles */
@@ -105,6 +107,12 @@ function anyContains(haystack: unknown[], needles: unknown[]): boolean {
   });
 }
 
+function equalityNormalizer(field: string): typeof norm {
+  return normField(field) === 'country'
+    ? (value: unknown) => norm(lookupCountryIso(norm(value)) ?? value)
+    : norm;
+}
+
 export function evaluateRule(rule: RuleLike, attributes: Record<string, unknown>): RuleOutcome {
   const attr = getAttr(attributes, rule.field);
   if (attr === undefined || attr === null || (typeof attr === 'string' && !attr.trim())) {
@@ -112,16 +120,20 @@ export function evaluateRule(rule: RuleLike, attributes: Record<string, unknown>
   }
   const attrArr = asArray(attr);
   const valArr = asArray(rule.value);
+  // Canonical company countries use ISO2; ICP rules may retain a localized name.
+  // Apply the existing alias vocabulary only to country equality, preserving
+  // literal comparisons on other fields and explicit substring/regex semantics.
+  const equalityNorm = equalityNormalizer(rule.field);
 
   switch (rule.operator) {
     case 'eq':
-      return anyEqual(attrArr, valArr) ? 'pass' : 'fail';
+      return anyEqual(attrArr, valArr, equalityNorm) ? 'pass' : 'fail';
     case 'neq':
-      return anyEqual(attrArr, valArr) ? 'fail' : 'pass';
+      return anyEqual(attrArr, valArr, equalityNorm) ? 'fail' : 'pass';
     case 'in':
-      return anyEqual(attrArr, valArr) ? 'pass' : 'fail';
+      return anyEqual(attrArr, valArr, equalityNorm) ? 'pass' : 'fail';
     case 'not_in':
-      return anyEqual(attrArr, valArr) ? 'fail' : 'pass';
+      return anyEqual(attrArr, valArr, equalityNorm) ? 'fail' : 'pass';
     case 'contains':
       return anyContains(attrArr, valArr) ? 'pass' : 'fail';
     case 'not_contains':

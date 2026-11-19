@@ -406,7 +406,7 @@ function bySpecificity(
  *    record's own domain, the company-site policy.
  * 3. Otherwise none.
  */
-function governingPolicy(
+export function governingPolicy(
   provenance: { host: string | null; hostname: string | null },
   providerKey: string,
   recordDomain: unknown,

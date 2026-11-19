@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { readProjectPageEvidence } from "./website-profile/project-page-evidence";
 import type { EnrichmentResult } from './provider-contract';
 import { loadCompanyForSuppressionSafeWrite } from './company-suppression-gate';
 import {
@@ -128,7 +129,9 @@ export async function commitCompanyEnrichmentResults(
           confidence: hit.result.confidence,
           license: 'public',
           allowedActions: ['display', 'match'] as Prisma.InputJsonValue,
-          ...(sourceUrl ? { sourceUrl } : {}),
+          ...(field === 'project_evidence' && hit.key === 'website_profile'
+            ? { sourceUrl: readProjectPageEvidence(value)!.source_url }
+            : sourceUrl ? { sourceUrl } : {}),
           ...(hit.result.provenance ? { fetchedAt: new Date(hit.result.provenance.fetchedAt) } : {}),
         },
       });

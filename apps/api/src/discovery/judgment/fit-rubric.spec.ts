@@ -135,6 +135,21 @@ describe('fit-v2 rubric（P3 J09）', () => {
     }
   });
 
+  it.each([
+    ['factory_direct', '工厂直采', '自用工厂'],
+    ['equipment_integration', '设备或工程配套', '工程选型'],
+  ] as const)('uses a separately identified rubric for %s', (procurementScenario, label, evidence) => {
+    const prompt = buildJudgePrompt({
+      icpBrief: '德国工业泵', companySnapshot: 'candidate evidence', procurementScenario,
+    });
+    expect(prompt.rubricVersion).toBe('fit-v2-procurement-' + procurementScenario + '-v1');
+    expect(prompt.promptHash).not.toBe(PROMPT_HASH);
+    expect(prompt.system).toContain(label);
+    expect(prompt.system).toContain(evidence);
+    expect(prompt.system).not.toContain(RUBRIC_CRITERIA[1]!.anchors['10']);
+    expect(prompt.system).not.toContain(RUBRIC_CRITERIA[3]!.anchors['10']);
+  });
+
   it('prompt 构造器只替换占位符、hash 稳定', () => {
     const prompt = buildJudgePrompt({
       icpBrief: '德国金属加工进口商，50-200 人',

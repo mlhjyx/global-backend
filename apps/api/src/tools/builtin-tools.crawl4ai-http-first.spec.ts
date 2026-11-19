@@ -24,6 +24,29 @@ afterEach(() => {
 });
 
 describe('crawl4ai.fetch 的 HTTP-first 分级（PR-A）', () => {
+  it('does not send an exact evidence request if HTTP-first is disabled', async () => {
+    process.env.HTTP_FIRST_FETCH = 'off';
+    const fetchHttpFirst = vi.fn();
+    const crawlUrl = vi.fn();
+    const tool = makeTool({ fetchHttpFirst, crawlUrl });
+    const out = await tool.execute({ url: 'https://acme.example/project', exactHtml: true }, ctx);
+    expect(out.data.text).toBe('');
+    expect(fetchHttpFirst).not.toHaveBeenCalled();
+    expect(crawlUrl).not.toHaveBeenCalled();
+  });
+
+  it('strict evidence requests bypass normal cache and never fall back to rendering', async () => {
+    const url = 'https://acme.example/referenzen/';
+    const fetchHttpFirst = vi.fn(async () => null);
+    const renderer = vi.fn();
+    const tool = makeTool({ fetchHttpFirst, crawlUrl: renderer });
+    const input = { url, exactHtml: true as const };
+    expect(tool.idempotencyKey!(input)).not.toBe(tool.idempotencyKey!({ url }));
+    expect((await tool.execute(input, ctx)).data.text).toBe('');
+    expect(fetchHttpFirst).toHaveBeenCalledWith(url, expect.objectContaining({ exactUrl: true }));
+    expect(renderer).not.toHaveBeenCalled();
+  });
+
   it('serves a readable page over plain HTTP without invoking the renderer', async () => {
     const crawlUrl = vi.fn();
     const tool = makeTool({

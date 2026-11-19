@@ -54,6 +54,7 @@ interface StoredRaw {
   dispositionCode: string | null;
   retentionDays: number;
   snapshot: Record<string, unknown>;
+  sourceUrl: string | null;
 }
 
 const ROLLBACK = new Error("raw source policy test rollback");
@@ -152,11 +153,11 @@ describe.runIf(enabled)("Raw source policy binding on PostgreSQL", { timeout: 60
     ...overrides,
   });
 
-  function publicWebRecord(domain: string): unknown {
+  function publicWebRecord(domain: string, page = `https://${domain}/produkte`): unknown {
     return mapPublicWebCompanyToRecord({
       domain,
-      hitUrls: [`https://${domain}/produkte`],
-      sourceText: `- Pumpen GmbH\n  URL: https://${domain}/produkte`,
+      hitUrls: [page],
+      sourceText: `- Pumpen GmbH\n  URL: ${page}`,
       extracted: {
         is_company_site: true,
         name: "Pumpen Müller GmbH",
@@ -219,7 +220,7 @@ describe.runIf(enabled)("Raw source policy binding on PostgreSQL", { timeout: 60
         stored = (
           await tx.$queryRaw<StoredRaw[]>`
             SELECT ingest_status AS "ingestStatus", disposition_code AS "dispositionCode",
-              retention_days AS "retentionDays", source_policy_snapshot AS snapshot
+              retention_days AS "retentionDays", source_policy_snapshot AS snapshot, source_url AS "sourceUrl"
             FROM raw_source_record WHERE id = ${receipt.id}::uuid`
         )[0];
         throw ROLLBACK;
@@ -248,6 +249,7 @@ describe.runIf(enabled)("Raw source policy binding on PostgreSQL", { timeout: 60
       dispositionCode: row.dispositionCode,
       retentionDays: row.retentionDays,
       snapshot: row.sourcePolicySnapshot,
+      sourceUrl: row.sourceUrl,
     });
   }
 
@@ -301,6 +303,29 @@ describe.runIf(enabled)("Raw source policy binding on PostgreSQL", { timeout: 60
           policyId: COMPANY_SITE_ID,
         }),
       );
+    });
+
+    it("keeps an exact www project PDF through source policy and persistence", async () => {
+      const page = `https://www.${site}/files/pump_project.pdf`;
+      await withPolicies([companySite()], async () => {
+        const row = await prepare("public_web", publicWebRecord(site, page));
+        expect(row).toMatchObject({ ingestStatus: "ACCEPTED", sourceUrl: page });
+        expect(await persist("public_web", row)).toMatchObject({ ingestStatus: "ACCEPTED", sourceUrl: page });
+      });
+    });
+
+    it("refuses a www project address on a different company domain at the database writer", async () => {
+      await withPolicies([companySite()], async () => {
+        const row = await prepare("public_web", publicWebRecord(site));
+        expect(row.ingestStatus).toBe("ACCEPTED");
+        const wrongUrl = `https://www.not-${site}/anlagenbau`;
+        const payload = row.payload as { provenance: Record<string, unknown> };
+        await expect(persist("public_web", {
+          ...row,
+          sourceUrl: wrongUrl,
+          payload: { ...payload, provenance: { ...payload.provenance, sourceUrl: wrongUrl } },
+        })).rejects.toThrow(/RAW_SOURCE_WRITER_ORIGIN_BINDING_INVALID/u);
+      });
     });
 
     it.each([

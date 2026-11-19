@@ -39,6 +39,8 @@ import {
   WebsiteProfileProvider,
   type WebsiteProfile,
 } from '../discovery/providers/website-profile.provider';
+import { loadRunProjectPage, scopeRunProjectEvidence } from '../discovery/website-profile/run-project-page';
+import { readProjectPageEvidence } from '../discovery/website-profile/project-page-evidence';
 import { targetCountryCodes } from '../discovery/search-localization';
 import { artifactSubjectSkipReason } from '../tools/artifact-subject-denial';
 import { isPublicHttpTransportFailure } from '../adapters/guarded-http';
@@ -68,6 +70,7 @@ import {
   ENRICH_COMPANY_BUDGET_CAP_MICROUSD,
   ENRICH_SOFT_DEADLINE_MS,
   MAX_RUN_EMAIL_PROBES_PER_COMPANY,
+  MAX_DISCOVERY_PROFILE_COMPANIES,
 } from '../discovery/execution-envelope';
 import { enrichCompanyContacts } from '../enrichment/waterfall/enrich-company-contacts';
 import { CapBudget, CompositeBudget } from '../enrichment/waterfall/enrichment-budget';
@@ -95,6 +98,11 @@ export interface CompanyPipelineActivityInput {
   companyId: string;
   executionContractVersion?: number;
   executionBudget?: unknown;
+  enrichmentSlot?: number;
+}
+
+function projectPageWithinQuotedSlots(slot: number | undefined): boolean {
+  return slot !== undefined && Number.isInteger(slot) && slot >= 0 && slot < MAX_DISCOVERY_PROFILE_COMPANIES;
 }
 
 const DEEP_JOB_CAP = 500;
@@ -319,11 +327,17 @@ export function createRun2PipelineActivities(deps: {
           where: { id: args.companyId },
           select: { id: true, name: true, domain: true, country: true, attributes: true },
         });
-        return { contactPaths: contactSource?.status === 'ENABLED', icp, company };
+        const projectUrl = company?.domain && projectPageWithinQuotedSlots(args.enrichmentSlot) && judgeContractMode() === 'enforce'
+          ? await loadRunProjectPage(tx, { ...args, domain: company.domain, now: new Date() })
+          : undefined;
+        return { contactPaths: contactSource?.status === 'ENABLED', icp, company, projectUrl };
       });
       if (!setup?.company?.domain) return { profiled: false, matched: false, unclassified: false, reason: 'no_domain_or_provider' };
       const nowMs = Date.now();
-      if (websiteProfileFreshAndCurrent(setup.company.attributes, setup.contactPaths, nowMs)) {
+      const storedProfile = (setup.company.attributes as { website_profile?: { project_evidence?: unknown } } | null)?.website_profile;
+      const sameProject = !setup.projectUrl ||
+        readProjectPageEvidence(storedProfile?.project_evidence, setup.company.domain)?.source_url === setup.projectUrl;
+      if (sameProject && websiteProfileFreshAndCurrent(setup.company.attributes, setup.contactPaths, nowMs)) {
         return { profiled: false, matched: false, unclassified: false, reason: 'fresh' };
       }
       if (!(await mayUse(args.workspaceId, args.companyId))) {
@@ -352,6 +366,7 @@ export function createRun2PipelineActivities(deps: {
             homeCountry,
             icpContext: icpProductContext(setup.icp?.companyAttributes),
             contactPaths: setup.contactPaths,
+            ...(setup.projectUrl ? { projectUrl: setup.projectUrl } : {}),
           },
           {
             workspaceId: args.workspaceId,
@@ -466,7 +481,7 @@ export function createRun2PipelineActivities(deps: {
       // shadow 评估但只记录（v1 产出照旧）；enforce 下 FAIL 在模型调用前拦截（NOT_FIT）。
       const mode = judgeContractMode();
       const loaded = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-        const icpBrief = await loadIcpBrief(tx, args.icpId);
+        const icpBrief = await loadIcpBrief(tx, args.icpId, args.runId);
         const company = await tx.canonicalCompany.findUnique({
           where: { id: args.companyId },
           select: {
@@ -478,7 +493,12 @@ export function createRun2PipelineActivities(deps: {
             attributes: true,
           },
         });
-        return { icpBrief, company };
+        const scene = icpBrief.procurement_scenario?.id;
+        const projectUrl = company?.domain && projectPageWithinQuotedSlots(args.enrichmentSlot) && mode === 'enforce' && (scene === 'factory_direct' || scene === 'equipment_integration')
+          ? await loadRunProjectPage(tx, { ...args, domain: company.domain, now: new Date() })
+          : undefined;
+        const attributes = scopeRunProjectEvidence(company?.attributes, projectUrl);
+        return { icpBrief, company: company ? { ...company, attributes } : null };
       });
       if (!loaded.company) return { judged: false, verdict: null, skipped: true };
       if (!(await mayUse(args.workspaceId, args.companyId))) {

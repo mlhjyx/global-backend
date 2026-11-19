@@ -1,5 +1,6 @@
 import {
   isContactFreeText,
+  isCompanySourceHost,
   isProviderCompanyName,
   isSecretFreeText,
   isStableSafeHttpsUrl,
@@ -766,7 +767,6 @@ function validProviderBindings(
     case "directory":
       // `attributes.source_directory` 由 normalizeDomain 生成（小写、去 www.）；binding 比较
       // 必须用同一规范化，否则来自 www 主机的名录页记录全部被判「源站不符」而拒绝
-      // （2026-11-06 真实 run：cmpe360.com 的 41 条记录全部 PROVIDER_PAYLOAD_SCHEMA_INVALID）。
       return (
         (typeof payload.domain === "string"
           ? payload.externalId === `directory:${payload.domain}`
@@ -826,7 +826,7 @@ function validProviderBindings(
       );
     }
     case "public_web":
-      return payload.externalId === payload.domain && host === payload.domain;
+      return payload.externalId === payload.domain && isCompanySourceHost(host, payload.domain);
     case "opencorporates": {
       const oc = record(attributes.opencorporates);
       const identifier = record(payload.identifier);

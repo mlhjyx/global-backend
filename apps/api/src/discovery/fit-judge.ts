@@ -13,6 +13,12 @@ import { isExecutionControlError } from '../execution-budget/execution-control-e
 import { applyDomainAckConsumerTransaction } from '../durable-results/domain-ack-consumer-bindings';
 import type { DurableExecutionReceipt } from '../durable-results/durable-execution-receipt';
 import { icpTradeRole } from './icp-trade-role';
+import {
+  buyerProcurementCriteria,
+  buyerProcurementQualificationSystem,
+  readBuyerProcurementScenario,
+  readBuyerScenarioFromPlan,
+} from './buyer-procurement-scenarios';
 import type { EvidenceUrlPolicy } from './judgment/evidence-validate';
 import type { TradeRole } from './search-localization';
 import {
@@ -43,6 +49,7 @@ export interface IcpBrief {
   icp_name?: string;
   /** Deterministic ICP trade role (design §4 step 8); the judge's role and business-model gates follow it. */
   icp_trade_role?: TradeRole | null;
+  procurement_scenario?: ReturnType<typeof buyerProcurementCriteria>;
   company_attributes?: unknown;
   exclusions?: unknown;
   target_markets?: unknown;
@@ -261,17 +268,31 @@ function applyCorroborationToV1(
 }
 
 /** 事务内加载 ICP 摘要（供判定 prompt）。ICP 不存在时返回空对象（与既有行为一致）。 */
-export async function loadIcpBrief(tx: Prisma.TransactionClient, icpId: string,
+export async function loadIcpBrief(tx: Prisma.TransactionClient, icpId: string, runId?: string,
 ): Promise<IcpBrief | Record<string, never>> {
   const icp = await tx.icpDefinition.findUnique({ where: { id: icpId }, include: { company: true },
   });
   if (!icp) return {};
+  const run = runId ? await tx.discoveryRun.findFirst({
+    where: { id: runId, icpId }, select: { planId: true },
+  }) : null;
+  const plan = run ? await tx.discoveryQueryPlan.findFirst({
+    where: { id: run.planId, icpId }, select: { queries: true },
+  }) : null;
+  const scenario = runId
+    ? readBuyerScenarioFromPlan(plan?.queries)
+    : readBuyerProcurementScenario(icp.companyAttributes);
+  const companyAttributes = runId && readBuyerProcurementScenario(icp.companyAttributes)
+    ? Object.fromEntries(Object.entries(icp.companyAttributes as object).filter(([key]) => key !== 'procurement_scenario'))
+    : icp.companyAttributes;
   return {
     seller: icp.company?.name ?? 'unknown',
     seller_summary: icp.company?.summary ?? null,
     icp_name: icp.name,
-    icp_trade_role: icpTradeRole(icp.companyAttributes),
-    company_attributes: icp.companyAttributes,
+    icp_trade_role: scenario === 'distribution' ? 'distributor'
+      : scenario ? null : icpTradeRole(icp.companyAttributes),
+    ...(scenario ? { procurement_scenario: buyerProcurementCriteria(scenario) } : {}),
+    company_attributes: companyAttributes,
     exclusions: icp.exclusions,
     target_markets: icp.targetMarkets,
   };
@@ -445,7 +466,7 @@ async function judgeFitCompanyV1(
           null,
           2,
         )}\n\n判断该候选是否为卖方的真实目标客户，输出中文理由。`,
-        system: contract.description,
+        system: buyerProcurementQualificationSystem(contract.description, icpBrief.procurement_scenario),
         model: contract.model,
         schema: contract.outputSchema,
       },

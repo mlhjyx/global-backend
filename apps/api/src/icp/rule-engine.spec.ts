@@ -22,6 +22,41 @@ describe('evaluateRule', () => {
     expect(evaluateRule(rule({}), { industry: 'software' })).toBe('fail');
   });
 
+  it.each([
+    ['DE', '德国', 'eq', 'pass'],
+    ['德国', 'de', 'eq', 'pass'],
+    ['DE', ' Germany ', 'eq', 'pass'],
+    ['Deutschland', 'DE', 'eq', 'pass'],
+    ['AT', '德国', 'eq', 'fail'],
+    ['DE', '德国', 'neq', 'fail'],
+    ['AT', '德国', 'neq', 'pass'],
+    ['DE', ['德国', '奥地利'], 'in', 'pass'],
+    [['DE', 'CH'], ['德国'], 'in', 'pass'],
+    ['DE', ['德国', '奥地利'], 'not_in', 'fail'],
+    ['CH', ['德国', '奥地利'], 'not_in', 'pass'],
+  ] as const)('country aliases: %j %s %j → %s', (actual, value, operator, expected) => {
+    expect(evaluateRule(rule({ field: 'country', operator, value }), { country: actual })).toBe(expected);
+  });
+
+  it('country normalization does not loosen unrelated fields or pattern operators', () => {
+    expect(evaluateRule(rule({ field: 'industry', value: '德国' }), { industry: 'DE' })).toBe('fail');
+    expect(evaluateRule(rule({ field: 'region', value: '德国' }), { region: 'DE' })).toBe('fail');
+    expect(evaluateRule(rule({ field: 'country', operator: 'contains', value: '德国' }), { country: 'DE' })).toBe('fail');
+    expect(evaluateRule(rule({ field: 'country', operator: 'matches', value: '^DE$' }), { country: 'DE' })).toBe('pass');
+    expect(evaluateRule(rule({ field: 'country', value: '德国' }), {})).toBe('unknown');
+    expect(evaluateRule(rule({ field: 'country', value: '德国' }), { country: '' })).toBe('unknown');
+    expect(evaluateRule(rule({ field: 'country', value: '德国' }), { country: 'unknown-market' })).toBe('fail');
+  });
+
+  it('equivalent country aliases preserve positive exclusion and allowed-country rules', () => {
+    const allowed: RuleLike[] = [{ kind: 'MUST_HAVE', field: 'country', operator: 'eq', value: '德国' }];
+    expect(qualify(allowed, { country: 'DE' }).verdict).toBe('match');
+    expect(qualify(allowed, { country: 'AT' }).verdict).toBe('no_match');
+    const excluded: RuleLike[] = [{ kind: 'EXCLUSION', field: 'country', operator: 'in', value: ['德国'] }];
+    expect(qualify(excluded, { country: 'DE' }).verdict).toBe('exclude');
+    expect(qualify(excluded, { country: 'AT' }).verdict).toBe('match');
+  });
+
   it('缺失属性 → unknown（不硬判）', () => {
     expect(evaluateRule(rule({}), {})).toBe('unknown');
     expect(evaluateRule(rule({}), { industry: '' })).toBe('unknown');

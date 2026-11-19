@@ -791,3 +791,8 @@ export function normalizeRawSourceProviderPayload(
     ].flatMap(([key, item]) => (item === undefined ? [] : [[key, item]])),
   );
 }
+
+/** Matches a company's own source host, including one leading www alias. */
+export function isCompanySourceHost(host: string, domain: unknown): boolean {
+  return host === domain || host.replace(/^www\./u, "") === domain;
+}

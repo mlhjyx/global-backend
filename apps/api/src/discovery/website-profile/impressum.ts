@@ -34,9 +34,10 @@ const REGISTER_RE = /\bH\s?R\s?([AB])\b\s*(?:Nr\.?|-?Nummer)?\s*[:.]?\s*(\d{1,6}
 const COURT_RE = /(?:Amtsgerichts?|Registergericht):?\s+(?:AG\s+)?(?!Amtsgericht)([A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]*(?:[ -](?!H\s?R\s?[AB]\b)[A-ZÄÖÜ][A-Za-zÄÖÜäöüß.-]*)?(?:\s*\([^)\n]{1,40}\))?)/u;
 const VAT_RE = /\bDE\s?(\d{3})\s?(\d{3})\s?(\d{3})\b/gu;
 const CAPITAL_FORM_RE =
-  /\b(?:GmbH\s*&\s*Co\.?\s*KG(?:aA)?|GmbH|gGmbH|AG|SE|KGaA|UG\s*\(haftungsbeschränkt\)|eG)(?![\p{L}\p{N}])/u;
+  /\b(?:GmbH\s*&\s*Co\.?\s*KG(?:aA)?|Gesellschaft\s+mit\s+beschr(?:ä|ae)nkter\s+Haftung|GmbH|gGmbH|AG|SE|KGaA|UG\s*\(haftungsbeschränkt\)|eG)(?![\p{L}\p{N}])/u;
 const NON_NAME_LINE_RE =
   /gesch(?:ä|ae)ftsf(?:ü|ue)hr|vorstand|inhaber|vertreten|aufsichtsrat|amtsgericht|registergericht|handelsregister|registernummer|\bust\b|ust-?id|umsatzsteuer|steuernummer|steuer-?nr|telefon|\btel\b|\bfax\b|e-?mail|\bsitz\b|copyright|©|datenschutz|http|www\.|verantwortlich|§/iu;
+const SITE_INTRODUCTION_RE = /^Diese\s+(?:Webseite|Website|Internetseite)\s+(?:ist\s+ein\s+Angebot|wird\s+betrieben)\b/iu;
 const MAX_NAME_LENGTH = 120;
 
 /** German Impressum labels whose value is the company's postal address. */
@@ -127,9 +128,9 @@ function parseLegalName(text: string): string | null {
   for (const raw of text.split('\n')) {
     const line = cleanLine(raw);
     if (!line || line.length > MAX_NAME_LENGTH) continue;
-    if (NON_NAME_LINE_RE.test(line)) continue;
+    if (NON_NAME_LINE_RE.test(line) || SITE_INTRODUCTION_RE.test(line)) continue;
     const form = CAPITAL_FORM_RE.exec(line);
-    if (!form) continue;
+    if (!form || form.index === 0) continue;
     // A legal name ends with its company form: drop taglines after it.
     const name = line.slice(0, form.index + form[0].length).trim();
     if (/:/u.test(name)) continue;
@@ -186,6 +187,17 @@ export function scanRegisterNumbers(
     out.push({ type: `HR${match[1]}` as 'HRA' | 'HRB', number: match[2]! });
   }
   return out;
+}
+
+/** Distinct entries of the same register type cannot be assigned to one website profile. */
+export function hasConflictingRegisterNumbers(text: string): boolean {
+  const firstByType = new Map<ImpressumRegister['type'], string>();
+  for (const { type, number } of scanRegisterNumbers(text)) {
+    const first = firstByType.get(type);
+    if (first !== undefined && first !== number) return true;
+    firstByType.set(type, number);
+  }
+  return false;
 }
 
 export function parseImpressum(text: string): ParsedImpressum {

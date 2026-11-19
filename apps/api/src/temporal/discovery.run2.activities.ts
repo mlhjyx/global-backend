@@ -1,3 +1,4 @@
+import { loadQuickScanPool } from '../discovery/run2/pool';
 import { createHash } from 'node:crypto';
 import { Context } from '@temporalio/activity';
 import { CancelledFailure } from '@temporalio/common';
@@ -38,6 +39,9 @@ import {
   companyMayUseExternalProcessingMany,
 } from '../discovery/company-suppression-gate';
 import { ExternalActionDeniedError } from '../model-gateway/providers/provider-output-error';
+import {
+  buyerProcurementQualificationSystem,
+} from '../discovery/buyer-procurement-scenarios';
 import {
   QUICK_JUDGE_BATCH_SIZE,
   QUICK_JUDGE_OUTPUT_SCHEMA,
@@ -164,41 +168,21 @@ export function createRun2Activities(deps: {
      * prefiltered_out 与 queued 两类写进 discovery_company_job，受 500 家/run 上限约束。
      */
     async prefilterPool(
-      args: Run2ActivityInput & { limit?: number },
-    ): Promise<{ poolSize: number; candidates: number; prefilteredOut: number }> {
+      args: Run2ActivityInput & { limit?: number; planId?: string; afterProcurementSearch?: true },
+    ): Promise<{ poolSize: number; candidates: number; prefilteredOut: number; requiresProcurementSearch?: true }> {
       await ensureRunBudget(args);
       const limit = Math.min(Math.max(args.limit ?? QUICK_SCAN_POOL_LIMIT, 1), QUICK_SCAN_POOL_LIMIT);
 
-      const { rules, poolSize, companies } = await deps.prisma.withWorkspace(
+      const { rules, poolSize, companies, requiresProcurementSearch } = await deps.prisma.withWorkspace(
         args.workspaceId,
         async (tx) => {
-          const rules = await tx.qualificationRule.findMany({
-            where: { icpId: args.icpId },
-            select: { id: true, kind: true, field: true, operator: true, value: true, weight: true },
-          });
-          const where = {
-            status: { not: 'SUPPRESSED' as const },
-            NOT: { leads: { some: { icpId: args.icpId, fitVerdict: { not: null } } } },
-          };
-          const poolSize = await tx.canonicalCompany.count({ where });
-          const companies = await tx.canonicalCompany.findMany({
-            where,
-            orderBy: [{ lastSeenAt: { sort: 'desc' as const, nulls: 'last' as const } }, { createdAt: 'desc' as const }],
-            take: limit,
-            select: {
-              id: true,
-              name: true,
-              domain: true,
-              country: true,
-              industry: true,
-              employeeCount: true,
-              revenueUsd: true,
-              attributes: true,
-            },
-          });
-          return { rules, poolSize, companies };
+          return loadQuickScanPool(tx, args, limit);
         },
       );
+
+      if (requiresProcurementSearch && !args.afterProcurementSearch) {
+        return { poolSize: 0, candidates: 0, prefilteredOut: 0, requiresProcurementSearch: true };
+      }
 
       let candidates = 0;
       let prefilteredOut = 0;
@@ -254,7 +238,9 @@ export function createRun2Activities(deps: {
         }),
       );
 
-      return { poolSize, candidates, prefilteredOut };
+      return {
+        poolSize, candidates, prefilteredOut,
+      };
     },
 
     /**
@@ -303,7 +289,7 @@ export function createRun2Activities(deps: {
                 },
               })
             : [];
-          const icpBrief = ids.length ? await loadIcpBrief(tx, args.icpId) : {};
+          const icpBrief = ids.length ? await loadIcpBrief(tx, args.icpId, args.runId) : {};
           return { jobs, companies, icpBrief };
         },
       );
@@ -543,7 +529,7 @@ export function createRun2Activities(deps: {
                 {
                   task: task.id,
                   prompt: buildQuickJudgePrompt(icpBrief, eligible.map((entry) => entry.company as PrefilterCompany)),
-                  system: task.description,
+                  system: buyerProcurementQualificationSystem(task.description, icpBrief.procurement_scenario),
                   model: task.model,
                   schema: QUICK_JUDGE_OUTPUT_SCHEMA,
                 },

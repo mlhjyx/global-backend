@@ -88,9 +88,9 @@ export const MAX_DIRECTORY_PAGINATION = 3 as const;
 export const MAX_SINGLE_SEARCH_WIRES_PER_QUERY = 1 as const;
 
 // Post-discovery stages of one run, and their per-company wires.
-/** Website profile (G3 5.4b): before fit, homepage + Impressum per company, at most one model call. */
+/** Website profile (G3 5.4b): before fit, homepage + Impressum + at most one first-party project page, one model call. */
 export const MAX_DISCOVERY_PROFILE_COMPANIES = 50 as const;
-export const MAX_WEBSITE_PROFILE_FETCHES_PER_COMPANY = 2 as const;
+export const MAX_WEBSITE_PROFILE_FETCHES_PER_COMPANY = 3 as const;
 /** BI-14 contact paths (switch company_contact): the linked contact page, rendered to look for a form. */
 export const MAX_WEBSITE_PROFILE_RENDERS_PER_COMPANY = 1 as const;
 export const MAX_DISCOVERY_ENRICH_COMPANIES = 50 as const;

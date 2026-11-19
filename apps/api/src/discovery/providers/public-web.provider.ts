@@ -1,3 +1,4 @@
+import { readBuyerProcurementScenario } from '../buyer-procurement-scenarios';
 import { createHash } from 'node:crypto';
 import { resolveMx } from 'node:dns/promises';
 import {
@@ -31,11 +32,12 @@ import { cleanEmail } from '../../acquisition/clean';
 import { canonicalizeSuppressionValue } from '../suppression-value';
 import { isAllowedByRobots } from '../../adapters/robots';
 import { normalizeDomain } from '../identity';
+import { companyProjectPageUrl } from '../website-profile/project-page-evidence';
 import {
   MAX_PUBLIC_WEB_CONTACT_LINKED_PAGES,
   MAX_PUBLIC_WEB_DOMAINS_PER_QUERY,
 } from '../execution-envelope';
-import { isControlledBusinessTerm, isStableSafeHttpsUrl } from '../raw-source-provider-normalizer';
+import { isContactFreeText, isControlledBusinessTerm, isStableSafeHttpsUrl } from '../raw-source-provider-normalizer';
 import { COUNTRY_ISO, lookupCountryIso } from '../vocab';
 import { sanitizeEvidenceUrl } from '../../site-builder/agents/evidence-ref';
 import {
@@ -87,11 +89,13 @@ const NOISE_DOMAINS = [
 
 const JUDGE_CONCURRENCY = 5;
 const MAX_HITS_PER_DOMAIN = 3;
+const MAX_DOCUMENT_HITS_PER_DOMAIN = 20;
+const MAX_DOCUMENT_TITLE_CHARS = 160;
 const MAX_SEARCH_EVIDENCE_CHARS = 4_000;
 /** Raw governance stores at most 20 products and 20 keywords (TypeScript boundary and database writer alike). */
 const MAX_RAW_TERMS = 20;
 
-type SearchHit = Readonly<{ url: string; title: string }>;
+type SearchHit = Readonly<{ url: string; title: string; document?: true }>;
 
 export interface ExtractedCompany {
   is_company_site: boolean;
@@ -159,10 +163,6 @@ export class PublicWebDiscoveryProvider
         }),
       };
     }
-    const blocked = new Set((opts?.blockedDomains ?? []).map((d) => d.toLowerCase()));
-    // Domains this run already accepted: search overlap across a plan's queries is heavy, and
-    // judging one again only spends model calls to produce a record ingestion would discard.
-    const known = new Set((opts?.knownExternalIds ?? []).map((d) => d.toLowerCase()));
     const searches = buildSearchQueries(query);
     // P2 §2.3：被剥离的词留痕（规划器关键词语言与目标市场不一致的直接证据；截断防日志放大）。
     {
@@ -197,33 +197,10 @@ export class PublicWebDiscoveryProvider
       };
     }
     const language = searchLanguageFor(query);
-    const targetTlds = targetCountryTlds(query);
-    // G3（规格 2026-09-24 §3）：搜索优先、建档后再抓——发现阶段只用搜索结果判站，不抓任何页面。
-    const candidates = new Map<string, SearchHit[]>(); // domain → 该域名的搜索命中（按出现顺序）
-
     const perQuery: SearxngSearchResult[][] = [];
     for (const q of searches) perQuery.push(await this.search(q, language, ctx));
-    // Round-robin across queries so each role query contributes candidates
-    // before the per-query domain cap applies.
-    const interleaved: SearxngSearchResult[] = [];
-    for (let i = 0; perQuery.some((results) => i < results.length); i += 1) {
-      for (const results of perQuery) if (results[i]) interleaved.push(results[i]!);
-    }
-    for (const r of interleaved) {
-      const domain = normalizeDomain(r.url);
-      if (!domain) continue;
-      if (NOISE_DOMAINS.some((n) => domain === n || domain.endsWith(`.${n}`))) continue;
-      if (blocked.has(domain)) continue;
-      if (known.has(domain)) continue;
-      if (isForeignCountryDomain(domain, targetTlds)) continue;
-      const hits = candidates.get(domain) ?? [];
-      if (hits.length < MAX_HITS_PER_DOMAIN && !hits.some((h) => h.url === r.url)) {
-        hits.push({ url: r.url, title: r.title ?? '' });
-      }
-      candidates.set(domain, hits);
-    }
-
-    const domains = [...candidates.keys()].slice(0, MAX_PUBLIC_WEB_DOMAINS_PER_QUERY);
+    const candidates = collectPublicWebCandidateHits(perQuery, query, opts);
+    const domains = [...candidates.keys()];
     const dedup = new Map<string, ProviderCompanyRecord>();
     const observations: DiscoveryCompanyReceiptObservation[] = [];
     const extractionCalls: Array<Readonly<{ failureReason?: string }>> = [];
@@ -359,10 +336,12 @@ export class PublicWebDiscoveryProvider
     }
     this.log(`✓ ${domain}: ${name}`);
 
+    const scenario = readBuyerProcurementScenario(query.filters);
     return Object.freeze({
       record: mapPublicWebCompanyToRecord({
         domain,
         hitUrls: hits.map((hit) => hit.url),
+        preferProjectPage: scenario === 'factory_direct' || scenario === 'equipment_integration',
         sourceText: text,
         extracted: out,
         sourceClass: query.sourceClass,
@@ -521,6 +500,8 @@ export function mapPublicWebCompanyToRecord(args: {
   domain: string;
   /** URLs of this domain's search hits, in result order. */
   hitUrls: readonly string[];
+  /** Procurement evidence may re-read a found HTML page after normal source admission. */
+  preferProjectPage?: boolean;
   sourceText: string;
   extracted: ExtractedCompany;
   sourceClass: SourceClass;
@@ -548,7 +529,7 @@ export function mapPublicWebCompanyToRecord(args: {
       source_class: args.sourceClass,
     },
     provenance: {
-      sourceUrl: sourcePageUrl(domain, args.hitUrls),
+      sourceUrl: sourcePageUrl(domain, args.hitUrls, args.preferProjectPage),
       fetchedAt: args.fetchedAt,
       contentHash: createHash('sha256').update(args.sourceText).digest('hex'),
       parserVersion: PARSER_VERSION,
@@ -630,30 +611,38 @@ function keepControlledTerms(terms: readonly unknown[] | undefined): string[] {
 }
 
 /**
- * Provenance page of a public_web record. Raw binds its host to `domain` exactly, in the TypeScript
- * boundary and again in the database writer, and `domain` has no leading "www." (normalizeDomain). So the
- * first search hit served from exactly that host is kept; a hit on www.<domain>, on a subdomain or over
- * plain http falls back to the home page https://<domain>/. So does a hit the database might not store
- * ({@link isStorableSourceUrl}): the writer raises on such a URL, quarantined rows included, and the raise
- * aborts the whole query's transaction.
+ * Preserve the original safe URL of an actual same-company detail page. The
+ * canonical company domain is a separate identity; the sole host alias here
+ * is one leading www, matching Raw source-policy site normalization.
  */
-function sourcePageUrl(domain: string, hitUrls: readonly string[]): string {
+function sourcePageUrl(domain: string, hitUrls: readonly string[], preferProjectPage = false): string {
+  let home: string | undefined;
+  let firstDetail: string | undefined;
   for (const hit of hitUrls) {
     const url = provenanceUrl(hit);
-    if (url && new URL(url).hostname === domain && isStorableSourceUrl(url)) return url;
+    if (!url || !isStorableSourceUrl(url)) continue;
+    const page = new URL(url);
+    if (page.hostname !== domain && page.hostname.replace(/^www\./u, '') !== domain) continue;
+    if (page.pathname !== '/') {
+      if (!preferProjectPage) return url;
+      firstDetail ??= url;
+      // Do not manufacture an HTML candidate by stripping a semantic query
+      // parameter. Ranking preference does not waive the downstream source gate.
+      if (companyProjectPageUrl(hit, domain) === url) return url;
+      continue;
+    }
+    home ??= url;
   }
-  return `https://${domain}/`;
+  return firstDetail ?? home ?? `https://${domain}/`;
 }
 
 /**
- * A source URL that both the TypeScript boundary (`isStableSafeHttpsUrl`) and the database writer
- * (`raw_source_safe_https_url_v2`) store. The database refuses every percent-escape but %20, such as an
- * umlaut path, and its contact rules read "_" as a word break where TypeScript's do not: in
- * `/Kreiselpumpe_SK-40_160` it finds a `sk-` key token that TypeScript misses. Without "%" and "_" the URL
- * is plain ASCII, on which the two sets of rules read alike.
+ * Keep the existing conservative percent-escape rule. Check underscores as
+ * word breaks too: the database contact/secret rule interprets them as such.
  */
 function isStorableSourceUrl(url: string): boolean {
-  return isStableSafeHttpsUrl(url) && !/[%_]/u.test(url);
+  return isStableSafeHttpsUrl(url) && !/%/u.test(url) &&
+    !/(?:^|[^a-z0-9])sk-[a-z0-9_-]{6,}/iu.test(url) && isContactFreeText(url.replace(/_/gu, ' '));
 }
 
 /**
@@ -730,8 +719,119 @@ function provenanceUrl(raw: string | undefined): string | null {
   return url.toString();
 }
 
+/** Shared by the provider and frozen search replays; no network or company writes. */
+export function collectPublicWebCandidateHits(
+  perQuery: readonly (readonly Pick<SearxngSearchResult, 'url' | 'title'>[])[],
+  query: CompanyDiscoveryQuery,
+  opts?: DiscoveryOptions,
+): Map<string, SearchHit[]> {
+  const blocked = new Set((opts?.blockedDomains ?? []).map((d) => d.toLowerCase()));
+  // Domains this run already accepted: search overlap across a plan's queries is heavy, and
+  // judging one again only spends model calls to produce a record ingestion would discard.
+  const known = new Set((opts?.knownExternalIds ?? []).map((d) => d.toLowerCase()));
+  const targetTlds = targetCountryTlds(query);
+  const scene = readBuyerProcurementScenario(query.filters);
+  const retainDocuments = scene === 'factory_direct' || scene === 'equipment_integration';
+  // G3（规格 2026-09-24 §3）：搜索优先、建档后再抓——发现阶段只用搜索结果判站，不抓任何页面。
+  const candidates = new Map<string, SearchHit[]>(); // domain → 该域名的搜索命中（按出现顺序）
+
+  // Round-robin across queries so each role query contributes candidates
+  // before the per-query domain cap applies.
+  const interleaved: SearxngSearchResult[] = [];
+  for (let i = 0; perQuery.some((results) => i < results.length); i += 1) {
+    for (const results of perQuery) if (results[i]) interleaved.push(results[i]!);
+  }
+  for (const r of interleaved) {
+    const domain = normalizeDomain(r.url);
+    if (!domain) continue;
+    if (NOISE_DOMAINS.some((n) => domain === n || domain.endsWith(`.${n}`))) continue;
+    if (blocked.has(domain)) continue;
+    if (known.has(domain)) continue;
+    if (isForeignCountryDomain(domain, targetTlds)) continue;
+    const hits = candidates.get(domain) ?? [];
+    // A tender portal can host many unrelated projects. Keep bounded per-file
+    // candidates without turning the portal into a company or adding model calls.
+    const documentUrl = retainDocuments ? procurementDocumentUrl(r.url) : null;
+    const url = documentUrl ?? r.url;
+    if (scene === 'equipment_integration' && !documentUrl) {
+      const catalog = engineeringCatalogVariant(url);
+      if (catalog) {
+        const priorIndex = hits.findIndex((hit) =>
+          !hit.document && engineeringCatalogVariant(hit.url)?.key === catalog.key,
+        );
+        if (priorIndex >= 0) {
+          const prior = hits[priorIndex]!;
+          // Prefer an actual unfiltered result when it was returned. Keep the
+          // original URL otherwise; never invent an unsearched evidence page.
+          if (!catalog.filtered && engineeringCatalogVariant(prior.url)?.filtered) {
+            hits[priorIndex] = { url, title: r.title ?? '' };
+          }
+          continue;
+        }
+      }
+    }
+    const bucketSize = hits.filter((hit) => Boolean(hit.document) === Boolean(documentUrl)).length;
+    const limit = documentUrl ? MAX_DOCUMENT_HITS_PER_DOMAIN : MAX_HITS_PER_DOMAIN;
+    if (bucketSize < limit && !hits.some((h) => h.url === url)) {
+      hits.push({ url, title: r.title ?? '', ...(documentUrl ? { document: true } : {}) });
+    }
+    candidates.set(domain, hits);
+  }
+
+  return new Map([...candidates.entries()].slice(0, MAX_PUBLIC_WEB_DOMAINS_PER_QUERY));
+}
+
+/**
+ * Faceted project indexes can produce many search hits for a single directory.
+ * Only collapse observed Drupal facet URLs on an index path. Query parameters
+ * that may address distinct projects, and concrete project pages/PDFs, keep
+ * their existing treatment.
+ */
+function engineeringCatalogVariant(raw: string): { key: string; filtered: boolean } | null {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password ||
+      !/\/(?:projektdatenbank|project-database)\/?$/iu.test(url.pathname)) return null;
+  const params = [...url.searchParams];
+  if (params.some(([key, value]) => !/^f\[\d+\]$/u.test(key) || !/^field_[a-z0-9_]+:.+$/iu.test(value))) {
+    return null;
+  }
+  return {
+    key: `${url.origin}${url.pathname.replace(/\/$/u, '')}`,
+    filtered: params.length > 0,
+  };
+}
+
+function procurementDocumentUrl(raw: string): string | null {
+  const url = provenanceUrl(raw);
+  if (!url || !isStorableSourceUrl(url)) return null;
+  const path = new URL(url).pathname;
+  return /\.(?:pdf|xlsx?|docx?)$/iu.test(path) ||
+    /(?:^|\/)(?:tenders?|ausschreibung(?:en)?|vergabe|referenz(?:en)?(?:-details)?|projects?|projekte)(?:\/[^/]+|-[^/]+)/iu.test(path)
+    ? url : null;
+}
+
 /** 同一域名的搜索命中 → 给模型的证据文本（标题/URL；无标题的命中不算证据）。 */
 export function searchEvidenceText(hits: readonly SearchHit[]): string {
+  if (hits.some((hit) => hit.document)) {
+    const picked: string[] = [];
+    let used = 0;
+    const ordered = [...hits.filter((hit) => hit.document), ...hits.filter((hit) => !hit.document)];
+    for (const hit of ordered) {
+      const title = hit.title.trim().replace(/\s+/gu, ' ').slice(0, MAX_DOCUMENT_TITLE_CHARS);
+      if (!title) continue;
+      const line = `- 标题：${title}\n  URL：${hit.url}`;
+      const next = used + line.length + (picked.length ? 1 : 0);
+      if (next > MAX_SEARCH_EVIDENCE_CHARS) continue; // Never provide a partial evidence URL.
+      picked.push(line);
+      used = next;
+    }
+    return picked.join('\n');
+  }
   const lines = hits
     .filter((h) => h.title.trim())
     .map((h) => `- 标题：${h.title.trim()}\n  URL：${h.url}`);
@@ -757,9 +857,12 @@ export function buildSearchQueries(query: CompanyDiscoveryQuery): string[] {
   if (!terms.length) return [];
   const roleTerms = tradeRoleTerms(tradeRoleFor(query), language);
 
-  const queries = roleTerms.length
-    ? roleTerms.map((role, i) => `${terms[i % terms.length]} ${role}`)
-    : [terms.slice(0, 2).join(' '), terms[2] ?? ''];
+  const scenario = readBuyerProcurementScenario(f);
+  const queries = scenario === 'factory_direct' || scenario === 'equipment_integration'
+    ? keywords.slice(0, 2)
+    : roleTerms.length
+      ? roleTerms.map((role, i) => `${terms[i % terms.length]} ${role}`)
+      : [terms.slice(0, 2).join(' '), terms[2] ?? ''];
   return queries
     .map((q) => q.trim())
     .filter((q, i, a) => q.length > 3 && a.indexOf(q) === i)

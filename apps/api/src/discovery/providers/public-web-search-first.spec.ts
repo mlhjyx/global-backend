@@ -17,10 +17,12 @@ vi.mock('../../adapters/robots', () => ({
 import {
   PublicWebDiscoveryProvider,
   buildSearchQueries,
+  mapPublicWebCompanyToRecord,
   searchLanguageFor,
   tradeRoleFor,
 } from './public-web.provider';
 import { getTask } from '../../ai-tasks/task-registry';
+import { prepareBuyerScenarioQueries } from '../buyer-procurement-scenarios';
 import { validateRawSourceProviderPayload } from '../raw-source-provider-schema';
 
 const CTX: ExecutionContext = {
@@ -187,6 +189,122 @@ describe('PublicWebDiscoveryProvider search-first discovery (G3 5.3)', () => {
     });
   }
 
+  it('sends the exact factory project and place to the search broker', async () => {
+    const executionBroker = searchBroker([]);
+    const planned = 'Papierfabrik Projekt Pumpenbeschaffung Leipzig';
+    const [compiled] = prepareBuyerScenarioQueries([{
+      source_class: 'public_intelligence', filters: { country: 'DE', source_hint: 'public_web' },
+      keywords: [planned], rationale: 'fixture', priority: 1,
+    }], 'factory_direct');
+    await new PublicWebDiscoveryProvider({ gateway: {} as never, broker: executionBroker })
+      .discoverCompanies(distributorQuery({ filters: compiled!.filters, keywords: compiled!.keywords }), CTX);
+    expect(executionBroker.invoke.mock.calls.map(([tool, input]) => [tool, input])).toEqual([
+      ['searxng.search', { q: planned, language: 'de' }],
+    ]);
+  });
+
+  it('keeps distinct notice URLs beyond the ordinary per-site limit without making the portal a company', async () => {
+    const ragPath = '2021-lieferung-instandhaltung-sowie-technische-begleitung-bei-der-erstmontage-von-doppelflutigen-unt';
+    const ragUrl = `https://de.openprocurements.com/tender/${ragPath}/`;
+    const portal = 'https://de.openprocurements.com';
+    const executionBroker = searchBroker([
+      { url: portal + '/tender/notice-a/', title: 'Notice A' },
+      { url: portal + '/tender/notice-b/', title: 'Notice B' },
+      { url: portal + '/cpv/42122430/', title: 'Procurement category' },
+      { url: portal + '/tender/notice-a/?utm_source=index', title: 'Notice A mirrored' },
+      { url: ragUrl, title: 'RAG Aktiengesellschaft – Lieferung von Unterwassermotor-Kreiselpumpen' },
+    ]);
+    mocks.executeStructuredTaskWithRuntime.mockResolvedValue({
+      data: { is_company_site: false }, provider: 'gateway', model: 'model', runtimeExecution: {},
+    });
+    const result = await new PublicWebDiscoveryProvider({ gateway: {} as never, broker: executionBroker })
+      .discoverCompanies(distributorQuery({
+        filters: { country: 'DE', procurement_scenario: 'equipment_integration' },
+        keywords: ['Pumpen Projekt Auslegung Deutschland'],
+      }), CTX);
+    expect(result.records).toEqual([]);
+    expect(mocks.executeStructuredTaskWithRuntime).toHaveBeenCalledOnce();
+    const prompt = mocks.executeStructuredTaskWithRuntime.mock.calls[0]?.[1].prompt as string;
+    expect(prompt).toContain(ragUrl);
+    expect(prompt).not.toContain('utm_source');
+    expect(prompt.split(portal + '/tender/notice-a/')).toHaveLength(2);
+  });
+
+  it.each(['equipment_integration', 'factory_direct'])(
+    'keeps the PDF in discovery but selects a found company HTML page for %s',
+    async (scenario) => {
+      const pdf = 'https://www.pumpenwolf-ot.de/dokumente/Referenzliste-Abwasseranlagen-2008.pdf';
+      const engineering = 'https://www.pumpenwolf-ot.de/anlagenbau';
+      const executionBroker = searchBroker([
+        { url: pdf, title: 'Referenzliste Abwasseranlagen' },
+        { url: 'https://www.pumpenwolf-ot.de/impressum', title: 'Impressum' },
+        { url: engineering, title: 'Anlagenbau für Rein- und Abwassertechnik' },
+      ]);
+      mocks.executeStructuredTaskWithRuntime.mockResolvedValue({
+        data: { is_company_site: true, name: 'Pumpen-Wolf Ostthüringen GmbH', country: 'DE' },
+        provider: 'gateway', model: 'model', runtimeExecution: {},
+      });
+      const result = await new PublicWebDiscoveryProvider({ gateway: {} as never, broker: executionBroker })
+        .discoverCompanies(distributorQuery({
+          filters: { country: 'DE', procurement_scenario: scenario },
+          keywords: ['Pumpen Anlagenbau'],
+        }), CTX);
+      const [record] = result.records;
+      const prompt = mocks.executeStructuredTaskWithRuntime.mock.calls[0]?.[1].prompt;
+      expect(prompt).toContain(pdf);
+      expect(prompt).toContain(engineering);
+      expect(record?.provenance?.sourceUrl).toBe(engineering);
+      expect(validateRawSourceProviderPayload('public_web', record).ok).toBe(true);
+    },
+  );
+
+  it.each([
+    ['equipment_integration', ['https://company.example/impressum', 'https://company.example/detail?projectId=42']],
+    ['distribution', ['https://company.example/anlagenbau']],
+  ] as const)('preserves the original PDF in %s when no project-page preference applies', async (scenario, later) => {
+    const pdf = 'https://company.example/reference.pdf';
+    const executionBroker = searchBroker([
+      { url: pdf, title: 'Referenz' }, ...later.map(url => ({ url, title: 'Other hit' })),
+    ]);
+    mocks.executeStructuredTaskWithRuntime.mockResolvedValue({
+      data: { is_company_site: true, name: 'Pumpenbau GmbH', country: 'DE' },
+      provider: 'gateway', model: 'model', runtimeExecution: {},
+    });
+    const result = await new PublicWebDiscoveryProvider({ gateway: {} as never, broker: executionBroker })
+      .discoverCompanies(distributorQuery({
+        filters: { country: 'DE', procurement_scenario: scenario },
+        keywords: ['Pumpen Anlagenbau'],
+      }), CTX);
+    expect(result.records[0]?.provenance?.sourceUrl).toBe(pdf);
+  });
+
+  it('keeps the exact safe same-company www detail page instead of replacing it with home', () => {
+    const project = 'https://www.wte.de/files/pdfs/Zustaendigkeiten-Warengruppen_ohne-Einkaeufer_WEB.pdf';
+    const record = mapPublicWebCompanyToRecord({
+      domain: 'wte.de', hitUrls: ['https://wte.de/', project], sourceText: 'WTE Wassertechnik GmbH',
+      extracted: { is_company_site: true, name: 'WTE Wassertechnik GmbH', country: 'DE' },
+      sourceClass: 'public_intelligence', fetchedAt: '2026-11-16T03:30:13.893Z',
+    });
+    expect(record.domain).toBe('wte.de');
+    expect(record.provenance?.sourceUrl).toBe(project);
+    expect(validateRawSourceProviderPayload('public_web', record).ok).toBe(true);
+    expect(validateRawSourceProviderPayload('public_web', {
+      ...record, provenance: { ...record.provenance, sourceUrl: 'https://www.other.de/project' },
+    }).ok).toBe(false);
+  });
+
+  it('uses an alternative safe company detail URL without relaxing the existing contact-safe URL gate', () => {
+    const item = 'https://www.atbwater.de/shop/ATB-Pumpstation/20000143';
+    const category = 'https://www.atbwater.de/shop/ALLE-KATEGORIEN/Pumpstationen/';
+    const record = mapPublicWebCompanyToRecord({
+      domain: 'atbwater.de', hitUrls: [item, category], sourceText: 'ATB WATER GmbH',
+      extracted: { is_company_site: true, name: 'ATB WATER GmbH', country: 'DE' },
+      sourceClass: 'public_intelligence', fetchedAt: '2026-11-16T03:30:13.893Z',
+    });
+    expect(record.provenance?.sourceUrl).toBe(category);
+    expect(validateRawSourceProviderPayload('public_web', record).ok).toBe(true);
+  });
+
   it('never fetches a page before a company exists and judges from search hits in the target language', async () => {
     const executionBroker = searchBroker([
       { url: 'https://www.pumpen-handel.example/', title: 'Pumpen Handel GmbH – Großhandel für Pumpen' },
@@ -282,7 +400,7 @@ describe('PublicWebDiscoveryProvider search-first discovery (G3 5.3)', () => {
         externalId: 'pumpen-mueller.de',
         country: 'DE',
         attributes: { products: ['centrifugal pumps'], keywords: ['industrial pumps'] },
-        provenance: { sourceUrl: 'https://pumpen-mueller.de/' },
+        provenance: { sourceUrl: 'https://www.pumpen-mueller.de/produkte/tauchpumpen' },
       },
     });
   });

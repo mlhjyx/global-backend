@@ -127,6 +127,25 @@ describe('M0③ 快扫编排（patched + 启动开关）', () => {
     );
   });
 
+  it('runs the selected procurement search even if the general company pool is deep', async () => {
+    acts.prefilterPool.mockResolvedValue({
+      poolSize: 0, candidates: 0, prefilteredOut: 0, requiresProcurementSearch: true,
+    });
+    acts.quickJudgeBatch.mockResolvedValue({
+      judged: 25, verdicts: { match: 4, weak: 21 },
+      fallbackPerCompany: 0, ruleFallback: 0, failed: 0, skipped: 0,
+    });
+    acts.materializeProvisionalLeads.mockResolvedValue({ leads: 25 });
+
+    await discoveryWorkflow(input(true));
+
+    expect(acts.prefilterPool).toHaveBeenNthCalledWith(1, expect.objectContaining({ planId: PLAN_ID }));
+    expect(acts.loadPlanQueries).toHaveBeenCalledTimes(1);
+    expect(acts.prefilterPool).toHaveBeenNthCalledWith(2,
+      expect.objectContaining({ planId: PLAN_ID, afterProcurementSearch: true }));
+    expect(acts.prefilterPool).toHaveBeenCalledTimes(2);
+  });
+
   it('falls back to one bounded search when the pool is short, then pre-filters again', async () => {
     acts.prefilterPool
       .mockResolvedValueOnce({ poolSize: 5, candidates: 5, prefilteredOut: 0 })

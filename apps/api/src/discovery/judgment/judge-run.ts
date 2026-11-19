@@ -13,6 +13,7 @@
  *    「单模型判 null」还是「面板记 UNKNOWN 票并继续」。
  */
 
+import { REQUIRED_PROCUREMENT_CRITERIA, type CriterionId } from './fit-rubric';
 import type { Prisma } from '@prisma/client';
 
 import type { ModelGateway } from '../../model-gateway/model-gateway';
@@ -52,6 +53,7 @@ import {
   type JudgmentModelIdentity,
   type JudgmentRecordDraft,
 } from './judgment-record';
+import { readProjectPageEvidence, type ProjectPageEvidence } from '../website-profile/project-page-evidence';
 import type { FitJudgeCompany, IcpBrief } from '../fit-judge';
 
 /** 判定任务契约 id：面板复用同一契约身份（qualify_fit / judge-output/v2）。 */
@@ -75,7 +77,7 @@ export interface CompanySnapshotFacts {
 }
 
 /** 与 v1 判定同一口径的公司快照（其 JSON 文本即 validateEvidence 的 snapshotText）。 */
-export function buildCompanySnapshot(company: FitJudgeCompany): {
+export function buildCompanySnapshot(company: FitJudgeCompany, projectEvidence?: ProjectPageEvidence): {
   facts: CompanySnapshotFacts;
   snapshotText: string;
 } {
@@ -95,6 +97,7 @@ export function buildCompanySnapshot(company: FitJudgeCompany): {
         carries_chinese_brand: profile.carries_chinese_brand,
         carries_foreign_brand: profile.carries_foreign_brand,
         evidence: profile.evidence,
+        ...(projectEvidence ? { project_evidence: projectEvidence } : {}),
       }
     : undefined;
   const websiteProfile =
@@ -169,8 +172,11 @@ export interface PreparedJudgeCall {
   inputDigest: string;
   now: string;
   prompt: JudgePromptBundle;
+  requiredCriteria?: readonly CriterionId[];
   snapshotFetchedAt: string;
   snapshotText: string;
+  projectEvidence?: ProjectPageEvidence;
+  baseSnapshotText?: string;
   urlPolicy: EvidenceUrlPolicy;
 }
 
@@ -189,10 +195,16 @@ export function prepareJudgeCall(
   opts: PrepareJudgeCallOptions = {},
 ): PreparedJudgeCall {
   const now = opts.now ?? new Date().toISOString();
-  const { facts, snapshotText } = buildCompanySnapshot(company);
+  const scenario = icpBrief.procurement_scenario?.id;
+  const profile = (company.attributes as { website_profile?: { project_evidence?: unknown } } | null)?.website_profile;
+  const projectEvidence = company.domain && (scenario === 'factory_direct' || scenario === 'equipment_integration')
+    ? readProjectPageEvidence(profile?.project_evidence, company.domain)
+    : undefined;
+  const { facts, snapshotText } = buildCompanySnapshot(company, projectEvidence);
   const prompt = buildJudgePrompt({
     icpBrief: JSON.stringify(icpBrief, null, 2),
     companySnapshot: snapshotText,
+    procurementScenario: scenario,
   });
   return {
     companyId: company.id,
@@ -200,9 +212,11 @@ export function prepareJudgeCall(
     inputDigest: judgmentInputDigest({ icpBrief, companySnapshot: facts }),
     now,
     prompt,
+    ...(scenario && scenario !== 'distribution' ? { requiredCriteria: REQUIRED_PROCUREMENT_CRITERIA } : {}),
     snapshotFetchedAt:
       opts.snapshotFetchedAt ?? snapshotFetchedAtFromCompany(company, now),
     snapshotText,
+    ...(projectEvidence ? { projectEvidence, baseSnapshotText: buildCompanySnapshot(company).snapshotText } : {}),
     urlPolicy: opts.urlPolicy ?? companyDomainEvidenceUrlPolicy(company.domain),
   };
 }
@@ -311,10 +325,11 @@ export async function runJudgeModel(
   const evidence = validateEvidence(output.criteria, {
     now: prepared.now,
     snapshotFetchedAt: prepared.snapshotFetchedAt,
-    snapshotText: prepared.snapshotText,
+    snapshotText: prepared.baseSnapshotText ?? prepared.snapshotText,
+    ...(prepared.projectEvidence ? { projectEvidence: prepared.projectEvidence } : {}),
     urlPolicy: prepared.urlPolicy,
   });
-  const aggregation = aggregateJudgment({ output, evidence });
+  const aggregation = aggregateJudgment({ output, evidence, requiredCriteria: prepared.requiredCriteria });
   return {
     ok: true,
     output,

@@ -276,8 +276,10 @@ describe('Model refusals never become mismatch (2026-11-02 incident)', () => {
 });
 
 describe('Fit follows the ICP trade role (design §4 step 8)', () => {
-  function icpTx(companyAttributes: unknown) {
+  function icpTx(companyAttributes: unknown, queries: unknown[] = []) {
     return {
+      discoveryRun: { findFirst: vi.fn(async () => ({ planId: 'plan-1' })) },
+      discoveryQueryPlan: { findFirst: vi.fn(async () => ({ queries })) },
       icpDefinition: {
         findUnique: vi.fn(async () => ({
           name: '德国工业泵分销商',
@@ -298,6 +300,48 @@ describe('Fit follows the ICP trade role (design §4 step 8)', () => {
     const brief = await loadIcpBrief(icpTx(attributes) as never, 'icp-1');
 
     expect(brief).toMatchObject({ icp_trade_role: role });
+  });
+
+  it('treats documented pump selection as integration rather than resale', async () => {
+    executeTask.mockReset();
+    executeTask.mockResolvedValue({ provider: 'stub', data: output } as never);
+    const brief = await loadIcpBrief(icpTx({
+      business_model: 'manufacturer',
+      procurement_scenario: 'equipment_integration',
+    }) as never, 'icp-1');
+
+    expect(brief).toMatchObject({
+      icp_trade_role: null,
+      procurement_scenario: { id: 'equipment_integration' },
+    });
+    await judgeFitCompany({} as never, '10000000-0000-4000-8000-000000000001', brief, company);
+    const [, input] = executeTask.mock.calls[0]!;
+    expect(input.system).toContain('有证据的工程选型');
+    expect(input.system).toContain('无需证明转售');
+  });
+
+  it('uses the scenario selected by the run plan even after the ICP changes', async () => {
+    const tx = icpTx({ procurement_scenario: 'equipment_integration' }, [
+      { filters: { procurement_scenario: 'factory_direct' } },
+    ]);
+    const brief = await loadIcpBrief(tx as never, 'icp-1', 'run-1');
+    expect(brief).toMatchObject({
+      icp_trade_role: null,
+      procurement_scenario: { id: 'factory_direct' },
+    });
+    expect(brief).not.toMatchObject({ company_attributes: { procurement_scenario: 'equipment_integration' } });
+    expect(tx.discoveryRun.findFirst).toHaveBeenCalledWith({
+      where: { id: 'run-1', icpId: 'icp-1' }, select: { planId: true },
+    });
+  });
+
+  it('does not attach a later scene edit to a legacy run', async () => {
+    const brief = await loadIcpBrief(icpTx({
+      business_model: 'distributor', procurement_scenario: 'factory_direct',
+    }, [{ filters: { country: 'DE' } }]) as never, 'icp-1', 'run-legacy');
+    expect(brief).toMatchObject({ icp_trade_role: 'distributor' });
+    expect(brief).not.toHaveProperty('procurement_scenario');
+    expect(brief).not.toHaveProperty('company_attributes.procurement_scenario');
   });
 
   it('sends the trade role to the judge together with role-aware gate rules', async () => {

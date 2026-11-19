@@ -20,6 +20,8 @@ import type {
   JudgeEvidenceItem,
 } from './judge-output-v2';
 
+import type { ProjectPageEvidence } from '../website-profile/project-page-evidence';
+
 export const EVIDENCE_VALIDATION_VERSION = 'evidence-validate/v1' as const;
 
 export const EVIDENCE_MAX_AGE_DAYS = 30;
@@ -67,6 +69,7 @@ export interface EvidenceValidationContext {
   snapshotFetchedAt: string;
   /** 本次输入快照正文（website_profile/抓取文本拼接）；span 必须逐字来自这里。 */
   snapshotText: string;
+  projectEvidence?: ProjectPageEvidence;
   urlPolicy: EvidenceUrlPolicy;
 }
 
@@ -111,7 +114,15 @@ function validateItem(
   if (!context.urlPolicy(item.url).allowed) {
     flags.push('EVIDENCE_URL_DENIED');
   }
-  if (!normalizedSnapshot.includes(normalizeWhitespace(item.span))) {
+  const normalizedSpan = normalizeWhitespace(item.span);
+  const project = context.projectEvidence;
+  const projectQuote = Boolean(project && normalizedSpan &&
+    project.spans.some((span) => normalizeWhitespace(span).includes(normalizedSpan)));
+  const claimsProject = Boolean(project && item.url === project.source_url);
+  if (claimsProject || projectQuote) {
+    if (!claimsProject || item.kind !== 'website') flags.push('EVIDENCE_URL_DENIED');
+    if (!projectQuote) flags.push('EVIDENCE_SPAN_NOT_FOUND');
+  } else if (!normalizedSpan || !normalizedSnapshot.includes(normalizedSpan)) {
     flags.push('EVIDENCE_SPAN_NOT_FOUND');
   }
   if (containsInjection(item.span)) {
@@ -119,13 +130,14 @@ function validateItem(
   }
 
   if (
-    (EVIDENCE_KINDS_REQUIRING_FRESHNESS as readonly string[]).includes(
+    claimsProject || (EVIDENCE_KINDS_REQUIRING_FRESHNESS as readonly string[]).includes(
       item.kind,
     )
   ) {
     const fetchedMs =
-      item.fetched_at === undefined ? snapshotMs : parseIsoInstant(item.fetched_at);
-    if (fetchedMs === null) {
+      claimsProject ? parseIsoInstant(project!.fetched_at)
+        : item.fetched_at === undefined ? snapshotMs : parseIsoInstant(item.fetched_at);
+    if (fetchedMs === null || (claimsProject && fetchedMs > nowMs)) {
       // 有 fetched_at 但不是合法时间：不能证明新鲜 → fail-closed。
       flags.push('EVIDENCE_FETCH_TIME_INVALID');
     } else if (nowMs - fetchedMs > EVIDENCE_MAX_AGE_DAYS * DAY_MS) {

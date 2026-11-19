@@ -742,6 +742,49 @@ describe("ICP generation authority and controlled enrichment", () => {
     }
     expect(prompt).not.toMatch(/\bted\b/u);
   });
+  it("plans the selected factory scenario using its own terms and compatible sources", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.icp.targetMarkets = ["DE"];
+    f.icp.companyAttributes = {
+      product: "工业泵", trade_side: "manufacturer", procurement_scenario: "factory_direct",
+    };
+    f.enable("public_web", "ted");
+    f.result.data = {
+      queries: [{
+        ...PUBLIC_WEB_QUERY, keywords: ["Papierfabrik Projekt Pumpenbeschaffung Leipzig"], filters: { ...PUBLIC_WEB_QUERY.filters, trade_side: "manufacturer" },
+      }],
+      estimated_volume: 10,
+    };
+
+    const plan = await f.service.generateQueryPlan(ctx, f.icp.id);
+
+    const prompt = f.runtime.mock.calls[0]![1].prompt as string;
+    expect(prompt).toContain("工厂直采");
+    expect(prompt).toContain("production site");
+    expect(prompt).toContain("项目中的实际责任");
+    expect(f.cpv).not.toHaveBeenCalled();
+    expect(plan.queries).toHaveLength(1);
+    expect(plan.queries[0]).toMatchObject({
+      filters: { country: "DE", source_hint: "public_web", procurement_scenario: "factory_direct" },
+      keywords: ["Papierfabrik Projekt Pumpenbeschaffung Leipzig"],
+    });
+    expect(plan.queries[0]!.filters).not.toHaveProperty("trade_side");
+  });
+
+  it("rejects a German pilot scenario outside its market before consuming the Grant", async () => {
+    const f = generationFixture();
+    f.icp.status = "ACTIVE";
+    f.icp.targetMarkets = ["DACH"];
+    f.icp.companyAttributes = { product: "工业泵", procurement_scenario: "equipment_integration" };
+
+    await expect(f.service.generateQueryPlan(ctx, f.icp.id)).rejects.toMatchObject({
+      response: { error: { code: "PROCUREMENT_SCENARIO_NOT_SUPPORTED" } },
+    });
+    expect(f.authority.consumeVerifiedWorkspaceGrant).not.toHaveBeenCalled();
+    expect(f.runtime).not.toHaveBeenCalled();
+  });
+
   it("lists trade_fair for an ICP that matches a registered fair (2026-11-02)", async () => {
     const f = generationFixture();
     f.icp.status = "ACTIVE";
@@ -1377,6 +1420,21 @@ describe("ICP input guardrails (PR-09)", () => {
     expect(
       f.prisma.withWorkspace.mock.calls.every(([workspace]) => workspace === ctx.workspaceId),
     ).toBe(true);
+  });
+
+  it("drafts German pump procurement scenarios from one confirmed offering without selecting one", async () => {
+    vi.stubEnv("ICP_INPUT_GUARDRAILS", "on");
+    const f = generationFixture();
+    f.tx.offering.findMany.mockResolvedValue([
+      { id: "offer-1", name: "工业泵", description: null, attributes: { selectedByUser: true } },
+    ]);
+    f.result.data = modelOutput(["德国"]);
+
+    await f.service.generateFromCompany(ctx, "company", undefined, undefined, ["DE"]);
+    const attrs = f.tx.icpDefinition.create.mock.calls[0][0].data.companyAttributes;
+    expect(attrs.procurement_scenario_drafts.map((item: { id: string }) => item.id))
+      .toEqual(["distribution", "factory_direct", "equipment_integration"]);
+    expect(attrs).not.toHaveProperty("procurement_scenario");
   });
 
   it("refuses to generate after the user canceled every product selection", async () => {

@@ -16,9 +16,14 @@ import {
   hasContactForm,
   type CompanyContactLinks,
 } from '../website-profile/contact-paths';
-import { parseImpressum, type ImpressumRegister } from '../website-profile/impressum';
+import { hasConflictingRegisterNumbers, parseImpressum, type ImpressumRegister } from '../website-profile/impressum';
 import { classifyTradeRoleByRules } from '../website-profile/trade-role-rules';
 import { scrubPii, scrubPiiKeepingTaxIds } from '../../site-builder/agents/pii';
+
+import {
+  companyProjectPageUrl, PROJECT_PAGE_MAX_SPAN_CHARS, readProjectPageEvidence,
+  validProjectEvidenceSpan, type ProjectPageEvidence,
+} from '../website-profile/project-page-evidence';
 
 export const WEBSITE_PROFILE_TASK = 'discovery.classify_trade_role' as const;
 /** data_provider kill switch and canonical attribute namespace. */
@@ -106,6 +111,7 @@ export interface WebsiteProfile {
   /** BI-15 / L6: registered postal address; null for sole traders and unstated addresses. */
   readonly registeredAddress: string | null;
   readonly evidence: readonly string[];
+  readonly projectEvidence?: ProjectPageEvidence;
   /** Present only when the caller asked for contact paths (data_provider company_contact). */
   readonly contactPaths?: CompanyContactPaths;
 }
@@ -118,12 +124,31 @@ interface ClassifiedRole {
   readonly evidence?: string[];
 }
 
+function profileTradeFacts(
+  rules: ReturnType<typeof classifyTradeRoleByRules>,
+  classified: ClassifiedRole | null,
+  home: string,
+): Pick<WebsiteProfile, 'tradeRole' | 'tradeRoleSource' | 'tradeRoleConfidence' | 'ownManufacturing' | 'evidence'> {
+  return {
+    tradeRole: rules.decisive ? rules.role : classified?.trade_role ?? null,
+    tradeRoleSource: rules.decisive ? 'rules' : classified ? 'model' : null,
+    tradeRoleConfidence: rules.decisive ? RULES_CONFIDENCE : classified?.confidence ?? null,
+    ownManufacturing: classified?.own_manufacturing ?? (rules.scores.manufacturer > 0 ? true : null),
+    evidence: rules.decisive
+      ? companyEvidence(modelSafeText(home).split(/\n+/u)
+          .map((line) => line.trim()).filter((line) => line.length >= 40)
+          .map((line) => line.slice(0, 800)))
+      : companyEvidence(classified?.evidence ?? []),
+  };
+}
+
 export interface WebsiteProfileInput {
   readonly domain: string;
   /** ISO-3166 alpha-2 target market, lower case (home brands are not foreign). */
   readonly homeCountry: string;
   /** ICP product/industry context for the model; never copied into output. */
   readonly icpContext: string;
+  readonly projectUrl?: string;
   /**
    * BI-14: also find the company's contact paths among the homepage links and render
    * the linked contact page (at most one page) to look for a contact form.
@@ -158,7 +183,7 @@ export class WebsiteProfileProvider {
     const impressumUrl =
       extractSameSiteLinks(home, homepageUrl).find((link) => IMPRESSUM_LINK.test(link)) ??
       `${homepageUrl}impressum`;
-    let impressum = '';
+    let impressum: string;
     try {
       impressum = await this.fetch(impressumUrl, ctx);
     } catch (error) {
@@ -166,7 +191,11 @@ export class WebsiteProfileProvider {
       impressum = ''; // a missing Impressum page does not void the homepage profile
     }
 
-    const identifiers = parseImpressum(impressum || home);
+    const legalPageText = impressum || home;
+    // A shared legal page with several HRB (or several HRA) numbers cannot
+    // safely attach any one company's identity, role or project to this domain.
+    if (hasConflictingRegisterNumbers(legalPageText)) return null;
+    const identifiers = parseImpressum(legalPageText);
     const dictionary = matchCarriedBrands(home, input.homeCountry);
     const rules = classifyTradeRoleByRules(`${home}\n${impressum}`);
     const classified = rules.decisive
@@ -186,13 +215,15 @@ export class WebsiteProfileProvider {
       ? await this.contactPaths(input.domain, home, ctx)
       : undefined;
 
+    const projectUrl = companyProjectPageUrl(input.projectUrl, input.domain);
+    const projectEvidence = projectUrl && projectUrl !== impressumUrl
+      ? await this.projectEvidence(projectUrl, input.icpContext, ctx)
+      : undefined;
+
     return {
       homepageUrl,
       impressumUrl: impressum ? impressumUrl : null,
-      tradeRole: rules.decisive ? rules.role : classified?.trade_role ?? null,
-      tradeRoleSource: rules.decisive ? 'rules' : classified ? 'model' : null,
-      tradeRoleConfidence: rules.decisive ? RULES_CONFIDENCE : classified?.confidence ?? null,
-      ownManufacturing: classified?.own_manufacturing ?? (rules.scores.manufacturer > 0 ? true : null),
+      ...profileTradeFacts(rules, classified, home),
       carriedBrands: brands,
       carriesChineseBrand: dictionary.carriesChineseBrand,
       carriesForeignBrand: dictionary.carriesForeignBrand,
@@ -200,7 +231,7 @@ export class WebsiteProfileProvider {
       register: identifiers.register,
       vatId: identifiers.vatId,
       registeredAddress: identifiers.registeredAddress,
-      evidence: companyEvidence(classified?.evidence ?? []),
+      ...(projectEvidence ? { projectEvidence } : {}),
       ...(contactPaths ? { contactPaths } : {}),
     };
   }
@@ -221,7 +252,7 @@ export class WebsiteProfileProvider {
     if (!links.contactPage) {
       return { ...links, linksChecked, contactForm: null, contactFormChecked: linksChecked };
     }
-    let html = '';
+    let html: string;
     try {
       html = await this.render(links.contactPage, ctx);
     } catch (error) {
@@ -245,13 +276,35 @@ export class WebsiteProfileProvider {
     };
   }
 
-  private async fetch(url: string, ctx: ExecutionContext & { artifactSubject: ArtifactSubjectRef }): Promise<string> {
-    const result = await this.deps.broker.invoke<{ url: string; maxChars?: number }, CrawlResult>(
+  private fetchPage(url: string, ctx: ExecutionContext & { artifactSubject: ArtifactSubjectRef }, exactHtml = false) {
+    return this.deps.broker.invoke<{ url: string; maxChars?: number; exactHtml?: true }, CrawlResult>(
       'crawl4ai.fetch',
-      { url, maxChars: PAGE_FETCH_MAX_CHARS },
+      { url, maxChars: PAGE_FETCH_MAX_CHARS, ...(exactHtml ? { exactHtml: true } : {}) },
       this.toolContext(ctx),
     );
-    return result.data.text ?? '';
+  }
+
+  private async fetch(url: string, ctx: ExecutionContext & { artifactSubject: ArtifactSubjectRef }): Promise<string> {
+    return (await this.fetchPage(url, ctx)).data.text ?? '';
+  }
+
+  private async projectEvidence(
+    url: string, icpContext: string, ctx: ExecutionContext & { artifactSubject: ArtifactSubjectRef },
+  ): Promise<ProjectPageEvidence | undefined> {
+    try {
+      const result = await this.fetchPage(url, ctx, true);
+      if (result.data.url !== url || result.provenance?.sourceUrl !== url) return undefined;
+      const terms = (icpContext.toLowerCase().match(/[\p{L}]{4,}/gu) ?? []).slice(0, 24);
+      const spans = modelSafeText(result.data.text)
+        .split(/\n+/u).map((line) => line.trim().slice(0, PROJECT_PAGE_MAX_SPAN_CHARS))
+        .filter(validProjectEvidenceSpan)
+        .map((span) => ({ span, relevance: terms.filter((term) => span.toLowerCase().includes(term)).length }))
+        .sort((a, b) => b.relevance - a.relevance).slice(0, 6).map(({ span }) => span);
+      return readProjectPageEvidence({ source_url: url, fetched_at: result.provenance.fetchedAt, spans });
+    } catch (error) {
+      if (artifactSubjectSkipReason(error) || isExecutionControlError(error)) throw error;
+      return undefined; // optional detail page has no usable evidence; keep ordinary profile
+    }
   }
 
   /**
