@@ -10,6 +10,7 @@ import type { RawEntity, WikidataEntitySummary } from '../../adapters/wikidata';
 import type { WikidataEntityInput, WikidataEntityOutput } from '../../tools/source-tools';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import { pickBestByName } from '../name-match';
+import { isExecutionControlError } from '../../execution-budget/execution-control-error';
 
 const PARSER_VERSION = 'wikidata-enrich/v1';
 const ACCEPT_THRESHOLD = 0.72; // 低于此不贴（宁缺毋滥）
@@ -40,22 +41,11 @@ export class WikidataEnrichmentProvider implements CompanyEnrichmentAdapter {
       return miss();
     }
     const toolCtx: ToolContext = { ...ctx };
-    let candidates: WikidataEntitySummary[];
-    try {
-      candidates = await searchEntityViaBroker(broker, input.name, MAX_CANDIDATES, toolCtx);
-    } catch {
-      return miss();
-    }
+    const candidates = await searchEntityViaBroker(broker, input.name, MAX_CANDIDATES, toolCtx);
     if (!candidates.length) return miss();
 
     // 取候选实体的 claims+labels，只保留"是公司/组织"的
-    let entities: Record<string, RawEntity>;
-    try {
-      entities = await getEntitiesViaBroker(broker, candidates.map((c) => c.qid), undefined, toolCtx,
-      );
-    } catch {
-      return miss();
-    }
+    const entities = await getEntitiesViaBroker(broker, candidates.map((c) => c.qid), undefined, toolCtx);
     const companyFacts = candidates
       .map((c) => (entities[c.qid] ? parseCompanyFacts(c.qid, entities[c.qid], {}) : null))
       .filter((f): f is WikidataCompanyFacts => !!f && f.isCompany);
@@ -79,7 +69,8 @@ export class WikidataEnrichmentProvider implements CompanyEnrichmentAdapter {
           Object.entries(labelEntities).map(([qid, e]) => [qid, e.labels?.en?.value ?? qid]),
         );
       }
-    } catch {
+    } catch (error) {
+      if (isExecutionControlError(error)) throw error;
       // 标签解析失败：仍可返回带 QID 的事实（降级不致命）
     }
     const facts = parseCompanyFacts(best.item.qid, winnerEntity, refLabels);
@@ -98,6 +89,8 @@ export class WikidataEnrichmentProvider implements CompanyEnrichmentAdapter {
       lei: facts.lei,
       isin: facts.isin,
       country: facts.countryName,
+      // P17 remains known even when optional labels are unavailable.
+      country_qid: facts.countryQid,
       headquarters: facts.headquartersName,
       stock_exchange: facts.stockExchangeName,
       match_confidence: Number(best.score.toFixed(2)),

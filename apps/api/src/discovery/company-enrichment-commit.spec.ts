@@ -4,6 +4,7 @@ import {
   commitCompanyEnrichmentResults,
   enrichmentHitSurvivesGovernance,
 } from './company-enrichment-commit';
+import { scopeIndependentEnrichment } from './enrichment-identity';
 
 describe('company enrichment commit evidence provenance (L1)', () => {
   function txWith(create: ReturnType<typeof vi.fn>) {
@@ -23,6 +24,21 @@ describe('company enrichment commit evidence provenance (L1)', () => {
       fieldEvidence: { create },
     } as unknown as Prisma.TransactionClient;
   }
+
+  it('preserves raw Wikidata country identity through the real commit and excludes it from a different-country fit snapshot', async () => {
+    const create = vi.fn(async () => ({}));
+    const tx = txWith(create);
+    await commitCompanyEnrichmentResults(tx, { workspaceId: 'ws-1', companyId: 'co-1', hits: [{
+      key: 'wikidata', result: { matched: true, confidence: 1, costCents: 0,
+        attributes: { qid: 'Q999', label: 'Acme GmbH', country_qid: 'Q183', match_confidence: 1 } },
+    }] });
+    const attributes = vi.mocked(tx.canonicalCompany.updateMany).mock.calls[0]![0].data.attributes;
+    expect(attributes).toHaveProperty('wikidata.country_qid', 'Q183');
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({
+      field: 'wikidata.country_qid', value: 'Q183',
+    }) }));
+    expect(scopeIndependentEnrichment({ country: 'FR', domain: 'acme.example', attributes })).not.toHaveProperty('wikidata');
+  });
 
   it('stores the provenance url and fetch time on every evidence row it writes', async () => {
     const create = vi.fn(async () => ({}));

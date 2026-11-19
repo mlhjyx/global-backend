@@ -10,6 +10,7 @@ import type { GleifFetchInput, GleifFetchOutput } from '../../tools/source-tools
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import { normForMatch, pickBestByName } from '../name-match';
 import { ELF_LABELS } from '../elf';
+import { isExecutionControlError } from '../../execution-budget/execution-control-error';
 
 const PARSER_VERSION = 'gleif/v1';
 const ACCEPT_THRESHOLD = 0.72; // 低于此不贴 LEI（宁缺毋滥，绝不贴错身份）
@@ -42,18 +43,10 @@ export class GleifEnrichmentProvider implements CompanyEnrichmentAdapter {
     // 再交给 pickBest + 歧义护栏挑突出者。
     const searchName = normForMatch(input.name) || input.name;
     let candidates: GleifRecord[];
-    try {
-      candidates = await searchLeiViaBroker(broker, { name: searchName, country, limit: 15 }, toolCtx);
-    } catch {
-      return miss();
-    }
+    candidates = await searchLeiViaBroker(broker, { name: searchName, country, limit: 15 }, toolCtx);
     if (!candidates.length && country) {
       // 国家过滤可能过严（登记地 ≠ 运营地）；放宽一次仅按名检索
-      try {
-        candidates = await searchLeiViaBroker(broker, { name: searchName, limit: 15 }, toolCtx);
-      } catch {
-        return miss();
-      }
+      candidates = await searchLeiViaBroker(broker, { name: searchName, limit: 15 }, toolCtx);
     }
     if (!candidates.length) return miss();
 
@@ -128,7 +121,8 @@ async function fetchParentViaBroker(
   try {
     const res = await broker.invoke<GleifFetchInput, GleifFetchOutput>('gleif.fetch', { op, lei }, ctx);
     return res.data.parent ?? null;
-  } catch {
+  } catch (error) {
+    if (isExecutionControlError(error)) throw error;
     return null;
   }
 }
