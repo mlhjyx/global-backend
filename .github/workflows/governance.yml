@@ -42,6 +42,12 @@ jobs:
       - name: Verify governance contracts and mutation tests
         run: pnpm governance:verify
 
+      # Standard-library unittests for the agent-team handoff controller. Kept in the
+      # existing governance job: no new job, action SHA or dependency, and the
+      # original gates above/below are unchanged.
+      - name: Agent-team controller stdlib unittests
+        run: python3 -I -B -m unittest discover -s scripts/agent-team -p 'test_*.py' -v
+
       # A PR that changes apps/, packages/, scripts/, infra/ or a root build or
       # runtime file adds a fragment under docs/roadmap/changelog.d/. Only a
       # branch cut before the fragment rule reached main may edit the

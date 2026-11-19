@@ -16,7 +16,7 @@ import {
 import type { EmailVerificationProvider } from '../verification/email-verification-provider';
 import type { ExecutionBroker } from '../../tools/tool-contract';
 import { CapBudget, CompositeBudget, DEFAULT_PER_CONTACT_CAP_MICROUSD, type EnrichmentBudget } from './enrichment-budget';
-import { enrichContactEmail, type EnrichContactResult } from './enrich-contact-email';
+import { enrichContactEmail, MAX_FINDER_ATTEMPTS, type EnrichContactResult } from './enrich-contact-email';
 import type { CircuitBreakerStore } from './circuit-breaker';
 
 /**
@@ -146,7 +146,10 @@ export async function enrichCompanyContacts(
   );
   const finderCallCap = Math.max(
     1,
-    input.maxFinderCallsPerCompany ?? MAX_ENRICH_FINDER_CALLS_PER_COMPANY,
+    Math.min(
+      input.maxFinderCallsPerCompany ?? MAX_ENRICH_FINDER_CALLS_PER_COMPANY,
+      MAX_ENRICH_FINDER_CALLS_PER_COMPANY,
+    ),
   );
   const deadlineAtMs = input.deadlineAtMs ?? now().getTime() + ENRICH_SOFT_DEADLINE_MS;
   const tier = deps.tailFinders && deps.tailFinders.length > 0 ? await companyTier(deps, input) : 'B';
@@ -215,7 +218,10 @@ export async function enrichCompanyContacts(
         budget: perContactBudget,
         clock: now,
         actorId: deps.actorId ?? 'enrich-company-contacts',
-        maxFinderAttempts: input.maxProvidersPerContact,
+        maxFinderAttempts: Math.min(
+          remainingFinderCalls,
+          input.maxProvidersPerContact ?? MAX_FINDER_ATTEMPTS,
+        ),
         maxVerificationCalls: input.maxVerificationCalls,
       },
       {

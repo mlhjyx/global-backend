@@ -1,0 +1,186 @@
+{
+  "$comment": "Desensitized runtime contract for the agent-team handoff controller v1. The runtime validates these shapes with the Python standard library only; this file documents them for review and drift checks. No free-text, prompt, command or shell fields exist anywhere.",
+  "schema_version": "global-team-controller/v1",
+  "files": {
+    "snapshot.json": "State (see defs.state)",
+    "state.lock": "Stable flock target (regular file, 0600)",
+    "binding-probe-pending.json": "One-time probe challenge: nonce_sha256, command_sha256, expires_at, consumed",
+    "binding-probe.json": "Proof: session_id, cwd, matched_at (no command/tool payload)",
+    "install-receipt.json": "Owned hook entry fingerprints, tool_commit, settings preimage/postimage digests"
+  },
+  "defs": {
+    "state": {
+      "schema_version": "global-team-controller/v1",
+      "revision": "integer >= 0",
+      "team_id": "string",
+      "workspace_root": "absolute path string",
+      "created_at": "UTC iso-8601",
+      "binding": {
+        "roles": "map role -> session id",
+        "supervisor_ccd_session_id": "string|null",
+        "supervisor_hook_session_id": "string|null",
+        "enabled": "boolean",
+        "capability": {
+          "probe_verified": "boolean",
+          "stop_verified": "boolean"
+        }
+      },
+      "paused": {
+        "active": "boolean",
+        "reason": "token|null",
+        "by": "string|null",
+        "at": "iso|null"
+      },
+      "input_pending": {
+        "active": "boolean",
+        "marked_at": "iso|null"
+      },
+      "active_task_id": "task id|null",
+      "tasks": "map task_id -> defs.task",
+      "ready_action": "defs.ready_action|null",
+      "actions": "map action_id -> defs.action",
+      "events": "map event_key -> {payload_digest, result}",
+      "guard": {
+        "stop_counts": "map progress key -> integer",
+        "round": "integer"
+      }
+    },
+    "task": {
+      "task_id": "^[A-Z0-9][A-Z0-9_-]{0,63}$",
+      "approval_source": "string <= 200 (supervisor-provided approval summary)",
+      "scope_digest": "sha256 hex",
+      "task_revision": "integer >= 1",
+      "repo": "mlhjyx/global-backend | mlhjyx/gain-saas",
+      "branch": "safe branch name",
+      "pr": "integer|null",
+      "head": "40-char lowercase hex|null",
+      "owner_role": "role",
+      "writer_role": "role",
+      "applicability": {
+        "product": "REQUIRED|NOT_REQUIRED (frozen at registration)"
+      },
+      "depends_on": "list of task ids",
+      "seq": "integer",
+      "dispatched": "boolean",
+      "awaiting_checkpoint": "boolean",
+      "phase": "IMPLEMENTING|REVIEW_PENDING|ACCEPTANCE_PENDING|CI_PENDING|MERGE_READY|MERGE_UNKNOWN|COMPLETED|REWORK",
+      "gates": {
+        "engineering": {
+          "status": "MISSING|DELIVERED|UNVERIFIED",
+          "head": "hex|null",
+          "receipt_id": "token|null",
+          "artifact_sha256": "hex|null",
+          "artifact_relpath": "safe relative path|null",
+          "limitations": "list of tokens"
+        },
+        "technical": {
+          "status": "UNKNOWN|PASS|FAIL|UNVERIFIED",
+          "head": "hex|null",
+          "receipt_id": "token|null",
+          "review_mode": "FINAL_COMMIT|null",
+          "artifact_sha256": "hex|null",
+          "artifact_relpath": "path|null",
+          "blockers": "list of tokens",
+          "accepted_limitations": "list of tokens"
+        },
+        "product": {
+          "status": "UNKNOWN|PASS|FAIL|NOT_REQUIRED|UNVERIFIED",
+          "head": "hex|null",
+          "receipt_id": "token|null",
+          "artifact_sha256": "hex|null",
+          "artifact_relpath": "path|null"
+        },
+        "ci": {
+          "status": "UNKNOWN|SUCCESS|PENDING|FAIL|UNVERIFIED",
+          "head": "hex|null",
+          "pr": "integer|null",
+          "observed_at": "payload-observed UTC iso (never receipt time)",
+          "required_checks": "exactly the frozen names, each SUCCESS|FAILURE|PENDING|SKIPPED"
+        }
+      },
+      "merge": {
+        "state": "NONE|UNKNOWN|MERGED|MERGED_OUTSIDE_RECORDED_GATES",
+        "merge_commit": "hex|null",
+        "head": "hex|null",
+        "pr_state": "OPEN|CLOSED|MERGED|null"
+      },
+      "handoffs": "map action_id -> {delivered, accepted, acked}",
+      "wait": "{reason, owner_role, evidence, since, generation, reconciled}|null",
+      "rework_rounds": "integer",
+      "required_checks": "frozen list of 1..64 unique check names (registration-time)",
+      "wait_generation": "integer >= 0 (increments once per accepted WAIT_OBSERVED event and per fresh-stop re-check cycle)"
+    },
+    "action": {
+      "action_id": "sha256 hex of normalized identity (team/task/task_revision/head/kind/stage/round/source_action_id/source_attempt)",
+      "task_id": "task id",
+      "action_kind": "RECONCILE_INPUT|RECONCILE_STAGE|RECONCILE_MERGE|REQUEST_CHECKPOINT|HANDOFF|OBSERVE_PR|MERGE_PR|DISPATCH_TASK",
+      "target_stage": "technical|product|rework|reconcile|readback|null",
+      "target_role": "role",
+      "head": "hex|null",
+      "state": "READY|CLAIMED|WAITING|UNKNOWN|APPLIED|BLOCKED|STALE",
+      "actor": "session id|null",
+      "lease_id": "token|null",
+      "lease_until": "iso|null",
+      "attempts": "integer 0..3",
+      "checkpoint": "token|null",
+      "blocked_reason": "token|null",
+      "round": "integer",
+      "source_action_id": "sha256 hex|null (readback/reconcile actions point at the unresolved action)",
+      "source_attempt": "integer 0..3|null (source action attempts at readback creation; part of the action identity)"
+    },
+    "ready_action": "{action_id, task_id, action_kind, target_stage, target_role, head}",
+    "event": {
+      "schema_version": "global-team-event/v1",
+      "event_kind": "ENGINEERING_DELIVERED|HANDOFF_ACK|TECH_RESULT|PRODUCT_RESULT|CI_OBSERVED|HEAD_OBSERVED|PR_OBSERVED|ACTION_RESULT|TRANSPORT_FAILURE|WAIT_OBSERVED",
+      "task_id": "task id",
+      "task_revision": "integer",
+      "head": "40-hex|null",
+      "issuer_role": "role",
+      "issuer_session_id": "string",
+      "receipt_id": "token",
+      "payload": "kind-specific small object; no prompt/command/shell/free text fields"
+    },
+    "gates_ci": {
+      "status": "UNKNOWN|SUCCESS|PENDING|FAIL|UNVERIFIED",
+      "head": "hex|null",
+      "pr": "integer|null",
+      "observed_at": "payload-observed UTC iso (never receipt time)",
+      "required_checks": "exactly the frozen names, each SUCCESS|FAILURE|PENDING|SKIPPED"
+    },
+    "event_payloads": {
+      "ENGINEERING_DELIVERED": "{scope_digest, artifact_sha256, artifact_relpath, limitations}",
+      "TECH_RESULT": "{conclusion PASS|FAIL, review_mode FINAL_COMMIT, artifact_sha256, artifact_relpath, accepted_limitations, blockers? (PASS must be empty, FAIL must name one)}",
+      "PRODUCT_RESULT": "{conclusion PASS|FAIL|NOT_REQUIRED, artifact_sha256, artifact_relpath}",
+      "CI_OBSERVED": "{conclusion, pr, required_checks, observed_at}",
+      "PR_OBSERVED": "{pr, state, head, merge_commit?}",
+      "HEAD_OBSERVED": "{head}",
+      "HANDOFF_ACK": "{handoff_action_id, status ACCEPTED|ACKED}",
+      "WAIT_OBSERVED": "{reason, owner_role, evidence}",
+      "TRANSPORT_FAILURE": "{action_id}",
+      "ACTION_RESULT": "{action_id, result, checkpoint}",
+      "$comment": "All result-bearing events must carry a concrete 40-hex head equal to the task head; mismatches are recorded stale without touching gates."
+    },
+    "recovery": {
+      "wait_cycles": "single mutation point next_wait_cycle: wait.generation mirrors task.wait_generation; WAIT_OBSERVED and the fresh-Stop re-check both call it; no lifetime generation cap",
+      "expired_lease": "CLI claim performs the CLAIMED->UNKNOWN(LEASE_EXPIRED) normalization inside the locked transaction, commits it, and returns a recovery code without a lease",
+      "readback": "reconcile actions include the full source_action_id and source_attempt; their own failures retry the same action up to 3 claims then BLOCKED_RECOVERY, never spawning a readback of a readback",
+      "schema_incomplete": "legacy snapshots missing wait_generation/source_attempt fail closed with STATE_SCHEMA_INCOMPLETE and refuse claims",
+      "progress_budget": "guard.stop_counts[action_id] counts only consecutive unhandled Stops (>3 -> BLOCKED_GUARD); any recorded finish clears that count and (for the active task) the guard block; successful claims and resume clear the block",
+      "transition_table": {
+        "source_actions": "DONE->APPLIED (MERGE_PR validates head+merge_commit); FAILED->READY (<3 claims) or BLOCKED_TRANSPORT (>=3); UNKNOWN/expired->UNKNOWN+readback; MERGE expiry also sets merge.state=UNKNOWN",
+        "recovery_actions": "DONE requires resolution; FAILED/UNKNOWN/expired->same action READY (<3 claims) or BLOCKED_RECOVERY (>=3); never derives a new action",
+        "invariants": "reconcile actions are never persisted as UNKNOWN; wait.generation must equal task.wait_generation"
+      }
+    }
+  },
+  "limits": {
+    "tasks": 64,
+    "actions": 1024,
+    "events": 4096,
+    "state_bytes": 4194304,
+    "event_bytes": 65536,
+    "lease_seconds": 120,
+    "ci_fresh_seconds": 60,
+    "stop_rounds": 3
+  }
+}
