@@ -10,7 +10,7 @@ ALTER TABLE public.run_event ADD CONSTRAINT run_event_type_check CHECK (
     'pool_cap_reached','run_finished','qualification_batch_scored')
 );
 
--- Preserve existing signature, owner and ACL. Source: packages/db/prisma/migrations/20260826210000_raw_source_stored_field_path_adapter/migration.sql
+-- Preserve existing signature, owner and ACL; retain the later 20261009160000 pg_temp-last hardening. Source: packages/db/prisma/migrations/20260826210000_raw_source_stored_field_path_adapter/migration.sql
 CREATE OR REPLACE FUNCTION public.raw_source_semantic_identifier_valid_v1(
   p_path TEXT[],
   p_value TEXT
@@ -19,7 +19,7 @@ RETURNS BOOLEAN
 LANGUAGE plpgsql
 IMMUTABLE
 STRICT
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 BEGIN
   IF normalize(p_value,NFKC) IS DISTINCT FROM p_value
@@ -93,13 +93,13 @@ BEGIN
 END
 $$;
 
--- Preserve existing signature, owner and ACL. Source: packages/db/prisma/migrations/20260826210000_raw_source_stored_field_path_adapter/migration.sql
+-- Preserve existing signature, owner and ACL; retain the later 20261009160000 pg_temp-last hardening. Source: packages/db/prisma/migrations/20260826210000_raw_source_stored_field_path_adapter/migration.sql
 CREATE OR REPLACE FUNCTION public.raw_source_stored_field_attribute_path_v1(p_field TEXT)
 RETURNS TEXT[]
 LANGUAGE sql
 IMMUTABLE
 STRICT
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
   SELECT CASE p_field
     WHEN 'digital_footprint.ad_pixels' THEN ARRAY['digital_footprint','ad_pixels']
@@ -150,7 +150,7 @@ AS $$
   END
 $$;
 
--- Preserve existing signature, owner and ACL. Source: packages/db/prisma/migrations/20260826190000_raw_source_governance_path_sanitizer/migration.sql
+-- Preserve existing signature, owner and ACL; retain the later 20261009160000 pg_temp-last hardening. Source: packages/db/prisma/migrations/20260826190000_raw_source_governance_path_sanitizer/migration.sql
 CREATE OR REPLACE FUNCTION public.raw_source_sanitize_derived_json_v4(
   p_value JSONB,
   p_path TEXT[],
@@ -159,7 +159,7 @@ CREATE OR REPLACE FUNCTION public.raw_source_sanitize_derived_json_v4(
 RETURNS JSONB
 LANGUAGE plpgsql
 IMMUTABLE
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
   rendered JSONB;

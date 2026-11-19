@@ -40,6 +40,14 @@ describe.runIf(Boolean(databaseUrl))('run-event seq allocation on PostgreSQL', (
       WHERE n.nspname='public' AND p.proname IN ('raw_source_stored_field_attribute_path_v1',
         'raw_source_semantic_identifier_valid_v1','raw_source_sanitize_derived_json_v4')`;
     expect(privileges?.executable).toBe(false);
+    const settings = await prisma.$queryRaw<Array<{ routine: string; config: string[] }>>`
+      SELECT p.oid::regprocedure::text AS routine, p.proconfig AS config
+      FROM pg_proc p WHERE p.oid IN (
+        'public.raw_source_semantic_identifier_valid_v1(text[],text)'::regprocedure,
+        'public.raw_source_stored_field_attribute_path_v1(text)'::regprocedure,
+        'public.raw_source_sanitize_derived_json_v4(jsonb,text[],integer)'::regprocedure)`;
+    expect(settings).toHaveLength(3);
+    for (const setting of settings) expect(setting.config).toContain('search_path=pg_catalog, public, pg_temp');
   });
 
   it('writes the full closed event vocabulary with app_user RLS and consecutive advisory-lock seqs', async () => {
