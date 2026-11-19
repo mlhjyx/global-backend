@@ -18,6 +18,8 @@ import {
   isCanonicalArtifactUuid,
 } from './artifact.types';
 import type { GenericOperationArtifactService } from './generic-operation-artifact.service';
+import type { GenericOperationArtifactReference } from './artifact.types';
+import type { DurableExecutionReceipt } from '../durable-execution-receipt';
 import { ArtifactStorageError } from './generic-operation-artifact.store';
 
 type WorkspaceArtifactSchema =
@@ -259,10 +261,41 @@ export class GenericOperationArtifactExecution implements ArtifactExecutionPort 
       );
       throw error;
     }
+    if (schema === 'crawl4ai-fetch/v1') {
+      return this.verifiedResult<O>(input.reservation, schema, settled.reference, costCents, settled.durableReceipt);
+    }
     return {
       data: payload.data as O,
       costCents,
       durableReceipt: settled.durableReceipt,
+    };
+  }
+
+  /** Source metadata comes from verified stored facts, including on the first read.
+   * The manifest time records artifact capture; replay must not refresh it.
+   * Never restore the caller's provenance or replace a normalized URL with the request URL.
+   */
+  private async verifiedResult<O>(
+    reservation: BudgetReservation,
+    schema: WorkspaceArtifactSchema,
+    reference: GenericOperationArtifactReference,
+    costCents: number,
+    durableReceipt: DurableExecutionReceipt,
+  ): Promise<ToolResult<O>> {
+    const verified = await this.deps.service.readVerified({
+      scopeKind: 'workspace', workspaceId: reservation.workspaceId,
+      authorityId: authorityOf(reservation), reference,
+    });
+    const data = await this.deps.materializers.materialize<O>(
+      schema, verified.body, verified.manifest, verified.expectedFacts,
+    );
+    const page = schema === 'crawl4ai-fetch/v1' ? record(data) : undefined;
+    return {
+      data, costCents, durableReceipt,
+      ...(page ? { provenance: {
+        sourceUrl: stringField(page.url), fetchedAt: verified.manifest.createdAt,
+        contentHash: stringField(page.contentHash), parserVersion: 'artifact/crawl4ai-fetch/v1',
+      } } : {}),
     };
   }
 
@@ -280,19 +313,9 @@ export class GenericOperationArtifactExecution implements ArtifactExecutionPort 
       return invalid();
     }
     try {
-      const verified = await this.deps.service.readVerified({
-        scopeKind: 'workspace',
-        workspaceId: input.reservation.workspaceId,
-        authorityId: authorityOf(input.reservation),
-        reference: replay.reference,
-      });
-      const data = await this.deps.materializers.materialize<O>(
-        schema,
-        verified.body,
-        verified.manifest,
-        verified.expectedFacts,
+      return await this.verifiedResult<O>(
+        input.reservation, schema, replay.reference, 0, input.reservation.receipt,
       );
-      return { data, costCents: 0, durableReceipt: input.reservation.receipt };
     } catch (error) {
       // The broker turns any replay failure into an operation it cannot replay
       // (no second physical call, the company or query is skipped and counted),

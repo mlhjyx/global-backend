@@ -84,7 +84,14 @@ function harness(decision: unknown = { status: 'BOUND', subjectRef }) {
       persisted.push({ ...input, bytes: await collect(input.source.body) });
       return { reference: {} as never, durableReceipt: receipt(input.resultSchema) };
     }),
-    readVerified: vi.fn(),
+    readVerified: vi.fn(async () => {
+      const saved = persisted[persisted.length - 1]!;
+      return {
+        manifest: manifestFor(saved.resultSchema, saved.source.mediaType, saved.bytes),
+        expectedFacts: saved.expectedFacts,
+        body: (async function* () { yield saved.bytes; })(),
+      };
+    }),
   };
   const execution = new GenericOperationArtifactExecution({
     withWorkspace: withWorkspace as never,
@@ -133,6 +140,57 @@ describe('GenericOperationArtifactExecution.admit', () => {
 });
 
 describe('GenericOperationArtifactExecution.persist', () => {
+  it.each([null, [], { url: 'javascript:alert(1)', text: 'Industrial pumps.', contentHash: 'raw' }])(
+    'does not persist malformed page data: %j', async (data) => {
+      const { execution, service } = harness();
+      await expect(execution.persist({
+        reservation: reservation(), tool: toolFor('crawl4ai-fetch/v1'), subjectRef,
+        input: { url: 'https://pumpen.example/project' }, result: { data, costCents: 1 },
+      })).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
+      expect(service.persist).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([-1, Number.NaN])('does not settle a page with an invalid cost: %s', async (costCents) => {
+    const { execution, service } = harness();
+    await expect(execution.persist({
+      reservation: reservation(), tool: toolFor('crawl4ai-fetch/v1'), subjectRef,
+      input: { url: 'https://pumpen.example/project' },
+      result: { data: { url: 'https://pumpen.example/project', text: 'Industrial pumps.', contentHash: 'raw' }, costCents },
+    })).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_INVALID');
+    expect(service.persist).not.toHaveBeenCalled();
+  });
+
+  it('uses verified stored metadata instead of caller-supplied provenance', async () => {
+    const { execution } = harness();
+    const result = await execution.persist({
+      reservation: reservation(), tool: toolFor('crawl4ai-fetch/v1'), subjectRef,
+      input: { url: 'https://pumpen.example/project' },
+      result: {
+        data: { url: 'https://pumpen.example/project', text: 'Industrial pumps project evidence.', contentHash: 'raw' },
+        costCents: 1,
+        provenance: { sourceUrl: 'https://unrelated.example/', fetchedAt: '2099-01-01T00:00:00.000Z',
+          contentHash: 'unverified', parserVersion: 'caller' },
+      },
+    });
+    expect(result.provenance).toEqual({
+      sourceUrl: 'https://pumpen.example/project', fetchedAt: '2026-08-21T00:00:00.000Z',
+      contentHash: expect.any(String), parserVersion: 'artifact/crawl4ai-fetch/v1',
+    });
+    expect(result.provenance?.contentHash).not.toBe('raw');
+  });
+
+  it('fails closed after settlement if the stored page cannot be verified', async () => {
+    const { execution, service } = harness();
+    service.readVerified.mockRejectedValueOnce(new Error('GENERIC_OPERATION_ARTIFACT_OBJECT_MISSING'));
+    await expect(execution.persist({
+      reservation: reservation(), tool: toolFor('crawl4ai-fetch/v1'), subjectRef,
+      input: { url: 'https://pumpen.example/project' },
+      result: { data: { url: 'https://pumpen.example/project', text: 'Industrial pumps.', contentHash: 'raw' }, costCents: 1 },
+    })).rejects.toThrow('GENERIC_OPERATION_ARTIFACT_OBJECT_MISSING');
+    expect(service.persist).toHaveBeenCalledOnce();
+  });
+
   it('persists a scrubbed crawl4ai page bound to the subject and returns exactly what replay materializes', async () => {
     const { execution, persisted } = harness();
     const result = await execution.persist({
@@ -307,6 +365,10 @@ describe('GenericOperationArtifactExecution.replay', () => {
       data: { url: 'https://pumpen.example/', text: 'Pumpen Vertrieb', contentHash: expect.any(String) },
       costCents: 0,
       durableReceipt: receipt('crawl4ai-fetch/v1'),
+      provenance: {
+        sourceUrl: 'https://pumpen.example/', fetchedAt: manifest.createdAt,
+        contentHash: expect.any(String), parserVersion: 'artifact/crawl4ai-fetch/v1',
+      },
     });
   });
 
