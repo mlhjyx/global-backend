@@ -397,6 +397,12 @@
       "SELECT",
       "UPDATE"
     ],
+    "manufacturer_network_evidence": [
+      "SELECT"
+    ],
+    "manufacturer_network_probe": [
+      "SELECT"
+    ],
     "mem_knowledge_stat": [
       "SELECT"
     ],

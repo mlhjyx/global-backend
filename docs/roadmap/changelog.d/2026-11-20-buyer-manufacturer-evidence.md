@@ -9,5 +9,6 @@ title: Add signed and receipt-backed manufacturer relationship corroboration
 - 修复：独立审查 F1–F3：明确否定/终止优先于正例组件；身份、国家与关系限定单个完整目标 profile，拒绝更长公司主体及跨公司组件；引文按实际 URL 选择页面，共享原文不再误杀合法官网引用。
 - 修复 round 2：新增同一签名字段的 `manufacturer-network/v2`，v1/无标记 canonical/hash、工具 key 和旧转换保持兼容。仅 v2 选择 `manufacturer-profile/v1`，从同次 exact HTTP 静态 DOM 保留真实 profile h1/正文；支持已核 AESSEAL 外置 preface h1 与同 canvas 唯一 locations article，拒绝多重/不完整布局，排除 main 相关区与 footer；仅从真实 heading DOM 的完整 textContent 还原嵌 DIV 标题，精确移除无事实的 `button.close > span` 字面 `×` 控件，否定/其它文字保留。email-only 身份一致性仅用 producer 生成的域名投影，原邮箱不保留，不从页面标签或 raw/API JSON 采信伪标记。新增专属临时 PG/加密、版本化 MinIO runner 并接入 CI；G15 不再缺失这份真实数据库测试。
 - 修复 round 3：v2 对可能触及 75,000 codepoint 规范化截尾的正文拒绝采信，完整 header/正文必须经 artifact 规范化原样保留；在 60,000 字符工具裁剪前将过长 profile 作为既有空结果/MISS 处理，不能用丢失尾部否定或公司冲突的正面前缀生成证明。v1/普通裁剪、key/hash/quote 不变。受控 producer 移入 tools 并由工具组合层固定绑定内部回调，缺回调 wire 前拒绝，移除 adapters→durable-results 反向边；共享 normalizer/PII 算法、模块基线、producer/schema/额度均不改。
+- 权限清单同步：将 `manufacturer_network_evidence` 与 `manufacturer_network_probe` 按原 DDL 和实际 catalog 登记为 app_user `[SELECT]`；两表原有 FORCE RLS/workspace 策略和受控写入函数保持原样，没有新增或放宽 GRANT，也不增加目录豁免。
 - 测试：包含旧 Grant、错 revision/快照、来源/主体/权限/时效负例；真实 Broker、PG 预算/manifest/Subject/ACK/写回/实际 v2 判定与事务故障重放验证。最终执行命令、覆盖率及限制见本任务实施报告。
 - 未做：无真实企业/provider/模型调用、生产配置或账本改动、部署、SaaS 合同消费者升级、业务数量或人类验收。厂家来源仍须独立审核配置后才能启用；INOXPA 共有导航不能构成经销关系证明。
