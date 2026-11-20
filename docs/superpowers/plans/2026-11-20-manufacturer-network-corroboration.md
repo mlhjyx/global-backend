@@ -23,6 +23,16 @@ Backend产品源码由Task1实施者独占，root负责ADR/计划、SaaS独立�
 
 该字段从DTO和请求hash，经准入、outbox、relay、父/子Workflow传到activity。新补证和新增T2视图仅在冻结的新revision下生效；旧历史与重放不新增调用，也不追认新规则。SaaS对应BFF规范化/透传与生成engine-client合同升级单独PR完成，正常SaaS报价/Grant/登录链不替换。不趁本功能重构所有workspace policyRevision语义。
 
+## 已核实的采集接线修正
+
+静态页面里存在真实公司h1和经销关系，不保证Readability正文保留它；实际工具只持久化正文、没有保留另行返回的title。已用合成HTML走真实converter→tool→artifact规范化→parser复现两种名称输入均MISS，不能把预制Markdown测试当成实际网页链路已经通。隐私规范化也会删除个人邮箱及其域名。
+
+此缺陷在已批准来源范围内修复：现有单一selector增`manufacturer-network/v2`，v1与无selector的旧请求/键/转换保持原样；不增加第二公共签名字段，workflow2/八字段Binding/50+50上界不变。仅v2的精确HTML调用传内部`profileTextRevision:manufacturer-profile/v1`并绑定工具幂等键，从同一次HTTP200、Readability修改前提取唯一受支持profile的真实h1、文本、链接、国家和关系，保留否定和主体冲突。不得注入title/搜索/调用方名称补造事实，不加请求、重定向、缓存或renderer降级。
+
+已读实际静态页面的AESSEAL locations模板，真实h1位于同一唯一canvas下的preface，正文在唯一locations article；不得把整个main及其相关内容合入。保留真实h1–h6原textContent并只规范空白，覆盖标题内嵌DIV，避免丢掉公司名或其他公司冲突标题。仅可剔除结构严格且全部文本恰为`×`的已识别关闭控件，否定或其他文字仍保留。真实页面内存预检只验证表示法，不代替Broker、回执、PG或正式资格结果。
+
+只有邮箱域名的页面，可以从该profile真实email/mailto生成仅域名的受控producer投影，与原页引用分开，绑定版本/回执/制品字节；不存localpart或个人姓名，不伪造官网链接，不相信普通网页自造的标志。域名只作身份一致性辅助，仍需完整法人名、国家和独立身份依据。真实HTML运输注入必须贯穿converter/tool/artifact/Broker/PG/MinIO做正负例与重放验证；本地合成结果不能计真实企业。实现按前向迁移和现有CI真实PG测试接入，不加豁免。
+
 ## RED → GREEN顺序
 
 1. 纯业务schema/模板解析：同目标官网域/国家/明确厂家关系可读；错国、错域、仅同名、目标自托管证书、关联发布者、过期、无关系声明、整站索引均拒绝或待核。
@@ -52,7 +62,7 @@ Backend产品源码由Task1实施者独占，root负责ADR/计划、SaaS独立�
 
 Owner：一名新实施者，工作区`/global/backend/.claude/worktrees/buyer-manufacturer-evidence`、分支`claude/buyer-manufacturer-evidence`、base`bdb05a0c0ab75fec64a249375a7b79feac7aff28`。接管本任务Backend产品源码、必要增量SQL治理迁移、生成OpenAPI与直接相关测试；不得改root的ADR/计划或SaaS/私有测试配置。你不是唯一writer，保留root已存在的两份execution helper文件（36测试通过）并延续实现，不回退其他文件。不派新subagent，独立审查由root安排。
 
-要求以本文方案为准完成M1。`manufacturerNetworkRevision`精确值为`manufacturer-network/v1`；现有workflow版本2和八字段Binding不变。新增执行快照至少包含planId/原attemptId/revision，经DTO→request canonical→quote→execute→outbox→relay→父/子workflow→activity传递；Node活动/relay重算Binding.requestSha256，Workflow不得导入node:crypto。无标记旧请求hash、quote及历史命令保持原样，厂家新调用与资格视图严格off。
+要求以本文方案为准完成M1。`manufacturerNetworkRevision`接受`manufacturer-network/v1`和`manufacturer-network/v2`；v1维持原转换，v2显式选择下述同响应profile采集修正；现有workflow版本2和八字段Binding不变。新增执行快照至少包含planId/原attemptId/revision，经DTO→request canonical→quote→execute→outbox→relay→父/子workflow→activity传递；Node活动/relay重算Binding.requestSha256，Workflow不得导入node:crypto。无标记旧请求hash、quote及历史命令保持原样，厂家新调用与资格视图严格off。
 
 新quote只对该revision额外计50次定向Searxng和50次exactHtml fetch；不冒称旧quote覆盖，也不做Workspace通用policyRevision安全重构。工具沿GLEIF/Wikidata独立确定性adapter，不冒用AI task白名单；新source默认为DISABLED，严格逐源/路径/用途审核后才能使用。支持厂家独立详情页、一次lookup一次fetch每公司；搜索摘要不作事实，模板未知/主体冲突/发布者独立性未知/来源不准入诚实待核。不得只凭不同域名就证明独立控制，也不得硬编码目标公司来凑数量。
 
