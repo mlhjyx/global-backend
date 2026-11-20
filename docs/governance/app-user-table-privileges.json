@@ -397,6 +397,18 @@
       "SELECT",
       "UPDATE"
     ],
+    "market_candidate_feedback": [
+      "INSERT",
+      "SELECT"
+    ],
+    "market_candidate_set": [
+      "INSERT",
+      "SELECT"
+    ],
+    "market_candidate_set_revision": [
+      "INSERT",
+      "SELECT"
+    ],
     "mem_knowledge_stat": [
       "SELECT"
     ],
@@ -784,6 +796,14 @@
         "UPDATE"
       ],
       "status_updated_by": [
+        "UPDATE"
+      ],
+      "updated_at": [
+        "UPDATE"
+      ]
+    },
+    "market_candidate_set": {
+      "current_revision": [
         "UPDATE"
       ],
       "updated_at": [

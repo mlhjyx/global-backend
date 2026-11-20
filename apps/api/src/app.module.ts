@@ -30,6 +30,7 @@ import { ComplianceModule } from './compliance/compliance.module';
 import { SanctionsModule } from './sanctions/sanctions.module';
 import { SiteBuilderModule } from './site-builder/site-builder.module';
 import { SellerKnowledgeModule } from './seller-knowledge/seller-knowledge.module';
+import { MarketCandidatesModule } from './market-candidates/market-candidates.module';
 import { SkillsModule } from './skills/skills.module';
 import { PacksModule } from './skills/packs/packs.module';
 import { AgentsModule } from './agents/agents.module';
@@ -84,6 +85,7 @@ import { CampaignPlanModule } from './campaign-plan/campaign-plan.module';
     SanctionsModule,
     SiteBuilderModule,
     SellerKnowledgeModule,
+    MarketCandidatesModule,
     SkillsModule,
     PacksModule,
     AgentsModule,
