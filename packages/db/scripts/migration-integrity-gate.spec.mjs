@@ -9,14 +9,17 @@ import { createSafeGitEnvironment } from '../../../scripts/safe-git-environment.
 import { migrationIntroductionCommit } from './migration-integrity-gate.mjs';
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const migration = 'packages/db/prisma/migrations/20260101000000_fixture/migration.sql';
+// Merge can require a committer even with --no-commit. Keep every fixture Git
+// command self-contained instead of depending on the host or CI identity.
+const fixtureIdentityArgs = ['-c', 'user.name=Synthetic fixture', '-c', 'user.email=fixture@example.invalid'];
 function git(root, args, input) {
-  const result = spawnSync('git', args, { cwd: root, env: createSafeGitEnvironment(), encoding: 'utf8', input });
+  const result = spawnSync('git', [...fixtureIdentityArgs, ...args], { cwd: root, env: createSafeGitEnvironment(), encoding: 'utf8', input });
   assert.equal(result.status, 0, result.stderr);
   return result.stdout.trim();
 }
 function commit(root, message) {
   git(root, ['add', '.']);
-  git(root, ['-c', 'user.name=Synthetic fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', message]);
+  git(root, ['commit', '-qm', message]);
   return git(root, ['rev-parse', 'HEAD']);
 }
 function fixture(t) {
@@ -129,7 +132,7 @@ test('independent merge-created origins are ambiguous rather than chosen by date
   git(root, ['checkout', '-q', 'independent']); writeFileSync(join(root, 'independent-main'), 'main\n'); commit(root, 'independent-main');
   git(root, ['merge', '--no-ff', '--no-commit', 'independent-side']); writeMigration(root, 'SELECT 2;\n'); const second = commit(root, 'second-independent-origin');
   assert.equal(git(root, ['merge-base', first, second]), common); git(root, ['checkout', '-q', 'main']);
-  const merge = spawnSync('git', ['merge', '--no-ff', '--no-commit', 'independent'], {cwd:root,env:createSafeGitEnvironment(),encoding:'utf8'}); assert.equal(merge.status,1); writeMigration(root,'SELECT 2;\n'); commit(root,'resolve-two-origins');
+  const merge = spawnSync('git', [...fixtureIdentityArgs, 'merge', '--no-ff', '--no-commit', 'independent'], {cwd:root,env:createSafeGitEnvironment(),encoding:'utf8'}); assert.equal(merge.status,1); writeMigration(root,'SELECT 2;\n'); commit(root,'resolve-two-origins');
   assert.equal(migrationIntroductionCommit(migration,root),'');
 });
 test('an origin on an unrelated non-HEAD ref cannot qualify an untracked path', t => {
