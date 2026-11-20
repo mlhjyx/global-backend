@@ -2,6 +2,36 @@
   "schema_version": "delivery-traceability/v1",
   "chains": [
     {
+      "chain_id": "market-candidate-persistence-internal",
+      "capability_id": "CAP-BUYER-001",
+      "object_ids": ["OBJ-FE-031"],
+      "operation_ids": [
+        "MarketCandidateSetsController_getLatest_v1",
+        "MarketCandidateSetsController_getCurrent_v1",
+        "MarketCandidateSetsController_listRevisions_v1",
+        "MarketCandidateSetsController_getRevision_v1",
+        "MarketCandidateSetsController_recordFeedback_v1"
+      ],
+      "code_paths": [
+        "apps/api/src/market-candidates/market-candidate-sets.controller.ts",
+        "apps/api/src/market-candidates/market-candidate-sets.service.ts",
+        "apps/api/src/market-candidates/market-candidate-set.document.ts"
+      ],
+      "test_paths": [
+        "apps/api/src/market-candidates/market-candidate-set.document.spec.ts",
+        "apps/api/src/market-candidates/market-candidate-sets.service.spec.ts",
+        "apps/api/src/market-candidates/market-candidate-sets.controller.spec.ts",
+        "apps/api/src/market-candidates/market-candidate-sets.postgres.spec.ts",
+        "apps/api/src/market-candidates/market-candidate-sets.openapi.spec.ts",
+        "apps/api/src/market-candidates/market-candidates.module.spec.ts"
+      ],
+      "scenario_ids": ["SCN-FE-BUYER-003"],
+      "delivery_state": "INTERNAL_ONLY",
+      "evidence_ids": [],
+      "required_evidence_kinds": ["runtime_probe"],
+      "evidence_expectation": "FRESH_PASS_REQUIRED_FOR_PILOT_OR_GA"
+    },
+    {
       "chain_id": "buyer-discovery-internal",
       "capability_id": "CAP-BUYER-001",
       "object_ids": ["OBJ-FE-009", "OBJ-FE-010", "OBJ-FE-011"],

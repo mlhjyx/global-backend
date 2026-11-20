@@ -22141,6 +22141,1024 @@
         "description": "重试解析：仅 failed_terminal 或 queued 状态可调用，重置错误码后重新入队（202）。需要 acquisition:write。"
       }
     },
+    "/api/v1/companies/{companyId}/market-candidate-sets/latest": {
+      "get": {
+        "description": "仅从引擎持久层读取；NOT_ANALYZED 只表示本能力没有可读文档，不表示市场无机会、生成已完成或失败。不会自动创建候选或调用模型、搜索、执行。",
+        "operationId": "MarketCandidateSetsController_getLatest_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MarketCandidateLatestDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR：参数或严格文档合同无效。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "需要有效的 SaaS 用户身份。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "缺少读取或人工反馈权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "公司、候选或文档不存在、已删除或不在当前租户。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "读取公司的最新市场候选文档",
+        "tags": [
+          "Market Candidates"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ]
+      }
+    },
+    "/api/v1/market-candidate-sets/{setId}": {
+      "get": {
+        "description": "返回不可变文档、原依据版本/摘要及本次来源可用性。来源变化或删除不改写历史、不生成下载链接、不自动重评估。已被新集合取代的文档明确 historical。",
+        "operationId": "MarketCandidateSetsController_getCurrent_v1",
+        "parameters": [
+          {
+            "name": "setId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MarketCandidateRevisionDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR：参数或严格文档合同无效。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "需要有效的 SaaS 用户身份。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "缺少读取或人工反馈权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "公司、候选或文档不存在、已删除或不在当前租户。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "读取候选集合当前修订",
+        "tags": [
+          "Market Candidates"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ]
+      }
+    },
+    "/api/v1/market-candidate-sets/{setId}/revisions": {
+      "get": {
+        "description": "修订号降序，默认20、最大100；cursor 是上一页最后一个正整数修订号，读取严格小于该值的摘要。历史只读，不无界加载所有正文。",
+        "operationId": "MarketCandidateSetsController_listRevisions_v1",
+        "parameters": [
+          {
+            "name": "setId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MarketCandidateRevisionPageDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR：参数或严格文档合同无效。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "需要有效的 SaaS 用户身份。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "缺少读取或人工反馈权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "公司、候选或文档不存在、已删除或不在当前租户。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "分页读取候选修订历史摘要",
+        "tags": [
+          "Market Candidates"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ]
+      }
+    },
+    "/api/v1/market-candidate-sets/{setId}/revisions/{revision}": {
+      "get": {
+        "description": "返回当时的 proposal、用户纠正、依据版本/hash、可信 actor/time，另计算当前来源可用性。旧来源失效时不回挂到现行正文，不修改旧修订。",
+        "operationId": "MarketCandidateSetsController_getRevision_v1",
+        "parameters": [
+          {
+            "name": "setId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "revision",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MarketCandidateRevisionDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR：参数或严格文档合同无效。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "需要有效的 SaaS 用户身份。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "缺少读取或人工反馈权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "公司、候选或文档不存在、已删除或不在当前租户。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "读取指定不可变候选修订",
+        "tags": [
+          "Market Candidates"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ]
+      }
+    },
+    "/api/v1/market-candidate-sets/{setId}/candidates/{candidateId}/feedback": {
+      "post": {
+        "description": "CONFIRM/CORRECT/KEEP_PENDING/REJECT 仅记录用户意见，不提升事实核验等级、不改卖方 SoR、不授权找买家。CORRECT 必须提供有实质变更的白名单 correction，其它动作不得带 correction。先核权限及幂等重放，再校验集合级 expectedRevision；旧版本/旧集合返回 VERSION_CONFLICT，同 key 异意图返回 IDEMPOTENCY_CONFLICT。理由缺省/null/纯空白记为未提供，其余原文保留。响应丢失时沿用原 key 重试，返回原 recordedRevision；不启动模型、搜索、Grant、计划、run 或发送。",
+        "operationId": "MarketCandidateSetsController_recordFeedback_v1",
+        "parameters": [
+          {
+            "name": "setId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "candidateId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "description": "同一意图重试沿用原 UUID；不同意图使用新 key。",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarketCandidateFeedbackInputDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MarketCandidateFeedbackResultDto"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_ERROR：参数或严格文档合同无效。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "需要有效的 SaaS 用户身份。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "缺少读取或人工反馈权限。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "公司、候选或文档不存在、已删除或不在当前租户。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "VERSION_CONFLICT 或 IDEMPOTENCY_CONFLICT；不写半条历史，不自动强制覆盖。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "error"
+                  ],
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object",
+                          "additionalProperties": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "追加市场候选人工反馈",
+        "tags": [
+          "Market Candidates"
+        ],
+        "x-required-scopes": [
+          "acquisition:review"
+        ]
+      }
+    },
     "/api/v1/skills": {
       "get": {
         "operationId": "SkillsController_list_v1",
@@ -23352,6 +24370,10 @@
     {
       "name": "Seller Documents",
       "description": "卖家资料库：上传签票、提交校验、列表 / 下载 / 重试 / 软删"
+    },
+    {
+      "name": "Market Candidates",
+      "description": "市场候选：不可变文档、版本化人工反馈与依据可用性；不生成或执行"
     },
     {
       "name": "Claims",
@@ -26302,6 +27324,743 @@
           "chunkCount",
           "createdAt"
         ]
+      },
+      "MarketCandidateCompanyBasisDto": {
+        "type": "object",
+        "properties": {
+          "companyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "companyId",
+          "version"
+        ],
+        "additionalProperties": false
+      },
+      "MarketCandidateSourcePositionDto": {
+        "type": "object",
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 0
+          },
+          "page": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 1
+          },
+          "section": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 2000
+          },
+          "quoteStart": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 0
+          },
+          "quoteEnd": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 0
+          }
+        },
+        "required": [
+          "seq",
+          "page",
+          "section",
+          "quoteStart",
+          "quoteEnd"
+        ],
+        "additionalProperties": false
+      },
+      "MarketCandidateSourceSnapshotDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "OFFERING",
+              "CLAIM",
+              "EVIDENCE",
+              "SELLER_DOCUMENT",
+              "SELLER_DOCUMENT_CHUNK"
+            ]
+          },
+          "sourceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "key": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "version": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 1
+          },
+          "status": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 80
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "contentHash": {
+            "type": "string",
+            "nullable": true,
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "parentId": {
+            "type": "string",
+            "nullable": true,
+            "format": "uuid"
+          },
+          "parentContentHash": {
+            "type": "string",
+            "nullable": true,
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "position": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MarketCandidateSourcePositionDto"
+              }
+            ]
+          },
+          "sourceDate": {
+            "type": "string",
+            "nullable": true,
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "kind",
+          "sourceId",
+          "key",
+          "version",
+          "status",
+          "digest",
+          "contentHash",
+          "parentId",
+          "parentContentHash",
+          "position",
+          "sourceDate"
+        ],
+        "additionalProperties": false
+      },
+      "MarketCandidateBasisSnapshotDto": {
+        "type": "object",
+        "properties": {
+          "company": {
+            "$ref": "#/components/schemas/MarketCandidateCompanyBasisDto"
+          },
+          "sources": {
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MarketCandidateSourceSnapshotDto"
+            }
+          }
+        },
+        "required": [
+          "company",
+          "sources"
+        ],
+        "additionalProperties": false
+      },
+      "MarketCandidateSupplyDto": {
+        "type": "object",
+        "properties": {
+          "offeringId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "offeringId",
+          "description"
+        ],
+        "additionalProperties": false
+      },
+      "MarketCandidateStatementDto": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "knowledgeState": {
+            "type": "string",
+            "enum": [
+              "SELLER_ASSERTION",
+              "REVIEWED_SOURCE_FACT",
+              "INFERENCE",
+              "CONFLICT",
+              "UNKNOWN"
+            ],
+            "description": "资料事实不等于独立验证认证、采购关系或真实市场效果。"
+          },
+          "basisKeys": {
+            "maxItems": 200,
+            "description": "指向同一依据快照的 kind:UUID 键；空数组明确无记录依据。",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "impact": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "text",
+          "knowledgeState",
+          "basisKeys",
+          "impact"
+        ],
+        "additionalProperties": false
+      },
+      "MarketCandidateRecommendationDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "COMPARABLE",
+              "CONDITIONAL",
+              "INSUFFICIENT_EVIDENCE",
+              "NOT_RECOMMENDED"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "status",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "MarketCandidateProposalDto": {
+        "type": "object",
+        "properties": {
+          "supplyOrCapability": {
+            "$ref": "#/components/schemas/MarketCandidateSupplyDto"
+          },
+          "buyerOrganizationCountry": {
+            "type": "string",
+            "nullable": true,
+            "pattern": "^[A-Z]{2}$"
+          },
+          "projectCountry": {
+            "type": "string",
+            "nullable": true,
+            "pattern": "^[A-Z]{2}$"
+          },
+          "application": {
+            "$ref": "#/components/schemas/MarketCandidateStatementDto"
+          },
+          "organizationRole": {
+            "$ref": "#/components/schemas/MarketCandidateStatementDto"
+          },
+          "fitExplanation": {
+            "$ref": "#/components/schemas/MarketCandidateStatementDto"
+          },
+          "entryConditions": {
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MarketCandidateStatementDto"
+            }
+          },
+          "support": {
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MarketCandidateStatementDto"
+            }
+          },
+          "counterEvidence": {
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MarketCandidateStatementDto"
+            }
+          },
+          "gaps": {
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MarketCandidateStatementDto"
+            }
+          },
+          "recommendation": {
+            "$ref": "#/components/schemas/MarketCandidateRecommendationDto"
+          },
+          "nextVerification": {
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "supplyOrCapability",
+          "buyerOrganizationCountry",
+          "projectCountry",
+          "application",
+          "organizationRole",
+          "fitExplanation",
+          "entryConditions",
+          "support",
+          "counterEvidence",
+          "gaps",
+          "recommendation",
+          "nextVerification"
+        ],
+        "additionalProperties": false
+      },
+      "MarketCandidateCorrectionDto": {
+        "type": "object",
+        "properties": {
+          "supplyDescription": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "buyerOrganizationCountry": {
+            "type": "string",
+            "nullable": true,
+            "pattern": "^[A-Z]{2}$"
+          },
+          "projectCountry": {
+            "type": "string",
+            "nullable": true,
+            "pattern": "^[A-Z]{2}$"
+          },
+          "application": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "organizationRole": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "fitExplanation": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "entryConditions": {
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "gaps": {
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "nextVerification": {
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "MarketCandidateDto": {
+        "type": "object",
+        "properties": {
+          "proposal": {
+            "$ref": "#/components/schemas/MarketCandidateProposalDto"
+          },
+          "candidateId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "corrections": {
+            "description": "用户主张覆盖层；不修改原 proposal 或卖方 SoR。",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MarketCandidateCorrectionDto"
+              }
+            ]
+          },
+          "feedback": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "CONFIRMED",
+              "CORRECTED",
+              "PENDING_EVIDENCE",
+              "REJECTED"
+            ]
+          },
+          "needsReassessment": {
+            "type": "boolean"
+          },
+          "impactScope": {
+            "type": "string",
+            "enum": [
+              "NONE",
+              "UNKNOWN"
+            ]
+          }
+        },
+        "required": [
+          "proposal",
+          "candidateId",
+          "corrections",
+          "feedback",
+          "needsReassessment",
+          "impactScope"
+        ],
+        "additionalProperties": false
+      },
+      "MarketCandidateSetV1Dto": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "enum": [
+              "market-candidate-set/v1"
+            ]
+          },
+          "setId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "companyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "basisSnapshot": {
+            "$ref": "#/components/schemas/MarketCandidateBasisSnapshotDto"
+          },
+          "generationOutcome": {
+            "type": "string",
+            "enum": [
+              "CANDIDATES_PROPOSED",
+              "COMPLETED_EMPTY"
+            ]
+          },
+          "candidates": {
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MarketCandidateDto"
+            }
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "setId",
+          "companyId",
+          "revision",
+          "basisSnapshot",
+          "generationOutcome",
+          "candidates"
+        ],
+        "additionalProperties": false
+      },
+      "MarketCandidateBasisAvailabilityDto": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "CURRENT",
+              "CHANGED",
+              "UNAVAILABLE",
+              "UNKNOWN"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "MATCHED",
+              "VERSION_OR_DIGEST_CHANGED",
+              "SOURCE_UNAVAILABLE",
+              "FINGERPRINT_UNKNOWN"
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "status",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "MarketCandidateRevisionDto": {
+        "type": "object",
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/MarketCandidateSetV1Dto"
+          },
+          "documentHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "createdBy": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "historical": {
+            "type": "boolean"
+          },
+          "basisAvailability": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MarketCandidateBasisAvailabilityDto"
+            }
+          }
+        },
+        "required": [
+          "document",
+          "documentHash",
+          "createdBy",
+          "createdAt",
+          "historical",
+          "basisAvailability"
+        ],
+        "additionalProperties": false
+      },
+      "MarketCandidateLatestDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "NOT_ANALYZED",
+              "AVAILABLE"
+            ],
+            "description": "NOT_ANALYZED 仅表示本能力没有可读候选文档，不代表没有市场机会。"
+          },
+          "result": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MarketCandidateRevisionDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "result"
+        ],
+        "additionalProperties": false
+      },
+      "MarketCandidateRevisionSummaryDto": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "documentHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "createdBy": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "revision",
+          "documentHash",
+          "createdBy",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
+      "MarketCandidateRevisionPageDto": {
+        "type": "object",
+        "properties": {
+          "revisions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MarketCandidateRevisionSummaryDto"
+            }
+          },
+          "nextCursor": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "revisions",
+          "nextCursor"
+        ],
+        "additionalProperties": false
+      },
+      "MarketCandidateFeedbackResultDto": {
+        "type": "object",
+        "properties": {
+          "feedbackId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "setId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "candidateId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recordedRevision": {
+            "type": "integer",
+            "minimum": 2
+          },
+          "documentHash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "CONFIRM",
+              "CORRECT",
+              "KEEP_PENDING",
+              "REJECT"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "correction": {
+            "nullable": true,
+            "type": "object",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MarketCandidateCorrectionDto"
+              }
+            ]
+          },
+          "before": {
+            "$ref": "#/components/schemas/MarketCandidateDto"
+          },
+          "after": {
+            "$ref": "#/components/schemas/MarketCandidateDto"
+          },
+          "actorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "basisAvailability": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MarketCandidateBasisAvailabilityDto"
+            }
+          }
+        },
+        "required": [
+          "feedbackId",
+          "setId",
+          "candidateId",
+          "recordedRevision",
+          "documentHash",
+          "action",
+          "reason",
+          "correction",
+          "before",
+          "after",
+          "actorId",
+          "createdAt",
+          "replayed",
+          "basisAvailability"
+        ],
+        "additionalProperties": false
+      },
+      "MarketCandidateFeedbackInputDto": {
+        "type": "object",
+        "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "CONFIRM",
+              "CORRECT",
+              "KEEP_PENDING",
+              "REJECT"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 2000
+          },
+          "correction": {
+            "description": "仅 CORRECT 接受非空且有实质变更的白名单补丁。",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MarketCandidateCorrectionDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "expectedRevision",
+          "action"
+        ],
+        "additionalProperties": false
       }
     }
   },
@@ -26311,6 +28070,7 @@
       "tags": [
         "Companies",
         "Claims",
+        "Market Candidates",
         "ICP",
         "Discovery",
         "Leads"

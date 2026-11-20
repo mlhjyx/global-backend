@@ -103,8 +103,80 @@ model Workspace {
   governedSubjectRelations                       GovernedSubjectRelation[]                       @relation("GovernedSubjectRelationWorkspace")
   governedSubjectTombstones                      GovernedSubjectTombstone[]                      @relation("GovernedSubjectTombstoneWorkspace")
   governedSubjectTombstoneAudits                 GovernedSubjectTombstoneAudit[]                 @relation("GovernedSubjectTombstoneAuditWorkspace")
+  marketCandidateSets                           MarketCandidateSet[]
 
   @@map("workspace")
+}
+
+model MarketCandidateSet {
+  id                 String   @id @default(uuid()) @db.Uuid
+  workspaceId        String   @map("workspace_id") @db.Uuid
+  companyId          String   @map("company_id") @db.Uuid
+  currentRevision    Int      @default(1) @map("current_revision")
+  initialOperationId String   @map("initial_operation_id") @db.Uuid
+  initialRequestHash String   @map("initial_request_hash") @db.VarChar(64)
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "market_candidate_set_workspace_fkey")
+  company CompanyProfile @relation(fields: [companyId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: NoAction, map: "market_candidate_set_company_fkey")
+  current MarketCandidateSetRevision @relation("MarketCandidateCurrent", fields: [workspaceId, id, currentRevision], references: [workspaceId, setId, revision], onDelete: NoAction, onUpdate: NoAction, map: "market_candidate_set_current_fkey")
+  revisions MarketCandidateSetRevision[] @relation("MarketCandidateRevisions")
+  feedback MarketCandidateFeedback[]
+
+  @@unique([id, workspaceId, companyId], map: "market_candidate_set_identity_key")
+  @@unique([workspaceId, companyId, initialOperationId], map: "market_candidate_set_operation_key")
+  @@index([workspaceId, companyId, createdAt, id], map: "market_candidate_set_company_created_idx")
+  @@map("market_candidate_set")
+}
+
+model MarketCandidateSetRevision {
+  workspaceId    String   @map("workspace_id") @db.Uuid
+  companyId      String   @map("company_id") @db.Uuid
+  setId          String   @map("set_id") @db.Uuid
+  revision       Int
+  parentRevision Int?     @map("parent_revision")
+  documentJson   Json     @map("document_json")
+  documentHash   String   @map("document_hash") @db.VarChar(64)
+  createdBy      String   @map("created_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  set MarketCandidateSet @relation("MarketCandidateRevisions", fields: [setId, workspaceId, companyId], references: [id, workspaceId, companyId], onDelete: Cascade, onUpdate: NoAction, map: "market_candidate_revision_set_fkey")
+  currentFor MarketCandidateSet[] @relation("MarketCandidateCurrent")
+  parent MarketCandidateSetRevision? @relation("MarketCandidateRevisionParent", fields: [workspaceId, setId, parentRevision], references: [workspaceId, setId, revision], onDelete: NoAction, onUpdate: NoAction, map: "market_candidate_revision_parent_fkey")
+  children MarketCandidateSetRevision[] @relation("MarketCandidateRevisionParent")
+  feedbackFrom MarketCandidateFeedback[] @relation("MarketCandidateFeedbackFrom")
+  feedbackTo MarketCandidateFeedback[] @relation("MarketCandidateFeedbackTo")
+
+  @@id([workspaceId, setId, revision], map: "market_candidate_set_revision_pkey")
+  @@map("market_candidate_set_revision")
+}
+
+model MarketCandidateFeedback {
+  id             String   @id @default(uuid()) @db.Uuid
+  workspaceId    String   @map("workspace_id") @db.Uuid
+  companyId      String   @map("company_id") @db.Uuid
+  setId          String   @map("set_id") @db.Uuid
+  candidateId    String   @map("candidate_id") @db.Uuid
+  fromRevision   Int      @map("from_revision")
+  toRevision     Int      @map("to_revision")
+  action         String   @db.VarChar(20)
+  reason         String?  @db.VarChar(2000)
+  correction     Json?
+  beforeJson     Json     @map("before_json")
+  afterJson      Json     @map("after_json")
+  actorId        String   @map("actor_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  idempotencyKey String   @map("idempotency_key") @db.Uuid
+  requestHash    String   @map("request_hash") @db.VarChar(64)
+
+  set MarketCandidateSet @relation(fields: [setId, workspaceId, companyId], references: [id, workspaceId, companyId], onDelete: Cascade, onUpdate: NoAction, map: "market_candidate_feedback_set_fkey")
+  from MarketCandidateSetRevision @relation("MarketCandidateFeedbackFrom", fields: [workspaceId, setId, fromRevision], references: [workspaceId, setId, revision], onDelete: NoAction, onUpdate: NoAction, map: "market_candidate_feedback_from_fkey")
+  to MarketCandidateSetRevision @relation("MarketCandidateFeedbackTo", fields: [workspaceId, setId, toRevision], references: [workspaceId, setId, revision], onDelete: NoAction, onUpdate: NoAction, map: "market_candidate_feedback_to_fkey")
+
+  @@unique([workspaceId, setId, actorId, idempotencyKey], map: "market_candidate_feedback_key")
+  @@unique([workspaceId, setId, toRevision], map: "market_candidate_feedback_revision_key")
+  @@map("market_candidate_feedback")
 }
 
 /// Platform process identity heartbeat. Managed API/Worker/relay processes are
@@ -852,6 +924,7 @@ model CompanyProfile {
   sites                     Site[]
   claimBridges              BrandProfileClaimBridge[]
   publishableClaimSnapshots SitePublishableClaimSnapshot[]
+  marketCandidateSets       MarketCandidateSet[]
 
   @@unique([id, workspaceId], map: "company_profile_id_workspace_id_key")
   @@index([workspaceId])

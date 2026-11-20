@@ -73,6 +73,10 @@
     },
     {
       "from": "(root)",
+      "to": "market-candidates"
+    },
+    {
+      "from": "(root)",
       "to": "measurement"
     },
     {
@@ -646,6 +650,18 @@
     {
       "from": "lead",
       "to": "tools"
+    },
+    {
+      "from": "market-candidates",
+      "to": "auth"
+    },
+    {
+      "from": "market-candidates",
+      "to": "common"
+    },
+    {
+      "from": "market-candidates",
+      "to": "prisma"
     },
     {
       "from": "measurement",

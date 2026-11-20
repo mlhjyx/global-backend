@@ -143,6 +143,7 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
     .addServer('/', '同源部署（相对路径；具体 host 由部署环境决定）')
     .addTag('Companies', '企业画像：提交官网、看完整度、审批后人工确认')
     .addTag('Seller Documents', '卖家资料库：上传签票、提交校验、列表 / 下载 / 重试 / 软删')
+    .addTag('Market Candidates', '市场候选：不可变文档、版本化人工反馈与依据可用性；不生成或执行')
     .addTag('Claims', '企业事实与来源：审批 / 驳回 / 撤销、冲突裁决')
     .addTag('ICP', '理想客户画像：规则、回溯测试、查询计划')
     .addTag('Discovery', '查询计划执行、规范化公司、联系人补全、抑制名单')
@@ -194,7 +195,7 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
   // 门户左侧按接入顺序分组，而不是按标签字母序。
   Object.assign(document, {
     'x-tagGroups': [
-      { name: '获客主链路', tags: ['Companies', 'Claims', 'ICP', 'Discovery', 'Leads'] },
+      { name: '获客主链路', tags: ['Companies', 'Claims', 'Market Candidates', 'ICP', 'Discovery', 'Leads'] },
       { name: '运营与合规', tags: ['Reports', 'Metrics', 'Events', 'Compliance', 'Skills', 'Packs', 'Agents'] },
       { name: '建站', tags: ['SiteBuilder'] },
       { name: '平台间通道', tags: ['ExecutionBudget', 'PlatformAuthority', 'Campaign'] },
@@ -222,6 +223,9 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
     document.components?.schemas?.WorkspaceTechnicalBudgetQuoteResponseDto;
   if (workspaceTechnicalBudgetQuote && !('$ref' in workspaceTechnicalBudgetQuote)) {
     workspaceTechnicalBudgetQuote.additionalProperties = false;
+  }
+  for (const [name, schema] of Object.entries(document.components?.schemas ?? {})) {
+    if (name.startsWith('MarketCandidate') && !('$ref' in schema)) schema.additionalProperties = false;
   }
   return document;
 }
