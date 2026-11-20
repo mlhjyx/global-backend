@@ -1,3 +1,4 @@
+import { captureManufacturerProfileText } from "./manufacturer-profile-capture";
 import { manufacturerProfileCaptureKey } from "../adapters/manufacturer-profile-text";
 import { createHash } from "node:crypto";
 import { CATALOG_RESULT_PROJECTION_SCHEMAS } from "../durable-results/catalog-result-projections";
@@ -505,7 +506,11 @@ export function createCrawl4aiFetchTool(
         };
         const page = await httpFirst(input.url, {
           ...(exact ? { exactUrl: true } : {}),
-          ...(input.profileTextRevision ? {profileTextRevision: input.profileTextRevision} : {}),
+          // The tool composition owns this producer; input/context only select the literal mode.
+          ...(input.profileTextRevision ? {
+            profileTextRevision: input.profileTextRevision,
+            captureProfileText: captureManufacturerProfileText,
+          } : {}),
           hooks: {
             authorizeExternalAction: exact
               ? async () => (await observeGate(ctx.authorizeExternalAction)) ?? true
@@ -519,7 +524,12 @@ export function createCrawl4aiFetchTool(
         }).catch(() => null);
         if (gateFailure) throw gateFailure.error;
         if (page) {
-          const httpText = page.markdown.slice(0, boundedCrawl4aiFetchChars(input.maxChars));
+          const maxChars = boundedCrawl4aiFetchChars(input.maxChars);
+          // A manufacturer view must remain complete: cropping may remove its
+          // revocation or another profile. Use the existing exact MISS result.
+          if (input.profileTextRevision && page.markdown.length > maxChars)
+            return { data: { url: input.url, text: "", contentHash: "" }, costCents: 0 };
+          const httpText = page.markdown.slice(0, maxChars);
           if (Buffer.byteLength(httpText, "utf8") > MAX_CRAWL4AI_FETCH_ARTIFACT_BYTES) {
             throw new Error("CRAWL4AI_FETCH_RESULT_TOO_LARGE");
           }

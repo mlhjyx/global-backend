@@ -1,3 +1,4 @@
+import { captureManufacturerProfileText } from "../tools/manufacturer-profile-capture";
 import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("./guarded-http", () => ({ requestPublicHttp: vi.fn() }));
 import { requestPublicHttp } from "./guarded-http";
@@ -31,7 +32,12 @@ describe("HTTP-first guarded transport contract", () => {
     };
     const page = await fetchPageHttpFirst(
       "https://manufacturer.example/location",
-      { exactUrl: true, profileTextRevision: "manufacturer-profile/v1", hooks },
+      {
+        exactUrl: true,
+        profileTextRevision: "manufacturer-profile/v1",
+        captureProfileText: captureManufacturerProfileText,
+        hooks,
+      },
     );
     expect(page?.markdown).toContain("# Acme Pumps GmbH");
     expect(requestPublicHttp).toHaveBeenCalledOnce();
@@ -54,6 +60,7 @@ describe("HTTP-first guarded transport contract", () => {
         await fetchPageHttpFirst("https://manufacturer.example/location", {
           exactUrl: true,
           profileTextRevision: "manufacturer-profile/v1",
+          captureProfileText: captureManufacturerProfileText,
         }),
       ).toBeNull();
     },
@@ -115,6 +122,7 @@ describe("HTTP-first guarded transport contract", () => {
       await fetchPageHttpFirst("https://manufacturer.example/location", {
         exactUrl: true,
         profileTextRevision: "manufacturer-profile/v1",
+        captureProfileText: captureManufacturerProfileText,
       }),
     ).toBeNull();
   });

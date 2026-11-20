@@ -955,7 +955,26 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
       sourcePage = undefined;
     });
     it("does not persist or qualify negated and wrong-profile relationships through real Broker receipts", async () => {
-      for (const [index, fixture] of MANUFACTURER_CONFLICT_PROFILES.entries()) {
+      const oversized = [
+        {
+          id: "oversized-tool-expired",
+          repeats: 1800,
+          tail: "Status: Expired",
+        },
+        {
+          id: "oversized-normalizer-expired",
+          repeats: 2200,
+          tail: "Status: Expired",
+        },
+        { id: "oversized-tool-other", repeats: 1800, tail: "## Other Pumps" },
+      ].map((c) => ({
+        id: c.id,
+        text: `${TEXT}\n${"Industrial distribution information. ".repeat(c.repeats)}\n${c.tail}`,
+      }));
+      for (const [index, fixture] of [
+        ...MANUFACTURER_CONFLICT_PROFILES,
+        ...oversized,
+      ].entries()) {
         const targetId = randomUUID();
         const domain = `acme-fix-${index}.example`;
         await owner.canonicalCompany.create({
@@ -1004,6 +1023,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
           companyId: targetId,
           enrichmentSlot: index + 2,
         };
+        const beforeWires = [searchWires, fetchWires];
         await corroborateCompanyBeforeFit(
           {
             prisma: app,
@@ -1056,6 +1076,47 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
           ),
           fixture.id,
         ).toBe(false);
+        if (fixture.id.startsWith("oversized-")) {
+          expect(target.attributes).not.toHaveProperty("manufacturer_network");
+          const account = await budgets.attestAuthorized({
+            scopeKey: workspaceId,
+            authorityId,
+            accountKey: binding.accountKey,
+          });
+          const replay = await provider.enrichCompany(
+            { ...COMPANY_INPUT, domain },
+            {
+              workspaceId,
+              runId: binding.accountKey,
+              manufacturerNetworkRevision: "manufacturer-network/v2",
+              artifactSubject: { subjectType: "company", subjectId: targetId },
+              durableBudgetAuthority: account,
+              admitManufacturerProbe: (phase, identity) =>
+                app.withWorkspace(workspaceId, async (tx) => {
+                  const rows = await tx.$queryRaw<
+                    Array<{ admitted: boolean }>
+                  >`SELECT public.admit_manufacturer_network_probe_v1(${workspaceId}::uuid,${targetId}::uuid,${runId}::uuid,${authorityId}::uuid,${phase},${identity}) AS admitted`;
+                  return rows[0]?.admitted === true;
+                }),
+            },
+          );
+          expect(replay.matched).toBe(false);
+          expect([searchWires, fetchWires]).toEqual([
+            beforeWires[0]! + 1,
+            beforeWires[1]! + 1,
+          ]);
+          const artifacts = await owner.$queryRaw<
+            Array<{ sha256: string }>
+          >`SELECT m.sha256 FROM generic_operation_artifact m JOIN tool_budget_operation o ON o.id=m.operation_id JOIN manufacturer_network_probe p ON p.identity_sha256=o.operation_key AND p.workspace_id::text=o.scope_key WHERE p.workspace_id=${workspaceId}::uuid AND p.company_id=${targetId}::uuid AND p.phase='fetch'`;
+          expect(artifacts).toHaveLength(1);
+          const chunks: Uint8Array[] = [];
+          for await (const chunk of await artifactStore.read(
+            artifacts[0]!.sha256,
+            "PERSONAL_DATA",
+          ))
+            chunks.push(chunk);
+          expect(Buffer.concat(chunks).toString("utf8")).toBe("");
+        }
         // Give the real v2 aggregator otherwise valid first-party evidence. It
         // must still abstain without an independent manufacturer proof/tier.
         vi.mocked(executeStructuredTaskWithRuntime).mockResolvedValue({

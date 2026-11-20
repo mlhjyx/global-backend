@@ -11,10 +11,7 @@
  * 出网治理与 http.get 完全一致：requestPublicHttp 逐跳公网 IP 钉扎，透传 broker 的
  * authorizeExternalAction / beforePhysicalWire 钩子，SSRF 与物理出口观测不削弱。
  */
-import {
-  captureManufacturerProfileText,
-  MANUFACTURER_PROFILE_TEXT_REVISION,
-} from "./manufacturer-profile-text";
+import { MANUFACTURER_PROFILE_TEXT_REVISION } from "./manufacturer-profile-text";
 import { createHash } from "node:crypto";
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
@@ -99,6 +96,8 @@ export interface HttpFirstOptions {
   /** Evidence mode: no redirects or cached text from the normal fetch path. */
   exactUrl?: boolean;
   profileTextRevision?: typeof MANUFACTURER_PROFILE_TEXT_REVISION;
+  /** Server-owned tool composition only; never a tool-input/query/context field. */
+  captureProfileText?: (html: string, minChars: number) => string | undefined;
   fetchHtml?: HttpFirstHtmlFetcher;
   minChars?: number;
   cache?: HttpFirstCacheOptions;
@@ -239,7 +238,8 @@ function extractionSettings(options: HttpFirstOptions) {
     valid:
       options.profileTextRevision === undefined ||
       (options.profileTextRevision === MANUFACTURER_PROFILE_TEXT_REVISION &&
-        options.exactUrl === true),
+        options.exactUrl === true &&
+        typeof options.captureProfileText === "function"),
     minChars: options.minChars ?? defaultMinChars(),
   };
 }
@@ -249,7 +249,7 @@ function extractResponsePage(
   minChars: number,
 ): HttpFirstPage | null {
   if (!options.profileTextRevision) return extractPage(html, minChars);
-  const markdown = captureManufacturerProfileText(html, minChars);
+  const markdown = options.captureProfileText?.(html, minChars);
   return markdown
     ? {
         markdown,

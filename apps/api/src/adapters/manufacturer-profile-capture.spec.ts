@@ -1,6 +1,6 @@
+import { captureManufacturerProfileText } from "../tools/manufacturer-profile-capture";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  captureManufacturerProfileText,
   readManufacturerProfileText,
   manufacturerProfileCaptureKey,
 } from "./manufacturer-profile-text";
@@ -282,6 +282,7 @@ async function staticCapture(value: string) {
       await fetchPageHttpFirst(PAGE_URL, {
         exactUrl: true,
         profileTextRevision: revision,
+        captureProfileText: captureManufacturerProfileText,
         fetchHtml: async () => ({
           status: 200,
           contentType: "text/html",
