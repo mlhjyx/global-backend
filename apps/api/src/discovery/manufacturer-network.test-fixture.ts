@@ -94,3 +94,76 @@ export const EVIDENCE: ManufacturerNetworkEvidence = {
   sourceReviewRef: "review:source",
   independenceReviewRef: "review:independence",
 };
+
+/** Synthetic review counterexamples: all have valid target identity anchors but no target relationship proof. */
+export const MANUFACTURER_CONFLICT_PROFILES = [
+  {
+    id: "terminated-component",
+    text: TEXT.replace(
+      SPAN,
+      "Acme Pumps GmbH is no longer an authorized AESSEAL distributor.\nLocation types\nDistributor",
+    ),
+  },
+  {
+    id: "negated-component",
+    text: TEXT.replace(
+      SPAN,
+      "Acme Pumps GmbH is not an authorized AESSEAL distributor.\nLocation types\nDistributor",
+    ),
+  },
+  {
+    id: "expired-component",
+    text: TEXT.replace(SPAN, "Status: Expired\nLocation types\nDistributor"),
+  },
+  {
+    id: "other-profile-component",
+    text: TEXT.replace(
+      SPAN,
+      "## Other Pumps\nCountry: France\nhttps://other.example/\nLocation types\nDistributor",
+    ),
+  },
+  {
+    id: "other-profile-before-target",
+    text:
+      "# Other Pumps\nCountry: France\nhttps://other.example/\nLocation types\nDistributor\n" +
+      TEXT,
+  },
+  {
+    id: "identity-from-other-profile",
+    text: "# Acme Pumps GmbH\n## Other Pumps\nCountry: Germany\nhttps://acme.example/\nLocation types\nDistributor",
+  },
+  { id: "longer-prefix-subject", text: TEXT.replace(SPAN, "Other" + SPAN) },
+  {
+    id: "longer-suffix-subject",
+    text: TEXT.replace(
+      SPAN,
+      SPAN.replace("Acme Pumps GmbH", "Acme Pumps GmbH Services"),
+    ),
+  },
+  {
+    id: "longer-prefix-component",
+    text: TEXT.replace(SPAN, "Other" + SPAN + "\nLocation types\nDistributor"),
+  },
+  {
+    id: "longer-suffix-component",
+    text: TEXT.replace(
+      SPAN,
+      SPAN.replace("Acme Pumps GmbH", "Acme Pumps GmbH Services") +
+        "\nLocation types\nDistributor",
+    ),
+  },
+  {
+    id: "wrapped-termination-component",
+    text: TEXT.replace(
+      SPAN,
+      "Acme Pumps GmbH is no longer an\nauthorized AESSEAL distributor.\nLocation types\nDistributor",
+    ),
+  },
+  {
+    id: "spaced-termination-component",
+    text: TEXT.replace(
+      SPAN,
+      "Acme Pumps GmbH is no  longer an authorized AESSEAL distributor.\nLocation types\nDistributor",
+    ),
+  },
+];

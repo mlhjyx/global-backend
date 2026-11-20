@@ -41,6 +41,7 @@ import { workspaceExecutionBudgetRequestScope } from "../execution-budget/execut
 import type { ExecutionBudgetBinding } from "../execution-budget/execution-budget-binding";
 import { CRITERION_IDS } from "./judgment/fit-rubric";
 import {
+  MANUFACTURER_CONFLICT_PROFILES,
   CONFIG,
   POLICY_ROW,
   COMPANY_INPUT,
@@ -615,6 +616,45 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
           })),
         },
       } as never);
+      // The actual v2 aggregator must preserve a genuine website quotation even
+      // when manufacturer evidence contains exactly the same words.
+      vi.mocked(executeStructuredTaskWithRuntime).mockResolvedValue({
+        provider: "test",
+        model: "test",
+        usage: { inputTokens: 1, outputTokens: 1, costUsd: 0 },
+        data: {
+          ...data,
+          criteria: data.criteria.map((c) => ({
+            ...c,
+            evidence: [
+              { kind: "website", url: "https://acme.example/", span: SPAN },
+            ],
+          })),
+        },
+      } as never);
+      const sharedCompany = {
+        ...company,
+        attributes: {
+          ...(company.attributes as object),
+          website_profile: {
+            trade_role: "distributor",
+            own_manufacturing: false,
+            evidence: [SPAN],
+          },
+        },
+        manufacturerEvidence,
+      };
+      expect(
+        (
+          await judgeFitV2(
+            {} as never,
+            workspaceId,
+            { seller: "Seller", seller_summary: "Industrial pumps" },
+            sharedCompany,
+            { judgePanelMode: "off", judgeCorroborationMode: "enforce" },
+          )
+        )?.verdict,
+      ).toBe("match");
       // 'distributor' remains a literal source span. A made-up first-party quote must fail.
       vi.mocked(executeStructuredTaskWithRuntime).mockResolvedValue({
         provider: "test",
@@ -855,6 +895,160 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
           loadManufacturerEvidence(tx, targetArgs, company),
         ),
       ).toBeUndefined();
+      sourcePage = undefined;
+    });
+    it("does not persist or qualify negated and wrong-profile relationships through real Broker receipts", async () => {
+      for (const [index, fixture] of MANUFACTURER_CONFLICT_PROFILES.entries()) {
+        const targetId = randomUUID();
+        const domain = `acme-fix-${index}.example`;
+        await owner.canonicalCompany.create({
+          data: {
+            ...COMPANY_INPUT,
+            id: targetId,
+            workspaceId,
+            domain,
+            dedupeKey: `d:${domain}`,
+          },
+        });
+        await owner.discoveryCompanyJob.create({
+          data: {
+            workspaceId,
+            runId,
+            canonicalCompanyId: targetId,
+            stage: "profiling",
+            verdictQuick: "match",
+          },
+        });
+        await owner.dataProvider.update({
+          where: { key: "manufacturer_network" },
+          data: {
+            config: {
+              ...config,
+              independenceAttestations: [
+                ...config.independenceAttestations,
+                {
+                  ...config.independenceAttestations[0]!,
+                  companyId: targetId,
+                  targetDomain: domain,
+                },
+              ],
+            },
+          },
+        });
+        sourcePage = {
+          url: PAGE_URL.replace("/acme", `/fix-${fixture.id}`),
+          text: fixture.text.replaceAll(
+            "https://acme.example/",
+            `https://${domain}/`,
+          ),
+        };
+        const targetArgs = {
+          ...args,
+          companyId: targetId,
+          enrichmentSlot: index + 2,
+        };
+        await corroborateCompanyBeforeFit(
+          {
+            prisma: app,
+            providers: { routeEnrichment: async () => [provider] } as never,
+          },
+          targetArgs,
+          binding,
+        );
+        expect(
+          await owner.manufacturerNetworkEvidence.count({
+            where: { workspaceId, companyId: targetId, runId },
+          }),
+          fixture.id,
+        ).toBe(0);
+        expect(
+          await owner.fieldEvidence.count({
+            where: {
+              workspaceId,
+              entityId: targetId,
+              providerKey: "manufacturer_network",
+            },
+          }),
+          fixture.id,
+        ).toBe(0);
+        const target = await owner.canonicalCompany.findUniqueOrThrow({
+          where: { id: targetId },
+        });
+        expect(
+          await app.withWorkspace(workspaceId, (tx) =>
+            loadManufacturerEvidence(tx, targetArgs, target),
+          ),
+          fixture.id,
+        ).toBeUndefined();
+        const events = await owner.runEvent.findMany({
+          where: {
+            workspaceId,
+            runId,
+            type: "company_enrichment_observed",
+            payload: { path: ["companyId"], equals: targetId },
+          },
+          select: { payload: true },
+        });
+        expect(
+          events.map((e) => (e.payload as { status: string }).status),
+          fixture.id,
+        ).toEqual(["miss"]);
+        expect(
+          currentEvidenceBundle(target).entries.some(
+            (e) => e.source_key === "manufacturer_network",
+          ),
+          fixture.id,
+        ).toBe(false);
+        // Give the real v2 aggregator otherwise valid first-party evidence. It
+        // must still abstain without an independent manufacturer proof/tier.
+        vi.mocked(executeStructuredTaskWithRuntime).mockResolvedValue({
+          provider: "test",
+          model: "test",
+          usage: { inputTokens: 1, outputTokens: 1, costUsd: 0 },
+          data: {
+            criteria: CRITERION_IDS.map((id) => ({
+              id,
+              applicable: true,
+              score: 9,
+              label: "pass",
+              rationale: "Synthetic first-party fixture",
+              evidence: [
+                { kind: "website", url: `https://${domain}/`, span: SPAN },
+              ],
+            })),
+            evidence_completeness: true,
+            verdict_proposed: "FIT",
+            refusal: { is_refusal: false, reason: null },
+          },
+        } as never);
+        const firstParty = {
+          ...target,
+          attributes: {
+            ...(target.attributes as object),
+            website_profile: {
+              trade_role: "distributor",
+              own_manufacturing: false,
+              evidence: [SPAN],
+            },
+          },
+        };
+        const rejected = await judgeFitV2(
+          {} as never,
+          workspaceId,
+          { seller: "Seller", seller_summary: "Industrial pumps" },
+          firstParty,
+          { judgePanelMode: "off", judgeCorroborationMode: "enforce" },
+        );
+        expect(rejected?.verdict, fixture.id).toBe("weak");
+        expect(
+          (
+            rejected?.judgmentRecord.sampling as {
+              corroboration: { reason: string };
+            }
+          ).corroboration.reason,
+          fixture.id,
+        ).toBe("INSUFFICIENT_TIERS");
+      }
       sourcePage = undefined;
     });
   },

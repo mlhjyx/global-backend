@@ -1,3 +1,4 @@
+import { MANUFACTURER_CONFLICT_PROFILES } from "./manufacturer-network.test-fixture";
 import { describe, expect, it } from "vitest";
 import {
   readManufacturerNetworkEvidence,
@@ -215,4 +216,54 @@ describe("manufacturer target country scope", () => {
     expect(
       parse(TEXT.replace("Country: Germany", "Country: France") + "\nGermany"),
     ).toBeUndefined());
+});
+
+describe("Fix round 1 target relationship and citation counterexamples", () => {
+  it.each(MANUFACTURER_CONFLICT_PROFILES)(
+    "withholds $id even with valid target identity",
+    ({ text }) => expect(parse(text)).toBeUndefined(),
+  );
+  it("accepts one scoped location profile using the reviewed complete legal-name formatting variant", () => {
+    expect(
+      parseManufacturerDetail({
+        source: CONFIG.sources[0]!,
+        company: { ...COMPANY_INPUT, name: "Acme" },
+        legalNames: ["Acme Pumps GmbH"],
+        text: "# ACME Pumps GMBH\nCountry: Germany\nhttps://acme.example/\n## Location types\nService Centre\nDistributor",
+      }),
+    ).toMatchObject({ spans: ["Distributor"], matchedName: "ACME Pumps GMBH" });
+  });
+  it("does not borrow identity anchors or country from another profile", () => {
+    expect(
+      parse(
+        "# Acme Pumps GmbH\n## Other Pumps\nCountry: Germany\nhttps://acme.example/\nLocation types\nDistributor",
+      ),
+    ).toBeUndefined();
+  });
+  it("retains real first-party evidence when its wording also appears on the manufacturer page", () => {
+    const criteria = CRITERION_IDS.map((id) => ({
+      id,
+      applicable: true,
+      label: "pass",
+      score: 9,
+      rationale: "fixture",
+      evidence: [{ kind: "website", url: "https://acme.example/", span: SPAN }],
+    }));
+    const context = {
+      now: NOW.toISOString(),
+      snapshotFetchedAt: NOW.toISOString(),
+      snapshotText: SPAN,
+      urlPolicy: () => ({ allowed: true }),
+    };
+    expect(
+      validateEvidence(criteria as never, context).byCriterion.C2_ROLE
+        .hasValidEvidence,
+    ).toBe(true);
+    expect(
+      validateEvidence(criteria as never, {
+        ...context,
+        manufacturerEvidence: EVIDENCE,
+      }).byCriterion.C2_ROLE,
+    ).toMatchObject({ hasValidEvidence: true, flags: [] });
+  });
 });

@@ -419,6 +419,12 @@ function matchesPropertyPath(path: readonly string[], parent: string, property: 
   return path.length === 2 && path[0] === parent && path[1] === property;
 }
 
+/** Top-level reserved namespace, governed separately from the recursive attribute walk. */
+function sanitizeManufacturerNamespace(value: unknown): unknown {
+  const evidence=value && typeof value==='object' && !Array.isArray(value) ? readManufacturerNetworkEvidence((value as Record<string,unknown>).evidence) : undefined;
+  return evidence ? {evidence} : undefined;
+}
+
 function sanitizeValue(
   key: string,
   value: unknown,
@@ -426,10 +432,6 @@ function sanitizeValue(
   depth: number,
   path: readonly string[],
 ): unknown {
-  if (path.length === 1 && path[0] === 'manufacturer_network') {
-    const evidence = value && typeof value === 'object' && !Array.isArray(value) ? readManufacturerNetworkEvidence((value as Record<string,unknown>).evidence) : undefined;
-    return evidence ? { evidence } : undefined;
-  }
   state.remaining -= 1;
   if (
     state.remaining < 0 ||
@@ -519,7 +521,7 @@ export function sanitizeCanonicalCompanyAttributes(
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>).flatMap(([key, item]) => {
       if (!RETAINED_TOP_LEVEL_KEYS.has(key)) return [];
-      const sanitized = sanitizeValue(key, item, state, 0, [key]);
+      const sanitized = key === 'manufacturer_network' ? sanitizeManufacturerNamespace(item) : sanitizeValue(key, item, state, 0, [key]);
       return sanitized === undefined ? [] : [[key, sanitized]];
     }),
   );

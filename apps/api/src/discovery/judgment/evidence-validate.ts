@@ -120,8 +120,8 @@ function validateItem(
   const manufacturer = context.manufacturerEvidence;
   const claimsManufacturer = Boolean(manufacturer && item.url === manufacturer.sourceUrl);
   const manufacturerQuote = Boolean(manufacturer && normalizedSpan && manufacturer.spans.some(span=>normalizeWhitespace(span).includes(normalizedSpan)));
-  if (claimsManufacturer || manufacturerQuote) {
-    if (!claimsManufacturer || item.kind !== 'directory') flags.push('EVIDENCE_URL_DENIED');
+  if (claimsManufacturer) {
+    if (item.kind !== 'directory') flags.push('EVIDENCE_URL_DENIED');
     if (!manufacturerQuote) flags.push('EVIDENCE_SPAN_NOT_FOUND');
     const at = Date.parse(manufacturer!.fetchedAt);
     if (!Number.isFinite(at) || at > nowMs) flags.push('EVIDENCE_FETCH_TIME_INVALID');

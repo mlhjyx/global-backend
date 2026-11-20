@@ -24,6 +24,7 @@ import {
   manufacturerIndependence,
   manufacturerSourceForUrl,
   readManufacturerNetworkSources,
+  type ManufacturerNetworkSource,
   type ManufacturerSourcePolicy,
 } from "../manufacturer-network-sources";
 import {
@@ -78,7 +79,7 @@ export class ManufacturerNetworkProvider implements CompanyEnrichmentAdapter {
       input.country !== "DE"
     )
       return miss();
-    let now = this.deps.now?.() ?? new Date();
+    const now = this.deps.now?.() ?? new Date();
     const setup = await this.deps.loadConfiguration();
     const config =
       setup?.status === "ENABLED"
@@ -214,9 +215,30 @@ export class ManufacturerNetworkProvider implements CompanyEnrichmentAdapter {
       throw new ExecutionControlError(
         "DURABLE_EXECUTION_RECEIPT_SCOPE_MISMATCH",
       );
-    now = this.deps.now?.() ?? new Date();
-    const fetchedAt = page.provenance.fetchedAt;
-    const artifactExpiresAt = page.provenance.artifactExpiresAt;
+    return this.finishEvidence(
+      input as CompanyEnrichmentInput & { domain: string; country: "DE" },
+      ctx,
+      subject,
+      candidate,
+      page,
+      receipt,
+      found,
+    );
+  }
+
+  /** Post-wire governance and deterministic projection, after receipt/Subject/URL validation. */
+  private async finishEvidence(
+    input: CompanyEnrichmentInput & { domain: string; country: "DE" },
+    ctx: ExecutionContext,
+    subject: Omit<ManufacturerIdentitySubject, "country">,
+    candidate: { url: string; source: ManufacturerNetworkSource },
+    page: ToolResult<{ url: string; text: string; contentHash: string }>,
+    receipt: ReturnType<typeof requireReceipt>,
+    found: ToolResult<{ results: Array<{ url: string }> }>,
+  ): Promise<EnrichmentResult> {
+    const now = this.deps.now?.() ?? new Date();
+    const fetchedAt = page.provenance!.fetchedAt;
+    const artifactExpiresAt = page.provenance!.artifactExpiresAt;
     if (
       !artifactExpiresAt ||
       !Number.isFinite(Date.parse(artifactExpiresAt)) ||
@@ -232,7 +254,7 @@ export class ManufacturerNetworkProvider implements CompanyEnrichmentAdapter {
     )
       return miss();
     // Re-read current governance after the wire; a concurrent revocation must not become evidence.
-    const latest = await this.deps.loadConfiguration();
+    const latest = await this.deps.loadConfiguration!();
     const latestConfig =
       latest?.status === "ENABLED"
         ? readManufacturerNetworkSources(latest.config)

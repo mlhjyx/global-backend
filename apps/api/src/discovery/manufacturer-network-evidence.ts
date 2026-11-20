@@ -149,46 +149,54 @@ export function parseManufacturerDetail(input: {
     .split(/\r?\n/u)
     .map((l) => l.trim())
     .filter(Boolean);
-  // Exact named detail heading and explicit canonical website are required; same-name-only is not identity.
-  const heading = lines
-    .filter((l) => /^#{1,3}\s/u.test(l))
-    .map((l) => l.replace(/^#{1,3}\s+/u, ""));
-  if (input.source.templateId === "aesseal-distributor/v1")
-    heading.push(lines[0] ?? "");
+  // One verified target profile only. A following unknown heading is an ambiguous
+  // layout, even when that heading has no legal suffix (e.g. "Other Pumps").
+  const headings = lines.flatMap((line, index) =>
+    /^#{1,6}\s/u.test(line)
+      ? [{ name: line.replace(/^#{1,6}\s+/u, ""), index }]
+      : [],
+  );
+  if (
+    input.source.templateId === "aesseal-distributor/v1" &&
+    !/^#{1,6}\s/u.test(lines[0] ?? "")
+  )
+    headings.push({ name: lines[0] ?? "", index: 0 });
   const targetNames = [input.company.name, ...(input.legalNames ?? [])].map(
     manufacturerNameKey,
   );
+  const matches = headings.filter((h) =>
+    targetNames.includes(manufacturerNameKey(h.name)),
+  );
+  if (matches.length !== 1) return undefined;
+  const { name: matchedName, index: profileIndex } = matches[0]!;
   const publisherName = manufacturerNameKey(input.source.legalName);
   if (
-    heading.some(
+    headings.some(
       (h) =>
-        /\b(?:gmbh|ag|kg|ltd|limited|inc|llc)\b/iu.test(h) &&
-        ![...targetNames, publisherName].includes(manufacturerNameKey(h)),
+        h.index !== profileIndex &&
+        !(
+          h.index < profileIndex &&
+          manufacturerNameKey(h.name) === publisherName
+        ) &&
+        !(h.index > profileIndex && /^Location types:?$/u.test(h.name)),
     )
   )
     return undefined;
-  const matchedName = heading.find((h) =>
-    targetNames.includes(manufacturerNameKey(h)),
-  );
-  if (!matchedName) return undefined;
+  const profile = lines.slice(profileIndex + 1);
+  const profileText = profile.join("\n");
   const website = [
-    ...input.text.matchAll(/https:\/\/[a-z0-9.-]+(?:\/[^\s)\]<>]*)?/giu),
+    ...profileText.matchAll(/https:\/\/[a-z0-9.-]+(?:\/[^\s)\]<>]*)?/giu),
   ].map((m) => new URL(m[0]!).hostname.replace(/^www\./u, ""));
-  // AESSEAL may expose only a staff email. Derive its domain in memory; never retain any address/person line.
+  // Derive an email domain in memory only, from this profile, never from another card.
   if (input.source.templateId === "aesseal-distributor/v1")
     website.push(
-      ...[...input.text.matchAll(/@[a-z0-9.-]+\.[a-z]{2,63}/giu)].map((m) =>
+      ...[...profileText.matchAll(/@[a-z0-9.-]+\.[a-z]{2,63}/giu)].map((m) =>
         m[0]!.slice(1).toLowerCase(),
       ),
     );
   if (!website.includes(input.company.domain.replace(/^www\./u, "")))
     return undefined;
-  const profileIndex = lines.findIndex(
-    (l) =>
-      manufacturerNameKey(l.replace(/^#{1,3}\s+/u, "")) ===
-      manufacturerNameKey(matchedName),
-  );
-  const profileLines = lines.slice(profileIndex + 1, profileIndex + 9);
+  const profileLines = profile.slice(0, 8);
   let profileCountry: string | null = null;
   for (const line of profileLines) {
     if (/^#{1,6}\s|^Location types:?$/u.test(line)) break;
@@ -203,39 +211,69 @@ export function parseManufacturerDetail(input: {
     }
   }
   if (profileCountry !== "DE") return undefined;
+  // A current negative is a decision, not merely a span to discard. It takes
+  // precedence over a stale positive Location types label in this target profile.
+  const negative =
+    /\b(?:not|no\s+longer|former|revoked|expired|terminated|unauthori[sz]ed|kein|keine|nicht|ehemaliger|beendet|widerrufen|abgelaufen)\b/iu;
+  const wrappedNegative =
+    /\b(?:not|no\s+longer|former|revoked|expired|terminated|unauthori[sz]ed|kein|keine|nicht|ehemaliger|beendet|widerrufen|abgelaufen)\b[^.!?;:]{0,160}\b(?:distributor|vertriebspartner)\b/iu;
+  if (wrappedNegative.test(profileText.replace(/\s+/gu, " "))) return undefined;
   if (
-    lines.some((l) =>
-      /^(?:Status\s*:\s*)?(?:Expired|Revoked|Terminated)\b/iu.test(l),
+    profile.some(
+      (line) =>
+        /^(?:(?:Relationship|Distributor)\s+status|Status)\s*:\s*(?:Expired|Revoked|Terminated)\b/iu.test(
+          line,
+        ) ||
+        /^(?:Expired|Revoked|Terminated)\b/iu.test(line) ||
+        (/\b(?:distributor|vertriebspartner)\b/iu.test(line) &&
+          negative.test(line)),
     )
+  )
+    return undefined;
+  // A relationship statement naming a different complete subject also makes a
+  // component fallback ambiguous, even when that foreign name contains ours.
+  if (
+    profile.some((line) => {
+      const statement = line.match(/^(.+?)\s+(?:is|ist)\s+(.+)$/iu);
+      return (
+        !!statement &&
+        /\b(?:distributor|vertriebspartner)\b/iu.test(statement[2]!) &&
+        manufacturerNameKey(statement[1]!) !== manufacturerNameKey(matchedName)
+      );
+    })
   )
     return undefined;
   const relation =
     input.source.templateId === "inoxpa-distributor/v1"
       ? /\b(?:authori[sz]ed\s+(?:INOXPA\s+)?distributor|offizieller\s+INOXPA[ -]Vertriebspartner)\b/iu
       : /\b(?:authori[sz]ed\s+AESSEAL\s+distributor|AESSEAL\s+authori[sz]ed\s+distributor)\b/iu;
-  const spans = lines
-    .filter(
-      (l) =>
-        relation.test(l) &&
-        !/\b(?:not|no longer|former|revoked|terminated|unauthori[sz]ed|kein|keine|ehemaliger)\b/iu.test(
-          l,
-        ) &&
-        l.length >= 30 &&
-        l.length <= 400 &&
-        l === l.normalize("NFKC") &&
-        companySpan(l) &&
-        manufacturerNameKey(l).includes(manufacturerNameKey(matchedName)),
-    )
+  const spans = profile
+    .filter((line) => {
+      // The complete grammatical subject must equal the accepted complete name.
+      // Longer names containing the target key do not establish its relationship.
+      const statement = line.match(/^(.+?)\s+(?:is|ist)\s+(.+)$/iu);
+      return (
+        !!statement &&
+        manufacturerNameKey(statement[1]!) ===
+          manufacturerNameKey(matchedName) &&
+        relation.test(statement[2]!) &&
+        !negative.test(statement[2]!) &&
+        line.length >= 30 &&
+        companySpan(line)
+      );
+    })
     .slice(0, 4);
   if (spans.length) return { spans, matchedName };
   if (input.source.templateId === "aesseal-distributor/v1") {
-    const section = lines.findIndex((l) =>
-      /^(?:#{1,4}\s*)?Location types:?$/u.test(l),
+    const sections = profile.flatMap((line, index) =>
+      /^(?:#{1,6}\s*)?Location types:?$/u.test(line) ? [index] : [],
     );
+    if (sections.length !== 1) return undefined;
+    const section = sections[0]!;
     const values =
       section < 0
         ? []
-        : lines
+        : profile
             .slice(section + 1, section + 4)
             .map((l) => l.replace(/^(?:[*-]|#{1,4})\s+/u, ""));
     // Closed known component; do not derive target relationships from global navigation/footer.

@@ -1,3 +1,4 @@
+import { MANUFACTURER_CONFLICT_PROFILES } from "../manufacturer-network.test-fixture";
 import { describe, expect, it, vi } from "vitest";
 import { ManufacturerNetworkProvider } from "./manufacturer-network.provider";
 import {
@@ -338,4 +339,30 @@ describe("manufacturer required independent alias references fail closed", () =>
         .matched,
     ).toBe(false);
   });
+});
+
+describe("Fix round 1 relationship proof before persistence", () => {
+  it.each(MANUFACTURER_CONFLICT_PROFILES)(
+    "does not map $id into authorized_distributor",
+    async ({ text }) => {
+      const h = harness({
+        fetch: {
+          data: { url: PAGE_URL, text, contentHash: "b".repeat(24) },
+          costCents: 1,
+          durableReceipt: fetchReceipt,
+          provenance: {
+            sourceUrl: PAGE_URL,
+            fetchedAt: NOW.toISOString(),
+            artifactExpiresAt: "2026-11-21T09:59:59.000Z",
+            contentHash: "b".repeat(24),
+            parserVersion: "artifact/crawl4ai-fetch/v1",
+          },
+        },
+      });
+      expect(await h.provider.enrichCompany(COMPANY_INPUT, ctx)).toMatchObject({
+        matched: false,
+      });
+      expect(h.invoke).toHaveBeenCalledTimes(2);
+    },
+  );
 });

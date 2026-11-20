@@ -1,3 +1,4 @@
+import { EVIDENCE as MANUFACTURER_EVIDENCE, NOW as MANUFACTURER_NOW } from "../manufacturer-network.test-fixture";
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -260,4 +261,16 @@ describe('evidence-validate（P3 J10）', () => {
       /invalid now/,
     );
   });
+});
+
+describe('Fix round 1 manufacturer page selection by claimed URL',()=>{
+ it.each(['Distributor','Acme Pumps GmbH is an authorized AESSEAL distributor for industrial customers.'])('keeps shared website wording independently valid: %s',span=>{
+  const manufacturer={...MANUFACTURER_EVIDENCE,spans:[span]};
+  const criteria=allCriteria({C2_ROLE:{evidence:[{kind:'website',url:'https://acme.example/',span}]}});
+  const ctx=context({now:MANUFACTURER_NOW.toISOString(),snapshotFetchedAt:MANUFACTURER_NOW.toISOString(),snapshotText:span});
+  expect(validateEvidence(criteria,ctx).byCriterion.C2_ROLE.hasValidEvidence).toBe(true);
+  expect(validateEvidence(criteria,{...ctx,manufacturerEvidence:manufacturer}).byCriterion.C2_ROLE).toMatchObject({hasValidEvidence:true,flags:[]});
+  const invented=allCriteria({C2_ROLE:{evidence:[{kind:'directory',url:manufacturer.sourceUrl,span:'This sentence appears only on the target website.'}]}});
+  expect(validateEvidence(invented,{...ctx,snapshotText:'This sentence appears only on the target website.',manufacturerEvidence:manufacturer}).byCriterion.C2_ROLE.flags).toContain('EVIDENCE_SPAN_NOT_FOUND');
+ });
 });

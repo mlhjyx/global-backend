@@ -1,5 +1,4 @@
-import { assertManufacturerNetworkAuthority } from '../discovery/manufacturer-network-authority';
-import type { ManufacturerNetworkExecutionSnapshot } from '../discovery/manufacturer-network-execution';
+import { discoveryManufacturerCommandArguments, NonRetryableOutboxCommandError } from './discovery-run-command';
 import { assertCandidateWorkspaceAllowed, assertRuntimeCandidateOperational, candidateWorkspaceWhere } from '../runtime/development-candidate';
 import { createHmac } from "node:crypto";
 import {
@@ -84,13 +83,6 @@ export const WEBHOOK_TIMEOUT_MS = 10_000;
 const BATCH_SIZE = 20;
 /** lastError 截断长度：错误体可能是整页 HTML，不让它撑爆行。 */
 const MAX_ERROR_LEN = 500;
-
-class NonRetryableOutboxCommandError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "NonRetryableOutboxCommandError";
-  }
-}
 
 /** 路由/派送用到的 outbox_event 行（含 BigInt 主键）。 */
 interface OutboxEventRecord {
@@ -890,8 +882,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           "EXECUTION_BUDGET_OUTBOX_COMMAND_PARKED",
         );
       }
-      let manufacturerNetworkExecution: ManufacturerNetworkExecutionSnapshot | undefined;
-      try { manufacturerNetworkExecution = assertManufacturerNetworkAuthority(payload.manufacturerNetworkExecution, executionBudget, payload.planId); } catch { throw new NonRetryableOutboxCommandError('EXECUTION_BUDGET_OUTBOX_COMMAND_PARKED'); }
+      const manufacturerArgs = discoveryManufacturerCommandArguments(payload.manufacturerNetworkExecution, executionBudget, payload.planId);
       await this.startWorkflowIdempotent(
         DISCOVERY_WORKFLOW,
         {
@@ -908,7 +899,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
               workspaceId: ev.workspaceId,
               runId: ev.aggregateId,
               planId: payload.planId ?? "",
-              ...(manufacturerNetworkExecution ? { manufacturerNetworkExecution } : {}),
+              ...manufacturerArgs,
               icpId: payload.icpId ?? "",
               executionContractVersion: 2,
               executionBudget,
