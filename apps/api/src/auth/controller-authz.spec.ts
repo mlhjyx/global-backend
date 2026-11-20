@@ -12,6 +12,7 @@ import { EventsController } from '../events/events.controller';
 import { IcpController } from '../icp/icp.controller';
 import { LeadController } from '../lead/lead.controller';
 import { ReportController } from '../report/report.controller';
+import { MarketCandidateSetsController } from '../market-candidates/market-candidate-sets.controller';
 import { PlatformExecutionTechnicalQuoteController } from '../platform-authority/platform-execution-technical-quote.controller';
 import { PlatformTechnicalQuoteServiceAuthenticationGuard } from '../platform-authority/platform-technical-quote-service-auth';
 import { PlatformTargetLookupController } from '../platform-authority/platform-target-lookup.controller';
@@ -38,6 +39,7 @@ const PROTECTED_CONTROLLERS = [
   DiscoveryController,
   EventsController,
   IcpController,
+  MarketCandidateSetsController,
   LeadController,
   ReportController,
   AssetsController,

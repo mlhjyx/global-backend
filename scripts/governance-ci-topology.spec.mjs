@@ -671,3 +671,15 @@ test("the required build verifies runtime lease roles against disposable Postgre
   assert.match(permissionStep, /ALTER ROLE app_user NOBYPASSRLS/);
   assert.doesNotMatch(permissionStep, /production|global_dev/);
 });
+
+test("market candidate persistence runs explicitly with both restricted disposable database identities", async () => {
+  const workflow = await readRepositoryFile(".github/workflows/ci.yml");
+  const step = namedStepBlock(jobBlock(workflow, "build-test"), "Market candidate persistence and feedback on PostgreSQL");
+  assert.match(step, /MARKET_CANDIDATES_DATABASE_TEST: "1"/);
+  assert.match(step, /MARKET_CANDIDATES_TEST_DATABASE_URL: postgresql:\/\/global:global-test-only@127\.0\.0\.1:5432\/global_test/);
+  assert.match(step, /MARKET_CANDIDATES_TEST_APP_DATABASE_URL: postgresql:\/\/app_user:app_pw@127\.0\.0\.1:5432\/global_test/);
+  assert.match(step, /APP_DATABASE_URL: postgresql:\/\/app_user:app_pw@127\.0\.0\.1:5432\/global_test/);
+  assert.match(step, /pnpm --filter @global\/api exec vitest run src\/market-candidates\/market-candidate-sets\.postgres\.spec\.ts/);
+  assert.match(step, /if: needs\.renderer-visual-scope\.outputs\.run_code != 'false'/);
+  assert.doesNotMatch(step, /continue-on-error|global_dev|--passWithNoTests|--testNamePattern/);
+});
