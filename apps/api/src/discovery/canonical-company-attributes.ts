@@ -1,3 +1,4 @@
+import { readManufacturerNetworkEvidence } from './manufacturer-network-evidence';
 import { isDeepStrictEqual } from "node:util";
 import {
   isContactFreeText,
@@ -11,6 +12,7 @@ import { readProjectPageEvidence } from "./website-profile/project-page-evidence
 import { isValidGermanVat, isRegisteredAddressText } from "./website-profile/impressum";
 
 const RETAINED_TOP_LEVEL_KEYS = new Set([
+  "manufacturer_network",
   "digital_footprint",
   "employee_band",
   "employees",
@@ -260,6 +262,7 @@ const storedCompanyFieldAttributePaths = new Map<
   string,
   readonly string[]
 >([
+  ["manufacturer_network.evidence", ["manufacturer_network", "evidence"]],
   ["digital_footprint.ad_pixels", ["digital_footprint", "ad_pixels"]],
   ["digital_footprint.email_provider", ["digital_footprint", "email_provider"]],
   ["digital_footprint.hiring_signal", ["digital_footprint", "hiring_signal"]],
@@ -354,6 +357,7 @@ export const STORED_COMPANY_FIELD_EVIDENCE_FIELDS = Object.freeze([
   "intent.sources_sought",
   "intent.tender",
   "intent.website_change",
+  "manufacturer_network.evidence",
   "name",
   "region",
   "revenue_usd",
@@ -413,6 +417,12 @@ function safeProduct(value: unknown): value is string {
 
 function matchesPropertyPath(path: readonly string[], parent: string, property: string): boolean {
   return path.length === 2 && path[0] === parent && path[1] === property;
+}
+
+/** Top-level reserved namespace, governed separately from the recursive attribute walk. */
+function sanitizeManufacturerNamespace(value: unknown): unknown {
+  const evidence=value && typeof value==='object' && !Array.isArray(value) ? readManufacturerNetworkEvidence((value as Record<string,unknown>).evidence) : undefined;
+  return evidence ? {evidence} : undefined;
 }
 
 function sanitizeValue(
@@ -511,7 +521,7 @@ export function sanitizeCanonicalCompanyAttributes(
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>).flatMap(([key, item]) => {
       if (!RETAINED_TOP_LEVEL_KEYS.has(key)) return [];
-      const sanitized = sanitizeValue(key, item, state, 0, [key]);
+      const sanitized = key === 'manufacturer_network' ? sanitizeManufacturerNamespace(item) : sanitizeValue(key, item, state, 0, [key]);
       return sanitized === undefined ? [] : [[key, sanitized]];
     }),
   );

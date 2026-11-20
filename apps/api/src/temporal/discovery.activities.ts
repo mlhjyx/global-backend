@@ -1,3 +1,4 @@
+import type { ManufacturerNetworkExecutionSnapshot } from '../discovery/manufacturer-network-execution';
 import { createHash } from 'node:crypto';
 import { scopeRunProjectEvidence } from '../discovery/website-profile/run-project-page';
 import { Prisma, type PrismaClient } from '@prisma/client';
@@ -195,6 +196,7 @@ export interface StaleDiscoveryRunRow {
 }
 
 export interface DiscoveryRunInput {
+  manufacturerNetworkExecution?: ManufacturerNetworkExecutionSnapshot;
   workspaceId: string;
   runId: string;
   planId: string;

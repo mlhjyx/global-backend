@@ -262,6 +262,50 @@
       ]
     },
     {
+      "key": "apps/api/src/discovery/providers/manufacturer-network.provider.ts#crawl4ai.fetch#1",
+      "kind": "tool",
+      "producerId": "crawl4ai.fetch",
+      "resultStrategy": "artifact_reference",
+      "resultSchema": "crawl4ai-fetch/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/discovery/providers/manufacturer-network.provider.ts",
+          "anchor": "requireReceipt"
+        },
+        {
+          "path": "apps/api/src/discovery/run2/corroboration-enrichment.ts",
+          "anchor": "applyDomainAckConsumerTransactions"
+        },
+        {
+          "path": "apps/api/src/discovery/manufacturer-network-store.ts",
+          "anchor": "commit_manufacturer_network_evidence_v1"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/manufacturer-network.provider.ts#searxng.search#1",
+      "kind": "tool",
+      "producerId": "searxng.search",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "searxng-search/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/discovery/providers/manufacturer-network.provider.ts",
+          "anchor": "requireReceipt"
+        },
+        {
+          "path": "apps/api/src/discovery/run2/corroboration-enrichment.ts",
+          "anchor": "applyDomainAckConsumerTransactions"
+        },
+        {
+          "path": "apps/api/src/discovery/manufacturer-network-store.ts",
+          "anchor": "commit_manufacturer_network_evidence_v1"
+        }
+      ]
+    },
+    {
       "key": "apps/api/src/discovery/providers/opencorporates.provider.ts#opencorporates.search#1",
       "kind": "tool",
       "producerId": "opencorporates.search",

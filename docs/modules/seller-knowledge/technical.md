@@ -129,3 +129,6 @@ presign → commit（魔数/大小/hash/配额，advisory lock 复检）
 - 精确消费绑定 `MarketCandidateGenerationService.apply / MarketCandidateGeneration`，key 为 generationId、消费版本为1。B1 set/revision、generation PERSISTED 与可信 ACK 必须同事务。确定被新意图/反馈 anchor 或来源改变拒绝时，合法 NOT_APPLIED 与 ACK 同事务、set_id 必空；真正存储/控制面失败不是丢弃，原 SETTLED 留 RESULT_READY/SAVE_PENDING。已准入在途调用遇公司软删仅可在原内部消费上下文完成拒绝审计，对外仍404，不复活/暴露资料。
 - 恢复只按原 scope/authority/account/generation/operation/schema 读账；复用唯一 receipt validator 与完整 project/restore/reproject 校验，不 open/reserve/attest 续权或调用模型。终态先读域决定，不依赖投影正文；PERSISTED 再做 B1 初始修订权威冷读，NOT_APPLIED 永无可用集合。ACK REPLAYED 的 value 为空，必须核既有匹配终态；孤立 ACK、错误元组或缺投影不能造成功。ACK 不表示 typed 投影已物理擦除，本增量不加 purge/reaper 或旧账本 DML 权限。
 - 验证是显式自建 loopback `global_test`、真实非 superuser/non-BYPASSRLS app_user 与合成 provider，通过原 Router、预算函数、ACK 和域表执行。覆盖并发、来源/反馈竞争、完整回滚、闭账/过期恢复、账户族总帽、UNKNOWN 不重发及真实普通用户/全局准入 HTTP。原模型与工程研究工具分离，本包不运行真实模型、embedding、搜索、抓取、发送、迁移业务库或部署，不声称真实市场判断或转化已验收。
+
+- 固定头复审回修：最新意图只约束首次 PERSISTED 提交，历史终态持续核对原操作、精确 ACK 和 B1 初始修订；新增准备或新集合不撤销旧保存事实。修正通过后续 forward 迁移实现，旧 ENUM/USE 字节保持。
+- 原账的 SETTLED 且所有结果/receipt 字段为 SQL NULL，是已结算但无可用结果，明确 FAILED 且不伪造 receipt/ACK、不退款或重发；部分/损坏投影、错元组和 RESULT_UNKNOWN 仍拒绝或保持未知。相同 attempt 的旧恢复快照不能倒写已推进阶段，同阶段同原因不重复写时间戳。UNKNOWN 的安全重准入须在原权威/账户锁与账户族检查内复核精确 RELEASED，再经合法 FAILED 转换；不放宽数据库阶段约束。

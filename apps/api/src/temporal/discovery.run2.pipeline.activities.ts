@@ -6,6 +6,9 @@
  * （渠道/导入养出来的 canonical 公司），本来就没有本 run 的 raw 记录。每一步都按公司 id
  * 直接读写，落库路径复用既有提交函数（durable receipt / 治理 / 抑制门语义不变）。
  */
+import type { ManufacturerNetworkExecutionSnapshot } from '../discovery/manufacturer-network-execution';
+import { loadManufacturerEvidence } from '../discovery/manufacturer-network-store';
+import { assertManufacturerNetworkAuthority } from '../discovery/manufacturer-network-authority';
 import { ApplicationFailure } from '@temporalio/activity';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { ModelGateway } from '../model-gateway/model-gateway';
@@ -94,6 +97,7 @@ import type { FailureStage } from '../discovery/judgment/failure-codes';
 import { withClassifiedFailure } from './pipeline-failure-activity';
 
 export interface CompanyPipelineActivityInput {
+  manufacturerNetworkExecution?: ManufacturerNetworkExecutionSnapshot;
   workspaceId: string;
   runId: string;
   icpId: string;
@@ -161,6 +165,11 @@ export function createRun2PipelineActivities(deps: {
         'EXECUTION_BUDGET_LEGACY_HISTORY_PARKED',
         'EXECUTION_BUDGET_LEGACY_HISTORY_PARKED',
       );
+    }
+    const manufacturerSnapshot = assertManufacturerNetworkAuthority(args.manufacturerNetworkExecution, binding);
+    if (manufacturerSnapshot) {
+      const run = await deps.prisma.withWorkspace(args.workspaceId, tx=>tx.discoveryRun.findFirst({where:{id:args.runId,workspaceId:args.workspaceId,icpId:args.icpId},select:{planId:true}}));
+      if (!run || run.planId !== manufacturerSnapshot.planId) throw ApplicationFailure.nonRetryable('EXECUTION_BUDGET_REQUEST_INVALID','EXECUTION_BUDGET_REQUEST_INVALID');
     }
     await budgets.attestAuthorized({
       authorityId: binding.authorityId,
@@ -501,7 +510,8 @@ export function createRun2PipelineActivities(deps: {
           ? await loadRunProjectPage(tx, { ...args, domain: company.domain, now: new Date() })
           : undefined;
         const attributes = scopeRunProjectEvidence(company ? scopeIndependentEnrichment(company) : undefined, projectUrl);
-        return { icpBrief, company: company ? { ...company, attributes } : null };
+        const manufacturerEvidence = company && args.manufacturerNetworkExecution && mode === 'enforce' && scene === 'distribution' ? await loadManufacturerEvidence(tx,args,company) : undefined;
+        return { icpBrief, company: company ? { ...company, attributes, ...(manufacturerEvidence ? { manufacturerEvidence } : {}) } : null };
       });
       if (!loaded.company) return { judged: false, verdict: null, skipped: true };
       if (!(await mayUse(args.workspaceId, args.companyId))) {

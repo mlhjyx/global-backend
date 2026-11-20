@@ -371,4 +371,56 @@ suite('generation controls are durable tenant data, not a fixture producer or mo
   expect((await fresh.service.get(ctx(f),prepared.generationId)).phase).toBe('PERSISTED');expect(fresh.state.calls).toBe(1);expect(old.state.calls).toBe(0);
  },20000);
 
+
+ it('r4: retains historical PERSISTED facts after preparing and executing a later intent',async()=>{
+  const f=await fixture(),s=system(f),a=await s.service.prepare(ctx(f),f.companyId,{intentId:f.intentId});
+  const saved=await s.service.execute(ctx(f),a.generationId,{intentDigest:a.intentDigest},'synthetic-owned-grant');expect(saved.phase).toBe('PERSISTED');
+  const b=await s.service.prepare(ctx(f),f.companyId,{intentId:randomUUID()});
+  expect(await s.service.get(ctx(f),a.generationId)).toEqual(saved);expect(await s.service.recover(ctx(f),a.generationId)).toEqual(saved);
+  expect(await s.service.prepare(ctx(f),f.companyId,{intentId:f.intentId})).toEqual(saved);expect(s.state.calls).toBe(1);
+  const next=await s.service.execute(ctx(f),b.generationId,{intentDigest:b.intentDigest},'synthetic-owned-grant');expect(next.phase).toBe('PERSISTED');expect(next.set?.setId).not.toBe(saved.set?.setId);
+  const cold=new MarketCandidateGenerationService(new MarketCandidateGenerationRepository(app),s.authorities,s.store,new MarketCandidateSetsService(app),undefined as never);
+  expect(await cold.get(ctx(f),a.generationId)).toEqual(saved);expect(await cold.recover(ctx(f),a.generationId)).toEqual(saved);expect(s.state.calls).toBe(2);
+ });
+ it('r4: bills rejected output once and persistently reports failed no-result without another wire or ACK',async()=>{
+  const f=await fixture(),valid=proposed(f),first=valid.candidates[0];const invalid={...valid,candidates:[{...first,proposal:{...first.proposal,supplyOrCapability:{...first.proposal.supplyOrCapability,offeringId:randomUUID()}}}]} as GenerationOutput;
+  const s=system(f,{output:invalid}),a=await s.service.prepare(ctx(f),f.companyId,{intentId:f.intentId});
+  const failed=await s.service.execute(ctx(f),a.generationId,{intentDigest:a.intentDigest},'synthetic-owned-grant');expect(failed).toMatchObject({phase:'FAILED',reasonCode:'EXECUTION_FAILED',set:null,execution:null});
+  const cold=new MarketCandidateGenerationService(new MarketCandidateGenerationRepository(app),s.authorities,s.store,new MarketCandidateSetsService(app),undefined as never);
+  expect(await cold.get(ctx(f),a.generationId)).toEqual(failed);expect(await cold.recover(ctx(f),a.generationId)).toEqual(failed);
+  expect(await s.service.execute(ctx(f),a.generationId,{intentDigest:a.intentDigest},'synthetic-owned-grant')).toEqual(failed);
+  const operations=await app.withWorkspace(f.workspaceId,tx=>tx.toolBudgetOperation.findMany());expect(operations).toHaveLength(1);expect(operations[0].status).toBe('SETTLED');expect(operations[0].chargedMicrousd).toBeGreaterThan(0n);expect(operations[0].resultSchema).toBeNull();expect(operations[0].resultDigest).toBeNull();
+  expect(await financialCounts(f)).toEqual({authorities:1,attempts:1,operations:1,sets:0});expect(await app.withWorkspace(f.workspaceId,tx=>tx.$queryRaw`SELECT ack_id FROM execution_domain_ack`)).toEqual([]);expect(s.state.calls).toBe(1);expect(s.state.requests).toHaveLength(1);
+ });
+ it('r4: ignores a same-attempt stale RESERVED recovery after RESULT_READY commits',async()=>{
+  let wireSeen!:()=>void,wireRelease!:()=>void,readSeen!:()=>void,readRelease!:()=>void,readySeen!:()=>void,applyRelease!:()=>void;
+  const wireStarted=new Promise<void>(resolve=>{wireSeen=resolve;}),wireGate=new Promise<void>(resolve=>{wireRelease=resolve;}),readStarted=new Promise<void>(resolve=>{readSeen=resolve;}),readGate=new Promise<void>(resolve=>{readRelease=resolve;}),readyStarted=new Promise<void>(resolve=>{readySeen=resolve;}),applyGate=new Promise<void>(resolve=>{applyRelease=resolve;});
+  const f=await fixture(),s=system(f,{beforeReturn:async()=>{wireSeen();await wireGate;}}),a=await s.service.prepare(ctx(f),f.companyId,{intentId:f.intentId});
+  const boundary=s.service as unknown as {apply:(...args:unknown[])=>Promise<unknown>},apply=boundary.apply.bind(s.service);boundary.apply=async(...args)=>{readySeen();await applyGate;return apply(...args);};
+  const read=s.store.readOperationResult!.bind(s.store);let hold=true;s.store.readOperationResult=async query=>{const value=await read(query);if(hold&&value.status==='RESERVED'){hold=false;readSeen();await readGate;}return value;};
+  const executing=s.service.execute(ctx(f),a.generationId,{intentDigest:a.intentDigest},'synthetic-owned-grant');await wireStarted;const recovering=s.service.recover(ctx(f),a.generationId);await readStarted;
+  try{wireRelease();await Promise.race([readyStarted,executing.then(()=>{throw Error('execution ended before apply gate');})]);expect((await app.withWorkspace(f.workspaceId,tx=>tx.marketCandidateGeneration.findUniqueOrThrow({where:{id:a.generationId}}))).phase).toBe('RESULT_READY');readRelease();expect((await recovering).phase).toBe('RESULT_READY');
+  }finally{wireRelease();readRelease();applyRelease();await Promise.allSettled([executing,recovering]);}
+  expect((await s.service.get(ctx(f),a.generationId)).phase).toBe('PERSISTED');expect(s.state.calls).toBe(1);expect(s.state.requests).toHaveLength(1);
+ },20000);
+ it('r4: safely readmits a ledger-RELEASED old attempt whose domain remained UNKNOWN after a crash',async()=>{
+  const f=await fixture(),old=system(f),a=await old.service.prepare(ctx(f),f.companyId,{intentId:f.intentId});const reserve=old.store.reserve.bind(old.store),read=old.store.readOperationResult!.bind(old.store);
+  old.store.readOperationResult=async query=>{const value=await read(query);if(value.status==='RELEASED')throw Error('synthetic crash before domain failure reconciliation');return value;};
+  old.store.reserve=async request=>{const reservation=await reserve(request);expect((await old.service.recover(ctx(f),a.generationId)).phase).toBe('RESULT_UNKNOWN');await old.store.release(reservation);throw Error('synthetic definite pre-wire failure');};
+  await expect(old.service.execute(ctx(f),a.generationId,{intentDigest:a.intentDigest},'synthetic-owned-grant')).rejects.toThrow('synthetic crash before domain failure reconciliation');
+  const row=await app.withWorkspace(f.workspaceId,tx=>tx.marketCandidateGeneration.findUniqueOrThrow({where:{id:a.generationId}}));expect(row.phase).toBe('RESULT_UNKNOWN');const first=(await app.withWorkspace(f.workspaceId,tx=>tx.marketCandidateGenerationAttempt.findMany({where:{generationId:a.generationId}})))[0];const operation=(await app.withWorkspace(f.workspaceId,tx=>tx.toolBudgetOperation.findMany()))[0];expect(operation.status).toBe('RELEASED');expect(operation.chargedMicrousd).toBe(0n);
+  await owner.$executeRaw`UPDATE execution_budget_authority SET issued_at=issued_at-INTERVAL'10 minutes',not_before=not_before-INTERVAL'10 minutes',expires_at=expires_at-INTERVAL'10 minutes' WHERE id=${first.authorityId}::uuid`;
+  const fresh=system(f),saved=await fresh.service.execute(ctx(f),a.generationId,{intentDigest:a.intentDigest},'synthetic-owned-grant');expect(saved.phase).toBe('PERSISTED');expect(old.state.calls).toBe(0);expect(fresh.state.calls).toBe(1);
+  const accounts=await app.withWorkspace(f.workspaceId,tx=>tx.toolBudgetAccount.findMany());expect(accounts.find(x=>x.accountKey===first.accountKey)?.closedAt).not.toBeNull();expect(accounts.reduce((n,x)=>n+x.chargedMicrousd+x.reservedMicrousd,0n)).toBeLessThanOrEqual(800000n);expect((await financialCounts(f)).attempts).toBe(2);
+ },20000);
+
+
+ it('r4: keeps the database latest-intent commit fence even if an application read is stale',async()=>{
+  const f=await fixture();let next!:Awaited<ReturnType<MarketCandidateGenerationService['prepare']>>;const s=system(f,{beforeReturn:async()=>{next=await s.service.prepare(ctx(f),f.companyId,{intentId:randomUUID()});}}),a=await s.service.prepare(ctx(f),f.companyId,{intentId:f.intentId});
+  const head=s.repository.head.bind(s.repository);s.repository.head=async(tx,row)=>{const value=await head(tx,row);return value?{...value,latestGenerationId:a.generationId}:value;};
+  try{expect((await s.service.execute(ctx(f),a.generationId,{intentDigest:a.intentDigest},'synthetic-owned-grant')).phase).toBe('RESULT_READY');expect((await financialCounts(f)).sets).toBe(0);expect(await app.withWorkspace(f.workspaceId,tx=>tx.$queryRaw`SELECT ack_id FROM execution_domain_ack`)).toEqual([]);
+  }finally{s.repository.head=head;}
+  expect(next.phase).toBe('PREPARED');expect((await s.service.recover(ctx(f),a.generationId)).phase).toBe('NOT_APPLIED');expect(s.state.calls).toBe(1);
+ });
+
 });

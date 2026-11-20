@@ -150,6 +150,7 @@ describe("CanonicalCompany derived-attribute sanitizer parity", () => {
       "intent.sources_sought",
       "intent.tender",
       "intent.website_change",
+      "manufacturer_network.evidence",
       "name",
       "region",
       "revenue_usd",
@@ -729,4 +730,13 @@ describe('stored raw Wikidata country identity', () => {
       expect(sanitizeCanonicalCompanyAttributes({ wikidata: { country_qid: value } })).not.toHaveProperty('wikidata.country_qid');
     },
   );
+});
+
+describe('reserved manufacturer namespace after G9 extraction',()=>{
+ it('preserves the governed proof and FieldEvidence value while withholding malformed namespace data',async()=>{
+  const {EVIDENCE}=await import('./manufacturer-network.test-fixture');
+  expect(sanitizeCanonicalCompanyAttributes({manufacturer_network:{evidence:EVIDENCE,untrusted:'ignored'}})).toEqual({manufacturer_network:{evidence:EVIDENCE}});
+  expect(sanitizeStored('manufacturer_network.evidence',EVIDENCE)).toEqual(EVIDENCE);
+  expect(sanitizeCanonicalCompanyAttributes({manufacturer_network:{evidence:{...EVIDENCE,attested:true}}})).toEqual({});
+ });
 });

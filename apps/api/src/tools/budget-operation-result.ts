@@ -14,7 +14,7 @@ export interface BudgetOperationResultQuery {
   readonly resultSchema: TypedProjectionSchema;
 }
 export type BudgetOperationResultReadback =
-  | { readonly status: 'NOT_FOUND' | 'RESERVED' | 'RELEASED' | 'RESULT_UNKNOWN' }
+  | { readonly status: 'NOT_FOUND' | 'RESERVED' | 'RELEASED' | 'RESULT_UNKNOWN' | 'SETTLED_NO_RESULT' }
   | { readonly status: 'SETTLED'; readonly projection: GenericOperationProjection; readonly receipt: DurableExecutionReceipt };
 
 function projectionResultStrategy(
@@ -163,7 +163,7 @@ interface ReadAccountRow {
 interface ReadOperationRow {
   scope_key: string; account_id: string; generation: number; operation_id: string; operation_key: string; status: string;
   result_schema_version: string | null; result_schema: string | null; result_digest: string | null;
-  result_json: unknown; receipt_usage: unknown; receipt_cost_basis: string | null;
+  result_json: unknown; receipt_usage: unknown; receipt_cost_basis: string | null; settled_without_result: boolean;
 }
 function assertReadQuery(query: BudgetOperationResultQuery): void {
   assertExecutionBudgetScopeKey(query.scopeKey, { allowPlatform: false });
@@ -203,7 +203,9 @@ export async function readBudgetOperationResult(tx: Prisma.TransactionClient, qu
       account.account_key !== query.accountKey || account.authority_id !== query.authorityId || account.generation !== query.accountGeneration) ledgerReceiptMismatch();
   const operations = await tx.$queryRaw<ReadOperationRow[]>`
     SELECT scope_key, account_id::text AS account_id, generation, id::text AS operation_id, operation_key, status::text AS status,
-      result_schema_version, result_schema, result_digest, result_json, receipt_usage, receipt_cost_basis
+      result_schema_version, result_schema, result_digest, result_json, receipt_usage, receipt_cost_basis,
+      (result_schema_version IS NULL AND result_schema IS NULL AND result_digest IS NULL
+        AND result_json IS NULL AND receipt_usage IS NULL AND receipt_cost_basis IS NULL) AS settled_without_result
     FROM public.tool_budget_operation WHERE scope_key=${query.scopeKey} AND account_id=${account.account_id}::uuid
       AND generation=${query.accountGeneration} AND operation_key=${query.operationKey}`;
   if (operations.length === 0) return { status: 'NOT_FOUND' };
@@ -212,5 +214,10 @@ export async function readBudgetOperationResult(tx: Prisma.TransactionClient, qu
       operation.account_id !== account.account_id || operation.generation !== query.accountGeneration || operation.operation_key !== query.operationKey) ledgerReceiptMismatch();
   if (operation.status === 'RESERVED' || operation.status === 'RELEASED' || operation.status === 'RESULT_UNKNOWN') return { status: operation.status };
   if (operation.status !== 'SETTLED') ledgerReceiptMismatch();
+  if (operation.settled_without_result === true) {
+    if ([operation.result_schema_version, operation.result_schema, operation.result_digest,
+      operation.result_json, operation.receipt_usage, operation.receipt_cost_basis].some(value => value !== null)) ledgerReceiptMismatch();
+    return { status: 'SETTLED_NO_RESULT' };
+  }
   return settledReadback(operation, account, query);
 }

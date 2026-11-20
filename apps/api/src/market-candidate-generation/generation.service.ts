@@ -15,7 +15,7 @@ import {
   ExecutionBudgetGrantError,
   type VerifiedExecutionBudgetAuthority,
 } from "../execution-budget/execution-budget-authority.types";
-import type { BudgetOperationResultReadback } from "../tools/budget-operation-result";
+import { readBudgetOperationResult, type BudgetOperationResultReadback } from "../tools/budget-operation-result";
 import {
   BadRequestException,
   ConflictException,
@@ -378,6 +378,16 @@ export class MarketCandidateGenerationService {
       const current = await this.repository.lockGeneration(tx, ctx, row, true);
       if (terminal(current) || current.activeAttemptId !== row.activeAttemptId)
         return current;
+      if (current.phase === phase && current.reasonCode === reason) return current;
+      const permitted: Readonly<Record<string, readonly string[]>> = {
+        PREPARED: ["FAILED"],
+        RUNNING: ["RESULT_UNKNOWN", "RESULT_READY", "FAILED"],
+        RESULT_UNKNOWN: ["RESULT_READY", "FAILED"],
+        RESULT_READY: [],
+        FAILED: ["RESULT_READY"],
+      };
+      if (current.phase !== phase && !permitted[current.phase]?.includes(phase))
+        return current;
       return this.repository.progress(tx, current, phase, reason);
     });
   }
@@ -449,6 +459,23 @@ export class MarketCandidateGenerationService {
               changed();
             await this.repository.assertNoForeignRisk(tx, current);
             await this.repository.assertAttemptFamilyClear(tx, current);
+            if (current.phase === "RESULT_UNKNOWN") {
+              const active = (await this.repository.attempts(tx, current)).find(
+                (attempt) => attempt.id === current.activeAttemptId,
+              );
+              if (!active) unavailable();
+              // The existing consume protocol has fenced the old account; inspect inside its locks.
+              const previous = await readBudgetOperationResult(tx, {
+                scopeKey: current.workspaceId,
+                authorityId: active.authorityId,
+                accountKey: active.accountKey,
+                accountGeneration: active.accountGeneration,
+                operationKey: active.expectedOperationKey,
+                resultSchema: GENERATION_RESULT_SCHEMA,
+              });
+              if (previous.status !== "RELEASED") unavailable();
+              await this.repository.progress(tx, current, "FAILED", "EXECUTION_REJECTED");
+            }
             const basis = await this.repository.loadBasis(
                 tx,
                 ctx,
@@ -502,6 +529,7 @@ export class MarketCandidateGenerationService {
       const prior = await this.inspect(row, active);
       if (
         prior.status === "SETTLED" ||
+        prior.status === "SETTLED_NO_RESULT" ||
         prior.status === "RESERVED" ||
         prior.status === "RESULT_UNKNOWN"
       )
@@ -576,7 +604,8 @@ export class MarketCandidateGenerationService {
       if (
         !storageFailure(error) &&
         error instanceof ExecutionControlError &&
-        state.status !== "SETTLED"
+        state.status !== "SETTLED" &&
+        state.status !== "SETTLED_NO_RESULT"
       )
         throw error;
     }
@@ -741,6 +770,8 @@ export class MarketCandidateGenerationService {
     const attempt = await this.active(row);
     if (!attempt) return this.present(ctx, row);
     const snapshot = await this.inspect(row, attempt);
+    if (snapshot.status === "SETTLED_NO_RESULT")
+      return this.present(ctx, await this.progress(ctx, row, "FAILED", "EXECUTION_FAILED"));
     if (snapshot.status !== "SETTLED") {
       if (
         snapshot.status === "RESULT_UNKNOWN" ||

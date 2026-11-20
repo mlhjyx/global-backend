@@ -1,3 +1,4 @@
+import { readManufacturerNetworkExecutionBody } from '../discovery/manufacturer-network-execution';
 import {
   Body,
   Controller,
@@ -236,6 +237,18 @@ function attemptBody(
   return { body: Object.freeze({ attemptId: uuid(body.attemptId) }) };
 }
 
+/** Preserve the exact query-plan body boundary outside the shared parser budget. */
+function queryPlanExecutionQuoteBody(
+  input: Record<string, unknown>,
+): { readonly body?: NonNullable<ReturnType<typeof readManufacturerNetworkExecutionBody>> } {
+  if (input.body === undefined) return {};
+  try {
+    return { body: readManufacturerNetworkExecutionBody(input.body)! };
+  } catch {
+    return invalid();
+  }
+}
+
 /** site-builder intake 的请求形状（从 parseRequest 提取：G9 圈复杂度预算）。 */
 function siteBuilderIntakeRequest(
   input: Record<string, unknown>,
@@ -391,7 +404,7 @@ function parseRequest(value: unknown): WorkspaceExecutionBudgetRequest {
       return Object.freeze({
         operation: input.operation,
         planId: uuid(input.planId),
-        ...attemptBody(input.body),
+        ...queryPlanExecutionQuoteBody(input),
       });
     case 'POST /canonical-companies/:id/discover-contacts': {
       exactKeys(input, ['operation', 'companyId'], ['body']);
@@ -551,7 +564,7 @@ const WORKSPACE_QUOTE_REQUEST_SCHEMAS = [
   ),
   operationVariant(
     'POST /query-plans/:planId/execute',
-    { planId: { type: 'string', format: 'uuid' } },
+    { planId: { type: 'string', format: 'uuid' }, body: { type: 'object', additionalProperties: false, minProperties: 1, properties: { attemptId: { type: 'string', format: 'uuid' }, manufacturerNetworkRevision: { type: 'string', enum: ['manufacturer-network/v1', 'manufacturer-network/v2'] } } } },
     ['planId'],
   ),
   operationVariant(

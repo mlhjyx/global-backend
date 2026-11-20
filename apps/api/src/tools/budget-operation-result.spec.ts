@@ -162,6 +162,18 @@ describe("readBudgetOperationResult is a tuple-bound SELECT capability, never a 
       ).rejects.toThrow("DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH");
     },
   );
+  it('r4: distinguishes exact SQL-null settled no-result without inventing a receipt', async () => {
+    const empty = { ...operation(), result_schema_version: null, result_schema: null, result_digest: null, result_json: null, receipt_usage: null, receipt_cost_basis: null, settled_without_result: true };
+    const executor = tx([[account()], [empty]]);
+    expect(await readBudgetOperationResult(executor.client as never, query)).toEqual({ status: 'SETTLED_NO_RESULT' });
+    expect(executor.queries).toHaveLength(2);
+    expect(executor.queries[1].text).toContain('IS NULL');
+  });
+  it.each([{ settled_without_result: false }, { result_digest: 'a'.repeat(64) }, { receipt_usage: usage }])('r4: rejects incomplete or counterfeit no-result %#', async change => {
+    const empty = { ...operation(), result_schema_version: null, result_schema: null, result_digest: null, result_json: null, receipt_usage: null, receipt_cost_basis: null, settled_without_result: true, ...change };
+    const executor = tx([[account()], [empty]]);
+    await expect(readBudgetOperationResult(executor.client as never, query)).rejects.toThrow('DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH');
+  });
   it.each([
     { scopeKey: "platform" },
     { scopeKey: "not-uuid" },

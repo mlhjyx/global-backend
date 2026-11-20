@@ -1,3 +1,4 @@
+import type { ManufacturerNetworkEvidence } from '../manufacturer-network-evidence';
 /**
  * 判定证据校验（P3 J10；设计 §4.3.3.5 证据字段规则、§4.3.3.4 R0/R2）。
  *
@@ -69,6 +70,7 @@ export interface EvidenceValidationContext {
   snapshotFetchedAt: string;
   /** 本次输入快照正文（website_profile/抓取文本拼接）；span 必须逐字来自这里。 */
   snapshotText: string;
+  manufacturerEvidence?: ManufacturerNetworkEvidence;
   projectEvidence?: ProjectPageEvidence;
   urlPolicy: EvidenceUrlPolicy;
 }
@@ -115,6 +117,18 @@ function validateItem(
     flags.push('EVIDENCE_URL_DENIED');
   }
   const normalizedSpan = normalizeWhitespace(item.span);
+  const manufacturer = context.manufacturerEvidence;
+  const claimsManufacturer = Boolean(manufacturer && item.url === manufacturer.sourceUrl);
+  const manufacturerQuote = Boolean(manufacturer && normalizedSpan && manufacturer.spans.some(span=>normalizeWhitespace(span).includes(normalizedSpan)));
+  if (claimsManufacturer) {
+    if (item.kind !== 'directory') flags.push('EVIDENCE_URL_DENIED');
+    if (!manufacturerQuote) flags.push('EVIDENCE_SPAN_NOT_FOUND');
+    const at = Date.parse(manufacturer!.fetchedAt);
+    if (!Number.isFinite(at) || at > nowMs) flags.push('EVIDENCE_FETCH_TIME_INVALID');
+    if (Date.parse(manufacturer!.expiresAt) <= nowMs || nowMs-at > EVIDENCE_MAX_AGE_DAYS*DAY_MS) flags.push('EVIDENCE_STALE');
+    if (containsInjection(item.span)) flags.push('PROMPT_INJECTION_DETECTED');
+    return { flags, valid: !flags.some(flag=>flag !== 'PROMPT_INJECTION_DETECTED') };
+  }
   const project = context.projectEvidence;
   const projectQuote = Boolean(project && normalizedSpan &&
     project.spans.some((span) => normalizeWhitespace(span).includes(normalizedSpan)));

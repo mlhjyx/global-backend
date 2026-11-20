@@ -192,6 +192,8 @@ export interface ToolResult<T = unknown> {
   provenance?: {
     sourceUrl?: string;
     fetchedAt: string;
+    /** Verified artifact retention deadline; replay preserves the manifest value. */
+    artifactExpiresAt?: string;
     contentHash?: string;
     parserVersion: string;
     /** PR-B：HTTP-first 页面缓存结果（未启用缓存时不出现）。 */

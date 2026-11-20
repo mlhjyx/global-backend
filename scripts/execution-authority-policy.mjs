@@ -73,6 +73,8 @@ export const EXPECTED_PROTECTED_WIRING_PATHS = Object.freeze([
 ]);
 
 export const EXPECTED_TOOL_CALLSITES = Object.freeze([
+  'apps/api/src/discovery/providers/manufacturer-network.provider.ts#crawl4ai.fetch#1',
+  'apps/api/src/discovery/providers/manufacturer-network.provider.ts#searxng.search#1',
   'apps/api/src/acquisition/adapters/mapyourshow.source.ts#mapyourshow.fetch#1',
   'apps/api/src/acquisition/adapters/trade-fair.source.ts#tradefair.algolia#1',
   'apps/api/src/company/website-candidates.ts#searxng.search#1',
