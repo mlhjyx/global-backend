@@ -2,7 +2,13 @@
 export const MANUFACTURER_NETWORK_EVIDENCE_SCHEMA =
   "manufacturer-network-evidence/v1" as const;
 
+export interface ManufacturerIdentityEvidenceRef {
+  readonly fieldEvidenceId: string;
+  /** SHA-256 of exact FieldEvidence string value UTF-8 bytes, without JSON encoding or normalization. */
+  readonly valueSha256: string;
+}
 export interface ManufacturerNetworkEvidence {
+  readonly identityEvidenceRefs?: readonly ManufacturerIdentityEvidenceRef[];
   schemaVersion: "manufacturer-network-evidence/v1";
   workspaceId: string;
   companyId: string;

@@ -1,3 +1,8 @@
+import type {
+  ManufacturerIdentitySubject,
+  ReviewedManufacturerLegalName,
+} from "../manufacturer-network-identity";
+import type { ManufacturerIdentityEvidenceRef } from "@global/contracts";
 import { paidOperationKey } from "../../site-builder/site-build-cost-ledger";
 import {
   searxngSearchTool,
@@ -15,6 +20,7 @@ import { ExecutionControlError } from "../../execution-budget/execution-control-
 import { MANUFACTURER_NETWORK_REVISION } from "../manufacturer-network-execution";
 import {
   currentManufacturerReview,
+  manufacturerNameKey,
   manufacturerIndependence,
   manufacturerSourceForUrl,
   readManufacturerNetworkSources,
@@ -42,6 +48,10 @@ export class ManufacturerNetworkProvider implements CompanyEnrichmentAdapter {
   constructor(
     private readonly deps: {
       broker?: ExecutionBroker;
+      readIdentityAliases?: (
+        subject: ManufacturerIdentitySubject,
+        references: readonly ManufacturerIdentityEvidenceRef[],
+      ) => Promise<readonly ReviewedManufacturerLegalName[] | undefined>;
       readArtifactSubject?: (
         workspaceId: string,
         companyId: string,
@@ -246,8 +256,20 @@ export class ManufacturerNetworkProvider implements CompanyEnrichmentAdapter {
       governed.source.publisherId !== candidate.source.publisherId
     )
       return miss();
+    let aliases: readonly ReviewedManufacturerLegalName[] = [];
+    if (independence.identityEvidenceRefs) {
+      if (!this.deps.readIdentityAliases) return miss();
+      const read = await this.deps.readIdentityAliases(
+        { ...subject, country: input.country },
+        independence.identityEvidenceRefs,
+      );
+      if (!read || read.length !== independence.identityEvidenceRefs.length)
+        return miss();
+      aliases = read;
+    }
     const detail = parseManufacturerDetail({
       text: page.data.text,
+      legalNames: aliases.map((alias) => alias.value),
       source: governed.source,
       company: {
         name: input.name,
@@ -256,9 +278,25 @@ export class ManufacturerNetworkProvider implements CompanyEnrichmentAdapter {
       },
     });
     if (!detail) return miss();
+    const usedAlias =
+      manufacturerNameKey(detail.matchedName) !==
+      manufacturerNameKey(input.name)
+        ? aliases.find(
+            (alias) =>
+              manufacturerNameKey(alias.value) ===
+              manufacturerNameKey(detail.matchedName),
+          )
+        : undefined;
+    if (
+      manufacturerNameKey(detail.matchedName) !==
+        manufacturerNameKey(input.name) &&
+      !usedAlias
+    )
+      return miss();
     const expiresAt = new Date(
       Math.min(
         Date.parse(artifactExpiresAt),
+        ...(usedAlias ? [Date.parse(usedAlias.fetchedAt) + 30 * 86400000] : []),
         Date.parse(governed.source.expiresAt),
         Date.parse(independence.expiresAt),
         Date.parse(fetchedAt) + governed.policy.retentionDays * 86400000,
@@ -266,6 +304,9 @@ export class ManufacturerNetworkProvider implements CompanyEnrichmentAdapter {
     ).toISOString();
     const evidence: ManufacturerNetworkEvidence = {
       schemaVersion: "manufacturer-network-evidence/v1",
+      ...(usedAlias
+        ? { identityEvidenceRefs: [{ ...usedAlias.reference }] }
+        : {}),
       workspaceId: ctx.workspaceId,
       companyId: subject.companyId,
       publisherId: governed.source.publisherId,

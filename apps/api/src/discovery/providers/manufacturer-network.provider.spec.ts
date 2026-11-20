@@ -268,3 +268,74 @@ describe("manufacturer deterministic adapter", () => {
     ).toBe(false);
   });
 });
+
+describe("manufacturer independently evidenced legal name", () => {
+  it("can match a short canonical target only via reviewed exact independent FieldEvidence", async () => {
+    const reference = {
+      fieldEvidenceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      valueSha256: "d".repeat(64),
+    };
+    const config = {
+      ...CONFIG,
+      independenceAttestations: CONFIG.independenceAttestations.map((a) => ({
+        ...a,
+        identityEvidenceRefs: [reference],
+      })),
+    };
+    const h = harness({ configuration: config });
+    (
+      h.provider as unknown as { deps: Record<string, unknown> }
+    ).deps.readIdentityAliases = async () => [
+      {
+        value: COMPANY_INPUT.name,
+        reference,
+        fetchedAt: "2026-11-19T00:00:00.000Z",
+      },
+    ];
+    const result = await h.provider.enrichCompany(
+      { ...COMPANY_INPUT, name: "Acme" },
+      ctx,
+    );
+    expect(result).toMatchObject({
+      matched: true,
+      manufacturerEvidence: {
+        targetName: "Acme",
+        identityEvidenceRefs: [reference],
+      },
+    });
+  });
+});
+
+describe("manufacturer required independent alias references fail closed", () => {
+  it("does not invent the full legal name from the manufacturer heading without a ref", async () => {
+    expect(
+      (
+        await harness().provider.enrichCompany(
+          { ...COMPANY_INPUT, name: "Acme" },
+          ctx,
+        )
+      ).matched,
+    ).toBe(false);
+  });
+  it("withholds invalid/missing dereferenced fields even when config names a UUID", async () => {
+    const reference = {
+      fieldEvidenceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      valueSha256: "d".repeat(64),
+    };
+    const config = {
+      ...CONFIG,
+      independenceAttestations: CONFIG.independenceAttestations.map((a) => ({
+        ...a,
+        identityEvidenceRefs: [reference],
+      })),
+    };
+    const h = harness({ configuration: config });
+    (
+      h.provider as unknown as { deps: Record<string, unknown> }
+    ).deps.readIdentityAliases = async () => undefined;
+    expect(
+      (await h.provider.enrichCompany({ ...COMPANY_INPUT, name: "Acme" }, ctx))
+        .matched,
+    ).toBe(false);
+  });
+});

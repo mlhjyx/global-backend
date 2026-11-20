@@ -1,3 +1,4 @@
+import { loadReviewedManufacturerLegalNames } from "./manufacturer-network-identity";
 import { loadCompanyForSuppressionSafeWrite } from "./company-suppression-gate";
 import { Prisma } from "@prisma/client";
 import type { ExecutionBudgetBinding } from "../execution-budget/execution-budget-binding";
@@ -107,5 +108,26 @@ export async function loadManufacturerEvidence(
     governed.source.licenseLabel !== evidence.licenseLabel
   )
     return undefined;
+  if (evidence.identityEvidenceRefs) {
+    if (
+      !independence.identityEvidenceRefs ||
+      !evidence.identityEvidenceRefs.every((ref) =>
+        independence.identityEvidenceRefs!.some(
+          (r) =>
+            r.fieldEvidenceId === ref.fieldEvidenceId &&
+            r.valueSha256 === ref.valueSha256,
+        ),
+      )
+    )
+      return undefined;
+    const aliases = await loadReviewedManufacturerLegalNames(
+      tx,
+      { ...args, domain: company.domain, country: company.country ?? "" },
+      evidence.identityEvidenceRefs,
+      now,
+    );
+    if (!aliases || aliases.length !== evidence.identityEvidenceRefs.length)
+      return undefined;
+  }
   return evidence;
 }

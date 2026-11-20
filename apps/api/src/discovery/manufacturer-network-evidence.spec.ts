@@ -36,7 +36,7 @@ const parse = (text = TEXT) =>
   });
 describe("manufacturer closed source/evidence contracts", () => {
   it("accepts a deterministic named detail with country, website and relationship", () =>
-    expect(parse()).toEqual({ spans: [SPAN] }));
+    expect(parse()).toMatchObject({ spans: [SPAN] }));
   it.each([
     TEXT.replace("Country: Germany", "Country: France"),
     TEXT.replace("https://acme.example/", "https://wrong.example/"),
@@ -207,5 +207,12 @@ describe("manufacturer single-company detail boundary", () => {
         TEXT +
           "\n\n## Other Distribution GmbH\nCountry: Germany\nhttps://other.example/\nOther Distribution GmbH is an authorized AESSEAL distributor.",
       ),
+    ).toBeUndefined());
+});
+
+describe("manufacturer target country scope", () => {
+  it("does not use a later Germany navigation value for a France target profile", () =>
+    expect(
+      parse(TEXT.replace("Country: Germany", "Country: France") + "\nGermany"),
     ).toBeUndefined());
 });

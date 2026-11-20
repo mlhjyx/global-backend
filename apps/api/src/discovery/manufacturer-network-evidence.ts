@@ -1,11 +1,14 @@
+import { normalizeCountryValue } from "./company-normalization";
 import type { ManufacturerNetworkEvidence } from "@global/contracts";
 export type { ManufacturerNetworkEvidence } from "@global/contracts";
 import {
   isContactFreeText,
   isStableSafeHttpsUrl,
 } from "./raw-source-provider-normalizer";
-import { normalizeCompanyName } from "./identity";
+
 import {
+  manufacturerNameKey,
+  validManufacturerIdentityReferences,
   closed,
   uuid,
   instant,
@@ -52,10 +55,15 @@ export function readManufacturerNetworkEvidence(
       "allowedActions",
       "sourceReviewRef",
       "independenceReviewRef",
+      ...(v && typeof v === "object" && Object.hasOwn(v, "identityEvidenceRefs")
+        ? ["identityEvidenceRefs"]
+        : []),
     ])
   )
     return undefined;
   if (
+    (Object.hasOwn(v, "identityEvidenceRefs") &&
+      !validManufacturerIdentityReferences(v.identityEvidenceRefs)) ||
     v.schemaVersion !== "manufacturer-network-evidence/v1" ||
     v.country !== "DE" ||
     v.relationship !== "authorized_distributor" ||
@@ -119,8 +127,8 @@ export function currentManufacturerEvidence(
     parsed.companyId !== subject.id ||
     parsed.targetDomain !== subject.domain?.replace(/^www\./u, "") ||
     subject.country !== "DE" ||
-    normalizeCompanyName(parsed.targetName) !==
-      normalizeCompanyName(subject.name) ||
+    manufacturerNameKey(parsed.targetName) !==
+      manufacturerNameKey(subject.name) ||
     Date.parse(parsed.fetchedAt) > now.getTime() ||
     Date.parse(parsed.expiresAt) <= now.getTime() ||
     now.getTime() - Date.parse(parsed.fetchedAt) > 30 * 86400000
@@ -133,7 +141,8 @@ export function parseManufacturerDetail(input: {
   text: string;
   source: ManufacturerNetworkSource;
   company: { name: string; domain: string; country: string };
-}): { spans: string[] } | undefined {
+  legalNames?: readonly string[];
+}): { spans: string[]; matchedName: string } | undefined {
   if (input.company.country !== "DE" || input.text.length > 60000)
     return undefined;
   const lines = input.text
@@ -146,23 +155,22 @@ export function parseManufacturerDetail(input: {
     .map((l) => l.replace(/^#{1,3}\s+/u, ""));
   if (input.source.templateId === "aesseal-distributor/v1")
     heading.push(lines[0] ?? "");
-  const targetName = normalizeCompanyName(input.company.name);
-  const publisherName = normalizeCompanyName(input.source.legalName);
+  const targetNames = [input.company.name, ...(input.legalNames ?? [])].map(
+    manufacturerNameKey,
+  );
+  const publisherName = manufacturerNameKey(input.source.legalName);
   if (
     heading.some(
       (h) =>
         /\b(?:gmbh|ag|kg|ltd|limited|inc|llc)\b/iu.test(h) &&
-        ![targetName, publisherName].includes(normalizeCompanyName(h)),
+        ![...targetNames, publisherName].includes(manufacturerNameKey(h)),
     )
   )
     return undefined;
-  if (
-    !heading.some(
-      (h) =>
-        normalizeCompanyName(h) === normalizeCompanyName(input.company.name),
-    )
-  )
-    return undefined;
+  const matchedName = heading.find((h) =>
+    targetNames.includes(manufacturerNameKey(h)),
+  );
+  if (!matchedName) return undefined;
   const website = [
     ...input.text.matchAll(/https:\/\/[a-z0-9.-]+(?:\/[^\s)\]<>]*)?/giu),
   ].map((m) => new URL(m[0]!).hostname.replace(/^www\./u, ""));
@@ -175,12 +183,26 @@ export function parseManufacturerDetail(input: {
     );
   if (!website.includes(input.company.domain.replace(/^www\./u, "")))
     return undefined;
-  if (
-    !lines.some((l) =>
-      /^(?:(?:Country|Land)\s*:?\s*)?(?:Germany|Deutschland|DE)\s*$/iu.test(l),
-    )
-  )
-    return undefined;
+  const profileIndex = lines.findIndex(
+    (l) =>
+      manufacturerNameKey(l.replace(/^#{1,3}\s+/u, "")) ===
+      manufacturerNameKey(matchedName),
+  );
+  const profileLines = lines.slice(profileIndex + 1, profileIndex + 9);
+  let profileCountry: string | null = null;
+  for (const line of profileLines) {
+    if (/^#{1,6}\s|^Location types:?$/u.test(line)) break;
+    const labeled = /^(?:Country|Land)\b\s*:?\s*/iu.test(line);
+    const country = normalizeCountryValue(
+      line.replace(/^(?:Country|Land)\b\s*:?\s*/iu, ""),
+    );
+    if (labeled && !country) return undefined;
+    if (country) {
+      profileCountry = country;
+      break;
+    }
+  }
+  if (profileCountry !== "DE") return undefined;
   if (
     lines.some((l) =>
       /^(?:Status\s*:\s*)?(?:Expired|Revoked|Terminated)\b/iu.test(l),
@@ -202,12 +224,10 @@ export function parseManufacturerDetail(input: {
         l.length <= 400 &&
         l === l.normalize("NFKC") &&
         companySpan(l) &&
-        normalizeCompanyName(l).includes(
-          normalizeCompanyName(input.company.name),
-        ),
+        manufacturerNameKey(l).includes(manufacturerNameKey(matchedName)),
     )
     .slice(0, 4);
-  if (spans.length) return { spans };
+  if (spans.length) return { spans, matchedName };
   if (input.source.templateId === "aesseal-distributor/v1") {
     const section = lines.findIndex((l) =>
       /^(?:#{1,4}\s*)?Location types:?$/u.test(l),
@@ -223,7 +243,7 @@ export function parseManufacturerDetail(input: {
       values.includes("Distributor") &&
       values.every((l) => ["Service Centre", "Distributor"].includes(l))
     )
-      return { spans: ["Distributor"] };
+      return { spans: ["Distributor"], matchedName };
   }
   return undefined;
 }

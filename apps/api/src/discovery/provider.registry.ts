@@ -1,3 +1,4 @@
+import { loadReviewedManufacturerLegalNames } from "./manufacturer-network-identity";
 import { ManufacturerNetworkProvider } from './providers/manufacturer-network.provider';
 import { PrismaClient } from '@prisma/client';
 import {
@@ -181,7 +182,10 @@ export class DiscoveryProviderRegistry {
     //  wikidata = 商业事实（行业/产品/财务/官网）；gleif = 法律身份（LEI/法人形式/母子关系）。
     this.enrichers.push(new WikidataEnrichmentProvider({ broker }));
     this.enrichers.push(new GleifEnrichmentProvider({ broker }));
-    this.enrichers.push(new ManufacturerNetworkProvider({ broker, ...(prisma ? { readArtifactSubject: async (workspaceId,companyId,artifactId) => prisma.$transaction(async tx=>{
+    this.enrichers.push(new ManufacturerNetworkProvider({ broker, ...(prisma ? { readIdentityAliases: async (subject,references)=>prisma.$transaction(async tx=>{
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id',${subject.workspaceId},true)`;
+      return loadReviewedManufacturerLegalNames(tx,subject,references);
+    }), readArtifactSubject: async (workspaceId,companyId,artifactId) => prisma.$transaction(async tx=>{
       await tx.$executeRaw`SELECT set_config('app.current_workspace_id',${workspaceId},true)`;
       const rows=await tx.$queryRaw<Array<{bound:boolean}>>`SELECT EXISTS(SELECT 1 FROM find_workspace_generic_operation_artifacts_by_subject_v1(${workspaceId}::uuid,'company',${companyId}::uuid) WHERE artifact_id=${artifactId}::uuid) AS bound`;
       return rows[0]?.bound===true;

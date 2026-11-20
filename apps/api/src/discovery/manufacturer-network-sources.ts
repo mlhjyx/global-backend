@@ -1,3 +1,4 @@
+import type { ManufacturerIdentityEvidenceRef } from "@global/contracts";
 import {
   isContactFreeText,
   isStableSafeHttpsUrl,
@@ -17,6 +18,7 @@ export interface ManufacturerNetworkSource {
   expiresAt: string;
 }
 export interface ManufacturerIndependenceAttestation {
+  identityEvidenceRefs?: readonly ManufacturerIdentityEvidenceRef[];
   workspaceId: string;
   companyId: string;
   targetDomain: string;
@@ -116,6 +118,30 @@ function validSource(v: unknown): boolean {
     review(v)
   );
 }
+export function validManufacturerIdentityReferences(
+  value: unknown,
+): value is readonly ManufacturerIdentityEvidenceRef[] {
+  return (
+    Array.isArray(value) &&
+    value.length >= 1 &&
+    value.length <= 4 &&
+    new Set(value.map((x) => x?.fieldEvidenceId)).size === value.length &&
+    value.every(
+      (x) =>
+        closed(x, ["fieldEvidenceId", "valueSha256"]) &&
+        uuid(x.fieldEvidenceId) &&
+        typeof x.valueSha256 === "string" &&
+        /^[a-f0-9]{64}$/u.test(x.valueSha256),
+    )
+  );
+}
+/** Exact whole-name formatting key; no word deletion, substring or fuzzy similarity. */
+export function manufacturerNameKey(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]/gu, "");
+}
 function validAttestation(v: unknown): boolean {
   return (
     closed(v, [
@@ -128,7 +154,12 @@ function validAttestation(v: unknown): boolean {
       "reviewRef",
       "reviewedAt",
       "expiresAt",
+      ...(v && typeof v === "object" && Object.hasOwn(v, "identityEvidenceRefs")
+        ? ["identityEvidenceRefs"]
+        : []),
     ]) &&
+    (!Object.hasOwn(v, "identityEvidenceRefs") ||
+      validManufacturerIdentityReferences(v.identityEvidenceRefs)) &&
     uuid(v.workspaceId) &&
     uuid(v.companyId) &&
     domain(v.targetDomain) &&

@@ -1,3 +1,7 @@
+import {
+  loadReviewedManufacturerLegalNames,
+  manufacturerIdentityValueSha256,
+} from "./manufacturer-network-identity";
 import { readFileSync } from "node:fs";
 import { S3Client } from "@aws-sdk/client-s3";
 import { DISCOVERY_COMPANY_MATERIALIZATION_CONTRACT_VERSION } from "./discovery-company-materialization-ctx";
@@ -119,6 +123,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
         >`SELECT public.admit_manufacturer_network_probe_v1(${workspaceId}::uuid,${companyId}::uuid,${runId}::uuid,${authorityId}::uuid,${phase},${identitySha256}) AS admitted`;
         return rows[0]?.admitted === true;
       });
+    let sourcePage: { url: string; text: string } | undefined;
     let firstEvidence: unknown;
     beforeAll(async () => {
       owner = new PrismaClient({ datasourceUrl: ownerUrl });
@@ -261,7 +266,10 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
         ...searxngSearchTool,
         execute: async () => {
           searchWires++;
-          return { data: { results: [{ url: PAGE_URL }] }, costCents: 0 };
+          return {
+            data: { results: [{ url: sourcePage?.url ?? PAGE_URL }] },
+            costCents: 0,
+          };
         },
       });
       registry.register({
@@ -270,10 +278,10 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
           fetchWires++;
           return {
             data: {
-              url: PAGE_URL,
-              text: TEXT,
+              url: sourcePage?.url ?? PAGE_URL,
+              text: sourcePage?.text ?? TEXT,
               contentHash: createHash("sha256")
-                .update(TEXT)
+                .update(sourcePage?.text ?? TEXT)
                 .digest("hex")
                 .slice(0, 24),
             },
@@ -293,6 +301,10 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
       });
       provider = new ManufacturerNetworkProvider({
         broker,
+        readIdentityAliases: (subject, references) =>
+          app.withWorkspace(subject.workspaceId, (tx) =>
+            loadReviewedManufacturerLegalNames(tx, subject, references),
+          ),
         readArtifactSubject: (w, c, id) =>
           app.withWorkspace(w, async (tx) => {
             const rows = await tx.$queryRaw<
@@ -718,6 +730,132 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
             tx.$executeRaw`UPDATE manufacturer_network_evidence SET evidence='{}'::jsonb WHERE company_id=${companyId}::uuid`,
         ),
       ).rejects.toThrow();
+    });
+    it("qualifies a short canonical name only through referenced independent legal-name evidence and fails closed on drift", async () => {
+      const aliasCompany = randomUUID();
+      const fieldId = randomUUID();
+      const legalName = "Alpine IndustrialSupply GmbH";
+      const reference = {
+        fieldEvidenceId: fieldId,
+        valueSha256: manufacturerIdentityValueSha256(legalName),
+      };
+      await owner.canonicalCompany.create({
+        data: {
+          ...COMPANY_INPUT,
+          id: aliasCompany,
+          workspaceId,
+          name: "Alpine",
+          domain: "alpine.example",
+          dedupeKey: "d:alpine.example",
+        },
+      });
+      await owner.discoveryCompanyJob.create({
+        data: {
+          workspaceId,
+          runId,
+          canonicalCompanyId: aliasCompany,
+          stage: "profiling",
+          verdictQuick: "match",
+        },
+      });
+      await owner.fieldEvidence.create({
+        data: {
+          id: fieldId,
+          workspaceId,
+          entityType: "company",
+          entityId: aliasCompany,
+          field: "website_profile.legal_name",
+          value: legalName,
+          providerKey: "website_profile",
+          license: "public",
+          allowedActions: ["display", "match"],
+          dataClass: "green",
+          sourceUrl: "https://alpine.example/impressum",
+          fetchedAt: new Date(),
+        },
+      });
+      await owner.dataProvider.update({
+        where: { key: "manufacturer_network" },
+        data: {
+          config: {
+            ...config,
+            independenceAttestations: [
+              ...config.independenceAttestations,
+              {
+                ...config.independenceAttestations[0]!,
+                companyId: aliasCompany,
+                targetDomain: "alpine.example",
+                identityEvidenceRefs: [reference],
+              },
+            ],
+          },
+        },
+      });
+      sourcePage = {
+        url: PAGE_URL.replace("/acme", "/alpine"),
+        text: "# Alpine Industrial Supply GMBH\nCountry: Germany\nhttps://alpine.example/\nLocation types\nService Centre\nDistributor",
+      };
+      const targetArgs = {
+        ...args,
+        companyId: aliasCompany,
+        enrichmentSlot: 1,
+      };
+      await corroborateCompanyBeforeFit(
+        {
+          prisma: app,
+          providers: { routeEnrichment: async () => [provider] } as never,
+        },
+        targetArgs,
+        binding,
+      );
+      const company = await owner.canonicalCompany.findUniqueOrThrow({
+        where: { id: aliasCompany },
+      });
+      expect(company.name).toBe("Alpine");
+      const proof = await app.withWorkspace(workspaceId, (tx) =>
+        loadManufacturerEvidence(tx, targetArgs, company),
+      );
+      expect(proof).toMatchObject({
+        targetName: "Alpine",
+        companyId: aliasCompany,
+        identityEvidenceRefs: [reference],
+        spans: ["Distributor"],
+      });
+      expect(
+        currentEvidenceBundle({ ...company, manufacturerEvidence: proof })
+          .coverage.corroborated,
+      ).toBe(true);
+      await owner.fieldEvidence.update({
+        where: { id: fieldId },
+        data: { value: "Drifted Legal Name GmbH" },
+      });
+      expect(
+        await app.withWorkspace(workspaceId, (tx) =>
+          loadManufacturerEvidence(tx, targetArgs, company),
+        ),
+      ).toBeUndefined();
+      await owner.fieldEvidence.update({
+        where: { id: fieldId },
+        data: { value: legalName, dataClass: "red" },
+      });
+      expect(
+        await app.withWorkspace(workspaceId, (tx) =>
+          loadManufacturerEvidence(tx, targetArgs, company),
+        ),
+      ).toBeUndefined();
+      await owner.fieldEvidence.update({
+        where: { id: fieldId },
+        data: {
+          dataClass: "green",
+          sourceUrl: "https://manufacturer.example/alpine",
+        },
+      });
+      expect(
+        await app.withWorkspace(workspaceId, (tx) =>
+          loadManufacturerEvidence(tx, targetArgs, company),
+        ),
+      ).toBeUndefined();
+      sourcePage = undefined;
     });
   },
 );
