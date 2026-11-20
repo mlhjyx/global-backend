@@ -1961,3 +1961,27 @@ describe("B3（审计 F2）：discovery 启动带总时限", () => {
     expect(options.workflowExecutionTimeout).toBe("215 minutes");
   });
 });
+
+describe('manufacturer frozen execution relay boundary',()=>{
+  it.each(['manufacturer-network/v1','manufacturer-network/v2'] as const)('recomputes %s request hash and forwards the exact approved snapshot',async(manufacturerNetworkRevision)=>{
+    const {manufacturerNetworkExecutionSnapshot}=await import('../discovery/manufacturer-network-execution');
+    const {workspaceExecutionBudgetRequestScope}=await import('../execution-budget/execution-budget-request-scope');
+    const planId='33333333-3333-4333-8333-333333333333';
+    const snapshot=manufacturerNetworkExecutionSnapshot(planId,{manufacturerNetworkRevision})!;
+    const scope=workspaceExecutionBudgetRequestScope({operation:'POST /query-plans/:planId/execute',planId,body:snapshot.body});
+    const executionBudget={...DISCOVERY_EXECUTION_BUDGET,...scope,accountKey:`discovery.run:discovery_run:${scope.subjectId}:${scope.requestSha256}`};
+    const ev=makeEvent({eventType:'DiscoveryRunRequested',schemaVersion:2,aggregateType:'DiscoveryRun',payload:{planId,icpId:'icp-1',executionBudget,manufacturerNetworkExecution:snapshot}});
+    const temporal=makeTemporal();const {db}=makeDb([ev]);await makeService(db,temporal).routeEvent(ev);
+    expect(temporal.client.workflow.start).toHaveBeenCalledWith(DISCOVERY_WORKFLOW,expect.objectContaining({args:[expect.objectContaining({manufacturerNetworkExecution:snapshot,executionContractVersion:2,executionBudget})]}));
+  });
+  it('parks an altered or old-Grant feature snapshot before starting Workflow',async()=>{
+    const {manufacturerNetworkExecutionSnapshot}=await import('../discovery/manufacturer-network-execution');
+    const snapshot=manufacturerNetworkExecutionSnapshot('33333333-3333-4333-8333-333333333333',{manufacturerNetworkRevision:'manufacturer-network/v1'})!;
+    const ev=makeEvent({eventType:'DiscoveryRunRequested',schemaVersion:2,aggregateType:'DiscoveryRun',payload:{planId:snapshot.planId,icpId:'icp-1',executionBudget:DISCOVERY_EXECUTION_BUDGET,manufacturerNetworkExecution:snapshot}});
+    const temporal=makeTemporal();const {db}=makeDb([ev]);
+    await makeService(db,temporal).routeEvent(ev);
+    expect(ev.parkedAt).toBeInstanceOf(Date);
+    expect(ev.publishedAt).toBeNull();
+    expect(temporal.client.workflow.start).not.toHaveBeenCalled();
+  });
+});

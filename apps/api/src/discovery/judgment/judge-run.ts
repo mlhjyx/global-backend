@@ -1,3 +1,4 @@
+import { currentManufacturerEvidence, type ManufacturerNetworkEvidence } from '../manufacturer-network-evidence';
 /**
  * v2 单模型判定执行器（P3 J12；从 `fit-judge-v2.ts` 抽出，供单模型判定与
  * borderline 面板共用，避免复制 prompt/证据/聚合/记账逻辑）。
@@ -61,6 +62,7 @@ const JUDGE_TASK_ID = 'discovery.qualify_fit';
 const JUDGE_SKILL_KEY = 'discovery.qualify_fit';
 
 export interface CompanySnapshotFacts {
+  manufacturer_network_evidence?: ManufacturerNetworkEvidence;
   country: string | null;
   domain: string | null;
   industry: string | null;
@@ -77,7 +79,7 @@ export interface CompanySnapshotFacts {
 }
 
 /** 与 v1 判定同一口径的公司快照（其 JSON 文本即 validateEvidence 的 snapshotText）。 */
-export function buildCompanySnapshot(company: FitJudgeCompany, projectEvidence?: ProjectPageEvidence): {
+export function buildCompanySnapshot(company: FitJudgeCompany, projectEvidence?: ProjectPageEvidence, manufacturerEvidence?: ManufacturerNetworkEvidence): {
   facts: CompanySnapshotFacts;
   snapshotText: string;
 } {
@@ -106,6 +108,7 @@ export function buildCompanySnapshot(company: FitJudgeCompany, projectEvidence?:
       : undefined;
   const crossSource = crossSourceEvidenceSummary(company.attributes);
   const facts: CompanySnapshotFacts = {
+    ...(manufacturerEvidence ? { manufacturer_network_evidence: manufacturerEvidence } : {}),
     name: company.name,
     domain: company.domain,
     country: company.country,
@@ -176,6 +179,7 @@ export interface PreparedJudgeCall {
   snapshotFetchedAt: string;
   snapshotText: string;
   projectEvidence?: ProjectPageEvidence;
+  manufacturerEvidence?: ManufacturerNetworkEvidence;
   baseSnapshotText?: string;
   urlPolicy: EvidenceUrlPolicy;
 }
@@ -200,7 +204,8 @@ export function prepareJudgeCall(
   const projectEvidence = company.domain && (scenario === 'factory_direct' || scenario === 'equipment_integration')
     ? readProjectPageEvidence(profile?.project_evidence, company.domain)
     : undefined;
-  const { facts, snapshotText } = buildCompanySnapshot(company, projectEvidence);
+  const manufacturerEvidence = currentManufacturerEvidence(company.manufacturerEvidence,company,new Date(now));
+  const { facts, snapshotText } = buildCompanySnapshot(company, projectEvidence, manufacturerEvidence);
   const prompt = buildJudgePrompt({
     icpBrief: JSON.stringify(icpBrief, null, 2),
     companySnapshot: snapshotText,
@@ -217,7 +222,8 @@ export function prepareJudgeCall(
       opts.snapshotFetchedAt ?? snapshotFetchedAtFromCompany(company, now),
     snapshotText,
     ...(projectEvidence ? { projectEvidence, baseSnapshotText: buildCompanySnapshot(company).snapshotText } : {}),
-    urlPolicy: opts.urlPolicy ?? companyDomainEvidenceUrlPolicy(company.domain),
+    ...(manufacturerEvidence ? { manufacturerEvidence, baseSnapshotText: buildCompanySnapshot(company).snapshotText } : {}),
+    urlPolicy: (url) => manufacturerEvidence?.sourceUrl === url ? { allowed: true } : (opts.urlPolicy ?? companyDomainEvidenceUrlPolicy(company.domain))(url),
   };
 }
 
@@ -327,6 +333,7 @@ export async function runJudgeModel(
     snapshotFetchedAt: prepared.snapshotFetchedAt,
     snapshotText: prepared.baseSnapshotText ?? prepared.snapshotText,
     ...(prepared.projectEvidence ? { projectEvidence: prepared.projectEvidence } : {}),
+    ...(prepared.manufacturerEvidence ? { manufacturerEvidence: prepared.manufacturerEvidence } : {}),
     urlPolicy: prepared.urlPolicy,
   });
   const aggregation = aggregateJudgment({ output, evidence, requiredCriteria: prepared.requiredCriteria });

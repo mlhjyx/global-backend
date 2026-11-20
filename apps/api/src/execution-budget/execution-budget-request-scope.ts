@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { readManufacturerNetworkExecutionBody, type ManufacturerNetworkExecuteBody } from '../discovery/manufacturer-network-execution';
 import { ExecutionControlError } from './execution-control-error';
 import type { WorkspaceExecutionBudgetScope } from './execution-budget-authority.service';
 
@@ -32,8 +33,7 @@ export type WorkspaceExecutionBudgetRequest =
   | Readonly<{
       operation: 'POST /query-plans/:planId/execute';
       planId: string;
-      /** 「重试」的幂等键；缺省时请求哈希与旧版一致（旧 Grant 语义不变）。 */
-      body?: Readonly<{ attemptId: string }>;
+      body?: Readonly<ManufacturerNetworkExecuteBody>;
     }>
   | Readonly<{
       operation: 'POST /canonical-companies/:id/discover-contacts';
@@ -140,6 +140,9 @@ function requestMaterial(request: WorkspaceExecutionBudgetRequest): JsonValue {
         ...(request.body === undefined ? {} : { body: request.body as JsonValue }),
       };
     case 'POST /query-plans/:planId/execute':
+      if (request.body !== undefined) {
+        try { readManufacturerNetworkExecutionBody(request.body); } catch { invalidRequest(); }
+      }
       return {
         operation: request.operation,
         planId: request.planId,

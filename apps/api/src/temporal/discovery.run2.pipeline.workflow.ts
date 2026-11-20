@@ -1,3 +1,4 @@
+import type { ManufacturerNetworkExecutionSnapshot } from '../discovery/manufacturer-network-execution';
 import { CancellationScope, isCancellation, patched, proxyActivities } from '@temporalio/workflow';
 import type { Run2PipelineActivities } from './discovery.run2.pipeline.activities';
 import type { ExecutionBudgetBinding } from '../execution-budget/execution-budget-binding';
@@ -35,6 +36,7 @@ const bookkeeping = proxyActivities<Run2PipelineActivities>({
 });
 
 export interface CompanyPipelineWorkflowInput {
+  manufacturerNetworkExecution?: ManufacturerNetworkExecutionSnapshot;
   workspaceId: string;
   runId: string;
   icpId: string;

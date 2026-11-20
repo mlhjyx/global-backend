@@ -908,6 +908,21 @@ jobs:
           fi
           pnpm --filter @global/api exec vitest run src/discovery/discovery-run-pool-cap.postgres.spec.ts
 
+      - name: Manufacturer HTML producer, Broker, PostgreSQL and MinIO contract
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        shell: bash
+        env:
+          APP_DATABASE_URL: ""
+        run: |
+          set -euo pipefail
+          docker pull pgvector/pgvector@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+          docker pull docker.io/library/golang@sha256:ab1d1823abb55a9504d2e3e003b75b36dbeb1cbcc4c92593d85a84ee46becc6c
+          docker pull docker.io/library/debian@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+          # Runner source-builds the pinned official MinIO release into a task-owned image.
+          # Runs src/discovery/manufacturer-network.postgres.spec.ts against its
+          # own never-used global_test database and encrypted/versioned bucket.
+          pnpm --filter @global/api exec tsx scripts/test-manufacturer-network-postgres.mts
+
       - name: Evaluate Copy fixed-source impact
         id: copy-impact
         run: node scripts/copy-fixed-source-impact.mjs --github-output "$GITHUB_OUTPUT"

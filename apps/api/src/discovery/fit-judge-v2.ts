@@ -217,6 +217,8 @@ function applyCrossSourceGate(args: {
   if (mode === 'off') return {};
   // 判定时现场装配（零出网）：本 run 已写回的 website_profile / 富集命名空间都在属性里。
   const bundle = currentEvidenceBundle({
+    id: args.company.id,
+    manufacturerEvidence: args.company.manufacturerEvidence,
     name: args.company.name,
     domain: args.company.domain,
     country: args.company.country,

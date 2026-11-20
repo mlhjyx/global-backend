@@ -185,3 +185,16 @@ describe('WorkspaceTechnicalBudgetQuoteController', () => {
     ).toThrow('EXECUTION_BUDGET_QUOTE_INVALID');
   });
 });
+
+describe('manufacturer execution quote canonical boundary',()=>{
+  const planId='30000000-0000-4000-8000-000000000003';
+  it.each(['manufacturer-network/v1', 'manufacturer-network/v2'] as const)('quotes %s revision-only first execution and preserves legacy cap/hash',(revision)=>{
+    const old=controller().quote(CTX,{operation:'POST /query-plans/:planId/execute',planId}).data;
+    const next=controller().quote(CTX,{operation:'POST /query-plans/:planId/execute',planId,body:{manufacturerNetworkRevision:revision}}).data;
+    expect(BigInt(next.requiredCapMicrousd)-BigInt(old.requiredCapMicrousd)).toBe(500000n);
+    expect(next.requestSha256).not.toBe(old.requestSha256);expect(next.policyRevision).not.toBe(old.policyRevision);
+  });
+  it.each([{}, {manufacturerNetworkRevision:'manufacturer-network/v3'},{manufacturerNetworkRevision:null},{manufacturerNetworkRevision:'manufacturer-network/v1',unexpected:true}])('rejects invalid request body before quote resolution',body=>{
+    expect(()=>controller().quote(CTX,{operation:'POST /query-plans/:planId/execute',planId,body})).toThrow();
+  });
+});

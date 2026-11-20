@@ -565,6 +565,7 @@ export async function discoveryWorkflow(input: DiscoveryRunInput): Promise<void>
                   executionContractVersion: EXECUTION_CONTRACT_VERSION,
                   executionBudget: executionBudget!,
                   enrichmentSlot: index,
+                  ...(input.manufacturerNetworkExecution ? { manufacturerNetworkExecution: input.manufacturerNetworkExecution } : {}),
                 },
               ],
             });

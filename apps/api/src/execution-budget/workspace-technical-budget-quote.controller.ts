@@ -1,3 +1,4 @@
+import { readManufacturerNetworkExecutionBody } from '../discovery/manufacturer-network-execution';
 import {
   Body,
   Controller,
@@ -379,7 +380,7 @@ function parseRequest(value: unknown): WorkspaceExecutionBudgetRequest {
       return Object.freeze({
         operation: input.operation,
         planId: uuid(input.planId),
-        ...attemptBody(input.body),
+        ...(input.body === undefined ? {} : { body: (() => { try { return readManufacturerNetworkExecutionBody(input.body)!; } catch { return invalid(); } })() }),
       });
     case 'POST /canonical-companies/:id/discover-contacts': {
       exactKeys(input, ['operation', 'companyId'], ['body']);
@@ -539,7 +540,7 @@ const WORKSPACE_QUOTE_REQUEST_SCHEMAS = [
   ),
   operationVariant(
     'POST /query-plans/:planId/execute',
-    { planId: { type: 'string', format: 'uuid' } },
+    { planId: { type: 'string', format: 'uuid' }, body: { type: 'object', additionalProperties: false, minProperties: 1, properties: { attemptId: { type: 'string', format: 'uuid' }, manufacturerNetworkRevision: { type: 'string', enum: ['manufacturer-network/v1', 'manufacturer-network/v2'] } } } },
     ['planId'],
   ),
   operationVariant(

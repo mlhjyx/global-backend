@@ -56,6 +56,8 @@ export interface IcpBrief {
 }
 
 export interface FitJudgeCompany {
+  /** Only receipt-backed run-scoped reader populates this field. Never loaded from attributes. */
+  manufacturerEvidence?: import('./manufacturer-network-evidence').ManufacturerNetworkEvidence;
   id: string;
   name: string;
   domain: string | null;
