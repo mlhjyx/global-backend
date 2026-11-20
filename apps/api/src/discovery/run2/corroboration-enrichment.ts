@@ -2,7 +2,7 @@ import { assertManufacturerNetworkAuthority } from "../manufacturer-network-auth
 import { loadIcpBrief } from "../fit-judge";
 import { commitManufacturerEvidence } from "../manufacturer-network-store";
 import {
-  MANUFACTURER_NETWORK_REVISION,
+  isManufacturerNetworkRevision,
   type ManufacturerNetworkExecutionSnapshot,
 } from "../manufacturer-network-execution";
 import type { PrismaService } from "../../prisma/prisma.service";
@@ -215,7 +215,7 @@ async function probe(
       {
         ...(key === "manufacturer_network"
           ? {
-              manufacturerNetworkRevision: MANUFACTURER_NETWORK_REVISION,
+              manufacturerNetworkRevision: args.manufacturerNetworkExecution!.body.manufacturerNetworkRevision,
               durableBudgetAuthority: {
                 authorityId: binding.authorityId,
                 accountId: account!.id,
@@ -381,8 +381,7 @@ export async function corroborateCompanyBeforeFit(
       continue;
     if (
       provider.key === "manufacturer_network" &&
-      (args.manufacturerNetworkExecution?.body.manufacturerNetworkRevision !==
-        MANUFACTURER_NETWORK_REVISION ||
+      (!isManufacturerNetworkRevision(args.manufacturerNetworkExecution?.body.manufacturerNetworkRevision) ||
         setup.scene !== "distribution")
     )
       continue;

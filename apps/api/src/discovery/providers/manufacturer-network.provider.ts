@@ -17,7 +17,10 @@ import type {
 import type { ExecutionBroker, ToolResult } from "../../tools/tool-contract";
 import { parseDurableExecutionReceipt } from "../../durable-results/durable-execution-receipt";
 import { ExecutionControlError } from "../../execution-budget/execution-control-error";
-import { MANUFACTURER_NETWORK_REVISION } from "../manufacturer-network-execution";
+import {
+  isManufacturerNetworkRevision,
+  MANUFACTURER_NETWORK_PROFILE_REVISION,
+} from "../manufacturer-network-execution";
 import {
   currentManufacturerReview,
   manufacturerNameKey,
@@ -69,7 +72,7 @@ export class ManufacturerNetworkProvider implements CompanyEnrichmentAdapter {
     ctx: ExecutionContext,
   ): Promise<EnrichmentResult> {
     if (
-      ctx.manufacturerNetworkRevision !== MANUFACTURER_NETWORK_REVISION ||
+      !isManufacturerNetworkRevision(ctx.manufacturerNetworkRevision) ||
       !this.deps.broker ||
       !this.deps.loadConfiguration ||
       !this.deps.readArtifactSubject ||
@@ -136,6 +139,10 @@ export class ManufacturerNetworkProvider implements CompanyEnrichmentAdapter {
       url: candidate.url,
       maxChars: 60000,
       exactHtml: true as const,
+      ...(ctx.manufacturerNetworkRevision ===
+      MANUFACTURER_NETWORK_PROFILE_REVISION
+        ? { profileTextRevision: "manufacturer-profile/v1" as const }
+        : {}),
     };
     if (
       !(await ctx.admitManufacturerProbe(
@@ -153,7 +160,12 @@ export class ManufacturerNetworkProvider implements CompanyEnrichmentAdapter {
         "DURABLE_EXECUTION_RECEIPT_SCOPE_MISMATCH",
       );
     const page = await this.deps.broker.invoke<
-      { url: string; maxChars: number; exactHtml: true },
+      {
+        url: string;
+        maxChars: number;
+        exactHtml: true;
+        profileTextRevision?: "manufacturer-profile/v1";
+      },
       { url: string; text: string; contentHash: string }
     >("crawl4ai.fetch", fetchInput, {
       ...toolCtx,
@@ -290,6 +302,10 @@ export class ManufacturerNetworkProvider implements CompanyEnrichmentAdapter {
       aliases = read;
     }
     const detail = parseManufacturerDetail({
+      ...(ctx.manufacturerNetworkRevision ===
+      MANUFACTURER_NETWORK_PROFILE_REVISION
+        ? { profileTextRevision: "manufacturer-profile/v1" as const }
+        : {}),
       text: page.data.text,
       legalNames: aliases.map((alias) => alias.value),
       source: governed.source,

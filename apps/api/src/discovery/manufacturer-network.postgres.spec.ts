@@ -1,3 +1,4 @@
+import { fetchPageHttpFirst } from "../adapters/http-first-fetch";
 import {
   loadReviewedManufacturerLegalNames,
   manufacturerIdentityValueSha256,
@@ -5,7 +6,7 @@ import {
 import { readFileSync } from "node:fs";
 import { S3Client } from "@aws-sdk/client-s3";
 import { DISCOVERY_COMPANY_MATERIALIZATION_CONTRACT_VERSION } from "./discovery-company-materialization-ctx";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import { beforeAll, afterAll, describe, expect, it, vi } from "vitest";
 vi.mock("../model-runtime/structured-task-runtime-bridge", () => ({
@@ -17,11 +18,17 @@ import { PostgresBudgetStore } from "../tools/budget-store";
 import { ToolBroker } from "../tools/tool-broker";
 import { ToolRegistry } from "../tools/tool-registry";
 import { RateLimiter } from "../tools/rate-limiter";
-import { searxngSearchTool, crawl4aiFetchTool } from "../tools/builtin-tools";
+import {
+  searxngSearchTool,
+  createCrawl4aiFetchTool,
+} from "../tools/builtin-tools";
 import { GenericOperationArtifactExecution } from "../durable-results/artifact/generic-operation-artifact.execution";
 import { GenericOperationArtifactRepository } from "../durable-results/artifact/generic-operation-artifact.repository";
 import { GenericOperationArtifactService } from "../durable-results/artifact/generic-operation-artifact.service";
-import { S3GenericOperationArtifactStore } from "../durable-results/artifact/generic-operation-artifact.store";
+import {
+  S3GenericOperationArtifactStore,
+  ArtifactStorageError,
+} from "../durable-results/artifact/generic-operation-artifact.store";
 import {
   MemoryS3Client,
   BUCKET,
@@ -33,10 +40,7 @@ import { corroborateCompanyBeforeFit } from "./run2/corroboration-enrichment";
 import { loadManufacturerEvidence } from "./manufacturer-network-store";
 import { judgeFitV2 } from "./fit-judge-v2";
 import { currentEvidenceBundle } from "./evidence-bundle";
-import {
-  manufacturerNetworkExecutionSnapshot,
-  MANUFACTURER_NETWORK_REVISION,
-} from "./manufacturer-network-execution";
+import { manufacturerNetworkExecutionSnapshot } from "./manufacturer-network-execution";
 import { workspaceExecutionBudgetRequestScope } from "../execution-budget/execution-budget-request-scope";
 import type { ExecutionBudgetBinding } from "../execution-budget/execution-budget-binding";
 import { CRITERION_IDS } from "./judgment/fit-rubric";
@@ -75,6 +79,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
     let broker: ToolBroker;
     let provider: ManufacturerNetworkProvider;
     let budgets: PostgresBudgetStore;
+    let artifactStore: S3GenericOperationArtifactStore;
     let realS3: S3Client | undefined;
     const workspaceId = randomUUID(),
       companyId = randomUUID(),
@@ -85,7 +90,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
       authorityId = randomUUID();
     const snapshot = manufacturerNetworkExecutionSnapshot(planId, {
       attemptId: randomUUID(),
-      manufacturerNetworkRevision: MANUFACTURER_NETWORK_REVISION,
+      manufacturerNetworkRevision: "manufacturer-network/v2" as const,
     })!;
     const scope = workspaceExecutionBudgetRequestScope({
       operation: "POST /query-plans/:planId/execute",
@@ -248,10 +253,10 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
             requestChecksumCalculation: "WHEN_REQUIRED",
           })
         : undefined;
-      const store = new S3GenericOperationArtifactStore({
+      const store = (artifactStore = new S3GenericOperationArtifactStore({
         client: realS3 ?? new MemoryS3Client(),
         bucket: s3Config?.bucket ?? BUCKET,
-      });
+      }));
       const artifactExecution = new GenericOperationArtifactExecution({
         withWorkspace: (w, fn) => app.withWorkspace(w, fn),
         binding: new ArtifactSubjectBindingContract(),
@@ -265,7 +270,8 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
       const registry = new ToolRegistry();
       registry.register({
         ...searxngSearchTool,
-        execute: async () => {
+        execute: async (_input, ctx) => {
+          await ctx.beforePhysicalWire?.();
           searchWires++;
           return {
             data: { results: [{ url: sourcePage?.url ?? PAGE_URL }] },
@@ -273,23 +279,52 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
           };
         },
       });
-      registry.register({
-        ...crawl4aiFetchTool,
-        execute: async () => {
-          fetchWires++;
-          return {
-            data: {
-              url: sourcePage?.url ?? PAGE_URL,
-              text: sourcePage?.text ?? TEXT,
-              contentHash: createHash("sha256")
-                .update(sourcePage?.text ?? TEXT)
-                .digest("hex")
-                .slice(0, 24),
-            },
-            costCents: 1,
-          };
-        },
-      });
+      process.env.HTTP_FIRST_FETCH = "on";
+      registry.register(
+        createCrawl4aiFetchTool({
+          isAllowedByRobots: async () => true,
+          crawlUrl: async () => {
+            throw new Error("MANUFACTURER_RENDERER_FORBIDDEN");
+          },
+          fetchHttpFirst: (url, options) =>
+            fetchPageHttpFirst(url, {
+              ...options,
+              fetchHtml: async () => {
+                if (
+                  options?.hooks?.authorizeExternalAction &&
+                  !(await options.hooks.authorizeExternalAction())
+                )
+                  return null;
+                await options?.hooks?.beforePhysicalWire?.();
+                fetchWires++;
+                const text = sourcePage?.text ?? TEXT;
+                const markup = text
+                  .split("\n")
+                  .filter(Boolean)
+                  .map((line) => {
+                    const h = /^(#{1,6})\s+(.*)$/u.exec(line);
+                    return h
+                      ? h[2] === "Location types"
+                        ? '<div class="field--label field--label--inline">Location types</div>'
+                        : `<h${h[1]!.length}><div>${h[2]}</div></h${h[1]!.length}>`
+                      : `<p>${line.replace(/\[([^\]]+)\]\((https:[^)]+)\)/gu, '<a href="$2">$1</a>')}</p>`;
+                  })
+                  .join("");
+                const filler =
+                  "Industrial distribution support and profile description. ".repeat(
+                    6,
+                  );
+                return {
+                  status: 200,
+                  contentType: "text/html",
+                  body: Buffer.from(
+                    `<html><head><title>${text.split("\n")[0]?.replace(/^#+ /u, "")}</title></head><body class="path-node page-node-type-locations"><div class="dialog-off-canvas-main-canvas"><div class="preface"><div class="page-title">${/<h1>.*?<\/h1>/u.exec(markup)?.[0] ?? ""}</div></div><main class="container-fluid g-0"><section><article class="locations full clearfix"><p>${filler}</p>${markup.replace(/<h1>.*?<\/h1>/u, "")}<button class="close"><span>×</span></button></article></section><h2>Unrelated section</h2></main></div></body></html>`,
+                  ),
+                };
+              },
+            }),
+        }),
+      );
       broker = new ToolBroker({
         registry,
         budgetStore: budgets,
@@ -429,18 +464,29 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
       const result = await provider.enrichCompany(COMPANY_INPUT, {
         workspaceId,
         runId: binding.accountKey,
-        manufacturerNetworkRevision: MANUFACTURER_NETWORK_REVISION,
+        manufacturerNetworkRevision: "manufacturer-network/v2" as const,
         artifactSubject: { subjectType: "company", subjectId: companyId },
         durableBudgetAuthority: account,
         admitManufacturerProbe: admitProbe,
       });
       expect(result.manufacturerEvidence).toEqual(firstEvidence);
+      await expect(
+        provider.enrichCompany(COMPANY_INPUT, {
+          workspaceId,
+          runId: binding.accountKey,
+          manufacturerNetworkRevision: "manufacturer-network/v1",
+          artifactSubject: { subjectType: "company", subjectId: companyId },
+          durableBudgetAuthority: account,
+          admitManufacturerProbe: admitProbe,
+        }),
+      ).rejects.toThrow("DURABLE_EXECUTION_RECEIPT_SCOPE_MISMATCH");
+
       expect([searchWires, fetchWires]).toEqual([1, 1]);
       await expect(
         provider.enrichCompany(COMPANY_INPUT, {
           workspaceId,
           runId: binding.accountKey,
-          manufacturerNetworkRevision: MANUFACTURER_NETWORK_REVISION,
+          manufacturerNetworkRevision: "manufacturer-network/v2" as const,
           artifactSubject: { subjectType: "company", subjectId: randomUUID() },
           durableBudgetAuthority: account,
           admitManufacturerProbe: admitProbe,
@@ -474,7 +520,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
           {
             workspaceId,
             runId: binding.accountKey,
-            manufacturerNetworkRevision: MANUFACTURER_NETWORK_REVISION,
+            manufacturerNetworkRevision: "manufacturer-network/v2" as const,
             artifactSubject: { subjectType: "company", subjectId: companyId },
             durableBudgetAuthority: account,
             admitManufacturerProbe: admitProbe,
@@ -500,7 +546,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
         provider.enrichCompany(COMPANY_INPUT, {
           workspaceId,
           runId: binding.accountKey,
-          manufacturerNetworkRevision: MANUFACTURER_NETWORK_REVISION,
+          manufacturerNetworkRevision: "manufacturer-network/v2" as const,
           artifactSubject: { subjectType: "company", subjectId: companyId },
           durableBudgetAuthority: account,
           admitManufacturerProbe: admitProbe,
@@ -551,7 +597,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
         provider.enrichCompany(COMPANY_INPUT, {
           workspaceId,
           runId: binding.accountKey,
-          manufacturerNetworkRevision: MANUFACTURER_NETWORK_REVISION,
+          manufacturerNetworkRevision: "manufacturer-network/v2" as const,
           artifactSubject: { subjectType: "company", subjectId: otherId },
           durableBudgetAuthority: account,
           admitManufacturerProbe: admitProbe,
@@ -833,7 +879,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
       });
       sourcePage = {
         url: PAGE_URL.replace("/acme", "/alpine"),
-        text: "# Alpine Industrial Supply GMBH\nCountry: Germany\nhttps://alpine.example/\nLocation types\nService Centre\nDistributor",
+        text: "# Alpine Industrial Supply GMBH\nCountry: Germany\nemployee@alpine.example\n## Location types\nService Centre\nDistributor",
       };
       const targetArgs = {
         ...args,
@@ -861,6 +907,17 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
         identityEvidenceRefs: [reference],
         spans: ["Distributor"],
       });
+      const chunks: Uint8Array[] = [];
+      for await (const chunk of await artifactStore.read(
+        (proof as { resultDigest: string }).resultDigest,
+        "PERSONAL_DATA",
+      ))
+        chunks.push(chunk);
+      const storedText = Buffer.concat(chunks).toString("utf8");
+      expect(storedText).toContain('"emailDomains":["alpine.example"]');
+      expect(storedText).not.toContain("employee@");
+      expect(storedText).toContain("# Alpine Industrial Supply GMBH");
+
       expect(
         currentEvidenceBundle({ ...company, manufacturerEvidence: proof })
           .coverage.corroborated,
@@ -1049,6 +1106,108 @@ describe.runIf(Boolean(ownerUrl && appUrl))(
           fixture.id,
         ).toBe("INSUFFICIENT_TIERS");
       }
+      sourcePage = undefined;
+    });
+
+    it("keeps an unknown v2 capture under the same probe identity without a second physical wire", async () => {
+      const targetId = randomUUID();
+      const domain = "acme-unknown.example";
+      await owner.canonicalCompany.create({
+        data: {
+          ...COMPANY_INPUT,
+          id: targetId,
+          workspaceId,
+          domain,
+          dedupeKey: `d:${domain}`,
+        },
+      });
+      await owner.discoveryCompanyJob.create({
+        data: {
+          workspaceId,
+          runId,
+          canonicalCompanyId: targetId,
+          stage: "profiling",
+          verdictQuick: "match",
+        },
+      });
+      await owner.dataProvider.update({
+        where: { key: "manufacturer_network" },
+        data: {
+          config: {
+            ...config,
+            independenceAttestations: [
+              ...config.independenceAttestations,
+              {
+                ...config.independenceAttestations[0]!,
+                companyId: targetId,
+                targetDomain: domain,
+              },
+            ],
+          },
+        },
+      });
+      sourcePage = {
+        url: PAGE_URL.replace("/acme", "/unknown"),
+        text: TEXT.replaceAll("acme.example", domain),
+      };
+      const before = [searchWires, fetchWires];
+      const account = await budgets.attestAuthorized({
+        scopeKey: workspaceId,
+        authorityId,
+        accountKey: binding.accountKey,
+      });
+      const ctx = {
+        workspaceId,
+        runId: binding.accountKey,
+        manufacturerNetworkRevision: "manufacturer-network/v2" as const,
+        artifactSubject: {
+          subjectType: "company" as const,
+          subjectId: targetId,
+        },
+        durableBudgetAuthority: account,
+        admitManufacturerProbe: (phase: "lookup" | "fetch", identity: string) =>
+          app.withWorkspace(workspaceId, async (tx) => {
+            const rows = await tx.$queryRaw<
+              Array<{ admitted: boolean }>
+            >`SELECT public.admit_manufacturer_network_probe_v1(${workspaceId}::uuid,${targetId}::uuid,${runId}::uuid,${authorityId}::uuid,${phase},${identity}) AS admitted`;
+            return rows[0]?.admitted === true;
+          }),
+      };
+      const fault = vi
+        .spyOn(artifactStore, "promote")
+        .mockRejectedValueOnce(
+          new ArtifactStorageError(
+            "GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE",
+          ),
+        );
+      try {
+        await expect(
+          provider.enrichCompany({ ...COMPANY_INPUT, domain }, ctx),
+        ).rejects.toThrow();
+      } finally {
+        fault.mockRestore();
+      }
+      expect([searchWires, fetchWires]).toEqual([
+        before[0]! + 1,
+        before[1]! + 1,
+      ]);
+      const rows = await owner.$queryRaw<
+        Array<{ status: string }>
+      >`SELECT o.status::text FROM tool_budget_operation o JOIN manufacturer_network_probe p ON p.identity_sha256=o.operation_key AND p.workspace_id::text=o.scope_key WHERE p.workspace_id=${workspaceId}::uuid AND p.company_id=${targetId}::uuid AND p.phase='fetch'`;
+      expect(rows).toEqual([{ status: "RESULT_UNKNOWN" }]);
+      await expect(
+        provider.enrichCompany({ ...COMPANY_INPUT, domain }, ctx),
+      ).rejects.toThrow();
+      await expect(
+        provider.enrichCompany(
+          { ...COMPANY_INPUT, domain },
+          { ...ctx, manufacturerNetworkRevision: "manufacturer-network/v1" },
+        ),
+      ).rejects.toThrow("DURABLE_EXECUTION_RECEIPT_SCOPE_MISMATCH");
+      expect([searchWires, fetchWires]).toEqual([
+        before[0]! + 1,
+        before[1]! + 1,
+      ]);
       sourcePage = undefined;
     });
   },

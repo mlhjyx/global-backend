@@ -540,7 +540,7 @@ const WORKSPACE_QUOTE_REQUEST_SCHEMAS = [
   ),
   operationVariant(
     'POST /query-plans/:planId/execute',
-    { planId: { type: 'string', format: 'uuid' }, body: { type: 'object', additionalProperties: false, minProperties: 1, properties: { attemptId: { type: 'string', format: 'uuid' }, manufacturerNetworkRevision: { type: 'string', enum: ['manufacturer-network/v1'] } } } },
+    { planId: { type: 'string', format: 'uuid' }, body: { type: 'object', additionalProperties: false, minProperties: 1, properties: { attemptId: { type: 'string', format: 'uuid' }, manufacturerNetworkRevision: { type: 'string', enum: ['manufacturer-network/v1', 'manufacturer-network/v2'] } } } },
     ['planId'],
   ),
   operationVariant(

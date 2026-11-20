@@ -376,10 +376,10 @@ class ExecuteTaskRefDto {
 }
 
 class ExecuteQueryPlanDto {
-  @ApiPropertyOptional({ enum: ['manufacturer-network/v1'], description: 'Explicit frozen manufacturer evidence execution revision.' })
+  @ApiPropertyOptional({ enum: ['manufacturer-network/v1', 'manufacturer-network/v2'], description: 'Explicit frozen manufacturer evidence execution revision.' })
   @ValidateIf((_object, value) => value !== undefined)
-  @IsIn(['manufacturer-network/v1'])
-  manufacturerNetworkRevision?: 'manufacturer-network/v1';
+  @IsIn(['manufacturer-network/v1', 'manufacturer-network/v2'])
+  manufacturerNetworkRevision?: 'manufacturer-network/v1' | 'manufacturer-network/v2';
 
   @ApiPropertyOptional({
     type: ExecuteTaskRefDto,

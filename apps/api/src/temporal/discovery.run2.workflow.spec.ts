@@ -322,9 +322,9 @@ describe('M0③ 快扫编排（patched + 启动开关）', () => {
 });
 
 describe('manufacturer execution frozen history propagation',()=>{
-  it('passes the exact revision and original attempt through the child workflow input',async()=>{
+  it.each(['manufacturer-network/v1','manufacturer-network/v2'] as const)('passes %s and original attempt through the child workflow input',async(manufacturerNetworkRevision)=>{
     const {manufacturerNetworkExecutionSnapshot}=await import('../discovery/manufacturer-network-execution');
-    const snapshot=manufacturerNetworkExecutionSnapshot(PLAN_ID,{attemptId:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',manufacturerNetworkRevision:'manufacturer-network/v1'})!;
+    const snapshot=manufacturerNetworkExecutionSnapshot(PLAN_ID,{attemptId:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',manufacturerNetworkRevision})!;
     acts.prefilterPool.mockResolvedValue({poolSize:30,candidates:25,prefilteredOut:5});
     acts.quickJudgeBatch.mockResolvedValue({judged:25,verdicts:{match:10,weak:15},fallbackPerCompany:0,ruleFallback:0,failed:0,skipped:0});
     acts.materializeProvisionalLeads.mockResolvedValue({leads:25});acts.listDeepTargets.mockResolvedValue({companyIds:['c1']});

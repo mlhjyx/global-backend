@@ -1,3 +1,4 @@
+import { readManufacturerProfileText } from "../adapters/manufacturer-profile-text";
 import { normalizeCountryValue } from "./company-normalization";
 import type { ManufacturerNetworkEvidence } from "@global/contracts";
 export type { ManufacturerNetworkEvidence } from "@global/contracts";
@@ -139,13 +140,18 @@ export function currentManufacturerEvidence(
 /** Known detail templates only. Search titles/snippets and full directory indexes are not facts. */
 export function parseManufacturerDetail(input: {
   text: string;
+  profileTextRevision?: "manufacturer-profile/v1";
   source: ManufacturerNetworkSource;
   company: { name: string; domain: string; country: string };
   legalNames?: readonly string[];
 }): { spans: string[]; matchedName: string } | undefined {
   if (input.company.country !== "DE" || input.text.length > 60000)
     return undefined;
-  const lines = input.text
+  const projection = input.profileTextRevision
+    ? readManufacturerProfileText(input.text)
+    : undefined;
+  if (input.profileTextRevision && !projection) return undefined;
+  const lines = (projection?.markdown ?? input.text)
     .split(/\r?\n/u)
     .map((l) => l.trim())
     .filter(Boolean);
@@ -187,6 +193,7 @@ export function parseManufacturerDetail(input: {
   const website = [
     ...profileText.matchAll(/https:\/\/[a-z0-9.-]+(?:\/[^\s)\]<>]*)?/giu),
   ].map((m) => new URL(m[0]!).hostname.replace(/^www\./u, ""));
+  website.push(...(projection?.emailDomains ?? []));
   // Derive an email domain in memory only, from this profile, never from another card.
   if (input.source.templateId === "aesseal-distributor/v1")
     website.push(

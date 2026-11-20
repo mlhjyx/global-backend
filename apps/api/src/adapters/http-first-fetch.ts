@@ -11,6 +11,10 @@
  * 出网治理与 http.get 完全一致：requestPublicHttp 逐跳公网 IP 钉扎，透传 broker 的
  * authorizeExternalAction / beforePhysicalWire 钩子，SSRF 与物理出口观测不削弱。
  */
+import {
+  captureManufacturerProfileText,
+  MANUFACTURER_PROFILE_TEXT_REVISION,
+} from "./manufacturer-profile-text";
 import { createHash } from "node:crypto";
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
@@ -78,7 +82,11 @@ export interface HttpFirstCacheWrite {
 
 export interface HttpFirstCachePort {
   get(workspaceId: string, url: string): Promise<HttpFirstCachedPage | null>;
-  put(workspaceId: string, url: string, page: HttpFirstCacheWrite): Promise<void>;
+  put(
+    workspaceId: string,
+    url: string,
+    page: HttpFirstCacheWrite,
+  ): Promise<void>;
 }
 
 export interface HttpFirstCacheOptions {
@@ -90,6 +98,7 @@ export interface HttpFirstCacheOptions {
 export interface HttpFirstOptions {
   /** Evidence mode: no redirects or cached text from the normal fetch path. */
   exactUrl?: boolean;
+  profileTextRevision?: typeof MANUFACTURER_PROFILE_TEXT_REVISION;
   fetchHtml?: HttpFirstHtmlFetcher;
   minChars?: number;
   cache?: HttpFirstCacheOptions;
@@ -124,14 +133,19 @@ function decodeHtml(body: Buffer, contentType: string | null): string {
   return body.toString("utf8");
 }
 
-function defaultFetchHtml(hooks?: HttpFirstOptions["hooks"], exactUrl = false): HttpFirstHtmlFetcher {
+function defaultFetchHtml(
+  hooks?: HttpFirstOptions["hooks"],
+  exactUrl = false,
+): HttpFirstHtmlFetcher {
   return async (url, validators) => {
     const headers: Record<string, string> = {
       "User-Agent": HTTP_FIRST_UA,
       Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
     };
-    if (validators?.ifNoneMatch) headers["If-None-Match"] = validators.ifNoneMatch;
-    if (validators?.ifModifiedSince) headers["If-Modified-Since"] = validators.ifModifiedSince;
+    if (validators?.ifNoneMatch)
+      headers["If-None-Match"] = validators.ifNoneMatch;
+    if (validators?.ifModifiedSince)
+      headers["If-Modified-Since"] = validators.ifModifiedSince;
     const res = await requestPublicHttp(
       url,
       {
@@ -176,7 +190,10 @@ function defaultFetchHtml(hooks?: HttpFirstOptions["hooks"], exactUrl = false): 
  * artifact 引用、不保存 provenance，所以命中率只能从 worker 日志聚合
  * `[http-cache] state=…` 行；URL 截断到 200 字符，避免日志膨胀。
  */
-function logPageCacheState(url: string, state: "miss" | "conditional-304"): void {
+function logPageCacheState(
+  url: string,
+  state: "miss" | "conditional-304",
+): void {
   console.log(`[http-cache] state=${state} url=${url.slice(0, 200)}`);
 }
 
@@ -194,7 +211,9 @@ function extractPage(html: string, minChars: number): HttpFirstPage | null {
   if (!article) return null;
   const text = (article.textContent ?? "").trim();
   if (text.length < minChars) return null;
-  const markdown = turndown().turndown(article.content ?? text).trim();
+  const markdown = turndown()
+    .turndown(article.content ?? text)
+    .trim();
   if (!markdown) return null;
   return {
     markdown,
@@ -203,9 +222,43 @@ function extractPage(html: string, minChars: number): HttpFirstPage | null {
   };
 }
 
-function acceptsHtml(contentType: string | null | undefined, exactUrl?: boolean): boolean {
+function acceptsHtml(
+  contentType: string | null | undefined,
+  exactUrl?: boolean,
+): boolean {
   const type = contentType?.toLowerCase() ?? "";
-  return (!exactUrl && !type) || type.includes("text/html") || type.includes("application/xhtml");
+  return (
+    (!exactUrl && !type) ||
+    type.includes("text/html") ||
+    type.includes("application/xhtml")
+  );
+}
+
+function extractionSettings(options: HttpFirstOptions) {
+  return {
+    valid:
+      options.profileTextRevision === undefined ||
+      (options.profileTextRevision === MANUFACTURER_PROFILE_TEXT_REVISION &&
+        options.exactUrl === true),
+    minChars: options.minChars ?? defaultMinChars(),
+  };
+}
+function extractResponsePage(
+  html: string,
+  options: HttpFirstOptions,
+  minChars: number,
+): HttpFirstPage | null {
+  if (!options.profileTextRevision) return extractPage(html, minChars);
+  const markdown = captureManufacturerProfileText(html, minChars);
+  return markdown
+    ? {
+        markdown,
+        title: null,
+        contentHash: createHash("sha256")
+          .update(markdown, "utf8")
+          .digest("hex"),
+      }
+    : null;
 }
 
 /**
@@ -216,7 +269,8 @@ export async function fetchPageHttpFirst(
   url: string,
   options: HttpFirstOptions = {},
 ): Promise<HttpFirstPage | null> {
-  const minChars = options.minChars ?? defaultMinChars();
+  const { valid, minChars } = extractionSettings(options);
+  if (!valid) return null;
   const cache = options.exactUrl ? undefined : options.cache;
   let cached: HttpFirstCachedPage | null = null;
   if (cache) {
@@ -236,7 +290,8 @@ export async function fetchPageHttpFirst(
 
   let fetched: HttpFirstHtmlResponse | null = null;
   try {
-    const fetcher = options.fetchHtml ?? defaultFetchHtml(options.hooks, options.exactUrl);
+    const fetcher =
+      options.fetchHtml ?? defaultFetchHtml(options.hooks, options.exactUrl);
     fetched = await fetcher(url, sendValidators);
   } catch {
     return null;
@@ -255,18 +310,21 @@ export async function fetchPageHttpFirst(
   if (!acceptsHtml(fetched.contentType, options.exactUrl)) return null;
   try {
     const html = decodeHtml(fetched.body, fetched.contentType);
-    const page = extractPage(html, minChars);
+    const page = extractResponsePage(html, options, minChars);
     if (!page) return null;
     if (cache) {
       try {
-        const cacheMaxChars = options.cacheMaxChars ?? DEFAULT_HTTP_FIRST_CACHE_MAX_CHARS;
+        const cacheMaxChars =
+          options.cacheMaxChars ?? DEFAULT_HTTP_FIRST_CACHE_MAX_CHARS;
         const cachedMarkdown = page.markdown.slice(0, cacheMaxChars);
         await cache.port.put(cache.workspaceId, url, {
           markdown: cachedMarkdown,
           contentHash:
             cachedMarkdown === page.markdown
               ? page.contentHash
-              : createHash("sha256").update(cachedMarkdown, "utf8").digest("hex"),
+              : createHash("sha256")
+                  .update(cachedMarkdown, "utf8")
+                  .digest("hex"),
           etag: fetched.etag ?? null,
           lastModified: fetched.lastModified ?? null,
         });

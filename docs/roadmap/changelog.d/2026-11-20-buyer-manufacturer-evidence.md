@@ -7,5 +7,6 @@ title: Add signed and receipt-backed manufacturer relationship corroboration
 - 起因：仅官网画像不足两个来源分层，厂家独立详情可补充经销关系，但不得从搜索摘要、不同域名或普通 attributes 伪造行业证明。
 - 改动：显式 `manufacturer-network/v1` 执行快照进入请求哈希、报价、outbox、relay、Workflow 与活动；新报价额外计 50 次定向查询、50 次精确详情抓取，八字段 Binding 与 workflow version 2 不变。新增默认 DISABLED 厂家 adapter，逐源/路径/用途审核、逐目标控制独立性、真实 Broker 回执与持久 manifest/Subject 同事务绑定。只从本 run 受控不可变记录装配 T2，判定引用严格绑定该页 spans；保留原 manifest 采集与到期时间。短 canonical 名仅可用逐目标审核所引用的独立 FieldEvidence UUID/原值 UTF-8 摘要补充精确法人名；同租户/主体、green、许可/match、时效及目标自域/已审登记源全部重验，不改 canonical，不做模糊或子串身份匹配。
 - 修复：独立审查 F1–F3：明确否定/终止优先于正例组件；身份、国家与关系限定单个完整目标 profile，拒绝更长公司主体及跨公司组件；引文按实际 URL 选择页面，共享原文不再误杀合法官网引用。
+- 修复 round 2：新增同一签名字段的 `manufacturer-network/v2`，v1/无标记 canonical/hash、工具 key 和旧转换保持兼容。仅 v2 选择 `manufacturer-profile/v1`，从同次 exact HTTP 静态 DOM 保留真实 profile h1/正文；支持已核 AESSEAL 外置 preface h1 与同 canvas 唯一 locations article，拒绝多重/不完整布局，排除 main 相关区与 footer；仅从真实 heading DOM 的完整 textContent 还原嵌 DIV 标题，精确移除无事实的 `button.close > span` 字面 `×` 控件，否定/其它文字保留。email-only 身份一致性仅用 producer 生成的域名投影，原邮箱不保留，不从页面标签或 raw/API JSON 采信伪标记。新增专属临时 PG/加密、版本化 MinIO runner 并接入 CI；G15 不再缺失这份真实数据库测试。
 - 测试：包含旧 Grant、错 revision/快照、来源/主体/权限/时效负例；真实 Broker、PG 预算/manifest/Subject/ACK/写回/实际 v2 判定与事务故障重放验证。最终执行命令、覆盖率及限制见本任务实施报告。
 - 未做：无真实企业/provider/模型调用、生产配置或账本改动、部署、SaaS 合同消费者升级、业务数量或人类验收。厂家来源仍须独立审核配置后才能启用；INOXPA 共有导航不能构成经销关系证明。

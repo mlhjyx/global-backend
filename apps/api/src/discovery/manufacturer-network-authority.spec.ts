@@ -79,3 +79,11 @@ describe("manufacturer execution signed authority", () => {
     );
   });
 });
+
+it("accepts v2 only with its own request-bound authority and rejects a v1 downgrade", () => {
+  const v2 = manufacturerNetworkExecutionSnapshot(planId, {...request.body,manufacturerNetworkRevision:"manufacturer-network/v2"})!;
+  const v2scope = workspaceExecutionBudgetRequestScope({...request,body:v2.body});
+  const v2binding = {...binding,...v2scope,accountKey:`discovery.run:discovery_run:${v2scope.subjectId}:${v2scope.requestSha256}`};
+  expect(assertManufacturerNetworkAuthority(v2,v2binding,planId)).toEqual(v2);
+  expect(() => assertManufacturerNetworkAuthority(snapshot,v2binding,planId)).toThrow("EXECUTION_BUDGET_REQUEST_INVALID");
+});

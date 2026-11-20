@@ -3870,7 +3870,8 @@
                           "manufacturerNetworkRevision": {
                             "type": "string",
                             "enum": [
-                              "manufacturer-network/v1"
+                              "manufacturer-network/v1",
+                              "manufacturer-network/v2"
                             ]
                           }
                         }
@@ -24846,7 +24847,8 @@
           "manufacturerNetworkRevision": {
             "type": "string",
             "enum": [
-              "manufacturer-network/v1"
+              "manufacturer-network/v1",
+              "manufacturer-network/v2"
             ],
             "description": "Explicit frozen manufacturer evidence execution revision."
           },

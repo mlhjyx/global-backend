@@ -92,9 +92,8 @@ describe('P1 execute 重跑：EXECUTED 计划凭新 attemptId（取代独立 rer
 });
 
 describe('manufacturer execution snapshot admission',()=>{
-  it('uses the same revision and original attempt in Grant scope and outbox snapshot',async()=>{
+  it.each(['manufacturer-network/v1','manufacturer-network/v2'] as const)('uses %s and original attempt in Grant scope and outbox snapshot',async(revision)=>{
     const tx=baseTx('READY');const svc=serviceWith(tx);
-    const revision='manufacturer-network/v1';
     await svc.executePlan(CTX,PLAN_ID,'grant',undefined,ATTEMPT_ID,revision);
     const request=await import('../execution-budget/execution-budget-request-scope');
     expect(svc['authority'].verifyWorkspaceGrant).toHaveBeenCalledWith(expect.objectContaining({scope:request.workspaceExecutionBudgetRequestScope({operation:'POST /query-plans/:planId/execute',planId:PLAN_ID,body:{attemptId:ATTEMPT_ID,manufacturerNetworkRevision:revision}})}));

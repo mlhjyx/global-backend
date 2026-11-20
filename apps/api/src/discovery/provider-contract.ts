@@ -36,7 +36,7 @@ export interface CompanyDiscoveryQuery {
 export interface ExecutionContext {
   /** Trusted Run2 callback: freeze each company's one manufacturer lookup/fetch operation identity before dispatch. */
   admitManufacturerProbe?: (phase: 'lookup' | 'fetch', identitySha256: string) => Promise<boolean>;
-  manufacturerNetworkRevision?: 'manufacturer-network/v1';
+  manufacturerNetworkRevision?: 'manufacturer-network/v1' | 'manufacturer-network/v2';
   workspaceId: string;
   runId?: string;
   correlationId?: string;

@@ -170,3 +170,55 @@ describe('crawl4ai.fetch 的 HTTP-first 分级（PR-A）', () => {
     ).toEqual({ rps: 2, concurrency: 3, perDomainCrawlDelayMs: 2000 });
   });
 });
+
+describe('profile capture physical gates and legacy renderer compatibility', () => {
+  const input = {url: 'https://manufacturer.example/location', exactHtml: true as const, profileTextRevision: 'manufacturer-profile/v1' as const};
+  it('stops a v2 profile before HTTP or renderer when robots denies it', async () => {
+    process.env.HTTP_FIRST_FETCH = 'on';
+    const fetchHttpFirst = vi.fn(); const crawlUrl = vi.fn();
+    const tool = createCrawl4aiFetchTool({fetchHttpFirst, crawlUrl, isAllowedByRobots: async () => false});
+    expect((await tool.execute(input, ctx)).data.text).toBe('');
+    expect(fetchHttpFirst).not.toHaveBeenCalled(); expect(crawlUrl).not.toHaveBeenCalled();
+  });
+  it('passes a false final source/suppression authorization through without a renderer fallback', async () => {
+    process.env.HTTP_FIRST_FETCH = 'on';
+    const renderer = vi.fn();
+    const fetchHttpFirst = vi.fn(async (_url, options) => {
+      expect(options.profileTextRevision).toBe('manufacturer-profile/v1');
+      expect(await options.hooks.authorizeExternalAction()).toBe(false);
+      return null;
+    });
+    const tool = makeTool({fetchHttpFirst, crawlUrl: renderer});
+    expect((await tool.execute(input, {workspaceId: 'offline', authorizeExternalAction: async () => false})).data.text).toBe('');
+    expect(renderer).not.toHaveBeenCalled(); expect(fetchHttpFirst).toHaveBeenCalledOnce();
+  });
+  it('propagates a failed physical-wire fence instead of hiding it as an empty profile', async () => {
+    process.env.HTTP_FIRST_FETCH = 'on';
+    const denied = new Error('PHYSICAL_FENCE_DENIED'); let wires = 0;
+    const renderer = vi.fn();
+    const fetchHttpFirst = vi.fn(async (_url, options) => {await options.hooks.beforePhysicalWire(); wires++; return null;});
+    const tool = makeTool({fetchHttpFirst, crawlUrl: renderer});
+    await expect(tool.execute(input, {workspaceId: 'offline', beforePhysicalWire: async () => {throw denied;}})).rejects.toBe(denied);
+    expect(wires).toBe(0); expect(renderer).not.toHaveBeenCalled(); expect(fetchHttpFirst).toHaveBeenCalledOnce();
+  });
+  it('keeps the existing non-profile renderer authorization callback intact', async () => {
+    process.env.HTTP_FIRST_FETCH = 'off';
+    const authorize = vi.fn(async () => true);
+    const crawlUrl = vi.fn(async (_url, before) => {await before(); return {text: 'Legacy page text'};});
+    const tool = makeTool({crawlUrl});
+    expect((await tool.execute({url: input.url}, {workspaceId: 'offline', authorizeExternalAction: authorize})).data.text).toBe('Legacy page text');
+    expect(authorize).toHaveBeenCalledOnce(); expect(crawlUrl).toHaveBeenCalledOnce();
+  });
+});
+
+it.each(['conditional-304', undefined] as const)('keeps ordinary cache forwarding/provenance (%s) while a v2 profile bypasses that cache', async fromCache => {
+  process.env.HTTP_FIRST_FETCH = 'on'; process.env.URL_CONTENT_CACHE = 'on';
+  const port = {get: vi.fn(), put: vi.fn()};
+  const fetchHttpFirst = vi.fn(async () => ({markdown: 'Cached ordinary page', title: null, contentHash: 'a'.repeat(64), ...(fromCache ? {fromCache} : {})}));
+  const tool = createCrawl4aiFetchTool({urlContentCache: port, fetchHttpFirst: fetchHttpFirst as never, isAllowedByRobots: async () => true, crawlUrl: vi.fn()});
+  const ordinary = await tool.execute({url:'https://acme.example/'}, {workspaceId:'offline'});
+  expect(fetchHttpFirst).toHaveBeenLastCalledWith('https://acme.example/', expect.objectContaining({cache:{workspaceId:'offline',port}}));
+  expect(ordinary.provenance).toMatchObject({cache:fromCache ?? 'miss'});
+  await tool.execute({url:'https://manufacturer.example/location',exactHtml:true,profileTextRevision:'manufacturer-profile/v1'}, {workspaceId:'offline'});
+  expect(fetchHttpFirst.mock.calls[1]![1]).not.toHaveProperty('cache');
+});

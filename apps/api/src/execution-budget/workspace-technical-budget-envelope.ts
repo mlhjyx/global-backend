@@ -1,4 +1,4 @@
-import { MANUFACTURER_NETWORK_REVISION, readManufacturerNetworkExecutionBody } from '../discovery/manufacturer-network-execution';
+import { isManufacturerNetworkRevision, readManufacturerNetworkExecutionBody } from '../discovery/manufacturer-network-execution';
 import { getTask } from '../ai-tasks/task-registry';
 import {
   MAX_COMPANIES_HOUSE_CONTACT_CALLS,
@@ -192,7 +192,7 @@ function contract<I, O>(value: Tool<I, O>): Tool<unknown, unknown> {
 function discoveryRunEnvelope(
   request: WorkspaceExecutionBudgetRequest,
 ): WorkspaceTechnicalBudgetEnvelope {
-  const extra = request.operation === 'POST /query-plans/:planId/execute' && readManufacturerNetworkExecutionBody(request.body)?.manufacturerNetworkRevision === MANUFACTURER_NETWORK_REVISION ? 50 : 0;
+  const extra = request.operation === 'POST /query-plans/:planId/execute' && isManufacturerNetworkRevision(readManufacturerNetworkExecutionBody(request.body)?.manufacturerNetworkRevision) ? 50 : 0;
   const queries = MAX_DISCOVERY_PLAN_QUERIES;
   const directoryPages = MAX_DIRECTORY_LISTING_PAGES * MAX_DIRECTORY_PAGINATION;
   const singleSearches = queries * MAX_SINGLE_SEARCH_WIRES_PER_QUERY;

@@ -1,3 +1,4 @@
+import { manufacturerProfileCaptureKey } from "../adapters/manufacturer-profile-text";
 import { createHash } from "node:crypto";
 import { CATALOG_RESULT_PROJECTION_SCHEMAS } from "../durable-results/catalog-result-projections";
 import { SOURCE_RESULT_PROJECTION_SCHEMAS } from "../durable-results/source-result-projections";
@@ -412,7 +413,7 @@ export interface Crawl4aiFetchToolDependencies {
 export function createCrawl4aiFetchTool(
   dependencies: Crawl4aiFetchToolDependencies = { crawlUrl, isAllowedByRobots },
 ): Tool<
-  { url: string; maxChars?: number; exactHtml?: true },
+  { url: string; maxChars?: number; exactHtml?: true; profileTextRevision?: "manufacturer-profile/v1" },
   { url: string; text: string; contentHash: string }
 > {
   return {
@@ -438,7 +439,7 @@ export function createCrawl4aiFetchTool(
       accepts: ["domain"],
     },
     idempotencyKey: (i) =>
-      `crawl4ai.fetch:${hash(i.url)}:${Math.min(i.maxChars ?? 40_000, 100_000)}${i.exactHtml === true ? ":exact-html" : ""}`,
+      `crawl4ai.fetch:${hash(i.url)}:${Math.min(i.maxChars ?? 40_000, 100_000)}${i.exactHtml === true ? ":exact-html" : ""}${manufacturerProfileCaptureKey(i)}`,
     durableResultStrategy: {
       kind: "artifact_reference",
       schema: "crawl4ai-fetch/v1",
@@ -471,6 +472,8 @@ export function createCrawl4aiFetchTool(
     },
     healthCheck: async () => ({ healthy: true, detail: "crawl4ai" }),
     execute: async (input, ctx) => {
+      manufacturerProfileCaptureKey(input);
+
       if (
         !(await dependencies.isAllowedByRobots(input.url, {
           authorizeExternalAction: ctx.authorizeExternalAction,
@@ -502,6 +505,7 @@ export function createCrawl4aiFetchTool(
         };
         const page = await httpFirst(input.url, {
           ...(exact ? { exactUrl: true } : {}),
+          ...(input.profileTextRevision ? {profileTextRevision: input.profileTextRevision} : {}),
           hooks: {
             authorizeExternalAction: exact
               ? async () => (await observeGate(ctx.authorizeExternalAction)) ?? true

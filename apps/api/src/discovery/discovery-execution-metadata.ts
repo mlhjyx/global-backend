@@ -8,7 +8,7 @@ import {
 export function prepareDiscoveryExecutionMetadata(
   planId: string,
   attemptId: string | undefined,
-  manufacturerNetworkRevision: "manufacturer-network/v1" | undefined,
+  manufacturerNetworkRevision: "manufacturer-network/v1" | "manufacturer-network/v2" | undefined,
   taskRef: { taskId: string; taskRunId: string } | undefined,
 ) {
   if (taskRef !== undefined) {

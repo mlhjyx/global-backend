@@ -1,11 +1,24 @@
 /** Workflow-safe request marker. It authorizes no source, publisher or URL by itself. */
 export const MANUFACTURER_NETWORK_REVISION = "manufacturer-network/v1" as const;
+export const MANUFACTURER_NETWORK_PROFILE_REVISION =
+  "manufacturer-network/v2" as const;
+export type ManufacturerNetworkRevision =
+  | typeof MANUFACTURER_NETWORK_REVISION
+  | typeof MANUFACTURER_NETWORK_PROFILE_REVISION;
+export function isManufacturerNetworkRevision(
+  value: unknown,
+): value is ManufacturerNetworkRevision {
+  return (
+    value === MANUFACTURER_NETWORK_REVISION ||
+    value === MANUFACTURER_NETWORK_PROFILE_REVISION
+  );
+}
 const SNAPSHOT_VERSION = "manufacturer-network-execution/v1" as const;
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/iu;
 
 export interface ManufacturerNetworkExecuteBody {
   readonly attemptId?: string;
-  readonly manufacturerNetworkRevision?: typeof MANUFACTURER_NETWORK_REVISION;
+  readonly manufacturerNetworkRevision?: ManufacturerNetworkRevision;
 }
 
 export interface ManufacturerNetworkExecutionSnapshot {
@@ -13,7 +26,7 @@ export interface ManufacturerNetworkExecutionSnapshot {
   readonly planId: string;
   readonly body: Readonly<
     ManufacturerNetworkExecuteBody & {
-      manufacturerNetworkRevision: typeof MANUFACTURER_NETWORK_REVISION;
+      manufacturerNetworkRevision: ManufacturerNetworkRevision;
     }
   >;
 }
@@ -56,13 +69,16 @@ export function readManufacturerNetworkExecutionBody(
     return invalid();
   if (
     hasRevision &&
-    input.manufacturerNetworkRevision !== MANUFACTURER_NETWORK_REVISION
+    !isManufacturerNetworkRevision(input.manufacturerNetworkRevision)
   )
     return invalid();
   return Object.freeze({
     ...(hasAttempt ? { attemptId: input.attemptId as string } : {}),
     ...(hasRevision
-      ? { manufacturerNetworkRevision: MANUFACTURER_NETWORK_REVISION }
+      ? {
+          manufacturerNetworkRevision:
+            input.manufacturerNetworkRevision as ManufacturerNetworkRevision,
+        }
       : {}),
   });
 }
@@ -73,15 +89,15 @@ export function manufacturerNetworkExecutionSnapshot(
   value: unknown,
 ): ManufacturerNetworkExecutionSnapshot | undefined {
   const body = readManufacturerNetworkExecutionBody(value);
-  if (body?.manufacturerNetworkRevision !== MANUFACTURER_NETWORK_REVISION)
-    return undefined;
+  const revision = body?.manufacturerNetworkRevision;
+  if (!isManufacturerNetworkRevision(revision)) return undefined;
   if (!UUID.test(planId)) return invalid();
   return Object.freeze({
     schemaVersion: SNAPSHOT_VERSION,
     planId,
     body: Object.freeze({
       ...body,
-      manufacturerNetworkRevision: MANUFACTURER_NETWORK_REVISION,
+      manufacturerNetworkRevision: revision,
     }),
   });
 }

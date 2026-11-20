@@ -113,7 +113,7 @@ export class DiscoveryService {
     compactJws?: string,
     taskRef?: { taskId: string; taskRunId: string },
     attemptId?: string,
-    manufacturerNetworkRevision?: 'manufacturer-network/v1',
+    manufacturerNetworkRevision?: 'manufacturer-network/v1' | 'manufacturer-network/v2',
   ) {
     const { executeBody, executionSnapshot } = prepareDiscoveryExecutionMetadata(planId, attemptId, manufacturerNetworkRevision, taskRef);
     const verified = await this.authority.verifyWorkspaceGrant({

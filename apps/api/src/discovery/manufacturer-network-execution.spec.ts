@@ -81,7 +81,7 @@ describe("explicit manufacturer network execution contract", () => {
     [],
     {},
     { attemptId: "not-a-uuid" },
-    { manufacturerNetworkRevision: "manufacturer-network/v2" },
+    { manufacturerNetworkRevision: "manufacturer-network/v3" },
     { manufacturerNetworkRevision: true },
     { manufacturerNetworkRevision: "" },
     {
@@ -124,4 +124,40 @@ describe("explicit manufacturer network execution contract", () => {
       );
     },
   );
+});
+
+it("freezes v2 as a distinct signed request without altering v1 or absent-marker hashes", () => {
+  const scope = (revision?: string) =>
+    workspaceExecutionBudgetRequestScope({
+      operation: "POST /query-plans/:planId/execute",
+      planId,
+      body: revision
+        ? ({ attemptId, manufacturerNetworkRevision: revision } as never)
+        : { attemptId },
+    });
+  const body = {
+    attemptId,
+    manufacturerNetworkRevision: "manufacturer-network/v2",
+  };
+  expect(manufacturerNetworkExecutionSnapshot(planId, body)?.body).toEqual(
+    body,
+  );
+  expect(scope("manufacturer-network/v2").requestSha256).not.toBe(
+    scope("manufacturer-network/v1").requestSha256,
+  );
+  expect(scope("manufacturer-network/v1").requestSha256).not.toBe(
+    scope().requestSha256,
+  );
+  expect(scope().requestSha256).toBe(
+    "006dcbb2b7fc9eb615f2f1ed09277d39e3cea87b7966fed3e93246dbadfc4336",
+  );
+  expect(scope("manufacturer-network/v1").requestSha256).toBe(
+    "bd1ede342860a1ea3f90772674fc2553e18ff18fce9d13986ff14c0466bce9d7",
+  );
+  expect(
+    workspaceExecutionBudgetRequestScope({
+      operation: "POST /query-plans/:planId/execute",
+      planId,
+    }).requestSha256,
+  ).toBe("3358f06f16eb5fc6a1afe5aa048fe3fba46aaef9f06b04c5d943abde8574754b");
 });

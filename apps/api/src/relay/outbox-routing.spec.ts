@@ -1963,11 +1963,11 @@ describe("B3（审计 F2）：discovery 启动带总时限", () => {
 });
 
 describe('manufacturer frozen execution relay boundary',()=>{
-  it('recomputes request hash and forwards the exact approved snapshot',async()=>{
+  it.each(['manufacturer-network/v1','manufacturer-network/v2'] as const)('recomputes %s request hash and forwards the exact approved snapshot',async(manufacturerNetworkRevision)=>{
     const {manufacturerNetworkExecutionSnapshot}=await import('../discovery/manufacturer-network-execution');
     const {workspaceExecutionBudgetRequestScope}=await import('../execution-budget/execution-budget-request-scope');
     const planId='33333333-3333-4333-8333-333333333333';
-    const snapshot=manufacturerNetworkExecutionSnapshot(planId,{manufacturerNetworkRevision:'manufacturer-network/v1'})!;
+    const snapshot=manufacturerNetworkExecutionSnapshot(planId,{manufacturerNetworkRevision})!;
     const scope=workspaceExecutionBudgetRequestScope({operation:'POST /query-plans/:planId/execute',planId,body:snapshot.body});
     const executionBudget={...DISCOVERY_EXECUTION_BUDGET,...scope,accountKey:`discovery.run:discovery_run:${scope.subjectId}:${scope.requestSha256}`};
     const ev=makeEvent({eventType:'DiscoveryRunRequested',schemaVersion:2,aggregateType:'DiscoveryRun',payload:{planId,icpId:'icp-1',executionBudget,manufacturerNetworkExecution:snapshot}});
