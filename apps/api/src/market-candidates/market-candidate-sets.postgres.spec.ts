@@ -14,6 +14,7 @@ import { TokenVerifier } from '../auth/token-verifier';
 import { createRolesToScopesPolicy, ROLES_TO_SCOPES_POLICY } from '../auth/scopes';
 import { GlobalHttpExceptionFilter } from '../common/http-exception.filter';
 import { MarketCandidateSetsController } from './market-candidate-sets.controller';
+import { ClaimService } from '../claim/claim.service';
 
 const enabled = process.env.MARKET_CANDIDATES_DATABASE_TEST === '1';
 const ownerUrl = process.env.MARKET_CANDIDATES_TEST_DATABASE_URL;
@@ -160,6 +161,217 @@ describe.runIf(enabled)('B1 market candidate persistence on restricted PostgreSQ
     const read = await usingService(service => service.getCurrent(context(), stored.setId));
     return { ...fx, stored, read, candidateId: read.document.candidates[0].candidateId };
   }
+
+  async function jsonbBytes(value: unknown): Promise<number> {
+    const [row] = await owner.$queryRaw<{ bytes: number }[]>`SELECT octet_length(${JSON.stringify(value)}::jsonb::text) AS bytes`;
+    return row.bytes;
+  }
+  async function storageBoundary(fx: Awaited<ReturnType<typeof seeded>>) {
+    const proposal = structuredClone(fx.draft.candidates[0].proposal);
+    proposal.fitExplanation.text = 'SYNTHETIC'.padEnd(2000, 'x');
+    proposal.nextVerification = Array.from({ length: 200 }, () => 'SYNTHETIC verify');
+    const documentFor = (draft: typeof fx.draft) => ({ ...fx.read.document, setId: randomUUID(), revision: 1,
+      candidates: draft.candidates.map(candidate => ({ ...fx.read.document.candidates[0], candidateId: randomUUID(), proposal: candidate.proposal })) });
+    for (let count = 1; count <= 100; count += 1) {
+      const draft = { ...fx.draft, candidates: Array.from({ length: count }, () => ({ proposal: structuredClone(proposal) })) };
+      const document = documentFor(draft), compactBytes = Buffer.byteLength(JSON.stringify(document), 'utf8');
+      if (compactBytes > 262144) break;
+      const storedBytes = await jsonbBytes(document);
+      if (storedBytes > 262144) return { draft, compactBytes, storedBytes, documentFor };
+    }
+    throw new Error('SYNTHETIC fixture did not straddle the two JSON size limits');
+  }
+
+  it('B1-R1-F1 handles real Claim approval and initial-storage reverse lock competition without a raw database failure', async () => {
+    const fx = await fixture(), candidateClient = new PrismaService(), approvalClient = new PrismaService();
+    const operation = randomUUID();
+    function barrier() {
+      let resolve!: () => void;
+      const promise = new Promise<void>(done => { resolve = done; });
+      return { promise, resolve };
+    }
+    const companyHeld = barrier(), claimHeld = barrier(), childReached = barrier();
+    let candidateCompanyLocks = 0;
+    function gated(client: PrismaService, side: 'candidate' | 'approval'): PrismaService {
+      return { withWorkspace: <T>(workspace: string, run: (tx: Prisma.TransactionClient) => Promise<T>, options?: { timeout?: number; maxWait?: number }) => client.withWorkspace(workspace, tx => run(new Proxy(tx, {
+        get(target, key) {
+          const value = Reflect.get(target, key, target);
+          if (key === '$queryRaw' && typeof value === 'function') return async (...args: unknown[]) => {
+            const template = args[0];
+            const sql = Array.isArray(template) ? template.join(' ') : '';
+            if (side === 'candidate' && /FROM\s+claim\s/iu.test(sql) && sql.includes('FOR SHARE')) childReached.resolve();
+            const result = await Reflect.apply(value, target, args);
+            if (side === 'candidate' && sql.includes('FROM company_profile') && sql.includes('FOR UPDATE')) {
+              candidateCompanyLocks += 1;
+              if (candidateCompanyLocks === 1) { companyHeld.resolve(); await claimHeld.promise; }
+            }
+            if (side === 'approval' && /FROM\s+"claim"\s/iu.test(sql) && sql.includes('FOR UPDATE')) {
+              claimHeld.resolve(); await childReached.promise;
+            }
+            return result;
+          };
+          if (key === 'claim' && side === 'candidate') return new Proxy(value, {
+            get(delegate, method) {
+              const original = Reflect.get(delegate, method, delegate);
+              if (method === 'findUnique' && typeof original === 'function') return (...args: unknown[]) => { childReached.resolve(); return Reflect.apply(original, delegate, args); };
+              return original;
+            },
+          });
+          return value;
+        },
+      })), options) } as unknown as PrismaService;
+    }
+    try {
+      const approval = new ClaimService(approvalClient);
+      for (let i = 0; i < 2; i += 1) {
+        const prior = await owner.claim.create({ data: { workspaceId, companyId: fx.companyId, type: 'capability', statement: `SYNTHETIC prior approval ${i}`, status: 'NEEDS_REVIEW' } });
+        await approval.transition(context(), prior.id, 'APPROVED', 1);
+      }
+      await owner.companyProfile.update({ where: { id: fx.companyId }, data: { status: 'REVIEW' } });
+      const storage = new MarketCandidateSetsService(gated(candidateClient, 'candidate'));
+      const initialSave = storage.persistInitial(context(), fx.companyId, fx.draft, operation);
+      await companyHeld.promise;
+      const approvalSave = new ClaimService(gated(approvalClient, 'approval')).transition(context(), fx.claim.id, 'APPROVED', 1);
+      const [stored, approved] = await Promise.allSettled([initialSave, approvalSave]);
+      expect(approved.status).toBe('fulfilled');
+      if (stored.status === 'rejected') expect(stored.reason).toMatchObject({ status: 409 });
+      expect(candidateCompanyLocks).toBeLessThanOrEqual(3);
+      const recovered = await new MarketCandidateSetsService(candidateClient).persistInitial(context(), fx.companyId, fx.draft, operation);
+      expect(await owner.marketCandidateSet.count({ where: { companyId: fx.companyId } })).toBe(1);
+      expect((await owner.companyProfile.findUniqueOrThrow({ where: { id: fx.companyId } })).status).toBe('ACTIVE');
+      if (stored.status === 'fulfilled') expect(recovered.setId).toBe(stored.value.setId);
+    } finally { await Promise.allSettled([candidateClient.$disconnect(), approvalClient.$disconnect()]); }
+  });
+
+  it('B1-R1-F2 rejects compact-valid but JSONB-oversized initial documents with a stable 400 and no new set', async () => {
+    const fx = await seeded(), boundary = await storageBoundary(fx);
+    expect(boundary.compactBytes).toBeLessThanOrEqual(262144); expect(boundary.storedBytes).toBeGreaterThan(262144);
+    const before = await owner.marketCandidateSet.count({ where: { companyId: fx.companyId } });
+    await expect(usingService(s => s.persistInitial(context(), fx.companyId, boundary.draft, randomUUID()))).rejects.toMatchObject({ status: 400 });
+    expect(await owner.marketCandidateSet.count({ where: { companyId: fx.companyId } })).toBe(before);
+  });
+
+  it('B1-R1-F2 rejects feedback growth past the JSONB limit without appending a revision or feedback', async () => {
+    const fx = await seeded(), boundary = await storageBoundary(fx), fitting = structuredClone(boundary.draft);
+    let trim = boundary.storedBytes - (262144 - 3000);
+    for (const candidate of fitting.candidates) {
+      const removable = candidate.proposal.fitExplanation.text.length - 'SYNTHETIC'.length;
+      const take = Math.min(trim, removable);
+      candidate.proposal.fitExplanation.text = candidate.proposal.fitExplanation.text.slice(0, candidate.proposal.fitExplanation.text.length - take);
+      trim -= take;
+    }
+    expect(trim).toBe(0); expect(await jsonbBytes(boundary.documentFor(fitting))).toBe(262144 - 3000);
+    const stored = await usingService(s => s.persistInitial(context(), fx.companyId, fitting, randomUUID()));
+    const before = await usingService(s => s.getCurrent(context(), stored.setId));
+    const correction = { application: 'SYNTHETIC'.padEnd(2000, 'a'), organizationRole: 'SYNTHETIC'.padEnd(2000, 'b'),
+      fitExplanation: 'SYNTHETIC'.padEnd(2000, 'c'), supplyDescription: 'SYNTHETIC'.padEnd(2000, 'd') };
+    const grown = { ...before.document, revision: 2, candidates: before.document.candidates.map((candidate, index) => index === 0
+      ? { ...candidate, corrections: correction, feedback: 'CORRECTED', needsReassessment: true, impactScope: 'UNKNOWN' } : candidate) };
+    expect(Buffer.byteLength(JSON.stringify(grown), 'utf8')).toBeLessThanOrEqual(262144);
+    expect(await jsonbBytes(grown)).toBeGreaterThan(262144);
+    await expect(usingService(s => s.recordFeedback(context(), stored.setId, before.document.candidates[0].candidateId,
+      { expectedRevision: 1, action: 'CORRECT', correction }, randomUUID()))).rejects.toMatchObject({ status: 400 });
+    expect(await owner.marketCandidateSetRevision.count({ where: { setId: stored.setId } })).toBe(1);
+    expect(await owner.marketCandidateFeedback.count({ where: { setId: stored.setId } })).toBe(0);
+    expect((await owner.marketCandidateSet.findUniqueOrThrow({ where: { id: stored.setId } })).currentRevision).toBe(1);
+  });
+
+  type CandidateDocument = Awaited<ReturnType<MarketCandidateSetsService['getCurrent']>>['document'];
+  function confirmedRevision(before: CandidateDocument): CandidateDocument {
+    return { ...before, revision: before.revision + 1, candidates: before.candidates.map((candidate, index) => index === 0
+      ? { ...candidate, feedback: 'CONFIRMED' as const } : candidate) };
+  }
+  function feedbackLayer(candidate: CandidateDocument['candidates'][number]) {
+    return { corrections: candidate.corrections, feedback: candidate.feedback, needsReassessment: candidate.needsReassessment, impactScope: candidate.impactScope };
+  }
+  async function insertRevision(tx: Prisma.TransactionClient, document: CandidateDocument) {
+    return tx.marketCandidateSetRevision.create({ data: { workspaceId, companyId: document.companyId, setId: document.setId,
+      revision: document.revision, parentRevision: document.revision - 1, documentJson: document as unknown as Prisma.InputJsonValue,
+      documentHash: documentHash(document), createdBy: actorId } });
+  }
+  async function insertFeedback(tx: Prisma.TransactionClient, before: CandidateDocument, after: CandidateDocument, target = before.candidates[0].candidateId) {
+    return tx.marketCandidateFeedback.create({ data: { id: randomUUID(), workspaceId, companyId: before.companyId, setId: before.setId,
+      candidateId: target, fromRevision: before.revision, toRevision: after.revision, action: 'CONFIRM', reason: null,
+      beforeJson: feedbackLayer(before.candidates[0]) as unknown as Prisma.InputJsonValue,
+      afterJson: feedbackLayer(after.candidates[0]) as unknown as Prisma.InputJsonValue,
+      actorId, idempotencyKey: randomUUID(), requestHash: 'd'.repeat(64) } });
+  }
+
+  it.each(['revision-only','head-without-feedback','feedback-without-head','feedback-only','invalid-target'])('B1-R1-F3 still rejects %s half-states at commit', async kind => {
+    const fx = await seeded(), before = fx.read.document, after = confirmedRevision(before);
+    await expect(tenant(async tx => {
+      if (kind !== 'feedback-only') await insertRevision(tx, after);
+      if (['feedback-without-head','feedback-only','invalid-target'].includes(kind)) await insertFeedback(tx, before, after, kind === 'invalid-target' ? randomUUID() : fx.candidateId);
+      if (['head-without-feedback','invalid-target'].includes(kind)) await tx.marketCandidateSet.update({ where: { id: before.setId }, data: { currentRevision: after.revision } });
+    })).rejects.toThrow();
+    expect((await owner.marketCandidateSet.findUniqueOrThrow({ where: { id: before.setId } })).currentRevision).toBe(1);
+    expect(await owner.marketCandidateSetRevision.count({ where: { setId: before.setId } })).toBe(1);
+    expect(await owner.marketCandidateFeedback.count({ where: { setId: before.setId } })).toBe(0);
+  });
+
+  it('B1-R1-F3 preserves the exact parent FK when an intermediate revision is missing', async () => {
+    const fx = await seeded(), missingParent = { ...fx.read.document, revision: 3 };
+    await expect(tenant(async tx => {
+      await insertRevision(tx, missingParent);
+      await tx.$executeRaw`SET CONSTRAINTS "market_candidate_revision_parent_fkey" IMMEDIATE`;
+    })).rejects.toThrow(/foreign key/u);
+    expect(await owner.marketCandidateSetRevision.count({ where: { setId: fx.stored.setId } })).toBe(1);
+  });
+
+  it('B1-R1-F3 preserves the same-workspace cross-company composite FK', async () => {
+    const fx = await seeded(), unrelated = await fixture();
+    const wrong = { ...confirmedRevision(fx.read.document), companyId: unrelated.companyId,
+      basisSnapshot: { ...fx.read.document.basisSnapshot, company: { companyId: unrelated.companyId, version: 1 } } };
+    await expect(tenant(tx => insertRevision(tx, wrong))).rejects.toThrow(/foreign key.*market_candidate_revision_set_fkey/iu);
+    expect(await owner.marketCandidateSetRevision.count({ where: { setId: fx.stored.setId } })).toBe(1);
+  });
+
+  it.each([false,true])('B1-R1-F3 checks every event in one transaction with invalid-middle=%s', async invalidMiddle => {
+    const fx = await seeded();
+    const operation = tenant(async tx => {
+      let before = fx.read.document;
+      for (let revision = 2; revision <= 4; revision += 1) {
+        const after = confirmedRevision(before);
+        await insertRevision(tx, after);
+        await insertFeedback(tx, before, after, invalidMiddle && revision === 3 ? randomUUID() : fx.candidateId);
+        await tx.marketCandidateSet.update({ where: { id: before.setId }, data: { currentRevision: revision } });
+        before = after;
+      }
+    });
+    if (invalidMiddle) await expect(operation).rejects.toThrow(/MARKET_CANDIDATE_FEEDBACK_TARGET_INVALID/u);
+    else await operation;
+    expect((await owner.marketCandidateSet.findUniqueOrThrow({ where: { id: fx.stored.setId } })).currentRevision).toBe(invalidMiddle ? 1 : 4);
+    expect(await owner.marketCandidateSetRevision.count({ where: { setId: fx.stored.setId } })).toBe(invalidMiddle ? 1 : 4);
+    expect(await owner.marketCandidateFeedback.count({ where: { setId: fx.stored.setId } })).toBe(invalidMiddle ? 0 : 3);
+  });
+
+  it('B1-R1-F2 accepts bounded multibyte and escaped text under both JSON representations', async () => {
+    const fx = await fixture(), text = 'SYNTHETIC 泵 " \\ \n'.repeat(60);
+    fx.draft.candidates[0].proposal.fitExplanation.text = text;
+    const stored = await usingService(s => s.persistInitial(context(), fx.companyId, fx.draft, randomUUID()));
+    const read = await usingService(s => s.getCurrent(context(), stored.setId));
+    expect(read.document.candidates[0].proposal.fitExplanation.text).toBe(text);
+    expect(Buffer.byteLength(JSON.stringify(read.document), 'utf8')).toBeLessThanOrEqual(262144);
+    expect(await jsonbBytes(read.document)).toBeLessThanOrEqual(262144);
+    const feedback = await usingService(s => s.recordFeedback(context(), stored.setId, read.document.candidates[0].candidateId,
+      { expectedRevision: 1, action: 'CORRECT', correction: { application: text } }, randomUUID()));
+    expect(feedback.recordedRevision).toBe(2);
+    expect(feedback.after.corrections.application).toBe(text);
+  });
+
+  it('B1-R1-F3 validates only the new revision pair without requiring visibility of unrelated immutable history', async () => {
+    const fx = await seeded();
+    for (let revision = 1; revision < 6; revision += 1) {
+      await usingService(s => s.recordFeedback(context(), fx.stored.setId, fx.candidateId, { expectedRevision: revision, action: 'CONFIRM' }, randomUUID()));
+    }
+    await owner.$executeRawUnsafe(`CREATE POLICY "b1_history_cost_probe" ON market_candidate_set_revision AS RESTRICTIVE FOR SELECT TO app_user USING (set_id <> '${fx.stored.setId}'::uuid OR revision >= 6)`);
+    try {
+      const result = await usingService(s => s.recordFeedback(context(), fx.stored.setId, fx.candidateId, { expectedRevision: 6, action: 'KEEP_PENDING' }, randomUUID()));
+      expect(result.recordedRevision).toBe(7);
+    } finally { await owner.$executeRawUnsafe('DROP POLICY "b1_history_cost_probe" ON market_candidate_set_revision'); }
+    expect(await owner.marketCandidateSetRevision.count({ where: { setId: fx.stored.setId } })).toBe(7);
+    expect(await owner.marketCandidateFeedback.count({ where: { setId: fx.stored.setId } })).toBe(6);
+  });
 
   it('B1-T01/T02/T12 cold-reads durable identity and distinguishes NOT_ANALYZED from COMPLETED_EMPTY', async () => {
     const fx = await fixture(), operation = randomUUID();

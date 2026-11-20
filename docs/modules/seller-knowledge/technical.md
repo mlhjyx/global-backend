@@ -99,7 +99,9 @@ presign → commit（魔数/大小/hash/配额，advisory lock 复检）
 
 ## 9. 市场候选持久化边界（B1）
 
-本增量依据 `B1-MARKET-CANDIDATE-PERSISTENCE` revision 1 的批准范围，绑定产品 v0.2（SHA256 `51977c60f9538099a8c4eb3657d7dffd5eb07751075b821475048b27e16b5f09`）与技术施工单（`a79996375f070e80cf6124e7fceda8e30085ccf84a51c57f567c52ab2e9704ab`）。本节说明新增源码，不改写上文历史设计状态，也不依赖私有审批文件运行。
+本增量依据 `B1-MARKET-CANDIDATE-PERSISTENCE` revision 2 的批准范围（原业务语义不变，仅追加一条 forward 完整性修正迁移），绑定产品 v0.2（SHA256 `51977c60f9538099a8c4eb3657d7dffd5eb07751075b821475048b27e16b5f09`）与技术施工单（`a79996375f070e80cf6124e7fceda8e30085ccf84a51c57f567c52ab2e9704ab`）。本节说明新增源码，不改写上文历史设计状态，也不依赖私有审批文件运行。
+
+初始存储在持有公司锁时不等待 Claim 子锁，采用 `NOWAIT`，仅对 SQLSTATE `55P03` 的已回滚存储事务最多重试三次；耗尽给受控409，其它错误不吞。文档写入前在原租户事务中精确预检 `octet_length(value::jsonb::text)`，避免 canonical 字节帽以内的输入撞数据库表示帽而返回500；文档哈希仍按原 canonical 算法。增量 deferred guard 对每条新增 head/revision/feedback 事件作唯一键定点检查，仅在 feedback 分支展开该条前后两版，不全历史 count/max 或重复解析不可变旧正文；旧迁移字节、FK/唯一约束、单步指针、RLS/ACL及原删除/cascade语义保持。
 
 - 引擎唯一主存：`market_candidate_set` 仅保头指针/初始操作幂等身份；`market_candidate_set_revision` 保不可变 `MarketCandidateSetV1`；`market_candidate_feedback` 只追加 before/after 用户覆盖层。CompanyProfile/Offering/Claim/Evidence 不被候选或反馈反向覆盖。稳定候选 UUID 与集合 revision 分开，同国不同应用/采购组织角色互不合并；组织国、项目国各自可空。
 - 文档校验与 DTO 位于 `apps/api/src/market-candidates/`；原 proposal、双边冲突/反证、资料事实/卖方声明/推断/未知与用户 corrections 分层。确认不升级事实核验等级；纠正必须有实质内容变化，保 ID/旧版并标 `needsReassessment=true`、`impactScope=UNKNOWN`，不自动重评估其他卡。每次独立四反馈形成集合新修订，原文理由保留，缺省/null/空白理由记 null。

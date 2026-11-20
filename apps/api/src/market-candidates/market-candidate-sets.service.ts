@@ -5,13 +5,14 @@ import { isUUID } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
 import type { RequestContext } from '../auth/request-context';
 import {
+  MAX_DOCUMENT_BYTES,
   type MarketCandidateBasisAvailabilityDto, type MarketCandidateBasisSnapshotDto,
   type MarketCandidateFeedbackResultDto, type MarketCandidateLatestDto,
   type MarketCandidateRevisionDto, type MarketCandidateRevisionPageDto,
   type MarketCandidateSetV1Dto, type MarketCandidateSourceReferenceDto,
   type MarketCandidateSourceSnapshotDto,
 } from './dto/market-candidate-set.dto';
-import { applyFeedback, createInitialDocument, documentHash, invalidCandidateInput, parseDocument, parseDraft, parseFeedback } from './market-candidate-set.document';
+import { applyFeedback, canonicalJson, createInitialDocument, documentHash, invalidCandidateInput, parseDocument, parseDraft, parseFeedback } from './market-candidate-set.document';
 
 type Tx = Prisma.TransactionClient;
 type CompanyLock = { id: string; version: number; deletedAt: Date | null };
@@ -70,6 +71,12 @@ export class MarketCandidateSetsService {
     if (!row) return notFound();
     return row;
   }
+  private async assertDocumentStorageSize(tx: Tx, document: MarketCandidateSetV1Dto): Promise<void> {
+    // JSONB text includes separator spaces that canonical hashing deliberately omits.
+    const encoded = canonicalJson(document);
+    const [stored] = await tx.$queryRaw<{ bytes: number }[]>`SELECT octet_length(${encoded}::jsonb::text) AS bytes`;
+    if (stored.bytes > MAX_DOCUMENT_BYTES) return invalidCandidateInput();
+  }
   private checkedDocument(row: MarketCandidateSetRevision): MarketCandidateSetV1Dto {
     const doc = parseDocument(row.documentJson);
     if (doc.setId !== row.setId || doc.companyId !== row.companyId || doc.revision !== row.revision || documentHash(doc) !== row.documentHash) {
@@ -78,7 +85,8 @@ export class MarketCandidateSetsService {
     return doc;
   }
   private async claim(tx: Tx, id: string, companyId: string, lock: boolean) {
-    if (lock) await tx.$queryRaw`SELECT id FROM claim WHERE id=${id}::uuid AND company_id=${companyId}::uuid FOR SHARE`;
+    // Never wait on a child lock while approval transactions hold it before the parent.
+    if (lock) await tx.$queryRaw`SELECT id FROM claim WHERE id=${id}::uuid AND company_id=${companyId}::uuid FOR SHARE NOWAIT`;
     const claim = await tx.claim.findUnique({ where: { id } });
     if (!claim || claim.companyId !== companyId || ['REVOKED','EXPIRED'].includes(claim.status)
       || (claim.validUntil !== null && claim.validUntil.getTime() <= Date.now())) return null;
@@ -164,32 +172,40 @@ export class MarketCandidateSetsService {
   async persistInitial(ctx: RequestContext, companyId: string, input: unknown, operationIdentity: string): Promise<{ setId: string; revision: 1; documentHash: string; replayed: boolean }> {
     ctx = context(ctx); companyId = uuid(companyId); operationIdentity = uuid(operationIdentity);
     const draft = parseDraft(input), requestHash = documentHash(draft);
-    return this.prisma.withWorkspace(ctx.workspaceId, async tx => {
-      const company = await this.company(tx, companyId, true);
-      const prior = await tx.marketCandidateSet.findUnique({ where: { workspaceId_companyId_initialOperationId: { workspaceId: ctx.workspaceId, companyId, initialOperationId: operationIdentity } } });
-      if (prior) {
-        if (prior.initialRequestHash !== requestHash) return conflict('IDEMPOTENCY_CONFLICT');
-        const row = await this.revision(tx, prior, 1);
-        this.checkedDocument(row);
-        return { setId: prior.id, revision: 1, documentHash: row.documentHash, replayed: true };
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await this.prisma.withWorkspace(ctx.workspaceId, async tx => {
+          const company = await this.company(tx, companyId, true);
+          const prior = await tx.marketCandidateSet.findUnique({ where: { workspaceId_companyId_initialOperationId: { workspaceId: ctx.workspaceId, companyId, initialOperationId: operationIdentity } } });
+          if (prior) {
+            if (prior.initialRequestHash !== requestHash) return conflict('IDEMPOTENCY_CONFLICT');
+            const row = await this.revision(tx, prior, 1);
+            this.checkedDocument(row);
+            return { setId: prior.id, revision: 1 as const, documentHash: row.documentHash, replayed: true };
+          }
+          const sources: MarketCandidateSourceSnapshotDto[] = [];
+          const sorted = [...draft.sources].sort((a, b) => `${a.kind}:${a.sourceId}`.localeCompare(`${b.kind}:${b.sourceId}`, 'en'));
+          for (const reference of sorted) {
+            const source = await this.source(tx, companyId, reference, true);
+            if (!source) return notFound();
+            sources.push(source);
+          }
+          const setId = randomUUID();
+          const document = createInitialDocument(draft, { setId, companyId, candidateIds: draft.candidates.map(() => randomUUID()) }, { company: { companyId, version: company.version }, sources });
+          await this.assertDocumentStorageSize(tx, document);
+          const hash = documentHash(document), latest = await this.latest(tx, companyId);
+          const createdAt = new Date(Math.max(Date.now(), (latest?.createdAt.getTime() ?? 0) + 1));
+          await tx.marketCandidateSet.create({ data: { id: setId, workspaceId: ctx.workspaceId, companyId, currentRevision: 1,
+            initialOperationId: operationIdentity, initialRequestHash: requestHash, createdAt, updatedAt: createdAt } });
+          await tx.marketCandidateSetRevision.create({ data: { workspaceId: ctx.workspaceId, companyId, setId, revision: 1, parentRevision: null,
+            documentJson: document as unknown as Prisma.InputJsonValue, documentHash: hash, createdBy: ctx.userId } });
+          return { setId, revision: 1 as const, documentHash: hash, replayed: false };
+        }, transactionOptions);
+      } catch (error) {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2010' || error.meta?.code !== '55P03') throw error;
       }
-      const sources: MarketCandidateSourceSnapshotDto[] = [];
-      const sorted = [...draft.sources].sort((a, b) => `${a.kind}:${a.sourceId}`.localeCompare(`${b.kind}:${b.sourceId}`, 'en'));
-      for (const reference of sorted) {
-        const source = await this.source(tx, companyId, reference, true);
-        if (!source) return notFound();
-        sources.push(source);
-      }
-      const setId = randomUUID();
-      const document = createInitialDocument(draft, { setId, companyId, candidateIds: draft.candidates.map(() => randomUUID()) }, { company: { companyId, version: company.version }, sources });
-      const hash = documentHash(document), latest = await this.latest(tx, companyId);
-      const createdAt = new Date(Math.max(Date.now(), (latest?.createdAt.getTime() ?? 0) + 1));
-      await tx.marketCandidateSet.create({ data: { id: setId, workspaceId: ctx.workspaceId, companyId, currentRevision: 1,
-        initialOperationId: operationIdentity, initialRequestHash: requestHash, createdAt, updatedAt: createdAt } });
-      await tx.marketCandidateSetRevision.create({ data: { workspaceId: ctx.workspaceId, companyId, setId, revision: 1, parentRevision: null,
-        documentJson: document as unknown as Prisma.InputJsonValue, documentHash: hash, createdBy: ctx.userId } });
-      return { setId, revision: 1, documentHash: hash, replayed: false };
-    }, transactionOptions);
+    }
+    throw new ConflictException({ error: { code: 'VERSION_CONFLICT', message: '候选依据正在变更，请沿用原操作标识重试' } });
   }
 
   async getLatest(ctx: RequestContext, companyId: string): Promise<MarketCandidateLatestDto> {
@@ -255,6 +271,7 @@ export class MarketCandidateSetsService {
       const before = current.candidates.find(candidate => candidate.candidateId === candidateId);
       if (!before) return notFound();
       const next = applyFeedback(current, candidateId, intention), hash = documentHash(next);
+      await this.assertDocumentStorageSize(tx, next);
       const after = next.candidates.find(candidate => candidate.candidateId === candidateId)!;
       await tx.marketCandidateSetRevision.create({ data: { workspaceId: ctx.workspaceId, companyId: head.companyId, setId, revision: next.revision,
         parentRevision: head.currentRevision, documentJson: next as unknown as Prisma.InputJsonValue, documentHash: hash, createdBy: ctx.userId } });

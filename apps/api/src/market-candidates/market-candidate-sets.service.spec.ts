@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { Prisma } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { RequestContext } from '../auth/request-context';
 import { MarketCandidateSetsService } from './market-candidate-sets.service';
@@ -15,6 +16,21 @@ function port(tx: object) {
 }
 
 describe('MarketCandidateSetsService boundaries', () => {
+  it('bounds initial source-lock retries and returns a controlled conflict after three aborted attempts', async () => {
+    const busy = new Prisma.PrismaClientKnownRequestError('SYNTHETIC source lock unavailable', { code: 'P2010', clientVersion: '6.19.3', meta: { code: '55P03' } });
+    const withWorkspace = vi.fn().mockRejectedValue(busy);
+    const service = new MarketCandidateSetsService({ withWorkspace } as unknown as PrismaService);
+    await expect(service.persistInitial(ctx, companyId, { generationOutcome: 'COMPLETED_EMPTY', sources: [], candidates: [] }, actor)).rejects.toMatchObject({ status: 409 });
+    expect(withWorkspace).toHaveBeenCalledTimes(3);
+  });
+  it('does not retry an unrelated storage or validation error as a Claim-lock conflict', async () => {
+    const failure = new Prisma.PrismaClientKnownRequestError('SYNTHETIC unexpected constraint', { code: 'P2010', clientVersion: '6.19.3', meta: { code: '23514' } });
+    const withWorkspace = vi.fn().mockRejectedValue(failure);
+    const service = new MarketCandidateSetsService({ withWorkspace } as unknown as PrismaService);
+    await expect(service.persistInitial(ctx, companyId, { generationOutcome: 'COMPLETED_EMPTY', sources: [], candidates: [] }, actor)).rejects.toBe(failure);
+    expect(withWorkspace).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects absent or malformed tenant identity before touching the database', async () => {
     const db = port({}); const service = new MarketCandidateSetsService(db as unknown as PrismaService);
     await expect(service.getLatest(undefined as unknown as RequestContext, companyId)).rejects.toMatchObject({ status: 403 });
