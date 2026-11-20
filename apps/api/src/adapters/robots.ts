@@ -25,6 +25,7 @@ import {
 
 interface RobotsRule {
   disallow: string[];
+  homepageOnly: boolean;
   fetchedAt: number;
 }
 
@@ -46,6 +47,7 @@ async function loadRobots(
   const cached = cache.get(origin);
   if (cached && Date.now() - cached.fetchedAt < TTL_MS) return cached;
   let disallow: string[] = [];
+  let homepageOnly = false;
   try {
     const res = await request(`${origin}/robots.txt`, {
       timeoutMs: 10_000,
@@ -55,6 +57,8 @@ async function loadRobots(
     });
     if (res.ok) {
       disallow = parseWildcardDisallow(res.text);
+    } else if (res.status >= 500) {
+      homepageOnly = true;
     }
     // 4xx/无 robots → 视为无限制（RFC 惯例）
   } catch (error) {
@@ -69,15 +73,17 @@ async function loadRobots(
       // A suppression decision belongs to the current workspace/request. It is
       // fail-closed for this call, but must never become a one-hour global
       // origin fact that blocks unrelated workspaces.
-      return { disallow: ['/'], fetchedAt: Date.now() };
+      return { disallow: ['/'], homepageOnly: false, fetchedAt: Date.now() };
     }
     if (error instanceof EgressBlockedError || (error instanceof Error && error.name === 'EgressBlockedError')) {
       // redirect 到私网、超限或其他安全拒绝不得降级成 allow。
       disallow = ['/'];
+    } else {
+      // 未取得规则只放行首页；缓存必须保留这一状态，不能视为空规则。
+      homepageOnly = true;
     }
-    // robots 不可达：保守放行首页级抓取（不放行深层），此处返回空 disallow
   }
-  const rule = { disallow, fetchedAt: Date.now() };
+  const rule = { disallow, homepageOnly, fetchedAt: Date.now() };
   cache.set(origin, rule);
   return rule;
 }
@@ -129,6 +135,7 @@ export async function isAllowedByRobots(url: string, dependencies: RobotsDepende
     });
   const rule = await loadRobots(u.origin, request, () => physicalWireFailed);
   const path = u.pathname || '/';
+  if (rule.homepageOnly && path !== '/') return false;
   // 任一 Disallow 前缀命中路径 → 禁止。Disallow: / 表示全站禁抓。
   return !rule.disallow.some((d) => path.startsWith(d));
 }
