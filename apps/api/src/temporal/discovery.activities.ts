@@ -95,6 +95,7 @@ import {
   reconcileRawSourceBatch,
   type RawSourceIngestLimits,
 } from '../discovery/raw-source-ingestion';
+import { directorySourcePolicyCheck } from '../discovery/directory-source-policy';
 import { persistPreparedRawSourceRecord } from '../discovery/raw-source-writer';
 import {
   buildDiscoveryQueryLineageLookup,
@@ -1305,7 +1306,11 @@ export function createDiscoveryActivities(deps: {
               }
               durableReceipts.push({ producerId, receipt });
             },
-          }, { blockedDomains, knownExternalIds });
+          }, {
+            blockedDomains,
+            knownExternalIds,
+            sourcePolicyCheck: directorySourcePolicyCheck(sourcePolicies),
+          });
           return { key: a.key, r, durableReceipts };
         }),
       );

@@ -4,7 +4,7 @@ import {
   createRawSourceIndexedResolver,
   type RawSourceIndexedResolution,
 } from "./raw-source-indexed-resolution";
-import { PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN } from "./source-policy-scope";
+import { PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN, sourcePolicyAllowsDiscovery } from "./source-policy-scope";
 
 export type { RawSourceIndexedResolution } from "./raw-source-indexed-resolution";
 
@@ -462,11 +462,7 @@ function policyFor(
     };
   }
   const allowedPurpose = policy.allowedPurpose;
-  const purposeAllowed =
-    Array.isArray(allowedPurpose) &&
-    allowedPurpose.length > 0 &&
-    allowedPurpose.every((purpose) => typeof purpose === "string") &&
-    allowedPurpose.includes("discovery");
+  const purposeAllowed = sourcePolicyAllowsDiscovery(allowedPurpose);
   return {
     retentionDays,
     missing: false,
