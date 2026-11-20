@@ -1,3 +1,9 @@
+import {
+  fixtureImageId,
+  assertFixtureOwnership,
+  assertFixtureVersion,
+  MINIO_FIXTURE_LABEL,
+} from "./manufacturer-minio-fixture.mjs";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
@@ -6,6 +12,8 @@ import {
   rmSync,
   rmdirSync,
   readFileSync,
+  mkdirSync,
+  existsSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -16,12 +24,16 @@ import {
   PutBucketVersioningCommand,
   PutBucketEncryptionCommand,
   PutBucketLifecycleConfigurationCommand,
+  GetBucketVersioningCommand,
+  GetBucketEncryptionCommand,
+  GetBucketLifecycleConfigurationCommand,
 } from "@aws-sdk/client-s3";
 
 // Task-owned disposable resources only. Never accepts a shared DB URL or service
 // name; exact generated names are retained until this process's cleanup runs.
 const root = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 const id = randomBytes(4).toString("hex");
+const imageTaskId = randomBytes(16).toString("hex");
 const pg = `manufacturer-network-pg-${id}`;
 const minio = `manufacturer-network-minio-${id}`;
 const secret = randomBytes(24).toString("hex");
@@ -33,6 +45,9 @@ const localEnv = {
 };
 const directory = mkdtempSync(join(tmpdir(), "manufacturer-network-"));
 const created: string[] = [];
+let sourceImageId: string | undefined;
+const buildContext = join(directory, "empty-context");
+const iidFile = join(directory, "minio.iid");
 function run(command: string, args: string[], env = localEnv, capture = false) {
   const result = spawnSync(command, args, {
     cwd: root,
@@ -59,6 +74,36 @@ function port(name: string, containerPort: number) {
   return match[1];
 }
 async function main() {
+  mkdirSync(buildContext, { mode: 0o700 });
+  run("docker", [
+    "build",
+    "--platform",
+    "linux/amd64",
+    "--pull=false",
+    "--file",
+    join(root, "infra/testing/manufacturer-minio.Dockerfile"),
+    "--label",
+    `${MINIO_FIXTURE_LABEL}=${imageTaskId}`,
+    "--iidfile",
+    iidFile,
+    buildContext,
+  ]);
+  const candidate = fixtureImageId(readFileSync(iidFile, "utf8"));
+  const metadata = run(
+    "docker",
+    [
+      "image",
+      "inspect",
+      candidate,
+      "--format",
+      '{"id":{{json .Id}},"os":{{json .Os}},"architecture":{{json .Architecture}},"task":{{json (index .Config.Labels "global.manufacturer-fixture")}}}',
+    ],
+    localEnv,
+    true,
+  );
+  assertFixtureOwnership(metadata, candidate, imageTaskId);
+  sourceImageId = candidate;
+  console.log(`manufacturer fixture source-built image ${sourceImageId}`);
   run(
     "docker",
     [
@@ -101,7 +146,7 @@ async function main() {
       `MINIO_ROOT_PASSWORD=${secret}`,
       "-e",
       `MINIO_KMS_SECRET_KEY=${kmsKey}`,
-      "quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e",
+      sourceImageId,
       "server",
       "/data",
     ],
@@ -109,6 +154,14 @@ async function main() {
     true,
   );
   created.push(minio);
+  const version = run(
+    "docker",
+    ["exec", minio, "minio", "--version"],
+    localEnv,
+    true,
+  );
+  assertFixtureVersion(version);
+  console.log(version);
   let ready = false;
   for (let attempt = 0; attempt < 60; attempt++) {
     const probe = spawnSync(
@@ -178,6 +231,30 @@ async function main() {
         ),
       }),
     );
+    const [versioning, encryption, lifecycle] = await Promise.all([
+      client.send(new GetBucketVersioningCommand({ Bucket: bucket })),
+      client.send(new GetBucketEncryptionCommand({ Bucket: bucket })),
+      client.send(
+        new GetBucketLifecycleConfigurationCommand({ Bucket: bucket }),
+      ),
+    ]);
+    const personal = lifecycle.Rules?.find(
+      (rule) => rule.ID === "generic-operation-artifact-personal-data-ttl",
+    );
+    if (
+      versioning.Status !== "Enabled" ||
+      encryption.ServerSideEncryptionConfiguration?.Rules?.[0]
+        ?.ApplyServerSideEncryptionByDefault?.SSEAlgorithm !== "AES256" ||
+      personal?.Status !== "Enabled" ||
+      personal.Expiration?.Days !== 1 ||
+      personal.NoncurrentVersionExpiration?.NoncurrentDays !== 1 ||
+      personal.Filter?.Tag?.Key !== "artifact-privacy" ||
+      personal.Filter.Tag.Value !== "PERSONAL_DATA"
+    )
+      throw new Error("MANUFACTURER_TEST_STORAGE_CONFIGURATION_INVALID");
+    console.log(
+      "manufacturer fixture storage: versioning Enabled, encryption AES256, PERSONAL_DATA lifecycle 1 day",
+    );
   } finally {
     client.destroy();
   }
@@ -222,6 +299,16 @@ try {
       process.exitCode = 1;
     }
   }
+  if (sourceImageId) {
+    try {
+      run("docker", ["image", "rm", sourceImageId], localEnv, true);
+    } catch {
+      console.error("MANUFACTURER_TEST_IMAGE_CLEANUP_FAILED");
+      process.exitCode = 1;
+    }
+  }
+  rmSync(iidFile, { force: true });
+  if (existsSync(buildContext)) rmdirSync(buildContext);
   rmSync(join(directory, "s3.json"), { force: true });
   rmdirSync(directory);
 }
