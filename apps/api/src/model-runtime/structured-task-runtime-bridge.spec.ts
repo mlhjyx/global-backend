@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ModelGateway } from '../model-gateway/model-gateway';
 import { PaidOperationUnknownError } from '../site-builder/site-build-cost-ledger';
-import { executeStructuredTaskWithRuntime } from './structured-task-runtime-bridge';
+import { executeStructuredTaskWithRuntime, prepareStructuredTaskRuntimeInput } from './structured-task-runtime-bridge';
 
 const schema = {
   type: 'object',
@@ -56,7 +56,8 @@ describe('executeStructuredTaskWithRuntime', () => {
         provider: 'gateway',
         reportedModel: 'deepseek-v4-flash-20260804',
         modelResolutionSource: 'upstream_response',
-        contextDigest: expect.stringMatching(/^[0-9a-f]{64}$/),
+        contextDigest: '30be3b2cd208713efc02e520520c1b58d074a86f15fbabc58a2fda071c58abe2',
+        promptDigest: '4d22a1dd3070202d79063f15e1c2befd1b931e53b88a5cdd12ce192709a5e349',
         states: ['planned', 'admitted', 'dispatched', 'observed', 'validated', 'settled', 'completed'],
       },
     });
@@ -139,5 +140,32 @@ describe('executeStructuredTaskWithRuntime', () => {
       ),
     ).rejects.toThrow('TASK_MAX_OUTPUT_TOKENS_UNAVAILABLE');
     expect(generateStructured).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('pure shared structured preparation before budget admission', () => {
+  const context = { workspaceId: '11111111-1111-4111-8111-111111111111', correlationId: '66666666-6666-4666-8666-666666666666' };
+  const input = { task: 'market.candidates.generate', prompt: 'Full structured synthetic material.', system: 'Hypotheses only.', model: 'deepseek-v4-flash', schema };
+  it('returns bounded input and the complete required context without a gateway or grant dependency', () => {
+    const prepared = prepareStructuredTaskRuntimeInput(input, context);
+    expect(prepared.boundedInput).toEqual({ ...input, maxTokens: 16_000 });
+    expect(prepared.envelope).toMatchObject({ workspaceId: context.workspaceId, outputReserve: 16_000, droppedSourceRefs: [] });
+    expect(prepared.envelope.segments.map(segment => segment.kind)).toEqual(['policy', 'schema', 'request']);
+    expect(prepared.requestMaterial.prompt).toBe(input.prompt);
+  });
+  it('rejects an aggregate context overflow rather than dropping or truncating required material', () => {
+    expect(() => prepareStructuredTaskRuntimeInput({ ...input, prompt: '\\'.repeat(200_000) }, context)).toThrow('required context segments exceed the model context budget');
+  });
+  it('uses the same token and registration gate before any execution admission', () => {
+    expect(() => prepareStructuredTaskRuntimeInput({ ...input, maxTokens: 16_001 }, context)).toThrow('TASK_MAX_OUTPUT_TOKENS_UNAVAILABLE');
+    expect(() => prepareStructuredTaskRuntimeInput({ ...input, task: 'unregistered' }, context)).toThrow('TASK_MAX_OUTPUT_TOKENS_UNAVAILABLE');
+  });
+  it('sends exactly the prepared bounded input and preserves its frozen context identity', async () => {
+    const prepared = prepareStructuredTaskRuntimeInput(input, context);
+    const generateStructured = vi.fn(async () => ({ data: { code: 'synthetic' }, provider: 'synthetic', model: input.model, usage: { inputTokens: 1, outputTokens: 1 } }));
+    const result = await executeStructuredTaskWithRuntime({ generateStructured } as unknown as ModelGateway, input, context);
+    expect(generateStructured).toHaveBeenCalledExactlyOnceWith(prepared.boundedInput, context);
+    expect(result.runtimeExecution.contextDigest).toBe(prepared.envelope.digest);
   });
 });

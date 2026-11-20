@@ -341,3 +341,16 @@ describe('workspaceExecutionBudgetRequestScope', () => {
     );
   });
 });
+
+
+describe('market-candidate generation budget request binding', () => {
+  const request = {"operation": "POST /market-candidate-generations/:generationId/execute", "generationId": "66666666-6666-4666-8666-666666666666", "body": {"intentDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}} as unknown as WorkspaceExecutionBudgetRequest;
+  it('binds only the dedicated purpose, server generation subject and exact intent digest material', () => {
+    expect(workspaceExecutionBudgetRequestScope(request)).toEqual({ purpose: 'market.candidates.generate', subjectType: 'market_candidate_generation', subjectId: '66666666-6666-4666-8666-666666666666', requestSha256: 'd387987f983216a733a11c7b48b74cd9b66aab8d17a268f00005e143d26460c3' });
+  });
+  it('cannot reuse a grant when a generation id or immutable intent digest changes', () => {
+    const a = workspaceExecutionBudgetRequestScope(request);
+    expect(workspaceExecutionBudgetRequestScope({ ...request, generationId: '77777777-7777-4777-8777-777777777777' } as unknown as WorkspaceExecutionBudgetRequest).requestSha256).not.toBe(a.requestSha256);
+    expect(workspaceExecutionBudgetRequestScope({ ...request, body: { intentDigest: 'b'.repeat(64) } } as unknown as WorkspaceExecutionBudgetRequest).requestSha256).not.toBe(a.requestSha256);
+  });
+});

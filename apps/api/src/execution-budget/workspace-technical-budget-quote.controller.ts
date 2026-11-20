@@ -73,11 +73,12 @@ class WorkspaceTechnicalBudgetQuoteResponseDto {
       'contact.enrich',
       'outreach.draft',
       'campaign.plan',
+      'market.candidates.generate',
     ],
   })
   purpose!: WorkspaceTechnicalBudgetQuote['purpose'];
 
-  @ApiProperty({ enum: ['company', 'icp', 'discovery_run', 'contact_point', 'lead', 'campaign'] })
+  @ApiProperty({ enum: ['company', 'icp', 'discovery_run', 'contact_point', 'lead', 'campaign', 'market_candidate_generation'] })
   subjectType!: string;
 
   @ApiProperty({ minLength: 1, maxLength: 200 })
@@ -254,6 +255,15 @@ function siteBuilderIntakeRequest(
   });
 }
 
+function marketGenerationQuoteRequest(input: Record<string, unknown>): WorkspaceExecutionBudgetRequest {
+  exactKeys(input, ['operation', 'generationId', 'body']);
+  const body = record(input.body);
+  exactKeys(body, ['intentDigest']);
+  if (typeof body.intentDigest !== 'string' || !/^[0-9a-f]{64}$/.test(body.intentDigest)) invalid();
+  return Object.freeze({ operation: 'POST /market-candidate-generations/:generationId/execute',
+    generationId: uuid(input.generationId).toLowerCase(), body: Object.freeze({ intentDigest: body.intentDigest }) });
+}
+
 function parseRequest(value: unknown): WorkspaceExecutionBudgetRequest {
   const input = record(value);
   if (
@@ -265,6 +275,8 @@ function parseRequest(value: unknown): WorkspaceExecutionBudgetRequest {
     invalid();
   }
   switch (input.operation) {
+    case 'POST /market-candidate-generations/:generationId/execute':
+      return marketGenerationQuoteRequest(input);
     case 'POST /site-builder/intake':
       return siteBuilderIntakeRequest(input);
     case 'POST /companies': {
@@ -622,6 +634,14 @@ const WORKSPACE_QUOTE_REQUEST_SCHEMAS = [
       },
     },
     ['body'],
+  ),
+  operationVariant(
+    'POST /market-candidate-generations/:generationId/execute',
+    { generationId: { type: 'string', format: 'uuid' }, body: {
+      type: 'object', additionalProperties: false, required: ['intentDigest'],
+      properties: { intentDigest: { type: 'string', pattern: '^[0-9a-f]{64}$' } },
+    } },
+    ['generationId', 'body'],
   ),
 ] as const;
 

@@ -2329,3 +2329,19 @@ describe('RouterModelGateway — settle 失败后的安全重试与观测（B2/F
     );
   });
 });
+
+
+describe('B2 ordinary reserve-key characterization before extraction',()=>{
+ it('emits the original actual reservation identity before any provider call',async()=>{
+  const provider=fakeProvider();let observed:unknown;
+  const stop=new Error('synthetic reservation boundary stop');
+  const budgetStore={reserve:vi.fn(async(request:unknown)=>{observed=request;throw stop;})}as unknown as BudgetStore;
+  const gateway=new RouterModelGateway({route:()=>[provider]}as unknown as ModelRouter,undefined,budgetStore);
+  await expect(gateway.generateStructured({task:'market.candidates.generate',prompt:'p',system:'s',model:'m',maxCostCents:40,
+   schema:{type:'object',additionalProperties:false,required:['ok'],properties:{ok:{type:'boolean'}}}},
+   {workspaceId:'11111111-1111-4111-8111-111111111111',runId:'logical-account',correlationId:'generation-1'})).rejects.toBe(stop);
+  const expectedReservationDigest = 'b6a0e69d51da6aa9bda5efb52d2f25f3c6e5ee02b80ea2527a81b7a397c61ac5';
+  expect(observed).toMatchObject({accountKey:'logical-account',operationKey:expectedReservationDigest,estimatedMicrousd:800000n});
+  expect(provider.generateStructured).not.toHaveBeenCalled();
+ });
+});

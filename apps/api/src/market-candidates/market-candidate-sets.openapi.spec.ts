@@ -13,6 +13,39 @@ const operations = [
   ['post', `${base}/candidates/{candidateId}/feedback`, 'recordFeedback', 'acquisition:review'],
 ];
 
+type CandidatePaths = Record<string, Record<string, unknown>>;
+const approvedB1Operations = operations.map(([method, path]) => `${method} ${path}`);
+const approvedB2Operations = [
+  'post /api/v1/companies/{companyId}/market-candidate-generations',
+  'get /api/v1/market-candidate-generations/{generationId}',
+  'post /api/v1/market-candidate-generations/{generationId}/execute',
+  'post /api/v1/market-candidate-generations/{generationId}/recover',
+];
+const pathItemMetadata = new Set(['$ref', 'summary', 'description', 'servers', 'parameters']);
+function candidateOperationUniverse(paths: CandidatePaths): string[] {
+  return Object.entries(paths).filter(([path]) => path.includes('market-candidate'))
+    .flatMap(([path, item]) => Object.keys(item)
+      .filter(key => !pathItemMetadata.has(key) && !key.startsWith('x-'))
+      .map(method => `${method} ${path}`)).sort();
+}
+function candidateUniverseAllowed(paths: CandidatePaths): boolean {
+  const allowed = new Set([...approvedB1Operations, ...approvedB2Operations]);
+  const allowedPaths = new Set([...allowed].map(operation => operation.slice(operation.indexOf(' ') + 1)));
+  const allCandidatePaths = Object.keys(paths).filter(path => path.includes('market-candidate'));
+  const actual = candidateOperationUniverse(paths);
+  return allCandidatePaths.every(path => allowedPaths.has(path))
+    && approvedB1Operations.every(operation => actual.includes(operation))
+    && actual.every(operation => allowed.has(operation));
+}
+function candidateFixture(withB2 = true): CandidatePaths {
+  const paths: CandidatePaths = {};
+  for (const operation of [...approvedB1Operations, ...(withB2 ? approvedB2Operations : [])]) {
+    const split = operation.indexOf(' '), method = operation.slice(0, split), path = operation.slice(split + 1);
+    (paths[path] ??= {})[method] = {};
+  }
+  return paths;
+}
+
 describe('MarketCandidateSets code-first contract', () => {
   it.each(operations)('publishes %s %s with exact operation identity and existing user scope', (method, path, operation, scope) => {
     const op = spec.paths[path]?.[method];
@@ -23,8 +56,8 @@ describe('MarketCandidateSets code-first contract', () => {
     for (const status of ['200','400','401','403','404']) expect(op.responses[status]).toBeDefined();
     if (method === 'post') expect(op.responses['409']).toBeDefined();
   });
-  it('does not register any production initial-write/import/generate or history mutation endpoint', () => {
-    const entries = Object.entries(spec.paths as Record<string, Record<string, unknown>>).filter(([path]) => path.includes('market-candidate'));
+  it('does not register any B1 initial-write/import/generate or history mutation endpoint', () => {
+    const entries = Object.entries(spec.paths as Record<string, Record<string, unknown>>).filter(([path]) => path.includes('market-candidate-sets'));
     expect(entries).toHaveLength(5);
     const mutations = entries.flatMap(([path, methods]) => Object.keys(methods).filter(m => ['post','put','patch','delete'].includes(m)).map(m => `${m} ${path}`));
     expect(mutations).toEqual([`post ${base}/candidates/{candidateId}/feedback`]);
@@ -53,4 +86,31 @@ describe('MarketCandidateSets code-first contract', () => {
     expect(spec.components.schemas.MarketCandidateLatestDto.properties.result.nullable).toBe(true);
     expect(spec.components.schemas.MarketCandidateFeedbackResultDto.properties.reason.nullable).toBe(true);
   });
+  it('fences the whole market-candidate operation universe to exact B1 and independently approved B2 method/path pairs', () => {
+    expect(candidateUniverseAllowed(spec.paths)).toBe(true);
+    expect(candidateOperationUniverse(spec.paths)).toEqual([...approvedB1Operations, ...approvedB2Operations].sort());
+  });
+  const mutationCases: Array<[string, (paths: CandidatePaths) => void]> = [
+    ['missing old read', paths => { delete paths[base]; }],
+    ['company initial write', paths => { paths['/api/v1/companies/{companyId}/market-candidate-sets'] = { post: {} }; }],
+    ['root initial write', paths => { paths['/api/v1/market-candidate-sets'] = { post: {} }; }],
+    ['import under B1', paths => { paths[`${base}/import`] = { post: {} }; }],
+    ['history mutation', paths => { paths[`${base}/revisions`].patch = {}; }],
+    ['B1 generate', paths => { paths['/api/v1/companies/{companyId}/market-candidate-sets/generate'] = { post: {} }; }],
+    ['renamed import', paths => { paths[`${base}/restore-snapshot`] = { post: {} }; }],
+    ['new method on B2 route', paths => { paths['/api/v1/market-candidate-generations/{generationId}/execute'].delete = {}; }],
+    ['undeclared generation cancel', paths => { paths['/api/v1/market-candidate-generations/{generationId}/cancel'] = { post: {} }; }],
+    ['extra feedback method', paths => { paths[`${base}/candidates/{candidateId}/feedback`].put = {}; }],
+  ];
+  it('accepts the original B1 universe without treating B2 as an implicit namespace exemption', () => {
+    expect(candidateUniverseAllowed(candidateFixture(false))).toBe(true);
+  });
+  it('accepts only the declared B1 plus independently approved B2 operation pairs', () => {
+    expect(candidateUniverseAllowed(candidateFixture())).toBe(true);
+  });
+  it.each(mutationCases)('rejects the actual mutated operation set: %s', (_name, mutate) => {
+    const paths = candidateFixture(); mutate(paths);
+    expect(candidateUniverseAllowed(paths)).toBe(false);
+  });
+
 });

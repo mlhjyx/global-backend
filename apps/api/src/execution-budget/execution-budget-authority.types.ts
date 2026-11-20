@@ -9,6 +9,7 @@ export type ExecutionBudgetPurpose =
   | 'contact.enrich'
   | 'outreach.draft'
   | 'campaign.plan'
+  | 'market.candidates.generate'
   | 'platform.acquisition'
   | 'platform.intent_watch'
   | 'platform.sanctions'
@@ -208,6 +209,7 @@ const WORKSPACE_PURPOSE_SUBJECT_TYPES: Readonly<
   'contact.enrich': ['company'],
   'outreach.draft': ['lead'],
   'campaign.plan': ['campaign'],
+  'market.candidates.generate': ['market_candidate_generation'],
 };
 
 const PLATFORM_PURPOSES = new Set<ExecutionBudgetPurpose>(

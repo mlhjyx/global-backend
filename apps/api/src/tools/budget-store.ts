@@ -1,3 +1,4 @@
+import { readBudgetOperationResult, durableReceiptFromLedgerRow, ledgerReceiptMismatch, canonicalJson, requireLedgerProjectionReceipt, type BudgetOperationResultQuery, type BudgetOperationResultReadback } from './budget-operation-result';
 import { assertCandidateAccountAllocated } from '../runtime/development-candidate-budget';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
@@ -34,7 +35,6 @@ import {
 } from '../durable-results/artifact/generic-operation-artifact-subject.repository';
 import { assertMicrousd } from './microusd';
 import {
-  parseDurableExecutionReceipt,
   type DurableExecutionReceipt,
   parseDurableExecutionReceiptFacts,
   type DurableExecutionReceiptFacts,
@@ -143,6 +143,8 @@ export interface BudgetAccountAuthorization {
 
 /** Authoritative budget surface. Product composition must use a shared durable implementation. */
 export interface BudgetStore {
+  /** Optional internal workspace-only SELECT result inspection; absence fails closed at its caller. */
+  readOperationResult?(query: BudgetOperationResultQuery): Promise<BudgetOperationResultReadback>;
   open(input: {
     authorityId: string;
     scopeKey: string;
@@ -257,6 +259,10 @@ export class UnavailableBudgetStore implements BudgetStore {
 
   private unavailable(): never {
     throw new BudgetStoreUnavailableError(this.reason);
+  }
+
+  async readOperationResult(_query: BudgetOperationResultQuery): Promise<BudgetOperationResultReadback> {
+    return this.unavailable();
   }
 
   async open(): Promise<BudgetAccountAuthorization> {
@@ -393,145 +399,6 @@ function assertKey(name: string, value: string): void {
   }
 }
 
-
-function projectionResultStrategy(
-  schemaVersion: string | null | undefined,
-): DurableExecutionReceipt['resultStrategy'] | null {
-  if (schemaVersion === 'generic-operation-projection/v1') return 'typed_projection';
-  if (schemaVersion === 'generic-operation-artifact-ref/v1') return 'artifact_reference';
-  return null;
-}
-
-function artifactIdFromResultJson(resultJson: unknown): string | null {
-  if (!resultJson || typeof resultJson !== 'object' || Array.isArray(resultJson)) return null;
-  const artifactId = (resultJson as Record<string, unknown>).artifactId;
-  return typeof artifactId === 'string' ? artifactId : null;
-}
-
-function durableReceiptFromLedgerRow(input: {
-  readonly scopeKey: string;
-  readonly operationId: string;
-  readonly operationKey?: string;
-  readonly accountId?: string;
-  readonly authorityId?: string | null;
-  readonly resultSchemaVersion?: string | null;
-  readonly resultSchema?: string | null;
-  readonly resultDigest?: string | null;
-  readonly resultJson?: unknown;
-  readonly receiptUsage?: unknown;
-  readonly receiptCostBasis?: string | null;
-}): DurableExecutionReceipt | undefined {
-  const resultStrategy = projectionResultStrategy(input.resultSchemaVersion);
-  if (
-    !input.accountId ||
-    !input.authorityId ||
-    !input.operationKey ||
-    !input.resultSchema ||
-    !input.resultDigest ||
-    !resultStrategy ||
-    !input.receiptUsage ||
-    !input.receiptCostBasis
-  ) {
-    return undefined;
-  }
-  return parseDurableExecutionReceipt({
-    schemaVersion: 'durable-execution-receipt/v1',
-    scopeKey: input.scopeKey,
-    authorityId: input.authorityId,
-    accountId: input.accountId,
-    operationId: input.operationId,
-    operationKey: input.operationKey,
-    resultStrategy,
-    resultSchema: input.resultSchema,
-    resultDigest: input.resultDigest,
-    artifactId: resultStrategy === 'artifact_reference'
-      ? artifactIdFromResultJson(input.resultJson)
-      : null,
-    usage: input.receiptUsage,
-    costBasis: input.receiptCostBasis,
-    status: 'SETTLED',
-  });
-}
-
-function ledgerReceiptMismatch(): never {
-  throw new ExecutionControlError('DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH');
-}
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value === 'boolean' || typeof value === 'number') {
-    return JSON.stringify(value);
-  }
-  if (typeof value === 'string') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  if (!value || typeof value !== 'object') return ledgerReceiptMismatch();
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record).sort().map((key) => (
-    `${JSON.stringify(key)}:${canonicalJson(record[key])}`
-  )).join(',')}}`;
-}
-
-function requireLedgerProjectionReceipt(input: {
-  readonly scopeKey: string;
-  readonly expectedOperationId: string;
-  readonly operationId?: string | null;
-  readonly operationKey?: string;
-  readonly accountId?: string;
-  readonly authorityId?: string | null;
-  readonly resultSchemaVersion?: string | null;
-  readonly resultSchema?: string | null;
-  readonly resultDigest?: string | null;
-  readonly resultJson?: unknown;
-  readonly receiptUsage?: unknown;
-  readonly receiptCostBasis?: string | null;
-  readonly expectedProjection: GenericOperationProjection;
-  readonly expectedFacts?: DurableExecutionReceiptFacts;
-}): DurableExecutionReceipt {
-  try {
-    if (
-      !input.operationId ||
-      input.operationId !== input.expectedOperationId ||
-      input.resultSchemaVersion !== input.expectedProjection.schemaVersion ||
-      input.resultSchema !== input.expectedProjection.schema ||
-      input.resultDigest !== input.expectedProjection.digest
-    ) {
-      return ledgerReceiptMismatch();
-    }
-    const lockedProjection = parseGenericOperationProjection(input.resultJson);
-    if (canonicalJson(lockedProjection) !== canonicalJson(input.expectedProjection)) {
-      return ledgerReceiptMismatch();
-    }
-    const receipt = durableReceiptFromLedgerRow({
-      scopeKey: input.scopeKey,
-      operationId: input.operationId,
-      operationKey: input.operationKey,
-      accountId: input.accountId,
-      authorityId: input.authorityId,
-      resultSchemaVersion: input.resultSchemaVersion,
-      resultSchema: input.resultSchema,
-      resultDigest: input.resultDigest,
-      resultJson: input.resultJson,
-      receiptUsage: input.receiptUsage,
-      receiptCostBasis: input.receiptCostBasis,
-    });
-    if (!receipt) return ledgerReceiptMismatch();
-    if (
-      input.expectedFacts &&
-      (canonicalJson(receipt.usage) !== canonicalJson(input.expectedFacts.usage) ||
-        receipt.costBasis !== input.expectedFacts.costBasis)
-    ) {
-      return ledgerReceiptMismatch();
-    }
-    return receipt;
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      error.message === 'DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH'
-    ) {
-      throw error;
-    }
-    return ledgerReceiptMismatch();
-  }
-}
 
 function requireLedgerArtifactReceipt(input: {
   readonly scopeKey: string;
@@ -723,6 +590,16 @@ export class PostgresBudgetStore implements BudgetStore {
       );
     }
     return this.prisma.withWorkspace(scopeKey, fn);
+  }
+
+  async readOperationResult(query: BudgetOperationResultQuery): Promise<BudgetOperationResultReadback> {
+    assertExecutionBudgetScopeKey(query.scopeKey, { allowPlatform: false });
+    try {
+      return await this.inAuthorityScope(query.scopeKey, tx => readBudgetOperationResult(tx, query));
+    } catch (error) {
+      if (isExecutionControlError(error) || error instanceof ExecutionBudgetGrantError || error instanceof BudgetStoreUnavailableError) throw error;
+      throw new BudgetStoreUnavailableError('budget operation result inspection unavailable');
+    }
   }
 
   async open(input: {

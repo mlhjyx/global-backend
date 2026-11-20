@@ -1,3 +1,4 @@
+import { modelBudgetOperationKey } from "./model-budget-operation-identity";
 import { assertPlatformEgressPaidContext, assertPlatformEgressReservation, createPlatformEgressOperation } from "../platform-authority/platform-egress-operation";
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import { ModelGateway } from "./model-gateway";
@@ -760,19 +761,7 @@ export class RouterModelGateway extends ModelGateway {
         ? { ...ctx, modelIdentitySubstitutes: substitutes }
         : ctx;
     const accountKey = ctx.runId ?? ctx.workspaceId;
-    const operationKey = paidOperationKey([
-      accountKey,
-      "model-budget",
-      op,
-      input.task,
-      input.model ?? "",
-      ctx.correlationId ?? "",
-      input.prompt ?? "",
-      input.system ?? "",
-      input.schema ? JSON.stringify(input.schema) : "",
-      input.messages ? JSON.stringify(input.messages) : "",
-      input.tools ? JSON.stringify(input.tools) : "",
-    ]);
+    const operationKey = modelBudgetOperationKey(op, input, ctx);
     let reservation;
     try {
       reservation = await this.budgetStore.reserve({

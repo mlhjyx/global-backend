@@ -641,4 +641,21 @@ describe.runIf(enabled)('B1 market candidate persistence on restricted PostgreSQ
     const after = await Promise.all([owner.companyProfile.findUnique({ where: { id: fx.companyId } }), owner.claim.findUnique({ where: { id: fx.claim.id } }), owner.outboxEvent.count(), owner.icpDefinition.count(), owner.executionBudgetAuthority.count(), owner.discoveryRun.count()]);
     expect(after).toEqual(before);
   });
+  it('caller-owned B1 transaction preserves all-or-nothing outer rollback and a fresh read sees no partial set', async () => {
+    const fx=await fixture(), operationId=randomUUID();
+    await usingService(async(service,prisma)=>{
+      await expect(prisma.withWorkspace(workspaceId,async tx=>{
+        const result=await service.persistInitialInTransaction(tx,context(),fx.companyId,fx.draft,operationId);
+        const visible=await tx.marketCandidateSetRevision.findUnique({where:{workspaceId_setId_revision:{workspaceId,setId:result.setId,revision:1}}});
+        expect(visible?.documentHash).toBe(result.documentHash);
+        throw new Error('SYNTHETIC_AFTER_B1_WRITE_BEFORE_OUTER_ACK_COMMIT');
+      })).rejects.toThrow('SYNTHETIC_AFTER_B1_WRITE_BEFORE_OUTER_ACK_COMMIT');
+    });
+    await usingService(async(service)=>{
+      expect(await service.getLatest(context(),fx.companyId)).toEqual({status:'NOT_ANALYZED',result:null});
+    });
+    const counts=await owner.marketCandidateSet.count({where:{workspaceId,companyId:fx.companyId,initialOperationId:operationId}});
+    expect(counts).toBe(0);
+  });
+
 });

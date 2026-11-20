@@ -93,3 +93,15 @@ describe('parseExecutionBudgetBinding retry accounts', () => {
     ).toThrow('EXECUTION_BUDGET_BINDING_INVALID');
   });
 });
+
+
+describe('dedicated market-generation immutable account identity', () => {
+  const subjectId = '66666666-6666-4666-8666-666666666666';
+  const primary = `market.candidates.generate:market_candidate_generation:${subjectId}:${REQUEST_SHA256}`;
+  const exact = { ...binding, accountKey: primary, purpose: 'market.candidates.generate', subjectType: 'market_candidate_generation', subjectId };
+  it('accepts only the dedicated primary or its own-authority retry account', () => {
+    expect(parseExecutionBudgetBinding(exact)).toEqual(exact);
+    expect(parseExecutionBudgetBinding({ ...exact, accountKey: `${primary}:retry:${AUTHORITY_ID}` }).accountKey).toBe(`${primary}:retry:${AUTHORITY_ID}`);
+    expect(() => parseExecutionBudgetBinding({ ...exact, accountKey: `${primary}:retry:77777777-7777-4777-8777-777777777777` })).toThrow('EXECUTION_BUDGET_BINDING_INVALID');
+  });
+});

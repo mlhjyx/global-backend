@@ -77,6 +77,11 @@ export type WorkspaceExecutionBudgetRequest =
       campaignId: string;
       /** 规划 job 的幂等键：一次 Grant 只能用于一个 job（重触发 = 新 jobId + 新 Grant）。 */
       body: Readonly<{ jobId: string }>;
+    }>
+  | Readonly<{
+      operation: 'POST /market-candidate-generations/:generationId/execute';
+      generationId: string;
+      body: Readonly<{ intentDigest: string }>;
     }>;
 
 export interface GuessEmailsHttpRequestBody {
@@ -124,6 +129,8 @@ function canonicalJson(value: unknown): string {
 
 function requestMaterial(request: WorkspaceExecutionBudgetRequest): JsonValue {
   switch (request.operation) {
+    case 'POST /market-candidate-generations/:generationId/execute':
+      return { operation: request.operation, generationId: request.generationId, body: request.body };
     case 'POST /companies':
       return { operation: request.operation, body: request.body } as JsonValue;
     case 'POST /companies/:companyId/icps':
@@ -202,6 +209,8 @@ export function workspaceExecutionBudgetRequestScope(
     .digest('hex');
 
   switch (request.operation) {
+    case 'POST /market-candidate-generations/:generationId/execute':
+      return Object.freeze({ purpose: 'market.candidates.generate', subjectType: 'market_candidate_generation', subjectId: request.generationId, requestSha256 });
     case 'POST /companies':
       return Object.freeze({
         purpose: 'understanding.run',

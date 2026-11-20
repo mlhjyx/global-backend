@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { RequestContext } from '../auth/request-context';
 import { MarketCandidateSetsService } from './market-candidate-sets.service';
+import { createInitialDocument, documentHash, parseDraft } from './market-candidate-set.document';
 
 const companyId = '00000000-0000-4000-8000-000000000001';
 const setId = '00000000-0000-4000-8000-000000000002';
@@ -68,5 +69,25 @@ describe('MarketCandidateSetsService boundaries', () => {
       await expect(service.listRevisions(ctx, setId, page)).rejects.toMatchObject({ status: 400 });
     }
     expect(db.withWorkspace).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('caller-owned B1 transaction core for generation ACK', () => {
+  const input = { generationOutcome: 'COMPLETED_EMPTY', sources: [], candidates: [] };
+  it('replays a verified initial revision using only the caller transaction, without opening an inner transaction', async () => {
+    const document = createInitialDocument(parseDraft(input), {setId,companyId,candidateIds:[]}, {company:{companyId,version:1},sources:[]});
+    const tx = { $queryRaw: vi.fn(async()=>[{id:companyId,version:1,deletedAt:null}]),
+      marketCandidateSet:{findUnique:vi.fn(async()=>({id:setId,workspaceId:ctx.workspaceId,companyId,currentRevision:1,initialOperationId:actor,initialRequestHash:documentHash(parseDraft(input))}))},
+      marketCandidateSetRevision:{findUnique:vi.fn(async()=>({workspaceId:ctx.workspaceId,companyId,setId,revision:1,documentJson:document,documentHash:documentHash(document)}))} };
+    const service = new MarketCandidateSetsService({withWorkspace:()=>{throw Error('inner transaction forbidden');}}as unknown as PrismaService);
+    expect(await service.persistInitialInTransaction(tx as unknown as Prisma.TransactionClient,ctx,companyId,input,actor)).toEqual({setId,revision:1,documentHash:documentHash(document),replayed:true});
+  });
+  it('propagates the exact source-lock failure once so the outer ACK transaction can roll back as a whole', async () => {
+    const busy = new Prisma.PrismaClientKnownRequestError('synthetic busy source', {code:'P2010',clientVersion:'6.19.3',meta:{code:'55P03'}});
+    const tx = {$queryRaw:vi.fn(async()=>{throw busy;})};
+    const service = new MarketCandidateSetsService({withWorkspace:()=>{throw Error('inner transaction forbidden');}}as unknown as PrismaService);
+    await expect(service.persistInitialInTransaction(tx as unknown as Prisma.TransactionClient,ctx,companyId,input,actor)).rejects.toBe(busy);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
   });
 });

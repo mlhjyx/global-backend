@@ -92,12 +92,7 @@ function cachedResultIsValid<Output>(
   }
 }
 
-export async function executeStructuredTaskWithRuntime<Output>(
-  gateway: ModelGateway,
-  input: GenerateStructuredInput,
-  context: AiContext,
-  options: StructuredTaskRuntimeOptions = {},
-): Promise<RuntimeStructuredModelResult<Output>> {
+function boundedStructuredTaskInput(input: GenerateStructuredInput) {
   const registeredTask = getTask(input.task);
   const registeredMaxOutputTokens = registeredTask?.maxOutputTokens;
   const maxOutputTokens = input.maxTokens ?? registeredMaxOutputTokens;
@@ -115,26 +110,53 @@ export async function executeStructuredTaskWithRuntime<Output>(
     ...input,
     maxTokens: maxOutputTokens as number,
   });
-  const contractVersion =
-    options.contractVersion ?? `structured-task-contract/${input.task}/v1`;
-  const protocol = options.protocol ?? "openai_chat_completions";
-  const requestedAlias = input.model ?? "gateway-default";
-  const effort = reasoning(input);
-  const requestMaterial = {
+  return { registeredTask, boundedInput };
+}
+
+function structuredTaskRequestMaterial(input: GenerateStructuredInput, maxOutputTokens: number) {
+  return {
     task: input.task,
     prompt: input.prompt,
     ...(input.system === undefined ? {} : { system: input.system }),
     ...(input.model === undefined ? {} : { model: input.model }),
-    maxOutputTokens: boundedInput.maxTokens,
+    maxOutputTokens,
   };
+}
+
+function structuredTaskSegment(
+  kind: 'policy' | 'schema' | 'request', sourceRef: string, content: unknown,
+  sensitivity: 'public' | 'workspace', cacheClass: 'stable-prefix' | 'request-local',
+) {
+  return { kind, sourceRef, sourceDigest: canonicalDigest(content), sensitivity, cacheClass,
+    estimatedTokens: estimatedTokens(content), content };
+}
+
+function assembleStructuredTaskContext(
+  context: AiContext, contractVersion: string, refs: Record<string, string>,
+  segments: ReturnType<typeof structuredTaskSegment>[], maxTokens: number, effort: ReasoningLevel,
+) {
+  return new ContextEngine().assemble({
+    workspaceId: context.workspaceId,
+    policy: { version: `${contractVersion}/context-v1`, allowedSourceRefs: Object.values(refs) },
+    segments,
+    budget: { contextWindow: STRUCTURED_CONTEXT_WINDOW, outputReserve: maxTokens,
+      reasoningReserve: reasoningReserve(effort) },
+  });
+}
+
+/** Same complete required context, with no grant, cache or gateway side effects. */
+export function prepareStructuredTaskRuntimeInput(
+  input: GenerateStructuredInput, context: AiContext, options: StructuredTaskRuntimeOptions = {},
+) {
+  const { registeredTask, boundedInput } = boundedStructuredTaskInput(input);
+  const contractVersion = options.contractVersion ?? `structured-task-contract/${input.task}/v1`;
+  const protocol = options.protocol ?? "openai_chat_completions";
+  const requestedAlias = input.model ?? "gateway-default";
+  const effort = reasoning(input);
+  const requestMaterial = structuredTaskRequestMaterial(input, boundedInput.maxTokens);
   const policy = {
-    task: input.task,
-    contractVersion,
-    system: input.system ?? "",
-    model: requestedAlias,
-    protocol,
-    gatewayRepair: "single_closed_repair",
-    maxOutputTokens: boundedInput.maxTokens,
+    task: input.task, contractVersion, system: input.system ?? "", model: requestedAlias,
+    protocol, gatewayRepair: "single_closed_repair", maxOutputTokens: boundedInput.maxTokens,
   };
   const refs = {
     policy: `task-policy:${input.task}@${contractVersion}`,
@@ -142,47 +164,22 @@ export async function executeStructuredTaskWithRuntime<Output>(
     request: `task-request:${input.task}@${canonicalDigest(requestMaterial)}`,
   };
   const segments = [
-    {
-      kind: "policy" as const,
-      sourceRef: refs.policy,
-      sourceDigest: canonicalDigest(policy),
-      sensitivity: "public" as const,
-      cacheClass: "stable-prefix" as const,
-      estimatedTokens: estimatedTokens(policy),
-      content: policy,
-    },
-    {
-      kind: "schema" as const,
-      sourceRef: refs.schema,
-      sourceDigest: canonicalDigest(input.schema),
-      sensitivity: "public" as const,
-      cacheClass: "stable-prefix" as const,
-      estimatedTokens: estimatedTokens(input.schema),
-      content: input.schema,
-    },
-    {
-      kind: "request" as const,
-      sourceRef: refs.request,
-      sourceDigest: canonicalDigest(requestMaterial),
-      sensitivity: "workspace" as const,
-      cacheClass: "request-local" as const,
-      estimatedTokens: estimatedTokens(requestMaterial),
-      content: requestMaterial,
-    },
+    structuredTaskSegment("policy", refs.policy, policy, "public", "stable-prefix"),
+    structuredTaskSegment("schema", refs.schema, input.schema, "public", "stable-prefix"),
+    structuredTaskSegment("request", refs.request, requestMaterial, "workspace", "request-local"),
   ];
-  const envelope = new ContextEngine().assemble({
-    workspaceId: context.workspaceId,
-    policy: {
-      version: `${contractVersion}/context-v1`,
-      allowedSourceRefs: Object.values(refs),
-    },
-    segments,
-    budget: {
-      contextWindow: STRUCTURED_CONTEXT_WINDOW,
-      outputReserve: boundedInput.maxTokens,
-      reasoningReserve: reasoningReserve(effort),
-    },
-  });
+  const envelope = assembleStructuredTaskContext(context, contractVersion, refs, segments, boundedInput.maxTokens, effort);
+  return { registeredTask, boundedInput, contractVersion, protocol, requestedAlias, effort, requestMaterial, refs, envelope };
+}
+
+export async function executeStructuredTaskWithRuntime<Output>(
+  gateway: ModelGateway,
+  input: GenerateStructuredInput,
+  context: AiContext,
+  options: StructuredTaskRuntimeOptions = {},
+): Promise<RuntimeStructuredModelResult<Output>> {
+  const { registeredTask, boundedInput, contractVersion, protocol, requestedAlias,
+    effort, requestMaterial, refs, envelope } = prepareStructuredTaskRuntimeInput(input, context, options);
   const taskInput = requestMaterial;
   const settlementRequired = context.paidCost !== undefined;
   const prompt = { system: input.system ?? "", user: input.prompt };
