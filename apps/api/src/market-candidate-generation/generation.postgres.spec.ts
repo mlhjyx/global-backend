@@ -1,3 +1,4 @@
+import { ProviderHttpError, ProviderTransportError } from '../model-gateway/providers/provider-output-error';
 import { applyDomainAckConsumerTransaction } from '../durable-results/domain-ack-consumer-bindings';
 import { generationOutputToDraft, type GenerationOutput } from './generation-output';
 import { RouterModelGateway } from '../model-gateway/router-model-gateway';
@@ -87,7 +88,7 @@ suite('generation controls are durable tenant data, not a fixture producer or mo
  });
 
  // Synthetic verifier/provider are explicit fixture seams. Admission, reserve, settle, ACK and domain writes use real app_user SQL.
- function system(f:Fixture, options:{cap?:bigint;beforeReturn?:()=>Promise<void>;beforeGrantReturn?:()=>Promise<void>;output?:GenerationOutput}={}){
+ function system(f:Fixture, options:{cap?:bigint;beforeReturn?:()=>Promise<void>;beforeGrantReturn?:()=>Promise<void>;output?:GenerationOutput;unknownGatewaySettlement?:boolean}={}){
    const store=new PostgresBudgetStore(app),sets=new MarketCandidateSetsService(app),repository=new MarketCandidateGenerationRepository(app);
    const state={calls:0,verifications:0,reservations:[]as BudgetReservation[],requests:[]as BudgetReservationRequest[]};
    const reserve=store.reserve.bind(store);
@@ -103,7 +104,7 @@ suite('generation controls are durable tenant data, not a fixture producer or mo
    const authorities=new ExecutionBudgetAuthorityService(verifier,new ExecutionBudgetAuthorityRepository(app));
    const provider={id:'synthetic-b2',generateStructured:async(input:GenerateStructuredInput)=>{
      state.calls+=1;await options.beforeReturn?.();
-     return {data:options.output??{outcome:'COMPLETED_EMPTY',candidates:[]},provider:'synthetic-b2',model:input.model!,reportedModel:input.model!,modelResolutionSource:'upstream_response',usage:{inputTokens:4,outputTokens:4,costUsd:0.001},callCount:1};
+     return {data:options.output??{outcome:'COMPLETED_EMPTY',candidates:[]},provider:'synthetic-b2',model:input.model!,reportedModel:input.model!,modelResolutionSource:'upstream_response',usage:{inputTokens:4,outputTokens:4,costUsd:0.001,...(options.unknownGatewaySettlement?{gatewaySettlements:[{status:'unknown'} as never]}:{})},callCount:1};
    },generateText:async()=>{throw Error('text forbidden');},embed:async()=>{throw Error('embedding forbidden');},health:async()=>({healthy:true})}as unknown as ModelProvider;
    const gateway=new RouterModelGateway({route:()=>[provider]}as unknown as ModelRouter,undefined,store);
    const service=new MarketCandidateGenerationService(repository,authorities,store,sets,gateway);
@@ -385,7 +386,7 @@ suite('generation controls are durable tenant data, not a fixture producer or mo
  it('r4: bills rejected output once and persistently reports failed no-result without another wire or ACK',async()=>{
   const f=await fixture(),valid=proposed(f),first=valid.candidates[0];const invalid={...valid,candidates:[{...first,proposal:{...first.proposal,supplyOrCapability:{...first.proposal.supplyOrCapability,offeringId:randomUUID()}}}]} as GenerationOutput;
   const s=system(f,{output:invalid}),a=await s.service.prepare(ctx(f),f.companyId,{intentId:f.intentId});
-  const failed=await s.service.execute(ctx(f),a.generationId,{intentDigest:a.intentDigest},'synthetic-owned-grant');expect(failed).toMatchObject({phase:'FAILED',reasonCode:'EXECUTION_FAILED',set:null,execution:null});
+  const failed=await s.service.execute(ctx(f),a.generationId,{intentDigest:a.intentDigest},'synthetic-owned-grant');expect(failed).toMatchObject({phase:'FAILED',reasonCode:'OUTPUT_INVALID',set:null,execution:null});
   const cold=new MarketCandidateGenerationService(new MarketCandidateGenerationRepository(app),s.authorities,s.store,new MarketCandidateSetsService(app),undefined as never);
   expect(await cold.get(ctx(f),a.generationId)).toEqual(failed);expect(await cold.recover(ctx(f),a.generationId)).toEqual(failed);
   expect(await s.service.execute(ctx(f),a.generationId,{intentDigest:a.intentDigest},'synthetic-owned-grant')).toEqual(failed);
@@ -421,6 +422,43 @@ suite('generation controls are durable tenant data, not a fixture producer or mo
   try{expect((await s.service.execute(ctx(f),a.generationId,{intentDigest:a.intentDigest},'synthetic-owned-grant')).phase).toBe('RESULT_READY');expect((await financialCounts(f)).sets).toBe(0);expect(await app.withWorkspace(f.workspaceId,tx=>tx.$queryRaw`SELECT ack_id FROM execution_domain_ack`)).toEqual([]);
   }finally{s.repository.head=head;}
   expect(next.phase).toBe('PREPARED');expect((await s.service.recover(ctx(f),a.generationId)).phase).toBe('NOT_APPLIED');expect(s.state.calls).toBe(1);
+ });
+
+
+ it.each([504,524,'cut'] as const)('r4u: ordinary provider %s keeps paid unknown across same and new intents',async kind=>{
+  const error=()=>kind==='cut'?new ProviderTransportError('SYNTHETIC_CUT_STREAM',{inputTokens:4,outputTokens:1,costUsd:0.001},{reasonCode:'CHAT_COMPLETIONS_STREAM_TRUNCATED',provider:'synthetic-b2',model:'synthetic'}):new ProviderHttpError({status:kind,provider:'synthetic-b2',model:'synthetic'});
+  const f=await fixture(),s=system(f,{beforeReturn:async()=>{throw error();}}),a=await s.service.prepare(ctx(f),f.companyId,{intentId:f.intentId});
+  expect((await s.service.execute(ctx(f),a.generationId,{intentDigest:a.intentDigest},'synthetic-owned-grant')).phase).toBe('RESULT_UNKNOWN');
+  const cold=new MarketCandidateGenerationService(new MarketCandidateGenerationRepository(app),s.authorities,s.store,new MarketCandidateSetsService(app),undefined as never);
+  expect((await cold.recover(ctx(f),a.generationId)).phase).toBe('RESULT_UNKNOWN');expect((await s.service.execute(ctx(f),a.generationId,{intentDigest:a.intentDigest},'synthetic-owned-grant')).phase).toBe('RESULT_UNKNOWN');
+  const b=await s.service.prepare(ctx(f),f.companyId,{intentId:randomUUID()});await expect(s.service.execute(ctx(f),b.generationId,{intentDigest:b.intentDigest},'synthetic-owned-grant')).rejects.toThrow('EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE');
+  const operations=await app.withWorkspace(f.workspaceId,tx=>tx.toolBudgetOperation.findMany());expect(operations).toHaveLength(1);expect(operations[0].status).toBe('SETTLED');expect(operations[0].chargedMicrousd).toBeGreaterThan(0n);expect(operations[0].resultSchema).toBeNull();expect(s.state.calls).toBe(1);expect(s.state.requests).toHaveLength(1);expect(await financialCounts(f)).toEqual({authorities:1,attempts:1,operations:1,sets:0});
+ });
+ it.each(['schema','hard-gate'] as const)('r4u: unknown gateway settlement on %s output never becomes a definite failure',async kind=>{
+  const f=await fixture(),valid=proposed(f),first=valid.candidates[0];const output=kind==='schema'?{syntheticBadSchema:true} as unknown as GenerationOutput:{...valid,candidates:[{...first,proposal:{...first.proposal,supplyOrCapability:{...first.proposal.supplyOrCapability,offeringId:randomUUID()}}}]} as GenerationOutput;
+  const s=system(f,{output,unknownGatewaySettlement:true}),a=await s.service.prepare(ctx(f),f.companyId,{intentId:f.intentId});expect((await s.service.execute(ctx(f),a.generationId,{intentDigest:a.intentDigest},'synthetic-owned-grant')).phase).toBe('RESULT_UNKNOWN');
+  const b=await s.service.prepare(ctx(f),f.companyId,{intentId:randomUUID()});await expect(s.service.execute(ctx(f),b.generationId,{intentDigest:b.intentDigest},'synthetic-owned-grant')).rejects.toThrow('EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE');expect((await s.service.recover(ctx(f),a.generationId)).phase).toBe('RESULT_UNKNOWN');expect(s.state.calls).toBe(1);expect(s.state.requests).toHaveLength(1);
+ });
+ it('r4u: unclassified settled no-result blocks a new intent even before cold recovery',async()=>{
+  const f=await fixture(),s=system(f,{beforeReturn:async()=>{throw new ProviderHttpError({status:504,provider:'synthetic-b2',model:'synthetic'});}}),a=await s.service.prepare(ctx(f),f.companyId,{intentId:f.intentId});const read=s.store.readOperationResult!.bind(s.store);s.store.readOperationResult=async query=>{const value=await read(query);if(value.status==='SETTLED_NO_RESULT')throw Error('synthetic crash after ledger settled before classification');return value;};
+  await expect(s.service.execute(ctx(f),a.generationId,{intentDigest:a.intentDigest},'synthetic-owned-grant')).rejects.toThrow('synthetic crash after ledger settled before classification');const row=await app.withWorkspace(f.workspaceId,tx=>tx.marketCandidateGeneration.findUniqueOrThrow({where:{id:a.generationId}}));expect(row.phase).toBe('RUNNING');
+  const cold=system(f),b=await cold.service.prepare(ctx(f),f.companyId,{intentId:randomUUID()});await expect(cold.service.execute(ctx(f),b.generationId,{intentDigest:b.intentDigest},'synthetic-owned-grant')).rejects.toThrow('EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE');expect(cold.state.calls).toBe(0);expect((await cold.service.recover(ctx(f),a.generationId)).phase).toBe('RESULT_UNKNOWN');expect((await cold.service.get(ctx(f),a.generationId)).phase).toBe('RESULT_UNKNOWN');expect(s.state.calls).toBe(1);expect(await financialCounts(f)).toEqual({authorities:1,attempts:1,operations:1,sets:0});
+ });
+
+
+ it('r4u: legacy unclassified FAILED is not trusted as determinate or allowed a fresh company wire',async()=>{
+  const f=await fixture(),s=system(f,{beforeReturn:async()=>{throw new ProviderHttpError({status:504,provider:'synthetic-b2',model:'synthetic'});}}),a=await s.service.prepare(ctx(f),f.companyId,{intentId:f.intentId});
+  await s.service.execute(ctx(f),a.generationId,{intentDigest:a.intentDigest},'synthetic-owned-grant');
+  await app.withWorkspace(f.workspaceId,tx=>tx.marketCandidateGeneration.update({where:{id:a.generationId},data:{phase:'FAILED',reasonCode:'EXECUTION_FAILED'}}));
+  await expect(s.service.get(ctx(f),a.generationId)).rejects.toThrow('EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE');await expect(s.service.recover(ctx(f),a.generationId)).rejects.toThrow('EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE');
+  const b=await s.service.prepare(ctx(f),f.companyId,{intentId:randomUUID()});await expect(s.service.execute(ctx(f),b.generationId,{intentDigest:b.intentDigest},'synthetic-owned-grant')).rejects.toThrow('EXECUTION_BUDGET_VERIFICATION_UNAVAILABLE');expect(s.state.calls).toBe(1);
+ });
+
+
+ it('r5u: determinate rejected output permits a separately authorised later intent but never same-intent replay',async()=>{
+  const f=await fixture(),valid=proposed(f),first=valid.candidates[0];const output={...valid,candidates:[{...first,proposal:{...first.proposal,supplyOrCapability:{...first.proposal.supplyOrCapability,offeringId:randomUUID()}}}]} as GenerationOutput;
+  const s=system(f,{output}),a=await s.service.prepare(ctx(f),f.companyId,{intentId:f.intentId});expect((await s.service.execute(ctx(f),a.generationId,{intentDigest:a.intentDigest},'synthetic-owned-grant')).reasonCode).toBe('OUTPUT_INVALID');await s.service.execute(ctx(f),a.generationId,{intentDigest:a.intentDigest},'synthetic-owned-grant');expect(s.state.calls).toBe(1);
+  const b=await s.service.prepare(ctx(f),f.companyId,{intentId:randomUUID()});expect((await s.service.execute(ctx(f),b.generationId,{intentDigest:b.intentDigest},'synthetic-owned-grant')).reasonCode).toBe('OUTPUT_INVALID');expect(s.state.calls).toBe(2);expect(await financialCounts(f)).toEqual({authorities:2,attempts:2,operations:2,sets:0});
  });
 
 });

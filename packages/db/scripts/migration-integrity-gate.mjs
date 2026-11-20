@@ -18,8 +18,10 @@
 
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createSafeGitEnvironment } from '../../../scripts/safe-git-environment.mjs';
 import {
   assertDisposableDatabase,
   baselinesDir,
@@ -130,15 +132,69 @@ function fileSha256(name) {
  * **当前** sha256 钉死（`modifiedHistory`），此后任何修改（包括再次修改）都会红；
  * 条目只许收紧：若某文件已与加入提交一致（不再需要豁免），条目必须删除。
  */
+export function migrationIntroductionCommit(path, cwd = repoRoot) {
+  const git = (args) => spawnSync('git', args, {
+    cwd, encoding: 'utf8', env: createSafeGitEnvironment(), maxBuffer: 16 * 1024 * 1024,
+  });
+  const shallow = git(['rev-parse', '--is-shallow-repository']);
+  if (shallow.status !== 0 || shallow.stdout.trim() !== 'false') return '';
+  const current = git(['ls-tree', '-z', 'HEAD', '--', path]);
+  if (current.status !== 0 || !current.stdout) return '';
+  // Preserve the existing ordinary-add authority and its historical blob check.
+  const log = git(['log', '--diff-filter=A', '--format=%H', '-1', '--', path]);
+  if (log.status !== 0) return '';
+  const ordinary = log.stdout.trim().split('\n')[0];
+  if (ordinary) return ordinary;
+  // A path-limited default log can hide an older ordinary origin at a merge.
+  // Only this narrow fallback inspects every reachable, fully known origin.
+  const fullOrdinary = git(['log', '--full-history', '--diff-filter=A', '--format=%H', '--', path]);
+  const merges = git(['log', '--full-history', '--merges', '--format=%H', '--', path]);
+  if (fullOrdinary.status !== 0 || merges.status !== 0) return '';
+  const origins = new Set(fullOrdinary.stdout.trim().split('\n').filter(Boolean));
+  for (const commit of merges.stdout.trim().split('\n').filter(Boolean)) {
+    if (!/^[0-9a-f]{40}$/u.test(commit)) return '';
+    const ancestry = git(['rev-list', '--parents', '-n', '1', commit]);
+    if (ancestry.status !== 0) return '';
+    const [identity, ...parents] = ancestry.stdout.trim().split(/\s+/u);
+    if (identity !== commit || parents.length < 2) return '';
+    const present = git(['ls-tree', '-z', commit, '--', path]);
+    if (present.status !== 0) return '';
+    if (!present.stdout) continue;
+    let allAbsent = true;
+    for (const parent of parents) {
+      const tree = git(['ls-tree', '-z', parent, '--', path]);
+      if (tree.status !== 0) return '';
+      if (tree.stdout) allAbsent = false;
+    }
+    if (allAbsent) origins.add(commit);
+  }
+  const candidates = [...origins];
+  for (const commit of candidates) {
+    if (!/^[0-9a-f]{40}$/u.test(commit) || git(['merge-base', '--is-ancestor', commit, 'HEAD']).status !== 0) return '';
+    const blob = git(['ls-tree', '-z', commit, '--', path]);
+    if (blob.status !== 0 || !blob.stdout) return '';
+  }
+  // Retain the one provably preceding origin. A later delete/recreate cannot
+  // reset it; independent roots cannot be resolved by date or traversal order.
+  const anchors = [];
+  for (const commit of candidates) {
+    let precedesAll = true;
+    for (const other of candidates) {
+      if (commit === other) continue;
+      const relation = git(['merge-base', '--is-ancestor', commit, other]);
+      if (relation.status !== 0 && relation.status !== 1) return '';
+      if (relation.status === 1) precedesAll = false;
+    }
+    if (precedesAll) anchors.push(commit);
+  }
+  return anchors.length === 1 ? anchors[0] : '';
+}
+
 function historySnapshot(migrations) {
   const entries = [];
   for (const name of migrations) {
     const path = `packages/db/prisma/migrations/${name}/migration.sql`;
-    const log = spawnSync('git', ['log', '--diff-filter=A', '--format=%H', '-1', '--', path], {
-      cwd: repoRoot,
-      encoding: 'utf8',
-    });
-    const commit = log.status === 0 ? log.stdout.trim().split('\n')[0] : '';
+    const commit = migrationIntroductionCommit(path);
     let original = null;
     if (commit) {
       const blob = spawnSync('git', ['show', `${commit}:${path}`], {
@@ -312,8 +368,10 @@ async function main() {
   );
 }
 
-main().catch((error) => {
-  fail(GATE, error instanceof Error ? error.message : String(error));
-});
+if (process.argv[1] && existsSync(process.argv[1]) && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    fail(GATE, error instanceof Error ? error.message : String(error));
+  });
+}
 
 export { duplicateTimestamps, listMigrations };

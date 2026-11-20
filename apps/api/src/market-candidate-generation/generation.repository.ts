@@ -487,10 +487,15 @@ export class MarketCandidateGenerationRepository {
   ): Promise<void> {
     const risk = await tx.$queryRaw<Array<{ unsafe: boolean }>>`SELECT EXISTS(
       SELECT 1 FROM market_candidate_generation_attempt a
+      JOIN market_candidate_generation g ON g.id=a.generation_id
+        AND g.workspace_id=a.workspace_id AND g.company_id=a.company_id
       JOIN tool_budget_account b ON b.scope_key=a.scope_key AND b.account_key=a.account_key
       LEFT JOIN tool_budget_operation o ON o.scope_key=b.scope_key AND o.account_id=b.id AND o.generation=a.account_generation
       WHERE a.workspace_id=${row.workspaceId}::uuid AND a.company_id=${row.companyId}::uuid AND a.generation_id<>${row.id}::uuid
-      AND (o.status IN('RESERVED','RESULT_UNKNOWN') OR (o.id IS NULL AND b.closed_at IS NULL))
+      AND (o.status IN('RESERVED','RESULT_UNKNOWN') OR (o.id IS NULL AND b.closed_at IS NULL)
+        OR (o.status='SETTLED' AND g.phase NOT IN('PERSISTED','NOT_APPLIED')
+          AND (o.result_json IS NULL OR o.result_schema_version IS NULL OR o.result_schema IS NULL OR o.result_digest IS NULL)
+          AND (g.phase='FAILED' AND g.reason_code='OUTPUT_INVALID') IS NOT TRUE))
     ) AS unsafe`;
     if (risk[0]?.unsafe !== false)
       throw new ExecutionControlError(

@@ -131,4 +131,8 @@ presign → commit（魔数/大小/hash/配额，advisory lock 复检）
 - 验证是显式自建 loopback `global_test`、真实非 superuser/non-BYPASSRLS app_user 与合成 provider，通过原 Router、预算函数、ACK 和域表执行。覆盖并发、来源/反馈竞争、完整回滚、闭账/过期恢复、账户族总帽、UNKNOWN 不重发及真实普通用户/全局准入 HTTP。原模型与工程研究工具分离，本包不运行真实模型、embedding、搜索、抓取、发送、迁移业务库或部署，不声称真实市场判断或转化已验收。
 
 - 固定头复审回修：最新意图只约束首次 PERSISTED 提交，历史终态持续核对原操作、精确 ACK 和 B1 初始修订；新增准备或新集合不撤销旧保存事实。修正通过后续 forward 迁移实现，旧 ENUM/USE 字节保持。
-- 原账的 SETTLED 且所有结果/receipt 字段为 SQL NULL，是已结算但无可用结果，明确 FAILED 且不伪造 receipt/ACK、不退款或重发；部分/损坏投影、错元组和 RESULT_UNKNOWN 仍拒绝或保持未知。相同 attempt 的旧恢复快照不能倒写已推进阶段，同阶段同原因不重复写时间戳。UNKNOWN 的安全重准入须在原权威/账户锁与账户族检查内复核精确 RELEASED，再经合法 FAILED 转换；不放宽数据库阶段约束。
+- 原账 SETTLED 且结果/receipt 全部 SQL NULL 仅证明保守记账，没有证明物理结果已确定。仅当本任务纯输出校验产生确定拒绝、usage 无未决结算时持久记为 FAILED/OUTPUT_INVALID；504/524、断流、未决输出、结算 unknown 和崩溃前未留确定分类均保 RESULT_UNKNOWN。公司风险闸在新意图准入前拦截旧未分类空结果，不能靠新 key/Grant 重买；旧通用 FAILED/EXECUTION_FAILED 无确定证明时读回保守不可用。费用不改、不伪造 receipt/ACK；部分/损坏/错元组仍 fail-closed。相同 attempt 的旧恢复快照不能倒写已推进阶段，同阶段同原因不重复写时间戳。UNKNOWN 的安全重准入须在原权威/账户锁与账户族检查内复核精确 RELEASED，再经合法 FAILED 转换；不放宽数据库阶段约束。
+
+- G2 历史识别保原普通添加提交；只在普通添加缺失时核完整 merge 历史及所有已知父提交均无该路径，识别真正 merge 首次加入。导入已有迁移不重置原始身份，后续改写、浅/缺历史仍拒绝；真实 CLI、命名/撞车/存量棘轮、迁移 deploy 与数据库 checksum 双向校验不变。Node 隔离 Git 回归接在原 G2 步骤，不跳检查或增豁免。
+
+- G2 的窄 fallback 额外核完整历史里被路径简化隐藏的普通起点与真正 merge 起点，按可证明祖先关系保留唯一原始身份；删除再建不能重置原 blob，独立多起点无法唯一证明则红，不按日期或遍历首项选点。普通查询已有结果的全仓存量规则不改，HEAD 未跟踪或只有 index 的文件不获得历史证明。

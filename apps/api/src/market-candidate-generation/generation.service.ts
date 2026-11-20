@@ -34,6 +34,7 @@ import { ExecutionBudgetAuthorityService } from "../execution-budget/execution-b
 import { TOOL_BUDGET_STORE, type BudgetStore } from "../tools/budget-store";
 import { MarketCandidateSetsService } from "../market-candidates/market-candidate-sets.service";
 import { ModelGateway } from "../model-gateway/model-gateway";
+import { ProviderOutputError, TaskOutputValidationError, isRecoverableModelFailure } from "../model-gateway/providers/provider-output-error";
 import { getTask } from "../ai-tasks/task-registry";
 import { ExecutionControlError } from "../execution-budget/execution-control-error";
 import type { GenerateStructuredInput } from "../model-gateway/types";
@@ -276,6 +277,18 @@ function receiptMatches(
     receipt.artifactId === null
   );
 }
+function definiteUnusableOutput(error: unknown): boolean {
+  if (!(error instanceof ProviderOutputError) || error.usage === undefined) return false;
+  const response = error.cause instanceof BadRequestException ? error.cause.getResponse() : null;
+  // This task's validateOutput is the local pure contract validator, not a control-plane call.
+  const validationCode = typeof response === "object" && response !== null &&
+    (("message" in response && response.message === "VALIDATION_ERROR") ||
+      ("error" in response && typeof response.error === "object" && response.error !== null &&
+        "code" in response.error && response.error.code === "VALIDATION_ERROR"));
+  const rejectedPureContract = error instanceof TaskOutputValidationError && validationCode;
+  return (rejectedPureContract || isRecoverableModelFailure(error)) &&
+    (error.usage.gatewaySettlements?.every(observation => observation.status === "settled") ?? true);
+}
 function storageFailure(error: unknown): boolean {
   return (
     error instanceof Prisma.PrismaClientKnownRequestError ||
@@ -300,6 +313,8 @@ export class MarketCandidateGenerationService {
     ctx: RequestContext,
     row: MarketCandidateGeneration,
   ): Promise<GenerationView> {
+    // A legacy generic failure has no durable proof that a paid call was determinate.
+    if (row.phase === "FAILED" && row.reasonCode === "EXECUTION_FAILED") unavailable();
     const view = bareView(row);
     if (!terminal(row)) return view;
     if (
@@ -601,11 +616,17 @@ export class MarketCandidateGenerationService {
         );
         return this.present(ctx, failed);
       }
+      if (state.status === "SETTLED_NO_RESULT") {
+        const definite = definiteUnusableOutput(error);
+        await this.progress(ctx, admitted.row,
+          definite ? "FAILED" : "RESULT_UNKNOWN",
+          definite ? "OUTPUT_INVALID" : "RESULT_UNKNOWN");
+        return this.recoverAdmitted(ctx, admitted.row);
+      }
       if (
         !storageFailure(error) &&
         error instanceof ExecutionControlError &&
-        state.status !== "SETTLED" &&
-        state.status !== "SETTLED_NO_RESULT"
+        state.status !== "SETTLED"
       )
         throw error;
     }
@@ -770,8 +791,12 @@ export class MarketCandidateGenerationService {
     const attempt = await this.active(row);
     if (!attempt) return this.present(ctx, row);
     const snapshot = await this.inspect(row, attempt);
-    if (snapshot.status === "SETTLED_NO_RESULT")
-      return this.present(ctx, await this.progress(ctx, row, "FAILED", "EXECUTION_FAILED"));
+    if (snapshot.status === "SETTLED_NO_RESULT") {
+      if (row.phase === "FAILED" && row.reasonCode === "OUTPUT_INVALID")
+        return this.present(ctx, row);
+      // Missing outcome classification after a crash must never manufacture certainty.
+      return this.present(ctx, await this.progress(ctx, row, "RESULT_UNKNOWN", "RESULT_UNKNOWN"));
+    }
     if (snapshot.status !== "SETTLED") {
       if (
         snapshot.status === "RESULT_UNKNOWN" ||
