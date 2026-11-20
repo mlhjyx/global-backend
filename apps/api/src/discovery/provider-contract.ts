@@ -107,6 +107,8 @@ export interface ProviderCompanyRecord {
 }
 
 export interface DiscoveryOptions {
+  /** Trusted activity-side raw admission check; never sourced from model filters. */
+  sourcePolicyCheck?: (sourceUrl: string) => Readonly<{ allowed: boolean; reasonCode?: string }>;
   /** Source Registry 中被 SUSPENDED 的域名 —— 适配器必须在爬取前跳过（DAT-011）。 */
   blockedDomains?: string[];
   /**

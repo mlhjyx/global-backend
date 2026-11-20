@@ -65,6 +65,27 @@ export function isDirectoryListingShaped(url: string, title: string): boolean {
 }
 
 const CRAWL_CONCURRENCY = 4;
+type PolicyCheck = NonNullable<DiscoveryOptions['sourcePolicyCheck']>;
+const POLICY_REASONS = new Set([
+  'SOURCE_POLICY_MISSING', 'SOURCE_POLICY_SUSPENDED', 'SOURCE_POLICY_PURPOSE_NOT_ALLOWED',
+  'INVALID_PROVENANCE', 'SOURCE_POLICY_CONTEXT_MISSING',
+]);
+
+function admitsSource(url: string, check: PolicyCheck, denied: string[]): boolean {
+  const decision = check(url);
+  if (decision.allowed === true) return true;
+  const code = decision.reasonCode ?? 'SOURCE_POLICY_CONTEXT_MISSING';
+  denied.push(POLICY_REASONS.has(code) ? code : 'SOURCE_POLICY_CONTEXT_MISSING');
+  return false;
+}
+
+function policyOutcome(denied: readonly string[]): DiscoveryResult['outcome'] {
+  if (!denied.length) return undefined;
+  const counts = new Map<string, number>();
+  for (const code of denied) counts.set(code, (counts.get(code) ?? 0) + 1);
+  const issues = [...counts].sort(([a], [b]) => a.localeCompare(b));
+  return { errorClass: 'EMPTY_RESULT', reasonCode: issues[0]![0], issues: issues.map(([code, n]) => `${code}:${n}`) };
+}
 
 interface ExtractedList {
   is_directory: boolean;
@@ -84,6 +105,7 @@ type MinedDirectoryListing = Readonly<{
   collectors: readonly DiscoveryCompanyReceiptCollector[];
   /** One entry per model call on the listing's pages, with the failure reason if it was skipped. */
   extractionCalls: readonly Readonly<{ failureReason?: string }>[];
+  policyBlocked: boolean;
 }>;
 
 /**
@@ -133,33 +155,13 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
         }),
       };
     }
+    const policyCheck = opts?.sourcePolicyCheck;
+    if (!policyCheck) return this.emptyResult(['SOURCE_POLICY_CONTEXT_MISSING']);
+    const denied: string[] = [];
     const blocked = new Set((opts?.blockedDomains ?? []).map((d) => d.toLowerCase()));
-    const searches = buildDirectorySearches(query);
-    const language = searchLanguageFor(query);
-
-    // 1) 找候选名录页（跨多条意图查询取并集，正向信号优先）
-    const listingUrls = new Map<string, string>(); // url → title
-    for (const q of searches) {
-      const hits = await this.search(q, ctx, language);
-      for (const h of hits) {
-        const domain = normalizeDomain(h.url);
-        if (!domain || blocked.has(domain)) continue;
-        if (NOISE_DOMAINS.some((n) => domain === n || domain.endsWith(`.${n}`))) continue;
-        if (!isDirectoryListingShaped(h.url, h.title)) continue; // 非名录相貌的先跳过
-        if (!listingUrls.has(h.url)) listingUrls.set(h.url, h.title);
-      }
-    }
-    const urls = [...listingUrls.keys()].slice(0, MAX_DIRECTORY_LISTING_PAGES);
+    const urls = await this.findListings(query, ctx, blocked, policyCheck, denied);
     if (!urls.length) {
-      return {
-        records: [],
-        costCents: 0,
-        lineage: buildDiscoveryCompanyResultLineage({
-          providerKey: 'directory',
-          recordCount: 0,
-          observations: [],
-        }),
-      };
+      return this.emptyResult(denied);
     }
 
     // 2) 抓每个名录页 + 列表抽取（有限并发），记录按 name+domain 去重
@@ -167,14 +169,19 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
     const collectors: DiscoveryCompanyReceiptCollector[] = [];
     const extractionCalls: Array<Readonly<{ failureReason?: string }>> = [];
     const collectorIndexes = new Map<DiscoveryCompanyReceiptCollector, readonly number[]>();
+    let allListingsPolicyBlocked = true;
     for (let i = 0; i < urls.length; i += CRAWL_CONCURRENCY) {
       const batch = urls.slice(i, i + CRAWL_CONCURRENCY);
-      const settled = await Promise.allSettled(batch.map((u) => this.mineListing(u, query, ctx)));
+      const settled = await Promise.allSettled(batch.map((u) => this.mineListing(u, query, ctx, policyCheck, denied)));
       for (const s of settled) {
         if (s.status === 'rejected' && isExecutionControlError(s.reason)) throw s.reason;
         if (s.status === 'rejected' && isDiscoveryCompanyReceiptForwardingFailure(s.reason)) throw s.reason;
         if (s.status === 'rejected' && isDiscoveryCompanyLineageInvalid(s.reason)) throw s.reason;
-        if (s.status !== 'fulfilled') continue;
+        if (s.status !== 'fulfilled') {
+          allListingsPolicyBlocked = false;
+          continue;
+        }
+        if (!s.value.policyBlocked) allListingsPolicyBlocked = false;
         collectors.push(...s.value.collectors);
         extractionCalls.push(...s.value.extractionCalls);
         for (const item of s.value.records) {
@@ -206,7 +213,38 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
       costCents: 0,
       ...(lineage ? { lineage } : {}),
       modelExtractions: tallyModelExtractions(extractionCalls),
+      ...(!records.length && allListingsPolicyBlocked && !extractionCalls.length
+        ? { outcome: policyOutcome(denied) } : {}),
     };
+  }
+
+  private emptyResult(denied: readonly string[]): DiscoveryResult {
+    return {
+      records: [], costCents: 0,
+      lineage: buildDiscoveryCompanyResultLineage({ providerKey: 'directory', recordCount: 0, observations: [] }),
+      ...(denied.length ? { outcome: policyOutcome(denied) } : {}),
+    };
+  }
+
+  private async findListings(
+    query: CompanyDiscoveryQuery, ctx: ExecutionContext, blocked: ReadonlySet<string>,
+    policyCheck: PolicyCheck, denied: string[],
+  ): Promise<string[]> {
+    const listingUrls = new Set<string>();
+    const seen = new Set<string>();
+    for (const q of buildDirectorySearches(query)) {
+      const hits = await this.search(q, ctx, searchLanguageFor(query));
+      for (const h of hits) {
+        const domain = normalizeDomain(h.url);
+        if (!domain || blocked.has(domain)) continue;
+        if (NOISE_DOMAINS.some((n) => domain === n || domain.endsWith(`.${n}`))) continue;
+        if (!isDirectoryListingShaped(h.url, h.title) || seen.has(h.url)) continue;
+        seen.add(h.url);
+        if (admitsSource(h.url, policyCheck, denied)) listingUrls.add(h.url);
+      }
+    }
+    // Denied results must not displace approved sources from the existing page cap.
+    return [...listingUrls].slice(0, MAX_DIRECTORY_LISTING_PAGES);
   }
 
   /**
@@ -231,14 +269,22 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
     listUrl: string,
     query: CompanyDiscoveryQuery,
     ctx: ExecutionContext,
+    policyCheck: PolicyCheck,
+    denied: string[],
   ): Promise<MinedDirectoryListing> {
     const out: MinedDirectoryRecord[] = [];
     const collectors: DiscoveryCompanyReceiptCollector[] = [];
     const extractionCalls: Array<Readonly<{ failureReason?: string }>> = [];
+    let policyBlocked = false;
     let pageUrl: string | null = listUrl;
     const visited = new Set<string>();
 
     for (let page = 0; page < MAX_DIRECTORY_PAGINATION && pageUrl && !visited.has(pageUrl); page++) {
+      if (!admitsSource(pageUrl, policyCheck, denied)) {
+        policyBlocked = true;
+        break;
+      }
+      const sourceUrl: string = pageUrl;
       visited.add(pageUrl);
       if (
         !(await isAllowedByRobots(pageUrl, {
@@ -260,6 +306,18 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
             purpose: ['discovery', 'enrichment'],
           },
         );
+        const reportedUrl: string = crawled.data.url ?? sourceUrl;
+        if (!admitsSource(reportedUrl, policyCheck, denied)) {
+          policyBlocked = true;
+          break;
+        }
+        // A persisted URL may be a privacy-safe origin, not a navigation URL.
+        // Keep the requested page for pagination and stable per-page identities.
+        if (normalizeDomain(reportedUrl) !== normalizeDomain(sourceUrl)) {
+          denied.push('INVALID_PROVENANCE');
+          policyBlocked = true;
+          break;
+        }
         text = crawled.data.text.slice(0, 60_000);
       } catch (err) {
         // G3（2026-09-24）：名录页在建档前没有真实主体，抓取被主体绑定禁令拒绝时
@@ -274,7 +332,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
       }
       if (text.trim().length < 200) break;
 
-      const extraction = await this.extractList(pageUrl, text, query, ctx);
+      const extraction = await this.extractList(sourceUrl, text, query, ctx);
       collectors.push(extraction.collector);
       extractionCalls.push(
         extraction.failureReason === undefined ? {} : { failureReason: extraction.failureReason },
@@ -289,7 +347,7 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
         const mapped = mapDirectoryCompanyToRecord({
           company: c,
           listKind: extracted.list_kind,
-          pageUrl,
+          pageUrl: sourceUrl,
           sourceClass: query.sourceClass,
         });
         if (
@@ -303,12 +361,13 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
         out.push(Object.freeze({ record: mapped, collector: extraction.collector }));
       }
       this.log(`✓ ${pageUrl}: +${extracted.companies.length} companies (page ${page + 1})`);
-      pageUrl = extracted.has_next_page ? nextPageLink(text, pageUrl) : null;
+      pageUrl = extracted.has_next_page ? nextPageLink(text, sourceUrl) : null;
     }
     return Object.freeze({
       records: Object.freeze(out),
       collectors: Object.freeze(collectors),
       extractionCalls: Object.freeze(extractionCalls),
+      policyBlocked,
     });
   }
 

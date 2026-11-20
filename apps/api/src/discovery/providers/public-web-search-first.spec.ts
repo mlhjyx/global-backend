@@ -438,7 +438,7 @@ describe('DirectoryDiscoveryProvider without a subject (G3 5.3)', () => {
       throw new ToolPolicyDenied(toolId, 'GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD');
     });
     const result = await new DirectoryDiscoveryProvider({ gateway: {} as never, broker: executionBroker })
-      .discoverCompanies(distributorQuery({ sourceClass: 'industry_data' }), CTX);
+      .discoverCompanies(distributorQuery({ sourceClass: 'industry_data' }), CTX, { sourcePolicyCheck: () => ({ allowed: true }) });
     expect(result.records).toEqual([]);
     expect(result.lineage?.recordCount).toBe(0);
     expect(mocks.executeStructuredTaskWithRuntime).not.toHaveBeenCalled();
@@ -453,7 +453,7 @@ describe('DirectoryDiscoveryProvider without a subject (G3 5.3)', () => {
       throw Object.assign(new Error('budget'), { code: 'BUDGET_EXCEEDED' });
     });
     await expect(new DirectoryDiscoveryProvider({ gateway: {} as never, broker: executionBroker })
-      .discoverCompanies(distributorQuery({ sourceClass: 'industry_data' }), CTX))
+      .discoverCompanies(distributorQuery({ sourceClass: 'industry_data' }), CTX, { sourcePolicyCheck: () => ({ allowed: true }) }))
       .rejects.toMatchObject({ code: 'BUDGET_EXCEEDED' });
   });
 });

@@ -85,7 +85,7 @@ describe('discovery providers rethrow execution-control errors', () => {
     });
 
     await expect(
-      provider.discoverCompanies({ keywords: ['pump'] }, CTX),
+      provider.discoverCompanies({ keywords: ['pump'] }, CTX, { sourcePolicyCheck: () => ({ allowed: true }) }),
     ).rejects.toMatchObject({ code: 'BUDGET_OPERATION_REPLAY_UNAVAILABLE' });
   });
 

@@ -29,6 +29,9 @@ import { DirectoryDiscoveryProvider } from './directory.provider';
 import { PublicWebDiscoveryProvider } from './public-web.provider';
 import { TradeFairDiscoveryProvider } from './trade-fair.provider';
 
+// These lineage fixtures explicitly authorize their example listing sources.
+const DIRECTORY_POLICY_OPTIONS = { sourcePolicyCheck: () => ({ allowed: true }) };
+
 const AUTHORITY_ID = '5c83a0c6-47af-48d3-a663-7cb4bb8ef9d0';
 const ACCOUNT_ID = '1b3d6096-b924-4bc8-bb4f-8436efb37b07';
 
@@ -685,7 +688,7 @@ describe('provider-owned company receipt lineage', () => {
       broker: executionBroker,
     });
 
-    const result = await provider.discoverCompanies(query, context(parent));
+    const result = await provider.discoverCompanies(query, context(parent), DIRECTORY_POLICY_OPTIONS);
 
     expect(provider.companyResultLineage).toBe(DISCOVERY_COMPANY_RESULT_LINEAGE_V1);
     expect(result.records.map((record) => record.domain)).toEqual([
@@ -716,14 +719,14 @@ describe('provider-owned company receipt lineage', () => {
 
   it('directory preserves early exits and omits lineage after an invoked model lacks a receipt', async () => {
     const noBroker = await new DirectoryDiscoveryProvider({ gateway: {} as never })
-      .discoverCompanies(query, context());
+      .discoverCompanies(query, context(), DIRECTORY_POLICY_OPTIONS);
     expect(noBroker.lineage?.recordCount).toBe(0);
 
     const noListingBroker = broker(async () => ({ data: { results: [] }, costCents: 0 }));
     const noListing = await new DirectoryDiscoveryProvider({
       gateway: {} as never,
       broker: noListingBroker,
-    }).discoverCompanies(query, context());
+    }).discoverCompanies(query, context(), DIRECTORY_POLICY_OPTIONS);
     expect(noListing.lineage?.recordCount).toBe(0);
 
     const listingBroker = broker(async (toolId) => toolId === 'searxng.search'
@@ -748,7 +751,7 @@ describe('provider-owned company receipt lineage', () => {
     const missing = await new DirectoryDiscoveryProvider({
       gateway: {} as never,
       broker: listingBroker,
-    }).discoverCompanies(query, context());
+    }).discoverCompanies(query, context(), DIRECTORY_POLICY_OPTIONS);
     expect(missing.records).toHaveLength(1);
     expect(missing).not.toHaveProperty('lineage');
   });
@@ -771,7 +774,7 @@ describe('provider-owned company receipt lineage', () => {
       const unusable = await new DirectoryDiscoveryProvider({
         gateway: {} as never,
         broker: listingBroker,
-      }).discoverCompanies(query, context());
+      }).discoverCompanies(query, context(), DIRECTORY_POLICY_OPTIONS);
       expect(unusable.records).toEqual([]);
       expect(unusable.lineage).toEqual({
         schemaVersion: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
@@ -790,7 +793,7 @@ describe('provider-owned company receipt lineage', () => {
       const cut = await new DirectoryDiscoveryProvider({
         gateway: {} as never,
         broker: listingBroker,
-      }).discoverCompanies(query, context());
+      }).discoverCompanies(query, context(), DIRECTORY_POLICY_OPTIONS);
       expect(cut.lineage?.recordCount).toBe(0);
       expect(cut.modelExtractions).toEqual({
         invoked: 1,
@@ -801,7 +804,7 @@ describe('provider-owned company receipt lineage', () => {
       const unknown = await new DirectoryDiscoveryProvider({
         gateway: {} as never,
         broker: listingBroker,
-      }).discoverCompanies(query, context());
+      }).discoverCompanies(query, context(), DIRECTORY_POLICY_OPTIONS);
       expect(unknown.records).toEqual([]);
       expect(unknown).not.toHaveProperty('lineage');
       expect(unknown.modelExtractions).toEqual({
@@ -833,7 +836,7 @@ describe('provider-owned company receipt lineage', () => {
     await expect(new DirectoryDiscoveryProvider({
       gateway: {} as never,
       broker: listingBroker,
-    }).discoverCompanies(query, context()))
+    }).discoverCompanies(query, context(), DIRECTORY_POLICY_OPTIONS))
       .rejects.toThrow('DISCOVERY_COMPANY_LINEAGE_INVALID');
   });
 
@@ -903,7 +906,7 @@ describe('provider-owned company receipt lineage', () => {
     await expect(new DirectoryDiscoveryProvider({
       gateway: {} as never,
       broker: directoryBroker,
-    }).discoverCompanies(query, context(parent))).rejects.toBe(parentFailure);
+    }).discoverCompanies(query, context(parent), DIRECTORY_POLICY_OPTIONS)).rejects.toBe(parentFailure);
 
     expect(parent).toHaveBeenCalledTimes(3);
   });

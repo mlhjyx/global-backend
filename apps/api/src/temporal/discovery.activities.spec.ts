@@ -7979,3 +7979,29 @@ describe("M2 步 9b 源侦察员角色化：source.route 轨迹 + agent 回合�
     expect(traces.record).not.toHaveBeenCalled();
   });
 });
+
+describe('directory source admission context', () => {
+  it('derives the preflight from database policies, not model-supplied filters', async () => {
+    const discoverCompanies = vi.fn<CompanyDiscoveryAdapter['discoverCompanies']>(async () => ({
+      records: [], costCents: 0,
+      lineage: { schemaVersion: 'discovery-company-result-lineage/v1', recordCount: 0, attemptReceipts: [], receiptCoverage: [] },
+    }));
+    const deps = makeDeps([{ ...okAdapter('directory', []), discoverCompanies }]);
+    deps.prisma.sourcePolicy.findMany = vi.fn(async () => [{
+      id: 'policy-approved-listing', domain: 'approved-listing.example', retentionDays: 30,
+      reviewStatus: 'APPROVED', allowedPurpose: ['discovery'], updatedAt: new Date('2026-11-20T00:00:00Z'),
+    }]) as never;
+    const acts = createDiscoveryActivities(deps);
+    await acts.executeQuery(discoveryArgs('directory-policy-context', {
+      query: { ...QUERY, source_class: 'industry_data', filters: {
+        source_hint: 'directory',
+        sourcePolicies: [{ domain: 'unapproved.example', reviewStatus: 'APPROVED', allowedPurpose: ['discovery'] }],
+      } },
+    }));
+    const opts = discoverCompanies.mock.calls[0]?.[2] as unknown as {
+      sourcePolicyCheck: (url: string) => { allowed: boolean; reasonCode?: string };
+    };
+    expect(opts.sourcePolicyCheck('https://approved-listing.example/members')).toEqual({ allowed: true });
+    expect(opts.sourcePolicyCheck('https://unapproved.example/members')).toEqual({ allowed: false, reasonCode: 'SOURCE_POLICY_MISSING' });
+  });
+});

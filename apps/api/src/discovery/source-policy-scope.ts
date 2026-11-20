@@ -10,3 +10,9 @@
  * per-domain lookups (ToolBroker, SUSPENDED block lists) therefore never select the row.
  */
 export const PUBLIC_WEB_COMPANY_SITE_POLICY_DOMAIN = "public_web:company_site";
+
+/** Raw admission and directory preflight share the same closed discovery-purpose predicate. */
+export function sourcePolicyAllowsDiscovery(value: unknown): boolean {
+  return Array.isArray(value) && value.length > 0 &&
+    value.every((purpose) => typeof purpose === 'string') && value.includes('discovery');
+}
