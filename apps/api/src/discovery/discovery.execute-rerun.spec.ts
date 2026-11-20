@@ -90,3 +90,18 @@ describe('P1 execute 重跑：EXECUTED 计划凭新 attemptId（取代独立 rer
     expect(tx.discoveryRun.create).not.toHaveBeenCalled();
   });
 });
+
+describe('manufacturer execution snapshot admission',()=>{
+  it('uses the same revision and original attempt in Grant scope and outbox snapshot',async()=>{
+    const tx=baseTx('READY');const svc=serviceWith(tx);
+    const revision='manufacturer-network/v1';
+    await svc.executePlan(CTX,PLAN_ID,'grant',undefined,ATTEMPT_ID,revision);
+    const request=await import('../execution-budget/execution-budget-request-scope');
+    expect(svc['authority'].verifyWorkspaceGrant).toHaveBeenCalledWith(expect.objectContaining({scope:request.workspaceExecutionBudgetRequestScope({operation:'POST /query-plans/:planId/execute',planId:PLAN_ID,body:{attemptId:ATTEMPT_ID,manufacturerNetworkRevision:revision}})}));
+    expect(tx.outboxEvent.create).toHaveBeenCalledWith({data:expect.objectContaining({payload:expect.objectContaining({manufacturerNetworkExecution:{schemaVersion:'manufacturer-network-execution/v1',planId:PLAN_ID,body:{attemptId:ATTEMPT_ID,manufacturerNetworkRevision:revision}}})})});
+  });
+  it('leaves old outbox commands without a new feature snapshot',async()=>{
+    const tx=baseTx('READY');await serviceWith(tx).executePlan(CTX,PLAN_ID,'grant');
+    expect((tx.outboxEvent.create.mock.calls[0]![0] as {data:{payload:object}}).data.payload).not.toHaveProperty('manufacturerNetworkExecution');
+  });
+});

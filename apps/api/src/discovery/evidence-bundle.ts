@@ -19,6 +19,7 @@
  * 预过滤 `isContactFreeText`（≥7 位连续数字的电话形态会被丢弃——长数字标识改存 number
  * 或拆分，如 TED 公告号存 notice_id/notice_year、CPV 存去尾零前缀）。
  */
+import { currentManufacturerEvidence, type ManufacturerNetworkEvidence } from './manufacturer-network-evidence';
 import type {
   CompanyEnrichmentAdapter,
   CompanyEnrichmentInput,
@@ -402,14 +403,20 @@ export function crossSourceEvidenceSummary(attributes: unknown): CrossSourceEvid
 
 /** 判定用证据包：现场按当前属性装配（含本 run 刚写回的 website_profile / 富集结果）。 */
 export function currentEvidenceBundle(company: {
+  id?: string;
+  manufacturerEvidence?: ManufacturerNetworkEvidence;
   name: string;
   domain: string | null;
   country: string | null;
   attributes: unknown;
-}): EvidenceBundle {
+}, now = new Date()): EvidenceBundle {
+  const qualified = company.id ? currentManufacturerEvidence(company.manufacturerEvidence,{...company,id:company.id},now) : undefined;
+  const entries = entriesFromStoredAttributes(company.attributes);
+  if (qualified) entries.push({ tier:'T2',source_key:'manufacturer_network',evidence_kind:'manufacturer_relationship',source_page:qualified.sourceUrl,
+    captured_at:qualified.fetchedAt,confidence:1,facts:{publisher:qualified.publisherId,relationship:qualified.relationship,country:qualified.country} });
   return assembleEvidenceBundle(
     { name: company.name, domain: company.domain, country: company.country },
-    entriesFromStoredAttributes(company.attributes),
+    entries,
   );
 }
 

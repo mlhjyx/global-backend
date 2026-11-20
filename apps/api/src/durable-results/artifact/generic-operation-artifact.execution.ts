@@ -293,7 +293,7 @@ export class GenericOperationArtifactExecution implements ArtifactExecutionPort 
     return {
       data, costCents, durableReceipt,
       ...(page ? { provenance: {
-        sourceUrl: stringField(page.url), fetchedAt: verified.manifest.createdAt,
+        sourceUrl: stringField(page.url), fetchedAt: verified.manifest.createdAt, artifactExpiresAt: verified.manifest.expiresAt,
         contentHash: stringField(page.contentHash), parserVersion: 'artifact/crawl4ai-fetch/v1',
       } } : {}),
     };

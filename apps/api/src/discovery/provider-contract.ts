@@ -34,6 +34,9 @@ export interface CompanyDiscoveryQuery {
  * 平台级无租户的执行（采集 sweep 等）用 PLATFORM_WORKSPACE 哨兵，且**绝不**流入 AiContext。
  */
 export interface ExecutionContext {
+  /** Trusted Run2 callback: freeze each company's one manufacturer lookup/fetch operation identity before dispatch. */
+  admitManufacturerProbe?: (phase: 'lookup' | 'fetch', identitySha256: string) => Promise<boolean>;
+  manufacturerNetworkRevision?: 'manufacturer-network/v1';
   workspaceId: string;
   runId?: string;
   correlationId?: string;
@@ -295,6 +298,7 @@ export interface CompanyEnrichmentInput {
  * attributes 命名空间化并入 canonical.attributes；命中的字段各自留 field_evidence。
  */
 export interface EnrichmentResult {
+  manufacturerEvidence?: import('./manufacturer-network-evidence').ManufacturerNetworkEvidence;
   matched: boolean;
   confidence: number; // 0..1
   attributes: Record<string, unknown>;

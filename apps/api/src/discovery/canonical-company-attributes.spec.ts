@@ -150,6 +150,7 @@ describe("CanonicalCompany derived-attribute sanitizer parity", () => {
       "intent.sources_sought",
       "intent.tender",
       "intent.website_change",
+      "manufacturer_network.evidence",
       "name",
       "region",
       "revenue_usd",

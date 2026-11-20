@@ -76,6 +76,7 @@ export async function commitCompanyEnrichmentResults(
     namespaceMarkers?: Readonly<Record<string, string>>;
   },
 ): Promise<boolean> {
+  if (args.hits.some((hit) => hit.key === 'manufacturer_network')) throw new Error('MANUFACTURER_EVIDENCE_REQUIRES_RECEIPT_WRITER');
   const markers = validNamespaceMarkers(args.namespaceMarkers);
   const current = await loadCompanyForSuppressionSafeWrite(tx, args.workspaceId, args.companyId);
   if (!current) return false;

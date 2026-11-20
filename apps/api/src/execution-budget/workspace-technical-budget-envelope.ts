@@ -1,3 +1,4 @@
+import { MANUFACTURER_NETWORK_REVISION, readManufacturerNetworkExecutionBody } from '../discovery/manufacturer-network-execution';
 import { getTask } from '../ai-tasks/task-registry';
 import {
   MAX_COMPANIES_HOUSE_CONTACT_CALLS,
@@ -191,6 +192,7 @@ function contract<I, O>(value: Tool<I, O>): Tool<unknown, unknown> {
 function discoveryRunEnvelope(
   request: WorkspaceExecutionBudgetRequest,
 ): WorkspaceTechnicalBudgetEnvelope {
+  const extra = request.operation === 'POST /query-plans/:planId/execute' && readManufacturerNetworkExecutionBody(request.body)?.manufacturerNetworkRevision === MANUFACTURER_NETWORK_REVISION ? 50 : 0;
   const queries = MAX_DISCOVERY_PLAN_QUERIES;
   const directoryPages = MAX_DIRECTORY_LISTING_PAGES * MAX_DIRECTORY_PAGINATION;
   const singleSearches = queries * MAX_SINGLE_SEARCH_WIRES_PER_QUERY;
@@ -223,14 +225,14 @@ function discoveryRunEnvelope(
       tool(
         contract(searxngSearchTool),
         queries * (MAX_PUBLIC_WEB_SEARCHES_PER_QUERY + MAX_DIRECTORY_SEARCHES_PER_QUERY) +
-          queries * MODEL_WEB_SEARCH_MAX_TOOL_CALLS,
+          queries * MODEL_WEB_SEARCH_MAX_TOOL_CALLS + extra,
       ),
       // 模型联网搜索的 DeepSeek 执行器（可选；两种执行器都按上界预留，实际按调用结算）。
       tool(contract(deepseekSearchTool), queries * MODEL_WEB_SEARCH_MAX_TOOL_CALLS),
       tool(
         contract(crawl4aiFetchTool),
         queries * directoryPages +
-          MAX_DISCOVERY_PROFILE_COMPANIES * MAX_WEBSITE_PROFILE_FETCHES_PER_COMPANY,
+          MAX_DISCOVERY_PROFILE_COMPANIES * MAX_WEBSITE_PROFILE_FETCHES_PER_COMPANY + extra,
       ),
       tool(contract(wikidataTool), singleSearches),
       tool(contract(osmOverpassTool), singleSearches),
@@ -262,6 +264,7 @@ function discoveryRunEnvelope(
       ),
     ],
     {
+      ...(extra ? { manufacturerNetworkCompanies: extra, manufacturerNetworkLookups: extra, manufacturerNetworkFetches: extra } : {}),
       planQueries: queries,
       companyDiscoveryAdapters: MAX_COMPANY_DISCOVERY_ADAPTERS,
       providerRecords: MAX_DISCOVERY_PROVIDER_RECORDS,

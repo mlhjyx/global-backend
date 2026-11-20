@@ -1,3 +1,4 @@
+import { readManufacturerNetworkEvidence } from './manufacturer-network-evidence';
 import { isDeepStrictEqual } from "node:util";
 import {
   isContactFreeText,
@@ -11,6 +12,7 @@ import { readProjectPageEvidence } from "./website-profile/project-page-evidence
 import { isValidGermanVat, isRegisteredAddressText } from "./website-profile/impressum";
 
 const RETAINED_TOP_LEVEL_KEYS = new Set([
+  "manufacturer_network",
   "digital_footprint",
   "employee_band",
   "employees",
@@ -260,6 +262,7 @@ const storedCompanyFieldAttributePaths = new Map<
   string,
   readonly string[]
 >([
+  ["manufacturer_network.evidence", ["manufacturer_network", "evidence"]],
   ["digital_footprint.ad_pixels", ["digital_footprint", "ad_pixels"]],
   ["digital_footprint.email_provider", ["digital_footprint", "email_provider"]],
   ["digital_footprint.hiring_signal", ["digital_footprint", "hiring_signal"]],
@@ -354,6 +357,7 @@ export const STORED_COMPANY_FIELD_EVIDENCE_FIELDS = Object.freeze([
   "intent.sources_sought",
   "intent.tender",
   "intent.website_change",
+  "manufacturer_network.evidence",
   "name",
   "region",
   "revenue_usd",
@@ -422,6 +426,10 @@ function sanitizeValue(
   depth: number,
   path: readonly string[],
 ): unknown {
+  if (path.length === 1 && path[0] === 'manufacturer_network') {
+    const evidence = value && typeof value === 'object' && !Array.isArray(value) ? readManufacturerNetworkEvidence((value as Record<string,unknown>).evidence) : undefined;
+    return evidence ? { evidence } : undefined;
+  }
   state.remaining -= 1;
   if (
     state.remaining < 0 ||

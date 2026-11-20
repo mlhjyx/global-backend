@@ -1214,6 +1214,44 @@
           "path": "apps/api/src/discovery/providers/model-web-search.provider.spec.ts"
         }
       ]
+    },
+    {
+      "key": "manufacturer_network",
+      "status": "IMPLEMENTED",
+      "source_classes": [
+        "industry_data"
+      ],
+      "purpose": "Corroborate a German distribution target using a reviewed manufacturer detail page; explicit manufacturer-network/v1 request, source policy, target independence review and persisted receipt required.",
+      "taxonomy": [
+        "manufacturer relationship",
+        "DE country",
+        "exact company subject"
+      ],
+      "license": {
+        "classification": "SOURCE_SPECIFIC",
+        "note": "Only source-reviewed display/match actions; preserve source attribution, review references and original artifact capture time."
+      },
+      "personal_data_class": "RESTRICTED_POSSIBLE",
+      "default_enablement": "DISABLED",
+      "call_gates": [
+        "data_provider_status",
+        "source_policy",
+        "tool_broker",
+        "manufacturer_network_revision",
+        "target_independence_review",
+        "artifact_subject",
+        "durable_receipt"
+      ],
+      "test_paths": [
+        "apps/api/src/discovery/providers/manufacturer-network.provider.spec.ts",
+        "apps/api/src/discovery/manufacturer-network.postgres.spec.ts"
+      ],
+      "evidence_refs": [
+        {
+          "kind": "TEST_ANCHOR",
+          "path": "apps/api/src/discovery/manufacturer-network.postgres.spec.ts"
+        }
+      ]
     }
   ]
 }

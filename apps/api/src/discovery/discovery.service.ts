@@ -1,3 +1,4 @@
+import { manufacturerNetworkExecutionSnapshot, readManufacturerNetworkExecutionBody } from './manufacturer-network-execution';
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
@@ -112,6 +113,7 @@ export class DiscoveryService {
     compactJws?: string,
     taskRef?: { taskId: string; taskRunId: string },
     attemptId?: string,
+    manufacturerNetworkRevision?: 'manufacturer-network/v1',
   ) {
     // M0②（Run 2.0）：任务归因是可选元数据；形状不合法在任何授权消耗之前拒绝。
     if (taskRef !== undefined) {
@@ -130,13 +132,15 @@ export class DiscoveryService {
         });
       }
     }
+    const executeBody = attemptId === undefined && manufacturerNetworkRevision === undefined ? undefined : readManufacturerNetworkExecutionBody({ ...(attemptId === undefined ? {} : { attemptId }), ...(manufacturerNetworkRevision === undefined ? {} : { manufacturerNetworkRevision }) });
+    const executionSnapshot = manufacturerNetworkExecutionSnapshot(planId, executeBody);
     const verified = await this.authority.verifyWorkspaceGrant({
       compactJws,
       identity: ctx,
       scope: workspaceExecutionBudgetRequestScope({
         operation: 'POST /query-plans/:planId/execute',
         planId,
-        ...(attemptId === undefined ? {} : { body: { attemptId } }),
+        ...(executeBody === undefined ? {} : { body: executeBody }),
       }),
     });
     const runId = randomUUID();
@@ -181,6 +185,7 @@ export class DiscoveryService {
           aggregateId: run.id,
           payload: {
             planId,
+            ...(executionSnapshot ? { manufacturerNetworkExecution: { ...executionSnapshot, body: { ...executionSnapshot.body } } } : {}),
             icpId: plan.icpId,
             executionBudget: this.outboxBinding(binding),
             ...(taskRef ? { taskRef: { taskId: taskRef.taskId, taskRunId: taskRef.taskRunId } } : {}),

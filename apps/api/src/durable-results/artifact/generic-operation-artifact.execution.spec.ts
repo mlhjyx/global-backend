@@ -174,7 +174,7 @@ describe('GenericOperationArtifactExecution.persist', () => {
       },
     });
     expect(result.provenance).toEqual({
-      sourceUrl: 'https://pumpen.example/project', fetchedAt: '2026-08-21T00:00:00.000Z',
+      sourceUrl: 'https://pumpen.example/project', fetchedAt: '2026-08-21T00:00:00.000Z', artifactExpiresAt: '2026-08-22T00:00:00.000Z',
       contentHash: expect.any(String), parserVersion: 'artifact/crawl4ai-fetch/v1',
     });
     expect(result.provenance?.contentHash).not.toBe('raw');
@@ -366,7 +366,7 @@ describe('GenericOperationArtifactExecution.replay', () => {
       costCents: 0,
       durableReceipt: receipt('crawl4ai-fetch/v1'),
       provenance: {
-        sourceUrl: 'https://pumpen.example/', fetchedAt: manifest.createdAt,
+        sourceUrl: 'https://pumpen.example/', fetchedAt: manifest.createdAt, artifactExpiresAt: manifest.expiresAt,
         contentHash: expect.any(String), parserVersion: 'artifact/crawl4ai-fetch/v1',
       },
     });

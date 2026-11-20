@@ -85,6 +85,10 @@ enum ExecutionBudgetPurpose {
 // ── Tenancy & infrastructure ──────────────────────────────────────────────
 
 model Workspace {
+  manufacturerNetworkProbes ManufacturerNetworkProbe[]
+
+  manufacturerNetworkEvidence ManufacturerNetworkEvidence[]
+
   id        String   @id @db.Uuid // = tenant id from the external platform's token
   name      String?
   createdAt DateTime @default(now()) @map("created_at")
@@ -171,6 +175,8 @@ model ToolBudgetAccount {
 /// Verified external spending authority. Signed claim fields are immutable;
 /// only narrow database functions advance lifecycle counters/timestamps.
 model ExecutionBudgetAuthority {
+  manufacturerNetworkProbes ManufacturerNetworkProbe[]
+
   id                      String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   scopeKey                String                       @map("scope_key") @db.VarChar(200)
   authorityKind           ExecutionBudgetAuthorityKind @map("authority_kind")
@@ -360,6 +366,8 @@ model ExecutionBudgetAuthorityRevocation {
 }
 
 model ToolBudgetOperation {
+  manufacturerNetworkEvidence ManufacturerNetworkEvidence[]
+
   id                          String                    @id @default(uuid()) @db.Uuid
   scopeKey                    String                    @map("scope_key") @db.VarChar(200)
   accountId                   String                    @map("account_id") @db.Uuid
@@ -407,6 +415,8 @@ model ToolBudgetOperation {
 /// Immutable metadata for a large durable Tool result. The body remains in
 /// content-addressed object storage and never enters PostgreSQL JSONB.
 model GenericOperationArtifact {
+  manufacturerNetworkEvidence ManufacturerNetworkEvidence[]
+
   id                    String   @id @default(uuid()) @db.Uuid
   scopeKey              String   @map("scope_key") @db.VarChar(200)
   workspaceId           String?  @map("workspace_id") @db.Uuid
@@ -1481,6 +1491,10 @@ model SignalIngest {
 
 /// 一次发现执行（对应一个 READY 的查询计划）。
 model DiscoveryRun {
+  manufacturerNetworkProbes ManufacturerNetworkProbe[]
+
+  manufacturerNetworkEvidence ManufacturerNetworkEvidence[]
+
   id                             String    @id @default(uuid()) @db.Uuid
   workspaceId                    String    @map("workspace_id") @db.Uuid
   planId                         String    @map("plan_id") @db.Uuid
@@ -2259,6 +2273,10 @@ model RawSourceGovernanceDisposition {
 /// Canonical 公司（PRD 8.8/8.9）：跨源归一后的目标客户公司。
 /// 字段值的来源/许可/置信度在 field_evidence —— canonical 只是「当前最优视图」。
 model CanonicalCompany {
+  manufacturerNetworkProbes ManufacturerNetworkProbe[]
+
+  manufacturerNetworkEvidence ManufacturerNetworkEvidence[]
+
   id            String   @id @default(uuid()) @db.Uuid
   workspaceId   String   @map("workspace_id") @db.Uuid
   name          String
@@ -4604,4 +4622,40 @@ model CoverageEstimate {
   @@unique([workspaceId, identityKey], map: "coverage_estimate_workspace_identity_key")
   @@index([workspaceId, computedAt], map: "coverage_estimate_workspace_computed_idx")
   @@map("coverage_estimate")
+}
+
+/// Immutable manufacturer projection. Only commit_manufacturer_network_evidence_v1 may insert;
+/// app_user reads through RLS and the run-scoped artifact/subject verifier. No raw/API write surface.
+model ManufacturerNetworkEvidence {
+  workspaceId String @map("workspace_id") @db.Uuid
+  companyId String @map("company_id") @db.Uuid
+  runId String @map("run_id") @db.Uuid
+  artifactId String @unique @map("artifact_id") @db.Uuid
+  searchOperationId String @map("search_operation_id") @db.Uuid
+  evidence Json
+  createdAt DateTime @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  company CanonicalCompany @relation(fields: [companyId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  run DiscoveryRun @relation(fields: [runId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  artifact GenericOperationArtifact @relation(fields: [artifactId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  searchOperation ToolBudgetOperation @relation(fields: [searchOperationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  @@id([workspaceId, companyId, runId])
+  @@map("manufacturer_network_evidence")
+}
+
+/// Fixed per-run company operation identities. Owner-defined admission function is the only writer.
+model ManufacturerNetworkProbe {
+ workspaceId String @map("workspace_id") @db.Uuid
+ companyId String @map("company_id") @db.Uuid
+ runId String @map("run_id") @db.Uuid
+ authorityId String @map("authority_id") @db.Uuid
+ phase String
+ identitySha256 String @map("identity_sha256") @db.Char(64)
+ createdAt DateTime @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz
+ workspace Workspace @relation(fields:[workspaceId],references:[id],onDelete:Cascade,onUpdate:NoAction)
+ company CanonicalCompany @relation(fields:[companyId],references:[id],onDelete:Cascade,onUpdate:NoAction)
+ run DiscoveryRun @relation(fields:[runId],references:[id],onDelete:Cascade,onUpdate:NoAction)
+ authority ExecutionBudgetAuthority @relation(fields:[authorityId],references:[id],onDelete:Cascade,onUpdate:NoAction)
+ @@id([workspaceId,companyId,runId,phase])
+ @@map("manufacturer_network_probe")
 }

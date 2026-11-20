@@ -102,5 +102,8 @@
   ],
   "model_web_search": [
     "public_intelligence"
+  ],
+  "manufacturer_network": [
+    "industry_data"
   ]
 }

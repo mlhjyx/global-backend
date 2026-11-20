@@ -1,3 +1,5 @@
+import { assertManufacturerNetworkAuthority } from '../discovery/manufacturer-network-authority';
+import type { ManufacturerNetworkExecutionSnapshot } from '../discovery/manufacturer-network-execution';
 import { assertCandidateWorkspaceAllowed, assertRuntimeCandidateOperational, candidateWorkspaceWhere } from '../runtime/development-candidate';
 import { createHmac } from "node:crypto";
 import {
@@ -871,6 +873,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     if (ev.eventType === "DiscoveryRunRequested") {
       const payload = (ev.payload ?? {}) as {
         planId?: string;
+        manufacturerNetworkExecution?: unknown;
         icpId?: string;
         executionBudget?: unknown;
       };
@@ -887,6 +890,8 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           "EXECUTION_BUDGET_OUTBOX_COMMAND_PARKED",
         );
       }
+      let manufacturerNetworkExecution: ManufacturerNetworkExecutionSnapshot | undefined;
+      try { manufacturerNetworkExecution = assertManufacturerNetworkAuthority(payload.manufacturerNetworkExecution, executionBudget, payload.planId); } catch { throw new NonRetryableOutboxCommandError('EXECUTION_BUDGET_OUTBOX_COMMAND_PARKED'); }
       await this.startWorkflowIdempotent(
         DISCOVERY_WORKFLOW,
         {
@@ -903,6 +908,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
               workspaceId: ev.workspaceId,
               runId: ev.aggregateId,
               planId: payload.planId ?? "",
+              ...(manufacturerNetworkExecution ? { manufacturerNetworkExecution } : {}),
               icpId: payload.icpId ?? "",
               executionContractVersion: 2,
               executionBudget,

@@ -14,7 +14,7 @@ import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiProperty, ApiPropert
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID,
   Matches,
-  Max, MaxLength, Min, MinLength, ValidateNested,
+  Max, MaxLength, Min, MinLength, ValidateNested, ValidateIf,
 } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
@@ -376,6 +376,11 @@ class ExecuteTaskRefDto {
 }
 
 class ExecuteQueryPlanDto {
+  @ApiPropertyOptional({ enum: ['manufacturer-network/v1'], description: 'Explicit frozen manufacturer evidence execution revision.' })
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsIn(['manufacturer-network/v1'])
+  manufacturerNetworkRevision?: 'manufacturer-network/v1';
+
   @ApiPropertyOptional({
     type: ExecuteTaskRefDto,
     description: 'Run 2.0 任务归因；旧调用方不传时行为不变。',
@@ -432,7 +437,7 @@ export class DiscoveryController {
     @ExecutionBudgetGrant() compactJws?: string,
   ) {
     const run = await asExecutionBudgetHttpBoundary(() =>
-      this.discovery.executePlan(ctx, planId, compactJws, dto?.taskRef, dto?.attemptId),
+      this.discovery.executePlan(ctx, planId, compactJws, dto?.taskRef, dto?.attemptId, dto?.manufacturerNetworkRevision),
     );
     return envelope({ runId: run.id, status: run.status });
   }

@@ -3857,6 +3857,23 @@
                       "planId": {
                         "type": "string",
                         "format": "uuid"
+                      },
+                      "body": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "minProperties": 1,
+                        "properties": {
+                          "attemptId": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "manufacturerNetworkRevision": {
+                            "type": "string",
+                            "enum": [
+                              "manufacturer-network/v1"
+                            ]
+                          }
+                        }
                       }
                     }
                   },
@@ -24826,6 +24843,13 @@
       "ExecuteQueryPlanDto": {
         "type": "object",
         "properties": {
+          "manufacturerNetworkRevision": {
+            "type": "string",
+            "enum": [
+              "manufacturer-network/v1"
+            ],
+            "description": "Explicit frozen manufacturer evidence execution revision."
+          },
           "taskRef": {
             "description": "Run 2.0 任务归因；旧调用方不传时行为不变。",
             "allOf": [

@@ -1,3 +1,4 @@
+import { ManufacturerNetworkProvider } from './providers/manufacturer-network.provider';
 import { PrismaClient } from '@prisma/client';
 import {
   CompanyDiscoveryAdapter,
@@ -180,6 +181,17 @@ export class DiscoveryProviderRegistry {
     //  wikidata = 商业事实（行业/产品/财务/官网）；gleif = 法律身份（LEI/法人形式/母子关系）。
     this.enrichers.push(new WikidataEnrichmentProvider({ broker }));
     this.enrichers.push(new GleifEnrichmentProvider({ broker }));
+    this.enrichers.push(new ManufacturerNetworkProvider({ broker, ...(prisma ? { readArtifactSubject: async (workspaceId,companyId,artifactId) => prisma.$transaction(async tx=>{
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id',${workspaceId},true)`;
+      const rows=await tx.$queryRaw<Array<{bound:boolean}>>`SELECT EXISTS(SELECT 1 FROM find_workspace_generic_operation_artifacts_by_subject_v1(${workspaceId}::uuid,'company',${companyId}::uuid) WHERE artifact_id=${artifactId}::uuid) AS bound`;
+      return rows[0]?.bound===true;
+    }), loadConfiguration: async () => {
+      const row = await prisma.dataProvider.findUnique({ where: { key: 'manufacturer_network' }, select: { status: true, config: true } });
+      if (!row) return undefined;
+      const policies = await prisma.sourcePolicy.findMany({ select: { id: true, domain: true, sourceType: true, reviewStatus: true, termsStatus: true,
+        allowedPurpose: true, allowedPaths: true, disallowedPaths: true, retentionDays: true } });
+      return { ...row, policies };
+    } } : {}) }));
     // 信号类富集（v3.0，**独立长活动 enrichSignalsRun** 跑，不进 enrichRun 的 2 分钟活动）：
     //  数字足迹（官网 HTML/DNS → 技术栈/在投广告/服务市场/邮件商）+ 结构化收割（sitemap → 招聘信号）。
     //  → attributes.digital_footprint.* / .structured_harvest.*，喂 Intent/Reachability 打分。零付费。
@@ -271,6 +283,7 @@ export class DiscoveryProviderRegistry {
       update: {},
       create: { key: 'trade_fair', class: 'industry_data', status: 'ENABLED', costPerCallCents: 0 },
     });
+    await db.dataProvider.upsert({ where: { key: 'manufacturer_network' }, update: {}, create: { key: 'manufacturer_network', class: 'industry_data', status: 'DISABLED', costPerCallCents: 0 } });
     // TED 招投标（欧盟采购官方 API）——中标发现 + 招标 intent（P3）。零鉴权、costPerCallCents=0。
     await db.dataProvider.upsert({
       where: { key: 'ted' },
