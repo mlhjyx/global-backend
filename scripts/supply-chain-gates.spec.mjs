@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -1176,12 +1183,20 @@ test("the trusted-base verifier probe reads git show from a file, never through 
     .slice(start, end + probeEnd.length)
     .replace(/^ {10}/gm, "");
 
-  const directory = await mkdtemp(join(tmpdir(), "supply-chain-verifier-probe-"));
+  const directory = await mkdtemp(
+    join(tmpdir(), "supply-chain-verifier-probe-"),
+  );
   // The developer's global hooks would scan every fixture commit.
   const git = (...arguments_) => {
     const execution = spawnSync(
       "git",
-      ["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", ...arguments_],
+      [
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "commit.gpgsign=false",
+        ...arguments_,
+      ],
       { cwd: directory, encoding: "utf8", env: createSafeGitEnvironment() },
     );
     assert.equal(
@@ -1195,7 +1210,10 @@ test("the trusted-base verifier probe reads git show from a file, never through 
   const runProbe = (baseSha, trustedVerifier = verifier) =>
     spawnSync(
       "bash",
-      ["-c", `set -euo pipefail\n${probe}  echo BOOTSTRAP\nelse\n  echo TRUSTED\nfi\n`],
+      [
+        "-c",
+        `set -euo pipefail\n${probe}  echo BOOTSTRAP\nelse\n  echo TRUSTED\nfi\n`,
+      ],
       {
         cwd: directory,
         encoding: "utf8",
@@ -1224,7 +1242,10 @@ test("the trusted-base verifier probe reads git show from a file, never through 
     git("add", "scripts/supply-chain-audit.mjs");
     git("commit", "--quiet", "-m", "trusted base verifier");
     const trustedBase = git("rev-parse", "HEAD");
-    await writeFile(auditPath, "// verifier before the comparable audit protocol\n");
+    await writeFile(
+      auditPath,
+      "// verifier before the comparable audit protocol\n",
+    );
     git("commit", "--quiet", "-am", "legacy base verifier");
     const legacyBase = git("rev-parse", "HEAD");
     git("rm", "--quiet", "scripts/supply-chain-audit.mjs");
@@ -1847,9 +1868,236 @@ test("the same GHSA on two version lines is not a duplicate advisory", async () 
 
   assert.ok(
     issueCodes(
-      evaluateProductionAudit(pnpmAudit([undiciSeven, undiciSeven]), baseline([]), {
-        now: NOW,
-      }),
+      evaluateProductionAudit(
+        pnpmAudit([undiciSeven, undiciSeven]),
+        baseline([]),
+        {
+          now: NOW,
+        },
+      ),
     ).includes("AUDIT_ADVISORY_DUPLICATE"),
+  );
+});
+
+// These are descriptive text fixtures, never package-manager installation input.
+function descriptiveMetadataInput(metadata, suffix = "") {
+  return {
+    manifests: [
+      { path: "package.json", document: { name: "root" } },
+      {
+        path: "packages/workspace/package.json",
+        document: { name: "workspace" },
+      },
+    ],
+    workspaceText: 'packages:\n  - "packages/*"\n',
+    lockfileText: `lockfileVersion: '9.0'\n\nimporters:\n  .:\n    dependencies:\n      workspace:\n        specifier: workspace:*\n        version: link:packages/workspace\n\npackages:\n  runtime@1.0.0:\n    resolution: {integrity: sha512-fixture}\n${metadata}${suffix}\nsnapshots:\n  runtime@1.0.0: {}\n`,
+  };
+}
+
+const DESCRIPTIVE_METADATA_FORMS = [
+  "    deprecated: See https://example.org/notice?x=1&y=2! for details.\n",
+  "    deprecated: 'It''s obsolete. See https://example.org/notice.'\n",
+  "    deprecated: '1_000'\n",
+  ...["|", "|-", "|+", ">", ">-", ">+"].map(
+    (style) =>
+      `    deprecated: ${style}\n      See https://example.org/notice.\n        More indented descriptive text.\n      Ordinary punctuation: brackets [] and ! marks.\n`,
+  ),
+];
+
+test("description metadata admits bounded string forms without rewriting source bytes", async () => {
+  const { validateDependencySourcePolicy } =
+    await import("./supply-chain-source-policy.mjs");
+  for (const metadata of DESCRIPTIVE_METADATA_FORMS) {
+    const input = descriptiveMetadataInput(metadata);
+    const original = input.lockfileText;
+    assert.deepEqual(
+      validateDependencySourcePolicy(input).issues,
+      [],
+      metadata,
+    );
+    assert.equal(input.lockfileText, original);
+  }
+});
+
+test("description metadata never admits real source fields after or beside the scalar", async () => {
+  const { validateDependencySourcePolicy } =
+    await import("./supply-chain-source-policy.mjs");
+  for (const metadata of DESCRIPTIVE_METADATA_FORMS) {
+    for (const source of [
+      "    resolution: {tarball: https://attacker.invalid/package.tgz}\n",
+      "    resolution: {tarball: https://registry.npmjs.org/runtime/-/runtime-1.0.0.tgz}\n",
+      "    resolution: {repo: git@attacker.invalid:runtime.git, commit: deadbeef, type: git}\n",
+      "    dependencies:\n      runtime: git+https://attacker.invalid/runtime.git\n",
+      "    dependencies:\n      runtime: link:../../outside\n",
+      "    dependencies:\n      runtime: file:../../outside\n",
+    ]) {
+      const input = descriptiveMetadataInput(metadata, source);
+      assert.equal(
+        validateDependencySourcePolicy(input).ok,
+        false,
+        metadata + source,
+      );
+    }
+    for (const malicious of [
+      {
+        ...descriptiveMetadataInput(metadata),
+        manifests: [
+          {
+            path: "package.json",
+            document: {
+              name: "root",
+              dependencies: { runtime: "https://attacker.invalid/runtime.tgz" },
+            },
+          },
+        ],
+      },
+      {
+        ...descriptiveMetadataInput(metadata),
+        workspaceText: 'packages:\n  - "../outside"\n',
+      },
+      {
+        ...descriptiveMetadataInput(metadata),
+        lockfileText: descriptiveMetadataInput(metadata).lockfileText.replace(
+          "link:packages/workspace",
+          "link:../../outside",
+        ),
+      },
+    ])
+      assert.equal(validateDependencySourcePolicy(malicious).ok, false);
+  }
+});
+
+test("description metadata rejects malformed, non-string, ambiguous and misplaced values", async () => {
+  const { validateDependencySourcePolicy } =
+    await import("./supply-chain-source-policy.mjs");
+  for (const metadata of [
+    "    deprecated: {notice: harmless}\n",
+    "    deprecated: [harmless]\n",
+    "    deprecated: null\n",
+    "    deprecated: true\n",
+    "    deprecated: 123\n",
+    "    deprecated: 1_000\n",
+    "    deprecated: -1_000\n",
+    "    deprecated: 0xdead_beef\n",
+    "    deprecated: ~\n",
+    "    deprecated: !!str harmless\n",
+    "    deprecated: &notice harmless\n",
+    "    deprecated: *notice\n",
+    '    deprecated: "escaped\\u0020text"\n',
+    "    deprecated: 'unclosed\n",
+    "    deprecated: |2\n      harmless\n",
+    "    deprecated: >-2\n      harmless\n",
+    "    deprecated: |\n     unknown indentation\n",
+    "    deprecated: |\n        first indentation not canonical\n      dedent ambiguity\n",
+    "    deprecated: |\n    no content\n",
+    "    deprecated: ordinary\n      unreviewed multiline continuation\n",
+    "    deprecated: ordinary\n    deprecated: duplicate\n",
+    "     deprecated: unknown indentation\n",
+    "    'deprecated': quoted key\n",
+    "    resolution:\n      deprecated: wrong context\n",
+    "    dependencies:\n      deprecated: wrong context\n",
+  ])
+    assert.equal(
+      validateDependencySourcePolicy(descriptiveMetadataInput(metadata)).ok,
+      false,
+      metadata,
+    );
+  const scalar = DESCRIPTIVE_METADATA_FORMS[0];
+  for (const lock of [
+    descriptiveMetadataInput(scalar).lockfileText.replace(
+      "packages:\n",
+      "packages:\npackages:\n",
+    ),
+    descriptiveMetadataInput(scalar).lockfileText.replace(
+      "packages:\n",
+      "'packages':\n",
+    ),
+    descriptiveMetadataInput(scalar).lockfileText.replace(
+      "  runtime@1.0.0:\n",
+      "  runtime@1.0.0:\n  runtime@1.0.0:\n",
+    ),
+    descriptiveMetadataInput(scalar).lockfileText.replace(
+      "importers:\n",
+      "importers:\n    deprecated: wrong root context\n",
+    ),
+  ])
+    assert.equal(
+      validateDependencySourcePolicy({
+        ...descriptiveMetadataInput(scalar),
+        lockfileText: lock,
+      }).ok,
+      false,
+      lock,
+    );
+});
+
+test("description metadata cannot conceal credentials, controls or dedented malicious sections", async () => {
+  const { validateDependencySourcePolicy } =
+    await import("./supply-chain-source-policy.mjs");
+  for (const text of [
+    "https://user:fixture-password@example.invalid/notice",
+    "https://user%3Afixture%40name:fixture@example.invalid/notice",
+    "https://user%3Afixture%40example.invalid/notice",
+    "https://example.invalid/notice?token=fixture",
+    "https://example.invalid/notice?%61pi_key=fixture",
+    "ssh://fixture@example.invalid/repository",
+    "//user:fixture@example.invalid/notice",
+    "text\u0000control",
+    "text\u001bcontrol",
+  ]) {
+    for (const metadata of [
+      `    deprecated: ${text}\n`,
+      `    deprecated: '${text}'\n`,
+      `    deprecated: |-\n      ${text}\n`,
+    ]) {
+      assert.equal(
+        validateDependencySourcePolicy(descriptiveMetadataInput(metadata)).ok,
+        false,
+      );
+    }
+  }
+  for (const metadata of DESCRIPTIVE_METADATA_FORMS) {
+    for (const section of [
+      "other:\n  resolution: {tarball: https://attacker.invalid/runtime.tgz}\n",
+      "importers:\n  .:\n    dependencies:\n      runtime:\n        version: link:../../outside\n",
+      "packages:\n  hostile@1.0.0:\n    resolution: {repo: attacker/runtime, commit: deadbeef, type: git}\n",
+    ]) {
+      const input = descriptiveMetadataInput(metadata);
+      assert.equal(
+        validateDependencySourcePolicy({
+          ...input,
+          lockfileText: input.lockfileText + section,
+        }).ok,
+        false,
+      );
+    }
+  }
+});
+
+test("description metadata preserves source-bearing fields when descriptive content resembles YAML", async () => {
+  const { validateDependencySourcePolicy } =
+    await import("./supply-chain-source-policy.mjs");
+  const input = descriptiveMetadataInput(
+    "    deprecated: |-\n      resolution: https://example.org/documentation\n      link:../../descriptive-text-not-a-dependency\n",
+  );
+  assert.deepEqual(validateDependencySourcePolicy(input).issues, []);
+  const malicious = {
+    ...input,
+    lockfileText: input.lockfileText.replace(
+      "snapshots:\n",
+      "untrusted:\n  resolution: {directory: ../../outside}\nsnapshots:\n",
+    ),
+  };
+  assert.equal(validateDependencySourcePolicy(malicious).ok, false);
+});
+
+test("description metadata retains admission of this repository's complete original lock", async () => {
+  const { validateRepositoryDependencySources } =
+    await import("./supply-chain-source-policy.mjs");
+  const { fileURLToPath } = await import("node:url");
+  assert.deepEqual(
+    (await validateRepositoryDependencySources(fileURLToPath(repositoryRoot)))
+      .issues,
+    [],
   );
 });
