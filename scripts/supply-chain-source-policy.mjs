@@ -369,6 +369,9 @@ function lockfileSourceView(text) {
       ),
     ],
   });
+  // YAML treats lone CR as a line break; never let a raw scanner and the
+  // bounded line classifier disagree about where source-bearing fields start.
+  if (/\r(?!\n)/u.test(text)) return invalid();
   if (!/^\s*['"]?deprecated['"]?\s*:/mu.test(text)) return { text, issues: [] };
   if (/[\u0000-\u0009\u000b\u000c\u000e-\u001f\u007f]/u.test(text))
     return invalid();
@@ -470,12 +473,16 @@ function lockfileSourceView(text) {
       if (!/^'(?:[^']|'')*'$/u.test(value)) return invalid();
       scalar = value.slice(1, -1).replaceAll("''", "'");
     } else {
+      // Comments on plain scalars complicate YAML type resolution. Reject
+      // rather than mask an ambiguously typed scalar or its trailing text.
+      if (/\s#/u.test(value)) return invalid();
+      const plainValue = value.trimEnd();
       if (
-        !value ||
+        !plainValue ||
         /^(?:[-?:](?:\s|$)|[!&*\[\{"#%@`|>])/u.test(value) ||
         /:(?:\s|$)/u.test(value) ||
         /^(?:null|true|false|~|[-+]?(?:0[xob][0-9a-f]+|(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?|\.inf|\.nan))$/iu.test(
-          value.replaceAll("_", ""),
+          plainValue.replaceAll("_", ""),
         )
       )
         return invalid();

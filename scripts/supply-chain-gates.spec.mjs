@@ -2101,3 +2101,75 @@ test("description metadata retains admission of this repository's complete origi
     [],
   );
 });
+
+test("description metadata cannot mask source fields with lone CR line breaks", async () => {
+  const { validateDependencySourcePolicy } =
+    await import("./supply-chain-source-policy.mjs");
+  for (const source of [
+    "    resolution: {tarball: https://attacker.invalid/runtime.tgz}",
+    "    resolution: {repo: attacker/runtime, commit: deadbeef, type: git}",
+    "    dependencies:\n      runtime: link:../../outside",
+  ]) {
+    const input = descriptiveMetadataInput(
+      `    deprecated: |-\n      Ordinary notice.\r${source}\n`,
+    );
+    assert.equal(validateDependencySourcePolicy(input).ok, false, source);
+  }
+  for (const ending of ["\n", "\r\n"]) {
+    const safe = descriptiveMetadataInput(
+      "    deprecated: |-\n      Ordinary notice.\n",
+    );
+    safe.lockfileText = safe.lockfileText.replaceAll("\n", ending);
+    assert.deepEqual(validateDependencySourcePolicy(safe).issues, []);
+    const unsafe = {
+      ...safe,
+      lockfileText: safe.lockfileText.replace(
+        "sha512-fixture",
+        "sha512-fixture, tarball: https://attacker.invalid/runtime.tgz",
+      ),
+    };
+    assert.equal(validateDependencySourcePolicy(unsafe).ok, false);
+  }
+});
+
+test("description metadata rejects plain YAML nonstrings with comments and trailing spaces", async () => {
+  const { validateDependencySourcePolicy } =
+    await import("./supply-chain-source-policy.mjs");
+  for (const scalar of [
+    "true",
+    "false",
+    "null",
+    "~",
+    "123",
+    "1_000",
+    "-2",
+    "0xdead_beef",
+    ".nan",
+    ".inf",
+  ]) {
+    for (const suffix of [" ", "  ", " # note", "   # note"]) {
+      assert.equal(
+        validateDependencySourcePolicy(
+          descriptiveMetadataInput(`    deprecated: ${scalar}${suffix}\n`),
+        ).ok,
+        false,
+        `${scalar}${suffix}`,
+      );
+    }
+  }
+  for (const scalar of [
+    "'true'",
+    "'123'",
+    "'null'",
+    "'true # note'",
+    "'123 '",
+  ]) {
+    assert.deepEqual(
+      validateDependencySourcePolicy(
+        descriptiveMetadataInput(`    deprecated: ${scalar}\n`),
+      ).issues,
+      [],
+      scalar,
+    );
+  }
+});
