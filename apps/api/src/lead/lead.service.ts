@@ -1,3 +1,4 @@
+import { loadManufacturerProofExpiries } from './manufacturer-proof-validity';
 import {
   ConflictException,
   Injectable,
@@ -15,7 +16,7 @@ import {
   LEAD_QUALIFIED_SCHEMA_VERSION,
   leadCandidateBatchRef,
 } from './lead-qualified-snapshot';
-import { buildLeadPackage, type LeadPackage, type LeadPackageSanctionsStatus } from './lead-package';
+import { buildLeadPackage, packageSanctionsStatus, type LeadPackage } from './lead-package';
 import { isOutcomeReasonCode, isRejectReasonCode, REJECT_REASON_CODES } from './reason-codes';
 import { reachableCompanyContactPoints } from '../discovery/company-contact-points';
 import { DataRightsService } from '../compliance/data-rights.service';
@@ -46,20 +47,6 @@ export interface LeadOutcomeInput {
   readonly note?: string | null;
   readonly contacted?: boolean | null;
   readonly source?: 'customer' | 'operator';
-}
-
-/** Stored screening → package status; an unresolved live hit stays visible to operators. */
-function packageSanctionsStatus(
-  screening: { status: string; reviewState: string } | null,
-): LeadPackageSanctionsStatus {
-  if (!screening) return 'not_screened';
-  if (screening.status === 'clear') return 'clear';
-  if (screening.status === 'potential_match') {
-    if (screening.reviewState === 'cleared_false_positive') return 'cleared_false_positive';
-    if (screening.reviewState === 'confirmed_true_hit') return 'confirmed_true_hit';
-    return 'potential_match';
-  }
-  return 'not_screened';
 }
 
 @Injectable()
@@ -372,6 +359,7 @@ export class LeadService {
         where: { entityId: { in: [company.id, ...contactIds] } },
         _max: { fetchedAt: true },
       });
+      const manufacturerProofExpiresAt = (await loadManufacturerProofExpiries(tx, ctx.workspaceId, [company], freshness)).get(company.id);
       const screening = await tx.sanctionsScreeningResult.findFirst({
         where: { canonicalCompanyId: company.id },
         orderBy: { screenedAt: 'desc' },
@@ -397,7 +385,7 @@ export class LeadService {
           freshness
             .filter((group) => group._max.fetchedAt != null)
             .map((group) => ({ dataClass: group.dataClass, fetchedAt: group._max.fetchedAt as Date })),
-          company.attributes,
+          company.attributes, manufacturerProofExpiresAt,
         ),
       });
     });
@@ -809,6 +797,9 @@ export class LeadService {
             dataClass: g.dataClass,
             fetchedAt: g._max.fetchedAt as Date,
           }));
+        const manufacturerProofExpiresAt = (await loadManufacturerProofExpiries(
+          tx, ctx.workspaceId, [effectiveCompany], evidenceByField,
+        )).get(effectiveCompany.id);
         await persistDecision();
         // #72 P2：存储权利判定的审计留痕（policy_decision_log，append-only）——与 LeadQualified 交棒**同事务**
         // 原子（日志与交棒共存亡，不会交棒无日志/日志无交棒）。DENY 已在上方写日志并返回
@@ -842,7 +833,7 @@ export class LeadService {
             status: sanctionsScreening.status,
             screened_at: sanctionsScreening.screenedAt,
           },
-          validUntil: computeValidUntil(evidence, effectiveCompany.attributes),
+          validUntil: computeValidUntil(evidence, effectiveCompany.attributes, manufacturerProofExpiresAt),
         });
         const snapshot = buildLeadQualifiedSnapshot({
           lead,
@@ -850,6 +841,7 @@ export class LeadService {
           company: effectiveCompany,
           icpVersion: icp?.version ?? null,
           storageRightsDecision: rights.effect,
+          manufacturerProofExpiresAt,
           evidence,
           sanctionsScreening, // 第五门合规结论（clear/not_screened；命中 hold 上方已 throw 到不了这里）
           delivery,

@@ -1,3 +1,4 @@
+import { EVIDENCE } from '../discovery/manufacturer-network.test-fixture';
 import { SANCTIONS_GATE_CASES, liveScreen, storedScreening } from '../sanctions/sanctions-gate.test-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
@@ -7,6 +8,7 @@ import Ajv2020 from 'ajv/dist/2020';
 import addFormats from 'ajv-formats';
 import { buildLeadQualifiedSnapshot, classifyLeadQualified, computeValidUntil } from './lead-qualified-snapshot';
 import { buildLeadPackage } from './lead-package';
+import * as leadPackageModule from './lead-package';
 import { LeadService } from './lead.service';
 import { contactSuppressionKeys } from '../discovery/identity';
 import { blindContactKey } from '../compliance/pii-crypto';
@@ -950,6 +952,45 @@ describe('valid_until 鲜度模型 v2（computeValidUntil + decide 接线）', (
     expect(computeValidUntil([], {})).toBeNull();
     expect(computeValidUntil([], null)).toBeNull();
     expect(computeValidUntil([], { intent: { events: [] } })).toBeNull();
+  });
+
+  it('caps the current manufacturer field at its explicit proof deadline, including already expired proofs', () => {
+    const fetchedAt = '2026-11-21T05:33:03.481Z';
+    const expiry = '2026-11-22T05:33:03.108Z';
+    expect(computeValidUntil([{ dataClass: GREEN, fetchedAt }], {}, expiry)).toBe(expiry);
+    const past = '2026-11-21T06:00:00.000Z';
+    expect(computeValidUntil([{ dataClass: GREEN, fetchedAt }], {}, past)).toBe(past);
+  });
+
+  it('keeps shorter legacy TTL/intent windows, and treats unverified/invalid proof deadlines as unknown', () => {
+    const fetchedAt = '2026-01-01T00:00:00.000Z';
+    const legacy = computeValidUntil([{ dataClass: GREEN, fetchedAt }], {});
+    expect(computeValidUntil([{ dataClass: GREEN, fetchedAt }], {}, '2027-01-01T00:00:00Z')).toBe(legacy);
+    expect(computeValidUntil([{ dataClass: GREEN, fetchedAt }], {}, null)).toBeNull();
+    expect(computeValidUntil([{ dataClass: GREEN, fetchedAt }], {}, 'invalid')).toBeNull();
+    expect(computeValidUntil([], {}, EVIDENCE.expiresAt)).toBe(EVIDENCE.expiresAt);
+  });
+
+  it('snapshot and accept delivery share the original authenticated manufacturer expiry', async () => {
+    const co = makeCompany({ id: EVIDENCE.companyId, name: EVIDENCE.targetName, domain: EVIDENCE.targetDomain,
+      country: 'DE', attributes: { manufacturer_network: { evidence: EVIDENCE } }, contacts: [] });
+    const outbox = vi.fn(async ({ data }: { data: Record<string, unknown> }) => data);
+    const tx = makeDecideTx(makeLead({ workspaceId: EVIDENCE.workspaceId, canonicalCompanyId: EVIDENCE.companyId }), co,
+      outbox, vi.fn(), [{ field: 'manufacturer_network.evidence', dataClass: GREEN, fetchedAt: EVIDENCE.fetchedAt }]);
+    tx.$queryRaw = vi.fn(async (..._args: unknown[]) => [{ companyId: EVIDENCE.companyId, workspaceId: EVIDENCE.workspaceId,
+      providerKey: 'manufacturer_network', license: EVIDENCE.licenseLabel, allowedActions: EVIDENCE.allowedActions,
+      sourceUrl: EVIDENCE.sourceUrl, fetchedAt: new Date(EVIDENCE.fetchedAt), value: EVIDENCE, proofMatched: true }]);
+    const delivery = vi.spyOn(leadPackageModule, 'buildLeadPackage');
+    await makeDecideService(tx).decide({ ...decideCtx, workspaceId: EVIDENCE.workspaceId }, LEAD_ID, 'accept');
+    expect(delivery.mock.calls.at(-1)![0].validUntil).toBe(EVIDENCE.expiresAt);
+    delivery.mockRestore();
+    const payload = outbox.mock.calls[0]![0].data.payload as Record<string, unknown>;
+    expect(payload.valid_until).toBe(EVIDENCE.expiresAt);
+    expect(loadValidator().validate(payload)).toBe(true);
+    expect(payload).not.toHaveProperty('manufacturerProofExpiresAt');
+    const explicit = buildLeadQualifiedSnapshot({ lead: makeLead(), company: makeCompany(), icpVersion: 3,
+      evidence: [{ dataClass: GREEN, fetchedAt: EVIDENCE.fetchedAt }], manufacturerProofExpiresAt: EVIDENCE.expiresAt });
+    expect(explicit.valid_until).toBe(EVIDENCE.expiresAt);
   });
 
   it('单条 green evidence → fetchedAt + 180d', () => {

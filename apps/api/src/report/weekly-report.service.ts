@@ -1,3 +1,4 @@
+import { loadManufacturerProofExpiries } from '../lead/manufacturer-proof-validity';
 import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
@@ -387,7 +388,7 @@ export class WeeklyReportService {
           decisionMakers: facts.decisionMakers.get(company.id) ?? [],
           draft: facts.draftsByLead.get(lead.id) ?? null,
           sanctionsStatus: sanctions.status,
-          validUntil: computeValidUntil(freshness, company.attributes),
+          validUntil: computeValidUntil(freshness, company.attributes, facts.manufacturerProofExpiries.get(company.id)),
           runCost: facts.runCosts.get(company.id) ?? null,
         }),
       ]);
@@ -424,6 +425,7 @@ export class WeeklyReportService {
       where: { entityType: 'company', entityId: { in: companyIds } },
       _max: { fetchedAt: true },
     });
+    const manufacturerProofExpiries = await loadManufacturerProofExpiries(tx, workspaceId, companies, evidence);
     const provenance = await tx.fieldEvidence.groupBy({
       by: ['entityId', 'providerKey', 'license'],
       where: { entityType: 'company', entityId: { in: companyIds } },
@@ -508,6 +510,7 @@ export class WeeklyReportService {
     return {
       companies: new Map(companies.map((company) => [company.id, company])),
       evidence: groupBy(evidence, (row) => row.entityId),
+      manufacturerProofExpiries,
       provenance: groupBy(provenance, (row) => row.entityId),
       contactPoints: pointsByCompany,
       /** M4 named decision makers per company, suppressed emails already removed. */

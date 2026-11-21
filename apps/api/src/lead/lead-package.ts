@@ -54,6 +54,20 @@ export type LeadPackageSanctionsStatus =
   | 'potential_match'
   | 'confirmed_true_hit';
 
+/** Stored screening → package status; an unresolved live hit stays visible to operators. */
+export function packageSanctionsStatus(
+  screening: { status: string; reviewState: string } | null,
+): LeadPackageSanctionsStatus {
+  if (!screening) return 'not_screened';
+  if (screening.status === 'clear') return 'clear';
+  if (screening.status === 'potential_match') {
+    if (screening.reviewState === 'cleared_false_positive') return 'cleared_false_positive';
+    if (screening.reviewState === 'confirmed_true_hit') return 'confirmed_true_hit';
+    return 'potential_match';
+  }
+  return 'not_screened';
+}
+
 export interface LeadPackageInput {
   readonly lead: LeadPackageLead;
   readonly company: LeadPackageCompany;

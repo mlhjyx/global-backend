@@ -1,3 +1,4 @@
+import { EVIDENCE } from '../discovery/manufacturer-network.test-fixture';
 import { BadRequestException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { parse } from 'csv-parse/sync';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -130,6 +131,7 @@ function harness(fixture: Fixture, screen = vi.fn(() => ({ status: 'not_screened
   /** Whether each sanctions screen and each decision-log write ran inside a database transaction. */
   const transactionTrace: Array<{ call: 'screen' | 'log'; inTransaction: boolean }> = [];
   const tx = {
+    $queryRaw: vi.fn(async (..._args: unknown[]) => [] as unknown[]),
     icpDefinition: { findUnique: vi.fn(async () => fixture.icp) },
     lead: { findMany: vi.fn(async (_query: unknown) => fixture.leads) },
     canonicalCompany: { findMany: vi.fn(async () => fixture.companies) },
@@ -234,6 +236,21 @@ describe('WeeklyReportService (BI-22)', () => {
       expect((error as BadRequestException).getResponse()).toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
     }
     expect(prisma.withWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('exports the current authenticated manufacturer deadline without extending it to a green TTL', async () => {
+    const f = baseFixture({ companies: [company(EVIDENCE.companyId, { name: EVIDENCE.targetName, domain: EVIDENCE.targetDomain,
+      attributes: { manufacturer_network: { evidence: EVIDENCE } } })],
+      leads: [leadRow('55555555-5555-4555-8555-555555555501', EVIDENCE.companyId)],
+      evidence: [evidence(EVIDENCE.companyId, { field: 'manufacturer_network.evidence', providerKey: 'manufacturer_network',
+        license: 'public', _max: { fetchedAt: new Date(EVIDENCE.fetchedAt) } })], outcomes: [] });
+    const h = harness(f);
+    h.tx.$queryRaw.mockResolvedValue([{ companyId: EVIDENCE.companyId, workspaceId: EVIDENCE.workspaceId,
+      providerKey: 'manufacturer_network', license: EVIDENCE.licenseLabel, allowedActions: EVIDENCE.allowedActions,
+      sourceUrl: EVIDENCE.sourceUrl, fetchedAt: new Date(EVIDENCE.fetchedAt), value: EVIDENCE, proofMatched: true }]);
+    // The existing report workspace equals the synthetic proof workspace.
+    const report = await h.service.weekly(ctx, { icpId: ICP, week: '2026-W42' });
+    expect(records(report.csv)[0]!['有效期至']).toBe(EVIDENCE.expiresAt.slice(0, 10));
   });
 
   it('returns 404 for an ICP the workspace cannot see', async () => {

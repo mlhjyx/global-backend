@@ -733,6 +733,7 @@ jobs:
             src/durable-results/artifact/generic-operation-artifact-object-version.postgres.spec.ts \
             src/durable-results/artifact/generic-operation-artifact-seller-subject.postgres.spec.ts \
             src/lead/lead-queue-basis.postgres.spec.ts \
+            src/lead/manufacturer-proof-validity.postgres.spec.ts \
             src/agents/agent-orchestration.postgres.spec.ts \
             src/registry/domain/domain-stores.postgres.spec.ts \
             src/discovery/contact-path-backfill.postgres.spec.ts \
