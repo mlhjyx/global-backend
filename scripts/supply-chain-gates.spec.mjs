@@ -2218,3 +2218,178 @@ test("description metadata classifies values after YAML leading whitespace", asy
     }
   }
 });
+
+// Pinned-reader fidelity: the 44 real vectors from the original technical
+// inventory (policy-prelude-pinned-implicit-resolver-inventory.json,
+// SHA256 020666126026e2fb898a17232f71043e106ef556a1dee67420bf023fb328db86).
+const PINNED_READER_ORACLE = [
+  ["", true],
+  ["~", true],
+  ["null", true],
+  ["Null", true],
+  ["NULL", true],
+  ["true", true],
+  ["True", true],
+  ["TRUE", true],
+  ["false", true],
+  ["False", true],
+  ["FALSE", true],
+  ["0", true],
+  ["00", true],
+  ["+12", true],
+  ["-12", true],
+  ["1_000", true],
+  ["0b101", true],
+  ["0o77", true],
+  ["0xA0", true],
+  ["+0xA0", true],
+  ["-0o77", true],
+  ["1.5", true],
+  [".5", true],
+  ["1.", true],
+  ["1e3", true],
+  ["1E-3", true],
+  ["+1.2e+4", true],
+  [".inf", true],
+  ["-.Inf", true],
+  [".NAN", true],
+  ["2026-11-21", true],
+  ["2026-1-2T3:04:05Z", true],
+  ["2026-11-21 14:00:00", true],
+  ["2026-11-21t14:00:00.123+08:30", true],
+  ["2026-11-21T14:00:00-8", true],
+  ["<<", false],
+  ["yes", false],
+  ["no", false],
+  ["on", false],
+  ["off", false],
+  ["1.2.3", false],
+  ["null notice", false],
+  ["2026-11-21 notice", false],
+  ["ordinary description", false],
+];
+
+test("description metadata classifies the pinned reader oracle exactly", async () => {
+  const { validateDependencySourcePolicy } =
+    await import("./supply-chain-source-policy.mjs");
+  for (const [value, nonString] of PINNED_READER_ORACLE) {
+    const metadata =
+      value === "" ? "    deprecated:\n" : `    deprecated: ${value}\n`;
+    const input = descriptiveMetadataInput(metadata);
+    const before = input.lockfileText;
+    const result = validateDependencySourcePolicy(input);
+    if (nonString) assert.equal(result.ok, false, value);
+    else assert.deepEqual(result.issues, [], value);
+    assert.equal(input.lockfileText, before);
+  }
+});
+
+const EXTRA_NON_STRING_EDGES = [
+  "0b1_0",
+  "0x_1",
+  "0b_1",
+  "1__2",
+  "01",
+  "-0",
+  "+0",
+  "+.INF",
+  "1_000.5",
+  "0123.5",
+  "1_.5",
+  ".5e2",
+  "1.e3",
+  "2026-13-45",
+  "2026-11-21 14:00:00.123",
+  "2026-11-21T14:00:00",
+  "2026-11-21T14:00:00.123Z",
+];
+
+const EXTRA_STRING_EDGES = [
+  "nUll",
+  "nullx",
+  "TrueX",
+  "tRue",
+  "0b",
+  "0x",
+  "0o",
+  "0_",
+  "1_000_",
+  "12_",
+  "1.5_",
+  "190:20:30.15",
+  "1e3.5",
+  "--1",
+  "2026-11-21z",
+  "2026-11-21T14:00:00z",
+  "2026-11-21 14:00",
+  "2026-11-21T14:00:00+8:30:00",
+  "2026-1-21",
+  "-abc",
+];
+
+test("description metadata covers finite family edges beyond the oracle", async () => {
+  const { validateDependencySourcePolicy } =
+    await import("./supply-chain-source-policy.mjs");
+  for (const value of EXTRA_NON_STRING_EDGES) {
+    assert.equal(
+      validateDependencySourcePolicy(
+        descriptiveMetadataInput(`    deprecated: ${value}\n`),
+      ).ok,
+      false,
+      value,
+    );
+  }
+  for (const value of EXTRA_STRING_EDGES) {
+    assert.deepEqual(
+      validateDependencySourcePolicy(
+        descriptiveMetadataInput(`    deprecated: ${value}\n`),
+      ).issues,
+      [],
+      value,
+    );
+  }
+});
+
+test("description metadata admits explicit string forms of non-string scalars", async () => {
+  const { validateDependencySourcePolicy } =
+    await import("./supply-chain-source-policy.mjs");
+  for (const value of ["true", "2026-11-21", "1_000", "~", "null", "<<"]) {
+    assert.deepEqual(
+      validateDependencySourcePolicy(
+        descriptiveMetadataInput(`    deprecated: '${value}'\n`),
+      ).issues,
+      [],
+      `quoted ${value}`,
+    );
+    assert.deepEqual(
+      validateDependencySourcePolicy(
+        descriptiveMetadataInput(`    deprecated: |-\n      ${value}\n`),
+      ).issues,
+      [],
+      `block ${value}`,
+    );
+  }
+});
+
+test("description metadata rejects Unicode line breaks inside plain scalars", async () => {
+  const { validateDependencySourcePolicy } =
+    await import("./supply-chain-source-policy.mjs");
+  for (const value of [
+    "1.5 ",
+    " 12",
+    "~\u0085",
+    "2026-11-21 ",
+    "1e3 ",
+    "1.5  ",
+    "notice text",
+  ]) {
+    const input = descriptiveMetadataInput(`    deprecated: ${value}\n`);
+    const before = input.lockfileText;
+    assert.equal(
+      validateDependencySourcePolicy(input).ok,
+      false,
+      JSON.stringify(value),
+    );
+    assert.equal(input.lockfileText, before);
+  }
+});

@@ -357,6 +357,113 @@ function workspaceSourceIssues(workspaceText, workspaceDirectories) {
   return issues;
 }
 
+// Finite plain-scalar classifier for the pinned lockfile reader
+// (@zkochan/js-yaml@0.0.7 DEFAULT_SCHEMA, pnpm 9.15.9 bundle SHA-256
+// 176d919063eba331742f5e522dd2f997b2eb23c137beeac64fd419effcc860ac).
+// Only the five implicit families that construct non-strings in value
+// position reject a descriptive scalar; the merge family and every other
+// plain text construct a string, exactly as the reader does. Resolver order
+// mirrors the schema: null, bool, int, float, timestamp, then merge. A
+// package-manager upgrade must re-verify this bounded family contract.
+const isDecCode = (code) => code >= 0x30 && code <= 0x39;
+const isHexCode = (code) =>
+  isDecCode(code) ||
+  (code >= 0x41 && code <= 0x46) ||
+  (code >= 0x61 && code <= 0x66);
+const isOctCode = (code) => code >= 0x30 && code <= 0x37;
+const PLAIN_FLOAT_PATTERN =
+  /^(?:[-+]?(?:[0-9][0-9_]*)(?:\.[0-9_]*)?(?:[eE][-+]?[0-9]+)?|\.[0-9_]+(?:[eE][-+]?[0-9]+)?|[-+]?\.(?:inf|Inf|INF)|\.(?:nan|NaN|NAN))$/;
+const PLAIN_DATE_PATTERN = /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/;
+const PLAIN_TIMESTAMP_PATTERN =
+  /^[0-9][0-9][0-9][0-9]-[0-9][0-9]?-[0-9][0-9]?(?:[Tt]|[ \t]+)[0-9][0-9]?:[0-9][0-9]:[0-9][0-9](?:\.[0-9]*)?(?:[ \t]*(?:Z|[-+][0-9][0-9]?(?::[0-9][0-9])?))?$/;
+
+// Direct ports of the pinned reader resolvers; comments keep the original
+// structure so the semantic equivalence stays reviewable.
+function resolveYamlInteger(data) {
+  let max = data.length;
+  let index = 0;
+  let hasDigits = false;
+  let ch;
+  if (!max) return false;
+  ch = data[index];
+  if (ch === "-" || ch === "+") {
+    ch = data[++index];
+  }
+  if (ch === "0") {
+    if (index + 1 === max) return true;
+    ch = data[++index];
+    if (ch === "b") {
+      index++;
+      for (; index < max; index++) {
+        ch = data[index];
+        if (ch === "_") continue;
+        if (ch !== "0" && ch !== "1") return false;
+        hasDigits = true;
+      }
+      return hasDigits && ch !== "_";
+    }
+    if (ch === "x") {
+      index++;
+      for (; index < max; index++) {
+        ch = data[index];
+        if (ch === "_") continue;
+        if (!isHexCode(data.charCodeAt(index))) return false;
+        hasDigits = true;
+      }
+      return hasDigits && ch !== "_";
+    }
+    if (ch === "o") {
+      index++;
+      for (; index < max; index++) {
+        ch = data[index];
+        if (ch === "_") continue;
+        if (!isOctCode(data.charCodeAt(index))) return false;
+        hasDigits = true;
+      }
+      return hasDigits && ch !== "_";
+    }
+  }
+  if (ch === "_") return false;
+  for (; index < max; index++) {
+    ch = data[index];
+    if (ch === "_") continue;
+    if (!isDecCode(data.charCodeAt(index))) return false;
+    hasDigits = true;
+  }
+  if (!hasDigits || ch === "_") return false;
+  return true;
+}
+
+function resolveYamlFloat(data) {
+  return PLAIN_FLOAT_PATTERN.test(data) && data[data.length - 1] !== "_";
+}
+
+function resolveYamlTimestamp(data) {
+  return PLAIN_DATE_PATTERN.test(data) || PLAIN_TIMESTAMP_PATTERN.test(data);
+}
+
+function classifyPlainGeneratedScalar(data) {
+  if (typeof data !== "string") return "null";
+  if (data.length === 0) return "null";
+  if (data === "~" || data === "null" || data === "Null" || data === "NULL")
+    return "null";
+  if (
+    data === "true" ||
+    data === "True" ||
+    data === "TRUE" ||
+    data === "false" ||
+    data === "False" ||
+    data === "FALSE"
+  )
+    return "bool";
+  if (resolveYamlInteger(data)) return "int";
+  if (resolveYamlFloat(data)) return "float";
+  if (resolveYamlTimestamp(data)) return "timestamp";
+  // The merge resolver matches "<<" but constructs a string in value position.
+  if (data === "<<") return "merge";
+  return "string";
+}
+
 // Classification is validation-only: package-manager input bytes are never rewritten.
 // Deliberately recognizes a bounded pnpm scalar subset, not arbitrary YAML.
 function lockfileSourceView(text) {
@@ -476,16 +583,20 @@ function lockfileSourceView(text) {
       // Comments on plain scalars complicate YAML type resolution. Reject
       // rather than mask an ambiguously typed scalar or its trailing text.
       if (/\s#/u.test(value)) return invalid();
+      // Plain scalars may not start with YAML indicator characters, and the
+      // reader would end the scalar at ": " (a nested mapping attempt).
+      if (/^(?:[-?:](?:\s|$)|[!&*\[\{"#%@`|>])/u.test(value)) return invalid();
+      if (/:(?:\s|$)/u.test(value)) return invalid();
+      // The reader ends a plain scalar at any line break it recognizes
+      // (LF, CR, CRLF, U+0085, U+2028, U+2029). Line-based scanning already
+      // removes LF/CR/CRLF from a value, so reject the remaining Unicode line
+      // breaks instead of classifying a token the reader would have folded.
+      if (/[\u0085\u2028\u2029]/u.test(value)) return invalid();
+      // Leading and trailing plain-scalar whitespace is folded by the reader;
+      // classify the folded text with the pinned finite resolver semantics.
       const plainValue = value.trimEnd();
-      if (
-        !plainValue ||
-        /^(?:[-?:](?:\s|$)|[!&*\[\{"#%@`|>])/u.test(value) ||
-        /:(?:\s|$)/u.test(value) ||
-        /^(?:null|true|false|~|[-+]?(?:0[xob][0-9a-f]+|(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?|\.inf|\.nan))$/iu.test(
-          plainValue.replaceAll("_", ""),
-        )
-      )
-        return invalid();
+      const tag = classifyPlainGeneratedScalar(plainValue);
+      if (tag !== "string" && tag !== "merge") return invalid();
       scalar = value;
     }
     if (!safeText(scalar)) return invalid();
