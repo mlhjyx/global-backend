@@ -3,9 +3,16 @@ import { readBuyerScenarioFromPlan } from '../buyer-procurement-scenarios';
 
 /** Only unjudged or explicitly provisional rows may be changed by a quick pass. */
 export function revisableProvisionalLeadWhere(): Prisma.LeadWhereInput {
-  return { status: 'DISCOVERED', OR: [
-    { fitVerdict: null },
-    { fitReasons: { path: ['source'], equals: 'quick_scan' } },
+  return { OR: [
+    { status: 'DISCOVERED', OR: [
+      { fitVerdict: null },
+      { fitReasons: { path: ['source'], equals: 'quick_scan' } },
+    ] },
+    // Normal scoring moves quick placeholders to REVIEW without replacing their fit markers.
+    { status: 'REVIEW', queue: 'needs_review', AND: [
+      { fitReasons: { path: ['source'], equals: 'quick_scan' } },
+      { fitReasons: { path: ['tier'], equals: 'quick' } },
+    ] },
   ] };
 }
 

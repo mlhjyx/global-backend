@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { Prisma, PrismaClient } from '@prisma/client';
+import { LeadStatus, Prisma, PrismaClient } from '@prisma/client';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { loadQuickScanPool } from './pool';
 import { createRun2Activities } from '../../temporal/discovery.run2.activities';
+import { createQualifyActivities } from '../../temporal/qualify.activities';
 import { createRun2PipelineActivities } from '../../temporal/discovery.run2.pipeline.activities';
 
 const url = process.env.RUN_EVENTS_TEST_DATABASE_URL;
@@ -19,7 +20,7 @@ describe.runIf(Boolean(url))('provisional recovery on PostgreSQL', () => {
     const workspaceId = randomUUID();
     await owner.workspace.create({ data: { id: workspaceId, name: 'pool recovery fixture' } });
     const company = await owner.companyProfile.create({ data: { workspaceId, name: 'fixture seller' } });
-    const icp = await owner.icpDefinition.create({ data: { workspaceId, companyId: company.id, name: 'fixture icp' } });
+    const icp = await owner.icpDefinition.create({ data: { workspaceId, companyId: company.id, name: 'fixture icp', status: 'ACTIVE' } });
     const plan = await owner.discoveryQueryPlan.create({ data: { workspaceId, icpId: icp.id, queries: [] } });
     const run = await owner.discoveryRun.create({ data: { workspaceId, icpId: icp.id, planId: plan.id,
       materializationContractVersion: 'discovery-company-materialization/v1' } });
@@ -68,9 +69,111 @@ describe.runIf(Boolean(url))('provisional recovery on PostgreSQL', () => {
         fitVerdict: 'match', fitReasons: { role: 'final' } } });
       const suppressed = await f.canonical('suppressed');
       await owner.canonicalCompany.update({ where: { id: suppressed.id }, data: { status: 'SUPPRESSED' } });
+      await owner.lead.create({ data: { workspaceId: f.workspaceId, icpId: f.icpId,
+        canonicalCompanyId: suppressed.id, status: 'REVIEW', fitVerdict: 'weak',
+        fitReasons: { source: 'quick_scan', tier: 'quick' } } });
       const result = await f.withWorkspace(f.workspaceId, (tx) => loadQuickScanPool(tx, f, 500));
       expect(result.companies.map((c) => c.id).sort()).toEqual(included.sort());
       expect(result.poolSize).toBe(included.length);
+    } finally { await clean(f.workspaceId); }
+  }, 60_000);
+
+  function producer(f: Awaited<ReturnType<typeof fixture>>) {
+    const hash = 'c'.repeat(64);
+    const args = { ...f, executionContractVersion: 2 as const,
+      executionBudget: { authorityId: randomUUID(), replay: false, scopeKey: f.workspaceId,
+        accountKey: `discovery.run:discovery_run:request:${hash}:${hash}`, purpose: 'discovery.run',
+        subjectType: 'discovery_run', subjectId: `request:${hash}`, requestSha256: hash } };
+    const activities = createRun2Activities({ prisma: { withWorkspace: f.withWorkspace } as never,
+      gateway: {} as never, providers: {} as never, budgetStore: { attestAuthorized: vi.fn(async () => ({})) } as never });
+    return () => activities.materializeProvisionalLeads(args);
+  }
+
+  it.each(['match', 'weak'] as const)('recovers normal quick %s producer → deterministic score REVIEW → pool and provisional CAS', async (verdict) => {
+    const f = await fixture();
+    try {
+      const c = await f.canonical('quick seller');
+      await owner.discoveryCompanyJob.create({ data: { workspaceId: f.workspaceId, runId: f.runId,
+        canonicalCompanyId: c.id, stage: 'quick_judged', verdictQuick: verdict } });
+      const materialize = producer(f);
+      expect(await materialize()).toEqual({ leads: 1 });
+      const read = () => owner.lead.findFirstOrThrow({ where: { canonicalCompanyId: c.id } });
+      expect(await read()).toMatchObject({ status: 'DISCOVERED', fitVerdict: verdict,
+        queue: 'needs_review', fitReasons: { source: 'quick_scan', tier: 'quick' } });
+      const scorer = createQualifyActivities({ prisma: { withWorkspace: f.withWorkspace } as never });
+      expect(await scorer.scoreCandidates({ workspaceId: f.workspaceId, icpId: f.icpId })).toMatchObject({ scored: 1 });
+      const scored = await read();
+      expect(scored).toMatchObject({ status: 'REVIEW', fitVerdict: verdict, queue: 'needs_review',
+        fitReasons: { source: 'quick_scan', tier: 'quick' } });
+      expect(scored.scoredAt).toBeInstanceOf(Date);
+      const pool = await f.withWorkspace(f.workspaceId, tx => loadQuickScanPool(tx, f, 500));
+      const rematerialized = await materialize();
+      expect({ poolSize: pool.poolSize, rematerialized }).toEqual({ poolSize: 1, rematerialized: { leads: 1 } });
+      expect(pool.companies.map(row => row.id)).toEqual([c.id]);
+      expect(await read()).toEqual({ ...scored, updatedAt: expect.any(Date), version: scored.version + 1 });
+      expect(await owner.lead.count({ where: { canonicalCompanyId: c.id } })).toBe(1);
+    } finally { await clean(f.workspaceId); }
+  }, 60_000);
+
+  it('rejects every other REVIEW queue/status/source/tier and rechecks them at provisional CAS', async () => {
+    const f = await fixture();
+    const foreign = await fixture();
+    try {
+      const quick = { source: 'quick_scan', tier: 'quick' };
+      const cases: Array<{ name: string; status?: LeadStatus; queue?: string; reasons?: Prisma.InputJsonValue | typeof Prisma.DbNull | typeof Prisma.JsonNull }> = [
+        ...Object.values(LeadStatus).filter(status => status !== 'DISCOVERED' && status !== 'REVIEW')
+          .map(status => ({ name: status, status })),
+        ...['recommended', 'rejected', 'suppressed', 'sanctions_hold', 'unknown', 'NEEDS_REVIEW', '']
+          .map(queue => ({ name: `queue:${queue}`, queue })),
+        ...[Prisma.DbNull, Prisma.JsonNull, {}, { tier: 'quick' }, { source: 'quick_scan' },
+          { source: 'quick_scan', tier: null }, { source: 'quick_scan', tier: 'deep' },
+          { source: 'deep', tier: 'quick' }, { source: 'quick_scan ', tier: 'quick' },
+          { source: 'quick_scan', tier: 'QUICK' }].map((reasons, index) => ({ name: `reasons:${index}`, reasons })),
+      ];
+      const protectedRows = [];
+      for (const item of cases) {
+        const c = await f.canonical(item.name);
+        protectedRows.push(await owner.lead.create({ data: { workspaceId: f.workspaceId, icpId: f.icpId,
+          canonicalCompanyId: c.id, status: item.status ?? 'REVIEW', queue: item.queue ?? 'needs_review',
+          fitVerdict: 'weak', fitReasons: item.reasons ?? quick } }));
+        await owner.discoveryCompanyJob.create({ data: { workspaceId: f.workspaceId, runId: f.runId,
+          canonicalCompanyId: c.id, stage: 'quick_judged', verdictQuick: 'match' } });
+      }
+      const fc = await foreign.canonical('foreign provisional');
+      await owner.lead.create({ data: { workspaceId: foreign.workspaceId, icpId: foreign.icpId,
+        canonicalCompanyId: fc.id, status: 'REVIEW', fitVerdict: 'weak', fitReasons: quick } });
+      const pool = await f.withWorkspace(f.workspaceId, tx => loadQuickScanPool(tx, f, 500));
+      expect(pool.poolSize).toBe(0); expect(pool.companies).toEqual([]);
+      expect(await producer(f)()).toEqual({ leads: 0 });
+      expect(await owner.lead.findMany({ where: { id: { in: protectedRows.map(row => row.id) } }, orderBy: { id: 'asc' } }))
+        .toEqual(protectedRows.sort((a, b) => a.id.localeCompare(b.id)));
+      expect(await f.withWorkspace(f.workspaceId, tx => tx.lead.findMany({ where: { canonicalCompanyId: fc.id } })))
+        .toEqual([]);
+      const foreignArgs = await foreign.withWorkspace(f.workspaceId, tx => loadQuickScanPool(tx, foreign, 500));
+      expect(foreignArgs.companies.map(row => row.id)).not.toContain(fc.id);
+      expect(await producer({ ...foreign, withWorkspace: (_ws, fn) => f.withWorkspace(f.workspaceId, fn) })())
+        .toEqual({ leads: 0 });
+    } finally { await clean(f.workspaceId); await clean(foreign.workspaceId); }
+  }, 60_000);
+
+  it('never overwrites a REVIEW provisional after selection races with final fit or sanctions/human routing', async () => {
+    const f = await fixture();
+    try {
+      const c = await f.canonical('review race');
+      const row = await owner.lead.create({ data: { workspaceId: f.workspaceId, icpId: f.icpId,
+        canonicalCompanyId: c.id, status: 'REVIEW', fitVerdict: 'weak',
+        fitReasons: { source: 'quick_scan', tier: 'quick' } } });
+      await owner.discoveryCompanyJob.create({ data: { workspaceId: f.workspaceId, runId: f.runId,
+        canonicalCompanyId: c.id, stage: 'quick_judged', verdictQuick: 'match' } });
+      for (const data of [{ fitReasons: { source: 'deep', tier: 'deep' } },
+        { queue: 'sanctions_hold' }, { status: 'QUALIFIED' as const }]) {
+        await owner.lead.update({ where: { id: row.id }, data: { status: 'REVIEW', queue: 'needs_review',
+          fitReasons: { source: 'quick_scan', tier: 'quick' } } });
+        expect((await f.withWorkspace(f.workspaceId, tx => loadQuickScanPool(tx, f, 500))).poolSize).toBe(1);
+        const final = await owner.lead.update({ where: { id: row.id }, data });
+        expect(await producer(f)()).toEqual({ leads: 0 });
+        expect(await owner.lead.findUnique({ where: { id: row.id } })).toEqual(final);
+      }
     } finally { await clean(f.workspaceId); }
   }, 60_000);
 
@@ -102,7 +205,9 @@ describe.runIf(Boolean(url))('provisional recovery on PostgreSQL', () => {
       } });
       const c = await f.canonical('not admitted in this run');
       await owner.lead.create({ data: { workspaceId: f.workspaceId, icpId: f.icpId,
-        canonicalCompanyId: c.id, fitVerdict: 'weak', fitReasons: { source: 'quick_scan' } } });
+        canonicalCompanyId: c.id, status: 'REVIEW', fitVerdict: 'weak', fitReasons: { source: 'quick_scan', tier: 'quick' } } });
+      expect(await f.withWorkspace(f.workspaceId, tx => loadQuickScanPool(tx, f, 500)))
+        .toMatchObject({ requiresProcurementSearch: true, poolSize: 0, companies: [] });
       const result = await f.withWorkspace(f.workspaceId, (tx) =>
         loadQuickScanPool(tx, { ...f, afterProcurementSearch: true }, 500));
       expect(result.requiresProcurementSearch).toBe(true);
