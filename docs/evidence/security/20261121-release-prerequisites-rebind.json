@@ -1,0 +1,658 @@
+{
+  "schema_version": "release-security-prerequisites-rebind-evidence/v1",
+  "captured_at": "2026-11-21T22:34:49.999Z",
+  "canonical_audit_subject_P": "7b3292e0a001f6fe5fb024d6cca9b771a910718f",
+  "trusted_source_base_S": "f1971170456ecf53dcc211ce4dbc851d2b786e79",
+  "lockfile_digest": "sha256:56625d98d68af514b4c1cf1ef2c5713301ed0addb4693ef33dda4899a0bc1428",
+  "production_audit": {
+    "actual_exit": 0,
+    "command": "pnpm audit --prod --registry=https://registry.npmjs.org --json",
+    "audit_sha256": "e394545598637f027102436ca6dd49ea0e3a270adcb0663bbf15e884f209369f",
+    "report": {
+      "actions": [],
+      "advisories": {},
+      "muted": [],
+      "metadata": {
+        "vulnerabilities": {
+          "info": 0,
+          "low": 0,
+          "moderate": 0,
+          "high": 0,
+          "critical": 0
+        },
+        "dependencies": 873,
+        "devDependencies": 0,
+        "optionalDependencies": 0,
+        "totalDependencies": 873
+      }
+    }
+  },
+  "baseline_before": {
+    "schema_version": "production-dependency-audit-baseline/v1",
+    "source": {
+      "base_commit": "262e9a6307cdd0df9994991a410acfebe63a5ea6",
+      "lockfile_digest": "sha256:5a7d0c6a4129051f3cb65c3035d4a5123764d4c726a314aee1207e84fdfef231",
+      "registry": "https://registry.npmjs.org/",
+      "package_manager": "pnpm@9.15.9",
+      "command": "pnpm audit --prod --registry=https://registry.npmjs.org --json",
+      "captured_at": "2026-11-12T07:50:37Z"
+    },
+    "bootstrap": {
+      "mode": "INITIAL_BASELINE",
+      "base_commit": "262e9a6307cdd0df9994991a410acfebe63a5ea6"
+    },
+    "governance": {
+      "owner": "OWN-SECURITY",
+      "valid_until": "2027-01-15T00:00:00.000Z",
+      "policy": "Exact zero-advisory snapshot of the audited corrected source. Any production advisory, severity increase, critical finding, or expired baseline fails closed."
+    },
+    "advisories": [],
+    "exposure": {
+      "schema_version": "production-dependency-exposure/v1",
+      "path_evidence": "REQUIRED",
+      "findings": []
+    },
+    "summary": {
+      "advisories": 0,
+      "vulnerabilities": {
+        "info": 0,
+        "low": 0,
+        "moderate": 0,
+        "high": 0,
+        "critical": 0
+      },
+      "exposures": 0
+    }
+  },
+  "baseline_after": {
+    "schema_version": "production-dependency-audit-baseline/v1",
+    "source": {
+      "base_commit": "7b3292e0a001f6fe5fb024d6cca9b771a910718f",
+      "lockfile_digest": "sha256:56625d98d68af514b4c1cf1ef2c5713301ed0addb4693ef33dda4899a0bc1428",
+      "registry": "https://registry.npmjs.org/",
+      "package_manager": "pnpm@9.15.9",
+      "command": "pnpm audit --prod --registry=https://registry.npmjs.org --json",
+      "captured_at": "2026-11-21T22:34:49.999Z"
+    },
+    "bootstrap": {
+      "mode": "INITIAL_BASELINE",
+      "base_commit": "7b3292e0a001f6fe5fb024d6cca9b771a910718f"
+    },
+    "governance": {
+      "owner": "OWN-SECURITY",
+      "valid_until": "2027-01-15T00:00:00.000Z",
+      "policy": "Exact zero-advisory snapshot of the audited corrected source. Any production advisory, severity increase, critical finding, or expired baseline fails closed."
+    },
+    "advisories": [],
+    "exposure": {
+      "schema_version": "production-dependency-exposure/v1",
+      "path_evidence": "REQUIRED",
+      "findings": []
+    },
+    "summary": {
+      "advisories": 0,
+      "vulnerabilities": {
+        "info": 0,
+        "low": 0,
+        "moderate": 0,
+        "high": 0,
+        "critical": 0
+      },
+      "exposures": 0
+    }
+  },
+  "old_binding_freshness": {
+    "actual_exit": 1,
+    "receipt": {
+      "schema_version": "production-dependency-baseline-freshness-result/v1",
+      "result": "AUDIT_INVALID_HOLD",
+      "hold": true,
+      "current_advisories": 0,
+      "resolved_advisories": [],
+      "issues": ["BASELINE_SOURCE_LOCK_MISMATCH"],
+      "provenance": {
+        "subject_commit": "7b3292e0a001f6fe5fb024d6cca9b771a910718f",
+        "lockfile_digest": "sha256:56625d98d68af514b4c1cf1ef2c5713301ed0addb4693ef33dda4899a0bc1428",
+        "verifier_digest": "sha256:fd2975544c95dee3cfe48f47ccd8c5dbf309a02a5918108572e4fb7257c38a63",
+        "source_policy_digest": "sha256:6811f5f7826f8300c5b4bf91663850c14b4979f553fcc37bf4151fe71c83305a",
+        "audit_digest": "sha256:e394545598637f027102436ca6dd49ea0e3a270adcb0663bbf15e884f209369f",
+        "observed_at": "2026-11-21T22:40:24.075Z",
+        "registry": "https://registry.npmjs.org/"
+      }
+    },
+    "stderr": "[BASELINE_SOURCE_LOCK_MISMATCH] candidate baseline lock digest does not match the trusted base lockfile\n"
+  },
+  "new_binding_freshness": {
+    "actual_exit": 0,
+    "receipt": {
+      "schema_version": "production-dependency-baseline-freshness-result/v1",
+      "result": "FRESH",
+      "hold": false,
+      "current_advisories": 0,
+      "resolved_advisories": [],
+      "issues": [],
+      "provenance": {
+        "subject_commit": "7b3292e0a001f6fe5fb024d6cca9b771a910718f",
+        "lockfile_digest": "sha256:56625d98d68af514b4c1cf1ef2c5713301ed0addb4693ef33dda4899a0bc1428",
+        "verifier_digest": "sha256:fd2975544c95dee3cfe48f47ccd8c5dbf309a02a5918108572e4fb7257c38a63",
+        "source_policy_digest": "sha256:6811f5f7826f8300c5b4bf91663850c14b4979f553fcc37bf4151fe71c83305a",
+        "audit_digest": "sha256:e394545598637f027102436ca6dd49ea0e3a270adcb0663bbf15e884f209369f",
+        "observed_at": "2026-11-21T22:40:24.346Z",
+        "registry": "https://registry.npmjs.org/"
+      }
+    },
+    "stderr": ""
+  },
+  "ratchet": {
+    "actual_exit": 0,
+    "receipt": {
+      "schema_version": "production-dependency-audit-result/v1",
+      "result": "PASS_CLEAR",
+      "current_advisories": 0,
+      "resolved_advisories": [],
+      "registry": "https://registry.npmjs.org/"
+    }
+  },
+  "platform_and_source": {
+    "old_candidate_lock_sha256": "8617bf8c74060370b1c4573748a934476e72ea53f041cb737cbaceae4a503bac",
+    "complete_delta_sha256": "e5e29c85733605ac5252a3085e70a372bdd290b16906519f71c35025ca589024",
+    "added_packages": [],
+    "removed_packages": [],
+    "snapshot_graph_unchanged": true,
+    "old30_selectors": [
+      {
+        "package": "@img/sharp-libvips-linux-arm64@1.3.4",
+        "oldLibc": "glibc",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm64"],
+          "libc": ["glibc"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm64"],
+          "libc": ["glibc"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@img/sharp-libvips-linux-arm@1.3.4",
+        "oldLibc": "glibc",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm"],
+          "libc": ["glibc"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm"],
+          "libc": ["glibc"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@img/sharp-libvips-linux-ppc64@1.3.4",
+        "oldLibc": "glibc",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["ppc64"],
+          "libc": ["glibc"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["ppc64"],
+          "libc": ["glibc"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@img/sharp-libvips-linux-riscv64@1.3.4",
+        "oldLibc": "glibc",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["riscv64"],
+          "libc": ["glibc"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["riscv64"],
+          "libc": ["glibc"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@img/sharp-libvips-linux-s390x@1.3.4",
+        "oldLibc": "glibc",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["s390x"],
+          "libc": ["glibc"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["s390x"],
+          "libc": ["glibc"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@img/sharp-libvips-linux-x64@1.3.4",
+        "oldLibc": "glibc",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["x64"],
+          "libc": ["glibc"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["x64"],
+          "libc": ["glibc"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@img/sharp-libvips-linuxmusl-arm64@1.3.4",
+        "oldLibc": "musl",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm64"],
+          "libc": ["musl"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm64"],
+          "libc": ["musl"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@img/sharp-libvips-linuxmusl-x64@1.3.4",
+        "oldLibc": "musl",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["x64"],
+          "libc": ["musl"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["x64"],
+          "libc": ["musl"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@img/sharp-linux-arm64@0.35.5",
+        "oldLibc": "glibc",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm64"],
+          "libc": ["glibc"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm64"],
+          "libc": ["glibc"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@img/sharp-linux-arm@0.35.5",
+        "oldLibc": "glibc",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm"],
+          "libc": ["glibc"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm"],
+          "libc": ["glibc"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@img/sharp-linux-ppc64@0.35.5",
+        "oldLibc": "glibc",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["ppc64"],
+          "libc": ["glibc"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["ppc64"],
+          "libc": ["glibc"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@img/sharp-linux-riscv64@0.35.5",
+        "oldLibc": "glibc",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["riscv64"],
+          "libc": ["glibc"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["riscv64"],
+          "libc": ["glibc"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@img/sharp-linux-s390x@0.35.5",
+        "oldLibc": "glibc",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["s390x"],
+          "libc": ["glibc"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["s390x"],
+          "libc": ["glibc"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@img/sharp-linux-x64@0.35.5",
+        "oldLibc": "glibc",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["x64"],
+          "libc": ["glibc"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["x64"],
+          "libc": ["glibc"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@img/sharp-linuxmusl-arm64@0.35.5",
+        "oldLibc": "musl",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm64"],
+          "libc": ["musl"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm64"],
+          "libc": ["musl"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@img/sharp-linuxmusl-x64@0.35.5",
+        "oldLibc": "musl",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["x64"],
+          "libc": ["musl"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["x64"],
+          "libc": ["musl"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@nx/nx-linux-arm64-gnu@23.3.0",
+        "oldLibc": "glibc",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm64"],
+          "libc": ["glibc"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm64"],
+          "libc": ["glibc"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@nx/nx-linux-arm64-musl@23.3.0",
+        "oldLibc": "musl",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm64"],
+          "libc": ["musl"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm64"],
+          "libc": ["musl"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@nx/nx-linux-x64-gnu@23.3.0",
+        "oldLibc": "glibc",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["x64"],
+          "libc": ["glibc"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["x64"],
+          "libc": ["glibc"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@nx/nx-linux-x64-musl@23.3.0",
+        "oldLibc": "musl",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["x64"],
+          "libc": ["musl"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["x64"],
+          "libc": ["musl"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@swc/core-linux-arm64-gnu@1.16.13",
+        "oldLibc": "glibc",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm64"],
+          "libc": ["glibc"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm64"],
+          "libc": ["glibc"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@swc/core-linux-arm64-musl@1.16.13",
+        "oldLibc": "musl",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm64"],
+          "libc": ["musl"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm64"],
+          "libc": ["musl"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@swc/core-linux-ppc64-gnu@1.16.13",
+        "oldLibc": "glibc",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["ppc64"],
+          "libc": ["glibc"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["ppc64"],
+          "libc": ["glibc"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@swc/core-linux-s390x-gnu@1.16.13",
+        "oldLibc": "glibc",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["s390x"],
+          "libc": ["glibc"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["s390x"],
+          "libc": ["glibc"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@swc/core-linux-x64-gnu@1.16.13",
+        "oldLibc": "glibc",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["x64"],
+          "libc": ["glibc"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["x64"],
+          "libc": ["glibc"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "@swc/core-linux-x64-musl@1.16.13",
+        "oldLibc": "musl",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["x64"],
+          "libc": ["musl"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["x64"],
+          "libc": ["musl"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "lightningcss-linux-arm64-gnu@1.33.0",
+        "oldLibc": "glibc",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm64"],
+          "libc": ["glibc"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm64"],
+          "libc": ["glibc"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "lightningcss-linux-arm64-musl@1.33.0",
+        "oldLibc": "musl",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm64"],
+          "libc": ["musl"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["arm64"],
+          "libc": ["musl"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "lightningcss-linux-x64-gnu@1.33.0",
+        "oldLibc": "glibc",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["x64"],
+          "libc": ["glibc"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["x64"],
+          "libc": ["glibc"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      },
+      {
+        "package": "lightningcss-linux-x64-musl@1.33.0",
+        "oldLibc": "musl",
+        "trustedSelectors": {
+          "os": ["linux"],
+          "cpu": ["x64"],
+          "libc": ["musl"]
+        },
+        "candidateSelectors": {
+          "os": ["linux"],
+          "cpu": ["x64"],
+          "libc": ["musl"]
+        },
+        "oldSameIntegrity": true,
+        "libcRestored": true
+      }
+    ],
+    "native_packages_verified": 144,
+    "exact19_source_disposition_reused": true,
+    "unknown_components": 0,
+    "fresh_official_cache_normal_resolution": true,
+    "lock_hand_edited": false
+  },
+  "limits": {
+    "no_new_advisory_exception": true,
+    "baseline_valid_until_unchanged": "2027-01-15T00:00:00.000Z",
+    "copy_eligibility_not_upgraded": true,
+    "not_final_F_or_future_main_source_attestation": true,
+    "no_deployment_or_runtime_acceptance": true,
+    "old_full_unit_failures_and_https503_UNKNOWN_retained": true
+  }
+}
