@@ -357,6 +357,143 @@ function workspaceSourceIssues(workspaceText, workspaceDirectories) {
   return issues;
 }
 
+// Classification is validation-only: package-manager input bytes are never rewritten.
+// Deliberately recognizes a bounded pnpm scalar subset, not arbitrary YAML.
+function lockfileSourceView(text) {
+  const invalid = () => ({
+    text,
+    issues: [
+      issue(
+        "LOCKFILE_SYNTAX_NOT_TRUSTED",
+        "lockfile descriptive metadata has an ambiguous structure or unsafe scalar",
+      ),
+    ],
+  });
+  // YAML treats lone CR as a line break; never let a raw scanner and the
+  // bounded line classifier disagree about where source-bearing fields start.
+  if (/\r(?!\n)/u.test(text)) return invalid();
+  if (!/^\s*['"]?deprecated['"]?\s*:/mu.test(text)) return { text, issues: [] };
+  if (/[\u0000-\u0009\u000b\u000c\u000e-\u001f\u007f]/u.test(text))
+    return invalid();
+  const lines = text.split(/\r?\n/u);
+  const view = [...lines];
+  const roots = new Set();
+  const packages = new Set();
+  let section = null;
+  let packageName = null;
+  let fields = new Set();
+  let lastField = null;
+  const safeText = (value) => {
+    const securityView = value
+      .replace(/%([0-9a-f]{2})/giu, (_, hex) =>
+        String.fromCharCode(Number.parseInt(hex, 16)),
+      )
+      .replace(/\s/gu, "");
+    return (
+      !value.includes("\\") &&
+      !/(?:[a-z][a-z0-9+.-]*:)?\/\/[^/?#]*(?:@|%40)/iu.test(securityView) &&
+      !/[?&#;](?:access[_-]?token|auth(?:orization)?|api[_-]?key|password|secret|token|credentials?)=/iu.test(
+        securityView,
+      )
+    );
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim() === "" || /^\s*#/u.test(line)) continue;
+    const indent = line.length - line.trimStart().length;
+    if (indent === 0) {
+      const root = /^([A-Za-z][A-Za-z0-9]*):(?: .*)?$/u.exec(line);
+      if (!root || roots.has(root[1])) return invalid();
+      roots.add(root[1]);
+      section = root[1];
+      packageName = null;
+      if (section === "packages" && line !== "packages:") return invalid();
+    }
+    const metadataKey = /^\s*['"]?deprecated['"]?\s*:/u.test(line);
+    if (
+      metadataKey &&
+      !(
+        section === "packages" &&
+        packageName &&
+        /^ {4}deprecated: /u.test(line)
+      )
+    )
+      return invalid();
+    if (section !== "packages" || indent === 0) continue;
+    if (indent === 2) {
+      const entry =
+        /^ {2}('?)((?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*@\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)\1:$/u.exec(
+          line,
+        );
+      if (
+        !entry ||
+        packages.has(entry[2]) ||
+        (entry[2].startsWith("@") && entry[1] !== "'")
+      )
+        return invalid();
+      packages.add(entry[2]);
+      packageName = entry[2];
+      fields = new Set();
+      lastField = null;
+      continue;
+    }
+    if (!packageName || indent < 4 || indent % 2 !== 0) return invalid();
+    if (indent > 4) {
+      if (lastField === "deprecated") return invalid();
+      continue;
+    }
+    const field = /^ {4}([A-Za-z][A-Za-z0-9]*):(?: (.*))?$/u.exec(line);
+    if (!field || fields.has(field[1])) return invalid();
+    fields.add(field[1]);
+    lastField = field[1];
+    if (lastField !== "deprecated") continue;
+    const value = field[2] ?? "";
+    if (/^[|>][+-]?(?: +#.*)?$/u.test(value)) {
+      let end = i + 1;
+      let contentSeen = false;
+      const content = [value];
+      for (; end < lines.length; end++) {
+        const next = lines[end];
+        if (next.trim() === "") continue;
+        const nextIndent = next.length - next.trimStart().length;
+        if (nextIndent <= 4) break;
+        if (nextIndent < 6 || (!contentSeen && nextIndent !== 6))
+          return invalid();
+        contentSeen = true;
+        content.push(next.slice(6));
+      }
+      if (!contentSeen || !safeText(content.join("\n"))) return invalid();
+      for (let n = i; n < end; n++) view[n] = "";
+      i = end - 1;
+      lastField = null;
+      continue;
+    }
+    let scalar;
+    if (value.startsWith("'")) {
+      if (!/^'(?:[^']|'')*'$/u.test(value)) return invalid();
+      scalar = value.slice(1, -1).replaceAll("''", "'");
+    } else {
+      // Comments on plain scalars complicate YAML type resolution. Reject
+      // rather than mask an ambiguously typed scalar or its trailing text.
+      if (/\s#/u.test(value)) return invalid();
+      const plainValue = value.trimEnd();
+      if (
+        !plainValue ||
+        /^(?:[-?:](?:\s|$)|[!&*\[\{"#%@`|>])/u.test(value) ||
+        /:(?:\s|$)/u.test(value) ||
+        /^(?:null|true|false|~|[-+]?(?:0[xob][0-9a-f]+|(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?|\.inf|\.nan))$/iu.test(
+          plainValue.replaceAll("_", ""),
+        )
+      )
+        return invalid();
+      scalar = value;
+    }
+    if (!safeText(scalar)) return invalid();
+    view[i] = "";
+  }
+  return { text: view.join("\n"), issues: [] };
+}
+
 function lockfileSyntaxIssues(lockfileText) {
   const ambiguousSyntax = [
     /["\\]/u,
@@ -597,8 +734,9 @@ export function validateDependencySourcePolicy(input) {
   issues.push(
     ...workspaceSourceIssues(input.workspaceText, workspaceDirectories),
   );
-  issues.push(...lockfileSyntaxIssues(input.lockfileText));
-  if (EXTERNAL_SOURCE_MARKER.test(input.lockfileText)) {
+  const sourceView = lockfileSourceView(input.lockfileText);
+  issues.push(...sourceView.issues, ...lockfileSyntaxIssues(sourceView.text));
+  if (EXTERNAL_SOURCE_MARKER.test(sourceView.text)) {
     issues.push(
       issue(
         "LOCKFILE_EXTERNAL_SOURCE_NOT_TRUSTED",
@@ -606,7 +744,7 @@ export function validateDependencySourcePolicy(input) {
       ),
     );
   }
-  issues.push(...lockfileLinkIssues(input.lockfileText, workspaceDirectories));
+  issues.push(...lockfileLinkIssues(sourceView.text, workspaceDirectories));
 
   return Object.freeze({
     ok: issues.length === 0,
