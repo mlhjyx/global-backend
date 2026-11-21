@@ -178,6 +178,8 @@ export interface LeadQualifiedSnapshotInput {
    *（旧调用方/测试 → valid_until 仅由 intent 事件驱动或 null，非破坏）。
    */
   evidence?: readonly EvidenceFreshness[];
+  /** Verified current manufacturer field deadline; null means present but unverified. */
+  manufacturerProofExpiresAt?: string | null;
   /**
    * 制裁筛查结论（第五门）：调用方（lead.service.decide）在 accept 时对公司 screen 后传入。
    * status=clear（无命中）| not_screened（门未启用）。命中(potential_match)时 decide 已抛 SANCTIONS_HOLD_UNRESOLVED、
@@ -300,8 +302,16 @@ function latestIntentAtMs(attributes: unknown): number | null {
  * valid_until = min over fields (该字段最新 fetchedAt + 分级 TTL)，再与最新 intent 事件的时机窗取最早；
  * 无任何依据 → null。字段个数的粒度由调用方决定（L1 起按 field 取最新）。
  */
-export function computeValidUntil(evidence: readonly EvidenceFreshness[], attributes: unknown): string | null {
+export function computeValidUntil(
+  evidence: readonly EvidenceFreshness[], attributes: unknown, manufacturerProofExpiresAt?: string | null,
+): string | null {
+  if (manufacturerProofExpiresAt === null) return null;
   const expiries: number[] = [];
+  if (manufacturerProofExpiresAt !== undefined) {
+    const expiry = typeof manufacturerProofExpiresAt === 'string' ? Date.parse(manufacturerProofExpiresAt) : NaN;
+    if (!Number.isFinite(expiry)) return null;
+    expiries.push(expiry); // A past deadline must not disappear and become a future generic TTL.
+  }
   for (const e of evidence) {
     const fetchedMs = e.fetchedAt instanceof Date ? e.fetchedAt.getTime() : Date.parse(String(e.fetchedAt));
     if (!Number.isFinite(fetchedMs)) continue;
@@ -394,7 +404,7 @@ export function buildLeadQualifiedSnapshot(input: LeadQualifiedSnapshotInput): L
       : { status: 'not_screened', screened_at: null, list_versions: {} },
     recommended_action: 'handoff_to_campaign',
     // 鲜度 v2：min(evidence.fetchedAt + 分级TTL, 最新 intent.at + 时机窗)；无鲜度依据 → null。
-    valid_until: computeValidUntil(input.evidence ?? [], company.attributes),
+    valid_until: computeValidUntil(input.evidence ?? [], company.attributes, input.manufacturerProofExpiresAt),
     scored_at: isoOrNull(lead.scoredAt),
     queue_basis: leadQueueBasis(lead, input.humanRejected === true),
     ...(input.delivery

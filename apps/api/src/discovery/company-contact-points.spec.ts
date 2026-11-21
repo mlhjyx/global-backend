@@ -168,7 +168,7 @@ describe('persistCompanyContactPoints (BI-14)', () => {
       skipDuplicates: true,
     });
     expect(COMPANY_CONTACT_PROVIDER_KEY).toBe('company_contact');
-    expect(COMPANY_CONTACT_PARSER_VERSION).toBe('company_contact/v1');
+    expect(COMPANY_CONTACT_PARSER_VERSION).toBe('company_contact/v2');
   });
 
   it('writes nothing for a missing or SUPPRESSED company, or one a domain or name suppression covers', async () => {
@@ -233,7 +233,7 @@ describe('persistCompanyContactPoints (BI-14)', () => {
           id: 'p-contact', providerKey: 'company_contact', updatedBy: null, status: 'UNVERIFIED', statusReason: null,
           lastSeenAt: { lte: SEEN_AT },
         },
-        data: { lastSeenAt: SEEN_AT, sourceKind: 'homepage', parserVersion: 'company_contact/v1' },
+        data: { lastSeenAt: SEEN_AT, sourceKind: 'homepage', parserVersion: 'company_contact/v2' },
       }],
       [{
         where: {
@@ -243,7 +243,7 @@ describe('persistCompanyContactPoints (BI-14)', () => {
         data: {
           lastSeenAt: SEEN_AT,
           sourceKind: 'homepage',
-          parserVersion: 'company_contact/v1',
+          parserVersion: 'company_contact/v2',
           status: 'UNVERIFIED',
           statusReason: null,
         },

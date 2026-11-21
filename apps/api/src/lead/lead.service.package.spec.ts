@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { EVIDENCE } from '../discovery/manufacturer-network.test-fixture';
 import { LeadService } from './lead.service';
 
 /**
@@ -215,6 +216,26 @@ describe('LeadService.package', () => {
     );
     const pkg = await serviceWithTx(tx).leadPackage(ctx, 'lead-1');
     expect(pkg.evidence[0]!.source_url).toBe('https://beispiel-pumpen.de/ueber-uns');
+  });
+
+  it.each([{ label: 'current', proof: EVIDENCE },
+    { label: 'already expired', proof: { ...EVIDENCE, expiresAt: '2026-11-20T11:00:00.000Z' } },
+  ])('GET package retains the $label authenticated proof deadline instead of a green 180-day expiry', async ({ proof }) => {
+    const c = { ...company, id: proof.companyId, name: proof.targetName, domain: proof.targetDomain,
+      country: proof.country, attributes: { manufacturer_network: { evidence: proof } }, contacts: [] };
+    const tx = txFor({
+      lead: { findUnique: vi.fn(async () => ({ ...lead, canonicalCompany: c })) },
+      fieldEvidence: {
+        findMany: vi.fn(async () => []),
+        groupBy: vi.fn(async () => [{ entityId: c.id, field: 'manufacturer_network.evidence', dataClass: 'green',
+          _max: { fetchedAt: new Date(proof.fetchedAt) } }]),
+      },
+      $queryRaw: vi.fn(async () => [{ companyId: c.id, workspaceId: proof.workspaceId,
+        providerKey: 'manufacturer_network', license: proof.licenseLabel, allowedActions: proof.allowedActions,
+        sourceUrl: proof.sourceUrl, fetchedAt: new Date(proof.fetchedAt), value: proof, proofMatched: true }]),
+    });
+    const pkg = await serviceWithTx(tx).leadPackage({ ...ctx, workspaceId: proof.workspaceId }, 'lead-1');
+    expect(pkg.valid_until).toBe(proof.expiresAt);
   });
 
   it('takes each field at its latest fetch and the earliest field decides valid_until (L1)', async () => {

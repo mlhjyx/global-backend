@@ -10,7 +10,8 @@ import { manifestFor, streamed } from '../../durable-results/artifact/materializ
 import type { GenericOperationArtifactReference } from '../../durable-results/artifact/artifact.types';
 import type { DurableExecutionReceipt } from '../../durable-results/durable-execution-receipt';
 import type { PersistGenericOperationArtifactInput } from '../../durable-results/artifact/generic-operation-artifact.service';
-import { WebsiteProfileProvider } from './website-profile.provider';
+import { findContactPaths } from '../website-profile/contact-paths';
+import { WEBSITE_PROFILE_TASK, WebsiteProfileProvider } from './website-profile.provider';
 
 const WS = '44444444-4444-4444-8444-444444444444';
 const AUTHORITY = '22222222-2222-4222-8222-222222222222';
@@ -22,13 +23,13 @@ const CREATED = '2026-08-21T00:00:00.000Z';
 const context = { workspaceId: WS, runId: 'run', artifactSubject: subjectRef };
 
 type Saved = { bytes: Uint8Array; input: PersistGenericOperationArtifactInput; reference: GenericOperationArtifactReference; receipt: DurableExecutionReceipt };
-function harness(options: { projectText?: string; projectUrl?: string; unavailable?: boolean } = {}) {
+function harness(options: { projectText?: string; projectUrl?: string; unavailable?: boolean; homepageNav?: string } = {}) {
   const stored = new Map<string, Saved>();
   const settled = new Map<string, Saved>();
   const fetchHtml = vi.fn(async (url: string) => ({
     status: 200, contentType: 'text/html', body: Buffer.from('<html><body><article><h1>Pumpentechnik</h1><p>' +
       (url === (options.projectUrl ?? URL) ? options.projectText ?? SPAN.repeat(5) : 'Autorisierter Händler und Vertriebspartner. Lagerprogramm ab Lager. '.repeat(8)) +
-      '</p></article></body></html>'),
+      '</p></article>' + (options.homepageNav ?? '') + '</body></html>'),
   }));
   const tool = createCrawl4aiFetchTool({
     isAllowedByRobots: async () => true,
@@ -102,6 +103,22 @@ async function profile(broker: ToolBroker, projectUrl = URL) {
 }
 
 describe('project evidence across real broker and artifact boundaries', () => {
+  it('persists and replays ordinary navigation text through the existing crawl4ai-fetch/v1 materializer', async () => {
+    const h = harness({ homepageNav: '<nav><a href="/kontakt">Kontakt</a><a href="/impressum">Impressum</a></nav>' });
+    const broker = h.broker();
+    const ctx = { ...context, taskContractId: WEBSITE_PROFILE_TASK, purpose: ['enrichment'] };
+    const input = { url: 'https://pumpen.example/', maxChars: 40000 };
+    const first = await broker.invoke<typeof input, { url: string; text: string; contentHash: string }>('crawl4ai.fetch', input, ctx);
+    expect(first.durableReceipt?.resultSchema).toBe('crawl4ai-fetch/v1');
+    expect(findContactPaths(first.data.text, 'pumpen.example')).toMatchObject({
+      contactPage: 'https://pumpen.example/kontakt', impressumPage: 'https://pumpen.example/impressum' });
+    expect(first.provenance?.parserVersion).toBe('artifact/crawl4ai-fetch/v1');
+    const calls = h.fetchHtml.mock.calls.length;
+    const second = await broker.invoke<typeof input, { url: string; text: string; contentHash: string }>('crawl4ai.fetch', input, ctx);
+    expect(second.data).toEqual(first.data);
+    expect(h.fetchHtml).toHaveBeenCalledTimes(calls);
+  });
+
   it('retains exact project evidence after persistence and replay with its original artifact time', async () => {
     const h = harness();
     const first = await profile(h.broker());

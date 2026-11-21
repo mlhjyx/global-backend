@@ -30,6 +30,12 @@ afterEach(() => {
 });
 
 describe('raw-source schema probe（RAW_SOURCE_SCHEMA_PROBE=1）', () => {
+  it('accepts the ordinary http-first/2 code token in the unchanged Raw provenance schema', () => {
+    const payload = directoryPayload('Acme Pumps GmbH');
+    (payload.provenance as Record<string, unknown>).parserVersion = 'http-first/2';
+    expect(validateRawSourceProviderPayload('directory', payload).ok).toBe(true);
+  });
+
   it('reports failed clause names and shapes but never field values', () => {
     vi.stubEnv('RAW_SOURCE_SCHEMA_PROBE', '1');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
