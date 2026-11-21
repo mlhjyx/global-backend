@@ -33,6 +33,7 @@ export const EXPECTED_TOOL_IDS = Object.freeze([
 ]);
 
 export const EXPECTED_MODEL_TASKS = Object.freeze([
+  Object.freeze({ path: 'apps/api/src/market-candidate-generation/generation.service.ts', taskId: 'market.candidates.generate', schema: 'market-candidates-generation/v1' }),
   Object.freeze({ path: 'apps/api/src/temporal/understanding.activities.ts', taskId: 'company_understanding.extract_claims', schema: 'understanding-claims/v1' }),
   Object.freeze({ path: 'apps/api/src/temporal/understanding.activities.ts', taskId: 'company_understanding.extract_profile', schema: 'understanding-profile/v1' }),
   Object.freeze({ path: 'apps/api/src/temporal/understanding.activities.ts', taskId: 'company_understanding.extract_offerings', schema: 'understanding-offerings/v1' }),

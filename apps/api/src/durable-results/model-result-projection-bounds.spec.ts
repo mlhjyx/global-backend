@@ -112,6 +112,60 @@ const COMMON_MODEL_METADATA_BOUNDS: Readonly<Record<string, NumericBounds>> = {
 };
 
 const EXPECTED_BOUNDS: Readonly<Partial<Record<TypedProjectionSchema, Readonly<Record<string, NumericBounds>>>>> = {
+  'market-candidates-generation/v1': {
+    "data.outcome": {"maxLength": 32},
+    "data.candidates": {"maxItems": 100},
+    "data.candidates[].proposal.supplyOrCapability.offeringId": {"maxLength": 36},
+    "data.candidates[].proposal.supplyOrCapability.description": {"maxLength": 2000},
+    "data.candidates[].proposal.buyerOrganizationCountry.oneOf[0]": {"maxLength": 2},
+    "data.candidates[].proposal.projectCountry.oneOf[0]": {"maxLength": 2},
+    "data.candidates[].proposal.application.text": {"maxLength": 2000},
+    "data.candidates[].proposal.application.knowledgeState": {"maxLength": 32},
+    "data.candidates[].proposal.application.basisKeys": {"maxItems": 200},
+    "data.candidates[].proposal.application.basisKeys[]": {"maxLength": 80},
+    "data.candidates[].proposal.application.impact": {"maxLength": 2000},
+    "data.candidates[].proposal.organizationRole.text": {"maxLength": 2000},
+    "data.candidates[].proposal.organizationRole.knowledgeState": {"maxLength": 32},
+    "data.candidates[].proposal.organizationRole.basisKeys": {"maxItems": 200},
+    "data.candidates[].proposal.organizationRole.basisKeys[]": {"maxLength": 80},
+    "data.candidates[].proposal.organizationRole.impact": {"maxLength": 2000},
+    "data.candidates[].proposal.fitExplanation.text": {"maxLength": 2000},
+    "data.candidates[].proposal.fitExplanation.knowledgeState": {"maxLength": 32},
+    "data.candidates[].proposal.fitExplanation.basisKeys": {"maxItems": 200},
+    "data.candidates[].proposal.fitExplanation.basisKeys[]": {"maxLength": 80},
+    "data.candidates[].proposal.fitExplanation.impact": {"maxLength": 2000},
+    "data.candidates[].proposal.entryConditions": {"maxItems": 200},
+    "data.candidates[].proposal.entryConditions[].text": {"maxLength": 2000},
+    "data.candidates[].proposal.entryConditions[].knowledgeState": {"maxLength": 32},
+    "data.candidates[].proposal.entryConditions[].basisKeys": {"maxItems": 200},
+    "data.candidates[].proposal.entryConditions[].basisKeys[]": {"maxLength": 80},
+    "data.candidates[].proposal.entryConditions[].impact": {"maxLength": 2000},
+    "data.candidates[].proposal.support": {"maxItems": 200},
+    "data.candidates[].proposal.support[].text": {"maxLength": 2000},
+    "data.candidates[].proposal.support[].knowledgeState": {"maxLength": 32},
+    "data.candidates[].proposal.support[].basisKeys": {"maxItems": 200},
+    "data.candidates[].proposal.support[].basisKeys[]": {"maxLength": 80},
+    "data.candidates[].proposal.support[].impact": {"maxLength": 2000},
+    "data.candidates[].proposal.counterEvidence": {"maxItems": 200},
+    "data.candidates[].proposal.counterEvidence[].text": {"maxLength": 2000},
+    "data.candidates[].proposal.counterEvidence[].knowledgeState": {"maxLength": 32},
+    "data.candidates[].proposal.counterEvidence[].basisKeys": {"maxItems": 200},
+    "data.candidates[].proposal.counterEvidence[].basisKeys[]": {"maxLength": 80},
+    "data.candidates[].proposal.counterEvidence[].impact": {"maxLength": 2000},
+    "data.candidates[].proposal.gaps": {"maxItems": 200},
+    "data.candidates[].proposal.gaps[].text": {"maxLength": 2000},
+    "data.candidates[].proposal.gaps[].knowledgeState": {"maxLength": 32},
+    "data.candidates[].proposal.gaps[].basisKeys": {"maxItems": 200},
+    "data.candidates[].proposal.gaps[].basisKeys[]": {"maxLength": 80},
+    "data.candidates[].proposal.gaps[].impact": {"maxLength": 2000},
+    "data.candidates[].proposal.recommendation.status": {"maxLength": 32},
+    "data.candidates[].proposal.recommendation.reason": {"maxLength": 2000},
+    "data.candidates[].proposal.nextVerification": {"maxItems": 200},
+    "data.candidates[].proposal.nextVerification[]": {"maxLength": 2000},
+    "provider": {"maxLength": 120},
+    "model": {"maxLength": 120},
+    ...COMMON_MODEL_METADATA_BOUNDS,
+  },
   'understanding-claims/v1': {
     'data.claims': { maxItems: 64 },
     'data.claims[].type': { maxLength: 80 },
@@ -484,12 +538,29 @@ function nearLimitReplayEnvelope(): Record<string, unknown> {
 }
 
 describe('model result projection exact literal bound lock', () => {
-  it.each(MODEL_RESULT_PROJECTION_DEFINITIONS)('$schema carries its maximum legal domain structure through the full replay envelope', (projection) => {
+  it.each(MODEL_RESULT_PROJECTION_DEFINITIONS)('$schema respects both local structure and the unchanged aggregate replay bound', (projection) => {
+    if (projection.schema === 'market-candidates-generation/v1') {
+      // Independently exercise the aggregate gate without allocating the unbounded Cartesian product.
+      // This is schema-valid but not valid under the domain's stricter serialized 64KiB gate.
+      const statement = { text: 'x', knowledgeState: 'INFERENCE', basisKeys: [], impact: 'x' };
+      const raw = { data: { outcome: 'CANDIDATES_PROPOSED', candidates: [{ proposal: {
+        supplyOrCapability: { offeringId: '33333333-3333-4333-8333-333333333333', description: 'x' },
+        buyerOrganizationCountry: null, projectCountry: null, application: statement,
+        organizationRole: statement, fitExplanation: statement, entryConditions: [], support: [],
+        counterEvidence: [], gaps: [], recommendation: { status: 'CONDITIONAL', reason: 'x' },
+        nextVerification: Array.from({ length: 80 }, () => 'x'.repeat(2000)),
+      } }] }, provider: 'p', model: 'm' };
+      const validate = new Ajv({ strict: false }).compile(projection.jsonSchema);
+      expect(validate(raw), JSON.stringify(validate.errors)).toBe(true);
+      const registry = registerModelResultProjections(new TypedProjectionRegistry());
+      expect(() => registry.project(projection.schema, raw)).toThrow('TYPED_PROJECTION_TOO_LARGE');
+      expect(() => projectModelResultForReplay(projection.schema, raw as never)).toThrow('MODEL_RESULT_REPLAY_INVALID');
+      return;
+    }
     const projected = maximalDomainValue(projection.jsonSchema as JsonRecord);
     const validate = new Ajv({ strict: false }).compile(projection.jsonSchema);
     expect(validate(projected), JSON.stringify(validate.errors)).toBe(true);
     const raw = projection.restore(projected);
-
     expect(() => projectModelResultForReplay(projection.schema, raw as never)).not.toThrow();
   });
 
@@ -657,8 +728,15 @@ describe('full model replay envelope PostgreSQL JSONB bound', () => {
 
   liveDatabaseIt.each(MODEL_RESULT_PROJECTION_DEFINITIONS)('$schema representative legal domain structure stays within real jsonb::text bytes', async (projection) => {
     if (!database) throw new Error('APP_DATABASE_URL is unavailable');
-    const projected = maximalDomainValue(projection.jsonSchema as JsonRecord);
-    const raw = projection.restore(projected);
+    const statement = { text: 'x', knowledgeState: 'INFERENCE', basisKeys: [], impact: 'x' };
+    const raw = projection.schema === 'market-candidates-generation/v1'
+      ? { data: { outcome: 'CANDIDATES_PROPOSED', candidates: [{ proposal: {
+          supplyOrCapability: { offeringId: '33333333-3333-4333-8333-333333333333', description: 'x' },
+          buyerOrganizationCountry: null, projectCountry: null, application: statement,
+          organizationRole: statement, fitExplanation: statement, entryConditions: [], support: [],
+          counterEvidence: [], gaps: [], recommendation: { status: 'CONDITIONAL', reason: 'x' }, nextVerification: ['x'],
+        } }] }, provider: 'p', model: 'm' }
+      : projection.restore(maximalDomainValue(projection.jsonSchema as JsonRecord));
     const envelope = projectModelResultForReplay(projection.schema, raw as never);
     const rows = await database.$queryRawUnsafe<Array<{ bytes: bigint }>>('SELECT octet_length($1::jsonb::text)::bigint AS bytes', JSON.stringify(envelope));
     expect(Number(rows[0]?.bytes), projection.schema).toBeLessThanOrEqual(128 * 1024);

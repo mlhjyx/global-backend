@@ -16,7 +16,7 @@ const PLAN_ID = '50000000-0000-4000-8000-000000000005';
 const LEAD_ID = '60000000-0000-4000-8000-000000000006';
 
 describe('workspace execution technical envelope catalog', () => {
-  it('machine-enumerates all and only the twelve workspace operations', () => {
+  it('machine-enumerates all and only registered bounded workspace operations', () => {
     expect(WORKSPACE_EXECUTION_QUOTE_OPERATIONS).toEqual([
       'POST /companies',
       'POST /companies/:companyId/icps',
@@ -30,6 +30,7 @@ describe('workspace execution technical envelope catalog', () => {
       'POST /companies/:companyId/understanding/retry',
       'POST /site-builder/intake',
       'POST /campaigns/:campaignId/plan-drafts',
+      'POST /market-candidate-generations/:generationId/execute',
     ]);
   });
 
@@ -372,4 +373,10 @@ describe('DISCOVERY_UNCAPPED=on —— 报价按防爆安全界（余额是唯�
     expect(envelope.policy.executionLimits).not.toHaveProperty('discoveryUncapped');
     expect(envelope.requiredCapMicrousd).toBe(840_888n * 10_000n);
   });
+});
+
+
+it('quotes one market-generation task at 40 cents with the unchanged two-wire repair ceiling, not a fresh per-attempt pool', () => {
+  const envelope = resolveWorkspaceTechnicalBudgetEnvelope({ operation: 'POST /market-candidate-generations/:generationId/execute', generationId: '66666666-6666-4666-8666-666666666666', body: { intentDigest: 'a'.repeat(64) } });
+  expect(envelope).toMatchObject({ requiredCapMicrousd: 800_000n, policy: { tools: [], executionLimits: { modelLogicalInvocations: 1 }, models: [{ taskId: 'market.candidates.generate', logicalInvocations: 1, structuredWireUpperBound: 2, maxCostCents: 40, maxOutputTokens: 16_000 }] } });
 });

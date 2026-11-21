@@ -4,7 +4,9 @@
     {
       "chain_id": "market-candidate-persistence-internal",
       "capability_id": "CAP-BUYER-001",
-      "object_ids": ["OBJ-FE-031"],
+      "object_ids": [
+        "OBJ-FE-031"
+      ],
       "operation_ids": [
         "MarketCandidateSetsController_getLatest_v1",
         "MarketCandidateSetsController_getCurrent_v1",
@@ -25,16 +27,24 @@
         "apps/api/src/market-candidates/market-candidate-sets.openapi.spec.ts",
         "apps/api/src/market-candidates/market-candidates.module.spec.ts"
       ],
-      "scenario_ids": ["SCN-FE-BUYER-003"],
+      "scenario_ids": [
+        "SCN-FE-BUYER-003"
+      ],
       "delivery_state": "INTERNAL_ONLY",
       "evidence_ids": [],
-      "required_evidence_kinds": ["runtime_probe"],
+      "required_evidence_kinds": [
+        "runtime_probe"
+      ],
       "evidence_expectation": "FRESH_PASS_REQUIRED_FOR_PILOT_OR_GA"
     },
     {
       "chain_id": "buyer-discovery-internal",
       "capability_id": "CAP-BUYER-001",
-      "object_ids": ["OBJ-FE-009", "OBJ-FE-010", "OBJ-FE-011"],
+      "object_ids": [
+        "OBJ-FE-009",
+        "OBJ-FE-010",
+        "OBJ-FE-011"
+      ],
       "operation_ids": [
         "DiscoveryController_execute_v1",
         "DiscoveryController_listCompanies_v1"
@@ -47,17 +57,27 @@
         "apps/api/src/temporal/discovery.activities.spec.ts",
         "apps/api/src/lead/lead-qualified-snapshot.spec.ts"
       ],
-      "scenario_ids": ["SCN-FE-BUYER-001", "SCN-FE-BUYER-002"],
+      "scenario_ids": [
+        "SCN-FE-BUYER-001",
+        "SCN-FE-BUYER-002"
+      ],
       "delivery_state": "INTERNAL_ONLY",
       "evidence_ids": [],
-      "required_evidence_kinds": ["runtime_probe"],
+      "required_evidence_kinds": [
+        "runtime_probe"
+      ],
       "evidence_expectation": "FRESH_PASS_REQUIRED_FOR_PILOT_OR_GA"
     },
     {
       "chain_id": "buyer-intent-queue-internal",
       "capability_id": "CAP-INTENT-001",
-      "object_ids": ["OBJ-FE-010", "OBJ-FE-011"],
-      "operation_ids": ["LeadController_queues_v1"],
+      "object_ids": [
+        "OBJ-FE-010",
+        "OBJ-FE-011"
+      ],
+      "operation_ids": [
+        "LeadController_queues_v1"
+      ],
       "code_paths": [
         "apps/api/src/lead/lead.controller.ts",
         "apps/api/src/lead/scoring.ts"
@@ -66,16 +86,25 @@
         "apps/api/src/lead/scoring.spec.ts",
         "apps/api/src/signals/intent-recompute.service.spec.ts"
       ],
-      "scenario_ids": ["SCN-FE-BUYER-001", "SCN-FE-BUYER-002"],
+      "scenario_ids": [
+        "SCN-FE-BUYER-001",
+        "SCN-FE-BUYER-002"
+      ],
       "delivery_state": "INTERNAL_ONLY",
       "evidence_ids": [],
-      "required_evidence_kinds": ["runtime_probe"],
+      "required_evidence_kinds": [
+        "runtime_probe"
+      ],
       "evidence_expectation": "FRESH_PASS_REQUIRED_FOR_PILOT_OR_GA"
     },
     {
       "chain_id": "site-builder-development-intake-path",
       "capability_id": "CAP-SITE-INTAKE-001",
-      "object_ids": ["OBJ-FE-003", "OBJ-FE-012", "OBJ-FE-015"],
+      "object_ids": [
+        "OBJ-FE-003",
+        "OBJ-FE-012",
+        "OBJ-FE-015"
+      ],
       "operation_ids": [
         "IntakeController_create_v1",
         "SiteBuildTechnicalBudgetQuoteController_quoteIntake_v1"
@@ -97,12 +126,17 @@
         "apps/api/src/site-builder/site-build-technical-budget-quote.integrity.spec.ts",
         "apps/api/src/site-builder/site-build-budget-grant.spec.ts"
       ],
-      "scenario_ids": ["SCN-FE-SITE-001", "SCN-FE-SITE-002"],
+      "scenario_ids": [
+        "SCN-FE-SITE-001",
+        "SCN-FE-SITE-002"
+      ],
       "delivery_state": "INTERNAL_ONLY",
       "evidence_ids": [
         "site-builder-deterministic-product-path-development-20260901"
       ],
-      "required_evidence_kinds": ["deterministic_product_path"],
+      "required_evidence_kinds": [
+        "deterministic_product_path"
+      ],
       "evidence_expectation": "DEVELOPMENT_ONLY_NOT_PILOT_OR_GA"
     },
     {
@@ -135,19 +169,29 @@
         "apps/api/src/site-builder/paid-execution-gates.spec.ts",
         "apps/api/src/site-builder/site-build-cost-reconciliation-integrity.spec.ts"
       ],
-      "scenario_ids": ["SCN-FE-SITE-011", "SCN-FE-SITE-012"],
+      "scenario_ids": [
+        "SCN-FE-SITE-011",
+        "SCN-FE-SITE-012"
+      ],
       "delivery_state": "INTERNAL_ONLY",
       "evidence_ids": [
         "site-builder-unknown-settlement-containment-development-20260901"
       ],
-      "required_evidence_kinds": ["unknown_settlement_containment"],
+      "required_evidence_kinds": [
+        "unknown_settlement_containment"
+      ],
       "evidence_expectation": "DEVELOPMENT_ONLY_NOT_PILOT_OR_GA"
     },
     {
       "chain_id": "site-builder-development-run-observation",
       "capability_id": "CAP-SITE-RUN-001",
-      "object_ids": ["OBJ-FE-015", "OBJ-FE-016"],
-      "operation_ids": ["BuildsController_get_v1"],
+      "object_ids": [
+        "OBJ-FE-015",
+        "OBJ-FE-016"
+      ],
+      "operation_ids": [
+        "BuildsController_get_v1"
+      ],
       "code_paths": [
         "apps/api/src/site-builder/builds.controller.ts",
         "apps/api/src/site-builder/site-build-cost-ledger.ts",
@@ -158,18 +202,26 @@
         "apps/api/src/site-builder/site-build-cost-ledger.spec.ts",
         "apps/api/src/site-builder/site-build-cost-reconciliation-resolver.spec.ts"
       ],
-      "scenario_ids": ["SCN-FE-SITE-013"],
+      "scenario_ids": [
+        "SCN-FE-SITE-013"
+      ],
       "delivery_state": "INTERNAL_ONLY",
       "evidence_ids": [
         "site-builder-unknown-settlement-containment-development-20260901"
       ],
-      "required_evidence_kinds": ["unknown_settlement_containment"],
+      "required_evidence_kinds": [
+        "unknown_settlement_containment"
+      ],
       "evidence_expectation": "DEVELOPMENT_ONLY_NOT_PILOT_OR_GA"
     },
     {
       "chain_id": "site-builder-development-intake-path-platform-writer",
       "capability_id": "CAP-SITE-INTAKE-001",
-      "object_ids": ["OBJ-FE-003", "OBJ-FE-012", "OBJ-FE-015"],
+      "object_ids": [
+        "OBJ-FE-003",
+        "OBJ-FE-012",
+        "OBJ-FE-015"
+      ],
       "operation_ids": [
         "IntakeController_create_v1",
         "SiteBuildTechnicalBudgetQuoteController_quoteIntake_v1"
@@ -191,12 +243,17 @@
         "apps/api/src/site-builder/site-build-technical-budget-quote.integrity.spec.ts",
         "apps/api/src/site-builder/site-build-budget-grant.spec.ts"
       ],
-      "scenario_ids": ["SCN-FE-SITE-001", "SCN-FE-SITE-002"],
+      "scenario_ids": [
+        "SCN-FE-SITE-001",
+        "SCN-FE-SITE-002"
+      ],
       "delivery_state": "INTERNAL_ONLY",
       "evidence_ids": [
         "site-builder-deterministic-product-path-platform-writer-development-20260901"
       ],
-      "required_evidence_kinds": ["deterministic_product_path"],
+      "required_evidence_kinds": [
+        "deterministic_product_path"
+      ],
       "evidence_expectation": "DEVELOPMENT_ONLY_NOT_PILOT_OR_GA"
     },
     {
@@ -229,19 +286,29 @@
         "apps/api/src/site-builder/paid-execution-gates.spec.ts",
         "apps/api/src/site-builder/site-build-cost-reconciliation-integrity.spec.ts"
       ],
-      "scenario_ids": ["SCN-FE-SITE-011", "SCN-FE-SITE-012"],
+      "scenario_ids": [
+        "SCN-FE-SITE-011",
+        "SCN-FE-SITE-012"
+      ],
       "delivery_state": "INTERNAL_ONLY",
       "evidence_ids": [
         "site-builder-unknown-containment-platform-writer-development-20260901"
       ],
-      "required_evidence_kinds": ["unknown_settlement_containment_readback"],
+      "required_evidence_kinds": [
+        "unknown_settlement_containment_readback"
+      ],
       "evidence_expectation": "DEVELOPMENT_ONLY_NOT_PILOT_OR_GA"
     },
     {
       "chain_id": "site-builder-development-run-observation-platform-writer",
       "capability_id": "CAP-SITE-RUN-001",
-      "object_ids": ["OBJ-FE-015", "OBJ-FE-016"],
-      "operation_ids": ["BuildsController_get_v1"],
+      "object_ids": [
+        "OBJ-FE-015",
+        "OBJ-FE-016"
+      ],
+      "operation_ids": [
+        "BuildsController_get_v1"
+      ],
       "code_paths": [
         "apps/api/src/site-builder/builds.controller.ts",
         "apps/api/src/site-builder/site-build-cost-ledger.ts",
@@ -252,18 +319,26 @@
         "apps/api/src/site-builder/site-build-cost-ledger.spec.ts",
         "apps/api/src/site-builder/site-build-cost-reconciliation-resolver.spec.ts"
       ],
-      "scenario_ids": ["SCN-FE-SITE-013"],
+      "scenario_ids": [
+        "SCN-FE-SITE-013"
+      ],
       "delivery_state": "INTERNAL_ONLY",
       "evidence_ids": [
         "site-builder-unknown-containment-platform-writer-development-20260901"
       ],
-      "required_evidence_kinds": ["unknown_settlement_containment_readback"],
+      "required_evidence_kinds": [
+        "unknown_settlement_containment_readback"
+      ],
       "evidence_expectation": "DEVELOPMENT_ONLY_NOT_PILOT_OR_GA"
     },
     {
       "chain_id": "site-builder-development-intake-path-platform-writer-expired-evidence",
       "capability_id": "CAP-SITE-INTAKE-001",
-      "object_ids": ["OBJ-FE-003", "OBJ-FE-012", "OBJ-FE-015"],
+      "object_ids": [
+        "OBJ-FE-003",
+        "OBJ-FE-012",
+        "OBJ-FE-015"
+      ],
       "operation_ids": [
         "IntakeController_create_v1",
         "SiteBuildTechnicalBudgetQuoteController_quoteIntake_v1"
@@ -285,12 +360,17 @@
         "apps/api/src/site-builder/site-build-technical-budget-quote.integrity.spec.ts",
         "apps/api/src/site-builder/site-build-budget-grant.spec.ts"
       ],
-      "scenario_ids": ["SCN-FE-SITE-001", "SCN-FE-SITE-002"],
+      "scenario_ids": [
+        "SCN-FE-SITE-001",
+        "SCN-FE-SITE-002"
+      ],
       "delivery_state": "INTERNAL_ONLY",
       "evidence_ids": [
         "site-builder-deterministic-product-path-platform-writer-development-20260904"
       ],
-      "required_evidence_kinds": ["deterministic_product_path"],
+      "required_evidence_kinds": [
+        "deterministic_product_path"
+      ],
       "evidence_expectation": "DEVELOPMENT_ONLY_NOT_PILOT_OR_GA"
     },
     {
@@ -323,19 +403,29 @@
         "apps/api/src/site-builder/paid-execution-gates.spec.ts",
         "apps/api/src/site-builder/site-build-cost-reconciliation-integrity.spec.ts"
       ],
-      "scenario_ids": ["SCN-FE-SITE-011", "SCN-FE-SITE-012"],
+      "scenario_ids": [
+        "SCN-FE-SITE-011",
+        "SCN-FE-SITE-012"
+      ],
       "delivery_state": "INTERNAL_ONLY",
       "evidence_ids": [
         "site-builder-reconciliation-terminal-platform-writer-development-20260904"
       ],
-      "required_evidence_kinds": ["reconciliation_terminalization_readback"],
+      "required_evidence_kinds": [
+        "reconciliation_terminalization_readback"
+      ],
       "evidence_expectation": "DEVELOPMENT_ONLY_NOT_PILOT_OR_GA"
     },
     {
       "chain_id": "site-builder-development-run-terminalization-platform-writer",
       "capability_id": "CAP-SITE-RUN-001",
-      "object_ids": ["OBJ-FE-015", "OBJ-FE-016"],
-      "operation_ids": ["BuildsController_get_v1"],
+      "object_ids": [
+        "OBJ-FE-015",
+        "OBJ-FE-016"
+      ],
+      "operation_ids": [
+        "BuildsController_get_v1"
+      ],
       "code_paths": [
         "apps/api/src/site-builder/builds.controller.ts",
         "apps/api/src/site-builder/site-build-cost-ledger.ts",
@@ -346,13 +436,60 @@
         "apps/api/src/site-builder/site-build-cost-ledger.spec.ts",
         "apps/api/src/site-builder/site-build-cost-reconciliation-resolver.spec.ts"
       ],
-      "scenario_ids": ["SCN-FE-SITE-013"],
+      "scenario_ids": [
+        "SCN-FE-SITE-013"
+      ],
       "delivery_state": "INTERNAL_ONLY",
       "evidence_ids": [
         "site-builder-reconciliation-terminal-platform-writer-development-20260904"
       ],
-      "required_evidence_kinds": ["reconciliation_terminalization_readback"],
+      "required_evidence_kinds": [
+        "reconciliation_terminalization_readback"
+      ],
       "evidence_expectation": "DEVELOPMENT_ONLY_NOT_PILOT_OR_GA"
+    },
+    {
+      "chain_id": "market-candidate-generation-controlled",
+      "capability_id": "CAP-BUYER-001",
+      "object_ids": [
+        "OBJ-FE-031",
+        "OBJ-FE-032"
+      ],
+      "operation_ids": [
+        "MarketCandidateGenerationsController_prepare_v1",
+        "MarketCandidateGenerationsController_execute_v1",
+        "MarketCandidateGenerationsController_get_v1",
+        "MarketCandidateGenerationsController_recover_v1"
+      ],
+      "code_paths": [
+        "apps/api/src/market-candidate-generation/generation.controller.ts",
+        "apps/api/src/market-candidate-generation/generation.service.ts",
+        "apps/api/src/market-candidate-generation/generation.repository.ts",
+        "apps/api/src/market-candidate-generation/generation-basis.ts",
+        "apps/api/src/market-candidate-generation/generation-output.ts",
+        "apps/api/src/durable-results/market-candidate-generation.projection.ts"
+      ],
+      "test_paths": [
+        "apps/api/src/market-candidate-generation/generation-basis.spec.ts",
+        "apps/api/src/market-candidate-generation/generation-output.spec.ts",
+        "apps/api/src/market-candidate-generation/generation.repository.spec.ts",
+        "apps/api/src/market-candidate-generation/generation.service.spec.ts",
+        "apps/api/src/market-candidate-generation/generation.controller.spec.ts",
+        "apps/api/src/market-candidate-generation/generation.postgres.spec.ts",
+        "apps/api/src/market-candidate-generation/generation.openapi.spec.ts",
+        "apps/api/src/market-candidate-generation/market-candidate-generation.module.spec.ts",
+        "apps/api/src/tools/budget-operation-result.postgres.spec.ts",
+        "apps/api/src/execution-budget/workspace-purpose-compatibility.postgres.spec.ts"
+      ],
+      "scenario_ids": [
+        "SCN-FE-BUYER-004"
+      ],
+      "delivery_state": "INTERNAL_ONLY",
+      "evidence_ids": [],
+      "required_evidence_kinds": [
+        "runtime_probe"
+      ],
+      "evidence_expectation": "FRESH_PASS_REQUIRED_FOR_PILOT_OR_GA"
     }
   ]
 }

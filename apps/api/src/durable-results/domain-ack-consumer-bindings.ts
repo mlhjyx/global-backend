@@ -24,6 +24,7 @@ export interface DomainAckProductConsumerBinding {
 }
 
 export const DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS = Object.freeze([
+  { producerId: 'market.candidates.generate', consumer: 'MarketCandidateGenerationService.apply', domainAggregateType: 'MarketCandidateGeneration', identity: 'generation-id-and-terminal-consumption-version', resultStrategy: 'typed_projection', resultSchema: 'market-candidates-generation/v1' },
   { producerId: 'companies_house.search', consumer: 'CompanyRegistryDiscoveryProvider', domainAggregateType: 'CanonicalCompany', identity: 'company-registry-number', resultStrategy: 'typed_projection', resultSchema: 'companies-house-search/v1' },
   { producerId: 'crawl4ai.fetch', consumer: 'WebCrawlKnowledgeSource', domainAggregateType: 'KnowledgeSource', identity: 'source-url-and-content-hash', resultStrategy: 'artifact_reference', resultSchema: 'crawl4ai-fetch/v1' },
   { producerId: 'crawl4ai.render', consumer: 'RenderedPageCapture', domainAggregateType: 'KnowledgeSource', identity: 'source-url-and-render-hash', resultStrategy: 'artifact_reference', resultSchema: 'crawl4ai-render/v1' },

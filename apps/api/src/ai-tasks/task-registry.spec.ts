@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AI_TASKS, getTask, parseTaskModelOverrides } from './task-registry';
 
@@ -282,5 +283,124 @@ describe('A1：联系人发现的工具白名单', () => {
     // 白名单缺 render 时，Broker 抛 ToolPolicyDenied 会被 isExecutionControlError 归为
     // control error → public_web 的 catch 不再回退而是 rethrow → 整次联系人发现失败（#748 同类）。
     expect(getTask('contact.find_decision_makers')?.allowedTools).toContain('crawl4ai.render');
+  });
+});
+
+const B2_LEGACY_SCHEMA_BYTES = {
+  "company_understanding.extract_claims": {
+    "output": "cafe12f823aa2a21d9a0bdeec90940b2804ef7e7bfdb3247803dbc7ab9d3ae60",
+    "contract": "d88ce9d1e40f283cb09d4beea61d3df40b58aa5fb6658511f139ae94d491545e"
+  },
+  "company_understanding.extract_profile": {
+    "output": "1b817a35345ddee673026b290d28434a935b5fe05b2be9800171db2572f2aa26",
+    "contract": "93193bc1d84139cd6507c043c553d85845ff97c0bcb55a0c9401a2b5725e86d6"
+  },
+  "company_understanding.extract_offerings": {
+    "output": "04b585ca421d61bca3fc6b4859e312c024666d9501626d8816b707ce475d4e84",
+    "contract": "f5120a2da87bfc61058ea3363ca7903093c2b45a0c5263b9e4b143bc09f0de7a"
+  },
+  "icp.design": {
+    "output": "ff593e144ad6489deb896cf30cdb70cd0df04f8ce025b81469e0e0de97a1e780",
+    "contract": "e3c01937eb30fd5dfb1a8649cf0556538df9486858242d395d8653a63e7a307c"
+  },
+  "discovery.extract_company": {
+    "output": "e1e158cda13100c8c204668115faeb19416a4ba2dd2157989792a9b642133224",
+    "contract": "27cae192898391fd0a3ad10ccc7ae84b8464b3a7a29d8e5e5d4c1e38e00b16c1"
+  },
+  "discovery.classify_trade_role": {
+    "output": "26c61256e97019ee6bdbecb76aededa991a5f8c100fa820c7d86e1c60ee134a3",
+    "contract": "b98a6c152c8f84b997172c72ccfd439968d49bb0c2e75aa5c730e4163a8f81e3"
+  },
+  "discovery.web_search_candidates": {
+    "output": "3ba5f1c67e332287da4fe3ee36ee4556b9165c8c649300389f24076c10b6f189",
+    "contract": "6a16e2b445d60f5025dee67d3b65cda894f3d14fdbb273acc4f32bd03f5e0b51"
+  },
+  "contact.find_decision_makers": {
+    "output": "946b9114a0d3997f6cff641e19bf155421f1b856dbaefdc2fe9e55a506d61ec2",
+    "contract": "f7aaf258fe812d6a2a1d6d28a6cf3cd7554ae132bf29c353a79e10be9e178c38"
+  },
+  "discovery.extract_list": {
+    "output": "518011f7bbf4096c36a8891cbd2459196b9d2fae0fb2c65f62ed84e4f462fa8b",
+    "contract": "082ceb53a12d2b2715663d8892ab72e8ee399d72e7dc4281d5b65ff22dac8a56"
+  },
+  "taxonomy.normalize": {
+    "output": "3fd0aff6cb2f332c19683f4ae8c8f5ac1431cdf62ac77fe10cfce9e3c1c266fc",
+    "contract": "67cb49254c66323d65315e19c6ef329d8e98efa46a6bd1f652348d5c864c6e0c"
+  },
+  "discovery.quick_judge": {
+    "output": "2810eb6a2cbb3dcf259cde2bd350b3f5ce5a657e5724e912556659591c0892dd",
+    "contract": "f5120a2da87bfc61058ea3363ca7903093c2b45a0c5263b9e4b143bc09f0de7a"
+  },
+  "discovery.qualify_fit": {
+    "output": "a3d60c8d1a191a21b0d3d860c107b9e23ec5bbae1a2e8f3343876ace3fb9603b",
+    "contract": "f5120a2da87bfc61058ea3363ca7903093c2b45a0c5263b9e4b143bc09f0de7a"
+  },
+  "discovery.query_plan": {
+    "output": "a8c56837b774a67da67a0754028a96869578c8ce6e30aabe96e823fa03567e51",
+    "contract": "f08c90ff93b67d8ef8562d1551e0fab33439c0f0ae1d78c083aabbe93ca43324"
+  },
+  "outreach.first_contact_draft": {
+    "output": "7b876ebc0dfd05fe87b919e9b4aa2f75321cfb40338a228a8db65992765c81a2",
+    "contract": "c10598a32044913bebf53dcfa47c0d299519e15b0b36f523054381beb172fb5c"
+  },
+  "outreach.sequence_draft": {
+    "output": "87e6e65599231fe4d58751012a371f4f33b561ee7f501b5eb98a5353c73c7072",
+    "contract": "c10598a32044913bebf53dcfa47c0d299519e15b0b36f523054381beb172fb5c"
+  },
+  "engage.reply_classify": {
+    "output": "f1babd0b5a983836bdf41b647659fb6c77eb03580b3c468b046e2abf8069c13f",
+    "contract": "6a3808e2be122801c3f995871747bff349ed91c341dd3a11926f12850f3f0941"
+  },
+  "campaign.plan": {
+    "output": "9809a15c54c1102b7a15673a758686f938013eb7d9b75388b61dfce7129bd607",
+    "contract": "c0e518033c55fa6c37939a664b2ed294279b37bffb35e1d10c272b4887ea9dcf"
+  },
+  "site_builder.brand_profile": {
+    "output": "a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0",
+    "contract": "82709e3808c7dff9dbf1d338cd83acb5332ff179331185dec750616cbe50b8cb"
+  },
+  "research.account_research": {
+    "output": "2b8083bd4fa945d4684d2bdf215f7f06b8a7d2475bf62d299e78c8ac6f9e5b11",
+    "contract": "1fbf6e32590409f7ac7f5978f5e84687b7f6d83adc6c0211ace2f962223b18c2"
+  },
+  "triage.lead_triage": {
+    "output": "b2cc39702e3f1d8515bb4cdaf53c9bcf17f0a30bca8c6fbfdb02ba10161e0ab8",
+    "contract": "2c8231382be0d9987626d8629366b377392eb5e92fc116e54a9477c74cbb693d"
+  }
+} as const;
+
+describe('B2 exact legacy schema bytes and new generation task boundary', () => {
+  const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
+  it.each(Object.entries(B2_LEGACY_SCHEMA_BYTES))('preserves the serialized legacy contract for %s', (id, expected) => {
+    const task = getTask(id)!;
+    expect(digest(task.outputSchema)).toBe(expected.output);
+    expect(digest({ allowedTools: task.allowedTools, risk: task.risk, humanGate: task.humanGate,
+      maxCostCents: task.maxCostCents, maxOutputTokens: task.maxOutputTokens, timeoutMs: task.timeoutMs,
+      cacheable: task.cacheable })).toBe(expected.contract);
+  });
+
+  it('registers only bounded explicit generation without tools, hidden cache or a substitute-policy expansion', () => {
+    const task = getTask('market.candidates.generate');
+    expect(task).toMatchObject({ id: 'market.candidates.generate', allowedTools: [], maxCostCents: 40,
+      maxOutputTokens: 16_000, timeoutMs: 180_000, risk: 'medium', humanGate: true });
+    expect(task?.cacheable).not.toBe(true);
+    expect(task?.acceptsModelSubstitute).toBeUndefined();
+    expect(task?.inputSchema).toMatchObject({ type: 'object', additionalProperties: false,
+      required: ['schemaVersion', 'company', 'offerings', 'claims'],
+      properties: { schemaVersion: { const: 'market-candidate-generation-input/v1' },
+        offerings: { type: 'array', maxItems: 200 }, claims: { type: 'array', maxItems: 200 } } });
+    expect(task?.outputSchema).toMatchObject({ type: 'object', additionalProperties: false,
+      required: ['outcome', 'candidates'], properties: { outcome: { enum: ['CANDIDATES_PROPOSED', 'COMPLETED_EMPTY'] },
+        candidates: { type: 'array', maxItems: 100 } } });
+  });
+
+  it('resolves the new generation task through the same existing reasoning-tier override mechanism', async () => {
+    vi.resetModules();
+    vi.stubEnv('MODEL_ACQUISITION_REASONING_MODEL', 'synthetic-reasoning-alias');
+    vi.stubEnv('MODEL_ACQUISITION_TASK_MODELS', '{}');
+    try {
+      const current = await import('./task-registry');
+      expect(current.getTask('market.candidates.generate')?.model).toBe('synthetic-reasoning-alias');
+    } finally { vi.unstubAllEnvs(); vi.resetModules(); }
   });
 });

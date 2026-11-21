@@ -73,6 +73,10 @@
     },
     {
       "from": "(root)",
+      "to": "market-candidate-generation"
+    },
+    {
+      "from": "(root)",
       "to": "market-candidates"
     },
     {
@@ -198,6 +202,10 @@
     {
       "from": "ai-tasks",
       "to": "discovery"
+    },
+    {
+      "from": "ai-tasks",
+      "to": "market-candidate-generation"
     },
     {
       "from": "ai-tasks",
@@ -409,6 +417,10 @@
     },
     {
       "from": "durable-results",
+      "to": "market-candidate-generation"
+    },
+    {
+      "from": "durable-results",
       "to": "platform-authority"
     },
     {
@@ -649,6 +661,46 @@
     },
     {
       "from": "lead",
+      "to": "tools"
+    },
+    {
+      "from": "market-candidate-generation",
+      "to": "ai-tasks"
+    },
+    {
+      "from": "market-candidate-generation",
+      "to": "auth"
+    },
+    {
+      "from": "market-candidate-generation",
+      "to": "common"
+    },
+    {
+      "from": "market-candidate-generation",
+      "to": "durable-results"
+    },
+    {
+      "from": "market-candidate-generation",
+      "to": "execution-budget"
+    },
+    {
+      "from": "market-candidate-generation",
+      "to": "market-candidates"
+    },
+    {
+      "from": "market-candidate-generation",
+      "to": "model-gateway"
+    },
+    {
+      "from": "market-candidate-generation",
+      "to": "model-runtime"
+    },
+    {
+      "from": "market-candidate-generation",
+      "to": "prisma"
+    },
+    {
+      "from": "market-candidate-generation",
       "to": "tools"
     },
     {

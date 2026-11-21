@@ -28,6 +28,7 @@ const typedProjectionSchemaValues = [
   'deepseek-search/v1', 'deepseek-fetch/v1',
   'outreach-first-contact-draft/v1',
   'campaign-plan/v1',
+  'market-candidates-generation/v1',
 ] as const;
 
 export const TYPED_PROJECTION_SCHEMAS = Object.freeze([

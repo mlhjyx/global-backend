@@ -240,7 +240,7 @@ describe('DomainAckService', () => {
     const service = new DomainAckService(repository);
     const apply = vi.fn(async () => ({ status: 'verified' }));
 
-    expect(DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS).toHaveLength(35);
+    expect(DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS).toHaveLength(36);
     expect(getDomainAckProductConsumerBinding('smtp.rcpt_probe')).toEqual({
       producerId: 'smtp.rcpt_probe',
       consumer: 'EmailVerificationProvider',
@@ -698,4 +698,19 @@ describe('DomainAckService', () => {
       }
     }
   });
+});
+
+
+describe('market generation terminal consumption binding',()=>{
+ it('registers only the fixed producer, consumer, aggregate and typed schema',()=>{
+   expect(getDomainAckProductConsumerBinding('market.candidates.generate')).toEqual({producerId:'market.candidates.generate',consumer:'MarketCandidateGenerationService.apply',domainAggregateType:'MarketCandidateGeneration',identity:'generation-id-and-terminal-consumption-version',resultStrategy:'typed_projection',resultSchema:'market-candidates-generation/v1'});
+ });
+ it('acknowledges a legitimate NOT_APPLIED consumer decision without asserting a set, and replay does not rerun that decision',async()=>{
+   const service=new DomainAckService(new InMemoryDomainAckRepository());
+   const input={service,producerId:'market.candidates.generate',receipt:receipt({resultSchema:'market-candidates-generation/v1'}),domainAckKey:UUID_A,domainRevision:'1'};
+   const first=await applyDomainAckConsumerTransaction({...input,apply:async()=>({phase:'NOT_APPLIED',setId:null,reasonCode:'SUPERSEDED'})});
+   expect(first).toMatchObject({status:'APPLIED',value:{phase:'NOT_APPLIED',setId:null,reasonCode:'SUPERSEDED'},ack:{consumer:'MarketCandidateGenerationService.apply',domainAggregateType:'MarketCandidateGeneration',resultSchema:'market-candidates-generation/v1'}});
+   const replay=await applyDomainAckConsumerTransaction({...input,apply:async()=>{throw Error('terminal replay must not reapply');}});
+   expect(replay).toMatchObject({status:'REPLAYED'});expect(replay.value).toBeUndefined();
+ });
 });

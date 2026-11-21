@@ -70,14 +70,19 @@ enum ExecutionBudgetAuthorityKind {
 }
 
 enum ExecutionBudgetPurpose {
-  ICP_DESIGN            @map("icp.design")
-  ICP_QUERY_PLAN        @map("icp.query_plan")
-  UNDERSTANDING_RUN     @map("understanding.run")
-  DISCOVERY_RUN         @map("discovery.run")
-  CONTACT_VERIFY        @map("contact.verify")
-  PLATFORM_ACQUISITION  @map("platform.acquisition")
-  PLATFORM_INTENT_WATCH @map("platform.intent_watch")
-  PLATFORM_SANCTIONS    @map("platform.sanctions")
+  ICP_DESIGN                  @map("icp.design")
+  ICP_QUERY_PLAN              @map("icp.query_plan")
+  UNDERSTANDING_RUN           @map("understanding.run")
+  DISCOVERY_RUN               @map("discovery.run")
+  CONTACT_VERIFY              @map("contact.verify")
+  CONTACT_ENRICH              @map("contact.enrich")
+  OUTREACH_DRAFT              @map("outreach.draft")
+  CAMPAIGN_PLAN               @map("campaign.plan")
+  MARKET_CANDIDATES_GENERATE   @map("market.candidates.generate")
+  PLATFORM_ACQUISITION        @map("platform.acquisition")
+  PLATFORM_INTENT_WATCH       @map("platform.intent_watch")
+  PLATFORM_SANCTIONS          @map("platform.sanctions")
+  PLATFORM_CHANNEL_CRAWL      @map("platform.channel_crawl")
 
   @@map("execution_budget_purpose")
 }
@@ -108,6 +113,7 @@ model Workspace {
   governedSubjectTombstones                      GovernedSubjectTombstone[]                      @relation("GovernedSubjectTombstoneWorkspace")
   governedSubjectTombstoneAudits                 GovernedSubjectTombstoneAudit[]                 @relation("GovernedSubjectTombstoneAuditWorkspace")
   marketCandidateSets                           MarketCandidateSet[]
+  marketCandidateGenerations                    MarketCandidateGeneration[]
 
   @@map("workspace")
 }
@@ -127,6 +133,8 @@ model MarketCandidateSet {
   current MarketCandidateSetRevision @relation("MarketCandidateCurrent", fields: [workspaceId, id, currentRevision], references: [workspaceId, setId, revision], onDelete: NoAction, onUpdate: NoAction, map: "market_candidate_set_current_fkey")
   revisions MarketCandidateSetRevision[] @relation("MarketCandidateRevisions")
   feedback MarketCandidateFeedback[]
+  generationResults MarketCandidateGeneration[] @relation("GenerationResultSet")
+  generationAnchors MarketCandidateGeneration[] @relation("GenerationAnchorSet")
 
   @@unique([id, workspaceId, companyId], map: "market_candidate_set_identity_key")
   @@unique([workspaceId, companyId, initialOperationId], map: "market_candidate_set_operation_key")
@@ -151,6 +159,7 @@ model MarketCandidateSetRevision {
   children MarketCandidateSetRevision[] @relation("MarketCandidateRevisionParent")
   feedbackFrom MarketCandidateFeedback[] @relation("MarketCandidateFeedbackFrom")
   feedbackTo MarketCandidateFeedback[] @relation("MarketCandidateFeedbackTo")
+  generationAnchors MarketCandidateGeneration[] @relation("GenerationAnchorRevision")
 
   @@id([workspaceId, setId, revision], map: "market_candidate_set_revision_pkey")
   @@map("market_candidate_set_revision")
@@ -231,6 +240,7 @@ model ToolBudgetAccount {
   createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
 
+  generationAttempts       MarketCandidateGenerationAttempt[] @relation("GenerationAttemptAccount")
   operations               ToolBudgetOperation[]
   platformEgressAttempts   PlatformEgressAttempt[]   @relation("PlatformEgressAttemptAccount")
   authority                ExecutionBudgetAuthority? @relation(fields: [authorityId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "tool_budget_account_authority_fkey")
@@ -286,6 +296,7 @@ model ExecutionBudgetAuthority {
   createdAt               DateTime                     @default(now()) @map("created_at") @db.Timestamptz(3)
 
   workspace                Workspace?                           @relation(fields: [workspaceId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "execution_budget_authority_workspace_fkey")
+  generationAttempts       MarketCandidateGenerationAttempt[] @relation("GenerationAttemptAuthority")
   accounts                 ToolBudgetAccount[]
   revocations              ExecutionBudgetAuthorityRevocation[]
   artifacts                GenericOperationArtifact[]
@@ -935,6 +946,8 @@ model CompanyProfile {
   claimBridges              BrandProfileClaimBridge[]
   publishableClaimSnapshots SitePublishableClaimSnapshot[]
   marketCandidateSets       MarketCandidateSet[]
+  marketCandidateGenerations MarketCandidateGeneration[]
+  marketCandidateGenerationHeads MarketCandidateGenerationHead[]
 
   @@unique([id, workspaceId], map: "company_profile_id_workspace_id_key")
   @@index([workspaceId])
@@ -4695,6 +4708,96 @@ model CoverageEstimate {
   @@unique([workspaceId, identityKey], map: "coverage_estimate_workspace_identity_key")
   @@index([workspaceId, computedAt], map: "coverage_estimate_workspace_computed_idx")
   @@map("coverage_estimate")
+}
+
+
+/// Metadata-only explicit intent. Raw input and model results remain at their existing authorities.
+model MarketCandidateGeneration {
+  id String @id @default(uuid()) @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  companyId String @map("company_id") @db.Uuid
+  requestedBy String @map("requested_by") @db.Uuid
+  intentId String @map("intent_id") @db.Uuid
+  intentSequence BigInt @map("intent_sequence")
+  prepareRequestHash String @map("prepare_request_hash") @db.VarChar(64)
+  intentDigest String @map("intent_digest") @db.VarChar(64)
+  sourceSelection Json @map("source_selection")
+  basisDescriptors Json @map("basis_descriptors")
+  inputMaterialDigest String @map("input_material_digest") @db.VarChar(64)
+  contractVersion String @map("contract_version") @db.VarChar(100)
+  contractDigest String @map("contract_digest") @db.VarChar(64)
+  promptDigest String @map("prompt_digest") @db.VarChar(64)
+  inputSchemaDigest String @map("input_schema_digest") @db.VarChar(64)
+  outputSchemaDigest String @map("output_schema_digest") @db.VarChar(64)
+  modelPolicyDigest String @map("model_policy_digest") @db.VarChar(64)
+  expectedCurrentSetId String? @map("expected_current_set_id") @db.Uuid
+  expectedCurrentRevision Int? @map("expected_current_revision")
+  preparedAt DateTime @default(now()) @map("prepared_at") @db.Timestamptz(3)
+  phase String @default("PREPARED") @db.VarChar(32)
+  reasonCode String? @map("reason_code") @db.VarChar(40)
+  activeAttemptId String? @map("active_attempt_id") @db.Uuid
+  setId String? @map("set_id") @db.Uuid
+  executionOperationId String? @map("execution_operation_id") @db.Uuid
+  resultSchema String? @map("result_schema") @db.VarChar(100)
+  resultDigest String? @map("result_digest") @db.VarChar(64)
+  consumerAckId String? @map("consumer_ack_id") @db.Char(64)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(3)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "market_candidate_generation_workspace_fkey")
+  company CompanyProfile @relation(fields: [companyId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: NoAction, map: "market_candidate_generation_company_fkey")
+  heads MarketCandidateGenerationHead[] @relation("GenerationHeadTarget")
+  attempts MarketCandidateGenerationAttempt[] @relation("GenerationAttempts")
+  activeAttempt MarketCandidateGenerationAttempt? @relation("GenerationActiveAttempt", fields: [activeAttemptId, workspaceId, companyId, id], references: [id, workspaceId, companyId, generationId], onDelete: NoAction, onUpdate: NoAction, map: "market_candidate_generation_active_attempt_fkey")
+  set MarketCandidateSet? @relation("GenerationResultSet", fields: [setId, workspaceId, companyId], references: [id, workspaceId, companyId], onDelete: NoAction, onUpdate: NoAction, map: "market_candidate_generation_set_fkey")
+  anchorSet MarketCandidateSet? @relation("GenerationAnchorSet", fields: [expectedCurrentSetId, workspaceId, companyId], references: [id, workspaceId, companyId], onDelete: NoAction, onUpdate: NoAction, map: "market_candidate_generation_anchor_set_fkey")
+  anchorRevision MarketCandidateSetRevision? @relation("GenerationAnchorRevision", fields: [workspaceId, expectedCurrentSetId, expectedCurrentRevision], references: [workspaceId, setId, revision], onDelete: NoAction, onUpdate: NoAction, map: "market_candidate_generation_anchor_revision_fkey")
+
+  @@unique([id, workspaceId, companyId], map: "market_candidate_generation_identity_key")
+  @@unique([id, workspaceId, companyId, intentSequence], map: "market_candidate_generation_head_identity_key")
+  @@unique([workspaceId, companyId, requestedBy, intentId], map: "market_candidate_generation_intent_key")
+  @@unique([workspaceId, companyId, setId], map: "market_candidate_generation_result_set_key")
+  @@index([workspaceId, companyId, preparedAt, id], map: "market_candidate_generation_company_idx")
+  @@map("market_candidate_generation")
+}
+
+model MarketCandidateGenerationHead {
+  workspaceId String @map("workspace_id") @db.Uuid
+  companyId String @map("company_id") @db.Uuid
+  latestGenerationId String @map("latest_generation_id") @db.Uuid
+  intentSequence BigInt @map("intent_sequence")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  company CompanyProfile @relation(fields: [companyId, workspaceId], references: [id, workspaceId], onDelete: Cascade, onUpdate: NoAction, map: "market_candidate_generation_head_company_fkey")
+  generation MarketCandidateGeneration @relation("GenerationHeadTarget", fields: [latestGenerationId, workspaceId, companyId, intentSequence], references: [id, workspaceId, companyId, intentSequence], onDelete: Cascade, onUpdate: NoAction, map: "market_candidate_generation_head_target_fkey")
+
+  @@id([workspaceId, companyId], map: "market_candidate_generation_head_pkey")
+  @@map("market_candidate_generation_head")
+}
+
+model MarketCandidateGenerationAttempt {
+  id String @id @default(uuid()) @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+  companyId String @map("company_id") @db.Uuid
+  generationId String @map("generation_id") @db.Uuid
+  scopeKey String @map("scope_key") @db.VarChar(200)
+  authorityId String @map("authority_id") @db.Uuid
+  accountKey String @map("account_key") @db.VarChar(200)
+  accountGeneration Int @map("account_generation")
+  expectedOperationKey String @map("expected_operation_key") @db.VarChar(64)
+  requestSha256 String @map("request_sha256") @db.VarChar(64)
+  admittedAt DateTime @default(now()) @map("admitted_at") @db.Timestamptz(3)
+
+  generation MarketCandidateGeneration @relation("GenerationAttempts", fields: [generationId, workspaceId, companyId], references: [id, workspaceId, companyId], onDelete: Cascade, onUpdate: NoAction, map: "market_candidate_generation_attempt_generation_fkey")
+  activeFor MarketCandidateGeneration[] @relation("GenerationActiveAttempt")
+  authority ExecutionBudgetAuthority @relation("GenerationAttemptAuthority", fields: [scopeKey, authorityId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "market_candidate_generation_attempt_authority_fkey")
+  account ToolBudgetAccount @relation("GenerationAttemptAccount", fields: [scopeKey, accountKey], references: [scopeKey, accountKey], onDelete: NoAction, onUpdate: NoAction, map: "market_candidate_generation_attempt_account_fkey")
+
+  @@unique([id, workspaceId, companyId, generationId], map: "market_candidate_generation_attempt_identity_key")
+  @@unique([generationId, authorityId], map: "market_candidate_generation_attempt_authority_key")
+  @@unique([scopeKey, accountKey, accountGeneration, expectedOperationKey], map: "market_candidate_generation_attempt_operation_key")
+  @@index([workspaceId, generationId, admittedAt, id], map: "market_candidate_generation_attempt_generation_idx")
+  @@map("market_candidate_generation_attempt")
 }
 
 /// Immutable manufacturer projection. Only commit_manufacturer_network_evidence_v1 may insert;

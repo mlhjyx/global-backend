@@ -113,3 +113,26 @@ presign → commit（魔数/大小/hash/配额，advisory lock 复检）
 - 验证入口：本域 document/service/controller/OpenAPI/module suites 与显式 CI opt-in 的 `market-candidate-sets.postgres.spec.ts`；一次性 loopback 数据库必须同时提供 owner/app_user URL，拒绝 global_dev、URL 覆盖参数与缺失配对。owner 只建/清合成 fixture；RLS、不可变、幂等并发、回滚、冷读与删源实际以 app_user 执行。
 - 容量是资源护栏，不是质量分或业务最低卡数：最多100卡、200来源引用，短文本/理由2000字符，canonical UTF-8 文档最多256 KiB；数据库对 JSONB 文本另有256 KiB保守存储限额。无排名、业务评分/权重或转化阈值。
 - 后继：B2 单独闭合授权/预算、真实 producer、模型合同/receipt/ACK 与生成状态；B3 从确知版本导出合同生成 SaaS pin/薄投影与反馈页面，409保留未提交输入；B4 另起带候选身份/版本的找买家操作。反馈不替代执行授权。本包未部署、无真实市场生成、SaaS 页面或商业效果验收；回退为撤回本模块接线/接口，保留追加历史，不通过回退源码抹掉资料或反馈。
+
+
+## 10. 受控市场候选生成（B2，源码边界）
+
+本增量只闭合 backend 单仓源码与合成隔离验证，不改上文 B1 纯存储自身的职责，不以代码或测试冒部署、真实市场效果或 SaaS 签发接线。B3 页面/薄投影和 B4 找买家不在本增量。
+
+- 普通用户接口：公司下 `POST market-candidate-generations` 准备明确意图；`POST market-candidate-generations/:generationId/execute` 受精确授权执行；`GET market-candidate-generations/:generationId` 纯持久读；`POST .../recover` 只恢复原结果与保存。prepare/execute/recover 需 `acquisition:write`，GET 需 `acquisition:read`；执行/恢复还限定原请求者。全局写准入不豁免 recover；UUID、quote 和客户端摘要均不是授权。
+- 意图使用 workspace/company/requestedBy/intentId 幂等，同体重放、异体409；不可变意图摘要绑定完整材料、选用字段摘要、合同/模板/schema/model-policy 与 B1 当前集合/修订 anchor。三张控制表只保存元数据、单调最新意图与追加账户身份，不复制原始输入、结果、文档、联系方式或用户反馈；租户 RLS、复合 FK、不可变列与最小列 UPDATE 在数据库执行。
+- 实际输入是完整 canonical `inputMaterial/v1`，包含 CompanyProfile 已选结构化字段、完整 Offering attributes 和已审批、未过期 Claim 已选字段。去重后来源合计最多200，完整 UTF-8 包装最多262144字节，不截断、摘要替正文或静默 take；显式选中失效项拒绝。CompanyProfile.version 与 Offering 所用字段 hash 独立，声明市场只作卖方偏好。
+- `market.candidates.generate` 仅 `WORKSPACE_GRANT/market_candidate_generation`，quote 绑定 generationId 与不可变 intentDigest。沿既有模型 selector，allowedTools 为空、无 cacheable、单任务40美分、输出最多16000 token、180秒超时；既有结构化修复倍率2计入完整逻辑80美分总帽，所有 attempts/accounts 共用该上界。新账户只沿原过期容忍、全部 neverDispatched 与先关闭旧账的安全协议；SETTLED/UNKNOWN/不明预留不能借新意图或账户重买。
+- 256 KiB 材料不保证能放入模型上下文：共享结构化 runtime 的纯准备函数同时用于 Grant 前预检与实际执行，完整 required policy/schema/request 包装及转义、输出/推理 reserve 都计入原窗口，不能丢段或放宽旧预算。冻结指纹在入场重建后复核；事务外才 await 原 granted-model/runtime/Router，无第二套 provider 或预算协议。
+- 输出闭合为候选假设或合法完成空结果，最多100卡、完整序列化最多65536字节；条件、反证、未知及独立空国家保留。模型不能写权威事实、稳定 ID、actor、版本或反馈，坏卡/伪来源全拒，不过滤凑空成功。旧通用119 KiB typed、128 KiB PG JSONB、4096字段及深度等容量门不变，局部最大值不表示其笛卡尔积合法。
+- 入场先执行既有 authority/account 锁协议，随后 company、generation head/row 与排序来源；Claim 沿 B1 `FOR SHARE NOWAIT`。预检、入场、应用只对55P03整事务最多三次，ACK 外层回滚而非只重试 B1 内句。初始 B1 存储提取调用方 tx core，旧入口保留原包裹/重试、哈希与 JSONB 精确字节门。
+- 精确消费绑定 `MarketCandidateGenerationService.apply / MarketCandidateGeneration`，key 为 generationId、消费版本为1。B1 set/revision、generation PERSISTED 与可信 ACK 必须同事务。确定被新意图/反馈 anchor 或来源改变拒绝时，合法 NOT_APPLIED 与 ACK 同事务、set_id 必空；真正存储/控制面失败不是丢弃，原 SETTLED 留 RESULT_READY/SAVE_PENDING。已准入在途调用遇公司软删仅可在原内部消费上下文完成拒绝审计，对外仍404，不复活/暴露资料。
+- 恢复只按原 scope/authority/account/generation/operation/schema 读账；复用唯一 receipt validator 与完整 project/restore/reproject 校验，不 open/reserve/attest 续权或调用模型。终态先读域决定，不依赖投影正文；PERSISTED 再做 B1 初始修订权威冷读，NOT_APPLIED 永无可用集合。ACK REPLAYED 的 value 为空，必须核既有匹配终态；孤立 ACK、错误元组或缺投影不能造成功。ACK 不表示 typed 投影已物理擦除，本增量不加 purge/reaper 或旧账本 DML 权限。
+- 验证是显式自建 loopback `global_test`、真实非 superuser/non-BYPASSRLS app_user 与合成 provider，通过原 Router、预算函数、ACK 和域表执行。覆盖并发、来源/反馈竞争、完整回滚、闭账/过期恢复、账户族总帽、UNKNOWN 不重发及真实普通用户/全局准入 HTTP。原模型与工程研究工具分离，本包不运行真实模型、embedding、搜索、抓取、发送、迁移业务库或部署，不声称真实市场判断或转化已验收。
+
+- 固定头复审回修：最新意图只约束首次 PERSISTED 提交，历史终态持续核对原操作、精确 ACK 和 B1 初始修订；新增准备或新集合不撤销旧保存事实。修正通过后续 forward 迁移实现，旧 ENUM/USE 字节保持。
+- 原账 SETTLED 且结果/receipt 全部 SQL NULL 仅证明保守记账，没有证明物理结果已确定。仅当本任务纯输出校验产生确定拒绝、usage 无未决结算时持久记为 FAILED/OUTPUT_INVALID；504/524、断流、未决输出、结算 unknown 和崩溃前未留确定分类均保 RESULT_UNKNOWN。公司风险闸在新意图准入前拦截旧未分类空结果，不能靠新 key/Grant 重买；旧通用 FAILED/EXECUTION_FAILED 无确定证明时读回保守不可用。费用不改、不伪造 receipt/ACK；部分/损坏/错元组仍 fail-closed。相同 attempt 的旧恢复快照不能倒写已推进阶段，同阶段同原因不重复写时间戳。UNKNOWN 的安全重准入须在原权威/账户锁与账户族检查内复核精确 RELEASED，再经合法 FAILED 转换；不放宽数据库阶段约束。
+
+- G2 历史识别保原普通添加提交；只在普通添加缺失时核完整 merge 历史及所有已知父提交均无该路径，识别真正 merge 首次加入。导入已有迁移不重置原始身份，后续改写、浅/缺历史仍拒绝；真实 CLI、命名/撞车/存量棘轮、迁移 deploy 与数据库 checksum 双向校验不变。Node 隔离 Git 回归接在原 G2 步骤，不跳检查或增豁免。
+
+- G2 的窄 fallback 额外核完整历史里被路径简化隐藏的普通起点与真正 merge 起点，按可证明祖先关系保留唯一原始身份；删除再建不能重置原 blob，独立多起点无法唯一证明则红，不按日期或遍历首项选点。普通查询已有结果的全仓存量规则不改，HEAD 未跟踪或只有 index 的文件不获得历史证明。

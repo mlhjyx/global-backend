@@ -54,7 +54,7 @@ describe('Workspace technical budget quote OpenAPI', () => {
     );
     const variants = operation.requestBody?.content?.['application/json']
       ?.schema?.oneOf;
-    expect(variants).toHaveLength(11);
+    expect(variants).toHaveLength(12);
     expect(
       variants?.every((variant) => variant.additionalProperties === false),
     ).toBe(true);
@@ -94,4 +94,14 @@ describe('Workspace technical budget quote OpenAPI', () => {
       /customer|balance|credits|subscription|prepaid|invoice/i,
     );
   });
+  it('documents only the bounded explicit generation intent, never budget authority or business input', () => {
+    const operation = document().paths['/api/v1/execution-budget/workspace-technical-quote']?.post;
+    const body = operation?.requestBody as {content:{'application/json':{schema:{oneOf:Array<{properties:{operation:{enum:string[]}};required:string[];additionalProperties:boolean}>}}}};
+    const variant = body.content['application/json'].schema.oneOf.find(v=>v.properties.operation.enum[0]==='POST /market-candidate-generations/:generationId/execute');
+    expect(variant).toMatchObject({ additionalProperties:false, required:['operation','generationId','body'], properties:{generationId:{format:'uuid'},body:{additionalProperties:false,required:['intentDigest'],properties:{intentDigest:{pattern:'^[0-9a-f]{64}$'}}}} });
+    const response = document().components.schemas.WorkspaceTechnicalBudgetQuoteResponseDto;
+    expect(JSON.stringify(response)).toContain('market.candidates.generate');
+    expect(JSON.stringify(response)).toContain('market_candidate_generation');
+  });
+
 });

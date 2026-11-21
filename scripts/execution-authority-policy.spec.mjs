@@ -24,11 +24,11 @@ import {
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 
-test('inventory is locked to 23 Tools and 15 product Model tasks', () => {
+test('inventory is locked to 23 Tools and 16 product Model tasks', () => {
   assert.equal(EXPECTED_TOOL_IDS.length, 23);
-  assert.equal(EXPECTED_MODEL_TASKS.length, 15);
+  assert.equal(EXPECTED_MODEL_TASKS.length, 16);
   assert.equal(new Set(EXPECTED_TOOL_IDS).size, 23);
-  assert.equal(new Set(EXPECTED_MODEL_TASKS.map((entry) => entry.taskId)).size, 15);
+  assert.equal(new Set(EXPECTED_MODEL_TASKS.map((entry) => entry.taskId)).size, 16);
   assert.equal(EXPECTED_GENERIC_MODEL_TASK_LOOKUPS.length, 4);
   assert.deepEqual(EXPECTED_MODEL_GATEWAY_BOUNDARIES, [
     'apps/api/src/model-runtime/site-builder-ai-task-bridge.ts#generateStructured#1',
@@ -278,7 +278,7 @@ test('pure contracts preserve typed authority wiring and the artifact pre-wire h
   assert.deepEqual(result.issues, []);
   // 获客 vNext W4：两源（opencorporates + companies_house_registry）= 23 tools / 52 callsites，manufacturer lookup/fetch +2，按 policy 源真值锁定。
   assert.equal(result.toolCount, 23);
-  assert.equal(result.modelTaskCount, 15);
+  assert.equal(result.modelTaskCount, 16);
   assert.equal(result.physicalExecutionWiring, 'PARTIAL_HOLD');
   assert.equal(result.physicalToolCallsiteCount, 52);
   assert.equal(result.modelGatewayBoundaryCount, 2);
@@ -349,4 +349,10 @@ test('artifact execution is bound per call: only a subject-bound call may reach 
     manifest: { ...manifest, artifactPhysicalExecution: { ...manifest.artifactPhysicalExecution, inlineFallbackAllowed: true } },
   });
   assert.ok(fallback.issues.some((entry) => entry.code === 'EXECUTION_AUTHORITY_ARTIFACT_WIRING_HOLD_INVALID'));
+});
+
+
+test('new market-generation task retains its dedicated source, typed schema and no extra model gateway boundary',()=>{
+ assert.deepEqual(EXPECTED_MODEL_TASKS.find(task=>task.taskId==='market.candidates.generate'),{path:'apps/api/src/market-candidate-generation/generation.service.ts',taskId:'market.candidates.generate',schema:'market-candidates-generation/v1'});
+ assert.equal(EXPECTED_MODEL_GATEWAY_BOUNDARIES.length,2);
 });

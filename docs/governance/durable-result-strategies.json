@@ -10,7 +10,7 @@
       },
       {
         "path": "apps/api/src/model-gateway/router-model-gateway.ts",
-        "sha256": "d92d124a3b0a1727d7f94ebace1893b107292336bb7731900558e50500c5380b"
+        "sha256": "de52c87f7d6b530373edac5bfe40ff2d629b4636896f64717d2e0c646905ea7d"
       },
       {
         "path": "apps/api/src/tools/tool-broker.factory.ts",
@@ -712,6 +712,22 @@
         "consumer": "CampaignPlanningActivities.deliverCampaignPlanRevision",
         "domainAggregateType": "CampaignRevision",
         "identitySource": "job-id-and-result-digest",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
+      "taskId": "market.candidates.generate",
+      "callsitePath": "apps/api/src/market-candidate-generation/generation.service.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "market-candidates-generation/v1",
+      "operationIdentity": "model:market.candidates.generate:<immutable-generation-account-operation-key>",
+      "privacyClass": "CONFIDENTIAL_TENANT",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "MarketCandidateGenerationService.apply",
+        "domainAggregateType": "MarketCandidateGeneration",
+        "identitySource": "generation-id-and-terminal-consumption-version",
         "subjectRefRequired": false,
         "personalDataDsrCompatible": false
       }
