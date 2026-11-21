@@ -2173,3 +2173,48 @@ test("description metadata rejects plain YAML nonstrings with comments and trail
     );
   }
 });
+
+test("description metadata classifies values after YAML leading whitespace", async () => {
+  const { validateDependencySourcePolicy } =
+    await import("./supply-chain-source-policy.mjs");
+  const invalid = [
+    "true",
+    "false",
+    "123",
+    "null",
+    "~",
+    "[harmless]",
+    "{notice:harmless}",
+    "!!str harmless",
+    "&notice harmless",
+    '"ordinary"',
+  ];
+  for (const spaces of [1, 2, 3]) {
+    for (const value of invalid) {
+      const input = descriptiveMetadataInput(
+        `    deprecated: ${" ".repeat(spaces)}${value}\n`,
+      );
+      assert.equal(
+        validateDependencySourcePolicy(input).ok,
+        false,
+        JSON.stringify({ spaces, value }),
+      );
+    }
+    for (const value of [
+      "'true'",
+      "'123'",
+      "'null'",
+      "'safe # text'",
+      "ordinary description",
+    ]) {
+      const input = descriptiveMetadataInput(
+        `    deprecated: ${" ".repeat(spaces)}${value}\n`,
+      );
+      assert.deepEqual(
+        validateDependencySourcePolicy(input).issues,
+        [],
+        JSON.stringify({ spaces, value }),
+      );
+    }
+  }
+});

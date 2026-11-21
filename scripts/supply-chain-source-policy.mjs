@@ -447,7 +447,7 @@ function lockfileSourceView(text) {
     fields.add(field[1]);
     lastField = field[1];
     if (lastField !== "deprecated") continue;
-    const value = field[2] ?? "";
+    const value = (field[2] ?? "").trimStart();
     if (/^[|>][+-]?(?: +#.*)?$/u.test(value)) {
       let end = i + 1;
       let contentSeen = false;
