@@ -19,11 +19,13 @@ if (Boolean(ownerUrl) !== Boolean(appUrl)) {
 for (const value of [ownerUrl, appUrl]) {
   if (!value) continue;
   const url = new URL(value);
+  const dedicated = /^\/manufacturer_ttl_test_[a-f0-9]{8}$/u.test(url.pathname);
+  const ownerOptions = dedicated && url.searchParams.toString() === new URLSearchParams({ options: '-c role=global' }).toString();
   if (
     url.protocol !== 'postgresql:' ||
     !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) ||
-    url.pathname !== '/global_test' ||
-    url.search !== '' ||
+    (!dedicated && url.pathname !== '/global_test') || url.port === '15433' ||
+    (url.search !== '' && !ownerOptions) ||
     url.hash !== ''
   ) {
     throw new Error('company_contact_point test requires a loopback test database');

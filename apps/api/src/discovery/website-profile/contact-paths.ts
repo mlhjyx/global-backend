@@ -342,18 +342,28 @@ function before(left: Rank, right: Rank): boolean {
  * and the link has no query string (the query might be what identifies the page).
  */
 export function findContactPaths(homeMarkdown: string, domainInput: string): CompanyContactLinks {
+  if (typeof homeMarkdown !== 'string' || !homeMarkdown) return NO_LINKS;
+  return contactPathsFromLinks(markdownLinks(homeMarkdown), domainInput).paths;
+}
+
+function contactPathsFromLinks(links: Iterable<MarkdownLink>, domainInput: string): {
+  paths: CompanyContactLinks; linkedinPages: readonly string[];
+} {
   const domain = companyDomain(domainInput);
-  if (!domain || typeof homeMarkdown !== 'string' || !homeMarkdown) return NO_LINKS;
+  if (!domain) return { paths: NO_LINKS, linkedinPages: [] };
   const base = new URL(`https://${domain}/`);
   const best = new Map<SameSiteKind, { url: string; rank: Rank }>();
   const linkedinPages: string[] = [];
+  const seenLinkedin = new Set<string>();
   let x: string | null = null;
-  markdownLinks(homeMarkdown).forEach((link, index) => {
+  let index = -1;
+  for (const link of links) {
+    index += 1;
     const linkedin = linkedinCompanyPage(link.target);
-    if (linkedin && !linkedinPages.includes(linkedin)) linkedinPages.push(linkedin);
+    if (linkedin && !seenLinkedin.has(linkedin)) { seenLinkedin.add(linkedin); linkedinPages.push(linkedin); }
     x ??= xCompanyAccount(link.target, domain);
     const page = sameSitePage(link.target, base, domain);
-    if (!page) return;
+    if (!page) continue;
     const label = normalizedLabel(link.label);
     for (const rule of SAME_SITE_RULES) {
       const byPath = rule.path(page.lastTokens);
@@ -362,14 +372,30 @@ export function findContactPaths(homeMarkdown: string, domainInput: string): Com
       const current = best.get(rule.kind);
       if (!current || before(rank, current.rank)) best.set(rule.kind, { url: page.url, rank });
     }
-  });
-  return Object.freeze({
+  }
+  return { paths: Object.freeze({
     contactPage: best.get('contact_page')?.url ?? null,
     impressumPage: best.get('impressum_page')?.url ?? null,
     supplierPage: best.get('supplier_page')?.url ?? null,
     linkedinCompanyPage: ownLinkedinPage(linkedinPages, domain),
     xCompanyAccount: x,
-  });
+  }), linkedinPages };
+}
+
+
+/** Server-owned same-document projection: reuse all five strict URL/ownership rules. */
+export function companyNavigationLinks(links: Iterable<MarkdownLink>, domainInput: string): readonly MarkdownLink[] {
+  const { paths, linkedinPages } = contactPathsFromLinks(links, domainInput);
+  const selected: MarkdownLink[] = [
+    ['Contact', paths.contactPage], ['Impressum', paths.impressumPage], ['Supplier', paths.supplierPage],
+    ['Company LinkedIn', paths.linkedinCompanyPage], ['Company X', paths.xCompanyAccount],
+  ].flatMap(([label, target]) => target ? [{ label: label!, target }] : []);
+  // Preserve existing global ambiguity after article extraction, never turn one
+  // remaining partner-company link into an owned LinkedIn page.
+  if (!paths.linkedinCompanyPage && linkedinPages.length > 1) {
+    selected.push(...linkedinPages.slice(0, 2).map(target => ({ label: 'Company LinkedIn', target })));
+  }
+  return selected;
 }
 
 /**

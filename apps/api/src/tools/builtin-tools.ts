@@ -1,3 +1,4 @@
+import { captureCompanyContactNavigation } from '../adapters/company-contact-navigation';
 import { captureManufacturerProfileText } from "./manufacturer-profile-capture";
 import { manufacturerProfileCaptureKey } from "../adapters/manufacturer-profile-text";
 import { createHash } from "node:crypto";
@@ -24,6 +25,7 @@ import {
 import { crawlUrl } from "../adapters/web-crawler";
 import {
   fetchPageHttpFirst,
+  httpFirstParserVersion,
   type HttpFirstCachePort,
 } from "../adapters/http-first-fetch";
 import { isAllowedByRobots } from "../adapters/robots";
@@ -505,6 +507,7 @@ export function createCrawl4aiFetchTool(
           }
         };
         const page = await httpFirst(input.url, {
+          captureNavigation: captureCompanyContactNavigation,
           ...(exact ? { exactUrl: true } : {}),
           // The tool composition owns this producer; input/context only select the literal mode.
           ...(input.profileTextRevision ? {
@@ -541,7 +544,7 @@ export function createCrawl4aiFetchTool(
               sourceUrl: input.url,
               fetchedAt: new Date().toISOString(),
               contentHash,
-              parserVersion: "http-first/1",
+              parserVersion: httpFirstParserVersion(page, exact),
               ...(cache ? { cache: page.fromCache ?? "miss" } : {}),
             },
           };

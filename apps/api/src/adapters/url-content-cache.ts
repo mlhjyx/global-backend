@@ -1,3 +1,4 @@
+import type { CompanyNavigationRecipe } from './company-navigation';
 /**
  * PR-B 页面缓存端口（url_content_cache）的 Postgres 实现。
  *
@@ -24,8 +25,8 @@ export function isTenantWorkspaceId(workspaceId: string): boolean {
   return UUID_RE.test(workspaceId);
 }
 
-/** 稳定 URL 键（含 query；fragment 不参与服务端资源标识，去掉）。 */
-export function urlContentCacheKey(url: string): string {
+/** Stable URL plus optional server-owned text recipe; legacy unversioned keys stay unchanged. */
+export function urlContentCacheKey(url: string, recipe?: CompanyNavigationRecipe): string {
   let normalized = url.trim();
   try {
     const parsed = new URL(normalized);
@@ -34,7 +35,7 @@ export function urlContentCacheKey(url: string): string {
   } catch {
     // 非法 URL 原样哈希（抓取层会另行拒绝）。
   }
-  return createHash("sha256").update(normalized, "utf8").digest("hex");
+  return createHash("sha256").update(recipe ? `${recipe}\0${normalized}` : normalized, "utf8").digest("hex");
 }
 
 interface UrlContentCacheRow {
@@ -63,9 +64,9 @@ export function createPrismaUrlContentCache(
 ): HttpFirstCachePort {
   const now = options.now ?? (() => new Date());
   return {
-    async get(workspaceId: string, url: string): Promise<HttpFirstCachedPage | null> {
+    async get(workspaceId: string, url: string, recipe?: CompanyNavigationRecipe): Promise<HttpFirstCachedPage | null> {
       if (!isTenantWorkspaceId(workspaceId)) return null;
-      const urlHash = urlContentCacheKey(url);
+      const urlHash = urlContentCacheKey(url, recipe);
       const rows = await db.withWorkspace(workspaceId, async (tx) =>
         tx.$queryRaw<UrlContentCacheRow[]>`
           SELECT markdown, content_hash, etag, last_modified
@@ -86,9 +87,9 @@ export function createPrismaUrlContentCache(
       };
     },
 
-    async put(workspaceId: string, url: string, page: HttpFirstCacheWrite): Promise<void> {
+    async put(workspaceId: string, url: string, page: HttpFirstCacheWrite, recipe?: CompanyNavigationRecipe): Promise<void> {
       if (!isTenantWorkspaceId(workspaceId)) return;
-      const urlHash = urlContentCacheKey(url);
+      const urlHash = urlContentCacheKey(url, recipe);
       const fetchedAt = now();
       const expiresAt = new Date(fetchedAt.getTime() + URL_CONTENT_CACHE_TTL_MS);
       await db.withWorkspace(workspaceId, async (tx) => {

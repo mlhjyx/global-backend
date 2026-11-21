@@ -16,7 +16,7 @@ import {
 /** data_provider kill switch of the BI-14 contact paths; seeded DISABLED. */
 export const COMPANY_CONTACT_PROVIDER_KEY = 'company_contact' as const;
 /** Rules version of the automatic points; a new version re-reads profiled companies. */
-export const COMPANY_CONTACT_PARSER_VERSION = 'company_contact/v1' as const;
+export const COMPANY_CONTACT_PARSER_VERSION = 'company_contact/v2' as const;
 /**
  * Bookkeeping key in the website_profile namespace (next to `_ts`, never field
  * evidence): the rules version the contact paths were last read with.

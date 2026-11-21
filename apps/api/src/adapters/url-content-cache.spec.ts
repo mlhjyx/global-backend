@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { COMPANY_NAVIGATION_RECIPE } from './company-navigation';
 import { describe, expect, it, vi } from 'vitest';
 import {
   createPrismaUrlContentCache,
@@ -26,6 +28,11 @@ function fakeDb(rows: unknown[] = []) {
 }
 
 describe('urlContentCacheKey', () => {
+  it('keeps legacy keys unchanged and separates the fixed navigation text recipe', () => {
+    const url = 'https://acme.example/';
+    expect(urlContentCacheKey(url)).toBe(createHash('sha256').update(url).digest('hex'));
+    expect(urlContentCacheKey(url, COMPANY_NAVIGATION_RECIPE)).not.toBe(urlContentCacheKey(url));
+  });
   it('is stable and ignores the fragment', () => {
     expect(urlContentCacheKey('https://acme.example/about#team')).toBe(
       urlContentCacheKey('https://acme.example/about'),

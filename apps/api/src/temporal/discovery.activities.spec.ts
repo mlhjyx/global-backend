@@ -5700,7 +5700,7 @@ describe("profileWebsitesForRun contact paths (BI-14)", () => {
       ["contact_form", PATHS.contactForm, "UNVERIFIED", "green", "company_contact"],
     ]);
     expect(updateMany.mock.calls[0]![0].data.attributes.website_profile).toMatchObject({
-      _contact_parser: "company_contact/v1",
+      _contact_parser: "company_contact/v2",
       source_url: `${SITE}/impressum`,
     });
   });
@@ -5709,7 +5709,8 @@ describe("profileWebsitesForRun contact paths (BI-14)", () => {
     const fresh = new Date().toISOString();
     const cases: Array<[Record<string, unknown>, string, number]> = [
       [{ trade_role: "distributor", _ts: fresh }, "ENABLED", 1],
-      [{ trade_role: "distributor", _ts: fresh, _contact_parser: "company_contact/v1" }, "ENABLED", 0],
+      [{ trade_role: "distributor", _ts: fresh, _contact_parser: "company_contact/v1" }, "ENABLED", 1],
+      [{ trade_role: "distributor", _ts: fresh, _contact_parser: "company_contact/v2" }, "ENABLED", 0],
       [{ trade_role: "distributor", _ts: fresh }, "DISABLED", 0],
     ];
     for (const [websiteProfile, contactStatus, profiles] of cases) {
@@ -5812,7 +5813,7 @@ describe("profileWebsitesForRun contact paths (BI-14)", () => {
     const alreadyRead = {
       ...BACKFILL[0]!,
       attributes: {
-        website_profile: { trade_role: "distributor", _ts: new Date().toISOString(), _contact_parser: "company_contact/v1" },
+        website_profile: { trade_role: "distributor", _ts: new Date().toISOString(), _contact_parser: "company_contact/v2" },
       },
     };
     const { acts } = await makeContactDeps(profile, { contactStatus: "ENABLED", backfill: [alreadyRead, BACKFILL[1]!] });
@@ -5847,7 +5848,7 @@ describe("profileWebsitesForRun contact paths (BI-14)", () => {
     // A company read successfully keeps its facts and parser marker next to the stamp.
     for (const id of [COMPANY.id, "b2"]) {
       expect(websiteProfileOf(rows.get(id)), id).toMatchObject({
-        _contact_parser: "company_contact/v1",
+        _contact_parser: "company_contact/v2",
         source_url: `${SITE}/impressum`,
         _contact_attempt_at: expect.any(String),
       });
