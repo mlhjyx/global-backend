@@ -42,6 +42,7 @@ vi.mock('../discovery/fit-judge', async (importOriginal) => {
   };
 });
 
+import { revisableProvisionalLeadWhere } from '../discovery/run2/pool';
 import { createRun2Activities } from './discovery.run2.activities';
 import { ExternalActionDeniedError, ProviderHttpError } from '../model-gateway/providers/provider-output-error';
 import { CancelledFailure } from '@temporalio/common';
@@ -809,6 +810,21 @@ describe('M0③ materializeProvisionalLeads', () => {
         fitReasons: { source: 'quick_scan', tier: 'quick' },
       });
     }
+  });
+});
+
+describe('provisional recovery CAS', () => {
+  it('uses the shared pool predicate when an existing scored lead blocks insert', async () => {
+    const where: unknown[] = [];
+    const tx = { discoveryCompanyJob: { findMany: vi.fn(async () => [
+      { canonicalCompanyId: 'c1', verdictQuick: 'weak' },
+    ]) }, lead: { createMany: vi.fn(async () => ({ count: 0 })),
+      updateMany: vi.fn(async (input: { where: unknown }) => { where.push(input.where); return { count: 1 }; }) } };
+    const activities = createRun2Activities({ prisma: { withWorkspace: async (_ws: string, fn: (tx: unknown) => unknown) => fn(tx) } as never,
+      gateway: {} as never, providers: {} as never, budgetStore: { attestAuthorized: vi.fn(async () => ({})) } as never });
+    expect(await activities.materializeProvisionalLeads(ARGS)).toEqual({ leads: 1 });
+    expect(where).toEqual([{ workspaceId: WORKSPACE_ID, icpId: ICP_ID, canonicalCompanyId: 'c1',
+      ...revisableProvisionalLeadWhere() }]);
   });
 });
 
