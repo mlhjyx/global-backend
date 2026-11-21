@@ -2,6 +2,7 @@ import {
   MAX_QUERY_TAXONOMY_COUNTRY_TERMS,
   MAX_QUERY_TAXONOMY_INDUSTRY_TERMS,
 } from './execution-envelope';
+import { isSpecificIndustryNode, wikidataBroadIndustryMode } from './wikidata-industry-scope';
 
 function terms(values: readonly unknown[], limit: number): string[] {
   const out: string[] = [];
@@ -28,4 +29,16 @@ export function queryTaxonomyTerms(filters: Readonly<Record<string, unknown>>): 
     industryTerms: terms([filters.industry, filters.sub_industry], MAX_QUERY_TAXONOMY_INDUSTRY_TERMS),
     countryTerms: terms([filters.country, filters.region], MAX_QUERY_TAXONOMY_COUNTRY_TERMS),
   };
+}
+
+/**
+ * Wikidata query pivots: only class-level industry nodes (3+ digit codes) are
+ * specific enough for P452; section letters and 2-digit divisions recall any
+ * manufacturer. `DISCOVERY_WIKIDATA_BROAD_INDUSTRY_MODE=off` keeps the old list.
+ */
+export function queryableIndustryNodes<T extends { code: string; wikidataQid?: string | null }>(
+  nodes: readonly T[],
+  mode = wikidataBroadIndustryMode(),
+): readonly T[] {
+  return nodes.filter((node) => mode === 'off' || isSpecificIndustryNode(node));
 }

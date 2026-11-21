@@ -218,7 +218,11 @@ export const ISIC_SEED: IsicNode[] = [
     de: 'Herstellung von sonstigen elektrischen Ausrüstungen', it: 'Fabbricazione di altre apparecchiature elettriche',
     fr: "Fabrication d'autres équipements électriques", es: 'Fabricación de otro equipo eléctrico',
     crosswalks: { cpv: ['09331200', '09330000', '09331000', '31600000'], nace: ['27.9'], naics: ['3359'], gb4754: ['38'] },
+    // Q192127 = photovoltaics：窄口径行业枢轴，替代此前 LLM 把"太阳能光伏"归到半导体制造（2610/Q11661）的映射。
+    wikidataQid: 'Q192127',
     aliases: ['光伏', '光伏组件', '光伏设备', '光伏产业链', '太阳能', '太阳能电池', '太阳能电池板', '太阳能组件',
+      '太阳能光伏', '光伏组件制造', '太阳能电池片制造', '光伏电池制造', 'bipv与光伏建材', '光伏建材',
+      'solar photovoltaics', 'solar energy equipment manufacturing',
       '充电桩', '充电设备', '电动汽车充电', '储能变流器',
       'solar', 'solar energy', 'solar power', 'solar panel', 'solar panels', 'solar module', 'solar modules',
       'photovoltaic', 'photovoltaics', 'pv', 'pv modules', 'solar cells', 'ev charging', 'charging station', 'charging stations',
@@ -288,7 +292,12 @@ export const ISIC_SEED: IsicNode[] = [
     it: "Commercio all'ingrosso di altre macchine e attrezzature", fr: "Commerce de gros d'autres machines et équipements", es: 'Comercio al por mayor de otras máquinas y equipos',
     // 不给 cpv 锚：批发节点的宽锚（如 42120000）会污染 TED 中标反查（公司被归一成批发而非制造）。
     crosswalks: { nace: ['46.6'], naics: ['423830'], gb4754: ['51'] },
+    // Q220695 = wholesale：Wikidata 无法表达"泵类分销商"这种角色，角色用"批发贸易"行业编号表达；
+    // 泵产品本身的后置核验由判定/关键词承担，provider 不做假声明。
+    wikidataQid: 'Q220695',
     aliases: ['机械设备批发', '工业品分销', '工业分销商',
+      '工业泵分销', '工业设备分销', '泵类渠道', '工业泵批发', '泵及流体处理设备分销', '泵类产品批发', '流体处理设备渠道销售',
+      '库存型工业泵批发', '化工流程泵分销', '库存与售后型泵类渠道', 'oem与自有品牌泵类渠道',
       'industrial distributor', 'industrial distributors', 'machinery distributor', 'machinery wholesale', 'industrial supply', 'industrial supplies', 'machinery trading'] },
   { code: '4663', parent: '46', en: 'Wholesale of construction materials, hardware, plumbing and heating equipment', zh: '建材与暖通批发', de: 'Großhandel mit Baumaterialien, Eisenwaren sowie Sanitär- und Heizungsbedarf',
     it: "Commercio all'ingrosso di materiali da costruzione e articoli sanitari", fr: 'Commerce de gros de matériaux de construction et de sanitaires', es: 'Comercio al por mayor de materiales de construcción y sanitarios',

@@ -1072,7 +1072,9 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
     ]);
     deps.taxonomy = {
       resolveMany: vi.fn(async () => [
-        { wikidataQid: "Q1", osmTags: ["industrial=pump"], code: "pump" },
+        // 三位以上数字类级码才作为 Wikidata 枢轴；两位 division 会被宽行业闸门滤掉。
+        { wikidataQid: "Q1", osmTags: ["industrial=pump"], code: "2812" },
+        { wikidataQid: "Q1857831", osmTags: null, code: "28" },
         { wikidataQid: null, osmTags: undefined, code: "valve" },
       ]),
       resolve: vi
@@ -1104,7 +1106,7 @@ describe("executeQuery —— 预算截断显性上报（不假 DONE），靠 le
         filters: expect.objectContaining({
           _industryQids: ["Q1"],
           _osmTags: ["industrial=pump"],
-          _industryCodes: ["pump", "valve"],
+          _industryCodes: ["2812", "28", "valve"],
           _countryQid: "Q183",
           _countryCode: "DE",
         }),
