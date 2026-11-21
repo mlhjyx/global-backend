@@ -43,6 +43,9 @@ export interface ContactEligibilityResult {
   state: EmailVerificationState;
   /** contact_point.confidence（0–100；未找到为 null）。 */
   score: number | null;
+  /** 命中的 contact_point id（多行取最强态时随获胜行返回；未找到为 null）。
+   *  gain-saas 退信回写 POST /contact-points/{id}/bounce-events 以此寻址。 */
+  contactPointId: string | null;
   allowedActions: string[];
   catchAllPolicy: ContactEligibilityPolicy | null;
 }
@@ -110,19 +113,22 @@ export class ContactEligibilityService {
     }
     const ciphertexts = [...ciphertextToEmail.keys()];
     const rows = await this.prisma.withWorkspace(workspaceId, (tx) =>
-      tx.$queryRaw<Array<{ value: string; verification_state: string; confidence: number | null }>>`
-        SELECT value, verification_state, confidence
+      tx.$queryRaw<Array<{ id: string; value: string; verification_state: string; confidence: number | null }>>`
+        SELECT id, value, verification_state, confidence
         FROM contact_point
         WHERE type = 'email' AND value IN (${Prisma.join(ciphertexts)})`,
     );
-    const strongest = new Map<string, { state: EmailVerificationState; score: number | null }>();
+    const strongest = new Map<
+      string,
+      { state: EmailVerificationState; score: number | null; contactPointId: string }
+    >();
     for (const row of rows) {
       const email = ciphertextToEmail.get(row.value);
       if (!email) continue; // 理论不可达：查询按密文集过滤
       const state = row.verification_state as EmailVerificationState;
       const existing = strongest.get(email);
       if (!existing || STATE_RANK[state] > STATE_RANK[existing.state]) {
-        strongest.set(email, { state, score: row.confidence ?? null });
+        strongest.set(email, { state, score: row.confidence ?? null, contactPointId: row.id });
       }
     }
 
@@ -144,6 +150,7 @@ export class ContactEligibilityService {
         found: hit !== undefined,
         state,
         score: hit ? hit.score : null,
+        contactPointId: hit?.contactPointId ?? null,
         allowedActions: hit ? ALLOWED_ACTIONS[state] : [],
         catchAllPolicy,
       };

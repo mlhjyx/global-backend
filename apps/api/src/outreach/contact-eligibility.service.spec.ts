@@ -10,6 +10,7 @@ import { ContactEligibilityService } from './contact-eligibility.service';
 const WORKSPACE = '00000000-0000-4000-8000-0000000000aa';
 
 interface Row {
+  id: string;
   value: string;
   verification_state: string;
   confidence: number | null;
@@ -27,8 +28,15 @@ function fakePrisma(rows: Row[]) {
 
 const hash = (email: string) => createHash('sha256').update(email).digest('hex');
 
-function rowFor(email: string, state: string, confidence: number | null): Row {
-  return { value: encryptPii(email), verification_state: state, confidence };
+let rowSeq = 0;
+function rowFor(email: string, state: string, confidence: number | null, id?: string): Row {
+  rowSeq += 1;
+  return {
+    id: id ?? `11111111-1111-4111-8111-${String(rowSeq).padStart(12, '0')}`,
+    value: encryptPii(email),
+    verification_state: state,
+    confidence,
+  };
 }
 
 function errorCode(error: unknown): string {
@@ -48,6 +56,8 @@ describe('ContactEligibilityService.check', () => {
       allowedActions: ['display', 'match', 'outreach'],
       catchAllPolicy: null,
     });
+    // 退信回写寻址键：命中行的 contact_point id 随结果返回
+    expect(result.contactPointId).toBe('11111111-1111-4111-8111-000000000001');
   });
 
   it('CATCH_ALL_RISKY：策略恒为 OFF/allowed=false（灰度表未落地=拒发），tier 按分数', async () => {
@@ -70,6 +80,8 @@ describe('ContactEligibilityService.check', () => {
     const service = new ContactEligibilityService(prisma as never);
     const [result] = await service.check(WORKSPACE, ['dup@acme.example']);
     expect(result).toMatchObject({ found: true, state: 'VALID' });
+    // contactPointId 必须来自获胜（最强态）行,而不是任意行
+    expect(result.contactPointId).toBe('11111111-1111-4111-8111-000000000005');
   });
 
   it('未找到 → found=false / UNKNOWN / 空 allowedActions（调用方 fail closed）', async () => {
@@ -81,6 +93,7 @@ describe('ContactEligibilityService.check', () => {
       found: false,
       state: 'UNKNOWN',
       score: null,
+      contactPointId: null,
       allowedActions: [],
       catchAllPolicy: null,
     });
