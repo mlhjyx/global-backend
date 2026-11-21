@@ -683,3 +683,15 @@ test("market candidate persistence runs explicitly with both restricted disposab
   assert.match(step, /if: needs\.renderer-visual-scope\.outputs\.run_code != 'false'/);
   assert.doesNotMatch(step, /continue-on-error|global_dev|--passWithNoTests|--testNamePattern/);
 });
+
+
+test("market generation full protocol PG step is explicit and shares the disposable migrated test database",async()=>{
+ const workflow=await readRepositoryFile(".github/workflows/ci.yml");
+ const step=namedStepBlock(jobBlock(workflow,"build-test"),"Market candidate generation controlled protocol on PostgreSQL");
+ assert.match(step,/MARKET_CANDIDATE_GENERATION_DATABASE_TEST: "1"/);
+ assert.match(step,/MARKET_CANDIDATE_GENERATION_TEST_DATABASE_URL: postgresql:\/\/global:global-test-only@127\.0\.0\.1:5432\/global_test/);
+ assert.match(step,/MARKET_CANDIDATE_GENERATION_TEST_APP_DATABASE_URL: postgresql:\/\/app_user:app_pw@127\.0\.0\.1:5432\/global_test/);
+ for(const suite of ["src/market-candidate-generation/generation.postgres.spec.ts","src/execution-budget/workspace-purpose-compatibility.postgres.spec.ts","src/tools/budget-operation-result.postgres.spec.ts"])assert.ok(step.includes(suite),suite);
+ assert.match(step,/needs\.renderer-visual-scope\.outputs\.run_code != 'false'/);
+ assert.doesNotMatch(step,/continue-on-error|global_dev|upstream|probe-provider/);
+});

@@ -1,3 +1,6 @@
+import { GENERATION_INPUT_SCHEMA } from '../market-candidate-generation/generation-basis';
+import { GENERATION_OUTPUT_SCHEMA } from '../market-candidate-generation/generation-output';
+import { boundedString, boundedNumber, boundedArray, closedObject, type OutputSchema } from './task-schema-bounds';
 import { AiTaskContract } from './task-contract';
 import {
   assertJudgeModelRouting,
@@ -14,7 +17,6 @@ import {
   MAX_QUERY_PLANNER_QUERIES,
 } from '../discovery/execution-envelope';
 
-type OutputSchema = Record<string, unknown>;
 
 /**
  * Model for the acquisition tasks (2026-10-29 product owner decision: run on
@@ -115,28 +117,6 @@ const REASONING_TASK_MAX_OUTPUT_TOKENS = 8_192;
  */
 const PLANNING_TASK_MAX_OUTPUT_TOKENS = 16_000;
 
-const boundedString = (maxLength: number, extra: OutputSchema = {}): OutputSchema => ({
-  type: 'string', maxLength, ...extra,
-});
-const boundedNumber = (
-  minimum: number,
-  maximum: number,
-  integer = false,
-): OutputSchema => ({ type: integer ? 'integer' : 'number', minimum, maximum });
-const boundedArray = (maxItems: number, items: OutputSchema): OutputSchema => ({
-  type: 'array', maxItems, items,
-});
-const closedObject = (
-  properties: Record<string, OutputSchema>,
-  required: readonly string[] = [],
-  extra: OutputSchema = {},
-): OutputSchema => ({
-  type: 'object', additionalProperties: false,
-  ...(required.length > 0 ? { required } : {}),
-  properties,
-  ...extra,
-});
-
 const MODEL_FACT_SCALAR: OutputSchema = {
   oneOf: [
     boundedString(2000),
@@ -186,6 +166,16 @@ const MODEL_RULE_VALUE: OutputSchema = {
  * triage… — registers its contract here and is orchestrated by a workflow.
  */
 export const AI_TASKS: Record<string, AiTaskContract> = {
+  'market.candidates.generate': {
+    id: 'market.candidates.generate',
+    description: '仅基于给定卖方结构化依据生成条件性市场候选假设，保留未知与反证；不检索、不产生具名买方或个人、不提升核验等级、不触发后继执行。',
+    inputSchema: GENERATION_INPUT_SCHEMA,
+    outputSchema: GENERATION_OUTPUT_SCHEMA,
+    model: acquisitionModel('market.candidates.generate', ACQUISITION_REASONING_MODEL),
+    allowedTools: [], maxCostCents: 40, maxOutputTokens: PLANNING_TASK_MAX_OUTPUT_TOKENS,
+    timeoutMs: 180000, risk: 'medium', humanGate: true,
+  },
+
   'company_understanding.extract_claims': {
     id: 'company_understanding.extract_claims',
     // 理解管线的页面抓取以本契约身份经 Broker（understanding.activities）——白名单收口②填实。

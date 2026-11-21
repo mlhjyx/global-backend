@@ -31,6 +31,7 @@ import { SanctionsModule } from './sanctions/sanctions.module';
 import { SiteBuilderModule } from './site-builder/site-builder.module';
 import { SellerKnowledgeModule } from './seller-knowledge/seller-knowledge.module';
 import { MarketCandidatesModule } from './market-candidates/market-candidates.module';
+import { MarketCandidateGenerationModule } from './market-candidate-generation/market-candidate-generation.module';
 import { SkillsModule } from './skills/skills.module';
 import { PacksModule } from './skills/packs/packs.module';
 import { AgentsModule } from './agents/agents.module';
@@ -86,6 +87,7 @@ import { CampaignPlanModule } from './campaign-plan/campaign-plan.module';
     SiteBuilderModule,
     SellerKnowledgeModule,
     MarketCandidatesModule,
+    MarketCandidateGenerationModule,
     SkillsModule,
     PacksModule,
     AgentsModule,

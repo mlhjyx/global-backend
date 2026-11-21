@@ -23,6 +23,7 @@ const WORKSPACE_PURPOSES = new Set<ExecutionBudgetPurpose>([
   'contact.enrich',
   'outreach.draft',
   'campaign.plan',
+  'market.candidates.generate',
 ]);
 
 /**
@@ -31,7 +32,7 @@ const WORKSPACE_PURPOSES = new Set<ExecutionBudgetPurpose>([
  * retry account; see execution-budget-retry-account.ts.
  */
 export const RETRYABLE_WORKSPACE_PURPOSES: ReadonlySet<ExecutionBudgetPurpose> =
-  new Set<ExecutionBudgetPurpose>(['icp.design', 'icp.query_plan']);
+  new Set<ExecutionBudgetPurpose>(['icp.design', 'icp.query_plan', 'market.candidates.generate']);
 
 export function retryWorkspaceAccountKey(
   primaryAccountKey: string,

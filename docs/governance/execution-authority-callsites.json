@@ -38,123 +38,21 @@
       ]
     },
     {
-      "key": "apps/api/src/signals/signal-ingest.service.ts#ted.search#1",
-      "kind": "tool",
-      "producerId": "ted.search",
+      "key": "apps/api/src/discovery/fit-judge.ts#discovery.qualify_fit#1",
+      "kind": "model",
+      "producerId": "discovery.qualify_fit",
       "resultStrategy": "typed_projection",
-      "resultSchema": "ted-search/v1",
+      "resultSchema": "fit-judgment/v1",
       "receiptMode": "ACK_REQUIRED",
       "consumerChecks": [
         {
-          "path": "apps/api/src/signals/signal-ingest.service.ts",
+          "path": "apps/api/src/discovery/fit-judge.ts",
           "anchor": "applyDomainAckConsumerTransaction"
         }
       ]
     },
     {
-      "key": "apps/api/src/signals/signal-ingest.service.ts#openfda.search#1",
-      "kind": "tool",
-      "producerId": "openfda.search",
-      "resultStrategy": "typed_projection",
-      "resultSchema": "openfda-search/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/signals/signal-ingest.service.ts",
-          "anchor": "applyDomainAckConsumerTransaction"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/signals/signal-ingest.service.ts#samgov.search#1",
-      "kind": "tool",
-      "producerId": "samgov.search",
-      "resultStrategy": "typed_projection",
-      "resultSchema": "samgov-search/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/signals/signal-ingest.service.ts",
-          "anchor": "applyDomainAckConsumerTransaction"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/intent/intent-projection.service.ts#http.get#1",
-      "kind": "tool",
-      "producerId": "http.get",
-      "resultStrategy": "artifact_reference",
-      "resultSchema": "http-get/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/intent/intent-projection.service.ts",
-          "anchor": "applyDomainAckConsumerTransactions"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/intent/page-fetcher.ts#crawl4ai.render#1",
-      "kind": "tool",
-      "producerId": "crawl4ai.render",
-      "resultStrategy": "artifact_reference",
-      "resultSchema": "crawl4ai-render/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/intent/page-fetcher.ts",
-          "anchor": "forwardPageReceipt(context, result.durableReceipt);"
-        },
-        {
-          "path": "apps/api/src/intent/website-watch.service.ts",
-          "anchor": "applyDomainAckConsumerTransactions"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/site-builder/agents/brand-research.ts#crawl4ai.fetch#1",
-      "kind": "tool",
-      "producerId": "crawl4ai.fetch",
-      "resultStrategy": "artifact_reference",
-      "resultSchema": "crawl4ai-fetch/v1",
-      "receiptMode": "TASK6_CUTOVER_FENCE",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/site-builder/agents/brand-research.ts",
-          "anchor": "paidCost"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/site-builder/agents/brand-research.ts#searxng.search#1",
-      "kind": "tool",
-      "producerId": "searxng.search",
-      "resultStrategy": "typed_projection",
-      "resultSchema": "searxng-search/v1",
-      "receiptMode": "TASK6_CUTOVER_FENCE",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/site-builder/agents/brand-research.ts",
-          "anchor": "paidCost"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/sanctions/sanctions-refresh.service.ts#sanctions.download#1",
-      "kind": "tool",
-      "producerId": "sanctions.download",
-      "resultStrategy": "artifact_reference",
-      "resultSchema": "sanctions-download/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/sanctions/sanctions-refresh.service.ts",
-          "anchor": "applyDomainAckConsumerTransaction"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/temporal/patent-cache-broker-scanner.ts#google_patents.search#1",
+      "key": "apps/api/src/discovery/providers/bigquery-patents.provider.ts#google_patents.search#1",
       "kind": "tool",
       "producerId": "google_patents.search",
       "resultStrategy": "typed_projection",
@@ -162,31 +60,17 @@
       "receiptMode": "ACK_REQUIRED",
       "consumerChecks": [
         {
-          "path": "apps/api/src/temporal/patents-cache.activities.ts",
-          "anchor": "readbackPatentRefresh"
+          "path": "apps/api/src/discovery/discovery.service.ts",
+          "anchor": "captureContactReceipt"
         }
       ]
     },
     {
-      "key": "apps/api/src/temporal/understanding.activities.ts#crawl4ai.fetch#1",
+      "key": "apps/api/src/discovery/providers/companies-house-registry.provider.ts#companies_house.search#1",
       "kind": "tool",
-      "producerId": "crawl4ai.fetch",
-      "resultStrategy": "artifact_reference",
-      "resultSchema": "crawl4ai-fetch/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/temporal/understanding.activities.ts",
-          "anchor": "crawlDurableReceipt"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/discovery/providers/directory.provider.ts#searxng.search#1",
-      "kind": "tool",
-      "producerId": "searxng.search",
+      "producerId": "companies_house.search",
       "resultStrategy": "typed_projection",
-      "resultSchema": "searxng-search/v1",
+      "resultSchema": "companies-house-search/v1",
       "receiptMode": "ACK_REQUIRED",
       "consumerChecks": [
         {
@@ -196,62 +80,44 @@
       ]
     },
     {
-      "key": "apps/api/src/discovery/providers/directory.provider.ts#crawl4ai.fetch#1",
+      "key": "apps/api/src/discovery/providers/companies-house.provider.ts#companies_house.search#1",
       "kind": "tool",
-      "producerId": "crawl4ai.fetch",
-      "resultStrategy": "artifact_reference",
-      "resultSchema": "crawl4ai-fetch/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/temporal/discovery.activities.ts",
-          "anchor": "onDurableReceipt"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/discovery/providers/website-profile.provider.ts#crawl4ai.fetch#1",
-      "kind": "tool",
-      "producerId": "crawl4ai.fetch",
-      "resultStrategy": "artifact_reference",
-      "resultSchema": "crawl4ai-fetch/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/temporal/discovery.activities.ts",
-          "anchor": "onDurableReceipt"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/discovery/providers/website-profile.provider.ts#crawl4ai.render#1",
-      "kind": "tool",
-      "producerId": "crawl4ai.render",
-      "resultStrategy": "artifact_reference",
-      "resultSchema": "crawl4ai-render/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/temporal/discovery.activities.ts",
-          "anchor": "onDurableReceipt"
-        },
-        {
-          "path": "apps/api/src/temporal/discovery.activities.ts",
-          "anchor": ":company-contact`"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/discovery/providers/wikidata.provider.ts#wikidata.sparql#1",
-      "kind": "tool",
-      "producerId": "wikidata.sparql",
+      "producerId": "companies_house.search",
       "resultStrategy": "typed_projection",
-      "resultSchema": "wikidata-sparql/v1",
+      "resultSchema": "companies-house-search/v1",
       "receiptMode": "ACK_REQUIRED",
       "consumerChecks": [
         {
-          "path": "apps/api/src/temporal/discovery.activities.ts",
-          "anchor": "onDurableReceipt"
+          "path": "apps/api/src/discovery/discovery.service.ts",
+          "anchor": "captureContactReceipt"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/companies-house.provider.ts#companies_house.search#2",
+      "kind": "tool",
+      "producerId": "companies_house.search",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "companies-house-search/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/discovery/discovery.service.ts",
+          "anchor": "captureContactReceipt"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/decision-maker.provider.ts#contact.find_decision_makers#1",
+      "kind": "model",
+      "producerId": "contact.find_decision_makers",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "contact-decision-makers/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/discovery/contact-discovery-core.ts",
+          "anchor": "captureContactReceipt"
         }
       ]
     },
@@ -298,62 +164,6 @@
       ]
     },
     {
-      "key": "apps/api/src/discovery/providers/companies-house.provider.ts#companies_house.search#1",
-      "kind": "tool",
-      "producerId": "companies_house.search",
-      "resultStrategy": "typed_projection",
-      "resultSchema": "companies-house-search/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/discovery/discovery.service.ts",
-          "anchor": "captureContactReceipt"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/discovery/providers/companies-house.provider.ts#companies_house.search#2",
-      "kind": "tool",
-      "producerId": "companies_house.search",
-      "resultStrategy": "typed_projection",
-      "resultSchema": "companies-house-search/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/discovery/discovery.service.ts",
-          "anchor": "captureContactReceipt"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/discovery/providers/structured-harvest.provider.ts#http.get#1",
-      "kind": "tool",
-      "producerId": "http.get",
-      "resultStrategy": "artifact_reference",
-      "resultSchema": "http-get/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/temporal/discovery.activities.ts",
-          "anchor": "captureEnrichmentReceipt"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/discovery/providers/structured-harvest.provider.ts#crawl4ai.render#1",
-      "kind": "tool",
-      "producerId": "crawl4ai.render",
-      "resultStrategy": "artifact_reference",
-      "resultSchema": "crawl4ai-render/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/temporal/discovery.activities.ts",
-          "anchor": "captureEnrichmentReceipt"
-        }
-      ]
-    },
-    {
       "key": "apps/api/src/discovery/providers/digital-footprint.provider.ts#crawl4ai.render#1",
       "kind": "tool",
       "producerId": "crawl4ai.render",
@@ -368,11 +178,81 @@
       ]
     },
     {
-      "key": "apps/api/src/discovery/providers/bigquery-patents.provider.ts#google_patents.search#1",
+      "key": "apps/api/src/discovery/providers/directory.provider.ts#crawl4ai.fetch#1",
       "kind": "tool",
-      "producerId": "google_patents.search",
+      "producerId": "crawl4ai.fetch",
+      "resultStrategy": "artifact_reference",
+      "resultSchema": "crawl4ai-fetch/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/temporal/discovery.activities.ts",
+          "anchor": "onDurableReceipt"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/directory.provider.ts#discovery.extract_list#1",
+      "kind": "model",
+      "producerId": "discovery.extract_list",
       "resultStrategy": "typed_projection",
-      "resultSchema": "google-patents-search/v1",
+      "resultSchema": "discovery-extract-list/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/temporal/discovery.activities.ts",
+          "anchor": "onDurableReceipt"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/directory.provider.ts#searxng.search#1",
+      "kind": "tool",
+      "producerId": "searxng.search",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "searxng-search/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/temporal/discovery.activities.ts",
+          "anchor": "onDurableReceipt"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/gleif.provider.ts#gleif.fetch#1",
+      "kind": "tool",
+      "producerId": "gleif.fetch",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "gleif-fetch/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/temporal/discovery.activities.ts",
+          "anchor": "captureEnrichmentReceipt"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/gleif.provider.ts#gleif.fetch#2",
+      "kind": "tool",
+      "producerId": "gleif.fetch",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "gleif-fetch/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/temporal/discovery.activities.ts",
+          "anchor": "captureEnrichmentReceipt"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/inpi-rne.provider.ts#inpi_rne.search#1",
+      "kind": "tool",
+      "producerId": "inpi_rne.search",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "inpi-rne-search/v1",
       "receiptMode": "ACK_REQUIRED",
       "consumerChecks": [
         {
@@ -382,58 +262,46 @@
       ]
     },
     {
-      "key": "apps/api/src/discovery/providers/trade-fair.provider.ts#tradefair.algolia#1",
+      "key": "apps/api/src/discovery/providers/manufacturer-network.provider.ts#crawl4ai.fetch#1",
       "kind": "tool",
-      "producerId": "tradefair.algolia",
-      "resultStrategy": "typed_projection",
-      "resultSchema": "tradefair-algolia/v1",
+      "producerId": "crawl4ai.fetch",
+      "resultStrategy": "artifact_reference",
+      "resultSchema": "crawl4ai-fetch/v1",
       "receiptMode": "ACK_REQUIRED",
       "consumerChecks": [
         {
-          "path": "apps/api/src/temporal/discovery.activities.ts",
-          "anchor": "onDurableReceipt"
+          "path": "apps/api/src/discovery/providers/manufacturer-network.provider.ts",
+          "anchor": "requireReceipt"
+        },
+        {
+          "path": "apps/api/src/discovery/run2/corroboration-enrichment.ts",
+          "anchor": "applyDomainAckConsumerTransactions"
+        },
+        {
+          "path": "apps/api/src/discovery/manufacturer-network-store.ts",
+          "anchor": "commit_manufacturer_network_evidence_v1"
         }
       ]
     },
     {
-      "key": "apps/api/src/discovery/providers/osm.provider.ts#osm.overpass#1",
+      "key": "apps/api/src/discovery/providers/manufacturer-network.provider.ts#searxng.search#1",
       "kind": "tool",
-      "producerId": "osm.overpass",
+      "producerId": "searxng.search",
       "resultStrategy": "typed_projection",
-      "resultSchema": "osm-overpass/v1",
+      "resultSchema": "searxng-search/v1",
       "receiptMode": "ACK_REQUIRED",
       "consumerChecks": [
         {
-          "path": "apps/api/src/temporal/discovery.activities.ts",
-          "anchor": "onDurableReceipt"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/discovery/providers/ted.provider.ts#ted.search#1",
-      "kind": "tool",
-      "producerId": "ted.search",
-      "resultStrategy": "typed_projection",
-      "resultSchema": "ted-search/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
+          "path": "apps/api/src/discovery/providers/manufacturer-network.provider.ts",
+          "anchor": "requireReceipt"
+        },
         {
-          "path": "apps/api/src/temporal/discovery.activities.ts",
-          "anchor": "onDurableReceipt"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/discovery/providers/companies-house-registry.provider.ts#companies_house.search#1",
-      "kind": "tool",
-      "producerId": "companies_house.search",
-      "resultStrategy": "typed_projection",
-      "resultSchema": "companies-house-search/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
+          "path": "apps/api/src/discovery/run2/corroboration-enrichment.ts",
+          "anchor": "applyDomainAckConsumerTransactions"
+        },
         {
-          "path": "apps/api/src/temporal/discovery.activities.ts",
-          "anchor": "onDurableReceipt"
+          "path": "apps/api/src/discovery/manufacturer-network-store.ts",
+          "anchor": "commit_manufacturer_network_evidence_v1"
         }
       ]
     },
@@ -452,11 +320,25 @@
       ]
     },
     {
-      "key": "apps/api/src/discovery/providers/public-web.provider.ts#searxng.search#1",
+      "key": "apps/api/src/discovery/providers/openfda.provider.ts#openfda.search#1",
       "kind": "tool",
-      "producerId": "searxng.search",
+      "producerId": "openfda.search",
       "resultStrategy": "typed_projection",
-      "resultSchema": "searxng-search/v1",
+      "resultSchema": "openfda-search/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/temporal/discovery.activities.ts",
+          "anchor": "onDurableReceipt"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/osm.provider.ts#osm.overpass#1",
+      "kind": "tool",
+      "producerId": "osm.overpass",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "osm-overpass/v1",
       "receiptMode": "ACK_REQUIRED",
       "consumerChecks": [
         {
@@ -508,25 +390,183 @@
       ]
     },
     {
-      "key": "apps/api/src/discovery/providers/inpi-rne.provider.ts#inpi_rne.search#1",
-      "kind": "tool",
-      "producerId": "inpi_rne.search",
+      "key": "apps/api/src/discovery/providers/public-web.provider.ts#discovery.extract_company#1",
+      "kind": "model",
+      "producerId": "discovery.extract_company",
       "resultStrategy": "typed_projection",
-      "resultSchema": "inpi-rne-search/v1",
+      "resultSchema": "discovery-extract-company/v1",
       "receiptMode": "ACK_REQUIRED",
       "consumerChecks": [
         {
-          "path": "apps/api/src/discovery/discovery.service.ts",
+          "path": "apps/api/src/temporal/discovery.activities.ts",
+          "anchor": "onDurableReceipt"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/public-web.provider.ts#searxng.search#1",
+      "kind": "tool",
+      "producerId": "searxng.search",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "searxng-search/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/temporal/discovery.activities.ts",
+          "anchor": "onDurableReceipt"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/social-presence.provider.ts#social.fetch#1",
+      "kind": "tool",
+      "producerId": "social.fetch",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "social-fetch/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/discovery/contact-discovery-core.ts",
           "anchor": "captureContactReceipt"
         }
       ]
     },
     {
-      "key": "apps/api/src/discovery/providers/openfda.provider.ts#openfda.search#1",
+      "key": "apps/api/src/discovery/providers/social-presence.provider.ts#social.fetch#2",
       "kind": "tool",
-      "producerId": "openfda.search",
+      "producerId": "social.fetch",
       "resultStrategy": "typed_projection",
-      "resultSchema": "openfda-search/v1",
+      "resultSchema": "social-fetch/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/discovery/contact-discovery-core.ts",
+          "anchor": "captureContactReceipt"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/social-presence.provider.ts#social.fetch#3",
+      "kind": "tool",
+      "producerId": "social.fetch",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "social-fetch/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/discovery/contact-discovery-core.ts",
+          "anchor": "captureContactReceipt"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/social-presence.provider.ts#social.search#1",
+      "kind": "tool",
+      "producerId": "social.search",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "social-search/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/discovery/contact-discovery-core.ts",
+          "anchor": "captureContactReceipt"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/structured-harvest.provider.ts#crawl4ai.render#1",
+      "kind": "tool",
+      "producerId": "crawl4ai.render",
+      "resultStrategy": "artifact_reference",
+      "resultSchema": "crawl4ai-render/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/temporal/discovery.activities.ts",
+          "anchor": "captureEnrichmentReceipt"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/structured-harvest.provider.ts#http.get#1",
+      "kind": "tool",
+      "producerId": "http.get",
+      "resultStrategy": "artifact_reference",
+      "resultSchema": "http-get/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/temporal/discovery.activities.ts",
+          "anchor": "captureEnrichmentReceipt"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/ted.provider.ts#ted.search#1",
+      "kind": "tool",
+      "producerId": "ted.search",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "ted-search/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/temporal/discovery.activities.ts",
+          "anchor": "onDurableReceipt"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/trade-fair.provider.ts#tradefair.algolia#1",
+      "kind": "tool",
+      "producerId": "tradefair.algolia",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "tradefair-algolia/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/temporal/discovery.activities.ts",
+          "anchor": "onDurableReceipt"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/website-profile.provider.ts#crawl4ai.fetch#1",
+      "kind": "tool",
+      "producerId": "crawl4ai.fetch",
+      "resultStrategy": "artifact_reference",
+      "resultSchema": "crawl4ai-fetch/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/temporal/discovery.activities.ts",
+          "anchor": "onDurableReceipt"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/website-profile.provider.ts#crawl4ai.render#1",
+      "kind": "tool",
+      "producerId": "crawl4ai.render",
+      "resultStrategy": "artifact_reference",
+      "resultSchema": "crawl4ai-render/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/temporal/discovery.activities.ts",
+          "anchor": "onDurableReceipt"
+        },
+        {
+          "path": "apps/api/src/temporal/discovery.activities.ts",
+          "anchor": ":company-contact`"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/discovery/providers/website-profile.provider.ts#discovery.classify_trade_role#1",
+      "kind": "model",
+      "producerId": "discovery.classify_trade_role",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "discovery-classify-trade-role/v1",
       "receiptMode": "ACK_REQUIRED",
       "consumerChecks": [
         {
@@ -564,30 +604,216 @@
       ]
     },
     {
-      "key": "apps/api/src/discovery/providers/gleif.provider.ts#gleif.fetch#1",
+      "key": "apps/api/src/discovery/providers/wikidata.provider.ts#wikidata.sparql#1",
       "kind": "tool",
-      "producerId": "gleif.fetch",
+      "producerId": "wikidata.sparql",
       "resultStrategy": "typed_projection",
-      "resultSchema": "gleif-fetch/v1",
+      "resultSchema": "wikidata-sparql/v1",
       "receiptMode": "ACK_REQUIRED",
       "consumerChecks": [
         {
           "path": "apps/api/src/temporal/discovery.activities.ts",
-          "anchor": "captureEnrichmentReceipt"
+          "anchor": "onDurableReceipt"
         }
       ]
     },
     {
-      "key": "apps/api/src/discovery/providers/gleif.provider.ts#gleif.fetch#2",
-      "kind": "tool",
-      "producerId": "gleif.fetch",
+      "key": "apps/api/src/discovery/taxonomy-resolver.ts#taxonomy.normalize#1",
+      "kind": "model",
+      "producerId": "taxonomy.normalize",
       "resultStrategy": "typed_projection",
-      "resultSchema": "gleif-fetch/v1",
+      "resultSchema": "taxonomy-code/v1",
       "receiptMode": "ACK_REQUIRED",
       "consumerChecks": [
         {
-          "path": "apps/api/src/temporal/discovery.activities.ts",
-          "anchor": "captureEnrichmentReceipt"
+          "path": "apps/api/src/discovery/taxonomy-resolver.ts",
+          "anchor": "acknowledgeTaxonomyNoop"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/icp/icp.service.ts#discovery.query_plan#1",
+      "kind": "model",
+      "producerId": "discovery.query_plan",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "icp-query-plan/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/icp/icp.service.ts",
+          "anchor": "applyDomainAckConsumerTransaction"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/icp/icp.service.ts#icp.design#1",
+      "kind": "model",
+      "producerId": "icp.design",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "icp-design/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/icp/icp.service.ts",
+          "anchor": "applyDomainAckConsumerTransaction"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/intent/intent-projection.service.ts#http.get#1",
+      "kind": "tool",
+      "producerId": "http.get",
+      "resultStrategy": "artifact_reference",
+      "resultSchema": "http-get/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/intent/intent-projection.service.ts",
+          "anchor": "applyDomainAckConsumerTransactions"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/intent/page-fetcher.ts#crawl4ai.render#1",
+      "kind": "tool",
+      "producerId": "crawl4ai.render",
+      "resultStrategy": "artifact_reference",
+      "resultSchema": "crawl4ai-render/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/intent/page-fetcher.ts",
+          "anchor": "forwardPageReceipt(context, result.durableReceipt);"
+        },
+        {
+          "path": "apps/api/src/intent/website-watch.service.ts",
+          "anchor": "applyDomainAckConsumerTransactions"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/lead/outreach-draft.service.ts#outreach.first_contact_draft#1",
+      "kind": "model",
+      "producerId": "outreach.first_contact_draft",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "outreach-first-contact-draft/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/lead/outreach-draft.service.ts",
+          "anchor": "applyDomainAckConsumerTransaction"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/market-candidate-generation/generation.service.ts#market.candidates.generate#1",
+      "kind": "model",
+      "producerId": "market.candidates.generate",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "market-candidates-generation/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/market-candidate-generation/generation.service.ts",
+          "anchor": "applyDomainAckConsumerTransaction"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/sanctions/sanctions-refresh.service.ts#sanctions.download#1",
+      "kind": "tool",
+      "producerId": "sanctions.download",
+      "resultStrategy": "artifact_reference",
+      "resultSchema": "sanctions-download/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/sanctions/sanctions-refresh.service.ts",
+          "anchor": "applyDomainAckConsumerTransaction"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/signals/signal-ingest.service.ts#openfda.search#1",
+      "kind": "tool",
+      "producerId": "openfda.search",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "openfda-search/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/signals/signal-ingest.service.ts",
+          "anchor": "applyDomainAckConsumerTransaction"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/signals/signal-ingest.service.ts#samgov.search#1",
+      "kind": "tool",
+      "producerId": "samgov.search",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "samgov-search/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/signals/signal-ingest.service.ts",
+          "anchor": "applyDomainAckConsumerTransaction"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/signals/signal-ingest.service.ts#ted.search#1",
+      "kind": "tool",
+      "producerId": "ted.search",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "ted-search/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/signals/signal-ingest.service.ts",
+          "anchor": "applyDomainAckConsumerTransaction"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/site-builder/agents/brand-research.ts#crawl4ai.fetch#1",
+      "kind": "tool",
+      "producerId": "crawl4ai.fetch",
+      "resultStrategy": "artifact_reference",
+      "resultSchema": "crawl4ai-fetch/v1",
+      "receiptMode": "TASK6_CUTOVER_FENCE",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/site-builder/agents/brand-research.ts",
+          "anchor": "paidCost"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/site-builder/agents/brand-research.ts#searxng.search#1",
+      "kind": "tool",
+      "producerId": "searxng.search",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "searxng-search/v1",
+      "receiptMode": "TASK6_CUTOVER_FENCE",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/site-builder/agents/brand-research.ts",
+          "anchor": "paidCost"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/temporal/patent-cache-broker-scanner.ts#google_patents.search#1",
+      "kind": "tool",
+      "producerId": "google_patents.search",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "google-patents-search/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/temporal/patents-cache.activities.ts",
+          "anchor": "readbackPatentRefresh"
         }
       ]
     },
@@ -597,6 +823,20 @@
       "producerId": "company_understanding.extract_claims",
       "resultStrategy": "typed_projection",
       "resultSchema": "understanding-claims/v1",
+      "receiptMode": "ACK_REQUIRED",
+      "consumerChecks": [
+        {
+          "path": "apps/api/src/temporal/understanding.activities.ts",
+          "anchor": "applyDomainAckConsumerTransactions"
+        }
+      ]
+    },
+    {
+      "key": "apps/api/src/temporal/understanding.activities.ts#company_understanding.extract_offerings#1",
+      "kind": "model",
+      "producerId": "company_understanding.extract_offerings",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "understanding-offerings/v1",
       "receiptMode": "ACK_REQUIRED",
       "consumerChecks": [
         {
@@ -620,142 +860,16 @@
       ]
     },
     {
-      "key": "apps/api/src/temporal/understanding.activities.ts#company_understanding.extract_offerings#1",
-      "kind": "model",
-      "producerId": "company_understanding.extract_offerings",
-      "resultStrategy": "typed_projection",
-      "resultSchema": "understanding-offerings/v1",
+      "key": "apps/api/src/temporal/understanding.activities.ts#crawl4ai.fetch#1",
+      "kind": "tool",
+      "producerId": "crawl4ai.fetch",
+      "resultStrategy": "artifact_reference",
+      "resultSchema": "crawl4ai-fetch/v1",
       "receiptMode": "ACK_REQUIRED",
       "consumerChecks": [
         {
           "path": "apps/api/src/temporal/understanding.activities.ts",
-          "anchor": "applyDomainAckConsumerTransactions"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/lead/outreach-draft.service.ts#outreach.first_contact_draft#1",
-      "kind": "model",
-      "producerId": "outreach.first_contact_draft",
-      "resultStrategy": "typed_projection",
-      "resultSchema": "outreach-first-contact-draft/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/lead/outreach-draft.service.ts",
-          "anchor": "applyDomainAckConsumerTransaction"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/icp/icp.service.ts#icp.design#1",
-      "kind": "model",
-      "producerId": "icp.design",
-      "resultStrategy": "typed_projection",
-      "resultSchema": "icp-design/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/icp/icp.service.ts",
-          "anchor": "applyDomainAckConsumerTransaction"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/icp/icp.service.ts#discovery.query_plan#1",
-      "kind": "model",
-      "producerId": "discovery.query_plan",
-      "resultStrategy": "typed_projection",
-      "resultSchema": "icp-query-plan/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/icp/icp.service.ts",
-          "anchor": "applyDomainAckConsumerTransaction"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/discovery/taxonomy-resolver.ts#taxonomy.normalize#1",
-      "kind": "model",
-      "producerId": "taxonomy.normalize",
-      "resultStrategy": "typed_projection",
-      "resultSchema": "taxonomy-code/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/discovery/taxonomy-resolver.ts",
-          "anchor": "acknowledgeTaxonomyNoop"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/discovery/fit-judge.ts#discovery.qualify_fit#1",
-      "kind": "model",
-      "producerId": "discovery.qualify_fit",
-      "resultStrategy": "typed_projection",
-      "resultSchema": "fit-judgment/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/discovery/fit-judge.ts",
-          "anchor": "applyDomainAckConsumerTransaction"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/discovery/providers/public-web.provider.ts#discovery.extract_company#1",
-      "kind": "model",
-      "producerId": "discovery.extract_company",
-      "resultStrategy": "typed_projection",
-      "resultSchema": "discovery-extract-company/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/temporal/discovery.activities.ts",
-          "anchor": "onDurableReceipt"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/discovery/providers/directory.provider.ts#discovery.extract_list#1",
-      "kind": "model",
-      "producerId": "discovery.extract_list",
-      "resultStrategy": "typed_projection",
-      "resultSchema": "discovery-extract-list/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/temporal/discovery.activities.ts",
-          "anchor": "onDurableReceipt"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/discovery/providers/website-profile.provider.ts#discovery.classify_trade_role#1",
-      "kind": "model",
-      "producerId": "discovery.classify_trade_role",
-      "resultStrategy": "typed_projection",
-      "resultSchema": "discovery-classify-trade-role/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/temporal/discovery.activities.ts",
-          "anchor": "onDurableReceipt"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/discovery/providers/decision-maker.provider.ts#contact.find_decision_makers#1",
-      "kind": "model",
-      "producerId": "contact.find_decision_makers",
-      "resultStrategy": "typed_projection",
-      "resultSchema": "contact-decision-makers/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/discovery/contact-discovery-core.ts",
-          "anchor": "captureContactReceipt"
+          "anchor": "crawlDurableReceipt"
         }
       ]
     },
@@ -812,106 +926,6 @@
         {
           "path": "apps/api/src/durable-results/artifact/generic-operation-artifact.service.ts",
           "anchor": "durableReceipt"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/discovery/providers/social-presence.provider.ts#social.search#1",
-      "kind": "tool",
-      "producerId": "social.search",
-      "resultStrategy": "typed_projection",
-      "resultSchema": "social-search/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/discovery/contact-discovery-core.ts",
-          "anchor": "captureContactReceipt"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/discovery/providers/social-presence.provider.ts#social.fetch#1",
-      "kind": "tool",
-      "producerId": "social.fetch",
-      "resultStrategy": "typed_projection",
-      "resultSchema": "social-fetch/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/discovery/contact-discovery-core.ts",
-          "anchor": "captureContactReceipt"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/discovery/providers/social-presence.provider.ts#social.fetch#2",
-      "kind": "tool",
-      "producerId": "social.fetch",
-      "resultStrategy": "typed_projection",
-      "resultSchema": "social-fetch/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/discovery/contact-discovery-core.ts",
-          "anchor": "captureContactReceipt"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/discovery/providers/social-presence.provider.ts#social.fetch#3",
-      "kind": "tool",
-      "producerId": "social.fetch",
-      "resultStrategy": "typed_projection",
-      "resultSchema": "social-fetch/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/discovery/contact-discovery-core.ts",
-          "anchor": "captureContactReceipt"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/discovery/providers/manufacturer-network.provider.ts#searxng.search#1",
-      "kind": "tool",
-      "producerId": "searxng.search",
-      "resultStrategy": "typed_projection",
-      "resultSchema": "searxng-search/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/discovery/providers/manufacturer-network.provider.ts",
-          "anchor": "requireReceipt"
-        },
-        {
-          "path": "apps/api/src/discovery/run2/corroboration-enrichment.ts",
-          "anchor": "applyDomainAckConsumerTransactions"
-        },
-        {
-          "path": "apps/api/src/discovery/manufacturer-network-store.ts",
-          "anchor": "commit_manufacturer_network_evidence_v1"
-        }
-      ]
-    },
-    {
-      "key": "apps/api/src/discovery/providers/manufacturer-network.provider.ts#crawl4ai.fetch#1",
-      "kind": "tool",
-      "producerId": "crawl4ai.fetch",
-      "resultStrategy": "artifact_reference",
-      "resultSchema": "crawl4ai-fetch/v1",
-      "receiptMode": "ACK_REQUIRED",
-      "consumerChecks": [
-        {
-          "path": "apps/api/src/discovery/providers/manufacturer-network.provider.ts",
-          "anchor": "requireReceipt"
-        },
-        {
-          "path": "apps/api/src/discovery/run2/corroboration-enrichment.ts",
-          "anchor": "applyDomainAckConsumerTransactions"
-        },
-        {
-          "path": "apps/api/src/discovery/manufacturer-network-store.ts",
-          "anchor": "commit_manufacturer_network_evidence_v1"
         }
       ]
     }

@@ -186,6 +186,23 @@ describe('WorkspaceTechnicalBudgetQuoteController', () => {
   });
 });
 
+
+describe('static market generation quote and its exact closed request boundary', () => {
+  const exact = { operation: 'POST /market-candidate-generations/:generationId/execute', generationId: '66666666-6666-4666-8666-666666666666', body: { intentDigest: 'a'.repeat(64) } };
+  it('returns a static market generation quote without proving ownership or consuming a grant', () => {
+    expect(controller().quote(CTX, exact)).toEqual({ data: expect.objectContaining({ workspaceId: CTX.workspaceId, purpose: 'market.candidates.generate', subjectType: 'market_candidate_generation', subjectId: exact.generationId, requiredCapMicrousd: '800000', requestSha256: 'd387987f983216a733a11c7b48b74cd9b66aab8d17a268f00005e143d26460c3' }) });
+  });
+  it.each([
+    { ...exact, generationId: 'not-a-uuid' },
+    { ...exact, body: {} },
+    { ...exact, body: { intentDigest: 'A'.repeat(64) } },
+    { ...exact, body: { intentDigest: 'a'.repeat(64), authorityId: '77777777-7777-4777-8777-777777777777' } },
+    { ...exact, capMicrousd: '1' },
+  ])('rejects a noncanonical or authority-shaped input rather than silently stripping it: %j', request => {
+    expect(() => controller().quote(CTX, request)).toThrow('EXECUTION_BUDGET_QUOTE_INVALID');
+  });
+});
+
 describe('manufacturer execution quote canonical boundary',()=>{
   const planId='30000000-0000-4000-8000-000000000003';
   it.each(['manufacturer-network/v1', 'manufacturer-network/v2'] as const)('quotes %s revision-only first execution and preserves legacy cap/hash',(revision)=>{

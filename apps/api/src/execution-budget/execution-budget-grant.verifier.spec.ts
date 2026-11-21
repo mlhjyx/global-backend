@@ -1038,3 +1038,15 @@ describe('ExecutionBudgetGrantVerifier', () => {
     });
   });
 });
+
+
+describe('dedicated market-generation synthetic grant verification', () => {
+  const scope: ExecutionBudgetGrantExpectedScope = { ...EXPECTED_SCOPE, purpose: 'market.candidates.generate', subjectType: 'market_candidate_generation' };
+  it.each(['RS256', 'ES256', 'EdDSA'] as const)('verifies an isolated fixture %s signature with the exact new purpose and subject', async algorithm => {
+    const compact = await signedToken({ algorithm, claims: { purpose: scope.purpose, subject_type: scope.subjectType, cap_microusd: '800000' } });
+    await expect(verifier().verify(compact, scope)).resolves.toMatchObject({ authorityKind: 'WORKSPACE_GRANT', workspaceId: WORKSPACE_ID, purpose: scope.purpose, subjectType: scope.subjectType, subjectId: COMPANY_ID, requestSha256: REQUEST_HASH, capMicrousd: 800000n });
+  });
+  it('does not accept an old seller-analysis grant for market generation', async () => {
+    await expect(verifier().verify(await signedToken(), scope)).rejects.toThrow('EXECUTION_BUDGET_GRANT_SCOPE_MISMATCH');
+  });
+});

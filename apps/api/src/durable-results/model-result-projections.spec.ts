@@ -520,7 +520,7 @@ function expectRecursivelyClosedAndBounded(schema: unknown, propertyNames?: stri
 }
 
 describe('non-Site-Builder model result projection registry', () => {
-  it('locks the exact fifteen task IDs and their exact schema IDs', () => {
+  it('locks the exact approved producer and schema identities', () => {
     expect(MODEL_RESULT_TASK_IDS).toEqual([
       'company_understanding.extract_claims',
       'company_understanding.extract_profile',
@@ -537,6 +537,7 @@ describe('non-Site-Builder model result projection registry', () => {
       'discovery.web_search_candidates',
       'outreach.first_contact_draft',
       'campaign.plan',
+      'market.candidates.generate',
     ]);
     expect(MODEL_RESULT_PROJECTION_SCHEMAS).toEqual({
       'company_understanding.extract_claims': 'understanding-claims/v1',
@@ -554,6 +555,7 @@ describe('non-Site-Builder model result projection registry', () => {
       'discovery.web_search_candidates': 'discovery-web-search-candidates/v1',
       'outreach.first_contact_draft': 'outreach-first-contact-draft/v1',
       'campaign.plan': 'campaign-plan/v1',
+      'market.candidates.generate': 'market-candidates-generation/v1',
     });
     expect(MODEL_RESULT_PROJECTION_DEFINITIONS.map((definition) => definition.schema)).toEqual([
       'understanding-claims/v1',
@@ -571,6 +573,7 @@ describe('non-Site-Builder model result projection registry', () => {
       'outreach-first-contact-draft/v1',
       'campaign-plan/v1',
       'discovery-web-search-candidates/v1',
+      'market-candidates-generation/v1',
     ]);
   });
 
@@ -589,7 +592,7 @@ describe('non-Site-Builder model result projection registry', () => {
   });
 
   it('registers only closed, bounded, ASCII-camelCase, non-sensitive projection schemas', () => {
-    expect(MODEL_RESULT_PROJECTION_DEFINITIONS).toHaveLength(15);
+    expect(MODEL_RESULT_PROJECTION_DEFINITIONS).toHaveLength(16);
     for (const definition of MODEL_RESULT_PROJECTION_DEFINITIONS) {
       const names: string[] = [];
       expectRecursivelyClosedAndBounded(definition.jsonSchema, names);
@@ -858,4 +861,29 @@ describe('campaign-plan/v1 projection carries the M2.2 replan budget', () => {
       expect(() => registry.project('campaign-plan/v1', rawResult(campaignPlanData(value)))).toThrow();
     }
   });
+});
+
+const B2_LEGACY_PROJECTION_SCHEMA_BYTES = {
+  "understanding-claims/v1": "3eda9c38233aa88e02acc52d183060a2dcd30ed3c97dcc076865c7e9a7dbc1f6",
+  "understanding-profile/v1": "94a7d6d8fa6bcb67ee7e66cfe94343dbaf91f97f1b3aa7834698682c180bd30f",
+  "understanding-offerings/v1": "1a6a5a31118ce58c242adbb1818be41a72d8ef784a4b804553415a75bd9cb124",
+  "icp-design/v1": "da03365e6c5232c46bec6771bd5fcf9c52f9f35cfc9ca1b6214edff1f7789f7c",
+  "icp-query-plan/v1": "3dd94e77a9494f99f8ae382b970f66d1848d8631d54d3ab6541e03221a4721aa",
+  "taxonomy-code/v1": "739d02e8761d1d66de84dbed67f7f1635810127236d231c5a24734a0240d0b80",
+  "fit-judgment/v1": "00dfa4e11ca6cc96e58e3904f4b5cc2f71f72bf3a4a3988b9d46237c0eb2cdb9",
+  "quick-judgment/v1": "4b439234100758d0eba62ecfe7fc2951adc352ed1aa7ffd29a2876b1be956ffd",
+  "discovery-extract-company/v1": "186be9213440c958b2e052670cd2b0a1238010c1b36d913a2d79bc320311a58e",
+  "discovery-extract-list/v1": "74aa9bcff13b7f8d62c2aa97ea0acb06b56fc93aa3473af00faadca98850d143",
+  "contact-decision-makers/v1": "6ebd55e100fddf00eeead29511bde9f5368938ccc6f01cfb5c385bb41f5aede6",
+  "discovery-classify-trade-role/v1": "d4861b32442e5d1726396ee07876b9201dd6553770d67cbca1a12f4874ba38c7",
+  "outreach-first-contact-draft/v1": "bb4f771e3a9222e2e527f83b44b01c8bbcca23812f5fd8649ba4fd30f35cf32e",
+  "campaign-plan/v1": "f27c3d7ba8955ed277854267e1d82d3b591c4e8b7cc9446ac5e4daae7a3b73b7",
+  "discovery-web-search-candidates/v1": "e992ae5f40e714461b47af65954332d9f5f58dde42ea8c8d3034216f0bb37f51"
+} as const;
+
+describe('B2 exact legacy projection schema bytes',()=>{
+ it.each(Object.entries(B2_LEGACY_PROJECTION_SCHEMA_BYTES))('preserves the old envelope JSON contract %s',(schema,expected)=>{
+  const definition=MODEL_RESULT_PROJECTION_DEFINITIONS.find(value=>value.schema===schema);
+  expect(definition).toBeDefined();expect(createHash('sha256').update(JSON.stringify(definition!.jsonSchema),'utf8').digest('hex')).toBe(expected);
+ });
 });

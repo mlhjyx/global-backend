@@ -407,6 +407,18 @@
       "INSERT",
       "SELECT"
     ],
+    "market_candidate_generation": [
+      "INSERT",
+      "SELECT"
+    ],
+    "market_candidate_generation_attempt": [
+      "INSERT",
+      "SELECT"
+    ],
+    "market_candidate_generation_head": [
+      "INSERT",
+      "SELECT"
+    ],
     "market_candidate_set": [
       "INSERT",
       "SELECT"
@@ -802,6 +814,49 @@
         "UPDATE"
       ],
       "status_updated_by": [
+        "UPDATE"
+      ],
+      "updated_at": [
+        "UPDATE"
+      ]
+    },
+    "market_candidate_generation": {
+      "active_attempt_id": [
+        "UPDATE"
+      ],
+      "consumed_at": [
+        "UPDATE"
+      ],
+      "consumer_ack_id": [
+        "UPDATE"
+      ],
+      "execution_operation_id": [
+        "UPDATE"
+      ],
+      "phase": [
+        "UPDATE"
+      ],
+      "reason_code": [
+        "UPDATE"
+      ],
+      "result_digest": [
+        "UPDATE"
+      ],
+      "result_schema": [
+        "UPDATE"
+      ],
+      "set_id": [
+        "UPDATE"
+      ],
+      "updated_at": [
+        "UPDATE"
+      ]
+    },
+    "market_candidate_generation_head": {
+      "intent_sequence": [
+        "UPDATE"
+      ],
+      "latest_generation_id": [
         "UPDATE"
       ],
       "updated_at": [

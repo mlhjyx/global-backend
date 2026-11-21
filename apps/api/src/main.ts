@@ -144,6 +144,7 @@ function buildOpenApi(app: Parameters<typeof SwaggerModule.createDocument>[0]) {
     .addTag('Companies', '企业画像：提交官网、看完整度、审批后人工确认')
     .addTag('Seller Documents', '卖家资料库：上传签票、提交校验、列表 / 下载 / 重试 / 软删')
     .addTag('Market Candidates', '市场候选：不可变文档、版本化人工反馈与依据可用性；不生成或执行')
+    .addTag('Market Candidate Generations', '明确意图、受控市场候选生成、持久结果与零重发恢复；不证明市场或买家有效性')
     .addTag('Claims', '企业事实与来源：审批 / 驳回 / 撤销、冲突裁决')
     .addTag('ICP', '理想客户画像：规则、回溯测试、查询计划')
     .addTag('Discovery', '查询计划执行、规范化公司、联系人补全、抑制名单')

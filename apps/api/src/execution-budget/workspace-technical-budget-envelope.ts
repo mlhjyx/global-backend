@@ -104,6 +104,7 @@ export const WORKSPACE_EXECUTION_QUOTE_OPERATIONS = Object.freeze([
   'POST /companies/:companyId/understanding/retry',
   'POST /site-builder/intake',
   'POST /campaigns/:campaignId/plan-drafts',
+  'POST /market-candidate-generations/:generationId/execute',
 ] as const satisfies readonly WorkspaceExecutionBudgetRequest['operation'][]);
 
 const MICROUSD_PER_CENT = 10_000n;
@@ -440,6 +441,8 @@ export function resolveWorkspaceTechnicalBudgetEnvelope(
   request: WorkspaceExecutionBudgetRequest,
 ): WorkspaceTechnicalBudgetEnvelope {
   switch (request.operation) {
+    case 'POST /market-candidate-generations/:generationId/execute':
+      return ready(request, [model('market.candidates.generate', 1)], [], { modelLogicalInvocations: 1 });
     case 'POST /companies/:companyId/icps':
       return ready(request, [model('icp.design', 1)], [], {
         modelLogicalInvocations: 1,

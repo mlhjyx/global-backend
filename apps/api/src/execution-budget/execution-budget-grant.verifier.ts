@@ -50,6 +50,7 @@ const PURPOSES = new Set<ExecutionBudgetPurpose>([
   'contact.enrich',
   'outreach.draft',
   'campaign.plan',
+  'market.candidates.generate',
   ...EXECUTION_BUDGET_PLATFORM_PURPOSES,
 ]);
 

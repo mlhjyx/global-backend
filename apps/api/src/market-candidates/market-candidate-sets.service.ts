@@ -171,41 +171,47 @@ export class MarketCandidateSetsService {
 
   async persistInitial(ctx: RequestContext, companyId: string, input: unknown, operationIdentity: string): Promise<{ setId: string; revision: 1; documentHash: string; replayed: boolean }> {
     ctx = context(ctx); companyId = uuid(companyId); operationIdentity = uuid(operationIdentity);
-    const draft = parseDraft(input), requestHash = documentHash(draft);
+    const draft = parseDraft(input);
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         return await this.prisma.withWorkspace(ctx.workspaceId, async tx => {
-          const company = await this.company(tx, companyId, true);
-          const prior = await tx.marketCandidateSet.findUnique({ where: { workspaceId_companyId_initialOperationId: { workspaceId: ctx.workspaceId, companyId, initialOperationId: operationIdentity } } });
-          if (prior) {
-            if (prior.initialRequestHash !== requestHash) return conflict('IDEMPOTENCY_CONFLICT');
-            const row = await this.revision(tx, prior, 1);
-            this.checkedDocument(row);
-            return { setId: prior.id, revision: 1 as const, documentHash: row.documentHash, replayed: true };
-          }
-          const sources: MarketCandidateSourceSnapshotDto[] = [];
-          const sorted = [...draft.sources].sort((a, b) => `${a.kind}:${a.sourceId}`.localeCompare(`${b.kind}:${b.sourceId}`, 'en'));
-          for (const reference of sorted) {
-            const source = await this.source(tx, companyId, reference, true);
-            if (!source) return notFound();
-            sources.push(source);
-          }
-          const setId = randomUUID();
-          const document = createInitialDocument(draft, { setId, companyId, candidateIds: draft.candidates.map(() => randomUUID()) }, { company: { companyId, version: company.version }, sources });
-          await this.assertDocumentStorageSize(tx, document);
-          const hash = documentHash(document), latest = await this.latest(tx, companyId);
-          const createdAt = new Date(Math.max(Date.now(), (latest?.createdAt.getTime() ?? 0) + 1));
-          await tx.marketCandidateSet.create({ data: { id: setId, workspaceId: ctx.workspaceId, companyId, currentRevision: 1,
-            initialOperationId: operationIdentity, initialRequestHash: requestHash, createdAt, updatedAt: createdAt } });
-          await tx.marketCandidateSetRevision.create({ data: { workspaceId: ctx.workspaceId, companyId, setId, revision: 1, parentRevision: null,
-            documentJson: document as unknown as Prisma.InputJsonValue, documentHash: hash, createdBy: ctx.userId } });
-          return { setId, revision: 1 as const, documentHash: hash, replayed: false };
+          return this.persistInitialInTransaction(tx, ctx, companyId, draft, operationIdentity);
         }, transactionOptions);
       } catch (error) {
         if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2010' || error.meta?.code !== '55P03') throw error;
       }
     }
     throw new ConflictException({ error: { code: 'VERSION_CONFLICT', message: '候选依据正在变更，请沿用原操作标识重试' } });
+  }
+
+  async persistInitialInTransaction(tx: Tx, ctx: RequestContext, companyId: string, input: unknown, operationIdentity: string): Promise<{setId:string;revision:1;documentHash:string;replayed:boolean}> {
+    ctx = context(ctx); companyId = uuid(companyId); operationIdentity = uuid(operationIdentity);
+    const draft = parseDraft(input), requestHash = documentHash(draft);
+    const company = await this.company(tx, companyId, true);
+    const prior = await tx.marketCandidateSet.findUnique({ where: { workspaceId_companyId_initialOperationId: { workspaceId: ctx.workspaceId, companyId, initialOperationId: operationIdentity } } });
+    if (prior) {
+      if (prior.initialRequestHash !== requestHash) return conflict('IDEMPOTENCY_CONFLICT');
+      const row = await this.revision(tx, prior, 1);
+      this.checkedDocument(row);
+      return { setId: prior.id, revision: 1 as const, documentHash: row.documentHash, replayed: true };
+    }
+    const sources: MarketCandidateSourceSnapshotDto[] = [];
+    const sorted = [...draft.sources].sort((a, b) => `${a.kind}:${a.sourceId}`.localeCompare(`${b.kind}:${b.sourceId}`, 'en'));
+    for (const reference of sorted) {
+      const source = await this.source(tx, companyId, reference, true);
+      if (!source) return notFound();
+      sources.push(source);
+    }
+    const setId = randomUUID();
+    const document = createInitialDocument(draft, { setId, companyId, candidateIds: draft.candidates.map(() => randomUUID()) }, { company: { companyId, version: company.version }, sources });
+    await this.assertDocumentStorageSize(tx, document);
+    const hash = documentHash(document), latest = await this.latest(tx, companyId);
+    const createdAt = new Date(Math.max(Date.now(), (latest?.createdAt.getTime() ?? 0) + 1));
+    await tx.marketCandidateSet.create({ data: { id: setId, workspaceId: ctx.workspaceId, companyId, currentRevision: 1,
+      initialOperationId: operationIdentity, initialRequestHash: requestHash, createdAt, updatedAt: createdAt } });
+    await tx.marketCandidateSetRevision.create({ data: { workspaceId: ctx.workspaceId, companyId, setId, revision: 1, parentRevision: null,
+      documentJson: document as unknown as Prisma.InputJsonValue, documentHash: hash, createdBy: ctx.userId } });
+    return { setId, revision: 1 as const, documentHash: hash, replayed: false };
   }
 
   async getLatest(ctx: RequestContext, companyId: string): Promise<MarketCandidateLatestDto> {

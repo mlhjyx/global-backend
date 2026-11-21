@@ -528,7 +528,9 @@ jobs:
         shell: bash
         env:
           PRISMA_CIGATE_FROM_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
-        run: node packages/db/scripts/migration-integrity-gate.mjs
+        run: |
+          node --test packages/db/scripts/migration-integrity-gate.spec.mjs
+          node packages/db/scripts/migration-integrity-gate.mjs
 
       # ch08 §3.4 G5：workspace 表强制 RLS + 平台表目录 + app_user 默认只读。
       - name: RLS catalog gate（G5）
@@ -808,6 +810,19 @@ jobs:
           MARKET_CANDIDATES_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
           APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
         run: pnpm --filter @global/api exec vitest run src/market-candidates/market-candidate-sets.postgres.spec.ts
+
+      - name: Market candidate generation controlled protocol on PostgreSQL
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        env:
+          MARKET_CANDIDATE_GENERATION_DATABASE_TEST: "1"
+          MARKET_CANDIDATE_GENERATION_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+          MARKET_CANDIDATE_GENERATION_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
+          APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
+        run: >-
+          pnpm --filter @global/api exec vitest run
+          src/market-candidate-generation/generation.postgres.spec.ts
+          src/execution-budget/workspace-purpose-compatibility.postgres.spec.ts
+          src/tools/budget-operation-result.postgres.spec.ts
 
       # The run-event seq allocator takes a transaction advisory lock whose function
       # returns PostgreSQL void; reading it through $queryRaw once reached production
