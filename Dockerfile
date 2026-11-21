@@ -1,7 +1,7 @@
 FROM alpine:3.23.3@sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659 AS ca-bootstrap
 RUN echo '766392c21c0baf5fa722cb309dc576b89d9fb3323dd32aa45a939dd575db6d1c  /etc/ssl/certs/ca-certificates.crt' | sha256sum -c -
 
-FROM node:22.18.0-bookworm-slim@sha256:752ea8a2f758c34002a0461bd9f1cee4f9a3c36d48494586f60ffce1fc708e0e AS runtime-base
+FROM node:22.23.4-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS runtime-base
 COPY --from=ca-bootstrap /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
 # Bootstrap CA bytes come from the digest-pinned stage above. APT then verifies
