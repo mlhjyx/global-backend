@@ -271,6 +271,8 @@ const FORBIDDEN_LOCKFILE_SNAPSHOTS = Object.freeze(["extract-zip@2.0.1"]);
 // way to hold a floor, so an override may retire once upstream ranges hold it.
 const SECURITY_FLOORS = Object.freeze(
   [
+    { name: "effect", floor: "3.22.1" },
+    { name: "astro", floor: "7.4.7" },
     { name: "nanoid", floor: "3.3.18" },
     { name: "postcss", floor: "8.5.26" },
     { name: "js-yaml", floor: "4.3.2" },
@@ -303,6 +305,8 @@ const SECURITY_FLOORS = Object.freeze(
 // Every vulnerable release a floor replaced. Each must stay below its floor, so a
 // floor cannot be lowered back past a known-bad release.
 const VULNERABLE_PREDECESSORS = Object.freeze([
+  "effect@3.21.0",
+  "astro@7.3.8",
   "nanoid@3.3.15",
   "nanoid@3.3.16",
   "nanoid@3.3.17",
@@ -570,3 +574,151 @@ test("root overrides pin exact releases rather than ranges, aliases or sources",
 
   assert.deepEqual(findLooseOverrides(manifest.pnpm?.overrides), []);
 });
+
+test("release prerequisite floors reject vulnerable versions beside patched effect and Astro", () => {
+  const floors = SECURITY_FLOORS.filter(
+    ({ name }) => name === "effect" || name === "astro",
+  );
+  assert.deepEqual(
+    findSecurityFloorViolations(
+      lockfileWith("effect@3.22.1", "astro@7.4.7"),
+      floors,
+    ),
+    [],
+  );
+  assert.deepEqual(
+    findSecurityFloorViolations(
+      lockfileWith(
+        "effect@3.22.1",
+        "effect@3.21.0",
+        "astro@7.4.7",
+        "astro@7.3.8",
+      ),
+      floors,
+    ),
+    [
+      { name: "effect", version: "3.21.0", floor: "3.22.1" },
+      { name: "astro", version: "7.3.8", floor: "7.4.7" },
+    ],
+  );
+});
+
+test("patched Astro build declares and pins a supported Node release", async () => {
+  const manifest = JSON.parse(
+    await readFile(new URL("package.json", repositoryRoot), "utf8"),
+  );
+  assert.equal(manifest.engines.node, ">=22.23.4");
+});
+
+test("patched Astro runtime image uses the reviewed Node digest", async () => {
+  const dockerfile = await readFile(
+    new URL("Dockerfile", repositoryRoot),
+    "utf8",
+  );
+  assert.match(
+    dockerfile,
+    /^FROM node:22\.23\.4-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS runtime-base$/mu,
+  );
+});
+
+test("release prerequisite advisories are remediated rather than added as baseline exceptions", async () => {
+  const baseline = await readFile(
+    new URL(
+      "docs/security/production-dependency-audit-baseline.json",
+      repositoryRoot,
+    ),
+    "utf8",
+  );
+  assert.doesNotMatch(
+    baseline,
+    /GHSA-7589-6fvf-x4pw|GHSA-mh32-jxcr-mh9f|GHSA-r3h5-4585-7x3w/u,
+  );
+});
+
+test(
+  "lockfile generation retains libc selectors with the repository architecture policy",
+  { timeout: 120_000 },
+  async (t) => {
+    const execute = promisify(execFile);
+    const root = await mkdtemp(join(tmpdir(), "dependency-libc-metadata-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const manifest = JSON.parse(
+      await readFile(new URL("package.json", repositoryRoot), "utf8"),
+    );
+    let registry;
+    const server = createServer((request, response) => {
+      if (request.url !== "/libc-selector-fixture") {
+        response.writeHead(404).end();
+        return;
+      }
+      const abbreviated = String(request.headers.accept ?? "").includes(
+        "application/vnd.npm.install-v1+json",
+      );
+      const version = {
+        name: "libc-selector-fixture",
+        version: "1.0.0",
+        os: ["linux"],
+        cpu: ["x64"],
+        ...(!abbreviated ? { libc: ["glibc"] } : {}),
+        dist: {
+          tarball: `${registry}libc-selector-fixture-1.0.0.tgz`,
+          integrity: `sha512-${Buffer.alloc(64).toString("base64")}`,
+        },
+      };
+      response.setHeader("content-type", "application/json");
+      response.end(
+        JSON.stringify({
+          name: version.name,
+          "dist-tags": { latest: "1.0.0" },
+          versions: { "1.0.0": version },
+        }),
+      );
+    });
+    await new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    t.after(() => {
+      server.closeAllConnections();
+      return new Promise((resolve) => server.close(resolve));
+    });
+    registry = `http://127.0.0.1:${server.address().port}/`;
+    await writeFile(
+      join(root, "package.json"),
+      JSON.stringify({
+        private: true,
+        packageManager: "pnpm@9.15.9",
+        pnpm: {
+          supportedArchitectures: manifest.pnpm?.supportedArchitectures,
+        },
+        optionalDependencies: { "libc-selector-fixture": "1.0.0" },
+      }),
+    );
+    await execute(
+      "pnpm",
+      [
+        "install",
+        "--lockfile-only",
+        "--resolution-only",
+        "--ignore-scripts",
+        `--registry=${registry}`,
+        `--cache-dir=${join(root, "cache")}`,
+        `--store-dir=${join(root, "store")}`,
+      ],
+      {
+        cwd: root,
+        timeout: 60_000,
+        maxBuffer: 2 * 1024 * 1024,
+        env: {
+          ...process.env,
+          CI: "true",
+          NPM_CONFIG_USERCONFIG: "/dev/null",
+          NPM_CONFIG_GLOBALCONFIG: "/dev/null",
+        },
+      },
+    );
+    const lock = await readFile(join(root, "pnpm-lock.yaml"), "utf8");
+    assert.match(lock, /libc-selector-fixture@1\.0\.0:/u);
+    assert.match(lock, /libc: \[glibc\]/u);
+  },
+);

@@ -17,7 +17,7 @@ const repositoryRoot = new URL("../", import.meta.url);
 const BASE_COMMIT = "a8fedc721bda57ef9d2aeb16a7838a24db4f4a99";
 const LOCKFILE_DIGEST = `sha256:${"a".repeat(64)}`;
 const NOW = new Date("2026-08-09T12:00:00.000Z");
-const REPOSITORY_BASELINE_NOW = new Date("2026-11-12T07:50:38.000Z");
+const REPOSITORY_BASELINE_NOW = new Date("2026-11-21T22:34:50.999Z");
 
 async function readRepositoryFile(path) {
   return readFile(new URL(path, repositoryRoot), "utf8");
@@ -967,7 +967,7 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
   );
   const validation = validateProductionAuditBaseline(repositoryBaseline, {
     now: REPOSITORY_BASELINE_NOW,
-    expectedBootstrapBase: "262e9a6307cdd0df9994991a410acfebe63a5ea6",
+    expectedBootstrapBase: "7b3292e0a001f6fe5fb024d6cca9b771a910718f",
   });
   assert.deepEqual(validation.issues, []);
   assert.equal(repositoryBaseline.summary.advisories, 0);
@@ -980,13 +980,13 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
   });
   assert.equal(
     repositoryBaseline.source.base_commit,
-    "262e9a6307cdd0df9994991a410acfebe63a5ea6",
+    "7b3292e0a001f6fe5fb024d6cca9b771a910718f",
   );
   const clear = evaluateProductionAudit(pnpmAudit([]), repositoryBaseline, {
     now: REPOSITORY_BASELINE_NOW,
-    expectedBootstrapBase: "262e9a6307cdd0df9994991a410acfebe63a5ea6",
+    expectedBootstrapBase: "7b3292e0a001f6fe5fb024d6cca9b771a910718f",
     expectedSourceLockfileDigest:
-      "sha256:5a7d0c6a4129051f3cb65c3035d4a5123764d4c726a314aee1207e84fdfef231",
+      "sha256:56625d98d68af514b4c1cf1ef2c5713301ed0addb4693ef33dda4899a0bc1428",
   });
   assert.equal(clear.ok, true);
   const vulnerable = evaluateProductionAudit(
@@ -1000,7 +1000,7 @@ test("repository baseline retires legacy exceptions and admits only a clear audi
     repositoryBaseline,
     {
       now: REPOSITORY_BASELINE_NOW,
-      expectedBootstrapBase: "262e9a6307cdd0df9994991a410acfebe63a5ea6",
+      expectedBootstrapBase: "7b3292e0a001f6fe5fb024d6cca9b771a910718f",
     },
   );
   assert.equal(vulnerable.ok, false);
