@@ -3,6 +3,8 @@
 export const SELLER_DOCUMENT_CLEANUP_SUBJECT_TYPE = 'seller_document' as const;
 export const SELLER_DOCUMENT_CLEANUP_POLICY_VERSION = 'seller-document-cleanup/v1';
 export const SELLER_DOCUMENT_CLEANUP_MAX_CHUNKS = 512;
+/** Per-invocation work bound of the resumable cleanup activity (matches the definer's 1..200). */
+export const SELLER_DOCUMENT_CLEANUP_BATCH_SIZE = 100;
 
 export interface SellerDocumentCleanupTargets {
   readonly policyVersion: string;
@@ -35,6 +37,15 @@ export interface SellerDocumentErasureCounts {
   readonly knowledgeSourcesErased: number;
   readonly blobDeleted: boolean;
   readonly blobFailures: number;
+}
+/** One bounded cleanup activity invocation: cumulative counts plus whether every batch finished. */
+export interface SellerDocumentEraseProgress extends SellerDocumentErasureCounts {
+  readonly done: boolean;
+}
+export type SellerDocumentCleanupPhase = 'claims' | 'sources' | 'chunks' | 'done';
+export interface SellerDocumentCleanupCursor {
+  readonly phase: SellerDocumentCleanupPhase;
+  readonly afterId: string | null;
 }
 export interface SellerDocumentCleanupCompletedPayloadV1 {
   readonly snapshot_version: 1;

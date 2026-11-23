@@ -5,10 +5,15 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { describe, expect, it } from 'vitest';
 import { SellerDocumentClaimsService } from './seller-document-claims.service';
 import { SellerDocumentCleanupService } from './seller-document-cleanup.service';
+import type {
+  SellerDocumentEraseProgress,
+} from './seller-document-cleanup.types';
+import type { DeletionWorkflowInput, LocatedDeletionTargets } from '../compliance/deletion.types';
 import { createDeletionActivities } from '../temporal/deletion.activities';
 import { ClaimService } from '../claim/claim.service';
 import {
   documentClaimBindingHash,
+  documentClaimDependenciesStillCurrent,
   documentClaimStatementDigest,
   hasValidDocumentClaimApprovalAudit,
   loadDocumentClaimBindingInTransaction,
@@ -48,6 +53,41 @@ describe.runIf(Boolean(ownerUrl && appUrl))('seller document typed claim S1a on 
   const claimService = new ClaimService(appPrisma);
   const cleanupService = new SellerDocumentCleanupService(appPrisma);
   const ctx = (workspaceId: string, userId = randomUUID()) => ({ workspaceId, userId, roles: [], scopes: [] as const });
+  /** The same helper paths under the real restricted principal: app_user + FORCE RLS. */
+  const asApp = <T>(workspaceId: string, work: (tx: Prisma.TransactionClient) => Promise<T>) =>
+    app.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceId}, true)`;
+      return work(tx);
+    }, { timeout: 30_000 });
+  const deferred = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => (resolve = done));
+    return { promise, resolve };
+  };
+  const countsOf = (progress: SellerDocumentEraseProgress) => ({
+    chunksErased: progress.chunksErased,
+    claimsErased: progress.claimsErased,
+    evidenceErased: progress.evidenceErased,
+    referencesErased: progress.referencesErased,
+    knowledgeSourcesErased: progress.knowledgeSourcesErased,
+    blobDeleted: progress.blobDeleted,
+    blobFailures: progress.blobFailures,
+  });
+  const eraseUntilDone = async (
+    activities: ReturnType<typeof createDeletionActivities>,
+    input: DeletionWorkflowInput,
+    located: LocatedDeletionTargets,
+  ) => {
+    const calls: SellerDocumentEraseProgress[] = [];
+    let progress = (await activities.eraseSubject({ input, located })) as SellerDocumentEraseProgress;
+    calls.push(progress);
+    while (!progress.done) {
+      progress = (await activities.eraseSubject({ input, located })) as SellerDocumentEraseProgress;
+      calls.push(progress);
+      if (calls.length > 200) throw new Error('seller document cleanup did not converge');
+    }
+    return { final: progress, calls };
+  };
 
   async function seedDocument(workspaceId: string, companyId: string, body: string, overrides: { parseRevision?: number; status?: string } = {}) {
     const documentId = randomUUID();
@@ -98,6 +138,59 @@ describe.runIf(Boolean(ownerUrl && appUrl))('seller document typed claim S1a on 
     const start = bytes.indexOf(Buffer.from(needle, 'utf8'));
     return { start, end: start + Buffer.byteLength(needle, 'utf8'), quote: needle };
   };
+  async function seedCleanupClaims(
+    tenant: { workspaceId: string; companyId: string; document: { documentId: string; contentHash: string; chunkTextHash: string } },
+    count: number,
+  ) {
+    const rows = Array.from({ length: count }, (_, index) => ({
+      claimId: randomUUID(),
+      evidenceId: randomUUID(),
+      statement: `legacy statement ${index}`,
+      digest: sha(`legacy statement ${index}`),
+    }));
+    await owner.claim.createMany({
+      data: rows.map((row) => ({
+        id: row.claimId,
+        workspaceId: tenant.workspaceId,
+        companyId: tenant.companyId,
+        type: 'certification',
+        statement: row.statement,
+        status: 'NEEDS_REVIEW' as const,
+        version: 1,
+      })),
+    });
+    await owner.evidence.createMany({
+      data: rows.map((row) => ({
+        id: row.evidenceId,
+        workspaceId: tenant.workspaceId,
+        claimId: row.claimId,
+        snippet: row.statement,
+      })),
+    });
+    await owner.claimDocumentEvidence.createMany({
+      data: rows.map((row) => ({
+        id: randomUUID(),
+        workspaceId: tenant.workspaceId,
+        companyId: tenant.companyId,
+        claimId: row.claimId,
+        evidenceId: row.evidenceId,
+        documentId: tenant.document.documentId,
+        sourceDocumentId: tenant.document.documentId,
+        documentContentSha256: tenant.document.contentHash,
+        parseRevision: 1,
+        chunkSeq: 0,
+        chunkTextSha256: tenant.document.chunkTextHash,
+        quoteStartByte: 0,
+        quoteEndByte: 1,
+        claimStatementDigest: row.digest,
+        claimType: 'certification',
+        bindingSha256: sha(`binding ${row.claimId}`),
+        requesterId: randomUUID(),
+        requestDigest: sha(`request ${row.claimId}`),
+      })),
+    });
+    return rows;
+  }
 
   it('verifies the delivered migration checksum and the published revision column', async () => {
     const path = fileURLToPath(new URL('../../../../packages/db/prisma/migrations/20261123110000_seller_document_claim_evidence/migration.sql', import.meta.url));
@@ -172,17 +265,15 @@ describe.runIf(Boolean(ownerUrl && appUrl))('seller document typed claim S1a on 
     await expect(claimService.transition(userCtx, draft.claimId, 'APPROVED')).rejects.toMatchObject({ status: 400 });
     const approved = await claimService.transition(userCtx, draft.claimId, 'APPROVED', 1);
     expect(approved).toMatchObject({ status: 'APPROVED', version: 2, verifiedBy: tenant.user });
-    const binding = await owner.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${tenant.workspaceId}, true)`;
-      return loadDocumentClaimBindingInTransaction(tx, { workspaceId: tenant.workspaceId, companyId: tenant.companyId }, approved);
-    });
+    const binding = await asApp(tenant.workspaceId, (tx) =>
+      loadDocumentClaimBindingInTransaction(tx, { workspaceId: tenant.workspaceId, companyId: tenant.companyId }, approved),
+    );
     expect(binding).not.toBeNull();
     expect(hasValidDocumentClaimApprovalAudit(approved, binding!)).toBe(true);
     expect((approved.verificationProof as { proofVersion?: number }).proofVersion).toBe(4);
-    const effective = await owner.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${tenant.workspaceId}, true)`;
-      return effectiveApprovedClaimsInTransaction(tx, userCtx, tenant.companyId, {}, 'icp');
-    });
+    const effective = await asApp(tenant.workspaceId, (tx) =>
+      effectiveApprovedClaimsInTransaction(tx, userCtx, tenant.companyId, {}, 'icp'),
+    );
     expect(effective.claims.map((claim) => claim.id)).toContain(draft.claimId);
     expect(effective.dependencies.get(draft.claimId)).toMatchObject({ referenceId: draft.referenceId, bindingHash: draft.bindingHash });
     await expect(claimService.revoke(userCtx, draft.claimId)).rejects.toMatchObject({ status: 400 });
@@ -213,10 +304,9 @@ describe.runIf(Boolean(ownerUrl && appUrl))('seller document typed claim S1a on 
     expect(listed.documentSource.status).toBe('CURRENT');
     expect(listed.statement).toBe('通过 ISO 9001 认证');
     expect(listed.evidence[0]?.snippet).toBe('通过 ISO 9001 认证');
-    const effective = await owner.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${tenant.workspaceId}, true)`;
-      return effectiveApprovedClaimsInTransaction(tx, userCtx, tenant.companyId, {}, 'icp');
-    });
+    const effective = await asApp(tenant.workspaceId, (tx) =>
+      effectiveApprovedClaimsInTransaction(tx, userCtx, tenant.companyId, {}, 'icp'),
+    );
     expect(effective.claims.map((claim) => claim.id)).not.toContain(draft.claimId);
   });
 
@@ -234,10 +324,9 @@ describe.runIf(Boolean(ownerUrl && appUrl))('seller document typed claim S1a on 
     expect(unavailable.documentSource.status).toBe('UNAVAILABLE');
     expect(unavailable.statement).toBeNull();
     expect(unavailable.evidence[0]?.snippet).toBeNull();
-    const effective = await owner.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${tenant.workspaceId}, true)`;
-      return effectiveApprovedClaimsInTransaction(tx, userCtx, tenant.companyId, {}, 'icp');
-    });
+    const effective = await asApp(tenant.workspaceId, (tx) =>
+      effectiveApprovedClaimsInTransaction(tx, userCtx, tenant.companyId, {}, 'icp'),
+    );
     expect(effective.claims.map((claim) => claim.id)).not.toContain(draft.claimId);
     expect(effective.rejectedDocumentClaimIds).toContain(draft.claimId);
     await owner.sellerDocument.delete({ where: { id: tenant.document.documentId } });
@@ -299,7 +388,8 @@ describe.runIf(Boolean(ownerUrl && appUrl))('seller document typed claim S1a on 
     const input = { workspaceId: tenant.workspaceId, deletionRequestId: request.requestId, subjectType: 'seller_document' as const, subjectId: tenant.document.documentId };
     const located = await activities.freezeSubject(input);
     expect(located).toMatchObject({ subjectType: 'seller_document', documentId: tenant.document.documentId, claimCount: 1, evidenceCount: 1, referenceCount: 1, chunkCount: 1 });
-    const counts = await activities.eraseSubject({ input, located });
+    const { final: progress } = await eraseUntilDone(activities, input, located);
+    const counts = countsOf(progress);
     expect(counts).toMatchObject({ chunksErased: 1, claimsErased: 1, evidenceErased: 1, referencesErased: 1, blobDeleted: true, blobFailures: 0 });
     expect(deleted.keys).toHaveLength(1);
     expect(await owner.sellerDocumentChunk.count({ where: { documentId: tenant.document.documentId } })).toBe(0);
@@ -330,12 +420,13 @@ describe.runIf(Boolean(ownerUrl && appUrl))('seller document typed claim S1a on 
     const input = { workspaceId: tenant.workspaceId, deletionRequestId: request.requestId, subjectType: 'seller_document' as const, subjectId: tenant.document.documentId };
     const failing = createDeletionActivities({ prisma: appPrisma, sellerDocumentsStorage: { delete: async () => { throw new Error('object storage down'); } } });
     const located = await failing.freezeSubject(input);
-    const counts = await failing.eraseSubject({ input, located });
+    const failed = await eraseUntilDone(failing, input, located);
+    const counts = countsOf(failed.final);
     expect(counts).toMatchObject({ blobDeleted: false, blobFailures: 1 });
     await expect(failing.completeDeletion({ input, located })).rejects.toThrow(/blob residue/);
     expect((await owner.deletionRequest.findUniqueOrThrow({ where: { id: request.requestId } })).status).toBe('ERASING');
     const healthy = createDeletionActivities({ prisma: appPrisma, sellerDocumentsStorage: { delete: async () => undefined } });
-    const retried = await healthy.eraseSubject({ input, located });
+    const retried = countsOf((await eraseUntilDone(healthy, input, located)).final);
     expect(retried).toMatchObject({ chunksErased: 1, blobDeleted: true, blobFailures: 0 });
     await expect(healthy.completeDeletion({ input, located })).resolves.toMatchObject({ blobDeleted: true });
     expect((await owner.deletionReceipt.findUniqueOrThrow({ where: { deletionRequestId: request.requestId } })).sellerDocumentDetail).toMatchObject({ blobDeleted: true });
@@ -347,10 +438,82 @@ describe.runIf(Boolean(ownerUrl && appUrl))('seller document typed claim S1a on 
     const request = await cleanupService.requestCleanup(ctx(tenantA.workspaceId, tenantA.user), tenantA.companyId, tenantA.document.documentId);
     const foreign = await app.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${tenantB.workspaceId}, true)`;
-      return tx.$queryRaw`SELECT erase_seller_document_cleanup_targets_v1(${tenantB.workspaceId}::uuid, ${request.requestId}::uuid) AS counts`;
+      return tx.$queryRaw`SELECT erase_seller_document_cleanup_batch_v1(${tenantB.workspaceId}::uuid, ${request.requestId}::uuid, 'claims'::text, NULL::uuid, 100::int) AS counts`;
     }).then(() => null).catch((error) => error);
     expect(foreign).not.toBeNull();
   });
+
+  it('binds the cleanup definer to the caller workspace even with a valid foreign frozen request', async () => {
+    const tenantA = await seedTenant();
+    const tenantB = await seedTenant();
+    const requestB = await cleanupService.requestCleanup(ctx(tenantB.workspaceId, tenantB.user), tenantB.companyId, tenantB.document.documentId);
+    const inputB = { workspaceId: tenantB.workspaceId, deletionRequestId: requestB.requestId, subjectType: 'seller_document' as const, subjectId: tenantB.document.documentId };
+    const activitiesB = createDeletionActivities({ prisma: appPrisma, sellerDocumentsStorage: { delete: async () => undefined } });
+    await activitiesB.freezeSubject(inputB);
+    const cross = await app.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${tenantA.workspaceId}, true)`;
+      return tx.$queryRaw`SELECT erase_seller_document_cleanup_batch_v1(${tenantB.workspaceId}::uuid, ${requestB.requestId}::uuid, 'claims'::text, NULL::uuid, 100::int) AS counts`;
+    }).then(() => null).catch((error) => sqlState(error));
+    expect(cross).toBe('42501');
+    expect(await owner.sellerDocumentChunk.count({ where: { documentId: tenantB.document.documentId } })).toBe(1);
+    expect((await owner.deletionRequest.findUniqueOrThrow({ where: { id: requestB.requestId } })).status).toBe('FROZEN');
+  });
+
+  it('recovers a FAILED cleanup request that has no erasure counts yet', async () => {
+    const tenant = await seedTenant();
+    const { start, end } = quoteOf(tenant.document.text, '通过 ISO 9001 认证');
+    const reference = { ...referenceFor(tenant.document), quoteStartByte: start, quoteEndByte: end };
+    const userCtx = ctx(tenant.workspaceId, tenant.user);
+    const preview = await claims.preview(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证' });
+    const draft = await claims.createDraft(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证', requestDigest: preview.requestDigest });
+    await claimService.transition(userCtx, draft.claimId, 'APPROVED', 1);
+    const request = await cleanupService.requestCleanup(userCtx, tenant.companyId, tenant.document.documentId);
+    const input = { workspaceId: tenant.workspaceId, deletionRequestId: request.requestId, subjectType: 'seller_document' as const, subjectId: tenant.document.documentId };
+    const activities = createDeletionActivities({ prisma: appPrisma, sellerDocumentsStorage: { delete: async () => undefined } });
+    await activities.freezeSubject(input);
+    await owner.deletionRequest.update({ where: { id: request.requestId }, data: { status: 'FAILED' } });
+    const restarted = createDeletionActivities({ prisma: appPrisma, sellerDocumentsStorage: { delete: async () => undefined } });
+    const located = await restarted.freezeSubject(input);
+    expect((await owner.deletionRequest.findUniqueOrThrow({ where: { id: request.requestId } })).status).toBe('FAILED');
+    const counts = countsOf((await eraseUntilDone(restarted, input, located)).final);
+    expect(counts).toMatchObject({ chunksErased: 1, claimsErased: 1, evidenceErased: 1, referencesErased: 1, blobDeleted: true });
+    await expect(restarted.completeDeletion({ input, located })).resolves.toMatchObject({ blobDeleted: true });
+    expect((await owner.deletionRequest.findUniqueOrThrow({ where: { id: request.requestId } })).status).toBe('COMPLETED');
+  });
+
+  it('erases a legacy cleanup snapshot with more than 512 claims in bounded batches', async () => {
+    const tenant = await seedTenant();
+    const claimsToSeed = 513;
+    await seedCleanupClaims(tenant, claimsToSeed);
+    const userCtx = ctx(tenant.workspaceId, tenant.user);
+    const request = await cleanupService.requestCleanup(userCtx, tenant.companyId, tenant.document.documentId);
+    const input = { workspaceId: tenant.workspaceId, deletionRequestId: request.requestId, subjectType: 'seller_document' as const, subjectId: tenant.document.documentId };
+    const activities = createDeletionActivities({ prisma: appPrisma, sellerDocumentsStorage: { delete: async () => undefined } });
+    const located = await activities.freezeSubject(input);
+    expect(located).toMatchObject({ claimCount: claimsToSeed, evidenceCount: claimsToSeed, referenceCount: claimsToSeed });
+    const first = (await activities.eraseSubject({ input, located })) as SellerDocumentEraseProgress;
+    expect(first).toMatchObject({ claimsErased: 100, evidenceErased: 100, referencesErased: 100, done: false });
+    // The batch counts and its continuation cursor are committed together, so a
+    // restarted process resumes instead of replaying the whole frozen snapshot.
+    const committed = await owner.deletionRequest.findUniqueOrThrow({ where: { id: request.requestId } });
+    const committedStats = committed.stats as {
+      sellerDocumentCounts?: { claimsErased?: number };
+      sellerDocumentCursor?: { phase?: string; afterId?: string | null };
+    };
+    expect(committedStats.sellerDocumentCounts?.claimsErased).toBe(100);
+    expect(committedStats.sellerDocumentCursor).toMatchObject({ phase: 'claims' });
+    expect(typeof committedStats.sellerDocumentCursor?.afterId).toBe('string');
+    const restarted = createDeletionActivities({ prisma: appPrisma, sellerDocumentsStorage: { delete: async () => undefined } });
+    const { final, calls } = await eraseUntilDone(restarted, input, located);
+    const progress = [first, ...calls];
+    const deltas = progress.map((call, index) => call.claimsErased - (index === 0 ? 0 : progress[index - 1].claimsErased));
+    expect(Math.max(...deltas)).toBeLessThanOrEqual(100);
+    const counts = countsOf(final);
+    expect(counts).toMatchObject({ claimsErased: claimsToSeed, evidenceErased: claimsToSeed, referencesErased: claimsToSeed, chunksErased: 1, blobDeleted: true });
+    await expect(restarted.completeDeletion({ input, located })).resolves.toMatchObject({ blobDeleted: true });
+    expect(await owner.claim.count({ where: { companyId: tenant.companyId } })).toBe(0);
+    expect(await owner.claimDocumentEvidence.count({ where: { workspaceId: tenant.workspaceId } })).toBe(0);
+  }, 90_000);
 
   it('keeps the binding digest stable and rejects tampered persisted facts', async () => {
     const tenant = await seedTenant();
@@ -373,5 +536,300 @@ describe.runIf(Boolean(ownerUrl && appUrl))('seller document typed claim S1a on 
     });
     expect(draft.bindingHash).toBe(expected);
     await expect(owner.claimDocumentEvidence.update({ where: { claimId: draft.claimId }, data: { bindingSha256: '0'.repeat(64) } })).rejects.toThrow();
+  });
+
+  it('reports a stale document dependency under app_user after the source reprocesses', async () => {
+    const tenant = await seedTenant();
+    const { start, end } = quoteOf(tenant.document.text, '通过 ISO 9001 认证');
+    const reference = { ...referenceFor(tenant.document), quoteStartByte: start, quoteEndByte: end };
+    const userCtx = ctx(tenant.workspaceId, tenant.user);
+    const preview = await claims.preview(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证' });
+    const draft = await claims.createDraft(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证', requestDigest: preview.requestDigest });
+    await claimService.transition(userCtx, draft.claimId, 'APPROVED', 1);
+    const effective = await asApp(tenant.workspaceId, (tx) =>
+      effectiveApprovedClaimsInTransaction(tx, userCtx, tenant.companyId, {}, 'icp'),
+    );
+    const dependencies = [...effective.dependencies.values()];
+    expect(dependencies).toHaveLength(1);
+    expect(
+      await asApp(tenant.workspaceId, (tx) =>
+        documentClaimDependenciesStillCurrent(tx, { workspaceId: tenant.workspaceId, companyId: tenant.companyId }, dependencies),
+      ),
+    ).toBe(true);
+    await owner.sellerDocument.update({ where: { id: tenant.document.documentId }, data: { status: 'processing' } });
+    expect(
+      await asApp(tenant.workspaceId, (tx) =>
+        documentClaimDependenciesStillCurrent(tx, { workspaceId: tenant.workspaceId, companyId: tenant.companyId }, dependencies),
+      ),
+    ).toBe(false);
+  });
+
+  it('refuses to erase a request that already carries erasure counts', async () => {
+    const tenant = await seedTenant();
+    const userCtx = ctx(tenant.workspaceId, tenant.user);
+    const request = await cleanupService.requestCleanup(userCtx, tenant.companyId, tenant.document.documentId);
+    const input = { workspaceId: tenant.workspaceId, deletionRequestId: request.requestId, subjectType: 'seller_document' as const, subjectId: tenant.document.documentId };
+    const activities = createDeletionActivities({ prisma: appPrisma, sellerDocumentsStorage: { delete: async () => undefined } });
+    await activities.freezeSubject(input);
+    const frozen = await owner.deletionRequest.findUniqueOrThrow({ where: { id: request.requestId } });
+    await owner.deletionRequest.update({
+      where: { id: request.requestId },
+      data: {
+        status: 'FAILED',
+        stats: {
+          ...(frozen.stats as Record<string, unknown>),
+          sellerDocumentCounts: { chunksErased: 1, claimsErased: 1, evidenceErased: 1, referencesErased: 1, knowledgeSourcesErased: 0, blobDeleted: false, blobFailures: 1 },
+        } as Prisma.InputJsonValue,
+      },
+    });
+    const state = await asApp(tenant.workspaceId, (tx) =>
+      tx.$queryRaw`SELECT erase_seller_document_cleanup_batch_v1(${tenant.workspaceId}::uuid, ${request.requestId}::uuid, 'claims'::text, NULL::uuid, 100::int) AS counts`,
+    ).then(() => null).catch((error) => sqlState(error));
+    expect(state).toBe('42501');
+    expect(await owner.sellerDocumentChunk.count({ where: { documentId: tenant.document.documentId } })).toBe(1);
+    expect((await owner.deletionRequest.findUniqueOrThrow({ where: { id: request.requestId } })).status).toBe('FAILED');
+  });
+
+  it('refuses to erase a document that is not soft-deleted', async () => {
+    const tenant = await seedTenant();
+    const userCtx = ctx(tenant.workspaceId, tenant.user);
+    const request = await cleanupService.requestCleanup(userCtx, tenant.companyId, tenant.document.documentId);
+    const input = { workspaceId: tenant.workspaceId, deletionRequestId: request.requestId, subjectType: 'seller_document' as const, subjectId: tenant.document.documentId };
+    const activities = createDeletionActivities({ prisma: appPrisma, sellerDocumentsStorage: { delete: async () => undefined } });
+    await activities.freezeSubject(input);
+    await owner.sellerDocument.update({
+      where: { id: tenant.document.documentId },
+      data: { status: 'ready', deletedAt: null, deletedBy: null },
+    });
+    const state = await asApp(tenant.workspaceId, (tx) =>
+      tx.$queryRaw`SELECT erase_seller_document_cleanup_batch_v1(${tenant.workspaceId}::uuid, ${request.requestId}::uuid, 'claims'::text, NULL::uuid, 100::int) AS counts`,
+    ).then(() => null).catch((error) => sqlState(error));
+    expect(state).toBe('42501');
+    expect(await owner.sellerDocumentChunk.count({ where: { documentId: tenant.document.documentId } })).toBe(1);
+    expect((await owner.deletionRequest.findUniqueOrThrow({ where: { id: request.requestId } })).status).toBe('FROZEN');
+  });
+
+  it('does not erase a claim that the frozen snapshot does not bind to the document', async () => {
+    const tenant = await seedTenant();
+    const { start, end } = quoteOf(tenant.document.text, '通过 ISO 9001 认证');
+    const reference = { ...referenceFor(tenant.document), quoteStartByte: start, quoteEndByte: end };
+    const userCtx = ctx(tenant.workspaceId, tenant.user);
+    const preview = await claims.preview(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证' });
+    const draft = await claims.createDraft(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证', requestDigest: preview.requestDigest });
+    await claimService.transition(userCtx, draft.claimId, 'APPROVED', 1);
+    const foreignClaimId = randomUUID();
+    const foreignEvidenceId = randomUUID();
+    await owner.claim.create({
+      data: { id: foreignClaimId, workspaceId: tenant.workspaceId, companyId: tenant.companyId, type: 'certification', statement: 'unrelated legacy claim', status: 'NEEDS_REVIEW', version: 1 },
+    });
+    await owner.evidence.create({
+      data: { id: foreignEvidenceId, workspaceId: tenant.workspaceId, claimId: foreignClaimId, snippet: 'unrelated legacy claim' },
+    });
+    const request = await cleanupService.requestCleanup(userCtx, tenant.companyId, tenant.document.documentId);
+    const input = { workspaceId: tenant.workspaceId, deletionRequestId: request.requestId, subjectType: 'seller_document' as const, subjectId: tenant.document.documentId };
+    const activities = createDeletionActivities({ prisma: appPrisma, sellerDocumentsStorage: { delete: async () => undefined } });
+    await activities.freezeSubject(input);
+    const frozen = await owner.deletionRequest.findUniqueOrThrow({ where: { id: request.requestId } });
+    await owner.deletionRequest.update({
+      where: { id: request.requestId },
+      data: {
+        stats: {
+          ...(frozen.stats as Record<string, unknown>),
+          claimIds: [...(frozen.stats as { claimIds: string[] }).claimIds, foreignClaimId],
+          evidenceIds: [...(frozen.stats as { evidenceIds: string[] }).evidenceIds, foreignEvidenceId],
+        } as Prisma.InputJsonValue,
+      },
+    });
+    const [row] = await asApp(tenant.workspaceId, (tx) =>
+      tx.$queryRaw<Array<{ counts: { claimsErased: number; evidenceErased: number; referencesErased: number } }>>`
+        SELECT erase_seller_document_cleanup_batch_v1(${tenant.workspaceId}::uuid, ${request.requestId}::uuid, 'claims'::text, NULL::uuid, 100::int) AS counts`,
+    );
+    expect(row.counts).toMatchObject({ claimsErased: 1, evidenceErased: 1, referencesErased: 1 });
+    expect(await owner.claim.count({ where: { id: draft.claimId } })).toBe(0);
+    expect(await owner.claim.count({ where: { id: foreignClaimId } })).toBe(1);
+    expect(await owner.evidence.count({ where: { id: foreignEvidenceId } })).toBe(1);
+  });
+
+  it('serializes overlapping continuations so committed counts are never overwritten', async () => {
+    const tenant = await seedTenant();
+    const claimsToSeed = 150;
+    await seedCleanupClaims(tenant, claimsToSeed);
+    const userCtx = ctx(tenant.workspaceId, tenant.user);
+    const request = await cleanupService.requestCleanup(userCtx, tenant.companyId, tenant.document.documentId);
+    const input = { workspaceId: tenant.workspaceId, deletionRequestId: request.requestId, subjectType: 'seller_document' as const, subjectId: tenant.document.documentId };
+    const activities = createDeletionActivities({ prisma: appPrisma, sellerDocumentsStorage: { delete: async () => undefined } });
+    const located = await activities.freezeSubject(input);
+    const first = (await activities.eraseSubject({ input, located })) as SellerDocumentEraseProgress;
+    expect(first).toMatchObject({ claimsErased: 100, done: false });
+    let releaseHolder!: () => void;
+    const holderRelease = new Promise<void>((resolve) => (releaseHolder = resolve));
+    let holderLocked!: () => void;
+    const holderReady = new Promise<void>((resolve) => (holderLocked = resolve));
+    let holderIdentity: { pid: number; xid: string } | undefined;
+    const holder = owner.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM deletion_request WHERE id = ${request.requestId}::uuid FOR UPDATE`;
+      const [identity] = await tx.$queryRaw<Array<{ pid: number; xid: string }>>`
+        SELECT pg_backend_pid() AS pid, pg_current_xact_id()::xid::text AS xid`;
+      holderIdentity = identity;
+      holderLocked();
+      await holderRelease;
+    }, { timeout: 60_000 });
+    await holderReady;
+    const waitingBackends = async (queryLike: string) =>
+      owner.$queryRaw<Array<{ pid: number; xid: string | null }>>`
+        SELECT pid, backend_xid::text AS xid FROM pg_stat_activity
+         WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE ${queryLike}`;
+    const blockedBy = async (pid: number) =>
+      owner.$queryRaw<Array<{ locktype: string; xid: string | null; relation: string | null }>>`
+        SELECT locktype, transactionid::text AS xid, relation::regclass::text AS relation
+          FROM pg_locks WHERE pid = ${pid} AND NOT granted`;
+    // An unrelated row-lock waiter runs throughout: the barrier must bind to the
+    // two target backends and their blocker, never to a global waiter count that
+    // another session could satisfy before either continuation has queued.
+    const unrelatedCompany = await owner.canonicalCompany.create({
+      data: { workspaceId: tenant.workspaceId, name: 'Synthetic overlap unrelated waiter', dedupeKey: randomUUID() },
+    });
+    const unrelatedHeld = deferred();
+    const releaseUnrelated = deferred();
+    const unrelatedHolder = owner.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM canonical_company WHERE id = ${unrelatedCompany.id}::uuid FOR UPDATE`;
+      unrelatedHeld.resolve();
+      await releaseUnrelated.promise;
+    }, { timeout: 60_000 });
+    await unrelatedHeld.promise;
+    const unrelatedWaiter = owner.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM canonical_company WHERE id = ${unrelatedCompany.id}::uuid FOR UPDATE`;
+      await releaseUnrelated.promise;
+    }, { timeout: 60_000 });
+    for (let attempt = 0; attempt < 400; attempt += 1) {
+      if ((await waitingBackends('%canonical_company%FOR UPDATE%')).length === 1) break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(await waitingBackends('%canonical_company%FOR UPDATE%')).toHaveLength(1);
+    // Two continuations of the same request overlap. Neither may read progress
+    // before the other commits, or one overwrites the other's counts.
+    const left = activities.eraseSubject({ input, located }) as Promise<SellerDocumentEraseProgress>;
+    const right = activities.eraseSubject({ input, located }) as Promise<SellerDocumentEraseProgress>;
+    let progressWaiters: Array<{ pid: number; xid: string | null }> = [];
+    for (let attempt = 0; attempt < 400; attempt += 1) {
+      progressWaiters = await waitingBackends('%deletion_request%FOR UPDATE%');
+      if (progressWaiters.length === 2) break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(progressWaiters).toHaveLength(2);
+    const [heldRow] = await owner.$queryRaw<Array<{ xmax: string }>>`
+      SELECT xmax::text AS xmax FROM deletion_request WHERE id = ${request.requestId}::uuid`;
+    expect(heldRow.xmax).toBe(holderIdentity?.xid);
+    for (const waiter of progressWaiters) {
+      const locks = await blockedBy(waiter.pid);
+      // The row lock surfaces either as a transactionid wait on the holder's xid
+      // or as a tuple wait on the target relation; both bind the real backend to
+      // this request row.
+      const blockedByHolder = locks.some((lock) => lock.locktype === 'transactionid' && lock.xid === holderIdentity?.xid);
+      const blockedOnRequestTuple = locks.some((lock) => lock.locktype === 'tuple' && lock.relation === 'deletion_request');
+      expect(blockedByHolder || blockedOnRequestTuple).toBe(true);
+    }
+    // Both continuations wait on the progress-row lock, not inside the definer.
+    expect(await waitingBackends('%erase_seller_document_cleanup_batch_v1%')).toHaveLength(0);
+    releaseHolder();
+    await holder;
+    releaseUnrelated.resolve();
+    await Promise.all([unrelatedHolder, unrelatedWaiter]);
+    await Promise.all([left, right]);
+    const raced = await owner.deletionRequest.findUniqueOrThrow({ where: { id: request.requestId } });
+    const racedCounts = (raced.stats as { sellerDocumentCounts?: { claimsErased?: number } }).sellerDocumentCounts;
+    expect(racedCounts?.claimsErased ?? 0).toBeGreaterThanOrEqual(100);
+    const final = countsOf((await eraseUntilDone(activities, input, located)).final);
+    expect(final).toMatchObject({ claimsErased: claimsToSeed, blobDeleted: true });
+    await expect(activities.completeDeletion({ input, located })).resolves.toMatchObject({ blobDeleted: true });
+  }, 60_000);
+
+  it('completes a legacy cleanup whose erasure finished but carries no cursor', async () => {
+    const tenant = await seedTenant();
+    const { start, end } = quoteOf(tenant.document.text, '通过 ISO 9001 认证');
+    const reference = { ...referenceFor(tenant.document), quoteStartByte: start, quoteEndByte: end };
+    const userCtx = ctx(tenant.workspaceId, tenant.user);
+    const preview = await claims.preview(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证' });
+    const draft = await claims.createDraft(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证', requestDigest: preview.requestDigest });
+    await claimService.transition(userCtx, draft.claimId, 'APPROVED', 1);
+    const request = await cleanupService.requestCleanup(userCtx, tenant.companyId, tenant.document.documentId);
+    const input = { workspaceId: tenant.workspaceId, deletionRequestId: request.requestId, subjectType: 'seller_document' as const, subjectId: tenant.document.documentId };
+    const activities = createDeletionActivities({ prisma: appPrisma, sellerDocumentsStorage: { delete: async () => undefined } });
+    const located = await activities.freezeSubject(input);
+    // Old whole-snapshot erasure had already removed every frozen target; only
+    // the blob obligation remained and no cursor was ever written.
+    await owner.$executeRaw`DELETE FROM claim_document_evidence WHERE claim_id = ${draft.claimId}::uuid`;
+    await owner.$executeRaw`DELETE FROM evidence WHERE claim_id = ${draft.claimId}::uuid`;
+    await owner.$executeRaw`DELETE FROM claim WHERE id = ${draft.claimId}::uuid`;
+    await owner.$executeRaw`DELETE FROM seller_document_chunk WHERE document_id = ${tenant.document.documentId}::uuid`;
+    const frozen = await owner.deletionRequest.findUniqueOrThrow({ where: { id: request.requestId } });
+    await owner.deletionRequest.update({
+      where: { id: request.requestId },
+      data: {
+        status: 'ERASING',
+        stats: {
+          ...(frozen.stats as Record<string, unknown>),
+          sellerDocumentCounts: { chunksErased: 1, claimsErased: 1, evidenceErased: 1, referencesErased: 1, knowledgeSourcesErased: 0, blobDeleted: false, blobFailures: 1 },
+        } as Prisma.InputJsonValue,
+      },
+    });
+    const result = await eraseUntilDone(activities, input, located);
+    expect(countsOf(result.final)).toMatchObject({ claimsErased: 1, blobDeleted: true });
+    // Blob-only retry: the erased legacy request never re-enters the definer.
+    expect(result.calls).toHaveLength(1);
+    await expect(activities.completeDeletion({ input, located })).resolves.toMatchObject({ blobDeleted: true });
+    expect((await owner.deletionRequest.findUniqueOrThrow({ where: { id: request.requestId } })).status).toBe('COMPLETED');
+  });
+
+  it('refuses legacy counts that disagree with the frozen snapshot', async () => {
+    const tenant = await seedTenant();
+    const { start, end } = quoteOf(tenant.document.text, '通过 ISO 9001 认证');
+    const reference = { ...referenceFor(tenant.document), quoteStartByte: start, quoteEndByte: end };
+    const userCtx = ctx(tenant.workspaceId, tenant.user);
+    const preview = await claims.preview(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证' });
+    const draft = await claims.createDraft(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证', requestDigest: preview.requestDigest });
+    await claimService.transition(userCtx, draft.claimId, 'APPROVED', 1);
+    const request = await cleanupService.requestCleanup(userCtx, tenant.companyId, tenant.document.documentId);
+    const input = { workspaceId: tenant.workspaceId, deletionRequestId: request.requestId, subjectType: 'seller_document' as const, subjectId: tenant.document.documentId };
+    const activities = createDeletionActivities({ prisma: appPrisma, sellerDocumentsStorage: { delete: async () => undefined } });
+    const located = await activities.freezeSubject(input);
+    const frozen = await owner.deletionRequest.findUniqueOrThrow({ where: { id: request.requestId } });
+    await owner.deletionRequest.update({
+      where: { id: request.requestId },
+      data: {
+        status: 'ERASING',
+        stats: {
+          ...(frozen.stats as Record<string, unknown>),
+          sellerDocumentCounts: { chunksErased: 0, claimsErased: 0, evidenceErased: 0, referencesErased: 0, knowledgeSourcesErased: 0, blobDeleted: false, blobFailures: 0 },
+        } as Prisma.InputJsonValue,
+      },
+    });
+    await expect(activities.eraseSubject({ input, located })).rejects.toThrow(/do not match the frozen snapshot/);
+    expect(await owner.claim.count({ where: { id: draft.claimId } })).toBe(1);
+  });
+
+  it('rejects a NULL cleanup phase without deleting targets', async () => {
+    const tenant = await seedTenant();
+    const userCtx = ctx(tenant.workspaceId, tenant.user);
+    const request = await cleanupService.requestCleanup(userCtx, tenant.companyId, tenant.document.documentId);
+    const input = { workspaceId: tenant.workspaceId, deletionRequestId: request.requestId, subjectType: 'seller_document' as const, subjectId: tenant.document.documentId };
+    const activities = createDeletionActivities({ prisma: appPrisma, sellerDocumentsStorage: { delete: async () => undefined } });
+    await activities.freezeSubject(input);
+    const state = await asApp(tenant.workspaceId, (tx) =>
+      tx.$queryRaw`SELECT erase_seller_document_cleanup_batch_v1(${tenant.workspaceId}::uuid, ${request.requestId}::uuid, NULL::text, NULL::uuid, 100::int) AS batch`,
+    ).then(() => null).catch((error) => sqlState(error));
+    expect(state).toBe('42501');
+    expect(await owner.sellerDocumentChunk.count({ where: { documentId: tenant.document.documentId } })).toBe(1);
+    expect((await owner.deletionRequest.findUniqueOrThrow({ where: { id: request.requestId } })).status).toBe('FROZEN');
+  });
+
+  it('pins the delivered S1a follow-up migration checksums', async () => {
+    for (const name of ['20261124020000_seller_document_claim_s1a_followup', '20261124030000_seller_document_cleanup_batch', '20261124040000_seller_document_cleanup_null_phase']) {
+      const path = fileURLToPath(new URL(`../../../../packages/db/prisma/migrations/${name}/migration.sql`, import.meta.url));
+      const expected = sha(readFileSync(path));
+      const rows = await owner.$queryRaw<Array<{ checksum: string }>>`SELECT checksum FROM _prisma_migrations WHERE migration_name = ${name}`;
+      expect(rows).toHaveLength(1);
+      expect(rows[0].checksum).toBe(expected);
+    }
   });
 });

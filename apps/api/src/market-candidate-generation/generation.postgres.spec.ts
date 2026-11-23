@@ -12,7 +12,7 @@ import { ExecutionBudgetGrantError, type VerifiedExecutionBudgetAuthority } from
 import { PostgresBudgetStore, type BudgetReservation, type BudgetReservationRequest } from '../tools/budget-store';
 import { MarketCandidateSetsService } from '../market-candidates/market-candidate-sets.service';
 import { MarketCandidateGenerationService } from './generation.service';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PrismaService } from '../prisma/prisma.service';
@@ -20,6 +20,7 @@ import { buildGenerationBasis } from './generation-basis';
 import { documentHash } from '../market-candidates/market-candidate-set.document';
 import { ClaimService } from '../claim/claim.service';
 import { MarketCandidateGenerationRepository } from './generation.repository';
+import { SellerDocumentClaimsService } from '../seller-knowledge/seller-document-claims.service';
 const ENABLED=process.env.MARKET_CANDIDATE_GENERATION_DATABASE_TEST==='1';
 const OWNER=process.env.MARKET_CANDIDATE_GENERATION_TEST_DATABASE_URL,APP=process.env.MARKET_CANDIDATE_GENERATION_TEST_APP_DATABASE_URL;
 if(ENABLED){if(!OWNER||!APP||APP!==process.env.APP_DATABASE_URL)throw Error('B2_TEST_URL_PAIR_REQUIRED');const a=new URL(OWNER),b=new URL(APP);if([a,b].some(u=>u.protocol!=='postgresql:'||u.hostname!=='127.0.0.1'||u.pathname!=='/global_test'||u.search||u.hash)||a.host!==b.host||b.username!=='app_user')throw Error('B2_EXPLICIT_LOOPBACK_GLOBAL_TEST_ONLY');}
@@ -459,6 +460,32 @@ suite('generation controls are durable tenant data, not a fixture producer or mo
   const f=await fixture(),valid=proposed(f),first=valid.candidates[0];const output={...valid,candidates:[{...first,proposal:{...first.proposal,supplyOrCapability:{...first.proposal.supplyOrCapability,offeringId:randomUUID()}}}]} as GenerationOutput;
   const s=system(f,{output}),a=await s.service.prepare(ctx(f),f.companyId,{intentId:f.intentId});expect((await s.service.execute(ctx(f),a.generationId,{intentDigest:a.intentDigest},'synthetic-owned-grant')).reasonCode).toBe('OUTPUT_INVALID');await s.service.execute(ctx(f),a.generationId,{intentDigest:a.intentDigest},'synthetic-owned-grant');expect(s.state.calls).toBe(1);
   const b=await s.service.prepare(ctx(f),f.companyId,{intentId:randomUUID()});expect((await s.service.execute(ctx(f),b.generationId,{intentDigest:b.intentDigest},'synthetic-owned-grant')).reasonCode).toBe('OUTPUT_INVALID');expect(s.state.calls).toBe(2);expect(await financialCounts(f)).toEqual({authorities:2,attempts:2,operations:2,sets:0});
+ });
+
+ it('repository excludes a document-backed claim from automatic selection and rejects it as explicit input',async()=>{
+  const workspaceId=randomUUID(),companyId=randomUUID(),userId=randomUUID(),sha=(value:string)=>createHash('sha256').update(value).digest('hex');
+  await owner.workspace.create({data:{id:workspaceId,name:'Synthetic document generation fixture'}});
+  await owner.companyProfile.create({data:{id:companyId,workspaceId,name:'Synthetic document supplier',website:'https://synthetic.example.test',version:1}});
+  await owner.offering.create({data:{workspaceId,companyId,name:'Synthetic supply',description:'Synthetic offering'}});
+  const draftClaim=await owner.claim.create({data:{workspaceId,companyId,type:'capability',statement:'Legacy approved generation statement',status:'NEEDS_REVIEW',version:1}});
+  const legacy=await new ClaimService(app).transition({workspaceId,userId,roles:[]},draftClaim.id,'APPROVED',1);
+  const body='Synthetic generation document body. Document-only approved generation statement.';
+  const documentId=randomUUID();
+  await owner.sellerDocument.create({data:{id:documentId,workspaceId,companyId,uploadedBy:userId,filename:'synthetic.txt',mime:'text/plain',sizeBytes:BigInt(Buffer.byteLength(body,'utf8')),kind:'txt',objectKey:`ws/${workspaceId}/companies/${companyId}/seller-documents/${documentId}/${sha(body)}.txt`,contentHash:sha(body),status:'ready',parseRevision:1,chunkCount:1}});
+  await owner.sellerDocumentChunk.create({data:{workspaceId,documentId,seq:0,text:body,meta:{page:1}}});
+  const start=Buffer.byteLength('Synthetic generation document body. ','utf8'),end=start+Buffer.byteLength('Document-only approved generation statement.', 'utf8'),statement='Document-only approved generation statement.';
+  const userCtx={workspaceId,userId,roles:[] as string[]};
+  const claimService=new SellerDocumentClaimsService(app);
+  const reference={documentId,documentContentHash:sha(body),parseRevision:1,chunkSeq:0,chunkTextHash:sha(body),quoteStartByte:start,quoteEndByte:end};
+  const preview=await claimService.preview(userCtx,companyId,documentId,{reference,type:'certification',statement});
+  const docDraft=await claimService.createDraft(userCtx,companyId,documentId,{reference,type:'certification',statement,requestDigest:preview.requestDigest});
+  await new ClaimService(app).transition(userCtx,docDraft.claimId,'APPROVED',1);
+  const intentId=randomUUID(),repository=new MarketCandidateGenerationRepository(app);
+  const prepared=await repository.prepare({workspaceId,userId,roles:[]},companyId,{intentId},frozenContract);
+  const sourceIds=prepared.basisDescriptors.sources.map((source)=>source.sourceId);
+  expect(sourceIds).toContain(legacy.id);
+  expect(sourceIds).not.toContain(docDraft.claimId);
+  await expect(repository.prepare({workspaceId,userId,roles:[]},companyId,{intentId:randomUUID(),claimIds:[docDraft.claimId]},frozenContract)).rejects.toMatchObject({status:400,response:{error:{code:'VALIDATION_ERROR'}}});
  });
 
 });

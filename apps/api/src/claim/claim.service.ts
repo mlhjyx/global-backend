@@ -123,11 +123,15 @@ export class ClaimService {
             error: { code: 'DOCUMENT_CLAIM_EXPECTED_VERSION_REQUIRED', message: 'document claims require expectedVersion' },
           });
         }
-        // Fixed order: company -> document -> claim.
+        // Fixed order: company -> document -> claim. The approval may later
+        // activate the company through an UPDATE (FOR NO KEY UPDATE), so the
+        // stage-final company mode is taken before waiting on the document —
+        // otherwise a consumer holding the company share lock while waiting on
+        // the same document would deadlock with this upgrade.
         await tx.$queryRaw(Prisma.sql`
           SELECT "id" FROM "company_profile"
            WHERE "id" = ${existing.companyId}::uuid AND "workspace_id" = ${ctx.workspaceId}::uuid
-           FOR SHARE
+           FOR NO KEY UPDATE
         `);
         if (reference.document_id !== null) {
           await tx.$queryRaw(Prisma.sql`

@@ -15,6 +15,7 @@ import { createRolesToScopesPolicy, ROLES_TO_SCOPES_POLICY } from '../auth/scope
 import { GlobalHttpExceptionFilter } from '../common/http-exception.filter';
 import { MarketCandidateSetsController } from './market-candidate-sets.controller';
 import { ClaimService } from '../claim/claim.service';
+import { SellerDocumentClaimsService } from '../seller-knowledge/seller-document-claims.service';
 
 const enabled = process.env.MARKET_CANDIDATES_DATABASE_TEST === '1';
 const ownerUrl = process.env.MARKET_CANDIDATES_TEST_DATABASE_URL;
@@ -656,6 +657,50 @@ describe.runIf(enabled)('B1 market candidate persistence on restricted PostgreSQ
     });
     const counts=await owner.marketCandidateSet.count({where:{workspaceId,companyId:fx.companyId,initialOperationId:operationId}});
     expect(counts).toBe(0);
+  });
+
+  it('B1-T08 reports a document-backed claim CURRENT and then UNAVAILABLE once its document is invalidated', async () => {
+    const company = await owner.companyProfile.create({ data: { workspaceId, name: 'SYNTHETIC document claim seller' } });
+    const offering = await owner.offering.create({ data: { workspaceId, companyId: company.id, name: 'SYNTHETIC document claim offering', description: 'SYNTHETIC offering' } });
+    const sha = (value: string) => createHash('sha256').update(value).digest('hex');
+    const body = 'Synthetic candidate set document body. Document-only candidate claim.';
+    const document = await owner.sellerDocument.create({ data: { workspaceId, companyId: company.id, uploadedBy: actorId, filename: 'SYNTHETIC.txt', mime: 'text/plain', sizeBytes: BigInt(Buffer.byteLength(body, 'utf8')), kind: 'txt', objectKey: `SYNTHETIC/${randomUUID()}`, contentHash: sha(body), status: 'ready', parseRevision: 1, chunkCount: 1 } });
+    await owner.sellerDocumentChunk.create({ data: { workspaceId, documentId: document.id, seq: 0, text: body, meta: { page: 1 } } });
+    const statementText = 'Document-only candidate claim.';
+    const start = Buffer.byteLength('Synthetic candidate set document body. ', 'utf8');
+    const end = start + Buffer.byteLength(statementText, 'utf8');
+    const userCtx: RequestContext = { workspaceId, userId: actorId, roles: [] };
+    const claimClient = new PrismaService();
+    let docClaimId = '';
+    try {
+      const claims = new SellerDocumentClaimsService(claimClient);
+      const reference = { documentId: document.id, documentContentHash: sha(body), parseRevision: 1, chunkSeq: 0, chunkTextHash: sha(body), quoteStartByte: start, quoteEndByte: end };
+      const preview = await claims.preview(userCtx, company.id, document.id, { reference, type: 'certification', statement: statementText });
+      const draft = await claims.createDraft(userCtx, company.id, document.id, { reference, type: 'certification', statement: statementText, requestDigest: preview.requestDigest });
+      await new ClaimService(claimClient).transition(userCtx, draft.claimId, 'APPROVED', 1);
+      docClaimId = draft.claimId;
+    } finally {
+      await claimClient.$disconnect();
+    }
+    const sources = [
+      { kind: 'OFFERING', sourceId: offering.id },
+      { kind: 'CLAIM', sourceId: docClaimId },
+      { kind: 'SELLER_DOCUMENT', sourceId: document.id },
+    ];
+    const statement = (text: string, knowledgeState = 'INFERENCE') => ({ text, knowledgeState, basisKeys: sources.map(source => `${source.kind}:${source.sourceId}`), impact: 'SYNTHETIC document claim relation unverified' });
+    const proposal = { supplyOrCapability: { offeringId: offering.id, description: 'SYNTHETIC offering' }, buyerOrganizationCountry: 'DE', projectCountry: 'FR',
+      application: statement('SYNTHETIC module assembly'), organizationRole: statement('SYNTHETIC generic job alone cannot prove a buyer', 'UNKNOWN'), fitExplanation: statement('SYNTHETIC possible input, not a verified buyer'),
+      entryConditions: [statement('SYNTHETIC certification missing', 'UNKNOWN')], support: [statement('SYNTHETIC seller claims supply', 'SELLER_ASSERTION')],
+      counterEvidence: [statement('SYNTHETIC conflicting supply limit', 'CONFLICT')], gaps: [statement('SYNTHETIC no independent market evidence', 'UNKNOWN')],
+      recommendation: { status: 'CONDITIONAL', reason: 'SYNTHETIC verification required' }, nextVerification: ['SYNTHETIC verify purchasing object'] };
+    const draft = { generationOutcome: 'CANDIDATES_PROPOSED', sources, candidates: [{ proposal }] };
+    const stored = await usingService(service => service.persistInitial(context(), company.id, draft, randomUUID()));
+    const read = await usingService(service => service.getCurrent(context(), stored.setId));
+    expect(read.basisAvailability.find(entry => entry.key === `CLAIM:${docClaimId}`)).toMatchObject({ status: 'CURRENT' });
+    await owner.sellerDocument.update({ where: { id: document.id }, data: { status: 'processing' } });
+    const stale = await usingService(service => service.getCurrent(context(), stored.setId));
+    expect(stale.documentHash).toBe(read.documentHash);
+    expect(stale.basisAvailability.find(entry => entry.key === `CLAIM:${docClaimId}`)).toMatchObject({ status: 'UNAVAILABLE' });
   });
 
 });
