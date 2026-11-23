@@ -11,6 +11,7 @@ const DOCUMENT = "data:text/html,<title>runtime-readiness</title>";
 const TIMEOUT_MS = 10_000;
 const KILL_GRACE_MS = 1_000;
 const REAP_GRACE_MS = 5_000;
+const RECOVERY_BUDGET_MS = 5_000;
 const OUTPUT_LIMIT = 128 * 1024;
 const CLEANUP_ERROR = "BROWSER_PROBE_CLEANUP_INCOMPLETE";
 const UNAVAILABLE_ERROR = "BROWSER_RUNTIME_UNAVAILABLE";
@@ -48,6 +49,10 @@ interface CleanupObligation {
   readonly child: childProcess.ChildProcess | undefined;
   readonly closed: Promise<void> | undefined;
   readonly fenced: boolean;
+  /** In-flight group observation; awaited (bounded) instead of starting a second one. */
+  groupCheck?: Promise<"ok" | "error">;
+  /** In-flight owned-root release; never duplicated while a retry may still be doing IO. */
+  release?: Promise<RootRelease>;
 }
 type ProbeResult =
   | { readonly kind: "ok" }
@@ -246,8 +251,10 @@ async function releaseRoot(
   let current: BrowserIdentity;
   try {
     current = await fs.lstat(root);
-  } catch {
-    return "fenced";
+  } catch (error) {
+    // A vanished root cannot be proven ours; a transient re-observation error
+    // stays retryable and must re-prove the full identity on the next attempt.
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "fenced" : "retry";
   }
   if (!sameIdentity(current, identity)) return "fenced";
   try {
@@ -287,8 +294,9 @@ async function runProbe(executable: string, attempt: number): Promise<ProbeResul
       obligation: { attempt, root, identity, child: result.child, closed: result.closed, fenced: false },
     };
   }
-  const release = await releaseRoot(root, identity);
-  if (release === "cleaned") return result;
+  const releasePromise = releaseRoot(root, identity);
+  const release = await waitSettled(releasePromise, RECOVERY_BUDGET_MS);
+  if (release.done && release.value === "cleaned") return result;
   return {
     kind: "cleanup",
     obligation: {
@@ -297,35 +305,53 @@ async function runProbe(executable: string, attempt: number): Promise<ProbeResul
       identity,
       child: undefined,
       closed: undefined,
-      fenced: release === "fenced",
+      fenced: release.done && release.value === "fenced",
+      ...(release.done ? {} : { release: releasePromise }),
     },
   };
 }
 
-async function waitWithin(promise: Promise<void>, timeoutMs: number): Promise<boolean> {
+type Settled<T> = { readonly done: false } | { readonly done: true; readonly value: T };
+
+async function waitSettled<T>(promise: Promise<T>, timeoutMs: number): Promise<Settled<T>> {
   let timer: NodeJS.Timeout | undefined;
-  const timedOut = new Promise<boolean>((resolve) => {
-    timer = setTimeout(() => resolve(false), timeoutMs);
+  const timedOut = new Promise<Settled<T>>((resolve) => {
+    timer = setTimeout(() => resolve({ done: false }), Math.max(0, timeoutMs));
   });
-  // Only the wait is bounded; the close promise itself stays owned by the
-  // obligation so a later real close is never abandoned by this race.
-  const settled = await Promise.race([promise.then(() => true), timedOut]);
+  // Only this wait is bounded; the underlying promise stays owned by the
+  // obligation so a later real completion is never abandoned or duplicated.
+  const settled = await Promise.race([
+    promise.then((value) => ({ done: true, value }) as Settled<T>),
+    timedOut,
+  ]);
   if (timer) clearTimeout(timer);
   return settled;
 }
 
+/** One recovery attempt with a single deadline over close/group/root IO. */
 async function recoverObligation(obligation: CleanupObligation): Promise<Recovery> {
   if (obligation.fenced || obligation.identity === undefined) return "fenced";
-  if (obligation.closed && !(await waitWithin(obligation.closed, REAP_GRACE_MS)))
-    return "pending";
-  try {
-    await waitForGroupExit(obligation.child?.pid, REAP_GRACE_MS);
-  } catch {
-    return "pending";
+  const deadline = Date.now() + RECOVERY_BUDGET_MS;
+  const remaining = () => Math.max(0, deadline - Date.now());
+  if (obligation.closed) {
+    const closed = await waitSettled(obligation.closed, remaining());
+    if (!closed.done) return "pending";
   }
-  const release = await releaseRoot(obligation.root, obligation.identity);
-  if (release === "cleaned") return "recovered";
-  return release === "fenced" ? "fenced" : "pending";
+  if (remaining() <= 0) return "pending";
+  obligation.groupCheck ??= waitForGroupExit(obligation.child?.pid, remaining()).then(
+    () => "ok" as const,
+    () => "error" as const,
+  );
+  const group = await waitSettled(obligation.groupCheck, remaining());
+  if (!group.done) return "pending";
+  obligation.groupCheck = undefined;
+  if (group.value !== "ok" || remaining() <= 0) return "pending";
+  obligation.release ??= releaseRoot(obligation.root, obligation.identity);
+  const release = await waitSettled(obligation.release, remaining());
+  if (!release.done) return "pending";
+  obligation.release = undefined;
+  if (release.value === "cleaned") return "recovered";
+  return release.value === "fenced" ? "fenced" : "pending";
 }
 
 /**
