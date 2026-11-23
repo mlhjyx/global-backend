@@ -577,9 +577,12 @@ export async function documentClaimDependenciesStillCurrent(
 }
 /**
  * Serialize a document-claim recheck with concurrent invalidation: company ->
- * live document rows -> claim rows in stable id order. The live document id is
- * re-read from the reference under the company lock, never taken from the
- * prepare-time dependency, so a document deleted in between cannot be bypassed.
+ * live document rows -> claim rows in stable id order. The company row is taken
+ * in the stage-final mode (FOR NO KEY UPDATE, the mode the approval's activation
+ * update needs) before any document wait, so approval and consumption share one
+ * lock-upgrade order. The live document id is re-read from the reference under
+ * the company lock, never taken from the prepare-time dependency, so a document
+ * deleted in between cannot be bypassed.
  */
 export async function lockDocumentClaimDependencies(
   tx: Prisma.TransactionClient,
@@ -588,7 +591,7 @@ export async function lockDocumentClaimDependencies(
 ): Promise<void> {
   if (dependencies.length === 0) return;
   await tx.$queryRaw`SELECT id FROM company_profile
-     WHERE id=${context.companyId}::uuid AND workspace_id=${context.workspaceId}::uuid FOR SHARE`;
+     WHERE id=${context.companyId}::uuid AND workspace_id=${context.workspaceId}::uuid FOR NO KEY UPDATE`;
   const claimIds = [...new Set(dependencies.map((dependency) => dependency.claimId))].sort();
   const references = await tx.claimDocumentEvidence.findMany({
     where: { workspaceId: context.workspaceId, companyId: context.companyId, claimId: { in: claimIds } },

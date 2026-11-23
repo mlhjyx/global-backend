@@ -1,7 +1,7 @@
 import { proxyActivities } from '@temporalio/workflow';
 import type { DeletionActivities } from './deletion.activities';
 import type { DeletionWorkflowInput, ErasureCounts, LocatedDeletionTargets } from '../compliance/deletion.types';
-import type { SellerDocumentErasureCounts } from '../seller-knowledge/seller-document-cleanup.types';
+import type { SellerDocumentEraseProgress, SellerDocumentErasureCounts } from '../seller-knowledge/seller-document-cleanup.types';
 
 const acts = proxyActivities<DeletionActivities>({
   startToCloseTimeout: '5 minutes',
@@ -18,7 +18,12 @@ export async function deletionWorkflow(
 ): Promise<ErasureCounts | SellerDocumentErasureCounts> {
   try {
     const located: LocatedDeletionTargets = await acts.freezeSubject(input);
-    await acts.eraseSubject({ input, located });
+    // The seller-document cleanup is resumable: each call erases one bounded
+    // batch and reports whether every batch finished.
+    let erased: ErasureCounts | SellerDocumentEraseProgress = await acts.eraseSubject({ input, located });
+    while ('done' in erased && !erased.done) {
+      erased = await acts.eraseSubject({ input, located });
+    }
     return await acts.completeDeletion({ input, located });
   } catch (err) {
     await acts.failDeletion({

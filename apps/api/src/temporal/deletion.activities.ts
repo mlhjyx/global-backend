@@ -21,9 +21,13 @@ import {
 import { SellerDocumentsStorage } from '../seller-knowledge/seller-documents.storage';
 import {
   buildSellerDocumentCleanupCompletedPayload,
+  SELLER_DOCUMENT_CLEANUP_BATCH_SIZE,
   SELLER_DOCUMENT_CLEANUP_POLICY_VERSION,
   SELLER_DOCUMENT_CLEANUP_SUBJECT_TYPE,
   type LocatedSellerDocumentCleanupTargets,
+  type SellerDocumentCleanupCursor,
+  type SellerDocumentCleanupPhase,
+  type SellerDocumentEraseProgress,
   type SellerDocumentErasureCounts,
   type SellerDocumentCleanupReceiptDetail,
 } from '../seller-knowledge/seller-document-cleanup.types';
@@ -121,7 +125,7 @@ export function createDeletionActivities(deps: {
 
     async eraseSubject(args: {
       input: DeletionWorkflowInput;
-      located: LocatedDeletionTargets }): Promise<ErasureCounts | SellerDocumentErasureCounts> {
+      located: LocatedDeletionTargets }): Promise<ErasureCounts | SellerDocumentEraseProgress> {
       const { input, located } = args;
       if (located.subjectType === SELLER_DOCUMENT_CLEANUP_SUBJECT_TYPE) {
         return prisma.withWorkspace(input.workspaceId, (tx) => eraseSellerDocumentCleanup(tx, input, located, sellerDocuments));
@@ -414,6 +418,7 @@ type CleanupStats = {
   referenceIds?: unknown;
   knowledgeSourceIds?: unknown;
   sellerDocumentCounts?: Partial<SellerDocumentErasureCounts>;
+  sellerDocumentCursor?: unknown;
 };
 function cleanupStats(value: unknown): CleanupStats {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as CleanupStats) : {};
@@ -429,6 +434,53 @@ function parsedErasureCounts(value: unknown): SellerDocumentErasureCounts | null
     knowledgeSourcesErased: cleanupNonNegative(row.knowledgeSourcesErased),
     blobDeleted: row.blobDeleted === true,
     blobFailures: cleanupNonNegative(row.blobFailures),
+  };
+}
+const EMPTY_ERASURE_COUNTS: SellerDocumentErasureCounts = {
+  chunksErased: 0,
+  claimsErased: 0,
+  evidenceErased: 0,
+  referencesErased: 0,
+  knowledgeSourcesErased: 0,
+  blobDeleted: false,
+  blobFailures: 0,
+};
+function parsedCleanupCursor(value: unknown): SellerDocumentCleanupCursor {
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    const row = value as Record<string, unknown>;
+    if (row.phase === 'claims' || row.phase === 'sources' || row.phase === 'chunks' || row.phase === 'done') {
+      return {
+        phase: row.phase,
+        afterId: typeof row.afterId === 'string' && CLEANUP_UUID.test(row.afterId) ? row.afterId : null,
+      };
+    }
+  }
+  return { phase: 'claims', afterId: null };
+}
+interface CleanupBatchResult extends SellerDocumentErasureCounts {
+  readonly nextPhase: SellerDocumentCleanupPhase;
+  readonly nextAfter: string | null;
+}
+function parsedCleanupBatch(value: unknown): CleanupBatchResult {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('seller document cleanup returned no batch counts');
+  }
+  const row = value as Record<string, unknown>;
+  const nextPhase = row.nextPhase;
+  if (nextPhase !== 'claims' && nextPhase !== 'sources' && nextPhase !== 'chunks' && nextPhase !== 'done') {
+    throw new Error('seller document cleanup returned an invalid next phase');
+  }
+  const nextAfter = typeof row.nextAfter === 'string' && CLEANUP_UUID.test(row.nextAfter) ? row.nextAfter : null;
+  return {
+    nextPhase,
+    nextAfter,
+    chunksErased: cleanupNonNegative(row.chunksErased),
+    claimsErased: cleanupNonNegative(row.claimsErased),
+    evidenceErased: cleanupNonNegative(row.evidenceErased),
+    referencesErased: cleanupNonNegative(row.referencesErased),
+    knowledgeSourcesErased: cleanupNonNegative(row.knowledgeSourcesErased),
+    blobDeleted: false,
+    blobFailures: 0,
   };
 }
 
@@ -479,13 +531,18 @@ async function locateSellerDocumentCleanup(
   };
 }
 
-/** Erase frozen targets through the bounded definer, then the original blob; failures keep actual residue. */
+/**
+ * One bounded, resumable cleanup step per invocation: the definer erases at most
+ * one batch of one frozen phase, and the batch counts plus the next cursor are
+ * committed in this same transaction. The blob is deleted only after every batch
+ * finished, in the invocation that closed the last phase.
+ */
 async function eraseSellerDocumentCleanup(
   tx: Prisma.TransactionClient,
   input: DeletionWorkflowInput,
   located: LocatedSellerDocumentCleanupTargets,
   storage: Pick<SellerDocumentsStorage, 'delete'>,
-): Promise<SellerDocumentErasureCounts> {
+): Promise<SellerDocumentEraseProgress> {
   if (input.subjectId !== located.subjectId || input.deletionRequestId.length === 0)
     throw ApplicationFailure.create({ type: 'SELLER_DOCUMENT_CLEANUP_SCOPE_INVALID', message: 'cleanup input does not match located targets', nonRetryable: true });
   const moved = await tx.deletionRequest.updateMany({
@@ -497,27 +554,41 @@ async function eraseSellerDocumentCleanup(
     select: { status: true, stats: true },
   });
   if (!request) throw new Error(`deletion_request ${input.deletionRequestId} not found`);
+  const stats = cleanupStats(request.stats);
+  const persisted = parsedErasureCounts(stats.sellerDocumentCounts);
   if (request.status === 'COMPLETED') {
-    const persisted = parsedErasureCounts(cleanupStats(request.stats).sellerDocumentCounts);
-    if (persisted) return persisted;
+    if (!persisted) throw new Error('seller document cleanup completed without erasure counts');
+    return { ...persisted, done: true };
   }
   if (moved.count === 0 && request.status !== 'ERASING' && request.status !== 'FAILED') {
     throw new Error(`seller document cleanup cannot erase from status ${request.status}`);
   }
-  const stats = cleanupStats(request.stats);
-  const persisted = parsedErasureCounts(stats.sellerDocumentCounts);
-  let counts = persisted;
-  if (counts === null) {
-    const rows = await tx.$queryRaw<Array<{ counts: unknown }>>(Prisma.sql`
-      SELECT erase_seller_document_cleanup_targets_v1(${input.workspaceId}::uuid, ${input.deletionRequestId}::uuid) AS counts
+  const cursor = parsedCleanupCursor(stats.sellerDocumentCursor);
+  const counts = persisted ?? EMPTY_ERASURE_COUNTS;
+  let next: SellerDocumentErasureCounts = counts;
+  let nextCursor = cursor;
+  if (cursor.phase !== 'done') {
+    const rows = await tx.$queryRaw<Array<{ batch: unknown }>>(Prisma.sql`
+      SELECT erase_seller_document_cleanup_batch_v1(
+        ${input.workspaceId}::uuid, ${input.deletionRequestId}::uuid,
+        ${cursor.phase}::text, ${cursor.afterId}::uuid, ${SELLER_DOCUMENT_CLEANUP_BATCH_SIZE}::int
+      ) AS batch
     `);
-    const erased = parsedErasureCounts(rows[0]?.counts);
-    if (!erased) throw new Error('seller document cleanup returned no erasure counts');
-    counts = { ...erased, blobDeleted: false, blobFailures: 0 };
+    const batch = parsedCleanupBatch(rows[0]?.batch);
+    next = {
+      chunksErased: counts.chunksErased + batch.chunksErased,
+      claimsErased: counts.claimsErased + batch.claimsErased,
+      evidenceErased: counts.evidenceErased + batch.evidenceErased,
+      referencesErased: counts.referencesErased + batch.referencesErased,
+      knowledgeSourcesErased: counts.knowledgeSourcesErased + batch.knowledgeSourcesErased,
+      blobDeleted: false,
+      blobFailures: 0,
+    };
+    nextCursor = { phase: batch.nextPhase, afterId: batch.nextAfter };
   }
-  let blobDeleted = counts.blobDeleted;
-  let blobFailures = counts.blobFailures;
-  if (!blobDeleted) {
+  let blobDeleted = next.blobDeleted;
+  let blobFailures = next.blobFailures;
+  if (nextCursor.phase === 'done' && !blobDeleted) {
     const document = await tx.sellerDocument.findFirst({
       where: { id: located.documentId, workspaceId: input.workspaceId, companyId: located.companyId },
       select: { objectKey: true },
@@ -534,12 +605,12 @@ async function eraseSellerDocumentCleanup(
       }
     }
   }
-  const next: SellerDocumentErasureCounts = { ...counts, blobDeleted, blobFailures };
+  const final: SellerDocumentErasureCounts = { ...next, blobDeleted, blobFailures };
   await tx.deletionRequest.updateMany({
     where: { id: input.deletionRequestId, status: { in: ['ERASING', 'FAILED'] } },
-    data: { stats: { ...stats, sellerDocumentCounts: next } as unknown as Prisma.InputJsonValue },
+    data: { stats: { ...stats, sellerDocumentCounts: final, sellerDocumentCursor: nextCursor } as unknown as Prisma.InputJsonValue },
   });
-  return next;
+  return { ...final, done: nextCursor.phase === 'done' };
 }
 
 /** Complete only after all targets and the blob are confirmed; otherwise leave ERASING/FAILED with real residue. */

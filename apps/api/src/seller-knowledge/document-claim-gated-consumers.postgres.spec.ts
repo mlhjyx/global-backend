@@ -8,12 +8,12 @@ import { IcpService } from '../icp/icp.service';
 import { OutreachDraftService } from '../lead/outreach-draft.service';
 import { createCampaignPlanningActivities } from '../temporal/campaign-planning.activities';
 import { UnderstandingPreviewService } from '../company/understanding-preview.service';
+import { executeStructuredTaskWithRuntime } from '../model-runtime/structured-task-runtime-bridge';
 
 vi.mock('../model-runtime/structured-task-runtime-bridge', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../model-runtime/structured-task-runtime-bridge')>();
   return { ...actual, executeStructuredTaskWithRuntime: vi.fn() };
 });
-const { executeStructuredTaskWithRuntime } = await import('../model-runtime/structured-task-runtime-bridge');
 
 const ownerUrl = process.env.SELLER_DOCUMENT_CLAIM_TEST_DATABASE_URL;
 const appUrl = process.env.SELLER_DOCUMENT_CLAIM_TEST_APP_DATABASE_URL;
@@ -52,9 +52,9 @@ describe.runIf(Boolean(ownerUrl && appUrl))('document-claim gates at the real co
   const appPrisma = workspacePrisma(app) as never;
   const claims = new SellerDocumentClaimsService(appPrisma);
   const claimService = new ClaimService(appPrisma);
-  const ctx = (workspaceId: string, userId = randomUUID()) => ({ workspaceId, userId, roles: [], scopes: [] as const });
+  const ctx = (workspaceId: string, userId: string = randomUUID()) => ({ workspaceId, userId, roles: [], scopes: [] as const });
 
-  async function seedTenant(statement: string) {
+  async function seedTenantWithClaims(statements: readonly string[], approvedCount: number) {
     const workspaceId = randomUUID();
     const companyId = randomUUID();
     const userId = randomUUID();
@@ -62,7 +62,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))('document-claim gates at the real co
     await owner.companyProfile.create({
       data: { id: companyId, workspaceId, name: 'Synthetic gate seller', website: 'https://synthetic.example.test', status: 'REVIEW' } as never,
     });
-    const body = `Synthetic seller profile. ${statement}`;
+    const body = `Synthetic seller profile. ${statements.join(' ')}`;
     const documentId = randomUUID();
     await owner.sellerDocument.create({
       data: {
@@ -82,10 +82,14 @@ describe.runIf(Boolean(ownerUrl && appUrl))('document-claim gates at the real co
       },
     });
     await owner.sellerDocumentChunk.create({ data: { workspaceId, documentId, seq: 0, text: body, meta: { page: 1 } } });
-    const start = Buffer.byteLength('Synthetic seller profile. ', 'utf8');
-    const end = start + Buffer.byteLength(statement, 'utf8');
-    const draft = await claims.createDraft(ctx(workspaceId, userId), companyId, documentId, {
-      reference: {
+    const bytes = Buffer.from(body, 'utf8');
+    const docClaimIds: string[] = [];
+    for (const [index, statement] of statements.entries()) {
+      const start = bytes.indexOf(Buffer.from(statement, 'utf8'));
+      if (start < 0) throw new Error(`statement is not inside the seeded document: ${statement}`);
+      const end = start + Buffer.byteLength(statement, 'utf8');
+      const userCtx = ctx(workspaceId, userId);
+      const reference = {
         documentId,
         documentContentHash: sha(body),
         parseRevision: 1,
@@ -93,25 +97,22 @@ describe.runIf(Boolean(ownerUrl && appUrl))('document-claim gates at the real co
         chunkTextHash: sha(body),
         quoteStartByte: start,
         quoteEndByte: end,
-      },
-      type: 'market',
-      statement,
-      requestDigest: (await claims.preview(ctx(workspaceId, userId), companyId, documentId, {
-        reference: {
-          documentId,
-          documentContentHash: sha(body),
-          parseRevision: 1,
-          chunkSeq: 0,
-          chunkTextHash: sha(body),
-          quoteStartByte: start,
-          quoteEndByte: end,
-        },
+      };
+      const preview = await claims.preview(userCtx, companyId, documentId, { reference, type: 'market', statement });
+      const draft = await claims.createDraft(userCtx, companyId, documentId, {
+        reference,
         type: 'market',
         statement,
-      })).requestDigest,
-    });
-    await claimService.transition(ctx(workspaceId, userId), draft.claimId, 'APPROVED', 1);
-    return { workspaceId, companyId, userId, documentId, docClaimId: draft.claimId };
+        requestDigest: preview.requestDigest,
+      });
+      if (index < approvedCount) await claimService.transition(userCtx, draft.claimId, 'APPROVED', 1);
+      docClaimIds.push(draft.claimId);
+    }
+    return { workspaceId, companyId, userId, documentId, body, docClaimIds };
+  }
+  async function seedTenant(statement: string) {
+    const tenant = await seedTenantWithClaims([statement], 1);
+    return { ...tenant, docClaimId: tenant.docClaimIds[0] };
   }
 
   async function legacyClaim(tenant: { workspaceId: string; companyId: string; userId: string }, statement: string): Promise<string> {
@@ -329,5 +330,80 @@ describe.runIf(Boolean(ownerUrl && appUrl))('document-claim gates at the real co
     expect(error?.status).toBe(409);
     expect(error?.getResponse?.()).toMatchObject({ error: { code: 'ICP_DOCUMENT_SOURCE_STALE' } });
     expect(await owner.icpDefinition.count({ where: { companyId: tenant.companyId } })).toBe(0);
+  });
+
+  it('does not deadlock when a third same-document claim activation overlaps the ICP apply', async () => {
+    const tenant = await seedTenantWithClaims(
+      ['Synthetic claim alpha.', 'Synthetic claim beta.', 'Synthetic claim gamma.'],
+      2,
+    );
+    const pendingClaimId = tenant.docClaimIds[2];
+    vi.mocked(executeStructuredTaskWithRuntime).mockImplementation(async () => ({
+      data: {
+        name: 'Synthetic activation-overlap ICP',
+        target_markets: ['DE'],
+        company_attributes: {},
+        pain_points: [],
+        trigger_signals: [],
+        exclusions: [],
+        value_props: [],
+        personas: [],
+        buying_committee: [],
+        qualification_rules: [],
+      },
+      provider: 'mock',
+      model: 'mock-model',
+    }) as never);
+    const icpService = new IcpService(appPrisma, {} as never, {} as never, {
+      verifyWorkspaceGrant: async () => ({}),
+      consumeVerifiedWorkspaceGrant: async () => ({ authorityId: randomUUID(), scopeKey: tenant.workspaceId, accountKey: 'mock-account', replay: false }),
+    } as never, {} as never, { attestAuthorized: async () => undefined } as never);
+    const pendingLockCount = async () => {
+      const [row] = await owner.$queryRaw<Array<{ n: number }>>`SELECT count(*)::int AS n FROM pg_locks WHERE NOT granted`;
+      return row.n;
+    };
+    const waitForNewWaiter = async (before: number, label: string, settled: Promise<unknown>) => {
+      const queued = (async () => {
+        for (let attempt = 0; attempt < 400; attempt += 1) {
+          const current = await pendingLockCount();
+          if (current > before) return current;
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        throw new Error(`${label} never queued on a lock`);
+      })();
+      const winner = await Promise.race([queued, settled.then((result) => ({ settled: result }))]);
+      if (typeof winner !== 'number') {
+        const detail = JSON.stringify(winner.settled, (_key, value) => (value instanceof Error ? { message: value.message } : value));
+        throw new Error(`${label} settled before queueing: ${detail}`);
+      }
+      return winner;
+    };
+    const documentHeld = deferred();
+    const releaseDocument = deferred();
+    const holder = owner.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM seller_document WHERE id = ${tenant.documentId}::uuid FOR UPDATE`;
+      documentHeld.resolve();
+      await releaseDocument.promise;
+    }, { timeout: 60_000 });
+    await documentHeld.promise;
+    const baseline = await pendingLockCount();
+    const approval = claimService
+      .transition(ctx(tenant.workspaceId, tenant.userId), pendingClaimId, 'APPROVED', 1)
+      .then(() => ({ ok: true as const }))
+      .catch((error: unknown) => ({ ok: false as const, error }));
+    const afterApproval = await waitForNewWaiter(baseline, 'claim approval', approval);
+    const consumption = icpService
+      .generateFromCompany(ctx(tenant.workspaceId, tenant.userId), tenant.companyId)
+      .then((value) => ({ ok: true as const, value }))
+      .catch((error: unknown) => ({ ok: false as const, error }));
+    const afterConsumption = await waitForNewWaiter(afterApproval, 'ICP apply', consumption);
+    expect(afterConsumption).toBeGreaterThan(afterApproval);
+    releaseDocument.resolve();
+    await holder;
+    const [approvedResult, consumedResult] = await Promise.all([approval, consumption]);
+    expect(approvedResult).toEqual({ ok: true });
+    expect(consumedResult).toMatchObject({ ok: true, value: { name: 'Synthetic activation-overlap ICP', companyId: tenant.companyId } });
+    expect(await owner.companyProfile.findUniqueOrThrow({ where: { id: tenant.companyId } })).toMatchObject({ status: 'ACTIVE' });
+    expect(await owner.icpDefinition.count({ where: { companyId: tenant.companyId } })).toBe(1);
   });
 });
