@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import { access, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { createBrowserReadinessProbe } from "./browser-readiness-probe";
+import { createBrowserReadinessProbe, createRecoveryDeadline } from "./browser-readiness-probe";
 
 const originalSpawn = childProcess.spawn.bind(childProcess);
 const roots = new Set<string>();
@@ -45,6 +45,21 @@ afterEach(async () => {
 });
 
 describe("Browser readiness temporary-state lifecycle", () => {
+  it("does not extend the recovery budget when the wall clock rolls back", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const remaining = createRecoveryDeadline(5_000);
+      const before = remaining();
+      vi.setSystemTime(new Date(Date.now() - 65_000));
+      const after = remaining();
+      // A wall-clock step backwards must not hand the recovery more budget.
+      expect(after).toBeLessThanOrEqual(before);
+      expect(after).toBeGreaterThan(4_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("isolates and cleans HOME, cache, config, temporary files and the profile", async () => {
     const spy = installBrowser(`
       const fs=require('node:fs');
@@ -425,19 +440,27 @@ describe("Browser readiness temporary-state lifecycle", () => {
 
   it("withholds cleanup when an escaped descendant prevents the close event", async () => {
     installBrowser(`
-      const child=require('node:child_process').spawn(process.execPath,['-e','setTimeout(()=>{},20000)'],{detached:true,stdio:'inherit'});
+      const child=require('node:child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'inherit'});
       require('node:fs').writeFileSync(process.env.HOME+'/escaped.pid',String(child.pid));
       child.unref();process.exit(0);
     `);
+    let closed = false;
     const probe = createBrowserReadinessProbe();
     try {
       await expect(probe("/usr/bin/chromium")).rejects.toThrow(
         "BROWSER_PROBE_CLEANUP_INCOMPLETE",
       );
+      children[0]!.once("close", () => {
+        closed = true;
+      });
       for (const root of roots) await access(root);
+      expect(closed).toBe(false);
       await expect(probe("/usr/bin/chromium")).rejects.toThrow(
         "BROWSER_PROBE_CLEANUP_INCOMPLETE",
       );
+      // Controlled lifecycle barrier: the escaped descendant lives until this
+      // finally block, so close cannot occur inside the assertion window.
+      expect(closed).toBe(false);
       expect(children.length).toBe(1);
     } finally {
       for (const root of roots) {
@@ -445,14 +468,144 @@ describe("Browser readiness temporary-state lifecycle", () => {
           await readFile(join(root, "home", "escaped.pid"), "utf8"),
         );
         expect(Number.isInteger(pid) && pid > 1).toBe(true);
-        const close = new Promise<void>((resolve) =>
-          children[0].once("close", () => resolve()),
-        );
+        const closeSeen = closed;
+        const close = closeSeen
+          ? Promise.resolve()
+          : new Promise<void>((resolve) =>
+              children[0]!.once("close", () => resolve()),
+            );
         process.kill(pid, "SIGKILL");
         await close;
       }
     }
   }, 35_000);
+
+  it("keeps a transient identity re-observation error retryable", async () => {
+    const readDirectory = fs.readdir.bind(fs);
+    const kill = process.kill.bind(process);
+    let bounded = true;
+    vi.spyOn(fs, "readdir").mockImplementation(((path, options) => {
+      if (path === "/proc" && bounded) {
+        bounded = false;
+        return Promise.resolve(
+          Array.from({ length: 4097 }, (_, i) => String(i + 1)),
+        );
+      }
+      return readDirectory(path, options);
+    }) as typeof fs.readdir);
+    vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+      if (signal === 0 && children.some((child) => pid === -child.pid!))
+        return true;
+      return kill(pid, signal);
+    });
+    installBrowser(`process.stdout.write(${JSON.stringify(document)})`);
+    const probe = createBrowserReadinessProbe();
+    await expect(probe("/usr/bin/chromium")).rejects.toThrow(
+      "BROWSER_PROBE_CLEANUP_INCOMPLETE",
+    );
+    for (const root of roots) await access(root);
+    const lstat = fs.lstat.bind(fs);
+    let failed = false;
+    vi.spyOn(fs, "lstat").mockImplementation(((path, options) => {
+      if (!failed && String(path).includes("global-browser-probe-")) {
+        failed = true;
+        return Promise.reject(
+          Object.assign(new Error("transient identity read"), { code: "EIO" }),
+        );
+      }
+      return lstat(path, options as never);
+    }) as typeof fs.lstat);
+    const transient = await probe("/usr/bin/chromium").catch((error: Error) => error);
+    expect(transient).toMatchObject({
+      message: "BROWSER_PROBE_CLEANUP_INCOMPLETE",
+      probePhase: "recovery-pending",
+    });
+    for (const root of roots) await access(root);
+    await probe("/usr/bin/chromium");
+    expect(children).toHaveLength(2);
+    for (const root of roots)
+      await expect(access(root)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("bounds a hung owned-root removal without duplicating cleanup", async () => {
+    const remove = fs.rm.bind(fs);
+    let releaseGate!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+    let removals = 0;
+    vi.spyOn(fs, "rm").mockImplementation(((path, options) => {
+      if (String(path).includes("global-browser-probe-")) {
+        removals += 1;
+        return gate.then(() => remove(path, options as never));
+      }
+      return remove(path, options as never);
+    }) as typeof fs.rm);
+    installBrowser(`process.stdout.write(${JSON.stringify(document)})`);
+    const probe = createBrowserReadinessProbe();
+    const first = Date.now();
+    await expect(probe("/usr/bin/chromium")).rejects.toThrow(
+      "BROWSER_PROBE_CLEANUP_INCOMPLETE",
+    );
+    // The hang at the now-removal stage cannot block the caller past the
+    // recovery budget.
+    expect(Date.now() - first).toBeLessThan(8_000);
+    expect(removals).toBe(1);
+    for (const root of roots) await access(root);
+    const second = Date.now();
+    const pending = await probe("/usr/bin/chromium").catch((error: Error) => error);
+    expect(pending).toMatchObject({
+      message: "BROWSER_PROBE_CLEANUP_INCOMPLETE",
+      probePhase: "recovery-pending",
+    });
+    expect(Date.now() - second).toBeLessThan(8_000);
+    expect(removals).toBe(1);
+    releaseGate();
+    await probe("/usr/bin/chromium");
+    expect(children).toHaveLength(2);
+    for (const root of roots)
+      await expect(access(root)).rejects.toMatchObject({ code: "ENOENT" });
+  }, 30_000);
+
+  it("bounds a hung proc observation during recovery", async () => {
+    const readDirectory = fs.readdir.bind(fs);
+    const read = fs.readFile.bind(fs);
+    const kill = process.kill.bind(process);
+    let bounded = true;
+    vi.spyOn(fs, "readdir").mockImplementation(((path, options) => {
+      if (path === "/proc" && bounded) {
+        bounded = false;
+        return Promise.resolve(
+          Array.from({ length: 4097 }, (_, i) => String(i + 1)),
+        );
+      }
+      return path === "/proc"
+        ? Promise.resolve(["999999"])
+        : readDirectory(path, options);
+    }) as typeof fs.readdir);
+    vi.spyOn(fs, "readFile").mockImplementation(((path, options) => {
+      if (path === "/proc/999999/stat") return new Promise(() => {});
+      return read(path, options as never);
+    }) as typeof fs.readFile);
+    vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+      if (signal === 0 && children.some((child) => pid === -child.pid!))
+        return true;
+      return kill(pid, signal);
+    });
+    installBrowser(`process.stdout.write(${JSON.stringify(document)})`);
+    const probe = createBrowserReadinessProbe();
+    await expect(probe("/usr/bin/chromium")).rejects.toThrow(
+      "BROWSER_PROBE_CLEANUP_INCOMPLETE",
+    );
+    const started = Date.now();
+    const pending = await probe("/usr/bin/chromium").catch((error: Error) => error);
+    expect(pending).toMatchObject({
+      message: "BROWSER_PROBE_CLEANUP_INCOMPLETE",
+      probePhase: "recovery-pending",
+    });
+    expect(Date.now() - started).toBeLessThan(8_000);
+    for (const root of roots) await access(root);
+  }, 30_000);
 
   it("recovers a transient group observation and then runs a fresh full probe", async () => {
     const readDirectory = fs.readdir.bind(fs);
