@@ -12,6 +12,20 @@ const TIMEOUT_MS = 10_000;
 const KILL_GRACE_MS = 1_000;
 const REAP_GRACE_MS = 5_000;
 const RECOVERY_BUDGET_MS = 5_000;
+
+/**
+ * Monotonic countdown for a bounded wait. Wall-clock changes (NTP steps, manual
+ * clock edits) must never stretch a recovery budget; wall time is only for logs
+ * and display, so the deadline is anchored to the monotonic clock by default.
+ */
+export function createRecoveryDeadline(
+  budgetMs: number,
+  now: () => number = () => performance.now(),
+): () => number {
+  const deadline = now() + budgetMs;
+  return () => Math.max(0, deadline - now());
+}
+
 const OUTPUT_LIMIT = 128 * 1024;
 const CLEANUP_ERROR = "BROWSER_PROBE_CLEANUP_INCOMPLETE";
 const UNAVAILABLE_ERROR = "BROWSER_RUNTIME_UNAVAILABLE";
@@ -107,7 +121,7 @@ async function waitForGroupExit(
   timeoutMs: number,
 ): Promise<void> {
   if (pid === undefined) return;
-  const deadline = Date.now() + timeoutMs;
+  const remaining = createRecoveryDeadline(timeoutMs);
   while (true) {
     try {
       process.kill(-pid, 0);
@@ -138,10 +152,10 @@ async function waitForGroupExit(
         active = true;
     }
     if (!active) return;
-    const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new Error(CLEANUP_ERROR);
+    const left = remaining();
+    if (left <= 0) throw new Error(CLEANUP_ERROR);
     await new Promise((resolve) =>
-      setTimeout(resolve, Math.min(10, remaining)),
+      setTimeout(resolve, Math.min(10, left)),
     );
   }
 }
@@ -331,8 +345,7 @@ async function waitSettled<T>(promise: Promise<T>, timeoutMs: number): Promise<S
 /** One recovery attempt with a single deadline over close/group/root IO. */
 async function recoverObligation(obligation: CleanupObligation): Promise<Recovery> {
   if (obligation.fenced || obligation.identity === undefined) return "fenced";
-  const deadline = Date.now() + RECOVERY_BUDGET_MS;
-  const remaining = () => Math.max(0, deadline - Date.now());
+  const remaining = createRecoveryDeadline(RECOVERY_BUDGET_MS);
   if (obligation.closed) {
     const closed = await waitSettled(obligation.closed, remaining());
     if (!closed.done) return "pending";

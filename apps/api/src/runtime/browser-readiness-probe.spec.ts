@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import { access, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { createBrowserReadinessProbe } from "./browser-readiness-probe";
+import { createBrowserReadinessProbe, createRecoveryDeadline } from "./browser-readiness-probe";
 
 const originalSpawn = childProcess.spawn.bind(childProcess);
 const roots = new Set<string>();
@@ -45,6 +45,21 @@ afterEach(async () => {
 });
 
 describe("Browser readiness temporary-state lifecycle", () => {
+  it("does not extend the recovery budget when the wall clock rolls back", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const remaining = createRecoveryDeadline(5_000);
+      const before = remaining();
+      vi.setSystemTime(new Date(Date.now() - 65_000));
+      const after = remaining();
+      // A wall-clock step backwards must not hand the recovery more budget.
+      expect(after).toBeLessThanOrEqual(before);
+      expect(after).toBeGreaterThan(4_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("isolates and cleans HOME, cache, config, temporary files and the profile", async () => {
     const spy = installBrowser(`
       const fs=require('node:fs');
