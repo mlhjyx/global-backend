@@ -1,7 +1,13 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { listCompanyEnrichmentHeads } from './enrichment-execution.repository';
+import { buildFrozenEnrichmentPlan } from './enrichment-call-plan';
+import {
+  EnrichmentExecutionRepository,
+  listCompanyEnrichmentHeads,
+} from './enrichment-execution.repository';
+import type { ExecutionBudgetBinding } from '../../execution-budget/execution-budget-binding';
+import type { VerifiedExecutionBudgetAuthority } from '../../execution-budget/execution-budget-authority.types';
 
 // Real-PostgreSQL behaviour for the two business index tables: app_user writes
 // the exact SQL shapes the repository uses, owner only seeds and reads fixtures.
@@ -73,10 +79,17 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment execution on Pos
   const companyB = randomUUID();
   const contactA = randomUUID();
   const contactB = randomUUID();
+  const admitContact = randomUUID();
+  const admitContact2 = randomUUID();
+  const admitContact3 = randomUUID();
   const authorityA = randomUUID();
   const authorityB = randomUUID();
   const accountA1 = randomUUID();
   const accountA2 = randomUUID();
+  const accountAdmit = randomUUID();
+  const accountFail = randomUUID();
+  const admitRequestSha256 = 'd'.repeat(64);
+  const failRequestSha256 = 'f'.repeat(64);
   const accountB = randomUUID();
   const operationA1 = randomUUID();
   const operationA2 = randomUUID();
@@ -86,6 +99,11 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment execution on Pos
   const deletedCompany = randomUUID();
 
   class RolledBack extends Error {}
+  class Prepared extends Error {
+    constructor(readonly value: unknown) {
+      super('prepared');
+    }
+  }
 
   const inWorkspace = <T>(workspace: string, work: (tx: Prisma.TransactionClient) => Promise<T>) =>
     app.$transaction(
@@ -95,6 +113,21 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment execution on Pos
       },
       { timeout: 20_000 },
     );
+
+  // SET ROLE is session-scoped even inside a committed transaction, so anything
+  // that may have changed the role runs in a transaction this helper rolls back.
+  const inRolledBackTransaction = async <T>(work: (tx: Prisma.TransactionClient) => Promise<T>) => {
+    try {
+      await app.$transaction(async (tx) => {
+        const value = await work(tx);
+        throw new Prepared(value);
+      }, { timeout: 5_000 });
+    } catch (error) {
+      if (error instanceof Prepared) return { ok: true as const, value: error.value as T };
+      return { ok: false as const, code: sqlState(error) ?? 'other error' };
+    }
+    return { ok: true as const, value: undefined as T };
+  };
 
   const attempt = async <T>(workspace: string, work: (tx: Prisma.TransactionClient) => Promise<T>) => {
     try {
@@ -222,7 +255,13 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment execution on Pos
         (${contactA}::uuid, ${workspaceA}::uuid, ${companyA}::uuid, ${`Contact A ${contactA.slice(0, 8)}`},
           ${`c:enrich-a-${contactA.slice(0, 8)}`}),
         (${contactB}::uuid, ${workspaceB}::uuid, ${companyB}::uuid, ${`Contact B ${contactB.slice(0, 8)}`},
-          ${`c:enrich-b-${contactB.slice(0, 8)}`})`;
+          ${`c:enrich-b-${contactB.slice(0, 8)}`}),
+        (${admitContact}::uuid, ${workspaceA}::uuid, ${companyA}::uuid, ${`Admit ${admitContact.slice(0, 8)}`},
+          ${`c:enrich-admit-${admitContact.slice(0, 8)}`}),
+        (${admitContact2}::uuid, ${workspaceA}::uuid, ${companyA}::uuid, ${`Admit2 ${admitContact2.slice(0, 8)}`},
+          ${`c:enrich-admit2-${admitContact2.slice(0, 8)}`}),
+        (${admitContact3}::uuid, ${workspaceA}::uuid, ${companyA}::uuid, ${`Admit3 ${admitContact3.slice(0, 8)}`},
+          ${`c:enrich-admit3-${admitContact3.slice(0, 8)}`})`;
     for (const [authority, workspace, company] of [
       [authorityA, workspaceA, companyA],
       [authorityB, workspaceB, companyB],
@@ -250,6 +289,19 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment execution on Pos
            authorized_cap_microusd, created_at, updated_at)
         VALUES (${account}::uuid, ${workspace}, ${key}, 1, 0, 0, 0, 0, 0, false, 1,
           ${authority}::uuid, 500000, now(), now())`;
+    }
+    for (const [account, requestSha] of [
+      [accountAdmit, admitRequestSha256],
+      [accountFail, failRequestSha256],
+    ] as const) {
+      await owner.$executeRaw`
+        INSERT INTO tool_budget_account
+          (id, scope_key, account_key, generation, cap_cents, reserved_cents, charged_cents,
+           reserved_microusd, charged_microusd, exhausted, ref_count, authority_id,
+           authorized_cap_microusd, created_at, updated_at)
+        VALUES (${account}::uuid, ${workspaceA},
+          ${`contact.enrich:company:${companyA}:${requestSha}`},
+          1, 0, 0, 0, 0, 0, false, 1, ${authorityA}::uuid, 500000, now(), now())`;
     }
     for (const [operation, workspace, account, generation, key] of [
       [operationA1, workspaceA, accountA1, 1, `enrich:finder:${randomUUID()}`],
@@ -570,6 +622,352 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment execution on Pos
       SELECT status, reserved_microusd AS reserved, generation
       FROM tool_budget_operation WHERE id = ${operationA3}::uuid`;
     expect(operation).toEqual({ status: 'RESERVED', reserved: 1000n, generation: 2 });
+  });
+
+  const admissionPlan = (contactId = admitContact, requestSha256 = admitRequestSha256, admittedAtMs = 1000, deadlineAtMs = 601000) =>
+    buildFrozenEnrichmentPlan({
+      workspaceId: workspaceA,
+      companyId: companyA,
+      entrypoint: 'http',
+      businessRunId: null,
+      requestSha256,
+      admittedAtMs,
+      deadlineAtMs,
+      targets: [
+        { contactId, contactOrdinal: 0, inputVersion: 'v1', beforeDigest: 'b'.repeat(64), pointRefs: [] },
+      ],
+      slots: [
+        {
+          slotKey: 'f1',
+          contactId,
+          contactOrdinal: 0,
+          phase: 'FINDER',
+          provider: 'hunter',
+          toolId: 'contact_email.find.hunter',
+          toolVersion: '1.0.0',
+          quoteMicrousd: '1780',
+          pricingVersion: 'p1',
+          dependsOnSlotKey: null,
+        },
+      ],
+      limits: {
+        authorityCapMicrousd: '500000',
+        companyCapMicrousd: '500000',
+        contactCapMicrousd: '150000',
+        finderCompanyMax: 10,
+        finderContactMax: 3,
+        verifyAddressMax: 6,
+        maxContacts: 10,
+      },
+    });
+  const admissionAuthorityFor = (requestSha256 = admitRequestSha256): VerifiedExecutionBudgetAuthority => ({
+    schemaVersion: 'execution-budget-grant/v1',
+    authorityKind: 'WORKSPACE_GRANT',
+    issuer: 'https://control.example.test',
+    audience: 'global-backend:execution-budget',
+    jti: 'admission-test',
+    purpose: 'contact.enrich',
+    workspaceId: workspaceA,
+    subjectType: 'company',
+    subjectId: companyA,
+    requestSha256,
+    scheduleId: null,
+    currency: 'USD',
+    unit: 'microusd',
+    capMicrousd: 500000n,
+    capPerRunMicrousd: null,
+    campaignCapMicrousd: null,
+    maxRuns: null,
+    tokenSha256: 'c'.repeat(64),
+    issuedAt: 1,
+    notBefore: 1,
+    expiresAt: 999,
+  });
+  const admissionAuthority = admissionAuthorityFor();
+  const admissionBinding = (requestSha256 = admitRequestSha256): ExecutionBudgetBinding => ({
+    authorityId: authorityA,
+    replay: false,
+    scopeKey: workspaceA,
+    accountKey: `contact.enrich:company:${companyA}:${requestSha256}`,
+    purpose: 'contact.enrich',
+    subjectType: 'company',
+    subjectId: companyA,
+    requestSha256,
+  });
+  const admissionRepository = (binding = admissionBinding()) =>
+    new EnrichmentExecutionRepository(
+      {
+        withWorkspace: (workspaceId: string, work: (tx: Prisma.TransactionClient) => Promise<unknown>) =>
+          app.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceId}, true)`;
+            return work(tx);
+          }, { timeout: 20_000 }),
+      } as never,
+      { consumeVerifiedWorkspaceGrantInTransaction: async () => binding },
+    );
+
+  it('admits an execution as app_user through the definer locks without UPDATE grants', async () => {
+    const view = await admissionRepository().admitHttp({
+      authority: admissionAuthority,
+      plan: admissionPlan(),
+      admissionRequestSha256: 'e'.repeat(64),
+    });
+    expect(view).toMatchObject({
+      status: 'PREPARED',
+      authorityId: authorityA,
+      accountId: accountAdmit,
+      generation: 1,
+    });
+    const [row] = await owner.$queryRaw<Array<{ status: string; scope_key: string; authority_id: string }>>`
+      SELECT status, scope_key, authority_id::text AS authority_id
+      FROM contact_enrichment_execution WHERE id = ${view.executionId}::uuid`;
+    expect(row).toEqual({ status: 'PREPARED', scope_key: workspaceA, authority_id: authorityA });
+    const grants = await owner.$queryRaw<Array<{ table_name: string; privilege_type: string }>>`
+      SELECT table_name, privilege_type FROM information_schema.role_table_grants
+      WHERE grantee = 'app_user' AND table_name IN ('execution_budget_authority', 'tool_budget_account')
+      ORDER BY table_name, privilege_type`;
+    expect(grants).toEqual([
+      { table_name: 'execution_budget_authority', privilege_type: 'SELECT' },
+      { table_name: 'tool_budget_account', privilege_type: 'SELECT' },
+    ]);
+    const [functions] = await owner.$queryRaw<Array<{ authority: boolean; account: boolean; operation: boolean; public_authority: boolean; public_account: boolean; public_operation: boolean }>>`
+      SELECT has_function_privilege('app_user', 'lock_contact_enrichment_authority_v1(uuid,uuid)', 'EXECUTE') AS authority,
+        has_function_privilege('app_user', 'lock_contact_enrichment_account_v1(uuid,uuid,text)', 'EXECUTE') AS account,
+        has_function_privilege('app_user', 'lock_contact_enrichment_operation_v1(uuid,uuid,integer,text)', 'EXECUTE') AS operation,
+        has_function_privilege('public', 'lock_contact_enrichment_authority_v1(uuid,uuid)', 'EXECUTE') AS public_authority,
+        has_function_privilege('public', 'lock_contact_enrichment_account_v1(uuid,uuid,text)', 'EXECUTE') AS public_account,
+        has_function_privilege('public', 'lock_contact_enrichment_operation_v1(uuid,uuid,integer,text)', 'EXECUTE') AS public_operation`;
+    expect(functions).toEqual({
+      authority: true,
+      account: true,
+      operation: true,
+      public_authority: false,
+      public_account: false,
+      public_operation: false,
+    });
+    const [budgetLocks] = await owner.$queryRaw<Array<{ e_table: boolean; e_column: boolean; s_table: boolean; s_column: boolean }>>`
+      SELECT has_table_privilege('app_user', 'public.contact_enrichment_execution', 'UPDATE') AS e_table,
+        has_any_column_privilege('app_user', 'public.contact_enrichment_execution', 'UPDATE') AS e_column,
+        has_table_privilege('app_user', 'public.contact_enrichment_execution_step', 'UPDATE') AS s_table,
+        has_any_column_privilege('app_user', 'public.contact_enrichment_execution_step', 'UPDATE') AS s_column`;
+    expect(budgetLocks).toEqual({ e_table: false, e_column: true, s_table: false, s_column: true });
+    const directAuthority = await attempt(workspaceA, (tx) =>
+      tx.$queryRaw`SELECT id FROM execution_budget_authority WHERE scope_key = ${workspaceA} AND id = ${authorityA}::uuid FOR UPDATE`);
+    expect(directAuthority).toMatchObject({ ok: false, code: '42501' });
+    const directAccount = await attempt(workspaceA, (tx) =>
+      tx.$queryRaw`SELECT id FROM tool_budget_account WHERE scope_key = ${workspaceA} AND id = ${accountA1}::uuid FOR UPDATE`);
+    expect(directAccount).toMatchObject({ ok: false, code: '42501' });
+    const directOperation = await attempt(workspaceA, (tx) =>
+      tx.$queryRaw`SELECT id FROM tool_budget_operation WHERE scope_key = ${workspaceA} AND id = ${operationA1}::uuid FOR UPDATE`);
+    expect(directOperation).toMatchObject({ ok: false, code: '42501' });
+    const columnHead = await newHead(workspaceA, { companyId: companyA, authorityId: authorityA, accountId: accountA1 });
+    const columnStep = await newStep(workspaceA, columnHead.id, { contactId: admitContact3, slotKey: `finder-${admitContact3.slice(0, 8)}` });
+    const executionLock = await attempt(workspaceA, (tx) =>
+      tx.$queryRaw`SELECT id FROM contact_enrichment_execution WHERE id = ${columnHead.id}::uuid FOR UPDATE`);
+    expect(executionLock.ok).toBe(true);
+    const stepLock = await attempt(workspaceA, (tx) =>
+      tx.$queryRaw`SELECT id FROM contact_enrichment_execution_step WHERE id = ${columnStep}::uuid FOR UPDATE`);
+    expect(stepLock.ok).toBe(true);
+    // Caller boundary of all three definer locks: a missing workspace context, a
+    // valid foreign target under the caller's own context, and an active SET ROLE
+    // must each be rejected by the function itself before any row is read.
+    const operationKeys = new Map(
+      (
+        await owner.$queryRaw<Array<{ id: string; key: string }>>`
+          SELECT id::text AS id, operation_key AS key FROM tool_budget_operation
+          WHERE id IN (${operationA1}::uuid, ${operationB}::uuid)`
+      ).map((row) => [row.id, row.key]),
+    );
+    const operationKeyOf = (id: string) => {
+      const key = operationKeys.get(id);
+      if (!key) throw new Error(`missing operation key for ${id}`);
+      return key;
+    };
+    const accountKeyA = `contact.enrich:a:${workspaceA}`;
+    const accountKeyB = `contact.enrich:b:${workspaceB}`;
+    const definerLocks = {
+      authority: (tx: Prisma.TransactionClient, workspace: string, authority: string) =>
+        tx.$queryRaw`SELECT * FROM public.lock_contact_enrichment_authority_v1(${workspace}::uuid, ${authority}::uuid)`,
+      account: (tx: Prisma.TransactionClient, workspace: string, authority: string, key: string) =>
+        tx.$queryRaw`SELECT * FROM public.lock_contact_enrichment_account_v1(${workspace}::uuid, ${authority}::uuid, ${key})`,
+      operation: (tx: Prisma.TransactionClient, workspace: string, account: string, key: string) =>
+        tx.$queryRaw`SELECT * FROM public.lock_contact_enrichment_operation_v1(${workspace}::uuid, ${account}::uuid, 1, ${key})`,
+    };
+    const ownTarget = {
+      authority: (tx: Prisma.TransactionClient) => definerLocks.authority(tx, workspaceA, authorityA),
+      account: (tx: Prisma.TransactionClient) => definerLocks.account(tx, workspaceA, authorityA, accountKeyA),
+      operation: (tx: Prisma.TransactionClient) => definerLocks.operation(tx, workspaceA, accountA1, operationKeyOf(operationA1)),
+    };
+    const foreignTarget = {
+      authority: (tx: Prisma.TransactionClient) => definerLocks.authority(tx, workspaceB, authorityB),
+      account: (tx: Prisma.TransactionClient) => definerLocks.account(tx, workspaceB, authorityB, accountKeyB),
+      operation: (tx: Prisma.TransactionClient) => definerLocks.operation(tx, workspaceB, accountB, operationKeyOf(operationB)),
+    };
+    const withoutContext = async (work: (tx: Prisma.TransactionClient) => Promise<unknown>) => {
+      try {
+        return { ok: true as const, value: await app.$transaction(work, { timeout: 5_000 }) };
+      } catch (error) {
+        return { ok: false as const, code: sqlState(error) ?? 'other error' };
+      }
+    };
+    // app_user may SET ROLE to itself, so the role guard — not a permission miss —
+    // must be what rejects the call; this probe keeps that distinction honest.
+    const selfRole = await inRolledBackTransaction(async (tx) => {
+      await tx.$executeRawUnsafe('SET ROLE app_user');
+      return tx.$queryRawUnsafe("SELECT current_setting('role', true) AS role");
+    });
+    expect(selfRole).toMatchObject({ ok: true, value: [{ role: 'app_user' }] });
+    for (const name of ['authority', 'account', 'operation'] as const) {
+      expect(await attempt(workspaceA, ownTarget[name])).toMatchObject({ ok: true });
+      expect(await attempt(workspaceB, foreignTarget[name])).toMatchObject({ ok: true });
+      expect(await attempt(workspaceA, foreignTarget[name])).toMatchObject({ ok: false, code: '42501' });
+      expect(await withoutContext(ownTarget[name])).toMatchObject({ ok: false, code: '42501' });
+      expect(
+        await inRolledBackTransaction(async (tx) => {
+          await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceA}, true)`;
+          await tx.$executeRawUnsafe('SET ROLE app_user');
+          return ownTarget[name](tx);
+        }),
+      ).toMatchObject({ ok: false, code: '42501' });
+    }
+    const roleEscalation = await inRolledBackTransaction((tx) => tx.$executeRawUnsafe('SET ROLE "global"'));
+    expect(roleEscalation.ok).toBe(false);
+  });
+
+  it('keeps admission inside one workspace and leaves no head or step when the transaction fails', async () => {
+    // Residue is counted under the failing attempt's own identity: a write that
+    // escaped the rolled-back transaction carries failRequestSha256, not the
+    // successful admission's hash.
+    const residue = async () => {
+      const [heads] = await owner.$queryRaw<Array<{ count: bigint }>>`
+        SELECT count(*)::bigint AS count FROM contact_enrichment_execution
+        WHERE workspace_id = ${workspaceA}::uuid AND request_sha256 = ${failRequestSha256}`;
+      const [steps] = await owner.$queryRaw<Array<{ count: bigint }>>`
+        SELECT count(*)::bigint AS count FROM contact_enrichment_execution_step step
+        JOIN contact_enrichment_execution head ON head.id = step.execution_id
+        WHERE head.workspace_id = ${workspaceA}::uuid AND head.request_sha256 = ${failRequestSha256}`;
+      return { heads: heads.count, steps: steps.count };
+    };
+    const before = await residue();
+    const failing = await attempt(workspaceA, () =>
+      admissionRepository(admissionBinding(failRequestSha256)).admitHttp({
+        authority: admissionAuthorityFor(failRequestSha256),
+        plan: admissionPlan(contactB, failRequestSha256),
+        admissionRequestSha256: 'f'.repeat(64),
+      }));
+    expect(failing).toMatchObject({ ok: false });
+    expect(await residue()).toEqual(before);
+    // Sensitivity control: the residue query must see the same identity when a
+    // write is made outside the admission transaction, so the equality above
+    // cannot pass vacuously.
+    const escapedHead = randomUUID();
+    const escapedStep = randomUUID();
+    const fixtureClient = owner as unknown as Prisma.TransactionClient;
+    await headSql(fixtureClient, {
+      workspaceId: workspaceA,
+      companyId: companyA,
+      authorityId: authorityA,
+      accountId: accountA1,
+      requestSha256: failRequestSha256,
+      admissionRequestSha256: digestOf(),
+      operationRef: digestOf(),
+    }, escapedHead);
+    await stepSql(fixtureClient, {
+      workspaceId: workspaceA,
+      executionId: escapedHead,
+      contactId: contactA,
+      contactOrdinal: 0,
+      slotOrdinal: 0,
+      slotKey: `escaped.${escapedStep}`,
+    }, escapedStep);
+    expect(await residue()).toEqual({ heads: before.heads + 1n, steps: before.steps + 1n });
+    await owner.$executeRaw`DELETE FROM contact_enrichment_execution_step WHERE id = ${escapedStep}::uuid`;
+    await owner.$executeRaw`DELETE FROM contact_enrichment_execution WHERE id = ${escapedHead}::uuid`;
+    expect(await residue()).toEqual(before);
+  });
+
+  it('refuses a foreign authority through the scoped definer lock', async () => {
+    const before = await owner.$queryRaw<Array<{ count: bigint }>>`
+      SELECT count(*)::bigint AS count FROM contact_enrichment_execution
+      WHERE workspace_id = ${workspaceA}::uuid AND request_sha256 = ${admitRequestSha256}`;
+    const cross = await attempt(workspaceA, () =>
+      admissionRepository({ ...admissionBinding(), authorityId: authorityB }).admitHttp({
+        authority: admissionAuthority,
+        plan: admissionPlan(),
+        admissionRequestSha256: 'a1'.repeat(32),
+      }));
+    expect(cross).toMatchObject({ ok: false });
+    const after = await owner.$queryRaw<Array<{ count: bigint }>>`
+      SELECT count(*)::bigint AS count FROM contact_enrichment_execution
+      WHERE workspace_id = ${workspaceA}::uuid AND request_sha256 = ${admitRequestSha256}`;
+    expect(after).toEqual(before);
+  });
+
+  it('binds a step as app_user through the anchor and step definer locks', async () => {
+    const view = await admissionRepository(admissionBinding(failRequestSha256)).admitHttp({
+      authority: admissionAuthorityFor(failRequestSha256),
+      plan: admissionPlan(admitContact2, failRequestSha256, Date.now(), Date.now() + 600_000),
+      admissionRequestSha256: 'c2'.repeat(32),
+    });
+    const [step] = await owner.$queryRaw<Array<{ id: string; pricing_version: string }>>`
+      SELECT id::text AS id, pricing_version FROM contact_enrichment_execution_step
+      WHERE workspace_id = ${workspaceA}::uuid AND execution_id = ${view.executionId}::uuid`;
+    const guards = {
+      assertCurrentSubjectAndPolicy: async (_tx: Prisma.TransactionClient, row: { pricing_version: string }) => ({ pricingVersion: row.pricing_version }),
+      assertCandidateOrigin: async () => undefined,
+    };
+    const guardsRepository = new EnrichmentExecutionRepository(
+      {
+        withWorkspace: (workspaceId: string, work: (tx: Prisma.TransactionClient) => Promise<unknown>) =>
+          app.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceId}, true)`;
+            return work(tx);
+          }, { timeout: 20_000 }),
+      } as never,
+      { consumeVerifiedWorkspaceGrantInTransaction: async () => admissionBinding(failRequestSha256) },
+      guards as never,
+    );
+    const bound = await guardsRepository.bindStepInput({
+      workspaceId: workspaceA,
+      companyId: companyA,
+      stepId: step!.id,
+      expectedRevision: 1,
+      inputFingerprint: 'a'.repeat(64),
+      operationKey: `find:${step!.id}`,
+      candidateRef: null,
+    });
+    expect(bound).toMatchObject({ stepId: step!.id, revision: 2 });
+    const claimOperation = randomUUID();
+    await owner.$executeRaw`
+      INSERT INTO tool_budget_operation
+        (id, scope_key, account_id, generation, operation_key, amount_unit, reserved_cents,
+         reserved_microusd, status, attempt, created_at)
+      VALUES (${claimOperation}::uuid, ${workspaceA}, ${view.accountId}::uuid, 1,
+        ${`find:${step!.id}`}, 'microusd', 0, 1780, 'RESERVED', 1, now())`;
+    const claimed = await guardsRepository.claimStepBeforeWire({
+      workspaceId: workspaceA,
+      companyId: companyA,
+      stepId: step!.id,
+      expectedRevision: 2,
+      operationKey: `find:${step!.id}`,
+      expectedPricingVersion: step!.pricing_version,
+    });
+    expect(claimed).toMatchObject({ stepId: step!.id, budgetOperationId: claimOperation });
+    const [claimedRow] = await owner.$queryRaw<Array<{ dispatch_phase: string; budget_operation_id: string | null }>>`
+      SELECT dispatch_phase, budget_operation_id::text AS budget_operation_id
+      FROM contact_enrichment_execution_step WHERE id = ${step!.id}::uuid`;
+    expect(claimedRow).toEqual({ dispatch_phase: 'RESERVED', budget_operation_id: claimOperation });
+    const cross = await attempt(workspaceB, () =>
+      guardsRepository.bindStepInput({
+        workspaceId: workspaceB,
+        companyId: companyB,
+        stepId: step!.id,
+        expectedRevision: 1,
+        inputFingerprint: 'b'.repeat(64),
+        operationKey: `find:${step!.id}`,
+        candidateRef: null,
+      }));
+    expect(cross).toMatchObject({ ok: false });
   });
 
   it('column-list SET NULL clears only the personal link, never the workspace', async () => {

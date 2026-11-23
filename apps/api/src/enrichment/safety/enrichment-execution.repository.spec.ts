@@ -118,9 +118,9 @@ function world(
       void values;
       const sql = strings.join("?");
       events.push(sql);
-      if (sql.includes("FROM public.execution_budget_authority"))
+      if (sql.includes("public.lock_contact_enrichment_authority_v1"))
         return [{ id: A, scope_key: W, usable: true, revoked_at: null }];
-      if (sql.includes("FROM public.tool_budget_account"))
+      if (sql.includes("public.lock_contact_enrichment_account_v1"))
         return [
           {
             account_id: ACCOUNT,
@@ -334,9 +334,9 @@ function stepWorld(
       void values;
       const sql = strings.join("?");
       events.push(sql);
-      if (sql.includes("FROM public.execution_budget_authority"))
+      if (sql.includes("public.lock_contact_enrichment_authority_v1"))
         return [{ id: A, scope_key: W, usable: true, revoked_at: null }];
-      if (sql.includes("FROM public.tool_budget_account"))
+      if (sql.includes("public.lock_contact_enrichment_account_v1"))
         return [
           {
             account_id: ACCOUNT,
@@ -356,7 +356,7 @@ function stepWorld(
         contextReads += 1;
         return [{ ...row, ...(contextReads > 1 ? options.secondRead : {}) }];
       }
-      if (sql.includes("FROM public.tool_budget_operation"))
+      if (sql.includes("public.lock_contact_enrichment_operation_v1"))
         return [
           {
             operation_id: OP,

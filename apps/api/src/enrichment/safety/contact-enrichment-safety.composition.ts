@@ -916,11 +916,25 @@ export function createSqlEnrichmentDomainCommitStore(transactions: ContactEnrich
       return factsCoherent(facts.map((fact) => ({ operationId: fact.operation_id, status: fact.operation_status, dispatchPhase: fact.dispatch_phase, domainState: fact.domain_state }))) ? decision : null;
     },
     lockAndLoad: async (tx, address) => {
+      const initialHeads = await tx.$queryRaw<Array<{ id: string; workspace_id: string; company_id: string | null; authority_id: string; account_id: string; generation: number; account_key: string }>>`SELECT e.id::text,e.workspace_id::text,e.company_id::text,e.authority_id::text,e.account_id::text,e.generation,a.account_key
+        FROM public.contact_enrichment_execution e JOIN public.tool_budget_account a ON a.scope_key=e.workspace_id::text AND a.id=e.account_id
+        WHERE e.workspace_id=${address.workspaceId}::uuid AND e.id=${address.executionId}::uuid AND e.company_id=${address.companyId}::uuid`;
+      if (initialHeads.length !== 1 || !initialHeads[0]) return null;
+      const initialHead = initialHeads[0];
+      const lockedAccounts = await tx.$queryRaw<Array<{ account_id: string; authority_id: string; generation: number }>>`SELECT account_id,authority_id,generation
+        FROM public.lock_contact_enrichment_account_v1(${address.workspaceId}::uuid, ${initialHead.authority_id}::uuid, ${initialHead.account_key})`;
+      if (lockedAccounts.length !== 1 || !lockedAccounts[0] ||
+          lockedAccounts[0].account_id !== initialHead.account_id ||
+          lockedAccounts[0].authority_id !== initialHead.authority_id ||
+          lockedAccounts[0].generation !== initialHead.generation) return null;
       const heads = await tx.$queryRaw<Array<{ id: string; workspace_id: string; company_id: string | null; authority_id: string; account_id: string; generation: number; account_key: string; entrypoint: string; business_run_id: string | null; status: string; frozen_limits: unknown; target_snapshot: unknown; result_snapshot: unknown }>>`SELECT e.id::text,e.workspace_id::text,e.company_id::text,e.authority_id::text,e.account_id::text,e.generation,a.account_key,e.entrypoint,e.business_run_id::text,e.status,e.frozen_limits,e.target_snapshot,e.result_snapshot
         FROM public.contact_enrichment_execution e JOIN public.tool_budget_account a ON a.scope_key=e.workspace_id::text AND a.id=e.account_id
-        WHERE e.workspace_id=${address.workspaceId}::uuid AND e.id=${address.executionId}::uuid AND e.company_id=${address.companyId}::uuid FOR UPDATE OF e,a`;
+        WHERE e.workspace_id=${address.workspaceId}::uuid AND e.id=${address.executionId}::uuid AND e.company_id=${address.companyId}::uuid FOR UPDATE OF e`;
       if (heads.length !== 1 || !heads[0]) return null;
       const head = heads[0];
+      if (head.workspace_id !== initialHead.workspace_id || head.company_id !== initialHead.company_id ||
+          head.account_id !== initialHead.account_id || head.authority_id !== initialHead.authority_id ||
+          head.generation !== initialHead.generation) return null;
       if (head.company_id !== address.companyId || head.status === 'REDACTED') return null;
       const limits = head.frozen_limits as { executionOptions?: { lawfulBasisKind?: string } } | null;
       const lockedContacts = await tx.$queryRaw<Array<{ id: string }>>`SELECT id::text FROM public.canonical_contact WHERE id=${address.contactId}::uuid FOR UPDATE`;
@@ -967,7 +981,7 @@ export function createSqlEnrichmentDomainCommitStore(transactions: ContactEnrich
     },
     persist: async (tx, address, decision, references, quality: ContactQualityFact | null = null) => {
       const heads = await tx.$queryRaw<Array<{ result_snapshot: unknown; target_snapshot: unknown; frozen_limits: unknown; status: string }>>`SELECT result_snapshot,target_snapshot,frozen_limits,status FROM public.contact_enrichment_execution
-        WHERE workspace_id=${address.workspaceId}::uuid AND id=${address.executionId}::uuid AND company_id=${address.companyId}::uuid FOR UPDATE`;
+        WHERE workspace_id=${address.workspaceId}::uuid AND id=${address.executionId}::uuid AND company_id=${address.companyId}::uuid`;
       if (heads.length !== 1 || !heads[0] || heads[0].status === 'REDACTED' || heads[0].status === 'COMPLETED' || heads[0].status === 'FAILED') throw new EnrichmentSafetyError('HOLD');
       const head = heads[0];
       const frozen = closedSafetyRecord(head.frozen_limits, ['caps','admittedAtMs','deadlineAtMs','targetCount','executionOptions']);
