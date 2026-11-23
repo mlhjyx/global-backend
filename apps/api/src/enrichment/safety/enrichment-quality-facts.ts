@@ -126,19 +126,7 @@ function emailPoints(
     return point.type === "email";
   });
 }
-export function buildContactQualityFact(input: {
-  readonly contactId: string;
-  readonly points: readonly ContactQualityPoint[];
-  readonly decision: ContactQualityDecision;
-  readonly newPoint: ContactQualityNewPoint | null;
-}): ContactQualityFact {
-  const contactId = input.contactId;
-  if (!isCanonicalArtifactUuid(contactId)) return bad();
-  const points = denseSafetyArray(input.points, 100);
-  for (const point of points)
-    if (!point || typeof point !== "object") return bad();
-  const email = emailPoints(points as ContactQualityPoint[]);
-  const decision = input.decision;
+function qualityDecisionRefs(decision: ContactQualityDecision): readonly string[] {
   if (
     !decision ||
     (decision.status !== "APPLIED" &&
@@ -151,79 +139,97 @@ export function buildContactQualityFact(input: {
       (typeof decision.state !== "string" || !STATES.has(decision.state))) ||
     !Number.isSafeInteger(decision.newCandidatePoints) ||
     decision.newCandidatePoints < 0 ||
-    decision.newCandidatePoints > 10
+    decision.newCandidatePoints > 10 ||
+    decision.status === "REDACTED"
   )
     return bad();
   const refs = denseSafetyArray(decision.pointRefs, 1).map((ref) =>
     isCanonicalArtifactUuid(ref) ? ref : bad(),
   );
   if (new Set(refs).size !== refs.length) return bad();
-  if (decision.status === "REDACTED") return bad();
-  const newPoint = input.newPoint;
+  return refs;
+}
+function qualityNewPoint(
+  decision: ContactQualityDecision,
+  refs: readonly string[],
+  newPoint: ContactQualityNewPoint | null,
+): ContactQualityNewPoint | null {
   if (refs.length === 0) {
     if (newPoint !== null || decision.newCandidatePoints !== 0) return bad();
-  } else {
-    if (
-      newPoint === null ||
-      decision.state === null ||
-      newPoint.state !== decision.state ||
-      decision.newCandidatePoints !== refs.length ||
-      (newPoint.emailType !== null &&
-        (typeof newPoint.emailType !== "string" ||
-          newPoint.emailType.length > 64))
-    )
-      return bad();
+    return null;
   }
+  if (
+    newPoint === null ||
+    decision.state === null ||
+    newPoint.state !== decision.state ||
+    decision.newCandidatePoints !== refs.length ||
+    (newPoint.emailType !== null &&
+      (typeof newPoint.emailType !== "string" ||
+        newPoint.emailType.length > 64))
+  )
+    return bad();
+  return newPoint;
+}
+function qualityPointFlags(
+  email: readonly ContactQualityPoint[],
+  newPoint: ContactQualityNewPoint | null,
+): Readonly<{
+  stockValidPersonal: boolean;
+  organizationChannel: boolean;
+  emailTypeUnknown: boolean;
+}> {
+  const isOrganization = (emailType: string | null) =>
+    emailType !== null && ORG_TYPES.has(emailType);
+  const isUnknown = (emailType: string | null) =>
+    emailType === null ||
+    (emailType !== "personal" && !ORG_TYPES.has(emailType));
+  return {
+    stockValidPersonal: email.some(
+      (point) =>
+        point.emailType === "personal" &&
+        point.verificationState === "VALID",
+    ),
+    organizationChannel:
+      email.some((point) => isOrganization(point.emailType)) ||
+      isOrganization(newPoint?.emailType ?? null),
+    emailTypeUnknown:
+      email.some((point) => isUnknown(point.emailType)) ||
+      (newPoint !== null && isUnknown(newPoint.emailType)),
+  };
+}
+export function buildContactQualityFact(input: {
+  readonly contactId: string;
+  readonly points: readonly ContactQualityPoint[];
+  readonly decision: ContactQualityDecision;
+  readonly newPoint: ContactQualityNewPoint | null;
+}): ContactQualityFact {
+  if (!isCanonicalArtifactUuid(input.contactId)) return bad();
+  const email = emailPoints(input.points);
+  const refs = qualityDecisionRefs(input.decision);
+  const newPoint = qualityNewPoint(input.decision, refs, input.newPoint);
   const beforeStates = sortedStates(
     email.map((point) => point.verificationState as EmailVerificationState),
   );
-  const stockValidPersonal = email.some(
-    (point) =>
-      point.emailType === "personal" &&
-      point.verificationState === "VALID",
-  );
-  const organizationChannel =
-    email.some(
-      (point) =>
-        point.emailType !== null && ORG_TYPES.has(point.emailType),
-    ) ||
-    (newPoint !== null &&
-      newPoint.emailType !== null &&
-      ORG_TYPES.has(newPoint.emailType));
-  const emailTypeUnknown =
-    email.some(
-      (point) =>
-        point.emailType === null ||
-        (point.emailType !== "personal" && !ORG_TYPES.has(point.emailType)),
-    ) ||
-    (newPoint !== null &&
-      (newPoint.emailType === null ||
-        (newPoint.emailType !== "personal" &&
-          !ORG_TYPES.has(newPoint.emailType))));
+  const flags = qualityPointFlags(email, newPoint);
   const newCandidate = refs.length > 0;
   const afterStates = newPoint
-    ? sortedStates([
-        ...beforeStates,
-        newPoint.state as EmailVerificationState,
-      ])
+    ? sortedStates([...beforeStates, newPoint.state as EmailVerificationState])
     : beforeStates;
   const newValidPersonal =
     newCandidate &&
     newPoint!.emailType === "personal" &&
     newPoint!.state === "VALID" &&
-    !stockValidPersonal;
+    !flags.stockValidPersonal;
   const unresolved =
-    !stockValidPersonal &&
+    !flags.stockValidPersonal &&
     !newValidPersonal &&
-    !isContactQualitySkipReason(decision.reasonCode);
+    !isContactQualitySkipReason(input.decision.reasonCode);
   return deepFreezeSafety({
-    contactId,
+    contactId: input.contactId,
     beforeStates,
     afterStates,
-    stockValidPersonal,
-    organizationChannel,
-    emailTypeUnknown,
-    eligible: !stockValidPersonal,
+    ...flags,
+    eligible: !flags.stockValidPersonal,
     newCandidate,
     newValidPersonal,
     unresolved,
