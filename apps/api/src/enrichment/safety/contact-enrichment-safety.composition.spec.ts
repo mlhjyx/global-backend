@@ -65,11 +65,16 @@ describe('full safety runtime composition drives bound steps through the origina
       $queryRaw: vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => { const sql = strings.join('?');
       if (sql.includes('FROM public.contact_enrichment_execution_step') && sql.includes('ORDER BY s.slot_ordinal')) return [stepRow()];
       if (sql.includes('AS execution_id,s.id::text AS step_id')) return [{ execution_id: EXEC, step_id: STEP }];
+      if (sql.includes('public.lock_enrichment_execution_step_anchor_v1')) return [{ execution_id: EXEC, step_id: STEP }];
+      if (sql.includes('public.lock_enrichment_execution_v1')) return [{ id: EXEC, account_id: ACCOUNT }];
+      if (sql.includes('public.lock_enrichment_step_v1')) return [{ id: STEP, revision: claimed ? 3 : 2, dispatch_phase: claimed ? 'RESERVED' : (sealed ? 'SETTLED_WAITING_APPLY' : 'ADMITTED'), budget_operation_id: claimed ? OP : null, operation_key: sealed ? sealedOp : null, result_digest: null, receipt: null, artifact_reference: null }];
+      if (sql.includes('public.lock_contact_enrichment_operation_v1')) return [{ operation_id: OP, scope_key: W, account_id: ACCOUNT, generation: 1, operation_key: sealedOp, status: 'RESERVED', amount_unit: 'microusd', reserved_microusd: 1700n }];
+      if (sql.includes('FROM public.tool_budget_operation') && !sql.includes('public.lock_')) return [{ operation_id: OP, scope_key: W, account_id: ACCOUNT, generation: 1, operation_key: sealedOp, status: 'RESERVED', amount_unit: 'microusd', reserved_microusd: 1700n }];
       if (sql.includes('FROM public.contact_enrichment_execution e JOIN')) return [head];
       if (sql.includes('FROM public.contact_enrichment_execution_step') && sql.includes('LEFT JOIN public.tool_budget_operation')) return [stepRow()];
       if (sql.includes('FROM public.contact_enrichment_execution_step s JOIN') && sql.includes('s.id=')) return [stepRow()];
-      if (sql.includes('FROM public.tool_budget_account')) return [{ account_id: ACCOUNT, scope_key: W, account_key: binding.accountKey, authority_id: A, generation: 1, authorized_cap_microusd: 250000n, closed_at: null, ref_count: 1 }];
-      if (sql.includes('FROM public.execution_budget_authority')) return [{ id: A, scope_key: W, usable: true, revoked_at: null }];
+      if (sql.includes('public.lock_contact_enrichment_account_v1')) return [{ account_id: ACCOUNT, scope_key: W, account_key: binding.accountKey, authority_id: A, generation: 1, authorized_cap_microusd: 250000n, closed_at: null, ref_count: 1 }];
+      if (sql.includes('public.lock_contact_enrichment_authority_v1')) return [{ id: A, scope_key: W, usable: true, revoked_at: null }];
       if (sql.includes('SELECT id::text,revision,dispatch_phase') && sql.includes('FOR UPDATE')) return [{ id: STEP, revision: claimed ? 3 : 2, dispatch_phase: claimed ? 'RESERVED' : (sealed ? 'SETTLED_WAITING_APPLY' : 'ADMITTED'), budget_operation_id: claimed ? OP : null, operation_key: sealed ? sealedOp : null, result_digest: null, receipt: null, artifact_reference: null }];
       if (sql.includes('SET result_digest=')) { linked = true; events.push('LINK'); return [{ id: STEP }]; }
       if (sql.includes("SET dispatch_phase='RESULT_UNKNOWN'")) { events.push('HOLD_STEP'); return []; }
@@ -165,13 +170,14 @@ function sqlTx(options: { plan: ReturnType<typeof sqlPlan>; head: ReturnType<typ
     $queryRaw: vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
       const text = strings.join('?');
       state.headSql.push(text);
-      if (text.includes('FOR UPDATE OF e,a')) return [options.head];
+      if (text.includes('public.lock_contact_enrichment_account_v1')) return [{ account_id: SQL_ACCOUNT, authority_id: SQL_A, generation: 1 }];
+      if (text.includes('SELECT s.id::text,s.contact_id::text')) { const id = values.find((value) => value === SQL_C1 || value === SQL_C2); return (options.rows as Array<{ contact_id: string }>).filter((row) => row.contact_id === id); }
+      if (text.includes('FROM public.contact_enrichment_execution e JOIN public.tool_budget_account a')) return [options.head];
       if (text.includes('SELECT id::text FROM public.canonical_contact')) { const id = String(values[0]); state.contactsLocked.push(id); return [{ id }]; }
       if (text.includes('SELECT id::text FROM public.contact_point')) return (options.plainPoints ?? [{ id: SQL_P1 }]).map((point) => ({ id: (point as { id: string }).id }));
       if (text.includes('SELECT s.id::text AS step_id,o.id::text AS operation_id')) return (options.rows as Array<{ id: string; budget_original_id?: string | null; budget_status?: string | null; dispatch_phase: string; domain_state: string }>).map((row) => ({ step_id: row.id, operation_id: row.budget_original_id ?? null, operation_status: row.budget_status ?? null, dispatch_phase: row.dispatch_phase, domain_state: row.domain_state }));
       if (text.includes('SELECT s.contact_id::text,s.domain_state,s.dispatch_phase,o.id::text AS operation_id')) return (options.rows as Array<{ contact_id: string; budget_original_id?: string | null; budget_status?: string | null; dispatch_phase: string; domain_state: string }>).map((row) => ({ contact_id: row.contact_id, operation_id: row.budget_original_id ?? null, operation_status: row.budget_status ?? null, dispatch_phase: row.dispatch_phase, domain_state: row.domain_state }));
       if (text.includes('SELECT result_snapshot,frozen_limits,status')) return [{ result_snapshot: state.snapshot, frozen_limits: options.head.frozen_limits, status: state.status }];
-      if (text.includes('FOR UPDATE OF s')) { const id = values.find((value) => value === SQL_C1 || value === SQL_C2); return (options.rows as Array<{ contact_id: string }>).filter((row) => row.contact_id === id); }
       if (text.includes('SELECT o.id::text AS operation_id')) return [];
       if (text.includes('SELECT result_snapshot FROM public.contact_enrichment_execution WHERE')) { const snapshot = state.snapshot; return [{ result_snapshot: snapshot }]; }
       if (text.includes('SELECT result_snapshot,target_snapshot,frozen_limits,status')) return [{ result_snapshot: state.snapshot, target_snapshot: options.plan.targets, frozen_limits: options.head.frozen_limits, status: state.status }];
@@ -410,8 +416,12 @@ describe('v6 remediation: current-fact flow, stop rules, cache/circuit, recover 
       if (sql.includes('SET input_fingerprint=')) { const s = stepByValue(); s.input_fingerprint = String(values[0]); s.operation_key = String(values[1]); s.candidate_ref = values[2] === null || values[2] === undefined ? null : typeof values[2] === 'string' ? JSON.parse(String(values[2])) : values[2]; s.revision += 1; return [{ id: s.id }]; }
       if (sql.includes('original_operation_id') && sql.includes('FROM public.contact_enrichment_execution_step s')) { const s = stepByValue(); return [bindingRow(s)]; }
       if (sql.includes('FROM public.contact_enrichment_execution_step s JOIN') && sql.includes('s.id=')) { const s = stepByValue(); return [row(s)]; }
-      if (sql.includes('FROM public.execution_budget_authority')) return [{ id: A, scope_key: W, revoked_at: null, usable: true }];
-      if (sql.includes('FROM public.tool_budget_account')) return [{ account_id: ACCOUNT, id: ACCOUNT, scope_key: W, account_key: binding.accountKey, authority_id: A, generation: 1, authorized_cap_microusd: 250000n, closed_at: null, ref_count: 1 }];
+      if (sql.includes('public.lock_contact_enrichment_authority_v1')) return [{ id: A, scope_key: W, revoked_at: null, usable: true }];
+      if (sql.includes('public.lock_contact_enrichment_account_v1')) return [{ account_id: ACCOUNT, id: ACCOUNT, scope_key: W, account_key: binding.accountKey, authority_id: A, generation: 1, authorized_cap_microusd: 250000n, closed_at: null, ref_count: 1 }];
+      if (sql.includes('public.lock_enrichment_execution_v1')) return [{ id: EXEC, account_id: ACCOUNT }];
+      if (sql.includes('public.lock_enrichment_execution_step_anchor_v1')) { const stepId = String(values[values.length - 1]); return [{ execution_id: EXEC, step_id: stepId }]; }
+      if (sql.includes('public.lock_enrichment_step_v1')) { const s = stepByValue(); return [{ id: s.id, revision: s.revision, dispatch_phase: s.dispatch_phase, budget_operation_id: s.budget_operation_id, operation_key: s.operation_key, result_digest: null, receipt: null, artifact_reference: null }]; }
+      if (sql.includes('public.lock_contact_enrichment_operation_v1')) { const step = steps.find((s) => values.some((value) => String(value) === s.operation_key))!; const operationId = OP(steps.indexOf(step) + 1); return [{ operation_id: operationId, scope_key: W, account_id: ACCOUNT, generation: 1, operation_key: step.operation_key, status: 'RESERVED', amount_unit: 'microusd', reserved_microusd: BigInt(step.slot.quoteMicrousd) }]; }
       if (sql.includes('SELECT id::text AS operation_id') && sql.includes('FROM public.tool_budget_operation')) { const step = steps.find((s) => values.some((value) => String(value) === s.operation_key))!; const operationId = OP(steps.indexOf(step) + 1); return [{ operation_id: operationId, scope_key: W, account_id: ACCOUNT, generation: 1, operation_key: step.operation_key, status: 'RESERVED', amount_unit: 'microusd', reserved_microusd: BigInt(step.slot.quoteMicrousd) }]; }
       if (sql.includes('UPDATE public.contact_enrichment_execution_step') && sql.includes('SET budget_operation_id=')) { const s = stepByValue(); s.budget_operation_id = OP(steps.indexOf(s) + 1); s.dispatch_phase = 'RESERVED'; s.revision += 1; s.ledger = { operationKey: s.operation_key!, operationId: s.budget_operation_id, status: 'RESERVED', charged: null, digest: null, receipt: null, artifact: false }; return [{ id: s.id }]; }
       if (sql.includes('SELECT id::text,revision,dispatch_phase') && sql.includes('FOR UPDATE')) { const s = stepByValue(); return [{ id: s.id, revision: s.revision, dispatch_phase: s.dispatch_phase, budget_operation_id: s.budget_operation_id, operation_key: s.operation_key, result_digest: null, receipt: null, artifact_reference: null }]; }
@@ -800,6 +810,7 @@ describe('V10 RED preparation: residual lifecycle and paid-fact boundaries (test
     const head = sqlHead(plan);
     const tx = { $queryRaw: vi.fn(async (strings: TemplateStringsArray, ...values: unknown[]) => {
       const sql = strings.join('?');
+      if (sql.includes('public.lock_enrichment_execution_v1')) return [{ id: SQL_EXEC, account_id: SQL_ACCOUNT }];
       if (sql.includes('SELECT result_snapshot,target_snapshot,frozen_limits,status')) return [{ result_snapshot: state.snapshot, target_snapshot: head.target_snapshot, frozen_limits: head.frozen_limits, status: state.status }];
       if (sql.includes("SET domain_state='SAVE_PENDING'")) { for (const row of rows) if (row.contact_id === SQL_C1 && row.domain_state === 'PENDING') row.domain_state = 'SAVE_PENDING'; return []; }
       if (sql.includes("SET dispatch_phase='SETTLED',domain_state='APPLIED'")) { const row = rows.find((entry) => entry.budget_operation_id !== null && values.some((value) => String(value) === entry.id) && values.some((value) => String(value) === entry.budget_operation_id)); if (!row) throw new Error('missing paid step'); row.dispatch_phase = 'SETTLED'; row.domain_state = 'APPLIED'; return [{ id: row.id }]; }
