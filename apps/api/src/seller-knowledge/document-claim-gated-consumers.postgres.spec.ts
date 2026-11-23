@@ -358,48 +358,75 @@ describe.runIf(Boolean(ownerUrl && appUrl))('document-claim gates at the real co
       verifyWorkspaceGrant: async () => ({}),
       consumeVerifiedWorkspaceGrant: async () => ({ authorityId: randomUUID(), scopeKey: tenant.workspaceId, accountKey: 'mock-account', replay: false }),
     } as never, {} as never, { attestAuthorized: async () => undefined } as never);
-    const pendingLockCount = async () => {
-      const [row] = await owner.$queryRaw<Array<{ n: number }>>`SELECT count(*)::int AS n FROM pg_locks WHERE NOT granted`;
-      return row.n;
-    };
-    const waitForNewWaiter = async (before: number, label: string, settled: Promise<unknown>) => {
-      const queued = (async () => {
-        for (let attempt = 0; attempt < 400; attempt += 1) {
-          const current = await pendingLockCount();
-          if (current > before) return current;
-          await new Promise((resolve) => setTimeout(resolve, 25));
-        }
-        throw new Error(`${label} never queued on a lock`);
-      })();
-      const winner = await Promise.race([queued, settled.then((result) => ({ settled: result }))]);
-      if (typeof winner !== 'number') {
-        const detail = JSON.stringify(winner.settled, (_key, value) => (value instanceof Error ? { message: value.message } : value));
-        throw new Error(`${label} settled before queueing: ${detail}`);
+    const waitingBackend = async (queryLike: string) => {
+      for (let attempt = 0; attempt < 400; attempt += 1) {
+        const rows = await owner.$queryRaw<Array<{ pid: number; xid: string | null }>>`
+          SELECT pid, backend_xid::text AS xid FROM pg_stat_activity
+           WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE ${queryLike}`;
+        if (rows.length === 1) return rows[0];
+        await new Promise((resolve) => setTimeout(resolve, 25));
       }
-      return winner;
+      throw new Error(`no waiting backend matched ${queryLike}`);
     };
+    const blockedBy = async (pid: number) => {
+      return owner.$queryRaw<Array<{ locktype: string; xid: string | null }>>`
+        SELECT locktype, transactionid::text AS xid FROM pg_locks
+         WHERE pid = ${pid} AND NOT granted`;
+    };
+    // An unrelated row-lock waiter runs throughout the interleaving: the barrier
+    // must bind to the two target backends and their blockers, never to a global
+    // waiter count that any other session could satisfy.
+    const unrelatedCompany = await owner.canonicalCompany.create({
+      data: { workspaceId: tenant.workspaceId, name: 'Synthetic unrelated waiter', dedupeKey: randomUUID() },
+    });
+    const unrelatedHeld = deferred();
+    const releaseUnrelated = deferred();
+    const unrelatedHolder = owner.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM canonical_company WHERE id = ${unrelatedCompany.id}::uuid FOR UPDATE`;
+      unrelatedHeld.resolve();
+      await releaseUnrelated.promise;
+    }, { timeout: 60_000 });
+    await unrelatedHeld.promise;
+    const unrelatedWaiter = owner.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM canonical_company WHERE id = ${unrelatedCompany.id}::uuid FOR UPDATE`;
+      await releaseUnrelated.promise;
+    }, { timeout: 60_000 });
+    await waitingBackend('%canonical_company%FOR UPDATE%');
     const documentHeld = deferred();
     const releaseDocument = deferred();
+    let holderIdentity: { pid: number; xid: string } | undefined;
     const holder = owner.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM seller_document WHERE id = ${tenant.documentId}::uuid FOR UPDATE`;
+      const [identity] = await tx.$queryRaw<Array<{ pid: number; xid: string }>>`
+        SELECT pg_backend_pid() AS pid, pg_current_xact_id()::xid::text AS xid`;
+      holderIdentity = identity;
       documentHeld.resolve();
       await releaseDocument.promise;
     }, { timeout: 60_000 });
     await documentHeld.promise;
-    const baseline = await pendingLockCount();
     const approval = claimService
       .transition(ctx(tenant.workspaceId, tenant.userId), pendingClaimId, 'APPROVED', 1)
       .then(() => ({ ok: true as const }))
       .catch((error: unknown) => ({ ok: false as const, error }));
-    const afterApproval = await waitForNewWaiter(baseline, 'claim approval', approval);
+    const approvalWaiter = await waitingBackend('%seller_document%FOR UPDATE%');
+    expect(approvalWaiter.xid).not.toBeNull();
+    expect(await blockedBy(approvalWaiter.pid)).toContainEqual({
+      locktype: 'transactionid',
+      xid: holderIdentity?.xid,
+    });
     const consumption = icpService
       .generateFromCompany(ctx(tenant.workspaceId, tenant.userId), tenant.companyId)
       .then((value) => ({ ok: true as const, value }))
       .catch((error: unknown) => ({ ok: false as const, error }));
-    const afterConsumption = await waitForNewWaiter(afterApproval, 'ICP apply', consumption);
-    expect(afterConsumption).toBeGreaterThan(afterApproval);
+    const icpWaiter = await waitingBackend('%company_profile%FOR NO KEY UPDATE%');
+    expect(await blockedBy(icpWaiter.pid)).toContainEqual({
+      locktype: 'transactionid',
+      xid: approvalWaiter.xid,
+    });
     releaseDocument.resolve();
     await holder;
+    releaseUnrelated.resolve();
+    await Promise.all([unrelatedHolder, unrelatedWaiter]);
     const [approvedResult, consumedResult] = await Promise.all([approval, consumption]);
     expect(approvedResult).toEqual({ ok: true });
     expect(consumedResult).toMatchObject({ ok: true, value: { name: 'Synthetic activation-overlap ICP', companyId: tenant.companyId } });

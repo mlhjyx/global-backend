@@ -445,17 +445,36 @@ const EMPTY_ERASURE_COUNTS: SellerDocumentErasureCounts = {
   blobDeleted: false,
   blobFailures: 0,
 };
-function parsedCleanupCursor(value: unknown): SellerDocumentCleanupCursor {
-  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-    const row = value as Record<string, unknown>;
-    if (row.phase === 'claims' || row.phase === 'sources' || row.phase === 'chunks' || row.phase === 'done') {
-      return {
-        phase: row.phase,
-        afterId: typeof row.afterId === 'string' && CLEANUP_UUID.test(row.afterId) ? row.afterId : null,
-      };
-    }
+function parsedCleanupCursor(value: unknown): SellerDocumentCleanupCursor | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  if (row.phase !== 'claims' && row.phase !== 'sources' && row.phase !== 'chunks' && row.phase !== 'done') return null;
+  if (row.afterId !== null && (typeof row.afterId !== 'string' || !CLEANUP_UUID.test(row.afterId))) return null;
+  return { phase: row.phase, afterId: row.afterId as string | null };
+}
+/**
+ * Legacy (pre-resumable) requests stored final erasure counts without a cursor:
+ * the old whole-snapshot function had already erased every frozen target when
+ * those counts were written, so only the blob obligation may remain. The counts
+ * are trusted only when every numeric field is present and the erased totals
+ * match the frozen snapshot; anything else fails closed instead of re-erasing.
+ */
+function parsedLegacyErasureCounts(value: unknown): SellerDocumentErasureCounts | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  for (const key of ['chunksErased', 'claimsErased', 'evidenceErased', 'referencesErased', 'knowledgeSourcesErased']) {
+    const count = row[key];
+    if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0) return null;
   }
-  return { phase: 'claims', afterId: null };
+  return {
+    chunksErased: row.chunksErased as number,
+    claimsErased: row.claimsErased as number,
+    evidenceErased: row.evidenceErased as number,
+    referencesErased: row.referencesErased as number,
+    knowledgeSourcesErased: row.knowledgeSourcesErased as number,
+    blobDeleted: row.blobDeleted === true,
+    blobFailures: cleanupNonNegative(row.blobFailures),
+  };
 }
 interface CleanupBatchResult extends SellerDocumentErasureCounts {
   readonly nextPhase: SellerDocumentCleanupPhase;
@@ -545,26 +564,56 @@ async function eraseSellerDocumentCleanup(
 ): Promise<SellerDocumentEraseProgress> {
   if (input.subjectId !== located.subjectId || input.deletionRequestId.length === 0)
     throw ApplicationFailure.create({ type: 'SELLER_DOCUMENT_CLEANUP_SCOPE_INVALID', message: 'cleanup input does not match located targets', nonRetryable: true });
-  const moved = await tx.deletionRequest.updateMany({
-    where: { id: input.deletionRequestId, status: 'FROZEN' },
-    data: { status: 'ERASING' },
-  });
-  const request = await tx.deletionRequest.findUnique({
-    where: { id: input.deletionRequestId },
-    select: { status: true, stats: true },
-  });
+  // Lock the request before reading progress: an overlapping continuation must
+  // wait here, then read the cursor/counts committed by the previous batch
+  // instead of overwriting them with a stale snapshot.
+  const [request] = await tx.$queryRaw<Array<{ status: string; stats: unknown }>>(Prisma.sql`
+    SELECT "status", "stats" FROM "deletion_request"
+     WHERE "id" = ${input.deletionRequestId}::uuid AND "workspace_id" = ${input.workspaceId}::uuid
+     FOR UPDATE
+  `);
   if (!request) throw new Error(`deletion_request ${input.deletionRequestId} not found`);
   const stats = cleanupStats(request.stats);
   const persisted = parsedErasureCounts(stats.sellerDocumentCounts);
+  if (stats.sellerDocumentCounts !== undefined && !persisted) {
+    throw new Error('seller document cleanup counts are invalid');
+  }
   if (request.status === 'COMPLETED') {
     if (!persisted) throw new Error('seller document cleanup completed without erasure counts');
     return { ...persisted, done: true };
   }
-  if (moved.count === 0 && request.status !== 'ERASING' && request.status !== 'FAILED') {
+  if (request.status === 'FROZEN') {
+    await tx.deletionRequest.updateMany({
+      where: { id: input.deletionRequestId, status: 'FROZEN' },
+      data: { status: 'ERASING' },
+    });
+  } else if (request.status !== 'ERASING' && request.status !== 'FAILED') {
     throw new Error(`seller document cleanup cannot erase from status ${request.status}`);
   }
-  const cursor = parsedCleanupCursor(stats.sellerDocumentCursor);
-  const counts = persisted ?? EMPTY_ERASURE_COUNTS;
+  let cursor: SellerDocumentCleanupCursor;
+  let counts: SellerDocumentErasureCounts;
+  if (stats.sellerDocumentCursor !== undefined) {
+    const stored = parsedCleanupCursor(stats.sellerDocumentCursor);
+    if (!stored) throw new Error('seller document cleanup cursor is invalid');
+    cursor = stored;
+    counts = persisted ?? EMPTY_ERASURE_COUNTS;
+  } else if (persisted) {
+    const legacy = parsedLegacyErasureCounts(stats.sellerDocumentCounts);
+    if (
+      !legacy ||
+      legacy.chunksErased !== located.chunkCount ||
+      legacy.claimsErased !== located.claimCount ||
+      legacy.evidenceErased !== located.evidenceCount ||
+      legacy.referencesErased !== located.referenceCount
+    ) {
+      throw new Error('seller document cleanup counts without a cursor do not match the frozen snapshot');
+    }
+    cursor = { phase: 'done', afterId: null };
+    counts = legacy;
+  } else {
+    cursor = { phase: 'claims', afterId: null };
+    counts = EMPTY_ERASURE_COUNTS;
+  }
   let next: SellerDocumentErasureCounts = counts;
   let nextCursor = cursor;
   if (cursor.phase !== 'done') {

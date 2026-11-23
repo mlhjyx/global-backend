@@ -133,6 +133,59 @@ describe.runIf(Boolean(ownerUrl && appUrl))('seller document typed claim S1a on 
     const start = bytes.indexOf(Buffer.from(needle, 'utf8'));
     return { start, end: start + Buffer.byteLength(needle, 'utf8'), quote: needle };
   };
+  async function seedCleanupClaims(
+    tenant: { workspaceId: string; companyId: string; document: { documentId: string; contentHash: string; chunkTextHash: string } },
+    count: number,
+  ) {
+    const rows = Array.from({ length: count }, (_, index) => ({
+      claimId: randomUUID(),
+      evidenceId: randomUUID(),
+      statement: `legacy statement ${index}`,
+      digest: sha(`legacy statement ${index}`),
+    }));
+    await owner.claim.createMany({
+      data: rows.map((row) => ({
+        id: row.claimId,
+        workspaceId: tenant.workspaceId,
+        companyId: tenant.companyId,
+        type: 'certification',
+        statement: row.statement,
+        status: 'NEEDS_REVIEW' as const,
+        version: 1,
+      })),
+    });
+    await owner.evidence.createMany({
+      data: rows.map((row) => ({
+        id: row.evidenceId,
+        workspaceId: tenant.workspaceId,
+        claimId: row.claimId,
+        snippet: row.statement,
+      })),
+    });
+    await owner.claimDocumentEvidence.createMany({
+      data: rows.map((row) => ({
+        id: randomUUID(),
+        workspaceId: tenant.workspaceId,
+        companyId: tenant.companyId,
+        claimId: row.claimId,
+        evidenceId: row.evidenceId,
+        documentId: tenant.document.documentId,
+        sourceDocumentId: tenant.document.documentId,
+        documentContentSha256: tenant.document.contentHash,
+        parseRevision: 1,
+        chunkSeq: 0,
+        chunkTextSha256: tenant.document.chunkTextHash,
+        quoteStartByte: 0,
+        quoteEndByte: 1,
+        claimStatementDigest: row.digest,
+        claimType: 'certification',
+        bindingSha256: sha(`binding ${row.claimId}`),
+        requesterId: randomUUID(),
+        requestDigest: sha(`request ${row.claimId}`),
+      })),
+    });
+    return rows;
+  }
 
   it('verifies the delivered migration checksum and the published revision column', async () => {
     const path = fileURLToPath(new URL('../../../../packages/db/prisma/migrations/20261123110000_seller_document_claim_evidence/migration.sql', import.meta.url));
@@ -426,57 +479,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))('seller document typed claim S1a on 
   it('erases a legacy cleanup snapshot with more than 512 claims in bounded batches', async () => {
     const tenant = await seedTenant();
     const claimsToSeed = 513;
-    const rows = Array.from({ length: claimsToSeed }, (_, index) => {
-      const claimId = randomUUID();
-      const evidenceId = randomUUID();
-      return {
-        claimId,
-        evidenceId,
-        statement: `legacy statement ${index}`,
-        digest: sha(`legacy statement ${index}`),
-      };
-    });
-    await owner.claim.createMany({
-      data: rows.map((row) => ({
-        id: row.claimId,
-        workspaceId: tenant.workspaceId,
-        companyId: tenant.companyId,
-        type: 'certification',
-        statement: row.statement,
-        status: 'NEEDS_REVIEW' as const,
-        version: 1,
-      })),
-    });
-    await owner.evidence.createMany({
-      data: rows.map((row) => ({
-        id: row.evidenceId,
-        workspaceId: tenant.workspaceId,
-        claimId: row.claimId,
-        snippet: row.statement,
-      })),
-    });
-    await owner.claimDocumentEvidence.createMany({
-      data: rows.map((row) => ({
-        id: randomUUID(),
-        workspaceId: tenant.workspaceId,
-        companyId: tenant.companyId,
-        claimId: row.claimId,
-        evidenceId: row.evidenceId,
-        documentId: tenant.document.documentId,
-        sourceDocumentId: tenant.document.documentId,
-        documentContentSha256: tenant.document.contentHash,
-        parseRevision: 1,
-        chunkSeq: 0,
-        chunkTextSha256: tenant.document.chunkTextHash,
-        quoteStartByte: 0,
-        quoteEndByte: 1,
-        claimStatementDigest: row.digest,
-        claimType: 'certification',
-        bindingSha256: sha(`binding ${row.claimId}`),
-        requesterId: randomUUID(),
-        requestDigest: sha(`request ${row.claimId}`),
-      })),
-    });
+    await seedCleanupClaims(tenant, claimsToSeed);
     const userCtx = ctx(tenant.workspaceId, tenant.user);
     const request = await cleanupService.requestCleanup(userCtx, tenant.companyId, tenant.document.documentId);
     const input = { workspaceId: tenant.workspaceId, deletionRequestId: request.requestId, subjectType: 'seller_document' as const, subjectId: tenant.document.documentId };
@@ -642,8 +645,133 @@ describe.runIf(Boolean(ownerUrl && appUrl))('seller document typed claim S1a on 
     expect(await owner.evidence.count({ where: { id: foreignEvidenceId } })).toBe(1);
   });
 
+  it('serializes overlapping continuations so committed counts are never overwritten', async () => {
+    const tenant = await seedTenant();
+    const claimsToSeed = 150;
+    await seedCleanupClaims(tenant, claimsToSeed);
+    const userCtx = ctx(tenant.workspaceId, tenant.user);
+    const request = await cleanupService.requestCleanup(userCtx, tenant.companyId, tenant.document.documentId);
+    const input = { workspaceId: tenant.workspaceId, deletionRequestId: request.requestId, subjectType: 'seller_document' as const, subjectId: tenant.document.documentId };
+    const activities = createDeletionActivities({ prisma: appPrisma, sellerDocumentsStorage: { delete: async () => undefined } });
+    const located = await activities.freezeSubject(input);
+    const first = (await activities.eraseSubject({ input, located })) as SellerDocumentEraseProgress;
+    expect(first).toMatchObject({ claimsErased: 100, done: false });
+    let releaseHolder!: () => void;
+    const holderRelease = new Promise<void>((resolve) => (releaseHolder = resolve));
+    let holderLocked!: () => void;
+    const holderReady = new Promise<void>((resolve) => (holderLocked = resolve));
+    const holder = owner.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM deletion_request WHERE id = ${request.requestId}::uuid FOR UPDATE`;
+      holderLocked();
+      await holderRelease;
+    }, { timeout: 60_000 });
+    await holderReady;
+    const pendingLockCount = async () => {
+      const [row] = await owner.$queryRaw<Array<{ n: number }>>`SELECT count(*)::int AS n FROM pg_locks WHERE NOT granted`;
+      return row.n;
+    };
+    const baselineWaiters = await pendingLockCount();
+    // Two continuations of the same request overlap. Neither may read progress
+    // before the other commits, or one overwrites the other's counts.
+    const left = activities.eraseSubject({ input, located }) as Promise<SellerDocumentEraseProgress>;
+    const right = activities.eraseSubject({ input, located }) as Promise<SellerDocumentEraseProgress>;
+    for (let attempt = 0; attempt < 400; attempt += 1) {
+      if ((await pendingLockCount()) >= baselineWaiters + 2) break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(await pendingLockCount()).toBeGreaterThanOrEqual(baselineWaiters + 2);
+    releaseHolder();
+    await holder;
+    await Promise.all([left, right]);
+    const raced = await owner.deletionRequest.findUniqueOrThrow({ where: { id: request.requestId } });
+    const racedCounts = (raced.stats as { sellerDocumentCounts?: { claimsErased?: number } }).sellerDocumentCounts;
+    expect(racedCounts?.claimsErased ?? 0).toBeGreaterThanOrEqual(100);
+    const final = countsOf((await eraseUntilDone(activities, input, located)).final);
+    expect(final).toMatchObject({ claimsErased: claimsToSeed, blobDeleted: true });
+    await expect(activities.completeDeletion({ input, located })).resolves.toMatchObject({ blobDeleted: true });
+  }, 60_000);
+
+  it('completes a legacy cleanup whose erasure finished but carries no cursor', async () => {
+    const tenant = await seedTenant();
+    const { start, end } = quoteOf(tenant.document.text, '通过 ISO 9001 认证');
+    const reference = { ...referenceFor(tenant.document), quoteStartByte: start, quoteEndByte: end };
+    const userCtx = ctx(tenant.workspaceId, tenant.user);
+    const preview = await claims.preview(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证' });
+    const draft = await claims.createDraft(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证', requestDigest: preview.requestDigest });
+    await claimService.transition(userCtx, draft.claimId, 'APPROVED', 1);
+    const request = await cleanupService.requestCleanup(userCtx, tenant.companyId, tenant.document.documentId);
+    const input = { workspaceId: tenant.workspaceId, deletionRequestId: request.requestId, subjectType: 'seller_document' as const, subjectId: tenant.document.documentId };
+    const activities = createDeletionActivities({ prisma: appPrisma, sellerDocumentsStorage: { delete: async () => undefined } });
+    const located = await activities.freezeSubject(input);
+    // Old whole-snapshot erasure had already removed every frozen target; only
+    // the blob obligation remained and no cursor was ever written.
+    await owner.$executeRaw`DELETE FROM claim_document_evidence WHERE claim_id = ${draft.claimId}::uuid`;
+    await owner.$executeRaw`DELETE FROM evidence WHERE claim_id = ${draft.claimId}::uuid`;
+    await owner.$executeRaw`DELETE FROM claim WHERE id = ${draft.claimId}::uuid`;
+    await owner.$executeRaw`DELETE FROM seller_document_chunk WHERE document_id = ${tenant.document.documentId}::uuid`;
+    const frozen = await owner.deletionRequest.findUniqueOrThrow({ where: { id: request.requestId } });
+    await owner.deletionRequest.update({
+      where: { id: request.requestId },
+      data: {
+        status: 'ERASING',
+        stats: {
+          ...(frozen.stats as Record<string, unknown>),
+          sellerDocumentCounts: { chunksErased: 1, claimsErased: 1, evidenceErased: 1, referencesErased: 1, knowledgeSourcesErased: 0, blobDeleted: false, blobFailures: 1 },
+        } as Prisma.InputJsonValue,
+      },
+    });
+    const result = await eraseUntilDone(activities, input, located);
+    expect(countsOf(result.final)).toMatchObject({ claimsErased: 1, blobDeleted: true });
+    // Blob-only retry: the erased legacy request never re-enters the definer.
+    expect(result.calls).toHaveLength(1);
+    await expect(activities.completeDeletion({ input, located })).resolves.toMatchObject({ blobDeleted: true });
+    expect((await owner.deletionRequest.findUniqueOrThrow({ where: { id: request.requestId } })).status).toBe('COMPLETED');
+  });
+
+  it('refuses legacy counts that disagree with the frozen snapshot', async () => {
+    const tenant = await seedTenant();
+    const { start, end } = quoteOf(tenant.document.text, '通过 ISO 9001 认证');
+    const reference = { ...referenceFor(tenant.document), quoteStartByte: start, quoteEndByte: end };
+    const userCtx = ctx(tenant.workspaceId, tenant.user);
+    const preview = await claims.preview(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证' });
+    const draft = await claims.createDraft(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证', requestDigest: preview.requestDigest });
+    await claimService.transition(userCtx, draft.claimId, 'APPROVED', 1);
+    const request = await cleanupService.requestCleanup(userCtx, tenant.companyId, tenant.document.documentId);
+    const input = { workspaceId: tenant.workspaceId, deletionRequestId: request.requestId, subjectType: 'seller_document' as const, subjectId: tenant.document.documentId };
+    const activities = createDeletionActivities({ prisma: appPrisma, sellerDocumentsStorage: { delete: async () => undefined } });
+    const located = await activities.freezeSubject(input);
+    const frozen = await owner.deletionRequest.findUniqueOrThrow({ where: { id: request.requestId } });
+    await owner.deletionRequest.update({
+      where: { id: request.requestId },
+      data: {
+        status: 'ERASING',
+        stats: {
+          ...(frozen.stats as Record<string, unknown>),
+          sellerDocumentCounts: { chunksErased: 0, claimsErased: 0, evidenceErased: 0, referencesErased: 0, knowledgeSourcesErased: 0, blobDeleted: false, blobFailures: 0 },
+        } as Prisma.InputJsonValue,
+      },
+    });
+    await expect(activities.eraseSubject({ input, located })).rejects.toThrow(/do not match the frozen snapshot/);
+    expect(await owner.claim.count({ where: { id: draft.claimId } })).toBe(1);
+  });
+
+  it('rejects a NULL cleanup phase without deleting targets', async () => {
+    const tenant = await seedTenant();
+    const userCtx = ctx(tenant.workspaceId, tenant.user);
+    const request = await cleanupService.requestCleanup(userCtx, tenant.companyId, tenant.document.documentId);
+    const input = { workspaceId: tenant.workspaceId, deletionRequestId: request.requestId, subjectType: 'seller_document' as const, subjectId: tenant.document.documentId };
+    const activities = createDeletionActivities({ prisma: appPrisma, sellerDocumentsStorage: { delete: async () => undefined } });
+    await activities.freezeSubject(input);
+    const state = await asApp(tenant.workspaceId, (tx) =>
+      tx.$queryRaw`SELECT erase_seller_document_cleanup_batch_v1(${tenant.workspaceId}::uuid, ${request.requestId}::uuid, NULL::text, NULL::uuid, 100::int) AS batch`,
+    ).then(() => null).catch((error) => sqlState(error));
+    expect(state).toBe('42501');
+    expect(await owner.sellerDocumentChunk.count({ where: { documentId: tenant.document.documentId } })).toBe(1);
+    expect((await owner.deletionRequest.findUniqueOrThrow({ where: { id: request.requestId } })).status).toBe('FROZEN');
+  });
+
   it('pins the delivered S1a follow-up migration checksums', async () => {
-    for (const name of ['20261124020000_seller_document_claim_s1a_followup', '20261124030000_seller_document_cleanup_batch']) {
+    for (const name of ['20261124020000_seller_document_claim_s1a_followup', '20261124030000_seller_document_cleanup_batch', '20261124040000_seller_document_cleanup_null_phase']) {
       const path = fileURLToPath(new URL(`../../../../packages/db/prisma/migrations/${name}/migration.sql`, import.meta.url));
       const expected = sha(readFileSync(path));
       const rows = await owner.$queryRaw<Array<{ checksum: string }>>`SELECT checksum FROM _prisma_migrations WHERE migration_name = ${name}`;
