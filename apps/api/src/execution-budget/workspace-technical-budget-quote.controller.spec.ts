@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RequestContext } from '../auth/request-context';
 import { WorkspaceTechnicalBudgetQuoteController } from './workspace-technical-budget-quote.controller';
 import { WorkspaceTechnicalBudgetQuoteService } from './workspace-technical-budget-quote';
@@ -213,5 +213,75 @@ describe('manufacturer execution quote canonical boundary',()=>{
   });
   it.each([{}, {manufacturerNetworkRevision:'manufacturer-network/v3'},{manufacturerNetworkRevision:null},{manufacturerNetworkRevision:'manufacturer-network/v1',unexpected:true}])('rejects invalid request body before quote resolution',body=>{
     expect(()=>controller().quote(CTX,{operation:'POST /query-plans/:planId/execute',planId,body})).toThrow();
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe('enrich-contacts quote bounds', () => {
+  const COMPANY = '30000000-0000-4000-8000-000000000003';
+  const ATTEMPT = '7e6f6f43-8f8d-4c2a-9b1e-2a3b4c5d6e7f';
+  const PROVIDER_KEYS = [
+    'HUNTER_API_KEY',
+    'FINDYMAIL_API_KEY',
+    'PROSPEO_API_KEY',
+    'APOLLO_API_KEY',
+    'PDL_API_KEY',
+    'MILLIONVERIFIER_API_KEY',
+    'EMAILABLE_API_KEY',
+    'ZEROBOUNCE_API_KEY',
+  ];
+
+  function clearProviders(): void {
+    for (const key of PROVIDER_KEYS) vi.stubEnv(key, '');
+  }
+
+  it('prices explicit finder/verifier bounds and binds them into the request hash', () => {
+    clearProviders();
+    vi.stubEnv('HUNTER_API_KEY', 'hunter-key');
+    vi.stubEnv('HUNTER_COST_MICROUSD', '1700');
+    vi.stubEnv('ZEROBOUNCE_API_KEY', 'zb-key');
+    vi.stubEnv('ZEROBOUNCE_COST_MICROUSD', '9900');
+    const quote = controller().quote(CTX, {
+      operation: 'POST /canonical-companies/:id/enrich-contacts',
+      companyId: COMPANY,
+      body: {
+        attemptId: ATTEMPT,
+        maxProviders: 1,
+        maxProbe: 1,
+        contactCount: 1,
+      },
+    });
+    expect(quote.data).toMatchObject({
+      purpose: 'contact.enrich',
+      requiredCapMicrousd: '20000',
+    });
+    const attemptOnly = controller().quote(CTX, {
+      operation: 'POST /canonical-companies/:id/enrich-contacts',
+      companyId: COMPANY,
+      body: { attemptId: ATTEMPT },
+    });
+    expect(quote.data.requestSha256).not.toBe(
+      attemptOnly.data.requestSha256,
+    );
+  });
+
+  it('rejects out-of-contract enrich bounds and unknown fields', () => {
+    expect(() =>
+      controller().quote(CTX, {
+        operation: 'POST /canonical-companies/:id/enrich-contacts',
+        companyId: COMPANY,
+        body: { attemptId: ATTEMPT, maxProviders: 4 },
+      }),
+    ).toThrow(/EXECUTION_BUDGET_QUOTE_INVALID/);
+    expect(() =>
+      controller().quote(CTX, {
+        operation: 'POST /canonical-companies/:id/enrich-contacts',
+        companyId: COMPANY,
+        body: { attemptId: ATTEMPT, clientCapMicrousd: 1 },
+      }),
+    ).toThrow(/EXECUTION_BUDGET_QUOTE_INVALID/);
   });
 });

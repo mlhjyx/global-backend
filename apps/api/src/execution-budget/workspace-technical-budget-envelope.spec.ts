@@ -14,6 +14,20 @@ const ICP_ID = '30000000-0000-4000-8000-000000000003';
 const POINT_ID = '40000000-0000-4000-8000-000000000004';
 const PLAN_ID = '50000000-0000-4000-8000-000000000005';
 const LEAD_ID = '60000000-0000-4000-8000-000000000006';
+const PROVIDER_KEY_ENVS = [
+  'HUNTER_API_KEY',
+  'FINDYMAIL_API_KEY',
+  'PROSPEO_API_KEY',
+  'APOLLO_API_KEY',
+  'PDL_API_KEY',
+  'MILLIONVERIFIER_API_KEY',
+  'EMAILABLE_API_KEY',
+  'ZEROBOUNCE_API_KEY',
+] as const;
+
+function clearProviderEnv(): void {
+  for (const key of PROVIDER_KEY_ENVS) vi.stubEnv(key, '');
+}
 
 describe('workspace execution technical envelope catalog', () => {
   it('machine-enumerates all and only registered bounded workspace operations', () => {
@@ -34,22 +48,100 @@ describe('workspace execution technical envelope catalog', () => {
     ]);
   });
 
-  it('quotes the enrich-contacts execution shape without pricing provider calls yet', () => {
+  it('prices enrich-contacts finder and verifier upper bounds when providers are configured', () => {
+    clearProviderEnv();
+    vi.stubEnv('HUNTER_API_KEY', 'hunter-key');
+    vi.stubEnv('HUNTER_COST_MICROUSD', '1700');
+    vi.stubEnv('ZEROBOUNCE_API_KEY', 'zb-key');
+    vi.stubEnv('ZEROBOUNCE_COST_MICROUSD', '9900');
+    const envelope = resolveWorkspaceTechnicalBudgetEnvelope({
+      operation: 'POST /canonical-companies/:id/enrich-contacts',
+      companyId: COMPANY_ID,
+      body: {
+        attemptId: '7e6f6f43-8f8d-4c2a-9b1e-2a3b4c5d6e7f',
+        maxProviders: 1,
+        maxProbe: 1,
+        contactCount: 1,
+      },
+    });
+    // 1 Hunter call at ceil(1700/10000)=1 cent + 1 ZeroBounce call at 1 cent.
+    expect(envelope.requiredCapMicrousd).toBe(20_000n);
+    expect(envelope.policy.tools).toEqual([
+      expect.objectContaining({
+        toolId: 'contact_email.find.hunter',
+        maxPhysicalInvocations: 1,
+        estimatedCents: 1,
+      }),
+      expect.objectContaining({
+        toolId: 'contact_email.verify.zerobounce',
+        maxPhysicalInvocations: 1,
+        estimatedCents: 1,
+      }),
+    ]);
+    expect(envelope.policy.executionLimits).toEqual({
+      finderCallsPerCompany: 1,
+      verificationCallsPerAddress: 1,
+      contactsPerRequest: 1,
+      maxProvidersPerContact: 1,
+      providerConcurrency: 2,
+      softDeadlineMs: 600_000,
+    });
+  });
+
+  it('uses the most expensive configured provider and caps finder calls per company', () => {
+    clearProviderEnv();
+    vi.stubEnv('HUNTER_API_KEY', 'hunter-key');
+    vi.stubEnv('HUNTER_COST_MICROUSD', '1700');
+    vi.stubEnv('APOLLO_API_KEY', 'apollo-key');
+    vi.stubEnv('APOLLO_COST_MICROUSD', '25000');
+    vi.stubEnv('ZEROBOUNCE_API_KEY', 'zb-key');
+    vi.stubEnv('ZEROBOUNCE_COST_MICROUSD', '9900');
+    const envelope = resolveWorkspaceTechnicalBudgetEnvelope({
+      operation: 'POST /canonical-companies/:id/enrich-contacts',
+      companyId: COMPANY_ID,
+      body: { contactCount: 10, maxProviders: 3, maxProbe: 6 },
+    });
+    // 10 contacts x 3 providers would be 30 calls, but the company cap is 10.
+    expect(envelope.policy.tools[0]).toMatchObject({
+      toolId: 'contact_email.find.apollo',
+      maxPhysicalInvocations: 10,
+      estimatedCents: 3,
+    });
+    expect(envelope.policy.tools[1]).toMatchObject({
+      toolId: 'contact_email.verify.zerobounce',
+      maxPhysicalInvocations: 60,
+      estimatedCents: 1,
+    });
+    expect(envelope.requiredCapMicrousd).toBe(900_000n);
+  });
+
+  it('keeps the representation minimum when no provider is configured', () => {
+    clearProviderEnv();
     const envelope = resolveWorkspaceTechnicalBudgetEnvelope({
       operation: 'POST /canonical-companies/:id/enrich-contacts',
       companyId: COMPANY_ID,
     });
-    // 付费 finder/验证 API 尚未经 ToolBroker 计价：envelope 只给执行形状，cap 为表示最小值。
     expect(envelope.requiredCapMicrousd).toBe(1n);
-    expect(envelope.policy.models).toEqual([]);
     expect(envelope.policy.tools).toEqual([]);
     expect(envelope.policy.executionLimits).toEqual({
       finderCallsPerCompany: 10,
       verificationCallsPerAddress: 6,
       contactsPerRequest: 10,
+      maxProvidersPerContact: 3,
       providerConcurrency: 2,
       softDeadlineMs: 600_000,
     });
+  });
+
+  it('rejects enrich bounds outside the request contract', () => {
+    clearProviderEnv();
+    expect(() =>
+      resolveWorkspaceTechnicalBudgetEnvelope({
+        operation: 'POST /canonical-companies/:id/enrich-contacts',
+        companyId: COMPANY_ID,
+        body: { contactCount: 11 },
+      }),
+    ).toThrow(/EXECUTION_BUDGET_QUOTE_INVALID/);
   });
 
   it('quotes a campaign plan draft from one bounded planning task', () => {

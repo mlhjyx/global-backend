@@ -3939,6 +3939,21 @@
                           "attemptId": {
                             "type": "string",
                             "format": "uuid"
+                          },
+                          "maxProviders": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 3
+                          },
+                          "maxProbe": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 6
+                          },
+                          "contactCount": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 10
                           }
                         }
                       }
