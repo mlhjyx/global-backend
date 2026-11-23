@@ -1,3 +1,7 @@
+import {
+  hasValidDocumentClaimApprovalAudit,
+  loadDocumentClaimBindingInTransaction,
+} from '../claim/document-claim-basis';
 import { createHash, randomUUID } from 'node:crypto';
 import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, type MarketCandidateFeedback, type MarketCandidateSet, type MarketCandidateSetRevision } from '@prisma/client';
@@ -17,6 +21,32 @@ import { applyFeedback, canonicalJson, createInitialDocument, documentHash, inva
 type Tx = Prisma.TransactionClient;
 type CompanyLock = { id: string; version: number; deletedAt: Date | null };
 const transactionOptions = { maxWait: 20_000, timeout: 30_000 };
+
+export interface ClaimSourceDigestInput {
+  type: string;
+  statement: string;
+  status: string;
+  validUntil: Date | null;
+  verifiedBy: string | null;
+  verifiedAt: Date | null;
+  verificationMethod: string | null;
+  verificationProof: unknown;
+  documentBindingHash?: string;
+}
+/** Legacy non-document claims keep their exact previous digest bytes; only document claims add the binding hash. */
+export function claimSourceDigest(claim: ClaimSourceDigestInput): string {
+  return documentHash({
+    type: claim.type,
+    statement: claim.statement,
+    status: claim.status,
+    validUntil: claim.validUntil?.toISOString() ?? null,
+    verifiedBy: claim.verifiedBy,
+    verifiedAt: claim.verifiedAt?.toISOString() ?? null,
+    verificationMethod: claim.verificationMethod,
+    verificationProof: claim.verificationProof,
+    ...(claim.documentBindingHash === undefined ? {} : { documentBindingHash: claim.documentBindingHash }),
+  });
+}
 
 function uuid(value: unknown): string {
   if (typeof value !== 'string' || !isUUID(value)) return invalidCandidateInput();
@@ -90,6 +120,12 @@ export class MarketCandidateSetsService {
     const claim = await tx.claim.findUnique({ where: { id } });
     if (!claim || claim.companyId !== companyId || ['REVOKED','EXPIRED'].includes(claim.status)
       || (claim.validUntil !== null && claim.validUntil.getTime() <= Date.now())) return null;
+    const documentReference = await tx.claimDocumentEvidence.findUnique({ where: { claimId: id }, select: { id: true } });
+    if (documentReference) {
+      const binding = await loadDocumentClaimBindingInTransaction(tx, { workspaceId: claim.workspaceId, companyId }, claim);
+      if (!binding || !hasValidDocumentClaimApprovalAudit(claim, binding)) return null;
+      return Object.assign(claim, { documentBindingHash: binding.bindingHash, documentReferenceId: binding.referenceId });
+    }
     return claim;
   }
   private async source(tx: Tx, companyId: string, reference: MarketCandidateSourceReferenceDto, lock: boolean): Promise<MarketCandidateSourceSnapshotDto | null> {
@@ -107,8 +143,10 @@ export class MarketCandidateSetsService {
       const row = await this.claim(tx, id, companyId, lock);
       if (!row) return null;
       return { ...base, version: row.version, status: row.status,
-        digest: documentHash({ type: row.type, statement: row.statement, status: row.status, validUntil: row.validUntil?.toISOString() ?? null,
-          verifiedBy: row.verifiedBy, verifiedAt: row.verifiedAt?.toISOString() ?? null, verificationMethod: row.verificationMethod, verificationProof: row.verificationProof }),
+        digest: claimSourceDigest({
+          ...row,
+          documentBindingHash: (row as { documentBindingHash?: string }).documentBindingHash,
+        }),
         sourceDate: row.createdAt.toISOString() };
     }
     if (reference.kind === 'EVIDENCE') {

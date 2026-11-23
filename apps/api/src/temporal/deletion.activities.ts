@@ -14,9 +14,19 @@ import {
   DELETION_SUBJECT_TYPES,
   DeletionWorkflowInput,
   ErasureCounts,
+  LocatedDeletionTargets,
   LocatedErasureTargets,
   SuppressionEntry,
 } from '../compliance/deletion.types';
+import { SellerDocumentsStorage } from '../seller-knowledge/seller-documents.storage';
+import {
+  buildSellerDocumentCleanupCompletedPayload,
+  SELLER_DOCUMENT_CLEANUP_POLICY_VERSION,
+  SELLER_DOCUMENT_CLEANUP_SUBJECT_TYPE,
+  type LocatedSellerDocumentCleanupTargets,
+  type SellerDocumentErasureCounts,
+  type SellerDocumentCleanupReceiptDetail,
+} from '../seller-knowledge/seller-document-cleanup.types';
 import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
 import { GenericOperationArtifactSubjectRepository } from '../durable-results/artifact/generic-operation-artifact-subject.repository';
 import { redactEnrichmentSubject } from '../enrichment/safety/enrichment-execution.repository';
@@ -35,13 +45,20 @@ import { PersonalArtifactCleanupEnqueuer } from '../durable-results/artifact/per
  * 幂等：每步用 CAS（updateMany where status=<expected>）守，Temporal 重试不产生重复副作用；擦除计数取自
  * ② 擦除时刻的真实擦除面并落 stats，故重试（行已删、二次统计为 0）也不失真。所有租户读写经 withWorkspace（RLS，app_user）。
  */
-export function createDeletionActivities(deps: { prisma: PrismaService }) {
+export function createDeletionActivities(deps: {
+  prisma: PrismaService;
+  sellerDocumentsStorage?: Pick<SellerDocumentsStorage, 'delete'>;
+}) {
   const { prisma } = deps;
+  const sellerDocuments = deps.sellerDocumentsStorage ?? new SellerDocumentsStorage();
   const artifactSubjects = new GenericOperationArtifactSubjectRepository();
   const artifactCleanup = new PersonalArtifactCleanupEnqueuer();
 
   return {
-    async freezeSubject(input: DeletionWorkflowInput): Promise<LocatedErasureTargets> {
+    async freezeSubject(input: DeletionWorkflowInput): Promise<LocatedDeletionTargets> {
+      if (input.subjectType === SELLER_DOCUMENT_CLEANUP_SUBJECT_TYPE) {
+        return prisma.withWorkspace(input.workspaceId, (tx) => locateSellerDocumentCleanup(tx, input));
+      }
       // 只受理 DSR 主体种类（contact | company）。产物主体函数自 2026-10-14 起也认卖方
       // company_profile，DB tombstone 不再替本流程拒掉它；而本流程的定位分支、回执与
       // DeletionCompleted 契约都只认这两种，别的种类在任何写入之前失败、不重试。
@@ -54,7 +71,7 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
       }
       return prisma.withWorkspace(input.workspaceId, async (tx) => {
         await lockWorkspaceSuppressionPolicy(tx, input.workspaceId);
-        const { located, suppressionEntries } = await locateInTransaction(tx, input);
+        const { located, suppressionEntries } = await locateInTransaction(tx, input as DeletionWorkflowInput & { subjectType: 'contact' | 'company' });
         await upsertSuppressionEntries(tx, input.workspaceId, suppressionEntries);
         // PERSONAL_DATA artifact 只以 workspace + 有界主体行 id 关联。冻结阶段先写
         // append-only subject tombstone，再公开 FROZEN：既关闭现有 raw artifact
@@ -64,7 +81,7 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
           workspaceId: input.workspaceId,
           deletionRequestId: input.deletionRequestId,
           subjectRef: {
-            subjectType: input.subjectType,
+            subjectType: input.subjectType as 'contact' | 'company',
             subjectId: input.subjectId,
           },
         });
@@ -104,8 +121,11 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
 
     async eraseSubject(args: {
       input: DeletionWorkflowInput;
-      located: LocatedErasureTargets }): Promise<ErasureCounts> {
+      located: LocatedDeletionTargets }): Promise<ErasureCounts | SellerDocumentErasureCounts> {
       const { input, located } = args;
+      if (located.subjectType === SELLER_DOCUMENT_CLEANUP_SUBJECT_TYPE) {
+        return prisma.withWorkspace(input.workspaceId, (tx) => eraseSellerDocumentCleanup(tx, input, located, sellerDocuments));
+      }
       return prisma.withWorkspace(input.workspaceId, async (tx) => {
         // Fixed global lock order: policy advisory lock -> company/contact rows -> suppression facts.
         await lockWorkspaceSuppressionPolicy(tx, input.workspaceId);
@@ -273,9 +293,12 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
 
     async completeDeletion(args: {
       input: DeletionWorkflowInput;
-      located: LocatedErasureTargets;
-    }): Promise<ErasureCounts> {
+      located: LocatedDeletionTargets;
+    }): Promise<ErasureCounts | SellerDocumentErasureCounts> {
       const { input, located } = args;
+      if (located.subjectType === SELLER_DOCUMENT_CLEANUP_SUBJECT_TYPE) {
+        return prisma.withWorkspace(input.workspaceId, (tx) => completeSellerDocumentCleanup(tx, input, located));
+      }
       const erasedAt = new Date().toISOString();
       return prisma.withWorkspace(input.workspaceId, async (tx) => {
         const req = await tx.deletionRequest.findUnique({
@@ -333,7 +356,7 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
         // DeletionCompleted（事务性 outbox：状态变更 ⇔ 事件存在，同 tx 原子）
         const payload = buildDeletionCompletedPayload({
           deletionRequestId: input.deletionRequestId,
-          subjectType: input.subjectType,
+          subjectType: input.subjectType as 'contact' | 'company',
           subjectId: input.subjectId,
           counts,
           erasedAt,
@@ -373,6 +396,220 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
       );
     },
   };
+}
+
+const CLEANUP_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+function cleanupUuidArray(value: unknown): string[] {
+  return Array.isArray(value) ? [...new Set(value.filter((item): item is string => typeof item === 'string' && CLEANUP_UUID.test(item)))].sort() : [];
+}
+function cleanupNonNegative(value: unknown): number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+type CleanupStats = {
+  policyVersion?: unknown;
+  companyId?: unknown;
+  chunkIds?: unknown;
+  claimIds?: unknown;
+  evidenceIds?: unknown;
+  referenceIds?: unknown;
+  knowledgeSourceIds?: unknown;
+  sellerDocumentCounts?: Partial<SellerDocumentErasureCounts>;
+};
+function cleanupStats(value: unknown): CleanupStats {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as CleanupStats) : {};
+}
+function parsedErasureCounts(value: unknown): SellerDocumentErasureCounts | null {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  return {
+    chunksErased: cleanupNonNegative(row.chunksErased),
+    claimsErased: cleanupNonNegative(row.claimsErased),
+    evidenceErased: cleanupNonNegative(row.evidenceErased),
+    referencesErased: cleanupNonNegative(row.referencesErased),
+    knowledgeSourcesErased: cleanupNonNegative(row.knowledgeSourcesErased),
+    blobDeleted: row.blobDeleted === true,
+    blobFailures: cleanupNonNegative(row.blobFailures),
+  };
+}
+
+/** Freeze an internal seller_document cleanup request: validate scope, snapshot IDs/counts, RECEIVED→FROZEN. */
+async function locateSellerDocumentCleanup(
+  tx: Prisma.TransactionClient,
+  input: DeletionWorkflowInput,
+): Promise<LocatedSellerDocumentCleanupTargets> {
+  const request = await tx.deletionRequest.findUnique({
+    where: { id: input.deletionRequestId },
+    select: { id: true, workspaceId: true, subjectType: true, subjectId: true, status: true, stats: true },
+  });
+  if (
+    !request ||
+    request.workspaceId !== input.workspaceId ||
+    request.subjectType !== SELLER_DOCUMENT_CLEANUP_SUBJECT_TYPE ||
+    request.subjectId !== input.subjectId
+  ) {
+    throw ApplicationFailure.create({ type: 'SELLER_DOCUMENT_CLEANUP_REQUEST_INVALID', message: 'invalid internal cleanup request', nonRetryable: true });
+  }
+  const stats = cleanupStats(request.stats);
+  const companyId = typeof stats.companyId === 'string' && CLEANUP_UUID.test(stats.companyId) ? stats.companyId : null;
+  if (companyId === null || stats.policyVersion !== SELLER_DOCUMENT_CLEANUP_POLICY_VERSION) {
+    throw ApplicationFailure.create({ type: 'SELLER_DOCUMENT_CLEANUP_REQUEST_INVALID', message: 'cleanup snapshot is missing its scope', nonRetryable: true });
+  }
+  const document = await tx.sellerDocument.findFirst({
+    where: { id: input.subjectId, workspaceId: input.workspaceId, companyId },
+    select: { id: true, deletedAt: true },
+  });
+  if (!document || document.deletedAt === null) {
+    throw ApplicationFailure.create({ type: 'SELLER_DOCUMENT_CLEANUP_SCOPE_INVALID', message: 'cleanup targets a live or foreign document', nonRetryable: true });
+  }
+  await tx.deletionRequest.updateMany({
+    where: { id: input.deletionRequestId, status: 'RECEIVED' },
+    data: { status: 'FROZEN' },
+  });
+  return {
+    subjectType: 'seller_document',
+    subjectId: input.subjectId,
+    documentId: input.subjectId,
+    companyId,
+    policyVersion: SELLER_DOCUMENT_CLEANUP_POLICY_VERSION,
+    chunkCount: cleanupUuidArray(stats.chunkIds).length,
+    claimCount: cleanupUuidArray(stats.claimIds).length,
+    evidenceCount: cleanupUuidArray(stats.evidenceIds).length,
+    referenceCount: cleanupUuidArray(stats.referenceIds).length,
+    knowledgeSourceCount: cleanupUuidArray(stats.knowledgeSourceIds).length,
+  };
+}
+
+/** Erase frozen targets through the bounded definer, then the original blob; failures keep actual residue. */
+async function eraseSellerDocumentCleanup(
+  tx: Prisma.TransactionClient,
+  input: DeletionWorkflowInput,
+  located: LocatedSellerDocumentCleanupTargets,
+  storage: Pick<SellerDocumentsStorage, 'delete'>,
+): Promise<SellerDocumentErasureCounts> {
+  if (input.subjectId !== located.subjectId || input.deletionRequestId.length === 0)
+    throw ApplicationFailure.create({ type: 'SELLER_DOCUMENT_CLEANUP_SCOPE_INVALID', message: 'cleanup input does not match located targets', nonRetryable: true });
+  const moved = await tx.deletionRequest.updateMany({
+    where: { id: input.deletionRequestId, status: 'FROZEN' },
+    data: { status: 'ERASING' },
+  });
+  const request = await tx.deletionRequest.findUnique({
+    where: { id: input.deletionRequestId },
+    select: { status: true, stats: true },
+  });
+  if (!request) throw new Error(`deletion_request ${input.deletionRequestId} not found`);
+  if (request.status === 'COMPLETED') {
+    const persisted = parsedErasureCounts(cleanupStats(request.stats).sellerDocumentCounts);
+    if (persisted) return persisted;
+  }
+  if (moved.count === 0 && request.status !== 'ERASING' && request.status !== 'FAILED') {
+    throw new Error(`seller document cleanup cannot erase from status ${request.status}`);
+  }
+  const stats = cleanupStats(request.stats);
+  const persisted = parsedErasureCounts(stats.sellerDocumentCounts);
+  let counts = persisted;
+  if (counts === null) {
+    const rows = await tx.$queryRaw<Array<{ counts: unknown }>>(Prisma.sql`
+      SELECT erase_seller_document_cleanup_targets_v1(${input.workspaceId}::uuid, ${input.deletionRequestId}::uuid) AS counts
+    `);
+    const erased = parsedErasureCounts(rows[0]?.counts);
+    if (!erased) throw new Error('seller document cleanup returned no erasure counts');
+    counts = { ...erased, blobDeleted: false, blobFailures: 0 };
+  }
+  let blobDeleted = counts.blobDeleted;
+  let blobFailures = counts.blobFailures;
+  if (!blobDeleted) {
+    const document = await tx.sellerDocument.findFirst({
+      where: { id: located.documentId, workspaceId: input.workspaceId, companyId: located.companyId },
+      select: { objectKey: true },
+    });
+    if (!document) {
+      blobFailures = 1;
+    } else {
+      try {
+        await storage.delete(document.objectKey);
+        blobDeleted = true;
+        blobFailures = 0;
+      } catch {
+        blobFailures = 1;
+      }
+    }
+  }
+  const next: SellerDocumentErasureCounts = { ...counts, blobDeleted, blobFailures };
+  await tx.deletionRequest.updateMany({
+    where: { id: input.deletionRequestId, status: { in: ['ERASING', 'FAILED'] } },
+    data: { stats: { ...stats, sellerDocumentCounts: next } as unknown as Prisma.InputJsonValue },
+  });
+  return next;
+}
+
+/** Complete only after all targets and the blob are confirmed; otherwise leave ERASING/FAILED with real residue. */
+async function completeSellerDocumentCleanup(
+  tx: Prisma.TransactionClient,
+  input: DeletionWorkflowInput,
+  located: LocatedSellerDocumentCleanupTargets,
+): Promise<SellerDocumentErasureCounts> {
+  const completedAt = new Date();
+  const request = await tx.deletionRequest.findUnique({
+    where: { id: input.deletionRequestId },
+    select: { status: true, stats: true },
+  });
+  if (!request) throw new Error(`deletion_request ${input.deletionRequestId} not found`);
+  const stats = cleanupStats(request.stats);
+  const counts = parsedErasureCounts(stats.sellerDocumentCounts);
+  if (!counts) throw new Error('completeDeletion: erase not performed — refuse to fabricate receipt');
+  if (!counts.blobDeleted || counts.blobFailures > 0)
+    throw new Error('completeDeletion: seller document cleanup has blob residue');
+  if (request.status === 'COMPLETED') return counts;
+  const existing = await tx.deletionReceipt.findUnique({ where: { deletionRequestId: input.deletionRequestId } });
+  if (!existing) {
+    const detail: SellerDocumentCleanupReceiptDetail = {
+      policyVersion: located.policyVersion,
+      documentId: located.documentId,
+      chunksErased: counts.chunksErased,
+      claimsErased: counts.claimsErased,
+      evidenceErased: counts.evidenceErased,
+      referencesErased: counts.referencesErased,
+      knowledgeSourcesErased: counts.knowledgeSourcesErased,
+      blobDeleted: counts.blobDeleted,
+      blobFailures: counts.blobFailures,
+    };
+    await tx.deletionReceipt.create({
+      data: {
+        workspaceId: input.workspaceId,
+        deletionRequestId: input.deletionRequestId,
+        subjectType: SELLER_DOCUMENT_CLEANUP_SUBJECT_TYPE,
+        subjectId: located.documentId,
+        ruleVersion: SELLER_DOCUMENT_CLEANUP_POLICY_VERSION,
+        sellerDocumentDetail: detail as unknown as Prisma.InputJsonValue,
+      },
+    });
+    const payload = buildSellerDocumentCleanupCompletedPayload({
+      deletionRequestId: input.deletionRequestId,
+      documentId: located.documentId,
+      policyVersion: located.policyVersion,
+      counts,
+      completedAt: completedAt.toISOString(),
+    });
+    await tx.outboxEvent.create({
+      data: {
+        workspaceId: input.workspaceId,
+        eventType: 'SellerDocumentCleanupCompleted',
+        aggregateType: 'DeletionRequest',
+        aggregateId: input.deletionRequestId,
+        privacyClassification: 'CONFIDENTIAL',
+        payload: payload as unknown as Prisma.InputJsonValue,
+      },
+    });
+  }
+  await tx.deletionRequest.updateMany({
+    where: { id: input.deletionRequestId, status: { in: ['ERASING', 'FAILED'] } },
+    data: { status: 'COMPLETED', completedAt },
+  });
+  await tx.sellerDocument.updateMany({
+    where: { id: located.documentId, workspaceId: input.workspaceId, companyId: located.companyId },
+    data: { cleanupCompletedAt: completedAt },
+  });
+  return counts;
 }
 
 export type DeletionActivities = ReturnType<typeof createDeletionActivities>;
@@ -483,7 +720,7 @@ async function affectedActiveIcpIds(tx: Prisma.TransactionClient, companyId: str
  */
 async function locateInTransaction(
   tx: Prisma.TransactionClient,
-  input: DeletionWorkflowInput,
+  input: DeletionWorkflowInput & { subjectType: 'contact' | 'company' },
 ): Promise<{
   located: LocatedErasureTargets;
   suppressionEntries: SuppressionEntry[];

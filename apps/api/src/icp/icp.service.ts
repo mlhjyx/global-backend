@@ -12,6 +12,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
 import { RequestContext } from '../auth/request-context';
 import { getTask } from '../ai-tasks/task-registry';
+import {
+  documentClaimDependenciesStillCurrent,
+  effectiveApprovedClaimsInTransaction,
+  type DocumentClaimDependency,
+} from '../claim/document-claim-basis';
 import { mirrorExclusionRuleIndexes, qualify, RuleLike } from './rule-engine';
 import { TaxonomyResolver } from '../discovery/taxonomy-resolver';
 import {
@@ -150,6 +155,7 @@ export class IcpService {
         ...(attemptId === undefined ? {} : { body: { attemptId } }),
       }),
     });
+    let documentDependencies: readonly DocumentClaimDependency[] = [];
     const { company, claims, offerings, offeringBasis } = await this.prisma.withWorkspace(
       ctx.workspaceId,
       async (tx) => {
@@ -157,7 +163,9 @@ export class IcpService {
         if (!company) {
           throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'company not found' } });
         }
-        const claims = await tx.claim.findMany({ where: { companyId, status: 'APPROVED' } });
+        const effectiveClaims = await effectiveApprovedClaimsInTransaction(tx, ctx, companyId, {}, 'icp');
+        const claims = effectiveClaims.claims;
+        documentDependencies = [...effectiveClaims.dependencies.values()];
         // Fetch enough rows to see selection markers beyond the legacy top-30 window.
         const allOfferings = await tx.offering.findMany({
           where: { companyId },
@@ -228,11 +236,24 @@ export class IcpService {
     });
 
     addConfirmedBuyerScenarioDrafts(companyAttributesForIcp, offeringBasis, offerings, confirmedMarkets);
+    if (documentDependencies.length > 0) {
+      Object.assign(companyAttributesForIcp as unknown as Record<string, unknown>, {
+        documentClaimDependencies: documentDependencies,
+      });
+    }
 
     const icpId = result.durableReceipt
       ? domainAggregateIdForReceipt(result.durableReceipt, 'icp.design')
       : undefined;
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      if (
+        documentDependencies.length > 0 &&
+        !(await documentClaimDependenciesStillCurrent(tx, { workspaceId: ctx.workspaceId, companyId }, documentDependencies))
+      ) {
+        throw new ConflictException({
+          error: { code: 'ICP_DOCUMENT_SOURCE_STALE', message: 'document claim source changed before ICP apply' },
+        });
+      }
       const applied = await applyDomainAckConsumerTransaction({
         transaction: tx,
         producerId: 'icp.design',

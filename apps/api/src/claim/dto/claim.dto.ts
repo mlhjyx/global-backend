@@ -13,17 +13,23 @@ export class ClaimEvidenceDto {
   confidence!: number | null;
 }
 
+export interface ClaimDocumentSourceState {
+  status: 'CURRENT' | 'UNAVAILABLE';
+  documentId: string | null;
+  parseRevision: number | null;
+}
 interface ClaimRow {
   id: string;
   companyId: string;
   type: string;
   factKey: string | null;
-  statement: string;
+  statement: string | null;
   status: string;
   confidence: number | null;
   version: number;
   createdAt: Date;
   evidence?: { sourceUrl: string | null; snippet: string | null; confidence: number | null }[];
+  documentSource?: ClaimDocumentSourceState | null;
 }
 
 export class ClaimDto {
@@ -44,8 +50,13 @@ export class ClaimDto {
   })
   factKey!: string | null;
 
-  @ApiProperty({ example: '产品通过 ISO 9001 与 CE 认证' })
-  statement!: string;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: '事实陈述；文档来源当前不可用（失效、变版或删除）时为 null，不透出可能等于原句的历史文本',
+    example: '产品通过 ISO 9001 与 CE 认证',
+  })
+  statement!: string | null;
 
   @ApiProperty({ enum: CLAIM_STATUSES })
   status!: string;
@@ -61,6 +72,13 @@ export class ClaimDto {
 
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;
+
+  @ApiPropertyOptional({
+    type: Object,
+    nullable: true,
+    description: '文档来源当前可用性；非文档 Claim 为 null。UNAVAILABLE 时不返回历史原句。',
+  })
+  documentSource!: ClaimDocumentSourceState | null;
 
   static from(c: ClaimRow): ClaimDto {
     return {
@@ -78,6 +96,7 @@ export class ClaimDto {
         confidence: e.confidence,
       })),
       createdAt: c.createdAt.toISOString(),
+      documentSource: c.documentSource ?? null,
     };
   }
 }

@@ -952,6 +952,8 @@ model CompanyProfile {
   marketCandidateGenerations MarketCandidateGeneration[]
   marketCandidateGenerationHeads MarketCandidateGenerationHead[]
 
+  claimDocumentEvidence ClaimDocumentEvidence[]
+
   @@unique([id, workspaceId], map: "company_profile_id_workspace_id_key")
   @@index([workspaceId])
   @@map("company_profile")
@@ -980,6 +982,7 @@ model SellerDocument {
   retryAt             DateTime? @map("retry_at") @db.Timestamptz(3)
   processingErrorCode String?   @map("processing_error_code") @db.VarChar(120)
   parsedMeta          Json?     @map("parsed_meta")
+  parseRevision       Int?      @map("parse_revision")
   chunkCount          Int       @default(0) @map("chunk_count")
   factsExtractedAt    DateTime? @map("facts_extracted_at") @db.Timestamptz(3)
   deletedAt           DateTime? @map("deleted_at") @db.Timestamptz(3)
@@ -1087,6 +1090,7 @@ model Claim {
   evidence                      Evidence[]
   claimBridges                  BrandProfileClaimBridge[]
   publishableClaimSnapshotItems SitePublishableClaimSnapshotItem[]
+  documentClaimEvidence         ClaimDocumentEvidence[]
 
   @@unique([companyId, originKey], map: "claim_company_origin_key")
   @@unique([id, workspaceId, companyId], map: "claim_id_workspace_company_key")
@@ -1116,12 +1120,50 @@ model Evidence {
   claim                         Claim                              @relation(fields: [claimId], references: [id], onDelete: Cascade)
   claimBridges                  BrandProfileClaimBridge[]
   publishableClaimSnapshotItems SitePublishableClaimSnapshotItem[]
+  documentClaimEvidence         ClaimDocumentEvidence?
 
   @@unique([claimId, originKey], map: "evidence_claim_origin_key")
   @@unique([id, workspaceId, claimId], map: "evidence_id_workspace_claim_key")
   @@index([workspaceId])
   @@index([claimId])
   @@map("evidence")
+}
+
+/// 卖方文档 typed 证据引用（S1a）：原句在 Evidence，原文件/chunks 在 SellerDocument；
+/// 本表只保存精确引用与绑定摘要，不复制全文。app_user 仅 SELECT/INSERT。
+model ClaimDocumentEvidence {
+  id                   String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workspaceId          String    @map("workspace_id") @db.Uuid
+  companyId            String    @map("company_id") @db.Uuid
+  claimId              String    @map("claim_id") @db.Uuid
+  evidenceId           String    @map("evidence_id") @db.Uuid
+  documentId           String?   @map("document_id") @db.Uuid
+  sourceDocumentId     String    @map("source_document_id") @db.Uuid
+  documentContentSha256 String   @map("document_content_sha256") @db.Char(64)
+  parseRevision        Int       @map("parse_revision")
+  chunkSeq             Int       @map("chunk_seq")
+  chunkTextSha256      String    @map("chunk_text_sha256") @db.Char(64)
+  quoteStartByte       Int       @map("quote_start_byte")
+  quoteEndByte         Int       @map("quote_end_byte")
+  referenceVersion     Int       @default(1) @map("reference_version")
+  claimStatementDigest String    @map("claim_statement_digest") @db.Char(64)
+  claimType            String    @map("claim_type") @db.VarChar(64)
+  bindingSha256        String    @map("binding_sha256") @db.Char(64)
+  requesterId          String    @map("requester_id") @db.Uuid
+  requestDigest        String    @map("request_digest") @db.Char(64)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  company  CompanyProfile @relation(fields: [companyId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  claim    Claim          @relation(fields: [claimId, workspaceId, companyId], references: [id, workspaceId, companyId], onDelete: Cascade)
+  evidence Evidence       @relation(fields: [evidenceId, workspaceId, claimId], references: [id, workspaceId, claimId], onDelete: Cascade)
+
+  @@unique([claimId], map: "claim_document_evidence_claim_key")
+  @@unique([evidenceId], map: "claim_document_evidence_evidence_key")
+  @@unique([id, workspaceId], map: "claim_document_evidence_id_workspace_id_key")
+  @@unique([claimId, workspaceId, companyId], map: "claim_document_evidence_claim_scope_key")
+  @@unique([evidenceId, workspaceId, claimId], map: "claim_document_evidence_evidence_scope_key")
+  @@index([workspaceId, companyId, documentId], map: "claim_document_evidence_document_idx")
+  @@map("claim_document_evidence")
 }
 
 /// 知识冲突（KNW-004）：不同来源对同一事实不一致时不得静默覆盖 ——
@@ -2933,6 +2975,7 @@ model DeletionReceipt {
   companiesSuppressed   Int      @default(0) @map("companies_suppressed")
   leadsRescoreRequested Int      @default(0) @map("leads_rescore_requested")
   patentCacheErased     Int      @default(0) @map("patent_cache_erased") // 平台专利发明人缓存按盲键命中删的行数（Art.17 扫描面审计，scale-safe #89）
+  sellerDocumentDetail  Json?    @map("seller_document_detail") // 内部 seller_document 清理分项事实；旧主体恒 NULL
   ruleVersion           String   @map("rule_version")
   createdAt             DateTime @default(now()) @map("created_at")
 

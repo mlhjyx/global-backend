@@ -6933,6 +6933,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimTransitionDto"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "",
@@ -6981,6 +6991,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimTransitionDto"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "",
@@ -7102,6 +7122,16 @@
             }
           }
         ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimTransitionDto"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "",
@@ -24501,6 +24531,209 @@
         "description": "重试解析：仅 failed_terminal 或 queued 状态可调用，重置错误码后重新入队（202）。需要 acquisition:write。"
       }
     },
+    "/api/v1/companies/{companyId}/seller-documents/{documentId}/chunks/{seq}": {
+      "get": {
+        "operationId": "SellerDocumentClaimsController_readChunk_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "documentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "seq",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/DocumentChunkViewDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "读取当前发布版本的单个分块（有界本地 DB，不调用 search/embedding）",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:read"
+        ],
+        "description": "读取 ready 文档当前发布解析版本的单块文本（seq 从 0 起），返回 documentContentHash、parseRevision、chunkTextHash 与上下文元数据；只查本地数据库，不调用 search/embedding、不落写。文档未 ready 返回 409（DOCUMENT_CLAIM_SOURCE_UNAVAILABLE），分块不存在 404，seq 非法 400；需要 acquisition:read。"
+      }
+    },
+    "/api/v1/companies/{companyId}/seller-documents/{documentId}/claim-previews": {
+      "post": {
+        "operationId": "SellerDocumentClaimsController_preview_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "documentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewDocumentClaimDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/DocumentClaimPreviewDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "校验 typed 引用并返回服务端重建的原句、bindingHash 与 requestDigest（纯检查，不写 Claim）",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ],
+        "description": "typed 引用预览（纯检查）：服务端重读文档与分块，逐项校验 documentContentHash、parseRevision、chunkSeq、chunkTextHash 与 UTF-8 字节区间原句一致后，返回重建原句、bindingHash 与 requestDigest；不写 Claim、不耗 Grant、不调模型。引用或文档失效返回 409，参数非法 400；需要 acquisition:write。"
+      }
+    },
+    "/api/v1/companies/{companyId}/seller-documents/{documentId}/claim-drafts": {
+      "post": {
+        "operationId": "SellerDocumentClaimsController_createDraft_v1",
+        "parameters": [
+          {
+            "name": "companyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "documentId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDocumentClaimDraftDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/DocumentClaimDraftDto"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "事务重读引用并写入 NEEDS_REVIEW 草稿；同 key 同体返原件，异体 409",
+        "tags": [
+          "Seller Documents"
+        ],
+        "x-required-scopes": [
+          "acquisition:write"
+        ],
+        "description": "在同一事务内重读引用并写入 NEEDS_REVIEW 草稿（Claim + Evidence + typed 文档引用），首次写入必为 NEEDS_REVIEW；同来源同陈述跨请求者重放返回原件（replayed=true，201），requestDigest 或引用异体返回 409（DOCUMENT_CLAIM_REQUEST_MISMATCH / DOCUMENT_CLAIM_CONFLICT）；需要 acquisition:write。"
+      }
+    },
     "/api/v1/companies/{companyId}/market-candidate-sets/latest": {
       "get": {
         "description": "仅从引擎持久层读取；NOT_ANALYZED 只表示本能力没有可读文档，不表示市场无机会、生成已完成或失败。不会自动创建候选或调用模型、搜索、执行。",
@@ -28515,6 +28748,8 @@
           },
           "statement": {
             "type": "string",
+            "nullable": true,
+            "description": "事实陈述；文档来源当前不可用（失效、变版或删除）时为 null，不透出可能等于原句的历史文本",
             "example": "产品通过 ISO 9001 与 CE 认证"
           },
           "status": {
@@ -28547,6 +28782,11 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "documentSource": {
+            "type": "object",
+            "nullable": true,
+            "description": "文档来源当前可用性；非文档 Claim 为 null。UNAVAILABLE 时不返回历史原句。"
           }
         },
         "required": [
@@ -28561,6 +28801,16 @@
           "evidence",
           "createdAt"
         ]
+      },
+      "ClaimTransitionDto": {
+        "type": "object",
+        "properties": {
+          "expectedVersion": {
+            "type": "number",
+            "description": "乐观锁版本；文档来源 Claim 必填（v4 proof 绑定该版本）",
+            "minimum": 1
+          }
+        }
       },
       "CreateManualClaimDto": {
         "type": "object",
@@ -30740,6 +30990,267 @@
           "status",
           "chunkCount",
           "createdAt"
+        ]
+      },
+      "DocumentChunkViewDto": {
+        "type": "object",
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "documentContentHash": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "parseRevision": {
+            "type": "number",
+            "minimum": 1
+          },
+          "chunkSeq": {
+            "type": "number",
+            "minimum": 0
+          },
+          "chunkTextHash": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "text": {
+            "type": "string"
+          },
+          "context": {
+            "type": "object",
+            "nullable": true,
+            "description": "页/章节等结构上下文；未知为 null"
+          }
+        },
+        "required": [
+          "documentId",
+          "documentContentHash",
+          "parseRevision",
+          "chunkSeq",
+          "chunkTextHash",
+          "text"
+        ]
+      },
+      "DocumentClaimPreviewDto": {
+        "type": "object",
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "documentContentHash": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "parseRevision": {
+            "type": "number",
+            "minimum": 1
+          },
+          "chunkSeq": {
+            "type": "number",
+            "minimum": 0
+          },
+          "quote": {
+            "type": "string"
+          },
+          "quoteStartByte": {
+            "type": "number",
+            "minimum": 0
+          },
+          "quoteEndByte": {
+            "type": "number",
+            "minimum": 0
+          },
+          "quoteDigest": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "statementDigest": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "bindingHash": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "requestDigest": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "context": {
+            "type": "object",
+            "nullable": true,
+            "description": "页/章节等解释上下文；未知为 null"
+          }
+        },
+        "required": [
+          "documentId",
+          "documentContentHash",
+          "parseRevision",
+          "chunkSeq",
+          "quote",
+          "quoteStartByte",
+          "quoteEndByte",
+          "quoteDigest",
+          "statementDigest",
+          "bindingHash",
+          "requestDigest",
+          "context"
+        ]
+      },
+      "DocumentClaimSourceRefDto": {
+        "type": "object",
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "当前可读 ready 文档 id（不得跨公司）"
+          },
+          "documentContentHash": {
+            "type": "string",
+            "description": "服务端读取端口返回的文档内容 sha256",
+            "maxLength": 64
+          },
+          "parseRevision": {
+            "type": "number",
+            "description": "发布的解析修订（读取端口返回）",
+            "minimum": 1
+          },
+          "chunkSeq": {
+            "type": "number",
+            "description": "分块序号",
+            "minimum": 0
+          },
+          "chunkTextHash": {
+            "type": "string",
+            "description": "分块文本 sha256（读取端口返回）",
+            "maxLength": 64
+          },
+          "quoteStartByte": {
+            "type": "number",
+            "description": "选区起始字节（UTF-8，服务端核验）",
+            "minimum": 0
+          },
+          "quoteEndByte": {
+            "type": "number",
+            "description": "选区结束字节（UTF-8，不截断多字节）",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "documentId",
+          "documentContentHash",
+          "parseRevision",
+          "chunkSeq",
+          "chunkTextHash",
+          "quoteStartByte",
+          "quoteEndByte"
+        ]
+      },
+      "PreviewDocumentClaimDto": {
+        "type": "object",
+        "properties": {
+          "reference": {
+            "$ref": "#/components/schemas/DocumentClaimSourceRefDto"
+          },
+          "type": {
+            "type": "string",
+            "description": "Claim 类型（1–50，字母数字 ._: -）",
+            "maxLength": 50
+          },
+          "statement": {
+            "type": "string",
+            "description": "人审陈述（≤4000 字符）",
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "reference",
+          "type",
+          "statement"
+        ]
+      },
+      "DocumentClaimDraftDto": {
+        "type": "object",
+        "properties": {
+          "claimId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "evidenceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "referenceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "bindingHash": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "NEEDS_REVIEW",
+              "APPROVED",
+              "REJECTED",
+              "REVOKED"
+            ]
+          },
+          "claimVersion": {
+            "type": "number",
+            "minimum": 1
+          },
+          "replayed": {
+            "type": "boolean",
+            "description": "同来源/陈述重放返回原件；不重置审批记录"
+          },
+          "available": {
+            "type": "boolean",
+            "description": "当前文档/引用是否仍可读且与绑定一致"
+          }
+        },
+        "required": [
+          "claimId",
+          "evidenceId",
+          "referenceId",
+          "bindingHash",
+          "status",
+          "claimVersion",
+          "replayed",
+          "available"
+        ]
+      },
+      "CreateDocumentClaimDraftDto": {
+        "type": "object",
+        "properties": {
+          "reference": {
+            "$ref": "#/components/schemas/DocumentClaimSourceRefDto"
+          },
+          "type": {
+            "type": "string",
+            "description": "Claim 类型（1–50，字母数字 ._: -）",
+            "maxLength": 50
+          },
+          "statement": {
+            "type": "string",
+            "description": "人审陈述（≤4000 字符）",
+            "maxLength": 4000
+          },
+          "requestDigest": {
+            "type": "string",
+            "description": "preview 返回的规范请求摘要；写入口独立重算",
+            "maxLength": 64
+          }
+        },
+        "required": [
+          "reference",
+          "type",
+          "statement",
+          "requestDigest"
         ]
       },
       "MarketCandidateCompanyBasisDto": {

@@ -30,34 +30,38 @@ function fixture(overrides: {
   let updateCalls = 0;
   const tx = {
     companyProfile: { findUnique: vi.fn(async () => ({ id: COMPANY_ID })) },
+    claimDocumentEvidence: { findMany: vi.fn(async () => []) },
+    sellerDocumentChunk: { findMany: vi.fn(async () => []) },
+    claim: { findMany: vi.fn(async () => []) },
+    deletionRequest: {
+      findFirst: vi.fn(async () => null),
+      create: vi.fn(async () => ({ id: '90000000-0000-4000-8000-000000000009' })),
+    },
+    outboxEvent: { create: vi.fn(async () => ({ eventId: '91000000-0000-4000-8000-000000000009' })) },
+    $queryRaw: vi.fn(async (argument: unknown) => {
+      const sql = typeof (argument as { sql?: unknown })?.sql === 'string'
+        ? (argument as { sql: string }).sql
+        : Array.isArray(argument) ? (argument as unknown[]).join('?') : '';
+      if (sql.includes('FROM "seller_document"') && !sql.includes('JOIN'))
+        return [{ id: DOC_ID }];
+      return overrides.searchRows ??
+        overrides.claimRows ?? [
+          { object_key: sellerDocumentStagingKey(CTX.workspaceId, DOC_ID), mime: 'application/pdf', size_bytes: 1024n },
+        ];
+    }),
     sellerDocument: {
       count: vi.fn(async () => overrides.count ?? 0),
       aggregate: vi.fn(async () => ({ _sum: { sizeBytes: overrides.sumBytes ?? 0n } })),
-      create: vi.fn(async ({ data }: { data: unknown }) => {
-        created.push(data);
-        return data;
-      }),
-      findFirst: vi.fn(async () => ({
-        id: DOC_ID,
-        companyId: COMPANY_ID,
-        status: 'ready',
-        objectKey: 'k',
-        deletedAt: null,
-      })),
+      create: vi.fn(async ({ data }: { data: unknown }) => { created.push(data); return data; }),
+      findFirst: vi.fn(async () => ({ id: DOC_ID, companyId: COMPANY_ID, status: 'ready', objectKey: 'k', deletedAt: null })),
       update: vi.fn(async ({ data }: { data: unknown }) => {
         updateCalls += 1;
-        // 仅第一次 update 抛：覆盖「成功转存后撞唯一索引」的场景，后续 markTerminal 需成功。
         if (overrides.updateError && updateCalls === 1) throw overrides.updateError;
         updates.push(data);
         return { id: DOC_ID, companyId: COMPANY_ID, status: 'queued', sizeBytes: 1n, createdAt: new Date() };
       }),
+      updateMany: vi.fn(async () => ({ count: 1 })),
     },
-    $queryRaw: vi.fn(async () =>
-      overrides.searchRows ??
-      overrides.claimRows ?? [
-        { object_key: sellerDocumentStagingKey(CTX.workspaceId, DOC_ID), mime: 'application/pdf', size_bytes: 1024n },
-      ],
-    ),
   };
   const prisma = {
     withWorkspace: vi.fn(async (_ws: string, fn: (t: typeof tx) => unknown) => fn(tx)),

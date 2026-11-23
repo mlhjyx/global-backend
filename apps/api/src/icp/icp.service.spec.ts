@@ -67,6 +67,10 @@ function fixture() {
         .fn()
         .mockResolvedValue([{ type: "product", statement: "Produces pumps" }]),
     },
+    claimDocumentEvidence: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     offering: { findMany: vi.fn().mockResolvedValue([]) },
     icpDefinition: {
       findUnique: vi.fn().mockResolvedValue(icp),

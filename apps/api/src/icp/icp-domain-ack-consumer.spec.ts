@@ -30,6 +30,7 @@ describe('IcpService receipt-aware domain consumer', () => {
             : null),
       },
       claim: { findMany: vi.fn(async () => [{ type: 'product', statement: 'Makes pumps' }]) },
+      claimDocumentEvidence: { findUnique: vi.fn(async () => null), findMany: vi.fn(async () => []) },
       offering: { findMany: vi.fn(async () => []) },
       icpDefinition: {
         create: icpCreate,

@@ -35,8 +35,14 @@ function makeService(
   };
   const updates: Record<string, unknown>[] = [];
   const events: Record<string, unknown>[] = [];
+  const sqlText = (arg: unknown) =>
+    typeof (arg as { sql?: unknown })?.sql === "string"
+      ? (arg as { sql: string }).sql
+      : Array.isArray(arg)
+        ? (arg as unknown[]).join("?")
+        : "";
   const queryRaw = vi.fn(async (strings: TemplateStringsArray) => {
-    const sql = strings.join("?");
+    const sql = sqlText(strings);
     if (sql.includes('FROM "claim"')) return [{ ...claim }];
     if (sql.includes('FROM "brand_profile_claim_bridge"')) {
       if (sql.includes("FOR SHARE OF bridge")) {
@@ -51,6 +57,7 @@ function makeService(
   const tx = {
     $queryRaw: queryRaw,
     claim: {
+      findFirst: async () => ({ id: claim.id, companyId: claim.companyId }),
       findUnique: async () => ({ ...claim }),
       findUniqueOrThrow: async () => ({ ...claim }),
       updateMany: async ({ data }: { data: Record<string, unknown> }) => {

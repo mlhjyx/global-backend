@@ -1,6 +1,7 @@
 import { proxyActivities } from '@temporalio/workflow';
 import type { DeletionActivities } from './deletion.activities';
-import type { DeletionWorkflowInput, ErasureCounts } from '../compliance/deletion.types';
+import type { DeletionWorkflowInput, ErasureCounts, LocatedDeletionTargets } from '../compliance/deletion.types';
+import type { SellerDocumentErasureCounts } from '../seller-knowledge/seller-document-cleanup.types';
 
 const acts = proxyActivities<DeletionActivities>({
   startToCloseTimeout: '5 minutes',
@@ -12,9 +13,11 @@ const acts = proxyActivities<DeletionActivities>({
  * 任一步异常 → failDeletion 标 FAILED 后重抛（失败可观测；Temporal 记录 + 可人工重启）。
  * 🔴 located 只含 uuid + 计数，进 workflow 历史无 PII。sandbox：本文件只 import @temporalio/workflow + 类型。
  */
-export async function deletionWorkflow(input: DeletionWorkflowInput): Promise<ErasureCounts> {
+export async function deletionWorkflow(
+  input: DeletionWorkflowInput,
+): Promise<ErasureCounts | SellerDocumentErasureCounts> {
   try {
-    const located = await acts.freezeSubject(input);
+    const located: LocatedDeletionTargets = await acts.freezeSubject(input);
     await acts.eraseSubject({ input, located });
     return await acts.completeDeletion({ input, located });
   } catch (err) {
