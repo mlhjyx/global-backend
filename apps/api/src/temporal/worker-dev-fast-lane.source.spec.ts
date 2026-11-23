@@ -188,7 +188,22 @@ describe("development fast-lane worker", () => {
       ),
       "utf8",
     );
-    expect(call(lane, "buildToolBroker(")).toContain("paidLedger: costLedger");
+    const laneBrokerCall = call(lane, "buildToolBroker(");
+    const expectedLaneBrokerCall =
+      "buildToolBroker({ sourcePolicyReader, paidLedger: costLedger, budgetStore, prisma, })";
+    expect(laneBrokerCall).toBe(expectedLaneBrokerCall);
+    for (const [label, mutated] of [
+      ["sourcePolicyReader removed", laneBrokerCall.replace("sourcePolicyReader, ", "")],
+      ["sourcePolicyReader substituted", laneBrokerCall.replace("sourcePolicyReader", "otherReader")],
+      ["budgetStore removed", laneBrokerCall.replace("budgetStore, ", "")],
+      ["budgetStore substituted", laneBrokerCall.replace("budgetStore", "otherBudgetStore")],
+      ["prisma removed", laneBrokerCall.replace("prisma, ", "")],
+      ["prisma substituted", laneBrokerCall.replace("prisma", "otherPrisma")],
+      ["paidLedger removed", laneBrokerCall.replace("paidLedger: costLedger, ", "")],
+      ["paidLedger substituted", laneBrokerCall.replace("paidLedger: costLedger", "paidLedger: otherLedger")],
+    ] as const) {
+      expect(mutated, label).not.toBe(expectedLaneBrokerCall);
+    }
     expect(worker).toContain(
       "createWorkerContactEnrichmentSafety({ prisma, budgetStore, costLedger, sourcePolicyReader })",
     );
