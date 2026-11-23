@@ -21,7 +21,7 @@ function domainWorld(options: { miss?: boolean; singleVote?: boolean; wrongInput
     const step = base(n, provider, 'VERIFY', quote); Object.assign(step, { candidateRef: { operationId: finder.budgetOperationId, resultDigest: 'b'.repeat(64), artifactRef: { schemaVersion: 'generic-operation-artifact-ref/v1', operationId: finder.budgetOperationId, artifactId: id(30), resultSchema: 'contact-email-find-hunter/v1', sha256: 'b'.repeat(64), sizeBytes: '128', mediaType: 'application/octet-stream', expiresAt: '2099-01-01T00:00:00.000Z' } } }); materialized.push({ phase: 'VERIFY', step, reference: reference(step), result: { data: { providerKey: provider, state: 'VALID', catchAll: 'not_catch_all', catchAllClass: 'not_catch_all', score: 90, acceptAll: false, disposable: false, role: false, reason: 'provider_verdict', costBasis: 'estimated_upper_bound' }, costCents: Number(quote) / 10000, costMicrousd: quote } });
   }
   const inputVersion = enrichmentInputVersion(input);
-  const state: LockedEnrichmentContactCommitState = { ...address, authorityId: id(5), accountId: id(6), generation: 1, businessRunId: null, target: { contactId: address.contactId, contactOrdinal: 0, inputVersion, beforeDigest: contactTargetBeforeDigest({ inputVersion, points: [] }), pointRefs: [] }, currentInput: options.wrongInput ? { ...input, fullName: 'Changed Person' } : input, currentPoints: options.existingPoint ? [{ id: id(31), type: 'email', value: 'already@company.example.invalid', status: 'VALID', verificationState: 'VALID', validSince: NOW.toISOString(), verifiedAt: NOW.toISOString(), nextReverifyAt: null, lastVerificationEventId: null, confidence: 95 }] : [], originalReferences: materialized.map(({ step, reference }) => ({ step, reference })), committed: null, redacted: false, lawfulBasis: { basis: 'legitimate_interest' }, pendingOperationIds: [], originalSmtpAcknowledgements: [] };
+  const state: LockedEnrichmentContactCommitState = { ...address, authorityId: id(5), accountId: id(6), generation: 1, businessRunId: null, target: { contactId: address.contactId, contactOrdinal: 0, inputVersion, beforeDigest: contactTargetBeforeDigest({ inputVersion, points: [] }), pointRefs: [] }, currentInput: options.wrongInput ? { ...input, fullName: 'Changed Person' } : input, currentPoints: options.existingPoint ? [{ id: id(31), type: 'email', value: 'already@company.example.invalid', status: 'VALID', verificationState: 'VALID', validSince: NOW.toISOString(), verifiedAt: NOW.toISOString(), nextReverifyAt: null, lastVerificationEventId: null, confidence: 95 }] : [], originalReferences: materialized.map(({ step, reference }) => ({ step, reference })), committed: null, redacted: false, lawfulBasis: { basis: 'legitimate_interest' }, pendingOperationIds: [], originalSmtpAcknowledgements: [], qualityPoints: [] };
   const tx = {
     $executeRawUnsafe: vi.fn(async () => 1),
     contactPoint: { upsert: vi.fn(async () => { events.push('POINT'); pointRows.push(id(31)); return { id: id(31), verificationState: 'UNKNOWN', validSince: null, nextReverifyAt: null }; }), update: vi.fn(async () => { events.push('POINT_STATE'); return { id: id(31) }; }) },
@@ -51,6 +51,31 @@ describe('same-transaction domain commit with original writers, fake ports only'
   it.each([{ wrongInput: true }, { existingPoint: true }, { denied: true }])('keeps changed input/current VALID/suppression pending without overwriting or ACK %#', async (options) => { const x = domainWorld(options); expect(await x.committer.commitContact(address, x.stepIds, 'synthetic-actor')).toMatchObject({ status: 'SAVE_PENDING', newCandidatePoints: 0 }); expect(x.tx.contactPoint.upsert).not.toHaveBeenCalled(); expect(x.deps.acknowledge).not.toHaveBeenCalled(); });
   it.each([{ failEvent: true }, { failSnapshot: true }])('propagates a write failure and fake-rolls back points/events/attempts/ACK/head %#', async (options) => { const x = domainWorld(options); await expect(x.committer.commitContact(address, x.stepIds, 'synthetic-actor')).rejects.toThrow(); expect(x.data()).toEqual({ saved: null, pointRows: [], eventRows: [], attemptRows: [], ackRows: [] }); expect(x.events).toContain('ROLLBACK_FAKE'); });
   it('rejects a materialized result from another original account before all domain writes', async () => { const x = domainWorld(); Object.assign(x.state, { accountId: id(99) }); await expect(x.committer.commitContact(address, x.stepIds, 'synthetic-actor')).rejects.toThrow(); expect(x.tx.contactPoint.upsert).not.toHaveBeenCalled(); expect(x.deps.acknowledge).not.toHaveBeenCalled(); });
+  it('persists the same-transaction quality facts of a stored candidate', async () => {
+    const x = domainWorld();
+    const result = await x.committer.commitContact(address, x.stepIds, 'synthetic-actor');
+    expect(result).toMatchObject({ status: 'APPLIED', newCandidatePoints: 1 });
+    expect(x.deps.store.persist).toHaveBeenCalledWith(expect.anything(), address, expect.objectContaining({ newCandidatePoints: 1 }), expect.any(Array), expect.objectContaining({
+      contactId: address.contactId, beforeStates: [], afterStates: ['VALID'], stockValidPersonal: false, eligible: true, newCandidate: true, newValidPersonal: false, unresolved: true,
+    }));
+  });
+  it('persists a miss as unresolved without inventing a point state', async () => {
+    const x = domainWorld({ miss: true });
+    await x.committer.commitContact(address, x.stepIds, 'synthetic-actor');
+    expect(x.deps.store.persist).toHaveBeenCalledWith(expect.anything(), address, expect.objectContaining({ reasonCode: 'NO_MATCH' }), expect.any(Array), expect.objectContaining({
+      beforeStates: [], afterStates: [], newCandidate: false, newValidPersonal: false, unresolved: true,
+    }));
+  });
+  it('records stock personal protection from the locked before points on a cache reuse', async () => {
+    const inputVersion = enrichmentInputVersion(input);
+    const stock = { id: id(31), type: 'email', value: 'person@company.example.invalid', status: 'VALID', verificationState: 'VALID', validSince: NOW.toISOString(), verifiedAt: NOW.toISOString(), nextReverifyAt: null, lastVerificationEventId: null, confidence: 95 };
+    const state: LockedEnrichmentContactCommitState = { ...address, authorityId: id(5), accountId: id(6), generation: 1, businessRunId: null, target: { contactId: address.contactId, contactOrdinal: 0, inputVersion, beforeDigest: contactTargetBeforeDigest({ inputVersion, points: [stock] }), pointRefs: [stock.id] }, currentInput: input, currentPoints: [stock], qualityPoints: [{ id: stock.id, type: 'email', emailType: 'personal', verificationState: 'VALID' }], originalReferences: [], committed: null, redacted: false, lawfulBasis: { basis: 'legitimate_interest' }, pendingOperationIds: [], originalSmtpAcknowledgements: [] };
+    const store = { readCommitted: vi.fn(async () => null), lockAndLoad: vi.fn(async () => state), savePending: vi.fn(async () => undefined), persist: vi.fn(async () => undefined) };
+    const committer = new EnrichmentDomainCommitter({ transactions: { withWorkspace: async (_w, fn) => fn({} as never) } as never, store, materialize: vi.fn(async () => null) as never, authorizeCurrent: vi.fn(async () => true) });
+    const decision = { status: 'APPLIED' as const, contactId: address.contactId, reasonCode: 'REUSED' as const, state: null, pointRefs: [], eventRefs: [], attemptRefs: [], newCandidatePoints: 0 };
+    await committer.commitSkipped(address, decision);
+    expect(store.persist).toHaveBeenCalledWith(expect.anything(), address, decision, [], expect.objectContaining({ beforeStates: ['VALID'], stockValidPersonal: true, eligible: false, newCandidate: false, newValidPersonal: false, unresolved: false }));
+  });
 });
 describe('new producer consumption bindings are exact; SMTP retains its original consumer', () => {
   it.each(['hunter', 'millionverifier', 'emailable', 'zerobounce'])('binds only the actual safety domain consumer for %s', (provider) => {

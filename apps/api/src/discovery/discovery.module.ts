@@ -16,12 +16,13 @@ import { ExecutionBudgetModule } from '../execution-budget/execution-budget.modu
 import { ExecutionBudgetAuthorityService } from '../execution-budget/execution-budget-authority.service';
 import { createFailClosedSafetyExecutor, createManagedContactEnrichmentSafety } from '../enrichment/safety/contact-enrichment-safety.composition';
 import { ContactEnrichmentResultsController, CONTACT_ENRICHMENT_RESULTS_PORT } from '../enrichment/safety/contact-enrichment-results.controller';
+import { ContactEnrichmentQualityFactsController } from '../enrichment/safety/contact-enrichment-quality-facts.controller';
 
 const CONTACT_ENRICHMENT_SAFETY_COMPOSITION = Symbol('CONTACT_ENRICHMENT_SAFETY_COMPOSITION');
 
 @Module({
   imports: [ExecutionBudgetModule],
-  controllers: [DiscoveryController, JudgmentReviewController, RunResultViewController, ContactEnrichmentResultsController],
+  controllers: [DiscoveryController, JudgmentReviewController, RunResultViewController, ContactEnrichmentResultsController, ContactEnrichmentQualityFactsController],
   providers: [
     {
       provide: TOOL_BUDGET_STORE,

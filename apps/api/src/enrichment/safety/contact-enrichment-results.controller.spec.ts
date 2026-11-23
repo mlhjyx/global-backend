@@ -150,6 +150,8 @@ function resultWorld(missing = false) {
     listEnrichmentExecutions: list,
     readEnrichmentExecution: read,
     recoverEnrichmentExecution: recover,
+    listEnrichmentQualityFacts: vi.fn(async () => null),
+    readEnrichmentQualityFacts: vi.fn(async () => null),
   };
   return {
     read,
