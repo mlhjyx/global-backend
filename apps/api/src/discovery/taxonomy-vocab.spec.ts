@@ -3,6 +3,8 @@ import { INDUSTRY_ROLE_KIND, INDUSTRY_ROLE_SEED, ISIC_SEED } from './isic-seed';
 import { CPV_SEED } from './cpv-seed';
 import { resolveIcpToCpv, type CpvTaxonomyPort } from './icp-to-cpv';
 import { cpvSubtreePrefix, type CanonicalNode } from './taxonomy-resolver';
+import { BROAD_WIKIDATA_INDUSTRY_QIDS, isSpecificIndustryNode } from './wikidata-industry-scope';
+import { queryableIndustryNodes } from './query-taxonomy-terms';
 
 const norm = (s: string): string => s.normalize('NFC').toLowerCase().trim();
 
@@ -205,5 +207,46 @@ describe('行业种子完备性（pipeline 数据契约）', () => {
       expect(c.en.trim().length, c.code).toBeGreaterThan(0);
       expect((c.zh ?? '').trim().length, c.code).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('召回修复：错误别名纠正与窄 Wikidata 行业编号', () => {
+  it.each([
+    ['太阳能光伏', '279'],
+    ['太阳能电池片制造', '279'],
+    ['光伏组件制造', '279'],
+    ['bipv与光伏建材', '279'],
+    ['库存与售后型泵类渠道', '4659'],
+    ['oem与自有品牌泵类渠道', '4659'],
+    ['库存型工业泵批发', '4659'],
+    ['化工流程泵分销', '4659'],
+  ])('「%s」解析到 code %s', async (term, code) => {
+    const node = await port.resolve('industry', term);
+    expect(node?.code).toBe(code);
+  });
+
+  it('共用电气节点不携带光伏身份，只有光伏词面获得枢轴', async () => {
+    const photovoltaic = await port.resolve('industry', '太阳能光伏');
+    const charging = await port.resolve('industry', 'ev charging');
+    expect(photovoltaic?.wikidataQid).toBeNull();
+    expect(charging?.wikidataQid).toBeNull();
+    expect(queryableIndustryNodes([photovoltaic!], 'enforce', ['太阳能光伏']).map((n) => n.wikidataQid)).toEqual(['Q192127']);
+    expect(queryableIndustryNodes([charging!], 'enforce', ['ev charging'])).toEqual([]);
+    expect(ISIC_SEED.find((n) => n.code === '4659')?.wikidataQid).toBe('Q220695');
+    expect(BROAD_WIKIDATA_INDUSTRY_QIDS.has('Q192127')).toBe(false);
+    expect(BROAD_WIKIDATA_INDUSTRY_QIDS.has('Q220695')).toBe(false);
+  });
+
+  it('归一输出不再把行业指向铁路站、信息技术或飓风季', async () => {
+    expect((await port.resolve('industry', '机械制造'))?.wikidataQid).toBe('Q1957908');
+    expect((await port.resolve('industry', '半导体'))?.wikidataQid).toBe('Q2986369');
+    expect((await port.resolve('industry', '钢铁'))?.wikidataQid).toBeNull();
+    expect((await port.resolve('industry', '钣金'))?.wikidataQid).toBeNull();
+  });
+
+  it('泵阀贸易仍留在 28（保留 TED CPV 冷路径），但两位 division 不作为 Wikidata 枢轴', async () => {
+    const node = await port.resolve('industry', '泵阀贸易');
+    expect(node?.code).toBe('28');
+    expect(isSpecificIndustryNode({ code: node!.code, wikidataQid: node!.wikidataQid })).toBe(false);
   });
 });

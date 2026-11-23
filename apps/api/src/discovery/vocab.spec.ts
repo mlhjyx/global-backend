@@ -25,6 +25,23 @@ describe('规范词表归一（中/英 → 结构化标识）', () => {
     expect(new Set(qids).size).toBe(qids.length); // 无重复
   });
 
+  it('光伏与工业分销映射到窄 Wikidata 编号', () => {
+    expect(mapIndustryToQids(['光伏'])).toEqual(['Q192127']);
+    expect(mapIndustryToQids(['太阳能'])).toEqual(['Q192127']);
+    expect(mapIndustryToQids(['solar photovoltaics'])).toEqual(['Q192127']);
+    expect(mapIndustryToQids(['photovoltaic'])).toEqual(['Q192127']);
+    expect(mapIndustryToQids(['工业品分销'])).toEqual(['Q220695']);
+    expect(mapIndustryToQids(['industrial distributor'])).toEqual(['Q220695']);
+    expect(mapIndustryToQids(['wholesale'])).toEqual(['Q220695']);
+  });
+
+  it('uses verified industry entities instead of the unrelated legacy entities', () => {
+    expect(mapIndustryToQids(['机械制造'])).toEqual(['Q1957908']);
+    expect(mapIndustryToQids(['半导体'])).toEqual(['Q2986369']);
+    expect(mapIndustryToQids(['钢铁'])).toEqual(['Q2285982']);
+    expect(mapIndustryToQids(['钣金', 'sheet metal', 'sheet metal fabrication'])).toEqual([]);
+  });
+
   it('国家词中英一致映射', () => {
     expect(mapCountryToQid('德国')).toBe('Q183');
     expect(mapCountryToQid('Germany')).toBe('Q183');

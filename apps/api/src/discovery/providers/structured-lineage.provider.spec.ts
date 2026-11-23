@@ -73,7 +73,8 @@ function fakeBroker(
 
 const WIKIDATA_QUERY = {
   sourceClass: 'company_registry' as const,
-  filters: { industry: 'manufacturing', country: 'germany' },
+  // 窄行业枢轴：制造业根（Q187939）会被 provider 的宽行业闸门拒绝，本用例只验证血缘/回执。
+  filters: { _industryQids: ['Q192127'], country: 'germany' },
   keywords: [],
   limit: 5,
 };
