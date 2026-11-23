@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { IsIn, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
@@ -34,7 +34,7 @@ class CreateManualClaimDto {
 }
 
 class ClaimTransitionDto {
-  @ApiProperty({
+  @ApiPropertyOptional({
     description: '乐观锁版本；文档来源 Claim 必填（v4 proof 绑定该版本）',
     minimum: 1,
   })
@@ -95,6 +95,7 @@ export class ClaimController {
   @RequireScopes('acquisition:review')
   @HttpCode(200)
   @ApiOperation({ summary: '审批通过（NEEDS_REVIEW → APPROVED），发 ClaimApproved 事件' })
+  @ApiBody({ type: ClaimTransitionDto, required: false })
   @ApiEnvelope(ClaimDto)
   async approve(
     @Ctx() ctx: RequestContext,
@@ -108,6 +109,7 @@ export class ClaimController {
   @RequireScopes('acquisition:review')
   @HttpCode(200)
   @ApiOperation({ summary: '驳回（NEEDS_REVIEW → REVOKED）' })
+  @ApiBody({ type: ClaimTransitionDto, required: false })
   @ApiEnvelope(ClaimDto)
   async reject(
     @Ctx() ctx: RequestContext,
@@ -157,6 +159,7 @@ export class ClaimController {
   @RequireScopes('acquisition:review')
   @HttpCode(200)
   @ApiOperation({ summary: '撤销已批准事实（APPROVED → REVOKED，发 ClaimRevoked —— 下游停止使用）' })
+  @ApiBody({ type: ClaimTransitionDto, required: false })
   @ApiEnvelope(ClaimDto)
   async revoke(
     @Ctx() ctx: RequestContext,

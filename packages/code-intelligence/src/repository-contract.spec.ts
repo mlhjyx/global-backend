@@ -101,6 +101,8 @@ test("current repository keeps representative business and dynamic chains comple
         "DiscoveryRunRequested",
         "PersonalArtifactCleanupRequested",
         "QualifyRequested",
+        // S1a：内部 seller_document 清理命令（不复用公开 DeletionRequested）。
+        "SellerDocumentCleanupRequested",
       ],
     ],
     [
@@ -121,6 +123,8 @@ test("current repository keeps representative business and dynamic chains comple
         "LeadsScored",
         // ch08 §3.1.12：制裁名单陈旧告警。
         "SanctionsListStale",
+        // S1a：内部文档清理完成回执（counts/ID only）。
+        "SellerDocumentCleanupCompleted",
         "SiteBuildCostSummaryUpdated",
       ],
     ],
