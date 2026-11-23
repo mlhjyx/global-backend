@@ -329,7 +329,7 @@ export class EnrichmentExecutionRepository {
       const operations = await tx.$queryRaw<
         OriginalReservedOperationRow[]
       >`SELECT operation_id,scope_key,account_id,generation,operation_key,status,amount_unit,reserved_microusd
-     FROM public.lock_enrichment_operation_v1(${input.workspaceId}::uuid, ${row.account_id}::uuid, ${row.generation}::int, ${row.operation_key})`;
+     FROM public.lock_contact_enrichment_operation_v1(${input.workspaceId}::uuid, ${row.account_id}::uuid, ${row.generation}::int, ${row.operation_key})`;
       const operation = operations[0];
       if (
         operations.length !== 1 ||
@@ -500,7 +500,7 @@ export class EnrichmentExecutionRepository {
       const authorities = await tx.$queryRaw<
         AuthorityRow[]
       >`SELECT id,scope_key,revoked_at,usable
-     FROM public.lock_enrichment_authority_v1(${input.workspaceId}::uuid, ${initial.authority_id}::uuid)`;
+     FROM public.lock_contact_enrichment_authority_v1(${input.workspaceId}::uuid, ${initial.authority_id}::uuid)`;
       const authority = authorities[0];
       if (
         authorities.length !== 1 ||
@@ -514,7 +514,7 @@ export class EnrichmentExecutionRepository {
       const accounts = await tx.$queryRaw<
         PhysicalAccountRow[]
       >`SELECT account_id,scope_key,account_key,authority_id,generation,authorized_cap_microusd,closed_at,ref_count
-     FROM public.lock_enrichment_account_v1(${input.workspaceId}::uuid, ${initial.account_id}::uuid, NULL::text)`;
+     FROM public.lock_contact_enrichment_account_v1(${input.workspaceId}::uuid, ${initial.authority_id}::uuid, ${initial.account_key})`;
       const account = accounts[0];
       if (
         accounts.length !== 1 ||
@@ -534,8 +534,9 @@ export class EnrichmentExecutionRepository {
         mismatch();
       const anchors = await tx.$queryRaw<
         { execution_id: string; step_id: string }[]
-      >`SELECT execution_id,step_id
-     FROM public.lock_enrichment_execution_step_anchor_v1(${input.workspaceId}::uuid, ${input.companyId}::uuid, ${input.stepId}::uuid)`;
+      >`SELECT e.id::text AS execution_id,s.id::text AS step_id
+     FROM public.contact_enrichment_execution e JOIN public.contact_enrichment_execution_step s ON s.workspace_id=e.workspace_id AND s.execution_id=e.id
+     WHERE e.workspace_id=${input.workspaceId}::uuid AND e.company_id=${input.companyId}::uuid AND s.id=${input.stepId}::uuid FOR UPDATE OF e,s`;
       if (
         anchors.length !== 1 ||
         anchors[0]?.execution_id !== initial.execution_id ||
@@ -562,7 +563,7 @@ export class EnrichmentExecutionRepository {
     const authorities = await tx.$queryRaw<
       AuthorityRow[]
     >`SELECT id,scope_key,revoked_at,usable
-    FROM public.lock_enrichment_authority_v1(${binding.scopeKey}::uuid, ${binding.authorityId}::uuid)`;
+    FROM public.lock_contact_enrichment_authority_v1(${binding.scopeKey}::uuid, ${binding.authorityId}::uuid)`;
     const authority = authorities[0];
     if (
       authorities.length !== 1 ||
@@ -576,7 +577,7 @@ export class EnrichmentExecutionRepository {
     const accounts = await tx.$queryRaw<
       AccountRow[]
     >`SELECT account_id,scope_key,account_key,authority_id,generation,authorized_cap_microusd
-    FROM public.lock_enrichment_account_v1(${binding.scopeKey}::uuid, NULL::uuid, ${binding.accountKey})`;
+    FROM public.lock_contact_enrichment_account_v1(${binding.scopeKey}::uuid, ${binding.authorityId}::uuid, ${binding.accountKey})`;
     const account = accounts[0];
     if (
       accounts.length !== 1 ||
@@ -612,8 +613,10 @@ export class EnrichmentExecutionRepository {
       .digest("hex");
     const existing = await tx.$queryRaw<
       EnrichmentExecutionRow[]
-    >`SELECT id,workspace_id,company_id,authority_id,account_id,generation,operation_ref,plan_sha256,status,admission_request_sha256
-    FROM public.lock_enrichment_execution_by_request_v1(${plan.workspaceId}::uuid, ${plan.companyId}::uuid, ${plan.requestSha256}, ${plan.entrypoint}, ${plan.businessRunId}::uuid, ${binding.authorityId}::uuid, ${account.account_id}::uuid, ${account.generation}::int)`;
+    >`SELECT id::text,workspace_id::text,company_id::text,authority_id::text,account_id::text,generation,operation_ref,plan_sha256,status,admission_request_sha256
+    FROM public.contact_enrichment_execution WHERE workspace_id=${plan.workspaceId}::uuid AND company_id=${plan.companyId}::uuid
+      AND authority_id=${binding.authorityId}::uuid AND account_id=${account.account_id}::uuid AND generation=${account.generation}
+      AND request_sha256=${plan.requestSha256} AND entrypoint=${plan.entrypoint} AND business_run_id IS NOT DISTINCT FROM ${plan.businessRunId}::uuid FOR UPDATE`;
     if (existing.length > 1) mismatch();
     if (existing[0]) {
       const row = existing[0];
@@ -769,8 +772,9 @@ export async function linkEnrichmentStepSettled(tx: Prisma.TransactionClient, in
   void version;
   const artifact = input.reference.durableReceipt.resultStrategy === "artifact_reference" ? input.reference.durableReceipt.artifactId : null;
   const expectedArtifact = artifact === null ? null : { artifactId: artifact, operationId: input.operationId };
-  const rows = await tx.$queryRaw<Array<{ id: string; revision: number; dispatch_phase: string; budget_operation_id: string | null; operation_key: string | null; result_digest: string | null; receipt: unknown; artifact_reference: unknown }>>`SELECT id,revision,dispatch_phase,budget_operation_id,operation_key,result_digest,receipt,artifact_reference
-    FROM public.lock_enrichment_step_v1(${input.workspaceId}::uuid, ${input.executionId}::uuid, ${input.stepId}::uuid, NULL::uuid)`;
+  const rows = await tx.$queryRaw<Array<{ id: string; revision: number; dispatch_phase: string; budget_operation_id: string | null; operation_key: string | null; result_digest: string | null; receipt: unknown; artifact_reference: unknown }>>`SELECT id::text,revision,dispatch_phase,budget_operation_id::text,operation_key,result_digest,receipt,artifact_reference
+    FROM public.contact_enrichment_execution_step
+    WHERE workspace_id=${input.workspaceId}::uuid AND execution_id=${input.executionId}::uuid AND id=${input.stepId}::uuid FOR UPDATE`;
   const row = rows[0];
   if (rows.length !== 1 || !row || row.budget_operation_id !== input.operationId || row.operation_key === null) throw new EnrichmentSafetyError("HOLD");
   if (row.dispatch_phase === "RESERVED" || row.dispatch_phase === "RESULT_UNKNOWN") {

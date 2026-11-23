@@ -81,6 +81,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment execution on Pos
   const contactB = randomUUID();
   const admitContact = randomUUID();
   const admitContact2 = randomUUID();
+  const admitContact3 = randomUUID();
   const authorityA = randomUUID();
   const authorityB = randomUUID();
   const accountA1 = randomUUID();
@@ -238,7 +239,9 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment execution on Pos
         (${admitContact}::uuid, ${workspaceA}::uuid, ${companyA}::uuid, ${`Admit ${admitContact.slice(0, 8)}`},
           ${`c:enrich-admit-${admitContact.slice(0, 8)}`}),
         (${admitContact2}::uuid, ${workspaceA}::uuid, ${companyA}::uuid, ${`Admit2 ${admitContact2.slice(0, 8)}`},
-          ${`c:enrich-admit2-${admitContact2.slice(0, 8)}`})`;
+          ${`c:enrich-admit2-${admitContact2.slice(0, 8)}`}),
+        (${admitContact3}::uuid, ${workspaceA}::uuid, ${companyA}::uuid, ${`Admit3 ${admitContact3.slice(0, 8)}`},
+          ${`c:enrich-admit3-${admitContact3.slice(0, 8)}`})`;
     for (const [authority, workspace, company] of [
       [authorityA, workspaceA, companyA],
       [authorityB, workspaceB, companyB],
@@ -707,16 +710,40 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment execution on Pos
       { table_name: 'execution_budget_authority', privilege_type: 'SELECT' },
       { table_name: 'tool_budget_account', privilege_type: 'SELECT' },
     ]);
-    const [functions] = await owner.$queryRaw<Array<{ authority: boolean; account: boolean }>>`
-      SELECT has_function_privilege('app_user', 'lock_enrichment_authority_v1(uuid,uuid)', 'EXECUTE') AS authority,
-        has_function_privilege('app_user', 'lock_enrichment_account_v1(uuid,uuid,text)', 'EXECUTE') AS account`;
-    expect(functions).toEqual({ authority: true, account: true });
-    const directLock = await attempt(workspaceA, (tx) =>
+    const [functions] = await owner.$queryRaw<Array<{ authority: boolean; account: boolean; operation: boolean; public_authority: boolean }>>`
+      SELECT has_function_privilege('app_user', 'lock_contact_enrichment_authority_v1(uuid,uuid)', 'EXECUTE') AS authority,
+        has_function_privilege('app_user', 'lock_contact_enrichment_account_v1(uuid,uuid,text)', 'EXECUTE') AS account,
+        has_function_privilege('app_user', 'lock_contact_enrichment_operation_v1(uuid,uuid,integer,text)', 'EXECUTE') AS operation,
+        has_function_privilege('public', 'lock_contact_enrichment_authority_v1(uuid,uuid)', 'EXECUTE') AS public_authority`;
+    expect(functions).toEqual({ authority: true, account: true, operation: true, public_authority: false });
+    const [budgetLocks] = await owner.$queryRaw<Array<{ e_table: boolean; e_column: boolean; s_table: boolean; s_column: boolean }>>`
+      SELECT has_table_privilege('app_user', 'public.contact_enrichment_execution', 'UPDATE') AS e_table,
+        has_any_column_privilege('app_user', 'public.contact_enrichment_execution', 'UPDATE') AS e_column,
+        has_table_privilege('app_user', 'public.contact_enrichment_execution_step', 'UPDATE') AS s_table,
+        has_any_column_privilege('app_user', 'public.contact_enrichment_execution_step', 'UPDATE') AS s_column`;
+    expect(budgetLocks).toEqual({ e_table: false, e_column: true, s_table: false, s_column: true });
+    const directAuthority = await attempt(workspaceA, (tx) =>
       tx.$queryRaw`SELECT id FROM execution_budget_authority WHERE scope_key = ${workspaceA} AND id = ${authorityA}::uuid FOR UPDATE`);
-    expect(directLock).toMatchObject({ ok: false, code: '42501' });
+    expect(directAuthority).toMatchObject({ ok: false, code: '42501' });
+    const directAccount = await attempt(workspaceA, (tx) =>
+      tx.$queryRaw`SELECT id FROM tool_budget_account WHERE scope_key = ${workspaceA} AND id = ${accountA1}::uuid FOR UPDATE`);
+    expect(directAccount).toMatchObject({ ok: false, code: '42501' });
+    const directOperation = await attempt(workspaceA, (tx) =>
+      tx.$queryRaw`SELECT id FROM tool_budget_operation WHERE scope_key = ${workspaceA} AND id = ${operationA1}::uuid FOR UPDATE`);
+    expect(directOperation).toMatchObject({ ok: false, code: '42501' });
+    const columnHead = await newHead(workspaceA, { companyId: companyA, authorityId: authorityA, accountId: accountA1 });
+    const columnStep = await newStep(workspaceA, columnHead.id, { contactId: admitContact3, slotKey: `finder-${admitContact3.slice(0, 8)}` });
+    const executionLock = await attempt(workspaceA, (tx) =>
+      tx.$queryRaw`SELECT id FROM contact_enrichment_execution WHERE id = ${columnHead.id}::uuid FOR UPDATE`);
+    expect(executionLock.ok).toBe(true);
+    const stepLock = await attempt(workspaceA, (tx) =>
+      tx.$queryRaw`SELECT id FROM contact_enrichment_execution_step WHERE id = ${columnStep}::uuid FOR UPDATE`);
+    expect(stepLock.ok).toBe(true);
     const crossScope = await attempt(workspaceB, (tx) =>
-      tx.$queryRaw`SELECT * FROM public.lock_enrichment_authority_v1(${workspaceA}::uuid, ${authorityA}::uuid)`);
+      tx.$queryRaw`SELECT * FROM public.lock_contact_enrichment_authority_v1(${workspaceA}::uuid, ${authorityA}::uuid)`);
     expect(crossScope).toMatchObject({ ok: false, code: '42501' });
+    const roleEscalation = await attempt(workspaceA, (tx) => tx.$executeRawUnsafe('SET ROLE "global"'));
+    expect(roleEscalation.ok).toBe(false);
   });
 
   it('keeps admission inside one workspace and leaves no head when the transaction fails', async () => {
