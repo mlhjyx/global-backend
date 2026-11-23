@@ -164,6 +164,98 @@ export interface ContactEnrichmentSafetyRuntime {
   readonly repository: import('./enrichment-execution.repository').EnrichmentExecutionRepository;
   readonly query: import('./enrichment-execution.repository').EnrichmentExecutionQueryRepository;
 }
+/** Scoped adapter dependencies; exported so the real list/read page behaviour is directly testable. */
+export interface ContactEnrichmentResultsAdapterDeps {
+  readonly database: import('./enrichment-execution.repository').WorkspaceEnrichmentTransactions;
+  readonly loadById: (
+    context: { workspaceId: string; companyId: string },
+    id: string,
+  ) => Promise<import('./enrichment-safety.contract').EnrichmentRuntimeExecutionRecord | null>;
+  readonly loadByRef: (
+    context: { workspaceId: string; companyId: string },
+    operationRef: string,
+  ) => Promise<import('./enrichment-safety.contract').EnrichmentRuntimeExecutionRecord | null>;
+}
+async function enrichmentResultsPage(
+  deps: ContactEnrichmentResultsAdapterDeps,
+  context: { workspaceId: string },
+  companyId: string,
+  parsed: import('./contact-enrichment-results.dto').ContactEnrichmentResultsQuery,
+  build: (
+    record: import('./enrichment-safety.contract').EnrichmentRuntimeExecutionRecord,
+  ) => unknown,
+) {
+  const scope = { workspaceId: context.workspaceId, companyId };
+  const heads = await listCompanyEnrichmentHeads(deps.database, scope, {
+    limit: parsed.limit,
+    cursor: parsed.cursor,
+    businessRunId: parsed.businessRunId,
+  });
+  // Unknown/foreign/soft-deleted company: no legitimate empty page exists.
+  if (heads === null) return null;
+  const page = heads.slice(0, parsed.limit);
+  const items: unknown[] = [];
+  for (const head of page) {
+    const record = await deps.loadById(scope, head.id);
+    if (record) items.push(build(record));
+  }
+  const hasMore = heads.length > parsed.limit;
+  const last = page[page.length - 1];
+  // The cursor follows the last head of the page even when its record cannot hydrate,
+  // so a skipped record never shifts the next page boundary.
+  return {
+    items,
+    nextCursor:
+      hasMore && last
+        ? encodeContactEnrichmentResultCursor({ createdAt: last.createdAt, id: last.id })
+        : null,
+    hasMore,
+  };
+}
+async function enrichmentResultByRef(
+  deps: ContactEnrichmentResultsAdapterDeps,
+  context: { workspaceId: string },
+  companyId: string,
+  operationRef: string,
+  build: (
+    record: import('./enrichment-safety.contract').EnrichmentRuntimeExecutionRecord,
+  ) => unknown,
+) {
+  const record = await deps.loadByRef({ workspaceId: context.workspaceId, companyId }, operationRef);
+  return record ? build(record) : null;
+}
+export function listContactEnrichmentResults(
+  deps: ContactEnrichmentResultsAdapterDeps,
+  context: { workspaceId: string },
+  companyId: string,
+  parsed: import('./contact-enrichment-results.dto').ContactEnrichmentResultsQuery,
+) {
+  return enrichmentResultsPage(deps, context, companyId, parsed, buildContactEnrichmentQualityResult);
+}
+export function readContactEnrichmentResult(
+  deps: ContactEnrichmentResultsAdapterDeps,
+  context: { workspaceId: string },
+  companyId: string,
+  operationRef: string,
+) {
+  return enrichmentResultByRef(deps, context, companyId, operationRef, buildContactEnrichmentQualityResult);
+}
+export function listContactEnrichmentQualityFacts(
+  deps: ContactEnrichmentResultsAdapterDeps,
+  context: { workspaceId: string },
+  companyId: string,
+  parsed: import('./contact-enrichment-results.dto').ContactEnrichmentResultsQuery,
+) {
+  return enrichmentResultsPage(deps, context, companyId, parsed, buildContactEnrichmentQualityFacts);
+}
+export function readContactEnrichmentQualityFacts(
+  deps: ContactEnrichmentResultsAdapterDeps,
+  context: { workspaceId: string },
+  companyId: string,
+  operationRef: string,
+) {
+  return enrichmentResultByRef(deps, context, companyId, operationRef, buildContactEnrichmentQualityFacts);
+}
 /** Real composition root for the shared safety lane; every SQL/transport port is injected, absence fails closed. */
 export function createContactEnrichmentSafetyRuntime(deps: ContactEnrichmentSafetyRuntimeDeps): ContactEnrichmentSafetyRuntime {
   const prisma = deps.prisma;
@@ -538,44 +630,25 @@ export function createContactEnrichmentSafetyRuntime(deps: ContactEnrichmentSafe
     },
     execute: ({ view, workspaceId, companyId, actorId, mode }) => executeView(view, workspaceId, companyId, actorId, mode),
   };
+  const resultsAdapters: ContactEnrichmentResultsAdapterDeps = {
+    database: prisma,
+    loadById: (scope, id) => query.loadById(scope, id),
+    loadByRef: (scope, operationRef) => query.loadByRef(scope, operationRef),
+  };
   const service = new ContactEnrichmentSafetyService({
     authority: deps.authority,
     repository,
     prepare: deps.prepare,
     execution,
     results: {
-      listEnrichmentExecutions: async (context, companyId, parsed) => {
-        const heads = await listCompanyEnrichmentHeads(prisma, { workspaceId: context.workspaceId, companyId }, { limit: parsed.limit, cursor: parsed.cursor, businessRunId: parsed.businessRunId });
-        const page = heads.slice(0, parsed.limit);
-        const items = [];
-        for (const head of page) {
-          const record = await query.loadById({ workspaceId: context.workspaceId, companyId }, head.id);
-          if (record) items.push(buildContactEnrichmentQualityResult(record));
-        }
-        const hasMore = heads.length > parsed.limit;
-        const last = page[page.length - 1];
-        return { items, nextCursor: hasMore && last ? encodeContactEnrichmentResultCursor({ createdAt: last.createdAt, id: last.id }) : null, hasMore };
-      },
-      readEnrichmentExecution: async (context, companyId, operationRef) => {
-        const record = await query.loadByRef({ workspaceId: context.workspaceId, companyId }, operationRef);
-        return record ? buildContactEnrichmentQualityResult(record) : null;
-      },
-      listEnrichmentQualityFacts: async (context, companyId, parsed) => {
-        const heads = await listCompanyEnrichmentHeads(prisma, { workspaceId: context.workspaceId, companyId }, { limit: parsed.limit, cursor: parsed.cursor, businessRunId: parsed.businessRunId });
-        const page = heads.slice(0, parsed.limit);
-        const items = [];
-        for (const head of page) {
-          const record = await query.loadById({ workspaceId: context.workspaceId, companyId }, head.id);
-          if (record) items.push(buildContactEnrichmentQualityFacts(record));
-        }
-        const hasMore = heads.length > parsed.limit;
-        const last = page[page.length - 1];
-        return { items, nextCursor: hasMore && last ? encodeContactEnrichmentResultCursor({ createdAt: last.createdAt, id: last.id }) : null, hasMore };
-      },
-      readEnrichmentQualityFacts: async (context, companyId, operationRef) => {
-        const record = await query.loadByRef({ workspaceId: context.workspaceId, companyId }, operationRef);
-        return record ? buildContactEnrichmentQualityFacts(record) : null;
-      },
+      listEnrichmentExecutions: (context, companyId, parsed) =>
+        listContactEnrichmentResults(resultsAdapters, context, companyId, parsed),
+      readEnrichmentExecution: (context, companyId, operationRef) =>
+        readContactEnrichmentResult(resultsAdapters, context, companyId, operationRef),
+      listEnrichmentQualityFacts: (context, companyId, parsed) =>
+        listContactEnrichmentQualityFacts(resultsAdapters, context, companyId, parsed),
+      readEnrichmentQualityFacts: (context, companyId, operationRef) =>
+        readContactEnrichmentQualityFacts(resultsAdapters, context, companyId, operationRef),
     },
     authorizeRecovery: deps.authorizeRecovery,
   });

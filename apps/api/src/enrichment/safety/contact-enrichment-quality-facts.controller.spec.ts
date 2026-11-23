@@ -146,7 +146,10 @@ describe("complete quality facts read routes, no real DB or HTTP listener", () =
   it("rejects more than ten rows and a fabricated full-quality zero", async () => {
     const x = world();
     x.list.mockResolvedValue({
-      items: Array.from({ length: 11 }, () => qualityResult()),
+      items: Array.from({ length: 11 }, (_, index) => ({
+        ...qualityResult(),
+        operationRef: index.toString(16).padStart(64, "0"),
+      })),
       nextCursor: null,
       hasMore: false,
     } as never);
@@ -156,6 +159,14 @@ describe("complete quality facts read routes, no real DB or HTTP listener", () =
     (fabricated.summary as Record<string, unknown>).stockValidPersonalContacts = 0;
     y.read.mockResolvedValue(fabricated as never);
     await expect(y.controller.read(ctx, C, "a".repeat(64))).rejects.toThrow();
+  });
+  it("404s when the quality port returns a record of another company or another operation ref", async () => {
+    const otherCompany = world();
+    otherCompany.read.mockResolvedValue({ ...qualityResult(), companyId: W });
+    await expect(otherCompany.controller.read(ctx, C, "a".repeat(64))).rejects.toMatchObject({ status: 404 });
+    const otherRef = world();
+    otherRef.read.mockResolvedValue({ ...qualityResult(), operationRef: "b".repeat(64) });
+    await expect(otherRef.controller.read(ctx, C, "a".repeat(64))).rejects.toMatchObject({ status: 404 });
   });
   it("does not leak unexpected persisted PII fields through a schema-shaped response", async () => {
     const x = world();

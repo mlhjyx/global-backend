@@ -809,9 +809,14 @@ export async function markEnrichmentStepHold(tx: Prisma.TransactionClient, input
 /** Company-scoped keyset listing of already admitted heads; SELECT-only. */
 export async function listCompanyEnrichmentHeads(database: WorkspaceEnrichmentTransactions, context: { workspaceId: string; companyId: string }, page: {
   limit: number; cursor: { createdAt: string; id: string } | null; businessRunId: string | null;
-}): Promise<readonly { id: string; createdAt: string }[]> {
+}): Promise<readonly { id: string; createdAt: string }[] | null> {
   if (!uuid(context.workspaceId) || !uuid(context.companyId) || !Number.isSafeInteger(page.limit) || page.limit < 1 || page.limit > 10) throw new EnrichmentSafetyError("INVALID_PLAN");
   return database.withWorkspace(context.workspaceId, async (tx) => {
+    // A missing/foreign/soft-deleted company is not a legitimate empty result; zero executions for a
+    // readable company still is. Both checks share the same RLS-scoped transaction.
+    const company = await tx.$queryRaw<{ id: string }[]>`SELECT id::text FROM public.canonical_company
+      WHERE id=${context.companyId}::uuid AND workspace_id=${context.workspaceId}::uuid LIMIT 1`;
+    if (company.length !== 1) return null;
     const rows = await tx.$queryRaw<{ id: string; created_at: Date }[]>`SELECT e.id::text,e.created_at
       FROM public.contact_enrichment_execution e
       WHERE e.workspace_id=${context.workspaceId}::uuid AND e.company_id=${context.companyId}::uuid

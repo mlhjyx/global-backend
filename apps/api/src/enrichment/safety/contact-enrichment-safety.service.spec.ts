@@ -20,7 +20,12 @@ function world(config: { notAdmitted?: boolean; unsupported?: boolean; deniedRec
         limits: { authorityCapMicrousd: input.authorityCapMicrousd, companyCapMicrousd: input.authorityCapMicrousd, contactCapMicrousd: '150000', finderCompanyMax: 10, finderContactMax: 3, verifyAddressMax: 6, maxContacts: 10 } }); return { status: 'PREPARED', plan, tier: 'B' }; }),
     repository: { admitHttp: vi.fn(async () => { events.push('ATOMIC_ADMISSION'); return view; }), admitRun: vi.fn(async () => { events.push('RUN_ADMISSION_NO_GRANT'); return view; }) },
     execution: { findRun: vi.fn(async () => null), findByRef: vi.fn(async () => ({ view, workspaceId: W, companyId: C, businessRunId: null, accountKey: 'original-key', admissionRequestSha256: 'e'.repeat(64) })), execute: vi.fn(async () => { events.push('SAME_EXECUTION_RUNNER'); return result; }) },
-    results: { listEnrichmentExecutions: vi.fn(async () => ({ items: [], nextCursor: null, hasMore: false })), readEnrichmentExecution: vi.fn(async () => ({ opaqueMetadata: true })) }, authorizeRecovery: vi.fn(async () => !config.deniedRecovery),
+    results: {
+      listEnrichmentExecutions: vi.fn(async () => ({ items: [], nextCursor: null, hasMore: false })),
+      readEnrichmentExecution: vi.fn(async () => ({ opaqueMetadata: true })),
+      listEnrichmentQualityFacts: vi.fn(async () => ({ items: [], nextCursor: null, hasMore: false })),
+      readEnrichmentQualityFacts: vi.fn(async () => ({ opaqueQuality: true })),
+    }, authorizeRecovery: vi.fn(async () => !config.deniedRecovery),
   };
   const binding = { authorityId: A, replay: false, scopeKey: W, accountKey: ['discovery.run','discovery_run',RUN,'a'.repeat(64)].join(':'), purpose: 'discovery.run', subjectType: 'discovery_run', subjectId: RUN, requestSha256: 'a'.repeat(64) };
   const run = { workspaceId: W, companyId: C, businessRunId: RUN, binding, lawfulBasis: options.lawfulBasis, remainingMicrousd: '250000', actorId: 'discovery-run:' + RUN };
@@ -51,6 +56,25 @@ describe('shared safe service admission and read/recovery orchestration, pure po
   it('delegates GET only to persisted scoped metadata without verification/admission/execution/recovery', async () => {
     const x = world(); expect(await x.service.readEnrichmentExecution(ctx, C, 'd'.repeat(64))).toEqual({ opaqueMetadata: true }); await x.service.listEnrichmentExecutions(ctx, C, { limit: 10, cursor: null, businessRunId: null });
     expect(x.deps.authority.verifyWorkspaceGrant).not.toHaveBeenCalled(); expect(x.deps.repository.admitHttp).not.toHaveBeenCalled(); expect(x.deps.execution.execute).not.toHaveBeenCalled(); expect(x.deps.authorizeRecovery).not.toHaveBeenCalled();
+  });
+  it('delegates both complete-quality read ports with the original scope and no side effects', async () => {
+    const x = world();
+    expect(await x.service.readEnrichmentQualityFacts(ctx, C, 'd'.repeat(64))).toEqual({ opaqueQuality: true });
+    await x.service.listEnrichmentQualityFacts(ctx, C, { limit: 10, cursor: null, businessRunId: null });
+    expect(x.deps.results.readEnrichmentQualityFacts).toHaveBeenCalledWith(ctx, C, 'd'.repeat(64));
+    expect(x.deps.results.listEnrichmentQualityFacts).toHaveBeenCalledWith(ctx, C, { limit: 10, cursor: null, businessRunId: null });
+    expect(x.deps.authority.verifyWorkspaceGrant).not.toHaveBeenCalled();
+    expect(x.deps.repository.admitHttp).not.toHaveBeenCalled();
+    expect(x.deps.execution.execute).not.toHaveBeenCalled();
+  });
+  it('rejects invalid quality read addresses before reaching the port', async () => {
+    const x = world();
+    await expect(x.service.readEnrichmentQualityFacts(ctx, 'not-a-uuid', 'd'.repeat(64))).rejects.toThrow();
+    await expect(x.service.readEnrichmentQualityFacts(ctx, C, 'not-a-ref')).rejects.toThrow();
+    await expect(x.service.listEnrichmentQualityFacts(ctx, 'not-a-uuid', { limit: 10, cursor: null, businessRunId: null })).rejects.toThrow();
+    await expect(x.service.listEnrichmentQualityFacts({ ...ctx, workspaceId: 'not-a-uuid' }, C, { limit: 10, cursor: null, businessRunId: null })).rejects.toThrow();
+    expect(x.deps.results.readEnrichmentQualityFacts).not.toHaveBeenCalled();
+    expect(x.deps.results.listEnrichmentQualityFacts).not.toHaveBeenCalled();
   });
   it('POST recovery authorizes current company then uses only RECOVER_NO_WIRE without Grant or new admission', async () => {
     const x = world(); expect(await x.service.recoverEnrichmentExecution(ctx, C, 'd'.repeat(64))).toEqual({ opaqueMetadata: true }); expect(x.deps.execution.execute).toHaveBeenCalledWith(expect.objectContaining({ mode: 'RECOVER_NO_WIRE', actorId: ctx.userId })); expect(x.deps.authority.verifyWorkspaceGrant).not.toHaveBeenCalled(); expect(x.deps.repository.admitHttp).not.toHaveBeenCalled(); expect(x.deps.repository.admitRun).not.toHaveBeenCalled();
