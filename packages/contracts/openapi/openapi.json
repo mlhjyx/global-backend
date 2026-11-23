@@ -11401,6 +11401,1286 @@
         ]
       }
     },
+    "/api/v1/canonical-companies/{id}/contact-enrichment-results": {
+      "get": {
+        "description": "固定 page10，createdAt/id keyset；仅原持久元数据，不消费 Grant、不恢复、不结算、不外联。",
+        "operationId": "listContactEnrichmentResults_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "runId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "page"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "version",
+                          "protocolVersion",
+                          "operationRef",
+                          "companyId",
+                          "entrypoint",
+                          "businessRunId",
+                          "createdAt",
+                          "status",
+                          "resultRevision",
+                          "qualityCoverage",
+                          "summary",
+                          "perContact",
+                          "spend",
+                          "unavailableMetrics"
+                        ],
+                        "properties": {
+                          "version": {
+                            "type": "integer",
+                            "enum": [
+                              1
+                            ]
+                          },
+                          "protocolVersion": {
+                            "type": "integer",
+                            "enum": [
+                              1
+                            ]
+                          },
+                          "operationRef": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$",
+                            "minLength": 64,
+                            "maxLength": 64
+                          },
+                          "companyId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "maxLength": 36
+                          },
+                          "entrypoint": {
+                            "type": "string",
+                            "enum": [
+                              "http",
+                              "discovery_run"
+                            ]
+                          },
+                          "businessRunId": {
+                            "type": "string",
+                            "format": "uuid",
+                            "maxLength": 36,
+                            "nullable": true
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "maxLength": 24
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "PREPARED",
+                              "RUNNING",
+                              "RESULT_UNKNOWN",
+                              "APPLY_PENDING",
+                              "COMPLETED",
+                              "FAILED",
+                              "REDACTED"
+                            ]
+                          },
+                          "resultRevision": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 2147483647
+                          },
+                          "qualityCoverage": {
+                            "type": "string",
+                            "enum": [
+                              "PREREQUISITE_ONLY"
+                            ]
+                          },
+                          "summary": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "consideredUniqueContacts",
+                              "eligibleUniqueContacts",
+                              "stockValidPersonalContacts",
+                              "physicallyAttemptedUniqueContacts",
+                              "newCandidatePoints",
+                              "newValidPersonalContacts",
+                              "unresolvedUniqueContacts",
+                              "skippedByReason"
+                            ],
+                            "properties": {
+                              "consideredUniqueContacts": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 10
+                              },
+                              "eligibleUniqueContacts": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 10
+                              },
+                              "stockValidPersonalContacts": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 10,
+                                "nullable": true,
+                                "enum": [
+                                  null
+                                ],
+                                "description": "本安全首片未证明该完整质量指标，固定为 null。"
+                              },
+                              "physicallyAttemptedUniqueContacts": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 10,
+                                "nullable": true
+                              },
+                              "newCandidatePoints": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 10
+                              },
+                              "newValidPersonalContacts": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 10,
+                                "nullable": true,
+                                "enum": [
+                                  null
+                                ],
+                                "description": "本安全首片未证明该完整质量指标，固定为 null。"
+                              },
+                              "unresolvedUniqueContacts": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 10,
+                                "nullable": true
+                              },
+                              "skippedByReason": {
+                                "type": "array",
+                                "maxItems": 10,
+                                "items": {
+                                  "type": "object",
+                                  "additionalProperties": false,
+                                  "required": [
+                                    "reasonCode",
+                                    "count"
+                                  ],
+                                  "properties": {
+                                    "reasonCode": {
+                                      "type": "string",
+                                      "enum": [
+                                        "PENDING",
+                                        "GOVERNANCE_PENDING",
+                                        "RESULT_UNKNOWN",
+                                        "INPUT_CONFLICT",
+                                        "SAVE_PENDING",
+                                        "NO_MATCH",
+                                        "STORED",
+                                        "REUSED",
+                                        "REDACTED",
+                                        "NO_DOMAIN",
+                                        "NO_CONTACTS",
+                                        "SUPPRESSED",
+                                        "INVALID_ALL",
+                                        "UNAVAILABLE",
+                                        "DEADLINE",
+                                        "BUDGET_CAP"
+                                      ],
+                                      "maxLength": 32
+                                    },
+                                    "count": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 10
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "perContact": {
+                            "type": "array",
+                            "maxItems": 10,
+                            "items": {
+                              "type": "object",
+                              "additionalProperties": false,
+                              "required": [
+                                "contactId",
+                                "reasonCode",
+                                "beforeStates",
+                                "afterStates",
+                                "pointRefs",
+                                "eventRefs",
+                                "attemptRefs",
+                                "newCandidate",
+                                "newValidPersonal"
+                              ],
+                              "properties": {
+                                "contactId": {
+                                  "type": "string",
+                                  "format": "uuid",
+                                  "maxLength": 36
+                                },
+                                "reasonCode": {
+                                  "type": "string",
+                                  "enum": [
+                                    "PENDING",
+                                    "GOVERNANCE_PENDING",
+                                    "RESULT_UNKNOWN",
+                                    "INPUT_CONFLICT",
+                                    "SAVE_PENDING",
+                                    "NO_MATCH",
+                                    "STORED",
+                                    "REUSED",
+                                    "REDACTED",
+                                    "NO_DOMAIN",
+                                    "NO_CONTACTS",
+                                    "SUPPRESSED",
+                                    "INVALID_ALL",
+                                    "UNAVAILABLE",
+                                    "DEADLINE",
+                                    "BUDGET_CAP"
+                                  ],
+                                  "maxLength": 32
+                                },
+                                "beforeStates": {
+                                  "type": "array",
+                                  "maxItems": 4,
+                                  "uniqueItems": true,
+                                  "items": {
+                                    "type": "string",
+                                    "enum": [
+                                      "VALID",
+                                      "INVALID",
+                                      "CATCH_ALL_RISKY",
+                                      "UNKNOWN"
+                                    ],
+                                    "maxLength": 32
+                                  }
+                                },
+                                "afterStates": {
+                                  "type": "array",
+                                  "maxItems": 4,
+                                  "uniqueItems": true,
+                                  "items": {
+                                    "type": "string",
+                                    "enum": [
+                                      "VALID",
+                                      "INVALID",
+                                      "CATCH_ALL_RISKY",
+                                      "UNKNOWN"
+                                    ],
+                                    "maxLength": 32
+                                  }
+                                },
+                                "pointRefs": {
+                                  "type": "array",
+                                  "maxItems": 100,
+                                  "uniqueItems": true,
+                                  "items": {
+                                    "type": "string",
+                                    "format": "uuid",
+                                    "maxLength": 36
+                                  }
+                                },
+                                "eventRefs": {
+                                  "type": "array",
+                                  "maxItems": 18,
+                                  "uniqueItems": true,
+                                  "items": {
+                                    "type": "string",
+                                    "format": "uuid",
+                                    "maxLength": 36
+                                  }
+                                },
+                                "attemptRefs": {
+                                  "type": "array",
+                                  "maxItems": 3,
+                                  "uniqueItems": true,
+                                  "items": {
+                                    "type": "string",
+                                    "format": "uuid",
+                                    "maxLength": 36
+                                  }
+                                },
+                                "newCandidate": {
+                                  "type": "boolean",
+                                  "nullable": true
+                                },
+                                "newValidPersonal": {
+                                  "type": "boolean",
+                                  "nullable": true,
+                                  "enum": [
+                                    null
+                                  ]
+                                }
+                              }
+                            }
+                          },
+                          "spend": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "quotedUpperBoundMicrousd",
+                              "knownChargedMicrousd",
+                              "unknownUpperBoundMicrousd",
+                              "costBasis"
+                            ],
+                            "properties": {
+                              "quotedUpperBoundMicrousd": {
+                                "type": "string",
+                                "pattern": "^(0|[1-9][0-9]*)$",
+                                "maxLength": 19
+                              },
+                              "knownChargedMicrousd": {
+                                "type": "string",
+                                "pattern": "^(0|[1-9][0-9]*)$",
+                                "maxLength": 19,
+                                "nullable": true
+                              },
+                              "unknownUpperBoundMicrousd": {
+                                "type": "string",
+                                "pattern": "^(0|[1-9][0-9]*)$",
+                                "maxLength": 19,
+                                "nullable": true
+                              },
+                              "costBasis": {
+                                "type": "string",
+                                "enum": [
+                                  "estimated_upper_bound"
+                                ],
+                                "description": "原 ledger 金额与未决上界，不是供应商发票；未知金额不视为零。"
+                              }
+                            }
+                          },
+                          "unavailableMetrics": {
+                            "type": "array",
+                            "maxItems": 4,
+                            "uniqueItems": true,
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "stockValidPersonalContacts",
+                                "physicallyAttemptedUniqueContacts",
+                                "newValidPersonalContacts",
+                                "unresolvedUniqueContacts"
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "page": {
+                      "type": "object",
+                      "required": [
+                        "next_cursor",
+                        "has_more"
+                      ],
+                      "properties": {
+                        "next_cursor": {
+                          "type": "string",
+                          "nullable": true,
+                          "description": "下一页游标；null = 没有更多"
+                        },
+                        "has_more": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "读取公司已准入的联系人补强结果",
+        "tags": [
+          "Contact enrichment results"
+        ],
+        "x-required-scopes": [
+          "acquisition:read",
+          "contact-discovery:read"
+        ]
+      }
+    },
+    "/api/v1/canonical-companies/{id}/contact-enrichment-results/{operationRef}": {
+      "get": {
+        "description": "跨 workspace/company 与不存在统一 404；无 Grant、预留、恢复、结算或外联。",
+        "operationId": "readContactEnrichmentResult_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "operationRef",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$",
+              "minLength": 64,
+              "maxLength": 64
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "version",
+                        "protocolVersion",
+                        "operationRef",
+                        "companyId",
+                        "entrypoint",
+                        "businessRunId",
+                        "createdAt",
+                        "status",
+                        "resultRevision",
+                        "qualityCoverage",
+                        "summary",
+                        "perContact",
+                        "spend",
+                        "unavailableMetrics"
+                      ],
+                      "properties": {
+                        "version": {
+                          "type": "integer",
+                          "enum": [
+                            1
+                          ]
+                        },
+                        "protocolVersion": {
+                          "type": "integer",
+                          "enum": [
+                            1
+                          ]
+                        },
+                        "operationRef": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$",
+                          "minLength": 64,
+                          "maxLength": 64
+                        },
+                        "companyId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "maxLength": 36
+                        },
+                        "entrypoint": {
+                          "type": "string",
+                          "enum": [
+                            "http",
+                            "discovery_run"
+                          ]
+                        },
+                        "businessRunId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "maxLength": 36,
+                          "nullable": true
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "maxLength": 24
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "PREPARED",
+                            "RUNNING",
+                            "RESULT_UNKNOWN",
+                            "APPLY_PENDING",
+                            "COMPLETED",
+                            "FAILED",
+                            "REDACTED"
+                          ]
+                        },
+                        "resultRevision": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 2147483647
+                        },
+                        "qualityCoverage": {
+                          "type": "string",
+                          "enum": [
+                            "PREREQUISITE_ONLY"
+                          ]
+                        },
+                        "summary": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "consideredUniqueContacts",
+                            "eligibleUniqueContacts",
+                            "stockValidPersonalContacts",
+                            "physicallyAttemptedUniqueContacts",
+                            "newCandidatePoints",
+                            "newValidPersonalContacts",
+                            "unresolvedUniqueContacts",
+                            "skippedByReason"
+                          ],
+                          "properties": {
+                            "consideredUniqueContacts": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 10
+                            },
+                            "eligibleUniqueContacts": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 10
+                            },
+                            "stockValidPersonalContacts": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 10,
+                              "nullable": true,
+                              "enum": [
+                                null
+                              ],
+                              "description": "本安全首片未证明该完整质量指标，固定为 null。"
+                            },
+                            "physicallyAttemptedUniqueContacts": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 10,
+                              "nullable": true
+                            },
+                            "newCandidatePoints": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 10
+                            },
+                            "newValidPersonalContacts": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 10,
+                              "nullable": true,
+                              "enum": [
+                                null
+                              ],
+                              "description": "本安全首片未证明该完整质量指标，固定为 null。"
+                            },
+                            "unresolvedUniqueContacts": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 10,
+                              "nullable": true
+                            },
+                            "skippedByReason": {
+                              "type": "array",
+                              "maxItems": 10,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "reasonCode",
+                                  "count"
+                                ],
+                                "properties": {
+                                  "reasonCode": {
+                                    "type": "string",
+                                    "enum": [
+                                      "PENDING",
+                                      "GOVERNANCE_PENDING",
+                                      "RESULT_UNKNOWN",
+                                      "INPUT_CONFLICT",
+                                      "SAVE_PENDING",
+                                      "NO_MATCH",
+                                      "STORED",
+                                      "REUSED",
+                                      "REDACTED",
+                                      "NO_DOMAIN",
+                                      "NO_CONTACTS",
+                                      "SUPPRESSED",
+                                      "INVALID_ALL",
+                                      "UNAVAILABLE",
+                                      "DEADLINE",
+                                      "BUDGET_CAP"
+                                    ],
+                                    "maxLength": 32
+                                  },
+                                  "count": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 10
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "perContact": {
+                          "type": "array",
+                          "maxItems": 10,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "contactId",
+                              "reasonCode",
+                              "beforeStates",
+                              "afterStates",
+                              "pointRefs",
+                              "eventRefs",
+                              "attemptRefs",
+                              "newCandidate",
+                              "newValidPersonal"
+                            ],
+                            "properties": {
+                              "contactId": {
+                                "type": "string",
+                                "format": "uuid",
+                                "maxLength": 36
+                              },
+                              "reasonCode": {
+                                "type": "string",
+                                "enum": [
+                                  "PENDING",
+                                  "GOVERNANCE_PENDING",
+                                  "RESULT_UNKNOWN",
+                                  "INPUT_CONFLICT",
+                                  "SAVE_PENDING",
+                                  "NO_MATCH",
+                                  "STORED",
+                                  "REUSED",
+                                  "REDACTED",
+                                  "NO_DOMAIN",
+                                  "NO_CONTACTS",
+                                  "SUPPRESSED",
+                                  "INVALID_ALL",
+                                  "UNAVAILABLE",
+                                  "DEADLINE",
+                                  "BUDGET_CAP"
+                                ],
+                                "maxLength": 32
+                              },
+                              "beforeStates": {
+                                "type": "array",
+                                "maxItems": 4,
+                                "uniqueItems": true,
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "VALID",
+                                    "INVALID",
+                                    "CATCH_ALL_RISKY",
+                                    "UNKNOWN"
+                                  ],
+                                  "maxLength": 32
+                                }
+                              },
+                              "afterStates": {
+                                "type": "array",
+                                "maxItems": 4,
+                                "uniqueItems": true,
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "VALID",
+                                    "INVALID",
+                                    "CATCH_ALL_RISKY",
+                                    "UNKNOWN"
+                                  ],
+                                  "maxLength": 32
+                                }
+                              },
+                              "pointRefs": {
+                                "type": "array",
+                                "maxItems": 100,
+                                "uniqueItems": true,
+                                "items": {
+                                  "type": "string",
+                                  "format": "uuid",
+                                  "maxLength": 36
+                                }
+                              },
+                              "eventRefs": {
+                                "type": "array",
+                                "maxItems": 18,
+                                "uniqueItems": true,
+                                "items": {
+                                  "type": "string",
+                                  "format": "uuid",
+                                  "maxLength": 36
+                                }
+                              },
+                              "attemptRefs": {
+                                "type": "array",
+                                "maxItems": 3,
+                                "uniqueItems": true,
+                                "items": {
+                                  "type": "string",
+                                  "format": "uuid",
+                                  "maxLength": 36
+                                }
+                              },
+                              "newCandidate": {
+                                "type": "boolean",
+                                "nullable": true
+                              },
+                              "newValidPersonal": {
+                                "type": "boolean",
+                                "nullable": true,
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        "spend": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "quotedUpperBoundMicrousd",
+                            "knownChargedMicrousd",
+                            "unknownUpperBoundMicrousd",
+                            "costBasis"
+                          ],
+                          "properties": {
+                            "quotedUpperBoundMicrousd": {
+                              "type": "string",
+                              "pattern": "^(0|[1-9][0-9]*)$",
+                              "maxLength": 19
+                            },
+                            "knownChargedMicrousd": {
+                              "type": "string",
+                              "pattern": "^(0|[1-9][0-9]*)$",
+                              "maxLength": 19,
+                              "nullable": true
+                            },
+                            "unknownUpperBoundMicrousd": {
+                              "type": "string",
+                              "pattern": "^(0|[1-9][0-9]*)$",
+                              "maxLength": 19,
+                              "nullable": true
+                            },
+                            "costBasis": {
+                              "type": "string",
+                              "enum": [
+                                "estimated_upper_bound"
+                              ],
+                              "description": "原 ledger 金额与未决上界，不是供应商发票；未知金额不视为零。"
+                            }
+                          }
+                        },
+                        "unavailableMetrics": {
+                          "type": "array",
+                          "maxItems": 4,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "stockValidPersonalContacts",
+                              "physicallyAttemptedUniqueContacts",
+                              "newValidPersonalContacts",
+                              "unresolvedUniqueContacts"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "读取原联系人补强操作结果",
+        "tags": [
+          "Contact enrichment results"
+        ],
+        "x-required-scopes": [
+          "acquisition:read",
+          "contact-discovery:read"
+        ]
+      }
+    },
+    "/api/v1/canonical-companies/{id}/contact-enrichment-results/{operationRef}/recover": {
+      "post": {
+        "description": "仍须当前公司/主体/抑制授权；仅原结果/原预留协议，不要求新 Grant，不新增预留或 wire。UNKNOWN 无原结果保持 HOLD。",
+        "operationId": "recoverContactEnrichmentResult_v1",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "operationRef",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$",
+              "minLength": 64,
+              "maxLength": 64
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "version",
+                        "protocolVersion",
+                        "operationRef",
+                        "companyId",
+                        "entrypoint",
+                        "businessRunId",
+                        "createdAt",
+                        "status",
+                        "resultRevision",
+                        "qualityCoverage",
+                        "summary",
+                        "perContact",
+                        "spend",
+                        "unavailableMetrics"
+                      ],
+                      "properties": {
+                        "version": {
+                          "type": "integer",
+                          "enum": [
+                            1
+                          ]
+                        },
+                        "protocolVersion": {
+                          "type": "integer",
+                          "enum": [
+                            1
+                          ]
+                        },
+                        "operationRef": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$",
+                          "minLength": 64,
+                          "maxLength": 64
+                        },
+                        "companyId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "maxLength": 36
+                        },
+                        "entrypoint": {
+                          "type": "string",
+                          "enum": [
+                            "http",
+                            "discovery_run"
+                          ]
+                        },
+                        "businessRunId": {
+                          "type": "string",
+                          "format": "uuid",
+                          "maxLength": 36,
+                          "nullable": true
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "maxLength": 24
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "PREPARED",
+                            "RUNNING",
+                            "RESULT_UNKNOWN",
+                            "APPLY_PENDING",
+                            "COMPLETED",
+                            "FAILED",
+                            "REDACTED"
+                          ]
+                        },
+                        "resultRevision": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 2147483647
+                        },
+                        "qualityCoverage": {
+                          "type": "string",
+                          "enum": [
+                            "PREREQUISITE_ONLY"
+                          ]
+                        },
+                        "summary": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "consideredUniqueContacts",
+                            "eligibleUniqueContacts",
+                            "stockValidPersonalContacts",
+                            "physicallyAttemptedUniqueContacts",
+                            "newCandidatePoints",
+                            "newValidPersonalContacts",
+                            "unresolvedUniqueContacts",
+                            "skippedByReason"
+                          ],
+                          "properties": {
+                            "consideredUniqueContacts": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 10
+                            },
+                            "eligibleUniqueContacts": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 10
+                            },
+                            "stockValidPersonalContacts": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 10,
+                              "nullable": true,
+                              "enum": [
+                                null
+                              ],
+                              "description": "本安全首片未证明该完整质量指标，固定为 null。"
+                            },
+                            "physicallyAttemptedUniqueContacts": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 10,
+                              "nullable": true
+                            },
+                            "newCandidatePoints": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 10
+                            },
+                            "newValidPersonalContacts": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 10,
+                              "nullable": true,
+                              "enum": [
+                                null
+                              ],
+                              "description": "本安全首片未证明该完整质量指标，固定为 null。"
+                            },
+                            "unresolvedUniqueContacts": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 10,
+                              "nullable": true
+                            },
+                            "skippedByReason": {
+                              "type": "array",
+                              "maxItems": 10,
+                              "items": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": [
+                                  "reasonCode",
+                                  "count"
+                                ],
+                                "properties": {
+                                  "reasonCode": {
+                                    "type": "string",
+                                    "enum": [
+                                      "PENDING",
+                                      "GOVERNANCE_PENDING",
+                                      "RESULT_UNKNOWN",
+                                      "INPUT_CONFLICT",
+                                      "SAVE_PENDING",
+                                      "NO_MATCH",
+                                      "STORED",
+                                      "REUSED",
+                                      "REDACTED",
+                                      "NO_DOMAIN",
+                                      "NO_CONTACTS",
+                                      "SUPPRESSED",
+                                      "INVALID_ALL",
+                                      "UNAVAILABLE",
+                                      "DEADLINE",
+                                      "BUDGET_CAP"
+                                    ],
+                                    "maxLength": 32
+                                  },
+                                  "count": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 10
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "perContact": {
+                          "type": "array",
+                          "maxItems": 10,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "contactId",
+                              "reasonCode",
+                              "beforeStates",
+                              "afterStates",
+                              "pointRefs",
+                              "eventRefs",
+                              "attemptRefs",
+                              "newCandidate",
+                              "newValidPersonal"
+                            ],
+                            "properties": {
+                              "contactId": {
+                                "type": "string",
+                                "format": "uuid",
+                                "maxLength": 36
+                              },
+                              "reasonCode": {
+                                "type": "string",
+                                "enum": [
+                                  "PENDING",
+                                  "GOVERNANCE_PENDING",
+                                  "RESULT_UNKNOWN",
+                                  "INPUT_CONFLICT",
+                                  "SAVE_PENDING",
+                                  "NO_MATCH",
+                                  "STORED",
+                                  "REUSED",
+                                  "REDACTED",
+                                  "NO_DOMAIN",
+                                  "NO_CONTACTS",
+                                  "SUPPRESSED",
+                                  "INVALID_ALL",
+                                  "UNAVAILABLE",
+                                  "DEADLINE",
+                                  "BUDGET_CAP"
+                                ],
+                                "maxLength": 32
+                              },
+                              "beforeStates": {
+                                "type": "array",
+                                "maxItems": 4,
+                                "uniqueItems": true,
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "VALID",
+                                    "INVALID",
+                                    "CATCH_ALL_RISKY",
+                                    "UNKNOWN"
+                                  ],
+                                  "maxLength": 32
+                                }
+                              },
+                              "afterStates": {
+                                "type": "array",
+                                "maxItems": 4,
+                                "uniqueItems": true,
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "VALID",
+                                    "INVALID",
+                                    "CATCH_ALL_RISKY",
+                                    "UNKNOWN"
+                                  ],
+                                  "maxLength": 32
+                                }
+                              },
+                              "pointRefs": {
+                                "type": "array",
+                                "maxItems": 100,
+                                "uniqueItems": true,
+                                "items": {
+                                  "type": "string",
+                                  "format": "uuid",
+                                  "maxLength": 36
+                                }
+                              },
+                              "eventRefs": {
+                                "type": "array",
+                                "maxItems": 18,
+                                "uniqueItems": true,
+                                "items": {
+                                  "type": "string",
+                                  "format": "uuid",
+                                  "maxLength": 36
+                                }
+                              },
+                              "attemptRefs": {
+                                "type": "array",
+                                "maxItems": 3,
+                                "uniqueItems": true,
+                                "items": {
+                                  "type": "string",
+                                  "format": "uuid",
+                                  "maxLength": 36
+                                }
+                              },
+                              "newCandidate": {
+                                "type": "boolean",
+                                "nullable": true
+                              },
+                              "newValidPersonal": {
+                                "type": "boolean",
+                                "nullable": true,
+                                "enum": [
+                                  null
+                                ]
+                              }
+                            }
+                          }
+                        },
+                        "spend": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "quotedUpperBoundMicrousd",
+                            "knownChargedMicrousd",
+                            "unknownUpperBoundMicrousd",
+                            "costBasis"
+                          ],
+                          "properties": {
+                            "quotedUpperBoundMicrousd": {
+                              "type": "string",
+                              "pattern": "^(0|[1-9][0-9]*)$",
+                              "maxLength": 19
+                            },
+                            "knownChargedMicrousd": {
+                              "type": "string",
+                              "pattern": "^(0|[1-9][0-9]*)$",
+                              "maxLength": 19,
+                              "nullable": true
+                            },
+                            "unknownUpperBoundMicrousd": {
+                              "type": "string",
+                              "pattern": "^(0|[1-9][0-9]*)$",
+                              "maxLength": 19,
+                              "nullable": true
+                            },
+                            "costBasis": {
+                              "type": "string",
+                              "enum": [
+                                "estimated_upper_bound"
+                              ],
+                              "description": "原 ledger 金额与未决上界，不是供应商发票；未知金额不视为零。"
+                            }
+                          }
+                        },
+                        "unavailableMetrics": {
+                          "type": "array",
+                          "maxItems": 4,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "stockValidPersonalContacts",
+                              "physicallyAttemptedUniqueContacts",
+                              "newValidPersonalContacts",
+                              "unresolvedUniqueContacts"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "显式恢复原结果的核对与领域保存",
+        "tags": [
+          "Contact enrichment results"
+        ],
+        "x-required-scopes": [
+          "acquisition:write",
+          "contact-discovery:read",
+          "compliance:manage"
+        ]
+      }
+    },
     "/api/v1/source-channels": {
       "get": {
         "operationId": "ChannelsController_list_v1",

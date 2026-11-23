@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { DiscoveryService } from './discovery.service';
-import { ContactEnrichmentService } from './enrich-contacts.service';
+import { ContactEnrichmentService, CONTACT_ENRICHMENT_SAFETY_EXECUTOR } from './enrich-contacts.service';
 import { DiscoveryController } from './discovery.controller';
 import { RunResultViewController } from './run-result-view.controller';
 import { JudgmentReviewController } from './judgment/judgment-review.controller';
@@ -13,10 +13,15 @@ import { PostgresBudgetStore, TOOL_BUDGET_STORE, type BudgetStore } from '../too
 import { TOOL_BROKER } from '../tools/tool-broker.tokens';
 import type { ExecutionBroker } from '../tools/tool-contract';
 import { ExecutionBudgetModule } from '../execution-budget/execution-budget.module';
+import { ExecutionBudgetAuthorityService } from '../execution-budget/execution-budget-authority.service';
+import { createFailClosedSafetyExecutor, createManagedContactEnrichmentSafety } from '../enrichment/safety/contact-enrichment-safety.composition';
+import { ContactEnrichmentResultsController, CONTACT_ENRICHMENT_RESULTS_PORT } from '../enrichment/safety/contact-enrichment-results.controller';
+
+const CONTACT_ENRICHMENT_SAFETY_COMPOSITION = Symbol('CONTACT_ENRICHMENT_SAFETY_COMPOSITION');
 
 @Module({
   imports: [ExecutionBudgetModule],
-  controllers: [DiscoveryController, JudgmentReviewController, RunResultViewController],
+  controllers: [DiscoveryController, JudgmentReviewController, RunResultViewController, ContactEnrichmentResultsController],
   providers: [
     {
       provide: TOOL_BUDGET_STORE,
@@ -24,15 +29,44 @@ import { ExecutionBudgetModule } from '../execution-budget/execution-budget.modu
       inject: [PrismaService],
     },
     {
-      // 收口②：全部 provider 原始出网统一经 ToolBroker（source_policy fail-closed + 预算 + 限流 + Trace）。
-      // 单实例供 discovery provider registry 与 SMTP 兜底票（验证瀑布第二票）共用。
+      provide: CONTACT_ENRICHMENT_SAFETY_COMPOSITION,
+      useFactory: async (prisma: PrismaService, budgetStore: BudgetStore, authority: ExecutionBudgetAuthorityService) =>
+        createManagedContactEnrichmentSafety({
+          prisma,
+          env: process.env,
+          budgetStore,
+          authority,
+          grantConsumer: {
+            consumeVerifiedWorkspaceGrantInTransaction: (verified, tx) =>
+              authority.consumeVerifiedWorkspaceGrantInTransaction(verified, tx),
+          },
+          buildBroker: (ports) =>
+            buildToolBroker({
+              sourcePolicyReader: sourcePolicyReaderFrom(prisma),
+              prisma,
+              budgetStore,
+              ...(ports ? { contactEnrichment: ports } : {}),
+            }),
+        }),
+      inject: [PrismaService, TOOL_BUDGET_STORE, ExecutionBudgetAuthorityService],
+    },
+    {
       provide: TOOL_BROKER,
-      useFactory: (prisma: PrismaService, budgetStore: BudgetStore) =>
-        buildToolBroker({ sourcePolicyReader: sourcePolicyReaderFrom(prisma), prisma, budgetStore }),
-      inject: [PrismaService, TOOL_BUDGET_STORE],
+      useFactory: (composition: Awaited<ReturnType<typeof createManagedContactEnrichmentSafety>>) => composition.broker,
+      inject: [CONTACT_ENRICHMENT_SAFETY_COMPOSITION],
     },
     DiscoveryService,
     ContactEnrichmentService,
+    {
+      provide: CONTACT_ENRICHMENT_SAFETY_EXECUTOR,
+      useFactory: (composition: Awaited<ReturnType<typeof createManagedContactEnrichmentSafety>>) =>
+        composition.service ?? createFailClosedSafetyExecutor(composition.unavailableReason ?? 'GOVERNANCE_PENDING'),
+      inject: [CONTACT_ENRICHMENT_SAFETY_COMPOSITION],
+    },
+    {
+      provide: CONTACT_ENRICHMENT_RESULTS_PORT,
+      useExisting: CONTACT_ENRICHMENT_SAFETY_EXECUTOR,
+    },
     {
       provide: DiscoveryProviderRegistry,
       // API 侧的联系人发现/邮箱验证走真实 public_web —— 注入全局 ModelGateway。

@@ -4,7 +4,7 @@ import { enrichmentRequestHash } from '../finders/email-enrichment-provider';
 import type { EmailVerificationProvider, EmailVerificationProviderResult } from '../verification/email-verification-provider';
 import type { EmailVerificationState } from '../../discovery/contact-point-verification-state';
 import { CapBudget, CompositeBudget, DEFAULT_PER_CONTACT_CAP_MICROUSD } from './enrichment-budget';
-import { enrichCompanyContacts, type EnrichCompanyContactsDeps } from './enrich-company-contacts';
+import { enrichCompanyContacts, loadContactEnrichmentTargets, loadCompanyContactEnrichmentTier, reachableContactEnrichmentFinders, type EnrichCompanyContactsDeps } from './enrich-company-contacts';
 import { enrichContactEmail } from './enrich-contact-email';
 import { emptyCircuitState } from './circuit-breaker';
 import { checkProviderGates } from '../provider-gates';
@@ -719,3 +719,58 @@ describe('enrichCompanyContacts：公司帽向单人 core 透传（S2-S0）', ()
 function finderTotal(handles: FinderHandle[]): number {
   return handles.reduce((sum, handle) => sum + handle.calls.length, 0);
 }
+
+
+describe('shared contact selector/tier ports for the frozen safety lane', () => {
+  it('preserves the none-email selector, explicit subset, order and cap', async () => {
+    const world = fakeWorld({ contacts: [{ id: CONTACT_1, fullName: 'Synthetic Person' }] });
+    const selected = await loadContactEnrichmentTargets(world.tx as never, { companyId: COMPANY, contactIds: [CONTACT_1] }, 3);
+    expect(selected.company?.domain).toBe('acme.example');
+    expect(selected.contacts).toEqual([{ id: CONTACT_1, fullName: 'Synthetic Person' }]);
+    expect(world.tx.canonicalContact.findMany).toHaveBeenCalledExactlyOnceWith({
+      where: { companyId: COMPANY, id: { in: [CONTACT_1] }, contactPoints: { none: { type: 'email' } } },
+      select: { id: true, fullName: true }, orderBy: { createdAt: 'asc' }, take: 3,
+    });
+    expect(world.tx.contactPoint.upsert).not.toHaveBeenCalled();
+    expect(world.tx.contactEnrichmentAttempt.create).not.toHaveBeenCalled();
+  });
+  it('preserves an explicitly empty subset rather than selecting every contact', async () => {
+    const world = fakeWorld({});
+    await loadContactEnrichmentTargets(world.tx as never, { companyId: COMPANY, contactIds: [] }, 10);
+    expect(world.tx.canonicalContact.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { companyId: COMPANY, id: { in: [] }, contactPoints: { none: { type: 'email' } } },
+    }));
+  });
+  it('does not select contacts when the company has no domain', async () => {
+    const world = fakeWorld({ domain: null });
+    expect(await loadContactEnrichmentTargets(world.tx as never, { companyId: COMPANY }, 10)).toEqual({ company: null, contacts: [] });
+    expect(world.tx.canonicalContact.findMany).not.toHaveBeenCalled();
+  });
+  it('does not invent an A tier when no configured tail is reachable', async () => {
+    const world = fakeWorld({ topLead: { id: 'synthetic-top-lead' } });
+    expect(await loadCompanyContactEnrichmentTier(world.prisma as never, INPUT, false)).toBe('B');
+    expect(world.tx.lead.findFirst).not.toHaveBeenCalled();
+  });
+  it.each([[true, 'A'], [false, 'B']] as const)('uses the original any-ICP threshold, topLead=%s', async (hit, expected) => {
+    const world = fakeWorld({ topLead: hit ? { id: 'synthetic-top-lead' } : null });
+    expect(await loadCompanyContactEnrichmentTier(world.prisma as never, INPUT, true)).toBe(expected);
+    expect(world.tx.lead.findFirst).toHaveBeenCalledWith({ where: { canonicalCompanyId: COMPANY, totalScore: { gte: 80 } }, select: { id: true } });
+  });
+  it('does not omit a configured unsupported finder from the reachable set', () => {
+    const primary = [finder('hunter', miss()).adapter, finder('findymail', miss()).adapter];
+    const tail = [finder('apollo', miss()).adapter];
+    expect(reachableContactEnrichmentFinders(primary, tail, 'B')).toBe(primary);
+    expect(reachableContactEnrichmentFinders(primary, tail, 'A').map((p) => p.key)).toEqual(['hunter', 'findymail', 'apollo']);
+    expect(primary.map((p) => p.key)).toEqual(['hunter', 'findymail']);
+  });
+});
+
+
+describe('shared selector cannot widen the frozen target cap', () => {
+  it.each([0, -1, 11, 1.5, Number.NaN, Number.POSITIVE_INFINITY])('rejects an invalid trusted cap %s before database selection', async (cap) => {
+    const world = fakeWorld({});
+    await expect(loadContactEnrichmentTargets(world.tx as never, { companyId: COMPANY }, cap)).rejects.toThrow();
+    expect(world.tx.canonicalCompany.findUnique).not.toHaveBeenCalled();
+    expect(world.tx.canonicalContact.findMany).not.toHaveBeenCalled();
+  });
+});

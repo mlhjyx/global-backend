@@ -1,42 +1,55 @@
-import { PrismaClient } from '@prisma/client';
-import Redis from 'ioredis';
-import { ToolRegistry } from './tool-registry';
-import { registerBuiltinTools, urlContentCacheEnabled } from './builtin-tools';
+import {
+  registerContactEnrichmentSafetyTools,
+  createStepAwareSmtpRcptProbeTool,
+  type ContactEnrichmentSafetyToolDeps,
+} from "./contact-enrichment-safety-tools";
+import { PrismaClient } from "@prisma/client";
+import Redis from "ioredis";
+import { ToolRegistry } from "./tool-registry";
+import { registerBuiltinTools, urlContentCacheEnabled } from "./builtin-tools";
 import {
   createPrismaUrlContentCache,
   type UrlContentCacheDb,
-} from '../adapters/url-content-cache';
-import { registerSourceTools } from './source-tools';
-import { ToolBroker, ToolTrace } from './tool-broker';
-import type { SiteBuildCostLedger } from '../site-builder/site-build-cost-ledger';
-import type { PrismaService } from '../prisma/prisma.service';
+} from "../adapters/url-content-cache";
+import { registerSourceTools } from "./source-tools";
+import { ToolBroker, ToolTrace } from "./tool-broker";
+import type { SiteBuildCostLedger } from "../site-builder/site-build-cost-ledger";
+import type { PrismaService } from "../prisma/prisma.service";
 import {
   type BudgetStore,
   PostgresBudgetStore,
   UnavailableBudgetStore,
-} from './budget-store';
-import type { RateLimitStore } from './rate-limiter';
-import type { ArtifactExecutionPort } from './artifact-execution-port';
-import { createGenericOperationArtifactExecutionFromEnv } from '../durable-results/artifact/generic-operation-artifact.runtime';
+} from "./budget-store";
+import type { RateLimitStore } from "./rate-limiter";
+import type { ArtifactExecutionPort } from "./artifact-execution-port";
+import { createGenericOperationArtifactExecutionFromEnv } from "../durable-results/artifact/generic-operation-artifact.runtime";
 import {
   RedisRateLimitStore,
   UnavailableRateLimitStore,
   validateRedisConnectionUrl,
-} from './redis-rate-limit-store';
+} from "./redis-rate-limit-store";
 
 /** source_policy 表的最小客户端面（PrismaClient 或事务客户端皆可）。 */
-type SourcePolicyDb = { sourcePolicy: PrismaClient['sourcePolicy'] };
+type SourcePolicyDb = { sourcePolicy: PrismaClient["sourcePolicy"] };
 
 /** Broker 用的 source_policy 读取器：按域名查（SUSPENDED + 用途）。未登记 → null（无策略）。 */
-export type SourcePolicyReader = (domain: string) => Promise<{ suspended: boolean; allowedPurpose?: string[] } | null>;
+export type SourcePolicyReader = (
+  domain: string,
+) => Promise<{ suspended: boolean; allowedPurpose?: string[] } | null>;
 
 /** 源合规矩阵（source_compliance_matrix，平台表无 RLS）的最小读取面。 */
-type SourceComplianceDb = { sourceComplianceMatrix: PrismaClient['sourceComplianceMatrix'] };
+type SourceComplianceDb = {
+  sourceComplianceMatrix: PrismaClient["sourceComplianceMatrix"];
+};
 
 /** Broker 用的源合规矩阵读取器：按 sourceKey 查。未登记 → null；approved = approved_at 非空。 */
-export type SourceComplianceReader = (sourceKey: string) => Promise<{ approved: boolean } | null>;
+export type SourceComplianceReader = (
+  sourceKey: string,
+) => Promise<{ approved: boolean } | null>;
 
-export function sourceComplianceReaderFrom(db: SourceComplianceDb): SourceComplianceReader {
+export function sourceComplianceReaderFrom(
+  db: SourceComplianceDb,
+): SourceComplianceReader {
   return async (sourceKey: string) => {
     const row = await db.sourceComplianceMatrix.findUnique({
       where: { sourceKey },
@@ -54,13 +67,17 @@ function rateLimitStoreFromEnvironment(): RateLimitStore {
   if (processRateLimitStore) return processRateLimitStore;
   const url = process.env.TOOL_RATE_LIMIT_REDIS_URL ?? process.env.REDIS_URL;
   if (!url?.trim()) {
-    return new UnavailableRateLimitStore('TOOL_RATE_LIMIT_REDIS_URL/REDIS_URL is not configured');
+    return new UnavailableRateLimitStore(
+      "TOOL_RATE_LIMIT_REDIS_URL/REDIS_URL is not configured",
+    );
   }
   let configured: string;
   try {
     configured = validateRedisConnectionUrl(url);
   } catch {
-    return new UnavailableRateLimitStore('Redis rate-limit configuration invalid');
+    return new UnavailableRateLimitStore(
+      "Redis rate-limit configuration invalid",
+    );
   }
   processRedis ??= new Redis(configured, {
     lazyConnect: true,
@@ -86,8 +103,10 @@ export function sourcePolicyReaderFrom(db: SourcePolicyDb): SourcePolicyReader {
     });
     if (!p) return null;
     return {
-      suspended: p.reviewStatus === 'SUSPENDED',
-      allowedPurpose: Array.isArray(p.allowedPurpose) ? (p.allowedPurpose as string[]) : undefined,
+      suspended: p.reviewStatus === "SUSPENDED",
+      allowedPurpose: Array.isArray(p.allowedPurpose)
+        ? (p.allowedPurpose as string[])
+        : undefined,
     };
   };
 }
@@ -101,6 +120,7 @@ export function buildToolBroker(deps?: {
   /** Required by managed composition unless a BudgetStore is explicitly injected. */
   prisma?: PrismaService;
   budgetStore?: BudgetStore;
+  smtpProtocol?: import("./builtin-tools").SmtpRcptProbeToolDependencies;
   limiter?: RateLimitStore;
   sourcePolicyReader?: SourcePolicyReader;
   /** 缺省从 PrismaService 派生（source_compliance_matrix 平台表，app_user 只读）。 */
@@ -109,6 +129,8 @@ export function buildToolBroker(deps?: {
   paidLedger?: SiteBuildCostLedger;
   /** Test/composition override; managed composition derives it from PrismaService + storage env. */
   artifactExecution?: ArtifactExecutionPort;
+  /** Trusted RLS step/config ports; absence never falls back to ungoverned enrichment. */
+  contactEnrichment?: ContactEnrichmentSafetyToolDeps;
 }): ToolBroker {
   // PR-B：HTTP-first 页面缓存（ETag/304）。仅当组合根有 Prisma 且 env 未关断时注入；
   // 缺省不注入 = crawl4ai.fetch 保持无条件请求行为。
@@ -116,19 +138,34 @@ export function buildToolBroker(deps?: {
     deps?.prisma && urlContentCacheEnabled()
       ? createPrismaUrlContentCache(deps.prisma as unknown as UrlContentCacheDb)
       : undefined;
-  const registry = registerSourceTools(
-    registerBuiltinTools(new ToolRegistry(), { urlContentCache }),
-  );
+  const builtins = registerBuiltinTools(new ToolRegistry(), {
+    urlContentCache,
+  });
+  const registry = new ToolRegistry();
+  for (const tool of builtins.all())
+    registry.register(
+      tool.id === "smtp.rcpt_probe"
+        ? createStepAwareSmtpRcptProbeTool(deps?.smtpProtocol)
+        : tool,
+    );
+  registerSourceTools(registry);
+  if (deps?.contactEnrichment)
+    registerContactEnrichmentSafetyTools(registry, deps.contactEnrichment);
   const traceRecorder =
     deps?.traceRecorder ??
     ((t: ToolTrace) => {
-      if (t.status !== 'OK') console.warn(`[tool-broker] ${t.status} ${t.toolId} ${t.reason ?? ''}`.trim());
+      if (t.status !== "OK")
+        console.warn(
+          `[tool-broker] ${t.status} ${t.toolId} ${t.reason ?? ""}`.trim(),
+        );
     });
   const budgetStore =
     deps?.budgetStore ??
     (deps?.prisma
       ? new PostgresBudgetStore(deps.prisma)
-      : new UnavailableBudgetStore('ToolBroker factory requires PrismaService for durable budgets'));
+      : new UnavailableBudgetStore(
+          "ToolBroker factory requires PrismaService for durable budgets",
+        ));
   // G3: subject-bound PERSONAL_DATA artifacts persist through the same durable
   // budget ledger. Without Prisma or valid storage env every such call stays held.
   const artifactExecution =
@@ -138,7 +175,9 @@ export function buildToolBroker(deps?: {
       : undefined);
   const sourceComplianceReader =
     deps?.sourceComplianceReader ??
-    (deps?.prisma ? sourceComplianceReaderFrom(deps.prisma as unknown as SourceComplianceDb) : undefined);
+    (deps?.prisma
+      ? sourceComplianceReaderFrom(deps.prisma as unknown as SourceComplianceDb)
+      : undefined);
   return new ToolBroker({
     registry,
     budgetStore,

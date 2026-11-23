@@ -33,6 +33,8 @@ export type ToolSourceClass =
 export interface CostModel {
   unit: "request" | "row" | "page" | "token" | "call";
   estimatedCents: number; // 每单位估算（供预算 reserve；执行后按实际 settle）
+  /** Exact canonical micro amount; when present the cent value is display-only. */
+  estimatedMicrousd?: string;
   external: boolean; // 是否外部付费/计额度
 }
 
@@ -93,7 +95,10 @@ export interface ToolContext {
    */
   beforePhysicalWire?: () => Promise<void>;
   /** Broker-owned per-wire fence; adapters pass the actual bounded transport promise. */
-  dispatchPhysicalWire?: <T>(wireId: string, execute: () => Promise<T>) => Promise<T>;
+  dispatchPhysicalWire?: <T>(
+    wireId: string,
+    execute: () => Promise<T>,
+  ) => Promise<T>;
   /**
    * Optional platform-schedule send fence. Managed platform activities inject
    * this callback; ordinary workspace requests leave it absent. The broker
@@ -189,6 +194,8 @@ export async function assertToolExternalActionAuthorized(
 export interface ToolResult<T = unknown> {
   data: T; // 符合 outputSchema
   costCents: number; // 实际成本（settle 用）
+  /** Exact canonical ledger amount; explicit malformed values must not fall back. */
+  costMicrousd?: string;
   provenance?: {
     sourceUrl?: string;
     fetchedAt: string;
@@ -276,4 +283,17 @@ export interface Tool<I = unknown, O = unknown> {
    * wire be retried, so declare it only with a test that proves the call.
    */
   physicalWireObservation?: "before_each_wire";
+}
+
+/** 从 input 里尽力提取一个域名（供 source_policy 闸门做合规检查；required 工具优先用 policyDomain）。 */
+export function extractToolGovernableDomain(input: unknown): string | null {
+  const v = input as { url?: string; domain?: string };
+  const raw = v?.url ?? v?.domain;
+  if (!raw) return null;
+  try {
+    const u = raw.includes("://") ? new URL(raw) : new URL(`https://${raw}`);
+    return u.hostname.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
 }

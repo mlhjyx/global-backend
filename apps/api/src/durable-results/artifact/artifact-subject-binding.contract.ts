@@ -12,7 +12,8 @@ export type SubjectBoundArtifactSchema =
   | "sanctions-download/v1"
   | "http-get/v1"
   | "crawl4ai-fetch/v1"
-  | "crawl4ai-render/v1";
+  | "crawl4ai-render/v1"
+  | "contact-email-find-hunter/v1";
 
 export type ArtifactSubjectBindingDecision =
   | Readonly<{
@@ -22,9 +23,7 @@ export type ArtifactSubjectBindingDecision =
   | Readonly<{
       status: "DENIED";
       reason:
-        | "SUBJECT_BINDING_INVALID"
-        | "SUBJECT_TOMBSTONED"
-        | "SUBJECT_SUPPRESSED";
+        "SUBJECT_BINDING_INVALID" | "SUBJECT_TOMBSTONED" | "SUBJECT_SUPPRESSED";
     }>
   | Readonly<{
       status: "BOUND";
@@ -35,14 +34,13 @@ type SubjectResolver = Pick<
   GenericOperationArtifactSubjectRepository,
   "resolveExistingSubject"
 > &
-  Partial<
-    Pick<GenericOperationArtifactSubjectRepository, "findExecutionHold">
-  >;
+  Partial<Pick<GenericOperationArtifactSubjectRepository, "findExecutionHold">>;
 
 const WORKSPACE_SUBJECT_SCHEMAS: ReadonlySet<string> = new Set([
   "http-get/v1",
   "crawl4ai-fetch/v1",
   "crawl4ai-render/v1",
+  "contact-email-find-hunter/v1",
 ]);
 
 const DENIED: ArtifactSubjectBindingDecision = Object.freeze({
@@ -167,6 +165,12 @@ export class ArtifactSubjectBindingContract {
     } catch {
       return DENIED;
     }
+
+    if (
+      source.resultSchema === "contact-email-find-hunter/v1" &&
+      subjectRef.subjectType !== "contact"
+    )
+      return DENIED;
 
     const resolved = await this.subjects.resolveExistingSubject(tx, {
       workspaceId: source.workspaceId,

@@ -58,15 +58,27 @@ function makeService(options: { authorizedCapMicrousd?: bigint } = {}) {
       generation: 1,
     })),
   };
-  const service = new ContactEnrichmentService(
-    prisma as never,
-    authority as never,
-    budgetStore as never,
-  );
-  return { service, authority, budgetStore, auditCreates };
+  const service = new ContactEnrichmentService(prisma as never);
+  return { service, authority, budgetStore, auditCreates, prisma };
 }
 
 describe('ContactEnrichmentService.enrichContacts', () => {
+
+  it('uses the safety lane when a composed service is injected, passing original body options and Grant', async () => {
+    const x = makeService(); const executeHttp = vi.fn(async () => ({ companyId: COMPANY_ID, tier: 'B', attempted: 1, costMicrousd: 1780, deadlineHit: false, results: [], admission: 'ADMITTED', operationRef: 'd'.repeat(64), qualityCoverage: 'PREREQUISITE_ONLY' }));
+    const safety = new ContactEnrichmentService(x.prisma as never, { executeHttp } as never);
+    const result = await safety.enrichContacts(CTX, COMPANY_ID, { lawfulBasis: { basis: 'legitimate_interest' }, contactIds: ['c-1'], maxProviders: 2, maxProbe: 3, attemptId: 'attempt-1' }, 'grant-jws');
+    expect(result).toMatchObject({ attempted: 1, costMicrousd: 1780 });
+    expect(executeHttp).toHaveBeenCalledExactlyOnceWith(CTX, COMPANY_ID, expect.objectContaining({ lawfulBasis: expect.objectContaining({ basis: 'legitimate_interest', recordedBy: 'u1' }), contactIds: ['c-1'], maxProviders: 2, maxProbe: 3, attemptId: 'attempt-1' }), 'grant-jws');
+    expect(x.authority.consumeWorkspaceGrant).not.toHaveBeenCalled(); expect(mocks.enrichCompanyContacts).not.toHaveBeenCalled();
+  });
+  it('fails closed without legacy wire or Grant consumption when no safety service is composed', async () => {
+    const x = makeService();
+    await expect(x.service.enrichContacts(CTX, COMPANY_ID, { lawfulBasis: { basis: 'legitimate_interest' } }, 'grant-jws')).rejects.toMatchObject({ response: { error: { code: 'GOVERNANCE_PENDING' } } });
+    expect(x.authority.consumeWorkspaceGrant).not.toHaveBeenCalled();
+    expect(mocks.enrichCompanyContacts).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     mocks.enrichCompanyContacts.mockReset();
     mocks.enrichCompanyContacts.mockResolvedValue({
@@ -93,72 +105,15 @@ describe('ContactEnrichmentService.enrichContacts', () => {
     expect(mocks.enrichCompanyContacts).not.toHaveBeenCalled();
   });
 
-  it('正确接线：Grant scope=purpose contact.enrich/subject company、预算=授权 cap、参数映射', async () => {
-    const { service, authority, auditCreates } = makeService({ authorizedCapMicrousd: 250_000n });
-    const result = await service.enrichContacts(
-      CTX,
-      COMPANY_ID,
-      {
-        lawfulBasis: { basis: 'legitimate_interest', ref: 'LIA-42' },
-        contactIds: ['c-1'],
-        maxProviders: 2,
-        maxProbe: 3,
-        attemptId: 'attempt-1',
-      },
-      'grant-jws',
-    );
+  it('passes mapped options to the safety lane and audits its attempted count without any Grant use', async () => {
+    const x = makeService();
+    const executeHttp = vi.fn(async () => ({ companyId: COMPANY_ID, tier: 'B', attempted: 3, costMicrousd: 4200, deadlineHit: false, results: [], admission: 'ADMITTED', operationRef: 'd'.repeat(64), qualityCoverage: 'PREREQUISITE_ONLY' }));
+    const service = new ContactEnrichmentService(x.prisma as never, { executeHttp } as never);
+    const result = await service.enrichContacts(CTX, COMPANY_ID, { lawfulBasis: { basis: 'legitimate_interest', ref: 'LIA-42' }, contactIds: ['c-1'], maxProviders: 2, maxProbe: 3, attemptId: 'attempt-1' }, 'grant-jws');
     expect(result).toMatchObject({ attempted: 3 });
-
-    const consumeArgs = authority.consumeWorkspaceGrant.mock.calls[0]?.[0] as {
-      compactJws: string;
-      scope: { purpose: string; subjectType: string; subjectId: string; requestSha256: string };
-    };
-    expect(consumeArgs.compactJws).toBe('grant-jws');
-    expect(consumeArgs.scope).toMatchObject({
-      purpose: 'contact.enrich',
-      subjectType: 'company',
-      subjectId: COMPANY_ID,
-    });
-    expect(consumeArgs.scope.requestSha256).toMatch(/^[0-9a-f]{64}$/u);
-
-    const [deps, input] = mocks.enrichCompanyContacts.mock.calls[0] as [
-      Record<string, unknown>,
-      Record<string, unknown>,
-    ];
-    expect(input).toMatchObject({
-      workspaceId: WORKSPACE_ID,
-      companyId: COMPANY_ID,
-      accountKey: 'acct-1',
-      contactIds: ['c-1'],
-      maxProvidersPerContact: 2,
-      maxVerificationCalls: 3,
-    });
-    expect((input.lawfulBasis as { basis: string; recordedBy: string })).toMatchObject({
-      basis: 'legitimate_interest',
-      recordedBy: 'u1',
-    });
-    // 预算端口以授权 cap 为上限。
-    expect((deps.budget as { remainingMicrousd(): number | undefined }).remainingMicrousd()).toBe(
-      250_000,
-    );
-
-    // PII 访问审计与请求同留痕（purpose=contact_discovery、subjectCount=attempted）。
-    expect(auditCreates[0]).toMatchObject({
-      workspaceId: WORKSPACE_ID,
-      actorId: 'u1',
-      purpose: 'contact_discovery',
-      companyId: COMPANY_ID,
-      subjectCount: 3,
-    });
-  });
-
-  it('attemptId 进入请求哈希：不同 attemptId → 不同 scope 哈希（同输入重放可复用）', async () => {
-    const { service, authority } = makeService();
-    await service.enrichContacts(CTX, COMPANY_ID, { lawfulBasis: { basis: 'consent' }, attemptId: 'a1' }, 'g1');
-    await service.enrichContacts(CTX, COMPANY_ID, { lawfulBasis: { basis: 'consent' }, attemptId: 'a2' }, 'g2');
-    const hashes = authority.consumeWorkspaceGrant.mock.calls.map(
-      (call) => (call[0] as { scope: { requestSha256: string } }).scope.requestSha256,
-    );
-    expect(hashes[0]).not.toBe(hashes[1]);
+    expect(executeHttp).toHaveBeenCalledExactlyOnceWith(CTX, COMPANY_ID, expect.objectContaining({ lawfulBasis: expect.objectContaining({ basis: 'legitimate_interest', recordedBy: 'u1' }), contactIds: ['c-1'], maxProviders: 2, maxProbe: 3, attemptId: 'attempt-1' }), 'grant-jws');
+    expect(x.authority.consumeWorkspaceGrant).not.toHaveBeenCalled();
+    expect(mocks.enrichCompanyContacts).not.toHaveBeenCalled();
+    expect(x.auditCreates[0]).toMatchObject({ purpose: 'contact_discovery', companyId: COMPANY_ID, subjectCount: 3 });
   });
 });

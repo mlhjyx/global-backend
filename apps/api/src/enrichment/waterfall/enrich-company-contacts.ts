@@ -118,12 +118,14 @@ export async function gateConfiguredVerificationProviders(
   return providers;
 }
 
-async function companyTier(
-  deps: EnrichCompanyContactsDeps,
-  input: EnrichCompanyContactsInput,
+export async function loadCompanyContactEnrichmentTier(
+  prisma: EnrichCompanyContactsDeps['prisma'],
+  input: Pick<EnrichCompanyContactsInput, 'workspaceId' | 'companyId'>,
+  hasTailFinders: boolean,
 ): Promise<'A' | 'B'> {
+  if (!hasTailFinders) return 'B';
   // A 档 = 该公司在任一 ICP 的 lead 总分 ≥80（评分见 §2.3.2.8；run 内通常就是本轮 ICP）。
-  const topLead = await deps.prisma.withWorkspace(input.workspaceId, (tx) =>
+  const topLead = await prisma.withWorkspace(input.workspaceId, (tx) =>
     tx.lead.findFirst({
       where: {
         canonicalCompanyId: input.companyId,
@@ -152,33 +154,17 @@ export async function enrichCompanyContacts(
     ),
   );
   const deadlineAtMs = input.deadlineAtMs ?? now().getTime() + ENRICH_SOFT_DEADLINE_MS;
-  const tier = deps.tailFinders && deps.tailFinders.length > 0 ? await companyTier(deps, input) : 'B';
-  const finders = tier === 'A' ? [...deps.finders, ...(deps.tailFinders ?? [])] : deps.finders;
+  const tier = await loadCompanyContactEnrichmentTier(deps.prisma, input, Boolean(deps.tailFinders?.length));
+  const finders = reachableContactEnrichmentFinders(deps.finders, deps.tailFinders, tier);
   const verifiers =
     deps.verifiers ??
     (await gateConfiguredVerificationProviders(deps.ownerPrisma, process.env, deps.verificationBroker));
   const budget =
     deps.budget ?? new CapBudget(maxContacts * DEFAULT_PER_CONTACT_CAP_MICROUSD);
 
-  const loaded = await deps.prisma.withWorkspace(input.workspaceId, async (tx) => {
-    const company = await tx.canonicalCompany.findUnique({
-      where: { id: input.companyId },
-      select: { id: true, name: true, domain: true },
-    });
-    if (!company?.domain) return { company: null, contacts: [] as Array<{ id: string; fullName: string }> };
-    const contacts = await tx.canonicalContact.findMany({
-      where: {
-        companyId: input.companyId,
-        ...(input.contactIds ? { id: { in: input.contactIds } } : {}),
-        // 只补「完全缺 email 点」的联系人；已有 email 点（任何状态）留给再验证队列。
-        contactPoints: { none: { type: 'email' } },
-      },
-      select: { id: true, fullName: true },
-      orderBy: { createdAt: 'asc' },
-      take: maxContacts,
-    });
-    return { company, contacts };
-  });
+  const loaded = await deps.prisma.withWorkspace(input.workspaceId, (tx) =>
+    loadContactEnrichmentTargets(tx, input, maxContacts),
+  );
   const domain = loaded.company?.domain ?? null;
   if (!loaded.company || !domain) {
     return { companyId: input.companyId, tier, skipped: 'no_domain', attempted: 0, costMicrousd: 0, deadlineHit: false, results: [] };
@@ -287,4 +273,39 @@ export async function enrichCompaniesBatch(
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, companies.length) }, () => worker()));
   return out;
+}
+
+/** Same transaction-local none-email query for both callers; never widens the target cap. */
+export async function loadContactEnrichmentTargets(
+  tx: Prisma.TransactionClient,
+  input: Pick<EnrichCompanyContactsInput, 'companyId' | 'contactIds'>,
+  maxContacts: number,
+): Promise<{ company: { id: string; name: string; domain: string | null } | null; contacts: Array<{ id: string; fullName: string }> }> {
+  if (!Number.isSafeInteger(maxContacts) || maxContacts < 1 || maxContacts > MAX_ENRICH_CONTACTS_PER_REQUEST) {
+    throw new RangeError('CONTACT_ENRICH_TARGET_CAP_INVALID');
+  }
+  const company = await tx.canonicalCompany.findUnique({
+    where: { id: input.companyId },
+    select: { id: true, name: true, domain: true },
+  });
+  if (!company?.domain) return { company: null, contacts: [] as Array<{ id: string; fullName: string }> };
+  const contacts = await tx.canonicalContact.findMany({
+    where: {
+      companyId: input.companyId,
+      ...(input.contactIds ? { id: { in: input.contactIds } } : {}),
+      // 只补「完全缺 email 点」的联系人；已有 email 点（任何状态）留给再验证队列。
+      contactPoints: { none: { type: 'email' } },
+    },
+    select: { id: true, fullName: true },
+    orderBy: { createdAt: 'asc' },
+    take: maxContacts,
+  });
+  return { company, contacts };
+}
+
+/** Keep the complete configured reachable set, including unsupported providers for preflight rejection. */
+export function reachableContactEnrichmentFinders(
+  primary: EmailEnrichmentAdapter[], tail: EmailEnrichmentAdapter[] | undefined, tier: 'A' | 'B',
+): EmailEnrichmentAdapter[] {
+  return tier === 'A' ? [...primary, ...(tail ?? [])] : primary;
 }

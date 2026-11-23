@@ -441,6 +441,14 @@
     },
     {
       "from": "enrichment",
+      "to": "auth"
+    },
+    {
+      "from": "enrichment",
+      "to": "common"
+    },
+    {
+      "from": "enrichment",
       "to": "compliance"
     },
     {
@@ -449,7 +457,19 @@
     },
     {
       "from": "enrichment",
+      "to": "durable-results"
+    },
+    {
+      "from": "enrichment",
       "to": "execution-budget"
+    },
+    {
+      "from": "enrichment",
+      "to": "prisma"
+    },
+    {
+      "from": "enrichment",
+      "to": "site-builder"
     },
     {
       "from": "enrichment",
@@ -1209,7 +1229,15 @@
     },
     {
       "from": "tools",
+      "to": "compliance"
+    },
+    {
+      "from": "tools",
       "to": "durable-results"
+    },
+    {
+      "from": "tools",
+      "to": "enrichment"
     },
     {
       "from": "tools",

@@ -70,17 +70,13 @@ import { guessEmailsForRunCompany } from '../discovery/contact-stage-email-guess
 import { stampLawfulBasis } from '../discovery/compliance/email-verification-gate';
 import { parseConfiguredLawfulBasis } from './backlog.activities';
 import {
-  ENRICH_COMPANY_BUDGET_CAP_MICROUSD,
-  ENRICH_SOFT_DEADLINE_MS,
   MAX_RUN_EMAIL_PROBES_PER_COMPANY,
   MAX_DISCOVERY_PROFILE_COMPANIES,
 } from '../discovery/execution-envelope';
-import { enrichCompanyContacts } from '../enrichment/waterfall/enrich-company-contacts';
-import { CapBudget, CompositeBudget } from '../enrichment/waterfall/enrichment-budget';
-import { PrismaCircuitBreakerStore } from '../enrichment/waterfall/circuit-breaker';
+import { executeContactEnrichmentSafetyActivity } from './contact-enrichment-safety.activity';
+import type { ContactEnrichmentSafetyService } from '../enrichment/safety/contact-enrichment-safety.service';
 import {
   resolveConfiguredFinderProviders,
-  resolveConfiguredTailFinderProviders,
 } from '../enrichment/finders/finder-pool';
 import type { ExecutionContext, EnrichmentResult } from '../discovery/provider-contract';
 import {
@@ -147,6 +143,8 @@ export function createRun2PipelineActivities(deps: {
   websiteProfile?: Pick<WebsiteProfileProvider, 'profile'>;
   /** S0 技能运行时：生产由 worker 注入 DB resolver；缺省为内置目录直通。 */
   skills?: SkillResolver;
+  /** Frozen safety lane for contact enrichment; absence keeps the original waterfall lane. */
+  contactEnrichmentSafety?: Pick<ContactEnrichmentSafetyService, 'executeRun'>;
 }) {
   const budgets =
     deps.budgetStore ?? new UnavailableBudgetStore('run2 pipeline activities require an authoritative BudgetStore');
@@ -785,6 +783,7 @@ export function createRun2PipelineActivities(deps: {
       tier?: 'A' | 'B';
       attempted?: number;
       costMicrousd?: number;
+      operationRef?: string;
     }> {
       const finders = resolveConfiguredFinderProviders();
       if (finders.length === 0) return { skipped: true, reason: 'no_configured_finder' };
@@ -809,38 +808,26 @@ export function createRun2PipelineActivities(deps: {
         workspaceId: binding.scopeKey,
         accountKey: binding.accountKey,
       });
-      const budget = new CompositeBudget([
-        new CapBudget(ENRICH_COMPANY_BUDGET_CAP_MICROUSD),
-        new CapBudget(Number(runStatus.remainingMicrousd)),
-      ]);
-      const result = await enrichCompanyContacts(
-        {
-          prisma: deps.prisma,
-          ownerPrisma: deps.prisma,
-          finders,
-          tailFinders: resolveConfiguredTailFinderProviders(),
-          circuits: new PrismaCircuitBreakerStore(deps.prisma),
-          budget,
-          actorId: `discovery-run:${args.runId}`,
-          // SMTP 兜底票（验证瀑布第二票）的出网闸门；worker 未装配 broker 时兜底票不参与。
-          ...(deps.broker ? { verificationBroker: deps.broker } : {}),
-        },
-        {
+      if (deps.contactEnrichmentSafety) {
+        // Same shared runner as HTTP: no second grant, original binding and exact remaining micro.
+        const safety = await executeContactEnrichmentSafetyActivity(deps.contactEnrichmentSafety, {
           workspaceId: args.workspaceId,
           companyId: args.companyId,
           runId: args.runId,
-          accountKey: binding.accountKey,
+          binding,
           lawfulBasis,
-          deadlineAtMs: Date.now() + ENRICH_SOFT_DEADLINE_MS,
-        },
-      );
-      return {
-        skipped: false,
-        tier: result.tier,
-        attempted: result.attempted,
-        costMicrousd: result.costMicrousd,
-        ...(result.skipped ? { reason: result.skipped } : {}),
-      };
+          remainingMicrousd: runStatus.remainingMicrousd,
+        });
+        if (safety.skipped) return { skipped: true, ...(safety.reason ? { reason: safety.reason } : {}) };
+        return {
+          skipped: false,
+          ...(safety.tier ? { tier: safety.tier } : {}),
+          ...(safety.attempted === undefined ? {} : { attempted: safety.attempted }),
+          ...(safety.costMicrousd === undefined ? {} : { costMicrousd: safety.costMicrousd }),
+          ...(safety.operationRef ? { operationRef: safety.operationRef } : {}),
+        };
+      }
+      return { skipped: true, reason: 'source_control_pending' };
     },
   };
 

@@ -24,6 +24,10 @@ export interface DomainAckProductConsumerBinding {
 }
 
 export const DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS = Object.freeze([
+  { producerId: 'contact_email.find.hunter', consumer: 'EnrichmentDomainCommitter.commitContact', domainAggregateType: 'ContactEnrichmentExecution', identity: 'execution-contact-and-original-operation', resultStrategy: 'artifact_reference', resultSchema: 'contact-email-find-hunter/v1' },
+  { producerId: 'contact_email.verify.millionverifier', consumer: 'EnrichmentDomainCommitter.commitContact', domainAggregateType: 'ContactEnrichmentExecution', identity: 'execution-contact-and-original-operation', resultStrategy: 'typed_projection', resultSchema: 'contact-email-verify-millionverifier/v1' },
+  { producerId: 'contact_email.verify.emailable', consumer: 'EnrichmentDomainCommitter.commitContact', domainAggregateType: 'ContactEnrichmentExecution', identity: 'execution-contact-and-original-operation', resultStrategy: 'typed_projection', resultSchema: 'contact-email-verify-emailable/v1' },
+  { producerId: 'contact_email.verify.zerobounce', consumer: 'EnrichmentDomainCommitter.commitContact', domainAggregateType: 'ContactEnrichmentExecution', identity: 'execution-contact-and-original-operation', resultStrategy: 'typed_projection', resultSchema: 'contact-email-verify-zerobounce/v1' },
   { producerId: 'market.candidates.generate', consumer: 'MarketCandidateGenerationService.apply', domainAggregateType: 'MarketCandidateGeneration', identity: 'generation-id-and-terminal-consumption-version', resultStrategy: 'typed_projection', resultSchema: 'market-candidates-generation/v1' },
   { producerId: 'companies_house.search', consumer: 'CompanyRegistryDiscoveryProvider', domainAggregateType: 'CanonicalCompany', identity: 'company-registry-number', resultStrategy: 'typed_projection', resultSchema: 'companies-house-search/v1' },
   { producerId: 'crawl4ai.fetch', consumer: 'WebCrawlKnowledgeSource', domainAggregateType: 'KnowledgeSource', identity: 'source-url-and-content-hash', resultStrategy: 'artifact_reference', resultSchema: 'crawl4ai-fetch/v1' },

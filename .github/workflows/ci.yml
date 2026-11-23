@@ -722,6 +722,8 @@ jobs:
           CONTACT_PATH_BACKFILL_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
           WEEKLY_REPORT_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
           WEEKLY_REPORT_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
+          CONTACT_ENRICHMENT_TEST_DATABASE_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
+          CONTACT_ENRICHMENT_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
         run: |
           set -euo pipefail
           pnpm --filter @global/db exec prisma migrate deploy
@@ -739,7 +741,9 @@ jobs:
             src/agents/agent-orchestration.postgres.spec.ts \
             src/registry/domain/domain-stores.postgres.spec.ts \
             src/discovery/contact-path-backfill.postgres.spec.ts \
-            src/report/weekly-report.postgres.spec.ts
+            src/report/weekly-report.postgres.spec.ts \
+            src/enrichment/safety/enrichment-safety.migration.spec.ts \
+            src/enrichment/safety/enrichment-execution.repository.postgres.spec.ts
 
       - name: Site Builder isolated zero-dispatch evaluation boundary
         if: needs.renderer-visual-scope.outputs.run_code != 'false'

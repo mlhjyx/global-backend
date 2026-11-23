@@ -11,6 +11,13 @@ const factory = readFileSync(
   path.join(apiRoot, "src/tools/tool-broker.factory.ts"),
   "utf8",
 );
+const enrichmentComposition = readFileSync(
+  path.join(
+    apiRoot,
+    "src/enrichment/safety/contact-enrichment-safety.composition.ts",
+  ),
+  "utf8",
+);
 
 describe("R4-B production worker paid-ledger wiring", () => {
   it("shares one durable ledger across gateway, ToolBroker and Site Builder activities", () => {
@@ -22,7 +29,11 @@ describe("R4-B production worker paid-ledger wiring", () => {
     );
     expect(worker).toContain("gateway.paidLedger = costLedger");
     expect(worker).toMatch(
-      /buildToolBroker\(\{\s*sourcePolicyReader,\s*paidLedger: costLedger,\s*budgetStore,\s*prisma,\s*\}\)/,
+      /createWorkerContactEnrichmentSafety\(\{\s*prisma,\s*budgetStore,\s*costLedger,\s*sourcePolicyReader,?\s*\}\)/,
+    );
+    expect(worker).toContain("const broker = safetyComposition.broker");
+    expect(enrichmentComposition).toMatch(
+      /buildToolBroker\(\{\s*sourcePolicyReader: input\.sourcePolicyReader,\s*paidLedger: input\.costLedger as never,\s*budgetStore: input\.budgetStore,\s*prisma: input\.prisma,\s*\.\.\.\(ports \? \{ contactEnrichment: ports \} : \{\}\)\s*\}\)/,
     );
     expect(worker).toMatch(
       /createSiteBuilderActivities\(\{[\s\S]*?costLedger,[\s\S]*?\}\)/,

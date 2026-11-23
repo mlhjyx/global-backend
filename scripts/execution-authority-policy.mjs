@@ -14,6 +14,7 @@ const TOOL_SOURCE_PATHS = Object.freeze([
   'apps/api/src/tools/builtin-tools.ts',
   'apps/api/src/tools/source-tools.ts',
   'apps/api/src/tools/deepseek-tools.ts',
+  'apps/api/src/tools/contact-enrichment-safety-tools.ts',
 ]);
 const RECEIPT_PATH = 'apps/api/src/durable-results/durable-execution-receipt.ts';
 const ACK_PATH = 'apps/api/src/durable-results/domain-ack-contract.ts';
@@ -30,6 +31,8 @@ export const EXPECTED_TOOL_IDS = Object.freeze([
   'inpi_rne.search', 'google_patents.search', 'tradefair.algolia',
   'mapyourshow.fetch', 'samgov.search', 'opencorporates.search', 'sanctions.download',
   'deepseek.search', 'deepseek.fetch',
+  'contact_email.find.hunter', 'contact_email.verify.millionverifier',
+  'contact_email.verify.emailable', 'contact_email.verify.zerobounce',
 ]);
 
 export const EXPECTED_MODEL_TASKS = Object.freeze([
@@ -129,6 +132,10 @@ export const EXPECTED_TOOL_CALLSITES = Object.freeze([
 
 export const EXPECTED_NON_TOOL_INVOKE_BOUNDARIES = Object.freeze([
   'apps/api/src/site-builder/eval/copy-sonnet-recovery-zero-call-preflight.ts#input.pricingBroker#1',
+  'apps/api/src/enrichment/safety/governed-enrichment-invoker.ts#this.deps.broker#1',
+  'apps/api/src/enrichment/safety/contact-enrichment-safety.composition.ts#invoker#1',
+  'apps/api/src/enrichment/safety/contact-enrichment-safety.composition.ts#invoker#2',
+  'apps/api/src/enrichment/safety/contact-enrichment-safety.composition.ts#invoker.createStepBoundSmtpBroker(bound, context)#1',
 ]);
 
 const RECEIPT_FIELDS = Object.freeze([
@@ -148,6 +155,7 @@ const ARTIFACT_CONTRACTS = Object.freeze({
   'crawl4ai-render/v1': Object.freeze({ maxBytes: 3000000, mediaTypes: Object.freeze(['text/html']), privacyClass: 'PERSONAL_DATA', ttlSeconds: 86400 }),
   'http-get/v1': Object.freeze({ maxBytes: 3000000, mediaTypes: Object.freeze(['text/plain']), privacyClass: 'PERSONAL_DATA', ttlSeconds: 86400 }),
   'sanctions-download/v1': Object.freeze({ maxBytes: 33554432, mediaTypes: Object.freeze(['application/xml', 'text/xml']), privacyClass: 'PERSONAL_DATA', ttlSeconds: 86400 }),
+  'contact-email-find-hunter/v1': Object.freeze({ maxBytes: 16384, mediaTypes: Object.freeze(['application/octet-stream']), privacyClass: 'PERSONAL_DATA', ttlSeconds: 86400 }),
 });
 
 function issue(code, path, message, producerId) {
@@ -521,7 +529,7 @@ function validateModelTasks(manifest, path, issues) {
 function validateArtifacts(manifest, path, issues) {
   if (!Array.isArray(manifest.artifactSchemas)) return;
   const schemas = manifest.artifactSchemas.map((entry) => entry?.schema).filter(Boolean);
-  if (!sameSet(schemas, Object.keys(ARTIFACT_CONTRACTS)) || new Set(schemas).size !== 4) {
+  if (!sameSet(schemas, Object.keys(ARTIFACT_CONTRACTS)) || new Set(schemas).size !== 5) {
     issues.push(issue('EXECUTION_AUTHORITY_ARTIFACT_INVENTORY_MISMATCH', path, 'manifest must declare exactly four artifact schemas'));
   }
   for (const entry of manifest.artifactSchemas) {
@@ -838,12 +846,13 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
   const constantSource = `${source}\n${platformContract}`;
   const sourceIds = [...source.matchAll(/\bid:\s*["']([a-z0-9_.]+)["']/g)].map((match) => match[1]);
   const registrationCount = [...source.matchAll(/\bregistry\.register\s*\(/g)].length;
-  if (!sameSet(sourceIds, EXPECTED_TOOL_IDS) || new Set(sourceIds).size !== 23 || registrationCount !== 23) {
+  if (!sameSet(sourceIds, EXPECTED_TOOL_IDS) || new Set(sourceIds).size !== 27 || registrationCount !== 27) {
     issues.push(issue('EXECUTION_AUTHORITY_TOOL_SOURCE_INVENTORY_MISMATCH', 'apps/api/src/tools', 'source declarations/registrations must be exactly 23'));
   }
   const projectionSources = [
     await readResolved('apps/api/src/durable-results/catalog-result-projections.ts'),
     await readResolved('apps/api/src/durable-results/source-result-projections.ts'),
+    await readResolved('apps/api/src/durable-results/contact-email-verification-projections.ts'),
   ].join('\n');
   for (const entry of manifest.tools ?? []) {
     const declarationSource = await readResolved(entry.declarationPath);
