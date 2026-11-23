@@ -1,10 +1,5 @@
 import { createHash } from 'node:crypto';
 import { readManufacturerNetworkExecutionBody, type ManufacturerNetworkExecuteBody } from '../discovery/manufacturer-network-execution';
-import {
-  MAX_ENRICH_CONTACTS_PER_REQUEST,
-  MAX_ENRICH_VERIFICATION_CALLS_PER_ADDRESS,
-} from '../discovery/execution-envelope';
-import { MAX_FINDER_ATTEMPTS } from '../enrichment/waterfall/enrich-contact-email';
 import { ExecutionControlError } from './execution-control-error';
 import type { WorkspaceExecutionBudgetScope } from './execution-budget-authority.service';
 
@@ -54,11 +49,8 @@ export type WorkspaceExecutionBudgetRequest =
   | Readonly<{
       operation: 'POST /canonical-companies/:id/enrich-contacts';
       companyId: string;
-      /**
-       * 每次富集请求的幂等键，以及请求的计价边界。未显式提供的字段保持旧哈希
-       * （仅 attemptId），由 envelope 按最大默认边界保守计价。
-       */
-      body?: Readonly<EnrichContactsBudgetFields>;
+      /** 每次富集请求的幂等键（同 discover-contacts 口径：只有 attemptId 进请求哈希）。 */
+      body?: Readonly<{ attemptId?: string }>;
     }>
   | Readonly<{
       operation: 'POST /contact-points/:pointId/verify';
@@ -92,13 +84,6 @@ export type WorkspaceExecutionBudgetRequest =
       body: Readonly<{ intentDigest: string }>;
     }>;
 
-export interface EnrichContactsBudgetFields {
-  readonly attemptId?: string;
-  readonly maxProviders?: number;
-  readonly maxProbe?: number;
-  readonly contactCount?: number;
-}
-
 export interface GuessEmailsHttpRequestBody {
   readonly lawfulBasis?: string;
   readonly lawfulBasisRef?: string;
@@ -117,50 +102,6 @@ export interface VerifyContactPointHttpRequestBody {
 
 function invalidRequest(): never {
   throw new ExecutionControlError('EXECUTION_BUDGET_REQUEST_INVALID');
-}
-
-function boundedInteger(
-  value: number | undefined,
-  minimum: number,
-  maximum: number,
-): number | undefined {
-  if (value === undefined) return undefined;
-  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
-    invalidRequest();
-  }
-  return value;
-}
-
-/**
- * Normalize the optional enrich-contacts pricing bounds before they enter the
- * request hash. Absent fields stay absent so pre-existing attempt-only Grants
- * keep their request scope; the envelope prices absent fields at the maximum
- * default bounds.
- */
-function enrichBudgetFields(
-  input: EnrichContactsBudgetFields | undefined,
-): EnrichContactsBudgetFields | undefined {
-  if (input === undefined) return undefined;
-  if (input.attemptId !== undefined && typeof input.attemptId !== 'string') {
-    invalidRequest();
-  }
-  const maxProviders = boundedInteger(input.maxProviders, 1, MAX_FINDER_ATTEMPTS);
-  const maxProbe = boundedInteger(
-    input.maxProbe,
-    1,
-    MAX_ENRICH_VERIFICATION_CALLS_PER_ADDRESS,
-  );
-  const contactCount = boundedInteger(
-    input.contactCount,
-    0,
-    MAX_ENRICH_CONTACTS_PER_REQUEST,
-  );
-  return Object.freeze({
-    ...(input.attemptId === undefined ? {} : { attemptId: input.attemptId }),
-    ...(maxProviders === undefined ? {} : { maxProviders }),
-    ...(maxProbe === undefined ? {} : { maxProbe }),
-    ...(contactCount === undefined ? {} : { contactCount }),
-  });
 }
 
 function canonicalJson(value: unknown): string {
@@ -229,17 +170,15 @@ function requestMaterial(request: WorkspaceExecutionBudgetRequest): JsonValue {
         companyId: request.companyId,
         body: (request.body ?? null) as JsonValue,
       };
-    case 'POST /canonical-companies/:id/enrich-contacts': {
-      const fields = enrichBudgetFields(request.body);
+    case 'POST /canonical-companies/:id/enrich-contacts':
       return {
         operation: request.operation,
         companyId: request.companyId,
-        // 旧请求（无 body / 只有 attemptId）保持原哈希；显式计价边界才进入哈希。
-        ...(fields === undefined || Object.keys(fields).length === 0
+        // 仅当客户端带 attemptId 时才进入哈希（与 discover-contacts 同口径）。
+        ...(request.body?.attemptId === undefined
           ? {}
-          : { body: fields as JsonValue }),
+          : { body: { attemptId: request.body.attemptId } }),
       };
-    }
     case 'POST /contact-points/:pointId/verify':
       return {
         operation: request.operation,
@@ -393,15 +332,13 @@ export function discoverContactsExecutionBudgetRequestScope(
 /** Canonical public DTO boundary used by both the HTTP adapter and grant issuer. */
 export function enrichContactsExecutionBudgetRequestScope(
   companyId: string,
-  body?: EnrichContactsBudgetFields,
+  body?: { readonly attemptId?: string },
 ): Readonly<WorkspaceExecutionBudgetScope> {
-  const fields = enrichBudgetFields(body);
+  const attemptId = body?.attemptId;
   return workspaceExecutionBudgetRequestScope({
     operation: 'POST /canonical-companies/:id/enrich-contacts',
     companyId,
-    ...(fields === undefined || Object.keys(fields).length === 0
-      ? {}
-      : { body: fields }),
+    ...(attemptId === undefined ? {} : { body: { attemptId } }),
   });
 }
 

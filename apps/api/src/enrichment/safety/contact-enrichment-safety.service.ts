@@ -44,12 +44,7 @@ export class ContactEnrichmentSafetyService implements ContactEnrichmentResultsP
   async executeHttp(context: RequestContext, companyId: string, options: ContactEnrichmentSafetyOptions, compactJws?: string): Promise<ContactEnrichmentSafetyResult> {
     this.address(context.workspaceId, companyId);
     const normalized = this.options(options);
-    const scope = enrichContactsExecutionBudgetRequestScope(companyId, {
-      ...(normalized.attemptId === undefined ? {} : { attemptId: normalized.attemptId }),
-      ...(normalized.contactIds === undefined ? {} : { contactCount: normalized.contactIds.length }),
-      ...(normalized.maxProviders === undefined ? {} : { maxProviders: normalized.maxProviders }),
-      ...(normalized.maxProbe === undefined ? {} : { maxProbe: normalized.maxProbe }),
-    });
+    const scope = enrichContactsExecutionBudgetRequestScope(companyId, { attemptId: normalized.attemptId });
     const authority = await this.deps.authority.verifyWorkspaceGrant({ compactJws, identity: context, scope });
     if (authority.capMicrousd === null || authority.workspaceId !== context.workspaceId || authority.subjectId !== companyId || authority.requestSha256 !== scope.requestSha256) throw new EnrichmentSafetyError("CONTROL_MISMATCH");
     const preparation = await this.prepare({ workspaceId: context.workspaceId, companyId, entrypoint: "http", businessRunId: null, requestSha256: scope.requestSha256, authorityCapMicrousd: parseCanonicalMicrousd("HTTP cap", authority.capMicrousd.toString()).toString(), options: normalized });

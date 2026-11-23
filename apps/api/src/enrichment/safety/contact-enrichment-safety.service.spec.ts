@@ -7,13 +7,8 @@ import { ContactEnrichmentSafetyService, type ContactEnrichmentSafetyServiceDeps
 const W = '00000000-0000-4000-8000-000000000001', C = '00000000-0000-4000-8000-000000000002', A = '00000000-0000-4000-8000-000000000003', ACCOUNT = '00000000-0000-4000-8000-000000000004', RUN = '00000000-0000-4000-8000-000000000005', CONTACT = '00000000-0000-4000-8000-000000000006';
 const ctx: RequestContext = { workspaceId: W, userId: 'synthetic-actor', roles: ['synthetic'], scopes: ['acquisition:write', 'contact-discovery:read', 'compliance:manage'] };
 const options = { lawfulBasis: { basis: 'legitimate_interest' as const }, attemptId: 'attempt-1' };
-function world(config: { notAdmitted?: boolean; unsupported?: boolean; deniedRecovery?: boolean } = {}, requestOptions = options) {
-  const events: string[] = []; const request = enrichContactsExecutionBudgetRequestScope(C, {
-    ...(requestOptions.attemptId === undefined ? {} : { attemptId: requestOptions.attemptId }),
-    ...(requestOptions.contactIds === undefined ? {} : { contactCount: requestOptions.contactIds.length }),
-    ...(requestOptions.maxProviders === undefined ? {} : { maxProviders: requestOptions.maxProviders }),
-    ...(requestOptions.maxProbe === undefined ? {} : { maxProbe: requestOptions.maxProbe }),
-  });
+function world(config: { notAdmitted?: boolean; unsupported?: boolean; deniedRecovery?: boolean } = {}) {
+  const events: string[] = []; const request = enrichContactsExecutionBudgetRequestScope(C, { attemptId: options.attemptId });
   const authority: VerifiedExecutionBudgetAuthority = { schemaVersion: 'execution-budget-grant/v1', authorityKind: 'WORKSPACE_GRANT', issuer: 'https://issuer.example.invalid', audience: 'global-backend:execution-budget', jti: 'fake-jti', purpose: 'contact.enrich', workspaceId: W, subjectType: 'company', subjectId: C, requestSha256: request.requestSha256, scheduleId: null, currency: 'USD', unit: 'microusd', capMicrousd: 250000n, capPerRunMicrousd: null, campaignCapMicrousd: null, maxRuns: null, tokenSha256: 'c'.repeat(64), issuedAt: 1, notBefore: 1, expiresAt: 9999999999 };
   const view = { executionId: RUN, operationRef: 'd'.repeat(64), planSha256: 'f'.repeat(64), status: 'PREPARED' as const, accountId: ACCOUNT, authorityId: A, generation: 1 };
   const result = { companyId: C, tier: 'B' as const, attempted: 1, costMicrousd: 1700, deadlineHit: false, results: [{ contactId: CONTACT, status: 'stored' as const }] };
@@ -22,7 +17,7 @@ function world(config: { notAdmitted?: boolean; unsupported?: boolean; deniedRec
     prepare: vi.fn(async (input) => { events.push('PREFLIGHT'); if (config.notAdmitted) return { status: 'NOT_ADMITTED', reasonCode: 'GOVERNANCE_PENDING', tier: 'B' };
       const plan = buildFrozenEnrichmentPlan({ workspaceId: W, companyId: C, entrypoint: input.entrypoint, businessRunId: input.businessRunId, requestSha256: input.requestSha256, admittedAtMs: 1000, deadlineAtMs: 601000,
         targets: [{ contactId: CONTACT, contactOrdinal: 0, inputVersion: 'a'.repeat(64), beforeDigest: 'b'.repeat(64), pointRefs: [] }], slots: [{ slotKey: 'finder', contactId: CONTACT, contactOrdinal: 0, phase: 'FINDER', provider: config.unsupported ? 'findymail' : 'hunter', toolId: config.unsupported ? 'contact_email.find.findymail' : 'contact_email.find.hunter', toolVersion: '1.0.0', quoteMicrousd: '1700', pricingVersion: 'p1', dependsOnSlotKey: null }],
-        limits: { authorityCapMicrousd: input.authorityCapMicrousd, companyCapMicrousd: input.authorityCapMicrousd, contactCapMicrousd: '150000', finderCompanyMax: 10, finderContactMax: input.options.maxProviders ?? 3, verifyAddressMax: input.options.maxProbe ?? 6, maxContacts: 10 } }); return { status: 'PREPARED', plan, tier: 'B' }; }),
+        limits: { authorityCapMicrousd: input.authorityCapMicrousd, companyCapMicrousd: input.authorityCapMicrousd, contactCapMicrousd: '150000', finderCompanyMax: 10, finderContactMax: 3, verifyAddressMax: 6, maxContacts: 10 } }); return { status: 'PREPARED', plan, tier: 'B' }; }),
     repository: { admitHttp: vi.fn(async () => { events.push('ATOMIC_ADMISSION'); return view; }), admitRun: vi.fn(async () => { events.push('RUN_ADMISSION_NO_GRANT'); return view; }) },
     execution: { findRun: vi.fn(async () => null), findByRef: vi.fn(async () => ({ view, workspaceId: W, companyId: C, businessRunId: null, accountKey: 'original-key', admissionRequestSha256: 'e'.repeat(64) })), execute: vi.fn(async () => { events.push('SAME_EXECUTION_RUNNER'); return result; }) },
     results: {
@@ -42,20 +37,6 @@ describe('shared safe service admission and read/recovery orchestration, pure po
     expect(x.events).toEqual(['VERIFY_ONLY','PREFLIGHT','ATOMIC_ADMISSION','SAME_EXECUTION_RUNNER']);
     expect(x.deps.repository.admitHttp).toHaveBeenCalledWith(expect.objectContaining({ authority: x.authority, executionOptions: { lawfulBasisKind: 'legitimate_interest', tier: 'B' } }));
     expect(x.deps.authority.verifyWorkspaceGrant).toHaveBeenCalledWith(expect.objectContaining({ compactJws: 'fake-jws', scope: enrichContactsExecutionBudgetRequestScope(C, { attemptId: 'attempt-1' }) }));
-  });
-  it('binds explicit enrich pricing bounds into the execute request scope', async () => {
-    const bounded = { ...options, contactIds: [CONTACT], maxProviders: 1, maxProbe: 1 };
-    const x = world({}, bounded);
-    await x.service.executeHttp(ctx, C, bounded, 'fake-jws');
-    expect(x.deps.authority.verifyWorkspaceGrant).toHaveBeenCalledWith(expect.objectContaining({
-      compactJws: 'fake-jws',
-      scope: enrichContactsExecutionBudgetRequestScope(C, {
-        attemptId: 'attempt-1',
-        contactCount: 1,
-        maxProviders: 1,
-        maxProbe: 1,
-      }),
-    }));
   });
   it('refuses missing lawful basis before verification, preflight or any admission', async () => {
     const x = world(); await expect(x.service.executeHttp(ctx, C, {}, 'fake-jws')).rejects.toThrow(); expect(x.deps.authority.verifyWorkspaceGrant).not.toHaveBeenCalled(); expect(x.deps.prepare).not.toHaveBeenCalled(); expect(x.deps.repository.admitHttp).not.toHaveBeenCalled();

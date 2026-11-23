@@ -24,15 +24,11 @@ import { envelope, type Enveloped } from '../common/envelope';
 import {
   MAX_EMAIL_GUESS_CONTACTS,
   MAX_EMAIL_PROBE_CANDIDATES,
-  MAX_ENRICH_CONTACTS_PER_REQUEST,
-  MAX_ENRICH_VERIFICATION_CALLS_PER_ADDRESS,
 } from '../discovery/execution-envelope';
-import { MAX_FINDER_ATTEMPTS } from '../enrichment/waterfall/enrich-contact-email';
 import {
   WORKSPACE_EXECUTION_QUOTE_OPERATIONS,
 } from './workspace-technical-budget-envelope';
 import type {
-  EnrichContactsBudgetFields,
   GuessEmailsHttpRequestBody,
   VerifyContactPointHttpRequestBody,
   WorkspaceExecutionBudgetRequest,
@@ -164,51 +160,12 @@ function optionalBoolean(value: unknown): boolean | undefined {
 function optionalBoundedInteger(
   value: unknown,
   maximum: number,
-  minimum = 1,
 ): number | undefined {
   if (value === undefined) return undefined;
-  if (
-    !Number.isSafeInteger(value) ||
-    (value as number) < minimum ||
-    (value as number) > maximum
-  ) {
+  if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > maximum) {
     invalid();
   }
   return value as number;
-}
-
-/**
- * Enrich-contacts quote body: attemptId plus the execution bounds that the
- * engine's request scope hashes. Absent bounds keep the legacy attempt-only
- * scope and are priced by the envelope at the maximum defaults.
- */
-function enrichBody(
-  value: unknown,
-): { readonly body?: Readonly<EnrichContactsBudgetFields> } {
-  if (value === undefined) return {};
-  const input = record(value);
-  exactKeys(input, ['attemptId'], ['maxProviders', 'maxProbe', 'contactCount']);
-  const maxProviders = optionalBoundedInteger(
-    input.maxProviders,
-    MAX_FINDER_ATTEMPTS,
-  );
-  const maxProbe = optionalBoundedInteger(
-    input.maxProbe,
-    MAX_ENRICH_VERIFICATION_CALLS_PER_ADDRESS,
-  );
-  const contactCount = optionalBoundedInteger(
-    input.contactCount,
-    MAX_ENRICH_CONTACTS_PER_REQUEST,
-    0,
-  );
-  return {
-    body: Object.freeze({
-      attemptId: uuid(input.attemptId),
-      ...(maxProviders === undefined ? {} : { maxProviders }),
-      ...(maxProbe === undefined ? {} : { maxProbe }),
-      ...(contactCount === undefined ? {} : { contactCount }),
-    }),
-  };
 }
 
 function complianceBody(
@@ -468,7 +425,7 @@ function parseRequest(value: unknown): WorkspaceExecutionBudgetRequest {
       return Object.freeze({
         operation: input.operation,
         companyId: uuid(input.companyId),
-        ...enrichBody(input.body),
+        ...attemptBody(input.body),
       });
     case 'POST /canonical-companies/:id/guess-emails':
       exactKeys(input, ['operation', 'companyId'], ['body']);
@@ -631,24 +588,7 @@ const WORKSPACE_QUOTE_REQUEST_SCHEMAS = [
         type: 'object',
         additionalProperties: false,
         required: ['attemptId'],
-        properties: {
-          attemptId: { type: 'string', format: 'uuid' },
-          maxProviders: {
-            type: 'integer',
-            minimum: 1,
-            maximum: MAX_FINDER_ATTEMPTS,
-          },
-          maxProbe: {
-            type: 'integer',
-            minimum: 1,
-            maximum: MAX_ENRICH_VERIFICATION_CALLS_PER_ADDRESS,
-          },
-          contactCount: {
-            type: 'integer',
-            minimum: 0,
-            maximum: MAX_ENRICH_CONTACTS_PER_REQUEST,
-          },
-        },
+        properties: { attemptId: { type: 'string', format: 'uuid' } },
       },
     },
     ['companyId'],

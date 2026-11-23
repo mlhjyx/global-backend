@@ -60,25 +60,6 @@ describe('Workspace technical budget quote OpenAPI', () => {
     ).toBe(true);
     expect(JSON.stringify(variants)).toContain('maxContacts');
     expect(JSON.stringify(variants)).toContain('maximum');
-    expect(
-      variants?.find((variant) =>
-        JSON.stringify(variant).includes('contactCount'),
-      ),
-    ).toMatchObject({
-      additionalProperties: false,
-      required: ['operation', 'companyId'],
-      properties: {
-        body: {
-          additionalProperties: false,
-          required: ['attemptId'],
-          properties: {
-            maxProviders: { type: 'integer', minimum: 1, maximum: 3 },
-            maxProbe: { type: 'integer', minimum: 1, maximum: 6 },
-            contactCount: { type: 'integer', minimum: 0, maximum: 10 },
-          },
-        },
-      },
-    });
   });
 
   it('publishes a closed internal authorization response without commercial fields', () => {

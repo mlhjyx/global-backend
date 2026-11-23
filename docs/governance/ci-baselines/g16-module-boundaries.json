@@ -1,7 +1,7 @@
 {
   "$comment": "G16：apps/api 运行时跨模块依赖对基线（按 from -> to 去重）。新增对必须显式更新本文件；消失的对不阻断。",
   "schemaVersion": "g16-module-boundaries/v1",
-  "generatedFrom": "5cf499d16571859f8fd420cc649b9435c0594c58",
+  "generatedFrom": "cbe87a7f3bb062344bd2de3a88dd7e492a601477",
   "pairs": [
     {
       "from": "(root)",
@@ -522,10 +522,6 @@
     {
       "from": "execution-budget",
       "to": "discovery"
-    },
-    {
-      "from": "execution-budget",
-      "to": "enrichment"
     },
     {
       "from": "execution-budget",

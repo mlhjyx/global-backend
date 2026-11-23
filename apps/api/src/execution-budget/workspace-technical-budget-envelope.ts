@@ -53,15 +53,6 @@ import {
   MAX_QUERY_PLAN_INDUSTRY_TERMS,
   MAX_QUERY_PLAN_TARGET_COUNTRIES,
 } from '../discovery/icp-to-cpv';
-import { MAX_FINDER_ATTEMPTS } from '../enrichment/waterfall/enrich-contact-email';
-import { resolveHunterConfig } from '../enrichment/finders/hunter.provider';
-import { resolveFindymailConfig } from '../enrichment/finders/findymail.provider';
-import { resolveProspeoConfig } from '../enrichment/finders/prospeo.provider';
-import { resolveApolloConfig } from '../enrichment/finders/apollo.provider';
-import { resolvePdlConfig } from '../enrichment/finders/pdl.provider';
-import { resolveMillionVerifierConfig } from '../enrichment/verification/millionverifier.provider';
-import { resolveEmailableConfig } from '../enrichment/verification/emailable.provider';
-import { resolveZeroBounceConfig } from '../enrichment/verification/zerobounce.provider';
 import { MODEL_STRUCTURED_OUTPUT_WIRE_UPPER_BOUND } from '../model-gateway/model-execution-envelope';
 import {
   MODEL_WEB_SEARCH_MAX_ROUNDS,
@@ -91,10 +82,7 @@ import {
   wikidataEntityTool,
 } from '../tools/source-tools';
 import type { Tool } from '../tools/tool-contract';
-import type {
-  EnrichContactsBudgetFields,
-  WorkspaceExecutionBudgetRequest,
-} from './execution-budget-request-scope';
+import type { WorkspaceExecutionBudgetRequest } from './execution-budget-request-scope';
 import {
   WorkspaceTechnicalBudgetQuoteError,
   type WorkspaceTechnicalBudgetEnvelope,
@@ -449,134 +437,6 @@ function ready(
   });
 }
 
-interface ProviderPricingConfig {
-  readonly apiKey: string | null;
-  readonly costMicrousd: number;
-}
-
-interface ConfiguredProviderPricing {
-  readonly key: string;
-  readonly estimatedCents: number;
-}
-
-function configuredPricing(
-  entries: readonly (readonly [string, ProviderPricingConfig])[],
-): ConfiguredProviderPricing[] {
-  return entries
-    .filter(([, config]) => config.apiKey !== null)
-    .map(([key, config]) => ({
-      key,
-      // Policy cents are integers; round each provider's microusd price up so a
-      // sub-cent call is never underquoted.
-      estimatedCents: Math.ceil(config.costMicrousd / 10_000),
-    }));
-}
-
-function maxConfiguredPricing(
-  entries: readonly ConfiguredProviderPricing[],
-): ConfiguredProviderPricing | null {
-  return entries.reduce<ConfiguredProviderPricing | null>(
-    (max, entry) =>
-      max === null || entry.estimatedCents > max.estimatedCents ? entry : max,
-    null,
-  );
-}
-
-function configuredFinderPricing(
-  env: NodeJS.ProcessEnv = process.env,
-): ConfiguredProviderPricing[] {
-  return configuredPricing([
-    ['hunter', resolveHunterConfig(env)],
-    ['findymail', resolveFindymailConfig(env)],
-    ['prospeo', resolveProspeoConfig(env)],
-    ['apollo', resolveApolloConfig(env)],
-    ['pdl', resolvePdlConfig(env)],
-  ]);
-}
-
-function configuredVerifierPricing(
-  env: NodeJS.ProcessEnv = process.env,
-): ConfiguredProviderPricing[] {
-  return configuredPricing([
-    ['millionverifier', resolveMillionVerifierConfig(env)],
-    ['emailable', resolveEmailableConfig(env)],
-    ['zerobounce', resolveZeroBounceConfig(env)],
-  ]);
-}
-
-/**
- * Enrich-contacts pricing envelope. Finder/verifier adapters call providers
- * directly, so price the worst configured provider per physical call plus the
- * request's explicit bounds. Absent bounds price the maximum defaults: a quote
- * cannot be under-reported and then widened by the execute request (the scope
- * hash binds every explicitly supplied bound). Provider enablement is a DB
- * kill switch at execution time; including an env-configured but DB-disabled
- * provider only overprices, never underprices.
- */
-function enrichContactsEnvelope(
-  request: WorkspaceExecutionBudgetRequest,
-): WorkspaceTechnicalBudgetEnvelope {
-  const body: Readonly<EnrichContactsBudgetFields> =
-    request.operation === 'POST /canonical-companies/:id/enrich-contacts'
-      ? (request.body ?? {})
-      : {};
-  const contacts = body.contactCount ?? MAX_ENRICH_CONTACTS_PER_REQUEST;
-  const maxProviders = body.maxProviders ?? MAX_FINDER_ATTEMPTS;
-  const maxProbe = body.maxProbe ?? MAX_ENRICH_VERIFICATION_CALLS_PER_ADDRESS;
-  if (
-    !Number.isSafeInteger(contacts) ||
-    contacts < 0 ||
-    contacts > MAX_ENRICH_CONTACTS_PER_REQUEST ||
-    !Number.isSafeInteger(maxProviders) ||
-    maxProviders < 1 ||
-    maxProviders > MAX_FINDER_ATTEMPTS ||
-    !Number.isSafeInteger(maxProbe) ||
-    maxProbe < 1 ||
-    maxProbe > MAX_ENRICH_VERIFICATION_CALLS_PER_ADDRESS
-  ) {
-    return invalid();
-  }
-
-  const finderCalls = Math.min(
-    contacts * maxProviders,
-    MAX_ENRICH_FINDER_CALLS_PER_COMPANY,
-  );
-  const verificationCalls = contacts * maxProbe;
-  const finder = maxConfiguredPricing(configuredFinderPricing());
-  const verifier = maxConfiguredPricing(configuredVerifierPricing());
-  const tools: WorkspaceTechnicalBudgetToolPolicy[] = [];
-  if (finderCalls > 0 && finder !== null) {
-    tools.push(
-      Object.freeze({
-        toolId: `contact_email.find.${finder.key}`,
-        version: 'provider-pricing/v1',
-        maxPhysicalInvocations: finderCalls,
-        estimatedCents: finder.estimatedCents,
-        costUnit: 'usd_cents_per_call',
-      }),
-    );
-  }
-  if (verificationCalls > 0 && verifier !== null) {
-    tools.push(
-      Object.freeze({
-        toolId: `contact_email.verify.${verifier.key}`,
-        version: 'provider-pricing/v1',
-        maxPhysicalInvocations: verificationCalls,
-        estimatedCents: verifier.estimatedCents,
-        costUnit: 'usd_cents_per_call',
-      }),
-    );
-  }
-  return ready(request, [], tools, {
-    finderCallsPerCompany: finderCalls,
-    verificationCallsPerAddress: maxProbe,
-    contactsPerRequest: contacts,
-    maxProvidersPerContact: maxProviders,
-    providerConcurrency: ENRICH_COMPANY_CONCURRENCY,
-    softDeadlineMs: ENRICH_SOFT_DEADLINE_MS,
-  });
-}
-
 export function resolveWorkspaceTechnicalBudgetEnvelope(
   request: WorkspaceExecutionBudgetRequest,
 ): WorkspaceTechnicalBudgetEnvelope {
@@ -662,6 +522,17 @@ export function resolveWorkspaceTechnicalBudgetEnvelope(
       // instead of fail-closed; actual spend still settles per call against the workspace ledger.
       return contactDiscoveryEnvelope(request);
     case 'POST /canonical-companies/:id/enrich-contacts':
-      return enrichContactsEnvelope(request);
+      // P1-10：付费 finder/验证 API 的花费尚未经 ToolBroker 计价（适配器直连供应商，
+      // 与第三方验证器同现状），本 envelope 只给出执行形状（调用上限/并发/软截止），
+      // 不计价 → requiredCapMicrousd 为表示最小值。Grant 的 capMicrousd 是端点侧的
+      // 硬上限（编排层 CapBudget 忠实执行）；把供应商单价纳入报价策略表需要与 gain-saas
+      // lane 协调后扩展 envelope 策略语言（后续卡）。
+      return ready(request, [], [], {
+        finderCallsPerCompany: MAX_ENRICH_FINDER_CALLS_PER_COMPANY,
+        verificationCallsPerAddress: MAX_ENRICH_VERIFICATION_CALLS_PER_ADDRESS,
+        contactsPerRequest: MAX_ENRICH_CONTACTS_PER_REQUEST,
+        providerConcurrency: ENRICH_COMPANY_CONCURRENCY,
+        softDeadlineMs: ENRICH_SOFT_DEADLINE_MS,
+      });
   }
 }

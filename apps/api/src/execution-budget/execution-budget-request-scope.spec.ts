@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   discoverContactsExecutionBudgetRequestScope,
-  enrichContactsExecutionBudgetRequestScope,
   guessEmailsExecutionBudgetRequestScope,
   verifyContactPointExecutionBudgetRequestScope,
   workspaceExecutionBudgetRequestScope,
@@ -353,74 +352,5 @@ describe('market-candidate generation budget request binding', () => {
     const a = workspaceExecutionBudgetRequestScope(request);
     expect(workspaceExecutionBudgetRequestScope({ ...request, generationId: '77777777-7777-4777-8777-777777777777' } as unknown as WorkspaceExecutionBudgetRequest).requestSha256).not.toBe(a.requestSha256);
     expect(workspaceExecutionBudgetRequestScope({ ...request, body: { intentDigest: 'b'.repeat(64) } } as unknown as WorkspaceExecutionBudgetRequest).requestSha256).not.toBe(a.requestSha256);
-  });
-});
-
-describe('enrich-contacts budget request binding', () => {
-  const ATTEMPT = '7e6f6f43-8f8d-4c2a-9b1e-2a3b4c5d6e7f';
-
-  it('keeps the legacy attempt-only hash when no pricing bounds are supplied', () => {
-    expect(
-      enrichContactsExecutionBudgetRequestScope(CANONICAL_COMPANY_ID, {
-        attemptId: ATTEMPT,
-      }).requestSha256,
-    ).toBe(
-      '9701c5bfda2fff61265a0192d4e8a3d4f618ffc0b96a8207ef3eb37df7cdaf24',
-    );
-  });
-
-  it('binds maxProviders, maxProbe and contactCount into the request hash', () => {
-    const fields = {
-      attemptId: ATTEMPT,
-      maxProviders: 1,
-      maxProbe: 1,
-      contactCount: 1,
-    } as const;
-    const scope = enrichContactsExecutionBudgetRequestScope(
-      CANONICAL_COMPANY_ID,
-      fields,
-    );
-    expect(scope).toEqual(
-      workspaceExecutionBudgetRequestScope({
-        operation: 'POST /canonical-companies/:id/enrich-contacts',
-        companyId: CANONICAL_COMPANY_ID,
-        body: fields,
-      }),
-    );
-    const attemptOnly = enrichContactsExecutionBudgetRequestScope(
-      CANONICAL_COMPANY_ID,
-      { attemptId: ATTEMPT },
-    );
-    expect(scope.requestSha256).not.toBe(attemptOnly.requestSha256);
-    expect(
-      enrichContactsExecutionBudgetRequestScope(CANONICAL_COMPANY_ID, {
-        ...fields,
-        contactCount: 2,
-      }).requestSha256,
-    ).not.toBe(scope.requestSha256);
-    expect(
-      enrichContactsExecutionBudgetRequestScope(CANONICAL_COMPANY_ID, {
-        ...fields,
-        maxProviders: 2,
-      }).requestSha256,
-    ).not.toBe(scope.requestSha256);
-  });
-
-  it('rejects bounds outside the request contract instead of hashing them', () => {
-    for (const fields of [
-      { maxProviders: 0 },
-      { maxProviders: 4 },
-      { maxProbe: 0 },
-      { maxProbe: 7 },
-      { contactCount: -1 },
-      { contactCount: 11 },
-    ]) {
-      expect(() =>
-        enrichContactsExecutionBudgetRequestScope(CANONICAL_COMPANY_ID, {
-          attemptId: ATTEMPT,
-          ...fields,
-        }),
-      ).toThrow(/EXECUTION_BUDGET_REQUEST_INVALID/);
-    }
   });
 });
