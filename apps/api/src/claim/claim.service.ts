@@ -7,7 +7,6 @@ import type { ClaimDocumentSourceState } from './dto/claim.dto';
 import { buildClaimApprovalProof } from './claim-verification';
 import {
   buildDocumentClaimApprovalProof,
-  hasValidDocumentClaimApprovalAudit,
   loadDocumentClaimBindingInTransaction,
 } from './document-claim-basis';
 import {
@@ -51,7 +50,12 @@ export class ClaimService {
         select: { claimId: true, documentId: true },
       });
       const byClaim = new Map(references.map((reference) => [reference.claimId, reference]));
-      const out: Array<(typeof claims)[number] & { documentSource: ClaimDocumentSourceState | null }> = [];
+      const out: Array<
+        Omit<(typeof claims)[number], 'statement'> & {
+          statement: string | null;
+          documentSource: ClaimDocumentSourceState | null;
+        }
+      > = [];
       for (const claim of claims) {
         const reference = byClaim.get(claim.id);
         if (!reference) {
@@ -63,13 +67,17 @@ export class ClaimService {
           { workspaceId: ctx.workspaceId, companyId: claim.companyId },
           claim,
         );
-        const current = binding !== null && hasValidDocumentClaimApprovalAudit(claim, binding);
+        // Source availability is decided by the current binding alone; approval
+        // proof validity only governs consumption by APPROVED consumers.
+        const sourceCurrent = binding !== null;
+        const { statement: claimStatement, evidence: claimEvidence, ...rest } = claim;
         out.push({
-          ...claim,
-          // 来源失效/删除时不渲染历史全文或偏移；只给准确状态。
-          evidence: current
-            ? claim.evidence
-            : claim.evidence.map((evidence) => ({
+          ...rest,
+          // 来源失效/删除时不渲染历史全文、偏移或可能等于原句的 statement；只给准确状态与审计事实。
+          statement: sourceCurrent ? claimStatement : null,
+          evidence: sourceCurrent
+            ? claimEvidence
+            : claimEvidence.map((evidence) => ({
                 ...evidence,
                 snippet: null,
                 sourceUrl: null,
@@ -79,7 +87,7 @@ export class ClaimService {
                 quoteSuffix: null,
               })),
           documentSource: {
-            status: current ? 'CURRENT' : 'UNAVAILABLE',
+            status: sourceCurrent ? 'CURRENT' : 'UNAVAILABLE',
             documentId: reference.documentId,
             parseRevision: binding?.parseRevision ?? null,
           },

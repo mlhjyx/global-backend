@@ -22,6 +22,32 @@ type Tx = Prisma.TransactionClient;
 type CompanyLock = { id: string; version: number; deletedAt: Date | null };
 const transactionOptions = { maxWait: 20_000, timeout: 30_000 };
 
+export interface ClaimSourceDigestInput {
+  type: string;
+  statement: string;
+  status: string;
+  validUntil: Date | null;
+  verifiedBy: string | null;
+  verifiedAt: Date | null;
+  verificationMethod: string | null;
+  verificationProof: unknown;
+  documentBindingHash?: string;
+}
+/** Legacy non-document claims keep their exact previous digest bytes; only document claims add the binding hash. */
+export function claimSourceDigest(claim: ClaimSourceDigestInput): string {
+  return documentHash({
+    type: claim.type,
+    statement: claim.statement,
+    status: claim.status,
+    validUntil: claim.validUntil?.toISOString() ?? null,
+    verifiedBy: claim.verifiedBy,
+    verifiedAt: claim.verifiedAt?.toISOString() ?? null,
+    verificationMethod: claim.verificationMethod,
+    verificationProof: claim.verificationProof,
+    ...(claim.documentBindingHash === undefined ? {} : { documentBindingHash: claim.documentBindingHash }),
+  });
+}
+
 function uuid(value: unknown): string {
   if (typeof value !== 'string' || !isUUID(value)) return invalidCandidateInput();
   return value.toLowerCase();
@@ -117,9 +143,10 @@ export class MarketCandidateSetsService {
       const row = await this.claim(tx, id, companyId, lock);
       if (!row) return null;
       return { ...base, version: row.version, status: row.status,
-        digest: documentHash({ type: row.type, statement: row.statement, status: row.status, validUntil: row.validUntil?.toISOString() ?? null,
-          verifiedBy: row.verifiedBy, verifiedAt: row.verifiedAt?.toISOString() ?? null, verificationMethod: row.verificationMethod, verificationProof: row.verificationProof,
-          documentBindingHash: (row as { documentBindingHash?: string }).documentBindingHash ?? null }),
+        digest: claimSourceDigest({
+          ...row,
+          documentBindingHash: (row as { documentBindingHash?: string }).documentBindingHash,
+        }),
         sourceDate: row.createdAt.toISOString() };
     }
     if (reference.kind === 'EVIDENCE') {

@@ -201,6 +201,25 @@ describe.runIf(Boolean(ownerUrl && appUrl))('seller document typed claim S1a on 
     expect(await claimService.transition(userCtx, draft.claimId, 'REVOKED', 1)).toMatchObject({ status: 'REVOKED', version: 2 });
   });
 
+  it('lists a current NEEDS_REVIEW draft with its quote while approval consumption stays closed', async () => {
+    const tenant = await seedTenant();
+    const { start, end } = quoteOf(tenant.document.text, '通过 ISO 9001 认证');
+    const reference = { ...referenceFor(tenant.document), quoteStartByte: start, quoteEndByte: end };
+    const userCtx = ctx(tenant.workspaceId, tenant.user);
+    const preview = await claims.preview(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证' });
+    const draft = await claims.createDraft(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证', requestDigest: preview.requestDigest });
+    const listed = (await claimService.listForCompany(userCtx, tenant.companyId)).find((claim) => claim.id === draft.claimId) as { statement: string | null; status: string; documentSource: { status: string }; evidence: Array<{ snippet: string | null }> };
+    expect(listed.status).toBe('NEEDS_REVIEW');
+    expect(listed.documentSource.status).toBe('CURRENT');
+    expect(listed.statement).toBe('通过 ISO 9001 认证');
+    expect(listed.evidence[0]?.snippet).toBe('通过 ISO 9001 认证');
+    const effective = await owner.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${tenant.workspaceId}, true)`;
+      return effectiveApprovedClaimsInTransaction(tx, userCtx, tenant.companyId, {}, 'icp');
+    });
+    expect(effective.claims.map((claim) => claim.id)).not.toContain(draft.claimId);
+  });
+
   it('invalidates the binding immediately on reprocess and after document deletion (FK keeps identity)', async () => {
     const tenant = await seedTenant();
     const { start, end } = quoteOf(tenant.document.text, '通过 ISO 9001 认证');
@@ -211,8 +230,9 @@ describe.runIf(Boolean(ownerUrl && appUrl))('seller document typed claim S1a on 
     await claimService.transition(userCtx, draft.claimId, 'APPROVED', 1);
     await owner.sellerDocument.update({ where: { id: tenant.document.documentId }, data: { status: 'processing' } });
     const listed = await claimService.listForCompany(userCtx, tenant.companyId);
-    const unavailable = listed.find((claim) => claim.id === draft.claimId) as { documentSource: { status: string }; evidence: Array<{ snippet: string | null }> };
+    const unavailable = listed.find((claim) => claim.id === draft.claimId) as { statement: string | null; documentSource: { status: string }; evidence: Array<{ snippet: string | null }> };
     expect(unavailable.documentSource.status).toBe('UNAVAILABLE');
+    expect(unavailable.statement).toBeNull();
     expect(unavailable.evidence[0]?.snippet).toBeNull();
     const effective = await owner.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${tenant.workspaceId}, true)`;
@@ -221,6 +241,9 @@ describe.runIf(Boolean(ownerUrl && appUrl))('seller document typed claim S1a on 
     expect(effective.claims.map((claim) => claim.id)).not.toContain(draft.claimId);
     expect(effective.rejectedDocumentClaimIds).toContain(draft.claimId);
     await owner.sellerDocument.delete({ where: { id: tenant.document.documentId } });
+    const afterDelete = (await claimService.listForCompany(userCtx, tenant.companyId)).find((claim) => claim.id === draft.claimId) as { statement: string | null; documentSource: { status: string } };
+    expect(afterDelete.documentSource.status).toBe('UNAVAILABLE');
+    expect(afterDelete.statement).toBeNull();
     const referenceAfter = await owner.claimDocumentEvidence.findUniqueOrThrow({ where: { claimId: draft.claimId } });
     expect(referenceAfter.documentId).toBeNull();
     expect(referenceAfter.sourceDocumentId).toBe(tenant.document.documentId);

@@ -23,7 +23,7 @@ interface ClaimRow {
   companyId: string;
   type: string;
   factKey: string | null;
-  statement: string;
+  statement: string | null;
   status: string;
   confidence: number | null;
   version: number;
@@ -50,8 +50,13 @@ export class ClaimDto {
   })
   factKey!: string | null;
 
-  @ApiProperty({ example: '产品通过 ISO 9001 与 CE 认证' })
-  statement!: string;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: '事实陈述；文档来源当前不可用（失效、变版或删除）时为 null，不透出可能等于原句的历史文本',
+    example: '产品通过 ISO 9001 与 CE 认证',
+  })
+  statement!: string | null;
 
   @ApiProperty({ enum: CLAIM_STATUSES })
   status!: string;
