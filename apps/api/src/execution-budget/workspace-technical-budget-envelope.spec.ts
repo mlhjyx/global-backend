@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { buildFrozenEnrichmentPlan } from '../enrichment/safety/enrichment-call-plan';
 import {
   WORKSPACE_EXECUTION_QUOTE_OPERATIONS,
   resolveWorkspaceTechnicalBudgetEnvelope,
@@ -34,22 +35,149 @@ describe('workspace execution technical envelope catalog', () => {
     ]);
   });
 
-  it('quotes the enrich-contacts execution shape without pricing provider calls yet', () => {
-    const envelope = resolveWorkspaceTechnicalBudgetEnvelope({
-      operation: 'POST /canonical-companies/:id/enrich-contacts',
-      companyId: COMPANY_ID,
-    });
-    // 付费 finder/验证 API 尚未经 ToolBroker 计价：envelope 只给执行形状，cap 为表示最小值。
-    expect(envelope.requiredCapMicrousd).toBe(1n);
+  it('prices the enrich-contacts governed catalog with conservative integer-cent upper bounds', () => {
+    const envelope = resolveWorkspaceTechnicalBudgetEnvelope(
+      {
+        operation: 'POST /canonical-companies/:id/enrich-contacts',
+        companyId: COMPANY_ID,
+      },
+      {},
+    );
+    // 4 governed tools × 10 contacts × 1 cent/call = 40 cents = 400000 µUSD.
+    expect(envelope.requiredCapMicrousd).toBe(400_000n);
     expect(envelope.policy.models).toEqual([]);
-    expect(envelope.policy.tools).toEqual([]);
+    expect(envelope.policy.tools).toEqual([
+      { toolId: 'contact_email.find.hunter', version: '1.0.0', maxPhysicalInvocations: 10, estimatedCents: 1, costUnit: 'request' },
+      { toolId: 'contact_email.verify.millionverifier', version: '1.0.0', maxPhysicalInvocations: 10, estimatedCents: 1, costUnit: 'request' },
+      { toolId: 'contact_email.verify.emailable', version: '1.0.0', maxPhysicalInvocations: 10, estimatedCents: 1, costUnit: 'request' },
+      { toolId: 'contact_email.verify.zerobounce', version: '1.0.0', maxPhysicalInvocations: 10, estimatedCents: 1, costUnit: 'request' },
+    ]);
     expect(envelope.policy.executionLimits).toEqual({
       finderCallsPerCompany: 10,
       verificationCallsPerAddress: 6,
       contactsPerRequest: 10,
       providerConcurrency: 2,
       softDeadlineMs: 600_000,
+      contactEnrichPricePolicyVersion: 1,
+      hunterUnitQuoteUpperMicrousd: 1_700,
+      millionverifierUnitQuoteUpperMicrousd: 1_780,
+      emailableUnitQuoteUpperMicrousd: 7_600,
+      zerobounceUnitQuoteUpperMicrousd: 9_900,
     });
+  });
+
+  it('keeps the integer-cent cap while a same-bucket unit price change still reaches the policy hash inputs', () => {
+    const request = {
+      operation: 'POST /canonical-companies/:id/enrich-contacts',
+      companyId: COMPANY_ID,
+    } as const;
+    const base = resolveWorkspaceTechnicalBudgetEnvelope(request, {});
+    const moved = resolveWorkspaceTechnicalBudgetEnvelope(request, {
+      HUNTER_COST_MICROUSD: '1900',
+    });
+    expect(moved.requiredCapMicrousd).toBe(base.requiredCapMicrousd);
+    expect(moved.policy.executionLimits).not.toEqual(base.policy.executionLimits);
+    expect(moved.policy.executionLimits.hunterUnitQuoteUpperMicrousd).toBe(1_900);
+  });
+
+  it('fails closed when a configured governed price leaves the controlled range', () => {
+    expect(() =>
+      resolveWorkspaceTechnicalBudgetEnvelope(
+        {
+          operation: 'POST /canonical-companies/:id/enrich-contacts',
+          companyId: COMPANY_ID,
+        },
+        { ZEROBOUNCE_COST_MICROUSD: '150001' },
+      ),
+    ).toThrow('EXECUTION_BUDGET_QUOTE_UNAVAILABLE');
+  });
+
+  it('never emits provider credentials or base URLs through the enrich quote policy', () => {
+    const envelope = resolveWorkspaceTechnicalBudgetEnvelope(
+      {
+        operation: 'POST /canonical-companies/:id/enrich-contacts',
+        companyId: COMPANY_ID,
+      },
+      {
+        HUNTER_API_KEY: 'secret-hunter-key',
+        HUNTER_BASE_URL: 'https://private.example.invalid',
+        EMAILABLE_API_KEY: 'secret-emailable-key',
+      },
+    );
+    expect(JSON.stringify(envelope.policy)).not.toMatch(/secret-|private\.example\.invalid/u);
+  });
+
+  it('bounds any maximal legal enrich plan by the quoted catalog for the same prices', () => {
+    const envelope = resolveWorkspaceTechnicalBudgetEnvelope(
+      {
+        operation: 'POST /canonical-companies/:id/enrich-contacts',
+        companyId: COMPANY_ID,
+      },
+      {},
+    );
+    const contactIds = Array.from({ length: 10 }, (_, ordinal) =>
+      `60000000-0000-4000-8000-0000000000${ordinal}`,
+    );
+    const targets = contactIds.map((contactId, contactOrdinal) => ({
+      contactId,
+      contactOrdinal,
+      inputVersion: 'a'.repeat(64),
+      beforeDigest: 'b'.repeat(64),
+      pointRefs: [],
+    }));
+    const tools = [
+      { provider: 'hunter', toolId: 'contact_email.find.hunter', phase: 'FINDER', quote: '1700' },
+      { provider: 'millionverifier', toolId: 'contact_email.verify.millionverifier', phase: 'VERIFY', quote: '1780' },
+      { provider: 'emailable', toolId: 'contact_email.verify.emailable', phase: 'VERIFY', quote: '7600' },
+      { provider: 'zerobounce', toolId: 'contact_email.verify.zerobounce', phase: 'VERIFY', quote: '9900' },
+    ] as const;
+    const slots = contactIds.flatMap((contactId, contactOrdinal) => {
+      let predecessor: string | null = null;
+      return tools.map((item, position) => {
+        const slotKey = `contact-${contactOrdinal}-${item.phase.toLowerCase()}-${position}`;
+        const slot = {
+          slotKey,
+          contactId,
+          contactOrdinal,
+          phase: item.phase,
+          provider: item.provider,
+          toolId: item.toolId,
+          toolVersion: '1.0.0',
+          quoteMicrousd: item.quote,
+          pricingVersion: 'p1',
+          dependsOnSlotKey: predecessor,
+        };
+        predecessor = slotKey;
+        return slot;
+      });
+    });
+    const plan = buildFrozenEnrichmentPlan({
+      workspaceId: '10000000-0000-4000-8000-000000000001',
+      companyId: COMPANY_ID,
+      entrypoint: 'http',
+      businessRunId: null,
+      requestSha256: 'c'.repeat(64),
+      admittedAtMs: 1_000,
+      deadlineAtMs: 601_000,
+      targets,
+      slots,
+      limits: {
+        authorityCapMicrousd: '6000000',
+        companyCapMicrousd: '6000000',
+        contactCapMicrousd: '150000',
+        finderCompanyMax: 10,
+        finderContactMax: 3,
+        verifyAddressMax: 6,
+        maxContacts: 10,
+      },
+    });
+    const planTotalMicrousd = plan.slots.reduce(
+      (sum, slot) => sum + BigInt(slot.quoteMicrousd),
+      0n,
+    );
+    // 10 × (1700 + 1780 + 7600 + 9900) = 209800 µUSD exact, bounded by the 400000 µUSD quote.
+    expect(planTotalMicrousd).toBe(209_800n);
+    expect(planTotalMicrousd).toBeLessThanOrEqual(envelope.requiredCapMicrousd);
   });
 
   it('quotes a campaign plan draft from one bounded planning task', () => {

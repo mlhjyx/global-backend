@@ -8,6 +8,7 @@ import {
   workspaceExecutionBudgetRequestScope,
   type WorkspaceExecutionBudgetRequest,
 } from './execution-budget-request-scope';
+import { resolveWorkspaceTechnicalBudgetEnvelope } from './workspace-technical-budget-envelope';
 
 const NOW = new Date('2026-08-26T12:00:00.000Z');
 const WORKSPACE_ID = '10000000-0000-4000-8000-000000000001';
@@ -153,5 +154,39 @@ describe('WorkspaceTechnicalBudgetQuoteService', () => {
       service.quote({ ...CTX, workspaceId: '' }, REQUEST),
     ).toThrow('EXECUTION_BUDGET_QUOTE_INVALID');
     expect(resolveEnvelope).not.toHaveBeenCalled();
+  });
+
+  const ENRICH_REQUEST = Object.freeze({
+    operation: 'POST /canonical-companies/:id/enrich-contacts',
+    companyId: COMPANY_ID,
+  }) satisfies WorkspaceExecutionBudgetRequest;
+
+  function enrichQuote(env: NodeJS.ProcessEnv) {
+    return new WorkspaceTechnicalBudgetQuoteService({
+      now: () => NOW,
+      resolveEnvelope: (request) =>
+        resolveWorkspaceTechnicalBudgetEnvelope(request, env),
+    }).quote(CTX, ENRICH_REQUEST);
+  }
+
+  it('no longer quotes enrich-contacts as the 1 µUSD representation minimum', () => {
+    const quote = enrichQuote({});
+    expect(quote.requiredCapMicrousd).toBe('400000');
+    expect(quote.purpose).toBe('contact.enrich');
+    expect(quote.schemaVersion).toBe('execution-budget-technical-quote/v1');
+  });
+
+  it('keeps the integer-cent cap but changes policyRevision for a same-bucket unit price move', () => {
+    const base = enrichQuote({});
+    const moved = enrichQuote({ HUNTER_COST_MICROUSD: '1900' });
+    expect(moved.requiredCapMicrousd).toBe(base.requiredCapMicrousd);
+    expect(moved.policyRevision).toMatch(/^[0-9a-f]{64}$/u);
+    expect(moved.policyRevision).not.toBe(base.policyRevision);
+  });
+
+  it('fails closed with a bounded 503 when a governed unit price is outside the controlled range', () => {
+    expect(() => enrichQuote({ EMAILABLE_COST_MICROUSD: '150001' })).toThrow(
+      'EXECUTION_BUDGET_QUOTE_UNAVAILABLE',
+    );
   });
 });

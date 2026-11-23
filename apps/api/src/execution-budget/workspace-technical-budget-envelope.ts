@@ -84,6 +84,11 @@ import {
 import type { Tool } from '../tools/tool-contract';
 import type { WorkspaceExecutionBudgetRequest } from './execution-budget-request-scope';
 import {
+  ENRICH_CONTACT_PRICE_POLICY_VERSION,
+  enrichContactPriceCatalog,
+  type EnrichContactPriceEntry,
+} from './enrich-contact-price-catalog';
+import {
   WorkspaceTechnicalBudgetQuoteError,
   type WorkspaceTechnicalBudgetEnvelope,
   type WorkspaceTechnicalBudgetModelPolicy,
@@ -437,8 +442,52 @@ function ready(
   });
 }
 
+/**
+ * enrich-contacts 只覆盖当前受审的 Hunter 与 MillionVerifier/Emailable/ZeroBounce：
+ * 每个工具按联系人上界 10 次计价，单次价 ceil 到整数分（旧 tool()/quote 只认整数分，
+ * 0.17 分不能直接送）；未配置 key 也照价计入——技术报价不是 provider 可用性声明。
+ * 精确实价仍留在原槽位/账本，这里只是保守上界；executionLimits 的精确单价让同一
+ * 分区间内的调价也进入 policyRevision。
+ */
+function enrichContactsEnvelope(
+  request: WorkspaceExecutionBudgetRequest,
+  env: NodeJS.ProcessEnv,
+): WorkspaceTechnicalBudgetEnvelope {
+  const catalog = enrichContactPriceCatalog(env);
+  const unit = (provider: EnrichContactPriceEntry['provider']): number => {
+    const entry = catalog.find((item) => item.provider === provider);
+    return entry ? entry.unitQuoteUpperMicrousd : unavailable();
+  };
+  return ready(
+    request,
+    [],
+    catalog.map((entry) =>
+      Object.freeze({
+        toolId: entry.toolId,
+        version: entry.version,
+        maxPhysicalInvocations: MAX_ENRICH_CONTACTS_PER_REQUEST,
+        estimatedCents: entry.unitCeilCents,
+        costUnit: entry.costUnit,
+      }),
+    ),
+    {
+      finderCallsPerCompany: MAX_ENRICH_FINDER_CALLS_PER_COMPANY,
+      verificationCallsPerAddress: MAX_ENRICH_VERIFICATION_CALLS_PER_ADDRESS,
+      contactsPerRequest: MAX_ENRICH_CONTACTS_PER_REQUEST,
+      providerConcurrency: ENRICH_COMPANY_CONCURRENCY,
+      softDeadlineMs: ENRICH_SOFT_DEADLINE_MS,
+      contactEnrichPricePolicyVersion: ENRICH_CONTACT_PRICE_POLICY_VERSION,
+      hunterUnitQuoteUpperMicrousd: unit('hunter'),
+      millionverifierUnitQuoteUpperMicrousd: unit('millionverifier'),
+      emailableUnitQuoteUpperMicrousd: unit('emailable'),
+      zerobounceUnitQuoteUpperMicrousd: unit('zerobounce'),
+    },
+  );
+}
+
 export function resolveWorkspaceTechnicalBudgetEnvelope(
   request: WorkspaceExecutionBudgetRequest,
+  env: NodeJS.ProcessEnv = process.env,
 ): WorkspaceTechnicalBudgetEnvelope {
   switch (request.operation) {
     case 'POST /market-candidate-generations/:generationId/execute':
@@ -522,17 +571,8 @@ export function resolveWorkspaceTechnicalBudgetEnvelope(
       // instead of fail-closed; actual spend still settles per call against the workspace ledger.
       return contactDiscoveryEnvelope(request);
     case 'POST /canonical-companies/:id/enrich-contacts':
-      // P1-10：付费 finder/验证 API 的花费尚未经 ToolBroker 计价（适配器直连供应商，
-      // 与第三方验证器同现状），本 envelope 只给出执行形状（调用上限/并发/软截止），
-      // 不计价 → requiredCapMicrousd 为表示最小值。Grant 的 capMicrousd 是端点侧的
-      // 硬上限（编排层 CapBudget 忠实执行）；把供应商单价纳入报价策略表需要与 gain-saas
-      // lane 协调后扩展 envelope 策略语言（后续卡）。
-      return ready(request, [], [], {
-        finderCallsPerCompany: MAX_ENRICH_FINDER_CALLS_PER_COMPANY,
-        verificationCallsPerAddress: MAX_ENRICH_VERIFICATION_CALLS_PER_ADDRESS,
-        contactsPerRequest: MAX_ENRICH_CONTACTS_PER_REQUEST,
-        providerConcurrency: ENRICH_COMPANY_CONCURRENCY,
-        softDeadlineMs: ENRICH_SOFT_DEADLINE_MS,
-      });
+      // T r1：此前空目录让 capMicrousd() 落到表示最小值 1 µUSD，付费 Hunter/验真
+      // 调用无法被真实 Grant 的 CapBudget 支付；现按受控工具目录给保守整数分上界。
+      return enrichContactsEnvelope(request, env);
   }
 }
