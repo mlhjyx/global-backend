@@ -1,5 +1,5 @@
 import childProcess from "node:child_process";
-import fs, { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -13,8 +13,47 @@ const KILL_GRACE_MS = 1_000;
 const REAP_GRACE_MS = 5_000;
 const OUTPUT_LIMIT = 128 * 1024;
 const CLEANUP_ERROR = "BROWSER_PROBE_CLEANUP_INCOMPLETE";
+const UNAVAILABLE_ERROR = "BROWSER_RUNTIME_UNAVAILABLE";
+const CONFIG_ERROR = "BROWSER_RUNTIME_CONFIG_INVALID";
 const EXECUTABLES = new Set(["/usr/bin/chromium", "/usr/bin/google-chrome"]);
 type Probe = (executable: string) => Promise<void>;
+type BrowserIdentity = Awaited<ReturnType<typeof fs.lstat>>;
+type ChildResult =
+  | { readonly kind: "ok" }
+  | { readonly kind: "unavailable" }
+  | {
+      readonly kind: "cleanup";
+      readonly child: childProcess.ChildProcess;
+      readonly closed: Promise<void>;
+    };
+type RootRelease = "cleaned" | "retry" | "fenced";
+type Recovery = "recovered" | "pending" | "fenced";
+type CleanupPhase = "attempt-cleanup" | "recovery-pending" | "recovery-fenced";
+function cleanupError(phase: CleanupPhase): Error {
+  const error = new Error(CLEANUP_ERROR);
+  // Fixed safe phase for logs; never carries browser output, env or arbitrary
+  // exception text. The public message stays the bounded single code.
+  Object.defineProperty(error, "probePhase", { value: phase, enumerable: false });
+  return error;
+}
+/**
+ * Outstanding cleanup ownership for one probe attempt. It is kept only while
+ * the attempt cannot yet prove that its child, process group and private root
+ * are terminal; a missing obligation means the next call may start a child.
+ */
+interface CleanupObligation {
+  readonly attempt: number;
+  readonly root: string;
+  readonly identity: BrowserIdentity | undefined;
+  readonly child: childProcess.ChildProcess | undefined;
+  readonly closed: Promise<void> | undefined;
+  readonly fenced: boolean;
+}
+type ProbeResult =
+  | { readonly kind: "ok" }
+  | { readonly kind: "unavailable" }
+  | { readonly kind: "cleanup"; readonly obligation: CleanupObligation };
+
 function browserEnvironment(root: string): NodeJS.ProcessEnv {
   return {
     PATH: "/usr/bin:/bin",
@@ -102,8 +141,8 @@ async function waitForGroupExit(
   }
 }
 
-function runBrowserChild(executable: string, root: string): Promise<void> {
-  return new Promise((resolve, reject) => {
+function runBrowserChild(executable: string, root: string): Promise<ChildResult> {
+  return new Promise((resolve) => {
     const child = childProcess.spawn(executable, browserArguments(root), {
       detached: true,
       cwd: root,
@@ -117,6 +156,12 @@ function runBrowserChild(executable: string, root: string): Promise<void> {
     let stdoutBytes = 0;
     let stderrBytes = 0;
     let killTimer: NodeJS.Timeout | undefined;
+    let closedSignal!: () => void;
+    // The close signal is recorded before any early return so a late real close
+    // can be observed by the owning attempt instead of being forgotten.
+    const closed = new Promise<void>((resolveClose) => {
+      closedSignal = resolveClose;
+    });
     const stop = () => {
       failed = true;
       if (killTimer) return;
@@ -138,7 +183,7 @@ function runBrowserChild(executable: string, root: string): Promise<void> {
       settled = true;
       clearTimeout(timeout);
       clearTimeout(killTimer);
-      reject(new Error(CLEANUP_ERROR));
+      resolve({ kind: "cleanup", child, closed });
     }, TIMEOUT_MS + REAP_GRACE_MS);
     child.stdout.on("data", (data: Buffer) => {
       stdoutBytes += data.length;
@@ -163,106 +208,180 @@ function runBrowserChild(executable: string, root: string): Promise<void> {
       clearTimeout(timeout);
       clearTimeout(killTimer);
       clearTimeout(reapDeadline);
+      closedSignal();
       if (settled) return;
       settled = true;
       void waitForGroupExit(child.pid, REAP_GRACE_MS).then(
         () => {
-          if (uncertain) reject(new Error(CLEANUP_ERROR));
+          if (uncertain) resolve({ kind: "cleanup", child, closed });
           else if (
             failed ||
             code !== 0 ||
             !stdout.includes("<title>runtime-readiness</title>")
           ) {
-            reject(new Error("BROWSER_RUNTIME_UNAVAILABLE"));
-          } else resolve();
+            resolve({ kind: "unavailable" });
+          } else resolve({ kind: "ok" });
         },
-        () => reject(new Error(CLEANUP_ERROR)),
+        () => resolve({ kind: "cleanup", child, closed }),
       );
     });
   });
 }
 
-async function runProbe(executable: string): Promise<void> {
-  // Capture a canonical parent once; never clean an ambient HOME/cache directory.
-  const parent = await realpath(tmpdir());
-  const root = await mkdtemp(join(parent, "global-browser-probe-"));
-  let identity: Awaited<ReturnType<typeof fs.lstat>>;
-  try {
-    identity = await fs.lstat(root);
-  } catch (error) {
-    throw new Error(CLEANUP_ERROR, { cause: error });
-  }
-  let safeToClean = true;
-  let failure: Error | undefined;
-  try {
-    for (const child of ["home", "cache", "config", "tmp", "profile"]) {
-      await mkdir(join(root, child), { mode: 0o700 });
-    }
-    await runBrowserChild(executable, root);
-  } catch (error) {
-    safeToClean = !(error instanceof Error && error.message === CLEANUP_ERROR);
-    failure = new Error(
-      safeToClean ? "BROWSER_RUNTIME_UNAVAILABLE" : CLEANUP_ERROR,
-      { cause: error },
-    );
-  }
-  if (safeToClean) {
-    try {
-      const current = await fs.lstat(root);
-      if (
-        !current.isDirectory() ||
-        current.isSymbolicLink() ||
-        current.dev !== identity.dev ||
-        current.ino !== identity.ino ||
-        current.uid !== identity.uid ||
-        (current.mode & 0o777) !== 0o700
-      ) {
-        throw new Error("root identity changed");
-      }
-      await rm(root, { recursive: true, force: false });
-    } catch (error) {
-      failure = new Error(CLEANUP_ERROR, { cause: error });
-    }
-  }
-  if (failure) throw failure;
+function sameIdentity(current: BrowserIdentity, identity: BrowserIdentity): boolean {
+  return (
+    current.isDirectory() &&
+    !current.isSymbolicLink() &&
+    current.dev === identity.dev &&
+    current.ino === identity.ino &&
+    current.uid === identity.uid &&
+    (Number(current.mode) & 0o777) === 0o700
+  );
 }
 
-/** One instance per runtime process; ambiguous cleanup stops further accumulation. */
+async function releaseRoot(
+  root: string,
+  identity: BrowserIdentity,
+): Promise<RootRelease> {
+  let current: BrowserIdentity;
+  try {
+    current = await fs.lstat(root);
+  } catch {
+    return "fenced";
+  }
+  if (!sameIdentity(current, identity)) return "fenced";
+  try {
+    await fs.rm(root, { recursive: true, force: false });
+  } catch {
+    return "retry";
+  }
+  return "cleaned";
+}
+
+async function runProbe(executable: string, attempt: number): Promise<ProbeResult> {
+  // Capture a canonical parent once; never clean an ambient HOME/cache directory.
+  const parent = await fs.realpath(tmpdir());
+  const root = await fs.mkdtemp(join(parent, "global-browser-probe-"));
+  let identity: BrowserIdentity;
+  try {
+    identity = await fs.lstat(root);
+  } catch {
+    // The just-created root cannot be proven ours; never guess-delete it.
+    return {
+      kind: "cleanup",
+      obligation: { attempt, root, identity: undefined, child: undefined, closed: undefined, fenced: true },
+    };
+  }
+  let result: ChildResult;
+  try {
+    for (const child of ["home", "cache", "config", "tmp", "profile"]) {
+      await fs.mkdir(join(root, child), { mode: 0o700 });
+    }
+    result = await runBrowserChild(executable, root);
+  } catch {
+    result = { kind: "unavailable" };
+  }
+  if (result.kind === "cleanup") {
+    return {
+      kind: "cleanup",
+      obligation: { attempt, root, identity, child: result.child, closed: result.closed, fenced: false },
+    };
+  }
+  const release = await releaseRoot(root, identity);
+  if (release === "cleaned") return result;
+  return {
+    kind: "cleanup",
+    obligation: {
+      attempt,
+      root,
+      identity,
+      child: undefined,
+      closed: undefined,
+      fenced: release === "fenced",
+    },
+  };
+}
+
+async function waitWithin(promise: Promise<void>, timeoutMs: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  const timedOut = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), timeoutMs);
+  });
+  // Only the wait is bounded; the close promise itself stays owned by the
+  // obligation so a later real close is never abandoned by this race.
+  const settled = await Promise.race([promise.then(() => true), timedOut]);
+  if (timer) clearTimeout(timer);
+  return settled;
+}
+
+async function recoverObligation(obligation: CleanupObligation): Promise<Recovery> {
+  if (obligation.fenced || obligation.identity === undefined) return "fenced";
+  if (obligation.closed && !(await waitWithin(obligation.closed, REAP_GRACE_MS)))
+    return "pending";
+  try {
+    await waitForGroupExit(obligation.child?.pid, REAP_GRACE_MS);
+  } catch {
+    return "pending";
+  }
+  const release = await releaseRoot(obligation.root, obligation.identity);
+  if (release === "cleaned") return "recovered";
+  return release === "fenced" ? "fenced" : "pending";
+}
+
+/**
+ * One instance per runtime process. A cleanup obligation is retained until this
+ * same attempt can prove its child/group/root terminal; only then may a later
+ * call run a fresh full probe. Obligation transitions happen only inside the
+ * singleflight call chain, so late close callbacks can never clear a newer
+ * fence. A fenced identity (unknown or replaced root) stays closed to manual
+ * operations instead of being deleted or ignored.
+ */
 export function createBrowserReadinessProbe(): Probe {
   let inFlight: Promise<void> | undefined;
   let executableInFlight: string | undefined;
-  let cleanupIncomplete = false;
+  let obligation: CleanupObligation | undefined;
+  let attempts = 0;
+  const run = async (executable: string): Promise<void> => {
+    if (obligation) {
+      const current = obligation;
+      let recovery: Recovery;
+      try {
+        recovery = await recoverObligation(current);
+      } catch {
+        recovery = "pending";
+      }
+      if (recovery !== "recovered" || obligation !== current)
+        throw cleanupError(
+          recovery === "fenced" ? "recovery-fenced" : "recovery-pending",
+        );
+      obligation = undefined;
+    }
+    attempts += 1;
+    let result: ProbeResult;
+    try {
+      result = await runProbe(executable, attempts);
+    } catch {
+      throw new Error(UNAVAILABLE_ERROR);
+    }
+    if (result.kind === "ok") return;
+    if (result.kind === "unavailable") throw new Error(UNAVAILABLE_ERROR);
+    obligation = result.obligation;
+    throw cleanupError("attempt-cleanup");
+  };
   return (executable) => {
     if (process.platform !== "linux" || !EXECUTABLES.has(executable)) {
-      return Promise.reject(new Error("BROWSER_RUNTIME_CONFIG_INVALID"));
-    }
-    if (cleanupIncomplete) {
-      return Promise.reject(new Error("BROWSER_PROBE_CLEANUP_INCOMPLETE"));
+      return Promise.reject(new Error(CONFIG_ERROR));
     }
     if (inFlight) {
       return executableInFlight === executable
         ? inFlight
-        : Promise.reject(new Error("BROWSER_RUNTIME_CONFIG_INVALID"));
+        : Promise.reject(new Error(CONFIG_ERROR));
     }
     executableInFlight = executable;
-    inFlight = runProbe(executable)
-      .catch((error: unknown) => {
-        if (
-          error instanceof Error &&
-          error.message === "BROWSER_PROBE_CLEANUP_INCOMPLETE"
-        ) {
-          cleanupIncomplete = true;
-        }
-        throw new Error(
-          cleanupIncomplete
-            ? "BROWSER_PROBE_CLEANUP_INCOMPLETE"
-            : "BROWSER_RUNTIME_UNAVAILABLE",
-        );
-      })
-      .finally(() => {
-        inFlight = undefined;
-        executableInFlight = undefined;
-      });
+    inFlight = run(executable).finally(() => {
+      inFlight = undefined;
+      executableInFlight = undefined;
+    });
     return inFlight;
   };
 }

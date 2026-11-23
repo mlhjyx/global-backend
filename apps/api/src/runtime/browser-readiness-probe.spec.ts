@@ -175,6 +175,11 @@ describe("Browser readiness temporary-state lifecycle", () => {
     await expect(probe("/usr/bin/chromium")).rejects.toThrow(
       "BROWSER_PROBE_CLEANUP_INCOMPLETE",
     );
+    const fenced = await probe("/usr/bin/chromium").catch((error: Error) => error);
+    expect(fenced).toMatchObject({
+      message: "BROWSER_PROBE_CLEANUP_INCOMPLETE",
+      probePhase: "recovery-fenced",
+    });
     expect(children.length).toBe(1);
   });
 
@@ -254,6 +259,12 @@ describe("Browser readiness temporary-state lifecycle", () => {
     await expect(probe("/usr/bin/chromium")).rejects.toThrow(
       "BROWSER_PROBE_CLEANUP_INCOMPLETE",
     );
+    const pending = await probe("/usr/bin/chromium").catch((error: Error) => error);
+    expect(pending).toMatchObject({
+      message: "BROWSER_PROBE_CLEANUP_INCOMPLETE",
+      probePhase: "recovery-pending",
+    });
+    expect(children).toHaveLength(1);
   });
 
   it("checks the remaining group without treating unrelated processes as descendants", async () => {
@@ -441,7 +452,113 @@ describe("Browser readiness temporary-state lifecycle", () => {
         await close;
       }
     }
-  }, 25_000);
+  }, 35_000);
+
+  it("recovers a transient group observation and then runs a fresh full probe", async () => {
+    const readDirectory = fs.readdir.bind(fs);
+    const kill = process.kill.bind(process);
+    let bounded = true;
+    vi.spyOn(fs, "readdir").mockImplementation(((path, options) => {
+      if (path === "/proc" && bounded) {
+        bounded = false;
+        return Promise.resolve(
+          Array.from({ length: 4097 }, (_, i) => String(i + 1)),
+        );
+      }
+      return readDirectory(path, options);
+    }) as typeof fs.readdir);
+    vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+      if (signal === 0 && children.some((child) => pid === -child.pid!))
+        return true;
+      return kill(pid, signal);
+    });
+    installBrowser(`process.stdout.write(${JSON.stringify(document)})`);
+    const probe = createBrowserReadinessProbe();
+    await expect(probe("/usr/bin/chromium")).rejects.toThrow(
+      "BROWSER_PROBE_CLEANUP_INCOMPLETE",
+    );
+    expect(children).toHaveLength(1);
+    for (const root of roots) await access(root);
+    await probe("/usr/bin/chromium");
+    expect(children).toHaveLength(2);
+    for (const root of roots)
+      await expect(access(root)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("never treats recovered cleanup as ready when the fresh probe fails", async () => {
+    const readDirectory = fs.readdir.bind(fs);
+    const kill = process.kill.bind(process);
+    let bounded = true;
+    vi.spyOn(fs, "readdir").mockImplementation(((path, options) => {
+      if (path === "/proc" && bounded) {
+        bounded = false;
+        return Promise.resolve(
+          Array.from({ length: 4097 }, (_, i) => String(i + 1)),
+        );
+      }
+      return readDirectory(path, options);
+    }) as typeof fs.readdir);
+    vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+      if (signal === 0 && children.some((child) => pid === -child.pid!))
+        return true;
+      return kill(pid, signal);
+    });
+    let launches = 0;
+    vi.spyOn(childProcess, "spawn").mockImplementation((command, args, options) => {
+      const opts = options as SpawnOptions;
+      const profileArg = (args as string[]).find((arg) =>
+        arg.startsWith("--user-data-dir="),
+      );
+      if (!profileArg) throw new Error("Missing private browser profile");
+      roots.add(dirname(profileArg.slice("--user-data-dir=".length)));
+      const script =
+        launches++ === 0
+          ? `process.stdout.write(${JSON.stringify(document)})`
+          : "process.exit(2)";
+      const child = originalSpawn(
+        process.execPath,
+        ["-e", script, "--", profileArg.slice("--user-data-dir=".length)],
+        opts,
+      );
+      children.push(child);
+      return child;
+    });
+    const probe = createBrowserReadinessProbe();
+    await expect(probe("/usr/bin/chromium")).rejects.toThrow(
+      "BROWSER_PROBE_CLEANUP_INCOMPLETE",
+    );
+    await expect(probe("/usr/bin/chromium")).rejects.toThrow(
+      "BROWSER_RUNTIME_UNAVAILABLE",
+    );
+    expect(children).toHaveLength(2);
+    for (const root of roots)
+      await expect(access(root)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("retries a transient owned-root removal only after terminal proof", async () => {
+    const remove = fs.rm.bind(fs);
+    let failed = false;
+    vi.spyOn(fs, "rm").mockImplementation(((path, options) => {
+      if (!failed && String(path).includes("global-browser-probe-")) {
+        failed = true;
+        return Promise.reject(
+          Object.assign(new Error("io failure"), { code: "EIO" }),
+        );
+      }
+      return remove(path, options as never);
+    }) as typeof fs.rm);
+    installBrowser(`process.stdout.write(${JSON.stringify(document)})`);
+    const probe = createBrowserReadinessProbe();
+    await expect(probe("/usr/bin/chromium")).rejects.toThrow(
+      "BROWSER_PROBE_CLEANUP_INCOMPLETE",
+    );
+    expect(children).toHaveLength(1);
+    for (const root of roots) await access(root);
+    await probe("/usr/bin/chromium");
+    expect(children).toHaveLength(2);
+    for (const root of roots)
+      await expect(access(root)).rejects.toMatchObject({ code: "ENOENT" });
+  });
 
   it("leaves no private roots after 1000 sequential real child processes", async () => {
     const parent = await mkdtemp(join(tmpdir(), "browser-probe-soak-"));
