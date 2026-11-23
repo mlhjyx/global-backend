@@ -118,9 +118,9 @@ function world(
       void values;
       const sql = strings.join("?");
       events.push(sql);
-      if (sql.includes("FROM public.execution_budget_authority"))
+      if (sql.includes("public.lock_enrichment_authority_v1"))
         return [{ id: A, scope_key: W, usable: true, revoked_at: null }];
-      if (sql.includes("FROM public.tool_budget_account"))
+      if (sql.includes("public.lock_enrichment_account_v1"))
         return [
           {
             account_id: ACCOUNT,
@@ -142,7 +142,7 @@ function world(
         if (options.fail === "head") throw new Error("synthetic_head_failure");
         return [head];
       }
-      if (sql.includes("FROM public.contact_enrichment_execution"))
+      if (sql.includes("public.lock_enrichment_execution_by_request_v1"))
         return options.existing ? [head] : [];
       throw new Error("unexpected_fake_transaction_query");
     },
@@ -334,9 +334,9 @@ function stepWorld(
       void values;
       const sql = strings.join("?");
       events.push(sql);
-      if (sql.includes("FROM public.execution_budget_authority"))
+      if (sql.includes("public.lock_enrichment_authority_v1"))
         return [{ id: A, scope_key: W, usable: true, revoked_at: null }];
-      if (sql.includes("FROM public.tool_budget_account"))
+      if (sql.includes("public.lock_enrichment_account_v1"))
         return [
           {
             account_id: ACCOUNT,
@@ -350,13 +350,13 @@ function stepWorld(
             ...options.account,
           },
         ];
-      if (sql.includes("FOR UPDATE OF e,s"))
+      if (sql.includes("public.lock_enrichment_execution_step_anchor_v1"))
         return [{ execution_id: R, step_id: STEP }];
       if (sql.includes("FROM public.contact_enrichment_execution_step s")) {
         contextReads += 1;
         return [{ ...row, ...(contextReads > 1 ? options.secondRead : {}) }];
       }
-      if (sql.includes("FROM public.tool_budget_operation"))
+      if (sql.includes("public.lock_enrichment_operation_v1"))
         return [
           {
             operation_id: OP,
@@ -822,7 +822,7 @@ function linkWorld(options: { phase: string; row?: Record<string, unknown>; upda
     void values;
     const sql = strings.join("?");
     events.push(sql);
-    if (sql.includes("SELECT id::text,revision,dispatch_phase")) return [row];
+    if (sql.includes("public.lock_enrichment_step_v1")) return [row];
     if (sql.includes("SET result_digest=")) return options.updateRows === 0 ? [] : [{ id: LINK_STEP }];
     throw new Error("unexpected_link_query: " + sql.slice(0, 120));
   });
