@@ -369,9 +369,16 @@ describe.runIf(Boolean(ownerUrl && appUrl))('document-claim gates at the real co
       throw new Error(`no waiting backend matched ${queryLike}`);
     };
     const blockedBy = async (pid: number) => {
-      return owner.$queryRaw<Array<{ locktype: string; xid: string | null }>>`
-        SELECT locktype, transactionid::text AS xid FROM pg_locks
-         WHERE pid = ${pid} AND NOT granted`;
+      return owner.$queryRaw<Array<{ locktype: string; xid: string | null; relation: string | null }>>`
+        SELECT locktype, transactionid::text AS xid, relation::regclass::text AS relation
+          FROM pg_locks WHERE pid = ${pid} AND NOT granted`;
+    };
+    const rowHeldBy = async (table: string, id: string) => {
+      const [row] = await owner.$queryRawUnsafe<Array<{ xmax: string }>>(
+        `SELECT xmax::text AS xmax FROM ${table} WHERE id = $1::uuid`,
+        id,
+      );
+      return row?.xmax ?? null;
     };
     // An unrelated row-lock waiter runs throughout the interleaving: the barrier
     // must bind to the two target backends and their blockers, never to a global
@@ -410,19 +417,27 @@ describe.runIf(Boolean(ownerUrl && appUrl))('document-claim gates at the real co
       .catch((error: unknown) => ({ ok: false as const, error }));
     const approvalWaiter = await waitingBackend('%seller_document%FOR UPDATE%');
     expect(approvalWaiter.xid).not.toBeNull();
-    expect(await blockedBy(approvalWaiter.pid)).toContainEqual({
-      locktype: 'transactionid',
-      xid: holderIdentity?.xid,
-    });
+    expect(await rowHeldBy('seller_document', tenant.documentId)).toBe(holderIdentity?.xid);
+    {
+      // Row locks surface as a transactionid wait on the holder's xid or as a
+      // tuple wait on the target relation; both bind this backend to the row.
+      const locks = await blockedBy(approvalWaiter.pid);
+      const blockedByHolder = locks.some((lock) => lock.locktype === 'transactionid' && lock.xid === holderIdentity?.xid);
+      const blockedOnDocumentTuple = locks.some((lock) => lock.locktype === 'tuple' && lock.relation === 'seller_document');
+      expect(blockedByHolder || blockedOnDocumentTuple).toBe(true);
+    }
     const consumption = icpService
       .generateFromCompany(ctx(tenant.workspaceId, tenant.userId), tenant.companyId)
       .then((value) => ({ ok: true as const, value }))
       .catch((error: unknown) => ({ ok: false as const, error }));
     const icpWaiter = await waitingBackend('%company_profile%FOR NO KEY UPDATE%');
-    expect(await blockedBy(icpWaiter.pid)).toContainEqual({
-      locktype: 'transactionid',
-      xid: approvalWaiter.xid,
-    });
+    expect(await rowHeldBy('company_profile', tenant.companyId)).toBe(approvalWaiter.xid);
+    {
+      const locks = await blockedBy(icpWaiter.pid);
+      const blockedByApproval = locks.some((lock) => lock.locktype === 'transactionid' && lock.xid === approvalWaiter.xid);
+      const blockedOnCompanyTuple = locks.some((lock) => lock.locktype === 'tuple' && lock.relation === 'company_profile');
+      expect(blockedByApproval || blockedOnCompanyTuple).toBe(true);
+    }
     releaseDocument.resolve();
     await holder;
     releaseUnrelated.resolve();

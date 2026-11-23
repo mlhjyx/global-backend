@@ -59,6 +59,11 @@ describe.runIf(Boolean(ownerUrl && appUrl))('seller document typed claim S1a on 
       await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceId}, true)`;
       return work(tx);
     }, { timeout: 30_000 });
+  const deferred = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((done) => (resolve = done));
+    return { promise, resolve };
+  };
   const countsOf = (progress: SellerDocumentEraseProgress) => ({
     chunksErased: progress.chunksErased,
     claimsErased: progress.claimsErased,
@@ -660,28 +665,76 @@ describe.runIf(Boolean(ownerUrl && appUrl))('seller document typed claim S1a on 
     const holderRelease = new Promise<void>((resolve) => (releaseHolder = resolve));
     let holderLocked!: () => void;
     const holderReady = new Promise<void>((resolve) => (holderLocked = resolve));
+    let holderIdentity: { pid: number; xid: string } | undefined;
     const holder = owner.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM deletion_request WHERE id = ${request.requestId}::uuid FOR UPDATE`;
+      const [identity] = await tx.$queryRaw<Array<{ pid: number; xid: string }>>`
+        SELECT pg_backend_pid() AS pid, pg_current_xact_id()::xid::text AS xid`;
+      holderIdentity = identity;
       holderLocked();
       await holderRelease;
     }, { timeout: 60_000 });
     await holderReady;
-    const pendingLockCount = async () => {
-      const [row] = await owner.$queryRaw<Array<{ n: number }>>`SELECT count(*)::int AS n FROM pg_locks WHERE NOT granted`;
-      return row.n;
-    };
-    const baselineWaiters = await pendingLockCount();
+    const waitingBackends = async (queryLike: string) =>
+      owner.$queryRaw<Array<{ pid: number; xid: string | null }>>`
+        SELECT pid, backend_xid::text AS xid FROM pg_stat_activity
+         WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE ${queryLike}`;
+    const blockedBy = async (pid: number) =>
+      owner.$queryRaw<Array<{ locktype: string; xid: string | null; relation: string | null }>>`
+        SELECT locktype, transactionid::text AS xid, relation::regclass::text AS relation
+          FROM pg_locks WHERE pid = ${pid} AND NOT granted`;
+    // An unrelated row-lock waiter runs throughout: the barrier must bind to the
+    // two target backends and their blocker, never to a global waiter count that
+    // another session could satisfy before either continuation has queued.
+    const unrelatedCompany = await owner.canonicalCompany.create({
+      data: { workspaceId: tenant.workspaceId, name: 'Synthetic overlap unrelated waiter', dedupeKey: randomUUID() },
+    });
+    const unrelatedHeld = deferred();
+    const releaseUnrelated = deferred();
+    const unrelatedHolder = owner.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM canonical_company WHERE id = ${unrelatedCompany.id}::uuid FOR UPDATE`;
+      unrelatedHeld.resolve();
+      await releaseUnrelated.promise;
+    }, { timeout: 60_000 });
+    await unrelatedHeld.promise;
+    const unrelatedWaiter = owner.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM canonical_company WHERE id = ${unrelatedCompany.id}::uuid FOR UPDATE`;
+      await releaseUnrelated.promise;
+    }, { timeout: 60_000 });
+    for (let attempt = 0; attempt < 400; attempt += 1) {
+      if ((await waitingBackends('%canonical_company%FOR UPDATE%')).length === 1) break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(await waitingBackends('%canonical_company%FOR UPDATE%')).toHaveLength(1);
     // Two continuations of the same request overlap. Neither may read progress
     // before the other commits, or one overwrites the other's counts.
     const left = activities.eraseSubject({ input, located }) as Promise<SellerDocumentEraseProgress>;
     const right = activities.eraseSubject({ input, located }) as Promise<SellerDocumentEraseProgress>;
+    let progressWaiters: Array<{ pid: number; xid: string | null }> = [];
     for (let attempt = 0; attempt < 400; attempt += 1) {
-      if ((await pendingLockCount()) >= baselineWaiters + 2) break;
+      progressWaiters = await waitingBackends('%deletion_request%FOR UPDATE%');
+      if (progressWaiters.length === 2) break;
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
-    expect(await pendingLockCount()).toBeGreaterThanOrEqual(baselineWaiters + 2);
+    expect(progressWaiters).toHaveLength(2);
+    const [heldRow] = await owner.$queryRaw<Array<{ xmax: string }>>`
+      SELECT xmax::text AS xmax FROM deletion_request WHERE id = ${request.requestId}::uuid`;
+    expect(heldRow.xmax).toBe(holderIdentity?.xid);
+    for (const waiter of progressWaiters) {
+      const locks = await blockedBy(waiter.pid);
+      // The row lock surfaces either as a transactionid wait on the holder's xid
+      // or as a tuple wait on the target relation; both bind the real backend to
+      // this request row.
+      const blockedByHolder = locks.some((lock) => lock.locktype === 'transactionid' && lock.xid === holderIdentity?.xid);
+      const blockedOnRequestTuple = locks.some((lock) => lock.locktype === 'tuple' && lock.relation === 'deletion_request');
+      expect(blockedByHolder || blockedOnRequestTuple).toBe(true);
+    }
+    // Both continuations wait on the progress-row lock, not inside the definer.
+    expect(await waitingBackends('%erase_seller_document_cleanup_batch_v1%')).toHaveLength(0);
     releaseHolder();
     await holder;
+    releaseUnrelated.resolve();
+    await Promise.all([unrelatedHolder, unrelatedWaiter]);
     await Promise.all([left, right]);
     const raced = await owner.deletionRequest.findUniqueOrThrow({ where: { id: request.requestId } });
     const racedCounts = (raced.stats as { sellerDocumentCounts?: { claimsErased?: number } }).sellerDocumentCounts;
