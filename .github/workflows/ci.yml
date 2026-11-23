@@ -746,7 +746,8 @@ jobs:
             src/report/weekly-report.postgres.spec.ts \
             src/enrichment/safety/enrichment-safety.migration.spec.ts \
             src/enrichment/safety/enrichment-execution.repository.postgres.spec.ts \
-            src/seller-knowledge/seller-document-claims.postgres.spec.ts
+            src/seller-knowledge/seller-document-claims.postgres.spec.ts \
+            src/seller-knowledge/document-claim-gated-consumers.postgres.spec.ts
 
       - name: Site Builder isolated zero-dispatch evaluation boundary
         if: needs.renderer-visual-scope.outputs.run_code != 'false'

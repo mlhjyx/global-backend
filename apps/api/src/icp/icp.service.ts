@@ -15,6 +15,7 @@ import { getTask } from '../ai-tasks/task-registry';
 import {
   documentClaimDependenciesStillCurrent,
   effectiveApprovedClaimsInTransaction,
+  lockDocumentClaimDependencies,
   type DocumentClaimDependency,
 } from '../claim/document-claim-basis';
 import { mirrorExclusionRuleIndexes, qualify, RuleLike } from './rule-engine';
@@ -246,13 +247,13 @@ export class IcpService {
       ? domainAggregateIdForReceipt(result.durableReceipt, 'icp.design')
       : undefined;
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      if (
-        documentDependencies.length > 0 &&
-        !(await documentClaimDependenciesStillCurrent(tx, { workspaceId: ctx.workspaceId, companyId }, documentDependencies))
-      ) {
-        throw new ConflictException({
-          error: { code: 'ICP_DOCUMENT_SOURCE_STALE', message: 'document claim source changed before ICP apply' },
-        });
+      if (documentDependencies.length > 0) {
+        await lockDocumentClaimDependencies(tx, { workspaceId: ctx.workspaceId, companyId }, documentDependencies);
+        if (!(await documentClaimDependenciesStillCurrent(tx, { workspaceId: ctx.workspaceId, companyId }, documentDependencies))) {
+          throw new ConflictException({
+            error: { code: 'ICP_DOCUMENT_SOURCE_STALE', message: 'document claim source changed before ICP apply' },
+          });
+        }
       }
       const applied = await applyDomainAckConsumerTransaction({
         transaction: tx,
