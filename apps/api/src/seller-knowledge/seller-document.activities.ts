@@ -87,32 +87,6 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
     });
   }
 
-  async function finalize(
-    input: SellerDocumentIngestInput,
-    leaseToken: string,
-    chunkCount: number,
-  ): Promise<boolean> {
-    return deps.prisma.withWorkspace(input.workspaceId, async (tx) => {
-      const updated = await tx.$executeRaw(Prisma.sql`
-        UPDATE "seller_document"
-        SET "status" = 'ready',
-            "chunk_count" = ${chunkCount},
-            "parsed_meta" = jsonb_build_object('chunks', ${chunkCount}::int),
-            "processing_stage" = NULL,
-            "processing_error_code" = NULL,
-            "lease_token" = NULL,
-            "lease_until" = NULL,
-            "retry_at" = NULL,
-            "updated_at" = now()
-        WHERE "id" = ${input.documentId}::uuid
-          AND "workspace_id" = ${input.workspaceId}::uuid
-          AND "lease_token" = ${leaseToken}
-          AND "status" = 'processing'
-      `);
-      return updated === 1;
-    });
-  }
-
   async function fail(
     input: SellerDocumentIngestInput,
     leaseToken: string,
@@ -208,8 +182,28 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
         }
 
         heartbeat('persist', input.documentId);
-        const persisted = await deps.prisma.withWorkspace(input.workspaceId, async (tx) => {
-          // 幂等重放：清掉该文档的旧分块（同一次 lease 内重试才会到这里）。
+        // 新 chunks/metadata 发布、parseRevision 递增与 ready 同一事务：旧引用在提交前不可见，
+        // 提交后即指向新修订；租约丢失时不覆盖新持有者的真值。
+        const published = await deps.prisma.withWorkspace(input.workspaceId, async (tx) => {
+          const rows = await tx.$queryRaw<Array<{ parse_revision: number }>>(Prisma.sql`
+            UPDATE "seller_document"
+            SET "status" = 'ready',
+                "chunk_count" = ${chunks.length},
+                "parsed_meta" = jsonb_build_object('chunks', ${chunks.length}::int),
+                "parse_revision" = COALESCE("parse_revision", 0) + 1,
+                "processing_stage" = NULL,
+                "processing_error_code" = NULL,
+                "lease_token" = NULL,
+                "lease_until" = NULL,
+                "retry_at" = NULL,
+                "updated_at" = now()
+            WHERE "id" = ${input.documentId}::uuid
+              AND "workspace_id" = ${input.workspaceId}::uuid
+              AND "lease_token" = ${leaseToken}
+              AND "status" = 'processing'
+            RETURNING "parse_revision"
+          `);
+          if (rows.length !== 1) return null;
           await tx.sellerDocumentChunk.deleteMany({ where: { documentId: input.documentId } });
           for (const [index, chunk] of chunks.entries()) {
             const vector = `[${vectors[index].join(',')}]`;
@@ -222,15 +216,9 @@ export function createSellerDocumentActivities(deps: SellerDocumentActivityDeps)
                  ${deps.embeddings.model}, ${deps.embeddings.version}, ${vector}::vector)
             `);
           }
-          return true;
+          return rows[0].parse_revision;
         });
-        if (!persisted) {
-          return { documentId: input.documentId, outcome: 'queued' };
-        }
-
-        const finalized = await finalize(input, leaseToken, chunks.length);
-        if (!finalized) {
-          // 租约已被回收（过期/被新 attempt 接管）：不覆盖新持有者的真值。
+        if (published === null) {
           log.warn(`seller document finalize lost lease (${input.documentId})`);
           return { documentId: input.documentId, outcome: 'not_due' };
         }

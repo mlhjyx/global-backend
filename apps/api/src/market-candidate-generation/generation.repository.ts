@@ -14,6 +14,7 @@ import {
 import { isUUID } from "class-validator";
 import { PrismaService } from "../prisma/prisma.service";
 import type { RequestContext } from "../auth/request-context";
+import { documentReferencedClaimIds } from '../claim/document-claim-basis';
 import {
   buildGenerationBasis,
   generationCanonicalJson,
@@ -304,7 +305,17 @@ export class MarketCandidateGenerationRepository {
       claims.length !== selection.claimIds.length
     )
       invalidGenerationInput();
-    return { offerings, claims };
+    // S1a: document-backed Claims are not yet carried through the generation basis.
+    // Explicit selection rejects them; automatic selection excludes them explicitly.
+    const documentReferenced = await documentReferencedClaimIds(
+      tx,
+      { workspaceId: ctx.workspaceId },
+      claims.map((claim) => claim.id),
+    );
+    const effectiveClaims = claims.filter((claim) => !documentReferenced.has(claim.id));
+    if (selection.claimIds !== undefined && effectiveClaims.length !== claims.length)
+      invalidGenerationInput();
+    return { offerings, claims: selection.claimIds === undefined ? effectiveClaims : claims };
   }
   async loadBasis(
     tx: Tx,

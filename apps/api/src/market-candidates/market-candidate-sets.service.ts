@@ -1,3 +1,7 @@
+import {
+  hasValidDocumentClaimApprovalAudit,
+  loadDocumentClaimBindingInTransaction,
+} from '../claim/document-claim-basis';
 import { createHash, randomUUID } from 'node:crypto';
 import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, type MarketCandidateFeedback, type MarketCandidateSet, type MarketCandidateSetRevision } from '@prisma/client';
@@ -90,6 +94,12 @@ export class MarketCandidateSetsService {
     const claim = await tx.claim.findUnique({ where: { id } });
     if (!claim || claim.companyId !== companyId || ['REVOKED','EXPIRED'].includes(claim.status)
       || (claim.validUntil !== null && claim.validUntil.getTime() <= Date.now())) return null;
+    const documentReference = await tx.claimDocumentEvidence.findUnique({ where: { claimId: id }, select: { id: true } });
+    if (documentReference) {
+      const binding = await loadDocumentClaimBindingInTransaction(tx, { workspaceId: claim.workspaceId, companyId }, claim);
+      if (!binding || !hasValidDocumentClaimApprovalAudit(claim, binding)) return null;
+      return Object.assign(claim, { documentBindingHash: binding.bindingHash, documentReferenceId: binding.referenceId });
+    }
     return claim;
   }
   private async source(tx: Tx, companyId: string, reference: MarketCandidateSourceReferenceDto, lock: boolean): Promise<MarketCandidateSourceSnapshotDto | null> {
@@ -108,7 +118,8 @@ export class MarketCandidateSetsService {
       if (!row) return null;
       return { ...base, version: row.version, status: row.status,
         digest: documentHash({ type: row.type, statement: row.statement, status: row.status, validUntil: row.validUntil?.toISOString() ?? null,
-          verifiedBy: row.verifiedBy, verifiedAt: row.verifiedAt?.toISOString() ?? null, verificationMethod: row.verificationMethod, verificationProof: row.verificationProof }),
+          verifiedBy: row.verifiedBy, verifiedAt: row.verifiedAt?.toISOString() ?? null, verificationMethod: row.verificationMethod, verificationProof: row.verificationProof,
+          documentBindingHash: (row as { documentBindingHash?: string }).documentBindingHash ?? null }),
         sourceDate: row.createdAt.toISOString() };
     }
     if (reference.kind === 'EVIDENCE') {

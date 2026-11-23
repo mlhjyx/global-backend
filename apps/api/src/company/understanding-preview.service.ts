@@ -200,7 +200,8 @@ export class UnderstandingPreviewService {
           take: 12,
         }),
         tx.claim.findMany({
-          where: { companyId, status: { not: 'REVOKED' } },
+          // S1a：理解预览只呈现官网同站溯源；文档来源 Claim 显式排除，不伪装官网事实。
+          where: { companyId, status: { not: 'REVOKED' }, documentClaimEvidence: { none: {} } },
           select: {
             type: true,
             statement: true,

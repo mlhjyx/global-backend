@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiProperty, ApiPropertyOptional, ApiQuery, ApiTags } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsIn, IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 import { Ctx } from '../auth/ctx.decorator';
 import { RequireScopes } from '../auth/require-scopes.decorator';
@@ -31,6 +31,17 @@ class CreateManualClaimDto {
   @IsString()
   @MaxLength(2000)
   evidence?: string;
+}
+
+class ClaimTransitionDto {
+  @ApiProperty({
+    description: '乐观锁版本；文档来源 Claim 必填（v4 proof 绑定该版本）',
+    minimum: 1,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  expectedVersion?: number;
 }
 
 class ResolveConflictDto {
@@ -88,8 +99,9 @@ export class ClaimController {
   async approve(
     @Ctx() ctx: RequestContext,
     @Param('claimId', ParseUUIDPipe) claimId: string,
+    @Body() dto: ClaimTransitionDto,
   ): Promise<Enveloped<ClaimDto>> {
-    return envelope(ClaimDto.from(await this.claims.transition(ctx, claimId, 'APPROVED')));
+    return envelope(ClaimDto.from(await this.claims.transition(ctx, claimId, 'APPROVED', dto?.expectedVersion)));
   }
 
   @Post('claims/:claimId/reject')
@@ -100,8 +112,9 @@ export class ClaimController {
   async reject(
     @Ctx() ctx: RequestContext,
     @Param('claimId', ParseUUIDPipe) claimId: string,
+    @Body() dto: ClaimTransitionDto,
   ): Promise<Enveloped<ClaimDto>> {
-    return envelope(ClaimDto.from(await this.claims.transition(ctx, claimId, 'REVOKED')));
+    return envelope(ClaimDto.from(await this.claims.transition(ctx, claimId, 'REVOKED', dto?.expectedVersion)));
   }
 
   @Post('companies/:companyId/claims')
@@ -148,8 +161,9 @@ export class ClaimController {
   async revoke(
     @Ctx() ctx: RequestContext,
     @Param('claimId', ParseUUIDPipe) claimId: string,
+    @Body() dto: ClaimTransitionDto,
   ): Promise<Enveloped<ClaimDto>> {
-    return envelope(ClaimDto.from(await this.claims.revoke(ctx, claimId)));
+    return envelope(ClaimDto.from(await this.claims.revoke(ctx, claimId, dto?.expectedVersion)));
   }
 
   @Get('companies/:companyId/conflicts')

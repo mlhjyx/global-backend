@@ -15,6 +15,7 @@ import type { RequestContext } from '../auth/request-context';
 import { mimeMatchesSniffed, sniffMime } from '../site-builder/object-key';
 import { EmbeddingsClient } from '../site-builder/embeddings.client';
 import { SellerDocumentsStorage } from './seller-documents.storage';
+import { SellerDocumentCleanupService } from './seller-document-cleanup.service';
 
 /** 允许的资料类型 → kind 与单文件上限（字节）。HTML/SVG/可执行类永不入列。 */
 const MIME_KIND: Record<string, { kind: string; maxBytes: number }> = {
@@ -432,14 +433,23 @@ export class SellerDocumentsService {
   async softDelete(ctx: RequestContext, documentId: string): Promise<SellerDocumentRow> {
     const row = await this.get(ctx, documentId);
     if (row.status === 'deleted') return row;
-    const updated = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-      tx.sellerDocument.update({
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const locked = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+        SELECT "id" FROM "seller_document"
+         WHERE "id" = ${documentId}::uuid AND "workspace_id" = ${ctx.workspaceId}::uuid AND "company_id" = ${row.companyId}::uuid
+         FOR UPDATE`);
+      if (locked.length !== 1) throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'document not found' } });
+      const updated = await tx.sellerDocument.update({
         where: { id: documentId },
         data: { status: 'deleted', deletedAt: new Date(), deletedBy: ctx.userId },
-      }),
-    );
-    // 物理清理（chunk/对象）由 Phase 2b 的清理管线按 deleted_at 扫描；chunk 先随文档级联不可见。
-    return updated;
+      });
+      // Internal cleanup request + transactional outbox; customer response is only the soft-deleted state.
+      await SellerDocumentCleanupService.createSellerDocumentCleanupRequestInTransaction(tx, ctx, {
+        documentId,
+        companyId: row.companyId,
+      });
+      return updated;
+    });
   }
 
   private async findActive(ctx: RequestContext, documentId: string): Promise<SellerDocumentRow | null> {

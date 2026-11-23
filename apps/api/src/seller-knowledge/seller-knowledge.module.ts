@@ -9,12 +9,15 @@ import {
 } from './seller-documents.service';
 import { SellerDocumentsStorage } from './seller-documents.storage';
 import { TemporalSellerDocumentsIngestLauncher } from './temporal-seller-documents-launcher';
+import { SellerDocumentClaimsController } from './seller-document-claims.controller';
+import { SellerDocumentClaimsService } from './seller-document-claims.service';
 import { EmbeddingsClient } from '../site-builder/embeddings.client';
 
 @Module({
-  controllers: [SellerCompanyDocumentsController, SellerDocumentsController],
+  controllers: [SellerCompanyDocumentsController, SellerDocumentsController, SellerDocumentClaimsController],
   providers: [
     SellerDocumentsService,
+    SellerDocumentClaimsService,
     EmbeddingsClient,
     { provide: SellerDocumentsStorage, useFactory: () => new SellerDocumentsStorage() },
     { provide: SELLER_DOCUMENTS_INGEST_LAUNCHER, useClass: TemporalSellerDocumentsIngestLauncher },

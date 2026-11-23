@@ -99,6 +99,10 @@
       "SELECT",
       "UPDATE"
     ],
+    "claim_document_evidence": [
+      "INSERT",
+      "SELECT"
+    ],
     "company_channel_sighting": [
       "INSERT",
       "SELECT"

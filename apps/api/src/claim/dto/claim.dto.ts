@@ -13,6 +13,11 @@ export class ClaimEvidenceDto {
   confidence!: number | null;
 }
 
+export interface ClaimDocumentSourceState {
+  status: 'CURRENT' | 'UNAVAILABLE';
+  documentId: string | null;
+  parseRevision: number | null;
+}
 interface ClaimRow {
   id: string;
   companyId: string;
@@ -24,6 +29,7 @@ interface ClaimRow {
   version: number;
   createdAt: Date;
   evidence?: { sourceUrl: string | null; snippet: string | null; confidence: number | null }[];
+  documentSource?: ClaimDocumentSourceState | null;
 }
 
 export class ClaimDto {
@@ -62,6 +68,13 @@ export class ClaimDto {
   @ApiProperty({ format: 'date-time' })
   createdAt!: string;
 
+  @ApiPropertyOptional({
+    type: Object,
+    nullable: true,
+    description: '文档来源当前可用性；非文档 Claim 为 null。UNAVAILABLE 时不返回历史原句。',
+  })
+  documentSource!: ClaimDocumentSourceState | null;
+
   static from(c: ClaimRow): ClaimDto {
     return {
       id: c.id,
@@ -78,6 +91,7 @@ export class ClaimDto {
         confidence: e.confidence,
       })),
       createdAt: c.createdAt.toISOString(),
+      documentSource: c.documentSource ?? null,
     };
   }
 }

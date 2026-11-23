@@ -1,8 +1,15 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import type { ClaimStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext } from '../auth/request-context';
+import type { ClaimDocumentSourceState } from './dto/claim.dto';
 import { buildClaimApprovalProof } from './claim-verification';
+import {
+  buildDocumentClaimApprovalProof,
+  hasValidDocumentClaimApprovalAudit,
+  loadDocumentClaimBindingInTransaction,
+} from './document-claim-basis';
 import {
   buildProfileClaimDraftSpecs,
   synthesizeProfileClaimDrafts,
@@ -33,13 +40,53 @@ export class ClaimService {
   constructor(private readonly prisma: PrismaService) {}
 
   listForCompany(ctx: RequestContext, companyId: string, status?: string) {
-    return this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-      tx.claim.findMany({
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const claims = await tx.claim.findMany({
         where: { companyId, ...(status ? { status: status as never } : {}) },
         orderBy: { createdAt: 'desc' },
         include: { evidence: true }, // 溯源：来源 URL + 原文片段
-      }),
-    );
+      });
+      const references = await tx.claimDocumentEvidence.findMany({
+        where: { workspaceId: ctx.workspaceId, claimId: { in: claims.map((claim) => claim.id) } },
+        select: { claimId: true, documentId: true },
+      });
+      const byClaim = new Map(references.map((reference) => [reference.claimId, reference]));
+      const out: Array<(typeof claims)[number] & { documentSource: ClaimDocumentSourceState | null }> = [];
+      for (const claim of claims) {
+        const reference = byClaim.get(claim.id);
+        if (!reference) {
+          out.push({ ...claim, documentSource: null });
+          continue;
+        }
+        const binding = await loadDocumentClaimBindingInTransaction(
+          tx,
+          { workspaceId: ctx.workspaceId, companyId: claim.companyId },
+          claim,
+        );
+        const current = binding !== null && hasValidDocumentClaimApprovalAudit(claim, binding);
+        out.push({
+          ...claim,
+          // 来源失效/删除时不渲染历史全文或偏移；只给准确状态。
+          evidence: current
+            ? claim.evidence
+            : claim.evidence.map((evidence) => ({
+                ...evidence,
+                snippet: null,
+                sourceUrl: null,
+                quoteStart: null,
+                quoteEnd: null,
+                quotePrefix: null,
+                quoteSuffix: null,
+              })),
+          documentSource: {
+            status: current ? 'CURRENT' : 'UNAVAILABLE',
+            documentId: reference.documentId,
+            parseRevision: binding?.parseRevision ?? null,
+          },
+        });
+      }
+      return out;
+    });
   }
 
   /**
@@ -48,6 +95,40 @@ export class ClaimService {
    */
   async transition(ctx: RequestContext, claimId: string, target: ClaimTarget, expectedVersion?: number) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const existing = await tx.claim.findFirst({
+        where: { id: claimId, workspaceId: ctx.workspaceId },
+        select: { id: true, companyId: true },
+      });
+      if (!existing) {
+        throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'claim not found' } });
+      }
+      const [reference] = await tx.$queryRaw<Array<{ id: string; document_id: string | null }>>(Prisma.sql`
+        SELECT r."id"::text, r."document_id"::text
+          FROM "claim_document_evidence" r
+         WHERE r."workspace_id" = ${ctx.workspaceId}::uuid AND r."claim_id" = ${claimId}::uuid
+         LIMIT 2
+      `);
+      const documentClaim = reference !== undefined;
+      if (documentClaim) {
+        if (expectedVersion == null) {
+          throw new ConflictException({
+            error: { code: 'DOCUMENT_CLAIM_EXPECTED_VERSION_REQUIRED', message: 'document claims require expectedVersion' },
+          });
+        }
+        // Fixed order: company -> document -> claim.
+        await tx.$queryRaw(Prisma.sql`
+          SELECT "id" FROM "company_profile"
+           WHERE "id" = ${existing.companyId}::uuid AND "workspace_id" = ${ctx.workspaceId}::uuid
+           FOR SHARE
+        `);
+        if (reference.document_id !== null) {
+          await tx.$queryRaw(Prisma.sql`
+            SELECT "id" FROM "seller_document"
+             WHERE "id" = ${reference.document_id}::uuid AND "workspace_id" = ${ctx.workspaceId}::uuid
+             FOR UPDATE
+          `);
+        }
+      }
       const [claim] = await tx.$queryRaw<LockedClaimForTransition[]>`
         SELECT
           c."id",
@@ -87,37 +168,65 @@ export class ClaimService {
         });
       }
 
-      if (target === 'APPROVED' && (claim.originKey !== null || claim.factKey !== null)) {
-        const exactBridge =
-          claim.originKey !== null && claim.factKey !== null
-            ? await tx.$queryRaw<Array<{ id: string }>>`
-                SELECT bridge."id"
-                FROM "brand_profile_claim_bridge" bridge
-                JOIN "brand_profile_evidence_ref" ref
-                  ON ref."id" = bridge."evidence_ref_id"
-                 AND ref."workspace_id" = bridge."workspace_id"
-                 AND ref."site_id" = bridge."site_id"
-                 AND ref."brand_profile_id" = bridge."brand_profile_id"
-                WHERE bridge."claim_id" = ${claim.id}::uuid
-                  AND bridge."workspace_id" = ${claim.workspaceId}::uuid
-                  AND bridge."company_profile_id" = ${claim.companyId}::uuid
-                  AND ref."fact_key" = ${claim.factKey}
-                LIMIT 1
-              `
-            : [];
-        if (exactBridge.length === 0) {
-          throw new ConflictException({
-            error: {
-              code: 'CLAIM_BRIDGE_REQUIRED',
-              message: 'origin-keyed claim has no surviving exact Site evidence bridge',
-            },
-          });
-        }
-      }
-
       const nextVersion = claim.version + 1;
       const verifiedAt = new Date();
       const verificationMethod = 'human_review' as const;
+      let documentDependency: { referenceId: string; bindingHash: string } | null = null;
+      let verificationProof: unknown;
+      if (target === 'APPROVED') {
+        if (documentClaim) {
+          const binding = await loadDocumentClaimBindingInTransaction(
+            tx,
+            { workspaceId: ctx.workspaceId, companyId: claim.companyId },
+            claim,
+          );
+          if (!binding) {
+            throw new ConflictException({
+              error: { code: 'DOCUMENT_CLAIM_SOURCE_UNAVAILABLE', message: 'document claim source is not current' },
+            });
+          }
+          documentDependency = { referenceId: binding.referenceId, bindingHash: binding.bindingHash };
+          verificationProof = buildDocumentClaimApprovalProof(
+            claim,
+            nextVersion,
+            { verifiedBy: ctx.userId, verifiedAt, verificationMethod },
+            binding,
+          );
+        } else {
+          if (claim.originKey !== null || claim.factKey !== null) {
+            const exactBridge =
+              claim.originKey !== null && claim.factKey !== null
+                ? await tx.$queryRaw<Array<{ id: string }>>`
+                    SELECT bridge."id"
+                    FROM "brand_profile_claim_bridge" bridge
+                    JOIN "brand_profile_evidence_ref" ref
+                      ON ref."id" = bridge."evidence_ref_id"
+                     AND ref."workspace_id" = bridge."workspace_id"
+                     AND ref."site_id" = bridge."site_id"
+                     AND ref."brand_profile_id" = bridge."brand_profile_id"
+                    WHERE bridge."claim_id" = ${claim.id}::uuid
+                      AND bridge."workspace_id" = ${claim.workspaceId}::uuid
+                      AND bridge."company_profile_id" = ${claim.companyId}::uuid
+                      AND ref."fact_key" = ${claim.factKey}
+                    LIMIT 1
+                  `
+                : [];
+            if (exactBridge.length === 0) {
+              throw new ConflictException({
+                error: {
+                  code: 'CLAIM_BRIDGE_REQUIRED',
+                  message: 'origin-keyed claim has no surviving exact Site evidence bridge',
+                },
+              });
+            }
+          }
+          verificationProof = buildClaimApprovalProof(claim, nextVersion, {
+            verifiedBy: ctx.userId,
+            verifiedAt,
+            verificationMethod,
+          });
+        }
+      }
       const transition = await tx.claim.updateMany({
         where: { id: claimId, status: 'NEEDS_REVIEW', version: claim.version },
         data: target === 'APPROVED'
@@ -127,11 +236,7 @@ export class ClaimService {
               verifiedBy: ctx.userId,
               verifiedAt,
               verificationMethod,
-              verificationProof: buildClaimApprovalProof(claim, nextVersion, {
-                verifiedBy: ctx.userId,
-                verifiedAt,
-                verificationMethod,
-              }),
+              verificationProof: verificationProof as never,
             }
           : { status: target, version: { increment: 1 } },
       });
@@ -153,6 +258,9 @@ export class ClaimService {
               companyId: claim.companyId,
               factKey: claim.factKey,
               type: claim.type,
+              ...(documentDependency === null
+                ? {}
+                : { documentReferenceId: documentDependency.referenceId, documentBindingHash: documentDependency.bindingHash }),
             },
           },
         });
@@ -264,7 +372,44 @@ export class ClaimService {
   /** KNW-003：已批准事实必须可撤销（用户纠正后，下游不再使用）。 */
   async revoke(ctx: RequestContext, claimId: string, expectedVersion?: number) {
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
-      const claim = await tx.claim.findUnique({ where: { id: claimId } });
+      const existing = await tx.claim.findFirst({
+        where: { id: claimId, workspaceId: ctx.workspaceId },
+        select: { id: true, companyId: true },
+      });
+      if (!existing) {
+        throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'claim not found' } });
+      }
+      const [reference] = await tx.$queryRaw<Array<{ id: string; document_id: string | null }>>(Prisma.sql`
+        SELECT r."id"::text, r."document_id"::text
+          FROM "claim_document_evidence" r
+         WHERE r."workspace_id" = ${ctx.workspaceId}::uuid AND r."claim_id" = ${claimId}::uuid
+         LIMIT 2
+      `);
+      if (reference !== undefined) {
+        if (expectedVersion == null) {
+          throw new ConflictException({
+            error: { code: 'DOCUMENT_CLAIM_EXPECTED_VERSION_REQUIRED', message: 'document claims require expectedVersion' },
+          });
+        }
+        await tx.$queryRaw(Prisma.sql`
+          SELECT "id" FROM "company_profile"
+           WHERE "id" = ${existing.companyId}::uuid AND "workspace_id" = ${ctx.workspaceId}::uuid
+           FOR SHARE
+        `);
+        if (reference.document_id !== null) {
+          await tx.$queryRaw(Prisma.sql`
+            SELECT "id" FROM "seller_document"
+             WHERE "id" = ${reference.document_id}::uuid AND "workspace_id" = ${ctx.workspaceId}::uuid
+             FOR UPDATE
+          `);
+        }
+      }
+      const [claim] = await tx.$queryRaw<Array<{ id: string; companyId: string; factKey: string | null; type: string; status: ClaimStatus; version: number }>>(Prisma.sql`
+        SELECT "id", "company_id" AS "companyId", "fact_key" AS "factKey", "type", "status", "version"
+          FROM "claim"
+         WHERE "id" = ${claimId}::uuid AND "workspace_id" = ${ctx.workspaceId}::uuid
+         FOR UPDATE
+      `);
       if (!claim) {
         throw new NotFoundException({ error: { code: 'NOT_FOUND', message: 'claim not found' } });
       }

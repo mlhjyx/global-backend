@@ -636,6 +636,12 @@
       "owner": "CONTACT-ENRICHMENT-SAFETY",
       "expiresAt": "2027-01-31",
       "reason": "SQL-only optional composite FK (nullable budget_operation_id with required scope_key) is not an optional Prisma relation (20261123074206)"
+    },
+    {
+      "statement": "ALTER TABLE \"claim_document_evidence\" DROP CONSTRAINT \"claim_document_evidence_document_fkey\";",
+      "owner": "SELLER-DOCUMENT-CLAIM-S1A",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only column-list ON DELETE SET NULL (document_id) for the live pointer; workspace/company identity stays non-null"
     }
   ]
 }

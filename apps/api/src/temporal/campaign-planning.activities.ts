@@ -412,7 +412,8 @@ export function createCampaignPlanningActivities(deps: {
           if (!company) return null;
           const [claims, offerings] = await Promise.all([
             tx.claim.findMany({
-              where: { companyId: company.id, status: 'APPROVED' },
+              // S1a：文档来源 Claim 暂不进入 campaign 规划（显式排除，未验证来源不得裸用）。
+              where: { companyId: company.id, status: 'APPROVED', documentClaimEvidence: { none: {} } },
               orderBy: { updatedAt: 'desc' },
               take: MAX_APPROVED_CLAIMS,
               select: { type: true, statement: true },

@@ -1,0 +1,353 @@
+import { createHash, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { Prisma, PrismaClient } from '@prisma/client';
+import { describe, expect, it } from 'vitest';
+import { SellerDocumentClaimsService } from './seller-document-claims.service';
+import { SellerDocumentCleanupService } from './seller-document-cleanup.service';
+import { createDeletionActivities } from '../temporal/deletion.activities';
+import { ClaimService } from '../claim/claim.service';
+import {
+  documentClaimBindingHash,
+  documentClaimStatementDigest,
+  hasValidDocumentClaimApprovalAudit,
+  loadDocumentClaimBindingInTransaction,
+} from '../claim/document-claim-basis';
+import { effectiveApprovedClaimsInTransaction } from '../claim/document-claim-basis';
+
+const ownerUrl = process.env.SELLER_DOCUMENT_CLAIM_TEST_DATABASE_URL;
+const appUrl = process.env.SELLER_DOCUMENT_CLAIM_TEST_APP_DATABASE_URL;
+if (Boolean(ownerUrl) !== Boolean(appUrl)) {
+  throw new Error('seller document claim tests need both SELLER_DOCUMENT_CLAIM_TEST_DATABASE_URL and SELLER_DOCUMENT_CLAIM_TEST_APP_DATABASE_URL');
+}
+for (const value of [ownerUrl, appUrl]) {
+  if (!value) continue;
+  const url = new URL(value);
+  if (url.protocol !== 'postgresql:' || !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || url.pathname !== '/global_test' || url.search !== '' || url.hash !== '') {
+    throw new Error('seller document claim tests require a loopback /global_test database');
+  }
+}
+const sha = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
+function sqlState(error: unknown): string | null {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2010') return null;
+  const code = (error.meta as { code?: unknown } | undefined)?.code;
+  return typeof code === 'string' ? code : null;
+}
+
+describe.runIf(Boolean(ownerUrl && appUrl))('seller document typed claim S1a on PostgreSQL as app_user', { timeout: 120_000 }, () => {
+  const owner = ownerUrl ? new PrismaClient({ datasources: { db: { url: ownerUrl } } }) : (null as never);
+  const app = appUrl ? new PrismaClient({ datasources: { db: { url: appUrl } } }) : (null as never);
+  const appPrisma = {
+    withWorkspace: <T>(workspaceId: string, work: (tx: Prisma.TransactionClient) => Promise<T>) =>
+      app.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceId}, true)`;
+        return work(tx);
+      }, { timeout: 30_000 }),
+  } as never;
+  const claims = new SellerDocumentClaimsService(appPrisma);
+  const claimService = new ClaimService(appPrisma);
+  const cleanupService = new SellerDocumentCleanupService(appPrisma);
+  const ctx = (workspaceId: string, userId = randomUUID()) => ({ workspaceId, userId, roles: [], scopes: [] as const });
+
+  async function seedDocument(workspaceId: string, companyId: string, body: string, overrides: { parseRevision?: number; status?: string } = {}) {
+    const documentId = randomUUID();
+    await owner.sellerDocument.create({
+      data: {
+        id: documentId,
+        workspaceId,
+        companyId,
+        uploadedBy: randomUUID(),
+        filename: 'synthetic.txt',
+        mime: 'text/plain',
+        sizeBytes: BigInt(Buffer.byteLength(body, 'utf8')),
+        kind: 'txt',
+        objectKey: `ws/${workspaceId}/companies/${companyId}/seller-documents/${documentId}/${sha(body)}.txt`,
+        contentHash: sha(body),
+        status: overrides.status ?? 'ready',
+        parseRevision: overrides.parseRevision ?? 1,
+        chunkCount: 1,
+      },
+    });
+    await owner.sellerDocumentChunk.create({
+      data: { workspaceId, documentId, seq: 0, text: body, meta: { page: 1 } },
+    });
+    return { documentId, contentHash: sha(body), text: body, chunkTextHash: sha(body) };
+  }
+  async function seedTenant(body = 'Synthetic seller GmbH 通过 ISO 9001 认证，覆盖汽车零部件。') {
+    const workspaceId = randomUUID();
+    const companyId = randomUUID();
+    await owner.workspace.create({ data: { id: workspaceId, name: 'Synthetic workspace' } });
+    await owner.companyProfile.create({ data: { id: companyId, workspaceId, name: 'Synthetic Seller', status: 'REVIEW' } as never });
+    const document = await seedDocument(workspaceId, companyId, body);
+    return { workspaceId, companyId, document, user: randomUUID() };
+  }
+  function referenceFor(document: { documentId: string; contentHash: string; chunkTextHash: string; text: string }, start = 0, end = Buffer.byteLength('Synthetic seller GmbH 通过 ISO 9001 认证，覆盖汽车零部件。')) {
+    const bytes = Buffer.from(document.text, 'utf8');
+    return {
+      documentId: document.documentId,
+      documentContentHash: document.contentHash,
+      parseRevision: 1,
+      chunkSeq: 0,
+      chunkTextHash: document.chunkTextHash,
+      quoteStartByte: start,
+      quoteEndByte: Math.min(end, bytes.length),
+    };
+  }
+  const quoteOf = (text: string, needle: string) => {
+    const bytes = Buffer.from(text, 'utf8');
+    const start = bytes.indexOf(Buffer.from(needle, 'utf8'));
+    return { start, end: start + Buffer.byteLength(needle, 'utf8'), quote: needle };
+  };
+
+  it('verifies the delivered migration checksum and the published revision column', async () => {
+    const path = fileURLToPath(new URL('../../../../packages/db/prisma/migrations/20261123110000_seller_document_claim_evidence/migration.sql', import.meta.url));
+    const expected = sha(readFileSync(path));
+    const rows = await owner.$queryRaw<Array<{ checksum: string }>>`SELECT checksum FROM _prisma_migrations WHERE migration_name = '20261123110000_seller_document_claim_evidence'`;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].checksum).toBe(expected);
+    const columns = await owner.$queryRaw<Array<{ column_name: string }>>`SELECT column_name FROM information_schema.columns WHERE table_name = 'claim_document_evidence' ORDER BY column_name`;
+    expect(columns.map((row) => row.column_name)).toEqual([
+      'binding_sha256', 'chunk_seq', 'chunk_text_sha256', 'claim_id', 'claim_statement_digest', 'claim_type',
+      'company_id', 'created_at', 'document_content_sha256', 'document_id', 'evidence_id', 'id', 'parse_revision',
+      'quote_end_byte', 'quote_start_byte', 'reference_version', 'request_digest', 'requester_id', 'source_document_id', 'workspace_id',
+    ]);
+  });
+
+  it('reads bounded chunks and previews the server-rebuilt quote, binding hash and request digest', async () => {
+    const tenant = await seedTenant();
+    const read = await claims.readChunk(ctx(tenant.workspaceId, tenant.user), tenant.companyId, tenant.document.documentId, 0);
+    expect(read).toMatchObject({ parseRevision: 1, chunkSeq: 0, text: tenant.document.text, context: { page: 1 } });
+    const { start, end, quote } = quoteOf(tenant.document.text, '通过 ISO 9001 认证');
+    const reference = { ...referenceFor(tenant.document), quoteStartByte: start, quoteEndByte: end };
+    const preview = await claims.preview(ctx(tenant.workspaceId, tenant.user), tenant.companyId, tenant.document.documentId, {
+      reference, type: 'certification', statement: '通过 ISO 9001 认证',
+    });
+    expect(preview.quote).toBe(quote);
+    expect(preview.bindingHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(preview.requestDigest).toMatch(/^[0-9a-f]{64}$/);
+    for (const bad of [
+      { ...reference, documentContentHash: '0'.repeat(64) },
+      { ...reference, parseRevision: 2 },
+      { ...reference, chunkTextHash: '0'.repeat(64) },
+      { ...reference, quoteStartByte: 1, quoteEndByte: start + 1 },
+    ])
+      await expect(claims.preview(ctx(tenant.workspaceId, tenant.user), tenant.companyId, tenant.document.documentId, { reference: bad, type: 'certification', statement: '通过 ISO 9001 认证' })).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('creates one NEEDS_REVIEW draft atomically and replays the same origin across requesters', async () => {
+    const tenant = await seedTenant();
+    const { start, end } = quoteOf(tenant.document.text, '通过 ISO 9001 认证');
+    const reference = { ...referenceFor(tenant.document), quoteStartByte: start, quoteEndByte: end };
+    const first = await claims.createDraft(ctx(tenant.workspaceId, tenant.user), tenant.companyId, tenant.document.documentId, {
+      reference, type: 'certification', statement: '通过 ISO 9001 认证', requestDigest: (await claims.preview(ctx(tenant.workspaceId, tenant.user), tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证' })).requestDigest,
+    });
+    expect(first).toMatchObject({ status: 'NEEDS_REVIEW', claimVersion: 1, replayed: false, available: true });
+    const claim = await owner.claim.findUniqueOrThrow({ where: { id: first.claimId }, include: { evidence: true } });
+    expect(claim.status).toBe('NEEDS_REVIEW');
+    expect(claim.evidence[0]?.snippet).toBe('通过 ISO 9001 认证');
+    expect(claim.evidence[0]?.sourceContentHash).toBe(tenant.document.contentHash);
+    const referenceRow = await owner.claimDocumentEvidence.findUniqueOrThrow({ where: { claimId: first.claimId } });
+    expect(referenceRow).toMatchObject({ parseRevision: 1, chunkSeq: 0, documentId: tenant.document.documentId, sourceDocumentId: tenant.document.documentId });
+    expect(referenceRow.quoteStartByte).toBe(start);
+    expect(referenceRow.quoteEndByte).toBe(end);
+    const reviewer2 = randomUUID();
+    const replay = await claims.createDraft(ctx(tenant.workspaceId, reviewer2), tenant.companyId, tenant.document.documentId, {
+      reference, type: 'certification', statement: '通过 ISO 9001 认证', requestDigest: (await claims.preview(ctx(tenant.workspaceId, reviewer2), tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证' })).requestDigest,
+    });
+    expect(replay).toMatchObject({ claimId: first.claimId, evidenceId: first.evidenceId, referenceId: first.referenceId, replayed: true, status: 'NEEDS_REVIEW' });
+    await expect(claims.createDraft(ctx(tenant.workspaceId, tenant.user), tenant.companyId, tenant.document.documentId, {
+      reference, type: 'certification', statement: '通过 ISO 14001 认证', requestDigest: (await claims.preview(ctx(tenant.workspaceId, tenant.user), tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证' })).requestDigest,
+    })).rejects.toMatchObject({ status: 409 });
+  });
+
+  it('requires expectedVersion and writes a v4 proof bound to the exact reference', async () => {
+    const tenant = await seedTenant();
+    const { start, end } = quoteOf(tenant.document.text, '通过 ISO 9001 认证');
+    const reference = { ...referenceFor(tenant.document), quoteStartByte: start, quoteEndByte: end };
+    const userCtx = ctx(tenant.workspaceId, tenant.user);
+    const preview = await claims.preview(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证' });
+    const draft = await claims.createDraft(userCtx, tenant.companyId, tenant.document.documentId, {
+      reference, type: 'certification', statement: '通过 ISO 9001 认证', requestDigest: preview.requestDigest,
+    });
+    await expect(claimService.transition(userCtx, draft.claimId, 'APPROVED')).rejects.toMatchObject({ status: 409 });
+    const approved = await claimService.transition(userCtx, draft.claimId, 'APPROVED', 1);
+    expect(approved).toMatchObject({ status: 'APPROVED', version: 2, verifiedBy: tenant.user });
+    const binding = await owner.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${tenant.workspaceId}, true)`;
+      return loadDocumentClaimBindingInTransaction(tx, { workspaceId: tenant.workspaceId, companyId: tenant.companyId }, approved);
+    });
+    expect(binding).not.toBeNull();
+    expect(hasValidDocumentClaimApprovalAudit(approved, binding!)).toBe(true);
+    expect((approved.verificationProof as { proofVersion?: number }).proofVersion).toBe(4);
+    const effective = await owner.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${tenant.workspaceId}, true)`;
+      return effectiveApprovedClaimsInTransaction(tx, userCtx, tenant.companyId, {}, 'icp');
+    });
+    expect(effective.claims.map((claim) => claim.id)).toContain(draft.claimId);
+    expect(effective.dependencies.get(draft.claimId)).toMatchObject({ referenceId: draft.referenceId, bindingHash: draft.bindingHash });
+    const revoked = await claimService.revoke(userCtx, draft.claimId, 2);
+    expect(revoked).toMatchObject({ status: 'REVOKED', version: 3 });
+  });
+
+  it('rejects a document claim without its expected version and accepts a versioned reject', async () => {
+    const tenant = await seedTenant();
+    const { start, end } = quoteOf(tenant.document.text, '通过 ISO 9001 认证');
+    const reference = { ...referenceFor(tenant.document), quoteStartByte: start, quoteEndByte: end };
+    const userCtx = ctx(tenant.workspaceId, tenant.user);
+    const preview = await claims.preview(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证' });
+    const draft = await claims.createDraft(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证', requestDigest: preview.requestDigest });
+    await expect(claimService.transition(userCtx, draft.claimId, 'REVOKED')).rejects.toMatchObject({ status: 409 });
+    expect(await claimService.transition(userCtx, draft.claimId, 'REVOKED', 1)).toMatchObject({ status: 'REVOKED', version: 2 });
+  });
+
+  it('invalidates the binding immediately on reprocess and after document deletion (FK keeps identity)', async () => {
+    const tenant = await seedTenant();
+    const { start, end } = quoteOf(tenant.document.text, '通过 ISO 9001 认证');
+    const reference = { ...referenceFor(tenant.document), quoteStartByte: start, quoteEndByte: end };
+    const userCtx = ctx(tenant.workspaceId, tenant.user);
+    const preview = await claims.preview(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证' });
+    const draft = await claims.createDraft(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证', requestDigest: preview.requestDigest });
+    await claimService.transition(userCtx, draft.claimId, 'APPROVED', 1);
+    await owner.sellerDocument.update({ where: { id: tenant.document.documentId }, data: { status: 'processing' } });
+    const listed = await claimService.listForCompany(userCtx, tenant.companyId);
+    const unavailable = listed.find((claim) => claim.id === draft.claimId) as { documentSource: { status: string }; evidence: Array<{ snippet: string | null }> };
+    expect(unavailable.documentSource.status).toBe('UNAVAILABLE');
+    expect(unavailable.evidence[0]?.snippet).toBeNull();
+    const effective = await owner.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${tenant.workspaceId}, true)`;
+      return effectiveApprovedClaimsInTransaction(tx, userCtx, tenant.companyId, {}, 'icp');
+    });
+    expect(effective.claims.map((claim) => claim.id)).not.toContain(draft.claimId);
+    expect(effective.rejectedDocumentClaimIds).toContain(draft.claimId);
+    await owner.sellerDocument.delete({ where: { id: tenant.document.documentId } });
+    const referenceAfter = await owner.claimDocumentEvidence.findUniqueOrThrow({ where: { claimId: draft.claimId } });
+    expect(referenceAfter.documentId).toBeNull();
+    expect(referenceAfter.sourceDocumentId).toBe(tenant.document.documentId);
+    expect(referenceAfter.workspaceId).toBe(tenant.workspaceId);
+    const replay = await claims.createDraft(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证', requestDigest: preview.requestDigest }).catch(() => null);
+    expect(replay).toBeNull();
+  });
+
+  it('keeps FORCE RLS and SELECT/INSERT-only grants for app_user', async () => {
+    const tenantA = await seedTenant();
+    const tenantB = await seedTenant();
+    const { start, end } = quoteOf(tenantA.document.text, '通过 ISO 9001 认证');
+    const reference = { ...referenceFor(tenantA.document), quoteStartByte: start, quoteEndByte: end };
+    const userCtx = ctx(tenantA.workspaceId, tenantA.user);
+    const preview = await claims.preview(userCtx, tenantA.companyId, tenantA.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证' });
+    const draft = await claims.createDraft(userCtx, tenantA.companyId, tenantA.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证', requestDigest: preview.requestDigest });
+    const hidden = await app.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${tenantB.workspaceId}, true)`;
+      return tx.claimDocumentEvidence.findMany({ where: { claimId: draft.claimId } });
+    });
+    expect(hidden).toHaveLength(0);
+    const crossInsert = await app.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${tenantA.workspaceId}, true)`;
+      await tx.$executeRaw`INSERT INTO claim_document_evidence (id, workspace_id, company_id, claim_id, evidence_id, source_document_id, document_content_sha256, parse_revision, chunk_seq, chunk_text_sha256, quote_start_byte, quote_end_byte, claim_statement_digest, claim_type, binding_sha256, requester_id, request_digest)
+        VALUES (${randomUUID()}::uuid, ${tenantB.workspaceId}::uuid, ${tenantB.companyId}::uuid, ${draft.claimId}::uuid, ${draft.evidenceId}::uuid, ${tenantB.document.documentId}::uuid, ${'a'.repeat(64)}, 1, 0, ${'b'.repeat(64)}, 0, 1, ${'c'.repeat(64)}, 'certification', ${'d'.repeat(64)}, ${randomUUID()}::uuid, ${'e'.repeat(64)})`;
+    }).then(() => null).catch((error) => sqlState(error));
+    expect(crossInsert).not.toBeNull();
+    for (const statement of [
+      () => app.$executeRaw`UPDATE claim_document_evidence SET claim_type = 'other' WHERE id = ${draft.referenceId}::uuid`,
+      () => app.$executeRaw`DELETE FROM claim_document_evidence WHERE id = ${draft.referenceId}::uuid`,
+    ]) {
+      const state = await statement().then(() => null).catch((error) => sqlState(error));
+      expect(state).toBe('42501');
+    }
+    const deleteDocument = await app.$executeRaw`DELETE FROM seller_document WHERE id = ${tenantA.document.documentId}::uuid`.then(() => null).catch((error) => sqlState(error));
+    expect(deleteDocument).toBe('42501');
+  });
+
+  it('runs the internal seller document cleanup as app_user with real item counts and idempotent completion', async () => {
+    const tenant = await seedTenant();
+    const { start, end } = quoteOf(tenant.document.text, '通过 ISO 9001 认证');
+    const reference = { ...referenceFor(tenant.document), quoteStartByte: start, quoteEndByte: end };
+    const userCtx = ctx(tenant.workspaceId, tenant.user);
+    const preview = await claims.preview(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证' });
+    const draft = await claims.createDraft(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证', requestDigest: preview.requestDigest });
+    await claimService.transition(userCtx, draft.claimId, 'APPROVED', 1);
+    const request = await cleanupService.requestCleanup(userCtx, tenant.companyId, tenant.document.documentId);
+    const deleted = { keys: [] as string[] };
+    const activities = createDeletionActivities({
+      prisma: appPrisma,
+      sellerDocumentsStorage: { delete: async (key: string) => { deleted.keys.push(key); } },
+    });
+    const input = { workspaceId: tenant.workspaceId, deletionRequestId: request.requestId, subjectType: 'seller_document' as const, subjectId: tenant.document.documentId };
+    const located = await activities.freezeSubject(input);
+    expect(located).toMatchObject({ subjectType: 'seller_document', documentId: tenant.document.documentId, claimCount: 1, evidenceCount: 1, referenceCount: 1, chunkCount: 1 });
+    const counts = await activities.eraseSubject({ input, located });
+    expect(counts).toMatchObject({ chunksErased: 1, claimsErased: 1, evidenceErased: 1, referencesErased: 1, blobDeleted: true, blobFailures: 0 });
+    expect(deleted.keys).toHaveLength(1);
+    expect(await owner.sellerDocumentChunk.count({ where: { documentId: tenant.document.documentId } })).toBe(0);
+    expect(await owner.claim.count({ where: { id: draft.claimId } })).toBe(0);
+    expect(await owner.evidence.count({ where: { id: draft.evidenceId } })).toBe(0);
+    expect(await owner.claimDocumentEvidence.count({ where: { claimId: draft.claimId } })).toBe(0);
+    const tombstone = await owner.sellerDocument.findUniqueOrThrow({ where: { id: tenant.document.documentId } });
+    expect(tombstone.status).toBe('deleted');
+    expect(tombstone.cleanupCompletedAt).toBeNull();
+    const completed = await activities.completeDeletion({ input, located });
+    expect(completed).toEqual(counts);
+    const receipt = await owner.deletionReceipt.findUniqueOrThrow({ where: { deletionRequestId: request.requestId } });
+    expect(receipt.subjectType).toBe('seller_document');
+    expect(receipt.sellerDocumentDetail).toMatchObject({ documentId: tenant.document.documentId, claimsErased: 1, chunksErased: 1, blobDeleted: true });
+    expect((await owner.deletionRequest.findUniqueOrThrow({ where: { id: request.requestId } })).status).toBe('COMPLETED');
+    expect((await owner.sellerDocument.findUniqueOrThrow({ where: { id: tenant.document.documentId } })).cleanupCompletedAt).not.toBeNull();
+    const events = await owner.outboxEvent.findMany({ where: { aggregateId: request.requestId, eventType: 'SellerDocumentCleanupCompleted' } });
+    expect(events).toHaveLength(1);
+    expect(events[0].payload).toMatchObject({ snapshot_version: 1, document_id: tenant.document.documentId, claims_erased: 1, blob_deleted: true });
+    await expect(activities.completeDeletion({ input, located })).resolves.toEqual(counts);
+    expect(await owner.outboxEvent.count({ where: { aggregateId: request.requestId, eventType: 'SellerDocumentCleanupCompleted' } })).toBe(1);
+  });
+
+  it('keeps ERASING residue on blob failure and completes only after a retry', async () => {
+    const tenant = await seedTenant();
+    const userCtx = ctx(tenant.workspaceId, tenant.user);
+    const request = await cleanupService.requestCleanup(userCtx, tenant.companyId, tenant.document.documentId);
+    const input = { workspaceId: tenant.workspaceId, deletionRequestId: request.requestId, subjectType: 'seller_document' as const, subjectId: tenant.document.documentId };
+    const failing = createDeletionActivities({ prisma: appPrisma, sellerDocumentsStorage: { delete: async () => { throw new Error('object storage down'); } } });
+    const located = await failing.freezeSubject(input);
+    const counts = await failing.eraseSubject({ input, located });
+    expect(counts).toMatchObject({ blobDeleted: false, blobFailures: 1 });
+    await expect(failing.completeDeletion({ input, located })).rejects.toThrow(/blob residue/);
+    expect((await owner.deletionRequest.findUniqueOrThrow({ where: { id: request.requestId } })).status).toBe('ERASING');
+    const healthy = createDeletionActivities({ prisma: appPrisma, sellerDocumentsStorage: { delete: async () => undefined } });
+    const retried = await healthy.eraseSubject({ input, located });
+    expect(retried).toMatchObject({ chunksErased: 1, blobDeleted: true, blobFailures: 0 });
+    await expect(healthy.completeDeletion({ input, located })).resolves.toMatchObject({ blobDeleted: true });
+    expect((await owner.deletionReceipt.findUniqueOrThrow({ where: { deletionRequestId: request.requestId } })).sellerDocumentDetail).toMatchObject({ blobDeleted: true });
+  });
+
+  it('rejects a foreign cleanup request in the definer path', async () => {
+    const tenantA = await seedTenant();
+    const tenantB = await seedTenant();
+    const request = await cleanupService.requestCleanup(ctx(tenantA.workspaceId, tenantA.user), tenantA.companyId, tenantA.document.documentId);
+    const foreign = await app.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${tenantB.workspaceId}, true)`;
+      return tx.$queryRaw`SELECT erase_seller_document_cleanup_targets_v1(${tenantB.workspaceId}::uuid, ${request.requestId}::uuid) AS counts`;
+    }).then(() => null).catch((error) => error);
+    expect(foreign).not.toBeNull();
+  });
+
+  it('keeps the binding digest stable and rejects tampered persisted facts', async () => {
+    const tenant = await seedTenant();
+    const { start, end } = quoteOf(tenant.document.text, '通过 ISO 9001 认证');
+    const reference = { ...referenceFor(tenant.document), quoteStartByte: start, quoteEndByte: end };
+    const userCtx = ctx(tenant.workspaceId, tenant.user);
+    const preview = await claims.preview(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证' });
+    const draft = await claims.createDraft(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证', requestDigest: preview.requestDigest });
+    const expected = documentClaimBindingHash({
+      documentId: tenant.document.documentId,
+      documentContentHash: tenant.document.contentHash,
+      parseRevision: 1,
+      chunkSeq: 0,
+      chunkTextHash: tenant.document.chunkTextHash,
+      quoteStartByte: start,
+      quoteEndByte: end,
+      quoteDigest: sha('通过 ISO 9001 认证'),
+      type: 'certification',
+      statementDigest: documentClaimStatementDigest('通过 ISO 9001 认证'),
+    });
+    expect(draft.bindingHash).toBe(expected);
+    await expect(owner.claimDocumentEvidence.update({ where: { claimId: draft.claimId }, data: { bindingSha256: '0'.repeat(64) } })).rejects.toThrow();
+  });
+});

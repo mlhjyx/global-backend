@@ -15,16 +15,21 @@ function fixture(options: {
   content?: Buffer | Error;
   markdown?: string;
   embedError?: Error;
-  finalizeUpdated?: number;
+  publishRows?: unknown[];
 } = {}) {
-  const executeRaw = vi.fn(async () => options.finalizeUpdated ?? 1);
+  const executeRaw = vi.fn(async () => 1);
   const deleteMany = vi.fn(async () => ({ count: 0 }));
   const tx = {
-    $queryRaw: vi.fn(async () =>
-      options.claimRows ?? [
+    $queryRaw: vi.fn(async (argument: unknown) => {
+      const sql = typeof (argument as { sql?: unknown })?.sql === 'string'
+        ? (argument as { sql: string }).sql
+        : Array.isArray(argument) ? (argument as unknown[]).join('?') : '';
+      if (sql.includes('RETURNING "parse_revision"'))
+        return options.publishRows ?? [{ parse_revision: 1 }];
+      return options.claimRows ?? [
         { object_key: 'ws/k', mime: 'text/markdown', processing_attempt: 1 },
-      ],
-    ),
+      ];
+    }),
     $executeRaw: executeRaw,
     sellerDocument: {
       findFirst: vi.fn(async () =>
@@ -71,8 +76,8 @@ describe('createSellerDocumentActivities（Phase 2b ingest）', () => {
     expect(result.outcome).toBe('ready');
     expect(embeddings.embed).toHaveBeenCalled();
     expect(deleteMany).toHaveBeenCalledWith({ where: { documentId: INPUT.documentId } });
-    // 每次 chunk 一个 INSERT + 一次 finalize
-    expect(executeRaw.mock.calls.length).toBeGreaterThan(1);
+    // 每个 chunk 一个 INSERT；ready 与 parseRevision 在同一事务 UPDATE
+    expect(executeRaw.mock.calls.length).toBeGreaterThan(0);
   });
 
   it('下载失败：按 attempt 退避回 queued（非终态）', async () => {
@@ -108,7 +113,7 @@ describe('createSellerDocumentActivities（Phase 2b ingest）', () => {
   });
 
   it('finalize 丢租约（被新 attempt 接管）时不覆盖真值', async () => {
-    const { activities } = fixture({ finalizeUpdated: 0 });
+    const { activities } = fixture({ publishRows: [] });
     const result = await activities.processSellerDocument(INPUT);
     expect(result.outcome).toBe('not_due');
   });

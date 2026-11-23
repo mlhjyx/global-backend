@@ -135,7 +135,8 @@ export class OutreachDraftService {
       });
       const claims = seller
         ? await tx.claim.findMany({
-            where: { companyId: seller.id, status: 'APPROVED' },
+            // S1a：文档来源 Claim 暂不进入外联草稿（显式排除，未验证来源不得裸用）。
+            where: { companyId: seller.id, status: 'APPROVED', documentClaimEvidence: { none: {} } },
             select: { id: true, type: true, statement: true },
             orderBy: { createdAt: 'asc' },
             take: 20,

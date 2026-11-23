@@ -771,6 +771,16 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private async startDeletionCommand(ev: { aggregateId: string; workspaceId: string; eventType: string; payload: unknown }): Promise<void> {
+    const payload = (ev.payload ?? {}) as { subjectType?: string; subjectId?: string };
+    if (ev.eventType === "SellerDocumentCleanupRequested" && (payload.subjectType !== "seller_document" || typeof payload.subjectId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(payload.subjectId)))
+      throw new NonRetryableOutboxCommandError("seller document cleanup payload contract mismatch");
+    await this.startWorkflowIdempotent(DELETION_WORKFLOW, {
+      taskQueue: UNDERSTANDING_TASK_QUEUE,
+      workflowId: `deletion-${ev.aggregateId}`,
+      args: [{ workspaceId: ev.workspaceId, deletionRequestId: ev.aggregateId, subjectType: payload.subjectType ?? "", subjectId: payload.subjectId ?? "" }],
+    }, `deletion workflow for request ${ev.aggregateId}`);
+  }
   private async startWorkflowIdempotent(
     workflowType: string,
     options: {
@@ -930,28 +940,13 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
         ev,
       );
     }
-    if (ev.eventType === "DeletionRequested") {
-      // 收口⑥ PR-B：起 GDPR Art.17 删除编排。workflowId=deletion-<requestId> 唯一，重放合并到在跑实例。
-      const payload = (ev.payload ?? {}) as {
-        subjectType?: string;
-        subjectId?: string;
-      };
-      await this.startWorkflowIdempotent(
-        DELETION_WORKFLOW,
-        {
-          taskQueue: UNDERSTANDING_TASK_QUEUE,
-          workflowId: `deletion-${ev.aggregateId}`,
-          args: [
-            {
-              workspaceId: ev.workspaceId,
-              deletionRequestId: ev.aggregateId,
-              subjectType: payload.subjectType ?? "",
-              subjectId: payload.subjectId ?? "",
-            },
-          ],
-        },
-        `deletion workflow for request ${ev.aggregateId}`,
-      );
+    if (
+      ev.eventType === "DeletionRequested" ||
+      ev.eventType === "SellerDocumentCleanupRequested"
+    ) {
+      // Public DSR and the S1a internal seller-document cleanup share deletionWorkflow;
+      // workflowId=deletion-<requestId> keeps replays on one running instance.
+      await this.startDeletionCommand(ev);
     }
     if (ev.eventType === "PersonalArtifactCleanupRequested") {
       const payload =

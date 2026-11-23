@@ -12,6 +12,7 @@ export const INTERNAL_COMMANDS: ReadonlySet<string> = new Set([
   'DiscoveryRunRequested',
   'QualifyRequested',
   'DeletionRequested', // 收口⑥ PR-B：relay dispatch → 起 deletionWorkflow（Art.17 擦除编排）
+  'SellerDocumentCleanupRequested', // S1a 内部文档清理命令（subjectType=seller_document）
   'PersonalArtifactCleanupRequested',
   'AssetObjectCleanupRequested', // R2-A4 staging + MF0-B strict canonical/Variant cleanup
 ]);
@@ -28,6 +29,7 @@ export const INTEGRATION_EVENTS: ReadonlySet<string> = new Set([
   'ClaimExpired',
   'KnowledgeConflictDetected',
   'DeletionCompleted', // 收口⑥ PR-B：擦除完成对外交付事件（🔴 payload 只计数 + subject 引用，无 PII）
+  'SellerDocumentCleanupCompleted', // S1a 内部文档清理完成（counts + id 引用，无原句/人名）
   'CampaignPlanJobFailed', // ch08 §3.1.4：失败回写第二通道（控制面 PATCH 重试耗尽后的 outbox 兜底）
   'SanctionsListStale', // ch08 §3.1.12：制裁名单陈旧告警（审计/运营可见；无 PII）
   'SiteBuildCostSummaryUpdated', // v1 append-only reconciliation projection for SaaS Credits/Billing
@@ -380,12 +382,44 @@ export function matchesDeletionCompletedPayload(ev: PayloadEvent): boolean {
   );
 }
 
+/** SellerDocumentCleanupCompleted/v1：内部文档清理完成，只含计数与 ID 引用。 */
+export function matchesSellerDocumentCleanupCompletedPayload(ev: PayloadEvent): boolean {
+  if (ev.eventType !== "SellerDocumentCleanupCompleted") return true;
+  const payload = payloadRecord(ev);
+  const counts = [
+    "chunks_erased",
+    "claims_erased",
+    "evidence_erased",
+    "references_erased",
+    "blob_failures",
+  ] as const;
+  return Boolean(
+    payload &&
+      ev.schemaVersion === 1 &&
+      payload.snapshot_version === 1 &&
+      typeof payload.deletion_request_id === "string" &&
+      UUID.test(payload.deletion_request_id) &&
+      typeof payload.document_id === "string" &&
+      UUID.test(payload.document_id) &&
+      typeof payload.policy_version === "string" &&
+      counts.every(
+        (key) =>
+          typeof payload[key] === "number" &&
+          Number.isSafeInteger(payload[key]) &&
+          Number(payload[key]) >= 0,
+      ) &&
+      typeof payload.blob_deleted === "boolean" &&
+      typeof payload.completed_at === "string",
+  );
+}
+
 const INTEGRATION_PAYLOAD_VALIDATORS: Readonly<
   Record<string, (ev: PayloadEvent) => boolean>
 > = {
   LeadQualified: matchesLeadQualifiedPayload,
   CandidateBatchCompleted: matchesCandidateBatchCompletedPayload,
   DeletionCompleted: matchesDeletionCompletedPayload,
+  SellerDocumentCleanupCompleted: matchesSellerDocumentCleanupCompletedPayload,
   SiteBuildCostSummaryUpdated: matchesSiteBuildCostSummaryUpdatedV1,
 };
 

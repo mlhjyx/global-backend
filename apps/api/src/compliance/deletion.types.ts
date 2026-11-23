@@ -7,6 +7,8 @@
 // （GENERIC_OPERATION_ARTIFACT_SUBJECT_TYPES，2026-10-14 方案 A），它不是 DSR 主体，不在此列。
 export const DELETION_SUBJECT_TYPES = ['contact', 'company'] as const;
 export type DeletionSubjectType = (typeof DELETION_SUBJECT_TYPES)[number];
+/** Internal-only subject for seller document cleanup; never accepted by the public API. */
+export type DeletionWorkflowSubjectType = DeletionSubjectType | 'seller_document';
 
 export const DELETION_STATUSES = ['RECEIVED', 'FROZEN', 'ERASING', 'COMPLETED', 'FAILED'] as const;
 export type DeletionStatus = (typeof DELETION_STATUSES)[number];
@@ -59,6 +61,9 @@ export interface ErasureCounts {
 export interface DeletionWorkflowInput {
   workspaceId: string;
   deletionRequestId: string;
-  subjectType: DeletionSubjectType;
+  subjectType: DeletionWorkflowSubjectType;
   subjectId: string;
 }
+export type LocatedDeletionTargets =
+  | LocatedErasureTargets
+  | import('../seller-knowledge/seller-document-cleanup.types').LocatedSellerDocumentCleanupTargets;
