@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { listCompanyEnrichmentHeads } from './enrichment-execution.repository';
 
 // Real-PostgreSQL behaviour for the two business index tables: app_user writes
 // the exact SQL shapes the repository uses, owner only seeds and reads fixtures.
@@ -81,6 +82,8 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment execution on Pos
   const operationA2 = randomUUID();
   const operationA3 = randomUUID();
   const operationB = randomUUID();
+  const emptyCompany = randomUUID();
+  const deletedCompany = randomUUID();
 
   class RolledBack extends Error {}
 
@@ -208,6 +211,13 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment execution on Pos
         (${companyB}::uuid, ${workspaceB}::uuid, ${`Enrich B ${companyB.slice(0, 8)}`},
           ${`enrich-b-${companyB.slice(0, 8)}.example`}, 'NEW', ${`domain:enrich-b-${companyB.slice(0, 8)}`}, now())`;
     await owner.$executeRaw`
+      INSERT INTO canonical_company (id, workspace_id, name, domain, status, dedupe_key, updated_at) VALUES
+        (${emptyCompany}::uuid, ${workspaceA}::uuid, ${`Enrich empty ${emptyCompany.slice(0, 8)}`},
+          ${`enrich-empty-${emptyCompany.slice(0, 8)}.example`}, 'NEW', ${`domain:enrich-empty-${emptyCompany.slice(0, 8)}`}, now()),
+        (${deletedCompany}::uuid, ${workspaceA}::uuid, ${`Enrich deleted ${deletedCompany.slice(0, 8)}`},
+          ${`enrich-deleted-${deletedCompany.slice(0, 8)}.example`}, 'NEW', ${`domain:enrich-deleted-${deletedCompany.slice(0, 8)}`}, now())`;
+    await owner.$executeRaw`DELETE FROM canonical_company WHERE id=${deletedCompany}::uuid`;
+    await owner.$executeRaw`
       INSERT INTO canonical_contact (id, workspace_id, company_id, full_name, dedupe_key) VALUES
         (${contactA}::uuid, ${workspaceA}::uuid, ${companyA}::uuid, ${`Contact A ${contactA.slice(0, 8)}`},
           ${`c:enrich-a-${contactA.slice(0, 8)}`}),
@@ -277,6 +287,21 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment execution on Pos
     } finally {
       await Promise.all([owner.$disconnect(), app?.$disconnect()]);
     }
+  });
+
+  it('distinguishes an unreadable company from a readable company with zero executions on real PostgreSQL', async () => {
+    const database = {
+      withWorkspace: (workspaceId: string, work: (tx: unknown) => Promise<unknown>) =>
+        app.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceId}, true)`;
+          return work(tx);
+        }),
+    } as never;
+    const page = { limit: 10, cursor: null, businessRunId: null };
+    await expect(listCompanyEnrichmentHeads(database, { workspaceId: workspaceA, companyId: emptyCompany }, page)).resolves.toEqual([]);
+    await expect(listCompanyEnrichmentHeads(database, { workspaceId: workspaceA, companyId: randomUUID() }, page)).resolves.toBeNull();
+    await expect(listCompanyEnrichmentHeads(database, { workspaceId: workspaceA, companyId: deletedCompany }, page)).resolves.toBeNull();
+    await expect(listCompanyEnrichmentHeads(database, { workspaceId: workspaceB, companyId: companyA }, page)).resolves.toBeNull();
   });
 
   it('app_user insert derives scope_key from the workspace even when a wrong value is supplied', async () => {

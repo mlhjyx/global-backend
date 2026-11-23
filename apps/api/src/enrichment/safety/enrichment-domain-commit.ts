@@ -21,6 +21,7 @@ import type { ProviderEmailPointSnapshot } from "../../discovery/contact-point-w
 import { contactTargetBeforeDigest } from "./enrichment-target-snapshot";
 import { assertSupportedEnrichmentSlot } from "./enrichment-call-plan";
 import { canonicalSafetyJson, deepFreezeSafety, denseSafetyArray, parseEnrichmentCandidateRef } from "./enrichment-safety.contract";
+import { buildContactQualityFact, type ContactQualityFact, type ContactQualityNewPoint, type ContactQualityPoint } from "./enrichment-quality-facts";
 import type { Prisma } from "@prisma/client";
 import type { LawfulBasis } from "../../discovery/provider-contract";
 import type { FindEmailInput } from "../finders/email-enrichment-provider";
@@ -51,6 +52,8 @@ export interface LockedEnrichmentContactCommitState extends EnrichmentContactCom
   readonly target: ContactTargetSnapshot;
   readonly currentInput: Pick<FindEmailInput, "fullName" | "domain" | "companyName" | "linkedinUrl">;
   readonly currentPoints: readonly EnrichmentPointBeforeSnapshot[];
+  /** Typed email categories of the same locked rows; absent in ports that cannot prove them. */
+  readonly qualityPoints?: readonly ContactQualityPoint[];
   readonly originalReferences: readonly Readonly<{ step: BoundEnrichmentStep; reference: SettledEnrichmentStepReference }>[];
   /** Current original-operation facts, independent of whether a settled reference can be built. */
   readonly originalFacts?: readonly Readonly<{ stepId: string; operationId: string | null; status: string | null; dispatchPhase: string; domainState: string }>[];
@@ -61,7 +64,7 @@ export interface EnrichmentDomainCommitStore {
   readCommitted(tx: Prisma.TransactionClient, address: EnrichmentContactCommitAddress): Promise<EnrichmentContactApplyDecision | null>;
   /** SQL adapter must lock original authority/account, suppression policy, head/steps and contact/points in that order. */
   lockAndLoad(tx: Prisma.TransactionClient, address: EnrichmentContactCommitAddress): Promise<LockedEnrichmentContactCommitState | null>;
-  persist(tx: Prisma.TransactionClient, address: EnrichmentContactCommitAddress, decision: EnrichmentContactApplyDecision, references: readonly SettledEnrichmentStepReference[]): Promise<void>;
+  persist(tx: Prisma.TransactionClient, address: EnrichmentContactCommitAddress, decision: EnrichmentContactApplyDecision, references: readonly SettledEnrichmentStepReference[], quality?: ContactQualityFact | null): Promise<void>;
   savePending(tx: Prisma.TransactionClient, address: EnrichmentContactCommitAddress, reason: "INPUT_CONFLICT" | "SUPPRESSED"): Promise<void>;
   /** End-of-run transition only: RUNNING -> APPLY_PENDING; never changes terminal states. */
   finishAttempt?(address: Pick<EnrichmentContactCommitAddress, "workspaceId" | "companyId" | "executionId">): Promise<void>;
@@ -114,7 +117,7 @@ export class EnrichmentDomainCommitter {
       }
       if (state.redacted) return this.empty(address, "REDACTED", "REDACTED");
       if (this.activeOriginalFacts(state).length > 0) return this.hold();
-      await this.deps.store.persist(tx, address, normalized, []);
+      await this.deps.store.persist(tx, address, normalized, [], this.qualityFact(state, normalized, null));
       return normalized;
     });
   }
@@ -176,7 +179,8 @@ export class EnrichmentDomainCommitter {
       evidence: { costBasis: "estimated_upper_bound", latencyBasis: "unavailable" }, runId: state.businessRunId, accountKey: finder.step.accountKey, attemptedAt: prepared.now });
     if (!attempt.attempt) return this.hold();
     const decision: EnrichmentContactApplyDecision = deepFreezeSafety({ status: "APPLIED", contactId: address.contactId, reasonCode: candidate.status === "miss" ? "NO_MATCH" : resolved.state === "INVALID" ? "INVALID_ALL" : "STORED", state: candidate.status === "miss" ? null : resolved.state, pointRefs, eventRefs, attemptRefs: [attempt.attempt.id], newCandidatePoints: pointRefs.length });
-    return this.applyAcknowledgements(tx, address, state, results, decision, pointRefs);
+    const newPoint: ContactQualityNewPoint | null = candidate.email !== null && pointRefs.length > 0 && decision.state !== null ? { emailType: classifyContactEmail(candidate.email).emailType, state: decision.state } : null;
+    return this.applyAcknowledgements(tx, address, state, results, decision, pointRefs, this.qualityFact(state, decision, newPoint));
   }
   private async writePointAndEvents(tx: Prisma.TransactionClient, address: EnrichmentContactCommitAddress, state: LockedEnrichmentContactCommitState, prepared: Extract<PreparedEnrichmentApplication, { status: "OK" }>, actorId: string): Promise<{ pointRefs: string[]; eventRefs: string[] }> {
     const { candidate, finder, resolved, now } = prepared;
@@ -213,13 +217,20 @@ export class EnrichmentDomainCommitter {
     await setEmailPointState(tx, { pointId: point.id, state: columns.verificationState, status: columns.status, validSince: columns.validSince, verifiedAt: columns.verifiedAt, nextReverifyAt: columns.nextReverifyAt, confidence: columns.confidence,
       verificationProvider: last?.providerKey ?? finder.step.provider, verificationMethod: last?.method ?? "third_party_api", ...(resolved.state === "UNKNOWN" ? {} : { catchAll: legacyCatchAllFromClass(resolved.catchAllClass), catchAllClass: resolved.catchAllClass }), lastVerificationEventId: eventRefs[eventRefs.length - 1] ?? null });
   }
-  private async applyAcknowledgements(tx: Prisma.TransactionClient, address: EnrichmentContactCommitAddress, state: LockedEnrichmentContactCommitState, results: readonly EnrichmentDomainMaterializedResult[], decision: EnrichmentContactApplyDecision, pointRefs: readonly string[]): Promise<EnrichmentContactApplyDecision> {
+  private async applyAcknowledgements(tx: Prisma.TransactionClient, address: EnrichmentContactCommitAddress, state: LockedEnrichmentContactCommitState, results: readonly EnrichmentDomainMaterializedResult[], decision: EnrichmentContactApplyDecision, pointRefs: readonly string[], quality: ContactQualityFact | null): Promise<EnrichmentContactApplyDecision> {
     const acknowledgements = results.filter((result) => !this.originalSmtpAcknowledged(state, result)).map((result) => ({ producerId: result.step.toolId, receipt: result.reference.durableReceipt,
       domainAckKey: result.phase === "SMTP" ? (pointRefs[0] ? `contact-point:${pointRefs[0]}:${result.reference.durableReceipt.operationId}` : `contact-guess:${address.contactId}:${result.reference.durableReceipt.operationId}`) : `contact-enrichment:${address.executionId}:${address.contactId}:${result.reference.durableReceipt.operationId}`, domainRevision: result.reference.resultDigest }));
-    const request: EnrichmentContactAckInput = { transaction: tx, acknowledgements, apply: async (transaction) => { await this.deps.store.persist(transaction, address, decision, results.map((result) => result.reference)); return decision; }, readback: async (transaction) => { const value = await this.deps.store.readCommitted(transaction, address); return value ? this.replay(value) : this.hold(); } };
+    const request: EnrichmentContactAckInput = { transaction: tx, acknowledgements, apply: async (transaction) => { await this.deps.store.persist(transaction, address, decision, results.map((result) => result.reference), quality); return decision; }, readback: async (transaction) => { const value = await this.deps.store.readCommitted(transaction, address); return value ? this.replay(value) : this.hold(); } };
     const applied = this.deps.acknowledge ? await this.deps.acknowledge(request) : await applyDomainAckConsumerTransactions(request);
     if (applied.status === "UNRECEIPTED" || !applied.value) return this.hold();
     return applied.status === "REPLAYED" ? this.replay(applied.value) : applied.value;
+  }
+  /** Only the original locked rows whose digest still matches the frozen target may seed quality facts. */
+  private qualityFact(state: LockedEnrichmentContactCommitState, decision: EnrichmentContactApplyDecision, newPoint: ContactQualityNewPoint | null): ContactQualityFact | null {
+    if (!state.qualityPoints) return null;
+    const inputVersion = enrichmentInputVersion(state.currentInput);
+    if (inputVersion !== state.target.inputVersion || contactTargetBeforeDigest({ inputVersion, points: state.currentPoints }) !== state.target.beforeDigest) return null;
+    return buildContactQualityFact({ contactId: state.contactId, points: state.qualityPoints, decision, newPoint });
   }
   private hold(): never { throw new EnrichmentSafetyError("HOLD"); }
   private replay(value: EnrichmentContactApplyDecision): EnrichmentContactApplyDecision { return deepFreezeSafety({ ...value, status: value.status === "REDACTED" ? "REDACTED" : "REPLAYED", newCandidatePoints: 0 }); }

@@ -41,6 +41,9 @@ import { GovernedEnrichmentInvoker } from "./governed-enrichment-invoker";
 import { EnrichmentDomainCommitter, parseEnrichmentContactApplyDecision } from "./enrichment-domain-commit";
 import { ContactEnrichmentSafetyService } from "./contact-enrichment-safety.service";
 import { buildContactEnrichmentQualityResult, encodeContactEnrichmentResultCursor } from "./contact-enrichment-results.dto";
+import { readEnrichmentResultSnapshot } from "./enrichment-result-snapshot";
+import { buildContactEnrichmentQualityFacts } from "./contact-enrichment-quality-facts.dto";
+import type { ContactQualityFact } from "./enrichment-quality-facts";
 import { finderPhysicalInputFingerprint, verificationPhysicalInputFingerprint, smtpPhysicalInputFingerprint } from "./enrichment-target-snapshot";
 import { parseBoundEnrichmentStepRow } from "./enrichment-safety.contract";
 import { findReusableAttempt, recordEnrichmentAttempt } from "../waterfall/enrichment-attempt";
@@ -68,7 +71,9 @@ export async function loadControlledEnrichmentProviderState(
 }
 export const ENRICHMENT_POINT_BEFORE_SELECT = Object.freeze({ id: true, type: true, value: true, status: true, verificationState: true, validSince: true, verifiedAt: true, nextReverifyAt: true, lastVerificationEventId: true, confidence: true } as const);
 export function pointBeforeSnapshot(point: { id: string; type: string; value: string; status: string; verificationState: string; validSince: Date | null; verifiedAt: Date | null; nextReverifyAt: Date | null; lastVerificationEventId: string | null; confidence: number | null }): EnrichmentPointBeforeSnapshot {
-  return { ...point, validSince: point.validSince?.toISOString() ?? null, verifiedAt: point.verifiedAt?.toISOString() ?? null, nextReverifyAt: point.nextReverifyAt?.toISOString() ?? null };
+  return { id: point.id, type: point.type, value: point.value, status: point.status, verificationState: point.verificationState,
+    validSince: point.validSince?.toISOString() ?? null, verifiedAt: point.verifiedAt?.toISOString() ?? null, nextReverifyAt: point.nextReverifyAt?.toISOString() ?? null,
+    lastVerificationEventId: point.lastVerificationEventId, confidence: point.confidence };
 }
 function preparerStateUsable(state: ControlledEnrichmentProviderState): boolean {
   if (!state.enabled || !state.policyAllowed || !state.apiKey || !Number.isSafeInteger(state.costMicrousd) || state.costMicrousd < 0 || state.costMicrousd > 150000 || !Number.isSafeInteger(state.timeoutMs) || state.timeoutMs < 100 || !Number.isSafeInteger(state.retentionSeconds) || state.retentionSeconds < 1) return false;
@@ -158,6 +163,98 @@ export interface ContactEnrichmentSafetyRuntime {
   readonly service: import('./contact-enrichment-safety.service').ContactEnrichmentSafetyService;
   readonly repository: import('./enrichment-execution.repository').EnrichmentExecutionRepository;
   readonly query: import('./enrichment-execution.repository').EnrichmentExecutionQueryRepository;
+}
+/** Scoped adapter dependencies; exported so the real list/read page behaviour is directly testable. */
+export interface ContactEnrichmentResultsAdapterDeps {
+  readonly database: import('./enrichment-execution.repository').WorkspaceEnrichmentTransactions;
+  readonly loadById: (
+    context: { workspaceId: string; companyId: string },
+    id: string,
+  ) => Promise<import('./enrichment-safety.contract').EnrichmentRuntimeExecutionRecord | null>;
+  readonly loadByRef: (
+    context: { workspaceId: string; companyId: string },
+    operationRef: string,
+  ) => Promise<import('./enrichment-safety.contract').EnrichmentRuntimeExecutionRecord | null>;
+}
+async function enrichmentResultsPage(
+  deps: ContactEnrichmentResultsAdapterDeps,
+  context: { workspaceId: string },
+  companyId: string,
+  parsed: import('./contact-enrichment-results.dto').ContactEnrichmentResultsQuery,
+  build: (
+    record: import('./enrichment-safety.contract').EnrichmentRuntimeExecutionRecord,
+  ) => unknown,
+) {
+  const scope = { workspaceId: context.workspaceId, companyId };
+  const heads = await listCompanyEnrichmentHeads(deps.database, scope, {
+    limit: parsed.limit,
+    cursor: parsed.cursor,
+    businessRunId: parsed.businessRunId,
+  });
+  // Unknown/foreign/soft-deleted company: no legitimate empty page exists.
+  if (heads === null) return null;
+  const page = heads.slice(0, parsed.limit);
+  const items: unknown[] = [];
+  for (const head of page) {
+    const record = await deps.loadById(scope, head.id);
+    if (record) items.push(build(record));
+  }
+  const hasMore = heads.length > parsed.limit;
+  const last = page[page.length - 1];
+  // The cursor follows the last head of the page even when its record cannot hydrate,
+  // so a skipped record never shifts the next page boundary.
+  return {
+    items,
+    nextCursor:
+      hasMore && last
+        ? encodeContactEnrichmentResultCursor({ createdAt: last.createdAt, id: last.id })
+        : null,
+    hasMore,
+  };
+}
+async function enrichmentResultByRef(
+  deps: ContactEnrichmentResultsAdapterDeps,
+  context: { workspaceId: string },
+  companyId: string,
+  operationRef: string,
+  build: (
+    record: import('./enrichment-safety.contract').EnrichmentRuntimeExecutionRecord,
+  ) => unknown,
+) {
+  const record = await deps.loadByRef({ workspaceId: context.workspaceId, companyId }, operationRef);
+  return record ? build(record) : null;
+}
+export function listContactEnrichmentResults(
+  deps: ContactEnrichmentResultsAdapterDeps,
+  context: { workspaceId: string },
+  companyId: string,
+  parsed: import('./contact-enrichment-results.dto').ContactEnrichmentResultsQuery,
+) {
+  return enrichmentResultsPage(deps, context, companyId, parsed, buildContactEnrichmentQualityResult);
+}
+export function readContactEnrichmentResult(
+  deps: ContactEnrichmentResultsAdapterDeps,
+  context: { workspaceId: string },
+  companyId: string,
+  operationRef: string,
+) {
+  return enrichmentResultByRef(deps, context, companyId, operationRef, buildContactEnrichmentQualityResult);
+}
+export function listContactEnrichmentQualityFacts(
+  deps: ContactEnrichmentResultsAdapterDeps,
+  context: { workspaceId: string },
+  companyId: string,
+  parsed: import('./contact-enrichment-results.dto').ContactEnrichmentResultsQuery,
+) {
+  return enrichmentResultsPage(deps, context, companyId, parsed, buildContactEnrichmentQualityFacts);
+}
+export function readContactEnrichmentQualityFacts(
+  deps: ContactEnrichmentResultsAdapterDeps,
+  context: { workspaceId: string },
+  companyId: string,
+  operationRef: string,
+) {
+  return enrichmentResultByRef(deps, context, companyId, operationRef, buildContactEnrichmentQualityFacts);
 }
 /** Real composition root for the shared safety lane; every SQL/transport port is injected, absence fails closed. */
 export function createContactEnrichmentSafetyRuntime(deps: ContactEnrichmentSafetyRuntimeDeps): ContactEnrichmentSafetyRuntime {
@@ -533,28 +630,25 @@ export function createContactEnrichmentSafetyRuntime(deps: ContactEnrichmentSafe
     },
     execute: ({ view, workspaceId, companyId, actorId, mode }) => executeView(view, workspaceId, companyId, actorId, mode),
   };
+  const resultsAdapters: ContactEnrichmentResultsAdapterDeps = {
+    database: prisma,
+    loadById: (scope, id) => query.loadById(scope, id),
+    loadByRef: (scope, operationRef) => query.loadByRef(scope, operationRef),
+  };
   const service = new ContactEnrichmentSafetyService({
     authority: deps.authority,
     repository,
     prepare: deps.prepare,
     execution,
     results: {
-      listEnrichmentExecutions: async (context, companyId, parsed) => {
-        const heads = await listCompanyEnrichmentHeads(prisma, { workspaceId: context.workspaceId, companyId }, { limit: parsed.limit, cursor: parsed.cursor, businessRunId: parsed.businessRunId });
-        const page = heads.slice(0, parsed.limit);
-        const items = [];
-        for (const head of page) {
-          const record = await query.loadById({ workspaceId: context.workspaceId, companyId }, head.id);
-          if (record) items.push(buildContactEnrichmentQualityResult(record));
-        }
-        const hasMore = heads.length > parsed.limit;
-        const last = page[page.length - 1];
-        return { items, nextCursor: hasMore && last ? encodeContactEnrichmentResultCursor({ createdAt: last.createdAt, id: last.id }) : null, hasMore };
-      },
-      readEnrichmentExecution: async (context, companyId, operationRef) => {
-        const record = await query.loadByRef({ workspaceId: context.workspaceId, companyId }, operationRef);
-        return record ? buildContactEnrichmentQualityResult(record) : null;
-      },
+      listEnrichmentExecutions: (context, companyId, parsed) =>
+        listContactEnrichmentResults(resultsAdapters, context, companyId, parsed),
+      readEnrichmentExecution: (context, companyId, operationRef) =>
+        readContactEnrichmentResult(resultsAdapters, context, companyId, operationRef),
+      listEnrichmentQualityFacts: (context, companyId, parsed) =>
+        listContactEnrichmentQualityFacts(resultsAdapters, context, companyId, parsed),
+      readEnrichmentQualityFacts: (context, companyId, operationRef) =>
+        readContactEnrichmentQualityFacts(resultsAdapters, context, companyId, operationRef),
     },
     authorizeRecovery: deps.authorizeRecovery,
   });
@@ -567,7 +661,7 @@ export interface ManagedContactEnrichmentSafety {
   readonly unavailableReason?: string;
 }
 type SafetyResultsPort = Pick<import('./contact-enrichment-safety.service').ContactEnrichmentSafetyService,
-  'executeHttp' | 'executeRun' | 'listEnrichmentExecutions' | 'readEnrichmentExecution' | 'recoverEnrichmentExecution'>;
+  'executeHttp' | 'executeRun' | 'listEnrichmentExecutions' | 'readEnrichmentExecution' | 'recoverEnrichmentExecution' | 'listEnrichmentQualityFacts' | 'readEnrichmentQualityFacts'>;
 /** Explicit fail-closed executor: no Grant verify/consume, no broker, no legacy lane. */
 export function createFailClosedSafetyExecutor(reasonCode: string): SafetyResultsPort {
   const notAdmitted = (companyId: string) => ({ companyId, tier: 'B' as const, attempted: 0, costMicrousd: 0, deadlineHit: false, results: [], admission: 'NOT_ADMITTED' as const, reasonCode, qualityCoverage: 'PREREQUISITE_ONLY' as const });
@@ -577,6 +671,8 @@ export function createFailClosedSafetyExecutor(reasonCode: string): SafetyResult
     listEnrichmentExecutions: async () => ({ items: [], nextCursor: null, hasMore: false }),
     readEnrichmentExecution: async () => null,
     recoverEnrichmentExecution: async () => null,
+    listEnrichmentQualityFacts: async () => ({ items: [], nextCursor: null, hasMore: false }),
+    readEnrichmentQualityFacts: async () => null,
   };
 }
 /** One shared construction used by both the API module and the real worker composition root. */
@@ -833,7 +929,7 @@ export function createSqlEnrichmentDomainCommitStore(transactions: ContactEnrich
       const domain = contact?.company?.domain ?? null;
       if (!contact || contact.companyId !== address.companyId || !domain) return null;
       const lockedPoints = await tx.$queryRaw<Array<{ id: string }>>`SELECT id::text FROM public.contact_point WHERE workspace_id=${address.workspaceId}::uuid AND contact_id=${address.contactId}::uuid ORDER BY id FOR UPDATE`;
-      const pointRows = lockedPoints.length === 0 ? [] : await tx.contactPoint.findMany({ where: { workspaceId: address.workspaceId, contactId: address.contactId }, select: ENRICHMENT_POINT_BEFORE_SELECT, orderBy: { id: 'asc' } });
+      const pointRows = lockedPoints.length === 0 ? [] : await tx.contactPoint.findMany({ where: { workspaceId: address.workspaceId, contactId: address.contactId }, select: { ...ENRICHMENT_POINT_BEFORE_SELECT, emailType: true }, orderBy: { id: 'asc' } });
       const stepRows = await tx.$queryRaw<Array<{ id: string; contact_id: string | null; contact_ordinal: number; slot_key: string; phase: string; provider: string; tool_id: string; tool_version: string; pricing_version: string; depends_on_slot_key: string | null; quote_microusd: bigint; dispatch_phase: string; domain_state: string; budget_operation_id: string | null; input_fingerprint: string | null; operation_key: string | null; candidate_ref: unknown; revision: number; budget_original_id: string | null; budget_status: string | null; budget_amount_unit: string | null; budget_reserved_microusd: bigint | null; budget_result_schema_version: string | null; budget_result_schema: string | null; budget_result_digest: string | null; budget_result_json: unknown; budget_receipt_usage: unknown; budget_receipt_cost_basis: string | null }>>`SELECT s.id::text,s.contact_id::text,s.contact_ordinal,s.slot_key,s.phase,s.provider,s.tool_id,s.tool_version,s.pricing_version,s.depends_on_slot_key,s.quote_microusd,s.dispatch_phase,s.domain_state,s.budget_operation_id::text,s.input_fingerprint,s.operation_key,s.candidate_ref,s.revision,
         o.id::text AS budget_original_id,o.status::text AS budget_status,o.amount_unit AS budget_amount_unit,o.reserved_microusd AS budget_reserved_microusd,o.result_schema_version AS budget_result_schema_version,o.result_schema AS budget_result_schema,o.result_digest AS budget_result_digest,o.result_json AS budget_result_json,o.receipt_usage AS budget_receipt_usage,o.receipt_cost_basis AS budget_receipt_cost_basis
         FROM public.contact_enrichment_execution_step s LEFT JOIN public.tool_budget_operation o ON o.scope_key=s.workspace_id::text AND o.account_id=(SELECT e2.account_id FROM public.contact_enrichment_execution e2 WHERE e2.workspace_id=s.workspace_id AND e2.id=s.execution_id) AND o.generation=(SELECT e2.generation FROM public.contact_enrichment_execution e2 WHERE e2.workspace_id=s.workspace_id AND e2.id=s.execution_id) AND o.operation_key=s.operation_key
@@ -859,6 +955,7 @@ export function createSqlEnrichmentDomainCommitStore(transactions: ContactEnrich
         target,
         currentInput: { fullName: contact.fullName, domain, companyName: contact.company?.name ?? '' },
         currentPoints: pointRows.map(pointBeforeSnapshot),
+        qualityPoints: pointRows.map((point) => ({ id: point.id, type: point.type, emailType: point.emailType ?? null, verificationState: point.verificationState })),
         originalReferences: references,
         originalFacts: stepRows.map((step) => ({ stepId: step.id, operationId: step.budget_original_id, status: step.budget_status, dispatchPhase: step.dispatch_phase, domainState: step.domain_state })),
         committed: readDecision(head.result_snapshot, address.contactId),
@@ -868,7 +965,7 @@ export function createSqlEnrichmentDomainCommitStore(transactions: ContactEnrich
         originalSmtpAcknowledgements: [],
       };
     },
-    persist: async (tx, address, decision, references) => {
+    persist: async (tx, address, decision, references, quality: ContactQualityFact | null = null) => {
       const heads = await tx.$queryRaw<Array<{ result_snapshot: unknown; target_snapshot: unknown; frozen_limits: unknown; status: string }>>`SELECT result_snapshot,target_snapshot,frozen_limits,status FROM public.contact_enrichment_execution
         WHERE workspace_id=${address.workspaceId}::uuid AND id=${address.executionId}::uuid AND company_id=${address.companyId}::uuid FOR UPDATE`;
       if (heads.length !== 1 || !heads[0] || heads[0].status === 'REDACTED' || heads[0].status === 'COMPLETED' || heads[0].status === 'FAILED') throw new EnrichmentSafetyError('HOLD');
@@ -885,6 +982,10 @@ export function createSqlEnrichmentDomainCommitStore(transactions: ContactEnrich
       if (new Set(parsed.map((entry) => entry.contactId)).size !== parsed.length) throw new EnrichmentSafetyError('HOLD');
       const newCandidatePoints = parsed.reduce((sum, entry) => sum + entry.newCandidatePoints, 0);
       if (newCandidatePoints > 10) throw new EnrichmentSafetyError('HOLD');
+      const priorQuality = head.result_snapshot === null ? [] : readEnrichmentResultSnapshot(head.result_snapshot).quality;
+      const qualityContacts = quality === null ? [...priorQuality] : [...priorQuality.filter((fact) => fact.contactId !== address.contactId), quality];
+      if (new Set(qualityContacts.map((fact) => fact.contactId)).size !== qualityContacts.length || qualityContacts.length > targetCount ||
+          qualityContacts.some((fact) => !parsed.some((entry) => entry.contactId === fact.contactId))) throw new EnrichmentSafetyError('HOLD');
       for (const reference of references) {
         await tx.$queryRaw`UPDATE public.contact_enrichment_execution_step SET dispatch_phase='SETTLED',domain_state='APPLIED',revision=revision+1
           WHERE workspace_id=${address.workspaceId}::uuid AND execution_id=${address.executionId}::uuid AND contact_id=${address.contactId}::uuid AND id=${reference.stepId}::uuid AND budget_operation_id=${reference.durableReceipt.operationId}::uuid`;
@@ -896,7 +997,7 @@ export function createSqlEnrichmentDomainCommitStore(transactions: ContactEnrich
       const stepStates = await readHeadFacts(tx, address);
       const nextStatus = aggregateHeadStatus(parsed, stepStates, Number(remaining[0]?.count ?? -1), targetCount);
       await tx.$queryRaw`UPDATE public.contact_enrichment_execution
-        SET result_snapshot=${canonicalSafetyJson({ version: 1, targetCount, newCandidatePoints, contacts: parsed })}::jsonb,result_revision=result_revision+1,status=${nextStatus}
+        SET result_snapshot=${canonicalSafetyJson({ version: 2, targetCount, newCandidatePoints, contacts: parsed, quality: { version: 1, contacts: qualityContacts } })}::jsonb,result_revision=result_revision+1,status=${nextStatus}
         WHERE workspace_id=${address.workspaceId}::uuid AND id=${address.executionId}::uuid AND company_id=${address.companyId}::uuid AND status<>'REDACTED'`;
     },
     finishAttempt: async (address) => {

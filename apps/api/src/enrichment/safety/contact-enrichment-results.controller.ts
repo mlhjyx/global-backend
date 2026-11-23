@@ -65,6 +65,20 @@ export interface ContactEnrichmentResultsPort {
     companyId: string,
     operationRef: string,
   ): Promise<unknown | null>;
+  listEnrichmentQualityFacts(
+    context: RequestContext,
+    companyId: string,
+    query: ContactEnrichmentResultsQuery,
+  ): Promise<Readonly<{
+    items: readonly unknown[];
+    nextCursor: string | null;
+    hasMore: boolean;
+  }> | null>;
+  readEnrichmentQualityFacts(
+    context: RequestContext,
+    companyId: string,
+    operationRef: string,
+  ): Promise<unknown | null>;
 }
 @ApiTags("Contact enrichment results")
 @ApiBearerAuth()

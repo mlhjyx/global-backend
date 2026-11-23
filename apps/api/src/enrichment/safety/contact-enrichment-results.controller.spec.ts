@@ -150,6 +150,8 @@ function resultWorld(missing = false) {
     listEnrichmentExecutions: list,
     readEnrichmentExecution: read,
     recoverEnrichmentExecution: recover,
+    listEnrichmentQualityFacts: vi.fn(async () => null),
+    readEnrichmentQualityFacts: vi.fn(async () => null),
   };
   return {
     read,
@@ -241,6 +243,26 @@ describe("scoped persistent result route ports, no real DB or HTTP listener", ()
     });
     await expect(x.controller.list(ctx, C, {})).rejects.toThrow();
     expect(x.recover).not.toHaveBeenCalled();
+  });
+  it("404s when the port returns a record of another company or another operation ref", async () => {
+    const otherCompany = resultWorld();
+    otherCompany.read.mockResolvedValue({ ...publicResult(), companyId: W });
+    await expect(otherCompany.controller.read(ctx, C, "a".repeat(64))).rejects.toMatchObject({ status: 404 });
+    const otherRef = resultWorld();
+    otherRef.read.mockResolvedValue({ ...publicResult(), operationRef: "b".repeat(64) });
+    await expect(otherRef.controller.read(ctx, C, "a".repeat(64))).rejects.toMatchObject({ status: 404 });
+  });
+  it("refuses broken page continuity instead of returning a misleading cursor", async () => {
+    const missing = resultWorld();
+    missing.list.mockResolvedValue({ items: [publicResult()], nextCursor: null, hasMore: true });
+    await expect(missing.controller.list(ctx, C, {})).rejects.toMatchObject({ status: 500 });
+    const misaligned = resultWorld();
+    const cursor = encodeContactEnrichmentResultCursor({ createdAt: "2026-11-23T00:00:00.000Z", id: C });
+    misaligned.list.mockResolvedValue({ items: [publicResult()], nextCursor: cursor, hasMore: true });
+    await expect(misaligned.controller.list(ctx, C, {})).rejects.toMatchObject({ status: 500 });
+    const stray = resultWorld();
+    stray.list.mockResolvedValue({ items: [publicResult()], nextCursor: encoded, hasMore: false });
+    await expect(stray.controller.list(ctx, C, {})).rejects.toMatchObject({ status: 500 });
   });
   it("does not leak unexpected persisted PII fields through a schema-shaped response", async () => {
     const x = resultWorld();

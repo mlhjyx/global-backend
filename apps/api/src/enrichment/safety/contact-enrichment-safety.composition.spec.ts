@@ -252,11 +252,25 @@ describe('SQL domain store/guards F09–F13', () => {
     await store.persist(tx as never, { workspaceId: SQL_W, companyId: SQL_COMPANY, executionId: SQL_EXEC, contactId: SQL_C2 }, sqlDecision(SQL_C2, SQL_P2), []);
     expect(state.status).toBe('COMPLETED');
     const snapshot = state.snapshot as { version: number; targetCount: number; newCandidatePoints: number; contacts: unknown[] };
-    expect(snapshot).toMatchObject({ version: 1, targetCount: 2, newCandidatePoints: 2 });
+    expect(snapshot).toMatchObject({ version: 2, targetCount: 2, newCandidatePoints: 2 });
     expect(snapshot.contacts).toHaveLength(2);
+    expect((snapshot as { quality?: unknown }).quality).toEqual({ version: 1, contacts: [] });
     expect(state.updates.filter((entry) => entry === 'RELEASED').length).toBeGreaterThanOrEqual(2);
     const record = { view: { executionId: SQL_EXEC, operationRef: '9'.repeat(64), planSha256: plan.planSha256, status: 'COMPLETED', accountId: SQL_ACCOUNT, authorityId: SQL_A, generation: 1 }, workspaceId: SQL_W, companyId: SQL_COMPANY, entrypoint: 'http' as const, businessRunId: null, requestSha256: plan.requestSha256, admissionRequestSha256: '8'.repeat(64), accountKey: 'account-key', currentAccount: { accountId: SQL_ACCOUNT, authorityId: SQL_A, generation: 1 }, plan, targetCount: 2, executionOptions: { lawfulBasisKind: 'legitimate_interest' as const, tier: 'B' as const }, createdAt: '2026-11-22T00:00:00.000Z', resultRevision: 3, resultSnapshot: snapshot, steps: [sqlVerifyRow(SQL_C1, 0, SQL_V1), sqlVerifyRow(SQL_C2, 1, SQL_V2)] };
     expect(() => buildContactEnrichmentQualityResult(record as never)).not.toThrow();
+  });
+  it('F13b: persists per-contact quality facts beside the decisions without resetting other contacts', async () => {
+    const plan = sqlPlan(); const head = sqlHead(plan); const state = { snapshot: null as unknown, remaining: 2, status: 'PREPARED', updates: [] as string[], contactsLocked: [] as string[], headSql: [] as string[] };
+    const { tx } = sqlTx({ plan, head, rows: [], state });
+    const store = createSqlEnrichmentDomainCommitStore({ withWorkspace: (_w, fn) => fn(tx) } as never, {});
+    const fact = (contactId: string) => ({ contactId, beforeStates: [], afterStates: ['VALID' as const], stockValidPersonal: false, organizationChannel: false, emailTypeUnknown: false, eligible: true, newCandidate: true, newValidPersonal: true, unresolved: false });
+    await store.persist(tx as never, { workspaceId: SQL_W, companyId: SQL_COMPANY, executionId: SQL_EXEC, contactId: SQL_C1 }, sqlDecision(SQL_C1, SQL_P1), [], fact(SQL_C1));
+    expect((state.snapshot as { quality: unknown }).quality).toEqual({ version: 1, contacts: [fact(SQL_C1)] });
+    const replaced = { ...fact(SQL_C1), newCandidate: false, newValidPersonal: false, afterStates: [] as const, unresolved: true };
+    await store.persist(tx as never, { workspaceId: SQL_W, companyId: SQL_COMPANY, executionId: SQL_EXEC, contactId: SQL_C1 }, { ...sqlDecision(SQL_C1, SQL_P1), reasonCode: 'NO_MATCH', state: null, pointRefs: [], newCandidatePoints: 0 }, [], replaced);
+    expect((state.snapshot as { quality: unknown }).quality).toEqual({ version: 1, contacts: [replaced] });
+    await store.persist(tx as never, { workspaceId: SQL_W, companyId: SQL_COMPANY, executionId: SQL_EXEC, contactId: SQL_C2 }, sqlDecision(SQL_C2, SQL_P2), [], fact(SQL_C2));
+    expect((state.snapshot as { quality: { contacts: unknown[] } }).quality.contacts).toEqual([replaced, fact(SQL_C2)]);
   });
   it('F14: REDACTED DTO accepts minimal metadata with empty decisions and rejects a null snapshot', () => {
     const plan = sqlPlan();

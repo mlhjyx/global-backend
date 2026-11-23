@@ -17,6 +17,7 @@ import {
   safetyInteger,
   EnrichmentSafetyError,
 } from "./enrichment-safety.contract";
+import { readEnrichmentResultSnapshot } from "./enrichment-result-snapshot";
 export interface ContactEnrichmentResultCursor {
   readonly createdAt: string;
   readonly id: string;
@@ -501,7 +502,7 @@ function metadataLedgerReceipt(record: EnrichmentRuntimeExecutionRecord, step: E
   if (projection.kind !== "tool" || projection.schema !== expected) return invalidReadInput();
   return requireLedgerProjectionReceipt({ ...common, expectedOperationId: step.budget_original_id, resultSchemaVersion: "generic-operation-projection/v1", expectedProjection: projection });
 }
-function metadataMoney(record: EnrichmentRuntimeExecutionRecord): { spend: ContactEnrichmentQualityResultV1["spend"]; physical: number | null } {
+export function metadataMoney(record: EnrichmentRuntimeExecutionRecord): { spend: ContactEnrichmentQualityResultV1["spend"]; physical: number | null } {
   let quoted = 0n, charged = 0n, unresolved = 0n, uncertainPhysical = false;
   const operations = new Set<string>(), contacts = new Set<number>();
   for (const step of record.steps) {
@@ -527,10 +528,10 @@ export function buildContactEnrichmentQualityResult(record: EnrichmentRuntimeExe
   let newCandidatePoints = 0;
   const decisions: ReturnType<typeof parseEnrichmentContactApplyDecision>[] = [];
   if (record.resultSnapshot !== null) {
-    const snapshot = closedSafetyRecord(record.resultSnapshot, ["version", "targetCount", "newCandidatePoints", "contacts"]);
-    if (snapshot.version !== 1 || snapshot.targetCount !== record.targetCount) return invalidReadInput();
-    newCandidatePoints = safetyInteger(snapshot.newCandidatePoints, 0, 10);
-    decisions.push(...denseSafetyArray(snapshot.contacts, 10).map(parseEnrichmentContactApplyDecision));
+    const snapshot = readEnrichmentResultSnapshot(record.resultSnapshot);
+    if (snapshot.targetCount !== record.targetCount) return invalidReadInput();
+    newCandidatePoints = snapshot.newCandidatePoints;
+    decisions.push(...snapshot.contacts.map(parseEnrichmentContactApplyDecision));
     if (new Set(decisions.map((decision) => decision.contactId)).size !== decisions.length) return invalidReadInput();
   } else if (record.view.status === "REDACTED") return invalidReadInput();
   const money = metadataMoney(record), redacted = record.view.status === "REDACTED";

@@ -35,7 +35,7 @@ export interface ContactEnrichmentSafetyServiceDeps {
     findByRef(input: { workspaceId: string; companyId: string; operationRef: string }): Promise<ExistingSafetyExecution | null>;
     execute(input: { view: EnrichmentExecutionView; workspaceId: string; companyId: string; actorId: string; mode: "EXECUTE" | "RECOVER_NO_WIRE" }): Promise<EnrichCompanyContactsResult>;
   };
-  readonly results: Pick<ContactEnrichmentResultsPort, "listEnrichmentExecutions" | "readEnrichmentExecution">;
+  readonly results: Pick<ContactEnrichmentResultsPort, "listEnrichmentExecutions" | "readEnrichmentExecution" | "listEnrichmentQualityFacts" | "readEnrichmentQualityFacts">;
   authorizeRecovery(context: RequestContext, companyId: string): Promise<boolean>;
 }
 export interface ContactEnrichmentSafetyRunInput { readonly workspaceId: string; readonly companyId: string; readonly businessRunId: string; readonly binding: ExecutionBudgetBinding; readonly lawfulBasis: LawfulBasis; readonly remainingMicrousd: string; readonly actorId: string; }
@@ -82,6 +82,14 @@ export class ContactEnrichmentSafetyService implements ContactEnrichmentResultsP
   async readEnrichmentExecution(context: RequestContext, companyId: string, operationRef: string): Promise<unknown | null> {
     this.address(context.workspaceId, companyId, operationRef);
     return this.deps.results.readEnrichmentExecution(context, companyId, operationRef);
+  }
+  async listEnrichmentQualityFacts(context: RequestContext, companyId: string, query: ContactEnrichmentResultsQuery): ReturnType<ContactEnrichmentResultsPort["listEnrichmentQualityFacts"]> {
+    this.address(context.workspaceId, companyId);
+    return this.deps.results.listEnrichmentQualityFacts(context, companyId, query);
+  }
+  async readEnrichmentQualityFacts(context: RequestContext, companyId: string, operationRef: string): Promise<unknown | null> {
+    this.address(context.workspaceId, companyId, operationRef);
+    return this.deps.results.readEnrichmentQualityFacts(context, companyId, operationRef);
   }
   async recoverEnrichmentExecution(context: RequestContext, companyId: string, operationRef: string): Promise<unknown | null> {
     this.address(context.workspaceId, companyId, operationRef);
