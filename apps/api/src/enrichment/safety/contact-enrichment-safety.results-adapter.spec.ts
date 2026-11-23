@@ -15,7 +15,14 @@ const C = '00000000-0000-4000-8000-000000000002';
 const CONTACT = '00000000-0000-4000-8000-000000000003';
 const A = '00000000-0000-4000-8000-000000000004';
 const ACCOUNT = '00000000-0000-4000-8000-000000000005';
+const RUN_A = '00000000-0000-4000-8000-0000000000aa';
+const RUN_B = '00000000-0000-4000-8000-0000000000bb';
 const parsed = { limit: 10 as const, cursor: null, businessRunId: null };
+interface Row {
+  id: string;
+  createdAt: string;
+  businessRunId?: string;
+}
 
 function record(operationRef: string, createdAt: string): EnrichmentRuntimeExecutionRecord {
   const plan = buildFrozenEnrichmentPlan({
@@ -49,38 +56,53 @@ function record(operationRef: string, createdAt: string): EnrichmentRuntimeExecu
     steps: [],
   } as EnrichmentRuntimeExecutionRecord;
 }
-function head(index: number) {
+function head(index: number, businessRunId?: string): Row {
   return {
     id: `00000000-0000-4000-8000-${String(index + 10).padStart(12, '0')}`,
     createdAt: `2026-11-22T00:00:${String(index).padStart(2, '0')}.000Z`,
+    ...(businessRunId === undefined ? {} : { businessRunId }),
   };
 }
 function textOf(argument: unknown): string {
   if (typeof (argument as { sql?: unknown })?.sql === 'string') return (argument as { sql: string }).sql;
   return Array.isArray(argument) ? (argument as unknown[]).join('?') : '';
 }
-function world(config: {
-  companyExists?: boolean;
-  pages?: Array<Array<{ id: string; createdAt: string }>>;
-  records?: ReadonlySet<string>;
-}) {
+function valuesOf(argument: unknown, rest: readonly unknown[]): readonly unknown[] {
+  const embedded = (argument as { values?: unknown })?.values;
+  return Array.isArray(embedded) ? embedded : rest;
+}
+function world(config: { companyExists?: boolean; rows?: Row[]; records?: ReadonlySet<string> }) {
   const scopes: string[] = [];
-  const sql: string[] = [];
-  let call = 0;
+  const headQueries: Array<{ cursor: { createdAt: string; id: string } | null; businessRunId: unknown; limit: number }> = [];
   const database = {
     withWorkspace: vi.fn(async (workspaceId: string, work: (tx: unknown) => Promise<unknown>) => {
       scopes.push(workspaceId);
       const tx = {
-        $queryRaw: vi.fn(async (argument: unknown) => {
-          const text = textOf(argument);
-          sql.push(text);
+        $queryRaw: vi.fn(async (...args: unknown[]) => {
+          const text = textOf(args[0]);
           if (text.includes('public.canonical_company')) return config.companyExists === false ? [] : [{ id: C }];
-          if (text.includes('public.contact_enrichment_execution e')) {
-            const page = config.pages?.[Math.min(call, (config.pages?.length ?? 1) - 1)] ?? [];
-            call += 1;
-            return page.map((row) => ({ id: row.id, created_at: new Date(row.createdAt) }));
-          }
-          return [];
+          if (!text.includes('public.contact_enrichment_execution e')) return [];
+          const values = valuesOf(args[0], args.slice(1));
+          // Bind order: workspace, company, businessRunId x2, cursor.createdAt x2, cursor.id, limit+1.
+          const businessRunId = values[2] ?? null;
+          const cursorAt = values[4] ?? null;
+          const cursorId = values[6] ?? null;
+          const limit = Number(values[7]) - 1;
+          headQueries.push({
+            cursor: cursorAt === null ? null : { createdAt: String(cursorAt), id: String(cursorId) },
+            businessRunId,
+            limit,
+          });
+          return (config.rows ?? [])
+            .filter((row) => businessRunId === null || row.businessRunId === businessRunId)
+            .filter(
+              (row) =>
+                cursorAt === null ||
+                (row.createdAt > String(cursorAt) ||
+                  (row.createdAt === String(cursorAt) && row.id > String(cursorId))),
+            )
+            .slice(0, limit + 1)
+            .map((row) => ({ id: row.id, created_at: new Date(row.createdAt) }));
         }),
       };
       return work(tx);
@@ -93,7 +115,7 @@ function world(config: {
     ref === 'a'.repeat(64) ? record(ref, '2026-11-22T00:00:00.000Z') : null,
   );
   const deps: ContactEnrichmentResultsAdapterDeps = { database, loadById, loadByRef };
-  return { deps, scopes, sql, loadById, loadByRef };
+  return { deps, scopes, headQueries, loadById, loadByRef };
 }
 
 describe('real enrichment result list/read adapters distinguish unknown companies from empty pages', () => {
@@ -102,11 +124,11 @@ describe('real enrichment result list/read adapters distinguish unknown companie
     await expect(listContactEnrichmentResults(x.deps, { workspaceId: W }, C, parsed)).resolves.toBeNull();
     await expect(listContactEnrichmentQualityFacts(x.deps, { workspaceId: W }, C, parsed)).resolves.toBeNull();
     expect(x.scopes).toEqual([W, W]);
-    expect(x.sql.some((text) => text.includes('public.contact_enrichment_execution e'))).toBe(false);
+    expect(x.headQueries).toEqual([]);
     expect(x.loadById).not.toHaveBeenCalled();
   });
   it('returns a legitimate empty page for a readable company with zero executions', async () => {
-    const x = world({ companyExists: true, pages: [[]], records: new Set() });
+    const x = world({ companyExists: true, rows: [], records: new Set() });
     await expect(listContactEnrichmentResults(x.deps, { workspaceId: W }, C, parsed)).resolves.toEqual({
       items: [],
       nextCursor: null,
@@ -117,31 +139,54 @@ describe('real enrichment result list/read adapters distinguish unknown companie
       hasMore: false,
     });
   });
-  it('hydrates each head in the scoped company and pages by the last head, including a skipped record', async () => {
-    const rows = Array.from({ length: 11 }, (_, index) => head(index));
-    const records = new Set(rows.slice(0, 11).map((row) => row.id));
+  it('binds the cursor, limit and business run into the next page query', async () => {
+    const rows = [
+      ...Array.from({ length: 12 }, (_, index) => head(index, RUN_A)),
+      ...Array.from({ length: 3 }, (_, index) => head(30 + index, RUN_B)),
+    ];
+    const allIds = new Set(rows.map((row) => row.id));
+    const x = world({ companyExists: true, rows, records: allIds });
+    const page1 = await listContactEnrichmentResults(x.deps, { workspaceId: W }, C, {
+      limit: 10,
+      cursor: null,
+      businessRunId: RUN_A,
+    });
+    expect(page1?.items).toHaveLength(10);
+    expect(page1?.hasMore).toBe(true);
+    const cursor = decodeContactEnrichmentResultCursor(page1!.nextCursor!);
+    expect(cursor).toEqual({ createdAt: rows[9]!.createdAt, id: rows[9]!.id });
+    expect(x.headQueries[0]).toEqual({ cursor: null, businessRunId: RUN_A, limit: 10 });
+
+    const page2 = await listContactEnrichmentResults(x.deps, { workspaceId: W }, C, {
+      limit: 10,
+      cursor,
+      businessRunId: RUN_A,
+    });
+    expect(x.headQueries[1]).toEqual({ cursor, businessRunId: RUN_A, limit: 10 });
+    expect(page2?.items).toHaveLength(2);
+    expect(page2?.hasMore).toBe(false);
+    expect(page2?.nextCursor).toBeNull();
+    // Dropping the cursor would repeat the first page; dropping the run filter would pull run B rows.
+    expect(x.headQueries[1]!.cursor).not.toBeNull();
+    expect(x.loadById).toHaveBeenLastCalledWith({ workspaceId: W, companyId: C }, rows[11]!.id);
+  });
+  it('keeps the cursor on the last head of the page when an intermediate record cannot hydrate', async () => {
+    const rows = Array.from({ length: 11 }, (_, index) => head(index, RUN_A));
+    const records = new Set(rows.map((row) => row.id));
     records.delete(rows[3]!.id);
-    const x = world({ companyExists: true, pages: [rows], records });
-    const page = await listContactEnrichmentResults(x.deps, { workspaceId: W }, C, parsed);
+    const x = world({ companyExists: true, rows, records });
+    const page = await listContactEnrichmentQualityFacts(x.deps, { workspaceId: W }, C, {
+      limit: 10,
+      cursor: null,
+      businessRunId: RUN_A,
+    });
     expect(page?.items).toHaveLength(9);
     expect(page?.hasMore).toBe(true);
     const cursor = decodeContactEnrichmentResultCursor(page!.nextCursor!);
     expect(cursor).toEqual({ createdAt: rows[9]!.createdAt, id: rows[9]!.id });
+    expect(x.headQueries[0]).toEqual({ cursor: null, businessRunId: RUN_A, limit: 10 });
     expect(x.loadById).toHaveBeenCalledTimes(10);
     expect(x.loadById).toHaveBeenCalledWith({ workspaceId: W, companyId: C }, rows[0]!.id);
-  });
-  it('uses a provided cursor on the next page and ends without a cursor', async () => {
-    const first = Array.from({ length: 11 }, (_, index) => head(index));
-    const second = [head(10)];
-    const x = world({ companyExists: true, pages: [first, second], records: new Set(first.map((row) => row.id)) });
-    const page1 = await listContactEnrichmentQualityFacts(x.deps, { workspaceId: W }, C, parsed);
-    const cursor = decodeContactEnrichmentResultCursor(page1!.nextCursor!);
-    const page2 = await listContactEnrichmentQualityFacts(x.deps, { workspaceId: W }, C, { ...parsed, cursor });
-    expect(page2).toMatchObject({ nextCursor: null, hasMore: false });
-    expect(page2?.items).toHaveLength(1);
-    expect(x.loadById).toHaveBeenLastCalledWith({ workspaceId: W, companyId: C }, second[0]!.id);
-    const headSql = x.sql.filter((text) => text.includes('public.contact_enrichment_execution e'));
-    expect(headSql).toHaveLength(2);
   });
   it('reads by exact operation ref through loadByRef and returns null when absent', async () => {
     const x = world({ companyExists: true });

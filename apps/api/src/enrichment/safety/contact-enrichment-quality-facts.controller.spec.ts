@@ -4,6 +4,7 @@ import type { ExecutionContext } from "@nestjs/common";
 import { ScopesGuard } from "../../auth/scopes.guard";
 import type { RequestContext } from "../../auth/request-context";
 import { ContactEnrichmentQualityFactsController } from "./contact-enrichment-quality-facts.controller";
+import { encodeContactEnrichmentResultCursor } from "./contact-enrichment-results.dto";
 import type { ContactEnrichmentResultsPort } from "./contact-enrichment-results.controller";
 import { describe, expect, it, vi } from "vitest";
 const W = "00000000-0000-4000-8000-000000000001",
@@ -167,6 +168,25 @@ describe("complete quality facts read routes, no real DB or HTTP listener", () =
     const otherRef = world();
     otherRef.read.mockResolvedValue({ ...qualityResult(), operationRef: "b".repeat(64) });
     await expect(otherRef.controller.read(ctx, C, "a".repeat(64))).rejects.toMatchObject({ status: 404 });
+  });
+  it("refuses broken quality page continuity instead of returning a misleading cursor", async () => {
+    const missing = world();
+    missing.list.mockResolvedValue({ items: [qualityResult()], nextCursor: null, hasMore: true });
+    await expect(missing.controller.list(ctx, C, {})).rejects.toMatchObject({ status: 500 });
+    const misaligned = world();
+    const badCursor = encodeContactEnrichmentResultCursor({
+      createdAt: "2026-11-23T00:00:00.000Z",
+      id: CONTACT,
+    });
+    misaligned.list.mockResolvedValue({ items: [qualityResult()], nextCursor: badCursor, hasMore: true });
+    await expect(misaligned.controller.list(ctx, C, {})).rejects.toMatchObject({ status: 500 });
+    const stray = world();
+    const encoded = encodeContactEnrichmentResultCursor({
+      createdAt: "2026-11-22T00:00:00.000Z",
+      id: CONTACT,
+    });
+    stray.list.mockResolvedValue({ items: [qualityResult()], nextCursor: encoded, hasMore: false });
+    await expect(stray.controller.list(ctx, C, {})).rejects.toMatchObject({ status: 500 });
   });
   it("does not leak unexpected persisted PII fields through a schema-shaped response", async () => {
     const x = world();
