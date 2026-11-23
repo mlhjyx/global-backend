@@ -99,6 +99,11 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment execution on Pos
   const deletedCompany = randomUUID();
 
   class RolledBack extends Error {}
+  class Prepared extends Error {
+    constructor(readonly value: unknown) {
+      super('prepared');
+    }
+  }
 
   const inWorkspace = <T>(workspace: string, work: (tx: Prisma.TransactionClient) => Promise<T>) =>
     app.$transaction(
@@ -108,6 +113,21 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment execution on Pos
       },
       { timeout: 20_000 },
     );
+
+  // SET ROLE is session-scoped even inside a committed transaction, so anything
+  // that may have changed the role runs in a transaction this helper rolls back.
+  const inRolledBackTransaction = async <T>(work: (tx: Prisma.TransactionClient) => Promise<T>) => {
+    try {
+      await app.$transaction(async (tx) => {
+        const value = await work(tx);
+        throw new Prepared(value);
+      }, { timeout: 5_000 });
+    } catch (error) {
+      if (error instanceof Prepared) return { ok: true as const, value: error.value as T };
+      return { ok: false as const, code: sqlState(error) ?? 'other error' };
+    }
+    return { ok: true as const, value: undefined as T };
+  };
 
   const attempt = async <T>(workspace: string, work: (tx: Prisma.TransactionClient) => Promise<T>) => {
     try {
@@ -710,12 +730,21 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment execution on Pos
       { table_name: 'execution_budget_authority', privilege_type: 'SELECT' },
       { table_name: 'tool_budget_account', privilege_type: 'SELECT' },
     ]);
-    const [functions] = await owner.$queryRaw<Array<{ authority: boolean; account: boolean; operation: boolean; public_authority: boolean }>>`
+    const [functions] = await owner.$queryRaw<Array<{ authority: boolean; account: boolean; operation: boolean; public_authority: boolean; public_account: boolean; public_operation: boolean }>>`
       SELECT has_function_privilege('app_user', 'lock_contact_enrichment_authority_v1(uuid,uuid)', 'EXECUTE') AS authority,
         has_function_privilege('app_user', 'lock_contact_enrichment_account_v1(uuid,uuid,text)', 'EXECUTE') AS account,
         has_function_privilege('app_user', 'lock_contact_enrichment_operation_v1(uuid,uuid,integer,text)', 'EXECUTE') AS operation,
-        has_function_privilege('public', 'lock_contact_enrichment_authority_v1(uuid,uuid)', 'EXECUTE') AS public_authority`;
-    expect(functions).toEqual({ authority: true, account: true, operation: true, public_authority: false });
+        has_function_privilege('public', 'lock_contact_enrichment_authority_v1(uuid,uuid)', 'EXECUTE') AS public_authority,
+        has_function_privilege('public', 'lock_contact_enrichment_account_v1(uuid,uuid,text)', 'EXECUTE') AS public_account,
+        has_function_privilege('public', 'lock_contact_enrichment_operation_v1(uuid,uuid,integer,text)', 'EXECUTE') AS public_operation`;
+    expect(functions).toEqual({
+      authority: true,
+      account: true,
+      operation: true,
+      public_authority: false,
+      public_account: false,
+      public_operation: false,
+    });
     const [budgetLocks] = await owner.$queryRaw<Array<{ e_table: boolean; e_column: boolean; s_table: boolean; s_column: boolean }>>`
       SELECT has_table_privilege('app_user', 'public.contact_enrichment_execution', 'UPDATE') AS e_table,
         has_any_column_privilege('app_user', 'public.contact_enrichment_execution', 'UPDATE') AS e_column,
@@ -739,17 +768,87 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment execution on Pos
     const stepLock = await attempt(workspaceA, (tx) =>
       tx.$queryRaw`SELECT id FROM contact_enrichment_execution_step WHERE id = ${columnStep}::uuid FOR UPDATE`);
     expect(stepLock.ok).toBe(true);
-    const crossScope = await attempt(workspaceB, (tx) =>
-      tx.$queryRaw`SELECT * FROM public.lock_contact_enrichment_authority_v1(${workspaceA}::uuid, ${authorityA}::uuid)`);
-    expect(crossScope).toMatchObject({ ok: false, code: '42501' });
-    const roleEscalation = await attempt(workspaceA, (tx) => tx.$executeRawUnsafe('SET ROLE "global"'));
+    // Caller boundary of all three definer locks: a missing workspace context, a
+    // valid foreign target under the caller's own context, and an active SET ROLE
+    // must each be rejected by the function itself before any row is read.
+    const operationKeys = new Map(
+      (
+        await owner.$queryRaw<Array<{ id: string; key: string }>>`
+          SELECT id::text AS id, operation_key AS key FROM tool_budget_operation
+          WHERE id IN (${operationA1}::uuid, ${operationB}::uuid)`
+      ).map((row) => [row.id, row.key]),
+    );
+    const operationKeyOf = (id: string) => {
+      const key = operationKeys.get(id);
+      if (!key) throw new Error(`missing operation key for ${id}`);
+      return key;
+    };
+    const accountKeyA = `contact.enrich:a:${workspaceA}`;
+    const accountKeyB = `contact.enrich:b:${workspaceB}`;
+    const definerLocks = {
+      authority: (tx: Prisma.TransactionClient, workspace: string, authority: string) =>
+        tx.$queryRaw`SELECT * FROM public.lock_contact_enrichment_authority_v1(${workspace}::uuid, ${authority}::uuid)`,
+      account: (tx: Prisma.TransactionClient, workspace: string, authority: string, key: string) =>
+        tx.$queryRaw`SELECT * FROM public.lock_contact_enrichment_account_v1(${workspace}::uuid, ${authority}::uuid, ${key})`,
+      operation: (tx: Prisma.TransactionClient, workspace: string, account: string, key: string) =>
+        tx.$queryRaw`SELECT * FROM public.lock_contact_enrichment_operation_v1(${workspace}::uuid, ${account}::uuid, 1, ${key})`,
+    };
+    const ownTarget = {
+      authority: (tx: Prisma.TransactionClient) => definerLocks.authority(tx, workspaceA, authorityA),
+      account: (tx: Prisma.TransactionClient) => definerLocks.account(tx, workspaceA, authorityA, accountKeyA),
+      operation: (tx: Prisma.TransactionClient) => definerLocks.operation(tx, workspaceA, accountA1, operationKeyOf(operationA1)),
+    };
+    const foreignTarget = {
+      authority: (tx: Prisma.TransactionClient) => definerLocks.authority(tx, workspaceB, authorityB),
+      account: (tx: Prisma.TransactionClient) => definerLocks.account(tx, workspaceB, authorityB, accountKeyB),
+      operation: (tx: Prisma.TransactionClient) => definerLocks.operation(tx, workspaceB, accountB, operationKeyOf(operationB)),
+    };
+    const withoutContext = async (work: (tx: Prisma.TransactionClient) => Promise<unknown>) => {
+      try {
+        return { ok: true as const, value: await app.$transaction(work, { timeout: 5_000 }) };
+      } catch (error) {
+        return { ok: false as const, code: sqlState(error) ?? 'other error' };
+      }
+    };
+    // app_user may SET ROLE to itself, so the role guard — not a permission miss —
+    // must be what rejects the call; this probe keeps that distinction honest.
+    const selfRole = await inRolledBackTransaction(async (tx) => {
+      await tx.$executeRawUnsafe('SET ROLE app_user');
+      return tx.$queryRawUnsafe("SELECT current_setting('role', true) AS role");
+    });
+    expect(selfRole).toMatchObject({ ok: true, value: [{ role: 'app_user' }] });
+    for (const name of ['authority', 'account', 'operation'] as const) {
+      expect(await attempt(workspaceA, ownTarget[name])).toMatchObject({ ok: true });
+      expect(await attempt(workspaceB, foreignTarget[name])).toMatchObject({ ok: true });
+      expect(await attempt(workspaceA, foreignTarget[name])).toMatchObject({ ok: false, code: '42501' });
+      expect(await withoutContext(ownTarget[name])).toMatchObject({ ok: false, code: '42501' });
+      expect(
+        await inRolledBackTransaction(async (tx) => {
+          await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceA}, true)`;
+          await tx.$executeRawUnsafe('SET ROLE app_user');
+          return ownTarget[name](tx);
+        }),
+      ).toMatchObject({ ok: false, code: '42501' });
+    }
+    const roleEscalation = await inRolledBackTransaction((tx) => tx.$executeRawUnsafe('SET ROLE "global"'));
     expect(roleEscalation.ok).toBe(false);
   });
 
-  it('keeps admission inside one workspace and leaves no head when the transaction fails', async () => {
-    const before = await owner.$queryRaw<Array<{ count: bigint }>>`
-      SELECT count(*)::bigint AS count FROM contact_enrichment_execution
-      WHERE workspace_id = ${workspaceA}::uuid AND request_sha256 = ${admitRequestSha256}`;
+  it('keeps admission inside one workspace and leaves no head or step when the transaction fails', async () => {
+    // Residue is counted under the failing attempt's own identity: a write that
+    // escaped the rolled-back transaction carries failRequestSha256, not the
+    // successful admission's hash.
+    const residue = async () => {
+      const [heads] = await owner.$queryRaw<Array<{ count: bigint }>>`
+        SELECT count(*)::bigint AS count FROM contact_enrichment_execution
+        WHERE workspace_id = ${workspaceA}::uuid AND request_sha256 = ${failRequestSha256}`;
+      const [steps] = await owner.$queryRaw<Array<{ count: bigint }>>`
+        SELECT count(*)::bigint AS count FROM contact_enrichment_execution_step step
+        JOIN contact_enrichment_execution head ON head.id = step.execution_id
+        WHERE head.workspace_id = ${workspaceA}::uuid AND head.request_sha256 = ${failRequestSha256}`;
+      return { heads: heads.count, steps: steps.count };
+    };
+    const before = await residue();
     const failing = await attempt(workspaceA, () =>
       admissionRepository(admissionBinding(failRequestSha256)).admitHttp({
         authority: admissionAuthorityFor(failRequestSha256),
@@ -757,10 +856,34 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment execution on Pos
         admissionRequestSha256: 'f'.repeat(64),
       }));
     expect(failing).toMatchObject({ ok: false });
-    const after = await owner.$queryRaw<Array<{ count: bigint }>>`
-      SELECT count(*)::bigint AS count FROM contact_enrichment_execution
-      WHERE workspace_id = ${workspaceA}::uuid AND request_sha256 = ${admitRequestSha256}`;
-    expect(after).toEqual(before);
+    expect(await residue()).toEqual(before);
+    // Sensitivity control: the residue query must see the same identity when a
+    // write is made outside the admission transaction, so the equality above
+    // cannot pass vacuously.
+    const escapedHead = randomUUID();
+    const escapedStep = randomUUID();
+    const fixtureClient = owner as unknown as Prisma.TransactionClient;
+    await headSql(fixtureClient, {
+      workspaceId: workspaceA,
+      companyId: companyA,
+      authorityId: authorityA,
+      accountId: accountA1,
+      requestSha256: failRequestSha256,
+      admissionRequestSha256: digestOf(),
+      operationRef: digestOf(),
+    }, escapedHead);
+    await stepSql(fixtureClient, {
+      workspaceId: workspaceA,
+      executionId: escapedHead,
+      contactId: contactA,
+      contactOrdinal: 0,
+      slotOrdinal: 0,
+      slotKey: `escaped.${escapedStep}`,
+    }, escapedStep);
+    expect(await residue()).toEqual({ heads: before.heads + 1n, steps: before.steps + 1n });
+    await owner.$executeRaw`DELETE FROM contact_enrichment_execution_step WHERE id = ${escapedStep}::uuid`;
+    await owner.$executeRaw`DELETE FROM contact_enrichment_execution WHERE id = ${escapedHead}::uuid`;
+    expect(await residue()).toEqual(before);
   });
 
   it('refuses a foreign authority through the scoped definer lock', async () => {
