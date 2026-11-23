@@ -113,6 +113,12 @@ export const OPERATION_DESCRIPTIONS: Readonly<Record<string, string>> = Object.f
     '重试解析：仅 failed_terminal 或 queued 状态可调用，重置错误码后重新入队（202）。需要 acquisition:write。',
   'DELETE /api/v1/seller-documents/{documentId}':
     '软删一份资料：置 deleted_at 并从列表与下载中消失；对象与分块的物理清理在受控清理管线（DSR 同路径）完成。需要 acquisition:review。',
+  'GET /api/v1/companies/{companyId}/seller-documents/{documentId}/chunks/{seq}':
+    '读取 ready 文档当前发布解析版本的单块文本（seq 从 0 起），返回 documentContentHash、parseRevision、chunkTextHash 与上下文元数据；只查本地数据库，不调用 search/embedding、不落写。文档未 ready 返回 409（DOCUMENT_CLAIM_SOURCE_UNAVAILABLE），分块不存在 404，seq 非法 400；需要 acquisition:read。',
+  'POST /api/v1/companies/{companyId}/seller-documents/{documentId}/claim-previews':
+    'typed 引用预览（纯检查）：服务端重读文档与分块，逐项校验 documentContentHash、parseRevision、chunkSeq、chunkTextHash 与 UTF-8 字节区间原句一致后，返回重建原句、bindingHash 与 requestDigest；不写 Claim、不耗 Grant、不调模型。引用或文档失效返回 409，参数非法 400；需要 acquisition:write。',
+  'POST /api/v1/companies/{companyId}/seller-documents/{documentId}/claim-drafts':
+    '在同一事务内重读引用并写入 NEEDS_REVIEW 草稿（Claim + Evidence + typed 文档引用），首次写入必为 NEEDS_REVIEW；同来源同陈述跨请求者重放返回原件（replayed=true，201），requestDigest 或引用异体返回 409（DOCUMENT_CLAIM_REQUEST_MISMATCH / DOCUMENT_CLAIM_CONFLICT）；需要 acquisition:write。',
 
   // ── Claims ────────────────────────────────────────────────────────────────
   'GET /api/v1/companies/{companyId}/claims':
