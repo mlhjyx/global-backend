@@ -328,6 +328,10 @@
       "to": "runtime"
     },
     {
+      "from": "compliance",
+      "to": "seller-knowledge"
+    },
+    {
       "from": "discovery",
       "to": "acquisition"
     },
@@ -561,6 +565,10 @@
     },
     {
       "from": "icp",
+      "to": "claim"
+    },
+    {
+      "from": "icp",
       "to": "common"
     },
     {
@@ -693,6 +701,10 @@
     },
     {
       "from": "market-candidate-generation",
+      "to": "claim"
+    },
+    {
+      "from": "market-candidate-generation",
       "to": "common"
     },
     {
@@ -726,6 +738,10 @@
     {
       "from": "market-candidates",
       "to": "auth"
+    },
+    {
+      "from": "market-candidates",
+      "to": "claim"
     },
     {
       "from": "market-candidates",
@@ -978,6 +994,10 @@
     {
       "from": "seller-knowledge",
       "to": "auth"
+    },
+    {
+      "from": "seller-knowledge",
+      "to": "claim"
     },
     {
       "from": "seller-knowledge",
