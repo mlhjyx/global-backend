@@ -165,7 +165,6 @@ describe("development fast-lane worker", () => {
       "costReconciliationCatalogCoversRoutes(",
       "createSiteBuildSettlementReadbackRuntimeFromEnv(",
       "sourcePolicyReaderFrom(",
-      "buildToolBroker(",
       "new TaxonomyResolver(",
       "new SanctionsScreeningService(",
       "new DiscoveryProviderRegistry({",
@@ -180,6 +179,22 @@ describe("development fast-lane worker", () => {
     // Discovery stages stop for the run's admission lease only where the reader is wired.
     expect(call(worker, "createDiscoveryActivities(")).toContain(
       "runLease: prismaDiscoveryRunLeaseReader(prisma)",
+    );
+    // The managed worker now gets its single broker from the contact-enrichment composition.
+    const enrichmentComposition = readFileSync(
+      join(
+        import.meta.dirname,
+        "../enrichment/safety/contact-enrichment-safety.composition.ts",
+      ),
+      "utf8",
+    );
+    expect(call(lane, "buildToolBroker(")).toContain("paidLedger: costLedger");
+    expect(worker).toContain(
+      "createWorkerContactEnrichmentSafety({ prisma, budgetStore, costLedger, sourcePolicyReader })",
+    );
+    expect(worker).toContain("const broker = safetyComposition.broker");
+    expect(enrichmentComposition).toContain(
+      "buildToolBroker({ sourcePolicyReader: input.sourcePolicyReader, paidLedger: input.costLedger as never, budgetStore: input.budgetStore, prisma: input.prisma, ...(ports ? { contactEnrichment: ports } : {}) })",
     );
     for (const statement of [
       "gateway.paidLedger = costLedger;",

@@ -15,6 +15,7 @@ import { parseArtifactReference } from "../../durable-results/artifact/artifact-
 import { isCanonicalArtifactUuid } from "../../durable-results/artifact/artifact.types";
 import { isTypedProjectionSchema } from "../../durable-results/durable-result-strategy";
 import { CONTACT_EMAIL_VERIFICATION_SCHEMAS } from "../../durable-results/contact-email-verification-projections";
+import { ExecutionControlError } from "../../execution-budget/execution-control-error";
 import { assertSupportedEnrichmentSlot } from "./enrichment-call-plan";
 import { deepFreezeSafety, safetyDigest } from "./enrichment-safety.contract";
 import type { SettledEnrichmentStepReference } from "./enrichment-safety.contract";
@@ -465,7 +466,7 @@ export class EnrichmentResultReader {
         receipt.resultDigest !== binding.expectedResultDigest) ||
       receipt.usage.upperBoundMicrousd !== step.quoteMicrousd
     )
-      throw new Error("DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH");
+      throw new ExecutionControlError("DURABLE_EXECUTION_RECEIPT_LEDGER_MISMATCH");
     return receipt;
   }
   private reference(
