@@ -1,33 +1,35 @@
-import { createHash } from 'node:crypto';
+import { createHash } from "node:crypto";
 import {
   parseArtifactExpectedFacts,
   type ArtifactExpectedFacts,
-} from './artifact-expected-facts';
+} from "./artifact-expected-facts";
 import type {
   ArtifactMaterializer,
   GenericOperationArtifactManifest,
-} from './artifact.types';
+} from "./artifact.types";
 import {
   GenericOperationArtifactError,
   invalidGenericOperationArtifact,
-} from './artifact.types';
-import { parseGenericOperationArtifactManifest } from './generic-operation-artifact.repository';
+} from "./artifact.types";
+import { parseGenericOperationArtifactManifest } from "./generic-operation-artifact.repository";
 
 export const REQUIRED_ARTIFACT_RESULT_SCHEMAS = Object.freeze([
-  'sanctions-download/v1',
-  'http-get/v1',
-  'crawl4ai-fetch/v1',
-  'crawl4ai-render/v1',
+  "sanctions-download/v1",
+  "http-get/v1",
+  "crawl4ai-fetch/v1",
+  "crawl4ai-render/v1",
+  "contact-email-find-hunter/v1",
 ] as const);
 
 export type ArtifactResultSchema =
   (typeof REQUIRED_ARTIFACT_RESULT_SCHEMAS)[number];
 
 export const ARTIFACT_RESULT_PRODUCERS = Object.freeze({
-  'crawl4ai-fetch/v1': 'crawl4ai.fetch',
-  'crawl4ai-render/v1': 'crawl4ai.render',
-  'http-get/v1': 'http.get',
-  'sanctions-download/v1': 'sanctions.download',
+  "crawl4ai-fetch/v1": "crawl4ai.fetch",
+  "crawl4ai-render/v1": "crawl4ai.render",
+  "http-get/v1": "http.get",
+  "sanctions-download/v1": "sanctions.download",
+  "contact-email-find-hunter/v1": "contact_email.find.hunter",
 } as const satisfies Record<ArtifactResultSchema, string>);
 
 export function artifactProducerIdForResultSchema(
@@ -37,7 +39,7 @@ export function artifactProducerIdForResultSchema(
 }
 
 const REQUIRED_SCHEMA_SET = new Set<string>(REQUIRED_ARTIFACT_RESULT_SCHEMAS);
-const MATERIALIZER_KEYS = new Set(['resultSchema', 'materialize']);
+const MATERIALIZER_KEYS = new Set(["resultSchema", "materialize"]);
 const MAX_STREAM_CHUNKS = 65_536;
 
 export interface ArtifactPayloadContract {
@@ -55,7 +57,7 @@ function isClosedMaterializer(
 ): value is ArtifactMaterializer<unknown> {
   try {
     if (
-      typeof value !== 'object' ||
+      typeof value !== "object" ||
       value === null ||
       Array.isArray(value) ||
       Object.getPrototypeOf(value) !== Object.prototype
@@ -65,7 +67,7 @@ function isClosedMaterializer(
     const keys = Reflect.ownKeys(value);
     if (
       keys.length !== MATERIALIZER_KEYS.size ||
-      keys.some((key) => typeof key !== 'string' || !MATERIALIZER_KEYS.has(key))
+      keys.some((key) => typeof key !== "string" || !MATERIALIZER_KEYS.has(key))
     ) {
       return false;
     }
@@ -73,8 +75,8 @@ function isClosedMaterializer(
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
       return Boolean(
         descriptor?.enumerable &&
-          Object.hasOwn(descriptor, 'value') &&
-          (key !== 'materialize' || typeof descriptor.value === 'function'),
+        Object.hasOwn(descriptor, "value") &&
+        (key !== "materialize" || typeof descriptor.value === "function"),
       );
     });
   } catch {
@@ -135,7 +137,8 @@ export class ArtifactMaterializerRegistry {
     const materializer = this.#materializers.get(resultSchema);
     if (!materializer) return invalid();
     const parsedFacts: ArtifactExpectedFacts | undefined =
-      resultSchema === 'sanctions-download/v1'
+      resultSchema === "sanctions-download/v1" ||
+      resultSchema === "contact-email-find-hunter/v1"
         ? expectedFacts === undefined
           ? undefined
           : invalid()
@@ -171,8 +174,8 @@ export async function readBoundedArtifactUtf8(
       return invalid();
     }
 
-    const decoder = new TextDecoder('utf-8', { fatal: true });
-    const hash = createHash('sha256');
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    const hash = createHash("sha256");
     const decoded: string[] = [];
     let size = 0n;
     let chunkCount = 0;
@@ -193,11 +196,11 @@ export async function readBoundedArtifactUtf8(
       decoded.push(decoder.decode(chunk, { stream: true }));
     }
     decoded.push(decoder.decode());
-    if (size !== declaredSize || hash.digest('hex') !== parsed.sha256) {
+    if (size !== declaredSize || hash.digest("hex") !== parsed.sha256) {
       return invalid();
     }
-    const text = decoded.join('');
-    if (text.includes('\0')) return invalid();
+    const text = decoded.join("");
+    if (text.includes("\0")) return invalid();
     return text;
   } catch (error) {
     if (error instanceof GenericOperationArtifactError) throw error;

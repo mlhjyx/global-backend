@@ -114,6 +114,7 @@ model Workspace {
   governedSubjectTombstoneAudits                 GovernedSubjectTombstoneAudit[]                 @relation("GovernedSubjectTombstoneAuditWorkspace")
   marketCandidateSets                           MarketCandidateSet[]
   marketCandidateGenerations                    MarketCandidateGeneration[]
+  contactEnrichmentExecutions                   ContactEnrichmentExecution[]
 
   @@map("workspace")
 }
@@ -246,6 +247,7 @@ model ToolBudgetAccount {
   authority                ExecutionBudgetAuthority? @relation(fields: [authorityId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "tool_budget_account_authority_fkey")
   toolOperationSubjects    ToolOperationSubject[]    @relation("ToolOperationSubjectAccount")
   governedSubjectRelations GovernedSubjectRelation[] @relation("GovernedSubjectRelationAccount")
+  contactEnrichmentExecutions ContactEnrichmentExecution[]
 
   @@unique([scopeKey, accountKey], map: "tool_budget_account_scope_key")
   @@unique([scopeKey, id], map: "tool_budget_account_scope_id_key")
@@ -303,6 +305,7 @@ model ExecutionBudgetAuthority {
   toolOperationSubjects    ToolOperationSubject[]               @relation("ToolOperationSubjectAuthority")
   governedSubjectRelations GovernedSubjectRelation[]            @relation("GovernedSubjectRelationAuthority")
   platformEgressAttempts   PlatformEgressAttempt[]
+  contactEnrichmentExecutions ContactEnrichmentExecution[]
 
   @@unique([issuer, jti], map: "execution_budget_authority_issuer_jti_key")
   @@unique([scopeKey, id], map: "execution_budget_authority_scope_id_key")
@@ -4834,4 +4837,81 @@ model ManufacturerNetworkProbe {
  authority ExecutionBudgetAuthority @relation(fields:[authorityId],references:[id],onDelete:Cascade,onUpdate:NoAction)
  @@id([workspaceId,companyId,runId,phase])
  @@map("manufacturer_network_probe")
+}
+
+/// 联系人补强安全首片执行头：业务索引，不持有余额/花费；唯一费用事实在原 tool_budget_* 账本。
+/// FORCE RLS、列级 UPDATE 授权、复合 scoped FK 与 HTTP/run 明确 nullable 唯一身份都在 SQL 迁移
+/// 20261123074206 中；company 列级 SET NULL 与部分唯一索引为 SQL-only 结构（漂移基线登记）。
+model ContactEnrichmentExecution {
+  id                     String    @id @db.Uuid
+  workspaceId            String    @map("workspace_id") @db.Uuid
+  companyId              String?   @map("company_id") @db.Uuid
+  entrypoint             String    @db.VarChar(20)
+  businessRunId          String?   @map("business_run_id") @db.Uuid
+  authorityId            String    @map("authority_id") @db.Uuid
+  accountId              String    @map("account_id") @db.Uuid
+  generation             Int
+  requestSha256          String    @map("request_sha256") @db.Char(64)
+  admissionRequestSha256 String    @map("admission_request_sha256") @db.Char(64)
+  operationRef           String    @map("operation_ref") @db.Char(64)
+  protocolVersion        Int       @map("protocol_version") @db.SmallInt
+  planSha256             String    @map("plan_sha256") @db.Char(64)
+  frozenLimits           Json      @map("frozen_limits")
+  targetSnapshot         Json      @map("target_snapshot")
+  status                 String    @db.VarChar(20)
+  qualityCoverage        String    @map("quality_coverage") @db.VarChar(30)
+  resultRevision         Int       @default(1) @map("result_revision")
+  resultSnapshot         Json?     @map("result_snapshot")
+  scopeKey               String    @map("scope_key") @db.VarChar(200)
+  createdAt              DateTime  @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz
+  finalizedAt            DateTime? @map("finalized_at") @db.Timestamptz
+
+  workspace Workspace                @relation(fields: [workspaceId], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "contact_enrichment_execution_workspace_fkey")
+  authority ExecutionBudgetAuthority @relation(fields: [scopeKey, authorityId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "contact_enrichment_execution_authority_scope_fkey")
+  account   ToolBudgetAccount        @relation(fields: [scopeKey, accountId], references: [scopeKey, id], onDelete: NoAction, onUpdate: NoAction, map: "contact_enrichment_execution_account_scope_fkey")
+  steps     ContactEnrichmentExecutionStep[]
+
+  @@unique([workspaceId, id], map: "contact_enrichment_execution_workspace_id_id_key")
+  @@unique([workspaceId, operationRef], map: "contact_enrichment_execution_workspace_operation_ref_key")
+  @@index([workspaceId, companyId, createdAt, id], map: "contact_enrichment_execution_list_idx")
+  @@map("contact_enrichment_execution")
+}
+
+/// 每个收费/验证 slot 的持久索引；operation_key/budget_operation_id 指向原账本，不复制费用算法。
+/// contact 列级 SET NULL、operation 可选复合 FK 与两项部分唯一索引为 SQL-only 结构（漂移基线登记）。
+model ContactEnrichmentExecutionStep {
+  id                String    @id @db.Uuid
+  workspaceId       String    @map("workspace_id") @db.Uuid
+  scopeKey          String    @map("scope_key") @db.VarChar(200)
+  executionId       String    @map("execution_id") @db.Uuid
+  contactId         String?   @map("contact_id") @db.Uuid
+  contactOrdinal    Int       @map("contact_ordinal")
+  slotOrdinal       Int       @map("slot_ordinal")
+  slotKey           String    @map("slot_key") @db.VarChar(256)
+  phase             String    @db.VarChar(10)
+  provider          String    @db.VarChar(256)
+  toolId            String    @map("tool_id") @db.VarChar(256)
+  toolVersion       String    @map("tool_version") @db.VarChar(256)
+  quoteMicrousd     BigInt    @map("quote_microusd")
+  pricingVersion    String    @map("pricing_version") @db.VarChar(256)
+  dependsOnSlotKey  String?   @map("depends_on_slot_key") @db.VarChar(256)
+  inputFingerprint  String?   @map("input_fingerprint") @db.Char(64)
+  operationKey      String?   @map("operation_key") @db.VarChar(256)
+  budgetOperationId String?   @map("budget_operation_id") @db.Uuid
+  candidateRef      Json?     @map("candidate_ref")
+  revision          Int
+  dispatchPhase     String    @map("dispatch_phase") @db.VarChar(30)
+  domainState       String    @map("domain_state") @db.VarChar(20)
+  reason            String?   @db.VarChar(64)
+  resultDigest      String?   @map("result_digest") @db.Char(64)
+  receipt           Json?
+  artifactReference Json?     @map("artifact_reference")
+  createdAt         DateTime  @default(dbgenerated("clock_timestamp()")) @map("created_at") @db.Timestamptz
+
+  execution ContactEnrichmentExecution @relation(fields: [workspaceId, executionId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Cascade, map: "contact_enrichment_execution_step_execution_fkey")
+
+  @@unique([executionId, slotOrdinal], map: "contact_enrichment_execution_step_execution_slot_ordinal_key")
+  @@unique([executionId, slotKey], map: "contact_enrichment_execution_step_execution_slot_key_key")
+  @@index([workspaceId, executionId], map: "contact_enrichment_execution_step_workspace_execution_idx")
+  @@map("contact_enrichment_execution_step")
 }

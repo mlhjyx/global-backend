@@ -1,31 +1,37 @@
-import { createHash } from 'node:crypto';
-import type { Prisma } from '@prisma/client';
-import { sanitizeEvidenceUrl } from '../../site-builder/agents/evidence-ref';
-import { normalizeArtifactPageText } from './artifact-page-text';
-import type { BudgetReservation } from '../../tools/budget-store';
+import { observedToolMicrousd } from "../../tools/tool-cost-microusd";
+import {
+  parseContactEmailFindPayload,
+  serializeContactEmailFindPayload,
+} from "./materializers/contact-email-find.materializer";
+import { createHash } from "node:crypto";
+import type { Prisma } from "@prisma/client";
+import { sanitizeEvidenceUrl } from "../../site-builder/agents/evidence-ref";
+import { normalizeArtifactPageText } from "./artifact-page-text";
+import type { BudgetReservation } from "../../tools/budget-store";
 import type {
   ArtifactExecutionAdmission,
   ArtifactExecutionPort,
   ArtifactSubjectRef,
-} from '../../tools/artifact-execution-port';
-import type { Tool, ToolResult } from '../../tools/tool-contract';
-import { parseArtifactExpectedFacts } from './artifact-expected-facts';
-import type { ArtifactMaterializerRegistry } from './artifact-materializer.registry';
-import type { ArtifactSubjectBindingContract } from './artifact-subject-binding.contract';
+} from "../../tools/artifact-execution-port";
+import type { Tool, ToolResult } from "../../tools/tool-contract";
+import { parseArtifactExpectedFacts } from "./artifact-expected-facts";
+import type { ArtifactMaterializerRegistry } from "./artifact-materializer.registry";
+import type { ArtifactSubjectBindingContract } from "./artifact-subject-binding.contract";
 import {
   GenericOperationArtifactError,
   invalidGenericOperationArtifact,
   isCanonicalArtifactUuid,
-} from './artifact.types';
-import type { GenericOperationArtifactService } from './generic-operation-artifact.service';
-import type { GenericOperationArtifactReference } from './artifact.types';
-import type { DurableExecutionReceipt } from '../durable-execution-receipt';
-import { ArtifactStorageError } from './generic-operation-artifact.store';
+} from "./artifact.types";
+import type { GenericOperationArtifactService } from "./generic-operation-artifact.service";
+import type { GenericOperationArtifactReference } from "./artifact.types";
+import type { DurableExecutionReceipt } from "../durable-execution-receipt";
+import { ArtifactStorageError } from "./generic-operation-artifact.store";
 
 type WorkspaceArtifactSchema =
-  | 'crawl4ai-fetch/v1'
-  | 'crawl4ai-render/v1'
-  | 'http-get/v1';
+  | "crawl4ai-fetch/v1"
+  | "crawl4ai-render/v1"
+  | "http-get/v1"
+  | "contact-email-find-hunter/v1";
 
 interface ArtifactPayload {
   readonly body: string;
@@ -40,34 +46,36 @@ export interface GenericOperationArtifactExecutionDeps {
     workspaceId: string,
     fn: (tx: Prisma.TransactionClient) => Promise<T>,
   ) => Promise<T>;
-  readonly binding: Pick<ArtifactSubjectBindingContract, 'resolveForExecution'>;
-  readonly service: Pick<GenericOperationArtifactService, 'persist' | 'readVerified'>;
-  readonly materializers: Pick<ArtifactMaterializerRegistry, 'materialize'>;
+  readonly binding: Pick<ArtifactSubjectBindingContract, "resolveForExecution">;
+  readonly service: Pick<
+    GenericOperationArtifactService,
+    "persist" | "readVerified"
+  >;
+  readonly materializers: Pick<ArtifactMaterializerRegistry, "materialize">;
   readonly now?: () => Date;
 }
 
 const invalid = invalidGenericOperationArtifact;
-const MICROUSD_PER_CENT = 10_000n;
 
 function shortHash(value: string): string {
-  return createHash('sha256').update(value).digest('hex').slice(0, 24);
+  return createHash("sha256").update(value).digest("hex").slice(0, 24);
 }
 
 function record(value: unknown): Readonly<Record<string, unknown>> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
+  return value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : invalid();
 }
 
 function stringField(value: unknown): string {
-  return typeof value === 'string' ? value : invalid();
+  return typeof value === "string" ? value : invalid();
 }
 
 function isPersistableUrl(url: string): boolean {
   try {
-    parseArtifactExpectedFacts('crawl4ai-fetch/v1', {
+    parseArtifactExpectedFacts("crawl4ai-fetch/v1", {
       sanitizedUrl: url,
-      contentHash: '0'.repeat(24),
+      contentHash: "0".repeat(24),
     });
     return true;
   } catch {
@@ -81,11 +89,13 @@ function isPersistableUrl(url: string): boolean {
  * URL cannot, the site origin is the truthful company-level provenance.
  */
 function persistableUrl(raw: unknown): string {
-  const sanitized = sanitizeEvidenceUrl(typeof raw === 'string' ? raw : undefined);
+  const sanitized = sanitizeEvidenceUrl(
+    typeof raw === "string" ? raw : undefined,
+  );
   if (!sanitized) return invalid();
   const url = new URL(sanitized);
-  url.search = '';
-  url.hash = '';
+  url.search = "";
+  url.hash = "";
   const candidates = [url.toString(), `${url.protocol}//${url.hostname}/`];
   return candidates.find(isPersistableUrl) ?? invalid();
 }
@@ -101,7 +111,7 @@ function crawl4aiFetchPayload(input: unknown, data: unknown): ArtifactPayload {
   const contentHash = shortHash(text);
   return {
     body: text,
-    mediaType: 'text/markdown',
+    mediaType: "text/markdown",
     expectedFacts: { sanitizedUrl: url, contentHash },
     data: { url, text, contentHash },
   };
@@ -112,17 +122,17 @@ function crawl4aiRenderPayload(input: unknown, data: unknown): ArtifactPayload {
   const url = persistableUrl(source.url ?? record(input).url);
   if (source.robotsBlocked === true) {
     return {
-      body: '',
-      mediaType: 'text/html',
+      body: "",
+      mediaType: "text/html",
       expectedFacts: { sanitizedUrl: url, blocked: true },
-      data: { url, html: '', robotsBlocked: true },
+      data: { url, html: "", robotsBlocked: true },
     };
   }
   const html = stringField(source.html);
   if (!isHtmlBody(html)) return invalid();
   return {
     body: html,
-    mediaType: 'text/html',
+    mediaType: "text/html",
     expectedFacts: { sanitizedUrl: url, blocked: false },
     data: { url, html },
   };
@@ -130,37 +140,77 @@ function crawl4aiRenderPayload(input: unknown, data: unknown): ArtifactPayload {
 
 function httpGetPayload(input: unknown, data: unknown): ArtifactPayload {
   const source = record(data);
-  if (typeof source.blocked === 'string') {
+  if (typeof source.blocked === "string") {
     return {
-      body: '',
-      mediaType: 'text/plain',
-      expectedFacts: { status: 0, ok: false, sanitizedUrl: null, blocked: source.blocked },
-      data: { status: 0, ok: false, mediaType: 'text/plain', text: '', blocked: source.blocked },
+      body: "",
+      mediaType: "text/plain",
+      expectedFacts: {
+        status: 0,
+        ok: false,
+        sanitizedUrl: null,
+        blocked: source.blocked,
+      },
+      data: {
+        status: 0,
+        ok: false,
+        mediaType: "text/plain",
+        text: "",
+        blocked: source.blocked,
+      },
     };
   }
   const status = source.status;
-  if (typeof status !== 'number' || typeof source.ok !== 'boolean') return invalid();
+  if (typeof status !== "number" || typeof source.ok !== "boolean")
+    return invalid();
   const url = persistableUrl(source.finalUrl ?? record(input).url);
   const text = stringField(source.text);
   return {
     body: text,
-    mediaType: 'text/plain',
+    mediaType: "text/plain",
     expectedFacts: { status, ok: source.ok, sanitizedUrl: url, blocked: null },
-    data: { status, ok: source.ok, mediaType: 'text/plain', text, finalUrl: url },
+    data: {
+      status,
+      ok: source.ok,
+      mediaType: "text/plain",
+      text,
+      finalUrl: url,
+    },
+  };
+}
+
+function contactEmailFindPayload(
+  _input: unknown,
+  value: unknown,
+): ArtifactPayload {
+  const data = parseContactEmailFindPayload(value);
+  return {
+    body: serializeContactEmailFindPayload(data),
+    mediaType: "application/octet-stream",
+    expectedFacts: undefined,
+    data,
   };
 }
 
 const PAYLOADS: Readonly<
-  Record<WorkspaceArtifactSchema, (input: unknown, data: unknown) => ArtifactPayload>
+  Record<
+    WorkspaceArtifactSchema,
+    (input: unknown, data: unknown) => ArtifactPayload
+  >
 > = Object.freeze({
-  'crawl4ai-fetch/v1': crawl4aiFetchPayload,
-  'crawl4ai-render/v1': crawl4aiRenderPayload,
-  'http-get/v1': httpGetPayload,
+  "crawl4ai-fetch/v1": crawl4aiFetchPayload,
+  "crawl4ai-render/v1": crawl4aiRenderPayload,
+  "http-get/v1": httpGetPayload,
+  "contact-email-find-hunter/v1": contactEmailFindPayload,
 });
 
-function workspaceSchema(tool: Tool<unknown, unknown>): WorkspaceArtifactSchema {
+function workspaceSchema(
+  tool: Tool<unknown, unknown>,
+): WorkspaceArtifactSchema {
   const strategy = tool.durableResultStrategy;
-  if (strategy.kind !== 'artifact_reference' || !Object.hasOwn(PAYLOADS, strategy.schema)) {
+  if (
+    strategy.kind !== "artifact_reference" ||
+    !Object.hasOwn(PAYLOADS, strategy.schema)
+  ) {
     return invalid();
   }
   return strategy.schema as WorkspaceArtifactSchema;
@@ -184,7 +234,7 @@ function failureLabel(error: unknown): string {
   ) {
     return `${error.name}:${error.code}`;
   }
-  return error instanceof Error ? error.name : 'unknown';
+  return error instanceof Error ? error.name : "unknown";
 }
 
 /**
@@ -207,17 +257,20 @@ export class GenericOperationArtifactExecution implements ArtifactExecutionPort 
     const decision = await this.deps.withWorkspace(input.workspaceId, (tx) =>
       this.deps.binding.resolveForExecution(tx, {
         resultSchema: input.resultSchema,
-        scopeKind: 'workspace',
+        scopeKind: "workspace",
         workspaceId: input.workspaceId,
         subjectRef: input.subjectRef,
       }),
     );
-    if (decision.status === 'BOUND') {
-      return { status: 'BOUND', subjectRef: decision.subjectRef };
+    if (decision.status === "BOUND") {
+      return { status: "BOUND", subjectRef: decision.subjectRef };
     }
     return {
-      status: 'DENIED',
-      reason: decision.status === 'SUBJECT_BINDING_HOLD' ? 'SUBJECT_BINDING_HOLD' : decision.reason,
+      status: "DENIED",
+      reason:
+        decision.status === "SUBJECT_BINDING_HOLD"
+          ? "SUBJECT_BINDING_HOLD"
+          : decision.reason,
     };
   }
 
@@ -230,15 +283,45 @@ export class GenericOperationArtifactExecution implements ArtifactExecutionPort 
   }): Promise<ToolResult<O>> {
     const schema = workspaceSchema(input.tool as Tool<unknown, unknown>);
     const strategy = input.tool.durableResultStrategy as Extract<
-      Tool['durableResultStrategy'],
-      { kind: 'artifact_reference' }
+      Tool["durableResultStrategy"],
+      { kind: "artifact_reference" }
     >;
     const authorityId = authorityOf(input.reservation);
     const costCents = input.result.costCents;
-    if (!Number.isSafeInteger(costCents) || costCents < 0) return invalid();
+    let observedMicrousd: bigint;
+    try {
+      observedMicrousd = observedToolMicrousd(input.result);
+    } catch {
+      return invalid();
+    }
+    if (schema === "contact-email-find-hunter/v1") {
+      if (
+        input.tool.id !== "contact_email.find.hunter" ||
+        input.subjectRef.subjectType !== "contact" ||
+        typeof input.result.costMicrousd !== "string" ||
+        observedMicrousd > 150000n ||
+        observedMicrousd !== input.reservation.estimatedMicrousd ||
+        !Number.isFinite(costCents) ||
+        Object.is(costCents, -0) ||
+        costCents !== Number(observedMicrousd) / 10000 ||
+        strategy.privacyClass !== "PERSONAL_DATA" ||
+        strategy.maxBytes > 16384 ||
+        strategy.ttlSeconds > 86400
+      )
+        return invalid();
+    } else if (
+      "costMicrousd" in input.result ||
+      !Number.isSafeInteger(costCents) ||
+      costCents < 0
+    )
+      return invalid();
     const payload = PAYLOADS[schema](input.input, input.result.data);
-    const expiresAt = new Date(this.now().getTime() + strategy.ttlSeconds * 1_000);
-    let settled: Awaited<ReturnType<GenericOperationArtifactExecutionDeps['service']['persist']>>;
+    const expiresAt = new Date(
+      this.now().getTime() + strategy.ttlSeconds * 1_000,
+    );
+    let settled: Awaited<
+      ReturnType<GenericOperationArtifactExecutionDeps["service"]["persist"]>
+    >;
     try {
       settled = await this.deps.service.persist({
         reservation: input.reservation,
@@ -249,7 +332,7 @@ export class GenericOperationArtifactExecution implements ArtifactExecutionPort 
         privacyClass: strategy.privacyClass,
         subjectRef: input.subjectRef,
         expiresAt: expiresAt.toISOString(),
-        observedMicrousd: BigInt(costCents) * MICROUSD_PER_CENT,
+        observedMicrousd,
         expectedFacts: payload.expectedFacts,
       });
     } catch (error) {
@@ -261,12 +344,21 @@ export class GenericOperationArtifactExecution implements ArtifactExecutionPort 
       );
       throw error;
     }
-    if (schema === 'crawl4ai-fetch/v1') {
-      return this.verifiedResult<O>(input.reservation, schema, settled.reference, costCents, settled.durableReceipt);
+    if (schema === "crawl4ai-fetch/v1") {
+      return this.verifiedResult<O>(
+        input.reservation,
+        schema,
+        settled.reference,
+        costCents,
+        settled.durableReceipt,
+      );
     }
     return {
       data: payload.data as O,
       costCents,
+      ...(schema === "contact-email-find-hunter/v1"
+        ? { costMicrousd: observedMicrousd.toString() }
+        : {}),
       durableReceipt: settled.durableReceipt,
     };
   }
@@ -283,19 +375,36 @@ export class GenericOperationArtifactExecution implements ArtifactExecutionPort 
     durableReceipt: DurableExecutionReceipt,
   ): Promise<ToolResult<O>> {
     const verified = await this.deps.service.readVerified({
-      scopeKind: 'workspace', workspaceId: reservation.workspaceId,
-      authorityId: authorityOf(reservation), reference,
+      scopeKind: "workspace",
+      workspaceId: reservation.workspaceId,
+      authorityId: authorityOf(reservation),
+      reference,
     });
     const data = await this.deps.materializers.materialize<O>(
-      schema, verified.body, verified.manifest, verified.expectedFacts,
+      schema,
+      verified.body,
+      verified.manifest,
+      verified.expectedFacts,
     );
-    const page = schema === 'crawl4ai-fetch/v1' ? record(data) : undefined;
+    const page = schema === "crawl4ai-fetch/v1" ? record(data) : undefined;
     return {
-      data, costCents, durableReceipt,
-      ...(page ? { provenance: {
-        sourceUrl: stringField(page.url), fetchedAt: verified.manifest.createdAt, artifactExpiresAt: verified.manifest.expiresAt,
-        contentHash: stringField(page.contentHash), parserVersion: 'artifact/crawl4ai-fetch/v1',
-      } } : {}),
+      data,
+      costCents,
+      durableReceipt,
+      ...(schema === "contact-email-find-hunter/v1"
+        ? { costMicrousd: "0" }
+        : {}),
+      ...(page
+        ? {
+            provenance: {
+              sourceUrl: stringField(page.url),
+              fetchedAt: verified.manifest.createdAt,
+              artifactExpiresAt: verified.manifest.expiresAt,
+              contentHash: stringField(page.contentHash),
+              parserVersion: "artifact/crawl4ai-fetch/v1",
+            },
+          }
+        : {}),
     };
   }
 
@@ -306,7 +415,7 @@ export class GenericOperationArtifactExecution implements ArtifactExecutionPort 
     const schema = workspaceSchema(input.tool as Tool<unknown, unknown>);
     const replay = input.reservation.replayResult;
     if (
-      replay?.resultStrategy !== 'artifact_reference' ||
+      replay?.resultStrategy !== "artifact_reference" ||
       replay.reference.resultSchema !== schema ||
       !input.reservation.receipt
     ) {
@@ -314,7 +423,11 @@ export class GenericOperationArtifactExecution implements ArtifactExecutionPort 
     }
     try {
       return await this.verifiedResult<O>(
-        input.reservation, schema, replay.reference, 0, input.reservation.receipt,
+        input.reservation,
+        schema,
+        replay.reference,
+        0,
+        input.reservation.receipt,
       );
     } catch (error) {
       // The broker turns any replay failure into an operation it cannot replay

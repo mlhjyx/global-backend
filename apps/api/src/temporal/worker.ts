@@ -73,10 +73,8 @@ import { ImagePipelineService } from "../site-builder/image-pipeline.service";
 import { IsolatedImagePipelineRunner } from "../site-builder/image-pipeline-runner";
 import { seedJurisdictionPolicy } from "../compliance/jurisdiction-policy.seed";
 import { DiscoveryProviderRegistry } from "../discovery/provider.registry";
-import {
-  buildToolBroker,
-  sourcePolicyReaderFrom,
-} from "../tools/tool-broker.factory";
+import { sourcePolicyReaderFrom } from "../tools/tool-broker.factory";
+import { createWorkerContactEnrichmentSafety } from "../enrichment/safety/contact-enrichment-safety.composition";
 import { TaxonomyResolver } from "../discovery/taxonomy-resolver";
 import { UNDERSTANDING_TASK_QUEUE } from "./understanding.constants";
 import { SiteBuildCostLedger } from "../site-builder/site-build-cost-ledger";
@@ -531,12 +529,8 @@ async function main(): Promise<void> {
   // 收口②：**唯一执行闸门**——全部原始出网（搜索/抓取/结构化 API/SMTP）经同一个 ToolBroker
   // （allowedTools 白名单 + source_policy fail-closed + 预算 reserve-settle + 限流 + Trace）。
   const sourcePolicyReader = sourcePolicyReaderFrom(prisma);
-  const broker = buildToolBroker({
-    sourcePolicyReader,
-    paidLedger: costLedger,
-    budgetStore,
-    prisma,
-  });
+  const safetyComposition = await createWorkerContactEnrichmentSafety({ prisma, budgetStore, costLedger, sourcePolicyReader });
+  const broker = safetyComposition.broker;
   const taxonomy = new TaxonomyResolver(
     prisma,
     gateway,
@@ -676,6 +670,7 @@ async function main(): Promise<void> {
         runtimeTelemetry: runtimeTelemetry.telemetry,
         budgetStore,
         skills: skillResolver,
+        contactEnrichmentSafety: safetyComposition.service,
       }),
       ...createRawSourceActivities({ prisma }),
       ...createQualifyActivities({ prisma, sanctionsScreening }),

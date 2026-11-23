@@ -19,6 +19,7 @@ import {
 } from '../compliance/deletion.types';
 import { lockWorkspaceSuppressionPolicy } from '../discovery/suppression-policy-lock';
 import { GenericOperationArtifactSubjectRepository } from '../durable-results/artifact/generic-operation-artifact-subject.repository';
+import { redactEnrichmentSubject } from '../enrichment/safety/enrichment-execution.repository';
 import { PersonalArtifactCleanupEnqueuer } from '../durable-results/artifact/personal-artifact-cleanup.repository';
 
 /**
@@ -73,6 +74,15 @@ export function createDeletionActivities(deps: { prisma: PrismaService }) {
         // it never exposes another workspace's subject/artifact identifiers.
         await artifactCleanup.enqueue(tx, {
           workspaceId: input.workspaceId,
+          deletionRequestId: input.deletionRequestId,
+        });
+        // Existing same-transaction DSR path: clear enrichment head target snapshots and step
+        // live personal associations. Original ledger/receipt audit, budget operation IDs and
+        // UNKNOWN holds are retained; never a refund or physical object deletion claim.
+        await redactEnrichmentSubject(tx, {
+          workspaceId: input.workspaceId,
+          subjectType: input.subjectType as 'contact' | 'company',
+          subjectId: input.subjectId,
           deletionRequestId: input.deletionRequestId,
         });
         // company 主体：**冻结即标 SUPPRESSED**（不等到 eraseSubject）——联系人发现/存量 sweep 以 company.status

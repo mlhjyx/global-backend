@@ -7,7 +7,11 @@ import {
   TestBudgetExceededError as BudgetExceededError,
 } from "@global/test-support";
 import { RateLimiter } from "./rate-limiter";
-import { BudgetOperationReplayError, BudgetStoreUnavailableError, type BudgetStore } from "./budget-store";
+import {
+  BudgetOperationReplayError,
+  BudgetStoreUnavailableError,
+  type BudgetStore,
+} from "./budget-store";
 import { projectGenericOperationResult } from "./generic-operation-projection";
 import { RateLimitStoreUnavailableError } from "./redis-rate-limit-store";
 import { Tool } from "./tool-contract";
@@ -924,7 +928,9 @@ describe("ToolBroker — a failure before any physical wire releases the reserva
     tool.physicalWireObservation = "before_each_wire";
     tool.execute = async (_input, ctx) => {
       if (failure === "after-wire") await ctx.beforePhysicalWire!();
-      throw new EgressBlockedError(failure === "before-wire" ? "dns_failed" : "response_too_large");
+      throw new EgressBlockedError(
+        failure === "before-wire" ? "dns_failed" : "response_too_large",
+      );
     };
     return tool;
   }
@@ -1026,7 +1032,10 @@ describe("ToolBroker — a failure before any physical wire releases the reserva
 
   it("releases a Platform tool that failed before its dispatcher sent anything", async () => {
     const budgetStore = platformBudget();
-    const dispatch = vi.fn(async <T,>(_operation: unknown, send: () => Promise<T>): Promise<T> => send());
+    const dispatch = vi.fn(
+      async <T>(_operation: unknown, send: () => Promise<T>): Promise<T> =>
+        send(),
+    );
     const { broker } = makeBroker(
       platformTool(async () => {
         throw new EgressBlockedError("dns_failed");
@@ -1035,11 +1044,15 @@ describe("ToolBroker — a failure before any physical wire releases the reserva
     );
 
     await expect(
-      broker.invoke("tradefair.algolia", {}, {
-        workspaceId: "platform",
-        runId: "run-1",
-        platformEgress: { authorizeAndDispatch: dispatch },
-      }),
+      broker.invoke(
+        "tradefair.algolia",
+        {},
+        {
+          workspaceId: "platform",
+          runId: "run-1",
+          platformEgress: { authorizeAndDispatch: dispatch },
+        },
+      ),
     ).rejects.toBeInstanceOf(EgressBlockedError);
     expect(dispatch).not.toHaveBeenCalled();
     expect(budgetStore.release).toHaveBeenCalledOnce();
@@ -1048,21 +1061,31 @@ describe("ToolBroker — a failure before any physical wire releases the reserva
 
   it("keeps a Platform reservation once a wire was sent", async () => {
     const budgetStore = platformBudget();
-    const dispatch = vi.fn(async <T,>(_operation: unknown, send: () => Promise<T>): Promise<T> => send());
+    const dispatch = vi.fn(
+      async <T>(_operation: unknown, send: () => Promise<T>): Promise<T> =>
+        send(),
+    );
     const { broker } = makeBroker(
       platformTool(async (_input, ctx) => {
-        await ctx.dispatchPhysicalWire!("tradefair.algolia.page", async () => "page");
+        await ctx.dispatchPhysicalWire!(
+          "tradefair.algolia.page",
+          async () => "page",
+        );
         throw new Error("algolia 503");
       }),
       { budgetStore: budgetStore as unknown as BudgetStore },
     );
 
     await expect(
-      broker.invoke("tradefair.algolia", {}, {
-        workspaceId: "platform",
-        runId: "run-1",
-        platformEgress: { authorizeAndDispatch: dispatch },
-      }),
+      broker.invoke(
+        "tradefair.algolia",
+        {},
+        {
+          workspaceId: "platform",
+          runId: "run-1",
+          platformEgress: { authorizeAndDispatch: dispatch },
+        },
+      ),
     ).rejects.toThrow("algolia 503");
     expect(dispatch).toHaveBeenCalledOnce();
     expect(budgetStore.release).not.toHaveBeenCalled();
@@ -1075,18 +1098,25 @@ describe("ToolBroker — a failure before any physical wire releases the reserva
     });
     const { broker } = makeBroker(
       platformTool(async (_input, ctx) => {
-        await ctx.dispatchPhysicalWire!("tradefair.algolia.page", async () => "page");
+        await ctx.dispatchPhysicalWire!(
+          "tradefair.algolia.page",
+          async () => "page",
+        );
         return { data: {}, costCents: 0 };
       }),
       { budgetStore: budgetStore as unknown as BudgetStore },
     );
 
     await expect(
-      broker.invoke("tradefair.algolia", {}, {
-        workspaceId: "platform",
-        runId: "run-1",
-        platformEgress: { authorizeAndDispatch: dispatch },
-      }),
+      broker.invoke(
+        "tradefair.algolia",
+        {},
+        {
+          workspaceId: "platform",
+          runId: "run-1",
+          platformEgress: { authorizeAndDispatch: dispatch },
+        },
+      ),
     ).rejects.toThrow("PLATFORM_EGRESS_PHYSICAL_WIRE_FAILED");
     expect(budgetStore.release).not.toHaveBeenCalled();
   });
@@ -1345,7 +1375,13 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
     artifactId: "2c3d6096-b924-4bc8-bb4f-8436efb37b07",
   };
 
-  function fetchTool(execute = vi.fn(async () => ({ url: "https://pumpen.example/", text: "Pumpen", contentHash: "x" }))) {
+  function fetchTool(
+    execute = vi.fn(async () => ({
+      url: "https://pumpen.example/",
+      text: "Pumpen",
+      contentHash: "x",
+    })),
+  ) {
     const tool = fakeTool("crawl4ai.fetch", 1, execute);
     tool.durableResultStrategy = {
       kind: "artifact_reference",
@@ -1358,20 +1394,25 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
     return { tool, execute };
   }
 
-  function harness(options: {
-    admission?: Awaited<ReturnType<ArtifactExecutionPort["admit"]>>;
-    replay?: boolean;
-    persistError?: Error;
-    schema?: string;
-    noPort?: boolean;
-    platform?: boolean;
-    toolId?: string;
-  } = {}) {
+  function harness(
+    options: {
+      admission?: Awaited<ReturnType<ArtifactExecutionPort["admit"]>>;
+      replay?: boolean;
+      persistError?: Error;
+      schema?: string;
+      noPort?: boolean;
+      platform?: boolean;
+      toolId?: string;
+    } = {},
+  ) {
     const { tool, execute } = fetchTool();
     if (options.toolId) tool.id = options.toolId;
     if (options.schema) {
       tool.durableResultStrategy = {
-        ...(tool.durableResultStrategy as Extract<Tool["durableResultStrategy"], { kind: "artifact_reference" }>),
+        ...(tool.durableResultStrategy as Extract<
+          Tool["durableResultStrategy"],
+          { kind: "artifact_reference" }
+        >),
         schema: options.schema,
       };
     }
@@ -1384,7 +1425,10 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
       authorityId: "42c863b9-7c7e-4d28-8678-60ef9a20219b",
     };
     const release = vi.fn(async () => ({
-      chargedMicrousd: 0n, observedMicrousd: 0n, capVariance: false, replay: false,
+      chargedMicrousd: 0n,
+      observedMicrousd: 0n,
+      capVariance: false,
+      replay: false,
     }));
     const settle = vi.fn();
     const markResultUnknown = vi.fn(async () => ({
@@ -1398,21 +1442,37 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
       markResultUnknown,
     } as unknown as BudgetStore;
     const durable = {
-      data: { url: "https://pumpen.example/", text: "Pumpen", contentHash: "abc" },
+      data: {
+        url: "https://pumpen.example/",
+        text: "Pumpen",
+        contentHash: "abc",
+      },
       costCents: 1,
       durableReceipt: RECEIPT,
     };
     const port = {
-      admit: vi.fn(async () => options.admission ?? { status: "BOUND" as const, subjectRef: subject }),
+      admit: vi.fn(
+        async () =>
+          options.admission ?? {
+            status: "BOUND" as const,
+            subjectRef: subject,
+          },
+      ),
       persist: vi.fn(async () => {
         if (options.persistError) throw options.persistError;
         return durable;
       }),
-      replay: vi.fn(async () => ({ data: durable.data, costCents: 0, durableReceipt: RECEIPT })),
+      replay: vi.fn(async () => ({
+        data: durable.data,
+        costCents: 0,
+        durableReceipt: RECEIPT,
+      })),
     };
     const { broker } = makeBroker(tool, {
       budgetStore,
-      ...(options.noPort ? {} : { artifactExecution: port as unknown as ArtifactExecutionPort }),
+      ...(options.noPort
+        ? {}
+        : { artifactExecution: port as unknown as ArtifactExecutionPort }),
     });
     return {
       broker,
@@ -1430,8 +1490,15 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
   it("keeps the hold when the caller supplies no subject, even with an artifact port", async () => {
     const { broker, execute, port, release, reservation } = harness();
     await expect(
-      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, { workspaceId: WORKSPACE, runId: "run" }),
-    ).rejects.toMatchObject({ name: "ToolPolicyDenied", reason: "GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD" });
+      broker.invoke(
+        "crawl4ai.fetch",
+        { url: "https://pumpen.example/" },
+        { workspaceId: WORKSPACE, runId: "run" },
+      ),
+    ).rejects.toMatchObject({
+      name: "ToolPolicyDenied",
+      reason: "GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD",
+    });
     expect(port.admit).not.toHaveBeenCalled();
     expect(release).toHaveBeenCalledWith(reservation);
     expect(execute).not.toHaveBeenCalled();
@@ -1440,8 +1507,15 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
   it("holds a subject-bound call when no artifact storage is composed", async () => {
     const { broker, execute, release } = harness({ noPort: true });
     await expect(
-      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, { workspaceId: WORKSPACE, runId: "run", artifactSubject: subject }),
-    ).rejects.toMatchObject({ name: "ToolPolicyDenied", reason: "GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE" });
+      broker.invoke(
+        "crawl4ai.fetch",
+        { url: "https://pumpen.example/" },
+        { workspaceId: WORKSPACE, runId: "run", artifactSubject: subject },
+      ),
+    ).rejects.toMatchObject({
+      name: "ToolPolicyDenied",
+      reason: "GENERIC_OPERATION_ARTIFACT_STORAGE_UNAVAILABLE",
+    });
     expect(release).toHaveBeenCalledOnce();
     expect(execute).not.toHaveBeenCalled();
   });
@@ -1449,31 +1523,58 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
   it.each([
     ["SUBJECT_TOMBSTONED", "GENERIC_OPERATION_ARTIFACT_SUBJECT_TOMBSTONED"],
     ["SUBJECT_SUPPRESSED", "GENERIC_OPERATION_ARTIFACT_SUBJECT_SUPPRESSED"],
-    ["SUBJECT_BINDING_INVALID", "GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_INVALID"],
+    [
+      "SUBJECT_BINDING_INVALID",
+      "GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_INVALID",
+    ],
     ["SUBJECT_BINDING_HOLD", "GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD"],
-  ] as const)("denies %s before the wire and releases the reservation", async (reason, denial) => {
-    const { broker, execute, release, reservation, port } = harness({ admission: { status: "DENIED", reason } });
-    await expect(
-      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, { workspaceId: WORKSPACE, runId: "run", artifactSubject: subject }),
-    ).rejects.toMatchObject({ name: "ToolPolicyDenied", reason: denial });
-    expect(port.admit).toHaveBeenCalledWith({ workspaceId: WORKSPACE, resultSchema: "crawl4ai-fetch/v1", subjectRef: subject });
-    expect(release).toHaveBeenCalledWith(reservation);
-    expect(execute).not.toHaveBeenCalled();
-    expect(port.persist).not.toHaveBeenCalled();
-  });
+  ] as const)(
+    "denies %s before the wire and releases the reservation",
+    async (reason, denial) => {
+      const { broker, execute, release, reservation, port } = harness({
+        admission: { status: "DENIED", reason },
+      });
+      await expect(
+        broker.invoke(
+          "crawl4ai.fetch",
+          { url: "https://pumpen.example/" },
+          { workspaceId: WORKSPACE, runId: "run", artifactSubject: subject },
+        ),
+      ).rejects.toMatchObject({ name: "ToolPolicyDenied", reason: denial });
+      expect(port.admit).toHaveBeenCalledWith({
+        workspaceId: WORKSPACE,
+        resultSchema: "crawl4ai-fetch/v1",
+        subjectRef: subject,
+      });
+      expect(release).toHaveBeenCalledWith(reservation);
+      expect(execute).not.toHaveBeenCalled();
+      expect(port.persist).not.toHaveBeenCalled();
+    },
+  );
 
   it("executes a bound call once and settles only through artifact persistence", async () => {
     const receipts: string[] = [];
-    const { broker, execute, port, settle, release, reservation, durable } = harness();
-    const result = await broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, {
-      workspaceId: WORKSPACE, runId: "run", artifactSubject: subject,
-      onDurableReceipt: (producer) => receipts.push(producer),
-    });
+    const { broker, execute, port, settle, release, reservation, durable } =
+      harness();
+    const result = await broker.invoke(
+      "crawl4ai.fetch",
+      { url: "https://pumpen.example/" },
+      {
+        workspaceId: WORKSPACE,
+        runId: "run",
+        artifactSubject: subject,
+        onDurableReceipt: (producer) => receipts.push(producer),
+      },
+    );
     expect(execute).toHaveBeenCalledOnce();
-    expect(port.persist).toHaveBeenCalledWith(expect.objectContaining({
-      reservation, subjectRef: subject, input: { url: "https://pumpen.example/" },
-      result: expect.objectContaining({ costCents: 1 }),
-    }));
+    expect(port.persist).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reservation,
+        subjectRef: subject,
+        input: { url: "https://pumpen.example/" },
+        result: expect.objectContaining({ costCents: 1 }),
+      }),
+    );
     expect(settle).not.toHaveBeenCalled();
     expect(release).not.toHaveBeenCalled();
     expect(result).toEqual(durable);
@@ -1482,7 +1583,11 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
 
   it("replays a settled artifact from storage without a wire or a release", async () => {
     const { broker, execute, port, release } = harness({ replay: true });
-    const result = await broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, { workspaceId: WORKSPACE, runId: "run", artifactSubject: subject });
+    const result = await broker.invoke(
+      "crawl4ai.fetch",
+      { url: "https://pumpen.example/" },
+      { workspaceId: WORKSPACE, runId: "run", artifactSubject: subject },
+    );
     expect(port.replay).toHaveBeenCalledOnce();
     expect(execute).not.toHaveBeenCalled();
     expect(release).not.toHaveBeenCalled();
@@ -1490,52 +1595,105 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
   });
 
   it("keeps the platform sanctions artifact held even when a subject is supplied", async () => {
-    const { broker, execute, port } = harness({ schema: "sanctions-download/v1" });
+    const { broker, execute, port } = harness({
+      schema: "sanctions-download/v1",
+    });
     await expect(
-      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, { workspaceId: WORKSPACE, runId: "run", artifactSubject: subject }),
-    ).rejects.toMatchObject({ reason: "GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD" });
+      broker.invoke(
+        "crawl4ai.fetch",
+        { url: "https://pumpen.example/" },
+        { workspaceId: WORKSPACE, runId: "run", artifactSubject: subject },
+      ),
+    ).rejects.toMatchObject({
+      reason: "GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD",
+    });
     expect(port.admit).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();
   });
 
   it("admits the subject after the limiter and crawl delay, immediately before the wire", async () => {
     const order: string[] = [];
-    const { tool, execute } = fetchTool(vi.fn(async () => {
-      order.push("execute");
-      return { url: "https://pumpen.example/", text: "Pumpen", contentHash: "x" };
-    }));
-    tool.rateLimit = { rps: 100, concurrency: 10, perDomainCrawlDelayMs: 2_000 };
-    const reservation = {
-      workspaceId: WORKSPACE, accountKey: "run", operationId: "1b3d6096-b924-4bc8-bb4f-8436efb37b07",
-      estimatedMicrousd: 10_000n, replay: false, authorityId: "42c863b9-7c7e-4d28-8678-60ef9a20219b",
+    const { tool, execute } = fetchTool(
+      vi.fn(async () => {
+        order.push("execute");
+        return {
+          url: "https://pumpen.example/",
+          text: "Pumpen",
+          contentHash: "x",
+        };
+      }),
+    );
+    tool.rateLimit = {
+      rps: 100,
+      concurrency: 10,
+      perDomainCrawlDelayMs: 2_000,
     };
-    const release = vi.fn(async () => ({ chargedMicrousd: 0n, observedMicrousd: 0n, capVariance: false, replay: false }));
+    const reservation = {
+      workspaceId: WORKSPACE,
+      accountKey: "run",
+      operationId: "1b3d6096-b924-4bc8-bb4f-8436efb37b07",
+      estimatedMicrousd: 10_000n,
+      replay: false,
+      authorityId: "42c863b9-7c7e-4d28-8678-60ef9a20219b",
+    };
+    const release = vi.fn(async () => ({
+      chargedMicrousd: 0n,
+      observedMicrousd: 0n,
+      capVariance: false,
+      replay: false,
+    }));
     const limiter = {
       configure: vi.fn(),
-      acquire: vi.fn(async () => { order.push("limiter"); return () => undefined; }),
-      respectDomainDelay: vi.fn(async () => { order.push("crawl-delay"); }),
+      acquire: vi.fn(async () => {
+        order.push("limiter");
+        return () => undefined;
+      }),
+      respectDomainDelay: vi.fn(async () => {
+        order.push("crawl-delay");
+      }),
     };
     const admit = vi.fn(async () => {
       order.push("admit");
-      return { status: "DENIED" as const, reason: "SUBJECT_TOMBSTONED" as const };
+      return {
+        status: "DENIED" as const,
+        reason: "SUBJECT_TOMBSTONED" as const,
+      };
     });
     const { broker } = makeBroker(tool, {
-      budgetStore: { reserve: vi.fn(async () => reservation), release } as unknown as BudgetStore,
+      budgetStore: {
+        reserve: vi.fn(async () => reservation),
+        release,
+      } as unknown as BudgetStore,
       limiter: limiter as never,
-      artifactExecution: { admit, persist: vi.fn(), replay: vi.fn() } as unknown as ArtifactExecutionPort,
+      artifactExecution: {
+        admit,
+        persist: vi.fn(),
+        replay: vi.fn(),
+      } as unknown as ArtifactExecutionPort,
     });
     await expect(
-      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, { workspaceId: WORKSPACE, runId: "run", artifactSubject: subject }),
-    ).rejects.toMatchObject({ reason: "GENERIC_OPERATION_ARTIFACT_SUBJECT_TOMBSTONED" });
+      broker.invoke(
+        "crawl4ai.fetch",
+        { url: "https://pumpen.example/" },
+        { workspaceId: WORKSPACE, runId: "run", artifactSubject: subject },
+      ),
+    ).rejects.toMatchObject({
+      reason: "GENERIC_OPERATION_ARTIFACT_SUBJECT_TOMBSTONED",
+    });
     expect(order).toEqual(["limiter", "crawl-delay", "admit"]);
     expect(execute).not.toHaveBeenCalled();
     expect(release).toHaveBeenCalledWith(reservation);
   });
 
   it("never releases or retries once the wire ran and persistence failed", async () => {
-    const { broker, execute, release, reservation, markResultUnknown } = harness({ persistError: new Error("object store ack lost") });
+    const { broker, execute, release, reservation, markResultUnknown } =
+      harness({ persistError: new Error("object store ack lost") });
     await expect(
-      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, { workspaceId: WORKSPACE, runId: "run", artifactSubject: subject }),
+      broker.invoke(
+        "crawl4ai.fetch",
+        { url: "https://pumpen.example/" },
+        { workspaceId: WORKSPACE, runId: "run", artifactSubject: subject },
+      ),
     ).rejects.toMatchObject({ code: "BUDGET_OPERATION_REPLAY_UNAVAILABLE" });
     expect(execute).toHaveBeenCalledOnce();
     expect(release).not.toHaveBeenCalled();
@@ -1546,20 +1704,27 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
   });
 
   it("still surfaces the artifact error when the unknown-result fallback itself fails", async () => {
-    const { broker, markResultUnknown } = harness({ persistError: new Error("object store ack lost") });
+    const { broker, markResultUnknown } = harness({
+      persistError: new Error("object store ack lost"),
+    });
     markResultUnknown.mockRejectedValueOnce(new Error("ledger unavailable"));
     await expect(
-      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, { workspaceId: WORKSPACE, runId: "run", artifactSubject: subject }),
+      broker.invoke(
+        "crawl4ai.fetch",
+        { url: "https://pumpen.example/" },
+        { workspaceId: WORKSPACE, runId: "run", artifactSubject: subject },
+      ),
     ).rejects.toMatchObject({ code: "BUDGET_OPERATION_REPLAY_UNAVAILABLE" });
     expect(markResultUnknown).toHaveBeenCalledOnce();
   });
 
   it("executes a declared platform scope transiently and settles without an artifact", async () => {
     // The platform execution contract enumerates crawl4ai.render (1.0.0) with its wires.
-    const { broker, tool, execute, port, release, settle, reservation } = harness({
-      platform: true,
-      toolId: "crawl4ai.render",
-    });
+    const { broker, tool, execute, port, release, settle, reservation } =
+      harness({
+        platform: true,
+        toolId: "crawl4ai.render",
+      });
     tool.transientResultScopes = ["platform_channel_crawl"];
     const result = await broker.invoke(
       "crawl4ai.render",
@@ -1576,7 +1741,12 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
     expect(port.persist).not.toHaveBeenCalled();
     expect(release).not.toHaveBeenCalled();
     // Plain cost settlement: no projection and no artifact reference.
-    expect(settle).toHaveBeenCalledWith(reservation, 10_000n, undefined, undefined);
+    expect(settle).toHaveBeenCalledWith(
+      reservation,
+      10_000n,
+      undefined,
+      undefined,
+    );
     expect(result.durableReceipt).toBeUndefined();
   });
 
@@ -1584,10 +1754,19 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
     const { broker, tool, execute, release, reservation } = harness();
     tool.transientResultScopes = ["platform_channel_crawl"];
     await expect(
-      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, {
-        workspaceId: WORKSPACE, runId: "run", transientResultScope: "platform_channel_crawl",
-      }),
-    ).rejects.toMatchObject({ name: "ToolPolicyDenied", reason: "TRANSIENT_RESULT_SCOPE_DENIED" });
+      broker.invoke(
+        "crawl4ai.fetch",
+        { url: "https://pumpen.example/" },
+        {
+          workspaceId: WORKSPACE,
+          runId: "run",
+          transientResultScope: "platform_channel_crawl",
+        },
+      ),
+    ).rejects.toMatchObject({
+      name: "ToolPolicyDenied",
+      reason: "TRANSIENT_RESULT_SCOPE_DENIED",
+    });
     expect(release).toHaveBeenCalledWith(reservation);
     expect(execute).not.toHaveBeenCalled();
   });
@@ -1595,13 +1774,22 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
   it("denies a transient scope for a tool that does not declare it", async () => {
     const { broker, execute } = harness({ platform: true });
     await expect(
-      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, {
-        workspaceId: "platform",
-        runId: "platform:run",
-        transientResultScope: "platform_channel_crawl",
-        platformEgress: { authorizeAndDispatch: (_operation, send) => send() },
-      }),
-    ).rejects.toMatchObject({ name: "ToolPolicyDenied", reason: "TRANSIENT_RESULT_SCOPE_DENIED" });
+      broker.invoke(
+        "crawl4ai.fetch",
+        { url: "https://pumpen.example/" },
+        {
+          workspaceId: "platform",
+          runId: "platform:run",
+          transientResultScope: "platform_channel_crawl",
+          platformEgress: {
+            authorizeAndDispatch: (_operation, send) => send(),
+          },
+        },
+      ),
+    ).rejects.toMatchObject({
+      name: "ToolPolicyDenied",
+      reason: "TRANSIENT_RESULT_SCOPE_DENIED",
+    });
     expect(execute).not.toHaveBeenCalled();
   });
 
@@ -1609,41 +1797,71 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
     const { broker, tool, execute } = harness({ platform: true });
     tool.transientResultScopes = ["platform_channel_crawl"];
     await expect(
-      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, {
-        workspaceId: "platform",
-        runId: "platform:run",
-        transientResultScope: "some_other_scope" as never,
-        platformEgress: { authorizeAndDispatch: (_operation, send) => send() },
-      }),
-    ).rejects.toMatchObject({ name: "ToolPolicyDenied", reason: "TRANSIENT_RESULT_SCOPE_DENIED" });
+      broker.invoke(
+        "crawl4ai.fetch",
+        { url: "https://pumpen.example/" },
+        {
+          workspaceId: "platform",
+          runId: "platform:run",
+          transientResultScope: "some_other_scope" as never,
+          platformEgress: {
+            authorizeAndDispatch: (_operation, send) => send(),
+          },
+        },
+      ),
+    ).rejects.toMatchObject({
+      name: "ToolPolicyDenied",
+      reason: "TRANSIENT_RESULT_SCOPE_DENIED",
+    });
     expect(execute).not.toHaveBeenCalled();
   });
 
   it("fails a settled transient operation closed instead of re-sending the wire", async () => {
-    const { broker, tool, execute, port } = harness({ platform: true, replay: true });
+    const { broker, tool, execute, port } = harness({
+      platform: true,
+      replay: true,
+    });
     tool.transientResultScopes = ["platform_channel_crawl"];
     await expect(
-      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, {
-        workspaceId: "platform",
-        runId: "platform:run",
-        transientResultScope: "platform_channel_crawl",
-        platformEgress: { authorizeAndDispatch: (_operation, send) => send() },
-      }),
+      broker.invoke(
+        "crawl4ai.fetch",
+        { url: "https://pumpen.example/" },
+        {
+          workspaceId: "platform",
+          runId: "platform:run",
+          transientResultScope: "platform_channel_crawl",
+          platformEgress: {
+            authorizeAndDispatch: (_operation, send) => send(),
+          },
+        },
+      ),
     ).rejects.toMatchObject({ code: "BUDGET_OPERATION_REPLAY_UNAVAILABLE" });
     expect(port.replay).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();
   });
 
   it("keeps the subject-binding hold for a platform call without a transient scope", async () => {
-    const { broker, tool, execute, port, release } = harness({ platform: true, toolId: "crawl4ai.render" });
+    const { broker, tool, execute, port, release } = harness({
+      platform: true,
+      toolId: "crawl4ai.render",
+    });
     tool.transientResultScopes = ["platform_channel_crawl"];
     await expect(
-      broker.invoke("crawl4ai.render", { url: "https://fair.example/list" }, {
-        workspaceId: "platform",
-        runId: "platform:run",
-        platformEgress: { authorizeAndDispatch: (_operation, send) => send() },
-      }),
-    ).rejects.toMatchObject({ name: "ToolPolicyDenied", reason: "GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD" });
+      broker.invoke(
+        "crawl4ai.render",
+        { url: "https://fair.example/list" },
+        {
+          workspaceId: "platform",
+          runId: "platform:run",
+          platformEgress: {
+            authorizeAndDispatch: (_operation, send) => send(),
+          },
+        },
+      ),
+    ).rejects.toMatchObject({
+      name: "ToolPolicyDenied",
+      reason: "GENERIC_OPERATION_ARTIFACT_SUBJECT_BINDING_HOLD",
+    });
     expect(port.admit).not.toHaveBeenCalled();
     expect(release).toHaveBeenCalledOnce();
     expect(execute).not.toHaveBeenCalled();
@@ -1659,15 +1877,22 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
     };
     const { broker } = makeBroker(tool, { paidLedger: paidLedger as never });
     await expect(
-      broker.invoke("crawl4ai.fetch", { url: "https://pumpen.example/" }, {
-        workspaceId: "00000000-0000-4000-8000-000000000001",
-        siteId: "00000000-0000-4000-8000-000000000002",
-        runId: "00000000-0000-4000-8000-000000000003",
-        taskContractId: "site_builder.brand_profile",
-        paidCost: { scopeKey: "brand-profile-research" },
-        transientResultScope: "platform_channel_crawl",
-      }),
-    ).rejects.toMatchObject({ name: "ToolPolicyDenied", reason: "TRANSIENT_RESULT_SCOPE_DENIED" });
+      broker.invoke(
+        "crawl4ai.fetch",
+        { url: "https://pumpen.example/" },
+        {
+          workspaceId: "00000000-0000-4000-8000-000000000001",
+          siteId: "00000000-0000-4000-8000-000000000002",
+          runId: "00000000-0000-4000-8000-000000000003",
+          taskContractId: "site_builder.brand_profile",
+          paidCost: { scopeKey: "brand-profile-research" },
+          transientResultScope: "platform_channel_crawl",
+        },
+      ),
+    ).rejects.toMatchObject({
+      name: "ToolPolicyDenied",
+      reason: "TRANSIENT_RESULT_SCOPE_DENIED",
+    });
     // The paid reservation taken before this check must be closed, not leaked.
     expect(settleOperation).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1768,5 +1993,84 @@ describe("ToolBroker — settle 失败后的安全重试（B2/F4）", () => {
     expect(settle).toHaveBeenCalledTimes(2);
     expect(settle.mock.calls[1]).toEqual(settle.mock.calls[0]);
     expect(markResultUnknown).not.toHaveBeenCalled();
+  });
+});
+
+describe("controlled micro lane keeps Site Builder paid branch separate", () => {
+  it("rejects micro paidCost before either paid or generic reservation", async () => {
+    const tool = fakeTool("micro.paid.guard", 0.178);
+    tool.cost.estimatedMicrousd = "1780";
+    const execute = vi.fn(async () => ({
+      data: { ok: true },
+      costCents: 0.178,
+      costMicrousd: "1780",
+    }));
+    tool.execute = execute;
+    const registry = new ToolRegistry();
+    registry.register(tool);
+    const reserve = vi.fn();
+    const paidReserve = vi.fn();
+    const broker = new ToolBroker({
+      registry,
+      limiter: new RateLimiter(),
+      budgetStore: { reserve } as unknown as BudgetStore,
+      paidLedger: { reserveOperation: paidReserve } as never,
+    });
+    await expect(
+      broker.invoke(
+        tool.id,
+        {},
+        {
+          workspaceId: "w",
+          runId: "run",
+          siteId: "site",
+          paidCost: {} as never,
+        },
+      ),
+    ).rejects.toMatchObject({ code: "BUDGET_MICROUSD_PAID_COST_UNSUPPORTED" });
+    expect(reserve).not.toHaveBeenCalled();
+    expect(paidReserve).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+  it("uses canonical micro for generic reservation and settlement instead of BigInt fractional cents", async () => {
+    const tool = fakeTool("micro.generic.amount", 0.178);
+    tool.cost.estimatedMicrousd = "1780";
+    tool.execute = async () => ({
+      data: { ok: true },
+      costCents: 0.178,
+      costMicrousd: "1780",
+    });
+    const registry = new ToolRegistry();
+    registry.register(tool);
+    const reserve = vi.fn<BudgetStore["reserve"]>(async (_input) => ({
+      workspaceId: "w",
+      accountKey: "run",
+      operationId: "original-op",
+      estimatedMicrousd: 1780n,
+      replay: false,
+    }));
+    const settle = vi.fn<BudgetStore["settle"]>(
+      async (_reservation, _observed) => ({
+        chargedMicrousd: 1780n,
+        observedMicrousd: 1780n,
+        capVariance: false,
+        replay: false,
+      }),
+    );
+    const broker = new ToolBroker({
+      registry,
+      limiter: new RateLimiter(),
+      budgetStore: { reserve, settle } as unknown as BudgetStore,
+    });
+    const result = await broker.invoke(
+      tool.id,
+      {},
+      { workspaceId: "w", runId: "run" },
+    );
+    expect(reserve.mock.calls[0]![0]).toMatchObject({
+      estimatedMicrousd: 1780n,
+    });
+    expect(settle.mock.calls[0]![1]).toBe(1780n);
+    expect(result.costMicrousd).toBe("1780");
   });
 });

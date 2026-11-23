@@ -146,6 +146,14 @@
       "SELECT",
       "UPDATE"
     ],
+    "contact_enrichment_execution": [
+      "INSERT",
+      "SELECT"
+    ],
+    "contact_enrichment_execution_step": [
+      "INSERT",
+      "SELECT"
+    ],
     "contact_metrics_snapshot": [
       "SELECT"
     ],
@@ -817,6 +825,58 @@
         "UPDATE"
       ],
       "updated_at": [
+        "UPDATE"
+      ]
+    },
+    "contact_enrichment_execution": {
+      "result_revision": [
+        "UPDATE"
+      ],
+      "result_snapshot": [
+        "UPDATE"
+      ],
+      "status": [
+        "UPDATE"
+      ],
+      "target_snapshot": [
+        "UPDATE"
+      ]
+    },
+    "contact_enrichment_execution_step": {
+      "artifact_reference": [
+        "UPDATE"
+      ],
+      "budget_operation_id": [
+        "UPDATE"
+      ],
+      "candidate_ref": [
+        "UPDATE"
+      ],
+      "contact_id": [
+        "UPDATE"
+      ],
+      "dispatch_phase": [
+        "UPDATE"
+      ],
+      "domain_state": [
+        "UPDATE"
+      ],
+      "input_fingerprint": [
+        "UPDATE"
+      ],
+      "operation_key": [
+        "UPDATE"
+      ],
+      "reason": [
+        "UPDATE"
+      ],
+      "receipt": [
+        "UPDATE"
+      ],
+      "result_digest": [
+        "UPDATE"
+      ],
+      "revision": [
         "UPDATE"
       ]
     },

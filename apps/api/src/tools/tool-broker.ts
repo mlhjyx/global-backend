@@ -1,3 +1,5 @@
+import { assertToolCostContextCompatible, estimatedToolMicrousd, observedToolMicrousd, noNewMicroToolReplayCost } from "./tool-cost-microusd";
+import { registerContactEmailVerificationProjections } from "../durable-results/contact-email-verification-projections";
 import { assertCandidateToolExecutionAllowed } from "../runtime/development-candidate";
 import { assertPlatformEgressPaidContext, assertPlatformEgressReservation, createPlatformEgressOperation } from "../platform-authority/platform-egress-operation";
 import { createPlatformToolWireDispatcher } from "../platform-authority/platform-tool-wire-dispatcher";
@@ -9,6 +11,7 @@ import {
   Tool,
   ToolContext,
   ToolResult,
+  extractToolGovernableDomain,
 } from "./tool-contract";
 import { ToolRegistry } from "./tool-registry";
 import { isTransientResultScope, type TransientResultScope } from "./transient-result-scope";
@@ -59,6 +62,7 @@ const SUBJECT_BOUND_ARTIFACT_HOLD_SCHEMAS: ReadonlySet<string> = new Set([
   "crawl4ai-render/v1",
   "http-get/v1",
   "sanctions-download/v1",
+  "contact-email-find-hunter/v1",
 ]);
 
 /** Platform-scoped artifacts have no truthful workspace subject; always held. */
@@ -154,27 +158,14 @@ export interface ToolTrace {
   degraded?: boolean;
 }
 
-/** 从 input 里尽力提取一个域名（供 source_policy 闸门做合规检查；required 工具优先用 policyDomain）。 */
-function extractDomain(input: unknown): string | null {
-  const v = input as { url?: string; domain?: string };
-  const raw = v?.url ?? v?.domain;
-  if (!raw) return null;
-  try {
-    const u = raw.includes("://") ? new URL(raw) : new URL(`https://${raw}`);
-    return u.hostname.replace(/^www\./, "");
-  } catch {
-    return null;
-  }
-}
-
 export class ToolBroker implements ExecutionBroker {
   private readonly registry: ToolRegistry;
   private readonly budget: BudgetStore;
   private readonly limiter: RateLimitStore;
   private readonly deps: BrokerDeps;
-  private readonly projectionRegistry = registerSourceResultProjections(
+  private readonly projectionRegistry = registerContactEmailVerificationProjections(registerSourceResultProjections(
     registerCatalogResultProjections(new TypedProjectionRegistry()),
-  );
+  ));
 
   constructor(deps: BrokerDeps) {
     this.deps = deps;
@@ -299,6 +290,7 @@ export class ToolBroker implements ExecutionBroker {
     const started = now();
     const tool = this.registry.get(toolId) as Tool<I, O> | undefined;
     if (!tool) throw new ToolPolicyDenied(toolId, "not registered");
+    assertToolCostContextCompatible(tool.cost, ctx);
     assertCandidateToolExecutionAllowed(tool);
     if (
       tool.durableResultStrategy.kind === "typed_projection" &&
@@ -336,7 +328,7 @@ export class ToolBroker implements ExecutionBroker {
     //    缺省从 input 提取；required 工具提不出域 = 拒（不再静默跳过合规门）。
     const mode = tool.compliance.sourcePolicy;
     if (mode !== "none") {
-      const domain = tool.compliance.policyDomain ?? extractDomain(input);
+      const domain = tool.compliance.policyDomain ?? extractToolGovernableDomain(input);
       if (!domain) {
         if (mode === "required") {
           this.trace(
@@ -451,7 +443,7 @@ export class ToolBroker implements ExecutionBroker {
           workspaceId: ctx.workspaceId,
           accountKey: runId,
           operationKey: budgetOperationKey,
-          estimatedMicrousd: BigInt(tool.cost.estimatedCents) * 10_000n,
+          estimatedMicrousd: estimatedToolMicrousd(tool.cost),
         });
         if (ctx.platformEgress) assertPlatformEgressReservation(reservation, ctx.workspaceId, runId);
         // Subject-bound artifact replays are admitted and read below.
@@ -474,7 +466,7 @@ export class ToolBroker implements ExecutionBroker {
             if (returned.durableReceipt) {
               ctx.onDurableReceipt?.(tool.id, returned.durableReceipt);
             }
-            return returned;
+            return noNewMicroToolReplayCost(returned);
           }
           throw new BudgetOperationReplayError(reservation.operationId, "remnant");
         }
@@ -498,7 +490,7 @@ export class ToolBroker implements ExecutionBroker {
       }
     }
 
-    // The four governed artifact producers must never use ToolBroker's small
+    // The five governed artifact producers must never use ToolBroker's small
     // typed-projection settlement as a physical fallback. Their approved
     // PERSONAL_DATA contract requires a real company/contact subject before
     // object persistence. Decide per call (G3): only an admitted subject may
@@ -585,7 +577,7 @@ export class ToolBroker implements ExecutionBroker {
       }
       throw error;
     }
-    const domain = extractDomain(input);
+    const domain = extractToolGovernableDomain(input);
     if (domain && tool.rateLimit.perDomainCrawlDelayMs) {
       try {
         await this.limiter.respectDomainDelay(
@@ -884,14 +876,14 @@ export class ToolBroker implements ExecutionBroker {
           try {
             await this.budget.settle(
               reservation,
-              BigInt(result.costCents) * 10_000n,
+              observedToolMicrousd(result),
             );
           } catch {
             try {
               // ACK 丢失：同样的 operation/成本重放一次是安全的。
               await this.budget.settle(
                 reservation,
-                BigInt(result.costCents) * 10_000n,
+                observedToolMicrousd(result),
               );
             } catch (settleError) {
               // B2/F4：双败同样要把行带离裸 RESERVED——先尽力标 RESULT_UNKNOWN，
@@ -921,12 +913,12 @@ export class ToolBroker implements ExecutionBroker {
                   : tool.durableResultStrategy.schema,
               result: result as ToolResult<unknown>,
               reservedMicrousd: reservation.estimatedMicrousd,
-              chargedMicrousd: BigInt(result.costCents) * 10_000n,
+              chargedMicrousd: observedToolMicrousd(result),
             })
           : undefined;
         const settlement = [
           reservation,
-          BigInt(result.costCents) * 10_000n,
+          observedToolMicrousd(result),
           projection,
           receiptFacts,
         ] as const;

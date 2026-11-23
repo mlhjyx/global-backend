@@ -1,3 +1,5 @@
+import { paidOperationKey } from "../site-builder/site-build-cost-ledger";
+import { createSmtpRcptProbeTool } from "./builtin-tools";
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BudgetLedger, InMemoryBudgetStoreAdapter } from '@global/test-support';
 import { buildToolBroker } from './tool-broker.factory';
@@ -74,5 +76,27 @@ describe('buildToolBroker artifact composition (G3 5.1)', () => {
       },
     )).rejects.toMatchObject({ reason: 'GENERIC_OPERATION_ARTIFACT_SUBJECT_SUPPRESSED' });
     expect(admit).toHaveBeenCalledOnce();
+  });
+});
+
+
+describe('original SMTP step gate in the real Broker factory', () => {
+  const input = { domain: 'company.example.invalid', mxHost: 'mx.company.example.invalid', rcptTo: ['person@company.example.invalid', 'x-verify-0123456789abcdef0123@company.example.invalid'] };
+  it('composes only the original SMTP producer with a fake protocol and one final step gate', async () => {
+    const events: string[] = [];
+    const smtpProtocol = { resolveMxHost: vi.fn(async () => { events.push('PUBLIC_IP_FAKE'); return { safe: true, ip: '93.184.216.34' }; }), executeSmtpProbe: vi.fn(async () => { events.push('SMTP_FAKE'); return { reachable: true, mailFromCode: 250, codes: [250, 550] }; }) };
+    const budgets = new InMemoryBudgetStoreAdapter(new BudgetLedger()); const reserve = vi.spyOn(budgets, 'reserve');
+    const broker = buildToolBroker({ budgetStore: budgets, limiter: new RateLimiter(), smtpProtocol });
+    const beforePhysicalWire = vi.fn(async () => { events.push('STEP_CLAIM_COMMITTED_FAKE'); });
+    const result = await broker.invoke('smtp.rcpt_probe', input, { workspaceId: '00000000-0000-4000-8000-000000000001', runId: 'actual-account-key', purpose: 'enrichment', authorizeExternalAction: async () => true, beforePhysicalWire });
+    expect(events).toEqual(['PUBLIC_IP_FAKE', 'STEP_CLAIM_COMMITTED_FAKE', 'SMTP_FAKE']); expect(beforePhysicalWire).toHaveBeenCalledTimes(1); expect(smtpProtocol.executeSmtpProbe).toHaveBeenCalledTimes(1);
+    expect(reserve).toHaveBeenCalledWith(expect.objectContaining({ accountKey: 'actual-account-key', estimatedMicrousd: 0n, operationKey: paidOperationKey(['actual-account-key', 'tool-budget', 'smtp.rcpt_probe', '1.0.0', createSmtpRcptProbeTool(smtpProtocol).idempotencyKey(input)]) }));
+    expect(result.data).toMatchObject({ reachable: true, codes: [250, 550] }); expect(result.costCents).toBe(0);
+  });
+  it('fails before SMTP transport when the step claim rejects and never falls back to default network', async () => {
+    const smtpProtocol = { resolveMxHost: vi.fn(async () => ({ safe: true, ip: '93.184.216.34' })), executeSmtpProbe: vi.fn() };
+    const broker = buildToolBroker({ budgetStore: new InMemoryBudgetStoreAdapter(new BudgetLedger()), limiter: new RateLimiter(), smtpProtocol });
+    await expect(broker.invoke('smtp.rcpt_probe', input, { workspaceId: '00000000-0000-4000-8000-000000000001', runId: 'actual-account-key', purpose: 'enrichment', beforePhysicalWire: async () => { throw new Error('synthetic_current_claim_denial'); } })).rejects.toThrow();
+    expect(smtpProtocol.executeSmtpProbe).not.toHaveBeenCalled();
   });
 });

@@ -24,10 +24,10 @@ import {
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 
-test('inventory is locked to 23 Tools and 16 product Model tasks', () => {
-  assert.equal(EXPECTED_TOOL_IDS.length, 23);
+test('inventory is locked to 27 Tools and 16 product Model tasks', () => {
+  assert.equal(EXPECTED_TOOL_IDS.length, 27);
   assert.equal(EXPECTED_MODEL_TASKS.length, 16);
-  assert.equal(new Set(EXPECTED_TOOL_IDS).size, 23);
+  assert.equal(new Set(EXPECTED_TOOL_IDS).size, 27);
   assert.equal(new Set(EXPECTED_MODEL_TASKS.map((entry) => entry.taskId)).size, 16);
   assert.equal(EXPECTED_GENERIC_MODEL_TASK_LOOKUPS.length, 4);
   assert.deepEqual(EXPECTED_MODEL_GATEWAY_BOUNDARIES, [
@@ -46,6 +46,10 @@ test('inventory is locked to 23 Tools and 16 product Model tasks', () => {
   assert.equal(EXPECTED_TOOL_CALLSITES.length, 52);
   assert.deepEqual(EXPECTED_NON_TOOL_INVOKE_BOUNDARIES, [
     'apps/api/src/site-builder/eval/copy-sonnet-recovery-zero-call-preflight.ts#input.pricingBroker#1',
+    'apps/api/src/enrichment/safety/governed-enrichment-invoker.ts#this.deps.broker#1',
+    'apps/api/src/enrichment/safety/contact-enrichment-safety.composition.ts#invoker#1',
+  'apps/api/src/enrichment/safety/contact-enrichment-safety.composition.ts#invoker#2',
+    'apps/api/src/enrichment/safety/contact-enrichment-safety.composition.ts#invoker.createStepBoundSmtpBroker(bound, context)#1',
   ]);
 });
 
@@ -276,8 +280,8 @@ test('artifact bounds are read only from the durableResultStrategy object and mu
 test('pure contracts preserve typed authority wiring and the artifact pre-wire hold', async () => {
   const result = await verifyExecutionAuthorityPolicy({ repoRoot: repositoryRoot });
   assert.deepEqual(result.issues, []);
-  // 获客 vNext W4：两源（opencorporates + companies_house_registry）= 23 tools / 52 callsites，manufacturer lookup/fetch +2，按 policy 源真值锁定。
-  assert.equal(result.toolCount, 23);
+  // 获客 vNext W4：两源（opencorporates + companies_house_registry）= 23 tools / 52 callsites；contact-enrichment safety 首片新增 4 producer = 27 tools / 52 callsites，按 policy 源真值锁定。
+  assert.equal(result.toolCount, 27);
   assert.equal(result.modelTaskCount, 16);
   assert.equal(result.physicalExecutionWiring, 'PARTIAL_HOLD');
   assert.equal(result.physicalToolCallsiteCount, 52);

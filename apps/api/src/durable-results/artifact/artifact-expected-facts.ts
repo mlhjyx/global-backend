@@ -1,7 +1,7 @@
-import { types as nodeUtilTypes } from 'node:util';
-import { sanitizeEvidenceUrl } from '../../site-builder/agents/evidence-ref';
-import { invalidGenericOperationArtifact } from './artifact.types';
-import type { GenericOperationArtifactManifest } from './artifact.types';
+import { types as nodeUtilTypes } from "node:util";
+import { sanitizeEvidenceUrl } from "../../site-builder/agents/evidence-ref";
+import { invalidGenericOperationArtifact } from "./artifact.types";
+import type { GenericOperationArtifactManifest } from "./artifact.types";
 
 /**
  * Small non-body facts required to reconstruct the existing product shapes.
@@ -11,9 +11,7 @@ import type { GenericOperationArtifactManifest } from './artifact.types';
  */
 
 export type ArtifactExpectedFactsSchema =
-  | 'http-get/v1'
-  | 'crawl4ai-fetch/v1'
-  | 'crawl4ai-render/v1';
+  "http-get/v1" | "crawl4ai-fetch/v1" | "crawl4ai-render/v1";
 
 export interface HttpGetArtifactExpectedFacts {
   readonly status: number;
@@ -66,7 +64,7 @@ function snapshotClosed(
 ): Readonly<Record<string, unknown>> {
   try {
     if (
-      typeof value !== 'object' ||
+      typeof value !== "object" ||
       value === null ||
       Array.isArray(value) ||
       nodeUtilTypes.isProxy(value) ||
@@ -78,17 +76,14 @@ function snapshotClosed(
     const keys = Reflect.ownKeys(value);
     if (
       keys.length !== expected.size ||
-      keys.some((key) => typeof key !== 'string' || !expected.has(key))
+      keys.some((key) => typeof key !== "string" || !expected.has(key))
     ) {
       return invalid();
     }
     const snapshot: Record<string, unknown> = {};
     for (const key of expectedKeys) {
       const descriptor = Object.getOwnPropertyDescriptor(value, key);
-      if (
-        !descriptor?.enumerable ||
-        !Object.hasOwn(descriptor, 'value')
-      ) {
+      if (!descriptor?.enumerable || !Object.hasOwn(descriptor, "value")) {
         return invalid();
       }
       Object.defineProperty(snapshot, key, {
@@ -106,14 +101,14 @@ function snapshotClosed(
 
 function assertSanitizedUrl(value: unknown): asserts value is string {
   try {
-    if (typeof value !== 'string' || value.length > 2_000) return invalid();
+    if (typeof value !== "string" || value.length > 2_000) return invalid();
     const parsed = new URL(value);
     if (
       !PERSISTED_SANITIZED_URL.test(value) ||
       sanitizeEvidenceUrl(value) !== value ||
-      parsed.search !== '' ||
+      parsed.search !== "" ||
       !/[a-z]/.test(parsed.hostname) ||
-      value.replace(/[^0-9]/g, '').length >= 9
+      value.replace(/[^0-9]/g, "").length >= 9
     ) {
       return invalid();
     }
@@ -124,17 +119,17 @@ function assertSanitizedUrl(value: unknown): asserts value is string {
 
 function parseHttpGet(value: unknown): HttpGetArtifactExpectedFacts {
   const facts = snapshotClosed(value, [
-    'status',
-    'ok',
-    'sanitizedUrl',
-    'blocked',
+    "status",
+    "ok",
+    "sanitizedUrl",
+    "blocked",
   ]);
   if (
-    typeof facts.status !== 'number' ||
+    typeof facts.status !== "number" ||
     !Number.isSafeInteger(facts.status) ||
     facts.status < 0 ||
     facts.status > 599 ||
-    typeof facts.ok !== 'boolean'
+    typeof facts.ok !== "boolean"
   ) {
     return invalid();
   }
@@ -142,7 +137,7 @@ function parseHttpGet(value: unknown): HttpGetArtifactExpectedFacts {
     if (
       facts.ok ||
       facts.sanitizedUrl !== null ||
-      typeof facts.blocked !== 'string' ||
+      typeof facts.blocked !== "string" ||
       !BLOCKED_CODE.test(facts.blocked)
     ) {
       return invalid();
@@ -163,10 +158,10 @@ function parseHttpGet(value: unknown): HttpGetArtifactExpectedFacts {
 function parseCrawl4aiFetch(
   value: unknown,
 ): Crawl4aiFetchArtifactExpectedFacts {
-  const facts = snapshotClosed(value, ['sanitizedUrl', 'contentHash']);
+  const facts = snapshotClosed(value, ["sanitizedUrl", "contentHash"]);
   assertSanitizedUrl(facts.sanitizedUrl);
   if (
-    typeof facts.contentHash !== 'string' ||
+    typeof facts.contentHash !== "string" ||
     !CONTENT_HASH.test(facts.contentHash)
   ) {
     return invalid();
@@ -177,9 +172,9 @@ function parseCrawl4aiFetch(
 function parseCrawl4aiRender(
   value: unknown,
 ): Crawl4aiRenderArtifactExpectedFacts {
-  const facts = snapshotClosed(value, ['sanitizedUrl', 'blocked']);
+  const facts = snapshotClosed(value, ["sanitizedUrl", "blocked"]);
   assertSanitizedUrl(facts.sanitizedUrl);
-  if (typeof facts.blocked !== 'boolean') return invalid();
+  if (typeof facts.blocked !== "boolean") return invalid();
   return facts as unknown as Crawl4aiRenderArtifactExpectedFacts;
 }
 
@@ -187,9 +182,9 @@ export function parseArtifactExpectedFacts(
   resultSchema: ArtifactExpectedFactsSchema,
   value: unknown,
 ): ArtifactExpectedFacts {
-  if (resultSchema === 'http-get/v1') return parseHttpGet(value);
-  if (resultSchema === 'crawl4ai-fetch/v1') return parseCrawl4aiFetch(value);
-  if (resultSchema === 'crawl4ai-render/v1') return parseCrawl4aiRender(value);
+  if (resultSchema === "http-get/v1") return parseHttpGet(value);
+  if (resultSchema === "crawl4ai-fetch/v1") return parseCrawl4aiFetch(value);
+  if (resultSchema === "crawl4ai-render/v1") return parseCrawl4aiRender(value);
   return invalid();
 }
 
@@ -197,13 +192,16 @@ export function parseArtifactExpectedFactsForResultSchema(
   resultSchema: string,
   value: unknown,
 ): ArtifactExpectedFacts | undefined {
-  if (resultSchema === 'sanctions-download/v1') {
+  if (
+    resultSchema === "sanctions-download/v1" ||
+    resultSchema === "contact-email-find-hunter/v1"
+  ) {
     return value === undefined ? undefined : invalid();
   }
   if (
-    resultSchema === 'http-get/v1' ||
-    resultSchema === 'crawl4ai-fetch/v1' ||
-    resultSchema === 'crawl4ai-render/v1'
+    resultSchema === "http-get/v1" ||
+    resultSchema === "crawl4ai-fetch/v1" ||
+    resultSchema === "crawl4ai-render/v1"
   ) {
     return parseArtifactExpectedFacts(resultSchema, value);
   }
@@ -228,7 +226,7 @@ export function artifactExpectedFactsColumns(
   const facts = parseArtifactExpectedFactsForResultSchema(resultSchema, value);
   const empty = emptyColumns();
   if (facts === undefined) return empty;
-  if (resultSchema === 'http-get/v1') {
+  if (resultSchema === "http-get/v1") {
     const http = facts as HttpGetArtifactExpectedFacts;
     return Object.freeze({
       ...empty,
@@ -238,7 +236,7 @@ export function artifactExpectedFactsColumns(
       expectedBlockedCode: http.blocked,
     });
   }
-  if (resultSchema === 'crawl4ai-fetch/v1') {
+  if (resultSchema === "crawl4ai-fetch/v1") {
     const fetch = facts as Crawl4aiFetchArtifactExpectedFacts;
     return Object.freeze({
       ...empty,
@@ -258,11 +256,24 @@ export function parseArtifactExpectedFactsColumns(
   resultSchema: string,
   columns: ArtifactExpectedFactsColumns,
 ): ArtifactExpectedFacts | undefined {
+  if (resultSchema === "contact-email-find-hunter/v1") {
+    const snapshot = snapshotClosed(columns, [
+      "expectedHttpStatus",
+      "expectedHttpOk",
+      "expectedSanitizedUrl",
+      "expectedContentHash",
+      "expectedBlockedCode",
+      "expectedRobotsBlocked",
+    ]);
+    return Object.values(snapshot).every((value) => value === null)
+      ? undefined
+      : invalid();
+  }
   const values = Object.values(columns);
-  if (resultSchema === 'sanctions-download/v1') {
+  if (resultSchema === "sanctions-download/v1") {
     return values.every((value) => value === null) ? undefined : invalid();
   }
-  if (resultSchema === 'http-get/v1') {
+  if (resultSchema === "http-get/v1") {
     if (
       columns.expectedContentHash !== null ||
       columns.expectedRobotsBlocked !== null
@@ -276,7 +287,7 @@ export function parseArtifactExpectedFactsColumns(
       blocked: columns.expectedBlockedCode,
     });
   }
-  if (resultSchema === 'crawl4ai-fetch/v1') {
+  if (resultSchema === "crawl4ai-fetch/v1") {
     if (
       columns.expectedHttpStatus !== null ||
       columns.expectedHttpOk !== null ||
@@ -290,7 +301,7 @@ export function parseArtifactExpectedFactsColumns(
       contentHash: columns.expectedContentHash,
     });
   }
-  if (resultSchema === 'crawl4ai-render/v1') {
+  if (resultSchema === "crawl4ai-render/v1") {
     if (
       columns.expectedHttpStatus !== null ||
       columns.expectedHttpOk !== null ||

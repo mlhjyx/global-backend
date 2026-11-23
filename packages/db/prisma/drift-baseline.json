@@ -618,6 +618,24 @@
       "owner": "P5c-BE-30",
       "expiresAt": "2027-01-31",
       "reason": "SQL-only structure pre-dating the drift gate (ch08 \u00a73.1.7)"
+    },
+    {
+      "statement": "ALTER TABLE \"contact_enrichment_execution\" DROP CONSTRAINT \"contact_enrichment_execution_company_scope_fkey\";",
+      "owner": "CONTACT-ENRICHMENT-SAFETY",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only column-list SET NULL (company_id only) cannot be expressed in the Prisma datamodel; live scoped FK (20261123074206)"
+    },
+    {
+      "statement": "ALTER TABLE \"contact_enrichment_execution_step\" DROP CONSTRAINT \"contact_enrichment_execution_step_contact_scope_fkey\";",
+      "owner": "CONTACT-ENRICHMENT-SAFETY",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only column-list SET NULL (contact_id only) cannot be expressed in the Prisma datamodel; live scoped FK (20261123074206)"
+    },
+    {
+      "statement": "ALTER TABLE \"contact_enrichment_execution_step\" DROP CONSTRAINT \"contact_enrichment_execution_step_operation_scope_fkey\";",
+      "owner": "CONTACT-ENRICHMENT-SAFETY",
+      "expiresAt": "2027-01-31",
+      "reason": "SQL-only optional composite FK (nullable budget_operation_id with required scope_key) is not an optional Prisma relation (20261123074206)"
     }
   ]
 }

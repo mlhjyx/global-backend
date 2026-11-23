@@ -68,6 +68,42 @@ function makeActivities(world: {
 
 const LAW_BASIS_CONFIG = { lawfulBasis: { basis: 'legitimate_interest', ref: 'LIA-42' } };
 
+function makeSafetyActivities(executeRun: ReturnType<typeof vi.fn>) {
+  const prisma = {
+    dataProvider: { findMany: vi.fn(async () => [{ key: 'hunter' }]), findUnique: vi.fn(async () => ({ config: LAW_BASIS_CONFIG })) },
+    withWorkspace: vi.fn(async (_workspaceId: string, fn: (tx: unknown) => Promise<unknown>) => fn({})),
+  };
+  const budgetStore = { attestAuthorized: vi.fn(async () => ({ accountId: 'account-1', authorityId: ARGS.executionBudget.authorityId, authorizedCapMicrousd: 5_000_000n, generation: 1 })), status: vi.fn(async () => ({ remainingMicrousd: 3_000_000n, exhausted: false, open: true })) };
+  return { activities: createRun2PipelineActivities({ prisma: prisma as never, providers: {} as never, gateway: {} as never, budgetStore: budgetStore as never, contactEnrichmentSafety: { executeRun } as never }), budgetStore };
+}
+
+describe('enrichContactsForCompany safety lane (run caller)', () => {
+  beforeEach(() => { mocks.enrichCompanyContacts.mockReset(); process.env.HUNTER_API_KEY = 'hunter-key'; });
+  afterEach(() => { delete process.env.HUNTER_API_KEY; });
+  it('routes the admitted run through the shared helper with actual business runId and remaining micro only', async () => {
+    const executeRun = vi.fn(async () => ({ companyId: COMPANY_ID, tier: 'B', attempted: 1, costMicrousd: 1700, deadlineHit: false, results: [], admission: 'ADMITTED', operationRef: 'd'.repeat(64), qualityCoverage: 'PREREQUISITE_ONLY' }));
+    const { activities } = makeSafetyActivities(executeRun);
+    const result = await activities.enrichContactsForCompany(ARGS);
+    expect(result).toEqual({ skipped: false, tier: 'B', attempted: 1, costMicrousd: 1700, operationRef: 'd'.repeat(64) });
+    expect(executeRun).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ workspaceId: WORKSPACE_ID, companyId: COMPANY_ID, businessRunId: RUN_ID, remainingMicrousd: '3000000', actorId: 'discovery-run:' + RUN_ID, binding: expect.objectContaining({ accountKey: ARGS.executionBudget.accountKey }) }));
+    expect(mocks.enrichCompanyContacts).not.toHaveBeenCalled();
+  });
+  it('reports not-admitted safety preflight as the legacy skipped reason without inventing spend', async () => {
+    const executeRun = vi.fn(async () => ({ companyId: COMPANY_ID, tier: 'B', attempted: 0, costMicrousd: 0, deadlineHit: false, results: [], admission: 'NOT_ADMITTED', reasonCode: 'GOVERNANCE_PENDING', qualityCoverage: 'PREREQUISITE_ONLY' }));
+    const { activities } = makeSafetyActivities(executeRun);
+    expect(await activities.enrichContactsForCompany(ARGS)).toEqual({ skipped: true, reason: 'governance_pending' });
+    expect(mocks.enrichCompanyContacts).not.toHaveBeenCalled();
+  });
+  it('fails closed with source_control_pending and zero legacy wire when no safety service is composed', async () => {
+    process.env.HUNTER_API_KEY = 'hunter-key';
+    mocks.enrichCompanyContacts.mockResolvedValue({ companyId: COMPANY_ID, tier: 'A', attempted: 2, costMicrousd: 4200, deadlineHit: false, results: [] });
+    const activities = makeActivities({ enabledFinderKeys: ['hunter'], decisionMakerConfig: LAW_BASIS_CONFIG });
+    expect(await activities.enrichContactsForCompany(ARGS)).toEqual({ skipped: true, reason: 'source_control_pending' });
+    expect(mocks.enrichCompanyContacts).not.toHaveBeenCalled();
+  });
+});
+
+
 describe('enrichContactsForCompany（P1-10b）', () => {
   beforeEach(() => {
     mocks.enrichCompanyContacts.mockReset();
@@ -116,28 +152,10 @@ describe('enrichContactsForCompany（P1-10b）', () => {
     expect(mocks.enrichCompanyContacts).not.toHaveBeenCalled();
   });
 
-  it('通过守卫：把 run 账户/配置 basis/软截止传入核心，并回传汇总', async () => {
+  it('through the guards, requires the safety lane instead of the legacy core', async () => {
     process.env.HUNTER_API_KEY = 'hunter-key';
-    const activities = makeActivities({
-      enabledFinderKeys: ['hunter'],
-      decisionMakerConfig: LAW_BASIS_CONFIG,
-    });
-    const before = Date.now();
-    const result = await activities.enrichContactsForCompany(ARGS);
-    expect(result).toMatchObject({ skipped: false, tier: 'A', attempted: 2, costMicrousd: 4_200 });
-
-    const [deps, input] = mocks.enrichCompanyContacts.mock.calls[0] as [Record<string, unknown>, Record<string, unknown>];
-    expect(input).toMatchObject({
-      workspaceId: WORKSPACE_ID,
-      companyId: COMPANY_ID,
-      runId: RUN_ID,
-      accountKey: ARGS.executionBudget.accountKey,
-    });
-    expect((input.lawfulBasis as { basis: string }).basis).toBe('legitimate_interest');
-    expect((input.lawfulBasis as { recordedBy: string }).recordedBy).toBe(`discovery-run:${RUN_ID}`);
-    expect(input.deadlineAtMs as number).toBeGreaterThanOrEqual(before + 600_000);
-    // 预算 = min(run 剩余 $3.00, $0.50) → 公司上限 500000 微美元生效。
-    expect((deps.budget as { remainingMicrousd(): number | undefined }).remainingMicrousd()).toBe(500_000);
-    expect((deps.finders as Array<{ key: string }>).map((finder) => finder.key)).toEqual(['hunter']);
+    const activities = makeActivities({ enabledFinderKeys: ['hunter'], decisionMakerConfig: LAW_BASIS_CONFIG });
+    expect(await activities.enrichContactsForCompany(ARGS)).toEqual({ skipped: true, reason: 'source_control_pending' });
+    expect(mocks.enrichCompanyContacts).not.toHaveBeenCalled();
   });
 });

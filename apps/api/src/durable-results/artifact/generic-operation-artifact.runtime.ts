@@ -15,13 +15,15 @@ import { S3GenericOperationArtifactStore } from "./generic-operation-artifact.st
 import { crawl4aiMaterializers } from "./materializers/crawl4ai.materializer";
 import { httpGetMaterializer } from "./materializers/http-get.materializer";
 import { sanctionsDownloadMaterializer } from "./materializers/sanctions-download.materializer";
+import { contactEmailFindMaterializer } from "./materializers/contact-email-find.materializer";
 
-/** The complete fixed materializer set for the four artifact result schemas. */
+/** The complete fixed materializer set for the five fixed artifact result schemas. */
 export function productArtifactMaterializerRegistry(): ArtifactMaterializerRegistry {
   return new ArtifactMaterializerRegistry([
     ...crawl4aiMaterializers,
     httpGetMaterializer,
     sanctionsDownloadMaterializer,
+    contactEmailFindMaterializer,
   ]);
 }
 
@@ -35,8 +37,12 @@ export function sharedGenericOperationArtifactStore(
   config: GenericArtifactStorageConfig,
 ): S3GenericOperationArtifactStore {
   const key = JSON.stringify([
-    config.endpoint, config.bucket, config.region, config.accessKeyId,
-    config.secretAccessKey, config.forcePathStyle,
+    config.endpoint,
+    config.bucket,
+    config.region,
+    config.accessKeyId,
+    config.secretAccessKey,
+    config.forcePathStyle,
   ]);
   const cached = processStores.get(key);
   if (cached) return cached;

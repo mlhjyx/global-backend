@@ -322,7 +322,10 @@ describe("ArtifactSubjectBindingContract.resolveForExecution", () => {
   });
 
   it("binds a live seller profile and denies it once its subject is tombstoned", async () => {
-    const profileRef = { subjectType: "company_profile", subjectId: PROFILE_ID } as const;
+    const profileRef = {
+      subjectType: "company_profile",
+      subjectId: PROFILE_ID,
+    } as const;
     const profileInput = workspaceInput("crawl4ai-fetch/v1", profileRef);
     const findExecutionHold = vi.fn(async () => null as "TOMBSTONED" | null);
     const contract = new ArtifactSubjectBindingContract({
@@ -330,7 +333,9 @@ describe("ArtifactSubjectBindingContract.resolveForExecution", () => {
       findExecutionHold,
     });
 
-    await expect(contract.resolveForExecution(tx, profileInput)).resolves.toEqual({
+    await expect(
+      contract.resolveForExecution(tx, profileInput),
+    ).resolves.toEqual({
       status: "BOUND",
       subjectRef: profileRef,
     });
@@ -340,7 +345,9 @@ describe("ArtifactSubjectBindingContract.resolveForExecution", () => {
     });
 
     findExecutionHold.mockResolvedValueOnce("TOMBSTONED");
-    await expect(contract.resolveForExecution(tx, profileInput)).resolves.toEqual({
+    await expect(
+      contract.resolveForExecution(tx, profileInput),
+    ).resolves.toEqual({
       status: "DENIED",
       reason: "SUBJECT_TOMBSTONED",
     });
@@ -367,7 +374,9 @@ describe("ArtifactSubjectBindingContract.resolveForExecution", () => {
       ...repository({ ...bound, workspaceId: OTHER_WORKSPACE_ID }),
       findExecutionHold,
     });
-    await expect(crossWorkspace.resolveForExecution(tx, input)).resolves.toEqual({
+    await expect(
+      crossWorkspace.resolveForExecution(tx, input),
+    ).resolves.toEqual({
       status: "DENIED",
       reason: "SUBJECT_BINDING_INVALID",
     });
@@ -388,5 +397,40 @@ describe("ArtifactSubjectBindingContract.resolveForExecution", () => {
       status: "DENIED",
       reason: "SUBJECT_BINDING_INVALID",
     });
+  });
+});
+
+describe("fixed encrypted Hunter subject binding", () => {
+  it("binds only an existing same-workspace contact, never company or company_profile", async () => {
+    const subjects = repository({
+      workspaceId: WORKSPACE_ID,
+      subjectType: "contact",
+      subjectId: CONTACT_ID,
+    });
+    const contract = new ArtifactSubjectBindingContract(subjects);
+    await expect(
+      contract.resolve(tx, {
+        resultSchema: "contact-email-find-hunter/v1",
+        scopeKind: "workspace",
+        workspaceId: WORKSPACE_ID,
+        subjectRef: { subjectType: "contact", subjectId: CONTACT_ID },
+      }),
+    ).resolves.toEqual({
+      status: "BOUND",
+      subjectRef: { subjectType: "contact", subjectId: CONTACT_ID },
+    });
+    for (const subjectType of ["company", "company_profile"] as const)
+      await expect(
+        contract.resolve(tx, {
+          resultSchema: "contact-email-find-hunter/v1",
+          scopeKind: "workspace",
+          workspaceId: WORKSPACE_ID,
+          subjectRef: { subjectType, subjectId: CONTACT_ID },
+        }),
+      ).resolves.toEqual({
+        status: "DENIED",
+        reason: "SUBJECT_BINDING_INVALID",
+      });
+    expect(subjects.resolveExistingSubject).toHaveBeenCalledTimes(1);
   });
 });
