@@ -24590,7 +24590,7 @@
         ],
         "summary": "读取当前发布版本的单个分块（有界本地 DB，不调用 search/embedding）",
         "tags": [
-          "Seller Document Claims"
+          "Seller Documents"
         ],
         "x-required-scopes": [
           "acquisition:read"
@@ -24657,7 +24657,7 @@
         ],
         "summary": "校验 typed 引用并返回服务端重建的原句、bindingHash 与 requestDigest（纯检查，不写 Claim）",
         "tags": [
-          "Seller Document Claims"
+          "Seller Documents"
         ],
         "x-required-scopes": [
           "acquisition:write"
@@ -24724,7 +24724,7 @@
         ],
         "summary": "事务重读引用并写入 NEEDS_REVIEW 草稿；同 key 同体返原件，异体 409",
         "tags": [
-          "Seller Document Claims"
+          "Seller Documents"
         ],
         "x-required-scopes": [
           "acquisition:write"

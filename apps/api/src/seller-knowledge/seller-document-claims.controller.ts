@@ -27,7 +27,7 @@ import {
 import { SellerDocumentClaimsService } from './seller-document-claims.service';
 
 /** S1a typed 原句接缝：读取端口只读；preview 纯检查；draft 首次必为 NEEDS_REVIEW。 */
-@ApiTags('Seller Document Claims')
+@ApiTags('Seller Documents')
 @ApiBearerAuth()
 @Controller('companies/:companyId/seller-documents/:documentId')
 @UseGuards(AuthGuard, ScopesGuard)

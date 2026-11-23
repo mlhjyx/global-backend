@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { ClaimStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -111,7 +111,7 @@ export class ClaimService {
       const documentClaim = reference !== undefined;
       if (documentClaim) {
         if (expectedVersion == null) {
-          throw new ConflictException({
+          throw new BadRequestException({
             error: { code: 'DOCUMENT_CLAIM_EXPECTED_VERSION_REQUIRED', message: 'document claims require expectedVersion' },
           });
         }
@@ -387,7 +387,7 @@ export class ClaimService {
       `);
       if (reference !== undefined) {
         if (expectedVersion == null) {
-          throw new ConflictException({
+          throw new BadRequestException({
             error: { code: 'DOCUMENT_CLAIM_EXPECTED_VERSION_REQUIRED', message: 'document claims require expectedVersion' },
           });
         }

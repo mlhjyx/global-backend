@@ -169,7 +169,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))('seller document typed claim S1a on 
     const draft = await claims.createDraft(userCtx, tenant.companyId, tenant.document.documentId, {
       reference, type: 'certification', statement: '通过 ISO 9001 认证', requestDigest: preview.requestDigest,
     });
-    await expect(claimService.transition(userCtx, draft.claimId, 'APPROVED')).rejects.toMatchObject({ status: 409 });
+    await expect(claimService.transition(userCtx, draft.claimId, 'APPROVED')).rejects.toMatchObject({ status: 400 });
     const approved = await claimService.transition(userCtx, draft.claimId, 'APPROVED', 1);
     expect(approved).toMatchObject({ status: 'APPROVED', version: 2, verifiedBy: tenant.user });
     const binding = await owner.$transaction(async (tx) => {
@@ -185,6 +185,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))('seller document typed claim S1a on 
     });
     expect(effective.claims.map((claim) => claim.id)).toContain(draft.claimId);
     expect(effective.dependencies.get(draft.claimId)).toMatchObject({ referenceId: draft.referenceId, bindingHash: draft.bindingHash });
+    await expect(claimService.revoke(userCtx, draft.claimId)).rejects.toMatchObject({ status: 400 });
     const revoked = await claimService.revoke(userCtx, draft.claimId, 2);
     expect(revoked).toMatchObject({ status: 'REVOKED', version: 3 });
   });
@@ -196,7 +197,7 @@ describe.runIf(Boolean(ownerUrl && appUrl))('seller document typed claim S1a on 
     const userCtx = ctx(tenant.workspaceId, tenant.user);
     const preview = await claims.preview(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证' });
     const draft = await claims.createDraft(userCtx, tenant.companyId, tenant.document.documentId, { reference, type: 'certification', statement: '通过 ISO 9001 认证', requestDigest: preview.requestDigest });
-    await expect(claimService.transition(userCtx, draft.claimId, 'REVOKED')).rejects.toMatchObject({ status: 409 });
+    await expect(claimService.transition(userCtx, draft.claimId, 'REVOKED')).rejects.toMatchObject({ status: 400 });
     expect(await claimService.transition(userCtx, draft.claimId, 'REVOKED', 1)).toMatchObject({ status: 'REVOKED', version: 2 });
   });
 
