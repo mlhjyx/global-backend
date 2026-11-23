@@ -28,6 +28,14 @@ type ChildResult =
     };
 type RootRelease = "cleaned" | "retry" | "fenced";
 type Recovery = "recovered" | "pending" | "fenced";
+type CleanupPhase = "attempt-cleanup" | "recovery-pending" | "recovery-fenced";
+function cleanupError(phase: CleanupPhase): Error {
+  const error = new Error(CLEANUP_ERROR);
+  // Fixed safe phase for logs; never carries browser output, env or arbitrary
+  // exception text. The public message stays the bounded single code.
+  Object.defineProperty(error, "probePhase", { value: phase, enumerable: false });
+  return error;
+}
 /**
  * Outstanding cleanup ownership for one probe attempt. It is kept only while
  * the attempt cannot yet prove that its child, process group and private root
@@ -343,7 +351,9 @@ export function createBrowserReadinessProbe(): Probe {
         recovery = "pending";
       }
       if (recovery !== "recovered" || obligation !== current)
-        throw new Error(CLEANUP_ERROR);
+        throw cleanupError(
+          recovery === "fenced" ? "recovery-fenced" : "recovery-pending",
+        );
       obligation = undefined;
     }
     attempts += 1;
@@ -356,7 +366,7 @@ export function createBrowserReadinessProbe(): Probe {
     if (result.kind === "ok") return;
     if (result.kind === "unavailable") throw new Error(UNAVAILABLE_ERROR);
     obligation = result.obligation;
-    throw new Error(CLEANUP_ERROR);
+    throw cleanupError("attempt-cleanup");
   };
   return (executable) => {
     if (process.platform !== "linux" || !EXECUTABLES.has(executable)) {

@@ -175,6 +175,11 @@ describe("Browser readiness temporary-state lifecycle", () => {
     await expect(probe("/usr/bin/chromium")).rejects.toThrow(
       "BROWSER_PROBE_CLEANUP_INCOMPLETE",
     );
+    const fenced = await probe("/usr/bin/chromium").catch((error: Error) => error);
+    expect(fenced).toMatchObject({
+      message: "BROWSER_PROBE_CLEANUP_INCOMPLETE",
+      probePhase: "recovery-fenced",
+    });
     expect(children.length).toBe(1);
   });
 
@@ -254,9 +259,11 @@ describe("Browser readiness temporary-state lifecycle", () => {
     await expect(probe("/usr/bin/chromium")).rejects.toThrow(
       "BROWSER_PROBE_CLEANUP_INCOMPLETE",
     );
-    await expect(probe("/usr/bin/chromium")).rejects.toThrow(
-      "BROWSER_PROBE_CLEANUP_INCOMPLETE",
-    );
+    const pending = await probe("/usr/bin/chromium").catch((error: Error) => error);
+    expect(pending).toMatchObject({
+      message: "BROWSER_PROBE_CLEANUP_INCOMPLETE",
+      probePhase: "recovery-pending",
+    });
     expect(children).toHaveLength(1);
   });
 
