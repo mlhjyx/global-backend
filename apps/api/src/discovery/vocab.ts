@@ -10,6 +10,8 @@
  * 有了它，中文 ICP 也能驱动 Wikidata/OSM 结构化发现，不再需要手工塞英文计划。
  */
 
+import { PHOTOVOLTAIC_TERMS } from './isic-seed';
+
 /** 行业词（归一为小写）→ Wikidata industry QID。 */
 export const INDUSTRY_QIDS: Record<string, string> = {
   // 金属加工 / 制造
@@ -18,42 +20,28 @@ export const INDUSTRY_QIDS: Record<string, string> = {
   金属加工: 'Q19541171',
   'metal fabrication': 'Q19541171',
   metalworking: 'Q19541171',
-  钣金: 'Q1857831',
-  'sheet metal': 'Q1857831',
-  'sheet metal fabrication': 'Q1857831',
-  机械制造: 'Q1857831',
-  'mechanical engineering': 'Q1857831',
-  机床: 'Q1857831',
-  'machine tool': 'Q1857831',
-  'machine tools': 'Q1857831',
+  机械制造: 'Q1957908',
+  'mechanical engineering': 'Q1957908',
+  机床: 'Q1957908',
+  'machine tool': 'Q1957908',
+  'machine tools': 'Q1957908',
   汽车: 'Q190117',
   automotive: 'Q190117',
   'automotive industry': 'Q190117',
   汽车零部件: 'Q190117',
   航空航天: 'Q765633',
   aerospace: 'Q765633',
-  半导体: 'Q11661',
-  semiconductor: 'Q11661',
+  半导体: 'Q2986369',
+  semiconductor: 'Q2986369',
   电子: 'Q11650',
   electronics: 'Q11650',
   新能源: 'Q12705122',
   'renewable energy': 'Q12705122',
-  钢铁: 'Q206894',
-  steel: 'Q206894',
-  'steel industry': 'Q206894',
-  // 光伏（Q192127 photovoltaics）与工业分销/批发（Q220695 wholesale）：
-  // 这两个窄编号替代此前 LLM 把"太阳能光伏"归到半导体制造（Q11661）、
-  // 把泵类渠道归到机械制造（Q1857831）的宽口径映射。
-  光伏: 'Q192127',
-  太阳能: 'Q192127',
-  太阳能光伏: 'Q192127',
-  光伏组件: 'Q192127',
-  光伏设备: 'Q192127',
-  photovoltaic: 'Q192127',
-  photovoltaics: 'Q192127',
-  solar: 'Q192127',
-  'solar energy': 'Q192127',
-  'solar power': 'Q192127',
+  钢铁: 'Q2285982',
+  steel: 'Q2285982',
+  'steel industry': 'Q2285982',
+  // Verified word-level PV identity; shared ISIC 279 itself is intentionally unbound.
+  ...Object.fromEntries(PHOTOVOLTAIC_TERMS.map((term) => [term, 'Q192127'])),
   工业品分销: 'Q220695',
   工业分销商: 'Q220695',
   机械设备批发: 'Q220695',

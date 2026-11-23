@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { queryTaxonomyTerms } from './query-taxonomy-terms';
+import { queryableIndustryNodes, queryTaxonomyTerms } from './query-taxonomy-terms';
+import { ISIC_SEED } from './isic-seed';
 import {
   MAX_QUERY_TAXONOMY_COUNTRY_TERMS,
   MAX_QUERY_TAXONOMY_INDUSTRY_TERMS,
@@ -41,5 +42,31 @@ describe('queryTaxonomyTerms', () => {
         country: [undefined, 'DE'],
       }),
     ).toEqual({ industryTerms: ['pumps', 'valves'], countryTerms: ['DE'] });
+  });
+});
+
+
+describe('Wikidata pivots retain the requested scope of shared ISIC 279', () => {
+  const shared = ISIC_SEED.find((node) => node.code === '279')!;
+  const qids = (term: string, node = shared) =>
+    queryableIndustryNodes([node], 'enforce', [term]).map((value) => value.wikidataQid);
+
+  it.each(['充电桩', '充电设备', '储能变流器', 'ev charging', 'charging station'])(
+    'does not turn the non-PV term %s into a photovoltaics query', (term) => {
+      expect(qids(term)).toEqual([]);
+    },
+  );
+  it.each(['太阳能光伏', '光伏组件制造', 'solar photovoltaics', 'solarmodule', 'panneaux solaires'])(
+    'retains the verified PV pivot for %s without binding the shared node', (term) => {
+      expect(qids(term, { ...shared, wikidataQid: undefined })).toEqual(['Q192127']);
+    },
+  );
+  it('does not trust a persisted whole-node PV binding for a charging request', () => {
+    expect(qids('ev charging', { ...shared, wikidataQid: 'Q192127' })).toEqual([]);
+  });
+  it('does not mutate the canonical node when resolving a PV request', () => {
+    const node = { ...shared, wikidataQid: undefined };
+    expect(qids('光伏组件制造', node)).toEqual(['Q192127']);
+    expect(node.wikidataQid).toBeUndefined();
   });
 });

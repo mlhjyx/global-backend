@@ -4,6 +4,7 @@ import { CPV_SEED } from './cpv-seed';
 import { resolveIcpToCpv, type CpvTaxonomyPort } from './icp-to-cpv';
 import { cpvSubtreePrefix, type CanonicalNode } from './taxonomy-resolver';
 import { BROAD_WIKIDATA_INDUSTRY_QIDS, isSpecificIndustryNode } from './wikidata-industry-scope';
+import { queryableIndustryNodes } from './query-taxonomy-terms';
 
 const norm = (s: string): string => s.normalize('NFC').toLowerCase().trim();
 
@@ -224,11 +225,23 @@ describe('召回修复：错误别名纠正与窄 Wikidata 行业编号', () => 
     expect(node?.code).toBe(code);
   });
 
-  it('光伏与批发节点绑定窄 Wikidata 编号，且不在宽口径兜底集合中', () => {
-    expect(ISIC_SEED.find((n) => n.code === '279')?.wikidataQid).toBe('Q192127');
+  it('共用电气节点不携带光伏身份，只有光伏词面获得枢轴', async () => {
+    const photovoltaic = await port.resolve('industry', '太阳能光伏');
+    const charging = await port.resolve('industry', 'ev charging');
+    expect(photovoltaic?.wikidataQid).toBeNull();
+    expect(charging?.wikidataQid).toBeNull();
+    expect(queryableIndustryNodes([photovoltaic!], 'enforce', ['太阳能光伏']).map((n) => n.wikidataQid)).toEqual(['Q192127']);
+    expect(queryableIndustryNodes([charging!], 'enforce', ['ev charging'])).toEqual([]);
     expect(ISIC_SEED.find((n) => n.code === '4659')?.wikidataQid).toBe('Q220695');
     expect(BROAD_WIKIDATA_INDUSTRY_QIDS.has('Q192127')).toBe(false);
     expect(BROAD_WIKIDATA_INDUSTRY_QIDS.has('Q220695')).toBe(false);
+  });
+
+  it('归一输出不再把行业指向铁路站、信息技术或飓风季', async () => {
+    expect((await port.resolve('industry', '机械制造'))?.wikidataQid).toBe('Q1957908');
+    expect((await port.resolve('industry', '半导体'))?.wikidataQid).toBe('Q2986369');
+    expect((await port.resolve('industry', '钢铁'))?.wikidataQid).toBeNull();
+    expect((await port.resolve('industry', '钣金'))?.wikidataQid).toBeNull();
   });
 
   it('泵阀贸易仍留在 28（保留 TED CPV 冷路径），但两位 division 不作为 Wikidata 枢轴', async () => {

@@ -10,17 +10,22 @@
  */
 export const BROAD_WIKIDATA_INDUSTRY_QIDS: ReadonlySet<string> = new Set(['Q187939']);
 
+/** Official entity identities are a station, IT, and a hurricane season, not these industries. */
+export const INVALID_LEGACY_WIKIDATA_INDUSTRY_QIDS: ReadonlySet<string> = new Set([
+  'Q1857831', 'Q11661', 'Q206894',
+]);
+
 /**
  * 内置词表回退路径没有"节点粒度"可依据，只能按 QID 判断；它的表本身就是行业大类，
  * 因此对回退结果采用更宽的拒绝集合。注入路径（活动层已按节点码过滤）不使用本集合，
- * 以免误伤映射到宽 QID 的具体节点（例如钣金 2599 也映射到 Q1857831）。
+ * 已知语义错误的旧实体由单独集合无条件拒绝，不因注入或 off 模式放行。
  */
 export const BROAD_FALLBACK_INDUSTRY_QIDS: ReadonlySet<string> = new Set([
   ...BROAD_WIKIDATA_INDUSTRY_QIDS,
-  'Q1857831',
+  'Q1957908',
   'Q11650',
-  'Q11661',
-  'Q206894',
+  'Q2986369',
+  'Q2285982',
   'Q19541171',
   'Q190117',
   'Q12705122',
@@ -54,7 +59,10 @@ export function applyBroadIndustryGate(
   mode: WikidataBroadIndustryMode,
   broad: ReadonlySet<string> = BROAD_WIKIDATA_INDUSTRY_QIDS,
 ): { accepted: string[]; rejected: string[] } {
-  if (mode === 'off') return { accepted: [...qids], rejected: [] };
+  if (mode === 'off') return {
+    accepted: qids.filter((qid) => !INVALID_LEGACY_WIKIDATA_INDUSTRY_QIDS.has(qid.trim())),
+    rejected: qids.filter((qid) => INVALID_LEGACY_WIKIDATA_INDUSTRY_QIDS.has(qid.trim())),
+  };
   const accepted: string[] = [];
   const rejected: string[] = [];
   const seen = new Set<string>();
@@ -62,7 +70,7 @@ export function applyBroadIndustryGate(
     const qid = raw.trim();
     if (!qid || seen.has(qid)) continue;
     seen.add(qid);
-    if (broad.has(qid)) rejected.push(qid);
+    if (broad.has(qid) || INVALID_LEGACY_WIKIDATA_INDUSTRY_QIDS.has(qid)) rejected.push(qid);
     else accepted.push(qid);
   }
   return { accepted, rejected };

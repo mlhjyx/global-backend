@@ -33,15 +33,15 @@ describe('Wikidata 行业枢轴闸门', () => {
     });
   });
 
-  it('回退集合拒绝更多行业大类，注入集合只拒绝制造业根', () => {
-    expect(BROAD_WIKIDATA_INDUSTRY_QIDS.has('Q1857831')).toBe(false);
-    expect(BROAD_FALLBACK_INDUSTRY_QIDS.has('Q1857831')).toBe(true);
-    expect(applyBroadIndustryGate(['Q1857831', 'Q192127'], 'enforce', BROAD_FALLBACK_INDUSTRY_QIDS)).toEqual({
+  it('回退集合拒绝已核验的机械大类，注入集合只按宽度拒绝制造业根', () => {
+    expect(BROAD_WIKIDATA_INDUSTRY_QIDS.has('Q1957908')).toBe(false);
+    expect(BROAD_FALLBACK_INDUSTRY_QIDS.has('Q1957908')).toBe(true);
+    expect(applyBroadIndustryGate(['Q1957908', 'Q192127'], 'enforce', BROAD_FALLBACK_INDUSTRY_QIDS)).toEqual({
       accepted: ['Q192127'],
-      rejected: ['Q1857831'],
+      rejected: ['Q1957908'],
     });
-    expect(applyBroadIndustryGate(['Q1857831'], 'enforce')).toEqual({
-      accepted: ['Q1857831'],
+    expect(applyBroadIndustryGate(['Q1957908'], 'enforce')).toEqual({
+      accepted: ['Q1957908'],
       rejected: [],
     });
   });
@@ -56,10 +56,23 @@ describe('Wikidata 行业枢轴闸门', () => {
 
   it('节点级判断：字母 section 与两位 division 视为过宽，三位以上数字码视为具体', () => {
     expect(isSpecificIndustryNode({ code: 'C', wikidataQid: 'Q187939' })).toBe(false);
-    expect(isSpecificIndustryNode({ code: '28', wikidataQid: 'Q1857831' })).toBe(false);
+    expect(isSpecificIndustryNode({ code: '28', wikidataQid: 'Q1957908' })).toBe(false);
     expect(isSpecificIndustryNode({ code: '279', wikidataQid: 'Q192127' })).toBe(true);
-    expect(isSpecificIndustryNode({ code: '2610', wikidataQid: 'Q11661' })).toBe(true);
+    expect(isSpecificIndustryNode({ code: '2610', wikidataQid: 'Q2986369' })).toBe(true);
     expect(isSpecificIndustryNode({ code: '4659', wikidataQid: 'Q220695' })).toBe(true);
     expect(isSpecificIndustryNode({ code: '279', wikidataQid: null })).toBe(false);
   });
+});
+
+
+describe('known unrelated legacy entities never become industry pivots', () => {
+  it.each(['Q1857831', 'Q11661', 'Q206894'])(
+    'rejects the unrelated entity %s even if the broad-industry switch is off', (qid) => {
+      for (const mode of ['enforce', 'off'] as const) {
+        expect(applyBroadIndustryGate([qid, 'Q192127'], mode)).toEqual({
+          accepted: ['Q192127'], rejected: [qid],
+        });
+      }
+    },
+  );
 });

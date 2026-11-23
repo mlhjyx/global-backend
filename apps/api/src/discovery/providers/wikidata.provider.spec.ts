@@ -3,6 +3,8 @@ import type { DurableExecutionReceipt } from '../../durable-results/durable-exec
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import { parseDiscoveryCompanyResultLineage } from '../company-discovery-lineage';
 import { WikidataDiscoveryProvider } from './wikidata.provider';
+import { ISIC_SEED } from '../isic-seed';
+import { queryableIndustryNodes } from '../query-taxonomy-terms';
 
 const CTX = {
   workspaceId: '00000000-0000-4000-8000-000000000001',
@@ -86,7 +88,7 @@ describe('wikidata provider：宽行业编号闸门', () => {
   it('注入空列表是权威的：不回退到内置词表，并给出过宽原因', async () => {
     const broker = fakeBroker();
     const res = await new WikidataDiscoveryProvider({ broker }).discoverCompanies(
-      query({ _industryQids: [], industry: '制造业', _countryQid: 'Q183' }),
+      query({ _industryQids: [], industry: '光伏', _countryQid: 'Q183' }),
       CTX,
     );
     expect(broker.invokeMock).not.toHaveBeenCalled();
@@ -94,7 +96,7 @@ describe('wikidata provider：宽行业编号闸门', () => {
     expect(res.outcome).toEqual({ errorClass: 'EMPTY_RESULT', reasonCode: 'INDUSTRY_QID_TOO_BROAD' });
   });
 
-  it('回退词表产出的大类编号（如 Q1857831）同样被拒绝', async () => {
+  it('回退词表产出的机械制造大类 Q1957908 同样被拒绝', async () => {
     const broker = fakeBroker();
     const res = await new WikidataDiscoveryProvider({ broker }).discoverCompanies(
       query({ industry: '机械制造', country: 'germany' }),
@@ -104,14 +106,14 @@ describe('wikidata provider：宽行业编号闸门', () => {
     expect(res.outcome).toEqual({ errorClass: 'EMPTY_RESULT', reasonCode: 'INDUSTRY_QID_TOO_BROAD' });
   });
 
-  it('活动层注入的具体节点即使映射到宽 QID 也放行（钣金 2599 → Q1857831）', async () => {
+  it('活动层注入已核验的半导体行业编号正常放行', async () => {
     const broker = fakeBroker();
     const res = await new WikidataDiscoveryProvider({ broker }).discoverCompanies(
-      query({ _industryQids: ['Q1857831'], _countryQid: 'Q183' }),
+      query({ _industryQids: ['Q2986369'], _countryQid: 'Q183' }),
       CTX,
     );
     expect(broker.invokeMock).toHaveBeenCalledOnce();
-    expect(broker.invokeMock.mock.calls[0]![1]).toMatchObject({ industryQids: ['Q1857831'] });
+    expect(broker.invokeMock.mock.calls[0]![1]).toMatchObject({ industryQids: ['Q2986369'] });
     expect(res.outcome).toBeUndefined();
   });
 
@@ -163,4 +165,49 @@ describe('wikidata provider：宽行业编号闸门', () => {
     expect(res.records).toEqual([]);
     expect(res.outcome).toBeUndefined();
   });
+});
+
+
+describe('real taxonomy-to-provider pivot boundaries', () => {
+  it.each(['充电桩', '充电设备', '储能变流器', 'ev charging', 'charging station'])(
+    'does not dispatch photovoltaics for the shared-node term %s', async (term) => {
+      const node = ISIC_SEED.find((value) => value.code === '279')!;
+      const industryQids = queryableIndustryNodes([node], 'enforce', [term])
+        .map((value) => value.wikidataQid).filter(Boolean);
+      const broker = fakeBroker();
+      const result = await new WikidataDiscoveryProvider({ broker }).discoverCompanies(
+        query({ _industryQids: industryQids, industry: term }), CTX,
+      );
+      expect(broker.invokeMock).not.toHaveBeenCalled();
+      expect(result.records).toEqual([]);
+    },
+  );
+  it('still dispatches a verified PV term when the shared node has no global pivot', async () => {
+    const node = { ...ISIC_SEED.find((value) => value.code === '279')!, wikidataQid: undefined };
+    const industryQids = queryableIndustryNodes([node], 'enforce', ['光伏组件制造'])
+      .map((value) => value.wikidataQid).filter(Boolean);
+    const broker = fakeBroker();
+    await new WikidataDiscoveryProvider({ broker }).discoverCompanies(
+      query({ _industryQids: industryQids, industry: '光伏组件制造' }), CTX,
+    );
+    expect(broker.invokeMock).toHaveBeenCalledOnce();
+    expect(broker.invokeMock.mock.calls[0]![1]).toMatchObject({ industryQids: ['Q192127'] });
+  });
+  it('does not recover a keyword pivot after authoritative empty injection', async () => {
+    const broker = fakeBroker();
+    await new WikidataDiscoveryProvider({ broker }).discoverCompanies(
+      query({ _industryQids: [] }, ['photovoltaic']), CTX,
+    );
+    expect(broker.invokeMock).not.toHaveBeenCalled();
+  });
+  it.each(['Q1857831', 'Q11661', 'Q206894'])(
+    'does not dispatch the unrelated persisted legacy entity %s', async (qid) => {
+      const broker = fakeBroker();
+      const result = await new WikidataDiscoveryProvider({ broker }).discoverCompanies(
+        query({ _industryQids: [qid] }), CTX,
+      );
+      expect(broker.invokeMock).not.toHaveBeenCalled();
+      expect(result.records).toEqual([]);
+    },
+  );
 });

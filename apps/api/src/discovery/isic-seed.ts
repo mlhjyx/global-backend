@@ -42,6 +42,20 @@ export interface IndustryRoleNode {
   aliases: string[];
 }
 
+/** PV-only words shared by the classification seed and the Wikidata word-level pivot. */
+export const PHOTOVOLTAIC_TERMS = [
+  '光伏', '光伏组件', '光伏设备', '光伏产业链',
+  '太阳能', '太阳能电池', '太阳能电池板', '太阳能组件',
+  '太阳能光伏', '光伏组件制造', '太阳能电池片制造', '光伏电池制造',
+  'bipv与光伏建材', '光伏建材', 'solar photovoltaics', 'solar energy equipment manufacturing',
+  'solar', 'solar energy', 'solar power', 'solar panel',
+  'solar panels', 'solar module', 'solar modules', 'photovoltaic',
+  'photovoltaics', 'pv', 'pv modules', 'solar cells',
+  'solarenergie', 'photovoltaik', 'solarmodule', 'energia solare',
+  'fotovoltaico', 'pannelli solari', 'énergie solaire', 'photovoltaïque',
+  'panneaux solaires', 'energía solar', 'fotovoltaica', 'paneles solares',
+] as const;
+
 export const ISIC_SEED: IsicNode[] = [
   // Section C — Manufacturing
   { code: 'C', en: 'Manufacturing', zh: '制造业', de: 'Verarbeitendes Gewerbe', wikidataQid: 'Q187939',
@@ -50,7 +64,7 @@ export const ISIC_SEED: IsicNode[] = [
   // Division 24 — Basic metals
   { code: '24', parent: 'C', en: 'Manufacture of basic metals', zh: '基本金属制造', de: 'Metallerzeugung',
     it: 'Fabbricazione di metalli di base', fr: 'Métallurgie', es: 'Fabricación de metales básicos',
-    crosswalks: { nace: ['24'], naics: ['331'], gb4754: ['31', '32'] }, wikidataQid: 'Q206894',
+    crosswalks: { nace: ['24'], naics: ['331'], gb4754: ['31', '32'] }, // Basic metals is broader than the verified iron-and-steel entity.
     aliases: ['钢铁', 'steel', 'steel industry', 'basic metals', 'metallurgy', '冶金', 'stahl'] },
 
   // Division 25 — Fabricated metal products（钣金/金属加工核心）
@@ -60,7 +74,7 @@ export const ISIC_SEED: IsicNode[] = [
     osmTags: [{ k: 'craft', v: 'metal_construction' }, { k: 'craft', v: 'blacksmith' }],
     aliases: ['金属加工', 'metal fabrication', 'metalworking', 'metallverarbeitung', '金属制品', 'fabricated metal', 'metallbau'] },
   { code: '2599', parent: '25', en: 'Manufacture of other fabricated metal products (sheet metal)', zh: '钣金加工', de: 'Blechbearbeitung',
-    crosswalks: { nace: ['25.99'], naics: ['332999'] }, wikidataQid: 'Q1857831',
+    crosswalks: { nace: ['25.99'], naics: ['332999'] }, // No verified sheet-metal industry entity; do not use a material/station QID.
     osmTags: [{ k: 'craft', v: 'metal_construction' }],
     aliases: ['钣金', 'sheet metal', 'sheet metal fabrication', 'blechbearbeitung', '激光切割', 'laser cutting', '折弯', 'bending', '焊接', 'welding'] },
 
@@ -89,7 +103,7 @@ export const ISIC_SEED: IsicNode[] = [
   // Division 28 — Machinery & equipment（机床/机械制造；泵阀流体词条在此）
   { code: '28', parent: 'C', en: 'Manufacture of machinery and equipment n.e.c.', zh: '通用及专用设备制造', de: 'Maschinenbau',
     it: 'Fabbricazione di macchinari e apparecchiature', fr: 'Fabrication de machines et équipements', es: 'Fabricación de maquinaria y equipo',
-    crosswalks: { cpv: ['42120000', '42130000'], nace: ['28'], naics: ['333'], gb4754: ['34', '35'] }, wikidataQid: 'Q1857831',
+    crosswalks: { cpv: ['42120000', '42130000'], nace: ['28'], naics: ['333'], gb4754: ['34', '35'] }, wikidataQid: 'Q1957908',
     aliases: ['机械制造', 'mechanical engineering', 'machinery', 'maschinenbau', '机床', 'machine tool', 'machine tools', '装备制造', '设备制造',
       'pump', 'pumps', '泵', 'compressor', 'compressors', 'pumps and compressors', 'valve', 'valves', '阀门', '工业阀门', 'ventil', 'ventile',
       '泵阀', '泵阀贸易', '阀门贸易', '泵阀批发', '泵阀经销', '流体设备', 'fluid equipment', 'fluid handling', 'fluid technology', 'fluidtechnik',
@@ -175,7 +189,7 @@ export const ISIC_SEED: IsicNode[] = [
     aliases: ['医疗器械', 'medical device', 'medical devices', 'medical equipment', '医疗设备', 'medtech', 'radiology', '放射', '放射影像', 'imaging', 'medical imaging', 'diagnostic imaging', '医学影像', 'radiology imaging devices'] },
   { code: '2610', parent: '26', en: 'Manufacture of electronic components (semiconductors)', zh: '半导体制造', de: 'Halbleiter',
     it: 'Fabbricazione di componenti elettronici (semiconduttori)', fr: 'Fabrication de composants électroniques (semi-conducteurs)', es: 'Fabricación de componentes electrónicos (semiconductores)',
-    crosswalks: { nace: ['26.11'], naics: ['334413'] }, wikidataQid: 'Q11661',
+    crosswalks: { nace: ['26.11'], naics: ['334413'] }, wikidataQid: 'Q2986369',
     aliases: ['半导体', 'semiconductor', 'semiconductors', 'halbleiter', '芯片', 'chip', '集成电路'] },
 
   // Division 27 — Electrical equipment（电气设备全链）
@@ -218,17 +232,9 @@ export const ISIC_SEED: IsicNode[] = [
     de: 'Herstellung von sonstigen elektrischen Ausrüstungen', it: 'Fabbricazione di altre apparecchiature elettriche',
     fr: "Fabrication d'autres équipements électriques", es: 'Fabricación de otro equipo eléctrico',
     crosswalks: { cpv: ['09331200', '09330000', '09331000', '31600000'], nace: ['27.9'], naics: ['3359'], gb4754: ['38'] },
-    // Q192127 = photovoltaics：窄口径行业枢轴，替代此前 LLM 把"太阳能光伏"归到半导体制造（2610/Q11661）的映射。
-    wikidataQid: 'Q192127',
-    aliases: ['光伏', '光伏组件', '光伏设备', '光伏产业链', '太阳能', '太阳能电池', '太阳能电池板', '太阳能组件',
-      '太阳能光伏', '光伏组件制造', '太阳能电池片制造', '光伏电池制造', 'bipv与光伏建材', '光伏建材',
-      'solar photovoltaics', 'solar energy equipment manufacturing',
-      '充电桩', '充电设备', '电动汽车充电', '储能变流器',
-      'solar', 'solar energy', 'solar power', 'solar panel', 'solar panels', 'solar module', 'solar modules',
-      'photovoltaic', 'photovoltaics', 'pv', 'pv modules', 'solar cells', 'ev charging', 'charging station', 'charging stations',
-      'solarenergie', 'photovoltaik', 'solarmodule', 'ladeinfrastruktur',
-      'energia solare', 'fotovoltaico', 'pannelli solari', 'énergie solaire', 'photovoltaïque', 'panneaux solaires',
-      'energía solar', 'fotovoltaica', 'paneles solares'] },
+    // Shared electrical classification: the original term, not this whole node, selects a PV pivot.
+    aliases: [...PHOTOVOLTAIC_TERMS,
+      '充电桩', '充电设备', '电动汽车充电', '储能变流器', 'ev charging', 'charging station', 'charging stations', 'ladeinfrastruktur'] },
 
   // Section D — 电力、燃气与蒸汽供应（能源公司/公用事业）
   { code: '35', en: 'Electricity, gas, steam and air conditioning supply', zh: '电力、燃气与蒸汽供应', de: 'Energieversorgung',

@@ -1182,7 +1182,7 @@ export function createDiscoveryActivities(deps: {
         try {
           const inds = await taxonomy.resolveMany('industry', industryTerms, resolveOptions);
           if (inds.length) {
-            enriched._industryQids = queryableIndustryNodes(inds).map((n) => n.wikidataQid).filter(Boolean);
+            enriched._industryQids = queryableIndustryNodes(inds, undefined, industryTerms).map((n) => n.wikidataQid).filter(Boolean);
             enriched._osmTags = inds.flatMap((n) => n.osmTags ?? []);
             enriched._industryCodes = inds.map((n) => n.code);
           }
