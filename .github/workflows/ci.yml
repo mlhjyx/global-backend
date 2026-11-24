@@ -212,11 +212,15 @@ jobs:
           docker buildx create --name ci-oci --driver docker-container --use >/dev/null
           cache_args=()
           use_cache=false
+          export_cache=false
           if [[ "${GITHUB_EVENT_NAME}" != "pull_request" || "${PR_IS_FORK}" == "false" ]]; then
             use_cache=true
             echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin >/dev/null
             cache_args+=(--cache-from "type=registry,ref=${CACHE_REF}")
-            cache_args+=(--cache-to "type=registry,ref=${CACHE_REF},mode=max,ignore-error=true")
+            if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]] || ! docker buildx imagetools inspect "${CACHE_REF}" >/dev/null 2>&1; then
+              export_cache=true
+              cache_args+=(--cache-to "type=registry,ref=${CACHE_REF},mode=max,ignore-error=true")
+            fi
           fi
           docker buildx build \
             --build-arg "BUILD_SHA=${BUILD_SHA}" \
@@ -225,7 +229,7 @@ jobs:
             --load \
             "${cache_args[@]}" \
             .
-          if [[ "${use_cache}" == "true" ]] && ! docker buildx imagetools inspect "${CACHE_REF}" >/dev/null 2>&1; then
+          if [[ "${export_cache}" == "true" ]] && ! docker buildx imagetools inspect "${CACHE_REF}" >/dev/null 2>&1; then
             echo "::warning::registry build cache manifest missing after export (${CACHE_REF}); the next run will rebuild cold"
           fi
           test "$(docker image inspect --format '{{.Config.User}}' "${OCI_IMAGE}")" = global
@@ -442,28 +446,14 @@ jobs:
           awk '$1 == "total:" { seen=1; if ($3+0 < 80) exit 1 } END { if (!seen) exit 1 }' "$temporal_cache/coverage.txt"
 
 
-  build-test:
-    name: build · typecheck · test
+  build-test-core:
+    name: build · lint · attestation
     needs: renderer-visual-scope
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     permissions:
       contents: read
-    services:
-      postgres:
-        image: pgvector/pgvector@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
-        env:
-          POSTGRES_USER: global
-          POSTGRES_PASSWORD: global-test-only
-          POSTGRES_DB: global_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U global -d global_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 20
     steps:
       - name: Fail closed when renderer scope evaluation did not succeed
         shell: bash
@@ -513,6 +503,220 @@ jobs:
         if: needs.renderer-visual-scope.outputs.run_code != 'false'
         run: pnpm --filter @global/db generate
 
+      # ch08 §3.4 G9：文件体量（warn 800 / fail 1200）与函数圈复杂度（warn 20 / fail 40），棘轮基线。
+      - name: File and complexity budget gate（G9）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: node scripts/check-file-budgets.mjs
+
+      # K-2（2026-11-12）：每个 API Postgres 套件必须显式接入本工作流，或在
+      # docs/governance/ci-baselines/g15-api-postgres-suites.json 登记带到期日的豁免。
+      - name: API Postgres suite coverage gate（G15）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: node scripts/governance-api-postgres-coverage.mjs verify
+
+      # G16/G17（2026-11-12，审计 A/C/L）：模块依赖只许收紧；RawUnsafe 新增调用必须带理由。
+      - name: Module dependency boundary gate（G16）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: node scripts/governance-module-boundaries.mjs verify
+
+      - name: Unsafe raw SQL gate（G17）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: node scripts/governance-unsafe-raw-sql.mjs verify
+
+      - name: Lint（eslint flat config，typescript-eslint）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: pnpm --filter @global/api lint
+
+      - name: Build 契约包（@global/api 依赖其 dist d.ts，DQ-1）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: pnpm --filter @global/contracts build
+
+      - name: Build（nest build = tsc 全量类型检查）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: pnpm --filter @global/api build
+
+      - name: Site Builder isolated zero-dispatch evaluation boundary
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: pnpm --filter @global/site-builder-eval-runner test
+
+      - name: Evaluate Copy fixed-source impact
+        id: copy-impact
+        run: node scripts/copy-fixed-source-impact.mjs --github-output "$GITHUB_OUTPUT"
+
+      - name: Copy Sonnet recovery fixed-source rebuild（顺序隔离）
+        if: steps.copy-impact.outputs.status == 'CURRENT' && needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: >-
+          COPY_SONNET_RECOVERY_MANIFEST_REBUILD_TEST=1
+          COPY_SONNET_RECOVERY_REBUILD_TEST=1
+          pnpm --filter @global/api exec vitest run
+          src/site-builder/eval/copy-sonnet-recovery-manifest-prep.spec.ts
+          src/site-builder/eval/copy-sonnet-recovery-runtime-binding-prep.spec.ts
+
+      - name: Generate and verify API build attestation
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        shell: bash
+        env:
+          BUILD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          BUILT_AT="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
+          export BUILT_AT
+          RENDERER_RUNTIME="${RUNNER_TEMP}/site-renderer-runtime"
+          DEPENDENCY_INVENTORY="${RUNNER_TEMP}/runtime-production-dependencies.json"
+          node scripts/prepare-site-renderer-runtime.mjs apps/site-renderer "${RENDERER_RUNTIME}"
+          node scripts/verify-runtime-artifact.mjs "${RENDERER_RUNTIME}"
+          pnpm --filter @global/api --filter @global/site-renderer list --prod --depth Infinity --json > "${DEPENDENCY_INVENTORY}"
+          node scripts/generate-runtime-sbom.mjs \
+            "${DEPENDENCY_INVENTORY}" "${BUILD_SHA}" "${BUILT_AT}" \
+            apps/api/dist/runtime-sbom.cdx.json @global/contracts@0.0.1
+          node scripts/generate-runtime-artifact-manifest.mjs \
+            --build-sha "${BUILD_SHA}" \
+            --built-at "${BUILT_AT}" \
+            --api apps/api/dist \
+            --contracts packages/contracts/dist \
+            --renderer "${RENDERER_RUNTIME}" \
+            --sbom apps/api/dist/runtime-sbom.cdx.json \
+            --source api-source=apps/api/src \
+            --source contracts-source=packages/contracts/src \
+            --source database-contract=packages/db/prisma \
+            --source renderer-source="${RENDERER_RUNTIME}" \
+            --output apps/api/dist/artifact-manifest.json
+          node scripts/verify-runtime-artifact.mjs apps/api/dist
+          pnpm exec tsx apps/api/scripts/generate-build-attestation.mts
+
+      # Kept unconditional: the OCI step repeats this check before docker build,
+      # but it is scoped, and generated-file drift must fail every run.
+      - name: Verify build and test steps left the tree clean
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git ls-files --others --exclude-standard)"
+
+  build-test-unit:
+    name: unit tests · ${{ matrix.shard }}/4
+    needs: renderer-visual-scope
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Fail closed when renderer scope evaluation did not succeed
+        shell: bash
+        env:
+          SCOPE_RESULT: ${{ needs.renderer-visual-scope.result }}
+        run: |
+          set -euo pipefail
+          if [[ "$SCOPE_RESULT" != "success" ]]; then
+            echo "::error::renderer visual scope did not succeed: $SCOPE_RESULT"
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22 # engines: node>=20
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: pnpm install --frozen-lockfile
+
+      - name: Prisma generate（test 依赖 @prisma/client 类型）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: pnpm --filter @global/db generate
+
+      - name: Build 契约包（@global/api 依赖其 dist d.ts，DQ-1）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: pnpm --filter @global/contracts build
+
+      - name: Build API（部分单测读取 apps/api/dist 产物）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: pnpm --filter @global/api build
+
+      - name: Test（vitest 纯单测）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        env:
+          APP_DATABASE_URL: ""
+        run: pnpm --filter @global/api exec vitest run --shard=${{ matrix.shard }}/4
+
+      - name: Verify unit tests left the tree clean
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --exit-code
+          test -z "$(git ls-files --others --exclude-standard)"
+
+  build-test-pg:
+    name: postgres semantics · permissions
+    needs: renderer-visual-scope
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: pgvector/pgvector@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+        env:
+          POSTGRES_USER: global
+          POSTGRES_PASSWORD: global-test-only
+          POSTGRES_DB: global_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U global -d global_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Fail closed when renderer scope evaluation did not succeed
+        shell: bash
+        env:
+          SCOPE_RESULT: ${{ needs.renderer-visual-scope.result }}
+        run: |
+          set -euo pipefail
+          if [[ "$SCOPE_RESULT" != "success" ]]; then
+            echo "::error::renderer visual scope did not succeed: $SCOPE_RESULT"
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22 # engines: node>=20
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        if: needs.renderer-visual-scope.outputs.run_code != 'false' || needs.renderer-visual-scope.outputs.run_db_tests == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Prisma generate
+        if: needs.renderer-visual-scope.outputs.run_code != 'false' || needs.renderer-visual-scope.outputs.run_db_tests == 'true'
+        run: pnpm --filter @global/db generate
+
+      - name: Build 契约包（@global/api 依赖其 dist d.ts，DQ-1）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: pnpm --filter @global/contracts build
+
       # ch08 §3.1.7 漂移门：datamodel ⇄ 迁移链必须零差异；历史 SQL-only 结构按基线清单登记
       # （owner + 到期日，只许收紧）。影子库只承载迁移重放，不触碰业务库。
       - name: Prisma drift gate（datamodel ⇄ migrations，基线允许清单）
@@ -539,26 +743,6 @@ jobs:
         env:
           PRISMA_CIGATE_FROM_URL: postgresql://global:global-test-only@127.0.0.1:5432/global_test
         run: node packages/db/scripts/rls-catalog-gate.mjs
-
-      # ch08 §3.4 G9：文件体量（warn 800 / fail 1200）与函数圈复杂度（warn 20 / fail 40），棘轮基线。
-      - name: File and complexity budget gate（G9）
-        if: needs.renderer-visual-scope.outputs.run_code != 'false'
-        run: node scripts/check-file-budgets.mjs
-
-      # K-2（2026-11-12）：每个 API Postgres 套件必须显式接入本工作流，或在
-      # docs/governance/ci-baselines/g15-api-postgres-suites.json 登记带到期日的豁免。
-      - name: API Postgres suite coverage gate（G15）
-        if: needs.renderer-visual-scope.outputs.run_code != 'false'
-        run: node scripts/governance-api-postgres-coverage.mjs verify
-
-      # G16/G17（2026-11-12，审计 A/C/L）：模块依赖只许收紧；RawUnsafe 新增调用必须带理由。
-      - name: Module dependency boundary gate（G16）
-        if: needs.renderer-visual-scope.outputs.run_code != 'false'
-        run: node scripts/governance-module-boundaries.mjs verify
-
-      - name: Unsafe raw SQL gate（G17）
-        if: needs.renderer-visual-scope.outputs.run_code != 'false'
-        run: node scripts/governance-unsafe-raw-sql.mjs verify
 
       - name: Runtime lease principal PostgreSQL permissions
         if: needs.renderer-visual-scope.outputs.run_code != 'false'
@@ -662,22 +846,6 @@ jobs:
           restore_app_role
           trap - EXIT
 
-      - name: Lint（eslint flat config，typescript-eslint）
-        if: needs.renderer-visual-scope.outputs.run_code != 'false'
-        run: pnpm --filter @global/api lint
-
-      - name: Build 契约包（@global/api 依赖其 dist d.ts，DQ-1）
-        if: needs.renderer-visual-scope.outputs.run_code != 'false'
-        run: pnpm --filter @global/contracts build
-
-      - name: Build（nest build = tsc 全量类型检查）
-        if: needs.renderer-visual-scope.outputs.run_code != 'false'
-        run: pnpm --filter @global/api build
-
-      - name: Test（vitest 纯单测）
-        if: needs.renderer-visual-scope.outputs.run_code != 'false'
-        run: pnpm --filter @global/api test
-
       - name: Suppression lock Prisma PostgreSQL semantics
         if: needs.renderer-visual-scope.outputs.run_code != 'false'
         env:
@@ -748,10 +916,6 @@ jobs:
             src/enrichment/safety/enrichment-execution.repository.postgres.spec.ts \
             src/seller-knowledge/seller-document-claims.postgres.spec.ts \
             src/seller-knowledge/document-claim-gated-consumers.postgres.spec.ts
-
-      - name: Site Builder isolated zero-dispatch evaluation boundary
-        if: needs.renderer-visual-scope.outputs.run_code != 'false'
-        run: pnpm --filter @global/site-builder-eval-runner test
 
       # Raw ingestion and the database writer bind each record to the same source_policy
       # (company-site fallback, most specific site policy, SUSPENDED first). The database was
@@ -858,6 +1022,49 @@ jobs:
           SANCTIONS_OPERATOR_REFRESH_TEST_APP_DATABASE_URL: postgresql://app_user:app_pw@127.0.0.1:5432/global_test
         run: pnpm --filter @global/api exec vitest run src/sanctions/sanctions-operator-refresh.postgres.spec.ts
 
+  build-test-pg-disposable:
+    name: postgres disposable · activation & pool cap
+    needs: renderer-visual-scope
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Fail closed when renderer scope evaluation did not succeed
+        shell: bash
+        env:
+          SCOPE_RESULT: ${{ needs.renderer-visual-scope.result }}
+        run: |
+          set -euo pipefail
+          if [[ "$SCOPE_RESULT" != "success" ]]; then
+            echo "::error::renderer visual scope did not succeed: $SCOPE_RESULT"
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22 # engines: node>=20
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: pnpm install --frozen-lockfile
+
+      - name: Prisma generate
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: pnpm --filter @global/db generate
+
+      - name: Build 契约包（@global/api 依赖其 dist d.ts，DQ-1）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: pnpm --filter @global/contracts build
+
       # Release B of governed Discovery company materialization needs a database that has never
       # been activated, so it runs on its own empty PostgreSQL (same pinned image, loopback only,
       # removed afterwards). The suite migrates it to the release before activation, proves a v1
@@ -932,74 +1139,128 @@ jobs:
           fi
           pnpm --filter @global/api exec vitest run src/discovery/discovery-run-pool-cap.postgres.spec.ts
 
+  build-test-manufacturer:
+    name: manufacturer HTML · MinIO
+    needs: renderer-visual-scope
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Fail closed when renderer scope evaluation did not succeed
+        shell: bash
+        env:
+          SCOPE_RESULT: ${{ needs.renderer-visual-scope.result }}
+        run: |
+          set -euo pipefail
+          if [[ "$SCOPE_RESULT" != "success" ]]; then
+            echo "::error::renderer visual scope did not succeed: $SCOPE_RESULT"
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22 # engines: node>=20
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: pnpm install --frozen-lockfile
+
+      - name: Prisma generate
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: pnpm --filter @global/db generate
+
+      - name: Build 契约包（@global/api 依赖其 dist d.ts，DQ-1）
+        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+        run: pnpm --filter @global/contracts build
+
       - name: Manufacturer HTML producer, Broker, PostgreSQL and MinIO contract
         if: needs.renderer-visual-scope.outputs.run_code != 'false'
         shell: bash
         env:
           APP_DATABASE_URL: ""
+          PR_IS_FORK: ${{ github.event.pull_request.head.repo.fork }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           docker pull pgvector/pgvector@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
-          docker pull docker.io/library/golang@sha256:ab1d1823abb55a9504d2e3e003b75b36dbeb1cbcc4c92593d85a84ee46becc6c
-          docker pull docker.io/library/debian@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
-          # Runner source-builds the pinned official MinIO release into a task-owned image.
+          CACHE_REF="ghcr.io/${GITHUB_REPOSITORY}-buildcache:manufacturer-minio"
+          if [[ "${GITHUB_EVENT_NAME}" != "pull_request" || "${PR_IS_FORK}" == "false" ]]; then
+            docker buildx create --name ci-minio --driver docker-container --use >/dev/null
+            echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin >/dev/null
+            export MANUFACTURER_MINIO_BUILDX_CACHE_FROM="type=registry,ref=${CACHE_REF}"
+            if [[ "${GITHUB_EVENT_NAME}" != "pull_request" ]] || ! docker buildx imagetools inspect "${CACHE_REF}" >/dev/null 2>&1; then
+              export MANUFACTURER_MINIO_BUILDX_CACHE_TO="type=registry,ref=${CACHE_REF},mode=max,ignore-error=true"
+            fi
+          else
+            docker pull docker.io/library/golang@sha256:ab1d1823abb55a9504d2e3e003b75b36dbeb1cbcc4c92593d85a84ee46becc6c
+            docker pull docker.io/library/debian@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+          fi
+          # Runner source-builds the pinned official MinIO release into a task-owned image
+          # (with BuildKit layer cache from GHCR when available; ownership & binary version
+          # are still strictly verified per run).
           # Runs src/discovery/manufacturer-network.postgres.spec.ts against its
           # own never-used global_test database and encrypted/versioned bucket.
           pnpm --filter @global/api exec tsx scripts/test-manufacturer-network-postgres.mts
 
-      - name: Evaluate Copy fixed-source impact
-        id: copy-impact
-        run: node scripts/copy-fixed-source-impact.mjs --github-output "$GITHUB_OUTPUT"
-
-      - name: Copy Sonnet recovery fixed-source rebuild（顺序隔离）
-        if: steps.copy-impact.outputs.status == 'CURRENT' && needs.renderer-visual-scope.outputs.run_code != 'false'
-        run: >-
-          COPY_SONNET_RECOVERY_MANIFEST_REBUILD_TEST=1
-          COPY_SONNET_RECOVERY_REBUILD_TEST=1
-          pnpm --filter @global/api exec vitest run
-          src/site-builder/eval/copy-sonnet-recovery-manifest-prep.spec.ts
-          src/site-builder/eval/copy-sonnet-recovery-runtime-binding-prep.spec.ts
-
-      - name: Generate and verify API build attestation
-        if: needs.renderer-visual-scope.outputs.run_code != 'false'
+  build-test:
+    name: build · typecheck · test
+    needs:
+      - renderer-visual-scope
+      - build-test-core
+      - build-test-unit
+      - build-test-pg
+      - build-test-pg-disposable
+      - build-test-manufacturer
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Fail closed when renderer scope evaluation did not succeed
         shell: bash
         env:
-          BUILD_SHA: ${{ github.sha }}
+          SCOPE_RESULT: ${{ needs.renderer-visual-scope.result }}
         run: |
           set -euo pipefail
-          BUILT_AT="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
-          export BUILT_AT
-          RENDERER_RUNTIME="${RUNNER_TEMP}/site-renderer-runtime"
-          DEPENDENCY_INVENTORY="${RUNNER_TEMP}/runtime-production-dependencies.json"
-          node scripts/prepare-site-renderer-runtime.mjs apps/site-renderer "${RENDERER_RUNTIME}"
-          node scripts/verify-runtime-artifact.mjs "${RENDERER_RUNTIME}"
-          pnpm --filter @global/api --filter @global/site-renderer list --prod --depth Infinity --json > "${DEPENDENCY_INVENTORY}"
-          node scripts/generate-runtime-sbom.mjs \
-            "${DEPENDENCY_INVENTORY}" "${BUILD_SHA}" "${BUILT_AT}" \
-            apps/api/dist/runtime-sbom.cdx.json @global/contracts@0.0.1
-          node scripts/generate-runtime-artifact-manifest.mjs \
-            --build-sha "${BUILD_SHA}" \
-            --built-at "${BUILT_AT}" \
-            --api apps/api/dist \
-            --contracts packages/contracts/dist \
-            --renderer "${RENDERER_RUNTIME}" \
-            --sbom apps/api/dist/runtime-sbom.cdx.json \
-            --source api-source=apps/api/src \
-            --source contracts-source=packages/contracts/src \
-            --source database-contract=packages/db/prisma \
-            --source renderer-source="${RENDERER_RUNTIME}" \
-            --output apps/api/dist/artifact-manifest.json
-          node scripts/verify-runtime-artifact.mjs apps/api/dist
-          pnpm exec tsx apps/api/scripts/generate-build-attestation.mts
+          if [[ "$SCOPE_RESULT" != "success" ]]; then
+            echo "::error::renderer visual scope did not succeed: $SCOPE_RESULT"
+            exit 1
+          fi
 
-      # Kept unconditional: the OCI step repeats this check before docker build,
-      # but it is scoped, and generated-file drift must fail every run.
-      - name: Verify build and test steps left the tree clean
+      - name: Fail closed when any parallel build or test lane did not succeed
         shell: bash
+        env:
+          CORE_RESULT: ${{ needs.build-test-core.result }}
+          UNIT_RESULT: ${{ needs.build-test-unit.result }}
+          PG_RESULT: ${{ needs.build-test-pg.result }}
+          PG_DISPOSABLE_RESULT: ${{ needs.build-test-pg-disposable.result }}
+          MANUFACTURER_RESULT: ${{ needs.build-test-manufacturer.result }}
         run: |
           set -euo pipefail
-          git diff --exit-code
-          test -z "$(git ls-files --others --exclude-standard)"
+          for pair in \
+            "build-test-core:${CORE_RESULT}" \
+            "build-test-unit:${UNIT_RESULT}" \
+            "build-test-pg:${PG_RESULT}" \
+            "build-test-pg-disposable:${PG_DISPOSABLE_RESULT}" \
+            "build-test-manufacturer:${MANUFACTURER_RESULT}"; do
+            lane="${pair%%:*}"
+            status="${pair#*:}"
+            if [[ "$status" != "success" ]]; then
+              echo "::error::parallel lane ${lane} did not succeed: ${status}"
+              exit 1
+            fi
+          done
 
   contracts:
     name: contracts · drift · lint · breaking

@@ -254,6 +254,78 @@ function validateCodeownerProtection(policy, repositoryContext, issues) {
   }
 }
 
+function isValidInternalNeedsList(value) {
+  if (value === undefined) return true;
+  if (!Array.isArray(value) || value.length === 0) return false;
+  return value.every((item) => isNonEmptyString(item)) && uniqueStrings(value);
+}
+
+function validateJobNeeds(
+  implementation,
+  job,
+  jobs,
+  requiredContexts,
+  issues,
+) {
+  const allowedInternalNeeds = asArray(implementation.allowed_internal_needs);
+  const allowedSet = new Set(allowedInternalNeeds);
+  for (const dependencyId of job.needs) {
+    const dependency = jobs.get(dependencyId);
+    if (dependency && requiredContexts.includes(dependency.name)) {
+      continue;
+    }
+    if (!dependency || !allowedSet.has(dependencyId)) {
+      issues.push(
+        issue(
+          "REQUIRED_CONTEXT_NEEDS_UNPROTECTED",
+          `${implementation.workflow} job ${job.id} depends on non-required job ${dependencyId}`,
+        ),
+      );
+      continue;
+    }
+    if (dependency.condition !== "${{ !cancelled() }}") {
+      issues.push(
+        issue(
+          "REQUIRED_CONTEXT_INTERNAL_NEED_CONDITIONAL",
+          `${implementation.workflow} internal dependency ${dependencyId} of ${job.id} must use exact invariant if: \${{ !cancelled() }}`,
+        ),
+      );
+    }
+    if (dependency.continueOnError !== null) {
+      issues.push(
+        issue(
+          "REQUIRED_CONTEXT_INTERNAL_NEED_CONTINUE_ON_ERROR",
+          `${implementation.workflow} internal dependency ${dependencyId} of ${job.id} must not set continue-on-error`,
+        ),
+      );
+    }
+    const invalidSubDep =
+      dependency.needs.length === 0 ||
+      dependency.needs.some((subId) => {
+        const subJob = jobs.get(subId);
+        return !subJob || !requiredContexts.includes(subJob.name);
+      });
+    if (invalidSubDep) {
+      issues.push(
+        issue(
+          "REQUIRED_CONTEXT_NEEDS_UNPROTECTED",
+          `${implementation.workflow} internal dependency ${dependencyId} of ${job.id} must depend only on required context jobs`,
+        ),
+      );
+    }
+  }
+  for (const declaredInternal of allowedInternalNeeds) {
+    if (!job.needs.includes(declaredInternal)) {
+      issues.push(
+        issue(
+          "REQUIRED_CONTEXT_INTERNAL_NEED_UNUSED",
+          `${implementation.workflow} job ${job.id} declares allowed_internal_needs entry ${declaredInternal} not present in needs`,
+        ),
+      );
+    }
+  }
+}
+
 export function validateRequiredContexts(
   policy,
   workflows = new Map(),
@@ -314,7 +386,8 @@ export function validateRequiredContexts(
         !isNonEmptyString(item.workflow) ||
         !isNonEmptyString(item.event) ||
         (item.allowed_job_if !== undefined &&
-          !isNonEmptyString(item.allowed_job_if)),
+          !isNonEmptyString(item.allowed_job_if)) ||
+        !isValidInternalNeedsList(item.allowed_internal_needs),
     ) ||
     !uniqueStrings(implementationNames)
   ) {
@@ -402,17 +475,13 @@ export function validateRequiredContexts(
             ),
           );
         }
-        for (const dependencyId of job.needs) {
-          const dependency = jobs.get(dependencyId);
-          if (!dependency || !requiredContexts.includes(dependency.name)) {
-            issues.push(
-              issue(
-                "REQUIRED_CONTEXT_NEEDS_UNPROTECTED",
-                `${implementation.workflow} job ${job.id} depends on non-required job ${dependencyId}`,
-              ),
-            );
-          }
-        }
+        validateJobNeeds(
+          implementation,
+          job,
+          jobs,
+          requiredContexts,
+          issues,
+        );
       }
     }
   }

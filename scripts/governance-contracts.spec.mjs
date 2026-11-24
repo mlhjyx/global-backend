@@ -29,6 +29,7 @@ import "./verify-platform-authority-policy-import.spec.mjs";
 import "./execution-authority-policy.spec.mjs";
 import "./execution-authority-wire-dispatch.spec.mjs";
 import "./governance-changelog-fragments.spec.mjs";
+import "./pr-body-from-changelog.spec.mjs";
 import "./frames/recall-audit.spec.mjs";
 import "./metrics/capture-recapture.test.mjs";
 import "./metrics/frame-registry.test.mjs";
@@ -1287,6 +1288,107 @@ test("required-context policy fails when a repository workflow drops a named con
         repositoryContext,
       ),
     ).includes("REQUIRED_CONTEXT_NEEDS_UNPROTECTED"),
+  );
+
+  const notCancelledCondition = "${{ !cancelled() }}";
+  const fanoutPolicy = {
+    ...policy,
+    required_contexts: [
+      "renderer visual scope",
+      "build · typecheck · test",
+      "governance · traceability · release",
+    ],
+    context_implementations: [
+      {
+        name: "renderer visual scope",
+        workflow: ".github/workflows/ci.yml",
+        event: "pull_request",
+      },
+      {
+        name: "build · typecheck · test",
+        workflow: ".github/workflows/ci.yml",
+        event: "pull_request",
+        allowed_job_if: notCancelledCondition,
+        allowed_internal_needs: ["build-lane"],
+      },
+      policy.context_implementations[1],
+    ],
+  };
+  const validFanout = new Map(workflows);
+  validFanout.set(
+    ".github/workflows/ci.yml",
+    [
+      "on:",
+      "  pull_request:",
+      "jobs:",
+      "  scope:",
+      "    name: renderer visual scope",
+      "  build-lane:",
+      "    name: build lane",
+      "    needs: scope",
+      `    if: ${notCancelledCondition}`,
+      "  build:",
+      "    name: build · typecheck · test",
+      `    if: ${notCancelledCondition}`,
+      "    needs:",
+      "      - scope",
+      "      - build-lane",
+      "",
+    ].join("\n"),
+  );
+  const validFanoutCodes = issueCodes(
+    validateRequiredContexts(fanoutPolicy, validFanout, repositoryContext),
+  );
+  assert.ok(!validFanoutCodes.includes("REQUIRED_CONTEXT_NEEDS_UNPROTECTED"));
+  assert.ok(
+    !validFanoutCodes.includes("REQUIRED_CONTEXT_INTERNAL_NEED_CONDITIONAL"),
+  );
+  assert.ok(!validFanoutCodes.includes("REQUIRED_CONTEXT_INTERNAL_NEED_UNUSED"));
+
+  const skippableFanout = new Map(workflows);
+  skippableFanout.set(
+    ".github/workflows/ci.yml",
+    validFanout.get(".github/workflows/ci.yml").replace(
+      `  build-lane:\n    name: build lane\n    needs: scope\n    if: ${notCancelledCondition}`,
+      "  build-lane:\n    name: build lane\n    needs: scope\n    if: false",
+    ),
+  );
+  assert.ok(
+    issueCodes(
+      validateRequiredContexts(fanoutPolicy, skippableFanout, repositoryContext),
+    ).includes("REQUIRED_CONTEXT_INTERNAL_NEED_CONDITIONAL"),
+  );
+
+  const continueOnErrorFanout = new Map(workflows);
+  continueOnErrorFanout.set(
+    ".github/workflows/ci.yml",
+    validFanout.get(".github/workflows/ci.yml").replace(
+      `  build-lane:\n    name: build lane\n    needs: scope\n    if: ${notCancelledCondition}`,
+      `  build-lane:\n    name: build lane\n    needs: scope\n    if: ${notCancelledCondition}\n    continue-on-error: true`,
+    ),
+  );
+  assert.ok(
+    issueCodes(
+      validateRequiredContexts(
+        fanoutPolicy,
+        continueOnErrorFanout,
+        repositoryContext,
+      ),
+    ).includes("REQUIRED_CONTEXT_INTERNAL_NEED_CONTINUE_ON_ERROR"),
+  );
+
+  const unusedFanout = new Map(workflows);
+  unusedFanout.set(
+    ".github/workflows/ci.yml",
+    validFanout.get(".github/workflows/ci.yml").replace(
+      "      - build-lane\n",
+      "",
+    ),
+  );
+  assert.ok(
+    issueCodes(
+      validateRequiredContexts(fanoutPolicy, unusedFanout, repositoryContext),
+    ).includes("REQUIRED_CONTEXT_INTERNAL_NEED_UNUSED"),
   );
 
   const continueOnError = new Map(workflows);
