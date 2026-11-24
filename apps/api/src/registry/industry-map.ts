@@ -56,16 +56,29 @@ function escapeRegExp(value: string): string {
 }
 
 /**
+ * False-friend English/Latin words that contain a ≥4-char industry alias as a
+ * substring without being a compound of that industry (e.g. "pumpkin" ≠ "pump").
+ */
+const SUBSTRING_FALSE_FRIENDS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  pump: ['pumpkin', 'pumpkins'],
+  chip: ['woodchip', 'woodchips', 'fish and chips', 'potato chip'],
+  lead: ['leader', 'leaders', 'leadership', 'leading', 'mislead', 'plead'],
+  glass: ['hourglass', 'sunglass', 'eyeglass'],
+});
+
+/**
  * 词面匹配：完全相等、词边界包含（拉丁文），或纯子串包含（CJK，及 ≥4 字符的拉丁别名
- * ——德语复合词 Kreiselpumpen 必须命中 pump）。≥4 字符拉丁别名的子串匹配接受少量误配
- * 风险（如 pumpkin→pump），由调用方的结果复核与分层审计兜底。
+ * ——德语复合词 Kreiselpumpen 必须命中 pump，同时拦截 pumpkin/leader 等假友词误配）。
  */
 function aliasMatches(term: string, alias: string): boolean {
   if (term === alias) return true;
   if (CJK.test(alias)) return term.includes(alias);
   const bounded = new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRegExp(alias)}([^\\p{L}\\p{N}]|$)`, 'u');
   if (bounded.test(term)) return true;
-  return alias.length >= 4 && term.includes(alias);
+  if (alias.length < 4 || !term.includes(alias)) return false;
+  const blocked = SUBSTRING_FALSE_FRIENDS[alias];
+  if (blocked && blocked.some((word) => term.includes(word))) return false;
+  return true;
 }
 
 export interface IndustryNaceResolution {

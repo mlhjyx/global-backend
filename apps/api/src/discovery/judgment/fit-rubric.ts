@@ -167,20 +167,20 @@ export function procurementRubric(
 ): readonly CriterionDefinition[] {
   const criteria = buyerProcurementCriteria(scenario);
   const titles = {
-    C1_MATERIAL: '采购场景的泵种与适用性',
+    C1_MATERIAL: '采购场景的目标产品与适用性',
     C2_ROLE: '采购场景角色',
-    C3_PROCESS: '泵的实际用途',
+    C3_PROCESS: '目标产品的实际用途',
     C4_BUSINESS_MODEL: '采购或配套责任',
   } as const;
   const proof = {
-    C1_MATERIAL: '指出使用或选型的泵种与卖方产品的具体交集。相邻设备不算证据。',
+    C1_MATERIAL: '指出使用或选型的目标产品/设备与卖方产品的具体交集。相邻设备不算证据。',
     C2_ROLE: scenario === 'factory_direct'
-      ? '指出该企业是自用工厂或实际运营方。泵制造或销售本身不算。'
+      ? '指出该企业是自用工厂或实际运营方。同类产品制造或销售本身不算。'
       : '指出该企业承担设备工程或系统集成。单纯转发产品资料不算。',
-    C3_PROCESS: '指出泵在该工艺、产线、设备或项目中的具体用途。只写经营行业不算。',
+    C3_PROCESS: '指出目标产品在该工艺、产线、设备或项目中的具体用途。只写经营行业不算。',
     C4_BUSINESS_MODEL: scenario === 'factory_direct'
       ? '指出工厂对该用途有使用、采购或项目实施责任。仅同属一个集团不算。'
-      : '指出企业对相关泵承担工程选型、集成或采购责任。无需证明转售。',
+      : '指出企业对相关产品或设备承担工程选型、集成或采购责任。无需证明转售。',
   } as const;
   return RUBRIC_CRITERIA.map((criterion) => {
     if (criterion.id === 'C5_SIZE') return criterion;

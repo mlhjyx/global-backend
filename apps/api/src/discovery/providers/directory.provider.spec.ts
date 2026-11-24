@@ -47,7 +47,7 @@ describe('名录发现检索串构造', () => {
   });
 
   it('给了地理范围却写不出当地名称时不检索，避免全球名录', () => {
-    expect(buildDirectorySearches(q({ industry: 'pumps', country: '加拿大' }))).toEqual([]);
+    expect(buildDirectorySearches(q({ industry: 'pumps', country: '火星' }))).toEqual([]);
   });
 
   it('中文地区词让位给可用的拉丁文国家词', () => {

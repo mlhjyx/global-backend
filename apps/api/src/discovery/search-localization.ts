@@ -10,7 +10,7 @@ import { lookupMarketRegion } from './vocab';
 
 export type SearchLanguage =
   | 'de' | 'en' | 'fr' | 'it' | 'es' | 'nl' | 'pl' | 'zh'
-  | 'ms' | 'id' | 'vi' | 'th' | 'ja' | 'ko' | 'pt' | 'tr';
+  | 'ms' | 'id' | 'vi' | 'th' | 'ja' | 'ko' | 'pt' | 'tr' | 'ar';
 export type TradeRole = 'distributor' | 'manufacturer';
 
 /** `name` is the country as a search in its own language would write it. */
@@ -24,8 +24,12 @@ const COUNTRIES: readonly CountryEntry[] = Object.freeze([
   { iso2: 'it', language: 'it', name: 'Italia', aliases: ['italy', 'italia', 'it', 'ita', '意大利'] },
   { iso2: 'es', language: 'es', name: 'España', aliases: ['spain', 'españa', 'espana', 'es', 'esp', '西班牙'] },
   { iso2: 'nl', language: 'nl', name: 'Nederland', aliases: ['netherlands', 'nederland', 'holland', 'nl', 'nld', '荷兰'] },
+  { iso2: 'be', language: 'nl', name: 'België', aliases: ['belgium', 'belgië', 'belgie', 'belgique', 'be', 'bel', '比利时'] },
+  { iso2: 'lu', language: 'fr', name: 'Luxembourg', aliases: ['luxembourg', 'lu', 'lux', '卢森堡'] },
   { iso2: 'pl', language: 'pl', name: 'Polska', aliases: ['poland', 'polska', 'pl', 'pol', '波兰'] },
   { iso2: 'cn', language: 'zh', name: '中国', aliases: ['china', 'cn', 'chn', '中国'] },
+  { iso2: 'hk', language: 'zh', name: '香港', aliases: ['hong kong', 'hk', 'hkg', '香港', '中国香港'] },
+  { iso2: 'tw', language: 'zh', name: '台湾', aliases: ['taiwan', 'tw', 'twn', '台湾', '中国台湾'] },
   { iso2: 'my', language: 'ms', name: 'Malaysia', aliases: ['malaysia', 'my', 'mys', '马来西亚'] },
   { iso2: 'id', language: 'id', name: 'Indonesia', aliases: ['indonesia', 'id', 'idn', '印度尼西亚', '印尼'] },
   { iso2: 'vn', language: 'vi', name: 'Việt Nam', aliases: ['vietnam', 'viet nam', 'việt nam', 'vn', 'vnm', '越南'] },
@@ -33,10 +37,77 @@ const COUNTRIES: readonly CountryEntry[] = Object.freeze([
   { iso2: 'jp', language: 'ja', name: '日本', aliases: ['japan', 'jp', 'jpn', '日本'] },
   { iso2: 'kr', language: 'ko', name: '대한민국', aliases: ['south korea', 'korea', 'kr', 'kor', '韩国', '南韩'] },
   { iso2: 'pt', language: 'pt', name: 'Portugal', aliases: ['portugal', 'pt', 'prt', '葡萄牙'] },
+  { iso2: 'br', language: 'pt', name: 'Brasil', aliases: ['brazil', 'brasil', 'br', 'bra', '巴西'] },
+  { iso2: 'mx', language: 'es', name: 'México', aliases: ['mexico', 'méxico', 'mx', 'mex', '墨西哥'] },
+  { iso2: 'cl', language: 'es', name: 'Chile', aliases: ['chile', 'cl', 'chl', '智利'] },
+  { iso2: 'co', language: 'es', name: 'Colombia', aliases: ['colombia', 'co', 'col', '哥伦比亚'] },
+  { iso2: 'ar', language: 'es', name: 'Argentina', aliases: ['argentina', 'ar', 'arg', '阿根廷'] },
+  { iso2: 'pe', language: 'es', name: 'Perú', aliases: ['peru', 'perú', 'pe', 'per', '秘鲁'] },
   { iso2: 'tr', language: 'tr', name: 'Türkiye', aliases: ['turkey', 'türkiye', 'turkiye', 'tr', 'tur', '土耳其'] },
+  { iso2: 'ae', language: 'ar', name: 'UAE', aliases: ['uae', 'united arab emirates', 'ae', 'are', '阿联酋', '阿拉伯联合酋长国', 'dubai', '迪拜'] },
+  { iso2: 'sa', language: 'ar', name: 'Saudi Arabia', aliases: ['saudi arabia', 'saudi', 'sa', 'sau', '沙特', '沙特阿拉伯'] },
+  { iso2: 'qa', language: 'ar', name: 'Qatar', aliases: ['qatar', 'qa', 'qat', '卡塔尔'] },
+  { iso2: 'om', language: 'ar', name: 'Oman', aliases: ['oman', 'om', 'omn', '阿曼'] },
+  { iso2: 'kw', language: 'ar', name: 'Kuwait', aliases: ['kuwait', 'kw', 'kwt', '科威特'] },
+  { iso2: 'bh', language: 'ar', name: 'Bahrain', aliases: ['bahrain', 'bh', 'bhr', '巴林'] },
+  { iso2: 'eg', language: 'ar', name: 'Egypt', aliases: ['egypt', 'eg', 'egy', '埃及'] },
+  { iso2: 'ma', language: 'fr', name: 'Maroc', aliases: ['morocco', 'maroc', 'ma', 'mar', '摩洛哥'] },
+  { iso2: 'il', language: 'en', name: 'Israel', aliases: ['israel', 'il', 'isr', '以色列'] },
+  { iso2: 'za', language: 'en', name: 'South Africa', aliases: ['south africa', 'za', 'zaf', '南非'] },
+  { iso2: 'ng', language: 'en', name: 'Nigeria', aliases: ['nigeria', 'ng', 'nga', '尼日利亚'] },
+  { iso2: 'ke', language: 'en', name: 'Kenya', aliases: ['kenya', 'ke', 'ken', '肯尼亚'] },
   { iso2: 'gb', language: 'en', name: 'United Kingdom', aliases: ['united kingdom', 'uk', 'gb', 'gbr', 'great britain', '英国'] },
   { iso2: 'us', language: 'en', name: 'United States', aliases: ['united states', 'usa', 'us', 'america', '美国'] },
+  { iso2: 'ca', language: 'en', name: 'Canada', aliases: ['canada', 'ca', 'can', '加拿大'] },
+  { iso2: 'au', language: 'en', name: 'Australia', aliases: ['australia', 'au', 'aus', '澳大利亚', '澳洲'] },
+  { iso2: 'nz', language: 'en', name: 'New Zealand', aliases: ['new zealand', 'nz', 'nzl', '新西兰'] },
+  { iso2: 'sg', language: 'en', name: 'Singapore', aliases: ['singapore', 'sg', 'sgp', '新加坡'] },
+  { iso2: 'ph', language: 'en', name: 'Philippines', aliases: ['philippines', 'ph', 'phl', '菲律宾'] },
+  { iso2: 'in', language: 'en', name: 'India', aliases: ['india', 'in', 'ind', '印度'] },
+  { iso2: 'pk', language: 'en', name: 'Pakistan', aliases: ['pakistan', 'pk', 'pak', '巴基斯坦'] },
+  { iso2: 'bd', language: 'en', name: 'Bangladesh', aliases: ['bangladesh', 'bd', 'bgd', '孟加拉国'] },
+  { iso2: 'se', language: 'en', name: 'Sweden', aliases: ['sweden', 'sverige', 'se', 'swe', '瑞典'] },
+  { iso2: 'no', language: 'en', name: 'Norway', aliases: ['norway', 'norge', 'no', 'nor', '挪威'] },
+  { iso2: 'dk', language: 'en', name: 'Denmark', aliases: ['denmark', 'danmark', 'dk', 'dnk', '丹麦'] },
+  { iso2: 'fi', language: 'en', name: 'Finland', aliases: ['finland', 'suomi', 'fi', 'fin', '芬兰'] },
+  { iso2: 'ie', language: 'en', name: 'Ireland', aliases: ['ireland', 'ie', 'irl', '爱尔兰'] },
+  { iso2: 'cz', language: 'en', name: 'Czechia', aliases: ['czechia', 'czech republic', 'cz', 'cze', '捷克'] },
+  { iso2: 'hu', language: 'en', name: 'Hungary', aliases: ['hungary', 'magyarország', 'hu', 'hun', '匈牙利'] },
+  { iso2: 'ro', language: 'en', name: 'Romania', aliases: ['romania', 'românia', 'ro', 'rou', '罗马尼亚'] },
+  { iso2: 'gr', language: 'en', name: 'Greece', aliases: ['greece', 'hellas', 'gr', 'grc', '希腊'] },
+  { iso2: 'bg', language: 'en', name: 'Bulgaria', aliases: ['bulgaria', 'bg', 'bgr', '保加利亚'] },
+  { iso2: 'hr', language: 'en', name: 'Croatia', aliases: ['croatia', 'hrvatska', 'hr', 'hrv', '克罗地亚'] },
+  { iso2: 'sk', language: 'en', name: 'Slovakia', aliases: ['slovakia', 'slovensko', 'sk', 'svk', '斯洛伐克'] },
+  { iso2: 'si', language: 'en', name: 'Slovenia', aliases: ['slovenia', 'slovenija', 'si', 'svn', '斯洛文尼亚'] },
+  { iso2: 'ua', language: 'en', name: 'Ukraine', aliases: ['ukraine', 'ua', 'ukr', '乌克兰'] },
+  { iso2: 'ru', language: 'en', name: 'Russia', aliases: ['russia', 'ru', 'rus', '俄罗斯'] },
 ]);
+
+const ISO2_ALPHA = /^[a-z]{2}$/u;
+const DYNAMIC_COUNTRIES = new Map<string, CountryEntry>();
+const REGION_DISPLAY_EN = (() => {
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'region', fallback: 'none' });
+  } catch {
+    return null;
+  }
+})();
+
+function dynamicCountryByIso2(iso2: string): CountryEntry | undefined {
+  if (!ISO2_ALPHA.test(iso2)) return undefined;
+  const cached = DYNAMIC_COUNTRIES.get(iso2);
+  if (cached) return cached;
+  const upper = iso2.toUpperCase();
+  // Exclude ISO-3166 user-assigned/macro codes that DisplayNames might resolve (EU/UN/QO/ZZ/XA-XZ).
+  if (upper === 'EU' || upper === 'UN' || upper === 'QO' || upper === 'ZZ' || /^X[A-Z]$/u.test(upper)) {
+    return undefined;
+  }
+  const name = REGION_DISPLAY_EN?.of(upper);
+  if (!name || name === upper) return undefined;
+  const entry: CountryEntry = Object.freeze({ iso2, language: 'en', name, aliases: [iso2, name.toLowerCase()] });
+  DYNAMIC_COUNTRIES.set(iso2, entry);
+  return entry;
+}
 
 /** Han, kana and Hangul：zh/ja/ko 的检索串由这些文字构成，其余支持的语言一律剔除。 */
 const CJK_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
@@ -44,15 +115,28 @@ const HAN_SCRIPT = /\p{Script=Han}/u;
 const KANA_SCRIPT = /[\p{Script=Hiragana}\p{Script=Katakana}]/u;
 const HANGUL_SCRIPT = /\p{Script=Hangul}/u;
 
-/** 词是否属于目标语言的检索文字（P2 §2.3：zh/ja/ko 保留本地文字并剥离纯拉丁词，其余语言剔除 CJK）。 */
+/**
+ * Pure technical specification / standard / model tokens (e.g. "HJT", "600W", "720W+",
+ * "TOPCon", "N-type", "BIPV", "DN50", "IEC 61215") that remain valid technical search
+ * anchors in CJK markets without admitting generic Latin prose like "Pumpen".
+ */
+const TECH_SPEC_TOKEN = /^(?:[A-Z0-9][A-Z0-9.+/-]{0,15}|[A-Z]{1,4}-[a-zA-Z0-9]{2,10}|[A-Z]{2,}[a-z]{1,4}[A-Z0-9]*)$/u;
+function isPureTechnicalSpec(term: string): boolean {
+  const parts = term.split(/\s+/u).filter(Boolean);
+  if (parts.length === 0 || parts.length > 4) return false;
+  const hasTechSignal = parts.some((p) => /\d/u.test(p) || /^[A-Z]{2,}/u.test(p) || /^[A-Z]-[a-z]/u.test(p));
+  return hasTechSignal && parts.every((p) => TECH_SPEC_TOKEN.test(p));
+}
+
+/** 词是否属于目标语言的检索文字（P2 §2.3：zh/ja/ko 保留本地文字与纯技术规格码，其余语言剔除 CJK）。 */
 function termFitsLanguage(term: string, language: SearchLanguage): boolean {
   switch (language) {
     case 'zh':
-      return HAN_SCRIPT.test(term);
+      return HAN_SCRIPT.test(term) || isPureTechnicalSpec(term);
     case 'ja':
-      return HAN_SCRIPT.test(term) || KANA_SCRIPT.test(term);
+      return HAN_SCRIPT.test(term) || KANA_SCRIPT.test(term) || isPureTechnicalSpec(term);
     case 'ko':
-      return HANGUL_SCRIPT.test(term);
+      return HANGUL_SCRIPT.test(term) || isPureTechnicalSpec(term);
     default:
       return !CJK_SCRIPT.test(term);
   }
@@ -84,9 +168,9 @@ const REGION_COUNTRY: Readonly<Record<string, string>> = Object.freeze({
 const GENERIC_CCTLDS: ReadonlySet<string> = new Set(['io', 'co', 'ai', 'me', 'tv', 'eu', 'cc', 'biz']);
 
 const DISTRIBUTOR_PATTERN =
-  /distribut|wholesal|dealer|import|reseller|\btrad(?:er|ing)\b|gro(?:ß|ss)hand|h(?:ä|ae)ndler|vertrieb|经销|分销|进口|批发|代理|grossiste|distributeur|distributore|grossista|distribuidor|mayorista|groothandel|hurtown|dystrybut/iu;
+  /distribut|wholesal|dealer|import|reseller|\btrad(?:er|ing)\b|gro(?:ß|ss)hand|h(?:ä|ae)ndler|vertrieb|经销|分销|进口|批发|代理|grossiste|distributeur|distributore|grossista|distribuidor|mayorista|groothandel|hurtown|dystrybut|موزع|جملة|وكيل/iu;
 const MANUFACTURER_PATTERN =
-  /manufactur|\boem\b|hersteller|produzent|fabrik|制造|生产|工厂|厂家|fabricant|produttore|fabricante|fabrikant|producent/iu;
+  /manufactur|\boem\b|hersteller|produzent|fabrik|制造|生产|工厂|厂家|fabricant|produttore|fabricante|fabrikant|producent|مصنع|مصنعة/iu;
 
 const ROLE_TERMS: Readonly<Record<TradeRole, Readonly<Record<SearchLanguage, readonly string[]>>>> = Object.freeze({
   distributor: {
@@ -109,6 +193,7 @@ const ROLE_TERMS: Readonly<Record<TradeRole, Readonly<Record<SearchLanguage, rea
     ko: ['유통업체', '도매업체', '대리점'],
     pt: ['distribuidor', 'atacadista', 'revendedor'],
     tr: ['distribütör', 'toptancı', 'bayi'],
+    ar: ['distributor', 'موزع', 'wholesaler'],
   },
   manufacturer: {
     de: ['Hersteller'],
@@ -127,6 +212,7 @@ const ROLE_TERMS: Readonly<Record<TradeRole, Readonly<Record<SearchLanguage, rea
     ko: ['제조업체', '제조사'],
     pt: ['fabricante'],
     tr: ['üretici'],
+    ar: ['manufacturer', 'مصنع'],
   },
 });
 
@@ -161,12 +247,19 @@ function targetCountries(filters: Record<string, unknown>): CountryEntry[] {
   const add = (entry: CountryEntry | undefined): void => {
     if (entry && !found.includes(entry)) found.push(entry);
   };
-  const byCode = (iso2: string | undefined): CountryEntry | undefined => COUNTRIES.find((c) => c.iso2 === iso2);
+  const byCode = (iso2: string | undefined): CountryEntry | undefined =>
+    iso2 ? (COUNTRIES.find((c) => c.iso2 === iso2) ?? dynamicCountryByIso2(iso2)) : undefined;
   for (const value of values) {
     const members = marketRegionCodes(value);
     if (members) members.forEach((iso2) => add(byCode(iso2)));
-    // 国家字段里也可能写区域名（「珠三角」「Bayern」）——与国家别名同等对待。
-    else add(COUNTRIES.find((c) => c.aliases.includes(value)) ?? byCode(REGION_COUNTRY[value]));
+    // 国家字段里也可能写区域名（「珠三角」「Bayern」）或任意合法 ISO-3166 alpha-2 码。
+    else {
+      add(
+        COUNTRIES.find((c) => c.aliases.includes(value)) ??
+          byCode(REGION_COUNTRY[value]) ??
+          dynamicCountryByIso2(value),
+      );
+    }
   }
   if (found.length) return found;
   // Region-only plans ("industry + country OR region") imply their country, or each country of a "DACH" region.

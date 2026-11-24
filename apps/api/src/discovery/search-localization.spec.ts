@@ -205,3 +205,46 @@ describe('获客 vNext W4：de/fr/it/es 行业角色词扩展', () => {
     expect(partitionSearchTerms(terms, language).stripped).toEqual([]);
   });
 });
+
+describe('Batch 1.2-A：全球 ISO-3166 市场覆盖、阿拉伯语与 CJK 技术规格词保留', () => {
+  it.each([
+    [{ country: '阿联酋' }, ['ae'], 'ar', 'UAE'],
+    [{ country: 'Saudi Arabia' }, ['sa'], 'ar', 'Saudi Arabia'],
+    [{ country: '巴西' }, ['br'], 'pt', 'Brasil'],
+    [{ country: '墨西哥' }, ['mx'], 'es', 'México'],
+    [{ country: 'Canada' }, ['ca'], 'en', 'Canada'],
+    [{ country: '新加坡' }, ['sg'], 'en', 'Singapore'],
+    [{ country: '菲律宾' }, ['ph'], 'en', 'Philippines'],
+    [{ country: '印度' }, ['in'], 'en', 'India'],
+    [{ country: 'South Africa' }, ['za'], 'en', 'South Africa'],
+    [{ country: '澳大利亚' }, ['au'], 'en', 'Australia'],
+    // Dynamic ISO-3166 alpha-2 fallback for markets not explicitly listed in COUNTRIES
+    [{ country: 'EE' }, ['ee'], 'en', 'Estonia'],
+  ])('resolves global market %o -> codes=%o lang=%s name=%s', (filters, codes, lang, name) => {
+    expect(targetCountryCodes({ filters })).toEqual(codes);
+    expect(searchLanguageFor({ filters })).toBe(lang);
+    expect(searchCountryName({ filters })).toBe(name);
+  });
+
+  it('expands MENA, LATAM and ASEAN regions into member ISO codes', () => {
+    expect(targetCountryCodes({ filters: { country: 'MENA' } })).toContain('ae');
+    expect(targetCountryCodes({ filters: { country: 'LATAM' } })).toContain('br');
+    expect(targetCountryCodes({ filters: { country: 'ASEAN' } })).toContain('sg');
+  });
+
+  it('preserves pure technical spec codes in zh/ja/ko while still stripping generic Latin words', () => {
+    expect(partitionSearchTerms(['光伏组件', 'HJT 700W+', 'TOPCon', 'N-type', 'Pumpen'], 'zh')).toEqual({
+      usable: ['光伏组件', 'HJT 700W+', 'TOPCon', 'N-type'],
+      stripped: ['Pumpen'],
+    });
+    expect(partitionSearchTerms(['太陽光パネル', 'BIPV', 'IEC 61215', 'Pumpen'], 'ja')).toEqual({
+      usable: ['太陽光パネル', 'BIPV', 'IEC 61215'],
+      stripped: ['Pumpen'],
+    });
+  });
+
+  it('supports Arabic distributor and manufacturer role terms', () => {
+    expect(tradeRoleTerms('distributor', 'ar')).toContain('موزع');
+    expect(tradeRoleTerms('manufacturer', 'ar')).toContain('مصنع');
+  });
+});

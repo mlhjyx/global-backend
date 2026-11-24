@@ -86,6 +86,15 @@ describe('evaluateRule', () => {
   it('matches 非法正则 → unknown 而非崩溃', () => {
     expect(evaluateRule(rule({ operator: 'matches', value: '([' }), { industry: 'x' })).toBe('unknown');
   });
+
+  it('matches 拒绝 ReDoS 灾难回溯与超长正则（线性时间返回 unknown）', () => {
+    const started = performance.now();
+    expect(evaluateRule(rule({ operator: 'matches', value: '^(a+)+$' }), { industry: `${'a'.repeat(40)}!` })).toBe('unknown');
+    expect(evaluateRule(rule({ operator: 'matches', value: '(foo|fo)+$' }), { industry: `${'fo'.repeat(25)}!` })).toBe('unknown');
+    expect(evaluateRule(rule({ operator: 'matches', value: 'a{201}' + 'x'.repeat(200) }), { industry: 'x' })).toBe('unknown');
+    expect(evaluateRule(rule({ operator: 'matches', value: '(\\w+)\\1' }), { industry: 'aa' })).toBe('unknown');
+    expect(performance.now() - started).toBeLessThan(200);
+  });
 });
 
 describe('qualify（优先级：EXCLUSION > MUST_HAVE fail > unknown > match）', () => {

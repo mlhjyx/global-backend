@@ -41,6 +41,12 @@ describe('nacePrefixesForIndustryTerms', () => {
     expect(resolution.unmatchedTerms).toEqual(['quantum basket weaving']);
   });
 
+  it('blocks false-friend substring collisions like pumpkin -> pump while keeping German compounds', () => {
+    expect(nacePrefixesForIndustryTerms(['pumpkin farming']).prefixes).toEqual([]);
+    expect(nacePrefixesForIndustryTerms(['leadership coaching']).prefixes).toEqual([]);
+    expect(nacePrefixesForIndustryTerms(['Kreiselpumpen']).prefixes).toEqual(['28']);
+  });
+
   it('dedupes prefixes across terms', () => {
     expect(nacePrefixesForIndustryTerms(['pump', 'machinery']).prefixes).toEqual(['28']);
   });

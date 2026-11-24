@@ -1,3 +1,4 @@
+import { normalizeCompanyNameTypography } from '../company-name-format';
 import { isStableSafeHttpsUrl } from '../raw-source-provider-normalizer';
 import { createHash } from 'node:crypto';
 import {
@@ -478,9 +479,8 @@ export function mapDirectoryCompanyToRecord(args: {
     externalId: domain
       ? `directory:${domain}`
       : `directory:${sourceDomain}:${slug(args.company.name)}`,
-    // 载荷契约要求 NFKC 恒等（validCompanyName）：中文名常用全角括号/全角字母
-    // （如「ABB（中国）有限公司」），在这里先归一，否则整条记录被拒（2026-11-06 实测）。
-    name: args.company.name.normalize('NFKC').trim(),
+    // Match public-web typography rules before unchanged Raw validation (strips ™/®/quotes, collapses dashes).
+    name: normalizeCompanyNameTypography(args.company.name),
     domain: domain || undefined,
     attributes: {
       source_kind: args.listKind ?? 'directory',

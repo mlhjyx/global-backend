@@ -346,3 +346,38 @@ describe('hasContactForm (BI-14)', () => {
     expect(hasContactForm('')).toBe(false);
   });
 });
+
+describe('multilingual contact, legal and supplier paths (Batch 1.2-A)', () => {
+  it('recognises IT, ES, FR, PT, NL, PL and global EN contact, legal and supplier links', () => {
+    const home = links(
+      '[Contattaci](https://pumpen-handel.example/it/contatti)',
+      '[Note Legali](https://pumpen-handel.example/it/note-legali)',
+      '[Fornitori](https://pumpen-handel.example/it/fornitori)',
+    );
+    expect(findContactPaths(home, DOMAIN)).toEqual({
+      ...NONE,
+      contactPage: 'https://pumpen-handel.example/it/contatti',
+      impressumPage: 'https://pumpen-handel.example/it/note-legali',
+      supplierPage: 'https://pumpen-handel.example/it/fornitori',
+    });
+
+    expect(findContactPaths('[Fale conosco](/fale-conosco)', DOMAIN).contactPage).toBe(
+      'https://pumpen-handel.example/fale-conosco',
+    );
+    expect(findContactPaths('[Aviso legal](/es/aviso-legal)', DOMAIN).impressumPage).toBe(
+      'https://pumpen-handel.example/es/aviso-legal',
+    );
+    expect(findContactPaths('[Mentions légales](/fr/mentions-legales)', DOMAIN).impressumPage).toBe(
+      'https://pumpen-handel.example/fr/mentions-legales',
+    );
+    expect(findContactPaths('[Vendor portal](/en/vendor-portal)', DOMAIN).supplierPage).toBe(
+      'https://pumpen-handel.example/en/vendor-portal',
+    );
+    expect(findContactPaths('[Proveedores](/es/proveedores)', DOMAIN).supplierPage).toBe(
+      'https://pumpen-handel.example/es/proveedores',
+    );
+    expect(findContactPaths('[Fornecedores](/br/fornecedores)', DOMAIN).supplierPage).toBe(
+      'https://pumpen-handel.example/br/fornecedores',
+    );
+  });
+});
