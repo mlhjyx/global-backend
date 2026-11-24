@@ -58,6 +58,8 @@ function buildSeed(): SeedRow[] {
       rows.push(
         row(subject, '*', 'red', action, RED_EFFECTS[subject][action], {
           retentionDays: action === 'RETAIN' ? RED_RETENTION_DAYS : null,
+          article14Required:
+            (subject === 'EU' || subject === 'UK') && (action === 'STORE' || action === 'OUTREACH'),
         }),
       );
     }
