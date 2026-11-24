@@ -33,11 +33,22 @@ describe('resolveProspeoConfig：env 解析', () => {
 });
 
 describe('parseProspeoResponse：error 族响应', () => {
-  it('error:false + response.email → 命中；email 缺失 → 无结果', () => {
+  it('error:false + person.email（v2）或 response.email（兼容）→ 命中；缺失 → 无结果', () => {
+    expect(
+      parseProspeoResponse({
+        error: false,
+        person: { email: { email: 'a@acme.example', status: 'VERIFIED', revealed: true } },
+      }),
+    ).toMatchObject({
+      ok: true,
+      email: 'a@acme.example',
+      confidence: 95,
+    });
     expect(parseProspeoResponse({ error: false, response: { email: 'a@acme.example' } })).toMatchObject({
       ok: true,
       email: 'a@acme.example',
     });
+    expect(parseProspeoResponse({ error: false, person: { email: {} } })).toMatchObject({ ok: true, email: null });
     expect(parseProspeoResponse({ error: false, response: {} })).toMatchObject({ ok: true, email: null });
   });
 
@@ -76,23 +87,31 @@ describe('parseProspeoResponse：error 族响应', () => {
 });
 
 describe('ProspeoProvider.findEmail：HTTP 契约', () => {
-  it('命中：X-KEY 头、full_name/domain/company_name 进 body，hit 带成本', async () => {
+  it('命中：走新版 /enrich-person + only_verified_email:true + X-KEY 头，hit 带成本与 SMTP 置信度', async () => {
     const fetchImpl = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
-      jsonResponse(200, { error: false, response: { email: 'J.Mueller@Acme.Example' } }),
+      jsonResponse(200, {
+        error: false,
+        person: { email: { email: 'J.Mueller@Acme.Example', status: 'VERIFIED', revealed: true } },
+      }),
     );
     const provider = new ProspeoProvider(resolveProspeoConfig({ PROSPEO_API_KEY: 'key-1' }), fetchImpl);
     expect(await provider.findEmail(INPUT)).toMatchObject({
       status: 'hit',
       costMicrousd: 19_800,
-      hit: { email: 'j.mueller@acme.example' },
+      hit: { email: 'j.mueller@acme.example', providerConfidence: 95 },
     });
     const [url, init] = fetchImpl.mock.calls[0] as [URL, RequestInit];
-    expect(url.toString()).toBe('https://api.prospeo.io/email-finder');
+    expect(url.toString()).toBe('https://api.prospeo.io/enrich-person');
     expect((init.headers as Record<string, string>)['x-key']).toBe('key-1');
     expect(JSON.parse(init.body as string)).toEqual({
-      full_name: 'Jürgen Müller',
-      domain: 'acme.example',
-      company_name: 'Acme GmbH',
+      data: {
+        full_name: 'Jürgen Müller',
+        first_name: 'Jürgen',
+        last_name: 'Müller',
+        company_website: 'acme.example',
+        company_name: 'Acme GmbH',
+      },
+      only_verified_email: true,
     });
   });
 

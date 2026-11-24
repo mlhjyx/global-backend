@@ -27,7 +27,7 @@ import type { CircuitBreakerStore } from './circuit-breaker';
  *  - 每次请求最多处理 10 个联系人（缺 email 的具名联系人）；
  *  - 每地址验证调用 ≤6 次（透传给单联系人瀑布）；
  *  - 软截止 10 分钟（HTTP 与 run activity 都传 deadline；到期不再开新联系人）；
- *  - A 档公司（本 ICP 或任一 ICP 的 lead.totalScore ≥80）才追加 Apollo/PDL 尾池。
+ *  - A 档公司（本 ICP 或任一 ICP 的 lead.totalScore ≥0.80，0–1 归一化分制）才追加 Apollo/PDL 尾池。
  *
  * 预算：调用方传预算端口（HTTP = Grant cap；run = run/per-company cap）；每个联系人再叠加
  * 单联系人上限（$0.15）——两者取最紧。未传时默认单请求 $1.50（10 × $0.15）以杜绝无界花费。
@@ -35,7 +35,7 @@ import type { CircuitBreakerStore } from './circuit-breaker';
  * 合规：联系人/公司抑制由 enrichContactEmail 的前置门拦截；本模块只做路由与预算。
  */
 
-export const A_TIER_SCORE_THRESHOLD = 80;
+export const A_TIER_SCORE_THRESHOLD = 0.8;
 
 export interface EnrichCompanyContactsInput {
   workspaceId: string;
@@ -275,10 +275,10 @@ export async function enrichCompaniesBatch(
   return out;
 }
 
-/** Same transaction-local none-email query for both callers; never widens the target cap. */
+/** Same transaction-local email target query; default keeps none-email safety lane, opt-in covers RISKY/UNKNOWN contacts lacking VALID email. */
 export async function loadContactEnrichmentTargets(
   tx: Prisma.TransactionClient,
-  input: Pick<EnrichCompanyContactsInput, 'companyId' | 'contactIds'>,
+  input: Pick<EnrichCompanyContactsInput, 'companyId' | 'contactIds'> & { includeUnverifiedEmails?: boolean },
   maxContacts: number,
 ): Promise<{ company: { id: string; name: string; domain: string | null } | null; contacts: Array<{ id: string; fullName: string }> }> {
   if (!Number.isSafeInteger(maxContacts) || maxContacts < 1 || maxContacts > MAX_ENRICH_CONTACTS_PER_REQUEST) {
@@ -293,8 +293,10 @@ export async function loadContactEnrichmentTargets(
     where: {
       companyId: input.companyId,
       ...(input.contactIds ? { id: { in: input.contactIds } } : {}),
-      // 只补「完全缺 email 点」的联系人；已有 email 点（任何状态）留给再验证队列。
-      contactPoints: { none: { type: 'email' } },
+      // 默认只补缺 email 点；显式开启 includeUnverifiedEmails 时扩展至仅有 CATCH_ALL_RISKY/UNKNOWN 而无 VALID 邮箱的联系人。
+      contactPoints: input.includeUnverifiedEmails
+        ? { none: { type: 'email', verificationState: 'VALID' } }
+        : { none: { type: 'email' } },
     },
     select: { id: true, fullName: true },
     orderBy: { createdAt: 'asc' },

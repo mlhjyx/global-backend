@@ -29,6 +29,8 @@ export interface ApolloConfig {
   baseUrl: string;
   timeoutMs: number;
   costMicrousd: number;
+  /** 免费套餐 Apollo API 返回 403 API_INACCESSIBLE；显式设 APOLLO_PAID_PLAN_ENABLED=0 可按 BYOK/付费门关闭。 */
+  paidPlanEnabled?: boolean;
 }
 
 export function resolveApolloConfig(env: NodeJS.ProcessEnv = process.env): ApolloConfig {
@@ -36,12 +38,15 @@ export function resolveApolloConfig(env: NodeJS.ProcessEnv = process.env): Apoll
     const parsed = Number.parseInt(raw ?? '', 10);
     return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
   };
+  const paidFlag = (env.APOLLO_PAID_PLAN_ENABLED ?? '').trim().toLowerCase();
+  const paidDisabled = paidFlag === '0' || paidFlag === 'false' || paidFlag === 'off';
   return {
     apiKey: (env.APOLLO_API_KEY ?? '').trim() || null,
     baseUrl: (env.APOLLO_BASE_URL ?? 'https://api.apollo.io').replace(/\/+$/u, ''),
     timeoutMs: positiveInt(env.APOLLO_TIMEOUT_MS, 8_000),
     // ≈$0.025/命中（credit 单价未公开，按内部规划值 2026-11-08 快照）→ 25000 微美元，待核。
     costMicrousd: positiveInt(env.APOLLO_COST_MICROUSD, 25_000),
+    ...(paidDisabled ? { paidPlanEnabled: false } : {}),
   };
 }
 
@@ -100,7 +105,7 @@ export class ApolloProvider implements EmailEnrichmentAdapter {
   }
 
   isConfigured(): boolean {
-    return this.config.apiKey !== null;
+    return this.config.apiKey !== null && this.config.paidPlanEnabled !== false;
   }
 
   requestHash(input: FindEmailInput): string {
@@ -109,7 +114,7 @@ export class ApolloProvider implements EmailEnrichmentAdapter {
 
   async findEmail(input: FindEmailInput): Promise<FindEmailOutcome> {
     const startedAt = Date.now();
-    if (!this.config.apiKey) return unconfiguredFindEmailOutcome();
+    if (!this.isConfigured() || !this.config.apiKey) return unconfiguredFindEmailOutcome();
     const name = splitName(input.fullName);
     if (!name) {
       // Apollo 按姓名匹配；单名输入无法形成有效请求——诚实 miss，不花配额。
@@ -158,13 +163,15 @@ export class ApolloProvider implements EmailEnrichmentAdapter {
       };
     }
     if (response.status === 401 || response.status === 403) {
+      const errBody = await response.json().catch(() => null) as { error_code?: unknown } | null;
+      const planBlocked = response.status === 403 && errBody?.error_code === 'API_INACCESSIBLE';
       return {
         status: 'error',
-        errorCode: 'unauthorized',
+        errorCode: planBlocked ? 'plan_inaccessible' : 'unauthorized',
         retryable: false,
         costMicrousd: 0,
         latencyMs,
-        detail: `apollo_http_${response.status}`,
+        detail: planBlocked ? 'apollo_free_plan_api_inaccessible' : `apollo_http_${response.status}`,
       };
     }
     if (!response.ok) {

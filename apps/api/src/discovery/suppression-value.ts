@@ -5,6 +5,9 @@ import { normalizeDomain } from './identity';
 
 export const SUPPRESSION_TYPES = ['email', 'domain', 'company_name'] as const;
 export type SuppressionType = (typeof SUPPRESSION_TYPES)[number];
+/** 多通道抑制类型（D3：在原有邮箱/域名/公司名之外覆盖 phone 与 whatsapp E.164 号码抑制）。 */
+export const CHANNEL_SUPPRESSION_TYPES = ['email', 'domain', 'company_name', 'phone', 'whatsapp'] as const;
+export type ChannelSuppressionType = (typeof CHANNEL_SUPPRESSION_TYPES)[number];
 
 const MAX_EMAIL_LENGTH = 254;
 const MAX_DOMAIN_INPUT_LENGTH = 2048;
@@ -36,6 +39,29 @@ function canonicalDomain(raw: string): string | null {
   return ascii;
 }
 
+const MAX_PHONE_INPUT_LENGTH = 128;
+
+function canonicalPhone(raw: string): string | null {
+  if (!raw.trim() || raw.length > MAX_PHONE_INPUT_LENGTH) return null;
+  let candidate = raw.trim();
+  const waPath = /^(?:https?:\/\/)?(?:www\.)?wa\.me\/(\+?[0-9][0-9\s\-().]{5,30})/iu.exec(candidate);
+  if (waPath) {
+    candidate = `+${waPath[1]!.replace(/\D/gu, '')}`;
+  } else {
+    const waApi = /[?&]phone=(\+?[0-9][0-9\s\-().]{5,30})/iu.exec(candidate);
+    if (waApi) {
+      candidate = `+${waApi[1]!.replace(/\D/gu, '')}`;
+    } else {
+      candidate = candidate.replace(/^tel:/iu, '').trim();
+    }
+  }
+  const normalized = candidate.replace(/^00/u, '+').replace(/[^\d+]/gu, '');
+  if (!normalized.startsWith('+')) return null;
+  const digits = normalized.slice(1).replace(/\D/gu, '');
+  if (digits.length < 7 || digits.length > 15 || digits.startsWith('0')) return null;
+  return `+${digits}`;
+}
+
 /**
  * Canonical key shared by suppression writes and company matching.
  * Invalid or unbounded values return null so callers can fail closed before persistence.
@@ -58,6 +84,7 @@ export function canonicalizeSuppressionValue(type: string, raw: string): string 
     const name = cleanName(raw.normalize('NFC')).toLowerCase();
     return name && name.length <= MAX_COMPANY_NAME_LENGTH ? name : null;
   }
+  if (type === 'phone' || type === 'whatsapp') return canonicalPhone(raw);
   return null;
 }
 

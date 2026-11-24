@@ -8,17 +8,19 @@ import {
 } from './email-enrichment-provider';
 
 /**
- * Prospeo（api.prospeo.io/email-finder）finder 适配器 —— 瀑布第三位（P1-07）。
+ * Prospeo（api.prospeo.io/enrich-person）finder 适配器 —— 瀑布第三位（P1-07 / Batch 1.3 迁移）。
  *
  * 口径（计划 §2.3.3）：pay-on-valid + 90 天免费重取（$49/mo 2,000 credits ≈ $0.0245；
- * 无结果 0 credit）。90 天重取的「免费」由供应商侧保证；引擎侧另有本地 attempt 幂等与
- * 90 天缓存（P1-08），命中缓存时不发请求、成本 0。
+ * 无结果 0 credit）。旧版 `/email-finder` 已于 2026-11 官方下线（400 DEPRECATED），
+ * 现统一迁至新版 `POST {base}/enrich-person`（`only_verified_email: true`，实测返回 SMTP VERIFIED）。
  *
- * 请求：POST {base}/email-finder，header `X-KEY: <key>`，body `{ full_name, domain, company_name? }`。
- * 响应契约：`{ error: false, response: { email, ... } }` 或
+ * 请求：POST {base}/enrich-person，header `X-KEY: <key>`，body
+ * `{ data: { full_name, first_name?, last_name?, company_website, company_name?, linkedin_url? }, only_verified_email: true }`。
+ * 响应契约：新版 `{ error: false, person: { email: { email, status, revealed? } } }`
+ * （兼容旧夹具 `{ error: false, response: { email } }`）或
  * `{ error: true, error_code: 'NO_MATCH' | 'RATE_LIMITED' | ... }`。
  * `NO_MATCH` / `INVALID_DATAPOINTS` = 合法 miss（0 成本）；`RATE_LIMITED` / `INTERNAL_ERROR`
- * 可重试；`INSUFFICIENT_CREDITS` / `INVALID_API_KEY` 不可重试（编排层熔断）。
+ * 可重试；`INSUFFICIENT_CREDITS` / `INVALID_API_KEY` / `DEPRECATED` 不可重试（编排层熔断）。
  *
  * 凭据与参数从 env 读（PROSPEO_API_KEY / _BASE_URL / _TIMEOUT_MS / _COST_MICROUSD，19800）；
  * 缺 key 时 isConfigured()=false。HTTP 走注入的 fetch（单测 fixture，零真实出网）。
@@ -46,13 +48,28 @@ export function resolveProspeoConfig(env: NodeJS.ProcessEnv = process.env): Pros
 }
 
 export type ProspeoParse =
-  | { ok: true; email: string | null; extra: Record<string, unknown> }
+  | { ok: true; email: string | null; confidence: number | null; extra: Record<string, unknown> }
   | { ok: false; errorCode: string; retryable: boolean; detail: string };
 
 const PROSPEO_MISS_CODES: ReadonlySet<string> = new Set(['NO_MATCH', 'INVALID_DATAPOINTS']);
 const PROSPEO_RETRYABLE_CODES: ReadonlySet<string> = new Set(['RATE_LIMITED', 'INTERNAL_ERROR']);
 
-/** 供应商响应 → 候选邮箱（纯函数；畸形体 fail-closed 为 error）。 */
+function splitProspeoName(fullName: string): { firstName?: string; lastName?: string } {
+  const parts = fullName.trim().split(/\s+/u).filter(Boolean);
+  if (parts.length < 2) return {};
+  return { firstName: parts[0], lastName: parts.slice(1).join(' ') };
+}
+
+function confidenceFromProspeoStatus(status: unknown): number | null {
+  if (typeof status !== 'string') return null;
+  const upper = status.trim().toUpperCase();
+  if (upper === 'VERIFIED' || upper === 'VALID') return 95;
+  if (upper === 'CATCH_ALL' || upper === 'UNVERIFIED') return 55;
+  if (upper === 'INVALID' || upper === 'BOUNCED') return 0;
+  return null;
+}
+
+/** 供应商响应 → 候选邮箱（纯函数；兼容 v2 `/enrich-person` 与旧 `response.email`；畸形体 fail-closed 为 error）。 */
 export function parseProspeoResponse(raw: unknown): ProspeoParse {
   if (!raw || typeof raw !== 'object') {
     return { ok: false, errorCode: 'malformed_response', retryable: false, detail: 'prospeo_response_not_object' };
@@ -61,7 +78,7 @@ export function parseProspeoResponse(raw: unknown): ProspeoParse {
   if (body.error === true) {
     const errorCode = typeof body.error_code === 'string' ? body.error_code : 'unknown_error';
     if (PROSPEO_MISS_CODES.has(errorCode)) {
-      return { ok: true, email: null, extra: { provider: 'prospeo', error_code: errorCode } };
+      return { ok: true, email: null, confidence: null, extra: { provider: 'prospeo', error_code: errorCode } };
     }
     return {
       ok: false,
@@ -73,15 +90,37 @@ export function parseProspeoResponse(raw: unknown): ProspeoParse {
   if (body.error !== false) {
     return { ok: false, errorCode: 'malformed_response', retryable: false, detail: 'prospeo_error_flag_missing' };
   }
+  // v2 `/enrich-person`: { error: false, person: { email: { email, status, revealed } } }
+  const person =
+    body.person && typeof body.person === 'object'
+      ? (body.person as Record<string, unknown>)
+      : null;
+  if (person) {
+    const emailObj =
+      person.email && typeof person.email === 'object'
+        ? (person.email as Record<string, unknown>)
+        : null;
+    const emailStr =
+      emailObj && typeof emailObj.email === 'string' && emailObj.email.trim()
+        ? emailObj.email
+        : typeof person.email === 'string' && person.email.trim()
+          ? person.email
+          : null;
+    const emailStatus = emailObj && typeof emailObj.status === 'string' ? emailObj.status : null;
+    return {
+      ok: true,
+      email: emailStr,
+      confidence: confidenceFromProspeoStatus(emailStatus),
+      extra: { provider: 'prospeo', api: 'enrich-person', ...(emailStatus ? { email_status: emailStatus } : {}) },
+    };
+  }
+  // 兼容旧夹具：{ error: false, response: { email } }
   const response =
     body.response && typeof body.response === 'object'
       ? (body.response as Record<string, unknown>)
       : null;
-  const email = response && typeof response.email === 'string' ? response.email : null;
-  if (email === null) {
-    return { ok: true, email: null, extra: { provider: 'prospeo' } };
-  }
-  return { ok: true, email, extra: { provider: 'prospeo' } };
+  const email = response && typeof response.email === 'string' && response.email.trim() ? response.email : null;
+  return { ok: true, email, confidence: null, extra: { provider: 'prospeo' } };
 }
 
 export class ProspeoProvider implements EmailEnrichmentAdapter {
@@ -110,17 +149,24 @@ export class ProspeoProvider implements EmailEnrichmentAdapter {
     if (!this.config.apiKey) return unconfiguredFindEmailOutcome();
 
     let response: Response;
+    const nameParts = splitProspeoName(input.fullName);
     try {
-      response = await this.fetchImpl(new URL(`${this.config.baseUrl}/email-finder`), {
+      response = await this.fetchImpl(new URL(`${this.config.baseUrl}/enrich-person`), {
         method: 'POST',
         headers: {
           'x-key': this.config.apiKey,
           'content-type': 'application/json',
         },
         body: JSON.stringify({
-          full_name: input.fullName,
-          domain: input.domain,
-          ...(input.companyName ? { company_name: input.companyName } : {}),
+          data: {
+            full_name: input.fullName,
+            ...(nameParts.firstName ? { first_name: nameParts.firstName } : {}),
+            ...(nameParts.lastName ? { last_name: nameParts.lastName } : {}),
+            company_website: input.domain,
+            ...(input.companyName ? { company_name: input.companyName } : {}),
+            ...(input.linkedinUrl ? { linkedin_url: input.linkedinUrl } : {}),
+          },
+          only_verified_email: true,
         }),
         signal: AbortSignal.timeout(this.config.timeoutMs),
       });
@@ -197,7 +243,11 @@ export class ProspeoProvider implements EmailEnrichmentAdapter {
     }
     return {
       status: 'hit',
-      hit: { email, raw: parsed.extra },
+      hit: {
+        email,
+        ...(parsed.confidence === null ? {} : { providerConfidence: parsed.confidence }),
+        raw: parsed.extra,
+      },
       costMicrousd: this.config.costMicrousd,
       latencyMs,
     };

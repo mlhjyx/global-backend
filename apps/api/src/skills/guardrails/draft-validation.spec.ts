@@ -209,6 +209,20 @@ describe("validateOutreachDraft", () => {
     expect(mirrored).toEqual({ ok: true, issues: [] });
   });
 
+  it("rejects empty/whitespace sender legalName or postalAddress footer bypass and Chinese forbidden phrases", () => {
+    const emptySender = validateOutreachDraft(
+      draft({ jurisdictionFooter: "Unsubscribe: reply STOP." }),
+      context({ sender: { legalName: "   ", postalAddress: "" } }),
+    );
+    expect(draftViolationCodes(emptySender)).toEqual(["FOOTER_MISSING_ELEMENTS"]);
+
+    const zhExaggeration = validateOutreachDraft(
+      draft({ body: "我们承诺零风险、世界第一光伏组件交付。" }),
+      context(),
+    );
+    expect(draftViolationCodes(zhExaggeration)).toEqual(["EXAGGERATION_FORBIDDEN"]);
+  });
+
   it("collects multiple independent issues deterministically", () => {
     const result = validateOutreachDraft(
       draft({

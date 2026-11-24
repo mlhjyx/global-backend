@@ -32,7 +32,7 @@ export const DRAFT_VIOLATION_CODES = [
 ] as const;
 export type DraftViolationCode = (typeof DRAFT_VIOLATION_CODES)[number];
 
-/** 绝对化/夸大用语（中英德三语 v0 基线）；命中即拒，人工改写后才可再提交。 */
+/** 绝对化/夸大用语（中英德三语基线）；命中即拒，人工改写后才可再提交。 */
 export const DRAFT_FORBIDDEN_PHRASES = [
   "guaranteed",
   "100%",
@@ -45,6 +45,14 @@ export const DRAFT_FORBIDDEN_PHRASES = [
   "garantiert",
   "weltweit führend",
   "risikofrei",
+  "100%保证",
+  "百分百",
+  "全球第一",
+  "世界第一",
+  "全网最低",
+  "零风险",
+  "绝对保证",
+  "包过",
 ] as const;
 
 export const DRAFT_LIMITS = Object.freeze({ subjectMaxChars: 90, bodyMaxChars: 2000 });
@@ -224,10 +232,12 @@ function footerIssues(
 ): DraftViolation[] {
   const missing: string[] = [];
   const haystack = footer.toLowerCase();
-  if (!haystack.includes(context.sender.legalName.toLowerCase())) {
+  const legalName = context.sender.legalName.trim().toLowerCase();
+  const postalAddress = context.sender.postalAddress.trim().toLowerCase();
+  if (!legalName || !haystack.includes(legalName)) {
     missing.push("sender legal name");
   }
-  if (!haystack.includes(context.sender.postalAddress.toLowerCase())) {
+  if (!postalAddress || !haystack.includes(postalAddress)) {
     missing.push("postal address");
   }
   const exitPattern = context.jurisdiction === "DE" ? DE_EXIT_PATTERN : US_EXIT_PATTERN;

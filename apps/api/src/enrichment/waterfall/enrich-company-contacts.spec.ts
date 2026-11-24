@@ -751,10 +751,24 @@ describe('shared contact selector/tier ports for the frozen safety lane', () => 
     expect(await loadCompanyContactEnrichmentTier(world.prisma as never, INPUT, false)).toBe('B');
     expect(world.tx.lead.findFirst).not.toHaveBeenCalled();
   });
-  it.each([[true, 'A'], [false, 'B']] as const)('uses the original any-ICP threshold, topLead=%s', async (hit, expected) => {
+  it.each([[true, 'A'], [false, 'B']] as const)('uses normalized 0..1 any-ICP A-tier threshold (0.8), topLead=%s', async (hit, expected) => {
     const world = fakeWorld({ topLead: hit ? { id: 'synthetic-top-lead' } : null });
     expect(await loadCompanyContactEnrichmentTier(world.prisma as never, INPUT, true)).toBe(expected);
-    expect(world.tx.lead.findFirst).toHaveBeenCalledWith({ where: { canonicalCompanyId: COMPANY, totalScore: { gte: 80 } }, select: { id: true } });
+    expect(world.tx.lead.findFirst).toHaveBeenCalledWith({ where: { canonicalCompanyId: COMPANY, totalScore: { gte: 0.8 } }, select: { id: true } });
+  });
+  it('supports opt-in unverified email target selector for RISKY/UNKNOWN contacts lacking VALID email', async () => {
+    const world = fakeWorld({ contacts: [{ id: CONTACT_1, fullName: 'Synthetic Person' }] });
+    await loadContactEnrichmentTargets(
+      world.tx as never,
+      { companyId: COMPANY, includeUnverifiedEmails: true },
+      5,
+    );
+    expect(world.tx.canonicalContact.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { companyId: COMPANY, contactPoints: { none: { type: 'email', verificationState: 'VALID' } } },
+        take: 5,
+      }),
+    );
   });
   it('does not omit a configured unsupported finder from the reachable set', () => {
     const primary = [finder('hunter', miss()).adapter, finder('findymail', miss()).adapter];
