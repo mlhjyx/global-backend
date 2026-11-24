@@ -5,6 +5,10 @@ import { GraphBuilder } from "../graph";
 import { SourceLocationV1 } from "../schema";
 import { readUtf8, relativePath, walkFiles } from "../utils";
 import { PrismaCatalog, prismaModelId } from "./prisma";
+import {
+  extractTemporalScheduleSpecs,
+  loadRegisteredWorkflowNames,
+} from "./temporal-schedules";
 
 const HTTP_DECORATORS = new Map([
   ["Get", "GET"],
@@ -251,31 +255,8 @@ export async function extractTypeScript(
       }
     }
   }
-  const registeredWorkflowNames = new Set<string>();
-  for (const registryFile of [
-    "customer-workflows.ts",
-    "platform-workflows.ts",
-    "workflows.ts",
-  ]) {
-    const workflowRegistryPath = path.join(
-      repositoryRoot,
-      "apps",
-      "api",
-      "src",
-      "temporal",
-      registryFile,
-    );
-    try {
-      const registryText = await readUtf8(workflowRegistryPath);
-      for (const match of registryText.matchAll(
-        /^export\s*\{\s*([A-Za-z][A-Za-z0-9_]*)\s*\}\s*from\s*/gm,
-      )) {
-        registeredWorkflowNames.add(match[1]);
-      }
-    } catch {
-      // Registry file may be absent in minimal test fixtures or split repos.
-    }
-  }
+  const registeredWorkflowNames =
+    await loadRegisteredWorkflowNames(repositoryRoot);
   const eventRegistries = new Map<string, StaticEventRegistry>();
   for (const absolute of absoluteFiles) {
     const relative = relativePath(repositoryRoot, absolute);
@@ -496,150 +477,15 @@ export async function extractTypeScript(
         : undefined;
     };
 
-    const unwrapExpression = (expression: ts.Expression): ts.Expression => {
-      let current = expression;
-      while (true) {
-        if (
-          ts.isParenthesizedExpression(current) ||
-          ts.isAsExpression(current) ||
-          ts.isSatisfiesExpression(current)
-        ) {
-          current = current.expression;
-          continue;
-        }
-        if (ts.isCallExpression(current) && current.arguments.length === 1) {
-          const callee = current.expression.getText(sourceFile);
-          if (
-            callee === "Object.freeze" ||
-            callee === "deepFreeze" ||
-            callee === "technicalRow"
-          ) {
-            current = current.arguments[0];
-            continue;
-          }
-        }
-        return current;
-      }
-    };
-
-    const recordScheduleSpecEntry = (
-      rawElement: ts.Expression,
-      idProperty: "id" | "scheduleId",
-    ): void => {
-      const element = unwrapExpression(rawElement);
-      if (!ts.isObjectLiteralExpression(element)) return;
-      const properties = new Map<string, ts.Expression>();
-      for (const property of element.properties) {
-        if (!ts.isPropertyAssignment(property)) continue;
-        const name = declarationName(property);
-        if (name) properties.set(name, property.initializer);
-      }
-      const scheduleId =
-        resolveStaticString(properties.get(idProperty)) ??
-        properties.get(idProperty)?.getText(sourceFile);
-      const workflowName =
-        resolveStaticString(properties.get("workflowType")) ??
-        properties.get("workflowType")?.getText(sourceFile);
-      if (!scheduleId || !workflowName) return;
-      const location = sourceLocation(sourceFile, relative, element);
-      const schedule = builder.addNode({
-        id: `service:temporal-schedule:${scheduleId}`,
-        kind: "service",
-        label: scheduleId,
-        attributes: {
-          subtype: "temporal-schedule",
-          configuredWorkflow: workflowName,
-          confidence: "REGISTERED_STATIC_CONFIG",
-          requiresRuntimeEvidence: true,
-        },
-        location,
-      });
-      builder.addEdge({
-        kind: "registers",
-        from: fileNode,
-        to: schedule,
-        attributes: { confidence: "REGISTERED_STATIC_CONFIG" },
-        location,
-      });
-      const proven = registeredWorkflowNames.has(workflowName);
-      const workflow = proven
-        ? workflowNode(builder, workflowName, location)
-        : builder.addNode({
-            id: `workflow:temporal:unknown:schedule:${scheduleId}`,
-            kind: "workflow",
-            label: `[UNKNOWN] ${workflowName}`,
-            attributes: {
-              runtime: "temporal",
-              resolution: "UNKNOWN",
-              expression: workflowName,
-            },
-            location,
-          });
-      builder.addEdge({
-        kind: "calls",
-        from: schedule,
-        to: workflow,
-        attributes: {
-          temporalOperation: "startWorkflow",
-          confidence: proven ? "REGISTERED_STATIC_CONFIG" : "UNKNOWN",
-          requiresRuntimeEvidence: true,
-        },
-        location,
-      });
-      if (!proven) {
-        builder.addDiagnostic({
-          code: "UNKNOWN_RELATION",
-          severity: "warning",
-          message: `Temporal schedule ${scheduleId} target ${workflowName} is not proven by registered workflow exports`,
-          nodeId: schedule,
-          location,
-        });
-      }
-    };
-
     const extractScheduleSpecs = (): void => {
-      for (const statement of sourceFile.statements) {
-        if (!ts.isVariableStatement(statement)) continue;
-        for (const declaration of statement.declarationList.declarations) {
-          if (!ts.isIdentifier(declaration.name) || !declaration.initializer) {
-            continue;
-          }
-          const unwrapped = unwrapExpression(declaration.initializer);
-          if (
-            declaration.name.text === "SPECS" &&
-            ts.isArrayLiteralExpression(unwrapped)
-          ) {
-            for (const element of unwrapped.elements) {
-              recordScheduleSpecEntry(element, "id");
-            }
-          } else if (
-            declaration.name.text === "CUSTOMER_SWEEPS" &&
-            ts.isArrayLiteralExpression(unwrapped)
-          ) {
-            for (const element of unwrapped.elements) {
-              recordScheduleSpecEntry(element, "scheduleId");
-            }
-          } else if (
-            declaration.name.text ===
-              "PLATFORM_EXECUTION_TECHNICAL_CONTRACT_V1" &&
-            ts.isObjectLiteralExpression(unwrapped)
-          ) {
-            const rowsProperty = unwrapped.properties.find(
-              (property): property is ts.PropertyAssignment =>
-                ts.isPropertyAssignment(property) &&
-                declarationName(property) === "rows",
-            );
-            const rowsArray = rowsProperty
-              ? unwrapExpression(rowsProperty.initializer)
-              : undefined;
-            if (rowsArray && ts.isArrayLiteralExpression(rowsArray)) {
-              for (const element of rowsArray.elements) {
-                recordScheduleSpecEntry(element, "scheduleId");
-              }
-            }
-          }
-        }
-      }
+      extractTemporalScheduleSpecs({
+        builder,
+        sourceFile,
+        relative,
+        fileNode,
+        literalConstants,
+        registeredWorkflowNames,
+      });
     };
 
     const addSymbol = (
