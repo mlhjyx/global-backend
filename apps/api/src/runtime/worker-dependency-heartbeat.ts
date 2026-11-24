@@ -58,6 +58,7 @@ export async function startWorkerDependencyHeartbeat(input: {
   const loopLag = input.loopLag ?? defaultLoopLag;
   const loopLagSkipMs = input.loopLagSkipMs ?? DEFAULT_LOOP_LAG_SKIP_MS;
   let stopped = false;
+  let inFlight = false;
   let consecutiveFailures = 0;
   const timer = { current: undefined as NodeJS.Timeout | undefined };
 
@@ -107,24 +108,29 @@ export async function startWorkerDependencyHeartbeat(input: {
 
   timer.current = setInterval(() => {
     void (async () => {
-      if (stopped) return;
-      // A busy loop is our own load, not a missing dependency: skip this round
-      // entirely so its probe abort cannot count toward a drain.
-      const lagMs = await loopLag();
-      if (stopped || lagMs >= loopLagSkipMs) return;
-      const result = await probe();
-      if (result.status === "ok") {
-        consecutiveFailures = 0;
-        return;
+      if (stopped || inFlight) return;
+      inFlight = true;
+      try {
+        // A busy loop is our own load, not a missing dependency: skip this round
+        // entirely so its probe abort cannot count toward a drain.
+        const lagMs = await loopLag();
+        if (stopped || lagMs >= loopLagSkipMs) return;
+        const result = await probe();
+        if (result.status === "ok") {
+          consecutiveFailures = 0;
+          return;
+        }
+        consecutiveFailures += 1;
+        if (
+          stopped ||
+          (result.drainImmediately !== true &&
+            consecutiveFailures < failuresBeforeDrain)
+        )
+          return;
+        await drain(result.code);
+      } finally {
+        inFlight = false;
       }
-      consecutiveFailures += 1;
-      if (
-        stopped ||
-        (result.drainImmediately !== true &&
-          consecutiveFailures < failuresBeforeDrain)
-      )
-        return;
-      await drain(result.code);
     })();
   }, intervalMs);
   timer.current.unref();

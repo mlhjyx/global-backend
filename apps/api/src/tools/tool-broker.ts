@@ -560,23 +560,7 @@ export class ToolBroker implements ExecutionBroker {
       }
     }
 
-    // 4) 限流（令牌桶 + 每域延迟）
-    let release: (() => void | Promise<void>) | undefined;
-    try {
-      release = await this.limiter.acquire(toolId, now());
-    } catch (error) {
-      if (paidScope) {
-        await this.settlePersistentOperation({
-          scope: paidScope,
-          status: "RELEASED",
-          measurement: this.notIncurredMeasurement(),
-          errorCode: "NOT_EXECUTED",
-        });
-      } else if (reservation) {
-        await this.budget.release(reservation);
-      }
-      throw error;
-    }
+    // 4) 限流（先排每域延迟，再拿全局并发槽，避免域延迟排队期间白占并发租约）
     const domain = extractToolGovernableDomain(input);
     if (domain && tool.rateLimit.perDomainCrawlDelayMs) {
       try {
@@ -586,22 +570,16 @@ export class ToolBroker implements ExecutionBroker {
           now(),
         );
       } catch (error) {
-        try {
-          if (paidScope) {
-            await this.settlePersistentOperation({
-              scope: paidScope,
-              status: "RELEASED",
-              measurement: this.notIncurredMeasurement(),
-              errorCode: "NOT_EXECUTED",
-            });
-          } else if (reservation) {
-            await this.budget.release(reservation);
-          }
-        } finally {
-          await release?.();
-        }
+        await this.releasePreWireBudget(paidScope, reservation);
         throw error;
       }
+    }
+    let release: (() => void | Promise<void>) | undefined;
+    try {
+      release = await this.limiter.acquire(toolId, now());
+    } catch (error) {
+      await this.releasePreWireBudget(paidScope, reservation);
+      throw error;
     }
 
     // 5) 执行 + 6) settle + 7) trace
@@ -969,7 +947,35 @@ export class ToolBroker implements ExecutionBroker {
       }
       return result;
     } finally {
-      await release?.();
+      await this.releaseLimiterSafely(release);
+    }
+  }
+
+  private async releasePreWireBudget(
+    paidScope: PaidOperationReservation | undefined,
+    reservation: BudgetReservation | undefined,
+  ): Promise<void> {
+    if (paidScope) {
+      await this.settlePersistentOperation({
+        scope: paidScope,
+        status: "RELEASED",
+        measurement: this.notIncurredMeasurement(),
+        errorCode: "NOT_EXECUTED",
+      });
+    } else if (reservation) {
+      await this.budget.release(reservation);
+    }
+  }
+
+  private async releaseLimiterSafely(
+    release: (() => void | Promise<void>) | undefined,
+  ): Promise<void> {
+    if (!release) return;
+    try {
+      await release();
+    } catch {
+      // Post-settlement Redis release errors must never discard an already-settled
+      // tool result (the Redis lease self-expires after leaseMs).
     }
   }
 

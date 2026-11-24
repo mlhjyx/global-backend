@@ -886,7 +886,7 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
     expect(budget.remainingCents("run1")).toBe(0); // 保守占用；不能把未知调用当作零费用
   });
 
-  it("domain-delay admission fails before execution and releases both budget and concurrency", async () => {
+  it("domain-delay admission runs before concurrency acquire and releases budget on failure", async () => {
     const budget = new BudgetLedger();
     budget.open("run1", 10);
     const tool = fakeTool("crawl.delayed", 10);
@@ -909,6 +909,30 @@ describe("ToolBroker — 预算 reserve-then-settle", () => {
       ),
     ).rejects.toThrow("redis unavailable");
     expect(budget.remainingCents("run1")).toBe(10);
+    expect(limiter.acquire).not.toHaveBeenCalled();
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it("preserves a settled tool result even if Redis limiter release fails afterwards", async () => {
+    const budget = new BudgetLedger();
+    budget.open("run1", 10);
+    const tool = fakeTool("crawl.settled", 1);
+    const release = vi.fn(async () => {
+      throw new Error("redis release blip");
+    });
+    const limiter = {
+      configure: vi.fn(),
+      acquire: vi.fn(async () => release),
+      respectDomainDelay: vi.fn(async () => undefined),
+    };
+    const { broker } = makeBroker(tool, { budget, limiter });
+
+    const result = await broker.invoke(
+      "crawl.settled",
+      { url: "https://example.com/" },
+      { workspaceId: "w", runId: "run1" },
+    );
+    expect(result.costCents).toBe(1);
     expect(release).toHaveBeenCalledOnce();
   });
 });
@@ -1680,7 +1704,7 @@ describe("ToolBroker — per-call artifact subject binding (G3 5.1)", () => {
     ).rejects.toMatchObject({
       reason: "GENERIC_OPERATION_ARTIFACT_SUBJECT_TOMBSTONED",
     });
-    expect(order).toEqual(["limiter", "crawl-delay", "admit"]);
+    expect(order).toEqual(["crawl-delay", "limiter", "admit"]);
     expect(execute).not.toHaveBeenCalled();
     expect(release).toHaveBeenCalledWith(reservation);
   });

@@ -36,6 +36,9 @@ export const resolvePublicHttpUrl: PublicUrlResolver = async (raw, options = {})
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new EgressBlockedError('invalid_scheme');
   }
+  if (url.port !== '' && url.port !== '80' && url.port !== '443') {
+    throw new EgressBlockedError('invalid_port');
+  }
   if (url.username || url.password) throw new EgressBlockedError('url_credentials_forbidden');
 
   const resolution = await resolvePublicIp(url.hostname, options);

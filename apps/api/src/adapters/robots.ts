@@ -31,6 +31,17 @@ interface RobotsRule {
 
 const cache = new Map<string, RobotsRule>();
 const TTL_MS = 60 * 60 * 1000; // 1h（生产可对齐 SourcePolicy）
+export const MAX_ROBOTS_CACHE_ENTRIES = 2_000;
+
+function writeRobotsCache(origin: string, rule: RobotsRule): void {
+  if (cache.has(origin)) cache.delete(origin);
+  while (cache.size >= MAX_ROBOTS_CACHE_ENTRIES) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+  cache.set(origin, rule);
+}
 
 export interface RobotsDependencies {
   request?: typeof requestPublicHttp;
@@ -84,24 +95,32 @@ async function loadRobots(
     }
   }
   const rule = { disallow, homepageOnly, fetchedAt: Date.now() };
-  cache.set(origin, rule);
+  writeRobotsCache(origin, rule);
   return rule;
 }
 
-/** 解析 `User-agent: *` 段落下的 Disallow 前缀。 */
+/** 解析 `User-agent: *` 段落下的 Disallow 前缀（遵循 RFC 9309 多 User-agent 合并组规则）。 */
 export function parseWildcardDisallow(robotsText: string): string[] {
   const lines = robotsText.split(/\r?\n/).map((l) => l.replace(/#.*$/, '').trim());
   const disallow: string[] = [];
   let inStar = false;
+  let seenRuleInGroup = false;
   for (const line of lines) {
     const m = line.match(/^(user-agent|disallow|allow)\s*:\s*(.*)$/i);
     if (!m) continue;
     const field = m[1].toLowerCase();
     const value = m[2].trim();
     if (field === 'user-agent') {
-      inStar = value === '*';
-    } else if (field === 'disallow' && inStar && value) {
-      disallow.push(value);
+      if (seenRuleInGroup) {
+        inStar = false;
+        seenRuleInGroup = false;
+      }
+      if (value === '*') inStar = true;
+    } else {
+      seenRuleInGroup = true;
+      if (field === 'disallow' && inStar && value) {
+        disallow.push(value);
+      }
     }
   }
   return disallow;

@@ -375,13 +375,30 @@ async function recoverObligation(obligation: CleanupObligation): Promise<Recover
  * fence. A fenced identity (unknown or replaced root) stays closed to manual
  * operations instead of being deleted or ignored.
  */
-export function createBrowserReadinessProbe(): Probe {
+export interface BrowserReadinessProbeOptions {
+  /** Cache PASS per executable for this many milliseconds (0 disables caching). */
+  readonly cacheTtlMs?: number;
+  /** Monotonic clock used to evaluate cache TTL (defaults to performance.now). */
+  readonly now?: () => number;
+}
+
+export const DEFAULT_BROWSER_PROBE_CACHE_TTL_MS = 60_000;
+
+export function createBrowserReadinessProbe(
+  options: BrowserReadinessProbeOptions = {},
+): Probe {
+  const cacheTtlMs = Math.max(0, options.cacheTtlMs ?? 0);
+  const now = options.now ?? (() => performance.now());
   let inFlight: Promise<void> | undefined;
   let executableInFlight: string | undefined;
   let obligation: CleanupObligation | undefined;
   let attempts = 0;
+  let cachedPass:
+    | { readonly executable: string; readonly expiresAt: number }
+    | undefined;
   const run = async (executable: string): Promise<void> => {
     if (obligation) {
+      cachedPass = undefined;
       const current = obligation;
       let recovery: Recovery;
       try {
@@ -400,9 +417,16 @@ export function createBrowserReadinessProbe(): Probe {
     try {
       result = await runProbe(executable, attempts);
     } catch {
+      cachedPass = undefined;
       throw new Error(UNAVAILABLE_ERROR);
     }
-    if (result.kind === "ok") return;
+    if (result.kind === "ok") {
+      if (cacheTtlMs > 0) {
+        cachedPass = { executable, expiresAt: now() + cacheTtlMs };
+      }
+      return;
+    }
+    cachedPass = undefined;
     if (result.kind === "unavailable") throw new Error(UNAVAILABLE_ERROR);
     obligation = result.obligation;
     throw cleanupError("attempt-cleanup");
@@ -410,6 +434,16 @@ export function createBrowserReadinessProbe(): Probe {
   return (executable) => {
     if (process.platform !== "linux" || !EXECUTABLES.has(executable)) {
       return Promise.reject(new Error(CONFIG_ERROR));
+    }
+    if (
+      cacheTtlMs > 0 &&
+      !obligation &&
+      !inFlight &&
+      cachedPass &&
+      cachedPass.executable === executable &&
+      now() < cachedPass.expiresAt
+    ) {
+      return Promise.resolve();
     }
     if (inFlight) {
       return executableInFlight === executable
@@ -425,4 +459,6 @@ export function createBrowserReadinessProbe(): Probe {
   };
 }
 
-export const probeBrowserReadiness = createBrowserReadinessProbe();
+export const probeBrowserReadiness = createBrowserReadinessProbe({
+  cacheTtlMs: DEFAULT_BROWSER_PROBE_CACHE_TTL_MS,
+});

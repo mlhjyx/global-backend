@@ -1,6 +1,9 @@
 import { captureManufacturerProfileText } from "../tools/manufacturer-profile-capture";
 import { afterEach, describe, expect, it, vi } from "vitest";
-vi.mock("./guarded-http", () => ({ requestPublicHttp: vi.fn() }));
+vi.mock("./guarded-http", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./guarded-http")>()),
+  requestPublicHttp: vi.fn(),
+}));
 import { requestPublicHttp } from "./guarded-http";
 import { fetchPageHttpFirst } from "./http-first-fetch";
 const html = `<html><head><title>Acme Pumps GmbH</title></head><body><article><h1>Acme Pumps GmbH</h1><p>Country: Germany</p><p>employee@acme.example</p><p>${"Industrial distribution support and approved profile description. ".repeat(6)}</p></article></body></html>`;

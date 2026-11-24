@@ -175,4 +175,17 @@ describe('robots 合规与 SSRF 入口', () => {
       { request, resolve },
     )).rejects.toBe(physicalFence);
   });
+
+  it('preserves wildcard Disallow across RFC 9309 multi-User-agent groups', () => {
+    const text = [
+      'User-agent: *',
+      'User-agent: Googlebot',
+      'Disallow: /private',
+      'Disallow: /checkout',
+      '',
+      'User-agent: Bingbot',
+      'Disallow: /bing-only',
+    ].join('\n');
+    expect(parseWildcardDisallow(text)).toEqual(['/private', '/checkout']);
+  });
 });

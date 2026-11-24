@@ -27,6 +27,8 @@ const REDIS_CONFIG_INVALID_MESSAGE = 'Redis rate-limit configuration invalid';
 const REDIS_PROTOCOL_INVALID_MESSAGE = 'Redis rate-limit protocol response invalid';
 const MAX_ACQUIRE_WAIT_MS = 1_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
+export const DEFAULT_RATE_LIMIT_LEASE_MS = 60_000;
+export const DEFAULT_MAX_DOMAIN_DELAY_WAIT_MS = 15_000;
 
 function isLoopbackRedisHost(hostname: string): boolean {
   return (
@@ -132,10 +134,15 @@ const DOMAIN_DELAY_SCRIPT = `
 local now = redis.call('TIME')
 local now_ms = now[1] * 1000 + math.floor(now[2] / 1000)
 local delay_ms = tonumber(ARGV[1])
+local max_wait_ms = tonumber(ARGV[2])
 local next_at = tonumber(redis.call('GET', KEYS[1]) or 0)
 local assigned_at = math.max(now_ms, next_at)
+local wait_ms = math.max(0, assigned_at - now_ms)
+if max_wait_ms and max_wait_ms > 0 and wait_ms > max_wait_ms then
+  return wait_ms
+end
 redis.call('SET', KEYS[1], assigned_at + delay_ms, 'PX', math.max(delay_ms * 4, 60000))
-return math.max(0, assigned_at - now_ms)
+return wait_ms
 `;
 
 function invalidProtocolResponse(message = REDIS_PROTOCOL_INVALID_MESSAGE): RateLimitStoreUnavailableError {
@@ -181,6 +188,7 @@ export class RedisRateLimitStore implements RateLimitStore {
   private readonly namespace: string;
   private readonly leaseMs: number;
   private readonly acquireTimeoutMs: number;
+  private readonly maxDomainDelayWaitMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => number;
 
@@ -190,13 +198,16 @@ export class RedisRateLimitStore implements RateLimitStore {
       namespace?: string;
       leaseMs?: number;
       acquireTimeoutMs?: number;
+      maxDomainDelayWaitMs?: number;
       sleep?: (ms: number) => Promise<void>;
       now?: () => number;
     },
   ) {
     this.namespace = options?.namespace ?? 'global:tool-limit';
-    this.leaseMs = options?.leaseMs ?? 30_000;
+    this.leaseMs = options?.leaseMs ?? DEFAULT_RATE_LIMIT_LEASE_MS;
     this.acquireTimeoutMs = options?.acquireTimeoutMs ?? 30_000;
+    this.maxDomainDelayWaitMs =
+      options?.maxDomainDelayWaitMs ?? DEFAULT_MAX_DOMAIN_DELAY_WAIT_MS;
     this.sleep = options?.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, Math.max(0, ms))));
     this.now = options?.now ?? Date.now;
   }
@@ -287,11 +298,20 @@ export class RedisRateLimitStore implements RateLimitStore {
     }
     let wait: unknown;
     try {
-      wait = await this.client.eval(DOMAIN_DELAY_SCRIPT, 1, `${this.namespace}:domain:${normalized}`, delayMs);
+      wait = await this.client.eval(
+        DOMAIN_DELAY_SCRIPT,
+        1,
+        `${this.namespace}:domain:${normalized}`,
+        delayMs,
+        this.maxDomainDelayWaitMs,
+      );
     } catch {
       throw new RateLimitStoreUnavailableError('Redis domain-delay reservation unavailable');
     }
     const waitMs = normalizeTimerDelay(wait);
+    if (waitMs > this.maxDomainDelayWaitMs) {
+      throw new RateLimitAcquireTimeoutError(`domain:${normalized}`);
+    }
     if (waitMs > 0) await this.sleep(waitMs);
   }
 }

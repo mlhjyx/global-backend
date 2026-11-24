@@ -17,7 +17,13 @@ import { createHash } from "node:crypto";
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
-import { requestPublicHttp } from "./guarded-http";
+import {
+  ExternalHttpActionDeniedError,
+  isExternalHttpPhysicalWireDeniedError,
+  requestPublicHttp,
+} from "./guarded-http";
+import { EgressBlockedError } from "./url-guard";
+import { decodeHttpTextWithCharset } from "./bounded-fetch-response";
 
 /** 诚实 UA：不做指纹伪装（curl-impersonate 类方案在观察名单，另行决策）。 */
 export const HTTP_FIRST_UA =
@@ -102,9 +108,36 @@ export interface HttpFirstCacheOptions {
   port: HttpFirstCachePort;
 }
 
+export class RobotsRedirectBlockedError extends Error {
+  constructor(public readonly finalUrl: string) {
+    super("robots_redirect_blocked");
+    this.name = "RobotsRedirectBlockedError";
+  }
+}
+
+export function isHttpFirstFatalError(error: unknown): boolean {
+  return (
+    error instanceof EgressBlockedError ||
+    error instanceof ExternalHttpActionDeniedError ||
+    error instanceof RobotsRedirectBlockedError ||
+    isExternalHttpPhysicalWireDeniedError(error)
+  );
+}
+
+function isCrossOriginRedirect(initialUrl: string, finalUrl: string | undefined): boolean {
+  if (!finalUrl) return false;
+  try {
+    return new URL(initialUrl).origin !== new URL(finalUrl).origin;
+  } catch {
+    return true;
+  }
+}
+
 export interface HttpFirstOptions {
   /** Evidence mode: no redirects or cached text from the normal fetch path. */
   exactUrl?: boolean;
+  /** Optional robots re-check when a non-exact redirect crosses to another origin. */
+  checkRedirectAllowed?: (finalUrl: string) => Promise<boolean>;
   profileTextRevision?: typeof MANUFACTURER_PROFILE_TEXT_REVISION;
   /** Server-owned tool composition only; never a tool-input/query/context field. */
   captureProfileText?: (html: string, minChars: number) => string | undefined;
@@ -130,18 +163,26 @@ function defaultMinChars(env: NodeJS.ProcessEnv = process.env): number {
 }
 
 function decodeHtml(body: Buffer, contentType: string | null): string {
-  const head = body.subarray(0, 2_048).toString("latin1");
-  const label =
-    /charset=["']?([\w-]+)/i.exec(contentType ?? "")?.[1] ??
-    /<meta[^>]+charset=["']?([\w-]+)/i.exec(head)?.[1];
-  if (label && !/^utf-?8$/i.test(label)) {
-    try {
-      return new TextDecoder(label, { fatal: false }).decode(body);
-    } catch {
-      // 未知编码标签：按 UTF-8 尽力解码。
-    }
+  return decodeHttpTextWithCharset(body, contentType);
+}
+
+async function enforceRedirectRobots(
+  url: string,
+  fetched: HttpFirstHtmlResponse,
+  options: HttpFirstOptions,
+): Promise<void> {
+  if (
+    options.exactUrl ||
+    !options.checkRedirectAllowed ||
+    !isCrossOriginRedirect(url, fetched.finalUrl)
+  ) {
+    return;
   }
-  return body.toString("utf8");
+  const targetUrl = fetched.finalUrl!;
+  const allowed = await options.checkRedirectAllowed(targetUrl);
+  if (!allowed) {
+    throw new RobotsRedirectBlockedError(targetUrl);
+  }
 }
 
 function defaultFetchHtml(
@@ -292,9 +333,24 @@ function writeCache(cache: HttpFirstCacheOptions, url: string, page: HttpFirstCa
   return recipe ? cache.port.put(cache.workspaceId, url, page, recipe) : cache.port.put(cache.workspaceId, url, page);
 }
 
+async function fetchHtmlSafely(
+  url: string,
+  options: HttpFirstOptions,
+  sendValidators: HttpFirstRequestValidators | undefined,
+): Promise<HttpFirstHtmlResponse | null> {
+  try {
+    const fetcher =
+      options.fetchHtml ?? defaultFetchHtml(options.hooks, options.exactUrl);
+    return await fetcher(url, sendValidators);
+  } catch (error) {
+    if (isHttpFirstFatalError(error)) throw error;
+    return null;
+  }
+}
+
 /**
  * 抓一页并抽成 Markdown。返回 null 表示「应回落浏览器渲染」：
- * 非 HTML、非 2xx、抓取失败、或可读正文低于阈值。任何异常都不向上抛（fail-safe）。
+ * 非 HTML、非 2xx、抓取失败、或可读正文低于阈值。安全拦截与 robots 重定向拒绝向上抛。
  */
 export async function fetchPageHttpFirst(
   url: string,
@@ -319,20 +375,14 @@ export async function fetchPageHttpFirst(
       ? validators
       : undefined;
 
-  let fetched: HttpFirstHtmlResponse | null = null;
-  try {
-    const fetcher =
-      options.fetchHtml ?? defaultFetchHtml(options.hooks, options.exactUrl);
-    fetched = await fetcher(url, sendValidators);
-  } catch {
-    return null;
-  }
+  const fetched = await fetchHtmlSafely(url, options, sendValidators);
   if (!fetched || (options.exactUrl && fetched.status !== 200)) return null;
   if (fetched.status === 304) {
     if (!cached) return null;
     logPageCacheState(url, "conditional-304");
     return cachedPage(cached, cacheRecipe);
   }
+  await enforceRedirectRobots(url, fetched, options);
   if (!acceptsHtml(fetched.contentType, options.exactUrl)) return null;
   try {
     const html = decodeHtml(fetched.body, fetched.contentType);
