@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { PrismaService } from '../prisma/prisma.service';
-import { createSellerDocumentActivities, type SellerDocumentIngestInput } from './seller-document.activities';
+import { KbIngestError } from '../site-builder/kb-errors';
+import {
+  createSellerDocumentActivities,
+  resolveDoclingFilename,
+  type SellerDocumentIngestInput,
+} from './seller-document.activities';
 import type { SellerDocumentsStorage } from './seller-documents.storage';
 
 const INPUT: SellerDocumentIngestInput = {
@@ -10,10 +15,11 @@ const INPUT: SellerDocumentIngestInput = {
 };
 
 function fixture(options: {
-  claimRows?: Array<{ object_key: string; mime: string; processing_attempt: number }>;
+  claimRows?: Array<{ filename?: string | null; object_key: string; mime: string; processing_attempt: number }>;
   currentStatus?: { status: string; deletedAt: Date | null } | null;
   content?: Buffer | Error;
   markdown?: string;
+  doclingError?: Error;
   embedError?: Error;
   publishRows?: unknown[];
 } = {}) {
@@ -27,7 +33,7 @@ function fixture(options: {
       if (sql.includes('RETURNING "parse_revision"'))
         return options.publishRows ?? [{ parse_revision: 1 }];
       return options.claimRows ?? [
-        { object_key: 'ws/k', mime: 'text/markdown', processing_attempt: 1 },
+        { filename: 'catalog.md', object_key: 'ws/k', mime: 'text/markdown', processing_attempt: 1 },
       ];
     }),
     $executeRaw: executeRaw,
@@ -50,7 +56,10 @@ function fixture(options: {
     }),
   };
   const docling = {
-    convertToMarkdown: vi.fn(async () => ({ markdown: options.markdown ?? '# parsed' })),
+    convertToMarkdown: vi.fn(async () => {
+      if (options.doclingError) throw options.doclingError;
+      return { markdown: options.markdown ?? '# parsed' };
+    }),
   };
   const embeddings = {
     model: 'bge-m3',
@@ -69,15 +78,38 @@ function fixture(options: {
   return { activities, prisma, tx, storage, docling, embeddings, executeRaw, deleteMany };
 }
 
+describe('resolveDoclingFilename', () => {
+  it('保留合法扩展名，缺失或仅 UUID 时按 MIME 补齐扩展名', () => {
+    expect(resolveDoclingFilename('doc-1', 'Liansheng_HJT_2026.pdf', 'application/pdf')).toBe('Liansheng_HJT_2026.pdf');
+    expect(resolveDoclingFilename('doc-1', 'dir/sub/catalog.docx', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')).toBe('catalog.docx');
+    expect(resolveDoclingFilename('doc-1', 'datasheet', 'application/pdf')).toBe('datasheet.pdf');
+    expect(resolveDoclingFilename('doc-1', null, 'application/pdf')).toBe('doc-1.pdf');
+  });
+});
+
 describe('createSellerDocumentActivities（Phase 2b ingest）', () => {
   it('文本资料：直读 → 分块 → 嵌入 → 写 chunk 并置 ready', async () => {
-    const { activities, embeddings, deleteMany, executeRaw } = fixture();
+    const { activities, embeddings, deleteMany, executeRaw, tx } = fixture();
     const result = await activities.processSellerDocument(INPUT);
     expect(result.outcome).toBe('ready');
     expect(embeddings.embed).toHaveBeenCalled();
     expect(deleteMany).toHaveBeenCalledWith({ where: { documentId: INPUT.documentId } });
+    // claim SQL 支持接管过期 processing 租约
+    const claimSql = (tx.$queryRaw.mock.calls[0]?.[0] as { sql?: string } | undefined)?.sql ?? '';
+    expect(claimSql).toContain(`"status" = 'processing'`);
+    expect(claimSql).toContain('"lease_until"');
     // 每个 chunk 一个 INSERT；ready 与 parseRevision 在同一事务 UPDATE
     expect(executeRaw.mock.calls.length).toBeGreaterThan(0);
+  });
+
+  it('PDF 资料：传带扩展名的文件名给 Docling，而非裸 UUID', async () => {
+    const { activities, docling } = fixture({
+      claimRows: [{ filename: '光伏组件规格书.pdf', object_key: 'ws/k.pdf', mime: 'application/pdf', processing_attempt: 1 }],
+      markdown: '# 光伏组件\n\nHJT 720W 规格参数说明。',
+    });
+    const result = await activities.processSellerDocument(INPUT);
+    expect(result.outcome).toBe('ready');
+    expect(docling.convertToMarkdown).toHaveBeenCalledWith('光伏组件规格书.pdf', expect.any(Buffer), undefined);
   });
 
   it('下载失败：按 attempt 退避回 queued（非终态）', async () => {
@@ -86,10 +118,19 @@ describe('createSellerDocumentActivities（Phase 2b ingest）', () => {
     expect(result.outcome).toBe('queued');
   });
 
-  it('解析为空内容：回 queued 并记录错误码', async () => {
+  it('解析为空内容：立即标记 failed_terminal，不触发 8 次重试风暴', async () => {
     const { activities } = fixture({ content: Buffer.from('   \n  ') });
     const result = await activities.processSellerDocument(INPUT);
-    expect(result.outcome).toBe('queued');
+    expect(result.outcome).toBe('failed_terminal');
+  });
+
+  it('Docling 返回终态文档损坏错误（disposition=terminal）：立即标记 failed_terminal', async () => {
+    const { activities } = fixture({
+      claimRows: [{ filename: 'bad.pdf', object_key: 'ws/bad.pdf', mime: 'application/pdf', processing_attempt: 1 }],
+      doclingError: new KbIngestError('KB_DOCUMENT_INVALID', 'terminal', 'parse', 'corrupt pdf'),
+    });
+    const result = await activities.processSellerDocument(INPUT);
+    expect(result.outcome).toBe('failed_terminal');
   });
 
   it('嵌入失败：回 queued，不写 chunk', async () => {

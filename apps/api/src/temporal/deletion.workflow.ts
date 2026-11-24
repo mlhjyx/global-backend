@@ -1,4 +1,4 @@
-import { proxyActivities } from '@temporalio/workflow';
+import { patched, proxyActivities, sleep } from '@temporalio/workflow';
 import type { DeletionActivities } from './deletion.activities';
 import type { DeletionWorkflowInput, ErasureCounts, LocatedDeletionTargets } from '../compliance/deletion.types';
 import type { SellerDocumentEraseProgress, SellerDocumentErasureCounts } from '../seller-knowledge/seller-document-cleanup.types';
@@ -7,6 +7,9 @@ const acts = proxyActivities<DeletionActivities>({
   startToCloseTimeout: '5 minutes',
   retry: { maximumAttempts: 5 },
 });
+
+// Frozen under patch `seller-document-blob-retry-v1` — do not alter in place; bump patch id if ever tuned.
+const BLOB_RETRY_DELAYS = ['5 seconds', '10 seconds', '15 seconds'] as const;
 
 /**
  * 删除编排（收口⑥ PR-B，GDPR Art.17）：冻结 → 擦除 → 回执 三段活动（各幂等，CAS 守状态）。
@@ -23,6 +26,19 @@ export async function deletionWorkflow(
     let erased: ErasureCounts | SellerDocumentEraseProgress = await acts.eraseSubject({ input, located });
     while ('done' in erased && !erased.done) {
       erased = await acts.eraseSubject({ input, located });
+    }
+    // DB 批次已完但对象存储删除失败时，工作流层在 patch 门后显式退避重调 eraseSubject 重试 storage.delete()，
+    // 而不是直接跳进 completeDeletion 空重试 5 次；耗尽仍未删通才交 completeDeletion fail-closed 报错。
+    if (
+      'blobDeleted' in erased &&
+      !erased.blobDeleted &&
+      patched('seller-document-blob-retry-v1')
+    ) {
+      for (const delay of BLOB_RETRY_DELAYS) {
+        if (!('blobDeleted' in erased) || erased.blobDeleted) break;
+        await sleep(delay);
+        erased = await acts.eraseSubject({ input, located });
+      }
     }
     return await acts.completeDeletion({ input, located });
   } catch (err) {

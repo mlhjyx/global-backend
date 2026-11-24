@@ -635,31 +635,48 @@ async function eraseSellerDocumentCleanup(
     };
     nextCursor = { phase: batch.nextPhase, afterId: batch.nextAfter };
   }
-  let blobDeleted = next.blobDeleted;
-  let blobFailures = next.blobFailures;
-  if (nextCursor.phase === 'done' && !blobDeleted) {
-    const document = await tx.sellerDocument.findFirst({
-      where: { id: located.documentId, workspaceId: input.workspaceId, companyId: located.companyId },
-      select: { objectKey: true },
-    });
-    if (!document) {
-      blobFailures = 1;
-    } else {
-      try {
-        await storage.delete(document.objectKey);
-        blobDeleted = true;
-        blobFailures = 0;
-      } catch {
-        blobFailures = 1;
-      }
-    }
-  }
-  const final: SellerDocumentErasureCounts = { ...next, blobDeleted, blobFailures };
+  const blob =
+    nextCursor.phase === 'done' && !next.blobDeleted
+      ? await deleteSellerDocumentBlobWithRetry(tx, storage, input.workspaceId, located)
+      : { blobDeleted: next.blobDeleted, blobFailures: next.blobFailures };
+  const final: SellerDocumentErasureCounts = {
+    ...next,
+    blobDeleted: blob.blobDeleted,
+    blobFailures: blob.blobFailures,
+  };
   await tx.deletionRequest.updateMany({
     where: { id: input.deletionRequestId, status: { in: ['ERASING', 'FAILED'] } },
     data: { stats: { ...stats, sellerDocumentCounts: final, sellerDocumentCursor: nextCursor } as unknown as Prisma.InputJsonValue },
   });
   return { ...final, done: nextCursor.phase === 'done' };
+}
+
+const BLOB_DELETE_MAX_ATTEMPTS = 3;
+const BLOB_DELETE_BASE_DELAY_MS = 50;
+
+/** 有界重试对象存储删除，避免瞬时网络/MinIO 抖动导致整条删除工作流落入无法自愈的 blob residue。 */
+async function deleteSellerDocumentBlobWithRetry(
+  tx: Prisma.TransactionClient,
+  storage: Pick<SellerDocumentsStorage, 'delete'>,
+  workspaceId: string,
+  located: LocatedSellerDocumentCleanupTargets,
+): Promise<{ blobDeleted: boolean; blobFailures: number }> {
+  const document = await tx.sellerDocument.findFirst({
+    where: { id: located.documentId, workspaceId, companyId: located.companyId },
+    select: { objectKey: true },
+  });
+  if (!document) return { blobDeleted: false, blobFailures: 1 };
+  for (let attempt = 1; attempt <= BLOB_DELETE_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      await storage.delete(document.objectKey);
+      return { blobDeleted: true, blobFailures: 0 };
+    } catch {
+      if (attempt < BLOB_DELETE_MAX_ATTEMPTS) {
+        await new Promise((resolve) => setTimeout(resolve, BLOB_DELETE_BASE_DELAY_MS * attempt));
+      }
+    }
+  }
+  return { blobDeleted: false, blobFailures: 1 };
 }
 
 /** Complete only after all targets and the blob are confirmed; otherwise leave ERASING/FAILED with real residue. */

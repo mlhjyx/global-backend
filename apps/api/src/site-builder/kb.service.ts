@@ -364,11 +364,16 @@ export class KbService {
     });
   }
 
-  /** 语义检索（halfvec cosine，与 HNSW 索引同 cast，02 §12）。 */
+  /** 语义检索（halfvec cosine，与 HNSW 索引同 cast，02 §12；迭代扫描 + 嵌入版本隔离）。 */
   async search(ctx: RequestContext, siteId: string, query: string, k = 5): Promise<SearchHit[]> {
     const [vector] = await this.embeddings.embed([query]);
     const literal = toVectorLiteral(vector);
+    const embedModel: string = this.embeddings.model;
+    const embedVersion: string = this.embeddings.version;
     return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      if (typeof tx.$executeRaw === 'function') {
+        await tx.$executeRaw`SET LOCAL hnsw.iterative_scan = relaxed_order`;
+      }
       const rows = await tx.$queryRaw<
         { document_id: string; seq: number; text: string; score: number }[]
       >`
@@ -376,7 +381,10 @@ export class KbService {
                1 - (c.embedding::halfvec(1024) <=> ${literal}::halfvec(1024)) AS score
         FROM kb_chunk c
         JOIN kb_document d ON d.id = c.document_id
-        WHERE d.site_id = ${siteId}::uuid AND c.embedding IS NOT NULL
+        WHERE d.site_id = ${siteId}::uuid
+          AND c.embedding IS NOT NULL
+          AND c.embed_model = ${embedModel}
+          AND c.embed_version = ${embedVersion}
         ORDER BY c.embedding::halfvec(1024) <=> ${literal}::halfvec(1024)
         LIMIT ${k}
       `;

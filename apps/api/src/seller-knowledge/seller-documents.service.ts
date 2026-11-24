@@ -226,7 +226,10 @@ export class SellerDocumentsService {
         WHERE "id" = ${documentId}::uuid
           AND "workspace_id" = ${ctx.workspaceId}::uuid
           AND "company_id" = ${companyId}::uuid
-          AND "status" = 'pending_upload'
+          AND (
+            "status" = 'pending_upload'
+            OR ("status" = 'committing' AND ("lease_until" IS NULL OR "lease_until" <= now()))
+          )
           AND "deleted_at" IS NULL
         RETURNING "object_key", "mime", "size_bytes"
       `),
@@ -312,6 +315,9 @@ export class SellerDocumentsService {
           error: { code: 'SELLER_DOCUMENT_DUPLICATE', message: '公司已存在相同内容的资料' },
         });
       }
+      // 非 P2002 异常：回滚状态至 pending_upload 并清理孤立 canonical 副本，避免行永久滞留 committing。
+      await this.resetToPendingUpload(ctx, documentId).catch(() => undefined);
+      await this.storage.delete(canonicalKey).catch(() => undefined);
       throw error;
     }
     await this.storage.delete(stagingKey).catch(() => undefined);
@@ -385,24 +391,68 @@ export class SellerDocumentsService {
       });
     }
     const literal = `[${vector.join(',')}]`;
-    return this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
-      tx.$queryRaw<
+    const candidateLimit = Math.min(Math.max(n * 4, 40), 200);
+    const embedModel: string = this.embeddings.model;
+    const embedVersion: string = this.embeddings.version;
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      if (typeof tx.$executeRaw === 'function') {
+        await tx.$executeRaw(Prisma.sql`SET LOCAL hnsw.iterative_scan = relaxed_order`);
+      }
+      return tx.$queryRaw<
         Array<{ document_id: string; filename: string; seq: number; text: string; score: number }>
       >(Prisma.sql`
-        SELECT c."document_id", d."filename", c."seq", c."text",
-               0.7 * (1 - (c."embedding"::halfvec(1024) <=> ${literal}::halfvec(1024)))
-             + 0.3 * ts_rank_cd(c."text_tsv", plainto_tsquery('simple', ${trimmed})) AS score
-        FROM "seller_document_chunk" c
-        JOIN "seller_document" d
-          ON d."id" = c."document_id" AND d."workspace_id" = c."workspace_id"
-        WHERE c."workspace_id" = ${ctx.workspaceId}::uuid
-          AND d."company_id" = ${companyId}::uuid
-          AND d."status" = 'ready'
-          AND d."deleted_at" IS NULL
-        ORDER BY score DESC
+        WITH vector_candidates AS (
+          SELECT c."id", c."document_id", d."filename", c."seq", c."text",
+                 c."embedding"::halfvec(1024) <=> ${literal}::halfvec(1024) AS dist,
+                 c."text_tsv"
+          FROM "seller_document_chunk" c
+          JOIN "seller_document" d
+            ON d."id" = c."document_id" AND d."workspace_id" = c."workspace_id"
+          WHERE c."workspace_id" = ${ctx.workspaceId}::uuid
+            AND d."company_id" = ${companyId}::uuid
+            AND d."status" = 'ready'
+            AND d."deleted_at" IS NULL
+            AND c."embedding" IS NOT NULL
+            AND c."embed_model" = ${embedModel}
+            AND c."embed_version" = ${embedVersion}
+          ORDER BY c."embedding"::halfvec(1024) <=> ${literal}::halfvec(1024) ASC
+          LIMIT ${candidateLimit}
+        ),
+        lexical_candidates AS (
+          SELECT c."id", c."document_id", d."filename", c."seq", c."text",
+                 c."embedding"::halfvec(1024) <=> ${literal}::halfvec(1024) AS dist,
+                 c."text_tsv"
+          FROM "seller_document_chunk" c
+          JOIN "seller_document" d
+            ON d."id" = c."document_id" AND d."workspace_id" = c."workspace_id"
+          WHERE c."workspace_id" = ${ctx.workspaceId}::uuid
+            AND d."company_id" = ${companyId}::uuid
+            AND d."status" = 'ready'
+            AND d."deleted_at" IS NULL
+            AND c."embedding" IS NOT NULL
+            AND c."embed_model" = ${embedModel}
+            AND c."embed_version" = ${embedVersion}
+            AND c."text_tsv" @@ plainto_tsquery('simple', ${trimmed})
+          ORDER BY ts_rank_cd(c."text_tsv", plainto_tsquery('simple', ${trimmed})) DESC
+          LIMIT ${candidateLimit}
+        ),
+        candidates AS (
+          SELECT DISTINCT ON ("id") "id", "document_id", "filename", "seq", "text", "dist", "text_tsv"
+          FROM (
+            SELECT * FROM vector_candidates
+            UNION ALL
+            SELECT * FROM lexical_candidates
+          ) u
+          ORDER BY "id", "dist" ASC
+        )
+        SELECT "document_id", "filename", "seq", "text",
+               0.7 * (1 - "dist")
+             + 0.3 * ts_rank_cd("text_tsv", plainto_tsquery('simple', ${trimmed})) AS score
+        FROM candidates
+        ORDER BY score DESC NULLS LAST
         LIMIT ${n}
-      `),
-    ).then((rows) =>
+      `);
+    }).then((rows) =>
       rows.map((row) => ({
         documentId: row.document_id,
         filename: row.filename,
@@ -415,15 +465,25 @@ export class SellerDocumentsService {
 
   async retry(ctx: RequestContext, documentId: string): Promise<SellerDocumentRow> {
     const row = await this.get(ctx, documentId);
-    if (row.status !== 'failed_terminal' && row.status !== 'queued') {
+    const expiredProcessing =
+      row.status === 'processing' &&
+      (!row.leaseUntil || row.leaseUntil.getTime() <= Date.now());
+    if (row.status !== 'failed_terminal' && row.status !== 'queued' && !expiredProcessing) {
       throw new ConflictException({
-        error: { code: 'SELLER_DOCUMENT_NOT_RETRYABLE', message: '只有失败或排队中的资料可以重试' },
+        error: { code: 'SELLER_DOCUMENT_NOT_RETRYABLE', message: '只有失败、排队中或租约过期的资料可以重试' },
       });
     }
     const updated = await this.prisma.withWorkspace(ctx.workspaceId, (tx) =>
       tx.sellerDocument.update({
         where: { id: documentId },
-        data: { status: 'queued', retryAt: null, processingErrorCode: null },
+        data: {
+          status: 'queued',
+          retryAt: null,
+          processingErrorCode: null,
+          processingStage: null,
+          leaseToken: null,
+          leaseUntil: null,
+        },
       }),
     );
     await this.launchIngest(ctx, row.companyId, documentId);
