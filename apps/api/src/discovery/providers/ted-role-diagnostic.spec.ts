@@ -80,7 +80,8 @@ describe('PR-03/PR-03b TED buyer/winner contract', () => {
     ]);
   });
 
-  it('T2: with the gate off (default), legacy behavior is unchanged', () => {
+  it('T2: with the gate off explicitly, legacy behavior is unchanged', () => {
+    vi.stubEnv('TED_BUYER_ROLE_GATE', 'off');
     const withFacts = scoreLead(
       {
         ...base,
@@ -96,8 +97,7 @@ describe('PR-03/PR-03b TED buyer/winner contract', () => {
     expect(withFacts.queue).toBe(withoutFacts.queue);
   });
 
-  it('T2: with the gate on, a winner-only record never enters a buyer queue', () => {
-    vi.stubEnv('TED_BUYER_ROLE_GATE', 'on');
+  it('T2: by default (gate on), a winner-only record never enters a buyer queue', () => {
     const result = scoreLead(
       {
         ...base,
@@ -140,7 +140,8 @@ describe('PR-03/PR-03b TED buyer/winner contract', () => {
     expect(withFacts.scores.intent).toBe(withoutFacts.scores.intent);
   });
 
-  it('T2: with the gate off, a same-country winner is still accepted (rollout safety)', () => {
+  it('T2: with the gate off explicitly, a same-country winner is still accepted (rollback safety)', () => {
+    vi.stubEnv('TED_BUYER_ROLE_GATE', 'off');
     const result = scoreLead(
       {
         ...base,

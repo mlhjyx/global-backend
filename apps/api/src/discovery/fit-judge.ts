@@ -186,6 +186,7 @@ export async function persistJudgmentRecordInTransaction(
   tx: Prisma.TransactionClient,
   icpId: string,
   judgment: FitJudgment,
+  runId?: string | null,
 ): Promise<void> {
   const records: JudgmentRecordDraft[] = [
     ...(judgment.judgmentRecord ? [judgment.judgmentRecord] : []),
@@ -206,8 +207,13 @@ export async function persistJudgmentRecordInTransaction(
     const tolerant =
       judgment.judgmentRecordTolerant === true ||
       (index > 0 && judgment.judgmentRecordsTolerant === true);
+    const resolvedRunId = record.runId ?? runId ?? undefined;
     try {
-      await recordJudgment(tx, { ...record, icpId });
+      await recordJudgment(tx, {
+        ...record,
+        icpId,
+        ...(resolvedRunId ? { runId: resolvedRunId } : {}),
+      });
     } catch (error) {
       if (!tolerant) throw error;
       console.warn(

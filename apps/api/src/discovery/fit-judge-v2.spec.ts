@@ -461,7 +461,12 @@ describe('persistJudgmentRecordInTransaction —— recordJudgment 唯一写入�
       },
     };
 
-    await persistJudgmentRecordInTransaction(tx as never, ICP_ID, judgmentWithRecord(judged!.judgmentRecord));
+    await persistJudgmentRecordInTransaction(
+      tx as never,
+      ICP_ID,
+      judgmentWithRecord(judged!.judgmentRecord),
+      'run-uuid-001',
+    );
 
     const data = tx.judgmentRecord.createMany.mock.calls[0]![0] as {
       data: Array<Record<string, unknown>>;
@@ -469,6 +474,7 @@ describe('persistJudgmentRecordInTransaction —— recordJudgment 唯一写入�
     expect(data.data[0]).toMatchObject({
       workspaceId: WS,
       icpId: ICP_ID,
+      runId: 'run-uuid-001',
       canonicalCompanyId: 'company-1',
       judgeLevel: 2,
       verdict: 'FIT',

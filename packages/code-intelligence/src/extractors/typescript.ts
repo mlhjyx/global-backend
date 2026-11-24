@@ -5,6 +5,10 @@ import { GraphBuilder } from "../graph";
 import { SourceLocationV1 } from "../schema";
 import { readUtf8, relativePath, walkFiles } from "../utils";
 import { PrismaCatalog, prismaModelId } from "./prisma";
+import {
+  extractTemporalScheduleSpecs,
+  loadRegisteredWorkflowNames,
+} from "./temporal-schedules";
 
 const HTTP_DECORATORS = new Map([
   ["Get", "GET"],
@@ -251,26 +255,8 @@ export async function extractTypeScript(
       }
     }
   }
-  const registeredWorkflowNames = new Set<string>();
-  const workflowRegistryPath = path.join(
-    repositoryRoot,
-    "apps",
-    "api",
-    "src",
-    "temporal",
-    "workflows.ts",
-  );
-  try {
-    const registryText = await readUtf8(workflowRegistryPath);
-    for (const match of registryText.matchAll(
-      /^export\s*\{\s*([A-Za-z][A-Za-z0-9_]*)\s*\}\s*from\s*/gm,
-    )) {
-      registeredWorkflowNames.add(match[1]);
-    }
-  } catch {
-    // A repository without the canonical Temporal registry simply emits no
-    // proven workflow declarations; client starts remain UNKNOWN.
-  }
+  const registeredWorkflowNames =
+    await loadRegisteredWorkflowNames(repositoryRoot);
   const eventRegistries = new Map<string, StaticEventRegistry>();
   for (const absolute of absoluteFiles) {
     const relative = relativePath(repositoryRoot, absolute);
@@ -492,89 +478,14 @@ export async function extractTypeScript(
     };
 
     const extractScheduleSpecs = (): void => {
-      for (const statement of sourceFile.statements) {
-        if (!ts.isVariableStatement(statement)) continue;
-        for (const declaration of statement.declarationList.declarations) {
-          if (
-            !ts.isIdentifier(declaration.name) ||
-            declaration.name.text !== "SPECS" ||
-            !declaration.initializer ||
-            !ts.isArrayLiteralExpression(declaration.initializer)
-          ) {
-            continue;
-          }
-          for (const element of declaration.initializer.elements) {
-            if (!ts.isObjectLiteralExpression(element)) continue;
-            const properties = new Map<string, ts.Expression>();
-            for (const property of element.properties) {
-              if (!ts.isPropertyAssignment(property)) continue;
-              const name = declarationName(property);
-              if (name) properties.set(name, property.initializer);
-            }
-            const scheduleId =
-              resolveStaticString(properties.get("id")) ??
-              properties.get("id")?.getText(sourceFile);
-            const workflowName =
-              resolveStaticString(properties.get("workflowType")) ??
-              properties.get("workflowType")?.getText(sourceFile);
-            if (!scheduleId || !workflowName) continue;
-            const location = sourceLocation(sourceFile, relative, element);
-            const schedule = builder.addNode({
-              id: `service:temporal-schedule:${scheduleId}`,
-              kind: "service",
-              label: scheduleId,
-              attributes: {
-                subtype: "temporal-schedule",
-                configuredWorkflow: workflowName,
-                confidence: "REGISTERED_STATIC_CONFIG",
-                requiresRuntimeEvidence: true,
-              },
-              location,
-            });
-            builder.addEdge({
-              kind: "registers",
-              from: fileNode,
-              to: schedule,
-              attributes: { confidence: "REGISTERED_STATIC_CONFIG" },
-              location,
-            });
-            const proven = registeredWorkflowNames.has(workflowName);
-            const workflow = proven
-              ? workflowNode(builder, workflowName, location)
-              : builder.addNode({
-                  id: `workflow:temporal:unknown:schedule:${scheduleId}`,
-                  kind: "workflow",
-                  label: `[UNKNOWN] ${workflowName}`,
-                  attributes: {
-                    runtime: "temporal",
-                    resolution: "UNKNOWN",
-                    expression: workflowName,
-                  },
-                  location,
-                });
-            builder.addEdge({
-              kind: "calls",
-              from: schedule,
-              to: workflow,
-              attributes: {
-                temporalOperation: "startWorkflow",
-                confidence: proven ? "REGISTERED_STATIC_CONFIG" : "UNKNOWN",
-                requiresRuntimeEvidence: true,
-              },
-              location,
-            });
-            if (!proven) {
-              builder.addDiagnostic({
-                code: "UNKNOWN_RELATION",
-                severity: "warning",
-                message: `Temporal schedule ${scheduleId} target ${workflowName} is not proven by workflows.ts`,
-                nodeId: schedule,
-                location,
-              });
-            }
-          }
-        }
-      }
+      extractTemporalScheduleSpecs({
+        builder,
+        sourceFile,
+        relative,
+        fileNode,
+        literalConstants,
+        registeredWorkflowNames,
+      });
     };
 
     const addSymbol = (

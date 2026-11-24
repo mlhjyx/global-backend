@@ -68,6 +68,66 @@ describe('entriesFromStoredAttributes', () => {
     expect(entries.find((entry) => entry.source_key === 'website_profile')!.facts.vat_id).toBeUndefined();
   });
 
+  it('extracts all four additional T1 sources (companies_house/ch_registry, inpi_rne, google_patents, samgov) and survives sanitizer round-trip', async () => {
+    const { sanitizeCanonicalCompanyAttributes } = await import('./canonical-company-attributes');
+    const extendedAttributes = {
+      ch_registry: {
+        company_number: '04123456',
+        company_status: 'active',
+        jurisdiction: 'england-wales',
+        sic_codes: ['35110'],
+      },
+      inpi_rne: {
+        siren: '552100554',
+        denomination: 'Solaire France SAS',
+        nature_juridique: 'SAS',
+        activite_principale: '35.11Z',
+        etat_administratif: 'A',
+      },
+      google_patents: {
+        applicant_name: 'Solaire France SAS',
+        patent_count: 14,
+        cpc_codes: ['H01L31/02'],
+        latest_filing_year: 2025,
+      },
+      sam_market_signal: true,
+      government_buyer: true,
+      intent: {
+        events: [
+          {
+            type: 'US_FED_SOURCES_SOUGHT',
+            at: '2026-11-20T00:00:00.000Z',
+            evidence: { source: 'samgov', naics: ['335999'] },
+          },
+        ],
+      },
+      website_profile: ATTRIBUTES.website_profile,
+    };
+    const entries = entriesFromStoredAttributes(extendedAttributes);
+    const bySource = Object.fromEntries(entries.map((entry) => [entry.source_key, entry]));
+    expect(bySource.companies_house?.tier).toBe('T1');
+    expect(bySource.companies_house?.facts.registry_company_no).toBe(4123456);
+    expect(bySource.companies_house?.source_page).toBe('https://find-and-update.company-information.service.gov.uk/');
+    expect(bySource.inpi_rne?.tier).toBe('T1');
+    expect(bySource.inpi_rne?.facts.registry_siren).toBe(552100554);
+    expect(bySource.inpi_rne?.source_page).toBe('https://annuaire-entreprises.data.gouv.fr/');
+    expect(bySource.google_patents?.tier).toBe('T1');
+    expect(bySource.google_patents?.facts.patent_count).toBe(14);
+    expect(bySource.samgov?.tier).toBe('T1');
+    expect(bySource.samgov?.facts.market_signal).toBe(true);
+    expect(bySource.samgov?.facts.naics_codes).toEqual(['335999']);
+
+    const bundle = assembleEvidenceBundle(
+      { name: 'Solaire France SAS', domain: 'solaire-france.example', country: 'FR' },
+      entries,
+      new Date('2026-11-24T00:00:00.000Z'),
+    );
+    expect(bundle.coverage.tiers.T1).toBe(4);
+    expect(bundle.coverage.corroborated).toBe(true);
+    const stored = sanitizeCanonicalCompanyAttributes({ evidence_bundle: bundle });
+    expect(stored.evidence_bundle).toEqual(bundle);
+  });
+
   it('returns nothing for empty or non-object attributes', () => {
     expect(entriesFromStoredAttributes(null)).toEqual([]);
     expect(entriesFromStoredAttributes({})).toEqual([]);

@@ -27,7 +27,7 @@ try {
     await Worker.runReplayHistory(
       {
         workflowsPath: fileURLToPath(
-          new URL("../src/temporal/workflows.ts", import.meta.url),
+          new URL("../src/temporal/customer-workflows.ts", import.meta.url),
         ),
       },
       history,

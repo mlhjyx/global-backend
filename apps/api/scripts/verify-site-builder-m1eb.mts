@@ -176,7 +176,7 @@ try {
     namespace: process.env.TEMPORAL_NAMESPACE ?? "default",
     taskQueue,
     workflowsPath: fileURLToPath(
-      new URL("../src/temporal/workflows.ts", import.meta.url),
+      new URL("../src/temporal/customer-workflows.ts", import.meta.url),
     ),
     activities: createSiteBuilderActivities({
       prisma: app,

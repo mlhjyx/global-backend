@@ -542,6 +542,7 @@ async function main(): Promise<void> {
   const sanctionsScreening = new SanctionsScreeningService(prisma);
   try {
     await sanctionsScreening.rebuildIndex();
+    sanctionsScreening.startPeriodicRefresh();
   } catch {
     await holdPlatformNotReady("SANCTIONS_INDEX_UNAVAILABLE");
   }
@@ -822,6 +823,7 @@ async function main(): Promise<void> {
       .heartbeat("WORKER", "STOPPED", UNDERSTANDING_TASK_QUEUE)
       .catch(() => undefined);
     await runtimeTelemetry.shutdown();
+    sanctionsScreening.onModuleDestroy();
     personalArtifactCleanupRuntime.destroy();
     await connection.close().catch(() => undefined);
     await providerWireDatabase.disconnect().catch(() => undefined);

@@ -166,7 +166,15 @@ function finish(sourceKey: string, entry: Omit<EvidenceBundleEntry, 'tier' | 'so
   const tier = SOURCE_TIERS[sourceKey];
   if (!tier) return null;
   if (Object.keys(entry.facts).length === 0 && entry.source_page === undefined) return null;
-  return { tier, source_key: sourceKey, evidence_kind: SOURCE_KINDS[sourceKey]!, ...entry };
+  return {
+    tier,
+    source_key: sourceKey,
+    evidence_kind: SOURCE_KINDS[sourceKey]!,
+    ...(entry.source_page !== undefined ? { source_page: entry.source_page } : {}),
+    ...(entry.captured_at !== undefined ? { captured_at: entry.captured_at } : {}),
+    ...(entry.confidence !== undefined ? { confidence: entry.confidence } : {}),
+    facts: entry.facts,
+  };
 }
 
 /** 单源抽取器：把 attributes.<source> 命名空间映射为键白名单内的事实（键避开 sanitizer 黑名单）。 */
@@ -214,6 +222,78 @@ const SOURCE_EXTRACTORS: Readonly<Record<string, (source: Record<string, unknown
         state_code: safeString(source.state_code),
         status_code: safeString(source.status_code),
         product_codes: stringList(source.product_codes),
+      },
+    }),
+    companies_house: (source) => {
+      const rawNo = typeof source.company_number === 'string' ? source.company_number.trim().toUpperCase() : '';
+      const validNo = /^[A-Z0-9]{1,12}$/u.test(rawNo) ? rawNo : undefined;
+      // 8 位纯数字注册号会被 isContactFreeText 视作电话形态；数字型转 number，字母前缀保留 string。
+      const companyNoFact = validNo
+        ? /^\d+$/u.test(validNo)
+          ? numericString(validNo)
+          : safeString(validNo)
+        : undefined;
+      return {
+        source_page: validNo
+          ? (safeUrl(`https://find-and-update.company-information.service.gov.uk/company/${validNo}`) ??
+            'https://find-and-update.company-information.service.gov.uk/')
+          : undefined,
+        captured_at: safeString(source._ts),
+        confidence: safeNumber(source.match_confidence),
+        facts: {
+          registry_company_no: companyNoFact,
+          company_status: safeString(source.company_status),
+          company_type: safeString(source.company_type),
+          jurisdiction: safeString(source.jurisdiction),
+          sic_codes: stringList(source.sic_codes),
+          incorporation_year: numericString(source.incorporation_year),
+        },
+      };
+    },
+    inpi_rne: (source) => {
+      const sirenNum = numericString(source.siren);
+      return {
+        source_page: sirenNum
+          ? (safeUrl(`https://annuaire-entreprises.data.gouv.fr/entreprise/${sirenNum}`) ??
+            'https://annuaire-entreprises.data.gouv.fr/')
+          : undefined,
+        captured_at: safeString(source._ts),
+        confidence: safeNumber(source.match_confidence),
+        facts: {
+          registry_siren: sirenNum,
+          legal_name: safeString(source.legal_name ?? source.denomination),
+          legal_nature: safeString(source.legal_nature ?? source.nature_juridique),
+          naf_code: safeString(source.naf_code ?? source.activite_principale),
+          entity_status: safeString(source.entity_status ?? source.etat_administratif),
+          registered_city: safeString(source.registered_city),
+        },
+      };
+    },
+    google_patents: (source) => ({
+      source_page: safeUrl(source.source_page) ?? 'https://patents.google.com/',
+      captured_at: safeString(source._ts),
+      confidence: safeNumber(source.match_confidence),
+      facts: {
+        applicant_name: safeString(source.applicant_name),
+        patent_count: numericString(source.patent_count),
+        recent_patent_count: numericString(source.recent_patent_count),
+        cpc_codes: stringList(source.cpc_codes),
+        ipc_codes: stringList(source.ipc_codes),
+        latest_filing_year: numericString(source.latest_filing_year),
+      },
+    }),
+    samgov: (source) => ({
+      source_page: safeUrl(source.source_page) ?? 'https://sam.gov/',
+      captured_at: safeString(source._ts),
+      confidence: safeNumber(source.match_confidence),
+      facts: {
+        market_signal: safeBool(source.market_signal),
+        government_buyer: safeBool(source.government_buyer),
+        agency: safeString(source.agency),
+        notice_count: numericString(source.notice_count),
+        naics_codes: stringList(source.naics_codes ?? source.naics),
+        set_aside: safeString(source.set_aside),
+        latest_notice_date: safeString(source.latest_notice_date),
       },
     }),
     wikidata: (source) => {
@@ -273,9 +353,39 @@ function storedSourceEntry(sourceKey: string, raw: unknown): EvidenceBundleEntry
   return finish(sourceKey, { ...rest, facts: compact(facts) });
 }
 
+/** 从 intent.events 中抽取 SAM.gov 公开采购事实，补齐仅写 sam_market_signal/intent.events 的记录。 */
+function samgovAttributesFromRoot(root: Record<string, unknown>): Record<string, unknown> | null {
+  const explicit = jsonObject(root.samgov);
+  if (explicit) return explicit;
+  const intent = jsonObject(root.intent);
+  const events = Array.isArray(intent?.events) ? intent.events : [];
+  const samEvents = events.filter((event) => {
+    const obj = jsonObject(event);
+    const ev = jsonObject(obj?.evidence);
+    return ev?.source === 'samgov';
+  });
+  if (root.sam_market_signal !== true && samEvents.length === 0) return null;
+  const naics: string[] = [];
+  for (const event of samEvents) {
+    const ev = jsonObject(jsonObject(event)?.evidence);
+    if (Array.isArray(ev?.naics)) {
+      for (const code of ev.naics) {
+        if (typeof code === 'string') naics.push(code);
+      }
+    }
+  }
+  return {
+    ...(root.sam_market_signal === true ? { market_signal: true } : {}),
+    ...(root.government_buyer === true ? { government_buyer: true } : {}),
+    ...(samEvents.length > 0 ? { notice_count: samEvents.length } : {}),
+    ...(naics.length > 0 ? { naics_codes: [...new Set(naics)] } : {}),
+  };
+}
+
 /**
  * 零出网装配：从已存 canonical attributes 生成证据条目。
- * 兼容 attributes.wikidata_qid（早期只存 QID 形态）。
+ * 兼容 attributes.wikidata_qid（早期只存 QID 形态）、attributes.ch_registry（Companies House 注册表）
+ * 以及 attributes.sam_market_signal / intent.events(source=samgov)。
  */
 export function entriesFromStoredAttributes(attributes: unknown): EvidenceBundleEntry[] {
   const root = jsonObject(attributes);
@@ -283,7 +393,13 @@ export function entriesFromStoredAttributes(attributes: unknown): EvidenceBundle
   const entries: EvidenceBundleEntry[] = [];
   for (const sourceKey of Object.keys(SOURCE_TIERS)) {
     if (sourceKey === 'wikidata') continue; // 先处理完整命名空间，再回退 QID
-    const entry = storedSourceEntry(sourceKey, root[sourceKey]);
+    const raw =
+      sourceKey === 'companies_house'
+        ? (root.companies_house ?? root.ch_registry)
+        : sourceKey === 'samgov'
+          ? samgovAttributesFromRoot(root)
+          : root[sourceKey];
+    const entry = storedSourceEntry(sourceKey, raw);
     if (entry) entries.push(entry);
   }
   const wikidataEntry = storedSourceEntry('wikidata', root.wikidata);
