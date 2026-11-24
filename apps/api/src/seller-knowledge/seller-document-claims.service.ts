@@ -17,6 +17,36 @@ import {
   verifyDocumentClaimReference,
   type DocumentClaimSourceRef,
 } from '../claim/document-claim-basis';
+import {
+  proposeDocumentClaimCandidates,
+  type ModelClaimSuggestion,
+} from './seller-document-claim-extractor';
+
+export interface SuggestedDocumentClaimItem {
+  readonly reference: DocumentClaimSourceRef;
+  readonly type: string;
+  readonly statement: string;
+  readonly quote: string;
+  readonly quoteDigest: string;
+  readonly statementDigest: string;
+  readonly bindingHash: string;
+  readonly requestDigest: string;
+  readonly confidence: number;
+  readonly extractionSource: 'deterministic' | 'model_verified';
+  readonly context: Record<string, unknown> | null;
+}
+
+export interface SuggestDocumentClaimsOptions {
+  readonly chunkSeqs?: readonly number[];
+  readonly maxChunks?: number;
+  readonly maxCandidates?: number;
+  readonly modelSuggestionsByChunk?: ReadonlyMap<number, readonly ModelClaimSuggestion[]>;
+}
+
+const MAX_ASSISTED_CHUNKS = 50;
+const DEFAULT_ASSISTED_CHUNKS = 20;
+const MAX_ASSISTED_CANDIDATES = 40;
+const DEFAULT_ASSISTED_CANDIDATES = 20;
 
 type Tx = Prisma.TransactionClient;
 
@@ -114,6 +144,145 @@ export class SellerDocumentClaimsService {
         this.replayByOrigin(tx, ctx, companyId, reference, input.type, input.statement),
       );
     }
+  }
+
+  /**
+   * S2 辅助抽取候选（纯只读）：遍历当前 ready 文档分块，提取并经服务端字节边界复核的
+   * 候选 Claim，附带完整 S1a reference / bindingHash / requestDigest，绝不写库或绕过人审。
+   */
+  async suggestClaimCandidates(
+    ctx: RequestContext,
+    companyId: string,
+    documentId: string,
+    opts: SuggestDocumentClaimsOptions = {},
+  ): Promise<{
+    documentId: string;
+    parseRevision: number;
+    scannedChunks: number;
+    droppedModelSuggestions: number;
+    candidates: SuggestedDocumentClaimItem[];
+  }> {
+    const maxChunks = Math.max(1, Math.min(opts.maxChunks ?? DEFAULT_ASSISTED_CHUNKS, MAX_ASSISTED_CHUNKS));
+    const maxCandidates = Math.max(
+      1,
+      Math.min(opts.maxCandidates ?? DEFAULT_ASSISTED_CANDIDATES, MAX_ASSISTED_CANDIDATES),
+    );
+    return this.prisma.withWorkspace(ctx.workspaceId, async (tx) => {
+      const document = await this.loadDocument(tx, ctx, companyId, documentId, true);
+      const chunks = await tx.sellerDocumentChunk.findMany({
+        where: {
+          workspaceId: ctx.workspaceId,
+          documentId,
+          ...(opts.chunkSeqs?.length ? { seq: { in: [...opts.chunkSeqs] } } : {}),
+        },
+        select: { documentId: true, seq: true, text: true, meta: true },
+        orderBy: { seq: 'asc' },
+        take: maxChunks,
+      });
+      const candidates: SuggestedDocumentClaimItem[] = [];
+      let droppedModelSuggestions = 0;
+      for (const chunk of chunks) {
+        if (candidates.length >= maxCandidates) break;
+        const remaining = maxCandidates - candidates.length;
+        const chunkTextHash = sha256(chunk.text);
+        const proposal = proposeDocumentClaimCandidates(
+          chunk.text,
+          opts.modelSuggestionsByChunk?.get(chunk.seq) ?? [],
+          { maxCandidates: remaining },
+        );
+        droppedModelSuggestions += proposal.droppedModelSuggestions;
+        for (const cand of proposal.candidates) {
+          const reference: DocumentClaimSourceRef = Object.freeze({
+            documentId: document.id,
+            documentContentHash: document.contentHash!,
+            parseRevision: document.parseRevision!,
+            chunkSeq: chunk.seq,
+            chunkTextHash,
+            quoteStartByte: cand.quoteStartByte,
+            quoteEndByte: cand.quoteEndByte,
+          });
+          const verified = verifyDocumentClaimReference({
+            document,
+            chunk,
+            evidenceSnippet: null,
+            reference,
+            context: { workspaceId: ctx.workspaceId, companyId },
+          });
+          const statementDigest = documentClaimStatementDigest(cand.statement);
+          const bindingHash = documentClaimBindingHash({
+            documentId: reference.documentId,
+            documentContentHash: reference.documentContentHash,
+            parseRevision: reference.parseRevision,
+            chunkSeq: reference.chunkSeq,
+            chunkTextHash: verified.chunkTextHash,
+            quoteStartByte: reference.quoteStartByte,
+            quoteEndByte: reference.quoteEndByte,
+            quoteDigest: verified.quoteDigest,
+            type: cand.type,
+            statementDigest,
+          });
+          const requestDigest = documentClaimRequestDigest({
+            workspaceId: ctx.workspaceId,
+            companyId,
+            requesterId: ctx.userId,
+            reference,
+            type: cand.type,
+            statement: cand.statement,
+          });
+          candidates.push({
+            reference,
+            type: cand.type,
+            statement: cand.statement,
+            quote: verified.quote,
+            quoteDigest: verified.quoteDigest,
+            statementDigest,
+            bindingHash,
+            requestDigest,
+            confidence: cand.confidence,
+            extractionSource: cand.extractionSource,
+            context: contextMeta(chunk.meta),
+          });
+        }
+      }
+      return {
+        documentId: document.id,
+        parseRevision: document.parseRevision!,
+        scannedChunks: chunks.length,
+        droppedModelSuggestions,
+        candidates,
+      };
+    });
+  }
+
+  /**
+   * S2 辅助批量落库：每条经复核的候选严格走 S1a `createInTransaction` 创建 `NEEDS_REVIEW` 草稿，
+   * 同 origin 并发安全幂等重放，绝不自动批准或绕过 proof v4 人审门。
+   */
+  async createAssistedDrafts(
+    ctx: RequestContext,
+    companyId: string,
+    documentId: string,
+    opts: SuggestDocumentClaimsOptions = {},
+  ) {
+    const suggested = await this.suggestClaimCandidates(ctx, companyId, documentId, opts);
+    const created: Array<Awaited<ReturnType<SellerDocumentClaimsService['createDraft']>>> = [];
+    for (const candidate of suggested.candidates) {
+      created.push(
+        await this.createDraft(ctx, companyId, documentId, {
+          reference: candidate.reference,
+          type: candidate.type,
+          statement: candidate.statement,
+          requestDigest: candidate.requestDigest,
+        }),
+      );
+    }
+    return {
+      documentId: suggested.documentId,
+      parseRevision: suggested.parseRevision,
+      scannedChunks: suggested.scannedChunks,
+      droppedModelSuggestions: suggested.droppedModelSuggestions,
+      drafts: created,
+    };
   }
 
   private parseReference(documentId: string, input: { reference: unknown; type: string; statement: string }): DocumentClaimSourceRef {

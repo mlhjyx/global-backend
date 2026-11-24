@@ -338,7 +338,8 @@ export function buildDocumentClaimApprovalProof(
   };
 }
 export function hasValidDocumentClaimApprovalAudit(
-  claim: ClaimProofIdentity & {
+  claim: Omit<ClaimProofIdentity, 'statement'> & {
+    statement: string | null;
     version: number;
     verifiedBy: string | null;
     verifiedAt: Date | null;
@@ -349,6 +350,7 @@ export function hasValidDocumentClaimApprovalAudit(
 ): boolean {
   const proof = claim.verificationProof;
   if (
+    typeof claim.statement !== 'string' ||
     !claim.verifiedBy?.trim() ||
     !(claim.verifiedAt instanceof Date) ||
     !Number.isFinite(claim.verifiedAt.getTime()) ||
@@ -366,7 +368,7 @@ export function hasValidDocumentClaimApprovalAudit(
     verifiedAt: claim.verifiedAt,
     verificationMethod: claim.verificationMethod,
   } as const;
-  return proof.claimDigest === proofDigest(claim, claim.version, audit, binding);
+  return proof.claimDigest === proofDigest({ ...claim, statement: claim.statement }, claim.version, audit, binding);
 }
 
 export interface ClaimDocumentEvidenceRow {
@@ -387,31 +389,34 @@ export interface ClaimDocumentEvidenceRow {
   claimStatementDigest: string;
   bindingSha256: string;
 }
-/** Current binding or null; missing/renamed/deleted/reprocessed sources are immediately invalid. */
-export async function loadDocumentClaimBindingInTransaction(
-  tx: Prisma.TransactionClient,
+
+type ClaimBindingCandidate = { id: string; companyId: string; statement: string | null; type: string };
+
+function referenceMatchesClaim(
+  reference: ClaimDocumentEvidenceRow,
   context: { workspaceId: string; companyId: string },
-  claim: { id: string; companyId: string; statement: string; type: string },
-): Promise<VerifiedDocumentClaimBinding | null> {
-  const reference = await tx.claimDocumentEvidence.findUnique({ where: { claimId: claim.id } });
-  if (!reference) return null;
-  if (
-    reference.workspaceId !== context.workspaceId ||
-    reference.companyId !== context.companyId ||
-    reference.claimId !== claim.id ||
-    reference.documentId === null ||
-    claim.type !== reference.claimType ||
-    documentClaimStatementDigest(claim.statement) !== reference.claimStatementDigest
-  )
-    return null;
-  const [document, chunk, evidence] = await Promise.all([
-    tx.sellerDocument.findFirst({
-      where: { id: reference.documentId, workspaceId: context.workspaceId, companyId: context.companyId, deletedAt: null },
-    }),
-    tx.sellerDocumentChunk.findFirst({ where: { documentId: reference.documentId, seq: reference.chunkSeq } }),
-    tx.evidence.findFirst({ where: { id: reference.evidenceId, claimId: claim.id } }),
-  ]);
-  if (!document || !chunk || !evidence) return null;
+  claim: ClaimBindingCandidate,
+): reference is ClaimDocumentEvidenceRow & { documentId: string } {
+  return (
+    typeof claim.statement === 'string' &&
+    reference.workspaceId === context.workspaceId &&
+    reference.companyId === context.companyId &&
+    reference.claimId === claim.id &&
+    reference.documentId !== null &&
+    claim.type === reference.claimType &&
+    documentClaimStatementDigest(claim.statement) === reference.claimStatementDigest
+  );
+}
+
+function verifyLoadedDocumentClaimBinding(
+  context: { workspaceId: string; companyId: string },
+  claim: ClaimBindingCandidate,
+  reference: ClaimDocumentEvidenceRow,
+  document: DocumentLike | null | undefined,
+  chunk: ChunkLike | null | undefined,
+  evidence: { snippet: string | null } | null | undefined,
+): VerifiedDocumentClaimBinding | null {
+  if (!referenceMatchesClaim(reference, context, claim) || !document || !chunk || !evidence) return null;
   let verified: { quote: string; quoteDigest: string; chunkTextHash: string };
   try {
     verified = verifyDocumentClaimReference({
@@ -460,6 +465,119 @@ export async function loadDocumentClaimBindingInTransaction(
     claimType: reference.claimType,
     claimStatementDigest: reference.claimStatementDigest,
   });
+}
+
+function toDocumentClaimDependency(
+  claim: { id: string; version: number },
+  binding: VerifiedDocumentClaimBinding,
+): DocumentClaimDependency {
+  return {
+    claimId: claim.id,
+    claimVersion: claim.version,
+    referenceId: binding.referenceId,
+    bindingHash: binding.bindingHash,
+    documentId: binding.sourceDocumentId,
+    documentContentHash: binding.documentContentHash,
+    parseRevision: binding.parseRevision,
+    chunkSeq: binding.chunkSeq,
+    quoteStartByte: binding.quoteStartByte,
+    quoteEndByte: binding.quoteEndByte,
+  };
+}
+
+function supportsBatchBindingQueries(tx: Prisma.TransactionClient): boolean {
+  const raw = tx as unknown as Record<string, { findMany?: unknown } | undefined>;
+  return (
+    typeof raw.claimDocumentEvidence?.findMany === 'function' &&
+    typeof raw.sellerDocument?.findMany === 'function' &&
+    typeof raw.sellerDocumentChunk?.findMany === 'function' &&
+    typeof raw.evidence?.findMany === 'function'
+  );
+}
+
+/** Current binding or null; missing/renamed/deleted/reprocessed sources are immediately invalid. */
+export async function loadDocumentClaimBindingInTransaction(
+  tx: Prisma.TransactionClient,
+  context: { workspaceId: string; companyId: string },
+  claim: ClaimBindingCandidate,
+): Promise<VerifiedDocumentClaimBinding | null> {
+  if (typeof claim.statement !== 'string') return null;
+  const reference = await tx.claimDocumentEvidence.findUnique({ where: { claimId: claim.id } });
+  if (!reference || !referenceMatchesClaim(reference, context, claim)) return null;
+  const [document, chunk, evidence] = await Promise.all([
+    tx.sellerDocument.findFirst({
+      where: { id: reference.documentId, workspaceId: context.workspaceId, companyId: context.companyId, deletedAt: null },
+    }),
+    tx.sellerDocumentChunk.findFirst({ where: { documentId: reference.documentId, seq: reference.chunkSeq } }),
+    tx.evidence.findFirst({ where: { id: reference.evidenceId, claimId: claim.id } }),
+  ]);
+  return verifyLoadedDocumentClaimBinding(context, claim, reference, document, chunk, evidence);
+}
+
+/**
+ * Constant-query (≤4 findMany) batch verification for document-backed claims inside a transaction.
+ * Falls back to single-claim loading only for minimal unit-test mocks lacking findMany delegates.
+ */
+export async function loadDocumentClaimBindingsInTransaction(
+  tx: Prisma.TransactionClient,
+  context: { workspaceId: string; companyId: string },
+  claims: readonly ClaimBindingCandidate[],
+): Promise<ReadonlyMap<string, VerifiedDocumentClaimBinding>> {
+  const out = new Map<string, VerifiedDocumentClaimBinding>();
+  if (claims.length === 0) return out;
+  if (!supportsBatchBindingQueries(tx)) {
+    for (const claim of claims) {
+      const binding = await loadDocumentClaimBindingInTransaction(tx, context, claim);
+      if (binding) out.set(claim.id, binding);
+    }
+    return out;
+  }
+  const claimById = new Map(claims.map((claim) => [claim.id, claim]));
+  const references = await tx.claimDocumentEvidence.findMany({
+    where: { workspaceId: context.workspaceId, companyId: context.companyId, claimId: { in: [...claimById.keys()] } },
+  });
+  const candidates = references.filter(
+    (ref): ref is (typeof references)[number] & { documentId: string } => {
+      const claim = claimById.get(ref.claimId);
+      return claim !== undefined && referenceMatchesClaim(ref, context, claim);
+    },
+  );
+  if (candidates.length === 0) return out;
+
+  const documentIds = [...new Set(candidates.map((ref) => ref.documentId))];
+  const evidenceIds = [...new Set(candidates.map((ref) => ref.evidenceId))];
+  const candidateClaimIds = [...new Set(candidates.map((ref) => ref.claimId))];
+  const chunkKeyMap = new Map<string, { documentId: string; seq: number }>();
+  for (const ref of candidates) {
+    chunkKeyMap.set(`${ref.documentId}:${ref.chunkSeq}`, { documentId: ref.documentId, seq: ref.chunkSeq });
+  }
+  const [documents, chunks, evidences] = await Promise.all([
+    tx.sellerDocument.findMany({
+      where: { id: { in: documentIds }, workspaceId: context.workspaceId, companyId: context.companyId, deletedAt: null },
+    }),
+    tx.sellerDocumentChunk.findMany({
+      where: { workspaceId: context.workspaceId, OR: [...chunkKeyMap.values()] },
+    }),
+    tx.evidence.findMany({
+      where: { id: { in: evidenceIds }, claimId: { in: candidateClaimIds } },
+    }),
+  ]);
+  const docById = new Map(documents.map((doc) => [doc.id, doc]));
+  const chunkByKey = new Map(chunks.map((chunk) => [`${chunk.documentId}:${chunk.seq}`, chunk]));
+  const evidenceByKey = new Map(evidences.map((ev) => [`${ev.id}:${ev.claimId}`, ev]));
+  for (const ref of candidates) {
+    const claim = claimById.get(ref.claimId)!;
+    const binding = verifyLoadedDocumentClaimBinding(
+      context,
+      claim,
+      ref,
+      docById.get(ref.documentId),
+      chunkByKey.get(`${ref.documentId}:${ref.chunkSeq}`),
+      evidenceByKey.get(`${ref.evidenceId}:${claim.id}`),
+    );
+    if (binding) out.set(claim.id, binding);
+  }
+  return out;
 }
 export type DocumentConsumerPurpose = 'icp' | 'generation' | 'market_candidate_set' | 'outreach_draft' | 'campaign_planning' | 'understanding_preview';
 export interface EffectiveApprovedClaims {
@@ -513,34 +631,33 @@ export async function effectiveApprovedClaimsInTransaction(
   const dependencies = new Map<string, DocumentClaimDependency>();
   const rejected: string[] = [];
   const effective: EffectiveApprovedClaims['claims'][number][] = [];
+  if (claims.length === 0) {
+    return Object.freeze({ claims: Object.freeze(effective), dependencies, rejectedDocumentClaimIds: Object.freeze(rejected), consumerPurpose });
+  }
+  const referencedIds = await documentReferencedClaimIds(tx, { workspaceId: context.workspaceId }, claims.map((c) => c.id));
+  const docClaims = claims.filter((claim) => referencedIds.has(claim.id));
+  const bindings = docClaims.length
+    ? await loadDocumentClaimBindingsInTransaction(tx, { workspaceId: context.workspaceId, companyId }, docClaims)
+    : new Map<string, VerifiedDocumentClaimBinding>();
+  // Re-read full proof-bearing rows in one batched query; never trust a caller-supplied proof.
+  const auditedRows = docClaims.length
+    ? await tx.claim.findMany({
+        where: { id: { in: docClaims.map((claim) => claim.id) }, workspaceId: context.workspaceId, companyId },
+      })
+    : [];
+  const auditedById = new Map(auditedRows.map((row) => [row.id, row]));
   for (const claim of claims) {
-    const hasReference = await tx.claimDocumentEvidence.findUnique({
-      where: { claimId: claim.id },
-      select: { id: true },
-    });
-    if (!hasReference) {
+    if (!referencedIds.has(claim.id)) {
       effective.push(claim);
       continue;
     }
-    const binding = await loadDocumentClaimBindingInTransaction(tx, { workspaceId: context.workspaceId, companyId }, claim);
-    // Re-read the full proof-bearing row; the list select never trusts a caller-supplied proof.
-    const audited = await tx.claim.findUnique({ where: { id: claim.id } });
+    const binding = bindings.get(claim.id);
+    const audited = auditedById.get(claim.id);
     if (!binding || !audited || !hasValidDocumentClaimApprovalAudit(audited, binding)) {
       rejected.push(claim.id);
       continue;
     }
-    dependencies.set(claim.id, {
-      claimId: claim.id,
-      claimVersion: claim.version,
-      referenceId: binding.referenceId,
-      bindingHash: binding.bindingHash,
-      documentId: binding.sourceDocumentId,
-      documentContentHash: binding.documentContentHash,
-      parseRevision: binding.parseRevision,
-      chunkSeq: binding.chunkSeq,
-      quoteStartByte: binding.quoteStartByte,
-      quoteEndByte: binding.quoteEndByte,
-    });
+    dependencies.set(claim.id, toDocumentClaimDependency(claim, binding));
     effective.push(claim);
   }
   return Object.freeze({
@@ -551,29 +668,60 @@ export async function effectiveApprovedClaimsInTransaction(
   });
 }
 
+const DEPENDENCY_RECHECK_SELECT = {
+  id: true,
+  workspaceId: true,
+  companyId: true,
+  sourceId: true,
+  originKey: true,
+  statement: true,
+  type: true,
+  version: true,
+  validUntil: true,
+  verifiedBy: true,
+  verifiedAt: true,
+  verificationMethod: true,
+  verificationProof: true,
+} as const;
+
 /** Prepare→apply recheck for consumers that carried typed document dependencies. */
 export async function documentClaimDependenciesStillCurrent(
   tx: Prisma.TransactionClient,
   context: { workspaceId: string; companyId: string },
   dependencies: readonly DocumentClaimDependency[],
 ): Promise<boolean> {
-  for (const dependency of dependencies) {
-    const claim = await tx.claim.findFirst({
-      where: {
-        id: dependency.claimId,
-        workspaceId: context.workspaceId,
-        companyId: context.companyId,
-        status: 'APPROVED',
-        version: dependency.claimVersion,
-      },
-      select: { id: true, workspaceId: true, companyId: true, sourceId: true, originKey: true, statement: true, type: true, version: true, validUntil: true, verifiedBy: true, verifiedAt: true, verificationMethod: true, verificationProof: true },
-    });
-    if (!claim || (claim.validUntil !== null && claim.validUntil.getTime() <= Date.now())) return false;
-    const binding = await loadDocumentClaimBindingInTransaction(tx, context, claim);
-    if (!binding || binding.referenceId !== dependency.referenceId || binding.bindingHash !== dependency.bindingHash || !hasValidDocumentClaimApprovalAudit(claim, binding))
-      return false;
+  if (dependencies.length === 0) return true;
+  const nowMs = Date.now();
+  const hasBatchClaimFindMany = typeof (tx as unknown as { claim?: { findMany?: unknown } }).claim?.findMany === 'function';
+  if (!hasBatchClaimFindMany) {
+    for (const dependency of dependencies) {
+      const claim = await tx.claim.findFirst({
+        where: { id: dependency.claimId, workspaceId: context.workspaceId, companyId: context.companyId, status: 'APPROVED', version: dependency.claimVersion },
+        select: DEPENDENCY_RECHECK_SELECT,
+      });
+      if (!claim || (claim.validUntil !== null && claim.validUntil.getTime() <= nowMs)) return false;
+      const binding = await loadDocumentClaimBindingInTransaction(tx, context, claim);
+      if (!binding || binding.referenceId !== dependency.referenceId || binding.bindingHash !== dependency.bindingHash || !hasValidDocumentClaimApprovalAudit(claim, binding))
+        return false;
+    }
+    return true;
   }
-  return true;
+  const uniqueClaimIds = [...new Set(dependencies.map((d) => d.claimId))];
+  const rows = await tx.claim.findMany({
+    where: { id: { in: uniqueClaimIds }, workspaceId: context.workspaceId, companyId: context.companyId, status: 'APPROVED' },
+    select: DEPENDENCY_RECHECK_SELECT,
+  });
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  for (const dep of dependencies) {
+    const claim = byId.get(dep.claimId);
+    if (!claim || claim.version !== dep.claimVersion || (claim.validUntil !== null && claim.validUntil.getTime() <= nowMs)) return false;
+  }
+  const bindings = await loadDocumentClaimBindingsInTransaction(tx, context, rows);
+  return dependencies.every((dep) => {
+    const claim = byId.get(dep.claimId);
+    const binding = bindings.get(dep.claimId);
+    return Boolean(claim && binding && binding.referenceId === dep.referenceId && binding.bindingHash === dep.bindingHash && hasValidDocumentClaimApprovalAudit(claim, binding));
+  });
 }
 /**
  * Serialize a document-claim recheck with concurrent invalidation: company ->
@@ -628,27 +776,19 @@ export async function documentReferencedClaimIds(
 export async function currentDocumentClaimDependencies(
   tx: Prisma.TransactionClient,
   context: { workspaceId: string; companyId: string },
-  claims: ReadonlyArray<{ id: string; workspaceId: string; companyId: string; sourceId: string | null; originKey: string | null; statement: string; type: string; version: number; validUntil: Date | null; verifiedBy: string | null; verifiedAt: Date | null; verificationMethod: string | null; verificationProof: unknown }>,
+  claims: ReadonlyArray<{ id: string; workspaceId: string; companyId: string; sourceId: string | null; originKey: string | null; statement: string | null; type: string; version: number; validUntil: Date | null; verifiedBy: string | null; verifiedAt: Date | null; verificationMethod: string | null; verificationProof: unknown }>,
 ): Promise<ReadonlyMap<string, DocumentClaimDependency>> {
   const referenced = await documentReferencedClaimIds(tx, context, claims.map((claim) => claim.id));
+  const nowMs = Date.now();
+  const liveCandidates = claims.filter(
+    (claim) => referenced.has(claim.id) && (claim.validUntil === null || claim.validUntil.getTime() > nowMs),
+  );
+  const bindings = await loadDocumentClaimBindingsInTransaction(tx, context, liveCandidates);
   const out = new Map<string, DocumentClaimDependency>();
-  for (const claim of claims) {
-    if (!referenced.has(claim.id)) continue;
-    if (claim.validUntil !== null && claim.validUntil.getTime() <= Date.now()) continue;
-    const binding = await loadDocumentClaimBindingInTransaction(tx, context, claim);
+  for (const claim of liveCandidates) {
+    const binding = bindings.get(claim.id);
     if (!binding || !hasValidDocumentClaimApprovalAudit(claim, binding)) continue;
-    out.set(claim.id, {
-      claimId: claim.id,
-      claimVersion: claim.version,
-      referenceId: binding.referenceId,
-      bindingHash: binding.bindingHash,
-      documentId: binding.sourceDocumentId,
-      documentContentHash: binding.documentContentHash,
-      parseRevision: binding.parseRevision,
-      chunkSeq: binding.chunkSeq,
-      quoteStartByte: binding.quoteStartByte,
-      quoteEndByte: binding.quoteEndByte,
-    });
+    out.set(claim.id, toDocumentClaimDependency(claim, binding));
   }
   return out;
 }
