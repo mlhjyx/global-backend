@@ -663,4 +663,21 @@ describe('KbService（知识库地基：切块→向量化→pgvector 落库，0
       }, // queued 的 d2 不参与
     ]);
   });
+
+  it('search：启用 hnsw.iterative_scan 并按当前 embed_model / embed_version 隔离向量空间', async () => {
+    const { service, tx } = makeService();
+    tx.$queryRaw.mockResolvedValueOnce([
+      { document_id: 'd1', seq: 0, text: 'HJT solar module', score: 0.91 },
+    ] as never);
+    const hits = await service.search(CTX, SITE_ID, 'solar module', 5);
+    expect(hits).toEqual([{ documentId: 'd1', seq: 0, text: 'HJT solar module', score: 0.91 }]);
+    const setLocalStrings = (tx.$executeRaw.mock.calls[0]?.[0] as readonly string[] | undefined) ?? [];
+    expect(setLocalStrings.join('')).toContain('SET LOCAL hnsw.iterative_scan = relaxed_order');
+    const queryStrings = (tx.$queryRaw.mock.calls[0]?.[0] as readonly string[] | undefined) ?? [];
+    const querySql = queryStrings.join('?');
+    expect(querySql).toContain('c.embed_model =');
+    expect(querySql).toContain('c.embed_version =');
+    expect(tx.$queryRaw.mock.calls[0]).toContain('bge-m3');
+    expect(tx.$queryRaw.mock.calls[0]).toContain('v1');
+  });
 });

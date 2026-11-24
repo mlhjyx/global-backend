@@ -27,20 +27,42 @@ const PRESIGN_GET_TTL_S = 600;
 export class SellerDocumentsStorage {
   readonly bucket: string;
   private readonly client: S3Client;
+  private readonly presignClient: S3Client;
 
   constructor(env: NodeJS.ProcessEnv = process.env) {
     this.bucket = env.SELLER_DOCUMENTS_S3_BUCKET?.trim() || 'global-seller-documents';
     // 先解构再引用：避免 gitleaks generic-api-key 对 `secretAccessKey: env.X` 字面模式的误报。
-    const { S3_ENDPOINT, S3_REGION, S3_FORCE_PATH_STYLE, S3_ACCESS_KEY, S3_SECRET_KEY } = env;
+    const {
+      S3_ENDPOINT,
+      S3_PUBLIC_ENDPOINT,
+      S3_REGION,
+      S3_FORCE_PATH_STYLE,
+      S3_ACCESS_KEY,
+      S3_SECRET_KEY,
+    } = env;
+    const internalEndpoint = S3_ENDPOINT?.trim() || 'http://localhost:9000';
+    const publicEndpoint = S3_PUBLIC_ENDPOINT?.trim() || internalEndpoint;
+    const region = S3_REGION ?? 'us-east-1';
+    const forcePathStyle = (S3_FORCE_PATH_STYLE ?? 'true') === 'true';
+    const credentials = {
+      accessKeyId: S3_ACCESS_KEY ?? '',
+      secretAccessKey: S3_SECRET_KEY ?? '',
+    };
     this.client = new S3Client({
-      endpoint: S3_ENDPOINT ?? 'http://localhost:9000',
-      region: S3_REGION ?? 'us-east-1',
-      forcePathStyle: (S3_FORCE_PATH_STYLE ?? 'true') === 'true',
-      credentials: {
-        accessKeyId: S3_ACCESS_KEY ?? '',
-        secretAccessKey: S3_SECRET_KEY ?? '',
-      },
+      endpoint: internalEndpoint,
+      region,
+      forcePathStyle,
+      credentials,
     });
+    this.presignClient =
+      publicEndpoint === internalEndpoint
+        ? this.client
+        : new S3Client({
+            endpoint: publicEndpoint,
+            region,
+            forcePathStyle,
+            credentials,
+          });
   }
 
   /** bucket 是否存在且可访问（fail-closed readiness / 上传前置）。 */
@@ -56,7 +78,7 @@ export class SellerDocumentsStorage {
   async presignPut(key: string, mime: string): Promise<{ url: string; expiresAt: Date }> {
     const expiresAt = new Date(Date.now() + PRESIGN_PUT_TTL_S * 1000);
     const url = await getSignedUrl(
-      this.client,
+      this.presignClient,
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: key,
@@ -69,7 +91,7 @@ export class SellerDocumentsStorage {
   }
 
   async presignGet(key: string, ttlS = PRESIGN_GET_TTL_S): Promise<string> {
-    return getSignedUrl(this.client, new GetObjectCommand({ Bucket: this.bucket, Key: key }), {
+    return getSignedUrl(this.presignClient, new GetObjectCommand({ Bucket: this.bucket, Key: key }), {
       expiresIn: ttlS,
     });
   }

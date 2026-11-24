@@ -103,6 +103,43 @@ function splitLongText(text: string): string[] {
   });
 }
 
+const TABLE_SEPARATOR_RE = /^\|[\s:|-]+\|?$/;
+
+/** 超长表格按行切到 MAX_CHARS 内，每段重复表头以保持语义自洽；短表格保持原子。 */
+function splitLongTable(text: string): string[] {
+  if (text.length <= MAX_CHARS) return [text];
+  const lines = text.split('\n');
+  const hasHeader = lines.length >= 2 && TABLE_SEPARATOR_RE.test(lines[1].trim());
+  const header = hasHeader ? `${lines[0]}\n${lines[1]}` : '';
+  const bodyLines = hasHeader ? lines.slice(2) : lines;
+  if (bodyLines.length === 0) return splitLongText(text);
+
+  const pieces: string[] = [];
+  let current = header;
+  for (const row of bodyLines) {
+    const candidate = current ? `${current}\n${row}` : row;
+    if (candidate.length <= MAX_CHARS) {
+      current = candidate;
+      continue;
+    }
+    if (current && current !== header) {
+      pieces.push(current);
+    }
+    const withHeader = header ? `${header}\n${row}` : row;
+    if (withHeader.length <= MAX_CHARS) {
+      current = withHeader;
+    } else {
+      // 单行本身超过 MAX_CHARS 的极端情况：保留行前缀并按硬上限切段，确保绝不撑爆嵌入窗口
+      for (let i = 0; i < row.length; i += MAX_CHARS) {
+        pieces.push(row.slice(i, i + MAX_CHARS));
+      }
+      current = header;
+    }
+  }
+  if (current && current !== header) pieces.push(current);
+  return pieces.length > 0 ? pieces : [text.slice(0, MAX_CHARS)];
+}
+
 /** 相邻同节碎块合并到 MIN_CHARS 以上（表格不参与合并）。 */
 function mergeSmall(blocks: Block[]): Block[] {
   const merged: Block[] = [];
@@ -125,7 +162,7 @@ export function chunkMarkdown(markdown: string): Chunk[] {
   const blocks = mergeSmall(toBlocks(markdown));
   const chunks: Chunk[] = [];
   for (const block of blocks) {
-    const pieces = block.kind === 'table' ? [block.text] : splitLongText(block.text);
+    const pieces = block.kind === 'table' ? splitLongTable(block.text) : splitLongText(block.text);
     for (const text of pieces) {
       chunks.push({
         seq: chunks.length,

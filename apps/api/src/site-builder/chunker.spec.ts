@@ -48,6 +48,22 @@ describe('chunkMarkdown（结构感知切块，02 §12：标题路径入 meta、
     expect(chunkMarkdown('   \n \n')).toEqual([]);
   });
 
+  it('超长表格按行切分并在每段重复表头，每块不超过上限', () => {
+    const rows = Array.from(
+      { length: 80 },
+      (_, i) => `| HJT-${String(i).padStart(3, '0')} | ${600 + i}W | 23.4% | IEC 61215 / IEC 61730 |`,
+    );
+    const md = ['## Module Matrix', '| model | power | eff | cert |', '| --- | --- | --- | --- |', ...rows].join('\n');
+    const chunks = chunkMarkdown(md);
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const chunk of chunks) {
+      expect(chunk.meta.kind).toBe('table');
+      expect(chunk.text.length).toBeLessThanOrEqual(1600);
+      expect(chunk.text.startsWith('| model | power | eff | cert |\n| --- | --- | --- | --- |\n')).toBe(true);
+    }
+    expect(chunks.map((c) => c.text).join('\n')).toContain('HJT-079');
+  });
+
   it('无标题的纯文本也能切块（headingPath=[]）', () => {
     const chunks = chunkMarkdown('Just a plain intro paragraph about the company.');
     expect(chunks).toHaveLength(1);

@@ -93,6 +93,9 @@ export class ApplicationFailure extends Error {
   }
 }
 
+/** 模拟 `@temporalio/workflow` 的 `sleep`：单测零等待，可断言退避调用。 */
+export const sleep = vi.fn(async (_duration?: unknown): Promise<void> => undefined);
+
 /** 模拟 `@temporalio/workflow` 的 workflow logger（编排里 `log.warn(...)` 等）：无副作用 spy。 */
 export const log = {
   debug: vi.fn(),
@@ -110,6 +113,7 @@ export function resetActivities(): void {
   for (const mock of Object.values(registry)) mock.mockReset();
   patchedFn = () => true;
   currentWorkflowInfo = Object.freeze({ runId: 'test-workflow-run' });
+  sleep.mockReset();
   log.debug.mockReset();
   log.info.mockReset();
   log.warn.mockReset();

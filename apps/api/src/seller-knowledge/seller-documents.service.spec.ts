@@ -38,6 +38,7 @@ function fixture(overrides: {
       create: vi.fn(async () => ({ id: '90000000-0000-4000-8000-000000000009' })),
     },
     outboxEvent: { create: vi.fn(async () => ({ eventId: '91000000-0000-4000-8000-000000000009' })) },
+    $executeRaw: vi.fn(async () => 0),
     $queryRaw: vi.fn(async (argument: unknown) => {
       const sql = typeof (argument as { sql?: unknown })?.sql === 'string'
         ? (argument as { sql: string }).sql
@@ -78,7 +79,11 @@ function fixture(overrides: {
     copy: vi.fn(async () => undefined),
     delete: vi.fn(async () => undefined),
   };
-  const embeddings = { embed: vi.fn(async (texts: string[]) => texts.map(() => [0.1, 0.2, 0.3])) };
+  const embeddings = {
+    model: 'site-builder-bge-m3-local',
+    version: 'bge-m3:2026-07',
+    embed: vi.fn(async (texts: string[]) => texts.map(() => [0.1, 0.2, 0.3])),
+  };
   const launcher = { launchIngest: vi.fn(async () => undefined) };
   const service = new SellerDocumentsService(
     prisma as unknown as PrismaService,
@@ -159,6 +164,17 @@ describe('SellerDocumentsService', () => {
     expect(launcher.launchIngest).not.toHaveBeenCalled();
   });
 
+  it('commit 非 P2002 数据库异常时回滚至 pending_upload 并清理孤立 canonical，不滞留 committing', async () => {
+    const { service, storage, updates, tx } = fixture({ updateError: new Error('db connection reset') });
+    await expect(service.commit(CTX, COMPANY_ID, DOC_ID)).rejects.toThrow('db connection reset');
+    const claimSql = (tx.$queryRaw.mock.calls[0]?.[0] as { sql?: string } | undefined)?.sql ?? '';
+    expect(claimSql).toContain(`"status" = 'committing'`);
+    expect(updates).toContainEqual(expect.objectContaining({ status: 'pending_upload', leaseToken: null, leaseUntil: null }));
+    expect(storage.delete).toHaveBeenCalledWith(
+      sellerDocumentCanonicalKey(CTX.workspaceId, COMPANY_ID, DOC_ID, SHA, 'pdf'),
+    );
+  });
+
   it('未上传完成（HEAD 404）时回到 pending_upload 并 409', async () => {
     const { service, storage } = fixture();
     storage.head.mockResolvedValueOnce(null);
@@ -172,7 +188,7 @@ describe('SellerDocumentsService', () => {
     expect(embeddings.embed).not.toHaveBeenCalled();
   });
 
-  it('混合检索：嵌入查询并映射命中分块', async () => {
+  it('混合检索：启用 hnsw.iterative_scan、过滤 NULL/嵌入版本并映射命中分块', async () => {
     const { service, embeddings, tx } = fixture({
       searchRows: [
         { document_id: DOC_ID, filename: '目录.pdf', seq: 0, text: '精密轴承规格', score: 0.83 },
@@ -180,10 +196,42 @@ describe('SellerDocumentsService', () => {
     });
     const rows = await service.search(CTX, COMPANY_ID, '轴承', 10);
     expect(embeddings.embed).toHaveBeenCalledWith(['轴承']);
-    expect(tx.$queryRaw).toHaveBeenCalled();
+    const setLocalSql = (tx.$executeRaw.mock.calls[0]?.[0] as { sql?: string } | undefined)?.sql ?? '';
+    expect(setLocalSql).toContain('SET LOCAL hnsw.iterative_scan = relaxed_order');
+    const searchSql = (tx.$queryRaw.mock.calls[0]?.[0] as { sql?: string } | undefined)?.sql ?? '';
+    expect(searchSql).toContain('c."embedding" IS NOT NULL');
+    expect(searchSql).toContain('c."embed_model"');
+    expect(searchSql).toContain('c."embed_version"');
+    expect(searchSql).toContain('vector_candidates');
+    expect(searchSql).toContain('NULLS LAST');
     expect(rows).toEqual([
       { documentId: DOC_ID, filename: '目录.pdf', seq: 0, text: '精密轴承规格', score: 0.83 },
     ]);
+  });
+
+  it('retry：租约已过期的 processing 文档允许接管重试，活跃租约仍 409', async () => {
+    const { service, tx, launcher, updates } = fixture();
+    tx.sellerDocument.findFirst.mockResolvedValueOnce({
+      id: DOC_ID,
+      companyId: COMPANY_ID,
+      status: 'processing',
+      objectKey: 'k',
+      deletedAt: null,
+      leaseUntil: new Date(Date.now() - 60_000),
+    } as never);
+    await service.retry(CTX, DOC_ID);
+    expect(updates[0]).toMatchObject({ status: 'queued', leaseToken: null, leaseUntil: null });
+    expect(launcher.launchIngest).toHaveBeenCalled();
+
+    tx.sellerDocument.findFirst.mockResolvedValueOnce({
+      id: DOC_ID,
+      companyId: COMPANY_ID,
+      status: 'processing',
+      objectKey: 'k',
+      deletedAt: null,
+      leaseUntil: new Date(Date.now() + 60_000),
+    } as never);
+    await expect(service.retry(CTX, DOC_ID)).rejects.toBeInstanceOf(ConflictException);
   });
 
   it('软删置 deleted 并从列表与下载中消失', async () => {
