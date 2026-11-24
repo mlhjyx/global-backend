@@ -140,6 +140,13 @@ test("every live required build job fails when its scope dependency is not succe
     readRepositoryFile(".github/required-contexts.json"),
   ]);
   const policy = JSON.parse(policyText);
+  const parallelLanes = [
+    "build-test-core",
+    "build-test-unit",
+    "build-test-pg",
+    "build-test-pg-disposable",
+    "build-test-manufacturer",
+  ];
   for (const [jobId, contextName] of [
     ["build-test", "build · typecheck · test"],
     ["build-test-oci", "OCI runtime image · smokes"],
@@ -164,7 +171,27 @@ test("every live required build job fails when its scope dependency is not succe
       /\n {4}if: always\(\)/,
       "always() jobs ignore cancellation, so a superseded PR run would block the next one",
     );
-    assert.match(buildJob, /\n {4}needs: renderer-visual-scope/);
+    if (jobId === "build-test") {
+      assert.match(buildJob, /\n {4}needs:\n {6}- renderer-visual-scope/);
+      for (const laneId of parallelLanes) {
+        assert.match(buildJob, new RegExp(`\\n {6}- ${laneId}\\b`));
+      }
+      const laneGuardStep = namedStepBlock(
+        buildJob,
+        "Fail closed when any parallel build or test lane did not succeed",
+      );
+      for (const laneId of parallelLanes) {
+        assert.match(
+          laneGuardStep,
+          new RegExp(`needs\\.${laneId}\\.result`),
+          `build-test aggregator must check needs.${laneId}.result`,
+        );
+      }
+      assert.match(laneGuardStep, /if \[\[ "\$status" != "success" \]\]; then/);
+      assert.match(laneGuardStep, /exit 1/);
+    } else {
+      assert.match(buildJob, /\n {4}needs: renderer-visual-scope/);
+    }
     assert.equal(
       firstStep,
       "      - name: Fail closed when renderer scope evaluation did not succeed",
@@ -179,6 +206,18 @@ test("every live required build job fails when its scope dependency is not succe
     );
     assert.match(scopeGuardStep, /^            exit 1$/m);
     assert.equal(buildPolicy?.allowed_job_if, "${{ !cancelled() }}");
+  }
+  for (const laneId of parallelLanes) {
+    const laneJob = jobBlock(ciWorkflow, laneId);
+    const firstStep = laneJob
+      .split(/\r?\n/)
+      .find((line) => /^      - (?:name:|uses:)/.test(line));
+    assert.match(laneJob, /\n {4}needs: renderer-visual-scope/);
+    assert.match(laneJob, /\n {4}if: \$\{\{ !cancelled\(\) \}\}/);
+    assert.equal(
+      firstStep,
+      "      - name: Fail closed when renderer scope evaluation did not succeed",
+    );
   }
 });
 
@@ -246,7 +285,8 @@ async function runScope(script, changedPaths, event = "pull_request") {
 test("heavy Temporal and OCI gates are path-scoped and fail closed", async () => {
   const ciWorkflow = await readRepositoryFile(".github/workflows/ci.yml");
   const scopeJob = jobBlock(ciWorkflow, "renderer-visual-scope");
-  const buildJob = jobBlock(ciWorkflow, "build-test");
+  const buildJob = jobBlock(ciWorkflow, "build-test-core");
+  const unitJob = jobBlock(ciWorkflow, "build-test-unit");
   const ociJob = jobBlock(ciWorkflow, "build-test-oci");
   const goJob = jobBlock(ciWorkflow, "build-test-temporal-go");
   for (const output of ["run_temporal_go", "run_oci", "run_db_tests", "run_code"]) {
@@ -329,17 +369,22 @@ test("heavy Temporal and OCI gates are path-scoped and fail closed", async () =>
     run_code: "true",
   });
 
-  const testStep = namedStepBlock(buildJob, "Test（vitest 纯单测）");
+  const testStep = namedStepBlock(unitJob, "Test（vitest 纯单测）");
   assert.deepEqual(
     testStep.match(/^        if:.*$/gm),
     ["        if: needs.renderer-visual-scope.outputs.run_code != 'false'"],
     "code steps must default to running unless the classifier explicitly says docs-only",
   );
+  assert.match(unitJob, /shard: \[1, 2, 3, 4\]/);
+  assert.match(
+    testStep,
+    /pnpm --filter @global\/api exec vitest run --shard=\$\{\{ matrix\.shard \}\}\/4/,
+  );
 });
 
 test("the Copy recovery rebuild gate rederives both fixed-source artifacts", async () => {
   const ciWorkflow = await readRepositoryFile(".github/workflows/ci.yml");
-  const buildJob = jobBlock(ciWorkflow, "build-test");
+  const buildJob = jobBlock(ciWorkflow, "build-test-core");
   const impactStep = namedStepBlock(
     buildJob,
     "Evaluate Copy fixed-source impact",
@@ -506,7 +551,7 @@ test("the Copy impact verifier and receipt remain code-owner controlled", async 
 
 test("the required build emits an exact-SHA runtime attestation after the final API rebuild", async () => {
   const ciWorkflow = await readRepositoryFile(".github/workflows/ci.yml");
-  const buildJob = jobBlock(ciWorkflow, "build-test");
+  const buildJob = jobBlock(ciWorkflow, "build-test-core");
   const copyStep = namedStepBlock(
     buildJob,
     "Copy Sonnet recovery fixed-source rebuild（顺序隔离）",
@@ -555,7 +600,7 @@ test("the required build emits an exact-SHA runtime attestation after the final 
 
 test("the required build runs only the isolated zero-dispatch evaluation runner suite", async () => {
   const ciWorkflow = await readRepositoryFile(".github/workflows/ci.yml");
-  const buildJob = jobBlock(ciWorkflow, "build-test");
+  const buildJob = jobBlock(ciWorkflow, "build-test-core");
   const evalStep = namedStepBlock(
     buildJob,
     "Site Builder isolated zero-dispatch evaluation boundary",
@@ -570,7 +615,7 @@ test("the required build runs only the isolated zero-dispatch evaluation runner 
 
 test("the required OCI job executes and inspects the exact-SHA immutable OCI contract", async () => {
   const ciWorkflow = await readRepositoryFile(".github/workflows/ci.yml");
-  const ciBuildJob = jobBlock(ciWorkflow, "build-test");
+  const ciBuildJob = jobBlock(ciWorkflow, "build-test-core");
   const buildJob = jobBlock(ciWorkflow, "build-test-oci");
   assert.ok(
     ciBuildJob.includes("Generate and verify API build attestation"),
@@ -611,7 +656,7 @@ test("the required OCI job executes and inspects the exact-SHA immutable OCI con
 
 test("the required build verifies runtime lease roles against disposable PostgreSQL", async () => {
   const ciWorkflow = await readRepositoryFile(".github/workflows/ci.yml");
-  const buildJob = jobBlock(ciWorkflow, "build-test");
+  const buildJob = jobBlock(ciWorkflow, "build-test-pg");
   const permissionStep = namedStepBlock(
     buildJob,
     "Runtime lease principal PostgreSQL permissions",
@@ -674,7 +719,7 @@ test("the required build verifies runtime lease roles against disposable Postgre
 
 test("market candidate persistence runs explicitly with both restricted disposable database identities", async () => {
   const workflow = await readRepositoryFile(".github/workflows/ci.yml");
-  const step = namedStepBlock(jobBlock(workflow, "build-test"), "Market candidate persistence and feedback on PostgreSQL");
+  const step = namedStepBlock(jobBlock(workflow, "build-test-pg"), "Market candidate persistence and feedback on PostgreSQL");
   assert.match(step, /MARKET_CANDIDATES_DATABASE_TEST: "1"/);
   assert.match(step, /MARKET_CANDIDATES_TEST_DATABASE_URL: postgresql:\/\/global:global-test-only@127\.0\.0\.1:5432\/global_test/);
   assert.match(step, /MARKET_CANDIDATES_TEST_APP_DATABASE_URL: postgresql:\/\/app_user:app_pw@127\.0\.0\.1:5432\/global_test/);
@@ -687,7 +732,7 @@ test("market candidate persistence runs explicitly with both restricted disposab
 
 test("market generation full protocol PG step is explicit and shares the disposable migrated test database",async()=>{
  const workflow=await readRepositoryFile(".github/workflows/ci.yml");
- const step=namedStepBlock(jobBlock(workflow,"build-test"),"Market candidate generation controlled protocol on PostgreSQL");
+ const step=namedStepBlock(jobBlock(workflow,"build-test-pg"),"Market candidate generation controlled protocol on PostgreSQL");
  assert.match(step,/MARKET_CANDIDATE_GENERATION_DATABASE_TEST: "1"/);
  assert.match(step,/MARKET_CANDIDATE_GENERATION_TEST_DATABASE_URL: postgresql:\/\/global:global-test-only@127\.0\.0\.1:5432\/global_test/);
  assert.match(step,/MARKET_CANDIDATE_GENERATION_TEST_APP_DATABASE_URL: postgresql:\/\/app_user:app_pw@127\.0\.0\.1:5432\/global_test/);

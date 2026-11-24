@@ -38,7 +38,14 @@
       "name": "build · typecheck · test",
       "workflow": ".github/workflows/ci.yml",
       "event": "pull_request",
-      "allowed_job_if": "${{ !cancelled() }}"
+      "allowed_job_if": "${{ !cancelled() }}",
+      "allowed_internal_needs": [
+        "build-test-core",
+        "build-test-unit",
+        "build-test-pg",
+        "build-test-pg-disposable",
+        "build-test-manufacturer"
+      ]
     },
     {
       "name": "contracts · drift · lint · breaking",

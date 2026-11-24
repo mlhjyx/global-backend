@@ -46,6 +46,7 @@ const localEnv = {
 const directory = mkdtempSync(join(tmpdir(), "manufacturer-network-"));
 const created: string[] = [];
 let sourceImageId: string | undefined;
+let sourceImageTag: string | undefined;
 const buildContext = join(directory, "empty-context");
 const iidFile = join(directory, "minio.iid");
 function run(command: string, args: string[], env = localEnv, capture = false) {
@@ -75,20 +76,51 @@ function port(name: string, containerPort: number) {
 }
 async function main() {
   mkdirSync(buildContext, { mode: 0o700 });
-  run("docker", [
-    "build",
-    "--platform",
-    "linux/amd64",
-    "--pull=false",
-    "--file",
-    join(root, "infra/testing/manufacturer-minio.Dockerfile"),
-    "--label",
-    `${MINIO_FIXTURE_LABEL}=${imageTaskId}`,
-    "--iidfile",
-    iidFile,
-    buildContext,
-  ]);
-  const candidate = fixtureImageId(readFileSync(iidFile, "utf8"));
+  const cacheFrom = process.env.MANUFACTURER_MINIO_BUILDX_CACHE_FROM?.trim();
+  const cacheTo = process.env.MANUFACTURER_MINIO_BUILDX_CACHE_TO?.trim();
+  const tempTag = cacheFrom ? `manufacturer-minio-fixture:${imageTaskId}` : undefined;
+  const buildArgs = cacheFrom
+    ? [
+        "buildx",
+        "build",
+        "--platform",
+        "linux/amd64",
+        "--pull=false",
+        "--load",
+        "--tag",
+        tempTag!,
+        "--cache-from",
+        cacheFrom,
+        ...(cacheTo ? ["--cache-to", cacheTo] : []),
+        "--file",
+        join(root, "infra/testing/manufacturer-minio.Dockerfile"),
+        "--label",
+        `${MINIO_FIXTURE_LABEL}=${imageTaskId}`,
+        "--iidfile",
+        iidFile,
+        buildContext,
+      ]
+    : [
+        "build",
+        "--platform",
+        "linux/amd64",
+        "--pull=false",
+        "--file",
+        join(root, "infra/testing/manufacturer-minio.Dockerfile"),
+        "--label",
+        `${MINIO_FIXTURE_LABEL}=${imageTaskId}`,
+        "--iidfile",
+        iidFile,
+        buildContext,
+      ];
+  run("docker", buildArgs);
+  if (tempTag) sourceImageTag = tempTag;
+  const iidCandidate = fixtureImageId(readFileSync(iidFile, "utf8"));
+  const candidate = tempTag
+    ? fixtureImageId(
+        run("docker", ["image", "inspect", tempTag, "--format", "{{.Id}}"], localEnv, true),
+      )
+    : iidCandidate;
   const metadata = run(
     "docker",
     [
@@ -299,9 +331,9 @@ try {
       process.exitCode = 1;
     }
   }
-  if (sourceImageId) {
+  if (sourceImageTag || sourceImageId) {
     try {
-      run("docker", ["image", "rm", sourceImageId], localEnv, true);
+      run("docker", ["image", "rm", sourceImageTag ?? sourceImageId!], localEnv, true);
     } catch {
       console.error("MANUFACTURER_TEST_IMAGE_CLEANUP_FAILED");
       process.exitCode = 1;
