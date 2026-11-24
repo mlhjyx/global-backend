@@ -1,6 +1,10 @@
 import { ApplicationFailure, Context } from '@temporalio/activity';
 import { PrismaService } from '../prisma/prisma.service';
 import { ModelGateway } from '../model-gateway/model-gateway';
+import {
+  withUntrustedWebContentGuard,
+  wrapUntrustedWebContent,
+} from '../model-gateway/untrusted-content';
 import { getTask } from '../ai-tasks/task-registry';
 import type { CrawlResult } from '../adapters/web-crawler';
 import type { ExecutionBroker } from '../tools/tool-contract';
@@ -379,8 +383,8 @@ export function createUnderstandingActivities(deps: {
           'company.understanding.extract',
           {
             task: contract?.id ?? 'company_understanding.extract_claims',
-            prompt: args.text,
-            system: contract?.description,
+            prompt: wrapUntrustedWebContent('company-website', args.text),
+            system: withUntrustedWebContentGuard(contract?.description),
             model: contract?.model, // 中转站解析该 model 名（DeepSeek 等）
             // B5：活动取消/超时传播到网关的 HTTP 请求（AbortSignal 贯通）。
             signal: activityCancellationSignal(),
@@ -411,8 +415,8 @@ export function createUnderstandingActivities(deps: {
           deps.gateway,
           {
             task: contract?.id ?? 'company_understanding.extract_profile',
-            prompt: args.text,
-            system: contract?.description,
+            prompt: wrapUntrustedWebContent(args.website || 'company-homepage', args.text),
+            system: withUntrustedWebContentGuard(contract?.description),
             model: contract?.model,
             // B5：活动取消/超时传播到网关的 HTTP 请求（AbortSignal 贯通）。
             signal: activityCancellationSignal(),
@@ -471,8 +475,8 @@ export function createUnderstandingActivities(deps: {
           'company.understanding.extract_offerings',
           {
             task: contract?.id ?? 'company_understanding.extract_offerings',
-            prompt: args.text,
-            system: contract?.description,
+            prompt: wrapUntrustedWebContent('company-website', args.text),
+            system: withUntrustedWebContentGuard(contract?.description),
             model: contract?.model,
             // B5：活动取消/超时传播到网关的 HTTP 请求（AbortSignal 贯通）。
             signal: activityCancellationSignal(),

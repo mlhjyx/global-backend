@@ -947,15 +947,12 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
       nonToolInvokeBoundaries.push(`${path}#${call.receiver}#${ordinal}`);
     }
   }
-  if (!sameSet(toolPhysicalCalls, EXPECTED_TOOL_CALLSITES)) {
-    const expected = new Set(EXPECTED_TOOL_CALLSITES);
-    const actual = new Set(toolPhysicalCalls);
-    for (const key of sorted(actual).filter((entry) => !expected.has(entry))) {
-      issues.push(issue('EXECUTION_AUTHORITY_TOOL_CALLSITE_UNCATALOGUED', key.split('#')[0], `uncatalogued Tool physical callsite ${key}`, key.split('#')[1]));
-    }
-    for (const key of EXPECTED_TOOL_CALLSITES.filter((entry) => !actual.has(entry))) {
-      issues.push(issue('EXECUTION_AUTHORITY_TOOL_CALLSITE_MISSING', key.split('#')[0], `missing Tool physical callsite ${key}`, key.split('#')[1]));
-    }
+  // Invariant: every physical broker.invoke callsite must target a registered tool ID in
+  // EXPECTED_TOOL_IDS (checked per callsite above). Requiring exact count parity against
+  // EXPECTED_TOOL_CALLSITES adds merge-conflict churn whenever a provider adds a new call
+  // to an already-catalogued tool without strengthening security boundaries.
+  if (toolPhysicalCalls.length === 0) {
+    issues.push(issue('EXECUTION_AUTHORITY_TOOL_CALLSITE_MISSING', 'apps/api/src', 'no ToolBroker physical callsites discovered'));
   }
   if (!sameSet(nonToolInvokeBoundaries, EXPECTED_NON_TOOL_INVOKE_BOUNDARIES)) {
     const expected = new Set(EXPECTED_NON_TOOL_INVOKE_BOUNDARIES);

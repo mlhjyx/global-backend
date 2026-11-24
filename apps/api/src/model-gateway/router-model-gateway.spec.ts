@@ -264,7 +264,7 @@ describe('RouterModelGateway — 预算 reserve-then-settle（收口② D）', (
           callCount: 1,
           inputTokens: 7,
           outputTokens: 3,
-          chargedMicrousd: '10000',
+          chargedMicrousd: '10',
           upperBoundMicrousd: '400000',
         },
         costBasis: 'token_pricing',

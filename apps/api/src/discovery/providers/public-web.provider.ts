@@ -19,6 +19,10 @@ import {
   SourceClass,
 } from '../provider-contract';
 import { ModelGateway } from '../../model-gateway/model-gateway';
+import {
+  withUntrustedWebContentGuard,
+  wrapUntrustedWebContent,
+} from '../../model-gateway/untrusted-content';
 import { getTask } from '../../ai-tasks/task-registry';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import type { SearxngSearchOutput, SearxngSearchResult } from '../../tools/builtin-tools';
@@ -294,8 +298,8 @@ export class PublicWebDiscoveryProvider
           prompt: `目标画像上下文（仅用于判断相关性，禁止照抄进字段）：${JSON.stringify({
             filters: query.filters,
             keywords: query.keywords,
-          }).slice(0, 1200)}\n\n搜索结果（同一域名 ${domain}，只含标题与 URL）：\n${text}`,
-          system: contract?.description,
+          }).slice(0, 1200)}\n\n搜索结果（同一域名 ${domain}，只含标题与 URL）：\n${wrapUntrustedWebContent(domain, text)}`,
+          system: withUntrustedWebContentGuard(contract?.description),
           model: contract?.model,
           schema: contract?.outputSchema ?? { required: ['is_company_site'] },
         },

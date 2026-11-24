@@ -353,7 +353,8 @@ describe('Fit follows the ICP trade role (design §4 step 8)', () => {
 
     const [, input] = executeTask.mock.calls[0]!;
     expect(input.prompt).toContain('"icp_trade_role": "distributor"');
-    expect(input.system).toBe(getTask('discovery.qualify_fit')!.description);
+    expect(input.system).toContain(getTask('discovery.qualify_fit')!.description);
+    expect(input.system).toContain('<untrusted_web_content>');
   });
 
   it('shows the judge the capability keywords that carry reseller evidence', async () => {

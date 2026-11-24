@@ -1102,15 +1102,6 @@
       "expiresAt": "2027-01-31",
       "reason": "存量高复杂度函数（棘轮：只许降低）"
     },
-    "apps/api/src/model-gateway/providers/openai-compatible.provider.ts#chatCompletions": {
-      "file": "apps/api/src/model-gateway/providers/openai-compatible.provider.ts",
-      "name": "chatCompletions",
-      "line": 1213,
-      "complexity": 21,
-      "owner": "P6-CI-10",
-      "expiresAt": "2027-01-31",
-      "reason": "存量高复杂度函数（棘轮：只许降低）"
-    },
     "apps/api/src/model-gateway/router-model-gateway.ts#settleCachedStructured": {
       "file": "apps/api/src/model-gateway/router-model-gateway.ts",
       "name": "settleCachedStructured",

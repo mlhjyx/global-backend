@@ -1,5 +1,9 @@
 import { Prisma } from '@prisma/client';
 import { ModelGateway } from '../model-gateway/model-gateway';
+import {
+  withUntrustedWebContentGuard,
+  wrapUntrustedWebContent,
+} from '../model-gateway/untrusted-content';
 import { getTask } from '../ai-tasks/task-registry';
 import { BudgetExceededError, BudgetOperationReplayError } from '../tools/budget-store';
 import type { RuntimeTelemetry } from '../model-runtime/types';
@@ -459,16 +463,21 @@ async function judgeFitCompanyV1(
       'discovery.qualify_fit',
       {
         task: contract.id,
-        prompt: `卖方 ICP：\n${JSON.stringify(icpBrief, null, 2)}\n\n候选公司：\n${JSON.stringify(
-          { name: company.name, domain: company.domain, country: company.country, industry: company.industry, products,
-            keywords,
-            ...(websiteProfile ? { website_profile: websiteProfile } : {}),
-            ...(crossSourceEvidence ? { cross_source_evidence: crossSourceEvidence } : {}),
-          },
-          null,
-          2,
+        prompt: `卖方 ICP：\n${JSON.stringify(icpBrief, null, 2)}\n\n候选公司：\n${wrapUntrustedWebContent(
+          company.domain ?? company.name,
+          JSON.stringify(
+            { name: company.name, domain: company.domain, country: company.country, industry: company.industry, products,
+              keywords,
+              ...(websiteProfile ? { website_profile: websiteProfile } : {}),
+              ...(crossSourceEvidence ? { cross_source_evidence: crossSourceEvidence } : {}),
+            },
+            null,
+            2,
+          ),
         )}\n\n判断该候选是否为卖方的真实目标客户，输出中文理由。`,
-        system: buyerProcurementQualificationSystem(contract.description, icpBrief.procurement_scenario),
+        system: withUntrustedWebContentGuard(
+          buyerProcurementQualificationSystem(contract.description, icpBrief.procurement_scenario),
+        ),
         model: contract.model,
         schema: contract.outputSchema,
       },

@@ -47,6 +47,13 @@ import {
   DEFAULT_MODEL_GATEWAY_REQUEST_TIMEOUT_MS,
   isBoundedModelGatewayRequestTimeout,
 } from "../gateway-credential-boundary";
+import {
+  buildAnthropicMessagesControlFields,
+  classifyBoundedStreamReadError,
+  fetchWith429Backoff,
+  readBoundedResponseText,
+  wireTemperatureField,
+} from "./provider-wire-helpers";
 
 /**
  * The application still has one gateway credential and one logical model name.
@@ -465,6 +472,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     const res = await fetch(`${this.cfg.baseUrl}/embeddings`, {
       method: "POST",
       headers: this.headers(),
+      signal: this.requestSignal(input.signal),
       body: JSON.stringify({ model: this.cfg.embedModel, input: input.input }),
     });
     if (!res.ok) {
@@ -558,7 +566,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
           tools: input.tools.map(toolDefinitionToWire),
           tool_choice: "auto",
           max_tokens: input.maxTokens,
-          temperature: 0.2,
+          ...wireTemperatureField(model, undefined, 0.2),
         }),
       },
       ctx,
@@ -909,7 +917,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
     ctx: AiContext | undefined,
     model: string,
   ): Promise<Response> {
-    if (!ctx?.paidCost) return fetch(url, init);
+    if (!ctx?.paidCost) return fetchWith429Backoff(url, init);
     const runtime = ctx.paidCost.settlementPhysicalWire;
     if (!runtime) {
       throw new ProviderSettlementError(
@@ -1056,9 +1064,10 @@ export class OpenAICompatibleProvider implements ModelProvider {
     };
     let text: string;
     try {
-      text = await response.text();
-    } catch {
-      return invalid("stream body unavailable", "CHAT_COMPLETIONS_STREAM_UNREADABLE");
+      text = await readBoundedResponseText(response);
+    } catch (err) {
+      const { reason, reasonCode } = classifyBoundedStreamReadError(err);
+      return invalid(reason, reasonCode);
     }
     const trimmed = text.trimStart();
     if (trimmed.startsWith("{")) {
@@ -1239,7 +1248,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
           model: opts.model,
           messages,
           max_tokens: opts.maxTokens,
-          temperature: opts.temperature ?? 0.2,
+          ...wireTemperatureField(opts.model, opts.temperature, 0.2),
           ...(opts.json ? { response_format: { type: "json_object" } } : {}),
           ...(opts.reasoningEffort
             ? { reasoning_effort: opts.reasoningEffort }
@@ -1959,7 +1968,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
           // New API transparently forwards the standard Responses message form.
           input: messages,
           max_output_tokens: opts.maxTokens,
-          temperature: opts.temperature ?? 0.2,
+          ...wireTemperatureField(opts.model, opts.temperature, 0.2),
           ...(opts.json ? { text: { format: { type: "json_object" } } } : {}),
           ...(opts.reasoningEffort
             ? { reasoning: { effort: opts.reasoningEffort } }
@@ -2087,25 +2096,7 @@ export class OpenAICompatibleProvider implements ModelProvider {
           ...(system ? { system } : {}),
           messages: conversation,
           max_tokens: opts.maxTokens,
-          temperature: opts.temperature ?? 0.2,
-          ...(opts.reasoningEffort
-            ? {
-                thinking: { type: "adaptive" },
-                output_config: { effort: opts.reasoningEffort },
-              }
-            : {}),
-          ...(opts.outputSchema
-            ? {
-                tools: [
-                  {
-                    name: "json",
-                    description: "Respond with a JSON object.",
-                    input_schema: opts.outputSchema,
-                  },
-                ],
-                tool_choice: { type: "any", disable_parallel_tool_use: true },
-              }
-            : {}),
+          ...buildAnthropicMessagesControlFields(opts),
         }),
       },
       ctx,

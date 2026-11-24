@@ -61,18 +61,18 @@ describe('AI task registry model execution policy invariants', () => {
       'discovery.extract_company': {
         // G3 5.3: discovery judges from search results only; no pre-identity fetch.
         model: 'deepseek-flash', risk: 'low', humanGate: false,
-        allowedTools: ['searxng.search'], maxCostCents: 15,
+        allowedTools: ['searxng.search'], maxCostCents: 3,
         timeoutMs: 180000,
       },
       'discovery.extract_list': {
         model: 'deepseek-flash', risk: 'low', humanGate: false,
-        allowedTools: ['searxng.search', 'crawl4ai.fetch'], maxCostCents: 20,
+        allowedTools: ['searxng.search', 'crawl4ai.fetch'], maxCostCents: 5,
         timeoutMs: 180000,
       },
       'discovery.classify_trade_role': {
         // BI-14: the website profile also renders the company's linked contact page (form check).
         model: 'deepseek-flash', risk: 'low', humanGate: false,
-        allowedTools: ['crawl4ai.fetch', 'crawl4ai.render'], maxCostCents: 10, timeoutMs: 120000,
+        allowedTools: ['crawl4ai.fetch', 'crawl4ai.render'], maxCostCents: 3, timeoutMs: 120000,
       },
       'contact.find_decision_makers': {
         model: 'deepseek-flash', risk: 'medium', humanGate: false,
@@ -305,15 +305,15 @@ const B2_LEGACY_SCHEMA_BYTES = {
   },
   "discovery.extract_company": {
     "output": "e1e158cda13100c8c204668115faeb19416a4ba2dd2157989792a9b642133224",
-    "contract": "27cae192898391fd0a3ad10ccc7ae84b8464b3a7a29d8e5e5d4c1e38e00b16c1"
+    "contract": "530cd600fd50cbee25c1fa52533daafd3717e8f3778d507b670a8a8e5c4ac22e"
   },
   "discovery.classify_trade_role": {
     "output": "26c61256e97019ee6bdbecb76aededa991a5f8c100fa820c7d86e1c60ee134a3",
-    "contract": "b98a6c152c8f84b997172c72ccfd439968d49bb0c2e75aa5c730e4163a8f81e3"
+    "contract": "a6a888e005b90190ca8481aa0c1543348664cb9d411bbcd5f0092c4b8bd677bf"
   },
   "discovery.web_search_candidates": {
     "output": "3ba5f1c67e332287da4fe3ee36ee4556b9165c8c649300389f24076c10b6f189",
-    "contract": "6a16e2b445d60f5025dee67d3b65cda894f3d14fdbb273acc4f32bd03f5e0b51"
+    "contract": "7ab23288e74a7afc0ee0efc22dbd2855f7f799aa88459b3afc9448b8ab038840"
   },
   "contact.find_decision_makers": {
     "output": "946b9114a0d3997f6cff641e19bf155421f1b856dbaefdc2fe9e55a506d61ec2",
@@ -321,7 +321,7 @@ const B2_LEGACY_SCHEMA_BYTES = {
   },
   "discovery.extract_list": {
     "output": "518011f7bbf4096c36a8891cbd2459196b9d2fae0fb2c65f62ed84e4f462fa8b",
-    "contract": "082ceb53a12d2b2715663d8892ab72e8ee399d72e7dc4281d5b65ff22dac8a56"
+    "contract": "20b4eff261885eb97aac4321255efaef215fdb9b825bd1ccb3e215e3a907346f"
   },
   "taxonomy.normalize": {
     "output": "3fd0aff6cb2f332c19683f4ae8c8f5ac1431cdf62ac77fe10cfce9e3c1c266fc",

@@ -12,10 +12,16 @@ export class TestBudgetExceededError extends Error {
 }
 
 interface Account {
-  capCents: number;
-  reservedCents: number;
-  settledCents: number;
+  capMicrousd: bigint;
+  reservedMicrousd: bigint;
+  settledMicrousd: bigint;
   refs: number;
+}
+
+const MICROUSD_PER_CENT = 10_000n;
+
+function centsToMicro(centsValue: number): bigint {
+  return BigInt(Math.round(centsValue * Number(MICROUSD_PER_CENT)));
 }
 
 /** Explicit unit-test ledger. It is not exported by any product package. */
@@ -24,48 +30,60 @@ export class BudgetLedger {
   private readonly exhausted = new Set<string>();
 
   open(accountKey: string, capCents: number): void {
+    const capMicrousd = centsToMicro(capCents);
     const current = this.accounts.get(accountKey);
     if (current) {
-      current.capCents = Math.max(current.capCents, capCents);
+      if (capMicrousd > current.capMicrousd) current.capMicrousd = capMicrousd;
       current.refs += 1;
     } else {
       this.accounts.set(accountKey, {
-        capCents,
-        reservedCents: 0,
-        settledCents: 0,
+        capMicrousd,
+        reservedMicrousd: 0n,
+        settledMicrousd: 0n,
         refs: 1,
       });
     }
   }
 
-  reserve(accountKey: string, estimatedCents: number): number {
+  reserveMicrousd(accountKey: string, estimatedMicrousd: bigint): bigint {
     const account = this.accounts.get(accountKey);
-    if (!account) return estimatedCents;
-    const remaining = account.capCents-account.reservedCents-account.settledCents;
-    if (estimatedCents > remaining) {
+    if (!account) return estimatedMicrousd;
+    const remaining = account.capMicrousd - account.reservedMicrousd - account.settledMicrousd;
+    if (estimatedMicrousd > remaining) {
       this.exhausted.add(accountKey);
-      throw new TestBudgetExceededError(
-        accountKey,
-        BigInt(estimatedCents)*10_000n,
-        BigInt(remaining)*10_000n,
-      );
+      throw new TestBudgetExceededError(accountKey, estimatedMicrousd, remaining);
     }
-    account.reservedCents += estimatedCents;
+    account.reservedMicrousd += estimatedMicrousd;
+    return estimatedMicrousd;
+  }
+
+  reserve(accountKey: string, estimatedCents: number): number {
+    this.reserveMicrousd(accountKey, centsToMicro(estimatedCents));
     return estimatedCents;
   }
 
-  settle(accountKey: string, reservedCents: number, actualCents: number): void {
+  settleMicrousd(accountKey: string, reservedMicrousd: bigint, actualMicrousd: bigint): void {
     const account = this.accounts.get(accountKey);
     if (!account) return;
-    account.reservedCents = Math.max(0, account.reservedCents-reservedCents);
-    account.settledCents += actualCents;
+    account.reservedMicrousd =
+      account.reservedMicrousd > reservedMicrousd
+        ? account.reservedMicrousd - reservedMicrousd
+        : 0n;
+    account.settledMicrousd += actualMicrousd;
+  }
+
+  settle(accountKey: string, reservedCents: number, actualCents: number): void {
+    this.settleMicrousd(accountKey, centsToMicro(reservedCents), centsToMicro(actualCents));
+  }
+
+  remainingMicrousd(accountKey: string): bigint | null {
+    const account = this.accounts.get(accountKey);
+    return account ? account.capMicrousd - account.reservedMicrousd - account.settledMicrousd : null;
   }
 
   remainingCents(accountKey: string): number {
-    const account = this.accounts.get(accountKey);
-    return account
-      ? account.capCents-account.reservedCents-account.settledCents
-      : Number.POSITIVE_INFINITY;
+    const remaining = this.remainingMicrousd(accountKey);
+    return remaining !== null ? Number(remaining) / Number(MICROUSD_PER_CENT) : Number.POSITIVE_INFINITY;
   }
 
   wasExhausted(accountKey: string): boolean {
@@ -84,13 +102,6 @@ export class BudgetLedger {
   }
 }
 
-function cents(value: bigint): number {
-  if (value % 10_000n !== 0n) throw new TypeError('test ledger requires whole cents');
-  const result = Number(value/10_000n);
-  if (!Number.isSafeInteger(result)) throw new RangeError('test ledger overflow');
-  return result;
-}
-
 /** Structural BudgetStore adapter for isolated unit tests only. */
 export class InMemoryBudgetStoreAdapter {
   constructor(readonly ledger = new BudgetLedger()) {}
@@ -104,15 +115,15 @@ export class InMemoryBudgetStoreAdapter {
     operationKey: string;
     estimatedMicrousd: bigint;
   }) {
-    const reservedCents = this.ledger.reserve(
+    const reservedMicrousd = this.ledger.reserveMicrousd(
       input.accountKey,
-      cents(input.estimatedMicrousd),
+      input.estimatedMicrousd,
     );
     return {
       workspaceId: input.workspaceId,
       accountKey: input.accountKey,
       operationId: input.operationKey,
-      estimatedMicrousd: BigInt(reservedCents)*10_000n,
+      estimatedMicrousd: reservedMicrousd,
       replay: false,
     };
   }
@@ -121,10 +132,10 @@ export class InMemoryBudgetStoreAdapter {
     accountKey: string;
     estimatedMicrousd: bigint;
   }, observedMicrousd: bigint) {
-    this.ledger.settle(
+    this.ledger.settleMicrousd(
       reservation.accountKey,
-      cents(reservation.estimatedMicrousd),
-      cents(observedMicrousd),
+      reservation.estimatedMicrousd,
+      observedMicrousd,
     );
     return {
       chargedMicrousd: observedMicrousd,
@@ -135,10 +146,10 @@ export class InMemoryBudgetStoreAdapter {
   }
 
   async release(reservation: { accountKey: string; estimatedMicrousd: bigint }) {
-    this.ledger.settle(
+    this.ledger.settleMicrousd(
       reservation.accountKey,
-      cents(reservation.estimatedMicrousd),
-      0,
+      reservation.estimatedMicrousd,
+      0n,
     );
     return {
       chargedMicrousd: 0n,
@@ -149,11 +160,11 @@ export class InMemoryBudgetStoreAdapter {
   }
 
   async status(input: { accountKey: string }) {
-    const remaining = this.ledger.remainingCents(input.accountKey);
+    const remaining = this.ledger.remainingMicrousd(input.accountKey);
     return {
-      remainingMicrousd: Number.isFinite(remaining) ? BigInt(remaining)*10_000n : 0n,
+      remainingMicrousd: remaining ?? 0n,
       exhausted: this.ledger.wasExhausted(input.accountKey),
-      open: Number.isFinite(remaining),
+      open: remaining !== null,
     };
   }
 

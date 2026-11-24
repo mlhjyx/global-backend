@@ -4,6 +4,10 @@ import type { CrawlHtmlResult, CrawlResult } from '../../adapters/web-crawler';
 import { isExecutionControlError } from '../../execution-budget/execution-control-error';
 import { settledModelFailureReason } from '../settled-model-failure';
 import type { ModelGateway } from '../../model-gateway/model-gateway';
+import {
+  withUntrustedWebContentGuard,
+  wrapUntrustedWebContent,
+} from '../../model-gateway/untrusted-content';
 import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
 import { artifactSubjectSkipReason } from '../../tools/artifact-subject-denial';
@@ -334,8 +338,8 @@ export class WebsiteProfileProvider {
         this.deps.gateway,
         {
           task: WEBSITE_PROFILE_TASK,
-          prompt: `品类上下文（只用于判断相关品类，禁止照抄进字段）：${input.icpContext.slice(0, 600)}\n\n首页（${homepageUrl}）：\n${modelSafeText(home).slice(0, HOME_PROMPT_CHARS)}\n\nImpressum：\n${modelSafeText(impressum).slice(0, IMPRESSUM_PROMPT_CHARS)}`,
-          system: contract?.description,
+          prompt: `品类上下文（只用于判断相关品类，禁止照抄进字段）：${input.icpContext.slice(0, 600)}\n\n首页（${homepageUrl}）：\n${wrapUntrustedWebContent(homepageUrl, modelSafeText(home).slice(0, HOME_PROMPT_CHARS))}\n\nImpressum：\n${wrapUntrustedWebContent(`${homepageUrl}impressum`, modelSafeText(impressum).slice(0, IMPRESSUM_PROMPT_CHARS))}`,
+          system: withUntrustedWebContentGuard(contract?.description),
           model: contract?.model,
           schema: contract?.outputSchema ?? { required: ['trade_role'] },
         },

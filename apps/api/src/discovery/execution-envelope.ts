@@ -68,10 +68,21 @@ export function resolveMaxDiscoveryProviderRecords(
 }
 export const MAX_DISCOVERY_PROVIDER_RECORDS: number =
   resolveMaxDiscoveryProviderRecords();
-export const MAX_DISCOVERY_FIT_COMPANIES =
-  MAX_DISCOVERY_PLAN_QUERIES *
-  MAX_COMPANY_DISCOVERY_ADAPTERS *
-  MAX_DISCOVERY_PROVIDER_RECORDS;
+/** Capped-mode deep fit ceiling: matches Run 2 QUICK_SCAN_POOL_LIMIT_CAPPED (500) so quotes do not multiply 66×11×25 into an $8k+ wall. */
+export const CAPPED_DISCOVERY_FIT_COMPANIES = 500 as const;
+export function resolveMaxDiscoveryFitCompanies(
+  env: NodeJS.ProcessEnv = ambientProcessEnv(),
+): number {
+  const productBound =
+    MAX_DISCOVERY_PLAN_QUERIES *
+    MAX_COMPANY_DISCOVERY_ADAPTERS *
+    resolveMaxDiscoveryProviderRecords(env);
+  return discoveryUncappedEnabled(env)
+    ? productBound
+    : Math.min(CAPPED_DISCOVERY_FIT_COMPANIES, productBound);
+}
+export const MAX_DISCOVERY_FIT_COMPANIES: number =
+  resolveMaxDiscoveryFitCompanies();
 
 // Per plan query, before the provider fan-out: taxonomy terms sent to the
 // `taxonomy.normalize` cold path (one model call per unresolved term).
