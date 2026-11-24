@@ -66,11 +66,13 @@ describe('classifyContactEmail（A4 分类器 v2）', () => {
     expect(result.dataClass).toBe('red');
   });
 
-  it('词表与形态都判不出的 → other（amber，绝不冒认人名：jdoe/webmaster 这类单段词不冒认）', () => {
-    expect(classifyContactEmail('jdoe@example.de').emailType).toBe('other');
+  it('词表与形态都判不出的 → other（fail-closed red，jdoe/x7 不得按职能箱绕过 GDPR）', () => {
+    const jdoe = classifyContactEmail('jdoe@example.de');
+    expect(jdoe.emailType).toBe('other');
+    expect(jdoe.dataClass).toBe('red');
     const result = classifyContactEmail('x7@example.com');
     expect(result.emailType).toBe('other');
-    expect(result.dataClass).toBe('amber');
+    expect(result.dataClass).toBe('red');
   });
 
   it('非邮箱输入不崩溃、按 other 处理', () => {

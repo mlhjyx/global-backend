@@ -73,7 +73,8 @@ export interface ContactEmailClassification {
 }
 
 function dataClassFor(type: ContactEmailType): ContactEmailDataClass {
-  return type === 'personal' ? 'red' : 'amber';
+  // fail-closed：除明确白名单职能邮箱外，personal 与无法判定的 other（如 jdoe@）一律标 red 受 GDPR 保护。
+  return type === 'personal' || type === 'other' ? 'red' : 'amber';
 }
 
 function classification(type: ContactEmailType): ContactEmailClassification {
@@ -98,6 +99,6 @@ export function classifyContactEmail(email: string): ContactEmailClassification 
   // ③ 人名形态 → personal（red）。与 cleanEmail 的保守裁决收敛：info.schmidt / vertrieb.mueller
   //    这类「职能词+人名」混合形态不冒认职能邮箱（下游 A6 若按 role 类放行会误触个人邮箱）。
   if (PERSON_NAME_SHAPE.test(localPart)) return classification('personal');
-  // ④ 判不出（jdoe 这类单段词绝不冒认人名）→ other（amber）。
+  // ④ 判不出（jdoe 这类单段词绝不冒认职能邮箱）→ other（fail-closed red）。
   return classification('other');
 }

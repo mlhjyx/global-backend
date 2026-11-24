@@ -119,5 +119,27 @@ describe('ApolloProvider.findEmail', () => {
       errorCode: 'provider_unconfigured',
     });
     expect(fetchImpl).not.toHaveBeenCalled();
+
+    const gated = new ApolloProvider(
+      resolveApolloConfig({ APOLLO_API_KEY: 'free-key', APOLLO_PAID_PLAN_ENABLED: '0' }),
+      fetchImpl,
+    );
+    expect(gated.isConfigured()).toBe(false);
+    expect(await gated.findEmail(INPUT)).toMatchObject({
+      status: 'error',
+      errorCode: 'provider_unconfigured',
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+
+    const freeTier403 = new ApolloProvider(
+      resolveApolloConfig({ APOLLO_API_KEY: 'free-key' }),
+      vi.fn(async () => jsonResponse(403, { error_code: 'API_INACCESSIBLE' })),
+    );
+    expect(await freeTier403.findEmail(INPUT)).toMatchObject({
+      status: 'error',
+      errorCode: 'plan_inaccessible',
+      retryable: false,
+      costMicrousd: 0,
+    });
   });
 });
