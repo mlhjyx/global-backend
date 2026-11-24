@@ -32,30 +32,28 @@ test("current repository keeps representative business and dynamic chains comple
       node.id.startsWith("service:temporal-schedule:") &&
       !node.id.includes("registration"),
   );
-  // B4（2026-11-08）：新增 tool-budget-reconciliation 周期清收。
-  // B3（2026-11-08）：新增 discovery-stale-run-sweep 周期看门狗。
-  // P1-19（2026-11-09）：新增 contact-reverify-sweep（联系人再验证，注册即 paused）。
-  // P1-17（2026-11-09）：新增 contact-weekly-report（联系人工程周报，注册即 paused）。
-  assert.equal(schedules.length, 14);
+  // 生产调度面拆分：8 个客户侧周期 sweep（sweep-scheduler.service.ts CUSTOMER_SWEEPS）
+  // + 4 个平台受控 schedule（platform-execution-contract.ts rows）= 12。
+  assert.equal(schedules.length, 12);
   assert.equal(
     graph.edges.some(
       (edge) =>
-        edge.from === "service:temporal-schedule:contact-reverify-sweep" &&
+        edge.from === "service:temporal-schedule:tool-budget-reconciliation" &&
         edge.kind === "calls" &&
-        edge.to === "workflow:temporal:contactReverifySweepWorkflow",
+        edge.to === "workflow:temporal:toolBudgetReconciliationWorkflow",
     ),
     true,
-    "contact-reverify-sweep must point to contactReverifySweepWorkflow",
+    "tool-budget-reconciliation must point to toolBudgetReconciliationWorkflow",
   );
   assert.equal(
     graph.edges.some(
       (edge) =>
-        edge.from === "service:temporal-schedule:contact-weekly-report" &&
+        edge.from === "service:temporal-schedule:sanctions-refresh" &&
         edge.kind === "calls" &&
-        edge.to === "workflow:temporal:contactWeeklyReportWorkflow",
+        edge.to === "workflow:temporal:sanctionsRefreshWorkflow",
     ),
     true,
-    "contact-weekly-report must point to contactWeeklyReportWorkflow",
+    "sanctions-refresh must point to sanctionsRefreshWorkflow",
   );
   assert.equal(
     graph.edges.some(

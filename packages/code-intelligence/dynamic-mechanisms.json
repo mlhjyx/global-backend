@@ -44,7 +44,7 @@
       "extractor": "typescript.temporal-schedule",
       "accountableRole": "OWN-PLATFORM",
       "assignee": "UNASSIGNED",
-      "patterns": ["schedule\\.create\\s*\\(", "ensurePlatformSchedules\\s*\\("]
+      "patterns": ["schedule\\.create\\s*\\(", "CUSTOMER_SWEEPS"]
     },
     {
       "id": "outbox.string-event",

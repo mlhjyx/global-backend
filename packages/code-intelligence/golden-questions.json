@@ -115,7 +115,7 @@
       "baselinePattern": "function sanctionsRefreshWorkflow",
       "expectedPaths": ["apps/api/src/temporal/sanctions-refresh.workflow.ts"],
       "allowedPaths": [
-        "apps/api/src/temporal/ensure-schedules.ts",
+        "apps/api/src/platform-authority/platform-execution-contract.ts",
         "apps/api/src/temporal/sanctions-refresh.workflow.ts"
       ],
       "forbiddenPaths": [
@@ -333,24 +333,24 @@
     {
       "id": "GQ-EXT-005",
       "category": "external-projector",
-      "question": "Temporal Schedule 自愈入口在哪里？",
-      "query": "ensurePlatformSchedules",
-      "baselinePattern": "function ensurePlatformSchedules",
-      "expectedPaths": ["apps/api/src/temporal/ensure-schedules.ts"],
+      "question": "客户侧 Temporal 周期 Sweep 调度入口在哪里？",
+      "query": "SweepSchedulerService",
+      "baselinePattern": "class SweepSchedulerService",
+      "expectedPaths": ["apps/api/src/temporal/sweep-scheduler.service.ts"],
       "allowedPaths": [
-        "apps/api/src/temporal/ensure-schedules.ts",
-        "apps/api/src/temporal/worker.ts"
+        "apps/api/src/temporal/sweep-scheduler.service.ts",
+        "apps/api/src/temporal/temporal.module.ts"
       ],
-      "forbiddenPaths": ["apps/api/src/temporal/workflows.ts"],
+      "forbiddenPaths": ["apps/api/src/temporal/customer-workflows.ts"],
       "expectedNodes": [
-        "symbol:apps/api/src/temporal/ensure-schedules.ts#ensurePlatformSchedules"
+        "symbol:apps/api/src/temporal/sweep-scheduler.service.ts#SweepSchedulerService"
       ],
       "expectedEdges": [
         {
-          "from": "symbol:apps/api/src/temporal/ensure-schedules.ts#ensurePlatformSchedules",
-          "to": "service:temporal-schedule-registration:apps/api/src/temporal/ensure-schedules.ts:56",
+          "from": "file:apps/api/src/temporal/sweep-scheduler.service.ts",
+          "to": "service:temporal-schedule:raw-source-retention",
           "kind": "registers",
-          "confidence": null
+          "confidence": "REGISTERED_STATIC_CONFIG"
         }
       ],
       "criticalDynamic": true
