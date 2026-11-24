@@ -519,7 +519,15 @@ export function metadataMoney(record: EnrichmentRuntimeExecutionRecord): { spend
     charged += amount;
     if (step.budget_result_json === null || step.budget_receipt_usage === null) { uncertainPhysical = true; continue; }
     const receipt = metadataLedgerReceipt(record, step);
-    if (receipt.usage.upperBoundMicrousd !== quote.toString() || receipt.usage.chargedMicrousd !== amount.toString()) return invalidReadInput();
+    if (receipt.usage.upperBoundMicrousd !== quote.toString()) return invalidReadInput();
+    if (receipt.usage.chargedMicrousd !== undefined) {
+      if (receipt.usage.chargedMicrousd !== amount.toString()) return invalidReadInput();
+    } else if (receipt.costBasis !== "estimated_upper_bound" || amount !== quote) {
+      // estimated_upper_bound settlements may omit chargedMicrousd (the durable
+      // receipt contract allows it). The ledger charge is then the recorded
+      // upper bound, which must equal this step's quote — never less.
+      return invalidReadInput();
+    }
     contacts.add(safetyInteger(step.contact_ordinal, 0, 9));
   }
   return { spend: { quotedUpperBoundMicrousd: quoted.toString(), knownChargedMicrousd: charged.toString(), unknownUpperBoundMicrousd: unresolved.toString(), costBasis: "estimated_upper_bound" }, physical: uncertainPhysical ? null : contacts.size };

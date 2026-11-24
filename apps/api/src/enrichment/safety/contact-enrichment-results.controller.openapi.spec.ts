@@ -1,4 +1,7 @@
-import { buildContactEnrichmentQualityResult } from "./contact-enrichment-results.dto";
+import { buildContactEnrichmentQualityResult, metadataMoney } from "./contact-enrichment-results.dto";
+import { projectGenericOperationResult } from "../../tools/generic-operation-projection";
+import { TypedProjectionRegistry } from "../../durable-results/typed-projection.registry";
+import { registerContactEmailVerificationProjections } from "../../durable-results/contact-email-verification-projections";
 import type { EnrichmentRuntimeExecutionRecord } from "./enrichment-safety.contract";
 import { buildFrozenEnrichmentPlan } from "./enrichment-call-plan";
 import { TokenVerifier } from "../../auth/token-verifier";
@@ -332,6 +335,156 @@ describe('scoped persistent metadata derivation from original ledger facts, no b
   it('keeps redacted aggregate counts and original charges while every personal reference is absent', () => { const result = buildContactEnrichmentQualityResult(persistedMetadataWorld('redacted')); expect(result.perContact).toEqual([]); expect(result.summary.consideredUniqueContacts).toBe(1); expect(result.summary.newCandidatePoints).toBe(1); expect(result.spend.knownChargedMicrousd).toBe('1700'); expect(JSON.stringify(result)).not.toContain(CONTACT); });
   it('rejects a duplicate original operation instead of double-counting its money', () => { const record = persistedMetadataWorld('settled'); Object.assign(record, { steps: [record.steps[0], record.steps[0]] }); expect(() => buildContactEnrichmentQualityResult(record)).toThrow(); });
   it('rejects foreign/extra-data persisted decisions instead of turning them into public proof', () => { for (const patch of [{ contactId: COMPANY }, { email: 'PII_SENTINEL' }]) { const record = persistedMetadataWorld('settled'); const snapshot = record.resultSnapshot as { contacts: Record<string, unknown>[] }; Object.assign(snapshot.contacts[0]!, patch); expect(() => buildContactEnrichmentQualityResult(record)).toThrow(); } });
+});
+
+describe("ledger settlement shapes from the real artifact-ref and typed-projection flows", () => {
+  const finderRecord = (patch: Record<string, unknown> = {}) => {
+    const record = persistedMetadataWorld("settled");
+    Object.assign(record.steps[0] as unknown as Record<string, unknown>, patch);
+    return record;
+  };
+  const realFinderUsage = {
+    currency: "USD",
+    unit: "microusd",
+    callCount: 1,
+    upperBoundMicrousd: "1700",
+  };
+  const verifierRecord = (patch: Record<string, unknown> = {}) => {
+    const registry = registerContactEmailVerificationProjections(new TypedProjectionRegistry());
+    const schema = "contact-email-verify-millionverifier/v1";
+    const vote = {
+      data: {
+        providerKey: "millionverifier",
+        state: "VALID",
+        catchAll: "not_catch_all",
+        catchAllClass: "not_catch_all",
+        score: 90,
+        acceptAll: false,
+        disposable: false,
+        role: false,
+        reason: "provider_verdict",
+        costBasis: "estimated_upper_bound",
+      },
+      costCents: 0.178,
+      costMicrousd: "1780",
+    };
+    const projection = projectGenericOperationResult({
+      kind: "tool",
+      schema,
+      data: JSON.parse(JSON.stringify(registry.project(schema, vote))),
+    });
+    const workspaceId = "00000000-0000-4000-8000-000000000001";
+    const authorityId = "00000000-0000-4000-8000-000000000006";
+    const accountId = "00000000-0000-4000-8000-000000000007";
+    const executionId = "00000000-0000-4000-8000-000000000008";
+    const operationId = "00000000-0000-4000-8000-000000000009";
+    const step = {
+      id: "00000000-0000-4000-8000-000000000011",
+      workspace_id: workspaceId,
+      company_id: COMPANY,
+      execution_id: executionId,
+      contact_id: CONTACT,
+      contact_ordinal: 0,
+      slot_key: "verify",
+      phase: "VERIFY",
+      provider: "millionverifier",
+      tool_id: "contact_email.verify.millionverifier",
+      tool_version: "1.0.0",
+      quote_microusd: 1780n,
+      pricing_version: "p1",
+      depends_on_slot_key: "finder",
+      input_fingerprint: null,
+      operation_key: "original-op-key",
+      budget_operation_id: operationId,
+      candidate_ref: null,
+      revision: 1,
+      dispatch_phase: "SETTLED",
+      domain_state: "APPLIED",
+      authority_id: authorityId,
+      account_id: accountId,
+      generation: 1,
+      account_key: "original-key",
+      execution_status: "COMPLETED",
+      deadline_open: false,
+      budget_original_id: operationId,
+      budget_status: "SETTLED",
+      budget_amount_unit: "microusd",
+      budget_reserved_microusd: 1780n,
+      budget_charged_microusd: 1780n,
+      budget_result_schema_version: "generic-operation-projection/v1",
+      budget_result_schema: schema,
+      budget_result_digest: projection.digest,
+      budget_result_json: projection,
+      budget_receipt_usage: {
+        currency: "USD",
+        unit: "microusd",
+        callCount: 1,
+        upperBoundMicrousd: "1780",
+      },
+      budget_receipt_cost_basis: "estimated_upper_bound",
+    };
+    Object.assign(step, patch);
+    return {
+      view: { executionId, operationRef: "a".repeat(64), status: "COMPLETED", accountId, authorityId, generation: 1 },
+      workspaceId,
+      companyId: COMPANY,
+      entrypoint: "http",
+      businessRunId: null,
+      requestSha256: "a".repeat(64),
+      admissionRequestSha256: "c".repeat(64),
+      accountKey: "original-key",
+      currentAccount: { accountId, authorityId, generation: 1 },
+      plan: null,
+      targetCount: 1,
+      executionOptions: null,
+      createdAt: "2026-11-22T00:00:00.000Z",
+      resultRevision: 1,
+      resultSnapshot: null,
+      steps: [step],
+    } as unknown as EnrichmentRuntimeExecutionRecord;
+  };
+
+  it("reads a settled artifact-ref finder whose usage omits chargedMicrousd", () => {
+    const record = finderRecord({ budget_receipt_usage: realFinderUsage });
+    const result = buildContactEnrichmentQualityResult(record);
+    expect(result.spend).toMatchObject({
+      quotedUpperBoundMicrousd: "1700",
+      knownChargedMicrousd: "1700",
+      unknownUpperBoundMicrousd: "0",
+      costBasis: "estimated_upper_bound",
+    });
+    expect(result.summary.physicallyAttemptedUniqueContacts).toBe(1);
+  });
+
+  it("reads a settled typed-projection verifier whose usage omits chargedMicrousd", () => {
+    const spend = metadataMoney(verifierRecord()).spend;
+    expect(spend).toMatchObject({ quotedUpperBoundMicrousd: "1780", knownChargedMicrousd: "1780", unknownUpperBoundMicrousd: "0" });
+  });
+
+  it("keeps released steps uncharged and rejects a released step that still records a charge", () => {
+    expect(metadataMoney(finderRecord({ budget_status: "RELEASED", budget_charged_microusd: 0n })).spend).toMatchObject({ knownChargedMicrousd: "0", quotedUpperBoundMicrousd: "1700" });
+    expect(() => metadataMoney(finderRecord({ budget_status: "RELEASED", budget_charged_microusd: 1700n }))).toThrow();
+  });
+
+  it("keeps the money invariants for missing-charged settlements", () => {
+    // charged above the quote is rejected before any receipt is trusted.
+    expect(() => metadataMoney(finderRecord({ budget_charged_microusd: 1800n, budget_receipt_usage: realFinderUsage }))).toThrow();
+    // usage upper bound differing from the quote is rejected.
+    expect(() => metadataMoney(finderRecord({ budget_receipt_usage: { ...realFinderUsage, upperBoundMicrousd: "1800" } }))).toThrow();
+    // a missing charged is only legal when the ledger charge is the full quote.
+    expect(() => metadataMoney(finderRecord({ budget_charged_microusd: 1600n, budget_receipt_usage: realFinderUsage }))).toThrow();
+    // a non estimated_upper_bound basis may not omit the charged amount.
+    expect(() => metadataMoney(finderRecord({ budget_receipt_usage: realFinderUsage, budget_receipt_cost_basis: "provider_reported" }))).toThrow();
+    // with no receipt facts the settled charge stays conservative, not a hard fail:
+    const conservative = metadataMoney(finderRecord({ budget_result_json: null, budget_receipt_usage: null }));
+    expect(conservative.spend).toMatchObject({ knownChargedMicrousd: "1700", unknownUpperBoundMicrousd: "0" });
+    expect(conservative.physical).toBeNull();
+  });
+
+  it("still requires an explicit charged amount to equal the ledger charge when present", () => {
+    expect(() => metadataMoney(finderRecord({ budget_receipt_usage: { ...realFinderUsage, chargedMicrousd: "1600" } }))).toThrow();
+    expect(metadataMoney(verifierRecord({ budget_receipt_usage: { currency: "USD", unit: "microusd", callCount: 1, upperBoundMicrousd: "1780", chargedMicrousd: "1780" } })).spend.knownChargedMicrousd).toBe("1780");
+  });
 });
 
 describe("real DiscoveryModule assembly metadata", () => {

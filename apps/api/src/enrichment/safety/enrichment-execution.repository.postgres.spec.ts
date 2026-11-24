@@ -3,9 +3,11 @@ import { Prisma, PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildFrozenEnrichmentPlan } from './enrichment-call-plan';
 import {
+  EnrichmentExecutionQueryRepository,
   EnrichmentExecutionRepository,
   listCompanyEnrichmentHeads,
 } from './enrichment-execution.repository';
+import { metadataMoney } from './contact-enrichment-results.dto';
 import type { ExecutionBudgetBinding } from '../../execution-budget/execution-budget-binding';
 import type { VerifiedExecutionBudgetAuthority } from '../../execution-budget/execution-budget-authority.types';
 
@@ -968,6 +970,59 @@ describe.runIf(Boolean(ownerUrl && appUrl))('contact enrichment execution on Pos
         candidateRef: null,
       }));
     expect(cross).toMatchObject({ ok: false });
+  });
+
+  it('loads a settled artifact-ref finder ledger row and derives its charge from the real usage shape', async () => {
+    const contactId = randomUUID();
+    await owner.$executeRaw`
+      INSERT INTO canonical_contact (id, workspace_id, company_id, full_name, dedupe_key)
+      VALUES (${contactId}::uuid, ${workspaceA}::uuid, ${companyA}::uuid, 'C1 read regression', ${`c:c1-${contactId}`})`;
+    const requestSha256 = digestOf(), admittedAtMs = Date.now(), deadlineAtMs = admittedAtMs + 600_000;
+    const plan = admissionPlan(contactId, requestSha256, admittedAtMs, deadlineAtMs);
+    const headId = randomUUID(), stepId = randomUUID(), operationId = randomUUID();
+    const resultDigest = digestOf();
+    const operationKey = `find:${stepId}`;
+    const artifact = { schemaVersion: 'generic-operation-artifact-ref/v1', operationId, artifactId: randomUUID(), resultSchema: 'contact-email-find-hunter/v1', sha256: resultDigest, mediaType: 'application/octet-stream', sizeBytes: '128', expiresAt: '2099-01-01T00:00:00.000Z' };
+    await owner.$executeRaw`
+      INSERT INTO tool_budget_operation
+        (id, scope_key, account_id, generation, operation_key, amount_unit, reserved_cents, reserved_microusd,
+         observed_microusd, charged_microusd, status, attempt, created_at, settled_at,
+         result_schema_version, result_schema, result_digest, result_json, receipt_usage, receipt_cost_basis)
+      VALUES (${operationId}::uuid, ${workspaceA}, ${accountA1}::uuid, 1, ${operationKey}, 'microusd', 0, 1780,
+        1780, 1780, 'SETTLED', 1, now(), now(),
+        'generic-operation-artifact-ref/v1', 'contact-email-find-hunter/v1', ${resultDigest}, ${JSON.stringify(artifact)}::jsonb,
+        ${JSON.stringify({ currency: 'USD', unit: 'microusd', callCount: 1, upperBoundMicrousd: '1780' })}::jsonb,
+        'estimated_upper_bound')`;
+    await owner.$executeRaw`
+      INSERT INTO contact_enrichment_execution
+        (id, workspace_id, company_id, entrypoint, business_run_id, authority_id, account_id, generation,
+         request_sha256, admission_request_sha256, operation_ref, protocol_version, plan_sha256, frozen_limits,
+         target_snapshot, status, quality_coverage, result_revision, scope_key)
+      VALUES (${headId}::uuid, ${workspaceA}::uuid, ${companyA}::uuid, 'http', NULL,
+        ${authorityA}::uuid, ${accountA1}::uuid, 1, ${requestSha256}, ${digestOf()}, ${digestOf()}, 1,
+        ${plan.planSha256}, ${JSON.stringify({ caps: plan.limits, admittedAtMs, deadlineAtMs, targetCount: plan.targets.length, executionOptions: null })}::jsonb,
+        ${JSON.stringify(plan.targets)}::jsonb, 'COMPLETED', 'PREREQUISITE_ONLY', 1, ${workspaceA})`;
+    await owner.$executeRaw`
+      INSERT INTO contact_enrichment_execution_step
+        (id, workspace_id, execution_id, contact_id, contact_ordinal, slot_ordinal, slot_key, phase, provider,
+         tool_id, tool_version, quote_microusd, pricing_version, depends_on_slot_key, input_fingerprint,
+         operation_key, budget_operation_id, result_digest, receipt, dispatch_phase, domain_state, revision)
+      VALUES (${stepId}::uuid, ${workspaceA}::uuid, ${headId}::uuid, ${contactId}::uuid, 0, 0, 'f1', 'FINDER', 'hunter',
+        'contact_email.find.hunter', '1.0.0', 1780, 'p1', NULL, ${'a'.repeat(64)},
+        ${operationKey}, ${operationId}::uuid, ${resultDigest}, '{"schemaVersion":"durable-execution-receipt/v1"}'::jsonb, 'SETTLED', 'APPLIED', 1)`;
+    const query = new EnrichmentExecutionQueryRepository({
+      withWorkspace: (workspaceId: string, work: (tx: Prisma.TransactionClient) => Promise<unknown>) =>
+        app.$transaction(async (tx) => {
+          await tx.$executeRaw`SELECT set_config('app.current_workspace_id', ${workspaceId}, true)`;
+          return work(tx);
+        }, { timeout: 20_000 }),
+    } as never);
+    const record = await query.loadById({ workspaceId: workspaceA, companyId: companyA }, headId);
+    expect(record).not.toBeNull();
+    expect(metadataMoney(record!)).toMatchObject({
+      spend: { quotedUpperBoundMicrousd: '1780', knownChargedMicrousd: '1780', unknownUpperBoundMicrousd: '0' },
+      physical: 1,
+    });
   });
 
   it('column-list SET NULL clears only the personal link, never the workspace', async () => {
