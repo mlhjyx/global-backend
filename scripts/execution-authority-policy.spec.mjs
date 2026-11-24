@@ -24,10 +24,10 @@ import {
 
 const repositoryRoot = fileURLToPath(new URL('../', import.meta.url));
 
-test('inventory is locked to 27 Tools and 16 product Model tasks', () => {
-  assert.equal(EXPECTED_TOOL_IDS.length, 27);
+test('inventory is locked to 30 Tools and 16 product Model tasks', () => {
+  assert.equal(EXPECTED_TOOL_IDS.length, 30);
   assert.equal(EXPECTED_MODEL_TASKS.length, 16);
-  assert.equal(new Set(EXPECTED_TOOL_IDS).size, 27);
+  assert.equal(new Set(EXPECTED_TOOL_IDS).size, 30);
   assert.equal(new Set(EXPECTED_MODEL_TASKS.map((entry) => entry.taskId)).size, 16);
   assert.equal(EXPECTED_GENERIC_MODEL_TASK_LOOKUPS.length, 4);
   assert.deepEqual(EXPECTED_MODEL_GATEWAY_BOUNDARIES, [
@@ -278,8 +278,8 @@ test('artifact bounds are read only from the durableResultStrategy object and mu
 test('pure contracts preserve typed authority wiring and the artifact pre-wire hold', async () => {
   const result = await verifyExecutionAuthorityPolicy({ repoRoot: repositoryRoot });
   assert.deepEqual(result.issues, []);
-  // 获客 vNext W4：两源（opencorporates + companies_house_registry）= 23 tools / 52 callsites；contact-enrichment safety 首片新增 4 producer = 27 tools / 52 callsites，按 policy 源真值锁定。
-  assert.equal(result.toolCount, 27);
+  // 获客 vNext W4 + contact-enrichment safety + Batch 1.2-B L0 实时搜索 3 工具（serper/exa/google_places）= 30 tools，按 policy 源真值锁定。
+  assert.equal(result.toolCount, 30);
   assert.equal(result.modelTaskCount, 16);
   assert.equal(result.physicalExecutionWiring, 'PARTIAL_HOLD');
   assert.ok(result.physicalToolCallsiteCount >= EXPECTED_TOOL_CALLSITES.length);

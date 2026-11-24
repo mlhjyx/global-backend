@@ -18,6 +18,8 @@ import {
 import { getTask } from '../../ai-tasks/task-registry';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import type { SearxngSearchOutput } from '../../tools/builtin-tools';
+import type { SearchProviderOutput } from '../../tools/search-provider-tools';
+import { resolveSerperApiKey } from '../../adapters/search-providers';
 import type { CrawlResult } from '../../adapters/web-crawler';
 import { extractSameSiteLinks } from '../../adapters/site-links';
 import { isAllowedByRobots } from '../../adapters/robots';
@@ -261,12 +263,31 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
     ctx: ExecutionContext,
     language: SearchLanguage,
   ): Promise<{ url: string; title: string }[]> {
+    const toolCtx = this.toolCtx(ctx, 'discovery.extract_list');
     const res = await this.deps.broker!.invoke<{ q: string; language?: string }, SearxngSearchOutput>(
       'searxng.search',
       { q, language },
-      this.toolCtx(ctx, 'discovery.extract_list'),
+      toolCtx,
     );
-    return res.data.results.slice(0, 20).map((r) => ({ url: r.url, title: r.title ?? '' }));
+    const out = res.data.results.slice(0, 20).map((r) => ({ url: r.url, title: r.title ?? '' }));
+    if (resolveSerperApiKey()) {
+      try {
+        const serper = await this.deps.broker!.invoke<
+          { query: string; num?: number; hl?: string },
+          SearchProviderOutput
+        >('serper.search', { query: q, num: 10, hl: language }, toolCtx);
+        const seen = new Set(out.map((item) => item.url));
+        for (const item of serper.data?.results ?? []) {
+          if (!item.url || seen.has(item.url)) continue;
+          seen.add(item.url);
+          out.push({ url: item.url, title: item.title ?? '' });
+        }
+      } catch (error) {
+        if (isExecutionControlError(error)) throw error;
+        this.log(`optional serper.search degraded: ${String(error).slice(0, 80)}`);
+      }
+    }
+    return out;
   }
 
   /** 抓一个名录页（含有限翻页）→ 列表抽取 → 该页所有公司记录。 */

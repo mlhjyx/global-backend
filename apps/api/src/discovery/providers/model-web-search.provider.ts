@@ -35,6 +35,9 @@ import {
   SourceClass,
 } from '../provider-contract';
 import type { SearxngSearchOutput } from '../../tools/builtin-tools';
+import type { SearchProviderOutput } from '../../tools/search-provider-tools';
+import { resolveDeepSeekApiKey } from '../../adapters/deepseek-tools';
+import { resolveExaApiKey, resolveSerperApiKey } from '../../adapters/search-providers';
 
 const PROVIDER_KEY = 'model_web_search' as const;
 /** 结构确认任务的契约字面量（execution-authority 策略要求 getTask 用字面量或同文件单一声明常量）。 */
@@ -86,10 +89,17 @@ export class ModelWebSearchDiscoveryProvider implements CompanyDiscoveryAdapter 
     return (this.env.MODEL_WEB_SEARCH_PROVIDER ?? '').trim() === 'on';
   }
 
-  private executor(): 'searxng' | 'deepseek' {
-    return (this.env.MODEL_WEB_SEARCH_EXECUTOR ?? '').trim() === 'deepseek'
-      ? 'deepseek'
-      : 'searxng';
+  private executor(): 'searxng' | 'deepseek' | 'serper' | 'exa' {
+    const configured = (this.env.MODEL_WEB_SEARCH_EXECUTOR ?? '').trim().toLowerCase();
+    if (configured === 'deepseek' || configured === 'serper' || configured === 'exa') {
+      return configured;
+    }
+    if (configured === 'auto') {
+      if (resolveSerperApiKey(this.env)) return 'serper';
+      if (resolveExaApiKey(this.env)) return 'exa';
+      if (resolveDeepSeekApiKey(this.env)) return 'deepseek';
+    }
+    return 'searxng';
   }
 
   private toolCtx(ctx: ExecutionContext): ToolContext {
@@ -132,7 +142,30 @@ export class ModelWebSearchDiscoveryProvider implements CompanyDiscoveryAdapter 
 
   private searcher(ctx: ExecutionContext): (q: string) => Promise<readonly WebSearchToolHit[]> {
     const broker = this.deps.broker!;
-    if (this.executor() === 'deepseek') {
+    const mode = this.executor();
+    if (mode === 'serper') {
+      return async (q) => {
+        const res = await broker.invoke<{ query: string }, SearchProviderOutput>(
+          'serper.search',
+          { query: q },
+          this.toolCtx(ctx),
+        );
+        const rows = Array.isArray(res.data?.results) ? res.data.results : [];
+        return rows.filter((row) => typeof row?.url === 'string' && row.url.length > 0);
+      };
+    }
+    if (mode === 'exa') {
+      return async (q) => {
+        const res = await broker.invoke<{ mode: 'search'; query: string }, SearchProviderOutput>(
+          'exa.search',
+          { mode: 'search', query: q },
+          this.toolCtx(ctx),
+        );
+        const rows = Array.isArray(res.data?.results) ? res.data.results : [];
+        return rows.filter((row) => typeof row?.url === 'string' && row.url.length > 0);
+      };
+    }
+    if (mode === 'deepseek') {
       return async (q) => {
         const res = await broker.invoke<{ query: string }, { results?: WebSearchToolHit[] }>(
           'deepseek.search',

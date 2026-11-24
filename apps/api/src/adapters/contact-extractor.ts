@@ -50,6 +50,7 @@ const SOCIAL_HOSTS = [
   'weibo.com',
   'pinterest.com',
   'xing.com',
+  'wa.me',
 ];
 const SOCIAL_RE = new RegExp(
   `https?://(?:www\\.)?(?:${SOCIAL_HOSTS.map((h) => h.replace('.', '\\.')).join('|')})/[A-Za-z0-9_\\-./@%]+`,

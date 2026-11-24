@@ -1,4 +1,8 @@
 import { COMPANY_NAVIGATION_RECIPE, type CompanyNavigationCapture, type CompanyNavigationRecipe } from './company-navigation';
+import {
+  extractFooterContactsFromDocument,
+  formatFooterContactsMarkdown,
+} from './footer-contact-capture';
 /**
  * HTTP-first 抓取（主计划 §3.5b PR-A）：先用受治理的普通 HTTP 拿 HTML，在进程内用
  * readability 抽正文并转 Markdown，只有可疑页面（薄页/非 HTML/失败）才回落到
@@ -261,13 +265,23 @@ function extractPage(html: string, minChars: number, navigation?: { capture: Com
   if (!/<html|<body|<p|<div|<article/i.test(html.slice(0, 65_536))) return null;
   const { document } = parseHTML(html);
   const links = navigation?.capture(document as unknown as Document, navigation.companyUrl, navigation.pageUrl) ?? "";
+  const footerBlock = navigation
+    ? formatFooterContactsMarkdown(
+        extractFooterContactsFromDocument(
+          document as unknown as Document,
+          navigation.companyUrl,
+          navigation.pageUrl,
+        ),
+      )
+    : "";
   const article = new Readability(document as unknown as Document).parse();
   if (!article) return null;
   const text = (article.textContent ?? "").trim();
   if (text.length < minChars) return null;
   const body = turndown().turndown(article.content ?? text).trim();
   if (!body) return null;
-  const markdown = links ? `${links}\n\n${body}` : body;
+  const withLinks = links ? `${links}\n\n${body}` : body;
+  const markdown = footerBlock ? `${withLinks}\n\n${footerBlock}` : withLinks;
   return {
     markdown,
     title: article.title?.trim() || null,

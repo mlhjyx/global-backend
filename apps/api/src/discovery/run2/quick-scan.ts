@@ -9,6 +9,7 @@
 import { qualify, type QualifyResult, type RuleLike } from '../../icp/rule-engine';
 import { wrapUntrustedWebContent } from '../../model-gateway/untrusted-content';
 import { ambientProcessEnv, discoveryUncappedEnabled } from '../execution-envelope';
+import { inferPrefilterCountry } from '../prefilter-country';
 
 /** 一次批量粗判的公司数（设计 R4：8 家/次，失败降级逐家）。 */
 export const QUICK_JUDGE_BATCH_SIZE = 8;
@@ -65,7 +66,15 @@ export function prefilterAttributes(company: PrefilterCompany): Record<string, u
       : {};
   attributes.name = company.name;
   if (company.domain) attributes.domain = company.domain;
-  if (company.country) attributes.country = company.country;
+  if (company.country) {
+    attributes.country = company.country;
+  } else if (!attributes.country) {
+    const inferred = inferPrefilterCountry(company);
+    if (inferred) {
+      attributes.country = inferred.iso;
+      attributes.country_inferred_by = inferred.source;
+    }
+  }
   if (company.industry) attributes.industry = company.industry;
   if (typeof company.employeeCount === 'number') {
     attributes.employee_count = company.employeeCount;

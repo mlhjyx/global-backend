@@ -321,6 +321,9 @@ describe('workspace execution technical envelope catalog', () => {
     ).toEqual([
       ['searxng.search', 66 * (3 + 4) + 66 * 10],
       ['deepseek.search', 66 * 10],
+      ['serper.search', 66 * (3 + 4) + 66 * 10],
+      ['exa.search', 66 * 3 + 66 * 10],
+      ['google_places.search', 66],
       // directory pages + homepage and Impressum of each profiled company
       ['crawl4ai.fetch', 66 * 8 * 3 + 50 * 3],
       ['wikidata.sparql', 66],
@@ -351,8 +354,9 @@ describe('workspace execution technical envelope catalog', () => {
       watchCompanies: 12,
     });
     // models: 396×2×5 + 924×2×3 + 1584×2×5 + 462×2×5 + 50×2×3 + 500×2×20 + 63×2×20 = 52_784 cents
-    // tools: crawl4ai.fetch 1734×1 + crawl4ai.render 74×1 + deepseek.search 660×1 + opencorporates/companies_house 各 66×0 = 2_468 cents。
-    expect(envelope.requiredCapMicrousd).toBe(55_252n * 10_000n);
+    // tools: crawl4ai.fetch 1734×1 + crawl4ai.render 74×1 + deepseek.search 660×1 +
+    // serper.search 1122×1 + exa.search 858×1 + google_places.search 66×4 = 4_712 cents；合计 57_496 cents (<$600)。
+    expect(envelope.requiredCapMicrousd).toBe(57_496n * 10_000n);
   });
 
   it('quotes company creation from the bounded understanding crawl and per-page extraction', () => {
@@ -466,6 +470,9 @@ describe('DISCOVERY_UNCAPPED=on —— 报价按防爆安全界（余额是唯�
     ).toEqual([
       ['searxng.search', 66 * (3 + 4) + 66 * 100],
       ['deepseek.search', 66 * 100],
+      ['serper.search', 66 * (3 + 4) + 66 * 100],
+      ['exa.search', 66 * 3 + 66 * 100],
+      ['google_places.search', 66],
       ['crawl4ai.fetch', 66 * 8 * 3 + 50 * 3],
       ['wikidata.sparql', 66],
       ['osm.overpass', 66],
@@ -487,9 +494,8 @@ describe('DISCOVERY_UNCAPPED=on —— 报价按防爆安全界（余额是唯�
       discoveryUncapped: 1,
     });
     // models: 396×2×5 + 924×2×3 + 1584×2×5 + 1650×2×5 + 50×2×3 + 726000×2×20 + 6250×2×20
-    //       = 29_332_144 cents；tools: crawl4ai.fetch 1734×1 + crawl4ai.render 74×1 +
-    // deepseek.search 6600×1 + opencorporates/companies_house 各 66×0 = 8_408 cents；合计 29_340_552 cents。
-    expect(envelope.requiredCapMicrousd).toBe(29_340_552n * 10_000n);
+    //       = 29_332_144 cents；tools: 8_408 + serper 7062 + exa 6798 + google_places 264 = 22_532 cents；合计 29_354_676 cents。
+    expect(envelope.requiredCapMicrousd).toBe(29_354_676n * 10_000n);
   });
 
   it('产品帽模式的报价保持稳定上界（开关 off 时不含 discoveryUncapped）', () => {
@@ -498,7 +504,7 @@ describe('DISCOVERY_UNCAPPED=on —— 报价按防爆安全界（余额是唯�
       planId: PLAN_ID,
     });
     expect(envelope.policy.executionLimits).not.toHaveProperty('discoveryUncapped');
-    expect(envelope.requiredCapMicrousd).toBe(55_252n * 10_000n);
+    expect(envelope.requiredCapMicrousd).toBe(57_496n * 10_000n);
   });
 });
 

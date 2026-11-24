@@ -502,6 +502,41 @@ const DEEPSEEK_FETCH_RAW: RawToolResult = {
   costCents: 1,
 };
 
+const SERPER_SEARCH_RAW: RawToolResult = {
+  data: {
+    results: Array.from({ length: 20 }, (_, index) => ({
+      url: index === 0 ? URL_2048 : `https://serper-${index}.example/solar`,
+      title: index === 0 ? 't'.repeat(2000) : `Serper result ${index}`,
+    })),
+  },
+  costCents: 1,
+  degraded: true,
+};
+
+const EXA_SEARCH_RAW: RawToolResult = {
+  data: {
+    results: Array.from({ length: 20 }, (_, index) => ({
+      url: index === 0 ? URL_2048 : `https://exa-${index}.example/epc`,
+      title: index === 0 ? 't'.repeat(2000) : `Exa result ${index}`,
+    })),
+  },
+  costCents: 1,
+  degraded: true,
+};
+
+const GOOGLE_PLACES_RAW: RawToolResult = {
+  data: {
+    places: Array.from({ length: 20 }, (_, index) => ({
+      placeId: index === 0 ? 'p'.repeat(256) : `ChIJplace${index}`,
+      name: index === 0 ? 'n'.repeat(500) : `Solar EPC ${index}`,
+      websiteUri: index === 0 ? URL_2048 : `https://solar-epc-${index}.example/`,
+      countryCode: 'DE',
+    })),
+  },
+  costCents: 4,
+  degraded: true,
+};
+
 const REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES: readonly ProjectionFixture[] = [
   { toolId: 'searxng.search', schema: 'searxng-search/v1', raw: SEARX_RAW },
   { toolId: 'social.search', schema: 'social-search/v1', raw: SEARX_RAW },
@@ -520,6 +555,9 @@ const REPRESENTATIVE_LEGAL_BOUNDARY_FIXTURES: readonly ProjectionFixture[] = [
   { toolId: 'mapyourshow.fetch', schema: 'mapyourshow-fetch/v1', raw: MAPYOURSHOW_RAW },
   { toolId: 'deepseek.search', schema: 'deepseek-search/v1', raw: DEEPSEEK_SEARCH_RAW },
   { toolId: 'deepseek.fetch', schema: 'deepseek-fetch/v1', raw: DEEPSEEK_FETCH_RAW },
+  { toolId: 'serper.search', schema: 'serper-search/v1', raw: SERPER_SEARCH_RAW },
+  { toolId: 'exa.search', schema: 'exa-search/v1', raw: EXA_SEARCH_RAW },
+  { toolId: 'google_places.search', schema: 'google-places-search/v1', raw: GOOGLE_PLACES_RAW },
 ];
 
 function schemaTypes(node: JsonRecord): readonly string[] {
@@ -759,6 +797,26 @@ const EXPECTED_BOUNDS: Readonly<Record<string, JsonRecord>> = {
     '$.data.title.maxLength': 2000,
     '$.data.content.maxLength': 32_000,
   },
+  'serper-search/v1': {
+    ...COMMON_RESULT_BOUNDS,
+    '$.data.results.maxItems': 20,
+    '$.data.results[].url.maxLength': 2048,
+    '$.data.results[].title.maxLength': 2000,
+  },
+  'exa-search/v1': {
+    ...COMMON_RESULT_BOUNDS,
+    '$.data.results.maxItems': 20,
+    '$.data.results[].url.maxLength': 2048,
+    '$.data.results[].title.maxLength': 2000,
+  },
+  'google-places-search/v1': {
+    ...COMMON_RESULT_BOUNDS,
+    '$.data.places.maxItems': 20,
+    '$.data.places[].placeId.maxLength': 256,
+    '$.data.places[].name.maxLength': 500,
+    '$.data.places[].websiteUri.maxLength': 2048,
+    '$.data.places[].countryCode.maxLength': 16,
+  },
 };
 
 function selectedOneOfIndex(schema: JsonRecord, value: unknown): number {
@@ -866,6 +924,7 @@ describe('closed catalog Tool result projections', () => {
       'wikidata.entity', 'gleif.fetch', 'companies_house.search', 'inpi_rne.search',
       'google_patents.search', 'tradefair.algolia', 'mapyourshow.fetch',
       'deepseek.search', 'deepseek.fetch',
+      'serper.search', 'exa.search', 'google_places.search',
     ]);
     expect(CATALOG_RESULT_PROJECTION_SCHEMAS).toEqual({
       'searxng.search': 'searxng-search/v1',
@@ -882,6 +941,9 @@ describe('closed catalog Tool result projections', () => {
       'mapyourshow.fetch': 'mapyourshow-fetch/v1',
       'deepseek.search': 'deepseek-search/v1',
       'deepseek.fetch': 'deepseek-fetch/v1',
+      'serper.search': 'serper-search/v1',
+      'exa.search': 'exa-search/v1',
+      'google_places.search': 'google-places-search/v1',
     });
     expect(CATALOG_RESULT_PROJECTION_DEFINITIONS.map((definition) => definition.schema))
       .toEqual(Object.values(CATALOG_RESULT_PROJECTION_SCHEMAS));

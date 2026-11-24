@@ -1,4 +1,5 @@
 import { extractPublicContacts } from '../../adapters/contact-extractor';
+import { extractFooterContactsFromHtml } from '../../adapters/footer-contact-capture';
 import { classifyContactEmail } from '../contact-classifier';
 import type { CompanyChannelInput, CompanyChannelSourceType } from '../company-contact-channel';
 import {
@@ -194,6 +195,9 @@ export function collectCompanyChannels(args: CollectCompanyChannelsArgs): Compan
       const jsonld = extractJsonLdContacts(html);
       for (const email of jsonld.emails) pushEmail(page, email);
       for (const phone of jsonld.phones) pushPhone(page, phone);
+      const footer = extractFooterContactsFromHtml(html, `https://${domain}/`, page.url);
+      for (const email of footer.roleEmails) pushEmail(page, email);
+      for (const phone of footer.phones) pushPhone(page, phone);
     }
     // 文本面：确定性正则（邮箱/电话/混淆形态）。
     const textFound = extractPublicContacts([{ url: page.url, text: page.text }]);

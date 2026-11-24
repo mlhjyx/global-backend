@@ -476,6 +476,54 @@
       }
     },
     {
+      "id": "serper.search",
+      "declarationPath": "apps/api/src/tools/search-provider-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "serper-search/v1",
+      "operationIdentity": "tool:serper.search:<version>:<idempotencyKey>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "SearchDiscoveryProvider",
+        "domainAggregateType": "SearchResultEvidence",
+        "identitySource": "query-digest-and-result-url",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
+      "id": "exa.search",
+      "declarationPath": "apps/api/src/tools/search-provider-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "exa-search/v1",
+      "operationIdentity": "tool:exa.search:<version>:<idempotencyKey>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "SearchDiscoveryProvider",
+        "domainAggregateType": "SearchResultEvidence",
+        "identitySource": "query-digest-and-result-url",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
+      "id": "google_places.search",
+      "declarationPath": "apps/api/src/tools/search-provider-tools.ts",
+      "resultStrategy": "typed_projection",
+      "resultSchema": "google-places-search/v1",
+      "operationIdentity": "tool:google_places.search:<version>:<idempotencyKey>",
+      "privacyClass": "PUBLIC_ORGANIZATION",
+      "domainAck": {
+        "mode": "AUTHORITY_BOUND_ACK_REPOSITORY",
+        "consumer": "SearchDiscoveryProvider",
+        "domainAggregateType": "LocationEvidence",
+        "identitySource": "google-place-id",
+        "subjectRefRequired": false,
+        "personalDataDsrCompatible": false
+      }
+    },
+    {
       "id": "contact_email.find.hunter",
       "declarationPath": "apps/api/src/tools/contact-enrichment-safety-tools.ts",
       "resultStrategy": "artifact_reference",
