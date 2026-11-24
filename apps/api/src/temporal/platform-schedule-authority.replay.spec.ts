@@ -192,7 +192,7 @@ describe("platform schedule authority old-history replay", () => {
 
   beforeAll(async () => {
     workflowBundle = await bundleWorkflowCode({
-      workflowsPath: resolve(process.cwd(), "src/temporal/workflows.ts"),
+      workflowsPath: resolve(process.cwd(), "src/temporal/platform-workflows.ts"),
     });
   }, 30_000);
 

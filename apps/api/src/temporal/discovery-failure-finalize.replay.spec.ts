@@ -303,7 +303,7 @@ describe('discovery failure finalization replay (BI-25)', () => {
 
   beforeAll(async () => {
     workflowBundle = await bundleWorkflowCode({
-      workflowsPath: resolve(import.meta.dirname, 'workflows.ts'),
+      workflowsPath: resolve(import.meta.dirname, 'customer-workflows.ts'),
     });
   }, 180_000);
 

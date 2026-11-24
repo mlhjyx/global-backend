@@ -67,13 +67,22 @@ export class SanctionsScreeningService implements OnModuleInit, OnModuleDestroy 
 
   async onModuleInit(): Promise<void> {
     await this.rebuildIndexSafe();
-    // 周期性重建：API 长驻进程与每日名单刷新之间保持新鲜（decide 硬门读同一索引；默认 1h，env 可调）。
+    this.startPeriodicRefresh();
+  }
+
+  /** 启动周期性内存索引刷新（API 经 onModuleInit、独立 worker 显式调用，幂等）。 */
+  startPeriodicRefresh(): void {
+    if (this.timer) return;
+    // 周期性重建：长驻进程与每日名单刷新之间保持新鲜（decide 硬门与 qualify 读同一索引；默认 1h，env 可调）。
     this.timer = setInterval(() => void this.rebuildIndexSafe(), rebuildIntervalMs());
     if (typeof this.timer.unref === 'function') this.timer.unref(); // 不阻止进程退出
   }
 
   onModuleDestroy(): void {
-    if (this.timer) clearInterval(this.timer);
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = undefined;
+    }
   }
 
   private async rebuildIndexSafe(): Promise<void> {

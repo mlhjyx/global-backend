@@ -139,12 +139,15 @@ test("fails a stale allowlist entry", async () => {
 test("scans the worker bundle entrypoints", async () => {
   await withFixture(
     {
-      [`${TEMPORAL_DIRECTORY}/workflows.ts`]: "const QUERY_BATCH = 4;\nexport {};\n",
+      [`${TEMPORAL_DIRECTORY}/customer-workflows.ts`]: "const QUERY_BATCH = 4;\nexport {};\n",
+      [`${TEMPORAL_DIRECTORY}/platform-workflows.ts`]: "const PLATFORM_BATCH = 2;\nexport {};\n",
     },
     async (root) => {
       const issues = await inspectWorkflowConstants(root, { allowlist: {} });
-      assert.equal(issues.length, 1);
-      assert.match(issues[0].path, /workflows\.ts:1$/);
+      assert.equal(issues.length, 2);
+      const paths = issues.map((issue) => issue.path).sort();
+      assert.match(paths[0], /customer-workflows\.ts:1$/);
+      assert.match(paths[1], /platform-workflows\.ts:1$/);
     },
   );
 });

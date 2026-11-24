@@ -41,8 +41,8 @@ const WORKFLOW_FILE = /\.workflow(-knobs)?\.ts$/;
 // The worker bundle entrypoints live outside the *.workflow.ts naming rule;
 // a constant added there is just as replay-visible as one in a workflow file.
 const WORKFLOW_ENTRYPOINTS = Object.freeze([
-  "apps/api/src/temporal/workflows.ts",
   "apps/api/src/temporal/customer-workflows.ts",
+  "apps/api/src/temporal/platform-workflows.ts",
 ]);
 
 /**

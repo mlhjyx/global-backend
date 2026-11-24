@@ -309,7 +309,7 @@ const workerOptions = {
   connection: nativeConnection,
   namespace,
   taskQueue,
-  workflowsPath: new URL("../src/temporal/workflows.ts", import.meta.url)
+  workflowsPath: new URL("../src/temporal/customer-workflows.ts", import.meta.url)
     .pathname,
   activities,
 };

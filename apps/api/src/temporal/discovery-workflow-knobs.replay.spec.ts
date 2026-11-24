@@ -381,7 +381,7 @@ describe('discovery workflow knob replay (B1/L01)', () => {
 
   beforeAll(async () => {
     workflowBundle = await bundleWorkflowCode({
-      workflowsPath: resolve(import.meta.dirname, 'workflows.ts'),
+      workflowsPath: resolve(import.meta.dirname, 'customer-workflows.ts'),
     });
   }, 180_000);
 

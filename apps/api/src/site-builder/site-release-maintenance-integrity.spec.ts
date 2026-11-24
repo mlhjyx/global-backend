@@ -21,7 +21,7 @@ describe('R1 Release reconciliation wiring', () => {
   it('is a scheduled cross-node activity but remains operator-disabled by default', async () => {
     const [worker, schedules, workflow] = await Promise.all([
       readFile(new URL('../temporal/worker.ts', import.meta.url), 'utf8'),
-      readFile(new URL('../temporal/ensure-schedules.ts', import.meta.url), 'utf8'),
+      readFile(new URL('../temporal/sweep-scheduler.service.ts', import.meta.url), 'utf8'),
       readFile(
         new URL('../temporal/site-release-maintenance.workflow.ts', import.meta.url),
         'utf8',

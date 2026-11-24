@@ -9,10 +9,13 @@ describe("site build cost reconciliation worker wiring", () => {
         "utf8",
       ),
       readFile(
-        new URL("../temporal/ensure-schedules.ts", import.meta.url),
+        new URL("../temporal/sweep-scheduler.service.ts", import.meta.url),
         "utf8",
       ),
-      readFile(new URL("../temporal/workflows.ts", import.meta.url), "utf8"),
+      readFile(
+        new URL("../temporal/customer-workflows.ts", import.meta.url),
+        "utf8",
+      ),
       readFile(new URL("../temporal/worker.ts", import.meta.url), "utf8"),
     ]);
 
@@ -21,7 +24,9 @@ describe("site build cost reconciliation worker wiring", () => {
     expect(schedules).toMatch(
       /SITE_BUILD_COST_RECONCILIATION_EVERY'[\s\S]*?everyDefault: '1m'/,
     );
-    expect(schedules).toMatch(/isCostReconciliation[\s\S]*?limit: 50/);
+    expect(schedules).toMatch(
+      /SITE_BUILD_COST_RECONCILIATION_SWEEP_SCHEDULE_ID[\s\S]*?limit: 50/,
+    );
     expect(workflows).toContain(
       "export { siteBuildCostReconciliationSweepWorkflow }",
     );

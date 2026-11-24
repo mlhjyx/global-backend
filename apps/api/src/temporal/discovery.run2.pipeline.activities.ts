@@ -555,9 +555,9 @@ export function createRun2PipelineActivities(deps: {
       if (gate?.sanctions.staleMarker) {
         judgment.sanctionsStale = gate.sanctions.staleMarker;
       }
-      // P3 J03b：judgment_record（v2, shadow/enforce）与 Lead 投影同一事务。
+      // P3 J03b：judgment_record（v2, shadow/enforce）与 Lead 投影同一事务；透传真实 discovery_run.id 供账本/precision@k 关联。
       await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
-        await persistJudgmentRecordInTransaction(tx, args.icpId, judgment);
+        await persistJudgmentRecordInTransaction(tx, args.icpId, judgment, args.runId);
         await upsertLeadFit(tx, args.workspaceId, args.icpId, args.companyId, judgment);
         await recordCompanyJobCostCents(tx as never, args, sumReceiptMicrousd([judgment.durableReceipt]));
       });

@@ -145,13 +145,17 @@ export interface ScoreLeadOpts {
 /** 权威 Fit 判定 → Fit 维分值（match 高带、weak 复核带、mismatch 零）。 */
 const AUTHORITATIVE_FIT_SCORE: Record<'match' | 'weak' | 'mismatch', number> = { match: 0.85, weak: 0.45, mismatch: 0 };
 
+function isTedBuyerRoleGateEnabled(): boolean {
+  return (process.env.TED_BUYER_ROLE_GATE ?? '').trim().toLowerCase() !== 'off';
+}
+
 export function scoreLead(company: CompanyForScoring, icp: IcpForScoring, opts?: ScoreLeadOpts): LeadScoreResult {
   const notes: string[] = [];
   const reasonCodes: string[] = [];
   const attrs = companyAttributes(company);
-  // PR-03b：TED 记录主体是中标方（供给侧）。开关打开时，winner-only 记录不进买家队列；
-  // 无 self_role 的旧数据不受影响。默认关——行为变化需产品确认后再开。
-  const tedRoleGate = process.env.TED_BUYER_ROLE_GATE === 'on';
+  // PR-03b / Batch 1.1-D：TED 记录主体是中标方（供给侧）。默认开启门控，winner-only 记录不进买家队列；
+  // 仅当显式设置 TED_BUYER_ROLE_GATE=off 时回退旧行为；无 self_role 的旧数据不受影响。
+  const tedRoleGate = isTedBuyerRoleGateEnabled();
   if (tedSupplySideBlocked(attrs, tedRoleGate)) return tedSupplySideResult();
   const authoritative = opts?.authoritativeFit ?? null;
   // v3：资格门已判 Fit 时，MUST_HAVE 的镜像 EXCLUSION 只记录不排除；其余 EXCLUSION（正向、非镜像否定型）照旧最高优先。
