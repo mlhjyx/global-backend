@@ -758,7 +758,8 @@ const DISCOVERY_DOMAIN_ACK_PRODUCERS = new Set([
   'tradefair.algolia',
   'wikidata.entity', 'wikidata.sparql', 'discovery.extract_company',
   'discovery.extract_list', 'contact.find_decision_makers', 'registry.query',
-  'deepseek.search', 'discovery.web_search_candidates',
+  'deepseek.search', 'serper.search', 'exa.search', 'google_places.search',
+  'discovery.web_search_candidates',
 ]);
 
 /** Failure stages a run reaches only after canonicalization, with the fit stage started. */

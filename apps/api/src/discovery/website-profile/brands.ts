@@ -48,6 +48,50 @@ export const KNOWN_PUMP_BRANDS: readonly KnownBrand[] = Object.freeze([
   { name: 'Shakti', country: 'in', ambiguous: true },
 ]);
 
+/** Tier-1 光伏组件/电池与逆变器/支架生态品牌库（支撑新能源/光伏垂直获客与竞品替换识别）。 */
+export const KNOWN_SOLAR_PV_BRANDS: readonly KnownBrand[] = Object.freeze([
+  { name: 'LONGi', country: 'cn', aliases: ['LONGi Solar', 'Longi Green Energy'] },
+  { name: 'JinkoSolar', country: 'cn', aliases: ['Jinko Solar', 'Jinko'] },
+  { name: 'Trina Solar', country: 'cn', aliases: ['Trinasolar'] },
+  { name: 'JA Solar', country: 'cn' },
+  { name: 'Canadian Solar', country: 'ca', aliases: ['CSI Solar'] },
+  { name: 'Risen Energy', country: 'cn', aliases: ['Risen Solar'] },
+  { name: 'AIKO Solar', country: 'cn', aliases: ['Aiko Energy'] },
+  { name: 'Astronergy', country: 'cn', aliases: ['CHINT Solar'] },
+  { name: 'Tongwei', country: 'cn', aliases: ['TW Solar'] },
+  { name: 'First Solar', country: 'us' },
+  { name: 'Qcells', country: 'kr', aliases: ['Hanwha Q CELLS', 'Q CELLS'] },
+  { name: 'REC Solar', country: 'no', aliases: ['REC Group'] },
+  { name: 'Meyer Burger', country: 'ch' },
+  { name: 'SMA', country: 'de', aliases: ['SMA Solar', 'SMA Solar Technology'], ambiguous: true },
+  { name: 'Fronius', country: 'at' },
+  { name: 'SolarEdge', country: 'il' },
+  { name: 'Sungrow', country: 'cn' },
+  { name: 'GoodWe', country: 'cn' },
+  { name: 'Growatt', country: 'cn' },
+  { name: 'Huawei FusionSolar', country: 'cn', aliases: ['FusionSolar'] },
+  { name: 'K2 Systems', country: 'de' },
+  { name: 'Schletter', country: 'de' },
+  { name: 'Kostal', country: 'de', aliases: ['KOSTAL Solar'] },
+]);
+
+export const ALL_KNOWN_BRANDS: readonly KnownBrand[] = Object.freeze([
+  ...KNOWN_PUMP_BRANDS,
+  ...KNOWN_SOLAR_PV_BRANDS,
+]);
+
+/** 按行业提示挑选对应品牌词典；未识别或跨行业时返回全量品牌词典。 */
+export function knownBrandsForIndustry(industryHint?: string | null): readonly KnownBrand[] {
+  const hint = (industryHint ?? '').toLowerCase();
+  if (/solar|photovoltaic|\bpv\b|hjt|topcon|inverter|bess|光伏|太阳能|储能/iu.test(hint)) {
+    return KNOWN_SOLAR_PV_BRANDS;
+  }
+  if (/pump|pumpen|hydraul|fluid|泵/iu.test(hint)) {
+    return KNOWN_PUMP_BRANDS;
+  }
+  return ALL_KNOWN_BRANDS;
+}
+
 export interface CarriedBrand {
   readonly name: string;
   readonly country: string;
@@ -75,11 +119,11 @@ function lineAt(text: string, index: number): string {
   return text.slice(start, end < 0 ? text.length : end);
 }
 
-const PUMP_TERM = /pump/iu;
+const BRAND_CONTEXT_TERM = /pump|solar|photovoltaic|\bpv\b|inverter|module|hjt|topcon/iu;
 
-/** A word-like brand name counts on a line about pumps or naming another, unambiguous brand. */
+/** A word-like brand name counts on a line about its industry or naming another, unambiguous brand. */
 function inBrandContext(line: string, brand: KnownBrand, dictionary: readonly KnownBrand[]): boolean {
-  if (PUMP_TERM.test(line)) return true;
+  if (BRAND_CONTEXT_TERM.test(line)) return true;
   return dictionary.some(
     (other) =>
       other !== brand &&

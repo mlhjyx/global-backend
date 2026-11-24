@@ -20,6 +20,7 @@ export const CATALOG_RESULT_TOOL_IDS = Object.freeze([
   'wikidata.entity', 'gleif.fetch', 'companies_house.search', 'inpi_rne.search',
   'google_patents.search', 'tradefair.algolia', 'mapyourshow.fetch',
   'deepseek.search', 'deepseek.fetch',
+  'serper.search', 'exa.search', 'google_places.search',
 ] as const);
 export type CatalogResultToolId = (typeof CATALOG_RESULT_TOOL_IDS)[number];
 export const CATALOG_RESULT_PROJECTION_SCHEMAS = Object.freeze({
@@ -37,6 +38,9 @@ export const CATALOG_RESULT_PROJECTION_SCHEMAS = Object.freeze({
   'mapyourshow.fetch': platformExecutionToolContract('mapyourshow.fetch').resultSchema,
   'deepseek.search': 'deepseek-search/v1',
   'deepseek.fetch': 'deepseek-fetch/v1',
+  'serper.search': 'serper-search/v1',
+  'exa.search': 'exa-search/v1',
+  'google_places.search': 'google-places-search/v1',
 } satisfies Readonly<Record<CatalogResultToolId, TypedProjectionSchema>>);
 const TOOL_RESULT_KEYS = ['data', 'costCents', 'degraded'] as const;
 const TOOL_RESULT_WITH_PROVENANCE_KEYS = [...TOOL_RESULT_KEYS, 'provenance'] as const;
@@ -263,26 +267,14 @@ function definition(
   deepFreeze(result.jsonSchema);
   return Object.freeze(result);
 }
-const searxResultSchema = objectSchema({
-  url: stringSchema(2048), title: stringSchema(2000),
-}, ['url']);
+const searxResultSchema = objectSchema({ url: stringSchema(2048), title: stringSchema(2000) }, ['url']);
+const searxResultsSchema = objectSchema({ results: arraySchema(20, searxResultSchema) }, ['results']);
 const searxData = (value: unknown) => mapClosedRecord(value, ['results'], ['results'], {
-  results: (results) => mapArray(results, (item) => (
-    mapClosedRecord(item, SEARX_RESULT_KEYS, ['url'])
-  )),
+  results: (results) => mapArray(results, (item) => mapClosedRecord(item, SEARX_RESULT_KEYS, ['url'])),
 });
-const searxDefinition = definition(
-  'searxng-search/v1',
-  objectSchema({ results: arraySchema(20, searxResultSchema) }, ['results']),
-  searxData,
-);
-
-/** social.search 的持久形态与 searxng 同形（url+title ≤20），独立 schema 因为它是 PERSONAL_DATA。 */
-const socialSearchDefinition = definition(
-  'social-search/v1',
-  objectSchema({ results: arraySchema(20, searxResultSchema) }, ['results']),
-  searxData,
-);
+const searchResultDefinition = (schema: TypedProjectionSchema) => definition(schema, searxResultsSchema, searxData);
+const searxDefinition = searchResultDefinition('searxng-search/v1');
+const socialSearchDefinition = searchResultDefinition('social-search/v1');
 
 /** social.fetch 的持久形态：{url, status, text(≤36k chars)}——PERSONAL_DATA 页面抓取投影。 */
 const socialFetchData = (value: unknown) => mapClosedRecord(
@@ -931,22 +923,25 @@ const mapYourShowDefinition = definition(
   }),
 );
 
-/** deepseek.search 的持久形态与 searxng 同形（url+title ≤20）：摘要/正文不持久化。 */
-const deepseekSearchDefinition = definition(
-  'deepseek-search/v1',
-  objectSchema({ results: arraySchema(20, searxResultSchema) }, ['results']),
-  searxData,
-);
-
-/** deepseek.fetch 的持久形态：{url, title?, content(≤32k chars)}——PERSONAL_DATA 页面正文投影。 */
+const deepseekSearchDefinition = searchResultDefinition('deepseek-search/v1');
 const deepseekFetchDefinition = definition(
   'deepseek-fetch/v1',
-  objectSchema({
-    url: stringSchema(2048),
-    title: stringSchema(2000),
-    content: stringSchema(32_000),
-  }, ['url', 'content']),
+  objectSchema({ url: stringSchema(2048), title: stringSchema(2000), content: stringSchema(32_000) }, ['url', 'content']),
   (value) => mapClosedRecord(value, ['url', 'title', 'content'], ['url', 'content']),
+);
+const serperSearchDefinition = searchResultDefinition('serper-search/v1');
+const exaSearchDefinition = searchResultDefinition('exa-search/v1');
+const GOOGLE_PLACE_KEYS = ['placeId', 'name', 'websiteUri', 'countryCode'] as const;
+const googlePlaceSchema = objectSchema(
+  { placeId: stringSchema(256), name: stringSchema(500), websiteUri: stringSchema(2048), countryCode: stringSchema(16) },
+  ['placeId'],
+);
+const googlePlacesSearchDefinition = definition(
+  'google-places-search/v1',
+  objectSchema({ places: arraySchema(20, googlePlaceSchema) }, ['places']),
+  (value) => mapClosedRecord(value, ['places'], ['places'], {
+    places: (items) => mapArray(items, (item) => mapClosedRecord(item, GOOGLE_PLACE_KEYS, ['placeId'])),
+  }),
 );
 
 export const CATALOG_RESULT_PROJECTION_DEFINITIONS = Object.freeze([
@@ -954,6 +949,7 @@ export const CATALOG_RESULT_PROJECTION_DEFINITIONS = Object.freeze([
   osmDefinition, wikidataEntityDefinition, gleifDefinition, companiesHouseDefinition,
   inpiDefinition, googlePatentsDefinition, tradeFairDefinition, mapYourShowDefinition,
   deepseekSearchDefinition, deepseekFetchDefinition,
+  serperSearchDefinition, exaSearchDefinition, googlePlacesSearchDefinition,
 ] as const);
 
 export function getCatalogResultProjectionSchema(toolId: string): TypedProjectionSchema {

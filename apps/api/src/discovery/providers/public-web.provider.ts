@@ -27,6 +27,16 @@ import {
 import { getTask } from '../../ai-tasks/task-registry';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import type { SearxngSearchOutput, SearxngSearchResult } from '../../tools/builtin-tools';
+import type {
+  GooglePlacesToolOutput,
+  SearchProviderOutput,
+} from '../../tools/search-provider-tools';
+import {
+  resolveExaApiKey,
+  resolveGoogleMapsApiKey,
+  resolveSerperApiKey,
+} from '../../adapters/search-providers';
+import { buildEcosystemSniperQueries } from '../ecosystem-sniper';
 import type { CrawlResult } from '../../adapters/web-crawler';
 import { extractSameSiteLinks } from '../../adapters/site-links';
 import { extractPublicContacts, type PublicContact } from '../../adapters/contact-extractor';
@@ -202,8 +212,11 @@ export class PublicWebDiscoveryProvider
       };
     }
     const language = searchLanguageFor(query);
+    const countryIso = resolveTargetCountryIso(query);
     const perQuery: SearxngSearchResult[][] = [];
-    for (const q of searches) perQuery.push(await this.search(q, language, ctx));
+    for (const q of searches) perQuery.push(await this.search(q, language, ctx, countryIso));
+    const extraHits = await this.supplementaryDiscoveryHits(query, searches, language, countryIso, ctx);
+    if (extraHits.length > 0) perQuery.push(extraHits);
     const candidates = collectPublicWebCandidateHits(perQuery, query, opts);
     const domains = [...candidates.keys()];
     const dedup = new Map<string, ProviderCompanyRecord>();
@@ -251,18 +264,128 @@ export class PublicWebDiscoveryProvider
     };
   }
 
-  /** SearXNG 元搜索（经 Broker：searxng.search 工具），语言随目标国。 */
+  /** 多引擎 L0 搜索（SearXNG 基线 + 已配置 key 时的 Serper / Exa 融合），语言随目标国。 */
   private async search(
     q: string,
     language: string,
     ctx: ExecutionContext,
+    countryIso?: string,
   ): Promise<SearxngSearchResult[]> {
+    const toolCtx = this.toolCtx(ctx, 'discovery.extract_company');
     const res = await this.deps.broker!.invoke<{ q: string; language?: string }, SearxngSearchOutput>(
       'searxng.search',
       { q, language },
-      this.toolCtx(ctx, 'discovery.extract_company'),
+      toolCtx,
     );
-    return res.data.results.slice(0, 20);
+    const merged: SearxngSearchResult[] = [...res.data.results.slice(0, 20)];
+    if (resolveSerperApiKey()) {
+      const serperHits = await this.invokeOptionalSearch(
+        () =>
+          this.deps.broker!.invoke<
+            { query: string; num?: number; gl?: string; hl?: string },
+            SearchProviderOutput
+          >(
+            'serper.search',
+            { query: q, num: 10, ...(countryIso ? { gl: countryIso.toLowerCase() } : {}), hl: language },
+            toolCtx,
+          ),
+        'serper.search',
+      );
+      merged.push(...serperHits);
+    }
+    if (resolveExaApiKey()) {
+      const exaHits = await this.invokeOptionalSearch(
+        () =>
+          this.deps.broker!.invoke<
+            { mode: 'search'; query: string; numResults?: number },
+            SearchProviderOutput
+          >(
+            'exa.search',
+            { mode: 'search', query: q, numResults: 10 },
+            toolCtx,
+          ),
+        'exa.search',
+      );
+      merged.push(...exaHits);
+    }
+    return dedupeSearchResults(merged);
+  }
+
+  private async invokeOptionalSearch(
+    call: () => Promise<{ data?: { results?: SearxngSearchResult[] } }>,
+    label: string,
+  ): Promise<SearxngSearchResult[]> {
+    try {
+      const res = await call();
+      return Array.isArray(res.data?.results) ? res.data.results.slice(0, 20) : [];
+    } catch (error) {
+      if (isExecutionControlError(error)) throw error;
+      this.log(`optional ${label} degraded: ${String(error).slice(0, 100)}`);
+      return [];
+    }
+  }
+
+  /** L0 补充召回：已配置 key 时执行 Exa Lookalike（客户种子域）与 Google Places 企业地点召回。 */
+  private async supplementaryDiscoveryHits(
+    query: CompanyDiscoveryQuery,
+    searches: readonly string[],
+    language: string,
+    countryIso: string | undefined,
+    ctx: ExecutionContext,
+  ): Promise<SearxngSearchResult[]> {
+    const toolCtx = this.toolCtx(ctx, 'discovery.extract_company');
+    const out: SearxngSearchResult[] = [];
+    const filters = (query.filters ?? {}) as Record<string, unknown>;
+    const rawSeeds = filters.seed_domains ?? filters.lookalike_urls;
+    const seeds = (Array.isArray(rawSeeds) ? rawSeeds : rawSeeds ? [rawSeeds] : [])
+      .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      .slice(0, 2);
+
+    if (resolveExaApiKey() && seeds.length > 0) {
+      for (const seed of seeds) {
+        const similarUrl = /^https?:\/\//iu.test(seed.trim()) ? seed.trim() : `https://${seed.trim()}/`;
+        const hits = await this.invokeOptionalSearch(
+          () =>
+            this.deps.broker!.invoke<
+              { mode: 'find_similar'; similarUrl: string; numResults?: number },
+              SearchProviderOutput
+            >(
+              'exa.search',
+              { mode: 'find_similar', similarUrl, numResults: 10 },
+              toolCtx,
+            ),
+          'exa.search(find_similar)',
+        );
+        out.push(...hits);
+      }
+    }
+
+    if (resolveGoogleMapsApiKey() && searches[0]) {
+      try {
+        const placesRes = await this.deps.broker!.invoke<
+          { textQuery: string; maxResultCount?: number; regionCode?: string; languageCode?: string },
+          GooglePlacesToolOutput
+        >(
+          'google_places.search',
+          {
+            textQuery: searches[0],
+            maxResultCount: 10,
+            ...(countryIso ? { regionCode: countryIso } : {}),
+            languageCode: language,
+          },
+          toolCtx,
+        );
+        for (const place of placesRes.data?.places ?? []) {
+          if (place.websiteUri) {
+            out.push({ url: place.websiteUri, ...(place.name ? { title: place.name } : {}) });
+          }
+        }
+      } catch (error) {
+        if (isExecutionControlError(error)) throw error;
+        this.log(`optional google_places.search degraded: ${String(error).slice(0, 100)}`);
+      }
+    }
+    return dedupeSearchResults(out);
   }
 
   private async mineDomain(
@@ -828,8 +951,32 @@ export function buildSearchQueries(query: CompanyDiscoveryQuery): string[] {
     : roleTerms.length
       ? roleTerms.map((role, i) => `${terms[i % terms.length]} ${role}`)
       : [terms.slice(0, 2).join(' '), terms[2] ?? ''];
-  return queries
+  const sniperQueries = buildEcosystemSniperQueries({
+    competitorBrands: arr(f.competitor_brands),
+    ecosystemBrands: arr(f.ecosystem_brands),
+    buyerRoleTerms: roleTerms,
+    countryHint: typeof f.country === 'string' ? f.country : undefined,
+    maxQueries: MAX_SEARCHES_PER_QUERY,
+  });
+  return [...queries, ...sniperQueries]
     .map((q) => q.trim())
     .filter((q, i, a) => q.length > 3 && a.indexOf(q) === i)
     .slice(0, MAX_SEARCHES_PER_QUERY);
+}
+
+function dedupeSearchResults(hits: readonly SearxngSearchResult[]): SearxngSearchResult[] {
+  const seen = new Set<string>();
+  const out: SearxngSearchResult[] = [];
+  for (const hit of hits) {
+    if (!hit.url || seen.has(hit.url)) continue;
+    seen.add(hit.url);
+    out.push(hit);
+  }
+  return out;
+}
+
+function resolveTargetCountryIso(query: CompanyDiscoveryQuery): string | undefined {
+  const raw = query.filters?.country;
+  if (typeof raw !== 'string') return undefined;
+  return countryIso(raw);
 }

@@ -1,4 +1,5 @@
 import { extractPublicContacts } from '../../adapters/contact-extractor';
+import { extractFooterContactsFromHtml } from '../../adapters/footer-contact-capture';
 import { classifyContactEmail } from '../contact-classifier';
 import type { CompanyChannelInput, CompanyChannelSourceType } from '../company-contact-channel';
 import {
@@ -120,6 +121,33 @@ function isCompanyDomain(email: string, domain: string): boolean {
   return [...domainTokens(host)].some((token) => companyTokens.has(token));
 }
 
+function collectHtmlPageChannels(
+  page: ImpressumPage,
+  domain: string,
+  pushEmail: (page: ImpressumPage, raw: string) => void,
+  pushPhone: (page: ImpressumPage, raw: string) => void,
+): void {
+  if (!page.html) return;
+  const html = decodeHtmlEntities(page.html);
+  for (const match of html.matchAll(MAILTO_RE)) {
+    const addr = decodingPercent(match[1] ?? '').split('?')[0] ?? '';
+    pushEmail(page, addr);
+  }
+  for (const match of html.matchAll(CFEMAIL_RE)) {
+    const decoded = decodeCfEmail(match[1] ?? '');
+    if (decoded) pushEmail(page, decoded);
+  }
+  for (const match of html.matchAll(TEL_HREF_RE)) {
+    pushPhone(page, decodingPercent(match[1] ?? ''));
+  }
+  const jsonld = extractJsonLdContacts(html);
+  for (const email of jsonld.emails) pushEmail(page, email);
+  for (const phone of jsonld.phones) pushPhone(page, phone);
+  const footer = extractFooterContactsFromHtml(html, `https://${domain}/`, page.url);
+  for (const email of footer.roleEmails) pushEmail(page, email);
+  for (const phone of footer.phones) pushPhone(page, phone);
+}
+
 export function collectCompanyChannels(args: CollectCompanyChannelsArgs): CompanyChannelInput[] {
   const cap = args.cap ?? 8;
   const domain = args.domain.toLowerCase().replace(/^www\./u, '');
@@ -176,25 +204,8 @@ export function collectCompanyChannels(args: CollectCompanyChannelsArgs): Compan
 
   for (const page of args.pages) {
     if (out.length >= cap) break;
-    // HTML 面：mailto / cfemail / JSON-LD（markdown 里看不到的形态）。先做实体解码——
-    // `href="mailto:info&#64;acme.de"` 这类防爬编码在德国 Impressum 上很常见。
-    if (page.html) {
-      const html = decodeHtmlEntities(page.html);
-      for (const match of html.matchAll(MAILTO_RE)) {
-        const addr = decodingPercent(match[1] ?? '').split('?')[0] ?? '';
-        pushEmail(page, addr);
-      }
-      for (const match of html.matchAll(CFEMAIL_RE)) {
-        const decoded = decodeCfEmail(match[1] ?? '');
-        if (decoded) pushEmail(page, decoded);
-      }
-      for (const match of html.matchAll(TEL_HREF_RE)) {
-        pushPhone(page, decodingPercent(match[1] ?? ''));
-      }
-      const jsonld = extractJsonLdContacts(html);
-      for (const email of jsonld.emails) pushEmail(page, email);
-      for (const phone of jsonld.phones) pushPhone(page, phone);
-    }
+    // HTML 面：mailto / cfemail / JSON-LD / Pre-Readability 页脚（markdown 里看不到的形态）。
+    collectHtmlPageChannels(page, domain, pushEmail, pushPhone);
     // 文本面：确定性正则（邮箱/电话/混淆形态）。
     const textFound = extractPublicContacts([{ url: page.url, text: page.text }]);
     for (const found of textFound) {

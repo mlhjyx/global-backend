@@ -14,6 +14,7 @@ const TOOL_SOURCE_PATHS = Object.freeze([
   'apps/api/src/tools/builtin-tools.ts',
   'apps/api/src/tools/source-tools.ts',
   'apps/api/src/tools/deepseek-tools.ts',
+  'apps/api/src/tools/search-provider-tools.ts',
   'apps/api/src/tools/contact-enrichment-safety-tools.ts',
 ]);
 const RECEIPT_PATH = 'apps/api/src/durable-results/durable-execution-receipt.ts';
@@ -31,6 +32,7 @@ export const EXPECTED_TOOL_IDS = Object.freeze([
   'inpi_rne.search', 'google_patents.search', 'tradefair.algolia',
   'mapyourshow.fetch', 'samgov.search', 'opencorporates.search', 'sanctions.download',
   'deepseek.search', 'deepseek.fetch',
+  'serper.search', 'exa.search', 'google_places.search',
   'contact_email.find.hunter', 'contact_email.verify.millionverifier',
   'contact_email.verify.emailable', 'contact_email.verify.zerobounce',
 ]);
@@ -846,8 +848,8 @@ async function scanCurrentSources(repoRoot, manifest, issues) {
   const constantSource = `${source}\n${platformContract}`;
   const sourceIds = [...source.matchAll(/\bid:\s*["']([a-z0-9_.]+)["']/g)].map((match) => match[1]);
   const registrationCount = [...source.matchAll(/\bregistry\.register\s*\(/g)].length;
-  if (!sameSet(sourceIds, EXPECTED_TOOL_IDS) || new Set(sourceIds).size !== 27 || registrationCount !== 27) {
-    issues.push(issue('EXECUTION_AUTHORITY_TOOL_SOURCE_INVENTORY_MISMATCH', 'apps/api/src/tools', 'source declarations/registrations must be exactly 23'));
+  if (!sameSet(sourceIds, EXPECTED_TOOL_IDS) || new Set(sourceIds).size !== EXPECTED_TOOL_IDS.length || registrationCount !== EXPECTED_TOOL_IDS.length) {
+    issues.push(issue('EXECUTION_AUTHORITY_TOOL_SOURCE_INVENTORY_MISMATCH', 'apps/api/src/tools', `source declarations/registrations must be exactly ${EXPECTED_TOOL_IDS.length}`));
   }
   const projectionSources = [
     await readResolved('apps/api/src/durable-results/catalog-result-projections.ts'),

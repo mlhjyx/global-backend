@@ -47,6 +47,9 @@ export const DOMAIN_ACK_PRODUCT_CONSUMER_BINDINGS = Object.freeze([
   { producerId: 'searxng.search', consumer: 'SearchDiscoveryProvider', domainAggregateType: 'SearchResultEvidence', identity: 'result-url-and-query-digest', resultStrategy: 'typed_projection', resultSchema: 'searxng-search/v1' },
   // WEB-1：deepseek.search 是模型联网搜索的可选执行器（与 searxng 同形投影：url+title）。
   { producerId: 'deepseek.search', consumer: 'SearchDiscoveryProvider', domainAggregateType: 'SearchResultEvidence', identity: 'result-url-and-query-digest', resultStrategy: 'typed_projection', resultSchema: 'deepseek-search/v1' },
+  { producerId: 'serper.search', consumer: 'SearchDiscoveryProvider', domainAggregateType: 'SearchResultEvidence', identity: 'result-url-and-query-digest', resultStrategy: 'typed_projection', resultSchema: 'serper-search/v1' },
+  { producerId: 'exa.search', consumer: 'SearchDiscoveryProvider', domainAggregateType: 'SearchResultEvidence', identity: 'result-url-and-query-digest', resultStrategy: 'typed_projection', resultSchema: 'exa-search/v1' },
+  { producerId: 'google_places.search', consumer: 'SearchDiscoveryProvider', domainAggregateType: 'LocationEvidence', identity: 'google-place-id', resultStrategy: 'typed_projection', resultSchema: 'google-places-search/v1' },
   { producerId: 'social.search', consumer: 'SocialPresenceContactAdapter', domainAggregateType: 'SearchResultEvidence', identity: 'result-url-and-query-digest', resultStrategy: 'typed_projection', resultSchema: 'social-search/v1' },
   { producerId: 'social.fetch', consumer: 'SocialPresenceContactAdapter', domainAggregateType: 'ExternalPageEvidence', identity: 'url-and-content-digest', resultStrategy: 'typed_projection', resultSchema: 'social-fetch/v1' },
   { producerId: 'smtp.rcpt_probe', consumer: 'EmailVerificationProvider', domainAggregateType: 'EmailVerification', identity: 'normalized-email-hash', resultStrategy: 'typed_projection', resultSchema: 'smtp-probe-verdict/v1' },

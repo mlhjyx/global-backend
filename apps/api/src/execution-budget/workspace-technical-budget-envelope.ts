@@ -60,6 +60,11 @@ import {
 } from '../discovery/model-web-search/model-web-search';
 import { deepseekSearchTool } from '../tools/deepseek-tools';
 import {
+  exaSearchTool,
+  googlePlacesSearchTool,
+  serperSearchTool,
+} from '../tools/search-provider-tools';
+import {
   crawl4aiFetchTool,
   osmOverpassTool,
   searxngSearchTool,
@@ -235,6 +240,18 @@ function discoveryRunEnvelope(
       ),
       // 模型联网搜索的 DeepSeek 执行器（可选；两种执行器都按上界预留，实际按调用结算）。
       tool(contract(deepseekSearchTool), queries * MODEL_WEB_SEARCH_MAX_TOOL_CALLS),
+      // L0 实时多引擎付费搜索/地点（缺 key 时降级为 0 成本；按上界预留并实际结算）。
+      tool(
+        contract(serperSearchTool),
+        queries * (MAX_PUBLIC_WEB_SEARCHES_PER_QUERY + MAX_DIRECTORY_SEARCHES_PER_QUERY) +
+          queries * MODEL_WEB_SEARCH_MAX_TOOL_CALLS,
+      ),
+      tool(
+        contract(exaSearchTool),
+        queries * MAX_PUBLIC_WEB_SEARCHES_PER_QUERY +
+          queries * MODEL_WEB_SEARCH_MAX_TOOL_CALLS,
+      ),
+      tool(contract(googlePlacesSearchTool), singleSearches),
       tool(
         contract(crawl4aiFetchTool),
         queries * directoryPages +

@@ -11,6 +11,7 @@ import {
 } from "./tool-contract";
 import { ToolRegistry } from "./tool-registry";
 import { registerDeepSeekTools } from "./deepseek-tools";
+import { registerSearchProviderTools } from "./search-provider-tools";
 import {
   durablePageText,
   durableTitle,
@@ -846,5 +847,5 @@ export function registerBuiltinTools(
   registry.register(wikidataTool as Tool);
   registry.register(osmOverpassTool as Tool);
   registry.register(smtpRcptProbeTool as Tool);
-  return registerDeepSeekTools(registry);
+  return registerSearchProviderTools(registerDeepSeekTools(registry));
 }
