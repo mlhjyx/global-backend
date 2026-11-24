@@ -64,6 +64,7 @@ import {
   validateIntegrationEvent,
 } from "./event-registry";
 import { logIntegrationPayloadWarning, qualifyWorkflowArgs } from "./event-payload-helpers";
+import { OutboxDispatchBackoff, tryWithOutboxAdvisoryLock } from "./outbox-retry-guard";
 
 /** Transactional Outbox relay (ADR-009): DATABASE_URL owner scans across tenants;
  * dispatched workflow activities reapply tenant scope through withWorkspace.
@@ -116,9 +117,10 @@ type FetchLike = (
     method: string;
     headers: Record<string, string>;
     body: string;
+    redirect?: RequestRedirect;
     signal: AbortSignal;
   },
-) => Promise<{ ok: boolean; status: number }>;
+) => Promise<{ ok: boolean; status: number; body?: { cancel?: () => Promise<unknown> | void } | null }>;
 
 @Injectable()
 export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
@@ -135,6 +137,7 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
   private managedTickInFlight?: Promise<void>;
   // Development fast lane only: the in-flight lane pass (scheduleLanePass).
   private laneInFlight?: Promise<void>;
+  private readonly dispatchBackoff = new OutboxDispatchBackoff();
   private readonly shutdownAbort = new AbortController();
   private readiness:
     | Readonly<{ status: "ready" }>
@@ -374,27 +377,25 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
     if (this.running) return; // avoid overlapping ticks
     this.running = true;
     try {
-      await this.expireDueClaims();
-      if (this.shuttingDown) return;
-      // parked 事件排除在轮询外：未注册类型只报一次错并停靠，不每 2s 重试刷日志。
-      const laneCommands = this.devFastLaneCommands();
-      const events = (await this.db.outboxEvent.findMany({
-        // Lane commands are polled in their own pass (scheduleLanePass), so
-        // commands that wait for an unavailable development Temporal never
-        // fill this batch.
-        where: { publishedAt: null, parkedAt: null, ...(laneCommands ? { NOT: laneCommands } : {}), ...candidateWorkspaceWhere() },
-        orderBy: { id: "asc" },
-        take: BATCH_SIZE,
-      })) as OutboxEventRecord[];
-      for (const ev of events) {
-        if (this.shuttingDown) break;
-        await this.routeEvent(ev);
-      }
-      if (laneCommands) this.scheduleLanePass(laneCommands);
-      // webhook 派送循环：仅推模式启用时才扫账本（与 routeEvent 的 sink 判定共用同一谓词，消除漂移）。
-      if (!this.shuttingDown && this.webhookEnabled()) {
-        await this.pumpWebhookDeliveries(new Date());
-      }
+      await tryWithOutboxAdvisoryLock(this.db as never, async () => {
+        await this.expireDueClaims();
+        if (this.shuttingDown) return;
+        const laneCommands = this.devFastLaneCommands();
+        const coolingIds = this.dispatchBackoff.coolingEventIds();
+        const events = (await this.db.outboxEvent.findMany({
+          where: { publishedAt: null, parkedAt: null, ...(coolingIds.length ? { eventId: { notIn: coolingIds } } : {}), ...(laneCommands ? { NOT: laneCommands } : {}), ...candidateWorkspaceWhere() },
+          orderBy: { id: "asc" },
+          take: BATCH_SIZE,
+        })) as OutboxEventRecord[];
+        for (const ev of events) {
+          if (this.shuttingDown) break;
+          await this.routeEvent(ev);
+        }
+        if (laneCommands) this.scheduleLanePass(laneCommands);
+        if (!this.shuttingDown && this.webhookEnabled()) {
+          await this.pumpWebhookDeliveries(new Date());
+        }
+      });
     } catch (err) {
       this.logger.error(`relay tick failed: ${String(err)}`);
     } finally {
@@ -464,17 +465,20 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
           where: { id: ev.id },
           data: { publishedAt: new Date() },
         });
+        this.dispatchBackoff.clear(ev.eventId);
       } catch (err) {
         if (err instanceof NonRetryableOutboxCommandError) {
           await this.db.outboxEvent.update({
             where: { id: ev.id },
             data: { parkedAt: new Date() },
           });
+          this.dispatchBackoff.clear(ev.eventId);
           this.logger.error(
             `invalid internal command ${ev.eventId} parked: ${err.message}`,
           );
           return;
         }
+        this.dispatchBackoff.recordFailure(ev.eventId);
         this.logger.error(
           `dispatch failed for event ${ev.eventId}: ${String(err)}`,
         );
@@ -574,43 +578,33 @@ export class OutboxRelayService implements OnModuleInit, OnModuleDestroy {
       take: BATCH_SIZE,
       include: { event: true },
     });
-    for (const d of due) {
+    const batchStartedMs = Date.now();
+    for (let idx = 0; idx < due.length; idx += 1) {
+      const d = due[idx]!;
       assertCandidateWorkspaceAllowed(d.workspaceId);
       if (this.shuttingDown) break;
+      const attemptNow = idx === 0 ? now : new Date(now.getTime() + Math.max(0, Date.now() - batchStartedMs));
       try {
         const body = JSON.stringify(toEnvelope(d.event));
-        const timestamp = now.toISOString();
-        // 签名覆盖 timestamp + body：消费端复算 HMAC 验真伪 + 按时间窗（建议 5min）拒重放。
-        const signature = createHmac("sha256", secret)
-          .update(`${timestamp}.${body}`)
-          .digest("hex");
+        const timestamp = attemptNow.toISOString();
+        const signature = createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
         const res = await this.fetchFn(url, {
           method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "x-timestamp": timestamp,
-            "x-signature": `sha256=${signature}`,
-          },
+          headers: { "content-type": "application/json", "x-timestamp": timestamp, "x-signature": `sha256=${signature}` },
           body,
-          signal: AbortSignal.any([
-            AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
-            this.shutdownAbort.signal,
-          ]),
+          redirect: "error",
+          signal: AbortSignal.any([AbortSignal.timeout(WEBHOOK_TIMEOUT_MS), this.shutdownAbort.signal]),
         });
+        await Promise.resolve(res.body?.cancel?.()).catch(() => undefined);
         if (this.shuttingDown) break;
         if (res.ok) {
-          // CAS：只翻 PENDING → ACKED。与 ACK API / 多实例竞态时 count=0 → 已被他方推进，本轮跳过
-          // （防把 ACKED 覆写回去或重复置位）。
-          await this.db.outboxDelivery.updateMany({
-            where: { id: d.id, status: "PENDING" },
-            data: { status: "ACKED", deliveredAt: now, ackedAt: now },
-          });
+          await this.db.outboxDelivery.updateMany({ where: { id: d.id, status: "PENDING" }, data: { status: "ACKED", deliveredAt: attemptNow, ackedAt: attemptNow } });
           continue;
         }
-        await this.recordWebhookFailure(d, `HTTP ${res.status}`, now);
+        await this.recordWebhookFailure(d, `HTTP ${res.status}`, attemptNow);
       } catch (err) {
         if (this.shuttingDown) break;
-        await this.recordWebhookFailure(d, String(err), now);
+        await this.recordWebhookFailure(d, String(err), attemptNow);
       }
     }
   }
