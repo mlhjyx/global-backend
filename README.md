@@ -30,7 +30,7 @@ NestJS/Nx 模块化单体（`apps/api`，含 Temporal worker 入口）· Astro �
 
 ```
 apps/api/            NestJS API + Temporal worker（模块：company/claim/icp/discovery/
-                     adapters/acquisition/intent/lead/contact/site-builder/tools/model-gateway/relay/auth…）
+                     adapters/acquisition/intent/lead/enrichment/outreach/site-builder/tools/model-gateway/relay/auth…）
 apps/site-renderer/  Astro 静态站渲染器（消费 @global/contracts SiteSpec）
 packages/db/         Prisma schema + migrations（RLS）
 packages/contracts/  OpenAPI 导出 · 事件 envelope · SiteSpec/DQ-1 共享契约
@@ -63,12 +63,12 @@ pnpm --filter @global/api build          # 部分单测加载编译产物（apps
 | --- | --- | --- | --- |
 | 单测 | 日常 TDD | `APP_DATABASE_URL= pnpm --filter @global/api test` | 无 |
 | 源码热重载 | 开发 API 端点 | `gctl up core` 后 `pnpm api:dev` | postgres · redis · minio · temporal |
-| managed runtime | RuntimeEvidence / UAT / 三方旅程 | `gctl up all` | 全部（含模型网关、GrowthOS） |
+| managed runtime | RuntimeEvidence / UAT / 三方旅程 | `gctl up all` | 全部（含模型网关与 `gain-saas` 平台权威） |
 
 - **单测**：`APP_DATABASE_URL` 一旦可见（含 Prisma 自动加载的 `packages/db/.env`），PostgreSQL JSONB 字节门等少量只读集成用例就会连库；库不在时它们失败而不是跳过。零容器跑时显式置空，`gctl up core` 后直接跑即可多覆盖这部分。计数以本次命令输出为准，不在 README 固化。
-- **源码热重载**：`start:dev` 是 `nest start --watch`，交互门户在 `/api/portal`。源码运行不持有 runtime lease，`/health/ready` 为 503、outbox relay 报 admission closed 是设计如此；读写接口可正常调试。
+- **源码热重载**：`start:dev` 是 `nest start --watch`，交互门户在 `/api/portal`。源码运行不持有 runtime lease，`/api/v1/health/ready` 为 503、outbox relay 报 admission closed 是设计如此；读写接口可正常调试。
 - **Worker 不从源码跑**（它在启动时幂等 seed 参考数据并 ensure 平台 Temporal Schedule，清单见 `apps/api/src/temporal/ensure-schedules.ts`）：`apps/api/src/runtime/` 对 `test` 以外的所有模式（含 `development`）强制 `BUILD_ATTESTATION_REQUIRED`，源码 `pnpm --filter @global/api worker` 会停在该门。Worker 与 managed API 只跑已发布镜像（`infra/backend-runtime.compose.yml`，镜像按 digest 钉住）。
-- Temporal 由容器 `global-temporal-dev` 提供，定义在仓外 `/global/local-config/global/infra.local.yaml`，不在仓库 `docker-compose.yml` 中；旧 `temporal-dev.service` 已 disable 并停止。基础设施容器的 `restart` 策略为 `no`，API/Worker 为 `unless-stopped`；宿主重启后按 AGENTS §3 的顺序恢复。
+- Temporal 由容器 `global-temporal-dev` 提供，定义在仓外 `/global/local-config/global/infra.local.yaml`，不在仓库 `docker-compose.yml` 中；旧 `temporal-dev.service` 已 disable 并停止。核心基础设施容器（`postgres`/`redis`/`minio`/`temporal`）与 API/Worker 的 `restart` 策略为 `unless-stopped`，其余按需容器为 `no`；宿主重启后按 `/global/local-config/RUNBOOK.md` §8 顺序核验恢复。
 
 首次建库（全新数据卷）：
 
@@ -81,4 +81,4 @@ pnpm --filter @global/api build && (cd apps/api && node scripts/seed-taxonomy.mj
 
 > 从旧的目录推导项目 `global-backend` 迁移时，先按 [Compose 项目名迁移 runbook](docs/backend/compose-project-migration.md) 核对标签、卷并备份；不要直接 `docker compose down -v`。
 
-Provider/采集/富集类改动**必须真实数据实测**（`cd apps/api && node --import tsx scripts/verify-*.mts`，无 sandbox）。团队流程（PR/CI/审查/合并）见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [AGENTS.md §8](AGENTS.md)。
+Provider/采集/富集类改动**必须真实数据实测**（`cd apps/api && node --import tsx scripts/verify-*.mts`，无 sandbox）。团队流程（PR/CI/审查/合并）见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [AGENTS.md §5 / §9](AGENTS.md)。
