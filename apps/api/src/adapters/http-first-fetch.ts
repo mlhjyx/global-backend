@@ -18,11 +18,11 @@ import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
 import {
-  EgressBlockedError,
   ExternalHttpActionDeniedError,
   isExternalHttpPhysicalWireDeniedError,
   requestPublicHttp,
 } from "./guarded-http";
+import { EgressBlockedError } from "./url-guard";
 import { decodeHttpTextWithCharset } from "./bounded-fetch-response";
 
 /** 诚实 UA：不做指纹伪装（curl-impersonate 类方案在观察名单，另行决策）。 */
