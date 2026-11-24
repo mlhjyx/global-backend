@@ -10,6 +10,10 @@ import {
   SourceClass,
 } from '../provider-contract';
 import { ModelGateway } from '../../model-gateway/model-gateway';
+import {
+  withUntrustedWebContentGuard,
+  wrapUntrustedWebContent,
+} from '../../model-gateway/untrusted-content';
 import { getTask } from '../../ai-tasks/task-registry';
 import type { ExecutionBroker, ToolContext } from '../../tools/tool-contract';
 import type { SearxngSearchOutput } from '../../tools/builtin-tools';
@@ -398,8 +402,8 @@ export class DirectoryDiscoveryProvider implements CompanyDiscoveryAdapter {
           prompt: `目标画像（仅用于相关性判断，禁止照抄进字段）：${JSON.stringify({
             filters: query.filters,
             keywords: query.keywords,
-          }).slice(0, 800)}\n\n名录页文本（URL: ${url}）：\n${text}`,
-          system: contract?.description,
+          }).slice(0, 800)}\n\n名录页文本（URL: ${url}）：\n${wrapUntrustedWebContent(url, text)}`,
+          system: withUntrustedWebContentGuard(contract?.description),
           model: contract?.model,
           schema: contract?.outputSchema ?? {
             required: ['is_directory', 'companies'],

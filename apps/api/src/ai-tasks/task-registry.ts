@@ -337,7 +337,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     // PublicWebDiscoveryProvider 以本契约身份经 Broker 搜索（收口②：白名单真实生效）。
     // G3（2026-09-24）：发现阶段只用搜索结果判站，建档前不抓页面，故不再允许 crawl4ai.fetch。
     allowedTools: ['searxng.search'],
-    maxCostCents: 15,
+    maxCostCents: 3,
     maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 180000,
     description:
@@ -375,7 +375,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     // G3 5.4（2026-09-24）：官网画像富集以已建档公司为主体抓首页与 Impressum（ToolBroker 按调用绑定主体）。
     // BI-14（2026-10-10）：开关 company_contact 打开时，再以同一主体渲染首页链到的联系页（每家至多 1 页），只看有没有联系表单。
     allowedTools: ['crawl4ai.fetch', 'crawl4ai.render'],
-    maxCostCents: 10,
+    maxCostCents: 3,
     maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 120000,
     description:
@@ -408,7 +408,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     id: 'discovery.web_search_candidates',
     // 获客通路 A：模型规划检索词并通过 web_search 工具搜索（SearXNG 或 DeepSeek tools/search）。
     allowedTools: ['searxng.search', 'deepseek.search'],
-    maxCostCents: 15,
+    maxCostCents: 5,
     // 结构确认要逐个核对探索候选与证据：输出预算被推理吃满时 deepseek-flash 会
     // finish=length 且 content 为空（STRUCTURED_OUTPUT_EMPTY_TRUNCATED，2026-11-10 run
     // 97a4fa1b），8k 不够；planner 档（16k）实测可用，与 discovery.query_plan 同档。
@@ -501,7 +501,7 @@ export const AI_TASKS: Record<string, AiTaskContract> = {
     id: 'discovery.extract_list',
     // DirectoryDiscoveryProvider 以本契约身份经 Broker 搜索/抓取（收口②）。
     allowedTools: ['searxng.search', 'crawl4ai.fetch'],
-    maxCostCents: 20,
+    maxCostCents: 5,
     maxOutputTokens: REASONING_TASK_MAX_OUTPUT_TOKENS,
     timeoutMs: 180000,
     description:

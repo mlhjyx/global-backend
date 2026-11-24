@@ -163,6 +163,7 @@ export interface ReviewVisionInput {
 export interface EmbedInput {
   task: string;
   input: string[];
+  signal?: AbortSignal;
 }
 
 export type ModelOp = 'generateText'

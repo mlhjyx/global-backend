@@ -765,7 +765,7 @@ describe("RouterModelGateway persistent paid-call gate", () => {
 
     expect(model.preflightPaidCall).not.toHaveBeenCalled();
     expect(model.generateStructured).toHaveBeenCalledWith(
-      expect.objectContaining({ signal: controller.signal }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
       expect.objectContaining({
         workspaceId: WORKSPACE_ID,
         runId: RUN_ID,
@@ -775,6 +775,11 @@ describe("RouterModelGateway persistent paid-call gate", () => {
         }),
       }),
     );
+    const passedSignal = vi.mocked(model.generateStructured).mock.calls[0]?.[0]?.signal;
+    expect(passedSignal?.aborted).toBe(false);
+    controller.abort("cancelled-by-caller");
+    expect(passedSignal?.aborted).toBe(true);
+    expect(passedSignal?.reason).toBe("cancelled-by-caller");
   });
 
   it("suppresses structured repair when the first physical settlement is unknown", async () => {

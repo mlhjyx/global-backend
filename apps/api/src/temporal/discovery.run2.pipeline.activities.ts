@@ -87,6 +87,11 @@ import {
   websiteProfileFreshAndCurrent,
 } from './discovery.activities';
 import { appendRunEvent } from '../discovery/run2/run-events';
+import {
+  flattenSignalReceipts,
+  recordCompanyJobCostCents,
+  sumReceiptMicrousd,
+} from '../discovery/run2/company-job-cost';
 import { corroborateCompanyBeforeFit } from '../discovery/run2/corroboration-enrichment';
 import { scopeIndependentEnrichment } from '../discovery/enrichment-identity';
 import type { FailureStage } from '../discovery/judgment/failure-codes';
@@ -462,6 +467,7 @@ export function createRun2PipelineActivities(deps: {
             readback: async () => null,
           });
         }
+        await recordCompanyJobCostCents(tx as never, args, sumReceiptMicrousd(durableReceipts.map((r) => r.receipt)));
         return result.value;
         });
       } catch (error) {
@@ -553,6 +559,7 @@ export function createRun2PipelineActivities(deps: {
       await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
         await persistJudgmentRecordInTransaction(tx, args.icpId, judgment);
         await upsertLeadFit(tx, args.workspaceId, args.icpId, args.companyId, judgment);
+        await recordCompanyJobCostCents(tx as never, args, sumReceiptMicrousd([judgment.durableReceipt]));
       });
       return { judged: true, verdict: judgment.verdict };
     },
@@ -652,15 +659,17 @@ export function createRun2PipelineActivities(deps: {
       if (!hits.length && receipts.size === 0) {
         return { matched: 0, provider: null, ...(subjectDenied ? { skipped: 'suppressed' } : {}) };
       }
-      const committed = await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
-        commitCompanySignals(tx, {
+      const committed = await deps.prisma.withWorkspace(args.workspaceId, async (tx) => {
+        const result = await commitCompanySignals(tx, {
           workspaceId: args.workspaceId,
           companyId: args.companyId,
           hits: subjectDenied ? [] : hits,
           receipts,
           signalTimestamp: new Date(nowMs),
-        }),
-      );
+        });
+        await recordCompanyJobCostCents(tx as never, args, sumReceiptMicrousd(flattenSignalReceipts(receipts)));
+        return result;
+      });
       return {
         matched: committed.length,
         provider: committed.length ? committed.join('+') : null,
@@ -819,6 +828,11 @@ export function createRun2PipelineActivities(deps: {
           remainingMicrousd: runStatus.remainingMicrousd,
         });
         if (safety.skipped) return { skipped: true, ...(safety.reason ? { reason: safety.reason } : {}) };
+        if (typeof safety.costMicrousd === 'number' && safety.costMicrousd > 0) {
+          await deps.prisma.withWorkspace(args.workspaceId, (tx) =>
+            recordCompanyJobCostCents(tx as never, args, BigInt(Math.trunc(safety.costMicrousd!))),
+          );
+        }
         return {
           skipped: false,
           ...(safety.tier ? { tier: safety.tier } : {}),

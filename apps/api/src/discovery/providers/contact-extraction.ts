@@ -1,4 +1,8 @@
 import { ModelGateway } from '../../model-gateway/model-gateway';
+import {
+  withUntrustedWebContentGuard,
+  wrapUntrustedWebContent,
+} from '../../model-gateway/untrusted-content';
 import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
 import type { ExecutionContext } from '../provider-contract';
@@ -109,8 +113,8 @@ export async function extractPeopleFromPage(
         `卖方/ICP 上下文（用于判断谁是目标买家角色；禁止照抄进字段）：${JSON.stringify(
           sellerContext ?? {},
         ).slice(0, 600)}\n\n` +
-        `${page.label}（URL: ${page.url}）：\n${page.text}`,
-      system: contract?.description,
+        `${page.label}（URL: ${page.url}）：\n${wrapUntrustedWebContent(page.url, page.text)}`,
+      system: withUntrustedWebContentGuard(contract?.description),
       model: contract?.model,
       schema: contract?.outputSchema ?? { required: ['people'] },
     },

@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import { getTask } from '../../ai-tasks/task-registry';
 import type { ModelGateway } from '../../model-gateway/model-gateway';
+import {
+  withUntrustedWebContentGuard,
+  wrapUntrustedWebContent,
+} from '../../model-gateway/untrusted-content';
 import type { ChatResponse } from '../../model-gateway/types';
 import { executeStructuredTaskWithRuntime } from '../../model-runtime/structured-task-runtime-bridge';
 import type { RuntimeTelemetry } from '../../model-runtime/types';
@@ -195,7 +199,7 @@ export class ModelWebSearchDiscoveryProvider implements CompanyDiscoveryAdapter 
       ).slice(0, 4000),
       '',
       '实际检索结果证据（只允许报告出现在这里、或出现在探索候选证据里的公司）：',
-      evidence,
+      wrapUntrustedWebContent('web-search-hits', evidence),
       '',
       '只输出满足任务契约的 JSON；无法从上述证据确认的公司直接略过。',
     ]
@@ -280,7 +284,7 @@ export class ModelWebSearchDiscoveryProvider implements CompanyDiscoveryAdapter 
         {
           task: SEARCH_TASK,
           prompt: this.confirmationPrompt(query, explored, hits),
-          ...(contract?.description ? { system: contract.description } : {}),
+          system: withUntrustedWebContentGuard(contract?.description),
           ...(contract?.model ? { model: contract.model } : {}),
           schema: contract?.outputSchema ?? { required: ['candidates'] },
         },
