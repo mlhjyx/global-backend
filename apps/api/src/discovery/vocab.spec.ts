@@ -82,7 +82,7 @@ describe('国家归一：奥地利、瑞士、荷兰、波兰、西班牙与「D
     expect(lookupCountryIso(' ESPAÑA '.normalize('NFD'))).toBe('ES');
   });
 
-  it('已有国家的映射逐条不变，国家码只新增 AT/CH/NL/PL/ES', () => {
+  it('已有国家的映射逐条不变，并扩展覆盖全球核心出口市场与 ISO2→QID 反查', () => {
     const before: Record<string, string> = {
       德国: 'DE', germany: 'DE', deutschland: 'DE',
       美国: 'US', usa: 'US', 'united states': 'US',
@@ -91,11 +91,19 @@ describe('国家归一：奥地利、瑞士、荷兰、波兰、西班牙与「D
     };
     for (const [term, iso] of Object.entries(before)) expect(lookupCountryIso(term)).toBe(iso);
     expect(lookupCountryIso('us')).toBeUndefined();
-    expect([...new Set(Object.values(COUNTRY_ISO))].sort()).toEqual(
-      ['AT', 'CH', 'CN', 'DE', 'ES', 'FR', 'GB', 'IN', 'IT', 'JP', 'NL', 'PL', 'US'],
-    );
+    const codes = new Set(Object.values(COUNTRY_ISO));
+    for (const expected of ['AT', 'CH', 'CN', 'DE', 'ES', 'FR', 'GB', 'IN', 'IT', 'JP', 'NL', 'PL', 'US', 'AE', 'SA', 'BR', 'MX', 'CA', 'AU', 'SG', 'PH', 'ZA', 'KR', 'PT', 'TR']) {
+      expect(codes.has(expected), expected).toBe(true);
+    }
     expect(mapCountryToQid('韩国')).toBe('Q884');
     expect(mapCountryToQid('us')).toBe('Q30');
+    expect(mapCountryToQid('DE')).toBe('Q183');
+    expect(mapCountryToQid('BR')).toBe('Q155');
+    expect(mapCountryToQid('AE')).toBe('Q878');
+    expect(lookupRegionOsmArea('DE')).toBe('Deutschland');
+    expect(lookupMarketRegion('MENA')).toContain('AE');
+    expect(lookupMarketRegion('LATAM')).toContain('BR');
+    expect(lookupMarketRegion('ASEAN')).toContain('SG');
   });
 
   it.each(['DACH', 'dach', 'D-A-CH', 'DACH区域', 'DACH地区', 'DACH市场', 'DACH region', 'DACH-Region', 'DACH-Raum'])(

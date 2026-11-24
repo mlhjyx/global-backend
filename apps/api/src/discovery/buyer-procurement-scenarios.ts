@@ -6,20 +6,20 @@ const SCENARIOS = {
   distribution: {
     label: '经销进口',
     keywords: ['Industriepumpen Großhandel', 'Industriepumpen Fachhandel'],
-    searchPurpose: 'Find distributors of relevant industrial pumps and evidence of resale.',
-    evidence: '核对在售相关泵种及分销证据；有自有制造也可凭独立经销证据匹配。',
+    searchPurpose: 'Find distributors or wholesalers of the target product and evidence of resale.',
+    evidence: '核对在售相关品类及分销证据；有自有制造也可凭独立经销证据匹配。',
   },
   factory_direct: {
     label: '工厂直采',
     keywords: ['Industrieabwasser Kreiselpumpen', 'Prozesspumpe Werk Beschaffung'],
-    searchPurpose: 'Find a production site using pumps in its own operations, not a pump manufacturer.',
-    evidence: '核对工厂及其自用工艺、产线或项目中的相关泵种；无需证明转售。',
+    searchPurpose: 'Find a production site or operator using the target product in its own operations, not a competing OEM manufacturer.',
+    evidence: '核对工厂或项目运营方及其自用工艺、产线或项目中的目标产品需求；无需证明转售。',
   },
   equipment_integration: {
     label: '设备或工程配套',
     keywords: ['Pumpenauslegung Anlagenbau', 'Prozesspumpen Systemintegration'],
-    searchPurpose: 'Find equipment builders or contractors responsible for pump selection or integration.',
-    evidence: '有证据的工程选型、集成或采购责任可以作为角色证据；无需证明转售。',
+    searchPurpose: 'Find equipment builders, EPC contractors, or system integrators responsible for product selection or integration.',
+    evidence: '有证据的工程选型、系统集成或采购责任可以作为角色证据；无需证明转售。',
   },
 } as const;
 
@@ -159,10 +159,43 @@ export function assertSupportedBuyerScenario(
   }
 }
 
+export function draftBuyerProcurementScenarios(input: {
+  productId: string;
+  product: string;
+  targetMarket: string;
+  evidenceRefs: readonly string[];
+  allowed?: readonly BuyerProcurementScenario[];
+}) {
+  const evidenceRefs = [...new Set(input.evidenceRefs.filter((ref) => !!ref.trim()))];
+  const product = input.product.trim();
+  const countries = targetCountryCodes({ filters: { country: input.targetMarket } });
+  if (!input.productId.trim() || !product || !evidenceRefs.length || countries.length !== 1) {
+    return [];
+  }
+  const market = countries[0]!.toUpperCase();
+  const useLegacyPumpKeywords = isGermanIndustrialPumpPilot(product, input.targetMarket);
+  const defaultKeywords = (id: BuyerProcurementScenario): string[] => {
+    if (useLegacyPumpKeywords) return [...SCENARIOS[id].keywords];
+    if (id === 'distribution') return [`${product} distributor`, `${product} wholesaler`];
+    if (id === 'factory_direct') return [`${product} procurement project`, `${product} buyer installation`];
+    return [`${product} EPC integrator`, `${product} system integration`];
+  };
+  return scenarioIds
+    .filter((id) => input.allowed === undefined || input.allowed.includes(id))
+    .map((id) => ({
+      market,
+      productId: input.productId,
+      product,
+      evidenceRefs,
+      ...buyerProcurementCriteria(id),
+      keywords: defaultKeywords(id),
+    }));
+}
+
 export function buyerScenarioPlannerNote(scenario: BuyerProcurementScenario | null): string {
   if (!scenario) return '';
   const criteria = buyerProcurementCriteria(scenario);
   const heading = `\n\n采购场景：${criteria.label}。 ${criteria.searchPurpose} ${criteria.evidence}`;
   return heading + (scenario === 'distribution' ? '' :
-    '\n生成相互有区别的完整检索短语：用泵种、工艺或项目中的实际责任（自用、选型、集成或采购），并写入已知市场或地区。优先寻找项目案例、招采或工艺内容，避免只搜泵厂家目录。不猜造公司或项目名称。');
+    '\n生成相互有区别的完整检索短语：围绕目标产品规格、工艺或项目中的实际责任（自用、选型、集成或采购），并写入已知市场或地区。优先寻找项目案例、招采或工艺内容，避免只搜同类竞品厂家目录。不猜造公司或项目名称。');
 }

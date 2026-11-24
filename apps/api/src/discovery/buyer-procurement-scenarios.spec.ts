@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { PlanQueryShape } from './icp-to-cpv';
 import {
+  draftBuyerProcurementScenarios,
   draftIndustrialPumpBuyerScenarios,
   prepareBuyerScenarioQueries,
   readBuyerProcurementScenario,
@@ -128,5 +129,18 @@ describe('industrial pump buyer scenario pilot', () => {
     const [compiled] = prepareBuyerScenarioQueries([query], 'distribution');
     expect(compiled?.filters.trade_side).toBe('distributor');
     expect(prepareBuyerScenarioQueries([query], null)).toEqual([query]);
+  });
+
+  it('drafts industry-agnostic procurement scenarios for non-pump global products (e.g. HJT solar in IT/AE/BR)', () => {
+    const drafts = draftBuyerProcurementScenarios({
+      productId: 'hjt-700w',
+      product: 'HJT Solar Modules 700W+',
+      targetMarket: 'Italia',
+      evidenceRefs: ['claim-hjt-1'],
+    });
+    expect(drafts.map((d) => d.id)).toEqual(['distribution', 'factory_direct', 'equipment_integration']);
+    expect(drafts.every((d) => d.market === 'IT')).toBe(true);
+    expect(drafts[0]!.keywords[0]).toContain('HJT Solar Modules 700W+');
+    expect(drafts.every((d) => !d.searchPurpose.includes('pump'))).toBe(true);
   });
 });

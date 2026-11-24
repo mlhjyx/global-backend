@@ -99,6 +99,10 @@ export class WikidataDiscoveryProvider implements CompanyDiscoveryAdapter {
       return this.emptyResult({ errorClass: 'EMPTY_RESULT', reasonCode: 'INDUSTRY_QID_TOO_BROAD' });
     }
     const countryQid = mapCountry(query);
+    if (!countryQid && (hasGeoFilter(query.filters?.country) || hasGeoFilter(query.filters?.region))) {
+      // Never silently drop an explicitly requested country/region and query global Wikidata.
+      return this.emptyResult();
+    }
 
     const collector = createDiscoveryCompanyReceiptCollector({
       providerKey: 'wikidata',
@@ -197,10 +201,17 @@ function mapIndustries(query: CompanyDiscoveryQuery): string[] {
   return mapIndustryToQids([...raw, ...kw]);
 }
 
+function hasGeoFilter(value: unknown): boolean {
+  if (typeof value === 'string') return value.trim().length > 0;
+  return Array.isArray(value) && value.some((item) => typeof item === 'string' && item.trim().length > 0);
+}
+
 function mapCountry(query: CompanyDiscoveryQuery): string | undefined {
   const f = query.filters ?? {};
   if (f._countryQid) return String(f._countryQid);
-  const raw = [f.country, f.region].flat().filter(Boolean).map(String);
+  // A region hint must not override an explicitly requested but unsupported country.
+  const source = hasGeoFilter(f.country) ? [f.country] : [f.region];
+  const raw = source.flat().filter(Boolean).map(String);
   for (const term of raw) {
     const q = mapCountryToQid(term);
     if (q) return q;

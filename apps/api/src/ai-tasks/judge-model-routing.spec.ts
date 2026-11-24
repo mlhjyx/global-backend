@@ -17,7 +17,11 @@ describe('judge model routing 护栏（P3 J03）', () => {
     expect([...JUDGE_MODEL_ALLOWLIST]).toEqual([
       'deepseek-v4-pro',
       'gemini-4-argon-high',
+      'gemini-4-argon',
       'gpt-5.6-sol',
+      'gpt-6.2-sol',
+      'claude-sonnet-5-5',
+      'gpt-6-luna',
     ]);
   });
 

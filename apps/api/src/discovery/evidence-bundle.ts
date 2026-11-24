@@ -497,7 +497,7 @@ export interface CrossSourceEvidenceSummary {
 }
 
 const MAX_SUMMARY_ENTRIES = 6;
-const MAX_SUMMARY_FACTS = 3;
+const MAX_SUMMARY_FACTS = 10;
 
 /** 从 canonical attributes 现场装配摘要（零出网）；无证据条目返回 null。 */
 export function crossSourceEvidenceSummary(attributes: unknown): CrossSourceEvidenceSummary | null {

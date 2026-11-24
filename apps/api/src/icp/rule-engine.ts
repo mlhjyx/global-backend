@@ -107,6 +107,38 @@ function anyContains(haystack: unknown[], needles: unknown[]): boolean {
   });
 }
 
+const MAX_REGEX_PATTERN_CHARS = 200;
+const MAX_REGEX_INPUT_CHARS = 4_000;
+const BACKREFERENCE_PATTERN = /\\[1-9]/u;
+const STACKED_QUANTIFIER_PATTERN = /(?:[+*?]|\{\d+,?\d*\})\s*(?:[+*?]|\{\d+,?\d*\})/u;
+const QUANTIFIED_GROUP_QUANTIFIER_PATTERN = /\((?:[^()\\]|\\.)*(?:[+*]|\{\d+,\d*\})(?:[^()\\]|\\.)*\)\s*(?:[+*?]|\{\d+,?\d*\})/u;
+const QUANTIFIED_ALTERNATION_PATTERN = /\((?:[^()\\]|\\.)*\|(?:[^()\\]|\\.)*\)\s*(?:[+*]|\{\d+,\d*\})/u;
+
+/**
+ * Deterministic ReDoS guard for ICP `matches` regex rules: rejects oversized
+ * patterns, backreferences, stacked quantifiers, and nested/alternation
+ * exponential backtracking constructs before constructing `RegExp`.
+ */
+export function isSafeRegexPattern(pattern: string): boolean {
+  if (pattern.length === 0 || pattern.length > MAX_REGEX_PATTERN_CHARS) return false;
+  if (BACKREFERENCE_PATTERN.test(pattern)) return false;
+  if (STACKED_QUANTIFIER_PATTERN.test(pattern)) return false;
+  if (QUANTIFIED_GROUP_QUANTIFIER_PATTERN.test(pattern)) return false;
+  if (QUANTIFIED_ALTERNATION_PATTERN.test(pattern)) return false;
+  return true;
+}
+
+function evaluateRegexMatch(attrArr: unknown[], rawPattern: unknown): RuleOutcome {
+  const pattern = String(rawPattern ?? '');
+  if (!isSafeRegexPattern(pattern)) return 'unknown';
+  try {
+    const re = new RegExp(pattern, 'i');
+    return attrArr.some((x) => re.test(String(x).slice(0, MAX_REGEX_INPUT_CHARS))) ? 'pass' : 'fail';
+  } catch {
+    return 'unknown'; // malformed pattern must not crash qualification
+  }
+}
+
 function equalityNormalizer(field: string): typeof norm {
   return normField(field) === 'country'
     ? (value: unknown) => norm(lookupCountryIso(norm(value)) ?? value)
@@ -150,14 +182,8 @@ export function evaluateRule(rule: RuleLike, attributes: Record<string, unknown>
       if (!a || !b) return 'unknown';
       return a[0] <= b[0] ? 'pass' : 'fail';
     }
-    case 'matches': {
-      try {
-        const re = new RegExp(String(valArr[0]), 'i');
-        return attrArr.some((x) => re.test(String(x))) ? 'pass' : 'fail';
-      } catch {
-        return 'unknown'; // malformed pattern must not crash qualification
-      }
-    }
+    case 'matches':
+      return evaluateRegexMatch(attrArr, valArr[0]);
     default:
       return 'unknown';
   }

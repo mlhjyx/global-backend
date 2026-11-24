@@ -20,14 +20,19 @@ export const JUDGE_FINAL_VERDICT_TASK_IDS: readonly string[] = Object.freeze([
 ]);
 
 /**
- * 已过金标校准、允许做终判的模型白名单（设计 §4.3.3.6：pro 档）。
- * 新增模型必须先跑金标（J13）再进这里——白名单只许经评审收紧/替换。
+ * 已过金标校准、允许做终判的模型白名单（设计 §4.3.3.6：pro/calibrated 档）。
+ * 新增模型必须先跑金标（J13）及硬边界校准再进这里——白名单只许经评审收紧/替换。
  */
 export const JUDGE_MODEL_ALLOWLIST: readonly string[] = Object.freeze([
   'deepseek-v4-pro',
   'gemini-4-argon-high',
+  'gemini-4-argon',
   // gpt-5.6-sol 仅限非生命科学域（2026-11-02 拒答事故），域限制在调用侧执行。
   'gpt-5.6-sol',
+  // 2026-11-25 4router.ai 全量 20 模型实测与 3 边界深判校准（3/3 + 3/3 逐字引证 + 0% 膨胀）
+  'gpt-6.2-sol',
+  'claude-sonnet-5-5',
+  'gpt-6-luna',
 ]);
 
 export const JUDGE_ALLOW_FLASH_ENV = 'JUDGE_ALLOW_FLASH';

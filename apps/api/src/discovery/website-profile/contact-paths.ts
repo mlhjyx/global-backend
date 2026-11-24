@@ -71,6 +71,8 @@ const PATH_WORDS: ReadonlySet<string> = new Set([
   'de', 'en', 'fr', 'it', 'es', 'nl', 'pl', 'cs', 'cz', 'da', 'dk', 'sv', 'se', 'no', 'nb', 'fi',
   'pt', 'tr', 'ru', 'zh', 'cn', 'ja', 'jp', 'ko', 'hu', 'ro', 'sk', 'sl', 'si', 'hr', 'bg', 'el',
   'gr', 'at', 'ch', 'be', 'lu', 'li', 'us', 'gb', 'uk', 'eu', 'int', 'intl', 'global',
+  'ar', 'ae', 'sa', 'br', 'mx', 'cl', 'co', 'ca', 'au', 'nz', 'sg', 'ph', 'in', 'za', 'id', 'my',
+  'vn', 'th', 'tw', 'hk',
   // section names
   'home', 'start', 'startseite', 'index', 'default', 'main', 'seite', 'seiten', 'page', 'pages',
   'site', 'sites', 'web', 'cms', 'content', 'node', 'p', 'id', 'info', 'infos', 'information',
@@ -81,33 +83,49 @@ const PATH_WORDS: ReadonlySet<string> = new Set([
   'händler', 'dealer', 'dealers', 'reseller', 'vertrieb', 'sales', 'hersteller', 'manufacturer',
   'manufacturers', 'portal', 'program', 'programm', 'programme', 'werden', 'become', 'a', 'and',
   'und', 'sie', 'ihre', 'ihr', 'mit', 'for', 'fuer', 'für', 'get', 'in', 'touch', 'form',
-  'formular', 'anfahrt',
-  // cue words
+  'formular', 'anfahrt', 'us', 'team', 'leadership', 'rfq', 'tender', 'tenders', 'vendor', 'vendors',
+  'distributor', 'distributors', 'wholesale', 'b2b',
+  // multilingual connectors & legal/about section words (IT/ES/FR/PT/NL/PL/TR)
+  'chi', 'siamo', 'azienda', 'note', 'legali', 'societa', 'aviso', 'empresa', 'nosotros', 'quienes',
+  'somos', 'mentions', 'legales', 'légales', 'qui', 'sommes', 'nous', 'devenir', 'societe', 'société',
+  'sobre', 'fale', 'conosco', 'quem', 'juridisch', 'over', 'ons', 'bedrijfsgegevens', 'firma',
+  'o', 'nas', 'hakkimizda', 'iletisim', 'iletişim', 'tedarik', 'tedarikci', 'tedarikçi',
+  // cue words (DE/EN/IT/ES/FR/PT/NL/PL/TR)
   'kontakt', 'kontakte', 'kontaktformular', 'kontaktieren', 'kontaktaufnahme', 'kontaktseite',
-  'contact', 'contacts', 'contactus', 'anfrage', 'anfragen', 'anfrageformular', 'impressum',
-  'imprint', 'anbieterkennzeichnung', 'lieferant', 'lieferanten', 'lieferantenportal', 'supplier',
-  'suppliers', 'partnerprogramm',
+  'contact', 'contacts', 'contactus', 'contactez', 'contacteer', 'contacto', 'contactenos',
+  'contáctenos', 'contatti', 'contatto', 'contattaci', 'contato', 'contatos',
+  'anfrage', 'anfragen', 'anfrageformular', 'impressum', 'imprint', 'anbieterkennzeichnung',
+  'lieferant', 'lieferanten', 'lieferantenportal', 'supplier', 'suppliers', 'partnerprogramm',
+  'fornitore', 'fornitori', 'proveedor', 'proveedores', 'fournisseur', 'fournisseurs',
+  'fornecedor', 'fornecedores', 'leverancier', 'leveranciers', 'dostawca', 'dostawcy',
 ]);
 
 const CONTACT_WORDS = new Set([
   'kontakt', 'kontakte', 'kontaktformular', 'kontaktieren', 'kontaktaufnahme', 'kontaktseite',
-  'contact', 'contacts', 'contactus', 'anfrage', 'anfragen', 'anfrageformular',
+  'contact', 'contacts', 'contactus', 'contactez', 'contacteer', 'contacto', 'contactenos',
+  'contáctenos', 'contatti', 'contatto', 'contattaci', 'contato', 'contatos',
+  'iletisim', 'iletişim', 'anfrage', 'anfragen', 'anfrageformular',
 ]);
 const IMPRESSUM_WORDS = new Set(['impressum', 'imprint', 'anbieterkennzeichnung']);
 const SUPPLIER_WORDS = new Set([
-  'lieferant', 'lieferanten', 'lieferantenportal', 'supplier', 'suppliers', 'partnerprogramm',
+  'lieferant', 'lieferanten', 'lieferantenportal', 'supplier', 'suppliers', 'vendor', 'vendors',
+  'partnerprogramm', 'fornitore', 'fornitori', 'proveedor', 'proveedores', 'fournisseur',
+  'fournisseurs', 'fornecedor', 'fornecedores', 'leverancier', 'leveranciers', 'dostawca',
+  'dostawcy', 'tedarik', 'tedarikci', 'tedarikçi',
 ]);
-const BECOME_WORDS = new Set(['werden', 'become']);
+const BECOME_WORDS = new Set(['werden', 'become', 'devenir']);
 const INVITED_ROLES = new Set([
-  'partner', 'haendler', 'händler', 'hersteller', 'dealer', 'reseller',
+  'partner', 'haendler', 'händler', 'hersteller', 'dealer', 'reseller', 'vendor', 'distributor',
+  'fournisseur', 'fornitore', 'proveedor', 'fornecedor',
 ]);
 const PROGRAM_WORDS = new Set(['program', 'programm', 'programme']);
 
 const CONTACT_LABEL =
-  /^(?:kontakt(?:formular|seite|aufnahme)?|kontakte|kontaktieren(?: sie uns)?|kontakt (?:&|und) anfahrt|contact(?: us| form)?|contacts|anfrage(?:formular)?|get in touch)$/u;
-const IMPRESSUM_LABEL = /^(?:impressum|imprint|legal notice|site notice|anbieterkennzeichnung)$/u;
+  /^(?:kontakt(?:formular|seite|aufnahme)?|kontakte|kontaktieren(?: sie uns)?|kontakt (?:&|und) anfahrt|contact(?: us| form)?|contacts|anfrage(?:formular)?|get in touch|contatt(?:i|aci)|contacto|contáctenos|contactez[- ]nous|nous contacter|contato|fale conosco|contacteer ons|ileti[sş]im)$/u;
+const IMPRESSUM_LABEL =
+  /^(?:impressum|imprint|legal notice|site notice|anbieterkennzeichnung|mentions l(?:é|e)gales|aviso legal|note legali|dati societari)$/u;
 const SUPPLIER_LABEL =
-  /^(?:lieferant(?:en)?(?: werden)?|lieferanten[ -]?portal|f(?:ü|ue)r lieferanten|partner werden|h(?:ä|ae)ndler werden|hersteller werden|become a (?:supplier|partner)|supplier portal|suppliers?|for suppliers|partner ?program(?:m|me)?)$/u;
+  /^(?:lieferant(?:en)?(?: werden)?|lieferanten[ -]?portal|f(?:ü|ue)r lieferanten|partner werden|h(?:ä|ae)ndler werden|hersteller werden|become a (?:supplier|vendor|partner)|(?:supplier|vendor) portal|suppliers?|vendors?|for (?:suppliers|vendors)|partner ?program(?:m|me)?|fornitori|lavora con noi fornitori|proveedores|fournisseurs|devenir fournisseur|fornecedores|leveranciers|dostawcy)$/u;
 
 type SameSiteKind = 'contact_page' | 'impressum_page' | 'supplier_page';
 
@@ -120,14 +138,18 @@ const SAME_SITE_RULES: ReadonlyArray<{
     kind: 'contact_page',
     path: (tokens) =>
       tokens.some((token) => CONTACT_WORDS.has(token)) ||
-      tokens.join('-').includes('get-in-touch'),
+      tokens.join('-').includes('get-in-touch') ||
+      tokens.join('-').includes('fale-conosco'),
     label: CONTACT_LABEL,
   },
   {
     kind: 'impressum_page',
     path: (tokens) =>
       tokens.some((token) => IMPRESSUM_WORDS.has(token)) ||
-      (tokens.includes('legal') && tokens.includes('notice')),
+      (tokens.includes('legal') && tokens.includes('notice')) ||
+      (tokens.includes('aviso') && tokens.includes('legal')) ||
+      (tokens.includes('note') && tokens.includes('legali')) ||
+      (tokens.includes('mentions') && (tokens.includes('legales') || tokens.includes('légales'))),
     label: IMPRESSUM_LABEL,
   },
   {

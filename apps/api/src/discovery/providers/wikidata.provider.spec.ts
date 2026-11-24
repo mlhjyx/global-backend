@@ -210,4 +210,24 @@ describe('real taxonomy-to-provider pivot boundaries', () => {
       expect(result.records).toEqual([]);
     },
   );
+
+  it('fails closed instead of querying global Wikidata when an explicit country filter cannot map to a QID', async () => {
+    const broker = fakeBroker();
+    const result = await new WikidataDiscoveryProvider({ broker }).discoverCompanies(
+      query({ _industryQids: ['Q192127'], country: 'Atlantis', region: 'Germany' }),
+      CTX,
+    );
+    expect(broker.invokeMock).not.toHaveBeenCalled();
+    expect(result.records).toEqual([]);
+  });
+
+  it('resolves ISO-3166 alpha-2 country filters such as BR and AE to their Wikidata QIDs', async () => {
+    const broker = fakeBroker();
+    await new WikidataDiscoveryProvider({ broker }).discoverCompanies(
+      query({ _industryQids: ['Q192127'], country: 'BR' }),
+      CTX,
+    );
+    expect(broker.invokeMock).toHaveBeenCalledOnce();
+    expect(broker.invokeMock.mock.calls[0]![1]).toMatchObject({ industryQids: ['Q192127'], countryQid: 'Q155' });
+  });
 });

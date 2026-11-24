@@ -247,3 +247,20 @@ describe('sanitizer round-trip（证据包必须在公司合并清洗后原样�
     expect(stored.evidence_bundle).toEqual(bundle);
   });
 });
+
+describe('crossSourceEvidenceSummary', () => {
+  it('retains up to 10 facts per source instead of truncating at 3', async () => {
+    const { crossSourceEvidenceSummary } = await import('./evidence-bundle');
+    const summary = crossSourceEvidenceSummary({
+      gleif: {
+        legal_name: 'Solartechnik GmbH',
+        legal_form: 'GmbH',
+        entity_status: 'ACTIVE',
+        registration_status: 'ISSUED',
+        registered_country: 'DE',
+        registered_city: 'Munich',
+      },
+    });
+    expect(summary?.sources[0]?.facts).toHaveLength(6);
+  });
+});
