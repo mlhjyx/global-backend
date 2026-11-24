@@ -8,6 +8,7 @@ import { buildClaimApprovalProof } from './claim-verification';
 import {
   buildDocumentClaimApprovalProof,
   loadDocumentClaimBindingInTransaction,
+  loadDocumentClaimBindingsInTransaction,
 } from './document-claim-basis';
 import {
   buildProfileClaimDraftSpecs,
@@ -50,6 +51,13 @@ export class ClaimService {
         select: { claimId: true, documentId: true },
       });
       const byClaim = new Map(references.map((reference) => [reference.claimId, reference]));
+      const referencedClaims = claims.filter((claim) => byClaim.has(claim.id));
+      const hasBatchDelegates =
+        referencedClaims.length > 0 &&
+        typeof (tx as unknown as { sellerDocument?: { findMany?: unknown } }).sellerDocument?.findMany === 'function';
+      const batchedBindings = hasBatchDelegates
+        ? await loadDocumentClaimBindingsInTransaction(tx, { workspaceId: ctx.workspaceId, companyId }, referencedClaims)
+        : null;
       const out: Array<
         Omit<(typeof claims)[number], 'statement'> & {
           statement: string | null;
@@ -62,11 +70,13 @@ export class ClaimService {
           out.push({ ...claim, documentSource: null });
           continue;
         }
-        const binding = await loadDocumentClaimBindingInTransaction(
-          tx,
-          { workspaceId: ctx.workspaceId, companyId: claim.companyId },
-          claim,
-        );
+        const binding = batchedBindings
+          ? (batchedBindings.get(claim.id) ?? null)
+          : await loadDocumentClaimBindingInTransaction(
+              tx,
+              { workspaceId: ctx.workspaceId, companyId: claim.companyId },
+              claim,
+            );
         // Source availability is decided by the current binding alone; approval
         // proof validity only governs consumption by APPROVED consumers.
         const sourceCurrent = binding !== null;
