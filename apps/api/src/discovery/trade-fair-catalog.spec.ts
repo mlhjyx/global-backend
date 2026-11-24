@@ -9,7 +9,7 @@ describe('TRADE_FAIR_CATALOG (16 archived + 4 solar fairs)', () => {
   it('contains 20 unique real trade fairs and excludes E2E smoke placeholder', () => {
     expect(TRADE_FAIR_CATALOG).toHaveLength(20);
     expect(new Set(TRADE_FAIR_CATALOG.map((f) => f.slug)).size).toBe(20);
-    expect(TRADE_FAIR_CATALOG.some((f) => f.exhibitorUrl.includes('example.com'))).toBe(false);
+    expect(TRADE_FAIR_CATALOG.some((f) => new URL(f.exhibitorUrl).hostname === 'example.com')).toBe(false);
   });
 
   it('selects all 4 solar/PV flagship fairs and ranks target country first', () => {

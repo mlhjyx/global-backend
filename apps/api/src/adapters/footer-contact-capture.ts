@@ -7,14 +7,14 @@
  * （`wa.me` / `api.whatsapp.com/send`）、公司地址与 VAT 税号全部丢失。
  *
  * 数据最小化与零个人数据红线：
- *  - 只保留公司同域（或同根域）的**职能邮箱**（`cleanEmail(addr)?.kind === 'role'`），
- *    任何具名个人邮箱（`person@`、`john.doe@`）一律过滤丢弃；
+ *  - 只保留公司同域（或同根域）的**职能邮箱**（显式 B2B 职能别名白名单 + `classifyContactEmail`
+ *    非 `personal`/`other` 判定），任何具名个人邮箱（`person@`、`john.doe@`、`jdoe@`）一律过滤丢弃；
  *  - WhatsApp 仅采集页面显式公开的 `wa.me/<digits>` / `api.whatsapp.com/send?phone=<digits>`
  *    商务链接，并剥离 query 里的预填消息文本；
  *  - 当页脚没有任何上述结构化公司信号时，格式化输出为空字符串（零正文/哈希扰动）。
  */
 import { parseHTML } from 'linkedom';
-import { cleanEmail } from '../acquisition/clean';
+import { classifyContactEmail } from '../discovery/contact-classifier';
 import { canonicalizeSuppressionValue } from '../discovery/suppression-value';
 import { companyNavigationLinks } from '../discovery/website-profile/contact-paths';
 
@@ -38,6 +38,23 @@ const EMAIL_IN_TEXT_RE = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/gu;
 const INTL_PHONE_RE = /\+[0-9][0-9 ()\-./]{6,18}[0-9]/gu;
 const VAT_ID_RE =
   /\b(?:DE\d{9}|IT\d{11}|FR[A-Z0-9]{2}\d{9}|ES[A-Z0-9]\d{7}[A-Z0-9]|NL\d{9}B\d{2}|ATU\d{8}|CHE[- ]?\d{3}\.\d{3}\.\d{3}|GB\d{9}|PL\d{10}|BE0?\d{9}|SE\d{12}|DK\d{8}|FI\d{8}|PT\d{9}|CZ\d{8,10}|RO\d{2,10})\b/gu;
+
+const EXTRA_ROLE_LOCALPARTS = new Set([
+  'rfq', 'quote', 'quotes', 'export', 'import', 'order', 'orders', 'bestellung',
+  'buy', 'hallo', 'email', 'general', 'main', 'reception', 'empfang', 'team',
+  'company', 'shop', 'press', 'presse', 'quality', 'qa', 'compliance', 'legal',
+]);
+
+function isExplicitRoleEmail(email: string): boolean {
+  const classified = classifyContactEmail(email);
+  if (classified.emailType !== 'personal' && classified.emailType !== 'other') {
+    return true;
+  }
+  if (classified.emailType === 'personal') return false;
+  const local = (email.split('@')[0] ?? '').split('+')[0] ?? '';
+  const bare = local.replace(/[._-]?\d+$/u, '').replace(/[._-](eu|us|de|uk|global|team)$/u, '');
+  return EXTRA_ROLE_LOCALPARTS.has(local) || EXTRA_ROLE_LOCALPARTS.has(bare);
+}
 
 function sameCompanyDomain(email: string, companyDomain: string | null): boolean {
   if (!companyDomain) return false;
@@ -143,7 +160,7 @@ export function extractFooterContactsFromDocument(
   const pushRoleEmail = (raw: string): void => {
     const cleaned = raw.trim().toLowerCase();
     if (!cleaned || !sameCompanyDomain(cleaned, ctx.companyDomain)) return;
-    if (cleanEmail(cleaned)?.kind !== 'role') return;
+    if (!isExplicitRoleEmail(cleaned)) return;
     addUnique(roleEmails, cleaned, MAX_ROLE_EMAILS);
   };
 

@@ -267,26 +267,14 @@ function definition(
   deepFreeze(result.jsonSchema);
   return Object.freeze(result);
 }
-const searxResultSchema = objectSchema({
-  url: stringSchema(2048), title: stringSchema(2000),
-}, ['url']);
+const searxResultSchema = objectSchema({ url: stringSchema(2048), title: stringSchema(2000) }, ['url']);
+const searxResultsSchema = objectSchema({ results: arraySchema(20, searxResultSchema) }, ['results']);
 const searxData = (value: unknown) => mapClosedRecord(value, ['results'], ['results'], {
-  results: (results) => mapArray(results, (item) => (
-    mapClosedRecord(item, SEARX_RESULT_KEYS, ['url'])
-  )),
+  results: (results) => mapArray(results, (item) => mapClosedRecord(item, SEARX_RESULT_KEYS, ['url'])),
 });
-const searxDefinition = definition(
-  'searxng-search/v1',
-  objectSchema({ results: arraySchema(20, searxResultSchema) }, ['results']),
-  searxData,
-);
-
-/** social.search 的持久形态与 searxng 同形（url+title ≤20），独立 schema 因为它是 PERSONAL_DATA。 */
-const socialSearchDefinition = definition(
-  'social-search/v1',
-  objectSchema({ results: arraySchema(20, searxResultSchema) }, ['results']),
-  searxData,
-);
+const searchResultDefinition = (schema: TypedProjectionSchema) => definition(schema, searxResultsSchema, searxData);
+const searxDefinition = searchResultDefinition('searxng-search/v1');
+const socialSearchDefinition = searchResultDefinition('social-search/v1');
 
 /** social.fetch 的持久形态：{url, status, text(≤36k chars)}——PERSONAL_DATA 页面抓取投影。 */
 const socialFetchData = (value: unknown) => mapClosedRecord(
@@ -935,53 +923,25 @@ const mapYourShowDefinition = definition(
   }),
 );
 
-/** deepseek.search 的持久形态与 searxng 同形（url+title ≤20）：摘要/正文不持久化。 */
-const deepseekSearchDefinition = definition(
-  'deepseek-search/v1',
-  objectSchema({ results: arraySchema(20, searxResultSchema) }, ['results']),
-  searxData,
-);
-
-/** deepseek.fetch 的持久形态：{url, title?, content(≤32k chars)}——PERSONAL_DATA 页面正文投影。 */
+const deepseekSearchDefinition = searchResultDefinition('deepseek-search/v1');
 const deepseekFetchDefinition = definition(
   'deepseek-fetch/v1',
-  objectSchema({
-    url: stringSchema(2048),
-    title: stringSchema(2000),
-    content: stringSchema(32_000),
-  }, ['url', 'content']),
+  objectSchema({ url: stringSchema(2048), title: stringSchema(2000), content: stringSchema(32_000) }, ['url', 'content']),
   (value) => mapClosedRecord(value, ['url', 'title', 'content'], ['url', 'content']),
 );
-
-/** serper.search / exa.search 的持久形态与 searxng 同形（url+title ≤20，不含摘要/个人数据）。 */
-const serperSearchDefinition = definition(
-  'serper-search/v1',
-  objectSchema({ results: arraySchema(20, searxResultSchema) }, ['results']),
-  searxData,
-);
-
-const exaSearchDefinition = definition(
-  'exa-search/v1',
-  objectSchema({ results: arraySchema(20, searxResultSchema) }, ['results']),
-  searxData,
-);
-
+const serperSearchDefinition = searchResultDefinition('serper-search/v1');
+const exaSearchDefinition = searchResultDefinition('exa-search/v1');
 const GOOGLE_PLACE_KEYS = ['placeId', 'name', 'websiteUri', 'countryCode'] as const;
-const googlePlaceSchema = objectSchema({
-  placeId: stringSchema(256),
-  name: stringSchema(500),
-  websiteUri: stringSchema(2048),
-  countryCode: stringSchema(16),
-}, ['placeId']);
-const googlePlacesData = (value: unknown) => mapClosedRecord(value, ['places'], ['places'], {
-  places: (items) => mapArray(items, (item) => (
-    mapClosedRecord(item, GOOGLE_PLACE_KEYS, ['placeId'])
-  )),
-});
+const googlePlaceSchema = objectSchema(
+  { placeId: stringSchema(256), name: stringSchema(500), websiteUri: stringSchema(2048), countryCode: stringSchema(16) },
+  ['placeId'],
+);
 const googlePlacesSearchDefinition = definition(
   'google-places-search/v1',
   objectSchema({ places: arraySchema(20, googlePlaceSchema) }, ['places']),
-  googlePlacesData,
+  (value) => mapClosedRecord(value, ['places'], ['places'], {
+    places: (items) => mapArray(items, (item) => mapClosedRecord(item, GOOGLE_PLACE_KEYS, ['placeId'])),
+  }),
 );
 
 export const CATALOG_RESULT_PROJECTION_DEFINITIONS = Object.freeze([
