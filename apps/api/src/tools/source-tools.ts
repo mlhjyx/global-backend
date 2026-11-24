@@ -82,7 +82,10 @@ import {
   boundedPlatformAcquisitionFetchLimit,
   platformExecutionToolContract,
 } from "../platform-authority/platform-execution-contract";
-import { decodeJsonBytes } from "../adapters/bounded-fetch-response";
+import {
+  decodeHttpTextWithCharset,
+  decodeJsonBytes,
+} from "../adapters/bounded-fetch-response";
 
 /**
  * 受治理数据源 + 标的站点的 L0 工具（收口②：主链出网收编进 ToolBroker）。
@@ -240,16 +243,10 @@ function canonicalSanctionsMediaType(value: string | null): string | null {
   return SANCTIONS_DOWNLOAD_MEDIA_TYPES.has(canonical) ? canonical : null;
 }
 
-function decodeHttpGetArtifactText(body: Buffer): string {
+function decodeHttpGetArtifactText(body: Buffer, contentType?: string): string {
   let text: string;
-  try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(body);
-  } catch {
-    throw new Error("HTTP_GET_ARTIFACT_UTF8_INVALID");
-  }
-  if (Buffer.byteLength(text, "utf8") > MAX_HTTP_GET_ARTIFACT_BYTES) {
-    throw new Error("HTTP_GET_ARTIFACT_TOO_LARGE");
-  }
+  try { text = decodeHttpTextWithCharset(body, contentType, { strictWithoutDeclaredCharset: true }); } catch { throw new Error("HTTP_GET_ARTIFACT_UTF8_INVALID"); }
+  if (Buffer.byteLength(text, "utf8") > MAX_HTTP_GET_ARTIFACT_BYTES) throw new Error("HTTP_GET_ARTIFACT_TOO_LARGE");
   return text;
 }
 
@@ -316,7 +313,9 @@ export const httpGetTool: Tool<HttpGetInput, HttpGetOutput> = {
         }
       }
       const text =
-        input.method === "HEAD" ? "" : decodeHttpGetArtifactText(buf);
+        input.method === "HEAD"
+          ? ""
+          : decodeHttpGetArtifactText(buf, res.headers["content-type"]);
       return {
         data: {
           status: res.status,

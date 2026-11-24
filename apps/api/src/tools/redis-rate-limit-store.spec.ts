@@ -271,6 +271,20 @@ describe('RedisRateLimitStore', () => {
       message: 'Redis domain-delay reservation unavailable',
     });
   });
+
+  it('fails fast with RateLimitAcquireTimeoutError when domain queue wait exceeds cap', async () => {
+    const client = clientWith([20_000]);
+    const sleep = vi.fn(async () => undefined);
+    const store = new RedisRateLimitStore(client, {
+      namespace: 'test',
+      sleep,
+      maxDomainDelayWaitMs: 15_000,
+    });
+    await expect(store.respectDomainDelay('slow.example', 2_000)).rejects.toBeInstanceOf(
+      RateLimitAcquireTimeoutError,
+    );
+    expect(sleep).not.toHaveBeenCalled();
+  });
 });
 
 describe('UnavailableRateLimitStore', () => {

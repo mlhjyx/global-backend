@@ -288,4 +288,33 @@ describe('fetchPageHttpFirst cache (PR-B)', () => {
       logSpy.mockRestore();
     }
   });
+
+  it('propagates EgressBlockedError instead of silently falling back to renderer', async () => {
+    const { EgressBlockedError } = await import('./guarded-http');
+    await expect(
+      fetchPageHttpFirst('https://acme.example/', {
+        fetchHtml: async () => {
+          throw new EgressBlockedError('non_global_address');
+        },
+      }),
+    ).rejects.toBeInstanceOf(EgressBlockedError);
+  });
+
+  it('blocks cross-origin redirects disallowed by robots before caching', async () => {
+    const { RobotsRedirectBlockedError } = await import('./http-first-fetch');
+    const port = stubPort();
+    await expect(
+      fetchPageHttpFirst('https://origin-a.example/go', {
+        fetchHtml: async () => ({
+          status: 200,
+          contentType: 'text/html; charset=utf-8',
+          body: Buffer.from(ARTICLE_HTML),
+          finalUrl: 'https://origin-b.example/private',
+        }),
+        checkRedirectAllowed: async () => false,
+        cache: { workspaceId: WORKSPACE_ID, port },
+      }),
+    ).rejects.toBeInstanceOf(RobotsRedirectBlockedError);
+    expect(port.put).not.toHaveBeenCalled();
+  });
 });

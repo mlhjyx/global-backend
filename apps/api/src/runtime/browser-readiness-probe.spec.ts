@@ -211,6 +211,21 @@ describe("Browser readiness temporary-state lifecycle", () => {
     expect(children.length).toBe(2);
   });
 
+  it("caches PASS per executable when cacheTtlMs is configured and re-probes after expiry", async () => {
+    installBrowser(`process.stdout.write(${JSON.stringify(document)})`);
+    let clock = 1_000;
+    const probe = createBrowserReadinessProbe({
+      cacheTtlMs: 60_000,
+      now: () => clock,
+    });
+    await probe("/usr/bin/chromium");
+    await probe("/usr/bin/chromium");
+    expect(children.length).toBe(1);
+    clock += 60_001;
+    await probe("/usr/bin/chromium");
+    expect(children.length).toBe(2);
+  });
+
   it("rejects an unapproved or mismatched executable before starting another child", async () => {
     installBrowser(
       `setTimeout(()=>process.stdout.write(${JSON.stringify(document)}),30)`,

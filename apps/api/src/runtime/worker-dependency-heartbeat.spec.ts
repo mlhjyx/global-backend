@@ -216,4 +216,38 @@ describe('startWorkerDependencyHeartbeat', () => {
     expect(shutdown).toHaveBeenCalledOnce();
     handle.stop();
   });
+
+  it('skips overlapping interval ticks while a previous dependency probe is still in flight', async () => {
+    let releaseSlowProbe!: (value: CheckResult) => void;
+    let calls = 0;
+    const check = vi.fn<() => Promise<CheckResult>>(() => {
+      calls += 1;
+      if (calls === 1) return Promise.resolve({ status: 'ok' });
+      if (calls === 2) {
+        return new Promise<CheckResult>((resolve) => {
+          releaseSlowProbe = resolve;
+        });
+      }
+      return Promise.resolve({ status: 'ok' });
+    });
+    const handle = await startWorkerDependencyHeartbeat({
+      check,
+      worker: { shutdown: vi.fn() },
+      leases: { heartbeat: vi.fn(async () => undefined) },
+      taskQueue: 'understanding',
+      intervalMs: 1_000,
+      onBlocked: vi.fn(),
+      loopLag: async () => 0,
+    });
+    expect(calls).toBe(1);
+
+    // Tick 1 starts the slow probe; ticks 2 and 3 must not overlap it.
+    await vi.advanceTimersByTimeAsync(3_500);
+    expect(calls).toBe(2);
+
+    releaseSlowProbe({ status: 'ok' });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(calls).toBe(3);
+    handle.stop();
+  });
 });

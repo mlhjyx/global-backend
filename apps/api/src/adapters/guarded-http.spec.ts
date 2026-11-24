@@ -397,4 +397,44 @@ describe('requestPublicHttp — a site\'s own transport failure is marked, nothi
     expect(isPublicHttpTransportFailure(undefined)).toBe(false);
     expect(isPublicHttpTransportFailure('ECONNRESET')).toBe(false);
   });
+
+  it('blocks non-standard ports in resolvePublicHttpUrl', async () => {
+    const { resolvePublicHttpUrl } = await import('./url-guard');
+    await expect(
+      resolvePublicHttpUrl('http://example.com:8080/internal'),
+    ).rejects.toMatchObject({ name: 'EgressBlockedError', code: 'invalid_port' });
+    await expect(
+      resolvePublicHttpUrl('https://example.com:6379/'),
+    ).rejects.toMatchObject({ name: 'EgressBlockedError', code: 'invalid_port' });
+  });
+
+  it('decompresses gzip responses safely within maxBytes', async () => {
+    const { gzipSync } = await import('node:zlib');
+    const server = createServer((req, res) => {
+      if (req.url === '/gz') {
+        res.writeHead(200, { 'Content-Encoding': 'gzip', 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end(gzipSync(Buffer.from('hello-compressed-world', 'utf8')));
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+    servers.push(server);
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('bind failed');
+    const resolver: PublicUrlResolver = async (raw) => ({
+      url: new URL(raw),
+      ip: '127.0.0.1',
+      family: 4,
+      addresses: [{ address: '127.0.0.1', family: 4 }],
+    });
+    const res = await requestPublicHttp(
+      `http://gzip.example:${address.port}/gz`,
+      { maxBytes: 4096 },
+      { resolver },
+    );
+    expect(res.text).toBe('hello-compressed-world');
+  });
 });

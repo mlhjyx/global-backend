@@ -5,6 +5,10 @@ import {
   resolvePublicHttpUrl,
   type PinnedPublicUrl,
   type PublicUrlResolver } from './url-guard';
+import {
+  decodeHttpTextWithCharset,
+  decompressHttpBody,
+} from './bounded-fetch-response';
 import { PLATFORM_PUBLIC_HTTP_RESPONSE_MAX_BYTES } from '../platform-authority/platform-execution-contract';
 
 export { EgressBlockedError } from './url-guard';
@@ -225,12 +229,20 @@ const executePinnedHttp: PinnedHttpExecutor = async (target, options) =>
         if (options.method !== 'HEAD') chunks.push(buffer);
       });
       response.once('end', () => {
-        const body = options.method === 'HEAD' ? Buffer.alloc(0) : Buffer.concat(chunks);
+        const headers = normalizeHeaders(response.headers);
+        const rawBody = options.method === 'HEAD' ? Buffer.alloc(0) : Buffer.concat(chunks);
+        let body: Buffer;
+        try {
+          body = decompressHttpBody(rawBody, headers['content-encoding'], options.maxBytes);
+        } catch (error) {
+          finishReject(error instanceof Error ? error : new EgressBlockedError('invalid_content_encoding'));
+          return;
+        }
         finishResolve({
           status: response.statusCode ?? 0,
-          headers: normalizeHeaders(response.headers),
+          headers,
           body,
-          text: body.toString('utf8'),
+          text: decodeHttpTextWithCharset(body, headers['content-type']),
         });
       });
       response.once('error', finishTransportReject);
@@ -271,13 +283,19 @@ export async function requestPublicHttp(
   let current = raw;
   let currentHeaders = effective.headers;
 
+  const overallDeadlineAt = Date.now() + effective.timeoutMs;
   for (let hop = 0; hop <= effective.maxRedirects; hop++) {
+    const hopTimeoutMs = hop === 0 ? effective.timeoutMs : overallDeadlineAt - Date.now();
+    if (hopTimeoutMs <= 0) {
+      throw new Error('public_http_timeout');
+    }
     await assertExternalHttpActionAuthorized(dependencies.authorizeExternalAction);
     const target = await resolver(current);
     await assertExternalHttpActionAuthorized(dependencies.authorizeExternalAction);
     await assertPhysicalWireAuthorized(dependencies.beforePhysicalWire);
     const executePhysicalWire = () => execute(target, {
       ...effective,
+      timeoutMs: hop === 0 ? effective.timeoutMs : Math.max(1, overallDeadlineAt - Date.now()),
       headers: currentHeaders,
     });
     const response = dependencies.dispatchPhysicalWire

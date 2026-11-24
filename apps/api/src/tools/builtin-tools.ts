@@ -26,6 +26,8 @@ import { crawlUrl } from "../adapters/web-crawler";
 import {
   fetchPageHttpFirst,
   httpFirstParserVersion,
+  isHttpFirstFatalError,
+  RobotsRedirectBlockedError,
   type HttpFirstCachePort,
 } from "../adapters/http-first-fetch";
 import { isAllowedByRobots } from "../adapters/robots";
@@ -506,6 +508,7 @@ export function createCrawl4aiFetchTool(
             throw error;
           }
         };
+        let robotsRedirectBlocked = false;
         const page = await httpFirst(input.url, {
           captureNavigation: captureCompanyContactNavigation,
           ...(exact ? { exactUrl: true } : {}),
@@ -514,6 +517,10 @@ export function createCrawl4aiFetchTool(
             profileTextRevision: input.profileTextRevision,
             captureProfileText: captureManufacturerProfileText,
           } : {}),
+          checkRedirectAllowed: (finalUrl) =>
+            dependencies.isAllowedByRobots(finalUrl, {
+              authorizeExternalAction: ctx.authorizeExternalAction,
+            }),
           hooks: {
             authorizeExternalAction: exact
               ? async () => (await observeGate(ctx.authorizeExternalAction)) ?? true
@@ -524,8 +531,21 @@ export function createCrawl4aiFetchTool(
             },
           },
           ...(cache ? { cache } : {}),
-        }).catch(() => null);
+        }).catch((error) => {
+          if (error instanceof RobotsRedirectBlockedError) {
+            robotsRedirectBlocked = true;
+            return null;
+          }
+          if (isHttpFirstFatalError(error)) throw error;
+          return null;
+        });
         if (gateFailure) throw gateFailure.error;
+        if (robotsRedirectBlocked) {
+          return {
+            data: { url: input.url, text: "", contentHash: "" },
+            costCents: 0,
+          };
+        }
         if (page) {
           const maxChars = boundedCrawl4aiFetchChars(input.maxChars);
           // A manufacturer view must remain complete: cropping may remove its
