@@ -9,8 +9,7 @@ import {
   ToolContext,
 } from "./tool-contract";
 import { ToolRegistry } from "./tool-registry";
-import { CrawlHtmlResult } from "../adapters/web-crawler";
-import { executeCrawl4aiRenderWithResilience } from "./crawl4ai-timeout-resilience";
+import { crawlHtml, CrawlHtmlResult } from "../adapters/web-crawler";
 import { isAllowedByRobots } from "../adapters/robots";
 import {
   EgressBlockedError,
@@ -133,43 +132,29 @@ function sourcePhysicalWire(ctx: ToolContext, wireId: string): DispatchPhysicalW
   return dispatch ? (execute) => dispatch(wireId, execute) : undefined;
 }
 
+const CRAWL4AI_RENDER_EMPTY_HTML = '<!doctype html><html data-crawl4ai-empty="1"><body></body></html>';
+const CRAWL4AI_RENDER_TIMEOUT_CODES = new Set(["UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT", "UND_ERR_CONNECT_TIMEOUT", "ETIMEDOUT", "ABORT_ERR"]);
+function isWorkspaceRenderTimeout(error: unknown, ctx: ToolContext): boolean {
+  if (ctx.platformEgress || ctx.workspaceId === "platform" || error instanceof ExecutionControlError || error instanceof EgressBlockedError || !error || typeof error !== "object") return false;
+  const err = error as { name?: unknown; code?: unknown; cause?: unknown };
+  if (err.name === "ExternalToolActionDeniedError") return false;
+  if (err.name === "TimeoutError" || err.name === "AbortError" || (typeof err.code === "string" && CRAWL4AI_RENDER_TIMEOUT_CODES.has(err.code))) return true;
+  const cause = err.cause && typeof err.cause === "object" ? (err.cause as { name?: unknown; code?: unknown }) : null;
+  return cause !== null && (cause.name === "TimeoutError" || cause.name === "AbortError" || (typeof cause.code === "string" && CRAWL4AI_RENDER_TIMEOUT_CODES.has(cause.code)));
+}
+
 /** crawl4ai.render —— 渲染后原始 HTML（数字足迹/结构化收割/web_watch 用；robots 在内强制）。 */
-export const crawl4aiRenderTool: Tool<
-  { url: string },
-  CrawlHtmlResult & { robotsBlocked?: boolean }
-> = {
+export const crawl4aiRenderTool: Tool<{ url: string }, CrawlHtmlResult & { robotsBlocked?: boolean }> = {
   id: platformCrawl4aiContract.toolId,
   version: platformCrawl4aiContract.version,
   category: "fetch",
   sourceClass: "public_intelligence",
-  cost: {
-    unit: platformCrawl4aiContract.costUnit,
-    estimatedCents: Number(platformCrawl4aiContract.estimatedCents),
-    external: false,
-  },
+  cost: { unit: platformCrawl4aiContract.costUnit, estimatedCents: Number(platformCrawl4aiContract.estimatedCents), external: false },
   rateLimit: { rps: 1, concurrency: 3, perDomainCrawlDelayMs: 2000 },
-  compliance: {
-    sourcePolicy: "advisory",
-    respectsRobots: true,
-    personalData: false,
-    allowedPurpose: ["discovery", "enrichment"],
-    reversible: true,
-    authRequired: false,
-    risk: "low",
-  },
-  capabilities: {
-    produces: ["company", "domain", "contact"],
-    accepts: ["domain"],
-  },
+  compliance: { sourcePolicy: "advisory", respectsRobots: true, personalData: false, allowedPurpose: ["discovery", "enrichment"], reversible: true, authRequired: false, risk: "low" },
+  capabilities: { produces: ["company", "domain", "contact"], accepts: ["domain"] },
   idempotencyKey: (i) => `crawl4ai.render:${hash(i.url)}`,
-  durableResultStrategy: {
-    kind: "artifact_reference",
-    schema: platformCrawl4aiContract.resultSchema,
-    maxBytes: PLATFORM_CRAWL4AI_ARTIFACT_MAX_BYTES,
-    mediaTypes: ["text/html"],
-    privacyClass: "PERSONAL_DATA",
-    ttlSeconds: 86_400,
-  },
+  durableResultStrategy: { kind: "artifact_reference", schema: platformCrawl4aiContract.resultSchema, maxBytes: PLATFORM_CRAWL4AI_ARTIFACT_MAX_BYTES, mediaTypes: ["text/html"], privacyClass: "PERSONAL_DATA", ttlSeconds: 86_400 },
   // Platform channel crawls parse public organizer directories and persist the
   // extracted records with per-record provenance; the raw page itself is used
   // transiently (no subjectless PERSONAL_DATA copy is kept).
@@ -186,16 +171,23 @@ export const crawl4aiRenderTool: Tool<
       }))
     ) {
       // robots 禁抓 → 合规放弃（不换 UA）。空 HTML 返回，不计费。
-      return {
-        data: { url: input.url, html: "", headers: {}, robotsBlocked: true },
-        costCents: 0,
-      };
+      return { data: { url: input.url, html: "", headers: {}, robotsBlocked: true }, costCents: 0 };
     }
-    return executeCrawl4aiRenderWithResilience(
-      input.url,
-      ctx,
-      sourcePhysicalWire(ctx, "crawl4ai.render.dispatch"),
-    );
+    let r: CrawlHtmlResult;
+    try {
+      r = await crawlHtml(input.url, () => assertToolExternalActionAuthorized(ctx), undefined, ctx.beforePhysicalWire, sourcePhysicalWire(ctx, "crawl4ai.render.dispatch"));
+    } catch (error) {
+      if (isWorkspaceRenderTimeout(error, ctx)) return { data: { url: input.url, html: CRAWL4AI_RENDER_EMPTY_HTML, headers: {} }, costCents: 0, degraded: true };
+      throw error;
+    }
+    if (!ctx.platformEgress && ctx.workspaceId !== "platform" && !/^\s*<(?:!doctype\s+html\b|[a-z][a-z0-9:-]*\b)/i.test(r.html)) {
+      return { data: { url: r.url, html: CRAWL4AI_RENDER_EMPTY_HTML, headers: r.headers }, costCents: 0, degraded: true };
+    }
+    return {
+      data: r,
+      costCents: 1,
+      provenance: { sourceUrl: input.url, fetchedAt: new Date().toISOString(), contentHash: hash(r.html), parserVersion: "crawl4ai/1" },
+    };
   },
 };
 
