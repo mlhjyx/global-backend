@@ -1,6 +1,6 @@
 ---
 date: 2026-11-26
-pr:
+pr: 1111
 title: Phase 2A Plan B streaming discovery funnel, three-layer ICP decoupling, multimodal cold-start, and Comtrade market recommendations
 ---
 
