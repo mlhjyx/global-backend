@@ -24,7 +24,7 @@ import {
   SearxResult,
   SearxCategory,
 } from "../adapters/searxng";
-import { executeWithSearxngFallback } from "../adapters/searxng-fallback";
+import { recordSearxngCooldownError } from "../adapters/searxng-fallback";
 import { crawlUrl } from "../adapters/web-crawler";
 import {
   fetchPageHttpFirst,
@@ -182,28 +182,25 @@ export const searxngSearchTool: Tool<
       return { healthy: false };
     }
   },
-  execute: async (input, ctx) => {
-    const query = {
-      q: input.q,
-      categories: input.categories,
-      engines: input.engines,
-      language: input.language,
-      timeRange: input.timeRange,
-    };
-    const pages = input.pages ?? 1;
-    const outcome = await executeWithSearxngFallback(
-      () => searxSearchPaged(query, pages),
-      query,
-      {
-        pages,
-        beforeRequest: beforeExternalRequest(ctx),
-      },
-    );
-    return {
-      data: { results: durableSearxResults(outcome.results) },
-      costCents: 0,
-      ...(outcome.fallbackUsed ? { degraded: true } : {}),
-    };
+  execute: async (input) => {
+    // 严格保持 searxng.search 为免费自托管工具，绝不在 costCents=0 合同下静默调用付费搜索 API；
+    // 遇 403/429/5xx 时仅登记冷却状态并抛出错误，由调用方按需经 ToolBroker 切至已计费的 serper.search / exa.search。
+    try {
+      const results = await searxSearchPaged(
+        {
+          q: input.q,
+          categories: input.categories,
+          engines: input.engines,
+          language: input.language,
+          timeRange: input.timeRange,
+        },
+        input.pages ?? 1,
+      );
+      return { data: { results: durableSearxResults(results) }, costCents: 0 };
+    } catch (error) {
+      recordSearxngCooldownError(error);
+      throw error;
+    }
   },
 };
 

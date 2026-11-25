@@ -7,7 +7,10 @@ vi.mock('../adapters/searxng', async (importOriginal) => ({
 }));
 
 import { searxngSearchTool } from './builtin-tools';
-import { resetSearxngCooldownForTests } from '../adapters/searxng-fallback';
+import {
+  getSearxngCooldownSnapshot,
+  resetSearxngCooldownForTests,
+} from '../adapters/searxng-fallback';
 import { TypedProjectionRegistry } from '../durable-results/typed-projection.registry';
 import { registerCatalogResultProjections } from '../durable-results/catalog-result-projections';
 import type { ToolContext } from './tool-contract';
@@ -137,29 +140,21 @@ describe('searxng.search output fits its durable contract (searxng-search/v1)', 
     expect(JSON.stringify(result)).not.toMatch(/Max Muster|Erika/u);
   });
 
-  it('falls back to Serper on SearXNG 429 and still satisfies searxng-search/v1 projection', async () => {
+  it('trips cooldown on SearXNG 429 without silently invoking unbilled paid APIs inside searxng.search', async () => {
     resetSearxngCooldownForTests();
+    vi.stubEnv('SEARXNG_FALLBACK_ENABLED', 'on');
     vi.stubEnv('SERPER_API_KEY', 'test-serper-fallback-key');
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          organic: [
-            { link: 'https://solar-hub.de/', title: 'Solar Hub GmbH' },
-          ],
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      ),
-    );
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
     searx.searxSearchPaged.mockRejectedValueOnce(new Error('searxng 429: Too Many Requests'));
     try {
-      const result = await searxngSearchTool.execute({ q: 'Photovoltaik Großhandel', language: 'de' }, CTX);
-      expect(result.degraded).toBe(true);
-      expect(result.costCents).toBe(0);
-      expect(result.data.results).toEqual([
-        { url: 'https://solar-hub.de/', title: 'Solar Hub GmbH' },
-      ]);
-      const registry = registerCatalogResultProjections(new TypedProjectionRegistry());
-      expect(() => registry.project('searxng-search/v1', result)).not.toThrow();
+      await expect(
+        searxngSearchTool.execute({ q: 'Photovoltaik Großhandel', language: 'de' }, CTX),
+      ).rejects.toThrow('searxng 429');
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(getSearxngCooldownSnapshot()).toMatchObject({
+        active: true,
+        reason: 'searxng_http_429',
+      });
     } finally {
       fetchSpy.mockRestore();
       vi.unstubAllEnvs();

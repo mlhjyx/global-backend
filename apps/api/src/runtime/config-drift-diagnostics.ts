@@ -213,29 +213,38 @@ export function inspectConfigurationDrift(input: {
     }
   }
 
-  // ICP_INPUT_GUARDRAILS drift check
-  const rawGuardrails = env.ICP_INPUT_GUARDRAILS?.trim().toLowerCase();
-  const icpInputGuardrails = rawGuardrails || "default(on)";
-  if (rawGuardrails === "off" || rawGuardrails === "false" || rawGuardrails === "0") {
+  // ICP_INPUT_GUARDRAILS drift check — strictly aligned with icp.service.ts:149
+  // (`process.env.ICP_INPUT_GUARDRAILS === 'on'`). Unset or any value other than
+  // exact `'on'` evaluates to OFF in runtime.
+  const rawGuardrails = env.ICP_INPUT_GUARDRAILS;
+  const trimmedGuardrails = rawGuardrails?.trim();
+  const normalizedLower = trimmedGuardrails?.toLowerCase();
+  const icpInputGuardrails = !trimmedGuardrails ? "unset(off)" : rawGuardrails!;
+  if (!trimmedGuardrails) {
     findings.push({
       severity: "warn",
       code: "ICP_INPUT_GUARDRAILS_DISABLED",
       subject: "ICP_INPUT_GUARDRAILS",
-      message: "ICP_INPUT_GUARDRAILS is explicitly disabled; input quality guardrails are bypassed",
+      message:
+        "ICP_INPUT_GUARDRAILS is unset (effective mode: off; icp.service requires exact 'on')",
     });
   } else if (
-    rawGuardrails &&
-    rawGuardrails !== "on" &&
-    rawGuardrails !== "true" &&
-    rawGuardrails !== "1" &&
-    rawGuardrails !== "shadow" &&
-    rawGuardrails !== "enforce"
+    normalizedLower === "off" ||
+    normalizedLower === "false" ||
+    normalizedLower === "0"
   ) {
+    findings.push({
+      severity: "warn",
+      code: "ICP_INPUT_GUARDRAILS_DISABLED",
+      subject: "ICP_INPUT_GUARDRAILS",
+      message: `ICP_INPUT_GUARDRAILS is '${rawGuardrails}' (input quality guardrails are disabled)`,
+    });
+  } else if (rawGuardrails !== "on") {
     findings.push({
       severity: "warn",
       code: "ICP_INPUT_GUARDRAILS_INVALID",
       subject: "ICP_INPUT_GUARDRAILS",
-      message: `ICP_INPUT_GUARDRAILS has unrecognized mode '${rawGuardrails}'`,
+      message: `ICP_INPUT_GUARDRAILS is '${rawGuardrails}', which evaluates to OFF because icp.service strictly checks === 'on'`,
     });
   }
 

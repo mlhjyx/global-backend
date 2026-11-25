@@ -1,4 +1,10 @@
 import { Logger } from "@nestjs/common";
+import type { ExecutionBroker, ToolContext } from "../tools/tool-contract";
+import type {
+  ExaSearchToolInput,
+  SearchProviderOutput,
+  SerperSearchToolInput,
+} from "../tools/search-provider-tools";
 import {
   exaSearch,
   resolveExaApiKey,
@@ -14,6 +20,7 @@ const logger = new Logger("SearxngFallback");
 export const DEFAULT_SEARXNG_COOLDOWN_MS = 180_000;
 const MIN_COOLDOWN_MS = 1_000;
 const MAX_COOLDOWN_MS = 3_600_000;
+const PAID_SEARCH_FALLBACK_COST_CENTS = 1;
 
 export type SearxngEffectiveProvider = "searxng" | "serper" | "exa";
 
@@ -22,6 +29,7 @@ export interface SearxngFallbackResult {
   readonly provider: SearxngEffectiveProvider;
   readonly fallbackUsed: boolean;
   readonly billed: boolean;
+  readonly costCents: number;
   readonly cooldownActive: boolean;
   readonly reason?: string;
 }
@@ -30,6 +38,13 @@ export interface SearxngFallbackDeps {
   readonly env?: NodeJS.ProcessEnv;
   readonly now?: () => number;
   readonly cooldownState?: SearxngCooldownTracker;
+  /** Workspace scope; `platform` (or `platformEgress`) is strictly forbidden from calling paid fallback APIs. */
+  readonly workspaceId?: string;
+  readonly platformEgress?: unknown;
+  /** Optional `data_provider` gate check so DISABLED paid providers are never bypassed. */
+  readonly isProviderEnabled?: (
+    providerKey: "serper" | "exa",
+  ) => Promise<boolean> | boolean;
   readonly beforeRequest?: () => Promise<void>;
   readonly serper?: (
     input: { query: string; num?: number; hl?: string },
@@ -86,11 +101,23 @@ export function getSearxngCooldownSnapshot(nowMs = Date.now()): {
   };
 }
 
+/**
+ * Paid fallback (Serper / Exa) is strictly opt-in (default OFF) so a free
+ * self-hosted SearXNG outage never silently incurs paid API spend unless
+ * explicitly authorized via `SEARXNG_FALLBACK_ENABLED=on|true|1`.
+ */
 export function isSearxngFallbackEnabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   const raw = env.SEARXNG_FALLBACK_ENABLED?.trim().toLowerCase();
-  return raw !== "off" && raw !== "false" && raw !== "0";
+  return raw === "on" || raw === "true" || raw === "1";
+}
+
+export function isPlatformScopedContext(input: {
+  readonly workspaceId?: string;
+  readonly platformEgress?: unknown;
+}): boolean {
+  return input.workspaceId === "platform" || Boolean(input.platformEgress);
 }
 
 export function resolveSearxngCooldownMs(
@@ -121,6 +148,23 @@ export function classifySearxngCooldownReason(error: unknown): string | null {
   return null;
 }
 
+/** Records a SearXNG cooldown transition when a 403/429/5xx/block error occurs. */
+export function recordSearxngCooldownError(
+  error: unknown,
+  options: {
+    readonly env?: NodeJS.ProcessEnv;
+    readonly now?: () => number;
+    readonly cooldownState?: SearxngCooldownTracker;
+  } = {},
+): string | null {
+  const reason = classifySearxngCooldownReason(error);
+  if (!reason) return null;
+  const tracker = options.cooldownState ?? defaultCooldownTracker;
+  const now = options.now ?? Date.now;
+  tracker.trip(now(), resolveSearxngCooldownMs(options.env ?? process.env), reason);
+  return reason;
+}
+
 function hasAnyFallbackKey(env: NodeJS.ProcessEnv): boolean {
   return Boolean(resolveSerperApiKey(env) || resolveExaApiKey(env));
 }
@@ -132,7 +176,15 @@ function normalizeSearchLanguage(language: string | undefined): string | undefin
   return undefined;
 }
 
-async function runFallbackChain(
+async function providerAllowed(
+  key: "serper" | "exa",
+  check?: (providerKey: "serper" | "exa") => Promise<boolean> | boolean,
+): Promise<boolean> {
+  if (!check) return true;
+  return Boolean(await check(key));
+}
+
+async function runAdapterFallbackChain(
   query: SearxQuery,
   maxResults: number,
   reason: string,
@@ -145,7 +197,7 @@ async function runFallbackChain(
     ...(deps.beforeRequest ? { beforeRequest: deps.beforeRequest } : {}),
   };
 
-  if (serperKey) {
+  if (serperKey && (await providerAllowed("serper", deps.isProviderEnabled))) {
     try {
       const serperFn = deps.serper ?? serperSearch;
       const response = await serperFn(
@@ -168,6 +220,7 @@ async function runFallbackChain(
         provider: "serper",
         fallbackUsed: true,
         billed: response.billed,
+        costCents: response.billed ? PAID_SEARCH_FALLBACK_COST_CENTS : 0,
         cooldownActive: true,
         reason,
       };
@@ -178,7 +231,7 @@ async function runFallbackChain(
     }
   }
 
-  if (exaKey) {
+  if (exaKey && (await providerAllowed("exa", deps.isProviderEnabled))) {
     try {
       const exaFn = deps.exa ?? exaSearch;
       const response = await exaFn(
@@ -200,6 +253,7 @@ async function runFallbackChain(
         provider: "exa",
         fallbackUsed: true,
         billed: response.billed,
+        costCents: response.billed ? PAID_SEARCH_FALLBACK_COST_CENTS : 0,
         cooldownActive: true,
         reason,
       };
@@ -214,8 +268,10 @@ async function runFallbackChain(
 }
 
 /**
- * Executes a SearXNG search with automatic 403/429 cooldown tracking and
- * deterministic Serper -> Exa fallback when fallback API keys are configured.
+ * Adapter-level SearXNG execution with 403/429 cooldown tracking and opt-in
+ * Serper -> Exa fallback. Strictly blocks paid fallback when disabled (default)
+ * or in `platform` scope, respects `isProviderEnabled`, and reports truthful
+ * `costCents` (`1` when billed, `0` when served by free SearXNG).
  */
 export async function executeWithSearxngFallback(
   primary: () => Promise<SearxResult[]>,
@@ -225,12 +281,20 @@ export async function executeWithSearxngFallback(
   const env = options.env ?? process.env;
   const now = options.now ?? Date.now;
   const tracker = options.cooldownState ?? defaultCooldownTracker;
-  const fallbackEnabled = isSearxngFallbackEnabled(env);
+  const canFallback =
+    isSearxngFallbackEnabled(env) &&
+    !isPlatformScopedContext(options) &&
+    hasAnyFallbackKey(env);
   const maxResults = Math.min(20, Math.max(10, (options.pages ?? 1) * 10));
 
-  if (fallbackEnabled && tracker.isInCooldown(now()) && hasAnyFallbackKey(env)) {
+  if (canFallback && tracker.isInCooldown(now())) {
     const activeReason = tracker.reason() ?? "searxng_cooldown_active";
-    const served = await runFallbackChain(query, maxResults, activeReason, options);
+    const served = await runAdapterFallbackChain(
+      query,
+      maxResults,
+      activeReason,
+      options,
+    );
     if (served) return served;
   }
 
@@ -241,16 +305,202 @@ export async function executeWithSearxngFallback(
       provider: "searxng",
       fallbackUsed: false,
       billed: false,
+      costCents: 0,
       cooldownActive: tracker.isInCooldown(now()),
     };
   } catch (error) {
-    const reason = classifySearxngCooldownReason(error);
-    if (reason) {
-      tracker.trip(now(), resolveSearxngCooldownMs(env), reason);
-      if (fallbackEnabled && hasAnyFallbackKey(env)) {
-        const served = await runFallbackChain(query, maxResults, reason, options);
-        if (served) return served;
+    const reason = recordSearxngCooldownError(error, {
+      env,
+      now,
+      cooldownState: tracker,
+    });
+    if (reason && canFallback) {
+      const served = await runAdapterFallbackChain(
+        query,
+        maxResults,
+        reason,
+        options,
+      );
+      if (served) return served;
+    }
+    throw error;
+  }
+}
+
+export interface BrokerSearxngFallbackOptions {
+  readonly pages?: number;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly now?: () => number;
+  readonly cooldownState?: SearxngCooldownTracker;
+  /** Optional `data_provider` gate check so DISABLED paid providers are never invoked. */
+  readonly isProviderEnabled?: (
+    providerKey: "serper" | "exa",
+  ) => Promise<boolean> | boolean;
+}
+
+async function runBrokerFallbackChain(
+  broker: ExecutionBroker,
+  query: SearxQuery,
+  ctx: ToolContext,
+  maxResults: number,
+  reason: string,
+  options: BrokerSearxngFallbackOptions,
+): Promise<SearxngFallbackResult | null> {
+  const env = options.env ?? process.env;
+
+  if (
+    resolveSerperApiKey(env) &&
+    (await providerAllowed("serper", options.isProviderEnabled))
+  ) {
+    try {
+      const input: SerperSearchToolInput = {
+        query: query.q,
+        num: Math.min(20, Math.max(1, maxResults)),
+        ...(normalizeSearchLanguage(query.language)
+          ? { hl: normalizeSearchLanguage(query.language) }
+          : {}),
+      };
+      const out = await broker.invoke<SerperSearchToolInput, SearchProviderOutput>(
+        "serper.search",
+        input,
+        ctx,
+      );
+      if (!out.degraded) {
+        logger.warn(
+          `SearXNG cooldown routed through ToolBroker serper.search (reason=${reason}, costCents=${out.costCents})`,
+        );
+        return {
+          results: out.data.results.map((hit) => ({
+            url: hit.url,
+            title: hit.title ?? "",
+            engine: "serper_fallback",
+          })),
+          provider: "serper",
+          fallbackUsed: true,
+          billed: out.costCents > 0,
+          costCents: out.costCents,
+          cooldownActive: true,
+          reason,
+        };
       }
+    } catch (error) {
+      logger.warn(
+        `ToolBroker serper.search fallback failed after ${reason}: ${String((error as Error)?.message ?? error).slice(0, 120)}`,
+      );
+    }
+  }
+
+  if (
+    resolveExaApiKey(env) &&
+    (await providerAllowed("exa", options.isProviderEnabled))
+  ) {
+    try {
+      const input: ExaSearchToolInput = {
+        mode: "search",
+        query: query.q,
+        numResults: Math.min(20, Math.max(1, maxResults)),
+      };
+      const out = await broker.invoke<ExaSearchToolInput, SearchProviderOutput>(
+        "exa.search",
+        input,
+        ctx,
+      );
+      if (!out.degraded) {
+        logger.warn(
+          `SearXNG cooldown routed through ToolBroker exa.search (reason=${reason}, costCents=${out.costCents})`,
+        );
+        return {
+          results: out.data.results.map((hit) => ({
+            url: hit.url,
+            title: hit.title ?? "",
+            engine: "exa_fallback",
+          })),
+          provider: "exa",
+          fallbackUsed: true,
+          billed: out.costCents > 0,
+          costCents: out.costCents,
+          cooldownActive: true,
+          reason,
+        };
+      }
+    } catch (error) {
+      logger.warn(
+        `ToolBroker exa.search fallback failed after ${reason}: ${String((error as Error)?.message ?? error).slice(0, 120)}`,
+      );
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Governed ToolBroker caller seam: routes SearXNG searches through `searxng.search`
+ * and — only when `SEARXNG_FALLBACK_ENABLED=on|true|1` AND non-platform scope —
+ * delegates 403/429 cooldown fallback to the properly budgeted & rate-limited
+ * `serper.search` / `exa.search` ToolBroker tools so every paid call settles truthfully
+ * in `tool_budget_operation` (never silently billed at 0c).
+ */
+export async function invokeSearxngWithBrokerFallback(
+  broker: ExecutionBroker,
+  query: SearxQuery,
+  ctx: ToolContext,
+  options: BrokerSearxngFallbackOptions = {},
+): Promise<SearxngFallbackResult> {
+  const env = options.env ?? process.env;
+  const now = options.now ?? Date.now;
+  const tracker = options.cooldownState ?? defaultCooldownTracker;
+  const pages = options.pages ?? 1;
+  const maxResults = Math.min(20, Math.max(10, pages * 10));
+  const canFallback =
+    isSearxngFallbackEnabled(env) &&
+    !isPlatformScopedContext(ctx) &&
+    hasAnyFallbackKey(env);
+
+  if (canFallback && tracker.isInCooldown(now())) {
+    const activeReason = tracker.reason() ?? "searxng_cooldown_active";
+    const served = await runBrokerFallbackChain(
+      broker,
+      query,
+      ctx,
+      maxResults,
+      activeReason,
+      options,
+    );
+    if (served) return served;
+  }
+
+  try {
+    const out = await broker.invoke<
+      SearxQuery & { pages?: number },
+      { results: Array<{ url: string; title?: string }> }
+    >("searxng.search", { ...query, pages }, ctx);
+    return {
+      results: out.data.results.map((hit) => ({
+        url: hit.url,
+        title: hit.title ?? "",
+      })),
+      provider: "searxng",
+      fallbackUsed: false,
+      billed: false,
+      costCents: out.costCents,
+      cooldownActive: tracker.isInCooldown(now()),
+    };
+  } catch (error) {
+    const reason = recordSearxngCooldownError(error, {
+      env,
+      now,
+      cooldownState: tracker,
+    });
+    if (reason && canFallback) {
+      const served = await runBrokerFallbackChain(
+        broker,
+        query,
+        ctx,
+        maxResults,
+        reason,
+        options,
+      );
+      if (served) return served;
     }
     throw error;
   }

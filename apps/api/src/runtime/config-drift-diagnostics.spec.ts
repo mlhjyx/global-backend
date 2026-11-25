@@ -73,8 +73,49 @@ describe("config-drift-diagnostics (four-way startup drift checks)", () => {
     });
 
     expect(report.findings.filter((f) => f.severity === "warn")).toEqual([]);
+    expect(report.flags.icpInputGuardrails).toBe("on");
     expect(report.flags.gateEnrichmentTaskWriteEnabled).toBe(false);
     expect(report.flags.customerTemporalMode).toBe("dev_sqlite");
+  });
+
+  it("matches icp.service.ts strict === 'on' truth for ICP_INPUT_GUARDRAILS (unset and non-'on' strings both warn)", () => {
+    const unsetReport = inspectConfigurationDrift({ env: {}, dbProviders: [] });
+    expect(unsetReport.flags.icpInputGuardrails).toBe("unset(off)");
+    expect(unsetReport.findings).toContainEqual(
+      expect.objectContaining({
+        severity: "warn",
+        code: "ICP_INPUT_GUARDRAILS_DISABLED",
+        subject: "ICP_INPUT_GUARDRAILS",
+      }),
+    );
+
+    for (const offValue of ["off", "false", "0"]) {
+      const offReport = inspectConfigurationDrift({
+        env: { ICP_INPUT_GUARDRAILS: offValue },
+        dbProviders: [],
+      });
+      expect(offReport.findings).toContainEqual(
+        expect.objectContaining({
+          severity: "warn",
+          code: "ICP_INPUT_GUARDRAILS_DISABLED",
+          subject: "ICP_INPUT_GUARDRAILS",
+        }),
+      );
+    }
+
+    for (const nonExactValue of ["true", "1", "shadow", "enforce", "ON", " on "]) {
+      const invalidReport = inspectConfigurationDrift({
+        env: { ICP_INPUT_GUARDRAILS: nonExactValue },
+        dbProviders: [],
+      });
+      expect(invalidReport.findings).toContainEqual(
+        expect.objectContaining({
+          severity: "warn",
+          code: "ICP_INPUT_GUARDRAILS_INVALID",
+          subject: "ICP_INPUT_GUARDRAILS",
+        }),
+      );
+    }
   });
 
   it("stays non-blocking when data_provider DB read fails at startup", async () => {
