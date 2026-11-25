@@ -103,7 +103,15 @@ export function buildChannelCatalogQueryLineage(
   return Object.freeze({
     schemaVersion: DISCOVERY_COMPANY_RESULT_LINEAGE_V1,
     recordCount,
-    attemptReceipts: Object.freeze([]),
+    attemptReceipts:
+      recordCount === 0
+        ? Object.freeze([
+            Object.freeze({
+              producerId: CHANNEL_CATALOG_QUERY_PRODUCER_ID,
+              receipt,
+            }),
+          ])
+        : Object.freeze([]),
     receiptCoverage:
       recordCount === 0
         ? Object.freeze([])

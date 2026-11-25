@@ -170,12 +170,16 @@ describe('buildRegistryQueryLineage', () => {
     ).toThrow();
   });
 
-  it('represents empty results as a valid empty lineage', () => {
+  it('represents empty results as a valid attempt receipt lineage (never orphaned to auxiliary)', () => {
+    const emptyReceipt = receiptFor([]);
     const parsed = parseDiscoveryCompanyResultLineage(
-      buildRegistryQueryLineage(receiptFor([]), 0),
+      buildRegistryQueryLineage(emptyReceipt, 0),
       'registry_frame',
     );
     expect(parsed.recordCount).toBe(0);
     expect(parsed.receiptCoverage).toEqual([]);
+    expect(parsed.attemptReceipts).toHaveLength(1);
+    expect(parsed.attemptReceipts[0]?.producerId).toBe(REGISTRY_QUERY_PRODUCER_ID);
+    expect(parsed.attemptReceipts[0]?.receipt.operationId).toBe(emptyReceipt.operationId);
   });
 });
